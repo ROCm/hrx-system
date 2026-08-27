@@ -32,6 +32,8 @@ typedef struct iree_hal_amdgpu_profile_device_metrics_session_t
 typedef struct iree_hal_amdgpu_profile_trace_session_t
     iree_hal_amdgpu_profile_trace_session_t;
 typedef struct iree_hal_amdgpu_host_queue_t iree_hal_amdgpu_host_queue_t;
+typedef struct iree_hal_amdgpu_system_event_registration_t
+    iree_hal_amdgpu_system_event_registration_t;
 typedef struct iree_hal_amdgpu_system_t iree_hal_amdgpu_system_t;
 typedef struct iree_hal_amdgpu_topology_t iree_hal_amdgpu_topology_t;
 
@@ -192,6 +194,11 @@ typedef struct iree_hal_amdgpu_logical_device_t {
     // Host-side memory and queue profiling event streams.
     iree_hal_amdgpu_profile_event_streams_t event_streams;
   } profiling;
+
+  // Process-wide HSA system event registration for this device's GPU agents,
+  // or NULL when the device is not registered. Owns the per-agent failure
+  // delivery targets borrowed by the physical devices.
+  iree_hal_amdgpu_system_event_registration_t* system_event_registration;
 
   // Topology metadata assigned by the device group after construction.
   iree_hal_device_topology_info_t topology_info;

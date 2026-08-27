@@ -717,11 +717,48 @@ iree_status_t iree_hal_amdgpu_host_queue_initialize_tsan_state(
 void iree_hal_amdgpu_host_queue_deinitialize_tsan_state(
     iree_hal_amdgpu_host_queue_t* queue);
 
+// Begins queue teardown by permanently closing submission admission.
+//
+// After this returns every submission entry point rejects work and no new
+// notification epoch can be published. Deferred operations already linked on
+// the queue are not settled here.
+//
+// Callers tearing down several queues should call this on all of them before
+// waiting on any so teardown latency is not serialized across queues.
+void iree_hal_amdgpu_host_queue_begin_deinitialize(
+    iree_hal_amdgpu_host_queue_t* queue);
+
+// Waits until no queue work remains that can depend on GPU progress: either
+// hardware retires the last submitted epoch or the queue records a failure.
+// Requires that admission has already been closed.
+//
+// Returns immediately when the queue already failed or never submitted
+// anything. A failure recorded while this is waiting wakes it through the queue
+// stop signal, which is why external failure delivery is a precondition of this
+// call rather than something the caller may retire first.
+//
+// This wait is unbounded and a GPU that can no longer advance the submitted
+// epoch has only the recorded failure to release it. Delivery of that failure
+// is not guaranteed: the HSA runtime delivers a fatal event at most once per
+// runtime instance and delivers none at all when its interrupt path is off
+// (see system_event.h), so a queue stranded by a second fault in one runtime
+// instance - or by any fault at all where delivery is disabled - leaves this
+// call blocked for the life of the process.
+void iree_hal_amdgpu_host_queue_wait_idle_before_deinitialize(
+    iree_hal_amdgpu_host_queue_t* queue);
+
 // Deinitializes the queue. Destroys all owned resources and stops the
 // completion thread.
 //
-// All in-flight work must have completed and been drained before calling.
-// The caller must ensure no concurrent access to the queue during deinit.
+// All in-flight work must have completed or failed: the caller must have run
+// begin_deinitialize and wait_idle_before_deinitialize first, must ensure no
+// concurrent access to the queue, and must have retired any external failure
+// delivery that can still reach it.
+void iree_hal_amdgpu_host_queue_finish_deinitialize(
+    iree_hal_amdgpu_host_queue_t* queue);
+
+// Runs the full begin/wait/finish teardown sequence for one queue.
+// Callers tearing down several queues should drive the phases themselves.
 void iree_hal_amdgpu_host_queue_deinitialize(
     iree_hal_amdgpu_host_queue_t* queue);
 

@@ -6,33 +6,63 @@
 
 #include "iree/hal/drivers/amdgpu/system_event.h"
 
+#include <string.h>
+
+#include "iree/base/internal/atomics.h"
 #include "iree/base/threading/api.h"
 #include "iree/hal/drivers/amdgpu/host_queue.h"
 #include "iree/hal/drivers/amdgpu/logical_device.h"
 #include "iree/hal/drivers/amdgpu/physical_device.h"
 
-typedef struct iree_hal_amdgpu_system_event_device_t {
-  // Next live logical device registered for process-wide event delivery.
-  struct iree_hal_amdgpu_system_event_device_t* next;
-  // Logical device receiving events. Borrowed until explicit unregistration.
+struct iree_hal_amdgpu_system_event_agent_target_t {
+  // HSA agent handle copied at registration. Immutable for the registration.
+  hsa_agent_t agent;
+  // Queue storage for |agent|, captured when the queues are published. Interior
+  // pointer into the physical device's inline queue array, which lives inside
+  // the logical device allocation and outlives this target.
+  iree_hal_amdgpu_host_queue_t* host_queues;
+  // Number of leading entries in |host_queues| eligible for failure delivery.
+  // Zero before publication and after retirement. Written only under the
+  // registry mutex, by frontier assignment and deassignment.
+  iree_host_size_t live_queue_count;
+};
+
+struct iree_hal_amdgpu_system_event_registration_t {
+  // Next live registration in the process-wide registry list.
+  struct iree_hal_amdgpu_system_event_registration_t* next;
+  // Logical device receiving the sticky device failure status for these agents,
+  // or NULL once that status has been retired as a delivery target. Borrowed;
+  // retirement happens while the device is still allocated.
   iree_hal_amdgpu_logical_device_t* logical_device;
-  // Allocator owning this registry entry.
+  // Allocator owning this registration.
   iree_allocator_t host_allocator;
-  // Number of GPU agents represented by |agents|.
+  // Number of entries in |agent_targets|.
   iree_host_size_t agent_count;
-  // True after callbacks must stop dereferencing |logical_device|.
-  bool is_tearing_down;
-  // Stable HSA agent handles retained through hardware queue teardown.
-  hsa_agent_t agents[IREE_HAL_AMDGPU_MAX_GPU_AGENT];
-} iree_hal_amdgpu_system_event_device_t;
+  // One delivery target per GPU agent of |logical_device|.
+  iree_hal_amdgpu_system_event_agent_target_t agent_targets[/*agent_count*/];
+};
 
 typedef struct iree_hal_amdgpu_system_event_registry_t {
-  // Serializes registration, removal, and callback traversal.
+  // Serializes registration list mutation, target publication/retirement, and
+  // callback traversal. Never held across an HSA entry point an event can be
+  // dispatched through, so a callback waiting for it can never be waiting on a
+  // thread the HSA runtime has to call back into; delivery does hold it across
+  // the stop-signal store that records a queue failure, which dispatches
+  // nothing. Deliberately process-lifetime: it guards a file-static list that
+  // outlives every device, so it is initialized once and never deinitialized.
   iree_mutex_t mutex;
-  // Head of the live logical device list.
-  iree_hal_amdgpu_system_event_device_t* device_list;
-  // Whether the process-wide callback has been registered with HSA.
-  bool is_hsa_handler_registered;
+  // Serializes the one-time handler registration with the HSA runtime and is
+  // held across that call. The callback never acquires it, which is what keeps
+  // the rule above true without giving registration an exemption from it.
+  iree_mutex_t hsa_handler_mutex;
+  // Head of the live registration list.
+  iree_hal_amdgpu_system_event_registration_t* registration_list;
+  // Whether the process-wide callback is registered with the HSA runtime.
+  // Written under |hsa_handler_mutex| by registration and cleared by the
+  // shutdown-event branch of the callback, which takes no lock at all: that
+  // branch runs on the thread inside the final hsa_shut_down, which is the one
+  // thread that must never block on a lock an HSA caller may hold.
+  iree_atomic_int32_t is_hsa_handler_registered;
 } iree_hal_amdgpu_system_event_registry_t;
 
 static iree_once_flag iree_hal_amdgpu_system_event_once = IREE_ONCE_FLAG_INIT;
@@ -41,6 +71,11 @@ static iree_hal_amdgpu_system_event_registry_t
 
 static void iree_hal_amdgpu_system_event_initialize(void) {
   iree_mutex_initialize(&iree_hal_amdgpu_system_event_registry.mutex);
+  iree_mutex_initialize(
+      &iree_hal_amdgpu_system_event_registry.hsa_handler_mutex);
+  iree_atomic_store(
+      &iree_hal_amdgpu_system_event_registry.is_hsa_handler_registered, 0,
+      iree_memory_order_relaxed);
 }
 
 static bool iree_hal_amdgpu_system_event_agent(const hsa_amd_event_t* event,
@@ -91,145 +126,236 @@ static iree_status_t iree_hal_amdgpu_system_event_make_status(
   }
 }
 
+// Returns true if |registration| holds a target for |event_agent|.
+static bool iree_hal_amdgpu_system_event_registration_matches(
+    const iree_hal_amdgpu_system_event_registration_t* registration,
+    hsa_agent_t event_agent) {
+  for (iree_host_size_t i = 0; i < registration->agent_count; ++i) {
+    if (registration->agent_targets[i].agent.handle == event_agent.handle) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Delivers |event| to every registration holding a target for its agent.
+// Returns true if at least one registration accepted delivery.
+//
+// The failing unit is the registration, not the agent. Queues of one logical
+// device share an epoch signal table spanning every one of its GPU agents, so a
+// queue on a healthy agent can be parked on a device-side barrier against the
+// epoch signal of a queue on the faulting one, which will never advance again.
+// Failing only the matched agent's queues would leave that queue live with an
+// epoch nothing can retire, and its teardown wait would never return - while
+// the sticky device status this same delivery latches already covers the whole
+// logical device.
+//
+// Runs on an HSA runtime thread and can run while a thread of this driver is
+// inside HSA teardown. The only lock it takes is the registry mutex, which
+// every path in this file holds across a list walk or a store and never across
+// a blocking call, so it cannot be parked behind a teardown that is itself
+// waiting. The rest is a compare-exchange per failure slot, host status
+// allocation and release, and the stop-signal store that recording a queue
+// failure makes into a signal the delivery targets keep valid.
+static bool iree_hal_amdgpu_system_event_deliver(const hsa_amd_event_t* event,
+                                                 hsa_agent_t event_agent) {
+  bool delivered = false;
+  iree_mutex_lock(&iree_hal_amdgpu_system_event_registry.mutex);
+  for (iree_hal_amdgpu_system_event_registration_t* registration =
+           iree_hal_amdgpu_system_event_registry.registration_list;
+       registration != NULL; registration = registration->next) {
+    if (!iree_hal_amdgpu_system_event_registration_matches(registration,
+                                                           event_agent)) {
+      continue;
+    }
+    for (iree_host_size_t i = 0; i < registration->agent_count; ++i) {
+      iree_hal_amdgpu_system_event_agent_target_t* target =
+          &registration->agent_targets[i];
+      for (iree_host_size_t j = 0; j < target->live_queue_count; ++j) {
+        iree_hal_amdgpu_host_queue_record_failure(
+            &target->host_queues[j],
+            iree_hal_amdgpu_system_event_make_status(event));
+        delivered = true;
+      }
+    }
+    // The device's sticky failure status is a delivery target in its own right,
+    // outliving the queue targets: it is still readable through the HAL after a
+    // frontier deassignment retires every queue, and stops being readable when
+    // the device does. A registration that holds neither has nowhere to write,
+    // and a write nothing can read is not a delivery and must not be claimed.
+    if (registration->logical_device) {
+      iree_hal_amdgpu_logical_device_error_handler(
+          registration->logical_device,
+          iree_hal_amdgpu_system_event_make_status(event));
+      delivered = true;
+    }
+  }
+  iree_mutex_unlock(&iree_hal_amdgpu_system_event_registry.mutex);
+  return delivered;
+}
+
 static hsa_status_t iree_hal_amdgpu_system_event_callback(
     const hsa_amd_event_t* event, void* user_data) {
   (void)user_data;
   if (event->event_type == HSA_AMD_SYSTEM_SHUTDOWN_EVENT) {
     // The final hsa_shut_down destroys the runtime's callback registry. Reset
     // our process state so a later HSA lifetime registers this handler again.
-    iree_mutex_lock(&iree_hal_amdgpu_system_event_registry.mutex);
-    iree_hal_amdgpu_system_event_registry.is_hsa_handler_registered = false;
-    iree_mutex_unlock(&iree_hal_amdgpu_system_event_registry.mutex);
+    iree_atomic_store(
+        &iree_hal_amdgpu_system_event_registry.is_hsa_handler_registered, 0,
+        iree_memory_order_release);
     return HSA_STATUS_SUCCESS;
   }
   hsa_agent_t event_agent;
   if (!iree_hal_amdgpu_system_event_agent(event, &event_agent)) {
     return HSA_STATUS_ERROR;
   }
-
-  bool handled = false;
-  iree_mutex_lock(&iree_hal_amdgpu_system_event_registry.mutex);
-  for (iree_hal_amdgpu_system_event_device_t* entry =
-           iree_hal_amdgpu_system_event_registry.device_list;
-       entry != NULL; entry = entry->next) {
-    bool agent_matches = false;
-    for (iree_host_size_t i = 0; i < entry->agent_count; ++i) {
-      if (entry->agents[i].handle == event_agent.handle) {
-        agent_matches = true;
-        break;
-      }
-    }
-    if (!agent_matches) continue;
-
-    handled = true;
-    if (entry->is_tearing_down) continue;
-
-    iree_hal_amdgpu_logical_device_t* logical_device = entry->logical_device;
-    bool logical_device_faulted = false;
-    for (iree_host_size_t i = 0; i < logical_device->physical_device_count;
-         ++i) {
-      iree_hal_amdgpu_physical_device_t* physical_device =
-          logical_device->physical_devices[i];
-      if (physical_device->device_agent.handle != event_agent.handle) continue;
-
-      logical_device_faulted = true;
-      for (iree_host_size_t j = 0; j < physical_device->host_queue_count; ++j) {
-        iree_hal_amdgpu_host_queue_record_failure(
-            &physical_device->host_queues[j],
-            iree_hal_amdgpu_system_event_make_status(event));
-      }
-    }
-    if (logical_device_faulted) {
-      iree_hal_amdgpu_logical_device_error_handler(
-          logical_device, iree_hal_amdgpu_system_event_make_status(event));
-    }
-  }
-  iree_mutex_unlock(&iree_hal_amdgpu_system_event_registry.mutex);
-  return handled ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
+  // Claiming is delivering: an event matched but written nowhere readable would
+  // suppress the HSA runtime's abort while leaving nothing in the process able
+  // to report the fault.
+  return iree_hal_amdgpu_system_event_deliver(event, event_agent)
+             ? HSA_STATUS_SUCCESS
+             : HSA_STATUS_ERROR;
 }
 
 iree_status_t iree_hal_amdgpu_system_event_register_device(
     const iree_hal_amdgpu_libhsa_t* libhsa,
     iree_hal_amdgpu_logical_device_t* logical_device,
-    iree_allocator_t host_allocator) {
+    iree_allocator_t host_allocator,
+    iree_hal_amdgpu_system_event_registration_t** out_registration) {
   IREE_ASSERT_ARGUMENT(libhsa);
   IREE_ASSERT_ARGUMENT(logical_device);
+  IREE_ASSERT_ARGUMENT(out_registration);
+  *out_registration = NULL;
   iree_call_once(&iree_hal_amdgpu_system_event_once,
                  iree_hal_amdgpu_system_event_initialize);
 
-  iree_hal_amdgpu_system_event_device_t* entry = NULL;
+  const iree_host_size_t agent_count = logical_device->physical_device_count;
+  iree_host_size_t total_size = 0;
+  IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
+      sizeof(iree_hal_amdgpu_system_event_registration_t), &total_size,
+      IREE_STRUCT_FIELD_FAM(agent_count,
+                            iree_hal_amdgpu_system_event_agent_target_t)));
+  iree_hal_amdgpu_system_event_registration_t* registration = NULL;
   IREE_RETURN_IF_ERROR(
-      iree_allocator_malloc(host_allocator, sizeof(*entry), (void**)&entry));
-  entry->next = NULL;
-  entry->logical_device = logical_device;
-  entry->host_allocator = host_allocator;
-  entry->agent_count = logical_device->physical_device_count;
-  entry->is_tearing_down = false;
-  for (iree_host_size_t i = 0; i < entry->agent_count; ++i) {
-    entry->agents[i] = logical_device->physical_devices[i]->device_agent;
+      iree_allocator_malloc(host_allocator, total_size, (void**)&registration));
+  memset(registration, 0, total_size);
+  registration->logical_device = logical_device;
+  registration->host_allocator = host_allocator;
+  registration->agent_count = agent_count;
+  for (iree_host_size_t i = 0; i < agent_count; ++i) {
+    registration->agent_targets[i].agent =
+        logical_device->physical_devices[i]->device_agent;
   }
 
-  iree_mutex_lock(&iree_hal_amdgpu_system_event_registry.mutex);
+  // The HSA registration runs under its own mutex because it is a call into the
+  // same handler registry an event is dispatched from, and the traversal mutex
+  // must not be held across one of those. Registering the same handler twice
+  // silently succeeds and doubles delivery, so the one-shot has to be exact,
+  // which is what serializing the whole check-call-record sequence gives.
+  iree_mutex_lock(&iree_hal_amdgpu_system_event_registry.hsa_handler_mutex);
   iree_status_t status = iree_ok_status();
-  if (!iree_hal_amdgpu_system_event_registry.is_hsa_handler_registered) {
+  if (!iree_atomic_load(
+          &iree_hal_amdgpu_system_event_registry.is_hsa_handler_registered,
+          iree_memory_order_acquire)) {
     status = iree_hsa_amd_register_system_event_handler(
         IREE_LIBHSA(libhsa), iree_hal_amdgpu_system_event_callback,
         /*data=*/NULL);
     if (iree_status_is_ok(status)) {
-      iree_hal_amdgpu_system_event_registry.is_hsa_handler_registered = true;
+      iree_atomic_store(
+          &iree_hal_amdgpu_system_event_registry.is_hsa_handler_registered, 1,
+          iree_memory_order_release);
     }
   }
-  if (iree_status_is_ok(status)) {
-    entry->next = iree_hal_amdgpu_system_event_registry.device_list;
-    iree_hal_amdgpu_system_event_registry.device_list = entry;
-  }
-  iree_mutex_unlock(&iree_hal_amdgpu_system_event_registry.mutex);
+  iree_mutex_unlock(&iree_hal_amdgpu_system_event_registry.hsa_handler_mutex);
 
-  if (!iree_status_is_ok(status)) {
-    iree_allocator_free(host_allocator, entry);
+  if (iree_status_is_ok(status)) {
+    iree_mutex_lock(&iree_hal_amdgpu_system_event_registry.mutex);
+    registration->next =
+        iree_hal_amdgpu_system_event_registry.registration_list;
+    iree_hal_amdgpu_system_event_registry.registration_list = registration;
+    iree_mutex_unlock(&iree_hal_amdgpu_system_event_registry.mutex);
+  }
+
+  if (iree_status_is_ok(status)) {
+    *out_registration = registration;
+  } else {
+    iree_allocator_free(host_allocator, registration);
   }
   return status;
 }
 
-void iree_hal_amdgpu_system_event_begin_device_teardown(
-    iree_hal_amdgpu_logical_device_t* logical_device) {
-  IREE_ASSERT_ARGUMENT(logical_device);
-  iree_call_once(&iree_hal_amdgpu_system_event_once,
-                 iree_hal_amdgpu_system_event_initialize);
+void iree_hal_amdgpu_system_event_retire_device_status(
+    iree_hal_amdgpu_system_event_registration_t* registration) {
+  if (!registration) return;
 
+  // Bounded to the store, on the same reasoning as queue target retirement.
   iree_mutex_lock(&iree_hal_amdgpu_system_event_registry.mutex);
-  for (iree_hal_amdgpu_system_event_device_t* entry =
-           iree_hal_amdgpu_system_event_registry.device_list;
-       entry != NULL; entry = entry->next) {
-    if (entry->logical_device == logical_device) {
-      entry->is_tearing_down = true;
-      break;
-    }
-  }
+  registration->logical_device = NULL;
   iree_mutex_unlock(&iree_hal_amdgpu_system_event_registry.mutex);
 }
 
 void iree_hal_amdgpu_system_event_unregister_device(
-    iree_hal_amdgpu_logical_device_t* logical_device) {
-  IREE_ASSERT_ARGUMENT(logical_device);
-  iree_call_once(&iree_hal_amdgpu_system_event_once,
-                 iree_hal_amdgpu_system_event_initialize);
+    iree_hal_amdgpu_system_event_registration_t* registration) {
+  if (!registration) return;
 
-  iree_hal_amdgpu_system_event_device_t* removed_entry = NULL;
   iree_mutex_lock(&iree_hal_amdgpu_system_event_registry.mutex);
-  iree_hal_amdgpu_system_event_device_t** entry_ptr =
-      &iree_hal_amdgpu_system_event_registry.device_list;
-  while (*entry_ptr != NULL) {
-    if ((*entry_ptr)->logical_device == logical_device) {
-      removed_entry = *entry_ptr;
-      *entry_ptr = removed_entry->next;
+  iree_hal_amdgpu_system_event_registration_t** registration_ptr =
+      &iree_hal_amdgpu_system_event_registry.registration_list;
+  while (*registration_ptr != NULL) {
+    if (*registration_ptr == registration) {
+      *registration_ptr = registration->next;
       break;
     }
-    entry_ptr = &(*entry_ptr)->next;
+    registration_ptr = &(*registration_ptr)->next;
   }
   iree_mutex_unlock(&iree_hal_amdgpu_system_event_registry.mutex);
 
-  if (removed_entry) {
-    iree_allocator_free(removed_entry->host_allocator, removed_entry);
+  // Unlinking under the mutex the callback holds across its whole traversal is
+  // what makes this a quiescence barrier: no callback can be inside the
+  // registration once the mutex is released.
+  //
+  // The walk finds it. Registration returns a handle only after linking it and
+  // frees it itself otherwise, so the sole way to reach here with an unlinked
+  // registration is to unregister one twice - which has already read freed
+  // memory to get through the walk. Freeing only on a hit would trade that for
+  // a leak rather than detect anything.
+  iree_allocator_free(registration->host_allocator, registration);
+}
+
+iree_hal_amdgpu_system_event_agent_target_t*
+iree_hal_amdgpu_system_event_registration_lookup_agent(
+    iree_hal_amdgpu_system_event_registration_t* registration,
+    hsa_agent_t agent) {
+  if (!registration) return NULL;
+  for (iree_host_size_t i = 0; i < registration->agent_count; ++i) {
+    if (registration->agent_targets[i].agent.handle == agent.handle) {
+      return &registration->agent_targets[i];
+    }
   }
+  return NULL;
+}
+
+void iree_hal_amdgpu_system_event_publish_queue_targets(
+    iree_hal_amdgpu_system_event_agent_target_t* target,
+    iree_hal_amdgpu_host_queue_t* host_queues,
+    iree_host_size_t live_queue_count) {
+  if (!target) return;
+
+  iree_mutex_lock(&iree_hal_amdgpu_system_event_registry.mutex);
+  target->host_queues = host_queues;
+  target->live_queue_count = live_queue_count;
+  iree_mutex_unlock(&iree_hal_amdgpu_system_event_registry.mutex);
+}
+
+void iree_hal_amdgpu_system_event_retire_queue_targets(
+    iree_hal_amdgpu_system_event_agent_target_t* target) {
+  if (!target) return;
+
+  // Bounded to the store so the mutex acquisition is a quiescence barrier
+  // rather than a scope: holding it across queue destruction would serialize
+  // every device's teardown against every other device's fault delivery.
+  iree_mutex_lock(&iree_hal_amdgpu_system_event_registry.mutex);
+  target->host_queues = NULL;
+  target->live_queue_count = 0;
+  iree_mutex_unlock(&iree_hal_amdgpu_system_event_registry.mutex);
 }

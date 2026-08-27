@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include <cstdint>
+#include <thread>
 
 #include "iree/base/internal/atomics.h"
 #include "iree/base/threading/notification.h"
@@ -402,6 +403,186 @@ TEST_F(HostQueueFailureTest, SubmissionAfterQueueFailureIsRejected) {
   IREE_EXPECT_OK(
       iree_hal_semaphore_signal(wait_semaphore, wait_value, /*frontier=*/NULL));
 }
+
+// The teardown wait reaches the HSA runtime only after deciding whether to
+// block at all: it returns without waiting on a queue that has already failed.
+// Its call into HSA is therefore the first instant at which that decision is
+// behind it, and installing a thunk over that call in a private copy of the
+// symbol table is what lets a test act there. That table only exists in the
+// default dynamic build.
+#if !IREE_HAL_AMDGPU_LIBHSA_STATIC
+
+// Observation point for the teardown wait. The queue's completion thread blocks
+// in the same entry point throughout, so only the armed thread's next wait is
+// observed and every other call passes straight through.
+struct TeardownWaitHook {
+  // Real entry point every call delegates to.
+  decltype(iree_hal_amdgpu_libhsa_t::hsa_amd_signal_wait_any) next;
+  // Thread whose armed wait is observed. Written before the device built on the
+  // hooked table exists and never again, so no HSA waiter races it.
+  std::thread::id thread;
+  // Set while the next wait on |thread| is the teardown wait.
+  iree_atomic_int32_t armed;
+  // Set once that wait has been reached.
+  iree_atomic_int32_t reached;
+  // Posted with |reached|.
+  iree_notification_t reached_notification;
+};
+
+TeardownWaitHook g_teardown_wait_hook;
+
+static uint32_t HSA_API TeardownWaitHookEntry(
+    uint32_t signal_count, hsa_signal_t* signals, hsa_signal_condition_t* conds,
+    hsa_signal_value_t* values, uint64_t timeout_hint,
+    hsa_wait_state_t wait_hint, hsa_signal_value_t* satisfying_value) {
+  if (std::this_thread::get_id() == g_teardown_wait_hook.thread &&
+      iree_atomic_exchange(&g_teardown_wait_hook.armed, 0,
+                           iree_memory_order_acq_rel) != 0) {
+    iree_atomic_store(&g_teardown_wait_hook.reached, 1,
+                      iree_memory_order_release);
+    iree_notification_post(&g_teardown_wait_hook.reached_notification,
+                           IREE_ALL_WAITERS);
+  }
+  return g_teardown_wait_hook.next(signal_count, signals, conds, values,
+                                   timeout_hint, wait_hint, satisfying_value);
+}
+
+static bool TeardownWaitWasReached(void* user_data) {
+  TeardownWaitHook* hook = (TeardownWaitHook*)user_data;
+  return iree_atomic_load(&hook->reached, iree_memory_order_acquire) != 0;
+}
+
+// The teardown wait blocks until hardware retires the last submitted epoch, and
+// a GPU that faulted never will. A failure delivered while teardown is already
+// blocked there is the only thing that can release it, so failure delivery has
+// to stay live from the moment admission closes until the queues are destroyed.
+//
+// The failure arrives from another thread and cannot arrive earlier: the thread
+// that records it is released from inside the wait's own call into HSA. Nothing
+// here depends on how the two threads are scheduled, which matters because
+// recording the failure before the wait starts would skip the wait entirely -
+// the call returns immediately on an already-failed queue - and leave the
+// release path this covers unexercised while still passing.
+TEST_F(HostQueueFailureTest, FailureDuringTeardownWaitReleasesIt) {
+  iree_hal_amdgpu_logical_device_options_t options;
+  iree_hal_amdgpu_logical_device_options_initialize(&options);
+  options.preallocate_pools = 0;
+
+  // Symbol table the device below is built on: this suite's table with the
+  // blocking wait replaced. The device copies it during creation and holds its
+  // own references to HSA and to the library, so this copy is released at the
+  // end of the test while the device is still using those symbols.
+  iree_hal_amdgpu_libhsa_t hooked_libhsa;
+  IREE_ASSERT_OK(iree_hal_amdgpu_libhsa_copy(&libhsa_, &hooked_libhsa));
+  g_teardown_wait_hook.next = hooked_libhsa.hsa_amd_signal_wait_any;
+  g_teardown_wait_hook.thread = std::this_thread::get_id();
+  iree_atomic_store(&g_teardown_wait_hook.armed, 0, iree_memory_order_release);
+  iree_atomic_store(&g_teardown_wait_hook.reached, 0,
+                    iree_memory_order_release);
+  iree_notification_initialize(&g_teardown_wait_hook.reached_notification);
+  hooked_libhsa.hsa_amd_signal_wait_any = TeardownWaitHookEntry;
+
+  TestLogicalDevice test_device;
+  IREE_ASSERT_OK(test_device.Initialize(&options, &hooked_libhsa, &topology_,
+                                        host_allocator_));
+  iree_hal_amdgpu_host_queue_t* queue = test_device.first_host_queue();
+  ASSERT_NE(queue, nullptr);
+
+  Ref<iree_hal_buffer_t> target_buffer;
+  IREE_ASSERT_OK(CreateHostVisibleTransferBuffer(
+      test_device.allocator(), sizeof(uint32_t), target_buffer.out()));
+
+  // Stands in for the faulted GPU: the epoch submitted below cannot retire
+  // while this barrier holds the hardware queue.
+  hsa_signal_t blocker_signal = iree_hsa_signal_null();
+  IREE_ASSERT_OK(iree_hsa_amd_signal_create(
+      IREE_LIBHSA(&libhsa_), /*initial_value=*/1, /*num_consumers=*/0,
+      /*consumers=*/NULL, /*attributes=*/0, &blocker_signal));
+  EnqueueRawBlockingBarrier(queue, blocker_signal);
+
+  Ref<iree_hal_semaphore_t> signal_semaphore;
+  IREE_ASSERT_OK(
+      CreateSemaphore(test_device.base_device(), signal_semaphore.out()));
+  uint64_t signal_value = 1;
+  iree_hal_semaphore_t* signal_semaphore_ptr = signal_semaphore.get();
+  const iree_hal_semaphore_list_t signal_list =
+      MakeSemaphoreList(&signal_semaphore_ptr, &signal_value);
+
+  const uint32_t pattern = 0xCACE1103u;
+  IREE_ASSERT_OK(iree_hal_device_queue_fill(
+      test_device.base_device(), IREE_HAL_QUEUE_AFFINITY_ANY,
+      iree_hal_semaphore_list_empty(), signal_list, target_buffer,
+      /*target_offset=*/0, sizeof(pattern), &pattern, sizeof(pattern),
+      IREE_HAL_FILL_FLAG_NONE));
+
+  // Teardown order: admission closes first, then the wait, with the queues
+  // still able to receive a failure throughout.
+  iree_hal_amdgpu_host_queue_begin_deinitialize(queue);
+
+  // Stands in for the delivery path: a thread outside teardown recording the
+  // failure, held until the wait it has to release has reached HSA.
+  std::thread failing_thread([&]() {
+    iree_notification_await(&g_teardown_wait_hook.reached_notification,
+                            TeardownWaitWasReached, &g_teardown_wait_hook,
+                            iree_infinite_timeout());
+    iree_hal_amdgpu_host_queue_record_failure(
+        queue,
+        iree_make_status(kInjectedFailureCode, "injected queue failure"));
+  });
+
+  // Nothing has failed the queue yet, so the call below has no early exit and
+  // blocks on an epoch the parked hardware will never publish.
+  EXPECT_EQ(HostQueueErrorStatusCode(queue), IREE_STATUS_OK);
+  iree_atomic_store(&g_teardown_wait_hook.armed, 1, iree_memory_order_release);
+
+  // Returns only because the failure recorded on the other thread raised the
+  // stop signal this wait is armed on: the epoch signal it is also armed on
+  // cannot advance, and the thread that records the failure is released by this
+  // call and by nothing else.
+  iree_hal_amdgpu_host_queue_wait_idle_before_deinitialize(queue);
+
+  // The hook consumes the arming when it runs, so an arming still set means the
+  // wait returned without reaching HSA - the one shape in which the recorded
+  // failure is not what ended it. Clearing it also keeps the hook away from a
+  // notification this test tears down before the device is destroyed, since
+  // destruction runs another teardown wait on this thread.
+  EXPECT_EQ(iree_atomic_exchange(&g_teardown_wait_hook.armed, 0,
+                                 iree_memory_order_acq_rel),
+            0);
+
+  // Releases the failing thread on the paths where the wait did not, so a run
+  // that has already failed an assertion still terminates.
+  iree_atomic_store(&g_teardown_wait_hook.reached, 1,
+                    iree_memory_order_release);
+  iree_notification_post(&g_teardown_wait_hook.reached_notification,
+                         IREE_ALL_WAITERS);
+  failing_thread.join();
+  EXPECT_EQ(HostQueueErrorStatusCode(queue), kInjectedFailureCode);
+  IREE_EXPECT_STATUS_IS(kInjectedFailureCode,
+                        iree_hal_semaphore_wait(signal_semaphore, signal_value,
+                                                iree_infinite_timeout(),
+                                                IREE_ASYNC_WAIT_FLAG_NONE));
+
+  iree_hsa_signal_store_screlease(IREE_LIBHSA(&libhsa_), blocker_signal, 0);
+  WaitForSubmittedEpoch(&libhsa_, queue);
+  IREE_EXPECT_OK(
+      iree_hsa_signal_destroy(IREE_LIBHSA(&libhsa_), blocker_signal));
+  iree_notification_deinitialize(&g_teardown_wait_hook.reached_notification);
+  iree_hal_amdgpu_libhsa_deinitialize(&hooked_libhsa);
+}
+
+#else
+
+// A static HSA link has no function-pointer table to install a thunk into, so
+// the wait cannot be observed from inside and the coverage above is not
+// buildable. Report that as a skip rather than leaving it looking as though it
+// ran.
+TEST_F(HostQueueFailureTest, TeardownWaitCoverageRequiresDynamicLibhsa) {
+  GTEST_SKIP() << "teardown wait coverage requires the dynamic libhsa function "
+                  "table";
+}
+
+#endif  // !IREE_HAL_AMDGPU_LIBHSA_STATIC
 
 // An operation that ran out of submission capacity parks itself as a post-drain
 // action, and the terminal transition closes admission before it flushes those

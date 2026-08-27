@@ -621,8 +621,9 @@ static hsa_signal_value_t iree_hal_amdgpu_host_queue_last_drained_signal_value(
                               last_drained_epoch);
 }
 
-static void iree_hal_amdgpu_host_queue_wait_idle_before_teardown(
+void iree_hal_amdgpu_host_queue_wait_idle_before_deinitialize(
     iree_hal_amdgpu_host_queue_t* queue) {
+  IREE_ASSERT_ARGUMENT(queue);
   if (!queue->hardware_queue || !queue->notification_ring.epoch.signal.handle) {
     return;
   }
@@ -1016,14 +1017,23 @@ iree_status_t iree_hal_amdgpu_host_queue_initialize(
   return status;
 }
 
+void iree_hal_amdgpu_host_queue_begin_deinitialize(
+    iree_hal_amdgpu_host_queue_t* queue) {
+  IREE_ASSERT_ARGUMENT(queue);
+  iree_hal_amdgpu_host_queue_close_submission(queue);
+}
+
 void iree_hal_amdgpu_host_queue_deinitialize(
+    iree_hal_amdgpu_host_queue_t* queue) {
+  iree_hal_amdgpu_host_queue_begin_deinitialize(queue);
+  iree_hal_amdgpu_host_queue_wait_idle_before_deinitialize(queue);
+  iree_hal_amdgpu_host_queue_finish_deinitialize(queue);
+}
+
+void iree_hal_amdgpu_host_queue_finish_deinitialize(
     iree_hal_amdgpu_host_queue_t* queue) {
   IREE_ASSERT_ARGUMENT(queue);
   IREE_TRACE_ZONE_BEGIN(z0);
-
-  iree_hal_amdgpu_host_queue_close_submission(queue);
-
-  iree_hal_amdgpu_host_queue_wait_idle_before_teardown(queue);
 
   if (queue->completion.thread) {
     iree_hal_amdgpu_host_queue_request_completion_thread_stop(queue);
@@ -2038,15 +2048,8 @@ static iree_status_t iree_hal_amdgpu_host_queue_flush(
 // Virtual queue vtable
 //===----------------------------------------------------------------------===//
 
-static void iree_hal_amdgpu_host_queue_deinitialize_vtable(
-    iree_hal_amdgpu_virtual_queue_t* base_queue) {
-  iree_hal_amdgpu_host_queue_deinitialize(
-      (iree_hal_amdgpu_host_queue_t*)base_queue);
-}
-
 static const iree_hal_amdgpu_virtual_queue_vtable_t
     iree_hal_amdgpu_host_queue_vtable = {
-        .deinitialize = iree_hal_amdgpu_host_queue_deinitialize_vtable,
         .trim = iree_hal_amdgpu_host_queue_trim,
         .alloca = iree_hal_amdgpu_host_queue_alloca,
         .dealloca = iree_hal_amdgpu_host_queue_dealloca,

@@ -233,7 +233,11 @@ TEST_F(HostQueuePendingTest, DefaultPoolServesOptimalHostLocalMappedAlloca) {
       &libhsa_, &topology_, host_allocator_, IREE_HAL_MEMORY_TYPE_OPTIMAL);
 }
 
+// Cancels the queue's deferred operations the way the queue itself does:
+// admission closed first, so no submission can be admitted alongside the
+// cancellation pass.
 static void CancelPendingWithTestStatus(iree_hal_amdgpu_host_queue_t* queue) {
+  iree_hal_amdgpu_host_queue_begin_deinitialize(queue);
   iree_status_t cancellation_status =
       iree_make_status(IREE_STATUS_CANCELLED, "test cancellation");
   iree_hal_amdgpu_host_queue_cancel_pending(queue, cancellation_status);

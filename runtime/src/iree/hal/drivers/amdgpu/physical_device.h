@@ -39,6 +39,8 @@ typedef struct iree_hal_amdgpu_feedback_state_t
     iree_hal_amdgpu_feedback_state_t;
 typedef struct iree_hal_amdgpu_hostcall_provider_state_t
     iree_hal_amdgpu_hostcall_provider_state_t;
+typedef struct iree_hal_amdgpu_system_event_agent_target_t
+    iree_hal_amdgpu_system_event_agent_target_t;
 
 //===----------------------------------------------------------------------===//
 // iree_hal_amdgpu_physical_device_options_t
@@ -322,7 +324,18 @@ typedef struct iree_hal_amdgpu_physical_device_t {
   // Queue-local PM4 timestamp strategy selected from this GPU agent's ISA.
   iree_hal_amdgpu_pm4_timestamp_strategy_t pm4_timestamp_strategy;
 
-  // Number of live host queues initialized in |host_queues|.
+  // Process-wide HSA system event delivery target for |device_agent|, or NULL
+  // when the logical device has no registration. Borrowed from the
+  // registration, which outlives frontier assignment.
+  iree_hal_amdgpu_system_event_agent_target_t* system_event_target;
+
+  // Number of host queues in |host_queues| that have been initialized and not
+  // yet destroyed.
+  //
+  // Between the phases of deassignment this names queues in three conditions -
+  // still admitting work, closed but not yet destroyed, and destroyed - so it
+  // is not a safe bound for anything that must only touch usable queues.
+  // Asynchronous failure delivery is bounded by |system_event_target| instead.
   iree_host_size_t host_queue_count;
   // One or more host queues mapped to HSA queues on this physical device.
   iree_hal_amdgpu_host_queue_t host_queues[/*host_queue_count*/];
@@ -350,6 +363,11 @@ iree_status_t iree_hal_amdgpu_physical_device_initialize(
 
 // Binds and initializes this physical device's host queues after the logical
 // device has been assigned a topology/frontier.
+//
+// |system_event_target| is this agent's delivery target in the logical device's
+// system event registration, or NULL when the device has no registration. The
+// queues are published to it as the last step, so a partially assigned physical
+// device is never a delivery target.
 iree_status_t iree_hal_amdgpu_physical_device_assign_frontier(
     iree_hal_device_t* logical_device, iree_hal_amdgpu_system_t* system,
     iree_async_proactor_t* proactor,
@@ -358,10 +376,15 @@ iree_status_t iree_hal_amdgpu_physical_device_assign_frontier(
     iree_hal_amdgpu_epoch_signal_table_t* epoch_signal_table,
     iree_hal_amdgpu_feedback_state_t* feedback_state,
     const iree_hal_amdgpu_host_memory_pools_t* host_memory_pools,
+    iree_hal_amdgpu_system_event_agent_target_t* system_event_target,
     iree_allocator_t host_allocator,
     iree_hal_amdgpu_physical_device_t* physical_device);
 
 // Deinitializes any host queues initialized by assign_frontier.
+//
+// Closes admission on every queue, waits for all of them to pass their
+// idle/error boundary, retires asynchronous failure delivery for this agent,
+// and only then destroys queue-owned resources. Idempotent.
 void iree_hal_amdgpu_physical_device_deassign_frontier(
     iree_hal_amdgpu_physical_device_t* physical_device);
 
