@@ -345,6 +345,9 @@ pass.pipeline<module> @__loom_check_prepared_low pipeline {
       where target(abi = "hal_kernel", codegen = "low_native", family = "amdgpu") {
         amdgpu-materialize-hal-kernel-abi
       }
+      where target(abi = "vm_function", codegen = "vm") {
+        vm-materialize-call-abi
+      }
       canonicalize
       cse
       low-select-operand-forms

@@ -1,0 +1,55 @@
+// RUN: pass vm-materialize-call-abi
+
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) abi(vm_function) @return_input(%input: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+  return %input
+}
+
+// ----
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) abi(vm_function) @return_input(%input: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+  %2 = copy %input : reg<vm.value : i32> -> reg<vm.value : i32>
+  %3 = copy %2 : reg<vm.value : i32> -> reg<vm.value : i32>
+  return %3
+}
+
+// ====
+
+// RUN: pass vm-materialize-call-abi
+
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) abi(vm_function) @callee(%input: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+  %one = constant.s16 1 : reg<vm.value : i32>
+  %result = integer.add.i32 %input, %one : reg<vm.value : i32>
+  return %result
+}
+
+low.func.def target<vm.core>(@target) abi(vm_function) @caller(%input: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+  %result = low.func.call @callee(%input) : (reg<vm.value : i32>) -> (reg<vm.value : i32>)
+  %sum = integer.add.i32 %result, %input : reg<vm.value : i32>
+  return %sum
+}
+
+// ----
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) abi(vm_function) @callee(%input: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+  %8 = copy %input : reg<vm.value : i32> -> reg<vm.value : i32>
+  %one = constant.s16 1 : reg<vm.value : i32>
+  %result = integer.add.i32 %8, %one : reg<vm.value : i32>
+  %9 = copy %result : reg<vm.value : i32> -> reg<vm.value : i32>
+  return %9
+}
+
+low.func.def target<vm.core>(@target) abi(vm_function) @caller(%input: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+  %10 = copy %input : reg<vm.value : i32> -> reg<vm.value : i32>
+  %11 = copy %10 : reg<vm.value : i32> -> reg<vm.value : i32>
+  %result = low.func.call @callee(%11) : (reg<vm.value : i32>) -> (reg<vm.value : i32>)
+  %12 = copy %result : reg<vm.value : i32> -> reg<vm.value : i32>
+  %sum = integer.add.i32 %12, %10 : reg<vm.value : i32>
+  %13 = copy %sum : reg<vm.value : i32> -> reg<vm.value : i32>
+  return %13
+}

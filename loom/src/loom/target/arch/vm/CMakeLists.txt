@@ -106,16 +106,31 @@ loom_cc_library(
   NAME
     provider
   HDRS
+    "abi/materialization.h"
+    "pass_registry.h"
     "provider.h"
   SRCS
+    "abi/materialization.c"
+    "pass_registry.c"
     "provider.c"
   DEPS
     ::descriptors
     ::lower
     ::ops
     iree::base
+    loom::codegen::low::function
+    loom::ir
+    loom::ops::low
+    loom::ops::op_defs
+    loom::pass::builder
+    loom::pass::registry
+    loom::pass::types
+    loom::rewrite::rewriter
     loom::target::low_descriptor_registry
     loom::target::provider
+    loom::target::registers
+    loom::target::types
+    loom::util::walk
   PUBLIC
 )
 endif()
@@ -142,6 +157,7 @@ loom_check_test_suite(
   NAME
     loom_check_file_test
   SRCS
+    "test/source_low/abi_materialization.loom-test"
     "test/source_low/corpus/numeric_scalar_baseline.loom-test"
     "test/source_low/corpus/numeric_scalar_literals.loom-test"
   DATA

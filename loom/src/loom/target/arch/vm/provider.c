@@ -6,9 +6,12 @@
 
 #include "loom/target/arch/vm/provider.h"
 
+#include "loom/ir/module.h"
+#include "loom/pass/builder.h"
 #include "loom/target/arch/vm/descriptors.h"
 #include "loom/target/arch/vm/lower/lower.h"
 #include "loom/target/arch/vm/ops/registry.h"
+#include "loom/target/arch/vm/pass_registry.h"
 #include "loom/target/low_descriptor_registry.h"
 
 static void loom_vm_low_descriptor_registry_initialize(
@@ -20,12 +23,60 @@ static void loom_vm_low_descriptor_registry_initialize(
       out_registry, kProviders, IREE_ARRAYSIZE(kProviders));
 }
 
+static iree_status_t loom_vm_provider_build_string_attr(
+    loom_builder_t* builder, iree_string_view_t name, iree_string_view_t value,
+    loom_named_attr_t* out_attr) {
+  loom_string_id_t name_id = LOOM_STRING_ID_INVALID;
+  IREE_RETURN_IF_ERROR(
+      loom_module_intern_string(builder->module, name, &name_id));
+  loom_string_id_t value_id = LOOM_STRING_ID_INVALID;
+  IREE_RETURN_IF_ERROR(
+      loom_module_intern_string(builder->module, value, &value_id));
+  *out_attr = (loom_named_attr_t){
+      .name_id = name_id,
+      .value = loom_attr_string(value_id),
+  };
+  return iree_ok_status();
+}
+
+static iree_status_t loom_vm_provider_build_call_abi_pass(
+    loom_builder_t* builder, void* user_data) {
+  (void)user_data;
+  loom_op_t* run_op = NULL;
+  return loom_pass_ir_build_run(builder, 0, IREE_SV("vm-materialize-call-abi"),
+                                loom_named_attr_slice_empty(), &run_op);
+}
+
+static iree_status_t loom_vm_provider_contribute_pipeline(
+    const loom_target_pipeline_contribution_t* contribution) {
+  if (contribution->phase !=
+      LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_MATERIALIZATION) {
+    return iree_ok_status();
+  }
+
+  loom_named_attr_t attrs[2] = {0};
+  IREE_RETURN_IF_ERROR(
+      loom_vm_provider_build_string_attr(contribution->builder, IREE_SV("abi"),
+                                         IREE_SV("vm_function"), &attrs[0]));
+  IREE_RETURN_IF_ERROR(loom_vm_provider_build_string_attr(
+      contribution->builder, IREE_SV("codegen"), IREE_SV("vm"), &attrs[1]));
+
+  loom_op_t* where_op = NULL;
+  return loom_pass_ir_build_where(
+      contribution->builder, LOOM_PASS_WHERE_BUILD_FLAG_HAS_ATTRS,
+      IREE_SV("target"),
+      loom_make_named_attr_slice(attrs, IREE_ARRAYSIZE(attrs)),
+      loom_vm_provider_build_call_abi_pass, NULL, &where_op);
+}
+
 const loom_target_provider_t loom_vm_target_provider = {
     .register_context = loom_vm_ops_register_dialect,
     .initialize_low_descriptor_registry =
         loom_vm_low_descriptor_registry_initialize,
     .initialize_low_lower_policy_registry =
         loom_vm_low_lower_policy_registry_initialize,
+    .pass_registry = &loom_vm_pass_registry,
+    .contribute_pipeline = loom_vm_provider_contribute_pipeline,
 };
 
 static const loom_target_provider_t* const kVmTargetProviders[] = {
