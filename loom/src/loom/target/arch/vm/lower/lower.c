@@ -39,7 +39,9 @@ typedef struct loom_vm_source_lowering_row_t {
   uint16_t descriptor_ordinal;
   // Descriptor-local selector immediate ordinal, or UINT8_MAX when absent.
   uint8_t selector_immediate_ordinal;
-  // Encoded selector value when |selector_immediate_ordinal| is present.
+  // Source enum attribute ordinal copied to the selector, or UINT8_MAX.
+  uint8_t selector_source_attr_ordinal;
+  // Fixed selector value used when no source attribute supplies the value.
   uint8_t selector_value;
   // Operand types followed by result types at the generated maximum offsets.
   loom_scalar_type_t scalar_types[LOOM_VM_SOURCE_LOWERING_MAX_TYPE_COUNT];
@@ -54,13 +56,14 @@ typedef struct loom_vm_source_constant_t {
 
 static const loom_vm_source_lowering_row_t kVmSourceLoweringRows[] = {
 #define LOOM_VM_SOURCE_LOWERING_LIMITS(...)
-#define LOOM_VM_SOURCE_LOWERING_ROW(source_op_kind, descriptor_ordinal, \
-                                    selector_immediate_ordinal,         \
-                                    selector_value, ...)                \
-  {source_op_kind,                                                      \
-   descriptor_ordinal,                                                  \
-   selector_immediate_ordinal,                                          \
-   selector_value,                                                      \
+#define LOOM_VM_SOURCE_LOWERING_ROW(                                \
+    source_op_kind, descriptor_ordinal, selector_immediate_ordinal, \
+    selector_source_attr_ordinal, selector_value, ...)              \
+  {source_op_kind,                                                  \
+   descriptor_ordinal,                                              \
+   selector_immediate_ordinal,                                      \
+   selector_source_attr_ordinal,                                    \
+   selector_value,                                                  \
    {__VA_ARGS__}},
 #include "loom/target/arch/vm/lowering_rows.inl"
 #undef LOOM_VM_SOURCE_LOWERING_ROW
@@ -311,7 +314,12 @@ static iree_status_t loom_vm_emit_op(void* user_data,
     IREE_RETURN_IF_ERROR(
         loom_builder_intern_string(loom_low_lower_context_builder(context),
                                    immediate_name, &selector_attr.name_id));
-    selector_attr.value = loom_attr_i64(row->selector_value);
+    const int64_t selector_value =
+        row->selector_source_attr_ordinal == UINT8_MAX
+            ? row->selector_value
+            : loom_attr_as_enum(loom_op_const_attrs(
+                  source_op)[row->selector_source_attr_ordinal]);
+    selector_attr.value = loom_attr_i64(selector_value);
     attrs = loom_make_named_attr_slice(&selector_attr, 1);
   }
 

@@ -62,6 +62,7 @@ def generate_lowering_rows() -> str:
             c_enum_name(row.source_op),
             descriptor_name,
             ("UINT8_MAX" if row.selector_immediate_ordinal is None else str(row.selector_immediate_ordinal)),
+            ("UINT8_MAX" if row.selector_source_attr_ordinal is None else str(row.selector_source_attr_ordinal)),
             str(row.selector_value),
             *operand_types,
             *result_types,

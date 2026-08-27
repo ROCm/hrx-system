@@ -75,8 +75,9 @@ from model.schema import ANY_BITS, SCALAR_ENCODINGS, EntityReference, FieldRefer
 
 from loom.dialect.index import defs as index_defs
 from loom.dialect.scalar import arithmetic as scalar_arithmetic
+from loom.dialect.scalar import comparison as scalar_comparison
 from loom.dialect.scalar import conversion as scalar_conversion
-from loom.dsl import Op
+from loom.dsl import ATTR_TYPE_ENUM, Op
 from loom.ir import ScalarType
 from loom.scalar_type import ScalarTypeKind
 from loom.target.low_descriptors import (
@@ -249,15 +250,29 @@ class VmSourceLowering:
     result_types: tuple[ScalarTypeKind, ...]
     descriptor_key: str
     selector_immediate_ordinal: int | None = None
+    selector_source_attr_ordinal: int | None = None
     selector_value: int = 0
 
     def __post_init__(self) -> None:
         if self.selector_immediate_ordinal is None:
+            if self.selector_source_attr_ordinal is not None:
+                raise ValueError(
+                    "VM source lowering has a source selector without a target"
+                )
             if self.selector_value != 0:
                 raise ValueError("VM source lowering has a value without a selector")
             return
         if not 0 <= self.selector_immediate_ordinal <= 0xFF:
             raise ValueError("VM source selector immediate ordinal exceeds u8")
+        if (
+            self.selector_source_attr_ordinal is not None
+            and not 0 <= self.selector_source_attr_ordinal <= 0xFF
+        ):
+            raise ValueError("VM source selector attribute ordinal exceeds u8")
+        if self.selector_source_attr_ordinal is not None and self.selector_value != 0:
+            raise ValueError(
+                "VM source lowering cannot combine a source selector with a value"
+            )
         if not 0 <= self.selector_value <= 0xFF:
             raise ValueError("VM source selector value exceeds u8")
 
@@ -269,10 +284,20 @@ class VmSourceOpcode:
     descriptor_key: str
     selector_table: str | None = None
     selector_name: str | None = None
+    selector_source_attr: str | None = None
 
     def __post_init__(self) -> None:
-        if (self.selector_table is None) != (self.selector_name is None):
-            raise ValueError("VM source selector table and name must be paired")
+        selector_source_count = sum(
+            value is not None
+            for value in (self.selector_name, self.selector_source_attr)
+        )
+        if self.selector_table is None:
+            if selector_source_count:
+                raise ValueError("VM source selector requires a selector table")
+        elif selector_source_count != 1:
+            raise ValueError(
+                "VM source selector requires one fixed name or source attribute"
+            )
 
 
 def _instruction(mnemonic: str) -> Instruction:
@@ -903,11 +928,12 @@ def _require_fixed_source_shape(
 
 
 def _require_descriptor_shape(
+    source_op: Op,
     source_opcode: VmSourceOpcode,
     *,
     operand_count: int,
     result_count: int,
-) -> tuple[int | None, int]:
+) -> tuple[int | None, int | None, int]:
     descriptor_key = source_opcode.descriptor_key
     descriptor = _DESCRIPTORS_BY_KEY.get(source_opcode.descriptor_key)
     if descriptor is None:
@@ -940,7 +966,7 @@ def _require_descriptor_shape(
                 f"{descriptor_key}: source operation projection does not supply "
                 "required immediates"
             )
-        return None, 0
+        return None, None, 0
 
     selector_table = SELECTOR_TABLES_BY_NAME[source_opcode.selector_table]
     selector_immediate_ordinals = tuple(
@@ -953,13 +979,63 @@ def _require_descriptor_shape(
         raise ValueError(
             f"{descriptor_key}: source selector must be the descriptor's only immediate"
         )
-    selector_key = (selector_table.entity_id, source_opcode.selector_name)
-    if selector_key not in _SELECTOR_VALUES_BY_KEY:
-        raise ValueError(
-            f"{descriptor_key}: unknown selector {source_opcode.selector_name!r} "
-            f"in {source_opcode.selector_table!r}"
+    if source_opcode.selector_name is not None:
+        selector_key = (selector_table.entity_id, source_opcode.selector_name)
+        if selector_key not in _SELECTOR_VALUES_BY_KEY:
+            raise ValueError(
+                f"{descriptor_key}: unknown selector "
+                f"{source_opcode.selector_name!r} in "
+                f"{source_opcode.selector_table!r}"
+            )
+        return (
+            selector_immediate_ordinals[0],
+            None,
+            _SELECTOR_VALUES_BY_KEY[selector_key],
         )
-    return selector_immediate_ordinals[0], _SELECTOR_VALUES_BY_KEY[selector_key]
+
+    source_attr_name = source_opcode.selector_source_attr
+    if source_attr_name is None:
+        raise ValueError(f"{descriptor_key}: source selector attribute is missing")
+    source_attr_ordinal = next(
+        (
+            ordinal
+            for ordinal, attr in enumerate(source_op.attrs)
+            if attr.name == source_attr_name
+        ),
+        None,
+    )
+    if source_attr_ordinal is None:
+        raise ValueError(
+            f"{source_op.name}: source selector attribute "
+            f"{source_attr_name!r} is not declared"
+        )
+    source_attr = source_op.attrs[source_attr_ordinal]
+    if (
+        source_attr.attr_type != ATTR_TYPE_ENUM
+        or source_attr.enum_def is None
+        or source_attr.optional
+        or source_attr.open_enum
+    ):
+        raise ValueError(
+            f"{source_op.name}: source selector attribute "
+            f"{source_attr_name!r} must be a required closed enum"
+        )
+    for source_case in source_attr.enum_def.cases:
+        selector_key = (selector_table.entity_id, source_case.keyword)
+        target_value = _SELECTOR_VALUES_BY_KEY.get(selector_key)
+        if target_value is None:
+            raise ValueError(
+                f"{descriptor_key}: source selector case "
+                f"{source_case.keyword!r} is absent from "
+                f"{source_opcode.selector_table!r}"
+            )
+        if target_value != source_case.value:
+            raise ValueError(
+                f"{descriptor_key}: source selector case "
+                f"{source_case.keyword!r} has value {source_case.value}, but "
+                f"{source_opcode.selector_table!r} uses {target_value}"
+            )
+    return selector_immediate_ordinals[0], source_attr_ordinal, 0
 
 
 def _require_concrete_source_types(
@@ -993,7 +1069,12 @@ def _source_lowering(
         result_count=len(result_types),
     )
     _require_concrete_source_types(source_op, operand_types, result_types)
-    selector_immediate_ordinal, selector_value = _require_descriptor_shape(
+    (
+        selector_immediate_ordinal,
+        selector_source_attr_ordinal,
+        selector_value,
+    ) = _require_descriptor_shape(
+        source_op,
         source_opcode,
         operand_count=len(operand_types),
         result_count=len(result_types),
@@ -1004,6 +1085,7 @@ def _source_lowering(
         result_types,
         source_opcode.descriptor_key,
         selector_immediate_ordinal,
+        selector_source_attr_ordinal,
         selector_value,
     )
 
@@ -1034,6 +1116,39 @@ def _same_type_binary(
             (scalar_type, scalar_type),
             (scalar_type,),
             descriptor_key,
+        )
+        for scalar_type, descriptor_key in descriptor_by_type.items()
+    )
+
+
+def _integer_comparison(
+    source_op: Op,
+    descriptor_by_type: dict[ScalarTypeKind, str],
+) -> tuple[VmSourceLowering, ...]:
+    """Projects an integer comparison and its predicate onto the VM ISA."""
+
+    _require_fixed_source_shape(source_op, operand_count=2, result_count=1)
+    operand_names = tuple(operand.name for operand in source_op.operands)
+    if not any(
+        constraint.name == "SameType" and constraint.args == operand_names
+        for constraint in source_op.constraints
+    ):
+        raise ValueError(
+            f"{source_op.name}: integer comparison projection requires a "
+            f"SameType{operand_names} constraint"
+        )
+    if not descriptor_by_type:
+        raise ValueError(f"{source_op.name}: comparison projection has no type cases")
+    return tuple(
+        _source_lowering(
+            source_op,
+            (scalar_type, scalar_type),
+            (ScalarTypeKind.I1,),
+            VmSourceOpcode(
+                descriptor_key,
+                "integer.compare",
+                selector_source_attr="predicate",
+            ),
         )
         for scalar_type, descriptor_key in descriptor_by_type.items()
     )
@@ -1104,10 +1219,24 @@ VM_SOURCE_LOWERINGS = (
         },
     ),
     *_same_type_binary(
+        scalar_arithmetic.scalar_subi,
+        {
+            ScalarTypeKind.I32: "vm.integer.sub.i32",
+            ScalarTypeKind.I64: "vm.integer.sub.i64",
+        },
+    ),
+    *_same_type_binary(
         scalar_arithmetic.scalar_muli,
         {
             ScalarTypeKind.I32: "vm.integer.mul.i32",
             ScalarTypeKind.I64: "vm.integer.mul.i64",
+        },
+    ),
+    *_integer_comparison(
+        scalar_comparison.scalar_cmpi,
+        {
+            ScalarTypeKind.I32: "vm.integer.compare.i32",
+            ScalarTypeKind.I64: "vm.integer.compare.i64",
         },
     ),
     *_cast(

@@ -8,6 +8,52 @@ func.def @scalar_i32_add_multiply(%lhs: i32, %rhs: i32) -> (i32) {
 
 // ====
 
+func.def @scalar_i32_subtract(%lhs: i32, %rhs: i32) -> (i32) {
+  %result = scalar.subi %lhs, %rhs : i32
+  func.return %result : i32
+}
+
+// ====
+
+func.def @scalar_i64_subtract(%lhs: i64, %rhs: i64) -> (i64) {
+  %result = scalar.subi %lhs, %rhs : i64
+  func.return %result : i64
+}
+
+// ====
+
+func.def @scalar_i32_compare_predicates(%lhs: i32, %rhs: i32) -> (i1, i1, i1, i1, i1, i1, i1, i1, i1, i1) {
+  %eq = scalar.cmpi eq, %lhs, %rhs : i32
+  %ne = scalar.cmpi ne, %lhs, %rhs : i32
+  %slt = scalar.cmpi slt, %lhs, %rhs : i32
+  %sle = scalar.cmpi sle, %lhs, %rhs : i32
+  %sgt = scalar.cmpi sgt, %lhs, %rhs : i32
+  %sge = scalar.cmpi sge, %lhs, %rhs : i32
+  %ult = scalar.cmpi ult, %lhs, %rhs : i32
+  %ule = scalar.cmpi ule, %lhs, %rhs : i32
+  %ugt = scalar.cmpi ugt, %lhs, %rhs : i32
+  %uge = scalar.cmpi uge, %lhs, %rhs : i32
+  func.return %eq, %ne, %slt, %sle, %sgt, %sge, %ult, %ule, %ugt, %uge : i1, i1, i1, i1, i1, i1, i1, i1, i1, i1
+}
+
+// ====
+
+func.def @scalar_i64_compare_predicates(%lhs: i64, %rhs: i64) -> (i1, i1, i1, i1, i1, i1, i1, i1, i1, i1) {
+  %eq = scalar.cmpi eq, %lhs, %rhs : i64
+  %ne = scalar.cmpi ne, %lhs, %rhs : i64
+  %slt = scalar.cmpi slt, %lhs, %rhs : i64
+  %sle = scalar.cmpi sle, %lhs, %rhs : i64
+  %sgt = scalar.cmpi sgt, %lhs, %rhs : i64
+  %sge = scalar.cmpi sge, %lhs, %rhs : i64
+  %ult = scalar.cmpi ult, %lhs, %rhs : i64
+  %ule = scalar.cmpi ule, %lhs, %rhs : i64
+  %ugt = scalar.cmpi ugt, %lhs, %rhs : i64
+  %uge = scalar.cmpi uge, %lhs, %rhs : i64
+  func.return %eq, %ne, %slt, %sle, %sgt, %sge, %ult, %ule, %ugt, %uge : i1, i1, i1, i1, i1, i1, i1, i1, i1, i1
+}
+
+// ====
+
 func.def @scalar_bf16_extend(%source: bf16) -> (f32) {
   %result = scalar.extf %source : bf16 to f32
   func.return %result : f32
