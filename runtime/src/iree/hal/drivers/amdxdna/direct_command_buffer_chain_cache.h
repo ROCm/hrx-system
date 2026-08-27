@@ -212,6 +212,10 @@ iree_status_t iree_hal_amdxdna_chain_accum_append_group(
     iree_allocator_t host_allocator, iree_hal_amdxdna_chain_accum_t* accum,
     iree_hal_amdxdna_chain_group_t** out_group);
 
+iree_status_t iree_hal_amdxdna_chain_command_cache_create(
+    iree_allocator_t host_allocator, iree_host_size_t max_child_commands,
+    iree_hal_amdxdna_device_chain_command_cache_t** out_cache);
+
 iree_hal_amdxdna_device_chain_command_cache_t*
 iree_hal_amdxdna_get_chain_command_cache(iree_hal_amdxdna_device* device);
 

@@ -79,10 +79,9 @@ typedef struct iree_hal_amdxdna_device {
   iree_hal_amdxdna_device_chain_command_cache_t* chain_command_cache;
   // Native single-dispatch cache for module-style commands.
   // This owns prepared command/control BOs keyed by the device-visible dispatch
-  // signature and is destroyed before the native device.
+  // signature and is destroyed before the native device. Created during device
+  // construction so public dispatch never races a lazy getter.
   iree_hal_amdxdna_device_single_command_cache_t* single_command_cache;
-  // Serializes lazy command-cache allocation on this device.
-  iree_slim_mutex_t command_cache_mutex;
   // Maximum slots that fit in one ERT_CMD_CHAIN exec BO (constant per device).
   // Lazily computed on first flush; the chain flush splits into this many
   // slots per submitted chain. Atomic because a multi-worker submission path

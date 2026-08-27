@@ -22,6 +22,8 @@
 #include "iree/hal/drivers/amdxdna/completion_queue.h"
 #include "iree/hal/drivers/amdxdna/context_cache.h"
 #include "iree/hal/drivers/amdxdna/direct_command_buffer.h"
+#include "iree/hal/drivers/amdxdna/direct_command_buffer_chain_cache.h"
+#include "iree/hal/drivers/amdxdna/direct_command_buffer_single_cache.h"
 #include "iree/hal/drivers/amdxdna/executable.h"
 #include "iree/hal/drivers/amdxdna/semaphore.h"
 #include "iree/hal/drivers/amdxdna/util.h"
@@ -44,9 +46,8 @@ static void iree_hal_amdxdna_device_initialize(
   IREE_TRACE_ZONE_BEGIN(z0);
 
   memset(device, 0, sizeof(*device));
-  // The context cache is created later, once device caps (and thus the
-  // hardware-context budget) are known; see the caps query in device_create.
-  iree_slim_mutex_initialize(&device->command_cache_mutex);
+  // Context and command caches are created after native caps are known; see
+  // device_create.
   iree_atomic_store(&device->chain_max_slots, 0, iree_memory_order_relaxed);
   iree_atomic_store(&device->queue_epoch, 0, iree_memory_order_relaxed);
 
@@ -74,7 +75,6 @@ static void iree_hal_amdxdna_device_deinitialize(
   iree_hal_amdxdna_device_destroy_single_command_cache(device);
   iree_hal_amdxdna_device_destroy_chain_command_cache(device);
   iree_hal_amdxdna_device_context_cache_destroy(device->context_cache);
-  iree_slim_mutex_deinitialize(&device->command_cache_mutex);
   device->context_cache = NULL;
 }
 
@@ -1923,6 +1923,16 @@ iree_status_t iree_hal_amdxdna_device_create(
       status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                                 "failed to allocate amdxdna context cache");
     }
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_amdxdna_single_command_cache_create(
+        device->host_allocator, &device->single_command_cache);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_amdxdna_chain_command_cache_create(
+        device->host_allocator,
+        device->native_caps.max_cached_chain_child_commands,
+        &device->chain_command_cache);
   }
   if (iree_status_is_ok(status) && should_set_power_mode) {
     status = iree_hal_amdxdna_native_device_c_set_power_mode(

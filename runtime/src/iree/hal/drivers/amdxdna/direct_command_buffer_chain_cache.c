@@ -627,7 +627,7 @@ iree_status_t iree_hal_amdxdna_chain_accum_append_group(
   return iree_ok_status();
 }
 
-static iree_status_t iree_hal_amdxdna_chain_command_cache_create(
+iree_status_t iree_hal_amdxdna_chain_command_cache_create(
     iree_allocator_t host_allocator, iree_host_size_t max_child_commands,
     iree_hal_amdxdna_device_chain_command_cache_t** out_cache) {
   *out_cache = NULL;
@@ -646,15 +646,6 @@ static iree_status_t iree_hal_amdxdna_chain_command_cache_create(
 
 iree_hal_amdxdna_device_chain_command_cache_t*
 iree_hal_amdxdna_get_chain_command_cache(iree_hal_amdxdna_device* device) {
-  if (device->chain_command_cache) return device->chain_command_cache;
-  iree_slim_mutex_lock(&device->command_cache_mutex);
-  if (!device->chain_command_cache) {
-    (void)iree_hal_amdxdna_chain_command_cache_create(
-        device->host_allocator,
-        device->native_caps.max_cached_chain_child_commands,
-        &device->chain_command_cache);
-  }
-  iree_slim_mutex_unlock(&device->command_cache_mutex);
   return device->chain_command_cache;
 }
 

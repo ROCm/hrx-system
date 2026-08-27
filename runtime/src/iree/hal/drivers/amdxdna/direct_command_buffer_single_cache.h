@@ -76,8 +76,12 @@ typedef struct iree_hal_amdxdna_device_single_command_cache_t {
 
 typedef struct iree_hal_amdxdna_device iree_hal_amdxdna_device;
 
+iree_status_t iree_hal_amdxdna_single_command_cache_create(
+    iree_allocator_t host_allocator,
+    iree_hal_amdxdna_device_single_command_cache_t** out_cache);
+
 iree_hal_amdxdna_device_single_command_cache_t*
-iree_hal_amdxdna_get_single_command_cache(iree_hal_amdxdna_device* device);
+    iree_hal_amdxdna_get_single_command_cache(iree_hal_amdxdna_device* device);
 
 void iree_hal_amdxdna_single_command_cache_invalidate_queue(
     iree_hal_amdxdna_device_single_command_cache_t* cache,
