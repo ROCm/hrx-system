@@ -67,6 +67,7 @@ loom_generated_cc_library(
   TEXTUAL_HDRS
     "encoding_rows.inl"
     "lowering_rows.inl"
+    "verification_rows.inl"
   GENERATED_HDR_FLAGS
     "--header"
   GENERATED_HDRS
@@ -74,11 +75,29 @@ loom_generated_cc_library(
   EXTRA_OUTPUT_FLAGS
     "--encoding-rows"
     "--lowering-rows"
+    "--verification-rows"
   EXTRA_OUTPUTS
     "encoding_rows.inl"
     "lowering_rows.inl"
+    "verification_rows.inl"
   DEPS
     loom::codegen::low::descriptors
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_test(
+  NAME
+    descriptors_test
+  SRCS
+    "descriptors_test.cc"
+  DEPS
+    ::descriptors
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::codegen::low::testing::descriptors_verify
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
 )
 endif()
 
@@ -113,6 +132,27 @@ endif()
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
+    low_verify
+  HDRS
+    "low_verify.h"
+  SRCS
+    "low_verify.c"
+  DEPS
+    ::descriptors
+    iree::base
+    loom::codegen::low::diagnostics
+    loom::codegen::low::packet
+    loom::codegen::low::verify
+    loom::error::error_defs
+    loom::ir
+    loom::target::registers
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
     provider
   HDRS
     "abi/materialization.h"
@@ -126,10 +166,12 @@ loom_cc_library(
     "provider.c"
   DEPS
     ::descriptors
+    ::low_verify
     ::lower
     ::ops
     iree::base
     iree::vm
+    iree::vm::bytecode::wire
     loom::codegen::low::builder
     loom::codegen::low::function
     loom::ir
@@ -174,6 +216,8 @@ loom_check_test_suite(
     "test/source_low/corpus/numeric_scalar_baseline.loom-test"
     "test/source_low/corpus/numeric_scalar_literals.loom-test"
     "test/source_low/function_contracts.loom-test"
+    "test/source_low/low_verification.loom-test"
+    "test/source_low/selector_assembly.loom-test"
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_scalar_baseline.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_scalar_literals.loom-test"

@@ -17,10 +17,37 @@ static bool loom_vm_loom_check_emit_provider_matches(
   return iree_string_view_equal(target_name, IREE_SV("vm-dis"));
 }
 
+typedef enum loom_vm_loom_check_input_e {
+  LOOM_VM_LOOM_CHECK_INPUT_SOURCE_LOW = 0,
+  LOOM_VM_LOOM_CHECK_INPUT_LOW = 1,
+} loom_vm_loom_check_input_t;
+
+static iree_status_t loom_vm_loom_check_parse_input(
+    iree_string_view_t target_options, loom_vm_loom_check_input_t* out_input) {
+  target_options = iree_string_view_trim(target_options);
+  if (iree_string_view_is_empty(target_options) ||
+      iree_string_view_equal(target_options, IREE_SV("input=source-low"))) {
+    *out_input = LOOM_VM_LOOM_CHECK_INPUT_SOURCE_LOW;
+    return iree_ok_status();
+  }
+  if (iree_string_view_equal(target_options, IREE_SV("input=low"))) {
+    *out_input = LOOM_VM_LOOM_CHECK_INPUT_LOW;
+    return iree_ok_status();
+  }
+  return iree_make_status(
+      IREE_STATUS_INVALID_ARGUMENT,
+      "vm-dis expected no options, 'input=source-low', or 'input=low'; got "
+      "'%.*s'",
+      (int)target_options.size, target_options.data);
+}
+
 static iree_status_t loom_vm_loom_check_prepare_module(
-    const loom_check_emit_provider_request_t* request) {
+    const loom_check_emit_provider_request_t* request,
+    loom_vm_loom_check_input_t input) {
   loom_check_prepare_source_low_options_t options = {0};
   loom_check_prepare_source_low_options_initialize(&options);
+  options.pipeline = input == LOOM_VM_LOOM_CHECK_INPUT_LOW ? IREE_SV("none")
+                                                           : IREE_SV("default");
   options.default_pipeline = LOOM_COMPILE_DEFAULT_PIPELINE_PREPARED_LOW;
   return loom_check_prepare_source_low_module(
       request->module, &options, request->low_registry, request->environment,
@@ -37,12 +64,11 @@ static iree_status_t loom_vm_loom_check_append_dump(void* user_data,
 static iree_status_t loom_vm_loom_check_emit_provider_execute(
     const loom_check_emit_provider_t* provider,
     const loom_check_emit_provider_request_t* request) {
-  if (!iree_string_view_is_empty(request->target_options)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "vm-dis does not accept target options");
-  }
+  loom_vm_loom_check_input_t input = LOOM_VM_LOOM_CHECK_INPUT_SOURCE_LOW;
+  IREE_RETURN_IF_ERROR(
+      loom_vm_loom_check_parse_input(request->target_options, &input));
 
-  IREE_RETURN_IF_ERROR(loom_vm_loom_check_prepare_module(request));
+  IREE_RETURN_IF_ERROR(loom_vm_loom_check_prepare_module(request, input));
   if (request->diagnostic_collector->count != 0) return iree_ok_status();
 
   loom_check_diagnostic_emitter_capture_t capture = {

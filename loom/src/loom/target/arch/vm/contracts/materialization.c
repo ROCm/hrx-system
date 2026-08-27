@@ -8,6 +8,9 @@
 
 #include <inttypes.h>
 
+#include "iree/vm/bytecode/wire/core/conversion.h"
+#include "iree/vm/bytecode/wire/core/float.h"
+#include "iree/vm/bytecode/wire/core/integer.h"
 #include "loom/codegen/low/builder.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
@@ -156,37 +159,92 @@ static const loom_low_descriptor_t* loom_vm_contract_descriptor(
   return descriptor;
 }
 
-static iree_status_t loom_vm_contract_build_unary(
-    loom_vm_contract_materializer_t* materializer, uint16_t descriptor_ordinal,
-    loom_value_id_t operand, loom_type_t result_type,
+typedef struct loom_vm_contract_instruction_t {
+  // Dense Core VM descriptor ordinal naming the physical instruction.
+  uint16_t descriptor_ordinal;
+  // Selector value, or UINT16_MAX when the instruction has no selector.
+  uint16_t selector_value;
+} loom_vm_contract_instruction_t;
+
+static loom_vm_contract_instruction_t loom_vm_contract_instruction(
+    uint16_t descriptor_ordinal) {
+  return (loom_vm_contract_instruction_t){
+      .descriptor_ordinal = descriptor_ordinal,
+      .selector_value = UINT16_MAX,
+  };
+}
+
+static loom_vm_contract_instruction_t loom_vm_contract_selected_instruction(
+    uint16_t descriptor_ordinal, uint8_t selector_value) {
+  return (loom_vm_contract_instruction_t){
+      .descriptor_ordinal = descriptor_ordinal,
+      .selector_value = selector_value,
+  };
+}
+
+static iree_status_t loom_vm_contract_build_value(
+    loom_vm_contract_materializer_t* materializer,
+    loom_vm_contract_instruction_t instruction, const loom_value_id_t* operands,
+    uint16_t operand_count, loom_type_t result_type,
     loom_value_id_t* out_result) {
   *out_result = LOOM_VALUE_ID_INVALID;
+  const loom_low_descriptor_t* descriptor =
+      loom_vm_contract_descriptor(materializer, instruction.descriptor_ordinal);
+  loom_named_attr_t selector_attr = {0};
+  loom_named_attr_slice_t attrs = loom_named_attr_slice_empty();
+  if (instruction.selector_value != UINT16_MAX) {
+    IREE_ASSERT_EQ(descriptor->immediate_count, 1);
+    const loom_low_immediate_t* immediate =
+        &materializer->descriptor_set->immediates[descriptor->immediate_start];
+    IREE_ASSERT_EQ(immediate->kind, LOOM_LOW_IMMEDIATE_KIND_ENUM);
+    const iree_string_view_t immediate_name = loom_low_descriptor_set_string(
+        materializer->descriptor_set, immediate->field_name_string_offset);
+    IREE_RETURN_IF_ERROR(
+        loom_builder_intern_string(&materializer->rewriter->builder,
+                                   immediate_name, &selector_attr.name_id));
+    selector_attr.value = loom_attr_i64(instruction.selector_value);
+    attrs = loom_make_named_attr_slice(&selector_attr, 1);
+  }
+
   loom_op_t* op = NULL;
   IREE_RETURN_IF_ERROR(loom_low_build_resolved_descriptor_op(
       &materializer->rewriter->builder, materializer->descriptor_set,
-      loom_vm_contract_descriptor(materializer, descriptor_ordinal), &operand,
-      1, loom_named_attr_slice_empty(), &result_type, 1,
+      descriptor, operands, operand_count, attrs, &result_type, 1,
       /*tied_results=*/NULL, /*tied_result_count=*/0, materializer->location,
       &op));
   *out_result = loom_op_results(op)[0];
   return iree_ok_status();
 }
 
+static iree_status_t loom_vm_contract_build_selected_unary(
+    loom_vm_contract_materializer_t* materializer, uint16_t descriptor_ordinal,
+    uint8_t selector_value, loom_value_id_t operand, loom_type_t result_type,
+    loom_value_id_t* out_result) {
+  return loom_vm_contract_build_value(
+      materializer,
+      loom_vm_contract_selected_instruction(descriptor_ordinal, selector_value),
+      &operand, 1, result_type, out_result);
+}
+
 static iree_status_t loom_vm_contract_build_binary(
     loom_vm_contract_materializer_t* materializer, uint16_t descriptor_ordinal,
     loom_value_id_t lhs, loom_value_id_t rhs, loom_type_t result_type,
     loom_value_id_t* out_result) {
-  *out_result = LOOM_VALUE_ID_INVALID;
   const loom_value_id_t operands[] = {lhs, rhs};
-  loom_op_t* op = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_build_resolved_descriptor_op(
-      &materializer->rewriter->builder, materializer->descriptor_set,
-      loom_vm_contract_descriptor(materializer, descriptor_ordinal), operands,
-      IREE_ARRAYSIZE(operands), loom_named_attr_slice_empty(), &result_type, 1,
-      /*tied_results=*/NULL, /*tied_result_count=*/0, materializer->location,
-      &op));
-  *out_result = loom_op_results(op)[0];
-  return iree_ok_status();
+  return loom_vm_contract_build_value(
+      materializer, loom_vm_contract_instruction(descriptor_ordinal), operands,
+      IREE_ARRAYSIZE(operands), result_type, out_result);
+}
+
+static iree_status_t loom_vm_contract_build_selected_binary(
+    loom_vm_contract_materializer_t* materializer, uint16_t descriptor_ordinal,
+    uint8_t selector_value, loom_value_id_t lhs, loom_value_id_t rhs,
+    loom_type_t result_type, loom_value_id_t* out_result) {
+  const loom_value_id_t operands[] = {lhs, rhs};
+  return loom_vm_contract_build_value(
+      materializer,
+      loom_vm_contract_selected_instruction(descriptor_ordinal, selector_value),
+      operands, IREE_ARRAYSIZE(operands), result_type, out_result);
 }
 
 static iree_status_t loom_vm_contract_build_assert(
@@ -216,22 +274,27 @@ static iree_status_t loom_vm_contract_normalize_integer_value(
     loom_vm_contract_materializer_t* materializer, loom_value_id_t value,
     loom_scalar_type_t scalar_type, int width, loom_value_id_t* out_result) {
   *out_result = value;
-  uint16_t first_conversion = UINT16_MAX;
+  uint16_t first_selector = UINT16_MAX;
+  loom_type_t first_result_type = loom_type_none();
   switch (scalar_type) {
     case LOOM_SCALAR_TYPE_I1:
       if (width == 64) {
-        first_conversion = VM_CORE_DESCRIPTOR_REF_CONVERSION_INTEGER_U32_TO_I64;
+        first_selector = IREE_VM_ISA_INTEGER_CONVERT_U32_TO_I64;
+        first_result_type = materializer->i64_type;
       }
       break;
     case LOOM_SCALAR_TYPE_I8:
-      first_conversion = VM_CORE_DESCRIPTOR_REF_CONVERSION_INTEGER_S8_TO_I32;
+      first_selector = IREE_VM_ISA_INTEGER_CONVERT_S8_TO_I32;
+      first_result_type = materializer->i32_type;
       break;
     case LOOM_SCALAR_TYPE_I16:
-      first_conversion = VM_CORE_DESCRIPTOR_REF_CONVERSION_INTEGER_S16_TO_I32;
+      first_selector = IREE_VM_ISA_INTEGER_CONVERT_S16_TO_I32;
+      first_result_type = materializer->i32_type;
       break;
     case LOOM_SCALAR_TYPE_I32:
       if (width == 64) {
-        first_conversion = VM_CORE_DESCRIPTOR_REF_CONVERSION_INTEGER_S32_TO_I64;
+        first_selector = IREE_VM_ISA_INTEGER_CONVERT_S32_TO_I64;
+        first_result_type = materializer->i64_type;
       }
       break;
     case LOOM_SCALAR_TYPE_I64:
@@ -244,22 +307,17 @@ static iree_status_t loom_vm_contract_normalize_integer_value(
       return iree_ok_status();
   }
 
-  if (first_conversion != UINT16_MAX) {
-    const loom_type_t result_type =
-        first_conversion ==
-                    VM_CORE_DESCRIPTOR_REF_CONVERSION_INTEGER_S8_TO_I32 ||
-                first_conversion ==
-                    VM_CORE_DESCRIPTOR_REF_CONVERSION_INTEGER_S16_TO_I32
-            ? materializer->i32_type
-            : materializer->i64_type;
-    IREE_RETURN_IF_ERROR(loom_vm_contract_build_unary(
-        materializer, first_conversion, value, result_type, out_result));
+  if (first_selector != UINT16_MAX) {
+    IREE_RETURN_IF_ERROR(loom_vm_contract_build_selected_unary(
+        materializer, VM_CORE_DESCRIPTOR_REF_CONVERSION_INTEGER,
+        (uint8_t)first_selector, value, first_result_type, out_result));
   }
   if (width == 64 && (scalar_type == LOOM_SCALAR_TYPE_I8 ||
                       scalar_type == LOOM_SCALAR_TYPE_I16)) {
-    return loom_vm_contract_build_unary(
-        materializer, VM_CORE_DESCRIPTOR_REF_CONVERSION_INTEGER_S32_TO_I64,
-        *out_result, materializer->i64_type, out_result);
+    return loom_vm_contract_build_selected_unary(
+        materializer, VM_CORE_DESCRIPTOR_REF_CONVERSION_INTEGER,
+        IREE_VM_ISA_INTEGER_CONVERT_S32_TO_I64, *out_result,
+        materializer->i64_type, out_result);
   }
   return iree_ok_status();
 }
@@ -315,24 +373,11 @@ enum loom_vm_contract_comparison_e {
   LOOM_VM_CONTRACT_COMPARISON_COUNT = 6,
 };
 
-static const uint16_t
-    kVmContractComparisonDescriptors[2][LOOM_VM_CONTRACT_COMPARISON_COUNT] = {
-        {
-            VM_CORE_DESCRIPTOR_REF_INTEGER_COMPARE_I32_EQ,
-            VM_CORE_DESCRIPTOR_REF_INTEGER_COMPARE_I32_NE,
-            VM_CORE_DESCRIPTOR_REF_INTEGER_COMPARE_I32_SLT,
-            VM_CORE_DESCRIPTOR_REF_INTEGER_COMPARE_I32_SLE,
-            VM_CORE_DESCRIPTOR_REF_INTEGER_COMPARE_I32_SGT,
-            VM_CORE_DESCRIPTOR_REF_INTEGER_COMPARE_I32_SGE,
-        },
-        {
-            VM_CORE_DESCRIPTOR_REF_INTEGER_COMPARE_I64_EQ,
-            VM_CORE_DESCRIPTOR_REF_INTEGER_COMPARE_I64_NE,
-            VM_CORE_DESCRIPTOR_REF_INTEGER_COMPARE_I64_SLT,
-            VM_CORE_DESCRIPTOR_REF_INTEGER_COMPARE_I64_SLE,
-            VM_CORE_DESCRIPTOR_REF_INTEGER_COMPARE_I64_SGT,
-            VM_CORE_DESCRIPTOR_REF_INTEGER_COMPARE_I64_SGE,
-        },
+static const uint8_t
+    kVmContractComparisonSelectors[LOOM_VM_CONTRACT_COMPARISON_COUNT] = {
+        IREE_VM_ISA_INTEGER_COMPARE_EQ,  IREE_VM_ISA_INTEGER_COMPARE_NE,
+        IREE_VM_ISA_INTEGER_COMPARE_SLT, IREE_VM_ISA_INTEGER_COMPARE_SLE,
+        IREE_VM_ISA_INTEGER_COMPARE_SGT, IREE_VM_ISA_INTEGER_COMPARE_SGE,
 };
 
 static iree_status_t loom_vm_contract_build_comparison(
@@ -340,10 +385,12 @@ static iree_status_t loom_vm_contract_build_comparison(
     enum loom_vm_contract_comparison_e comparison, loom_value_id_t lhs,
     loom_value_id_t rhs, loom_value_id_t* out_condition) {
   const uint16_t descriptor_ordinal =
-      kVmContractComparisonDescriptors[width == 64][comparison];
-  return loom_vm_contract_build_binary(materializer, descriptor_ordinal, lhs,
-                                       rhs, materializer->i1_type,
-                                       out_condition);
+      width == 32 ? VM_CORE_DESCRIPTOR_REF_INTEGER_COMPARE_I32
+                  : VM_CORE_DESCRIPTOR_REF_INTEGER_COMPARE_I64;
+  return loom_vm_contract_build_selected_binary(
+      materializer, descriptor_ordinal,
+      kVmContractComparisonSelectors[comparison], lhs, rhs,
+      materializer->i1_type, out_condition);
 }
 
 static enum loom_vm_contract_comparison_e loom_vm_contract_relation_comparison(
@@ -497,23 +544,19 @@ static iree_status_t loom_vm_contract_normalize_float_value(
     int* out_width) {
   *out_result = value;
   *out_width = 32;
-  uint16_t conversion_descriptor = UINT16_MAX;
+  uint16_t conversion_selector = UINT16_MAX;
   switch (scalar_type) {
     case LOOM_SCALAR_TYPE_F8E4M3:
-      conversion_descriptor =
-          VM_CORE_DESCRIPTOR_REF_CONVERSION_FLOAT_EXTEND_F8E4M3_TO_F32;
+      conversion_selector = IREE_VM_ISA_FLOAT_EXTEND_F8E4M3_TO_F32;
       break;
     case LOOM_SCALAR_TYPE_F8E5M2:
-      conversion_descriptor =
-          VM_CORE_DESCRIPTOR_REF_CONVERSION_FLOAT_EXTEND_F8E5M2_TO_F32;
+      conversion_selector = IREE_VM_ISA_FLOAT_EXTEND_F8E5M2_TO_F32;
       break;
     case LOOM_SCALAR_TYPE_F16:
-      conversion_descriptor =
-          VM_CORE_DESCRIPTOR_REF_CONVERSION_FLOAT_EXTEND_F16_TO_F32;
+      conversion_selector = IREE_VM_ISA_FLOAT_EXTEND_F16_TO_F32;
       break;
     case LOOM_SCALAR_TYPE_BF16:
-      conversion_descriptor =
-          VM_CORE_DESCRIPTOR_REF_CONVERSION_FLOAT_EXTEND_BF16_TO_F32;
+      conversion_selector = IREE_VM_ISA_FLOAT_EXTEND_BF16_TO_F32;
       break;
     case LOOM_SCALAR_TYPE_F32:
       break;
@@ -524,10 +567,11 @@ static iree_status_t loom_vm_contract_normalize_float_value(
       IREE_ASSERT_UNREACHABLE("preflighted VM floating-point predicate type");
       return iree_ok_status();
   }
-  if (conversion_descriptor != UINT16_MAX) {
-    return loom_vm_contract_build_unary(materializer, conversion_descriptor,
-                                        value, materializer->f32_type,
-                                        out_result);
+  if (conversion_selector != UINT16_MAX) {
+    return loom_vm_contract_build_selected_unary(
+        materializer, VM_CORE_DESCRIPTOR_REF_CONVERSION_FLOAT_EXTEND,
+        (uint8_t)conversion_selector, value, materializer->f32_type,
+        out_result);
   }
   return iree_ok_status();
 }
@@ -544,22 +588,16 @@ static iree_status_t loom_vm_contract_materialize_float(
   IREE_RETURN_IF_ERROR(loom_vm_contract_normalize_float_value(
       materializer, source, scalar_type, &value, &width));
 
-  uint16_t classify_descriptor = UINT16_MAX;
+  uint8_t classify_selector = 0;
   switch (predicate->kind) {
     case LOOM_PREDICATE_NOT_NAN:
-      classify_descriptor =
-          width == 32 ? VM_CORE_DESCRIPTOR_REF_FLOAT_CLASSIFY_F32_ISNAN
-                      : VM_CORE_DESCRIPTOR_REF_FLOAT_CLASSIFY_F64_ISNAN;
+      classify_selector = IREE_VM_ISA_FLOAT_CLASSIFY_ISNAN;
       break;
     case LOOM_PREDICATE_NOT_INF:
-      classify_descriptor =
-          width == 32 ? VM_CORE_DESCRIPTOR_REF_FLOAT_CLASSIFY_F32_ISINF
-                      : VM_CORE_DESCRIPTOR_REF_FLOAT_CLASSIFY_F64_ISINF;
+      classify_selector = IREE_VM_ISA_FLOAT_CLASSIFY_ISINF;
       break;
     case LOOM_PREDICATE_FINITE:
-      classify_descriptor =
-          width == 32 ? VM_CORE_DESCRIPTOR_REF_FLOAT_CLASSIFY_F32_ISFINITE
-                      : VM_CORE_DESCRIPTOR_REF_FLOAT_CLASSIFY_F64_ISFINITE;
+      classify_selector = IREE_VM_ISA_FLOAT_CLASSIFY_ISFINITE;
       break;
     default:
       IREE_ASSERT_UNREACHABLE("floating-point VM function predicate");
@@ -567,9 +605,12 @@ static iree_status_t loom_vm_contract_materialize_float(
   }
 
   loom_value_id_t condition = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(
-      loom_vm_contract_build_unary(materializer, classify_descriptor, value,
-                                   materializer->i1_type, &condition));
+  const uint16_t classify_descriptor =
+      width == 32 ? VM_CORE_DESCRIPTOR_REF_FLOAT_CLASSIFY_F32
+                  : VM_CORE_DESCRIPTOR_REF_FLOAT_CLASSIFY_F64;
+  IREE_RETURN_IF_ERROR(loom_vm_contract_build_selected_unary(
+      materializer, classify_descriptor, classify_selector, value,
+      materializer->i1_type, &condition));
   if (predicate->kind != LOOM_PREDICATE_FINITE) {
     loom_value_id_t zero = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(

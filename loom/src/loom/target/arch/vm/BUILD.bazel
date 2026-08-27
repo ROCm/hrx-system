@@ -7,6 +7,7 @@
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
     "loom_cc_library",
+    "loom_cc_test",
     "loom_generated_cc_library",
 )
 load(
@@ -79,10 +80,12 @@ loom_generated_cc_library(
     extra_output_flags = [
         "--encoding-rows",
         "--lowering-rows",
+        "--verification-rows",
     ],
     extra_outputs = [
         "encoding_rows.inl",
         "lowering_rows.inl",
+        "verification_rows.inl",
     ],
     generated_hdr_flags = ["--header"],
     generated_hdrs = ["descriptors.h"],
@@ -91,9 +94,21 @@ loom_generated_cc_library(
     textual_hdrs = [
         ":encoding_rows.inl",
         ":lowering_rows.inl",
+        ":verification_rows.inl",
     ],
     visibility = ["//loom/src/loom/target/emit/vm:__pkg__"],
     deps = ["//loom/src/loom/codegen/low:descriptors"],
+)
+
+loom_cc_test(
+    name = "descriptors_test",
+    srcs = ["descriptors_test.cc"],
+    deps = [
+        ":descriptors",
+        "//loom/src/loom/codegen/low/testing:descriptors_verify",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
 )
 
 loom_cc_library(
@@ -124,6 +139,22 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "low_verify",
+    srcs = ["low_verify.c"],
+    hdrs = ["low_verify.h"],
+    deps = [
+        ":descriptors",
+        "//loom/src/loom/codegen/low:diagnostics",
+        "//loom/src/loom/codegen/low:packet",
+        "//loom/src/loom/codegen/low:verify",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/target:registers",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "provider",
     srcs = [
         "abi/materialization.c",
@@ -140,6 +171,7 @@ loom_cc_library(
     visibility = _VM_PROVIDER_VISIBILITY,
     deps = [
         ":descriptors",
+        ":low_verify",
         ":lower",
         ":ops",
         "//loom/src/loom/codegen/low:builder",
@@ -157,6 +189,7 @@ loom_cc_library(
         "//loom/src/loom/util:walk",
         "//runtime/src/iree/base",
         "//runtime/src/iree/vm",
+        "//runtime/src/iree/vm/bytecode/wire",
     ],
 )
 
@@ -181,6 +214,8 @@ loom_check_test_suite(
         "test/source_low/corpus/numeric_scalar_baseline.loom-test",
         "test/source_low/corpus/numeric_scalar_literals.loom-test",
         "test/source_low/function_contracts.loom-test",
+        "test/source_low/low_verification.loom-test",
+        "test/source_low/selector_assembly.loom-test",
     ],
     data = [
         "//loom/src/loom/test/corpus/source_low:numeric_scalar_baseline.loom-test",

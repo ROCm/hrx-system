@@ -33,6 +33,10 @@ typedef struct loom_vm_source_lowering_row_t {
   loom_op_kind_t source_op_kind;
   // Dense Core VM descriptor ordinal selected by this row.
   uint16_t descriptor_ordinal;
+  // Descriptor-local selector immediate ordinal, or UINT8_MAX when absent.
+  uint8_t selector_immediate_ordinal;
+  // Encoded selector value when |selector_immediate_ordinal| is present.
+  uint8_t selector_value;
   // Operand types followed by result types at the generated maximum offsets.
   loom_scalar_type_t scalar_types[LOOM_VM_SOURCE_LOWERING_MAX_TYPE_COUNT];
 } loom_vm_source_lowering_row_t;
@@ -46,8 +50,14 @@ typedef struct loom_vm_source_constant_t {
 
 static const loom_vm_source_lowering_row_t kVmSourceLoweringRows[] = {
 #define LOOM_VM_SOURCE_LOWERING_LIMITS(...)
-#define LOOM_VM_SOURCE_LOWERING_ROW(source_op_kind, descriptor_ordinal, ...) \
-  {source_op_kind, descriptor_ordinal, {__VA_ARGS__}},
+#define LOOM_VM_SOURCE_LOWERING_ROW(source_op_kind, descriptor_ordinal, \
+                                    selector_immediate_ordinal,         \
+                                    selector_value, ...)                \
+  {source_op_kind,                                                      \
+   descriptor_ordinal,                                                  \
+   selector_immediate_ordinal,                                          \
+   selector_value,                                                      \
+   {__VA_ARGS__}},
 #include "loom/target/arch/vm/lowering_rows.inl"
 #undef LOOM_VM_SOURCE_LOWERING_ROW
 #undef LOOM_VM_SOURCE_LOWERING_LIMITS
@@ -185,7 +195,7 @@ static iree_status_t loom_vm_select_op(void* user_data,
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(kVmSourceLoweringRows); ++i) {
     const loom_vm_source_lowering_row_t* row = &kVmSourceLoweringRows[i];
     if (loom_vm_source_lowering_row_matches(module, source_op, row)) {
-      *out_plan = loom_low_lower_plan_make(row->descriptor_ordinal, NULL);
+      *out_plan = loom_low_lower_plan_make(row->descriptor_ordinal, row);
       return iree_ok_status();
     }
   }
@@ -243,10 +253,29 @@ static iree_status_t loom_vm_emit_op(void* user_data,
         context, source_op, source_results[i], &low_result_types[i]));
   }
 
+  const loom_vm_source_lowering_row_t* row = plan.target_data;
+  IREE_ASSERT(row != NULL);
+  loom_named_attr_t selector_attr = {0};
+  loom_named_attr_slice_t attrs = loom_named_attr_slice_empty();
+  if (row->selector_immediate_ordinal != UINT8_MAX) {
+    IREE_ASSERT_LT(row->selector_immediate_ordinal,
+                   descriptor->immediate_count);
+    const loom_low_immediate_t* immediate =
+        &descriptor_set->immediates[descriptor->immediate_start +
+                                    row->selector_immediate_ordinal];
+    const iree_string_view_t immediate_name = loom_low_descriptor_set_string(
+        descriptor_set, immediate->field_name_string_offset);
+    IREE_RETURN_IF_ERROR(
+        loom_builder_intern_string(loom_low_lower_context_builder(context),
+                                   immediate_name, &selector_attr.name_id));
+    selector_attr.value = loom_attr_i64(row->selector_value);
+    attrs = loom_make_named_attr_slice(&selector_attr, 1);
+  }
+
   loom_op_t* low_op = NULL;
   IREE_RETURN_IF_ERROR(loom_low_lower_emit_resolved_descriptor_op(
       context, &resolved_descriptor, low_operands, source_op->operand_count,
-      loom_named_attr_slice_empty(), low_result_types, source_op->result_count,
+      attrs, low_result_types, source_op->result_count,
       /*tied_results=*/NULL, /*tied_result_count=*/0, source_op->location,
       &low_op));
   const loom_value_id_t* low_results = loom_op_const_results(low_op);

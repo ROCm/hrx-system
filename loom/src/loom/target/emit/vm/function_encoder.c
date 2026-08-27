@@ -24,15 +24,14 @@
     LOOM_VM_MAXIMUM_INSTRUCTION_RECORD_BYTE_LENGTH =                    \
         maximum_record_byte_length,                                     \
   };
-#define LOOM_VM_INSTRUCTION_ENCODING_ROW(ordinal, descriptor_ref, byte_length)
+#define LOOM_VM_INSTRUCTION_ENCODING_ROW(byte_length)
 #include "loom/target/arch/vm/encoding_rows.inl"
 #undef LOOM_VM_INSTRUCTION_ENCODING_ROW
 #undef LOOM_VM_INSTRUCTION_ENCODING_LIMITS
 
 static const uint8_t kLoomVmInstructionRecordByteLengths[] = {
 #define LOOM_VM_INSTRUCTION_ENCODING_LIMITS(maximum_record_byte_length)
-#define LOOM_VM_INSTRUCTION_ENCODING_ROW(ordinal, descriptor_ref, byte_length) \
-  byte_length,
+#define LOOM_VM_INSTRUCTION_ENCODING_ROW(byte_length) byte_length,
 #include "loom/target/arch/vm/encoding_rows.inl"
 #undef LOOM_VM_INSTRUCTION_ENCODING_ROW
 #undef LOOM_VM_INSTRUCTION_ENCODING_LIMITS
@@ -47,6 +46,34 @@ static const loom_named_attr_t* loom_vm_function_find_packet_attr(
     if (iree_string_view_equal(attr_name, name)) return attr;
   }
   return NULL;
+}
+
+static int64_t loom_vm_function_resolve_immediate(
+    const loom_module_t* module,
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_immediate_t* immediate, const loom_named_attr_t* attr) {
+  if (attr == NULL) {
+    IREE_ASSERT(iree_any_bit_set(immediate->flags,
+                                 LOOM_LOW_IMMEDIATE_FLAG_DEFAULT_VALUE));
+    return immediate->default_value;
+  }
+  if (attr->value.kind == LOOM_ATTR_I64) {
+    return attr->value.i64;
+  }
+  if (attr->value.kind != LOOM_ATTR_STRING ||
+      immediate->kind != LOOM_LOW_IMMEDIATE_KIND_ENUM ||
+      attr->value.string_id >= module->strings.count) {
+    IREE_ASSERT_UNREACHABLE("verified VM immediate kind");
+    IREE_BUILTIN_UNREACHABLE();
+  }
+  int64_t value = 0;
+  if (!loom_low_descriptor_set_lookup_enum_value_by_token(
+          descriptor_set, immediate->enum_domain_id,
+          module->strings.entries[attr->value.string_id], &value)) {
+    IREE_ASSERT_UNREACHABLE("verified VM enum immediate token");
+    IREE_BUILTIN_UNREACHABLE();
+  }
+  return value;
 }
 
 static void loom_vm_function_encode_immediate(uint8_t* record,
@@ -83,10 +110,11 @@ static iree_status_t loom_vm_function_encode_descriptor_packet(
                                                       packet, i);
     IREE_ASSERT(assignment->location_kind ==
                 LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER);
-    IREE_ASSERT_EQ(assignment->descriptor_reg_class_id,
-                   VM_CORE_REG_CLASS_ID_VALUE);
-    IREE_ASSERT_EQ(assignment->location_count, 1u);
+    IREE_ASSERT(loom_low_operand_accepts_unit_count(
+        operand, assignment->location_count));
     IREE_ASSERT_LT(assignment->location_base, 256u);
+    IREE_ASSERT_LE(assignment->location_count,
+                   256u - assignment->location_base);
     IREE_ASSERT_LT(operand->encoding_field_id, record_byte_length);
     record[operand->encoding_field_id] = (uint8_t)assignment->location_base;
   }
@@ -99,12 +127,8 @@ static iree_status_t loom_vm_function_encode_descriptor_packet(
         descriptor_set, immediate->field_name_string_offset);
     const loom_named_attr_t* attr =
         loom_vm_function_find_packet_attr(frame->module, attrs, name);
-    IREE_ASSERT(attr != NULL ||
-                iree_any_bit_set(immediate->flags,
-                                 LOOM_LOW_IMMEDIATE_FLAG_DEFAULT_VALUE));
-    IREE_ASSERT(attr == NULL || attr->value.kind == LOOM_ATTR_I64);
-    const int64_t value =
-        attr != NULL ? attr->value.i64 : immediate->default_value;
+    const int64_t value = loom_vm_function_resolve_immediate(
+        frame->module, descriptor_set, immediate, attr);
     IREE_ASSERT_LE(immediate->encoding_field_id + immediate->bit_width / 8u,
                    record_byte_length);
     loom_vm_function_encode_immediate(record, immediate->encoding_field_id,
@@ -261,17 +285,22 @@ iree_status_t loom_vm_function_encode(
   }
   if (frame.allocation.spill_count != 0) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "VM value registers cannot spill");
+                            "VM registers cannot spill");
   }
-  uint32_t value_register_count = 0;
-  if (frame.allocation.physical_extents.count != 0) {
-    value_register_count = frame.allocation.physical_extents
-                               .ends_by_reg_class[VM_CORE_REG_CLASS_ID_VALUE];
-  }
-  if (value_register_count > 256u) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "VM value register count exceeds 256");
-  }
+  IREE_ASSERT_EQ(frame.allocation.physical_extents.count,
+                 VM_CORE_REG_CLASS_ID_FUNCTION + 1u);
+  const uint32_t value_register_count =
+      frame.allocation.physical_extents
+          .ends_by_reg_class[VM_CORE_REG_CLASS_ID_VALUE];
+  const uint32_t ref_register_count =
+      frame.allocation.physical_extents
+          .ends_by_reg_class[VM_CORE_REG_CLASS_ID_REF];
+  const uint32_t function_register_count =
+      frame.allocation.physical_extents
+          .ends_by_reg_class[VM_CORE_REG_CLASS_ID_FUNCTION];
+  IREE_ASSERT_LE(value_register_count, 256u);
+  IREE_ASSERT_LE(ref_register_count, 256u);
+  IREE_ASSERT_LE(function_register_count, 256u);
 
   const uint64_t bytecode_start = writer->total_written;
   const iree_vm_isa_control_block_record_t block_record = {
@@ -302,6 +331,9 @@ iree_status_t loom_vm_function_encode(
   out_encoding->row.callable_type_ordinal_u16 = function->callable_type_ordinal;
   out_encoding->row.bytecode_length_u32 = (uint32_t)bytecode_length;
   out_encoding->row.value_register_count_u16 = (uint16_t)value_register_count;
+  out_encoding->row.ref_register_count_u16 = (uint16_t)ref_register_count;
+  out_encoding->row.function_register_count_u16 =
+      (uint16_t)function_register_count;
   out_encoding->row.block_count_u32 = 1;
   out_encoding->is_complete = true;
   return iree_ok_status();

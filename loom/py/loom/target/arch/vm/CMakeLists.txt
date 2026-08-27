@@ -34,4 +34,16 @@ iree_py_library(
     iree::vm::bytecode::spec::model::isa::core::core
 )
 
+iree_py_library(
+  NAME
+    verification
+  SRCS
+    "verification.py"
+  DEPS
+    loom::py::loom::target::arch::vm::projection
+    loom::py::loom::target::low_descriptors
+    iree::vm::bytecode::spec::model::model
+    iree::vm::bytecode::spec::model::isa::definitions
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

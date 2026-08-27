@@ -25,7 +25,7 @@ func.def target(@target) @scalar_bf16_extend(%source: bf16) -> (f32) {
 
 // ----
 low.func.def target<vm.core>(@target) abi(vm_function) @scalar_bf16_extend(%source: reg<vm.value : bf16>) -> (reg<vm.value : f32>) asm {
-  %result = conversion.float.extend.bf16_to_f32 %source : reg<vm.value : f32>
+  %result = conversion.float.extend %source, bf16.to.f32 : reg<vm.value : f32>
   return %result
 }
 
@@ -39,7 +39,7 @@ func.def target(@target) @index_i32_cast(%source: i32) -> (index) {
 
 // ----
 low.func.def target<vm.core>(@target) abi(vm_function) @index_i32_cast(%source: reg<vm.value : i32>) -> (reg<vm.value : index>) asm {
-  %result = conversion.integer.s32_to_i64 %source : reg<vm.value : index>
+  %result = conversion.integer %source, s32.to.i64 : reg<vm.value : index>
   return %result
 }
 

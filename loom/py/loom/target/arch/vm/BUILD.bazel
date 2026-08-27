@@ -35,3 +35,14 @@ iree_py_library(
         "//runtime/src/iree/vm/bytecode/spec/model/isa/core",
     ],
 )
+
+iree_py_library(
+    name = "verification",
+    srcs = ["verification.py"],
+    deps = [
+        ":projection",
+        "//loom/py/loom/target:low_descriptors",
+        "//runtime/src/iree/vm/bytecode/spec/model",
+        "//runtime/src/iree/vm/bytecode/spec/model/isa:definitions",
+    ],
+)

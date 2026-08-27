@@ -26,6 +26,12 @@ from loom.target.arch.vm.projection import (
     VM_INSTRUCTION_PROJECTIONS,
     VM_SOURCE_LOWERINGS,
 )
+from loom.target.arch.vm.verification import (
+    VM_MEMORY_FORMAT_UNIT_COUNTS,
+    VM_PACKED_IMMEDIATE_MASKS,
+    VM_PACKET_CONSTRAINT_RANGES,
+    VM_PACKET_CONSTRAINTS,
+)
 
 
 def _scalar_type_name(scalar_type) -> str:
@@ -54,6 +60,8 @@ def generate_lowering_rows() -> str:
         arguments = [
             c_enum_name(row.source_op),
             descriptor_name,
+            ("UINT8_MAX" if row.selector_immediate_ordinal is None else str(row.selector_immediate_ordinal)),
+            str(row.selector_value),
             *operand_types,
             *result_types,
         ]
@@ -93,8 +101,11 @@ def _validate_instruction_encoding_projection() -> None:
             ):
                 if encoding.byte_length != 1 or field.array_length != 1:
                     raise ValueError(f"{projection.key}: register field {field.name} must be one byte")
-            elif field.role is InstructionFieldRole.IMMEDIATE:
-                if encoding.byte_length not in (1, 2, 4, 8) or field.array_length != 1:
+            elif field.role in (
+                InstructionFieldRole.IMMEDIATE,
+                InstructionFieldRole.CONSTRAINT_MEMBER,
+            ):
+                if encoding.byte_length not in (1, 2, 4, 8):
                     raise ValueError(f"{projection.key}: immediate field {field.name} is not a supported scalar")
             elif field.role is not InstructionFieldRole.PADDING:
                 raise ValueError(f"{projection.key}: field {field.name} has unsupported role {field.role.value}")
@@ -106,9 +117,8 @@ def _validate_instruction_encoding_projection() -> None:
                 raise ValueError(f"{projection.key}: immediate width {immediate.bit_width} is unsupported")
             if immediate.encoding_field_id + immediate.bit_width // 8 > instruction.byte_length:
                 raise ValueError(f"{projection.key}: immediate field exceeds its record")
-        for field_value in descriptor.encoding_field_values:
-            if field_value.value != 0:
-                raise ValueError(f"{projection.key}: nonzero fixed fields require a specialized encoder")
+        if descriptor.encoding_field_values:
+            raise ValueError(f"{projection.key}: zero-initialized VM records need no fixed fields")
 
 
 def generate_encoding_rows() -> str:
@@ -123,15 +133,49 @@ def generate_encoding_rows() -> str:
         "",
         f"LOOM_VM_INSTRUCTION_ENCODING_LIMITS({maximum_record_byte_length})",
     ]
-    for ordinal, (descriptor, projection) in enumerate(
-        zip(
-            VM_CORE_DESCRIPTOR_SET.descriptors,
-            VM_INSTRUCTION_PROJECTIONS,
-            strict=True,
+    lines.extend(f"LOOM_VM_INSTRUCTION_ENCODING_ROW({projection.instruction.byte_length})" for projection in VM_INSTRUCTION_PROJECTIONS)
+    return "\n".join(lines) + "\n"
+
+
+def generate_verification_rows() -> str:
+    """Returns the compact target-low packet verifier tables."""
+
+    if len(VM_PACKET_CONSTRAINT_RANGES) != len(VM_CORE_DESCRIPTOR_SET.descriptors):
+        raise ValueError("VM packet constraint range count does not match descriptors")
+    lines = [
+        COPYRIGHT.rstrip(),
+        "",
+        *line_comment_header("//", generator="loom.gen.target.arch.vm.vm_tables"),
+        "",
+        "#if defined(LOOM_VM_PACKET_CONSTRAINT_DEFINE_LIMITS)",
+        "LOOM_VM_PACKET_CONSTRAINT_LIMITS(",
+        f"    {len(VM_PACKET_CONSTRAINT_RANGES)}, {len(VM_PACKET_CONSTRAINTS)},",
+        f"    {len(VM_PACKED_IMMEDIATE_MASKS)}, {len(VM_MEMORY_FORMAT_UNIT_COUNTS)})",
+        "#elif defined(LOOM_VM_PACKET_CONSTRAINT_DEFINE_MEMORY_FORMAT_ROWS)",
+    ]
+    lines.extend(f"LOOM_VM_MEMORY_FORMAT_UNIT_COUNT_ROW({unit_count})" for unit_count in VM_MEMORY_FORMAT_UNIT_COUNTS)
+    lines.append("#elif defined(LOOM_VM_PACKET_CONSTRAINT_DEFINE_PACKED_MASK_ROWS)")
+    for words in VM_PACKED_IMMEDIATE_MASKS:
+        word_arguments = ", ".join(f"UINT64_C(0x{word:016X})" for word in words)
+        lines.append(f"LOOM_VM_PACKED_IMMEDIATE_MASK_ROW({word_arguments})")
+    lines.append("#elif defined(LOOM_VM_PACKET_CONSTRAINT_DEFINE_RANGE_ROWS)")
+    lines.extend(f"LOOM_VM_PACKET_CONSTRAINT_RANGE_ROW({constraint_start}, {constraint_count})" for constraint_start, constraint_count in VM_PACKET_CONSTRAINT_RANGES)
+    lines.append("#elif defined(LOOM_VM_PACKET_CONSTRAINT_DEFINE_ROWS)")
+    for constraint in VM_PACKET_CONSTRAINTS:
+        arguments = [*constraint.arguments]
+        arguments.extend([0] * (7 - len(arguments)))
+        lines.append(
+            "LOOM_VM_PACKET_CONSTRAINT_ROW("
+            + ", ".join(
+                (
+                    constraint.kind.name,
+                    str(constraint.parameter),
+                    *(str(argument) for argument in arguments),
+                )
+            )
+            + ")"
         )
-    ):
-        descriptor_name = descriptor_ref_constant_name(VM_CORE_DESCRIPTOR_SET, descriptor.key)
-        lines.append(f"LOOM_VM_INSTRUCTION_ENCODING_ROW({ordinal}, {descriptor_name}, {projection.instruction.byte_length})")
+    lines.append("#endif  // VM packet constraint projection")
     return "\n".join(lines) + "\n"
 
 
@@ -141,6 +185,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--header", required=True, type=Path)
     parser.add_argument("--lowering-rows", required=True, type=Path)
     parser.add_argument("--encoding-rows", required=True, type=Path)
+    parser.add_argument("--verification-rows", required=True, type=Path)
     args = parser.parse_args(argv)
 
     write_descriptor_set_to_paths(
@@ -150,6 +195,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     write_text_file(args.lowering_rows, generate_lowering_rows())
     write_text_file(args.encoding_rows, generate_encoding_rows())
+    write_text_file(args.verification_rows, generate_verification_rows())
     return 0
 
 

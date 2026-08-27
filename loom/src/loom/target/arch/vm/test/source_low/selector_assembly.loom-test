@@ -1,0 +1,9 @@
+// RUN: verify
+
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) abi(vm_function) @selector_assembly(%lhs: reg<vm.value : i32>, %rhs: reg<vm.value : i32>, %narrow: reg<vm.value : bf16>) -> (reg<vm.value : i1>, reg<vm.value : f32>) asm {
+  %compared = integer.compare.i32 %lhs, %rhs, sge : reg<vm.value : i1>
+  %extended = conversion.float.extend %narrow, bf16.to.f32 : reg<vm.value : f32>
+  return %compared, %extended
+}

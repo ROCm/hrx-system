@@ -891,8 +891,16 @@ SELECTOR_TABLES_BY_NAME = {
     for table in SELECTOR_TABLES
 }
 _MEMORY_FORMAT_TABLE_ID = SELECTOR_TABLES_BY_NAME["memory.format"].entity_id
+
+
+def memory_format_lane_count(selector_value: int) -> int:
+    """Decodes the lane count carried by a memory.format selector value."""
+
+    return 1 << (selector_value & 0x3)
+
+
 MEMORY_FORMAT_MAXIMUM_LANE_COUNT = max(
-    1 << (value.value & 0x3)
+    memory_format_lane_count(value.value)
     for value in SELECTOR_VALUES
     if value.table_id == _MEMORY_FORMAT_TABLE_ID
 )

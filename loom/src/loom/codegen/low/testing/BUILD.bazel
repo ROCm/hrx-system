@@ -55,6 +55,10 @@ loom_cc_library(
     testonly = True,
     srcs = ["descriptors_verify.c"],
     hdrs = ["descriptors_verify.h"],
+    visibility = [
+        "//loom/src/loom/codegen/low:__pkg__",
+        "//loom/src/loom/target/arch:__subpackages__",
+    ],
     deps = [
         "//loom/src/loom/codegen/low:descriptors",
         "//runtime/src/iree/base",

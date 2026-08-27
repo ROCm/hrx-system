@@ -9,6 +9,7 @@
 #include "loom/ir/module.h"
 #include "loom/pass/builder.h"
 #include "loom/target/arch/vm/descriptors.h"
+#include "loom/target/arch/vm/low_verify.h"
 #include "loom/target/arch/vm/lower/lower.h"
 #include "loom/target/arch/vm/ops/registry.h"
 #include "loom/target/arch/vm/pass_registry.h"
@@ -22,6 +23,10 @@ static void loom_vm_low_descriptor_registry_initialize(
   loom_target_low_descriptor_registry_initialize_from_tables(
       out_registry, kProviders, IREE_ARRAYSIZE(kProviders));
 }
+
+static const loom_low_verify_provider_t* const kLoomVmLowVerifyProviders[] = {
+    &loom_vm_low_verify_provider,
+};
 
 static iree_status_t loom_vm_provider_build_string_attr(
     loom_builder_t* builder, iree_string_view_t name, iree_string_view_t value,
@@ -85,6 +90,11 @@ const loom_target_provider_t loom_vm_target_provider = {
         loom_vm_low_descriptor_registry_initialize,
     .initialize_low_lower_policy_registry =
         loom_vm_low_lower_policy_registry_initialize,
+    .low_verify_provider_list =
+        {
+            .count = IREE_ARRAYSIZE(kLoomVmLowVerifyProviders),
+            .values = kLoomVmLowVerifyProviders,
+        },
     .pass_registry = &loom_vm_pass_registry,
     .contribute_pipeline = loom_vm_provider_contribute_pipeline,
 };

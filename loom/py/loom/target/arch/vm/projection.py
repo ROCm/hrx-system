@@ -17,15 +17,60 @@ from model.isa import (
     Instruction,
     InstructionField,
     InstructionFieldRole,
+    RefOwnership,
+    StateAccess,
+    StateResource,
     Suspension,
 )
+from model.isa.core.abi import INSTRUCTIONS as ABI_INSTRUCTIONS
+from model.isa.core.buffer import INSTRUCTIONS as BUFFER_INSTRUCTIONS
 from model.isa.core.constant import INSTRUCTIONS as CONSTANT_INSTRUCTIONS
 from model.isa.core.control import INSTRUCTIONS as CONTROL_INSTRUCTIONS
 from model.isa.core.conversion import INSTRUCTIONS as CONVERSION_INSTRUCTIONS
 from model.isa.core.float import INSTRUCTIONS as FLOAT_INSTRUCTIONS
+from model.isa.core.function import INSTRUCTIONS as FUNCTION_INSTRUCTIONS
+from model.isa.core.globals import INSTRUCTIONS as GLOBAL_INSTRUCTIONS
 from model.isa.core.integer import INSTRUCTIONS as INTEGER_INSTRUCTIONS
-from model.isa.selectors import SELECTOR_TABLES_BY_NAME, SELECTOR_VALUES
-from model.schema import SCALAR_ENCODINGS
+from model.isa.core.ref import INSTRUCTIONS as REF_INSTRUCTIONS
+from model.isa.core.stack import INSTRUCTIONS as STACK_INSTRUCTIONS
+from model.isa.core.value import INSTRUCTIONS as VALUE_INSTRUCTIONS
+from model.isa.selectors import (
+    SELECTOR_TABLES,
+    SELECTOR_TABLES_BY_NAME,
+    SELECTOR_VALUES,
+)
+from model.isa.validation import (
+    ALLOWED_RANGE,
+    ALLOWED_VALUES,
+    CONSTANT_POOL_ORDINAL,
+    CONSTRAINT_MEMBER,
+    FIELDS_DISTINCT,
+    FUNCTION_ADDRESS,
+    FUNCTION_LOCAL_ORDINAL,
+    GLOBAL_ORDINAL,
+    IMPORT_ORDINAL_OPTIONAL,
+    INTEGER_BITSTREAM_SHAPE,
+    LOCAL_BYTES_FIXED_BASE,
+    LOCAL_BYTES_RANGE_BASE,
+    LOCAL_BYTES_RANGE_LENGTH,
+    LOCAL_BYTES_RANGE_MEMORY_FORMAT,
+    LOCAL_BYTES_REPEATED_BASE,
+    LOCAL_BYTES_REPEATED_COUNT,
+    PACKED_SELECTOR_ALLOWED_PAIRS,
+    PACKED_SELECTOR_TARGET_SUPPORTED,
+    PACKED_SELECTORS,
+    REF_SLOT,
+    REGISTER_FUNCTION,
+    REGISTER_REF,
+    REGISTER_VALUE,
+    RODATA_OFFSET,
+    RODATA_ORDINAL,
+    RODATA_STATIC_OFFSET,
+    SELECTOR,
+    VALUE_REGISTER_RANGE,
+    VALUE_REGISTER_RANGE_FROM_MEMORY_FORMAT,
+)
+from model.schema import ANY_BITS, SCALAR_ENCODINGS, EntityReference, FieldReference
 
 from loom.dialect.index import defs as index_defs
 from loom.dialect.scalar import arithmetic as scalar_arithmetic
@@ -36,19 +81,27 @@ from loom.scalar_type import ScalarTypeKind
 from loom.target.low_descriptors import (
     AsmForm,
     AsmImmediate,
+    AsmImmediateFlag,
+    Constraint,
+    ConstraintKind,
     Descriptor,
     DescriptorFlag,
     DescriptorOpKind,
     DescriptorSet,
-    EncodingFieldValue,
+    Effect,
+    EffectFlag,
+    EffectKind,
+    EnumDomain,
+    EnumValue,
     Immediate,
-    ImmediateFlag,
     ImmediateKind,
     InstructionClass,
     IssueUse,
     LatencyKind,
+    MemorySpace,
     ModelQuality,
     Operand,
+    OperandFlag,
     OperandRole,
     RegClass,
     RegClassAlt,
@@ -56,100 +109,131 @@ from loom.target.low_descriptors import (
     Resource,
     ResourceKind,
     ScheduleClass,
+    ScheduleClassFlag,
     SpillSlotSpace,
 )
 from loom.verify import type_satisfies_constraint
 
 _VALUE_REGISTER_CLASS = "vm.value"
+_REF_REGISTER_CLASS = "vm.ref"
+_FUNCTION_REGISTER_CLASS = "vm.function"
 _VALUE_REGISTER_ALTERNATIVES = (RegClassAlt(_VALUE_REGISTER_CLASS),)
+_REF_REGISTER_ALTERNATIVES = (RegClassAlt(_REF_REGISTER_CLASS),)
+_FUNCTION_REGISTER_ALTERNATIVES = (RegClassAlt(_FUNCTION_REGISTER_CLASS),)
 _EXECUTE_RESOURCE = "vm.execute"
 _CONSTANT_SCHEDULE_CLASS = "vm.constant"
 _EXECUTE_SCHEDULE_CLASS = "vm.execute"
 
+_CORE_INSTRUCTIONS = (
+    *BUFFER_INSTRUCTIONS,
+    *CONSTANT_INSTRUCTIONS,
+    *CONTROL_INSTRUCTIONS,
+    *CONVERSION_INSTRUCTIONS,
+    *FLOAT_INSTRUCTIONS,
+    *FUNCTION_INSTRUCTIONS,
+    *GLOBAL_INSTRUCTIONS,
+    *INTEGER_INSTRUCTIONS,
+    *REF_INSTRUCTIONS,
+    *STACK_INSTRUCTIONS,
+    *VALUE_INSTRUCTIONS,
+)
+VM_CORE_INSTRUCTIONS = tuple(
+    sorted((*ABI_INSTRUCTIONS, *_CORE_INSTRUCTIONS), key=lambda value: value.opcode)
+)
 _INSTRUCTIONS_BY_MNEMONIC = {
-    instruction.mnemonic: instruction
-    for instruction in (
-        *CONSTANT_INSTRUCTIONS,
-        *CONTROL_INSTRUCTIONS,
-        *CONVERSION_INSTRUCTIONS,
-        *FLOAT_INSTRUCTIONS,
-        *INTEGER_INSTRUCTIONS,
-    )
+    instruction.mnemonic: instruction for instruction in _CORE_INSTRUCTIONS
 }
 _ENCODINGS_BY_ID = {encoding.entity_id: encoding for encoding in SCALAR_ENCODINGS}
+_SELECTOR_TABLES_BY_ID = {table.entity_id: table for table in SELECTOR_TABLES}
 _SELECTOR_VALUES_BY_KEY = {
     (value.table_id, value.name): value.value for value in SELECTOR_VALUES
 }
-_ENCODING_SUFFIX = re.compile(r"_(?:[iuf]\d+(?:le)?|v8)$")
+_SELECTOR_VALUES_BY_TABLE_ID = {
+    table_id: tuple(value for value in SELECTOR_VALUES if value.table_id == table_id)
+    for table_id in _SELECTOR_TABLES_BY_ID
+}
+_ENCODING_SUFFIX = re.compile(r"_(?:(?:[irufv]\d+)(?:le)?|le)$")
+
+_REGISTER_ALTERNATIVES_BY_RULE_ID = {
+    REGISTER_VALUE.entity_id: _VALUE_REGISTER_ALTERNATIVES,
+    REGISTER_REF.entity_id: _REF_REGISTER_ALTERNATIVES,
+    REGISTER_FUNCTION.entity_id: _FUNCTION_REGISTER_ALTERNATIVES,
+}
+_ORDINAL_RULE_IDS = frozenset(
+    rule.entity_id
+    for rule in (
+        CONSTANT_POOL_ORDINAL,
+        FUNCTION_LOCAL_ORDINAL,
+        GLOBAL_ORDINAL,
+        IMPORT_ORDINAL_OPTIONAL,
+        REF_SLOT,
+        RODATA_ORDINAL,
+    )
+)
+_UNSIGNED_IMMEDIATE_RULE_IDS = frozenset(
+    rule.entity_id
+    for rule in (
+        CONSTRAINT_MEMBER,
+        LOCAL_BYTES_FIXED_BASE,
+        LOCAL_BYTES_RANGE_BASE,
+        LOCAL_BYTES_RANGE_LENGTH,
+        LOCAL_BYTES_RANGE_MEMORY_FORMAT,
+        LOCAL_BYTES_REPEATED_BASE,
+        LOCAL_BYTES_REPEATED_COUNT,
+        RODATA_OFFSET,
+        RODATA_STATIC_OFFSET,
+    )
+)
+_PLAIN_IMMEDIATE_RULE_IDS = frozenset((ANY_BITS.entity_id, PACKED_SELECTORS.entity_id))
+_TARGET_VERIFY_CONSTRAINT_RULE_IDS = frozenset(
+    rule.entity_id
+    for rule in (
+        INTEGER_BITSTREAM_SHAPE,
+        PACKED_SELECTOR_ALLOWED_PAIRS,
+        PACKED_SELECTOR_TARGET_SUPPORTED,
+        VALUE_REGISTER_RANGE,
+        VALUE_REGISTER_RANGE_FROM_MEMORY_FORMAT,
+    )
+)
+_MODULE_VERIFY_CONSTRAINT_RULE_IDS = frozenset((FUNCTION_ADDRESS.entity_id,))
+_NONMUTATING_REF_OPERAND_OWNERSHIP = frozenset(
+    (
+        RefOwnership.BORROW,
+        RefOwnership.DIAGNOSTIC_BORROW,
+        RefOwnership.INSPECT,
+    )
+)
+_MEMORY_SPACE_BY_STATE_RESOURCE = {
+    StateResource.FRAME_LOCALS: MemorySpace.STACK,
+    StateResource.PROCESS_GLOBALS: MemorySpace.GLOBAL,
+    StateResource.BUFFER: MemorySpace.GENERIC,
+}
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class VmInstructionProjection:
-    """One physical instruction form visible to target-Low."""
+    """One physical sequential instruction visible to target-Low."""
 
     instruction: Instruction
-    selector_table: str | None = None
-    selector_name: str | None = None
 
     def __post_init__(self) -> None:
-        has_selector = self.selector_table is not None or self.selector_name is not None
-        if has_selector and (self.selector_table is None or self.selector_name is None):
-            raise ValueError("VM selector table and value must be specified together")
-        selector_fields = self._selector_fields()
-        if len(selector_fields) != (1 if has_selector else 0):
-            raise ValueError(
-                f"{self.instruction.mnemonic}: selector projection does not match "
-                "fields"
-            )
         if self.instruction.control_flow is not ControlFlow.SEQUENTIAL:
             raise ValueError(
-                f"{self.instruction.mnemonic}: initial Low projection requires "
+                f"{self.instruction.mnemonic}: ordinary Low projection requires "
                 "sequential control flow"
             )
         if self.instruction.suspension is not Suspension.NEVER:
             raise ValueError(
-                f"{self.instruction.mnemonic}: initial Low projection cannot suspend"
-            )
-        if self.instruction.state_effects:
-            raise ValueError(
-                f"{self.instruction.mnemonic}: pure Low projection has state effects"
+                f"{self.instruction.mnemonic}: sequential instruction cannot suspend"
             )
 
     @property
     def key(self) -> str:
-        suffix = (
-            f".{self.selector_name.replace('.', '_')}"
-            if self.selector_name is not None
-            else ""
-        )
-        return f"vm.{self.instruction.mnemonic}{suffix}"
+        return f"vm.{self.instruction.mnemonic}"
 
     @property
     def mnemonic(self) -> str:
-        return self.key.removeprefix("vm.")
-
-    @property
-    def selector_value(self) -> int | None:
-        if self.selector_table is None:
-            return None
-        table = SELECTOR_TABLES_BY_NAME[self.selector_table]
-        return _SELECTOR_VALUES_BY_KEY[(table.entity_id, self.selector_name)]
-
-    @property
-    def selector_field_name(self) -> str | None:
-        fields = self._selector_fields()
-        return fields[0].name if fields else None
-
-    def _selector_fields(self) -> tuple[InstructionField, ...]:
-        if self.selector_table is None:
-            return ()
-        table = SELECTOR_TABLES_BY_NAME[self.selector_table]
-        return tuple(
-            field
-            for field in self.instruction.fields
-            if field.role is InstructionFieldRole.IMMEDIATE
-            and table.entity_id in field.referenced_entity_ids()
-        )
+        return self.instruction.mnemonic
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -160,191 +244,490 @@ class VmSourceLowering:
     operand_types: tuple[ScalarTypeKind, ...]
     result_types: tuple[ScalarTypeKind, ...]
     descriptor_key: str
+    selector_immediate_ordinal: int | None = None
+    selector_value: int = 0
+
+    def __post_init__(self) -> None:
+        if self.selector_immediate_ordinal is None:
+            if self.selector_value != 0:
+                raise ValueError("VM source lowering has a value without a selector")
+            return
+        if not 0 <= self.selector_immediate_ordinal <= 0xFF:
+            raise ValueError("VM source selector immediate ordinal exceeds u8")
+        if not 0 <= self.selector_value <= 0xFF:
+            raise ValueError("VM source selector value exceeds u8")
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class VmSourceOpcode:
+    """Physical opcode and optional selector chosen by source semantics."""
+
+    descriptor_key: str
+    selector_table: str | None = None
+    selector_name: str | None = None
+
+    def __post_init__(self) -> None:
+        if (self.selector_table is None) != (self.selector_name is None):
+            raise ValueError("VM source selector table and name must be paired")
 
 
 def _instruction(mnemonic: str) -> Instruction:
     return _INSTRUCTIONS_BY_MNEMONIC[mnemonic]
 
 
-def _plain_instruction_projections(
-    *mnemonics: str,
-) -> tuple[VmInstructionProjection, ...]:
-    return tuple(VmInstructionProjection(_instruction(name)) for name in mnemonics)
-
-
-def _selected_instruction_projections(
-    mnemonic: str,
-    selector_table: str,
-    *selector_names: str,
-) -> tuple[VmInstructionProjection, ...]:
-    instruction = _instruction(mnemonic)
-    return tuple(
-        VmInstructionProjection(instruction, selector_table, selector_name)
-        for selector_name in selector_names
-    )
-
-
-VM_INSTRUCTION_PROJECTIONS = (
-    *_plain_instruction_projections(
-        "constant.zero",
-        "constant.s16",
-        "constant.i32",
-        "constant.i64",
-        "integer.add.i32",
-        "integer.add.i64",
-        "integer.mul.i32",
-        "integer.mul.i64",
-        "integer.div.u64",
-        "integer.sub.i32",
-        "integer.sub.i64",
-        "integer.rem.s32",
-        "integer.rem.s64",
-        "integer.rem.u64",
-        "integer.and.i32",
-        "integer.and.i64",
-        "integer.shift.left.i64",
-        "integer.shift.right.s64",
-        "integer.shift.right.u64",
-    ),
-    *_selected_instruction_projections(
-        "integer.compare.i32",
-        "integer.compare",
-        "eq",
-        "ne",
-        "slt",
-        "sle",
-        "sgt",
-        "sge",
-    ),
-    *_selected_instruction_projections(
-        "integer.compare.i64",
-        "integer.compare",
-        "eq",
-        "ne",
-        "slt",
-        "sle",
-        "sgt",
-        "sge",
-    ),
-    *_selected_instruction_projections(
-        "conversion.integer",
-        "integer.convert",
-        "s8.to.i32",
-        "s16.to.i32",
-        "s32.to.i64",
-        "u32.to.i64",
-    ),
-    *_selected_instruction_projections(
-        "conversion.float.extend",
-        "float.extend",
-        "f8e4m3.to.f32",
-        "f8e5m2.to.f32",
-        "f16.to.f32",
-        "bf16.to.f32",
-    ),
-    *_selected_instruction_projections(
-        "conversion.float.to.integer",
-        "float.to.integer",
-        "f32.to.u32",
-    ),
-    *_selected_instruction_projections(
-        "float.classify.f32",
-        "float.classify",
-        "isnan",
-        "isinf",
-        "isfinite",
-    ),
-    *_selected_instruction_projections(
-        "float.classify.f64",
-        "float.classify",
-        "isnan",
-        "isinf",
-        "isfinite",
-    ),
-    *_plain_instruction_projections("control.assert"),
+VM_INSTRUCTION_PROJECTIONS = tuple(
+    VmInstructionProjection(instruction)
+    for instruction in sorted(_CORE_INSTRUCTIONS, key=lambda value: value.opcode)
+    if instruction.control_flow is ControlFlow.SEQUENTIAL
 )
+
+# Control-flow records are emitted from Low structural operations because they
+# own successor edges rather than ordinary descriptor operands. Overflow ABI
+# records are inserted by ABI materialization and encoded explicitly because
+# their signature-derived slots are not source-level values. Together with the
+# descriptor projection these sets must partition the complete Core ISA.
+VM_STRUCTURAL_INSTRUCTIONS = tuple(
+    instruction
+    for instruction in VM_CORE_INSTRUCTIONS
+    if instruction.control_flow is not ControlFlow.SEQUENTIAL
+)
+VM_ABI_INSTRUCTIONS = tuple(
+    instruction
+    for instruction in VM_CORE_INSTRUCTIONS
+    if instruction.family_id == "core.family.abi"
+)
+
+
+def _validate_core_instruction_partition() -> None:
+    descriptor_instructions = tuple(
+        projection.instruction for projection in VM_INSTRUCTION_PROJECTIONS
+    )
+    partitions = (
+        descriptor_instructions,
+        VM_STRUCTURAL_INSTRUCTIONS,
+        VM_ABI_INSTRUCTIONS,
+    )
+    partitioned_ids = [
+        instruction.entity_id for partition in partitions for instruction in partition
+    ]
+    core_ids = [instruction.entity_id for instruction in VM_CORE_INSTRUCTIONS]
+    if len(partitioned_ids) != len(set(partitioned_ids)):
+        raise ValueError("VM Core instruction projection partitions overlap")
+    if set(partitioned_ids) != set(core_ids):
+        missing = sorted(set(core_ids) - set(partitioned_ids))
+        extra = sorted(set(partitioned_ids) - set(core_ids))
+        raise ValueError(
+            "VM Core instruction projection is incomplete: "
+            f"missing={missing}, extra={extra}"
+        )
+
+
+_validate_core_instruction_partition()
 
 
 def _field_name(name: str) -> str:
     return _ENCODING_SUFFIX.sub("", name)
 
 
-def _immediate(field, *, default_value: int | None = None) -> Immediate:
+def _rule_use(field: InstructionField, rule_id: str):
+    return next(
+        (rule_use for rule_use in field.validation if rule_use.rule_id == rule_id),
+        None,
+    )
+
+
+def _register_alternatives(field: InstructionField) -> tuple[RegClassAlt, ...]:
+    alternatives = tuple(
+        _REGISTER_ALTERNATIVES_BY_RULE_ID[rule_use.rule_id]
+        for rule_use in field.validation
+        if rule_use.rule_id in _REGISTER_ALTERNATIVES_BY_RULE_ID
+    )
+    if len(alternatives) != 1:
+        raise ValueError(
+            f"{field.name}: register field must select exactly one VM bank"
+        )
+    return alternatives[0]
+
+
+def _allowed_values_domain_name(values: tuple[int, ...]) -> str:
+    return "vm.allowed." + "_".join(str(value) for value in values)
+
+
+def _selector_table_id(field: InstructionField) -> str | None:
+    rule_use = _rule_use(field, SELECTOR.entity_id)
+    if rule_use is None:
+        return None
+    if len(rule_use.arguments) != 1 or not isinstance(
+        rule_use.arguments[0], EntityReference
+    ):
+        raise ValueError(f"{field.name}: malformed selector validation")
+    return rule_use.arguments[0].entity_id
+
+
+def _immediate(
+    field: InstructionField,
+    element_index: int = 0,
+    *,
+    record_ordinal: bool = False,
+) -> Immediate:
     encoding = _ENCODINGS_BY_ID[field.encoding_id]
     bit_width = encoding.byte_length * 8
-    is_signed = encoding.c_type.startswith("int")
-    flags = (ImmediateFlag.DEFAULT_VALUE,) if default_value is not None else ()
-    return Immediate(
-        field_name=_field_name(field.name),
-        kind=ImmediateKind.SIGNED if is_signed else ImmediateKind.UNSIGNED,
-        flags=flags,
-        bit_width=bit_width,
-        encoding_field_id=field.offset,
-        signed_min=-(2 ** (bit_width - 1)) if is_signed else 0,
-        unsigned_max=(2 ** (bit_width - (1 if is_signed else 0))) - 1,
-        default_value=default_value or 0,
+    field_name = _field_name(field.name)
+    if field.array_length != 1:
+        field_name = f"{field_name}_{element_index}"
+    encoding_field_id = field.offset + element_index * encoding.byte_length
+
+    selector_table_id = _selector_table_id(field)
+    allowed_values_rule = _rule_use(field, ALLOWED_VALUES.entity_id)
+    allowed_range_rule = _rule_use(field, ALLOWED_RANGE.entity_id)
+    recognized_rule_ids = {
+        *(rule_id for rule_id in _ORDINAL_RULE_IDS),
+        *(rule_id for rule_id in _UNSIGNED_IMMEDIATE_RULE_IDS),
+        *(rule_id for rule_id in _PLAIN_IMMEDIATE_RULE_IDS),
+        ALLOWED_RANGE.entity_id,
+        ALLOWED_VALUES.entity_id,
+        SELECTOR.entity_id,
+    }
+    unknown_rule_ids = tuple(
+        rule_use.rule_id
+        for rule_use in field.validation
+        if rule_use.rule_id not in recognized_rule_ids
     )
+    if unknown_rule_ids:
+        raise ValueError(
+            f"{field.name}: unsupported immediate validation "
+            + ", ".join(unknown_rule_ids)
+        )
+
+    enum_domain = None
+    if selector_table_id is not None:
+        kind = ImmediateKind.ENUM
+        enum_domain = selector_table_id
+        signed_min = 0
+        unsigned_max = (2**bit_width) - 1
+    elif allowed_values_rule is not None:
+        values = tuple(int(value) for value in allowed_values_rule.arguments[0])
+        kind = ImmediateKind.ENUM
+        enum_domain = _allowed_values_domain_name(values)
+        signed_min = min(values)
+        unsigned_max = max(values)
+    elif record_ordinal or any(
+        rule_use.rule_id in _ORDINAL_RULE_IDS for rule_use in field.validation
+    ):
+        kind = ImmediateKind.ORDINAL
+        signed_min = 0
+        unsigned_max = (2**bit_width) - 1
+    else:
+        is_signed = encoding.c_type.startswith("int")
+        minimum = -(2 ** (bit_width - 1)) if is_signed else 0
+        maximum = (2 ** (bit_width - 1)) - 1 if is_signed else (2**bit_width) - 1
+        if allowed_range_rule is not None:
+            minimum, maximum = (
+                int(allowed_range_rule.arguments[0]),
+                int(allowed_range_rule.arguments[1]),
+            )
+        kind = ImmediateKind.SIGNED if is_signed else ImmediateKind.UNSIGNED
+        signed_min = minimum if is_signed else 0
+        unsigned_max = maximum
+
+    return Immediate(
+        field_name=field_name,
+        kind=kind,
+        bit_width=bit_width,
+        encoding_field_id=encoding_field_id,
+        enum_domain=enum_domain,
+        signed_min=signed_min,
+        unsigned_max=unsigned_max,
+    )
+
+
+def _variable_value_register_limits(instruction: Instruction) -> dict[str, int]:
+    limits: dict[str, int] = {}
+    has_integer_bitstream_shape = any(
+        constraint.rule_id == INTEGER_BITSTREAM_SHAPE.entity_id
+        for constraint in instruction.constraints
+    )
+    for constraint in instruction.constraints:
+        if constraint.rule_id not in (
+            VALUE_REGISTER_RANGE.entity_id,
+            VALUE_REGISTER_RANGE_FROM_MEMORY_FORMAT.entity_id,
+        ):
+            continue
+        if not constraint.arguments or not isinstance(
+            constraint.arguments[0], FieldReference
+        ):
+            raise ValueError(f"{instruction.mnemonic}: malformed value-register range")
+        field_name = constraint.arguments[0].field_name
+        if constraint.rule_id == VALUE_REGISTER_RANGE_FROM_MEMORY_FORMAT.entity_id:
+            if len(constraint.arguments) != 3:
+                raise ValueError(
+                    f"{instruction.mnemonic}: malformed memory-format "
+                    "value-register range"
+                )
+            maximum_unit_count = int(constraint.arguments[2])
+        elif has_integer_bitstream_shape:
+            bitstream_constraint = next(
+                constraint
+                for constraint in instruction.constraints
+                if constraint.rule_id == INTEGER_BITSTREAM_SHAPE.entity_id
+            )
+            if len(bitstream_constraint.arguments) != 7:
+                raise ValueError(
+                    f"{instruction.mnemonic}: malformed integer bitstream shape"
+                )
+            # The narrowest logical field is one bit, so neither register run
+            # can contain more cells than the complete stream has bits.
+            maximum_unit_count = int(bitstream_constraint.arguments[1])
+        else:
+            raise ValueError(
+                f"{instruction.mnemonic}: value-register range has no "
+                "structured maximum-unit constraint"
+            )
+        previous_limit = limits.setdefault(field_name, maximum_unit_count)
+        if previous_limit != maximum_unit_count:
+            raise ValueError(
+                f"{instruction.mnemonic}: value-register range {field_name} "
+                "has conflicting maximum-unit constraints"
+            )
+    return limits
+
+
+def _state_effect(effect) -> Effect:
+    if effect.access in (StateAccess.READ, StateAccess.WRITE):
+        memory_space = _MEMORY_SPACE_BY_STATE_RESOURCE.get(effect.resource)
+        if memory_space is None:
+            raise ValueError(f"unsupported Core state resource {effect.resource.value}")
+        return Effect(
+            EffectKind.READ if effect.access is StateAccess.READ else EffectKind.WRITE,
+            memory_space=memory_space,
+            flags=(EffectFlag.DEPENDENCY,),
+        )
+    if effect.access in (StateAccess.UNKNOWN, StateAccess.ALLOCATE):
+        return Effect(
+            EffectKind.CALL,
+            flags=(EffectFlag.ORDERED, EffectFlag.DEPENDENCY),
+        )
+    if effect.access in (StateAccess.RELEASE, StateAccess.SYNCHRONIZE):
+        return Effect(EffectKind.BARRIER, flags=(EffectFlag.ORDERED,))
+    raise ValueError(f"unsupported Core state access {effect.access.value}")
+
+
+def _instruction_effects(instruction: Instruction) -> tuple[Effect, ...]:
+    effects: list[Effect] = []
+    for state_effect in instruction.state_effects:
+        effect = _state_effect(state_effect)
+        if effect not in effects:
+            effects.append(effect)
+
+    mutates_ref_operand = any(
+        field.role is InstructionFieldRole.OPERAND
+        and field.runtime_ref_policy is not None
+        and field.runtime_ref_policy.ownership not in _NONMUTATING_REF_OPERAND_OWNERSHIP
+        for field in instruction.fields
+    )
+    if mutates_ref_operand:
+        barrier = Effect(EffectKind.BARRIER, flags=(EffectFlag.ORDERED,))
+        if barrier not in effects:
+            effects.append(barrier)
+    return tuple(effects)
+
+
+def _descriptor_constraints(instruction: Instruction) -> tuple[Constraint, ...]:
+    constraints: list[Constraint] = []
+    operand_indices_by_field: dict[str, int] = {}
+    operand_index = 0
+    for field in instruction.fields:
+        if field.role in (
+            InstructionFieldRole.RESULT,
+            InstructionFieldRole.OPERAND,
+        ):
+            operand_indices_by_field[field.name] = operand_index
+            operand_index += 1
+    for constraint in instruction.constraints:
+        if constraint.rule_id in (
+            *_TARGET_VERIFY_CONSTRAINT_RULE_IDS,
+            *_MODULE_VERIFY_CONSTRAINT_RULE_IDS,
+        ):
+            continue
+        if constraint.rule_id != FIELDS_DISTINCT.entity_id:
+            raise ValueError(
+                f"{instruction.mnemonic}: unsupported record constraint "
+                f"{constraint.rule_id}"
+            )
+        lhs, rhs = constraint.arguments
+        if not isinstance(lhs, FieldReference) or not isinstance(rhs, FieldReference):
+            raise ValueError(f"{instruction.mnemonic}: malformed distinct fields")
+        lhs_index = operand_indices_by_field[lhs.field_name]
+        rhs_index = operand_indices_by_field[rhs.field_name]
+        constraints.append(Constraint(ConstraintKind.EARLY_CLOBBER, lhs_index))
+        if rhs_index == lhs_index:
+            raise ValueError(f"{instruction.mnemonic}: self-distinct field")
+    return tuple(constraints)
+
+
+def _record_ordinal_field_names(instruction: Instruction) -> frozenset[str]:
+    field_names: set[str] = set()
+    for constraint in instruction.constraints:
+        if constraint.rule_id != FUNCTION_ADDRESS.entity_id:
+            continue
+        if len(constraint.arguments) != 3:
+            raise ValueError(f"{instruction.mnemonic}: malformed function address")
+        for argument in constraint.arguments[1:]:
+            if not isinstance(argument, FieldReference):
+                raise ValueError(
+                    f"{instruction.mnemonic}: malformed function address ordinal"
+                )
+            field_names.add(argument.field_name)
+    return frozenset(field_names)
+
+
+def _instruction_classes(instruction: Instruction) -> tuple[InstructionClass, ...]:
+    classes: list[InstructionClass] = []
+    resources = {effect.resource for effect in instruction.state_effects}
+    if StateResource.BUFFER in resources:
+        classes.append(InstructionClass.GENERIC_MEMORY)
+    if StateResource.FRAME_LOCALS in resources:
+        classes.append(InstructionClass.PRIVATE_MEMORY)
+    if StateResource.PROCESS_GLOBALS in resources:
+        classes.append(InstructionClass.GLOBAL_MEMORY)
+    if ".atomic." in instruction.mnemonic:
+        classes.append(InstructionClass.ATOMIC)
+    if instruction.family_id == "core.family.conversion":
+        classes.append(InstructionClass.CONVERSION)
+    elif instruction.family_id == "core.family.control":
+        classes.append(InstructionClass.CONTROL)
+    elif instruction.family_id in (
+        "core.family.function",
+        "core.family.ref",
+        "core.family.value",
+    ):
+        classes.append(InstructionClass.REGISTER_MOVE)
+    elif instruction.family_id == "core.family.constant":
+        classes.append(InstructionClass.OTHER)
+    elif not classes:
+        classes.append(InstructionClass.SCALAR_ALU)
+    return tuple(classes)
+
+
+def _enum_domains() -> tuple[EnumDomain, ...]:
+    selector_table_ids = {
+        table_id
+        for instruction in _CORE_INSTRUCTIONS
+        if instruction.control_flow is ControlFlow.SEQUENTIAL
+        for field in instruction.fields
+        if (table_id := _selector_table_id(field)) is not None
+    }
+    domains = [
+        EnumDomain(
+            name=table_id,
+            values=tuple(
+                EnumValue(value.name, value.value)
+                for value in _SELECTOR_VALUES_BY_TABLE_ID[table_id]
+            ),
+        )
+        for table_id in sorted(selector_table_ids)
+    ]
+    allowed_value_sets = {
+        tuple(int(value) for value in rule_use.arguments[0])
+        for instruction in _CORE_INSTRUCTIONS
+        if instruction.control_flow is ControlFlow.SEQUENTIAL
+        for field in instruction.fields
+        if (rule_use := _rule_use(field, ALLOWED_VALUES.entity_id)) is not None
+    }
+    domains.extend(
+        EnumDomain(
+            name=_allowed_values_domain_name(values),
+            values=tuple(EnumValue(str(value), value) for value in values),
+        )
+        for values in sorted(allowed_value_sets)
+    )
+    return tuple(domains)
+
+
+VM_ENUM_DOMAINS = _enum_domains()
 
 
 def _descriptor(projection: VmInstructionProjection) -> Descriptor:
     instruction = projection.instruction
+    variable_register_limits = _variable_value_register_limits(instruction)
+    record_ordinal_field_names = _record_ordinal_field_names(instruction)
     operands: list[Operand] = []
     immediates: list[Immediate] = []
-    encoding_field_values: list[EncodingFieldValue] = []
     asm_results: list[str] = []
     asm_operands: list[str] = []
     asm_immediates: list[AsmImmediate] = []
     for field in instruction.fields:
         name = _field_name(field.name)
-        if field.role is InstructionFieldRole.RESULT:
+        if field.role in (
+            InstructionFieldRole.RESULT,
+            InstructionFieldRole.OPERAND,
+        ):
+            variable_register_limit = variable_register_limits.get(field.name)
+            is_variable_register = variable_register_limit is not None
             operands.append(
                 Operand(
                     name,
-                    OperandRole.RESULT,
-                    _VALUE_REGISTER_ALTERNATIVES,
+                    OperandRole.RESULT
+                    if field.role is InstructionFieldRole.RESULT
+                    else OperandRole.OPERAND,
+                    _register_alternatives(field),
+                    flags=(
+                        (OperandFlag.VARIABLE_UNIT_COUNT,)
+                        if is_variable_register
+                        else ()
+                    ),
+                    unit_count=variable_register_limit or 1,
                     encoding_field_id=field.offset,
                 )
             )
-            asm_results.append(name)
-        elif field.role is InstructionFieldRole.OPERAND:
-            operands.append(
-                Operand(
-                    name,
-                    OperandRole.OPERAND,
-                    _VALUE_REGISTER_ALTERNATIVES,
-                    encoding_field_id=field.offset,
+            if field.role is InstructionFieldRole.RESULT:
+                asm_results.append(name)
+            else:
+                asm_operands.append(name)
+        elif field.role in (
+            InstructionFieldRole.IMMEDIATE,
+            InstructionFieldRole.CONSTRAINT_MEMBER,
+        ):
+            for element_index in range(field.array_length):
+                immediate = _immediate(
+                    field,
+                    element_index,
+                    record_ordinal=field.name in record_ordinal_field_names,
                 )
-            )
-            asm_operands.append(name)
-        elif field.role is InstructionFieldRole.IMMEDIATE:
-            default_value = (
-                projection.selector_value
-                if field.name == projection.selector_field_name
-                else None
-            )
-            immediate = _immediate(field, default_value=default_value)
-            immediates.append(immediate)
-            if default_value is None:
-                asm_immediates.append(AsmImmediate(immediate.field_name))
-        elif field.role is InstructionFieldRole.PADDING:
-            encoding_field_values.append(EncodingFieldValue(field.offset, 0))
-        else:
+                immediates.append(immediate)
+                asm_immediates.append(
+                    AsmImmediate(
+                        immediate.field_name,
+                        flags=(AsmImmediateFlag.ENUM_TOKEN,)
+                        if immediate.kind is ImmediateKind.ENUM
+                        else (),
+                    )
+                )
+        elif field.role is not InstructionFieldRole.PADDING:
             raise ValueError(
                 f"{instruction.mnemonic}: field {field.name} has unsupported "
                 f"projection role {field.role.value}"
             )
 
-    is_constant = instruction.mnemonic.startswith("constant.")
-    is_conversion = instruction.mnemonic.startswith("conversion.")
-    is_control_assert = instruction.mnemonic == "control.assert"
-    instruction_class = (
-        InstructionClass.OTHER
-        if is_constant
-        else InstructionClass.CONVERSION
-        if is_conversion
-        else InstructionClass.CONTROL
-        if is_control_assert
-        else InstructionClass.SCALAR_ALU
+    effects = _instruction_effects(instruction)
+    side_effecting = any(
+        effect.kind in (EffectKind.WRITE, EffectKind.CALL, EffectKind.BARRIER)
+        for effect in effects
+    )
+    has_results = any(operand.role is OperandRole.RESULT for operand in operands)
+    if side_effecting:
+        flags = (DescriptorFlag.SIDE_EFFECTING,)
+    elif has_results:
+        flags = (DescriptorFlag.DEAD_REMOVABLE,)
+    else:
+        flags = ()
+    is_constant = instruction.family_id == "core.family.constant"
+    asm_forms = (
+        AsmForm(
+            results=tuple(asm_results),
+            operands=tuple(asm_operands),
+            immediates=tuple(asm_immediates),
+        ),
     )
     return Descriptor(
         key=projection.key,
@@ -356,21 +739,12 @@ def _descriptor(projection: VmInstructionProjection) -> Descriptor:
         ),
         op_kind=DescriptorOpKind.CONST if is_constant else DescriptorOpKind.OP,
         immediates=tuple(immediates),
-        encoding_field_values=tuple(encoding_field_values),
-        asm_forms=(
-            AsmForm(
-                results=tuple(asm_results),
-                operands=tuple(asm_operands),
-                immediates=tuple(asm_immediates),
-            ),
-        ),
+        asm_forms=asm_forms,
+        effects=effects,
+        constraints=_descriptor_constraints(instruction),
         encoding_id=instruction.opcode,
-        flags=(
-            (DescriptorFlag.SIDE_EFFECTING,)
-            if is_control_assert
-            else (DescriptorFlag.DEAD_REMOVABLE,)
-        ),
-        instruction_classes=(instruction_class,),
+        flags=flags,
+        instruction_classes=_instruction_classes(instruction),
     )
 
 
@@ -396,6 +770,28 @@ VM_CORE_DESCRIPTOR_SET = DescriptorSet(
             allocatable_count=256,
             alias_set_id=1,
         ),
+        RegClass(
+            _REF_REGISTER_CLASS,
+            alloc_unit_bits=128,
+            spill_slot_space=SpillSlotSpace.PRIVATE,
+            flags=(
+                RegClassFlag.PHYSICAL,
+                RegClassFlag.REFERENCE,
+                RegClassFlag.UNSPILLABLE,
+            ),
+            target_bank_id=2,
+            allocatable_count=256,
+            alias_set_id=2,
+        ),
+        RegClass(
+            _FUNCTION_REGISTER_CLASS,
+            alloc_unit_bits=128,
+            spill_slot_space=SpillSlotSpace.PRIVATE,
+            flags=(RegClassFlag.PHYSICAL, RegClassFlag.UNSPILLABLE),
+            target_bank_id=3,
+            allocatable_count=256,
+            alias_set_id=3,
+        ),
     ),
     resources=(
         Resource(
@@ -417,8 +813,14 @@ VM_CORE_DESCRIPTOR_SET = DescriptorSet(
             model_quality=ModelQuality.EXACT,
             latency_cycles=1,
             issue_uses=(IssueUse(_EXECUTE_RESOURCE, cycles=1, units=1),),
+            flags=(
+                ScheduleClassFlag.MAY_LOAD,
+                ScheduleClassFlag.MAY_STORE,
+                ScheduleClassFlag.MAY_CALL,
+            ),
         ),
     ),
+    enum_domains=VM_ENUM_DOMAINS,
     descriptors=tuple(
         _descriptor(projection) for projection in VM_INSTRUCTION_PROJECTIONS
     ),
@@ -450,12 +852,13 @@ def _require_fixed_source_shape(
 
 
 def _require_descriptor_shape(
-    descriptor_key: str,
+    source_opcode: VmSourceOpcode,
     *,
     operand_count: int,
     result_count: int,
-) -> None:
-    descriptor = _DESCRIPTORS_BY_KEY.get(descriptor_key)
+) -> tuple[int | None, int]:
+    descriptor_key = source_opcode.descriptor_key
+    descriptor = _DESCRIPTORS_BY_KEY.get(source_opcode.descriptor_key)
     if descriptor is None:
         raise ValueError(
             f"VM source lowering names unknown descriptor {descriptor_key!r}"
@@ -480,16 +883,32 @@ def _require_descriptor_shape(
             f"{descriptor_key}: source operation projection requires an "
             "instruction descriptor"
         )
-    missing_default_immediates = tuple(
-        immediate.field_name
-        for immediate in descriptor.immediates
-        if ImmediateFlag.DEFAULT_VALUE not in immediate.flags
+    if source_opcode.selector_table is None:
+        if descriptor.immediates:
+            raise ValueError(
+                f"{descriptor_key}: source operation projection does not supply "
+                "required immediates"
+            )
+        return None, 0
+
+    selector_table = SELECTOR_TABLES_BY_NAME[source_opcode.selector_table]
+    selector_immediate_ordinals = tuple(
+        index
+        for index, immediate in enumerate(descriptor.immediates)
+        if immediate.kind is ImmediateKind.ENUM
+        and immediate.enum_domain == selector_table.entity_id
     )
-    if missing_default_immediates:
+    if len(selector_immediate_ordinals) != 1 or len(descriptor.immediates) != 1:
         raise ValueError(
-            f"{descriptor_key}: source operation projection cannot synthesize "
-            "required immediates " + ", ".join(missing_default_immediates)
+            f"{descriptor_key}: source selector must be the descriptor's only immediate"
         )
+    selector_key = (selector_table.entity_id, source_opcode.selector_name)
+    if selector_key not in _SELECTOR_VALUES_BY_KEY:
+        raise ValueError(
+            f"{descriptor_key}: unknown selector {source_opcode.selector_name!r} "
+            f"in {source_opcode.selector_table!r}"
+        )
+    return selector_immediate_ordinals[0], _SELECTOR_VALUES_BY_KEY[selector_key]
 
 
 def _require_concrete_source_types(
@@ -513,20 +932,29 @@ def _source_lowering(
     source_op: Op,
     operand_types: tuple[ScalarTypeKind, ...],
     result_types: tuple[ScalarTypeKind, ...],
-    descriptor_key: str,
+    source_opcode: str | VmSourceOpcode,
 ) -> VmSourceLowering:
+    if isinstance(source_opcode, str):
+        source_opcode = VmSourceOpcode(source_opcode)
     _require_fixed_source_shape(
         source_op,
         operand_count=len(operand_types),
         result_count=len(result_types),
     )
     _require_concrete_source_types(source_op, operand_types, result_types)
-    _require_descriptor_shape(
-        descriptor_key,
+    selector_immediate_ordinal, selector_value = _require_descriptor_shape(
+        source_opcode,
         operand_count=len(operand_types),
         result_count=len(result_types),
     )
-    return VmSourceLowering(source_op, operand_types, result_types, descriptor_key)
+    return VmSourceLowering(
+        source_op,
+        operand_types,
+        result_types,
+        source_opcode.descriptor_key,
+        selector_immediate_ordinal,
+        selector_value,
+    )
 
 
 def _same_type_binary(
@@ -562,7 +990,9 @@ def _same_type_binary(
 
 def _cast(
     source_op: Op,
-    descriptor_by_type_pair: dict[tuple[ScalarTypeKind, ScalarTypeKind], str],
+    descriptor_by_type_pair: dict[
+        tuple[ScalarTypeKind, ScalarTypeKind], str | VmSourceOpcode
+    ],
 ) -> tuple[VmSourceLowering, ...]:
     """Projects a unary Loom cast onto concrete VM instructions."""
 
@@ -574,12 +1004,12 @@ def _cast(
             source_op,
             (source_type,),
             (result_type,),
-            descriptor_key,
+            source_opcode,
         )
         for (
             source_type,
             result_type,
-        ), descriptor_key in descriptor_by_type_pair.items()
+        ), source_opcode in descriptor_by_type_pair.items()
     )
 
 
@@ -632,27 +1062,35 @@ VM_SOURCE_LOWERINGS = (
     *_cast(
         scalar_conversion.scalar_extf,
         {
-            (ScalarTypeKind.BF16, ScalarTypeKind.F32): (
-                "vm.conversion.float.extend.bf16_to_f32"
+            (ScalarTypeKind.BF16, ScalarTypeKind.F32): VmSourceOpcode(
+                "vm.conversion.float.extend",
+                "float.extend",
+                "bf16.to.f32",
             ),
         },
     ),
     *_cast(
         scalar_conversion.scalar_fptoui,
         {
-            (ScalarTypeKind.F32, ScalarTypeKind.I32): (
-                "vm.conversion.float.to.integer.f32_to_u32"
+            (ScalarTypeKind.F32, ScalarTypeKind.I32): VmSourceOpcode(
+                "vm.conversion.float.to.integer",
+                "float.to.integer",
+                "f32.to.u32",
             ),
         },
     ),
     *_cast(
         index_defs.index_cast,
         {
-            (ScalarTypeKind.I32, ScalarTypeKind.INDEX): (
-                "vm.conversion.integer.s32_to_i64"
+            (ScalarTypeKind.I32, ScalarTypeKind.INDEX): VmSourceOpcode(
+                "vm.conversion.integer",
+                "integer.convert",
+                "s32.to.i64",
             ),
-            (ScalarTypeKind.I32, ScalarTypeKind.OFFSET): (
-                "vm.conversion.integer.u32_to_i64"
+            (ScalarTypeKind.I32, ScalarTypeKind.OFFSET): VmSourceOpcode(
+                "vm.conversion.integer",
+                "integer.convert",
+                "u32.to.i64",
             ),
         },
     ),
