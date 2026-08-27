@@ -192,6 +192,7 @@ static iree_status_t loom_cmd_program_plan_check_materialize_roots(
         index,
         &(loom_link_plan_options_t){
             .mode = LOOM_LINK_PLAN_SELECTIVE,
+            .unresolved_policy = LOOM_LINK_PLAN_UNRESOLVED_ALLOW,
             .root_facets =
                 {
                     .count = root_count,
