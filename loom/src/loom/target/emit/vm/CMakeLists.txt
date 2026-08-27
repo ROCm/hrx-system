@@ -15,11 +15,13 @@ loom_cc_library(
   HDRS
     "artifact_emitter.h"
     "function_encoder.h"
+    "function_layout.h"
     "module_emitter.h"
     "module_layout.h"
   SRCS
     "artifact_emitter.c"
     "function_encoder.c"
+    "function_layout.c"
     "module_emitter.c"
     "module_layout.c"
   DEPS
@@ -50,6 +52,7 @@ loom_check_test_suite(
   NAME
     loom_check_file_test
   SRCS
+    "test/control_flow.loom-test"
     "test/module.loom-test"
   TEST_NAME_PREFIX_TO_STRIP
     "test/"
@@ -65,6 +68,8 @@ loom_cc_library(
   DEPS
     ::vm
     iree::base
+    iree::vm
+    iree::vm::bytecode
     iree::vm::bytecode::dump
     loom::tools::loom-check::execute
   TESTONLY

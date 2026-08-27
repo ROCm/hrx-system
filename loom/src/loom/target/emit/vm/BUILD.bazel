@@ -18,12 +18,14 @@ loom_cc_library(
     srcs = [
         "artifact_emitter.c",
         "function_encoder.c",
+        "function_layout.c",
         "module_emitter.c",
         "module_layout.c",
     ],
     hdrs = [
         "artifact_emitter.h",
         "function_encoder.h",
+        "function_layout.h",
         "module_emitter.h",
         "module_layout.h",
     ],
@@ -58,7 +60,10 @@ loom_cc_library(
 
 loom_check_test_suite(
     name = "loom_check_file_test",
-    srcs = ["test/module.loom-test"],
+    srcs = [
+        "test/control_flow.loom-test",
+        "test/module.loom-test",
+    ],
     test_name_prefix_to_strip = "test/",
 )
 
@@ -72,6 +77,8 @@ loom_cc_library(
         ":vm",
         "//loom/src/loom/tools/loom-check:execute",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/vm",
+        "//runtime/src/iree/vm/bytecode",
         "//runtime/src/iree/vm/bytecode:dump",
     ],
 )
