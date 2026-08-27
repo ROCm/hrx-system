@@ -74,6 +74,29 @@ preserve the aggregate packet and register-unit counts; detailed reports let
 unchanged causes. This separates a source-level repacking change from a
 target-created operand-bank repair instead of treating both as generic moves.
 
+Detailed reports also retain target-neutral native contraction and fragment-
+transition facts selected for each source-to-Low row. `show` presents the
+native tile and participant count, per-role register and payload placement,
+logical ownership multiplicity, and any source-owner movement required by a
+fragment transition. Movement counts remain unscaled structural facts: a
+cross-participant result such as `256/512 (50%)` describes destination
+positions in one selected native transition, not dispatch executions or a
+hardware cycle estimate. The selected target recipe and descriptor are shown
+separately from the coordinate evidence that explains them.
+
+Coordinate-bearing physical positions are reported separately from payload
+elements. Packed or strided carriers need not assign an independent logical
+coordinate to every payload slot, so multiplying payload elements by
+participants can overstate the ownership domain.
+
+Exact transitions include readable equations over the target-neutral physical
+dimensions `participant` and participant-local `position`. A relation such as
+`source.participant = participant % 16 + (position % 2) * 16` states precisely
+which source owner supplies each destination position without exposing a
+backend instruction mnemonic or requiring the viewer to load target tables.
+Metadata-dependent, parametric, and opaque placements retain their evidence
+class and do not claim exact ownership.
+
 Fragment memory reports also preserve the producer-proven address relationship
 across a complete subgroup. `show` prints each authored memory source and its
 packet variants with the per-lane packet width, exact lane-offset formula, and
@@ -151,6 +174,12 @@ overlap can be evaluated together.
 For a forced single-entry comparison, the explicit entry pair also aligns wave
 memory sources whose function was renamed. Packet variants still require exact
 semantic identity; the forced pair does not authorize guessed variant matches.
+
+Native-layout diffs use the retained function and `source_low` row index as the
+source-row identity. They compare normalized placement, movement, and factor
+fields directly; recipe-key spelling is reported as a separate selection
+change. If an edit shifts or removes the source row, the evidence appears as
+removed and added instead of being paired heuristically with another operation.
 
 ## Compare target specialization
 
