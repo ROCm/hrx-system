@@ -31,6 +31,12 @@ loom_target_table_cc_library(
     contract_tables
   GENERATOR
     loom::py::loom::gen::target::arch::amdgpu::matrix::contract_tables
+  GENERATED_HDR_FLAGS
+    "--result-to-lhs"
+    "--result-to-rhs"
+  GENERATED_HDRS
+    "matrix_fragment_repack_result_to_lhs_projections.inl"
+    "matrix_fragment_repack_result_to_rhs_projections.inl"
   ARGS
     "--public-header=loom/target/arch/amdgpu/matrix/contract_tables.h"
   DEPS

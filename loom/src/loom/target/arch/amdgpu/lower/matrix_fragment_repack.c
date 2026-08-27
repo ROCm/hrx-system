@@ -176,6 +176,25 @@ static bool loom_amdgpu_fragment_repack_contract_role(
   }
 }
 
+typedef struct loom_amdgpu_result_to_lhs_bf16_projection_t {
+  // Mask selecting source-register index bits from lane_mod.
+  uint16_t source_register_selector_and_mask;
+  // Mask selecting source lane-group bits from lane_mod.
+  uint16_t source_lane_group_and_mask;
+  // Log2 byte spacing between source result-fragment lane groups.
+  uint8_t source_lane_group_byte_shift;
+  // Log2 byte spacing contributed by the destination lane-div group.
+  uint8_t result_lane_div_byte_shift;
+  // Right shift positioning the source-register index at bit zero.
+  uint8_t source_register_selector_right_shift;
+  // Right shift positioning the source lane-group index at bit zero.
+  uint8_t source_lane_group_right_shift;
+  // Number of low source-value bits exchanged with lane bits.
+  uint8_t transpose_bit_count;
+} loom_amdgpu_result_to_lhs_bf16_projection_t;
+
+#include "loom/target/arch/amdgpu/matrix/matrix_fragment_repack_result_to_lhs_projections.inl"
+
 static bool loom_amdgpu_fragment_repack_uses_source_register_bit_tree(
     uint16_t source_register_count) {
   return source_register_count >= 4 &&
@@ -304,14 +323,11 @@ loom_amdgpu_fragment_repack_has_result_to_lhs_bf16_bpermute_descriptors(
   return true;
 }
 
-static bool loom_amdgpu_fragment_repack_can_pack_adjacent_source_lanes(
+static bool loom_amdgpu_fragment_repack_select_adjacent_source_lane_packing(
     const loom_low_descriptor_set_t* descriptor_set,
-    const loom_amdgpu_matrix_fragment_layout_t* layout,
     loom_amdgpu_fragment_repack_plan_t* plan) {
   const uint16_t required_even_lane_byte_base_shift = 3;
-  if (!loom_matrix_fragment_role_has_contiguous_lane_xor1_columns(
-          layout, plan->source_role) ||
-      plan->source_lane_group_byte_shift < required_even_lane_byte_base_shift ||
+  if (plan->source_lane_group_byte_shift < required_even_lane_byte_base_shift ||
       (plan->result_lane_div_byte_shift != 0 &&
        plan->result_lane_div_byte_shift < required_even_lane_byte_base_shift)) {
     return false;
@@ -372,11 +388,7 @@ static const loom_amdgpu_fragment_repack_transpose_lane_bit_t
 
 static bool loom_amdgpu_fragment_repack_select_transpose_strategy(
     const loom_low_descriptor_set_t* descriptor_set, uint16_t wave_size,
-    loom_amdgpu_fragment_repack_plan_t* plan) {
-  const uint16_t transpose_bit_count = iree_min(
-      (uint16_t)iree_math_count_trailing_zeros_u32(plan->source_register_count),
-      (uint16_t)iree_math_count_trailing_zeros_u32(
-          plan->result_register_count));
+    uint16_t transpose_bit_count, loom_amdgpu_fragment_repack_plan_t* plan) {
   if (transpose_bit_count == 0 ||
       transpose_bit_count >
           LOOM_AMDGPU_FRAGMENT_REPACK_TRANSPOSE_STAGE_CAPACITY) {
@@ -497,108 +509,18 @@ static bool
 loom_amdgpu_fragment_repack_select_result_to_lhs_bf16_bpermute_strategy(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_amdgpu_matrix_fragment_layout_t* layout,
-    const loom_matrix_fragment_role_layout_t* source_role_layout,
-    const loom_matrix_fragment_role_layout_t* result_role_layout,
     loom_amdgpu_fragment_repack_plan_t* plan) {
+  const uint8_t projection_ordinal =
+      kResultToLhsBf16ProjectionOrdinals[layout->kind];
+  if (projection_ordinal == 0) {
+    return false;
+  }
+  const loom_amdgpu_result_to_lhs_bf16_projection_t* projection =
+      &kResultToLhsBf16Projections[projection_ordinal];
   if (plan->source_role != LOOM_CONTRACT_OPERAND_ROLE_RESULT ||
       plan->result_role != LOOM_CONTRACT_OPERAND_ROLE_LHS ||
       loom_type_element_type(plan->source_type) != LOOM_SCALAR_TYPE_F32 ||
-      loom_type_element_type(plan->result_type) != LOOM_SCALAR_TYPE_BF16 ||
-      source_role_layout->element_bit_count != 32 ||
-      loom_amdgpu_matrix_fragment_payload_elements_per_register(
-          result_role_layout) !=
-          LOOM_AMDGPU_FRAGMENT_PACKED_B16_ELEMENT_COUNT ||
-      result_role_layout->element_bit_count !=
-          LOOM_AMDGPU_FRAGMENT_PACKED_B16_ELEMENT_BIT_COUNT ||
-      source_role_layout->coordinate_flags !=
-          (LOOM_MATRIX_FRAGMENT_COORDINATE_ROW |
-           LOOM_MATRIX_FRAGMENT_COORDINATE_COLUMN) ||
-      result_role_layout->coordinate_flags !=
-          (LOOM_MATRIX_FRAGMENT_COORDINATE_ROW |
-           LOOM_MATRIX_FRAGMENT_COORDINATE_REDUCTION) ||
-      source_role_layout->register_count == 0 ||
-      result_role_layout->register_count == 0) {
-    return false;
-  }
-
-  const loom_matrix_fragment_axis_layout_t* source_row_layout =
-      &source_role_layout->axes[LOOM_MATRIX_FRAGMENT_AXIS_ROW];
-  const loom_matrix_fragment_axis_layout_t* source_column_layout =
-      &source_role_layout->axes[LOOM_MATRIX_FRAGMENT_AXIS_COLUMN];
-  const loom_matrix_fragment_axis_layout_t* result_row_layout =
-      &result_role_layout->axes[LOOM_MATRIX_FRAGMENT_AXIS_ROW];
-  const loom_matrix_fragment_axis_layout_t* result_reduction_layout =
-      &result_role_layout->axes[LOOM_MATRIX_FRAGMENT_AXIS_REDUCTION];
-  const bool result_uses_lane_div_reduction =
-      result_reduction_layout->thread_count > 1;
-
-  if (!loom_amdgpu_u32_is_power_of_two(layout->tile_shape.result_row_count) ||
-      !loom_amdgpu_u32_is_power_of_two(
-          layout->tile_shape.result_column_count) ||
-      !loom_amdgpu_u32_is_power_of_two(layout->tile_shape.reduction_count)) {
-    return false;
-  }
-
-  const uint16_t lane_group_count =
-      (uint16_t)(layout->wave_size / layout->tile_shape.result_column_count);
-  if (lane_group_count == 0 ||
-      (layout->wave_size % layout->tile_shape.result_column_count) != 0 ||
-      !loom_amdgpu_u32_is_power_of_two(lane_group_count) ||
-      (layout->tile_shape.result_row_count % lane_group_count) != 0 ||
-      source_role_layout->register_count !=
-          layout->tile_shape.result_row_count / lane_group_count ||
-      source_role_layout->register_count >
-          LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES ||
-      (layout->tile_shape.reduction_count %
-       LOOM_AMDGPU_FRAGMENT_PACKED_B16_ELEMENT_COUNT) != 0 ||
-      result_role_layout->register_count >
-          LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES ||
-      source_row_layout->thread_count != lane_group_count ||
-      source_row_layout->thread_stride !=
-          layout->tile_shape.result_column_count ||
-      source_column_layout->thread_count !=
-          layout->tile_shape.result_column_count ||
-      source_column_layout->thread_stride != 1 ||
-      result_row_layout->thread_count != layout->tile_shape.result_row_count ||
-      result_row_layout->thread_stride != 1) {
-    return false;
-  }
-  const uint16_t lane_div_count =
-      (uint16_t)(layout->wave_size / layout->tile_shape.result_row_count);
-  if (lane_div_count == 0 ||
-      (layout->wave_size % layout->tile_shape.result_row_count) != 0 ||
-      !loom_amdgpu_u32_is_power_of_two(lane_div_count) ||
-      (result_uses_lane_div_reduction &&
-       (result_reduction_layout->thread_count != lane_div_count ||
-        result_reduction_layout->thread_stride !=
-            layout->tile_shape.result_row_count)) ||
-      (!result_uses_lane_div_reduction &&
-       result_reduction_layout->thread_count != 1)) {
-    return false;
-  }
-  const uint16_t expected_result_register_count =
-      (uint16_t)(layout->tile_shape.reduction_count /
-                 (LOOM_AMDGPU_FRAGMENT_PACKED_B16_ELEMENT_COUNT *
-                  (result_uses_lane_div_reduction ? lane_div_count : 1u)));
-  if (expected_result_register_count == 0 ||
-      result_role_layout->register_count != expected_result_register_count) {
-    return false;
-  }
-
-  const uint32_t source_lane_group_byte_count =
-      (uint32_t)layout->tile_shape.result_column_count *
-      LOOM_AMDGPU_FRAGMENT_REGISTER_BYTE_COUNT;
-  if (!loom_amdgpu_u32_is_power_of_two(source_lane_group_byte_count)) {
-    return false;
-  }
-  const uint32_t result_lane_div_byte_count =
-      result_uses_lane_div_reduction
-          ? (uint32_t)result_role_layout->register_count *
-                LOOM_AMDGPU_FRAGMENT_PACKED_B16_ELEMENT_COUNT *
-                LOOM_AMDGPU_FRAGMENT_REGISTER_BYTE_COUNT
-          : 0u;
-  if (result_lane_div_byte_count != 0 &&
-      !loom_amdgpu_u32_is_power_of_two(result_lane_div_byte_count)) {
+      loom_type_element_type(plan->result_type) != LOOM_SCALAR_TYPE_BF16) {
     return false;
   }
 
@@ -606,55 +528,25 @@ loom_amdgpu_fragment_repack_select_result_to_lhs_bf16_bpermute_strategy(
       LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_RESULT_TO_LHS_BF16_BPERMUTE;
   plan->reason = LOOM_AMDGPU_FRAGMENT_REPACK_REASON_NONE;
   plan->layout_kind = (loom_amdgpu_matrix_fragment_layout_kind_t)layout->kind;
-  plan->source_register_count = source_role_layout->register_count;
-  plan->result_register_count = result_role_layout->register_count;
-  plan->lane_group_count = lane_group_count;
+  plan->source_register_count = layout->result.register_count;
+  plan->result_register_count = layout->lhs.register_count;
   plan->lane_divisor = layout->tile_shape.result_row_count;
-  plan->source_lane_group_byte_shift =
-      (uint16_t)iree_math_count_trailing_zeros_u32(
-          source_lane_group_byte_count);
-  plan->result_lane_div_byte_shift =
-      result_lane_div_byte_count == 0
-          ? 0
-          : (uint16_t)iree_math_count_trailing_zeros_u32(
-                result_lane_div_byte_count);
-  if (source_row_layout->element_count == source_role_layout->register_count &&
-      source_row_layout->outer_count == 1) {
-    plan->source_register_selector =
-        (loom_amdgpu_fragment_repack_lane_recipe_t){
-            .and_mask = (uint16_t)(source_role_layout->register_count - 1u),
-        };
-    plan->source_lane_group =
-        lane_group_count == 1
-            ? (loom_amdgpu_fragment_repack_lane_recipe_t){0}
-            : (loom_amdgpu_fragment_repack_lane_recipe_t){
-                  .and_mask = UINT16_MAX,
-                  .right_shift = (uint16_t)iree_math_count_trailing_zeros_u32(
-                      source_role_layout->register_count),
-              };
-  } else if (source_row_layout->outer_count ==
-                 source_role_layout->register_count &&
-             source_row_layout->element_count == 1) {
-    plan->source_register_selector =
-        (loom_amdgpu_fragment_repack_lane_recipe_t){
-            .and_mask = UINT16_MAX,
-            .right_shift =
-                (uint16_t)iree_math_count_trailing_zeros_u32(lane_group_count),
-        };
-    plan->source_lane_group =
-        lane_group_count == 1
-            ? (loom_amdgpu_fragment_repack_lane_recipe_t){0}
-            : (loom_amdgpu_fragment_repack_lane_recipe_t){
-                  .and_mask = (uint16_t)(lane_group_count - 1u),
-              };
-  } else {
-    return false;
-  }
+  plan->source_lane_group_byte_shift = projection->source_lane_group_byte_shift;
+  plan->result_lane_div_byte_shift = projection->result_lane_div_byte_shift;
+  plan->source_register_selector = (loom_amdgpu_fragment_repack_lane_recipe_t){
+      .and_mask = projection->source_register_selector_and_mask,
+      .right_shift = projection->source_register_selector_right_shift,
+  };
+  plan->source_lane_group = (loom_amdgpu_fragment_repack_lane_recipe_t){
+      .and_mask = projection->source_lane_group_and_mask,
+      .right_shift = projection->source_lane_group_right_shift,
+  };
 
-  if (loom_amdgpu_fragment_repack_can_pack_adjacent_source_lanes(
-          descriptor_set, layout, plan)) {
+  if (loom_amdgpu_fragment_repack_select_adjacent_source_lane_packing(
+          descriptor_set, plan)) {
     if (loom_amdgpu_fragment_repack_select_transpose_strategy(
-            descriptor_set, layout->wave_size, plan)) {
+            descriptor_set, layout->wave_size, projection->transpose_bit_count,
+            plan)) {
       return true;
     }
     if (loom_amdgpu_fragment_repack_has_result_to_lhs_bf16_bpermute_descriptors(
@@ -749,13 +641,11 @@ static bool loom_amdgpu_fragment_repack_select_target_strategy(
     found_storage_candidate = true;
 
     if (loom_amdgpu_select_result_to_rhs_packed_b16_fragment_repack_plan(
-            descriptor_set, layout, source_role_layout, result_role_layout,
-            plan)) {
+            descriptor_set, layout, plan)) {
       return true;
     }
     if (loom_amdgpu_fragment_repack_select_result_to_lhs_bf16_bpermute_strategy(
-            descriptor_set, layout, source_role_layout, result_role_layout,
-            plan)) {
+            descriptor_set, layout, plan)) {
       return true;
     }
   }

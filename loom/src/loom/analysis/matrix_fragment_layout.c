@@ -6,6 +6,67 @@
 
 #include "loom/analysis/matrix_fragment_layout.h"
 
+#include <string.h>
+
+void loom_matrix_fragment_apply_coordinate_projection(
+    const loom_matrix_fragment_coordinate_projection_term_t* terms,
+    uint8_t term_count,
+    const uint32_t
+        source_terms[LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COUNT],
+    uint32_t out_terms[LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COUNT]) {
+  memset(
+      out_terms, 0,
+      LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COUNT * sizeof(out_terms[0]));
+  for (uint8_t i = 0; i < term_count; ++i) {
+    const loom_matrix_fragment_coordinate_projection_term_t* term = &terms[i];
+    uint32_t digit =
+        source_terms[term->source_dimension] / (uint32_t)term->source_divisor;
+    if (term->source_modulus != 0) {
+      digit %= term->source_modulus;
+    }
+    out_terms[term->destination_dimension] +=
+        digit * (uint32_t)term->destination_multiplier;
+  }
+}
+
+loom_matrix_fragment_coordinate_dimension_t
+loom_matrix_fragment_axis_coordinate_dimension(
+    loom_matrix_fragment_axis_t axis) {
+  switch (axis) {
+    case LOOM_MATRIX_FRAGMENT_AXIS_BLOCK:
+      return LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_BLOCK;
+    case LOOM_MATRIX_FRAGMENT_AXIS_ROW:
+      return LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_ROW;
+    case LOOM_MATRIX_FRAGMENT_AXIS_COLUMN:
+      return LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COLUMN;
+    case LOOM_MATRIX_FRAGMENT_AXIS_REDUCTION:
+      return LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_REDUCTION;
+    case LOOM_MATRIX_FRAGMENT_AXIS_COUNT:
+    default:
+      IREE_ASSERT_UNREACHABLE("invalid matrix fragment semantic axis");
+      IREE_BUILTIN_UNREACHABLE();
+  }
+}
+
+loom_matrix_fragment_axis_t loom_matrix_fragment_coordinate_dimension_axis(
+    loom_matrix_fragment_coordinate_dimension_t dimension) {
+  switch (dimension) {
+    case LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_BLOCK:
+      return LOOM_MATRIX_FRAGMENT_AXIS_BLOCK;
+    case LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_ROW:
+      return LOOM_MATRIX_FRAGMENT_AXIS_ROW;
+    case LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COLUMN:
+      return LOOM_MATRIX_FRAGMENT_AXIS_COLUMN;
+    case LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_REDUCTION:
+      return LOOM_MATRIX_FRAGMENT_AXIS_REDUCTION;
+    case LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_PARTICIPANT:
+    case LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_VALUE:
+    case LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COUNT:
+    default:
+      return LOOM_MATRIX_FRAGMENT_AXIS_COUNT;
+  }
+}
+
 static bool loom_matrix_fragment_coordinate_matches(
     loom_matrix_fragment_coordinate_t lhs,
     loom_matrix_fragment_coordinate_t rhs) {
@@ -35,80 +96,6 @@ static bool loom_matrix_fragment_coordinate_matches(
   return true;
 }
 
-static loom_matrix_fragment_coordinate_flags_t
-loom_matrix_fragment_axis_coordinate_flag(loom_matrix_fragment_axis_t axis) {
-  IREE_ASSERT_LT(axis, LOOM_MATRIX_FRAGMENT_AXIS_COUNT);
-  return 1u << axis;
-}
-
-static uint16_t loom_matrix_fragment_axis_extent(
-    const loom_matrix_fragment_tile_shape_t* tile_shape,
-    loom_matrix_fragment_axis_t axis) {
-  switch (axis) {
-    case LOOM_MATRIX_FRAGMENT_AXIS_BLOCK:
-      return tile_shape->block_count;
-    case LOOM_MATRIX_FRAGMENT_AXIS_ROW:
-      return tile_shape->result_row_count;
-    case LOOM_MATRIX_FRAGMENT_AXIS_COLUMN:
-      return tile_shape->result_column_count;
-    case LOOM_MATRIX_FRAGMENT_AXIS_REDUCTION:
-      return tile_shape->reduction_count;
-    case LOOM_MATRIX_FRAGMENT_AXIS_COUNT:
-    default:
-      IREE_ASSERT_UNREACHABLE("invalid matrix fragment semantic axis");
-      return 0;
-  }
-}
-
-static void loom_matrix_fragment_set_axis_coordinate(
-    loom_matrix_fragment_coordinate_t* coordinate,
-    loom_matrix_fragment_axis_t axis, uint16_t value) {
-  switch (axis) {
-    case LOOM_MATRIX_FRAGMENT_AXIS_BLOCK:
-      coordinate->block = value;
-      break;
-    case LOOM_MATRIX_FRAGMENT_AXIS_ROW:
-      coordinate->row = value;
-      break;
-    case LOOM_MATRIX_FRAGMENT_AXIS_COLUMN:
-      coordinate->column = value;
-      break;
-    case LOOM_MATRIX_FRAGMENT_AXIS_REDUCTION:
-      coordinate->reduction = value;
-      break;
-    case LOOM_MATRIX_FRAGMENT_AXIS_COUNT:
-    default:
-      IREE_ASSERT_UNREACHABLE("invalid matrix fragment semantic axis");
-      break;
-  }
-}
-
-static bool loom_matrix_fragment_role_coordinate_element_count(
-    const loom_matrix_fragment_role_layout_t* role_layout,
-    uint32_t* out_element_count) {
-  uint32_t element_count = 1;
-  bool has_axis = false;
-  for (iree_host_size_t i = 0; i < LOOM_MATRIX_FRAGMENT_AXIS_COUNT; ++i) {
-    const loom_matrix_fragment_axis_t axis = (loom_matrix_fragment_axis_t)i;
-    if (!iree_any_bit_set(role_layout->coordinate_flags,
-                          loom_matrix_fragment_axis_coordinate_flag(axis))) {
-      continue;
-    }
-    has_axis = true;
-    const loom_matrix_fragment_axis_layout_t* axis_layout =
-        &role_layout->axes[axis];
-    const uint32_t axis_element_count =
-        (uint32_t)axis_layout->outer_count * axis_layout->element_count;
-    if (axis_element_count == 0 ||
-        element_count > UINT16_MAX / axis_element_count) {
-      return false;
-    }
-    element_count *= axis_element_count;
-  }
-  *out_element_count = has_axis ? element_count : 0;
-  return has_axis;
-}
-
 bool loom_matrix_fragment_coordinate(
     const loom_matrix_fragment_layout_t* layout,
     loom_contract_operand_role_t role, uint16_t lane,
@@ -132,6 +119,7 @@ bool loom_matrix_fragment_coordinate_from_role_layout(
   if (layout == NULL || role_layout == NULL || layout->wave_size == 0 ||
       lane >= layout->wave_size ||
       payload_element_index >= role_layout->payload_element_count ||
+      role_layout->coordinate_projection_plan == NULL ||
       role_layout->coordinate_element_stride == 0 ||
       payload_element_index < role_layout->coordinate_element_offset) {
     return false;
@@ -149,66 +137,30 @@ bool loom_matrix_fragment_coordinate_from_role_layout(
   }
   const uint32_t coordinate_element_index =
       relative_payload_element / role_layout->coordinate_element_stride;
-  uint32_t coordinate_element_count = 0;
-  if (!loom_matrix_fragment_role_coordinate_element_count(
-          role_layout, &coordinate_element_count) ||
-      coordinate_element_index >= coordinate_element_count) {
+  if (coordinate_element_index >= role_layout->coordinate_element_count) {
     return false;
   }
 
-  uint32_t inner_element_count = 1;
-  uint32_t outer_element_count = 1;
-  for (iree_host_size_t i = 0; i < LOOM_MATRIX_FRAGMENT_AXIS_COUNT; ++i) {
-    const loom_matrix_fragment_axis_t axis = (loom_matrix_fragment_axis_t)i;
-    if (!iree_any_bit_set(role_layout->coordinate_flags,
-                          loom_matrix_fragment_axis_coordinate_flag(axis))) {
-      continue;
-    }
-    inner_element_count *= role_layout->axes[axis].element_count;
-    outer_element_count *= role_layout->axes[axis].outer_count;
-  }
-  IREE_ASSERT_EQ(coordinate_element_count,
-                 inner_element_count * outer_element_count);
-  const uint32_t inner_linear_index =
-      coordinate_element_index % inner_element_count;
-  const uint32_t outer_linear_index =
-      coordinate_element_index / inner_element_count;
-
+  const loom_matrix_fragment_coordinate_projection_plan_t* plan =
+      role_layout->coordinate_projection_plan;
+  const uint32_t source_terms[LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COUNT] =
+      {
+          [LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_PARTICIPANT] = lane,
+          [LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_VALUE] =
+              coordinate_element_index,
+      };
+  uint32_t terms[LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COUNT];
+  loom_matrix_fragment_apply_coordinate_projection(
+      plan->terms, plan->forward_term_count, source_terms, terms);
   out_coordinate->coordinate_flags = role_layout->coordinate_flags;
-  uint32_t inner_stride = inner_element_count;
-  uint32_t outer_stride = outer_element_count;
-  for (iree_host_size_t i = 0; i < LOOM_MATRIX_FRAGMENT_AXIS_COUNT; ++i) {
-    const loom_matrix_fragment_axis_t axis = (loom_matrix_fragment_axis_t)i;
-    if (!iree_any_bit_set(role_layout->coordinate_flags,
-                          loom_matrix_fragment_axis_coordinate_flag(axis))) {
-      continue;
-    }
-    const loom_matrix_fragment_axis_layout_t* axis_layout =
-        &role_layout->axes[axis];
-    if (axis_layout->outer_count == 0 || axis_layout->thread_count == 0 ||
-        axis_layout->thread_stride == 0 || axis_layout->element_count == 0) {
-      return false;
-    }
-    inner_stride /= axis_layout->element_count;
-    outer_stride /= axis_layout->outer_count;
-    const uint32_t element_coordinate =
-        (inner_linear_index / inner_stride) % axis_layout->element_count;
-    const uint32_t thread_coordinate =
-        (lane / axis_layout->thread_stride) % axis_layout->thread_count;
-    const uint32_t outer_coordinate =
-        (outer_linear_index / outer_stride) % axis_layout->outer_count;
-    const uint32_t coordinate =
-        element_coordinate +
-        (uint32_t)axis_layout->element_count *
-            (thread_coordinate +
-             (uint32_t)axis_layout->thread_count * outer_coordinate);
-    if (coordinate >=
-        loom_matrix_fragment_axis_extent(&layout->tile_shape, axis)) {
-      return false;
-    }
-    loom_matrix_fragment_set_axis_coordinate(out_coordinate, axis,
-                                             (uint16_t)coordinate);
-  }
+  out_coordinate->block =
+      (uint16_t)terms[LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_BLOCK];
+  out_coordinate->row =
+      (uint16_t)terms[LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_ROW];
+  out_coordinate->column =
+      (uint16_t)terms[LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COLUMN];
+  out_coordinate->reduction =
+      (uint16_t)terms[LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_REDUCTION];
   return true;
 }
 

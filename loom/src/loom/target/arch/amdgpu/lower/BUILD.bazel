@@ -31,8 +31,6 @@ _AMDGPU_LOWER_TABLE_VISIBILITY = (
     _AMDGPU_CONTRACT_VISIBILITY
 )
 
-_AMDGPU_MEMORY_CANDIDATE_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu/lower/candidates:memory_candidates"
-
 _AMDGPU_NARROW_FLOAT_TABLE_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu/lower:narrow_float_tables"
 
 loom_cc_library(
@@ -57,19 +55,6 @@ exports_files(
         "registry_tables.inl",
     ],
     visibility = ["//loom/py/loom/target/arch/amdgpu/contracts:__pkg__"],
-)
-
-loom_generated_file_family(
-    name = "memory_descriptor_candidate_tables_gen",
-    generator = _AMDGPU_MEMORY_CANDIDATE_GENERATOR,
-    output_flags = [
-        "--candidate-ranges",
-        "--candidate-rows",
-    ],
-    outputs = [
-        "memory_descriptor_candidate_ranges.inl",
-        "memory_descriptor_candidates.inl",
-    ],
 )
 
 loom_generated_file_family(
@@ -242,8 +227,10 @@ loom_cc_library(
         "//loom/src/loom/target/arch/amdgpu:target_records_tables.inl",
         "//loom/src/loom/target/arch/amdgpu:memory_cache_policy_encoding_rows.inl",
         "//loom/src/loom/target/arch/amdgpu:memory_cache_policy_temporal_th.inl",
-        ":memory_descriptor_candidate_ranges.inl",
-        ":memory_descriptor_candidates.inl",
+        "//loom/src/loom/target/arch/amdgpu/lower/candidates:memory_descriptor_candidate_ranges.inl",
+        "//loom/src/loom/target/arch/amdgpu/lower/candidates:memory_descriptor_candidates.inl",
+        "//loom/src/loom/target/arch/amdgpu/matrix:matrix_fragment_repack_result_to_lhs_projections.inl",
+        "//loom/src/loom/target/arch/amdgpu/matrix:matrix_fragment_repack_result_to_rhs_projections.inl",
         "registry_tables.inl",
     ],
     visibility = _AMDGPU_ROOT_VISIBILITY,
@@ -294,10 +281,7 @@ loom_cc_library(
         "//loom/src/loom/target/arch/amdgpu/contracts",
         "//loom/src/loom/target/arch/amdgpu/encoding:encoding_defs",
         "//loom/src/loom/target/arch/amdgpu/hal:kernel_abi",
-        "//loom/src/loom/target/arch/amdgpu/lower/candidates:arithmetic_candidates",
-        "//loom/src/loom/target/arch/amdgpu/lower/candidates:async_gather_candidates",
-        "//loom/src/loom/target/arch/amdgpu/lower/candidates:atomic_candidates",
-        "//loom/src/loom/target/arch/amdgpu/lower/candidates:compare_candidates",
+        "//loom/src/loom/target/arch/amdgpu/lower/candidates:candidate_tables",
         "//loom/src/loom/target/arch/amdgpu/matrix:contract",
         "//loom/src/loom/target/arch/amdgpu/matrix:projection",
         "//loom/src/loom/target/arch/amdgpu/planning:wait_counters",

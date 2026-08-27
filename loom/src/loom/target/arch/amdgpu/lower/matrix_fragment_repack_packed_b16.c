@@ -11,7 +11,6 @@
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/amdgpu/lower/constants.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
-#include "loom/target/arch/amdgpu/lower/matrix_fragment.h"
 #include "loom/target/arch/amdgpu/lower/subgroup.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
@@ -22,82 +21,29 @@ enum {
   // selector packs SRC1.low16 before SRC0.low16.
   LOOM_AMDGPU_FRAGMENT_REPACK_PACK_LOW16_SELECTOR = 0x01000504u,
   LOOM_AMDGPU_FRAGMENT_REPACK_PACK_LOW16_REVERSED_SELECTOR = 0x05040100u,
-  // Wave32 lanes 16..31 contain the odd result rows paired with lanes 0..15.
-  LOOM_AMDGPU_FRAGMENT_REPACK_ODD_ROW_LANE_MASK = 0xFFFF0000u,
 };
 
-static bool loom_amdgpu_fragment_repack_axis_layout_matches(
-    const loom_matrix_fragment_axis_layout_t* axis, uint16_t outer_count,
-    uint16_t thread_count, uint16_t thread_stride, uint16_t element_count) {
-  return axis->outer_count == outer_count &&
-         axis->thread_count == thread_count &&
-         axis->thread_stride == thread_stride &&
-         axis->element_count == element_count;
-}
+typedef struct loom_amdgpu_result_to_rhs_packed_b16_projection_t {
+  // Lane-id XOR mask selecting the other source halfword owner.
+  uint16_t exchange_lane_mask;
+  // Wave32 predicate selecting lanes that reverse the packed pair.
+  uint32_t reverse_lane_mask;
+} loom_amdgpu_result_to_rhs_packed_b16_projection_t;
+
+#include "loom/target/arch/amdgpu/matrix/matrix_fragment_repack_result_to_rhs_projections.inl"
 
 bool loom_amdgpu_select_result_to_rhs_packed_b16_fragment_repack_plan(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_amdgpu_matrix_fragment_layout_t* layout,
-    const loom_matrix_fragment_role_layout_t* source_role_layout,
-    const loom_matrix_fragment_role_layout_t* result_role_layout,
     loom_amdgpu_fragment_repack_plan_t* plan) {
+  const uint8_t projection_ordinal =
+      kResultToRhsPackedB16ProjectionOrdinals[layout->kind];
+  const loom_amdgpu_result_to_rhs_packed_b16_projection_t* projection =
+      &kResultToRhsPackedB16Projections[projection_ordinal];
   if (plan->source_role != LOOM_CONTRACT_OPERAND_ROLE_RESULT ||
       plan->result_role != LOOM_CONTRACT_OPERAND_ROLE_RHS ||
       !loom_type_equal(plan->source_type, plan->result_type) ||
-      layout->wave_size != 32 || layout->tile_shape.block_count != 1 ||
-      layout->tile_shape.result_row_count !=
-          layout->tile_shape.reduction_count ||
-      layout->tile_shape.result_column_count != 16 ||
-      source_role_layout->element_bit_count != 16 ||
-      result_role_layout->element_bit_count != 16 ||
-      source_role_layout->coordinate_element_offset != 0 ||
-      source_role_layout->coordinate_element_stride != 2 ||
-      result_role_layout->coordinate_element_offset != 0 ||
-      result_role_layout->coordinate_element_stride != 1 ||
-      loom_amdgpu_matrix_fragment_payload_elements_per_register(
-          source_role_layout) != 2 ||
-      loom_amdgpu_matrix_fragment_payload_elements_per_register(
-          result_role_layout) != 2 ||
-      source_role_layout->coordinate_flags !=
-          (LOOM_MATRIX_FRAGMENT_COORDINATE_ROW |
-           LOOM_MATRIX_FRAGMENT_COORDINATE_COLUMN) ||
-      result_role_layout->coordinate_flags !=
-          (LOOM_MATRIX_FRAGMENT_COORDINATE_COLUMN |
-           LOOM_MATRIX_FRAGMENT_COORDINATE_REDUCTION) ||
-      source_role_layout->register_count == 0 ||
-      source_role_layout->register_count !=
-          result_role_layout->register_count ||
-      source_role_layout->payload_element_count !=
-          source_role_layout->register_count * 2u ||
-      result_role_layout->payload_element_count !=
-          result_role_layout->register_count * 2u ||
-      layout->tile_shape.result_row_count !=
-          source_role_layout->register_count * 2u ||
-      layout->tile_shape.reduction_count !=
-          result_role_layout->register_count * 2u) {
-    return false;
-  }
-
-  const loom_matrix_fragment_axis_layout_t* source_row_layout =
-      &source_role_layout->axes[LOOM_MATRIX_FRAGMENT_AXIS_ROW];
-  const loom_matrix_fragment_axis_layout_t* source_column_layout =
-      &source_role_layout->axes[LOOM_MATRIX_FRAGMENT_AXIS_COLUMN];
-  const loom_matrix_fragment_axis_layout_t* result_column_layout =
-      &result_role_layout->axes[LOOM_MATRIX_FRAGMENT_AXIS_COLUMN];
-  const loom_matrix_fragment_axis_layout_t* result_reduction_layout =
-      &result_role_layout->axes[LOOM_MATRIX_FRAGMENT_AXIS_REDUCTION];
-  if (!loom_amdgpu_fragment_repack_axis_layout_matches(
-          source_row_layout, source_role_layout->register_count, 2,
-          layout->tile_shape.result_column_count, 1) ||
-      !loom_amdgpu_fragment_repack_axis_layout_matches(
-          source_column_layout, 1, layout->tile_shape.result_column_count, 1,
-          1) ||
-      !loom_amdgpu_fragment_repack_axis_layout_matches(
-          result_column_layout, 1, layout->tile_shape.result_column_count, 1,
-          1) ||
-      !loom_amdgpu_fragment_repack_axis_layout_matches(
-          result_reduction_layout, 1, 1, 1,
-          layout->tile_shape.reduction_count)) {
+      projection->exchange_lane_mask == 0) {
     return false;
   }
 
@@ -115,8 +61,8 @@ bool loom_amdgpu_select_result_to_rhs_packed_b16_fragment_repack_plan(
 
   loom_amdgpu_direct_xor_lane_recipe_t exchange = {0};
   if (!loom_amdgpu_select_direct_xor_lane_recipe(
-          descriptor_set, layout->wave_size,
-          layout->tile_shape.result_column_count, &exchange)) {
+          descriptor_set, layout->wave_size, projection->exchange_lane_mask,
+          &exchange)) {
     return false;
   }
 
@@ -124,9 +70,11 @@ bool loom_amdgpu_select_result_to_rhs_packed_b16_fragment_repack_plan(
       LOOM_AMDGPU_FRAGMENT_REPACK_STRATEGY_RESULT_TO_RHS_PACKED_B16_XOR_PERMUTE;
   plan->reason = LOOM_AMDGPU_FRAGMENT_REPACK_REASON_NONE;
   plan->layout_kind = (loom_amdgpu_matrix_fragment_layout_kind_t)layout->kind;
-  plan->source_register_count = source_role_layout->register_count;
-  plan->result_register_count = result_role_layout->register_count;
-  plan->strategy_payload.result_to_rhs_exchange = exchange;
+  plan->source_register_count = layout->result.register_count;
+  plan->result_register_count = layout->rhs.register_count;
+  plan->strategy_payload.result_to_rhs.exchange = exchange;
+  plan->strategy_payload.result_to_rhs.reverse_lane_mask =
+      projection->reverse_lane_mask;
   return true;
 }
 
@@ -182,7 +130,7 @@ iree_status_t loom_amdgpu_lower_result_to_rhs_packed_b16_fragment_repack(
 
   loom_low_lower_resolved_descriptor_t exchange_descriptor = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref(
-      context, plan->strategy_payload.result_to_rhs_exchange.descriptor_ref,
+      context, plan->strategy_payload.result_to_rhs.exchange.descriptor_ref,
       &exchange_descriptor));
   loom_low_lower_resolved_descriptor_t vcc_constant_descriptor = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref(
@@ -199,7 +147,7 @@ iree_status_t loom_amdgpu_lower_result_to_rhs_packed_b16_fragment_repack(
   loom_value_id_t low_odd_row_lanes = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_fragment_repack_vcc_constant(
       context, source_op, &vcc_constant_descriptor,
-      LOOM_AMDGPU_FRAGMENT_REPACK_ODD_ROW_LANE_MASK, vcc_type,
+      plan->strategy_payload.result_to_rhs.reverse_lane_mask, vcc_type,
       &low_odd_row_lanes));
   loom_value_id_t low_reversed_selector = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
@@ -234,9 +182,9 @@ iree_status_t loom_amdgpu_lower_result_to_rhs_packed_b16_fragment_repack(
   for (uint16_t i = 0; i < plan->source_register_count; ++i) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_direct_crosslane_register(
         context, source_op, &exchange_descriptor,
-        plan->strategy_payload.result_to_rhs_exchange.crosslane_kind,
+        plan->strategy_payload.result_to_rhs.exchange.crosslane_kind,
         source_registers[i],
-        plan->strategy_payload.result_to_rhs_exchange.immediate, vgpr_type,
+        plan->strategy_payload.result_to_rhs.exchange.immediate, vgpr_type,
         &paired_registers[i]));
   }
 

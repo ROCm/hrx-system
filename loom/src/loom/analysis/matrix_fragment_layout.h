@@ -54,25 +54,47 @@ typedef enum loom_matrix_fragment_axis_e {
   LOOM_MATRIX_FRAGMENT_AXIS_COUNT = 4,
 } loom_matrix_fragment_axis_t;
 
-// Factorization of one semantic axis across lane-local payload elements and
-// subgroup lanes. The semantic coordinate is:
-//
-//   element + element_count *
-//       (thread + thread_count * outer)
-//
-// Payload element indices are row-major across all element factors and then
-// all outer factors. The lane contribution is
-// `(lane / thread_stride) % thread_count`.
-typedef struct loom_matrix_fragment_axis_layout_t {
-  // Outer lane-local factor represented by discontiguous payload elements.
-  uint16_t outer_count;
-  // Cross-lane factor distributed across the subgroup.
-  uint16_t thread_count;
-  // Lane-id stride between adjacent cross-lane coordinates.
-  uint16_t thread_stride;
-  // Inner lane-local factor represented by contiguous payload elements.
-  uint16_t element_count;
-} loom_matrix_fragment_axis_layout_t;
+// Named physical and semantic dimensions used by generated coordinate plans.
+typedef enum loom_matrix_fragment_coordinate_dimension_e {
+  LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_PARTICIPANT = 0,
+  LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_VALUE = 1,
+  LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_BLOCK = 2,
+  LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_ROW = 3,
+  LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COLUMN = 4,
+  LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_REDUCTION = 5,
+  LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COUNT = 6,
+} loom_matrix_fragment_coordinate_dimension_t;
+
+// One mixed-radix term in a generated coordinate projection. Evaluation adds
+// `((source / source_divisor) % source_modulus) * destination_multiplier`.
+// A zero source modulus omits the remainder operation.
+typedef struct loom_matrix_fragment_coordinate_projection_term_t {
+  // Dimension from which the source digit is extracted.
+  uint8_t source_dimension;
+  // Dimension into which the scaled digit is accumulated.
+  uint8_t destination_dimension;
+  // Divisor applied to the source coordinate before optional reduction.
+  uint16_t source_divisor;
+  // Modulus applied to the quotient, or zero to retain the full quotient.
+  uint16_t source_modulus;
+  // Multiplier applied before accumulating into the destination coordinate.
+  uint16_t destination_multiplier;
+} loom_matrix_fragment_coordinate_projection_term_t;
+
+// Direct generated projection for one fixed fragment role. Forward terms map
+// participant/value coordinates to stored role coordinates. Inverse terms map
+// stored coordinates to the canonical participant/value owner. For compressed
+// roles, the reduction coordinate names the physical storage group; runtime
+// metadata owns its expansion into logical reduction positions. The terms
+// array stores the forward slice followed by the inverse slice.
+typedef struct loom_matrix_fragment_coordinate_projection_plan_t {
+  // Concatenated forward and inverse coordinate terms.
+  const loom_matrix_fragment_coordinate_projection_term_t* terms;
+  // Number of forward terms at the beginning of |terms|.
+  uint8_t forward_term_count;
+  // Number of inverse terms following the forward terms.
+  uint8_t inverse_term_count;
+} loom_matrix_fragment_coordinate_projection_plan_t;
 
 typedef struct loom_matrix_fragment_tile_shape_t {
   // Independent matrix blocks computed by one target-native instruction.
@@ -95,6 +117,8 @@ typedef struct loom_matrix_fragment_role_layout_t {
   uint16_t element_bit_count;
   // Number of scalar elements in the role's source-level payload vector.
   uint16_t payload_element_count;
+  // Number of distinct stored coordinates represented by the payload.
+  uint16_t coordinate_element_count;
   // First payload element that carries a distinct logical coordinate.
   uint16_t coordinate_element_offset;
   // Payload element stride between distinct logical coordinates.
@@ -103,6 +127,9 @@ typedef struct loom_matrix_fragment_role_layout_t {
   loom_matrix_fragment_role_layout_flags_t flags;
   // Coordinate axes produced by this role layout.
   loom_matrix_fragment_coordinate_flags_t coordinate_flags;
+  // Single coordinate flag for the axis densely packed within each register,
+  // or zero when elements are not densely packed along one semantic axis.
+  loom_matrix_fragment_coordinate_flags_t packed_element_coordinate_flag;
   // Physical-to-logical grouping for a compressed reduction axis.
   struct {
     // Number of elements physically stored in each reduction group.
@@ -111,8 +138,9 @@ typedef struct loom_matrix_fragment_role_layout_t {
     // Number of logical reduction elements represented by each group.
     uint16_t logical_element_count;
   } reduction_group;
-  // Semantic factorization indexed by loom_matrix_fragment_axis_t.
-  loom_matrix_fragment_axis_layout_t axes[LOOM_MATRIX_FRAGMENT_AXIS_COUNT];
+  // Direct generated storage-coordinate plan.
+  const loom_matrix_fragment_coordinate_projection_plan_t*
+      coordinate_projection_plan;
 } loom_matrix_fragment_role_layout_t;
 
 typedef struct loom_matrix_fragment_layout_t {
@@ -153,6 +181,25 @@ typedef struct loom_matrix_fragment_physical_element_t {
   // Scalar element ordinal in the source-level payload vector.
   uint16_t payload_element_index;
 } loom_matrix_fragment_physical_element_t;
+
+// Applies a trusted generated coordinate projection term slice. |out_terms|
+// is cleared before the terms are accumulated.
+void loom_matrix_fragment_apply_coordinate_projection(
+    const loom_matrix_fragment_coordinate_projection_term_t* terms,
+    uint8_t term_count,
+    const uint32_t
+        source_terms[LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COUNT],
+    uint32_t out_terms[LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COUNT]);
+
+// Returns the coordinate dimension corresponding to one semantic axis.
+loom_matrix_fragment_coordinate_dimension_t
+loom_matrix_fragment_axis_coordinate_dimension(
+    loom_matrix_fragment_axis_t axis);
+
+// Returns the semantic axis corresponding to |dimension|, or
+// LOOM_MATRIX_FRAGMENT_AXIS_COUNT for a physical coordinate dimension.
+loom_matrix_fragment_axis_t loom_matrix_fragment_coordinate_dimension_axis(
+    loom_matrix_fragment_coordinate_dimension_t dimension);
 
 // Returns the role layout within |layout|, or NULL when the role is not
 // modeled.

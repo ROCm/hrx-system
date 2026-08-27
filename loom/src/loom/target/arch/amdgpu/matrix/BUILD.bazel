@@ -37,7 +37,18 @@ loom_cc_library(
 loom_target_table_cc_library(
     name = "contract_tables",
     args = ["--public-header=loom/target/arch/amdgpu/matrix/contract_tables.h"],
+    generated_hdr_flags = [
+        "--result-to-lhs",
+        "--result-to-rhs",
+    ],
+    generated_hdrs = [
+        "matrix_fragment_repack_result_to_lhs_projections.inl",
+        "matrix_fragment_repack_result_to_rhs_projections.inl",
+    ],
     generator = _AMDGPU_MATRIX_CONTRACT_TABLE_GENERATOR,
+    visibility = [
+        "//loom/src/loom/target/arch/amdgpu/lower:__pkg__",
+    ],
     deps = [
         ":types",
         "//runtime/src/iree/base",

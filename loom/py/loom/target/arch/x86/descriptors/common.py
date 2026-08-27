@@ -22,6 +22,7 @@ from loom.target.arch.x86.packed_dot_data import (
     NUMERIC_U8,
     NUMERIC_U16,
     PackedDotDescriptor,
+    packed_dot_native_layout,
 )
 from loom.target.low_descriptors import (
     AsmForm,
@@ -599,10 +600,10 @@ def _packed_dot_semantic_tag(descriptor: PackedDotDescriptor) -> str:
     lhs_tag = _PACKED_DOT_NUMERIC_TAGS[descriptor.lhs_numeric_type]
     rhs_tag = _PACKED_DOT_NUMERIC_TAGS[descriptor.rhs_numeric_type]
     result_tag = _PACKED_DOT_NUMERIC_TAGS[descriptor.result_numeric_type]
+    result_element_count = packed_dot_native_layout(descriptor).shape.block_count
     saturating_suffix = ".sat" if descriptor.flags & CONTRACT_FLAG_SATURATING else ""
     return (
-        f"dot.{lhs_tag}{rhs_tag}.{result_tag}x"
-        f"{descriptor.result_lane_count}{saturating_suffix}"
+        f"dot.{lhs_tag}{rhs_tag}.{result_tag}x{result_element_count}{saturating_suffix}"
     )
 
 

@@ -126,6 +126,8 @@ iree_py_library(
     srcs = ["matrix_fragment_layouts.py"],
     deps = [
         ":matrix_formats",
+        "//loom/py/loom/target:native_contraction_layout",
+        "//loom/py/loom/target:native_coordinate_projection",
         "//loom/py/loom/target/arch:package",
     ],
 )
@@ -138,7 +140,11 @@ iree_py_test(
     ],
     args = ["loom.target.arch.amdgpu.matrix_fragment_layouts_test"],
     main = "pytest_style_runner.py",
-    deps = [":matrix_fragment_layouts"],
+    deps = [
+        ":matrix_fragment_layouts",
+        "//loom/py/loom/target:native_contraction_layout",
+        "//loom/py/loom/target:native_coordinate_projection",
+    ],
 )
 
 iree_py_library(

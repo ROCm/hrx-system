@@ -11,7 +11,7 @@ from __future__ import annotations
 import argparse
 import re
 import sys
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Hashable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -45,8 +45,14 @@ from loom.target.arch.amdgpu.matrix_fragment_layouts import (  # noqa: E402
     AMDGPU_MATRIX_FRAGMENT_LAYOUTS,
     AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY,
     AmdgpuMatrixFragmentLayout,
+    MatrixFragmentResultToLhsBf16Projection,
+    MatrixFragmentResultToRhsPackedB16Projection,
     MatrixFragmentRoleLayout,
     layout_roles,
+    matrix_fragment_packed_element_axis,
+    matrix_fragment_result_to_lhs_bf16_projection,
+    matrix_fragment_result_to_rhs_packed_b16_projection,
+    matrix_fragment_role_storage_projection_plan,
     role_has_contiguous_lane_xor1_columns,
 )
 from loom.target.arch.amdgpu.target_info import (  # noqa: E402
@@ -73,6 +79,10 @@ from loom.target.low_descriptors import (  # noqa: E402
     ImmediateFlag,
     Operand,
     target_relative_name,
+)
+from loom.target.native_coordinate_projection import (  # noqa: E402
+    CoordinateProjectionPlan,
+    CoordinateProjectionTerm,
 )
 
 _FAMILY_C_NAMES = {
@@ -966,19 +976,119 @@ def _emit_header() -> str:
     return "\n".join(lines) + "\n"
 
 
+def _deduplicate_repack_projections[ProjectionT: Hashable](
+    project: Callable[[AmdgpuMatrixFragmentLayout], ProjectionT | None],
+) -> tuple[tuple[int, ...], tuple[ProjectionT, ...]]:
+    rows: list[ProjectionT] = []
+    row_ordinals: dict[ProjectionT, int] = {}
+    layout_ordinals: list[int] = []
+    for layout in AMDGPU_MATRIX_FRAGMENT_LAYOUTS:
+        projection = project(layout)
+        if projection is None:
+            layout_ordinals.append(0)
+            continue
+        ordinal = row_ordinals.get(projection)
+        if ordinal is None:
+            rows.append(projection)
+            ordinal = len(rows)
+            if ordinal > 0xFF:
+                raise ValueError("fragment repack projection ordinal exceeds uint8_t")
+            row_ordinals[projection] = ordinal
+        layout_ordinals.append(ordinal)
+    return tuple(layout_ordinals), tuple(rows)
+
+
+def _fragment_repack_ordinal_table_lines(name: str, layout_ordinals: tuple[int, ...]) -> list[str]:
+    lines = [
+        f"static const uint8_t {name}[",
+        "    LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_COUNT] = {",
+    ]
+    for layout, ordinal in zip(AMDGPU_MATRIX_FRAGMENT_LAYOUTS, layout_ordinals, strict=True):
+        if ordinal:
+            lines.append(f"    [{layout.c_kind}] = UINT8_C({ordinal}),")
+    lines.extend(["};", ""])
+    return lines
+
+
+def _fragment_repack_header() -> list[str]:
+    return [
+        "// Copyright 2026 The IREE Authors",
+        "//",
+        "// Licensed under the Apache License v2.0 with LLVM Exceptions.",
+        "// See https://llvm.org/LICENSE.txt for license information.",
+        "// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception",
+        "",
+        *line_comment_header(
+            "//",
+            generator=("loom.gen.target.arch.amdgpu.matrix.amdgpu_matrix_contract_tables"),
+        ),
+        "",
+    ]
+
+
+def _emit_result_to_lhs_repack_projections() -> str:
+    layout_ordinals, projections = _deduplicate_repack_projections(matrix_fragment_result_to_lhs_bf16_projection)
+    lines = _fragment_repack_header()
+    lines.extend(_fragment_repack_ordinal_table_lines("kResultToLhsBf16ProjectionOrdinals", layout_ordinals))
+    lines.extend(
+        [
+            "static const loom_amdgpu_result_to_lhs_bf16_projection_t",
+            "    kResultToLhsBf16Projections[] = {",
+            "    [0] = {0},",
+        ]
+    )
+    for ordinal, projection in enumerate(projections, start=1):
+        if not isinstance(projection, MatrixFragmentResultToLhsBf16Projection):
+            raise TypeError("unexpected result-to-LHS projection type")
+        lines.extend(
+            [
+                f"    [{ordinal}] = {{",
+                f"        .source_register_selector_and_mask = UINT16_C(0x{projection.source_register_selector.and_mask:x}),",
+                f"        .source_lane_group_and_mask = UINT16_C(0x{projection.source_lane_group.and_mask:x}),",
+                f"        .source_lane_group_byte_shift = UINT8_C({projection.source_lane_group_byte_shift}),",
+                f"        .result_lane_div_byte_shift = UINT8_C({projection.result_lane_div_byte_shift}),",
+                f"        .source_register_selector_right_shift = UINT8_C({projection.source_register_selector.right_shift}),",
+                f"        .source_lane_group_right_shift = UINT8_C({projection.source_lane_group.right_shift}),",
+                f"        .transpose_bit_count = UINT8_C({projection.transpose_bit_count}),",
+                "    },",
+            ]
+        )
+    lines.extend(["};", ""])
+    return "\n".join(lines)
+
+
+def _emit_result_to_rhs_repack_projections() -> str:
+    layout_ordinals, projections = _deduplicate_repack_projections(matrix_fragment_result_to_rhs_packed_b16_projection)
+    lines = _fragment_repack_header()
+    lines.extend(_fragment_repack_ordinal_table_lines("kResultToRhsPackedB16ProjectionOrdinals", layout_ordinals))
+    lines.extend(
+        [
+            "static const loom_amdgpu_result_to_rhs_packed_b16_projection_t",
+            "    kResultToRhsPackedB16Projections[] = {",
+            "    [0] = {0},",
+        ]
+    )
+    for ordinal, projection in enumerate(projections, start=1):
+        if not isinstance(projection, MatrixFragmentResultToRhsPackedB16Projection):
+            raise TypeError("unexpected result-to-RHS projection type")
+        lines.extend(
+            [
+                f"    [{ordinal}] = {{",
+                f"        .exchange_lane_mask = UINT16_C(0x{projection.exchange_participant_xor_mask:x}),",
+                f"        .reverse_lane_mask = UINT32_C(0x{projection.reverse_participant_mask:x}),",
+                "    },",
+            ]
+        )
+    lines.extend(["};", ""])
+    return "\n".join(lines)
+
+
 _ROLE_C_NAMES = {
     "lhs": "LOOM_CONTRACT_OPERAND_ROLE_LHS",
     "rhs": "LOOM_CONTRACT_OPERAND_ROLE_RHS",
     "accumulator": "LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR",
     "result": "LOOM_CONTRACT_OPERAND_ROLE_RESULT",
 }
-
-_AXIS_C_NAMES = (
-    "LOOM_MATRIX_FRAGMENT_AXIS_BLOCK",
-    "LOOM_MATRIX_FRAGMENT_AXIS_ROW",
-    "LOOM_MATRIX_FRAGMENT_AXIS_COLUMN",
-    "LOOM_MATRIX_FRAGMENT_AXIS_REDUCTION",
-)
 
 _COORDINATE_FLAG_C_NAMES = (
     "LOOM_MATRIX_FRAGMENT_COORDINATE_BLOCK",
@@ -989,23 +1099,126 @@ _COORDINATE_FLAG_C_NAMES = (
 
 _CONTIGUOUS_LANE_XOR1_COLUMNS_FLAG_C_NAME = "LOOM_MATRIX_FRAGMENT_ROLE_LAYOUT_FLAG_CONTIGUOUS_LANE_XOR1_COLUMNS"
 
+_PACKED_ELEMENT_AXIS_C_NAMES = {
+    "block": "LOOM_MATRIX_FRAGMENT_COORDINATE_BLOCK",
+    "row": "LOOM_MATRIX_FRAGMENT_COORDINATE_ROW",
+    "column": "LOOM_MATRIX_FRAGMENT_COORDINATE_COLUMN",
+    "reduction": "LOOM_MATRIX_FRAGMENT_COORDINATE_REDUCTION",
+}
+
+_COORDINATE_DIMENSION_C_NAMES = {
+    "participant": "LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_PARTICIPANT",
+    "value": "LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_VALUE",
+    "block": "LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_BLOCK",
+    "m": "LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_ROW",
+    "n": "LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COLUMN",
+    "k": "LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_REDUCTION",
+    "row": "LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_ROW",
+    "column": "LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_COLUMN",
+    "reduction": "LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_REDUCTION",
+}
+
+
+def _fragment_coordinate_plan_catalog() -> tuple[tuple[CoordinateProjectionPlan, ...], Mapping[tuple[str, str], int]]:
+    plans: list[CoordinateProjectionPlan] = []
+    plan_indices: dict[CoordinateProjectionPlan, int] = {}
+    role_plan_indices: dict[tuple[str, str], int] = {}
+    for layout in AMDGPU_MATRIX_FRAGMENT_LAYOUTS:
+        for role in layout_roles(layout):
+            plan = matrix_fragment_role_storage_projection_plan(layout, role)
+            participant_destinations = tuple(term.destination_dimension for term in plan.forward_terms if term.source_dimension == "participant")
+            if len(participant_destinations) != len(set(participant_destinations)):
+                raise ValueError(f"AMDGPU matrix fragment layout '{layout.key}' role '{role.role}' requires multiple participant digits for one stored coordinate")
+            plan_index = plan_indices.get(plan)
+            if plan_index is None:
+                plan_index = len(plans)
+                plans.append(plan)
+                plan_indices[plan] = plan_index
+            role_plan_indices[(layout.key, role.role)] = plan_index
+    return tuple(plans), role_plan_indices
+
+
+def _fragment_coordinate_term_initializer(
+    term: CoordinateProjectionTerm,
+) -> list[str]:
+    for field_name, value in (
+        ("source_divisor", term.source_divisor),
+        ("source_modulus", term.source_modulus),
+        ("destination_multiplier", term.destination_multiplier),
+    ):
+        if value > 0xFFFF:
+            raise ValueError(f"AMDGPU matrix fragment coordinate projection {field_name} {value} exceeds uint16_t")
+    return [
+        "{",
+        f"    .source_dimension = {_COORDINATE_DIMENSION_C_NAMES[term.source_dimension]},",
+        f"    .destination_dimension = {_COORDINATE_DIMENSION_C_NAMES[term.destination_dimension]},",
+        f"    .source_divisor = {term.source_divisor},",
+        f"    .source_modulus = {term.source_modulus},",
+        f"    .destination_multiplier = {term.destination_multiplier},",
+        "},",
+    ]
+
+
+def _fragment_coordinate_plan_table_lines(
+    plans: tuple[CoordinateProjectionPlan, ...],
+) -> list[str]:
+    plan_terms = tuple(plan.forward_terms + plan.inverse_terms for plan in plans)
+    lines = [
+        "static const loom_matrix_fragment_coordinate_projection_term_t",
+        "    kLoomAmdgpuMatrixFragmentCoordinateProjectionTerms[] = {",
+    ]
+    for terms in plan_terms:
+        for term in terms:
+            lines.extend(_fragment_coordinate_term_initializer(term))
+    lines.extend(
+        [
+            "};",
+            "",
+            "static const loom_matrix_fragment_coordinate_projection_plan_t",
+            "    kLoomAmdgpuMatrixFragmentCoordinateProjectionPlans[] = {",
+        ]
+    )
+    term_offset = 0
+    for plan, terms in zip(plans, plan_terms, strict=True):
+        if len(plan.forward_terms) > 0xFF or len(plan.inverse_terms) > 0xFF:
+            raise ValueError("AMDGPU matrix fragment coordinate projection term count exceeds uint8_t")
+        lines.extend(
+            [
+                "{",
+                "    .terms =",
+                "        &kLoomAmdgpuMatrixFragmentCoordinateProjectionTerms[",
+                f"            {term_offset}],",
+                f"    .forward_term_count = {len(plan.forward_terms)},",
+                f"    .inverse_term_count = {len(plan.inverse_terms)},",
+                "},",
+            ]
+        )
+        term_offset += len(terms)
+    lines.extend(["};", ""])
+    return lines
+
 
 def _fragment_role_initializer(
     layout: AmdgpuMatrixFragmentLayout,
     role: MatrixFragmentRoleLayout,
+    coordinate_plan_index: int,
 ) -> list[str]:
     coordinate_flags = " | ".join(flag_name for flag_name, axis in zip(_COORDINATE_FLAG_C_NAMES, role.axes, strict=True) if axis is not None)
     flags = _CONTIGUOUS_LANE_XOR1_COLUMNS_FLAG_C_NAME if role_has_contiguous_lane_xor1_columns(layout, role) else "0"
+    packed_element_axis = matrix_fragment_packed_element_axis(layout, role)
+    packed_element_axis_c_name = "0" if packed_element_axis is None else _PACKED_ELEMENT_AXIS_C_NAMES[packed_element_axis]
     lines = [
         "{",
         f"    .role = {_ROLE_C_NAMES[role.role]},",
         f"    .register_count = {role.register_count},",
         f"    .element_bit_count = {role.element_bit_count},",
         f"    .payload_element_count = {role.payload_element_count},",
+        f"    .coordinate_element_count = {role.coordinate_element_count},",
         f"    .coordinate_element_offset = {role.coordinate_element_offset},",
         f"    .coordinate_element_stride = {role.coordinate_element_stride},",
         f"    .flags = {flags},",
         f"    .coordinate_flags = {coordinate_flags},",
+        f"    .packed_element_coordinate_flag = {packed_element_axis_c_name},",
     ]
     if role.reduction_group is not None:
         lines.extend(
@@ -1016,26 +1229,20 @@ def _fragment_role_initializer(
                 "    },",
             ]
         )
-    lines.append("    .axes = {")
-    for axis_name, axis in zip(_AXIS_C_NAMES, role.axes, strict=True):
-        if axis is None:
-            continue
-        lines.extend(
-            [
-                f"        [{axis_name}] = {{",
-                f"            .outer_count = {axis.outer_count},",
-                f"            .thread_count = {axis.thread_count},",
-                f"            .thread_stride = {axis.thread_stride},",
-                f"            .element_count = {axis.element_count},",
-                "        },",
-            ]
-        )
-    lines.extend(["    },", "},"])
+    lines.extend(
+        [
+            "    .coordinate_projection_plan =",
+            "        &kLoomAmdgpuMatrixFragmentCoordinateProjectionPlans[",
+            f"            {coordinate_plan_index}],",
+        ]
+    )
+    lines.append("},")
     return lines
 
 
 def _fragment_layout_initializer(
     layout: AmdgpuMatrixFragmentLayout,
+    role_plan_indices: Mapping[tuple[str, str], int],
 ) -> list[str]:
     block_count, row_count, column_count, reduction_count = layout.tile_shape
     lines = [
@@ -1055,7 +1262,7 @@ def _fragment_layout_initializer(
         layout_roles(layout),
         strict=True,
     ):
-        role_lines = _fragment_role_initializer(layout, role)
+        role_lines = _fragment_role_initializer(layout, role, role_plan_indices[(layout.key, role.role)])
         lines.append(f"    .{field_name} = {role_lines[0]}")
         lines.extend(f"    {line}" for line in role_lines[1:])
     lines.append("},")
@@ -1073,6 +1280,7 @@ def _emit_source(*, public_header: str) -> str:
         descriptor_immediates_by_key=descriptor_immediates_by_key,
     )
     _validate_matrix_profile_descriptor_sets(global_descriptor_keys=descriptor_keys)
+    coordinate_plans, role_plan_indices = _fragment_coordinate_plan_catalog()
     lines = [
         "// Copyright 2026 The IREE Authors",
         "//",
@@ -1085,12 +1293,13 @@ def _emit_source(*, public_header: str) -> str:
         f'#include "{public_header}"',
         "",
         *_matrix_feature_profile_table_lines(),
+        *_fragment_coordinate_plan_table_lines(coordinate_plans),
         "const loom_amdgpu_matrix_fragment_layout_t",
         "    kLoomAmdgpuMatrixFragmentLayouts[",
         "        LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_COUNT] = {",
     ]
     for layout in AMDGPU_MATRIX_FRAGMENT_LAYOUTS:
-        lines.extend(_fragment_layout_initializer(layout))
+        lines.extend(_fragment_layout_initializer(layout, role_plan_indices))
     lines.extend(
         [
             "};",
@@ -1146,12 +1355,32 @@ def main(argv: Sequence[str] | None = None) -> int:
         default="loom/target/arch/amdgpu/matrix/contract_tables.h",
         help="Public include path for the generated header.",
     )
+    parser.add_argument(
+        "--result-to-lhs",
+        required=True,
+        type=Path,
+        help="Generated result-to-LHS fragment repack projection table path.",
+    )
+    parser.add_argument(
+        "--result-to-rhs",
+        required=True,
+        type=Path,
+        help="Generated result-to-RHS fragment repack projection table path.",
+    )
     args = parser.parse_args(argv)
 
     write_text_file(args.header, _emit_header())
     write_text_file(
         args.source,
         _emit_source(public_header=args.public_header),
+    )
+    write_text_file(
+        args.result_to_lhs,
+        _emit_result_to_lhs_repack_projections(),
+    )
+    write_text_file(
+        args.result_to_rhs,
+        _emit_result_to_rhs_repack_projections(),
     )
     return 0
 

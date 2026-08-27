@@ -4,33 +4,19 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Generator: AMDGPU source-to-low memory descriptor candidates."""
+"""Emits AMDGPU source-to-low memory descriptor candidates."""
 
 from __future__ import annotations
 
-import argparse
-import sys
 from collections.abc import Sequence
-from pathlib import Path
 
-
-def _ensure_runtime_py_on_path() -> None:
-    runtime_py = Path(__file__).resolve().parents[7]
-    runtime_py_string = str(runtime_py)
-    if runtime_py_string not in sys.path:
-        sys.path.insert(0, runtime_py_string)
-
-
-_ensure_runtime_py_on_path()
-
-from loom.gen.support.files import write_text_file  # noqa: E402
-from loom.gen.support.generated_file import line_comment_header  # noqa: E402
-from loom.gen.target.arch.amdgpu.lower.candidates.validation import (  # noqa: E402
+from loom.gen.support.generated_file import line_comment_header
+from loom.gen.target.arch.amdgpu.lower.candidates.validation import (
     dense_candidate_ranges,
     descriptor_ref_constant_name,
     require_descriptor_refs,
 )
-from loom.target.arch.amdgpu.descriptors import (  # noqa: E402
+from loom.target.arch.amdgpu.descriptors import (
     AmdgpuMemoryAddressForm,
     AmdgpuMemoryDescriptorCandidate,
     AmdgpuMemoryDescriptorDomain,
@@ -291,29 +277,6 @@ def _emit_candidate_ranges(
     )
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Generate AMDGPU source-to-low memory descriptor candidates.")
-    parser.add_argument(
-        "--candidate-rows",
-        type=Path,
-        help="Generated memory descriptor candidate row fragment path.",
-    )
-    parser.add_argument(
-        "--candidate-ranges",
-        type=Path,
-        help="Generated memory descriptor candidate range fragment path.",
-    )
-    args = parser.parse_args(argv)
-
-    if args.candidate_rows is None and args.candidate_ranges is None:
-        parser.error("at least one output path is required")
+def _emit_tables() -> tuple[str, str]:
     candidates = _ordered_candidates(amdgpu_memory_descriptor_candidates())
-    if args.candidate_rows is not None:
-        write_text_file(args.candidate_rows, _emit_candidate_rows(candidates))
-    if args.candidate_ranges is not None:
-        write_text_file(args.candidate_ranges, _emit_candidate_ranges(candidates))
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+    return _emit_candidate_ranges(candidates), _emit_candidate_rows(candidates)
