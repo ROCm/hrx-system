@@ -1923,6 +1923,23 @@ class TestTypeDef:
 
         assert type_def.semantic == TypeSemantic.MANAGED_REFERENCE
 
+    def test_managed_reference_requires_qualified_opaque_dialect_type(self) -> None:
+        with _raises(ValueError, match="namespace-qualified"):
+            TypeDef("handle", semantic=TypeSemantic.MANAGED_REFERENCE)
+        with _raises(ValueError, match="opaque dialect types"):
+            TypeDef(
+                "test.ref",
+                params=[AttrDef("element_type", "type")],
+                format=[Param("element_type")],
+                semantic=TypeSemantic.MANAGED_REFERENCE,
+            )
+        with _raises(ValueError, match="opaque dialect types"):
+            TypeDef(
+                "test.ref",
+                ir_kind="buffer",
+                semantic=TypeSemantic.MANAGED_REFERENCE,
+            )
+
     def test_descriptor_parameters_support_positional_and_keyed_formats(self) -> None:
         type_def = TypeDef(
             "test.matrix",

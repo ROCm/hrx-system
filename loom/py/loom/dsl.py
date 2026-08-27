@@ -3989,6 +3989,17 @@ class TypeDef:
                 f"TypeDef '{name}': Python value types are only supported for "
                 "compact descriptor-backed types"
             )
+        if semantic is TypeSemantic.MANAGED_REFERENCE:
+            if "." not in name:
+                raise ValueError(
+                    f"TypeDef '{name}': managed references require a "
+                    "namespace-qualified name"
+                )
+            if frozen_params or frozen_format or ir_kind != "dialect":
+                raise ValueError(
+                    f"TypeDef '{name}': managed references must be opaque "
+                    "dialect types without parameters"
+                )
         parameter_names = [parameter.name for parameter in frozen_params]
         if len(set(parameter_names)) != len(parameter_names):
             raise ValueError(f"TypeDef '{name}': duplicate parameter name")

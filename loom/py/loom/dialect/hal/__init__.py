@@ -15,7 +15,7 @@ hal.buffer — an opaque device buffer handle. Produced by pool.buffer,
 consumed by HAL queue operations (copies, fills, etc.).
 """
 
-from loom.dsl import TypeDef
+from loom.dsl import TypeDef, TypeSemantic
 
 # ============================================================================
 # hal.buffer — opaque device buffer handle
@@ -24,6 +24,7 @@ from loom.dsl import TypeDef
 hal_buffer_type = TypeDef(
     name="hal.buffer",
     doc="Opaque device buffer handle for HAL queue operations.",
+    semantic=TypeSemantic.MANAGED_REFERENCE,
 )
 
 # ============================================================================
