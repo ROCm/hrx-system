@@ -10,62 +10,51 @@
 iree_add_all_subdirs()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_cc_library(
+loom_generated_file_family(
   NAME
-    arithmetic_candidates
+    candidate_tables_gen
   GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::lower::candidates::arithmetic_candidates
+    loom::py::loom::gen::target::arch::amdgpu::lower::candidates::candidates
+  OUTPUTS
+    "arithmetic_candidates.c"
+    "async_gather_candidates.c"
+    "atomic_candidates.c"
+    "compare_candidates.c"
+    "memory_descriptor_candidate_ranges.inl"
+    "memory_descriptor_candidates.inl"
+  OUTPUT_FLAGS
+    "--arithmetic-source"
+    "--async-gather-source"
+    "--atomic-source"
+    "--compare-source"
+    "--memory-candidate-ranges"
+    "--memory-candidate-rows"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_cc_library(
+  NAME
+    candidate_tables
   HDRS
     "arithmetic_candidates.h"
-  DEPS
-    loom::target::arch::amdgpu::lower::kinds
-    loom::target::arch::amdgpu::refs::target_refs
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_cc_library(
-  NAME
-    async_gather_candidates
-  GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::lower::candidates::async_gather_candidates
-  HDRS
     "async_gather_candidates.h"
-  DEPS
-    iree::base
-    loom::target::arch::amdgpu::refs::target_refs
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_cc_library(
-  NAME
-    atomic_candidates
-  GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::lower::candidates::atomic_candidates
-  HDRS
     "atomic_candidates.h"
+    "compare_candidates.h"
+  SRCS
+    "arithmetic_candidates.c"
+    "async_gather_candidates.c"
+    "atomic_candidates.c"
+    "compare_candidates.c"
   DEPS
     iree::base
     loom::ops::atomic
+    loom::ops::scalar
+    loom::ops::vector
     loom::target::arch::amdgpu::lower::kinds
     loom::target::arch::amdgpu::refs::target_refs
     loom::util::fact_table
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_cc_library(
-  NAME
-    compare_candidates
-  GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::lower::candidates::compare_candidates
-  HDRS
-    "compare_candidates.h"
-  DEPS
-    loom::ops::scalar
-    loom::ops::vector
-    loom::target::arch::amdgpu::refs::target_refs
+  PUBLIC
 )
 endif()
 

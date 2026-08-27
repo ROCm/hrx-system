@@ -964,12 +964,12 @@ static_assert(sizeof(loom_amdgpu_memory_descriptor_candidate_range_t) == 8,
 
 static const loom_amdgpu_memory_descriptor_candidate_t
     kAmdgpuMemoryDescriptorCandidates[] = {
-#include "loom/target/arch/amdgpu/lower/memory_descriptor_candidates.inl"
+#include "loom/target/arch/amdgpu/lower/candidates/memory_descriptor_candidates.inl"
 };
 
 static const loom_amdgpu_memory_descriptor_candidate_range_t
     kAmdgpuMemoryDescriptorCandidateRanges[] = {
-#include "loom/target/arch/amdgpu/lower/memory_descriptor_candidate_ranges.inl"
+#include "loom/target/arch/amdgpu/lower/candidates/memory_descriptor_candidate_ranges.inl"
 };
 
 #undef LOOM_AMDGPU_MEMORY_DESCRIPTOR_CANDIDATE_RANGE

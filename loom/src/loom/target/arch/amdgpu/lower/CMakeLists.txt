@@ -37,21 +37,6 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU)
 loom_generated_file_family(
   NAME
-    memory_descriptor_candidate_tables_gen
-  GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::lower::candidates::memory_candidates
-  OUTPUTS
-    "memory_descriptor_candidate_ranges.inl"
-    "memory_descriptor_candidates.inl"
-  OUTPUT_FLAGS
-    "--candidate-ranges"
-    "--candidate-rows"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_file_family(
-  NAME
     fp8_tables_gen
   GENERATOR
     loom::py::loom::gen::target::arch::amdgpu::lower::narrow_float_tables
@@ -134,13 +119,13 @@ loom_cc_library(
     "value/vector_transform.h"
     "workgroup.h"
   TEXTUAL_HDRS
+    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/lower/candidates/memory_descriptor_candidate_ranges.inl"
+    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/lower/candidates/memory_descriptor_candidates.inl"
     "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/matrix/matrix_fragment_repack_result_to_lhs_projections.inl"
     "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/matrix/matrix_fragment_repack_result_to_rhs_projections.inl"
     "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/memory_cache_policy_encoding_rows.inl"
     "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/memory_cache_policy_temporal_th.inl"
     "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amdgpu/target_records_tables.inl"
-    "memory_descriptor_candidate_ranges.inl"
-    "memory_descriptor_candidates.inl"
     "registry_tables.inl"
   SRCS
     "abi.c"
@@ -271,10 +256,7 @@ loom_cc_library(
     loom::target::arch::amdgpu::error_defs
     loom::target::arch::amdgpu::facts
     loom::target::arch::amdgpu::hal::kernel_abi
-    loom::target::arch::amdgpu::lower::candidates::arithmetic_candidates
-    loom::target::arch::amdgpu::lower::candidates::async_gather_candidates
-    loom::target::arch::amdgpu::lower::candidates::atomic_candidates
-    loom::target::arch::amdgpu::lower::candidates::compare_candidates
+    loom::target::arch::amdgpu::lower::candidates::candidate_tables
     loom::target::arch::amdgpu::matrix::contract
     loom::target::arch::amdgpu::matrix::projection
     loom::target::arch::amdgpu::planning::wait_counters
