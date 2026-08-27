@@ -12,6 +12,7 @@
           "unordered": [
             "## loom-compile",
             "--backend=",
+            "--emit-command-artifacts=",
             "--compile-report=summary",
             "--artifact-manifest=summary",
             "--emit-target-artifact=",
@@ -37,6 +38,166 @@
             "jq -r"
           ]
         }
+      }
+    },
+    {
+      "name": "emits portable command artifact set",
+      "run": {
+        "tool": "loom-compile",
+        "args": [
+          "{srcdir}/command_artifacts.loom",
+          "--backend=command",
+          "--output=-",
+          "--emit-command-artifacts={tmp}/commands",
+          "--compile-report=summary"
+        ]
+      },
+      "stdout": {
+        "contains": {
+          "ordered": [
+            "\"schema_version\":1,\"format\":\"loom-command-set\"",
+            "\"symbol\":\"increment_once\",\"artifact\":\"program-0.loomcmd\"",
+            "\"entry_requirements\":[0]",
+            "\"symbol\":\"increment_then_double\",\"artifact\":\"program-1.loomcmd\"",
+            "\"entry_requirements\":[0,1]",
+            "\"entries\":[{\"symbol\":\"increment\"},{\"symbol\":\"double\"}]"
+          ]
+        }
+      },
+      "stderr": {
+        "contains": {
+          "unordered": [
+            "\"artifact_kind\":\"target-artifact\"",
+            "\"backend\":\"command\"",
+            "\"artifact_format\":\"loom-command-set\"",
+            "\"status\":{\"code\":0,\"name\":\"OK\"}"
+          ]
+        }
+      },
+      "files": [
+        {
+          "path": "{tmp}/commands/program-0.loomcmd",
+          "non_empty": true
+        },
+        {
+          "path": "{tmp}/commands/program-1.loomcmd",
+          "non_empty": true
+        }
+      ]
+    },
+    {
+      "name": "selects one command root",
+      "run": {
+        "tool": "loom-compile",
+        "args": [
+          "{srcdir}/command_artifacts.loom",
+          "--backend=command",
+          "--root=@increment_then_double",
+          "--output=-",
+          "--emit-command-artifacts={tmp}/commands"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"symbol\":\"increment_then_double\",\"artifact\":\"program-0.loomcmd\"",
+          "\"entry_requirements\":[0,1]",
+          "\"entries\":[{\"symbol\":\"increment\"},{\"symbol\":\"double\"}]"
+        ],
+        "not_contains": [
+          "increment_once",
+          "program-1.loomcmd"
+        ]
+      },
+      "files": [
+        {
+          "path": "{tmp}/commands/program-0.loomcmd",
+          "non_empty": true
+        },
+        {
+          "path": "{tmp}/commands/program-1.loomcmd",
+          "exists": false
+        }
+      ]
+    },
+    {
+      "name": "emits command artifacts from bytecode",
+      "steps": [
+        {
+          "name": "encode-source",
+          "run": {
+            "tool": "loom-format",
+            "args": [
+              "{srcdir}/command_artifacts.loom",
+              "--from=text",
+              "--to=bytecode",
+              "--output={tmp}/command_artifacts.loombc"
+            ]
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{tmp}/command_artifacts.loombc",
+              "--backend=command",
+              "--output={tmp}/commands.json",
+              "--emit-command-artifacts={tmp}/commands"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/commands.json",
+              "non_empty": true
+            },
+            {
+              "path": "{tmp}/commands/program-0.loomcmd",
+              "non_empty": true
+            },
+            {
+              "path": "{tmp}/commands/program-1.loomcmd",
+              "non_empty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "requires command artifact directory",
+      "run": {
+        "tool": "loom-compile",
+        "args": [
+          "{srcdir}/command_artifacts.loom",
+          "--backend=command",
+          "--output={tmp}/commands.json"
+        ]
+      },
+      "exit": {
+        "nonzero": true
+      },
+      "stderr": {
+        "contains": [
+          "--backend=command requires --emit-command-artifacts=<directory>"
+        ]
+      }
+    },
+    {
+      "name": "rejects command artifacts for another backend",
+      "run": {
+        "tool": "loom-compile",
+        "args": [
+          "{srcdir}/command_artifacts.loom",
+          "--backend=vm",
+          "--emit-command-artifacts={tmp}/commands"
+        ]
+      },
+      "exit": {
+        "nonzero": true
+      },
+      "stderr": {
+        "contains": [
+          "--emit-command-artifacts requires --backend=command"
+        ]
       }
     },
     {

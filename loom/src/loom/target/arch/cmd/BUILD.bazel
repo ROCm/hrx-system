@@ -88,6 +88,7 @@ loom_cc_library(
     visibility = [
         "//loom/src/loom/target/all:__pkg__",
         "//loom/src/loom/target/arch/cmd/check:__pkg__",
+        "//loom/src/loom/tools/loom-compile:__pkg__",
     ],
     deps = [
         "//loom/src/loom/target:provider",

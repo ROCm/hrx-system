@@ -9,6 +9,7 @@ load(
     "//loom/build_tools/bazel:build_defs.bzl",
     "iree_select",
     "loom_cc_binary",
+    "loom_cc_library",
     "loom_config_compatible_with",
 )
 
@@ -110,11 +111,32 @@ _LLVMIR_ARTIFACTS_COMPATIBLE_WITH = loom_config_compatible_with([
     "//loom/config/target:llvmir_artifacts",
 ])
 
+loom_cc_library(
+    name = "command_backend",
+    srcs = ["command_backend.c"],
+    hdrs = ["command_backend.h"],
+    deps = [
+        "//loom/src/loom/error:diagnostic",
+        "//loom/src/loom/link:module_index",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/command",
+        "//loom/src/loom/pass:builtin_registry",
+        "//loom/src/loom/target:entry_selection",
+        "//loom/src/loom/target/arch/cmd:artifact_set",
+        "//loom/src/loom/target/arch/cmd/lower:program_plan_index",
+        "//loom/src/loom/tooling/execution:session",
+        "//loom/src/loom/tooling/io:file",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
 loom_cc_binary(
     name = "loom-compile",
     srcs = ["loom-compile.c"],
     copts = _AMDGPU_COMPILE_COPTS + _IREE_VM_COMPILE_COPTS + _SPIRV_VULKAN_COMPILE_COPTS + _LLVMIR_COMPILE_COPTS + _LLVMIR_AMDGPU_TARGET_ENV_COPTS + _LLVMIR_X86_TARGET_ENV_COPTS,
     deps = [
+        ":command_backend",
         "//loom/src/loom/codegen/low:text_asm",
         "//loom/src/loom/error:diagnostic",
         "//loom/src/loom/format/text:printer",
@@ -125,6 +147,8 @@ loom_cc_binary(
         "//loom/src/loom/sanitizer:options",
         "//loom/src/loom/target:entry_selection",
         "//loom/src/loom/target:low_descriptor_registry",
+        "//loom/src/loom/target/arch/cmd:artifact_set",
+        "//loom/src/loom/target/arch/cmd:provider",
         "//loom/src/loom/target/reporting:artifact_manifest",
         "//loom/src/loom/tooling/cli:help",
         "//loom/src/loom/tooling/compile:pipeline",
@@ -149,6 +173,7 @@ loom_cc_binary(
 iree_execution_test_suite(
     name = "execution_test",
     data = [
+        "command_artifacts.loom",
         "rooted_template_provider.loom",
     ],
     manifests = ["loom-compile.test.json"],
