@@ -4,7 +4,7 @@ command.program.decl @project_layer(%layer: index, %element_count: index) launch
 
 // Serial composition orders both launches; the intermediate binding carries
 // the first result into the second launch. Exact layer IDs specialize parameter
-// names while element count remains a root launch-count input.
+// names while element count remains a root specialization input.
 command.program.def public @two_layer(%element_count: index) launch(%parameters: buffer, %input: buffer, %hidden: buffer, %output: buffer) where [range(%element_count, 1, 8)] {
   %first_layer = index.constant 12 : index
   %second_layer = index.constant 13 : index
