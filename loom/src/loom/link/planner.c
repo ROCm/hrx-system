@@ -1387,6 +1387,11 @@ static iree_status_t loom_link_plan_select_root(
 static iree_status_t loom_link_plan_select_export(
     loom_link_plan_t* plan, const loom_link_plan_options_t* options,
     const loom_link_module_index_symbol_t* symbol) {
+  // Strip policies filter implicit export sets. Explicit roots still pass
+  // through required-symbol selection and diagnose a stripped symbol.
+  if (loom_link_plan_symbol_is_stripped(options, plan, symbol)) {
+    return iree_ok_status();
+  }
   const loom_link_plan_live_cause_t cause = {
       .reason = LOOM_LINK_PLAN_LIVE_ROOT,
       .symbol_plan_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL,

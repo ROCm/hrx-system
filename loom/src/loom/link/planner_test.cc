@@ -1579,7 +1579,7 @@ TEST_F(LinkPlannerTest, StripPolicyControlsRequiredDependencies) {
   EXPECT_FALSE(ContainsSymbol(plan.get(), helper));
 }
 
-TEST_F(LinkPlannerTest, TestSymbolStripPolicyRemovesBytecodeSymbols) {
+TEST_F(LinkPlannerTest, TestSymbolStripPolicyFiltersImplicitExports) {
   loom_module_t* module = Parse(Fixture(IREE_SV(
       "test_symbol_strip_policy_removes_bytecode_symbols_module.loom")));
   ASSERT_NE(module, nullptr);
@@ -1590,11 +1590,11 @@ TEST_F(LinkPlannerTest, TestSymbolStripPolicyRemovesBytecodeSymbols) {
       /*.provider_name=*/IREE_SV("kernel-lib"),
       /*.role=*/LOOM_LINK_PROVIDER_ROLE_INPUT,
   };
+  iree_host_size_t provider_ordinal = 0;
   IREE_ASSERT_OK(loom_link_module_index_add_bytecode(
       index.get(), iree_make_const_byte_span(bytes.data(), bytes.size()),
       IREE_SV("kernel-lib.loombc"), /*index_options=*/nullptr,
-      &provider_options,
-      /*out_provider_ordinal=*/nullptr));
+      &provider_options, &provider_ordinal));
   const loom_link_module_index_module_t* indexed_module =
       loom_link_module_index_module_at(index.get(), 0);
   ASSERT_NE(indexed_module, nullptr);
@@ -1616,6 +1616,14 @@ TEST_F(LinkPlannerTest, TestSymbolStripPolicyRemovesBytecodeSymbols) {
   const loom_link_module_index_symbol_t* benchmark =
       loom_link_module_index_lookup_private(index.get(), indexed_module,
                                             IREE_SV("kernel_bench"));
+  EXPECT_TRUE(ContainsSymbol(plan.get(), kernel));
+  EXPECT_FALSE(ContainsSymbol(plan.get(), check_case));
+  EXPECT_FALSE(ContainsSymbol(plan.get(), benchmark));
+
+  strip_options.mode = LOOM_LINK_PLAN_LINK;
+  strip_options.root_providers.count = 1;
+  strip_options.root_providers.values = &provider_ordinal;
+  plan = BuildPlan(index.get(), &strip_options);
   EXPECT_TRUE(ContainsSymbol(plan.get(), kernel));
   EXPECT_FALSE(ContainsSymbol(plan.get(), check_case));
   EXPECT_FALSE(ContainsSymbol(plan.get(), benchmark));
