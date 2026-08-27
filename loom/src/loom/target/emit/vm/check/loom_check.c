@@ -1,0 +1,99 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+#include "loom/target/emit/vm/check/loom_check.h"
+
+#include "iree/base/byte_sequence.h"
+#include "iree/vm/bytecode/tooling/dump.h"
+#include "loom/target/emit/vm/module_emitter.h"
+#include "loom/tools/loom-check/diagnostics.h"
+
+static bool loom_vm_loom_check_emit_provider_matches(
+    const loom_check_emit_provider_t* provider,
+    iree_string_view_t target_name) {
+  return iree_string_view_equal(target_name, IREE_SV("vm-dis"));
+}
+
+static iree_status_t loom_vm_loom_check_prepare_module(
+    const loom_check_emit_provider_request_t* request) {
+  loom_check_prepare_source_low_options_t options = {0};
+  loom_check_prepare_source_low_options_initialize(&options);
+  options.default_pipeline = LOOM_COMPILE_DEFAULT_PIPELINE_PREPARED_LOW;
+  return loom_check_prepare_source_low_module(
+      request->module, &options, request->low_registry, request->environment,
+      request->source_resolver, request->diagnostic_collector,
+      request->block_pool);
+}
+
+static iree_status_t loom_vm_loom_check_append_dump(void* user_data,
+                                                    iree_string_view_t text) {
+  return iree_string_builder_append_string((iree_string_builder_t*)user_data,
+                                           text);
+}
+
+static iree_status_t loom_vm_loom_check_emit_provider_execute(
+    const loom_check_emit_provider_t* provider,
+    const loom_check_emit_provider_request_t* request) {
+  if (!iree_string_view_is_empty(request->target_options)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "vm-dis does not accept target options");
+  }
+
+  IREE_RETURN_IF_ERROR(loom_vm_loom_check_prepare_module(request));
+  if (request->diagnostic_collector->count != 0) return iree_ok_status();
+
+  loom_check_diagnostic_emitter_capture_t capture = {
+      .diagnostic_collector = request->diagnostic_collector,
+      .module = request->module,
+      .source_resolver = request->source_resolver,
+      .emitter = LOOM_EMITTER_PASS,
+  };
+  const loom_vm_module_emitter_options_t options = {
+      .descriptor_registry = &request->low_registry->registry,
+      .diagnostic_emitter =
+          {
+              .fn = loom_check_diagnostic_emitter_capture_emit,
+              .user_data = &capture,
+          },
+  };
+
+  iree_byte_sequence_t* contents = NULL;
+  iree_byte_span_t contiguous_contents = iree_byte_span_empty();
+  iree_status_t status =
+      loom_vm_emit_module(request->module, &options, request->case_arena,
+                          request->host_allocator, &contents);
+  if (iree_status_is_ok(status) && contents != NULL) {
+    status = iree_byte_sequence_clone(contents, request->host_allocator,
+                                      &contiguous_contents);
+  }
+  if (iree_status_is_ok(status) && contents != NULL) {
+    status = iree_vm_bytecode_module_dump(
+        IREE_SV("module"),
+        iree_make_const_byte_span(contiguous_contents.data,
+                                  contiguous_contents.data_length),
+        (iree_vm_bytecode_dump_write_callback_t){
+            .fn = loom_vm_loom_check_append_dump,
+            .user_data = &request->result->actual_output,
+        },
+        request->host_allocator);
+  }
+  iree_allocator_free(request->host_allocator, contiguous_contents.data);
+  iree_byte_sequence_release(contents);
+  return status;
+}
+
+static iree_status_t loom_vm_loom_check_emit_provider_append_names(
+    const loom_check_emit_provider_t* provider,
+    iree_string_builder_t* builder) {
+  return iree_string_builder_append_cstring(builder, "vm-dis");
+}
+
+const loom_check_emit_provider_t loom_vm_loom_check_emit_provider = {
+    .name = IREE_SVL("vm"),
+    .match = loom_vm_loom_check_emit_provider_matches,
+    .execute = loom_vm_loom_check_emit_provider_execute,
+    .append_names = loom_vm_loom_check_emit_provider_append_names,
+};

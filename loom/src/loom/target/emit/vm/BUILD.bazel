@@ -1,0 +1,76 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library")
+load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test_suite")
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],
+)
+
+loom_cc_library(
+    name = "vm",
+    srcs = [
+        "artifact_emitter.c",
+        "function_encoder.c",
+        "module_emitter.c",
+        "module_layout.c",
+    ],
+    hdrs = [
+        "artifact_emitter.h",
+        "function_encoder.h",
+        "module_emitter.h",
+        "module_layout.h",
+    ],
+    visibility = [
+        "//loom/src/loom/target/arch/vm:__pkg__",
+        "//loom/src/loom/tools/loom-compile:__pkg__",
+    ],
+    deps = [
+        "//loom/src/loom/codegen/low:allocation",
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/codegen/low:frame",
+        "//loom/src/loom/codegen/low:function",
+        "//loom/src/loom/codegen/low:packet",
+        "//loom/src/loom/codegen/low/allocation:target_constraints",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/format/bytecode/writer:encoder",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target:low_descriptor_registry",
+        "//loom/src/loom/target:provider",
+        "//loom/src/loom/target:registers",
+        "//loom/src/loom/target/arch/vm:descriptors",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:stream",
+        "//runtime/src/iree/vm",
+        "//runtime/src/iree/vm/bytecode/wire",
+    ],
+)
+
+loom_check_test_suite(
+    name = "loom_check_file_test",
+    srcs = ["test/module.loom-test"],
+    test_name_prefix_to_strip = "test/",
+)
+
+loom_cc_library(
+    name = "loom_check",
+    testonly = True,
+    srcs = ["check/loom_check.c"],
+    hdrs = ["check/loom_check.h"],
+    visibility = ["//loom/src/loom/target/arch/vm:__pkg__"],
+    deps = [
+        ":vm",
+        "//loom/src/loom/tools/loom-check:execute",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/vm/bytecode:dump",
+    ],
+)

@@ -1,0 +1,6 @@
+template.decl @vm.double(%value: i32) -> (i32)
+
+template.def<@vm.double> @double_template(%value: i32) -> (i32) {
+  %result = scalar.addi %value, %value : i32
+  template.return %result : i32
+}

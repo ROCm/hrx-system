@@ -23,6 +23,7 @@ package(
 _VM_PROVIDER_VISIBILITY = [
     "//loom/src/loom/target/all:__pkg__",
     "//loom/src/loom/target/configured:__pkg__",
+    "//loom/src/loom/tools/loom-compile:__pkg__",
 ]
 
 _VM_CHECK_PROVIDER_VISIBILITY = [
@@ -85,6 +86,7 @@ loom_generated_cc_library(
         ":encoding_rows.inl",
         ":lowering_rows.inl",
     ],
+    visibility = ["//loom/src/loom/target/emit/vm:__pkg__"],
     deps = ["//loom/src/loom/codegen/low:descriptors"],
 )
 
@@ -147,6 +149,7 @@ loom_cc_library(
     visibility = _VM_CHECK_PROVIDER_VISIBILITY,
     deps = [
         ":provider",
+        "//loom/src/loom/target/emit/vm:loom_check",
         "//loom/src/loom/tools/loom-check:provider",
         "//runtime/src/iree/base",
     ],

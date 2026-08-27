@@ -158,6 +158,21 @@ rule retains the static packaging workflow. It compiles the linked kernel module
 as one executable and exposes it with the manifest and portable artifacts as one
 Bazel product target.
 
+## Compile a VM-targeted module
+
+The VM backend emits a VM bytecode archive from functions authored for a
+`vm.target`:
+
+```shell
+loom-compile program.loom \
+  --backend=vm \
+  --output=program.vmfb
+```
+
+This is an artifact backend, not an implicit reference interpreter for an
+arbitrary device kernel. The module still states which functions target the VM
+and which entry points are public.
+
 Target-owned emitters can also expose intermediate deployment formats directly.
 For example, an installation with the LLVM IR emitter can write textual or
 bitcode artifacts:

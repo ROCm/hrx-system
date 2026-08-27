@@ -167,6 +167,27 @@ artifacts because they have different portability and caching boundaries. The
 manifest joins them through logical entry symbols; it does not force an
 embedding to reverse-engineer either binary format.
 
+## VM binaries contain authored VM functions
+
+`loom_vm_binary` links functions authored for a `vm.target` and emits
+`<name>.vmfb`. VM images do not embed a module name; the host assigns a name
+when it loads the image into its runtime environment.
+
+```shell
+bazel build //loom/docs/examples/elementwise-transform:elementwise_vm
+
+iree-dump-module \
+  bazel-bin/loom/docs/examples/elementwise-transform/elementwise_vm.vmfb
+```
+
+The result is an executable VM bytecode module; the dump includes
+`@double_i32` as a public export. Runtime applications assign the module name
+while loading the image and invoke exports through the generic VM API.
+This product consumes targets authored on the VM functions and has no `target`
+attribute. It does not infer or bundle command-program and device artifacts:
+those are explicit `loom_command_binary` products with their own target profile
+and runtime ownership.
+
 ## Inspect the closed input and compiler evidence
 
 Binary rules keep their primary runtime products in Bazel's default output

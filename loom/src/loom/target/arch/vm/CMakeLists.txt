@@ -147,6 +147,7 @@ loom_cc_library(
   DEPS
     ::provider
     iree::base
+    loom::target::emit::vm::loom_check
     loom::tools::loom-check::provider
   TESTONLY
   PUBLIC

@@ -12,6 +12,7 @@ load(
     "loom_command_binary",
     "loom_kernel_binary",
     "loom_library",
+    "loom_vm_binary",
 )
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 
@@ -49,14 +50,27 @@ loom_command_binary(
     target = "@hrx//loom/target/amdgpu:gfx11-generic",
     deps = [":model"],
 )
+
+loom_library(
+    name = "vm",
+    srcs = ["vm.loom"],
+)
+
+loom_vm_binary(
+    name = "elementwise_vm",
+    deps = [":vm"],
+)
 # --8<-- [end:products]
 
 sh_test(
     name = "product_test",
     srcs = ["product_test.sh"],
+    args = ["$(rootpath //tools:iree-dump-module)"],
     data = [
         ":elementwise_command",
         ":elementwise_kernel",
+        ":elementwise_vm",
+        "//tools:iree-dump-module",
     ],
 )
 

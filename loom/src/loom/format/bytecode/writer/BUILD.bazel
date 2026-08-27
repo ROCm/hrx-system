@@ -59,7 +59,10 @@ loom_cc_library(
     name = "encoder",
     srcs = ["encoder.c"],
     hdrs = ["encoder.h"],
-    visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
+    visibility = [
+        "//loom/src/loom/format/bytecode:__pkg__",
+        "//loom/src/loom/target/emit/vm:__pkg__",
+    ],
     deps = [
         "//loom/src/loom/format/bytecode:format",
         "//loom/src/loom/format/bytecode:varint",

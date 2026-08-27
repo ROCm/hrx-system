@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "compiles and dumps VM bytecode",
+      "steps": [
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "--backend=vm",
+              "{srcdir}/vm_arithmetic.loom",
+              "--output={tmp}/arithmetic.vm"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/arithmetic.vm",
+              "non_empty": true
+            }
+          ]
+        },
+        {
+          "name": "dump",
+          "run": {
+            "tool": "iree-dump-module",
+            "args": ["{tmp}/arithmetic.vm"]
+          },
+          "stdout": {
+            "contains": [
+              "vm.module \"module\" core=0.0",
+              "@multiply_add -> function[0]",
+              "control.block",
+              "integer.mul.i32",
+              "integer.add.i32",
+              "control.return"
+            ],
+            "not_contains": ["low.op"]
+          }
+        }
+      ]
+    }
+  ]
+}
