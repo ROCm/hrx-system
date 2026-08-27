@@ -109,6 +109,11 @@ const loom_type_descriptor_t* loom_type_registry_lookup(
 const loom_type_descriptor_t* loom_type_registry_lookup_builtin(
     loom_type_kind_t kind);
 
+// Resolves the registered descriptor for |type|.
+// Returns NULL when the type is malformed or is not registered.
+const loom_type_descriptor_t* loom_type_registry_resolve(
+    const loom_module_t* module, loom_type_t type);
+
 // Resolves the type-owned value fact domain for |type|, or NULL if the
 // registered type has no extension fact domain.
 const loom_value_fact_domain_t* loom_type_registry_resolve_fact_domain(

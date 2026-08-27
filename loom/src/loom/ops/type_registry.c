@@ -62,23 +62,47 @@ const loom_type_descriptor_t* loom_type_registry_lookup(
                          : NULL;
 }
 
+const loom_type_descriptor_t* loom_type_registry_resolve(
+    const loom_module_t* module, loom_type_t type) {
+  const loom_type_kind_t kind = loom_type_kind(type);
+  if (kind == LOOM_TYPE_DIALECT) {
+    const loom_string_id_t name_id = loom_type_dialect_name_id(type);
+    if (module == NULL || name_id == LOOM_STRING_ID_INVALID ||
+        name_id >= module->strings.count) {
+      return NULL;
+    }
+    const loom_type_descriptor_t* descriptor = loom_type_registry_lookup(
+        module->context, module->strings.entries[name_id]);
+    return descriptor != NULL && descriptor->param_count ==
+                                     loom_type_dialect_param_count(type)
+               ? descriptor
+               : NULL;
+  }
+  if (kind == LOOM_TYPE_PARAMETERIZED) {
+    const loom_parameterized_type_descriptor_t* parameterized =
+        loom_type_parameterized_descriptor(type);
+    if (parameterized == NULL ||
+        parameterized->parameter_count !=
+            loom_type_parameterized_parameter_count(type)) {
+      return NULL;
+    }
+    const loom_type_descriptor_t* descriptor =
+        loom_type_registry_lookup(module != NULL ? module->context : NULL,
+                                  loom_bstring_view(parameterized->name));
+    return descriptor != NULL && descriptor->parameterized == parameterized
+               ? descriptor
+               : NULL;
+  }
+  return loom_type_registry_lookup_builtin(kind);
+}
+
 const loom_value_fact_domain_t* loom_type_registry_resolve_fact_domain(
     void* user_data, const loom_fact_context_t* context,
     const loom_module_t* module, loom_type_t type) {
   (void)user_data;
   (void)context;
-  if (loom_type_is_dialect(type)) {
-    const loom_string_id_t name_id = loom_type_dialect_name_id(type);
-    if (module == NULL || name_id == LOOM_STRING_ID_INVALID ||
-        (iree_host_size_t)name_id >= module->strings.count) {
-      return NULL;
-    }
-    const loom_type_descriptor_t* descriptor = loom_type_registry_lookup(
-        module->context, module->strings.entries[name_id]);
-    return descriptor != NULL ? descriptor->fact_domain : NULL;
-  }
   const loom_type_descriptor_t* descriptor =
-      loom_type_registry_lookup_builtin(loom_type_kind(type));
+      loom_type_registry_resolve(module, type);
   return descriptor != NULL ? descriptor->fact_domain : NULL;
 }
 
