@@ -12,6 +12,7 @@
 
 #include "iree/base/internal/arena.h"
 #include "iree/hal/drivers/amdxdna/direct_command_buffer.h"
+#include "iree/hal/drivers/amdxdna/dispatch.h"
 #include "iree/hal/utils/resource_set.h"
 
 typedef enum iree_hal_amdxdna_cmd_type_e {
@@ -502,6 +503,10 @@ static iree_status_t iree_hal_amdxdna_command_buffer_dispatch(
     iree_hal_executable_function_t export_ordinal,
     const iree_hal_dispatch_config_t config, iree_const_byte_span_t constants,
     iree_hal_buffer_ref_list_t bindings, iree_hal_dispatch_flags_t flags) {
+  IREE_RETURN_IF_ERROR(iree_hal_amdxdna_validate_dispatch(&config, flags));
+  if (iree_hal_amdxdna_dispatch_is_zero_workgroups(&config, flags)) {
+    return iree_ok_status();
+  }
   iree_hal_amdxdna_command_buffer_t* command_buffer =
       iree_hal_amdxdna_command_buffer_cast(base_command_buffer);
   iree_hal_amdxdna_dispatch_plan_t plan;

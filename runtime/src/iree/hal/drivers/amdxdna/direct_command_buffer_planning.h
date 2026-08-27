@@ -82,7 +82,8 @@ iree_status_t iree_hal_amdxdna_patch_write32_constants_with_list(
 // (offset, arg_idx, arg_plus) triples; for each, the 48-bit shim-DMA address
 // `args[arg_idx] + arg_plus + AIE_DDR_offset` is written into the
 // buffer-descriptor address words at byte `offset` (low 32 into bd[1], high 16
-// into bd[2]). Returns false on any malformed / out-of-bounds table entry.
+// into bd[2]). Returns false on any malformed / out-of-bounds table entry, or
+// when the computed address overflows or is not 4-byte aligned.
 bool iree_hal_amdxdna_apply_patch_table(uint32_t* ctrl_code, size_t ctrl_words,
                                         const uint32_t* patches,
                                         size_t patch_count,
