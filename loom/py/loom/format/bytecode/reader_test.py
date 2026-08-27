@@ -1726,14 +1726,18 @@ class TestCrossFormat:
         from loom.format.text.parser import Parser
 
         text = (
-            "kernel.def @dynamic(%grid: index) {\n"
+            "kernel.def @dynamic(%grid: index) "
+            "where [range(%grid, 1, 65535)] {\n"
             "  kernel.launch.config workgroups(%grid, %grid, %grid) "
             "workgroup_size(%grid, %grid, %grid) : index\n"
-            "} launch(%count: index, %output: buffer) {\n"
+            "} launch(%count: index, %output: buffer) "
+            "where [mul(%count, 4)] {\n"
             "  kernel.return\n"
             "}\n"
             "kernel.decl @external(%workload: index) "
-            "launch(%abi_count: index, %output: buffer)\n"
+            "where [range(%workload, 1, 65535)] "
+            "launch(%abi_count: index, %output: buffer) "
+            "where [mul(%abi_count, 4)]\n"
         )
         parser = Parser()
         parser.register_ops(ALL_KERNEL_OPS)
@@ -1746,12 +1750,16 @@ class TestCrossFormat:
 
         definition = loaded.symbols[0].op
         assert definition is not None
+        assert "workload_predicates" in definition.attributes
+        assert "predicates" in definition.attributes
         assert [len(region.blocks[0].arg_ids) for region in definition.regions] == [
             1,
             2,
         ]
         declaration = loaded.symbols[1].op
         assert declaration is not None
+        assert "workload_predicates" in declaration.attributes
+        assert "predicates" in declaration.attributes
         assert declaration.operand_segment_counts == (1, 2)
         assert len(declaration.operands) == 3
 

@@ -550,9 +550,14 @@ class BlockArgs:
     arguments of the referenced region. The op verifier owns the semantic
     relationship between those block arguments and any operands, terminator
     operands, or result fields.
+
+    When ``definition_scope`` is true, the argument names are also visible to
+    later elements in the surrounding Scope. This is used by split signatures
+    whose metadata refers to the entry arguments of a non-body region.
     """
 
     region: str
+    definition_scope: bool = False
 
 
 @dataclass(frozen=True, slots=True)

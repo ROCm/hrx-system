@@ -179,16 +179,26 @@ static iree_status_t loom_link_kernel_config_build_declaration(
       header->attributes[loom_kernel_def_callee_ATTR_INDEX];
   attributes[loom_kernel_decl_target_ATTR_INDEX] =
       header->attributes[loom_kernel_def_target_ATTR_INDEX];
-  const loom_attribute_t source_predicates =
-      header->attributes[loom_kernel_def_predicates_ATTR_INDEX];
-  if (!loom_attr_is_absent(source_predicates)) {
+  const uint8_t source_predicate_indices[] = {
+      loom_kernel_def_predicates_ATTR_INDEX,
+      loom_kernel_def_workload_predicates_ATTR_INDEX,
+  };
+  const uint8_t target_predicate_indices[] = {
+      loom_kernel_decl_predicates_ATTR_INDEX,
+      loom_kernel_decl_workload_predicates_ATTR_INDEX,
+  };
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(source_predicate_indices);
+       ++i) {
+    const loom_attribute_t source_predicates =
+        header->attributes[source_predicate_indices[i]];
+    if (loom_attr_is_absent(source_predicates)) continue;
     loom_predicate_t* predicates = NULL;
     IREE_RETURN_IF_ERROR(
         iree_arena_allocate_array(&module->arena, source_predicates.count,
                                   sizeof(*predicates), (void**)&predicates));
     memcpy(predicates, source_predicates.predicate_list,
            source_predicates.count * sizeof(*predicates));
-    attributes[loom_kernel_decl_predicates_ATTR_INDEX] =
+    attributes[target_predicate_indices[i]] =
         loom_attr_predicate_list(predicates, source_predicates.count);
   }
   IREE_RETURN_IF_ERROR(loom_builder_finalize_op(builder, declaration));
@@ -196,51 +206,24 @@ static iree_status_t loom_link_kernel_config_build_declaration(
   return iree_ok_status();
 }
 
-static bool loom_link_kernel_config_predicate_uses_mapped_values(
-    const loom_ir_remap_t* remap, const loom_predicate_t* predicate) {
-  for (uint8_t i = 0; i < predicate->arg_count; ++i) {
-    if (predicate->arg_tags[i] != LOOM_PRED_ARG_VALUE) continue;
-    loom_value_id_t ignored = LOOM_VALUE_ID_INVALID;
-    if (!loom_ir_remap_try_lookup_value(
-            remap, (loom_value_id_t)predicate->args[i], &ignored)) {
-      return false;
-    }
-  }
-  return true;
-}
-
 static iree_status_t loom_link_kernel_config_copy_workload_predicates(
     loom_module_t* module, const loom_bytecode_function_header_t* header,
     loom_ir_remap_t* remap, iree_arena_allocator_t* scratch_arena,
     loom_op_t* helper_op) {
   const loom_attribute_t source_predicates =
-      header->attributes[loom_kernel_def_predicates_ATTR_INDEX];
+      header->attributes[loom_kernel_def_workload_predicates_ATTR_INDEX];
   if (loom_attr_is_absent(source_predicates)) return iree_ok_status();
 
-  loom_predicate_t* workload_predicates = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      scratch_arena, source_predicates.count, sizeof(*workload_predicates),
-      (void**)&workload_predicates));
-  uint16_t workload_predicate_count = 0;
-  for (uint16_t i = 0; i < source_predicates.count; ++i) {
-    if (loom_link_kernel_config_predicate_uses_mapped_values(
-            remap, &source_predicates.predicate_list[i])) {
-      workload_predicates[workload_predicate_count++] =
-          source_predicates.predicate_list[i];
-    }
-  }
-  if (workload_predicate_count == 0) return iree_ok_status();
-
   loom_predicate_t* target_predicates = NULL;
-  IREE_RETURN_IF_ERROR(loom_ir_remap_predicate_list(remap, workload_predicates,
-                                                    workload_predicate_count,
-                                                    &target_predicates));
+  IREE_RETURN_IF_ERROR(loom_ir_remap_predicate_list(
+      remap, source_predicates.predicate_list, source_predicates.count,
+      &target_predicates));
   loom_rewriter_t rewriter;
   IREE_RETURN_IF_ERROR(
       loom_rewriter_initialize(&rewriter, module, scratch_arena));
   const iree_status_t status = loom_rewriter_set_attr(
       &rewriter, helper_op, loom_func_def_predicates_ATTR_INDEX,
-      loom_attr_predicate_list(target_predicates, workload_predicate_count));
+      loom_attr_predicate_list(target_predicates, source_predicates.count));
   loom_rewriter_deinitialize(&rewriter);
   return status;
 }
@@ -520,47 +503,22 @@ static iree_status_t loom_link_kernel_config_configure_ir_values(
   return iree_ok_status();
 }
 
-typedef enum loom_link_kernel_config_predicate_projection_e {
-  LOOM_LINK_KERNEL_CONFIG_PREDICATE_PROJECTION_ALL = 0,
-  LOOM_LINK_KERNEL_CONFIG_PREDICATE_PROJECTION_MAPPED_VALUES = 1,
-} loom_link_kernel_config_predicate_projection_t;
-
 static iree_status_t loom_link_kernel_config_copy_ir_predicates(
     loom_link_kernel_config_ir_projection_t* projection,
-    loom_func_like_t source_function, loom_ir_remap_t* remap,
-    loom_link_kernel_config_predicate_projection_t predicate_projection,
+    loom_attribute_t source_predicates, loom_ir_remap_t* remap,
     loom_op_t* target_op, uint8_t target_attr_index) {
-  uint16_t source_predicate_count = 0;
-  const loom_predicate_t* source_predicates =
-      loom_func_like_predicates(source_function, &source_predicate_count);
-  if (source_predicate_count == 0) return iree_ok_status();
-
-  loom_predicate_t* selected_predicates = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      projection->scratch_arena, source_predicate_count,
-      sizeof(*selected_predicates), (void**)&selected_predicates));
-  uint16_t selected_predicate_count = 0;
-  for (uint16_t i = 0; i < source_predicate_count; ++i) {
-    if (predicate_projection ==
-            LOOM_LINK_KERNEL_CONFIG_PREDICATE_PROJECTION_MAPPED_VALUES &&
-        !loom_link_kernel_config_predicate_uses_mapped_values(
-            remap, &source_predicates[i])) {
-      continue;
-    }
-    selected_predicates[selected_predicate_count++] = source_predicates[i];
-  }
-  if (selected_predicate_count == 0) return iree_ok_status();
+  if (loom_attr_is_absent(source_predicates)) return iree_ok_status();
 
   loom_predicate_t* target_predicates = NULL;
-  IREE_RETURN_IF_ERROR(loom_ir_remap_predicate_list(remap, selected_predicates,
-                                                    selected_predicate_count,
-                                                    &target_predicates));
+  IREE_RETURN_IF_ERROR(loom_ir_remap_predicate_list(
+      remap, source_predicates.predicate_list, source_predicates.count,
+      &target_predicates));
   loom_rewriter_t rewriter = {0};
   IREE_RETURN_IF_ERROR(loom_rewriter_initialize(
       &rewriter, projection->target_module, projection->scratch_arena));
   const iree_status_t status = loom_rewriter_set_attr(
       &rewriter, target_op, target_attr_index,
-      loom_attr_predicate_list(target_predicates, selected_predicate_count));
+      loom_attr_predicate_list(target_predicates, source_predicates.count));
   loom_rewriter_deinitialize(&rewriter);
   return status;
 }
@@ -637,9 +595,9 @@ static iree_status_t loom_link_kernel_config_build_ir_declaration(
   IREE_RETURN_IF_ERROR(loom_kernel_decl_build(
       builder, build_flags, loom_kernel_def_retain(source_op), target,
       export_symbol, loom_kernel_def_export_linkage(source_op), target_callee,
-      workload_types, source_workloads.count, argument_types,
-      source_argument_count, /*predicates=*/NULL, /*predicates_count=*/0,
-      location, out_declaration));
+      workload_types, source_workloads.count, /*workload_predicates=*/NULL,
+      /*workload_predicates_count=*/0, argument_types, source_argument_count,
+      /*predicates=*/NULL, /*predicates_count=*/0, location, out_declaration));
 
   const loom_value_slice_t target_workloads =
       loom_kernel_workload_arg_ids(projection->target_module, *out_declaration);
@@ -661,10 +619,12 @@ static iree_status_t loom_link_kernel_config_build_ir_declaration(
   IREE_RETURN_IF_ERROR(loom_link_kernel_config_configure_ir_values(
       projection, source_arguments, target_arguments, source_argument_count,
       &remap));
+  IREE_RETURN_IF_ERROR(loom_link_kernel_config_copy_ir_predicates(
+      projection, loom_kernel_def_workload_predicates(source_op), &remap,
+      *out_declaration, loom_kernel_decl_workload_predicates_ATTR_INDEX));
   return loom_link_kernel_config_copy_ir_predicates(
-      projection, source_function, &remap,
-      LOOM_LINK_KERNEL_CONFIG_PREDICATE_PROJECTION_ALL, *out_declaration,
-      loom_kernel_decl_predicates_ATTR_INDEX);
+      projection, loom_kernel_def_predicates(source_op), &remap,
+      *out_declaration, loom_kernel_decl_predicates_ATTR_INDEX);
 }
 
 static iree_status_t loom_link_kernel_config_build_ir_helper(
@@ -728,9 +688,8 @@ static iree_status_t loom_link_kernel_config_build_ir_helper(
       projection, source_workloads.values, target_arguments,
       source_workloads.count, &remap));
   IREE_RETURN_IF_ERROR(loom_link_kernel_config_copy_ir_predicates(
-      projection, source_function, &remap,
-      LOOM_LINK_KERNEL_CONFIG_PREDICATE_PROJECTION_MAPPED_VALUES, helper_op,
-      loom_func_def_predicates_ATTR_INDEX));
+      projection, loom_kernel_def_workload_predicates(source_op), &remap,
+      helper_op, loom_func_def_predicates_ATTR_INDEX));
 
   const loom_region_t* source_region = loom_kernel_def_config(source_op);
   const loom_block_t* source_block =

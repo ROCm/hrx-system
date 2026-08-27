@@ -578,7 +578,15 @@ iree_status_t loom_parse_format_binding_list(
   return iree_ok_status();
 }
 
-iree_status_t loom_parse_format_block_args(loom_parser_t* parser) {
+iree_status_t loom_parse_format_block_args(
+    loom_parser_t* parser, const loom_format_element_t* element) {
+  const bool definition_scope = iree_any_bit_set(
+      element->data, LOOM_FORMAT_BLOCK_ARGS_DATA_DEFINITION_SCOPE);
+  if (definition_scope && !loom_parser_in_definition_scope(parser)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "definition-scope BLOCK_ARGS must be nested in SCOPE");
+  }
   if (!loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_LPAREN)) {
     loom_token_t peek = loom_tokenizer_peek(&parser->tokenizer);
     return loom_parser_emit_unexpected_token(parser, peek, IREE_SV("'('"));
@@ -598,11 +606,18 @@ iree_status_t loom_parse_format_block_args(loom_parser_t* parser) {
     LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_COLON, NULL);
 
     loom_type_t type = {0};
-    IREE_RETURN_IF_ERROR(loom_parse_type(parser, LOOM_TYPE_PARSE_BODY, &type));
+    IREE_RETURN_IF_ERROR(loom_parse_type(
+        parser, definition_scope ? LOOM_TYPE_PARSE_ARG : LOOM_TYPE_PARSE_BODY,
+        &type));
 
-    loom_value_id_t arg_value_id = 0;
-    IREE_RETURN_IF_ERROR(
-        loom_module_define_value(parser->module, type, &arg_value_id));
+    loom_value_id_t arg_value_id = LOOM_VALUE_ID_INVALID;
+    if (definition_scope) {
+      IREE_RETURN_IF_ERROR(
+          loom_parser_define_value(parser, arg_token, type, &arg_value_id));
+    } else {
+      IREE_RETURN_IF_ERROR(
+          loom_module_define_value(parser->module, type, &arg_value_id));
+    }
     IREE_RETURN_IF_ERROR(
         loom_parser_add_pending_block_arg(parser, arg_value_id, arg_token));
     ++parsed_arg_count;

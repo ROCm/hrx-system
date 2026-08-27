@@ -27,7 +27,8 @@ iree_status_t loom_parse_format_result_type_list(
 iree_status_t loom_parse_format_binding_list(
     loom_parser_t* parser, const loom_format_element_t* element,
     loom_parsed_op_t* parsed);
-iree_status_t loom_parse_format_block_args(loom_parser_t* parser);
+iree_status_t loom_parse_format_block_args(
+    loom_parser_t* parser, const loom_format_element_t* element);
 iree_status_t loom_parse_format_func_args(loom_parser_t* parser,
                                           const loom_op_vtable_t* vtable,
                                           const loom_format_element_t* element,

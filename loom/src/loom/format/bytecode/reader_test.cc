@@ -387,7 +387,8 @@ class ReaderTest : public ::testing::Test {
     IREE_CHECK_OK(loom_kernel_def_build(
         &module_builder, /*build_flags=*/0, /*retain=*/0,
         loom_symbol_ref_null(), LOOM_STRING_ID_INVALID, /*export_linkage=*/0,
-        callee, &index_type, 1, /*arg_types=*/nullptr,
+        callee, &index_type, 1, /*workload_predicates=*/nullptr,
+        /*workload_predicates_count=*/0, /*arg_types=*/nullptr,
         /*arg_types_count=*/0, /*predicates=*/nullptr,
         /*predicates_count=*/0, LOOM_LOCATION_UNKNOWN, &kernel_op));
     module->symbols.entries[symbol_id].flags = LOOM_SYMBOL_FLAG_PUBLIC;

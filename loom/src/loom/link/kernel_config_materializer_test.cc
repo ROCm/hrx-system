@@ -255,7 +255,7 @@ func.def pure @implementation_only(%value: index) -> (index) {
   func.return %value : index
 }
 
-kernel.def target(@dispatch_target) @dispatch_rows(%element_count: index) {
+kernel.def target(@dispatch_target) @dispatch_rows(%element_count: index) where [range(%element_count, 1, 65535)] {
   %one = index.constant 1 : index
   %subgroup_size = target.subgroup.size : index
   %workgroup_count = index.div %element_count, %subgroup_size : index
@@ -608,7 +608,7 @@ func.def pure @implementation_only(%value: index) -> (index) {
   func.return %value : index
 }
 
-kernel.def target(@dispatch_target) @dispatch_rows(%element_count: index) {
+kernel.def target(@dispatch_target) @dispatch_rows(%element_count: index) where [range(%element_count, 1, 65535)] {
   %one = index.constant 1 : index
   %two = index.constant 2 : index
   %subgroup_size = target.subgroup.size : index
@@ -822,6 +822,9 @@ kernel.def target(@dispatch_target) @dispatch_rows(%element_count: index) {
   const loom_value_slice_t workloads =
       loom_kernel_workload_arg_ids(projected_module.get(), kernel_op);
   ASSERT_EQ(workloads.count, 1u);
+  const loom_attribute_t kernel_workload_predicates =
+      loom_kernel_decl_workload_predicates(kernel_op);
+  ASSERT_EQ(kernel_workload_predicates.count, 1u);
   uint16_t kernel_argument_count = 0;
   const loom_value_id_t* kernel_arguments =
       loom_func_like_arg_ids(kernel, &kernel_argument_count);
@@ -850,7 +853,7 @@ kernel.def target(@dispatch_target) @dispatch_rows(%element_count: index) {
   ASSERT_EQ(helper_argument_count, 1u);
   uint16_t helper_predicate_count = 0;
   loom_func_like_predicates(helper, &helper_predicate_count);
-  ASSERT_EQ(helper_predicate_count, 0u);
+  ASSERT_EQ(helper_predicate_count, 1u);
   ASSERT_EQ(helper_op->result_count, 3u);
 
   loom_block_t* helper_block =

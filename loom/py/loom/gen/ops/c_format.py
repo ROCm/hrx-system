@@ -290,11 +290,12 @@ def translate_format_elements(op: Op) -> list[tuple[str, int, str]]:
                     binding_kind_name = "LOOM_BINDING_ELEMENT" if binding_kind == "element" else "LOOM_BINDING_CAPTURE"
                     elements.append(("LOOM_FORMAT_KIND_BINDING_LIST", index, binding_kind_name))
 
-                case BlockArgs(region=name):
+                case BlockArgs(region=name, definition_scope=definition_scope):
                     kind, index = resolve_field(name)
                     if kind != FieldKind.REGION:
                         raise ValueError(f"Op '{op.name}': BlockArgs region field '{name}' is not a region field")
-                    elements.append(("LOOM_FORMAT_KIND_BLOCK_ARGS", index, "0"))
+                    data = "LOOM_FORMAT_BLOCK_ARGS_DATA_DEFINITION_SCOPE" if definition_scope else "0"
+                    elements.append(("LOOM_FORMAT_KIND_BLOCK_ARGS", index, data))
 
                 case FuncArgs(
                     field=name,

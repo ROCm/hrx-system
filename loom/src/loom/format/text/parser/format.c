@@ -1144,7 +1144,7 @@ iree_status_t loom_parser_walk_format(loom_parser_t* parser,
       }
 
       case LOOM_FORMAT_KIND_BLOCK_ARGS: {
-        IREE_RETURN_IF_ERROR(loom_parse_format_block_args(parser));
+        IREE_RETURN_IF_ERROR(loom_parse_format_block_args(parser, element));
         break;
       }
 

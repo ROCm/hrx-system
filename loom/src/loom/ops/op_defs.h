@@ -276,6 +276,13 @@ enum loom_format_index_list_data_bits_e {
   LOOM_FORMAT_INDEX_LIST_DATA_NO_LEADING_GLUE = 1u << 15,
 };
 
+// Individual flag bits packed into BLOCK_ARGS format element data.
+enum loom_format_block_args_data_bits_e {
+  // Defines entry arguments in the surrounding declaration Scope so adjacent
+  // signature metadata can reference them before the region is parsed.
+  LOOM_FORMAT_BLOCK_ARGS_DATA_DEFINITION_SCOPE = 1u << 0,
+};
+
 // Mask for the static attribute field index packed into INDEX_LIST data.
 #define LOOM_FORMAT_INDEX_LIST_ATTR_INDEX_MASK ((uint16_t)0x7FFFu)
 #define LOOM_FORMAT_INDEX_LIST_DATA(static_attr_index, leading_glue) \
@@ -337,6 +344,7 @@ typedef enum loom_region_syntax_e {
 //   REGION_TABLE:   packed keys attr index and fixed default region index.
 //   REGION:         loom_region_syntax_t parser/printer selector.
 //   BINDING_LIST:   binding kind (CAPTURE=0, ELEMENT=1).
+//   BLOCK_ARGS:     loom_format_block_args_data_bits_e flags.
 //   FUNC_ARGS:      packed optional start/end i64 attribute indices.
 //   OPTIONAL_GROUP: (skip_count << 2) | anchor_category.
 typedef struct loom_format_element_t {

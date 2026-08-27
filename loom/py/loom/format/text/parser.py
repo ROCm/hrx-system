@@ -1813,6 +1813,10 @@ class ParsedFields:
 
     implicit_values holds parser-created region block args such as loop IVs.
     RegionFmt defines those names in the child scope when the region starts.
+
+    definition_scope_block_args holds region entry args that remain visible to
+    adjacent signature metadata inside a Scope until its matching region is
+    parsed.
     """
 
     __slots__ = (
@@ -1824,6 +1828,7 @@ class ParsedFields:
         "regions",
         "tied_results",
         "implicit_values",
+        "definition_scope_block_args",
         "func_arg_ids",
         "func_args_consumed",
         "operand_fields",
@@ -1838,6 +1843,7 @@ class ParsedFields:
         self.regions: list[Region] = []
         self.tied_results: list[IRTiedResult] = []
         self.implicit_values: dict[str, int] = {}
+        self.definition_scope_block_args: dict[str, list[int]] = {}
         self.func_arg_ids: list[int] = []
         self.func_args_consumed = False
         self.operand_fields: dict[str, list[int]] = {}
@@ -3038,7 +3044,19 @@ class Parser:
                     pre_arg_ids = None
                     region_def = _region_def(op_decl, name)
                     func_args_field = _func_args_field(op_decl)
-                    if (
+                    definition_scope_arg_ids = parsed.definition_scope_block_args.pop(
+                        name, None
+                    )
+                    if definition_scope_arg_ids is not None:
+                        if binding_names or binding_types:
+                            raise ParseError(
+                                f"region '{name}' cannot combine definition-"
+                                "scope block args with explicit binding args",
+                                tok.peek().location,
+                                tok._filename,
+                            )
+                        pre_arg_ids = definition_scope_arg_ids
+                    elif (
                         parsed.func_arg_ids
                         and func_args_field is not None
                         and region_def is not None
@@ -3084,8 +3102,8 @@ class Parser:
                 case BindingList(field=name, kind=binding_kind):
                     self._parse_binding_list(parsed, op_decl, name, binding_kind)
 
-                case BlockArgs(region=name):
-                    self._parse_block_args(parsed, name)
+                case BlockArgs(region=name, definition_scope=definition_scope):
+                    self._parse_block_args(parsed, name, definition_scope)
 
                 case FuncArgs(field=name, end_attr=end_attr):
                     tok.expect(TokenKind.LPAREN)
@@ -3636,10 +3654,31 @@ class Parser:
         parsed.attributes["_binding_arg_names"] = block_arg_names
         parsed.attributes["_binding_arg_types"] = block_arg_types
 
-    def _parse_block_args(self, parsed: ParsedFields, _region_name: str) -> None:
+    def _parse_block_args(
+        self,
+        parsed: ParsedFields,
+        region_name: str,
+        definition_scope: bool,
+    ) -> None:
         """Parse BlockArgs into pending entry block argument metadata."""
         tok = self._tokenizer
         tok.expect(TokenKind.LPAREN)
+        if definition_scope:
+            if not self._definition_scope_active:
+                raise RuntimeError(
+                    "definition-scope BlockArgs must be nested in Scope(...)"
+                )
+            block_arg_ids: list[int] = []
+            if not tok.at(TokenKind.RPAREN):
+                while True:
+                    _name, _arg_type, value_id = self._parse_func_arg()
+                    block_arg_ids.append(value_id)
+                    if not tok.try_consume(TokenKind.COMMA):
+                        break
+            tok.expect(TokenKind.RPAREN)
+            parsed.definition_scope_block_args[region_name] = block_arg_ids
+            return
+
         block_arg_names: list[str] = []
         block_arg_types: list[Type] = []
 
