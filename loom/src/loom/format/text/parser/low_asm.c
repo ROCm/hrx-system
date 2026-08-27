@@ -73,6 +73,7 @@ static bool loom_low_asm_token_can_start_attr(loom_token_t token) {
     case LOOM_TOKEN_STRING:
     case LOOM_TOKEN_SYMBOL:
     case LOOM_TOKEN_BARE_IDENT:
+    case LOOM_TOKEN_OP_NAME:
     case LOOM_TOKEN_LBRACKET:
     case LOOM_TOKEN_LBRACE:
     case LOOM_TOKEN_HASH_ATTR:

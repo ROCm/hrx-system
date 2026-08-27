@@ -153,6 +153,52 @@ static iree_status_t loom_low_descriptor_text_asm_form_references_immediate(
   return iree_ok_status();
 }
 
+static iree_status_t loom_low_descriptor_text_asm_immediate_index(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_t* descriptor,
+    const loom_low_asm_form_t* asm_form, uint16_t asm_immediate_index,
+    uint16_t* out_descriptor_immediate_index) {
+  *out_descriptor_immediate_index = 0;
+  if (asm_immediate_index >= descriptor->immediate_count) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "low asm immediate index is out of range");
+  }
+  if (asm_immediate_index < asm_form->immediate_count) {
+    const uint32_t row_index = asm_form->immediate_start + asm_immediate_index;
+    if (row_index >= descriptor_set->asm_immediate_count) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "low asm immediate row is out of range");
+    }
+    const uint16_t descriptor_immediate_index =
+        descriptor_set->asm_immediates[row_index].immediate_index;
+    if (descriptor_immediate_index >= descriptor->immediate_count) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "low asm immediate field is out of range");
+    }
+    *out_descriptor_immediate_index = descriptor_immediate_index;
+    return iree_ok_status();
+  }
+
+  uint16_t extra_immediate_index =
+      (uint16_t)(asm_immediate_index - asm_form->immediate_count);
+  for (uint16_t descriptor_immediate_index = 0;
+       descriptor_immediate_index < descriptor->immediate_count;
+       ++descriptor_immediate_index) {
+    bool referenced_by_form = false;
+    IREE_RETURN_IF_ERROR(loom_low_descriptor_text_asm_form_references_immediate(
+        descriptor_set, asm_form, descriptor_immediate_index,
+        &referenced_by_form));
+    if (referenced_by_form) continue;
+    if (extra_immediate_index == 0) {
+      *out_descriptor_immediate_index = descriptor_immediate_index;
+      return iree_ok_status();
+    }
+    --extra_immediate_index;
+  }
+  return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                          "low asm immediate row is out of range");
+}
+
 static iree_status_t loom_low_descriptor_text_asm_make_packet(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_asm_form_t* asm_form,
@@ -919,6 +965,10 @@ static iree_status_t loom_low_descriptor_text_asm_immediate_descriptor(
       loom_low_descriptor_text_asm_descriptor(packet->descriptor);
   const loom_low_asm_form_t* asm_form =
       loom_low_descriptor_text_asm_form(packet->form);
+  uint16_t descriptor_immediate_index = 0;
+  IREE_RETURN_IF_ERROR(loom_low_descriptor_text_asm_immediate_index(
+      descriptor_set, descriptor, asm_form, immediate_index,
+      &descriptor_immediate_index));
   if (immediate_index < packet->asm_immediate_count) {
     const uint32_t asm_immediate_index =
         asm_form->immediate_start + immediate_index;
@@ -931,26 +981,79 @@ static iree_status_t loom_low_descriptor_text_asm_immediate_descriptor(
     return loom_low_descriptor_text_asm_immediate_info(
         descriptor_set, descriptor, asm_immediate, out_immediate);
   }
+  return loom_low_descriptor_text_asm_descriptor_immediate_info(
+      descriptor_set, descriptor, descriptor_immediate_index, out_immediate);
+}
 
-  uint16_t extra_immediate_index =
-      (uint16_t)(immediate_index - packet->asm_immediate_count);
-  for (uint16_t descriptor_immediate_index = 0;
-       descriptor_immediate_index < descriptor->immediate_count;
-       ++descriptor_immediate_index) {
-    bool referenced_by_form = false;
-    IREE_RETURN_IF_ERROR(loom_low_descriptor_text_asm_form_references_immediate(
-        descriptor_set, asm_form, descriptor_immediate_index,
-        &referenced_by_form));
-    if (referenced_by_form) continue;
-    if (extra_immediate_index == 0) {
-      return loom_low_descriptor_text_asm_descriptor_immediate_info(
-          descriptor_set, descriptor, descriptor_immediate_index,
-          out_immediate);
-    }
-    --extra_immediate_index;
+static iree_status_t loom_low_descriptor_text_asm_query_immediate_spelling(
+    const loom_text_low_asm_environment_state_t* state,
+    const loom_text_low_asm_packet_descriptor_t* packet,
+    uint16_t immediate_index, const loom_module_t* module,
+    const loom_attribute_t* value, iree_string_view_t* out_spelling) {
+  (void)state;
+  *out_spelling = iree_string_view_empty();
+  const loom_low_descriptor_set_t* descriptor_set =
+      loom_low_descriptor_text_asm_descriptor_set(packet->descriptor_set);
+  const loom_low_descriptor_t* descriptor =
+      loom_low_descriptor_text_asm_descriptor(packet->descriptor);
+  const loom_low_asm_form_t* asm_form =
+      loom_low_descriptor_text_asm_form(packet->form);
+  if (immediate_index >= asm_form->immediate_count) {
+    return iree_ok_status();
   }
-  return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                          "low asm immediate row is out of range");
+  const uint32_t asm_immediate_row =
+      asm_form->immediate_start + immediate_index;
+  if (asm_immediate_row >= descriptor_set->asm_immediate_count) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "low asm immediate row is out of range");
+  }
+  const loom_low_asm_immediate_t* asm_immediate =
+      &descriptor_set->asm_immediates[asm_immediate_row];
+  if (!iree_any_bit_set(asm_immediate->flags,
+                        LOOM_LOW_ASM_IMMEDIATE_FLAG_ENUM_TOKEN)) {
+    return iree_ok_status();
+  }
+  uint16_t descriptor_immediate_index = 0;
+  IREE_RETURN_IF_ERROR(loom_low_descriptor_text_asm_immediate_index(
+      descriptor_set, descriptor, asm_form, immediate_index,
+      &descriptor_immediate_index));
+  const uint32_t row_index =
+      descriptor->immediate_start + descriptor_immediate_index;
+  if (row_index >= descriptor_set->immediate_count) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "low asm immediate field is out of range");
+  }
+  const loom_low_immediate_t* immediate =
+      &descriptor_set->immediates[row_index];
+  if (immediate->kind != LOOM_LOW_IMMEDIATE_KIND_ENUM) {
+    return iree_ok_status();
+  }
+  int64_t enum_value = 0;
+  if (value->kind == LOOM_ATTR_STRING) {
+    if (value->string_id >= module->strings.count) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "low asm enum immediate string is invalid");
+    }
+    if (!loom_low_descriptor_set_lookup_enum_value_by_token(
+            descriptor_set, immediate->enum_domain_id,
+            module->strings.entries[value->string_id], &enum_value)) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "low asm enum immediate value is not declared");
+    }
+  } else if (value->kind == LOOM_ATTR_I64) {
+    enum_value = value->i64;
+  } else {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "low asm enum immediate has invalid attribute "
+                            "kind");
+  }
+  if (!loom_low_descriptor_set_lookup_enum_token_by_value(
+          descriptor_set, immediate->enum_domain_id, enum_value,
+          out_spelling)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "low asm enum immediate value is not declared");
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t loom_low_descriptor_text_asm_tied_result_count(
@@ -1689,6 +1792,8 @@ static const loom_text_low_asm_vtable_t kLowDescriptorTextAsmVtable = {
     .result_type_annotation_required =
         loom_low_descriptor_text_asm_result_type_annotation_required,
     .immediate_descriptor = loom_low_descriptor_text_asm_immediate_descriptor,
+    .query_immediate_spelling =
+        loom_low_descriptor_text_asm_query_immediate_spelling,
     .operand_segment_descriptor =
         loom_low_descriptor_text_asm_operand_segment_descriptor,
     .build_packet = loom_low_descriptor_text_asm_build_packet,
@@ -1714,6 +1819,8 @@ static const loom_text_low_asm_vtable_t kLowDescriptorTextAsmDiagnosticVtable = 
     .result_type_annotation_required =
         loom_low_descriptor_text_asm_result_type_annotation_required,
     .immediate_descriptor = loom_low_descriptor_text_asm_immediate_descriptor,
+    .query_immediate_spelling =
+        loom_low_descriptor_text_asm_query_immediate_spelling,
     .operand_segment_descriptor =
         loom_low_descriptor_text_asm_operand_segment_descriptor,
     .build_packet = loom_low_descriptor_text_asm_build_packet,

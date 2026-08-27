@@ -1428,6 +1428,15 @@ TEST_F(ParserTest, AttrDictSymbolRefRoundTrip) {
       << text;
 }
 
+TEST_F(ParserTest, AttrDictQualifiedIdentifierParsesAsString) {
+  std::string text = RoundTrip(
+      "%c = test.constant 0 : f32\n"
+      "%s = test.attrs %c {mode = bf16.to.f32} : f32\n");
+  EXPECT_NE(text.find("test.attrs %c {mode = \"bf16.to.f32\"} : f32"),
+            std::string::npos)
+      << "qualified generic identifiers should parse as strings: " << text;
+}
+
 TEST_F(ParserTest, SymbolForwardReferenceResolvesToLaterDefinition) {
   std::string text = RoundTrip(
       "test.template_param_symbol<@target>\n"

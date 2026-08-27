@@ -29,6 +29,8 @@ from loom.target.low_descriptors import (
     LOW_DESCRIPTOR_ENCODING_ID_NONE,
     LOW_DESCRIPTOR_SET_ORDINAL_NONE,
     AsmForm,
+    AsmImmediateFlag,
+    AsmResultValueType,
     Constraint,
     ConstraintKind,
     Descriptor,
@@ -620,6 +622,8 @@ def _compile_asm_form(
         immediate_index = immediate_indices.get(immediate.field_name)
         if immediate_index is None:
             raise ValueError(f"descriptor '{descriptor.key}' asm form '{mnemonic}' immediate references unknown immediate field '{immediate.field_name}'")
+        if AsmImmediateFlag.ENUM_TOKEN in immediate.flags and descriptor.immediates[immediate_index].kind is not ImmediateKind.ENUM:
+            raise ValueError(f"descriptor '{descriptor.key}' asm form '{mnemonic}' immediate '{immediate.field_name}' requests enum-token spelling for a non-enum field")
         name_label = None
         if immediate.name is not None:
             if immediate.name == "":
@@ -638,6 +642,7 @@ def _compile_asm_form(
                 immediate_index=immediate_index,
                 name_label=name_label,
                 name=immediate.name,
+                flags=immediate.flags,
             )
         )
 

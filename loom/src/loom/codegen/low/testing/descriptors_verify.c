@@ -399,6 +399,32 @@ static iree_status_t loom_low_verify_asm_immediates(
                               descriptor_index, asm_immediate->immediate_index,
                               descriptor->immediate_count);
     }
+    const loom_low_asm_immediate_flags_t known_flags =
+        LOOM_LOW_ASM_IMMEDIATE_FLAG_ENUM_TOKEN;
+    if (asm_immediate->flags & ~known_flags) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "low asm form for descriptor %" PRIu32
+                              " immediate %" PRIu16 " has unknown flags 0x%04X",
+                              descriptor_index, asm_immediate->immediate_index,
+                              asm_immediate->flags & ~known_flags);
+    }
+    if (iree_any_bit_set(asm_immediate->flags,
+                         LOOM_LOW_ASM_IMMEDIATE_FLAG_ENUM_TOKEN)) {
+      const uint32_t immediate_row =
+          descriptor->immediate_start + asm_immediate->immediate_index;
+      if (immediate_row >= descriptor_set->immediate_count) {
+        return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "low asm immediate field is out of range");
+      }
+      if (descriptor_set->immediates[immediate_row].kind !=
+          LOOM_LOW_IMMEDIATE_KIND_ENUM) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "low asm form for descriptor %" PRIu32 " immediate %" PRIu16
+            " requests enum-token spelling for a non-enum field",
+            descriptor_index, asm_immediate->immediate_index);
+      }
+    }
     for (uint16_t j = 0; j < i; ++j) {
       const loom_low_asm_immediate_t* previous =
           &descriptor_set->asm_immediates[asm_form->immediate_start + j];
@@ -1763,25 +1789,11 @@ static iree_status_t loom_low_verify_descriptor_effect_contract(
 static iree_status_t loom_low_verify_descriptor_canonical_asm_form(
     const loom_low_descriptor_set_t* descriptor_set,
     uint32_t descriptor_index) {
-  const loom_low_descriptor_t* descriptor =
-      &descriptor_set->descriptors[descriptor_index];
   const loom_low_descriptor_view_t* descriptor_view =
       &descriptor_set->descriptor_views[descriptor_index];
   if (descriptor_view->canonical_asm_form_ordinal ==
       LOOM_LOW_ASM_FORM_ORDINAL_NONE) {
     return iree_ok_status();
-  }
-  for (uint16_t i = 0; i < descriptor->operand_count; ++i) {
-    const loom_low_operand_t* operand =
-        &descriptor_set->operands[descriptor->operand_start + i];
-    if (iree_any_bit_set(operand->flags,
-                         LOOM_LOW_OPERAND_FLAG_VARIABLE_UNIT_COUNT)) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "low descriptor %" PRIu32
-          " has compact assembly for a variable-unit operand",
-          descriptor_index);
-    }
   }
   if (descriptor_view->canonical_asm_form_ordinal >=
       descriptor_set->asm_form_count) {

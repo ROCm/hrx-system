@@ -59,6 +59,16 @@ loom_cc_library(
     ],
 )
 
+loom_cc_test(
+    name = "descriptors_test",
+    srcs = ["descriptors_test.cc"],
+    deps = [
+        ":descriptors",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 loom_cc_library(
     name = "descriptor_traits",
     srcs = ["descriptor_traits.c"],

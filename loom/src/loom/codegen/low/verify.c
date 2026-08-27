@@ -550,7 +550,6 @@ static iree_status_t loom_low_verify_format_i64(
 static iree_status_t loom_low_verify_immediate_enum_domain(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_immediate_t* immediate,
-    const loom_low_enum_domain_t** out_domain,
     iree_string_view_t* out_domain_name) {
   if (immediate->enum_domain_id >= descriptor_set->enum_domain_count) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
@@ -563,39 +562,7 @@ static iree_status_t loom_low_verify_immediate_enum_domain(
       &descriptor_set->enum_domains[immediate->enum_domain_id];
   *out_domain_name = loom_low_descriptor_set_string(descriptor_set,
                                                     domain->name_string_offset);
-  *out_domain = domain;
   return iree_ok_status();
-}
-
-static iree_status_t loom_low_verify_enum_domain_contains_token(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_enum_domain_t* domain, iree_string_view_t token,
-    bool* out_contains) {
-  *out_contains = false;
-  for (uint16_t i = 0; i < domain->value_count; ++i) {
-    const loom_low_enum_value_t* value =
-        &descriptor_set->enum_values[domain->value_start + i];
-    iree_string_view_t value_token = loom_low_descriptor_set_string(
-        descriptor_set, value->token_string_offset);
-    if (iree_string_view_equal(token, value_token)) {
-      *out_contains = true;
-      return iree_ok_status();
-    }
-  }
-  return iree_ok_status();
-}
-
-static bool loom_low_verify_enum_domain_contains_value(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_enum_domain_t* domain, int64_t actual_value) {
-  for (uint16_t i = 0; i < domain->value_count; ++i) {
-    const loom_low_enum_value_t* value =
-        &descriptor_set->enum_values[domain->value_start + i];
-    if (value->value == actual_value) {
-      return true;
-    }
-  }
-  return false;
 }
 
 static iree_status_t loom_low_verify_i64_immediate_range(
@@ -714,17 +681,16 @@ static iree_status_t loom_low_verify_descriptor_immediate_attr(
     case LOOM_LOW_IMMEDIATE_KIND_ENUM: {
       const loom_low_descriptor_set_t* descriptor_set =
           function_state->target->descriptor_set;
-      const loom_low_enum_domain_t* domain = NULL;
       iree_string_view_t domain_name = iree_string_view_empty();
       IREE_RETURN_IF_ERROR(loom_low_verify_immediate_enum_domain(
-          descriptor_set, immediate, &domain, &domain_name));
+          descriptor_set, immediate, &domain_name));
       if (attr->value.kind == LOOM_ATTR_STRING) {
         iree_string_view_t actual_token = loom_low_verify_string_or_empty(
             function_state->state->module, attr->value.string_id);
-        bool contains = false;
-        IREE_RETURN_IF_ERROR(loom_low_verify_enum_domain_contains_token(
-            descriptor_set, domain, actual_token, &contains));
-        if (contains) {
+        int64_t enum_value = 0;
+        if (loom_low_descriptor_set_lookup_enum_value_by_token(
+                descriptor_set, immediate->enum_domain_id, actual_token,
+                &enum_value)) {
           return iree_ok_status();
         }
         return loom_low_verify_emit_enum_domain_mismatch(
@@ -738,8 +704,10 @@ static iree_status_t loom_low_verify_descriptor_immediate_attr(
             (loom_attr_kind_t)attr->value.kind,
             loom_low_verify_expected_immediate_kind(immediate));
       }
-      if (loom_low_verify_enum_domain_contains_value(descriptor_set, domain,
-                                                     attr->value.i64)) {
+      iree_string_view_t enum_token = iree_string_view_empty();
+      if (loom_low_descriptor_set_lookup_enum_token_by_value(
+              descriptor_set, immediate->enum_domain_id, attr->value.i64,
+              &enum_token)) {
         return iree_ok_status();
       }
       iree_string_view_t actual_value = iree_string_view_empty();

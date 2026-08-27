@@ -1166,6 +1166,15 @@ class TestParseAttrDictOp:
         assert d["enabled"] is True
         assert d["debug"] is False
 
+    def test_qualified_identifier_value(self) -> None:
+        module, scope = _setup_scope(("x", F32))
+        op = _parse_op(
+            "%r = test.attrs %x {mode = bf16.to.f32} : f32",
+            module=module,
+            scope=scope,
+        )
+        assert op.attributes["dict"]["mode"] == "bf16.to.f32"
+
     def test_string_value_escapes_are_decoded(self) -> None:
         module, scope = _setup_scope(("x", F32))
         op = _parse_op(

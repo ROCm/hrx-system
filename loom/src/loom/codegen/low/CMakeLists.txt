@@ -26,6 +26,17 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_test(
+  NAME
+    descriptors_test
+  SRCS
+    "descriptors_test.cc"
+  DEPS
+    ::descriptors
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
 loom_cc_library(
   NAME
     descriptor_traits

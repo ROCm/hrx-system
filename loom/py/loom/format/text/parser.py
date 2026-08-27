@@ -248,6 +248,8 @@ def _parse_generic_attr_value_from_tokens(
         if text == "false":
             return False
         return text
+    if tokenizer.at(TokenKind.OP_NAME):
+        return tokenizer.next().text
     if tokenizer.at(TokenKind.SYMBOL):
         return SymbolName(tokenizer.next().text)
     if tokenizer.at(TokenKind.HASH_ATTR):

@@ -839,14 +839,13 @@ TEST(LowDescriptorsTest, RejectsVariableUnitCountPredicate) {
                         loom_low_descriptor_set_verify(&tables.set));
 }
 
-TEST(LowDescriptorsTest, RejectsVariableUnitCountCompactAssembly) {
+TEST(LowDescriptorsTest, AcceptsVariableUnitCountCompactAssembly) {
   TestTables tables;
   InitializeTestTables(&tables);
   AddAsmForms(&tables);
   tables.operands[1].flags = LOOM_LOW_OPERAND_FLAG_VARIABLE_UNIT_COUNT;
 
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        loom_low_descriptor_set_verify(&tables.set));
+  IREE_EXPECT_OK(loom_low_descriptor_set_verify(&tables.set));
 }
 
 TEST(LowDescriptorsTest, RejectsImplicitRowsWithoutImplicitFlag) {
@@ -1934,6 +1933,26 @@ TEST(LowDescriptorsTest, RejectsAsmFormImmediateOutOfRange) {
   tables.asm_immediates[0].immediate_index = 1;
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsUnknownAsmImmediateFlags) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  AddAsmForms(&tables);
+  tables.asm_immediates[0].flags = UINT16_MAX;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsEnumTokenSpellingForNonEnumImmediate) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  AddAsmForms(&tables);
+  tables.asm_immediates[0].flags = LOOM_LOW_ASM_IMMEDIATE_FLAG_ENUM_TOKEN;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         loom_low_descriptor_set_verify(&tables.set));
 }
 

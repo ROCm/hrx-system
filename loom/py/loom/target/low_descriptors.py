@@ -133,6 +133,10 @@ class ImmediateFlag(CEnum):
     DEFAULT_VALUE = "LOOM_LOW_IMMEDIATE_FLAG_DEFAULT_VALUE"
 
 
+class AsmImmediateFlag(CEnum):
+    ENUM_TOKEN = "LOOM_LOW_ASM_IMMEDIATE_FLAG_ENUM_TOKEN"
+
+
 class EffectKind(CEnum):
     READ = "LOOM_LOW_EFFECT_KIND_READ"
     WRITE = "LOOM_LOW_EFFECT_KIND_WRITE"
@@ -428,6 +432,7 @@ class EncodingFieldValue:
 class AsmImmediate:
     field_name: str
     name: str | None = None
+    flags: tuple[AsmImmediateFlag, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

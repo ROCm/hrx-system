@@ -988,9 +988,17 @@ typedef struct loom_low_descriptor_ref_t {
   uint32_t descriptor_ordinal;
 } loom_low_descriptor_ref_t;
 
+enum loom_low_asm_immediate_flag_bits_e {
+  // Prints enum values using their stable symbolic token.
+  LOOM_LOW_ASM_IMMEDIATE_FLAG_ENUM_TOKEN = 1u << 0,
+};
+typedef uint16_t loom_low_asm_immediate_flags_t;
+
 typedef struct loom_low_asm_immediate_t {
   // Descriptor-local immediate index printed or parsed by this asm field.
   uint16_t immediate_index;
+  // Presentation flags controlling compact assembly spelling.
+  loom_low_asm_immediate_flags_t flags;
   // Optional string-table offset for a named immediate spelling.
   loom_bstring_table_offset_t name_string_offset;
 } loom_low_asm_immediate_t;
@@ -1349,6 +1357,18 @@ const loom_low_descriptor_set_t* loom_low_descriptor_registry_lookup_by_id(
 iree_string_view_t loom_low_descriptor_set_string(
     const loom_low_descriptor_set_t* descriptor_set,
     loom_bstring_table_offset_t string_offset);
+
+// Looks up the numeric value assigned to |token| in |enum_domain_id|. Returns
+// false when the domain or token is not present.
+bool loom_low_descriptor_set_lookup_enum_value_by_token(
+    const loom_low_descriptor_set_t* descriptor_set, uint16_t enum_domain_id,
+    iree_string_view_t token, int64_t* out_value);
+
+// Looks up the stable token assigned to |value| in |enum_domain_id|. Returns
+// false when the domain or value is not present.
+bool loom_low_descriptor_set_lookup_enum_token_by_value(
+    const loom_low_descriptor_set_t* descriptor_set, uint16_t enum_domain_id,
+    int64_t value, iree_string_view_t* out_token);
 
 // Looks up a descriptor-set-local register class by stable register-class name.
 // |out_descriptor_register_class| may be NULL when only the dense descriptor ID

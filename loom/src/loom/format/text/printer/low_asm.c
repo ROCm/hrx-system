@@ -293,6 +293,20 @@ static bool loom_print_low_asm_should_print_immediate_attr(
          !loom_print_low_asm_immediate_attr_is_default(immediate, attr);
 }
 
+static iree_status_t loom_print_low_asm_immediate_value(
+    loom_print_context_t* ctx, const loom_text_low_asm_statement_t* statement,
+    uint16_t immediate_index, const loom_attribute_t* value) {
+  iree_string_view_t spelling = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(
+      ctx->low_asm_environment.vtable->query_immediate_spelling(
+          ctx->low_asm_environment.state, &statement->packet, immediate_index,
+          ctx->module, value, &spelling));
+  if (!iree_string_view_is_empty(spelling)) {
+    return loom_output_stream_write(ctx->stream, spelling);
+  }
+  return loom_print_attr(ctx, value, NULL);
+}
+
 static iree_status_t loom_print_low_asm_result_types_require_annotation(
     loom_print_context_t* ctx, const loom_text_low_asm_statement_t* statement,
     bool* out_required) {
@@ -500,7 +514,8 @@ static iree_status_t loom_print_low_asm_named_immediates(
     IREE_RETURN_IF_ERROR(
         loom_output_stream_write(ctx->stream, immediate.spelling));
     IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(ctx->stream, " = "));
-    IREE_RETURN_IF_ERROR(loom_print_attr(ctx, &attr->value, NULL));
+    IREE_RETURN_IF_ERROR(
+        loom_print_low_asm_immediate_value(ctx, statement, i, &attr->value));
     ++printed_count;
   }
   IREE_RETURN_IF_ERROR(loom_output_stream_write_char(ctx->stream, '}'));
@@ -535,7 +550,8 @@ static iree_status_t loom_print_low_asm_positional_immediates(
     }
     IREE_RETURN_IF_ERROR(loom_print_space_if_needed(ctx));
     iree_host_size_t start = ctx->stream->offset;
-    IREE_RETURN_IF_ERROR(loom_print_attr(ctx, &attr->value, NULL));
+    IREE_RETURN_IF_ERROR(
+        loom_print_low_asm_immediate_value(ctx, statement, i, &attr->value));
     loom_print_did_write(ctx);
     if (statement->has_immediate_attribute_field) {
       loom_print_report_field(

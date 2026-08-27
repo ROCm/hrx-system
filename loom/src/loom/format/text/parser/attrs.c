@@ -1111,6 +1111,14 @@ static iree_status_t loom_parse_generic_attr_value_with_type_mode(
       *out_attr = loom_attr_string(ident_id);
       return iree_ok_status();
     }
+    case LOOM_TOKEN_OP_NAME: {
+      loom_tokenizer_next(&parser->tokenizer);
+      loom_string_id_t ident_id = LOOM_STRING_ID_INVALID;
+      IREE_RETURN_IF_ERROR(loom_module_intern_string(
+          parser->module, value_token.text, &ident_id));
+      *out_attr = loom_attr_string(ident_id);
+      return iree_ok_status();
+    }
     case LOOM_TOKEN_LBRACKET:
       return loom_parse_i64_array_attr(parser, out_attr);
     case LOOM_TOKEN_HASH_ATTR: {

@@ -812,6 +812,7 @@ def emit_source_for_views(
         [
             [
                 f".immediate_index = {immediate.immediate_index},",
+                f".flags = {c_spelling.flag_expr(immediate.flags)},",
                 f".name_string_offset = {c_spelling.optional_string_expr(pool, immediate.name_label)},",
             ]
             for immediate in asm_table_storage.immediates

@@ -283,6 +283,16 @@ typedef iree_status_t (*loom_text_low_asm_immediate_descriptor_fn_t)(
     uint16_t immediate_index,
     loom_text_low_asm_immediate_descriptor_t* out_immediate);
 
+// Queries a target-owned compact spelling for an immediate attribute value.
+// Returns an empty |out_spelling| when the generic attribute spelling should be
+// used. Non-empty spellings must be directly parseable as generic attribute
+// values and remain valid for the duration of the call.
+typedef iree_status_t (*loom_text_low_asm_query_immediate_spelling_fn_t)(
+    const loom_text_low_asm_environment_state_t* state,
+    const loom_text_low_asm_packet_descriptor_t* packet,
+    uint16_t immediate_index, const loom_module_t* module,
+    const loom_attribute_t* value, iree_string_view_t* out_spelling);
+
 typedef iree_status_t (*loom_text_low_asm_operand_segment_descriptor_fn_t)(
     const loom_text_low_asm_environment_state_t* state,
     const loom_text_low_asm_packet_descriptor_t* packet, uint16_t segment_index,
@@ -373,6 +383,8 @@ typedef struct loom_text_low_asm_vtable_t {
       result_type_annotation_required;
   // Returns canonical field and surface spelling metadata for one immediate.
   loom_text_low_asm_immediate_descriptor_fn_t immediate_descriptor;
+  // Queries a compact target-owned spelling for an immediate attribute value.
+  loom_text_low_asm_query_immediate_spelling_fn_t query_immediate_spelling;
   // Returns delimiter and cardinality metadata for one operand segment.
   loom_text_low_asm_operand_segment_descriptor_fn_t operand_segment_descriptor;
   // Builds the canonical low operation for a parsed non-return asm packet.
@@ -431,6 +443,7 @@ static inline bool loom_text_low_asm_environment_supports_printing(
          environment->low_repr.vtable && environment->low_repr.state &&
          environment->vtable->result_type_annotation_required &&
          environment->vtable->immediate_descriptor &&
+         environment->vtable->query_immediate_spelling &&
          environment->vtable->operand_segment_descriptor &&
          environment->vtable->describe_operation &&
          environment->vtable->lookup_register_descriptor_set &&

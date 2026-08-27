@@ -24,6 +24,7 @@ from loom.target.low_descriptors import (
     LOW_DESCRIPTOR_ENCODING_ID_NONE,
     AsmForm,
     AsmImmediate,
+    AsmImmediateFlag,
     AsmOperandSegment,
     AsmOperandSegmentDelimiter,
     AsmResultValueType,
@@ -2437,6 +2438,69 @@ def test_generator_emits_enum_immediate_domains() -> None:
     assert "test.condition" in generated.source
     assert "eq" in generated.source
     assert "ne" in generated.source
+
+
+def test_generator_emits_symbolic_enum_asm_immediate() -> None:
+    domain = EnumDomain(
+        "test.condition",
+        values=(EnumValue("ne", 1), EnumValue("eq", 0)),
+    )
+    enum_immediate = replace(
+        TEST_LOW_CONST_I32_DESCRIPTOR.immediates[0],
+        kind=ImmediateKind.ENUM,
+        enum_domain="test.condition",
+    )
+    descriptor = replace(
+        TEST_LOW_CONST_I32_DESCRIPTOR,
+        immediates=(enum_immediate,),
+        asm_forms=(
+            replace(
+                TEST_LOW_CONST_I32_DESCRIPTOR.asm_forms[0],
+                immediates=(
+                    AsmImmediate(
+                        enum_immediate.field_name,
+                        flags=(AsmImmediateFlag.ENUM_TOKEN,),
+                    ),
+                ),
+            ),
+        ),
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        enum_domains=(domain,),
+        descriptors=(descriptor,),
+    )
+
+    generated = generate_descriptor_set(descriptor_set)
+
+    assert "LOOM_LOW_ASM_IMMEDIATE_FLAG_ENUM_TOKEN" in generated.source
+
+
+def test_generator_rejects_symbolic_non_enum_asm_immediate() -> None:
+    descriptor = replace(
+        TEST_LOW_CONST_I32_DESCRIPTOR,
+        asm_forms=(
+            replace(
+                TEST_LOW_CONST_I32_DESCRIPTOR.asm_forms[0],
+                immediates=(
+                    AsmImmediate(
+                        TEST_LOW_CONST_I32_DESCRIPTOR.immediates[0].field_name,
+                        flags=(AsmImmediateFlag.ENUM_TOKEN,),
+                    ),
+                ),
+            ),
+        ),
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(descriptor,),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor 'test.const.i32' asm form 'test.const.i32' immediate 'i32_value' requests enum-token spelling for a non-enum field"),
+    ):
+        generate_descriptor_set(descriptor_set)
 
 
 def test_generator_rejects_missing_enum_immediate_domain() -> None:
