@@ -774,6 +774,8 @@ def _ceildiv(*, opcode: int, width: int) -> Instruction:
 INTEGER_CEILDIV_POW2_U32 = _ceildiv(opcode=0x74, width=32)
 INTEGER_CEILDIV_POW2_U64 = _ceildiv(opcode=0x75, width=64)
 
+INTEGER_BITSTREAM_MAXIMUM_BIT_COUNT = 64
+
 
 def _bitstream(*, opcode: int, mnemonic: str, mode: str, signed: bool) -> Instruction:
     carrier_values = (8, 16, 32, 64)
@@ -786,7 +788,12 @@ def _bitstream(*, opcode: int, mnemonic: str, mode: str, signed: bool) -> Instru
             U8.entity_id,
             InstructionFieldRole.IMMEDIATE,
             "Logical field width in bits.",
-            (RuleUse(ALLOWED_RANGE.entity_id, (1, 64)),),
+            (
+                RuleUse(
+                    ALLOWED_RANGE.entity_id,
+                    (1, INTEGER_BITSTREAM_MAXIMUM_BIT_COUNT),
+                ),
+            ),
         ),
         instruction_field(
             "source_count_u8",
@@ -834,6 +841,7 @@ def _bitstream(*, opcode: int, mnemonic: str, mode: str, signed: bool) -> Instru
             INTEGER_BITSTREAM_SHAPE.entity_id,
             (
                 mode,
+                INTEGER_BITSTREAM_MAXIMUM_BIT_COUNT,
                 FieldReference("field_width_u8"),
                 FieldReference("source_count_u8"),
                 FieldReference("result_count_u8"),

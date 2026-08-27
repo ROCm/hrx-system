@@ -890,4 +890,10 @@ SELECTOR_TABLES_BY_NAME = {
     ): table
     for table in SELECTOR_TABLES
 }
+_MEMORY_FORMAT_TABLE_ID = SELECTOR_TABLES_BY_NAME["memory.format"].entity_id
+MEMORY_FORMAT_MAXIMUM_LANE_COUNT = max(
+    1 << (value.value & 0x3)
+    for value in SELECTOR_VALUES
+    if value.table_id == _MEMORY_FORMAT_TABLE_ID
+)
 ENTITIES = (*SELECTOR_TABLES, *SELECTOR_VALUES)

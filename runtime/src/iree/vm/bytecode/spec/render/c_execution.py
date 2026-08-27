@@ -12,6 +12,8 @@ from collections.abc import Sequence
 
 from execution import ExecutableInstruction
 from model.isa import Instruction, InstructionFieldRole
+from model.isa.core.integer import INTEGER_BITSTREAM_MAXIMUM_BIT_COUNT
+from model.isa.selectors import MEMORY_FORMAT_MAXIMUM_LANE_COUNT
 from model.isa.validation import (
     ABI_SLOT,
     ALLOWED_RANGE,
@@ -27,6 +29,7 @@ from model.isa.validation import (
     FUNCTION_LOCAL_ORDINAL,
     GLOBAL_ORDINAL,
     IMPORT_ORDINAL_OPTIONAL,
+    INTEGER_BITSTREAM_SHAPE,
     LOCAL_BYTES_FIXED_BASE,
     LOCAL_BYTES_RANGE_BASE,
     LOCAL_BYTES_RANGE_LENGTH,
@@ -44,6 +47,7 @@ from model.isa.validation import (
     RODATA_ORDINAL,
     RODATA_STATIC_OFFSET,
     SELECTOR,
+    VALUE_REGISTER_RANGE,
     VALUE_REGISTER_RANGE_FROM_MEMORY_FORMAT,
     ZERO,
 )
@@ -207,6 +211,7 @@ def _validate_verification_form(
         expected_arguments = (
             FieldReference(base_field),
             FieldReference(format_field),
+            MEMORY_FORMAT_MAXIMUM_LANE_COUNT,
         )
         if (
             constraint.rule_id != VALUE_REGISTER_RANGE_FROM_MEMORY_FORMAT.entity_id
@@ -725,6 +730,34 @@ def _validate_verification_form(
             (InstructionFieldRole.IMMEDIATE,),
             rule_arguments=(carrier_values,),
         )
+        mode = "pack" if verification_form == "INTEGER_BITSTREAM_PACK" else "unpack"
+        expected_constraints = (
+            RuleUse(
+                VALUE_REGISTER_RANGE.entity_id,
+                (FieldReference("result_base_v8"), FieldReference("result_count_u8")),
+            ),
+            RuleUse(
+                VALUE_REGISTER_RANGE.entity_id,
+                (FieldReference("source_base_v8"), FieldReference("source_count_u8")),
+            ),
+            RuleUse(
+                INTEGER_BITSTREAM_SHAPE.entity_id,
+                (
+                    mode,
+                    INTEGER_BITSTREAM_MAXIMUM_BIT_COUNT,
+                    FieldReference("field_width_u8"),
+                    FieldReference("source_count_u8"),
+                    FieldReference("result_count_u8"),
+                    FieldReference("source_width_u8"),
+                    FieldReference("result_width_u8"),
+                ),
+            ),
+        )
+        if instruction.constraints != expected_constraints:
+            raise ValueError(
+                f"{instruction.mnemonic}: bitstream constraints do not match "
+                "the runtime verification form"
+            )
     elif verification_form == "REF_CLEAR":
         if instruction.byte_length != 4:
             raise ValueError(f"{instruction.mnemonic}: ref clear record is not 4 bytes")

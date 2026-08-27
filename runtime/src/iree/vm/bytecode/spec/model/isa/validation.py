@@ -372,6 +372,7 @@ INTEGER_BITSTREAM_SHAPE = _record_rule(
     "integer_bitstream_shape",
     (
         RuleParameter("mode", TEXT_ARGUMENT),
+        RuleParameter("maximum_bit_count", INTEGER_ARGUMENT),
         RuleParameter("field_width_field", FIELD_ARGUMENT),
         RuleParameter("source_count_field", FIELD_ARGUMENT),
         RuleParameter("result_count_field", FIELD_ARGUMENT),
@@ -379,9 +380,10 @@ INTEGER_BITSTREAM_SHAPE = _record_rule(
         RuleParameter("result_width_field", FIELD_ARGUMENT),
     ),
     "Validates exact source/result capacity for integer bitstream packing.",
-    "mode must be pack or unpack. The declared carrier widths and counts must "
-    "provide exactly the bit capacity required by field_width without reading "
-    "or producing an incomplete logical element.",
+    "mode must be pack or unpack and maximum_bit_count must be positive. The "
+    "declared carrier widths and counts must provide exactly the bit capacity "
+    "required by field_width without reading or producing an incomplete "
+    "logical element or exceeding maximum_bit_count.",
 )
 PACKED_SELECTOR_ALLOWED_PAIRS = _record_rule(
     "packed_selector_allowed_pairs",
@@ -432,10 +434,12 @@ VALUE_REGISTER_RANGE_FROM_MEMORY_FORMAT = _record_rule(
     (
         RuleParameter("base_field", FIELD_ARGUMENT),
         RuleParameter("format_field", FIELD_ARGUMENT),
+        RuleParameter("maximum_lane_count", INTEGER_ARGUMENT),
     ),
     "Requires the value-register range implied by a memory format.",
-    "The u8 base must leave enough consecutive value registers for the lane "
-    "count selected by format_field.",
+    "maximum_lane_count must be positive. The u8 base must leave enough "
+    "consecutive value registers for the lane count selected by format_field, "
+    "which must not exceed maximum_lane_count.",
 )
 
 INSTRUCTION_FIELD_RULES = (

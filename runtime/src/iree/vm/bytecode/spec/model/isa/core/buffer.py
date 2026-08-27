@@ -29,7 +29,10 @@ from model.isa.declarations import (
     value_register,
     zero_padding,
 )
-from model.isa.selectors import SELECTOR_TABLES_BY_NAME
+from model.isa.selectors import (
+    MEMORY_FORMAT_MAXIMUM_LANE_COUNT,
+    SELECTOR_TABLES_BY_NAME,
+)
 from model.isa.validation import (
     ALLOWED_VALUES,
     ANY_BITS,
@@ -155,7 +158,11 @@ def _memory_format(offset: int):
 def _lane_range_constraint(register_field: str):
     return RuleUse(
         VALUE_REGISTER_RANGE_FROM_MEMORY_FORMAT.entity_id,
-        (FieldReference(register_field), FieldReference("format_u8")),
+        (
+            FieldReference(register_field),
+            FieldReference("format_u8"),
+            MEMORY_FORMAT_MAXIMUM_LANE_COUNT,
+        ),
     )
 
 
