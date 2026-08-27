@@ -38,12 +38,13 @@ from loom.target.low_descriptors import (
     Effect,
     EffectFlag,
     EffectKind,
+    ImmediateKind,
     MemorySpace,
 )
 
 
 def test_descriptors_preserve_instruction_identity() -> None:
-    assert len(VM_INSTRUCTION_PROJECTIONS) == 163
+    assert len(VM_INSTRUCTION_PROJECTIONS) == 170
     assert len(VM_CORE_DESCRIPTOR_SET.descriptors) == len(VM_PACKET_DESCRIPTORS) + 1
     for descriptor, projection in zip(
         VM_PACKET_DESCRIPTORS,
@@ -66,15 +67,41 @@ def test_descriptors_preserve_instruction_identity() -> None:
 
 def test_projection_partitions_every_core_instruction() -> None:
     assert len(VM_CORE_INSTRUCTIONS) == 183
-    assert len(VM_INSTRUCTION_PROJECTIONS) == 163
+    assert len(VM_INSTRUCTION_PROJECTIONS) == 170
     assert len(VM_STRUCTURAL_INSTRUCTIONS) == 13
     assert len(VM_ABI_INSTRUCTIONS) == 7
     partitioned_ids = {
         *(projection.instruction.entity_id for projection in VM_INSTRUCTION_PROJECTIONS),
         *(instruction.entity_id for instruction in VM_STRUCTURAL_INSTRUCTIONS),
-        *(instruction.entity_id for instruction in VM_ABI_INSTRUCTIONS),
     }
     assert partitioned_ids == {instruction.entity_id for instruction in VM_CORE_INSTRUCTIONS}
+    projected_ids = {projection.instruction.entity_id for projection in VM_INSTRUCTION_PROJECTIONS}
+    assert all(instruction.entity_id in projected_ids for instruction in VM_ABI_INSTRUCTIONS)
+
+
+def test_abi_records_are_ordinary_sequential_descriptors() -> None:
+    descriptors = {descriptor.key: descriptor for descriptor in VM_CORE_DESCRIPTOR_SET.descriptors}
+    value_load = descriptors["vm.value.abi.argument.load"]
+    assert value_load.immediates[0].kind is ImmediateKind.ORDINAL
+    assert value_load.effects == (
+        Effect(
+            EffectKind.READ,
+            memory_space=MemorySpace.STACK,
+            flags=(EffectFlag.DEPENDENCY,),
+        ),
+    )
+    assert value_load.flags == (DescriptorFlag.DEAD_REMOVABLE,)
+
+    ref_store = descriptors["vm.ref.abi.result.store.move"]
+    assert ref_store.effects == (
+        Effect(
+            EffectKind.WRITE,
+            memory_space=MemorySpace.STACK,
+            flags=(EffectFlag.DEPENDENCY,),
+        ),
+        Effect(EffectKind.BARRIER, flags=(EffectFlag.ORDERED,)),
+    )
+    assert ref_store.flags == (DescriptorFlag.SIDE_EFFECTING,)
 
 
 def test_ref_move_requires_distinct_registers() -> None:
@@ -179,11 +206,11 @@ def test_packet_constraints_preserve_isa_relationships() -> None:
     assert len(VM_PACKED_IMMEDIATE_MASKS) == 5
     assert {constraint.kind for constraint in VM_PACKET_CONSTRAINTS} == set(VmPacketConstraintKind)
     assert len(VM_TARGET_DEPENDENT_CONSTRAINTS) == 3
-    assert len(VM_MODULE_DEPENDENT_CONSTRAINTS) == 1
+    assert len(VM_MODULE_DEPENDENT_CONSTRAINTS) == 8
 
 
 def test_verification_rows_are_data_only() -> None:
     rows = generate_verification_rows()
-    assert "LOOM_VM_PACKET_CONSTRAINT_LIMITS(\n    163, 26,\n    5, 16)" in rows
-    assert rows.count("LOOM_VM_PACKET_CONSTRAINT_RANGE_ROW(") == 163
+    assert "LOOM_VM_PACKET_CONSTRAINT_LIMITS(\n    170, 26,\n    5, 16)" in rows
+    assert rows.count("LOOM_VM_PACKET_CONSTRAINT_RANGE_ROW(") == 170
     assert rows.count("LOOM_VM_PACKET_CONSTRAINT_ROW(") == 26

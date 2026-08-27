@@ -40,6 +40,7 @@ from model.isa.selectors import (
     SELECTOR_VALUES,
 )
 from model.isa.validation import (
+    ABI_SLOT,
     ALLOWED_RANGE,
     ALLOWED_VALUES,
     CONSTANT_POOL_ORDINAL,
@@ -126,6 +127,7 @@ _CONSTANT_SCHEDULE_CLASS = "vm.constant"
 _EXECUTE_SCHEDULE_CLASS = "vm.execute"
 
 _CORE_INSTRUCTIONS = (
+    *ABI_INSTRUCTIONS,
     *BUFFER_INSTRUCTIONS,
     *CONSTANT_INSTRUCTIONS,
     *CONTROL_INSTRUCTIONS,
@@ -138,9 +140,7 @@ _CORE_INSTRUCTIONS = (
     *STACK_INSTRUCTIONS,
     *VALUE_INSTRUCTIONS,
 )
-VM_CORE_INSTRUCTIONS = tuple(
-    sorted((*ABI_INSTRUCTIONS, *_CORE_INSTRUCTIONS), key=lambda value: value.opcode)
-)
+VM_CORE_INSTRUCTIONS = tuple(sorted(_CORE_INSTRUCTIONS, key=lambda value: value.opcode))
 _INSTRUCTIONS_BY_MNEMONIC = {
     instruction.mnemonic: instruction for instruction in _CORE_INSTRUCTIONS
 }
@@ -163,6 +163,7 @@ _REGISTER_ALTERNATIVES_BY_RULE_ID = {
 _ORDINAL_RULE_IDS = frozenset(
     rule.entity_id
     for rule in (
+        ABI_SLOT,
         CONSTANT_POOL_ORDINAL,
         FUNCTION_LOCAL_ORDINAL,
         GLOBAL_ORDINAL,
@@ -205,6 +206,8 @@ _NONMUTATING_REF_OPERAND_OWNERSHIP = frozenset(
     )
 )
 _MEMORY_SPACE_BY_STATE_RESOURCE = {
+    StateResource.INVOCATION_ARGUMENTS: MemorySpace.STACK,
+    StateResource.INVOCATION_RESULTS: MemorySpace.STACK,
     StateResource.FRAME_LOCALS: MemorySpace.STACK,
     StateResource.PROCESS_GLOBALS: MemorySpace.GLOBAL,
     StateResource.BUFFER: MemorySpace.GENERIC,
@@ -283,10 +286,8 @@ VM_INSTRUCTION_PROJECTIONS = tuple(
 )
 
 # Control-flow records are emitted from Low structural operations because they
-# own successor edges rather than ordinary descriptor operands. Overflow ABI
-# records are inserted by ABI materialization and encoded explicitly because
-# their signature-derived slots are not source-level values. Together with the
-# descriptor projection these sets must partition the complete Core ISA.
+# own successor edges rather than ordinary descriptor operands. Together with
+# the sequential descriptor projection they partition the complete Core ISA.
 VM_STRUCTURAL_INSTRUCTIONS = tuple(
     instruction
     for instruction in VM_CORE_INSTRUCTIONS
@@ -306,7 +307,6 @@ def _validate_core_instruction_partition() -> None:
     partitions = (
         descriptor_instructions,
         VM_STRUCTURAL_INSTRUCTIONS,
-        VM_ABI_INSTRUCTIONS,
     )
     partitioned_ids = [
         instruction.entity_id for partition in partitions for instruction in partition

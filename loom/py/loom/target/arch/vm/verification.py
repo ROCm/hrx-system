@@ -18,6 +18,7 @@ from model.isa.selectors import (
     memory_format_lane_count,
 )
 from model.isa.validation import (
+    ABI_SLOT,
     ALLOWED_RANGE,
     FIELDS_DISTINCT,
     FUNCTION_ADDRESS,
@@ -362,6 +363,18 @@ def _project_constraints() -> tuple[
         constraint_start = len(constraints)
 
         for field in instruction.fields:
+            abi_slot = _rule_use(field, ABI_SLOT.entity_id)
+            if abi_slot is not None:
+                if len(abi_slot.arguments) != 1 or not isinstance(
+                    abi_slot.arguments[0], str
+                ):
+                    raise ValueError(
+                        f"{instruction.mnemonic}.{field.name}: malformed ABI slot"
+                    )
+                module_dependent.append(
+                    VmDeferredConstraint(descriptor_ordinal, ABI_SLOT.entity_id)
+                )
+
             allowed_range = _rule_use(field, ALLOWED_RANGE.entity_id)
             if allowed_range is not None:
                 if len(allowed_range.arguments) != 2:
