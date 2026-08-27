@@ -554,7 +554,7 @@ low_func_def = Op(
         Region("body", syntax="low.asm.optional"),
     ],
     examples=[
-        "low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_generic) @add(%lhs: reg<amdgpu.vgpr x1>, %rhs: reg<amdgpu.vgpr x1>) -> (reg<amdgpu.vgpr x1>) {\n  %sum = low.op<amdgpu.v_add_u32>(%lhs, %rhs) : (reg<amdgpu.vgpr x1>, reg<amdgpu.vgpr x1>) -> reg<amdgpu.vgpr x1>\n  low.return %sum : reg<amdgpu.vgpr x1>\n}",
+        "low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_generic) @add(%lhs: reg<amdgpu.vgpr x1>, %rhs: reg<amdgpu.vgpr x1>) -> (reg<amdgpu.vgpr x1>) asm {\n  %sum = v_add_u32 %lhs, %rhs\n  return %sum\n}",
         "low.func.def target<amdgpu.rdna3_5.core> @invocation_bound() {\n  low.return\n}",
         "low.func.def allocation(fixed) schedule(locked) target<amdgpu.gfx11.generic.core>(@gfx11_generic) @agent_authored(%lhs: reg<amdgpu.vgpr x1>) {\n  low.return\n}",
     ],
