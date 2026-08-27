@@ -79,7 +79,47 @@ def _declare_relocatable_module(
         transitive_dependencies = transitive_dependencies,
     )
 
+def _declare_linked_module(
+        ctx,
+        direct_modules,
+        transitive_modules,
+        roots,
+        configs,
+        output_stem,
+        mnemonic,
+        progress_message):
+    module = ctx.actions.declare_file(output_stem + ".loombc")
+    args = ctx.actions.args()
+    args.add("--mode=link")
+    args.add("--strip-check")
+    args.add("--require-resolved-config")
+    args.add("--to=bc")
+    args.add("--output=%s" % module.path)
+    if roots:
+        args.add_all(direct_modules, format_each = "--library=%s")
+        args.add_all(roots, format_each = "--root=%s")
+    else:
+        args.add_all(direct_modules, format_each = "--root-library=%s")
+    args.add_all(
+        transitive_modules,
+        format_each = "--transitive-library=%s",
+    )
+    for key in sorted(configs.keys()):
+        args.add("--config=%s=%s" % (key, configs[key]))
+
+    tool = ctx.toolchains[_LOOM_LINK_TOOLCHAIN_TYPE].tool
+    ctx.actions.run(
+        arguments = [args],
+        executable = tool.files_to_run,
+        inputs = depset(direct = direct_modules + transitive_modules),
+        mnemonic = mnemonic,
+        outputs = [module],
+        progress_message = progress_message,
+    )
+    return module
+
 loom_linking = struct(
     collect_dependency_modules = _collect_dependency_modules,
+    declare_linked_module = _declare_linked_module,
     declare_relocatable_module = _declare_relocatable_module,
 )

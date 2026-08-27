@@ -7,6 +7,11 @@
 """Public Bazel API for Loom source repositories."""
 
 load(
+    ":loom_binary.bzl",
+    _LoomBinaryInfo = "LoomBinaryInfo",
+    _loom_kernel_binary = "loom_kernel_binary",
+)
+load(
     ":loom_library.bzl",
     _LoomCompilationInfo = "LoomCompilationInfo",
     _LoomCompileTargetInfo = "LoomCompileTargetInfo",
@@ -34,6 +39,7 @@ load(
     _loom_tools_toolchains = "loom_tools_toolchains",
 )
 
+LoomBinaryInfo = _LoomBinaryInfo
 LoomCompilationInfo = _LoomCompilationInfo
 LoomCompileTargetInfo = _LoomCompileTargetInfo
 LoomExecutionTestInfo = _LoomExecutionTestInfo
@@ -44,6 +50,7 @@ loom_compile = _loom_compile
 loom_compile_target = _loom_compile_target
 loom_amdgpu_target_profile = _loom_amdgpu_target_profile
 loom_execution_profile = _loom_execution_profile
+loom_kernel_binary = _loom_kernel_binary
 loom_kernel_library = _loom_kernel_library
 loom_library = _loom_library
 loom_module = _loom_module

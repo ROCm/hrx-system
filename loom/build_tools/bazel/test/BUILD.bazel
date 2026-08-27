@@ -12,12 +12,18 @@ load(
     "//loom/build_tools/bazel:defs.bzl",
     "loom_amdgpu_target_profile",
     "loom_compile_target",
+    "loom_kernel_binary",
     "loom_kernel_library",
     "loom_library",
     "loom_module",
     "loom_test_library",
 )
 load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test")
+load(
+    ":loom_binary_rules_test.bzl",
+    "loom_binary_rules_test_suite",
+    "test_target_profile",
+)
 load(":loom_check_rules_test.bzl", "loom_check_rules_test_suite")
 load(
     ":loom_library_rules_test.bzl",
@@ -46,6 +52,11 @@ loom_amdgpu_target_profile(
     target = "gfx942",
 )
 
+test_target_profile(
+    name = "test_spirv_profile",
+    family = "spirv",
+)
+
 loom_kernel_library(
     name = "public_kernel_library",
     srcs = [
@@ -58,6 +69,40 @@ loom_library(
     name = "library_dependency",
     srcs = ["link_kernels.loom"],
     tags = ["manual"],
+)
+
+loom_kernel_binary(
+    name = "kernel_binary_deps",
+    tags = ["manual"],
+    target = "//loom/target/amdgpu:gfx11-generic",
+    deps = [":public_kernel_library"],
+)
+
+loom_kernel_binary(
+    name = "kernel_binary_srcs",
+    srcs = ["link_kernels.loom"],
+    tags = ["manual"],
+    target = "//loom/target/amdgpu:gfx11-generic",
+)
+
+loom_kernel_binary(
+    name = "kernel_binary_mixed",
+    srcs = ["link_checks.loom"],
+    configs = {
+        "a.value": "1",
+        "z.value": "2",
+    },
+    tags = ["manual"],
+    target = "//loom/target/amdgpu:gfx11-generic",
+    deps = [":library_dependency"],
+)
+
+loom_kernel_binary(
+    name = "kernel_binary_explicit_root",
+    roots = ["@scale"],
+    tags = ["manual"],
+    target = "//loom/target/amdgpu:gfx11-generic",
+    deps = [":public_kernel_library"],
 )
 
 loom_library(
@@ -113,6 +158,8 @@ loom_check_rules_test_suite(name = "loom_check_rules_tests")
 
 loom_library_rules_test_suite(name = "loom_library_rules_tests")
 
+loom_binary_rules_test_suite(name = "loom_binary_rules_tests")
+
 loom_target_profile_rules_test_suite(name = "loom_target_profile_rules_tests")
 
 loom_module(
@@ -140,6 +187,38 @@ iree_executable_test(
     src = "//loom/src/loom/tools/loom-format",
     args = ["$(rootpath :library_aggregate)"],
     data = [":library_aggregate"],
+)
+
+sh_test(
+    name = "kernel_binary_direct_test",
+    srcs = ["kernel_binary_direct_test.sh"],
+    args = [
+        "$(rootpath :kernel_binary_deps)",
+        "$(rootpath :kernel_binary_deps_compile_report)",
+    ],
+    data = [
+        ":kernel_binary_deps",
+        ":kernel_binary_deps_compile_report",
+    ],
+)
+
+filegroup(
+    name = "kernel_binary_deps_compile_report",
+    srcs = [":kernel_binary_deps"],
+    output_group = "compile_reports",
+)
+
+filegroup(
+    name = "kernel_binary_deps_linked_module",
+    srcs = [":kernel_binary_deps"],
+    output_group = "linked_modules",
+)
+
+iree_executable_test(
+    name = "kernel_binary_linked_module_test",
+    src = "//loom/src/loom/tools/loom-format",
+    args = ["$(rootpath :kernel_binary_deps_linked_module)"],
+    data = [":kernel_binary_deps_linked_module"],
 )
 
 sh_test(
@@ -177,6 +256,9 @@ sh_test(
 test_suite(
     name = "test",
     tests = [
+        ":kernel_binary_direct_test",
+        ":kernel_binary_linked_module_test",
+        ":loom_binary_rules_tests",
         ":loom_check_rules_tests",
         ":loom_check_wrapper_direct_test",
         ":loom_library_aggregate_direct_test",
@@ -188,5 +270,6 @@ test_suite(
         ":profiled_library_plan_test",
         ":public_kernel_library_test",
         ":relocatable_library_direct_test",
+        "//loom/build_tools/bazel/test/testdata/kernel_binary:test",
     ],
 )
