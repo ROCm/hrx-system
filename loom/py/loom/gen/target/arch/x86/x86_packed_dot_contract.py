@@ -33,7 +33,10 @@ from loom.gen.support.generated_file import (  # noqa: E402
     line_comment_header,
     maintain_generated_file_set,
 )
-from loom.target.arch.x86.packed_dot_data import X86_PACKED_DOT_DESCRIPTORS  # noqa: E402
+from loom.target.arch.x86.packed_dot_data import (  # noqa: E402
+    X86_PACKED_DOT_DESCRIPTORS,
+    packed_dot_native_layout,
+)
 from loom.target.arch.x86.target_info import sorted_descriptor_set_infos  # noqa: E402
 from loom.target.descriptor_sets import resolve_descriptor_set  # noqa: E402
 from loom.target.low_descriptors import descriptor_stable_id  # noqa: E402
@@ -119,6 +122,7 @@ def _emit_source() -> str:
         "    loom_x86_packed_dot_builtin_descriptors[] = {",
     ]
     for descriptor_ref, descriptor in enumerate(X86_PACKED_DOT_DESCRIPTORS):
+        native_shape = packed_dot_native_layout(descriptor).shape
         lines.extend(
             [
                 "    {",
@@ -132,9 +136,9 @@ def _emit_source() -> str:
                 f"        .flags = UINT32_C(0x{descriptor.flags:x}),",
                 "        .shape = {",
                 f"            .vector_bit_width = {descriptor.vector_bit_width},",
-                f"            .input_lane_count = {descriptor.input_lane_count},",
-                f"            .result_lane_count = {descriptor.result_lane_count},",
-                f"            .reduction_group_size = {descriptor.reduction_group_size},",
+                f"            .input_lane_count = {native_shape.block_count * native_shape.k},",
+                f"            .result_lane_count = {native_shape.block_count},",
+                f"            .reduction_group_size = {native_shape.k},",
                 "        },",
                 f"        .lhs_numeric_type = {descriptor.lhs_numeric_type},",
                 f"        .rhs_numeric_type = {descriptor.rhs_numeric_type},",

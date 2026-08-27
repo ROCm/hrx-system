@@ -23,7 +23,10 @@ iree_py_library(
         "packed_dot_data.py",
         "target_info.py",
     ],
-    deps = [":package_init"],
+    deps = [
+        ":package_init",
+        "//loom/py/loom/target:native_contraction_layout",
+    ],
 )
 
 iree_py_library(
@@ -65,5 +68,20 @@ iree_py_test(
     main = "pytest_style_runner.py",
     deps = [
         ":target_info",
+    ],
+)
+
+iree_py_test(
+    name = "packed_dot_data_test",
+    srcs = [
+        "packed_dot_data_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.target.arch.x86.packed_dot_data_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":target_info",
+        "//loom/py/loom/target:native_contraction_layout",
+        "//loom/py/loom/target:native_coordinate_projection",
     ],
 )

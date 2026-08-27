@@ -26,6 +26,7 @@ iree_py_library(
     "target_info.py"
   DEPS
     loom::py::loom::target::arch::x86::package_init
+    loom::py::loom::target::native_contraction_layout
 )
 
 iree_py_library(
@@ -69,6 +70,26 @@ iree_py_test(
     "loom.target.arch.x86.target_info_test"
   DEPS
     loom::py::loom::target::arch::x86::target_info
+  PACKAGE_DIRS
+    "${PROJECT_SOURCE_DIR}/loom/py"
+    "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
+)
+
+iree_py_test(
+  NAME
+    packed_dot_data_test
+  MAIN
+    "../../../tools/pytest_style_runner.py"
+  SRCS
+    "packed_dot_data_test.py"
+    "../../../tools/pytest_style_runner.py"
+  ARGS
+    "loom.target.arch.x86.packed_dot_data_test"
+  DEPS
+    loom::py::loom::target::arch::x86::target_info
+    loom::py::loom::target::native_contraction_layout
+    loom::py::loom::target::native_coordinate_projection
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"
