@@ -260,6 +260,7 @@ test_suite(
         ":profiled_library_plan_test",
         ":public_kernel_library_test",
         ":relocatable_library_direct_test",
+        "//loom/build_tools/bazel/test/testdata/command_binary:test",
         "//loom/build_tools/bazel/test/testdata/kernel_binary:test",
     ],
 )

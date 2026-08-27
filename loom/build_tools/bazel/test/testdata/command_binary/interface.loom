@@ -1,0 +1,14 @@
+kernel.decl @scale() launch(%storage: buffer)
+
+command.program.def public @scale_once() launch(%storage: buffer) {
+  kernel.launch @scale(%storage) : (buffer)
+  command.return
+}
+
+command.program.def public @scale_twice() launch(%storage: buffer) {
+  command.serial {
+    kernel.launch @scale(%storage) : (buffer)
+    kernel.launch @scale(%storage) : (buffer)
+  }
+  command.return
+}

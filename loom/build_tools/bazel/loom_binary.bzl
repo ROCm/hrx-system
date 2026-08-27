@@ -41,10 +41,11 @@ def _amdgpu_target_profile(ctx, product_kind):
     if target_profile.family != "amdgpu":
         fail(
             ("%s cannot emit a %s binary for target profile family %r; " +
-             "only amdgpu kernel products are available") % (
+             "only amdgpu-backed %s products are available") % (
                 ctx.label,
                 product_kind,
                 target_profile.family,
+                product_kind,
             ),
         )
     if LoomAmdgpuTargetProfileInfo not in ctx.attr.target:
@@ -117,6 +118,35 @@ def _declare_amdgpu_kernel_product(
         compile_report = compile_report,
     )
 
+def _declare_command_product(ctx, linked_module):
+    manifest = ctx.actions.declare_file(ctx.label.name + ".commands.json")
+    artifacts = ctx.actions.declare_directory(ctx.label.name + ".commands")
+    compile_report = ctx.actions.declare_file(
+        ctx.label.name + ".commands.compile.json",
+    )
+    args = ctx.actions.args()
+    args.add(linked_module)
+    args.add("--backend=command")
+    args.add("--output=%s" % manifest.path)
+    args.add("--emit-command-artifacts=%s" % artifacts.path)
+    args.add("--compile-report=details")
+    args.add("--compile-report-output=%s" % compile_report.path)
+
+    tool = ctx.toolchains[_LOOM_COMPILE_TOOLCHAIN_TYPE].tool
+    ctx.actions.run(
+        arguments = [args],
+        executable = tool.files_to_run,
+        inputs = depset(direct = [linked_module]),
+        mnemonic = "LoomCommandBinary",
+        outputs = [manifest, artifacts, compile_report],
+        progress_message = "Emitting portable command binary %s" % ctx.label,
+    )
+    return struct(
+        artifacts = artifacts,
+        compile_report = compile_report,
+        manifest = manifest,
+    )
+
 def _loom_kernel_binary_impl(ctx):
     _require_binary_inputs(ctx)
     amdgpu_profile = _amdgpu_target_profile(ctx, "kernel")
@@ -150,9 +180,8 @@ def _loom_kernel_binary_impl(ctx):
         ),
     ]
 
-loom_kernel_binary = rule(
-    implementation = _loom_kernel_binary_impl,
-    attrs = {
+def _binary_attrs(target_doc):
+    return {
         "configs": attr.string_dict(
             doc = "Compile-time config symbol values keyed by declaration name.",
         ),
@@ -170,10 +199,78 @@ loom_kernel_binary = rule(
         "target": attr.label(
             mandatory = True,
             providers = [LoomTargetProfileInfo],
-            doc = "Immutable target profile used for every emitted kernel.",
+            doc = target_doc,
         ),
-    },
+    }
+
+loom_kernel_binary = rule(
+    implementation = _loom_kernel_binary_impl,
+    attrs = _binary_attrs(
+        "Immutable target profile used for every emitted kernel.",
+    ),
     doc = "Links and emits one closed loader-ready kernel product.",
+    toolchains = [
+        _LOOM_COMPILE_TOOLCHAIN_TYPE,
+        _LOOM_LINK_TOOLCHAIN_TYPE,
+    ],
+)
+
+def _loom_command_binary_impl(ctx):
+    _require_binary_inputs(ctx)
+    amdgpu_profile = _amdgpu_target_profile(ctx, "command")
+    linked = _declare_binary_linked_module(ctx, "command")
+    command_product = _declare_command_product(ctx, linked.linked_module)
+    kernel_product = _declare_amdgpu_kernel_product(
+        ctx = ctx,
+        linked_module = linked.linked_module,
+        amdgpu_profile = amdgpu_profile,
+        output_stem = ctx.label.name + ".kernels",
+        mnemonic = "LoomCommandKernelBinary",
+        progress_message = "Compiling command kernels for %s against %s" % (
+            ctx.label,
+            ctx.attr.target.label,
+        ),
+    )
+    artifacts = [
+        command_product.manifest,
+        command_product.artifacts,
+        kernel_product.artifact,
+    ]
+    reports = [
+        command_product.compile_report,
+        kernel_product.compile_report,
+    ]
+
+    return [
+        DefaultInfo(files = depset(artifacts)),
+        OutputGroupInfo(
+            command_artifacts = depset([command_product.artifacts]),
+            command_compile_reports = depset(
+                [command_product.compile_report],
+            ),
+            command_manifests = depset([command_product.manifest]),
+            compile_reports = depset(reports),
+            dependency_reports = depset(linked.dependency_reports),
+            kernel_artifacts = depset([kernel_product.artifact]),
+            kernel_compile_reports = depset([kernel_product.compile_report]),
+            linked_modules = depset([linked.linked_module]),
+        ),
+        LoomBinaryInfo(
+            artifacts = depset(artifacts),
+            kind = "command",
+            linked_module = linked.linked_module,
+            primary_artifact = command_product.manifest,
+            reports = depset(reports),
+            target_profiles = [ctx.attr.target],
+        ),
+    ]
+
+loom_command_binary = rule(
+    implementation = _loom_command_binary_impl,
+    attrs = _binary_attrs(
+        "Immutable target profile used for every emitted kernel entry.",
+    ),
+    doc = "Links and emits portable command programs with their kernel executable.",
     toolchains = [
         _LOOM_COMPILE_TOOLCHAIN_TYPE,
         _LOOM_LINK_TOOLCHAIN_TYPE,
