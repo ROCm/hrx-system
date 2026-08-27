@@ -49,17 +49,18 @@ from loom.target.arch.amdgpu.matrix_fragment_layouts import (  # noqa: E402
     AMDGPU_MATRIX_FRAGMENT_LAYOUTS,
     AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY,
     AmdgpuMatrixFragmentLayout,
+    MatrixFragmentPackedB16PublicationProjection,
     MatrixFragmentResultToLhsBf16Projection,
     MatrixFragmentResultToRhsPackedB16Projection,
     MatrixFragmentRoleLayout,
     layout_roles,
     matrix_fragment_native_contraction_facts,
     matrix_fragment_native_transition_facts,
+    matrix_fragment_packed_b16_publication_projection,
     matrix_fragment_packed_element_axis,
     matrix_fragment_result_to_lhs_bf16_projection,
     matrix_fragment_result_to_rhs_packed_b16_projection,
     matrix_fragment_role_storage_projection_plan,
-    role_has_contiguous_lane_xor1_columns,
 )
 from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX9_4_GENERIC,
@@ -1126,8 +1127,6 @@ _COORDINATE_FLAG_C_NAMES = (
     "LOOM_MATRIX_FRAGMENT_COORDINATE_REDUCTION",
 )
 
-_CONTIGUOUS_LANE_XOR1_COLUMNS_FLAG_C_NAME = "LOOM_MATRIX_FRAGMENT_ROLE_LAYOUT_FLAG_CONTIGUOUS_LANE_XOR1_COLUMNS"
-
 _PACKED_ELEMENT_AXIS_C_NAMES = {
     "block": "LOOM_MATRIX_FRAGMENT_COORDINATE_BLOCK",
     "row": "LOOM_MATRIX_FRAGMENT_COORDINATE_ROW",
@@ -1233,7 +1232,7 @@ def _fragment_role_initializer(
     coordinate_plan_index: int,
 ) -> list[str]:
     coordinate_flags = " | ".join(flag_name for flag_name, axis in zip(_COORDINATE_FLAG_C_NAMES, role.axes, strict=True) if axis is not None)
-    flags = _CONTIGUOUS_LANE_XOR1_COLUMNS_FLAG_C_NAME if role_has_contiguous_lane_xor1_columns(layout, role) else "0"
+    packed_publication = matrix_fragment_packed_b16_publication_projection(layout, role)
     packed_element_axis = matrix_fragment_packed_element_axis(layout, role)
     packed_element_axis_c_name = "0" if packed_element_axis is None else _PACKED_ELEMENT_AXIS_C_NAMES[packed_element_axis]
     lines = [
@@ -1245,10 +1244,25 @@ def _fragment_role_initializer(
         f"    .coordinate_element_count = {role.coordinate_element_count},",
         f"    .coordinate_element_offset = {role.coordinate_element_offset},",
         f"    .coordinate_element_stride = {role.coordinate_element_stride},",
-        f"    .flags = {flags},",
-        f"    .coordinate_flags = {coordinate_flags},",
-        f"    .packed_element_coordinate_flag = {packed_element_axis_c_name},",
     ]
+    if packed_publication is not None:
+        if not isinstance(packed_publication, MatrixFragmentPackedB16PublicationProjection):
+            raise TypeError("unexpected packed-B16 publication projection type")
+        lines.extend(
+            [
+                "    .packed_b16_publication = {",
+                f"        .publishing_participant_modulus = UINT16_C({packed_publication.publishing_participant_modulus}),",
+                f"        .publishing_participant_remainder = UINT16_C({packed_publication.publishing_participant_remainder}),",
+                f"        .paired_participant_xor_mask = UINT16_C(0x{packed_publication.paired_participant_xor_mask:x}),",
+                "    },",
+            ]
+        )
+    lines.extend(
+        [
+            f"    .coordinate_flags = {coordinate_flags},",
+            f"    .packed_element_coordinate_flag = {packed_element_axis_c_name},",
+        ]
+    )
     if role.reduction_group is not None:
         lines.extend(
             [

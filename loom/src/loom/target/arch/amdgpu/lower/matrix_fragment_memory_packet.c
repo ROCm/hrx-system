@@ -594,14 +594,15 @@ static bool loom_amdgpu_fragment_memory_packet_addresses_fit_u32(
 
 static loom_amdgpu_fragment_memory_packet_flags_t
 loom_amdgpu_fragment_memory_crosslane_packed_b16_store_flags(
-    const loom_low_descriptor_set_t* descriptor_set) {
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_matrix_fragment_packed_b16_publication_t* publication) {
   const bool has_common_refs =
       loom_amdgpu_descriptor_set_can_emit_vgpr_compare_immediate(
           descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_EQ_I32,
           kLoomAmdgpuVectorCmpiCompareDescriptorCandidates
               [LOOM_VECTOR_CMPI_PREDICATE_EQ]
                   .src1_inline_descriptor_ref,
-          0) &&
+          publication->publishing_participant_remainder) &&
       loom_amdgpu_descriptor_set_has_ref(
           descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_S_AND_SAVEEXEC_B64) &&
       loom_amdgpu_descriptor_set_has_ref(
@@ -612,8 +613,9 @@ loom_amdgpu_fragment_memory_crosslane_packed_b16_store_flags(
   if (!has_common_refs) {
     return 0;
   }
-  if (loom_amdgpu_select_dpp_descriptor_ref(descriptor_set) !=
-      LOOM_AMDGPU_DESCRIPTOR_REF_NONE) {
+  if (publication->paired_participant_xor_mask == 1 &&
+      loom_amdgpu_select_dpp_descriptor_ref(descriptor_set) !=
+          LOOM_AMDGPU_DESCRIPTOR_REF_NONE) {
     return LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_CROSSLANE_PACKED_B16_STORE |
            LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_CROSSLANE_PACKED_B16_STORE_DPP;
   }
@@ -630,7 +632,8 @@ loom_amdgpu_fragment_memory_crosslane_packed_b16_store_flags(
   return LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_CROSSLANE_PACKED_B16_STORE;
 }
 
-static bool loom_amdgpu_fragment_memory_crosslane_packed_b16_store_layout(
+static const loom_matrix_fragment_packed_b16_publication_t*
+loom_amdgpu_fragment_memory_crosslane_packed_b16_store_publication(
     const loom_amdgpu_matrix_fragment_layout_t* layout,
     const loom_amdgpu_fragment_memory_plan_t* plan) {
   if (plan->operation_kind != LOOM_LOW_SOURCE_MEMORY_OPERATION_STORE ||
@@ -640,7 +643,7 @@ static bool loom_amdgpu_fragment_memory_crosslane_packed_b16_store_layout(
       plan->view_rank != LOOM_AMDGPU_FRAGMENT_UNBLOCKED_VIEW_RANK ||
       plan->element_byte_count != 2 ||
       plan->static_axis_byte_strides[1] != plan->element_byte_count) {
-    return false;
+    return NULL;
   }
 
   const loom_matrix_fragment_role_layout_t* role_layout =
@@ -649,11 +652,12 @@ static bool loom_amdgpu_fragment_memory_crosslane_packed_b16_store_layout(
       role_layout->coordinate_flags !=
           (LOOM_AMDGPU_MATRIX_FRAGMENT_COORDINATE_ROW |
            LOOM_AMDGPU_MATRIX_FRAGMENT_COORDINATE_COLUMN)) {
-    return false;
+    return NULL;
   }
 
-  return loom_matrix_fragment_role_has_contiguous_lane_xor1_columns(layout,
-                                                                    plan->role);
+  const loom_matrix_fragment_packed_b16_publication_t* publication =
+      &role_layout->packed_b16_publication;
+  return publication->publishing_participant_modulus != 0 ? publication : NULL;
 }
 
 static bool loom_amdgpu_fragment_memory_select_packet(
@@ -962,15 +966,17 @@ bool loom_amdgpu_fragment_memory_plan_packets(
   const bool store_narrow_f32_to_bf16 =
       plan->payload_form ==
       LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_BF16;
-  const bool crosslane_packed_b16_store_layout =
-      store_narrow_f32_to_bf16 &&
-      loom_amdgpu_fragment_memory_crosslane_packed_b16_store_layout(layout,
-                                                                    plan);
+  const loom_matrix_fragment_packed_b16_publication_t*
+      crosslane_packed_b16_store_publication =
+          store_narrow_f32_to_bf16
+              ? loom_amdgpu_fragment_memory_crosslane_packed_b16_store_publication(
+                    layout, plan)
+              : NULL;
   const loom_amdgpu_fragment_memory_packet_flags_t
       crosslane_packed_b16_store_flags =
-          crosslane_packed_b16_store_layout
+          crosslane_packed_b16_store_publication != NULL
               ? loom_amdgpu_fragment_memory_crosslane_packed_b16_store_flags(
-                    descriptor_set)
+                    descriptor_set, crosslane_packed_b16_store_publication)
               : 0;
   loom_amdgpu_descriptor_ref_t packed_b16_low_descriptor_ref =
       LOOM_AMDGPU_DESCRIPTOR_REF_NONE;

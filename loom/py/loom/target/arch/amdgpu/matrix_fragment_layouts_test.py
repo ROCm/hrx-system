@@ -20,6 +20,7 @@ from loom.target.arch.amdgpu.matrix_fragment_layouts import (
     AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY,
     MatrixFragmentAxisLayout,
     MatrixFragmentLaneBitProjection,
+    MatrixFragmentPackedB16PublicationProjection,
     MatrixFragmentReductionGroup,
     MatrixFragmentResultToLhsBf16Projection,
     MatrixFragmentResultToRhsPackedB16Projection,
@@ -28,12 +29,12 @@ from loom.target.arch.amdgpu.matrix_fragment_layouts import (
     matrix_fragment_native_layout,
     matrix_fragment_native_role_layout,
     matrix_fragment_native_transition_facts,
+    matrix_fragment_packed_b16_publication_projection,
     matrix_fragment_packed_element_axis,
     matrix_fragment_result_to_lhs_bf16_projection,
     matrix_fragment_result_to_rhs_packed_b16_projection,
     matrix_fragment_role_storage_projection_plan,
     role_coordinate,
-    role_has_contiguous_lane_xor1_columns,
     validate_matrix_fragment_layout,
 )
 from loom.target.native_contraction_layout import (
@@ -260,15 +261,52 @@ def test_result_to_lhs_projection_matches_shipping_layouts() -> None:
     }
 
 
-def test_lane_xor1_column_property_accounts_for_payload_padding() -> None:
+def test_packed_b16_publication_accounts_for_payload_padding() -> None:
     f32_layout = AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY["rdna3_wmmar3_f32_16x16x16_f16"]
     f16_layout = AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY["rdna3_wmmar3_f16_16x16x16_f16"]
 
-    assert role_has_contiguous_lane_xor1_columns(f32_layout, f32_layout.result)
-    assert not role_has_contiguous_lane_xor1_columns(f16_layout, f16_layout.result)
+    assert matrix_fragment_packed_b16_publication_projection(
+        f32_layout, f32_layout.result
+    ) == MatrixFragmentPackedB16PublicationProjection(
+        publishing_participant_modulus=2,
+        publishing_participant_remainder=0,
+        paired_participant_xor_mask=1,
+    )
+    assert (
+        matrix_fragment_packed_b16_publication_projection(f16_layout, f16_layout.result)
+        is None
+    )
 
 
-def test_lane_xor1_column_property_requires_column_lane_factor() -> None:
+@pytest.mark.parametrize(
+    "layout_key",
+    [
+        "rdna3_wmmar3_f32_16x16x16_f16",
+        "rdna3_wmmar3_f32_16x16x16_f16_w64",
+        "cdna_mfma_f32_16x16x16_f16",
+        "rdna4_wmma_f32_16x16x16_f16",
+        "gfx125x_wmma_f32_16x16x128_f8_f8",
+    ],
+)
+def test_packed_b16_publication_spans_matrix_families(layout_key: str) -> None:
+    layout = AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY[layout_key]
+    expected = MatrixFragmentPackedB16PublicationProjection(
+        publishing_participant_modulus=2,
+        publishing_participant_remainder=0,
+        paired_participant_xor_mask=1,
+    )
+
+    assert (
+        matrix_fragment_packed_b16_publication_projection(layout, layout.accumulator)
+        == expected
+    )
+    assert (
+        matrix_fragment_packed_b16_publication_projection(layout, layout.result)
+        == expected
+    )
+
+
+def test_packed_b16_publication_requires_adjacent_column_owners() -> None:
     layout = AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY["rdna3_wmmar3_f32_16x16x16_f16"]
     row_paired_role = replace(
         layout.result,
@@ -294,7 +332,12 @@ def test_lane_xor1_column_property_requires_column_lane_factor() -> None:
         0,
         None,
     )
-    assert not role_has_contiguous_lane_xor1_columns(row_paired_layout, row_paired_role)
+    assert (
+        matrix_fragment_packed_b16_publication_projection(
+            row_paired_layout, row_paired_role
+        )
+        is None
+    )
 
 
 @pytest.mark.parametrize(
@@ -670,7 +713,8 @@ def test_result_to_lhs_partial_transpose_preserves_coordinates() -> None:
             or destination_role.element_bit_count != 16
             or destination_role.reduction_group is not None
             or layout.tile_shape[2] != layout.tile_shape[3]
-            or not role_has_contiguous_lane_xor1_columns(layout, source_role)
+            or matrix_fragment_packed_b16_publication_projection(layout, source_role)
+            is None
         ):
             continue
         checked_layout_count += 1

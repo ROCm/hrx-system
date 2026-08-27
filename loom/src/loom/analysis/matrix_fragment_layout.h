@@ -37,14 +37,6 @@ typedef enum loom_matrix_fragment_coordinate_flag_bits_e {
 // Bitset of loom_matrix_fragment_coordinate_flag_bits_t values.
 typedef uint32_t loom_matrix_fragment_coordinate_flags_t;
 
-typedef enum loom_matrix_fragment_role_layout_flag_bits_e {
-  // Lane xor 1 advances the column by one while preserving other coordinates.
-  LOOM_MATRIX_FRAGMENT_ROLE_LAYOUT_FLAG_CONTIGUOUS_LANE_XOR1_COLUMNS = 1u << 0,
-} loom_matrix_fragment_role_layout_flag_bits_t;
-
-// Bitset of loom_matrix_fragment_role_layout_flag_bits_t values.
-typedef uint16_t loom_matrix_fragment_role_layout_flags_t;
-
 // Canonical semantic axes carried by matrix fragment layouts. The ordering is
 // also the row-major delinearization order for per-lane payload elements.
 typedef enum loom_matrix_fragment_axis_e {
@@ -108,6 +100,21 @@ typedef struct loom_matrix_fragment_tile_shape_t {
   uint16_t reduction_count;
 } loom_matrix_fragment_tile_shape_t;
 
+// Exact executable source-owner projection for one packed B16 publication.
+// Participants congruent to |publishing_participant_remainder| modulo
+// |publishing_participant_modulus| own the low-column elements and publish one
+// 32-bit packet. The participant selected by xor owns the adjacent high-column
+// element at the same participant-local payload position. A zero modulus means
+// that this packed publication is unavailable.
+typedef struct loom_matrix_fragment_packed_b16_publication_t {
+  // Participant modulus selecting the packet publishers.
+  uint16_t publishing_participant_modulus;
+  // Participant remainder selecting the packet publishers.
+  uint16_t publishing_participant_remainder;
+  // XOR mask selecting the adjacent high-column source participant.
+  uint16_t paired_participant_xor_mask;
+} loom_matrix_fragment_packed_b16_publication_t;
+
 typedef struct loom_matrix_fragment_role_layout_t {
   // Contract operand role described by this role layout.
   loom_contract_operand_role_t role;
@@ -124,8 +131,8 @@ typedef struct loom_matrix_fragment_role_layout_t {
   uint16_t coordinate_element_offset;
   // Payload element stride between distinct logical coordinates.
   uint16_t coordinate_element_stride;
-  // Properties proven for the complete role layout during table generation.
-  loom_matrix_fragment_role_layout_flags_t flags;
+  // Exact packed-B16 publication projection derived for this role.
+  loom_matrix_fragment_packed_b16_publication_t packed_b16_publication;
   // Coordinate axes produced by this role layout.
   loom_matrix_fragment_coordinate_flags_t coordinate_flags;
   // Single coordinate flag for the axis densely packed within each register,
@@ -230,14 +237,6 @@ bool loom_matrix_fragment_coordinate_from_role_layout(
     const loom_matrix_fragment_role_layout_t* role_layout, uint16_t lane,
     uint16_t payload_element_index,
     loom_matrix_fragment_coordinate_t* out_coordinate);
-
-// Returns true when the generated layout properties prove that every even/odd
-// lane pair selected by lane xor 1 carries adjacent columns for each payload
-// element in |role|. This is the reusable contract used by packed epilogues
-// that let one lane store two horizontally adjacent logical elements.
-bool loom_matrix_fragment_role_has_contiguous_lane_xor1_columns(
-    const loom_matrix_fragment_layout_t* layout,
-    loom_contract_operand_role_t role);
 
 // Counts physical lane/payload elements that carry |coordinate| for |role|.
 // Some target fragment layouts intentionally replicate input operands across
