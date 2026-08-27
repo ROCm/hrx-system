@@ -168,18 +168,37 @@ def _loom_library_impl(ctx):
         fail("%s requires at least one source across srcs and deps" % ctx.label)
     dependency_infos = [dep[LoomLibraryInfo] for dep in ctx.attr.deps]
     libraries = [info.module for info in dependency_infos]
+    dependency_closure = depset(
+        transitive = [info.transitive_dependencies for info in dependency_infos],
+    )
+    direct_library_paths = {library.path: True for library in libraries}
+    transitive_libraries = [
+        library
+        for library in dependency_closure.to_list()
+        if library.path not in direct_library_paths
+    ]
     transitive_dependencies = depset(
         direct = libraries,
         transitive = [info.transitive_dependencies for info in dependency_infos],
     )
-    inputs = depset(direct = ctx.files.srcs + libraries)
+    inputs = depset(direct = ctx.files.srcs + libraries + transitive_libraries)
     output = ctx.actions.declare_file(ctx.label.name + ".loombc")
+    dependency_report = ctx.actions.declare_file(
+        ctx.label.name + ".dependencies.json",
+    )
     args = ctx.actions.args()
     args.add("--mode=merge")
+    args.add("--strict-deps")
+    args.add("--dependency-component=%s" % ctx.label)
+    args.add("--dependency-report=%s" % dependency_report.path)
     args.add("--to=bc")
     args.add("--output=%s" % output.path)
     args.add_all(ctx.files.srcs)
     args.add_all(libraries, format_each = "--library=%s")
+    args.add_all(
+        transitive_libraries,
+        format_each = "--transitive-library=%s",
+    )
 
     tool = ctx.toolchains[_LOOM_LINK_TOOLCHAIN_TYPE].tool
     ctx.actions.run(
@@ -187,12 +206,15 @@ def _loom_library_impl(ctx):
         executable = tool.files_to_run,
         inputs = inputs,
         mnemonic = "LoomLibrary",
-        outputs = [output],
+        outputs = [output, dependency_report],
         progress_message = "Linking Loom library %s" % ctx.label,
     )
 
     return [
         DefaultInfo(files = depset([output])),
+        OutputGroupInfo(
+            dependency_reports = depset([dependency_report]),
+        ),
         LoomLibraryInfo(
             module = output,
             transitive_dependencies = transitive_dependencies,
@@ -718,7 +740,14 @@ def loom_library(
         deps = [],
         tags = [],
         visibility = None):
-    """Declares a reusable Loom function or template library."""
+    """Declares a reusable Loom function or template library.
+
+    The rule merges only ``srcs`` into its relocatable bytecode module. Direct
+    ``deps`` and their transitive closure remain independent linker inputs, and
+    strict dependency analysis rejects source references satisfied only by the
+    transitive closure. The ``dependency_reports`` output group contains the
+    schema-versioned JSON analysis report.
+    """
     _declare_library(
         name = name,
         srcs = srcs,

@@ -57,6 +57,11 @@ def _expect_arg_with_prefix_and_suffix(env, args, prefix, suffix):
             return
     env.fail("expected argument with prefix %r and suffix %r in %r" % (prefix, suffix, args))
 
+def _expect_no_arg_with_prefix_and_suffix(env, args, prefix, suffix):
+    for arg in args:
+        if arg.startswith(prefix) and arg.endswith(suffix):
+            env.fail("unexpected argument with prefix %r and suffix %r in %r" % (prefix, suffix, args))
+
 def _test_library_keeps_dependency_module_separate(name, **kwargs):
     analysis_test(
         name = name,
@@ -79,8 +84,24 @@ def _test_library_keeps_dependency_module_separate_impl(env, target):
     _expect_basename(env, dependencies, "library_dependency.loombc")
 
     action = _find_action(env, target[TestingAspectInfo].actions, "LoomLibrary")
-    if "--mode=merge" not in action.argv:
-        env.fail("expected merge mode in %r" % action.argv)
+    for expected_arg in [
+        "--mode=merge",
+        "--strict-deps",
+    ]:
+        if expected_arg not in action.argv:
+            env.fail("expected %r in %r" % (expected_arg, action.argv))
+    _expect_arg_with_prefix_and_suffix(
+        env,
+        action.argv,
+        "--dependency-component=",
+        "//loom/build_tools/bazel/test:library_consumer",
+    )
+    _expect_arg_with_prefix_and_suffix(
+        env,
+        action.argv,
+        "--dependency-report=",
+        "library_consumer.dependencies.json",
+    )
     _expect_arg_with_prefix_and_suffix(
         env,
         action.argv,
@@ -98,6 +119,11 @@ def _test_library_keeps_dependency_module_separate_impl(env, target):
     _expect_basename(env, inputs, "library_dependency.loombc")
     _expect_basename(env, inputs, "link_checks.loom")
     _expect_no_basename(env, inputs, "link_kernels.loom")
+
+    reports = target[OutputGroupInfo].dependency_reports.to_list()
+    if len(reports) != 1:
+        env.fail("expected one dependency report, got %r" % reports)
+    _expect_basename(env, reports, "library_consumer.dependencies.json")
 
 def _test_deps_only_library_propagates_dependencies(name, **kwargs):
     analysis_test(
@@ -127,11 +153,84 @@ def _test_deps_only_library_propagates_dependencies_impl(env, target):
         "--library=",
         "library_consumer.loombc",
     )
+    _expect_arg_with_prefix_and_suffix(
+        env,
+        action.argv,
+        "--transitive-library=",
+        "library_dependency.loombc",
+    )
 
     inputs = action.inputs.to_list()
     _expect_basename(env, inputs, "library_consumer.loombc")
+    _expect_basename(env, inputs, "library_dependency.loombc")
     _expect_no_basename(env, inputs, "link_checks.loom")
     _expect_no_basename(env, inputs, "link_kernels.loom")
+
+def _test_redundant_direct_dependency_is_not_transitive(name, **kwargs):
+    analysis_test(
+        name = name,
+        attr_values = {
+            "timeout": "short",
+        },
+        impl = _test_redundant_direct_dependency_is_not_transitive_impl,
+        target = ":library_redundant_direct",
+        **kwargs
+    )
+
+def _test_redundant_direct_dependency_is_not_transitive_impl(env, target):
+    action = _find_action(env, target[TestingAspectInfo].actions, "LoomLibrary")
+    for basename in [
+        "library_consumer.loombc",
+        "library_dependency.loombc",
+    ]:
+        _expect_arg_with_prefix_and_suffix(
+            env,
+            action.argv,
+            "--library=",
+            basename,
+        )
+        _expect_no_arg_with_prefix_and_suffix(
+            env,
+            action.argv,
+            "--transitive-library=",
+            basename,
+        )
+
+def _test_transitive_audit_universe_is_separate(name, **kwargs):
+    analysis_test(
+        name = name,
+        attr_values = {
+            "timeout": "short",
+        },
+        impl = _test_transitive_audit_universe_is_separate_impl,
+        target = ":library_transitive_consumer",
+        **kwargs
+    )
+
+def _test_transitive_audit_universe_is_separate_impl(env, target):
+    action = _find_action(env, target[TestingAspectInfo].actions, "LoomLibrary")
+    _expect_arg_with_prefix_and_suffix(
+        env,
+        action.argv,
+        "--library=",
+        "library_aggregate.loombc",
+    )
+    for basename in [
+        "library_consumer.loombc",
+        "library_dependency.loombc",
+    ]:
+        _expect_arg_with_prefix_and_suffix(
+            env,
+            action.argv,
+            "--transitive-library=",
+            basename,
+        )
+        _expect_no_arg_with_prefix_and_suffix(
+            env,
+            action.argv,
+            "--library=",
+            basename,
+        )
 
 def _test_wrapper_library_module_is_testonly(name, **kwargs):
     analysis_test(
@@ -257,7 +356,9 @@ def loom_library_rules_test_suite(name):
             _test_deps_only_library_propagates_dependencies,
             _test_execution_profile_consumes_source_and_dependency_module,
             _test_library_keeps_dependency_module_separate,
+            _test_redundant_direct_dependency_is_not_transitive,
             _test_resource_profile_preserves_direct_execution,
+            _test_transitive_audit_universe_is_separate,
             _test_wrapper_compilation_is_testonly,
             _test_wrapper_library_module_is_testonly,
         ],

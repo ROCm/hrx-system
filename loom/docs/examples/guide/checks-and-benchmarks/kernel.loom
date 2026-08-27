@@ -1,6 +1,6 @@
 // Copies one fixed-size row. The kernel remains a production library symbol;
 // correctness and benchmark records live in the separate test module.
-kernel.def @copy_i32() {
+kernel.def export("copy_i32") @copy_i32() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 8 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index

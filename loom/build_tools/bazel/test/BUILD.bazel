@@ -63,6 +63,23 @@ loom_library(
     deps = [":library_consumer"],
 )
 
+loom_library(
+    name = "library_redundant_direct",
+    srcs = ["link_checks.loom"],
+    tags = ["manual"],
+    deps = [
+        ":library_consumer",
+        ":library_dependency",
+    ],
+)
+
+loom_library(
+    name = "library_transitive_consumer",
+    srcs = ["link_checks.loom"],
+    tags = ["manual"],
+    deps = [":library_aggregate"],
+)
+
 loom_test_library(
     name = "profiled_library",
     srcs = ["profile_cases.loom"],
