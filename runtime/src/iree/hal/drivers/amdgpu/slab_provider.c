@@ -191,7 +191,7 @@ static iree_status_t iree_hal_amdgpu_slab_provider_resolve_access_agents(
       .queue_count_per_physical_device =
           provider->topology->gpu_agent_queue_count,
   };
-  return iree_hal_amdgpu_access_agent_list_resolve(
+  return iree_hal_amdgpu_access_agent_list_resolve_memory_agents(
       provider->topology, domain, provider->queue_affinity_mask,
       out_agent_list);
 }

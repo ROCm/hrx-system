@@ -392,7 +392,7 @@ static iree_status_t iree_hal_amdgpu_allocator_resolve_access_agents(
     const iree_hal_amdgpu_allocator_t* allocator,
     iree_hal_queue_affinity_t queue_affinity,
     iree_hal_amdgpu_access_agent_list_t* out_agent_list) {
-  return iree_hal_amdgpu_access_agent_list_resolve(
+  return iree_hal_amdgpu_access_agent_list_resolve_memory_agents(
       allocator->topology,
       iree_hal_amdgpu_allocator_queue_affinity_domain(allocator),
       queue_affinity, out_agent_list);
