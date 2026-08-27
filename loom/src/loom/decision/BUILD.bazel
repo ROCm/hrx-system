@@ -22,6 +22,36 @@ loom_cc_library(
     ],
 )
 
+loom_cc_library(
+    name = "program",
+    srcs = ["program.c"],
+    hdrs = ["program.h"],
+    deps = [
+        ":predicate",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "program_test",
+    srcs = ["program_test.cc"],
+    deps = [
+        ":program",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_benchmark(
+    name = "program_benchmark",
+    srcs = ["program_benchmark.cc"],
+    deps = [
+        ":program",
+        "//runtime/src/iree/testing:benchmark_main",
+    ],
+)
+
 loom_cc_test(
     name = "predicate_test",
     srcs = ["predicate_test.cc"],

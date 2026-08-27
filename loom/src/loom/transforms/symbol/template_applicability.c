@@ -48,32 +48,29 @@ loom_template_applicability_provider_contract(
   };
 }
 
-static loom_template_provider_feasibility_t
-loom_template_applicability_target_feasibility(
+loom_template_provider_feasibility_t
+loom_template_applicability_evaluate_target_requirement(
     const loom_module_t* application_module,
-    const loom_template_applicability_target_t* application_target,
-    const loom_template_applicability_contract_t* contract) {
-  if (!loom_symbol_ref_is_valid(contract->target_symbol) &&
-      contract->target_facts == NULL) {
+    const loom_module_t* requirement_module, loom_symbol_ref_t target_symbol,
+    const loom_target_facts_t* target_facts,
+    const loom_template_applicability_target_t* application_target) {
+  if (!loom_symbol_ref_is_valid(target_symbol) && target_facts == NULL) {
     return LOOM_TEMPLATE_PROVIDER_MATCH;
   }
-  if (contract->module == application_module &&
+  if (requirement_module == application_module &&
       loom_symbol_ref_is_valid(application_target->witness) &&
-      contract->target_symbol.module_id ==
-          application_target->witness.module_id &&
-      contract->target_symbol.symbol_id ==
-          application_target->witness.symbol_id) {
+      target_symbol.module_id == application_target->witness.module_id &&
+      target_symbol.symbol_id == application_target->witness.symbol_id) {
     return LOOM_TEMPLATE_PROVIDER_MATCH;
   }
   if (application_target->facts == NULL) {
     return LOOM_TEMPLATE_PROVIDER_MAYBE;
   }
-  const loom_target_facts_t* target_requirement = contract->target_facts;
-  if (target_requirement == NULL) {
+  if (target_facts == NULL) {
     return LOOM_TEMPLATE_PROVIDER_MAYBE;
   }
   return loom_target_facts_satisfy_identity_requirement(
-             application_target->facts, target_requirement)
+             application_target->facts, target_facts)
              ? LOOM_TEMPLATE_PROVIDER_MATCH
              : LOOM_TEMPLATE_PROVIDER_REJECT;
 }
@@ -213,6 +210,20 @@ loom_template_applicability_feasibility_from_truth(
   IREE_BUILTIN_UNREACHABLE();
 }
 
+static loom_decision_truth_t loom_template_applicability_truth_from_feasibility(
+    loom_template_provider_feasibility_t feasibility) {
+  switch (feasibility) {
+    case LOOM_TEMPLATE_PROVIDER_REJECT:
+      return LOOM_DECISION_TRUTH_FALSE;
+    case LOOM_TEMPLATE_PROVIDER_MATCH:
+      return LOOM_DECISION_TRUTH_TRUE;
+    case LOOM_TEMPLATE_PROVIDER_MAYBE:
+      return LOOM_DECISION_TRUTH_UNKNOWN;
+  }
+  IREE_ASSERT_UNREACHABLE("invalid template provider feasibility");
+  IREE_BUILTIN_UNREACHABLE();
+}
+
 static bool loom_template_predicate_relation_kind(
     uint8_t predicate_kind, loom_symbolic_integer_relation_t* out_relation) {
   switch ((loom_predicate_kind_t)predicate_kind) {
@@ -286,9 +297,8 @@ loom_template_applicability_evaluate_relation(
 static loom_template_provider_feasibility_t
 loom_template_applicability_evaluate_resolved_predicate(
     const loom_template_applicability_facts_t* application_facts,
-    const loom_predicate_t* predicate,
-    loom_decision_predicate_operand_t args[3]) {
-  switch ((loom_predicate_kind_t)predicate->kind) {
+    uint8_t predicate_kind, loom_decision_predicate_operand_t args[3]) {
+  switch ((loom_predicate_kind_t)predicate_kind) {
     case LOOM_PREDICATE_EQ:
     case LOOM_PREDICATE_NE:
     case LOOM_PREDICATE_LT:
@@ -296,7 +306,7 @@ loom_template_applicability_evaluate_resolved_predicate(
     case LOOM_PREDICATE_GT:
     case LOOM_PREDICATE_GE:
       return loom_template_applicability_evaluate_relation(
-          &args[0], &args[1], predicate->kind, application_facts);
+          &args[0], &args[1], predicate_kind, application_facts);
     case LOOM_PREDICATE_MIN:
       return loom_template_applicability_evaluate_relation(
           &args[0], &args[1], LOOM_PREDICATE_GE, application_facts);
@@ -310,13 +320,34 @@ loom_template_applicability_evaluate_resolved_predicate(
     case LOOM_PREDICATE_NOT_INF:
     case LOOM_PREDICATE_FINITE:
       return loom_template_applicability_feasibility_from_truth(
-          loom_decision_predicate_evaluate(predicate->kind, args));
+          loom_decision_predicate_evaluate(predicate_kind, args));
     case LOOM_PREDICATE_COUNT_:
       IREE_ASSERT_UNREACHABLE("invalid template predicate kind");
       IREE_BUILTIN_UNREACHABLE();
   }
   IREE_ASSERT_UNREACHABLE("invalid template predicate kind");
   IREE_BUILTIN_UNREACHABLE();
+}
+
+loom_decision_truth_t loom_template_applicability_refine_predicate(
+    const loom_template_applicability_facts_t* application_facts,
+    uint8_t predicate_kind,
+    const loom_decision_predicate_operand_t operands[3]) {
+  const uint8_t operand_count =
+      loom_predicate_kind_argument_count(predicate_kind);
+  loom_decision_predicate_operand_t refined_operands[3];
+  for (uint8_t i = 0; i < operand_count; ++i) {
+    refined_operands[i] = operands[i];
+    if (refined_operands[i].identity == LOOM_DECISION_OPERAND_IDENTITY_NONE) {
+      continue;
+    }
+    (void)loom_condition_fact_set_apply_to_value_facts(
+        &application_facts->path, application_facts->values,
+        refined_operands[i].identity, &refined_operands[i].facts);
+  }
+  return loom_template_applicability_truth_from_feasibility(
+      loom_template_applicability_evaluate_resolved_predicate(
+          application_facts, predicate_kind, refined_operands));
 }
 
 static bool loom_template_applicability_predicate_arity_is_valid(
@@ -347,7 +378,7 @@ loom_template_applicability_evaluate_contract_predicate(
     }
   }
   return loom_template_applicability_evaluate_resolved_predicate(
-      application_facts, predicate, args);
+      application_facts, predicate->kind, args);
 }
 
 static loom_template_provider_feasibility_t
@@ -367,7 +398,7 @@ loom_template_applicability_evaluate_application_predicate(
     }
   }
   return loom_template_applicability_evaluate_resolved_predicate(
-      application_facts, predicate, args);
+      application_facts, predicate->kind, args);
 }
 
 static loom_template_provider_feasibility_t
@@ -466,6 +497,30 @@ loom_template_applicability_evaluate_target_condition_queries(
   return LOOM_TEMPLATE_PROVIDER_MAYBE;
 }
 
+loom_template_provider_feasibility_t
+loom_template_applicability_evaluate_target_condition(
+    const loom_module_t* application_module,
+    const loom_target_condition_t* condition,
+    const loom_target_facts_t* application_target_facts,
+    const loom_template_applicability_facts_t* application_facts) {
+  const loom_target_condition_outcome_t outcome =
+      loom_target_condition_evaluate(condition->descriptor, condition->value,
+                                     application_target_facts);
+  switch (outcome) {
+    case LOOM_TARGET_CONDITION_MATCH:
+      return LOOM_TEMPLATE_PROVIDER_MATCH;
+    case LOOM_TARGET_CONDITION_UNKNOWN:
+    case LOOM_TARGET_CONDITION_UNBOUND:
+      return loom_template_applicability_evaluate_target_condition_queries(
+          application_module, condition, application_facts);
+    case LOOM_TARGET_CONDITION_REJECT:
+      return LOOM_TEMPLATE_PROVIDER_REJECT;
+    default:
+      IREE_ASSERT_UNREACHABLE("target condition returned an invalid outcome");
+      IREE_BUILTIN_UNREACHABLE();
+  }
+}
+
 static loom_template_provider_feasibility_t
 loom_template_applicability_evaluate_target_conditions(
     const loom_module_t* application_module,
@@ -478,33 +533,17 @@ loom_template_applicability_evaluate_target_conditions(
       LOOM_TEMPLATE_PROVIDER_MATCH;
   for (uint16_t i = 0; i < contract->target_condition_count; ++i) {
     const loom_target_condition_t* condition = &contract->target_conditions[i];
-    const loom_target_condition_outcome_t outcome =
-        loom_target_condition_evaluate(condition->descriptor, condition->value,
-                                       target_facts);
-    switch (outcome) {
-      case LOOM_TARGET_CONDITION_MATCH:
-        break;
-      case LOOM_TARGET_CONDITION_UNKNOWN:
-      case LOOM_TARGET_CONDITION_UNBOUND: {
-        const loom_template_provider_feasibility_t query_feasibility =
-            loom_template_applicability_evaluate_target_condition_queries(
-                application_module, condition, application_facts);
-        if (query_feasibility == LOOM_TEMPLATE_PROVIDER_REJECT) {
-          return LOOM_TEMPLATE_PROVIDER_REJECT;
-        }
-        if (query_feasibility == LOOM_TEMPLATE_PROVIDER_MAYBE) {
-          feasibility = LOOM_TEMPLATE_PROVIDER_MAYBE;
-          if (*out_unresolved_condition == NULL) {
-            *out_unresolved_condition = condition;
-          }
-        }
-        break;
+    const loom_template_provider_feasibility_t condition_feasibility =
+        loom_template_applicability_evaluate_target_condition(
+            application_module, condition, target_facts, application_facts);
+    if (condition_feasibility == LOOM_TEMPLATE_PROVIDER_REJECT) {
+      return LOOM_TEMPLATE_PROVIDER_REJECT;
+    }
+    if (condition_feasibility == LOOM_TEMPLATE_PROVIDER_MAYBE) {
+      feasibility = LOOM_TEMPLATE_PROVIDER_MAYBE;
+      if (*out_unresolved_condition == NULL) {
+        *out_unresolved_condition = condition;
       }
-      case LOOM_TARGET_CONDITION_REJECT:
-        return LOOM_TEMPLATE_PROVIDER_REJECT;
-      default:
-        IREE_ASSERT_UNREACHABLE("target condition returned an invalid outcome");
-        IREE_BUILTIN_UNREACHABLE();
     }
   }
   return feasibility;
@@ -567,8 +606,9 @@ void loom_template_applicability_classify_provider(
   const loom_template_applicability_contract_t contract =
       loom_template_applicability_provider_contract(provider);
   out_classification->target_feasibility =
-      loom_template_applicability_target_feasibility(
-          application_module, application_target, &contract);
+      loom_template_applicability_evaluate_target_requirement(
+          application_module, contract.module, contract.target_symbol,
+          contract.target_facts, application_target);
   if (out_classification->target_feasibility == LOOM_TEMPLATE_PROVIDER_REJECT) {
     return;
   }
@@ -589,8 +629,9 @@ void loom_template_applicability_classify_contract(
       .target_feasibility = LOOM_TEMPLATE_PROVIDER_REJECT,
   };
   out_classification->target_feasibility =
-      loom_template_applicability_target_feasibility(
-          application_module, application_target, contract);
+      loom_template_applicability_evaluate_target_requirement(
+          application_module, contract->module, contract->target_symbol,
+          contract->target_facts, application_target);
   if (out_classification->target_feasibility == LOOM_TEMPLATE_PROVIDER_REJECT) {
     return;
   }

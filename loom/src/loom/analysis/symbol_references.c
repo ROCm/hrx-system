@@ -13,7 +13,18 @@
 #include "loom/ir/parameterized_type.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/op_defs.h"
+#include "loom/ops/scf/ops.h"
 #include "loom/ops/template/ops.h"
+#include "loom/util/adaptive_sort.h"
+
+static bool loom_symbol_reference_symbol_id_less(const loom_symbol_id_t* lhs,
+                                                 const loom_symbol_id_t* rhs) {
+  return *lhs < *rhs;
+}
+
+LOOM_DEFINE_ADAPTIVE_SORT(loom_symbol_reference_sort_symbol_ids,
+                          loom_symbol_id_t,
+                          loom_symbol_reference_symbol_id_less)
 
 typedef struct loom_symbol_reference_builder_t {
   // Module being scanned.
@@ -40,6 +51,12 @@ typedef struct loom_symbol_reference_builder_t {
     iree_host_size_t count;
     // Number of allocated entries.
     iree_host_size_t capacity;
+    // Unique demanded family symbol IDs.
+    loom_symbol_id_t* family_symbol_ids;
+    // Number of unique demanded family symbol IDs.
+    iree_host_size_t family_count;
+    // Number of allocated family symbol ID entries.
+    iree_host_size_t family_capacity;
     // Dense bitset indexed by module symbol ID for demanded families.
     uint64_t* family_bits;
   } template_demands;
@@ -66,6 +83,9 @@ typedef struct loom_symbol_reference_source_scope_t {
   loom_symbol_id_t symbol_id;
   // Root region slot on symbol_id plus one, or zero for its contract.
   uint8_t root_region_index_plus_one;
+
+  // True when the current region is nested under scf.if.
+  bool has_lexical_condition;
 } loom_symbol_reference_source_scope_t;
 
 static void loom_symbol_reference_initialize_symbol_occurrences(
@@ -227,6 +247,25 @@ static iree_status_t loom_symbol_reference_append_template_demand(
         (void**)&builder->template_demands.family_bits));
   }
 
+  const uint64_t family_mask = UINT64_C(1) << (family.symbol_id & 63u);
+  uint64_t* family_word =
+      &builder->template_demands.family_bits[family.symbol_id >> 6];
+  if ((*family_word & family_mask) == 0) {
+    if (builder->template_demands.family_count >=
+        builder->template_demands.family_capacity) {
+      IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+          builder->arena, builder->template_demands.family_count,
+          builder->template_demands.family_count + 1,
+          sizeof(*builder->template_demands.family_symbol_ids),
+          &builder->template_demands.family_capacity,
+          (void**)&builder->template_demands.family_symbol_ids));
+    }
+    builder->template_demands
+        .family_symbol_ids[builder->template_demands.family_count++] =
+        family.symbol_id;
+    *family_word |= family_mask;
+  }
+
   const loom_template_demand_id_t demand_id =
       (loom_template_demand_id_t)builder->template_demands.count++;
   loom_symbol_reference_symbol_occurrences_t* source =
@@ -236,13 +275,12 @@ static iree_status_t loom_symbol_reference_append_template_demand(
       .source_symbol_id = source_scope.symbol_id,
       .source_root_region_index_plus_one =
           source_scope.root_region_index_plus_one,
+      .has_lexical_condition = source_scope.has_lexical_condition,
       .apply_op = apply_op,
       .next_source_demand_id = source->first_template_demand_id,
   };
   source->first_template_demand_id = demand_id;
   ++source->template_demand_count;
-  builder->template_demands.family_bits[family.symbol_id >> 6] |=
-      UINT64_C(1) << (family.symbol_id & 63u);
   return iree_ok_status();
 }
 
@@ -700,6 +738,7 @@ static iree_status_t loom_symbol_reference_visit_region(
       for (uint8_t i = 0; i < op->region_count; ++i) {
         loom_symbol_reference_source_scope_t child_source_scope =
             nested_source_scope;
+        child_source_scope.has_lexical_condition |= loom_scf_if_isa(op);
         if (op_symbol_id != LOOM_SYMBOL_ID_INVALID) {
           child_source_scope.root_region_index_plus_one = (uint8_t)(i + 1);
         }
@@ -751,6 +790,9 @@ iree_status_t loom_symbol_reference_table_build(
   IREE_RETURN_IF_ERROR(
       loom_symbol_reference_visit_region(&builder, module_scope, module->body));
   IREE_RETURN_IF_ERROR(loom_symbol_reference_visit_module_encodings(&builder));
+  loom_symbol_reference_sort_symbol_ids(
+      builder.template_demands.family_symbol_ids,
+      builder.template_demands.family_count);
 
   *out_table = (loom_symbol_reference_table_t){
       .module = module,
@@ -764,6 +806,8 @@ iree_status_t loom_symbol_reference_table_build(
           {
               .values = builder.template_demands.values,
               .count = builder.template_demands.count,
+              .family_symbol_ids = builder.template_demands.family_symbol_ids,
+              .family_count = builder.template_demands.family_count,
               .family_bits = builder.template_demands.family_bits,
           },
       .template_providers =

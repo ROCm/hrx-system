@@ -22,6 +22,42 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_library(
+  NAME
+    program
+  HDRS
+    "program.h"
+  SRCS
+    "program.c"
+  DEPS
+    ::predicate
+    iree::base
+    loom::util::fact_table
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    program_test
+  SRCS
+    "program_test.cc"
+  DEPS
+    ::program
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+loom_cc_benchmark(
+  NAME
+    program_benchmark
+  SRCS
+    "program_benchmark.cc"
+  DEPS
+    ::program
+    iree::testing::benchmark_main
+  TESTONLY
+)
+
 loom_cc_test(
   NAME
     predicate_test
