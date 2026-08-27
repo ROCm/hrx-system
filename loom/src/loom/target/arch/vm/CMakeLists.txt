@@ -107,19 +107,23 @@ loom_cc_library(
     lower
   HDRS
     "lower/constants.h"
+    "lower/control.h"
     "lower/lower.h"
     "lower/types.h"
   SRCS
     "lower/constants.c"
+    "lower/control.c"
     "lower/lower.c"
   DEPS
     ::descriptors
     iree::base
     iree::base::internal
+    iree::vm::bytecode::wire
     loom::codegen::low::builder
     loom::codegen::low::lower
     loom::error::error_defs
     loom::ir
+    loom::ops::cfg
     loom::ops::index
     loom::ops::low
     loom::ops::op_defs
@@ -213,6 +217,7 @@ loom_check_test_suite(
     loom_check_file_test
   SRCS
     "test/source_low/abi_materialization.loom-test"
+    "test/source_low/control_switch.loom-test"
     "test/source_low/corpus/numeric_scalar_baseline.loom-test"
     "test/source_low/corpus/numeric_scalar_literals.loom-test"
     "test/source_low/function_contracts.loom-test"

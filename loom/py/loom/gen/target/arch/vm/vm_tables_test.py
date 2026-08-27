@@ -18,6 +18,7 @@ from loom.target.arch.vm.projection import (
     VM_CORE_DESCRIPTOR_SET,
     VM_CORE_INSTRUCTIONS,
     VM_INSTRUCTION_PROJECTIONS,
+    VM_PACKET_DESCRIPTORS,
     VM_SOURCE_LOWERINGS,
     VM_STRUCTURAL_INSTRUCTIONS,
 )
@@ -32,6 +33,7 @@ from loom.target.arch.vm.verification import (
 )
 from loom.target.low_descriptors import (
     ConstraintKind,
+    DescriptorCarrier,
     DescriptorFlag,
     Effect,
     EffectFlag,
@@ -42,9 +44,9 @@ from loom.target.low_descriptors import (
 
 def test_descriptors_preserve_instruction_identity() -> None:
     assert len(VM_INSTRUCTION_PROJECTIONS) == 163
-    assert len(VM_CORE_DESCRIPTOR_SET.descriptors) == len(VM_INSTRUCTION_PROJECTIONS)
+    assert len(VM_CORE_DESCRIPTOR_SET.descriptors) == len(VM_PACKET_DESCRIPTORS) + 1
     for descriptor, projection in zip(
-        VM_CORE_DESCRIPTOR_SET.descriptors,
+        VM_PACKET_DESCRIPTORS,
         VM_INSTRUCTION_PROJECTIONS,
         strict=True,
     ):
@@ -52,6 +54,14 @@ def test_descriptors_preserve_instruction_identity() -> None:
         assert descriptor.key == projection.key
         assert descriptor.mnemonic == projection.mnemonic
         assert descriptor.asm_forms
+
+    switch = VM_CORE_DESCRIPTOR_SET.descriptors[-1]
+    assert switch.key == "vm.control.switch"
+    assert switch.carrier is DescriptorCarrier.SWITCH
+    assert switch.encoding_id == 0x0A
+    assert tuple(operand.field_name for operand in switch.operands) == ("selector",)
+    assert switch.immediates == ()
+    assert tuple(effect.kind for effect in switch.effects) == (EffectKind.CONTROL,)
 
 
 def test_projection_partitions_every_core_instruction() -> None:

@@ -12,9 +12,11 @@
 #include "loom/error/error_catalog.h"
 #include "loom/ir/module.h"
 #include "loom/ops/index/ops.h"
+#include "loom/ops/low/ops.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/target/arch/vm/descriptors.h"
 #include "loom/target/arch/vm/lower/constants.h"
+#include "loom/target/arch/vm/lower/control.h"
 
 #define LOOM_VM_SOURCE_LOWERING_LIMITS(max_operand_count, max_result_count) \
   enum {                                                                    \
@@ -292,6 +294,12 @@ static const loom_low_lower_policy_t kVmCoreLowLowerPolicy = {
     .map_type = {.fn = loom_vm_map_type, .user_data = NULL},
     .source_type_supported = {.fn = loom_vm_source_type_supported,
                               .user_data = NULL},
+    .switch_lowering =
+        {
+            .can_emit = loom_vm_switch_lowering_can_emit,
+            .emit = loom_vm_switch_lowering_emit,
+            .user_data = NULL,
+        },
     .select_op = {.fn = loom_vm_select_op, .user_data = NULL},
     .emit_op = {.fn = loom_vm_emit_op, .user_data = NULL},
 };

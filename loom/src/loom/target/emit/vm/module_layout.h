@@ -35,6 +35,8 @@ typedef struct loom_vm_module_function_layout_t {
   uint16_t function_ordinal;
   // Canonical structural callable-type ordinal.
   uint16_t callable_type_ordinal;
+  // Aggregate switch-target entries required by the function body.
+  uint32_t switch_target_entry_count;
 } loom_vm_module_function_layout_t;
 
 // Complete deterministic table plan for one emitted Core VM module.
@@ -55,6 +57,8 @@ typedef struct loom_vm_module_layout_t {
   iree_host_size_t export_count;
   // Aggregate source-ordered descriptors in unique signatures.
   uint32_t signature_descriptor_count;
+  // Aggregate switch-target entries across all functions.
+  uint32_t switch_target_entry_count;
 } loom_vm_module_layout_t;
 
 // Collects supported low functions and assigns all module wire ordinals.

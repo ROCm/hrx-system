@@ -31,8 +31,8 @@ from model.isa.validation import (
 from model.schema import EntityReference, FieldReference, RuleUse
 
 from loom.target.arch.vm.projection import (
-    VM_CORE_DESCRIPTOR_SET,
     VM_INSTRUCTION_PROJECTIONS,
+    VM_PACKET_DESCRIPTORS,
 )
 from loom.target.low_descriptors import Descriptor
 
@@ -354,7 +354,7 @@ def _project_constraints() -> tuple[
     for descriptor_ordinal, (projection, descriptor) in enumerate(
         zip(
             VM_INSTRUCTION_PROJECTIONS,
-            VM_CORE_DESCRIPTOR_SET.descriptors,
+            VM_PACKET_DESCRIPTORS,
             strict=True,
         )
     ):

@@ -6,6 +6,7 @@
 
 #include "loom/target/emit/vm/function_layout.h"
 
+#include "iree/vm/bytecode/wire/core/control.h"
 #include "iree/vm/bytecode/wire/core/opcodes.h"
 #include "loom/codegen/low/packet.h"
 #include "loom/ir/context.h"
@@ -164,6 +165,11 @@ static iree_status_t loom_vm_function_structural_packet_byte_length(
         control_layout->first_byte_length + control_layout->second_byte_length;
     return iree_ok_status();
   }
+  if (loom_low_switch_isa(op)) {
+    *out_byte_length = sizeof(iree_vm_isa_control_switch_record_t) +
+                       control_layout->first_byte_length;
+    return iree_ok_status();
+  }
   if (packet->descriptor != NULL) {
     const uint32_t descriptor_ordinal =
         (uint32_t)(packet->descriptor -
@@ -202,7 +208,14 @@ loom_vm_function_initial_control_encoding(
                : LOOM_VM_FUNCTION_CONTROL_ENCODING_BRANCH_S32;
   }
   if (!loom_low_cond_br_isa(op)) {
-    return LOOM_VM_FUNCTION_CONTROL_ENCODING_NONE;
+    if (!loom_low_switch_isa(op)) {
+      return LOOM_VM_FUNCTION_CONTROL_ENCODING_NONE;
+    }
+    const uint32_t target_block_index = loom_vm_function_target_block_index(
+        schedule, loom_low_switch_default_dest(op));
+    return target_block_index == next_block_index
+               ? LOOM_VM_FUNCTION_CONTROL_ENCODING_NONE
+               : LOOM_VM_FUNCTION_CONTROL_ENCODING_BRANCH_S32;
   }
   const uint32_t true_block_index = loom_vm_function_target_block_index(
       schedule, loom_low_cond_br_true_dest(op));
@@ -305,6 +318,10 @@ static void loom_vm_function_select_narrow_branch(
     } else {
       first_target_block_index = true_block_index;
     }
+  } else if (loom_low_switch_isa(op)) {
+    first_record_offset += sizeof(iree_vm_isa_control_switch_record_t);
+    first_target_block_index = loom_vm_function_target_block_index(
+        &frame->schedule, loom_low_switch_default_dest(op));
   } else {
     return;
   }
@@ -385,6 +402,7 @@ iree_status_t loom_vm_function_code_layout_build(
       .control_encodings = control_encodings,
   };
 
+  uint64_t switch_target_entry_count = 0;
   for (uint32_t block_index = 0; block_index < frame->schedule.block_count;
        ++block_index) {
     const loom_low_schedule_block_t* block =
@@ -395,8 +413,18 @@ iree_status_t loom_vm_function_code_layout_build(
       control_encodings[packet.packet_index] =
           loom_vm_function_initial_control_encoding(&frame->schedule,
                                                     block_index, &packet);
+      if (loom_low_switch_isa(packet.node->op)) {
+        switch_target_entry_count +=
+            loom_low_switch_target_dests(packet.node->op).count;
+      }
     }
   }
+  if (switch_target_entry_count > UINT32_MAX) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "VM function switch-target entry count exceeds u32");
+  }
+  out_layout->switch_target_entry_count = (uint32_t)switch_target_entry_count;
 
   // Select narrow branches against a pessimistic all-wide layout. Shrinking a
   // record can only bring every other direct target closer or leave its

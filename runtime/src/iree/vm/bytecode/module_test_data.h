@@ -81,6 +81,9 @@ std::vector<uint8_t> BuildHALInspectionModuleImage();
 // Builds one structurally valid switch-target inspection fixture.
 std::vector<uint8_t> BuildSwitchInspectionModuleImage();
 
+// Builds one executable switch fixture with distinct case and default results.
+std::vector<uint8_t> BuildSwitchExecutionModuleImage();
+
 }  // namespace iree::vm::bytecode::testing
 
 #endif  // IREE_VM_BYTECODE_MODULE_TEST_DATA_H_

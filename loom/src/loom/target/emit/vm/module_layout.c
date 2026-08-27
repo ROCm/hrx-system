@@ -132,6 +132,28 @@ static int loom_vm_module_layout_compare_export_names(const void* lhs_ptr,
   return iree_string_view_compare(lhs->export_name, rhs->export_name);
 }
 
+static iree_status_t loom_vm_module_layout_count_switch_targets(
+    const loom_op_t* function_op, uint32_t* out_count) {
+  *out_count = 0;
+  const loom_region_t* body = loom_low_function_const_body(function_op);
+  if (body == NULL) return iree_ok_status();
+  for (uint16_t block_index = 0; block_index < body->block_count;
+       ++block_index) {
+    const loom_op_t* op = NULL;
+    loom_block_for_each_op(body->blocks[block_index], op) {
+      if (!loom_low_switch_isa(op)) continue;
+      const uint32_t target_count = loom_low_switch_target_dests(op).count;
+      if (target_count > UINT32_MAX - *out_count) {
+        return iree_make_status(
+            IREE_STATUS_OUT_OF_RANGE,
+            "VM function switch-target entry count exceeds u32");
+      }
+      *out_count += target_count;
+    }
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_vm_module_layout_count(
     const loom_module_t* module, iree_host_size_t* out_function_count,
     iree_host_size_t* out_signature_descriptor_count) {
@@ -222,6 +244,16 @@ static iree_status_t loom_vm_module_layout_populate_functions(
       IREE_RETURN_IF_ERROR(loom_vm_module_layout_signature_kind(
           module, results.values[i], &signature_kinds[signature_kind_index++]));
     }
+
+    IREE_RETURN_IF_ERROR(loom_vm_module_layout_count_switch_targets(
+        function_op, &function->switch_target_entry_count));
+    if (function->switch_target_entry_count >
+        UINT32_MAX - layout->switch_target_entry_count) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "VM module switch-target entry count exceeds u32");
+    }
+    layout->switch_target_entry_count += function->switch_target_entry_count;
   }
   return iree_ok_status();
 }

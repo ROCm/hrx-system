@@ -191,7 +191,9 @@ static iree_status_t loom_vm_module_write_functions(
     const loom_vm_module_layout_t* layout,
     const loom_vm_module_emitter_options_t* options,
     iree_arena_allocator_t* scratch_arena, loom_vm_module_writer_t* writer,
-    iree_vm_bytecode_v0_function_row_t* function_rows, bool* out_complete) {
+    iree_vm_bytecode_v0_function_row_t* function_rows,
+    iree_vm_bytecode_v0_switch_target_entry_t* switch_targets,
+    bool* out_complete) {
   *out_complete = false;
   uint64_t section_start = 0;
   IREE_RETURN_IF_ERROR(loom_vm_module_writer_begin_section(
@@ -204,6 +206,15 @@ static iree_status_t loom_vm_module_write_functions(
   writer->function_rows_offset = writer->writer.total_written;
   IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_zeros(
       &writer->writer, layout->function_count * sizeof(*function_rows)));
+  iree_host_size_t switch_target_byte_length = 0;
+  if (!iree_host_size_checked_mul(layout->switch_target_entry_count,
+                                  sizeof(*switch_targets),
+                                  &switch_target_byte_length)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "VM switch-target table exceeds host size");
+  }
+  IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_zeros(
+      &writer->writer, switch_target_byte_length));
 
   const uint64_t bytecode_start = writer->writer.total_written;
   const loom_vm_function_encoder_options_t function_options = {
@@ -216,6 +227,7 @@ static iree_status_t loom_vm_module_write_functions(
   iree_arena_initialize(scratch_arena->block_pool, &function_arena);
   iree_status_t status = iree_ok_status();
   bool functions_complete = true;
+  uint32_t switch_target_base = 0;
   for (iree_host_size_t i = 0; i < layout->function_count &&
                                iree_status_is_ok(status) && functions_complete;
        ++i) {
@@ -230,17 +242,38 @@ static iree_status_t loom_vm_module_write_functions(
     status = loom_vm_function_encode(layout->module, &layout->functions[i],
                                      &function_options, &function_arena,
                                      &writer->writer, &encoding);
-    iree_arena_reset(&function_arena);
+    if (iree_status_is_ok(status) && encoding.is_complete) {
+      if (switch_target_base > layout->switch_target_entry_count ||
+          encoding.row.switch_target_entry_count_u32 >
+              layout->switch_target_entry_count - switch_target_base) {
+        status = iree_make_status(
+            IREE_STATUS_INTERNAL,
+            "VM function switch-target count exceeds module layout");
+      }
+    }
     if (iree_status_is_ok(status) && encoding.is_complete) {
       encoding.row.bytecode_offset_u32 = (uint32_t)relative_offset;
+      encoding.row.switch_target_base_u32 = switch_target_base;
       function_rows[i] = encoding.row;
+      if (encoding.row.switch_target_entry_count_u32 != 0) {
+        memcpy(switch_targets + switch_target_base, encoding.switch_targets,
+               encoding.row.switch_target_entry_count_u32 *
+                   sizeof(*switch_targets));
+      }
+      switch_target_base += encoding.row.switch_target_entry_count_u32;
     } else if (iree_status_is_ok(status)) {
       functions_complete = false;
     }
+    iree_arena_reset(&function_arena);
   }
   iree_arena_deinitialize(&function_arena);
   IREE_RETURN_IF_ERROR(status);
   if (!functions_complete) return iree_ok_status();
+  if (switch_target_base != layout->switch_target_entry_count) {
+    return iree_make_status(
+        IREE_STATUS_INTERNAL,
+        "VM module switch-target count changed during emission");
+  }
   loom_vm_module_writer_end_section(writer, section_start);
   *out_complete = true;
   return iree_ok_status();
@@ -249,7 +282,9 @@ static iree_status_t loom_vm_module_write_functions(
 static iree_status_t loom_vm_module_patch_records(
     loom_vm_module_writer_t* writer,
     const iree_vm_bytecode_v0_function_row_t* function_rows,
-    iree_host_size_t function_count, uint64_t image_length) {
+    iree_host_size_t function_count,
+    const iree_vm_bytecode_v0_switch_target_entry_t* switch_targets,
+    uint32_t switch_target_count, uint64_t image_length) {
   IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_flush(&writer->writer));
 
   IREE_RETURN_IF_ERROR(
@@ -259,6 +294,11 @@ static iree_status_t loom_vm_module_patch_records(
   loom_bytecode_page_writer_initialize(&patch_writer, writer->stream);
   IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write(
       &patch_writer, function_rows, function_count * sizeof(*function_rows)));
+  if (switch_target_count != 0) {
+    IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write(
+        &patch_writer, switch_targets,
+        (iree_host_size_t)switch_target_count * sizeof(*switch_targets)));
+  }
   IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_flush(&patch_writer));
 
   IREE_RETURN_IF_ERROR(iree_io_stream_seek(
@@ -306,10 +346,16 @@ static iree_status_t loom_vm_module_write_image(
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       scratch_arena, layout->function_count, sizeof(*function_rows),
       (void**)&function_rows));
+  iree_vm_bytecode_v0_switch_target_entry_t* switch_targets = NULL;
+  if (layout->switch_target_entry_count != 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        scratch_arena, layout->switch_target_entry_count,
+        sizeof(*switch_targets), (void**)&switch_targets));
+  }
   bool functions_complete = false;
-  IREE_RETURN_IF_ERROR(
-      loom_vm_module_write_functions(layout, options, scratch_arena, writer,
-                                     function_rows, &functions_complete));
+  IREE_RETURN_IF_ERROR(loom_vm_module_write_functions(
+      layout, options, scratch_arena, writer, function_rows, switch_targets,
+      &functions_complete));
   if (!functions_complete) return iree_ok_status();
   IREE_ASSERT_EQ(writer->section_count, section_count);
 
@@ -319,7 +365,8 @@ static iree_status_t loom_vm_module_write_image(
                             "VM module image exceeds stream offset range");
   }
   IREE_RETURN_IF_ERROR(loom_vm_module_patch_records(
-      writer, function_rows, layout->function_count, image_length));
+      writer, function_rows, layout->function_count, switch_targets,
+      layout->switch_target_entry_count, image_length));
   *out_complete = true;
   return iree_ok_status();
 }

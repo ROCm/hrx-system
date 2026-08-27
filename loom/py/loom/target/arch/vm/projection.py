@@ -85,6 +85,7 @@ from loom.target.low_descriptors import (
     Constraint,
     ConstraintKind,
     Descriptor,
+    DescriptorCarrier,
     DescriptorFlag,
     DescriptorOpKind,
     DescriptorSet,
@@ -514,6 +515,8 @@ def _state_effect(effect) -> Effect:
 
 def _instruction_effects(instruction: Instruction) -> tuple[Effect, ...]:
     effects: list[Effect] = []
+    if instruction.control_flow is not ControlFlow.SEQUENTIAL:
+        effects.append(Effect(EffectKind.CONTROL, flags=(EffectFlag.ORDERED,)))
     for state_effect in instruction.state_effects:
         effect = _state_effect(state_effect)
         if effect not in effects:
@@ -748,6 +751,52 @@ def _descriptor(projection: VmInstructionProjection) -> Descriptor:
     )
 
 
+def _switch_descriptor(instruction: Instruction) -> Descriptor:
+    """Projects control.switch onto its structural Low carrier."""
+
+    if instruction.control_flow is not ControlFlow.SWITCH:
+        raise ValueError(f"{instruction.mnemonic}: expected switch control flow")
+    selector_fields = tuple(
+        field
+        for field in instruction.fields
+        if field.role is InstructionFieldRole.OPERAND
+    )
+    if len(selector_fields) != 1:
+        raise ValueError(
+            f"{instruction.mnemonic}: structural switch requires one selector"
+        )
+    selector_field = selector_fields[0]
+    selector_name = _field_name(selector_field.name)
+    return Descriptor(
+        key=f"vm.{instruction.mnemonic}",
+        mnemonic=instruction.mnemonic,
+        semantic_tag=instruction.mnemonic,
+        operands=(
+            Operand(
+                selector_name,
+                OperandRole.OPERAND,
+                _register_alternatives(selector_field),
+                unit_count=1,
+                encoding_field_id=selector_field.offset,
+            ),
+        ),
+        schedule_class=_EXECUTE_SCHEDULE_CLASS,
+        carrier=DescriptorCarrier.SWITCH,
+        asm_forms=(AsmForm(operands=(selector_name,)),),
+        effects=_instruction_effects(instruction),
+        encoding_id=instruction.opcode,
+        flags=(DescriptorFlag.SIDE_EFFECTING, DescriptorFlag.TERMINATOR),
+        instruction_classes=(InstructionClass.CONTROL,),
+    )
+
+
+_CONTROL_SWITCH_INSTRUCTION = _instruction("control.switch")
+
+VM_PACKET_DESCRIPTORS = tuple(
+    _descriptor(projection) for projection in VM_INSTRUCTION_PROJECTIONS
+)
+
+
 VM_CORE_DESCRIPTOR_SET = DescriptorSet(
     key="vm.core",
     target_key="vm",
@@ -817,12 +866,14 @@ VM_CORE_DESCRIPTOR_SET = DescriptorSet(
                 ScheduleClassFlag.MAY_LOAD,
                 ScheduleClassFlag.MAY_STORE,
                 ScheduleClassFlag.MAY_CALL,
+                ScheduleClassFlag.CONTROL,
             ),
         ),
     ),
     enum_domains=VM_ENUM_DOMAINS,
-    descriptors=tuple(
-        _descriptor(projection) for projection in VM_INSTRUCTION_PROJECTIONS
+    descriptors=(
+        *VM_PACKET_DESCRIPTORS,
+        _switch_descriptor(_CONTROL_SWITCH_INSTRUCTION),
     ),
 )
 

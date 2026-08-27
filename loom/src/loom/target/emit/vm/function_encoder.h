@@ -38,6 +38,8 @@ typedef struct loom_vm_function_encoder_options_t {
 typedef struct loom_vm_function_encoding_t {
   // Fully populated Functions section row when |is_complete| is true.
   iree_vm_bytecode_v0_function_row_t row;
+  // Scratch-arena-owned switch-target entries in structural packet order.
+  const iree_vm_bytecode_v0_switch_target_entry_t* switch_targets;
   // False when diagnostics prevented function packet emission.
   bool is_complete;
 } loom_vm_function_encoding_t;

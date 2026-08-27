@@ -270,6 +270,30 @@ TEST(VMBytecodeModuleCallTest, ExecutesDirectIndirectAndSuspendingCalls) {
   expect_suspending_result(IREE_SV("call_yield_indirect"), 44, 45);
 }
 
+TEST(VMBytecodeModuleCallTest, ExecutesSwitchCasesHolesAndDefault) {
+  CallExecutionHarness harness(BuildSwitchExecutionModuleImage());
+  IREE_ASSERT_OK(harness.Initialize(IREE_SV("switch")));
+
+  iree_vm_function_t function = iree_vm_function_null();
+  IREE_ASSERT_OK(
+      harness.LookupFunction(IREE_SV("switch"), IREE_SV("select"), &function));
+  for (const auto [selector, expected] : {std::pair<int32_t, int32_t>{0, 10},
+                                          {1, 99},
+                                          {2, 12},
+                                          {3, 99},
+                                          {-1, 99}}) {
+    iree_vm_variant_t arguments[] = {iree_vm_variant_from_i32(selector)};
+    iree_vm_variant_t results[1] = {};
+    IREE_ASSERT_OK(iree_vm_invoke(harness.invocation, function,
+                                  iree_vm_variant_span_from_array(arguments),
+                                  iree_vm_variant_span_from_array(results)));
+    int32_t result = 0;
+    IREE_ASSERT_OK(iree_vm_i32_from_variant(results[0], &result));
+    EXPECT_EQ(result, expected);
+    iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
+  }
+}
+
 TEST(VMBytecodeModuleCallTest,
      TrampolinesRecursiveCallsUntilInvocationStorageExhausts) {
   std::vector<uint8_t> image = BuildCallModuleImage();

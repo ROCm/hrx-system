@@ -58,6 +58,8 @@ typedef struct loom_vm_function_code_layout_t {
   uint32_t* packet_offsets;
   // Selected control encodings indexed by scheduled packet ordinal.
   loom_vm_function_control_encoding_t* control_encodings;
+  // Aggregate switch-target entries required by structural switch packets.
+  uint32_t switch_target_entry_count;
   // Exact complete function record-stream byte length.
   uint32_t bytecode_length;
 } loom_vm_function_code_layout_t;

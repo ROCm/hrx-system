@@ -1481,6 +1481,17 @@ std::vector<uint8_t> BuildSwitchInspectionSignatures() {
   return section.Take();
 }
 
+std::vector<uint8_t> BuildSwitchExecutionSignatures() {
+  ByteBuffer section;
+  section.Append(iree_vm_bytecode_v0_signatures_header_t{1});
+  section.Append(iree_vm_bytecode_v0_signature_row_t{0, 1, 1, 0, 0, 0, 0});
+  section.Append(iree_vm_bytecode_v0_signature_descriptor_row_t{
+      IREE_VM_BYTECODE_SIGNATURE_KIND_I32, 0});
+  section.Append(iree_vm_bytecode_v0_signature_descriptor_row_t{
+      IREE_VM_BYTECODE_SIGNATURE_KIND_I32, 0});
+  return section.Take();
+}
+
 std::vector<uint8_t> BuildSwitchInspectionCallableTypes() {
   ByteBuffer section;
   section.Append(iree_vm_bytecode_v0_callable_types_header_t{1});
@@ -1512,6 +1523,46 @@ std::vector<uint8_t> BuildSwitchInspectionFunctions() {
   section.Append(iree_vm_bytecode_v0_function_row_t{
       0, 0, 0, 20, 0, 1, 0, 1, 0, 0, 0, 0, 2, {0, 0}});
   section.Append(static_cast<iree_vm_bytecode_v0_switch_target_entry_t>(3));
+  section.AppendBytes(bytecode_data.data(), bytecode_data.size());
+  return section.Take();
+}
+
+std::vector<uint8_t> BuildSwitchExecutionFunctions() {
+  ByteBuffer bytecode;
+  bytecode.Append(iree_vm_isa_control_block_record_t{
+      IREE_VM_ISA_CORE_OPCODE_CONTROL_BLOCK, {0, 0, 0}});
+  bytecode.Append(iree_vm_isa_control_switch_record_t{
+      IREE_VM_ISA_CORE_OPCODE_CONTROL_SWITCH, 0, 3, 0});
+
+  bytecode.Append(iree_vm_isa_control_block_record_t{
+      IREE_VM_ISA_CORE_OPCODE_CONTROL_BLOCK, {0, 0, 0}});
+  bytecode.Append(iree_vm_isa_constant_s16_record_t{
+      IREE_VM_ISA_CORE_OPCODE_CONSTANT_S16, 0, 99});
+  bytecode.Append(iree_vm_isa_control_return_record_t{
+      IREE_VM_ISA_CORE_OPCODE_CONTROL_RETURN, {0, 0, 0}});
+
+  bytecode.Append(iree_vm_isa_control_block_record_t{
+      IREE_VM_ISA_CORE_OPCODE_CONTROL_BLOCK, {0, 0, 0}});
+  bytecode.Append(iree_vm_isa_constant_s16_record_t{
+      IREE_VM_ISA_CORE_OPCODE_CONSTANT_S16, 0, 10});
+  bytecode.Append(iree_vm_isa_control_return_record_t{
+      IREE_VM_ISA_CORE_OPCODE_CONTROL_RETURN, {0, 0, 0}});
+
+  bytecode.Append(iree_vm_isa_control_block_record_t{
+      IREE_VM_ISA_CORE_OPCODE_CONTROL_BLOCK, {0, 0, 0}});
+  bytecode.Append(iree_vm_isa_constant_s16_record_t{
+      IREE_VM_ISA_CORE_OPCODE_CONSTANT_S16, 0, 12});
+  bytecode.Append(iree_vm_isa_control_return_record_t{
+      IREE_VM_ISA_CORE_OPCODE_CONTROL_RETURN, {0, 0, 0}});
+
+  std::vector<uint8_t> bytecode_data = bytecode.Take();
+  ByteBuffer section;
+  section.Append(iree_vm_bytecode_v0_functions_header_t{1});
+  section.Append(iree_vm_bytecode_v0_function_row_t{
+      0, 0, 0, 48, 0, 3, 0, 1, 0, 0, 0, 0, 4, {0, 0}});
+  section.Append(static_cast<iree_vm_bytecode_v0_switch_target_entry_t>(6));
+  section.Append(static_cast<iree_vm_bytecode_v0_switch_target_entry_t>(3));
+  section.Append(static_cast<iree_vm_bytecode_v0_switch_target_entry_t>(9));
   section.AppendBytes(bytecode_data.data(), bytecode_data.size());
   return section.Take();
 }
@@ -1737,6 +1788,18 @@ std::vector<uint8_t> BuildSwitchInspectionModuleImage() {
        BuildSwitchInspectionCallableTypes()},
       {IREE_VM_BYTECODE_SECTION_EXPORTS, 0, BuildSwitchInspectionExports()},
       {IREE_VM_BYTECODE_SECTION_FUNCTIONS, 0, BuildSwitchInspectionFunctions()},
+  });
+}
+
+std::vector<uint8_t> BuildSwitchExecutionModuleImage() {
+  return BuildImage({
+      {IREE_VM_BYTECODE_SECTION_STRINGS, 0, BuildStrings({"select"})},
+      {IREE_VM_BYTECODE_SECTION_SIGNATURES, 0,
+       BuildSwitchExecutionSignatures()},
+      {IREE_VM_BYTECODE_SECTION_CALLABLE_TYPES, 0,
+       BuildSwitchInspectionCallableTypes()},
+      {IREE_VM_BYTECODE_SECTION_EXPORTS, 0, BuildSwitchInspectionExports()},
+      {IREE_VM_BYTECODE_SECTION_FUNCTIONS, 0, BuildSwitchExecutionFunctions()},
   });
 }
 

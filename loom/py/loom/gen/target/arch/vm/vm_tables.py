@@ -24,6 +24,7 @@ from loom.gen.target.low.low_descriptors import write_descriptor_set_to_paths
 from loom.target.arch.vm.projection import (
     VM_CORE_DESCRIPTOR_SET,
     VM_INSTRUCTION_PROJECTIONS,
+    VM_PACKET_DESCRIPTORS,
     VM_SOURCE_LOWERINGS,
 )
 from loom.target.arch.vm.verification import (
@@ -74,10 +75,9 @@ def _validate_instruction_encoding_projection() -> None:
     """Proves that the generic C encoder can populate every projected record."""
 
     encodings_by_id = {encoding.entity_id: encoding for encoding in SCALAR_ENCODINGS}
-    descriptors = VM_CORE_DESCRIPTOR_SET.descriptors
-    if len(descriptors) != len(VM_INSTRUCTION_PROJECTIONS):
-        raise ValueError("VM descriptor and instruction projection counts differ")
-    for descriptor, projection in zip(descriptors, VM_INSTRUCTION_PROJECTIONS, strict=True):
+    if len(VM_PACKET_DESCRIPTORS) != len(VM_INSTRUCTION_PROJECTIONS):
+        raise ValueError("VM packet descriptor projection is incomplete")
+    for descriptor, projection in zip(VM_PACKET_DESCRIPTORS, VM_INSTRUCTION_PROJECTIONS, strict=True):
         instruction = projection.instruction
         if instruction.byte_length <= 0 or instruction.byte_length % 4:
             raise ValueError(f"{projection.key}: instruction length must be a positive multiple of four")
@@ -140,8 +140,8 @@ def generate_encoding_rows() -> str:
 def generate_verification_rows() -> str:
     """Returns the compact target-low packet verifier tables."""
 
-    if len(VM_PACKET_CONSTRAINT_RANGES) != len(VM_CORE_DESCRIPTOR_SET.descriptors):
-        raise ValueError("VM packet constraint range count does not match descriptors")
+    if len(VM_PACKET_CONSTRAINT_RANGES) != len(VM_INSTRUCTION_PROJECTIONS):
+        raise ValueError("VM packet constraint range count does not match packet descriptors")
     lines = [
         COPYRIGHT.rstrip(),
         "",

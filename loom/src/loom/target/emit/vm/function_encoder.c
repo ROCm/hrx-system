@@ -158,15 +158,16 @@ static iree_status_t loom_vm_function_encode_move_group(
   return iree_ok_status();
 }
 
-static uint8_t loom_vm_function_condition_register(
+static uint8_t loom_vm_function_value_operand_register(
     const loom_low_emission_frame_t* frame,
-    const loom_low_packet_view_t* packet) {
-  IREE_ASSERT_EQ(packet->node->operand_count, 1u);
-  const loom_value_ordinal_t condition_ordinal =
-      loom_low_schedule_node_const_operand_ordinals(packet->node)[0];
+    const loom_low_packet_view_t* packet, uint16_t operand_index) {
+  IREE_ASSERT_LT(operand_index, packet->node->operand_count);
+  const loom_value_ordinal_t operand_ordinal =
+      loom_low_schedule_node_const_operand_ordinals(
+          packet->node)[operand_index];
   const loom_low_allocation_assignment_t* assignment =
       loom_low_allocation_assignment_for_value_ordinal(&frame->allocation,
-                                                       condition_ordinal, NULL);
+                                                       operand_ordinal, NULL);
   IREE_ASSERT(assignment != NULL);
   IREE_ASSERT_EQ(assignment->location_kind,
                  LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER);
@@ -255,7 +256,7 @@ static iree_status_t loom_vm_function_encode_control_packet(
       branches_unless ? false_block_index : true_block_index;
   const uint16_t condition_register =
       control_layout->first_uses_condition
-          ? loom_vm_function_condition_register(frame, packet)
+          ? loom_vm_function_value_operand_register(frame, packet, 0)
           : UINT16_MAX;
   IREE_RETURN_IF_ERROR(loom_vm_function_encode_direct_branch(
       control_layout->first_opcode, control_layout->first_byte_length,
@@ -269,10 +270,58 @@ static iree_status_t loom_vm_function_encode_control_packet(
       code_layout->block_offsets[false_block_index], writer);
 }
 
+static iree_status_t loom_vm_function_encode_switch(
+    const loom_low_emission_frame_t* frame,
+    const loom_vm_function_code_layout_t* code_layout,
+    const loom_low_packet_view_t* packet, uint32_t switch_target_base,
+    iree_vm_bytecode_v0_switch_target_entry_t* switch_targets,
+    loom_bytecode_page_writer_t* writer) {
+  const loom_successor_slice_t target_dests =
+      loom_low_switch_target_dests(packet->node->op);
+  IREE_ASSERT_GT(target_dests.count, 0u);
+  IREE_ASSERT_LT(target_dests.count, UINT16_MAX);
+  IREE_ASSERT_LE(target_dests.count, code_layout->switch_target_entry_count);
+  IREE_ASSERT_LE(switch_target_base,
+                 code_layout->switch_target_entry_count - target_dests.count);
+  for (uint16_t i = 0; i < target_dests.count; ++i) {
+    const uint32_t target_block_index =
+        loom_low_packet_block_index(&frame->schedule, target_dests.blocks[i]);
+    IREE_ASSERT_NE(target_block_index, LOOM_LOW_PACKET_INDEX_NONE);
+    IREE_ASSERT_EQ(code_layout->block_offsets[target_block_index] % 4u, 0u);
+    switch_targets[switch_target_base + i] =
+        code_layout->block_offsets[target_block_index] / 4u;
+  }
+
+  const iree_vm_isa_control_switch_record_t record = {
+      .opcode_u8 = IREE_VM_ISA_CORE_OPCODE_CONTROL_SWITCH,
+      .selector_v8 = loom_vm_function_value_operand_register(frame, packet, 0),
+      .target_count_u16 = target_dests.count,
+      .target_base_u32 = switch_target_base,
+  };
+  IREE_RETURN_IF_ERROR(
+      loom_bytecode_page_writer_write(writer, &record, sizeof(record)));
+
+  const loom_vm_function_control_layout_t* control_layout =
+      loom_vm_function_control_encoding_layout(
+          code_layout->control_encodings[packet->packet_index]);
+  IREE_ASSERT_EQ(control_layout->second_byte_length, 0u);
+  if (control_layout->first_byte_length == 0) return iree_ok_status();
+  const uint32_t default_block_index = loom_low_packet_block_index(
+      &frame->schedule, loom_low_switch_default_dest(packet->node->op));
+  IREE_ASSERT_NE(default_block_index, LOOM_LOW_PACKET_INDEX_NONE);
+  return loom_vm_function_encode_direct_branch(
+      control_layout->first_opcode, control_layout->first_byte_length,
+      /*condition_register=*/UINT16_MAX,
+      code_layout->packet_offsets[packet->packet_index] + sizeof(record),
+      code_layout->block_offsets[default_block_index], writer);
+}
+
 static iree_status_t loom_vm_function_encode_structural_packet(
     const loom_low_emission_frame_t* frame,
     const loom_vm_function_code_layout_t* code_layout,
-    const loom_low_packet_view_t* packet, loom_bytecode_page_writer_t* writer) {
+    const loom_low_packet_view_t* packet, uint32_t switch_target_base,
+    iree_vm_bytecode_v0_switch_target_entry_t* switch_targets,
+    loom_bytecode_page_writer_t* writer) {
   if (loom_low_return_isa(packet->node->op)) {
     const iree_vm_isa_control_return_record_t record = {
         .opcode_u8 = IREE_VM_ISA_CORE_OPCODE_CONTROL_RETURN,
@@ -294,6 +343,10 @@ static iree_status_t loom_vm_function_encode_structural_packet(
       loom_low_cond_br_isa(packet->node->op)) {
     return loom_vm_function_encode_control_packet(frame, code_layout, packet,
                                                   writer);
+  }
+  if (loom_low_switch_isa(packet->node->op)) {
+    return loom_vm_function_encode_switch(
+        frame, code_layout, packet, switch_target_base, switch_targets, writer);
   }
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                           "VM structural operation is not implemented");
@@ -423,12 +476,25 @@ iree_status_t loom_vm_function_encode(
   loom_vm_function_code_layout_t code_layout = {0};
   IREE_RETURN_IF_ERROR(
       loom_vm_function_code_layout_build(&frame, scratch_arena, &code_layout));
+  if (code_layout.switch_target_entry_count !=
+      function->switch_target_entry_count) {
+    return iree_make_status(
+        IREE_STATUS_INTERNAL,
+        "VM function layout switch-target count changed during emission");
+  }
+  iree_vm_bytecode_v0_switch_target_entry_t* switch_targets = NULL;
+  if (code_layout.switch_target_entry_count != 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        scratch_arena, code_layout.switch_target_entry_count,
+        sizeof(*switch_targets), (void**)&switch_targets));
+  }
 
   const uint64_t bytecode_start = writer->total_written;
   const iree_vm_isa_control_block_record_t block_record = {
       .opcode_u8 = IREE_VM_ISA_CORE_OPCODE_CONTROL_BLOCK,
       .zero_padding_u8 = {0, 0, 0},
   };
+  uint32_t switch_target_base = 0;
   for (uint32_t block_index = 0; block_index < frame.schedule.block_count;
        ++block_index) {
     IREE_ASSERT_EQ(writer->total_written - bytecode_start,
@@ -443,15 +509,22 @@ iree_status_t loom_vm_function_encode(
       IREE_ASSERT_EQ(writer->total_written - bytecode_start,
                      code_layout.packet_offsets[packet.packet_index]);
       if (loom_low_packet_is_compile_time_only(&packet)) continue;
-      if (packet.descriptor != NULL) {
+      if (packet.descriptor != NULL &&
+          packet.descriptor->carrier == LOOM_LOW_DESCRIPTOR_CARRIER_PACKET) {
         IREE_RETURN_IF_ERROR(
             loom_vm_function_encode_descriptor_packet(&frame, &packet, writer));
       } else {
         IREE_RETURN_IF_ERROR(loom_vm_function_encode_structural_packet(
-            &frame, &code_layout, &packet, writer));
+            &frame, &code_layout, &packet, switch_target_base, switch_targets,
+            writer));
+        if (loom_low_switch_isa(packet.node->op)) {
+          switch_target_base +=
+              loom_low_switch_target_dests(packet.node->op).count;
+        }
       }
     }
   }
+  IREE_ASSERT_EQ(switch_target_base, code_layout.switch_target_entry_count);
 
   const uint64_t bytecode_length = writer->total_written - bytecode_start;
   if (bytecode_length != code_layout.bytecode_length) {
@@ -466,6 +539,9 @@ iree_status_t loom_vm_function_encode(
   out_encoding->row.function_register_count_u16 =
       (uint16_t)function_register_count;
   out_encoding->row.block_count_u32 = (uint32_t)frame.schedule.block_count;
+  out_encoding->row.switch_target_entry_count_u32 =
+      code_layout.switch_target_entry_count;
+  out_encoding->switch_targets = switch_targets;
   out_encoding->is_complete = true;
   return iree_ok_status();
 }
