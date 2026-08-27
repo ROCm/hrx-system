@@ -49,35 +49,11 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
-    kernel_unit
+    dispatch_counts
   HDRS
-    "kernel_unit.h"
+    "dispatch_counts.h"
   SRCS
-    "kernel_unit.c"
-  DEPS
-    iree::base
-    iree::base::internal::arena
-    loom::ir
-    loom::link::linker
-    loom::ops::buffer
-    loom::ops::index
-    loom::ops::kernel
-    loom::ops::op_defs
-    loom::ops::special_values
-    loom::ops::type_registry
-    loom::pass::value_facts
-    loom::transforms::cleanup::canonicalize
-    loom::util::fact_table
-  PUBLIC
-)
-
-loom_cc_library(
-  NAME
-    launch_graph
-  HDRS
-    "launch_graph.h"
-  SRCS
-    "launch_graph.c"
+    "dispatch_counts.c"
   DEPS
     ::schedule
     iree::base
@@ -88,19 +64,9 @@ loom_cc_library(
     loom::ir::facts
     loom::ops::buffer
     loom::ops::command
-    loom::ops::func
     loom::ops::kernel
-    loom::ops::op_defs
-    loom::ops::special_values
-    loom::ops::type_registry
-    loom::pass::value_facts
-    loom::rewrite::materialize
-    loom::rewrite::remap
-    loom::rewrite::rewriter
     loom::target::arch::cmd::program
     loom::target::types
-    loom::transforms::cleanup::canonicalize
-    loom::transforms::cleanup::cse
     loom::util::fact_table
   PUBLIC
 )
@@ -113,7 +79,8 @@ loom_cc_library(
   SRCS
     "lower.c"
   DEPS
-    ::launch_graph
+    ::dispatch_counts
+    ::schedule
     iree::base
     iree::base::internal::arena
     loom::codegen::low::builder
@@ -177,8 +144,7 @@ loom_cc_library(
   SRCS
     "program_plan.c"
   DEPS
-    ::kernel_unit
-    ::launch_graph
+    ::dispatch_counts
     ::lower
     ::parameters
     ::program_composition
@@ -186,12 +152,12 @@ loom_cc_library(
     ::transients
     iree::base
     iree::base::internal::arena
+    loom::analysis::symbol_references
     loom::error::emitter
     loom::error::error_defs
     loom::ir
     loom::ir::facts
-    loom::link::linker
-    loom::ops::command
+    loom::link::plan_materializer
     loom::ops::kernel
     loom::ops::op_defs
     loom::ops::type_registry
@@ -200,6 +166,8 @@ loom_cc_library(
     loom::pass::program
     loom::pass::registry
     loom::target::arch::cmd::abi_layout
+    loom::target::arch::cmd::program
+    loom::transforms::kernel::resolve_launches
     loom::util::fact_table
   PUBLIC
 )
@@ -250,6 +218,27 @@ loom_cc_test(
     loom::testing::diagnostic_matchers
     loom::testing::module_ptr
     loom::verify
+)
+
+loom_cc_benchmark(
+  NAME
+    program_plan_benchmark
+  SRCS
+    "program_plan_benchmark.cc"
+  DEPS
+    ::program_plan
+    iree::base
+    iree::base::internal::arena
+    iree::testing::benchmark_main
+    loom::format::text::parser
+    loom::ir
+    loom::link::module_index
+    loom::link::plan_materializer
+    loom::link::planner
+    loom::ops::op_registry
+    loom::pass::builtin_registry
+    loom::verify
+  TESTONLY
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

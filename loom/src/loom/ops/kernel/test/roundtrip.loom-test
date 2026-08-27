@@ -1,5 +1,26 @@
 // RUN: roundtrip
 
+test.target<low_core> @dispatch_target
+
+kernel.entry.decl target(@dispatch_target) @configured_entry(%output: buffer)
+
+func.def @dispatch_with_workgroup_size(%count_x: index, %count_y: index, %size_x: index, %size_y: index, %size_z: index, %output: buffer) {
+  kernel.dispatch @configured_entry[%count_x, %count_y](%output) workgroup_size(%size_x, %size_y, %size_z) : [index, index](buffer)
+  func.return
+}
+
+// ----
+test.target<low_core> @dispatch_target
+
+kernel.entry.decl target(@dispatch_target) @configured_entry(%output: buffer)
+
+func.def @dispatch_with_workgroup_size(%count_x: index, %count_y: index, %size_x: index, %size_y: index, %size_z: index, %output: buffer) {
+  kernel.dispatch @configured_entry[%count_x, %count_y](%output) workgroup_size(%size_x, %size_y, %size_z) : [index, index](buffer)
+  func.return
+}
+
+// ====
+
 kernel.def @empty_kernel() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index

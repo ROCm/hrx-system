@@ -627,7 +627,7 @@ func.def @interleaved_dependency() {
 TEST_F(LinkPlannerTest, KernelReferencesSelectOnlyTheirRequiredFacets) {
   const iree_string_view_t harness_source = IREE_SV(R"(
 kernel.decl @configured(%count: index) launch()
-kernel.entry.decl @dispatched() where [workgroup_size(1, 1, 1)]
+kernel.entry.decl @dispatched()
 
 func.def @interleaved_dependency() {
   func.return

@@ -96,8 +96,6 @@ typedef struct loom_cmd_lower_resources_t {
   loom_value_id_t* fixed_buffers;
   // Rebindable resources indexed by issue-time binding slot.
   loom_value_id_t* bindings;
-  // Buffer references indexed by aggregate host launch tuple ordinal.
-  loom_value_id_t* launch_counts;
   // Executable resources indexed by package executable ordinal.
   loom_value_id_t* executables;
   // Entry-token resources indexed by program entry ordinal.
@@ -473,36 +471,6 @@ static iree_status_t loom_cmd_lower_map_source_buffer_ranges(
   return iree_ok_status();
 }
 
-static iree_status_t loom_cmd_lower_build_launch_count_refs(
-    loom_cmd_lower_state_t* state) {
-  const loom_cmd_launch_graph_t* graph = state->plan->launch_graph;
-  if (graph->host_tuple_count == 0) return iree_ok_status();
-
-  const loom_cmd_lower_launch_count_binding_t binding =
-      state->plan->launch_count_binding;
-  IREE_ASSERT_LT(binding.resource_index,
-                 state->plan->abi_layout.rebindable_binding_count);
-  IREE_ASSERT_EQ(binding.byte_offset % sizeof(uint32_t), 0u);
-  IREE_RETURN_IF_ERROR(loom_cmd_lower_allocate_value_array(
-      state, graph->host_tuple_count, &state->resources.launch_counts));
-
-  const uint64_t tuple_byte_length =
-      LOOM_CMD_PROGRAM_LAUNCH_COUNT_TUPLE_BYTE_LENGTH;
-  const loom_cmd_buffer_binding_t range_binding = {
-      .role = LOOM_CMD_BUFFER_ROLE_REBINDABLE,
-      .resource_index = binding.resource_index,
-  };
-  for (uint32_t i = 0; i < graph->host_tuple_count; ++i) {
-    const uint64_t tuple_byte_offset = (uint64_t)i * tuple_byte_length;
-    IREE_ASSERT_LE(binding.byte_offset, UINT64_MAX - tuple_byte_offset);
-    IREE_RETURN_IF_ERROR(loom_cmd_lower_build_buffer_ref(
-        state, &range_binding, binding.byte_offset + tuple_byte_offset,
-        tuple_byte_length, state->source_program.op->location,
-        &state->resources.launch_counts[i]));
-  }
-  return iree_ok_status();
-}
-
 static iree_status_t loom_cmd_lower_build_dispatch_operands(
     loom_cmd_lower_state_t* state, const loom_op_t* source_op,
     const loom_cmd_lower_dispatch_t* dispatch,
@@ -631,18 +599,6 @@ static iree_status_t loom_cmd_lower_build_indirect_dispatch(
       &dispatch_op);
 }
 
-static iree_status_t loom_cmd_lower_build_host_dispatch(
-    loom_cmd_lower_state_t* state, const loom_op_t* source_op,
-    const loom_cmd_lower_dispatch_t* dispatch, uint32_t host_tuple_ordinal,
-    bool has_barrier) {
-  IREE_ASSERT_LT(host_tuple_ordinal,
-                 state->plan->launch_graph->host_tuple_count);
-  return loom_cmd_lower_build_indirect_dispatch(
-      state, source_op, dispatch,
-      state->resources.launch_counts[host_tuple_ordinal],
-      LOOM_CMD_LOWER_INDIRECT_DISPATCH_KIND_STATIC, has_barrier);
-}
-
 static iree_status_t loom_cmd_lower_build_source_indirect_dispatch(
     loom_cmd_lower_state_t* state, const loom_op_t* source_op,
     const loom_cmd_lower_dispatch_t* dispatch, loom_value_id_t source_value,
@@ -664,42 +620,38 @@ static iree_status_t loom_cmd_lower_build_dispatch(
     bool has_barrier) {
   const loom_cmd_lower_dispatch_t* dispatch =
       &state->plan->dispatches[dispatch_index];
-  const loom_cmd_launch_count_t* launch_count =
-      &state->plan->launch_graph->launches[dispatch_index];
-  switch (launch_count->kind) {
-    case LOOM_CMD_LAUNCH_COUNT_KIND_DIRECT:
+  const loom_cmd_dispatch_count_t* count =
+      &state->plan->dispatch_counts[dispatch_index];
+  const loom_op_t* source_op =
+      state->plan->schedule->commands[dispatch_index].source_op;
+  switch (count->kind) {
+    case LOOM_CMD_DISPATCH_COUNT_KIND_DIRECT:
       return loom_cmd_lower_build_direct_dispatch(
-          state, launch_count->source_op, dispatch,
-          launch_count->payload.direct, has_barrier);
-    case LOOM_CMD_LAUNCH_COUNT_KIND_HOST:
-      return loom_cmd_lower_build_host_dispatch(
-          state, launch_count->source_op, dispatch,
-          launch_count->payload.host_tuple_ordinal, has_barrier);
-    case LOOM_CMD_LAUNCH_COUNT_KIND_INDIRECT_STATIC:
+          state, source_op, dispatch, count->payload.direct, has_barrier);
+    case LOOM_CMD_DISPATCH_COUNT_KIND_INDIRECT_STATIC:
       return loom_cmd_lower_build_source_indirect_dispatch(
-          state, launch_count->source_op, dispatch,
-          launch_count->payload.indirect_source_value,
+          state, source_op, dispatch, count->payload.indirect_source_value,
           LOOM_CMD_LOWER_INDIRECT_DISPATCH_KIND_STATIC, has_barrier);
-    case LOOM_CMD_LAUNCH_COUNT_KIND_INDIRECT_DYNAMIC:
+    case LOOM_CMD_DISPATCH_COUNT_KIND_INDIRECT_DYNAMIC:
       return loom_cmd_lower_build_source_indirect_dispatch(
-          state, launch_count->source_op, dispatch,
-          launch_count->payload.indirect_source_value,
+          state, source_op, dispatch, count->payload.indirect_source_value,
           LOOM_CMD_LOWER_INDIRECT_DISPATCH_KIND_DYNAMIC, has_barrier);
     default:
-      IREE_ASSERT_UNREACHABLE("aggregate launch count kind is valid");
+      IREE_ASSERT_UNREACHABLE("dispatch count kind is valid");
       IREE_BUILTIN_UNREACHABLE();
   }
 }
 
 static iree_status_t loom_cmd_lower_build_commands(
     loom_cmd_lower_state_t* state) {
-  const loom_cmd_launch_graph_t* graph = state->plan->launch_graph;
-  IREE_ASSERT(graph->launch_count == 0 || graph->launches != NULL);
-  IREE_ASSERT(graph->launch_count == 0 || state->plan->dispatches != NULL);
-  IREE_ASSERT(graph->wave_count == 0 || graph->waves != NULL);
-  for (iree_host_size_t wave_index = 0; wave_index < graph->wave_count;
+  const loom_cmd_schedule_plan_t* schedule = state->plan->schedule;
+  IREE_ASSERT(schedule->command_count == 0 ||
+              state->plan->dispatch_counts != NULL);
+  IREE_ASSERT(schedule->command_count == 0 || state->plan->dispatches != NULL);
+  IREE_ASSERT(schedule->wave_count == 0 || schedule->waves != NULL);
+  for (iree_host_size_t wave_index = 0; wave_index < schedule->wave_count;
        ++wave_index) {
-    const loom_cmd_schedule_wave_t wave = graph->waves[wave_index];
+    const loom_cmd_schedule_wave_t wave = schedule->waves[wave_index];
     IREE_ASSERT_GT(wave.command_count, 0u);
     for (iree_host_size_t i = 0; i < wave.command_count; ++i) {
       const iree_host_size_t dispatch_index = wave.command_offset + i;
@@ -772,7 +724,6 @@ static iree_status_t loom_cmd_lower_convert(loom_cmd_lower_state_t* state) {
   IREE_RETURN_IF_ERROR(loom_cmd_lower_build_abi_resources(state));
   IREE_RETURN_IF_ERROR(loom_cmd_lower_map_source_bindings(state));
   IREE_RETURN_IF_ERROR(loom_cmd_lower_map_source_buffer_ranges(state));
-  IREE_RETURN_IF_ERROR(loom_cmd_lower_build_launch_count_refs(state));
   return loom_cmd_lower_build_commands(state);
 }
 
@@ -798,7 +749,7 @@ iree_status_t loom_cmd_lower_program_to_low(loom_module_t* module,
                  argument_count - (uint16_t)specialization_count);
   IREE_ASSERT(plan->binding_count == 0 || plan->bindings != NULL);
   IREE_ASSERT(plan->buffer_range_count == 0 || plan->buffer_ranges != NULL);
-  IREE_ASSERT(plan->launch_graph != NULL);
+  IREE_ASSERT(plan->schedule != NULL);
   iree_arena_allocator_t scratch_arena;
   iree_arena_initialize(module->arena.block_pool, &scratch_arena);
   iree_status_t status = iree_ok_status();

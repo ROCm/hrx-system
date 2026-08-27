@@ -45,6 +45,19 @@ iree_status_t loom_bytecode_selected_module_materialize(
     const iree_host_size_t* ordinals, iree_host_size_t ordinal_count,
     loom_module_t** out_module);
 
+// Materializes |ordinals| into a caller-owned output module.
+//
+// The caller may predeclare additional output symbols and resolve references
+// to them through |symbol_resolver|. Only selected symbol headers and root
+// regions are decoded; predeclared symbols remain otherwise untouched. This
+// is the composition boundary used when a semantic projector replaces some
+// source symbols while retaining complete siblings from the same module.
+iree_status_t loom_bytecode_selected_module_materialize_into(
+    const loom_bytecode_selected_module_materializer_t* materializer,
+    const iree_host_size_t* ordinals, iree_host_size_t ordinal_count,
+    loom_bytecode_selected_symbol_resolver_t symbol_resolver,
+    loom_module_t* output_module);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

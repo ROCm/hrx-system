@@ -194,13 +194,29 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    materialization_environment
+  HDRS
+    "materialization_environment.h"
+  DEPS
+    ::module_index
+    iree::base
+    iree::base::internal::arena
+    loom::error::diagnostic
+    loom::format::low_repr
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     plan_materializer
   HDRS
     "plan_materializer.h"
   SRCS
     "plan_materializer.c"
   DEPS
+    ::kernel_config_materializer
     ::linker
+    ::materialization_environment
     ::plan_projection
     ::planner
     iree::base
@@ -221,18 +237,23 @@ loom_cc_library(
   SRCS
     "kernel_config_materializer.c"
   DEPS
-    ::plan_materializer
+    ::materialization_environment
+    ::plan_projection
+    ::planner
     iree::base
     iree::base::internal::arena
     loom::format::bytecode::function_projection_reader
+    loom::format::bytecode::selected_reader
     loom::ir
+    loom::ir::symbol_map
     loom::ops::func
     loom::ops::kernel
     loom::ops::op_defs
-    loom::ops::target
     loom::ops::type_registry
+    loom::rewrite::materialize
     loom::rewrite::remap
     loom::rewrite::rewriter
+    loom::util::adaptive_sort
   PUBLIC
 )
 
@@ -255,6 +276,7 @@ loom_cc_test(
     loom::format::bytecode::writer
     loom::format::text::parser
     loom::ir
+    loom::ops::config
     loom::ops::func
     loom::ops::index
     loom::ops::kernel
@@ -424,8 +446,8 @@ loom_cc_benchmark(
   SRCS
     "kernel_config_materializer_benchmark.cc"
   DEPS
-    ::kernel_config_materializer
     ::module_index
+    ::plan_materializer
     ::planner
     iree::base::internal::arena
     iree::io::stream

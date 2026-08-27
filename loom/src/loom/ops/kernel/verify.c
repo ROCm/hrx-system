@@ -1231,71 +1231,6 @@ iree_status_t loom_kernel_decl_verify(const loom_module_t* module,
       loom_kernel_decl_export_linkage_ATTR_INDEX);
 }
 
-iree_status_t loom_kernel_entry_decl_verify(const loom_module_t* module,
-                                            const loom_op_t* op,
-                                            iree_diagnostic_emitter_t emitter) {
-  (void)module;
-  IREE_RETURN_IF_ERROR(loom_kernel_verify_positive_u32_attr(
-      emitter, op, loom_kernel_entry_decl_workgroup_size_x_ATTR_INDEX,
-      loom_kernel_entry_decl_workgroup_size_x(op),
-      IREE_SV("workgroup_size_x")));
-  IREE_RETURN_IF_ERROR(loom_kernel_verify_positive_u32_attr(
-      emitter, op, loom_kernel_entry_decl_workgroup_size_y_ATTR_INDEX,
-      loom_kernel_entry_decl_workgroup_size_y(op),
-      IREE_SV("workgroup_size_y")));
-  IREE_RETURN_IF_ERROR(loom_kernel_verify_positive_u32_attr(
-      emitter, op, loom_kernel_entry_decl_workgroup_size_z_ATTR_INDEX,
-      loom_kernel_entry_decl_workgroup_size_z(op),
-      IREE_SV("workgroup_size_z")));
-
-  const uint16_t cluster_attr_indices[] = {
-      loom_kernel_entry_decl_workgroup_cluster_size_x_ATTR_INDEX,
-      loom_kernel_entry_decl_workgroup_cluster_size_y_ATTR_INDEX,
-      loom_kernel_entry_decl_workgroup_cluster_size_z_ATTR_INDEX,
-  };
-  const iree_string_view_t cluster_attr_names[] = {
-      IREE_SV("workgroup_cluster_size_x"),
-      IREE_SV("workgroup_cluster_size_y"),
-      IREE_SV("workgroup_cluster_size_z"),
-  };
-  const int64_t cluster_sizes[] = {
-      loom_kernel_entry_decl_workgroup_cluster_size_x(op),
-      loom_kernel_entry_decl_workgroup_cluster_size_y(op),
-      loom_kernel_entry_decl_workgroup_cluster_size_z(op),
-  };
-  uint32_t present_count = 0;
-  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(cluster_attr_indices); ++i) {
-    present_count +=
-        loom_kernel_optional_attr_is_present(op, cluster_attr_indices[i]);
-  }
-  if (present_count != 0 && present_count != 3) {
-    return loom_kernel_emit_integer_field_constraint(
-        emitter, op, IREE_SV("cluster dimension count"), present_count,
-        IREE_SV("zero or three"));
-  }
-  if (present_count == 0) return iree_ok_status();
-
-  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(cluster_attr_indices); ++i) {
-    IREE_RETURN_IF_ERROR(loom_kernel_verify_positive_u32_attr(
-        emitter, op, cluster_attr_indices[i], cluster_sizes[i],
-        cluster_attr_names[i]));
-  }
-  if (cluster_sizes[0] == 1 && cluster_sizes[1] == 1 && cluster_sizes[2] == 1) {
-    return loom_kernel_emit_attribute_value_constraint(
-        emitter, op, IREE_SV("workgroup_cluster_size_x"), cluster_sizes[0],
-        IREE_SV("omitted when the complete cluster shape is 1x1x1"));
-  }
-  const uint64_t cluster_size_xy =
-      (uint64_t)cluster_sizes[0] * (uint64_t)cluster_sizes[1];
-  if (cluster_size_xy > UINT32_MAX ||
-      cluster_sizes[2] > UINT32_MAX / cluster_size_xy) {
-    return loom_kernel_emit_attribute_value_constraint(
-        emitter, op, IREE_SV("workgroup_cluster_size_z"), cluster_sizes[2],
-        IREE_SV("a value whose product with x and y fits u32"));
-  }
-  return iree_ok_status();
-}
-
 static bool loom_kernel_is_indirect_workgroup_count_type(loom_type_t type) {
   return loom_type_is_view(type) && loom_type_rank(type) == 1 &&
          !loom_type_dim_is_dynamic_at(type, 0) &&
@@ -1365,6 +1300,13 @@ iree_status_t loom_kernel_dispatch_verify(const loom_module_t* module,
                                           iree_diagnostic_emitter_t emitter) {
   IREE_RETURN_IF_ERROR(
       loom_kernel_verify_dispatch_workgroup_counts(module, op, emitter));
+  const loom_value_slice_t workgroup_size =
+      loom_kernel_dispatch_workgroup_size(op);
+  if (workgroup_size.count != 0 && workgroup_size.count != 3) {
+    return loom_kernel_emit_integer_field_constraint(
+        emitter, op, IREE_SV("workgroup size operand count"),
+        workgroup_size.count, IREE_SV("zero or three"));
+  }
 
   const loom_symbol_ref_t callee = loom_kernel_dispatch_callee(op);
   const loom_symbol_t* symbol = &module->symbols.entries[callee.symbol_id];

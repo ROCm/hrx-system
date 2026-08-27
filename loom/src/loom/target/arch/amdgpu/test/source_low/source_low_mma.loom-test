@@ -40,10 +40,10 @@ func.def target(@target) @f16_wmmar3_static_k_loop_unroll(%lhs_data: vector<16xf
 
 // ----
 low.func.def target<amdgpu.rdna3.core>(@target) abi(hal_kernel) @f16_wmmar3_static_k_loop_unroll(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x8>) asm {
-  %24 = copy %init : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
-  %next = v_wmma_f32_16x16x16_f16 %lhs, %rhs, %24
-  %26 = copy %next : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
-  %next_1 = v_wmma_f32_16x16x16_f16 %lhs, %rhs, %26
+  %22 = copy %init : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
+  %next = v_wmma_f32_16x16x16_f16 %lhs, %rhs, %22
+  %24 = copy %next : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
+  %next_1 = v_wmma_f32_16x16x16_f16 %lhs, %rhs, %24
   return %next_1
 }
 

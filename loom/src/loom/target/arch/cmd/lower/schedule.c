@@ -61,8 +61,6 @@ typedef struct loom_cmd_schedule_build_t {
   iree_host_size_t command_count;
   // Number of allocated command rows.
   iree_host_size_t command_capacity;
-  // Number of logical kernel launch commands.
-  iree_host_size_t kernel_launch_count;
   // Total number of device-ABI argument values across all commands.
   iree_host_size_t argument_value_count;
   // Allocation definitions accumulated in source traversal order.
@@ -152,30 +150,18 @@ static iree_status_t loom_cmd_schedule_append_command(
   loom_cmd_schedule_command_t command = {
       .source_op = op,
   };
-  if (loom_kernel_launch_isa(op)) {
-    command.callee = loom_kernel_launch_callee(op);
-    command.arguments =
-        loom_cmd_schedule_value_slice(loom_kernel_launch_arguments(op));
-    command.kind = LOOM_CMD_SCHEDULE_COMMAND_KIND_KERNEL_LAUNCH;
-    command.count_inputs.workloads =
-        loom_cmd_schedule_value_slice(loom_kernel_launch_workloads(op));
-    ++build->kernel_launch_count;
-  } else {
-    IREE_ASSERT(loom_kernel_dispatch_isa(op));
-    command.callee = loom_kernel_dispatch_callee(op);
-    command.arguments =
-        loom_cmd_schedule_value_slice(loom_kernel_dispatch_arguments(op));
-    command.count_inputs.workgroup_counts = loom_cmd_schedule_value_slice(
-        loom_kernel_dispatch_workgroup_counts(op));
-    const loom_cmd_schedule_value_slice_t counts =
-        command.count_inputs.workgroup_counts;
-    IREE_ASSERT_GT(counts.count, 0u);
-    const loom_type_t first_count_type =
-        loom_module_value_type(build->module, counts.values[0]);
-    command.kind = loom_type_is_view(first_count_type)
-                       ? LOOM_CMD_SCHEDULE_COMMAND_KIND_KERNEL_DISPATCH_INDIRECT
-                       : LOOM_CMD_SCHEDULE_COMMAND_KIND_KERNEL_DISPATCH_DIRECT;
-  }
+  IREE_ASSERT(loom_kernel_dispatch_isa(op));
+  command.callee = loom_kernel_dispatch_callee(op);
+  command.arguments =
+      loom_cmd_schedule_value_slice(loom_kernel_dispatch_arguments(op));
+  command.workgroup_counts =
+      loom_cmd_schedule_value_slice(loom_kernel_dispatch_workgroup_counts(op));
+  IREE_ASSERT_GT(command.workgroup_counts.count, 0u);
+  const loom_type_t first_count_type =
+      loom_module_value_type(build->module, command.workgroup_counts.values[0]);
+  command.kind = loom_type_is_view(first_count_type)
+                     ? LOOM_CMD_SCHEDULE_COMMAND_KIND_KERNEL_DISPATCH_INDIRECT
+                     : LOOM_CMD_SCHEDULE_COMMAND_KIND_KERNEL_DISPATCH_DIRECT;
   if (!iree_host_size_checked_add(build->argument_value_count,
                                   command.arguments.count,
                                   &build->argument_value_count)) {
@@ -258,9 +244,14 @@ static iree_status_t loom_cmd_schedule_build_commands(
     } else if (loom_kernel_launch_concurrent_isa(op)) {
       child_region = loom_kernel_launch_concurrent_body(op);
       child_mode = LOOM_CMD_SCHEDULE_MODE_CONCURRENT;
-    } else if (loom_kernel_launch_isa(op) || loom_kernel_dispatch_isa(op)) {
+    } else if (loom_kernel_dispatch_isa(op)) {
       IREE_RETURN_IF_ERROR(loom_cmd_schedule_append_command(build, frame, op));
       continue;
+    } else if (loom_kernel_launch_isa(op)) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "logical kernel launch reached command scheduling before "
+          "configuration resolution");
     } else if (loom_buffer_alloca_isa(op)) {
       IREE_RETURN_IF_ERROR(
           loom_cmd_schedule_append_allocation(build, frame, op));
@@ -268,9 +259,8 @@ static iree_status_t loom_cmd_schedule_build_commands(
     } else if (op->region_count == 0 &&
                iree_any_bit_set(loom_op_effective_traits(build->module, op),
                                 LOOM_TRAIT_PURE)) {
-      // Pure leaf dataflow may feed launch workloads but does not itself emit
-      // a command. The launch plan owns any value it contributes to dispatch
-      // metadata.
+      // Pure leaf dataflow may feed dispatch metadata but does not itself emit
+      // a command. Later placement consumes its prepared SSA facts directly.
       continue;
     } else {
       const iree_string_view_t op_name = loom_op_name(build->module, op);
@@ -325,7 +315,6 @@ static iree_status_t loom_cmd_schedule_group_waves(
   *out_plan = (loom_cmd_schedule_plan_t){
       .commands = commands,
       .command_count = build->command_count,
-      .kernel_launch_count = build->kernel_launch_count,
       .argument_value_count = build->argument_value_count,
       .waves = waves,
       .wave_count = wave_count,

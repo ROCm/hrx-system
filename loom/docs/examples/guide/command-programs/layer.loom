@@ -1,8 +1,8 @@
 // The declaration records the exact kernel contract used by this module.
 kernel.decl @project_block(%element_count: index) launch(%weights: view<8xf32>, %input: buffer, %output: buffer)
 
-// The layer must become exact for parameter selection. Element count may
-// remain a residual host value used to evaluate physical launch counts.
+// The layer must become exact for parameter selection. Element count remains a
+// source specialization until the selected command root fixes its launch.
 command.program.def @project_layer(%layer: index, %element_count: index) launch(%parameters: buffer, %input: buffer, %output: buffer) where [range(%layer, 0, 127), range(%element_count, 1, 8)] {
   %weights = command.parameter %parameters, "blk.{}.projection.weight"[%layer] : view<8xf32>
   kernel.launch @project_block[%element_count](%weights, %input, %output) : [index](view<8xf32>, buffer, buffer)

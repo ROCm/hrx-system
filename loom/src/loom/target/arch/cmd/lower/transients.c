@@ -250,8 +250,8 @@ static void loom_cmd_transient_mark_command_uses(
   loom_cmd_transient_mark_value_uses(build, command->arguments, wave_index);
   if (command->kind ==
       LOOM_CMD_SCHEDULE_COMMAND_KIND_KERNEL_DISPATCH_INDIRECT) {
-    loom_cmd_transient_mark_value_uses(
-        build, command->count_inputs.workgroup_counts, wave_index);
+    loom_cmd_transient_mark_value_uses(build, command->workgroup_counts,
+                                       wave_index);
   }
 }
 

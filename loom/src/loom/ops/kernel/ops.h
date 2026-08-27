@@ -1128,25 +1128,16 @@ iree_status_t loom_kernel_decl_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_KERNEL_ENTRY_DECL: Bodyless declaration of an executable kernel entry. The declaration owns the exact target execution geometry and device ABI but has no workload-to-workgroup configuration contract or implementation body.
-// kernel.entry.decl @fill(%count: index, %output: buffer) where [workgroup_size(256, 1, 1)]
+// LOOM_OP_KERNEL_ENTRY_DECL: Bodyless declaration of an executable kernel entry. The declaration owns the device ABI but has no workload-to-workgroup configuration contract, execution geometry, or implementation body.
+// kernel.entry.decl @fill(%count: index, %output: buffer)
 LOOM_DEFINE_ISA(loom_kernel_entry_decl_isa, LOOM_OP_KERNEL_ENTRY_DECL)
 LOOM_DEFINE_VARIADIC_OPERANDS(loom_kernel_entry_decl_args, 0)
 LOOM_DEFINE_ATTR_SYMBOL(loom_kernel_entry_decl_callee, 0)
 LOOM_DEFINE_ATTR_SYMBOL(loom_kernel_entry_decl_target, 1)
-LOOM_DEFINE_ATTR_I64(loom_kernel_entry_decl_workgroup_size_x, 2)
-LOOM_DEFINE_ATTR_I64(loom_kernel_entry_decl_workgroup_size_y, 3)
-LOOM_DEFINE_ATTR_I64(loom_kernel_entry_decl_workgroup_size_z, 4)
-LOOM_DEFINE_ATTR_I64(loom_kernel_entry_decl_workgroup_cluster_size_x, 5)
-LOOM_DEFINE_ATTR_I64(loom_kernel_entry_decl_workgroup_cluster_size_y, 6)
-LOOM_DEFINE_ATTR_I64(loom_kernel_entry_decl_workgroup_cluster_size_z, 7)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_kernel_entry_decl_retain, 8, loom_kernel_retain_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_kernel_entry_decl_retain, 2, loom_kernel_retain_t)
 enum loom_kernel_entry_decl_build_flag_bits_e {
   LOOM_KERNEL_ENTRY_DECL_BUILD_FLAG_HAS_RETAIN = 1u << 0,
   LOOM_KERNEL_ENTRY_DECL_BUILD_FLAG_HAS_TARGET = 1u << 1,
-  LOOM_KERNEL_ENTRY_DECL_BUILD_FLAG_HAS_WORKGROUP_CLUSTER_SIZE_X = 1u << 2,
-  LOOM_KERNEL_ENTRY_DECL_BUILD_FLAG_HAS_WORKGROUP_CLUSTER_SIZE_Y = 1u << 3,
-  LOOM_KERNEL_ENTRY_DECL_BUILD_FLAG_HAS_WORKGROUP_CLUSTER_SIZE_Z = 1u << 4,
 };
 typedef uint32_t loom_kernel_entry_decl_build_flags_t;
 iree_status_t loom_kernel_entry_decl_build(
@@ -1157,17 +1148,8 @@ iree_status_t loom_kernel_entry_decl_build(
     loom_symbol_ref_t callee,
     const loom_type_t* arg_types,
     iree_host_size_t arg_types_count,
-    int64_t workgroup_size_x,
-    int64_t workgroup_size_y,
-    int64_t workgroup_size_z,
-    loom_optional int64_t workgroup_cluster_size_x,
-    loom_optional int64_t workgroup_cluster_size_y,
-    loom_optional int64_t workgroup_cluster_size_z,
     loom_location_id_t location,
     loom_op_t** out_op);
-iree_status_t loom_kernel_entry_decl_verify(
-    const loom_module_t* module, const loom_op_t* op,
-    iree_diagnostic_emitter_t emitter);
 
 // LOOM_OP_KERNEL_LAUNCH: Launch a kernel with explicit workload and device-ABI operands. Workloads configure the launch and never alter the kernel ABI.
 // kernel.launch @fill[%count](%count, %output) : [index](index, buffer)
@@ -1188,11 +1170,12 @@ iree_status_t loom_kernel_launch_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_KERNEL_DISPATCH: Dispatch a configured kernel entry with exact workgroup counts and device-ABI operands. Counts are one to three index values or one dense view<3xi32> for indirect dispatch.
+// LOOM_OP_KERNEL_DISPATCH: Dispatch an executable kernel entry with exact workgroup counts and device-ABI operands. Counts are one to three index values or one dense view<3xi32> for indirect dispatch. An optional XYZ workgroup size overrides the executable entry default for targets supporting dispatch-time workgroup sizes.
 // kernel.dispatch @fill[%count](%count, %output) : [index](index, buffer)
 LOOM_DEFINE_ISA(loom_kernel_dispatch_isa, LOOM_OP_KERNEL_DISPATCH)
 LOOM_DEFINE_SEGMENTED_OPERANDS(loom_kernel_dispatch_workgroup_counts, 0)
 LOOM_DEFINE_SEGMENTED_OPERANDS(loom_kernel_dispatch_arguments, 1)
+LOOM_DEFINE_SEGMENTED_OPERANDS(loom_kernel_dispatch_workgroup_size, 2)
 LOOM_DEFINE_ATTR_SYMBOL(loom_kernel_dispatch_callee, 0)
 iree_status_t loom_kernel_dispatch_build(
     loom_builder_t* builder,
@@ -1201,6 +1184,8 @@ iree_status_t loom_kernel_dispatch_build(
     iree_host_size_t workgroup_counts_count,
     const loom_value_id_t* arguments,
     iree_host_size_t arguments_count,
+    const loom_value_id_t* workgroup_size,
+    iree_host_size_t workgroup_size_count,
     loom_location_id_t location,
     loom_op_t** out_op);
 iree_status_t loom_kernel_dispatch_verify(

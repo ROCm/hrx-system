@@ -47,6 +47,28 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    resolve_launches
+  HDRS
+    "resolve_launches.h"
+  SRCS
+    "resolve_launches.c"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+    loom::analysis::symbol_references
+    loom::error::emitter
+    loom::error::error_defs
+    loom::ir
+    loom::ops::func
+    loom::ops::kernel
+    loom::ops::op_defs
+    loom::rewrite::remap
+    loom::rewrite::rewriter
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     promote_private_fragments
   HDRS
     "promote_private_fragments.h"

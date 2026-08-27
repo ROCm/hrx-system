@@ -255,7 +255,7 @@ func.def @entry() -> (index) {
 TEST_F(SymbolReferencesTest, KernelReferencesRetainDistinctTargetInterfaces) {
   ModulePtr module = ParseModule(R"(
 kernel.decl @logical() launch()
-kernel.entry.decl @configured() where [workgroup_size(1, 1, 1)]
+kernel.entry.decl @configured()
 
 func.def @entry() {
   kernel.launch @logical() : ()

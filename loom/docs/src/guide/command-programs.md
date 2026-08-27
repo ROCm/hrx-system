@@ -36,15 +36,18 @@ The arguments before `launch` specialize the program. The arguments after
 
 | Argument group | Becomes known | What it can control |
 | --- | --- | --- |
-| Specializations | Facts participate during preparation; residual values feed host launch-count evaluation | Exact source control flow and parameter names, residual launch workloads, provider selection, and derived kernel facts. |
+| Specializations | Facts participate during linking and preparation; artifact-affecting scalar uses must resolve before portable lowering | Source control flow, parameter names, provider selection, direct launch counts, and exact scalar kernel arguments. |
 | Buffer roots | Roles are fixed during preparation; storage is bound during materialization or issue | Immutable parameter storage or replaceable invocation storage. |
 
 This distinction is stronger than a conventional kernel argument list.
 Specializations are host-side program inputs, not push constants read by every
 kernel. Their known facts participate in preparation of the complete command
 root. An exact `%layer` can disappear into parameter placement and selected
-branches. A residual `%element_count` can remain as an input to the generated
-host launch-count function without entering the command or device ABI.
+branches. A source root may retain `%element_count` while it remains linkable,
+but preparing a direct dispatch requires its physical count to become exact.
+An issue-time dynamic count instead has an explicit `view<3xi32>` storage
+producer and lowers to indirect dispatch; it never becomes an implicit host
+callback outside the command artifact.
 
 ## Effects are explicit commands
 
@@ -55,31 +58,32 @@ explicit command operations such as `kernel.launch`, `command.program.launch`,
 them is effect-free. Calls used to derive launch workloads therefore carry a
 `pure` contract, just as calls in a kernel launch-configuration region do.
 
-The distinction keeps preparation movable. The compiler can evaluate pure
-shape arithmetic in the host VM, preserve it as residual launch computation,
-or lower it to a device-side producer for indirect dispatch without silently
-moving a memory observation or mutation. A `buffer.alloca` remains valid: it
-declares a fresh command-program storage identity for later scheduling rather
-than reading, writing, or synchronizing external state.
+The distinction keeps preparation movable. The compiler can inline and fold
+pure shape arithmetic at its real caller-owned control-flow site. When a count
+must remain dynamic at issue time, an explicit device-side producer can write
+the indirect dispatch tuple without silently moving a memory observation or
+mutation. A `buffer.alloca` remains valid: it declares a fresh command-program
+storage identity for later scheduling rather than reading, writing, or
+synchronizing external state.
 
 The verifier enforces this at the source operation that violates the contract.
 An opaque ordinary call is rejected inside nested control flow instead of
 surviving until command outlining or schedule materialization.
 
 Schedule topology and parameter identity must be closed after preparation.
-Residual specialization values may feed pure launch-count expressions, but
-they cannot leave an unresolved source branch or a dynamic parameter key in the
-materialized command program.
+Pure launch-count expressions either fold to exact direct counts or terminate
+in explicit indirect-count storage. They cannot leave an unresolved source
+branch, dynamic parameter key, or free scalar result in the materialized
+command program.
 
 The launch-binding group is intentionally buffers only. Preparation classifies
 roots used by `command.parameter` as fixed materialization resources and
-ordinary roots as rebindable issue-time resources. Residual scalar
-specializations are host inputs to launch-count evaluation; they do not
-silently become device push constants. A scalar used by varying device
-arithmetic must live in device-visible storage today, while an exact scalar
-kernel argument may specialize away. The type checker rejects non-buffer
-launch bindings so a caller and a command program cannot silently disagree
-about which ABI carries a value.
+ordinary roots as rebindable issue-time resources. Scalar specializations do
+not silently become host callbacks or device push constants. A scalar used by
+varying device arithmetic must live in device-visible storage, while an exact
+scalar kernel argument may specialize away. The type checker rejects
+non-buffer launch bindings so a caller and a command program cannot silently
+disagree about which ABI carries a value.
 
 !!! note "Workloads and specializations are different"
 
@@ -87,7 +91,38 @@ about which ABI carries a value.
     physical launch without changing its device ABI. A
     `command.program.launch @program[%variant](...)` specialization contributes
     facts to the complete reachable subgraph. Exact facts may change which
-    kernels exist; residual facts may remain in host launch-count evaluation.
+    kernels exist or make direct launch counts exact. Counts that intentionally
+    remain issue-time dynamic use explicit indirect storage.
+
+## Launch configuration stays with its caller
+
+Command preparation does not open a selected kernel implementation. Selective
+linking projects only its logical contract and pure launch-configuration
+facet, then rewrites each workload-level launch at the same caller-owned CFG
+site:
+
+```loom
+%x, %y, %z = func.call pure @project_block$config(%element_count) : (index) -> (index, index, index)
+kernel.dispatch @project_block[%x, %y, %z](%weights, %input, %output) : [index, index, index](view<8xf32>, buffer, buffer)
+```
+
+Ordinary canonicalization, CSE, inlining, and folding optimize those calls
+before schedule construction. Equal calls with equal SSA inputs can collapse;
+calls in different branches or loop iterations retain the control-flow scope
+that gives their values meaning. There is no aggregate result function or
+command-specific memo table.
+
+Exact scalar results become direct dispatch commands. An exact aligned
+`view<3xi32>` rooted in an immutable parameter or command input becomes a
+static indirect dispatch. The same view in transient command storage becomes
+a dynamic indirect dispatch when an earlier execution wave writes it. Any
+other residual count is diagnosed because the portable artifact has no hidden
+place to evaluate or store it.
+
+Each configured entry contributes one atomic executable-entry requirement.
+The embedding may satisfy it with a Loom-compiled executable, a cached object,
+or an externally supplied HIP or SPIR-V entry; command planning neither loads
+the kernel body nor chooses that compilation policy.
 
 ## Turn named parameter content into typed views
 
@@ -109,12 +144,13 @@ source buffer root.
 
 The model composition supplies exact layer constants. A `%layer` value of `12`
 therefore produces the key `blk.12.projection.weight`, while the forwarded
-`%element_count` may remain residual. The `view<8xf32>` result states the exact
-32-byte parameter block available to the kernel. `%element_count` independently
-selects a prefix from one through eight, so the view shape does not create one
-kernel version per active element count. Command lowering can place that content
-in a fixed resource range while `%input` and `%output` remain replaceable
-issue-time bindings.
+`%element_count` remains a source specialization until a selected root fixes
+its launch. The `view<8xf32>` result states the exact 32-byte parameter block
+available to the kernel. `%element_count` independently selects a prefix from
+one through eight, so the view shape does not create one kernel version per
+active element count. Command lowering can place that content in a fixed
+resource range while `%input` and `%output` remain replaceable issue-time
+bindings.
 
 The substitutions must become exact nonnegative indices before the program is
 prepared. The result type must also have an exact byte footprint. These are
@@ -131,10 +167,10 @@ The kernel receives the typed view directly:
 ```
 
 The view is more informative than an opaque pointer plus an offset. Its root,
-byte range, element type, and shape remain available while the dependency
-kernel is derived. The kernel can therefore use the same ordinary view and
-vector operations as a standalone kernel; it has no command-program-specific
-device implementation.
+byte range, element type, and shape remain available while the kernel is
+specialized and compiled independently. The kernel can therefore use the same
+ordinary view and vector operations as a standalone kernel; it has no
+command-program-specific device implementation.
 
 ## Expand model structure from configuration
 
@@ -154,7 +190,9 @@ requires the layer count to resolve, expands the loop into a finite sequence,
 and then sees parameter keys such as `blk.0.projection.weight` and
 `blk.1.projection.weight`. The `%element_count` specialization remains a
 separate value that controls each kernel workload; it is not promoted to
-configuration merely because every layer consumes it.
+configuration merely because every layer consumes it. A host may keep the
+program parameterized in a source archive, but it fixes that value before
+preparing a direct portable command artifact.
 
 ## Compose programs through exact contracts
 
@@ -236,14 +274,14 @@ compiler operations:
 
 1. Selectively link the dependency closure of the requested roots.
 2. Flatten reachable command-program composition.
-3. Specialize source control flow, propagate facts, and retain pure residual
-   launch-count expressions.
-4. Resolve named parameter requirements and explicit schedule waves.
-5. Derive independently compilable kernel units for reachable launch sites.
-6. Share equivalent dependency units across roots and assign dense executable
-   slots.
-7. Lower each root to portable command Low and derive its launch-count
-   function.
+3. Project each referenced kernel's logical contract and pure launch
+   configuration without opening its implementation.
+4. Rewrite launches in caller IR, then specialize, inline, canonicalize, CSE,
+   and unroll the resulting ordinary dataflow.
+5. Resolve named parameters, physical dispatch counts, storage, and explicit
+   schedule waves.
+6. Assign dense slots for distinct executable-entry requirements and lower
+   each closed root to portable command Low.
 
 The dependency kernels retain their ordinary target compilation paths. A
 command root can therefore lower to the portable `cmd.core` target while one
@@ -251,19 +289,19 @@ kernel dependency lowers to AMDGPU ISA and another target configuration lowers
 the same source to SPIR-V. Command composition changes the unit of
 specialization; it does not create a command-only kernel language.
 
-Equivalent launch sites may share one derived kernel unit when they call the
-same kernel and the scalar facts crossing their workloads and device ABI match.
-Different facts produce distinct units when specialization can profit from
-them. This is how one concise program can cover many shapes and variants
-without carrying a hand-maintained dispatch table.
+Equivalent launch sites can share pure configuration computation through
+ordinary CSE when their SSA inputs match. Repeated entry uses also share one
+plan-wide executable-entry requirement while retaining root-local dense slots.
+Kernel specialization and cache policy remain an independent host workflow
+rather than a nested product of command compilation.
 
-The prepared command plan owns three complementary artifacts:
+The prepared command plan owns three complementary products:
 
-| Artifact | Responsibility |
+| Product | Responsibility |
 | --- | --- |
 | Command root | Portable resource bindings, command schedule, and executable slots. |
-| Launch-count function | Host evaluation of the dynamic launch tuples required by that root. |
-| Dependency units | Selectively linked and specialized kernels compiled through their normal targets. |
+| Entry requirements | Atomic executable and entry bindings required by one or more command roots. |
+| Parameter and storage requirements | Fixed parameter placements, rebindable bindings, transients, and any explicit indirect-count storage. |
 
 ## Keep the deployment boundary honest
 
@@ -284,7 +322,8 @@ defined.
 
 | Symptom | Contract to inspect |
 | --- | --- |
-| Source control flow remains in the prepared schedule | Its condition did not specialize to an exact value; only launch-count expressions may remain dynamic. |
+| Source control flow remains in the prepared schedule | Its condition did not specialize to an exact value; portable command topology must be closed. |
+| A direct dispatch count remains dynamic | Specialize it to an exact unsigned 32-bit value or produce an aligned `view<3xi32>` for indirect dispatch. |
 | A launch binding is rejected | The command ABI accepts buffer roots only. |
 | A parameter key cannot be prepared | A `{}` substitution did not become an exact nonnegative index. |
 | A parameter view has unknown storage size | Its type does not provide an exact byte footprint. |

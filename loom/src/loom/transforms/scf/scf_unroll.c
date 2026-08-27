@@ -73,6 +73,14 @@ iree_status_t loom_scf_unroll_create(loom_pass_t* pass,
 
 #define LOOM_SCF_UNROLL_INITIAL_LOOP_CAPACITY 16
 
+static bool loom_scf_unroll_policy_present(loom_op_t* op) {
+  return loom_scf_for_unroll_factor_is_present(op) ||
+         !loom_attr_is_absent(
+             loom_op_attrs(op)[loom_scf_for_unroll_policy_ATTR_INDEX]) ||
+         !loom_attr_is_absent(
+             loom_op_attrs(op)[loom_scf_for_unroll_schedule_ATTR_INDEX]);
+}
+
 typedef struct loom_scf_unroll_loop_list_t {
   // Collected scf.for operations in traversal order.
   loom_op_t** ops;
@@ -87,6 +95,8 @@ typedef struct loom_scf_unroll_collect_context_t {
   iree_arena_allocator_t* arena;
   // Collected scf.for operations.
   loom_scf_unroll_loop_list_t* loops;
+  // True when at least one collected loop requests unrolling.
+  bool has_policy;
 } loom_scf_unroll_collect_context_t;
 
 static iree_status_t loom_scf_unroll_loop_list_initialize(
@@ -118,6 +128,9 @@ static iree_status_t loom_scf_unroll_collect_loop(
   *out_result = LOOM_WALK_CONTINUE;
   if (!loom_scf_for_isa(op)) {
     return iree_ok_status();
+  }
+  if (!collect_context->has_policy) {
+    collect_context->has_policy = loom_scf_unroll_policy_present(op);
   }
   return loom_scf_unroll_loop_list_push(collect_context->arena,
                                         collect_context->loops, op);
@@ -552,14 +565,6 @@ static iree_status_t loom_scf_unroll_emit_trip_count_error(
   return iree_ok_status();
 }
 
-static bool loom_scf_unroll_policy_present(loom_op_t* op) {
-  return loom_scf_for_unroll_factor_is_present(op) ||
-         !loom_attr_is_absent(
-             loom_op_attrs(op)[loom_scf_for_unroll_policy_ATTR_INDEX]) ||
-         !loom_attr_is_absent(
-             loom_op_attrs(op)[loom_scf_for_unroll_schedule_ATTR_INDEX]);
-}
-
 static bool loom_scf_unroll_shape_is_supported(loom_op_t* op,
                                                loom_op_t** out_yield) {
   *out_yield = NULL;
@@ -697,27 +702,46 @@ static iree_status_t loom_scf_unroll_build_index_constant(
   return iree_ok_status();
 }
 
-static iree_status_t loom_scf_unroll_clone_iteration(
-    loom_scf_unroll_context_t* context, const loom_block_t* body_block,
-    loom_op_t* yield, loom_value_id_t iteration_index, uint32_t ordinal,
-    const loom_value_id_t* carried_values, uint16_t carried_count,
-    loom_value_id_t* next_carried_values) {
-  loom_ir_remap_t remap = {0};
-  IREE_RETURN_IF_ERROR(loom_ir_remap_initialize(
-      context->module, context->module, &context->module->arena,
+// Initializes the same-module remap reused by every linear clone of one loop
+// body. Each iteration overwrites the body arguments before cloning, and
+// dominance ensures each cloned result mapping is overwritten before a later
+// body operation can consume it. Keeping one sparse map avoids allocating and
+// initializing an identical map for every materialized iteration.
+static iree_status_t loom_scf_unroll_initialize_iteration_remap(
+    loom_scf_unroll_context_t* context, loom_ir_remap_t* out_remap) {
+  return loom_ir_remap_initialize(
+      context->module, context->module, context->pass->arena,
       &(loom_ir_remap_options_t){
           .allow_unmapped_values = true,
           .remap_symbol = loom_ir_remap_symbol_callback_empty(),
       },
-      &remap));
-  IREE_RETURN_IF_ERROR(
-      loom_ir_remap_map_value(&remap, body_block->arg_ids[0], iteration_index));
+      out_remap);
+}
+
+// Returns true when cloning the loop body must materialize and map |value_id|.
+// Operand and type references are maintained exactly. Attribute references do
+// not have individual use records, so their maintained summary bit is
+// intentionally conservative: a stale bit may retain an index but can never
+// remove one that the cloned body requires.
+static bool loom_scf_unroll_value_has_references(const loom_module_t* module,
+                                                 loom_value_id_t value_id) {
+  const loom_value_t* value = loom_module_value(module, value_id);
+  return !loom_value_has_no_uses(value) ||
+         loom_value_has_attribute_uses(value) ||
+         loom_module_value_has_type_uses(module, value_id);
+}
+
+static iree_status_t loom_scf_unroll_clone_iteration(
+    loom_scf_unroll_context_t* context, loom_ir_remap_t* remap,
+    const loom_block_t* body_block, loom_op_t* yield, uint32_t ordinal,
+    const loom_value_id_t* carried_values, uint16_t carried_count,
+    loom_value_id_t* next_carried_values) {
   for (uint16_t i = 0; i < carried_count; ++i) {
     IREE_RETURN_IF_ERROR(loom_ir_remap_map_value(
-        &remap, body_block->arg_ids[1 + i], carried_values[i]));
+        remap, body_block->arg_ids[1 + i], carried_values[i]));
   }
   IREE_RETURN_IF_ERROR(loom_ir_clone_block_ops(
-      &context->rewriter->builder, body_block, &remap,
+      &context->rewriter->builder, body_block, remap,
       &(loom_ir_clone_block_options_t){.omit_terminators = true}));
 
   if (ordinal > 0 &&
@@ -739,7 +763,7 @@ static iree_status_t loom_scf_unroll_clone_iteration(
         loom_value_id_t source_result = source_results[i];
         if (source_result == LOOM_VALUE_ID_INVALID) continue;
         loom_value_id_t target_result = LOOM_VALUE_ID_INVALID;
-        if (!loom_ir_remap_try_lookup_value(&remap, source_result,
+        if (!loom_ir_remap_try_lookup_value(remap, source_result,
                                             &target_result)) {
           continue;
         }
@@ -754,18 +778,17 @@ static iree_status_t loom_scf_unroll_clone_iteration(
   loom_value_slice_t yielded_values = loom_scf_yield_values(yield);
   for (uint16_t i = 0; i < carried_count; ++i) {
     IREE_RETURN_IF_ERROR(loom_ir_remap_resolve_value(
-        &remap, yielded_values.values[i], &next_carried_values[i]));
+        remap, yielded_values.values[i], &next_carried_values[i]));
   }
   return iree_ok_status();
 }
 
 static iree_status_t loom_scf_unroll_clone_guarded_iteration(
-    loom_scf_unroll_context_t* context, const loom_block_t* body_block,
-    loom_op_t* yield, loom_value_id_t condition,
-    loom_value_id_t iteration_index, uint32_t ordinal,
-    const loom_value_id_t* carried_values, uint16_t carried_count,
-    const loom_type_t* result_types, loom_location_id_t location,
-    loom_value_id_t* next_carried_values) {
+    loom_scf_unroll_context_t* context, loom_ir_remap_t* remap,
+    const loom_block_t* body_block, loom_op_t* yield, loom_value_id_t condition,
+    uint32_t ordinal, const loom_value_id_t* carried_values,
+    uint16_t carried_count, const loom_type_t* result_types,
+    loom_location_id_t location, loom_value_id_t* next_carried_values) {
   loom_op_t* if_op = NULL;
   IREE_RETURN_IF_ERROR(loom_scf_if_build(
       &context->rewriter->builder,
@@ -775,8 +798,8 @@ static iree_status_t loom_scf_unroll_clone_guarded_iteration(
   loom_builder_ip_t saved_ip = loom_builder_enter_region(
       &context->rewriter->builder, if_op, loom_scf_if_then_region(if_op));
   IREE_RETURN_IF_ERROR(loom_scf_unroll_clone_iteration(
-      context, body_block, yield, iteration_index, ordinal, carried_values,
-      carried_count, next_carried_values));
+      context, remap, body_block, yield, ordinal, carried_values, carried_count,
+      next_carried_values));
   loom_op_t* then_yield = NULL;
   IREE_RETURN_IF_ERROR(loom_scf_yield_build(&context->rewriter->builder,
                                             next_carried_values, carried_count,
@@ -1018,32 +1041,45 @@ static iree_status_t loom_scf_unroll_partial_unroll(
     }
   }
 
+  loom_ir_remap_t iteration_remap = {0};
+  IREE_RETURN_IF_ERROR(
+      loom_scf_unroll_initialize_iteration_remap(context, &iteration_remap));
   loom_value_id_t outer_index = loom_block_arg_id(new_block, 0);
   loom_value_id_t source_induction_variable = loom_block_arg_id(old_block, 0);
+  const bool induction_variable_has_references =
+      loom_scf_unroll_value_has_references(context->module,
+                                           source_induction_variable);
   for (uint32_t ordinal = 0; ordinal < unroll_factor; ++ordinal) {
+    const bool guard_iteration =
+        ordinal > 0 &&
+        iree_any_bit_set(flags, LOOM_SCF_UNROLL_PARTIAL_UNROLL_FLAG_GUARD_TAIL);
     loom_value_id_t iteration_index = LOOM_VALUE_ID_INVALID;
-    IREE_RETURN_IF_ERROR(loom_scf_unroll_build_strided_iteration_index(
-        context, source_induction_variable, outer_index, index_type, step,
-        ordinal, op->location, &iteration_index));
-    if (iteration_index == LOOM_VALUE_ID_INVALID) {
-      return loom_scf_unroll_emit_policy_error(
-          context, op, IREE_SV("unroll_factor"), ordinal,
-          IREE_SV("iteration index representable as i64"));
+    if (induction_variable_has_references || guard_iteration) {
+      IREE_RETURN_IF_ERROR(loom_scf_unroll_build_strided_iteration_index(
+          context, source_induction_variable, outer_index, index_type, step,
+          ordinal, op->location, &iteration_index));
+      if (iteration_index == LOOM_VALUE_ID_INVALID) {
+        return loom_scf_unroll_emit_policy_error(
+            context, op, IREE_SV("unroll_factor"), ordinal,
+            IREE_SV("iteration index representable as i64"));
+      }
+    }
+    if (induction_variable_has_references) {
+      IREE_RETURN_IF_ERROR(loom_ir_remap_map_value(
+          &iteration_remap, source_induction_variable, iteration_index));
     }
 
-    if (ordinal > 0 &&
-        iree_any_bit_set(flags,
-                         LOOM_SCF_UNROLL_PARTIAL_UNROLL_FLAG_GUARD_TAIL)) {
+    if (guard_iteration) {
       loom_value_id_t condition = LOOM_VALUE_ID_INVALID;
       IREE_RETURN_IF_ERROR(loom_scf_unroll_build_in_bounds_condition(
           context, op, iteration_index, index_type, &condition));
       IREE_RETURN_IF_ERROR(loom_scf_unroll_clone_guarded_iteration(
-          context, old_block, yield, condition, iteration_index, ordinal,
+          context, &iteration_remap, old_block, yield, condition, ordinal,
           carried_values, op->result_count, result_types, op->location,
           next_carried_values));
     } else {
       IREE_RETURN_IF_ERROR(loom_scf_unroll_clone_iteration(
-          context, old_block, yield, iteration_index, ordinal, carried_values,
+          context, &iteration_remap, old_block, yield, ordinal, carried_values,
           op->result_count, next_carried_values));
     }
 
@@ -2021,10 +2057,6 @@ static iree_status_t loom_scf_unroll_initialize_scheduled_tile(
       &out_tile->effect_dependency_plan));
 
   const loom_value_id_t induction_variable = body_block->arg_ids[0];
-  loom_value_id_t* iteration_indices = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      scratch_arena, out_tile->unroll_count, sizeof(*iteration_indices),
-      (void**)&iteration_indices));
   for (uint32_t ordinal = 0; ordinal < out_tile->unroll_count; ++ordinal) {
     IREE_RETURN_IF_ERROR(loom_ir_remap_initialize(
         context->module, context->module, scratch_arena,
@@ -2033,57 +2065,67 @@ static iree_status_t loom_scf_unroll_initialize_scheduled_tile(
             .remap_symbol = loom_ir_remap_symbol_callback_empty(),
         },
         &out_tile->remaps[ordinal]));
-    IREE_RETURN_IF_ERROR(loom_scf_unroll_build_iteration_index(
-        context, op, induction_variable, trip_count, ordinal,
-        &iteration_indices[ordinal]));
-    if (iteration_indices[ordinal] == LOOM_VALUE_ID_INVALID) {
-      return loom_scf_unroll_emit_policy_error(
-          context, op, IREE_SV("schedule"), ordinal,
-          IREE_SV("iteration index representable as i64"));
-    }
   }
 
-  const loom_value_id_t* remapped_iteration_indices = iteration_indices;
-  // Dynamic partial unrolling replaces the source upper bound with an aligned
-  // main-loop bound. Preserve the source bound on every materialized index so
-  // consumers do not have to reconstruct the split arithmetic.
-  if (iteration_upper_bound != LOOM_VALUE_ID_INVALID) {
-    loom_predicate_t* predicates = NULL;
-    IREE_RETURN_IF_ERROR(
-        iree_arena_allocate_array(scratch_arena, out_tile->unroll_count,
-                                  sizeof(*predicates), (void**)&predicates));
-    loom_type_t* result_types = NULL;
+  if (loom_scf_unroll_value_has_references(context->module,
+                                           induction_variable)) {
+    loom_value_id_t* iteration_indices = NULL;
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        scratch_arena, out_tile->unroll_count, sizeof(*result_types),
-        (void**)&result_types));
+        scratch_arena, out_tile->unroll_count, sizeof(*iteration_indices),
+        (void**)&iteration_indices));
     for (uint32_t ordinal = 0; ordinal < out_tile->unroll_count; ++ordinal) {
-      predicates[ordinal] = (loom_predicate_t){
-          .kind = LOOM_PREDICATE_LT,
-          .arg_count = 2,
-          .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE,
-                       LOOM_PRED_ARG_NONE},
-          .args = {iteration_indices[ordinal], iteration_upper_bound, 0},
-      };
-      result_types[ordinal] =
-          loom_module_value_type(context->module, iteration_indices[ordinal]);
+      IREE_RETURN_IF_ERROR(loom_scf_unroll_build_iteration_index(
+          context, op, induction_variable, trip_count, ordinal,
+          &iteration_indices[ordinal]));
+      if (iteration_indices[ordinal] == LOOM_VALUE_ID_INVALID) {
+        return loom_scf_unroll_emit_policy_error(
+            context, op, IREE_SV("schedule"), ordinal,
+            IREE_SV("iteration index representable as i64"));
+      }
     }
-    loom_op_t* assume_op = NULL;
-    IREE_RETURN_IF_ERROR(loom_index_assume_build(
-        &context->rewriter->builder, iteration_indices, out_tile->unroll_count,
-        predicates, out_tile->unroll_count, result_types,
-        out_tile->unroll_count, op->location, &assume_op));
-    remapped_iteration_indices = loom_index_assume_results(assume_op).values;
+
+    const loom_value_id_t* remapped_iteration_indices = iteration_indices;
+    // Dynamic partial unrolling replaces the source upper bound with an aligned
+    // main-loop bound. Preserve the source bound on every materialized index so
+    // consumers do not have to reconstruct the split arithmetic.
+    if (iteration_upper_bound != LOOM_VALUE_ID_INVALID) {
+      loom_predicate_t* predicates = NULL;
+      IREE_RETURN_IF_ERROR(
+          iree_arena_allocate_array(scratch_arena, out_tile->unroll_count,
+                                    sizeof(*predicates), (void**)&predicates));
+      loom_type_t* result_types = NULL;
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          scratch_arena, out_tile->unroll_count, sizeof(*result_types),
+          (void**)&result_types));
+      for (uint32_t ordinal = 0; ordinal < out_tile->unroll_count; ++ordinal) {
+        predicates[ordinal] = (loom_predicate_t){
+            .kind = LOOM_PREDICATE_LT,
+            .arg_count = 2,
+            .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE,
+                         LOOM_PRED_ARG_NONE},
+            .args = {iteration_indices[ordinal], iteration_upper_bound, 0},
+        };
+        result_types[ordinal] =
+            loom_module_value_type(context->module, iteration_indices[ordinal]);
+      }
+      loom_op_t* assume_op = NULL;
+      IREE_RETURN_IF_ERROR(loom_index_assume_build(
+          &context->rewriter->builder, iteration_indices,
+          out_tile->unroll_count, predicates, out_tile->unroll_count,
+          result_types, out_tile->unroll_count, op->location, &assume_op));
+      remapped_iteration_indices = loom_index_assume_results(assume_op).values;
+      for (uint32_t ordinal = 0; ordinal < out_tile->unroll_count; ++ordinal) {
+        IREE_RETURN_IF_ERROR(loom_rewriter_move_value_name(
+            context->rewriter, iteration_indices[ordinal],
+            remapped_iteration_indices[ordinal]));
+      }
+    }
+
     for (uint32_t ordinal = 0; ordinal < out_tile->unroll_count; ++ordinal) {
-      IREE_RETURN_IF_ERROR(loom_rewriter_move_value_name(
-          context->rewriter, iteration_indices[ordinal],
+      IREE_RETURN_IF_ERROR(loom_ir_remap_map_value(
+          &out_tile->remaps[ordinal], induction_variable,
           remapped_iteration_indices[ordinal]));
     }
-  }
-
-  for (uint32_t ordinal = 0; ordinal < out_tile->unroll_count; ++ordinal) {
-    IREE_RETURN_IF_ERROR(
-        loom_ir_remap_map_value(&out_tile->remaps[ordinal], induction_variable,
-                                remapped_iteration_indices[ordinal]));
   }
   for (uint16_t i = 0; i < carried_count; ++i) {
     IREE_RETURN_IF_ERROR(loom_ir_remap_map_value(&out_tile->remaps[0],
@@ -2912,19 +2954,28 @@ static iree_status_t loom_scf_unroll_try_unroll(
            (iree_host_size_t)op->result_count * sizeof(*carried_values));
   }
 
+  loom_ir_remap_t iteration_remap = {0};
+  IREE_RETURN_IF_ERROR(
+      loom_scf_unroll_initialize_iteration_remap(context, &iteration_remap));
   loom_value_id_t induction_variable = body_block->arg_ids[0];
+  const bool induction_variable_has_references =
+      loom_scf_unroll_value_has_references(context->module, induction_variable);
   for (uint32_t ordinal = 0; ordinal < trip_count.count; ++ordinal) {
-    loom_value_id_t iteration_index = LOOM_VALUE_ID_INVALID;
-    IREE_RETURN_IF_ERROR(loom_scf_unroll_build_iteration_index(
-        context, op, induction_variable, &trip_count, ordinal,
-        &iteration_index));
-    if (iteration_index == LOOM_VALUE_ID_INVALID) {
-      return loom_scf_unroll_emit_policy_error(
-          context, op, IREE_SV("unroll"), ordinal,
-          IREE_SV("iteration index representable as i64"));
+    if (induction_variable_has_references) {
+      loom_value_id_t iteration_index = LOOM_VALUE_ID_INVALID;
+      IREE_RETURN_IF_ERROR(loom_scf_unroll_build_iteration_index(
+          context, op, induction_variable, &trip_count, ordinal,
+          &iteration_index));
+      if (iteration_index == LOOM_VALUE_ID_INVALID) {
+        return loom_scf_unroll_emit_policy_error(
+            context, op, IREE_SV("unroll"), ordinal,
+            IREE_SV("iteration index representable as i64"));
+      }
+      IREE_RETURN_IF_ERROR(loom_ir_remap_map_value(
+          &iteration_remap, induction_variable, iteration_index));
     }
     IREE_RETURN_IF_ERROR(loom_scf_unroll_clone_iteration(
-        context, body_block, yield, iteration_index, ordinal, carried_values,
+        context, &iteration_remap, body_block, yield, ordinal, carried_values,
         op->result_count, next_carried_values));
     if (op->result_count > 0) {
       loom_value_id_t* temporary_values = carried_values;
@@ -2970,6 +3021,18 @@ static iree_status_t loom_scf_unroll_process_function_once(
                          },
                          context->pass->arena, &walk_result));
 
+  // Fact computation is proportional to the entire function. Avoid it when
+  // the terminal convergence iteration has no loops or when all remaining
+  // loops have no unroll policy. Report mode still resolves trip counts for
+  // policy-free loops to explain why they remain structured.
+  if (loops.count == 0 ||
+      (!collect_context.has_policy && !context->reports_enabled)) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(loom_pass_value_facts_acquire(
+      context->pass, context->module,
+      loom_pass_value_fact_scope_function(function), &context->fact_table));
+
   for (iree_host_size_t i = 0;
        i < loops.count && !loom_pass_has_error_diagnostics(context->pass);
        ++i) {
@@ -3009,10 +3072,6 @@ iree_status_t loom_scf_unroll_run(loom_pass_t* pass, loom_module_t* module,
   while (iree_status_is_ok(status) && changed &&
          !loom_pass_has_error_diagnostics(pass)) {
     changed = false;
-    status = loom_pass_value_facts_acquire(
-        pass, module, loom_pass_value_fact_scope_function(function),
-        &context.fact_table);
-    if (!iree_status_is_ok(status)) break;
     status =
         loom_scf_unroll_process_function_once(&context, function, &changed);
     if (changed) {

@@ -54,24 +54,24 @@ command.program.def public @attention_wave() launch(%source: buffer, %target: bu
 
 // ----
 low.func.def public retain target<cmd.core> abi(command_program) abi_layout({entry_count = 2, executable_count = 2, fixed_buffer_count = 0, rebindable_binding_count = 3}) @attention_wave() asm {
-  %0 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
-  %1 = resource<command_input> {index = 1, source_type = buffer} : reg<cmd.binding>
-  %2 = resource<command_input> {index = 2, source_type = buffer} : reg<cmd.binding>
-  %3 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
-  %4 = resource<command_input> {index = 1, source_type = index} : reg<cmd.executable>
-  %5 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
-  %6 = resource<command_input> {index = 1, source_type = index} : reg<cmd.entry>
-  %7 = cmd.constant.u64 0
-  %8 = cmd.constant.u64 -1
-  %9 = cmd.constant.u64 64
-  %10 = cmd.constant.u64 256
-  %11 = cmd.constant.u32 1
-  cmd.dispatch.direct<%3, %5>[%11, %11, %11](%0, %7, %8, %2, %7, %9)
-  cmd.dispatch.direct<%3, %5>[%11, %11, %11](%0, %7, %8, %2, %10, %9)
-  cmd.dispatch.direct<%3, %5>[%11, %11, %11](%0, %7, %8, %2, %9, %9)
-  cmd.dispatch.direct.barrier<%4, %6>[%11, %11, %11](%2, %7, %9, %2, %10, %9, %2, %9, %9, %1, %7, %8)
-  cmd.dispatch.direct.barrier<%3, %5>[%11, %11, %11](%0, %7, %8, %2, %7, %10)
-  cmd.dispatch.direct.barrier<%3, %5>[%11, %11, %11](%2, %7, %10, %1, %7, %8)
+  %49 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %50 = resource<command_input> {index = 1, source_type = buffer} : reg<cmd.binding>
+  %51 = resource<command_input> {index = 2, source_type = buffer} : reg<cmd.binding>
+  %52 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %53 = resource<command_input> {index = 1, source_type = index} : reg<cmd.executable>
+  %54 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %55 = resource<command_input> {index = 1, source_type = index} : reg<cmd.entry>
+  %56 = cmd.constant.u64 0
+  %57 = cmd.constant.u64 -1
+  %58 = cmd.constant.u64 64
+  %59 = cmd.constant.u64 256
+  %60 = cmd.constant.u32 1
+  cmd.dispatch.direct<%52, %54>[%60, %60, %60](%49, %56, %57, %51, %56, %58)
+  cmd.dispatch.direct<%52, %54>[%60, %60, %60](%49, %56, %57, %51, %59, %58)
+  cmd.dispatch.direct<%52, %54>[%60, %60, %60](%49, %56, %57, %51, %58, %58)
+  cmd.dispatch.direct.barrier<%53, %55>[%60, %60, %60](%51, %56, %58, %51, %59, %58, %51, %58, %58, %50, %56, %57)
+  cmd.dispatch.direct.barrier<%52, %54>[%60, %60, %60](%49, %56, %57, %51, %56, %59)
+  cmd.dispatch.direct.barrier<%52, %54>[%60, %60, %60](%51, %56, %59, %50, %56, %57)
   return
 }
 
@@ -103,16 +103,16 @@ command.program.def public @parameterized() launch(%parameters: buffer, %target:
 
 // ----
 low.func.def public retain target<cmd.core> abi(command_program) abi_layout({entry_count = 1, executable_count = 1, fixed_buffer_count = 1, rebindable_binding_count = 1}) @parameterized() asm {
-  %0 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.buffer>
-  %1 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
-  %2 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
-  %3 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
-  %4 = cmd.constant.u64 0
-  %5 = cmd.constant.u64 -1
-  %6 = cmd.constant.u64 12
-  %7 = cmd.constant.u64 256
-  %8 = cmd.constant.u64 16
-  %9 = cmd.constant.u32 1
-  cmd.dispatch.direct<%2, %3>[%9, %9, %9](%0, %4, %6, %0, %7, %8, %1, %4, %5)
+  %18 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.buffer>
+  %19 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %20 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %21 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %22 = cmd.constant.u64 0
+  %23 = cmd.constant.u64 -1
+  %24 = cmd.constant.u64 12
+  %25 = cmd.constant.u64 256
+  %26 = cmd.constant.u64 16
+  %27 = cmd.constant.u32 1
+  cmd.dispatch.direct<%20, %21>[%27, %27, %27](%18, %22, %24, %18, %25, %26, %19, %22, %23)
   return
 }

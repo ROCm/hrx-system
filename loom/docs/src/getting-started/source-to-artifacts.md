@@ -158,8 +158,9 @@ reference](../reference/dialects/kernel/index.md) defines the complete launch,
 execution, collective, and synchronization vocabulary.
 
 The kernel below accepts its element count as a workload and device value,
-derives a one-subgroup workgroup size from the target profile, and applies the
-motif contract without naming either provider:
+uses a portable 64-thread workgroup, and applies the motif contract without
+naming either provider. The target profile still selects the eligible motif
+implementation independently of that launch geometry:
 
 **Source:** [`loom/docs/examples/elementwise-transform/kernel.loom`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/elementwise-transform/kernel.loom)
 
@@ -178,7 +179,7 @@ binding stage.
 | Target facts | Compile invocation | Describe capabilities such as subgroup size, supported types, and resource limits for the selected executable root. |
 | Kernel workload values | Launch-configuration evaluation | Compute the physical launch for one workload without pretending the values were compile-time constants. |
 | Kernel launch arguments | Device issue | Carry scalars and buffers through the selected target ABI into the kernel body. |
-| Command specialization arguments | Command-program specialization | Shape a reusable command artifact and its aggregate launch requirements. |
+| Command specialization arguments | Command-program specialization | Shape source control flow and launch computation; direct counts and scalar command data must become exact before portable preparation. |
 | Command buffer bindings | Command-program issue | Attach concrete parameter, transient, input, and output storage without recompiling the schedule. |
 
 Configuration is not a hidden global flag. A module declares artifact-level
@@ -239,9 +240,11 @@ generation, fixtures, requirements, expectations, and benchmark records.
 A [`command.program.def`](../reference/dialects/command/ops/program-def.md)
 composes kernel launches, parameter views, resources, and serial or concurrent
 schedule regions into a reusable subgraph. Its leading specialization
-arguments participate in staged specialization and launch-count evaluation;
-its buffer bindings remain replaceable when the materialized program is
-issued.
+arguments participate in staged specialization and pure launch-count
+computation; its buffer bindings remain replaceable when the materialized
+program is issued. Exact counts become direct commands, while intentionally
+dynamic counts use an explicit `view<3xi32>` produced before an indirect
+dispatch.
 
 That separation allows one program to specialize around model structure and
 target facts while still accepting different weights, cache storage, inputs,
@@ -249,9 +252,10 @@ and outputs. It is the same idea as a specialized kernel launch, applied to a
 larger ownership boundary rather than hidden behind a separate graph compiler.
 
 The outer module declares the exact kernel dependency and turns one concrete
-1009-element invocation into a reusable command program. The kernel itself
-retains its dynamic workload contract and can be launched with other counts by
-other roots:
+1009-element invocation into a reusable command program. Its portable
+workgroup geometry makes the physical count exact without loading the kernel
+implementation. The kernel itself retains its dynamic workload contract and
+can be launched with other counts by other roots:
 
 **Source:** [`loom/docs/examples/elementwise-transform/model.loom`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/elementwise-transform/model.loom)
 
@@ -303,9 +307,12 @@ is checked-in source.
     ```
 
 The GFX11 tab comes directly from the installed-tool workflow above. The
-command-program tab shows compiler-owned materialization from the same archived
-program. Until command-program materialization has a published installed-tool
-surface, treat that tab as verified compiler output rather than a CLI recipe.
+command-program tab shows body-blind compiler-owned materialization from the
+same archived program: launch configuration is projected as pure caller IR,
+folded to an exact direct count, and lowered while the device implementation
+remains unopened. Until command-program materialization has a published
+installed-tool surface, treat that tab as verified compiler output rather than
+a CLI recipe.
 
 ## Embedding chooses the deployment policy
 

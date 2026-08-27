@@ -4,8 +4,9 @@ Command programs compile reusable, command-buffer-shaped work from the same
 Loom source that defines the kernels they launch. They preserve model-level
 structure long enough for Loom to specialize control flow, share kernel
 dependencies, derive launch counts, plan transient storage, and encode explicit
-concurrency. The result is a target-neutral command artifact accompanied by
-independently compilable kernel units and a pure host launch-count function.
+concurrency. The result is a target-neutral command artifact plus explicit
+executable-entry requirements. Kernel implementations remain independent
+compilation products and are never opened by command planning.
 
 The command compiler is independent of HAL. A materializer maps the portable
 artifact to its command system, such as a HAL command buffer, a CUDA graph, or
@@ -15,11 +16,11 @@ Four boundaries keep the feature composable:
 
 - Source command programs remain open Loom IR. Normal linking,
   specialization, and canonicalization apply before portability is required.
-- The prepared plan is the sole owner of root, launch-count, dependency, and
+- The prepared plan is the sole owner of root, dispatch-count, entry, and
   storage decisions. Later stages consume those indexed results instead of
   reconstructing them from source IR.
-- Command roots, launch-count functions, and kernel units are peer compilation
-  products. No product kind is implicitly primary or nested inside another.
+- Logical launch configuration remains ordinary pure computation in the
+  caller until generic inlining, canonicalization, CSE, and folding have run.
 - The serialized artifact contains logical resources and typed arguments, not
   HAL objects, process addresses, native calling conventions, or target code.
 
@@ -30,9 +31,9 @@ Four boundaries keep the feature composable:
 - Specialization arguments precede `launch`. They are program-invocation
   values whose facts participate in staged specialization. Uses that control
   program topology, allocation, or executable selection must resolve before
-  materialization. Residual values used only by launch arithmetic remain
-  inputs to the aggregate launch-count function, so they can change without
-  rerecording the command program.
+  materialization. Direct dispatch counts and scalar device-ABI arguments must
+  likewise become exact before portable command lowering; values intended to
+  remain dynamic use explicit buffer or view storage.
 - Buffer bindings follow `launch`. They occupy stable slots whose concrete
   buffers may be supplied each time the materialized program is issued.
 
@@ -99,68 +100,73 @@ Preparation accepts one or more selected program roots and constructs one
 owned plan:
 
 ```text
-selected command roots
-          |
-          v
- link their union dependency closure
-          |
-          v
- compose programs and specialize root structure
-          |
-          +-------------------------+--------------------------+
-          |                         |                          |
-          v                         v                          v
- portable Low roots       aggregate launch functions   shared kernel units
-          |                                                    |
-          v                                                    v
- command artifacts                              independent target lowering
+selected command implementation facets
+                 |
+                 v
+ selectively link command code, kernel contracts,
+ and pure launch-configuration facets
+                 |
+                 v
+ replace launches in caller CFG with ordinary calls + dispatches
+                 |
+                 v
+ generic specialization, inlining, CSE, and folding
+                 |
+                 v
+ schedule configured dispatches and lower portable Low roots
+                 |
+                 v
+ command artifacts + executable-entry requirements
 ```
 
-The plan products are peers:
+The plan owns:
 
 - Each selected root owns a symbol-closed `cmd.core` Low function and can be
   serialized into one portable command artifact.
-- Each root has one pure host function returning its unique residual XYZ
-  launch-count tuples.
-- The plan owns a deduplicated set of selectively linked kernel units. Each
-  root references the units it uses through dense dependency indices.
-
-Kernel launch sites share a unit when their linked kernel identity and
-boundary-projected scalar facts match. Prefill, decode, and other roots can
-therefore share compiled kernels without coupling their command artifacts.
-Each unit remains an ordinary target-compilation input and can be lowered or
-retrieved from a caller-owned cache independently.
+- A plan-wide table contains each distinct configured executable-entry
+  declaration. Roots reference that table through dense local slots so an
+  executable object and its entry token are resolved atomically.
+- Parameter, transient, and physical dispatch-count placement is retained as
+  prepared data consumed directly by Low conversion and serialization.
 
 Source preparation requires every scheduled `kernel.launch` to resolve to a
-`kernel.def`: launch-configuration extraction and dependency-unit
-specialization both consume that definition. A bodyless `kernel.decl` is
-diagnosed at this boundary instead of acquiring guessed launch semantics. The
-artifact ABI remains agnostic to executable provenance, so a materializer can
-supply any executable whose entry reflection satisfies the recorded logical
-schema.
+selected launch-configuration facet. Selective materialization reconstructs a
+private `kernel.decl` and pure configuration function without decoding the
+kernel implementation body. A bodyless `kernel.decl` with no configuration is
+diagnosed instead of acquiring guessed launch semantics. An authored
+`kernel.entry.decl` can be dispatched directly when the embedding application
+provides the matching executable entry.
 
 The source module may be released after preparation. The plan owns every
-module, parameter key, requirement table, and dependency mapping reachable
-from its roots.
+module, parameter key, requirement table, and root-local entry mapping
+reachable from its roots.
 
 ## Launch Counts
 
-The compiler inlines the exact launch-configuration regions of all scheduled
-kernels into one pure function per root. Canonicalization and common
-subexpression elimination run across the aggregate function, so equal dynamic
-XYZ tuples produce one result slot regardless of how many dispatches use them.
+Selective linking projects each required kernel launch configuration as an
+ordinary private pure function. Launch resolution replaces `kernel.launch` at
+its caller-owned CFG site with a pure inline call and a `kernel.dispatch` that
+uses the call results. Calls nested only in launch-schedule wrappers move just
+outside the wrapper because schedule regions contain command ordering rather
+than ordinary computation. Calls otherwise stay branch- and loop-local.
 
-Launch counts have two portable placements:
+The normal function pipeline owns canonicalization, CSE, unrolling, inlining,
+and dead-symbol elimination. Equal calls can therefore collapse before command
+scheduling, and exact results become ordinary dispatch facts without a second
+launch evaluator or result-compaction pass.
+
+Configured dispatch counts have three portable placements:
 
 - Exact counts are embedded in a direct dispatch command.
-- Counts derived from residual specialization arguments are returned by the
-  aggregate host function on each program invocation. The caller stores the
-  tuples in one rebindable buffer, and dispatches reference them through static
-  indirect commands. Updating this table does not rerecord the command program.
+- An exact aligned `view<3xi32>` rooted in command inputs or immutable
+  parameters becomes a static indirect dispatch.
+- An exact aligned `view<3xi32>` rooted in transient command storage becomes a
+  dynamic indirect dispatch after a preceding execution wave.
 
-The Low ISA and artifact format also represent dynamic indirect dispatches,
-whose count tuple is produced in buffer storage while the command program is
-executing.
+A residual scalar count is not silently outlined or stored. Portable command
+preparation diagnoses it and requires the caller to specialize it to an exact
+value or represent it through explicit indirect storage. The serialized
+artifact therefore remains independent of invocation-time scalar values.
 
 ## Storage
 
@@ -169,7 +175,7 @@ Command-program buffers have two materialization roles:
 - A fixed root retains the same concrete buffer while the materialized program
   lives. Immutable parameter roots use this role.
 - A rebindable root is a stable issue-time binding slot. Inputs, outputs,
-  transient storage, and host launch-count storage use this role.
+  transient storage, and explicit indirect-count views use this role.
 
 Every operational range is a root index, byte offset, and byte length. A length
 of `UINT64_MAX` denotes the remaining root range. This keeps command artifacts
@@ -259,14 +265,14 @@ The artifact records:
 - operational buffer ranges and logical entry argument schemas;
 - tagless dispatch argument bytes and ordered command records;
 - parameter roots, keys, and concrete placements;
-- transient slab and host launch-count table requirements.
+- transient slab and optional launch-count storage requirements.
 
 ## Ownership Map
 
 | Object | Owns | Borrows |
 | --- | --- | --- |
 | Source module | Authored IR | Nothing |
-| Prepared plan | Root and launch modules, kernel units, root tables, parameter keys | Compiler context and arena block pool |
+| Prepared plan | Root module, entry requirements, root tables, parameter keys | Compiler context and arena block pool |
 | Serialized bytes | Complete portable program | Nothing |
 | Parsed program view | Nothing | Serialized bytes |
 
@@ -280,8 +286,9 @@ valid only while its source byte span remains live.
 | --- | --- |
 | `loom/py/loom/dialect/command/defs.py` | Source operations and canonical text syntax |
 | `loom/src/loom/ops/command/verify.c` | Source-level program, launch, and parameter verification |
+| `loom/src/loom/transforms/kernel/resolve_launches.*` | Caller-owned launch-to-call-and-dispatch rewriting |
 | `loom/src/loom/target/arch/cmd/lower/program_plan.*` | Multi-root ownership and product preparation |
-| `loom/src/loom/target/arch/cmd/lower/launch_graph.*` | Aggregate launch-count factoring |
+| `loom/src/loom/target/arch/cmd/lower/dispatch_counts.*` | Direct and explicit indirect count placement |
 | `loom/src/loom/target/arch/cmd/lower/schedule.*` | Structured schedules and execution waves |
 | `loom/src/loom/target/arch/cmd/lower/parameters.*` | Immutable parameter enumeration and placement |
 | `loom/src/loom/target/arch/cmd/lower/transients.*` | Transient live ranges and slab packing |
@@ -290,8 +297,8 @@ valid only while its source byte span remains live.
 | `loom/src/loom/target/arch/cmd/format.*` | Canonical binary layout |
 | `loom/src/loom/target/arch/cmd/program.*` | Parsed artifact view and typed accessors |
 
-Production-backed `loom-check` emitters expose prepared root programs,
-aggregate launch functions, and independently compilable kernel units in text.
-The `.loom-test` corpus beside this implementation uses those emitters, so its
-expected IR exercises the same preparation and serialization path as an
-embedding application.
+The production-backed `loom-check` emitter exposes prepared root programs in
+text and round-trips each root through command serialization and the untrusted
+artifact parser. The `.loom-test` corpus beside this implementation therefore
+exercises the same preparation and serialization path as an embedding
+application.
