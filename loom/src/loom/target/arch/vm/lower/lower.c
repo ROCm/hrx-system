@@ -11,12 +11,15 @@
 #include "iree/base/internal/math.h"
 #include "loom/error/error_catalog.h"
 #include "loom/ir/module.h"
+#include "loom/ops/func/reference.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/scalar/ops.h"
+#include "loom/ops/type_registry.h"
 #include "loom/target/arch/vm/descriptors.h"
 #include "loom/target/arch/vm/lower/constants.h"
 #include "loom/target/arch/vm/lower/control.h"
+#include "loom/target/arch/vm/lower/types.h"
 
 #define LOOM_VM_SOURCE_LOWERING_LIMITS(max_operand_count, max_result_count) \
   enum {                                                                    \
@@ -158,16 +161,35 @@ static bool loom_vm_try_get_source_constant(
   return true;
 }
 
+static uint16_t loom_vm_source_type_register_class(const loom_module_t* module,
+                                                   loom_type_t source_type) {
+  if (loom_type_is_scalar(source_type)) return VM_CORE_REG_CLASS_ID_VALUE;
+  if (loom_func_ref_type_isa(source_type)) {
+    const loom_type_t signature =
+        loom_func_ref_resolve_signature(module, source_type);
+    return loom_type_is_function(signature)
+               ? VM_CORE_REG_CLASS_ID_FUNCTION
+               : LOOM_LOW_REGISTER_CLASS_ID_INVALID;
+  }
+  const loom_type_descriptor_t* descriptor =
+      loom_type_registry_resolve(module, source_type);
+  return descriptor != NULL && descriptor->semantics.semantic ==
+                                   LOOM_TYPE_SEMANTIC_MANAGED_REFERENCE
+             ? VM_CORE_REG_CLASS_ID_REF
+             : LOOM_LOW_REGISTER_CLASS_ID_INVALID;
+}
+
 static iree_status_t loom_vm_map_type(void* user_data,
                                       loom_low_lower_context_t* context,
                                       const loom_op_t* source_op,
                                       loom_type_t source_type,
                                       loom_type_t* out_low_type) {
   (void)user_data;
-  if (loom_type_is_scalar(source_type)) {
+  const uint16_t register_class = loom_vm_source_type_register_class(
+      loom_low_lower_context_module(context), source_type);
+  if (register_class != LOOM_LOW_REGISTER_CLASS_ID_INVALID) {
     return loom_low_lower_make_typed_register_type(
-        context, VM_CORE_REG_CLASS_ID_VALUE, /*unit_count=*/1, source_type,
-        out_low_type);
+        context, register_class, /*unit_count=*/1, source_type, out_low_type);
   }
   return loom_low_lower_emit_source_type_unsupported(
       context, source_op, IREE_SV("source"), source_type);
@@ -177,8 +199,8 @@ static bool loom_vm_source_type_supported(void* user_data,
                                           const loom_module_t* module,
                                           loom_type_t source_type) {
   (void)user_data;
-  (void)module;
-  return loom_type_is_scalar(source_type);
+  return loom_vm_source_type_register_class(module, source_type) !=
+         LOOM_LOW_REGISTER_CLASS_ID_INVALID;
 }
 
 static iree_status_t loom_vm_select_op(void* user_data,

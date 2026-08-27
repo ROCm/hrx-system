@@ -124,10 +124,12 @@ loom_cc_library(
     loom::error::error_defs
     loom::ir
     loom::ops::cfg
+    loom::ops::func
     loom::ops::index
     loom::ops::low
     loom::ops::op_defs
     loom::ops::scalar
+    loom::ops::type_registry
     loom::target::registers
   PUBLIC
 )
@@ -217,6 +219,7 @@ loom_check_test_suite(
     loom_check_file_test
   SRCS
     "test/source_low/abi_materialization.loom-test"
+    "test/source_low/abi_types.loom-test"
     "test/source_low/control_switch.loom-test"
     "test/source_low/corpus/numeric_scalar_baseline.loom-test"
     "test/source_low/corpus/numeric_scalar_literals.loom-test"
