@@ -461,8 +461,9 @@ def repository_integration_steps(amdgpu_target_selector: str) -> list[CiStep]:
             bazel_options=amdgpu_options,
         ),
         bazel_test_step(
-            "Test Bazel repository integration",
-            ci_config.BAZEL_REPOSITORY_INTEGRATION_TEST_TARGETS,
+            "Test repository",
+            ci_config.BAZEL_REPOSITORY_TEST_TARGETS,
+            test_tag_filters=ci_config.CPU_RESOURCE_TAG_EXCLUDES,
         ),
         CiStep(
             "Test lock-free Bazel launch",

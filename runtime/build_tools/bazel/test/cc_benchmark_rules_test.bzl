@@ -27,7 +27,7 @@ def _expect_path_suffix(env, paths, suffix):
             return
     env.fail("expected one of %s to end with %r" % (paths, suffix))
 
-def _test_runtime_benchmark_binary_adds_runtime_include_root(name, **kwargs):
+def _test_benchmark_runtime_include(name, **kwargs):
     util.helper_target(
         iree_runtime_cc_benchmark,
         name = name + "_subject",
@@ -39,16 +39,16 @@ def _test_runtime_benchmark_binary_adds_runtime_include_root(name, **kwargs):
         attr_values = {
             "timeout": "short",
         },
-        impl = _test_runtime_benchmark_binary_adds_runtime_include_root_impl,
+        impl = _test_benchmark_runtime_include_impl,
         target = name + "_subject",
         **kwargs
     )
 
-def _test_runtime_benchmark_binary_adds_runtime_include_root_impl(env, target):
+def _test_benchmark_runtime_include_impl(env, target):
     paths = _all_compilation_paths(target[CcInfo].compilation_context)
     _expect_path_suffix(env, paths, "runtime/src")
 
-def _test_runtime_benchmark_smoke_test_applies_resource_group_tags(name, **kwargs):
+def _test_benchmark_smoke_resource_tags(name, **kwargs):
     util.helper_target(
         iree_runtime_cc_benchmark,
         name = name + "_subject",
@@ -64,12 +64,12 @@ def _test_runtime_benchmark_smoke_test_applies_resource_group_tags(name, **kwarg
         attr_values = {
             "timeout": "short",
         },
-        impl = _test_runtime_benchmark_smoke_test_applies_resource_group_tags_impl,
+        impl = _test_benchmark_smoke_resource_tags_impl,
         target = name + "_subject_test",
         **kwargs
     )
 
-def _test_runtime_benchmark_smoke_test_applies_resource_group_tags_impl(env, target):
+def _test_benchmark_smoke_resource_tags_impl(env, target):
     tags = target[TestingAspectInfo].attrs.tags
     for expected_tag in [
         "requires-gpu-amd",
@@ -83,7 +83,7 @@ def cc_benchmark_rules_test_suite(name):
     test_suite(
         name = name,
         tests = [
-            _test_runtime_benchmark_binary_adds_runtime_include_root,
-            _test_runtime_benchmark_smoke_test_applies_resource_group_tags,
+            _test_benchmark_runtime_include,
+            _test_benchmark_smoke_resource_tags,
         ],
     )

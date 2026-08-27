@@ -216,7 +216,7 @@ def _test_explicit_roots_replace_direct_exports_impl(env, target):
         "public_kernel_library.loombc",
     )
 
-def _test_kernel_binary_rejects_incompatible_profile_family(name, **kwargs):
+def _test_kernel_binary_profile_mismatch(name, **kwargs):
     subject = name + "_subject"
     util.helper_target(
         loom_kernel_binary,
@@ -228,12 +228,12 @@ def _test_kernel_binary_rejects_incompatible_profile_family(name, **kwargs):
     analysis_test(
         name = name,
         expect_failure = True,
-        impl = _test_kernel_binary_rejects_incompatible_profile_family_impl,
+        impl = _test_kernel_binary_profile_mismatch_impl,
         target = subject,
         **kwargs
     )
 
-def _test_kernel_binary_rejects_incompatible_profile_family_impl(env, target):
+def _test_kernel_binary_profile_mismatch_impl(env, target):
     env.expect.that_target(target).failures().contains_predicate(
         matching.contains(
             "cannot emit a kernel binary for target profile family \"spirv\"",
@@ -405,7 +405,7 @@ def _test_command_binary_explicit_roots_replace_exports_impl(env, target):
         "interface.loombc",
     )
 
-def _test_command_binary_rejects_incompatible_profile_family(name, **kwargs):
+def _test_command_binary_profile_mismatch(name, **kwargs):
     subject = name + "_subject"
     util.helper_target(
         loom_command_binary,
@@ -417,12 +417,12 @@ def _test_command_binary_rejects_incompatible_profile_family(name, **kwargs):
     analysis_test(
         name = name,
         expect_failure = True,
-        impl = _test_command_binary_rejects_incompatible_profile_family_impl,
+        impl = _test_command_binary_profile_mismatch_impl,
         target = subject,
         **kwargs
     )
 
-def _test_command_binary_rejects_incompatible_profile_family_impl(env, target):
+def _test_command_binary_profile_mismatch_impl(env, target):
     env.expect.that_target(target).failures().contains_predicate(
         matching.contains(
             "cannot emit a command binary for target profile family \"spirv\"",
@@ -550,10 +550,10 @@ def loom_binary_rules_test_suite(name):
         tests = [
             _test_command_binary_emits_composite_product,
             _test_command_binary_explicit_roots_replace_exports,
-            _test_command_binary_rejects_incompatible_profile_family,
+            _test_command_binary_profile_mismatch,
             _test_command_binary_sources_are_an_implicit_library,
             _test_explicit_roots_replace_direct_exports,
-            _test_kernel_binary_rejects_incompatible_profile_family,
+            _test_kernel_binary_profile_mismatch,
             _test_kernel_binary_roots_direct_library_exports,
             _test_kernel_binary_sources_are_an_implicit_library,
             _test_vm_binary_emits_vmfb_product,

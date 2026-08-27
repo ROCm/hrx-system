@@ -24,7 +24,7 @@ def _expect_label(env, labels, expected_label):
     if expected_label not in [_label_string(label) for label in labels]:
         env.fail("expected label %r in %r" % (expected_label, labels))
 
-def _test_non_executable_suite_generates_wrapped_test(name, **kwargs):
+def _test_non_executable_suite_wrapper(name, **kwargs):
     iree_runtime_hal_cts_test_suite(
         name = name + "_subject",
         args = ["--cts_fixture_flag=true"],
@@ -45,12 +45,12 @@ def _test_non_executable_suite_generates_wrapped_test(name, **kwargs):
         attr_values = {
             "timeout": "short",
         },
-        impl = _test_non_executable_suite_generates_wrapped_test_impl,
+        impl = _test_non_executable_suite_wrapper_impl,
         target = name + "_subject_core_tests",
         **kwargs
     )
 
-def _test_non_executable_suite_generates_wrapped_test_impl(env, target):
+def _test_non_executable_suite_wrapper_impl(env, target):
     executable_info = target[IreeExecutableInfo]
     env.expect.that_str(executable_info.output.basename).equals(target.label.name)
     env.expect.that_str(_label_string(executable_info.src)).equals(
@@ -66,7 +66,7 @@ def _test_non_executable_suite_generates_wrapped_test_impl(env, target):
     env.expect.that_bool(attrs.local).equals(True)
     env.expect.that_str(attrs.size).equals("medium")
 
-def _test_non_executable_suite_links_base_cts_deps(name, **kwargs):
+def _test_non_executable_suite_deps(name, **kwargs):
     iree_runtime_hal_cts_test_suite(
         name = name + "_subject",
         backends = ":hal_cts_test_backends",
@@ -77,18 +77,18 @@ def _test_non_executable_suite_links_base_cts_deps(name, **kwargs):
         attr_values = {
             "timeout": "short",
         },
-        impl = _test_non_executable_suite_links_base_cts_deps_impl,
+        impl = _test_non_executable_suite_deps_impl,
         target = name + "_subject_core_tests_bin",
         **kwargs
     )
 
-def _test_non_executable_suite_links_base_cts_deps_impl(env, target):
+def _test_non_executable_suite_deps_impl(env, target):
     deps = [dep.label for dep in target[TestingAspectInfo].attrs.deps]
     _expect_label(env, deps, "//runtime/build_tools/bazel/test/hal_cts:hal_cts_test_backends")
     _expect_label(env, deps, "//runtime/src/iree/hal/cts/core:all_tests")
     _expect_label(env, deps, "//runtime/src/iree/hal/cts/util:registry")
 
-def _test_executable_suite_links_prebuilt_testdata(name, **kwargs):
+def _test_executable_suite_testdata(name, **kwargs):
     iree_runtime_hal_cts_test_suite(
         name = name + "_subject",
         backends = ":hal_cts_test_backends",
@@ -100,12 +100,12 @@ def _test_executable_suite_links_prebuilt_testdata(name, **kwargs):
         attr_values = {
             "timeout": "short",
         },
-        impl = _test_executable_suite_links_prebuilt_testdata_impl,
+        impl = _test_executable_suite_testdata_impl,
         target = name + "_subject_dispatch_tests_bin",
         **kwargs
     )
 
-def _test_executable_suite_links_prebuilt_testdata_impl(env, target):
+def _test_executable_suite_testdata_impl(env, target):
     deps = [dep.label for dep in target[TestingAspectInfo].attrs.deps]
     _expect_label(env, deps, "//runtime/build_tools/bazel/test/hal_cts:hal_cts_testdata")
     _expect_label(
@@ -118,8 +118,8 @@ def hal_cts_rules_test_suite(name):
     test_suite(
         name = name,
         tests = [
-            _test_non_executable_suite_generates_wrapped_test,
-            _test_non_executable_suite_links_base_cts_deps,
-            _test_executable_suite_links_prebuilt_testdata,
+            _test_non_executable_suite_wrapper,
+            _test_non_executable_suite_deps,
+            _test_executable_suite_testdata,
         ],
     )

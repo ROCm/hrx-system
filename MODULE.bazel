@@ -9,7 +9,7 @@
 module(
     name = "hrx",
     version = "0.0.0",
-    bazel_compatibility = [">=9.1.0"],
+    bazel_compatibility = [">=9.2.0"],
 )
 
 include("//build_tools/bazel:deps.MODULE.bazel")

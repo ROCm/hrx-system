@@ -219,7 +219,7 @@ class CiTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "repository-wide"):
             ci.steps_from_args(args)
 
-    def test_bazel_repository_integration_exercises_portable_runtime_contracts(self):
+    def test_bazel_repository_integration_exercises_supported_repository_tests(self):
         args = ci.parse_arguments(
             [
                 "iree-bazel-repository-integration",
@@ -241,7 +241,7 @@ class CiTest(unittest.TestCase):
                 "Configure Bazel",
                 "Build repository",
                 "Build AMDGPU device toolchain smoke",
-                "Test Bazel repository integration",
+                "Test repository",
                 "Test lock-free Bazel launch",
                 "Run dynamic library environment smoke",
                 "Run executable alias smoke",
@@ -257,8 +257,11 @@ class CiTest(unittest.TestCase):
             device_build_step.argv,
         )
         integration_test_step = steps[3]
-        for target in ci_config.BAZEL_REPOSITORY_INTEGRATION_TEST_TARGETS:
-            self.assertIn(target, integration_test_step.argv)
+        self.assertEqual(integration_test_step.argv[-1], "//...")
+        self.assertIn(
+            "--test_tag_filters=" + ",".join(ci_config.CPU_RESOURCE_TAG_EXCLUDES),
+            integration_test_step.argv,
+        )
         self.assertEqual(
             steps[5].argv[-1],
             ci_config.BAZEL_REPOSITORY_INTEGRATION_DYNAMIC_LIBRARY_TARGET,

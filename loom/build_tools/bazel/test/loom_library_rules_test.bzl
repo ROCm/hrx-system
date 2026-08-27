@@ -283,18 +283,18 @@ def _test_generated_kernel_binary_is_testonly_impl(env, target):
         if expected_arg not in action.argv:
             env.fail("expected %r in kernel binary arguments %r" % (expected_arg, action.argv))
 
-def _test_execution_profile_consumes_source_and_dependency_module(name, **kwargs):
+def _test_execution_profile_contract(name, **kwargs):
     analysis_test(
         name = name,
         attr_values = {
             "timeout": "short",
         },
-        impl = _test_execution_profile_consumes_source_and_dependency_module_impl,
+        impl = _test_execution_profile_contract_impl,
         target = ":profiled_library_execute_reference_test_launcher",
         **kwargs
     )
 
-def _test_execution_profile_consumes_source_and_dependency_module_impl(env, target):
+def _test_execution_profile_contract_impl(env, target):
     info = target[LoomExecutionTestInfo]
     env.expect.that_str(info.source.basename).equals("profile_cases.loom")
     if len(info.libraries) != 1:
@@ -356,7 +356,7 @@ def loom_library_rules_test_suite(name):
         name = name,
         tests = [
             _test_deps_only_library_propagates_dependencies,
-            _test_execution_profile_consumes_source_and_dependency_module,
+            _test_execution_profile_contract,
             _test_generated_kernel_binary_is_testonly,
             _test_library_keeps_dependency_module_separate,
             _test_redundant_direct_dependency_is_not_transitive,
