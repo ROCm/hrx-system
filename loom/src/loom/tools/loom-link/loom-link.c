@@ -23,6 +23,8 @@
 #include "loom/format/text/printer.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/link/dependency_analysis.h"
+#include "loom/link/dependency_report.h"
 #include "loom/link/index_materializer.h"
 #include "loom/link/module_index.h"
 #include "loom/link/planner.h"
@@ -50,6 +52,20 @@ IREE_FLAG_LIST(string, root,
 IREE_FLAG_LIST(string, library,
                "Library contributing exported exact definitions and template "
                "implementations. Repeat for multiple libraries.");
+IREE_FLAG_LIST_NAMED(
+    string, transitive_library, "transitive-library",
+    "Transitive library available to linking and strict dependency audits, "
+    "but not declared as a direct dependency. Repeat for multiple libraries.");
+IREE_FLAG_NAMED(bool, strict_deps, "strict-deps", false,
+                "Require every exact dependency of merged inputs to be owned "
+                "locally or by a direct --library.");
+IREE_FLAG_NAMED(string, dependency_report, "dependency-report", "",
+                "Write a strict dependency analysis report as JSON. Implies "
+                "--strict-deps.");
+IREE_FLAG_NAMED(
+    string, dependency_component, "dependency-component", "",
+    "Component name used in strict dependency diagnostics and reports. "
+    "Defaults to the first primary input path.");
 IREE_FLAG_LIST(string, config,
                "Compile/link-time config binding. Repeat as "
                "--config=key=value. Bindings specialize each linked analysis "
@@ -90,6 +106,8 @@ typedef struct loom_link_cli_input_t {
   iree_string_view_t filename;
   // Provider role assigned to this input.
   loom_link_provider_role_t role;
+  // True when a library may directly own dependencies of the input component.
+  bool direct_dependency;
   // Detected or forced external input format.
   loom_module_format_t format;
   // File contents kept alive while bytecode metadata borrows from it.
@@ -105,6 +123,13 @@ typedef struct loom_link_cli_input_t {
 typedef struct loom_link_cli_index_t {
   // Provider-backed module index.
   loom_link_module_index_t* module_index;
+  // Library providers declared as direct dependencies.
+  struct {
+    // Allocator-owned provider ordinals in command-line order.
+    iree_host_size_t* values;
+    // Number of provider ordinals in values.
+    iree_host_size_t count;
+  } direct_providers;
 } loom_link_cli_index_t;
 
 typedef struct loom_link_cli_prepare_state_t {
@@ -273,19 +298,21 @@ static void loom_link_cli_index_deinitialize(loom_link_cli_index_t* index,
   if (!index) {
     return;
   }
+  iree_allocator_free(allocator, index->direct_providers.values);
   loom_link_module_index_free(index->module_index);
   *index = (loom_link_cli_index_t){0};
 }
 
 static iree_status_t loom_link_cli_read_input(
     iree_string_view_t path, loom_link_provider_role_t role,
-    loom_module_format_t requested_format, loom_context_t* context,
-    iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
-    loom_link_cli_input_t* out_input) {
+    bool direct_dependency, loom_module_format_t requested_format,
+    loom_context_t* context, iree_arena_block_pool_t* block_pool,
+    iree_allocator_t allocator, loom_link_cli_input_t* out_input) {
   *out_input = (loom_link_cli_input_t){
       .filename =
           loom_tooling_file_path_is_stdio(path) ? IREE_SV("<stdin>") : path,
       .role = role,
+      .direct_dependency = direct_dependency,
   };
 
   IREE_RETURN_IF_ERROR(
@@ -349,10 +376,17 @@ static iree_status_t loom_link_cli_read_inputs(
   *out_input_count = 0;
 
   iree_flag_string_list_t libraries = FLAG_library_list();
+  iree_flag_string_list_t transitive_libraries = FLAG_transitive_library_list();
   const iree_host_size_t primary_count =
-      argc < 2 && libraries.count == 0 ? 1 : (iree_host_size_t)(argc - 1);
+      argc < 2 && libraries.count == 0 && transitive_libraries.count == 0
+          ? 1
+          : (iree_host_size_t)(argc - 1);
   iree_host_size_t input_count = 0;
   if (!iree_host_size_checked_add(primary_count, libraries.count,
+                                  &input_count)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE, "input count overflow");
+  }
+  if (!iree_host_size_checked_add(input_count, transitive_libraries.count,
                                   &input_count)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE, "input count overflow");
   }
@@ -377,6 +411,7 @@ static iree_status_t loom_link_cli_read_inputs(
       break;
     }
     status = loom_link_cli_read_input(path, LOOM_LINK_PROVIDER_ROLE_INPUT,
+                                      /*direct_dependency=*/false,
                                       requested_format, context, block_pool,
                                       allocator, &inputs[input_ordinal++]);
   }
@@ -390,6 +425,21 @@ static iree_status_t loom_link_cli_read_inputs(
       break;
     }
     status = loom_link_cli_read_input(path, LOOM_LINK_PROVIDER_ROLE_LIBRARY,
+                                      /*direct_dependency=*/true,
+                                      requested_format, context, block_pool,
+                                      allocator, &inputs[input_ordinal++]);
+  }
+  for (iree_host_size_t i = 0;
+       i < transitive_libraries.count && iree_status_is_ok(status); ++i) {
+    iree_string_view_t path = transitive_libraries.values[i];
+    if (loom_tooling_file_path_is_stdio(path)) {
+      status = iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "transitive library input requires a filesystem path, not stdin");
+      break;
+    }
+    status = loom_link_cli_read_input(path, LOOM_LINK_PROVIDER_ROLE_LIBRARY,
+                                      /*direct_dependency=*/false,
                                       requested_format, context, block_pool,
                                       allocator, &inputs[input_ordinal++]);
   }
@@ -412,7 +462,21 @@ static iree_status_t loom_link_cli_build_index(
   IREE_RETURN_IF_ERROR(
       loom_link_module_index_allocate(context, block_pool, allocator, &index));
 
+  iree_host_size_t direct_provider_count = 0;
+  for (iree_host_size_t i = 0; i < input_count; ++i) {
+    if (inputs[i].direct_dependency) {
+      ++direct_provider_count;
+    }
+  }
+  iree_host_size_t* direct_provider_ordinals = NULL;
   iree_status_t status = iree_ok_status();
+  if (direct_provider_count != 0) {
+    status = iree_allocator_malloc_array(allocator, direct_provider_count,
+                                         sizeof(*direct_provider_ordinals),
+                                         (void**)&direct_provider_ordinals);
+  }
+
+  iree_host_size_t direct_provider_ordinal = 0;
   for (iree_host_size_t i = 0; i < input_count && iree_status_is_ok(status);
        ++i) {
     loom_link_cli_input_t* input = &inputs[i];
@@ -420,25 +484,102 @@ static iree_status_t loom_link_cli_build_index(
         .provider_name = input->filename,
         .role = input->role,
     };
+    iree_host_size_t provider_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL;
     if (input->materialized_module != NULL) {
       status = loom_link_module_index_add_materialized(
-          index, input->materialized_module, &options,
-          /*out_provider_ordinal=*/NULL);
+          index, input->materialized_module, &options, &provider_ordinal);
     } else {
       loom_bytecode_index_options_t index_options = {
           .diagnostic_sink = {.fn = loom_diagnostic_stderr_sink},
       };
       status = loom_link_module_index_add_bytecode(
           index, input->contents->const_buffer, input->filename, &index_options,
-          &options, /*out_provider_ordinal=*/NULL);
+          &options, &provider_ordinal);
+    }
+    if (iree_status_is_ok(status) && input->direct_dependency) {
+      direct_provider_ordinals[direct_provider_ordinal++] = provider_ordinal;
     }
   }
 
   if (!iree_status_is_ok(status)) {
+    iree_allocator_free(allocator, direct_provider_ordinals);
     loom_link_module_index_free(index);
   } else {
     out_index->module_index = index;
+    out_index->direct_providers.values = direct_provider_ordinals;
+    out_index->direct_providers.count = direct_provider_count;
   }
+  return status;
+}
+
+static iree_status_t loom_link_cli_write_dependency_report(
+    const loom_link_dependency_analysis_t* analysis,
+    iree_string_view_t component_name, iree_string_view_t path,
+    iree_allocator_t allocator) {
+  loom_tooling_output_stream_t output;
+  IREE_RETURN_IF_ERROR(
+      loom_tooling_output_stream_open(path, allocator, &output));
+  iree_status_t status = loom_link_dependency_format_json(
+      analysis, component_name, &output.stream);
+  if (iree_status_is_ok(status)) {
+    status = loom_output_stream_write_char(&output.stream, '\n');
+  }
+  return iree_status_join(status, loom_tooling_output_stream_close(&output));
+}
+
+static iree_status_t loom_link_cli_print_dependency_diagnostics(
+    const loom_link_dependency_analysis_t* analysis,
+    iree_string_view_t component_name) {
+  loom_output_stream_t stream;
+  loom_output_stream_for_file(stderr, &stream);
+  for (iree_host_size_t i = 0; i < analysis->requirements.count; ++i) {
+    const loom_link_dependency_requirement_t* requirement =
+        &analysis->requirements.values[i];
+    if (loom_link_dependency_requirement_satisfied(requirement)) {
+      continue;
+    }
+    IREE_RETURN_IF_ERROR(
+        loom_output_stream_write_cstring(&stream, "loom-link: "));
+    IREE_RETURN_IF_ERROR(loom_output_stream_write(
+        &stream, loom_link_dependency_diagnostic_code(requirement)));
+    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(&stream, ": "));
+    IREE_RETURN_IF_ERROR(loom_link_dependency_format_diagnostic(
+        analysis, requirement, component_name, &stream));
+    IREE_RETURN_IF_ERROR(loom_output_stream_write_char(&stream, '\n'));
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_link_cli_analyze_dependencies(
+    const loom_link_cli_index_t* index, iree_string_view_t component_name,
+    iree_string_view_t report_path, iree_arena_block_pool_t* block_pool,
+    iree_allocator_t allocator, bool* out_succeeded) {
+  *out_succeeded = false;
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(block_pool, &arena);
+  const loom_link_dependency_analysis_options_t options = {
+      .direct_provider_ordinals = index->direct_providers.values,
+      .direct_provider_count = index->direct_providers.count,
+  };
+  loom_link_dependency_analysis_t analysis = {0};
+  iree_status_t status = loom_link_dependency_analyze(
+      index->module_index, &options, block_pool, &arena, allocator, &analysis);
+  bool succeeded = false;
+  if (iree_status_is_ok(status)) {
+    succeeded = loom_link_dependency_analysis_succeeded(&analysis);
+  }
+  if (iree_status_is_ok(status) && !iree_string_view_is_empty(report_path)) {
+    status = loom_link_cli_write_dependency_report(&analysis, component_name,
+                                                   report_path, allocator);
+  }
+  if (iree_status_is_ok(status) && !succeeded) {
+    status =
+        loom_link_cli_print_dependency_diagnostics(&analysis, component_name);
+  }
+  if (iree_status_is_ok(status)) {
+    *out_succeeded = succeeded;
+  }
+  iree_arena_deinitialize(&arena);
   return status;
 }
 
@@ -790,6 +931,9 @@ static void loom_link_cli_print_agents_markdown(FILE* stream) {
       "--print-plan\n"
       "loom-link library.loom --mode=merge --strip-check --to=bc \\\n"
       "  --output=runtime-library.loombc\n"
+      "loom-link component.loom --library=direct.loombc \\\n"
+      "  --transitive-library=indirect.loombc --mode=merge \\\n"
+      "  --dependency-report=component.dependencies.json\n"
       "loom-link root.loom --print-config-schema\n"
       "```\n"
       "\n"
@@ -798,7 +942,9 @@ static void loom_link_cli_print_agents_markdown(FILE* stream) {
       "Positional inputs jointly form the direct source module. A\n"
       "`--library=path` names a separate library. Merge mode leaves library\n"
       "symbols out of the result; link mode may select their exported exact\n"
-      "definitions and template implementations. `--from=auto|text|bc` "
+      "definitions and template implementations. A `--transitive-library` is\n"
+      "equally available to link mode, but does not own a direct dependency\n"
+      "during strict dependency analysis. `--from=auto|text|bc` "
       "controls\n"
       "input decoding and `--to=text|bc` controls output encoding.\n"
       "\n"
@@ -809,6 +955,19 @@ static void loom_link_cli_print_agents_markdown(FILE* stream) {
       "optional `--include-input-exports`, and reachable dependencies.\n"
       "`--strip-check` removes symbols marked as test/benchmark-only from\n"
       "runtime artifacts.\n"
+      "\n"
+      "### Dependency hygiene\n"
+      "\n"
+      "`--strict-deps` checks the exact symbol dependencies authored by the\n"
+      "merged positional inputs before materialization. Each dependency must\n"
+      "be defined locally or exported by a direct `--library`; a compatible\n"
+      "definition found only in a `--transitive-library` is diagnosed as a\n"
+      "missing direct dependency. Open template families may remain "
+      "unresolved\n"
+      "for later specialization. `--dependency-report=path` implies the check\n"
+      "and writes its schema-versioned JSON result even when the check fails.\n"
+      "`--dependency-component=name` supplies external build provenance for\n"
+      "diagnostics and the report without embedding it in Loom IR.\n"
       "\n"
       "### Provider debugging\n"
       "\n"
@@ -847,15 +1006,16 @@ int main(int argc, char** argv) {
       "\n"
       "Input defaults to stdin only when no primary inputs or libraries are "
       "provided. Positional inputs jointly own private definitions; "
-      "--library inputs remain separate in merge mode and contribute exported "
-      "definitions in link mode.\n"
+      "--library and --transitive-library inputs remain separate in merge "
+      "mode and contribute exported definitions in link mode.\n"
       "Merge mode keeps every non-stripped primary-input symbol in stable "
       "input order. Link "
       "mode keeps explicit roots or exported input symbols and their reachable "
       "dependencies.\n"
       "Use --strip-check to remove symbols marked as test/benchmark-only from "
       "runtime artifacts. Use --allow-unresolved to emit a reusable partial "
-      "artifact.\n");
+      "artifact. Use --strict-deps when producing a relocatable library to "
+      "enforce direct dependency ownership before materialization.\n");
   for (int i = 1; i < argc; ++i) {
     if (loom_tooling_cli_is_agents_markdown_arg(argv[i])) {
       loom_link_cli_print_agents_markdown(stdout);
@@ -888,6 +1048,13 @@ int main(int argc, char** argv) {
   loom_link_cli_mode_t cli_mode = LOOM_LINK_CLI_MODE_AUTO;
   loom_link_plan_mode_t plan_mode = LOOM_LINK_PLAN_MERGE;
   const iree_flag_string_list_t roots = FLAG_root_list();
+  const iree_string_view_t dependency_report_path =
+      iree_make_cstring_view(FLAG_dependency_report);
+  const iree_string_view_t requested_dependency_component =
+      iree_make_cstring_view(FLAG_dependency_component);
+  const bool dependency_analysis_requested =
+      FLAG_strict_deps || !iree_string_view_is_empty(dependency_report_path);
+  bool dependency_analysis_succeeded = true;
 
   iree_status_t status = loom_module_format_parse(
       iree_make_cstring_view(FLAG_from), /*allow_auto=*/true, &input_format);
@@ -902,6 +1069,19 @@ int main(int argc, char** argv) {
   if (iree_status_is_ok(status)) {
     status = loom_link_cli_resolve_plan_mode(
         cli_mode, roots, FLAG_include_input_exports, &plan_mode);
+  }
+  if (iree_status_is_ok(status) && dependency_analysis_requested &&
+      plan_mode != LOOM_LINK_PLAN_MERGE) {
+    status = iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "--strict-deps and --dependency-report require merge mode");
+  }
+  if (iree_status_is_ok(status) && !dependency_analysis_requested &&
+      !iree_string_view_is_empty(requested_dependency_component)) {
+    status =
+        iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                         "--dependency-component requires --strict-deps or "
+                         "--dependency-report");
   }
   if (iree_status_is_ok(status) && FLAG_print_config_schema &&
       (FLAG_print_plan || FLAG_list_symbols)) {
@@ -940,7 +1120,22 @@ int main(int argc, char** argv) {
     status = loom_link_cli_build_index(inputs, input_count, &context,
                                        &block_pool, allocator, &link_index);
   }
-  if (iree_status_is_ok(status) && FLAG_list_symbols) {
+  if (iree_status_is_ok(status) && dependency_analysis_requested) {
+    iree_string_view_t component_name = requested_dependency_component;
+    if (iree_string_view_is_empty(component_name)) {
+      for (iree_host_size_t i = 0; i < input_count; ++i) {
+        if (inputs[i].role == LOOM_LINK_PROVIDER_ROLE_INPUT) {
+          component_name = inputs[i].filename;
+          break;
+        }
+      }
+    }
+    status = loom_link_cli_analyze_dependencies(
+        &link_index, component_name, dependency_report_path, &block_pool,
+        allocator, &dependency_analysis_succeeded);
+  }
+  if (iree_status_is_ok(status) && dependency_analysis_succeeded &&
+      FLAG_list_symbols) {
     status = loom_link_cli_print_symbol_list(
         link_index.module_index, iree_make_cstring_view(FLAG_output),
         allocator);
@@ -956,7 +1151,8 @@ int main(int argc, char** argv) {
       .test_symbol_policy = FLAG_strip_check ? LOOM_LINK_PLAN_TEST_SYMBOL_STRIP
                                              : LOOM_LINK_PLAN_TEST_SYMBOL_KEEP,
   };
-  if (iree_status_is_ok(status) && !FLAG_list_symbols) {
+  if (iree_status_is_ok(status) && dependency_analysis_succeeded &&
+      !FLAG_list_symbols) {
     loom_target_low_descriptor_registry_t low_registry = {0};
     status = loom_target_environment_initialize_low_descriptor_registry(
         loom_configured_target_environment(), &low_registry);
@@ -984,7 +1180,8 @@ int main(int argc, char** argv) {
                                            IREE_SV("linked"), &materialization);
     }
   }
-  if (iree_status_is_ok(status) && FLAG_print_plan) {
+  if (iree_status_is_ok(status) && dependency_analysis_succeeded &&
+      FLAG_print_plan) {
     status = loom_link_cli_print_plan(materialization.plan, plan_mode,
                                       iree_make_cstring_view(FLAG_output),
                                       allocator);
@@ -1018,6 +1215,8 @@ int main(int argc, char** argv) {
   if (!iree_status_is_ok(status)) {
     iree_status_fprint(stderr, status);
     iree_status_free(status);
+    exit_code = 1;
+  } else if (!dependency_analysis_succeeded) {
     exit_code = 1;
   }
 

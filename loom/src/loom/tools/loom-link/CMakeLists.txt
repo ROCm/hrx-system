@@ -27,6 +27,8 @@ loom_cc_binary(
     loom::format::text::parser
     loom::format::text::printer
     loom::ir
+    loom::link::dependency_analysis
+    loom::link::dependency_report
     loom::link::index_materializer
     loom::link::module_index
     loom::link::planner
@@ -50,6 +52,9 @@ iree_execution_test_suite(
     "loom-format=loom::tools::loom-format"
     "loom-link=::loom-link"
   DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-link/testdata/dependency_component.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-link/testdata/dependency_direct.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-link/testdata/dependency_transitive.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-link/testdata/merge_inline_kernel_helper.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-link/testdata/merge_many_symbols.loom"
   LABELS

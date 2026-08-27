@@ -12,6 +12,9 @@
           "unordered": [
             "## loom-link",
             "--library=providers.loombc",
+            "--transitive-library=indirect.loombc",
+            "--strict-deps",
+            "--dependency-report=component.dependencies.json",
             "--root=@entry",
             "--print-plan",
             "--list-symbols",
@@ -53,6 +56,138 @@
           "kernel.def @subgroup_broadcast_kernel"
         ]
       }
+    },
+    {
+      "name": "checks direct dependencies before merging a library",
+      "steps": [
+        {
+          "name": "accept-direct-dependencies",
+          "run": {
+            "tool": "loom-link",
+            "args": [
+              "{srcdir}/testdata/dependency_component.loom",
+              "--library={srcdir}/testdata/dependency_direct.loom",
+              "--library={srcdir}/testdata/dependency_transitive.loom",
+              "--mode=merge",
+              "--strict-deps",
+              "--dependency-component=//model:component",
+              "--dependency-report={tmp}/direct.json",
+              "--to=bc",
+              "--output={tmp}/direct.loombc"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/direct.loombc",
+              "non_empty": true
+            },
+            {
+              "path": "{tmp}/direct.json",
+              "contains": [
+                "\"component\":\"//model:component\"",
+                "\"succeeded\":true",
+                "\"direct_dependencies\":2",
+                "\"dependency\":\"direct\""
+              ]
+            }
+          ]
+        },
+        {
+          "name": "reject-transitive-dependency",
+          "run": {
+            "tool": "loom-link",
+            "args": [
+              "{srcdir}/testdata/dependency_component.loom",
+              "--library={srcdir}/testdata/dependency_direct.loom",
+              "--transitive-library={srcdir}/testdata/dependency_transitive.loom",
+              "--mode=merge",
+              "--dependency-component=//model:component",
+              "--dependency-report={tmp}/transitive.json",
+              "--to=bc",
+              "--output={tmp}/transitive.loombc"
+            ]
+          },
+          "exit": {
+            "nonzero": true
+          },
+          "stderr": {
+            "contains": [
+              "LINK/DEPENDENCY/MISSING_DIRECT",
+              "@entry requires @transitive",
+              "no direct dependency of //model:component"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/transitive.loombc",
+              "exists": false
+            },
+            {
+              "path": "{tmp}/transitive.json",
+              "contains": [
+                "\"succeeded\":false",
+                "\"dependency\":\"missing_direct\"",
+                "\"origin\":\"transitive\""
+              ]
+            }
+          ]
+        },
+        {
+          "name": "encode-component",
+          "run": {
+            "tool": "loom-format",
+            "args": [
+              "--to=bc",
+              "--output={tmp}/component.loombc",
+              "{srcdir}/testdata/dependency_component.loom"
+            ]
+          }
+        },
+        {
+          "name": "encode-direct-library",
+          "run": {
+            "tool": "loom-format",
+            "args": [
+              "--to=bc",
+              "--output={tmp}/dependency-direct.loombc",
+              "{srcdir}/testdata/dependency_direct.loom"
+            ]
+          }
+        },
+        {
+          "name": "encode-transitive-library",
+          "run": {
+            "tool": "loom-format",
+            "args": [
+              "--to=bc",
+              "--output={tmp}/dependency-transitive.loombc",
+              "{srcdir}/testdata/dependency_transitive.loom"
+            ]
+          }
+        },
+        {
+          "name": "reject-transitive-bytecode-dependency",
+          "run": {
+            "tool": "loom-link",
+            "args": [
+              "{tmp}/component.loombc",
+              "--library={tmp}/dependency-direct.loombc",
+              "--transitive-library={tmp}/dependency-transitive.loombc",
+              "--mode=merge",
+              "--strict-deps"
+            ]
+          },
+          "exit": {
+            "nonzero": true
+          },
+          "stderr": {
+            "contains": [
+              "LINK/DEPENDENCY/MISSING_DIRECT",
+              "@entry requires @transitive"
+            ]
+          }
+        }
+      ]
     },
     {
       "name": "links import-free declarations in merge mode",

@@ -24,6 +24,8 @@ loom_cc_binary(
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/format/text:printer",
         "//loom/src/loom/ir",
+        "//loom/src/loom/link:dependency_analysis",
+        "//loom/src/loom/link:dependency_report",
         "//loom/src/loom/link:index_materializer",
         "//loom/src/loom/link:module_index",
         "//loom/src/loom/link:planner",
@@ -47,6 +49,9 @@ loom_cc_binary(
 iree_execution_test_suite(
     name = "execution_test",
     data = [
+        "testdata/dependency_component.loom",
+        "testdata/dependency_direct.loom",
+        "testdata/dependency_transitive.loom",
         "testdata/merge_inline_kernel_helper.loom",
         "testdata/merge_many_symbols.loom",
     ],
