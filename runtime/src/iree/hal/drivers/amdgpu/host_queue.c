@@ -787,10 +787,22 @@ static int iree_hal_amdgpu_host_queue_completion_thread_main(void* entry_arg) {
   return 0;
 }
 
-// HSA queue error callback. Called by the HSA runtime (on an internal thread)
-// when the queue encounters an unrecoverable error (page fault, invalid AQL
-// packet, ECC error). Stores the error atomically on the queue so the
-// completion drain path can fail pending semaphores with the actual GPU error.
+// HSA queue error callback, invoked by the HSA runtime on an internal thread
+// when this queue takes an unrecoverable error: an invalid or unsupported AQL
+// packet, an illegal instruction, a wave exception, a memory aperture
+// violation, exhausted scratch or registers, or a device-level fault such as
+// ECC.
+//
+// A plain VM memory fault does not arrive here. The runtime installs one of two
+// queue handlers depending on whether the kernel driver reports support for
+// exception debugging: the one it installs with support recognizes a wave
+// memory violation, stamps the queue and hands the fault to its process-wide VM
+// fault path without calling back here, and the one it installs without support
+// carries no memory-fault code in its mapping at all. Either way the fault is
+// delivered to the process-wide system event handlers, which is where this
+// driver observes it - see system_event.c. Both callbacks can fail the same
+// queue, so both converge on the same terminal transition and handling must
+// stay idempotent.
 static void iree_hal_amdgpu_host_queue_error_callback(hsa_status_t status,
                                                       hsa_queue_t* source,
                                                       void* data) {

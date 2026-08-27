@@ -88,6 +88,17 @@ static void iree_hal_amdgpu_system_event_initialize(void) {
       iree_memory_order_relaxed);
 }
 
+// Returns the GPU agent an event blames, for the event types this driver
+// converts into device failures.
+//
+// HSA_AMD_GPU_MEMORY_ERROR_EVENT is deliberately not one of them. It is not a
+// GPU fault: the runtime raises it synchronously on the thread inside a memory
+// pool free, its agent is the owner of the pool being freed rather than a
+// faulting device, and claiming it makes that free return an error with the
+// allocation record already purged - converting the runtime's abort into a
+// permanent leak plus an allocator whose bookkeeping no longer matches reality.
+// Leaving it unclaimed keeps the abort, which is the defensible outcome for an
+// inconsistent allocator.
 static bool iree_hal_amdgpu_system_event_agent(const hsa_amd_event_t* event,
                                                hsa_agent_t* out_agent) {
   *out_agent = (hsa_agent_t){0};
@@ -97,9 +108,6 @@ static bool iree_hal_amdgpu_system_event_agent(const hsa_amd_event_t* event,
       return true;
     case HSA_AMD_GPU_HW_EXCEPTION_EVENT:
       *out_agent = event->hw_exception.agent;
-      return true;
-    case HSA_AMD_GPU_MEMORY_ERROR_EVENT:
-      *out_agent = event->memory_error.agent;
       return true;
     default:
       return false;
@@ -123,13 +131,6 @@ static iree_status_t iree_hal_amdgpu_system_event_make_status(
           ", cause 0x%08" PRIx32 ")",
           (uint32_t)event->hw_exception.reset_type,
           (uint32_t)event->hw_exception.reset_cause);
-    case HSA_AMD_GPU_MEMORY_ERROR_EVENT:
-      return iree_make_status(
-          IREE_STATUS_ABORTED,
-          "AMDGPU memory error at device address 0x%016" PRIx64
-          " (reason mask 0x%08" PRIx32 ")",
-          event->memory_error.virtual_address,
-          event->memory_error.error_reason_mask);
     default:
       return iree_make_status(IREE_STATUS_ABORTED,
                               "unrecognized AMDGPU system event");

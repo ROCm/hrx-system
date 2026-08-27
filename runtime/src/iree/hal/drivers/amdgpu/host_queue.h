@@ -179,10 +179,15 @@ typedef struct iree_hal_amdgpu_host_queue_t {
   // Allocator used for host-side queue resources.
   iree_allocator_t host_allocator;
 
-  // Sticky error status from the HSA queue error callback. Non-zero indicates
-  // an unrecoverable GPU fault (page fault, invalid packet, ECC error).
-  // First-error-wins CAS from the HSA runtime thread; acquire-loaded by the
-  // completion drain path to fail pending semaphores instead of signaling.
+  // Sticky terminal failure for this queue. Non-zero means the queue will never
+  // make progress again: an unrecoverable GPU error, or an HSA wait that
+  // returned a result the queue cannot act on.
+  //
+  // Written through iree_hal_amdgpu_host_queue_record_failure by any of the HSA
+  // queue error callback, the process-wide HSA system event callback, and this
+  // driver's own wait paths, so writers are not restricted to HSA runtime
+  // threads. First-error-wins CAS; acquire-loaded by the completion drain path
+  // to fail pending semaphores instead of signaling them.
   //
   // Owned by the queue. Deinitialization takes the status out of the slot in
   // the same step that frees it, so a non-zero slot always names a live status
@@ -265,10 +270,12 @@ typedef struct iree_hal_amdgpu_host_queue_t {
   //     the serialized drain; direct host waiters do not. Never writes to
   //     submission-path fields.
   //
-  //   HSA error callback (HSA runtime thread):
-  //     Writes error_status via atomic CAS. Signals
-  //     completion.stop_signal so the completion thread wakes and fails
-  //     outstanding notifications.
+  //   Terminal failure (any thread that can prove the queue is initialized):
+  //     Writes error_status via atomic CAS and signals completion.stop_signal
+  //     so the completion thread wakes, closes admission and fails outstanding
+  //     notifications. Reached from the queue's own HSA error callback, from
+  //     the process-wide HSA system event callback, and from this driver's own
+  //     wait paths, so the writer is not always an HSA runtime thread.
   //
   // Wait-resolution fast-path contract:
   //   - Same-queue signal-before-wait is elided directly from the semaphore's

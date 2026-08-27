@@ -26,7 +26,10 @@ typedef struct iree_hal_amdgpu_logical_device_t
 // exceptions - to a process-global list of callbacks rather than to the queue
 // that faulted. A registration binds one logical device's GPU agents to that
 // callback so a fault on any of them becomes a durable failure observable
-// through normal HAL operations.
+// through normal HAL operations. Both event types are one-shot per runtime
+// instance and both are claimed here. This callback and a queue's own HSA error
+// callback can fail the same queue, so both converge on the same terminal queue
+// transition, which is idempotent.
 //
 // Limits the HSA runtime imposes that no amount of code here can escape:
 //
