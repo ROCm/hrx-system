@@ -33,6 +33,16 @@ iree_c_embed_data(
 )
 
 iree_c_embed_data(
+    name = "dependency_analysis",
+    testonly = True,
+    srcs = glob(["dependency_analysis/*.loom"]),
+    c_file_output = "dependency_analysis_testdata.c",
+    flatten = True,
+    h_file_output = "dependency_analysis_testdata.h",
+    identifier = "loom_link_dependency_analysis_testdata",
+)
+
+iree_c_embed_data(
     name = "planner",
     testonly = True,
     srcs = glob(["planner/*.loom"]),

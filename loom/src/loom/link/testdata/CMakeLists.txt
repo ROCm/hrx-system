@@ -43,6 +43,23 @@ iree_c_embed_data(
   PUBLIC
 )
 
+file(GLOB _GLOB_DEPENDENCY_ANALYSIS_X_LOOM LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS dependency_analysis/*.loom)
+iree_c_embed_data(
+  NAME
+    dependency_analysis
+  SRCS
+    "${_GLOB_DEPENDENCY_ANALYSIS_X_LOOM}"
+  C_FILE_OUTPUT
+    "dependency_analysis_testdata.c"
+  H_FILE_OUTPUT
+    "dependency_analysis_testdata.h"
+  IDENTIFIER
+    "loom_link_dependency_analysis_testdata"
+  TESTONLY
+  FLATTEN
+  PUBLIC
+)
+
 file(GLOB _GLOB_PLANNER_X_LOOM LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS planner/*.loom)
 iree_c_embed_data(
   NAME

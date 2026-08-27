@@ -99,6 +99,43 @@ loom_cc_test(
 
 loom_cc_library(
   NAME
+    dependency_analysis
+  HDRS
+    "dependency_analysis.h"
+  SRCS
+    "dependency_analysis.c"
+  DEPS
+    ::func_contract
+    ::func_contract_projection
+    ::module_index
+    iree::base
+    iree::base::internal::arena
+    loom::rewrite::remap
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    dependency_analysis_test
+  SRCS
+    "dependency_analysis_test.cc"
+  DEPS
+    ::dependency_analysis
+    ::module_index
+    iree::base
+    iree::base::internal::arena
+    iree::io::stream
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::format::bytecode::writer
+    loom::format::text::parser
+    loom::ir
+    loom::link::testdata::dependency_analysis
+    loom::ops::op_registry
+)
+
+loom_cc_library(
+  NAME
     linker
   HDRS
     "linker.h"

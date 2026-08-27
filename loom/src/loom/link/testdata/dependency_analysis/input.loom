@@ -1,0 +1,35 @@
+func.decl @direct(%x: i32) -> (i32)
+
+func.decl @transitive(%x: i32) -> (i32)
+
+func.decl public @reexported(%x: i32) -> (i32)
+
+func.decl @bad(%x: i32) -> (i32)
+
+func.decl @missing(%x: i32) -> (i32)
+
+func.decl @private_only(%x: i32) -> (i32)
+
+func.decl @local(%x: i32) -> (i32)
+
+func.decl public @export_only(%x: i32) -> (i32)
+
+template.decl @family.direct(%x: i32) -> (i32)
+
+template.decl @family.transitive(%x: i32) -> (i32)
+
+template.decl @family.open(%x: i32) -> (i32)
+
+func.def public @entry(%x: i32) -> (i32) {
+  %direct = func.call @direct(%x) : (i32) -> (i32)
+  %transitive = func.call @transitive(%direct) : (i32) -> (i32)
+  %reexported = func.call @reexported(%transitive) : (i32) -> (i32)
+  %bad = func.call @bad(%reexported) : (i32) -> (i32)
+  %missing = func.call @missing(%bad) : (i32) -> (i32)
+  %private = func.call @private_only(%missing) : (i32) -> (i32)
+  %local = func.call @local(%private) : (i32) -> (i32)
+  %direct_template = template.apply<@family.direct>(%local) : (i32) -> (i32)
+  %transitive_template = template.apply<@family.transitive>(%direct_template) : (i32) -> (i32)
+  %open_template = template.apply<@family.open>(%transitive_template) : (i32) -> (i32)
+  func.return %open_template : i32
+}

@@ -90,6 +90,39 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "dependency_analysis",
+    srcs = ["dependency_analysis.c"],
+    hdrs = ["dependency_analysis.h"],
+    deps = [
+        ":func_contract",
+        ":func_contract_projection",
+        ":module_index",
+        "//loom/src/loom/rewrite:remap",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "dependency_analysis_test",
+    srcs = ["dependency_analysis_test.cc"],
+    deps = [
+        ":dependency_analysis",
+        ":module_index",
+        "//loom/src/loom/format/bytecode:writer",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/link/testdata:dependency_analysis",
+        "//loom/src/loom/ops:op_registry",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:stream",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "linker",
     srcs = ["linker.c"],
     hdrs = ["linker.h"],
