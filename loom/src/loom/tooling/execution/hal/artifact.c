@@ -23,6 +23,30 @@ iree_status_t loom_run_hal_artifact_provider_select_compatible_device_target(
       provider, runtime, target_requirement, allocator, out_target);
 }
 
+iree_status_t loom_run_hal_artifact_provider_select_target_key(
+    const loom_run_hal_artifact_provider_t* provider,
+    iree_string_view_t target_key, iree_allocator_t allocator,
+    loom_run_hal_device_target_t* out_target) {
+  IREE_ASSERT_ARGUMENT(provider);
+  IREE_ASSERT_ARGUMENT(out_target);
+  *out_target = (loom_run_hal_device_target_t){0};
+
+  target_key = iree_string_view_trim(target_key);
+  if (iree_string_view_is_empty(target_key)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "offline target key must not be empty");
+  }
+  if (provider->select_target_key == NULL) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "HAL artifact provider '%.*s' does not support explicit offline "
+        "target specialization",
+        (int)provider->name.size, provider->name.data);
+  }
+  return provider->select_target_key(provider, target_key, allocator,
+                                     out_target);
+}
+
 void loom_run_hal_artifact_provider_registry_initialize_from_entries(
     const loom_run_hal_artifact_provider_t* const* providers,
     iree_host_size_t provider_count,

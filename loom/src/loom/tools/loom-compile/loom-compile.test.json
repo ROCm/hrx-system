@@ -293,6 +293,29 @@
       ]
     },
     {
+      "name": "target specialization precedes rooted template selection",
+      "run": {
+        "tool": "loom-compile",
+        "args": [
+          "{srcdir}/../loom-link/testdata/target_profile_template_selection.loom",
+          "--root=@target_profile_entry",
+          "--backend=amdgpu-hal",
+          "--target=gfx11-generic",
+          "--output={tmp}/target_profile.hsaco",
+          "--dump-ir-after=select-templates",
+          "--dump-ir-format=jsonl",
+          "--dump-ir-output=stderr"
+        ]
+      },
+      "stderr": {
+        "contains": [
+          "template.call @wave32_target_profile_transform",
+          "amdgpu.target<gfx11-generic> @__loom_target_context_0_0"
+        ],
+        "not_contains": ["portable_target_profile_transform"]
+      }
+    },
+    {
       "name": "rooted compile retains template provider",
       "steps": [
         {

@@ -169,6 +169,7 @@ loom_cc_library(
         ":specialization",
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],

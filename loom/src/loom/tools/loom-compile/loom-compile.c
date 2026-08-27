@@ -22,6 +22,7 @@
 #include "loom/target/arch/cmd/artifact_set.h"
 #include "loom/target/arch/cmd/provider.h"
 #include "loom/target/entry_selection.h"
+#include "loom/target/module_specialization.h"
 #include "loom/target/reporting/artifact_manifest.h"
 #include "loom/tooling/cli/help.h"
 #include "loom/tooling/compile/pipeline.h"
@@ -550,55 +551,10 @@ static iree_status_t loom_compile_artifact_manifest_options_initialize(
 static iree_status_t loom_compile_run_pass_pipeline(
     const loom_run_execution_environment_t* environment,
     loom_run_session_t* session, loom_run_module_t* run_module,
-    const loom_run_hal_device_target_t* hal_target,
     loom_compile_default_pipeline_t default_pipeline,
     const loom_run_candidate_compile_options_t* compile_options,
     const loom_pass_trace_options_t* trace_options,
     loom_compile_pipeline_result_t* out_result) {
-  iree_arena_allocator_t specialization_arena;
-  iree_arena_initialize(loom_run_session_block_pool(session),
-                        &specialization_arena);
-  loom_target_specialization_request_list_t target_specializations = {0};
-  if (hal_target != NULL) {
-    iree_host_size_t specialization_count = 0;
-    loom_op_t* op = NULL;
-    loom_block_for_each_op(loom_module_block(run_module->module), op) {
-      if (loom_func_like_is_kernel_entry(
-              loom_func_like_cast(run_module->module, op))) {
-        ++specialization_count;
-      }
-    }
-    loom_target_specialization_request_t* specialization_requests = NULL;
-    iree_status_t status = iree_arena_allocate_array(
-        &specialization_arena, specialization_count,
-        sizeof(*specialization_requests), (void**)&specialization_requests);
-    if (!iree_status_is_ok(status)) {
-      iree_arena_deinitialize(&specialization_arena);
-      return status;
-    }
-    iree_host_size_t specialization_ordinal = 0;
-    loom_block_for_each_op(loom_module_block(run_module->module), op) {
-      const loom_func_like_t function =
-          loom_func_like_cast(run_module->module, op);
-      if (!loom_func_like_is_kernel_entry(function)) {
-        continue;
-      }
-      const loom_symbol_ref_t function_ref = loom_func_like_callee(function);
-      const loom_symbol_t* function_symbol =
-          &run_module->module->symbols.entries[function_ref.symbol_id];
-      specialization_requests[specialization_ordinal++] =
-          (loom_target_specialization_request_t){
-              .function_name =
-                  run_module->module->strings.entries[function_symbol->name_id],
-              .target_profile = hal_target->target_profile,
-          };
-    }
-    target_specializations = (loom_target_specialization_request_list_t){
-        .values = specialization_requests,
-        .count = specialization_count,
-    };
-  }
-
   loom_compile_pipeline_options_t pipeline_options = {0};
   loom_compile_pipeline_options_initialize(&pipeline_options);
   pipeline_options.pipeline = iree_make_cstring_view(FLAG_pipeline);
@@ -607,7 +563,6 @@ static iree_status_t loom_compile_run_pass_pipeline(
       compile_options->target_pipeline_options;
   pipeline_options.target_environment =
       loom_run_execution_environment_target_environment(environment);
-  pipeline_options.target_specializations = target_specializations;
   pipeline_options.low_descriptor_registry =
       loom_run_session_low_descriptor_registry(session);
   loom_compile_diagnostic_sink_t diagnostic_sink = {
@@ -627,11 +582,9 @@ static iree_status_t loom_compile_run_pass_pipeline(
   pipeline_options.report = compile_options->report;
   pipeline_options.trace_options = trace_options;
 
-  iree_status_t status = loom_compile_run_pipeline(
-      run_module->module, &pipeline_options,
-      loom_run_session_block_pool(session), out_result);
-  iree_arena_deinitialize(&specialization_arena);
-  return status;
+  return loom_compile_run_pipeline(run_module->module, &pipeline_options,
+                                   loom_run_session_block_pool(session),
+                                   out_result);
 }
 
 static iree_status_t loom_compile_write_bytes(iree_string_view_t path,
@@ -1197,17 +1150,50 @@ static iree_status_t loom_compile_select_explicit_hal_target(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "--target is only valid for HAL artifact backends");
   }
-  if (artifact_provider->select_target_key == NULL) {
-    return iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "HAL artifact provider '%.*s' does not support explicit offline "
-        "target specialization",
-        (int)artifact_provider->name.size, artifact_provider->name.data);
-  }
-
-  IREE_RETURN_IF_ERROR(artifact_provider->select_target_key(
+  IREE_RETURN_IF_ERROR(loom_run_hal_artifact_provider_select_target_key(
       artifact_provider, target_key, allocator, out_target));
   *out_target_selected = true;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_compile_specialize_explicit_hal_target(
+    const loom_run_execution_environment_t* environment,
+    loom_run_session_t* session, loom_run_module_t* run_module,
+    const loom_run_hal_device_target_t* target,
+    loom_run_compile_report_capture_t* compile_report_capture,
+    iree_allocator_t allocator) {
+  loom_compile_diagnostic_sink_t compile_diagnostic_sink = {
+      .run_module = run_module,
+      .compile_report_capture = compile_report_capture,
+  };
+  loom_low_descriptor_text_print_context_initialize(
+      &loom_run_session_low_descriptor_registry(session)->registry,
+      &compile_diagnostic_sink.type_print_context);
+  const loom_target_entry_options_t diagnostic_options = {
+      .diagnostic_sink =
+          {
+              .fn = loom_compile_diagnostic_sink,
+              .user_data = &compile_diagnostic_sink,
+          },
+      .source_resolver = loom_run_module_source_resolver(run_module),
+  };
+  loom_target_entry_diagnostic_emitter_t diagnostic_emitter;
+  loom_target_entry_diagnostic_emitter_initialize(
+      run_module->module, &diagnostic_options, LOOM_EMITTER_PASS,
+      &diagnostic_emitter);
+
+  uint32_t error_count = 0;
+  IREE_RETURN_IF_ERROR(loom_target_specialize_module_kernel_entries(
+      loom_run_execution_environment_target_environment(environment),
+      target->target_profile, loom_target_entry_emitter(&diagnostic_emitter),
+      loom_run_session_block_pool(session), allocator, &run_module->module,
+      &error_count));
+  if (error_count != 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "target profile specialization failed with %u error%s", error_count,
+        error_count == 1 ? "" : "s");
+  }
   return iree_ok_status();
 }
 
@@ -1692,6 +1678,7 @@ int main(int argc, char** argv) {
   char* input_filename_storage = NULL;
   loom_run_session_t session = {0};
   loom_run_module_t run_module = {0};
+  loom_run_compile_report_capture_options_t compile_report_options = {0};
   loom_run_compile_report_capture_t compile_report_capture = {0};
   loom_tooling_pass_trace_t pass_trace = {0};
   const loom_run_hal_artifact_provider_t* hal_artifact_provider = NULL;
@@ -1728,6 +1715,17 @@ int main(int argc, char** argv) {
         loom_compile_materialize_config_set(&session, &run_module, &config_set);
   }
   if (iree_status_is_ok(status)) {
+    status = loom_compile_report_options_initialize(&compile_report_options);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_run_compile_report_capture_initialize(
+        &compile_report_options, allocator, &compile_report_capture);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_run_compile_report_capture_record_materialized_config(
+        &compile_report_capture, run_module.module, &config_set);
+  }
+  if (iree_status_is_ok(status)) {
     loom_compile_backend_t backend = {0};
     status = loom_compile_select_backend(
         backend_name, &kLoomCompileHalArtifactProviderRegistry,
@@ -1742,31 +1740,23 @@ int main(int argc, char** argv) {
     }
   }
   if (iree_status_is_ok(status)) {
+    status = loom_compile_select_explicit_hal_target(
+        hal_artifact_provider, allocator, &explicit_hal_target_selected,
+        &explicit_hal_target);
+  }
+  if (iree_status_is_ok(status) && explicit_hal_target_selected) {
+    status = loom_compile_specialize_explicit_hal_target(
+        &environment, &session, &run_module, &explicit_hal_target,
+        &compile_report_capture, allocator);
+  }
+  if (iree_status_is_ok(status)) {
     status = loom_compile_select_roots(&session, &run_module,
                                        hal_artifact_provider, allocator);
-  }
-
-  loom_run_compile_report_capture_options_t compile_report_options = {0};
-  if (iree_status_is_ok(status)) {
-    status = loom_compile_report_options_initialize(&compile_report_options);
-  }
-  if (iree_status_is_ok(status)) {
-    status = loom_run_compile_report_capture_initialize(
-        &compile_report_options, allocator, &compile_report_capture);
-  }
-  if (iree_status_is_ok(status)) {
-    status = loom_run_compile_report_capture_record_materialized_config(
-        &compile_report_capture, run_module.module, &config_set);
   }
   if (iree_status_is_ok(status)) {
     status = loom_compile_artifact_manifest_options_initialize(
         &artifact_manifest_options, hal_artifact_provider != NULL, allocator,
         &artifact_manifest_output_path, &artifact_manifest_output_path_storage);
-  }
-  if (iree_status_is_ok(status)) {
-    status = loom_compile_select_explicit_hal_target(
-        hal_artifact_provider, allocator, &explicit_hal_target_selected,
-        &explicit_hal_target);
   }
   if (iree_status_is_ok(status)) {
     status = loom_compile_require_hal_kernel_targets(
@@ -1837,7 +1827,6 @@ int main(int argc, char** argv) {
   if (iree_status_is_ok(status)) {
     status = loom_compile_run_pass_pipeline(
         &environment, &session, &run_module,
-        explicit_hal_target_selected ? &explicit_hal_target : NULL,
         is_command_backend ? LOOM_COMPILE_DEFAULT_PIPELINE_EXPANDED_SOURCE
                            : LOOM_COMPILE_DEFAULT_PIPELINE_PREPARED_LOW,
         &compile_options, loom_tooling_pass_trace_options(&pass_trace),

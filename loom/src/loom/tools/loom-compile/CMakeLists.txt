@@ -99,6 +99,7 @@ loom_cc_binary(
     loom::target::arch::cmd::provider
     loom::target::entry_selection
     loom::target::low_descriptor_registry
+    loom::target::module_specialization
     loom::target::reporting::artifact_manifest
     loom::tooling::cli::help
     loom::tooling::compile::pipeline
@@ -127,6 +128,7 @@ iree_execution_test_suite(
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-compile/command_artifacts.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-compile/rooted_template_provider.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-link/testdata/target_profile_template_selection.loom"
   LABELS
     "hostonly"
 )

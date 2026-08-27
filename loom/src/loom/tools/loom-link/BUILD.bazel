@@ -13,6 +13,8 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
+exports_files(["testdata/target_profile_template_selection.loom"])
+
 loom_cc_binary(
     name = "loom-link",
     srcs = ["loom-link.c"],

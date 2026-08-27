@@ -147,6 +147,7 @@ loom_cc_binary(
         "//loom/src/loom/sanitizer:options",
         "//loom/src/loom/target:entry_selection",
         "//loom/src/loom/target:low_descriptor_registry",
+        "//loom/src/loom/target:module_specialization",
         "//loom/src/loom/target/arch/cmd:artifact_set",
         "//loom/src/loom/target/arch/cmd:provider",
         "//loom/src/loom/target/reporting:artifact_manifest",
@@ -175,6 +176,7 @@ iree_execution_test_suite(
     data = [
         "command_artifacts.loom",
         "rooted_template_provider.loom",
+        "//loom/src/loom/tools/loom-link:testdata/target_profile_template_selection.loom",
     ],
     manifests = ["loom-compile.test.json"],
     tags = ["hostonly"],

@@ -191,6 +191,7 @@ loom_cc_library(
     iree::base::internal::arena
     loom::error::emitter
     loom::ir
+    loom::ops::op_defs
   PUBLIC
 )
 
