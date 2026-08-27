@@ -1,0 +1,69 @@
+// RUN: emit spirv-dis validate
+// REQUIRES: spirv-dis, spirv-val
+
+spirv.target<vulkan1_3> @target
+
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @empty_entry() {
+  low.schedule.fence
+  low.return
+}
+
+// ----
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpExtension "SPV_KHR_vulkan_memory_model"
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %empty_entry "empty_entry"
+               OpExecutionMode %empty_entry LocalSize 1 1 1
+               OpName %empty_entry "empty_entry"
+       %void = OpTypeVoid
+          %3 = OpTypeFunction %void
+%empty_entry = OpFunction %void None %3
+          %4 = OpLabel
+               OpReturn
+               OpFunctionEnd
+
+
+// ====
+
+
+// RUN: emit spirv-dis validate
+// REQUIRES: spirv-dis, spirv-val
+
+spirv.target<vulkan1_3> @target
+
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @first_empty_entry() asm {
+  return
+}
+
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @second_empty_entry() asm {
+  return
+}
+
+// ----
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpExtension "SPV_KHR_vulkan_memory_model"
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %first_empty_entry "first_empty_entry"
+               OpEntryPoint GLCompute %second_empty_entry "second_empty_entry"
+               OpExecutionMode %first_empty_entry LocalSize 1 1 1
+               OpExecutionMode %second_empty_entry LocalSize 1 1 1
+               OpName %first_empty_entry "first_empty_entry"
+               OpName %second_empty_entry "second_empty_entry"
+       %void = OpTypeVoid
+          %3 = OpTypeFunction %void
+%first_empty_entry = OpFunction %void None %3
+          %4 = OpLabel
+               OpReturn
+               OpFunctionEnd
+%second_empty_entry = OpFunction %void None %3
+          %6 = OpLabel
+               OpReturn
+               OpFunctionEnd
