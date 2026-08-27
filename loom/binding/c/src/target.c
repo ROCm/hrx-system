@@ -100,6 +100,11 @@ loomc_status_t loomc_target_specialization_options_validate(
         LOOMC_STATUS_INVALID_ARGUMENT,
         "target specialization count is nonzero but specializations is NULL");
   }
+  if (options->target_binding_count != 0 && options->target_bindings == NULL) {
+    return loomc_make_status(
+        LOOMC_STATUS_INVALID_ARGUMENT,
+        "target binding count is nonzero but target_bindings is NULL");
+  }
   for (loomc_host_size_t i = 0; i < options->specialization_count; ++i) {
     const loomc_target_specialization_t* specialization =
         &options->specializations[i];
@@ -114,6 +119,19 @@ loomc_status_t loomc_target_specialization_options_validate(
       return loomc_make_status(
           LOOMC_STATUS_INVALID_ARGUMENT,
           "target specialization requires a target profile");
+    }
+  }
+  for (loomc_host_size_t i = 0; i < options->target_binding_count; ++i) {
+    const loomc_target_binding_t* binding = &options->target_bindings[i];
+    if ((binding->target_symbol.data == NULL &&
+         binding->target_symbol.size != 0) ||
+        loomc_string_view_is_empty(binding->target_symbol)) {
+      return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
+                               "target binding symbol must not be empty");
+    }
+    if (binding->target_profile == NULL) {
+      return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
+                               "target binding requires a target profile");
     }
   }
   return loomc_ok_status();
@@ -139,6 +157,22 @@ static bool loomc_target_environment_is_compatible(
   }
   return loomc_target_environment_provider_set(target_environment) ==
          loomc_target_environment_provider_set(profile_environment);
+}
+
+static loomc_status_t loomc_target_specialization_validate_profile_environment(
+    const loomc_target_environment_t* target_environment,
+    const loomc_target_profile_t* profile, const char* incompatible_message,
+    const char* incomplete_message) {
+  if (!loomc_target_environment_is_compatible(target_environment,
+                                              profile->target_environment)) {
+    return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
+                             incompatible_message);
+  }
+  if (profile->target_profile == NULL ||
+      profile->target_profile->target_bundle == NULL) {
+    return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT, incomplete_message);
+  }
+  return loomc_ok_status();
 }
 
 static bool loomc_target_environment_supports_profile_type(
@@ -317,7 +351,8 @@ loomc_status_t loomc_target_specialization_options_resolve(
 loomc_status_t loomc_target_specialization_options_validate_environment(
     const loomc_target_specialization_options_t* options,
     const loomc_target_environment_t* target_environment) {
-  if (options == NULL || options->specialization_count == 0) {
+  if (options == NULL || (options->specialization_count == 0 &&
+                          options->target_binding_count == 0)) {
     return loomc_ok_status();
   }
   if (target_environment == NULL) {
@@ -326,53 +361,74 @@ loomc_status_t loomc_target_specialization_options_validate_environment(
         "target specialization requires a context target environment");
   }
   for (loomc_host_size_t i = 0; i < options->specialization_count; ++i) {
-    const loomc_target_specialization_t* specialization =
-        &options->specializations[i];
-    const loomc_target_profile_t* profile = specialization->target_profile;
-    if (!loomc_target_environment_is_compatible(target_environment,
-                                                profile->target_environment)) {
-      return loomc_make_status(
-          LOOMC_STATUS_INVALID_ARGUMENT,
-          "target specialization profile was created for an incompatible "
-          "target environment");
-    }
-    if (profile->target_profile == NULL ||
-        profile->target_profile->target_bundle == NULL) {
-      return loomc_make_status(
-          LOOMC_STATUS_INVALID_ARGUMENT,
-          "target specialization contains an incomplete target profile");
-    }
+    LOOMC_RETURN_IF_ERROR(
+        loomc_target_specialization_validate_profile_environment(
+            target_environment, options->specializations[i].target_profile,
+            "target specialization profile was created for an incompatible "
+            "target environment",
+            "target specialization contains an incomplete target profile"));
+  }
+  for (loomc_host_size_t i = 0; i < options->target_binding_count; ++i) {
+    LOOMC_RETURN_IF_ERROR(
+        loomc_target_specialization_validate_profile_environment(
+            target_environment, options->target_bindings[i].target_profile,
+            "target binding profile was created for an incompatible target "
+            "environment",
+            "target binding contains an incomplete target profile"));
   }
   return loomc_ok_status();
 }
 
-loomc_status_t loomc_target_specialization_options_make_request_list(
+loomc_status_t loomc_target_specialization_options_make_lists(
     const loomc_target_specialization_options_t* options,
     iree_arena_allocator_t* arena,
-    loom_target_specialization_request_list_t* out_requests) {
+    loom_target_specialization_request_list_t* out_requests,
+    loom_target_declaration_binding_list_t* out_bindings) {
   *out_requests = (loom_target_specialization_request_list_t){0};
-  if (options == NULL || options->specialization_count == 0) {
+  *out_bindings = (loom_target_declaration_binding_list_t){0};
+  if (options == NULL) {
     return loomc_ok_status();
   }
 
-  loom_target_specialization_request_t* requests = NULL;
-  LOOMC_RETURN_IF_ERROR(loomc_status_from_iree(
-      iree_arena_allocate_array(arena, options->specialization_count,
-                                sizeof(*requests), (void**)&requests)));
-  for (loomc_host_size_t i = 0; i < options->specialization_count; ++i) {
-    const loomc_target_specialization_t* specialization =
-        &options->specializations[i];
-    requests[i] = (loom_target_specialization_request_t){
-        .function_name =
-            iree_string_view_from_loomc(specialization->function_symbol),
-        .target_profile = loomc_target_profile_loom_target_profile(
-            specialization->target_profile),
+  if (options->specialization_count != 0) {
+    loom_target_specialization_request_t* requests = NULL;
+    LOOMC_RETURN_IF_ERROR(loomc_status_from_iree(
+        iree_arena_allocate_array(arena, options->specialization_count,
+                                  sizeof(*requests), (void**)&requests)));
+    for (loomc_host_size_t i = 0; i < options->specialization_count; ++i) {
+      const loomc_target_specialization_t* specialization =
+          &options->specializations[i];
+      requests[i] = (loom_target_specialization_request_t){
+          .function_name =
+              iree_string_view_from_loomc(specialization->function_symbol),
+          .target_profile = loomc_target_profile_loom_target_profile(
+              specialization->target_profile),
+      };
+    }
+    *out_requests = (loom_target_specialization_request_list_t){
+        .values = requests,
+        .count = options->specialization_count,
     };
   }
-  *out_requests = (loom_target_specialization_request_list_t){
-      .values = requests,
-      .count = options->specialization_count,
-  };
+
+  if (options->target_binding_count != 0) {
+    loom_target_declaration_binding_t* bindings = NULL;
+    LOOMC_RETURN_IF_ERROR(loomc_status_from_iree(
+        iree_arena_allocate_array(arena, options->target_binding_count,
+                                  sizeof(*bindings), (void**)&bindings)));
+    for (loomc_host_size_t i = 0; i < options->target_binding_count; ++i) {
+      const loomc_target_binding_t* binding = &options->target_bindings[i];
+      bindings[i] = (loom_target_declaration_binding_t){
+          .target_name = iree_string_view_from_loomc(binding->target_symbol),
+          .target_profile =
+              loomc_target_profile_loom_target_profile(binding->target_profile),
+      };
+    }
+    *out_bindings = (loom_target_declaration_binding_list_t){
+        .values = bindings,
+        .count = options->target_binding_count,
+    };
+  }
   return loomc_ok_status();
 }
 

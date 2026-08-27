@@ -223,7 +223,9 @@ loom_cc_test(
     deps = [
         ":test_util",
         "//loom/binding/c:loomc",
+        "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/test",
+        "//loom/src/loom/target:function_version",
         "//loom/src/loom/target:profile",
         "//loom/src/loom/target:provider",
         "//loom/src/loom/target/test:target_record_table",

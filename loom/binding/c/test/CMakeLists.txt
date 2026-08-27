@@ -232,7 +232,9 @@ loom_cc_test(
     iree::testing::gtest_main
     iree::testing::temp_file
     loom::binding::c::loomc
+    loom::ops::op_defs
     loom::ops::test
+    loom::target::function_version
     loom::target::profile
     loom::target::provider
     loom::target::test::target_record_table

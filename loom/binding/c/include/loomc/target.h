@@ -29,9 +29,10 @@
 ///
 /// A target profile is a reusable, immutable, target-family-typed set of facts
 /// for a concrete, partial, saved, or synthetic target. Compile invocations
-/// borrow profiles in per-function specialization rows. This lets a JIT share
-/// cached device profiles across worker threads while independently choosing
-/// the exact target of every function version in a multi-target module.
+/// borrow profiles in direct-function and target-declaration binding rows. This
+/// lets a JIT share cached device profiles across worker threads while
+/// independently choosing the exact target of function roots or authored
+/// target declarations in a multi-target module.
 ///
 /// @par Example
 /// Create a context linked with a target environment:
@@ -180,11 +181,28 @@ typedef struct loomc_target_specialization_t {
   loomc_target_profile_t* target_profile;
 } loomc_target_specialization_t;
 
-/// Option extension carrying per-function target specializations.
+/// One authored target declaration to bind to one target profile.
 ///
-/// Put this descriptor on `loomc_compile_options_t::next`. Every row is
-/// validated before any function target is changed. The invocation borrows the
-/// row array, symbol strings, and profiles for the duration of the call.
+/// Every binding key must resolve to a `target.decl` in the module being
+/// compiled. The profile seeds all target-assignable functions authored with
+/// `target(@target_symbol)`. Semantic callgraph specialization propagates that
+/// target context through reachable callees.
+typedef struct loomc_target_binding_t {
+  /// Target declaration symbol name. A leading `@` is accepted.
+  loomc_string_view_t target_symbol;
+
+  /// Complete target profile borrowed for the invocation.
+  loomc_target_profile_t* target_profile;
+} loomc_target_binding_t;
+
+/// Option extension carrying target specialization inputs.
+///
+/// Put this descriptor on `loomc_compile_options_t::next`. Direct function rows
+/// assign profiles to selected roots. Target binding rows assign profiles to
+/// authored `target.decl` contexts without enumerating every function using the
+/// context. The two sets must not assign the same function. Every row is
+/// validated before any function version is published. The invocation borrows
+/// the row arrays, symbol strings, and profiles for the duration of the call.
 typedef struct loomc_target_specialization_options_t {
   /// Structure type. Must be
   /// `LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS`.
@@ -201,6 +219,12 @@ typedef struct loomc_target_specialization_options_t {
 
   /// Number of rows in `specializations`.
   loomc_host_size_t specialization_count;
+
+  /// Target declaration binding rows borrowed for the invocation.
+  const loomc_target_binding_t* target_bindings;
+
+  /// Number of rows in `target_bindings`.
+  loomc_host_size_t target_binding_count;
 } loomc_target_specialization_options_t;
 
 /// Target lowering pipeline boundary.

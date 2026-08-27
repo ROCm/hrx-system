@@ -162,8 +162,11 @@ unrequested functions for other targets.
 
 The loomc C API expresses the same operation with
 `loomc_target_specialization_options_t` attached only to
-`loomc_compile_options_t.next`. Each borrowed row pairs one function symbol
-with one structured target profile. Plain loading and linking preserve all
+`loomc_compile_options_t.next`. A direct specialization row pairs one function
+symbol with one structured target profile. A target binding row instead pairs
+one authored `target.decl` symbol with a profile and seeds every function using
+that declaration; this is the compact form for heterogeneous command or VM
+programs with named target roles. Plain loading and linking preserve all
 authored targets and never accept a specialization option; emission consumes
 the durable targets in prepared IR and never accepts an override. Embedders can
 therefore link a multi-target library once, clone or filter it as appropriate,

@@ -13,8 +13,10 @@
 #include "iree/io/byte_sequence.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/temp_file.h"
+#include "loom/ops/op_defs.h"
 #include "loom/ops/test/ops.h"
 #include "loom/ops/test/registry.h"
+#include "loom/target/function_version.h"
 #include "loom/target/profile.h"
 #include "loom/target/provider.h"
 #include "loom/target/test/target_records.h"
@@ -161,12 +163,26 @@ static const loom_target_emitter_t* const kFakeWasmEmitters[] = {
 
 static const loom_target_provider_t kEmptyProvider = {};
 
+typedef struct TestTargetProfile {
+  // Generic target profile base.
+  loom_target_profile_t base;
+
+  // Exact subgroup size projected by this profile.
+  uint32_t subgroup_size;
+} TestTargetProfile;
+
 static iree_status_t ProjectTestTargetProfileFacts(
-    const loom_target_profile_t* profile, iree_arena_allocator_t* arena,
+    const loom_target_profile_t* base_profile, iree_arena_allocator_t* arena,
     loom_target_facts_t* out_facts) {
-  (void)profile;
   (void)arena;
+  const auto* profile =
+      reinterpret_cast<const TestTargetProfile*>(base_profile);
   out_facts->selector = LOOM_TEST_TARGET_KIND_LOW_CORE;
+  if (profile->subgroup_size != 0) {
+    out_facts->storage.snapshot.subgroup_size = profile->subgroup_size;
+    loom_target_fact_field_set_insert(&out_facts->explicit_fields,
+                                      LOOM_TARGET_FACT_FIELD_SUBGROUP_SIZE);
+  }
   return iree_ok_status();
 }
 
@@ -198,9 +214,10 @@ static const loom_target_provider_set_t kTestTargetProviderSet = {
     /*.provider_count=*/IREE_ARRAYSIZE(kTestTargetProviders),
 };
 
-static loom_target_profile_t kTestTargetProfile = {
-    /*.type=*/&kTestTargetProfileType,
-};
+static void DeinitializeTestTargetProfile(loom_target_profile_t* base_profile,
+                                          loomc_allocator_t allocator) {
+  loomc_allocator_free(allocator, base_profile);
+}
 
 static const loom_target_provider_t kFakeElfProvider = {
     /*.profile_type=*/nullptr,
@@ -335,14 +352,28 @@ ContextPtr CreateTargetContext(loomc_target_environment_t* target_environment) {
 }
 
 TargetProfilePtr CreateTestTargetProfile(
-    loomc_target_environment_t* target_environment) {
-  kTestTargetProfile.target_bundle = loom_target_bundle_table_lookup(
-      &loom_test_target_bundles, LOOM_TEST_TARGET_KIND_LOW_CORE);
-  IREE_ASSERT(kTestTargetProfile.target_bundle != nullptr);
+    loomc_target_environment_t* target_environment,
+    uint32_t subgroup_size = 0) {
+  loomc_allocator_t allocator = loomc_allocator_system();
+  TestTargetProfile* internal_profile = nullptr;
+  LOOMC_EXPECT_OK(loomc_allocator_malloc(allocator, sizeof(*internal_profile),
+                                         (void**)&internal_profile));
+  IREE_ASSERT(internal_profile != nullptr);
+  *internal_profile = TestTargetProfile{
+      /*.base=*/
+      {
+          /*.type=*/&kTestTargetProfileType,
+          /*.target_bundle=*/
+          loom_target_bundle_table_lookup(&loom_test_target_bundles,
+                                          LOOM_TEST_TARGET_KIND_LOW_CORE),
+      },
+      /*.subgroup_size=*/subgroup_size,
+  };
+  IREE_ASSERT(internal_profile->base.target_bundle != nullptr);
   loomc_target_profile_t* profile = nullptr;
   loomc_status_t status = loomc_target_profile_create(
       target_environment, loomc_make_cstring_view("test-low-core"),
-      &kTestTargetProfile, /*deinitialize=*/nullptr, loomc_allocator_system(),
+      &internal_profile->base, DeinitializeTestTargetProfile, allocator,
       &profile);
   LOOMC_EXPECT_OK(status);
   return TargetProfilePtr(profile);
@@ -375,6 +406,44 @@ void ExpectSucceededResult(const loomc_result_t* result) {
     ADD_FAILURE() << ToString(diagnostic->message);
   }
   EXPECT_TRUE(loomc_result_succeeded(result));
+}
+
+PassProgramPtr CreatePassProgramFromPipelineText(loomc_context_t* context,
+                                                 const char* pipeline_text) {
+  loomc_pass_program_t* pass_program = nullptr;
+  loomc_result_t* result = nullptr;
+  loomc_status_t status = loomc_pass_program_create_from_pipeline_text(
+      context, loomc_make_cstring_view(pipeline_text), nullptr,
+      loomc_allocator_system(), &pass_program, &result);
+  LOOMC_EXPECT_OK(status);
+  ResultPtr result_ptr(result);
+  ExpectSucceededResult(result_ptr.get());
+  return PassProgramPtr(pass_program);
+}
+
+loom_func_like_t FindFunction(loomc_module_t* module, const char* name) {
+  loom_module_t* internal_module = loomc_module_loom_module(module);
+  IREE_ASSERT(internal_module != nullptr);
+  const loom_string_id_t name_id =
+      loom_module_lookup_string(internal_module, iree_make_cstring_view(name));
+  IREE_ASSERT(name_id != LOOM_STRING_ID_INVALID);
+  const loom_symbol_id_t symbol_id =
+      loom_module_find_symbol(internal_module, name_id);
+  IREE_ASSERT(symbol_id != LOOM_SYMBOL_ID_INVALID);
+  loom_func_like_t function = loom_func_like_cast(
+      internal_module, internal_module->symbols.entries[symbol_id].defining_op);
+  IREE_ASSERT(loom_func_like_isa(function));
+  return function;
+}
+
+const loom_target_function_version_t* FindTargetVersion(loomc_module_t* module,
+                                                        const char* name) {
+  const loom_function_version_list_t* function_versions =
+      loomc_module_function_versions(module);
+  return function_versions != nullptr
+             ? loom_target_function_version_list_find(
+                   function_versions, FindFunction(module, name))
+             : nullptr;
 }
 
 PassProgramPtr CreateTargetPipelinePassProgram(
@@ -971,6 +1040,377 @@ TEST(TargetTest, RejectsSanitizerOptionsOnPlainPassProgramOptions) {
       loomc_pass_program_create_empty(context.get(), &pass_options,
                                       loomc_allocator_system(), &pass_program));
   EXPECT_EQ(pass_program, nullptr);
+}
+
+TEST(TargetTest, CompileBindsTargetDeclarationsAcrossCommandBoundaries) {
+  TargetEnvironmentPtr target_environment = CreateTestTargetEnvironment();
+  TargetProfilePtr host_profile =
+      CreateTestTargetProfile(target_environment.get(), 64);
+  TargetProfilePtr shared_device_profile =
+      CreateTestTargetProfile(target_environment.get(), 32);
+  TargetProfilePtr decode_profile =
+      CreateTestTargetProfile(target_environment.get(), 7);
+  ContextPtr context = CreateTargetContext(target_environment.get());
+  CompilerPtr compiler = CreateCompiler(context.get());
+  PassProgramPtr pass_program = CreatePassProgramFromPipelineText(
+      context.get(), "specialize-target-callgraph");
+  WorkspacePtr workspace = CreateWorkspace();
+  SourcePtr source = CreateTextSource("target_bindings.loom", R"(
+target.decl @prefill_device
+target.decl @decode_device
+target.decl @batch_device
+
+func.def @shared_subgroup_size() -> (index) {
+  %size = target.subgroup.size : index
+  func.return %size : index
+}
+
+kernel.def @prefill_kernel() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch() {
+  %size = func.call @shared_subgroup_size() : () -> (index)
+  kernel.return
+}
+
+kernel.def @decode_kernel() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch() {
+  %size = func.call @shared_subgroup_size() : () -> (index)
+  kernel.return
+}
+
+command.program.def public target(@prefill_device) @prefill_program() launch() {
+  kernel.launch @prefill_kernel() : ()
+  command.return
+}
+
+command.program.def public target(@decode_device) @decode_program() launch() {
+  kernel.launch @decode_kernel() : ()
+  command.return
+}
+
+command.program.def public target(@batch_device) @batch_program() launch() {
+  kernel.launch @prefill_kernel() : ()
+  command.return
+}
+
+func.def public @host() {
+  command.program.launch @prefill_program() : ()
+  command.program.launch @decode_program() : ()
+  command.program.launch @batch_program() : ()
+  func.return
+}
+
+func.def public @unbound() {
+  func.return
+}
+)");
+  ModulePtr module =
+      DeserializeModule(context.get(), workspace.get(), source.get());
+  const loomc_target_specialization_t specialization = {
+      /*.function_symbol=*/loomc_make_cstring_view("host"),
+      /*.target_profile=*/host_profile.get(),
+  };
+  const loomc_target_binding_t target_bindings[] = {
+      {
+          /*.target_symbol=*/loomc_make_cstring_view("@prefill_device"),
+          /*.target_profile=*/shared_device_profile.get(),
+      },
+      {
+          /*.target_symbol=*/loomc_make_cstring_view("batch_device"),
+          /*.target_profile=*/shared_device_profile.get(),
+      },
+      {
+          /*.target_symbol=*/loomc_make_cstring_view("decode_device"),
+          /*.target_profile=*/decode_profile.get(),
+      },
+  };
+  const loomc_target_specialization_options_t target_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
+      /*.structure_size=*/sizeof(target_options),
+      /*.next=*/nullptr,
+      /*.specializations=*/&specialization,
+      /*.specialization_count=*/1,
+      /*.target_bindings=*/target_bindings,
+      /*.target_binding_count=*/IREE_ARRAYSIZE(target_bindings),
+  };
+  const loomc_compile_options_t compile_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
+      /*.structure_size=*/sizeof(compile_options),
+      /*.next=*/&target_options,
+      /*.module_name=*/loomc_string_view_empty(),
+      /*.artifact_flags=*/LOOMC_COMPILE_ARTIFACT_FLAG_REPORT_JSON,
+  };
+
+  loomc_result_t* result = nullptr;
+  LOOMC_ASSERT_OK(loomc_compile_module(
+      compiler.get(), workspace.get(), pass_program.get(), module.get(),
+      &compile_options, loomc_allocator_system(), &result));
+  ResultPtr result_ptr(result);
+  ExpectSucceededResult(result_ptr.get());
+  ASSERT_EQ(loomc_result_artifact_count(result_ptr.get()), 1u);
+  const loomc_artifact_t* report =
+      loomc_result_artifact_at(result_ptr.get(), 0);
+  ASSERT_NE(report, nullptr);
+  EXPECT_EQ(report->kind, LOOMC_ARTIFACT_KIND_REPORT);
+  EXPECT_EQ(ToString(report->format), LOOMC_ARTIFACT_FORMAT_JSON);
+  const std::string report_contents = ToString(report->contents);
+  EXPECT_NE(report_contents.find("\"target_specialization_count\":1"),
+            std::string::npos);
+  EXPECT_NE(report_contents.find("\"target_binding_count\":3"),
+            std::string::npos);
+
+  const loom_function_version_list_t* function_versions =
+      loomc_module_function_versions(module.get());
+  ASSERT_NE(function_versions, nullptr);
+  ASSERT_EQ(function_versions->count, 8u);
+  const loom_target_function_version_t* host =
+      FindTargetVersion(module.get(), "host");
+  const loom_target_function_version_t* prefill_program =
+      FindTargetVersion(module.get(), "prefill_program");
+  const loom_target_function_version_t* decode_program =
+      FindTargetVersion(module.get(), "decode_program");
+  const loom_target_function_version_t* batch_program =
+      FindTargetVersion(module.get(), "batch_program");
+  const loom_target_function_version_t* prefill_kernel =
+      FindTargetVersion(module.get(), "prefill_kernel");
+  const loom_target_function_version_t* decode_kernel =
+      FindTargetVersion(module.get(), "decode_kernel");
+  ASSERT_NE(host, nullptr);
+  ASSERT_NE(prefill_program, nullptr);
+  ASSERT_NE(decode_program, nullptr);
+  ASSERT_NE(batch_program, nullptr);
+  ASSERT_NE(prefill_kernel, nullptr);
+  ASSERT_NE(decode_kernel, nullptr);
+  EXPECT_EQ(host->resolved_target.facts->storage.snapshot.subgroup_size, 64u);
+  EXPECT_EQ(
+      prefill_program->resolved_target.facts->storage.snapshot.subgroup_size,
+      32u);
+  EXPECT_EQ(
+      decode_program->resolved_target.facts->storage.snapshot.subgroup_size,
+      7u);
+  EXPECT_EQ(
+      batch_program->resolved_target.facts->storage.snapshot.subgroup_size,
+      32u);
+  EXPECT_NE(host->target_context_ordinal,
+            prefill_program->target_context_ordinal);
+  EXPECT_NE(prefill_program->target_context_ordinal,
+            decode_program->target_context_ordinal);
+  EXPECT_EQ(prefill_program->target_context_ordinal,
+            batch_program->target_context_ordinal);
+  EXPECT_EQ(prefill_program->target_context_ordinal,
+            prefill_kernel->target_context_ordinal);
+  EXPECT_EQ(decode_program->target_context_ordinal,
+            decode_kernel->target_context_ordinal);
+  EXPECT_EQ(batch_program->target_context_ordinal,
+            prefill_kernel->target_context_ordinal);
+  EXPECT_TRUE(iree_string_view_equal(prefill_program->authored_target_name,
+                                     IREE_SV("prefill_device")));
+  EXPECT_TRUE(iree_string_view_equal(decode_program->authored_target_name,
+                                     IREE_SV("decode_device")));
+  EXPECT_EQ(FindTargetVersion(module.get(), "unbound"), nullptr);
+
+  const loom_module_t* internal_module =
+      loomc_module_const_loom_module(module.get());
+  iree_host_size_t shared_version_count = 0;
+  bool saw_shared_wave32 = false;
+  bool saw_shared_wave7 = false;
+  for (iree_host_size_t i = 0; i < function_versions->count; ++i) {
+    const loom_target_function_version_t* target_version =
+        loom_target_function_version_const_cast(function_versions->values[i]);
+    ASSERT_NE(target_version, nullptr);
+    const loom_symbol_ref_t function_ref =
+        loom_func_like_callee(target_version->base.function);
+    ASSERT_TRUE(loom_symbol_ref_is_valid(function_ref));
+    const loom_symbol_t* function_symbol =
+        &internal_module->symbols.entries[function_ref.symbol_id];
+    const iree_string_view_t function_name =
+        internal_module->strings.entries[function_symbol->name_id];
+    const std::string function_name_string(function_name.data,
+                                           function_name.size);
+    if (function_name_string.rfind("shared_subgroup_size", 0) != 0) {
+      continue;
+    }
+    ++shared_version_count;
+    const uint32_t subgroup_size =
+        target_version->resolved_target.facts->storage.snapshot.subgroup_size;
+    saw_shared_wave32 |= subgroup_size == 32;
+    saw_shared_wave7 |= subgroup_size == 7;
+  }
+  EXPECT_EQ(shared_version_count, 2u);
+  EXPECT_TRUE(saw_shared_wave32);
+  EXPECT_TRUE(saw_shared_wave7);
+}
+
+TEST(TargetTest, CompileRejectsInvalidTargetDeclarationBindings) {
+  TargetEnvironmentPtr target_environment = CreateTestTargetEnvironment();
+  TargetProfilePtr profile = CreateTestTargetProfile(target_environment.get());
+  ContextPtr context = CreateTargetContext(target_environment.get());
+  CompilerPtr compiler = CreateCompiler(context.get());
+  PassProgramPtr pass_program = CreateEmptyPassProgram(context.get());
+  WorkspacePtr workspace = CreateWorkspace();
+  SourcePtr source = CreateTextSource("invalid_target_bindings.loom", R"(
+target.decl @device
+target.decl @unused
+test.target<low_core> @concrete
+
+func.def public target(@device) @entry() {
+  func.return
+}
+)");
+  ModulePtr module =
+      DeserializeModule(context.get(), workspace.get(), source.get());
+  loomc_target_specialization_options_t target_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
+      /*.structure_size=*/sizeof(target_options),
+  };
+  const loomc_compile_options_t compile_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
+      /*.structure_size=*/sizeof(compile_options),
+      /*.next=*/&target_options,
+  };
+
+  const auto expect_rejected =
+      [&](loomc_status_code_t expected_code,
+          const loomc_target_specialization_t* specializations,
+          loomc_host_size_t specialization_count,
+          const loomc_target_binding_t* target_bindings,
+          loomc_host_size_t target_binding_count) {
+        target_options.specializations = specializations;
+        target_options.specialization_count = specialization_count;
+        target_options.target_bindings = target_bindings;
+        target_options.target_binding_count = target_binding_count;
+        loomc_result_t* result = nullptr;
+        LOOMC_EXPECT_STATUS_IS(
+            expected_code,
+            loomc_compile_module(compiler.get(), workspace.get(),
+                                 pass_program.get(), module.get(),
+                                 &compile_options, loomc_allocator_system(),
+                                 &result));
+        EXPECT_EQ(result, nullptr);
+        EXPECT_EQ(loomc_module_function_versions(module.get()), nullptr);
+      };
+
+  expect_rejected(LOOMC_STATUS_INVALID_ARGUMENT, nullptr, 0, nullptr, 1);
+
+  const loomc_target_binding_t missing_profile_binding = {
+      /*.target_symbol=*/loomc_make_cstring_view("device"),
+      /*.target_profile=*/nullptr,
+  };
+  expect_rejected(LOOMC_STATUS_INVALID_ARGUMENT, nullptr, 0,
+                  &missing_profile_binding, 1);
+
+  const loomc_target_binding_t missing_binding = {
+      /*.target_symbol=*/loomc_make_cstring_view("missing"),
+      /*.target_profile=*/profile.get(),
+  };
+  expect_rejected(LOOMC_STATUS_NOT_FOUND, nullptr, 0, &missing_binding, 1);
+
+  const loomc_target_binding_t concrete_binding = {
+      /*.target_symbol=*/loomc_make_cstring_view("concrete"),
+      /*.target_profile=*/profile.get(),
+  };
+  expect_rejected(LOOMC_STATUS_INVALID_ARGUMENT, nullptr, 0, &concrete_binding,
+                  1);
+
+  const loomc_target_binding_t duplicate_bindings[] = {
+      {
+          /*.target_symbol=*/loomc_make_cstring_view("device"),
+          /*.target_profile=*/profile.get(),
+      },
+      {
+          /*.target_symbol=*/loomc_make_cstring_view("@device"),
+          /*.target_profile=*/profile.get(),
+      },
+  };
+  expect_rejected(LOOMC_STATUS_INVALID_ARGUMENT, nullptr, 0, duplicate_bindings,
+                  IREE_ARRAYSIZE(duplicate_bindings));
+
+  const loomc_target_specialization_t specialization = {
+      /*.function_symbol=*/loomc_make_cstring_view("entry"),
+      /*.target_profile=*/profile.get(),
+  };
+  const loomc_target_binding_t overlapping_binding = {
+      /*.target_symbol=*/loomc_make_cstring_view("device"),
+      /*.target_profile=*/profile.get(),
+  };
+  expect_rejected(LOOMC_STATUS_INVALID_ARGUMENT, &specialization, 1,
+                  &overlapping_binding, 1);
+
+  const loomc_target_binding_t unused_binding = {
+      /*.target_symbol=*/loomc_make_cstring_view("unused"),
+      /*.target_profile=*/profile.get(),
+  };
+  target_options.specializations = nullptr;
+  target_options.specialization_count = 0;
+  target_options.target_bindings = &unused_binding;
+  target_options.target_binding_count = 1;
+  loomc_result_t* result = nullptr;
+  LOOMC_ASSERT_OK(loomc_compile_module(
+      compiler.get(), workspace.get(), pass_program.get(), module.get(),
+      &compile_options, loomc_allocator_system(), &result));
+  ResultPtr result_ptr(result);
+  ExpectSucceededResult(result_ptr.get());
+  EXPECT_EQ(loomc_module_function_versions(module.get()), nullptr);
+}
+
+TEST(TargetTest, CompileReportsIncompatibleBoundCalleeTarget) {
+  TargetEnvironmentPtr target_environment = CreateTestTargetEnvironment();
+  TargetProfilePtr profile =
+      CreateTestTargetProfile(target_environment.get(), 32);
+  ContextPtr context = CreateTargetContext(target_environment.get());
+  CompilerPtr compiler = CreateCompiler(context.get());
+  PassProgramPtr pass_program = CreatePassProgramFromPipelineText(
+      context.get(), "specialize-target-callgraph");
+  WorkspacePtr workspace = CreateWorkspace();
+  SourcePtr source = CreateTextSource("incompatible_target_binding.loom", R"(
+target.decl @device
+test.target<quirky> @quirky
+
+func.def target(@quirky) @helper() {
+  func.return
+}
+
+func.def public target(@device) @entry() {
+  func.call @helper() : ()
+  func.return
+}
+)");
+  ModulePtr module =
+      DeserializeModule(context.get(), workspace.get(), source.get());
+  const loomc_target_binding_t binding = {
+      /*.target_symbol=*/loomc_make_cstring_view("device"),
+      /*.target_profile=*/profile.get(),
+  };
+  const loomc_target_specialization_options_t target_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
+      /*.structure_size=*/sizeof(target_options),
+      /*.next=*/nullptr,
+      /*.specializations=*/nullptr,
+      /*.specialization_count=*/0,
+      /*.target_bindings=*/&binding,
+      /*.target_binding_count=*/1,
+  };
+  const loomc_compile_options_t compile_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
+      /*.structure_size=*/sizeof(compile_options),
+      /*.next=*/&target_options,
+  };
+
+  loomc_result_t* result = nullptr;
+  LOOMC_ASSERT_OK(loomc_compile_module(
+      compiler.get(), workspace.get(), pass_program.get(), module.get(),
+      &compile_options, loomc_allocator_system(), &result));
+  ResultPtr result_ptr(result);
+  ASSERT_FALSE(loomc_result_succeeded(result_ptr.get()));
+  ASSERT_EQ(loomc_result_diagnostic_count(result_ptr.get()), 1u);
+  const loomc_diagnostic_t* diagnostic =
+      loomc_result_diagnostic_at(result_ptr.get(), 0);
+  ASSERT_NE(diagnostic, nullptr);
+  EXPECT_EQ(ToString(diagnostic->code), "TARGET/052");
+  EXPECT_EQ(loomc_module_function_versions(module.get()), nullptr);
 }
 
 TEST(TargetTest, RejectsSerializationWithoutATargetMaterializer) {

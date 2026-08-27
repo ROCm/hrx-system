@@ -100,6 +100,13 @@ profiles in the same compile operation. Configuration bindings use the same
 per-invocation boundary, so a compiler and pass program remain reusable across
 model configurations and autotuning candidates.
 
+A heterogeneous module can instead use `loomc_target_binding_t` to bind an
+authored `target.decl` context to a profile. Every function carrying that target
+declaration is seeded from the binding, and retained semantic callees inherit
+the context during callgraph specialization. Direct function rows remain useful
+for default host roots; the two forms can share one invocation as long as they
+do not assign the same function.
+
 The launch companion is opt-in through
 `LOOMC_COMPILE_ARTIFACT_FLAG_LAUNCH_CONFIG`. `loomc_compile_module` may rewrite
 the invocation's module and retains the concrete function-version facts needed
