@@ -139,6 +139,14 @@ class ContextCachePolicyTest : public ::testing::Test {
         IREE_SV("MLIR_AIE"), out_context_ref);
   }
 
+  iree_status_t Pin(uint8_t key,
+                    iree_hal_amdxdna_context_cache_lease_t** out_lease) {
+    return iree_hal_amdxdna_context_cache_pin(
+        cache_, nullptr, IREE_HAL_AMDXDNA_NATIVE_C_CONTEXT_IMAGE_MODEL_PDI,
+        iree_make_const_byte_span(&key, 1), iree_const_byte_span_empty(),
+        IREE_SV("MLIR_AIE"), out_lease);
+  }
+
   iree_hal_amdxdna_native_context_ref_t* GetAndExpectOk(uint8_t key) {
     iree_hal_amdxdna_native_context_ref_t* context_ref = nullptr;
     iree_status_t status = Get(key, &context_ref);
@@ -148,6 +156,17 @@ class ContextCachePolicyTest : public ::testing::Test {
     if (!ok) return nullptr;
     EXPECT_NE(context_ref, nullptr);
     return context_ref;
+  }
+
+  iree_hal_amdxdna_context_cache_lease_t* PinAndExpectOk(uint8_t key) {
+    iree_hal_amdxdna_context_cache_lease_t* lease = nullptr;
+    iree_status_t status = Pin(key, &lease);
+    const bool ok = iree_status_is_ok(status);
+    EXPECT_TRUE(ok);
+    iree_status_ignore(status);
+    if (!ok) return nullptr;
+    EXPECT_NE(lease, nullptr);
+    return lease;
   }
 
   void TearDown() override {
@@ -283,6 +302,62 @@ TEST_F(ContextCachePolicyTest, EvictionPreservesLiveCallerReference) {
       << "eviction must release only the cache-owned reference";
 
   factory_.ReleaseCaller(one);
+  EXPECT_EQ(factory_.destroy_counts[1].load(), 1);
+}
+
+TEST_F(ContextCachePolicyTest, LeasedEntryIsSkippedByLruEviction) {
+  CreateCache(2);
+  auto* one_lease = PinAndExpectOk(1);
+  auto* two = GetAndExpectOk(2);
+  factory_.ReleaseCaller(two);
+
+  auto* three = GetAndExpectOk(3);
+  factory_.ReleaseCaller(three);
+  EXPECT_EQ(factory_.destroy_counts[1].load(), 0)
+      << "leased entries must not be evicted";
+  EXPECT_EQ(factory_.destroy_counts[2].load(), 1);
+
+  iree_hal_amdxdna_context_cache_lease_release(one_lease);
+  auto* four = GetAndExpectOk(4);
+  factory_.ReleaseCaller(four);
+  EXPECT_EQ(factory_.destroy_counts[1].load(), 1)
+      << "released leases become normal LRU candidates again";
+}
+
+TEST_F(ContextCachePolicyTest, CapacityFullOfLeasedEntriesRejectsMiss) {
+  CreateCache(1);
+  auto* one_lease = PinAndExpectOk(1);
+
+  iree_hal_amdxdna_native_context_ref_t* two = nullptr;
+  iree_status_t status = Get(2, &two);
+  EXPECT_EQ(iree_status_code(status), IREE_STATUS_RESOURCE_EXHAUSTED);
+  iree_status_ignore(status);
+  EXPECT_EQ(two, nullptr);
+  EXPECT_EQ(factory_.create_calls.load(), 1)
+      << "the cache must not create past the bound when all entries are leased";
+  EXPECT_EQ(factory_.destroy_counts[1].load(), 0);
+
+  iree_hal_amdxdna_context_cache_lease_release(one_lease);
+  two = GetAndExpectOk(2);
+  factory_.ReleaseCaller(two);
+  EXPECT_EQ(factory_.destroy_counts[1].load(), 1);
+}
+
+TEST_F(ContextCachePolicyTest, LeaseCanRetainDispatchReference) {
+  CreateCache(1);
+  auto* one_lease = PinAndExpectOk(1);
+
+  iree_hal_amdxdna_native_context_ref_t* caller_ref =
+      iree_hal_amdxdna_context_cache_lease_retain_context(one_lease);
+  ASSERT_NE(caller_ref, nullptr);
+  iree_hal_amdxdna_context_cache_lease_release(one_lease);
+
+  auto* two = GetAndExpectOk(2);
+  factory_.ReleaseCaller(two);
+  EXPECT_EQ(factory_.destroy_counts[1].load(), 0)
+      << "a retained dispatch reference keeps the evicted context alive";
+
+  factory_.ReleaseCaller(caller_ref);
   EXPECT_EQ(factory_.destroy_counts[1].load(), 1);
 }
 

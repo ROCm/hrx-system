@@ -2540,6 +2540,9 @@ iree_status_t iree_hal_amdxdna_native_device_query_caps(
   caps.supports_host_buffer_reuse =
       mcdm::SupportsHostBufferReuse(device->device.mcdm_abi);
   caps.native_owns_control_code_publication = true;
+  caps.requires_executable_context_cache =
+      device->device.mcdm_abi == mcdm::McdmAbi::legacy_v0 ||
+      device->device.mcdm_abi == mcdm::McdmAbi::legacy_v2;
   // Issue may return before the native completion wait finishes. The HAL
   // retains native resources and keeps cache entries in flight until the
   // completion batch publishes its signal semaphores.

@@ -132,6 +132,10 @@ typedef struct iree_hal_amdxdna_native_c_device_caps_t {
   // Native submission owns publication of command control code. Common code
   // must not publish the source control BO when this is true.
   bool native_owns_control_code_publication;
+  // Some legacy Windows MCDM stacks require self-contained dispatches to keep a
+  // stable executable-local context/CU binding instead of borrowing/reopening a
+  // device-LRU context for each dispatch.
+  bool requires_executable_context_cache;
   // Native issue may return before completion. Common code must retain
   // submission resources and defer signal semaphores until native completion.
   // This does not imply multiple hardware queues or concurrent queue access.

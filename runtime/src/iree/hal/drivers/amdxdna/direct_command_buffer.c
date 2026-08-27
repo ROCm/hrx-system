@@ -2817,10 +2817,12 @@ iree_status_t iree_hal_amdxdna_direct_command_buffer_dispatch_plan(
   //      carries its own context image (PDI or xclbin). The context is
   //      keyed by the native context-image inputs (PDI+CU or xclbin) and
   //      borrowed for this dispatch. Dispatch control code is command identity
-  //      and must not split hwctx objects. Do not retain the borrowed context
-  //      on the executable: FLM and similar direct-XADX users may cache many
-  //      executable handles, and executable-owned native contexts would bypass
-  //      the device LRU and exhaust the small driver hwctx pool.
+  //      and must not split hwctx objects. Modern stacks do not retain the
+  //      borrowed context on the executable: FLM and similar direct-XADX users
+  //      may cache many executable handles, and executable-owned native
+  //      contexts would bypass the device LRU and exhaust the small driver
+  //      hwctx pool. Legacy Windows MCDM revisions still need the historical
+  //      executable-local context/CU binding for dispatch stability.
   //
   //   2. data_payload_count != 0 with a PDI/xclbin on this entry point --
   //      context-loading control-packet entry point. It (re)loads the array and
@@ -2831,12 +2833,52 @@ iree_status_t iree_hal_amdxdna_direct_command_buffer_dispatch_plan(
   //      point. It has no image of its own and runs on the executable->context
   //      that a sibling loader (branch 2) published; it fails if none has.
   if (iree_status_is_ok(status) && plan->data_payload_count == 0) {
-    status = iree_hal_amdxdna_device_get_or_create_context(
-        command_buffer->device, plan->pdi_span, plan->xclbin_span,
-        plan->kernel_name, &context_ref);
-    if (iree_status_is_ok(status)) {
-      status = iree_hal_amdxdna_native_context_ref_open_cu(
-          context_ref, plan->kernel_name, &cu_idx);
+    if (command_buffer->device->native_caps.requires_executable_context_cache) {
+      iree_slim_mutex_lock(&executable->context_mutex);
+      if (kernel_params->cached_context_valid) {
+        context_ref = iree_hal_amdxdna_context_cache_lease_retain_context(
+            kernel_params->cached_context_lease);
+        if (!context_ref) {
+          status = iree_make_status(
+              IREE_STATUS_RESOURCE_EXHAUSTED,
+              "amdxdna executable context lease could not retain context");
+        }
+        cu_idx = kernel_params->cached_cu_index;
+      } else {
+        iree_hal_amdxdna_context_cache_lease_t* context_lease = NULL;
+        status = iree_hal_amdxdna_device_pin_context(
+            command_buffer->device, plan->pdi_span, plan->xclbin_span,
+            plan->kernel_name, &context_lease);
+        if (iree_status_is_ok(status)) {
+          context_ref =
+              iree_hal_amdxdna_context_cache_lease_retain_context(context_lease);
+          if (!context_ref) {
+            status = iree_make_status(
+                IREE_STATUS_RESOURCE_EXHAUSTED,
+                "amdxdna executable context lease could not retain context");
+          }
+        }
+        if (iree_status_is_ok(status)) {
+          status = iree_hal_amdxdna_native_context_ref_open_cu(
+              context_ref, plan->kernel_name, &cu_idx);
+        }
+        if (iree_status_is_ok(status)) {
+          kernel_params->cached_context_lease = context_lease;
+          context_lease = NULL;
+          kernel_params->cached_cu_index = cu_idx;
+          kernel_params->cached_context_valid = true;
+        }
+        iree_hal_amdxdna_context_cache_lease_release(context_lease);
+      }
+      iree_slim_mutex_unlock(&executable->context_mutex);
+    } else {
+      status = iree_hal_amdxdna_device_get_or_create_context(
+          command_buffer->device, plan->pdi_span, plan->xclbin_span,
+          plan->kernel_name, &context_ref);
+      if (iree_status_is_ok(status)) {
+        status = iree_hal_amdxdna_native_context_ref_open_cu(
+            context_ref, plan->kernel_name, &cu_idx);
+      }
     }
   } else if (iree_status_is_ok(status) && (kernel_params->pdi.count != 0 ||
                                            kernel_params->xclbin.count != 0)) {

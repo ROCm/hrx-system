@@ -17,6 +17,8 @@ extern "C" {
 typedef struct iree_hal_amdxdna_device iree_hal_amdxdna_device;
 typedef struct iree_hal_amdxdna_device_context_cache_t
     iree_hal_amdxdna_device_context_cache_t;
+typedef struct iree_hal_amdxdna_context_cache_lease_t
+    iree_hal_amdxdna_context_cache_lease_t;
 
 // Injectable native-context operations used by hermetic cache-policy tests and
 // optional device integration hooks. NULL callbacks use the native DDI
@@ -76,8 +78,7 @@ iree_hal_amdxdna_device_context_cache_create_with_ops(
     iree_allocator_t host_allocator, iree_host_size_t hardware_context_budget,
     const iree_hal_amdxdna_context_cache_ops_t* ops, void* user_data);
 
-// Resolves the cache capacity: IREE_HAL_AMDXDNA_CONTEXT_CACHE_CAPACITY if set
-// (0 disables the bound), else the device budget if nonzero, else a built-in
+// Resolves the cache capacity: the device budget if nonzero, else a built-in
 // default. Exported so the policy can be unit tested without a device.
 iree_host_size_t iree_hal_amdxdna_context_cache_resolve_capacity(
     iree_host_size_t hardware_context_budget);
@@ -98,6 +99,26 @@ iree_status_t iree_hal_amdxdna_context_cache_get_or_create(
     iree_const_byte_span_t xclbin, iree_string_view_t kernel_name,
     iree_hal_amdxdna_native_context_ref_t** out_context_ref);
 
+// Like get_or_create, but returns a lease that pins the cache entry against LRU
+// eviction until released. The lease itself is not a dispatch reference; callers
+// must retain a context ref from the lease while submitting work.
+iree_status_t iree_hal_amdxdna_context_cache_pin(
+    iree_hal_amdxdna_device_context_cache_t* context_cache,
+    iree_hal_amdxdna_native_device_t* native_device,
+    uint32_t context_image_models, iree_const_byte_span_t pdi,
+    iree_const_byte_span_t xclbin, iree_string_view_t kernel_name,
+    iree_hal_amdxdna_context_cache_lease_t** out_lease);
+
+// Retains the native context referenced by |lease| for one dispatch or CU-open
+// operation. The returned context ref must be released by the caller.
+iree_hal_amdxdna_native_context_ref_t*
+iree_hal_amdxdna_context_cache_lease_retain_context(
+    iree_hal_amdxdna_context_cache_lease_t* lease);
+
+// Releases a cache entry lease created by iree_hal_amdxdna_context_cache_pin.
+void iree_hal_amdxdna_context_cache_lease_release(
+    iree_hal_amdxdna_context_cache_lease_t* lease);
+
 // Returns a native context for the (non-empty) control-packet bootstrap
 // `pdi`/`xclbin` and CU/export name, creating and caching it on first use. A
 // cached PDI context is reused when PDI + kernel name match; an xclbin-native
@@ -107,6 +128,11 @@ iree_status_t iree_hal_amdxdna_device_get_or_create_context(
     iree_hal_amdxdna_device* device, iree_const_byte_span_t pdi,
     iree_const_byte_span_t xclbin, iree_string_view_t kernel_name,
     iree_hal_amdxdna_native_context_ref_t** out_context_ref);
+
+iree_status_t iree_hal_amdxdna_device_pin_context(
+    iree_hal_amdxdna_device* device, iree_const_byte_span_t pdi,
+    iree_const_byte_span_t xclbin, iree_string_view_t kernel_name,
+    iree_hal_amdxdna_context_cache_lease_t** out_lease);
 
 #ifdef __cplusplus
 }  // extern "C"

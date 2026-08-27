@@ -17,6 +17,9 @@
 #include "iree/hal/drivers/amdxdna/executable.h"
 #include "iree/hal/drivers/amdxdna/native.h"
 
+typedef struct iree_hal_amdxdna_context_cache_lease_t
+    iree_hal_amdxdna_context_cache_lease_t;
+
 typedef struct iree_hal_amdxdna_u8_list_t {
   uint8_t* data;
   iree_host_size_t count;
@@ -48,6 +51,14 @@ typedef struct iree_hal_amdxdna_kernel_params_t {
   iree_string_view_t kernel_name;
   uint32_t n_reconfigure_runs;
   uint32_t n_pdi_loads;
+  // Legacy Windows MCDM requires stable per-entry-point native context/CU
+  // bindings for self-contained dispatches. The lease pins the cache entry
+  // against LRU eviction while keeping ownership accounted by the device cache.
+  // Written under the owning executable's context_mutex when native caps request
+  // this compatibility path.
+  iree_hal_amdxdna_context_cache_lease_t* cached_context_lease;
+  iree_hal_amdxdna_native_c_cu_index_t cached_cu_index;
+  bool cached_context_valid;
   IREE_TRACE(iree_string_view_t source_filename;)
   IREE_TRACE(uint32_t source_line;)
 } iree_hal_amdxdna_kernel_params_t;
