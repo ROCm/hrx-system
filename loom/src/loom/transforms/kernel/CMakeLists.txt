@@ -37,7 +37,6 @@ loom_cc_library(
     iree::base
     loom::ir
     loom::ops::buffer
-    loom::ops::func
     loom::ops::index
     loom::ops::op_defs
     loom::pass::types

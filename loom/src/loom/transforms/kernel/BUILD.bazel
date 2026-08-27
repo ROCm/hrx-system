@@ -34,7 +34,6 @@ loom_cc_library(
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/buffer",
-        "//loom/src/loom/ops/func",
         "//loom/src/loom/ops/index",
         "//loom/src/loom/pass:types",
         "//loom/src/loom/pass:value_facts",
