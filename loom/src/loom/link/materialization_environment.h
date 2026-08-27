@@ -24,8 +24,14 @@ typedef loom_diagnostic_sink_t (*loom_link_plan_diagnostic_sink_fn_t)(
     void* user_data, const loom_link_module_index_provider_t* provider);
 
 // Applies caller-owned specialization to a newly linked module.
+//
+// The callback owns |*inout_module| for the duration of the call and may
+// replace it with a semantically equivalent standalone module that preserves
+// all existing symbol IDs. Replacements may append symbols. On failure the
+// callback must leave an owned module in |*inout_module| for the materializer
+// to release.
 typedef iree_status_t (*loom_link_plan_prepare_module_fn_t)(
-    void* user_data, loom_module_t* module);
+    void* user_data, loom_module_t** inout_module);
 
 // Environment shared by every source materialized for one plan.
 typedef struct loom_link_plan_materialization_environment_t {

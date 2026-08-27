@@ -307,10 +307,10 @@ static loom_diagnostic_sink_t loom_link_cli_materialization_diagnostic_sink(
 }
 
 static iree_status_t loom_link_cli_prepare_linked_module(
-    void* user_data, loom_module_t* module) {
+    void* user_data, loom_module_t** inout_module) {
   loom_link_cli_prepare_state_t* state =
       (loom_link_cli_prepare_state_t*)user_data;
-  return loom_link_cli_materialize_config(module, state->config_set,
+  return loom_link_cli_materialize_config(*inout_module, state->config_set,
                                           state->block_pool);
 }
 

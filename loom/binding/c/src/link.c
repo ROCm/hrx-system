@@ -205,12 +205,12 @@ static loom_diagnostic_sink_t loomc_link_materialization_diagnostic_sink(
 }
 
 static iree_status_t loomc_link_prepare_module(void* user_data,
-                                               loom_module_t* module) {
+                                               loom_module_t** inout_module) {
   loomc_link_materialization_context_t* context =
       (loomc_link_materialization_context_t*)user_data;
   const loomc_config_apply_to_module_options_t apply_options = {
       .config = &context->options->config,
-      .module = module,
+      .module = *inout_module,
       .result = context->result,
       .diagnostic_code = loomc_make_cstring_view("CONFIG/INVALID"),
       .block_pool = context->block_pool,

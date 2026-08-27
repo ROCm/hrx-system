@@ -400,8 +400,11 @@ iree_status_t loom_link_plan_materialize(
   if (iree_status_is_ok(status)) {
     status = loom_linker_finish(linker, &output_module);
   }
+  const iree_host_size_t linked_symbol_count =
+      output_module != NULL ? output_module->symbols.count : 0;
   if (iree_status_is_ok(status) && environment->prepare_module != NULL) {
-    status = environment->prepare_module(environment->user_data, output_module);
+    status =
+        environment->prepare_module(environment->user_data, &output_module);
   }
   loom_linker_free(linker);
 
@@ -418,6 +421,6 @@ iree_status_t loom_link_plan_materialize(
   out_materialization->target_kernel_configurations.values =
       target_kernel_configurations;
   out_materialization->target_kernel_configurations.count =
-      target_kernel_configurations ? output_module->symbols.count : 0;
+      target_kernel_configurations ? linked_symbol_count : 0;
   return iree_ok_status();
 }
