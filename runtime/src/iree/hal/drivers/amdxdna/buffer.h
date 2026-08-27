@@ -27,6 +27,15 @@ iree_status_t iree_hal_amdxdna_buffer_wrap(
 iree_hal_amdxdna_native_buffer_t* iree_hal_amdxdna_buffer_handle(
     iree_hal_buffer_t* base_buffer);
 
+// Resolves a mapping/flush range onto the root native BO. Subspan buffers
+// store a non-zero |byte_offset|; flush/invalidate/map must clflush that
+// root offset rather than the local mapping offset.
+iree_status_t iree_hal_amdxdna_buffer_resolve_root_range(
+    iree_hal_buffer_t* base_buffer, iree_device_size_t local_byte_offset,
+    iree_device_size_t local_byte_length,
+    iree_device_size_t* out_root_byte_offset,
+    iree_device_size_t* out_byte_length);
+
 iree_status_t iree_hal_amdxdna_buffer_invalidate_range(
     iree_hal_buffer_t* base_buffer, iree_device_size_t local_byte_offset,
     iree_device_size_t local_byte_length);

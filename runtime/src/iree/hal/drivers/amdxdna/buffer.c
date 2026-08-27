@@ -23,7 +23,7 @@ typedef struct iree_hal_amdxdna_buffer_t {
   iree_atomic_uint32_t deallocated;
 } iree_hal_amdxdna_buffer_t;
 
-static iree_status_t iree_hal_amdxdna_buffer_resolve_root_range(
+iree_status_t iree_hal_amdxdna_buffer_resolve_root_range(
     iree_hal_buffer_t* base_buffer, iree_device_size_t local_byte_offset,
     iree_device_size_t local_byte_length,
     iree_device_size_t* out_root_byte_offset,

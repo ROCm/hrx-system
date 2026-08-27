@@ -136,42 +136,66 @@ static iree_status_t iree_hal_amdxdna_allocator_take_cached_buffer(
   return iree_ok_status();
 }
 
+static const iree_hal_memory_type_t
+    iree_hal_amdxdna_host_only_memory_type =
+        IREE_HAL_MEMORY_TYPE_HOST_VISIBLE | IREE_HAL_MEMORY_TYPE_HOST_CACHED |
+        IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
+
+static const iree_hal_memory_type_t iree_hal_amdxdna_host_local_bit =
+    IREE_HAL_MEMORY_TYPE_HOST_LOCAL & ~IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
+static const iree_hal_memory_type_t iree_hal_amdxdna_device_local_bit =
+    IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL & ~IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
+
 static iree_hal_buffer_compatibility_t
 iree_hal_amdxdna_allocator_query_buffer_compatibility(
     iree_hal_allocator_t* IREE_RESTRICT base_allocator,
     iree_hal_buffer_params_t* IREE_RESTRICT params,
     iree_device_size_t* IREE_RESTRICT allocation_size) {
   IREE_TRACE_ZONE_BEGIN(z0);
+  (void)base_allocator;
 
-  iree_hal_buffer_compatibility_t compatibility =
-      IREE_HAL_BUFFER_COMPATIBILITY_ALLOCATABLE;
-
-  // Buffers can only be used on the queue if they are device visible.
-  if (iree_all_bits_set(params->type, IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE)) {
-    if (iree_any_bit_set(params->usage, IREE_HAL_BUFFER_USAGE_DISPATCH)) {
-      compatibility |= IREE_HAL_BUFFER_COMPATIBILITY_QUEUE_DISPATCH;
-    }
+  const bool optimal =
+      iree_any_bit_set(params->type, IREE_HAL_MEMORY_TYPE_OPTIMAL);
+  iree_hal_memory_type_t required_type =
+      params->type & ~IREE_HAL_MEMORY_TYPE_OPTIMAL;
+  if (optimal) {
+    // HOST_LOCAL / DEVICE_LOCAL extra bits are placement preferences under
+    // OPTIMAL. HOST_COHERENT is a coherence contract, not a placement hint:
+    // HOST_ONLY BOs still fail it so callers flush/invalidate.
+    required_type &=
+        ~(iree_hal_amdxdna_host_local_bit | iree_hal_amdxdna_device_local_bit);
   }
 
-  params->type &= ~IREE_HAL_MEMORY_TYPE_OPTIMAL;
-  // amdxdna native host-visible allocations are shared-mapped with the device,
-  // so every allocation is simultaneously host-local, device-visible, and
-  // host-mappable. Transfer usage remains legal buffer metadata, but
-  // queue-transfer compatibility is intentionally not advertised until amdxdna
-  // has a native blit path; the device queue must not hide host-emulated
-  // map/sync/memcpy transfers behind asynchronous APIs.
-  params->type |=
-      IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
+  // HOST_ONLY allocations are cached host DRAM that the NPU can snoop. They
+  // are host-visible and device-visible, but not host-coherent: callers must
+  // flush/invalidate. They are also not HOST_LOCAL or DEVICE_LOCAL.
+  const iree_hal_memory_type_t rejected_type =
+      IREE_HAL_MEMORY_TYPE_HOST_COHERENT | iree_hal_amdxdna_host_local_bit |
+      iree_hal_amdxdna_device_local_bit | IREE_HAL_MEMORY_TYPE_DEVICE_UNCACHED;
+  if (iree_any_bit_set(required_type, rejected_type)) {
+    IREE_TRACE_ZONE_END(z0);
+    return IREE_HAL_BUFFER_COMPATIBILITY_NONE;
+  }
+
+  params->type = iree_hal_amdxdna_host_only_memory_type;
+  if (!iree_all_bits_set(params->type, required_type)) {
+    IREE_TRACE_ZONE_END(z0);
+    return IREE_HAL_BUFFER_COMPATIBILITY_NONE;
+  }
+
   params->usage |=
       IREE_HAL_BUFFER_USAGE_MAPPING | IREE_HAL_BUFFER_USAGE_TRANSFER;
 
-  // Guard against the corner case where the requested buffer size is 0. The
-  // application is unlikely to do anything when requesting a 0-byte buffer;
-  // but it can happen in real world use cases. So we should at least not
-  // crash.
+  iree_hal_buffer_compatibility_t compatibility =
+      IREE_HAL_BUFFER_COMPATIBILITY_ALLOCATABLE;
+  // Transfer usage remains legal buffer metadata, but queue-transfer
+  // compatibility is intentionally not advertised until amdxdna has a native
+  // blit path.
+  if (iree_any_bit_set(params->usage, IREE_HAL_BUFFER_USAGE_DISPATCH)) {
+    compatibility |= IREE_HAL_BUFFER_COMPATIBILITY_QUEUE_DISPATCH;
+  }
+
   if (*allocation_size == 0) *allocation_size = 4;
-  // Align allocation sizes to 4 bytes so shaders operating on 32 bit types
-  // can act safely even on buffer ranges that are not naturally aligned.
   *allocation_size = iree_host_align(*allocation_size, 4);
 
   IREE_TRACE_ZONE_END(z0);
@@ -190,7 +214,8 @@ static iree_status_t iree_hal_amdxdna_allocator_query_memory_heaps(
     return iree_status_from_code(IREE_STATUS_OUT_OF_RANGE);
   }
   heaps[0] = (iree_hal_allocator_memory_heap_t){
-      .type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
+      .type = IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
+              IREE_HAL_MEMORY_TYPE_HOST_CACHED |
               IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
       .allowed_usage = IREE_HAL_BUFFER_USAGE_TRANSFER |
                        IREE_HAL_BUFFER_USAGE_DISPATCH |
