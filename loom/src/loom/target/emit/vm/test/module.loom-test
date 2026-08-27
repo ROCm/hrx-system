@@ -39,6 +39,53 @@ functions:
 
 vm.target<core> @target
 
+func.def public target(@target) @function_type_order(%sync: func.ref<(i32) -> (i32)>, %yieldable: func.ref<yieldable (i32) -> (i32)>) -> (func.ref<yieldable (i32) -> (i32)>, func.ref<(i32) -> (i32)>) {
+  func.return %yieldable, %sync : func.ref<yieldable (i32) -> (i32)>, func.ref<(i32) -> (i32)>
+}
+
+func.def public target(@target) @nested_type_identity(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+// ----
+vm.module "module" core=0.0 bytes=424
+requirements:
+sections:
+  [0] strings type=0x0002 flags=0x0000 bytes=[96, +55)
+  [1] signatures type=0x0004 flags=0x0000 bytes=[152, +84)
+  [2] callable_types type=0x0005 flags=0x0000 bytes=[240, +28)
+  [3] exports type=0x0007 flags=0x0000 bytes=[272, +20)
+  [4] functions type=0x0008 flags=0x0000 bytes=[296, +128)
+resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
+module_metadata:
+ref_types:
+callable_types:
+  [0] (i32) -> (i32)
+  [1] (i32) -> (i32) may_yield
+  [2] (func<module:0>, func<module:1>) -> (func<module:1>, func<module:0>)
+imports:
+exports:
+  [0] @function_type_order -> function[0] : (func<module:0>, func<module:1>) -> (func<module:1>, func<module:0>)
+  [1] @nested_type_identity -> function[1] : (i32) -> (i32)
+functions:
+  [0] callable[2] signature[2] bytecode=[0, +20) registers=(0, 0, 3) locals=(0, 0, 0) switch_targets=0
+    type = (func<module:0>, func<module:1>) -> (func<module:1>, func<module:0>)
+    +0000  control.block
+    +0004  func.copy dst_f8=2 src_f8=0
+    +0008  func.copy dst_f8=0 src_f8=1
+    +0012  func.copy dst_f8=1 src_f8=2
+    +0016  control.return
+  [1] callable[0] signature[0] bytecode=[20, +8) registers=(1, 0, 0) locals=(0, 0, 0) switch_targets=0
+    type = (i32) -> (i32)
+    +0000  control.block
+    +0004  control.return
+
+// ====
+
+// RUN: emit vm-dis
+
+vm.target<core> @target
+
 func.def public target(@target) @identity(%value: i32) -> (i32) {
   func.return %value : i32
 }

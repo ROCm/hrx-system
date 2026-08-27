@@ -18,12 +18,14 @@ loom_cc_library(
     "function_layout.h"
     "module_emitter.h"
     "module_layout.h"
+    "module_types.h"
   SRCS
     "artifact_emitter.c"
     "function_encoder.c"
     "function_layout.c"
     "module_emitter.c"
     "module_layout.c"
+    "module_types.c"
   DEPS
     iree::base
     iree::base::internal::arena
@@ -39,8 +41,10 @@ loom_cc_library(
     loom::error::emitter
     loom::format::bytecode::writer::encoder
     loom::ir
+    loom::ops::func
     loom::ops::low
     loom::ops::op_defs
+    loom::ops::type_registry
     loom::target::arch::vm::abi_layout
     loom::target::arch::vm::descriptors
     loom::target::low_descriptor_registry

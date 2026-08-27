@@ -15,7 +15,7 @@
 #include "loom/target/emit/vm/module_layout.h"
 
 enum {
-  LOOM_VM_MODULE_MAX_SECTION_COUNT = 5,
+  LOOM_VM_MODULE_MAX_SECTION_COUNT = 6,
   LOOM_VM_MODULE_STREAM_BLOCK_SIZE = 32 * 1024,
 };
 
@@ -63,11 +63,12 @@ static void loom_vm_module_writer_end_section(loom_vm_module_writer_t* writer,
 
 static iree_status_t loom_vm_module_write_strings(
     const loom_vm_module_layout_t* layout, loom_vm_module_writer_t* writer) {
+  const loom_vm_module_type_tables_t* tables = &layout->type_tables;
   uint64_t section_start = 0;
   IREE_RETURN_IF_ERROR(loom_vm_module_writer_begin_section(
       writer, IREE_VM_BYTECODE_SECTION_STRINGS, &section_start));
   const iree_vm_bytecode_v0_strings_header_t header = {
-      .string_count_u32 = (uint32_t)layout->export_count,
+      .string_count_u32 = tables->string_count,
   };
   IREE_RETURN_IF_ERROR(
       loom_vm_module_writer_write_record(writer, &header, sizeof(header)));
@@ -75,8 +76,8 @@ static iree_status_t loom_vm_module_write_strings(
   uint32_t string_offset = 0;
   IREE_RETURN_IF_ERROR(
       loom_bytecode_page_writer_write_u32_le(&writer->writer, string_offset));
-  for (iree_host_size_t i = 0; i < layout->export_count; ++i) {
-    const iree_string_view_t value = layout->exports[i]->export_name;
+  for (uint32_t i = 0; i < tables->string_count; ++i) {
+    const iree_string_view_t value = tables->strings[i];
     if (value.size > UINT32_MAX - string_offset) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "VM string data length exceeds u32");
@@ -85,8 +86,8 @@ static iree_status_t loom_vm_module_write_strings(
     IREE_RETURN_IF_ERROR(
         loom_bytecode_page_writer_write_u32_le(&writer->writer, string_offset));
   }
-  for (iree_host_size_t i = 0; i < layout->export_count; ++i) {
-    const iree_string_view_t value = layout->exports[i]->export_name;
+  for (uint32_t i = 0; i < tables->string_count; ++i) {
+    const iree_string_view_t value = tables->strings[i];
     IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write(
         &writer->writer, value.data, value.size));
   }
@@ -94,49 +95,47 @@ static iree_status_t loom_vm_module_write_strings(
   return iree_ok_status();
 }
 
+static iree_status_t loom_vm_module_write_ref_types(
+    const loom_vm_module_layout_t* layout, loom_vm_module_writer_t* writer) {
+  const loom_vm_module_type_tables_t* tables = &layout->type_tables;
+  uint64_t section_start = 0;
+  IREE_RETURN_IF_ERROR(loom_vm_module_writer_begin_section(
+      writer, IREE_VM_BYTECODE_SECTION_REF_TYPES, &section_start));
+  const iree_vm_bytecode_v0_ref_types_header_t header = {
+      .group_count_u32 = tables->ref_type_group_count,
+  };
+  IREE_RETURN_IF_ERROR(
+      loom_vm_module_writer_write_record(writer, &header, sizeof(header)));
+  IREE_RETURN_IF_ERROR(loom_vm_module_writer_write_record(
+      writer, tables->ref_type_groups,
+      tables->ref_type_group_count * sizeof(*tables->ref_type_groups)));
+  IREE_RETURN_IF_ERROR(loom_vm_module_writer_write_record(
+      writer, tables->ref_type_entries,
+      tables->ref_type_entry_count * sizeof(*tables->ref_type_entries)));
+  loom_vm_module_writer_end_section(writer, section_start);
+  return iree_ok_status();
+}
+
 static iree_status_t loom_vm_module_write_signatures(
     const loom_vm_module_layout_t* layout, loom_vm_module_writer_t* writer) {
+  const loom_vm_module_type_tables_t* tables = &layout->type_tables;
   uint64_t section_start = 0;
   IREE_RETURN_IF_ERROR(loom_vm_module_writer_begin_section(
       writer, IREE_VM_BYTECODE_SECTION_SIGNATURES, &section_start));
   const iree_vm_bytecode_v0_signatures_header_t header = {
-      .signature_count_u32 = (uint32_t)layout->callable_type_count,
+      .signature_count_u32 = tables->signature_count,
   };
   IREE_RETURN_IF_ERROR(
       loom_vm_module_writer_write_record(writer, &header, sizeof(header)));
 
-  uint32_t descriptor_base = 0;
-  for (iree_host_size_t i = 0; i < layout->callable_type_count; ++i) {
-    const loom_vm_module_function_layout_t* function =
-        layout->callable_types[i];
-    const iree_vm_bytecode_v0_signature_row_t row = {
-        .descriptor_base_u32 = descriptor_base,
-        .argument_value_count_u16 = function->argument_count,
-        .result_value_count_u16 = function->result_count,
-    };
-    IREE_RETURN_IF_ERROR(
-        loom_vm_module_writer_write_record(writer, &row, sizeof(row)));
-    descriptor_base += function->argument_count + function->result_count;
-  }
-  IREE_ASSERT_EQ(descriptor_base, layout->signature_descriptor_count);
-
-  for (iree_host_size_t i = 0; i < layout->callable_type_count; ++i) {
-    const loom_vm_module_function_layout_t* function =
-        layout->callable_types[i];
-    for (uint16_t j = 0; j < function->argument_count; ++j) {
-      const iree_vm_bytecode_v0_signature_descriptor_row_t descriptor = {
-          .kind_u16 = function->argument_kinds[j],
-      };
-      IREE_RETURN_IF_ERROR(loom_vm_module_writer_write_record(
-          writer, &descriptor, sizeof(descriptor)));
-    }
-    for (uint16_t j = 0; j < function->result_count; ++j) {
-      const iree_vm_bytecode_v0_signature_descriptor_row_t descriptor = {
-          .kind_u16 = function->result_kinds[j],
-      };
-      IREE_RETURN_IF_ERROR(loom_vm_module_writer_write_record(
-          writer, &descriptor, sizeof(descriptor)));
-    }
+  IREE_RETURN_IF_ERROR(loom_vm_module_writer_write_record(
+      writer, tables->signatures,
+      tables->signature_count * sizeof(*tables->signatures)));
+  if (tables->signature_descriptor_count != 0) {
+    IREE_RETURN_IF_ERROR(loom_vm_module_writer_write_record(
+        writer, tables->signature_descriptors,
+        tables->signature_descriptor_count *
+            sizeof(*tables->signature_descriptors)));
   }
   loom_vm_module_writer_end_section(writer, section_start);
   return iree_ok_status();
@@ -144,21 +143,18 @@ static iree_status_t loom_vm_module_write_signatures(
 
 static iree_status_t loom_vm_module_write_callable_types(
     const loom_vm_module_layout_t* layout, loom_vm_module_writer_t* writer) {
+  const loom_vm_module_type_tables_t* tables = &layout->type_tables;
   uint64_t section_start = 0;
   IREE_RETURN_IF_ERROR(loom_vm_module_writer_begin_section(
       writer, IREE_VM_BYTECODE_SECTION_CALLABLE_TYPES, &section_start));
   const iree_vm_bytecode_v0_callable_types_header_t header = {
-      .callable_type_count_u32 = (uint32_t)layout->callable_type_count,
+      .callable_type_count_u32 = tables->callable_type_count,
   };
   IREE_RETURN_IF_ERROR(
       loom_vm_module_writer_write_record(writer, &header, sizeof(header)));
-  for (iree_host_size_t i = 0; i < layout->callable_type_count; ++i) {
-    const iree_vm_bytecode_v0_callable_type_row_t row = {
-        .signature_ordinal_u16 = (uint16_t)i,
-    };
-    IREE_RETURN_IF_ERROR(
-        loom_vm_module_writer_write_record(writer, &row, sizeof(row)));
-  }
+  IREE_RETURN_IF_ERROR(loom_vm_module_writer_write_record(
+      writer, tables->callable_types,
+      tables->callable_type_count * sizeof(*tables->callable_types)));
   loom_vm_module_writer_end_section(writer, section_start);
   return iree_ok_status();
 }
@@ -176,7 +172,7 @@ static iree_status_t loom_vm_module_write_exports(
   for (iree_host_size_t i = 0; i < layout->export_count; ++i) {
     const loom_vm_module_function_layout_t* function = layout->exports[i];
     const iree_vm_bytecode_v0_export_row_t row = {
-        .name_string_u16 = (uint16_t)i,
+        .name_string_u16 = function->export_name_string_ordinal,
         .callable_type_ordinal_u16 = function->callable_type_ordinal,
         .function_ordinal_u16 = function->function_ordinal,
     };
@@ -321,7 +317,9 @@ static iree_status_t loom_vm_module_write_image(
     bool* out_complete) {
   *out_complete = false;
   const uint16_t section_count =
-      (uint16_t)(3 + (layout->export_count != 0 ? 2 : 0));
+      (uint16_t)(3 + (layout->type_tables.string_count != 0 ? 1 : 0) +
+                 (layout->type_tables.ref_type_entry_count != 0 ? 1 : 0) +
+                 (layout->export_count != 0 ? 1 : 0));
   iree_vm_bytecode_v0_image_header_t header = {0};
   memcpy(header.magic_u8, IREE_VM_BYTECODE_IMAGE_HEADER_MAGIC_U8_BYTES,
          IREE_VM_BYTECODE_IMAGE_HEADER_MAGIC_U8_LENGTH);
@@ -333,8 +331,11 @@ static iree_status_t loom_vm_module_write_image(
   IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_zeros(
       &writer->writer, section_count * sizeof(*writer->sections)));
 
-  if (layout->export_count != 0) {
+  if (layout->type_tables.string_count != 0) {
     IREE_RETURN_IF_ERROR(loom_vm_module_write_strings(layout, writer));
+  }
+  if (layout->type_tables.ref_type_entry_count != 0) {
+    IREE_RETURN_IF_ERROR(loom_vm_module_write_ref_types(layout, writer));
   }
   IREE_RETURN_IF_ERROR(loom_vm_module_write_signatures(layout, writer));
   IREE_RETURN_IF_ERROR(loom_vm_module_write_callable_types(layout, writer));

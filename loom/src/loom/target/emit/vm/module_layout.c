@@ -8,12 +8,10 @@
 
 #include <stdlib.h>
 
-#include "iree/vm/bytecode/wire/module_format.h"
 #include "loom/codegen/low/function.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
-#include "loom/target/arch/vm/descriptors.h"
-#include "loom/target/registers.h"
+#include "loom/target/arch/vm/abi/layout.h"
 
 static iree_string_view_t loom_vm_module_layout_string_or_empty(
     const loom_module_t* module, loom_string_id_t string_id) {
@@ -37,90 +35,6 @@ static iree_string_view_t loom_vm_module_layout_export_name(
     return loom_vm_module_layout_string_or_empty(module, symbol->name_id);
   }
   return iree_string_view_empty();
-}
-
-static iree_status_t loom_vm_module_layout_signature_kind(
-    const loom_module_t* module, loom_value_id_t value_id, uint16_t* out_kind) {
-  const loom_type_t register_type = loom_module_value_type(module, value_id);
-  const loom_type_t* value_type = loom_type_register_value_type(register_type);
-  if (!loom_low_type_is_register(register_type) ||
-      loom_low_register_type_descriptor_set_stable_id(register_type) !=
-          VM_CORE_DESCRIPTOR_SET_ID ||
-      loom_low_register_type_class_id(register_type) !=
-          VM_CORE_REG_CLASS_ID_VALUE ||
-      loom_low_register_type_unit_count(register_type) != 1 ||
-      value_type == NULL || !loom_type_is_scalar(*value_type)) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "VM function signature value %u is not one scalar vm.value register",
-        (unsigned)value_id);
-  }
-
-  switch (loom_type_element_type(*value_type)) {
-    case LOOM_SCALAR_TYPE_INDEX:
-    case LOOM_SCALAR_TYPE_OFFSET:
-    case LOOM_SCALAR_TYPE_I64:
-      *out_kind = IREE_VM_BYTECODE_SIGNATURE_KIND_I64;
-      return iree_ok_status();
-    case LOOM_SCALAR_TYPE_I1:
-    case LOOM_SCALAR_TYPE_I8:
-      *out_kind = IREE_VM_BYTECODE_SIGNATURE_KIND_I8;
-      return iree_ok_status();
-    case LOOM_SCALAR_TYPE_I16:
-      *out_kind = IREE_VM_BYTECODE_SIGNATURE_KIND_I16;
-      return iree_ok_status();
-    case LOOM_SCALAR_TYPE_I32:
-      *out_kind = IREE_VM_BYTECODE_SIGNATURE_KIND_I32;
-      return iree_ok_status();
-    case LOOM_SCALAR_TYPE_F8E4M3:
-      *out_kind = IREE_VM_BYTECODE_SIGNATURE_KIND_F8E4M3FN;
-      return iree_ok_status();
-    case LOOM_SCALAR_TYPE_F8E5M2:
-      *out_kind = IREE_VM_BYTECODE_SIGNATURE_KIND_F8E5M2;
-      return iree_ok_status();
-    case LOOM_SCALAR_TYPE_F16:
-      *out_kind = IREE_VM_BYTECODE_SIGNATURE_KIND_F16;
-      return iree_ok_status();
-    case LOOM_SCALAR_TYPE_BF16:
-      *out_kind = IREE_VM_BYTECODE_SIGNATURE_KIND_BF16;
-      return iree_ok_status();
-    case LOOM_SCALAR_TYPE_F32:
-      *out_kind = IREE_VM_BYTECODE_SIGNATURE_KIND_F32;
-      return iree_ok_status();
-    case LOOM_SCALAR_TYPE_F64:
-      *out_kind = IREE_VM_BYTECODE_SIGNATURE_KIND_F64;
-      return iree_ok_status();
-    default:
-      return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                              "scalar type is not supported by the VM ABI");
-  }
-}
-
-static int loom_vm_module_layout_compare_kind_lists(const uint16_t* lhs,
-                                                    const uint16_t* rhs,
-                                                    uint16_t count) {
-  for (uint16_t i = 0; i < count; ++i) {
-    if (lhs[i] < rhs[i]) return -1;
-    if (lhs[i] > rhs[i]) return 1;
-  }
-  return 0;
-}
-
-static int loom_vm_module_layout_compare_callable_types(const void* lhs_ptr,
-                                                        const void* rhs_ptr) {
-  const loom_vm_module_function_layout_t* lhs =
-      *(loom_vm_module_function_layout_t* const*)lhs_ptr;
-  const loom_vm_module_function_layout_t* rhs =
-      *(loom_vm_module_function_layout_t* const*)rhs_ptr;
-  if (lhs->argument_count < rhs->argument_count) return -1;
-  if (lhs->argument_count > rhs->argument_count) return 1;
-  int comparison = loom_vm_module_layout_compare_kind_lists(
-      lhs->argument_kinds, rhs->argument_kinds, lhs->argument_count);
-  if (comparison != 0) return comparison;
-  if (lhs->result_count < rhs->result_count) return -1;
-  if (lhs->result_count > rhs->result_count) return 1;
-  return loom_vm_module_layout_compare_kind_lists(
-      lhs->result_kinds, rhs->result_kinds, lhs->result_count);
 }
 
 static int loom_vm_module_layout_compare_export_names(const void* lhs_ptr,
@@ -155,10 +69,8 @@ static iree_status_t loom_vm_module_layout_count_switch_targets(
 }
 
 static iree_status_t loom_vm_module_layout_count(
-    const loom_module_t* module, iree_host_size_t* out_function_count,
-    iree_host_size_t* out_signature_descriptor_count) {
+    const loom_module_t* module, iree_host_size_t* out_function_count) {
   *out_function_count = 0;
-  *out_signature_descriptor_count = 0;
   for (iree_host_size_t i = 0; i < module->symbols.count; ++i) {
     const loom_op_t* defining_op = module->symbols.entries[i].defining_op;
     if (defining_op == NULL) continue;
@@ -176,21 +88,6 @@ static iree_status_t loom_vm_module_layout_count(
           IREE_STATUS_OUT_OF_RANGE,
           "VM function count exceeds the u16 ordinal domain");
     }
-    loom_func_like_t function =
-        loom_func_like_cast(module, (loom_op_t*)defining_op);
-    uint16_t argument_count = 0;
-    (void)loom_func_like_arg_ids(function, &argument_count);
-    const loom_value_slice_t results = loom_low_func_def_results(defining_op);
-    iree_host_size_t descriptor_count = 0;
-    if (!iree_host_size_checked_add(argument_count, results.count,
-                                    &descriptor_count) ||
-        !iree_host_size_checked_add(*out_signature_descriptor_count,
-                                    descriptor_count,
-                                    out_signature_descriptor_count) ||
-        *out_signature_descriptor_count > UINT32_MAX) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "VM signature descriptor count exceeds u32");
-    }
     ++*out_function_count;
   }
   if (*out_function_count == 0) {
@@ -201,10 +98,9 @@ static iree_status_t loom_vm_module_layout_count(
 }
 
 static iree_status_t loom_vm_module_layout_populate_functions(
-    loom_module_t* module, uint16_t* signature_kinds,
+    loom_module_t* module, iree_arena_allocator_t* arena,
     loom_vm_module_layout_t* layout) {
   iree_host_size_t function_index = 0;
-  iree_host_size_t signature_kind_index = 0;
   for (iree_host_size_t symbol_index = 0; symbol_index < module->symbols.count;
        ++symbol_index) {
     const loom_symbol_t* symbol = &module->symbols.entries[symbol_index];
@@ -219,30 +115,26 @@ static iree_status_t loom_vm_module_layout_populate_functions(
     if (!iree_string_view_is_empty(function->export_name)) {
       ++layout->export_count;
     }
-
-    loom_func_like_t function_like = loom_func_like_cast(module, function_op);
-    const loom_value_id_t* arguments =
-        loom_func_like_arg_ids(function_like, &function->argument_count);
-    function->argument_kinds = function->argument_count != 0
-                                   ? signature_kinds + signature_kind_index
-                                   : NULL;
-    for (uint16_t i = 0; i < function->argument_count; ++i) {
-      IREE_RETURN_IF_ERROR(loom_vm_module_layout_signature_kind(
-          module, arguments[i], &signature_kinds[signature_kind_index++]));
-    }
-
-    const loom_value_slice_t results = loom_low_func_def_results(function_op);
-    if (results.count > UINT16_MAX) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "VM function result count exceeds u16");
-    }
-    function->result_count = (uint16_t)results.count;
-    function->result_kinds = function->result_count != 0
-                                 ? signature_kinds + signature_kind_index
-                                 : NULL;
-    for (uint16_t i = 0; i < function->result_count; ++i) {
-      IREE_RETURN_IF_ERROR(loom_vm_module_layout_signature_kind(
-          module, results.values[i], &signature_kinds[signature_kind_index++]));
+    const loom_named_attr_slice_t abi_layout =
+        loom_low_func_def_abi_layout(function_op);
+    if (abi_layout.count == 0) {
+      loom_func_like_t function_like = loom_func_like_cast(module, function_op);
+      uint16_t argument_count = 0;
+      loom_func_like_arg_ids(function_like, &argument_count);
+      if (argument_count != 0 ||
+          loom_low_func_def_results(function_op).count != 0) {
+        return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                                "nonempty VM function is missing its preserved "
+                                "logical ABI signature");
+      }
+      loom_func_type_data_t* empty_signature = NULL;
+      IREE_RETURN_IF_ERROR(iree_arena_allocate(arena, sizeof(*empty_signature),
+                                               (void**)&empty_signature));
+      *empty_signature = (loom_func_type_data_t){0};
+      function->logical_signature = loom_type_function(empty_signature);
+    } else {
+      IREE_RETURN_IF_ERROR(loom_vm_call_abi_layout_resolve_signature(
+          module, abi_layout, &function->logical_signature));
     }
 
     IREE_RETURN_IF_ERROR(loom_vm_module_layout_count_switch_targets(
@@ -258,39 +150,10 @@ static iree_status_t loom_vm_module_layout_populate_functions(
   return iree_ok_status();
 }
 
-static iree_status_t loom_vm_module_layout_assign_ordinals(
+static iree_status_t loom_vm_module_layout_assign_exports(
     iree_arena_allocator_t* arena, loom_vm_module_layout_t* layout) {
   for (iree_host_size_t i = 0; i < layout->function_count; ++i) {
     layout->functions[i].function_ordinal = (uint16_t)i;
-  }
-
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, layout->function_count, sizeof(*layout->callable_types),
-      (void**)&layout->callable_types));
-  for (iree_host_size_t i = 0; i < layout->function_count; ++i) {
-    layout->callable_types[i] = &layout->functions[i];
-  }
-  qsort(layout->callable_types, layout->function_count,
-        sizeof(*layout->callable_types),
-        loom_vm_module_layout_compare_callable_types);
-
-  loom_vm_module_function_layout_t* previous = NULL;
-  for (iree_host_size_t i = 0; i < layout->function_count; ++i) {
-    loom_vm_module_function_layout_t* function = layout->callable_types[i];
-    if (previous == NULL || loom_vm_module_layout_compare_callable_types(
-                                &previous, &function) != 0) {
-      if (layout->callable_type_count == 65536u) {
-        return iree_make_status(
-            IREE_STATUS_OUT_OF_RANGE,
-            "VM callable type count exceeds the u16 ordinal domain");
-      }
-      layout->callable_types[layout->callable_type_count++] = function;
-      layout->signature_descriptor_count +=
-          function->argument_count + function->result_count;
-      previous = function;
-    }
-    function->callable_type_ordinal =
-        (uint16_t)(layout->callable_type_count - 1);
   }
 
   if (layout->export_count == 0) return iree_ok_status();
@@ -321,19 +184,13 @@ iree_status_t loom_vm_module_layout_build(loom_module_t* module,
   *out_layout = (loom_vm_module_layout_t){
       .module = module,
   };
-  iree_host_size_t signature_descriptor_count = 0;
-  IREE_RETURN_IF_ERROR(loom_vm_module_layout_count(
-      module, &out_layout->function_count, &signature_descriptor_count));
+  IREE_RETURN_IF_ERROR(
+      loom_vm_module_layout_count(module, &out_layout->function_count));
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, out_layout->function_count, sizeof(*out_layout->functions),
       (void**)&out_layout->functions));
-  uint16_t* signature_kinds = NULL;
-  if (signature_descriptor_count != 0) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        arena, signature_descriptor_count, sizeof(*signature_kinds),
-        (void**)&signature_kinds));
-  }
-  IREE_RETURN_IF_ERROR(loom_vm_module_layout_populate_functions(
-      module, signature_kinds, out_layout));
-  return loom_vm_module_layout_assign_ordinals(arena, out_layout);
+  IREE_RETURN_IF_ERROR(
+      loom_vm_module_layout_populate_functions(module, arena, out_layout));
+  IREE_RETURN_IF_ERROR(loom_vm_module_layout_assign_exports(arena, out_layout));
+  return loom_vm_module_type_tables_build(arena, out_layout);
 }

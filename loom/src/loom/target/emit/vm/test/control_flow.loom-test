@@ -45,7 +45,7 @@ functions:
 
 vm.target<core> @target
 
-low.func.def target<vm.core>(@target) abi(vm_function) @diamond(%condition: reg<vm.value : i1>, %true_value: reg<vm.value : i32>, %false_value: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i1>, reg<vm.value : i32>, reg<vm.value : i32>) -> (reg<vm.value : i32>)>}) @diamond(%condition: reg<vm.value : i1>, %true_value: reg<vm.value : i32>, %false_value: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
   low.cond_br %condition, ^then, ^else : reg<vm.value : i1>
 ^join(%result: reg<vm.value : i32>):
   return %result
@@ -90,7 +90,7 @@ functions:
 
 vm.target<core> @target
 
-low.func.def target<vm.core>(@target) abi(vm_function) @loop_arg_cycle(%lhs: reg<vm.value : i32>, %rhs: reg<vm.value : i32>) asm {
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i32>, reg<vm.value : i32>) -> ()>}) @loop_arg_cycle(%lhs: reg<vm.value : i32>, %rhs: reg<vm.value : i32>) asm {
   low.br ^loop(%rhs: reg<vm.value : i32>, %lhs: reg<vm.value : i32>)
 ^loop(%a: reg<vm.value : i32>, %b: reg<vm.value : i32>):
   low.br ^loop(%b: reg<vm.value : i32>, %a: reg<vm.value : i32>)
