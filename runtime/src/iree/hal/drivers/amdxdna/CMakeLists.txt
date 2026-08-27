@@ -80,6 +80,7 @@ iree_cc_library(
     "buffer.h"
     "command_buffer.h"
     "completion_queue.h"
+    "dispatch.h"
     "context_cache.h"
     "device.h"
     "device_internal.h"

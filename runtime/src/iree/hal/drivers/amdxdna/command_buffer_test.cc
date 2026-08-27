@@ -13,6 +13,7 @@
 #include "iree/hal/api.h"
 #include "iree/hal/drivers/amdxdna/allocator.h"
 #include "iree/hal/drivers/amdxdna/device.h"
+#include "iree/hal/drivers/amdxdna/dispatch.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -407,6 +408,52 @@ TEST_F(CommandBufferTest, ApplyRetainsBufferBarriers) {
   EXPECT_EQ(target.barrier_ref.length, 16);
 
   iree_hal_command_buffer_release(command_buffer);
+}
+
+TEST(DispatchContractTest, AcceptsStatic1x1x1) {
+  iree_hal_dispatch_config_t config =
+      iree_hal_make_static_dispatch_config(1, 1, 1);
+  IREE_EXPECT_OK(
+      iree_hal_amdxdna_validate_dispatch(&config, IREE_HAL_DISPATCH_FLAG_NONE));
+  EXPECT_FALSE(iree_hal_amdxdna_dispatch_is_zero_workgroups(
+      &config, IREE_HAL_DISPATCH_FLAG_NONE));
+}
+
+TEST(DispatchContractTest, ZeroWorkgroupsIsOrderedNoOp) {
+  iree_hal_dispatch_config_t config =
+      iree_hal_make_static_dispatch_config(0, 0, 0);
+  IREE_EXPECT_OK(
+      iree_hal_amdxdna_validate_dispatch(&config, IREE_HAL_DISPATCH_FLAG_NONE));
+  EXPECT_TRUE(iree_hal_amdxdna_dispatch_is_zero_workgroups(
+      &config, IREE_HAL_DISPATCH_FLAG_NONE));
+}
+
+TEST(DispatchContractTest, RejectsNonUnitWorkgroupCount) {
+  iree_hal_dispatch_config_t config =
+      iree_hal_make_static_dispatch_config(2, 1, 1);
+  iree_status_t status =
+      iree_hal_amdxdna_validate_dispatch(&config, IREE_HAL_DISPATCH_FLAG_NONE);
+  EXPECT_EQ(iree_status_code(status), IREE_STATUS_UNIMPLEMENTED);
+  iree_status_ignore(status);
+}
+
+TEST(DispatchContractTest, RejectsIndirectParameters) {
+  iree_hal_dispatch_config_t config =
+      iree_hal_make_static_dispatch_config(1, 1, 1);
+  iree_status_t status = iree_hal_amdxdna_validate_dispatch(
+      &config, IREE_HAL_DISPATCH_FLAG_STATIC_INDIRECT_PARAMETERS);
+  EXPECT_EQ(iree_status_code(status), IREE_STATUS_UNIMPLEMENTED);
+  iree_status_ignore(status);
+}
+
+TEST(DispatchContractTest, RejectsWorkgroupLocalMemory) {
+  iree_hal_dispatch_config_t config =
+      iree_hal_make_static_dispatch_config(1, 1, 1);
+  config.dynamic_workgroup_local_memory = 64;
+  iree_status_t status =
+      iree_hal_amdxdna_validate_dispatch(&config, IREE_HAL_DISPATCH_FLAG_NONE);
+  EXPECT_EQ(iree_status_code(status), IREE_STATUS_UNIMPLEMENTED);
+  iree_status_ignore(status);
 }
 
 }  // namespace

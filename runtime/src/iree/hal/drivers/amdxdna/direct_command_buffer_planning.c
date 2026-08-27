@@ -6,6 +6,7 @@
 
 #include "iree/hal/drivers/amdxdna/direct_command_buffer_planning.h"
 
+#include <stdint.h>
 #include <string.h>
 
 // AIE-visible DDR address offset added to every shim-DMA buffer address.
@@ -29,6 +30,22 @@ static uint32_t iree_hal_amdxdna_read_u32(const uint8_t* p) {
 
 static void iree_hal_amdxdna_write_u32(uint8_t* p, uint32_t value) {
   memcpy(p, &value, sizeof(value));
+}
+
+// Shim-DMA BD addresses are 48-bit and 4-byte aligned. Reject overflow and
+// unaligned arg+arg_plus sums instead of masking, so a miscompiled TXN fails
+// closed rather than silently pointing at a neighboring descriptor.
+static bool iree_hal_amdxdna_bd_base_address(uint64_t arg, uint32_t arg_plus,
+                                             uint64_t* out_base) {
+  const uint64_t addend = (uint64_t)arg_plus;
+  if (arg > UINT64_MAX - addend) return false;
+  const uint64_t sum = arg + addend;
+  if (sum > UINT64_MAX - iree_hal_amdxdna_ddr_aie_addr_offset) return false;
+  const uint64_t base = sum + iree_hal_amdxdna_ddr_aie_addr_offset;
+  if ((base & 0x3u) != 0) return false;
+  if (base > 0x0000FFFFFFFFFFFFULL) return false;
+  *out_base = base;
+  return true;
 }
 
 typedef struct iree_hal_amdxdna_bd_patch_site_t {
@@ -347,9 +364,11 @@ bool iree_hal_amdxdna_apply_patch_table(uint32_t* ctrl_code, size_t ctrl_words,
     // the final AIE-visible BD address from scratch instead of accumulating onto
     // a compiler-baked address word, which would double-count sub-buffer BDs.
     // bd[2] bits [31:16] carry BD control state and must be preserved.
-    uint64_t base =
-        args[arg_idx] + arg_plus + iree_hal_amdxdna_ddr_aie_addr_offset;
-    uint32_t bd1 = (uint32_t)(base & 0xFFFFFFFC);
+    uint64_t base = 0;
+    if (!iree_hal_amdxdna_bd_base_address(args[arg_idx], arg_plus, &base)) {
+      return false;
+    }
+    uint32_t bd1 = (uint32_t)base;
     bd2 = (bd2 & 0xFFFF0000) | (uint32_t)(base >> 32);
     iree_hal_amdxdna_write_u32(b + offset + 4, bd1);
     iree_hal_amdxdna_write_u32(b + offset + 8, bd2);
@@ -440,9 +459,15 @@ iree_status_t iree_hal_amdxdna_patch_dynamic_fields_from_template(
         iree_hal_amdxdna_read_u32(template_bytes + offset + 8);
     // Overwrite (do not accumulate onto) the compiler-baked BD address. See
     // iree_hal_amdxdna_apply_patch_table for details.
-    uint64_t base =
-        args[arg_idx] + arg_plus + iree_hal_amdxdna_ddr_aie_addr_offset;
-    const uint32_t bd1 = (uint32_t)(base & 0xFFFFFFFC);
+    uint64_t base = 0;
+    if (!iree_hal_amdxdna_bd_base_address(args[arg_idx], arg_plus, &base)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "amdxdna host patch address for arg %u overflowed or is not 4-byte "
+          "aligned",
+          arg_idx);
+    }
+    const uint32_t bd1 = (uint32_t)base;
     const uint32_t bd2 = (template_bd2 & 0xFFFF0000) | (uint32_t)(base >> 32);
     iree_hal_amdxdna_write_u32(dst_bytes + offset + 4, bd1);
     iree_hal_amdxdna_write_u32(dst_bytes + offset + 8, bd2);

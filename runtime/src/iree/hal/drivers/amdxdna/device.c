@@ -24,6 +24,7 @@
 #include "iree/hal/drivers/amdxdna/direct_command_buffer.h"
 #include "iree/hal/drivers/amdxdna/direct_command_buffer_chain_cache.h"
 #include "iree/hal/drivers/amdxdna/direct_command_buffer_single_cache.h"
+#include "iree/hal/drivers/amdxdna/dispatch.h"
 #include "iree/hal/drivers/amdxdna/executable.h"
 #include "iree/hal/drivers/amdxdna/semaphore.h"
 #include "iree/hal/drivers/amdxdna/util.h"
@@ -1457,9 +1458,8 @@ static iree_status_t iree_hal_amdxdna_device_queue_dispatch(
 
   iree_hal_amdxdna_device* device = IREE_HAL_AMDXDNA_CHECKED_VTABLE_CAST(
       base_device, iree_hal_amdxdna_device_vtable, iree_hal_amdxdna_device);
-  if (!iree_hal_dispatch_uses_indirect_parameters(flags) &&
-      (config.workgroup_count[0] | config.workgroup_count[1] |
-       config.workgroup_count[2]) == 0) {
+  IREE_RETURN_IF_ERROR(iree_hal_amdxdna_validate_dispatch(&config, flags));
+  if (iree_hal_amdxdna_dispatch_is_zero_workgroups(&config, flags)) {
     return iree_hal_amdxdna_enqueue_signal_op(device, wait_semaphore_list,
                                               signal_semaphore_list);
   }

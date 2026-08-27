@@ -341,18 +341,22 @@ TEST(ApplyPatchTableTest, RejectsOutOfBoundsOrMisalignedOffset) {
       big.data(), big.size(), misaligned.data(), misaligned.size(), args, 1));
 }
 
-TEST(ApplyPatchTableTest, DropsLowTwoBitsOfDescriptorAddress) {
+TEST(ApplyPatchTableTest, RejectsUnalignedDescriptorAddress) {
   std::vector<uint32_t> ctrl(8, 0);
-  // arg_plus 0x13 makes the computed base non-4-aligned; bd[1] must mask the
-  // low two bits to keep the descriptor address word-aligned.
+  // arg_plus 0x13 makes the computed base non-4-aligned; fail closed instead of
+  // silently rounding the descriptor onto a neighboring address.
   std::vector<uint32_t> patches = {0u, 0u, 0x13u};
   uint64_t args[] = {0x1000u};
-  EXPECT_TRUE(iree_hal_amdxdna_apply_patch_table(
+  EXPECT_FALSE(iree_hal_amdxdna_apply_patch_table(
       ctrl.data(), ctrl.size(), patches.data(), patches.size(), args, 1));
-  const uint64_t base = 0x1000u + 0x13u + kDdrAieAddrOffset;  // 0x80001013
-  EXPECT_EQ(ctrl[1], static_cast<uint32_t>(base & 0xFFFFFFFC));
-  EXPECT_EQ(ctrl[1] & 0x3u, 0u);
-  EXPECT_EQ(ctrl[2], static_cast<uint32_t>(base >> 32));
+}
+
+TEST(ApplyPatchTableTest, RejectsOverflowingDescriptorAddress) {
+  std::vector<uint32_t> ctrl(8, 0);
+  std::vector<uint32_t> patches = {0u, 0u, 0u};
+  uint64_t args[] = {UINT64_MAX};
+  EXPECT_FALSE(iree_hal_amdxdna_apply_patch_table(
+      ctrl.data(), ctrl.size(), patches.data(), patches.size(), args, 1));
 }
 
 TEST(ApplyPatchTableTest, AddsAieApertureOffsetForAllArgIndices) {
@@ -534,6 +538,20 @@ TEST(PatchDynamicFieldsFromTemplateTest, RejectsMalformedPatchTable) {
   std::vector<uint32_t> ctrl = templ;
   std::vector<uint32_t> patches = {0u, 0u};
   uint64_t args[] = {0u};
+
+  iree_status_t status = iree_hal_amdxdna_patch_dynamic_fields_from_template(
+      ctrl.data(), templ.data(), ctrl.size(), /*constant_patches=*/nullptr,
+      iree_make_const_byte_span(nullptr, 0), patches.data(), patches.size(),
+      args, 1);
+  EXPECT_EQ(iree_status_code(status), IREE_STATUS_INVALID_ARGUMENT);
+  iree_status_ignore(status);
+}
+
+TEST(PatchDynamicFieldsFromTemplateTest, RejectsUnalignedDescriptorAddress) {
+  std::vector<uint32_t> templ(8, 0);
+  std::vector<uint32_t> ctrl = templ;
+  std::vector<uint32_t> patches = {0u, 0u, 0x13u};
+  uint64_t args[] = {0x1000u};
 
   iree_status_t status = iree_hal_amdxdna_patch_dynamic_fields_from_template(
       ctrl.data(), templ.data(), ctrl.size(), /*constant_patches=*/nullptr,
