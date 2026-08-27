@@ -217,6 +217,7 @@ class TargetCallgraphSpecializationTest : public ::testing::Test {
                                                        /*.values=*/requests,
                                                        /*.count=*/request_count,
                                                    },
+                                                   /*.bindings=*/{},
                                                    /*.diagnostic_emitter=*/{},
                                                    &version_arena_, &result));
     EXPECT_EQ(result.error_count, 0u);

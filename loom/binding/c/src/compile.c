@@ -190,6 +190,7 @@ static loomc_status_t loomc_compile_specialize_functions(
   LOOMC_RETURN_IF_ERROR(loomc_status_from_iree(loom_target_specialize_functions(
       loomc_target_environment_loom_target_environment(target_environment),
       module, requests,
+      /*bindings=*/(loom_target_declaration_binding_list_t){0},
       (iree_diagnostic_emitter_t){
           .fn = loomc_compile_capture_diagnostic_emission,
           .user_data = &capture,
