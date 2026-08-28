@@ -136,10 +136,9 @@ static iree_status_t iree_hal_amdxdna_allocator_take_cached_buffer(
   return iree_ok_status();
 }
 
-static const iree_hal_memory_type_t
-    iree_hal_amdxdna_host_only_memory_type =
-        IREE_HAL_MEMORY_TYPE_HOST_VISIBLE | IREE_HAL_MEMORY_TYPE_HOST_CACHED |
-        IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
+static const iree_hal_memory_type_t iree_hal_amdxdna_host_only_memory_type =
+    IREE_HAL_MEMORY_TYPE_HOST_VISIBLE | IREE_HAL_MEMORY_TYPE_HOST_CACHED |
+    IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
 
 static const iree_hal_memory_type_t iree_hal_amdxdna_host_local_bit =
     IREE_HAL_MEMORY_TYPE_HOST_LOCAL & ~IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
@@ -164,6 +163,17 @@ iree_hal_amdxdna_allocator_query_buffer_compatibility(
     // HOST_ONLY BOs still fail it so callers flush/invalidate.
     required_type &=
         ~(iree_hal_amdxdna_host_local_bit | iree_hal_amdxdna_device_local_bit);
+  } else if (iree_all_bits_set(required_type,
+                               IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE)) {
+    // HOST_LOCAL|DEVICE_VISIBLE is the historical FastFlowLM/HIP spelling of
+    // HOST_ONLY. Prebuilt FastFlowLM engines were compiled against
+    // HRX_MEMORY_TYPE_HOST_LOCAL=0x46 (HOST_LOCAL|HOST_COHERENT), so they also
+    // request HOST_COHERENT. That bit is a false coherency advertisement: the
+    // resolved type stays non-coherent HOST_ONLY and callers must still
+    // flush/invalidate. Bare HOST_LOCAL or HOST_COHERENT without DEVICE_VISIBLE
+    // stays rejected.
+    required_type &=
+        ~(iree_hal_amdxdna_host_local_bit | IREE_HAL_MEMORY_TYPE_HOST_COHERENT);
   }
 
   // HOST_ONLY allocations are cached host DRAM that the NPU can snoop. They
@@ -259,8 +269,7 @@ static iree_status_t iree_hal_amdxdna_allocator_allocate_buffer(
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
         z0, iree_hal_amdxdna_native_device_c_alloc_buffer(
                 allocator->native_device, allocation_size,
-                IREE_HAL_AMDXDNA_NATIVE_BUFFER_TYPE_HOST_ONLY,
-                &native_buffer));
+                IREE_HAL_AMDXDNA_NATIVE_BUFFER_TYPE_HOST_ONLY, &native_buffer));
   }
 
   iree_hal_buffer_t* buffer = NULL;

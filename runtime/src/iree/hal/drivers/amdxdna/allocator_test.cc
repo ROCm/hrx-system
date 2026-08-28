@@ -62,21 +62,21 @@ TEST_F(AllocatorCompatibilityTest, CreateAndRelease) {
 
 TEST_F(AllocatorCompatibilityTest,
        TransferUsageDoesNotAdvertiseQueueTransferCompatibility) {
-  CompatibilityQuery result = QueryCompatibility(
-      allocator_, IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_DEVICE,
-      IREE_HAL_BUFFER_USAGE_TRANSFER);
+  CompatibilityQuery result =
+      QueryCompatibility(allocator_, IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_DEVICE,
+                         IREE_HAL_BUFFER_USAGE_TRANSFER);
   EXPECT_TRUE(iree_all_bits_set(result.compatibility,
                                 IREE_HAL_BUFFER_COMPATIBILITY_ALLOCATABLE));
   EXPECT_FALSE(iree_any_bit_set(result.compatibility,
                                 IREE_HAL_BUFFER_COMPATIBILITY_QUEUE_TRANSFER));
-  EXPECT_TRUE(iree_all_bits_set(result.resolved.usage,
-                                IREE_HAL_BUFFER_USAGE_TRANSFER));
+  EXPECT_TRUE(
+      iree_all_bits_set(result.resolved.usage, IREE_HAL_BUFFER_USAGE_TRANSFER));
 }
 
 TEST_F(AllocatorCompatibilityTest, AdvertisesCachedHostVisibleDeviceVisible) {
-  CompatibilityQuery result = QueryCompatibility(
-      allocator_, IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_DEVICE,
-      IREE_HAL_BUFFER_USAGE_DISPATCH);
+  CompatibilityQuery result =
+      QueryCompatibility(allocator_, IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_DEVICE,
+                         IREE_HAL_BUFFER_USAGE_DISPATCH);
   EXPECT_TRUE(iree_all_bits_set(result.compatibility,
                                 IREE_HAL_BUFFER_COMPATIBILITY_ALLOCATABLE));
   EXPECT_EQ(result.resolved.type, kHostOnlyType);
@@ -87,9 +87,9 @@ TEST_F(AllocatorCompatibilityTest, AdvertisesCachedHostVisibleDeviceVisible) {
 }
 
 TEST_F(AllocatorCompatibilityTest, DispatchUsageAdvertisesQueueDispatch) {
-  CompatibilityQuery result = QueryCompatibility(
-      allocator_, IREE_HAL_MEMORY_TYPE_HOST_VISIBLE,
-      IREE_HAL_BUFFER_USAGE_DISPATCH);
+  CompatibilityQuery result =
+      QueryCompatibility(allocator_, IREE_HAL_MEMORY_TYPE_HOST_VISIBLE,
+                         IREE_HAL_BUFFER_USAGE_DISPATCH);
   EXPECT_TRUE(iree_all_bits_set(
       result.compatibility, IREE_HAL_BUFFER_COMPATIBILITY_ALLOCATABLE |
                                 IREE_HAL_BUFFER_COMPATIBILITY_QUEUE_DISPATCH));
@@ -97,8 +97,8 @@ TEST_F(AllocatorCompatibilityTest, DispatchUsageAdvertisesQueueDispatch) {
 
 TEST_F(AllocatorCompatibilityTest, HostCoherentIsRejected) {
   CompatibilityQuery result = QueryCompatibility(
-      allocator_, IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
-                      IREE_HAL_MEMORY_TYPE_HOST_COHERENT,
+      allocator_,
+      IREE_HAL_MEMORY_TYPE_HOST_VISIBLE | IREE_HAL_MEMORY_TYPE_HOST_COHERENT,
       IREE_HAL_BUFFER_USAGE_TRANSFER);
   EXPECT_EQ(result.compatibility, IREE_HAL_BUFFER_COMPATIBILITY_NONE);
 }
@@ -112,32 +112,57 @@ TEST_F(AllocatorCompatibilityTest, OptimalHostCoherentIsRejected) {
 }
 
 TEST_F(AllocatorCompatibilityTest, HostLocalWithoutOptimalIsRejected) {
-  CompatibilityQuery result = QueryCompatibility(
-      allocator_, IREE_HAL_MEMORY_TYPE_HOST_LOCAL,
-      IREE_HAL_BUFFER_USAGE_TRANSFER);
+  CompatibilityQuery result =
+      QueryCompatibility(allocator_, IREE_HAL_MEMORY_TYPE_HOST_LOCAL,
+                         IREE_HAL_BUFFER_USAGE_TRANSFER);
   EXPECT_EQ(result.compatibility, IREE_HAL_BUFFER_COMPATIBILITY_NONE);
 }
 
-TEST_F(AllocatorCompatibilityTest, DeviceLocalWithoutOptimalIsRejected) {
+TEST_F(AllocatorCompatibilityTest, HostLocalDeviceVisibleIsHostOnly) {
   CompatibilityQuery result = QueryCompatibility(
-      allocator_, IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
+      allocator_,
+      IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
       IREE_HAL_BUFFER_USAGE_TRANSFER);
+  EXPECT_TRUE(iree_all_bits_set(result.compatibility,
+                                IREE_HAL_BUFFER_COMPATIBILITY_ALLOCATABLE));
+  EXPECT_EQ(result.resolved.type, kHostOnlyType);
+}
+
+TEST_F(AllocatorCompatibilityTest,
+       HistoricalHostLocalCoherentDeviceVisibleIsHostOnly) {
+  CompatibilityQuery result = QueryCompatibility(
+      allocator_,
+      IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_COHERENT |
+          IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+      IREE_HAL_BUFFER_USAGE_TRANSFER);
+  EXPECT_TRUE(iree_all_bits_set(result.compatibility,
+                                IREE_HAL_BUFFER_COMPATIBILITY_ALLOCATABLE));
+  EXPECT_EQ(result.resolved.type, kHostOnlyType);
+  EXPECT_FALSE(iree_any_bit_set(result.resolved.type,
+                                IREE_HAL_MEMORY_TYPE_HOST_COHERENT));
+}
+
+TEST_F(AllocatorCompatibilityTest, DeviceLocalWithoutOptimalIsRejected) {
+  CompatibilityQuery result =
+      QueryCompatibility(allocator_, IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
+                         IREE_HAL_BUFFER_USAGE_TRANSFER);
   EXPECT_EQ(result.compatibility, IREE_HAL_BUFFER_COMPATIBILITY_NONE);
 }
 
 TEST_F(AllocatorCompatibilityTest, DeviceUncachedIsRejected) {
-  CompatibilityQuery result = QueryCompatibility(
-      allocator_, IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE |
-                      IREE_HAL_MEMORY_TYPE_DEVICE_UNCACHED,
-      IREE_HAL_BUFFER_USAGE_TRANSFER);
+  CompatibilityQuery result =
+      QueryCompatibility(allocator_,
+                         IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE |
+                             IREE_HAL_MEMORY_TYPE_DEVICE_UNCACHED,
+                         IREE_HAL_BUFFER_USAGE_TRANSFER);
   EXPECT_EQ(result.compatibility, IREE_HAL_BUFFER_COMPATIBILITY_NONE);
 }
 
 TEST_F(AllocatorCompatibilityTest, HeapTypeMatchesAdvertisedHostOnlyType) {
   iree_hal_allocator_memory_heap_t heap = {};
   iree_host_size_t count = 0;
-  IREE_ASSERT_OK(iree_hal_allocator_query_memory_heaps(allocator_, 1, &heap,
-                                                       &count));
+  IREE_ASSERT_OK(
+      iree_hal_allocator_query_memory_heaps(allocator_, 1, &heap, &count));
   EXPECT_EQ(count, 1u);
   EXPECT_EQ(heap.type, kHostOnlyType);
 }
