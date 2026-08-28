@@ -7,6 +7,7 @@
 #include "loom/target/emit/vm/function_layout.h"
 
 #include "iree/vm/bytecode/wire/core/control.h"
+#include "iree/vm/bytecode/wire/core/function.h"
 #include "iree/vm/bytecode/wire/core/opcodes.h"
 #include "loom/codegen/low/packet.h"
 #include "loom/ir/context.h"
@@ -166,7 +167,24 @@ static iree_status_t loom_vm_function_structural_packet_byte_length(
     code_layout->local_function_count = iree_max(
         code_layout->local_function_count, call_layout.local_function_count);
     code_layout->has_call = true;
-    *out_byte_length = loom_vm_function_call_record_byte_length(&call_layout);
+    *out_byte_length =
+        loom_vm_function_call_record_byte_length(&call, &call_layout);
+    return iree_ok_status();
+  }
+  if (loom_low_func_null_isa(op)) {
+    *out_byte_length = sizeof(iree_vm_isa_func_null_record_t);
+    return iree_ok_status();
+  }
+  if (loom_low_func_compare_null_isa(op)) {
+    *out_byte_length = sizeof(iree_vm_isa_func_compare_null_record_t);
+    return iree_ok_status();
+  }
+  if (loom_low_func_address_isa(op)) {
+    *out_byte_length = sizeof(iree_vm_isa_func_address_record_t);
+    return iree_ok_status();
+  }
+  if (loom_low_func_import_resolved_isa(op)) {
+    *out_byte_length = sizeof(iree_vm_isa_func_import_resolved_record_t);
     return iree_ok_status();
   }
   const loom_vm_function_control_layout_t* control_layout =

@@ -8,7 +8,9 @@
 
 #include <stdlib.h>
 
+#include "loom/codegen/low/function.h"
 #include "loom/ops/func/reference.h"
+#include "loom/ops/low/ops.h"
 #include "loom/ops/type_registry.h"
 #include "loom/target/arch/vm/abi/layout.h"
 #include "loom/target/emit/vm/module_layout.h"
@@ -332,6 +334,20 @@ static iree_status_t loom_vm_module_callable_collect(
     loom_vm_module_type_build_t* build, loom_type_t signature, uint16_t flags,
     loom_vm_module_callable_type_build_t** out_callable);
 
+static loom_vm_module_callable_type_build_t* loom_vm_module_callable_find(
+    const loom_vm_module_type_build_t* build, loom_type_t signature,
+    uint16_t flags) {
+  for (iree_host_size_t i = 0; i < build->callable_count; ++i) {
+    loom_vm_module_callable_type_build_t* callable =
+        &build->callable_storage[i];
+    if (callable->flags == flags &&
+        loom_type_equal(callable->signature, signature)) {
+      return callable;
+    }
+  }
+  return NULL;
+}
+
 static uint16_t* loom_vm_module_signature_bank_count(
     loom_vm_module_callable_type_build_t* callable,
     loom_vm_module_signature_side_t side, loom_vm_call_abi_bank_t bank) {
@@ -427,16 +443,8 @@ static iree_status_t loom_vm_module_callable_collect(
                             "VM callable type has unsupported flags");
   }
 
-  loom_vm_module_callable_type_build_t* callable = NULL;
-  for (iree_host_size_t i = 0; i < build->callable_count; ++i) {
-    loom_vm_module_callable_type_build_t* existing =
-        &build->callable_storage[i];
-    if (existing->flags == flags &&
-        loom_type_equal(existing->signature, signature)) {
-      callable = existing;
-      break;
-    }
-  }
+  loom_vm_module_callable_type_build_t* callable =
+      loom_vm_module_callable_find(build, signature, flags);
   if (callable == NULL) {
     if (build->callable_count == build->callable_capacity) {
       return iree_make_status(
@@ -483,6 +491,53 @@ static iree_status_t loom_vm_module_callable_collect(
         &callable->fields[callable->argument_count + i]));
   }
   callable->state = LOOM_VM_MODULE_CALLABLE_STATE_COMPLETE;
+  return iree_ok_status();
+}
+
+static uint16_t loom_vm_module_function_ref_flags(loom_type_t type) {
+  return loom_func_ref_type_has_yieldability(type)
+             ? IREE_VM_BYTECODE_CALLABLE_TYPE_FLAG_MAY_YIELD
+             : 0;
+}
+
+static iree_status_t loom_vm_module_collect_function_ref_type(
+    loom_vm_module_type_build_t* build, loom_type_t type) {
+  if (loom_low_type_is_register(type)) {
+    const loom_type_t* logical_type = loom_type_register_value_type(type);
+    if (logical_type == NULL) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "VM indirect-call target register has no logical value type");
+    }
+    type = *logical_type;
+  }
+  if (!loom_func_ref_type_isa(type)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "VM indirect-call target is not a func.ref");
+  }
+  loom_vm_module_callable_type_build_t* callable = NULL;
+  return loom_vm_module_callable_collect(
+      build, loom_func_ref_resolve_signature(build->module, type),
+      loom_vm_module_function_ref_flags(type), &callable);
+}
+
+static iree_status_t loom_vm_module_collect_indirect_call_types(
+    loom_vm_module_type_build_t* build, const loom_vm_module_layout_t* layout) {
+  for (iree_host_size_t function_i = 0; function_i < layout->function_count;
+       ++function_i) {
+    const loom_region_t* body =
+        loom_low_function_const_body(layout->functions[function_i].function_op);
+    if (body == NULL) continue;
+    for (uint16_t block_i = 0; block_i < body->block_count; ++block_i) {
+      const loom_op_t* op = NULL;
+      loom_block_for_each_op(body->blocks[block_i], op) {
+        if (!loom_low_func_call_indirect_isa(op)) continue;
+        IREE_RETURN_IF_ERROR(loom_vm_module_collect_function_ref_type(
+            build, loom_module_value_type(
+                       build->module, loom_low_func_call_indirect_target(op))));
+      }
+    }
+  }
   return iree_ok_status();
 }
 
@@ -609,6 +664,50 @@ static iree_status_t loom_vm_module_type_rows_build(
     }
   }
   IREE_ASSERT_EQ(descriptor_base, descriptor_count);
+  return iree_ok_status();
+}
+
+static iree_status_t loom_vm_module_callable_type_lookup_build(
+    const loom_vm_module_type_build_t* build,
+    loom_vm_module_type_tables_t* tables) {
+  const iree_host_size_t signature_count = build->module->types.count;
+  if (signature_count == 0) return iree_ok_status();
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      build->arena, signature_count,
+      sizeof(*tables->callable_type_ordinals_by_signature),
+      (void**)&tables->callable_type_ordinals_by_signature));
+  tables->callable_type_ordinal_signature_count = signature_count;
+  for (iree_host_size_t i = 0; i < signature_count; ++i) {
+    tables->callable_type_ordinals_by_signature[i] =
+        (loom_vm_module_callable_type_ordinals_t){
+            .synchronous = UINT16_MAX,
+            .yieldable = UINT16_MAX,
+        };
+  }
+
+  for (iree_host_size_t i = 0; i < build->module->types.count; ++i) {
+    const loom_type_t type = build->module->types.entries[i];
+    if (!loom_func_ref_type_isa(type)) continue;
+    const loom_type_id_t signature_id = loom_func_ref_type_signature(type);
+    if (signature_id >= signature_count) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "VM function reference has an invalid signature type ID");
+    }
+    const uint16_t flags = loom_vm_module_function_ref_flags(type);
+    const loom_vm_module_callable_type_build_t* callable =
+        loom_vm_module_callable_find(
+            build, loom_func_ref_resolve_signature(build->module, type), flags);
+    if (callable == NULL) continue;
+    loom_vm_module_callable_type_ordinals_t* ordinals =
+        &tables->callable_type_ordinals_by_signature[signature_id];
+    if (iree_any_bit_set(flags,
+                         IREE_VM_BYTECODE_CALLABLE_TYPE_FLAG_MAY_YIELD)) {
+      ordinals->yieldable = callable->ordinal;
+    } else {
+      ordinals->synchronous = callable->ordinal;
+    }
+  }
   return iree_ok_status();
 }
 
@@ -845,6 +944,8 @@ iree_status_t loom_vm_module_type_tables_build(
         &build, layout->import_declarations[i].logical_signature, /*flags=*/0,
         &root_callables[layout->function_count + i]));
   }
+  IREE_RETURN_IF_ERROR(
+      loom_vm_module_collect_indirect_call_types(&build, layout));
 
   IREE_RETURN_IF_ERROR(loom_vm_module_ref_types_canonicalize(&build));
   iree_host_size_t callable_type_count = 0;
@@ -852,8 +953,31 @@ iree_status_t loom_vm_module_type_tables_build(
       loom_vm_module_callables_canonicalize(&build, &callable_type_count));
   IREE_RETURN_IF_ERROR(loom_vm_module_type_rows_build(
       &build, callable_type_count, &layout->type_tables));
+  IREE_RETURN_IF_ERROR(
+      loom_vm_module_callable_type_lookup_build(&build, &layout->type_tables));
   IREE_RETURN_IF_ERROR(loom_vm_module_strings_build(&build, layout));
   IREE_RETURN_IF_ERROR(
       loom_vm_module_ref_type_rows_build(&build, &layout->type_tables));
   return loom_vm_module_root_ordinals_assign(root_callables, layout);
+}
+
+bool loom_vm_module_type_tables_try_resolve_callable_ordinal(
+    const loom_vm_module_type_tables_t* tables, loom_type_t function_ref_type,
+    uint16_t* out_ordinal) {
+  *out_ordinal = UINT16_MAX;
+  if (!loom_func_ref_type_isa(function_ref_type)) return false;
+  const loom_type_id_t signature_id =
+      loom_func_ref_type_signature(function_ref_type);
+  if (signature_id >= tables->callable_type_ordinal_signature_count) {
+    return false;
+  }
+  const loom_vm_module_callable_type_ordinals_t ordinals =
+      tables->callable_type_ordinals_by_signature[signature_id];
+  const uint16_t ordinal =
+      loom_func_ref_type_has_yieldability(function_ref_type)
+          ? ordinals.yieldable
+          : ordinals.synchronous;
+  if (ordinal == UINT16_MAX) return false;
+  *out_ordinal = ordinal;
+  return true;
 }

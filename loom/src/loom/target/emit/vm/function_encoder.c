@@ -8,10 +8,12 @@
 
 #include <string.h>
 
+#include "iree/vm/bytecode/wire/core/constant.h"
 #include "iree/vm/bytecode/wire/core/control.h"
 #include "iree/vm/bytecode/wire/core/function.h"
 #include "iree/vm/bytecode/wire/core/opcodes.h"
 #include "iree/vm/bytecode/wire/core/ref.h"
+#include "iree/vm/bytecode/wire/core/selectors.h"
 #include "iree/vm/bytecode/wire/core/value.h"
 #include "iree/vm/module.h"
 #include "loom/codegen/low/frame.h"
@@ -211,24 +213,49 @@ static iree_status_t loom_vm_function_encode_move_group(
   return iree_ok_status();
 }
 
-static uint8_t loom_vm_function_value_operand_register(
-    const loom_low_emission_frame_t* frame,
-    const loom_low_packet_view_t* packet, uint16_t operand_index) {
-  IREE_ASSERT_LT(operand_index, packet->node->operand_count);
-  const loom_value_ordinal_t operand_ordinal =
-      loom_low_schedule_node_const_operand_ordinals(
-          packet->node)[operand_index];
+static uint8_t loom_vm_function_assigned_register(
+    const loom_low_allocation_table_t* allocation,
+    loom_value_ordinal_t value_ordinal, uint16_t expected_reg_class_id) {
   const loom_low_allocation_assignment_t* assignment =
-      loom_low_allocation_assignment_for_value_ordinal(&frame->allocation,
-                                                       operand_ordinal, NULL);
+      loom_low_allocation_assignment_for_value_ordinal(allocation,
+                                                       value_ordinal, NULL);
   IREE_ASSERT(assignment != NULL);
   IREE_ASSERT_EQ(assignment->location_kind,
                  LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER);
-  IREE_ASSERT_EQ(assignment->descriptor_reg_class_id,
-                 VM_CORE_REG_CLASS_ID_VALUE);
+  IREE_ASSERT_EQ(assignment->descriptor_reg_class_id, expected_reg_class_id);
   IREE_ASSERT_EQ(assignment->location_count, 1u);
   IREE_ASSERT_LT(assignment->location_base, 256u);
   return (uint8_t)assignment->location_base;
+}
+
+static uint8_t loom_vm_function_operand_register(
+    const loom_low_emission_frame_t* frame,
+    const loom_low_packet_view_t* packet, uint16_t operand_index,
+    uint16_t expected_reg_class_id) {
+  IREE_ASSERT_LT(operand_index, packet->node->operand_count);
+  return loom_vm_function_assigned_register(
+      &frame->allocation,
+      loom_low_schedule_node_const_operand_ordinals(
+          packet->node)[operand_index],
+      expected_reg_class_id);
+}
+
+static uint8_t loom_vm_function_result_register(
+    const loom_low_emission_frame_t* frame,
+    const loom_low_packet_view_t* packet, uint16_t result_index,
+    uint16_t expected_reg_class_id) {
+  IREE_ASSERT_LT(result_index, packet->node->result_count);
+  return loom_vm_function_assigned_register(
+      &frame->allocation,
+      loom_low_schedule_node_const_result_ordinals(packet->node)[result_index],
+      expected_reg_class_id);
+}
+
+static uint8_t loom_vm_function_value_operand_register(
+    const loom_low_emission_frame_t* frame,
+    const loom_low_packet_view_t* packet, uint16_t operand_index) {
+  return loom_vm_function_operand_register(frame, packet, operand_index,
+                                           VM_CORE_REG_CLASS_ID_VALUE);
 }
 
 static iree_status_t loom_vm_function_encode_direct_branch(
@@ -370,6 +397,93 @@ static iree_status_t loom_vm_function_encode_switch(
       code_layout->block_offsets[default_block_index], writer);
 }
 
+static uint16_t loom_vm_function_target_callable_type_ordinal(
+    const loom_vm_module_layout_t* module_layout,
+    loom_vm_module_call_target_t target) {
+  if (target.kind == IREE_VM_ISA_CONTROL_CALL_TARGET_LOCAL) {
+    IREE_ASSERT_LT(target.ordinal, module_layout->function_count);
+    return module_layout->functions[target.ordinal].callable_type_ordinal;
+  }
+  IREE_ASSERT(target.kind == IREE_VM_ISA_CONTROL_CALL_TARGET_REQUIRED_IMPORT ||
+              target.kind == IREE_VM_ISA_CONTROL_CALL_TARGET_OPTIONAL_IMPORT);
+  IREE_ASSERT_LT(target.ordinal, module_layout->import_count);
+  return module_layout->imports[target.ordinal]->callable_type_ordinal;
+}
+
+static iree_status_t loom_vm_function_encode_function_packet(
+    const loom_low_emission_frame_t* frame,
+    const loom_vm_module_layout_t* module_layout,
+    const loom_low_packet_view_t* packet, loom_bytecode_page_writer_t* writer) {
+  const loom_op_t* op = packet->node->op;
+  if (loom_low_func_null_isa(op)) {
+    const iree_vm_isa_func_null_record_t record = {
+        .opcode_u8 = IREE_VM_ISA_CORE_OPCODE_FUNC_NULL,
+        .dst_f8 = loom_vm_function_result_register(
+            frame, packet, 0, VM_CORE_REG_CLASS_ID_FUNCTION),
+        .zero_padding_u16 = 0,
+    };
+    return loom_bytecode_page_writer_write(writer, &record, sizeof(record));
+  }
+  if (loom_low_func_compare_null_isa(op)) {
+    const iree_vm_isa_func_compare_null_record_t record = {
+        .opcode_u8 = IREE_VM_ISA_CORE_OPCODE_FUNC_COMPARE_NULL,
+        .dst_v8 = loom_vm_function_result_register(frame, packet, 0,
+                                                   VM_CORE_REG_CLASS_ID_VALUE),
+        .src_f8 = loom_vm_function_operand_register(
+            frame, packet, 0, VM_CORE_REG_CLASS_ID_FUNCTION),
+        .zero_padding_u8 = 0,
+    };
+    return loom_bytecode_page_writer_write(writer, &record, sizeof(record));
+  }
+
+  loom_vm_module_call_target_t target = {0};
+  const loom_symbol_ref_t callee =
+      loom_low_func_address_isa(op) ? loom_low_func_address_callee(op)
+                                    : loom_low_func_import_resolved_callee(op);
+  if (!loom_vm_module_layout_try_resolve_call_target(module_layout, callee,
+                                                     &target)) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "function operation target is not callable");
+  }
+  if (loom_low_func_address_isa(op)) {
+    const iree_vm_isa_func_address_record_t record = {
+        .opcode_u8 = IREE_VM_ISA_CORE_OPCODE_FUNC_ADDRESS,
+        .dst_f8 = loom_vm_function_result_register(
+            frame, packet, 0, VM_CORE_REG_CLASS_ID_FUNCTION),
+        .target_kind_u8 = target.kind,
+        .zero_padding_u8 = 0,
+        .target_ordinal_u16 = target.ordinal,
+        .callable_type_ordinal_u16 =
+            loom_vm_function_target_callable_type_ordinal(module_layout,
+                                                          target),
+    };
+    return loom_bytecode_page_writer_write(writer, &record, sizeof(record));
+  }
+
+  IREE_ASSERT(loom_low_func_import_resolved_isa(op));
+  const uint8_t destination_register = loom_vm_function_result_register(
+      frame, packet, 0, VM_CORE_REG_CLASS_ID_VALUE);
+  if (target.kind == IREE_VM_ISA_CONTROL_CALL_TARGET_OPTIONAL_IMPORT) {
+    const iree_vm_isa_func_import_resolved_record_t record = {
+        .opcode_u8 = IREE_VM_ISA_CORE_OPCODE_FUNC_IMPORT_RESOLVED,
+        .dst_v8 = destination_register,
+        .import_ordinal_u16 = target.ordinal,
+    };
+    return loom_bytecode_page_writer_write(writer, &record, sizeof(record));
+  }
+  if (target.kind == IREE_VM_ISA_CONTROL_CALL_TARGET_REQUIRED_IMPORT) {
+    const iree_vm_isa_constant_s16_record_t record = {
+        .opcode_u8 = IREE_VM_ISA_CORE_OPCODE_CONSTANT_S16,
+        .dst_v8 = destination_register,
+        .immediate_i16 = 1,
+    };
+    return loom_bytecode_page_writer_write(writer, &record, sizeof(record));
+  }
+  return iree_make_status(
+      IREE_STATUS_FAILED_PRECONDITION,
+      "import availability query resolved to a local function");
+}
+
 static iree_status_t loom_vm_function_encode_structural_packet(
     const loom_low_emission_frame_t* frame,
     const loom_vm_module_layout_t* module_layout,
@@ -406,6 +520,13 @@ static iree_status_t loom_vm_function_encode_structural_packet(
     return loom_vm_function_encode_move_group(
         &frame->allocation, group != NULL ? &group->move_group : NULL,
         ref_transfer, writer);
+  }
+  if (loom_low_func_null_isa(packet->node->op) ||
+      loom_low_func_compare_null_isa(packet->node->op) ||
+      loom_low_func_address_isa(packet->node->op) ||
+      loom_low_func_import_resolved_isa(packet->node->op)) {
+    return loom_vm_function_encode_function_packet(frame, module_layout, packet,
+                                                   writer);
   }
   if (loom_low_br_isa(packet->node->op) ||
       loom_low_cond_br_isa(packet->node->op)) {

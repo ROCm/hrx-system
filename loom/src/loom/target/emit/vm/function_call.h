@@ -52,8 +52,9 @@ iree_status_t loom_vm_function_call_layout_build(
     const loom_module_t* module, const loom_vm_function_call_view_t* call,
     loom_vm_call_abi_packet_layout_t* out_layout);
 
-// Returns the exact record-stream byte length required by |layout|.
+// Returns the exact record-stream byte length required by |call| and |layout|.
 uint32_t loom_vm_function_call_record_byte_length(
+    const loom_vm_function_call_view_t* call,
     const loom_vm_call_abi_packet_layout_t* layout);
 
 // Encodes one structural call and its caller-local overflow transfers.

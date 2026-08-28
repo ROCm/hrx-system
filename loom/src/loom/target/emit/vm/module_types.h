@@ -12,6 +12,7 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "iree/vm/bytecode/wire/module_format.h"
+#include "loom/ir/types.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -19,7 +20,15 @@ extern "C" {
 
 typedef struct loom_vm_module_layout_t loom_vm_module_layout_t;
 
-// Canonical wire-ready string and type tables for one VM module.
+// Canonical callable ordinals for one structural function signature.
+typedef struct loom_vm_module_callable_type_ordinals_t {
+  // Ordinal of the synchronous callable type, or UINT16_MAX when unused.
+  uint16_t synchronous;
+  // Ordinal of the yieldable callable type, or UINT16_MAX when unused.
+  uint16_t yieldable;
+} loom_vm_module_callable_type_ordinals_t;
+
+// Canonical wire-ready type tables and compiler lookups for one VM module.
 typedef struct loom_vm_module_type_tables_t {
   // Arena-owned unique strings in strict byte order.
   iree_string_view_t* strings;
@@ -45,6 +54,10 @@ typedef struct loom_vm_module_type_tables_t {
   iree_vm_bytecode_v0_callable_type_row_t* callable_types;
   // Number of entries in |callable_types|.
   uint32_t callable_type_count;
+  // Arena-owned compiler lookup indexed by Loom function-signature type ID.
+  loom_vm_module_callable_type_ordinals_t* callable_type_ordinals_by_signature;
+  // Number of entries in |callable_type_ordinals_by_signature|.
+  iree_host_size_t callable_type_ordinal_signature_count;
 } loom_vm_module_type_tables_t;
 
 // Builds all canonical string, ref-type, signature, and callable-type tables.
@@ -53,6 +66,15 @@ typedef struct loom_vm_module_type_tables_t {
 // in |layout|. The build assigns their final string and callable-type ordinals.
 iree_status_t loom_vm_module_type_tables_build(iree_arena_allocator_t* arena,
                                                loom_vm_module_layout_t* layout);
+
+// Resolves the canonical module-local callable ordinal for |function_ref_type|.
+//
+// Returns false when the type is not a planned func.ref type. This is a
+// compiler-side lookup over the already canonicalized module plan and performs
+// no interning, hashing, allocation, or structural walk.
+bool loom_vm_module_type_tables_try_resolve_callable_ordinal(
+    const loom_vm_module_type_tables_t* tables, loom_type_t function_ref_type,
+    uint16_t* out_ordinal);
 
 #ifdef __cplusplus
 }  // extern "C"

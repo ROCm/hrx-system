@@ -49,8 +49,22 @@ iree_status_t loom_vm_function_call_layout_build(
 }
 
 uint32_t loom_vm_function_call_record_byte_length(
+    const loom_vm_function_call_view_t* call,
     const loom_vm_call_abi_packet_layout_t* layout) {
-  return sizeof(iree_vm_isa_control_call_record_t) +
+  uint32_t call_record_byte_length = 0;
+  switch (call->kind) {
+    case LOOM_VM_FUNCTION_CALL_KIND_DIRECT:
+      call_record_byte_length = sizeof(iree_vm_isa_control_call_record_t);
+      break;
+    case LOOM_VM_FUNCTION_CALL_KIND_INDIRECT:
+      call_record_byte_length =
+          sizeof(iree_vm_isa_control_call_indirect_record_t);
+      break;
+    default:
+      IREE_ASSERT_UNREACHABLE("structural VM call kind");
+      IREE_BUILTIN_UNREACHABLE();
+  }
+  return call_record_byte_length +
          loom_vm_call_abi_overflow_count(layout->arguments.value) *
              sizeof(iree_vm_isa_stack_store_record_t) +
          loom_vm_call_abi_overflow_count(layout->results.value) *
@@ -108,6 +122,25 @@ static uint16_t loom_vm_function_call_register_class_id(
       IREE_ASSERT_UNREACHABLE("classified VM call ABI bank");
       IREE_BUILTIN_UNREACHABLE();
   }
+}
+
+static iree_status_t loom_vm_function_call_resolve_callable_ordinal(
+    const loom_low_emission_frame_t* frame,
+    const loom_vm_module_layout_t* module_layout, const loom_op_t* op,
+    uint16_t* out_ordinal) {
+  *out_ordinal = UINT16_MAX;
+  const loom_type_t register_type = loom_module_value_type(
+      frame->module, loom_low_func_call_indirect_target(op));
+  const loom_type_t* function_ref_type =
+      loom_type_register_value_type(register_type);
+  if (function_ref_type == NULL ||
+      !loom_vm_module_type_tables_try_resolve_callable_ordinal(
+          &module_layout->type_tables, *function_ref_type, out_ordinal)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "indirect call target has no planned VM callable type");
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t loom_vm_function_call_encode_argument_overflow(
@@ -201,14 +234,10 @@ iree_status_t loom_vm_function_call_encode(
     const loom_vm_function_call_view_t* call,
     const loom_vm_call_abi_packet_layout_t* layout,
     loom_bytecode_page_writer_t* writer) {
-  if (call->kind != LOOM_VM_FUNCTION_CALL_KIND_DIRECT) {
-    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                            "VM indirect calls are not implemented");
-  }
-
   const loom_value_ordinal_t* operand_ordinals =
-      loom_low_schedule_node_const_operand_ordinals(packet->node) +
-      call->argument_operand_base;
+      loom_low_schedule_node_const_operand_ordinals(packet->node);
+  const loom_value_ordinal_t* argument_operand_ordinals =
+      operand_ordinals + call->argument_operand_base;
   loom_vm_call_abi_bank_counts_t argument_ordinals = {0};
   for (uint16_t i = 0; i < call->arguments.count; ++i) {
     loom_vm_call_abi_bank_t bank = LOOM_VM_CALL_ABI_BANK_NONE;
@@ -223,28 +252,47 @@ iree_status_t loom_vm_function_call_encode(
     const uint16_t expected_reg_class_id =
         loom_vm_function_call_register_class_id(bank);
     const uint8_t source_register = loom_vm_function_call_assigned_register(
-        &frame->allocation, operand_ordinals[i], expected_reg_class_id);
+        &frame->allocation, argument_operand_ordinals[i],
+        expected_reg_class_id);
     IREE_RETURN_IF_ERROR(loom_vm_function_call_encode_argument_overflow(
         bank, (uint16_t)(ordinal - IREE_VM_CALL_DIRECT_REGISTER_COUNT),
         source_register, writer));
   }
 
-  loom_vm_module_call_target_t target = {0};
-  if (!loom_vm_module_layout_try_resolve_call_target(
-          module_layout, loom_low_func_call_callee(packet->node->op),
-          &target)) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "direct call target is not a VM function or runtime import");
+  if (call->kind == LOOM_VM_FUNCTION_CALL_KIND_DIRECT) {
+    loom_vm_module_call_target_t target = {0};
+    if (!loom_vm_module_layout_try_resolve_call_target(
+            module_layout, loom_low_func_call_callee(packet->node->op),
+            &target)) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "direct call target is not a VM function or runtime import");
+    }
+    const iree_vm_isa_control_call_record_t call_record = {
+        .opcode_u8 = IREE_VM_ISA_CORE_OPCODE_CONTROL_CALL,
+        .target_kind_u8 = target.kind,
+        .target_ordinal_u16 = target.ordinal,
+        .direct_ref_move_mask_u16 = layout->direct_ref_move_mask,
+    };
+    IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write(writer, &call_record,
+                                                         sizeof(call_record)));
+  } else {
+    IREE_ASSERT_EQ(call->kind, LOOM_VM_FUNCTION_CALL_KIND_INDIRECT);
+    uint16_t callable_type_ordinal = UINT16_MAX;
+    IREE_RETURN_IF_ERROR(loom_vm_function_call_resolve_callable_ordinal(
+        frame, module_layout, packet->node->op, &callable_type_ordinal));
+    const uint8_t target_register = loom_vm_function_call_assigned_register(
+        &frame->allocation, operand_ordinals[0], VM_CORE_REG_CLASS_ID_FUNCTION);
+    const iree_vm_isa_control_call_indirect_record_t call_record = {
+        .opcode_u8 = IREE_VM_ISA_CORE_OPCODE_CONTROL_CALL_INDIRECT,
+        .target_f8 = target_register,
+        .callable_type_ordinal_u16 = callable_type_ordinal,
+        .direct_ref_move_mask_u16 = layout->direct_ref_move_mask,
+        .zero_padding_u16 = 0,
+    };
+    IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write(writer, &call_record,
+                                                         sizeof(call_record)));
   }
-  const iree_vm_isa_control_call_record_t call_record = {
-      .opcode_u8 = IREE_VM_ISA_CORE_OPCODE_CONTROL_CALL,
-      .target_kind_u8 = target.kind,
-      .target_ordinal_u16 = target.ordinal,
-      .direct_ref_move_mask_u16 = layout->direct_ref_move_mask,
-  };
-  IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write(writer, &call_record,
-                                                       sizeof(call_record)));
 
   const loom_value_ordinal_t* result_ordinals =
       loom_low_schedule_node_const_result_ordinals(packet->node);
