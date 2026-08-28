@@ -383,7 +383,7 @@ kernel.def @classified() {
 }
 
 TEST_F(KernelClassMaterializerTest,
-       RejectsSpecializedProviderOutsideSourceProduct) {
+       PublishesExternalProviderSelectionAsGenericRequest) {
   const iree_string_view_t source = IREE_SV(R"(
 template.decl @external.family(%n: index)
 
@@ -497,13 +497,79 @@ kernel.def @classified() {
   ASSERT_FALSE(loom_symbol_ref_is_valid(selected_provider->symbol));
 
   loom_module_t* class_module = nullptr;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_FAILED_PRECONDITION,
-      loom_kernel_class_materialize(&classifier, &collection,
-                                    /*class_ordinal=*/0, &block_pool_,
-                                    iree_allocator_system(), &class_module));
-  EXPECT_EQ(class_module, nullptr);
+  IREE_ASSERT_OK(loom_kernel_class_materialize(
+      &classifier, &collection, /*class_ordinal=*/0, &block_pool_,
+      iree_allocator_system(), &class_module));
+  ModulePtr class_module_ptr(class_module);
+
+  // The published class owns only ordinary IR. The selected external body is
+  // represented by an assumption feeding the still-generic request.
+  const loom_symbol_id_t class_kernel_symbol_id =
+      FindSymbol(class_module, IREE_SV("classified"));
+  const loom_func_like_t class_kernel = loom_func_like_cast(
+      class_module,
+      class_module->symbols.entries[class_kernel_symbol_id].defining_op);
+  loom_block_t* body =
+      loom_region_entry_block(loom_func_like_body(class_kernel));
+  loom_op_t* assume_op = nullptr;
+  loom_op_t* apply_op = nullptr;
+  loom_op_t* op = nullptr;
+  loom_block_for_each_op(body, op) {
+    if (loom_index_assume_isa(op)) assume_op = op;
+    if (loom_template_apply_isa(op)) apply_op = op;
+    EXPECT_FALSE(loom_template_call_isa(op));
+  }
+  ASSERT_NE(assume_op, nullptr);
+  ASSERT_NE(apply_op, nullptr);
+  const loom_value_slice_t apply_operands =
+      loom_template_apply_operands(apply_op);
+  ASSERT_EQ(apply_operands.count, 1u);
+  const loom_value_t* refined_operand =
+      loom_module_value(class_module, apply_operands.values[0]);
+  ASSERT_FALSE(loom_value_is_block_arg(refined_operand));
+  EXPECT_EQ(loom_value_def_op(refined_operand), assume_op);
+
+  // The ordinary request survives serialization independently of every
+  // classifier input and selects the same external provider when linked into
+  // a provider universe again.
   iree_arena_deinitialize(&analysis_arena);
+  source_module.reset();
+  ModulePtr round_tripped = RoundTripBytecode(class_module);
+  ASSERT_NE(round_tripped, nullptr);
+  class_module_ptr = std::move(round_tripped);
+  class_module = class_module_ptr.get();
+  Verify(class_module);
+
+  iree_arena_allocator_t query_arena;
+  iree_arena_initialize(&block_pool_, &query_arena);
+  const loom_symbol_ref_t class_family = {
+      /*.module_id=*/0,
+      /*.symbol_id=*/FindSymbol(class_module, IREE_SV("external.family")),
+  };
+  loom_template_provider_summary_t rebound_external_provider = {};
+  IREE_ASSERT_OK(loom_template_provider_contract_bind_family(
+      &external_contract, class_module, class_family, loom_symbol_ref_null(),
+      /*origin_ordinal=*/7, &query_arena, &rebound_external_provider));
+  loom_symbol_fact_table_t class_symbol_facts = {};
+  loom_symbol_fact_table_initialize(&class_symbol_facts, &query_arena);
+  loom_template_provider_catalog_t class_providers = {};
+  loom_template_provider_catalog_initialize(&class_providers, &query_arena);
+  IREE_ASSERT_OK(loom_template_provider_catalog_build(
+      &class_providers, class_module, &class_symbol_facts,
+      &rebound_external_provider, /*external_provider_count=*/1));
+  const loom_template_selection_query_options_t query_options = {
+      /*.mode=*/LOOM_TEMPLATE_SELECTION_MODE_FINAL,
+      /*.catalog=*/&class_providers,
+      /*.function_versions=*/nullptr,
+      /*.origin_count=*/8,
+  };
+  loom_template_selection_query_result_t query_result = {};
+  IREE_ASSERT_OK(loom_template_selection_query(
+      class_module, &query_options, &block_pool_, &query_arena, &query_result));
+  ASSERT_EQ(query_result.selected_origins.count, 1u);
+  EXPECT_EQ(query_result.selected_origins.values[0], 7u);
+  EXPECT_EQ(query_result.unresolved_site_count, 0u);
+  iree_arena_deinitialize(&query_arena);
 }
 
 }  // namespace

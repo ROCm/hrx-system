@@ -221,12 +221,9 @@ static iree_status_t loom_kernel_class_rewrite_application(
   const bool action_is_source_generic =
       decision->generic_result.kind == LOOM_DECISION_PROGRAM_RESULT_SELECTED &&
       decision->generic_result.action_ordinal == action_ordinal;
-  if (!loom_kernel_class_provider_is_local(classifier, provider)) {
-    if (action_is_source_generic) return iree_ok_status();
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "kernel class selects a provider outside its source product");
-  }
+  const bool provider_is_local =
+      loom_kernel_class_provider_is_local(classifier, provider);
+  if (action_is_source_generic && !provider_is_local) return iree_ok_status();
 
   const loom_value_slice_t target_arguments =
       loom_template_apply_operands(target_apply_op);
@@ -306,11 +303,24 @@ static iree_status_t loom_kernel_class_rewrite_application(
         rewriter, target_apply_op, &groups[1], call_operands));
   }
 
-  const loom_symbol_ref_t target_provider =
-      loom_ir_module_projection_target_symbol(projection,
-                                              provider->symbol.symbol_id);
-  return loom_template_rewrite_apply_as_exact_call(
-      rewriter, target_apply_op, target_provider, call_operands);
+  if (provider_is_local) {
+    const loom_symbol_ref_t target_provider =
+        loom_ir_module_projection_target_symbol(projection,
+                                                provider->symbol.symbol_id);
+    return loom_template_rewrite_apply_as_exact_call(
+        rewriter, target_apply_op, target_provider, call_operands);
+  }
+
+  // Keep external providers as ordinary generic requests. The assumed
+  // operands preserve the class contract in IR so a subsequent indexed link
+  // can select the same provider without embedding source-owned identities.
+  for (uint16_t i = 0; i < target_arguments.count; ++i) {
+    if (call_operands[i] != target_arguments.values[i]) {
+      IREE_RETURN_IF_ERROR(loom_rewriter_set_operand(rewriter, target_apply_op,
+                                                     i, call_operands[i]));
+    }
+  }
+  return iree_ok_status();
 }
 
 iree_status_t loom_kernel_class_materialize(
@@ -359,19 +369,6 @@ iree_status_t loom_kernel_class_materialize(
     operation_projections[projection_ordinal].target_op = NULL;
     selected_trace_ids[projection_ordinal] = trace_id;
 
-    const loom_template_provider_summary_t* provider =
-        loom_template_decision_model_provider(decision->model,
-                                              trace->action_ordinal);
-    const bool action_is_source_generic =
-        decision->generic_result.kind ==
-            LOOM_DECISION_PROGRAM_RESULT_SELECTED &&
-        decision->generic_result.action_ordinal == trace->action_ordinal;
-    if (!action_is_source_generic &&
-        !loom_kernel_class_provider_is_local(classifier, provider)) {
-      status = iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "kernel class selects a provider outside its source product");
-    }
     trace_id = trace->parent_trace_id;
   }
   IREE_ASSERT(!iree_status_is_ok(status) || trace_cursor == 0);
