@@ -181,10 +181,13 @@ class KernelClassMaterializerBenchmarkFixture {
   }
 
   loom_module_t* Materialize() {
-    loom_module_t* materialized_module = nullptr;
+    loom_kernel_class_product_t product = {};
     IREE_CHECK_OK(loom_kernel_class_materialize(
         &classifier_, &collection_, class_ordinal_, &block_pool_,
-        iree_allocator_system(), &materialized_module));
+        iree_allocator_system(), &product));
+    loom_module_t* materialized_module = product.module;
+    product.module = nullptr;
+    loom_kernel_class_product_deinitialize(&product);
     return materialized_module;
   }
 
