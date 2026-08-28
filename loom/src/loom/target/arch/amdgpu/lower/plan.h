@@ -122,6 +122,54 @@ typedef enum loom_amdgpu_fp8_decode_value_flag_bits_e {
 } loom_amdgpu_fp8_decode_value_flag_bits_t;
 typedef uint8_t loom_amdgpu_fp8_decode_value_flags_t;
 
+typedef uint8_t loom_amdgpu_fp8_decode_action_kind_t;
+enum loom_amdgpu_fp8_decode_action_kind_e {
+  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_NONE = 0,
+  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_IDENTITY_E8M0_PK8_BF16 = 1,
+  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_IDENTITY_E8M0_PK8_F16 = 2,
+  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_SCALEF32_BF16_PAIR = 3,
+  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_SCALEF32_F16_PAIR = 4,
+  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_NATIVE_F16_PAIR = 5,
+  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_NATIVE_F32_PAIR = 6,
+  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_NATIVE_F32_PAIR_BF16_PACK = 7,
+  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_PACKED_BF16_NORMAL = 8,
+  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_PACKED_BF16_EXACT_REPAIR = 9,
+  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_PACKED_BF16_EXACT_VIA_F16 = 10,
+  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_PACKED_F16_NORMAL = 11,
+  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_PACKED_F16_EXACT_REPAIR = 12,
+  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_FULL_BF16 = 13,
+};
+
+typedef enum loom_amdgpu_fp8_decode_action_detail_flag_bits_e {
+  // Packed decode repairs zero payloads after normal expansion.
+  LOOM_AMDGPU_FP8_DECODE_ACTION_DETAIL_FLAG_REPAIR_ZERO = 1u << 0,
+  // Packed decode repairs subnormal payloads with table packets.
+  LOOM_AMDGPU_FP8_DECODE_ACTION_DETAIL_FLAG_REPAIR_SUBNORMAL = 1u << 1,
+  // Packed BF16 decode repairs NaN payloads after expansion.
+  LOOM_AMDGPU_FP8_DECODE_ACTION_DETAIL_FLAG_REPAIR_NAN = 1u << 2,
+  // Packed BF16 decode repairs infinity payloads after expansion.
+  LOOM_AMDGPU_FP8_DECODE_ACTION_DETAIL_FLAG_REPAIR_INF = 1u << 3,
+  // Full decode was selected because value facts do not prove finiteness.
+  LOOM_AMDGPU_FP8_DECODE_ACTION_DETAIL_FLAG_MISSING_VALUE_FINITE = 1u << 4,
+  // Full decode was selected because values are not proven non-subnormal.
+  LOOM_AMDGPU_FP8_DECODE_ACTION_DETAIL_FLAG_MISSING_NOT_SUBNORMAL = 1u << 5,
+  // Full decode was selected because target packed packets are unavailable.
+  LOOM_AMDGPU_FP8_DECODE_ACTION_DETAIL_FLAG_MISSING_TARGET_PACKETS = 1u << 6,
+} loom_amdgpu_fp8_decode_action_detail_flag_bits_t;
+typedef uint8_t loom_amdgpu_fp8_decode_action_detail_flags_t;
+
+// Exact target action selected for one group of FP8 source lanes.
+typedef struct loom_amdgpu_fp8_decode_action_t {
+  // Selected FP8 decode action.
+  loom_amdgpu_fp8_decode_action_kind_t kind;
+  // Source value facts retained to specialize the selected decoder.
+  loom_amdgpu_fp8_decode_value_flags_t value_flags;
+  // Packed repair requirements or full-decode fallback reasons.
+  loom_amdgpu_fp8_decode_action_detail_flags_t detail_flags;
+} loom_amdgpu_fp8_decode_action_t;
+static_assert(sizeof(loom_amdgpu_fp8_decode_action_t) == 3,
+              "FP8 decode actions must stay cache dense");
+
 typedef enum loom_amdgpu_vector_16bit_float_conversion_kind_e {
   LOOM_AMDGPU_VECTOR_16BIT_FLOAT_CONVERSION_KIND_NONE = 0,
   LOOM_AMDGPU_VECTOR_16BIT_FLOAT_CONVERSION_KIND_EXTF = 1,
@@ -1360,56 +1408,6 @@ typedef struct loom_amdgpu_fragment_memory_packet_plan_t {
 static_assert(sizeof(loom_amdgpu_fragment_memory_packet_plan_t) == 12,
               "fragment memory packet plans must stay cache dense");
 
-typedef uint8_t loom_amdgpu_fragment_memory_fp8_decode_kind_t;
-enum loom_amdgpu_fragment_memory_fp8_decode_kind_e {
-  LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_DECODE_KIND_NONE = 0,
-  LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_DECODE_KIND_IDENTITY_E8M0_PK8_BF16 = 1,
-  LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_DECODE_KIND_IDENTITY_E8M0_PK8_F16 = 2,
-  LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_DECODE_KIND_SCALEF32_BF16_PAIR = 3,
-  LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_DECODE_KIND_SCALEF32_F16_PAIR = 4,
-  LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_DECODE_KIND_NATIVE_F16_PAIR = 5,
-  LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_DECODE_KIND_NATIVE_F32_PAIR = 6,
-  LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_DECODE_KIND_NATIVE_F32_PAIR_BF16_PACK = 7,
-  LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_DECODE_KIND_PACKED_BF16_NORMAL = 8,
-  LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_DECODE_KIND_PACKED_BF16_EXACT_REPAIR = 9,
-  LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_DECODE_KIND_PACKED_BF16_EXACT_VIA_F16 = 10,
-  LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_DECODE_KIND_PACKED_F16_NORMAL = 11,
-  LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_DECODE_KIND_PACKED_F16_EXACT_REPAIR = 12,
-  LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_DECODE_KIND_FULL_BF16 = 13,
-};
-
-typedef enum loom_amdgpu_fragment_memory_fp8_decode_detail_flag_bits_e {
-  // Packed decode repairs zero payloads after normal expansion.
-  LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_DECODE_DETAIL_FLAG_REPAIR_ZERO = 1u << 0,
-  // Packed decode repairs subnormal payloads with table packets.
-  LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_DECODE_DETAIL_FLAG_REPAIR_SUBNORMAL = 1u << 1,
-  // Packed BF16 decode repairs NaN payloads after expansion.
-  LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_DECODE_DETAIL_FLAG_REPAIR_NAN = 1u << 2,
-  // Packed BF16 decode repairs infinity payloads after expansion.
-  LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_DECODE_DETAIL_FLAG_REPAIR_INF = 1u << 3,
-  // Full decode was selected because value facts do not prove finiteness.
-  LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_DECODE_DETAIL_FLAG_MISSING_VALUE_FINITE =
-      1u << 4,
-  // Full decode was selected because values are not proven non-subnormal.
-  LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_DECODE_DETAIL_FLAG_MISSING_NOT_SUBNORMAL =
-      1u << 5,
-  // Full decode was selected because target packed packets are unavailable.
-  LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_DECODE_DETAIL_FLAG_MISSING_TARGET_PACKETS =
-      1u << 6,
-} loom_amdgpu_fragment_memory_fp8_decode_detail_flag_bits_t;
-typedef uint8_t loom_amdgpu_fragment_memory_fp8_decode_detail_flags_t;
-
-typedef struct loom_amdgpu_fragment_memory_fp8_decode_plan_t {
-  // Exact decode strategy selected for every FP8 load packet.
-  loom_amdgpu_fragment_memory_fp8_decode_kind_t kind;
-  // Source value facts retained to specialize the selected decoder.
-  loom_amdgpu_fp8_decode_value_flags_t value_flags;
-  // Packed repair requirements or full-decode fallback reasons.
-  loom_amdgpu_fragment_memory_fp8_decode_detail_flags_t detail_flags;
-} loom_amdgpu_fragment_memory_fp8_decode_plan_t;
-static_assert(sizeof(loom_amdgpu_fragment_memory_fp8_decode_plan_t) == 3,
-              "FP8 fragment decode plans must fill existing plan padding");
-
 typedef enum loom_amdgpu_fragment_memory_payload_form_e {
   // Payload storage matches the selected fragment role layout.
   LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_NATIVE = 0,
@@ -1515,7 +1513,7 @@ typedef struct loom_amdgpu_fragment_memory_plan_t {
   // Whether every dynamic source-address term is subgroup-uniform.
   bool dynamic_base_is_subgroup_uniform;
   // Decode strategy and retained facts for an FP8 load payload.
-  loom_amdgpu_fragment_memory_fp8_decode_plan_t fp8_load_decode;
+  loom_amdgpu_fp8_decode_action_t fp8_load_decode;
   // Source store payload or load result SSA value.
   loom_value_id_t payload;
   // Optional F32 scale applied while decoding an FP8 load payload.

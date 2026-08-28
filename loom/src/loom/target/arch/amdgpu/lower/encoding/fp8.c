@@ -16,6 +16,23 @@
 #include "loom/target/arch/amdgpu/lower/types.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 
+static_assert((uint32_t)LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_ZERO ==
+                  (uint32_t)
+                      LOOM_AMDGPU_FP8_DECODE_ACTION_DETAIL_FLAG_REPAIR_ZERO,
+              "FP8 zero repair action details mirror repair bits");
+static_assert(
+    (uint32_t)LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_SUBNORMAL ==
+        (uint32_t)LOOM_AMDGPU_FP8_DECODE_ACTION_DETAIL_FLAG_REPAIR_SUBNORMAL,
+    "FP8 subnormal repair action details mirror repair bits");
+static_assert((uint32_t)LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_NAN ==
+                  (uint32_t)
+                      LOOM_AMDGPU_FP8_DECODE_ACTION_DETAIL_FLAG_REPAIR_NAN,
+              "FP8 NaN repair action details mirror repair bits");
+static_assert((uint32_t)LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_INF ==
+                  (uint32_t)
+                      LOOM_AMDGPU_FP8_DECODE_ACTION_DETAIL_FLAG_REPAIR_INF,
+              "FP8 infinity repair action details mirror repair bits");
+
 static uint32_t loom_amdgpu_fp8_decode_packed_u16(uint32_t value) {
   return value | (value << 16);
 }
@@ -425,6 +442,76 @@ iree_string_view_t loom_amdgpu_fp8_packed_f16_repair_reason_key(
     loom_amdgpu_fp8_packed_u16_repairs_t repairs) {
   IREE_ASSERT_LT(repairs, IREE_ARRAYSIZE(kLoomAmdgpuFp8PackedF16RepairReasons));
   return kLoomAmdgpuFp8PackedF16RepairReasons[repairs];
+}
+
+loom_amdgpu_fp8_decode_action_t
+loom_amdgpu_select_fp8_packed_bf16_decode_action(
+    const loom_amdgpu_fp8_decode_plan_t* decode_plan,
+    loom_amdgpu_fp8_decode_value_flags_t value_flags) {
+  IREE_ASSERT_TRUE(
+      loom_amdgpu_can_emit_fp8_pair_to_packed_bf16(decode_plan, value_flags));
+  const loom_amdgpu_fp8_packed_bf16_strategy_t strategy =
+      loom_amdgpu_select_fp8_packed_bf16_strategy(decode_plan, value_flags);
+  loom_amdgpu_fp8_decode_action_kind_t kind =
+      LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_NONE;
+  switch (strategy) {
+    case LOOM_AMDGPU_FP8_PACKED_BF16_STRATEGY_NORMAL:
+      kind = LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_PACKED_BF16_NORMAL;
+      break;
+    case LOOM_AMDGPU_FP8_PACKED_BF16_STRATEGY_EXACT_REPAIR:
+      kind = LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_PACKED_BF16_EXACT_REPAIR;
+      break;
+    case LOOM_AMDGPU_FP8_PACKED_BF16_STRATEGY_EXACT_VIA_F16:
+      return (loom_amdgpu_fp8_decode_action_t){
+          .kind = LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_PACKED_BF16_EXACT_VIA_F16,
+          .value_flags = value_flags,
+      };
+    default:
+      IREE_ASSERT_UNREACHABLE("selected packed BF16 strategy");
+      IREE_BUILTIN_UNREACHABLE();
+  }
+  const loom_amdgpu_fp8_packed_u16_repairs_t repairs =
+      loom_amdgpu_fp8_pair_to_packed_bf16_repairs(decode_plan, value_flags);
+  IREE_ASSERT_LE(repairs, UINT8_MAX);
+  loom_amdgpu_fp8_decode_action_t action = {
+      .kind = kind,
+      .value_flags = value_flags,
+  };
+  action.detail_flags = (loom_amdgpu_fp8_decode_action_detail_flags_t)repairs;
+  return action;
+}
+
+loom_amdgpu_fp8_decode_action_t loom_amdgpu_select_fp8_packed_f16_decode_action(
+    const loom_amdgpu_fp8_decode_plan_t* decode_plan,
+    loom_amdgpu_fp8_decode_value_flags_t value_flags) {
+  IREE_ASSERT_TRUE(loom_amdgpu_can_emit_fp8_pair_to_packed_f16_finite(
+      decode_plan, value_flags));
+  const loom_amdgpu_fp8_packed_f16_strategy_t strategy =
+      loom_amdgpu_select_fp8_packed_f16_strategy(decode_plan, value_flags);
+  const loom_amdgpu_fp8_decode_action_kind_t kind =
+      strategy == LOOM_AMDGPU_FP8_PACKED_F16_STRATEGY_NORMAL
+          ? LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_PACKED_F16_NORMAL
+          : LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_PACKED_F16_EXACT_REPAIR;
+  const loom_amdgpu_fp8_packed_u16_repairs_t repairs =
+      loom_amdgpu_fp8_pair_to_packed_f16_repairs(decode_plan, value_flags);
+  IREE_ASSERT_LE(repairs, UINT8_MAX);
+  loom_amdgpu_fp8_decode_action_t action = {
+      .kind = kind,
+      .value_flags = value_flags,
+  };
+  action.detail_flags = (loom_amdgpu_fp8_decode_action_detail_flags_t)repairs;
+  return action;
+}
+
+loom_amdgpu_fp8_packed_u16_repairs_t loom_amdgpu_fp8_decode_action_repairs(
+    const loom_amdgpu_fp8_decode_action_t* action) {
+  const loom_amdgpu_fp8_decode_action_detail_flags_t repair_flags =
+      LOOM_AMDGPU_FP8_DECODE_ACTION_DETAIL_FLAG_REPAIR_ZERO |
+      LOOM_AMDGPU_FP8_DECODE_ACTION_DETAIL_FLAG_REPAIR_SUBNORMAL |
+      LOOM_AMDGPU_FP8_DECODE_ACTION_DETAIL_FLAG_REPAIR_NAN |
+      LOOM_AMDGPU_FP8_DECODE_ACTION_DETAIL_FLAG_REPAIR_INF;
+  return (loom_amdgpu_fp8_packed_u16_repairs_t)(action->detail_flags &
+                                                repair_flags);
 }
 
 loom_amdgpu_fp8_packed_bf16_missing_requirements_t

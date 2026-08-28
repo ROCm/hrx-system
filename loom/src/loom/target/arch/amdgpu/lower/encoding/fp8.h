@@ -254,6 +254,23 @@ typedef struct loom_amdgpu_fp8_decode_plan_t {
   loom_low_lower_resolved_descriptor_t bfi_b32_src0_literal_descriptor;
 } loom_amdgpu_fp8_decode_plan_t;
 
+// Selects the exact packed BF16 action for a source pair that is known to be
+// supported by |decode_plan|.
+loom_amdgpu_fp8_decode_action_t
+loom_amdgpu_select_fp8_packed_bf16_decode_action(
+    const loom_amdgpu_fp8_decode_plan_t* decode_plan,
+    loom_amdgpu_fp8_decode_value_flags_t value_flags);
+
+// Selects the exact packed F16 action for a source pair that is known to be
+// supported by |decode_plan|.
+loom_amdgpu_fp8_decode_action_t loom_amdgpu_select_fp8_packed_f16_decode_action(
+    const loom_amdgpu_fp8_decode_plan_t* decode_plan,
+    loom_amdgpu_fp8_decode_value_flags_t value_flags);
+
+// Returns the packed 16-bit repair requirements retained in |action|.
+loom_amdgpu_fp8_packed_u16_repairs_t loom_amdgpu_fp8_decode_action_repairs(
+    const loom_amdgpu_fp8_decode_action_t* action);
+
 typedef struct loom_amdgpu_fp8_packed_u16_pair_source_t {
   // Source register containing the selected adjacent FP8 byte pair.
   loom_value_id_t source_register;

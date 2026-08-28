@@ -652,7 +652,7 @@ iree_status_t loom_amdgpu_emit_fragment_memory_fp8_to_packed_16bit_load_packet(
     loom_value_id_t* out_low_packet) {
   *out_low_packet = LOOM_VALUE_ID_INVALID;
   loom_amdgpu_fragment_memory_address_t address;
-  const loom_amdgpu_fragment_memory_fp8_decode_kind_t decode_kind =
+  const loom_amdgpu_fp8_decode_action_kind_t decode_kind =
       plan->fp8_load_decode.kind;
   const loom_amdgpu_fp8_decode_value_flags_t decode_value_flags =
       plan->fp8_load_decode.value_flags;
@@ -661,36 +661,28 @@ iree_status_t loom_amdgpu_emit_fragment_memory_fp8_to_packed_16bit_load_packet(
           plan->payload_form);
   const bool use_identity_e8m0_pk8_descriptor =
       decode_kind ==
-          LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_DECODE_KIND_IDENTITY_E8M0_PK8_BF16 ||
-      decode_kind ==
-          LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_DECODE_KIND_IDENTITY_E8M0_PK8_F16;
+          LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_IDENTITY_E8M0_PK8_BF16 ||
+      decode_kind == LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_IDENTITY_E8M0_PK8_F16;
   const bool use_scalef32_descriptor =
-      decode_kind ==
-          LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_DECODE_KIND_SCALEF32_BF16_PAIR ||
-      decode_kind ==
-          LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_DECODE_KIND_SCALEF32_F16_PAIR;
+      decode_kind == LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_SCALEF32_BF16_PAIR ||
+      decode_kind == LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_SCALEF32_F16_PAIR;
   const bool use_native_f16_pair =
-      decode_kind ==
-      LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_DECODE_KIND_NATIVE_F16_PAIR;
+      decode_kind == LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_NATIVE_F16_PAIR;
   const bool use_native_f32_pair =
+      decode_kind == LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_NATIVE_F32_PAIR ||
       decode_kind ==
-          LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_DECODE_KIND_NATIVE_F32_PAIR ||
-      decode_kind ==
-          LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_DECODE_KIND_NATIVE_F32_PAIR_BF16_PACK;
+          LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_NATIVE_F32_PAIR_BF16_PACK;
   const bool use_packed_bf16 =
+      decode_kind == LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_PACKED_BF16_NORMAL ||
       decode_kind ==
-          LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_DECODE_KIND_PACKED_BF16_NORMAL ||
+          LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_PACKED_BF16_EXACT_REPAIR ||
       decode_kind ==
-          LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_DECODE_KIND_PACKED_BF16_EXACT_REPAIR ||
-      decode_kind ==
-          LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_DECODE_KIND_PACKED_BF16_EXACT_VIA_F16;
+          LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_PACKED_BF16_EXACT_VIA_F16;
   const bool use_packed_f16 =
-      decode_kind ==
-          LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_DECODE_KIND_PACKED_F16_NORMAL ||
-      decode_kind ==
-          LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_DECODE_KIND_PACKED_F16_EXACT_REPAIR;
+      decode_kind == LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_PACKED_F16_NORMAL ||
+      decode_kind == LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_PACKED_F16_EXACT_REPAIR;
   const bool use_full_bf16 =
-      decode_kind == LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_DECODE_KIND_FULL_BF16;
+      decode_kind == LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_FULL_BF16;
 
   const loom_amdgpu_fp8_decode_plan_t* decode_plan = NULL;
   if (use_native_f32_pair || use_packed_bf16 || use_packed_f16 ||
@@ -775,7 +767,7 @@ iree_status_t loom_amdgpu_emit_fragment_memory_fp8_to_packed_16bit_load_packet(
     bf16_pack_descriptors = (loom_amdgpu_float16_pack_descriptors_t){
         .flags =
             (decode_kind ==
-                     LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_DECODE_KIND_NATIVE_F32_PAIR_BF16_PACK
+                     LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_NATIVE_F32_PAIR_BF16_PACK
                  ? LOOM_AMDGPU_FLOAT16_PACK_DESCRIPTOR_FLAG_HAS_NATIVE_BF16
                  : LOOM_AMDGPU_FLOAT16_PACK_DESCRIPTOR_FLAG_NONE) |
             (iree_any_bit_set(decode_plan->flags,
@@ -819,8 +811,8 @@ iree_status_t loom_amdgpu_emit_fragment_memory_fp8_to_packed_16bit_load_packet(
     low_result_registers[i] = LOOM_VALUE_ID_INVALID;
   }
   switch (decode_kind) {
-    case LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_DECODE_KIND_IDENTITY_E8M0_PK8_BF16:
-    case LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_DECODE_KIND_IDENTITY_E8M0_PK8_F16: {
+    case LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_IDENTITY_E8M0_PK8_BF16:
+    case LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_IDENTITY_E8M0_PK8_F16: {
       IREE_RETURN_IF_ERROR(
           loom_amdgpu_emit_fragment_memory_identity_e8m0_pk8_fp8_to_16bit_packet(
               context, source_op, low_source_packet,
@@ -829,13 +821,13 @@ iree_status_t loom_amdgpu_emit_fragment_memory_fp8_to_packed_16bit_load_packet(
               low_result_registers));
       break;
     }
-    case LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_DECODE_KIND_SCALEF32_BF16_PAIR:
-    case LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_DECODE_KIND_SCALEF32_F16_PAIR:
+    case LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_SCALEF32_BF16_PAIR:
+    case LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_SCALEF32_F16_PAIR:
       for (uint16_t result_register_index = 0;
            result_register_index < packet->result_register_count;
            ++result_register_index) {
         if (decode_kind ==
-            LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_DECODE_KIND_SCALEF32_BF16_PAIR) {
+            LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_SCALEF32_BF16_PAIR) {
           IREE_RETURN_IF_ERROR(
               loom_amdgpu_emit_fragment_memory_scalef32_fp8_to_packed_bf16_register(
                   context, source_op, low_source_packet,
@@ -852,7 +844,7 @@ iree_status_t loom_amdgpu_emit_fragment_memory_fp8_to_packed_16bit_load_packet(
         }
       }
       break;
-    case LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_DECODE_KIND_NATIVE_F16_PAIR:
+    case LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_NATIVE_F16_PAIR:
       for (uint16_t result_register_index = 0;
            result_register_index < packet->result_register_count;
            ++result_register_index) {
@@ -864,8 +856,8 @@ iree_status_t loom_amdgpu_emit_fragment_memory_fp8_to_packed_16bit_load_packet(
                 &low_result_registers[result_register_index]));
       }
       break;
-    case LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_DECODE_KIND_NATIVE_F32_PAIR:
-    case LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_DECODE_KIND_NATIVE_F32_PAIR_BF16_PACK:
+    case LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_NATIVE_F32_PAIR:
+    case LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_NATIVE_F32_PAIR_BF16_PACK:
       for (uint16_t result_register_index = 0;
            result_register_index < packet->result_register_count;
            ++result_register_index) {
@@ -878,15 +870,14 @@ iree_status_t loom_amdgpu_emit_fragment_memory_fp8_to_packed_16bit_load_packet(
                 &low_result_registers[result_register_index]));
       }
       break;
-    case LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_DECODE_KIND_PACKED_BF16_NORMAL:
-    case LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_DECODE_KIND_PACKED_BF16_EXACT_REPAIR:
-    case LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_DECODE_KIND_PACKED_BF16_EXACT_VIA_F16: {
+    case LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_PACKED_BF16_NORMAL:
+    case LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_PACKED_BF16_EXACT_REPAIR:
+    case LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_PACKED_BF16_EXACT_VIA_F16: {
       const loom_amdgpu_fp8_packed_bf16_strategy_t strategy =
-          decode_kind ==
-                  LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_DECODE_KIND_PACKED_BF16_NORMAL
+          decode_kind == LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_PACKED_BF16_NORMAL
               ? LOOM_AMDGPU_FP8_PACKED_BF16_STRATEGY_NORMAL
           : decode_kind ==
-                  LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_DECODE_KIND_PACKED_BF16_EXACT_REPAIR
+                  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_PACKED_BF16_EXACT_REPAIR
               ? LOOM_AMDGPU_FP8_PACKED_BF16_STRATEGY_EXACT_REPAIR
               : LOOM_AMDGPU_FP8_PACKED_BF16_STRATEGY_EXACT_VIA_F16;
       IREE_RETURN_IF_ERROR(
@@ -899,11 +890,10 @@ iree_status_t loom_amdgpu_emit_fragment_memory_fp8_to_packed_16bit_load_packet(
               vgpr_type, sgpr_type, mask_type, low_result_registers));
       break;
     }
-    case LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_DECODE_KIND_PACKED_F16_NORMAL:
-    case LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_DECODE_KIND_PACKED_F16_EXACT_REPAIR: {
+    case LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_PACKED_F16_NORMAL:
+    case LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_PACKED_F16_EXACT_REPAIR: {
       const loom_amdgpu_fp8_packed_f16_strategy_t strategy =
-          decode_kind ==
-                  LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_DECODE_KIND_PACKED_F16_NORMAL
+          decode_kind == LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_PACKED_F16_NORMAL
               ? LOOM_AMDGPU_FP8_PACKED_F16_STRATEGY_NORMAL
               : LOOM_AMDGPU_FP8_PACKED_F16_STRATEGY_EXACT_REPAIR;
       IREE_RETURN_IF_ERROR(
@@ -916,7 +906,7 @@ iree_status_t loom_amdgpu_emit_fragment_memory_fp8_to_packed_16bit_load_packet(
               vgpr_type, sgpr_type, mask_type, low_result_registers));
       break;
     }
-    case LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_DECODE_KIND_FULL_BF16:
+    case LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_FULL_BF16:
       for (uint16_t result_register_index = 0;
            result_register_index < packet->result_register_count;
            ++result_register_index) {
