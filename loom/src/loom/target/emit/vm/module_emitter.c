@@ -15,7 +15,7 @@
 #include "loom/target/emit/vm/module_layout.h"
 
 enum {
-  LOOM_VM_MODULE_MAX_SECTION_COUNT = 11,
+  LOOM_VM_MODULE_MAX_SECTION_COUNT = 12,
   LOOM_VM_MODULE_STREAM_BLOCK_SIZE = 32 * 1024,
 };
 
@@ -452,6 +452,72 @@ static iree_status_t loom_vm_module_write_presentation(
   return iree_ok_status();
 }
 
+static iree_status_t loom_vm_module_write_metadata(
+    const loom_vm_module_layout_t* layout, loom_vm_module_writer_t* writer) {
+  const loom_vm_module_metadata_layout_t* metadata = &layout->metadata;
+  uint64_t section_start = 0;
+  IREE_RETURN_IF_ERROR(loom_vm_module_writer_begin_section_with_flags(
+      writer, IREE_VM_BYTECODE_SECTION_METADATA,
+      IREE_VM_BYTECODE_SECTION_METADATA_REQUIRED_FLAGS,
+      IREE_VM_BYTECODE_SECTION_MIN_ALIGNMENT, &section_start));
+  const iree_vm_bytecode_v0_metadata_header_t header = {
+      .module_entry_count_u32 = metadata->module_entry_count,
+      .import_scope_count_u32 = metadata->import_scope_count,
+      .export_scope_count_u32 = metadata->export_scope_count,
+      .total_entry_count_u32 = metadata->total_entry_count,
+  };
+  IREE_RETURN_IF_ERROR(
+      loom_vm_module_writer_write_record(writer, &header, sizeof(header)));
+  for (uint32_t i = 0; i < metadata->import_scope_count; ++i) {
+    const loom_vm_module_metadata_scope_layout_t* scope =
+        &metadata->import_scopes[i];
+    const iree_vm_bytecode_v0_metadata_scope_row_t row = {
+        .declaration_ordinal_u16 = scope->declaration_ordinal,
+        .entry_count_u16 = scope->entry_count,
+        .entry_base_u32 = scope->entry_base,
+    };
+    IREE_RETURN_IF_ERROR(
+        loom_vm_module_writer_write_record(writer, &row, sizeof(row)));
+  }
+  for (uint32_t i = 0; i < metadata->export_scope_count; ++i) {
+    const loom_vm_module_metadata_scope_layout_t* scope =
+        &metadata->export_scopes[i];
+    const iree_vm_bytecode_v0_metadata_scope_row_t row = {
+        .declaration_ordinal_u16 = scope->declaration_ordinal,
+        .entry_count_u16 = scope->entry_count,
+        .entry_base_u32 = scope->entry_base,
+    };
+    IREE_RETURN_IF_ERROR(
+        loom_vm_module_writer_write_record(writer, &row, sizeof(row)));
+  }
+  for (uint32_t i = 0; i < metadata->total_entry_count; ++i) {
+    const loom_vm_module_metadata_entry_layout_t* entry = &metadata->entries[i];
+    const iree_vm_bytecode_v0_metadata_entry_row_t row = {
+        .key_string_u16 = entry->key_string_ordinal,
+        .value_type_u16 = entry->value_type,
+    };
+    IREE_RETURN_IF_ERROR(
+        loom_vm_module_writer_write_record(writer, &row, sizeof(row)));
+  }
+  IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_pad_to_alignment(
+      &writer->writer,
+      iree_alignof(iree_vm_bytecode_v0_metadata_value_offset_t)));
+  for (uint32_t i = 0; i <= metadata->total_entry_count; ++i) {
+    const iree_vm_bytecode_v0_metadata_value_offset_t offset =
+        metadata->value_offsets[i];
+    IREE_RETURN_IF_ERROR(
+        loom_vm_module_writer_write_record(writer, &offset, sizeof(offset)));
+  }
+  for (uint32_t i = 0; i < metadata->total_entry_count; ++i) {
+    const iree_const_byte_span_t value =
+        loom_vm_module_metadata_entry_value(&metadata->entries[i]);
+    IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write(
+        &writer->writer, value.data, value.data_length));
+  }
+  loom_vm_module_writer_end_section(writer, section_start);
+  return iree_ok_status();
+}
+
 static iree_status_t loom_vm_module_patch_records(
     loom_vm_module_writer_t* writer,
     const iree_vm_bytecode_v0_function_row_t* function_rows,
@@ -502,6 +568,7 @@ static iree_status_t loom_vm_module_write_image(
   if (loom_vm_module_has_globals(layout)) ++section_count;
   if (layout->resources.rodata_count != 0) ++section_count;
   if (layout->presentation.entry_count != 0) ++section_count;
+  if (layout->metadata.total_entry_count != 0) ++section_count;
   iree_vm_bytecode_v0_image_header_t header = {0};
   memcpy(header.magic_u8, IREE_VM_BYTECODE_IMAGE_HEADER_MAGIC_U8_BYTES,
          IREE_VM_BYTECODE_IMAGE_HEADER_MAGIC_U8_LENGTH);
@@ -554,6 +621,9 @@ static iree_status_t loom_vm_module_write_image(
   }
   if (layout->presentation.entry_count != 0) {
     IREE_RETURN_IF_ERROR(loom_vm_module_write_presentation(layout, writer));
+  }
+  if (layout->metadata.total_entry_count != 0) {
+    IREE_RETURN_IF_ERROR(loom_vm_module_write_metadata(layout, writer));
   }
   IREE_ASSERT_EQ(writer->section_count, section_count);
 

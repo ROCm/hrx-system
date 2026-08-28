@@ -807,6 +807,12 @@ static iree_status_t loom_vm_module_strings_build(
                               "VM string candidate count exceeds host size");
     }
   }
+  if (!iree_host_size_checked_add(string_capacity,
+                                  layout->metadata.total_entry_count,
+                                  &string_capacity)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "VM string candidate count exceeds host size");
+  }
   if (string_capacity == 0) return iree_ok_status();
 
   iree_string_view_t* strings = NULL;
@@ -845,6 +851,9 @@ static iree_status_t loom_vm_module_strings_build(
     if (loom_vm_module_string_candidate_present(field->authored_type)) {
       strings[string_count++] = field->authored_type;
     }
+  }
+  for (uint32_t i = 0; i < layout->metadata.total_entry_count; ++i) {
+    strings[string_count++] = layout->metadata.entries[i].key;
   }
   IREE_ASSERT_EQ(string_count, string_capacity);
 
@@ -1086,6 +1095,7 @@ iree_status_t loom_vm_module_type_tables_build_strings(
   loom_vm_module_ref_type_string_ordinals_assign(&layout->type_tables);
   loom_vm_module_root_string_ordinals_assign(layout);
   loom_vm_module_presentation_resolve_string_ordinals(layout);
+  loom_vm_module_metadata_resolve_string_ordinals(layout);
   return iree_ok_status();
 }
 

@@ -12,6 +12,7 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "loom/ir/ir.h"
+#include "loom/target/emit/vm/module_metadata.h"
 #include "loom/target/emit/vm/module_presentation.h"
 #include "loom/target/emit/vm/module_resources.h"
 #include "loom/target/emit/vm/module_types.h"
@@ -115,6 +116,8 @@ struct loom_vm_module_layout_t {
   loom_vm_module_resource_layout_t resources;
   // Optional public declaration presentation.
   loom_vm_module_presentation_layout_t presentation;
+  // Optional module, import, and export typed metadata.
+  loom_vm_module_metadata_layout_t metadata;
   // Aggregate switch-target entries across all functions.
   uint32_t switch_target_entry_count;
 };

@@ -20,6 +20,7 @@ loom_cc_library(
     "function_locals.h"
     "module_emitter.h"
     "module_layout.h"
+    "module_metadata.h"
     "module_presentation.h"
     "module_resources.h"
     "module_types.h"
@@ -31,6 +32,7 @@ loom_cc_library(
     "function_locals.c"
     "module_emitter.c"
     "module_layout.c"
+    "module_metadata.c"
     "module_presentation.c"
     "module_resources.c"
     "module_types.c"
@@ -55,6 +57,7 @@ loom_cc_library(
     loom::ops::func
     loom::ops::global
     loom::ops::low
+    loom::ops::metadata
     loom::ops::op_defs
     loom::ops::type_registry
     loom::target::arch::vm::abi_layout
@@ -78,6 +81,7 @@ loom_check_test_suite(
     "test/control_flow.loom-test"
     "test/function_values.loom-test"
     "test/imports.loom-test"
+    "test/metadata.loom-test"
     "test/module.loom-test"
     "test/spills.loom-test"
     "test/suspension.loom-test"

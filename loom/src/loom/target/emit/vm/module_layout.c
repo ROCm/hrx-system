@@ -540,6 +540,7 @@ iree_status_t loom_vm_module_layout_build(loom_module_t* module,
   IREE_RETURN_IF_ERROR(loom_vm_module_layout_assign_imports(arena, out_layout));
   IREE_RETURN_IF_ERROR(
       loom_vm_module_presentation_layout_build(arena, out_layout));
+  IREE_RETURN_IF_ERROR(loom_vm_module_metadata_layout_build(arena, out_layout));
   return loom_vm_module_type_tables_build_strings(arena, out_layout);
 }
 
