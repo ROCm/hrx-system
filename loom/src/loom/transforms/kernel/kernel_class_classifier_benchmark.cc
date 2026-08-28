@@ -121,6 +121,7 @@ class KernelClassClassifierBenchmarkFixture {
           /*.result_values=*/nullptr,
           /*.projection_ordinals=*/&projection_ordinal_,
           /*.feature_outcomes=*/nullptr,
+          /*.action_contract_flags=*/action_contract_flags_,
           /*.generic_result=*/
           {
               /*.kind=*/LOOM_DECISION_PROGRAM_RESULT_SELECTED,
@@ -135,6 +136,7 @@ class KernelClassClassifierBenchmarkFixture {
           /*.result_count=*/0,
           /*.projection_count=*/1,
           /*.unavailable_reason=*/LOOM_KERNEL_CLASS_DECISION_AVAILABLE,
+          /*.hard_requirement_flags=*/0,
           /*.reserved=*/{},
       };
     }
@@ -193,6 +195,7 @@ class KernelClassClassifierBenchmarkFixture {
   loom_kernel_class_projection_t projection_ = {};
   loom_value_id_t projection_value_id_ = 0;
   uint32_t projection_ordinal_ = 0;
+  loom_kernel_class_contract_flags_t action_contract_flags_[2] = {};
   std::vector<loom_kernel_class_decision_t> decisions_;
   loom_kernel_class_classifier_t classifier_ = {};
 };

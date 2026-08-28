@@ -106,6 +106,13 @@ enum loom_kernel_class_decision_unavailable_reason_e {
   LOOM_KERNEL_CLASS_DECISION_UNRESOLVED_TARGET = 3,
 };
 
+// Publication properties of one family or provider applicability contract.
+typedef uint8_t loom_kernel_class_contract_flags_t;
+enum loom_kernel_class_contract_flag_bits_e {
+  // At least one scalar predicate reads an application result.
+  LOOM_KERNEL_CLASS_CONTRACT_FLAG_RESULT_DEPENDENT = 1u << 0,
+};
+
 // Immutable boundary form of one template application decision.
 typedef struct loom_kernel_class_decision_t {
   // Source application demand.
@@ -126,6 +133,9 @@ typedef struct loom_kernel_class_decision_t {
   // Pre-resolved contextual feature outcomes in model-local order.
   const loom_decision_truth_t* feature_outcomes;
 
+  // Publication properties indexed by provider action ordinal.
+  const loom_kernel_class_contract_flags_t* action_contract_flags;
+
   // Selection result from kernel-source facts before launch-site refinement.
   loom_decision_program_result_t generic_result;
 
@@ -141,8 +151,11 @@ typedef struct loom_kernel_class_decision_t {
   // Construction-time availability reason.
   loom_kernel_class_decision_unavailable_reason_t unavailable_reason;
 
+  // Publication properties of the family hard requirements.
+  loom_kernel_class_contract_flags_t hard_requirement_flags;
+
   // Reserved bytes. Always zero.
-  uint8_t reserved[3];
+  uint8_t reserved[2];
 } loom_kernel_class_decision_t;
 
 // Immutable classifier owned by one materialized kernel source product.
@@ -217,8 +230,11 @@ enum loom_kernel_class_decision_state_e {
   // A target-dependent decision retained its generic source form.
   LOOM_KERNEL_CLASS_DECISION_SKIPPED_UNRESOLVED_TARGET = 3,
 
+  // A selected result-dependent action retained its generic source form.
+  LOOM_KERNEL_CLASS_DECISION_SKIPPED_RESULT_DEPENDENT = 4,
+
   // Refining this decision would have exceeded the class limit.
-  LOOM_KERNEL_CLASS_DECISION_SKIPPED_CLASS_LIMIT = 4,
+  LOOM_KERNEL_CLASS_DECISION_SKIPPED_CLASS_LIMIT = 5,
 };
 
 // Collection result for one source decision.

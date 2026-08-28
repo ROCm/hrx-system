@@ -251,6 +251,24 @@ loom_kernel_class_feature_evaluator(
   };
 }
 
+static loom_kernel_class_contract_flags_t loom_kernel_class_contract_flags(
+    const loom_decision_program_t* program,
+    loom_decision_program_conjunction_t conjunction) {
+  loom_kernel_class_contract_flags_t flags = 0;
+  const uint32_t end_predicate =
+      conjunction.first_predicate + conjunction.predicate_count;
+  for (uint32_t i = conjunction.first_predicate; i < end_predicate; ++i) {
+    const loom_decision_program_predicate_t* predicate =
+        &program->predicates[i];
+    for (uint8_t j = 0; j < predicate->operand_count; ++j) {
+      if (loom_decision_program_operand_is_result(predicate->operands[j])) {
+        flags |= LOOM_KERNEL_CLASS_CONTRACT_FLAG_RESULT_DEPENDENT;
+      }
+    }
+  }
+  return flags;
+}
+
 //===----------------------------------------------------------------------===//
 // Classifier construction
 //===----------------------------------------------------------------------===//
@@ -308,6 +326,7 @@ iree_status_t loom_kernel_class_classifier_build(
   iree_host_size_t value_reference_count = 0;
   iree_host_size_t binding_value_count = 0;
   iree_host_size_t feature_count = 0;
+  iree_host_size_t action_count = 0;
   demand_id = references->symbols[kernel_symbol_id].first_template_demand_id;
   while (demand_id != LOOM_TEMPLATE_DEMAND_ID_INVALID) {
     const loom_template_demand_t* demand =
@@ -340,6 +359,12 @@ iree_status_t loom_kernel_class_classifier_build(
         loom_kernel_class_decision_value_reference_count(model);
     binding_value_count += arguments.count + results.count;
     feature_count += model->program.feature_count;
+    if (!iree_host_size_checked_add(action_count, model->program.choice_count,
+                                    &action_count)) {
+      return iree_make_status(
+          IREE_STATUS_RESOURCE_EXHAUSTED,
+          "kernel decision action contract table exceeds host range");
+    }
     out_classifier->maximum_provider_count = iree_max(
         out_classifier->maximum_provider_count, model->program.choice_count);
   }
@@ -454,12 +479,16 @@ iree_status_t loom_kernel_class_classifier_build(
   // compact projection-ordinal slices for the classifier lifetime.
   uint32_t* decision_projection_ordinals = referenced_value_ids;
   loom_decision_truth_t* feature_outcomes = NULL;
+  loom_kernel_class_contract_flags_t* action_contract_flags = NULL;
   IREE_RETURN_IF_ERROR(loom_kernel_class_allocate_array(
       arena, binding_value_count, sizeof(*binding_values),
       (void**)&binding_values));
   IREE_RETURN_IF_ERROR(loom_kernel_class_allocate_array(
       arena, feature_count, sizeof(*feature_outcomes),
       (void**)&feature_outcomes));
+  IREE_RETURN_IF_ERROR(loom_kernel_class_allocate_array(
+      arena, action_count, sizeof(*action_contract_flags),
+      (void**)&action_contract_flags));
   if (binding_value_count > 0) {
     memset(binding_values, 0xFF, binding_value_count * sizeof(*binding_values));
   }
@@ -470,6 +499,7 @@ iree_status_t loom_kernel_class_classifier_build(
   iree_host_size_t binding_cursor = 0;
   iree_host_size_t projection_cursor = 0;
   iree_host_size_t feature_cursor = 0;
+  iree_host_size_t action_cursor = 0;
   for (uint32_t i = 0; i < decision_count; ++i) {
     loom_kernel_class_decision_t* decision = &decisions[i];
     decision->argument_values =
@@ -487,6 +517,22 @@ iree_status_t loom_kernel_class_classifier_build(
     decision->feature_outcomes = decision->model->program.feature_count > 0
                                      ? feature_outcomes + feature_cursor
                                      : NULL;
+    decision->action_contract_flags =
+        decision->model->program.choice_count > 0
+            ? action_contract_flags + action_cursor
+            : NULL;
+    decision->hard_requirement_flags = loom_kernel_class_contract_flags(
+        &decision->model->program, decision->model->program.hard_requirements);
+    for (uint32_t j = 0; j < decision->model->program.choice_count; ++j) {
+      const loom_decision_program_choice_t* choice =
+          &decision->model->program.choices[j];
+      IREE_ASSERT(choice->action_ordinal <
+                  decision->model->program.choice_count);
+      action_contract_flags[action_cursor + choice->action_ordinal] =
+          loom_kernel_class_contract_flags(&decision->model->program,
+                                           choice->conjunction);
+    }
+    action_cursor += decision->model->program.choice_count;
 
     iree_host_size_t raw_projection_count = 0;
     bool has_unprojectable_input = false;
@@ -572,6 +618,7 @@ iree_status_t loom_kernel_class_classifier_build(
   IREE_ASSERT(binding_cursor == binding_value_count);
   IREE_ASSERT(projection_cursor <= value_reference_count);
   IREE_ASSERT(feature_cursor == feature_count);
+  IREE_ASSERT(action_cursor == action_count);
   return iree_ok_status();
 }
 
@@ -674,6 +721,20 @@ static iree_status_t loom_kernel_class_unresolved_decision_status(
   IREE_BUILTIN_UNREACHABLE();
 }
 
+static bool loom_kernel_class_action_is_publishable(
+    const loom_kernel_class_decision_t* decision, uint32_t action_ordinal) {
+  IREE_ASSERT(action_ordinal < decision->model->program.choice_count);
+  if (decision->generic_result.kind == LOOM_DECISION_PROGRAM_RESULT_SELECTED &&
+      decision->generic_result.action_ordinal == action_ordinal) {
+    return true;
+  }
+  const loom_kernel_class_contract_flags_t flags =
+      decision->hard_requirement_flags |
+      decision->action_contract_flags[action_ordinal];
+  return !iree_any_bit_set(flags,
+                           LOOM_KERNEL_CLASS_CONTRACT_FLAG_RESULT_DEPENDENT);
+}
+
 iree_status_t loom_kernel_class_classifier_collect(
     const loom_kernel_class_classifier_t* classifier,
     const loom_kernel_class_site_t* sites, iree_host_size_t site_count,
@@ -744,6 +805,7 @@ iree_status_t loom_kernel_class_classifier_collect(
     loom_decision_class_partition_begin(&partition,
                                         decision->model->program.choice_count);
     bool within_class_limit = true;
+    bool actions_are_publishable = true;
     for (iree_host_size_t site_ordinal = 0; site_ordinal < site_count;
          ++site_ordinal) {
       const loom_kernel_class_site_t* site = &sites[site_ordinal];
@@ -772,11 +834,31 @@ iree_status_t loom_kernel_class_classifier_collect(
         return loom_kernel_class_unresolved_decision_status(decision_ordinal,
                                                             &result);
       }
+      if (!loom_kernel_class_action_is_publishable(decision,
+                                                   result.action_ordinal)) {
+        actions_are_publishable = false;
+        break;
+      }
       if (!loom_decision_class_partition_record(&partition, site_ordinal,
                                                 result.action_ordinal)) {
         within_class_limit = false;
         break;
       }
+    }
+
+    if (!actions_are_publishable) {
+      if (decision->generic_result.kind !=
+          LOOM_DECISION_PROGRAM_RESULT_SELECTED) {
+        return iree_make_status(
+            IREE_STATUS_FAILED_PRECONDITION,
+            "kernel decision %u selects a result-dependent specialization "
+            "and has no generic residual",
+            decision_ordinal);
+      }
+      decision_results[decision_ordinal].state =
+          LOOM_KERNEL_CLASS_DECISION_SKIPPED_RESULT_DEPENDENT;
+      ++skipped_decision_count;
+      continue;
     }
 
     if (!within_class_limit) {

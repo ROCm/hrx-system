@@ -73,6 +73,45 @@ class KernelClassClassifierTest : public ::testing::Test {
     return symbol_id;
   }
 
+  ModulePtr BuildClassifier(iree_string_view_t source,
+                            iree_string_view_t kernel_name,
+                            loom_kernel_class_classifier_t* out_classifier) {
+    loom_symbol_reference_table_t references = {};
+    ModulePtr module = ParseAndVerify(source, &references);
+    if (module == nullptr) return ModulePtr();
+
+    loom_symbol_fact_table_t symbol_facts = {};
+    loom_symbol_fact_table_initialize(&symbol_facts, &analysis_arena_);
+    loom_template_provider_catalog_t providers = {};
+    loom_template_provider_catalog_initialize(&providers, &analysis_arena_);
+    IREE_EXPECT_OK(loom_template_provider_catalog_build_local(
+        &providers, module.get(), &symbol_facts));
+    loom_template_decision_model_catalog_t decision_models = {};
+    IREE_EXPECT_OK(loom_template_decision_model_catalog_build(
+        module.get(), &symbol_facts, &references, &providers, &analysis_arena_,
+        &decision_models));
+
+    const loom_symbol_id_t kernel_symbol_id =
+        FindSymbol(module.get(), kernel_name);
+    if (kernel_symbol_id == LOOM_SYMBOL_ID_INVALID) return ModulePtr();
+    const loom_func_like_t kernel = loom_func_like_cast(
+        module.get(), module->symbols.entries[kernel_symbol_id].defining_op);
+    loom_value_fact_table_t kernel_facts = {};
+    IREE_EXPECT_OK(loom_value_fact_table_initialize(
+        &kernel_facts, &analysis_arena_, module->values.count));
+    IREE_EXPECT_OK(
+        loom_value_fact_table_compute(&kernel_facts, module.get(), kernel));
+    loom_symbolic_expr_context_t expression_context = {};
+    loom_symbolic_expr_context_initialize(
+        module.get(), &kernel_facts, &analysis_arena_, &expression_context);
+    const loom_template_applicability_target_t kernel_target = {};
+    IREE_EXPECT_OK(loom_kernel_class_classifier_build(
+        module.get(), kernel_symbol_id, &references, &decision_models,
+        &kernel_facts, &expression_context, &kernel_target, &analysis_arena_,
+        out_classifier));
+    return module;
+  }
+
   iree_arena_block_pool_t block_pool_;
   iree_arena_allocator_t analysis_arena_;
   loom_context_t context_;
@@ -224,6 +263,7 @@ class ManualBinaryClassifier {
           /*.result_values=*/nullptr,
           /*.projection_ordinals=*/&projection_ordinals_[i],
           /*.feature_outcomes=*/nullptr,
+          /*.action_contract_flags=*/action_contract_flags_[i],
           /*.generic_result=*/
           {
               /*.kind=*/static_cast<loom_decision_program_result_kind_t>(
@@ -242,6 +282,7 @@ class ManualBinaryClassifier {
           /*.result_count=*/0,
           /*.projection_count=*/1,
           /*.unavailable_reason=*/LOOM_KERNEL_CLASS_DECISION_AVAILABLE,
+          /*.hard_requirement_flags=*/0,
           /*.reserved=*/{},
       };
     }
@@ -277,6 +318,10 @@ class ManualBinaryClassifier {
 
   loom_kernel_class_classifier_t* classifier() { return &classifier_; }
   loom_kernel_class_decision_t* decisions() { return decisions_; }
+  loom_kernel_class_contract_flags_t* action_contract_flags(
+      uint32_t decision_ordinal) {
+    return action_contract_flags_[decision_ordinal];
+  }
   const loom_kernel_class_site_t* sites() const { return sites_; }
 
  private:
@@ -292,6 +337,7 @@ class ManualBinaryClassifier {
   loom_kernel_class_projection_t projections_[2] = {};
   loom_value_id_t projection_value_ids_[2] = {0, 1};
   uint32_t projection_ordinals_[2] = {0, 1};
+  loom_kernel_class_contract_flags_t action_contract_flags_[2][2] = {};
   loom_kernel_class_decision_t decisions_[2] = {};
   loom_kernel_class_classifier_t classifier_ = {};
 
@@ -534,6 +580,85 @@ TEST_F(KernelClassClassifierTest,
       loom_kernel_class_classifier_collect(
           fixture.classifier(), fixture.sites(), /*site_count=*/4, &options,
           &analysis_arena_, &collection));
+}
+
+TEST_F(KernelClassClassifierTest,
+       SelectedResultDependentActionRetainsGenericResidual) {
+  ManualBinaryClassifier fixture(/*has_generic_residual=*/true);
+  fixture.classifier()->decision_count = 1;
+  fixture.action_contract_flags(0)[0] =
+      LOOM_KERNEL_CLASS_CONTRACT_FLAG_RESULT_DEPENDENT;
+  const loom_kernel_class_collection_options_t options =
+      loom_kernel_class_collection_options_default();
+  loom_kernel_class_collection_t collection = {};
+  IREE_ASSERT_OK(loom_kernel_class_classifier_collect(
+      fixture.classifier(), fixture.sites(), /*site_count=*/4, &options,
+      &analysis_arena_, &collection));
+  EXPECT_EQ(collection.class_count, 1u);
+  EXPECT_EQ(collection.accepted_decision_count, 0u);
+  EXPECT_EQ(collection.skipped_decision_count, 1u);
+  EXPECT_EQ(collection.trace_count, 0u);
+  EXPECT_EQ(collection.decision_results[0].state,
+            LOOM_KERNEL_CLASS_DECISION_SKIPPED_RESULT_DEPENDENT);
+}
+
+TEST_F(KernelClassClassifierTest,
+       UnselectedResultDependentActionDoesNotSuppressInputOnlyAction) {
+  ManualBinaryClassifier fixture(/*has_generic_residual=*/true);
+  fixture.classifier()->decision_count = 1;
+  fixture.action_contract_flags(0)[0] =
+      LOOM_KERNEL_CLASS_CONTRACT_FLAG_RESULT_DEPENDENT;
+  const loom_kernel_class_collection_options_t options =
+      loom_kernel_class_collection_options_default();
+  loom_kernel_class_collection_t collection = {};
+  IREE_ASSERT_OK(loom_kernel_class_classifier_collect(
+      fixture.classifier(), fixture.sites(), /*site_count=*/2, &options,
+      &analysis_arena_, &collection));
+  EXPECT_EQ(collection.class_count, 1u);
+  EXPECT_EQ(collection.accepted_decision_count, 1u);
+  EXPECT_EQ(collection.skipped_decision_count, 0u);
+  EXPECT_EQ(collection.trace_count, 1u);
+  EXPECT_EQ(collection.decision_results[0].state,
+            LOOM_KERNEL_CLASS_DECISION_ACCEPTED);
+  EXPECT_EQ(collection.traces[0].action_ordinal, 1u);
+}
+
+TEST_F(KernelClassClassifierTest, ResultDependencyIsScopedToItsProviderAction) {
+  const iree_string_view_t source = IREE_SV(R"(
+template.decl @result.family(%input: index) -> (%output: index)
+
+template.def<@result.family> priority(10) @result_guard(%input: index) -> (%output: index) where [ge(%output, 128)] {
+  template.return %input : index
+}
+
+template.def<@result.family> priority(1) @fallback(%input: index) -> (index) {
+  template.return %input : index
+}
+
+kernel.def @classified() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%input: index) {
+  %result = template.apply<@result.family>(%input) : (index) -> (index)
+  kernel.return
+}
+)");
+  loom_kernel_class_classifier_t classifier = {};
+  ModulePtr module =
+      BuildClassifier(source, IREE_SV("classified"), &classifier);
+  ASSERT_NE(module, nullptr);
+  ASSERT_EQ(classifier.decision_count, 1u);
+  const loom_kernel_class_decision_t* decision = &classifier.decisions[0];
+  EXPECT_EQ(decision->hard_requirement_flags, 0u);
+  ASSERT_EQ(decision->model->providers.count, 2u);
+  for (uint32_t i = 0; i < decision->model->providers.count; ++i) {
+    const bool is_result_guard = iree_string_view_equal(
+        decision->model->providers.providers[i].name, IREE_SV("result_guard"));
+    EXPECT_EQ(
+        iree_any_bit_set(decision->action_contract_flags[i],
+                         LOOM_KERNEL_CLASS_CONTRACT_FLAG_RESULT_DEPENDENT),
+        is_result_guard);
+  }
 }
 
 }  // namespace
