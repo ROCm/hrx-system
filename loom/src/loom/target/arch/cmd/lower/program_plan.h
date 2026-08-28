@@ -145,9 +145,10 @@ typedef struct loom_cmd_program_plan_t {
 // |materialization| is a sealed selective-link product containing command
 // implementations, logical-kernel contracts and configuration functions, and
 // executable-entry declarations without kernel implementation facets.
-// |program_refs| names unique command roots in that target module. Preparation
-// takes ownership of the module and resets |materialization| immediately; all
-// dense projections are borrowed for the duration of this call.
+// |program_refs| names command roots in caller order and may repeat the same
+// root. Preparation takes ownership of the module and resets |materialization|
+// immediately; all dense projections are borrowed for the duration of this
+// call.
 //
 // Preparation flattens command-program composition,
 // resolves root-local control flow and explicit unroll policies, converts
