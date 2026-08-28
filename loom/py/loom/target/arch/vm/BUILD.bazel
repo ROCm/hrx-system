@@ -27,6 +27,17 @@ iree_py_library(
     name = "projection",
     srcs = ["projection.py"],
     deps = [
+        "//loom/py/loom/target:low_descriptors",
+        "//runtime/src/iree/vm/bytecode/spec/model/isa:definitions",
+        "//runtime/src/iree/vm/bytecode/spec/model/isa/core",
+    ],
+)
+
+iree_py_library(
+    name = "source_lowering",
+    srcs = ["source_lowering.py"],
+    deps = [
+        ":projection",
         "//loom/py/loom:core",
         "//loom/py/loom/dialect/cfg",
         "//loom/py/loom/dialect/func",
@@ -34,7 +45,6 @@ iree_py_library(
         "//loom/py/loom/dialect/scalar",
         "//loom/py/loom/target:low_descriptors",
         "//runtime/src/iree/vm/bytecode/spec/model/isa:definitions",
-        "//runtime/src/iree/vm/bytecode/spec/model/isa/core",
     ],
 )
 

@@ -232,3 +232,105 @@ low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = t
   %byte_offset = integer.mul.i64 %population, %stride : reg<vm.value : offset>
   return %difference, %bits, %rotated, %population, %ordered, %byte_offset
 }
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_f32_core_records(%value: f32, %rhs: f32, %lower: f32, %upper: f32) -> (f32, f32, f32, i1, i1, f32, f32, f32) {
+  %sum = scalar.addf %value, %rhs : f32
+  %minimum = scalar.minimumf %value, %rhs : f32
+  %clamped = scalar.clampf<ieee> %value, %lower, %upper : f32
+  %ordered = scalar.cmpf olt, %value, %rhs : f32
+  %finite = scalar.isfinitef %value : f32
+  %root = scalar.sqrtf %value : f32
+  %power = scalar.powf %value, %rhs : f32
+  %fused = scalar.fmaf %value, %rhs, %sum : f32
+  func.return %sum, %minimum, %clamped, %ordered, %finite, %root, %power, %fused : f32, f32, f32, i1, i1, f32, f32, f32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>) -> (reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>)>}) @scalar_f32_core_records(%value: reg<vm.value : f32>, %rhs: reg<vm.value : f32>, %lower: reg<vm.value : f32>, %upper: reg<vm.value : f32>) -> (reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>) asm {
+  %sum = float.add.f32 %value, %rhs : reg<vm.value : f32>
+  %minimum = float.minmax.f32 %value, %rhs, minimum : reg<vm.value : f32>
+  %clamped = float.clamp.f32 %value, %lower, %upper, ieee : reg<vm.value : f32>
+  %ordered = float.compare.f32 %value, %rhs, olt : reg<vm.value : i1>
+  %finite = float.classify.f32 %value, isfinite : reg<vm.value : i1>
+  %root = float.math.unary.f32 %value, sqrt : reg<vm.value : f32>
+  %power = float.math.binary.f32 %value, %rhs, pow : reg<vm.value : f32>
+  %fused = float.math.ternary.f32 %value, %rhs, %sum, fma : reg<vm.value : f32>
+  return %sum, %minimum, %clamped, %ordered, %finite, %root, %power, %fused
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_f64_core_records(%value: f64, %rhs: f64) -> (f64, f64, f64, f64, f64) {
+  %negated = scalar.negf %value : f64
+  %maximum = scalar.maxnumf %value, %rhs : f64
+  %cosine = scalar.cosf %value : f64
+  %angle = scalar.atan2f %value, %rhs : f64
+  %sign = scalar.signf %value : f64
+  func.return %negated, %maximum, %cosine, %angle, %sign : f64, f64, f64, f64, f64
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : f64>, reg<vm.value : f64>) -> (reg<vm.value : f64>, reg<vm.value : f64>, reg<vm.value : f64>, reg<vm.value : f64>, reg<vm.value : f64>)>}) @scalar_f64_core_records(%value: reg<vm.value : f64>, %rhs: reg<vm.value : f64>) -> (reg<vm.value : f64>, reg<vm.value : f64>, reg<vm.value : f64>, reg<vm.value : f64>, reg<vm.value : f64>) asm {
+  %negated = float.neg.f64 %value : reg<vm.value : f64>
+  %maximum = float.minmax.f64 %value, %rhs, maxnum : reg<vm.value : f64>
+  %cosine = float.math.unary.f64 %value, cos : reg<vm.value : f64>
+  %angle = float.math.binary.f64 %value, %rhs, atan2 : reg<vm.value : f64>
+  %sign = float.math.unary.f64 %value, sign : reg<vm.value : f64>
+  return %negated, %maximum, %cosine, %angle, %sign
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_core_conversions(%i32_value: i32, %i64_value: i64, %f16_value: f16, %f32_value: f32, %f64_value: f64) -> (f32, f64, f16, bf16, f64, i64, i32, i8, i64, i32) {
+  %extended_f16 = scalar.extf %f16_value : f16 to f32
+  %extended_f32 = scalar.extf %f32_value : f32 to f64
+  %truncated_f64 = scalar.fptrunc %f64_value : f64 to f16
+  %signed_float = scalar.sitofp %i32_value : i32 to bf16
+  %unsigned_float = scalar.uitofp %i64_value : i64 to f64
+  %signed_integer = scalar.fptosi %f32_value : f32 to i64
+  %unsigned_integer = scalar.fptoui %f64_value : f64 to i32
+  %truncated_integer = scalar.trunci %i32_value : i32 to i8
+  %extended_integer = scalar.extsi %i32_value : i32 to i64
+  %raw_bits = scalar.bitcast %f32_value : f32 to i32
+  func.return %extended_f16, %extended_f32, %truncated_f64, %signed_float, %unsigned_float, %signed_integer, %unsigned_integer, %truncated_integer, %extended_integer, %raw_bits : f32, f64, f16, bf16, f64, i64, i32, i8, i64, i32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i32>, reg<vm.value : i64>, reg<vm.value : f16>, reg<vm.value : f32>, reg<vm.value : f64>) -> (reg<vm.value : f32>, reg<vm.value : f64>, reg<vm.value : f16>, reg<vm.value : bf16>, reg<vm.value : f64>, reg<vm.value : i64>, reg<vm.value : i32>, reg<vm.value : i8>, reg<vm.value : i64>, reg<vm.value : i32>)>}) @scalar_core_conversions(%i32_value: reg<vm.value : i32>, %i64_value: reg<vm.value : i64>, %f16_value: reg<vm.value : f16>, %f32_value: reg<vm.value : f32>, %f64_value: reg<vm.value : f64>) -> (reg<vm.value : f32>, reg<vm.value : f64>, reg<vm.value : f16>, reg<vm.value : bf16>, reg<vm.value : f64>, reg<vm.value : i64>, reg<vm.value : i32>, reg<vm.value : i8>, reg<vm.value : i64>, reg<vm.value : i32>) asm {
+  %extended_f16 = conversion.float.extend %f16_value, f16.to.f32 : reg<vm.value : f32>
+  %extended_f32 = conversion.float.width %f32_value, f32.to.f64 : reg<vm.value : f64>
+  %truncated_f64 = conversion.float.truncate %f64_value, f64.to.f16 : reg<vm.value : f16>
+  %signed_float = conversion.integer.to.float %i32_value, s32.to.bf16 : reg<vm.value : bf16>
+  %unsigned_float = conversion.integer.to.float %i64_value, u64.to.f64 : reg<vm.value : f64>
+  %signed_integer = conversion.float.to.integer %f32_value, f32.to.s64 : reg<vm.value : i64>
+  %unsigned_integer = conversion.float.to.integer %f64_value, f64.to.u32 : reg<vm.value : i32>
+  %truncated_integer = conversion.integer %i32_value, i32.to.i8 : reg<vm.value : i8>
+  %extended_integer = conversion.integer %i32_value, s32.to.i64 : reg<vm.value : i64>
+  %raw_bits = value.copy %f32_value : reg<vm.value : i32>
+  return %extended_f16, %extended_f32, %truncated_f64, %signed_float, %unsigned_float, %signed_integer, %unsigned_integer, %truncated_integer, %extended_integer, %raw_bits
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @index_core_casts(%raw: i64, %index_value: index, %offset_value: offset) -> (index, offset, i64, i32) {
+  %index_from_raw = index.cast %raw : i64 to index
+  %offset_from_index = index.cast %index_value : index to offset
+  %raw_from_offset = index.cast %offset_value : offset to i64
+  %narrow_offset = index.cast %offset_value : offset to i32
+  func.return %index_from_raw, %offset_from_index, %raw_from_offset, %narrow_offset : index, offset, i64, i32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i64>, reg<vm.value : index>, reg<vm.value : offset>) -> (reg<vm.value : index>, reg<vm.value : offset>, reg<vm.value : i64>, reg<vm.value : i32>)>}) @index_core_casts(%raw: reg<vm.value : i64>, %index_value: reg<vm.value : index>, %offset_value: reg<vm.value : offset>) -> (reg<vm.value : index>, reg<vm.value : offset>, reg<vm.value : i64>, reg<vm.value : i32>) asm {
+  %index_from_raw = value.copy %raw : reg<vm.value : index>
+  %offset_from_index = value.copy %index_value : reg<vm.value : offset>
+  %raw_from_offset = value.copy %offset_value : reg<vm.value : i64>
+  %narrow_offset = conversion.integer %offset_value, i64.to.i32 : reg<vm.value : i32>
+  return %index_from_raw, %offset_from_index, %raw_from_offset, %narrow_offset
+}

@@ -12,12 +12,29 @@ from loom.dialect.index import defs as index_defs
 from loom.dialect.scalar import arithmetic as scalar_arithmetic
 from loom.dialect.scalar import bitwise as scalar_bitwise
 from loom.dialect.scalar import comparison as scalar_comparison
+from loom.dialect.scalar import conversion as scalar_conversion
+from loom.dialect.scalar import math as scalar_math
 from loom.gen.target.arch.vm.vm_tables import (
     generate_encoding_rows,
     generate_lowering_rows,
     generate_verification_rows,
 )
-from loom.ir import BUFFER_TYPE, I1, I32, I64, INDEX, OFFSET
+from loom.ir import (
+    BF16,
+    BUFFER_TYPE,
+    F16,
+    F32,
+    F64,
+    I1,
+    I8,
+    I16,
+    I32,
+    I64,
+    INDEX,
+    OFFSET,
+    ScalarType,
+)
+from loom.scalar_type import ScalarTypeKind
 from loom.target.arch.vm.projection import (
     VM_ABI_INSTRUCTIONS,
     VM_CORE_DESCRIPTOR_SET,
@@ -25,9 +42,9 @@ from loom.target.arch.vm.projection import (
     VM_INSTRUCTION_PROJECTIONS,
     VM_MODULE_RESOURCES,
     VM_PACKET_DESCRIPTORS,
-    VM_SOURCE_LOWERINGS,
     VM_STRUCTURAL_INSTRUCTIONS,
 )
+from loom.target.arch.vm.source_lowering import VM_SOURCE_LOWERINGS
 from loom.target.arch.vm.verification import (
     VM_MEMORY_FORMAT_UNIT_COUNTS,
     VM_MODULE_DEPENDENT_CONSTRAINTS,
@@ -361,13 +378,230 @@ def test_comparison_projection_copies_the_verified_predicate() -> None:
     )
 
 
+def test_native_float_projection_preserves_widths_and_selectors() -> None:
+    direct_operations = (
+        (scalar_arithmetic.scalar_addf, "vm.float.add"),
+        (scalar_arithmetic.scalar_subf, "vm.float.sub"),
+        (scalar_arithmetic.scalar_mulf, "vm.float.mul"),
+        (scalar_arithmetic.scalar_divf, "vm.float.div"),
+        (scalar_arithmetic.scalar_remf, "vm.float.rem"),
+        (scalar_arithmetic.scalar_negf, "vm.float.neg"),
+        (scalar_arithmetic.scalar_absf, "vm.float.abs"),
+        (scalar_arithmetic.scalar_copysignf, "vm.float.copysign"),
+    )
+    for source_op, descriptor_stem in direct_operations:
+        rows = tuple(row for row in VM_SOURCE_LOWERINGS if row.source_op is source_op)
+        assert tuple((row.operand_types, row.result_types, row.descriptor_key) for row in rows) == (
+            (
+                (F32,) * len(source_op.operands),
+                (F32,),
+                f"{descriptor_stem}.f32",
+            ),
+            (
+                (F64,) * len(source_op.operands),
+                (F64,),
+                f"{descriptor_stem}.f64",
+            ),
+        )
+
+    for source_op, selector_value in (
+        (scalar_arithmetic.scalar_minimumf, 0),
+        (scalar_arithmetic.scalar_maximumf, 1),
+        (scalar_arithmetic.scalar_minnumf, 2),
+        (scalar_arithmetic.scalar_maxnumf, 3),
+    ):
+        rows = tuple(row for row in VM_SOURCE_LOWERINGS if row.source_op is source_op)
+        assert tuple((row.descriptor_key, row.selector_value) for row in rows) == (
+            ("vm.float.minmax.f32", selector_value),
+            ("vm.float.minmax.f64", selector_value),
+        )
+
+    clamp_rows = tuple(row for row in VM_SOURCE_LOWERINGS if row.source_op is scalar_arithmetic.scalar_clampf)
+    assert tuple(
+        (
+            row.operand_types,
+            row.result_types,
+            row.descriptor_key,
+            row.selector_source_attr_ordinal,
+        )
+        for row in clamp_rows
+    ) == (
+        ((F32, F32, F32), (F32,), "vm.float.clamp.f32", 0),
+        ((F64, F64, F64), (F64,), "vm.float.clamp.f64", 0),
+    )
+
+    compare_rows = tuple(row for row in VM_SOURCE_LOWERINGS if row.source_op is scalar_comparison.scalar_cmpf)
+    assert tuple(
+        (
+            row.operand_types,
+            row.result_types,
+            row.descriptor_key,
+            row.selector_source_attr_ordinal,
+        )
+        for row in compare_rows
+    ) == (
+        ((F32, F32), (I1,), "vm.float.compare.f32", 0),
+        ((F64, F64), (I1,), "vm.float.compare.f64", 0),
+    )
+
+
+def test_float_math_projection_covers_native_core_selectors() -> None:
+    unary_operations = (
+        (scalar_math.scalar_expf, 0),
+        (scalar_math.scalar_exp2f, 1),
+        (scalar_math.scalar_expm1f, 2),
+        (scalar_math.scalar_logf, 3),
+        (scalar_math.scalar_log2f, 4),
+        (scalar_math.scalar_log10f, 5),
+        (scalar_math.scalar_log1pf, 6),
+        (scalar_math.scalar_sqrtf, 7),
+        (scalar_math.scalar_rsqrtf, 8),
+        (scalar_math.scalar_cbrtf, 9),
+        (scalar_math.scalar_sinf, 10),
+        (scalar_math.scalar_cosf, 11),
+        (scalar_math.scalar_sinturnsf, 12),
+        (scalar_math.scalar_costurnsf, 13),
+        (scalar_math.scalar_tanf, 14),
+        (scalar_math.scalar_asinf, 15),
+        (scalar_math.scalar_acosf, 16),
+        (scalar_math.scalar_atanf, 17),
+        (scalar_math.scalar_sinhf, 18),
+        (scalar_math.scalar_coshf, 19),
+        (scalar_math.scalar_tanhf, 20),
+        (scalar_math.scalar_asinhf, 21),
+        (scalar_math.scalar_acoshf, 22),
+        (scalar_math.scalar_atanhf, 23),
+        (scalar_math.scalar_erff, 24),
+        (scalar_math.scalar_erfcf, 25),
+        (scalar_math.scalar_logisticf, 26),
+        (scalar_math.scalar_siluf, 27),
+        (scalar_math.scalar_softplusf, 28),
+        (scalar_math.scalar_ceilf, 29),
+        (scalar_math.scalar_floorf, 30),
+        (scalar_math.scalar_roundf, 31),
+        (scalar_math.scalar_roundevenf, 32),
+        (scalar_math.scalar_truncf, 33),
+        (scalar_comparison.scalar_signf, 34),
+    )
+    for source_op, selector_value in unary_operations:
+        rows = tuple(row for row in VM_SOURCE_LOWERINGS if row.source_op is source_op)
+        assert tuple((row.descriptor_key, row.selector_value) for row in rows) == (
+            ("vm.float.math.unary.f32", selector_value),
+            ("vm.float.math.unary.f64", selector_value),
+        )
+
+    for source_op, selector_value in (
+        (scalar_math.scalar_powf, 0),
+        (scalar_math.scalar_atan2f, 1),
+    ):
+        rows = tuple(row for row in VM_SOURCE_LOWERINGS if row.source_op is source_op)
+        assert tuple((row.descriptor_key, row.selector_value) for row in rows) == (
+            ("vm.float.math.binary.f32", selector_value),
+            ("vm.float.math.binary.f64", selector_value),
+        )
+
+    fma_rows = tuple(row for row in VM_SOURCE_LOWERINGS if row.source_op is scalar_math.scalar_fmaf)
+    assert tuple((row.operand_types, row.descriptor_key, row.selector_value) for row in fma_rows) == (
+        ((F32, F32, F32), "vm.float.math.ternary.f32", 0),
+        ((F64, F64, F64), "vm.float.math.ternary.f64", 0),
+    )
+
+    for source_op, selector_value in (
+        (scalar_comparison.scalar_isnanf, 0),
+        (scalar_comparison.scalar_isinff, 1),
+        (scalar_comparison.scalar_isfinitef, 2),
+    ):
+        rows = tuple(row for row in VM_SOURCE_LOWERINGS if row.source_op is source_op)
+        assert tuple((row.result_types, row.descriptor_key, row.selector_value) for row in rows) == (
+            ((I1,), "vm.float.classify.f32", selector_value),
+            ((I1,), "vm.float.classify.f64", selector_value),
+        )
+
+
+def test_conversion_projection_covers_exact_core_type_pairs() -> None:
+    f8e4m3 = ScalarType(ScalarTypeKind.F8E4M3)
+    f8e5m2 = ScalarType(ScalarTypeKind.F8E5M2)
+
+    expected_type_pairs = {
+        scalar_conversion.scalar_extf: {
+            (f8e4m3, F32),
+            (f8e5m2, F32),
+            (F16, F32),
+            (BF16, F32),
+            (F32, F64),
+        },
+        scalar_conversion.scalar_fptrunc: {
+            (F32, f8e4m3),
+            (F32, f8e5m2),
+            (F32, F16),
+            (F32, BF16),
+            (F64, f8e4m3),
+            (F64, f8e5m2),
+            (F64, F16),
+            (F64, BF16),
+            (F64, F32),
+        },
+        scalar_conversion.scalar_sitofp: {
+            (I32, F32),
+            (I32, F64),
+            (I64, F32),
+            (I64, F64),
+            (I32, BF16),
+            (I64, BF16),
+        },
+        scalar_conversion.scalar_uitofp: {
+            (I32, F32),
+            (I32, F64),
+            (I64, F32),
+            (I64, F64),
+            (I32, BF16),
+            (I64, BF16),
+        },
+        scalar_conversion.scalar_fptosi: {
+            (F32, I32),
+            (F32, I64),
+            (F64, I32),
+            (F64, I64),
+        },
+        scalar_conversion.scalar_fptoui: {
+            (F32, I32),
+            (F32, I64),
+            (F64, I32),
+            (F64, I64),
+        },
+        scalar_conversion.scalar_extsi: {
+            (I8, I32),
+            (I16, I32),
+            (I32, I64),
+        },
+        scalar_conversion.scalar_extui: {
+            (I8, I32),
+            (I16, I32),
+            (I32, I64),
+        },
+        scalar_conversion.scalar_trunci: {
+            (I32, I8),
+            (I32, I16),
+            (I64, I32),
+        },
+    }
+    for source_op, expected_pairs in expected_type_pairs.items():
+        actual_pairs = {(row.operand_types[0], row.result_types[0]) for row in VM_SOURCE_LOWERINGS if row.source_op is source_op}
+        assert actual_pairs == expected_pairs
+
+    bitcast_rows = tuple(row for row in VM_SOURCE_LOWERINGS if row.source_op is scalar_conversion.scalar_bitcast)
+    assert len(bitcast_rows) == 16
+    assert all(row.descriptor_key == "vm.value.copy" for row in bitcast_rows)
+    assert all(row.operand_types[0].bitwidth == row.result_types[0].bitwidth for row in bitcast_rows)
+
+
 def test_lowering_rows_are_data_only() -> None:
     rows = generate_lowering_rows()
     assert "LOOM_VM_MODULE_RESOURCE_ROW(VALUE_IMMUTABLE" in rows
     assert "LOOM_VM_MODULE_RESOURCE_ROW(RODATA" in rows
     assert "VM_CORE_DESCRIPTOR_REF_BUFFER_RODATA_LOAD, UINT16_MAX, UINT16_MAX" in rows
     assert "VM_CORE_DESCRIPTOR_REF_REF_RETAIN" in rows
-    assert "LOOM_VM_SOURCE_LOWERING_LIMITS(\n    2, 1)" in rows
+    assert "LOOM_VM_SOURCE_LOWERING_LIMITS(\n    3, 1)" in rows
     assert "LOOM_OP_INDEX_MUL" in rows
     assert "VM_CORE_DESCRIPTOR_REF_INTEGER_MUL_I64" in rows
     assert ("LOOM_OP_SCALAR_CMPI, VM_CORE_DESCRIPTOR_REF_INTEGER_COMPARE_I32, 0, 0, 0") in rows

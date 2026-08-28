@@ -29,8 +29,8 @@ from loom.target.arch.vm.projection import (
     VM_INSTRUCTION_PROJECTIONS,
     VM_MODULE_RESOURCES,
     VM_PACKET_DESCRIPTORS,
-    VM_SOURCE_LOWERINGS,
 )
+from loom.target.arch.vm.source_lowering import VM_SOURCE_LOWERINGS
 from loom.target.arch.vm.verification import (
     VM_MEMORY_FORMAT_UNIT_COUNTS,
     VM_PACKED_IMMEDIATE_MASKS,

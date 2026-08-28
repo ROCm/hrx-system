@@ -26,6 +26,18 @@ iree_py_library(
   SRCS
     "projection.py"
   DEPS
+    loom::py::loom::target::low_descriptors
+    iree::vm::bytecode::spec::model::isa::definitions
+    iree::vm::bytecode::spec::model::isa::core::core
+)
+
+iree_py_library(
+  NAME
+    source_lowering
+  SRCS
+    "source_lowering.py"
+  DEPS
+    loom::py::loom::target::arch::vm::projection
     loom::py::loom::core
     loom::py::loom::dialect::cfg::cfg
     loom::py::loom::dialect::func::func
@@ -33,7 +45,6 @@ iree_py_library(
     loom::py::loom::dialect::scalar::scalar
     loom::py::loom::target::low_descriptors
     iree::vm::bytecode::spec::model::isa::definitions
-    iree::vm::bytecode::spec::model::isa::core::core
 )
 
 iree_py_library(

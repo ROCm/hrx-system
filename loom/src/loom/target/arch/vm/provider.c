@@ -13,6 +13,7 @@
 #include "loom/target/arch/vm/lower/kernel.h"
 #include "loom/target/arch/vm/lower/lower.h"
 #include "loom/target/arch/vm/lower/resources.h"
+#include "loom/target/arch/vm/math_policy.h"
 #include "loom/target/arch/vm/ops/registry.h"
 #include "loom/target/arch/vm/pass_registry.h"
 #include "loom/target/low_descriptor_registry.h"
@@ -106,6 +107,7 @@ const loom_target_provider_t loom_vm_target_provider = {
         loom_vm_low_descriptor_registry_initialize,
     .initialize_low_lower_policy_registry =
         loom_vm_low_lower_policy_registry_initialize,
+    .initialize_math_policy_registry = loom_vm_math_policy_registry_initialize,
     .low_legality_provider_list =
         {
             .count = IREE_ARRAYSIZE(kLoomVmLowLegalityProviders),

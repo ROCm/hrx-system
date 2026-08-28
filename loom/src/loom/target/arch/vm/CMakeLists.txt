@@ -222,6 +222,7 @@ loom_cc_library(
     "constants/materialization.h"
     "contracts/materialization.h"
     "initialization.h"
+    "math_policy.h"
     "pass_registry.h"
     "provider.h"
   SRCS
@@ -229,6 +230,7 @@ loom_cc_library(
     "constants/materialization.c"
     "contracts/materialization.c"
     "initialization.c"
+    "math_policy.c"
     "pass_registry.c"
     "provider.c"
   DEPS
@@ -253,6 +255,7 @@ loom_cc_library(
     loom::pass::types
     loom::rewrite::rewriter
     loom::target::low_descriptor_registry
+    loom::target::math_policy
     loom::target::provider
     loom::target::types
     loom::util::adaptive_sort
@@ -290,6 +293,7 @@ loom_check_test_suite(
     "test/source_low/constant_pool.loom-test"
     "test/source_low/control_switch.loom-test"
     "test/source_low/corpus/numeric_scalar_baseline.loom-test"
+    "test/source_low/corpus/numeric_scalar_f32.loom-test"
     "test/source_low/corpus/numeric_scalar_literals.loom-test"
     "test/source_low/function_abi.loom-test"
     "test/source_low/function_contracts.loom-test"
@@ -299,9 +303,11 @@ loom_check_test_suite(
     "test/source_low/module_initialization.loom-test"
     "test/source_low/module_resources.loom-test"
     "test/source_low/program_failure.loom-test"
+    "test/source_low/scalar_diagnostics.loom-test"
     "test/source_low/selector_assembly.loom-test"
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_scalar_baseline.loom-test"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_scalar_f32.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_scalar_literals.loom-test"
   TEST_NAME_PREFIX_TO_STRIP
     "test/source_low/"
