@@ -199,6 +199,57 @@ hrx_cc_test(
 )
 
 hrx_cc_test(
+    name = "hip_device_attribute_validation_api_test",
+    srcs = [
+        "api.h",
+        "hip_device_attribute_validation_api_test.cc",
+        "hip_device_attribute_validation_test_shim.c",
+        "hip_device_attribute_validation_test_shim.h",
+    ],
+    # Exercise validation and TLS behavior through the exact public shared
+    # object built by this target graph.
+    data = [":amdhip64"],
+    env = {
+        "HRX_TEST_LIBAMDHIP64": "$(location :amdhip64)",
+    },
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = _LINUX_COMPATIBILITY,
+    deps = [
+        "//build_tools/bazel:dl",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "hip_device_attribute_no_device_api_test",
+    srcs = [
+        "api.h",
+        "hip_device_attribute_no_device_api_test.cc",
+        "hip_device_attribute_validation_test_shim.c",
+        "hip_device_attribute_validation_test_shim.h",
+    ],
+    data = [":amdhip64"],
+    env = {
+        "HRX_TEST_LIBAMDHIP64": "$(location :amdhip64)",
+        "ROCR_VISIBLE_DEVICES": "-1",
+    },
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = _LINUX_COMPATIBILITY,
+    deps = [
+        "//build_tools/bazel:dl",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
     name = "hip_get_proc_address_test",
     srcs = ["hip_get_proc_address_test.cc"],
     # The test dlopen()s the built libamdhip64 with RTLD_LOCAL to reproduce the
