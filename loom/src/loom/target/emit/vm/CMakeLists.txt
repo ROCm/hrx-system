@@ -17,6 +17,7 @@ loom_cc_library(
     "function_call.h"
     "function_encoder.h"
     "function_layout.h"
+    "function_locals.h"
     "module_emitter.h"
     "module_layout.h"
     "module_types.h"
@@ -25,6 +26,7 @@ loom_cc_library(
     "function_call.c"
     "function_encoder.c"
     "function_layout.c"
+    "function_locals.c"
     "module_emitter.c"
     "module_layout.c"
     "module_types.c"
@@ -40,6 +42,7 @@ loom_cc_library(
     loom::codegen::low::frame
     loom::codegen::low::function
     loom::codegen::low::packet
+    loom::codegen::low::storage_layout
     loom::error::emitter
     loom::format::bytecode::writer::encoder
     loom::ir
@@ -64,6 +67,7 @@ loom_check_test_suite(
     "test/function_values.loom-test"
     "test/imports.loom-test"
     "test/module.loom-test"
+    "test/spills.loom-test"
   TEST_NAME_PREFIX_TO_STRIP
     "test/"
 )

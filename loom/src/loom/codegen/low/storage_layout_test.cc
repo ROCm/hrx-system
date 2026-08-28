@@ -184,6 +184,7 @@ TEST_F(LowStorageLayoutTest, ResolvesNestedStorageViews) {
   loom_low_storage_layout_reference_t reference = {};
   loom_low_storage_layout_lookup_reference(&layout, module_, nested_view,
                                            &reference);
+  EXPECT_EQ(reference.reservation_ordinal, 0u);
   EXPECT_EQ(reference.reservation.space, LOOM_STORAGE_SPACE_STACK);
   EXPECT_EQ(reference.reservation.byte_offset, 0u);
   EXPECT_EQ(reference.reservation.byte_size, 16u);

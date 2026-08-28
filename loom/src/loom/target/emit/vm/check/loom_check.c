@@ -11,6 +11,7 @@
 #include "iree/vm/bytecode/tooling/dump.h"
 #include "loom/target/emit/vm/module_emitter.h"
 #include "loom/tools/loom-check/diagnostics.h"
+#include "loom/tools/loom-check/low_emit.h"
 
 static bool loom_vm_loom_check_emit_provider_matches(
     const loom_check_emit_provider_t* provider,
@@ -23,23 +24,62 @@ typedef enum loom_vm_loom_check_input_e {
   LOOM_VM_LOOM_CHECK_INPUT_LOW = 1,
 } loom_vm_loom_check_input_t;
 
-static iree_status_t loom_vm_loom_check_parse_input(
-    iree_string_view_t target_options, loom_vm_loom_check_input_t* out_input) {
-  target_options = iree_string_view_trim(target_options);
-  if (iree_string_view_is_empty(target_options) ||
-      iree_string_view_equal(target_options, IREE_SV("input=source-low"))) {
-    *out_input = LOOM_VM_LOOM_CHECK_INPUT_SOURCE_LOW;
-    return iree_ok_status();
+typedef struct loom_vm_loom_check_emit_request_t {
+  // Input preparation selected by the RUN line.
+  loom_vm_loom_check_input_t input;
+  // Whether the RUN line already specified |input|.
+  bool has_input;
+  // Explicit per-class register budgets passed to allocation.
+  loom_low_allocation_budget_t
+      allocation_budgets[LOOM_CHECK_LOW_EMIT_MAX_ALLOCATION_BUDGETS];
+  // Number of initialized entries in |allocation_budgets|.
+  iree_host_size_t allocation_budget_count;
+} loom_vm_loom_check_emit_request_t;
+
+static iree_status_t loom_vm_loom_check_parse_emit_request(
+    iree_string_view_t target_options,
+    loom_vm_loom_check_emit_request_t* out_request) {
+  *out_request = (loom_vm_loom_check_emit_request_t){
+      .input = LOOM_VM_LOOM_CHECK_INPUT_SOURCE_LOW,
+  };
+  while (!iree_string_view_is_empty(target_options)) {
+    iree_string_view_t token = iree_string_view_empty();
+    iree_string_view_t remaining = iree_string_view_empty();
+    iree_string_view_split(iree_string_view_trim(target_options), ' ', &token,
+                           &remaining);
+    token = iree_string_view_trim(token);
+    target_options = iree_string_view_trim(remaining);
+    if (iree_string_view_is_empty(token)) continue;
+
+    iree_string_view_t name = iree_string_view_empty();
+    iree_string_view_t value = iree_string_view_empty();
+    iree_string_view_split(token, '=', &name, &value);
+    name = iree_string_view_trim(name);
+    value = iree_string_view_trim(value);
+    if (iree_string_view_equal(name, IREE_SV("input"))) {
+      if (out_request->has_input) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "duplicate vm-dis option 'input'");
+      }
+      if (iree_string_view_equal(value, IREE_SV("source-low"))) {
+        out_request->input = LOOM_VM_LOOM_CHECK_INPUT_SOURCE_LOW;
+      } else if (iree_string_view_equal(value, IREE_SV("low"))) {
+        out_request->input = LOOM_VM_LOOM_CHECK_INPUT_LOW;
+      } else {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "vm-dis option 'input' expected 'source-low' or 'low', got '%.*s'",
+            (int)value.size, value.data);
+      }
+      out_request->has_input = true;
+      continue;
+    }
+    IREE_RETURN_IF_ERROR(loom_check_low_emit_parse_allocation_budget(
+        token, IREE_SV("vm-dis"), out_request->allocation_budgets,
+        IREE_ARRAYSIZE(out_request->allocation_budgets),
+        &out_request->allocation_budget_count));
   }
-  if (iree_string_view_equal(target_options, IREE_SV("input=low"))) {
-    *out_input = LOOM_VM_LOOM_CHECK_INPUT_LOW;
-    return iree_ok_status();
-  }
-  return iree_make_status(
-      IREE_STATUS_INVALID_ARGUMENT,
-      "vm-dis expected no options, 'input=source-low', or 'input=low'; got "
-      "'%.*s'",
-      (int)target_options.size, target_options.data);
+  return iree_ok_status();
 }
 
 static iree_status_t loom_vm_loom_check_prepare_module(
@@ -65,11 +105,12 @@ static iree_status_t loom_vm_loom_check_append_dump(void* user_data,
 static iree_status_t loom_vm_loom_check_emit_provider_execute(
     const loom_check_emit_provider_t* provider,
     const loom_check_emit_provider_request_t* request) {
-  loom_vm_loom_check_input_t input = LOOM_VM_LOOM_CHECK_INPUT_SOURCE_LOW;
-  IREE_RETURN_IF_ERROR(
-      loom_vm_loom_check_parse_input(request->target_options, &input));
+  loom_vm_loom_check_emit_request_t emit_request;
+  IREE_RETURN_IF_ERROR(loom_vm_loom_check_parse_emit_request(
+      request->target_options, &emit_request));
 
-  IREE_RETURN_IF_ERROR(loom_vm_loom_check_prepare_module(request, input));
+  IREE_RETURN_IF_ERROR(
+      loom_vm_loom_check_prepare_module(request, emit_request.input));
   if (request->diagnostic_collector->count != 0) return iree_ok_status();
 
   loom_check_diagnostic_emitter_capture_t capture = {
@@ -80,6 +121,8 @@ static iree_status_t loom_vm_loom_check_emit_provider_execute(
   };
   const loom_vm_module_emitter_options_t options = {
       .descriptor_registry = &request->low_registry->registry,
+      .allocation_budgets = emit_request.allocation_budgets,
+      .allocation_budget_count = emit_request.allocation_budget_count,
       .diagnostic_emitter =
           {
               .fn = loom_check_diagnostic_emitter_capture_emit,

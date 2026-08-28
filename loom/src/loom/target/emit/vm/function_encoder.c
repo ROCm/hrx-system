@@ -25,6 +25,7 @@
 #include "loom/target/arch/vm/descriptors.h"
 #include "loom/target/emit/vm/function_call.h"
 #include "loom/target/emit/vm/function_layout.h"
+#include "loom/target/emit/vm/function_locals.h"
 
 #define LOOM_VM_INSTRUCTION_ENCODING_LIMITS(maximum_record_byte_length) \
   enum {                                                                \
@@ -498,6 +499,14 @@ static iree_status_t loom_vm_function_encode_structural_packet(
     };
     return loom_bytecode_page_writer_write(writer, &record, sizeof(record));
   }
+  if (loom_low_storage_reserve_isa(packet->node->op) ||
+      loom_low_storage_view_isa(packet->node->op)) {
+    return iree_ok_status();
+  }
+  if (loom_vm_function_local_transfer_is_packet(packet)) {
+    return loom_vm_function_local_transfer_encode(frame, &code_layout->locals,
+                                                  packet, writer);
+  }
   loom_vm_function_call_view_t call = {0};
   if (loom_vm_function_call_try_view(packet->node->op, &call)) {
     loom_vm_call_abi_packet_layout_t call_layout = {0};
@@ -699,19 +708,26 @@ iree_status_t loom_vm_function_encode(
       .emitter = options->diagnostic_emitter,
   };
   loom_low_emission_frame_t frame = {0};
-  IREE_RETURN_IF_ERROR(loom_low_emission_frame_build(
-      module, function->function_op, &frame_options, scratch_arena, &frame));
-  if (frame.schedule.error_count != 0 || frame.allocation.error_count != 0) {
+  const loom_low_emission_frame_spill_free_options_t spill_free_options = {
+      .materialization_options =
+          {
+              .has_supported_storage_spaces = true,
+              .supported_storage_spaces = LOOM_LOW_STORAGE_SPACE_SET_PRIVATE,
+              .emitter = options->diagnostic_emitter,
+          },
+  };
+  IREE_RETURN_IF_ERROR(loom_low_emission_frame_build_spill_free(
+      module, function->function_op, &frame_options, &spill_free_options,
+      scratch_arena, &frame));
+  if (frame.function_op == NULL || frame.schedule.error_count != 0 ||
+      frame.allocation.error_count != 0 || frame.allocation.spill_count != 0) {
     return iree_ok_status();
   }
   if (frame.target.descriptor_set != loom_vm_core_descriptor_set()) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "VM emission requires descriptor set 'vm.core'");
   }
-  if (frame.allocation.spill_count != 0) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "VM registers cannot spill");
-  }
+  IREE_ASSERT_EQ(frame.allocation.spill_count, 0u);
   IREE_ASSERT_EQ(frame.allocation.physical_extents.count,
                  VM_CORE_REG_CLASS_ID_FUNCTION + 1u);
   const uint32_t value_register_count =
@@ -795,9 +811,11 @@ iree_status_t loom_vm_function_encode(
   out_encoding->row.ref_register_count_u16 = (uint16_t)ref_register_count;
   out_encoding->row.function_register_count_u16 =
       (uint16_t)function_register_count;
-  out_encoding->row.local_byte_length_u16 = code_layout.local_byte_length;
-  out_encoding->row.local_ref_count_u32 = code_layout.local_ref_count;
-  out_encoding->row.local_function_count_u32 = code_layout.local_function_count;
+  out_encoding->row.local_byte_length_u16 =
+      code_layout.locals.counts.byte_length;
+  out_encoding->row.local_ref_count_u32 = code_layout.locals.counts.ref_count;
+  out_encoding->row.local_function_count_u32 =
+      code_layout.locals.counts.function_count;
   out_encoding->row.block_count_u32 = (uint32_t)frame.schedule.block_count;
   out_encoding->row.switch_target_entry_count_u32 =
       code_layout.switch_target_entry_count;
