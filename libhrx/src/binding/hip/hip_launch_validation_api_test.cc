@@ -30,6 +30,7 @@ const char* CandidateLibPath() {
 }
 
 using HipInitFn = hipError_t (*)(unsigned int flags);
+using HipHalDeinitFn = hipError_t (*)(void);
 using HipStreamCreateFn = hipError_t (*)(hipStream_t* stream);
 using HipStreamDestroyFn = hipError_t (*)(hipStream_t stream);
 using HipStreamGetIdFn = hipError_t (*)(hipStream_t stream,
@@ -64,6 +65,12 @@ using HipGraphKernelNodeGetParamsFn = hipError_t (*)(hipGraphNode_t node,
                                                      void* params);
 using HipGraphKernelNodeSetParamsFn = hipError_t (*)(hipGraphNode_t node,
                                                      const void* params);
+using HipGraphKernelNodeSetAttributeFn =
+    hipError_t (*)(hipGraphNode_t node, hipKernelNodeAttrID attribute,
+                   const hipKernelNodeAttrValue* value);
+using HipGraphKernelNodeGetAttributeFn =
+    hipError_t (*)(hipGraphNode_t node, hipKernelNodeAttrID attribute,
+                   hipKernelNodeAttrValue* value);
 
 // Owns an RTLD_LOCAL HIP runtime instance and the entry points exercised by
 // this test. All calls use the loaded library instead of a link-time runtime.
@@ -72,6 +79,8 @@ struct HipRuntimeApi {
   void* library = nullptr;
   // Initializes the HIP runtime instance.
   HipInitFn init = nullptr;
+  // Deinitializes the HIP runtime instance before unloading its DSO.
+  HipHalDeinitFn hal_deinit = nullptr;
   // Creates the stream used by immediate launch entry points.
   HipStreamCreateFn stream_create = nullptr;
   // Destroys the stream used by immediate launch entry points.
@@ -98,6 +107,10 @@ struct HipRuntimeApi {
   HipGraphKernelNodeGetParamsFn graph_kernel_node_get_params = nullptr;
   // Replaces the parameters retained by a graph kernel node.
   HipGraphKernelNodeSetParamsFn graph_kernel_node_set_params = nullptr;
+  // Updates one attribute retained by a graph kernel node.
+  HipGraphKernelNodeSetAttributeFn graph_kernel_node_set_attribute = nullptr;
+  // Reads one attribute retained by a graph kernel node.
+  HipGraphKernelNodeGetAttributeFn graph_kernel_node_get_attribute = nullptr;
 };
 
 template <typename T>
@@ -117,6 +130,8 @@ class HipLaunchValidationApiTest : public testing::Test {
           << "cannot dlopen " << library_path << ": " << dlerror();
 
       api_.init = ResolveHipSymbol<HipInitFn>(api_.library, "hipInit");
+      api_.hal_deinit =
+          ResolveHipSymbol<HipHalDeinitFn>(api_.library, "hipHALDeinit");
       api_.stream_create =
           ResolveHipSymbol<HipStreamCreateFn>(api_.library, "hipStreamCreate");
       api_.stream_destroy = ResolveHipSymbol<HipStreamDestroyFn>(
@@ -145,9 +160,16 @@ class HipLaunchValidationApiTest : public testing::Test {
       api_.graph_kernel_node_set_params =
           ResolveHipSymbol<HipGraphKernelNodeSetParamsFn>(
               api_.library, "hipGraphKernelNodeSetParams");
+      api_.graph_kernel_node_set_attribute =
+          ResolveHipSymbol<HipGraphKernelNodeSetAttributeFn>(
+              api_.library, "hipGraphKernelNodeSetAttribute");
+      api_.graph_kernel_node_get_attribute =
+          ResolveHipSymbol<HipGraphKernelNodeGetAttributeFn>(
+              api_.library, "hipGraphKernelNodeGetAttribute");
     }
 
     ASSERT_NE(nullptr, api_.init);
+    ASSERT_NE(nullptr, api_.hal_deinit);
     ASSERT_NE(nullptr, api_.stream_create);
     ASSERT_NE(nullptr, api_.stream_destroy);
     ASSERT_NE(nullptr, api_.stream_get_id);
@@ -161,6 +183,8 @@ class HipLaunchValidationApiTest : public testing::Test {
     ASSERT_NE(nullptr, api_.graph_add_kernel_node);
     ASSERT_NE(nullptr, api_.graph_kernel_node_get_params);
     ASSERT_NE(nullptr, api_.graph_kernel_node_set_params);
+    ASSERT_NE(nullptr, api_.graph_kernel_node_set_attribute);
+    ASSERT_NE(nullptr, api_.graph_kernel_node_get_attribute);
 
     const hipError_t init_result = api_.init(/*flags=*/0);
     if (init_result != hipSuccess) {
@@ -177,6 +201,15 @@ class HipLaunchValidationApiTest : public testing::Test {
     // Keep the process-global runtime instance loaded across test cases. The
     // driver services it owns outlive an individual stream and are not
     // reinitializable after the final dlclose within the same process.
+  }
+
+  static void TearDownTestSuite() {
+    if (!api_.library) return;
+    void* library = api_.library;
+    ASSERT_NE(nullptr, api_.hal_deinit);
+    EXPECT_EQ(hipSuccess, api_.hal_deinit());
+    api_ = {};
+    EXPECT_EQ(0, dlclose(library));
   }
 
   // Runtime entry points loaded once from the HIP shared object under test.
@@ -278,6 +311,47 @@ TEST_F(HipLaunchValidationApiTest,
                                  /*dependencies=*/nullptr,
                                  /*dependency_count=*/0, &invalid_params));
   EXPECT_EQ(reinterpret_cast<hipGraphNode_t>(uintptr_t{1}), rejected_node);
+  EXPECT_EQ(hipSuccess, api_.graph_destroy(graph));
+}
+
+TEST_F(HipLaunchValidationApiTest, ZeroAccessPolicyWindowRemainsSupported) {
+  iree_hal_streaming_symbol_t symbol = {};
+  symbol.type = IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION;
+  const dim3 one = {1, 1, 1};
+  hipKernelNodeParams params = {
+      /*.blockDim=*/one,
+      /*.extra=*/nullptr,
+      /*.func=*/iree_hal_streaming_symbol_tag(&symbol),
+      /*.gridDim=*/one,
+      /*.kernelParams=*/nullptr,
+      /*.sharedMemBytes=*/0,
+  };
+
+  hipGraph_t graph = nullptr;
+  ASSERT_EQ(hipSuccess, api_.graph_create(&graph, /*flags=*/0));
+  hipGraphNode_t node = nullptr;
+  ASSERT_EQ(hipSuccess,
+            api_.graph_add_kernel_node(&node, graph, /*dependencies=*/nullptr,
+                                       /*dependency_count=*/0, &params));
+
+  hipKernelNodeAttrValue access_policy = {};
+  access_policy.accessPolicyWindow.hitProp = hipAccessPropertyNormal;
+  access_policy.accessPolicyWindow.missProp = hipAccessPropertyNormal;
+  EXPECT_EQ(hipSuccess, api_.graph_kernel_node_set_attribute(
+                            node, hipKernelNodeAttributeAccessPolicyWindow,
+                            &access_policy));
+
+  access_policy.accessPolicyWindow.num_bytes = 1;
+  EXPECT_EQ(
+      hipErrorInvalidValue,
+      api_.graph_kernel_node_set_attribute(
+          node, hipKernelNodeAttributeAccessPolicyWindow, &access_policy));
+
+  hipKernelNodeAttrValue retained_access_policy = {};
+  ASSERT_EQ(hipSuccess, api_.graph_kernel_node_get_attribute(
+                            node, hipKernelNodeAttributeAccessPolicyWindow,
+                            &retained_access_policy));
+  EXPECT_EQ(0u, retained_access_policy.accessPolicyWindow.num_bytes);
   EXPECT_EQ(hipSuccess, api_.graph_destroy(graph));
 }
 
