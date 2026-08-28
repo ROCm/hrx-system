@@ -182,7 +182,7 @@ static iree_status_t iree_hal_webgpu_semaphore_import_timepoint(
     iree_hal_semaphore_t* base_semaphore, uint64_t value,
     iree_hal_queue_affinity_t queue_affinity,
     iree_hal_external_timepoint_t external_timepoint) {
-  // WebGPU has no native timepoint types (no CUDA events, no HIP events).
+  // WebGPU has no native timepoint handle type.
   // ASYNC_PRIMITIVE types are handled in the base HAL layer via the
   // semaphore's proactor, so this vtable method is only reached for
   // driver-specific types that WebGPU does not support.

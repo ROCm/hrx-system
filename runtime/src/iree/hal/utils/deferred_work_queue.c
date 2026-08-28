@@ -577,13 +577,13 @@ iree_status_t iree_hal_deferred_work_queue_create(
   // Create the ready-list processing worker itself.
   iree_thread_create_params_t params;
   memset(&params, 0, sizeof(params));
-  params.name = IREE_SV("iree-hip-queue-worker");
+  params.name = IREE_SV("iree-hal-deferred-worker");
   params.create_suspended = false;
   iree_status_t status = iree_thread_create(
       iree_hal_deferred_work_queue_worker_thread_entry, actions, params,
       actions->host_allocator, &actions->worker_thread);
 
-  params.name = IREE_SV("iree-hip-queue-completion");
+  params.name = IREE_SV("iree-hal-deferred-completion");
   params.create_suspended = false;
   if (iree_status_is_ok(status)) {
     status = iree_thread_create(

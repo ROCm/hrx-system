@@ -86,7 +86,7 @@ typedef struct iree_hal_device_event_source_t {
   iree_hal_device_t* device;
   // Stable device identifier string when available.
   iree_string_view_t device_id;
-  // Backend name such as "amdgpu", "hip", "vulkan", "metal", or "webgpu".
+  // Driver name such as "amdgpu", "local-task", "vulkan", or "webgpu".
   iree_string_view_t driver_id;
   // Physical device ordinal, or UINT32_MAX when not applicable.
   uint32_t physical_device_ordinal;

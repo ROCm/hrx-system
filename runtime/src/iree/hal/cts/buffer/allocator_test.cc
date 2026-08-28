@@ -112,16 +112,9 @@ TEST_P(AllocatorTest, AllocateEmptyBuffer) {
   iree_hal_buffer_release(buffer);
 }
 
-// Regression test for hipHostUnregister/cuMemHostUnregister leak:
-// When a HOST_ALLOCATION is imported with a null release callback, the
-// backend allocator must still call hipHostUnregister/cuMemHostUnregister on
-// destroy.  The old code only invoked the stored release_callback, so a null
-// callback meant unregister was never called, leaking the pinned registration.
-//
-// The re-import postcondition (second import must succeed) is a reliable
-// oracle on backends where double-register fails.  On AMD ROCm, hipHostRegister
-// is idempotent so the oracle does not fire there; see HipAllocatorTest in
-// hip_allocator_test.cc for a HIP-specific regression check.
+// Backend registration is owned independently of the caller's release
+// callback. Re-importing the same allocation verifies cleanup on backends that
+// reject duplicate registration.
 TEST_P(AllocatorTest, ImportHostAllocationNullCallback) {
   iree_hal_buffer_params_t params = {0};
   params.type =
@@ -176,12 +169,9 @@ TEST_P(AllocatorTest, ImportHostAllocationNullCallback) {
   iree_allocator_free_aligned(iree_allocator_system(), host_ptr);
 }
 
-// Regression test for the chained-callback path: when a HOST_ALLOCATION is
-// imported with a non-null release callback, both backend cleanup
-// (hipHostUnregister/cuMemHostUnregister) and the caller callback must fire.
-// The caller callback must be invoked exactly once.  The re-import
-// postcondition is a reliable oracle on backends where double-register fails;
-// see HipAllocatorTest in hip_allocator_test.cc for a HIP-specific check.
+// Backend registration cleanup and the caller's release callback are separate
+// ownership obligations. The callback must run exactly once, and re-importing
+// verifies cleanup on backends that reject duplicate registration.
 TEST_P(AllocatorTest, ImportHostAllocationWithCallback) {
   iree_hal_buffer_params_t params = {0};
   params.type =
