@@ -882,11 +882,14 @@ iree_status_t loom_kernel_class_classifier_collect(
       return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                               "kernel class trace table exceeds uint32_t");
     }
-    void* trace_storage = traces;
-    IREE_RETURN_IF_ERROR(iree_arena_grow_array(
-        arena, trace_count, trace_count + new_trace_count, sizeof(*traces),
-        &trace_capacity, &trace_storage));
-    traces = (loom_kernel_class_trace_t*)trace_storage;
+    const uint32_t required_trace_count = trace_count + new_trace_count;
+    if (required_trace_count > trace_capacity) {
+      void* trace_storage = traces;
+      IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+          arena, trace_count, required_trace_count, sizeof(*traces),
+          &trace_capacity, &trace_storage));
+      traces = (loom_kernel_class_trace_t*)trace_storage;
+    }
     for (uint32_t i = 0; i < new_trace_count; ++i) {
       const loom_decision_class_ordinal_t parent_class =
           partition.candidate_parent_classes[i];
@@ -897,7 +900,7 @@ iree_status_t loom_kernel_class_classifier_collect(
       };
       candidate_trace_ids[i] = trace_count + i;
     }
-    trace_count += new_trace_count;
+    trace_count = required_trace_count;
     loom_decision_class_partition_commit(&partition);
     loom_kernel_class_trace_id_t* previous_trace_ids = current_trace_ids;
     current_trace_ids = candidate_trace_ids;

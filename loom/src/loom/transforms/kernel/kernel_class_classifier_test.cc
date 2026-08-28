@@ -509,6 +509,27 @@ TEST_F(KernelClassClassifierTest, CorrelatedDecisionsRetainObservedQuotient) {
 }
 
 TEST_F(KernelClassClassifierTest,
+       ManyCorrelatedDecisionsRetainLinearTraceStorage) {
+  constexpr uint32_t kDecisionCount = 128;
+  ManualBinaryClassifier fixture(/*has_generic_residual=*/true);
+  std::vector<loom_kernel_class_decision_t> decisions(kDecisionCount,
+                                                      fixture.decisions()[0]);
+  fixture.classifier()->decisions = decisions.data();
+  fixture.classifier()->decision_count = decisions.size();
+
+  const loom_kernel_class_collection_options_t options =
+      loom_kernel_class_collection_options_default();
+  loom_kernel_class_collection_t collection = {};
+  IREE_ASSERT_OK(loom_kernel_class_classifier_collect(
+      fixture.classifier(), fixture.sites(), /*site_count=*/4, &options,
+      &analysis_arena_, &collection));
+  EXPECT_EQ(collection.class_count, 2u);
+  EXPECT_EQ(collection.accepted_decision_count, kDecisionCount);
+  EXPECT_EQ(collection.skipped_decision_count, 0u);
+  EXPECT_EQ(collection.trace_count, 2u * kDecisionCount);
+}
+
+TEST_F(KernelClassClassifierTest,
        ClassLimitRetainsGenericResidualWithoutAliasingClasses) {
   ManualBinaryClassifier fixture(/*has_generic_residual=*/true);
   loom_kernel_class_collection_options_t options =

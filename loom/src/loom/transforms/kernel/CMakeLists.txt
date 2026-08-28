@@ -111,6 +111,7 @@ loom_cc_test(
     loom::ops::index
     loom::ops::kernel
     loom::ops::op_defs
+    loom::ops::scalar
     loom::ops::scf
     loom::ops::template
     loom::testing::module_ptr
@@ -119,6 +120,30 @@ loom_cc_test(
     loom::transforms::symbol::template_selection
     loom::util::fact_table
     loom::verify
+)
+
+loom_cc_benchmark(
+  NAME
+    kernel_class_materializer_benchmark
+  SRCS
+    "kernel_class_materializer_benchmark.cc"
+  DEPS
+    ::kernel_class_classifier
+    ::kernel_class_materializer
+    iree::base::internal::arena
+    iree::testing::benchmark_main
+    loom::analysis::symbol_facts
+    loom::analysis::symbol_references
+    loom::analysis::template_provider_catalog
+    loom::format::text::parser
+    loom::ir
+    loom::ops::kernel
+    loom::testing::module_ptr
+    loom::tooling::context
+    loom::transforms::symbol::template_decision_model
+    loom::util::fact_table
+    loom::verify
+  TESTONLY
 )
 
 loom_cc_library(
