@@ -2402,17 +2402,14 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
                                         int device) {
   HIP_DEBUG_LOG("[HIP_API] hipDeviceGetAttribute(attr=%d, device=%d)\n",
                 (int)attr, device);
-  if (!value) {
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
-  }
-  if ((int)attr < 0) {
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
-  }
-
   // Ensure HIP is initialized.
   hipError_t init_result = iree_hip_ensure_initialized();
   if (init_result != hipSuccess) {
     HIP_RETURN_ERROR(init_result);
+  }
+
+  if (!value) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
   iree_hal_streaming_device_t* device_obj =
@@ -2427,6 +2424,11 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
   const iree_hal_physical_device_identity_t* physical_identity =
       iree_hip_physical_device_identity(device_obj);
   switch (attr) {
+    case hipDeviceAttributeAccessPolicyMaxWindowSize:
+      // A zero maximum advertises that persisting access-policy windows are
+      // disabled.
+      *value = 0;
+      break;
     case hipDeviceAttributeMaxThreadsPerBlock:
       *value = device_obj->max_threads_per_block;
       break;
@@ -2623,9 +2625,7 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
       *value = IREE_HIP_ARRAY_MAX_3D_DEPTH;
       break;
     default:
-      // Return sensible defaults for other attributes.
-      *value = 0;
-      break;
+      HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
   return hipSuccess;
