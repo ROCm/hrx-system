@@ -154,6 +154,22 @@ typedef struct loom_amdgpu_fp4_decode_plan_t {
   const loom_amdgpu_fp4_native_pk8_decode_recipe_t* native_pk8_recipe;
 } loom_amdgpu_fp4_decode_plan_t;
 
+typedef uint8_t loom_amdgpu_vector_float_conversion_strategy_t;
+enum loom_amdgpu_vector_float_conversion_strategy_e {
+  // No vector conversion strategy has been selected.
+  LOOM_AMDGPU_VECTOR_FLOAT_CONVERSION_STRATEGY_NONE = 0,
+  // Conversion is fully described by the common type and storage fields.
+  LOOM_AMDGPU_VECTOR_FLOAT_CONVERSION_STRATEGY_STANDARD = 1,
+  // The strategy payload contains a selected packed FP4 decoder.
+  LOOM_AMDGPU_VECTOR_FLOAT_CONVERSION_STRATEGY_FP4_DECODE = 2,
+  // The strategy payload contains a selected packed FP8 encoder.
+  LOOM_AMDGPU_VECTOR_FLOAT_CONVERSION_STRATEGY_FP8_ENCODE = 3,
+};
+static_assert(LOOM_AMDGPU_MAX_PACKED_16BIT_FLOAT_LANES <= UINT8_MAX,
+              "vector conversion lane counts must fit compact plans");
+static_assert(LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES <= UINT8_MAX,
+              "vector conversion register counts must fit compact plans");
+
 typedef struct loom_amdgpu_vector_16bit_float_conversion_plan_t {
   // Source vector value being converted.
   loom_value_id_t source;
@@ -167,41 +183,50 @@ typedef struct loom_amdgpu_vector_16bit_float_conversion_plan_t {
   loom_value_id_t scale_source;
   // Numeric format of scale_source, or NONE when there is no scale source.
   loom_value_fact_numeric_format_flags_t scale_format;
-  // Number of logical payload lanes covered by each scale value.
-  uint32_t scale_group_element_count;
-  // Number of encoded scale values covering the conversion.
-  uint32_t scale_count;
-  // Number of 32-bit registers carrying the encoded scale values.
-  uint32_t scale_register_count;
-  // Conversion operation selected for the source/result type pair.
-  loom_amdgpu_vector_16bit_float_conversion_kind_t kind;
-  // Source scalar element type.
-  loom_scalar_type_t source_element_type;
   // Exact numeric format represented by the source payload.
   loom_value_fact_numeric_format_flags_t source_format;
   // Semantically equivalent source format accepted by native descriptors.
   loom_value_fact_numeric_format_flags_t descriptor_source_format;
+  // Conversion operation selected for the source/result type pair.
+  loom_amdgpu_vector_16bit_float_conversion_kind_t kind;
+  // Source scalar element type.
+  loom_scalar_type_t source_element_type;
   // Result scalar element type.
   loom_scalar_type_t result_element_type;
+  // Discriminant selecting the active strategy union member.
+  loom_amdgpu_vector_float_conversion_strategy_t strategy_kind;
+  // Number of logical payload lanes covered by each scale value.
+  uint8_t scale_group_element_count;
+  // Number of encoded scale values covering the conversion.
+  uint8_t scale_count;
+  // Number of 32-bit registers carrying the encoded scale values.
+  uint8_t scale_register_count;
   // Static vector lane count.
-  uint32_t lane_count;
+  uint8_t lane_count;
   // Number of 32-bit source registers occupied by the source vector.
-  uint32_t source_register_count;
+  uint8_t source_register_count;
   // First logical lane read from storage_source for result lane zero.
-  uint32_t storage_lane_offset;
+  uint8_t storage_lane_offset;
   // Logical lane stride through storage_source for adjacent result lanes.
-  uint32_t storage_lane_stride;
+  uint8_t storage_lane_stride;
   // Number of scalar lanes proven available in storage_source.
-  uint32_t storage_lane_count;
+  uint8_t storage_lane_count;
   // Number of 32-bit registers occupied by storage_source.
-  uint32_t storage_register_count;
+  uint8_t storage_register_count;
   // Number of 32-bit result registers occupied by the result vector.
-  uint32_t result_register_count;
-  // Packed FP4 decode strategy, or NONE for other conversions.
-  loom_amdgpu_fp4_decode_plan_t fp4_decode;
-  // Native packed FP8 encode strategy for an FP8-result truncation.
-  loom_amdgpu_fp8_encode_plan_t fp8_encode;
+  uint8_t result_register_count;
+  // Byte reserved for a future bounded conversion-plan count.
+  uint8_t reserved;
+  // Strategy-specific data selected before emission.
+  union {
+    // Packed FP4 decode strategy when strategy_kind is FP4_DECODE.
+    loom_amdgpu_fp4_decode_plan_t fp4_decode;
+    // Packed FP8 encode strategy when strategy_kind is FP8_ENCODE.
+    loom_amdgpu_fp8_encode_plan_t fp8_encode;
+  } strategy;
 } loom_amdgpu_vector_16bit_float_conversion_plan_t;
+static_assert(sizeof(loom_amdgpu_vector_16bit_float_conversion_plan_t) == 104,
+              "vector float conversion plans must stay cache dense");
 
 typedef enum loom_amdgpu_index_cast_kind_e {
   LOOM_AMDGPU_INDEX_CAST_KIND_NONE = 0,

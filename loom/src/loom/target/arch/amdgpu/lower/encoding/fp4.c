@@ -782,26 +782,31 @@ iree_status_t loom_amdgpu_select_fp4_decode_plan(
       .content_fact_source = result,
       .scale_source = match.scale_source,
       .scale_format = match.scale_format,
-      .scale_group_element_count = match.scale_shape.group_element_count,
-      .scale_count = match.scale_shape.scale_count,
-      .scale_register_count = match.scale_shape.register_count,
       .kind = LOOM_AMDGPU_VECTOR_16BIT_FLOAT_CONVERSION_KIND_DECODE,
       .source_element_type = LOOM_SCALAR_TYPE_I32,
       .source_format = LOOM_VALUE_FACT_NUMERIC_FORMAT_F4_E2M1,
       .descriptor_source_format = LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE,
       .result_element_type = match.shape.result_element_type,
-      .lane_count = match.shape.lane_count,
-      .source_register_count = match.shape.source_register_count,
+      .strategy_kind = LOOM_AMDGPU_VECTOR_FLOAT_CONVERSION_STRATEGY_FP4_DECODE,
+      .scale_group_element_count =
+          (uint8_t)match.scale_shape.group_element_count,
+      .scale_count = (uint8_t)match.scale_shape.scale_count,
+      .scale_register_count = (uint8_t)match.scale_shape.register_count,
+      .lane_count = (uint8_t)match.shape.lane_count,
+      .source_register_count = (uint8_t)match.shape.source_register_count,
       .storage_lane_stride = 1,
-      .storage_lane_count = match.shape.source_register_count,
-      .storage_register_count = match.shape.source_register_count,
-      .result_register_count = match.shape.result_register_count,
-      .fp4_decode =
+      .storage_lane_count = (uint8_t)match.shape.source_register_count,
+      .storage_register_count = (uint8_t)match.shape.source_register_count,
+      .result_register_count = (uint8_t)match.shape.result_register_count,
+      .strategy =
           {
-              .kind = decode_kind,
-              .portable_recipe = portable_recipe,
-              .native_pair_recipe = native_pair_recipe,
-              .native_pk8_recipe = native_pk8_recipe,
+              .fp4_decode =
+                  {
+                      .kind = decode_kind,
+                      .portable_recipe = portable_recipe,
+                      .native_pair_recipe = native_pair_recipe,
+                      .native_pk8_recipe = native_pk8_recipe,
+                  },
           },
   };
   return iree_ok_status();
@@ -1382,14 +1387,14 @@ static iree_status_t loom_amdgpu_emit_fp4_native_e8m0_f32_scale(
 static iree_status_t loom_amdgpu_lower_vector_fp4_decode_native_pair(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_vector_16bit_float_conversion_plan_t* plan) {
-  IREE_ASSERT_EQ(plan->fp4_decode.kind,
+  IREE_ASSERT_EQ(plan->strategy.fp4_decode.kind,
                  LOOM_AMDGPU_FP4_DECODE_KIND_NATIVE_SCALEF32_PAIR);
   IREE_ASSERT_EQ(plan->result_element_type, LOOM_SCALAR_TYPE_BF16);
   IREE_ASSERT_EQ(plan->scale_format, LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E8M0);
   IREE_ASSERT_EQ(plan->scale_group_element_count,
                  LOOM_AMDGPU_FP4_E8M0_BF16_SCALE_GROUP_ELEMENT_COUNT);
   const loom_amdgpu_fp4_native_pair_decode_recipe_t* recipe =
-      plan->fp4_decode.native_pair_recipe;
+      plan->strategy.fp4_decode.native_pair_recipe;
   IREE_ASSERT(recipe != NULL);
 
   loom_value_id_t low_source = LOOM_VALUE_ID_INVALID;
@@ -1443,7 +1448,7 @@ static iree_status_t loom_amdgpu_lower_vector_fp4_decode_native_pair(
 static iree_status_t loom_amdgpu_lower_vector_fp4_decode_native_pk8(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_vector_16bit_float_conversion_plan_t* plan) {
-  IREE_ASSERT_EQ(plan->fp4_decode.kind,
+  IREE_ASSERT_EQ(plan->strategy.fp4_decode.kind,
                  LOOM_AMDGPU_FP4_DECODE_KIND_NATIVE_E8M0_PK8);
   IREE_ASSERT_EQ(plan->result_element_type, LOOM_SCALAR_TYPE_BF16);
   IREE_ASSERT_EQ(plan->scale_format, LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E8M0);
@@ -1456,7 +1461,7 @@ static iree_status_t loom_amdgpu_lower_vector_fp4_decode_native_pk8(
                      LOOM_AMDGPU_FP4_PK8_BF16_RESULT_REGISTER_COUNT,
                  plan->result_register_count);
   const loom_amdgpu_fp4_native_pk8_decode_recipe_t* recipe =
-      plan->fp4_decode.native_pk8_recipe;
+      plan->strategy.fp4_decode.native_pk8_recipe;
   IREE_ASSERT(recipe != NULL);
 
   loom_value_id_t low_source = LOOM_VALUE_ID_INVALID;
@@ -1537,10 +1542,10 @@ static iree_status_t loom_amdgpu_lower_vector_fp4_decode_native_pk8(
 static iree_status_t loom_amdgpu_lower_vector_fp4_decode_portable(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_vector_16bit_float_conversion_plan_t* plan) {
-  IREE_ASSERT_EQ(plan->fp4_decode.kind,
+  IREE_ASSERT_EQ(plan->strategy.fp4_decode.kind,
                  LOOM_AMDGPU_FP4_DECODE_KIND_PORTABLE_LOOKUP);
   const loom_amdgpu_fp4_decode_recipe_t* decode_recipe =
-      plan->fp4_decode.portable_recipe;
+      plan->strategy.fp4_decode.portable_recipe;
   IREE_ASSERT(decode_recipe != NULL);
   loom_value_id_t low_source = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(
@@ -1630,7 +1635,7 @@ static iree_status_t loom_amdgpu_lower_vector_fp4_decode_portable(
 iree_status_t loom_amdgpu_lower_vector_fp4_decode(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_vector_16bit_float_conversion_plan_t* plan) {
-  switch (plan->fp4_decode.kind) {
+  switch (plan->strategy.fp4_decode.kind) {
     case LOOM_AMDGPU_FP4_DECODE_KIND_PORTABLE_LOOKUP:
       return loom_amdgpu_lower_vector_fp4_decode_portable(context, source_op,
                                                           plan);
@@ -1648,19 +1653,21 @@ iree_status_t loom_amdgpu_lower_vector_fp4_decode(
 
 iree_string_view_t loom_amdgpu_fp4_decode_plan_key(
     const loom_amdgpu_vector_16bit_float_conversion_plan_t* plan) {
-  IREE_ASSERT_NE(plan->fp4_decode.kind, LOOM_AMDGPU_FP4_DECODE_KIND_NONE);
-  if (plan->fp4_decode.kind ==
+  IREE_ASSERT_NE(plan->strategy.fp4_decode.kind,
+                 LOOM_AMDGPU_FP4_DECODE_KIND_NONE);
+  if (plan->strategy.fp4_decode.kind ==
       LOOM_AMDGPU_FP4_DECODE_KIND_NATIVE_SCALEF32_PAIR) {
     return IREE_SV(
         "amdgpu.vector_16bit_float_conversion.strategy."
         "fp4_e2m1_e8m0_scale32_native_bf16_pair");
   }
-  if (plan->fp4_decode.kind == LOOM_AMDGPU_FP4_DECODE_KIND_NATIVE_E8M0_PK8) {
+  if (plan->strategy.fp4_decode.kind ==
+      LOOM_AMDGPU_FP4_DECODE_KIND_NATIVE_E8M0_PK8) {
     return IREE_SV(
         "amdgpu.vector_16bit_float_conversion.strategy."
         "fp4_e2m1_e8m0_scale32_native_bf16_pk8");
   }
-  IREE_ASSERT_EQ(plan->fp4_decode.kind,
+  IREE_ASSERT_EQ(plan->strategy.fp4_decode.kind,
                  LOOM_AMDGPU_FP4_DECODE_KIND_PORTABLE_LOOKUP);
   if (plan->scale_format == LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FN) {
     switch (plan->scale_group_element_count) {
