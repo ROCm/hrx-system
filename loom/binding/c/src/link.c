@@ -14,9 +14,9 @@
 #include "iree/base/internal/arena.h"
 #include "iree/base/internal/atomics.h"
 #include "link_index.h"
+#include "link_materialization.h"
 #include "loom/link/index_materializer.h"
 #include "loom/link/module_index.h"
-#include "loom/target/module_specialization.h"
 #include "loomc/iree.h"
 #include "module.h"
 #include "result.h"
@@ -40,36 +40,6 @@ struct loomc_linker_t {
   // Copied default output module name.
   loomc_string_view_t module_name;
 };
-
-typedef struct loomc_link_diagnostic_capture_t {
-  // Result receiving converted diagnostics.
-  loomc_result_t* result;
-  // Source associated with emitted diagnostics.
-  const loomc_source_t* source;
-} loomc_link_diagnostic_capture_t;
-
-typedef struct loomc_link_materialization_context_t {
-  // Prepared linker driving this invocation.
-  loomc_linker_t* linker;
-  // Frozen public index being linked.
-  loomc_link_index_t* link_index;
-  // Per-invocation link options controlling config specialization.
-  const loomc_link_options_t* options;
-  // Target specialization applied before each template-selection query.
-  const loomc_target_specialization_options_t* target_specialization;
-  // Result receiving materialization diagnostics.
-  loomc_result_t* result;
-  // Workspace block pool backing transient and output modules.
-  iree_arena_block_pool_t* block_pool;
-  // Host allocator used for transient and output objects.
-  loomc_allocator_t allocator;
-  // Synchronous diagnostic bridge for the provider currently being decoded.
-  loomc_link_diagnostic_capture_t capture;
-} loomc_link_materialization_context_t;
-
-static iree_allocator_t loomc_link_iree_allocator(loomc_allocator_t allocator) {
-  return iree_allocator_from_loomc(allocator);
-}
 
 static bool loomc_link_any_flag_set(loomc_link_flags_t flags,
                                     loomc_link_flags_t bits) {
@@ -191,109 +161,6 @@ static loomc_status_t loomc_link_result_fail_iree_status(
   return add_status;
 }
 
-static iree_status_t loomc_link_capture_diagnostic(
-    void* user_data, const loom_diagnostic_t* diagnostic) {
-  loomc_link_diagnostic_capture_t* capture =
-      (loomc_link_diagnostic_capture_t*)user_data;
-  return iree_status_from_loomc(loomc_result_add_loom_diagnostic(
-      capture->result, capture->source, diagnostic));
-}
-
-static iree_status_t loomc_link_capture_diagnostic_emission(
-    void* user_data, const loom_diagnostic_emission_t* emission) {
-  loomc_link_materialization_context_t* context =
-      (loomc_link_materialization_context_t*)user_data;
-  return iree_status_from_loomc(loomc_result_add_loom_diagnostic_emission(
-      context->result, /*source=*/NULL, LOOM_EMITTER_PASS, emission));
-}
-
-static loom_diagnostic_sink_t loomc_link_materialization_diagnostic_sink(
-    void* user_data, const loom_link_module_index_provider_t* provider) {
-  loomc_link_materialization_context_t* context =
-      (loomc_link_materialization_context_t*)user_data;
-  context->capture.source = loomc_link_index_source_for_provider(
-      context->link_index, provider->ordinal);
-  return (loom_diagnostic_sink_t){
-      .fn = loomc_link_capture_diagnostic,
-      .user_data = &context->capture,
-  };
-}
-
-static iree_status_t loomc_link_prepare_module(void* user_data,
-                                               loom_module_t** inout_module) {
-  loomc_link_materialization_context_t* context =
-      (loomc_link_materialization_context_t*)user_data;
-  const loomc_config_apply_to_module_options_t apply_options = {
-      .config = &context->options->config,
-      .module = *inout_module,
-      .result = context->result,
-      .diagnostic_code = loomc_make_cstring_view("CONFIG/INVALID"),
-      .block_pool = context->block_pool,
-      .allocator = context->allocator,
-  };
-  loomc_status_t status = loomc_config_apply_to_module(&apply_options);
-  if (!loomc_status_is_ok(status)) {
-    return iree_status_from_loomc(status);
-  }
-  if (!loomc_result_succeeded(context->result)) {
-    return iree_status_from_code(IREE_STATUS_INVALID_ARGUMENT);
-  }
-  if (context->target_specialization == NULL ||
-      (context->target_specialization->specialization_count == 0 &&
-       context->target_specialization->target_binding_count == 0)) {
-    return iree_ok_status();
-  }
-
-  iree_arena_allocator_t arena;
-  iree_arena_initialize(context->block_pool, &arena);
-  loom_target_specialization_request_list_t requests = {0};
-  loom_target_declaration_binding_list_t bindings = {0};
-  status = loomc_target_specialization_options_make_lists(
-      context->target_specialization, &arena, &requests, &bindings);
-  uint32_t error_count = 0;
-  if (loomc_status_is_ok(status)) {
-    status = loomc_status_from_iree(loom_target_specialize_module(
-        loomc_target_environment_loom_target_environment(
-            loomc_context_target_environment(context->linker->context)),
-        requests, bindings,
-        (iree_diagnostic_emitter_t){
-            .fn = loomc_link_capture_diagnostic_emission,
-            .user_data = context,
-        },
-        context->block_pool, loomc_link_iree_allocator(context->allocator),
-        inout_module, &error_count));
-  }
-  iree_arena_deinitialize(&arena);
-  if (!loomc_status_is_ok(status)) {
-    return iree_status_from_loomc(status);
-  }
-  if (error_count != 0) {
-    status = loomc_link_result_set_failed(context->result);
-    if (!loomc_status_is_ok(status)) {
-      return iree_status_from_loomc(status);
-    }
-    return iree_status_from_code(IREE_STATUS_INVALID_ARGUMENT);
-  }
-  return iree_ok_status();
-}
-
-static void loomc_link_materialization_context_initialize(
-    loomc_linker_t* linker, loomc_workspace_t* workspace,
-    const loomc_link_options_t* options,
-    const loomc_target_specialization_options_t* target_specialization,
-    loomc_result_t* result, loomc_link_materialization_context_t* out_context) {
-  *out_context = (loomc_link_materialization_context_t){
-      .linker = linker,
-      .link_index = options->link_index,
-      .options = options,
-      .target_specialization = target_specialization,
-      .result = result,
-      .block_pool = loomc_workspace_block_pool(workspace),
-      .allocator = linker->allocator,
-      .capture = {.result = result},
-  };
-}
-
 static iree_string_view_t loomc_link_module_name(
     const loomc_linker_t* linker, const loomc_link_options_t* options) {
   if (!loomc_string_view_is_empty(options->module_name)) {
@@ -391,12 +258,12 @@ loomc_status_t loomc_link_module(loomc_linker_t* linker,
 
   iree_arena_allocator_t arena = {0};
   iree_arena_initialize(loomc_workspace_block_pool(workspace), &arena);
-  loomc_link_materialization_context_t materialization_context = {0};
+  loomc_link_materialization_state_t materialization_state = {0};
   loom_link_index_materialization_t index_materialization = {0};
   loomc_module_t* module = NULL;
-  loomc_link_materialization_context_initialize(linker, workspace, options,
-                                                target_specialization, result,
-                                                &materialization_context);
+  loomc_link_materialization_state_initialize(
+      linker->context, workspace, options->link_index, &options->config,
+      target_specialization, result, linker->allocator, &materialization_state);
   loomc_status_t status = loomc_ok_status();
 
   iree_string_view_t* root_symbols = NULL;
@@ -437,19 +304,8 @@ loomc_status_t loomc_link_module(loomc_linker_t* linker,
               : LOOM_LINK_PLAN_TEST_SYMBOL_KEEP,
   };
 
-  loom_low_repr_environment_t low_repr_environment = {0};
-  loomc_target_pass_environment_initialize_low_repr_environment(
-      loomc_context_target_pass_environment(linker->context),
-      &low_repr_environment);
-  const loom_link_plan_materialization_environment_t environment = {
-      .context = loomc_context_loom_context(linker->context),
-      .block_pool = loomc_workspace_block_pool(workspace),
-      .low_repr_environment = low_repr_environment,
-      .diagnostic_sink = loomc_link_materialization_diagnostic_sink,
-      .prepare_module = loomc_link_prepare_module,
-      .user_data = &materialization_context,
-      .allocator = loomc_link_iree_allocator(linker->allocator),
-  };
+  const loom_link_plan_materialization_environment_t environment =
+      loomc_link_materialization_state_environment(&materialization_state);
   loomc_host_size_t before_diagnostics = loomc_result_diagnostic_count(result);
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
     iree_status_t operation_status = loom_link_index_materialize(
