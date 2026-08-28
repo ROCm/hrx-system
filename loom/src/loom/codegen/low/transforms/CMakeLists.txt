@@ -47,6 +47,7 @@ loom_cc_library(
   DEPS
     iree::base
     iree::base::internal::arena
+    loom::codegen::low::builder
     loom::codegen::low::function
     loom::ir
     loom::ops::low

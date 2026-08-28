@@ -476,6 +476,7 @@ loom_cc_library(
     hdrs = ["allocation_materialization.h"],
     deps = [
         ":allocation",
+        ":builder",
         ":descriptors",
         ":diagnostics",
         ":function",

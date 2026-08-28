@@ -48,6 +48,14 @@ iree_status_t loom_low_build_resolved_descriptor_br(
     const loom_value_id_t* args, iree_host_size_t arg_count,
     loom_location_id_t location, loom_op_t** out_op);
 
+// Rebuilds |source_br| with a replacement argument list while preserving its
+// successor, optional descriptor binding, effective traits, and location.
+iree_status_t loom_low_rebuild_br(loom_builder_t* builder,
+                                  const loom_op_t* source_br,
+                                  const loom_value_id_t* args,
+                                  iree_host_size_t arg_count,
+                                  loom_op_t** out_op);
+
 // Emits a descriptor-backed dense low.switch from a row resolved earlier in
 // the pipeline. |target_dests| is the zero-based dense table and may repeat
 // destinations to represent holes.

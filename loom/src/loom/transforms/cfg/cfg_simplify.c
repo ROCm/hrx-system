@@ -220,10 +220,10 @@ static iree_status_t loom_cfg_simplify_replace_direct_br(
     return loom_cfg_simplify_replace_br(state, old_br, dest, args, arg_count);
   }
 
-  if (!loom_low_br_isa(old_br)) {
+  if (!loom_low_br_isa(old_br) || loom_low_br_descriptor_is_present(old_br)) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "cfg-simplify direct branch rewrite expected a "
-                            "cfg.br or low.br");
+                            "cfg.br or descriptorless low.br");
   }
 
   loom_builder_ip_t saved_ip = loom_builder_save(&state->rewriter->builder);
@@ -336,7 +336,7 @@ static bool loom_cfg_simplify_direct_branch(const loom_op_t* op,
     *out_args = loom_cfg_br_args(op);
     return true;
   }
-  if (loom_low_br_isa(op)) {
+  if (loom_low_br_isa(op) && !loom_low_br_descriptor_is_present(op)) {
     *out_dest = loom_low_br_dest(op);
     *out_args = loom_low_br_args(op);
     return true;

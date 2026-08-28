@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "loom/codegen/low/allocation/spill_plan.h"
+#include "loom/codegen/low/builder.h"
 #include "loom/codegen/low/diagnostics.h"
 #include "loom/codegen/low/function.h"
 #include "loom/error/error_catalog.h"
@@ -438,9 +439,8 @@ static iree_status_t loom_low_allocation_rebuild_br_without_arg(
                           &builder);
   loom_builder_set_before(&builder, branch_op);
   loom_op_t* replacement_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_br_build(&builder, loom_low_br_dest(branch_op),
-                                         new_args, new_count,
-                                         branch_op->location, &replacement_op));
+  IREE_RETURN_IF_ERROR(loom_low_rebuild_br(&builder, branch_op, new_args,
+                                           new_count, &replacement_op));
   return loom_op_erase(module, branch_op);
 }
 

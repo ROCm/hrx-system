@@ -94,7 +94,7 @@ low.func.def target<test.low.core>(@test_target) @block_arg_spill(%row: reg<test
   return %out
 ^late:
   %late_state = test.const.i32 7
-  low.br ^join(%late_state: reg<test.i32>)
+  test.br ^join(%late_state)
 }
 
 // ----
@@ -117,7 +117,7 @@ low.func.def target<test.low.core>(@test_target) @block_arg_spill(%row: reg<test
 ^late:
   %late_state = test.const.i32 7
   low.spill %late_state, %block_arg_spill_spill_storage_2 : reg<test.i32>, low.storage<private>
-  low.br ^join
+  test.br ^join
 }
 
 // ====

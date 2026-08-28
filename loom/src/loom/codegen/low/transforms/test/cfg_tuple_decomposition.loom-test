@@ -5,7 +5,7 @@ test.target<low_core> @test_target
 low.func.def target<test.low.core>(@test_target) @decomposes_lane_sliced_block_arg(%cond: reg<test.i32>, %init: reg<test.i32 x4>, %a0: reg<test.i32>, %a1: reg<test.i32>, %a2: reg<test.i32>, %a3: reg<test.i32>) -> (reg<test.i32>) {
   low.cond_br %cond, ^init_edge, ^concat_edge : reg<test.i32>
 ^init_edge:
-  low.br ^join(%init: reg<test.i32 x4>)
+  low.br<test.br> ^join(%init: reg<test.i32 x4>)
 ^concat_edge:
   %next = low.concat(%a0, %a1, %a2, %a3) : (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>) -> reg<test.i32 x4>
   low.br ^join(%next: reg<test.i32 x4>)
@@ -26,7 +26,7 @@ low.func.def target<test.low.core>(@test_target) @decomposes_lane_sliced_block_a
   %17 = low.slice %init[1] : reg<test.i32 x4> -> reg<test.i32>
   %18 = low.slice %init[2] : reg<test.i32 x4> -> reg<test.i32>
   %19 = low.slice %init[3] : reg<test.i32 x4> -> reg<test.i32>
-  low.br ^join(%16: reg<test.i32>, %17: reg<test.i32>, %18: reg<test.i32>, %19: reg<test.i32>)
+  low.br<test.br> ^join(%16: reg<test.i32>, %17: reg<test.i32>, %18: reg<test.i32>, %19: reg<test.i32>)
 ^concat_edge:
   low.br ^join(%a0: reg<test.i32>, %a1: reg<test.i32>, %a2: reg<test.i32>, %a3: reg<test.i32>)
 ^join(%12: reg<test.i32>, %13: reg<test.i32>, %14: reg<test.i32>, %15: reg<test.i32>):

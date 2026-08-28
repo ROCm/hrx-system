@@ -6,6 +6,7 @@
 
 #include "loom/codegen/low/transforms/cfg_tuple_decomposition.h"
 
+#include "loom/codegen/low/builder.h"
 #include "loom/codegen/low/function.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
@@ -322,9 +323,9 @@ static iree_status_t loom_low_decompose_cfg_tuples_rebuild_branch(
   loom_builder_ip_t saved_ip = loom_builder_save(&state->rewriter->builder);
   loom_builder_set_before(&state->rewriter->builder, branch_op);
   loom_op_t* new_branch_op = NULL;
-  iree_status_t status = loom_low_br_build(
-      &state->rewriter->builder, loom_low_br_dest(branch_op), new_args,
-      new_arg_count, branch_op->location, &new_branch_op);
+  iree_status_t status =
+      loom_low_rebuild_br(&state->rewriter->builder, branch_op, new_args,
+                          new_arg_count, &new_branch_op);
   loom_builder_restore(&state->rewriter->builder, saved_ip);
   IREE_RETURN_IF_ERROR(status);
   return loom_rewriter_erase(state->rewriter, branch_op);

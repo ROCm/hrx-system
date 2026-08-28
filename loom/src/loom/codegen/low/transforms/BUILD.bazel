@@ -45,6 +45,7 @@ loom_cc_library(
     srcs = ["cfg_tuple_decomposition.c"],
     hdrs = ["cfg_tuple_decomposition.h"],
     deps = [
+        "//loom/src/loom/codegen/low:builder",
         "//loom/src/loom/codegen/low:function",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",

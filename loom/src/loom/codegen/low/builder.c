@@ -108,6 +108,32 @@ iree_status_t loom_low_build_resolved_descriptor_br(
   return loom_builder_finalize_op(builder, *out_op);
 }
 
+iree_status_t loom_low_rebuild_br(loom_builder_t* builder,
+                                  const loom_op_t* source_br,
+                                  const loom_value_id_t* args,
+                                  iree_host_size_t arg_count,
+                                  loom_op_t** out_op) {
+  *out_op = NULL;
+  IREE_ASSERT(loom_low_br_isa(source_br));
+  if (arg_count > UINT16_MAX) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "low.br argument count exceeds uint16_t range");
+  }
+  IREE_RETURN_IF_ERROR(loom_builder_allocate_op_with_successors(
+      builder, LOOM_OP_LOW_BR, (uint16_t)arg_count, /*result_count=*/0,
+      /*successor_count=*/1, /*region_count=*/0, /*tied_result_count=*/0,
+      /*attribute_count=*/1, source_br->location, out_op));
+  loom_op_successors(*out_op)[0] = loom_low_br_dest(source_br);
+  if (arg_count != 0) {
+    memcpy(loom_op_operands(*out_op), args,
+           arg_count * sizeof(loom_value_id_t));
+  }
+  loom_op_attrs(*out_op)[loom_low_br_descriptor_ATTR_INDEX] =
+      loom_op_const_attrs(source_br)[loom_low_br_descriptor_ATTR_INDEX];
+  (*out_op)->traits = source_br->traits;
+  return loom_builder_finalize_op(builder, *out_op);
+}
+
 iree_status_t loom_low_build_resolved_descriptor_switch(
     loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor, loom_value_id_t selector,

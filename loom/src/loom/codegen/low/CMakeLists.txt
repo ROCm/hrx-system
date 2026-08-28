@@ -499,6 +499,7 @@ loom_cc_library(
     "allocation_materialization.c"
   DEPS
     ::allocation
+    ::builder
     ::descriptors
     ::diagnostics
     ::function
