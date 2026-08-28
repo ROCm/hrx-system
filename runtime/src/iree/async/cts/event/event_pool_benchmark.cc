@@ -36,7 +36,7 @@ static EventPoolContext* CreateEventPoolContext(
     ::benchmark::State& state) {
   auto* ctx = new EventPoolContext();
 
-  auto result = factory();
+  auto result = factory(iree_async_proactor_options_default());
   if (!result.ok()) {
     state.SkipWithError("Proactor creation failed");
     delete ctx;
@@ -113,7 +113,7 @@ static void BM_AcquireGrow(::benchmark::State& state,
                            const ProactorFactory& factory) {
   for (auto _ : state) {
     // Create a fresh pool with no capacity each iteration.
-    auto result = factory();
+    auto result = factory(iree_async_proactor_options_default());
     if (!result.ok()) {
       state.SkipWithError("Proactor creation failed");
       return;

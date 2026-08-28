@@ -284,9 +284,9 @@ typedef struct iree_async_proactor_iocp_t {
   struct iree_async_notification_t* notifications_with_waits;
 
   // Cross-proactor messaging state.
-  // IOCP has native kernel-mediated messaging via PostQueuedCompletionStatus
-  // to the target proactor's completion port. The message pool is used for
-  // consistent API with other backends.
+  // Senders copy payloads into this bounded pool and wake the target completion
+  // port with PostQueuedCompletionStatus. The poll thread drains the pool and
+  // invokes the registered callback.
   iree_async_message_pool_t message_pool;
   iree_async_proactor_message_callback_t message_callback;
 
@@ -408,23 +408,10 @@ void iree_async_proactor_iocp_push_pending(iree_async_proactor_iocp_t* proactor,
 void iree_async_proactor_iocp_release_carrier(
     iree_async_proactor_iocp_t* proactor, iree_async_iocp_carrier_t* carrier);
 
-// Cancels a continuation chain by directly invoking callbacks with CANCELLED.
-// Returns the number of callbacks invoked. (proactor_submit.c)
-iree_host_size_t iree_async_proactor_iocp_cancel_continuation_chain(
-    iree_async_operation_t* chain_head);
-
-// Submits a continuation chain head. On submit failure, fires the chain head's
-// callback with the error and cancels remaining continuations.
-// (proactor_submit.c)
-void iree_async_proactor_iocp_submit_continuation_chain(
-    iree_async_proactor_iocp_t* proactor, iree_async_operation_t* chain_head);
-
-// Dispatches a linked_next continuation chain based on the trigger's status.
-// On success: submits the chain. On failure: cancels with CANCELLED callbacks.
-// Returns the number of directly-invoked callbacks. (proactor_submit.c)
-iree_host_size_t iree_async_proactor_iocp_dispatch_linked_continuation(
-    iree_async_proactor_iocp_t* proactor, iree_async_operation_t* operation,
-    iree_status_t trigger_status);
+// Submits one continuation chain head through the IOCP backend.
+// Matches iree_async_continuation_submit_fn_t. (proactor_submit.c)
+iree_status_t iree_async_proactor_iocp_submit_continuation(
+    void* user_data, iree_async_operation_t* chain_head);
 
 // Submit vtable implementation (in proactor_submit.c).
 iree_status_t iree_async_proactor_iocp_submit(

@@ -31,18 +31,18 @@ namespace iree::async::cts {
 //===----------------------------------------------------------------------===//
 
 // Creates an io_uring proactor with default options (full capabilities).
-static iree::StatusOr<iree_async_proactor_t*> CreateIoUringProactor() {
+static iree::StatusOr<iree_async_proactor_t*> CreateIoUringProactor(
+    iree_async_proactor_options_t options) {
   iree_async_proactor_t* proactor = nullptr;
-  IREE_RETURN_IF_ERROR(
-      iree_async_proactor_create_io_uring(iree_async_proactor_options_default(),
-                                          iree_allocator_system(), &proactor));
+  IREE_RETURN_IF_ERROR(iree_async_proactor_create_io_uring(
+      options, iree_allocator_system(), &proactor));
   return proactor;
 }
 
 // Creates an io_uring proactor with zerocopy disabled.
 // Tests the non-zerocopy send path even on kernels that support it.
-static iree::StatusOr<iree_async_proactor_t*> CreateIoUringNoZerocopy() {
-  iree_async_proactor_options_t options = iree_async_proactor_options_default();
+static iree::StatusOr<iree_async_proactor_t*> CreateIoUringNoZerocopy(
+    iree_async_proactor_options_t options) {
   options.allowed_capabilities &=
       ~IREE_ASYNC_PROACTOR_CAPABILITY_ZERO_COPY_SEND;
   iree_async_proactor_t* proactor = nullptr;
@@ -54,8 +54,8 @@ static iree::StatusOr<iree_async_proactor_t*> CreateIoUringNoZerocopy() {
 // Creates an io_uring proactor with multishot disabled.
 // Tests the single-shot accept/recv path even on kernels that support
 // multishot.
-static iree::StatusOr<iree_async_proactor_t*> CreateIoUringNoMultishot() {
-  iree_async_proactor_options_t options = iree_async_proactor_options_default();
+static iree::StatusOr<iree_async_proactor_t*> CreateIoUringNoMultishot(
+    iree_async_proactor_options_t options) {
   options.allowed_capabilities &= ~IREE_ASYNC_PROACTOR_CAPABILITY_MULTISHOT;
   iree_async_proactor_t* proactor = nullptr;
   IREE_RETURN_IF_ERROR(iree_async_proactor_create_io_uring(
@@ -65,8 +65,8 @@ static iree::StatusOr<iree_async_proactor_t*> CreateIoUringNoMultishot() {
 
 // Creates an io_uring proactor with minimal capabilities.
 // Tests the base io_uring path without optional features.
-static iree::StatusOr<iree_async_proactor_t*> CreateIoUringMinimal() {
-  iree_async_proactor_options_t options = iree_async_proactor_options_default();
+static iree::StatusOr<iree_async_proactor_t*> CreateIoUringMinimal(
+    iree_async_proactor_options_t options) {
   options.allowed_capabilities &=
       ~(IREE_ASYNC_PROACTOR_CAPABILITY_ZERO_COPY_SEND |
         IREE_ASYNC_PROACTOR_CAPABILITY_MULTISHOT);
@@ -78,8 +78,8 @@ static iree::StatusOr<iree_async_proactor_t*> CreateIoUringMinimal() {
 
 // Creates an io_uring proactor with PROACTOR_MESSAGING disabled.
 // Tests the fallback message passing path (MPSC queue instead of MSG_RING).
-static iree::StatusOr<iree_async_proactor_t*> CreateIoUringNoMessaging() {
-  iree_async_proactor_options_t options = iree_async_proactor_options_default();
+static iree::StatusOr<iree_async_proactor_t*> CreateIoUringNoMessaging(
+    iree_async_proactor_options_t options) {
   options.allowed_capabilities &=
       ~IREE_ASYNC_PROACTOR_CAPABILITY_PROACTOR_MESSAGING;
   iree_async_proactor_t* proactor = nullptr;
@@ -131,15 +131,16 @@ static bool io_uring_no_msg_registered_ =
     (CtsRegistry::RegisterBackend({
          "io_uring_no_messaging",
          {"io_uring_no_messaging", CreateIoUringNoMessaging},
-         {"zerocopy", "multishot", "shared_notification"},
+         {"zerocopy", "multishot", "shared_notification",
+          "software_message_pool"},
      }),
      true);
 
 // No futex: forces EVENT mode (eventfd-based) for notifications.
 // Tests the POLL_ADD+READ linked SQE path for shared notifications on
 // systems with futex support (which is the default path on older kernels).
-static iree::StatusOr<iree_async_proactor_t*> CreateIoUringNoFutex() {
-  iree_async_proactor_options_t options = iree_async_proactor_options_default();
+static iree::StatusOr<iree_async_proactor_t*> CreateIoUringNoFutex(
+    iree_async_proactor_options_t options) {
   options.allowed_capabilities &=
       ~IREE_ASYNC_PROACTOR_CAPABILITY_FUTEX_OPERATIONS;
   iree_async_proactor_t* proactor = nullptr;

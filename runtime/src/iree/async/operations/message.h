@@ -24,20 +24,19 @@ typedef struct iree_async_proactor_t iree_async_proactor_t;
 enum iree_async_message_flag_bits_e {
   IREE_ASYNC_MESSAGE_FLAG_NONE = 0u,
 
-  // Skip generating a completion on the source proactor.
-  // The message is fire-and-forget: no callback fires on the sender side.
-  // Only the target proactor receives the message callback.
-  // This reduces CQE traffic when the sender doesn't need confirmation.
+  // Skips the source-side completion and transfers the payload to the target
+  // as fire-and-forget work. The base completion_fn and pool must be NULL.
+  // The MESSAGE must be a LINKED chain tail: a predecessor may link to it, but
+  // the MESSAGE itself cannot have IREE_ASYNC_OPERATION_FLAG_LINKED set.
   IREE_ASYNC_MESSAGE_FLAG_SKIP_SOURCE_COMPLETION = 1u << 0,
 };
 typedef uint32_t iree_async_message_flags_t;
 
-// Sends a message to another proactor's completion queue.
+// Sends a message to another proactor.
 //
-// Cross-proactor messaging enables zero-userspace-hop communication between
-// proactors running on different threads. The kernel posts a CQE directly to
-// the target proactor's ring, waking its poll() without any intermediate
-// syscalls from the source.
+// Cross-proactor messaging enables communication between proactors running on
+// different threads. io_uring may post directly between rings; IOCP and POSIX
+// use a bounded message pool and wake the target poll thread.
 //
 // Use cases:
 //   - Worker pool coordination: main proactor dispatches work to worker
@@ -46,12 +45,10 @@ typedef uint32_t iree_async_message_flags_t;
 //     data arrived without returning to userspace between operations
 //   - Load balancing: distribute incoming connections across worker proactors
 //
-// Availability:
-//   generic | io_uring | IOCP | kqueue
-//   n/a     | 5.18+    | n/a  | n/a
-//
-// Requires IREE_ASYNC_PROACTOR_CAPABILITY_PROACTOR_MESSAGING. On platforms
-// without native support, consider using eventfd + shared memory as a fallback.
+// Native io_uring MSG_RING requires
+// IREE_ASYNC_PROACTOR_CAPABILITY_PROACTOR_MESSAGING. The io_uring fallback,
+// IOCP, and POSIX backends provide the same operation contract with a bounded
+// software message pool.
 //
 // Implementation (io_uring):
 //   Uses IORING_OP_MSG_RING with IORING_MSG_DATA. The message_data is encoded
@@ -70,10 +67,12 @@ typedef uint32_t iree_async_message_flags_t;
 //   immediately after data arrives, with no userspace round-trip between them.
 //
 // Lifetime:
-//   The operation struct must remain valid until the completion callback fires.
-//   Operations with SKIP_SOURCE_COMPLETION may be released after submit
-//   returns. The target proactor must remain valid until the message callback
-//   fires.
+//   A normal operation remains proactor-owned until its source completion
+//   callback fires. A directly submitted SKIP_SOURCE_COMPLETION operation may
+//   be released after submit returns. A linked skip operation remains
+//   proactor-owned until its predecessor callback begins; the backend consumes
+//   all of its fields before that callback. The target proactor remains valid
+//   until its message callback fires.
 typedef struct iree_async_message_operation_t {
   iree_async_operation_t base;
 
@@ -105,6 +104,11 @@ typedef struct iree_async_message_operation_t {
     } fallback;
   } platform;
 } iree_async_message_operation_t;
+
+// Validates the backend-independent MESSAGE operation contract before any
+// payload delivery or source-side submission occurs.
+iree_status_t iree_async_message_operation_validate(
+    const iree_async_message_operation_t* message);
 
 #ifdef __cplusplus
 }  // extern "C"

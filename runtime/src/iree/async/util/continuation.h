@@ -4,18 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Continuation dispatcher for LINKED operation chains.
-//
-// When an operation with IREE_ASYNC_OPERATION_FLAG_LINKED completes, its
-// continuation operations must be handled based on the result:
-//   - On success: Submit the continuations to the proactor.
-//   - On failure: Invoke continuation callbacks directly with CANCELLED.
-//
-// This utility provides the common dispatch logic used by all proactor
-// backends for SEMAPHORE_WAIT and SEMAPHORE_SIGNAL continuations.
-//
-// Note: TIMER continuations use a different pattern on some backends (submit
-// then cancel to get proper CQEs) and are handled separately.
+// Common emulation for IREE_ASYNC_OPERATION_FLAG_LINKED operation chains.
 
 #ifndef IREE_ASYNC_UTIL_CONTINUATION_H_
 #define IREE_ASYNC_UTIL_CONTINUATION_H_
@@ -27,90 +16,86 @@
 extern "C" {
 #endif  // __cplusplus
 
-//===----------------------------------------------------------------------===//
-// Continuation list
-//===----------------------------------------------------------------------===//
-
-// Reference to a list of continuation operations.
+// Submits the head of an intrusive continuation chain.
 //
-// Points into caller-owned storage (typically an operation's platform union or
-// a wait tracker struct). The dispatcher clears |count| before dispatching to
-// prevent re-entrancy issues with recursive submits.
-typedef struct iree_async_continuation_list_t {
-  // Array of continuation operations (not owned).
-  iree_async_operation_t** operations;
-  // First valid index in the array.
-  iree_host_size_t start;
-  // Number of continuation operations.
-  iree_host_size_t count;
-} iree_async_continuation_list_t;
-
-// Returns an empty continuation list.
-static inline iree_async_continuation_list_t iree_async_continuation_list_empty(
-    void) {
-  iree_async_continuation_list_t list = {NULL, 0, 0};
-  return list;
-}
-
-// Constructs a continuation list from the given arguments.
-static inline iree_async_continuation_list_t iree_async_make_continuation_list(
-    iree_async_operation_t** operations, iree_host_size_t start,
-    iree_host_size_t count) {
-  iree_async_continuation_list_t list = {operations, start, count};
-  return list;
-}
-
-// Returns true if the continuation list is empty.
-static inline bool iree_async_continuation_list_is_empty(
-    const iree_async_continuation_list_t* list) {
-  return list->count == 0;
-}
-
-//===----------------------------------------------------------------------===//
-// Continuation submit function
-//===----------------------------------------------------------------------===//
-
-// Function pointer type for submitting operations to a proactor.
-//
-// The implementation should be the backend's submit function (or a wrapper).
-// |context| is backend-specific (typically the proactor pointer).
-// Returns OK on success, or an error if submission failed.
+// On success, the backend owns eventual completion of |chain_head| and its
+// remaining linked_next chain. On failure, the function returns an owned
+// status and leaves the chain intact for the dispatcher to complete.
 typedef iree_status_t (*iree_async_continuation_submit_fn_t)(
-    void* context, iree_async_operation_list_t operations);
+    void* user_data, iree_async_operation_t* chain_head);
 
-//===----------------------------------------------------------------------===//
-// Continuation dispatch
-//===----------------------------------------------------------------------===//
+// Pending work produced by iree_async_continuation_begin.
+typedef struct iree_async_continuation_t {
+  // Chain to complete after the triggering callback, if any.
+  iree_async_operation_t* chain_head;
+  // Owned submission error transferred to the chain head, if any.
+  iree_status_t submit_status;
+  // True when the trigger failed and the entire chain must be cancelled.
+  bool cancel_chain;
+} iree_async_continuation_t;
 
-// Dispatches continuation operations based on the triggering operation's
-// result.
+// Validates LINKED flags and constructs intrusive linked_next chains for a
+// submission batch. All linked_next fields are cleared and rebuilt from the
+// batch; the caller's operation pointer array is not retained.
 //
-// On success (|status_code| is OK):
-//   Submits continuation operations via |submit_fn|. If submit fails, invokes
-//   callbacks directly with the submit error.
+// Returns INVALID_ARGUMENT if an operation pointer is NULL or the final
+// operation has LINKED set. On failure, linked_next fields are not modified.
+iree_status_t iree_async_continuation_prepare_batch(
+    iree_async_operation_list_t operations);
+
+// Detaches and returns |operation|'s continuation chain.
 //
-// On failure (|status_code| is not OK):
-//   Invokes all continuation callbacks directly with CANCELLED.
+// This must happen before invoking the operation's callback because the
+// callback may free or recycle the operation.
+static inline iree_async_operation_t* iree_async_continuation_take(
+    iree_async_operation_t* operation) {
+  iree_async_operation_t* chain_head = operation->linked_next;
+  operation->linked_next = NULL;
+  return chain_head;
+}
+
+// Completes an unsubmitted continuation chain with fresh CANCELLED statuses.
+// Returns the number of user callbacks invoked directly.
 //
-// The triggering operation's status is intentionally represented as a status
-// code because dispatch only needs to branch on success/failure. The caller
-// retains ownership of any original status and passes it to the triggering
-// operation's completion callback. Continuations receive fresh CANCELLED
-// statuses, not the original error.
+// Thread safety: must be called from the proactor's poll owner thread.
+iree_host_size_t iree_async_continuation_cancel(
+    iree_async_operation_t* chain_head);
+
+// Begins dispatch of a detached continuation chain.
 //
-// |submit_fn|: Backend's submit function.
-// |submit_context|: Context for submit_fn (typically proactor pointer).
-// |continuations|: List of continuations (count cleared before dispatch).
-// |status_code|: Result code of the triggering operation.
+// A successful trigger submits the chain head through |submit_fn| before the
+// trigger callback can release successor storage. Successful submission returns
+// an empty result. Submission failure returns the intact chain and owned error
+// for later completion. A failed trigger returns the chain marked for later
+// cancellation without calling |submit_fn|.
 //
-// Returns the number of callbacks invoked directly (not via CQE). This is used
-// for completion counting on backends that track completions.
+// A single tail with a suppressed completion (completion_fn == NULL) is
+// consumed during this call on trigger or submission failure. It has no user
+// callback to order, and consuming it before the trigger callback preserves
+// the fire-and-forget tail lifetime contract.
 //
-// Thread-safety: Must be called from the proactor's poll thread.
-iree_host_size_t iree_async_continuation_dispatch(
-    iree_async_continuation_submit_fn_t submit_fn, void* submit_context,
-    iree_async_continuation_list_t* continuations,
-    iree_status_code_t status_code);
+// |trigger_status_code| is deliberately scalar: the caller retains ownership
+// of the trigger's full status until transferring it to the trigger callback.
+//
+// Thread safety: must be called from the proactor's poll owner thread.
+iree_async_continuation_t iree_async_continuation_begin(
+    iree_async_continuation_submit_fn_t submit_fn, void* submit_user_data,
+    iree_async_operation_t* chain_head, iree_status_code_t trigger_status_code);
+
+// Finishes a continuation after the triggering operation's callback.
+//
+// On trigger failure, cancels the entire chain. On continuation submission
+// failure, completes the head with the owned submission error and cancels the
+// remaining tail. Clears |continuation| before invoking callbacks so recursive
+// poll/submit paths cannot complete it twice.
+//
+// Returns the number of user callbacks invoked directly. Successfully
+// submitted operations complete through the backend's normal poll path and are
+// not included.
+//
+// Thread safety: must be called from the proactor's poll owner thread.
+iree_host_size_t iree_async_continuation_finish(
+    iree_async_continuation_t* continuation);
 
 #ifdef __cplusplus
 }  // extern "C"

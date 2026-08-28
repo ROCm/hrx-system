@@ -39,7 +39,7 @@
 #include "iree/async/semaphore.h"
 #include "iree/async/types.h"
 #include "iree/async/util/message_pool.h"
-#include "iree/async/util/operation_pool.h"
+#include "iree/async/util/operation_completion.h"
 #include "iree/async/util/semaphore_wait.h"
 #include "iree/base/internal/atomics.h"
 #include "iree/base/internal/memory.h"
@@ -71,26 +71,6 @@
 #else
 #define IREE_IO_URING_TSAN_COMPLETE(operation) ((void)0)
 #endif  // IREE_SANITIZER_THREAD
-
-// Invokes an operation's completion callback and releases it to its pool.
-// Extracts the pool pointer before the callback (which may free the operation
-// when pool is NULL). For multishot operations (MORE flag set), skips pool
-// release since the operation is still in flight.
-static inline void iree_async_proactor_complete_operation(
-    iree_async_operation_t* operation, iree_status_t status,
-    iree_async_completion_flags_t flags) {
-  bool is_final = !iree_any_bit_set(flags, IREE_ASYNC_COMPLETION_FLAG_MORE);
-  iree_async_operation_pool_t* pool = is_final ? operation->pool : NULL;
-  status = iree_async_operation_resolve_completion(operation, status, &flags);
-  if (operation->completion_fn) {
-    operation->completion_fn(operation->user_data, operation, status, flags);
-  } else {
-    iree_status_ignore(status);
-  }
-  if (pool) {
-    iree_async_operation_pool_release(pool, operation);
-  }
-}
 
 static void iree_async_proactor_io_uring_destroy(
     iree_async_proactor_t* base_proactor);
@@ -383,7 +363,8 @@ static void iree_async_proactor_io_uring_drain_pending_messages(
 
 // Submits a continuation chain from an operation's linked_next pointer.
 // Builds a temporary array from the linked list and submits as a batch.
-// On submit failure, invokes callbacks directly with the error.
+// On submit failure, queues the failed head and cancelled tail through the
+// poll-owned software completion path.
 void iree_async_proactor_io_uring_submit_continuation_chain(
     iree_async_proactor_io_uring_t* proactor,
     iree_async_operation_t* chain_head) {
@@ -405,15 +386,26 @@ void iree_async_proactor_io_uring_submit_continuation_chain(
         proactor->base.allocator, chain_count * sizeof(iree_async_operation_t*),
         (void**)&chain_array);
     if (!iree_status_is_ok(alloc_status)) {
-      // Allocation failed — complete all operations with the error.
-      for (iree_async_operation_t* op = chain_head; op;) {
-        iree_async_operation_t* next = op->linked_next;
-        iree_async_proactor_complete_operation(op,
-                                               iree_status_clone(alloc_status),
-                                               IREE_ASYNC_COMPLETION_FLAG_NONE);
-        op = next;
+      // The failed head receives the allocation error and the unsubmitted tail
+      // is cancelled. Callback-bearing operations use the poll-owned
+      // completion path; suppressed tails are consumed before their storage
+      // may be released.
+      iree_async_operation_t* remaining_chain = chain_head->linked_next;
+      chain_head->linked_next = NULL;
+      if (chain_head->completion_fn) {
+        iree_async_operation_retain_resources(chain_head);
+        iree_async_proactor_io_uring_push_software_completion(
+            proactor, chain_head, alloc_status);
+      } else {
+        // A deliberately suppressed tail has no callback to order and may be
+        // released as soon as its predecessor callback begins.
+        iree_async_operation_complete(chain_head, alloc_status,
+                                      IREE_ASYNC_COMPLETION_FLAG_NONE);
       }
-      iree_status_ignore(alloc_status);
+      if (remaining_chain) {
+        iree_async_proactor_io_uring_cancel_continuation_chain_to_mpsc(
+            proactor, remaining_chain);
+      }
       return;
     }
   }
@@ -427,13 +419,27 @@ void iree_async_proactor_io_uring_submit_continuation_chain(
   iree_status_t submit_status =
       iree_async_proactor_io_uring_submit(&proactor->base, chain_list);
   if (!iree_status_is_ok(submit_status)) {
-    // Submit failed — invoke callbacks directly with the error.
+    // Submission may have rebuilt or consumed the intrusive links. Restore the
+    // caller-owned chain before queueing the failed head and cancelled tail.
     for (iree_host_size_t i = 0; i < chain_count; ++i) {
-      iree_async_proactor_complete_operation(chain_array[i],
-                                             iree_status_clone(submit_status),
-                                             IREE_ASYNC_COMPLETION_FLAG_NONE);
+      chain_array[i]->linked_next =
+          i + 1 < chain_count ? chain_array[i + 1] : NULL;
     }
-    iree_status_ignore(submit_status);
+    iree_async_operation_t* failed_head = chain_array[0];
+    iree_async_operation_t* remaining_chain = failed_head->linked_next;
+    failed_head->linked_next = NULL;
+    if (failed_head->completion_fn) {
+      iree_async_operation_retain_resources(failed_head);
+      iree_async_proactor_io_uring_push_software_completion(
+          proactor, failed_head, submit_status);
+    } else {
+      iree_async_operation_complete(failed_head, submit_status,
+                                    IREE_ASYNC_COMPLETION_FLAG_NONE);
+    }
+    if (remaining_chain) {
+      iree_async_proactor_io_uring_cancel_continuation_chain_to_mpsc(
+          proactor, remaining_chain);
+    }
   }
 
   if (chain_array != stack_array) {
@@ -493,10 +499,8 @@ iree_async_proactor_io_uring_drain_pending_software_completions(
     // Release resources retained at submit time.
     iree_async_operation_release_resources(operation);
 
-    // Invoke the user callback and release to pool.
-    iree_async_proactor_complete_operation(operation, status,
-                                           IREE_ASYNC_COMPLETION_FLAG_NONE);
-    ++drained_count;
+    drained_count += iree_async_operation_complete(
+        operation, status, IREE_ASYNC_COMPLETION_FLAG_NONE);
 
     entry = next;
   }
@@ -543,14 +547,8 @@ iree_async_proactor_io_uring_drain_pending_semaphore_waits(
     iree_status_t status = completion.status;
     iree_status_code_t status_code = iree_status_code(status);
 
-    // Invoke the operation's callback and release to pool.
-    iree_async_proactor_complete_operation((iree_async_operation_t*)wait_op,
-                                           status,
-                                           IREE_ASYNC_COMPLETION_FLAG_NONE);
-    ++drained_count;
-
-    // Dispatch continuation chain after the trigger's callback. Software
-    // completions are pushed to MPSC (counted by the post-CQE drain).
+    // Consume continuation fields before the trigger callback. Dispatch only
+    // queues work, so successor callbacks remain ordered after the trigger.
     if (continuation) {
       if (status_code == IREE_STATUS_OK) {
         iree_async_proactor_io_uring_dispatch_continuation_chain(proactor,
@@ -560,6 +558,10 @@ iree_async_proactor_io_uring_drain_pending_semaphore_waits(
             proactor, continuation);
       }
     }
+
+    drained_count +=
+        iree_async_operation_complete((iree_async_operation_t*)wait_op, status,
+                                      IREE_ASYNC_COMPLETION_FLAG_NONE);
 
     entry = next;
   }
@@ -1299,32 +1301,23 @@ static iree_host_size_t iree_async_proactor_io_uring_process_cqe(
     return 0;
   }
 
-  // Detach LINKED continuation chain before callback (callback may free the
-  // operation). Continuations are dispatched AFTER the trigger's callback to
-  // preserve callback ordering: trigger first, then its continuations.
-  iree_async_operation_t* continuation = operation->linked_next;
-  operation->linked_next = NULL;
-
   // Compute completion flags.
   iree_async_completion_flags_t flags =
       iree_async_proactor_io_uring_completion_flags(cqe, operation);
+  const bool is_final =
+      !iree_any_bit_set(flags, IREE_ASYNC_COMPLETION_FLAG_MORE);
 
-  // Release resources retained during submission (not for multishot).
-  // Must happen BEFORE callback since callback may free the operation.
-  if (!iree_any_bit_set(flags, IREE_ASYNC_COMPLETION_FLAG_MORE)) {
-    iree_async_operation_release_resources(operation);
-  }
+  // Detach the LINKED continuation before the final callback can release the
+  // trigger. Intermediate multishot completions leave the continuation owned
+  // by the in-flight operation.
+  iree_async_operation_t* continuation =
+      is_final ? iree_async_continuation_take(operation) : NULL;
 
   iree_status_code_t status_code = iree_status_code(status);
 
-  // Invoke callback and release to pool. The helper extracts the pool pointer
-  // before the callback (which may free the operation when pool is NULL).
-  iree_async_proactor_complete_operation(operation, status, flags);
-
-  // Dispatch continuation chain after the trigger's callback. Software
-  // completions in the chain are pushed to the MPSC queue (counted by the
-  // post-CQE MPSC drain in the poll loop). Kernel ops are submitted and
-  // produce their own CQEs.
+  // Consume successor fields before the trigger callback. Software completions
+  // and failures are queued to the MPSC path, while kernel operations produce
+  // later CQEs, so user callbacks remain trigger-first.
   if (continuation) {
     if (status_code == IREE_STATUS_OK) {
       iree_async_proactor_io_uring_dispatch_continuation_chain(proactor,
@@ -1335,7 +1328,16 @@ static iree_host_size_t iree_async_proactor_io_uring_process_cqe(
     }
   }
 
-  return 1;
+  // Release resources retained during submission (not for multishot).
+  // Must happen before the callback since it may free the operation.
+  if (is_final) {
+    iree_async_operation_release_resources(operation);
+  }
+
+  iree_host_size_t completed_count =
+      iree_async_operation_complete(operation, status, flags);
+
+  return completed_count;
 }
 
 static iree_status_t iree_async_proactor_io_uring_poll(

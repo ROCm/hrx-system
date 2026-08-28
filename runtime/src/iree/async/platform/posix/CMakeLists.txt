@@ -49,8 +49,9 @@ iree_cc_library(
     ::timer_list
     iree::async
     iree::async::util::completion_pool
+    iree::async::util::continuation
     iree::async::util::message_pool
-    iree::async::util::operation_pool
+    iree::async::util::operation_completion
     iree::async::util::ready_pool
     iree::async::util::semaphore_wait
     iree::async::util::sequence_emulation

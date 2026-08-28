@@ -188,6 +188,11 @@ static inline iree_async_proactor_posix_t* iree_async_proactor_posix_cast(
 void iree_async_proactor_posix_wake_poll_thread(
     iree_async_proactor_posix_t* proactor);
 
+// Submits one continuation chain head through the POSIX backend and wakes the
+// poll thread. Matches iree_async_continuation_submit_fn_t.
+iree_status_t iree_async_proactor_posix_submit_continuation(
+    void* user_data, iree_async_operation_t* chain_head);
+
 // Creates a threaded proactor using poll() + worker pool for I/O.
 // Uses the platform-default event backend (poll on most systems).
 iree_status_t iree_async_proactor_create_posix(

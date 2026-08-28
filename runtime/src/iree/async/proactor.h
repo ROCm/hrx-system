@@ -306,11 +306,10 @@ enum iree_async_proactor_capability_bits_e {
   //   n/a     | 6.7+     | n/a  | n/a
   IREE_ASYNC_PROACTOR_CAPABILITY_FUTEX_OPERATIONS = 1u << 8,
 
-  // Supports kernel-mediated cross-proactor messaging (io_uring
-  // MSG_RING 5.18+). When set, iree_async_proactor_send_message() uses
-  // zero-copy ring-to-ring communication. When not set, falls back to eventfd
-  // wake + shared queue. LINK chain support (kernel-side I/O → message
-  // chaining) requires this.
+  // Supports native kernel-mediated cross-proactor messaging via io_uring
+  // MSG_RING (5.18+). When absent, messaging-capable backends use a bounded
+  // software message pool plus a poll wake. LINKED MESSAGE operations remain
+  // available through userspace continuation dispatch.
   //
   // Availability:
   //   generic | io_uring | IOCP | kqueue
@@ -650,9 +649,8 @@ typedef struct iree_async_proactor_vtable_t {
                                 iree_async_primitive_t* out_fence);
 
   // Cross-proactor messaging. NULL if backend does not support messaging.
-  // Backends with native kernel-mediated delivery (io_uring MSG_RING, IOCP
-  // PostQueuedCompletionStatus) implement these directly; backends without
-  // native support (POSIX poll) use a pre-allocated message pool internally.
+  // io_uring may use native MSG_RING delivery. IOCP, POSIX, and the io_uring
+  // fallback use a pre-allocated message pool plus a backend wake.
   void (*set_message_callback)(iree_async_proactor_t* proactor,
                                iree_async_proactor_message_callback_t callback);
   iree_status_t (*send_message)(iree_async_proactor_t* target,
@@ -1295,9 +1293,8 @@ static inline void iree_async_proactor_unregister_relay(
 //
 // Cross-proactor messaging enables efficient communication between proactors
 // running on different threads. Messages can arrive via backend-specific paths:
-//   - io_uring MSG_RING: Kernel posts CQE directly to target ring (5.18+).
-//   - IOCP PostQueuedCompletionStatus: Kernel posts to target port.
-//   - Software fallback: Pre-allocated message pool + wake (POSIX poll).
+//   - io_uring MSG_RING: Kernel posts a CQE directly to the target ring.
+//   - IOCP/POSIX/io_uring fallback: Bounded message pool plus target wake.
 //
 // All paths deliver messages through this callback during poll().
 //

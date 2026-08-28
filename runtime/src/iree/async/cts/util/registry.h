@@ -49,10 +49,11 @@ namespace iree::async::cts {
 // Backend factory (matches test_base.h)
 //===----------------------------------------------------------------------===//
 
-// Factory function that creates a proactor backend. Each backend's
-// registration provides its own factory, allowing implementation-specific
-// options beyond iree_async_proactor_options_default().
-using ProactorFactory = std::function<iree::StatusOr<iree_async_proactor_t*>()>;
+// Factory function that creates a proactor backend from caller-selected common
+// options. Backend configurations may further mask capabilities to select the
+// implementation path they represent.
+using ProactorFactory = std::function<iree::StatusOr<iree_async_proactor_t*>(
+    iree_async_proactor_options_t options)>;
 
 // Identifies a proactor backend for test parameterization.
 // This matches the BackendInfo in test_base.h for compatibility.

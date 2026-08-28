@@ -38,6 +38,8 @@
 #include "iree/async/platform/io_uring/proactor.h"
 #include "iree/async/platform/io_uring/socket.h"
 #include "iree/async/semaphore.h"
+#include "iree/async/util/continuation.h"
+#include "iree/async/util/operation_completion.h"
 #include "iree/async/util/semaphore_wait.h"
 
 // See proactor.c for the rationale behind the TSAN annotation bridge.
@@ -1142,10 +1144,10 @@ void iree_async_proactor_io_uring_dispatch_continuation_chain(
   }
 }
 
-// Cancels a continuation chain by pushing CANCELLED completions to the MPSC
-// queue. Each operation is retained before pushing so that the drain function's
-// release_resources call is balanced. All cancellation completions flow through
-// the MPSC for uniform counting by the poll loop's drain passes.
+// Cancels a continuation chain by pushing callback-bearing operations to the
+// MPSC queue. Deliberately suppressed completions are consumed immediately so
+// their storage can be released from the preceding callback. Each queued
+// operation is retained so the drain's release_resources call is balanced.
 void iree_async_proactor_io_uring_cancel_continuation_chain_to_mpsc(
     iree_async_proactor_io_uring_t* proactor,
     iree_async_operation_t* chain_head) {
@@ -1153,10 +1155,16 @@ void iree_async_proactor_io_uring_cancel_continuation_chain_to_mpsc(
   while (op) {
     iree_async_operation_t* next = op->linked_next;
     op->linked_next = NULL;
-    // Retain so the drain's release_resources is balanced.
-    iree_async_operation_retain_resources(op);
-    iree_async_proactor_io_uring_push_software_completion(
-        proactor, op, iree_status_from_code(IREE_STATUS_CANCELLED));
+    if (op->completion_fn) {
+      // Retain so the drain's release_resources is balanced.
+      iree_async_operation_retain_resources(op);
+      iree_async_proactor_io_uring_push_software_completion(
+          proactor, op, iree_status_from_code(IREE_STATUS_CANCELLED));
+    } else {
+      iree_async_operation_complete(
+          op, iree_status_from_code(IREE_STATUS_CANCELLED),
+          IREE_ASYNC_COMPLETION_FLAG_NONE);
+    }
     op = next;
   }
 }
@@ -1327,6 +1335,14 @@ iree_status_t iree_async_proactor_io_uring_submit(
 
   if (operations.count == 0) return iree_ok_status();
 
+  IREE_RETURN_IF_ERROR(iree_async_continuation_prepare_batch(operations));
+  for (iree_host_size_t i = 0; i < operations.count; ++i) {
+    if (operations.values[i]->type == IREE_ASYNC_OPERATION_TYPE_MESSAGE) {
+      IREE_RETURN_IF_ERROR(iree_async_message_operation_validate(
+          (const iree_async_message_operation_t*)operations.values[i]));
+    }
+  }
+
   IREE_RETURN_IF_ERROR(iree_async_proactor_io_uring_submit_sequences(
       proactor, base_proactor, operations));
 
@@ -1363,20 +1379,6 @@ iree_status_t iree_async_proactor_io_uring_submit(
   // If all operations were SEQUENCE (handled in pre-scan) with no software
   // ops and no kernel ops, there is nothing left to do.
   if (sqes_needed == 0 && !has_software_ops) return iree_ok_status();
-
-  // Validate LINKED flag usage: the last operation must not have LINKED set.
-  // LINKED means "link to next operation" — there is no next for the last one.
-  // io_uring would treat this as linking to the next submit batch, which could
-  // cause unrelated future operations to be spuriously cancelled.
-  iree_async_operation_t* last_operation =
-      operations.values[operations.count - 1];
-  if (iree_any_bit_set(last_operation->flags,
-                       IREE_ASYNC_OPERATION_FLAG_LINKED)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "LINKED flag set on last operation in batch; LINKED means 'link to "
-        "next' but there is no next operation");
-  }
 
   // Build linked_next chain for LINKED operations and find split points.
   //
@@ -1800,8 +1802,18 @@ iree_status_t iree_async_proactor_io_uring_submit(
       //
       // No GETEVENTS: we avoid running task_work mid-processing. The drain
       // loop handles deferred completions with GETEVENTS after the CQE loop.
-      return iree_io_uring_ring_submit(&proactor->ring,
-                                       /*min_complete=*/0, /*flags=*/0);
+      iree_status_t flush_status = iree_io_uring_ring_submit(
+          &proactor->ring, /*min_complete=*/0, /*flags=*/0);
+      if (!iree_status_is_ok(flush_status)) {
+        // ring_submit publishes the SQ tail before entering the kernel. The
+        // operations are therefore accepted even when io_uring_enter fails;
+        // the poll loop's unconditional flush will either submit them or
+        // propagate a persistent ring failure. Returning the flush error here
+        // would falsely return ownership to the caller and permit a duplicate
+        // completion while the published SQEs still reference the operations.
+        iree_status_free(flush_status);
+      }
+      return iree_ok_status();
     }
     // Cross-thread submit while the poll thread is actively processing CQEs.
     // The SQEs are in the ring; the poll thread's drain loop will flush them.

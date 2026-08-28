@@ -19,11 +19,11 @@
 
 namespace iree::async::cts {
 
-static iree::StatusOr<iree_async_proactor_t*> CreateJSProactor() {
+static iree::StatusOr<iree_async_proactor_t*> CreateJSProactor(
+    iree_async_proactor_options_t options) {
   iree_async_proactor_t* proactor = nullptr;
-  IREE_RETURN_IF_ERROR(
-      iree_async_proactor_create_js(iree_async_proactor_options_default(),
-                                    iree_allocator_system(), &proactor));
+  IREE_RETURN_IF_ERROR(iree_async_proactor_create_js(
+      options, iree_allocator_system(), &proactor));
   return proactor;
 }
 

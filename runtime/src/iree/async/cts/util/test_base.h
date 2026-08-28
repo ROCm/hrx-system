@@ -229,7 +229,7 @@ class CtsTestBase : public BaseType {
                    << "' unavailable on this system (cached)";
     }
 
-    auto result = backend.factory();
+    auto result = backend.factory(iree_async_proactor_options_default());
     if (!result.ok() &&
         result.status().code() == iree::StatusCode::kUnavailable) {
       unavailable_backends.insert(backend.name);

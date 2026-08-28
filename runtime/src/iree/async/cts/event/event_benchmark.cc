@@ -59,7 +59,7 @@ class EventBenchmarkContext {
       ::benchmark::State& state) {
     std::unique_ptr<EventBenchmarkContext> ctx(new EventBenchmarkContext());
 
-    auto result = factory();
+    auto result = factory(iree_async_proactor_options_default());
     if (!result.ok()) {
       if (result.status().code() == iree::StatusCode::kUnavailable) {
         state.SkipWithError("Backend unavailable on this system");

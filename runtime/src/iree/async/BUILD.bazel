@@ -47,6 +47,7 @@ iree_runtime_cc_library(
         "frontier_tracker.c",
         "notification.c",
         "operation.c",
+        "operations/message.c",
         "primitive.c",
         "proactor.c",
         "region.c",
@@ -154,6 +155,17 @@ iree_runtime_cc_test(
 iree_runtime_cc_test(
     name = "address_test",
     srcs = ["address_test.cc"],
+    deps = [
+        ":async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "message_operation_test",
+    srcs = ["operations/message_test.cc"],
     deps = [
         ":async",
         "//runtime/src/iree/base",

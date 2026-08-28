@@ -27,11 +27,11 @@ namespace iree::async::cts {
 //===----------------------------------------------------------------------===//
 
 // Creates an IOCP proactor with full capabilities.
-static iree::StatusOr<iree_async_proactor_t*> CreateIOCPProactor() {
+static iree::StatusOr<iree_async_proactor_t*> CreateIOCPProactor(
+    iree_async_proactor_options_t options) {
   iree_async_proactor_t* proactor = nullptr;
-  IREE_RETURN_IF_ERROR(
-      iree_async_proactor_create_iocp(iree_async_proactor_options_default(),
-                                      iree_allocator_system(), &proactor));
+  IREE_RETURN_IF_ERROR(iree_async_proactor_create_iocp(
+      options, iree_allocator_system(), &proactor));
   return proactor;
 }
 
@@ -44,7 +44,8 @@ static bool iocp_registered_ =
     (CtsRegistry::RegisterBackend({
          "iocp",
          {"iocp", CreateIOCPProactor},
-         {"portable", "multishot", "shared_notification"},
+         {"portable", "multishot", "shared_notification",
+          "software_message_pool"},
      }),
      true);
 
@@ -52,8 +53,8 @@ static bool iocp_registered_ =
 // Forces the RegisterWaitForSingleObject fallback path for Event-to-IOCP
 // bridging, exercising the threadpool-based wait registration code path even
 // on systems where the NT wait completion packet API is available.
-static iree::StatusOr<iree_async_proactor_t*> CreateIOCPLegacyWaitProactor() {
-  iree_async_proactor_options_t options = iree_async_proactor_options_default();
+static iree::StatusOr<iree_async_proactor_t*> CreateIOCPLegacyWaitProactor(
+    iree_async_proactor_options_t options) {
   options.allowed_capabilities &=
       ~IREE_ASYNC_PROACTOR_CAPABILITY_WAIT_COMPLETION_PACKET;
   iree_async_proactor_t* proactor = nullptr;
@@ -69,7 +70,8 @@ static bool iocp_legacy_wait_registered_ =
     (CtsRegistry::RegisterBackend({
          "iocp_legacy_wait",
          {"iocp_legacy_wait", CreateIOCPLegacyWaitProactor},
-         {"portable", "multishot", "shared_notification"},
+         {"portable", "multishot", "shared_notification",
+          "software_message_pool"},
      }),
      true);
 

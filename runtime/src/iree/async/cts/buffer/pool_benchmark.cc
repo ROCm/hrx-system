@@ -41,7 +41,7 @@ static BufferPoolContext* CreateBufferPoolContext(
   auto* ctx = new BufferPoolContext();
   ctx->buffer_count = buffer_count;
 
-  auto result = factory();
+  auto result = factory(iree_async_proactor_options_default());
   if (!result.ok()) {
     state.SkipWithError("Proactor creation failed");
     delete ctx;

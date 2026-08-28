@@ -11,6 +11,8 @@
 #include "iree/async/operations/scheduling.h"
 #include "iree/async/platform/js/imports.h"
 #include "iree/async/platform/js/token_table.h"
+#include "iree/async/util/continuation.h"
+#include "iree/async/util/operation_completion.h"
 #include "iree/async/util/sequence_emulation.h"
 
 // Forward-declare the vtable (defined at bottom of file).
@@ -44,83 +46,6 @@ static iree_async_operation_t* iree_async_proactor_js_ready_dequeue(
     operation->next = NULL;
   }
   return operation;
-}
-
-//===----------------------------------------------------------------------===//
-// Linked chain dispatch
-//===----------------------------------------------------------------------===//
-
-// Forward-declare submit_one for use by linked continuation dispatch.
-static iree_status_t iree_async_proactor_js_submit_one(
-    iree_async_proactor_js_t* proactor, iree_async_operation_t* operation);
-
-// Cancels a linked_next continuation chain by directly invoking callbacks with
-// CANCELLED. Cancelled continuations were never submitted, so no resources
-// were retained — we call completion_fn directly (not through
-// iree_async_proactor_js_complete which would try to release resources).
-static void iree_async_proactor_js_cancel_continuation_chain(
-    iree_async_operation_t* chain_head) {
-  iree_async_operation_t* operation = chain_head;
-  while (operation) {
-    iree_async_operation_t* next = operation->linked_next;
-    operation->linked_next = NULL;
-    iree_async_completion_flags_t flags = IREE_ASYNC_COMPLETION_FLAG_NONE;
-    iree_status_t status = iree_async_operation_resolve_completion(
-        operation, iree_status_from_code(IREE_STATUS_CANCELLED), &flags);
-    operation->completion_fn(operation->user_data, operation, status, flags);
-    operation = next;
-  }
-}
-
-// Dispatches a linked_next continuation chain based on the trigger's status.
-// On success: submits the next operation for execution.
-// On failure: cancels the entire chain with CANCELLED callbacks.
-static void iree_async_proactor_js_dispatch_linked_continuation(
-    iree_async_proactor_js_t* proactor, iree_async_operation_t* operation,
-    iree_status_code_t trigger_status_code) {
-  iree_async_operation_t* continuation = operation->linked_next;
-  if (!continuation) return;
-
-  // Detach the chain before potentially recursive submit.
-  operation->linked_next = NULL;
-
-  if (trigger_status_code == IREE_STATUS_OK) {
-    // Success: submit the continuation (which may itself have linked_next).
-    iree_status_t status =
-        iree_async_proactor_js_submit_one(proactor, continuation);
-    if (!iree_status_is_ok(status)) {
-      // Submit failed. Fire continuation's callback with the error,
-      // then cancel the rest of the chain.
-      iree_async_operation_t* rest = continuation->linked_next;
-      continuation->linked_next = NULL;
-      continuation->completion_fn(continuation->user_data, continuation, status,
-                                  IREE_ASYNC_COMPLETION_FLAG_NONE);
-      iree_async_proactor_js_cancel_continuation_chain(rest);
-    }
-  } else {
-    // Trigger failed: cancel the entire continuation chain.
-    iree_async_proactor_js_cancel_continuation_chain(continuation);
-  }
-}
-
-//===----------------------------------------------------------------------===//
-// Completion dispatch
-//===----------------------------------------------------------------------===//
-
-// Dispatches a completion callback for an operation.
-// Releases retained resources, dispatches any linked continuations, then
-// invokes the user callback. The linked continuation dispatch must happen
-// before the callback because the callback may free the operation.
-static void iree_async_proactor_js_complete(
-    iree_async_proactor_js_t* proactor, iree_async_operation_t* operation,
-    iree_status_t status, iree_async_completion_flags_t flags) {
-  IREE_TRACE_ZONE_BEGIN(z0);
-  iree_async_operation_release_resources(operation);
-  iree_async_proactor_js_dispatch_linked_continuation(proactor, operation,
-                                                      iree_status_code(status));
-  status = iree_async_operation_resolve_completion(operation, status, &flags);
-  operation->completion_fn(operation->user_data, operation, status, flags);
-  IREE_TRACE_ZONE_END(z0);
 }
 
 //===----------------------------------------------------------------------===//
@@ -187,31 +112,41 @@ static iree_status_t iree_async_proactor_js_submit_one(
   }
 }
 
+static iree_status_t iree_async_proactor_js_submit_continuation(
+    void* user_data, iree_async_operation_t* chain_head) {
+  return iree_async_proactor_js_submit_one((iree_async_proactor_js_t*)user_data,
+                                           chain_head);
+}
+
+// Dispatches a final completion and any continuation callbacks from poll().
+// Returns the exact number of user callbacks invoked.
+static iree_host_size_t iree_async_proactor_js_complete(
+    iree_async_proactor_js_t* proactor, iree_async_operation_t* operation,
+    iree_status_t status, iree_async_completion_flags_t flags) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+  iree_async_continuation_t continuation = {0};
+  if (!iree_any_bit_set(flags, IREE_ASYNC_COMPLETION_FLAG_MORE)) {
+    iree_async_operation_t* chain_head =
+        iree_async_continuation_take(operation);
+    continuation = iree_async_continuation_begin(
+        iree_async_proactor_js_submit_continuation, proactor, chain_head,
+        iree_status_code(status));
+    iree_async_operation_release_resources(operation);
+  }
+  iree_host_size_t completed_count =
+      iree_async_operation_complete(operation, status, flags);
+  completed_count += iree_async_continuation_finish(&continuation);
+  IREE_TRACE_ZONE_END(z0);
+  return completed_count;
+}
+
 static iree_status_t iree_async_proactor_js_submit(
     iree_async_proactor_t* proactor, iree_async_operation_list_t operations) {
   IREE_TRACE_ZONE_BEGIN(z0);
   iree_async_proactor_js_t* js_proactor = iree_async_proactor_js_cast(proactor);
 
-  // Build linked_next chains from LINKED flags and validate.
-  // Operations with LINKED flag point to the next operation in the batch.
-  // Only "chain heads" (operations not preceded by a LINKED operation) are
-  // submitted; continuations stay in linked_next and are dispatched when the
-  // predecessor completes.
-  for (iree_host_size_t i = 0; i < operations.count; ++i) {
-    iree_async_operation_t* operation = operations.values[i];
-    operation->linked_next = NULL;
-    if (!iree_any_bit_set(operation->flags, IREE_ASYNC_OPERATION_FLAG_LINKED)) {
-      continue;
-    }
-    // LINKED on last operation is a contract violation.
-    if (i + 1 >= operations.count) {
-      IREE_TRACE_ZONE_END(z0);
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "LINKED flag set on last operation in batch (no successor)");
-    }
-    operation->linked_next = operations.values[i + 1];
-  }
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_async_continuation_prepare_batch(operations));
 
   for (iree_host_size_t i = 0; i < operations.count; ++i) {
     iree_async_operation_t* operation = operations.values[i];
@@ -263,10 +198,11 @@ iree_status_t iree_async_proactor_js_submit_external(
 // Drains completions from the JS ring and dispatches callbacks.
 static iree_host_size_t iree_async_proactor_js_drain_ring(
     iree_async_proactor_js_t* proactor) {
-  uint32_t count = iree_async_js_import_ring_drain(
+  uint32_t entry_count = iree_async_js_import_ring_drain(
       proactor->completion_buffer, proactor->completion_buffer_capacity);
+  iree_host_size_t completed_count = 0;
 
-  for (uint32_t i = 0; i < count; ++i) {
+  for (uint32_t i = 0; i < entry_count; ++i) {
     iree_async_js_completion_entry_t* entry = &proactor->completion_buffer[i];
     iree_async_operation_t* operation =
         iree_async_js_token_table_lookup(&proactor->token_table, entry->token);
@@ -284,7 +220,7 @@ static iree_host_size_t iree_async_proactor_js_drain_ring(
     iree_async_operation_internal_flags_t internal_flags =
         iree_atomic_load(&operation->internal_flags, iree_memory_order_relaxed);
     if (internal_flags & IREE_ASYNC_JS_OPERATION_INTERNAL_FLAG_CANCELLED) {
-      iree_async_proactor_js_complete(
+      completed_count += iree_async_proactor_js_complete(
           proactor, operation, iree_status_from_code(IREE_STATUS_CANCELLED),
           IREE_ASYNC_COMPLETION_FLAG_NONE);
     } else {
@@ -292,12 +228,12 @@ static iree_host_size_t iree_async_proactor_js_drain_ring(
           entry->status_code == 0
               ? iree_ok_status()
               : iree_status_from_code((iree_status_code_t)entry->status_code);
-      iree_async_proactor_js_complete(proactor, operation, status,
-                                      IREE_ASYNC_COMPLETION_FLAG_NONE);
+      completed_count += iree_async_proactor_js_complete(
+          proactor, operation, status, IREE_ASYNC_COMPLETION_FLAG_NONE);
     }
   }
 
-  return (iree_host_size_t)count;
+  return completed_count;
 }
 
 // Drains the ready queue and dispatches callbacks.
@@ -309,14 +245,14 @@ static iree_host_size_t iree_async_proactor_js_drain_ready(
     iree_async_operation_internal_flags_t internal_flags =
         iree_atomic_load(&operation->internal_flags, iree_memory_order_relaxed);
     if (internal_flags & IREE_ASYNC_JS_OPERATION_INTERNAL_FLAG_CANCELLED) {
-      iree_async_proactor_js_complete(
+      count += iree_async_proactor_js_complete(
           proactor, operation, iree_status_from_code(IREE_STATUS_CANCELLED),
           IREE_ASYNC_COMPLETION_FLAG_NONE);
     } else {
-      iree_async_proactor_js_complete(proactor, operation, iree_ok_status(),
-                                      IREE_ASYNC_COMPLETION_FLAG_NONE);
+      count +=
+          iree_async_proactor_js_complete(proactor, operation, iree_ok_status(),
+                                          IREE_ASYNC_COMPLETION_FLAG_NONE);
     }
-    ++count;
   }
   return count;
 }
@@ -386,15 +322,14 @@ static iree_status_t iree_async_proactor_js_cancel(
       uint32_t cancelled =
           iree_async_js_import_timer_cancel(timer->platform.js.token);
       if (cancelled) {
-        // Timer was cancelled before firing. Release the token and complete
-        // with CANCELLED status immediately.
+        // Timer was cancelled before firing. Release the token and queue it so
+        // the callback still fires from poll().
         iree_async_js_token_table_release(
             &iree_async_proactor_js_cast(proactor)->token_table,
             timer->platform.js.token);
-        iree_async_proactor_js_complete(
-            iree_async_proactor_js_cast(proactor), operation,
-            iree_status_from_code(IREE_STATUS_CANCELLED),
-            IREE_ASYNC_COMPLETION_FLAG_NONE);
+        iree_async_proactor_js_ready_enqueue(
+            iree_async_proactor_js_cast(proactor), operation);
+        iree_async_js_import_schedule_drain();
       }
       // If cancelled == 0, the timer already fired. The completion will arrive
       // through the ring and be dispatched with CANCELLED status because we set
