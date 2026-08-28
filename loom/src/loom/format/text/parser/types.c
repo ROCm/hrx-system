@@ -685,7 +685,7 @@ static iree_status_t loom_parse_shaped_type(
   // Parse element type.
   loom_token_t element_token;
   LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_BARE_IDENT, &element_token);
-  loom_scalar_type_t element_type = 0;
+  loom_scalar_type_t element_type = LOOM_SCALAR_TYPE_NONE;
   if (!loom_scalar_type_parse(element_token.text, &element_type)) {
     loom_diagnostic_param_t params[] = {
         loom_param_string(element_token.text),
@@ -1232,7 +1232,7 @@ iree_status_t loom_parse_type(loom_parser_t* parser,
 
   if (token.kind == LOOM_TOKEN_BARE_IDENT) {
     // Scalar type keyword (f32, i8, index, ...).
-    loom_scalar_type_t scalar_type = 0;
+    loom_scalar_type_t scalar_type = LOOM_SCALAR_TYPE_NONE;
     if (loom_scalar_type_parse(token.text, &scalar_type)) {
       loom_tokenizer_next(&parser->tokenizer);
       *out_type = loom_type_scalar(scalar_type);

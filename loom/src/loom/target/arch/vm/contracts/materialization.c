@@ -102,7 +102,7 @@ static iree_status_t loom_vm_contract_preflight_predicate(
           "VM function predicate '%s' value %u is not a function argument",
           predicate_name ? predicate_name : "<unknown>", value);
     }
-    loom_scalar_type_t scalar_type = 0;
+    loom_scalar_type_t scalar_type = LOOM_SCALAR_TYPE_NONE;
     IREE_RETURN_IF_ERROR(
         loom_vm_contract_value_scalar_type(module, value, &scalar_type));
     const bool type_supported =
@@ -349,7 +349,7 @@ static int loom_vm_contract_integer_width(const loom_module_t* module,
       }
       continue;
     }
-    loom_scalar_type_t scalar_type = 0;
+    loom_scalar_type_t scalar_type = LOOM_SCALAR_TYPE_NONE;
     const loom_value_id_t value = (loom_value_id_t)predicate->args[i];
     const bool has_scalar_type = loom_vm_value_register_scalar_type(
         loom_module_value_type(module, value), &scalar_type);
@@ -374,7 +374,7 @@ static iree_status_t loom_vm_contract_build_integer_arg(
   }
   const loom_value_id_t value =
       (loom_value_id_t)predicate->args[argument_index];
-  loom_scalar_type_t scalar_type = 0;
+  loom_scalar_type_t scalar_type = LOOM_SCALAR_TYPE_NONE;
   IREE_RETURN_IF_ERROR(loom_vm_contract_value_scalar_type(
       materializer->rewriter->module, value, &scalar_type));
   return loom_vm_contract_normalize_integer_value(
@@ -598,7 +598,7 @@ static iree_status_t loom_vm_contract_materialize_float(
     loom_vm_contract_materializer_t* materializer,
     const loom_predicate_t* predicate) {
   const loom_value_id_t source = (loom_value_id_t)predicate->args[0];
-  loom_scalar_type_t scalar_type = 0;
+  loom_scalar_type_t scalar_type = LOOM_SCALAR_TYPE_NONE;
   IREE_RETURN_IF_ERROR(loom_vm_contract_value_scalar_type(
       materializer->rewriter->module, source, &scalar_type));
   loom_value_id_t value = LOOM_VALUE_ID_INVALID;

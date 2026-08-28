@@ -2223,7 +2223,7 @@ static iree_status_t loom_vector_canonicalize_dense_q8_0_decode(
     return iree_ok_status();
   }
 
-  loom_scalar_type_t scale_element_type = 0;
+  loom_scalar_type_t scale_element_type = LOOM_SCALAR_TYPE_NONE;
   loom_type_t scale_vector_type =
       loom_module_value_type(rewriter->module, scale_vector);
   if (!loom_vector_type_is_single_lane_float_vector(scale_vector_type,
