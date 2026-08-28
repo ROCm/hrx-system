@@ -123,32 +123,40 @@ loom-compile model.loombc \
   --root=@elementwise_transform \
   --backend=command \
   --output=commands.json \
-  --emit-command-artifacts=commands/
+  --emit-command-artifacts=commands/ \
+  --emit-kernel-requests=kernel-requests/
 ```
 
 `commands.json` maps each command symbol to a `.loomcmd` file and records the
 logical kernel entries that artifact requires. The files under `commands/`
 contain target-neutral resource bindings, schedule waves, dispatches, and
-executable slots. They do not embed a device executable.
+executable slots. They do not embed a device executable. Source-backed entries
+also name ordinary `.loombc` modules under `kernel-requests/`. Launch sites are
+partitioned only by decisions that change their generated kernels, so repeated
+sites and separate command roots share a request when their semantic class is
+the same. External bodyless entries remain plain binding requirements.
 
-Compile the reachable kernels through a HAL backend for the deployment target:
+Compile each manifest-listed source request independently through the target
+backend. For example, the first request can be compiled with:
 
 ```shell
-loom-compile model.loombc \
-  --root=@elementwise_transform_f32 \
+loom-compile kernel-requests/kernel-0.loombc \
   --backend=amdgpu-hal \
   --target=gfx11-generic \
-  --output=commands-kernels.hsaco
+  --output=kernel-0.hsaco
 ```
 
-Use the same closed, root-selected module for both invocations so the command
-manifest and executable are derived from one dependency closure. For a
-multi-library input, close that module with the
-[same target profile during selective linking](link-and-package.md#link-one-program)
-so target-constrained kernel providers are chosen before pruning. The public
+Each request is already closed around one semantic kernel class while retaining
+the ordinary target-selection surface. The embedding compiles or cache-resolves
+those requests concurrently, then binds each resulting executable entry to the
+manifest ordinal that named it. The manifest is the parent commit point: request
+files emitted by a failed command compilation are not a usable artifact set.
+
+The public
 [`loom_command_binary`](build-with-bazel.md#command-binaries-package-schedules-with-their-kernels)
-rule owns that pairing in Bazel and exposes the manifest, portable artifacts,
-and kernel executable as one product target.
+rule retains the static packaging workflow. It compiles the linked kernel module
+as one executable and exposes it with the manifest and portable artifacts as one
+Bazel product target.
 
 ## Compile a VM-targeted module
 

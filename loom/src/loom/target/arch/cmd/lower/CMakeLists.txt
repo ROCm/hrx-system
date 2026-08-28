@@ -141,8 +141,10 @@ loom_cc_library(
     program_plan
   HDRS
     "program_plan.h"
+    "program_plan_requests.h"
   SRCS
     "program_plan.c"
+    "program_plan_requests.c"
   DEPS
     ::dispatch_counts
     ::lower
@@ -157,6 +159,7 @@ loom_cc_library(
     loom::error::error_defs
     loom::ir
     loom::ir::facts
+    loom::link::module_index
     loom::link::plan_materializer
     loom::ops::kernel
     loom::ops::op_defs
@@ -167,6 +170,7 @@ loom_cc_library(
     loom::pass::registry
     loom::target::arch::cmd::abi_layout
     loom::target::arch::cmd::program
+    loom::transforms::kernel::kernel_request_producer
     loom::transforms::kernel::resolve_launches
     loom::transforms::symbol::template_expansion_pipeline
     loom::util::fact_table
@@ -187,9 +191,11 @@ loom_cc_library(
     loom::error::emitter
     loom::ir
     loom::link::index_materializer
+    loom::link::materialization_environment
     loom::link::module_index
     loom::link::planner
     loom::pass::registry
+    loom::transforms::kernel::kernel_request_producer
   PUBLIC
 )
 

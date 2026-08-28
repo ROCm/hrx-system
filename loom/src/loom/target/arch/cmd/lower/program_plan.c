@@ -22,6 +22,7 @@
 #include "loom/target/arch/cmd/lower/lower.h"
 #include "loom/target/arch/cmd/lower/parameters.h"
 #include "loom/target/arch/cmd/lower/program_composition.h"
+#include "loom/target/arch/cmd/lower/program_plan_requests.h"
 #include "loom/target/arch/cmd/lower/schedule.h"
 #include "loom/target/arch/cmd/lower/transients.h"
 #include "loom/transforms/kernel/resolve_launches.h"
@@ -47,6 +48,8 @@ typedef struct loom_cmd_program_root_build_t {
   loom_cmd_schedule_plan_t schedule;
   // Scratch-backed physical count placement in schedule command order.
   const loom_cmd_dispatch_count_t* dispatch_counts;
+  // Scratch class-specific requirement by schedule command, or NULL.
+  const uint32_t* command_requirement_indices;
   // Scratch-backed facts consumed by closed command lowering.
   loom_cmd_lower_plan_t lower_plan;
   // Owned immutable parameter requirements transferred to the final root.
@@ -371,6 +374,7 @@ static iree_status_t loom_cmd_program_plan_build_lower_plan(
     loom_op_t* root_program_op, const loom_cmd_schedule_plan_t* schedule,
     const loom_value_fact_table_t* source_facts,
     const loom_cmd_dispatch_count_t* dispatch_counts,
+    const uint32_t* command_requirement_indices,
     loom_cmd_program_entry_index_t* entry_index,
     iree_arena_allocator_t* scratch_arena,
     iree_diagnostic_emitter_t diagnostic_emitter, bool* out_valid,
@@ -419,9 +423,14 @@ static iree_status_t loom_cmd_program_plan_build_lower_plan(
         preparation_module->symbols.entries[command->callee.symbol_id]
             .defining_op;
     IREE_ASSERT(loom_kernel_entry_decl_isa(declaration_op));
-    const uint32_t requirement_index =
-        loom_cmd_program_plan_declaration_requirement(
-            plan, entry_index, command->callee, declaration_op);
+    uint32_t requirement_index = UINT32_MAX;
+    if (command_requirement_indices != NULL) {
+      requirement_index = command_requirement_indices[i];
+    }
+    if (requirement_index == UINT32_MAX) {
+      requirement_index = loom_cmd_program_plan_declaration_requirement(
+          plan, entry_index, command->callee, declaration_op);
+    }
 
     const uint32_t root_entry_slot = loom_cmd_program_plan_root_entry_slot(
         entry_index, requirement_index, entry_requirement_indices,
@@ -549,6 +558,7 @@ static iree_status_t loom_cmd_program_plan_build_lower_plan(
 iree_status_t loom_cmd_program_plan_prepare_materialization(
     loom_link_plan_materialization_t* materialization,
     const loom_symbol_ref_t* program_refs, iree_host_size_t program_count,
+    const loom_cmd_program_kernel_source_t* kernel_source,
     const loom_pass_registry_t* pass_registry,
     iree_diagnostic_emitter_t diagnostic_emitter,
     iree_arena_block_pool_t* block_pool, bool* out_valid,
@@ -608,6 +618,7 @@ iree_status_t loom_cmd_program_plan_prepare_materialization(
   }
 
   loom_symbol_reference_table_t references = {0};
+  loom_kernel_launch_entry_table_t kernel_entry_table = {0};
   iree_host_size_t template_demand_count = 0;
   bool valid = false;
   if (iree_status_is_ok(status)) {
@@ -621,7 +632,7 @@ iree_status_t loom_cmd_program_plan_prepare_materialization(
     status = loom_kernel_resolve_launches(
         preparation_module, &references, configuration_functions,
         configuration_function_count, diagnostic_emitter, &scratch_arena,
-        &valid);
+        &kernel_entry_table, &valid);
   }
   if (valid && iree_status_is_ok(status)) {
     status = loom_cmd_program_composition_flatten(
@@ -674,9 +685,71 @@ iree_status_t loom_cmd_program_plan_prepare_materialization(
         &scratch_arena, &valid, &root->dispatch_counts);
   }
 
+  loom_cmd_program_kernel_source_t prepared_kernel_source = {0};
+  const loom_cmd_program_kernel_source_t* effective_kernel_source = NULL;
+  if (valid && iree_status_is_ok(status) && kernel_source != NULL) {
+    iree_host_size_t* prepared_source_definitions = NULL;
+    status = iree_arena_allocate_array(&scratch_arena,
+                                       preparation_module->symbols.count,
+                                       sizeof(*prepared_source_definitions),
+                                       (void**)&prepared_source_definitions);
+    if (iree_status_is_ok(status)) {
+      for (iree_host_size_t i = 0; i < preparation_module->symbols.count; ++i) {
+        prepared_source_definitions[i] = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL;
+      }
+      IREE_ASSERT_EQ(kernel_entry_table.count,
+                     kernel_source->source_definitions.count);
+      const iree_host_size_t source_symbol_count = kernel_entry_table.count;
+      for (iree_host_size_t source_symbol_id = 0;
+           source_symbol_id < source_symbol_count; ++source_symbol_id) {
+        loom_op_t* entry_op = kernel_entry_table.values[source_symbol_id];
+        const iree_host_size_t source_definition =
+            kernel_source->source_definitions.values[source_symbol_id];
+        if (entry_op == NULL ||
+            iree_any_bit_set(entry_op->flags, LOOM_OP_FLAG_DEAD) ||
+            source_definition == LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL) {
+          continue;
+        }
+        const loom_symbol_ref_t entry_ref =
+            loom_kernel_entry_decl_callee(entry_op);
+        IREE_ASSERT(loom_symbol_ref_is_valid(entry_ref));
+        IREE_ASSERT_EQ(entry_ref.module_id, 0u);
+        IREE_ASSERT_LT(entry_ref.symbol_id, preparation_module->symbols.count);
+        prepared_source_definitions[entry_ref.symbol_id] = source_definition;
+      }
+      prepared_kernel_source = *kernel_source;
+      prepared_kernel_source.source_definitions.values =
+          prepared_source_definitions;
+      prepared_kernel_source.source_definitions.count =
+          preparation_module->symbols.count;
+      effective_kernel_source = &prepared_kernel_source;
+    }
+  }
+
   if (valid && iree_status_is_ok(status)) {
     status = loom_cmd_program_plan_allocate_tables(
         program_count, entry_requirement_capacity, &plan);
+  }
+  if (valid && iree_status_is_ok(status) && effective_kernel_source != NULL) {
+    loom_cmd_program_kernel_site_root_t* kernel_site_roots = NULL;
+    status = iree_arena_allocate_array(&scratch_arena, program_count,
+                                       sizeof(*kernel_site_roots),
+                                       (void**)&kernel_site_roots);
+    for (iree_host_size_t i = 0; i < program_count && iree_status_is_ok(status);
+         ++i) {
+      kernel_site_roots[i].schedule = &root_builds[i].schedule;
+      kernel_site_roots[i].requirement_indices = NULL;
+    }
+    if (iree_status_is_ok(status)) {
+      status = loom_cmd_program_plan_publish_kernel_requests(
+          &plan, preparation_module, &source_facts, effective_kernel_source,
+          kernel_site_roots, program_count, &scratch_arena);
+    }
+    for (iree_host_size_t i = 0; i < program_count && iree_status_is_ok(status);
+         ++i) {
+      root_builds[i].command_requirement_indices =
+          kernel_site_roots[i].requirement_indices;
+    }
   }
   loom_cmd_program_entry_index_t entry_index = {0};
   if (valid && iree_status_is_ok(status) &&
@@ -714,10 +787,10 @@ iree_status_t loom_cmd_program_plan_prepare_materialization(
     entry_index.root_generation = i + 1;
     status = loom_cmd_program_plan_build_lower_plan(
         &plan, preparation_module, root->program_op, &root->schedule,
-        &source_facts, root->dispatch_counts, &entry_index, &scratch_arena,
-        diagnostic_emitter, &valid, &root->parameters, &root->transient,
-        &root->lower_plan, &root->entry_requirement_indices,
-        &root->entry_requirement_count);
+        &source_facts, root->dispatch_counts, root->command_requirement_indices,
+        &entry_index, &scratch_arena, diagnostic_emitter, &valid,
+        &root->parameters, &root->transient, &root->lower_plan,
+        &root->entry_requirement_indices, &root->entry_requirement_count);
   }
   for (iree_host_size_t i = 0;
        valid && i < program_count && iree_status_is_ok(status); ++i) {

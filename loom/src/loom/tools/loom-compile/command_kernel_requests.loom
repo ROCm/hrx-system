@@ -1,0 +1,25 @@
+template.decl @request.schedule(%size: index)
+
+template.def<@request.schedule> priority(10) @large(%size: index) where [ge(%size, 128)] {
+  template.return
+}
+
+template.def<@request.schedule> priority(1) @small(%size: index) {
+  template.return
+}
+
+kernel.def @classified() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%size: index, %storage: buffer) {
+  template.apply<@request.schedule>(%size) : (index)
+  kernel.return
+}
+
+command.program.def public @two_classes() launch(%storage: buffer) {
+  %small = index.constant 64 : index
+  %large = index.constant 256 : index
+  kernel.launch @classified(%small, %storage) : (index, buffer)
+  kernel.launch @classified(%large, %storage) : (index, buffer)
+  command.return
+}

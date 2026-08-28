@@ -181,10 +181,15 @@ static iree_status_t loom_cmd_program_plan_check_prepare_roots(
         indexed_module->symbol_start_ordinal + source_root_refs[i].symbol_id;
   }
   if (iree_status_is_ok(status)) {
+    const loom_link_plan_materialization_environment_t environment = {
+        .context = source_module->context,
+        .block_pool = block_pool,
+        .allocator = host_allocator,
+    };
     status = loom_cmd_program_plan_prepare_index(
-        index, root_symbol_ordinals, root_count, loom_pass_builtin_registry(),
-        diagnostic_emitter, block_pool, arena, out_valid, out_plan,
-        host_allocator);
+        index, root_symbol_ordinals, root_count, /*options=*/NULL,
+        loom_pass_builtin_registry(), diagnostic_emitter, &environment, arena,
+        out_valid, out_plan);
   }
 
   loom_link_module_index_free(index);

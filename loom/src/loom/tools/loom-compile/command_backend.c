@@ -6,6 +6,10 @@
 
 #include "loom/tools/loom-compile/command_backend.h"
 
+#include "iree/io/stdio_stream.h"
+#include "loom/codegen/low/repr.h"
+#include "loom/format/bytecode/writer.h"
+#include "loom/format/low_repr.h"
 #include "loom/link/module_index.h"
 #include "loom/ops/command/ops.h"
 #include "loom/ops/op_defs.h"
@@ -32,6 +36,21 @@ static iree_host_size_t loom_compile_command_backend_count_roots(
     }
   }
   return root_count;
+}
+
+static iree_status_t loom_compile_command_backend_require_directory(
+    iree_string_view_t path, iree_allocator_t host_allocator) {
+  IREE_RETURN_IF_ERROR(
+      loom_tooling_create_directory_if_needed(path, host_allocator));
+  bool is_directory = false;
+  IREE_RETURN_IF_ERROR(
+      loom_tooling_file_path_is_directory(path, host_allocator, &is_directory));
+  if (!is_directory) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "artifact path '%.*s' is not a directory",
+                            (int)path.size, path.data);
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t loom_compile_command_backend_index_roots(
@@ -66,17 +85,8 @@ static iree_status_t loom_compile_command_backend_index_roots(
 static iree_status_t loom_compile_command_backend_write_programs(
     const loom_cmd_program_artifact_set_t* artifact_set,
     iree_string_view_t artifact_directory, iree_allocator_t host_allocator) {
-  IREE_RETURN_IF_ERROR(loom_tooling_create_directory_if_needed(
+  IREE_RETURN_IF_ERROR(loom_compile_command_backend_require_directory(
       artifact_directory, host_allocator));
-  bool is_directory = false;
-  IREE_RETURN_IF_ERROR(loom_tooling_file_path_is_directory(
-      artifact_directory, host_allocator, &is_directory));
-  if (!is_directory) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "command artifact path '%.*s' is not a directory",
-                            (int)artifact_directory.size,
-                            artifact_directory.data);
-  }
 
   for (iree_host_size_t i = 0; i < artifact_set->programs.count; ++i) {
     char filename_storage[LOOM_CMD_PROGRAM_ARTIFACT_FILENAME_CAPACITY];
@@ -113,6 +123,57 @@ static iree_status_t loom_compile_command_backend_write_manifest(
   return iree_status_join(status, loom_tooling_output_stream_close(&output));
 }
 
+typedef struct loom_compile_kernel_request_writer_t {
+  // Destination directory for ordinary Loom bytecode request modules.
+  iree_string_view_t directory;
+
+  // Stable Low descriptor codec shared with the input session.
+  loom_low_repr_environment_t low_repr_environment;
+
+  // Arena block pool used by the streaming bytecode writer.
+  iree_arena_block_pool_t* block_pool;
+
+  // Host allocator for paths and file streams.
+  iree_allocator_t host_allocator;
+} loom_compile_kernel_request_writer_t;
+
+static iree_status_t loom_compile_command_backend_write_kernel_request(
+    void* user_data, loom_cmd_program_kernel_request_t request) {
+  loom_compile_kernel_request_writer_t* writer =
+      (loom_compile_kernel_request_writer_t*)user_data;
+  char filename_storage[LOOM_CMD_KERNEL_REQUEST_FILENAME_CAPACITY];
+  iree_string_view_t filename = iree_string_view_empty();
+  iree_status_t status = loom_cmd_kernel_request_format_filename(
+      request.entry_requirement_index, sizeof(filename_storage),
+      filename_storage, &filename);
+
+  char* path_storage = NULL;
+  if (iree_status_is_ok(status)) {
+    status = loom_tooling_file_path_join(writer->directory, filename,
+                                         writer->host_allocator, &path_storage);
+  }
+  iree_io_stream_t* stream = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_io_stdio_stream_open(
+        IREE_IO_STDIO_STREAM_MODE_WRITE | IREE_IO_STDIO_STREAM_MODE_DISCARD,
+        iree_make_cstring_view(path_storage), writer->host_allocator, &stream);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_bytecode_write_module(
+        request.source.product.module, stream,
+        &(loom_bytecode_write_options_t){
+            .producer = IREE_SV("loom-compile"),
+            .location_mode = LOOM_BYTECODE_LOCATION_MODE_SOURCE_LOCATIONS,
+            .low_repr_environment = writer->low_repr_environment,
+        },
+        writer->block_pool);
+  }
+  iree_io_stream_release(stream);
+  iree_allocator_free(writer->host_allocator, path_storage);
+  loom_kernel_class_product_deinitialize(&request.source.product);
+  return status;
+}
+
 iree_status_t loom_compile_command_backend_emit(
     loom_run_session_t* session, loom_run_module_t* run_module,
     const loom_compile_command_backend_options_t* options, bool* out_emitted,
@@ -129,6 +190,12 @@ iree_status_t loom_compile_command_backend_emit(
         IREE_STATUS_INVALID_ARGUMENT,
         "command backend requires a filesystem artifact directory");
   }
+  if (!iree_string_view_is_empty(options->kernel_request_directory) &&
+      loom_tooling_file_path_is_stdio(options->kernel_request_directory)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "kernel request artifacts require a filesystem directory");
+  }
 
   const iree_host_size_t root_count =
       loom_compile_command_backend_count_roots(run_module->module);
@@ -136,6 +203,11 @@ iree_status_t loom_compile_command_backend_emit(
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "command backend requires at least one retained command program root");
+  }
+
+  if (!iree_string_view_is_empty(options->kernel_request_directory)) {
+    IREE_RETURN_IF_ERROR(loom_compile_command_backend_require_directory(
+        options->kernel_request_directory, host_allocator));
   }
 
   iree_arena_allocator_t scratch_arena;
@@ -183,12 +255,38 @@ iree_status_t loom_compile_command_backend_emit(
       &diagnostic_emitter);
   loom_cmd_program_plan_t plan = {0};
   bool plan_valid = false;
+  loom_low_repr_environment_t low_repr_environment = {0};
+  loom_low_repr_environment_initialize(
+      &loom_run_session_low_descriptor_registry(session)->registry,
+      &low_repr_environment);
+  const loom_link_plan_materialization_environment_t
+      materialization_environment = {
+          .context = run_module->module->context,
+          .block_pool = loom_run_session_block_pool(session),
+          .low_repr_environment = low_repr_environment,
+          .allocator = host_allocator,
+      };
+  loom_compile_kernel_request_writer_t kernel_request_writer = {
+      .directory = options->kernel_request_directory,
+      .low_repr_environment = low_repr_environment,
+      .block_pool = loom_run_session_block_pool(session),
+      .host_allocator = host_allocator,
+  };
+  loom_cmd_program_plan_index_options_t plan_options;
+  loom_cmd_program_plan_index_options_initialize(&plan_options);
+  if (!iree_string_view_is_empty(options->kernel_request_directory)) {
+    plan_options.kernel_request_sink = (loom_cmd_program_kernel_request_sink_t){
+        .publish = loom_compile_command_backend_write_kernel_request,
+        .user_data = &kernel_request_writer,
+    };
+  }
   if (iree_status_is_ok(status)) {
     status = loom_cmd_program_plan_prepare_index(
-        index, root_symbol_ordinals, root_count, loom_pass_builtin_registry(),
+        index, root_symbol_ordinals, root_count,
+        plan_options.kernel_request_sink.publish != NULL ? &plan_options : NULL,
+        loom_pass_builtin_registry(),
         loom_target_entry_emitter(&diagnostic_emitter),
-        loom_run_session_block_pool(session), &scratch_arena, &plan_valid,
-        &plan, host_allocator);
+        &materialization_environment, &scratch_arena, &plan_valid, &plan);
   }
   if (iree_status_is_ok(status) && !plan_valid &&
       diagnostic_emitter.error_count == 0) {
