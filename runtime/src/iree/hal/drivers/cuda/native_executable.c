@@ -12,16 +12,8 @@
 #include "iree/base/threading/mutex.h"
 #include "iree/hal/drivers/cuda/cuda_buffer.h"
 #include "iree/hal/drivers/cuda/cuda_dynamic_symbols.h"
+#include "iree/hal/drivers/cuda/cuda_executable_format.h"
 #include "iree/hal/drivers/cuda/cuda_status_util.h"
-#include "iree/hal/utils/executable_debug_info.h"
-#include "iree/hal/utils/executable_header.h"
-
-// flatcc schemas:
-#include "iree/base/internal/flatcc/parsing.h"
-#include "iree/schemas/cuda_executable_def_reader.h"
-#include "iree/schemas/cuda_executable_def_verifier.h"
-#include "iree/schemas/executable_debug_info_reader.h"
-#include "iree/schemas/executable_debug_info_verifier.h"
 
 typedef struct iree_hal_cuda_native_executable_global_t {
   // Next executable-owned global entry.
@@ -80,6 +72,7 @@ static iree_hal_cuda_native_executable_t* iree_hal_cuda_native_executable_cast(
 
 typedef struct iree_hal_cuda_limits_t {
   uint32_t max_block_dims[3];
+  uint32_t max_block_thread_count;
   uint32_t max_block_shared_memory_size;
 } iree_hal_cuda_limits_t;
 static iree_status_t iree_hal_cuda_query_limits(
@@ -105,6 +98,12 @@ static iree_status_t iree_hal_cuda_query_limits(
 
   IREE_CUDA_RETURN_IF_ERROR(
       symbols,
+      cuDeviceGetAttribute((int32_t*)&out_limits->max_block_thread_count,
+                           CU_DEVICE_ATTRIBUTE_MAX_THREADS_PER_BLOCK, device),
+      "cuDeviceGetAttribute");
+
+  IREE_CUDA_RETURN_IF_ERROR(
+      symbols,
       cuDeviceGetAttribute(
           (int32_t*)&out_limits->max_block_shared_memory_size,
           CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK_OPTIN, device),
@@ -113,126 +112,69 @@ static iree_status_t iree_hal_cuda_query_limits(
   return iree_ok_status();
 }
 
-// Verifies the structure of the flatbuffer so that we can avoid doing so during
-// runtime.
-//
-// There are still some conditions we must be aware of (such as omitted names on
-// functions with internal linkage), however we shouldn't need to bounds check
-// anything within the flatbuffer after this succeeds.
-static iree_status_t iree_hal_cuda_native_executable_flatbuffer_verify(
-    iree_const_byte_span_t flatbuffer_data,
-    const iree_hal_cuda_limits_t* limits) {
-  IREE_ASSERT(flatbuffer_data.data && flatbuffer_data.data_length >= 16);
+static iree_status_t iree_hal_cuda_native_executable_verify(
+    const iree_hal_cuda_executable_format_t* format,
+    const iree_hal_cuda_limits_t* limits,
+    iree_host_size_t* out_export_name_storage_size) {
+  *out_export_name_storage_size = 0;
+  for (iree_host_size_t i = 0; i < format->export_count; ++i) {
+    iree_hal_cuda_executable_export_t export_def;
+    IREE_RETURN_IF_ERROR(
+        iree_hal_cuda_executable_format_read_export(format, i, &export_def));
 
-  // Run flatcc generated verification. This ensures all pointers are in-bounds
-  // and that we can safely walk the file, but not that the actual contents of
-  // the flatbuffer meet our expectations.
-  int verify_ret = iree_hal_cuda_ExecutableDef_verify_as_root(
-      flatbuffer_data.data, flatbuffer_data.data_length);
-  if (verify_ret != flatcc_verify_ok) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "flatbuffer verification failed: %s",
-                            flatcc_verify_error_string(verify_ret));
-  }
-
-  iree_hal_cuda_ExecutableDef_table_t executable_def =
-      iree_hal_cuda_ExecutableDef_as_root(flatbuffer_data.data);
-
-  iree_hal_cuda_ModuleDef_vec_t modules_vec =
-      iree_hal_cuda_ExecutableDef_modules_get(executable_def);
-  iree_host_size_t module_count = iree_hal_cuda_ModuleDef_vec_len(modules_vec);
-  for (iree_host_size_t i = 0; i < module_count; ++i) {
-    iree_hal_cuda_ModuleDef_table_t module_def =
-        iree_hal_cuda_ModuleDef_vec_at(modules_vec, i);
-    if (!module_def) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "modules[%" PRIhsz "] is NULL", i);
-    }
-    if (flatbuffers_string_len(
-            iree_hal_cuda_ModuleDef_ptx_image_get(module_def)) == 0) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "modules[%" PRIhsz "] contents are empty", i);
-    }
-  }
-
-  iree_hal_cuda_ExportDef_vec_t exports_vec =
-      iree_hal_cuda_ExecutableDef_exports_get(executable_def);
-  for (iree_host_size_t i = 0; i < iree_hal_cuda_ExportDef_vec_len(exports_vec);
-       ++i) {
-    iree_hal_cuda_ExportDef_table_t export_def =
-        iree_hal_cuda_ExportDef_vec_at(exports_vec, i);
-    if (!export_def) continue;
-
-    uint32_t module_ordinal =
-        iree_hal_cuda_ExportDef_module_ordinal_get(export_def);
-    if (module_ordinal >= module_count) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "exports[%" PRIhsz
-                              "] module_ordinal %u is out of bounds %" PRIhsz,
-                              i, module_ordinal, module_count);
-    }
-
-    if (flatbuffers_string_len(
-            iree_hal_cuda_ExportDef_kernel_name_get(export_def)) == 0) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "exports[%" PRIhsz "] name is empty", i);
-    }
-
-    if (iree_hal_cuda_ExportDef_block_dims_is_present(export_def)) {
-      const iree_hal_cuda_BlockDims_t* block_dims =
-          iree_hal_cuda_ExportDef_block_dims_get(export_def);
-      if (block_dims->x > limits->max_block_dims[0] ||
-          block_dims->y > limits->max_block_dims[1] ||
-          block_dims->z > limits->max_block_dims[2]) {
-        return iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "exports[%" PRIhsz
-            "] block dims %ux%ux%u exceeds device maximum %ux%ux%u",
-            i, block_dims->x, block_dims->y, block_dims->z,
-            limits->max_block_dims[0], limits->max_block_dims[1],
-            limits->max_block_dims[2]);
-      }
-    } else {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "exports[%" PRIhsz "] blocks dims are missing",
-                              i);
-    }
-
-    uint32_t block_shared_memory_size =
-        iree_hal_cuda_ExportDef_block_shared_memory_size_get(export_def);
-    if (block_shared_memory_size > limits->max_block_shared_memory_size) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "exports[%" PRIhsz
-                              "] requires %uB of shared memory and "
-                              "exceeds the device maximum of %uB per block",
-                              i, block_shared_memory_size,
-                              limits->max_block_shared_memory_size);
-    }
-
-    uint32_t constant_count =
-        iree_hal_cuda_ExportDef_constant_count_get(export_def);
-    if (constant_count > IREE_HAL_CUDA_MAX_DISPATCH_CONSTANT_COUNT) {
+    if (export_def.block_size[0] > limits->max_block_dims[0] ||
+        export_def.block_size[1] > limits->max_block_dims[1] ||
+        export_def.block_size[2] > limits->max_block_dims[2]) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
-          "exports[%" PRIhsz "] constant_count %u exceeds maximum of %u", i,
-          constant_count, IREE_HAL_CUDA_MAX_DISPATCH_CONSTANT_COUNT);
+          "CUDA executable export[%" PRIhsz
+          "] block size %ux%ux%u exceeds device maximum %ux%ux%u",
+          i, export_def.block_size[0], export_def.block_size[1],
+          export_def.block_size[2], limits->max_block_dims[0],
+          limits->max_block_dims[1], limits->max_block_dims[2]);
     }
-
-    iree_hal_cuda_BindingBits_vec_t binding_flags_vec =
-        iree_hal_cuda_ExportDef_binding_flags_get(export_def);
-    if (iree_hal_cuda_BindingBits_vec_len(binding_flags_vec) >
-        IREE_HAL_CUDA_MAX_DISPATCH_BINDING_COUNT) {
+    const uint64_t block_thread_count = (uint64_t)export_def.block_size[0] *
+                                        export_def.block_size[1] *
+                                        export_def.block_size[2];
+    if (block_thread_count > limits->max_block_thread_count) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
-          "exports[%" PRIhsz "] binding_flags count %zu exceeds maximum of %u",
-          i, iree_hal_cuda_BindingBits_vec_len(binding_flags_vec),
-          IREE_HAL_CUDA_MAX_DISPATCH_BINDING_COUNT);
+          "CUDA executable export[%" PRIhsz "] block contains %" PRIu64
+          " threads, exceeding the device maximum of %u",
+          i, block_thread_count, limits->max_block_thread_count);
     }
-
-    IREE_RETURN_IF_ERROR(iree_hal_debug_verify_export_def(
-        iree_hal_cuda_ExportDef_debug_info_get(export_def)));
+    if (export_def.block_shared_memory_size >
+        limits->max_block_shared_memory_size) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "CUDA executable export[%" PRIhsz
+          "] requires %uB of shared memory, exceeding the device maximum of "
+          "%uB per block",
+          i, export_def.block_shared_memory_size,
+          limits->max_block_shared_memory_size);
+    }
+    if (export_def.constant_count > IREE_HAL_CUDA_MAX_DISPATCH_CONSTANT_COUNT) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "CUDA executable export[%" PRIhsz
+                              "] constant count %u exceeds maximum of %u",
+                              i, export_def.constant_count,
+                              IREE_HAL_CUDA_MAX_DISPATCH_CONSTANT_COUNT);
+    }
+    if (export_def.binding_count > IREE_HAL_CUDA_MAX_DISPATCH_BINDING_COUNT) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "CUDA executable export[%" PRIhsz
+                              "] binding count %u exceeds maximum of %u",
+                              i, export_def.binding_count,
+                              IREE_HAL_CUDA_MAX_DISPATCH_BINDING_COUNT);
+    }
+    if (IREE_UNLIKELY(!iree_host_size_checked_add(
+            *out_export_name_storage_size, export_def.kernel_name.size,
+            out_export_name_storage_size))) {
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "CUDA executable export name storage exceeds "
+                              "host size limits");
+    }
   }
-
   return iree_ok_status();
 }
 
@@ -247,54 +189,29 @@ iree_status_t iree_hal_cuda_native_executable_create(
 
   *out_executable = NULL;
 
+  if (IREE_UNLIKELY(load_params->constant_count != 0)) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "CUDA executable specialization constants are not supported");
+  }
+
+  iree_hal_cuda_executable_format_t executable_format;
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_cuda_executable_format_parse(load_params->executable_data,
+                                                &executable_format));
+
   // TODO: cache immutable CUDA limits on the device to avoid repeated queries.
   iree_hal_cuda_limits_t limits = {0};
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_hal_cuda_query_limits(symbols, cu_device, &limits));
 
-  // Read and strip the flatbuffer header prefix.
-  iree_const_byte_span_t executable_flatbuffer = iree_const_byte_span_empty();
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0,
-      iree_hal_read_executable_flatbuffer_header(
-          load_params->executable_data, /*unsafe_infer_size=*/false,
-          iree_hal_cuda_ExecutableDef_file_identifier, &executable_flatbuffer));
-
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_cuda_native_executable_flatbuffer_verify(
-              executable_flatbuffer, &limits));
-
-  iree_hal_cuda_ExecutableDef_table_t executable_def =
-      iree_hal_cuda_ExecutableDef_as_root(executable_flatbuffer.data);
-
-  iree_hal_cuda_ModuleDef_vec_t modules_vec =
-      iree_hal_cuda_ExecutableDef_modules_get(executable_def);
-  iree_host_size_t module_count = iree_hal_cuda_ModuleDef_vec_len(modules_vec);
-  iree_hal_cuda_ExportDef_vec_t exports_vec =
-      iree_hal_cuda_ExecutableDef_exports_get(executable_def);
-  iree_host_size_t export_count = iree_hal_cuda_ExportDef_vec_len(exports_vec);
-
-  // Calculate the total number of characters across all entry point names so
-  // that we can store copies of the names as the flatbuffer storing the strings
-  // may be released while the executable is still live.
   iree_host_size_t total_export_name_length = 0;
-  iree_host_size_t total_export_info_length = 0;
-  for (iree_host_size_t i = 0; i < export_count; ++i) {
-    iree_hal_cuda_ExportDef_table_t export_def =
-        iree_hal_cuda_ExportDef_vec_at(exports_vec, i);
-    if (IREE_UNLIKELY(!iree_host_size_checked_add(
-            total_export_name_length,
-            flatbuffers_string_len(
-                iree_hal_cuda_ExportDef_kernel_name_get(export_def)),
-            &total_export_name_length))) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "export name storage size overflow");
-    }
-    IREE_TRACE({
-      total_export_info_length += iree_hal_debug_calculate_export_info_size(
-          iree_hal_cuda_ExportDef_debug_info_get(export_def));
-    });
-  }
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_cuda_native_executable_verify(&executable_format, &limits,
+                                                 &total_export_name_length));
+  const iree_host_size_t module_count = executable_format.module_count;
+  const iree_host_size_t export_count = executable_format.export_count;
 
   // Allocate storage for the executable and its associated data structures.
   iree_hal_cuda_native_executable_t* executable = NULL;
@@ -312,11 +229,11 @@ iree_status_t iree_hal_cuda_native_executable_create(
                     !iree_host_size_checked_add(total_size, module_table_size,
                                                 &total_size) ||
                     !iree_host_size_checked_add(
-                        total_size, total_export_name_length, &total_size) ||
-                    !iree_host_size_checked_add(
-                        total_size, total_export_info_length, &total_size))) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "executable storage size overflow");
+                        total_size, total_export_name_length, &total_size))) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "CUDA executable metadata storage exceeds host "
+                            "size limits");
   }
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0,
@@ -335,24 +252,15 @@ iree_status_t iree_hal_cuda_native_executable_create(
   iree_slim_mutex_initialize(&executable->global_mutex);
   executable->export_count = export_count;
   char* export_name_ptr = (char*)executable->modules + module_table_size;
-  IREE_TRACE(uint8_t* export_info_ptr =
-                 (uint8_t*)export_name_ptr + total_export_name_length);
-
-  // Publish any embedded source files to the tracing infrastructure.
-  iree_hal_debug_publish_source_files(
-      iree_hal_cuda_ExecutableDef_source_files_get(executable_def));
 
   // Load each module first so that exports can reference them.
   iree_status_t status = iree_ok_status();
-  for (iree_host_size_t i = 0; i < module_count; ++i) {
-    iree_hal_cuda_ModuleDef_table_t module_def =
-        iree_hal_cuda_ModuleDef_vec_at(modules_vec, i);
-
-    // WARNING: CUDA doesn't take an expected length here so we can't bound it.
-    // It's likely that users could craft inputs that read beyond the extents of
-    // the embedded binary.
-    flatbuffers_string_t ptx_image =
-        iree_hal_cuda_ModuleDef_ptx_image_get(module_def);
+  for (iree_host_size_t i = 0; i < module_count && iree_status_is_ok(status);
+       ++i) {
+    iree_hal_cuda_executable_module_t module_def;
+    status = iree_hal_cuda_executable_format_read_module(&executable_format, i,
+                                                         &module_def);
+    if (!iree_status_is_ok(status)) break;
 
     // TODO: pass cuJitOption values to get log info and other info back.
     // We pass the error buffer today but could use the info log to diagnose
@@ -369,8 +277,9 @@ iree_status_t iree_hal_cuda_native_executable_create(
     CUmodule module = NULL;
     status = IREE_CURESULT_TO_STATUS(
         symbols,
-        cuModuleLoadDataEx(&module, ptx_image, IREE_ARRAYSIZE(jit_options),
-                           jit_options, jit_option_values),
+        cuModuleLoadDataEx(&module, module_def.ptx_image.data,
+                           IREE_ARRAYSIZE(jit_options), jit_options,
+                           jit_option_values),
         "cuModuleLoadDataEx");
     if (!iree_status_is_ok(status)) {
       status = iree_status_annotate(
@@ -387,72 +296,52 @@ iree_status_t iree_hal_cuda_native_executable_create(
   }
 
   if (iree_status_is_ok(status)) {
-    for (iree_host_size_t i = 0; i < export_count; ++i) {
-      iree_hal_cuda_ExportDef_table_t export_def =
-          iree_hal_cuda_ExportDef_vec_at(exports_vec, i);
+    for (iree_host_size_t i = 0; i < export_count && iree_status_is_ok(status);
+         ++i) {
+      iree_hal_cuda_executable_export_t export_def;
+      status = iree_hal_cuda_executable_format_read_export(&executable_format,
+                                                           i, &export_def);
+      if (!iree_status_is_ok(status)) break;
 
       // Lookup the function in the module; this should always succeed but
       // we cannot trust that the input was generated by our compiler.
-      uint32_t module_ordinal =
-          iree_hal_cuda_ExportDef_module_ordinal_get(export_def);
-      CUmodule module = executable->modules[module_ordinal];
-      flatbuffers_string_t kernel_name =
-          iree_hal_cuda_ExportDef_kernel_name_get(export_def);
+      CUmodule module = executable->modules[export_def.module_ordinal];
       CUfunction function = NULL;
       status = IREE_CURESULT_TO_STATUS(
-          symbols, cuModuleGetFunction(&function, module, kernel_name),
+          symbols,
+          cuModuleGetFunction(&function, module, export_def.kernel_name.data),
           "cuModuleGetFunction");
       if (!iree_status_is_ok(status)) break;
       if (!function) {
-        status = iree_make_status(IREE_STATUS_NOT_FOUND,
-                                  "exports[%" PRIhsz
-                                  "] kernel `%s` not found in modules[%u]",
-                                  i, kernel_name, module_ordinal);
+        status = iree_make_status(
+            IREE_STATUS_NOT_FOUND,
+            "exports[%" PRIhsz "] kernel `%s` not found in modules[%u]", i,
+            export_def.kernel_name.data, export_def.module_ordinal);
         break;
       }
 
-      uint32_t block_shared_memory_size =
-          iree_hal_cuda_ExportDef_block_shared_memory_size_get(export_def);
       status = IREE_CURESULT_TO_STATUS(
           symbols,
           cuFuncSetAttribute(function,
                              CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
-                             block_shared_memory_size),
+                             export_def.block_shared_memory_size),
           "cuFuncSetAttribute");
       if (!iree_status_is_ok(status)) break;
 
       // Package required parameters for kernel launches for each entry point.
       iree_hal_cuda_kernel_params_t* kernel_info = &executable->exports[i];
-      const iree_host_size_t kernel_name_length =
-          flatbuffers_string_len(kernel_name);
       kernel_info->name =
-          iree_make_string_view(export_name_ptr, kernel_name_length);
-      memcpy(export_name_ptr, kernel_name, kernel_name_length);
-      export_name_ptr += kernel_name_length;
+          iree_make_string_view(export_name_ptr, export_def.kernel_name.size);
+      memcpy(export_name_ptr, export_def.kernel_name.data,
+             export_def.kernel_name.size);
+      export_name_ptr += export_def.kernel_name.size;
       kernel_info->function = function;
-      const iree_hal_cuda_BlockDims_t* block_dims =
-          iree_hal_cuda_ExportDef_block_dims_get(export_def);
-      kernel_info->block_dims[0] = block_dims->x;
-      kernel_info->block_dims[1] = block_dims->y;
-      kernel_info->block_dims[2] = block_dims->z;
+      memcpy(kernel_info->block_dims, export_def.block_size,
+             sizeof(kernel_info->block_dims));
       kernel_info->block_shared_memory_size =
-          iree_hal_cuda_ExportDef_block_shared_memory_size_get(export_def);
-      kernel_info->constant_count =
-          iree_hal_cuda_ExportDef_constant_count_get(export_def);
-      iree_hal_cuda_BindingBits_vec_t binding_flags_vec =
-          iree_hal_cuda_ExportDef_binding_flags_get(export_def);
-      kernel_info->binding_count =
-          iree_hal_cuda_BindingBits_vec_len(binding_flags_vec);
-
-      IREE_TRACE({
-        iree_hal_debug_export_info_t* export_info =
-            (iree_hal_debug_export_info_t*)export_info_ptr;
-        export_info_ptr += iree_hal_debug_copy_export_info(
-            iree_hal_cuda_ExportDef_debug_info_get(export_def), export_info);
-        kernel_info->debug_info.function_name = export_info->function_name;
-        kernel_info->debug_info.source_filename = export_info->source_filename;
-        kernel_info->debug_info.source_line = export_info->source_line;
-      });
+          export_def.block_shared_memory_size;
+      kernel_info->constant_count = export_def.constant_count;
+      kernel_info->binding_count = export_def.binding_count;
     }
   }
 
