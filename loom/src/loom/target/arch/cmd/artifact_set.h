@@ -11,7 +11,6 @@
 
 #include "iree/base/api.h"
 #include "loom/target/arch/cmd/lower/program_plan.h"
-#include "loom/util/stream.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -19,21 +18,6 @@ extern "C" {
 
 // Stable public format name for one serialized portable command program.
 #define LOOM_CMD_PROGRAM_ARTIFACT_FORMAT "loom-command"
-
-// File extension convention for a serialized portable command program.
-#define LOOM_CMD_PROGRAM_ARTIFACT_EXTENSION ".loomcmd"
-
-// Stable format name for a portable command artifact-set manifest.
-#define LOOM_CMD_PROGRAM_ARTIFACT_SET_MANIFEST_FORMAT "loom-command-set"
-
-// Current portable command artifact-set manifest schema version.
-#define LOOM_CMD_PROGRAM_ARTIFACT_SET_SCHEMA_VERSION 2
-
-// Maximum storage required by a canonical root artifact filename.
-#define LOOM_CMD_PROGRAM_ARTIFACT_FILENAME_CAPACITY 64
-
-// Maximum storage required by a canonical kernel request filename.
-#define LOOM_CMD_KERNEL_REQUEST_FILENAME_CAPACITY 64
 
 // One plan-wide executable-entry requirement.
 typedef struct loom_cmd_program_artifact_entry_t {
@@ -100,30 +84,6 @@ iree_status_t loom_cmd_program_artifact_set_build(
 // Releases all storage owned by |artifact_set| and resets it to empty.
 void loom_cmd_program_artifact_set_deinitialize(
     loom_cmd_program_artifact_set_t* artifact_set);
-
-// Formats the canonical relative artifact filename for |program_ordinal|.
-//
-// The returned view borrows |buffer| and excludes its trailing NUL.
-iree_status_t loom_cmd_program_artifact_format_filename(
-    iree_host_size_t program_ordinal, iree_host_size_t buffer_capacity,
-    char* buffer, iree_string_view_t* out_filename);
-
-// Formats the canonical relative request filename for |entry_ordinal|.
-//
-// The returned view borrows |buffer| and excludes its trailing NUL.
-iree_status_t loom_cmd_kernel_request_format_filename(
-    iree_host_size_t entry_ordinal, iree_host_size_t buffer_capacity,
-    char* buffer, iree_string_view_t* out_filename);
-
-// Writes the schema-versioned artifact-set manifest as JSON.
-//
-// Program artifact filenames use loom_cmd_program_artifact_format_filename and
-// are relative to the manifest's embedding-owned artifact directory. Source
-// request filenames use loom_cmd_kernel_request_format_filename and are
-// relative to the embedding-owned kernel request directory.
-iree_status_t loom_cmd_program_artifact_set_format_manifest_json(
-    const loom_cmd_program_artifact_set_t* artifact_set,
-    loom_output_stream_t* stream);
 
 #ifdef __cplusplus
 }  // extern "C"

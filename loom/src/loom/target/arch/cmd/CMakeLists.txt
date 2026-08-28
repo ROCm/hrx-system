@@ -51,8 +51,6 @@ loom_cc_library(
     loom::ops::op_defs
     loom::target::arch::cmd::lower::program_plan
     loom::target::arch::cmd::lower::serialize
-    loom::util::json
-    loom::util::stream
   PUBLIC
 )
 

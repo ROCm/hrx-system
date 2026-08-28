@@ -17,6 +17,9 @@
 extern "C" {
 #endif
 
+// Stable format name for the loom-compile command artifact manifest.
+#define LOOM_COMPILE_COMMAND_MANIFEST_FORMAT "loom-command-set"
+
 typedef struct loom_compile_command_backend_options_t {
   // Directory receiving canonical root artifact files.
   iree_string_view_t artifact_directory;
