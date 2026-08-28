@@ -153,6 +153,18 @@ iree_status_t loom_low_select_source_funcs(
     iree_arena_allocator_t* arena,
     loom_low_source_selection_list_t* out_selection_list);
 
+// Selects all target-bound func bodies compatible with the injected target-low
+// registries, including bodies already authored or lowered in Low IR.
+//
+// The returned selection array is allocated from |arena| and remains valid for
+// the arena lifetime. A module with no compatible funcs succeeds with an empty
+// list so module passes can be no-ops.
+iree_status_t loom_low_select_target_bound_funcs(
+    const loom_module_t* module,
+    const loom_low_source_selection_options_t* options,
+    iree_arena_allocator_t* arena,
+    loom_low_source_selection_list_t* out_selection_list);
+
 // Invokes each distinct selected policy's module finalizer once in first-use
 // order. Policies without module finalizers are skipped.
 iree_status_t loom_low_source_selection_finalize_policies(
