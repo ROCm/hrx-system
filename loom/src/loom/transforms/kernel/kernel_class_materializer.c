@@ -17,6 +17,12 @@
 #include "loom/rewrite/rewriter.h"
 #include "loom/transforms/symbol/template_rewrite.h"
 
+void loom_kernel_class_product_deinitialize(
+    loom_kernel_class_product_t* product) {
+  loom_module_free(product->module);
+  *product = (loom_kernel_class_product_t){0};
+}
+
 // Scalar dialect carrying one published assumption group.
 typedef uint8_t loom_kernel_class_assume_domain_t;
 enum loom_kernel_class_assume_domain_e {
@@ -328,9 +334,9 @@ iree_status_t loom_kernel_class_materialize(
     const loom_kernel_class_collection_t* collection,
     loom_decision_class_ordinal_t class_ordinal,
     iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
-    loom_module_t** out_module) {
+    loom_kernel_class_product_t* out_product) {
   IREE_ASSERT(class_ordinal < collection->class_count);
-  *out_module = NULL;
+  *out_product = (loom_kernel_class_product_t){0};
 
   iree_arena_allocator_t scratch_arena;
   iree_arena_initialize(block_pool, &scratch_arena);
@@ -406,9 +412,17 @@ iree_status_t loom_kernel_class_materialize(
   }
 
   if (rewriter_is_initialized) loom_rewriter_deinitialize(&rewriter);
+  const loom_symbol_ref_t target_kernel =
+      target_module != NULL
+          ? loom_ir_module_projection_target_symbol(
+                &module_projection, classifier->kernel_symbol_id)
+          : loom_symbol_ref_null();
   iree_arena_deinitialize(&scratch_arena);
   if (iree_status_is_ok(status)) {
-    *out_module = target_module;
+    *out_product = (loom_kernel_class_product_t){
+        .module = target_module,
+        .kernel = target_kernel,
+    };
   } else {
     loom_module_free(target_module);
   }

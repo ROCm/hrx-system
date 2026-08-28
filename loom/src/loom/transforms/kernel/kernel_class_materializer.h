@@ -18,14 +18,27 @@
 extern "C" {
 #endif  // __cplusplus
 
+// Independently owned source product for one live kernel class.
+typedef struct loom_kernel_class_product_t {
+  // Standalone source module owned by the product.
+  loom_module_t* module;
+
+  // Module-local root naming the specialized kernel definition in |module|.
+  loom_symbol_ref_t kernel;
+} loom_kernel_class_product_t;
+
+// Releases all storage owned by |product|.
+void loom_kernel_class_product_deinitialize(
+    loom_kernel_class_product_t* product);
+
 // Materializes one independently owned kernel source module for
 // |class_ordinal|.
 //
 // Accepted provider decisions become ordinary input assumptions followed by
 // exact template calls. Decisions intentionally skipped during collection
 // remain generic template applications. No classifier or collection state is
-// retained by the returned module, which the caller must free with
-// loom_module_free().
+// retained by the returned product. The caller must release it with
+// loom_kernel_class_product_deinitialize().
 //
 // The classifier, collection, and source module must describe the same
 // immutable compiler snapshot. |class_ordinal| must name a live class in
@@ -36,7 +49,7 @@ iree_status_t loom_kernel_class_materialize(
     const loom_kernel_class_collection_t* collection,
     loom_decision_class_ordinal_t class_ordinal,
     iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
-    loom_module_t** out_module);
+    loom_kernel_class_product_t* out_product);
 
 #ifdef __cplusplus
 }  // extern "C"

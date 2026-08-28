@@ -277,6 +277,7 @@ kernel.def @classified() {
   ASSERT_EQ(collection.skipped_decision_count, 1u);
 
   std::array<ModulePtr, 2> class_modules;
+  std::array<loom_symbol_ref_t, 2> class_kernels = {};
   std::array<bool, 2> class_is_large = {};
   std::array<iree_host_size_t, 2> class_member_counts = {};
   for (loom_decision_class_ordinal_t class_ordinal = 0;
@@ -296,11 +297,22 @@ kernel.def @classified() {
     class_member_counts[class_ordinal] =
         collection.classes[class_ordinal].member_count;
 
-    loom_module_t* class_module = nullptr;
+    loom_kernel_class_product_t product = {};
     IREE_ASSERT_OK(loom_kernel_class_materialize(
         &classifier, &collection, class_ordinal, &block_pool_,
-        iree_allocator_system(), &class_module));
-    class_modules[class_ordinal] = ModulePtr(class_module);
+        iree_allocator_system(), &product));
+    class_kernels[class_ordinal] = product.kernel;
+    class_modules[class_ordinal] = ModulePtr(product.module);
+    product.module = nullptr;
+    loom_kernel_class_product_deinitialize(&product);
+
+    ASSERT_EQ(class_kernels[class_ordinal].module_id, 0u);
+    ASSERT_LT(class_kernels[class_ordinal].symbol_id,
+              class_modules[class_ordinal]->symbols.count);
+    EXPECT_TRUE(loom_kernel_def_isa(
+        class_modules[class_ordinal]
+            ->symbols.entries[class_kernels[class_ordinal].symbol_id]
+            .defining_op));
   }
 
   // Published modules own only ordinary IR and survive every transient input.
@@ -496,16 +508,20 @@ kernel.def @classified() {
                                             trace->action_ordinal);
   ASSERT_FALSE(loom_symbol_ref_is_valid(selected_provider->symbol));
 
-  loom_module_t* class_module = nullptr;
+  loom_kernel_class_product_t product = {};
   IREE_ASSERT_OK(loom_kernel_class_materialize(
       &classifier, &collection, /*class_ordinal=*/0, &block_pool_,
-      iree_allocator_system(), &class_module));
+      iree_allocator_system(), &product));
+  loom_module_t* class_module = product.module;
   ModulePtr class_module_ptr(class_module);
+  product.module = nullptr;
+  const loom_symbol_ref_t class_kernel_ref = product.kernel;
+  loom_kernel_class_product_deinitialize(&product);
 
   // The published class owns only ordinary IR. The selected external body is
   // represented by an assumption feeding the still-generic request.
-  const loom_symbol_id_t class_kernel_symbol_id =
-      FindSymbol(class_module, IREE_SV("classified"));
+  ASSERT_EQ(class_kernel_ref.module_id, 0u);
+  const loom_symbol_id_t class_kernel_symbol_id = class_kernel_ref.symbol_id;
   const loom_func_like_t class_kernel = loom_func_like_cast(
       class_module,
       class_module->symbols.entries[class_kernel_symbol_id].defining_op);

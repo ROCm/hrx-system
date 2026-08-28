@@ -148,6 +148,56 @@ loom_cc_benchmark(
 
 loom_cc_library(
   NAME
+    kernel_request_producer
+  HDRS
+    "kernel_request_producer.h"
+  SRCS
+    "kernel_request_producer.c"
+  DEPS
+    ::kernel_class_materializer
+    iree::base
+    iree::base::internal::arena
+    loom::analysis::symbol_facts
+    loom::analysis::symbol_references
+    loom::analysis::symbolic_expr
+    loom::analysis::template_provider_catalog
+    loom::ir
+    loom::link::index_materializer
+    loom::link::materialization_environment
+    loom::link::module_index
+    loom::link::template_candidate_loader
+    loom::ops::op_defs
+    loom::ops::target
+    loom::ops::type_registry
+    loom::transforms::symbol::template_decision_model
+    loom::util::fact_table
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    kernel_request_producer_test
+  SRCS
+    "kernel_request_producer_test.cc"
+  DEPS
+    ::kernel_request_producer
+    iree::base::internal::arena
+    iree::io::stream
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::format::bytecode::writer
+    loom::format::text::parser
+    loom::ir
+    loom::link::module_index
+    loom::ops::kernel
+    loom::ops::op_registry
+    loom::testing::module_ptr
+    loom::util::fact_table
+    loom::verify
+)
+
+loom_cc_library(
+  NAME
     kernel_async_legality
   HDRS
     "kernel_async_legality.h"

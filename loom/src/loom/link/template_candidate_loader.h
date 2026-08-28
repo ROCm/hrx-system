@@ -21,14 +21,6 @@ extern "C" {
 typedef struct loom_link_template_candidate_loader_t
     loom_link_template_candidate_loader_t;
 
-// Dense membership for provider symbols already selected by the link.
-typedef struct loom_link_template_provider_membership_t {
-  // Packed membership bits indexed by index-wide symbol ordinal.
-  const uint64_t* words;
-  // Number of index-wide symbol ordinals represented by words.
-  iree_host_size_t symbol_count;
-} loom_link_template_provider_membership_t;
-
 // Allocates a lazy candidate-header loader over |index|.
 //
 // The loader borrows |index| and |environment| for its lifetime. Materialized
@@ -46,15 +38,16 @@ void loom_link_template_candidate_loader_free(
 
 // Binds unselected candidates for families demanded by |plan|.
 //
-// Each candidate borrows its source-owned applicability facts while using the
-// already-linked family signature in materialization->module. This never adds
-// values, symbols, types, or operations to the materialized module. The
-// returned summaries belong to |arena| and are suitable as the external
-// catalog overlay for one selection query.
+// The plan's existing reachability bitmap identifies providers already present
+// in |materialization|. Each remaining candidate borrows its source-owned
+// applicability facts while using the already-linked family signature in
+// materialization->module. This never adds values, symbols, types, or
+// operations to the materialized module. The returned summaries belong to
+// |arena| and are suitable as the external catalog overlay for one selection
+// query.
 iree_status_t loom_link_template_candidate_loader_load(
     loom_link_template_candidate_loader_t* loader, const loom_link_plan_t* plan,
     loom_link_plan_materialization_t* materialization,
-    loom_link_template_provider_membership_t selected_providers,
     iree_arena_allocator_t* arena,
     loom_template_provider_slice_t* out_candidates);
 

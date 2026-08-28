@@ -138,6 +138,52 @@ loom_cc_benchmark(
 )
 
 loom_cc_library(
+    name = "kernel_request_producer",
+    srcs = ["kernel_request_producer.c"],
+    hdrs = ["kernel_request_producer.h"],
+    deps = [
+        ":kernel_class_materializer",
+        "//loom/src/loom/analysis:symbol_facts",
+        "//loom/src/loom/analysis:symbol_references",
+        "//loom/src/loom/analysis:symbolic_expr",
+        "//loom/src/loom/analysis:template_provider_catalog",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/link:index_materializer",
+        "//loom/src/loom/link:materialization_environment",
+        "//loom/src/loom/link:module_index",
+        "//loom/src/loom/link:template_candidate_loader",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops:type_registry",
+        "//loom/src/loom/ops/target",
+        "//loom/src/loom/transforms/symbol:template_decision_model",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "kernel_request_producer_test",
+    srcs = ["kernel_request_producer_test.cc"],
+    deps = [
+        ":kernel_request_producer",
+        "//loom/src/loom/format/bytecode:writer",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/link:module_index",
+        "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/testing:module_ptr",
+        "//loom/src/loom/util:fact_table",
+        "//loom/src/loom/verify",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:stream",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "kernel_async_legality",
     srcs = ["kernel_async_legality.c"],
     hdrs = ["kernel_async_legality.h"],
