@@ -20,7 +20,7 @@ func.def target(@target) @function_values(%value: i32) -> (i32, func.ref<yieldab
 }
 
 // ----
-low.func.decl optional link("runtime", "callback") target<vm.core>(@target) abi_layout({signature = type<(reg<vm.value : i32>) -> (reg<vm.value : i32>)>}) @callback(%value: reg<vm.value : i32>) -> (reg<vm.value : i32>)
+low.func.decl optional link("runtime", "callback") target<vm.core>(@target) abi_layout({argument_names = {f00000 = "value"}, signature = type<(reg<vm.value : i32>) -> (reg<vm.value : i32>)>}) @callback(%value: reg<vm.value : i32>) -> (reg<vm.value : i32>)
 
 low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i32>) -> (reg<vm.value : i32>)>}) @identity(%value: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
   return %value

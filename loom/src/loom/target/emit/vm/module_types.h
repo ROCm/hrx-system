@@ -38,10 +38,14 @@ typedef struct loom_vm_module_type_tables_t {
   iree_vm_bytecode_v0_ref_type_group_row_t* ref_type_groups;
   // Number of entries in |ref_type_groups|.
   uint32_t ref_type_group_count;
+  // Arena-owned namespace names parallel to |ref_type_groups|.
+  iree_string_view_t* ref_type_group_names;
   // Arena-owned ref-type entries grouped by namespace and sorted by name.
   iree_vm_bytecode_v0_ref_type_entry_row_t* ref_type_entries;
   // Number of entries in |ref_type_entries|.
   uint32_t ref_type_entry_count;
+  // Arena-owned local names parallel to |ref_type_entries|.
+  iree_string_view_t* ref_type_entry_names;
   // Arena-owned source-ordered signature rows in callable-type order.
   iree_vm_bytecode_v0_signature_row_t* signatures;
   // Number of entries in |signatures|.
@@ -60,12 +64,28 @@ typedef struct loom_vm_module_type_tables_t {
   iree_host_size_t callable_type_ordinal_signature_count;
 } loom_vm_module_type_tables_t;
 
-// Builds all canonical string, ref-type, signature, and callable-type tables.
+// Builds canonical ref-type, signature, and callable-type structure.
 //
-// Function and import logical signatures and names must already be populated
-// in |layout|. The build assigns their final string and callable-type ordinals.
-iree_status_t loom_vm_module_type_tables_build(iree_arena_allocator_t* arena,
-                                               loom_vm_module_layout_t* layout);
+// Function and import logical signatures must already be populated in
+// |layout|. The build assigns their final callable-type ordinals but leaves
+// string-backed row fields unresolved so import canonicalization and public
+// presentation can contribute to the one module string table.
+iree_status_t loom_vm_module_type_tables_build_structure(
+    iree_arena_allocator_t* arena, loom_vm_module_layout_t* layout);
+
+// Builds the one canonical string table and resolves every string-backed row.
+//
+// Canonical imports and optional presentation must be finalized before this
+// call. No string-bearing module resource may be added afterward.
+iree_status_t loom_vm_module_type_tables_build_strings(
+    iree_arena_allocator_t* arena, loom_vm_module_layout_t* layout);
+
+// Resolves |value| in the canonical module string table.
+//
+// Returns false when |value| was not included during string planning.
+bool loom_vm_module_type_tables_try_resolve_string_ordinal(
+    const loom_vm_module_type_tables_t* tables, iree_string_view_t value,
+    uint16_t* out_ordinal);
 
 // Resolves the canonical module-local callable ordinal for |function_ref_type|.
 //

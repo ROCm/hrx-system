@@ -53,7 +53,7 @@ global.constant @immutable_function : func.ref<(i32) -> (i32)>
 
 global.rodata.def @message = align(8) bytes("6c6f6f6d")
 
-low.func.def initializer target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i32>, reg<vm.ref : hal.buffer>, reg<vm.function : func.ref<(i32) -> (i32)>>) -> ()>}) export("initialize") @initialize_resources(%value: reg<vm.value : i32>, %ref: reg<vm.ref : hal.buffer>, %function: reg<vm.function : func.ref<(i32) -> (i32)>>) asm {
+low.func.def initializer target<vm.core>(@target) abi(vm_function) abi_layout({argument_names = {f00000 = "value", f00001 = "ref", f00002 = "function"}, signature = type<(reg<vm.value : i32>, reg<vm.ref : hal.buffer>, reg<vm.function : func.ref<(i32) -> (i32)>>) -> ()>}) export("initialize") @initialize_resources(%value: reg<vm.value : i32>, %ref: reg<vm.ref : hal.buffer>, %function: reg<vm.function : func.ref<(i32) -> (i32)>>) asm {
   global.value.immutable.store %value, 0
   %31 = ref.retain %ref : reg<vm.ref : hal.buffer>
   global.ref.immutable.store.move %31, 0

@@ -51,6 +51,8 @@ static int loom_vm_module_layout_compare_imports(const void* lhs_ptr,
   if (comparison != 0) return comparison;
   if (lhs->callable_type_ordinal < rhs->callable_type_ordinal) return -1;
   if (lhs->callable_type_ordinal > rhs->callable_type_ordinal) return 1;
+  if (lhs->symbol_id < rhs->symbol_id) return -1;
+  if (lhs->symbol_id > rhs->symbol_id) return 1;
   return 0;
 }
 
@@ -386,6 +388,11 @@ static iree_status_t loom_vm_module_layout_assign_exports(
   }
 
   if (layout->export_count == 0) return iree_ok_status();
+  if (layout->export_count > UINT16_MAX) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "VM export count exceeds the string-table ordinal domain");
+  }
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, layout->export_count,
                                                  sizeof(*layout->exports),
                                                  (void**)&layout->exports));
@@ -480,8 +487,7 @@ static iree_status_t loom_vm_module_layout_assign_imports(
     }
     layout->import_groups[group_index++] =
         (loom_vm_module_import_group_layout_t){
-            .module_name_string_ordinal =
-                layout->imports[group_begin]->module_name_string_ordinal,
+            .first_import = layout->imports[group_begin],
             .import_count = (uint32_t)(import_index - group_begin),
         };
   }
@@ -529,8 +535,12 @@ iree_status_t loom_vm_module_layout_build(loom_module_t* module,
   IREE_RETURN_IF_ERROR(
       loom_vm_module_layout_derive_function_yieldability(arena, out_layout));
   IREE_RETURN_IF_ERROR(loom_vm_module_layout_assign_exports(arena, out_layout));
-  IREE_RETURN_IF_ERROR(loom_vm_module_type_tables_build(arena, out_layout));
-  return loom_vm_module_layout_assign_imports(arena, out_layout);
+  IREE_RETURN_IF_ERROR(
+      loom_vm_module_type_tables_build_structure(arena, out_layout));
+  IREE_RETURN_IF_ERROR(loom_vm_module_layout_assign_imports(arena, out_layout));
+  IREE_RETURN_IF_ERROR(
+      loom_vm_module_presentation_layout_build(arena, out_layout));
+  return loom_vm_module_type_tables_build_strings(arena, out_layout);
 }
 
 bool loom_vm_module_layout_try_resolve_call_target(

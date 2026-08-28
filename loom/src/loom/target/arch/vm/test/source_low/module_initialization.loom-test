@@ -103,7 +103,7 @@ global.constant @answer : i32 = 42
 
 global.variable @scale : f32 = 1.5
 
-low.func.def initializer target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i64>) -> ()>}) export("initialize") @setup(%seed: reg<vm.value : i64>) asm {
+low.func.def initializer target<vm.core>(@target) abi(vm_function) abi_layout({argument_names = {f00000 = "seed"}, signature = type<(reg<vm.value : i64>) -> ()>}) export("initialize") @setup(%seed: reg<vm.value : i64>) asm {
   %4 = constant.s16 42 : reg<vm.value : i32>
   global.value.immutable.store %4, 0
   %5 = constant.i32 1069547520 : reg<vm.value : f32>

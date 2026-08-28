@@ -7,14 +7,15 @@ func.def public target(@target) @value_overflow(%v0: i32, %v1: i32, %v2: i32, %v
 }
 
 // ----
-vm.module "module" core=0.0 bytes=388
+vm.module "module" core=0.0 bytes=848
 requirements:
 sections:
-  [0] strings type=0x0002 flags=0x0000 bytes=[96, +26)
-  [1] signatures type=0x0004 flags=0x0000 bytes=[128, +156)
-  [2] callable_types type=0x0005 flags=0x0000 bytes=[288, +12)
-  [3] exports type=0x0007 flags=0x0000 bytes=[304, +12)
-  [4] functions type=0x0008 flags=0x0000 bytes=[320, +68)
+  [0] strings type=0x0002 flags=0x0000 bytes=[112, +320)
+  [1] signatures type=0x0004 flags=0x0000 bytes=[432, +156)
+  [2] callable_types type=0x0005 flags=0x0000 bytes=[592, +12)
+  [3] exports type=0x0007 flags=0x0000 bytes=[608, +12)
+  [4] functions type=0x0008 flags=0x0000 bytes=[624, +68)
+  [5] presentation type=0x000C flags=0x0001 bytes=[696, +152)
 resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
 module_metadata:
 ref_types:
@@ -22,7 +23,42 @@ callable_types:
   [0] (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) -> (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32)
 imports:
 exports:
-  [0] @value_overflow -> function[0] : (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) -> (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32)
+  [0] @value_overflow -> function[0] : (v0: i32, v1: i32, v2: i32, v3: i32, v4: i32, v5: i32, v6: i32, v7: i32, v8: i32, v9: i32, v10: i32, v11: i32, v12: i32, v13: i32, v14: i32, v15: i32, v16: i32) -> (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32)
+    authored_type = "(i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) -> (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32)"
+    argument[0].authored_type = "i32"
+    argument[1].authored_type = "i32"
+    argument[2].authored_type = "i32"
+    argument[3].authored_type = "i32"
+    argument[4].authored_type = "i32"
+    argument[5].authored_type = "i32"
+    argument[6].authored_type = "i32"
+    argument[7].authored_type = "i32"
+    argument[8].authored_type = "i32"
+    argument[9].authored_type = "i32"
+    argument[10].authored_type = "i32"
+    argument[11].authored_type = "i32"
+    argument[12].authored_type = "i32"
+    argument[13].authored_type = "i32"
+    argument[14].authored_type = "i32"
+    argument[15].authored_type = "i32"
+    argument[16].authored_type = "i32"
+    result[0].authored_type = "i32"
+    result[1].authored_type = "i32"
+    result[2].authored_type = "i32"
+    result[3].authored_type = "i32"
+    result[4].authored_type = "i32"
+    result[5].authored_type = "i32"
+    result[6].authored_type = "i32"
+    result[7].authored_type = "i32"
+    result[8].authored_type = "i32"
+    result[9].authored_type = "i32"
+    result[10].authored_type = "i32"
+    result[11].authored_type = "i32"
+    result[12].authored_type = "i32"
+    result[13].authored_type = "i32"
+    result[14].authored_type = "i32"
+    result[15].authored_type = "i32"
+    result[16].authored_type = "i32"
 functions:
   [0] callable[0] signature[0] bytecode=[0, +16) registers=(17, 0, 0) locals=(0, 0, 0) switch_targets=0
     type = (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) -> (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32)
@@ -49,14 +85,15 @@ func.def public target(@target) @call_add_one(%value: i32) -> (i32) {
 }
 
 // ----
-vm.module "module" core=0.0 bytes=316
+vm.module "module" core=0.0 bytes=400
 requirements:
 sections:
-  [0] strings type=0x0002 flags=0x0000 bytes=[96, +24)
-  [1] signatures type=0x0004 flags=0x0000 bytes=[120, +28)
-  [2] callable_types type=0x0005 flags=0x0000 bytes=[152, +12)
-  [3] exports type=0x0007 flags=0x0000 bytes=[168, +12)
-  [4] functions type=0x0008 flags=0x0000 bytes=[184, +132)
+  [0] strings type=0x0002 flags=0x0000 bytes=[112, +58)
+  [1] signatures type=0x0004 flags=0x0000 bytes=[176, +28)
+  [2] callable_types type=0x0005 flags=0x0000 bytes=[208, +12)
+  [3] exports type=0x0007 flags=0x0000 bytes=[224, +12)
+  [4] functions type=0x0008 flags=0x0000 bytes=[240, +132)
+  [5] presentation type=0x000C flags=0x0001 bytes=[376, +24)
 resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
 module_metadata:
 ref_types:
@@ -64,7 +101,10 @@ callable_types:
   [0] (i32) -> (i32)
 imports:
 exports:
-  [0] @call_add_one -> function[1] : (i32) -> (i32)
+  [0] @call_add_one -> function[1] : (value: i32) -> (i32)
+    authored_type = "(i32) -> (i32)"
+    argument[0].authored_type = "i32"
+    result[0].authored_type = "i32"
 functions:
   [0] callable[0] signature[0] bytecode=[0, +16) registers=(2, 0, 0) locals=(0, 0, 0) switch_targets=0
     type = (i32) -> (i32)
@@ -94,14 +134,15 @@ func.def public target(@target) @call_wide_identity(%value: i32) -> (i32) {
 }
 
 // ----
-vm.module "module" core=0.0 bytes=572
+vm.module "module" core=0.0 bytes=648
 requirements:
 sections:
-  [0] strings type=0x0002 flags=0x0000 bytes=[96, +30)
-  [1] signatures type=0x0004 flags=0x0000 bytes=[128, +180)
-  [2] callable_types type=0x0005 flags=0x0000 bytes=[312, +20)
-  [3] exports type=0x0007 flags=0x0000 bytes=[336, +12)
-  [4] functions type=0x0008 flags=0x0000 bytes=[352, +220)
+  [0] strings type=0x0002 flags=0x0000 bytes=[112, +64)
+  [1] signatures type=0x0004 flags=0x0000 bytes=[176, +180)
+  [2] callable_types type=0x0005 flags=0x0000 bytes=[360, +20)
+  [3] exports type=0x0007 flags=0x0000 bytes=[384, +12)
+  [4] functions type=0x0008 flags=0x0000 bytes=[400, +220)
+  [5] presentation type=0x000C flags=0x0001 bytes=[624, +24)
 resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
 module_metadata:
 ref_types:
@@ -110,7 +151,10 @@ callable_types:
   [1] (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) -> (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32)
 imports:
 exports:
-  [0] @call_wide_identity -> function[1] : (i32) -> (i32)
+  [0] @call_wide_identity -> function[1] : (value: i32) -> (i32)
+    authored_type = "(i32) -> (i32)"
+    argument[0].authored_type = "i32"
+    result[0].authored_type = "i32"
 functions:
   [0] callable[1] signature[1] bytecode=[0, +16) registers=(17, 0, 0) locals=(0, 0, 0) switch_targets=0
     type = (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) -> (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32)
@@ -160,15 +204,16 @@ func.def public target(@target) @call_mixed_identity(%value: i32, %buffer: hal.b
 }
 
 // ----
-vm.module "module" core=0.0 bytes=404
+vm.module "module" core=0.0 bytes=620
 requirements:
 sections:
-  [0] strings type=0x0002 flags=0x0000 bytes=[112, +48)
-  [1] ref_types type=0x0003 flags=0x0000 bytes=[160, +16)
-  [2] signatures type=0x0004 flags=0x0000 bytes=[176, +64)
-  [3] callable_types type=0x0005 flags=0x0000 bytes=[240, +20)
-  [4] exports type=0x0007 flags=0x0000 bytes=[264, +12)
-  [5] functions type=0x0008 flags=0x0000 bytes=[280, +124)
+  [0] strings type=0x0002 flags=0x0000 bytes=[128, +207)
+  [1] ref_types type=0x0003 flags=0x0000 bytes=[336, +16)
+  [2] signatures type=0x0004 flags=0x0000 bytes=[352, +64)
+  [3] callable_types type=0x0005 flags=0x0000 bytes=[416, +20)
+  [4] exports type=0x0007 flags=0x0000 bytes=[440, +12)
+  [5] functions type=0x0008 flags=0x0000 bytes=[456, +124)
+  [6] presentation type=0x000C flags=0x0001 bytes=[584, +36)
 resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
 module_metadata:
 ref_types:
@@ -178,7 +223,13 @@ callable_types:
   [1] (i32, ref<hal, buffer>, func<module:0>) -> (ref<hal, buffer>, func<module:0>)
 imports:
 exports:
-  [0] @call_mixed_identity -> function[1] : (i32, ref<hal, buffer>, func<module:0>) -> (ref<hal, buffer>, func<module:0>)
+  [0] @call_mixed_identity -> function[1] : (value: i32, buffer: ref<hal, buffer>, callback: func<module:0>) -> (ref<hal, buffer>, func<module:0>)
+    authored_type = "(i32, hal.buffer, func.ref<(i32) -> (i32)>) -> (hal.buffer, func.ref<(i32) -> (i32)>)"
+    argument[0].authored_type = "i32"
+    argument[1].authored_type = "hal.buffer"
+    argument[2].authored_type = "func.ref<(i32) -> (i32)>"
+    result[0].authored_type = "hal.buffer"
+    result[1].authored_type = "func.ref<(i32) -> (i32)>"
 functions:
   [0] callable[1] signature[1] bytecode=[0, +8) registers=(1, 1, 1) locals=(0, 0, 0) switch_targets=0
     type = (i32, ref<hal, buffer>, func<module:0>) -> (ref<hal, buffer>, func<module:0>)
@@ -206,15 +257,16 @@ func.def public target(@target) @call_then_return_buffer(%buffer: hal.buffer) ->
 }
 
 // ----
-vm.module "module" core=0.0 bytes=420
+vm.module "module" core=0.0 bytes=512
 requirements:
 sections:
-  [0] strings type=0x0002 flags=0x0000 bytes=[112, +52)
-  [1] ref_types type=0x0003 flags=0x0000 bytes=[168, +16)
-  [2] signatures type=0x0004 flags=0x0000 bytes=[184, +52)
-  [3] callable_types type=0x0005 flags=0x0000 bytes=[240, +20)
-  [4] exports type=0x0007 flags=0x0000 bytes=[264, +12)
-  [5] functions type=0x0008 flags=0x0000 bytes=[280, +140)
+  [0] strings type=0x0002 flags=0x0000 bytes=[128, +98)
+  [1] ref_types type=0x0003 flags=0x0000 bytes=[232, +16)
+  [2] signatures type=0x0004 flags=0x0000 bytes=[248, +52)
+  [3] callable_types type=0x0005 flags=0x0000 bytes=[304, +20)
+  [4] exports type=0x0007 flags=0x0000 bytes=[328, +12)
+  [5] functions type=0x0008 flags=0x0000 bytes=[344, +140)
+  [6] presentation type=0x000C flags=0x0001 bytes=[488, +24)
 resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
 module_metadata:
 ref_types:
@@ -224,7 +276,10 @@ callable_types:
   [1] (ref<hal, buffer>, ref<hal, buffer>) -> ()
 imports:
 exports:
-  [0] @call_then_return_buffer -> function[1] : (ref<hal, buffer>) -> (ref<hal, buffer>)
+  [0] @call_then_return_buffer -> function[1] : (buffer: ref<hal, buffer>) -> (ref<hal, buffer>)
+    authored_type = "(hal.buffer) -> (hal.buffer)"
+    argument[0].authored_type = "hal.buffer"
+    result[0].authored_type = "hal.buffer"
 functions:
   [0] callable[1] signature[1] bytecode=[0, +8) registers=(0, 2, 0) locals=(0, 0, 0) switch_targets=0
     type = (ref<hal, buffer>, ref<hal, buffer>) -> ()
@@ -256,15 +311,16 @@ func.def public target(@target) @call_wide_ref_identity(%r0: hal.buffer, %r1: ha
 }
 
 // ----
-vm.module "module" core=0.0 bytes=620
+vm.module "module" core=0.0 bytes=1072
 requirements:
 sections:
-  [0] strings type=0x0002 flags=0x0000 bytes=[112, +51)
-  [1] ref_types type=0x0003 flags=0x0000 bytes=[168, +16)
-  [2] signatures type=0x0004 flags=0x0000 bytes=[184, +244)
-  [3] callable_types type=0x0005 flags=0x0000 bytes=[432, +20)
-  [4] exports type=0x0007 flags=0x0000 bytes=[456, +12)
-  [5] functions type=0x0008 flags=0x0000 bytes=[472, +148)
+  [0] strings type=0x0002 flags=0x0000 bytes=[128, +398)
+  [1] ref_types type=0x0003 flags=0x0000 bytes=[528, +16)
+  [2] signatures type=0x0004 flags=0x0000 bytes=[544, +244)
+  [3] callable_types type=0x0005 flags=0x0000 bytes=[792, +20)
+  [4] exports type=0x0007 flags=0x0000 bytes=[816, +12)
+  [5] functions type=0x0008 flags=0x0000 bytes=[832, +148)
+  [6] presentation type=0x000C flags=0x0001 bytes=[984, +88)
 resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
 module_metadata:
 ref_types:
@@ -274,7 +330,26 @@ callable_types:
   [1] (ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>) -> (ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>)
 imports:
 exports:
-  [0] @call_wide_ref_identity -> function[1] : (ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>) -> (ref<hal, buffer>)
+  [0] @call_wide_ref_identity -> function[1] : (r0: ref<hal, buffer>, r1: ref<hal, buffer>, r2: ref<hal, buffer>, r3: ref<hal, buffer>, r4: ref<hal, buffer>, r5: ref<hal, buffer>, r6: ref<hal, buffer>, r7: ref<hal, buffer>, r8: ref<hal, buffer>, r9: ref<hal, buffer>, r10: ref<hal, buffer>, r11: ref<hal, buffer>, r12: ref<hal, buffer>, r13: ref<hal, buffer>, r14: ref<hal, buffer>, r15: ref<hal, buffer>, r16: ref<hal, buffer>) -> (ref<hal, buffer>)
+    authored_type = "(hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (hal.buffer)"
+    argument[0].authored_type = "hal.buffer"
+    argument[1].authored_type = "hal.buffer"
+    argument[2].authored_type = "hal.buffer"
+    argument[3].authored_type = "hal.buffer"
+    argument[4].authored_type = "hal.buffer"
+    argument[5].authored_type = "hal.buffer"
+    argument[6].authored_type = "hal.buffer"
+    argument[7].authored_type = "hal.buffer"
+    argument[8].authored_type = "hal.buffer"
+    argument[9].authored_type = "hal.buffer"
+    argument[10].authored_type = "hal.buffer"
+    argument[11].authored_type = "hal.buffer"
+    argument[12].authored_type = "hal.buffer"
+    argument[13].authored_type = "hal.buffer"
+    argument[14].authored_type = "hal.buffer"
+    argument[15].authored_type = "hal.buffer"
+    argument[16].authored_type = "hal.buffer"
+    result[0].authored_type = "hal.buffer"
 functions:
   [0] callable[1] signature[1] bytecode=[0, +16) registers=(0, 17, 0) locals=(0, 0, 0) switch_targets=0
     type = (ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>) -> (ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>)
@@ -308,14 +383,15 @@ func.def public target(@target) @call_wide_function_identity(%callback: func.ref
 }
 
 // ----
-vm.module "module" core=0.0 bytes=604
+vm.module "module" core=0.0 bytes=752
 requirements:
 sections:
-  [0] strings type=0x0002 flags=0x0000 bytes=[96, +39)
-  [1] signatures type=0x0004 flags=0x0000 bytes=[136, +204)
-  [2] callable_types type=0x0005 flags=0x0000 bytes=[344, +28)
-  [3] exports type=0x0007 flags=0x0000 bytes=[376, +12)
-  [4] functions type=0x0008 flags=0x0000 bytes=[392, +212)
+  [0] strings type=0x0002 flags=0x0000 bytes=[112, +139)
+  [1] signatures type=0x0004 flags=0x0000 bytes=[256, +204)
+  [2] callable_types type=0x0005 flags=0x0000 bytes=[464, +28)
+  [3] exports type=0x0007 flags=0x0000 bytes=[496, +12)
+  [4] functions type=0x0008 flags=0x0000 bytes=[512, +212)
+  [5] presentation type=0x000C flags=0x0001 bytes=[728, +24)
 resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
 module_metadata:
 ref_types:
@@ -325,7 +401,10 @@ callable_types:
   [2] (func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>) -> (func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>)
 imports:
 exports:
-  [0] @call_wide_function_identity -> function[1] : (func<module:0>) -> (func<module:0>)
+  [0] @call_wide_function_identity -> function[1] : (callback: func<module:0>) -> (func<module:0>)
+    authored_type = "(func.ref<(i32) -> (i32)>) -> (func.ref<(i32) -> (i32)>)"
+    argument[0].authored_type = "func.ref<(i32) -> (i32)>"
+    result[0].authored_type = "func.ref<(i32) -> (i32)>"
 functions:
   [0] callable[2] signature[2] bytecode=[0, +16) registers=(0, 0, 17) locals=(0, 0, 0) switch_targets=0
     type = (func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>) -> (func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>)
@@ -358,3 +437,40 @@ functions:
     +0084  func.stack.load dst_f8=16 local_ordinal_u16=1
     +0088  func.copy dst_f8=0 src_f8=16
     +0092  control.return
+
+// ====
+
+// RUN: emit vm-dis
+
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({result_names = {f00000 = "output"}, signature = type<(reg<vm.value : i32>) -> (reg<vm.value : i32>)>}) export("authored_low") @authored_low(%value: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+  return %value
+}
+
+// ----
+vm.module "module" core=0.0 bytes=336
+requirements:
+sections:
+  [0] strings type=0x0002 flags=0x0000 bytes=[112, +68)
+  [1] signatures type=0x0004 flags=0x0000 bytes=[184, +28)
+  [2] callable_types type=0x0005 flags=0x0000 bytes=[216, +12)
+  [3] exports type=0x0007 flags=0x0000 bytes=[232, +12)
+  [4] functions type=0x0008 flags=0x0000 bytes=[248, +60)
+  [5] presentation type=0x000C flags=0x0001 bytes=[312, +24)
+resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
+module_metadata:
+ref_types:
+callable_types:
+  [0] (i32) -> (i32)
+imports:
+exports:
+  [0] @authored_low -> function[0] : (value: i32) -> (output: i32)
+    authored_type = "(i32) -> (i32)"
+    argument[0].authored_type = "i32"
+    result[0].authored_type = "i32"
+functions:
+  [0] callable[0] signature[0] bytecode=[0, +8) registers=(1, 0, 0) locals=(0, 0, 0) switch_targets=0
+    type = (i32) -> (i32)
+    +0000  control.block
+    +0004  control.return

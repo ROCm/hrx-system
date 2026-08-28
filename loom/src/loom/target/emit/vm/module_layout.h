@@ -12,6 +12,7 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "loom/ir/ir.h"
+#include "loom/target/emit/vm/module_presentation.h"
 #include "loom/target/emit/vm/module_resources.h"
 #include "loom/target/emit/vm/module_types.h"
 
@@ -76,8 +77,8 @@ typedef struct loom_vm_module_import_layout_t {
 
 // One canonical target-module group in import-table order.
 typedef struct loom_vm_module_import_group_layout_t {
-  // String-table ordinal of the target-module name.
-  uint16_t module_name_string_ordinal;
+  // First canonical import in this target-module group.
+  loom_vm_module_import_layout_t* first_import;
   // Number of canonical import entries in the group.
   uint32_t import_count;
 } loom_vm_module_import_group_layout_t;
@@ -112,6 +113,8 @@ struct loom_vm_module_layout_t {
   loom_vm_module_type_tables_t type_tables;
   // Canonical physical global and read-only data layout.
   loom_vm_module_resource_layout_t resources;
+  // Optional public declaration presentation.
+  loom_vm_module_presentation_layout_t presentation;
   // Aggregate switch-target entries across all functions.
   uint32_t switch_target_entry_count;
 };

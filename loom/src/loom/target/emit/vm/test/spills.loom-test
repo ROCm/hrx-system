@@ -243,14 +243,15 @@ func.def public target(@target) @call_with_spill(%keep: i32, %value: i32) -> (i3
 }
 
 // ----
-vm.module "module" core=0.0 bytes=504
+vm.module "module" core=0.0 bytes=596
 requirements:
 sections:
-  [0] strings type=0x0002 flags=0x0000 bytes=[96, +27)
-  [1] signatures type=0x0004 flags=0x0000 bytes=[128, +116)
-  [2] callable_types type=0x0005 flags=0x0000 bytes=[248, +20)
-  [3] exports type=0x0007 flags=0x0000 bytes=[272, +12)
-  [4] functions type=0x0008 flags=0x0000 bytes=[288, +216)
+  [0] strings type=0x0002 flags=0x0000 bytes=[112, +74)
+  [1] signatures type=0x0004 flags=0x0000 bytes=[192, +116)
+  [2] callable_types type=0x0005 flags=0x0000 bytes=[312, +20)
+  [3] exports type=0x0007 flags=0x0000 bytes=[336, +12)
+  [4] functions type=0x0008 flags=0x0000 bytes=[352, +216)
+  [5] presentation type=0x000C flags=0x0001 bytes=[568, +28)
 resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
 module_metadata:
 ref_types:
@@ -259,7 +260,11 @@ callable_types:
   [1] (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) -> ()
 imports:
 exports:
-  [0] @call_with_spill -> function[1] : (i32, i32) -> (i32)
+  [0] @call_with_spill -> function[1] : (keep: i32, value: i32) -> (i32)
+    authored_type = "(i32, i32) -> (i32)"
+    argument[0].authored_type = "i32"
+    argument[1].authored_type = "i32"
+    result[0].authored_type = "i32"
 functions:
   [0] callable[1] signature[1] bytecode=[0, +8) registers=(17, 0, 0) locals=(0, 0, 0) switch_targets=0
     type = (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) -> ()

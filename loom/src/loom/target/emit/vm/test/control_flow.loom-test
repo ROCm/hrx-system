@@ -11,14 +11,15 @@ func.def public target(@target) @conditional_return(%condition: i1, %true_value:
 }
 
 // ----
-vm.module "module" core=0.0 bytes=284
+vm.module "module" core=0.0 bytes=416
 requirements:
 sections:
-  [0] strings type=0x0002 flags=0x0000 bytes=[96, +30)
-  [1] signatures type=0x0004 flags=0x0000 bytes=[128, +36)
-  [2] callable_types type=0x0005 flags=0x0000 bytes=[168, +12)
-  [3] exports type=0x0007 flags=0x0000 bytes=[184, +12)
-  [4] functions type=0x0008 flags=0x0000 bytes=[200, +84)
+  [0] strings type=0x0002 flags=0x0000 bytes=[112, +112)
+  [1] signatures type=0x0004 flags=0x0000 bytes=[224, +36)
+  [2] callable_types type=0x0005 flags=0x0000 bytes=[264, +12)
+  [3] exports type=0x0007 flags=0x0000 bytes=[280, +12)
+  [4] functions type=0x0008 flags=0x0000 bytes=[296, +84)
+  [5] presentation type=0x000C flags=0x0001 bytes=[384, +32)
 resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
 module_metadata:
 ref_types:
@@ -26,7 +27,12 @@ callable_types:
   [0] (i8, i32, i32) -> (i32)
 imports:
 exports:
-  [0] @conditional_return -> function[0] : (i8, i32, i32) -> (i32)
+  [0] @conditional_return -> function[0] : (condition: i8, true_value: i32, false_value: i32) -> (i32)
+    authored_type = "(i1, i32, i32) -> (i32)"
+    argument[0].authored_type = "i1"
+    argument[1].authored_type = "i32"
+    argument[2].authored_type = "i32"
+    result[0].authored_type = "i32"
 functions:
   [0] callable[0] signature[0] bytecode=[0, +32) registers=(3, 0, 0) locals=(0, 0, 0) switch_targets=0
     type = (i8, i32, i32) -> (i32)
@@ -151,14 +157,15 @@ func.def public target(@target) @switch_negative(%selector: index, %negative2: i
 }
 
 // ----
-vm.module "module" core=0.0 bytes=496
+vm.module "module" core=0.0 bytes=732
 requirements:
 sections:
-  [0] strings type=0x0002 flags=0x0000 bytes=[96, +47)
-  [1] signatures type=0x0004 flags=0x0000 bytes=[144, +44)
-  [2] callable_types type=0x0005 flags=0x0000 bytes=[192, +12)
-  [3] exports type=0x0007 flags=0x0000 bytes=[208, +20)
-  [4] functions type=0x0008 flags=0x0000 bytes=[232, +264)
+  [0] strings type=0x0002 flags=0x0000 bytes=[112, +188)
+  [1] signatures type=0x0004 flags=0x0000 bytes=[304, +44)
+  [2] callable_types type=0x0005 flags=0x0000 bytes=[352, +12)
+  [3] exports type=0x0007 flags=0x0000 bytes=[368, +20)
+  [4] functions type=0x0008 flags=0x0000 bytes=[392, +264)
+  [5] presentation type=0x000C flags=0x0001 bytes=[656, +76)
 resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
 module_metadata:
 ref_types:
@@ -166,8 +173,22 @@ callable_types:
   [0] (i64, i32, i32, i32, i32) -> (i32)
 imports:
 exports:
-  [0] @switch_negative -> function[1] : (i64, i32, i32, i32, i32) -> (i32)
-  [1] @switch_with_hole -> function[0] : (i64, i32, i32, i32, i32) -> (i32)
+  [0] @switch_negative -> function[1] : (selector: i64, negative2: i32, negative1: i32, zero: i32, fallback: i32) -> (i32)
+    authored_type = "(index, i32, i32, i32, i32) -> (i32)"
+    argument[0].authored_type = "index"
+    argument[1].authored_type = "i32"
+    argument[2].authored_type = "i32"
+    argument[3].authored_type = "i32"
+    argument[4].authored_type = "i32"
+    result[0].authored_type = "i32"
+  [1] @switch_with_hole -> function[0] : (selector: i64, case0: i32, case1: i32, case3: i32, fallback: i32) -> (i32)
+    authored_type = "(index, i32, i32, i32, i32) -> (i32)"
+    argument[0].authored_type = "index"
+    argument[1].authored_type = "i32"
+    argument[2].authored_type = "i32"
+    argument[3].authored_type = "i32"
+    argument[4].authored_type = "i32"
+    result[0].authored_type = "i32"
 functions:
   [0] callable[0] signature[0] bytecode=[0, +64) registers=(5, 0, 0) locals=(0, 0, 0) switch_targets=4
     type = (i64, i32, i32, i32, i32) -> (i32)
@@ -225,15 +246,16 @@ func.def public target(@target) @assert_then_fail(%condition: i1, %message: buff
 }
 
 // ----
-vm.module "module" core=0.0 bytes=304
+vm.module "module" core=0.0 bytes=392
 requirements:
 sections:
-  [0] strings type=0x0002 flags=0x0000 bytes=[112, +44)
-  [1] ref_types type=0x0003 flags=0x0000 bytes=[160, +16)
-  [2] signatures type=0x0004 flags=0x0000 bytes=[176, +28)
-  [3] callable_types type=0x0005 flags=0x0000 bytes=[208, +12)
-  [4] exports type=0x0007 flags=0x0000 bytes=[224, +12)
-  [5] functions type=0x0008 flags=0x0000 bytes=[240, +64)
+  [0] strings type=0x0002 flags=0x0000 bytes=[128, +96)
+  [1] ref_types type=0x0003 flags=0x0000 bytes=[224, +16)
+  [2] signatures type=0x0004 flags=0x0000 bytes=[240, +28)
+  [3] callable_types type=0x0005 flags=0x0000 bytes=[272, +12)
+  [4] exports type=0x0007 flags=0x0000 bytes=[288, +12)
+  [5] functions type=0x0008 flags=0x0000 bytes=[304, +64)
+  [6] presentation type=0x000C flags=0x0001 bytes=[368, +24)
 resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
 module_metadata:
 ref_types:
@@ -242,7 +264,10 @@ callable_types:
   [0] (i8, ref<vm, buffer>) -> ()
 imports:
 exports:
-  [0] @assert_then_fail -> function[0] : (i8, ref<vm, buffer>) -> ()
+  [0] @assert_then_fail -> function[0] : (condition: i8, message: ref<vm, buffer>) -> ()
+    authored_type = "(i1, buffer) -> ()"
+    argument[0].authored_type = "i1"
+    argument[1].authored_type = "buffer"
 functions:
   [0] callable[0] signature[0] bytecode=[0, +12) registers=(1, 1, 0) locals=(0, 0, 0) switch_targets=0
     type = (i8, ref<vm, buffer>) -> ()

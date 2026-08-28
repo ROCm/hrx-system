@@ -738,9 +738,10 @@ static iree_status_t loom_vm_module_callable_type_lookup_build(
   return iree_ok_status();
 }
 
-static bool loom_vm_module_string_ordinal_find(
+bool loom_vm_module_type_tables_try_resolve_string_ordinal(
     const loom_vm_module_type_tables_t* tables, iree_string_view_t value,
     uint16_t* out_ordinal) {
+  *out_ordinal = UINT16_MAX;
   iree_host_size_t low = 0;
   iree_host_size_t high = tables->string_count;
   while (low < high) {
@@ -759,41 +760,91 @@ static bool loom_vm_module_string_ordinal_find(
   return false;
 }
 
+static bool loom_vm_module_string_candidate_present(iree_string_view_t value) {
+  return !iree_string_view_is_empty(value);
+}
+
+static bool loom_vm_module_string_candidate_count(
+    iree_string_view_t value, iree_host_size_t* inout_count) {
+  if (!loom_vm_module_string_candidate_present(value)) return true;
+  return iree_host_size_checked_add(*inout_count, 1, inout_count);
+}
+
 static iree_status_t loom_vm_module_strings_build(
-    const loom_vm_module_type_build_t* build, loom_vm_module_layout_t* layout) {
+    iree_arena_allocator_t* arena, loom_vm_module_layout_t* layout) {
   iree_host_size_t string_capacity = layout->export_count;
-  if (!iree_host_size_checked_add(string_capacity,
-                                  layout->import_declaration_count,
+  if (!iree_host_size_checked_add(string_capacity, layout->import_count,
+                                  &string_capacity) ||
+      !iree_host_size_checked_add(string_capacity, layout->import_count,
                                   &string_capacity) ||
       !iree_host_size_checked_add(string_capacity,
-                                  layout->import_declaration_count,
+                                  layout->type_tables.ref_type_group_count,
                                   &string_capacity) ||
-      !iree_host_size_checked_add(string_capacity, build->ref_type_count,
-                                  &string_capacity) ||
-      !iree_host_size_checked_add(string_capacity, build->ref_type_count,
+      !iree_host_size_checked_add(string_capacity,
+                                  layout->type_tables.ref_type_entry_count,
                                   &string_capacity)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "VM string candidate count exceeds host size");
+  }
+  for (uint32_t i = 0; i < layout->presentation.entry_count; ++i) {
+    const loom_vm_module_presentation_entry_layout_t* entry =
+        &layout->presentation.entries[i];
+    if (!loom_vm_module_string_candidate_count(entry->documentation,
+                                               &string_capacity) ||
+        !loom_vm_module_string_candidate_count(entry->authored_type,
+                                               &string_capacity)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "VM string candidate count exceeds host size");
+    }
+  }
+  for (uint32_t i = 0; i < layout->presentation.field_count; ++i) {
+    const loom_vm_module_presentation_field_layout_t* field =
+        &layout->presentation.fields[i];
+    if (!loom_vm_module_string_candidate_count(field->name, &string_capacity) ||
+        !loom_vm_module_string_candidate_count(field->authored_type,
+                                               &string_capacity)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "VM string candidate count exceeds host size");
+    }
   }
   if (string_capacity == 0) return iree_ok_status();
 
   iree_string_view_t* strings = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      build->arena, string_capacity, sizeof(*strings), (void**)&strings));
+      arena, string_capacity, sizeof(*strings), (void**)&strings));
   iree_host_size_t string_count = 0;
-  for (iree_host_size_t i = 0; i < layout->function_count; ++i) {
-    const iree_string_view_t export_name = layout->functions[i].export_name;
-    if (!iree_string_view_is_empty(export_name)) {
-      strings[string_count++] = export_name;
+  for (iree_host_size_t i = 0; i < layout->export_count; ++i) {
+    strings[string_count++] = layout->exports[i]->export_name;
+  }
+  for (iree_host_size_t i = 0; i < layout->import_count; ++i) {
+    strings[string_count++] = layout->imports[i]->module_name;
+    strings[string_count++] = layout->imports[i]->symbol_name;
+  }
+  for (uint32_t i = 0; i < layout->type_tables.ref_type_group_count; ++i) {
+    strings[string_count++] = layout->type_tables.ref_type_group_names[i];
+  }
+  for (uint32_t i = 0; i < layout->type_tables.ref_type_entry_count; ++i) {
+    strings[string_count++] = layout->type_tables.ref_type_entry_names[i];
+  }
+  for (uint32_t i = 0; i < layout->presentation.entry_count; ++i) {
+    const loom_vm_module_presentation_entry_layout_t* entry =
+        &layout->presentation.entries[i];
+    if (loom_vm_module_string_candidate_present(entry->documentation)) {
+      strings[string_count++] = entry->documentation;
+    }
+    if (loom_vm_module_string_candidate_present(entry->authored_type)) {
+      strings[string_count++] = entry->authored_type;
     }
   }
-  for (iree_host_size_t i = 0; i < layout->import_declaration_count; ++i) {
-    strings[string_count++] = layout->import_declarations[i].module_name;
-    strings[string_count++] = layout->import_declarations[i].symbol_name;
-  }
-  for (iree_host_size_t i = 0; i < build->ref_type_count; ++i) {
-    strings[string_count++] = build->ref_type_order[i]->namespace_name;
-    strings[string_count++] = build->ref_type_order[i]->type_name;
+  for (uint32_t i = 0; i < layout->presentation.field_count; ++i) {
+    const loom_vm_module_presentation_field_layout_t* field =
+        &layout->presentation.fields[i];
+    if (loom_vm_module_string_candidate_present(field->name)) {
+      strings[string_count++] = field->name;
+    }
+    if (loom_vm_module_string_candidate_present(field->authored_type)) {
+      strings[string_count++] = field->authored_type;
+    }
   }
   IREE_ASSERT_EQ(string_count, string_capacity);
 
@@ -840,8 +891,15 @@ static iree_status_t loom_vm_module_ref_type_rows_build(
       build->arena, group_count, sizeof(*tables->ref_type_groups),
       (void**)&tables->ref_type_groups));
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      build->arena, group_count, sizeof(*tables->ref_type_group_names),
+      (void**)&tables->ref_type_group_names));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       build->arena, build->ref_type_count, sizeof(*tables->ref_type_entries),
       (void**)&tables->ref_type_entries));
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(build->arena, build->ref_type_count,
+                                sizeof(*tables->ref_type_entry_names),
+                                (void**)&tables->ref_type_entry_names));
   tables->ref_type_group_count = (uint32_t)group_count;
   tables->ref_type_entry_count = (uint32_t)build->ref_type_count;
 
@@ -857,28 +915,18 @@ static iree_status_t loom_vm_module_ref_type_rows_build(
             namespace_name, build->ref_type_order[group_end]->namespace_name)) {
       ++group_end;
     }
-    uint16_t namespace_ordinal = 0;
-    if (!loom_vm_module_string_ordinal_find(tables, namespace_name,
-                                            &namespace_ordinal)) {
-      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                              "VM ref-type namespace is missing from strings");
-    }
+    tables->ref_type_group_names[group_index] = namespace_name;
     tables->ref_type_groups[group_index++] =
         (iree_vm_bytecode_v0_ref_type_group_row_t){
-            .namespace_string_u16 = namespace_ordinal,
+            .namespace_string_u16 = UINT16_MAX,
             .entry_count_u32 = (uint32_t)(group_end - entry_index),
         };
     while (entry_index < group_end) {
-      uint16_t type_name_ordinal = 0;
-      if (!loom_vm_module_string_ordinal_find(
-              tables, build->ref_type_order[entry_index]->type_name,
-              &type_name_ordinal)) {
-        return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                                "VM ref-type name is missing from strings");
-      }
+      tables->ref_type_entry_names[entry_index] =
+          build->ref_type_order[entry_index]->type_name;
       tables->ref_type_entries[entry_index] =
           (iree_vm_bytecode_v0_ref_type_entry_row_t){
-              .type_name_string_u16 = type_name_ordinal,
+              .type_name_string_u16 = UINT16_MAX,
           };
       ++entry_index;
     }
@@ -887,42 +935,63 @@ static iree_status_t loom_vm_module_ref_type_rows_build(
   return iree_ok_status();
 }
 
-static iree_status_t loom_vm_module_root_ordinals_assign(
+static void loom_vm_module_root_callable_ordinals_assign(
     loom_vm_module_callable_type_build_t* const* root_callables,
     loom_vm_module_layout_t* layout) {
   for (iree_host_size_t i = 0; i < layout->function_count; ++i) {
     loom_vm_module_function_layout_t* function = &layout->functions[i];
     function->callable_type_ordinal = root_callables[i]->ordinal;
-    function->export_name_string_ordinal = UINT16_MAX;
-    if (!iree_string_view_is_empty(function->export_name) &&
-        !loom_vm_module_string_ordinal_find(
-            &layout->type_tables, function->export_name,
-            &function->export_name_string_ordinal)) {
-      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                              "VM export name is missing from strings");
-    }
   }
   for (iree_host_size_t i = 0; i < layout->import_declaration_count; ++i) {
     loom_vm_module_import_layout_t* import = &layout->import_declarations[i];
     import->callable_type_ordinal =
         root_callables[layout->function_count + i]->ordinal;
-    if (!loom_vm_module_string_ordinal_find(
-            &layout->type_tables, import->module_name,
-            &import->module_name_string_ordinal)) {
-      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                              "VM import module is missing from strings");
-    }
-    if (!loom_vm_module_string_ordinal_find(
-            &layout->type_tables, import->symbol_name,
-            &import->symbol_name_string_ordinal)) {
-      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                              "VM import symbol is missing from strings");
-    }
   }
-  return iree_ok_status();
 }
 
-iree_status_t loom_vm_module_type_tables_build(
+static void loom_vm_module_ref_type_string_ordinals_assign(
+    loom_vm_module_type_tables_t* tables) {
+  for (uint32_t i = 0; i < tables->ref_type_group_count; ++i) {
+    const bool resolved = loom_vm_module_type_tables_try_resolve_string_ordinal(
+        tables, tables->ref_type_group_names[i],
+        &tables->ref_type_groups[i].namespace_string_u16);
+    IREE_ASSERT(resolved);
+  }
+  for (uint32_t i = 0; i < tables->ref_type_entry_count; ++i) {
+    const bool resolved = loom_vm_module_type_tables_try_resolve_string_ordinal(
+        tables, tables->ref_type_entry_names[i],
+        &tables->ref_type_entries[i].type_name_string_u16);
+    IREE_ASSERT(resolved);
+  }
+}
+
+static void loom_vm_module_root_string_ordinals_assign(
+    loom_vm_module_layout_t* layout) {
+  for (iree_host_size_t i = 0; i < layout->function_count; ++i) {
+    loom_vm_module_function_layout_t* function = &layout->functions[i];
+    function->export_name_string_ordinal = UINT16_MAX;
+    if (!iree_string_view_is_empty(function->export_name)) {
+      const bool resolved =
+          loom_vm_module_type_tables_try_resolve_string_ordinal(
+              &layout->type_tables, function->export_name,
+              &function->export_name_string_ordinal);
+      IREE_ASSERT(resolved);
+    }
+  }
+  for (iree_host_size_t i = 0; i < layout->import_declaration_count; ++i) {
+    loom_vm_module_import_layout_t* import = &layout->import_declarations[i];
+    bool resolved = loom_vm_module_type_tables_try_resolve_string_ordinal(
+        &layout->type_tables, import->module_name,
+        &import->module_name_string_ordinal);
+    IREE_ASSERT(resolved);
+    resolved = loom_vm_module_type_tables_try_resolve_string_ordinal(
+        &layout->type_tables, import->symbol_name,
+        &import->symbol_name_string_ordinal);
+    IREE_ASSERT(resolved);
+  }
+}
+
+iree_status_t loom_vm_module_type_tables_build_structure(
     iree_arena_allocator_t* arena, loom_vm_module_layout_t* layout) {
   layout->type_tables = (loom_vm_module_type_tables_t){0};
   loom_vm_module_type_capacities_t capacities;
@@ -1005,10 +1074,19 @@ iree_status_t loom_vm_module_type_tables_build(
       &build, ref_global_types, function_global_types, layout));
   IREE_RETURN_IF_ERROR(
       loom_vm_module_callable_type_lookup_build(&build, &layout->type_tables));
-  IREE_RETURN_IF_ERROR(loom_vm_module_strings_build(&build, layout));
   IREE_RETURN_IF_ERROR(
       loom_vm_module_ref_type_rows_build(&build, &layout->type_tables));
-  return loom_vm_module_root_ordinals_assign(root_callables, layout);
+  loom_vm_module_root_callable_ordinals_assign(root_callables, layout);
+  return iree_ok_status();
+}
+
+iree_status_t loom_vm_module_type_tables_build_strings(
+    iree_arena_allocator_t* arena, loom_vm_module_layout_t* layout) {
+  IREE_RETURN_IF_ERROR(loom_vm_module_strings_build(arena, layout));
+  loom_vm_module_ref_type_string_ordinals_assign(&layout->type_tables);
+  loom_vm_module_root_string_ordinals_assign(layout);
+  loom_vm_module_presentation_resolve_string_ordinals(layout);
+  return iree_ok_status();
 }
 
 bool loom_vm_module_type_tables_try_resolve_callable_ordinal(

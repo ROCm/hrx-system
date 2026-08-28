@@ -20,6 +20,7 @@ loom_cc_library(
     "function_locals.h"
     "module_emitter.h"
     "module_layout.h"
+    "module_presentation.h"
     "module_resources.h"
     "module_types.h"
   SRCS
@@ -30,6 +31,7 @@ loom_cc_library(
     "function_locals.c"
     "module_emitter.c"
     "module_layout.c"
+    "module_presentation.c"
     "module_resources.c"
     "module_types.c"
   DEPS
@@ -48,6 +50,7 @@ loom_cc_library(
     loom::codegen::low::target_binding
     loom::error::emitter
     loom::format::bytecode::writer::encoder
+    loom::format::text::printer
     loom::ir
     loom::ops::func
     loom::ops::global
@@ -62,6 +65,7 @@ loom_cc_library(
     loom::target::provider
     loom::target::registers
     loom::util::call_graph
+    loom::util::stream
   PUBLIC
 )
 

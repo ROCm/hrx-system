@@ -478,14 +478,42 @@ static iree_status_t loom_vm_call_abi_materialize_function(
 
 static iree_status_t loom_vm_call_abi_preserve_logical_signature(
     loom_rewriter_t* rewriter, loom_func_like_t function) {
-  if (loom_low_func_def_abi_layout(function.op).count != 0) {
-    return iree_ok_status();
-  }
-
   uint16_t argument_count = 0;
   const loom_value_id_t* arguments =
       loom_func_like_arg_ids(function, &argument_count);
   const loom_value_slice_t results = loom_low_func_def_results(function.op);
+  const loom_symbol_ref_t function_ref = loom_func_like_callee(function);
+  const bool has_presentation =
+      loom_symbol_ref_is_valid(function_ref) && function_ref.module_id == 0 &&
+      function_ref.symbol_id < rewriter->module->symbols.count &&
+      !iree_string_view_is_empty(loom_func_like_export_name(
+          rewriter->module,
+          &rewriter->module->symbols.entries[function_ref.symbol_id],
+          function));
+
+  const loom_named_attr_slice_t abi_layout =
+      loom_low_func_def_abi_layout(function.op);
+  if (abi_layout.count != 0) {
+    if (!has_presentation) return iree_ok_status();
+    bool layout_changed = false;
+    loom_attribute_t layout_attr = loom_attr_absent();
+    IREE_RETURN_IF_ERROR(loom_vm_call_abi_layout_preserve_presentation_names(
+        rewriter->module, abi_layout,
+        (loom_vm_call_abi_source_fields_t){
+            .values = arguments,
+            .count = argument_count,
+        },
+        (loom_vm_call_abi_source_fields_t){
+            .values = results.values,
+            .count = results.count,
+        },
+        rewriter->arena, &layout_changed, &layout_attr));
+    if (!layout_changed) return iree_ok_status();
+    return loom_rewriter_set_attr(rewriter, function.op,
+                                  loom_low_func_def_abi_layout_ATTR_INDEX,
+                                  layout_attr);
+  }
+
   iree_host_size_t type_count = 0;
   if (!iree_host_size_checked_add(argument_count, results.count, &type_count)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
@@ -508,8 +536,18 @@ static iree_status_t loom_vm_call_abi_preserve_logical_signature(
   const loom_type_t* result_types =
       results.count != 0 ? types + argument_count : NULL;
   IREE_RETURN_IF_ERROR(loom_vm_call_abi_layout_make_attr(
-      rewriter->module, types, argument_count, result_types, results.count,
-      &layout_attr));
+      rewriter->module,
+      (loom_vm_call_abi_source_fields_t){
+          .types = types,
+          .values = has_presentation ? arguments : NULL,
+          .count = argument_count,
+      },
+      (loom_vm_call_abi_source_fields_t){
+          .types = result_types,
+          .values = has_presentation ? results.values : NULL,
+          .count = results.count,
+      },
+      rewriter->arena, &layout_attr));
   return loom_rewriter_set_attr(rewriter, function.op,
                                 loom_low_func_def_abi_layout_ATTR_INDEX,
                                 layout_attr);

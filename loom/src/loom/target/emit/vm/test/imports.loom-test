@@ -14,26 +14,39 @@ func.def public target(@target) @call_imports(%value: i32) -> (i32) {
 }
 
 // ----
-vm.module "module" core=0.0 bytes=380
+vm.module "module" core=0.0 bytes=516
 requirements:
 sections:
-  [0] strings type=0x0002 flags=0x0000 bytes=[112, +67)
-  [1] signatures type=0x0004 flags=0x0000 bytes=[184, +28)
-  [2] callable_types type=0x0005 flags=0x0000 bytes=[216, +12)
-  [3] imports type=0x0006 flags=0x0000 bytes=[232, +44)
-  [4] exports type=0x0007 flags=0x0000 bytes=[280, +12)
-  [5] functions type=0x0008 flags=0x0000 bytes=[296, +84)
+  [0] strings type=0x0002 flags=0x0000 bytes=[128, +101)
+  [1] signatures type=0x0004 flags=0x0000 bytes=[232, +28)
+  [2] callable_types type=0x0005 flags=0x0000 bytes=[264, +12)
+  [3] imports type=0x0006 flags=0x0000 bytes=[280, +44)
+  [4] exports type=0x0007 flags=0x0000 bytes=[328, +12)
+  [5] functions type=0x0008 flags=0x0000 bytes=[344, +84)
+  [6] presentation type=0x000C flags=0x0001 bytes=[432, +84)
 resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
 module_metadata:
 ref_types:
 callable_types:
   [0] (i32) -> (i32)
 imports:
-  [0] @alpha::compute : (i32) -> (i32)
-  [1] @alpha::try_compute : (i32) -> (i32) optional
-  [2] @zeta::compute : (i32) -> (i32)
+  [0] @alpha::compute : (value: i32) -> (i32)
+    authored_type = "(i32) -> (i32)"
+    argument[0].authored_type = "i32"
+    result[0].authored_type = "i32"
+  [1] @alpha::try_compute : (value: i32) -> (i32) optional
+    authored_type = "(i32) -> (i32)"
+    argument[0].authored_type = "i32"
+    result[0].authored_type = "i32"
+  [2] @zeta::compute : (value: i32) -> (i32)
+    authored_type = "(i32) -> (i32)"
+    argument[0].authored_type = "i32"
+    result[0].authored_type = "i32"
 exports:
-  [0] @call_imports -> function[0] : (i32) -> (i32)
+  [0] @call_imports -> function[0] : (value: i32) -> (i32)
+    authored_type = "(i32) -> (i32)"
+    argument[0].authored_type = "i32"
+    result[0].authored_type = "i32"
 functions:
   [0] callable[0] signature[0] bytecode=[0, +32) registers=(1, 0, 0) locals=(0, 0, 0) switch_targets=0 has_call
     type = (i32) -> (i32)
@@ -49,8 +62,8 @@ functions:
 
 vm.target<core> @target
 
-func.decl import("math", "identity") target(@target) @identity_a(%value: i32) -> (i32)
-func.decl import("math", "identity") target(@target) @identity_b(%value: i32) -> (i32)
+func.decl import("math", "identity") target(@target) @identity_a(%first: i32) -> (i32)
+func.decl import("math", "identity") target(@target) @identity_b(%second: i32) -> (i32)
 
 func.def public target(@target) @call_aliases(%value: i32) -> (i32) {
   %a = func.call @identity_a(%value) : (i32) -> (i32)
@@ -59,24 +72,31 @@ func.def public target(@target) @call_aliases(%value: i32) -> (i32) {
 }
 
 // ----
-vm.module "module" core=0.0 bytes=324
+vm.module "module" core=0.0 bytes=428
 requirements:
 sections:
-  [0] strings type=0x0002 flags=0x0000 bytes=[112, +44)
-  [1] signatures type=0x0004 flags=0x0000 bytes=[160, +28)
-  [2] callable_types type=0x0005 flags=0x0000 bytes=[192, +12)
-  [3] imports type=0x0006 flags=0x0000 bytes=[208, +20)
-  [4] exports type=0x0007 flags=0x0000 bytes=[232, +12)
-  [5] functions type=0x0008 flags=0x0000 bytes=[248, +76)
+  [0] strings type=0x0002 flags=0x0000 bytes=[128, +87)
+  [1] signatures type=0x0004 flags=0x0000 bytes=[216, +28)
+  [2] callable_types type=0x0005 flags=0x0000 bytes=[248, +12)
+  [3] imports type=0x0006 flags=0x0000 bytes=[264, +20)
+  [4] exports type=0x0007 flags=0x0000 bytes=[288, +12)
+  [5] functions type=0x0008 flags=0x0000 bytes=[304, +76)
+  [6] presentation type=0x000C flags=0x0001 bytes=[384, +44)
 resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
 module_metadata:
 ref_types:
 callable_types:
   [0] (i32) -> (i32)
 imports:
-  [0] @math::identity : (i32) -> (i32)
+  [0] @math::identity : (first: i32) -> (i32)
+    authored_type = "(i32) -> (i32)"
+    argument[0].authored_type = "i32"
+    result[0].authored_type = "i32"
 exports:
-  [0] @call_aliases -> function[0] : (i32) -> (i32)
+  [0] @call_aliases -> function[0] : (value: i32) -> (i32)
+    authored_type = "(i32) -> (i32)"
+    argument[0].authored_type = "i32"
+    result[0].authored_type = "i32"
 functions:
   [0] callable[0] signature[0] bytecode=[0, +24) registers=(1, 0, 0) locals=(0, 0, 0) switch_targets=0 has_call
     type = (i32) -> (i32)

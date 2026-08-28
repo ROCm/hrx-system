@@ -10,9 +10,9 @@ func.def public target(@target) @caller(%value: i32) -> (i32) {
 }
 
 // ----
-low.func.decl link("runtime", "wait") target<vm.core>(@target) abi(vm_function, {suspending = true}) abi_layout({signature = type<(reg<vm.value : i32>) -> (reg<vm.value : i32>)>}) @wait(%value: reg<vm.value : i32>) -> (reg<vm.value : i32>)
+low.func.decl link("runtime", "wait") target<vm.core>(@target) abi(vm_function, {suspending = true}) abi_layout({argument_names = {f00000 = "value"}, signature = type<(reg<vm.value : i32>) -> (reg<vm.value : i32>)>}) @wait(%value: reg<vm.value : i32>) -> (reg<vm.value : i32>)
 
-low.func.def public target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i32>) -> (reg<vm.value : i32>)>}) @caller(%value: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+low.func.def public target<vm.core>(@target) abi(vm_function) abi_layout({argument_names = {f00000 = "value"}, signature = type<(reg<vm.value : i32>) -> (reg<vm.value : i32>)>}) @caller(%value: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
   %result = low.func.call @wait(%value) : (reg<vm.value : i32>) -> (reg<vm.value : i32>)
   return %result
 }

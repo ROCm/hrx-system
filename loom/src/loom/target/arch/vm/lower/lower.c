@@ -175,6 +175,29 @@ static bool loom_vm_source_type_supported(void* user_data,
          LOOM_LOW_REGISTER_CLASS_ID_INVALID;
 }
 
+static bool loom_vm_source_function_has_presentation(
+    const loom_module_t* module, loom_func_like_t function) {
+  if (loom_func_like_import_module(function) != LOOM_STRING_ID_INVALID) {
+    return true;
+  }
+  const loom_symbol_ref_t function_ref = loom_func_like_callee(function);
+  if (!loom_symbol_ref_is_valid(function_ref) || function_ref.module_id != 0 ||
+      function_ref.symbol_id >= module->symbols.count) {
+    return false;
+  }
+  return !iree_string_view_is_empty(loom_func_like_export_name(
+      module, &module->symbols.entries[function_ref.symbol_id], function));
+}
+
+static const loom_value_id_t* loom_vm_source_function_argument_values(
+    loom_low_lower_context_t* context, iree_host_size_t expected_count) {
+  uint16_t source_count = 0;
+  const loom_value_id_t* source_values = loom_func_like_arg_ids(
+      loom_low_lower_context_source_function(context), &source_count);
+  IREE_ASSERT_EQ(source_count, expected_count);
+  return source_values;
+}
+
 static iree_status_t loom_vm_map_abi_layout(
     void* user_data, loom_low_lower_context_t* context,
     loom_low_lower_abi_layout_kind_t layout_kind,
@@ -186,10 +209,33 @@ static iree_status_t loom_vm_map_abi_layout(
   if (layout_kind != LOOM_LOW_LOWER_ABI_LAYOUT_KIND_FUNC) {
     return iree_ok_status();
   }
+  const loom_func_like_t source_function =
+      loom_low_lower_context_source_function(context);
+  const loom_module_t* module = loom_low_lower_context_module(context);
+  const bool has_presentation =
+      loom_vm_source_function_has_presentation(module, source_function);
+  const loom_value_id_t* argument_values =
+      has_presentation
+          ? loom_vm_source_function_argument_values(context, argument_count)
+          : NULL;
+  const loom_value_id_t* result_values =
+      has_presentation ? loom_op_const_results(source_function.op) : NULL;
+  IREE_ASSERT(!has_presentation ||
+              source_function.op->result_count == result_count);
   loom_attribute_t layout_attr = loom_attr_absent();
   IREE_RETURN_IF_ERROR(loom_vm_call_abi_layout_make_attr(
-      loom_low_lower_context_module(context), argument_types, argument_count,
-      result_types, result_count, &layout_attr));
+      loom_low_lower_context_module(context),
+      (loom_vm_call_abi_source_fields_t){
+          .types = argument_types,
+          .values = argument_values,
+          .count = argument_count,
+      },
+      (loom_vm_call_abi_source_fields_t){
+          .types = result_types,
+          .values = result_values,
+          .count = result_count,
+      },
+      loom_low_lower_context_function_arena(context), &layout_attr));
   *out_abi_layout = loom_attr_as_dict(layout_attr);
   return iree_ok_status();
 }

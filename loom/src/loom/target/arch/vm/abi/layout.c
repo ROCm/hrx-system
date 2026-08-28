@@ -157,6 +157,82 @@ iree_status_t loom_vm_call_abi_layout_resolve_signature(
   return iree_ok_status();
 }
 
+enum {
+  // 'f' plus every decimal digit of a u16 and the NUL terminator.
+  LOOM_VM_CALL_ABI_FIELD_KEY_CAPACITY = 7,
+};
+
+static iree_string_view_t loom_vm_call_abi_format_field_key(
+    uint16_t field_ordinal, char* buffer) {
+  buffer[0] = 'f';
+  for (iree_host_size_t i = 5; i > 0; --i) {
+    buffer[i] = (char)('0' + field_ordinal % 10);
+    field_ordinal /= 10;
+  }
+  buffer[6] = '\0';
+  return iree_make_string_view(buffer, LOOM_VM_CALL_ABI_FIELD_KEY_CAPACITY - 1);
+}
+
+static iree_status_t loom_vm_call_abi_layout_resolve_name_table(
+    const loom_module_t* module, loom_named_attr_slice_t abi_layout,
+    iree_string_view_t table_key, uint16_t expected_count,
+    loom_named_attr_slice_t* out_names) {
+  *out_names = loom_named_attr_slice_empty();
+  const loom_string_id_t table_key_id =
+      loom_module_lookup_string(module, table_key);
+  if (table_key_id == LOOM_STRING_ID_INVALID) return iree_ok_status();
+  const loom_attribute_t* table_attr = NULL;
+  for (iree_host_size_t i = 0; i < abi_layout.count; ++i) {
+    const loom_named_attr_t* entry = &abi_layout.entries[i];
+    if (entry->name_id != table_key_id) continue;
+    table_attr = &entry->value;
+    break;
+  }
+  if (table_attr == NULL) return iree_ok_status();
+  if (table_attr->kind != LOOM_ATTR_DICT ||
+      table_attr->count != expected_count) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "VM abi_layout %.*s must contain %u string entries",
+                            (int)table_key.size, table_key.data,
+                            (unsigned)expected_count);
+  }
+
+  const loom_named_attr_slice_t names = loom_attr_as_dict(*table_attr);
+  for (uint16_t i = 0; i < expected_count; ++i) {
+    char expected_key_storage[LOOM_VM_CALL_ABI_FIELD_KEY_CAPACITY];
+    const iree_string_view_t expected_key =
+        loom_vm_call_abi_format_field_key(i, expected_key_storage);
+    const loom_named_attr_t* entry = &names.entries[i];
+    if (entry->name_id >= module->strings.count ||
+        !iree_string_view_equal(module->strings.entries[entry->name_id],
+                                expected_key) ||
+        entry->value.kind != LOOM_ATTR_STRING ||
+        entry->value.string_id >= module->strings.count) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "VM abi_layout %.*s field %u is not a canonical string entry",
+          (int)table_key.size, table_key.data, (unsigned)i);
+    }
+  }
+  *out_names = names;
+  return iree_ok_status();
+}
+
+iree_status_t loom_vm_call_abi_layout_resolve_presentation_names(
+    const loom_module_t* module, loom_named_attr_slice_t abi_layout,
+    uint16_t argument_count, uint16_t result_count,
+    loom_named_attr_slice_t* out_argument_names,
+    loom_named_attr_slice_t* out_result_names) {
+  *out_argument_names = loom_named_attr_slice_empty();
+  *out_result_names = loom_named_attr_slice_empty();
+  IREE_RETURN_IF_ERROR(loom_vm_call_abi_layout_resolve_name_table(
+      module, abi_layout, IREE_SV("argument_names"), argument_count,
+      out_argument_names));
+  return loom_vm_call_abi_layout_resolve_name_table(
+      module, abi_layout, IREE_SV("result_names"), result_count,
+      out_result_names);
+}
+
 static uint16_t* loom_vm_call_abi_bank_count(
     loom_vm_call_abi_bank_counts_t* counts, loom_vm_call_abi_bank_t bank) {
   switch (bank) {
@@ -300,33 +376,168 @@ iree_status_t loom_vm_call_abi_packet_layout_build(
   return iree_ok_status();
 }
 
-iree_status_t loom_vm_call_abi_layout_make_attr(
-    loom_module_t* module, const loom_type_t* argument_types,
-    iree_host_size_t argument_count, const loom_type_t* result_types,
-    iree_host_size_t result_count, loom_attribute_t* out_attr) {
+static iree_status_t loom_vm_call_abi_layout_make_name_table(
+    loom_module_t* module, loom_vm_call_abi_source_fields_t fields,
+    iree_arena_allocator_t* scratch_arena, loom_attribute_t* out_attr) {
   *out_attr = loom_attr_absent();
-  if (argument_count > UINT16_MAX || result_count > UINT16_MAX) {
+  if (fields.values == NULL || fields.count == 0) return iree_ok_status();
+
+  bool has_names = false;
+  for (iree_host_size_t i = 0; i < fields.count; ++i) {
+    if (fields.values[i] >= module->values.count) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "VM ABI name source value is out of range");
+    }
+    const loom_string_id_t name_id =
+        loom_module_value(module, fields.values[i])->name_id;
+    if (name_id != LOOM_STRING_ID_INVALID && name_id >= module->strings.count) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "VM ABI source value name is out of range");
+    }
+    has_names |= !iree_string_view_is_empty(
+        loom_module_value_name(module, fields.values[i]));
+  }
+  if (!has_names) return iree_ok_status();
+
+  loom_named_attr_t* entries = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      scratch_arena, fields.count, sizeof(*entries), (void**)&entries));
+  loom_string_id_t empty_name_id = LOOM_STRING_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_module_intern_string(
+      module, iree_string_view_empty(), &empty_name_id));
+  for (iree_host_size_t i = 0; i < fields.count; ++i) {
+    char field_key_storage[LOOM_VM_CALL_ABI_FIELD_KEY_CAPACITY];
+    const iree_string_view_t field_key =
+        loom_vm_call_abi_format_field_key((uint16_t)i, field_key_storage);
+    loom_string_id_t field_key_id = LOOM_STRING_ID_INVALID;
+    IREE_RETURN_IF_ERROR(
+        loom_module_intern_string(module, field_key, &field_key_id));
+    const loom_string_id_t name_id =
+        loom_module_value(module, fields.values[i])->name_id;
+    entries[i] = (loom_named_attr_t){
+        .name_id = field_key_id,
+        .value = loom_attr_string(
+            name_id != LOOM_STRING_ID_INVALID ? name_id : empty_name_id),
+    };
+  }
+  *out_attr = loom_make_canonical_attr_dict(entries, fields.count);
+  return iree_ok_status();
+}
+
+iree_status_t loom_vm_call_abi_layout_preserve_presentation_names(
+    loom_module_t* module, loom_named_attr_slice_t abi_layout,
+    loom_vm_call_abi_source_fields_t arguments,
+    loom_vm_call_abi_source_fields_t results,
+    iree_arena_allocator_t* scratch_arena, bool* out_changed,
+    loom_attribute_t* out_attr) {
+  *out_changed = false;
+  *out_attr =
+      loom_make_canonical_attr_dict(abi_layout.entries, abi_layout.count);
+  if (arguments.count > UINT16_MAX || results.count > UINT16_MAX) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "VM logical call signature exceeds u16");
   }
 
+  loom_named_attr_slice_t existing_argument_names =
+      loom_named_attr_slice_empty();
+  loom_named_attr_slice_t existing_result_names = loom_named_attr_slice_empty();
+  IREE_RETURN_IF_ERROR(loom_vm_call_abi_layout_resolve_presentation_names(
+      module, abi_layout, (uint16_t)arguments.count, (uint16_t)results.count,
+      &existing_argument_names, &existing_result_names));
+
+  loom_attribute_t argument_names = loom_attr_absent();
+  if (existing_argument_names.count == 0) {
+    IREE_RETURN_IF_ERROR(loom_vm_call_abi_layout_make_name_table(
+        module, arguments, scratch_arena, &argument_names));
+  }
+  loom_attribute_t result_names = loom_attr_absent();
+  if (existing_result_names.count == 0) {
+    IREE_RETURN_IF_ERROR(loom_vm_call_abi_layout_make_name_table(
+        module, results, scratch_arena, &result_names));
+  }
+
+  loom_named_attr_update_t updates[2];
+  iree_host_size_t update_count = 0;
+  if (!loom_attr_is_absent(argument_names)) {
+    loom_string_id_t key_id = LOOM_STRING_ID_INVALID;
+    IREE_RETURN_IF_ERROR(
+        loom_module_intern_string(module, IREE_SV("argument_names"), &key_id));
+    updates[update_count++] = (loom_named_attr_update_t){
+        .name_id = key_id,
+        .value = argument_names,
+    };
+  }
+  if (!loom_attr_is_absent(result_names)) {
+    loom_string_id_t key_id = LOOM_STRING_ID_INVALID;
+    IREE_RETURN_IF_ERROR(
+        loom_module_intern_string(module, IREE_SV("result_names"), &key_id));
+    updates[update_count++] = (loom_named_attr_update_t){
+        .name_id = key_id,
+        .value = result_names,
+    };
+  }
+  if (update_count == 0) return iree_ok_status();
+
+  IREE_RETURN_IF_ERROR(
+      loom_module_replace_canonical_attr_dict(module, abi_layout,
+                                              (loom_named_attr_update_slice_t){
+                                                  .updates = updates,
+                                                  .count = update_count,
+                                              },
+                                              out_attr));
+  *out_changed = true;
+  return iree_ok_status();
+}
+
+iree_status_t loom_vm_call_abi_layout_make_attr(
+    loom_module_t* module, loom_vm_call_abi_source_fields_t arguments,
+    loom_vm_call_abi_source_fields_t results,
+    iree_arena_allocator_t* scratch_arena, loom_attribute_t* out_attr) {
+  *out_attr = loom_attr_absent();
+  if (arguments.count > UINT16_MAX || results.count > UINT16_MAX) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "VM logical call signature exceeds u16");
+  }
+  if ((arguments.count != 0 && arguments.types == NULL) ||
+      (results.count != 0 && results.types == NULL)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "VM logical call signature types are missing");
+  }
+
   loom_type_t signature = loom_type_none();
   IREE_RETURN_IF_ERROR(loom_module_intern_function_type(
-      module, argument_types, (uint16_t)argument_count, result_types,
-      (uint16_t)result_count, &signature));
+      module, arguments.types, (uint16_t)arguments.count, results.types,
+      (uint16_t)results.count, &signature));
   loom_type_id_t signature_id = LOOM_TYPE_ID_INVALID;
   IREE_RETURN_IF_ERROR(
       loom_module_intern_type_id(module, signature, &signature_id));
+
+  loom_attribute_t argument_names = loom_attr_absent();
+  IREE_RETURN_IF_ERROR(loom_vm_call_abi_layout_make_name_table(
+      module, arguments, scratch_arena, &argument_names));
+  loom_attribute_t result_names = loom_attr_absent();
+  IREE_RETURN_IF_ERROR(loom_vm_call_abi_layout_make_name_table(
+      module, results, scratch_arena, &result_names));
+
+  loom_named_attr_t entries[3] = {0};
+  iree_host_size_t entry_count = 0;
+  if (!loom_attr_is_absent(argument_names)) {
+    IREE_RETURN_IF_ERROR(loom_module_intern_string(
+        module, IREE_SV("argument_names"), &entries[entry_count].name_id));
+    entries[entry_count++].value = argument_names;
+  }
+  if (!loom_attr_is_absent(result_names)) {
+    IREE_RETURN_IF_ERROR(loom_module_intern_string(
+        module, IREE_SV("result_names"), &entries[entry_count].name_id));
+    entries[entry_count++].value = result_names;
+  }
   loom_string_id_t signature_key = LOOM_STRING_ID_INVALID;
   IREE_RETURN_IF_ERROR(
       loom_module_intern_string(module, IREE_SV("signature"), &signature_key));
-  const loom_named_attr_t entries[] = {
-      {
-          .name_id = signature_key,
-          .value = loom_attr_type(signature_id),
-      },
+  entries[entry_count++] = (loom_named_attr_t){
+      .name_id = signature_key,
+      .value = loom_attr_type(signature_id),
   };
   return loom_module_make_canonical_attr_dict(
-      module, loom_make_named_attr_slice(entries, IREE_ARRAYSIZE(entries)),
-      out_attr);
+      module, loom_make_named_attr_slice(entries, entry_count), out_attr);
 }

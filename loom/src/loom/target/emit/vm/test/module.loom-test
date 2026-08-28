@@ -9,14 +9,15 @@ func.def public target(@target) @multiply_add(%lhs: i32, %rhs: i32) -> (i32) {
 }
 
 // ----
-vm.module "module" core=0.0 bytes=252
+vm.module "module" core=0.0 bytes=348
 requirements:
 sections:
-  [0] strings type=0x0002 flags=0x0000 bytes=[96, +24)
-  [1] signatures type=0x0004 flags=0x0000 bytes=[120, +32)
-  [2] callable_types type=0x0005 flags=0x0000 bytes=[152, +12)
-  [3] exports type=0x0007 flags=0x0000 bytes=[168, +12)
-  [4] functions type=0x0008 flags=0x0000 bytes=[184, +68)
+  [0] strings type=0x0002 flags=0x0000 bytes=[112, +68)
+  [1] signatures type=0x0004 flags=0x0000 bytes=[184, +32)
+  [2] callable_types type=0x0005 flags=0x0000 bytes=[216, +12)
+  [3] exports type=0x0007 flags=0x0000 bytes=[232, +12)
+  [4] functions type=0x0008 flags=0x0000 bytes=[248, +68)
+  [5] presentation type=0x000C flags=0x0001 bytes=[320, +28)
 resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
 module_metadata:
 ref_types:
@@ -24,7 +25,11 @@ callable_types:
   [0] (i32, i32) -> (i32)
 imports:
 exports:
-  [0] @multiply_add -> function[0] : (i32, i32) -> (i32)
+  [0] @multiply_add -> function[0] : (lhs: i32, rhs: i32) -> (i32)
+    authored_type = "(i32, i32) -> (i32)"
+    argument[0].authored_type = "i32"
+    argument[1].authored_type = "i32"
+    result[0].authored_type = "i32"
 functions:
   [0] callable[0] signature[0] bytecode=[0, +16) registers=(2, 0, 0) locals=(0, 0, 0) switch_targets=0
     type = (i32, i32) -> (i32)
@@ -48,14 +53,15 @@ func.def public target(@target) @nested_type_identity(%value: i32) -> (i32) {
 }
 
 // ----
-vm.module "module" core=0.0 bytes=424
+vm.module "module" core=0.0 bytes=748
 requirements:
 sections:
-  [0] strings type=0x0002 flags=0x0000 bytes=[96, +55)
-  [1] signatures type=0x0004 flags=0x0000 bytes=[152, +84)
-  [2] callable_types type=0x0005 flags=0x0000 bytes=[240, +28)
-  [3] exports type=0x0007 flags=0x0000 bytes=[272, +20)
-  [4] functions type=0x0008 flags=0x0000 bytes=[296, +128)
+  [0] strings type=0x0002 flags=0x0000 bytes=[112, +308)
+  [1] signatures type=0x0004 flags=0x0000 bytes=[424, +84)
+  [2] callable_types type=0x0005 flags=0x0000 bytes=[512, +28)
+  [3] exports type=0x0007 flags=0x0000 bytes=[544, +20)
+  [4] functions type=0x0008 flags=0x0000 bytes=[568, +128)
+  [5] presentation type=0x000C flags=0x0001 bytes=[696, +52)
 resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
 module_metadata:
 ref_types:
@@ -65,8 +71,16 @@ callable_types:
   [2] (func<module:0>, func<module:1>) -> (func<module:1>, func<module:0>)
 imports:
 exports:
-  [0] @function_type_order -> function[0] : (func<module:0>, func<module:1>) -> (func<module:1>, func<module:0>)
-  [1] @nested_type_identity -> function[1] : (i32) -> (i32)
+  [0] @function_type_order -> function[0] : (sync: func<module:0>, yieldable: func<module:1>) -> (func<module:1>, func<module:0>)
+    authored_type = "(func.ref<(i32) -> (i32)>, func.ref<yieldable (i32) -> (i32)>) -> (func.ref<yieldable (i32) -> (i32)>, func.ref<(i32) -> (i32)>)"
+    argument[0].authored_type = "func.ref<(i32) -> (i32)>"
+    argument[1].authored_type = "func.ref<yieldable (i32) -> (i32)>"
+    result[0].authored_type = "func.ref<yieldable (i32) -> (i32)>"
+    result[1].authored_type = "func.ref<(i32) -> (i32)>"
+  [1] @nested_type_identity -> function[1] : (value: i32) -> (i32)
+    authored_type = "(i32) -> (i32)"
+    argument[0].authored_type = "i32"
+    result[0].authored_type = "i32"
 functions:
   [0] callable[2] signature[2] bytecode=[0, +20) registers=(0, 0, 3) locals=(0, 0, 0) switch_targets=0
     type = (func<module:0>, func<module:1>) -> (func<module:1>, func<module:0>)
@@ -91,14 +105,15 @@ func.def public target(@target) @identity(%value: i32) -> (i32) {
 }
 
 // ----
-vm.module "module" core=0.0 bytes=244
+vm.module "module" core=0.0 bytes=320
 requirements:
 sections:
-  [0] strings type=0x0002 flags=0x0000 bytes=[96, +20)
-  [1] signatures type=0x0004 flags=0x0000 bytes=[120, +28)
-  [2] callable_types type=0x0005 flags=0x0000 bytes=[152, +12)
-  [3] exports type=0x0007 flags=0x0000 bytes=[168, +12)
-  [4] functions type=0x0008 flags=0x0000 bytes=[184, +60)
+  [0] strings type=0x0002 flags=0x0000 bytes=[112, +54)
+  [1] signatures type=0x0004 flags=0x0000 bytes=[168, +28)
+  [2] callable_types type=0x0005 flags=0x0000 bytes=[200, +12)
+  [3] exports type=0x0007 flags=0x0000 bytes=[216, +12)
+  [4] functions type=0x0008 flags=0x0000 bytes=[232, +60)
+  [5] presentation type=0x000C flags=0x0001 bytes=[296, +24)
 resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
 module_metadata:
 ref_types:
@@ -106,7 +121,10 @@ callable_types:
   [0] (i32) -> (i32)
 imports:
 exports:
-  [0] @identity -> function[0] : (i32) -> (i32)
+  [0] @identity -> function[0] : (value: i32) -> (i32)
+    authored_type = "(i32) -> (i32)"
+    argument[0].authored_type = "i32"
+    result[0].authored_type = "i32"
 functions:
   [0] callable[0] signature[0] bytecode=[0, +8) registers=(1, 0, 0) locals=(0, 0, 0) switch_targets=0
     type = (i32) -> (i32)
@@ -132,14 +150,15 @@ func.def public target(@target) @a_i32(%value: i32) -> (i32) {
 }
 
 // ----
-vm.module "module" core=0.0 bytes=420
+vm.module "module" core=0.0 bytes=560
 requirements:
 sections:
-  [0] strings type=0x0002 flags=0x0000 bytes=[96, +35)
-  [1] signatures type=0x0004 flags=0x0000 bytes=[136, +52)
-  [2] callable_types type=0x0005 flags=0x0000 bytes=[192, +20)
-  [3] exports type=0x0007 flags=0x0000 bytes=[216, +28)
-  [4] functions type=0x0008 flags=0x0000 bytes=[248, +172)
+  [0] strings type=0x0002 flags=0x0000 bytes=[112, +94)
+  [1] signatures type=0x0004 flags=0x0000 bytes=[208, +52)
+  [2] callable_types type=0x0005 flags=0x0000 bytes=[264, +20)
+  [3] exports type=0x0007 flags=0x0000 bytes=[288, +28)
+  [4] functions type=0x0008 flags=0x0000 bytes=[320, +172)
+  [5] presentation type=0x000C flags=0x0001 bytes=[496, +64)
 resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
 module_metadata:
 ref_types:
@@ -148,9 +167,18 @@ callable_types:
   [1] (i64) -> (i64)
 imports:
 exports:
-  [0] @a_i32 -> function[2] : (i32) -> (i32)
-  [1] @m_i32 -> function[1] : (i32) -> (i32)
-  [2] @z_i64 -> function[0] : (i64) -> (i64)
+  [0] @a_i32 -> function[2] : (value: i32) -> (i32)
+    authored_type = "(i32) -> (i32)"
+    argument[0].authored_type = "i32"
+    result[0].authored_type = "i32"
+  [1] @m_i32 -> function[1] : (value: i32) -> (i32)
+    authored_type = "(i32) -> (i32)"
+    argument[0].authored_type = "i32"
+    result[0].authored_type = "i32"
+  [2] @z_i64 -> function[0] : (value: i64) -> (i64)
+    authored_type = "(i64) -> (i64)"
+    argument[0].authored_type = "i64"
+    result[0].authored_type = "i64"
 functions:
   [0] callable[1] signature[1] bytecode=[0, +8) registers=(1, 0, 0) locals=(0, 0, 0) switch_targets=0
     type = (i64) -> (i64)
@@ -207,14 +235,15 @@ func.def public target(@target) @enum_immediate(%narrow: bf16) -> (f32) {
 }
 
 // ----
-vm.module "module" core=0.0 bytes=256
+vm.module "module" core=0.0 bytes=336
 requirements:
 sections:
-  [0] strings type=0x0002 flags=0x0000 bytes=[96, +26)
-  [1] signatures type=0x0004 flags=0x0000 bytes=[128, +28)
-  [2] callable_types type=0x0005 flags=0x0000 bytes=[160, +12)
-  [3] exports type=0x0007 flags=0x0000 bytes=[176, +12)
-  [4] functions type=0x0008 flags=0x0000 bytes=[192, +64)
+  [0] strings type=0x0002 flags=0x0000 bytes=[112, +70)
+  [1] signatures type=0x0004 flags=0x0000 bytes=[184, +28)
+  [2] callable_types type=0x0005 flags=0x0000 bytes=[216, +12)
+  [3] exports type=0x0007 flags=0x0000 bytes=[232, +12)
+  [4] functions type=0x0008 flags=0x0000 bytes=[248, +64)
+  [5] presentation type=0x000C flags=0x0001 bytes=[312, +24)
 resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
 module_metadata:
 ref_types:
@@ -222,7 +251,10 @@ callable_types:
   [0] (bf16) -> (f32)
 imports:
 exports:
-  [0] @enum_immediate -> function[0] : (bf16) -> (f32)
+  [0] @enum_immediate -> function[0] : (narrow: bf16) -> (f32)
+    authored_type = "(bf16) -> (f32)"
+    argument[0].authored_type = "bf16"
+    result[0].authored_type = "f32"
 functions:
   [0] callable[0] signature[0] bytecode=[0, +12) registers=(1, 0, 0) locals=(0, 0, 0) switch_targets=0
     type = (bf16) -> (f32)

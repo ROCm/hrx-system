@@ -58,15 +58,16 @@ func.def public noinline target(@target) @pooled_constant_d() -> (i64) {
 }
 
 // ----
-vm.module "module" core=0.0 bytes=544
+vm.module "module" core=0.0 bytes=652
 requirements:
 sections:
-  [0] strings type=0x0002 flags=0x0000 bytes=[112, +92)
-  [1] signatures type=0x0004 flags=0x0000 bytes=[208, +24)
-  [2] callable_types type=0x0005 flags=0x0000 bytes=[232, +12)
-  [3] exports type=0x0007 flags=0x0000 bytes=[248, +36)
-  [4] functions type=0x0008 flags=0x0000 bytes=[288, +244)
-  [5] constants type=0x0009 flags=0x0000 bytes=[536, +8)
+  [0] strings type=0x0002 flags=0x0000 bytes=[128, +114)
+  [1] signatures type=0x0004 flags=0x0000 bytes=[248, +24)
+  [2] callable_types type=0x0005 flags=0x0000 bytes=[272, +12)
+  [3] exports type=0x0007 flags=0x0000 bytes=[288, +36)
+  [4] functions type=0x0008 flags=0x0000 bytes=[328, +244)
+  [5] constants type=0x0009 flags=0x0000 bytes=[576, +8)
+  [6] presentation type=0x000C flags=0x0001 bytes=[584, +68)
 resources: constants=1 globals=(values=0, refs=0, functions=0) rodata=0
 module_metadata:
 ref_types:
@@ -75,9 +76,17 @@ callable_types:
 imports:
 exports:
   [0] @pooled_constant_a -> function[0] : () -> (i64)
+    authored_type = "() -> (i64)"
+    result[0].authored_type = "i64"
   [1] @pooled_constant_b -> function[1] : () -> (i64)
+    authored_type = "() -> (i64)"
+    result[0].authored_type = "i64"
   [2] @pooled_constant_c -> function[2] : () -> (i64)
+    authored_type = "() -> (i64)"
+    result[0].authored_type = "i64"
   [3] @pooled_constant_d -> function[3] : () -> (i64)
+    authored_type = "() -> (i64)"
+    result[0].authored_type = "i64"
 functions:
   [0] callable[0] signature[0] bytecode=[0, +12) registers=(1, 0, 0) locals=(0, 0, 0) switch_targets=0
     type = () -> (i64)

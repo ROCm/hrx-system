@@ -69,6 +69,16 @@ typedef struct loom_vm_call_abi_layout_t {
   loom_vm_call_abi_side_layout_t results;
 } loom_vm_call_abi_layout_t;
 
+// Logical source fields used to construct one side of an ABI layout.
+typedef struct loom_vm_call_abi_source_fields_t {
+  // Borrowed target-mapped logical field types.
+  const loom_type_t* types;
+  // Borrowed source values supplying optional presentation names.
+  const loom_value_id_t* values;
+  // Number of entries in |types| and, when present, |values|.
+  iree_host_size_t count;
+} loom_vm_call_abi_source_fields_t;
+
 // Canonical caller-local packet layout for one logical callsite.
 //
 // Every call in a function reuses the same local-storage prefixes. Value
@@ -123,6 +133,30 @@ iree_status_t loom_vm_call_abi_layout_resolve_signature(
     const loom_module_t* module, loom_named_attr_slice_t abi_layout,
     loom_type_t* out_signature);
 
+// Resolves optional source field names from an abi_layout dictionary.
+//
+// Present name tables contain exactly one entry per logical field, including
+// empty string values for anonymous fields. The returned slices borrow the
+// immutable layout dictionary. Malformed tables fail rather than silently
+// dropping presentation data.
+iree_status_t loom_vm_call_abi_layout_resolve_presentation_names(
+    const loom_module_t* module, loom_named_attr_slice_t abi_layout,
+    uint16_t argument_count, uint16_t result_count,
+    loom_named_attr_slice_t* out_argument_names,
+    loom_named_attr_slice_t* out_result_names);
+
+// Adds missing source field-name tables to an existing ABI layout.
+//
+// Existing tables and all unrelated layout entries are preserved. A side with
+// no authored names does not create a table. |out_changed| is true only when
+// |out_attr| contains a newly materialized dictionary.
+iree_status_t loom_vm_call_abi_layout_preserve_presentation_names(
+    loom_module_t* module, loom_named_attr_slice_t abi_layout,
+    loom_vm_call_abi_source_fields_t arguments,
+    loom_vm_call_abi_source_fields_t results,
+    iree_arena_allocator_t* scratch_arena, bool* out_changed,
+    loom_attribute_t* out_attr);
+
 // Builds deterministic per-bank ordinals for a structural VM signature.
 //
 // The field arrays are owned by |arena| and remain in source order. Value,
@@ -143,12 +177,15 @@ iree_status_t loom_vm_call_abi_packet_layout_build(
     loom_vm_call_abi_packet_layout_t* out_layout);
 
 // Builds a canonical abi_layout dictionary containing the logical mapped Low
-// function signature. The signature is independent of the physical function
-// boundary and remains unchanged as boundary values are materialized.
+// function signature and optional source field names.
+//
+// The signature is independent of the physical function boundary and remains
+// unchanged as boundary values are materialized. A NULL |values| pointer omits
+// presentation names for that side while retaining its types.
 iree_status_t loom_vm_call_abi_layout_make_attr(
-    loom_module_t* module, const loom_type_t* argument_types,
-    iree_host_size_t argument_count, const loom_type_t* result_types,
-    iree_host_size_t result_count, loom_attribute_t* out_attr);
+    loom_module_t* module, loom_vm_call_abi_source_fields_t arguments,
+    loom_vm_call_abi_source_fields_t results,
+    iree_arena_allocator_t* scratch_arena, loom_attribute_t* out_attr);
 
 #ifdef __cplusplus
 }  // extern "C"
