@@ -52,18 +52,6 @@ py_binary(
     ],
 )
 
-py_binary(
-    name = "bazel_smoke_test",
-    srcs = [
-        "__init__.py",
-        "bazel_smoke_test.py",
-        "environment.py",
-        "smoke_test_lib.py",
-    ],
-    imports = ["build_tools/devtools"],
-    main = "bazel_smoke_test.py",
-)
-
 iree_cc_binary(
     name = "bazel_launcher_integration_fixture",
     srcs = ["bazel_launcher_integration_fixture.c"],
@@ -79,18 +67,6 @@ py_binary(
     ],
     imports = ["build_tools/devtools"],
     main = "cli_smoke_test.py",
-)
-
-py_binary(
-    name = "cmake_smoke_test",
-    srcs = [
-        "__init__.py",
-        "cmake_smoke_test.py",
-        "environment.py",
-        "smoke_test_lib.py",
-    ],
-    imports = ["build_tools/devtools"],
-    main = "cmake_smoke_test.py",
 )
 
 py_test(

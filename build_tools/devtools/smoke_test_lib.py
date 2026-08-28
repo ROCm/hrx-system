@@ -9,11 +9,10 @@
 from __future__ import annotations
 
 import argparse
+import difflib
 import os
-import shutil
 import subprocess
 import sys
-import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
@@ -38,69 +37,35 @@ REPO_ROOT = find_repo_root()
 
 def parse_arguments(description: str) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=description)
-    parser.add_argument(
-        "--from-working-tree",
-        action="store_true",
-        help="Copy tracked and untracked working-tree files instead of cloning HEAD.",
-    )
-    parser.add_argument(
-        "--keep",
-        action="store_true",
-        help="Keep the temporary checkout for inspection.",
-    )
-    parser.add_argument(
-        "--scenario",
-        choices=("dry-run",),
-        default="dry-run",
-        help="Smoke scenario to run.",
-    )
     return parser.parse_args()
 
 
-def git_paths(*args: str) -> list[str]:
-    git_dir = subprocess.check_output(
-        ["git", "rev-parse", "--absolute-git-dir"],
+def repository_status() -> str:
+    return subprocess.check_output(
+        ["git", "status", "--porcelain=v1", "--untracked-files=all"],
         cwd=REPO_ROOT,
         text=True,
-    ).strip()
-    result = subprocess.run(
-        [
-            "git",
-            f"--git-dir={git_dir}",
-            f"--work-tree={REPO_ROOT}",
-            *args,
-        ],
-        cwd=REPO_ROOT,
-        check=True,
-        stdout=subprocess.PIPE,
-    )
-    return [path.decode("utf-8") for path in result.stdout.split(b"\0") if path]
-
-
-def copy_working_tree(destination: Path) -> None:
-    paths = git_paths("ls-files", "-z")
-    paths += git_paths("ls-files", "-z", "--others", "--exclude-standard")
-    for relative_path in paths:
-        source_path = REPO_ROOT / relative_path
-        if not source_path.is_file():
-            continue
-        destination_path = destination / relative_path
-        destination_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source_path, destination_path)
-    subprocess.run(["git", "init"], cwd=destination, check=True, stdout=subprocess.PIPE)
-
-
-def clone_head(destination: Path) -> None:
-    subprocess.run(
-        ["git", "clone", "--local", "--no-hardlinks", str(REPO_ROOT), str(destination)],
-        cwd=REPO_ROOT,
-        check=True,
     )
 
 
-def run_dev_command(checkout: Path, args: list[str]) -> None:
+def assert_repository_status(expected: str) -> None:
+    actual = repository_status()
+    if actual == expected:
+        return
+    difference = "".join(
+        difflib.unified_diff(
+            expected.splitlines(keepends=True),
+            actual.splitlines(keepends=True),
+            fromfile="before smoke",
+            tofile="after smoke",
+        )
+    )
+    raise RuntimeError(f"dry-run smoke changed repository state:\n{difference}")
+
+
+def run_dev_command(repo_root: Path, args: list[str]) -> None:
     command = [sys.executable, "dev.py", *args]
-    run_command(checkout, command, env=smoke_python_environment())
+    run_command(repo_root, command, env=smoke_python_environment())
 
 
 def smoke_python_environment(*, remove_python_override: bool = False) -> dict[str, str]:
@@ -114,7 +79,7 @@ def smoke_python_environment(*, remove_python_override: bool = False) -> dict[st
 
 
 def run_command(
-    checkout: Path,
+    working_directory: Path,
     command: list[str],
     *,
     env: dict[str, str] | None = None,
@@ -122,7 +87,7 @@ def run_command(
     print("smoke:", " ".join(command), flush=True)
     result = subprocess.run(
         command,
-        cwd=checkout,
+        cwd=working_directory,
         env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -138,9 +103,9 @@ def run_command(
         result.check_returncode()
 
 
-def run_bin_wrapper(checkout: Path, wrapper_name: str, args: list[str]) -> None:
+def run_bin_wrapper(repo_root: Path, wrapper_name: str, args: list[str]) -> None:
     env = smoke_python_environment(remove_python_override=True)
-    wrapper_path = checkout / "build_tools/bin" / wrapper_name
+    wrapper_path = repo_root / "build_tools/bin" / wrapper_name
     command = [str(wrapper_path), *args]
     if os.name == "nt":
         bazel_sh = environment.find_windows_bazel_sh(env)
@@ -155,15 +120,10 @@ def run_bin_wrapper(checkout: Path, wrapper_name: str, args: list[str]) -> None:
         env["PYTHON"] = sys.executable
         command = [bazel_sh, str(wrapper_path), *args]
     run_command(
-        checkout,
+        repo_root,
         command,
         env=env,
     )
-
-
-def assert_absent(path: Path) -> None:
-    if path.exists():
-        raise RuntimeError(f"dry-run smoke unexpectedly created {path}")
 
 
 def run_smoke(
@@ -171,39 +131,11 @@ def run_smoke(
     description: str,
     scenario_runner: Callable[[Path], None],
 ) -> int:
-    args = parse_arguments(description)
-    if args.keep:
-        temporary_root = Path(tempfile.mkdtemp(prefix="iree-x-dev-smoke-"))
-        checkout = temporary_root / "checkout"
-        _prepare_checkout(args, checkout)
-        _run_scenario(args, checkout, scenario_runner)
-        print(f"smoke: passed in {checkout}")
-        print(f"smoke: kept {temporary_root}")
-        return 0
-
-    with tempfile.TemporaryDirectory(prefix="iree-x-dev-smoke-") as temporary_name:
-        temporary_root = Path(temporary_name)
-        checkout = temporary_root / "checkout"
-        _prepare_checkout(args, checkout)
-        _run_scenario(args, checkout, scenario_runner)
-        print(f"smoke: passed in {checkout}")
-        return 0
-
-
-def _prepare_checkout(args: argparse.Namespace, checkout: Path) -> None:
-    if args.from_working_tree:
-        checkout.mkdir()
-        copy_working_tree(checkout)
-    else:
-        clone_head(checkout)
-
-
-def _run_scenario(
-    args: argparse.Namespace,
-    checkout: Path,
-    scenario_runner: Callable[[Path], None],
-) -> None:
-    if args.scenario == "dry-run":
-        scenario_runner(checkout)
-        return
-    raise ValueError(f"unknown smoke scenario: {args.scenario}")
+    parse_arguments(description)
+    status = repository_status()
+    try:
+        scenario_runner(REPO_ROOT)
+    finally:
+        assert_repository_status(status)
+    print(f"smoke: passed in {REPO_ROOT}")
+    return 0

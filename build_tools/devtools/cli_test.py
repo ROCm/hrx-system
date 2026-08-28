@@ -894,6 +894,25 @@ class CliTest(unittest.TestCase):
     def test_cmake_aliases_include_fuzz(self):
         self.assertEqual(aliases.CMAKE_ALIASES["iree-cmake-fuzz"], ["cmake", "fuzz"])
 
+    def test_checked_in_posix_wrappers_match_declared_aliases(self):
+        declared_aliases = aliases.BAZEL_ALIASES | aliases.CMAKE_ALIASES
+        wrapper_directory = cli.REPO_ROOT / "build_tools/bin"
+        checked_in_names = {
+            path.name
+            for pattern in ("iree-bazel-*", "iree-cmake-*")
+            for path in wrapper_directory.glob(pattern)
+            if path.is_file()
+        }
+
+        self.assertEqual(checked_in_names, set(declared_aliases))
+        for name, command in declared_aliases.items():
+            with self.subTest(wrapper=name):
+                invocation = (
+                    'exec "$PYTHON" "$REPO_ROOT/dev.py" ' + " ".join(command) + ' "$@"'
+                )
+                wrapper_lines = (wrapper_directory / name).read_text().splitlines()
+                self.assertEqual(wrapper_lines[-1], invocation)
+
     def test_root_verbose_survives_nested_command_parser(self):
         args = cli.parse_arguments(["--verbose", "bazel", "build"])
 
@@ -1195,7 +1214,7 @@ class CliTest(unittest.TestCase):
         self.assertIn("--hygiene", plan.steps[0].argv)
         self.assertIn("--check", plan.steps[1].argv)
         self.assertNotIn("--fail-on-fix", plan.steps[1].argv)
-        self.assertIn("--hygiene", plan.steps[1].argv)
+        self.assertNotIn("--hygiene", plan.steps[1].argv)
         self.assertIn("--tests", plan.steps[1].argv)
         self.assertIn("--static-analysis", plan.steps[1].argv)
         self.assertIn("--commit", description)
@@ -1224,7 +1243,7 @@ class CliTest(unittest.TestCase):
         self.assertIn("--fail-on-fix", plan.steps[0].argv)
         self.assertIn("--hygiene", plan.steps[0].argv)
         self.assertIn("--check", plan.steps[1].argv)
-        self.assertIn("--hygiene", plan.steps[1].argv)
+        self.assertNotIn("--hygiene", plan.steps[1].argv)
         self.assertIn("--tests", plan.steps[1].argv)
         self.assertIn("--static-analysis", plan.steps[1].argv)
         self.assertIn("--staged", description)
@@ -1240,7 +1259,7 @@ class CliTest(unittest.TestCase):
         self.assertIn("--fix", plan.steps[0].argv)
         self.assertIn("--hygiene", plan.steps[0].argv)
         self.assertIn("--check", plan.steps[1].argv)
-        self.assertIn("--hygiene", plan.steps[1].argv)
+        self.assertNotIn("--hygiene", plan.steps[1].argv)
         self.assertIn("--tests", plan.steps[1].argv)
         self.assertIn("--static-analysis", plan.steps[1].argv)
         self.assertIn("README.md dev.py", description)

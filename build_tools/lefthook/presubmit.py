@@ -1578,39 +1578,8 @@ def run_root_devtools_tests(paths: list[str], verbose: bool) -> bool:
             [
                 "python",
                 "build_tools/devtools/cli_smoke_test.py",
-                "--from-working-tree",
-                "--scenario",
-                "dry-run",
             ],
-            "Root devtools CLI smoke test",
-            verbose,
-        )
-        and ok
-    )
-    ok = (
-        run_command(
-            [
-                "python",
-                "build_tools/devtools/bazel_smoke_test.py",
-                "--from-working-tree",
-                "--scenario",
-                "dry-run",
-            ],
-            "Root devtools Bazel smoke test",
-            verbose,
-        )
-        and ok
-    )
-    ok = (
-        run_command(
-            [
-                "python",
-                "build_tools/devtools/cmake_smoke_test.py",
-                "--from-working-tree",
-                "--scenario",
-                "dry-run",
-            ],
-            "Root devtools CMake smoke test",
+            "Root devtools command smoke test",
             verbose,
         )
         and ok

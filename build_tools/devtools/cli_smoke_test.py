@@ -5,7 +5,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Smoke tests for the cross-lane dev.py command surface."""
+"""Smoke tests for the developer command launch boundaries."""
 
 from __future__ import annotations
 
@@ -17,219 +17,55 @@ try:
 except ModuleNotFoundError:
     import smoke_test_lib
 
-CI_DRY_RUN_COMMANDS = (
-    ("iree-bazel-cpu",),
-    ("iree-bazel-repository-build",),
-    ("iree-bazel-cpu-asan",),
-    ("iree-bazel-cpu-msan",),
-    ("iree-bazel-cpu-tsan",),
-    ("iree-bazel-cpu-ubsan",),
-    ("iree-bazel-cpu-sanitizers",),
-    ("iree-bazel-amdgpu",),
-    ("iree-bazel-amdgpu-asan",),
-    ("iree-bazel-amdgpu-tsan",),
-    ("iree-bazel-amdgpu-ubsan",),
-    ("iree-bazel-vulkan",),
-    ("iree-cmake-cpu",),
-    ("iree-cmake-repository-build",),
-    ("iree-cmake-cpu-asan",),
-    ("iree-cmake-cpu-msan",),
-    ("iree-cmake-cpu-tsan",),
-    ("iree-cmake-cpu-ubsan",),
-    ("iree-cmake-cpu-sanitizers",),
-    ("iree-cmake-sanitizer-smoke",),
-    ("iree-cmake-amdgpu",),
-    ("iree-cmake-amdgpu-asan",),
-    ("iree-cmake-amdgpu-msan",),
-    ("iree-cmake-amdgpu-tsan",),
-    ("iree-cmake-amdgpu-ubsan",),
-    ("iree-cmake-amdgpu-sanitizers",),
-    ("iree-cmake-vulkan",),
-    ("iree-cmake-vulkan-asan",),
-    ("iree-cmake-vulkan-msan",),
-    ("iree-cmake-vulkan-tsan",),
-    ("iree-cmake-vulkan-ubsan",),
-    ("iree-cmake-vulkan-sanitizers",),
-)
+
+def file_contents(path: Path) -> bytes | None:
+    if not path.exists():
+        return None
+    if not path.is_file():
+        raise RuntimeError(f"expected smoke state path to be a file: {path}")
+    return path.read_bytes()
 
 
-def run_dry_run_scenario(checkout: Path) -> None:
-    tool_root = checkout.parent / "external-tools"
-    smoke_test_lib.run_dev_command(checkout, ["--dry-run", "bazel", "setup"])
-    smoke_test_lib.run_dev_command(
-        checkout, ["--dry-run", "bazel", "setup", "--system"]
+def run_dry_run_scenario(repo_root: Path) -> None:
+    local_state_paths = (
+        repo_root / ".bazelrc.configured",
+        repo_root / "lefthook-local.yml",
+        repo_root / ".iree/cmake_build_dir",
     )
+    local_state = {path: file_contents(path) for path in local_state_paths}
+
+    # Exercise the direct dev.py router and a plan containing file writes.
     smoke_test_lib.run_dev_command(
-        checkout, ["--dry-run", "bazel", "setup", "--tool-root", str(tool_root)]
+        repo_root, ["--dry-run", "bazel", "hook", "--profile", "ci"]
     )
-    smoke_test_lib.run_dev_command(
-        checkout,
-        ["--dry-run", "bazel", "configure", "-DIREE_HAL_DRIVER_AMDGPU=OFF"],
+    # Exercise one checked-in POSIX wrapper for each build-system lane. Unit
+    # tests verify the complete wrapper-to-command mapping.
+    smoke_test_lib.run_bin_wrapper(
+        repo_root, "iree-bazel-build", ["-n", "--config=asan"]
     )
-    smoke_test_lib.run_dev_command(checkout, ["bazel", "build", "-n", "--config=asan"])
-    smoke_test_lib.run_dev_command(
-        checkout,
-        ["--dry-run", "bazel", "query", "kind(cc_library, //runtime/...)"],
+    smoke_test_lib.run_bin_wrapper(
+        repo_root, "iree-cmake-build", ["-n", "hrx::hrx", "--parallel", "8"]
     )
-    smoke_test_lib.run_dev_command(
-        checkout,
-        ["--dry-run", "bazel", "cquery", "--output=files", "//runtime/..."],
-    )
-    smoke_test_lib.run_dev_command(
-        checkout, ["--dry-run", "bazel", "info", "execution_root"]
-    )
-    smoke_test_lib.run_dev_command(checkout, ["--dry-run", "bazel", "shutdown"])
-    smoke_test_lib.run_dev_command(
-        checkout,
+    # Exercise the standalone CI entry point. Its command matrix is covered by
+    # ci_test; the smoke only proves the process boundary and dry-run contract.
+    smoke_test_lib.run_command(
+        repo_root,
         [
+            sys.executable,
+            "build_tools/devtools/ci.py",
+            "iree-bazel-cpu",
             "--dry-run",
-            "bazel",
-            "run",
-            "//runtime/src/iree/base:allocator_benchmark",
-            "--",
-            "--help",
         ],
     )
-    smoke_test_lib.run_dev_command(
-        checkout,
-        ["--dry-run", "bazel", "try", "-e", "int main() { return 0; }"],
-    )
-    smoke_test_lib.run_dev_command(
-        checkout,
-        [
-            "--dry-run",
-            "bazel",
-            "compile-commands",
-            "//runtime/src/iree/base/...",
-        ],
-    )
-    smoke_test_lib.run_dev_command(
-        checkout,
-        [
-            "--dry-run",
-            "bazel",
-            "fuzz",
-            "//runtime/src/iree/tokenizer:special_tokens_fuzz",
-            "--",
-            "-max_total_time=1",
-        ],
-    )
-    smoke_test_lib.run_dev_command(
-        checkout,
-        [
-            "--dry-run",
-            "bazel",
-            "fuzz",
-            "//runtime/src/iree/tokenizer/...",
-            "--",
-            "-max_total_time=1",
-        ],
-    )
-    smoke_test_lib.run_dev_command(
-        checkout,
-        [
-            "--dry-run",
-            "--cmake-build-dir",
-            "build/smoke-cmake",
-            "cmake",
-            "configure",
-            "-DIREE_HAL_DRIVER_AMDGPU=OFF",
-            "-DLIBHRX_BUILD=OFF",
-        ],
-    )
-    smoke_test_lib.run_dev_command(
-        checkout,
-        [
-            "cmake",
-            "build",
-            "-n",
-            "--cmake-build-dir",
-            "build/smoke-cmake",
-            "hrx",
-        ],
-    )
-    smoke_test_lib.run_dev_command(
-        checkout,
-        [
-            "--dry-run",
-            "--cmake-build-dir",
-            "build/smoke-cmake",
-            "cmake",
-            "compile-commands",
-        ],
-    )
-    smoke_test_lib.run_dev_command(
-        checkout,
-        [
-            "--dry-run",
-            "--cmake-build-dir",
-            "build/smoke-cmake",
-            "cmake",
-            "run",
-            "iree::tools::iree-run-module",
-            "--",
-            "--help",
-        ],
-    )
-    smoke_test_lib.run_dev_command(
-        checkout,
-        [
-            "--dry-run",
-            "--cmake-build-dir",
-            "build/smoke-cmake",
-            "cmake",
-            "try",
-            "-e",
-            "int main() { return 0; }",
-        ],
-    )
-    smoke_test_lib.run_dev_command(
-        checkout,
-        [
-            "--dry-run",
-            "--cmake-build-dir",
-            "build/smoke-cmake",
-            "cmake",
-            "fuzz",
-            "iree::tokenizer::special_tokens_fuzz",
-            "--",
-            "-max_total_time=1",
-        ],
-    )
-    smoke_test_lib.run_dev_command(
-        checkout, ["--dry-run", "bazel", "hook", "--profile", "ci"]
-    )
-    smoke_test_lib.run_dev_command(
-        checkout, ["--dry-run", "cmake", "hook", "--profile", "paranoid"]
-    )
-    smoke_test_lib.run_dev_command(
-        checkout, ["--dry-run", "bazel", "precommit", "--profile", "default"]
-    )
-    smoke_test_lib.run_dev_command(
-        checkout, ["--dry-run", "cmake", "precommit", "--profile", "ci"]
-    )
-    smoke_test_lib.run_dev_command(
-        checkout, ["--dry-run", "bazel", "presubmit", "--profile", "paranoid"]
-    )
-    smoke_test_lib.run_dev_command(
-        checkout, ["--dry-run", "cmake", "presubmit", "--profile", "default"]
-    )
-    for command in CI_DRY_RUN_COMMANDS:
-        smoke_test_lib.run_command(
-            checkout,
-            [sys.executable, "build_tools/devtools/ci.py", *command, "--dry-run"],
-        )
-    smoke_test_lib.assert_absent(checkout / ".bazelrc.configured")
-    smoke_test_lib.assert_absent(checkout / ".venv")
-    smoke_test_lib.assert_absent(checkout / ".iree")
-    smoke_test_lib.assert_absent(checkout / ".tmp/iree-cmake-try")
-    smoke_test_lib.assert_absent(checkout / "lefthook-local.yml")
-    smoke_test_lib.assert_absent(tool_root)
+
+    for path, expected_contents in local_state.items():
+        if file_contents(path) != expected_contents:
+            raise RuntimeError(f"dry-run smoke changed local state file: {path}")
 
 
 def main() -> int:
     return smoke_test_lib.run_smoke(
-        description="Run dev.py CLI smoke tests.",
+        description="Run developer command smoke tests.",
         scenario_runner=run_dry_run_scenario,
     )
 

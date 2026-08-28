@@ -185,7 +185,10 @@ def precommit_plan(
         profile,
     ]
     if should_autofix:
-        command += ["--hygiene", "--tests", "--static-analysis"]
+        # The fix step is also a complete hygiene validation. Its
+        # --fail-on-fix contract stops the plan if it mutates the index, so a
+        # successful fix step must not be repeated in check mode.
+        command += ["--tests", "--static-analysis"]
     if verbose:
         command.append("--verbose")
     plan.add(

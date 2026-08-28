@@ -160,17 +160,16 @@ Core developer-tool tests:
 bazel test --config=presubmit //build_tools/bazel:configure_test //build_tools/devtools:cli_test //build_tools/devtools:command_plan_test //build_tools/devtools:setup_test
 ```
 
-Checkout smoke tests for the command router and checked-in wrappers:
+Smoke test for the command router and checked-in wrappers:
 
 ```bash
-python build_tools/devtools/cli_smoke_test.py --from-working-tree --scenario dry-run
-python build_tools/devtools/bazel_smoke_test.py --from-working-tree --scenario dry-run
-python build_tools/devtools/cmake_smoke_test.py --from-working-tree --scenario dry-run
+python build_tools/devtools/cli_smoke_test.py
 ```
 
-The smoke tests create temporary checkouts, run dry-run setup/configure/wrapper
-commands, and verify those dry-runs do not create a venv, hook config,
-generated Bazel rc, try workspace, or external tool root.
+The smoke test runs one direct command, one checked-in wrapper per build-system
+lane, and one CI command against the live repository. All commands are dry runs,
+and the harness verifies that repository and ignored local configuration state
+remain unchanged.
 
 More detail on profiles and hook internals lives in
 `build_tools/lefthook/README.md`.
