@@ -124,10 +124,10 @@ CONVERSION_INTEGER = _conversion(
     mnemonic="conversion.integer",
     selector_name="integer.convert",
     description=(
-        "Performs the selected exact integer-width conversion: s8/u8 and "
-        "s16/u16 extend to i32; s32/u32 extend to i64; i32 truncates to i8 "
-        "or i16; and i64 truncates to i32. Signed extensions propagate the "
-        "selected source sign bit and unsigned extensions insert zeros."
+        "Performs the selected exact conversion between distinct i1, i8, i16, "
+        "i32, and i64 widths. Signed extensions propagate the selected source "
+        "sign bit, unsigned extensions insert zeros, and truncations preserve "
+        "the selected low destination-width bits."
     ),
     success=(
         "dst_v8 receives the selected truncation or extension. Results no "

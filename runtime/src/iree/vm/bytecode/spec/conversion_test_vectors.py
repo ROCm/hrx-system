@@ -159,6 +159,31 @@ def _selector_rows(table_id: str) -> tuple[tuple[int, str], ...]:
     )
 
 
+def _integer_conversion_rows() -> tuple[tuple[int, int, int], ...]:
+    rows: list[tuple[int, int, int]] = []
+    dirty_high_bits = 0xA55AA55AA55AA55A
+    for selector, name in _selector_rows("core.selector.integer.convert"):
+        source_name, destination_name = name.split(".to.")
+        source_bit_count = int(source_name[1:])
+        destination_bit_count = int(destination_name[1:])
+        source_mask = (1 << source_bit_count) - 1
+        destination_mask = (1 << destination_bit_count) - 1
+        samples = {
+            0,
+            1,
+            source_mask,
+            1 << (source_bit_count - 1),
+            0xFEDCBA9876543210 & source_mask,
+        }
+        for low_source_bits in sorted(samples):
+            source_bits = low_source_bits | (dirty_high_bits & ~source_mask)
+            result = low_source_bits
+            if source_name.startswith("s") and (result & (1 << (source_bit_count - 1))):
+                result |= ~source_mask
+            rows.append((selector, source_bits, result & destination_mask))
+    return tuple(rows)
+
+
 def _neighbor_bits(bits: int, binary_format: _BinaryFormat) -> tuple[int, ...]:
     sign_mask = 1 << (binary_format.bit_count - 1)
     magnitude = bits & (sign_mask - 1)
@@ -408,8 +433,13 @@ def render_conversion_test_vectors() -> str:
         "// Independent Fraction-based conversion boundary witnesses.",
         "// clang-format off",
         "",
-        "#if defined(IREE_VM_BYTECODE_DEFINE_FLOAT_TRUNCATE_TEST_ROWS)",
+        "#if defined(IREE_VM_BYTECODE_DEFINE_INTEGER_TEST_ROWS)",
     ]
+    lines.extend(
+        f"IREE_VM_BYTECODE_INTEGER_TEST_ROW(0x{selector:02X}, {_u64(source)}, {_u64(expected)})"
+        for selector, source, expected in _integer_conversion_rows()
+    )
+    lines.append("#elif defined(IREE_VM_BYTECODE_DEFINE_FLOAT_TRUNCATE_TEST_ROWS)")
     lines.extend(
         f"IREE_VM_BYTECODE_FLOAT_TRUNCATE_TEST_ROW(0x{selector:02X}, {_u64(source)}, {_u64(expected)})"
         for selector, source, expected in _float_truncate_rows()

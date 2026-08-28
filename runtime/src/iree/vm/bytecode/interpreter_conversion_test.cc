@@ -15,18 +15,27 @@
 namespace iree::vm::bytecode::testing {
 namespace {
 
-typedef struct FloatConversionTestRow {
+typedef struct ConversionTestRow {
   // Verified selector value.
   uint8_t selector;
   // Complete source value-cell bits.
   uint64_t source;
   // Expected canonical destination bits.
   uint64_t expected;
-} FloatConversionTestRow;
+} ConversionTestRow;
+
+#define IREE_VM_BYTECODE_INTEGER_TEST_ROW(selector, source, expected) \
+  {(selector), (source), (expected)},
+static const ConversionTestRow kIntegerTestRows[] = {
+#define IREE_VM_BYTECODE_DEFINE_INTEGER_TEST_ROWS
+#include "iree/vm/bytecode/conversion_test_vectors.inl"
+#undef IREE_VM_BYTECODE_DEFINE_INTEGER_TEST_ROWS
+};
+#undef IREE_VM_BYTECODE_INTEGER_TEST_ROW
 
 #define IREE_VM_BYTECODE_FLOAT_TRUNCATE_TEST_ROW(selector, source, expected) \
   {(selector), (source), (expected)},
-static const FloatConversionTestRow kFloatTruncateTestRows[] = {
+static const ConversionTestRow kFloatTruncateTestRows[] = {
 #define IREE_VM_BYTECODE_DEFINE_FLOAT_TRUNCATE_TEST_ROWS
 #include "iree/vm/bytecode/conversion_test_vectors.inl"
 #undef IREE_VM_BYTECODE_DEFINE_FLOAT_TRUNCATE_TEST_ROWS
@@ -35,7 +44,7 @@ static const FloatConversionTestRow kFloatTruncateTestRows[] = {
 
 #define IREE_VM_BYTECODE_FLOAT_WIDTH_TEST_ROW(selector, source, expected) \
   {(selector), (source), (expected)},
-static const FloatConversionTestRow kFloatWidthTestRows[] = {
+static const ConversionTestRow kFloatWidthTestRows[] = {
 #define IREE_VM_BYTECODE_DEFINE_FLOAT_WIDTH_TEST_ROWS
 #include "iree/vm/bytecode/conversion_test_vectors.inl"
 #undef IREE_VM_BYTECODE_DEFINE_FLOAT_WIDTH_TEST_ROWS
@@ -44,7 +53,7 @@ static const FloatConversionTestRow kFloatWidthTestRows[] = {
 
 #define IREE_VM_BYTECODE_INTEGER_TO_FLOAT_TEST_ROW(selector, source, expected) \
   {(selector), (source), (expected)},
-static const FloatConversionTestRow kIntegerToFloatTestRows[] = {
+static const ConversionTestRow kIntegerToFloatTestRows[] = {
 #define IREE_VM_BYTECODE_DEFINE_INTEGER_TO_FLOAT_TEST_ROWS
 #include "iree/vm/bytecode/conversion_test_vectors.inl"
 #undef IREE_VM_BYTECODE_DEFINE_INTEGER_TO_FLOAT_TEST_ROWS
@@ -105,30 +114,18 @@ static bool IsBF16NaN(uint16_t bits) {
 }
 
 TEST(VMBytecodeInterpreterConversionTest, ExecutesEveryIntegerSelector) {
-  const uint64_t sources[] = {
-      UINT64_C(0xA55AA55AA55A0080), UINT64_C(0xA55AA55AA55A00FF),
-      UINT64_C(0xA55AA55AA55A8000), UINT64_C(0xA55AA55AA55AFFFF),
-      UINT64_C(0xA55AA55A80000000), UINT64_C(0xA55AA55AFFFFFFFF),
-      UINT64_C(0xA55AA55A12345678), UINT64_C(0xA55AA55A12345678),
-      UINT64_C(0xFEDCBA9876543210),
-  };
-  const uint64_t expected[] = {
-      UINT32_C(0xFFFFFF80),
-      UINT32_C(0x000000FF),
-      UINT32_C(0xFFFF8000),
-      UINT32_C(0x0000FFFF),
-      UINT64_C(0xFFFFFFFF80000000),
-      UINT32_C(0xFFFFFFFF),
-      UINT8_C(0x78),
-      UINT16_C(0x5678),
-      UINT32_C(0x76543210),
-  };
-  for (uint8_t selector = 0; selector < IREE_ARRAYSIZE(sources); ++selector) {
-    SCOPED_TRACE(static_cast<int>(selector));
+  bool selector_seen[IREE_VM_ISA_INTEGER_CONVERT_I64_TO_I32 + 1] = {};
+  for (const ConversionTestRow& row : kIntegerTestRows) {
+    SCOPED_TRACE(static_cast<int>(row.selector));
+    ASSERT_LT(row.selector, IREE_ARRAYSIZE(selector_seen));
+    selector_seen[row.selector] = true;
     EXPECT_EQ(ExecuteConversion<iree_vm_isa_conversion_integer_record_t>(
-                  iree_vm_bytecode_execute_conversion_integer, selector,
-                  sources[selector]),
-              expected[selector]);
+                  iree_vm_bytecode_execute_conversion_integer, row.selector,
+                  row.source),
+              row.expected);
+  }
+  for (bool was_seen : selector_seen) {
+    EXPECT_TRUE(was_seen);
   }
 }
 
@@ -172,7 +169,7 @@ TEST(VMBytecodeInterpreterConversionTest,
 
 TEST(VMBytecodeInterpreterConversionTest, RoundsEveryFloatBoundaryWitness) {
   bool truncate_selector_seen[IREE_VM_ISA_FLOAT_TRUNCATE_F64_TO_BF16 + 1] = {};
-  for (const FloatConversionTestRow& row : kFloatTruncateTestRows) {
+  for (const ConversionTestRow& row : kFloatTruncateTestRows) {
     SCOPED_TRACE(static_cast<int>(row.selector));
     ASSERT_LT(row.selector, IREE_ARRAYSIZE(truncate_selector_seen));
     truncate_selector_seen[row.selector] = true;
@@ -186,7 +183,7 @@ TEST(VMBytecodeInterpreterConversionTest, RoundsEveryFloatBoundaryWitness) {
   }
 
   bool width_selector_seen[IREE_VM_ISA_FLOAT_WIDTH_F64_TO_F32 + 1] = {};
-  for (const FloatConversionTestRow& row : kFloatWidthTestRows) {
+  for (const ConversionTestRow& row : kFloatWidthTestRows) {
     SCOPED_TRACE(static_cast<int>(row.selector));
     ASSERT_LT(row.selector, IREE_ARRAYSIZE(width_selector_seen));
     width_selector_seen[row.selector] = true;
@@ -250,7 +247,7 @@ TEST(VMBytecodeInterpreterConversionTest,
 
 TEST(VMBytecodeInterpreterConversionTest, RoundsIntegersDirectly) {
   bool selector_seen[IREE_VM_ISA_INTEGER_TO_FLOAT_U64_TO_BF16 + 1] = {};
-  for (const FloatConversionTestRow& row : kIntegerToFloatTestRows) {
+  for (const ConversionTestRow& row : kIntegerToFloatTestRows) {
     SCOPED_TRACE(static_cast<int>(row.selector));
     ASSERT_LT(row.selector, IREE_ARRAYSIZE(selector_seen));
     selector_seen[row.selector] = true;

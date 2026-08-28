@@ -47,6 +47,45 @@ def _selector_table(
     return table, table_values
 
 
+_INTEGER_WIDTHS = (1, 8, 16, 32, 64)
+
+
+def _integer_convert_values() -> tuple[tuple[int, str, int, str], ...]:
+    values: list[tuple[int, str, int, str]] = []
+    for source_index, source_width in enumerate(_INTEGER_WIDTHS):
+        for destination_width in _INTEGER_WIDTHS[source_index + 1 :]:
+            values.append(
+                (
+                    len(values),
+                    f"s{source_width}.to.i{destination_width}",
+                    0,
+                    f"Sign-extends the low {source_width} bits to "
+                    f"i{destination_width}.",
+                )
+            )
+            values.append(
+                (
+                    len(values),
+                    f"u{source_width}.to.i{destination_width}",
+                    0,
+                    f"Zero-extends the low {source_width} bits to "
+                    f"i{destination_width}.",
+                )
+            )
+    for source_index, source_width in enumerate(_INTEGER_WIDTHS):
+        for destination_width in _INTEGER_WIDTHS[:source_index]:
+            values.append(
+                (
+                    len(values),
+                    f"i{source_width}.to.i{destination_width}",
+                    0,
+                    f"Preserves the low {destination_width} bits and clears "
+                    "all higher bits.",
+                )
+            )
+    return tuple(values)
+
+
 _SELECTOR_DEFINITIONS = (
     _selector_table(
         "core.selector.memory.format",
@@ -379,27 +418,7 @@ _SELECTOR_DEFINITIONS = (
             "Selects an exact low-bit integer truncation or extension. Results "
             "clear every cell bit above their declared destination width."
         ),
-        (
-            (0, "s8.to.i32", 0, "Sign-extends the low 8 bits to i32."),
-            (1, "u8.to.i32", 0, "Zero-extends the low 8 bits to i32."),
-            (2, "s16.to.i32", 0, "Sign-extends the low 16 bits to i32."),
-            (3, "u16.to.i32", 0, "Zero-extends the low 16 bits to i32."),
-            (4, "s32.to.i64", 0, "Sign-extends the low 32 bits through the cell."),
-            (5, "u32.to.i64", 0, "Zero-extends the low 32 bits through the cell."),
-            (6, "i32.to.i8", 0, "Preserves the low 8 bits and clears all higher bits."),
-            (
-                7,
-                "i32.to.i16",
-                0,
-                "Preserves the low 16 bits and clears all higher bits.",
-            ),
-            (
-                8,
-                "i64.to.i32",
-                0,
-                "Preserves the low 32 bits and clears the high 32 bits.",
-            ),
-        ),
+        _integer_convert_values(),
     ),
     _selector_table(
         "core.selector.float.extend",

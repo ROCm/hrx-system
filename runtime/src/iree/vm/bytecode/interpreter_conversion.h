@@ -21,6 +21,24 @@ typedef enum iree_vm_bytecode_conversion_failure_e {
   IREE_VM_BYTECODE_CONVERSION_FAILURE_OUT_OF_RANGE,
 } iree_vm_bytecode_conversion_failure_t;
 
+// Returns the low |bit_count| bits of |value| with all higher bits clear.
+static inline IREE_ATTRIBUTE_ALWAYS_INLINE uint64_t
+iree_vm_bytecode_integer_low_bits(uint64_t value, uint32_t bit_count) {
+  return value & (UINT64_MAX >> (64 - bit_count));
+}
+
+// Sign-extends the low source bits through the destination width and clears all
+// higher cell bits.
+static inline IREE_ATTRIBUTE_ALWAYS_INLINE uint64_t
+iree_vm_bytecode_integer_sign_extend(uint64_t value, uint32_t source_bit_count,
+                                     uint32_t destination_bit_count) {
+  const uint64_t sign_bit = UINT64_C(1) << (source_bit_count - 1);
+  value =
+      (iree_vm_bytecode_integer_low_bits(value, source_bit_count) ^ sign_bit) -
+      sign_bit;
+  return iree_vm_bytecode_integer_low_bits(value, destination_bit_count);
+}
+
 // Executes one verified exact integer-width conversion record.
 static inline IREE_ATTRIBUTE_ALWAYS_INLINE void
 iree_vm_bytecode_execute_conversion_integer(
@@ -28,35 +46,30 @@ iree_vm_bytecode_execute_conversion_integer(
   const uint64_t source = values[record->src_v8];
   uint64_t result = 0;
   switch (record->selector_u8) {
-    case IREE_VM_ISA_INTEGER_CONVERT_S8_TO_I32:
-      result =
-          (source & 0x80u) ? (uint32_t)source | 0xFFFFFF00u : (uint8_t)source;
-      break;
-    case IREE_VM_ISA_INTEGER_CONVERT_U8_TO_I32:
-      result = (uint8_t)source;
-      break;
-    case IREE_VM_ISA_INTEGER_CONVERT_S16_TO_I32:
-      result = (source & 0x8000u) ? (uint32_t)source | 0xFFFF0000u
-                                  : (uint16_t)source;
-      break;
-    case IREE_VM_ISA_INTEGER_CONVERT_U16_TO_I32:
-      result = (uint16_t)source;
-      break;
-    case IREE_VM_ISA_INTEGER_CONVERT_S32_TO_I64:
-      result = (source & UINT32_C(0x80000000))
-                   ? (uint32_t)source | UINT64_C(0xFFFFFFFF00000000)
-                   : (uint32_t)source;
-      break;
-    case IREE_VM_ISA_INTEGER_CONVERT_U32_TO_I64:
-    case IREE_VM_ISA_INTEGER_CONVERT_I64_TO_I32:
-      result = (uint32_t)source;
-      break;
-    case IREE_VM_ISA_INTEGER_CONVERT_I32_TO_I8:
-      result = (uint8_t)source;
-      break;
+#define IREE_VM_BYTECODE_INTEGER_SIGN_EXTEND_CASE(selector, source_bit_count, \
+                                                  destination_bit_count)      \
+  case IREE_VM_ISA_INTEGER_CONVERT_##selector:                                \
+    result = iree_vm_bytecode_integer_sign_extend(source, (source_bit_count), \
+                                                  (destination_bit_count));   \
+    break;
+#define IREE_VM_BYTECODE_INTEGER_ZERO_EXTEND_CASE(selector, source_bit_count, \
+                                                  destination_bit_count)      \
+  case IREE_VM_ISA_INTEGER_CONVERT_##selector:                                \
+    result = iree_vm_bytecode_integer_low_bits(source, source_bit_count);     \
+    break;
+#define IREE_VM_BYTECODE_INTEGER_TRUNCATE_CASE(selector, source_bit_count,     \
+                                               destination_bit_count)          \
+  case IREE_VM_ISA_INTEGER_CONVERT_##selector:                                 \
+    result = iree_vm_bytecode_integer_low_bits(source, destination_bit_count); \
+    break;
+#define IREE_VM_BYTECODE_DEFINE_INTEGER_CONVERSION_CASES
+#include "iree/vm/bytecode/execution_tables.inl"
+#undef IREE_VM_BYTECODE_DEFINE_INTEGER_CONVERSION_CASES
+#undef IREE_VM_BYTECODE_INTEGER_TRUNCATE_CASE
+#undef IREE_VM_BYTECODE_INTEGER_ZERO_EXTEND_CASE
+#undef IREE_VM_BYTECODE_INTEGER_SIGN_EXTEND_CASE
     default:
-      result = (uint16_t)source;
-      break;
+      IREE_BUILTIN_UNREACHABLE();
   }
   values[record->dst_v8] = result;
 }
