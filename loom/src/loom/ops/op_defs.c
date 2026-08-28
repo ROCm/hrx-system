@@ -833,6 +833,27 @@ loom_string_id_t loom_func_like_export_symbol(loom_func_like_t func) {
   return loom_attr_as_string_id(attr);
 }
 
+iree_string_view_t loom_func_like_export_name(const loom_module_t* module,
+                                              const loom_symbol_t* symbol,
+                                              loom_func_like_t func) {
+  if (!module || !symbol || !loom_func_like_isa(func)) {
+    return iree_string_view_empty();
+  }
+  const loom_string_id_t export_name_id = loom_func_like_export_symbol(func);
+  if (export_name_id != LOOM_STRING_ID_INVALID &&
+      export_name_id < module->strings.count) {
+    const iree_string_view_t export_name =
+        module->strings.entries[export_name_id];
+    if (!iree_string_view_is_empty(export_name)) return export_name;
+  }
+  if ((loom_func_like_visibility(func) != 0 ||
+       iree_any_bit_set(symbol->flags, LOOM_SYMBOL_FLAG_PUBLIC)) &&
+      symbol->name_id < module->strings.count) {
+    return module->strings.entries[symbol->name_id];
+  }
+  return iree_string_view_empty();
+}
+
 loom_named_attr_slice_t loom_func_like_export_attrs(loom_func_like_t func) {
   if (!func.vtable ||
       func.vtable->export_attrs_attr_index == LOOM_ATTR_INDEX_NONE) {

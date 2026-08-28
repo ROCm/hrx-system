@@ -6,9 +6,54 @@
 
 #include "loom/target/arch/vm/lower/constants.h"
 
+#include <string.h>
+
+#include "iree/base/internal/math.h"
 #include "loom/codegen/low/builder.h"
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/vm/descriptors.h"
+
+static uint64_t loom_vm_float_constant_bits(loom_scalar_type_t scalar_type,
+                                            double value) {
+  switch (scalar_type) {
+    case LOOM_SCALAR_TYPE_F8E4M3:
+      return iree_math_f32_to_f8e4m3fn((float)value);
+    case LOOM_SCALAR_TYPE_F8E5M2:
+      return iree_math_f32_to_f8e5m2((float)value);
+    case LOOM_SCALAR_TYPE_F16:
+      return iree_math_f32_to_f16((float)value);
+    case LOOM_SCALAR_TYPE_BF16:
+      return iree_math_f32_to_bf16((float)value);
+    case LOOM_SCALAR_TYPE_F32: {
+      const float f32_value = (float)value;
+      uint32_t bits = 0;
+      memcpy(&bits, &f32_value, sizeof(bits));
+      return bits;
+    }
+    case LOOM_SCALAR_TYPE_F64: {
+      uint64_t bits = 0;
+      memcpy(&bits, &value, sizeof(bits));
+      return bits;
+    }
+    default:
+      IREE_ASSERT_UNREACHABLE("verified VM float constant type");
+      return 0;
+  }
+}
+
+uint64_t loom_vm_constant_bits_from_scalar_attr(loom_scalar_type_t scalar_type,
+                                                loom_attribute_t value) {
+  if (loom_scalar_type_is_float(scalar_type)) {
+    return loom_vm_float_constant_bits(scalar_type, loom_attr_as_f64(value));
+  }
+  const int64_t integer_value =
+      scalar_type == LOOM_SCALAR_TYPE_I1 && value.kind == LOOM_ATTR_BOOL
+          ? (loom_attr_as_bool(value) ? 1 : 0)
+          : loom_attr_as_i64(value);
+  const int32_t bit_width = loom_scalar_type_bitwidth(scalar_type);
+  IREE_ASSERT_GT(bit_width, 0);
+  return iree_math_mask_low_bits_u64((uint64_t)integer_value, bit_width);
+}
 
 uint16_t loom_vm_constant_descriptor_ordinal(uint64_t bits) {
   if (bits == 0) return VM_CORE_DESCRIPTOR_REF_CONSTANT_ZERO;

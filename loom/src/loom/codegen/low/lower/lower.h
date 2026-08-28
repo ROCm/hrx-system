@@ -751,6 +751,28 @@ typedef struct loom_low_lower_finalize_function_callback_t {
   void* user_data;
 } loom_low_lower_finalize_function_callback_t;
 
+typedef struct loom_low_lower_prepare_module_result_t {
+  // True when the source module satisfies the policy's preparation contract.
+  bool valid;
+  // True when preparation changed source IR or semantic module state.
+  bool changed;
+} loom_low_lower_prepare_module_result_t;
+
+typedef iree_status_t (*loom_low_lower_prepare_module_fn_t)(
+    void* user_data, loom_module_t* module,
+    iree_diagnostic_emitter_t diagnostic_emitter,
+    iree_arena_allocator_t* scratch_arena,
+    loom_low_lower_prepare_module_result_t* out_result);
+
+typedef struct loom_low_lower_prepare_module_callback_t {
+  // Optional callback invoked once before source symbol selection when the
+  // module contains a target record selecting this policy. Targets use this
+  // to canonicalize module structure required by ordinary source lowering.
+  loom_low_lower_prepare_module_fn_t fn;
+  // Caller-owned payload passed to |fn|.
+  void* user_data;
+} loom_low_lower_prepare_module_callback_t;
+
 typedef iree_status_t (*loom_low_lower_finalize_module_fn_t)(
     void* user_data, loom_module_t* module,
     loom_low_lower_module_state_t* module_state,
@@ -853,6 +875,8 @@ typedef struct loom_low_lower_policy_t {
   loom_low_lower_emit_op_callback_t emit_op;
   // Optional target-owned function finalizer.
   loom_low_lower_finalize_function_callback_t finalize_function;
+  // Optional target-owned source module preparation.
+  loom_low_lower_prepare_module_callback_t prepare_module;
   // Optional target-owned module finalizer.
   loom_low_lower_finalize_module_callback_t finalize_module;
 } loom_low_lower_policy_t;

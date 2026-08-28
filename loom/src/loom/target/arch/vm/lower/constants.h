@@ -21,6 +21,10 @@ extern "C" {
 // Selects the smallest VM constant instruction preserving |bits| exactly.
 uint16_t loom_vm_constant_descriptor_ordinal(uint64_t bits);
 
+// Converts a verified scalar attribute to its exact VM value-register bits.
+uint64_t loom_vm_constant_bits_from_scalar_attr(loom_scalar_type_t scalar_type,
+                                                loom_attribute_t value);
+
 // Materializes |bits| into one typed VM value register.
 iree_status_t loom_vm_constant_build(loom_builder_t* builder, uint64_t bits,
                                      loom_type_t result_type,

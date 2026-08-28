@@ -150,12 +150,14 @@ loom_cc_library(
   HDRS
     "lower/constants.h"
     "lower/control.h"
+    "lower/initialization.h"
     "lower/lower.h"
     "lower/resources.h"
     "lower/types.h"
   SRCS
     "lower/constants.c"
     "lower/control.c"
+    "lower/initialization.c"
     "lower/lower.c"
     "lower/resources.c"
   DEPS
@@ -177,6 +179,7 @@ loom_cc_library(
     loom::ops::op_defs
     loom::ops::scalar
     loom::ops::type_registry
+    loom::rewrite::rewriter
     loom::target::low_legality
     loom::target::registers
   PUBLIC
@@ -211,11 +214,13 @@ loom_cc_library(
   HDRS
     "abi/materialization.h"
     "contracts/materialization.h"
+    "initialization.h"
     "pass_registry.h"
     "provider.h"
   SRCS
     "abi/materialization.c"
     "contracts/materialization.c"
+    "initialization.c"
     "pass_registry.c"
     "provider.c"
   DEPS
@@ -229,7 +234,10 @@ loom_cc_library(
     iree::vm::bytecode::wire
     loom::codegen::low::builder
     loom::codegen::low::function
+    loom::error::error_defs
     loom::ir
+    loom::ops::func
+    loom::ops::global
     loom::ops::low
     loom::ops::op_defs
     loom::pass::builder
@@ -277,6 +285,7 @@ loom_check_test_suite(
     "test/source_low/function_contracts.loom-test"
     "test/source_low/function_values.loom-test"
     "test/source_low/low_verification.loom-test"
+    "test/source_low/module_initialization.loom-test"
     "test/source_low/module_resources.loom-test"
     "test/source_low/program_failure.loom-test"
     "test/source_low/selector_assembly.loom-test"

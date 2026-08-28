@@ -8,6 +8,7 @@
 
 #include "loom/target/arch/vm/abi/materialization.h"
 #include "loom/target/arch/vm/contracts/materialization.h"
+#include "loom/target/arch/vm/initialization.h"
 
 static const loom_pass_descriptor_t kVmPassDescriptors[] = {
     {
@@ -19,6 +20,11 @@ static const loom_pass_descriptor_t kVmPassDescriptors[] = {
         .key = IREE_SVL("vm-materialize-function-contracts"),
         .info = loom_vm_materialize_function_contracts_pass_info,
         .function_run = loom_vm_materialize_function_contracts_run,
+    },
+    {
+        .key = IREE_SVL("vm-materialize-initializer"),
+        .info = loom_vm_materialize_initializer_pass_info,
+        .module_run = loom_vm_materialize_initializer_run,
     },
 };
 

@@ -1354,6 +1354,13 @@ loom_named_attr_slice_t loom_func_like_abi_attrs(loom_func_like_t func);
 // Returns the export symbol string ID, or LOOM_STRING_ID_INVALID if absent.
 loom_string_id_t loom_func_like_export_symbol(loom_func_like_t func);
 
+// Returns the effective exported name of |func|, or an empty view when the
+// function is module-internal. An explicit export name takes precedence over
+// the symbol name used by public functions.
+iree_string_view_t loom_func_like_export_name(const loom_module_t* module,
+                                              const loom_symbol_t* symbol,
+                                              loom_func_like_t func);
+
 // Returns the export payload attrs, or an empty slice if absent.
 loom_named_attr_slice_t loom_func_like_export_attrs(loom_func_like_t func);
 

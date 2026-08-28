@@ -30,21 +30,6 @@ static iree_string_view_t loom_vm_module_layout_string_or_empty(
   return module->strings.entries[string_id];
 }
 
-static iree_string_view_t loom_vm_module_layout_export_name(
-    const loom_module_t* module, const loom_symbol_t* symbol,
-    loom_op_t* function_op) {
-  loom_func_like_t function = loom_func_like_cast(module, function_op);
-  if (!loom_func_like_isa(function)) return iree_string_view_empty();
-  iree_string_view_t export_name = loom_vm_module_layout_string_or_empty(
-      module, loom_func_like_export_symbol(function));
-  if (!iree_string_view_is_empty(export_name)) return export_name;
-  if (loom_func_like_visibility(function) != 0 ||
-      iree_any_bit_set(symbol->flags, LOOM_SYMBOL_FLAG_PUBLIC)) {
-    return loom_vm_module_layout_string_or_empty(module, symbol->name_id);
-  }
-  return iree_string_view_empty();
-}
-
 static int loom_vm_module_layout_compare_export_names(const void* lhs_ptr,
                                                       const void* rhs_ptr) {
   const loom_vm_module_function_layout_t* lhs =
@@ -224,8 +209,8 @@ static iree_status_t loom_vm_module_layout_populate_functions(
             .kind = IREE_VM_ISA_CONTROL_CALL_TARGET_LOCAL,
             .ordinal = (uint16_t)(function_index - 1),
         };
-    function->export_name =
-        loom_vm_module_layout_export_name(module, symbol, function_op);
+    function->export_name = loom_func_like_export_name(
+        module, symbol, loom_func_like_cast(module, function_op));
     if (!iree_string_view_is_empty(function->export_name)) {
       ++layout->export_count;
     }

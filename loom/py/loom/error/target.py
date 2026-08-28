@@ -1306,6 +1306,40 @@ ERR_TARGET_071 = ErrorDef(
     ),
 )
 
+# ERR_TARGET_072: VM inline initialization target is ambiguous.
+ERR_TARGET_072 = ErrorDef(
+    domain=ErrorDomain.TARGET,
+    code=72,
+    severity=Severity.ERROR,
+    summary="VM inline initialization target is ambiguous.",
+    message=(
+        "inline VM global initialization has {target_count} VM targets and "
+        "no authored initializer selecting one"
+    ),
+    params=(ErrorParam("target_count", ParamKind.U32),),
+    fix_hint=(
+        "Author one initializer with an explicit VM target when a module "
+        "contains multiple VM targets"
+    ),
+)
+
+# ERR_TARGET_073: Reserved VM initializer export has the wrong convention.
+ERR_TARGET_073 = ErrorDef(
+    domain=ErrorDomain.TARGET,
+    code=73,
+    severity=Severity.ERROR,
+    summary="Reserved VM initializer export has the wrong convention.",
+    message=(
+        "function '@{function_name}' exports the reserved VM name "
+        "'initialize' without the initializer calling convention"
+    ),
+    params=(ErrorParam("function_name", ParamKind.STRING),),
+    fix_hint=(
+        "Use the initializer calling convention for the VM initializer or "
+        "choose a different export name"
+    ),
+)
+
 ALL_TARGET_ERRORS = (
     ERR_TARGET_001,
     ERR_TARGET_002,
@@ -1370,4 +1404,6 @@ ALL_TARGET_ERRORS = (
     ERR_TARGET_069,
     ERR_TARGET_070,
     ERR_TARGET_071,
+    ERR_TARGET_072,
+    ERR_TARGET_073,
 )

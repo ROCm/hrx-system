@@ -6,9 +6,6 @@
 
 #include "loom/target/arch/vm/lower/lower.h"
 
-#include <string.h>
-
-#include "iree/base/internal/math.h"
 #include "loom/error/error_catalog.h"
 #include "loom/ir/module.h"
 #include "loom/ops/cfg/ops.h"
@@ -20,6 +17,7 @@
 #include "loom/target/arch/vm/descriptors.h"
 #include "loom/target/arch/vm/lower/constants.h"
 #include "loom/target/arch/vm/lower/control.h"
+#include "loom/target/arch/vm/lower/initialization.h"
 #include "loom/target/arch/vm/lower/resources.h"
 #include "loom/target/arch/vm/lower/types.h"
 
@@ -108,48 +106,6 @@ static bool loom_vm_source_lowering_row_matches(
   return true;
 }
 
-static uint64_t loom_vm_float_constant_bits(loom_scalar_type_t scalar_type,
-                                            double value) {
-  switch (scalar_type) {
-    case LOOM_SCALAR_TYPE_F8E4M3:
-      return iree_math_f32_to_f8e4m3fn((float)value);
-    case LOOM_SCALAR_TYPE_F8E5M2:
-      return iree_math_f32_to_f8e5m2((float)value);
-    case LOOM_SCALAR_TYPE_F16:
-      return iree_math_f32_to_f16((float)value);
-    case LOOM_SCALAR_TYPE_BF16:
-      return iree_math_f32_to_bf16((float)value);
-    case LOOM_SCALAR_TYPE_F32: {
-      const float f32_value = (float)value;
-      uint32_t bits = 0;
-      memcpy(&bits, &f32_value, sizeof(bits));
-      return bits;
-    }
-    case LOOM_SCALAR_TYPE_F64: {
-      uint64_t bits = 0;
-      memcpy(&bits, &value, sizeof(bits));
-      return bits;
-    }
-    default:
-      IREE_ASSERT_UNREACHABLE("verified VM float constant type");
-      return 0;
-  }
-}
-
-static uint64_t loom_vm_constant_bits(loom_scalar_type_t scalar_type,
-                                      loom_attribute_t value) {
-  if (loom_scalar_type_is_float(scalar_type)) {
-    return loom_vm_float_constant_bits(scalar_type, loom_attr_as_f64(value));
-  }
-  const int64_t integer_value =
-      scalar_type == LOOM_SCALAR_TYPE_I1 && value.kind == LOOM_ATTR_BOOL
-          ? (loom_attr_as_bool(value) ? 1 : 0)
-          : loom_attr_as_i64(value);
-  const int32_t bit_width = loom_scalar_type_bitwidth(scalar_type);
-  IREE_ASSERT_GT(bit_width, 0);
-  return iree_math_mask_low_bits_u64((uint64_t)integer_value, bit_width);
-}
-
 static bool loom_vm_try_get_source_constant(
     const loom_module_t* module, const loom_op_t* source_op,
     loom_vm_source_constant_t* out_constant) {
@@ -170,7 +126,8 @@ static bool loom_vm_try_get_source_constant(
   const loom_type_t result_type = loom_module_value_type(module, result);
   *out_constant = (loom_vm_source_constant_t){
       .result = result,
-      .bits = loom_vm_constant_bits(loom_type_element_type(result_type), value),
+      .bits = loom_vm_constant_bits_from_scalar_attr(
+          loom_type_element_type(result_type), value),
   };
   return true;
 }
@@ -235,6 +192,16 @@ static iree_status_t loom_vm_map_abi_layout(
       result_types, result_count, &layout_attr));
   *out_abi_layout = loom_attr_as_dict(layout_attr);
   return iree_ok_status();
+}
+
+static iree_status_t loom_vm_emit_initializer_preamble(
+    void* user_data, loom_low_lower_context_t* context) {
+  (void)user_data;
+  if (loom_func_like_cc(loom_low_lower_context_source_function(context)) !=
+      LOOM_FUNC_CC_INITIALIZER) {
+    return iree_ok_status();
+  }
+  return loom_vm_module_resources_emit_initializer_preamble(context);
 }
 
 static iree_status_t loom_vm_select_op(void* user_data,
@@ -365,6 +332,16 @@ static iree_status_t loom_vm_finalize_module(
   return loom_vm_module_resources_finalize(module, module_state, scratch_arena);
 }
 
+static iree_status_t loom_vm_prepare_module(
+    void* user_data, loom_module_t* module,
+    iree_diagnostic_emitter_t diagnostic_emitter,
+    iree_arena_allocator_t* scratch_arena,
+    loom_low_lower_prepare_module_result_t* out_result) {
+  (void)user_data;
+  return loom_vm_materialize_initializer(module, diagnostic_emitter,
+                                         scratch_arena, out_result);
+}
+
 static const loom_low_lower_policy_t kVmCoreLowLowerPolicy = {
     .name = IREE_SVL("vm-core-low-lower"),
     .flags = LOOM_LOW_LOWER_POLICY_FLAG_MODULE_IMPORTS,
@@ -372,6 +349,8 @@ static const loom_low_lower_policy_t kVmCoreLowLowerPolicy = {
     .map_type = {.fn = loom_vm_map_type, .user_data = NULL},
     .source_type_supported = {.fn = loom_vm_source_type_supported,
                               .user_data = NULL},
+    .emit_preamble = {.fn = loom_vm_emit_initializer_preamble,
+                      .user_data = NULL},
     .map_abi_layout = {.fn = loom_vm_map_abi_layout, .user_data = NULL},
     .switch_lowering =
         {
@@ -381,6 +360,7 @@ static const loom_low_lower_policy_t kVmCoreLowLowerPolicy = {
         },
     .select_op = {.fn = loom_vm_select_op, .user_data = NULL},
     .emit_op = {.fn = loom_vm_emit_op, .user_data = NULL},
+    .prepare_module = {.fn = loom_vm_prepare_module, .user_data = NULL},
     .finalize_module = {.fn = loom_vm_finalize_module, .user_data = NULL},
 };
 

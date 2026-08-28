@@ -8,10 +8,12 @@
 
 #include <string.h>
 
+#include "loom/codegen/low/builder.h"
 #include "loom/ir/module.h"
 #include "loom/ops/global/ops.h"
 #include "loom/target/arch/vm/abi/layout.h"
 #include "loom/target/arch/vm/descriptors.h"
+#include "loom/target/arch/vm/lower/constants.h"
 #include "loom/target/arch/vm/ops/ops.h"
 
 typedef uint8_t loom_vm_module_resource_kind_t;
@@ -354,6 +356,93 @@ iree_status_t loom_vm_module_resource_emit_op(loom_low_lower_context_t* context,
     IREE_RETURN_IF_ERROR(
         loom_low_lower_bind_value(context, loom_op_const_results(source_op)[0],
                                   loom_op_const_results(low_op)[0]));
+  }
+  return iree_ok_status();
+}
+
+static bool loom_vm_module_resource_inline_initializer(
+    const loom_op_t* source_op, loom_value_id_t* out_type_value,
+    loom_attribute_t* out_initializer) {
+  if (loom_global_constant_isa(source_op)) {
+    *out_type_value = loom_global_constant_type(source_op);
+    *out_initializer = loom_global_constant_initializer(source_op);
+  } else if (loom_global_variable_isa(source_op)) {
+    *out_type_value = loom_global_variable_type(source_op);
+    *out_initializer = loom_global_variable_initializer(source_op);
+  } else {
+    return false;
+  }
+  return !loom_attr_is_absent(*out_initializer);
+}
+
+static iree_status_t loom_vm_module_resource_build_value_store(
+    loom_builder_t* builder, uint16_t descriptor_ordinal,
+    uint16_t global_ordinal, loom_value_id_t value,
+    loom_location_id_t location) {
+  const loom_low_descriptor_set_t* descriptor_set =
+      loom_vm_core_descriptor_set();
+  const loom_low_descriptor_t* descriptor =
+      loom_low_descriptor_set_descriptor_at(descriptor_set, descriptor_ordinal);
+  IREE_ASSERT(descriptor != NULL);
+  IREE_ASSERT_EQ(descriptor->immediate_count, 1u);
+  const loom_low_immediate_t* immediate =
+      &descriptor_set->immediates[descriptor->immediate_start];
+  loom_named_attr_t ordinal_attr = {
+      .value = loom_attr_i64(global_ordinal),
+  };
+  IREE_RETURN_IF_ERROR(loom_builder_intern_string(
+      builder,
+      loom_low_descriptor_set_string(descriptor_set,
+                                     immediate->field_name_string_offset),
+      &ordinal_attr.name_id));
+  loom_op_t* store_op = NULL;
+  return loom_low_build_resolved_descriptor_op(
+      builder, descriptor_set, descriptor, &value, /*operand_count=*/1,
+      loom_make_named_attr_slice(&ordinal_attr, 1), /*result_types=*/NULL,
+      /*result_count=*/0, /*tied_results=*/NULL, /*tied_result_count=*/0,
+      location, &store_op);
+}
+
+iree_status_t loom_vm_module_resources_emit_initializer_preamble(
+    loom_low_lower_context_t* context) {
+  loom_module_t* module = loom_low_lower_context_module(context);
+  loom_vm_module_resource_plan_t* plan = NULL;
+  IREE_RETURN_IF_ERROR(loom_vm_module_resource_plan_get(
+      module, loom_low_lower_context_module_state(context), &plan));
+
+  for (iree_host_size_t i = 0; i < plan->symbol_count; ++i) {
+    const loom_op_t* source_op = module->symbols.entries[i].defining_op;
+    if (source_op == NULL) continue;
+    loom_value_id_t type_value = LOOM_VALUE_ID_INVALID;
+    loom_attribute_t initializer = loom_attr_absent();
+    if (!loom_vm_module_resource_inline_initializer(source_op, &type_value,
+                                                    &initializer)) {
+      continue;
+    }
+
+    const loom_type_t source_type = loom_module_value_type(module, type_value);
+    loom_type_t low_type = loom_type_none();
+    IREE_RETURN_IF_ERROR(
+        loom_low_lower_map_type(context, source_op, source_type, &low_type));
+    if (loom_type_kind(low_type) == LOOM_TYPE_NONE) continue;
+
+    const loom_vm_module_resource_entry_t entry = plan->entries_by_symbol[i];
+    if (entry.kind != LOOM_VM_MODULE_RESOURCE_KIND_VALUE_IMMUTABLE &&
+        entry.kind != LOOM_VM_MODULE_RESOURCE_KIND_VALUE_MUTABLE) {
+      return iree_make_status(
+          IREE_STATUS_INTERNAL,
+          "VM scalar initializer did not map to a value global");
+    }
+    const uint64_t bits = loom_vm_constant_bits_from_scalar_attr(
+        loom_type_element_type(source_type), initializer);
+    loom_value_id_t value = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(
+        loom_vm_constant_build(loom_low_lower_context_builder(context), bits,
+                               low_type, source_op->location, &value));
+    IREE_RETURN_IF_ERROR(loom_vm_module_resource_build_value_store(
+        loom_low_lower_context_builder(context),
+        kVmModuleResourceDescriptors[entry.kind].store, entry.ordinal, value,
+        source_op->location));
   }
   return iree_ok_status();
 }

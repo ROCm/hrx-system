@@ -1,0 +1,214 @@
+// RUN: pass vm-materialize-initializer,vm-materialize-initializer
+
+vm.target<core> @target
+
+global.constant @answer : i32 = 42
+
+func.def initializer target(@target) @setup() {
+  func.return
+}
+
+// ----
+vm.target<core> @target
+
+global.constant @answer : i32 = 42
+
+func.def initializer target(@target) export("initialize") @setup() {
+  func.return
+}
+
+// ====
+
+// RUN: pass vm-materialize-initializer
+
+vm.target<core> @target
+
+func.def target(@target) @ordinary() {
+  func.return
+}
+
+// ----
+vm.target<core> @target
+
+func.def target(@target) @ordinary() {
+  func.return
+}
+
+// ====
+
+// RUN: pass vm-materialize-initializer
+
+vm.target<core> @first_target
+vm.target<core> @second_target
+
+global.variable @count : i64 = 0
+
+func.def initializer target(@second_target) @setup() {
+  func.return
+}
+
+// ----
+vm.target<core> @first_target
+
+vm.target<core> @second_target
+
+global.variable @count : i64 = 0
+
+func.def initializer target(@second_target) export("initialize") @setup() {
+  func.return
+}
+
+// ====
+
+// RUN: pass vm-materialize-initializer
+
+vm.target<core> @target
+
+global.variable @count : i64 = 0
+
+func.def target(@target) @__vm_initialize() {
+  func.return
+}
+
+// ----
+vm.target<core> @target
+
+global.variable @count : i64 = 0
+
+func.def target(@target) @__vm_initialize() {
+  func.return
+}
+
+func.def initializer target(@target) export("initialize") @__vm_initialize$1() {
+  func.return
+}
+
+// ====
+
+// RUN: emit source-low output=module
+
+vm.target<core> @target
+
+global.constant @answer : i32 = 42
+global.variable @scale : f32 = 1.5
+
+func.def initializer target(@target) @setup(%seed: i64) {
+  func.return
+}
+
+// ----
+vm.target<core> @target
+
+global.constant @answer : i32 = 42
+
+global.variable @scale : f32 = 1.5
+
+low.func.def initializer target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i64>) -> ()>}) export("initialize") @setup(%seed: reg<vm.value : i64>) asm {
+  %4 = constant.s16 42 : reg<vm.value : i32>
+  global.value.immutable.store %4, 0
+  %5 = constant.i32 1069547520 : reg<vm.value : f32>
+  global.value.mutable.store %5, 1
+  return
+}
+vm.global @answer ordinal(0)
+vm.global @scale ordinal(1)
+
+// ====
+
+// RUN: emit source-low output=module
+
+vm.target<core> @target
+
+global.variable @count : i64 = -1
+
+func.def target(@target) @read_count() -> (i64) {
+  %count = global.load @count : i64
+  func.return %count : i64
+}
+
+// ----
+vm.target<core> @target
+
+global.variable @count : i64 = -1
+
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<() -> (reg<vm.value : i64>)>}) @read_count() -> (reg<vm.value : i64>) asm {
+  %count = global.value.mutable.load 0 : reg<vm.value : i64>
+  return %count
+}
+
+low.func.def initializer target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<() -> ()>}) export("initialize") @__vm_initialize() asm {
+  %5 = constant.s16 -1 : reg<vm.value : i64>
+  global.value.mutable.store %5, 0
+  return
+}
+vm.global @count ordinal(0)
+
+// ====
+
+// RUN: pass vm-materialize-initializer
+
+vm.target<core> @target
+
+func.def initializer target(@target) @first() {
+  func.return
+}
+
+// ERROR@+1: SYMBOL/005 {symbol_name="initialize"}
+func.def initializer target(@target) @second() {
+  func.return
+}
+
+// ====
+
+// RUN: pass vm-materialize-initializer
+
+vm.target<core> @target
+
+// ERROR@+1: STRUCTURE/002 {op_name="func.def", actual_count="1", expected_count="0"}
+func.def initializer target(@target) @returns_value() -> (i32) {
+  %value = scalar.constant 0 : i32
+  func.return %value : i32
+}
+
+// ====
+
+// RUN: pass vm-materialize-initializer
+
+vm.target<core> @target
+
+// ERROR@+1: STRUCTURE/027 {attr_name="export", actual_value="setup"}
+func.def initializer target(@target) export("setup") @wrong_export() {
+  func.return
+}
+
+// ====
+
+// RUN: pass vm-materialize-initializer
+
+vm.target<core> @target
+
+// ERROR@+1: TARGET/073 {function_name="ordinary"}
+func.def target(@target) export("initialize") @ordinary() {
+  func.return
+}
+
+// ====
+
+// RUN: pass vm-materialize-initializer
+
+vm.target<core> @target
+
+// ERROR@+1: TARGET/073 {function_name="initialize"}
+func.def public target(@target) @initialize() {
+  func.return
+}
+
+// ====
+
+// RUN: pass vm-materialize-initializer
+
+vm.target<core> @first_target
+vm.target<core> @second_target
+
+// ERROR@+1: TARGET/072 {target_count="2"}
+global.variable @count : i64 = 0

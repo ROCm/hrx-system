@@ -326,8 +326,21 @@ iree_status_t loom_low_source_to_low_run(loom_pass_t* pass,
           loom_target_pass_capability_function_versions(target_capability),
       .collect_target_candidates = record_source_low_targets,
   };
-  iree_status_t status = loom_low_select_source_symbols(
-      module, &selection_options, &selection_arena, &selection_list);
+  loom_low_lower_prepare_module_result_t preparation_result = {0};
+  iree_status_t status = loom_low_prepare_source_module(
+      module, &selection_options, &selection_arena, &preparation_result);
+  if (preparation_result.changed) {
+    loom_pass_value_fact_owner_invalidate(pass->value_facts);
+    loom_pass_mark_changed(pass);
+  }
+  if (iree_status_is_ok(status) && !preparation_result.valid) {
+    iree_arena_deinitialize(&selection_arena);
+    return iree_ok_status();
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_low_select_source_symbols(module, &selection_options,
+                                            &selection_arena, &selection_list);
+  }
   for (iree_host_size_t i = 0;
        i < selection_list.count && iree_status_is_ok(status); ++i) {
     status = loom_low_source_to_low_record_target_specialization(

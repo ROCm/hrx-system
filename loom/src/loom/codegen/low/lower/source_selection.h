@@ -118,6 +118,18 @@ typedef struct loom_low_source_selection_list_t {
   iree_host_size_t count;
 } loom_low_source_selection_list_t;
 
+// Invokes each distinct target-selected policy's source module preparation
+// callback once in target-record order.
+//
+// Preparation occurs before source symbol selection because callbacks may add
+// ordinary source functions that must participate in lowering. The returned
+// result is valid and unchanged when no target record selects a policy with a
+// preparation callback.
+iree_status_t loom_low_prepare_source_module(
+    loom_module_t* module, const loom_low_source_selection_options_t* options,
+    iree_arena_allocator_t* arena,
+    loom_low_lower_prepare_module_result_t* out_result);
+
 // Selects all source funcs and import declarations compatible with the injected
 // target-low registries.
 //

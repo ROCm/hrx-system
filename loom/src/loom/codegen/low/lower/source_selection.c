@@ -11,8 +11,84 @@
 #include "loom/analysis/symbol_facts.h"
 #include "loom/ir/module.h"
 #include "loom/ops/func_symbol_facts.h"
+#include "loom/ops/op_defs.h"
 #include "loom/ops/target/facts.h"
 #include "loom/target/function_contract.h"
+
+iree_status_t loom_low_prepare_source_module(
+    loom_module_t* module, const loom_low_source_selection_options_t* options,
+    iree_arena_allocator_t* arena,
+    loom_low_lower_prepare_module_result_t* out_result) {
+  *out_result = (loom_low_lower_prepare_module_result_t){
+      .valid = true,
+  };
+  if (options->policy_registry == NULL ||
+      options->policy_registry->entry_count == 0 ||
+      module->symbols.count == 0) {
+    return iree_ok_status();
+  }
+
+  iree_host_size_t prepare_policy_capacity = 0;
+  for (iree_host_size_t i = 0; i < options->policy_registry->entry_count; ++i) {
+    const loom_low_lower_policy_t* policy =
+        options->policy_registry->entries[i].policy;
+    if (policy != NULL && policy->prepare_module.fn != NULL) {
+      ++prepare_policy_capacity;
+    }
+  }
+  if (prepare_policy_capacity == 0) return iree_ok_status();
+
+  const loom_low_lower_policy_t** prepare_policies = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, prepare_policy_capacity,
+                                                 sizeof(*prepare_policies),
+                                                 (void**)&prepare_policies));
+  iree_host_size_t prepare_policy_count = 0;
+  loom_symbol_fact_table_t fact_table = {0};
+  loom_symbol_fact_table_initialize(&fact_table, arena);
+  for (iree_host_size_t i = 0; i < module->symbols.count; ++i) {
+    const loom_symbol_t* symbol = &module->symbols.entries[i];
+    if (!loom_symbol_implements(symbol, LOOM_SYMBOL_INTERFACE_TARGET)) {
+      continue;
+    }
+    const loom_symbol_facts_base_t* base_facts = NULL;
+    IREE_RETURN_IF_ERROR(loom_symbol_fact_table_lookup(
+        &fact_table, module, (loom_symbol_id_t)i, &base_facts));
+    const loom_target_symbol_facts_t* target_facts =
+        loom_target_symbol_facts_cast(base_facts);
+    if (target_facts == NULL) continue;
+    const loom_low_lower_policy_t* policy =
+        loom_low_lower_policy_registry_lookup_for_bundle(
+            options->policy_registry,
+            loom_target_facts_bundle(target_facts->projection));
+    if (policy == NULL || policy->prepare_module.fn == NULL) continue;
+
+    bool seen = false;
+    for (iree_host_size_t j = 0; j < prepare_policy_count; ++j) {
+      if (prepare_policies[j] == policy) {
+        seen = true;
+        break;
+      }
+    }
+    if (!seen) {
+      IREE_ASSERT_LT(prepare_policy_count, prepare_policy_capacity);
+      prepare_policies[prepare_policy_count++] = policy;
+    }
+  }
+
+  for (iree_host_size_t i = 0; i < prepare_policy_count; ++i) {
+    loom_low_lower_prepare_module_result_t policy_result = {0};
+    const loom_low_lower_policy_t* policy = prepare_policies[i];
+    IREE_RETURN_IF_ERROR(policy->prepare_module.fn(
+        policy->prepare_module.user_data, module, options->diagnostic_emitter,
+        arena, &policy_result));
+    out_result->changed |= policy_result.changed;
+    if (!policy_result.valid) {
+      out_result->valid = false;
+      break;
+    }
+  }
+  return iree_ok_status();
+}
 
 static iree_status_t loom_low_source_selection_lookup_func_facts(
     const loom_module_t* module, loom_symbol_fact_table_t* fact_table,

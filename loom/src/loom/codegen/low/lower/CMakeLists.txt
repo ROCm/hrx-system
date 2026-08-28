@@ -92,6 +92,7 @@ loom_cc_library(
     loom::error::error_defs
     loom::ir
     loom::ops::func_symbol_facts
+    loom::ops::op_defs
     loom::ops::target
     loom::target::function_contract
     loom::target::function_version

@@ -29,6 +29,10 @@ iree_status_t loom_vm_module_resource_emit_op(loom_low_lower_context_t* context,
                                               loom_low_lower_plan_t plan,
                                               bool* out_handled);
 
+// Emits inline scalar global initializers into the active VM initializer.
+iree_status_t loom_vm_module_resources_emit_initializer_preamble(
+    loom_low_lower_context_t* context);
+
 // Materializes physical VM resource records from the module resource plan.
 iree_status_t loom_vm_module_resources_finalize(
     loom_module_t* module, loom_low_lower_module_state_t* module_state,
