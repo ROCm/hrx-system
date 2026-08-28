@@ -1278,6 +1278,7 @@ void loom_amdgpu_select_vector_fp8_decode_plan(
   IREE_ASSERT_EQ(plan->strategy_kind,
                  LOOM_AMDGPU_VECTOR_FLOAT_CONVERSION_STRATEGY_STANDARD);
   plan->strategy_kind = LOOM_AMDGPU_VECTOR_FLOAT_CONVERSION_STRATEGY_FP8_DECODE;
+  plan->strategy.fp8_decode = (loom_amdgpu_vector_fp8_decode_plan_t){0};
   if (loom_amdgpu_vector_fp8_scalef32_is_identity(context, plan)) {
     plan->scale_source = LOOM_VALUE_ID_INVALID;
     plan->scale_format = LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE;
