@@ -24,6 +24,19 @@ DEFAULT_LOCAL_TMP_ROOT = REPO_ROOT / ".tmp"
 BAZEL_SH_ENV = "BAZEL_SH"
 
 
+def _environment_value(
+    environ: Mapping[str, str], name: str, *, platform_name: str
+) -> str | None:
+    """Returns an environment value using the selected platform's name rules."""
+    if platform_name != "nt":
+        return environ.get(name)
+    name_key = name.upper()
+    for candidate_name, value in environ.items():
+        if candidate_name.upper() == name_key:
+            return value
+    return None
+
+
 def _read_windows_short_path(path: str) -> str | None:
     """Returns the Win32 short spelling of an existing path when available."""
     import ctypes
@@ -197,7 +210,9 @@ def find_windows_bazel_sh(
 ) -> str | None:
     environ = os.environ if environ is None else environ
     platform_name = os.name if platform_name is None else platform_name
-    configured_path = environ.get(BAZEL_SH_ENV)
+    configured_path = _environment_value(
+        environ, BAZEL_SH_ENV, platform_name=platform_name
+    )
     if configured_path:
         return bazel_compatible_windows_shell_path(
             configured_path,
@@ -208,7 +223,10 @@ def find_windows_bazel_sh(
         return None
 
     if git_executable is None:
-        git_executable = shutil.which("git", path=environ.get("PATH"))
+        git_executable = shutil.which(
+            "git",
+            path=_environment_value(environ, "PATH", platform_name=platform_name),
+        )
 
     candidates = []
     if git_executable:
@@ -219,7 +237,7 @@ def find_windows_bazel_sh(
             )
 
     for key in ("ProgramFiles", "ProgramFiles(x86)", "LocalAppData"):
-        root = environ.get(key)
+        root = _environment_value(environ, key, platform_name=platform_name)
         if not root:
             continue
         root_path = Path(root)

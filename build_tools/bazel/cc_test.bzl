@@ -25,6 +25,7 @@ load(
     "cc_execution_impl",
     "cc_execution_initializer",
 )
+load(":cc_opts.bzl", "cc_opts")
 
 # This is a rules_cc test rule extension, not a wrapper target. ctx.super()
 # preserves the parent rule's compilation, coverage, launcher, platform, and
@@ -64,7 +65,7 @@ def _iree_cc_test_impl(
         srcs = srcs,
         hdrs = None,
         textual_hdrs = None,
-        deps = deps,
+        deps = cc_opts.iree_code_link_dependencies(deps),
         data = data,
         copts = copts,
         conlyopts = conlyopts,
@@ -73,7 +74,7 @@ def _iree_cc_test_impl(
         local_defines = local_defines,
         includes = includes,
         system_includes = system_includes,
-        linkopts = linkopts,
+        linkopts = cc_opts.iree_code_link_options(linkopts),
         linkstatic = linkstatic,
     )
     target_attrs = cc_attrs.merge_dicts(kwargs, target_attrs)

@@ -94,14 +94,13 @@ build:sanitizer --strip=never
 build:sanitizer --copt=-g
 build:sanitizer --force_ignore_dash_static
 build:sanitizer --test_timeout=120,600,1800,-1
-build:sanitizer --copt=-fno-omit-frame-pointer
+build:sanitizer --//build_tools/bazel:sanitizer=true
 
 # AddressSanitizer.
 build:asan --config=sanitizer
 build:asan --features=asan
 build:asan --copt=-fsanitize=address
 build:asan --copt=-fsanitize-address-use-after-scope
-build:asan --linkopt=-fsanitize=address
 build:asan --cc_output_directory_tag=asan
 build:asan --copt=-DADDRESS_SANITIZER
 
@@ -146,7 +145,6 @@ build:fuzzer --config=sanitizer
 build:fuzzer --features=asan
 build:fuzzer --copt=-fsanitize=address
 build:fuzzer --copt=-fsanitize-address-use-after-scope
-build:fuzzer --linkopt=-fsanitize=address
 build:fuzzer --copt=-DADDRESS_SANITIZER
 build:fuzzer --copt=-fsanitize=fuzzer-no-link
 build:fuzzer --linkopt=-fsanitize=fuzzer-no-link

@@ -12,6 +12,7 @@ import subprocess
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from build_tools.devtools import smoke_test_lib
 
@@ -59,6 +60,42 @@ class RunCommandTest(unittest.TestCase):
         self.assertIn("smoke:", stdout.getvalue())
         self.assertIn("failed child stdout", stderr.getvalue())
         self.assertIn("failed child stderr", stderr.getvalue())
+
+
+class RunSmokeTest(unittest.TestCase):
+    def test_runs_against_live_repository_without_copying(self):
+        scenario_runner = mock.Mock()
+        with (
+            mock.patch.object(smoke_test_lib, "parse_arguments"),
+            mock.patch.object(
+                smoke_test_lib,
+                "repository_status",
+                side_effect=["candidate\n", "candidate\n"],
+            ),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            result = smoke_test_lib.run_smoke(
+                description="test smoke",
+                scenario_runner=scenario_runner,
+            )
+
+        self.assertEqual(result, 0)
+        scenario_runner.assert_called_once_with(smoke_test_lib.REPO_ROOT)
+
+    def test_fails_when_dry_run_mutates_repository(self):
+        with (
+            mock.patch.object(smoke_test_lib, "parse_arguments"),
+            mock.patch.object(
+                smoke_test_lib,
+                "repository_status",
+                side_effect=["candidate\n", "candidate\n?? generated.txt\n"],
+            ),
+            self.assertRaisesRegex(RuntimeError, "generated.txt"),
+        ):
+            smoke_test_lib.run_smoke(
+                description="test smoke",
+                scenario_runner=lambda _repo_root: None,
+            )
 
 
 if __name__ == "__main__":
