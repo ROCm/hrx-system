@@ -92,6 +92,10 @@ func.def @helper(%x: i32) -> (i32) {
   const loom_value_id_t dead_value =
       loom_func_call_results(dead_call).values[0];
   IREE_ASSERT_OK(loom_op_erase(source, dead_call));
+  const loom_op_t* live_call = entry_block->first_op;
+  ASSERT_TRUE(loom_func_call_isa(live_call));
+  const loom_op_t* entry_return = live_call->next_op;
+  ASSERT_TRUE(loom_func_return_isa(entry_return));
 
   const loom_module_size_hints_t hints = {
       /*.value_count=*/0,
@@ -129,7 +133,19 @@ func.def @helper(%x: i32) -> (i32) {
   IREE_ASSERT_OK(loom_ir_module_projection_initialize(
       source, target, target_symbols.data(), target_symbols.size(),
       &projection));
+  loom_ir_remap_op_projection_t operation_projection[] = {
+      {/*.source_op=*/live_call, /*.target_op=*/nullptr},
+      {/*.source_op=*/entry_return, /*.target_op=*/nullptr},
+  };
+  IREE_ASSERT_OK(loom_ir_module_projection_track_operations(
+      &projection, operation_projection, IREE_ARRAYSIZE(operation_projection)));
   IREE_ASSERT_OK(loom_ir_module_projection_clone(&projection, &scratch_arena_));
+  EXPECT_TRUE(loom_func_call_isa(operation_projection[0].target_op));
+  EXPECT_TRUE(loom_func_return_isa(operation_projection[1].target_op));
+  EXPECT_NE(operation_projection[0].target_op, live_call);
+  EXPECT_NE(operation_projection[1].target_op, entry_return);
+  EXPECT_EQ(operation_projection[0].target_op->next_op,
+            operation_projection[1].target_op);
   for (loom_value_id_t source_value_id = 0;
        source_value_id < source->values.count; ++source_value_id) {
     loom_value_id_t target_value_id = LOOM_VALUE_ID_INVALID;

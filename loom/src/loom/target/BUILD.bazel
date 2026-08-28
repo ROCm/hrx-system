@@ -610,6 +610,7 @@ loom_cc_library(
         "//loom/src/loom/pass:builder",
         "//loom/src/loom/pass:environment",
         "//loom/src/loom/sanitizer:options",
+        "//loom/src/loom/transforms/symbol:template_expansion_pipeline",
         "//runtime/src/iree/base",
     ],
 )

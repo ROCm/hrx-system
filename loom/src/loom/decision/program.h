@@ -63,6 +63,25 @@ loom_decision_program_constant_ref(uint32_t ordinal) {
   return UINT32_C(0x80000000) | ordinal;
 }
 
+// Returns true when |ref| identifies a constant-table operand.
+static inline bool loom_decision_program_operand_is_constant(
+    loom_decision_program_operand_ref_t ref) {
+  return (ref & UINT32_C(0x80000000)) != 0;
+}
+
+// Returns true when |ref| identifies an application result operand.
+static inline bool loom_decision_program_operand_is_result(
+    loom_decision_program_operand_ref_t ref) {
+  return !loom_decision_program_operand_is_constant(ref) &&
+         (ref & UINT32_C(0x40000000)) != 0;
+}
+
+// Returns the argument, result, or constant ordinal encoded in |ref|.
+static inline uint32_t loom_decision_program_operand_ordinal(
+    loom_decision_program_operand_ref_t ref) {
+  return ref & UINT32_C(0x3fffffff);
+}
+
 // Returns a scalar-predicate constraint reference.
 static inline loom_decision_program_constraint_ref_t
 loom_decision_program_predicate_constraint_ref(uint32_t ordinal) {
@@ -293,12 +312,14 @@ static_assert(sizeof(loom_decision_program_choice_evidence_t) == 8,
 
 // Evaluates the minimum ranked prefix needed to decide |program|.
 //
-// |live_action_ordinals| must have capacity for |program->choice_count|
-// entries. The function writes exactly the actions that a caller must retain
-// under |resolution_policy| and returns their count in |out_live_action_count|.
-// |binding| may be NULL only when the program contains no scalar predicates;
-// the feature callback may be empty only when it contains no features. All
-// program storage and bindings are trusted compiler-owned state.
+// When non-NULL, |live_action_ordinals| must have capacity for
+// |program->choice_count| entries. The function writes exactly the actions
+// that a caller must retain under |resolution_policy| and returns their count
+// in |out_live_action_count|. Callers using the select-proven policy may pass
+// NULL when they only need |out_result|. |binding| may be NULL only when the
+// program contains no scalar predicates; the feature callback may be empty
+// only when it contains no features. All program storage and bindings are
+// trusted compiler-owned state.
 void loom_decision_program_evaluate(
     const loom_decision_program_t* program,
     const loom_decision_program_binding_t* binding,

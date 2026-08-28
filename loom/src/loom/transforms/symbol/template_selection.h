@@ -38,13 +38,18 @@ typedef struct loom_template_selection_query_options_t {
 
 // Read-only provider selection result borrowing caller-owned arena storage.
 typedef struct loom_template_selection_query_result_t {
-  // Exact external provider origins selected by reachable applications.
+  // External provider origins required by reachable applications.
+  //
+  // Exact applications contribute their selected provider. Applications that
+  // remain unresolved in EARLY mode contribute every still-viable provider so
+  // a caller can materialize the bounded candidate set before ordinary
+  // inlining exposes additional facts.
   struct {
-    // Dense origins in first-selection order.
+    // Dense origins in first-requirement order.
     const iree_host_size_t* values;
-    // Number of unique selected origins.
+    // Number of unique required origins.
     iree_host_size_t count;
-  } selected_origins;
+  } required_origins;
   // Number of reachable applications left unresolved.
   iree_host_size_t unresolved_site_count;
 } loom_template_selection_query_result_t;

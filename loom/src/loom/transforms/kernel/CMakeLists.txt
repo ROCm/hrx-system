@@ -11,6 +11,143 @@ iree_add_all_subdirs()
 
 loom_cc_library(
   NAME
+    kernel_class_classifier
+  HDRS
+    "kernel_class_classifier.h"
+  SRCS
+    "kernel_class_classifier.c"
+  DEPS
+    iree::base
+    iree::base::internal
+    iree::base::internal::arena
+    loom::analysis::symbol_references
+    loom::analysis::symbolic_expr
+    loom::decision::class_partition
+    loom::ir
+    loom::ops::op_defs
+    loom::ops::template
+    loom::transforms::symbol::template_decision_model
+    loom::util::adaptive_sort
+    loom::util::fact_table
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    kernel_class_classifier_test
+  SRCS
+    "kernel_class_classifier_test.cc"
+  DEPS
+    ::kernel_class_classifier
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::analysis::symbol_facts
+    loom::analysis::symbol_references
+    loom::analysis::template_provider_catalog
+    loom::format::text::parser
+    loom::ir
+    loom::ops::kernel
+    loom::ops::op_defs
+    loom::testing::module_ptr
+    loom::tooling::context
+    loom::transforms::symbol::template_decision_model
+    loom::util::fact_table
+    loom::verify
+)
+
+loom_cc_benchmark(
+  NAME
+    kernel_class_classifier_benchmark
+  SRCS
+    "kernel_class_classifier_benchmark.cc"
+  DEPS
+    ::kernel_class_classifier
+    iree::base::internal::arena
+    iree::testing::benchmark_main
+  TESTONLY
+)
+
+loom_cc_library(
+  NAME
+    kernel_class_materializer
+  HDRS
+    "kernel_class_materializer.h"
+  SRCS
+    "kernel_class_materializer.c"
+  DEPS
+    ::kernel_class_classifier
+    iree::base
+    iree::base::internal::arena
+    loom::ir
+    loom::ops::index
+    loom::ops::scalar
+    loom::ops::template
+    loom::rewrite::module_projection
+    loom::rewrite::rewriter
+    loom::transforms::symbol::template_rewrite
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    kernel_class_materializer_test
+  SRCS
+    "kernel_class_materializer_test.cc"
+  DEPS
+    ::kernel_class_classifier
+    ::kernel_class_materializer
+    iree::base::internal::arena
+    iree::io::stream
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::analysis::symbol_facts
+    loom::analysis::symbol_references
+    loom::analysis::template_provider_catalog
+    loom::format::bytecode::reader
+    loom::format::bytecode::writer
+    loom::format::text::parser
+    loom::ir
+    loom::ops::index
+    loom::ops::kernel
+    loom::ops::op_defs
+    loom::ops::scalar
+    loom::ops::scf
+    loom::ops::template
+    loom::testing::module_ptr
+    loom::tooling::context
+    loom::transforms::symbol::template_decision_model
+    loom::transforms::symbol::template_selection
+    loom::util::fact_table
+    loom::verify
+)
+
+loom_cc_benchmark(
+  NAME
+    kernel_class_materializer_benchmark
+  SRCS
+    "kernel_class_materializer_benchmark.cc"
+  DEPS
+    ::kernel_class_classifier
+    ::kernel_class_materializer
+    iree::base::internal::arena
+    iree::testing::benchmark_main
+    loom::analysis::symbol_facts
+    loom::analysis::symbol_references
+    loom::analysis::template_provider_catalog
+    loom::format::text::parser
+    loom::ir
+    loom::ops::kernel
+    loom::testing::module_ptr
+    loom::tooling::context
+    loom::transforms::symbol::template_decision_model
+    loom::util::fact_table
+    loom::verify
+  TESTONLY
+)
+
+loom_cc_library(
+  NAME
     kernel_async_legality
   HDRS
     "kernel_async_legality.h"

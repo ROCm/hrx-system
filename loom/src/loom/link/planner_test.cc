@@ -605,7 +605,7 @@ TEST_F(LinkPlannerTest, KernelReferencesSelectOnlyTheirRequiredFacets) {
         /*.test_symbol_policy=*/LOOM_LINK_PLAN_TEST_SYMBOL_KEEP,
         /*.strip_symbol=*/nullptr,
         /*.strip_symbol_user_data=*/nullptr,
-        /*.selected_template_providers=*/{},
+        /*.template_provider_roots=*/{},
         /*.root_facets=*/{},
         /*.dependency_policy=*/LOOM_LINK_PLAN_DEPENDENCY_REQUESTED_FACETS,
     };
@@ -1245,33 +1245,33 @@ TEST_F(LinkPlannerTest, LinkApplyRequiresExplicitProviderSelection) {
   ASSERT_NE(demanded_family, nullptr);
   EXPECT_EQ(StringViewToString(demanded_family->name), "demo.targeted");
 
-  const iree_host_size_t selected_provider_ordinals[] = {
+  const iree_host_size_t provider_root_ordinals[] = {
       gfx11_provider->ordinal,
   };
-  options.selected_template_providers = {
-      /*.count=*/IREE_ARRAYSIZE(selected_provider_ordinals),
-      /*.values=*/selected_provider_ordinals,
+  options.template_provider_roots = {
+      /*.count=*/IREE_ARRAYSIZE(provider_root_ordinals),
+      /*.values=*/provider_root_ordinals,
   };
-  PlanPtr selected_plan = BuildPlan(index.get(), &options);
-  EXPECT_TRUE(ContainsSymbol(selected_plan.get(), entry));
-  EXPECT_TRUE(ContainsSymbol(selected_plan.get(), gfx11_provider));
-  EXPECT_FALSE(ContainsSymbol(selected_plan.get(), gfx12_provider));
-  EXPECT_FALSE(ContainsSymbol(selected_plan.get(), fallback_provider));
-  EXPECT_FALSE(ContainsSymbol(selected_plan.get(), unused_provider));
-  EXPECT_TRUE(ContainsSymbol(selected_plan.get(), gfx11));
-  EXPECT_FALSE(ContainsSymbol(selected_plan.get(), gfx12));
-  ASSERT_EQ(loom_link_plan_demanded_template_family_count(selected_plan.get()),
+  PlanPtr rooted_plan = BuildPlan(index.get(), &options);
+  EXPECT_TRUE(ContainsSymbol(rooted_plan.get(), entry));
+  EXPECT_TRUE(ContainsSymbol(rooted_plan.get(), gfx11_provider));
+  EXPECT_FALSE(ContainsSymbol(rooted_plan.get(), gfx12_provider));
+  EXPECT_FALSE(ContainsSymbol(rooted_plan.get(), fallback_provider));
+  EXPECT_FALSE(ContainsSymbol(rooted_plan.get(), unused_provider));
+  EXPECT_TRUE(ContainsSymbol(rooted_plan.get(), gfx11));
+  EXPECT_FALSE(ContainsSymbol(rooted_plan.get(), gfx12));
+  ASSERT_EQ(loom_link_plan_demanded_template_family_count(rooted_plan.get()),
             1u);
 
   const loom_link_plan_symbol_t* planned_gfx11_provider =
-      FindPlannedSymbol(selected_plan.get(), gfx11_provider);
+      FindPlannedSymbol(rooted_plan.get(), gfx11_provider);
   ASSERT_NE(planned_gfx11_provider, nullptr);
   EXPECT_EQ(planned_gfx11_provider->reason, LOOM_LINK_PLAN_LIVE_PROVIDER);
   EXPECT_EQ(planned_gfx11_provider->cause_ordinal,
             LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL);
 }
 
-TEST_F(LinkPlannerTest, SelectedProvidersExposeTransitiveDiamondDemands) {
+TEST_F(LinkPlannerTest, ProviderRootsExposeTransitiveDiamondDemands) {
   loom_module_t* harness = Parse(Fixture(IREE_SV(
       "selected_providers_expose_transitive_diamond_demands_harness.loom")));
   loom_module_t* library = Parse(Fixture(IREE_SV(
@@ -1311,7 +1311,7 @@ TEST_F(LinkPlannerTest, SelectedProvidersExposeTransitiveDiamondDemands) {
       /*.mode=*/LOOM_LINK_PLAN_LINK,
       /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
   };
-  options.selected_template_providers = {
+  options.template_provider_roots = {
       /*.count=*/IREE_ARRAYSIZE(first_provider_ordinals),
       /*.values=*/first_provider_ordinals,
   };
@@ -1341,7 +1341,7 @@ TEST_F(LinkPlannerTest, SelectedProvidersExposeTransitiveDiamondDemands) {
       shared_provider->ordinal,
       shared_provider->ordinal,
   };
-  options.selected_template_providers = {
+  options.template_provider_roots = {
       /*.count=*/IREE_ARRAYSIZE(complete_provider_ordinals),
       /*.values=*/complete_provider_ordinals,
   };
@@ -1358,7 +1358,7 @@ TEST_F(LinkPlannerTest, SelectedProvidersExposeTransitiveDiamondDemands) {
       loom_link_plan_template_demand_occurrence_count(complete_plan.get()), 4u);
 }
 
-TEST_F(LinkPlannerTest, SelectedProviderOrdinalsAreValidated) {
+TEST_F(LinkPlannerTest, ProviderRootOrdinalsAreValidated) {
   loom_module_t* module = Parse(
       Fixture(IREE_SV("selected_provider_ordinals_are_validated_module.loom")));
   IndexPtr index = CreateIndex();
@@ -1373,7 +1373,7 @@ TEST_F(LinkPlannerTest, SelectedProviderOrdinalsAreValidated) {
       /*.mode=*/LOOM_LINK_PLAN_LINK,
       /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
   };
-  options.selected_template_providers = {
+  options.template_provider_roots = {
       /*.count=*/1,
       /*.values=*/nullptr,
   };
@@ -1383,11 +1383,11 @@ TEST_F(LinkPlannerTest, SelectedProviderOrdinalsAreValidated) {
 
   const iree_host_size_t out_of_range_ordinal =
       loom_link_module_index_symbol_count(index.get());
-  options.selected_template_providers.values = &out_of_range_ordinal;
+  options.template_provider_roots.values = &out_of_range_ordinal;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
                         BuildPlanStatus(index.get(), &options, &plan));
 
-  options.selected_template_providers.values = &entry->ordinal;
+  options.template_provider_roots.values = &entry->ordinal;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         BuildPlanStatus(index.get(), &options, &plan));
 }

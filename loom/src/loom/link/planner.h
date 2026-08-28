@@ -97,15 +97,16 @@ typedef struct loom_link_plan_options_t {
   loom_link_plan_strip_symbol_fn_t strip_symbol;
   // User data passed to strip_symbol.
   void* strip_symbol_user_data;
-  // Exact template providers already chosen by specialization. These are
-  // additional link roots whose ordinary dependencies and nested
-  // template-family demands participate in the same closure.
+  // Template providers retained as additional link roots. Their ordinary
+  // dependencies and nested template-family demands participate in the same
+  // closure. A specializing caller may retain one exact provider or a bounded
+  // set of still-viable providers for later refinement.
   struct {
     // Number of index-wide symbol ordinals.
     iree_host_size_t count;
     // Index-wide template.def/template.ukernel symbol ordinals.
     const iree_host_size_t* values;
-  } selected_template_providers;
+  } template_provider_roots;
   // Identity-resolved facet roots for LINK mode.
   struct {
     // Number of root facet requests.

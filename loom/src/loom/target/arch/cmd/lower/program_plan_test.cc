@@ -12,11 +12,13 @@
 #include "loom/format/text/parser.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/link/module_index.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_registry.h"
 #include "loom/pass/builtin_registry.h"
 #include "loom/target/arch/cmd/artifact_set.h"
 #include "loom/target/arch/cmd/descriptors/descriptors.h"
+#include "loom/target/arch/cmd/lower/program_plan_index.h"
 #include "loom/target/arch/cmd/lower/serialize.h"
 #include "loom/target/arch/cmd/program.h"
 #include "loom/testing/diagnostic_matchers.h"
@@ -27,6 +29,7 @@ namespace loom {
 namespace {
 
 using ::loom::testing::DiagnosticCapture;
+using ::loom::testing::DiagnosticEmissionCapture;
 using ModulePtr = ::loom::testing::ModulePtr;
 
 class CmdProgramPlanTest : public ::testing::Test {
@@ -202,6 +205,117 @@ command.program.def public @increment_twice() launch(%source: buffer, %scratch: 
   EXPECT_EQ(plan.root_module, nullptr);
   EXPECT_EQ(plan.roots, nullptr);
   EXPECT_EQ(plan.entry_requirements, nullptr);
+}
+
+TEST_F(CmdProgramPlanTest, IndexedPreparationExpandsNestedCommandTemplates) {
+  ModulePtr source_module = ParseAndVerify(R"(
+kernel.def @one_group() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%storage: buffer) {
+  kernel.return
+}
+
+kernel.def @eight_groups() {
+  %unit = index.constant 1 : index
+  %c8 = index.constant 8 : index
+  kernel.launch.config workgroups(%c8, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%storage: buffer) {
+  kernel.return
+}
+
+template.decl @test.command_schedule(%token_count: index, %storage: buffer)
+template.decl @test.dispatch_schedule(%token_count: index, %storage: buffer)
+
+template.def<@test.command_schedule> @decode(%token_count: index, %storage: buffer) {
+  template.apply<@test.dispatch_schedule>(%token_count, %storage) : (index, buffer)
+  template.return
+}
+
+template.def<@test.dispatch_schedule> @dispatch_one(%token_count: index, %storage: buffer) where [eq(%token_count, 1)] {
+  kernel.launch @one_group(%storage) : (buffer)
+  template.return
+}
+
+template.def<@test.dispatch_schedule> @dispatch_many(%token_count: index, %storage: buffer) where [range(%token_count, 2, 8)] {
+  kernel.launch @eight_groups(%storage) : (buffer)
+  template.return
+}
+
+command.program.def public @selected_schedule() launch(%storage: buffer) {
+  %token_count = index.constant 1 : index
+  template.apply<@test.command_schedule>(%token_count, %storage) : (index, buffer)
+  command.return
+}
+)");
+  ASSERT_NE(source_module, nullptr);
+
+  loom_link_module_index_t* index = nullptr;
+  IREE_ASSERT_OK(loom_link_module_index_allocate(
+      &context_, &block_pool_, iree_allocator_system(), &index));
+  const loom_link_module_index_add_options_t add_options = {
+      /*.provider_name=*/IREE_SV("indexed_command_test"),
+  };
+  iree_host_size_t provider_ordinal = 0;
+  IREE_ASSERT_OK(loom_link_module_index_add_materialized(
+      index, source_module.get(), &add_options, &provider_ordinal));
+  const loom_link_module_index_provider_t* provider =
+      loom_link_module_index_provider_at(index, provider_ordinal);
+  ASSERT_NE(provider, nullptr);
+  const loom_link_module_index_module_t* indexed_module =
+      loom_link_module_index_module_at(index, provider->module_start_ordinal);
+  ASSERT_NE(indexed_module, nullptr);
+  const loom_symbol_ref_t source_root =
+      FindSymbolRef(source_module.get(), IREE_SV("selected_schedule"));
+  const iree_host_size_t root_symbol_ordinal =
+      indexed_module->symbol_start_ordinal + source_root.symbol_id;
+
+  iree_arena_allocator_t scratch_arena;
+  iree_arena_initialize(&block_pool_, &scratch_arena);
+  loom_cmd_program_plan_t plan = {};
+  DiagnosticEmissionCapture diagnostic_capture;
+  bool valid = false;
+  iree_status_t status = loom_cmd_program_plan_prepare_index(
+      index, &root_symbol_ordinal, 1, loom_pass_builtin_registry(),
+      diagnostic_capture.emitter(), &block_pool_, &scratch_arena, &valid, &plan,
+      iree_allocator_system());
+  loom_link_module_index_free(index);
+  source_module.reset();
+  iree_arena_deinitialize(&scratch_arena);
+  if (!iree_status_is_ok(status)) {
+    loom_cmd_program_plan_deinitialize(&plan);
+    IREE_ASSERT_OK(status);
+  }
+  if (!valid) {
+    for (const auto& emission : diagnostic_capture.emissions) {
+      std::string detail = emission.error->summary;
+      for (const std::string& parameter : emission.string_params) {
+        detail.append(" [").append(parameter).append("]");
+      }
+      ADD_FAILURE() << detail;
+    }
+    loom_cmd_program_plan_deinitialize(&plan);
+    ASSERT_TRUE(valid);
+  }
+
+  ASSERT_EQ(plan.root_count, 1u);
+  ASSERT_EQ(plan.entry_requirement_count, 1u);
+  const loom_cmd_program_root_t& root = plan.roots[0];
+  ASSERT_EQ(root.entry_requirement_count, 1u);
+  iree_byte_span_t data = iree_byte_span_empty();
+  IREE_ASSERT_OK(loom_cmd_program_plan_serialize_root(&plan, 0, &data,
+                                                      iree_allocator_system()));
+  loom_cmd_program_t program = {};
+  IREE_ASSERT_OK(loom_cmd_program_parse(
+      iree_make_const_byte_span(data.data, data.data_length), &program));
+  ASSERT_EQ(program.commands.count, 1u);
+  const loom_cmd_program_command_t dispatch =
+      loom_cmd_program_command_at(&program, 0);
+  ASSERT_EQ(dispatch.kind, LOOM_CMD_PROGRAM_COMMAND_KIND_DISPATCH_DIRECT);
+  EXPECT_EQ(dispatch.payload.dispatch_direct.workgroup_count_x, 1u);
+
+  iree_allocator_free(iree_allocator_system(), data.data);
+  loom_cmd_program_plan_deinitialize(&plan);
 }
 
 TEST_F(CmdProgramPlanTest, OwnsParameterRequirementTables) {

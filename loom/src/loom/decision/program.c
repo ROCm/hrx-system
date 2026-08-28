@@ -6,12 +6,6 @@
 
 #include "loom/decision/program.h"
 
-// Operand and constraint tag bits. Program construction proves that ordinals
-// fit below their tags, allowing evaluation to remain validation-free.
-#define LOOM_DECISION_PROGRAM_CONSTANT_OPERAND_BIT UINT32_C(0x80000000)
-#define LOOM_DECISION_PROGRAM_RESULT_OPERAND_BIT UINT32_C(0x40000000)
-#define LOOM_DECISION_PROGRAM_OPERAND_ORDINAL_MASK UINT32_C(0x3fffffff)
-
 typedef struct loom_decision_program_conjunction_result_t {
   // Combined ternary conjunction outcome.
   loom_decision_truth_t feasibility;
@@ -25,19 +19,18 @@ loom_decision_program_resolve_operand(
     const loom_decision_program_t* program,
     const loom_decision_program_binding_t* binding,
     loom_decision_program_operand_ref_t ref) {
-  if (iree_any_bit_set(ref, LOOM_DECISION_PROGRAM_CONSTANT_OPERAND_BIT)) {
+  if (loom_decision_program_operand_is_constant(ref)) {
     const int64_t value =
-        program->constants[ref & LOOM_DECISION_PROGRAM_OPERAND_ORDINAL_MASK];
+        program->constants[loom_decision_program_operand_ordinal(ref)];
     return (loom_decision_predicate_operand_t){
         .facts = loom_value_facts_exact_i64(value),
         .identity = LOOM_DECISION_OPERAND_IDENTITY_NONE,
     };
   }
-  const uint32_t ordinal = ref & LOOM_DECISION_PROGRAM_OPERAND_ORDINAL_MASK;
-  const loom_value_id_t value_id =
-      iree_any_bit_set(ref, LOOM_DECISION_PROGRAM_RESULT_OPERAND_BIT)
-          ? binding->result_values[ordinal]
-          : binding->argument_values[ordinal];
+  const uint32_t ordinal = loom_decision_program_operand_ordinal(ref);
+  const loom_value_id_t value_id = loom_decision_program_operand_is_result(ref)
+                                       ? binding->result_values[ordinal]
+                                       : binding->argument_values[ordinal];
   return (loom_decision_predicate_operand_t){
       .facts = loom_value_fact_table_lookup(binding->facts, value_id),
       .identity = value_id,
@@ -143,7 +136,10 @@ IREE_ATTRIBUTE_ALWAYS_INLINE static inline void
 loom_decision_program_append_live(uint32_t action_ordinal,
                                   uint32_t* live_action_ordinals,
                                   uint32_t* live_action_count) {
-  live_action_ordinals[(*live_action_count)++] = action_ordinal;
+  if (live_action_ordinals != NULL) {
+    live_action_ordinals[*live_action_count] = action_ordinal;
+  }
+  ++*live_action_count;
 }
 
 static loom_decision_program_result_t loom_decision_program_empty_result(void) {
@@ -263,7 +259,9 @@ void loom_decision_program_evaluate(
 
     out_result->kind = LOOM_DECISION_PROGRAM_RESULT_SELECTED;
     out_result->action_ordinal = selected_action;
-    live_action_ordinals[0] = selected_action;
+    if (live_action_ordinals != NULL) {
+      live_action_ordinals[0] = selected_action;
+    }
     *out_live_action_count = 1;
     return;
   }

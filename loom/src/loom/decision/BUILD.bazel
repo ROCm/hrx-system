@@ -23,6 +23,27 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "class_partition",
+    srcs = ["class_partition.c"],
+    hdrs = ["class_partition.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "class_partition_test",
+    srcs = ["class_partition_test.cc"],
+    deps = [
+        ":class_partition",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "program",
     srcs = ["program.c"],
     hdrs = ["program.h"],

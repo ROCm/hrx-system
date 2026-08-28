@@ -82,6 +82,7 @@ static void loom_link_plan_materialization_scatter_target_symbols(
     const loom_link_plan_module_selection_t* selection,
     const loom_symbol_ref_t* module_target_symbols, bool projected_module,
     loom_symbol_ref_t* target_symbols,
+    iree_host_size_t* target_source_definitions,
     loom_symbol_ref_t* target_template_families,
     const loom_symbol_ref_t* source_configuration_functions,
     loom_symbol_ref_t* target_kernel_configurations) {
@@ -94,6 +95,16 @@ static void loom_link_plan_materialization_scatter_target_symbols(
                                         .materialized_symbol_ordinal
                                   : i];
     target_symbols[source_symbol->ordinal] = target_symbol;
+    if (target_source_definitions &&
+        iree_any_bit_set(source_symbol->flags,
+                         LOOM_LINK_SYMBOL_FLAG_CONCRETE_DEFINITION)) {
+      iree_host_size_t* target_source_definition =
+          &target_source_definitions[target_symbol.symbol_id];
+      IREE_ASSERT(*target_source_definition ==
+                      LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL ||
+                  *target_source_definition == source_symbol->ordinal);
+      *target_source_definition = source_symbol->ordinal;
+    }
     if (source_configuration_functions &&
         loom_symbol_ref_is_valid(source_configuration_functions[i])) {
       IREE_ASSERT(target_kernel_configurations != NULL);
@@ -129,16 +140,18 @@ static iree_status_t loom_link_plan_materialize_module(
     const loom_link_plan_t* plan, const loom_link_module_index_t* index,
     const loom_link_plan_module_selection_t* selection,
     const loom_link_plan_materialization_environment_t* environment,
-    iree_arena_allocator_t* arena, iree_host_size_t* source_symbol_ordinals,
+    iree_arena_allocator_t* scratch_arena,
+    iree_host_size_t* source_symbol_ordinals,
     loom_linker_symbol_output_t* source_symbol_outputs,
     loom_symbol_ref_t* module_target_symbols, loom_symbol_ref_t* target_symbols,
+    iree_host_size_t* target_source_definitions,
     loom_symbol_ref_t* target_template_families,
     loom_symbol_ref_t* target_kernel_configurations, loom_linker_t* linker) {
   const loom_link_module_index_module_t* module = selection->source_module;
   if (loom_link_plan_module_requires_symbol_projection(selection)) {
     loom_link_kernel_config_module_projection_t projected = {0};
     IREE_RETURN_IF_ERROR(loom_link_plan_project_kernel_config_module(
-        plan, selection, environment, module->name, arena, &projected));
+        plan, selection, environment, module->name, scratch_arena, &projected));
     const iree_host_size_t projected_symbol_count =
         projected.module->symbols.count;
     for (iree_host_size_t i = 0; i < projected_symbol_count; ++i) {
@@ -170,8 +183,8 @@ static iree_status_t loom_link_plan_materialize_module(
     if (iree_status_is_ok(status)) {
       loom_link_plan_materialization_scatter_target_symbols(
           index, selection, module_target_symbols,
-          /*projected_module=*/true, target_symbols, target_template_families,
-          projected.configuration_functions.values,
+          /*projected_module=*/true, target_symbols, target_source_definitions,
+          target_template_families, projected.configuration_functions.values,
           target_kernel_configurations);
     }
     loom_module_free(projected.module);
@@ -236,7 +249,8 @@ static iree_status_t loom_link_plan_materialize_module(
   if (iree_status_is_ok(status)) {
     loom_link_plan_materialization_scatter_target_symbols(
         index, selection, module_target_symbols,
-        /*projected_module=*/false, target_symbols, target_template_families,
+        /*projected_module=*/false, target_symbols, target_source_definitions,
+        target_template_families,
         /*source_configuration_functions=*/NULL, target_kernel_configurations);
   }
   return status;
@@ -286,8 +300,9 @@ static iree_status_t loom_link_plan_materialize_modules(
     const loom_link_plan_t* plan, const loom_link_module_index_t* index,
     const loom_link_plan_module_projection_t* projection,
     const loom_link_plan_materialization_environment_t* environment,
-    bool sealed_output, iree_arena_allocator_t* arena,
+    bool sealed_output, iree_arena_allocator_t* scratch_arena,
     loom_symbol_ref_t* target_symbols,
+    iree_host_size_t* target_source_definitions,
     loom_symbol_ref_t* target_template_families,
     loom_symbol_ref_t* target_kernel_configurations, loom_linker_t* linker) {
   const iree_host_size_t max_module_symbol_count =
@@ -297,15 +312,15 @@ static iree_status_t loom_link_plan_materialize_modules(
   loom_symbol_ref_t* module_target_symbols = NULL;
   if (max_module_symbol_count != 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        arena, max_module_symbol_count, sizeof(*source_symbol_ordinals),
+        scratch_arena, max_module_symbol_count, sizeof(*source_symbol_ordinals),
         (void**)&source_symbol_ordinals));
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        arena, max_module_symbol_count, sizeof(*module_target_symbols),
+        scratch_arena, max_module_symbol_count, sizeof(*module_target_symbols),
         (void**)&module_target_symbols));
     if (sealed_output) {
       IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-          arena, max_module_symbol_count, sizeof(*source_symbol_outputs),
-          (void**)&source_symbol_outputs));
+          scratch_arena, max_module_symbol_count,
+          sizeof(*source_symbol_outputs), (void**)&source_symbol_outputs));
     }
   }
 
@@ -313,10 +328,10 @@ static iree_status_t loom_link_plan_materialize_modules(
   for (iree_host_size_t i = 0;
        i < projection->modules.count && iree_status_is_ok(status); ++i) {
     status = loom_link_plan_materialize_module(
-        plan, index, &projection->modules.values[i], environment, arena,
+        plan, index, &projection->modules.values[i], environment, scratch_arena,
         source_symbol_ordinals, source_symbol_outputs, module_target_symbols,
-        target_symbols, target_template_families, target_kernel_configurations,
-        linker);
+        target_symbols, target_source_definitions, target_template_families,
+        target_kernel_configurations, linker);
     if (!iree_status_is_ok(status)) {
       status = loom_link_plan_annotate_global_collision(
           status, plan, index, &projection->modules.values[i]);
@@ -325,17 +340,12 @@ static iree_status_t loom_link_plan_materialize_modules(
   return status;
 }
 
-iree_status_t loom_link_plan_materialize(
+static iree_status_t loom_link_plan_materialize_with_scratch(
     const loom_link_plan_t* plan,
     const loom_link_plan_materialization_environment_t* environment,
-    iree_string_view_t module_name, iree_arena_allocator_t* arena,
+    iree_string_view_t module_name, iree_arena_allocator_t* product_arena,
+    iree_arena_allocator_t* scratch_arena,
     loom_link_plan_materialization_t* out_materialization) {
-  IREE_ASSERT_ARGUMENT(plan);
-  IREE_ASSERT_ARGUMENT(environment);
-  IREE_ASSERT_ARGUMENT(environment->context);
-  IREE_ASSERT_ARGUMENT(environment->block_pool);
-  IREE_ASSERT_ARGUMENT(arena);
-  IREE_ASSERT_ARGUMENT(out_materialization);
   *out_materialization = (loom_link_plan_materialization_t){0};
 
   const loom_link_module_index_t* index = loom_link_plan_index(plan);
@@ -343,9 +353,10 @@ iree_status_t loom_link_plan_materialize(
       loom_link_module_index_symbol_count(index);
   loom_link_plan_module_projection_t module_projection = {0};
   IREE_RETURN_IF_ERROR(
-      loom_link_plan_project_modules(plan, arena, &module_projection));
+      loom_link_plan_project_modules(plan, scratch_arena, &module_projection));
 
   loom_symbol_ref_t* target_symbols = NULL;
+  iree_host_size_t* target_source_definitions = NULL;
   loom_symbol_ref_t* target_kernel_configurations = NULL;
   iree_host_size_t planned_symbol_capacity = 0;
   if (loom_link_plan_mode(plan) == LOOM_LINK_PLAN_LINK &&
@@ -356,16 +367,26 @@ iree_status_t loom_link_plan_materialize(
                             "planned symbol capacity overflow");
   }
   if (index_symbol_count != 0) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, index_symbol_count,
-                                                   sizeof(*target_symbols),
-                                                   (void**)&target_symbols));
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        product_arena, index_symbol_count, sizeof(*target_symbols),
+        (void**)&target_symbols));
     for (iree_host_size_t i = 0; i < index_symbol_count; ++i) {
       target_symbols[i] = loom_symbol_ref_null();
     }
+    if (planned_symbol_capacity != 0) {
+      IREE_RETURN_IF_ERROR(
+          iree_arena_allocate_array(product_arena, planned_symbol_capacity,
+                                    sizeof(*target_source_definitions),
+                                    (void**)&target_source_definitions));
+      for (iree_host_size_t i = 0; i < planned_symbol_capacity; ++i) {
+        target_source_definitions[i] = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL;
+      }
+    }
     if (module_projection.synthetic_symbol_count != 0) {
-      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-          arena, planned_symbol_capacity, sizeof(*target_kernel_configurations),
-          (void**)&target_kernel_configurations));
+      IREE_RETURN_IF_ERROR(
+          iree_arena_allocate_array(product_arena, planned_symbol_capacity,
+                                    sizeof(*target_kernel_configurations),
+                                    (void**)&target_kernel_configurations));
       for (iree_host_size_t i = 0; i < planned_symbol_capacity; ++i) {
         target_kernel_configurations[i] = loom_symbol_ref_null();
       }
@@ -376,7 +397,7 @@ iree_status_t loom_link_plan_materialize(
   loom_symbol_ref_t* target_template_families = NULL;
   if (template_family_count != 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        arena, template_family_count, sizeof(*target_template_families),
+        product_arena, template_family_count, sizeof(*target_template_families),
         (void**)&target_template_families));
     for (iree_host_size_t i = 0; i < template_family_count; ++i) {
       target_template_families[i] = loom_symbol_ref_null();
@@ -395,8 +416,9 @@ iree_status_t loom_link_plan_materialize(
   loom_module_t* output_module = NULL;
   iree_status_t status = loom_link_plan_materialize_modules(
       plan, index, &module_projection, environment,
-      loom_link_plan_mode(plan) == LOOM_LINK_PLAN_LINK, arena, target_symbols,
-      target_template_families, target_kernel_configurations, linker);
+      loom_link_plan_mode(plan) == LOOM_LINK_PLAN_LINK, scratch_arena,
+      target_symbols, target_source_definitions, target_template_families,
+      target_kernel_configurations, linker);
   if (iree_status_is_ok(status)) {
     status = loom_linker_finish(linker, &output_module);
   }
@@ -415,6 +437,10 @@ iree_status_t loom_link_plan_materialize(
   out_materialization->module = output_module;
   out_materialization->target_symbols.values = target_symbols;
   out_materialization->target_symbols.count = index_symbol_count;
+  out_materialization->target_source_definitions.values =
+      target_source_definitions;
+  out_materialization->target_source_definitions.count =
+      target_source_definitions ? linked_symbol_count : 0;
   out_materialization->target_template_families.values =
       target_template_families;
   out_materialization->target_template_families.count = template_family_count;
@@ -423,4 +449,25 @@ iree_status_t loom_link_plan_materialize(
   out_materialization->target_kernel_configurations.count =
       target_kernel_configurations ? linked_symbol_count : 0;
   return iree_ok_status();
+}
+
+iree_status_t loom_link_plan_materialize(
+    const loom_link_plan_t* plan,
+    const loom_link_plan_materialization_environment_t* environment,
+    iree_string_view_t module_name, iree_arena_allocator_t* arena,
+    loom_link_plan_materialization_t* out_materialization) {
+  IREE_ASSERT_ARGUMENT(plan);
+  IREE_ASSERT_ARGUMENT(environment);
+  IREE_ASSERT_ARGUMENT(environment->context);
+  IREE_ASSERT_ARGUMENT(environment->block_pool);
+  IREE_ASSERT_ARGUMENT(arena);
+  IREE_ASSERT_ARGUMENT(out_materialization);
+
+  iree_arena_allocator_t scratch_arena;
+  iree_arena_initialize(environment->block_pool, &scratch_arena);
+  iree_status_t status = loom_link_plan_materialize_with_scratch(
+      plan, environment, module_name, arena, &scratch_arena,
+      out_materialization);
+  iree_arena_deinitialize(&scratch_arena);
+  return status;
 }

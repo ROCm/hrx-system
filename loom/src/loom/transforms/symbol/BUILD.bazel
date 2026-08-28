@@ -75,6 +75,19 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "template_rewrite",
+    srcs = ["template_rewrite.c"],
+    hdrs = ["template_rewrite.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/template",
+        "//loom/src/loom/rewrite:rewriter",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "template_selection",
     srcs = ["template_selection.c"],
     hdrs = ["template_selection.h"],
@@ -82,6 +95,7 @@ loom_cc_library(
         ":symbol_pruning",
         ":template_applicability",
         ":template_decision_model",
+        ":template_rewrite",
         "//loom/src/loom/analysis:condition_facts",
         "//loom/src/loom/analysis:symbol_facts",
         "//loom/src/loom/analysis:symbol_liveness",
@@ -108,6 +122,16 @@ loom_cc_library(
         "//loom/src/loom/util:bstring",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "template_expansion_pipeline",
+    srcs = ["template_expansion_pipeline.c"],
+    hdrs = ["template_expansion_pipeline.h"],
+    deps = [
+        "//loom/src/loom/pass:builder",
+        "//runtime/src/iree/base",
     ],
 )
 

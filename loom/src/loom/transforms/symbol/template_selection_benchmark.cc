@@ -181,7 +181,7 @@ class TemplateSelectionFixture {
     IREE_CHECK_OK(loom_template_selection_query(
         module_.get(), &options, &block_pool_, &query_arena_, &result));
     IREE_ASSERT_EQ(result.unresolved_site_count, 0u);
-    const uint64_t sink = result.selected_origins.count + 1;
+    const uint64_t sink = result.required_origins.count + 1;
     iree_arena_reset(&query_arena_);
     return sink;
   }

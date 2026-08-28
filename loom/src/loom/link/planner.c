@@ -1541,16 +1541,16 @@ static bool loom_link_plan_symbol_is_template_provider(
          symbol->kind == LOOM_SYMBOL_TEMPLATE_UKERNEL;
 }
 
-static iree_status_t loom_link_plan_select_template_providers(
+static iree_status_t loom_link_plan_select_template_provider_roots(
     loom_link_plan_t* plan, const loom_link_plan_options_t* options) {
   const iree_host_size_t provider_count =
-      options ? options->selected_template_providers.count : 0;
+      options ? options->template_provider_roots.count : 0;
   const iree_host_size_t* provider_ordinals =
-      options ? options->selected_template_providers.values : NULL;
+      options ? options->template_provider_roots.values : NULL;
   if (provider_count != 0 && provider_ordinals == NULL) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "selected template provider count is non-zero but values is NULL");
+        "template provider root count is non-zero but values is NULL");
   }
   const iree_host_size_t symbol_count =
       loom_link_module_index_symbol_count(plan->index);
@@ -1558,7 +1558,7 @@ static iree_status_t loom_link_plan_select_template_providers(
     const iree_host_size_t symbol_ordinal = provider_ordinals[i];
     if (symbol_ordinal >= symbol_count) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "selected template provider ordinal %" PRIhsz
+                              "template provider root ordinal %" PRIhsz
                               " is outside the %" PRIhsz "-symbol index",
                               symbol_ordinal, symbol_count);
     }
@@ -1566,7 +1566,7 @@ static iree_status_t loom_link_plan_select_template_providers(
         loom_link_module_index_symbol_at(plan->index, symbol_ordinal);
     if (!loom_link_plan_symbol_is_template_provider(symbol)) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "selected template provider ordinal %" PRIhsz
+                              "template provider root ordinal %" PRIhsz
                               " names non-provider symbol '@%.*s'",
                               symbol_ordinal, (int)symbol->name.size,
                               symbol->name.data);
@@ -1587,7 +1587,8 @@ static iree_status_t loom_link_plan_select_template_providers(
 static iree_status_t loom_link_plan_select_link(
     loom_link_plan_t* plan, const loom_link_plan_options_t* options) {
   IREE_RETURN_IF_ERROR(loom_link_plan_select_roots(plan, options));
-  IREE_RETURN_IF_ERROR(loom_link_plan_select_template_providers(plan, options));
+  IREE_RETURN_IF_ERROR(
+      loom_link_plan_select_template_provider_roots(plan, options));
   for (iree_host_size_t i = 0; i < plan->facets.count; ++i) {
     IREE_RETURN_IF_ERROR(loom_link_plan_expand_facet(plan, options, i));
   }
@@ -1605,11 +1606,11 @@ static iree_status_t loom_link_plan_validate_options(
   }
   if (options->root_symbols.count != 0 || options->include_input_exports ||
       options->root_providers.count != 0 ||
-      options->selected_template_providers.count != 0 ||
+      options->template_provider_roots.count != 0 ||
       options->root_facets.count != 0) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "merge plans do not accept roots or selected template providers");
+        "merge plans do not accept roots or template provider roots");
   }
   return iree_ok_status();
 }

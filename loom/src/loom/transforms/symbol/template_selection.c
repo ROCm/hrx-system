@@ -33,6 +33,7 @@
 #include "loom/transforms/symbol/symbol_pruning.h"
 #include "loom/transforms/symbol/template_applicability.h"
 #include "loom/transforms/symbol/template_decision_model.h"
+#include "loom/transforms/symbol/template_rewrite.h"
 #include "loom/util/bstring.h"
 
 //===----------------------------------------------------------------------===//
@@ -324,12 +325,12 @@ typedef struct loom_template_selection_state_t {
   // Capacity of entries.
   iree_host_size_t entry_capacity;
 
-  // External provider origins selected by exact reachable applications.
+  // External provider origins required by reachable applications.
   struct {
-    // Dense origins in first-selection order.
+    // Dense origins in first-requirement order.
     iree_host_size_t* values;
 
-    // Number of unique selected origins.
+    // Number of unique required origins.
     iree_host_size_t count;
 
     // Allocated value capacity.
@@ -340,7 +341,7 @@ typedef struct loom_template_selection_state_t {
 
     // Exclusive upper bound for valid external origin ordinals.
     iree_host_size_t origin_count;
-  } selected_origins;
+  } required_origins;
 
   // Reusable branch-relation storage for the apply site being classified.
   struct {
@@ -812,35 +813,36 @@ static iree_status_t loom_template_selection_prepare_application_facts(
       state, table, apply_op, out_facts);
 }
 
-static iree_status_t loom_template_selection_mark_provider_live(
-    loom_template_selection_state_t* state,
-    loom_symbol_liveness_contributor_context_t* context,
-    const loom_template_provider_summary_t* provider) {
-  if (!loom_symbol_ref_is_valid(provider->symbol)) {
-    return iree_ok_status();
-  }
-  ++state->statistics->provider_edges;
-  return loom_symbol_liveness_mark_symbol_ref(context, provider->symbol);
-}
-
-static void loom_template_selection_record_selected_origin(
+static void loom_template_selection_record_required_origin(
     loom_template_selection_state_t* state,
     const loom_template_provider_summary_t* provider) {
   if (provider->origin_ordinal == IREE_HOST_SIZE_MAX) {
     return;
   }
   IREE_ASSERT_LT(provider->origin_ordinal,
-                 state->selected_origins.origin_count);
+                 state->required_origins.origin_count);
   const iree_host_size_t word_index = provider->origin_ordinal >> 6;
   const uint64_t mask = UINT64_C(1) << (provider->origin_ordinal & 63u);
-  if ((state->selected_origins.membership_bits[word_index] & mask) != 0) {
+  if ((state->required_origins.membership_bits[word_index] & mask) != 0) {
     return;
   }
-  IREE_ASSERT_LT(state->selected_origins.count,
-                 state->selected_origins.capacity);
-  state->selected_origins.membership_bits[word_index] |= mask;
-  state->selected_origins.values[state->selected_origins.count++] =
+  IREE_ASSERT_LT(state->required_origins.count,
+                 state->required_origins.capacity);
+  state->required_origins.membership_bits[word_index] |= mask;
+  state->required_origins.values[state->required_origins.count++] =
       provider->origin_ordinal;
+}
+
+static iree_status_t loom_template_selection_mark_provider_live(
+    loom_template_selection_state_t* state,
+    loom_symbol_liveness_contributor_context_t* context,
+    const loom_template_provider_summary_t* provider) {
+  loom_template_selection_record_required_origin(state, provider);
+  if (!loom_symbol_ref_is_valid(provider->symbol)) {
+    return iree_ok_status();
+  }
+  ++state->statistics->provider_edges;
+  return loom_symbol_liveness_mark_symbol_ref(context, provider->symbol);
 }
 
 static loom_template_selection_entry_t* loom_template_selection_append_entry(
@@ -1056,7 +1058,7 @@ static iree_status_t loom_template_selection_analyze_apply(
 
       entry->action = LOOM_TEMPLATE_SELECTION_ACTION_SELECT;
       entry->blocker = LOOM_TEMPLATE_SELECTION_BLOCKER_NONE;
-      loom_template_selection_record_selected_origin(state, selected_provider);
+      loom_template_selection_record_required_origin(state, selected_provider);
       if (selected_provider->priority < model->highest_provider_priority) {
         ++state->statistics->fallback_selected_sites;
       }
@@ -1331,69 +1333,14 @@ static iree_status_t loom_template_selection_emit_blockers(
 // Rewrite
 //===----------------------------------------------------------------------===//
 
-static iree_status_t loom_template_selection_copy_result_types(
-    loom_template_selection_state_t* state, const loom_op_t* apply_op,
-    loom_type_t** out_result_types) {
-  *out_result_types = NULL;
-  loom_value_slice_t results = loom_template_apply_results(apply_op);
-  if (results.count == 0) {
-    return iree_ok_status();
-  }
-
-  loom_type_t* result_types = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_arena_allocate_array(state->pass->arena, results.count,
-                                sizeof(*result_types), (void**)&result_types));
-  for (uint16_t i = 0; i < results.count; ++i) {
-    if (results.values[i] >= state->module->values.count) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "template.apply result value %u is outside the "
-                              "module value table",
-                              (uint32_t)results.values[i]);
-    }
-    result_types[i] = loom_module_value_type(state->module, results.values[i]);
-  }
-  *out_result_types = result_types;
-  return iree_ok_status();
-}
-
 static iree_status_t loom_template_selection_rewrite_entry(
     loom_template_selection_state_t* state, loom_rewriter_t* rewriter,
     const loom_template_selection_entry_t* entry) {
-  loom_value_slice_t operands =
+  const loom_value_slice_t operands =
       loom_template_apply_operands(entry->application_op);
-  loom_value_slice_t results =
-      loom_template_apply_results(entry->application_op);
-  loom_type_t* result_types = NULL;
-  IREE_RETURN_IF_ERROR(loom_template_selection_copy_result_types(
-      state, entry->application_op, &result_types));
-
-  loom_template_call_build_flags_t build_flags = 0;
-  uint8_t purity = loom_template_apply_purity(entry->application_op);
-  if (purity != 0) {
-    build_flags |= LOOM_TEMPLATE_CALL_BUILD_FLAG_HAS_PURITY;
-  }
-  uint8_t temperature = loom_template_apply_temperature(entry->application_op);
-  if (temperature != 0) {
-    build_flags |= LOOM_TEMPLATE_CALL_BUILD_FLAG_HAS_TEMPERATURE;
-  }
-
-  loom_builder_set_before(&rewriter->builder, entry->application_op);
-  loom_value_id_t value_checkpoint = loom_rewriter_value_checkpoint(rewriter);
-  loom_op_t* call_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_template_call_build(
-      &rewriter->builder, build_flags, purity, temperature,
-      entry->selected_provider->symbol, operands.values, operands.count,
-      result_types, results.count, loom_op_tied_results(entry->application_op),
-      entry->application_op->tied_result_count, entry->application_op->location,
-      &call_op));
-  loom_value_slice_t call_results = loom_template_call_results(call_op);
-  IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
-      rewriter, entry->application_op, call_results.values, call_results.count,
-      value_checkpoint));
-  IREE_RETURN_IF_ERROR(loom_rewriter_replace_all_uses_and_erase(
-      rewriter, entry->application_op, call_results.values,
-      call_results.count));
+  IREE_RETURN_IF_ERROR(loom_template_rewrite_apply_as_exact_call(
+      rewriter, entry->application_op, entry->selected_provider->symbol,
+      operands.values));
   loom_pass_mark_changed(state->pass);
   return iree_ok_status();
 }
@@ -1491,9 +1438,9 @@ static iree_status_t loom_template_selection_allocate_decision_scratch(
       (void**)&state->decision_scratch.provider_evidence);
 }
 
-static iree_status_t loom_template_selection_allocate_selected_origins(
+static iree_status_t loom_template_selection_allocate_required_origins(
     loom_template_selection_state_t* state, iree_host_size_t origin_count) {
-  state->selected_origins.origin_count = origin_count;
+  state->required_origins.origin_count = origin_count;
   for (iree_host_size_t i = 0; i < state->catalog->provider_count; ++i) {
     const loom_template_provider_summary_t* provider =
         &state->catalog->providers[i];
@@ -1506,16 +1453,16 @@ static iree_status_t loom_template_selection_allocate_selected_origins(
           "template provider origin ordinal %zu exceeds origin count %zu",
           provider->origin_ordinal, origin_count);
     }
-    ++state->selected_origins.capacity;
+    ++state->required_origins.capacity;
   }
-  if (state->selected_origins.capacity == 0) {
+  if (state->required_origins.capacity == 0) {
     return iree_ok_status();
   }
 
   IREE_RETURN_IF_ERROR(
-      iree_arena_allocate_array(state->arena, state->selected_origins.capacity,
-                                sizeof(*state->selected_origins.values),
-                                (void**)&state->selected_origins.values));
+      iree_arena_allocate_array(state->arena, state->required_origins.capacity,
+                                sizeof(*state->required_origins.values),
+                                (void**)&state->required_origins.values));
   iree_host_size_t rounded_origin_count = 0;
   if (!iree_host_size_checked_add(origin_count, 63, &rounded_origin_count)) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
@@ -1524,8 +1471,8 @@ static iree_status_t loom_template_selection_allocate_selected_origins(
   const iree_host_size_t word_count = rounded_origin_count / 64;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
       iree_arena_allocator(state->arena), word_count,
-      sizeof(*state->selected_origins.membership_bits),
-      (void**)&state->selected_origins.membership_bits));
+      sizeof(*state->required_origins.membership_bits),
+      (void**)&state->required_origins.membership_bits));
   return iree_ok_status();
 }
 
@@ -1545,7 +1492,7 @@ static iree_status_t loom_template_selection_compute(
   IREE_RETURN_IF_ERROR(
       loom_template_selection_allocate_decision_scratch(state));
   IREE_RETURN_IF_ERROR(
-      loom_template_selection_allocate_selected_origins(state, origin_count));
+      loom_template_selection_allocate_required_origins(state, origin_count));
   IREE_RETURN_IF_ERROR(loom_template_selection_build_liveness(state));
   return loom_template_selection_analyze_exact_calls(state);
 }
@@ -1591,8 +1538,8 @@ iree_status_t loom_template_selection_query(
     return status;
   }
 
-  out_result->selected_origins.values = state.selected_origins.values;
-  out_result->selected_origins.count = state.selected_origins.count;
+  out_result->required_origins.values = state.required_origins.values;
+  out_result->required_origins.count = state.required_origins.count;
   out_result->unresolved_site_count = statistics.unresolved_sites;
   if (options->mode == LOOM_TEMPLATE_SELECTION_MODE_FINAL &&
       statistics.unresolved_sites > 0) {

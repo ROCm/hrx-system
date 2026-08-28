@@ -256,7 +256,7 @@ static void RunSelectOneTemplateBenchmark(
   for (auto _ : state) {
     loom_link_index_materialization_t materialization = fixture.Materialize();
     selected_symbol_count = loom_link_plan_symbol_count(materialization.plan);
-    benchmark::DoNotOptimize(materialization.module);
+    benchmark::DoNotOptimize(materialization.product.module);
 
     state.PauseTiming();
     loom_link_index_materialization_deinitialize(&materialization);

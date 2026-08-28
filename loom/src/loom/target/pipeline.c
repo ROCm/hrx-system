@@ -9,6 +9,7 @@
 #include "loom/codegen/low/pipeline/pipeline.h"
 #include "loom/pass/builder.h"
 #include "loom/sanitizer/options.h"
+#include "loom/transforms/symbol/template_expansion_pipeline.h"
 
 typedef struct loom_target_pipeline_build_context_t {
   // Target providers linked into the current compile driver.
@@ -177,37 +178,6 @@ loom_target_pipeline_build_cleanup_expanded_target_functions(
   loom_op_t* for_op = NULL;
   return loom_target_pipeline_build_for_target_functions(
       builder, loom_target_pipeline_build_canonicalize_body, NULL, &for_op);
-}
-
-static iree_status_t loom_target_pipeline_build_authoring_expansion_iteration(
-    loom_builder_t* builder, void* user_data) {
-  (void)user_data;
-  IREE_RETURN_IF_ERROR(loom_target_pipeline_build_run_with_string_option(
-      builder, IREE_SV("select-templates"), IREE_SV("mode"), IREE_SV("early")));
-  IREE_RETURN_IF_ERROR(
-      loom_target_pipeline_build_run(builder, IREE_SV("inline-callables")));
-  // Expose constants and facts at each newly inlined application site before
-  // the next selection iteration considers nested template predicates.
-  loom_op_t* if_changed_op = NULL;
-  return loom_pass_ir_build_if_changed(
-      builder, loom_target_pipeline_build_cleanup_expanded_target_functions,
-      NULL, &if_changed_op);
-}
-
-static iree_status_t loom_target_pipeline_build_authoring_expansion(
-    loom_builder_t* builder) {
-  // Template providers may contain applications whose predicates depend on
-  // facts available only at the outer application site. Expand from the
-  // outside in until all resolvable applications have reached their concrete
-  // call sites, then diagnose any demands that remain unresolved.
-  loom_op_t* repeat_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_pass_ir_build_repeat(
-      builder, LOOM_PASS_REPEAT_BUILD_FLAG_HAS_MAX_ITERATIONS,
-      LOOM_PASS_REPEAT_MODE_UNTIL_CONVERGED, 0, 64,
-      loom_target_pipeline_build_authoring_expansion_iteration, NULL,
-      &repeat_op));
-  return loom_target_pipeline_build_run_with_string_option(
-      builder, IREE_SV("select-templates"), IREE_SV("mode"), IREE_SV("final"));
 }
 
 static iree_status_t loom_target_pipeline_build_source_to_low(
@@ -419,7 +389,9 @@ static iree_status_t loom_target_pipeline_build_expanded_source_body(
       builder,
       loom_target_pipeline_build_source_normalization_before_authoring_expansion,
       user_data, &for_op));
-  return loom_target_pipeline_build_authoring_expansion(builder);
+  return loom_template_expansion_pipeline_build(
+      builder, loom_target_pipeline_build_cleanup_expanded_target_functions,
+      NULL);
 }
 
 static iree_status_t loom_target_pipeline_build_source_low_body(

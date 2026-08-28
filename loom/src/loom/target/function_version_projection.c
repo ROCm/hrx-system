@@ -41,12 +41,6 @@ typedef struct loom_target_function_version_projection_plan_t {
   iree_host_size_t generated_name_namespace;
 } loom_target_function_version_projection_plan_t;
 
-static iree_string_view_t loom_target_function_version_projection_module_name(
-    const loom_module_t* module) {
-  if (module->name_id == LOOM_STRING_ID_INVALID) return IREE_SV("module");
-  return module->strings.entries[module->name_id];
-}
-
 static bool
 loom_target_function_version_projection_parse_generated_name_namespace(
     iree_string_view_t name, uint32_t* out_namespace) {
@@ -227,82 +221,13 @@ static iree_status_t loom_target_function_version_projection_clone_source(
     iree_arena_block_pool_t* block_pool, iree_arena_allocator_t* scratch_arena,
     iree_allocator_t allocator, loom_ir_module_projection_t* out_projection,
     loom_module_t** out_module) {
-  *out_projection = (loom_ir_module_projection_t){0};
-  *out_module = NULL;
-
-  iree_host_size_t target_string_count = 0;
-  iree_host_size_t target_symbol_count = 0;
-  if (!iree_host_size_checked_add(source_module->strings.count,
-                                  materialization_count,
-                                  &target_string_count) ||
-      !iree_host_size_checked_add(source_module->symbols.count,
-                                  materialization_count,
-                                  &target_symbol_count) ||
-      target_symbol_count > LOOM_SYMBOL_ID_INVALID) {
-    return iree_make_status(
-        IREE_STATUS_RESOURCE_EXHAUSTED,
-        "projected module exceeds the target string or symbol capacity");
-  }
-  const loom_module_size_hints_t hints = {
-      .value_count = 0,
-      .string_count = target_string_count,
-      .type_count = source_module->types.count,
-      .encoding_count = source_module->encodings.count,
-      .source_count = source_module->sources.count,
-      .symbol_count = target_symbol_count,
+  const loom_ir_module_clone_options_t options = {
+      .additional_string_capacity = materialization_count,
+      .additional_symbol_capacity = materialization_count,
   };
-  loom_module_t* target_module = NULL;
-  IREE_RETURN_IF_ERROR(loom_module_allocate(
-      source_module->context,
-      loom_target_function_version_projection_module_name(source_module),
-      block_pool, &hints, allocator, &target_module));
-  target_module->flags = source_module->flags;
-
-  loom_symbol_ref_t* target_symbols = NULL;
-  iree_status_t status = iree_ok_status();
-  if (source_module->symbols.count > 0) {
-    status = iree_arena_allocate_array(
-        scratch_arena, source_module->symbols.count, sizeof(*target_symbols),
-        (void**)&target_symbols);
-  }
-  for (loom_symbol_id_t source_symbol_id = 0;
-       source_symbol_id < source_module->symbols.count &&
-       iree_status_is_ok(status);
-       ++source_symbol_id) {
-    const loom_symbol_t* source_symbol =
-        &source_module->symbols.entries[source_symbol_id];
-    loom_string_id_t target_name_id = LOOM_STRING_ID_INVALID;
-    status = loom_module_intern_string(
-        target_module, source_module->strings.entries[source_symbol->name_id],
-        &target_name_id);
-    loom_symbol_id_t target_symbol_id = LOOM_SYMBOL_ID_INVALID;
-    if (iree_status_is_ok(status)) {
-      status = loom_module_add_symbol(target_module, target_name_id,
-                                      &target_symbol_id);
-    }
-    if (iree_status_is_ok(status)) {
-      target_module->symbols.entries[target_symbol_id].flags =
-          source_symbol->flags;
-      target_symbols[source_symbol_id] = (loom_symbol_ref_t){
-          .module_id = 0,
-          .symbol_id = target_symbol_id,
-      };
-    }
-  }
-  if (iree_status_is_ok(status)) {
-    status = loom_ir_module_projection_initialize(
-        source_module, target_module, target_symbols,
-        source_module->symbols.count, out_projection);
-  }
-  if (iree_status_is_ok(status)) {
-    status = loom_ir_module_projection_clone(out_projection, scratch_arena);
-  }
-  if (iree_status_is_ok(status)) {
-    *out_module = target_module;
-    target_module = NULL;
-  }
-  loom_module_free(target_module);
-  return status;
+  return loom_ir_module_clone(source_module, &options, block_pool,
+                              scratch_arena, allocator, out_projection,
+                              out_module);
 }
 
 static void loom_target_function_version_projection_seed_exact_contexts(

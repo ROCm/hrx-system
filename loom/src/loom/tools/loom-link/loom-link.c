@@ -1381,7 +1381,7 @@ int main(int argc, char** argv) {
                                       allocator);
   }
   loom_module_t* linked_module =
-      FLAG_print_plan ? NULL : materialization.module;
+      FLAG_print_plan ? NULL : materialization.product.module;
   if (iree_status_is_ok(status) && linked_module != NULL) {
     status = loom_link_cli_collect_source_entries(
         inputs, input_count, &source_entries, &source_count, allocator);
