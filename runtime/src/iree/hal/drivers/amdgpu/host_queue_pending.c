@@ -842,13 +842,6 @@ iree_status_t iree_hal_amdgpu_pending_op_start(iree_hal_amdgpu_pending_op_t* op,
   return iree_hal_amdgpu_pending_op_enqueue_waits(op);
 }
 
-static iree_status_t iree_hal_amdgpu_host_queue_clone_error_status(
-    iree_hal_amdgpu_host_queue_t* queue) {
-  iree_status_t error = (iree_status_t)iree_atomic_load(
-      &queue->error_status, iree_memory_order_acquire);
-  return iree_status_is_ok(error) ? iree_ok_status() : iree_status_clone(error);
-}
-
 // Allocates and initializes a pending operation from a fresh arena.
 // Clones the wait semaphore list. Allocates the retained_resources array
 // with |max_resource_count| capacity and populates the first entries with

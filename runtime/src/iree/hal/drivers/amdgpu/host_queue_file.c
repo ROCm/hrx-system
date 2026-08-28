@@ -167,13 +167,6 @@ static void iree_hal_amdgpu_file_action_fail_with_borrowed_status(
                                iree_status_clone(status));
 }
 
-static iree_status_t iree_hal_amdgpu_file_action_clone_queue_error(
-    iree_hal_amdgpu_file_action_state_t* state) {
-  iree_status_t error = (iree_status_t)iree_atomic_load(
-      &state->queue->error_status, iree_memory_order_acquire);
-  return iree_status_is_ok(error) ? iree_ok_status() : iree_status_clone(error);
-}
-
 static void iree_hal_amdgpu_file_action_signal_capacity_post_drain(
     void* user_data);
 
@@ -183,7 +176,8 @@ static iree_status_t iree_hal_amdgpu_file_action_submit_signal_barrier(
     return iree_ok_status();
   }
 
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_file_action_clone_queue_error(state));
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amdgpu_host_queue_clone_error_status(state->queue));
 
   iree_hal_amdgpu_wait_resolution_t resolution;
   memset(&resolution, 0, sizeof(resolution));

@@ -164,9 +164,8 @@ static iree_status_t iree_hal_amdgpu_command_buffer_replay_create(
 // same cause as every other operation that transition settles.
 static iree_status_t iree_hal_amdgpu_command_buffer_replay_clone_queue_error(
     iree_hal_amdgpu_command_buffer_replay_t* replay) {
-  iree_status_t error = (iree_status_t)iree_atomic_load(
-      &replay->queue->error_status, iree_memory_order_acquire);
-  if (!iree_status_is_ok(error)) return iree_status_clone(error);
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amdgpu_host_queue_clone_error_status(replay->queue));
   if (IREE_UNLIKELY(replay->queue->is_shutting_down)) {
     return iree_make_status(IREE_STATUS_CANCELLED, "queue shutting down");
   }

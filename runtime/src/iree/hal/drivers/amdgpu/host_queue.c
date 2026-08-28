@@ -422,21 +422,21 @@ static iree_host_size_t iree_hal_amdgpu_host_queue_drain_completions_locked(
   // thread). If the queue has faulted, no further epochs will advance;
   // fail all pending entries so waiters get the actual GPU error instead
   // of hanging or timing out.
-  iree_status_t error = (iree_status_t)iree_atomic_load(
-      &queue->error_status, iree_memory_order_acquire);
+  const intptr_t error_status =
+      iree_hal_amdgpu_host_queue_load_error_status_raw(queue);
   const uint64_t previous_epoch = (uint64_t)iree_atomic_load(
       &queue->notification_ring.epoch.last_drained, iree_memory_order_relaxed);
   iree_hal_amdgpu_reclaim_positions_t reclaim_positions = {0};
   iree_host_size_t count = 0;
-  if (IREE_UNLIKELY(error)) {
+  if (IREE_UNLIKELY(error_status != 0)) {
     count = iree_hal_amdgpu_notification_ring_fail_all_reclaim_positions(
-        &queue->notification_ring, error,
+        &queue->notification_ring, (iree_status_t)error_status,
         iree_hal_amdgpu_host_queue_reclaim_retire_fn(queue), queue,
         &reclaim_positions);
     iree_hal_amdgpu_host_queue_clear_profile_events(queue);
     iree_async_frontier_tracker_fail_axis(
         queue->frontier_tracker, queue->axis,
-        iree_status_from_code(iree_status_code(error)));
+        iree_status_from_code(iree_status_code((iree_status_t)error_status)));
   } else {
     count = iree_hal_amdgpu_notification_ring_drain_reclaim_positions(
         &queue->notification_ring,
@@ -473,25 +473,6 @@ iree_host_size_t iree_hal_amdgpu_host_queue_drain_completions_for_waiter(
       iree_hal_amdgpu_host_queue_drain_completions_locked(queue);
   iree_slim_mutex_unlock(&queue->locks.completion_drain_mutex);
   return count;
-}
-
-// Returns the queue's recorded failure without transferring ownership. The
-// queue owns the status until it is taken by deinitialization.
-static iree_status_t iree_hal_amdgpu_host_queue_error_status(
-    iree_hal_amdgpu_host_queue_t* queue) {
-  return (iree_status_t)iree_atomic_load(&queue->error_status,
-                                         iree_memory_order_acquire);
-}
-
-static bool iree_hal_amdgpu_host_queue_has_error(
-    iree_hal_amdgpu_host_queue_t* queue) {
-  return !iree_status_is_ok(iree_hal_amdgpu_host_queue_error_status(queue));
-}
-
-static iree_status_t iree_hal_amdgpu_host_queue_clone_error_status(
-    iree_hal_amdgpu_host_queue_t* queue) {
-  iree_status_t error = iree_hal_amdgpu_host_queue_error_status(queue);
-  return iree_status_is_ok(error) ? iree_ok_status() : iree_status_clone(error);
 }
 
 static bool iree_hal_amdgpu_host_queue_store_error(
@@ -763,14 +744,16 @@ static int iree_hal_amdgpu_host_queue_completion_thread_main(void* entry_arg) {
         // is a no-op; on the failure path it is what makes the drain final.
         iree_hal_amdgpu_host_queue_close_submission(queue);
         iree_hal_amdgpu_host_queue_drain_completions(queue);
-        if (iree_hal_amdgpu_host_queue_has_error(queue)) {
+        const intptr_t error_status =
+            iree_hal_amdgpu_host_queue_load_error_status_raw(queue);
+        if (error_status != 0) {
           // Capacity-parked pending operations are retried by post-drain
           // callbacks and the drain's own pass can enqueue more. Flush them
           // under closed admission so they observe cancellation and run their
           // normal failure path instead of being destroyed under the callback.
           iree_hal_amdgpu_host_queue_run_post_drain_actions(queue);
           iree_hal_amdgpu_host_queue_cancel_pending(
-              queue, iree_hal_amdgpu_host_queue_error_status(queue));
+              queue, (iree_status_t)error_status);
         }
         keep_running = false;
       }
