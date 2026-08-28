@@ -187,20 +187,6 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
-    name = "instrument_util",
-    srcs = ["instrument_util.c"],
-    hdrs = ["instrument_util.h"],
-    deps = [
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base/tooling:flags",
-        "//runtime/src/iree/hal",
-        "//runtime/src/iree/modules/hal:types",
-        "//runtime/src/iree/schemas/instruments",
-        "//runtime/src/iree/vm",
-    ],
-)
-
-iree_runtime_cc_library(
     name = "numpy_io",
     srcs = ["numpy_io.c"],
     hdrs = ["numpy_io.h"],
@@ -274,7 +260,6 @@ iree_runtime_cc_library(
         ":device_util",
         ":function_io",
         ":function_util",
-        ":instrument_util",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/hal",

@@ -210,23 +210,6 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
-    instrument_util
-  HDRS
-    "instrument_util.h"
-  SRCS
-    "instrument_util.c"
-  DEPS
-    iree::base
-    iree::base::tooling::flags
-    iree::hal
-    iree::modules::hal::types
-    iree::schemas::instruments
-    iree::vm
-  PUBLIC
-)
-
-iree_cc_library(
-  NAME
     numpy_io
   HDRS
     "numpy_io.h"
@@ -312,7 +295,6 @@ iree_cc_library(
     ::device_util
     ::function_io
     ::function_util
-    ::instrument_util
     iree::base
     iree::base::tooling::flags
     iree::hal

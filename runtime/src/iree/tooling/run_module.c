@@ -17,7 +17,6 @@
 #include "iree/tooling/device_util.h"
 #include "iree/tooling/function_io.h"
 #include "iree/tooling/function_util.h"
-#include "iree/tooling/instrument_util.h"
 #include "iree/vm/api.h"
 #include "iree/vm/bytecode/module.h"
 
@@ -293,13 +292,6 @@ static iree_status_t iree_tooling_run_function(
         status,
         iree_status_annotate_f(iree_hal_end_profiling_from_flags(profiling),
                                "ending device profiling"));
-  }
-
-  // Grab any instrumentation data present in the context and write it to disk.
-  if (iree_status_is_ok(status)) {
-    status = iree_status_annotate_f(
-        iree_tooling_process_instrument_data(context, host_allocator),
-        "processing instrument data");
   }
 
   // Transfer outputs to the host so they can be processed. Only required when
