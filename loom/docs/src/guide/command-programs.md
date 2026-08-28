@@ -296,14 +296,17 @@ plan-wide executable-entry requirement while retaining root-local dense slots.
 Kernel specialization and cache policy remain an independent host workflow
 rather than a nested product of command compilation.
 
-The prepared command plan owns three complementary products:
+Command preparation has two independent ownership channels:
 
-| Product | Responsibility |
+| Owner | Responsibility |
 | --- | --- |
-| Command root | Portable resource bindings, command schedule, and executable slots. |
-| Entry requirements | Atomic executable and entry bindings required by one or more command roots. |
-| Kernel source requests | Optional ordinary Loom bytecode modules specialized only by distinctions that change generated kernels. |
-| Parameter and storage requirements | Fixed parameter placements, rebindable bindings, transients, and any explicit indirect-count storage. |
+| Prepared command plan | Portable roots, atomic entry requirements, parameter placements, rebindable bindings, transients, and explicit indirect-count storage. |
+| Optional request recipient | Independently owned ordinary Loom modules specialized only by distinctions that change generated kernels. |
+
+The plan never retains a request module, source provider, kernel body, or
+classification state. A request transfers to its recipient as it is published;
+the parent operation's terminal result determines whether the complete set is
+committed or cancelled.
 
 ## Emit the portable deployment artifacts
 
@@ -351,5 +354,8 @@ schedule remain runtime responsibilities.
 [Source modules and canonical text](source-modules.md) explains declaration
 and library ownership. [Facts and specialization](facts-and-specialization.md)
 shows how configuration, assumptions, and target facts constrain the values
-used here. [Compile artifacts](../workflows/compile-artifacts.md#emit-portable-command-programs)
+used here. [Compose recursive product
+frontiers](../workflows/product-frontiers.md) follows local, linked, classified,
+and external kernels through one checked product. [Compile
+artifacts](../workflows/compile-artifacts.md#emit-portable-command-programs)
 covers the public command-line artifact workflow.

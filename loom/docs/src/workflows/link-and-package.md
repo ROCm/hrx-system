@@ -135,6 +135,20 @@ Repeated `--root=@symbol` options select several roots from one catalog. Add
 should join the explicit root set. Library exports remain resolution candidates
 and never become roots merely because they are public in their source module.
 
+Output visibility follows root intent rather than provider visibility. A
+public library definition selected only to satisfy the requester becomes a
+private dependency in the linked output. Name it as another root or provide it
+through `--root-library` when that definition should independently remain an
+output. This prevents a reusable library's complete public catalog from being
+re-exported through every product that consumes one definition.
+
+Some products close before every reachable implementation. Portable command
+construction, for example, follows a kernel's contract and pure configuration
+without pulling its device body into the command artifact. [Compose recursive
+product frontiers](product-frontiers.md) follows that boundary through mixed
+local, linked, bytecode, and external kernels and shows how child source
+requests remain ordinary Loom modules.
+
 Configuration bindings are applied to the composed analysis module before each
 reachability and template-selection step. This lets newly reachable code expose
 additional demands while value and target predicates eliminate provider

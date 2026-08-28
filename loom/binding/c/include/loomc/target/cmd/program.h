@@ -24,6 +24,12 @@
 /// high-throughput embedding resolve human-readable names once at ingress and
 /// use indexed identity throughout planning.
 ///
+/// Without a request sink, construction leaves kernel implementation facets
+/// unopened. With a sink, it classifies only surviving source-backed launch
+/// sites and publishes one ordinary module per live semantic class. Published
+/// modules transfer independently and are never retained by the command
+/// product.
+///
 /// @par Example
 /// Build one command product from an already resolved root:
 ///
@@ -111,7 +117,7 @@ typedef struct loomc_cmd_kernel_request_t {
 /// The callback owns `request.module` at entry, including when it returns a
 /// non-OK status. It must release or transfer that module reference.
 ///
-/// @transaction
+/// @par Transaction
 /// Publication is provisional until the parent operation returns OK with a
 /// succeeded result. A non-OK status or failed result cancels the parent
 /// product; the embedding remains responsible for requests it accepted before
@@ -242,31 +248,47 @@ LOOMC_API_EXPORT loomc_status_t loomc_cmd_program_product_build(
     loomc_result_t** out_result);
 
 /// Retains a command product for another owner.
+///
+/// @param product Product to retain.
 LOOMC_API_EXPORT void loomc_cmd_program_product_retain(
     loomc_cmd_program_product_t* product);
 
-/// Releases a command product. Passing NULL is allowed.
+/// Releases a command product.
+///
+/// @param product Product to release. Passing NULL is allowed.
 LOOMC_API_EXPORT void loomc_cmd_program_product_release(
     loomc_cmd_program_product_t* product);
 
 /// Returns the number of serialized command roots in `product`.
+///
+/// @param product Product to query.
+/// @return Number of serialized command roots.
 LOOMC_API_EXPORT loomc_host_size_t loomc_cmd_program_product_program_count(
     const loomc_cmd_program_product_t* product);
 
 /// Returns serialized command-root metadata by product-local ordinal.
 ///
+/// @param product Product to query.
+/// @param ordinal Product-local root ordinal.
+/// @param out_program Receives the borrowed root record when found.
 /// @return True when `ordinal` was valid and `out_program` was populated.
 LOOMC_API_EXPORT bool loomc_cmd_program_product_program_at(
     const loomc_cmd_program_product_t* product, loomc_host_size_t ordinal,
     loomc_cmd_program_t* out_program);
 
 /// Returns the number of product-wide executable-entry requirements.
+///
+/// @param product Product to query.
+/// @return Number of product-wide executable-entry requirements.
 LOOMC_API_EXPORT loomc_host_size_t
 loomc_cmd_program_product_entry_requirement_count(
     const loomc_cmd_program_product_t* product);
 
 /// Returns an executable-entry requirement by product-local ordinal.
 ///
+/// @param product Product to query.
+/// @param ordinal Product-local entry-requirement ordinal.
+/// @param out_requirement Receives the borrowed requirement when found.
 /// @return True when `ordinal` was valid and `out_requirement` was populated.
 LOOMC_API_EXPORT bool loomc_cmd_program_product_entry_requirement_at(
     const loomc_cmd_program_product_t* product, loomc_host_size_t ordinal,

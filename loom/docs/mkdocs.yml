@@ -81,6 +81,7 @@ nav:
       - Agent-driven kernel development: workflows/agent-driven-kernel-development.md
       - Format and verify source: workflows/format-and-verify.md
       - Link and package modules: workflows/link-and-package.md
+      - Compose recursive product frontiers: workflows/product-frontiers.md
       - Build libraries and binaries with Bazel: workflows/build-with-bazel.md
       - Test correctness: workflows/test-correctness.md
       - Benchmark checked work: workflows/benchmark.md
