@@ -70,6 +70,18 @@ typedef enum loom_ir_remap_value_map_kind_e {
   LOOM_IR_REMAP_VALUE_MAP_SOURCE_INDEXED = 1,
 } loom_ir_remap_value_map_kind_t;
 
+// Selected source-to-target operation correspondence recorded during cloning.
+//
+// The source pointer is immutable caller input. The target pointer is written
+// exactly once when the matching source operation is cloned. This is a sparse
+// projection over caller-selected operations, not an all-operation side table.
+typedef struct loom_ir_remap_op_projection_t {
+  // Source operation to observe.
+  const loom_op_t* source_op;
+  // Corresponding cloned operation, or NULL until observed.
+  loom_op_t* target_op;
+} loom_ir_remap_op_projection_t;
+
 // Remap behavior knobs supplied at initialization.
 typedef struct loom_ir_remap_options_t {
   // Allows unmapped SSA value references to remain unchanged when source and
@@ -83,6 +95,16 @@ typedef struct loom_ir_remap_options_t {
   bool remap_same_module_symbols;
   // Storage strategy for SSA value correspondence.
   loom_ir_remap_value_map_kind_t value_map_kind;
+
+  // Optional source operations to project while cloning. Entries must follow
+  // clone visitation order. Target pointers are populated as those operations
+  // are cloned; unrelated operations perform only a cursor-bound check.
+  struct {
+    // Caller-owned projection entries.
+    loom_ir_remap_op_projection_t* entries;
+    // Number of entries in clone visitation order.
+    iree_host_size_t count;
+  } op_projection;
 } loom_ir_remap_options_t;
 
 // Sparse SSA value mapping entry.
@@ -127,6 +149,16 @@ typedef struct loom_ir_remap_t {
   loom_ir_remap_symbol_callback_t remap_symbol;
   // Invokes |remap_symbol| for same-module symbol refs.
   bool remap_same_module_symbols;
+
+  // Sparse source-to-target operation projection used only during cloning.
+  struct {
+    // Caller-owned entries in clone visitation order.
+    loom_ir_remap_op_projection_t* entries;
+    // Number of selected source operations.
+    iree_host_size_t count;
+    // First entry not yet observed.
+    iree_host_size_t cursor;
+  } op_projection;
   // Current recursive static-encoding remap depth. Internal recursion guard;
   // callers should treat this as owned by the remap helpers.
   uint16_t encoding_depth;
@@ -241,6 +273,22 @@ iree_status_t loom_ir_remap_attribute(loom_ir_remap_t* remap,
 iree_status_t loom_ir_remap_predicate_list(
     loom_ir_remap_t* remap, const loom_predicate_t* source_predicates,
     iree_host_size_t predicate_count, loom_predicate_t** out_target_predicates);
+
+// Records a just-cloned source/target operation pair when it is the next
+// selected sparse projection entry.
+//
+// This is called by generic clone materialization. Remaps without a selected
+// operation projection return immediately without retaining either pointer.
+static inline void loom_ir_remap_record_cloned_op(loom_ir_remap_t* remap,
+                                                  const loom_op_t* source_op,
+                                                  loom_op_t* target_op) {
+  if (remap->op_projection.cursor == remap->op_projection.count) return;
+  loom_ir_remap_op_projection_t* entry =
+      &remap->op_projection.entries[remap->op_projection.cursor];
+  if (entry->source_op != source_op) return;
+  entry->target_op = target_op;
+  ++remap->op_projection.cursor;
+}
 
 #ifdef __cplusplus
 }

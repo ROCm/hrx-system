@@ -37,7 +37,29 @@ typedef struct loom_ir_module_projection_t {
   iree_host_size_t target_symbol_count;
   // Source-to-target value correspondence populated while cloning live IR.
   loom_ir_remap_t remap;
+  // Optional sparse operation correspondence populated during the same clone.
+  struct {
+    // Caller-owned entries in clone visitation order.
+    loom_ir_remap_op_projection_t* entries;
+    // Number of selected source operations.
+    iree_host_size_t count;
+  } operations;
 } loom_ir_module_projection_t;
+
+// Capacity and correspondence options for allocating an exact module clone.
+typedef struct loom_ir_module_clone_options_t {
+  // Additional string-table capacity reserved for caller materialization.
+  iree_host_size_t additional_string_capacity;
+  // Additional symbol-table capacity reserved for caller materialization.
+  iree_host_size_t additional_symbol_capacity;
+  // Optional sparse operation correspondence in clone visitation order.
+  struct {
+    // Caller-owned projection entries.
+    loom_ir_remap_op_projection_t* entries;
+    // Number of selected source operations.
+    iree_host_size_t count;
+  } operations;
+} loom_ir_module_clone_options_t;
 
 // Initializes a complete module projection.
 //
@@ -52,6 +74,15 @@ iree_status_t loom_ir_module_projection_initialize(
     iree_host_size_t target_symbol_count,
     loom_ir_module_projection_t* out_projection);
 
+// Selects source operations whose cloned target pointers must be retained.
+//
+// |entries| must follow clone visitation order and remain live through
+// loom_ir_module_projection_clone(). Every selected operation must be live in
+// the complete source module. The clone fails if any entry is not observed.
+iree_status_t loom_ir_module_projection_track_operations(
+    loom_ir_module_projection_t* projection,
+    loom_ir_remap_op_projection_t* entries, iree_host_size_t entry_count);
+
 // Clones the complete source module body through |projection|.
 //
 // Temporary remap state is allocated from |scratch_arena|. Operation order,
@@ -62,6 +93,19 @@ iree_status_t loom_ir_module_projection_initialize(
 iree_status_t loom_ir_module_projection_clone(
     loom_ir_module_projection_t* projection,
     iree_arena_allocator_t* scratch_arena);
+
+// Allocates and exactly clones |source_module| into a new owned module.
+//
+// Symbol IDs are preserved one-to-one and |out_projection| retains source to
+// target symbol, value, and optionally selected operation correspondence.
+// Projection storage belongs to |scratch_arena| and must remain live while the
+// caller queries it. The returned module is owned by the caller.
+iree_status_t loom_ir_module_clone(
+    const loom_module_t* source_module,
+    const loom_ir_module_clone_options_t* options,
+    iree_arena_block_pool_t* block_pool, iree_arena_allocator_t* scratch_arena,
+    iree_allocator_t allocator, loom_ir_module_projection_t* out_projection,
+    loom_module_t** out_module);
 
 // Returns the prepared target reference for |source_symbol_id|.
 static inline loom_symbol_ref_t loom_ir_module_projection_target_symbol(

@@ -468,6 +468,7 @@ static iree_status_t loom_ir_clone_op_impl(
   }
   IREE_RETURN_IF_ERROR(loom_builder_finalize_op(builder, target_op));
   IREE_RETURN_IF_ERROR(loom_ir_clone_op_comments(remap, source_op, target_op));
+  loom_ir_remap_record_cloned_op(remap, source_op, target_op);
   *out_cloned_op = target_op;
   return iree_ok_status();
 }

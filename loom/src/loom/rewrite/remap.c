@@ -140,6 +140,24 @@ iree_status_t loom_ir_remap_initialize(const loom_module_t* source_module,
       .remap_same_module_symbols =
           options ? options->remap_same_module_symbols : false,
   };
+  if (options != NULL) {
+    remap.op_projection.entries = options->op_projection.entries;
+    remap.op_projection.count = options->op_projection.count;
+  }
+
+  if (remap.op_projection.count != 0 && remap.op_projection.entries == NULL) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "operation projection count is non-zero but entries are NULL");
+  }
+  for (iree_host_size_t i = 0; i < remap.op_projection.count; ++i) {
+    if (remap.op_projection.entries[i].source_op == NULL) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "operation projection entry %zu has no source",
+                              i);
+    }
+    remap.op_projection.entries[i].target_op = NULL;
+  }
 
   const loom_ir_remap_value_map_kind_t value_map_kind =
       options ? options->value_map_kind : LOOM_IR_REMAP_VALUE_MAP_SPARSE;
