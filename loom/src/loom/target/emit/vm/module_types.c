@@ -225,44 +225,14 @@ static int loom_vm_module_compare_callable_structures(const void* lhs_ptr,
 
 static iree_status_t loom_vm_module_signature_scalar_kind(loom_type_t type,
                                                           uint16_t* out_kind) {
-  switch (loom_type_element_type(type)) {
-    case LOOM_SCALAR_TYPE_INDEX:
-    case LOOM_SCALAR_TYPE_OFFSET:
-    case LOOM_SCALAR_TYPE_I64:
-      *out_kind = IREE_VM_BYTECODE_SIGNATURE_KIND_I64;
-      return iree_ok_status();
-    case LOOM_SCALAR_TYPE_I1:
-    case LOOM_SCALAR_TYPE_I8:
-      *out_kind = IREE_VM_BYTECODE_SIGNATURE_KIND_I8;
-      return iree_ok_status();
-    case LOOM_SCALAR_TYPE_I16:
-      *out_kind = IREE_VM_BYTECODE_SIGNATURE_KIND_I16;
-      return iree_ok_status();
-    case LOOM_SCALAR_TYPE_I32:
-      *out_kind = IREE_VM_BYTECODE_SIGNATURE_KIND_I32;
-      return iree_ok_status();
-    case LOOM_SCALAR_TYPE_F8E4M3:
-      *out_kind = IREE_VM_BYTECODE_SIGNATURE_KIND_F8E4M3FN;
-      return iree_ok_status();
-    case LOOM_SCALAR_TYPE_F8E5M2:
-      *out_kind = IREE_VM_BYTECODE_SIGNATURE_KIND_F8E5M2;
-      return iree_ok_status();
-    case LOOM_SCALAR_TYPE_F16:
-      *out_kind = IREE_VM_BYTECODE_SIGNATURE_KIND_F16;
-      return iree_ok_status();
-    case LOOM_SCALAR_TYPE_BF16:
-      *out_kind = IREE_VM_BYTECODE_SIGNATURE_KIND_BF16;
-      return iree_ok_status();
-    case LOOM_SCALAR_TYPE_F32:
-      *out_kind = IREE_VM_BYTECODE_SIGNATURE_KIND_F32;
-      return iree_ok_status();
-    case LOOM_SCALAR_TYPE_F64:
-      *out_kind = IREE_VM_BYTECODE_SIGNATURE_KIND_F64;
-      return iree_ok_status();
-    default:
-      return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                              "scalar type is not supported by the VM ABI");
+  const iree_vm_scalar_type_t scalar_type =
+      loom_vm_call_abi_scalar_type(loom_type_element_type(type));
+  if (scalar_type == IREE_VM_SCALAR_TYPE_NONE) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "scalar type is not part of the VM ABI");
   }
+  *out_kind = scalar_type;
+  return iree_ok_status();
 }
 
 static iree_status_t loom_vm_module_resolve_logical_type(

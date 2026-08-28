@@ -15,6 +15,37 @@
 #include "loom/target/arch/vm/descriptors.h"
 #include "loom/target/registers.h"
 
+iree_vm_scalar_type_t loom_vm_call_abi_scalar_type(
+    loom_scalar_type_t scalar_type) {
+  switch (scalar_type) {
+    case LOOM_SCALAR_TYPE_I1:
+    case LOOM_SCALAR_TYPE_I8:
+      return IREE_VM_SCALAR_TYPE_I8;
+    case LOOM_SCALAR_TYPE_I16:
+      return IREE_VM_SCALAR_TYPE_I16;
+    case LOOM_SCALAR_TYPE_I32:
+      return IREE_VM_SCALAR_TYPE_I32;
+    case LOOM_SCALAR_TYPE_INDEX:
+    case LOOM_SCALAR_TYPE_OFFSET:
+    case LOOM_SCALAR_TYPE_I64:
+      return IREE_VM_SCALAR_TYPE_I64;
+    case LOOM_SCALAR_TYPE_F8E4M3:
+      return IREE_VM_SCALAR_TYPE_F8E4M3FN;
+    case LOOM_SCALAR_TYPE_F8E5M2:
+      return IREE_VM_SCALAR_TYPE_F8E5M2;
+    case LOOM_SCALAR_TYPE_F16:
+      return IREE_VM_SCALAR_TYPE_F16;
+    case LOOM_SCALAR_TYPE_BF16:
+      return IREE_VM_SCALAR_TYPE_BF16;
+    case LOOM_SCALAR_TYPE_F32:
+      return IREE_VM_SCALAR_TYPE_F32;
+    case LOOM_SCALAR_TYPE_F64:
+      return IREE_VM_SCALAR_TYPE_F64;
+    default:
+      return IREE_VM_SCALAR_TYPE_NONE;
+  }
+}
+
 bool loom_vm_call_abi_try_classify_logical_type(
     const loom_module_t* module, loom_type_t type,
     loom_vm_call_abi_bank_t* out_bank) {

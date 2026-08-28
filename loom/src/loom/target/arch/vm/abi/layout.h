@@ -11,6 +11,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
+#include "iree/vm/scalar.h"
 #include "loom/ir/ir.h"
 
 #ifdef __cplusplus
@@ -89,6 +90,14 @@ typedef struct loom_vm_call_abi_packet_layout_t {
   // Complete caller-local function prefix required by function overflow slots.
   uint32_t local_function_count;
 } loom_vm_call_abi_packet_layout_t;
+
+// Maps one Loom scalar to its exact VM callable scalar type.
+//
+// Index and offset use the version-zero 64-bit host-program ABI. I1 uses the
+// I8 carrier with canonical zero/one bits. Returns NONE for a non-scalar or a
+// scalar unavailable in the Core ABI.
+iree_vm_scalar_type_t loom_vm_call_abi_scalar_type(
+    loom_scalar_type_t scalar_type);
 
 // Returns the number of fields beyond the direct register prefix.
 uint16_t loom_vm_call_abi_overflow_count(uint16_t count);
