@@ -116,6 +116,8 @@ loom_cc_library(
         "//loom/src/loom/tooling/execution:session",
         "//loom/src/loom/tooling/io:file",
         "//loom/src/loom/transforms/kernel:kernel_class_materializer",
+        "//loom/src/loom/util:json",
+        "//loom/src/loom/util:stream",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/io:stream",

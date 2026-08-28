@@ -63,8 +63,6 @@ loom_cc_library(
         "//loom/src/loom/ops/kernel",
         "//loom/src/loom/target/arch/cmd/lower:program_plan",
         "//loom/src/loom/target/arch/cmd/lower:serialize",
-        "//loom/src/loom/util:json",
-        "//loom/src/loom/util:stream",
         "//runtime/src/iree/base",
     ],
 )

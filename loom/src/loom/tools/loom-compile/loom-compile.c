@@ -715,7 +715,7 @@ static iree_status_t loom_compile_emit_command(
         LOOM_TARGET_COMPILE_ARTIFACT_KIND_TARGET_ARTIFACT;
     compile_options->report->backend_name = IREE_SV("command");
     compile_options->report->artifact_format =
-        IREE_SV(LOOM_CMD_PROGRAM_ARTIFACT_SET_MANIFEST_FORMAT);
+        IREE_SV(LOOM_COMPILE_COMMAND_MANIFEST_FORMAT);
   }
   return loom_compile_command_backend_emit(
       session, run_module,
