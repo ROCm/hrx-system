@@ -479,7 +479,7 @@ iree_status_t loom_kernel_class_classifier_build(
   // compact projection-ordinal slices for the classifier lifetime.
   uint32_t* decision_projection_ordinals = referenced_value_ids;
   loom_decision_truth_t* feature_outcomes = NULL;
-  loom_kernel_class_contract_flags_t* action_contract_flags = NULL;
+  loom_kernel_class_action_t* actions = NULL;
   IREE_RETURN_IF_ERROR(loom_kernel_class_allocate_array(
       arena, binding_value_count, sizeof(*binding_values),
       (void**)&binding_values));
@@ -487,8 +487,7 @@ iree_status_t loom_kernel_class_classifier_build(
       arena, feature_count, sizeof(*feature_outcomes),
       (void**)&feature_outcomes));
   IREE_RETURN_IF_ERROR(loom_kernel_class_allocate_array(
-      arena, action_count, sizeof(*action_contract_flags),
-      (void**)&action_contract_flags));
+      arena, action_count, sizeof(*actions), (void**)&actions));
   if (binding_value_count > 0) {
     memset(binding_values, 0xFF, binding_value_count * sizeof(*binding_values));
   }
@@ -517,10 +516,9 @@ iree_status_t loom_kernel_class_classifier_build(
     decision->feature_outcomes = decision->model->program.feature_count > 0
                                      ? feature_outcomes + feature_cursor
                                      : NULL;
-    decision->action_contract_flags =
-        decision->model->program.choice_count > 0
-            ? action_contract_flags + action_cursor
-            : NULL;
+    decision->actions = decision->model->program.choice_count > 0
+                            ? actions + action_cursor
+                            : NULL;
     decision->hard_requirement_flags = loom_kernel_class_contract_flags(
         &decision->model->program, decision->model->program.hard_requirements);
     for (uint32_t j = 0; j < decision->model->program.choice_count; ++j) {
@@ -528,9 +526,12 @@ iree_status_t loom_kernel_class_classifier_build(
           &decision->model->program.choices[j];
       IREE_ASSERT(choice->action_ordinal <
                   decision->model->program.choice_count);
-      action_contract_flags[action_cursor + choice->action_ordinal] =
-          loom_kernel_class_contract_flags(&decision->model->program,
-                                           choice->conjunction);
+      actions[action_cursor + choice->action_ordinal] =
+          (loom_kernel_class_action_t){
+              .choice_ordinal = j,
+              .contract_flags = loom_kernel_class_contract_flags(
+                  &decision->model->program, choice->conjunction),
+          };
     }
     action_cursor += decision->model->program.choice_count;
 
@@ -730,7 +731,7 @@ static bool loom_kernel_class_action_is_publishable(
   }
   const loom_kernel_class_contract_flags_t flags =
       decision->hard_requirement_flags |
-      decision->action_contract_flags[action_ordinal];
+      decision->actions[action_ordinal].contract_flags;
   return !iree_any_bit_set(flags,
                            LOOM_KERNEL_CLASS_CONTRACT_FLAG_RESULT_DEPENDENT);
 }

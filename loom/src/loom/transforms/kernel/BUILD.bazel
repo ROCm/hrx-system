@@ -66,6 +66,55 @@ loom_cc_benchmark(
 )
 
 loom_cc_library(
+    name = "kernel_class_materializer",
+    srcs = ["kernel_class_materializer.c"],
+    hdrs = ["kernel_class_materializer.h"],
+    deps = [
+        ":kernel_class_classifier",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/ops/template",
+        "//loom/src/loom/rewrite:module_projection",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/transforms/symbol:template_rewrite",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "kernel_class_materializer_test",
+    srcs = ["kernel_class_materializer_test.cc"],
+    deps = [
+        ":kernel_class_classifier",
+        ":kernel_class_materializer",
+        "//loom/src/loom/analysis:symbol_facts",
+        "//loom/src/loom/analysis:symbol_references",
+        "//loom/src/loom/analysis:template_provider_catalog",
+        "//loom/src/loom/format/bytecode:reader",
+        "//loom/src/loom/format/bytecode:writer",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/ops/scf",
+        "//loom/src/loom/ops/template",
+        "//loom/src/loom/testing:module_ptr",
+        "//loom/src/loom/tooling/context",
+        "//loom/src/loom/transforms/symbol:template_decision_model",
+        "//loom/src/loom/transforms/symbol:template_selection",
+        "//loom/src/loom/util:fact_table",
+        "//loom/src/loom/verify",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:stream",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "kernel_async_legality",
     srcs = ["kernel_async_legality.c"],
     hdrs = ["kernel_async_legality.h"],

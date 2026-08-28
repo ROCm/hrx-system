@@ -78,6 +78,8 @@ class KernelClassClassifierBenchmarkFixture {
         /*.conjunction=*/{},
         /*.action_ordinal=*/1,
     };
+    actions_[0].choice_ordinal = 0;
+    actions_[1].choice_ordinal = 1;
     priority_groups_[0].choice_count = 1;
     priority_groups_[1].choice_count = 1;
     model_.program = {
@@ -121,7 +123,7 @@ class KernelClassClassifierBenchmarkFixture {
           /*.result_values=*/nullptr,
           /*.projection_ordinals=*/&projection_ordinal_,
           /*.feature_outcomes=*/nullptr,
-          /*.action_contract_flags=*/action_contract_flags_,
+          /*.actions=*/actions_,
           /*.generic_result=*/
           {
               /*.kind=*/LOOM_DECISION_PROGRAM_RESULT_SELECTED,
@@ -195,7 +197,7 @@ class KernelClassClassifierBenchmarkFixture {
   loom_kernel_class_projection_t projection_ = {};
   loom_value_id_t projection_value_id_ = 0;
   uint32_t projection_ordinal_ = 0;
-  loom_kernel_class_contract_flags_t action_contract_flags_[2] = {};
+  loom_kernel_class_action_t actions_[2] = {};
   std::vector<loom_kernel_class_decision_t> decisions_;
   loom_kernel_class_classifier_t classifier_ = {};
 };

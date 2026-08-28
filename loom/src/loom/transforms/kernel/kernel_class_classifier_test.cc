@@ -219,6 +219,10 @@ class ManualBinaryClassifier {
         },
         /*.action_ordinal=*/1,
     };
+    for (uint32_t i = 0; i < 2; ++i) {
+      actions_[0][i].choice_ordinal = i;
+      actions_[1][i].choice_ordinal = i;
+    }
     if (has_generic_residual) {
       priority_groups_[0].choice_count = 1;
       priority_groups_[1].choice_count = 1;
@@ -263,7 +267,7 @@ class ManualBinaryClassifier {
           /*.result_values=*/nullptr,
           /*.projection_ordinals=*/&projection_ordinals_[i],
           /*.feature_outcomes=*/nullptr,
-          /*.action_contract_flags=*/action_contract_flags_[i],
+          /*.actions=*/actions_[i],
           /*.generic_result=*/
           {
               /*.kind=*/static_cast<loom_decision_program_result_kind_t>(
@@ -318,9 +322,8 @@ class ManualBinaryClassifier {
 
   loom_kernel_class_classifier_t* classifier() { return &classifier_; }
   loom_kernel_class_decision_t* decisions() { return decisions_; }
-  loom_kernel_class_contract_flags_t* action_contract_flags(
-      uint32_t decision_ordinal) {
-    return action_contract_flags_[decision_ordinal];
+  loom_kernel_class_action_t* actions(uint32_t decision_ordinal) {
+    return actions_[decision_ordinal];
   }
   const loom_kernel_class_site_t* sites() const { return sites_; }
 
@@ -337,7 +340,7 @@ class ManualBinaryClassifier {
   loom_kernel_class_projection_t projections_[2] = {};
   loom_value_id_t projection_value_ids_[2] = {0, 1};
   uint32_t projection_ordinals_[2] = {0, 1};
-  loom_kernel_class_contract_flags_t action_contract_flags_[2][2] = {};
+  loom_kernel_class_action_t actions_[2][2] = {};
   loom_kernel_class_decision_t decisions_[2] = {};
   loom_kernel_class_classifier_t classifier_ = {};
 
@@ -586,7 +589,7 @@ TEST_F(KernelClassClassifierTest,
        SelectedResultDependentActionRetainsGenericResidual) {
   ManualBinaryClassifier fixture(/*has_generic_residual=*/true);
   fixture.classifier()->decision_count = 1;
-  fixture.action_contract_flags(0)[0] =
+  fixture.actions(0)[0].contract_flags =
       LOOM_KERNEL_CLASS_CONTRACT_FLAG_RESULT_DEPENDENT;
   const loom_kernel_class_collection_options_t options =
       loom_kernel_class_collection_options_default();
@@ -606,7 +609,7 @@ TEST_F(KernelClassClassifierTest,
        UnselectedResultDependentActionDoesNotSuppressInputOnlyAction) {
   ManualBinaryClassifier fixture(/*has_generic_residual=*/true);
   fixture.classifier()->decision_count = 1;
-  fixture.action_contract_flags(0)[0] =
+  fixture.actions(0)[0].contract_flags =
       LOOM_KERNEL_CLASS_CONTRACT_FLAG_RESULT_DEPENDENT;
   const loom_kernel_class_collection_options_t options =
       loom_kernel_class_collection_options_default();
@@ -655,7 +658,7 @@ kernel.def @classified() {
     const bool is_result_guard = iree_string_view_equal(
         decision->model->providers.providers[i].name, IREE_SV("result_guard"));
     EXPECT_EQ(
-        iree_any_bit_set(decision->action_contract_flags[i],
+        iree_any_bit_set(decision->actions[i].contract_flags,
                          LOOM_KERNEL_CLASS_CONTRACT_FLAG_RESULT_DEPENDENT),
         is_result_guard);
   }

@@ -113,6 +113,21 @@ enum loom_kernel_class_contract_flag_bits_e {
   LOOM_KERNEL_CLASS_CONTRACT_FLAG_RESULT_DEPENDENT = 1u << 0,
 };
 
+// Publication metadata for one dense provider action.
+typedef struct loom_kernel_class_action_t {
+  // Direct choice ordinal in the ranked decision program.
+  uint32_t choice_ordinal;
+
+  // Properties of the provider applicability contract.
+  loom_kernel_class_contract_flags_t contract_flags;
+
+  // Reserved bytes. Always zero.
+  uint8_t reserved[3];
+} loom_kernel_class_action_t;
+
+static_assert(sizeof(loom_kernel_class_action_t) == 8,
+              "kernel class actions must remain compact");
+
 // Immutable boundary form of one template application decision.
 typedef struct loom_kernel_class_decision_t {
   // Source application demand.
@@ -133,8 +148,8 @@ typedef struct loom_kernel_class_decision_t {
   // Pre-resolved contextual feature outcomes in model-local order.
   const loom_decision_truth_t* feature_outcomes;
 
-  // Publication properties indexed by provider action ordinal.
-  const loom_kernel_class_contract_flags_t* action_contract_flags;
+  // Publication metadata indexed by provider action ordinal.
+  const loom_kernel_class_action_t* actions;
 
   // Selection result from kernel-source facts before launch-site refinement.
   loom_decision_program_result_t generic_result;

@@ -70,6 +70,59 @@ loom_cc_benchmark(
 
 loom_cc_library(
   NAME
+    kernel_class_materializer
+  HDRS
+    "kernel_class_materializer.h"
+  SRCS
+    "kernel_class_materializer.c"
+  DEPS
+    ::kernel_class_classifier
+    iree::base
+    iree::base::internal::arena
+    loom::ir
+    loom::ops::index
+    loom::ops::scalar
+    loom::ops::template
+    loom::rewrite::module_projection
+    loom::rewrite::rewriter
+    loom::transforms::symbol::template_rewrite
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    kernel_class_materializer_test
+  SRCS
+    "kernel_class_materializer_test.cc"
+  DEPS
+    ::kernel_class_classifier
+    ::kernel_class_materializer
+    iree::base::internal::arena
+    iree::io::stream
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::analysis::symbol_facts
+    loom::analysis::symbol_references
+    loom::analysis::template_provider_catalog
+    loom::format::bytecode::reader
+    loom::format::bytecode::writer
+    loom::format::text::parser
+    loom::ir
+    loom::ops::index
+    loom::ops::kernel
+    loom::ops::op_defs
+    loom::ops::scf
+    loom::ops::template
+    loom::testing::module_ptr
+    loom::tooling::context
+    loom::transforms::symbol::template_decision_model
+    loom::transforms::symbol::template_selection
+    loom::util::fact_table
+    loom::verify
+)
+
+loom_cc_library(
+  NAME
     kernel_async_legality
   HDRS
     "kernel_async_legality.h"
