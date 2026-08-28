@@ -6,11 +6,14 @@
 
 #include "loom/target/arch/cmd/lower/program_plan.h"
 
+#include <algorithm>
 #include <vector>
 
+#include "iree/io/vec_stream.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/codegen/low/text_asm.h"
+#include "loom/format/bytecode/writer.h"
 #include "loom/format/text/parser.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
@@ -115,6 +118,22 @@ class CmdProgramPlanTest : public ::testing::Test {
     }
     EXPECT_EQ(result.error_count, 0u);
     return module_ptr;
+  }
+
+  std::vector<uint8_t> WriteBytecode(const loom_module_t* module) {
+    iree_io_stream_t* stream = nullptr;
+    IREE_CHECK_OK(iree_io_vec_stream_create(
+        IREE_IO_STREAM_MODE_WRITABLE | IREE_IO_STREAM_MODE_SEEKABLE |
+            IREE_IO_STREAM_MODE_READABLE | IREE_IO_STREAM_MODE_RESIZABLE,
+        4096, iree_allocator_system(), &stream));
+    IREE_CHECK_OK(loom_bytecode_write_module(
+        module, stream, /*options=*/nullptr, &block_pool_));
+    std::vector<uint8_t> bytes(iree_io_stream_length(stream));
+    IREE_CHECK_OK(iree_io_stream_seek(stream, IREE_IO_STREAM_SEEK_SET, 0));
+    IREE_CHECK_OK(
+        iree_io_stream_read(stream, bytes.size(), bytes.data(), nullptr));
+    iree_io_stream_release(stream);
+    return bytes;
   }
 
   loom_op_t* FindSymbol(loom_module_t* module, iree_string_view_t name) {
@@ -353,7 +372,109 @@ command.program.def public @selected_schedule() launch(%storage: buffer) {
 }
 
 TEST_F(CmdProgramPlanTest,
-       IndexedPreparationStreamsSharedClassesAndExternalBindings) {
+       BodyBlindPreparationDoesNotReadKernelImplementationBytes) {
+  ModulePtr source_module = ParseAndVerify(R"(
+kernel.def @child() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch() {
+  kernel.return
+}
+
+command.program.def public @root() launch() {
+  kernel.launch @child() : ()
+  command.return
+}
+)");
+  ASSERT_NE(source_module, nullptr);
+  std::vector<uint8_t> bytecode = WriteBytecode(source_module.get());
+
+  loom_link_module_index_t* index = nullptr;
+  IREE_ASSERT_OK(loom_link_module_index_allocate(
+      &context_, &block_pool_, iree_allocator_system(), &index));
+  loom_bytecode_index_options_t index_options = {};
+  index_options.diagnostic_sink = {loom_diagnostic_stderr_sink, nullptr};
+  IREE_ASSERT_OK(loom_link_module_index_add_bytecode(
+      index, iree_make_const_byte_span(bytecode.data(), bytecode.size()),
+      IREE_SV("provider.loombc"), &index_options, /*options=*/nullptr,
+      /*out_provider_ordinal=*/nullptr));
+  const loom_link_module_index_symbol_t* root =
+      loom_link_module_index_lookup_name(index, IREE_SV("root"));
+  const loom_link_module_index_symbol_t* child =
+      loom_link_module_index_lookup_name(index, IREE_SV("child"));
+  ASSERT_NE(root, nullptr);
+  ASSERT_NE(child, nullptr);
+
+  const loom_link_module_index_provider_t* provider =
+      loom_link_module_index_symbol_provider(index, child);
+  const loom_link_module_index_module_t* indexed_module =
+      loom_link_module_index_symbol_module(index, child);
+  ASSERT_NE(provider, nullptr);
+  ASSERT_NE(indexed_module, nullptr);
+  const loom_bytecode_module_metadata_t* metadata =
+      &provider->bytecode.metadata
+           .modules[indexed_module->provider_module_ordinal];
+  const loom_bytecode_symbol_metadata_t* symbol =
+      &metadata->symbols[child->module_symbol_ordinal];
+  ASSERT_NE(symbol->kernel_workload_region_payload_ordinal_plus_one, 0u);
+  ASSERT_NE(symbol->body_region_payload_ordinal_plus_one, 0u);
+  const loom_bytecode_region_payload_metadata_t* body_payload =
+      &metadata
+           ->region_payloads[symbol->first_region_payload_index +
+                             symbol->body_region_payload_ordinal_plus_one - 1];
+  ASSERT_GT(body_payload->length, 0u);
+  std::fill_n(bytecode.data() + body_payload->absolute_offset,
+              body_payload->length, UINT8_C(0xFF));
+
+  const loom_link_plan_materialization_environment_t environment = {
+      /*.context=*/&context_,
+      /*.block_pool=*/&block_pool_,
+      /*.low_repr_environment=*/{},
+      /*.diagnostic_sink=*/nullptr,
+      /*.prepare_module=*/nullptr,
+      /*.user_data=*/nullptr,
+      /*.allocator=*/iree_allocator_system(),
+  };
+  iree_arena_allocator_t body_blind_arena;
+  iree_arena_initialize(&block_pool_, &body_blind_arena);
+  loom_cmd_program_plan_t body_blind_plan = {};
+  bool body_blind_valid = false;
+  IREE_ASSERT_OK(loom_cmd_program_plan_prepare_index(
+      index, &root->ordinal, /*program_count=*/1, /*options=*/nullptr,
+      loom_pass_builtin_registry(), /*diagnostic_emitter=*/{}, &environment,
+      &body_blind_arena, &body_blind_valid, &body_blind_plan));
+  ASSERT_TRUE(body_blind_valid);
+  ASSERT_EQ(body_blind_plan.root_count, 1u);
+  ASSERT_EQ(body_blind_plan.entry_requirement_count, 1u);
+  EXPECT_FALSE(body_blind_plan.entry_requirements[0].has_source_request);
+  loom_cmd_program_plan_deinitialize(&body_blind_plan);
+  iree_arena_deinitialize(&body_blind_arena);
+
+  KernelRequestCapture request_capture;
+  loom_cmd_program_plan_index_options_t request_options;
+  loom_cmd_program_plan_index_options_initialize(&request_options);
+  request_options.kernel_request_sink = {
+      /*.publish=*/CaptureKernelRequest,
+      /*.user_data=*/&request_capture,
+  };
+  iree_arena_allocator_t request_arena;
+  iree_arena_initialize(&block_pool_, &request_arena);
+  loom_cmd_program_plan_t request_plan = {};
+  bool request_valid = false;
+  IREE_EXPECT_NOT_OK(loom_cmd_program_plan_prepare_index(
+      index, &root->ordinal, /*program_count=*/1, &request_options,
+      loom_pass_builtin_registry(), /*diagnostic_emitter=*/{}, &environment,
+      &request_arena, &request_valid, &request_plan));
+  EXPECT_FALSE(request_valid);
+  EXPECT_EQ(request_plan.root_module, nullptr);
+  EXPECT_TRUE(request_capture.requests.empty());
+  loom_cmd_program_plan_deinitialize(&request_plan);
+  iree_arena_deinitialize(&request_arena);
+  loom_link_module_index_free(index);
+}
+
+TEST_F(CmdProgramPlanTest,
+       IndexedPreparationStreamsIndependentKernelsAndSharedClasses) {
   ModulePtr source_module = ParseAndVerify(R"(
 template.decl @request.schedule(%size: index)
 
@@ -373,6 +494,13 @@ kernel.def @classified() {
   kernel.return
 }
 
+kernel.def @fixed() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%storage: buffer) {
+  kernel.return
+}
+
 kernel.entry.decl @external(%storage: buffer)
 
 command.program.def public @root_a() launch(%storage: buffer) {
@@ -381,6 +509,7 @@ command.program.def public @root_a() launch(%storage: buffer) {
   %unit = index.constant 1 : index
   kernel.launch @classified(%small, %storage) : (index, buffer)
   kernel.launch @classified(%large, %storage) : (index, buffer)
+  kernel.launch @fixed(%storage) : (buffer)
   kernel.dispatch @external[%unit](%storage) : [index](buffer)
   command.return
 }
@@ -391,6 +520,8 @@ command.program.def public @root_b() launch(%storage: buffer) {
   %unit = index.constant 1 : index
   kernel.launch @classified(%large, %storage) : (index, buffer)
   kernel.launch @classified(%small, %storage) : (index, buffer)
+  kernel.launch @fixed(%storage) : (buffer)
+  kernel.launch @fixed(%storage) : (buffer)
   kernel.dispatch @external[%unit](%storage) : [index](buffer)
   command.return
 }
@@ -474,13 +605,14 @@ command.program.def public @root_b() launch(%storage: buffer) {
   iree_arena_deinitialize(&reject_scratch_arena);
   iree_arena_deinitialize(&scratch_arena);
 
-  ASSERT_EQ(request_capture.requests.size(), 2u);
+  ASSERT_EQ(request_capture.requests.size(), 3u);
   EXPECT_EQ(request_capture.requests[0].source.member_count, 2u);
   EXPECT_EQ(request_capture.requests[1].source.member_count, 2u);
+  EXPECT_EQ(request_capture.requests[2].source.member_count, 3u);
   EXPECT_NE(request_capture.requests[0].source.class_ordinal,
             request_capture.requests[1].source.class_ordinal);
 
-  ASSERT_EQ(plan.entry_requirement_count, 3u);
+  ASSERT_EQ(plan.entry_requirement_count, 4u);
   iree_host_size_t source_requirement_count = 0;
   iree_host_size_t external_requirement_count = 0;
   for (iree_host_size_t i = 0; i < plan.entry_requirement_count; ++i) {
@@ -490,21 +622,23 @@ command.program.def public @root_b() launch(%storage: buffer) {
       ++external_requirement_count;
     }
   }
-  EXPECT_EQ(source_requirement_count, 2u);
+  EXPECT_EQ(source_requirement_count, 3u);
   EXPECT_EQ(external_requirement_count, 1u);
 
   ASSERT_EQ(plan.root_count, 2u);
   const loom_cmd_program_root_t& root_a = plan.roots[0];
   const loom_cmd_program_root_t& root_b = plan.roots[1];
-  ASSERT_EQ(root_a.entry_requirement_count, 3u);
-  ASSERT_EQ(root_b.entry_requirement_count, 3u);
+  ASSERT_EQ(root_a.entry_requirement_count, 4u);
+  ASSERT_EQ(root_b.entry_requirement_count, 4u);
   EXPECT_EQ(root_a.entry_requirement_indices[0],
             root_b.entry_requirement_indices[1]);
   EXPECT_EQ(root_a.entry_requirement_indices[1],
             root_b.entry_requirement_indices[0]);
   EXPECT_EQ(root_a.entry_requirement_indices[2],
             root_b.entry_requirement_indices[2]);
-  EXPECT_FALSE(plan.entry_requirements[root_a.entry_requirement_indices[2]]
+  EXPECT_EQ(root_a.entry_requirement_indices[3],
+            root_b.entry_requirement_indices[3]);
+  EXPECT_FALSE(plan.entry_requirements[root_a.entry_requirement_indices[3]]
                    .has_source_request);
 
   for (loom_cmd_program_kernel_request_t& request : request_capture.requests) {
