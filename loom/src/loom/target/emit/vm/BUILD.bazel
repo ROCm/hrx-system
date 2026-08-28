@@ -61,6 +61,8 @@ loom_cc_library(
         "//loom/src/loom/target:registers",
         "//loom/src/loom/target/arch/vm:abi_layout",
         "//loom/src/loom/target/arch/vm:descriptors",
+        "//loom/src/loom/target/arch/vm:facts",
+        "//loom/src/loom/util:call_graph",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/io:stream",

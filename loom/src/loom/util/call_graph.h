@@ -28,11 +28,12 @@
 //   loom_call_graph_t graph;
 //   IREE_RETURN_IF_ERROR(loom_call_graph_build(module, &arena, &graph));
 //
-//   // Iterate functions in bottom-up order (callees first).
-//   for (uint16_t i = 0; i < graph.node_count; ++i) {
-//     const loom_call_graph_node_t* node = &graph.nodes[i];
-//     if (loom_call_graph_is_recursive(&graph, node->symbol_id)) {
-//       // Handle recursive function.
+//   // SCC IDs, not the symbol-ordered node array, are bottom-up.
+//   for (uint16_t scc_id = 0; scc_id < graph.scc_count; ++scc_id) {
+//     for (uint16_t i = 0; i < graph.node_count; ++i) {
+//       const loom_call_graph_node_t* node = &graph.nodes[i];
+//       if (node->scc_id != scc_id) continue;
+//       // Analyze this SCC member after every cross-SCC callee.
 //     }
 //   }
 

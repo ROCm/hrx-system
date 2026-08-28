@@ -36,6 +36,7 @@ loom_cc_library(
     name = "facts",
     srcs = ["facts.c"],
     hdrs = ["facts.h"],
+    visibility = ["//loom/src/loom/target/emit/vm:__pkg__"],
     deps = [
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/ir",

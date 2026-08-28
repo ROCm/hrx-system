@@ -7,6 +7,7 @@
 #include "loom/target/emit/vm/module_layout.h"
 
 #include <stdlib.h>
+#include <string.h>
 
 #include "iree/vm/bytecode/wire/core/selectors.h"
 #include "iree/vm/bytecode/wire/module_format.h"
@@ -14,8 +15,11 @@
 #include "loom/codegen/low/target_binding.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
+#include "loom/ops/type_registry.h"
 #include "loom/target/arch/vm/abi/layout.h"
 #include "loom/target/arch/vm/descriptors.h"
+#include "loom/target/arch/vm/facts.h"
+#include "loom/util/call_graph.h"
 
 static iree_string_view_t loom_vm_module_layout_string_or_empty(
     const loom_module_t* module, loom_string_id_t string_id) {
@@ -81,7 +85,7 @@ typedef struct loom_vm_module_function_summary_t {
 } loom_vm_module_function_summary_t;
 
 static iree_status_t loom_vm_module_layout_summarize_function(
-    const loom_op_t* function_op,
+    const loom_module_t* module, const loom_op_t* function_op,
     loom_vm_module_function_summary_t* out_summary) {
   *out_summary = (loom_vm_module_function_summary_t){0};
   const loom_region_t* body = loom_low_function_const_body(function_op);
@@ -92,6 +96,16 @@ static iree_status_t loom_vm_module_layout_summarize_function(
        ++block_index) {
     const loom_op_t* op = NULL;
     loom_block_for_each_op(body->blocks[block_index], op) {
+      if (loom_low_func_call_indirect_isa(op)) {
+        const loom_type_t target_register_type = loom_module_value_type(
+            module, loom_low_func_call_indirect_target(op));
+        const loom_type_t* target_type =
+            loom_type_register_value_type(target_register_type);
+        if (target_type != NULL && loom_func_ref_type_isa(*target_type) &&
+            loom_func_ref_type_has_yieldability(*target_type)) {
+          out_summary->flags |= IREE_VM_BYTECODE_FUNCTION_FLAG_MAY_YIELD;
+        }
+      }
       if (loom_low_switch_isa(op)) {
         const uint32_t target_count = loom_low_switch_target_dests(op).count;
         if (target_count >
@@ -219,8 +233,8 @@ static iree_status_t loom_vm_module_layout_populate_functions(
         module, arena, function_op, &function->logical_signature));
 
     loom_vm_module_function_summary_t summary = {0};
-    IREE_RETURN_IF_ERROR(
-        loom_vm_module_layout_summarize_function(function_op, &summary));
+    IREE_RETURN_IF_ERROR(loom_vm_module_layout_summarize_function(
+        module, function_op, &summary));
     function->flags = summary.flags;
     function->switch_target_entry_count = summary.switch_target_entry_count;
     if (function->switch_target_entry_count >
@@ -262,6 +276,11 @@ static iree_status_t loom_vm_module_layout_populate_imports(
                                                              : symbol->name_id),
         .module_name_string_ordinal = UINT16_MAX,
         .symbol_name_string_ordinal = UINT16_MAX,
+        .callable_flags =
+            loom_vm_function_abi_attrs_may_yield(
+                module, loom_low_func_decl_abi_attrs(declaration_op))
+                ? IREE_VM_BYTECODE_CALLABLE_TYPE_FLAG_MAY_YIELD
+                : 0,
         .import_ordinal = UINT16_MAX,
         .flags = loom_low_func_decl_import_policy(declaration_op) ==
                          LOOM_LOW_FUNC_DECL_IMPORT_POLICY_OPTIONAL
@@ -279,6 +298,99 @@ static iree_status_t loom_vm_module_layout_populate_imports(
     layout->imports[import_index - 1] = import;
   }
   IREE_ASSERT_EQ(import_index, layout->import_declaration_count);
+  return iree_ok_status();
+}
+
+static loom_vm_module_function_layout_t*
+loom_vm_module_layout_try_resolve_local_function(
+    loom_vm_module_layout_t* layout, loom_symbol_id_t symbol_id) {
+  if (symbol_id >= layout->module->symbols.count) return NULL;
+  const loom_vm_module_call_target_t target =
+      layout->call_targets_by_symbol[symbol_id];
+  if (target.kind != IREE_VM_ISA_CONTROL_CALL_TARGET_LOCAL ||
+      target.ordinal == UINT16_MAX ||
+      target.ordinal >= layout->function_count) {
+    return NULL;
+  }
+  return &layout->functions[target.ordinal];
+}
+
+static bool loom_vm_module_layout_import_may_yield(
+    const loom_vm_module_layout_t* layout, loom_symbol_id_t symbol_id) {
+  if (symbol_id >= layout->module->symbols.count) return false;
+  const loom_op_t* defining_op =
+      layout->module->symbols.entries[symbol_id].defining_op;
+  return defining_op != NULL && loom_low_func_decl_isa(defining_op) &&
+         loom_vm_function_abi_attrs_may_yield(
+             layout->module, loom_low_func_decl_abi_attrs(defining_op));
+}
+
+// Derives conservative function suspension flags in one bottom-up SCC walk.
+// SCC IDs are callee-first, so cross-SCC callees have their final flags before
+// their callers are visited. Members of one recursive SCC share the aggregate
+// of all local suspension seeds and outgoing calls.
+static iree_status_t loom_vm_module_layout_derive_function_yieldability(
+    iree_arena_allocator_t* arena, loom_vm_module_layout_t* layout) {
+  loom_call_graph_t graph;
+  IREE_RETURN_IF_ERROR(loom_call_graph_build(layout->module, arena, &graph));
+  if (graph.node_count == 0) return iree_ok_status();
+
+  const iree_host_size_t index_count =
+      (iree_host_size_t)graph.scc_count + graph.node_count;
+  uint16_t* indices = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, index_count, sizeof(*indices), (void**)&indices));
+  memset(indices, 0xFF, index_count * sizeof(*indices));
+  uint16_t* const scc_heads = indices;
+  uint16_t* const next_nodes = indices + graph.scc_count;
+  for (uint16_t node_index = 0; node_index < graph.node_count; ++node_index) {
+    const uint16_t scc_id = graph.nodes[node_index].scc_id;
+    next_nodes[node_index] = scc_heads[scc_id];
+    scc_heads[scc_id] = node_index;
+  }
+
+  for (uint16_t scc_id = 0; scc_id < graph.scc_count; ++scc_id) {
+    bool may_yield = false;
+    for (uint16_t node_index = scc_heads[scc_id]; node_index != UINT16_MAX;
+         node_index = next_nodes[node_index]) {
+      const loom_call_graph_node_t* node = &graph.nodes[node_index];
+      loom_vm_module_function_layout_t* function =
+          loom_vm_module_layout_try_resolve_local_function(layout,
+                                                           node->symbol_id);
+      if (function == NULL) continue;
+      may_yield |= iree_any_bit_set(function->flags,
+                                    IREE_VM_BYTECODE_FUNCTION_FLAG_MAY_YIELD);
+      for (uint16_t callee_index = 0; callee_index < node->callee_count;
+           ++callee_index) {
+        const loom_symbol_id_t callee_symbol_id = node->callees[callee_index];
+        loom_vm_module_function_layout_t* callee =
+            loom_vm_module_layout_try_resolve_local_function(layout,
+                                                             callee_symbol_id);
+        if (callee != NULL) {
+          const loom_call_graph_node_t* callee_node =
+              loom_call_graph_node(&graph, callee_symbol_id);
+          if (callee_node != NULL && callee_node->scc_id != scc_id) {
+            IREE_ASSERT_LT(callee_node->scc_id, scc_id);
+            may_yield |= iree_any_bit_set(
+                callee->flags, IREE_VM_BYTECODE_FUNCTION_FLAG_MAY_YIELD);
+          }
+        } else {
+          may_yield |=
+              loom_vm_module_layout_import_may_yield(layout, callee_symbol_id);
+        }
+      }
+    }
+    if (!may_yield) continue;
+    for (uint16_t node_index = scc_heads[scc_id]; node_index != UINT16_MAX;
+         node_index = next_nodes[node_index]) {
+      loom_vm_module_function_layout_t* function =
+          loom_vm_module_layout_try_resolve_local_function(
+              layout, graph.nodes[node_index].symbol_id);
+      if (function != NULL) {
+        function->flags |= IREE_VM_BYTECODE_FUNCTION_FLAG_MAY_YIELD;
+      }
+    }
+  }
   return iree_ok_status();
 }
 
@@ -427,6 +539,8 @@ iree_status_t loom_vm_module_layout_build(loom_module_t* module,
       loom_vm_module_layout_populate_functions(module, arena, out_layout));
   IREE_RETURN_IF_ERROR(
       loom_vm_module_layout_populate_imports(module, arena, out_layout));
+  IREE_RETURN_IF_ERROR(
+      loom_vm_module_layout_derive_function_yieldability(arena, out_layout));
   IREE_RETURN_IF_ERROR(loom_vm_module_layout_assign_exports(arena, out_layout));
   IREE_RETURN_IF_ERROR(loom_vm_module_type_tables_build(arena, out_layout));
   return loom_vm_module_layout_assign_imports(arena, out_layout);

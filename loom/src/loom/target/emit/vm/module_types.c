@@ -954,7 +954,8 @@ iree_status_t loom_vm_module_type_tables_build(
   for (iree_host_size_t i = 0; i < layout->import_declaration_count; ++i) {
     IREE_RETURN_IF_ERROR(loom_vm_module_callable_collect(
         &build, layout->import_declarations[i].logical_signature,
-        /*flags=*/0, &root_callables[layout->function_count + i]));
+        layout->import_declarations[i].callable_flags,
+        &root_callables[layout->function_count + i]));
   }
   IREE_RETURN_IF_ERROR(
       loom_vm_module_collect_indirect_call_types(&build, layout));

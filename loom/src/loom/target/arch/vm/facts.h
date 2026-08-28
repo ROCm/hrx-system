@@ -9,6 +9,7 @@
 #ifndef LOOM_TARGET_ARCH_VM_FACTS_H_
 #define LOOM_TARGET_ARCH_VM_FACTS_H_
 
+#include "loom/ir/attribute.h"
 #include "loom/target/facts.h"
 
 #ifdef __cplusplus
@@ -17,6 +18,13 @@ extern "C" {
 
 // Static fact type used by VM target projection.
 extern const loom_target_fact_type_t loom_vm_target_fact_type;
+
+// Returns whether validated vm_function ABI attributes permit suspension.
+//
+// Only imported function declarations may carry this authored contract;
+// function definitions derive the equivalent fact from their lowered bodies.
+bool loom_vm_function_abi_attrs_may_yield(const loom_module_t* module,
+                                          loom_named_attr_slice_t attrs);
 
 #ifdef __cplusplus
 }  // extern "C"

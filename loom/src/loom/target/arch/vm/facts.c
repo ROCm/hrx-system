@@ -16,6 +16,20 @@ static iree_string_view_t loom_vm_target_string_from_id(
   return module->strings.entries[string_id];
 }
 
+bool loom_vm_function_abi_attrs_may_yield(const loom_module_t* module,
+                                          loom_named_attr_slice_t attrs) {
+  for (iree_host_size_t i = 0; i < attrs.count; ++i) {
+    const loom_named_attr_t* attr = &attrs.entries[i];
+    if (attr->value.kind == LOOM_ATTR_BOOL &&
+        iree_string_view_equal(
+            loom_vm_target_string_from_id(module, attr->name_id),
+            IREE_SV("suspending"))) {
+      return loom_attr_as_bool(attr->value);
+    }
+  }
+  return false;
+}
+
 static iree_status_t loom_vm_target_reject_function_abi_attr(
     iree_diagnostic_emitter_t diagnostic_emitter,
     const loom_func_symbol_facts_t* func_facts, const loom_error_def_t* error,

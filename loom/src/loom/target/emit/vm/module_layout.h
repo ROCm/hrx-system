@@ -65,6 +65,8 @@ typedef struct loom_vm_module_import_layout_t {
   uint16_t symbol_name_string_ordinal;
   // Canonical structural callable-type ordinal.
   uint16_t callable_type_ordinal;
+  // Callable permission flags derived from the imported ABI contract.
+  uint16_t callable_flags;
   // Flat import ordinal assigned after canonical ordering and deduplication.
   uint16_t import_ordinal;
   // Wire import flags shared by equivalent declarations.

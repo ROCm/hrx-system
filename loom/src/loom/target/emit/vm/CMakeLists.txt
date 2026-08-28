@@ -53,9 +53,11 @@ loom_cc_library(
     loom::ops::type_registry
     loom::target::arch::vm::abi_layout
     loom::target::arch::vm::descriptors
+    loom::target::arch::vm::facts
     loom::target::low_descriptor_registry
     loom::target::provider
     loom::target::registers
+    loom::util::call_graph
   PUBLIC
 )
 
