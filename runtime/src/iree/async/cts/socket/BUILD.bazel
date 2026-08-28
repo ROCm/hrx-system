@@ -151,7 +151,7 @@ iree_runtime_cc_library(
     deps = [
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/cts/util:registry",
-        "//runtime/src/iree/async/cts/util:socket_test_base",
+        "//runtime/src/iree/async/cts/util:test_base",
     ],
     alwayslink = True,
 )
