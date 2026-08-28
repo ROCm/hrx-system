@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 from model.module.validation import (
+    BYTE_ALIGNMENT,
     CALLABLE_TYPES,
     CORE_MAJOR,
     CORE_REQUIRED_MINOR,
@@ -47,6 +48,8 @@ from model.schema import (
     WireRecordLayout,
 )
 from model.specification import CORE_0
+
+MINIMUM_SECTION_ALIGNMENT = 8
 
 
 def _record(
@@ -148,11 +151,13 @@ _RECORD_DEFINITIONS = (
                 validation=(RuleUse(SECTION_FLAGS.entity_id, ()),),
             ),
             WireField(
-                name="reserved_u32",
+                name="payload_alignment_u32",
                 offset=4,
                 encoding_id=U32.entity_id,
-                description="Reserved zero word preserving native u64 alignment.",
-                validation=(RuleUse(ZERO.entity_id, ()),),
+                description="Image-relative minimum alignment of the payload.",
+                validation=(
+                    RuleUse(BYTE_ALIGNMENT.entity_id, (MINIMUM_SECTION_ALIGNMENT,)),
+                ),
             ),
             WireField(
                 name="byte_length_u64",
@@ -897,9 +902,9 @@ _RECORD_DEFINITIONS = (
         ),
     ),
     _record(
-        "rodata_block_length",
-        "iree_vm_bytecode_v0_rodata_block_length_t",
-        8,
+        "rodata_block_descriptor",
+        "iree_vm_bytecode_v0_rodata_block_descriptor_t",
+        16,
         8,
         (
             WireField(
@@ -909,8 +914,21 @@ _RECORD_DEFINITIONS = (
                 description="Exact byte length of one rodata block.",
                 validation=(RuleUse(ANY_BITS.entity_id, ()),),
             ),
+            WireField(
+                name="minimum_alignment_u32",
+                offset=8,
+                encoding_id=U32.entity_id,
+                description="Minimum host-address alignment of the block.",
+                validation=(RuleUse(BYTE_ALIGNMENT.entity_id, (1,)),),
+            ),
+            WireField(
+                name="reserved_u32",
+                offset=12,
+                encoding_id=U32.entity_id,
+                description="Reserved zero word.",
+                validation=(RuleUse(ZERO.entity_id, ()),),
+            ),
         ),
-        scalar_alias=True,
     ),
     _record(
         "presentation_header",

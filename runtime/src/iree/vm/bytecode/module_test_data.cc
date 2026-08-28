@@ -66,6 +66,8 @@ struct Section {
   uint16_t flags;
   // Complete section payload.
   std::vector<uint8_t> payload;
+  // Image-relative payload alignment.
+  uint32_t payload_alignment = IREE_VM_BYTECODE_SECTION_MIN_ALIGNMENT;
 };
 
 std::vector<uint8_t> BuildImage(std::initializer_list<Section> sections) {
@@ -78,16 +80,15 @@ std::vector<uint8_t> BuildImage(std::initializer_list<Section> sections) {
   header.section_count_u16 = static_cast<uint16_t>(sections.size());
   image.Append(header);
   for (const Section& section : sections) {
-    const iree_vm_bytecode_v0_section_directory_row_t row = {
-        section.type,
-        section.flags,
-        0,
-        static_cast<uint64_t>(section.payload.size()),
-    };
+    iree_vm_bytecode_v0_section_directory_row_t row = {};
+    row.section_type_u16 = section.type;
+    row.section_flags_u16 = section.flags;
+    row.payload_alignment_u32 = section.payload_alignment;
+    row.byte_length_u64 = static_cast<uint64_t>(section.payload.size());
     image.Append(row);
   }
   for (const Section& section : sections) {
-    image.Align(IREE_VM_BYTECODE_SECTION_ALIGNMENT);
+    image.Align(section.payload_alignment);
     image.AppendBytes(section.payload.data(), section.payload.size());
   }
   return image.Take();
@@ -844,12 +845,13 @@ std::vector<uint8_t> BuildRefStateGlobals() {
   return section.Take();
 }
 
-std::vector<uint8_t> BuildTestRodata() {
+std::vector<uint8_t> BuildTestRodata(uint32_t minimum_alignment) {
   constexpr std::string_view kPayload = "loom-vm-v1";
   ByteBuffer section;
   section.Append(iree_vm_bytecode_v0_rodata_header_t{1, 0});
-  section.Append(
-      static_cast<iree_vm_bytecode_v0_rodata_block_length_t>(kPayload.size()));
+  section.Append(iree_vm_bytecode_v0_rodata_block_descriptor_t{
+      static_cast<uint64_t>(kPayload.size()), minimum_alignment, 0});
+  section.Align(minimum_alignment);
   section.AppendBytes(kPayload.data(), kPayload.size());
   return section.Take();
 }
@@ -1577,8 +1579,8 @@ uint8_t* FindSectionPayload(std::vector<uint8_t>* image,
       header + 1);
   size_t offset = sizeof(*header) + header->section_count_u16 * sizeof(*rows);
   for (uint16_t i = 0; i < header->section_count_u16; ++i) {
-    offset = (offset + IREE_VM_BYTECODE_SECTION_ALIGNMENT - 1) &
-             ~(IREE_VM_BYTECODE_SECTION_ALIGNMENT - 1);
+    offset = (offset + rows[i].payload_alignment_u32 - 1) &
+             ~(rows[i].payload_alignment_u32 - 1);
     if (rows[i].section_type_u16 == section_type) {
       return image->data() + offset;
     }
@@ -1613,6 +1615,12 @@ MutableFunctionImage FindFunctionImage(std::vector<uint8_t>* image,
 }
 
 std::vector<uint8_t> BuildOwnershipModuleImage() {
+  return BuildOwnershipModuleImageWithRodataAlignment(
+      IREE_VM_BYTECODE_SECTION_MIN_ALIGNMENT);
+}
+
+std::vector<uint8_t> BuildOwnershipModuleImageWithRodataAlignment(
+    uint32_t rodata_alignment) {
   return BuildImage({
       {IREE_VM_BYTECODE_SECTION_STRINGS, 0,
        BuildStrings({"vm", "buffer", "initialize", "run",
@@ -1627,7 +1635,8 @@ std::vector<uint8_t> BuildOwnershipModuleImage() {
       {IREE_VM_BYTECODE_SECTION_EXPORTS, 0, BuildOwnershipExports()},
       {IREE_VM_BYTECODE_SECTION_FUNCTIONS, 0, BuildOwnershipFunctions()},
       {IREE_VM_BYTECODE_SECTION_GLOBALS, 0, BuildOwnershipGlobals()},
-      {IREE_VM_BYTECODE_SECTION_RODATA, 0, BuildTestRodata()},
+      {IREE_VM_BYTECODE_SECTION_RODATA, 0, BuildTestRodata(rodata_alignment),
+       rodata_alignment},
       {IREE_VM_BYTECODE_SECTION_PRESENTATION,
        IREE_VM_BYTECODE_SECTION_FLAG_SKIPPABLE, BuildOwnershipPresentation()},
       {IREE_VM_BYTECODE_SECTION_METADATA,
@@ -1736,7 +1745,8 @@ std::vector<uint8_t> BuildScalarStateModuleImage() {
       {IREE_VM_BYTECODE_SECTION_FUNCTIONS, 0, BuildScalarStateFunctions()},
       {IREE_VM_BYTECODE_SECTION_CONSTANTS, 0, BuildScalarStateConstants()},
       {IREE_VM_BYTECODE_SECTION_GLOBALS, 0, BuildScalarStateGlobals()},
-      {IREE_VM_BYTECODE_SECTION_RODATA, 0, BuildTestRodata()},
+      {IREE_VM_BYTECODE_SECTION_RODATA, 0,
+       BuildTestRodata(IREE_VM_BYTECODE_SECTION_MIN_ALIGNMENT)},
   });
 }
 
@@ -1756,7 +1766,8 @@ std::vector<uint8_t> BuildBufferModuleImage() {
       {IREE_VM_BYTECODE_SECTION_CALLABLE_TYPES, 0, BuildBufferCallableTypes()},
       {IREE_VM_BYTECODE_SECTION_EXPORTS, 0, BuildBufferExports()},
       {IREE_VM_BYTECODE_SECTION_FUNCTIONS, 0, BuildBufferFunctions()},
-      {IREE_VM_BYTECODE_SECTION_RODATA, 0, BuildTestRodata()},
+      {IREE_VM_BYTECODE_SECTION_RODATA, 0,
+       BuildTestRodata(IREE_VM_BYTECODE_SECTION_MIN_ALIGNMENT)},
   });
 }
 

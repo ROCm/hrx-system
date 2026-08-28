@@ -622,7 +622,7 @@ static iree_status_t iree_vm_bytecode_dump_sections(
   for (uint16_t i = 0; i < module->layout.image.section_count; ++i) {
     const iree_vm_bytecode_v0_section_directory_row_t* row =
         &module->layout.image.sections[i];
-    offset = iree_host_align(offset, IREE_VM_BYTECODE_SECTION_ALIGNMENT);
+    offset = iree_host_align(offset, row->payload_alignment_u32);
     const iree_vm_bytecode_tooling_section_descriptor_t* descriptor =
         iree_vm_bytecode_dump_find_section(row->section_type_u16);
     IREE_RETURN_IF_ERROR(
@@ -637,10 +637,14 @@ static iree_status_t iree_vm_bytecode_dump_sections(
           iree_string_builder_append_cstring(builder, "unknown"));
     }
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-        builder,
-        " type=0x%04" PRIX16 " flags=0x%04" PRIX16 " bytes=[%" PRIhsz
-        ", +%" PRIu64 ")\n",
-        row->section_type_u16, row->section_flags_u16, offset,
+        builder, " type=0x%04" PRIX16 " flags=0x%04" PRIX16,
+        row->section_type_u16, row->section_flags_u16));
+    if (row->payload_alignment_u32 > IREE_VM_BYTECODE_SECTION_MIN_ALIGNMENT) {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder, " alignment=%" PRIu32, row->payload_alignment_u32));
+    }
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder, " bytes=[%" PRIhsz ", +%" PRIu64 ")\n", offset,
         row->byte_length_u64));
     IREE_RETURN_IF_ERROR(iree_vm_bytecode_dump_emit(write_callback, builder));
     offset += (iree_host_size_t)row->byte_length_u64;

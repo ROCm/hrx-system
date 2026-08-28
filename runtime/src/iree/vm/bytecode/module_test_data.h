@@ -45,6 +45,10 @@ MutableFunctionImage FindFunctionImage(std::vector<uint8_t>* image,
 // Builds the exact Core 0.0 ownership and reflection fixture.
 std::vector<uint8_t> BuildOwnershipModuleImage();
 
+// Builds the ownership fixture with the requested rodata alignment.
+std::vector<uint8_t> BuildOwnershipModuleImageWithRodataAlignment(
+    uint32_t rodata_alignment);
+
 // Builds one typed-ref fixture covering register and local-slot ownership.
 std::vector<uint8_t> BuildRefModuleImage();
 

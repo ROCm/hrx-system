@@ -94,6 +94,17 @@ CORE_REQUIRED_MINOR = ValidationRule(
         "cover every core feature used by the image."
     ),
 )
+BYTE_ALIGNMENT = ValidationRule(
+    entity_id="core.validation.module.field.byte_alignment",
+    since=CORE_0,
+    summary="Validates a minimum byte alignment.",
+    scope=ValidationScope.FIELD,
+    parameters=(RuleParameter("minimum", INTEGER_ARGUMENT),),
+    normative_text=(
+        "The value must be a positive power of two no smaller than minimum. "
+        "The minimum parameter must also be a positive power of two."
+    ),
+)
 NONCORE_PAGE = ValidationRule(
     entity_id="core.validation.module.field.noncore_page",
     since=CORE_0,
@@ -222,6 +233,7 @@ SWITCH_TARGET = ValidationRule(
 )
 
 MODULE_FIELD_RULES = (
+    BYTE_ALIGNMENT,
     CORE_MAJOR,
     CORE_REQUIRED_MINOR,
     NONCORE_PAGE,

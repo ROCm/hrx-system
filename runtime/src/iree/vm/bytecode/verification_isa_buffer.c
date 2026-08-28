@@ -279,7 +279,7 @@ iree_status_t iree_vm_bytecode_verify_buffer_record(
                                 "buffer.copy.rodata ordinal is out of range");
       }
       if (record->source_offset_u32 >
-          layout->rodata.lengths[record->rodata_u16]) {
+          layout->rodata.descriptors[record->rodata_u16].byte_length_u64) {
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
             "buffer.copy.rodata source offset is out of range");

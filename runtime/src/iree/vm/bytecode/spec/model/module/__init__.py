@@ -55,7 +55,7 @@ class ModuleFormat(Entity):
     """Top-level image packing and alignment contract."""
 
     image_alignment: int
-    section_alignment: int
+    minimum_section_alignment: int
     normative_text: str
 
     def __post_init__(self) -> None:
@@ -75,8 +75,12 @@ class ModuleFormat(Entity):
             )
         if not _is_power_of_two(self.image_alignment):
             raise ValueError(f"{self.entity_id}: invalid image alignment")
-        if not _is_power_of_two(self.section_alignment):
-            raise ValueError(f"{self.entity_id}: invalid section alignment")
+        if not _is_power_of_two(self.minimum_section_alignment):
+            raise ValueError(f"{self.entity_id}: invalid minimum section alignment")
+        if self.image_alignment < self.minimum_section_alignment:
+            raise ValueError(
+                f"{self.entity_id}: image alignment does not preserve sections"
+            )
 
         records = {
             entity.entity_id

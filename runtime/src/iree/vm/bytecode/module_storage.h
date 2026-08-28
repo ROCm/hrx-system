@@ -134,13 +134,21 @@ typedef struct iree_vm_bytecode_global_table_t {
 typedef struct iree_vm_bytecode_rodata_table_t {
   // Number of distinct rodata blocks.
   uint32_t count;
-  // Exact block lengths in ordinal order.
-  const iree_vm_bytecode_v0_rodata_block_length_t* lengths;
-  // First byte after the complete length array.
-  const uint8_t* blocks_begin;
-  // One-past-last byte of the rodata section.
-  const uint8_t* section_end;
+  // Block descriptors in ordinal order.
+  const iree_vm_bytecode_v0_rodata_block_descriptor_t* descriptors;
+  // First byte of the complete rodata section.
+  const uint8_t* section_begin;
+  // Section-relative byte offset after the complete descriptor array.
+  iree_host_size_t blocks_offset;
 } iree_vm_bytecode_rodata_table_t;
+
+// Exact storage needed for rodata blocks that cannot map the image directly.
+typedef struct iree_vm_bytecode_rodata_storage_plan_t {
+  // Total byte length of the packed fallback copies.
+  iree_host_size_t copy_length;
+  // Maximum alignment required by any fallback copy, or zero when empty.
+  iree_host_size_t copy_alignment;
+} iree_vm_bytecode_rodata_storage_plan_t;
 
 // Mapped canonical authored presentation.
 typedef struct iree_vm_bytecode_presentation_table_t {
@@ -228,6 +236,8 @@ typedef struct iree_vm_bytecode_module_plan_t {
   iree_vm_bytecode_module_layout_t layout;
   // Exact process storage layout.
   iree_vm_bytecode_process_layout_t process_layout;
+  // Exact fallback storage for misaligned image rodata.
+  iree_vm_bytecode_rodata_storage_plan_t rodata_storage_plan;
 } iree_vm_bytecode_module_plan_t;
 
 typedef struct iree_vm_bytecode_image_t iree_vm_bytecode_image_t;

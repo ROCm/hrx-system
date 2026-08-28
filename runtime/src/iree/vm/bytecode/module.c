@@ -204,16 +204,31 @@ static iree_status_t iree_vm_bytecode_resolve_buffer_type(
 }
 
 static void iree_vm_bytecode_initialize_rodata_roots(
-    iree_vm_bytecode_image_t* image) {
+    iree_vm_bytecode_image_t* image, uint8_t* copy_storage) {
   iree_vm_bytecode_module_t* module = &image->module;
-  iree_host_size_t block_offset = 0;
+  iree_host_size_t section_offset = module->layout.rodata.blocks_offset;
+  iree_host_size_t copy_offset = 0;
   for (uint32_t i = 0; i < module->layout.rodata.count; ++i) {
-    block_offset =
-        iree_host_align(block_offset, IREE_VM_BYTECODE_SECTION_ALIGNMENT);
+    const iree_vm_bytecode_v0_rodata_block_descriptor_t* descriptor =
+        &module->layout.rodata.descriptors[i];
+    section_offset =
+        iree_host_align(section_offset, descriptor->minimum_alignment_u32);
     const iree_host_size_t block_length =
-        (iree_host_size_t)module->layout.rodata.lengths[i];
-    const iree_const_byte_span_t block = iree_make_const_byte_span(
-        module->layout.rodata.blocks_begin + block_offset, block_length);
+        (iree_host_size_t)descriptor->byte_length_u64;
+    const uint8_t* block_data =
+        module->layout.rodata.section_begin + section_offset;
+    if (!iree_host_ptr_has_alignment(block_data,
+                                     descriptor->minimum_alignment_u32)) {
+      copy_offset =
+          iree_host_align(copy_offset, descriptor->minimum_alignment_u32);
+      if (block_length != 0) {
+        memcpy(copy_storage + copy_offset, block_data, block_length);
+      }
+      block_data = copy_storage + copy_offset;
+      copy_offset += block_length;
+    }
+    const iree_const_byte_span_t block =
+        iree_make_const_byte_span(block_data, block_length);
     iree_vm_bytecode_image_retain(image);
     const iree_vm_buffer_release_callback_t callback = {
         iree_vm_bytecode_rodata_release,
@@ -221,7 +236,7 @@ static void iree_vm_bytecode_initialize_rodata_roots(
     };
     iree_vm_buffer_initialize_embedded_read_only(block, callback,
                                                  &module->rodata_roots[i]);
-    block_offset += block_length;
+    section_offset += block_length;
   }
 }
 
@@ -277,6 +292,7 @@ IREE_API_EXPORT iree_status_t iree_vm_bytecode_module_create(
   iree_host_size_t name_offset = 0;
   iree_host_size_t ref_types_offset = 0;
   iree_host_size_t rodata_roots_offset = 0;
+  iree_host_size_t rodata_copy_offset = 0;
   IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
       iree_sizeof_struct(iree_vm_bytecode_image_t), &total_size,
       IREE_STRUCT_FIELD(module_name.size, char, &name_offset),
@@ -285,11 +301,14 @@ IREE_API_EXPORT iree_status_t iree_vm_bytecode_module_create(
           iree_alignof(iree_vm_ref_type_t), &ref_types_offset),
       IREE_STRUCT_FIELD_ALIGNED(plan.layout.rodata.count, iree_vm_buffer_t,
                                 iree_alignof(iree_vm_buffer_t),
-                                &rodata_roots_offset)));
+                                &rodata_roots_offset),
+      IREE_STRUCT_FIELD(plan.rodata_storage_plan.copy_length, uint8_t,
+                        &rodata_copy_offset)));
 
   iree_vm_bytecode_image_t* image = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_allocator_malloc(host_allocator, total_size, (void**)&image));
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_aligned(
+      host_allocator, total_size, plan.rodata_storage_plan.copy_alignment,
+      rodata_copy_offset, (void**)&image));
   iree_atomic_ref_count_init(&image->ref_count);
   image->host_allocator = host_allocator;
   image->storage.contents = storage.contents;
@@ -307,6 +326,9 @@ IREE_API_EXPORT iree_status_t iree_vm_bytecode_module_create(
       plan.layout.rodata.count == 0
           ? NULL
           : (iree_vm_buffer_t*)((uint8_t*)image + rodata_roots_offset);
+  uint8_t* rodata_copy_storage = plan.rodata_storage_plan.copy_alignment == 0
+                                     ? NULL
+                                     : (uint8_t*)image + rodata_copy_offset;
   char* cloned_name = (char*)image + name_offset;
   memcpy(cloned_name, module_name.data, module_name.size);
   module->descriptor.name =
@@ -335,7 +357,7 @@ IREE_API_EXPORT iree_status_t iree_vm_bytecode_module_create(
         iree_vm_bytecode_resolve_buffer_type(environment, &module->buffer_type);
   }
   if (iree_status_is_ok(status)) {
-    iree_vm_bytecode_initialize_rodata_roots(image);
+    iree_vm_bytecode_initialize_rodata_roots(image, rodata_copy_storage);
     initialized_rodata_root_count = module->layout.rodata.count;
     status = iree_vm_module_initialize(&iree_vm_bytecode_module_vtable,
                                        &module->descriptor, &module->base);

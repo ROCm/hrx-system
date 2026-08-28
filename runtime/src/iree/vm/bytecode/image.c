@@ -17,5 +17,5 @@ void iree_vm_bytecode_image_release(iree_vm_bytecode_image_t* image) {
   const iree_vm_bytecode_module_storage_t storage = image->storage;
   const iree_allocator_t host_allocator = image->host_allocator;
   iree_allocator_free(storage.deallocator, (void*)storage.contents.data);
-  iree_allocator_free(host_allocator, image);
+  iree_allocator_free_aligned(host_allocator, image);
 }

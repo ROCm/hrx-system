@@ -113,8 +113,8 @@ IREE_API_EXPORT iree_status_t iree_vm_bytecode_module_create_for_inspection(
                                 &type_descriptors_offset)));
 
   iree_vm_bytecode_image_t* image = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_allocator_malloc(host_allocator, total_size, (void**)&image));
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_aligned(host_allocator, total_size,
+                                                     0, 0, (void**)&image));
   iree_atomic_ref_count_init(&image->ref_count);
   image->host_allocator = host_allocator;
   image->storage.contents = storage.contents;

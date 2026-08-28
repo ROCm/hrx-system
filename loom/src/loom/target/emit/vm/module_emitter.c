@@ -41,13 +41,14 @@ static iree_status_t loom_vm_module_writer_write_record(
 
 static iree_status_t loom_vm_module_writer_begin_section(
     loom_vm_module_writer_t* writer, uint16_t section_type,
-    uint64_t* out_section_start) {
+    uint32_t payload_alignment, uint64_t* out_section_start) {
   IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_pad_to_alignment(
-      &writer->writer, IREE_VM_BYTECODE_SECTION_ALIGNMENT));
+      &writer->writer, payload_alignment));
   IREE_ASSERT_LT(writer->section_count, LOOM_VM_MODULE_MAX_SECTION_COUNT);
   writer->sections[writer->section_count] =
       (iree_vm_bytecode_v0_section_directory_row_t){
           .section_type_u16 = section_type,
+          .payload_alignment_u32 = payload_alignment,
       };
   *out_section_start = writer->writer.total_written;
   return iree_ok_status();
@@ -66,7 +67,8 @@ static iree_status_t loom_vm_module_write_strings(
   const loom_vm_module_type_tables_t* tables = &layout->type_tables;
   uint64_t section_start = 0;
   IREE_RETURN_IF_ERROR(loom_vm_module_writer_begin_section(
-      writer, IREE_VM_BYTECODE_SECTION_STRINGS, &section_start));
+      writer, IREE_VM_BYTECODE_SECTION_STRINGS,
+      IREE_VM_BYTECODE_SECTION_MIN_ALIGNMENT, &section_start));
   const iree_vm_bytecode_v0_strings_header_t header = {
       .string_count_u32 = tables->string_count,
   };
@@ -100,7 +102,8 @@ static iree_status_t loom_vm_module_write_ref_types(
   const loom_vm_module_type_tables_t* tables = &layout->type_tables;
   uint64_t section_start = 0;
   IREE_RETURN_IF_ERROR(loom_vm_module_writer_begin_section(
-      writer, IREE_VM_BYTECODE_SECTION_REF_TYPES, &section_start));
+      writer, IREE_VM_BYTECODE_SECTION_REF_TYPES,
+      IREE_VM_BYTECODE_SECTION_MIN_ALIGNMENT, &section_start));
   const iree_vm_bytecode_v0_ref_types_header_t header = {
       .group_count_u32 = tables->ref_type_group_count,
   };
@@ -121,7 +124,8 @@ static iree_status_t loom_vm_module_write_signatures(
   const loom_vm_module_type_tables_t* tables = &layout->type_tables;
   uint64_t section_start = 0;
   IREE_RETURN_IF_ERROR(loom_vm_module_writer_begin_section(
-      writer, IREE_VM_BYTECODE_SECTION_SIGNATURES, &section_start));
+      writer, IREE_VM_BYTECODE_SECTION_SIGNATURES,
+      IREE_VM_BYTECODE_SECTION_MIN_ALIGNMENT, &section_start));
   const iree_vm_bytecode_v0_signatures_header_t header = {
       .signature_count_u32 = tables->signature_count,
   };
@@ -146,7 +150,8 @@ static iree_status_t loom_vm_module_write_callable_types(
   const loom_vm_module_type_tables_t* tables = &layout->type_tables;
   uint64_t section_start = 0;
   IREE_RETURN_IF_ERROR(loom_vm_module_writer_begin_section(
-      writer, IREE_VM_BYTECODE_SECTION_CALLABLE_TYPES, &section_start));
+      writer, IREE_VM_BYTECODE_SECTION_CALLABLE_TYPES,
+      IREE_VM_BYTECODE_SECTION_MIN_ALIGNMENT, &section_start));
   const iree_vm_bytecode_v0_callable_types_header_t header = {
       .callable_type_count_u32 = tables->callable_type_count,
   };
@@ -163,7 +168,8 @@ static iree_status_t loom_vm_module_write_imports(
     const loom_vm_module_layout_t* layout, loom_vm_module_writer_t* writer) {
   uint64_t section_start = 0;
   IREE_RETURN_IF_ERROR(loom_vm_module_writer_begin_section(
-      writer, IREE_VM_BYTECODE_SECTION_IMPORTS, &section_start));
+      writer, IREE_VM_BYTECODE_SECTION_IMPORTS,
+      IREE_VM_BYTECODE_SECTION_MIN_ALIGNMENT, &section_start));
   const iree_vm_bytecode_v0_imports_header_t header = {
       .group_count_u32 = (uint32_t)layout->import_group_count,
   };
@@ -197,7 +203,8 @@ static iree_status_t loom_vm_module_write_exports(
     const loom_vm_module_layout_t* layout, loom_vm_module_writer_t* writer) {
   uint64_t section_start = 0;
   IREE_RETURN_IF_ERROR(loom_vm_module_writer_begin_section(
-      writer, IREE_VM_BYTECODE_SECTION_EXPORTS, &section_start));
+      writer, IREE_VM_BYTECODE_SECTION_EXPORTS,
+      IREE_VM_BYTECODE_SECTION_MIN_ALIGNMENT, &section_start));
   const iree_vm_bytecode_v0_exports_header_t header = {
       .export_count_u32 = (uint32_t)layout->export_count,
   };
@@ -227,7 +234,8 @@ static iree_status_t loom_vm_module_write_functions(
   *out_complete = false;
   uint64_t section_start = 0;
   IREE_RETURN_IF_ERROR(loom_vm_module_writer_begin_section(
-      writer, IREE_VM_BYTECODE_SECTION_FUNCTIONS, &section_start));
+      writer, IREE_VM_BYTECODE_SECTION_FUNCTIONS,
+      IREE_VM_BYTECODE_SECTION_MIN_ALIGNMENT, &section_start));
   const iree_vm_bytecode_v0_functions_header_t header = {
       .function_count_u32 = (uint32_t)layout->function_count,
   };

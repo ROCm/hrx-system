@@ -316,7 +316,8 @@ def render_module_header(projection: Projection, filename: str) -> str:
             f"  IREE_VM_BYTECODE_CORE_MAJOR = {core_version.major},",
             f"  IREE_VM_BYTECODE_CORE_MINOR = {core_version.minor},",
             f"  IREE_VM_BYTECODE_IMAGE_ALIGNMENT = {module_format.image_alignment},",
-            f"  IREE_VM_BYTECODE_SECTION_ALIGNMENT = {module_format.section_alignment},",
+            "  IREE_VM_BYTECODE_SECTION_MIN_ALIGNMENT = "
+            f"{module_format.minimum_section_alignment},",
             "};",
             "",
             "typedef uint16_t iree_vm_bytecode_section_type_t;",

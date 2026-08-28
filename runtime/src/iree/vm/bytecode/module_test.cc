@@ -279,6 +279,87 @@ TEST(VMBytecodeModuleTest,
   EXPECT_EQ(image_allocator.free_count, 1u);
 }
 
+TEST(VMBytecodeModuleTest, PreservesRodataAlignmentInOneModuleAllocation) {
+  constexpr iree_host_size_t kRodataAlignment = 64;
+  const std::vector<uint8_t> image =
+      BuildOwnershipModuleImageWithRodataAlignment(kRodataAlignment);
+
+  std::vector<uint8_t> storage(image.size() + kRodataAlignment);
+  const uintptr_t storage_base = reinterpret_cast<uintptr_t>(storage.data());
+  iree_host_size_t image_offset =
+      (IREE_VM_BYTECODE_IMAGE_ALIGNMENT -
+       (storage_base & (IREE_VM_BYTECODE_IMAGE_ALIGNMENT - 1))) &
+      (IREE_VM_BYTECODE_IMAGE_ALIGNMENT - 1);
+  if (iree_host_ptr_has_alignment(storage.data() + image_offset,
+                                  kRodataAlignment)) {
+    image_offset += IREE_VM_BYTECODE_IMAGE_ALIGNMENT;
+  }
+  ASSERT_LE(image_offset + image.size(), storage.size());
+  uint8_t* image_data = storage.data() + image_offset;
+  ASSERT_TRUE(iree_host_ptr_has_alignment(image_data,
+                                          IREE_VM_BYTECODE_IMAGE_ALIGNMENT));
+  ASSERT_FALSE(iree_host_ptr_has_alignment(image_data, kRodataAlignment));
+  std::memcpy(image_data, image.data(), image.size());
+
+  CountingAllocator module_allocator = {iree_allocator_system(), 0, 0};
+  iree_vm_environment_t* environment = nullptr;
+  IREE_ASSERT_OK(
+      iree_vm_environment_allocate(iree_allocator_system(), &environment));
+  iree_vm_module_t* module = nullptr;
+  IREE_ASSERT_OK(iree_vm_bytecode_module_create(
+      environment, IREE_SV("aligned_rodata"),
+      {iree_make_const_byte_span(image_data, image.size()),
+       iree_allocator_null()},
+      MakeCountingAllocator(&module_allocator), &module));
+  ASSERT_NE(module, nullptr);
+  EXPECT_EQ(module_allocator.allocation_count, 1u);
+
+  iree_vm_ref_type_t buffer_type = nullptr;
+  IREE_ASSERT_OK(iree_vm_module_ref_type_by_ordinal(module, 0, &buffer_type));
+  const iree_vm_ref_types_t vm_types = {buffer_type};
+  iree_vm_program_t* program = nullptr;
+  IREE_ASSERT_OK(iree_vm_program_create({module, iree_vm_module_span_empty()},
+                                        iree_allocator_system(), &program));
+  iree_vm_invocation_t* invocation = nullptr;
+  IREE_ASSERT_OK(iree_vm_invocation_allocate(
+      kInvocationStorageSize, iree_allocator_system(), &invocation));
+  iree_vm_process_t* process = nullptr;
+  IREE_ASSERT_OK(iree_vm_process_create(program, invocation,
+                                        iree_vm_variant_span_empty(),
+                                        iree_allocator_system(), &process));
+  iree_vm_function_t run = iree_vm_function_null();
+  IREE_ASSERT_OK(iree_vm_process_lookup_function(
+      process, IREE_SV("aligned_rodata"), IREE_SV("run"), &run));
+
+  iree_vm_variant_t arguments[] = {iree_vm_variant_from_i32(35)};
+  iree_vm_variant_t results[2] = {};
+  IREE_ASSERT_OK(iree_vm_invoke(invocation, run,
+                                iree_vm_variant_span_from_array(arguments),
+                                iree_vm_variant_span_from_array(results)));
+  iree_vm_buffer_t* escaped_buffer = nullptr;
+  IREE_ASSERT_OK(iree_vm_buffer_ptr_from_variant_move(&vm_types, &results[1],
+                                                      &escaped_buffer));
+  ASSERT_NE(escaped_buffer, nullptr);
+  iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
+
+  iree_vm_invocation_free(invocation);
+  iree_vm_process_release(process);
+  iree_vm_program_release(program);
+  iree_vm_module_release(module);
+  iree_vm_environment_free(environment);
+  EXPECT_EQ(module_allocator.free_count, 0u);
+
+  iree_const_byte_span_t payload = iree_const_byte_span_empty();
+  IREE_ASSERT_OK(iree_vm_buffer_map_read(
+      escaped_buffer, 0, iree_vm_buffer_length(escaped_buffer), &payload));
+  EXPECT_TRUE(iree_host_ptr_has_alignment(payload.data, kRodataAlignment));
+  EXPECT_EQ(std::string_view(reinterpret_cast<const char*>(payload.data),
+                             payload.data_length),
+            "loom-vm-v1");
+  iree_vm_buffer_release(escaped_buffer);
+  EXPECT_EQ(module_allocator.free_count, 1u);
+}
+
 TEST(VMBytecodeModuleTest,
      InspectionReflectsTypesWithoutProvidersAndCannotLink) {
   std::vector<uint8_t> image = BuildHALInspectionModuleImage();

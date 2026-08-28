@@ -265,8 +265,9 @@ def render_module_markdown(projection: Projection) -> str:
             module_format.normative_text,
             "",
             f"The image base is aligned to {module_format.image_alignment} bytes. "
-            "Every section begins at an image-relative offset aligned to "
-            f"{module_format.section_alignment} bytes. Natural field alignment is "
+            "Every section begins at an image-relative offset aligned to at least "
+            f"{module_format.minimum_section_alignment} bytes, with the exact "
+            "alignment carried by its directory row. Natural field alignment is "
             "part of the "
             "wire format so a verified little-endian image may be mmap-overlaid on "
             "alignment-sensitive targets.",

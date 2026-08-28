@@ -32,6 +32,7 @@ using iree::vm::bytecode::testing::BuildCallModuleImage;
 using iree::vm::bytecode::testing::BuildFunctionStateModuleImage;
 using iree::vm::bytecode::testing::BuildHALInspectionModuleImage;
 using iree::vm::bytecode::testing::BuildOwnershipModuleImage;
+using iree::vm::bytecode::testing::BuildOwnershipModuleImageWithRodataAlignment;
 using iree::vm::bytecode::testing::BuildRefStateModuleImage;
 using iree::vm::bytecode::testing::BuildScalarStateModuleImage;
 using iree::vm::bytecode::testing::BuildSwitchInspectionModuleImage;
@@ -67,6 +68,8 @@ struct SectionData {
   uint16_t flags;
   // Complete section payload.
   std::vector<uint8_t> payload;
+  // Image-relative payload alignment.
+  uint32_t payload_alignment = IREE_VM_BYTECODE_SECTION_MIN_ALIGNMENT;
 };
 
 template <typename T>
@@ -102,8 +105,8 @@ std::vector<SectionData> ExtractSections(const std::vector<uint8_t>& image) {
   std::vector<SectionData> sections;
   sections.reserve(header->section_count_u16);
   for (uint16_t i = 0; i < header->section_count_u16; ++i) {
-    offset = (offset + IREE_VM_BYTECODE_SECTION_ALIGNMENT - 1) &
-             ~(IREE_VM_BYTECODE_SECTION_ALIGNMENT - 1);
+    offset = (offset + rows[i].payload_alignment_u32 - 1) &
+             ~(rows[i].payload_alignment_u32 - 1);
     if (rows[i].byte_length_u64 > image.size() - offset) {
       ADD_FAILURE() << "test fixture has a truncated section payload";
       return {};
@@ -114,6 +117,7 @@ std::vector<SectionData> ExtractSections(const std::vector<uint8_t>& image) {
         rows[i].section_flags_u16,
         std::vector<uint8_t>(image.begin() + offset,
                              image.begin() + offset + length),
+        rows[i].payload_alignment_u32,
     });
     offset += length;
   }
@@ -141,10 +145,11 @@ std::vector<uint8_t> BuildImage(const std::vector<SectionData>& sections) {
   for (size_t i = 0; i < sections.size(); ++i) {
     rows[i].section_type_u16 = sections[i].type;
     rows[i].section_flags_u16 = sections[i].flags;
+    rows[i].payload_alignment_u32 = sections[i].payload_alignment;
     rows[i].byte_length_u64 = sections[i].payload.size();
   }
   for (const SectionData& section : sections) {
-    AlignData(IREE_VM_BYTECODE_SECTION_ALIGNMENT, &image);
+    AlignData(section.payload_alignment, &image);
     image.insert(image.end(), section.payload.begin(), section.payload.end());
   }
   return image;
@@ -389,8 +394,8 @@ void RunValidationObligation(ValidationObligation obligation) {
     }
     case ValidationObligation::DIRECTORY_ROWS: {
       std::vector<uint8_t> image = BuildOwnershipModuleImage();
-      DirectoryRows(&image)[0].reserved_u32 = 1;
-      ExpectStructureRejected(image, "reserved bits");
+      DirectoryRows(&image)[0].payload_alignment_u32 = 3;
+      ExpectStructureRejected(image, "invalid payload alignment");
       break;
     }
     case ValidationObligation::DIRECTORY_KNOWN_SECTIONS: {
@@ -808,11 +813,12 @@ void RunValidationObligation(ValidationObligation obligation) {
     }
     case ValidationObligation::RODATA_BLOCKS: {
       std::vector<uint8_t> image = BuildOwnershipModuleImage();
-      auto* length = SectionRecord<iree_vm_bytecode_v0_rodata_block_length_t>(
-          &image, IREE_VM_BYTECODE_SECTION_RODATA,
-          sizeof(iree_vm_bytecode_v0_rodata_header_t));
-      ASSERT_NE(length, nullptr);
-      *length = UINT64_MAX;
+      auto* descriptor =
+          SectionRecord<iree_vm_bytecode_v0_rodata_block_descriptor_t>(
+              &image, IREE_VM_BYTECODE_SECTION_RODATA,
+              sizeof(iree_vm_bytecode_v0_rodata_header_t));
+      ASSERT_NE(descriptor, nullptr);
+      descriptor->byte_length_u64 = UINT64_MAX;
       ExpectStructureRejected(image, "Rodata section is truncated");
       break;
     }
@@ -931,6 +937,28 @@ TEST(VMBytecodeVerificationTest, CoversEveryModuleValidationObligation) {
     SCOPED_TRACE(test_case.entity_id);
     RunValidationObligation(test_case.obligation);
   }
+}
+
+TEST(VMBytecodeVerificationTest, RejectsInvalidRodataAlignmentContracts) {
+  std::vector<uint8_t> image = BuildOwnershipModuleImageWithRodataAlignment(64);
+  auto* descriptor =
+      SectionRecord<iree_vm_bytecode_v0_rodata_block_descriptor_t>(
+          &image, IREE_VM_BYTECODE_SECTION_RODATA,
+          sizeof(iree_vm_bytecode_v0_rodata_header_t));
+  ASSERT_NE(descriptor, nullptr);
+  descriptor->minimum_alignment_u32 = 3;
+  ExpectStructureRejected(image, "rodata block descriptor is invalid");
+
+  std::vector<SectionData> sections =
+      ExtractSections(BuildOwnershipModuleImageWithRodataAlignment(64));
+  auto rodata = std::find_if(
+      sections.begin(), sections.end(), [](const SectionData& section) {
+        return section.type == IREE_VM_BYTECODE_SECTION_RODATA;
+      });
+  ASSERT_NE(rodata, sections.end());
+  rodata->payload_alignment = 32;
+  ExpectStructureRejected(BuildImage(sections),
+                          "does not match maximum block alignment");
 }
 
 }  // namespace

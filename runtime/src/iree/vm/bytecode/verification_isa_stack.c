@@ -146,7 +146,8 @@ iree_status_t iree_vm_bytecode_verify_stack_record(
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                 "stack.copy.rodata ordinal is out of range");
       }
-      const uint64_t rodata_length = layout->rodata.lengths[record->rodata_u16];
+      const uint64_t rodata_length =
+          layout->rodata.descriptors[record->rodata_u16].byte_length_u64;
       if (record->source_offset_u32 > rodata_length ||
           record->length_u16 > rodata_length - record->source_offset_u32) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,

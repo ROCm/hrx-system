@@ -16,7 +16,7 @@ from model.module import (
     SectionRecord,
     ValidationObligation,
 )
-from model.module.v0.records import RECORDS_BY_KEY
+from model.module.v0.records import MINIMUM_SECTION_ALIGNMENT, RECORDS_BY_KEY
 from model.schema import ValidationScope
 from model.specification import CORE_0, NormativeClause
 
@@ -25,18 +25,19 @@ FORMAT = ModuleFormat(
     since=CORE_0,
     summary="IREE VM bytecode module container.",
     image_alignment=8,
-    section_alignment=8,
+    minimum_section_alignment=MINIMUM_SECTION_ALIGNMENT,
     normative_text=(
         "The complete image is canonical little-endian immutable storage. The "
         "fixed header begins at byte zero, the section directory immediately "
         "follows it, and payloads occur in strictly increasing directory order "
         "without serialized payload offsets. Starting at the checked end of "
-        "the directory, align the running cursor to the declared section "
+        "the directory, align the running cursor to each row's declared payload "
         "alignment, require every skipped padding byte to be zero, take exactly "
         "the row's byte_length bytes, and repeat; the final unaligned payload "
         "end must equal the image length. All size, offset, count, alignment, "
         "and address calculations use widened checked arithmetic and reject "
-        "before pointer formation. Reserved and alignment bytes are zero. "
+        "before pointer formation. Each payload alignment is a power of two at "
+        "least eight. Reserved and alignment-padding bytes are zero. "
         "Fixed table fields use natural alignment and ordinary C layouts; "
         "version zero supports only little-endian hosts and defines no "
         "byte-swapping representation. Instruction streams retain their own "
@@ -351,19 +352,24 @@ SECTIONS = (
         summary="Module rodata section.",
         section_type=11,
         required_flags=0,
-        grammar="block-count header, u64 lengths, then aligned block payloads",
+        grammar="block-count header, block descriptors, then aligned block payloads",
         normative_text=(
-            "block_count is in [1, 65536]. After the header and complete u64 "
-            "length array, derive each block in ordinal order by aligning the "
-            "running cursor to eight, requiring skipped padding to be zero, and "
-            "taking the exact declared length; the final block end consumes the "
-            "section. Each block therefore has exactly eight-byte image-relative "
-            "alignment. Zero-length and duplicate blocks remain distinct valid "
-            "ordinals. Version zero promises no stronger alignment. Module load "
+            "block_count is in [1, 65536]. Every descriptor carries an exact "
+            "byte length and a positive power-of-two minimum alignment; the "
+            "Rodata directory row's payload alignment equals the maximum of eight "
+            "and every block alignment. After the header and complete descriptor "
+            "array, derive each block in ordinal order by aligning the running "
+            "cursor to its declared alignment, requiring skipped padding to be "
+            "zero, and taking the exact declared length; the final block end "
+            "consumes the section. Zero-length and duplicate blocks remain "
+            "distinct valid ordinals. Module load "
             "creates one READ-only vm.buffer root per block whose initial owner "
-            "is held by the module and whose image-storage lifetime survives any "
-            "escaped owner. buffer.rodata.load publishes an internal borrow that "
-            "may be promoted to an ordinary owner without an ownership cycle."
+            "is held by the module and whose storage lifetime survives any escaped "
+            "owner. A block maps the image directly when its actual address meets "
+            "the declared alignment; otherwise module creation copies it into an "
+            "aligned tail of the same exact module slab. buffer.rodata.load "
+            "publishes an internal borrow that may be promoted to an ordinary "
+            "owner without an ownership cycle."
         ),
     ),
     Section(
@@ -619,11 +625,11 @@ SECTION_RECORDS = (
         document_order=0,
     ),
     SectionRecord(
-        entity_id="core.module.section.rodata.record.rodata_block_length",
+        entity_id="core.module.section.rodata.record.rodata_block_descriptor",
         since=CORE_0,
-        summary="rodata section use of rodata_block_length.",
+        summary="rodata section use of rodata_block_descriptor.",
         section_id=SECTIONS_BY_KEY["rodata"].entity_id,
-        record_id=RECORDS_BY_KEY["rodata_block_length"].entity_id,
+        record_id=RECORDS_BY_KEY["rodata_block_descriptor"].entity_id,
         document_order=1,
     ),
     SectionRecord(
@@ -786,7 +792,7 @@ VALIDATION_OBLIGATIONS = (
     ValidationObligation(
         entity_id="core.validation.module.directory.payload_packing",
         since=CORE_0,
-        summary="Derive eight-byte-aligned payloads, prove zero padding, and consume the image exactly.",
+        summary="Derive row-aligned payloads, prove zero padding, and consume the image exactly.",
         scope=ValidationScope.DIRECTORY,
         kind="derive_packed_payloads",
         inputs=(
@@ -798,8 +804,12 @@ VALIDATION_OBLIGATIONS = (
                 RECORDS_BY_KEY["section_directory_row"].entity_id,
                 "byte_length_u64",
             ),
+            RecordFieldReference(
+                RECORDS_BY_KEY["section_directory_row"].entity_id,
+                "payload_alignment_u32",
+            ),
         ),
-        normative_text="Derive eight-byte-aligned payloads, prove zero padding, and consume the image exactly.",
+        normative_text="Derive row-aligned payloads, prove zero padding, and consume the image exactly.",
     ),
     ValidationObligation(
         entity_id="core.validation.module.requirements.extent",
@@ -1414,7 +1424,7 @@ VALIDATION_OBLIGATIONS = (
     ValidationObligation(
         entity_id="core.validation.module.rodata.extent",
         since=CORE_0,
-        summary="Derive and bounds-check the complete u64 block-length array.",
+        summary="Derive and bounds-check the complete block-descriptor array.",
         scope=ValidationScope.SECTION,
         kind="checked_counted_extent",
         inputs=(
@@ -1422,24 +1432,28 @@ VALIDATION_OBLIGATIONS = (
                 RECORDS_BY_KEY["rodata_header"].entity_id,
                 "block_count_u32",
             ),
-            RecordFieldReference(RECORDS_BY_KEY["rodata_block_length"].entity_id),
+            RecordFieldReference(RECORDS_BY_KEY["rodata_block_descriptor"].entity_id),
         ),
-        normative_text="Derive and bounds-check the complete u64 block-length array.",
+        normative_text="Derive and bounds-check the complete block-descriptor array.",
         section_id=SECTIONS_BY_KEY["rodata"].entity_id,
     ),
     ValidationObligation(
         entity_id="core.validation.module.rodata.blocks",
         since=CORE_0,
-        summary="Derive eight-byte-aligned block views, prove zero padding, and consume the section exactly.",
+        summary="Derive minimum-aligned block views, prove zero padding, and consume the section exactly.",
         scope=ValidationScope.SECTION,
         kind="derive_aligned_blocks",
         inputs=(
             RecordFieldReference(
-                RECORDS_BY_KEY["rodata_block_length"].entity_id,
+                RECORDS_BY_KEY["rodata_block_descriptor"].entity_id,
                 "byte_length_u64",
             ),
+            RecordFieldReference(
+                RECORDS_BY_KEY["rodata_block_descriptor"].entity_id,
+                "minimum_alignment_u32",
+            ),
         ),
-        normative_text="Derive eight-byte-aligned block views, prove zero padding, and consume the section exactly.",
+        normative_text="Derive minimum-aligned block views, prove zero padding, and consume the section exactly.",
         section_id=SECTIONS_BY_KEY["rodata"].entity_id,
     ),
     ValidationObligation(

@@ -123,6 +123,8 @@ typedef struct iree_vm_bytecode_section_map_t {
   const iree_vm_bytecode_v0_section_directory_row_t* rows;
   // Known section payloads indexed by their architectural type ID.
   iree_const_byte_span_t spans[IREE_VM_BYTECODE_SECTION_METADATA + 1];
+  // Known section payload alignments indexed by architectural type ID.
+  uint32_t payload_alignments[IREE_VM_BYTECODE_SECTION_METADATA + 1];
   // Architectural extension pages owning at least one section.
   uint16_t extension_section_pages;
 } iree_vm_bytecode_section_map_t;
@@ -265,11 +267,12 @@ static iree_status_t iree_vm_bytecode_verify_envelope(
           IREE_STATUS_INVALID_ARGUMENT,
           "section directory types must be strictly increasing and nonzero");
     }
-    if (row->reserved_u32 != 0) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "section 0x%04" PRIx16
-                              " has nonzero reserved bits",
-                              row->section_type_u16);
+    if (row->payload_alignment_u32 < IREE_VM_BYTECODE_SECTION_MIN_ALIGNMENT ||
+        !iree_host_size_is_power_of_two(row->payload_alignment_u32)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "section 0x%04" PRIx16 " has invalid payload alignment %" PRIu32,
+          row->section_type_u16, row->payload_alignment_u32);
     }
     uint16_t required_flags = 0;
     const bool is_known = iree_vm_bytecode_known_section_flags(
@@ -299,8 +302,8 @@ static iree_status_t iree_vm_bytecode_verify_envelope(
           (uint16_t)(1u << (authority - 0xF0));
     }
 
-    IREE_RETURN_IF_ERROR(iree_vm_bytecode_cursor_align(
-        &cursor, IREE_VM_BYTECODE_SECTION_ALIGNMENT));
+    IREE_RETURN_IF_ERROR(
+        iree_vm_bytecode_cursor_align(&cursor, row->payload_alignment_u32));
     if (row->byte_length_u64 > IREE_HOST_SIZE_MAX) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "section 0x%04" PRIx16 " is not host-addressable",
@@ -309,10 +312,12 @@ static iree_status_t iree_vm_bytecode_verify_envelope(
     const uint8_t* payload = NULL;
     IREE_RETURN_IF_ERROR(iree_vm_bytecode_cursor_take(
         &cursor, (iree_host_size_t)row->byte_length_u64,
-        IREE_VM_BYTECODE_SECTION_ALIGNMENT, (const void**)&payload));
+        row->payload_alignment_u32, (const void**)&payload));
     if (is_known) {
       out_sections->spans[row->section_type_u16] = iree_make_const_byte_span(
           payload, (iree_host_size_t)row->byte_length_u64);
+      out_sections->payload_alignments[row->section_type_u16] =
+          row->payload_alignment_u32;
     }
     previous_type = row->section_type_u16;
   }
@@ -1078,7 +1083,9 @@ static iree_status_t iree_vm_bytecode_verify_globals(
 }
 
 static iree_status_t iree_vm_bytecode_verify_rodata(
-    iree_const_byte_span_t span, iree_vm_bytecode_module_layout_t* layout) {
+    iree_const_byte_span_t span, uint32_t payload_alignment,
+    iree_vm_bytecode_module_layout_t* layout,
+    iree_vm_bytecode_rodata_storage_plan_t* out_storage_plan) {
   if (iree_const_byte_span_is_empty(span)) return iree_ok_status();
   iree_vm_bytecode_cursor_t cursor = {span, 0, "Rodata section"};
   const iree_vm_bytecode_v0_rodata_header_t* header = NULL;
@@ -1089,28 +1096,67 @@ static iree_status_t iree_vm_bytecode_verify_rodata(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Rodata header is invalid");
   }
-  const iree_vm_bytecode_v0_rodata_block_length_t* lengths = NULL;
+  const iree_vm_bytecode_v0_rodata_block_descriptor_t* descriptors = NULL;
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_cursor_take_array(
-      &cursor, header->block_count_u32, sizeof(*lengths),
-      iree_alignof(*lengths), (const void**)&lengths));
-  const uint8_t* blocks_begin = span.data + cursor.offset;
+      &cursor, header->block_count_u32, sizeof(*descriptors),
+      iree_alignof(*descriptors), (const void**)&descriptors));
+  uint32_t maximum_alignment = IREE_VM_BYTECODE_SECTION_MIN_ALIGNMENT;
   for (uint32_t i = 0; i < header->block_count_u32; ++i) {
+    const iree_vm_bytecode_v0_rodata_block_descriptor_t* descriptor =
+        &descriptors[i];
+    if (!iree_host_size_is_power_of_two(descriptor->minimum_alignment_u32) ||
+        descriptor->reserved_u32 != 0) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "rodata block descriptor is invalid");
+    }
+    maximum_alignment =
+        iree_max(maximum_alignment, descriptor->minimum_alignment_u32);
+  }
+  if (payload_alignment != maximum_alignment) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Rodata payload alignment %" PRIu32
+                            " does not match maximum block alignment %" PRIu32,
+                            payload_alignment, maximum_alignment);
+  }
+
+  iree_vm_bytecode_rodata_storage_plan_t storage_plan = {0};
+  const iree_host_size_t blocks_offset = cursor.offset;
+  for (uint32_t i = 0; i < header->block_count_u32; ++i) {
+    const iree_vm_bytecode_v0_rodata_block_descriptor_t* descriptor =
+        &descriptors[i];
     IREE_RETURN_IF_ERROR(iree_vm_bytecode_cursor_align(
-        &cursor, IREE_VM_BYTECODE_SECTION_ALIGNMENT));
-    if (lengths[i] > IREE_HOST_SIZE_MAX) {
+        &cursor, descriptor->minimum_alignment_u32));
+    if (descriptor->byte_length_u64 > IREE_HOST_SIZE_MAX) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "rodata block is not host-addressable");
     }
     const uint8_t* block = NULL;
     IREE_RETURN_IF_ERROR(iree_vm_bytecode_cursor_take(
-        &cursor, (iree_host_size_t)lengths[i],
-        IREE_VM_BYTECODE_SECTION_ALIGNMENT, (const void**)&block));
+        &cursor, (iree_host_size_t)descriptor->byte_length_u64,
+        descriptor->minimum_alignment_u32, (const void**)&block));
+    if (!iree_host_ptr_has_alignment(block,
+                                     descriptor->minimum_alignment_u32)) {
+      if (!iree_host_size_checked_align(storage_plan.copy_length,
+                                        descriptor->minimum_alignment_u32,
+                                        &storage_plan.copy_length) ||
+          !iree_host_size_checked_add(
+              storage_plan.copy_length,
+              (iree_host_size_t)descriptor->byte_length_u64,
+              &storage_plan.copy_length)) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "rodata fallback storage overflows host size");
+      }
+      storage_plan.copy_alignment =
+          iree_max(storage_plan.copy_alignment,
+                   (iree_host_size_t)descriptor->minimum_alignment_u32);
+    }
   }
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_cursor_finish(&cursor));
   layout->rodata.count = header->block_count_u32;
-  layout->rodata.lengths = lengths;
-  layout->rodata.blocks_begin = blocks_begin;
-  layout->rodata.section_end = span.data + span.data_length;
+  layout->rodata.descriptors = descriptors;
+  layout->rodata.section_begin = span.data;
+  layout->rodata.blocks_offset = blocks_offset;
+  *out_storage_plan = storage_plan;
   return iree_ok_status();
 }
 
@@ -1484,7 +1530,9 @@ iree_status_t iree_vm_bytecode_module_verify_structure(
       sections.spans[IREE_VM_BYTECODE_SECTION_GLOBALS], &plan.layout,
       &plan.process_layout));
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_rodata(
-      sections.spans[IREE_VM_BYTECODE_SECTION_RODATA], &plan.layout));
+      sections.spans[IREE_VM_BYTECODE_SECTION_RODATA],
+      sections.payload_alignments[IREE_VM_BYTECODE_SECTION_RODATA],
+      &plan.layout, &plan.rodata_storage_plan));
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_presentation(
       sections.spans[IREE_VM_BYTECODE_SECTION_PRESENTATION], &plan.layout));
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_metadata(

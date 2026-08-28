@@ -510,6 +510,12 @@ class ProjectionTest(unittest.TestCase):
         )
         self.assertNotIn("iree_vm_bytecode_section_flag_t;", module_header)
 
+    def test_module_wire_carries_resource_alignment_contracts(self) -> None:
+        module_header = generated_wire_outputs()["wire/module_format.h"]
+        self.assertIn("IREE_VM_BYTECODE_SECTION_MIN_ALIGNMENT = 8,", module_header)
+        self.assertIn("uint32_t payload_alignment_u32;", module_header)
+        self.assertIn("iree_vm_bytecode_v0_rodata_block_descriptor_t;", module_header)
+
     def test_wire_alignment_accepts_stricter_file_alignment_than_host_abi(self) -> None:
         outputs = generated_wire_outputs()
         module_assertions = outputs["wire/assertions.c"]
