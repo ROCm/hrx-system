@@ -322,7 +322,7 @@ static iree_status_t loom_vm_contract_normalize_integer_value(
       break;
     default:
       IREE_ASSERT_UNREACHABLE("preflighted VM integer predicate type");
-      return iree_ok_status();
+      IREE_BUILTIN_UNREACHABLE();
   }
 
   if (first_selector != UINT16_MAX) {
@@ -430,7 +430,7 @@ static enum loom_vm_contract_comparison_e loom_vm_contract_relation_comparison(
       return LOOM_VM_CONTRACT_COMPARISON_GE;
     default:
       IREE_ASSERT_UNREACHABLE("relational VM function predicate");
-      return LOOM_VM_CONTRACT_COMPARISON_EQ;
+      IREE_BUILTIN_UNREACHABLE();
   }
 }
 
@@ -583,7 +583,7 @@ static iree_status_t loom_vm_contract_normalize_float_value(
       break;
     default:
       IREE_ASSERT_UNREACHABLE("preflighted VM floating-point predicate type");
-      return iree_ok_status();
+      IREE_BUILTIN_UNREACHABLE();
   }
   if (conversion_selector != UINT16_MAX) {
     return loom_vm_contract_build_selected_unary(
@@ -619,7 +619,7 @@ static iree_status_t loom_vm_contract_materialize_float(
       break;
     default:
       IREE_ASSERT_UNREACHABLE("floating-point VM function predicate");
-      return iree_ok_status();
+      IREE_BUILTIN_UNREACHABLE();
   }
 
   loom_value_id_t condition = LOOM_VALUE_ID_INVALID;
