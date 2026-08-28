@@ -233,9 +233,11 @@ loom_cc_test(
     ::serialize
     iree::base
     iree::base::internal::arena
+    iree::io::stream
     iree::testing::gtest
     iree::testing::gtest_main
     loom::codegen::low::text_asm
+    loom::format::bytecode::writer
     loom::format::text::parser
     loom::ir
     loom::link::module_index

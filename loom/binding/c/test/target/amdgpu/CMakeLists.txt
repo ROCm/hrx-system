@@ -20,6 +20,7 @@ loom_cc_test(
     iree::testing::gtest_main
     loom::binding::c::loomc
     loom::binding::c::target::amdgpu
+    loom::binding::c::target::cmd
     loom::binding::c::test::test_util
 )
 endif()
