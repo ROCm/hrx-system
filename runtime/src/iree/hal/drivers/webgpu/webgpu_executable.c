@@ -6,11 +6,8 @@
 
 #include "iree/hal/drivers/webgpu/webgpu_executable.h"
 
-#include "iree/base/internal/flatcc/parsing.h"
+#include "iree/hal/drivers/webgpu/webgpu_executable_format.h"
 #include "iree/hal/drivers/webgpu/webgpu_imports.h"
-#include "iree/hal/utils/executable_header.h"
-#include "iree/schemas/webgpu_executable_def_reader.h"
-#include "iree/schemas/webgpu_executable_def_verifier.h"
 
 //===----------------------------------------------------------------------===//
 // Per-function entry
@@ -27,8 +24,6 @@ typedef struct iree_hal_webgpu_executable_entry_t {
   uint32_t workgroup_size[3];
   // Number of resource bindings declared by the function.
   uint16_t binding_count;
-  // Number of push constants declared by the executable.
-  uint16_t constant_count;
 } iree_hal_webgpu_executable_entry_t;
 
 //===----------------------------------------------------------------------===//
@@ -55,23 +50,17 @@ static iree_hal_webgpu_executable_t* iree_hal_webgpu_executable_cast(
 }
 
 static iree_status_t iree_hal_webgpu_executable_calculate_name_storage_size(
-    iree_hal_webgpu_ExportDef_vec_t exports_vec, iree_host_size_t export_count,
+    const iree_hal_webgpu_executable_format_t* executable_format,
     iree_host_size_t* out_name_storage_size) {
   iree_host_size_t name_storage_size = 0;
-  for (iree_host_size_t i = 0; i < export_count; ++i) {
-    iree_hal_webgpu_ExportDef_table_t export_def =
-        iree_hal_webgpu_ExportDef_vec_at(exports_vec, i);
-    flatbuffers_string_t entry_point =
-        iree_hal_webgpu_ExportDef_entry_point_get(export_def);
-    iree_host_size_t entry_point_length =
-        entry_point ? flatbuffers_string_len(entry_point) : 0;
-    if (entry_point_length == 0) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "exports[%" PRIhsz "] has no entry point name",
-                              i);
-    }
-    if (!iree_host_size_checked_add(name_storage_size, entry_point_length + 1,
-                                    &name_storage_size)) {
+  for (iree_host_size_t i = 0; i < executable_format->export_count; ++i) {
+    iree_hal_webgpu_executable_export_t export_def;
+    IREE_RETURN_IF_ERROR(iree_hal_webgpu_executable_format_read_export(
+        executable_format, i, &export_def));
+    if (!iree_host_size_checked_add(name_storage_size,
+                                    export_def.entry_point.size,
+                                    &name_storage_size) ||
+        !iree_host_size_checked_add(name_storage_size, 1, &name_storage_size)) {
       return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                               "WebGPU executable export name storage exceeds "
                               "host size limits");
@@ -83,87 +72,24 @@ static iree_status_t iree_hal_webgpu_executable_calculate_name_storage_size(
 
 static iree_status_t iree_hal_webgpu_executable_initialize_export(
     iree_hal_webgpu_handle_t device_handle,
-    iree_hal_webgpu_ShaderModuleDef_vec_t shader_modules_vec,
-    iree_host_size_t shader_module_count, iree_host_size_t export_ordinal,
-    iree_hal_webgpu_ExportDef_table_t export_def, char** inout_name_storage,
-    iree_hal_webgpu_executable_entry_t* out_entry) {
-  uint32_t shader_module_ordinal =
-      iree_hal_webgpu_ExportDef_shader_module_ordinal_get(export_def);
-  if (shader_module_ordinal >= shader_module_count) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "exports[%" PRIhsz "] references shader module %u but only %" PRIhsz
-        " shader modules are present",
-        export_ordinal, shader_module_ordinal, shader_module_count);
-  }
-
-  iree_hal_webgpu_ShaderModuleDef_table_t shader_module_def =
-      iree_hal_webgpu_ShaderModuleDef_vec_at(shader_modules_vec,
-                                             shader_module_ordinal);
-  flatbuffers_string_t wgsl_source =
-      iree_hal_webgpu_ShaderModuleDef_wgsl_source_get(shader_module_def);
-  iree_host_size_t wgsl_source_length =
-      wgsl_source ? flatbuffers_string_len(wgsl_source) : 0;
-  if (wgsl_source_length == 0) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "shader_modules[%u] has no WGSL source",
-                            shader_module_ordinal);
-  }
-
-  flatbuffers_string_t entry_point =
-      iree_hal_webgpu_ExportDef_entry_point_get(export_def);
-  iree_host_size_t entry_point_length =
-      entry_point ? flatbuffers_string_len(entry_point) : 0;
-  if (entry_point_length == 0) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "exports[%" PRIhsz "] has no entry point name",
-                            export_ordinal);
-  }
-  memcpy(*inout_name_storage, entry_point, entry_point_length);
-  (*inout_name_storage)[entry_point_length] = '\0';
+    const iree_hal_webgpu_executable_export_t* export_def,
+    char** inout_name_storage, iree_hal_webgpu_executable_entry_t* out_entry) {
+  memcpy(*inout_name_storage, export_def->entry_point.data,
+         export_def->entry_point.size);
+  (*inout_name_storage)[export_def->entry_point.size] = '\0';
   out_entry->name =
-      iree_make_string_view(*inout_name_storage, entry_point_length);
-  *inout_name_storage += entry_point_length + 1;
+      iree_make_string_view(*inout_name_storage, export_def->entry_point.size);
+  *inout_name_storage += export_def->entry_point.size + 1;
 
-  uint32_t constant_count =
-      iree_hal_webgpu_ExportDef_constant_count_get(export_def);
-  if (constant_count > UINT16_MAX) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "exports[%" PRIhsz
-                            "] declares %u constants, exceeding the HAL "
-                            "reflection limit of %u",
-                            export_ordinal, constant_count, UINT16_MAX);
-  }
-  out_entry->constant_count = (uint16_t)constant_count;
-
-  iree_hal_webgpu_BindingBits_vec_t binding_flags_vec =
-      iree_hal_webgpu_ExportDef_binding_flags_get(export_def);
-  iree_host_size_t binding_count =
-      iree_hal_webgpu_BindingBits_vec_len(binding_flags_vec);
-  if (binding_count > UINT16_MAX) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "exports[%" PRIhsz "] declares %" PRIhsz
-                            " bindings, exceeding the HAL reflection limit "
-                            "of %u",
-                            export_ordinal, binding_count, UINT16_MAX);
-  }
-  out_entry->binding_count = (uint16_t)binding_count;
-
-  const iree_hal_webgpu_WorkgroupSize_t* workgroup_size =
-      iree_hal_webgpu_ExportDef_workgroup_size_get(export_def);
-  if (!workgroup_size) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "exports[%" PRIhsz "] has no static workgroup size",
-                            export_ordinal);
-  }
-  out_entry->workgroup_size[0] = workgroup_size->x;
-  out_entry->workgroup_size[1] = workgroup_size->y;
-  out_entry->workgroup_size[2] = workgroup_size->z;
+  out_entry->binding_count = export_def->binding_count;
+  memcpy(out_entry->workgroup_size, export_def->workgroup_size,
+         sizeof(out_entry->workgroup_size));
 
   out_entry->pipeline_handle =
       iree_hal_webgpu_import_device_create_compute_pipeline(
-          device_handle, /*layout_handle=*/0, (uint32_t)(uintptr_t)wgsl_source,
-          (uint32_t)wgsl_source_length,
+          device_handle, /*layout_handle=*/0,
+          (uint32_t)(uintptr_t)export_def->wgsl_source.data,
+          (uint32_t)export_def->wgsl_source.size,
           (uint32_t)(uintptr_t)out_entry->name.data,
           (uint32_t)out_entry->name.size);
   if (out_entry->pipeline_handle == 0) {
@@ -195,43 +121,23 @@ iree_status_t iree_hal_webgpu_executable_create(
   IREE_TRACE_ZONE_BEGIN(z0);
   *out_executable = NULL;
 
-  iree_const_byte_span_t flatbuffer_data = iree_const_byte_span_empty();
+  if (IREE_UNLIKELY(load_params->constant_count != 0)) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "WebGPU executable specialization constants are not supported");
+  }
+
+  iree_hal_webgpu_executable_format_t executable_format;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_read_executable_flatbuffer_header(
-              load_params->executable_data,
-              /*unsafe_infer_size=*/false,
-              iree_hal_webgpu_ExecutableDef_file_identifier, &flatbuffer_data));
-
-  int verify_ret = iree_hal_webgpu_ExecutableDef_verify_as_root(
-      flatbuffer_data.data, flatbuffer_data.data_length);
-  if (verify_ret != flatcc_verify_ok) {
-    IREE_TRACE_ZONE_END(z0);
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "WebGPU executable flatbuffer verification failed: "
-                            "%s",
-                            flatcc_verify_error_string(verify_ret));
-  }
-
-  iree_hal_webgpu_ExecutableDef_table_t executable_def =
-      iree_hal_webgpu_ExecutableDef_as_root(flatbuffer_data.data);
-  iree_hal_webgpu_ShaderModuleDef_vec_t shader_modules_vec =
-      iree_hal_webgpu_ExecutableDef_shader_modules_get(executable_def);
-  iree_hal_webgpu_ExportDef_vec_t exports_vec =
-      iree_hal_webgpu_ExecutableDef_exports_get(executable_def);
-  iree_host_size_t shader_module_count =
-      iree_hal_webgpu_ShaderModuleDef_vec_len(shader_modules_vec);
-  iree_host_size_t export_count =
-      iree_hal_webgpu_ExportDef_vec_len(exports_vec);
-  if (export_count == 0) {
-    IREE_TRACE_ZONE_END(z0);
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "WebGPU executable has no exports");
-  }
+      z0, iree_hal_webgpu_executable_format_parse(load_params->executable_data,
+                                                  &executable_format));
+  const iree_host_size_t export_count = executable_format.export_count;
 
   iree_host_size_t name_storage_size = 0;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_hal_webgpu_executable_calculate_name_storage_size(
-              exports_vec, export_count, &name_storage_size));
+              &executable_format, &name_storage_size));
 
   iree_host_size_t entry_storage_size = 0;
   iree_host_size_t total_size = 0;
@@ -256,16 +162,18 @@ iree_status_t iree_hal_webgpu_executable_create(
   executable->host_allocator = host_allocator;
   executable->function_count = export_count;
   char* name_storage =
-      (char*)executable + sizeof(*executable) +
-      export_count * sizeof(iree_hal_webgpu_executable_entry_t);
+      (char*)executable + sizeof(*executable) + entry_storage_size;
 
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0; i < export_count && iree_status_is_ok(status);
        ++i) {
-    status = iree_hal_webgpu_executable_initialize_export(
-        device_handle, shader_modules_vec, shader_module_count, i,
-        iree_hal_webgpu_ExportDef_vec_at(exports_vec, i), &name_storage,
-        &executable->entries[i]);
+    iree_hal_webgpu_executable_export_t export_def;
+    status = iree_hal_webgpu_executable_format_read_export(&executable_format,
+                                                           i, &export_def);
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_webgpu_executable_initialize_export(
+          device_handle, &export_def, &name_storage, &executable->entries[i]);
+    }
   }
 
   if (iree_status_is_ok(status)) {
@@ -342,7 +250,6 @@ static iree_status_t iree_hal_webgpu_executable_function_info(
   memset(out_info, 0, sizeof(*out_info));
   out_info->name = entry->name;
   out_info->binding_count = entry->binding_count;
-  out_info->constant_byte_length = entry->constant_count * sizeof(uint32_t);
   out_info->workgroup_size[0] = entry->workgroup_size[0];
   out_info->workgroup_size[1] = entry->workgroup_size[1];
   out_info->workgroup_size[2] = entry->workgroup_size[2];

@@ -19,12 +19,13 @@ extern "C" {
 // iree_hal_webgpu_executable_t
 //===----------------------------------------------------------------------===//
 
-// Creates a WebGPU executable from a compiled binary blob.
+// Creates a WebGPU executable from a versioned WebGPU executable bundle.
 //
-// The executable binary contains WGSL shader sources and metadata for each
-// entry point. At creation time, compute pipelines are created for each export
-// via the bridge layer. The executable retains the pipeline handles and
-// releases them on destruction.
+// The bundle contains WGSL shader sources and the reflection metadata required
+// for each entry point. At creation time, compute pipelines are created for
+// each export via the bridge layer. The executable retains the pipeline handles
+// and releases them on destruction. Dispatch push constants and load-time
+// specialization constants are not supported.
 //
 // |device_handle| is the bridge handle for the GPUDevice used to create compute
 // pipelines and their associated layouts.

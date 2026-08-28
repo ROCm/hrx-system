@@ -1963,6 +1963,12 @@ iree_status_t iree_hal_webgpu_queue_dispatch(
     iree_hal_executable_t* executable, iree_hal_executable_function_t function,
     iree_hal_dispatch_config_t config, iree_const_byte_span_t constants,
     iree_hal_buffer_ref_list_t bindings, iree_hal_dispatch_flags_t flags) {
+  if (IREE_UNLIKELY(constants.data_length != 0)) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "WebGPU does not support push constants; lower constants to buffer "
+        "bindings");
+  }
   // Extract pipeline/bgl handles at submit time. These are bridge table
   // indices (uint32 values) that remain valid as long as the executable lives.
   iree_hal_webgpu_handle_t pipeline_handle =
