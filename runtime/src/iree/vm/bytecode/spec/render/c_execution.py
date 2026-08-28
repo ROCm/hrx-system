@@ -13,7 +13,10 @@ from collections.abc import Sequence
 from execution import ExecutableInstruction
 from model.isa import Instruction, InstructionFieldRole
 from model.isa.core.integer import INTEGER_BITSTREAM_MAXIMUM_BIT_COUNT
-from model.isa.selectors import MEMORY_FORMAT_MAXIMUM_LANE_COUNT
+from model.isa.selectors import (
+    MEMORY_FORMAT_MAXIMUM_LANE_COUNT,
+    parse_integer_conversion_name,
+)
 from model.isa.validation import (
     ABI_SLOT,
     ALLOWED_RANGE,
@@ -73,22 +76,6 @@ def _opcode_token(mnemonic: str) -> str:
 
 def _handler_label(mnemonic: str) -> str:
     return mnemonic.replace(".", "_")
-
-
-def _integer_conversion_case(value_name: str) -> tuple[str, int, int]:
-    source_name, destination_name = value_name.split(".to.")
-    source_kind = source_name[0]
-    source_bit_count = int(source_name[1:])
-    destination_bit_count = int(destination_name[1:])
-    if source_kind == "s" and source_bit_count < destination_bit_count:
-        operation = "SIGN_EXTEND"
-    elif source_kind == "u" and source_bit_count < destination_bit_count:
-        operation = "ZERO_EXTEND"
-    elif source_kind == "i" and source_bit_count > destination_bit_count:
-        operation = "TRUNCATE"
-    else:
-        raise ValueError(f"invalid integer conversion selector {value_name!r}")
-    return operation, source_bit_count, destination_bit_count
 
 
 def _require_field(
@@ -1472,11 +1459,11 @@ def render_execution_tables(
         "core.selector.integer.convert"
     ]
     for value in integer_conversions:
-        operation, source_bit_count, destination_bit_count = _integer_conversion_case(
-            value.name
+        operation, source_bit_count, destination_bit_count = (
+            parse_integer_conversion_name(value.name)
         )
         lines.append(
-            f"IREE_VM_BYTECODE_INTEGER_{operation}_CASE("
+            f"IREE_VM_BYTECODE_INTEGER_{operation.upper()}_CASE("
             f"{_opcode_token(value.name)}, {source_bit_count}, "
             f"{destination_bit_count})"
         )

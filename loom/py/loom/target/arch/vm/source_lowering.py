@@ -10,7 +10,11 @@ from __future__ import annotations
 
 import dataclasses
 
-from model.isa.selectors import SELECTOR_TABLES_BY_NAME, SELECTOR_VALUES
+from model.isa.selectors import (
+    SELECTOR_TABLES_BY_NAME,
+    SELECTOR_VALUES,
+    parse_integer_conversion_name,
+)
 
 from loom.dialect.cfg import defs as cfg_defs
 from loom.dialect.func import defs as func_defs
@@ -33,6 +37,13 @@ _DESCRIPTORS_BY_KEY = {
 }
 _SELECTOR_VALUES_BY_KEY = {
     (value.table_id, value.name): value.value for value in SELECTOR_VALUES
+}
+_INTEGER_TYPE_BY_BIT_COUNT = {
+    1: ScalarTypeKind.I1,
+    8: ScalarTypeKind.I8,
+    16: ScalarTypeKind.I16,
+    32: ScalarTypeKind.I32,
+    64: ScalarTypeKind.I64,
 }
 
 
@@ -93,6 +104,100 @@ class VmSourceOpcode:
             raise ValueError(
                 "VM source selector requires one fixed name or source attribute"
             )
+
+
+def _integer_conversion_cases(
+    operation: str,
+) -> tuple[tuple[ScalarTypeKind, ScalarTypeKind, str], ...]:
+    """Projects one integer conversion family from the VM selector table."""
+
+    selector_table_id = SELECTOR_TABLES_BY_NAME["integer.convert"].entity_id
+    cases = tuple(
+        (
+            _INTEGER_TYPE_BY_BIT_COUNT[source_bit_count],
+            _INTEGER_TYPE_BY_BIT_COUNT[result_bit_count],
+            selector.name,
+        )
+        for selector in SELECTOR_VALUES
+        if selector.table_id == selector_table_id
+        for selector_operation, source_bit_count, result_bit_count in (
+            parse_integer_conversion_name(selector.name),
+        )
+        if selector_operation == operation
+    )
+    if not cases:
+        raise ValueError(f"VM integer conversion operation {operation!r} is unknown")
+    return cases
+
+
+def _integer_conversion_opcode(
+    operation: str,
+    source_type: ScalarTypeKind,
+    result_type: ScalarTypeKind,
+) -> VmSourceOpcode:
+    """Selects the VM integer conversion for one fixed-width type pair."""
+
+    selector_names = tuple(
+        selector_name
+        for case_source_type, case_result_type, selector_name in (
+            _integer_conversion_cases(operation)
+        )
+        if case_source_type is source_type and case_result_type is result_type
+    )
+    if len(selector_names) != 1:
+        raise ValueError(
+            f"VM integer conversion {operation} has no unique selector for "
+            f"{source_type.name} to {result_type.name}"
+        )
+    return VmSourceOpcode(
+        "vm.conversion.integer",
+        "integer.convert",
+        selector_names[0],
+    )
+
+
+def _index_cast_opcodes() -> dict[
+    tuple[ScalarTypeKind, ScalarTypeKind], str | VmSourceOpcode
+]:
+    """Projects every valid 64-bit VM address-boundary conversion."""
+
+    fixed_integer_types = tuple(_INTEGER_TYPE_BY_BIT_COUNT.values())
+    address_types = (ScalarTypeKind.INDEX, ScalarTypeKind.OFFSET)
+    opcodes: dict[tuple[ScalarTypeKind, ScalarTypeKind], str | VmSourceOpcode] = {}
+
+    for source_type in fixed_integer_types:
+        for result_type in address_types:
+            if source_type is ScalarTypeKind.I64:
+                opcode: str | VmSourceOpcode = "vm.value.copy"
+            else:
+                operation = (
+                    "zero_extend"
+                    if source_type is ScalarTypeKind.I1
+                    or result_type is ScalarTypeKind.OFFSET
+                    else "sign_extend"
+                )
+                opcode = _integer_conversion_opcode(
+                    operation,
+                    source_type,
+                    ScalarTypeKind.I64,
+                )
+            opcodes[(source_type, result_type)] = opcode
+
+    for source_type in address_types:
+        for result_type in fixed_integer_types:
+            opcodes[(source_type, result_type)] = (
+                "vm.value.copy"
+                if result_type is ScalarTypeKind.I64
+                else _integer_conversion_opcode(
+                    "truncate",
+                    ScalarTypeKind.I64,
+                    result_type,
+                )
+            )
+
+    opcodes[(ScalarTypeKind.INDEX, ScalarTypeKind.OFFSET)] = "vm.value.copy"
+    opcodes[(ScalarTypeKind.OFFSET, ScalarTypeKind.INDEX)] = "vm.value.copy"
+    return opcodes
 
 
 def _require_fixed_source_shape(
@@ -1079,31 +1184,19 @@ VM_SOURCE_LOWERINGS = (
         scalar_conversion.scalar_extsi,
         "vm.conversion.integer",
         "integer.convert",
-        (
-            (ScalarTypeKind.I8, ScalarTypeKind.I32, "s8.to.i32"),
-            (ScalarTypeKind.I16, ScalarTypeKind.I32, "s16.to.i32"),
-            (ScalarTypeKind.I32, ScalarTypeKind.I64, "s32.to.i64"),
-        ),
+        _integer_conversion_cases("sign_extend"),
     ),
     *_selected_cast(
         scalar_conversion.scalar_extui,
         "vm.conversion.integer",
         "integer.convert",
-        (
-            (ScalarTypeKind.I8, ScalarTypeKind.I32, "u8.to.i32"),
-            (ScalarTypeKind.I16, ScalarTypeKind.I32, "u16.to.i32"),
-            (ScalarTypeKind.I32, ScalarTypeKind.I64, "u32.to.i64"),
-        ),
+        _integer_conversion_cases("zero_extend"),
     ),
     *_selected_cast(
         scalar_conversion.scalar_trunci,
         "vm.conversion.integer",
         "integer.convert",
-        (
-            (ScalarTypeKind.I32, ScalarTypeKind.I8, "i32.to.i8"),
-            (ScalarTypeKind.I32, ScalarTypeKind.I16, "i32.to.i16"),
-            (ScalarTypeKind.I64, ScalarTypeKind.I32, "i64.to.i32"),
-        ),
+        _integer_conversion_cases("truncate"),
     ),
     *_cast(
         scalar_conversion.scalar_bitcast,
@@ -1126,33 +1219,6 @@ VM_SOURCE_LOWERINGS = (
     ),
     *_cast(
         index_defs.index_cast,
-        {
-            (ScalarTypeKind.I32, ScalarTypeKind.INDEX): VmSourceOpcode(
-                "vm.conversion.integer",
-                "integer.convert",
-                "s32.to.i64",
-            ),
-            (ScalarTypeKind.I32, ScalarTypeKind.OFFSET): VmSourceOpcode(
-                "vm.conversion.integer",
-                "integer.convert",
-                "u32.to.i64",
-            ),
-            (ScalarTypeKind.INDEX, ScalarTypeKind.I32): VmSourceOpcode(
-                "vm.conversion.integer",
-                "integer.convert",
-                "i64.to.i32",
-            ),
-            (ScalarTypeKind.OFFSET, ScalarTypeKind.I32): VmSourceOpcode(
-                "vm.conversion.integer",
-                "integer.convert",
-                "i64.to.i32",
-            ),
-            (ScalarTypeKind.I64, ScalarTypeKind.INDEX): "vm.value.copy",
-            (ScalarTypeKind.I64, ScalarTypeKind.OFFSET): "vm.value.copy",
-            (ScalarTypeKind.INDEX, ScalarTypeKind.I64): "vm.value.copy",
-            (ScalarTypeKind.OFFSET, ScalarTypeKind.I64): "vm.value.copy",
-            (ScalarTypeKind.INDEX, ScalarTypeKind.OFFSET): "vm.value.copy",
-            (ScalarTypeKind.OFFSET, ScalarTypeKind.INDEX): "vm.value.copy",
-        },
+        _index_cast_opcodes(),
     ),
 )

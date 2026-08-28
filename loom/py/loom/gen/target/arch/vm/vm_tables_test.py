@@ -530,6 +530,9 @@ def test_float_math_projection_covers_native_core_selectors() -> None:
 def test_conversion_projection_covers_exact_core_type_pairs() -> None:
     f8e4m3 = ScalarType(ScalarTypeKind.F8E4M3)
     f8e5m2 = ScalarType(ScalarTypeKind.F8E5M2)
+    integer_types = (I1, I8, I16, I32, I64)
+    integer_extension_pairs = {(source_type, result_type) for source_ordinal, source_type in enumerate(integer_types) for result_type in integer_types[source_ordinal + 1 :]}
+    integer_truncation_pairs = {(source_type, result_type) for source_ordinal, source_type in enumerate(integer_types) for result_type in integer_types[:source_ordinal]}
 
     expected_type_pairs = {
         scalar_conversion.scalar_extf: {
@@ -578,21 +581,9 @@ def test_conversion_projection_covers_exact_core_type_pairs() -> None:
             (F64, I32),
             (F64, I64),
         },
-        scalar_conversion.scalar_extsi: {
-            (I8, I32),
-            (I16, I32),
-            (I32, I64),
-        },
-        scalar_conversion.scalar_extui: {
-            (I8, I32),
-            (I16, I32),
-            (I32, I64),
-        },
-        scalar_conversion.scalar_trunci: {
-            (I32, I8),
-            (I32, I16),
-            (I64, I32),
-        },
+        scalar_conversion.scalar_extsi: integer_extension_pairs,
+        scalar_conversion.scalar_extui: integer_extension_pairs,
+        scalar_conversion.scalar_trunci: integer_truncation_pairs,
     }
     for source_op, expected_pairs in expected_type_pairs.items():
         actual_pairs = {(row.operand_types[0], row.result_types[0]) for row in VM_SOURCE_LOWERINGS if row.source_op is source_op}
@@ -602,6 +593,18 @@ def test_conversion_projection_covers_exact_core_type_pairs() -> None:
     assert len(bitcast_rows) == 16
     assert all(row.descriptor_key == "vm.value.copy" for row in bitcast_rows)
     assert all(row.operand_types[0].bitwidth == row.result_types[0].bitwidth for row in bitcast_rows)
+
+    address_types = (INDEX, OFFSET)
+    expected_index_cast_pairs = {
+        *((source_type, result_type) for source_type in integer_types for result_type in address_types),
+        *((source_type, result_type) for source_type in address_types for result_type in integer_types),
+        (INDEX, OFFSET),
+        (OFFSET, INDEX),
+    }
+    index_cast_rows = tuple(row for row in VM_SOURCE_LOWERINGS if row.source_op is index_defs.index_cast)
+    assert {(row.operand_types[0], row.result_types[0]) for row in index_cast_rows} == expected_index_cast_pairs
+    assert sum(row.descriptor_key == "vm.value.copy" for row in index_cast_rows) == 6
+    assert sum(row.descriptor_key == "vm.conversion.integer" for row in index_cast_rows) == 16
 
 
 def test_lowering_rows_are_data_only() -> None:

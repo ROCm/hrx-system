@@ -14,7 +14,7 @@ import pathlib
 from fractions import Fraction
 from typing import Literal
 
-from model.isa.selectors import SELECTOR_VALUES
+from model.isa.selectors import SELECTOR_VALUES, parse_integer_conversion_name
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -163,9 +163,9 @@ def _integer_conversion_rows() -> tuple[tuple[int, int, int], ...]:
     rows: list[tuple[int, int, int]] = []
     dirty_high_bits = 0xA55AA55AA55AA55A
     for selector, name in _selector_rows("core.selector.integer.convert"):
-        source_name, destination_name = name.split(".to.")
-        source_bit_count = int(source_name[1:])
-        destination_bit_count = int(destination_name[1:])
+        operation, source_bit_count, destination_bit_count = (
+            parse_integer_conversion_name(name)
+        )
         source_mask = (1 << source_bit_count) - 1
         destination_mask = (1 << destination_bit_count) - 1
         samples = {
@@ -178,7 +178,7 @@ def _integer_conversion_rows() -> tuple[tuple[int, int, int], ...]:
         for low_source_bits in sorted(samples):
             source_bits = low_source_bits | (dirty_high_bits & ~source_mask)
             result = low_source_bits
-            if source_name.startswith("s") and (result & (1 << (source_bit_count - 1))):
+            if operation == "sign_extend" and (result & (1 << (source_bit_count - 1))):
                 result |= ~source_mask
             rows.append((selector, source_bits, result & destination_mask))
     return tuple(rows)

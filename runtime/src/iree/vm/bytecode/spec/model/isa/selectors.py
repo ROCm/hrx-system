@@ -50,6 +50,33 @@ def _selector_table(
 _INTEGER_WIDTHS = (1, 8, 16, 32, 64)
 
 
+def parse_integer_conversion_name(name: str) -> tuple[str, int, int]:
+    """Returns the operation and widths encoded by an integer selector name."""
+
+    try:
+        source_name, destination_name = name.split(".to.")
+        source_kind = source_name[0]
+        source_bit_count = int(source_name[1:])
+        if not destination_name.startswith("i"):
+            raise ValueError
+        destination_bit_count = int(destination_name[1:])
+    except (IndexError, ValueError) as exc:
+        raise ValueError(f"invalid integer conversion selector {name!r}") from exc
+    if source_bit_count not in _INTEGER_WIDTHS:
+        raise ValueError(f"invalid integer conversion selector {name!r}")
+    if destination_bit_count not in _INTEGER_WIDTHS:
+        raise ValueError(f"invalid integer conversion selector {name!r}")
+    if source_kind == "s" and source_bit_count < destination_bit_count:
+        operation = "sign_extend"
+    elif source_kind == "u" and source_bit_count < destination_bit_count:
+        operation = "zero_extend"
+    elif source_kind == "i" and source_bit_count > destination_bit_count:
+        operation = "truncate"
+    else:
+        raise ValueError(f"invalid integer conversion selector {name!r}")
+    return operation, source_bit_count, destination_bit_count
+
+
 def _integer_convert_values() -> tuple[tuple[int, str, int, str], ...]:
     values: list[tuple[int, str, int, str]] = []
     for source_index, source_width in enumerate(_INTEGER_WIDTHS):
