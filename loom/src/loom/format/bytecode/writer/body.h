@@ -11,6 +11,7 @@
 
 #include "loom/format/bytecode/writer/encoder.h"
 #include "loom/format/bytecode/writer/numbering.h"
+#include "loom/ir/module_record.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -50,6 +51,11 @@ typedef struct loom_bytecode_body_counts_t {
 iree_status_t loom_bytecode_count_serialized_bodies(
     loom_bytecode_numbering_t* numbering, loom_bytecode_body_counts_t* counts);
 
+// Counts the non-symbol module operation forest in wire order.
+iree_status_t loom_bytecode_count_serialized_module_ops(
+    const loom_module_t* module, const loom_module_record_plan_t* record_plan,
+    loom_bytecode_body_counts_t* counts, iree_host_size_t* out_root_op_count);
+
 // Appends one SSA value definition to a buffered metadata payload.
 iree_status_t loom_bytecode_emit_value_def(
     iree_string_builder_t* builder, loom_bytecode_numbering_t* numbering,
@@ -61,6 +67,13 @@ iree_status_t loom_bytecode_write_ir_section(
     loom_bytecode_page_writer_t* page_writer,
     loom_bytecode_numbering_t* numbering,
     loom_bytecode_ir_region_list_t* ir_regions);
+
+// Streams the independently bounded non-symbol module operation forest.
+iree_status_t loom_bytecode_write_module_ops_section(
+    loom_bytecode_page_writer_t* page_writer,
+    loom_bytecode_numbering_t* numbering,
+    const loom_module_record_plan_t* record_plan,
+    const loom_bytecode_body_counts_t* counts, iree_host_size_t root_op_count);
 
 #ifdef __cplusplus
 }

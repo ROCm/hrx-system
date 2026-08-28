@@ -167,6 +167,7 @@ loom_cc_test(
         "//loom/src/loom/ops/func",
         "//loom/src/loom/ops/global",
         "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/ops/metadata",
         "//loom/src/loom/ops/template",
         "//loom/src/loom/ops/test",
         "//loom/src/loom/verify",

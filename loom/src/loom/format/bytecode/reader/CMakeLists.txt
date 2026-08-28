@@ -58,6 +58,7 @@ loom_cc_library(
     iree::base
     iree::base::internal::arena
     loom::error::error_defs
+    loom::format::bytecode::module_summary
     loom::format::low_repr
     loom::ir
     loom::ops::op_defs
@@ -212,6 +213,21 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    module_ops
+  HDRS
+    "module_ops.h"
+  SRCS
+    "module_ops.c"
+  DEPS
+    ::decoder
+    iree::base
+    loom::error::error_defs
+    loom::format::bytecode::module_summary
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     module_view
   HDRS
     "module_view.h"
@@ -238,6 +254,7 @@ loom_cc_library(
     ::decoder
     ::encoding
     ::location
+    ::module_ops
     ::module_view
     ::operation
     ::source_trivia
@@ -462,6 +479,7 @@ loom_cc_library(
     "selected_materializer.c"
   DEPS
     ::decoder
+    ::module_ops
     ::selected_symbol
     ::selected_tables
     iree::base

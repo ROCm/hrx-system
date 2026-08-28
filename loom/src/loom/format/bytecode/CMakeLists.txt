@@ -196,6 +196,7 @@ loom_cc_test(
     loom::ops::func
     loom::ops::global
     loom::ops::kernel
+    loom::ops::metadata
     loom::ops::template
     loom::ops::test
     loom::ops::type_registry

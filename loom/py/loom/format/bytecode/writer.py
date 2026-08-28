@@ -21,6 +21,7 @@ from __future__ import annotations
 import struct
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from itertools import pairwise
 from typing import Any, ClassVar, cast
 
 from loom.dsl import FuncLikeInterface, SymbolReferenceRole
@@ -106,9 +107,11 @@ SECTION_IR = 7
 SECTION_RESOURCES = 8
 SECTION_SOURCE_TRIVIA = 9
 SECTION_SYMBOL_REFERENCES = 10
+SECTION_MODULE_OPS = 11
 
 SECTION_WRITE_ORDER = (
     SECTION_IR,
+    SECTION_MODULE_OPS,
     SECTION_SYMBOLS,
     SECTION_SYMBOL_REFERENCES,
     SECTION_STRINGS,
@@ -181,7 +184,7 @@ BYTECODE_IR_KIND_BY_TYPE_KIND: dict[int, TypeKind] = {
 
 # File magic and version.
 MAGIC = b"LOOM"
-FORMAT_VERSION = 35
+FORMAT_VERSION = 36
 PRODUCER = "loom-py"
 
 SYMBOL_INTERFACE_BITS = {
@@ -568,6 +571,7 @@ class BytecodeWriter:
         self._wire_symbols, self._wire_symbol_indices = (
             self._build_wire_symbol_projection()
         )
+        self._module_operations = self._build_module_operation_projection()
         self._number_module()
         (
             self._module_dependencies,
@@ -594,6 +598,67 @@ class BytecodeWriter:
                     f"symbol {symbol.name!r} has no serializable symbol kind"
                 )
         return wire_symbols, symbol_indices
+
+    def _build_module_operation_projection(self) -> tuple[Operation, ...]:
+        """Build the non-symbol module operation projection in wire order."""
+        symbol_operation_ids = {
+            id(symbol.op) for symbol in self._wire_symbols if symbol.op is not None
+        }
+        records: list[tuple[bytes, bytes, int, Operation]] = []
+        ordinary_operations: list[Operation] = []
+        for operation_index, operation in enumerate(self._module.body.ops):
+            if operation.is_dead:
+                continue
+            declaration = self._op_decls_by_name.get(operation.name)
+            if declaration is None:
+                raise ValueError(
+                    f"module operation {operation.name!r} is not registered"
+                )
+            defines_symbol = declaration.symbol_def is not None
+            indexed_as_symbol = id(operation) in symbol_operation_ids
+            if defines_symbol:
+                continue
+            if indexed_as_symbol:
+                raise ValueError(
+                    f"module operation {operation.name!r} is indexed as a symbol "
+                    "but does not define one"
+                )
+            if not declaration.has_trait("ModuleScope"):
+                raise ValueError(
+                    f"operation {operation.name!r} is not permitted at module scope"
+                )
+            key_attr = declaration.keyed_module_record_attr
+            if key_attr is None:
+                ordinary_operations.append(operation)
+                continue
+            key = operation.attributes.get(key_attr)
+            if not isinstance(key, str):
+                raise ValueError(
+                    f"keyed module operation {operation.name!r} has no string "
+                    f"attribute {key_attr!r}"
+                )
+            if not key:
+                raise ValueError(
+                    f"keyed module operation {operation.name!r} key must be non-empty"
+                )
+            records.append(
+                (
+                    operation.name.encode("utf-8"),
+                    key.encode("utf-8"),
+                    operation_index,
+                    operation,
+                )
+            )
+        records.sort(key=lambda record: record[:3])
+        for previous, current in pairwise(records):
+            if previous[:2] == current[:2]:
+                operation_name = current[3].name
+                key = current[1].decode("utf-8")
+                raise ValueError(
+                    f"duplicate keyed module operation {operation_name!r} "
+                    f"with key {key!r}"
+                )
+        return tuple(record[3] for record in records) + tuple(ordinary_operations)
 
     def _number_module(self) -> None:
         """Walk the module and assign IDs to all entities."""
@@ -625,6 +690,10 @@ class BytecodeWriter:
                         f"symbol {symbol.name!r} of kind {symbol.kind.name} "
                         "has no supported defining op"
                     )
+
+        # Non-symbol module operations use the ordinary operation codec.
+        for operation in self._module_operations:
+            self._number_operation(operation)
 
         # Encodings: recursively number child encoding params before parents so
         # the ENCODINGS section has no forward references.
@@ -1049,6 +1118,8 @@ class BytecodeWriter:
             sections[SECTION_SOURCE_TRIVIA] = self._write_source_trivia_section()
         ir_bytes, ir_regions = self._write_ir()
         sections[SECTION_IR] = ir_bytes
+        if self._module_operations:
+            sections[SECTION_MODULE_OPS] = self._write_module_operations()
         sections[SECTION_SYMBOLS] = self._write_symbols(ir_regions)
         sections[SECTION_SYMBOL_REFERENCES] = self._write_symbol_references()
         return self._assemble(sections, self._module_allocation_counts())
@@ -1302,6 +1373,55 @@ class BytecodeWriter:
         buf.write_varint(op_count)
         self._write_region(buf, region, value_numbers)
 
+    def _write_module_operations(self) -> bytes:
+        """Write the independently bounded non-symbol module operation forest."""
+        buf = ByteBuffer()
+        value_numbers: dict[int, int] = {}
+        value_count = 0
+        region_count = 0
+        block_count = 0
+        op_count = 0
+        for operation in self._module_operations:
+            self._assign_operation_value_numbers(operation, value_numbers)
+            counts = self._count_operation_tree(operation)
+            value_count += counts[0]
+            region_count += counts[1]
+            block_count += counts[2]
+            op_count += counts[3]
+        buf.write_varint(value_count)
+        buf.write_varint(region_count)
+        buf.write_varint(block_count)
+        buf.write_varint(op_count)
+        buf.write_varint(len(self._module_operations))
+        module_block_indices = {id(self._module.body): 0}
+        for operation in self._module_operations:
+            self._write_operation(buf, operation, value_numbers, module_block_indices)
+        return buf.get_bytes()
+
+    def _assign_operation_value_numbers(
+        self, operation: Operation, numbers: dict[int, int]
+    ) -> None:
+        """Assign values defined by one operation and its nested regions."""
+        for result_id in operation.results:
+            if result_id not in numbers:
+                numbers[result_id] = len(numbers)
+        for region in operation.regions:
+            self._assign_value_numbers(region, numbers)
+
+    def _count_operation_tree(self, operation: Operation) -> tuple[int, int, int, int]:
+        """Return value, region, block, and op counts for one live op tree."""
+        value_count = len(operation.results)
+        region_count = 0
+        block_count = 0
+        op_count = 1
+        for region in operation.regions:
+            counts = self._count_region_tree(region)
+            value_count += counts[0]
+            region_count += counts[1]
+            block_count += counts[2]
+            op_count += counts[3]
+        return value_count, region_count, block_count, op_count
+
     def _assign_value_numbers(self, region: Region, numbers: dict[int, int]) -> None:
         """Assign sequential value numbers within one root region."""
         for block in region.blocks:
@@ -1371,6 +1491,12 @@ class BytecodeWriter:
                 continue
             value_count += len(symbol.op.results)
             counts = self._count_region_forest(symbol.op)
+            value_count += counts[0]
+            region_count += counts[1]
+            block_count += counts[2]
+            op_count += counts[3]
+        for operation in self._module_operations:
+            counts = self._count_operation_tree(operation)
             value_count += counts[0]
             region_count += counts[1]
             block_count += counts[2]

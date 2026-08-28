@@ -102,6 +102,14 @@ static iree_status_t loom_bytecode_module_materialize_tables(
     IREE_RETURN_IF_ERROR(loom_bytecode_location_table_materialize(
         &location_materializer, reader->view.sections.locations));
   }
+  if (reader->view.sections.module_ops) {
+    IREE_RETURN_IF_ERROR(loom_bytecode_body_materialize_module_ops(
+        &symbol_materializer.body_materializer,
+        reader->view.directory_entry->name,
+        reader->view.sections.module_ops->bytes,
+        reader->view.sections.module_ops->absolute_offset,
+        &reader->view.module_ops_summary));
+  }
   return loom_bytecode_symbols_materialize(&symbol_materializer,
                                            reader->view.sections.symbols,
                                            reader->view.sections.ir);

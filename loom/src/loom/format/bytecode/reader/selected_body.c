@@ -155,7 +155,10 @@ static iree_status_t loom_bytecode_body_policy_materialize_attribute_ssa(
   loom_bytecode_selected_value_scope_materialize_definition
 #define LOOM_BYTECODE_BODY_MATERIALIZE_REGION \
   loom_bytecode_selected_body_materialize_region
+#define LOOM_BYTECODE_BODY_MATERIALIZE_MODULE_OPS \
+  loom_bytecode_selected_body_materialize_module_ops
 #include "loom/format/bytecode/reader/body_materializer_impl.inl"
+#undef LOOM_BYTECODE_BODY_MATERIALIZE_MODULE_OPS
 #undef LOOM_BYTECODE_BODY_MATERIALIZE_REGION
 #undef LOOM_BYTECODE_BODY_VALUE_SCOPE_MATERIALIZE_DEFINITION
 #undef LOOM_BYTECODE_BODY_VALUE_SCOPE_INITIALIZE_FRESH

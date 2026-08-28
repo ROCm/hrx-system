@@ -1,0 +1,6 @@
+// RUN: roundtrip
+
+metadata.module "help.summary" = "Example model"
+metadata.module "model.enabled" = true
+metadata.module "model.payload" = bytes("00feff")
+metadata.module "model.revision" = u64(18446744073709551615)

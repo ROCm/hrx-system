@@ -214,6 +214,13 @@ iree_py_binary(
 )
 
 iree_py_binary(
+    name = "c_tables_metadata_generator",
+    main_module = "loom.gen.ops.c_tables",
+    visibility = GENERATOR_VISIBILITY,
+    deps = C_TABLES_BASE_DEPS + ["//loom/py/loom/dialect/metadata"],
+)
+
+iree_py_binary(
     name = "c_tables_template_generator",
     main_module = "loom.gen.ops.c_tables",
     visibility = GENERATOR_VISIBILITY,

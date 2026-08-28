@@ -222,10 +222,11 @@ static std::string BuildEncodingModule(SchemaPopulation population,
                                        int64_t definition_count) {
   std::string source;
   source.reserve((size_t)definition_count * 240);
+  source.append("func.def @encodings() {\n");
   for (int64_t i = 0; i < definition_count; ++i) {
     const int64_t payload_element_count =
         population == SchemaPopulation::kDistinct ? i + 1 : 32;
-    source.append("%schema");
+    source.append("  %schema");
     source.append(std::to_string(i));
     source.append(
         " = encoding.define #encoding.operand<element_format=f8e4m3, "
@@ -235,6 +236,7 @@ static std::string BuildEncodingModule(SchemaPopulation population,
         ", payload_packing=dense_lanes, "
         "rounding=finite_only> : encoding<schema>\n");
   }
+  source.append("  func.return\n}\n");
   return source;
 }
 
@@ -626,12 +628,22 @@ static void BM_QueryStaticFp8OperandSchema(benchmark::State& state) {
   EncodingBenchmarkFixture fixture;
   loom_module_t* module = ParseModule(
       fixture,
-      "%schema = encoding.define #encoding.operand<element_format=f8e4m3fn, "
-      "payload_elements=1, payload_packing=dense_lanes, rounding=finite_only> "
-      ": encoding<schema>\n");
+      "func.def @query() {\n"
+      "  %schema = encoding.define "
+      "#encoding.operand<element_format=f8e4m3fn, payload_elements=1, "
+      "payload_packing=dense_lanes, rounding=finite_only> : "
+      "encoding<schema>\n"
+      "  func.return\n"
+      "}\n");
   OperationMemoryTracker memory_tracker(fixture.block_pool());
-  const loom_op_t* define_op =
-      loom_block_const_op(loom_module_block(module), 0);
+  loom_func_like_t function = GetOnlyFunction(module);
+  if (!function.op) {
+    state.SkipWithError("static FP8 operand schema function was malformed");
+    loom_module_free(module);
+    return;
+  }
+  const loom_op_t* define_op = loom_block_const_op(
+      loom_region_entry_block(loom_func_like_body(function)), 0);
   const uint16_t encoding_id = loom_encoding_define_spec(define_op);
 
   loom_value_fact_storage_schema_t schema = {};

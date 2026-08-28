@@ -195,6 +195,12 @@ class ModuleVerifier:
             if declaration is None or declaration.keyed_module_record_attr is None:
                 continue
             key = operation.attributes[declaration.keyed_module_record_attr]
+            if not key:
+                self.diagnostics.error(
+                    "keyed module record key must be non-empty",
+                    source=f"module operation[{operation_index}] {operation.name}",
+                )
+                continue
             identity = (operation.name, key)
             previous_index = seen.get(identity)
             if previous_index is not None:

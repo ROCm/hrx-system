@@ -225,6 +225,7 @@ loom_cc_library(
     loom::ops::index
     loom::ops::kernel
     loom::ops::low
+    loom::ops::metadata
     loom::ops::pass
     loom::ops::pool
     loom::ops::sanitizer

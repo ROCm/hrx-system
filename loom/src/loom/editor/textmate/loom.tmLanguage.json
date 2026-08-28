@@ -197,6 +197,18 @@
         },
         {
           "name": "meta.operation-name.loom",
+          "match": "\\b(metadata)\\.(module)\\b",
+          "captures": {
+            "1": {
+              "name": "support.namespace.dialect.loom"
+            },
+            "2": {
+              "name": "entity.name.function.operation.loom"
+            }
+          }
+        },
+        {
+          "name": "meta.operation-name.loom",
           "match": "\\b(pool)\\.(buffer|store|unpin|load|pin)\\b",
           "captures": {
             "1": {

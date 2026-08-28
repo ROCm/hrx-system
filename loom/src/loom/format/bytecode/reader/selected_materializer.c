@@ -6,12 +6,30 @@
 
 #include "loom/format/bytecode/reader/selected_materializer.h"
 
+#include "loom/format/bytecode/reader/module_ops.h"
+
 typedef struct loom_bytecode_selected_module_preparation_t {
   // Prepared selected symbols in canonical source order.
   loom_bytecode_selected_symbol_t* symbols;
   // Exact number of module values materialized by the selection.
   iree_host_size_t value_count;
+  // Optional non-symbol module operation payload and validated summary.
+  struct {
+    // Source MODULE_OPS section retained by the bytecode index.
+    const loom_bytecode_section_metadata_t* section;
+    // Validated allocation summary for section.
+    loom_bytecode_module_ops_summary_t summary;
+  } module_ops;
 } loom_bytecode_selected_module_preparation_t;
+
+static const loom_bytecode_section_metadata_t*
+loom_bytecode_selected_module_find_section(
+    const loom_bytecode_module_metadata_t* metadata, uint16_t kind) {
+  for (iree_host_size_t i = 0; i < metadata->section_count; ++i) {
+    if (metadata->sections[i].kind == kind) return &metadata->sections[i];
+  }
+  return NULL;
+}
 
 static iree_const_byte_span_t loom_bytecode_selected_region_span(
     const loom_bytecode_selected_module_materializer_t* materializer,
@@ -51,6 +69,16 @@ static iree_status_t loom_bytecode_selected_module_prepare(
   loom_bytecode_selected_module_preparation_t preparation = {
       .symbols = selected_symbols,
   };
+  preparation.module_ops.section = loom_bytecode_selected_module_find_section(
+      materializer->metadata, LOOM_BYTECODE_SECTION_MODULE_OPS);
+  if (preparation.module_ops.section) {
+    IREE_RETURN_IF_ERROR(loom_bytecode_module_ops_summary_read(
+        materializer->decoder, preparation.module_ops.section->bytes,
+        preparation.module_ops.section->absolute_offset,
+        &preparation.module_ops.summary));
+    IREE_RETURN_IF_ERROR(loom_bytecode_selected_module_add_value_count(
+        preparation.module_ops.summary.value_count, &preparation));
+  }
   for (iree_host_size_t i = 0; i < ordinal_count; ++i) {
     const iree_host_size_t source_ordinal = ordinals[i];
     IREE_ASSERT(source_ordinal < materializer->metadata->symbol_count);
@@ -174,8 +202,15 @@ static iree_status_t loom_bytecode_selected_module_materialize_prepared_into(
   loom_bytecode_selected_symbol_materializer_initialize(
       materializer->decoder, materializer->block_pool, &tables,
       &materializer->low_repr_environment, &symbols);
-  const iree_status_t status = loom_bytecode_selected_symbols_materialize(
+  iree_status_t status = loom_bytecode_selected_symbols_materialize(
       &symbols, preparation->symbols, selected_symbol_count);
+  if (iree_status_is_ok(status) && preparation->module_ops.section) {
+    status = loom_bytecode_selected_body_materialize_module_ops(
+        &symbols.body_materializer, materializer->metadata->name,
+        preparation->module_ops.section->bytes,
+        preparation->module_ops.section->absolute_offset,
+        &preparation->module_ops.summary);
+  }
   loom_bytecode_selected_table_materializer_deinitialize(&tables);
   return status;
 }

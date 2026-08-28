@@ -15,6 +15,7 @@ from pathlib import Path
 
 from loom.builtin_types import ALL_BUILTIN_TYPES
 from loom.dialect.low import ALL_LOW_OPS
+from loom.dialect.metadata import ALL_METADATA_OPS
 from loom.dialect.test import (
     ALL_TEST_OPS,
     ALL_TEST_PARAMETERIZED_ATTRS,
@@ -62,12 +63,17 @@ def _run_loom_format(arguments: list[object]) -> subprocess.CompletedProcess[str
 def _interop_module() -> tuple[Module, RegisterType]:
     parser = Parser()
     parser.register_ops(ALL_LOW_OPS)
+    parser.register_ops(ALL_METADATA_OPS)
     parser.register_ops(ALL_TEST_OPS)
     parser.register_types(ALL_BUILTIN_TYPES)
     parser.register_types(ALL_TEST_TYPES)
     parser.register_parameterized_attrs(ALL_TEST_PARAMETERIZED_ATTRS)
     module = parser.parse(
         "// Bytecode interoperability coverage.\n"
+        "\n"
+        'metadata.module "model.payload" = bytes("00feff")\n'
+        'metadata.module "model.revision" = u64(18446744073709551615)\n'
+        "test.module_metadata\n"
         "\n"
         "low.func.decl target<test.low.core> "
         "@typed_identity(%arg: reg<test.ptr : vector<4xi16>>) -> "
@@ -175,6 +181,21 @@ def _assert_module_structure(module: Module, register_type: RegisterType) -> Blo
     ):
         raise AssertionError("block source trivia did not survive C bytecode")
     return entry_block
+
+
+def _assert_module_metadata(module: Module) -> None:
+    metadata = {
+        op.attributes["key"]: op.attributes["value"]
+        for op in module.body.ops
+        if op.name == "metadata.module"
+    }
+    if metadata != {
+        "model.payload": bytes.fromhex("00feff"),
+        "model.revision": U64Attr(2**64 - 1),
+    }:
+        raise AssertionError("module metadata did not survive C bytecode")
+    if sum(op.name == "test.module_metadata" for op in module.body.ops) != 1:
+        raise AssertionError("ordinary module operation did not survive C bytecode")
 
 
 def _assert_enum_and_symbol_attrs(entry_block: Block) -> None:
@@ -340,6 +361,7 @@ def main() -> None:
         raise ValueError("expected the C loom-format binary path")
     source_module, register_type = _interop_module()
     loaded_module = _roundtrip_through_c(Path(sys.argv[1]), source_module)
+    _assert_module_metadata(loaded_module)
     entry_block = _assert_module_structure(loaded_module, register_type)
     _assert_enum_and_symbol_attrs(entry_block)
     _assert_parameterized_attrs(entry_block)

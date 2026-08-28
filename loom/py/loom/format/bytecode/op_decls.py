@@ -26,6 +26,7 @@ def default_op_decls() -> tuple[Any, ...]:
     from loom.dialect.kernel import ALL_KERNEL_OPS
     from loom.dialect.llvmir import ALL_LLVMIR_OPS
     from loom.dialect.low import ALL_LOW_OPS
+    from loom.dialect.metadata import ALL_METADATA_OPS
     from loom.dialect.pass_ import ALL_PASS_OPS
     from loom.dialect.pool import ALL_POOL_OPS
     from loom.dialect.scalar import ALL_SCALAR_OPS
@@ -55,6 +56,7 @@ def default_op_decls() -> tuple[Any, ...]:
         *ALL_LLVMIR_OPS,
         *ALL_TARGET_OPS,
         *ALL_LOW_OPS,
+        *ALL_METADATA_OPS,
         *ALL_PASS_OPS,
     )
 

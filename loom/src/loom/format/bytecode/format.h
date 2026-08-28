@@ -85,7 +85,7 @@ extern "C" {
 
 #define LOOM_BYTECODE_MAGIC "LOOM"
 #define LOOM_BYTECODE_MAGIC_LENGTH 4
-#define LOOM_BYTECODE_FORMAT_VERSION 35
+#define LOOM_BYTECODE_FORMAT_VERSION 36
 
 #define LOOM_BYTECODE_SOURCE_TRIVIA_LEADING_BLANK_LINE (1u << 0)
 #define LOOM_BYTECODE_SOURCE_TRIVIA_COMMENT_COUNT_SHIFT 1
@@ -163,6 +163,8 @@ typedef uint16_t loom_bytecode_module_flags_t;
 //   +-----------------------+
 //   | SYMBOL_REFERENCES     |  Direct dependency and provider-demand rows.
 //   +-----------------------+
+//   | MODULE_OPS            |  Non-symbol operations owned by the module.
+//   +-----------------------+
 //   | RESOURCES section     |  Large blobs: weights, executables, etc.
 //   |                       |  (last — keeps dense metadata up front,
 //   |                       |  potentially multi-GB data at the end)
@@ -171,9 +173,10 @@ typedef uint16_t loom_bytecode_module_flags_t;
 // Module prefix:
 //
 //   [section_count: varint]
-//   [value_count: varint]   Total SSA value definitions serialized by symbols
-//                           and root-region payloads. Readers may reserve this
-//                           capacity before constructing IR.
+//   [value_count: varint]   Total SSA value definitions serialized by symbols,
+//                           root-region payloads, and module operations.
+//                           Readers may reserve this capacity before
+//                           constructing IR.
 //   [region_count: varint]  Total serialized regions.
 //   [block_count: varint]   Total serialized blocks.
 //   [op_count: varint]      Total serialized operations.
@@ -219,9 +222,33 @@ typedef enum loom_bytecode_section_kind_e {
       9,  // Optional module-owned source presentation.
   LOOM_BYTECODE_SECTION_SYMBOL_REFERENCES =
       10,  // Per-symbol dependency and abstract-provider demands.
+  LOOM_BYTECODE_SECTION_MODULE_OPS =
+      11,  // Non-symbol module operations in canonical wire order.
 } loom_bytecode_section_kind_t;
 
-#define LOOM_BYTECODE_SECTION_COUNT 11
+#define LOOM_BYTECODE_SECTION_COUNT 12
+
+// ==========================================================================
+// MODULE_OPS section
+// ==========================================================================
+//
+// Non-symbol operations owned directly by the module body. Keyed module
+// records appear first in strict (operation name, record key) byte order;
+// ordinary module operations follow in physical module-body order. Symbol-
+// defining operations are represented only by SYMBOLS and never appear here.
+//
+// The section is an independently numbered operation forest:
+//
+//   [value_count: uvarint]
+//   [region_count: uvarint]
+//   [block_count: uvarint]
+//   [op_count: uvarint]
+//   [root_op_count: uvarint]
+//   [root_op: operation] * root_op_count
+//
+// Operation records use the same encoding as operations nested in IR root
+// regions. The allocation counts cover the root operations and every nested
+// region, block, operation, and SSA value in this section only.
 
 // ==========================================================================
 // SOURCE_TRIVIA section

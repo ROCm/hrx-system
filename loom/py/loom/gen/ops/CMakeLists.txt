@@ -230,6 +230,16 @@ iree_py_library(
 
 iree_py_library(
   NAME
+    c_tables_metadata_generator
+  MAIN_MODULE
+    "loom.gen.ops.c_tables"
+  DEPS
+    loom::py::loom::gen::ops::c_tables
+    loom::py::loom::dialect::metadata::metadata
+)
+
+iree_py_library(
+  NAME
     c_tables_template_generator
   MAIN_MODULE
     "loom.gen.ops.c_tables"

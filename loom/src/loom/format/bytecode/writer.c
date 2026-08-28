@@ -93,6 +93,51 @@ static iree_status_t loom_bytecode_validate_module(
   return iree_ok_status();
 }
 
+// Returns whether the module body may contain operations not represented by
+// the symbol table. Valid symbol-only modules have one top-level defining op
+// per symbol, letting the common serialization path avoid constructing and
+// scanning a module-record projection.
+static iree_status_t loom_bytecode_module_has_non_symbol_ops(
+    const loom_module_t* module, bool* out_has_non_symbol_ops) {
+  if (!module->body) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "module has no body");
+  }
+  iree_host_size_t top_level_op_count = 0;
+  for (uint16_t i = 0; i < module->body->block_count; ++i) {
+    if (!iree_host_size_checked_add(
+            top_level_op_count,
+            loom_region_const_block(module->body, i)->op_count,
+            &top_level_op_count)) {
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "module top-level operation count overflow");
+    }
+  }
+  if (top_level_op_count < module->symbols.count) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "module has fewer top-level operations than indexed symbols");
+  }
+  *out_has_non_symbol_ops = top_level_op_count > module->symbols.count;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_bytecode_add_body_counts(
+    const loom_bytecode_body_counts_t* source,
+    loom_bytecode_body_counts_t* inout_target) {
+  if (!iree_checked_add_u64(inout_target->value_count, source->value_count,
+                            &inout_target->value_count) ||
+      !iree_checked_add_u64(inout_target->region_count, source->region_count,
+                            &inout_target->region_count) ||
+      !iree_checked_add_u64(inout_target->block_count, source->block_count,
+                            &inout_target->block_count) ||
+      !iree_checked_add_u64(inout_target->op_count, source->op_count,
+                            &inout_target->op_count)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "module allocation summary overflow");
+  }
+  return iree_ok_status();
+}
+
 iree_status_t loom_bytecode_write_module(
     const loom_module_t* module, iree_io_stream_t* stream,
     const loom_bytecode_write_options_t* options,
@@ -153,7 +198,12 @@ iree_status_t loom_bytecode_write_module(
 
   loom_module_record_plan_t record_plan = {0};
   bool record_plan_initialized = false;
+  bool has_non_symbol_module_ops = false;
   if (iree_status_is_ok(status)) {
+    status = loom_bytecode_module_has_non_symbol_ops(
+        module, &has_non_symbol_module_ops);
+  }
+  if (iree_status_is_ok(status) && has_non_symbol_module_ops) {
     status = loom_module_record_plan_initialize(module, &record_plan);
     record_plan_initialized = iree_status_is_ok(status);
   }
@@ -261,9 +311,19 @@ iree_status_t loom_bytecode_write_module(
   // Module data starts at this offset.
   iree_host_size_t module_start = page_writer.total_written;
 
+  loom_bytecode_body_counts_t module_op_counts = {0};
+  iree_host_size_t module_root_op_count = 0;
+  if (iree_status_is_ok(status) && has_non_symbol_module_ops) {
+    status = loom_bytecode_count_serialized_module_ops(
+        module, &record_plan, &module_op_counts, &module_root_op_count);
+  }
+
   loom_bytecode_section_kind_t section_write_order[LOOM_BYTECODE_SECTION_COUNT];
   iree_host_size_t section_count = 0;
   section_write_order[section_count++] = LOOM_BYTECODE_SECTION_IR;
+  if (module_root_op_count > 0) {
+    section_write_order[section_count++] = LOOM_BYTECODE_SECTION_MODULE_OPS;
+  }
   section_write_order[section_count++] = LOOM_BYTECODE_SECTION_SYMBOLS;
   section_write_order[section_count++] =
       LOOM_BYTECODE_SECTION_SYMBOL_REFERENCES;
@@ -283,6 +343,9 @@ iree_status_t loom_bytecode_write_module(
   loom_bytecode_body_counts_t module_counts = {0};
   if (iree_status_is_ok(status)) {
     status = loom_bytecode_count_serialized_bodies(&numbering, &module_counts);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_bytecode_add_body_counts(&module_op_counts, &module_counts);
   }
   if (iree_status_is_ok(status)) {
     status =
@@ -340,6 +403,20 @@ iree_status_t loom_bytecode_write_module(
       section_lengths[LOOM_BYTECODE_SECTION_IR] =
           page_writer.total_written - module_start -
           section_offsets[LOOM_BYTECODE_SECTION_IR];
+    }
+  }
+
+  // Non-symbol operations owned directly by the module body.
+  if (iree_status_is_ok(status) && module_root_op_count > 0) {
+    section_offsets[LOOM_BYTECODE_SECTION_MODULE_OPS] =
+        page_writer.total_written - module_start;
+    status = loom_bytecode_write_module_ops_section(
+        &page_writer, &numbering, &record_plan, &module_op_counts,
+        module_root_op_count);
+    if (iree_status_is_ok(status)) {
+      section_lengths[LOOM_BYTECODE_SECTION_MODULE_OPS] =
+          page_writer.total_written - module_start -
+          section_offsets[LOOM_BYTECODE_SECTION_MODULE_OPS];
     }
   }
 
