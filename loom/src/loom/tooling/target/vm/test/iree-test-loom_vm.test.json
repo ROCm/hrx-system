@@ -11,8 +11,8 @@
         "contains": {
           "unordered": [
             "\"format\":\"loom.test.v0\"",
-            "\"case_count\":7",
-            "\"sample_count\":7",
+            "\"case_count\":8",
+            "\"sample_count\":8",
             "\"failed_sample_count\":0",
             "\"case\":\"initializer_and_export_alias\"",
             "\"case\":\"shared_process_sequence\"",
@@ -20,7 +20,8 @@
             "\"case\":\"integer_execution\"",
             "\"case\":\"overflow_execution\"",
             "\"case\":\"rodata_execution\"",
-            "\"case\":\"scalar_boundary_execution\""
+            "\"case\":\"scalar_boundary_execution\"",
+            "\"case\":\"constant_pool_execution\""
           ]
         }
       }

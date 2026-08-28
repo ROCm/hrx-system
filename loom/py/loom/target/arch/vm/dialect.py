@@ -6,7 +6,7 @@
 
 """VM target-family records and physical module resources."""
 
-from loom.assembly import Attr, AttrDict, Clause, SymbolRef, TemplateParam
+from loom.assembly import EQUALS, Attr, AttrDict, Clause, SymbolRef, TemplateParam
 from loom.dialect.target import target_record_attrs
 from loom.dsl import (
     MODULE_SCOPE,
@@ -66,6 +66,25 @@ vm_target = Op(
     examples=["vm.target<core> @vm"],
 )
 
+vm_constant = Op(
+    "vm.constant",
+    group=vm_ops,
+    doc=(
+        "Assign an exact 64-bit value pattern to a physical Core VM "
+        "constant-pool ordinal. Module materialization creates these records "
+        "only when replacing repeated inline constants reduces the complete "
+        "module image size."
+    ),
+    traits=[MODULE_SCOPE],
+    attrs=[
+        AttrDef("ordinal", "i64"),
+        AttrDef("bits", "i64"),
+    ],
+    verify="loom_vm_constant_verify",
+    format=[Attr("ordinal"), EQUALS, Attr("bits")],
+    examples=["vm.constant 0 = -1"],
+)
+
 vm_global = Op(
     "vm.global",
     group=vm_ops,
@@ -111,4 +130,4 @@ vm_rodata = Op(
     examples=["vm.rodata @lookup_table ordinal(0)"],
 )
 
-ALL_VM_OPS: tuple[Op, ...] = (vm_target, vm_global, vm_rodata)
+ALL_VM_OPS: tuple[Op, ...] = (vm_target, vm_constant, vm_global, vm_rodata)

@@ -21,9 +21,10 @@ extern "C" {
 
 enum {
   LOOM_OP_VM_TARGET = LOOM_OP_KIND(LOOM_DIALECT_VM, 0),
-  LOOM_OP_VM_GLOBAL = LOOM_OP_KIND(LOOM_DIALECT_VM, 1),
-  LOOM_OP_VM_RODATA = LOOM_OP_KIND(LOOM_DIALECT_VM, 2),
-  LOOM_OP_VM_COUNT_ = 3,
+  LOOM_OP_VM_CONSTANT = LOOM_OP_KIND(LOOM_DIALECT_VM, 1),
+  LOOM_OP_VM_GLOBAL = LOOM_OP_KIND(LOOM_DIALECT_VM, 2),
+  LOOM_OP_VM_RODATA = LOOM_OP_KIND(LOOM_DIALECT_VM, 3),
+  LOOM_OP_VM_COUNT_ = 4,
 };
 
 // VM target row selected by vm.target.
@@ -138,6 +139,21 @@ iree_status_t loom_vm_target_build(
     loom_location_id_t location,
     loom_op_t** out_op);
 iree_status_t loom_target_record_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_VM_CONSTANT: Assign an exact 64-bit value pattern to a physical Core VM constant-pool ordinal. Module materialization creates these records only when replacing repeated inline constants reduces the complete module image size.
+// vm.constant 0 = -1
+LOOM_DEFINE_ISA(loom_vm_constant_isa, LOOM_OP_VM_CONSTANT)
+LOOM_DEFINE_ATTR_I64(loom_vm_constant_ordinal, 0)
+LOOM_DEFINE_ATTR_I64(loom_vm_constant_bits, 1)
+iree_status_t loom_vm_constant_build(
+    loom_builder_t* builder,
+    int64_t ordinal,
+    int64_t bits,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_vm_constant_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 

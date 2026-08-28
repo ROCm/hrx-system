@@ -214,6 +214,7 @@ loom_cc_library(
     name = "provider",
     srcs = [
         "abi/materialization.c",
+        "constants/materialization.c",
         "contracts/materialization.c",
         "initialization.c",
         "pass_registry.c",
@@ -221,6 +222,7 @@ loom_cc_library(
     ],
     hdrs = [
         "abi/materialization.h",
+        "constants/materialization.h",
         "contracts/materialization.h",
         "initialization.h",
         "pass_registry.h",
@@ -248,6 +250,7 @@ loom_cc_library(
         "//loom/src/loom/target:low_descriptor_registry",
         "//loom/src/loom/target:provider",
         "//loom/src/loom/target:types",
+        "//loom/src/loom/util:adaptive_sort",
         "//loom/src/loom/util:walk",
         "//runtime/src/iree/base",
         "//runtime/src/iree/vm",
@@ -275,6 +278,7 @@ loom_check_test_suite(
         "test/ops/resources.loom-test",
         "test/source_low/abi_materialization.loom-test",
         "test/source_low/abi_types.loom-test",
+        "test/source_low/constant_pool.loom-test",
         "test/source_low/control_switch.loom-test",
         "test/source_low/corpus/numeric_scalar_baseline.loom-test",
         "test/source_low/corpus/numeric_scalar_literals.loom-test",

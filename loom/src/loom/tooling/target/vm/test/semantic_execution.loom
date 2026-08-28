@@ -158,3 +158,41 @@ check.case @scalar_boundary_execution {
   check.expect.bitwise actual(%actual_f64) expected(%f64_value) : f64
   check.return
 }
+
+func.def noinline target(@vm) @constant_pool_a() -> (i64) {
+  %value = scalar.constant 1311768467463790320 : i64
+  func.return %value : i64
+}
+
+func.def noinline target(@vm) @constant_pool_b() -> (i64) {
+  %value = scalar.constant 1311768467463790320 : i64
+  func.return %value : i64
+}
+
+func.def noinline target(@vm) @constant_pool_c() -> (i64) {
+  %value = scalar.constant 1311768467463790320 : i64
+  func.return %value : i64
+}
+
+func.def noinline target(@vm) @constant_pool_d() -> (i64) {
+  %value = scalar.constant 1311768467463790320 : i64
+  func.return %value : i64
+}
+
+func.def public target(@vm) @sum_pooled_constants() -> (i64) {
+  %a = func.call @constant_pool_a() : () -> (i64)
+  %b = func.call @constant_pool_b() : () -> (i64)
+  %c = func.call @constant_pool_c() : () -> (i64)
+  %d = func.call @constant_pool_d() : () -> (i64)
+  %ab = scalar.addi %a, %b : i64
+  %cd = scalar.addi %c, %d : i64
+  %sum = scalar.addi %ab, %cd : i64
+  func.return %sum : i64
+}
+
+check.case @constant_pool_execution {
+  %actual = func.call @sum_pooled_constants() : () -> (i64)
+  %expected = check.literal value(5247073869855161280) : i64
+  check.expect.equal actual(%actual) expected(%expected) : i64
+  check.return
+}

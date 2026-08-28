@@ -283,9 +283,9 @@ static iree_status_t loom_vm_contract_build_integer_constant(
   const uint64_t bits = width == 32 ? (uint32_t)value : (uint64_t)value;
   const loom_type_t result_type =
       width == 32 ? materializer->i32_type : materializer->i64_type;
-  return loom_vm_constant_build(&materializer->rewriter->builder, bits,
-                                result_type, materializer->location,
-                                out_result);
+  return loom_vm_inline_constant_build(&materializer->rewriter->builder, bits,
+                                       result_type, materializer->location,
+                                       out_result);
 }
 
 static iree_status_t loom_vm_contract_normalize_integer_value(

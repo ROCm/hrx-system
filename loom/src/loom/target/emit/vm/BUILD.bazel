@@ -80,6 +80,7 @@ loom_check_test_suite(
     name = "loom_check_file_test",
     srcs = [
         "test/abi.loom-test",
+        "test/constants.loom-test",
         "test/control_flow.loom-test",
         "test/function_values.loom-test",
         "test/imports.loom-test",

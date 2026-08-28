@@ -70,6 +70,7 @@ loom_check_test_suite(
     loom_check_file_test
   SRCS
     "test/abi.loom-test"
+    "test/constants.loom-test"
     "test/control_flow.loom-test"
     "test/function_values.loom-test"
     "test/imports.loom-test"

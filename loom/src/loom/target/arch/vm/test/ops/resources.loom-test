@@ -4,6 +4,9 @@ global.variable @state : i32
 global.rodata.def @table = bytes("00")
 
 // ERROR@+1: STRUCTURE/014 "ordinal" "-1" "an unsigned 16-bit integer"
+vm.constant -1 = 0
+
+// ERROR@+1: STRUCTURE/014 "ordinal" "-1" "an unsigned 16-bit integer"
 vm.global @state ordinal(-1)
 
 // ERROR@+1: STRUCTURE/014 "ordinal" "65536" "an unsigned 16-bit integer"

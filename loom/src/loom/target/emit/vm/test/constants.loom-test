@@ -1,0 +1,101 @@
+// RUN: emit vm-dis input=low
+
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<() -> (reg<vm.value : i64>)>}) @read_constant() -> (reg<vm.value : i64>) asm {
+  %value = constant.pool.load.i64 0 : reg<vm.value : i64>
+  return %value
+}
+
+vm.constant 0 = 1311768467463790320
+
+// ----
+vm.module "module" core=0.0 bytes=192
+requirements:
+sections:
+  [0] signatures type=0x0004 flags=0x0000 bytes=[80, +24)
+  [1] callable_types type=0x0005 flags=0x0000 bytes=[104, +12)
+  [2] functions type=0x0008 flags=0x0000 bytes=[120, +64)
+  [3] constants type=0x0009 flags=0x0000 bytes=[184, +8)
+resources: constants=1 globals=(values=0, refs=0, functions=0) rodata=0
+module_metadata:
+ref_types:
+callable_types:
+  [0] () -> (i64)
+imports:
+exports:
+functions:
+  [0] callable[0] signature[0] bytecode=[0, +12) registers=(1, 0, 0) locals=(0, 0, 0) switch_targets=0
+    type = () -> (i64)
+    +0000  control.block
+    +0004  constant.pool.load.i64 dst_v8=0 pool_u16=0
+    +0008  control.return
+
+// ====
+
+// RUN: emit vm-dis
+
+vm.target<core> @target
+
+func.def public noinline target(@target) @pooled_constant_a() -> (i64) {
+  %value = scalar.constant 1311768467463790320 : i64
+  func.return %value : i64
+}
+
+func.def public noinline target(@target) @pooled_constant_b() -> (i64) {
+  %value = scalar.constant 1311768467463790320 : i64
+  func.return %value : i64
+}
+
+func.def public noinline target(@target) @pooled_constant_c() -> (i64) {
+  %value = scalar.constant 1311768467463790320 : i64
+  func.return %value : i64
+}
+
+func.def public noinline target(@target) @pooled_constant_d() -> (i64) {
+  %value = scalar.constant 1311768467463790320 : i64
+  func.return %value : i64
+}
+
+// ----
+vm.module "module" core=0.0 bytes=544
+requirements:
+sections:
+  [0] strings type=0x0002 flags=0x0000 bytes=[112, +92)
+  [1] signatures type=0x0004 flags=0x0000 bytes=[208, +24)
+  [2] callable_types type=0x0005 flags=0x0000 bytes=[232, +12)
+  [3] exports type=0x0007 flags=0x0000 bytes=[248, +36)
+  [4] functions type=0x0008 flags=0x0000 bytes=[288, +244)
+  [5] constants type=0x0009 flags=0x0000 bytes=[536, +8)
+resources: constants=1 globals=(values=0, refs=0, functions=0) rodata=0
+module_metadata:
+ref_types:
+callable_types:
+  [0] () -> (i64)
+imports:
+exports:
+  [0] @pooled_constant_a -> function[0] : () -> (i64)
+  [1] @pooled_constant_b -> function[1] : () -> (i64)
+  [2] @pooled_constant_c -> function[2] : () -> (i64)
+  [3] @pooled_constant_d -> function[3] : () -> (i64)
+functions:
+  [0] callable[0] signature[0] bytecode=[0, +12) registers=(1, 0, 0) locals=(0, 0, 0) switch_targets=0
+    type = () -> (i64)
+    +0000  control.block
+    +0004  constant.pool.load.i64 dst_v8=0 pool_u16=0
+    +0008  control.return
+  [1] callable[0] signature[0] bytecode=[12, +12) registers=(1, 0, 0) locals=(0, 0, 0) switch_targets=0
+    type = () -> (i64)
+    +0000  control.block
+    +0004  constant.pool.load.i64 dst_v8=0 pool_u16=0
+    +0008  control.return
+  [2] callable[0] signature[0] bytecode=[24, +12) registers=(1, 0, 0) locals=(0, 0, 0) switch_targets=0
+    type = () -> (i64)
+    +0000  control.block
+    +0004  constant.pool.load.i64 dst_v8=0 pool_u16=0
+    +0008  control.return
+  [3] callable[0] signature[0] bytecode=[36, +12) registers=(1, 0, 0) locals=(0, 0, 0) switch_targets=0
+    type = () -> (i64)
+    +0000  control.block
+    +0004  constant.pool.load.i64 dst_v8=0 pool_u16=0
+    +0008  control.return

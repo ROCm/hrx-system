@@ -161,7 +161,7 @@ static iree_status_t loom_vm_normalize_switch_selector(
   const loom_type_t selector_type =
       loom_module_value_type(loom_low_lower_context_module(context), selector);
   loom_value_id_t minimum = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_vm_constant_build(
+  IREE_RETURN_IF_ERROR(loom_vm_inline_constant_build(
       loom_low_lower_context_builder(context), (uint64_t)minimum_key,
       selector_type, location, &minimum));
   return loom_vm_emit_subtract(context, location, selector, minimum,
@@ -211,9 +211,9 @@ static iree_status_t loom_vm_emit_switch_subtract_chain(
     loom_value_id_t difference = selector;
     if (case_keys.i64_array[i] != 0) {
       loom_value_id_t key = LOOM_VALUE_ID_INVALID;
-      IREE_RETURN_IF_ERROR(
-          loom_vm_constant_build(builder, (uint64_t)case_keys.i64_array[i],
-                                 selector_type, source_op->location, &key));
+      IREE_RETURN_IF_ERROR(loom_vm_inline_constant_build(
+          builder, (uint64_t)case_keys.i64_array[i], selector_type,
+          source_op->location, &key));
       IREE_RETURN_IF_ERROR(loom_vm_emit_subtract(context, source_op->location,
                                                  selector, key, &difference));
     }
@@ -246,7 +246,7 @@ static iree_status_t loom_vm_emit_switch_decrement_chain(
   loom_builder_t* builder = loom_low_lower_context_builder(context);
   loom_value_id_t one = LOOM_VALUE_ID_INVALID;
   if (case_count > 1) {
-    IREE_RETURN_IF_ERROR(loom_vm_constant_build(
+    IREE_RETURN_IF_ERROR(loom_vm_inline_constant_build(
         builder, UINT64_C(1),
         loom_module_value_type(loom_low_lower_context_module(context), value),
         source_op->location, &one));

@@ -33,6 +33,8 @@ typedef struct loom_vm_module_global_record_t {
 } loom_vm_module_global_record_t;
 
 typedef struct loom_vm_module_resource_counts_t {
+  // Number of direct constant-pool records.
+  uint32_t constants;
   // Total global count in each physical bank.
   uint32_t globals[LOOM_VM_MODULE_GLOBAL_BANK_COUNT_];
   // Immutable global count in each physical bank.
@@ -40,6 +42,13 @@ typedef struct loom_vm_module_resource_counts_t {
   // Number of direct rodata records.
   uint32_t rodata;
 } loom_vm_module_resource_counts_t;
+
+typedef struct loom_vm_module_resource_presence_t {
+  // Occupancy bytes indexed by constant-pool ordinal.
+  uint8_t* constants;
+  // Occupancy bytes indexed by value-global ordinal.
+  uint8_t* value_globals;
+} loom_vm_module_resource_presence_t;
 
 static iree_status_t loom_vm_module_resource_resolve_source(
     const loom_module_t* module, loom_symbol_ref_t source_ref,
@@ -155,7 +164,20 @@ static iree_status_t loom_vm_module_resource_layout_count(
   *out_counts = (loom_vm_module_resource_counts_t){0};
   const loom_op_t* op = NULL;
   loom_block_for_each_op(loom_region_const_entry_block(module->body), op) {
-    if (loom_vm_global_isa(op)) {
+    if (loom_vm_constant_isa(op)) {
+      const int64_t ordinal = loom_vm_constant_ordinal(op);
+      if (ordinal < 0 || ordinal > UINT16_MAX) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "VM constant-pool ordinal is outside the u16 domain");
+      }
+      if (out_counts->constants == 65536u) {
+        return iree_make_status(
+            IREE_STATUS_OUT_OF_RANGE,
+            "VM constant-pool count exceeds the u16 ordinal domain");
+      }
+      ++out_counts->constants;
+    } else if (loom_vm_global_isa(op)) {
       loom_vm_module_global_record_t record;
       IREE_RETURN_IF_ERROR(
           loom_vm_module_global_record_resolve(module, op, &record));
@@ -186,10 +208,12 @@ static iree_status_t loom_vm_module_resource_layout_count(
 
 static iree_status_t loom_vm_module_resource_layout_allocate(
     const loom_vm_module_resource_counts_t* counts,
-    iree_arena_allocator_t* arena, uint8_t** out_value_present,
+    iree_arena_allocator_t* arena,
+    loom_vm_module_resource_presence_t* out_presence,
     loom_vm_module_resource_layout_t* out_layout) {
-  *out_value_present = NULL;
+  *out_presence = (loom_vm_module_resource_presence_t){0};
   *out_layout = (loom_vm_module_resource_layout_t){
+      .constant_count = counts->constants,
       .value_global_count = counts->globals[LOOM_VM_MODULE_GLOBAL_BANK_VALUE],
       .immutable_value_global_count =
           counts->immutable_globals[LOOM_VM_MODULE_GLOBAL_BANK_VALUE],
@@ -203,12 +227,24 @@ static iree_status_t loom_vm_module_resource_layout_allocate(
       .rodata_count = counts->rodata,
       .rodata_section_alignment = IREE_VM_BYTECODE_SECTION_MIN_ALIGNMENT,
   };
-  if (out_layout->value_global_count != 0) {
+  if (out_layout->constant_count != 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        arena, out_layout->value_global_count, sizeof(**out_value_present),
-        (void**)out_value_present));
-    memset(*out_value_present, 0,
-           out_layout->value_global_count * sizeof(**out_value_present));
+        arena, out_layout->constant_count, sizeof(*out_layout->constant_cells),
+        (void**)&out_layout->constant_cells));
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        arena, out_layout->constant_count, sizeof(*out_presence->constants),
+        (void**)&out_presence->constants));
+    memset(out_presence->constants, 0,
+           out_layout->constant_count * sizeof(*out_presence->constants));
+  }
+  if (out_layout->value_global_count != 0) {
+    IREE_RETURN_IF_ERROR(
+        iree_arena_allocate_array(arena, out_layout->value_global_count,
+                                  sizeof(*out_presence->value_globals),
+                                  (void**)&out_presence->value_globals));
+    memset(
+        out_presence->value_globals, 0,
+        out_layout->value_global_count * sizeof(*out_presence->value_globals));
   }
   if (out_layout->ref_global_count != 0) {
     IREE_RETURN_IF_ERROR(
@@ -306,18 +342,31 @@ iree_status_t loom_vm_module_resource_layout_build(
     loom_vm_module_resource_layout_t* out_layout) {
   loom_vm_module_resource_counts_t counts;
   IREE_RETURN_IF_ERROR(loom_vm_module_resource_layout_count(module, &counts));
-  uint8_t* value_present = NULL;
+  loom_vm_module_resource_presence_t presence;
   IREE_RETURN_IF_ERROR(loom_vm_module_resource_layout_allocate(
-      &counts, arena, &value_present, out_layout));
+      &counts, arena, &presence, out_layout));
 
   const loom_op_t* op = NULL;
   loom_block_for_each_op(loom_region_const_entry_block(module->body), op) {
-    if (loom_vm_global_isa(op)) {
+    if (loom_vm_constant_isa(op)) {
+      const uint16_t ordinal = (uint16_t)loom_vm_constant_ordinal(op);
+      if (ordinal >= out_layout->constant_count) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "VM constant-pool ordinals must densely cover the physical table");
+      }
+      if (presence.constants[ordinal] != 0) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "VM constant-pool ordinal is duplicated");
+      }
+      presence.constants[ordinal] = 1;
+      out_layout->constant_cells[ordinal] = (uint64_t)loom_vm_constant_bits(op);
+    } else if (loom_vm_global_isa(op)) {
       loom_vm_module_global_record_t record;
       IREE_RETURN_IF_ERROR(
           loom_vm_module_global_record_resolve(module, op, &record));
       IREE_RETURN_IF_ERROR(loom_vm_module_resource_layout_insert_global(
-          &record, value_present, out_layout));
+          &record, presence.value_globals, out_layout));
     } else if (loom_vm_rodata_isa(op)) {
       uint16_t ordinal = 0;
       loom_vm_module_rodata_layout_t rodata;

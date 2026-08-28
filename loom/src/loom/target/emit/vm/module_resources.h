@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Deterministic Core VM global and read-only data layout planning.
+// Deterministic Core VM constant, global, and read-only data layout planning.
 
 #ifndef LOOM_TARGET_EMIT_VM_MODULE_RESOURCES_H_
 #define LOOM_TARGET_EMIT_VM_MODULE_RESOURCES_H_
@@ -28,6 +28,10 @@ typedef struct loom_vm_module_rodata_layout_t {
 
 // Complete physical resource layout for one emitted Core VM module.
 typedef struct loom_vm_module_resource_layout_t {
+  // Constant-pool cells indexed by physical pool ordinal.
+  iree_vm_bytecode_v0_constant_cell_t* constant_cells;
+  // Number of entries in |constant_cells|.
+  uint32_t constant_count;
   // Total value-global count.
   uint32_t value_global_count;
   // Dense immutable value-global prefix length.
@@ -59,10 +63,10 @@ typedef struct loom_vm_module_resource_layout_t {
 
 // Collects and validates physical VM resource records in |module|.
 //
-// Global and rodata ordinals must be dense and unique in their independent
-// physical domains. Immutable globals must occupy the complete prefix of each
-// global domain. Returned arrays borrow source module storage and are owned by
-// |arena|.
+// Constant, global, and rodata ordinals must be dense and unique in their
+// independent physical domains. Immutable globals must occupy the complete
+// prefix of each global domain. Returned arrays are owned by |arena|;
+// referenced contents continue to borrow source module storage.
 iree_status_t loom_vm_module_resource_layout_build(
     const loom_module_t* module, iree_arena_allocator_t* arena,
     loom_vm_module_resource_layout_t* out_layout);

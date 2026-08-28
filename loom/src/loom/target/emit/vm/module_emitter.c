@@ -15,7 +15,7 @@
 #include "loom/target/emit/vm/module_layout.h"
 
 enum {
-  LOOM_VM_MODULE_MAX_SECTION_COUNT = 9,
+  LOOM_VM_MODULE_MAX_SECTION_COUNT = 10,
   LOOM_VM_MODULE_STREAM_BLOCK_SIZE = 32 * 1024,
 };
 
@@ -354,6 +354,20 @@ static iree_status_t loom_vm_module_write_globals(
   return iree_ok_status();
 }
 
+static iree_status_t loom_vm_module_write_constants(
+    const loom_vm_module_layout_t* layout, loom_vm_module_writer_t* writer) {
+  const loom_vm_module_resource_layout_t* resources = &layout->resources;
+  uint64_t section_start = 0;
+  IREE_RETURN_IF_ERROR(loom_vm_module_writer_begin_section(
+      writer, IREE_VM_BYTECODE_SECTION_CONSTANTS,
+      IREE_VM_BYTECODE_SECTION_MIN_ALIGNMENT, &section_start));
+  IREE_RETURN_IF_ERROR(loom_vm_module_writer_write_record(
+      writer, resources->constant_cells,
+      resources->constant_count * sizeof(*resources->constant_cells)));
+  loom_vm_module_writer_end_section(writer, section_start);
+  return iree_ok_status();
+}
+
 static iree_status_t loom_vm_module_write_rodata(
     const loom_vm_module_layout_t* layout, loom_vm_module_writer_t* writer) {
   const loom_vm_module_resource_layout_t* resources = &layout->resources;
@@ -432,6 +446,7 @@ static iree_status_t loom_vm_module_write_image(
   if (layout->type_tables.ref_type_entry_count != 0) ++section_count;
   if (layout->import_count != 0) ++section_count;
   if (layout->export_count != 0) ++section_count;
+  if (layout->resources.constant_count != 0) ++section_count;
   if (loom_vm_module_has_globals(layout)) ++section_count;
   if (layout->resources.rodata_count != 0) ++section_count;
   iree_vm_bytecode_v0_image_header_t header = {0};
@@ -475,6 +490,9 @@ static iree_status_t loom_vm_module_write_image(
       layout, options, scratch_arena, writer, function_rows, switch_targets,
       &functions_complete));
   if (!functions_complete) return iree_ok_status();
+  if (layout->resources.constant_count != 0) {
+    IREE_RETURN_IF_ERROR(loom_vm_module_write_constants(layout, writer));
+  }
   if (loom_vm_module_has_globals(layout)) {
     IREE_RETURN_IF_ERROR(loom_vm_module_write_globals(layout, writer));
   }

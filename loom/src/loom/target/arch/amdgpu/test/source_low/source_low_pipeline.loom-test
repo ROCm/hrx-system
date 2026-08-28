@@ -351,6 +351,7 @@ pass.pipeline<module> @__loom_check_prepared_low pipeline {
     }
   }
   vm-materialize-call-abi
+  vm-materialize-constant-pool
   for func {
     where target {
       canonicalize

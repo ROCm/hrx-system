@@ -37,7 +37,7 @@ static uint64_t loom_vm_float_constant_bits(loom_scalar_type_t scalar_type,
     }
     default:
       IREE_ASSERT_UNREACHABLE("verified VM float constant type");
-      return 0;
+      IREE_BUILTIN_UNREACHABLE();
   }
 }
 
@@ -67,6 +67,84 @@ uint16_t loom_vm_constant_descriptor_ordinal(uint64_t bits) {
   return VM_CORE_DESCRIPTOR_REF_CONSTANT_I64;
 }
 
+static bool loom_vm_inline_constant_try_immediate(
+    const loom_module_t* module,
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_t* descriptor, uint16_t immediate_index,
+    loom_named_attr_slice_t attrs, int64_t* out_value) {
+  const loom_low_immediate_t* immediate =
+      &descriptor_set
+           ->immediates[descriptor->immediate_start + immediate_index];
+  const iree_string_view_t immediate_name = loom_low_descriptor_set_string(
+      descriptor_set, immediate->field_name_string_offset);
+  for (iree_host_size_t i = 0; i < attrs.count; ++i) {
+    const loom_named_attr_t* attr = &attrs.entries[i];
+    if (attr->name_id >= module->strings.count ||
+        !iree_string_view_equal(module->strings.entries[attr->name_id],
+                                immediate_name)) {
+      continue;
+    }
+    if (attr->value.kind != LOOM_ATTR_I64) return false;
+    *out_value = loom_attr_as_i64(attr->value);
+    return true;
+  }
+  return false;
+}
+
+bool loom_vm_inline_constant_try_decode(
+    const loom_module_t* module, const loom_op_t* op,
+    loom_vm_inline_constant_t* out_constant) {
+  *out_constant = (loom_vm_inline_constant_t){0};
+  if (!loom_low_const_isa(op)) return false;
+
+  const uint32_t descriptor_ordinal = loom_low_const_descriptor(op);
+  if (descriptor_ordinal != VM_CORE_DESCRIPTOR_REF_CONSTANT_ZERO &&
+      descriptor_ordinal != VM_CORE_DESCRIPTOR_REF_CONSTANT_S16 &&
+      descriptor_ordinal != VM_CORE_DESCRIPTOR_REF_CONSTANT_I32 &&
+      descriptor_ordinal != VM_CORE_DESCRIPTOR_REF_CONSTANT_I64) {
+    return false;
+  }
+  const loom_low_descriptor_set_t* descriptor_set =
+      loom_vm_core_descriptor_set();
+  const loom_low_descriptor_t* descriptor =
+      loom_low_descriptor_set_descriptor_at(descriptor_set, descriptor_ordinal);
+  if (descriptor == NULL) return false;
+
+  int64_t immediate_values[2] = {0};
+  const loom_named_attr_slice_t attrs = loom_low_const_attrs(op);
+  for (uint16_t i = 0; i < descriptor->immediate_count; ++i) {
+    if (!loom_vm_inline_constant_try_immediate(module, descriptor_set,
+                                               descriptor, i, attrs,
+                                               &immediate_values[i])) {
+      return false;
+    }
+  }
+
+  uint64_t bits = 0;
+  switch (descriptor_ordinal) {
+    case VM_CORE_DESCRIPTOR_REF_CONSTANT_ZERO:
+      break;
+    case VM_CORE_DESCRIPTOR_REF_CONSTANT_S16:
+      bits = (uint64_t)(int64_t)(int16_t)immediate_values[0];
+      break;
+    case VM_CORE_DESCRIPTOR_REF_CONSTANT_I32:
+      bits = (uint32_t)immediate_values[0];
+      break;
+    case VM_CORE_DESCRIPTOR_REF_CONSTANT_I64:
+      bits = (uint32_t)immediate_values[0] |
+             ((uint64_t)(uint32_t)immediate_values[1] << 32);
+      break;
+    default:
+      IREE_ASSERT_UNREACHABLE("recognized VM inline constant descriptor");
+      IREE_BUILTIN_UNREACHABLE();
+  }
+  *out_constant = (loom_vm_inline_constant_t){
+      .bits = bits,
+      .descriptor_ordinal = (uint16_t)descriptor_ordinal,
+  };
+  return true;
+}
+
 static int64_t loom_vm_s16_immediate(uint64_t bits) {
   const uint16_t low_bits = (uint16_t)bits;
   return iree_any_bit_set(low_bits, UINT16_C(0x8000))
@@ -74,10 +152,11 @@ static int64_t loom_vm_s16_immediate(uint64_t bits) {
              : (int64_t)low_bits;
 }
 
-iree_status_t loom_vm_constant_build(loom_builder_t* builder, uint64_t bits,
-                                     loom_type_t result_type,
-                                     loom_location_id_t location,
-                                     loom_value_id_t* out_value) {
+iree_status_t loom_vm_inline_constant_build(loom_builder_t* builder,
+                                            uint64_t bits,
+                                            loom_type_t result_type,
+                                            loom_location_id_t location,
+                                            loom_value_id_t* out_value) {
   *out_value = LOOM_VALUE_ID_INVALID;
   const loom_low_descriptor_set_t* descriptor_set =
       loom_vm_core_descriptor_set();
@@ -106,7 +185,7 @@ iree_status_t loom_vm_constant_build(loom_builder_t* builder, uint64_t bits,
       break;
     default:
       IREE_ASSERT_UNREACHABLE("selected VM constant descriptor");
-      return iree_ok_status();
+      IREE_BUILTIN_UNREACHABLE();
   }
 
   IREE_ASSERT_EQ(immediate_count, descriptor->immediate_count);

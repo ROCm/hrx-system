@@ -436,9 +436,9 @@ iree_status_t loom_vm_module_resources_emit_initializer_preamble(
     const uint64_t bits = loom_vm_constant_bits_from_scalar_attr(
         loom_type_element_type(source_type), initializer);
     loom_value_id_t value = LOOM_VALUE_ID_INVALID;
-    IREE_RETURN_IF_ERROR(
-        loom_vm_constant_build(loom_low_lower_context_builder(context), bits,
-                               low_type, source_op->location, &value));
+    IREE_RETURN_IF_ERROR(loom_vm_inline_constant_build(
+        loom_low_lower_context_builder(context), bits, low_type,
+        source_op->location, &value));
     IREE_RETURN_IF_ERROR(loom_vm_module_resource_build_value_store(
         loom_low_lower_context_builder(context),
         kVmModuleResourceDescriptors[entry.kind].store, entry.ordinal, value,

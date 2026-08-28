@@ -244,7 +244,7 @@ static iree_status_t loom_vm_emit_constant(loom_low_lower_context_t* context,
   IREE_RETURN_IF_ERROR(loom_low_lower_map_value(
       context, source_op, constant.result, &low_result_type));
   loom_value_id_t low_value = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_vm_constant_build(
+  IREE_RETURN_IF_ERROR(loom_vm_inline_constant_build(
       loom_low_lower_context_builder(context), constant.bits, low_result_type,
       source_op->location, &low_value));
   return loom_low_lower_bind_value(context, constant.result, low_value);

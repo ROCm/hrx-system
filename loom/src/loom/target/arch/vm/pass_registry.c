@@ -7,6 +7,7 @@
 #include "loom/target/arch/vm/pass_registry.h"
 
 #include "loom/target/arch/vm/abi/materialization.h"
+#include "loom/target/arch/vm/constants/materialization.h"
 #include "loom/target/arch/vm/contracts/materialization.h"
 #include "loom/target/arch/vm/initialization.h"
 
@@ -15,6 +16,11 @@ static const loom_pass_descriptor_t kVmPassDescriptors[] = {
         .key = IREE_SVL("vm-materialize-call-abi"),
         .info = loom_vm_materialize_call_abi_pass_info,
         .module_run = loom_vm_materialize_call_abi_run,
+    },
+    {
+        .key = IREE_SVL("vm-materialize-constant-pool"),
+        .info = loom_vm_materialize_constant_pool_pass_info,
+        .module_run = loom_vm_materialize_constant_pool_run,
     },
     {
         .key = IREE_SVL("vm-materialize-function-contracts"),

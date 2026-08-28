@@ -44,6 +44,14 @@ iree_status_t loom_vm_global_verify(const loom_module_t* module,
                                          loom_vm_global_ordinal(op), emitter);
 }
 
+iree_status_t loom_vm_constant_verify(const loom_module_t* module,
+                                      const loom_op_t* op,
+                                      iree_diagnostic_emitter_t emitter) {
+  return loom_vm_resource_verify_ordinal(module, op,
+                                         loom_vm_constant_ordinal_ATTR_INDEX,
+                                         loom_vm_constant_ordinal(op), emitter);
+}
+
 iree_status_t loom_vm_rodata_verify(const loom_module_t* module,
                                     const loom_op_t* op,
                                     iree_diagnostic_emitter_t emitter) {
