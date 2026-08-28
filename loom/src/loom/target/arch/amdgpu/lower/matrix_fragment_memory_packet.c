@@ -1249,17 +1249,11 @@ static iree_string_view_t loom_amdgpu_fragment_memory_fp8_strategy_key(
     case LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_NATIVE_F32_PAIR_BF16_PACK:
       return IREE_SV("fp8_native_f32_pair_native_bf16_pack");
     case LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_PACKED_BF16_NORMAL:
-      return loom_amdgpu_fp8_packed_bf16_strategy_key(
-          LOOM_AMDGPU_FP8_PACKED_BF16_STRATEGY_NORMAL,
-          loom_amdgpu_fp8_decode_action_repairs(action));
     case LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_PACKED_BF16_EXACT_REPAIR:
-      return loom_amdgpu_fp8_packed_bf16_strategy_key(
-          LOOM_AMDGPU_FP8_PACKED_BF16_STRATEGY_EXACT_REPAIR,
-          loom_amdgpu_fp8_decode_action_repairs(action));
     case LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_PACKED_BF16_EXACT_VIA_F16:
       return loom_amdgpu_fp8_packed_bf16_strategy_key(
-          LOOM_AMDGPU_FP8_PACKED_BF16_STRATEGY_EXACT_VIA_F16,
-          LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_NONE);
+          loom_amdgpu_fp8_decode_action_packed_bf16_strategy(action),
+          loom_amdgpu_fp8_decode_action_repairs(action));
     case LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_PACKED_F16_NORMAL:
     case LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_PACKED_F16_EXACT_REPAIR:
       return loom_amdgpu_fp8_packed_f16_repair_reason_key(

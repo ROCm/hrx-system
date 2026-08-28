@@ -267,6 +267,16 @@ loom_amdgpu_fp8_decode_action_t loom_amdgpu_select_fp8_packed_f16_decode_action(
     const loom_amdgpu_fp8_decode_plan_t* decode_plan,
     loom_amdgpu_fp8_decode_value_flags_t value_flags);
 
+// Returns the packed BF16 strategy named by |action|.
+loom_amdgpu_fp8_packed_bf16_strategy_t
+loom_amdgpu_fp8_decode_action_packed_bf16_strategy(
+    const loom_amdgpu_fp8_decode_action_t* action);
+
+// Returns the packed F16 strategy named by |action|.
+loom_amdgpu_fp8_packed_f16_strategy_t
+loom_amdgpu_fp8_decode_action_packed_f16_strategy(
+    const loom_amdgpu_fp8_decode_action_t* action);
+
 // Returns the packed 16-bit repair requirements retained in |action|.
 loom_amdgpu_fp8_packed_u16_repairs_t loom_amdgpu_fp8_decode_action_repairs(
     const loom_amdgpu_fp8_decode_action_t* action);

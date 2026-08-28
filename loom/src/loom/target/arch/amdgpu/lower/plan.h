@@ -119,6 +119,11 @@ typedef enum loom_amdgpu_fp8_decode_value_flag_bits_e {
   LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NOT_INF = 1u << 1,
   LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NOT_SUBNORMAL = 1u << 2,
   LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NON_ZERO = 1u << 3,
+  LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_MASK =
+      LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NOT_NAN |
+      LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NOT_INF |
+      LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NOT_SUBNORMAL |
+      LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NON_ZERO,
 } loom_amdgpu_fp8_decode_value_flag_bits_t;
 typedef uint8_t loom_amdgpu_fp8_decode_value_flags_t;
 
@@ -138,6 +143,18 @@ enum loom_amdgpu_fp8_decode_action_kind_e {
   LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_PACKED_F16_NORMAL = 11,
   LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_PACKED_F16_EXACT_REPAIR = 12,
   LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_FULL_BF16 = 13,
+  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_IDENTITY_E8M0_PK8_F32 = 14,
+  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_SCALEF32_F32_PAIR = 15,
+  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_SCALEF32_F32_PAIR_BF16_PACK = 16,
+  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_NATIVE_F32_LANE = 17,
+  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_NATIVE_F32_LANES_PACK = 18,
+  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_NATIVE_F32_LANES_BF16_PACK = 19,
+  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_NATIVE_F16_BYTE_SELECT = 20,
+  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_FULL_F32 = 21,
+  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_FULL_F16 = 22,
+  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_CONTINUATION = 23,
+  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_IDENTITY_E8M0_PK8_F32_LANES_PACK = 24,
+  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_IDENTITY_E8M0_PK8_F32_BF16_PACK = 25,
 };
 
 typedef enum loom_amdgpu_fp8_decode_action_detail_flag_bits_e {
@@ -162,13 +179,30 @@ typedef uint8_t loom_amdgpu_fp8_decode_action_detail_flags_t;
 typedef struct loom_amdgpu_fp8_decode_action_t {
   // Selected FP8 decode action.
   loom_amdgpu_fp8_decode_action_kind_t kind;
-  // Source value facts retained to specialize the selected decoder.
-  loom_amdgpu_fp8_decode_value_flags_t value_flags;
-  // Packed repair requirements or full-decode fallback reasons.
-  loom_amdgpu_fp8_decode_action_detail_flags_t detail_flags;
+  // Action-specific flags. The low nibble holds first-lane value facts or
+  // packed repair flags. Full two-lane actions use the high nibble for the
+  // second lane; fragment full-decode actions use it for fallback reasons.
+  union {
+    // Source value facts, optionally packed as one nibble per lane.
+    loom_amdgpu_fp8_decode_value_flags_t value_flags;
+    // Packed repair requirements or full-decode fallback reasons, optionally
+    // sharing the byte with first-lane value facts.
+    loom_amdgpu_fp8_decode_action_detail_flags_t detail_flags;
+  };
 } loom_amdgpu_fp8_decode_action_t;
-static_assert(sizeof(loom_amdgpu_fp8_decode_action_t) == 3,
+static_assert(sizeof(loom_amdgpu_fp8_decode_action_t) == 2,
               "FP8 decode actions must stay cache dense");
+
+// Returns the retained value facts for |lane_index| within an action.
+static inline loom_amdgpu_fp8_decode_value_flags_t
+loom_amdgpu_fp8_decode_action_value_flags(
+    const loom_amdgpu_fp8_decode_action_t* action, uint32_t lane_index) {
+  IREE_ASSERT_LE(lane_index, 1u);
+  return (
+      loom_amdgpu_fp8_decode_value_flags_t)((action->value_flags >>
+                                             (lane_index * 4u)) &
+                                            LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_MASK);
+}
 
 typedef enum loom_amdgpu_vector_16bit_float_conversion_kind_e {
   LOOM_AMDGPU_VECTOR_16BIT_FLOAT_CONVERSION_KIND_NONE = 0,
@@ -212,11 +246,22 @@ enum loom_amdgpu_vector_float_conversion_strategy_e {
   LOOM_AMDGPU_VECTOR_FLOAT_CONVERSION_STRATEGY_FP4_DECODE = 2,
   // The strategy payload contains a selected packed FP8 encoder.
   LOOM_AMDGPU_VECTOR_FLOAT_CONVERSION_STRATEGY_FP8_ENCODE = 3,
+  // The strategy payload contains selected FP8 decode actions.
+  LOOM_AMDGPU_VECTOR_FLOAT_CONVERSION_STRATEGY_FP8_DECODE = 4,
 };
 static_assert(LOOM_AMDGPU_MAX_PACKED_16BIT_FLOAT_LANES <= UINT8_MAX,
               "vector conversion lane counts must fit compact plans");
 static_assert(LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES <= UINT8_MAX,
               "vector conversion register counts must fit compact plans");
+
+typedef struct loom_amdgpu_vector_fp8_decode_plan_t {
+  // Exact action producing each physical result register. Multi-register
+  // actions mark every result after their first with CONTINUATION.
+  loom_amdgpu_fp8_decode_action_t
+      actions[LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES];
+} loom_amdgpu_vector_fp8_decode_plan_t;
+static_assert(sizeof(loom_amdgpu_vector_fp8_decode_plan_t) == 64,
+              "vector FP8 decode plans must stay cache dense");
 
 typedef struct loom_amdgpu_vector_16bit_float_conversion_plan_t {
   // Source vector value being converted.
@@ -271,9 +316,11 @@ typedef struct loom_amdgpu_vector_16bit_float_conversion_plan_t {
     loom_amdgpu_fp4_decode_plan_t fp4_decode;
     // Packed FP8 encode strategy when strategy_kind is FP8_ENCODE.
     loom_amdgpu_fp8_encode_plan_t fp8_encode;
+    // Exact FP8 decode actions when strategy_kind is FP8_DECODE.
+    loom_amdgpu_vector_fp8_decode_plan_t fp8_decode;
   } strategy;
 } loom_amdgpu_vector_16bit_float_conversion_plan_t;
-static_assert(sizeof(loom_amdgpu_vector_16bit_float_conversion_plan_t) == 104,
+static_assert(sizeof(loom_amdgpu_vector_16bit_float_conversion_plan_t) == 136,
               "vector float conversion plans must stay cache dense");
 
 typedef enum loom_amdgpu_index_cast_kind_e {

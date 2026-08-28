@@ -16,10 +16,15 @@
 extern "C" {
 #endif
 
+// Selects the exact FP8/BF8 decode action producing each physical result
+// register and canonicalizes an identity F32 scale to an unscaled plan.
+void loom_amdgpu_select_vector_fp8_decode_plan(
+    loom_low_lower_context_t* context,
+    loom_amdgpu_vector_16bit_float_conversion_plan_t* plan);
+
 // Returns the stable compile-report strategy key for an FP8/BF8 vector
 // conversion plan.
 iree_string_view_t loom_amdgpu_vector_fp8_conversion_plan_key(
-    loom_low_lower_context_t* context,
     const loom_amdgpu_vector_16bit_float_conversion_plan_t* plan);
 
 // Lowers one selected FP8/BF8 vector conversion through native or software

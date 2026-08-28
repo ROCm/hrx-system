@@ -464,7 +464,6 @@ loom_amdgpu_select_fp8_packed_bf16_decode_action(
     case LOOM_AMDGPU_FP8_PACKED_BF16_STRATEGY_EXACT_VIA_F16:
       return (loom_amdgpu_fp8_decode_action_t){
           .kind = LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_PACKED_BF16_EXACT_VIA_F16,
-          .value_flags = value_flags,
       };
     default:
       IREE_ASSERT_UNREACHABLE("selected packed BF16 strategy");
@@ -475,7 +474,6 @@ loom_amdgpu_select_fp8_packed_bf16_decode_action(
   IREE_ASSERT_LE(repairs, UINT8_MAX);
   loom_amdgpu_fp8_decode_action_t action = {
       .kind = kind,
-      .value_flags = value_flags,
   };
   action.detail_flags = (loom_amdgpu_fp8_decode_action_detail_flags_t)repairs;
   return action;
@@ -497,10 +495,39 @@ loom_amdgpu_fp8_decode_action_t loom_amdgpu_select_fp8_packed_f16_decode_action(
   IREE_ASSERT_LE(repairs, UINT8_MAX);
   loom_amdgpu_fp8_decode_action_t action = {
       .kind = kind,
-      .value_flags = value_flags,
   };
   action.detail_flags = (loom_amdgpu_fp8_decode_action_detail_flags_t)repairs;
   return action;
+}
+
+loom_amdgpu_fp8_packed_bf16_strategy_t
+loom_amdgpu_fp8_decode_action_packed_bf16_strategy(
+    const loom_amdgpu_fp8_decode_action_t* action) {
+  switch (action->kind) {
+    case LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_PACKED_BF16_NORMAL:
+      return LOOM_AMDGPU_FP8_PACKED_BF16_STRATEGY_NORMAL;
+    case LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_PACKED_BF16_EXACT_REPAIR:
+      return LOOM_AMDGPU_FP8_PACKED_BF16_STRATEGY_EXACT_REPAIR;
+    case LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_PACKED_BF16_EXACT_VIA_F16:
+      return LOOM_AMDGPU_FP8_PACKED_BF16_STRATEGY_EXACT_VIA_F16;
+    default:
+      IREE_ASSERT_UNREACHABLE("selected packed BF16 action");
+      IREE_BUILTIN_UNREACHABLE();
+  }
+}
+
+loom_amdgpu_fp8_packed_f16_strategy_t
+loom_amdgpu_fp8_decode_action_packed_f16_strategy(
+    const loom_amdgpu_fp8_decode_action_t* action) {
+  switch (action->kind) {
+    case LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_PACKED_F16_NORMAL:
+      return LOOM_AMDGPU_FP8_PACKED_F16_STRATEGY_NORMAL;
+    case LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_PACKED_F16_EXACT_REPAIR:
+      return LOOM_AMDGPU_FP8_PACKED_F16_STRATEGY_EXACT_REPAIR;
+    default:
+      IREE_ASSERT_UNREACHABLE("selected packed F16 action");
+      IREE_BUILTIN_UNREACHABLE();
+  }
 }
 
 loom_amdgpu_fp8_packed_u16_repairs_t loom_amdgpu_fp8_decode_action_repairs(

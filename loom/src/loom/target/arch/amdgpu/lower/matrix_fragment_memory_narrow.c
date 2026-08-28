@@ -655,7 +655,7 @@ iree_status_t loom_amdgpu_emit_fragment_memory_fp8_to_packed_16bit_load_packet(
   const loom_amdgpu_fp8_decode_action_kind_t decode_kind =
       plan->fp8_load_decode.kind;
   const loom_amdgpu_fp8_decode_value_flags_t decode_value_flags =
-      plan->fp8_load_decode.value_flags;
+      loom_amdgpu_fp8_decode_action_value_flags(&plan->fp8_load_decode, 0);
   const loom_scalar_type_t result_element_type =
       loom_amdgpu_fragment_memory_load_fp8_result_element_type(
           plan->payload_form);
@@ -873,18 +873,13 @@ iree_status_t loom_amdgpu_emit_fragment_memory_fp8_to_packed_16bit_load_packet(
     case LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_PACKED_BF16_NORMAL:
     case LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_PACKED_BF16_EXACT_REPAIR:
     case LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_PACKED_BF16_EXACT_VIA_F16: {
-      const loom_amdgpu_fp8_packed_bf16_strategy_t strategy =
-          decode_kind == LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_PACKED_BF16_NORMAL
-              ? LOOM_AMDGPU_FP8_PACKED_BF16_STRATEGY_NORMAL
-          : decode_kind ==
-                  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_PACKED_BF16_EXACT_REPAIR
-              ? LOOM_AMDGPU_FP8_PACKED_BF16_STRATEGY_EXACT_REPAIR
-              : LOOM_AMDGPU_FP8_PACKED_BF16_STRATEGY_EXACT_VIA_F16;
       IREE_RETURN_IF_ERROR(
           loom_amdgpu_emit_fragment_memory_fp8_to_packed_bf16_packet(
               context, source_op, low_source_packet,
               packet->packet_register_count, packet->result_register_count,
-              decode_plan, strategy,
+              decode_plan,
+              loom_amdgpu_fp8_decode_action_packed_bf16_strategy(
+                  &plan->fp8_load_decode),
               (loom_amdgpu_fp8_packed_u16_repairs_t)
                   plan->fp8_load_decode.detail_flags,
               vgpr_type, sgpr_type, mask_type, low_result_registers));
@@ -892,15 +887,13 @@ iree_status_t loom_amdgpu_emit_fragment_memory_fp8_to_packed_16bit_load_packet(
     }
     case LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_PACKED_F16_NORMAL:
     case LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_PACKED_F16_EXACT_REPAIR: {
-      const loom_amdgpu_fp8_packed_f16_strategy_t strategy =
-          decode_kind == LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_PACKED_F16_NORMAL
-              ? LOOM_AMDGPU_FP8_PACKED_F16_STRATEGY_NORMAL
-              : LOOM_AMDGPU_FP8_PACKED_F16_STRATEGY_EXACT_REPAIR;
       IREE_RETURN_IF_ERROR(
           loom_amdgpu_emit_fragment_memory_fp8_to_packed_f16_packet(
               context, source_op, low_source_packet,
               packet->packet_register_count, packet->result_register_count,
-              decode_plan, strategy,
+              decode_plan,
+              loom_amdgpu_fp8_decode_action_packed_f16_strategy(
+                  &plan->fp8_load_decode),
               (loom_amdgpu_fp8_packed_u16_repairs_t)
                   plan->fp8_load_decode.detail_flags,
               vgpr_type, sgpr_type, mask_type, low_result_registers));
