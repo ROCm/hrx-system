@@ -136,16 +136,13 @@ iree_py_library(
 iree_py_test(
     name = "matrix_fragment_layouts_test",
     srcs = [
-        "matrix_fragment_layouts_test.py",
+        "matrix_fragment_layout_semantics_test.py",
         "//loom/py/loom/tools:pytest_style_runner.py",
     ],
-    args = ["loom.target.arch.amdgpu.matrix_fragment_layouts_test"],
+    args = ["loom.target.arch.amdgpu.matrix_fragment_layout_semantics_test"],
     main = "pytest_style_runner.py",
     deps = [
         ":matrix_fragment_layouts",
-        "//loom/py/loom/target:native_contraction_layout",
-        "//loom/py/loom/target:native_coordinate_projection",
-        "//loom/py/loom/target:native_layout_facts",
     ],
 )
 

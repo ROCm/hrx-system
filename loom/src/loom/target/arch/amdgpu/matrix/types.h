@@ -465,10 +465,6 @@ typedef loom_matrix_fragment_role_layout_t
 // AMDGPU descriptors use the generic matrix fragment layout record.
 typedef loom_matrix_fragment_layout_t loom_amdgpu_matrix_fragment_layout_t;
 
-// AMDGPU descriptors use the generic logical coordinate record.
-typedef loom_matrix_fragment_coordinate_t
-    loom_amdgpu_matrix_fragment_coordinate_t;
-
 typedef struct loom_amdgpu_matrix_contract_descriptor_t {
   // Stable Loom descriptor name used by tests, diagnostics, and target logs.
   iree_string_view_t name;
