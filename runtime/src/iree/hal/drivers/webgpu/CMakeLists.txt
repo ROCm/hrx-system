@@ -273,14 +273,41 @@ iree_cc_library(
     "webgpu_executable.c"
   DEPS
     ::handle_table
+    ::webgpu_executable_format
     ::webgpu_imports
     iree::base
-    iree::base::internal::flatcc::parsing
     iree::hal
-    iree::hal::utils::executable_header
-    iree::schemas::executable_debug_info_c_fbs
-    iree::schemas::webgpu_executable_def_c_fbs
   PUBLIC
+)
+endif()
+
+if(IREE_HAL_DRIVER_WEBGPU)
+iree_cc_library(
+  NAME
+    webgpu_executable_format
+  HDRS
+    "webgpu_executable_format.h"
+  SRCS
+    "webgpu_executable_format.c"
+  DEPS
+    iree::base
+  PUBLIC
+)
+endif()
+
+if(IREE_HAL_DRIVER_WEBGPU)
+iree_cc_test(
+  NAME
+    webgpu_executable_format_test
+  SRCS
+    "webgpu_executable_format_test.cc"
+  DEPS
+    ::webgpu_executable_format
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=runtime.hal.webgpu"
 )
 endif()
 

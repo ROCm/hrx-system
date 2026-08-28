@@ -86,23 +86,6 @@ flatbuffer_c_library(
   PUBLIC
 )
 
-flatbuffer_c_library(
-  NAME
-    webgpu_executable_def_c_fbs
-  SRCS
-    "webgpu_executable_def.fbs"
-  FLATCC_ARGS
-    "--reader"
-    "--builder"
-    "--verifier"
-    "--json"
-  INCLUDES
-    "executable_debug_info.fbs"
-  DEPS
-    ::executable_debug_info_c_fbs
-  PUBLIC
-)
-
 add_custom_command(OUTPUT cpu_data_headers_filegroup.stamp
     COMMAND ${CMAKE_COMMAND} -E touch cpu_data_headers_filegroup.stamp
   DEPENDS

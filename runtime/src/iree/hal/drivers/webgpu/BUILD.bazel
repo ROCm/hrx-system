@@ -233,13 +233,30 @@ iree_runtime_cc_library(
     hdrs = ["webgpu_executable.h"],
     deps = [
         ":handle_table",
+        ":webgpu_executable_format",
         ":webgpu_imports",
         "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal/flatcc:parsing",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/utils:executable_header",
-        "//runtime/src/iree/schemas:executable_debug_info_c_fbs",
-        "//runtime/src/iree/schemas:webgpu_executable_def_c_fbs",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "webgpu_executable_format",
+    srcs = ["webgpu_executable_format.c"],
+    hdrs = ["webgpu_executable_format.h"],
+    deps = [
+        "//runtime/src/iree/base",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "webgpu_executable_format_test",
+    srcs = ["webgpu_executable_format_test.cc"],
+    deps = [
+        ":webgpu_executable_format",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
