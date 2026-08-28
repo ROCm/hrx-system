@@ -557,11 +557,8 @@ class QueueBenchmark : public benchmark::Fixture {
           HSA_WAIT_STATE_BLOCKED);
       if (signal_value < compare_value) return iree_ok_status();
 
-      iree_status_t queue_error = (iree_status_t)iree_atomic_load(
-          &host_queue->error_status, iree_memory_order_acquire);
-      if (IREE_UNLIKELY(!iree_status_is_ok(queue_error))) {
-        return iree_status_clone(queue_error);
-      }
+      IREE_RETURN_IF_ERROR(
+          iree_hal_amdgpu_host_queue_clone_error_status(host_queue));
     }
   }
 

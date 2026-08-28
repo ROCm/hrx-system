@@ -627,13 +627,6 @@ static const iree_hal_resource_vtable_t
         .destroy = iree_hal_amdgpu_staging_transfer_destroy,
 };
 
-static iree_status_t iree_hal_amdgpu_staging_transfer_clone_queue_error(
-    iree_hal_amdgpu_staging_transfer_t* transfer) {
-  iree_status_t error = (iree_status_t)iree_atomic_load(
-      &transfer->queue->error_status, iree_memory_order_acquire);
-  return iree_status_is_ok(error) ? iree_ok_status() : iree_status_clone(error);
-}
-
 static void iree_hal_amdgpu_staging_transfer_record_failure(
     iree_hal_amdgpu_staging_transfer_t* transfer, iree_status_t status) {
   if (iree_status_is_ok(status)) return;
@@ -653,7 +646,7 @@ static iree_status_t iree_hal_amdgpu_staging_transfer_submit_signal_barrier(
   }
 
   IREE_RETURN_IF_ERROR(
-      iree_hal_amdgpu_staging_transfer_clone_queue_error(transfer));
+      iree_hal_amdgpu_host_queue_clone_error_status(transfer->queue));
 
   iree_hal_amdgpu_wait_resolution_t resolution;
   memset(&resolution, 0, sizeof(resolution));
@@ -818,7 +811,7 @@ static iree_status_t iree_hal_amdgpu_staging_chunk_submit_copy(
     iree_hal_amdgpu_staging_chunk_t* chunk) {
   iree_hal_amdgpu_staging_transfer_t* transfer = chunk->transfer;
   IREE_RETURN_IF_ERROR(
-      iree_hal_amdgpu_staging_transfer_clone_queue_error(transfer));
+      iree_hal_amdgpu_host_queue_clone_error_status(transfer->queue));
 
   iree_hal_amdgpu_wait_resolution_t resolution;
   memset(&resolution, 0, sizeof(resolution));
@@ -941,7 +934,7 @@ static iree_status_t iree_hal_amdgpu_staging_chunk_submit_read(
     iree_hal_amdgpu_staging_chunk_t* chunk) {
   iree_hal_amdgpu_staging_transfer_t* transfer = chunk->transfer;
   IREE_RETURN_IF_ERROR(
-      iree_hal_amdgpu_staging_transfer_clone_queue_error(transfer));
+      iree_hal_amdgpu_host_queue_clone_error_status(transfer->queue));
 
   iree_async_operation_zero(&chunk->read_op.base, sizeof(chunk->read_op));
   iree_async_operation_initialize(&chunk->read_op.base,
@@ -967,7 +960,7 @@ static iree_status_t iree_hal_amdgpu_staging_chunk_submit_write(
     iree_hal_amdgpu_staging_chunk_t* chunk) {
   iree_hal_amdgpu_staging_transfer_t* transfer = chunk->transfer;
   IREE_RETURN_IF_ERROR(
-      iree_hal_amdgpu_staging_transfer_clone_queue_error(transfer));
+      iree_hal_amdgpu_host_queue_clone_error_status(transfer->queue));
 
   iree_async_operation_zero(&chunk->write_op.base, sizeof(chunk->write_op));
   iree_async_operation_initialize(
@@ -1131,7 +1124,7 @@ static void iree_hal_amdgpu_staging_transfer_pump(
 static iree_status_t iree_hal_amdgpu_staging_transfer_start(
     iree_hal_amdgpu_staging_transfer_t* transfer) {
   IREE_RETURN_IF_ERROR(
-      iree_hal_amdgpu_staging_transfer_clone_queue_error(transfer));
+      iree_hal_amdgpu_host_queue_clone_error_status(transfer->queue));
   // The transfer buffer may be a queue_alloca result whose backing is only
   // staged when the operation is submitted. Validate the device pointer here,
   // after the host action's wait set has been satisfied.

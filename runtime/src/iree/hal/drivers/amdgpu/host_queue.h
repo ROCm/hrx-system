@@ -581,6 +581,31 @@ typedef struct iree_hal_amdgpu_host_queue_t {
   iree_hal_amdgpu_host_queue_frontier_t frontier;
 } iree_hal_amdgpu_host_queue_t;
 
+// Loads the queue-owned terminal error as an opaque raw value. Zero means the
+// queue has not failed. A nonzero value remains owned by |queue| and must be
+// cloned before crossing an ownership boundary.
+static inline intptr_t iree_hal_amdgpu_host_queue_load_error_status_raw(
+    const iree_hal_amdgpu_host_queue_t* queue) {
+  return iree_atomic_load(&queue->error_status, iree_memory_order_acquire);
+}
+
+// Returns true when the queue has recorded a terminal error.
+static inline bool iree_hal_amdgpu_host_queue_has_error(
+    const iree_hal_amdgpu_host_queue_t* queue) {
+  return iree_hal_amdgpu_host_queue_load_error_status_raw(queue) != 0;
+}
+
+// Returns an owned clone of the queue's terminal error, or OK when the queue
+// has not failed.
+static inline iree_status_t iree_hal_amdgpu_host_queue_clone_error_status(
+    const iree_hal_amdgpu_host_queue_t* queue) {
+  const intptr_t error_status =
+      iree_hal_amdgpu_host_queue_load_error_status_raw(queue);
+  return IREE_LIKELY(error_status == 0)
+             ? iree_ok_status()
+             : iree_status_clone((iree_status_t)error_status);
+}
+
 // Returns a pointer to the queue's accumulated frontier. The returned pointer
 // is layout-compatible with iree_async_frontier_t and valid for all frontier
 // APIs (compare, merge, etc.). Valid for the lifetime of the queue.

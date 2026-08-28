@@ -231,9 +231,11 @@ static bool iree_hal_amdgpu_semaphore_epoch_is_reached(
 
 static iree_status_t iree_hal_amdgpu_host_queue_epoch_wait_check_error(
     const iree_hal_amdgpu_host_queue_epoch_wait_t* wait_state) {
-  iree_status_t error = (iree_status_t)iree_atomic_load(
-      wait_state->error_status, iree_memory_order_acquire);
-  return iree_status_is_ok(error) ? iree_ok_status() : iree_status_clone(error);
+  const intptr_t error_status =
+      iree_atomic_load(wait_state->error_status, iree_memory_order_acquire);
+  return IREE_LIKELY(error_status == 0)
+             ? iree_ok_status()
+             : iree_status_clone((iree_status_t)error_status);
 }
 
 static uint64_t iree_hal_amdgpu_host_queue_epoch_wait_hint(
