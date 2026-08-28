@@ -61,6 +61,7 @@ loom_check_test_suite(
   SRCS
     "test/abi.loom-test"
     "test/control_flow.loom-test"
+    "test/imports.loom-test"
     "test/module.loom-test"
   TEST_NAME_PREFIX_TO_STRIP
     "test/"

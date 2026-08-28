@@ -339,6 +339,7 @@ static iree_status_t loom_vm_emit_op(void* user_data,
 
 static const loom_low_lower_policy_t kVmCoreLowLowerPolicy = {
     .name = IREE_SVL("vm-core-low-lower"),
+    .flags = LOOM_LOW_LOWER_POLICY_FLAG_MODULE_IMPORTS,
     .error_catalog = &loom_error_catalog_core,
     .map_type = {.fn = loom_vm_map_type, .user_data = NULL},
     .source_type_supported = {.fn = loom_vm_source_type_supported,

@@ -114,9 +114,13 @@ static int loom_vm_module_compare_u16(uint16_t lhs, uint16_t rhs) {
 static iree_status_t loom_vm_module_type_capacities_count(
     const loom_vm_module_layout_t* layout,
     loom_vm_module_type_capacities_t* out_capacities) {
-  *out_capacities = (loom_vm_module_type_capacities_t){
-      .callable_count = layout->function_count,
-  };
+  *out_capacities = (loom_vm_module_type_capacities_t){0};
+  if (!iree_host_size_checked_add(layout->function_count,
+                                  layout->import_declaration_count,
+                                  &out_capacities->callable_count)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "VM callable candidate count exceeds host size");
+  }
   for (iree_host_size_t i = 0; i < layout->module->types.count; ++i) {
     const loom_type_t type = layout->module->types.entries[i];
     if (loom_func_ref_type_isa(type)) {
@@ -632,7 +636,13 @@ static bool loom_vm_module_string_ordinal_find(
 static iree_status_t loom_vm_module_strings_build(
     const loom_vm_module_type_build_t* build, loom_vm_module_layout_t* layout) {
   iree_host_size_t string_capacity = layout->export_count;
-  if (!iree_host_size_checked_add(string_capacity, build->ref_type_count,
+  if (!iree_host_size_checked_add(string_capacity,
+                                  layout->import_declaration_count,
+                                  &string_capacity) ||
+      !iree_host_size_checked_add(string_capacity,
+                                  layout->import_declaration_count,
+                                  &string_capacity) ||
+      !iree_host_size_checked_add(string_capacity, build->ref_type_count,
                                   &string_capacity) ||
       !iree_host_size_checked_add(string_capacity, build->ref_type_count,
                                   &string_capacity)) {
@@ -650,6 +660,10 @@ static iree_status_t loom_vm_module_strings_build(
     if (!iree_string_view_is_empty(export_name)) {
       strings[string_count++] = export_name;
     }
+  }
+  for (iree_host_size_t i = 0; i < layout->import_declaration_count; ++i) {
+    strings[string_count++] = layout->import_declarations[i].module_name;
+    strings[string_count++] = layout->import_declarations[i].symbol_name;
   }
   for (iree_host_size_t i = 0; i < build->ref_type_count; ++i) {
     strings[string_count++] = build->ref_type_order[i]->namespace_name;
@@ -747,7 +761,7 @@ static iree_status_t loom_vm_module_ref_type_rows_build(
   return iree_ok_status();
 }
 
-static iree_status_t loom_vm_module_function_ordinals_assign(
+static iree_status_t loom_vm_module_root_ordinals_assign(
     loom_vm_module_callable_type_build_t* const* root_callables,
     loom_vm_module_layout_t* layout) {
   for (iree_host_size_t i = 0; i < layout->function_count; ++i) {
@@ -760,6 +774,23 @@ static iree_status_t loom_vm_module_function_ordinals_assign(
             &function->export_name_string_ordinal)) {
       return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                               "VM export name is missing from strings");
+    }
+  }
+  for (iree_host_size_t i = 0; i < layout->import_declaration_count; ++i) {
+    loom_vm_module_import_layout_t* import = &layout->import_declarations[i];
+    import->callable_type_ordinal =
+        root_callables[layout->function_count + i]->ordinal;
+    if (!loom_vm_module_string_ordinal_find(
+            &layout->type_tables, import->module_name,
+            &import->module_name_string_ordinal)) {
+      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "VM import module is missing from strings");
+    }
+    if (!loom_vm_module_string_ordinal_find(
+            &layout->type_tables, import->symbol_name,
+            &import->symbol_name_string_ordinal)) {
+      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "VM import symbol is missing from strings");
     }
   }
   return iree_ok_status();
@@ -794,13 +825,25 @@ iree_status_t loom_vm_module_type_tables_build(
   }
 
   loom_vm_module_callable_type_build_t** root_callables = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, layout->function_count,
+  iree_host_size_t root_callable_count = layout->function_count;
+  if (!iree_host_size_checked_add(root_callable_count,
+                                  layout->import_declaration_count,
+                                  &root_callable_count)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "VM root callable count exceeds host size");
+  }
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, root_callable_count,
                                                  sizeof(*root_callables),
                                                  (void**)&root_callables));
   for (iree_host_size_t i = 0; i < layout->function_count; ++i) {
     IREE_RETURN_IF_ERROR(loom_vm_module_callable_collect(
         &build, layout->functions[i].logical_signature, /*flags=*/0,
         &root_callables[i]));
+  }
+  for (iree_host_size_t i = 0; i < layout->import_declaration_count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_vm_module_callable_collect(
+        &build, layout->import_declarations[i].logical_signature, /*flags=*/0,
+        &root_callables[layout->function_count + i]));
   }
 
   IREE_RETURN_IF_ERROR(loom_vm_module_ref_types_canonicalize(&build));
@@ -812,5 +855,5 @@ iree_status_t loom_vm_module_type_tables_build(
   IREE_RETURN_IF_ERROR(loom_vm_module_strings_build(&build, layout));
   IREE_RETURN_IF_ERROR(
       loom_vm_module_ref_type_rows_build(&build, &layout->type_tables));
-  return loom_vm_module_function_ordinals_assign(root_callables, layout);
+  return loom_vm_module_root_ordinals_assign(root_callables, layout);
 }

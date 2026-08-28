@@ -233,8 +233,9 @@ iree_status_t loom_vm_function_call_encode(
   if (!loom_vm_module_layout_try_resolve_call_target(
           module_layout, loom_low_func_call_callee(packet->node->op),
           &target)) {
-    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                            "VM runtime function imports are not implemented");
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "direct call target is not a VM function or runtime import");
   }
   const iree_vm_isa_control_call_record_t call_record = {
       .opcode_u8 = IREE_VM_ISA_CORE_OPCODE_CONTROL_CALL,

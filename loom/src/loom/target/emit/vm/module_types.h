@@ -49,8 +49,8 @@ typedef struct loom_vm_module_type_tables_t {
 
 // Builds all canonical string, ref-type, signature, and callable-type tables.
 //
-// Function logical signatures and export names must already be populated in
-// |layout|. The build assigns their final string and callable-type ordinals.
+// Function and import logical signatures and names must already be populated
+// in |layout|. The build assigns their final string and callable-type ordinals.
 iree_status_t loom_vm_module_type_tables_build(iree_arena_allocator_t* arena,
                                                loom_vm_module_layout_t* layout);
 

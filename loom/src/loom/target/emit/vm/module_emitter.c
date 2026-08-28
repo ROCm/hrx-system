@@ -15,7 +15,7 @@
 #include "loom/target/emit/vm/module_layout.h"
 
 enum {
-  LOOM_VM_MODULE_MAX_SECTION_COUNT = 6,
+  LOOM_VM_MODULE_MAX_SECTION_COUNT = 7,
   LOOM_VM_MODULE_STREAM_BLOCK_SIZE = 32 * 1024,
 };
 
@@ -155,6 +155,40 @@ static iree_status_t loom_vm_module_write_callable_types(
   IREE_RETURN_IF_ERROR(loom_vm_module_writer_write_record(
       writer, tables->callable_types,
       tables->callable_type_count * sizeof(*tables->callable_types)));
+  loom_vm_module_writer_end_section(writer, section_start);
+  return iree_ok_status();
+}
+
+static iree_status_t loom_vm_module_write_imports(
+    const loom_vm_module_layout_t* layout, loom_vm_module_writer_t* writer) {
+  uint64_t section_start = 0;
+  IREE_RETURN_IF_ERROR(loom_vm_module_writer_begin_section(
+      writer, IREE_VM_BYTECODE_SECTION_IMPORTS, &section_start));
+  const iree_vm_bytecode_v0_imports_header_t header = {
+      .group_count_u32 = (uint32_t)layout->import_group_count,
+  };
+  IREE_RETURN_IF_ERROR(
+      loom_vm_module_writer_write_record(writer, &header, sizeof(header)));
+  for (iree_host_size_t i = 0; i < layout->import_group_count; ++i) {
+    const loom_vm_module_import_group_layout_t* group =
+        &layout->import_groups[i];
+    const iree_vm_bytecode_v0_import_group_row_t row = {
+        .module_name_string_u16 = group->module_name_string_ordinal,
+        .entry_count_u32 = group->import_count,
+    };
+    IREE_RETURN_IF_ERROR(
+        loom_vm_module_writer_write_record(writer, &row, sizeof(row)));
+  }
+  for (iree_host_size_t i = 0; i < layout->import_count; ++i) {
+    const loom_vm_module_import_layout_t* import = layout->imports[i];
+    const iree_vm_bytecode_v0_import_entry_row_t row = {
+        .symbol_name_string_u16 = import->symbol_name_string_ordinal,
+        .callable_type_ordinal_u16 = import->callable_type_ordinal,
+        .flags_u16 = import->flags,
+    };
+    IREE_RETURN_IF_ERROR(
+        loom_vm_module_writer_write_record(writer, &row, sizeof(row)));
+  }
   loom_vm_module_writer_end_section(writer, section_start);
   return iree_ok_status();
 }
@@ -320,6 +354,7 @@ static iree_status_t loom_vm_module_write_image(
   const uint16_t section_count =
       (uint16_t)(3 + (layout->type_tables.string_count != 0 ? 1 : 0) +
                  (layout->type_tables.ref_type_entry_count != 0 ? 1 : 0) +
+                 (layout->import_count != 0 ? 1 : 0) +
                  (layout->export_count != 0 ? 1 : 0));
   iree_vm_bytecode_v0_image_header_t header = {0};
   memcpy(header.magic_u8, IREE_VM_BYTECODE_IMAGE_HEADER_MAGIC_U8_BYTES,
@@ -340,6 +375,9 @@ static iree_status_t loom_vm_module_write_image(
   }
   IREE_RETURN_IF_ERROR(loom_vm_module_write_signatures(layout, writer));
   IREE_RETURN_IF_ERROR(loom_vm_module_write_callable_types(layout, writer));
+  if (layout->import_count != 0) {
+    IREE_RETURN_IF_ERROR(loom_vm_module_write_imports(layout, writer));
+  }
   if (layout->export_count != 0) {
     IREE_RETURN_IF_ERROR(loom_vm_module_write_exports(layout, writer));
   }
