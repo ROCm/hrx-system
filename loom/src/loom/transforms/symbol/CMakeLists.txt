@@ -135,6 +135,19 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_library(
+  NAME
+    template_expansion_pipeline
+  HDRS
+    "template_expansion_pipeline.h"
+  SRCS
+    "template_expansion_pipeline.c"
+  DEPS
+    iree::base
+    loom::pass::builder
+  PUBLIC
+)
+
 loom_cc_benchmark(
   NAME
     template_selection_benchmark

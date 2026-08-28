@@ -7,7 +7,7 @@
 #include "loom/target/arch/cmd/lower/program_plan_index.h"
 
 #include "loom/ir/module.h"
-#include "loom/link/plan_materializer.h"
+#include "loom/link/index_materializer.h"
 #include "loom/link/planner.h"
 
 iree_status_t loom_cmd_program_plan_prepare_index(
@@ -49,32 +49,25 @@ iree_status_t loom_cmd_program_plan_prepare_index(
     };
   }
 
-  loom_link_plan_t* link_plan = NULL;
-  iree_status_t status = loom_link_plan_build(
-      index,
-      &(loom_link_plan_options_t){
-          .mode = LOOM_LINK_PLAN_LINK,
-          .unresolved_policy = LOOM_LINK_PLAN_UNRESOLVED_ALLOW,
-          .root_facets =
-              {
-                  .count = program_count,
-                  .values = root_facets,
-              },
-          .dependency_policy = LOOM_LINK_PLAN_DEPENDENCY_REQUESTED_FACETS,
+  const loom_link_plan_options_t link_options = {
+      .mode = LOOM_LINK_PLAN_LINK,
+      .unresolved_policy = LOOM_LINK_PLAN_UNRESOLVED_ALLOW,
+      .root_facets =
+          {
+              .count = program_count,
+              .values = root_facets,
+          },
+      .dependency_policy = LOOM_LINK_PLAN_DEPENDENCY_REQUESTED_FACETS,
+  };
+  loom_link_index_materialization_t materialization = {0};
+  iree_status_t status = loom_link_index_materialize(
+      index, &link_options,
+      &(loom_link_plan_materialization_environment_t){
+          .context = loom_link_module_index_context(index),
+          .block_pool = block_pool,
+          .allocator = host_allocator,
       },
-      host_allocator, &link_plan);
-
-  loom_link_plan_materialization_t materialization = {0};
-  if (iree_status_is_ok(status)) {
-    status = loom_link_plan_materialize(
-        link_plan,
-        &(loom_link_plan_materialization_environment_t){
-            .context = loom_link_module_index_context(index),
-            .block_pool = block_pool,
-            .allocator = host_allocator,
-        },
-        IREE_SV("command_program_roots"), scratch_arena, &materialization);
-  }
+      IREE_SV("command_program_roots"), &materialization);
 
   loom_symbol_ref_t* target_root_refs = NULL;
   if (iree_status_is_ok(status)) {
@@ -85,20 +78,20 @@ iree_status_t loom_cmd_program_plan_prepare_index(
   for (iree_host_size_t i = 0; i < program_count && iree_status_is_ok(status);
        ++i) {
     const iree_host_size_t source_ordinal = program_symbol_ordinals[i];
-    IREE_ASSERT_LT(source_ordinal, materialization.target_symbols.count);
-    target_root_refs[i] = materialization.target_symbols.values[source_ordinal];
+    IREE_ASSERT_LT(source_ordinal,
+                   materialization.product.target_symbols.count);
+    target_root_refs[i] =
+        materialization.product.target_symbols.values[source_ordinal];
     IREE_ASSERT(loom_symbol_ref_is_valid(target_root_refs[i]));
   }
 
   if (iree_status_is_ok(status)) {
     status = loom_cmd_program_plan_prepare_materialization(
-        &materialization, target_root_refs, program_count, pass_registry,
-        diagnostic_emitter, block_pool, out_valid, out_plan, host_allocator);
+        &materialization.product, target_root_refs, program_count,
+        pass_registry, diagnostic_emitter, block_pool, out_valid, out_plan,
+        host_allocator);
   }
 
-  if (materialization.module != NULL) {
-    loom_module_free(materialization.module);
-  }
-  loom_link_plan_free(link_plan);
+  loom_link_index_materialization_deinitialize(&materialization);
   return status;
 }

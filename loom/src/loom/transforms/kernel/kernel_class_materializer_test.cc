@@ -566,8 +566,8 @@ kernel.def @classified() {
   loom_template_selection_query_result_t query_result = {};
   IREE_ASSERT_OK(loom_template_selection_query(
       class_module, &query_options, &block_pool_, &query_arena, &query_result));
-  ASSERT_EQ(query_result.selected_origins.count, 1u);
-  EXPECT_EQ(query_result.selected_origins.values[0], 7u);
+  ASSERT_EQ(query_result.required_origins.count, 1u);
+  EXPECT_EQ(query_result.required_origins.values[0], 7u);
   EXPECT_EQ(query_result.unresolved_site_count, 0u);
   iree_arena_deinitialize(&query_arena);
 }

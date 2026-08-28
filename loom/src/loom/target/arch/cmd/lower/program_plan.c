@@ -25,6 +25,7 @@
 #include "loom/target/arch/cmd/lower/schedule.h"
 #include "loom/target/arch/cmd/lower/transients.h"
 #include "loom/transforms/kernel/resolve_launches.h"
+#include "loom/transforms/symbol/template_expansion_pipeline.h"
 #include "loom/util/fact_table.h"
 
 static iree_string_view_t loom_cmd_program_plan_symbol_name(
@@ -117,7 +118,12 @@ static iree_status_t loom_cmd_program_plan_build_post_inline_body(
 
 static iree_status_t loom_cmd_program_plan_build_preparation_body(
     loom_builder_t* builder, void* user_data) {
-  (void)user_data;
+  const iree_host_size_t template_demand_count =
+      *(const iree_host_size_t*)user_data;
+  if (template_demand_count != 0) {
+    IREE_RETURN_IF_ERROR(loom_template_expansion_pipeline_build(
+        builder, loom_cmd_program_plan_build_post_inline_body, NULL));
+  }
   // Minimize pure calls while loops and control flow are still compact. This
   // lets CSE reuse equal configuration calls before inlining expands them.
   loom_op_t* for_op = NULL;
@@ -149,7 +155,8 @@ static iree_status_t loom_cmd_program_plan_build_preparation_body(
 static iree_status_t loom_cmd_program_plan_prepare_roots(
     loom_module_t* module, const loom_pass_registry_t* pass_registry,
     iree_diagnostic_emitter_t diagnostic_emitter,
-    iree_arena_block_pool_t* block_pool, bool* out_valid) {
+    iree_arena_block_pool_t* block_pool, iree_host_size_t template_demand_count,
+    bool* out_valid) {
   *out_valid = false;
 
   loom_module_t* pipeline_module = NULL;
@@ -161,7 +168,7 @@ static iree_status_t loom_cmd_program_plan_prepare_roots(
   iree_status_t status = loom_pass_ir_build_pipeline(
       pipeline_module, IREE_SV("__command_program_preparation"),
       LOOM_PASS_ANCHOR_MODULE, loom_cmd_program_plan_build_preparation_body,
-      NULL, &pipeline_op);
+      &template_demand_count, &pipeline_op);
 
   const loom_pass_program_compile_options_t compile_options = {
       .registry = pass_registry,
@@ -601,10 +608,14 @@ iree_status_t loom_cmd_program_plan_prepare_materialization(
   }
 
   loom_symbol_reference_table_t references = {0};
+  iree_host_size_t template_demand_count = 0;
   bool valid = false;
   if (iree_status_is_ok(status)) {
     status = loom_symbol_reference_table_build(preparation_module,
                                                &scratch_arena, &references);
+  }
+  if (iree_status_is_ok(status)) {
+    template_demand_count = references.template_demands.count;
   }
   if (iree_status_is_ok(status)) {
     status = loom_kernel_resolve_launches(
@@ -620,7 +631,7 @@ iree_status_t loom_cmd_program_plan_prepare_materialization(
   if (valid && iree_status_is_ok(status)) {
     status = loom_cmd_program_plan_prepare_roots(
         preparation_module, pass_registry, diagnostic_emitter, block_pool,
-        &valid);
+        template_demand_count, &valid);
   }
 
   iree_host_size_t entry_requirement_capacity = 0;

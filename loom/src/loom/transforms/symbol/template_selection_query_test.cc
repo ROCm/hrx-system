@@ -165,10 +165,44 @@ template.def<@demo.family> @external(%x: i32) -> (i32) {
   const loom_template_selection_query_result_t result =
       Query(module.get(), &external, 1, /*origin_count=*/8);
 
-  ASSERT_EQ(result.selected_origins.count, 1u);
-  EXPECT_EQ(result.selected_origins.values[0], 7u);
+  ASSERT_EQ(result.required_origins.count, 1u);
+  EXPECT_EQ(result.required_origins.values[0], 7u);
   EXPECT_EQ(result.unresolved_site_count, 0u);
   EXPECT_EQ(PrintModule(module.get()), module_before);
+}
+
+TEST_F(TemplateSelectionQueryTest,
+       RetainsViableExternalProvidersForUnresolvedApplication) {
+  ModulePtr module = ParseModule(R"(
+template.decl @demo.family(%x: i32) -> (i32)
+
+func.def public @entry(%x: i32) -> (i32) {
+  %result = template.apply<@demo.family>(%x) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+template.def<@demo.family> priority(10) @specialized(%x: i32) -> (i32) where [range(%x, 1, 1)] {
+  template.return %x : i32
+}
+
+template.def<@demo.family> priority(1) @fallback(%x: i32) -> (i32) {
+  template.return %x : i32
+}
+)");
+  const loom_template_provider_summary_t specialized = ExternalizeProvider(
+      module.get(), IREE_SV("demo.family"), IREE_SV("specialized"), 3);
+  const loom_template_provider_summary_t fallback = ExternalizeProvider(
+      module.get(), IREE_SV("demo.family"), IREE_SV("fallback"), 7);
+  const loom_template_provider_summary_t providers[] = {specialized, fallback};
+
+  const loom_template_selection_query_result_t result =
+      Query(module.get(), providers, IREE_ARRAYSIZE(providers),
+            /*origin_count=*/8);
+
+  ASSERT_EQ(result.required_origins.count, 2u);
+  EXPECT_EQ(result.required_origins.values[0], 3u);
+  EXPECT_EQ(result.required_origins.values[1], 7u);
+  EXPECT_EQ(result.unresolved_site_count, 1u);
 }
 
 TEST_F(TemplateSelectionQueryTest,
@@ -208,8 +242,8 @@ func.def public @entry(%m: index, %arg: tensor<[%m]xf32>) -> (tensor<[%m]xf32>) 
   const loom_template_selection_query_result_t result =
       Query(application.get(), &external, 1, /*origin_count=*/12);
 
-  ASSERT_EQ(result.selected_origins.count, 1u);
-  EXPECT_EQ(result.selected_origins.values[0], 11u);
+  ASSERT_EQ(result.required_origins.count, 1u);
+  EXPECT_EQ(result.required_origins.values[0], 11u);
   EXPECT_EQ(result.unresolved_site_count, 0u);
   EXPECT_EQ(PrintModule(application.get()), module_before);
 }
@@ -236,7 +270,7 @@ template.def<@demo.family> @external(%m: index) -> (index) {
       Query(rejected_module.get(), &rejected_provider, 1,
             /*origin_count=*/4);
 
-  EXPECT_EQ(rejected_result.selected_origins.count, 0u);
+  EXPECT_EQ(rejected_result.required_origins.count, 0u);
   EXPECT_EQ(rejected_result.unresolved_site_count, 1u);
 
   ModulePtr matched_module = ParseModule(R"(
@@ -258,8 +292,8 @@ template.def<@demo.family> @external(%m: index) -> (index) {
       Query(matched_module.get(), &matched_provider, 1,
             /*origin_count=*/4);
 
-  ASSERT_EQ(matched_result.selected_origins.count, 1u);
-  EXPECT_EQ(matched_result.selected_origins.values[0], 3u);
+  ASSERT_EQ(matched_result.required_origins.count, 1u);
+  EXPECT_EQ(matched_result.required_origins.values[0], 3u);
   EXPECT_EQ(matched_result.unresolved_site_count, 0u);
 }
 
@@ -339,8 +373,8 @@ template.def<@demo.inner> @inner(%x: i32) -> (i32) {
   const loom_template_selection_query_result_t result =
       Query(module.get(), &inner, 1, /*origin_count=*/12);
 
-  ASSERT_EQ(result.selected_origins.count, 1u);
-  EXPECT_EQ(result.selected_origins.values[0], 11u);
+  ASSERT_EQ(result.required_origins.count, 1u);
+  EXPECT_EQ(result.required_origins.values[0], 11u);
   EXPECT_EQ(result.unresolved_site_count, 0u);
 }
 
@@ -356,7 +390,7 @@ func.def public @entry(%x: i32) -> (i32) {
 
   const loom_template_selection_query_result_t result =
       Query(module.get(), nullptr, 0, /*origin_count=*/0);
-  EXPECT_EQ(result.selected_origins.count, 0u);
+  EXPECT_EQ(result.required_origins.count, 0u);
   EXPECT_EQ(result.unresolved_site_count, 1u);
 
   loom_symbol_fact_table_t fact_table = {};

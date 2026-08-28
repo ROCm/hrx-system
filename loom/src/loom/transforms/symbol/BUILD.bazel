@@ -125,6 +125,16 @@ loom_cc_library(
     ],
 )
 
+loom_cc_library(
+    name = "template_expansion_pipeline",
+    srcs = ["template_expansion_pipeline.c"],
+    hdrs = ["template_expansion_pipeline.h"],
+    deps = [
+        "//loom/src/loom/pass:builder",
+        "//runtime/src/iree/base",
+    ],
+)
+
 loom_cc_benchmark(
     name = "template_selection_benchmark",
     srcs = ["template_selection_benchmark.cc"],

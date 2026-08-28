@@ -784,6 +784,54 @@ template.def<@demo.leaf> @leaf_impl(%x: i32) -> (i32) {
   loom_link_index_materialization_deinitialize(&materialization);
 }
 
+TEST_F(LinkIndexMaterializerTest, EarlyLinkRetainsViableNestedProviderSet) {
+  loom_module_t* root = Parse(IREE_SV(R"(
+template.decl @demo.outer(%x: i32) -> (i32)
+
+func.def public @entry(%x: i32) -> (i32) {
+  %result = template.apply<@demo.outer>(%x) : (i32) -> (i32)
+  func.return %result : i32
+}
+)"),
+                              IREE_SV("root.loom"));
+  loom_module_t* library = Parse(IREE_SV(R"(
+template.decl @demo.outer(%x: i32) -> (i32)
+template.decl @demo.inner(%x: i32) -> (i32)
+
+template.def<@demo.outer> @outer(%x: i32) -> (i32) {
+  %result = template.apply<@demo.inner>(%x) : (i32) -> (i32)
+  template.return %result : i32
+}
+
+template.def<@demo.inner> priority(10) @specialized(%x: i32) -> (i32) where [range(%x, 1, 1)] {
+  template.return %x : i32
+}
+
+template.def<@demo.inner> priority(1) @fallback(%x: i32) -> (i32) {
+  template.return %x : i32
+}
+)"),
+                                 IREE_SV("library.loom"));
+
+  IndexPtr index = CreateIndex();
+  AddMaterialized(index.get(), root, IREE_SV("root"),
+                  LOOM_LINK_PROVIDER_ROLE_INPUT);
+  AddMaterialized(index.get(), library, IREE_SV("library"),
+                  LOOM_LINK_PROVIDER_ROLE_LIBRARY);
+
+  loom_link_index_materialization_t materialization = MaterializeWithPolicy(
+      index.get(), IREE_SV("@entry"), LOOM_LINK_PLAN_UNRESOLVED_ALLOW);
+  Verify(materialization.product.module);
+  EXPECT_NE(FindSymbol(materialization.product.module, IREE_SV("outer")),
+            nullptr);
+  EXPECT_NE(FindSymbol(materialization.product.module, IREE_SV("specialized")),
+            nullptr);
+  EXPECT_NE(FindSymbol(materialization.product.module, IREE_SV("fallback")),
+            nullptr);
+
+  loom_link_index_materialization_deinitialize(&materialization);
+}
+
 TEST_F(LinkIndexMaterializerTest, LinkLinkInternalizesLibraryDependencies) {
   loom_module_t* requester = Parse(IREE_SV(R"(
 func.decl @helper(%x: i32) -> (i32)

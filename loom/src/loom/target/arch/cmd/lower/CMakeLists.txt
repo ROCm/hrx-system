@@ -168,6 +168,7 @@ loom_cc_library(
     loom::target::arch::cmd::abi_layout
     loom::target::arch::cmd::program
     loom::transforms::kernel::resolve_launches
+    loom::transforms::symbol::template_expansion_pipeline
     loom::util::fact_table
   PUBLIC
 )
@@ -185,8 +186,8 @@ loom_cc_library(
     iree::base::internal::arena
     loom::error::emitter
     loom::ir
+    loom::link::index_materializer
     loom::link::module_index
-    loom::link::plan_materializer
     loom::link::planner
     loom::pass::registry
   PUBLIC
@@ -222,6 +223,7 @@ loom_cc_test(
     "program_plan_test.cc"
   DEPS
     ::program_plan
+    ::program_plan_index
     ::serialize
     iree::base
     iree::base::internal::arena
@@ -230,6 +232,7 @@ loom_cc_test(
     loom::codegen::low::text_asm
     loom::format::text::parser
     loom::ir
+    loom::link::module_index
     loom::ops::low
     loom::ops::op_registry
     loom::pass::builtin_registry

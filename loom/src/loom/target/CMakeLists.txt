@@ -683,6 +683,7 @@ loom_cc_library(
     loom::pass::builder
     loom::pass::environment
     loom::sanitizer::options
+    loom::transforms::symbol::template_expansion_pipeline
   PUBLIC
 )
 
