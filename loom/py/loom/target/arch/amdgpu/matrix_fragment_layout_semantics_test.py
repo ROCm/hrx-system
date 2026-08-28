@@ -10,16 +10,21 @@ from dataclasses import replace
 
 import pytest
 
-from loom.target.arch.amdgpu.matrix_fragment_layouts import (
+from loom.target.arch.amdgpu.matrix_fragment_layout import (
     AmdgpuMatrixFragmentLayout,
     MatrixFragmentAxisLayout,
-    MatrixFragmentPackedB16PublicationProjection,
     MatrixFragmentReductionGroup,
     MatrixFragmentRoleLayout,
-    matrix_fragment_native_layout,
-    matrix_fragment_packed_b16_publication_projection,
     validate_matrix_fragment_layout,
 )
+from loom.target.arch.amdgpu.matrix_fragment_layout_adaptation import (
+    matrix_fragment_native_contraction_facts,
+)
+from loom.target.arch.amdgpu.matrix_fragment_layout_recipes import (
+    MatrixFragmentPackedB16PublicationProjection,
+    matrix_fragment_packed_b16_publication_projection,
+)
+from loom.target.native_layout_facts import NativeLayoutEvidence
 
 
 def _axis(
@@ -104,7 +109,11 @@ def test_exact_layout_adapts_to_shared_algebra_and_publication() -> None:
     layout = _test_layout()
 
     validate_matrix_fragment_layout(layout)
-    assert matrix_fragment_native_layout(layout) is not None
+    facts = matrix_fragment_native_contraction_facts(layout)
+    assert all(
+        role.evidence is NativeLayoutEvidence.EXACT
+        for role in (facts.lhs, facts.rhs, facts.accumulator, facts.result)
+    )
     assert matrix_fragment_packed_b16_publication_projection(
         layout, layout.result, "column"
     ) == MatrixFragmentPackedB16PublicationProjection(

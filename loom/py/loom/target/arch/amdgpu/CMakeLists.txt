@@ -148,6 +148,9 @@ iree_py_library(
   NAME
     matrix_fragment_layouts
   SRCS
+    "matrix_fragment_layout.py"
+    "matrix_fragment_layout_adaptation.py"
+    "matrix_fragment_layout_recipes.py"
     "matrix_fragment_layouts.py"
   DEPS
     loom::py::loom::target::arch::amdgpu::matrix_formats
@@ -169,6 +172,7 @@ iree_py_test(
     "loom.target.arch.amdgpu.matrix_fragment_layout_semantics_test"
   DEPS
     loom::py::loom::target::arch::amdgpu::matrix_fragment_layouts
+    loom::py::loom::target::native_layout_facts
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"

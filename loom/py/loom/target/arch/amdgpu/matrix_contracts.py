@@ -13,11 +13,13 @@ from dataclasses import dataclass, replace
 from loom.target.arch.amdgpu.matrix_formats import (
     AMDGPU_F8F6F4_MATRIX_PHYSICAL_FORMATS,
 )
-from loom.target.arch.amdgpu.matrix_fragment_layouts import (
-    AMDGPU_MATRIX_FRAGMENT_LAYOUTS,
+from loom.target.arch.amdgpu.matrix_fragment_layout import (
     MatrixFragmentReductionGroup,
     MatrixFragmentRoleLayout,
     layout_roles,
+)
+from loom.target.arch.amdgpu.matrix_fragment_layouts import (
+    AMDGPU_MATRIX_FRAGMENT_LAYOUTS,
 )
 
 AMDGPU_MATRIX_NUMERIC_TYPE_BIT_COUNTS = {

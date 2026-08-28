@@ -123,7 +123,12 @@ iree_py_library(
 
 iree_py_library(
     name = "matrix_fragment_layouts",
-    srcs = ["matrix_fragment_layouts.py"],
+    srcs = [
+        "matrix_fragment_layout.py",
+        "matrix_fragment_layout_adaptation.py",
+        "matrix_fragment_layout_recipes.py",
+        "matrix_fragment_layouts.py",
+    ],
     deps = [
         ":matrix_formats",
         "//loom/py/loom/target:native_contraction_layout",
@@ -143,6 +148,7 @@ iree_py_test(
     main = "pytest_style_runner.py",
     deps = [
         ":matrix_fragment_layouts",
+        "//loom/py/loom/target:native_layout_facts",
     ],
 )
 

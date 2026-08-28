@@ -45,22 +45,28 @@ from loom.target.arch.amdgpu.matrix_contracts import (  # noqa: E402
     AmdgpuMatrixContract,
     AmdgpuMatrixPayload,
 )
-from loom.target.arch.amdgpu.matrix_fragment_layouts import (  # noqa: E402
-    AMDGPU_MATRIX_FRAGMENT_LAYOUTS,
-    AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY,
+from loom.target.arch.amdgpu.matrix_fragment_layout import (  # noqa: E402
     AmdgpuMatrixFragmentLayout,
+    MatrixFragmentRoleLayout,
+    layout_roles,
+)
+from loom.target.arch.amdgpu.matrix_fragment_layout_adaptation import (  # noqa: E402
+    matrix_fragment_native_contraction_facts,
+    matrix_fragment_native_transition_facts,
+    matrix_fragment_packed_element_axis,
+    matrix_fragment_role_storage_projection_plan,
+)
+from loom.target.arch.amdgpu.matrix_fragment_layout_recipes import (  # noqa: E402
     MatrixFragmentPackedB16PublicationProjection,
     MatrixFragmentResultToLhsBf16Projection,
     MatrixFragmentResultToRhsPackedB16Projection,
-    MatrixFragmentRoleLayout,
-    layout_roles,
-    matrix_fragment_native_contraction_facts,
-    matrix_fragment_native_transition_facts,
     matrix_fragment_packed_b16_publication_projection,
-    matrix_fragment_packed_element_axis,
     matrix_fragment_result_to_lhs_bf16_projection,
     matrix_fragment_result_to_rhs_packed_b16_projection,
-    matrix_fragment_role_storage_projection_plan,
+)
+from loom.target.arch.amdgpu.matrix_fragment_layouts import (  # noqa: E402
+    AMDGPU_MATRIX_FRAGMENT_LAYOUTS,
+    AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY,
 )
 from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX9_4_GENERIC,
