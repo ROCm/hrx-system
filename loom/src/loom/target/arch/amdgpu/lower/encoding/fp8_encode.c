@@ -587,7 +587,7 @@ bool loom_amdgpu_select_fp8_encode_plan(
     return false;
   }
 
-  loom_scalar_type_t format_element_type = LOOM_SCALAR_TYPE_COUNT_;
+  loom_scalar_type_t format_element_type = LOOM_SCALAR_TYPE_NONE;
   loom_scalar_type_fp8_format_t format = {0};
   if (!loom_amdgpu_fp8_format(result_format, &format_element_type, &format) ||
       format_element_type != result_type) {

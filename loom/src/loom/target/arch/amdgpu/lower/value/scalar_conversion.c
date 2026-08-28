@@ -22,7 +22,7 @@
 
 static loom_scalar_type_t loom_amdgpu_scalar_type_or_none(loom_type_t type) {
   if (!loom_type_is_scalar(type)) {
-    return LOOM_SCALAR_TYPE_COUNT_;
+    return LOOM_SCALAR_TYPE_NONE;
   }
   return loom_type_element_type(type);
 }
@@ -428,8 +428,8 @@ static bool loom_amdgpu_select_scalar_conversion_plan_impl(
       loom_amdgpu_scalar_type_or_none(loom_module_value_type(module, source));
   const loom_scalar_type_t result_type =
       loom_amdgpu_scalar_type_or_none(loom_module_value_type(module, result));
-  if (source_type == LOOM_SCALAR_TYPE_COUNT_ ||
-      result_type == LOOM_SCALAR_TYPE_COUNT_) {
+  if (source_type == LOOM_SCALAR_TYPE_NONE ||
+      result_type == LOOM_SCALAR_TYPE_NONE) {
     return false;
   }
 

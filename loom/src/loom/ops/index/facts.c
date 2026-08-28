@@ -72,8 +72,8 @@ iree_status_t loom_index_cast_facts(loom_fact_context_t* context,
                                     const loom_op_t* op,
                                     const loom_value_facts_t* operand_facts,
                                     loom_value_facts_t* result_facts) {
-  loom_scalar_type_t input_scalar_type = LOOM_SCALAR_TYPE_COUNT_;
-  loom_scalar_type_t result_scalar_type = LOOM_SCALAR_TYPE_COUNT_;
+  loom_scalar_type_t input_scalar_type = LOOM_SCALAR_TYPE_NONE;
+  loom_scalar_type_t result_scalar_type = LOOM_SCALAR_TYPE_NONE;
   if (!loom_index_cast_scalar_type(module, loom_index_cast_input(op),
                                    &input_scalar_type) ||
       !loom_index_cast_scalar_type(module, loom_index_cast_result(op),
@@ -451,7 +451,7 @@ iree_status_t loom_index_cmp_facts(loom_fact_context_t* context,
   if (op->operand_count >= 2 && op->attribute_count >= 1) {
     bool result = false;
     uint8_t predicate = loom_index_cmp_predicate(op);
-    loom_scalar_type_t operand_scalar_type = LOOM_SCALAR_TYPE_COUNT_;
+    loom_scalar_type_t operand_scalar_type = LOOM_SCALAR_TYPE_NONE;
     if ((loom_index_cmp_lhs(op) == loom_index_cmp_rhs(op) &&
          loom_index_cmp_same_value_result(predicate, &result)) ||
         (loom_index_cast_scalar_type(module, loom_index_cmp_lhs(op),

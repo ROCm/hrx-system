@@ -484,7 +484,7 @@ static iree_status_t loom_finalize_op(
       if (value->type.header != 0) {
         continue;
       }
-      loom_scalar_type_t fixed_scalar_type = LOOM_SCALAR_TYPE_COUNT_;
+      loom_scalar_type_t fixed_scalar_type = LOOM_SCALAR_TYPE_NONE;
       switch (vtable->result_descriptors[i].type_constraint) {
         case LOOM_TYPE_CONSTRAINT_I1:
           fixed_scalar_type = LOOM_SCALAR_TYPE_I1;
@@ -501,7 +501,7 @@ static iree_status_t loom_finalize_op(
         default:
           break;
       }
-      if (fixed_scalar_type != LOOM_SCALAR_TYPE_COUNT_) {
+      if (fixed_scalar_type != LOOM_SCALAR_TYPE_NONE) {
         IREE_RETURN_IF_ERROR(
             loom_module_set_value_type(parser->module, parsed->result_ids[i],
                                        loom_type_scalar(fixed_scalar_type)));
