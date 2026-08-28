@@ -43,6 +43,7 @@ loom_cc_library(
     "src/context.h"
     "src/diagnostic.h"
     "src/link_index.h"
+    "src/link_materialization.h"
     "src/module.h"
     "src/module_bytecode.h"
     "src/option_chain.h"
@@ -67,6 +68,7 @@ loom_cc_library(
     "src/link.c"
     "src/link_dependency.c"
     "src/link_index.c"
+    "src/link_materialization.c"
     "src/module.c"
     "src/module_bytecode.c"
     "src/module_function.c"
@@ -109,6 +111,7 @@ loom_cc_library(
     loom::link::dependency_report
     loom::link::index_materializer
     loom::link::linker
+    loom::link::materialization_environment
     loom::link::module_index
     loom::ops::func
     loom::ops::global
