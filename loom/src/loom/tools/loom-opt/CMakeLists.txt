@@ -53,6 +53,8 @@ iree_execution_test_suite(
     "loom-opt.test.json"
   TOOLS
     "loom-opt=::loom-opt"
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-opt/testdata/function_source_presentation.loom"
   LABELS
     "hostonly"
 )

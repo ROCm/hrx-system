@@ -1,0 +1,12 @@
+vm.target<core> @target
+
+// Waits for the runtime value to become available.
+func.decl import("runtime", "wait") target(@target) abi(vm_function, {suspending = true}) @wait(%value: i32) -> (i32)
+
+// Calls the runtime wait operation.
+//
+// The logical value remains in source order.
+func.def public target(@target) @caller(%value: i32) -> (i32) {
+  %result = func.call @wait(%value) : (i32) -> (i32)
+  func.return %result : i32
+}

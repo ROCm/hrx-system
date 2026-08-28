@@ -55,6 +55,23 @@
       }
     },
     {
+      "name": "preserves function comments through source lowering",
+      "run": {
+        "tool": "loom-opt",
+        "args": ["--pipeline=source-low"],
+        "stdin": {
+          "file": "{srcdir}/testdata/function_source_presentation.loom"
+        }
+      },
+      "stdout": {
+        "contains": [
+          "// Waits for the runtime value to become available.\nlow.func.decl",
+          "// Calls the runtime wait operation.\n//\n// The logical value remains in source order.\nlow.func.def"
+        ],
+        "not_contains": ["func.decl import", "func.def public target(@target)"]
+      }
+    },
+    {
       "name": "runs canonicalize and dce pipeline",
       "run": {
         "tool": "loom-opt",

@@ -2239,6 +2239,19 @@ static iree_status_t loom_low_lower_copy_decl_signature_names(
   return iree_ok_status();
 }
 
+static iree_status_t loom_low_lower_copy_function_source_presentation(
+    loom_low_lower_context_t* context) {
+  const loom_op_t* source_op = context->source_function.op;
+  loom_op_t* low_op = context->low_func_op;
+  low_op->flags |= source_op->flags & LOOM_OP_SOURCE_PRESENTATION_FLAG_MASK;
+
+  iree_host_size_t comment_count = 0;
+  const iree_string_view_t* comments =
+      loom_module_op_comments(context->module, source_op, &comment_count);
+  return loom_module_attach_op_comments(context->module, low_op, comments,
+                                        comment_count);
+}
+
 iree_status_t loom_low_lower_import_declaration(
     loom_module_t* module, loom_func_like_t source_declaration,
     const loom_low_lower_options_t* options,
@@ -2403,6 +2416,9 @@ iree_status_t loom_low_lower_import_declaration(
 
   if (iree_status_is_ok(status) && out_result->error_count == 0) {
     status = loom_low_lower_copy_decl_signature_names(&context);
+  }
+  if (iree_status_is_ok(status) && out_result->error_count == 0) {
+    status = loom_low_lower_copy_function_source_presentation(&context);
   }
   if (iree_status_is_ok(status) && out_result->error_count == 0) {
     out_result->low_func_op = context.low_func_op;
@@ -4028,6 +4044,9 @@ iree_status_t loom_low_lower_function(loom_module_t* module,
     // The replacement low op carries the source symbol while the source op
     // still owns the symbol table entry. Erase clears that entry; relink it to
     // the replacement so callers keep the same symbol identity.
+    if (iree_status_is_ok(status) && context.result->error_count == 0) {
+      status = loom_low_lower_copy_function_source_presentation(&context);
+    }
     if (iree_status_is_ok(status) && context.result->error_count == 0) {
       status = loom_op_erase(module, source_function.op);
     }
