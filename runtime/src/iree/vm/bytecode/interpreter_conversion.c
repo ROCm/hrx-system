@@ -316,12 +316,15 @@ iree_vm_bytecode_conversion_failure_t
 iree_vm_bytecode_execute_conversion_float_to_integer(
     const iree_vm_isa_conversion_float_to_integer_record_t* record,
     uint64_t* values) {
+  static const uint8_t kDestinationBitCounts[] = {1, 8, 16, 32, 64};
   const uint8_t selector = record->selector_u8;
-  const bool source_is_f64 =
-      selector >= IREE_VM_ISA_FLOAT_TO_INTEGER_F64_TO_S32;
-  const uint8_t destination_selector = selector & 3;
+  const bool source_is_f64 = selector >= IREE_VM_ISA_FLOAT_TO_INTEGER_F64_TO_S1;
+  const uint8_t destination_selector =
+      source_is_f64 ? selector - IREE_VM_ISA_FLOAT_TO_INTEGER_F64_TO_S1
+                    : selector;
   const bool destination_is_signed = (destination_selector & 1) == 0;
-  const uint8_t destination_bit_count = destination_selector < 2 ? 32 : 64;
+  const uint8_t destination_bit_count =
+      kDestinationBitCounts[destination_selector >> 1];
   const iree_vm_bytecode_float_value_t source = iree_vm_bytecode_float_decode(
       values[record->src_v8],
       source_is_f64 ? iree_vm_bytecode_float_f64 : iree_vm_bytecode_float_f32);
@@ -367,7 +370,9 @@ iree_vm_bytecode_execute_conversion_float_to_integer(
   }
 
   uint64_t result = source.is_negative ? 0 - magnitude : magnitude;
-  if (destination_bit_count == 32) result = (uint32_t)result;
+  if (destination_bit_count < 64) {
+    result &= (UINT64_C(1) << destination_bit_count) - 1;
+  }
   values[record->dst_v8] = result;
   return IREE_VM_BYTECODE_CONVERSION_FAILURE_NONE;
 }

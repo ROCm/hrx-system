@@ -135,7 +135,7 @@ class ProjectionTest(unittest.TestCase):
         }
 
         self.assertEqual(len(tables), 27)
-        self.assertEqual(len(values), 236)
+        self.assertEqual(len(values), 248)
         for table in tables:
             self.assertNotIn("Closed selector domain", table.summary)
             self.assertIn(table.entity_id, consumed_entity_ids)
@@ -495,7 +495,7 @@ class ProjectionTest(unittest.TestCase):
                     re.MULTILINE,
                 )
             ),
-            236 + 217,
+            248 + 217,
         )
 
     def test_generated_flag_types_follow_runtime_vocabulary(self) -> None:

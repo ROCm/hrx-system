@@ -250,11 +250,11 @@ CONVERSION_FLOAT_TO_INTEGER = _conversion(
     mnemonic="conversion.float.to.integer",
     selector_name="float.to.integer",
     description=(
-        "Truncates a finite f32 or f64 mathematical value toward zero to s32, "
-        "u32, s64, or u64. Successful strict source intervals are "
-        "(-2^31-1, 2^31), (-1, 2^32), (-2^63-1, 2^63), and (-1, 2^64), "
-        "respectively. The checks operate on source bits before any host "
-        "floating-to-integer conversion."
+        "Truncates a finite f32 or f64 mathematical value toward zero to a "
+        "selected signed or unsigned 1-, 8-, 16-, 32-, or 64-bit integer. "
+        "The successful strict source interval is (-2^(N-1)-1, 2^(N-1)) for "
+        "signed N-bit results and (-1, 2^N) for unsigned results. The checks "
+        "operate on source bits before any host floating-to-integer conversion."
     ),
     preconditions=(
         "The source must be finite, not NaN, and within the strict interval "
@@ -262,8 +262,8 @@ CONVERSION_FLOAT_TO_INTEGER = _conversion(
     ),
     success=(
         "dst_v8 receives the truncated two's-complement or unsigned result. "
-        "A 32-bit result clears the high 32 cell bits; a 64-bit result "
-        "occupies the complete cell.",
+        "Every result narrower than 64 bits clears all higher cell bits; a "
+        "64-bit result occupies the complete cell.",
     ),
     failures=(
         FailureCase(

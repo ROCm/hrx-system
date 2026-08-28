@@ -540,19 +540,32 @@ _SELECTOR_DEFINITIONS = (
         CORE_0,
         "float.to.integer",
         (
-            "Selects a finite f32/f64 source and integer destination. Successful "
-            "values truncate toward zero; NaN fails invalid_argument and values "
-            "outside the destination's strict source interval fail out_of_range."
+            "Selects a finite f32/f64 source and signed or unsigned 1-, 8-, "
+            "16-, 32-, or 64-bit integer destination. Successful values truncate "
+            "toward zero; NaN fails invalid_argument and values outside the "
+            "destination's strict source interval fail out_of_range."
         ),
         (
-            (0, "f32.to.s32", 0, "Truncates f32 in (-2^31-1, 2^31) to signed i32."),
-            (1, "f32.to.u32", 0, "Truncates f32 in (-1, 2^32) to unsigned i32."),
-            (2, "f32.to.s64", 0, "Truncates f32 in (-2^63-1, 2^63) to signed i64."),
-            (3, "f32.to.u64", 0, "Truncates f32 in (-1, 2^64) to unsigned i64."),
-            (4, "f64.to.s32", 0, "Truncates f64 in (-2^31-1, 2^31) to signed i32."),
-            (5, "f64.to.u32", 0, "Truncates f64 in (-1, 2^32) to unsigned i32."),
-            (6, "f64.to.s64", 0, "Truncates f64 in (-2^63-1, 2^63) to signed i64."),
-            (7, "f64.to.u64", 0, "Truncates f64 in (-1, 2^64) to unsigned i64."),
+            (0, "f32.to.s1", 0, "Truncates f32 in (-2, 1) to signed i1."),
+            (1, "f32.to.u1", 0, "Truncates f32 in (-1, 2) to unsigned i1."),
+            (2, "f32.to.s8", 0, "Truncates f32 in (-129, 128) to signed i8."),
+            (3, "f32.to.u8", 0, "Truncates f32 in (-1, 256) to unsigned i8."),
+            (4, "f32.to.s16", 0, "Truncates f32 in (-32769, 32768) to signed i16."),
+            (5, "f32.to.u16", 0, "Truncates f32 in (-1, 65536) to unsigned i16."),
+            (6, "f32.to.s32", 0, "Truncates f32 in (-2^31-1, 2^31) to signed i32."),
+            (7, "f32.to.u32", 0, "Truncates f32 in (-1, 2^32) to unsigned i32."),
+            (8, "f32.to.s64", 0, "Truncates f32 in (-2^63-1, 2^63) to signed i64."),
+            (9, "f32.to.u64", 0, "Truncates f32 in (-1, 2^64) to unsigned i64."),
+            (10, "f64.to.s1", 0, "Truncates f64 in (-2, 1) to signed i1."),
+            (11, "f64.to.u1", 0, "Truncates f64 in (-1, 2) to unsigned i1."),
+            (12, "f64.to.s8", 0, "Truncates f64 in (-129, 128) to signed i8."),
+            (13, "f64.to.u8", 0, "Truncates f64 in (-1, 256) to unsigned i8."),
+            (14, "f64.to.s16", 0, "Truncates f64 in (-32769, 32768) to signed i16."),
+            (15, "f64.to.u16", 0, "Truncates f64 in (-1, 65536) to unsigned i16."),
+            (16, "f64.to.s32", 0, "Truncates f64 in (-2^31-1, 2^31) to signed i32."),
+            (17, "f64.to.u32", 0, "Truncates f64 in (-1, 2^32) to unsigned i32."),
+            (18, "f64.to.s64", 0, "Truncates f64 in (-2^63-1, 2^63) to signed i64."),
+            (19, "f64.to.u64", 0, "Truncates f64 in (-1, 2^64) to unsigned i64."),
         ),
     ),
     _selector_table(
