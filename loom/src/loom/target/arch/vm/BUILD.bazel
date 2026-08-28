@@ -161,6 +161,7 @@ loom_cc_library(
         "lower/kernel.c",
         "lower/lower.c",
         "lower/resources.c",
+        "lower/vector.c",
     ],
     hdrs = [
         "lower/constants.h",
@@ -170,6 +171,7 @@ loom_cc_library(
         "lower/lower.h",
         "lower/resources.h",
         "lower/types.h",
+        "lower/vector.h",
     ],
     deps = [
         ":abi_layout",
@@ -191,6 +193,7 @@ loom_cc_library(
         "//loom/src/loom/ops/low",
         "//loom/src/loom/ops/scalar",
         "//loom/src/loom/ops/scf",
+        "//loom/src/loom/ops/vector",
         "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/target:low_legality",
         "//loom/src/loom/target:registers",
@@ -294,6 +297,7 @@ loom_check_test_suite(
         "test/source_low/corpus/numeric_scalar_f32.loom-test",
         "test/source_low/corpus/numeric_scalar_i32.loom-test",
         "test/source_low/corpus/numeric_scalar_literals.loom-test",
+        "test/source_low/corpus/vector_carrier_structure.loom-test",
         "test/source_low/function_abi.loom-test",
         "test/source_low/function_contracts.loom-test",
         "test/source_low/function_values.loom-test",
@@ -310,6 +314,7 @@ loom_check_test_suite(
         "//loom/src/loom/test/corpus/source_low:numeric_scalar_f32.loom-test",
         "//loom/src/loom/test/corpus/source_low:numeric_scalar_i32.loom-test",
         "//loom/src/loom/test/corpus/source_low:numeric_scalar_literals.loom-test",
+        "//loom/src/loom/test/corpus/source_low:vector_carrier_structure.loom-test",
     ],
     test_name_prefix_to_strip = "test/source_low/",
 )

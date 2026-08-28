@@ -155,6 +155,7 @@ loom_cc_library(
     "lower/lower.h"
     "lower/resources.h"
     "lower/types.h"
+    "lower/vector.h"
   SRCS
     "lower/constants.c"
     "lower/control.c"
@@ -162,6 +163,7 @@ loom_cc_library(
     "lower/kernel.c"
     "lower/lower.c"
     "lower/resources.c"
+    "lower/vector.c"
   DEPS
     ::abi_layout
     ::descriptors
@@ -185,6 +187,7 @@ loom_cc_library(
     loom::ops::scalar
     loom::ops::scf
     loom::ops::type_registry
+    loom::ops::vector
     loom::rewrite::rewriter
     loom::target::low_legality
     loom::target::registers
@@ -297,6 +300,7 @@ loom_check_test_suite(
     "test/source_low/corpus/numeric_scalar_f32.loom-test"
     "test/source_low/corpus/numeric_scalar_i32.loom-test"
     "test/source_low/corpus/numeric_scalar_literals.loom-test"
+    "test/source_low/corpus/vector_carrier_structure.loom-test"
     "test/source_low/function_abi.loom-test"
     "test/source_low/function_contracts.loom-test"
     "test/source_low/function_values.loom-test"
@@ -312,6 +316,7 @@ loom_check_test_suite(
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_scalar_f32.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_scalar_i32.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_scalar_literals.loom-test"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/vector_carrier_structure.loom-test"
   TEST_NAME_PREFIX_TO_STRIP
     "test/source_low/"
 )

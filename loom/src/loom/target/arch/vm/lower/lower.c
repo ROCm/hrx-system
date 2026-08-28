@@ -23,6 +23,7 @@
 #include "loom/target/arch/vm/lower/kernel.h"
 #include "loom/target/arch/vm/lower/resources.h"
 #include "loom/target/arch/vm/lower/types.h"
+#include "loom/target/arch/vm/lower/vector.h"
 
 #define LOOM_VM_SOURCE_LOWERING_LIMITS(max_operand_count, max_result_count) \
   enum {                                                                    \
@@ -286,6 +287,9 @@ static iree_status_t loom_vm_select_op(void* user_data,
   IREE_RETURN_IF_ERROR(
       loom_vm_module_resource_try_select_op(context, source_op, out_plan));
   if (!loom_low_lower_plan_is_empty(*out_plan)) return iree_ok_status();
+  if (loom_vm_vector_try_select_op(module, source_op, out_plan)) {
+    return iree_ok_status();
+  }
 
   const uint8_t dialect_id = loom_op_dialect_id(source_op->kind);
   if (dialect_id >= IREE_ARRAYSIZE(kVmSourceLoweringDialectRanges)) {
@@ -342,6 +346,11 @@ static iree_status_t loom_vm_emit_op(void* user_data,
   IREE_RETURN_IF_ERROR(loom_vm_module_resource_emit_op(context, source_op, plan,
                                                        &resource_handled));
   if (resource_handled) return iree_ok_status();
+
+  bool vector_handled = false;
+  IREE_RETURN_IF_ERROR(
+      loom_vm_vector_emit_op(context, source_op, plan, &vector_handled));
+  if (vector_handled) return iree_ok_status();
 
   const loom_low_descriptor_set_t* descriptor_set =
       loom_low_lower_context_descriptor_set(context);

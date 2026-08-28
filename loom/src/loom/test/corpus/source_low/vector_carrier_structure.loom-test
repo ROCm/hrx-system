@@ -1,0 +1,42 @@
+// RUN: roundtrip
+
+func.def @vector_from_elements_extract(%a: i32, %b: i32, %c: i32, %d: i32) -> (vector<4xi32>, i32) {
+  %vector = vector.from_elements %a, %b, %c, %d : vector<4xi32>
+  %selected = vector.extract %vector[2] : vector<4xi32> -> i32
+  func.return %vector, %selected : vector<4xi32>, i32
+}
+
+// ====
+
+func.def @vector_extract_tail(%vector: vector<2x3xi32>) -> (vector<3xi32>) {
+  %result = vector.extract %vector[1] : vector<2x3xi32> -> vector<3xi32>
+  func.return %result : vector<3xi32>
+}
+
+// ====
+
+func.def @vector_insert_static(%vector: vector<4xf32>, %value: f32) -> (vector<4xf32>) {
+  %result = vector.insert %value into %vector[2] : f32, vector<4xf32>
+  func.return %result : vector<4xf32>
+}
+
+// ====
+
+func.def @vector_slice_tile(%vector: vector<3x4xi16>) -> (vector<2x2xi16>) {
+  %result = vector.slice %vector[1, 1] : vector<3x4xi16> -> vector<2x2xi16>
+  func.return %result : vector<2x2xi16>
+}
+
+// ====
+
+func.def @vector_concat_outer(%lhs: vector<1x2xi8>, %rhs: vector<2x2xi8>) -> (vector<3x2xi8>) {
+  %result = vector.concat<0> %lhs, %rhs : vector<1x2xi8>, vector<2x2xi8> -> vector<3x2xi8>
+  func.return %result : vector<3x2xi8>
+}
+
+// ====
+
+func.def @vector_concat_inner(%lhs: vector<2x1xi8>, %rhs: vector<2x2xi8>) -> (vector<2x3xi8>) {
+  %result = vector.concat<1> %lhs, %rhs : vector<2x1xi8>, vector<2x2xi8> -> vector<2x3xi8>
+  func.return %result : vector<2x3xi8>
+}
