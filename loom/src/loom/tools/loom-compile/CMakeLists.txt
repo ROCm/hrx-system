@@ -29,8 +29,8 @@ loom_cc_library(
     loom::ops::command
     loom::ops::op_defs
     loom::pass::builtin_registry
+    loom::target::arch::cmd::artifact_builder
     loom::target::arch::cmd::artifact_set
-    loom::target::arch::cmd::lower::program_plan_index
     loom::target::entry_selection
     loom::tooling::execution::session
     loom::tooling::io::file

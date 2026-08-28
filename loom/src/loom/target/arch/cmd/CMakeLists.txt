@@ -56,6 +56,24 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_library(
+  NAME
+    artifact_builder
+  HDRS
+    "artifact_builder.h"
+  SRCS
+    "artifact_builder.c"
+  DEPS
+    ::artifact_set
+    iree::base
+    iree::base::internal::arena
+    loom::link::materialization_environment
+    loom::link::module_index
+    loom::pass::registry
+    loom::target::arch::cmd::lower::program_plan_index
+  PUBLIC
+)
+
 loom_cc_test(
   NAME
     program_test

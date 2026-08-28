@@ -25,8 +25,8 @@ loom_cc_library(
     loom::ir
     loom::link::module_index
     loom::pass::builtin_registry
+    loom::target::arch::cmd::artifact_builder
     loom::target::arch::cmd::artifact_set
-    loom::target::arch::cmd::lower::program_plan_index
     loom::transforms::kernel::kernel_class_materializer
   PUBLIC
 )
