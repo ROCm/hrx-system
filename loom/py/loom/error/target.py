@@ -383,6 +383,22 @@ ERR_TARGET_027 = ErrorDef(
     ),
 )
 
+# ERR_TARGET_028: Function ABI override field has an invalid value type.
+ERR_TARGET_028 = ErrorDef(
+    domain=ErrorDomain.TARGET,
+    code=28,
+    severity=Severity.ERROR,
+    summary="Function ABI override field has an invalid value type.",
+    message=(
+        "function '@{function_name}' ABI override field '{field_name}' must "
+        "be a boolean"
+    ),
+    params=(
+        ErrorParam("function_name", ParamKind.STRING),
+        ErrorParam("field_name", ParamKind.STRING),
+    ),
+)
+
 # ERR_TARGET_029: Tied function results reached target-low lowering.
 ERR_TARGET_029 = ErrorDef(
     domain=ErrorDomain.TARGET,
@@ -1310,6 +1326,7 @@ ALL_TARGET_ERRORS = (
     ERR_TARGET_025,
     ERR_TARGET_026,
     ERR_TARGET_027,
+    ERR_TARGET_028,
     ERR_TARGET_029,
     ERR_TARGET_030,
     ERR_TARGET_031,

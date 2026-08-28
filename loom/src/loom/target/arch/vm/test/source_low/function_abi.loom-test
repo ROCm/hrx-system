@@ -1,0 +1,41 @@
+// RUN: emit source-low output=low
+
+vm.target<core> @target
+
+func.decl import("runtime", "wait") target(@target) abi(vm_function, {suspending = true}) @wait(%value: i32) -> (i32)
+
+func.def public target(@target) @caller(%value: i32) -> (i32) {
+  %result = func.call @wait(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+low.func.decl link("runtime", "wait") target<vm.core>(@target) abi(vm_function, {suspending = true}) abi_layout({signature = type<(reg<vm.value : i32>) -> (reg<vm.value : i32>)>}) @wait(%value: reg<vm.value : i32>) -> (reg<vm.value : i32>)
+
+low.func.def public target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i32>) -> (reg<vm.value : i32>)>}) @caller(%value: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+  %result = low.func.call @wait(%value) : (reg<vm.value : i32>) -> (reg<vm.value : i32>)
+  return %result
+}
+
+// ====
+
+vm.target<core> @target
+
+// ERROR@+1: TARGET/028 {function_name="wait", field_name="suspending"}
+func.decl import("runtime", "wait") target(@target) abi(vm_function, {suspending = 1}) @wait()
+
+// ====
+
+vm.target<core> @target
+
+// ERROR@+1: TARGET/021 {function_name="defined", field_name="suspending"}
+func.def target(@target) abi(vm_function, {suspending = true}) @defined() {
+  func.return
+}
+
+// ====
+
+vm.target<core> @target
+
+// ERROR@+1: TARGET/021 {function_name="wait", field_name="unknown"}
+func.decl import("runtime", "wait") target(@target) abi(vm_function, {unknown = true}) @wait()

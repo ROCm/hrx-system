@@ -16,7 +16,6 @@ from loom.dsl import (
     Op,
     OpPhase,
     SymbolDefinition,
-    TargetFactSpecialization,
     TargetLikeInterface,
 )
 
@@ -48,7 +47,7 @@ vm_target = Op(
             symbol="symbol",
             selector="kind",
             bundle_table="loom_vm_target_bundles",
-            fact_specialization=TargetFactSpecialization.STRUCTURAL,
+            fact_type="loom_vm_target_fact_type",
         )
     ],
     symbol_def=SymbolDefinition(

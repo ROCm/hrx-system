@@ -12,6 +12,24 @@ iree_add_all_subdirs()
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
+    facts
+  HDRS
+    "facts.h"
+  SRCS
+    "facts.c"
+  DEPS
+    iree::base
+    loom::error::error_defs
+    loom::ir
+    loom::ops::func_symbol_facts
+    loom::target::facts
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
     target_records
   HDRS
     "records/target_records.h"
@@ -46,6 +64,7 @@ loom_generated_cc_library(
   ARGS
     "--dialect=vm"
   DEPS
+    ::facts
     ::target_records
     iree::base
     loom::error::error_defs
@@ -246,6 +265,7 @@ loom_check_test_suite(
     "test/source_low/control_switch.loom-test"
     "test/source_low/corpus/numeric_scalar_baseline.loom-test"
     "test/source_low/corpus/numeric_scalar_literals.loom-test"
+    "test/source_low/function_abi.loom-test"
     "test/source_low/function_contracts.loom-test"
     "test/source_low/function_values.loom-test"
     "test/source_low/low_verification.loom-test"
