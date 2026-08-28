@@ -1,0 +1,382 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/vector_v4.loom-test
+// RUN: emit source-low output=low
+
+vm.target<core> @target
+func.def target(@target) @i32x4_arith(%lhs: vector<4xi32>, %rhs: vector<4xi32>) -> (vector<4xi32>) {
+  %sum = vector.addi %lhs, %rhs : vector<4xi32>
+  %diff = vector.subi %sum, %rhs : vector<4xi32>
+  func.return %diff : vector<4xi32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x4 : vector<4xi32>>, reg<vm.value x4 : vector<4xi32>>) -> (reg<vm.value x4 : vector<4xi32>>)>}) @i32x4_arith(%lhs: reg<vm.value x4 : vector<4xi32>>, %rhs: reg<vm.value x4 : vector<4xi32>>) -> (reg<vm.value x4 : vector<4xi32>>) asm {
+  return %lhs
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @f32x4_arith(%lhs: vector<4xf32>, %rhs: vector<4xf32>) -> (vector<4xf32>) {
+  %sum = vector.addf %lhs, %rhs : vector<4xf32>
+  %product = vector.mulf %sum, %rhs : vector<4xf32>
+  func.return %product : vector<4xf32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x4 : vector<4xf32>>, reg<vm.value x4 : vector<4xf32>>) -> (reg<vm.value x4 : vector<4xf32>>)>}) @f32x4_arith(%lhs: reg<vm.value x4 : vector<4xf32>>, %rhs: reg<vm.value x4 : vector<4xf32>>) -> (reg<vm.value x4 : vector<4xf32>>) asm {
+  %29 = slice %lhs[0] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %30 = slice %rhs[0] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %31 = float.add.f32 %29, %30 : reg<vm.value : f32>
+  %32 = float.mul.f32 %31, %30 : reg<vm.value : f32>
+  %33 = slice %lhs[1] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %34 = slice %rhs[1] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %35 = float.add.f32 %33, %34 : reg<vm.value : f32>
+  %36 = float.mul.f32 %35, %34 : reg<vm.value : f32>
+  %37 = slice %lhs[2] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %38 = slice %rhs[2] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %39 = float.add.f32 %37, %38 : reg<vm.value : f32>
+  %40 = float.mul.f32 %39, %38 : reg<vm.value : f32>
+  %41 = slice %lhs[3] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %42 = slice %rhs[3] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %43 = float.add.f32 %41, %42 : reg<vm.value : f32>
+  %44 = float.mul.f32 %43, %42 : reg<vm.value : f32>
+  %product = concat(%32, %36, %40, %44) : (reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>) -> reg<vm.value x4 : vector<4xf32>>
+  return %product
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @f32x4_lane_extract(%v: vector<4xf32>, %x: f32) -> (f32) {
+  %lane = vector.extract %v[2] : vector<4xf32> -> f32
+  %sum = scalar.addf %lane, %x : f32
+  func.return %sum : f32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x4 : vector<4xf32>>, reg<vm.value : f32>) -> (reg<vm.value : f32>)>}) @f32x4_lane_extract(%v: reg<vm.value x4 : vector<4xf32>>, %x: reg<vm.value : f32>) -> (reg<vm.value : f32>) asm {
+  %lane = slice %v[2] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %sum = float.add.f32 %lane, %x : reg<vm.value : f32>
+  return %sum
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @f32x4_lane_edit(%v: vector<4xf32>, %x: f32) -> (vector<4xf32>) {
+  %lane = vector.extract %v[1] : vector<4xf32> -> f32
+  %sum = scalar.addf %lane, %x : f32
+  %updated = vector.insert %sum into %v[2] : f32, vector<4xf32>
+  func.return %updated : vector<4xf32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x4 : vector<4xf32>>, reg<vm.value : f32>) -> (reg<vm.value x4 : vector<4xf32>>)>}) @f32x4_lane_edit(%v: reg<vm.value x4 : vector<4xf32>>, %x: reg<vm.value : f32>) -> (reg<vm.value x4 : vector<4xf32>>) asm {
+  %lane = slice %v[1] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %sum = float.add.f32 %lane, %x : reg<vm.value : f32>
+  %11 = slice %v[0] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value x2 : vector<2xf32>>
+  %12 = slice %v[3] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : vector<1xf32>>
+  %updated = concat(%11, %sum, %12) : (reg<vm.value x2 : vector<2xf32>>, reg<vm.value : f32>, reg<vm.value : vector<1xf32>>) -> reg<vm.value x4 : vector<4xf32>>
+  return %updated
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @i32x4_splat_add(%value: i32, %rhs: vector<4xi32>) -> (vector<4xi32>) {
+  %splat = vector.splat %value : vector<4xi32>
+  %sum = vector.addi %splat, %rhs : vector<4xi32>
+  func.return %sum : vector<4xi32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i32>, reg<vm.value x4 : vector<4xi32>>) -> (reg<vm.value x4 : vector<4xi32>>)>}) @i32x4_splat_add(%value: reg<vm.value : i32>, %rhs: reg<vm.value x4 : vector<4xi32>>) -> (reg<vm.value x4 : vector<4xi32>>) asm {
+  %17 = slice %rhs[0] : reg<vm.value x4 : vector<4xi32>> -> reg<vm.value : i32>
+  %18 = integer.add.i32 %value, %17 : reg<vm.value : i32>
+  %19 = slice %rhs[1] : reg<vm.value x4 : vector<4xi32>> -> reg<vm.value : i32>
+  %20 = integer.add.i32 %value, %19 : reg<vm.value : i32>
+  %21 = slice %rhs[2] : reg<vm.value x4 : vector<4xi32>> -> reg<vm.value : i32>
+  %22 = integer.add.i32 %value, %21 : reg<vm.value : i32>
+  %23 = slice %rhs[3] : reg<vm.value x4 : vector<4xi32>> -> reg<vm.value : i32>
+  %24 = integer.add.i32 %value, %23 : reg<vm.value : i32>
+  %sum = concat(%18, %20, %22, %24) : (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>) -> reg<vm.value x4 : vector<4xi32>>
+  return %sum
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @i32x4_lane_edit(%v: vector<4xi32>, %x: i32) -> (vector<4xi32>) {
+  %lane = vector.extract %v[1] : vector<4xi32> -> i32
+  %sum = scalar.addi %lane, %x : i32
+  %updated = vector.insert %sum into %v[2] : i32, vector<4xi32>
+  func.return %updated : vector<4xi32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x4 : vector<4xi32>>, reg<vm.value : i32>) -> (reg<vm.value x4 : vector<4xi32>>)>}) @i32x4_lane_edit(%v: reg<vm.value x4 : vector<4xi32>>, %x: reg<vm.value : i32>) -> (reg<vm.value x4 : vector<4xi32>>) asm {
+  %lane = slice %v[1] : reg<vm.value x4 : vector<4xi32>> -> reg<vm.value : i32>
+  %sum = integer.add.i32 %lane, %x : reg<vm.value : i32>
+  %11 = slice %v[0] : reg<vm.value x4 : vector<4xi32>> -> reg<vm.value x2 : vector<2xi32>>
+  %12 = slice %v[3] : reg<vm.value x4 : vector<4xi32>> -> reg<vm.value : vector<1xi32>>
+  %updated = concat(%11, %sum, %12) : (reg<vm.value x2 : vector<2xi32>>, reg<vm.value : i32>, reg<vm.value : vector<1xi32>>) -> reg<vm.value x4 : vector<4xi32>>
+  return %updated
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @i32x4_shuffle(%v: vector<4xi32>) -> (vector<4xi32>) {
+  %shuffled = vector.shuffle<[3, 2, 1, 0]> %v : vector<4xi32>
+  func.return %shuffled : vector<4xi32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x4 : vector<4xi32>>) -> (reg<vm.value x4 : vector<4xi32>>)>}) @i32x4_shuffle(%v: reg<vm.value x4 : vector<4xi32>>) -> (reg<vm.value x4 : vector<4xi32>>) asm {
+  %10 = slice %v[3] : reg<vm.value x4 : vector<4xi32>> -> reg<vm.value : i32>
+  %11 = slice %v[2] : reg<vm.value x4 : vector<4xi32>> -> reg<vm.value : i32>
+  %12 = slice %v[1] : reg<vm.value x4 : vector<4xi32>> -> reg<vm.value : i32>
+  %13 = slice %v[0] : reg<vm.value x4 : vector<4xi32>> -> reg<vm.value : i32>
+  %shuffled = concat(%10, %11, %12, %13) : (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>) -> reg<vm.value x4 : vector<4xi32>>
+  return %shuffled
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @i32x4_shuffle_reduce(%v: vector<4xi32>, %init: i32) -> (i32) {
+  %reversed = vector.shuffle<[3, 2, 1, 0]> %v : vector<4xi32>
+  %sum = vector.reduce<addi> %reversed, %init : vector<4xi32>, i32
+  func.return %sum : i32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x4 : vector<4xi32>>, reg<vm.value : i32>) -> (reg<vm.value : i32>)>}) @i32x4_shuffle_reduce(%v: reg<vm.value x4 : vector<4xi32>>, %init: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+  %16 = slice %v[3] : reg<vm.value x4 : vector<4xi32>> -> reg<vm.value : i32>
+  %17 = integer.add.i32 %init, %16 : reg<vm.value : i32>
+  %18 = slice %v[2] : reg<vm.value x4 : vector<4xi32>> -> reg<vm.value : i32>
+  %19 = integer.add.i32 %17, %18 : reg<vm.value : i32>
+  %20 = slice %v[1] : reg<vm.value x4 : vector<4xi32>> -> reg<vm.value : i32>
+  %21 = integer.add.i32 %19, %20 : reg<vm.value : i32>
+  %22 = slice %v[0] : reg<vm.value x4 : vector<4xi32>> -> reg<vm.value : i32>
+  %sum = integer.add.i32 %21, %22 : reg<vm.value : i32>
+  return %sum
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @f32x4_shuffle(%v: vector<4xf32>) -> (vector<4xf32>) {
+  %shuffled = vector.shuffle<[3, 1, 2, 0]> %v : vector<4xf32>
+  func.return %shuffled : vector<4xf32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x4 : vector<4xf32>>) -> (reg<vm.value x4 : vector<4xf32>>)>}) @f32x4_shuffle(%v: reg<vm.value x4 : vector<4xf32>>) -> (reg<vm.value x4 : vector<4xf32>>) asm {
+  %10 = slice %v[3] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %11 = slice %v[1] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %12 = slice %v[2] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %13 = slice %v[0] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %shuffled = concat(%10, %11, %12, %13) : (reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>) -> reg<vm.value x4 : vector<4xf32>>
+  return %shuffled
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @f32x4_shuffle_reduce(%v: vector<4xf32>, %init: f32) -> (f32) {
+  %shuffled = vector.shuffle<[3, 1, 2, 0]> %v : vector<4xf32>
+  %sum = vector.reduce<addf> %shuffled, %init : vector<4xf32>, f32
+  func.return %sum : f32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x4 : vector<4xf32>>, reg<vm.value : f32>) -> (reg<vm.value : f32>)>}) @f32x4_shuffle_reduce(%v: reg<vm.value x4 : vector<4xf32>>, %init: reg<vm.value : f32>) -> (reg<vm.value : f32>) asm {
+  %16 = slice %v[3] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %17 = float.add.f32 %init, %16 : reg<vm.value : f32>
+  %18 = slice %v[1] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %19 = float.add.f32 %17, %18 : reg<vm.value : f32>
+  %20 = slice %v[2] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %21 = float.add.f32 %19, %20 : reg<vm.value : f32>
+  %22 = slice %v[0] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %sum = float.add.f32 %21, %22 : reg<vm.value : f32>
+  return %sum
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @i32x4_select(%lhs: vector<4xi32>, %rhs: vector<4xi32>, %true_value: vector<4xi32>, %false_value: vector<4xi32>) -> (vector<4xi32>) {
+  %mask = vector.cmpi slt, %lhs, %rhs : vector<4xi32> -> vector<4xi1>
+  %selected = vector.select %mask, %true_value, %false_value : vector<4xi32>
+  func.return %selected : vector<4xi32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x4 : vector<4xi32>>, reg<vm.value x4 : vector<4xi32>>, reg<vm.value x4 : vector<4xi32>>, reg<vm.value x4 : vector<4xi32>>) -> (reg<vm.value x4 : vector<4xi32>>)>}) @i32x4_select(%lhs: reg<vm.value x4 : vector<4xi32>>, %rhs: reg<vm.value x4 : vector<4xi32>>, %true_value: reg<vm.value x4 : vector<4xi32>>, %false_value: reg<vm.value x4 : vector<4xi32>>) -> (reg<vm.value x4 : vector<4xi32>>) asm {
+  %37 = slice %lhs[0] : reg<vm.value x4 : vector<4xi32>> -> reg<vm.value : i32>
+  %38 = slice %rhs[0] : reg<vm.value x4 : vector<4xi32>> -> reg<vm.value : i32>
+  %39 = integer.compare.i32 %37, %38, slt : reg<vm.value : i1>
+  %40 = slice %true_value[0] : reg<vm.value x4 : vector<4xi32>> -> reg<vm.value : i32>
+  %41 = slice %false_value[0] : reg<vm.value x4 : vector<4xi32>> -> reg<vm.value : i32>
+  %42 = value.select %39, %40, %41 : reg<vm.value : i32>
+  %43 = slice %lhs[1] : reg<vm.value x4 : vector<4xi32>> -> reg<vm.value : i32>
+  %44 = slice %rhs[1] : reg<vm.value x4 : vector<4xi32>> -> reg<vm.value : i32>
+  %45 = integer.compare.i32 %43, %44, slt : reg<vm.value : i1>
+  %46 = slice %true_value[1] : reg<vm.value x4 : vector<4xi32>> -> reg<vm.value : i32>
+  %47 = slice %false_value[1] : reg<vm.value x4 : vector<4xi32>> -> reg<vm.value : i32>
+  %48 = value.select %45, %46, %47 : reg<vm.value : i32>
+  %49 = slice %lhs[2] : reg<vm.value x4 : vector<4xi32>> -> reg<vm.value : i32>
+  %50 = slice %rhs[2] : reg<vm.value x4 : vector<4xi32>> -> reg<vm.value : i32>
+  %51 = integer.compare.i32 %49, %50, slt : reg<vm.value : i1>
+  %52 = slice %true_value[2] : reg<vm.value x4 : vector<4xi32>> -> reg<vm.value : i32>
+  %53 = slice %false_value[2] : reg<vm.value x4 : vector<4xi32>> -> reg<vm.value : i32>
+  %54 = value.select %51, %52, %53 : reg<vm.value : i32>
+  %55 = slice %lhs[3] : reg<vm.value x4 : vector<4xi32>> -> reg<vm.value : i32>
+  %56 = slice %rhs[3] : reg<vm.value x4 : vector<4xi32>> -> reg<vm.value : i32>
+  %57 = integer.compare.i32 %55, %56, slt : reg<vm.value : i1>
+  %58 = slice %true_value[3] : reg<vm.value x4 : vector<4xi32>> -> reg<vm.value : i32>
+  %59 = slice %false_value[3] : reg<vm.value x4 : vector<4xi32>> -> reg<vm.value : i32>
+  %60 = value.select %57, %58, %59 : reg<vm.value : i32>
+  %selected = concat(%42, %48, %54, %60) : (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>) -> reg<vm.value x4 : vector<4xi32>>
+  return %selected
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @f32x4_select(%lhs: vector<4xf32>, %rhs: vector<4xf32>, %true_value: vector<4xf32>, %false_value: vector<4xf32>) -> (vector<4xf32>) {
+  %mask = vector.cmpf olt, %lhs, %rhs : vector<4xf32> -> vector<4xi1>
+  %selected = vector.select %mask, %true_value, %false_value : vector<4xf32>
+  func.return %selected : vector<4xf32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x4 : vector<4xf32>>, reg<vm.value x4 : vector<4xf32>>, reg<vm.value x4 : vector<4xf32>>, reg<vm.value x4 : vector<4xf32>>) -> (reg<vm.value x4 : vector<4xf32>>)>}) @f32x4_select(%lhs: reg<vm.value x4 : vector<4xf32>>, %rhs: reg<vm.value x4 : vector<4xf32>>, %true_value: reg<vm.value x4 : vector<4xf32>>, %false_value: reg<vm.value x4 : vector<4xf32>>) -> (reg<vm.value x4 : vector<4xf32>>) asm {
+  %37 = slice %lhs[0] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %38 = slice %rhs[0] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %39 = float.compare.f32 %37, %38, olt : reg<vm.value : i1>
+  %40 = slice %true_value[0] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %41 = slice %false_value[0] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %42 = value.select %39, %40, %41 : reg<vm.value : f32>
+  %43 = slice %lhs[1] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %44 = slice %rhs[1] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %45 = float.compare.f32 %43, %44, olt : reg<vm.value : i1>
+  %46 = slice %true_value[1] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %47 = slice %false_value[1] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %48 = value.select %45, %46, %47 : reg<vm.value : f32>
+  %49 = slice %lhs[2] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %50 = slice %rhs[2] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %51 = float.compare.f32 %49, %50, olt : reg<vm.value : i1>
+  %52 = slice %true_value[2] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %53 = slice %false_value[2] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %54 = value.select %51, %52, %53 : reg<vm.value : f32>
+  %55 = slice %lhs[3] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %56 = slice %rhs[3] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %57 = float.compare.f32 %55, %56, olt : reg<vm.value : i1>
+  %58 = slice %true_value[3] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %59 = slice %false_value[3] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %60 = value.select %57, %58, %59 : reg<vm.value : f32>
+  %selected = concat(%42, %48, %54, %60) : (reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>) -> reg<vm.value x4 : vector<4xf32>>
+  return %selected
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @i32x4_memory_copy(%input: buffer, %output: buffer) {
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<4xi32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<4xi32>
+  %loaded = vector.load %input_view[0] : view<4xi32> -> vector<4xi32>
+  vector.store %loaded, %output_view[0] : vector<4xi32>, view<4xi32>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>}) @i32x4_memory_copy(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>) asm {
+  %8 = constant.zero : reg<vm.value : offset>
+  %loaded = buffer.load %input, %8, %8, 0, i32.x4 : reg<vm.value x4 : vector<4xi32>>
+  buffer.store %output, %8, %8, %loaded, 0, i32.x4
+  return
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @i32x4_memory_indexed(%input: buffer, %output: buffer, %i: index) {
+  %bounded_i = index.assume %i [range(%i, 0, 12)] : index
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<16xi32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<16xi32>
+  %loaded = vector.load %input_view[%bounded_i] : view<16xi32> -> vector<4xi32>
+  vector.store %loaded, %output_view[%bounded_i] : vector<4xi32>, view<16xi32>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>) -> ()>}) @i32x4_memory_indexed(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %bounded_i: reg<vm.value : index>) asm {
+  %11 = constant.zero : reg<vm.value : offset>
+  %loaded = buffer.load %input, %11, %bounded_i, 4, i32.x4 : reg<vm.value x4 : vector<4xi32>>
+  buffer.store %output, %11, %bounded_i, %loaded, 4, i32.x4
+  return
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @f32x4_memory_copy(%input: buffer, %output: buffer) {
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<4xf32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<4xf32>
+  %loaded = vector.load %input_view[0] : view<4xf32> -> vector<4xf32>
+  vector.store %loaded, %output_view[0] : vector<4xf32>, view<4xf32>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>}) @f32x4_memory_copy(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>) asm {
+  %8 = constant.zero : reg<vm.value : offset>
+  %loaded = buffer.load %input, %8, %8, 0, i32.x4 : reg<vm.value x4 : vector<4xf32>>
+  buffer.store %output, %8, %8, %loaded, 0, i32.x4
+  return
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @f32x4_memory_indexed_add(%lhs: buffer, %rhs: buffer, %output: buffer, %i: index) {
+  %bounded_i = index.assume %i [range(%i, 0, 12)] : index
+  %buffer_base = index.constant 0 : offset
+  %lhs_view = buffer.view %lhs[%buffer_base] : buffer -> view<16xf32>
+  %rhs_view = buffer.view %rhs[%buffer_base] : buffer -> view<16xf32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<16xf32>
+  %lhs_v = vector.load %lhs_view[%bounded_i] : view<16xf32> -> vector<4xf32>
+  %rhs_v = vector.load %rhs_view[%bounded_i] : view<16xf32> -> vector<4xf32>
+  %sum = vector.addf %lhs_v, %rhs_v : vector<4xf32>
+  vector.store %sum, %output_view[%bounded_i] : vector<4xf32>, view<16xf32>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>) -> ()>}) @f32x4_memory_indexed_add(%lhs: reg<vm.ref : buffer>, %rhs: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %bounded_i: reg<vm.value : index>) asm {
+  %41 = constant.zero : reg<vm.value : offset>
+  %42 = buffer.load %lhs, %41, %bounded_i, 4, i32.x1 : reg<vm.value : f32>
+  %44 = buffer.load %rhs, %41, %bounded_i, 4, i32.x1 : reg<vm.value : f32>
+  %45 = float.add.f32 %42, %44 : reg<vm.value : f32>
+  %46 = constant.s16 4 : reg<vm.value : offset>
+  %47 = buffer.load %lhs, %46, %bounded_i, 4, i32.x1 : reg<vm.value : f32>
+  %49 = buffer.load %rhs, %46, %bounded_i, 4, i32.x1 : reg<vm.value : f32>
+  %50 = float.add.f32 %47, %49 : reg<vm.value : f32>
+  %51 = constant.s16 8 : reg<vm.value : offset>
+  %52 = buffer.load %lhs, %51, %bounded_i, 4, i32.x1 : reg<vm.value : f32>
+  %54 = buffer.load %rhs, %51, %bounded_i, 4, i32.x1 : reg<vm.value : f32>
+  %55 = float.add.f32 %52, %54 : reg<vm.value : f32>
+  %56 = constant.s16 12 : reg<vm.value : offset>
+  %57 = buffer.load %lhs, %56, %bounded_i, 4, i32.x1 : reg<vm.value : f32>
+  %59 = buffer.load %rhs, %56, %bounded_i, 4, i32.x1 : reg<vm.value : f32>
+  %60 = float.add.f32 %57, %59 : reg<vm.value : f32>
+  %sum = concat(%45, %50, %55, %60) : (reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>) -> reg<vm.value x4 : vector<4xf32>>
+  buffer.store %output, %41, %bounded_i, %sum, 4, i32.x4
+  return
+}

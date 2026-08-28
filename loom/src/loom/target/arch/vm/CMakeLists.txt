@@ -233,6 +233,7 @@ loom_cc_library(
     "constants/materialization.h"
     "contracts/materialization.h"
     "initialization.h"
+    "legalization.h"
     "math_policy.h"
     "pass_registry.h"
     "provider.h"
@@ -241,6 +242,7 @@ loom_cc_library(
     "constants/materialization.c"
     "contracts/materialization.c"
     "initialization.c"
+    "legalization.c"
     "math_policy.c"
     "pass_registry.c"
     "provider.c"
@@ -261,14 +263,17 @@ loom_cc_library(
     loom::ops::global
     loom::ops::low
     loom::ops::op_defs
+    loom::ops::vector
     loom::pass::builder
     loom::pass::registry
     loom::pass::types
     loom::rewrite::rewriter
+    loom::target::legalization
     loom::target::low_descriptor_registry
     loom::target::math_policy
     loom::target::provider
     loom::target::types
+    loom::transforms::vector::to_scalar
     loom::util::adaptive_sort
     loom::util::walk
   PUBLIC
@@ -311,6 +316,7 @@ loom_check_test_suite(
     "test/source_low/corpus/numeric_scalar_i32.loom-test"
     "test/source_low/corpus/numeric_scalar_literals.loom-test"
     "test/source_low/corpus/vector_carrier_structure.loom-test"
+    "test/source_low/corpus/vector_v4.loom-test"
     "test/source_low/function_abi.loom-test"
     "test/source_low/function_contracts.loom-test"
     "test/source_low/function_values.loom-test"
@@ -321,6 +327,7 @@ loom_check_test_suite(
     "test/source_low/program_failure.loom-test"
     "test/source_low/scalar_diagnostics.loom-test"
     "test/source_low/selector_assembly.loom-test"
+    "test/source_low/vector_construction.loom-test"
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/memory_scalar_addressing.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/memory_vector_baseline.loom-test"
@@ -330,6 +337,7 @@ loom_check_test_suite(
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_scalar_i32.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_scalar_literals.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/vector_carrier_structure.loom-test"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/vector_v4.loom-test"
   TEST_NAME_PREFIX_TO_STRIP
     "test/source_low/"
 )

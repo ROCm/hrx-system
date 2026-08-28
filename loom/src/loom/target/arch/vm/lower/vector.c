@@ -13,6 +13,7 @@
 #include "loom/ops/vector/ops.h"
 #include "loom/target/arch/vm/abi/layout.h"
 #include "loom/target/arch/vm/descriptors.h"
+#include "loom/target/arch/vm/lower/constants.h"
 #include "loom/target/arch/vm/records/target_records.h"
 #include "loom/target/registers.h"
 
@@ -24,12 +25,18 @@ enum loom_vm_vector_plan_kind_e {
   LOOM_VM_VECTOR_PLAN_KIND_INSERT = 3,
   LOOM_VM_VECTOR_PLAN_KIND_SLICE = 4,
   LOOM_VM_VECTOR_PLAN_KIND_CONCAT = 5,
+  LOOM_VM_VECTOR_PLAN_KIND_CONSTANT = 6,
+  LOOM_VM_VECTOR_PLAN_KIND_SPLAT = 7,
 };
 
 #define LOOM_VM_VECTOR_OP_INDEX(op_kind) ((op_kind) & 0xFFu)
 
 static const loom_vm_vector_plan_kind_t
     kLoomVmVectorPlanKinds[LOOM_OP_VECTOR_COUNT_] = {
+        [LOOM_VM_VECTOR_OP_INDEX(LOOM_OP_VECTOR_CONSTANT)] =
+            LOOM_VM_VECTOR_PLAN_KIND_CONSTANT,
+        [LOOM_VM_VECTOR_OP_INDEX(LOOM_OP_VECTOR_SPLAT)] =
+            LOOM_VM_VECTOR_PLAN_KIND_SPLAT,
         [LOOM_VM_VECTOR_OP_INDEX(LOOM_OP_VECTOR_FROM_ELEMENTS)] =
             LOOM_VM_VECTOR_PLAN_KIND_FROM_ELEMENTS,
         [LOOM_VM_VECTOR_OP_INDEX(LOOM_OP_VECTOR_EXTRACT)] =
@@ -147,6 +154,29 @@ static bool loom_vm_vector_can_lower(const loom_module_t* module,
                                      const loom_op_t* source_op,
                                      loom_vm_vector_plan_kind_t plan_kind) {
   switch (plan_kind) {
+    case LOOM_VM_VECTOR_PLAN_KIND_CONSTANT: {
+      uint16_t result_unit_count = 0;
+      return loom_vm_vector_try_get_unit_count(
+          module,
+          loom_module_value_type(module,
+                                 loom_vector_constant_result(source_op)),
+          &result_unit_count);
+    }
+    case LOOM_VM_VECTOR_PLAN_KIND_SPLAT: {
+      uint16_t result_unit_count = 0;
+      uint16_t scalar_unit_count = 0;
+      return loom_vm_vector_try_get_unit_count(
+                 module,
+                 loom_module_value_type(module,
+                                        loom_vector_splat_result(source_op)),
+                 &result_unit_count) &&
+             loom_vm_vector_try_get_value_unit_count(
+                 module,
+                 loom_module_value_type(module,
+                                        loom_vector_splat_scalar(source_op)),
+                 &scalar_unit_count) &&
+             scalar_unit_count == 1;
+    }
     case LOOM_VM_VECTOR_PLAN_KIND_FROM_ELEMENTS: {
       const loom_value_id_t result =
           loom_vector_from_elements_result(source_op);
@@ -457,6 +487,53 @@ static iree_status_t loom_vm_vector_emit_from_elements(
       loom_vector_from_elements_result(source_op));
 }
 
+static iree_status_t loom_vm_vector_emit_splat_value(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t low_scalar, loom_value_id_t source_result) {
+  const loom_module_t* module = loom_low_lower_context_module(context);
+  uint16_t result_unit_count = 0;
+  const bool has_unit_count = loom_vm_vector_try_get_unit_count(
+      module, loom_module_value_type(module, source_result),
+      &result_unit_count);
+  IREE_ASSERT(has_unit_count);
+  (void)has_unit_count;
+  loom_value_id_t low_elements[LOOM_VM_CALL_ABI_MAX_FIELD_UNIT_COUNT];
+  for (uint16_t i = 0; i < result_unit_count; ++i) {
+    low_elements[i] = low_scalar;
+  }
+  return loom_vm_vector_emit_concat(context, source_op, low_elements,
+                                    result_unit_count, source_result);
+}
+
+static iree_status_t loom_vm_vector_emit_constant(
+    loom_low_lower_context_t* context, const loom_op_t* source_op) {
+  const loom_module_t* module = loom_low_lower_context_module(context);
+  const loom_value_id_t result = loom_vector_constant_result(source_op);
+  const loom_type_t result_type = loom_module_value_type(module, result);
+  const loom_scalar_type_t element_type = loom_type_element_type(result_type);
+  loom_type_t low_scalar_type = loom_type_none();
+  IREE_RETURN_IF_ERROR(loom_low_lower_make_typed_register_type(
+      context, VM_CORE_REG_CLASS_ID_VALUE, /*unit_count=*/1,
+      loom_type_scalar(element_type), &low_scalar_type));
+  const uint64_t bits = loom_vm_constant_bits_from_scalar_attr(
+      element_type, loom_vector_constant_value(source_op));
+  loom_value_id_t low_scalar = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_vm_inline_constant_build(
+      loom_low_lower_context_builder(context), bits, low_scalar_type,
+      source_op->location, &low_scalar));
+  return loom_vm_vector_emit_splat_value(context, source_op, low_scalar,
+                                         result);
+}
+
+static iree_status_t loom_vm_vector_emit_splat(
+    loom_low_lower_context_t* context, const loom_op_t* source_op) {
+  loom_value_id_t low_scalar = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_low_lower_lookup_value(
+      context, loom_vector_splat_scalar(source_op), &low_scalar));
+  return loom_vm_vector_emit_splat_value(context, source_op, low_scalar,
+                                         loom_vector_splat_result(source_op));
+}
+
 static iree_status_t loom_vm_vector_emit_extract(
     loom_low_lower_context_t* context, const loom_op_t* source_op) {
   const loom_module_t* module = loom_low_lower_context_module(context);
@@ -615,6 +692,10 @@ iree_status_t loom_vm_vector_emit_op(loom_low_lower_context_t* context,
   *out_handled = loom_vm_vector_plan_is_selected(plan);
   if (!*out_handled) return iree_ok_status();
   switch (loom_vm_vector_plan_kind_for_plan(plan)) {
+    case LOOM_VM_VECTOR_PLAN_KIND_CONSTANT:
+      return loom_vm_vector_emit_constant(context, source_op);
+    case LOOM_VM_VECTOR_PLAN_KIND_SPLAT:
+      return loom_vm_vector_emit_splat(context, source_op);
     case LOOM_VM_VECTOR_PLAN_KIND_FROM_ELEMENTS:
       return loom_vm_vector_emit_from_elements(context, source_op);
     case LOOM_VM_VECTOR_PLAN_KIND_EXTRACT:

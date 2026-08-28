@@ -718,17 +718,31 @@ static iree_status_t loom_vector_to_scalar_lower_descriptor_op(
   return loom_vector_to_scalar_replace_one_result(&state, replacement);
 }
 
-static iree_status_t loom_vector_to_scalar_lower_op(loom_pass_t* pass,
-                                                    loom_rewriter_t* rewriter,
-                                                    loom_op_t* op) {
+iree_status_t loom_vector_to_scalar_rewrite_op(loom_pass_t* pass,
+                                               loom_rewriter_t* rewriter,
+                                               loom_op_t* op,
+                                               bool* out_rewritten) {
+  *out_rewritten = false;
   loom_builder_set_before(&rewriter->builder, op);
   bool handled = false;
   IREE_RETURN_IF_ERROR(
       loom_vector_to_scalar_try_direct_lowerer(pass, rewriter, op, &handled));
-  if (handled) {
-    return iree_ok_status();
+  if (!handled) {
+    IREE_RETURN_IF_ERROR(
+        loom_vector_to_scalar_lower_descriptor_op(pass, rewriter, op));
   }
-  return loom_vector_to_scalar_lower_descriptor_op(pass, rewriter, op);
+  if (!loom_pass_has_error_diagnostics(pass) &&
+      iree_any_bit_set(op->flags, LOOM_OP_FLAG_DEAD)) {
+    *out_rewritten = true;
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_vector_to_scalar_lower_op(loom_pass_t* pass,
+                                                    loom_rewriter_t* rewriter,
+                                                    loom_op_t* op) {
+  bool rewritten = false;
+  return loom_vector_to_scalar_rewrite_op(pass, rewriter, op, &rewritten);
 }
 
 static iree_status_t loom_vector_reduce_axes_to_scalar_lower_op(

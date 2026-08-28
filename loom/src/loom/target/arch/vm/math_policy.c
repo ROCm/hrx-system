@@ -27,8 +27,9 @@ static void loom_vm_math_policy_query(
     const loom_target_math_query_t* query,
     loom_target_math_policy_decision_t* out_decision) {
   (void)policy;
-  if (query->lane_domain != LOOM_TARGET_MATH_LANE_DOMAIN_SCALAR) {
-    *out_decision = loom_vm_math_reject(IREE_SV("math.scalar"));
+  if (query->lane_domain != LOOM_TARGET_MATH_LANE_DOMAIN_SCALAR &&
+      query->lane_domain != LOOM_TARGET_MATH_LANE_DOMAIN_VECTOR) {
+    *out_decision = loom_vm_math_reject(IREE_SV("math.lane.scalar_vector"));
     return;
   }
   if (query->element_type != LOOM_SCALAR_TYPE_F32 &&
@@ -41,7 +42,7 @@ static void loom_vm_math_policy_query(
     case LOOM_TARGET_MATH_OP_GELUF_ERF:
     case LOOM_TARGET_MATH_OP_GELUF_TANH:
     case LOOM_TARGET_MATH_OP_GELUF_LOGISTIC:
-      *out_decision = loom_vm_math_reject(IREE_SV("math.op.native_scalar"));
+      *out_decision = loom_vm_math_reject(IREE_SV("math.op.supported"));
       return;
     case LOOM_TARGET_MATH_OP_LOGISTICF:
     case LOOM_TARGET_MATH_OP_SILUF:
@@ -66,7 +67,7 @@ static void loom_vm_math_policy_query(
       break;
   }
 
-  *out_decision = loom_vm_math_keep(IREE_SV("math.op.native_scalar"));
+  *out_decision = loom_vm_math_keep(IREE_SV("math.op.scalarizable"));
 }
 
 static const loom_target_math_policy_t kVmMathPolicy = {

@@ -9,6 +9,7 @@
 #include "loom/ir/module.h"
 #include "loom/pass/builder.h"
 #include "loom/target/arch/vm/descriptors.h"
+#include "loom/target/arch/vm/legalization.h"
 #include "loom/target/arch/vm/low_verify.h"
 #include "loom/target/arch/vm/lower/arithmetic.h"
 #include "loom/target/arch/vm/lower/kernel.h"
@@ -32,6 +33,11 @@ static void loom_vm_low_descriptor_registry_initialize(
 
 static const loom_low_verify_provider_t* const kLoomVmLowVerifyProviders[] = {
     &loom_vm_low_verify_provider,
+};
+
+static const loom_target_legalizer_provider_t* const
+    kLoomVmLegalizerProviders[] = {
+        &loom_vm_legalizer_provider,
 };
 
 static const loom_target_low_legality_provider_t* const
@@ -114,6 +120,11 @@ const loom_target_provider_t loom_vm_target_provider = {
     .initialize_low_lower_policy_registry =
         loom_vm_low_lower_policy_registry_initialize,
     .initialize_math_policy_registry = loom_vm_math_policy_registry_initialize,
+    .legalizer_provider_list =
+        {
+            .count = IREE_ARRAYSIZE(kLoomVmLegalizerProviders),
+            .values = kLoomVmLegalizerProviders,
+        },
     .low_legality_provider_list =
         {
             .count = IREE_ARRAYSIZE(kLoomVmLowLegalityProviders),

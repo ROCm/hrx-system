@@ -3,7 +3,7 @@
 vm.target<core> @target
 
 func.def target(@target) @scalar_geluf_requires_legalization(%input: f32) -> (f32) {
-  // ERROR@+1: LOWERING/036 {op_name="scalar.geluf", phase_name="legalize-math", policy_name="vm-math", math_op="geluf.erf", lane_domain="scalar", element_type="f32", constraint_key="math.op.native_scalar"}
+  // ERROR@+1: LOWERING/036 {op_name="scalar.geluf", phase_name="legalize-math", policy_name="vm-math", math_op="geluf.erf", lane_domain="scalar", element_type="f32", constraint_key="math.op.supported"}
   %result = scalar.geluf<erf> %input : f32
   func.return %result : f32
 }

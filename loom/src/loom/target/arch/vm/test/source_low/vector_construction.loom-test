@@ -1,0 +1,28 @@
+// RUN: emit source-low output=low
+
+vm.target<core> @target
+func.def target(@target) @vector_constant() -> (vector<4xi16>) {
+  %result = vector.constant 7 : vector<4xi16>
+  func.return %result : vector<4xi16>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<() -> (reg<vm.value x4 : vector<4xi16>>)>}) @vector_constant() -> (reg<vm.value x4 : vector<4xi16>>) asm {
+  %3 = constant.s16 7 : reg<vm.value : i16>
+  %result = concat(%3, %3, %3, %3) : (reg<vm.value : i16>, reg<vm.value : i16>, reg<vm.value : i16>, reg<vm.value : i16>) -> reg<vm.value x4 : vector<4xi16>>
+  return %result
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @vector_splat(%value: f32) -> (vector<4xf32>) {
+  %result = vector.splat %value : vector<4xf32>
+  func.return %result : vector<4xf32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : f32>) -> (reg<vm.value x4 : vector<4xf32>>)>}) @vector_splat(%value: reg<vm.value : f32>) -> (reg<vm.value x4 : vector<4xf32>>) asm {
+  %result = concat(%value, %value, %value, %value) : (reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>) -> reg<vm.value x4 : vector<4xf32>>
+  return %result
+}
