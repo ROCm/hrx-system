@@ -753,6 +753,68 @@ low_func_call_indirect = Op(
 )
 
 # ============================================================================
+# low.func.null — typed null function reference
+# ============================================================================
+
+low_func_null = Op(
+    "low.func.null",
+    group=low_ops,
+    builder_name="func_null",
+    doc="Produce a null first-class function value in a low function register.",
+    results=[Result("result", REGISTER)],
+    traits=[PURE],
+    verify="loom_low_func_null_verify",
+    format=[COLON, ResultType("result")],
+    examples=["%null = low.func.null : reg<test.ptr : func.ref<(i32) -> (i32)>>"],
+)
+
+# ============================================================================
+# low.func.compare.null — null function-reference test
+# ============================================================================
+
+low_func_compare_null = Op(
+    "low.func.compare.null",
+    group=low_ops,
+    builder_name="func_compare_null",
+    doc="Return true when a low function-register value is null.",
+    operands=[Operand("function", REGISTER)],
+    results=[Result("result", REGISTER)],
+    traits=[PURE],
+    verify="loom_low_func_compare_null_verify",
+    format=[
+        Ref("function"),
+        COLON,
+        TypeOf("function"),
+        ARROW,
+        ResultType("result"),
+    ],
+    examples=["%is_null = low.func.compare.null %function : reg<test.ptr : func.ref<(i32) -> (i32)>> -> reg<test.i32 : i1>"],
+)
+
+# ============================================================================
+# low.func.address — symbolic function address
+# ============================================================================
+
+low_func_address = Op(
+    "low.func.address",
+    group=low_ops,
+    builder_name="func_address",
+    doc="Produce a low function-register value addressing a callable symbol.",
+    attrs=[
+        AttrDef(
+            "callee",
+            "symbol",
+            symbol_ref=SymbolReference("function", ["callable"]),
+        ),
+    ],
+    results=[Result("result", REGISTER)],
+    traits=[PURE],
+    verify="loom_low_func_address_verify",
+    format=[SymbolRef("callee"), COLON, ResultType("result")],
+    examples=["%function = low.func.address @callee : reg<test.ptr : func.ref<(i32) -> (i32)>>"],
+)
+
+# ============================================================================
 # low.func.ref.cast — zero-cost function-reference permission widening
 # ============================================================================
 
@@ -778,6 +840,29 @@ low_func_ref_cast = Op(
         ResultType("result"),
     ],
     examples=["%yieldable = low.func.ref.cast %sync : reg<test.ptr : func.ref<(i32) -> (i32)>> to reg<test.ptr : func.ref<yieldable (i32) -> (i32)>>"],
+)
+
+# ============================================================================
+# low.func.import.resolved — optional import availability query
+# ============================================================================
+
+low_func_import_resolved = Op(
+    "low.func.import.resolved",
+    group=low_ops,
+    builder_name="func_import_resolved",
+    doc="Return true when an optional linked low function resolved.",
+    attrs=[
+        AttrDef(
+            "callee",
+            "symbol",
+            symbol_ref=SymbolReference("function", ["callable"]),
+        ),
+    ],
+    results=[Result("result", REGISTER)],
+    traits=[PURE],
+    verify="loom_low_func_import_resolved_verify",
+    format=[SymbolRef("callee"), COLON, ResultType("result")],
+    examples=["%available = low.func.import.resolved @optional_feature : reg<test.i32 : i1>"],
 )
 
 # ============================================================================
@@ -1609,6 +1694,7 @@ low_reload = Op(
 low_storage_address = Op(
     "low.storage.address",
     group=low_ops,
+    builder_name="address",
     phase=OpPhase.EXECUTABLE,
     doc="Materialize a target address for function-local storage.",
     operands=[Operand("storage", STORAGE)],
@@ -1766,7 +1852,11 @@ ALL_LOW_OPS: tuple[Op, ...] = (
     low_return,
     low_func_call,
     low_func_call_indirect,
+    low_func_null,
+    low_func_compare_null,
+    low_func_address,
     low_func_ref_cast,
+    low_func_import_resolved,
     low_op,
     low_const,
     low_copy,

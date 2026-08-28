@@ -390,6 +390,34 @@ iree_status_t loom_function_type_contract_verify(
   return iree_ok_status();
 }
 
+iree_status_t loom_function_optional_import_contract_verify(
+    const loom_module_t* module, const loom_op_t* op, loom_symbol_ref_t callee,
+    uint16_t callee_attr_index, iree_diagnostic_emitter_t emitter) {
+  const loom_symbol_t* symbol =
+      loom_function_contract_lookup_symbol(module, callee);
+  if (!symbol) return iree_ok_status();
+
+  const loom_func_like_t function =
+      loom_func_like_cast(module, symbol->defining_op);
+  if (loom_func_like_isa(function) &&
+      loom_func_like_import_policy(function) != 0) {
+    return iree_ok_status();
+  }
+
+  const loom_diagnostic_param_t params[] = {
+      loom_param_with_field_ref(
+          loom_param_string(loom_function_contract_symbol_name(module, symbol)),
+          loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE,
+                                    callee_attr_index)),
+      loom_param_string(
+          loom_symbol_definition_descriptor_name(symbol->definition)),
+      loom_param_string(IREE_SV("optional function import")),
+  };
+  return loom_function_contract_emit_related(emitter, op, symbol->defining_op,
+                                             LOOM_ERR_SYMBOL_003, params,
+                                             IREE_ARRAYSIZE(params));
+}
+
 static iree_status_t loom_function_provider_family_contract_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter) {

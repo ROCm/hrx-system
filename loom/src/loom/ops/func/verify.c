@@ -96,16 +96,6 @@ static iree_status_t loom_func_emit_ref_constraint(
                         params, IREE_ARRAYSIZE(params));
 }
 
-static const loom_symbol_t* loom_func_lookup_defined_symbol(
-    const loom_module_t* module, loom_symbol_ref_t symbol_ref) {
-  if (!loom_symbol_ref_is_valid(symbol_ref) || symbol_ref.module_id != 0 ||
-      symbol_ref.symbol_id >= module->symbols.count) {
-    return NULL;
-  }
-  const loom_symbol_t* symbol = &module->symbols.entries[symbol_ref.symbol_id];
-  return symbol->definition && symbol->defining_op ? symbol : NULL;
-}
-
 iree_status_t loom_func_def_verify(const loom_module_t* module,
                                    const loom_op_t* op,
                                    iree_diagnostic_emitter_t emitter) {
@@ -186,35 +176,9 @@ iree_status_t loom_func_ref_cast_verify(const loom_module_t* module,
 iree_status_t loom_func_import_resolved_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter) {
-  const loom_symbol_ref_t callee = loom_func_import_resolved_callee(op);
-  const loom_symbol_t* symbol = loom_func_lookup_defined_symbol(module, callee);
-  if (!symbol) return iree_ok_status();
-  const loom_func_like_t function =
-      loom_func_like_cast(module, symbol->defining_op);
-  if (loom_func_like_isa(function) &&
-      loom_func_like_import_policy(function) ==
-          LOOM_FUNC_DECL_IMPORT_POLICY_OPTIONAL) {
-    return iree_ok_status();
-  }
-  const loom_diagnostic_param_t params[] = {
-      loom_param_string(module->strings.entries[symbol->name_id]),
-      loom_param_string(
-          loom_symbol_definition_descriptor_name(symbol->definition)),
-      loom_param_string(IREE_SV("optional function import")),
-  };
-  const loom_diagnostic_related_op_t related[] = {{
-      .label = IREE_SV("defined here"),
-      .op = symbol->defining_op,
-  }};
-  const loom_diagnostic_emission_t emission = {
-      .op = op,
-      .error = LOOM_ERR_SYMBOL_003,
-      .params = params,
-      .param_count = IREE_ARRAYSIZE(params),
-      .related_ops = related,
-      .related_op_count = IREE_ARRAYSIZE(related),
-  };
-  return iree_diagnostic_emit(emitter, &emission);
+  return loom_function_optional_import_contract_verify(
+      module, op, loom_func_import_resolved_callee(op),
+      loom_func_import_resolved_callee_ATTR_INDEX, emitter);
 }
 
 iree_status_t loom_func_call_verify(const loom_module_t* module,

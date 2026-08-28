@@ -381,8 +381,12 @@ static bool loom_low_lower_op_is_structural(const loom_module_t* module,
     case LOOM_OP_CFG_BR:
     case LOOM_OP_CFG_COND_BR:
     case LOOM_OP_CFG_SWITCH:
+    case LOOM_OP_FUNC_ADDRESS:
     case LOOM_OP_FUNC_CALL:
     case LOOM_OP_FUNC_CALL_INDIRECT:
+    case LOOM_OP_FUNC_COMPARE_NULL:
+    case LOOM_OP_FUNC_IMPORT_RESOLVED:
+    case LOOM_OP_FUNC_NULL:
     case LOOM_OP_FUNC_RETURN:
     case LOOM_OP_KERNEL_RETURN:
     case LOOM_OP_SCF_FOR:
@@ -799,6 +803,10 @@ static void loom_low_lower_mark_structural_storage_demands(
     case LOOM_OP_BUFFER_ASSUME_SAME_ROOT:
       loom_low_lower_mark_value_storage_required(
           context, loom_buffer_assume_same_root_buffer(source_op));
+      return;
+    case LOOM_OP_FUNC_COMPARE_NULL:
+      loom_low_lower_mark_structural_value_storage_required(
+          context, loom_func_compare_null_function(source_op));
       return;
     case LOOM_OP_FUNC_CALL:
       loom_low_lower_mark_structural_value_slice_storage_required(
@@ -2767,6 +2775,61 @@ static iree_status_t loom_low_lower_bind_op_results(
   return iree_ok_status();
 }
 
+static iree_status_t loom_low_lower_func_null(loom_low_lower_context_t* context,
+                                              const loom_op_t* source_op) {
+  loom_type_t* result_types = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_low_lower_map_op_result_types(context, source_op, &result_types));
+  if (result_types == NULL) return iree_ok_status();
+  loom_op_t* low_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_func_null_build(
+      &context->builder, result_types[0], source_op->location, &low_op));
+  return loom_low_lower_bind_op_results(context, source_op, low_op);
+}
+
+static iree_status_t loom_low_lower_func_compare_null(
+    loom_low_lower_context_t* context, const loom_op_t* source_op) {
+  loom_value_id_t* operands = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_remap_values(
+      context, source_op, loom_op_const_operands(source_op),
+      source_op->operand_count, &operands));
+  loom_type_t* result_types = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_low_lower_map_op_result_types(context, source_op, &result_types));
+  if (result_types == NULL) return iree_ok_status();
+  loom_op_t* low_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_func_compare_null_build(
+      &context->builder, operands[0], result_types[0], source_op->location,
+      &low_op));
+  return loom_low_lower_bind_op_results(context, source_op, low_op);
+}
+
+static iree_status_t loom_low_lower_func_address(
+    loom_low_lower_context_t* context, const loom_op_t* source_op) {
+  loom_type_t* result_types = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_low_lower_map_op_result_types(context, source_op, &result_types));
+  if (result_types == NULL) return iree_ok_status();
+  loom_op_t* low_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_func_address_build(
+      &context->builder, loom_func_address_callee(source_op), result_types[0],
+      source_op->location, &low_op));
+  return loom_low_lower_bind_op_results(context, source_op, low_op);
+}
+
+static iree_status_t loom_low_lower_func_import_resolved(
+    loom_low_lower_context_t* context, const loom_op_t* source_op) {
+  loom_type_t* result_types = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_low_lower_map_op_result_types(context, source_op, &result_types));
+  if (result_types == NULL) return iree_ok_status();
+  loom_op_t* low_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_func_import_resolved_build(
+      &context->builder, loom_func_import_resolved_callee(source_op),
+      result_types[0], source_op->location, &low_op));
+  return loom_low_lower_bind_op_results(context, source_op, low_op);
+}
+
 static iree_status_t loom_low_lower_emit_scf_yield(
     loom_low_lower_context_t* context, const loom_op_t* source_op) {
   loom_value_slice_t values = loom_scf_yield_values(source_op);
@@ -3000,6 +3063,14 @@ static iree_status_t loom_low_lower_structural_op(
           context, loom_buffer_assume_same_root_buffer(source_op),
           loom_buffer_assume_same_root_result(source_op));
     }
+    case LOOM_OP_FUNC_NULL:
+      return loom_low_lower_func_null(context, source_op);
+    case LOOM_OP_FUNC_COMPARE_NULL:
+      return loom_low_lower_func_compare_null(context, source_op);
+    case LOOM_OP_FUNC_ADDRESS:
+      return loom_low_lower_func_address(context, source_op);
+    case LOOM_OP_FUNC_IMPORT_RESOLVED:
+      return loom_low_lower_func_import_resolved(context, source_op);
     case LOOM_OP_FUNC_RETURN: {
       loom_value_slice_t values = loom_func_return_operands(source_op);
       loom_value_id_t* low_values = NULL;

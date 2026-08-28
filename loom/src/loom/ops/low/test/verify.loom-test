@@ -304,6 +304,76 @@ low.func.def target<test.low.core>(@test_target) @low_ref_cast_requires_matching
 
 test.target<low_core> @test_target
 
+low.func.def target<test.low.core>(@test_target) @low_func_null_requires_function_ref() {
+  // ERROR@+1: TYPE/004 "result" "reg<test.i32 : i32>" "register carrying func.ref with a function signature"
+  %null = low.func.null : reg<test.i32 : i32>
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @low_func_compare_null_requires_i1(%function: reg<test.ptr : func.ref<() -> ()>>) {
+  // ERROR@+1: TYPE/001 {field_a="result 0", type_a="i32", field_b="expected result 0", type_b="i1"}
+  %is_null = low.func.compare.null %function : reg<test.ptr : func.ref<() -> ()>> -> reg<test.i32 : i32>
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.decl target<test.low.core>(@test_target) @address_target(%value: reg<test.i32 : i32>)
+
+low.func.def target<test.low.core>(@test_target) @low_func_address_checks_signature() {
+  // ERROR@+1: TYPE/004 "result" "reg<test.ptr : func.ref<(i64) -> ()>>" "register carrying func.ref matching the callee signature"
+  %function = low.func.address @address_target : reg<test.ptr : func.ref<(i64) -> ()>>
+  low.return
+}
+
+// ====
+
+test.target<low_core> @gfx1100
+test.target<low_core> @gfx1200
+
+low.func.decl target<test.low.core>(@gfx1200) @address_target()
+
+low.func.def target<test.low.core>(@gfx1100) @low_func_address_checks_target() {
+  // ERROR@+1: TARGET/040 {op_name="low.func.address", field_name="callee", callee_target_name="gfx1200", caller_target_name="gfx1100"}
+  %function = low.func.address @address_target : reg<test.ptr : func.ref<() -> ()>>
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.decl link("runtime", "required") target<test.low.core>(@test_target) @required()
+
+low.func.def target<test.low.core>(@test_target) @low_func_import_resolved_requires_optional() {
+  // ERROR@+1: SYMBOL/003 {symbol_name="required", actual_kind="function", expected_kind="optional function import"}
+  %available = low.func.import.resolved @required : reg<test.i32 : i1>
+  low.return
+}
+
+// ====
+
+test.target<low_core> @gfx1100
+test.target<low_core> @gfx1200
+
+low.func.decl optional link("runtime", "optional") target<test.low.core>(@gfx1200) @optional()
+
+low.func.def target<test.low.core>(@gfx1100) @low_func_import_resolved_checks_target() {
+  // ERROR@+1: TARGET/040 {op_name="low.func.import.resolved", field_name="callee", callee_target_name="gfx1200", caller_target_name="gfx1100"}
+  %available = low.func.import.resolved @optional : reg<test.i32 : i1>
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
 low.func.decl target<test.low.core>(@test_target) @extern_add()
 
 func.def @low_call_outside_low_body() {

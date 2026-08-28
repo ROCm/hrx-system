@@ -1,0 +1,38 @@
+// RUN: emit source-low output=low
+
+vm.target<core> @target
+
+func.decl optional import("runtime", "callback") target(@target) @callback(%value: i32) -> (i32)
+
+func.def target(@target) @identity(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.def target(@target) @function_values(%value: i32) -> (i32, func.ref<yieldable (i32) -> (i32)>, func.ref<(i32) -> (i32)>, i1, i1) {
+  %local = func.address @identity : func.ref<(i32) -> (i32)>
+  %called = func.call.indirect %local(%value) : (i32) -> (i32)
+  %yieldable = func.ref.cast %local : func.ref<(i32) -> (i32)> to func.ref<yieldable (i32) -> (i32)>
+  %optional = func.address @callback : func.ref<(i32) -> (i32)>
+  %available = func.import.resolved @callback
+  %null = func.null : func.ref<(i32) -> (i32)>
+  %is_null = func.compare.null %null : func.ref<(i32) -> (i32)>
+  func.return %called, %yieldable, %optional, %available, %is_null : i32, func.ref<yieldable (i32) -> (i32)>, func.ref<(i32) -> (i32)>, i1, i1
+}
+
+// ----
+low.func.decl optional link("runtime", "callback") target<vm.core>(@target) abi_layout({signature = type<(reg<vm.value : i32>) -> (reg<vm.value : i32>)>}) @callback(%value: reg<vm.value : i32>) -> (reg<vm.value : i32>)
+
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i32>) -> (reg<vm.value : i32>)>}) @identity(%value: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+  return %value
+}
+
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i32>) -> (reg<vm.value : i32>, reg<vm.function : func.ref<yieldable (i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.value : i1>, reg<vm.value : i1>)>}) @function_values(%value: reg<vm.value : i32>) -> (reg<vm.value : i32>, reg<vm.function : func.ref<yieldable (i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.value : i1>, reg<vm.value : i1>) asm {
+  %local = low.func.address @identity : reg<vm.function : func.ref<(i32) -> (i32)>>
+  %called = low.func.call.indirect %local(%value) : (reg<vm.value : i32>) -> (reg<vm.value : i32>)
+  %yieldable = low.func.ref.cast %local : reg<vm.function : func.ref<(i32) -> (i32)>> to reg<vm.function : func.ref<yieldable (i32) -> (i32)>>
+  %optional = low.func.address @callback : reg<vm.function : func.ref<(i32) -> (i32)>>
+  %available = low.func.import.resolved @callback : reg<vm.value : i1>
+  %null = low.func.null : reg<vm.function : func.ref<(i32) -> (i32)>>
+  %is_null = low.func.compare.null %null : reg<vm.function : func.ref<(i32) -> (i32)>> -> reg<vm.value : i1>
+  return %called, %yieldable, %optional, %available, %is_null
+}

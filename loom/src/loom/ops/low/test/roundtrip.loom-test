@@ -63,6 +63,16 @@ low.func.def target<test.low.core>(@test_target) @widen_function_ref(%sync: reg<
   low.return %yieldable : reg<test.ptr : func.ref<yieldable (i32) -> (i32)>>
 }
 
+low.func.decl optional link("runtime", "callback") target<test.low.core>(@test_target) @callback(%value: reg<test.i32 : i32>) -> (reg<test.i32 : i32>)
+
+low.func.def target<test.low.core>(@test_target) @function_values() -> (reg<test.ptr : func.ref<(i32) -> (i32)>>, reg<test.i32 : i1>, reg<test.i32 : i1>) asm {
+  %null = low.func.null : reg<test.ptr : func.ref<(i32) -> (i32)>>
+  %is_null = low.func.compare.null %null : reg<test.ptr : func.ref<(i32) -> (i32)>> -> reg<test.i32 : i1>
+  %function = low.func.address @callback : reg<test.ptr : func.ref<(i32) -> (i32)>>
+  %available = low.func.import.resolved @callback : reg<test.i32 : i1>
+  return %function, %is_null, %available
+}
+
 // ====
 
 test.target<low_core> @test_target

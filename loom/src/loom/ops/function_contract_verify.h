@@ -52,6 +52,12 @@ iree_status_t loom_function_type_contract_verify(
     const loom_module_t* module, const loom_op_t* op, loom_symbol_ref_t callee,
     loom_type_t function_type, iree_diagnostic_emitter_t emitter);
 
+// Verifies that |callee| names an optional function import. Unresolved symbols
+// are valid in partial modules and are checked after link resolution.
+iree_status_t loom_function_optional_import_contract_verify(
+    const loom_module_t* module, const loom_op_t* op, loom_symbol_ref_t callee,
+    uint16_t callee_attr_index, iree_diagnostic_emitter_t emitter);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif
