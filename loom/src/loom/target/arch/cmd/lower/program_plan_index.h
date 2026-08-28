@@ -35,7 +35,9 @@ typedef struct loom_cmd_program_plan_index_options_t {
 static inline void loom_cmd_program_plan_index_options_initialize(
     loom_cmd_program_plan_index_options_t* options) {
   *options = (loom_cmd_program_plan_index_options_t){
-      .kernel_class_collection = loom_kernel_class_collection_options_default(),
+      /*.kernel_request_sink=*/{},
+      /*.kernel_class_collection=*/
+      loom_kernel_class_collection_options_default(),
   };
 }
 
