@@ -163,7 +163,6 @@ static const loom_matrix_fragment_layout_t kTinyDistributedMmaLayout = {
     },
     /*.lhs=*/
     {
-        /*.role=*/LOOM_CONTRACT_OPERAND_ROLE_LHS,
         /*.register_count=*/1,
         /*.element_bit_count=*/16,
         /*.payload_element_count=*/2,
@@ -171,16 +170,12 @@ static const loom_matrix_fragment_layout_t kTinyDistributedMmaLayout = {
         /*.reserved=*/0,
         /*.coordinate_element_stride=*/1,
         /*.packed_b16_publications=*/{},
-        /*.coordinate_flags=*/LOOM_MATRIX_FRAGMENT_COORDINATE_ROW |
-            LOOM_MATRIX_FRAGMENT_COORDINATE_REDUCTION,
-        /*.packed_element_coordinate_flag=*/
-        LOOM_MATRIX_FRAGMENT_COORDINATE_REDUCTION,
+        /*.packed_element_axis=*/LOOM_MATRIX_FRAGMENT_AXIS_REDUCTION,
         /*.reduction_group=*/{},
         /*.coordinate_projection_plan=*/&kTinyDistributedMmaLhsPlan,
     },
     /*.rhs=*/
     {
-        /*.role=*/LOOM_CONTRACT_OPERAND_ROLE_RHS,
         /*.register_count=*/1,
         /*.element_bit_count=*/16,
         /*.payload_element_count=*/2,
@@ -188,16 +183,12 @@ static const loom_matrix_fragment_layout_t kTinyDistributedMmaLayout = {
         /*.reserved=*/0,
         /*.coordinate_element_stride=*/1,
         /*.packed_b16_publications=*/{},
-        /*.coordinate_flags=*/LOOM_MATRIX_FRAGMENT_COORDINATE_COLUMN |
-            LOOM_MATRIX_FRAGMENT_COORDINATE_REDUCTION,
-        /*.packed_element_coordinate_flag=*/
-        LOOM_MATRIX_FRAGMENT_COORDINATE_REDUCTION,
+        /*.packed_element_axis=*/LOOM_MATRIX_FRAGMENT_AXIS_REDUCTION,
         /*.reduction_group=*/{},
         /*.coordinate_projection_plan=*/&kTinyDistributedMmaRhsPlan,
     },
     /*.accumulator=*/
     {
-        /*.role=*/LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR,
         /*.register_count=*/2,
         /*.element_bit_count=*/32,
         /*.payload_element_count=*/2,
@@ -205,15 +196,12 @@ static const loom_matrix_fragment_layout_t kTinyDistributedMmaLayout = {
         /*.reserved=*/0,
         /*.coordinate_element_stride=*/1,
         /*.packed_b16_publications=*/{},
-        /*.coordinate_flags=*/LOOM_MATRIX_FRAGMENT_COORDINATE_ROW |
-            LOOM_MATRIX_FRAGMENT_COORDINATE_COLUMN,
-        /*.packed_element_coordinate_flag=*/0,
+        /*.packed_element_axis=*/LOOM_MATRIX_FRAGMENT_AXIS_COUNT,
         /*.reduction_group=*/{},
         /*.coordinate_projection_plan=*/&kTinyDistributedMmaResultPlan,
     },
     /*.result=*/
     {
-        /*.role=*/LOOM_CONTRACT_OPERAND_ROLE_RESULT,
         /*.register_count=*/2,
         /*.element_bit_count=*/32,
         /*.payload_element_count=*/2,
@@ -221,9 +209,7 @@ static const loom_matrix_fragment_layout_t kTinyDistributedMmaLayout = {
         /*.reserved=*/0,
         /*.coordinate_element_stride=*/1,
         /*.packed_b16_publications=*/{},
-        /*.coordinate_flags=*/LOOM_MATRIX_FRAGMENT_COORDINATE_ROW |
-            LOOM_MATRIX_FRAGMENT_COORDINATE_COLUMN,
-        /*.packed_element_coordinate_flag=*/0,
+        /*.packed_element_axis=*/LOOM_MATRIX_FRAGMENT_AXIS_COUNT,
         /*.reduction_group=*/{},
         /*.coordinate_projection_plan=*/&kTinyDistributedMmaResultPlan,
     },

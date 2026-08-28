@@ -174,25 +174,6 @@ typedef enum loom_amdgpu_matrix_scale_format_selector_e {
 // Bitset of loom_amdgpu_matrix_scale_format_selector_t values.
 typedef uint8_t loom_amdgpu_matrix_scale_format_selector_bits_t;
 
-typedef enum loom_amdgpu_matrix_fragment_coordinate_flag_bits_e {
-  // Coordinate carries an independent block or batch value.
-  LOOM_AMDGPU_MATRIX_FRAGMENT_COORDINATE_BLOCK =
-      LOOM_MATRIX_FRAGMENT_COORDINATE_BLOCK,
-  // Coordinate carries an M/result-row value.
-  LOOM_AMDGPU_MATRIX_FRAGMENT_COORDINATE_ROW =
-      LOOM_MATRIX_FRAGMENT_COORDINATE_ROW,
-  // Coordinate carries an N/result-column value.
-  LOOM_AMDGPU_MATRIX_FRAGMENT_COORDINATE_COLUMN =
-      LOOM_MATRIX_FRAGMENT_COORDINATE_COLUMN,
-  // Coordinate carries a K/reduction value.
-  LOOM_AMDGPU_MATRIX_FRAGMENT_COORDINATE_REDUCTION =
-      LOOM_MATRIX_FRAGMENT_COORDINATE_REDUCTION,
-} loom_amdgpu_matrix_fragment_coordinate_flag_bits_t;
-
-// Bitset of loom_amdgpu_matrix_fragment_coordinate_flag_bits_t values.
-typedef loom_matrix_fragment_coordinate_flags_t
-    loom_amdgpu_matrix_fragment_coordinate_flags_t;
-
 typedef enum loom_amdgpu_matrix_fragment_layout_kind_e {
   // No target-owned fragment layout is attached.
   LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_UNKNOWN = 0,

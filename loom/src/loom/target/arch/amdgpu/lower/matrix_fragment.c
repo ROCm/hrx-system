@@ -91,44 +91,16 @@ uint16_t loom_amdgpu_matrix_fragment_payload_elements_per_register(
   return (uint16_t)(32 / role_layout->element_bit_count);
 }
 
-bool loom_amdgpu_matrix_fragment_role_layout_packed_element_axis(
-    const loom_matrix_fragment_role_layout_t* role_layout,
-    loom_matrix_fragment_axis_t* out_axis) {
-  *out_axis = LOOM_MATRIX_FRAGMENT_AXIS_COUNT;
-  if (role_layout == NULL || role_layout->packed_element_coordinate_flag == 0) {
-    return false;
-  }
-  switch (role_layout->packed_element_coordinate_flag) {
-    case LOOM_MATRIX_FRAGMENT_COORDINATE_BLOCK:
-      *out_axis = LOOM_MATRIX_FRAGMENT_AXIS_BLOCK;
-      return true;
-    case LOOM_MATRIX_FRAGMENT_COORDINATE_ROW:
-      *out_axis = LOOM_MATRIX_FRAGMENT_AXIS_ROW;
-      return true;
-    case LOOM_MATRIX_FRAGMENT_COORDINATE_COLUMN:
-      *out_axis = LOOM_MATRIX_FRAGMENT_AXIS_COLUMN;
-      return true;
-    case LOOM_MATRIX_FRAGMENT_COORDINATE_REDUCTION:
-      *out_axis = LOOM_MATRIX_FRAGMENT_AXIS_REDUCTION;
-      return true;
-    default:
-      IREE_ASSERT_UNREACHABLE("invalid packed matrix fragment coordinate");
-      IREE_BUILTIN_UNREACHABLE();
-  }
-}
-
 bool loom_amdgpu_matrix_fragment_role_layout_uses_packed_b16_elements(
+    loom_contract_operand_role_t role,
     const loom_matrix_fragment_role_layout_t* role_layout) {
-  loom_matrix_fragment_axis_t packed_axis = LOOM_MATRIX_FRAGMENT_AXIS_COUNT;
   return role_layout != NULL &&
-         loom_amdgpu_matrix_fragment_role_is_result_like(role_layout->role) &&
+         loom_amdgpu_matrix_fragment_role_is_result_like(role) &&
          role_layout->element_bit_count ==
              LOOM_AMDGPU_FRAGMENT_PACKED_B16_ELEMENT_BIT_COUNT &&
          loom_amdgpu_matrix_fragment_payload_elements_per_register(
              role_layout) == LOOM_AMDGPU_FRAGMENT_PACKED_B16_ELEMENT_COUNT &&
-         loom_amdgpu_matrix_fragment_role_layout_packed_element_axis(
-             role_layout, &packed_axis) &&
-         packed_axis == LOOM_MATRIX_FRAGMENT_AXIS_ROW;
+         role_layout->packed_element_axis == LOOM_MATRIX_FRAGMENT_AXIS_ROW;
 }
 
 bool loom_amdgpu_matrix_fragment_payload_matches_role_storage(

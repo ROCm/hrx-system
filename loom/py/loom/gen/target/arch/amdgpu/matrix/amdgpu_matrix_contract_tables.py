@@ -1119,25 +1119,11 @@ def _emit_result_to_rhs_repack_projections() -> str:
     return "\n".join(lines)
 
 
-_ROLE_C_NAMES = {
-    "lhs": "LOOM_CONTRACT_OPERAND_ROLE_LHS",
-    "rhs": "LOOM_CONTRACT_OPERAND_ROLE_RHS",
-    "accumulator": "LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR",
-    "result": "LOOM_CONTRACT_OPERAND_ROLE_RESULT",
-}
-
-_COORDINATE_FLAG_C_NAMES = (
-    "LOOM_MATRIX_FRAGMENT_COORDINATE_BLOCK",
-    "LOOM_MATRIX_FRAGMENT_COORDINATE_ROW",
-    "LOOM_MATRIX_FRAGMENT_COORDINATE_COLUMN",
-    "LOOM_MATRIX_FRAGMENT_COORDINATE_REDUCTION",
-)
-
 _PACKED_ELEMENT_AXIS_C_NAMES = {
-    "block": "LOOM_MATRIX_FRAGMENT_COORDINATE_BLOCK",
-    "row": "LOOM_MATRIX_FRAGMENT_COORDINATE_ROW",
-    "column": "LOOM_MATRIX_FRAGMENT_COORDINATE_COLUMN",
-    "reduction": "LOOM_MATRIX_FRAGMENT_COORDINATE_REDUCTION",
+    "block": "LOOM_MATRIX_FRAGMENT_AXIS_BLOCK",
+    "row": "LOOM_MATRIX_FRAGMENT_AXIS_ROW",
+    "column": "LOOM_MATRIX_FRAGMENT_AXIS_COLUMN",
+    "reduction": "LOOM_MATRIX_FRAGMENT_AXIS_REDUCTION",
 }
 
 _COORDINATE_DIMENSION_C_NAMES = {
@@ -1237,7 +1223,6 @@ def _fragment_role_initializer(
     role: MatrixFragmentRoleLayout,
     coordinate_plan_index: int,
 ) -> list[str]:
-    coordinate_flags = " | ".join(flag_name for flag_name, axis in zip(_COORDINATE_FLAG_C_NAMES, role.axes, strict=True) if axis is not None)
     packed_publications = tuple(
         (
             packed_axis,
@@ -1246,10 +1231,9 @@ def _fragment_role_initializer(
         for packed_axis in ("row", "column")
     )
     packed_element_axis = matrix_fragment_packed_element_axis(layout, role)
-    packed_element_axis_c_name = "0" if packed_element_axis is None else _PACKED_ELEMENT_AXIS_C_NAMES[packed_element_axis]
+    packed_element_axis_c_name = "LOOM_MATRIX_FRAGMENT_AXIS_COUNT" if packed_element_axis is None else _PACKED_ELEMENT_AXIS_C_NAMES[packed_element_axis]
     lines = [
         "{",
-        f"    .role = {_ROLE_C_NAMES[role.role]},",
         f"    .register_count = {role.register_count},",
         f"    .element_bit_count = {role.element_bit_count},",
         f"    .payload_element_count = {role.payload_element_count},",
@@ -1273,8 +1257,7 @@ def _fragment_role_initializer(
         )
     lines.extend(
         [
-            f"    .coordinate_flags = {coordinate_flags},",
-            f"    .packed_element_coordinate_flag = {packed_element_axis_c_name},",
+            f"    .packed_element_axis = {packed_element_axis_c_name},",
         ]
     )
     if role.reduction_group is not None:

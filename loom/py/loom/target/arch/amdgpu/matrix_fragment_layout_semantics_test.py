@@ -19,6 +19,7 @@ from loom.target.arch.amdgpu.matrix_fragment_layout import (
 )
 from loom.target.arch.amdgpu.matrix_fragment_layout_adaptation import (
     matrix_fragment_native_contraction_facts,
+    matrix_fragment_packed_element_axis,
 )
 from loom.target.arch.amdgpu.matrix_fragment_layout_recipes import (
     MatrixFragmentPackedB16PublicationProjection,
@@ -113,6 +114,9 @@ def test_exact_layout_adapts_to_shared_algebra_and_publication() -> None:
         role.evidence is NativeLayoutEvidence.EXACT
         for role in (facts.lhs, facts.rhs, facts.accumulator, facts.result)
     )
+    assert matrix_fragment_packed_element_axis(layout, layout.lhs) == "reduction"
+    assert matrix_fragment_packed_element_axis(layout, layout.rhs) == "reduction"
+    assert matrix_fragment_packed_element_axis(layout, layout.result) is None
     assert matrix_fragment_packed_b16_publication_projection(
         layout, layout.result, "column"
     ) == MatrixFragmentPackedB16PublicationProjection(

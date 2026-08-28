@@ -80,13 +80,9 @@ uint16_t loom_amdgpu_matrix_fragment_payload_elements_per_register(
 bool loom_amdgpu_matrix_fragment_role_layout_uses_low_subword(
     const loom_matrix_fragment_role_layout_t* role_layout);
 
-// Returns the semantic axis containing packed elements in |role_layout|.
-bool loom_amdgpu_matrix_fragment_role_layout_packed_element_axis(
-    const loom_matrix_fragment_role_layout_t* role_layout,
-    loom_matrix_fragment_axis_t* out_axis);
-
 // Returns true when one result-role register stores two semantic b16 elements.
 bool loom_amdgpu_matrix_fragment_role_layout_uses_packed_b16_elements(
+    loom_contract_operand_role_t role,
     const loom_matrix_fragment_role_layout_t* role_layout);
 
 // Returns true when |blocks|, |rows|, and |columns| match the logical shape of

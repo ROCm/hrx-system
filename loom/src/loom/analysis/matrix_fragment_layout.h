@@ -23,20 +23,6 @@
 extern "C" {
 #endif
 
-typedef enum loom_matrix_fragment_coordinate_flag_bits_e {
-  // Coordinate carries an independent block or batch value.
-  LOOM_MATRIX_FRAGMENT_COORDINATE_BLOCK = 1u << 0,
-  // Coordinate carries an M/result-row value.
-  LOOM_MATRIX_FRAGMENT_COORDINATE_ROW = 1u << 1,
-  // Coordinate carries an N/result-column value.
-  LOOM_MATRIX_FRAGMENT_COORDINATE_COLUMN = 1u << 2,
-  // Coordinate carries a K/reduction value.
-  LOOM_MATRIX_FRAGMENT_COORDINATE_REDUCTION = 1u << 3,
-} loom_matrix_fragment_coordinate_flag_bits_t;
-
-// Bitset of loom_matrix_fragment_coordinate_flag_bits_t values.
-typedef uint32_t loom_matrix_fragment_coordinate_flags_t;
-
 // Canonical semantic axes carried by matrix fragment layouts. The ordering is
 // also the row-major delinearization order for per-lane payload elements.
 typedef enum loom_matrix_fragment_axis_e {
@@ -115,8 +101,6 @@ typedef struct loom_matrix_fragment_packed_b16_publication_t {
 } loom_matrix_fragment_packed_b16_publication_t;
 
 typedef struct loom_matrix_fragment_role_layout_t {
-  // Contract operand role described by this role layout.
-  loom_contract_operand_role_t role;
   // Number of 32-bit payload registers held by each participating lane.
   uint16_t register_count;
   // Bit width of each logical scalar element. Elements are densely packed
@@ -137,11 +121,9 @@ typedef struct loom_matrix_fragment_role_layout_t {
     // Projection pairing adjacent result columns.
     loom_matrix_fragment_packed_b16_publication_t column;
   } packed_b16_publications;
-  // Coordinate axes produced by this role layout.
-  loom_matrix_fragment_coordinate_flags_t coordinate_flags;
-  // Single coordinate flag for the axis densely packed within each register,
-  // or zero when elements are not densely packed along one semantic axis.
-  loom_matrix_fragment_coordinate_flags_t packed_element_coordinate_flag;
+  // Axis densely packed within each register, or
+  // LOOM_MATRIX_FRAGMENT_AXIS_COUNT when no single axis is densely packed.
+  loom_matrix_fragment_axis_t packed_element_axis;
   // Physical-to-logical grouping for a compressed reduction axis.
   struct {
     // Number of elements physically stored in each reduction group.

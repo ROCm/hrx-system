@@ -1152,15 +1152,8 @@ TEST(MatrixContractTest, GeneratedFragmentLayoutsMatchDescriptors) {
         &layout->accumulator,
         &layout->result,
     };
-    const loom_contract_operand_role_t roles[] = {
-        LOOM_CONTRACT_OPERAND_ROLE_LHS,
-        LOOM_CONTRACT_OPERAND_ROLE_RHS,
-        LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR,
-        LOOM_CONTRACT_OPERAND_ROLE_RESULT,
-    };
-    for (iree_host_size_t role_index = 0; role_index < IREE_ARRAYSIZE(roles);
-         ++role_index) {
-      EXPECT_EQ(role_layouts[role_index]->role, roles[role_index]);
+    for (iree_host_size_t role_index = 0;
+         role_index < IREE_ARRAYSIZE(role_layouts); ++role_index) {
       EXPECT_EQ(role_layouts[role_index]->register_count,
                 payloads[role_index]->register_count);
       EXPECT_EQ(role_layouts[role_index]->payload_element_count,

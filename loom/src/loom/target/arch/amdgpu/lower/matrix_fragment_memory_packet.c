@@ -596,7 +596,7 @@ static bool loom_amdgpu_fragment_memory_packet_addresses_fit_u32(
           : 1;
   const uint16_t element_address_count =
       loom_amdgpu_matrix_fragment_role_layout_uses_packed_b16_elements(
-          role_layout)
+          plan->role, role_layout)
           ? LOOM_AMDGPU_FRAGMENT_PACKED_B16_ELEMENT_COUNT
           : 1;
   for (uint16_t register_offset = 0; register_offset < register_address_count;
@@ -673,10 +673,7 @@ loom_amdgpu_fragment_memory_crosslane_packed_b16_store_publication(
 
   const loom_matrix_fragment_role_layout_t* role_layout =
       loom_matrix_fragment_role_layout(layout, plan->role);
-  if (role_layout == NULL || role_layout->element_bit_count != 32 ||
-      role_layout->coordinate_flags !=
-          (LOOM_AMDGPU_MATRIX_FRAGMENT_COORDINATE_ROW |
-           LOOM_AMDGPU_MATRIX_FRAGMENT_COORDINATE_COLUMN)) {
+  if (role_layout == NULL || role_layout->element_bit_count != 32) {
     return NULL;
   }
 

@@ -40,11 +40,6 @@ TEST(MatrixFragmentLayoutTest, MapsAxesToCoordinateDimensions) {
 
 TEST(MatrixFragmentLayoutTest, SelectsRoleLayouts) {
   loom_matrix_fragment_layout_t layout = {};
-  layout.lhs.role = LOOM_CONTRACT_OPERAND_ROLE_LHS;
-  layout.rhs.role = LOOM_CONTRACT_OPERAND_ROLE_RHS;
-  layout.accumulator.role = LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR;
-  layout.result.role = LOOM_CONTRACT_OPERAND_ROLE_RESULT;
-
   EXPECT_EQ(
       loom_matrix_fragment_role_layout(&layout, LOOM_CONTRACT_OPERAND_ROLE_LHS),
       &layout.lhs);
