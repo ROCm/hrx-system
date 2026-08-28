@@ -135,7 +135,7 @@ static iree_status_t iree_vm_module_validate_signature_type(
     const iree_vm_module_descriptor_t* descriptor,
     iree_vm_module_signature_type_t type,
     iree_host_size_t current_callable_ordinal) {
-  if (type.kind > IREE_VM_SCALAR_TYPE_INVALID &&
+  if (type.kind > IREE_VM_SCALAR_TYPE_NONE &&
       type.kind <= IREE_VM_SCALAR_TYPE_F64) {
     if (type.type_ordinal != 0) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,

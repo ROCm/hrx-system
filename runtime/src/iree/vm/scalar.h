@@ -18,8 +18,8 @@ extern "C" {
 // encodings. Loom types such as index, offset, and tensor are lowered before
 // reaching this boundary.
 enum iree_vm_scalar_type_e {
-  // Invalid in a descriptor.
-  IREE_VM_SCALAR_TYPE_INVALID = 0x00,
+  // No scalar type.
+  IREE_VM_SCALAR_TYPE_NONE = 0x00,
   // Low eight integer bits.
   IREE_VM_SCALAR_TYPE_I8 = 0x01,
   // Low 16 integer bits.

@@ -104,7 +104,7 @@ static iree_status_t iree_vm_module_calculate_type_storage_layout(
 static iree_vm_signature_type_t iree_vm_module_resolve_signature_type(
     const iree_vm_module_t* module, iree_vm_module_signature_type_t type) {
   iree_vm_signature_type_t resolved_type = {0};
-  if (type.kind > IREE_VM_SCALAR_TYPE_INVALID &&
+  if (type.kind > IREE_VM_SCALAR_TYPE_NONE &&
       type.kind <= IREE_VM_SCALAR_TYPE_F64) {
     resolved_type.kind = IREE_VM_SIGNATURE_TYPE_KIND_SCALAR;
     resolved_type.value.scalar = (iree_vm_scalar_type_t)type.kind;

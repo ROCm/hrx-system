@@ -135,7 +135,7 @@ static iree_vm_program_bank_counts_t iree_vm_program_count_signature_banks(
   iree_vm_program_bank_counts_t counts = {0};
   for (iree_host_size_t i = 0; i < types.count; ++i) {
     const iree_vm_module_signature_type_t type = types.data[i];
-    if (type.kind > IREE_VM_SCALAR_TYPE_INVALID &&
+    if (type.kind > IREE_VM_SCALAR_TYPE_NONE &&
         type.kind <= IREE_VM_SCALAR_TYPE_F64) {
       ++counts.value_count;
     } else if (type.kind == IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF) {
@@ -217,7 +217,7 @@ static void iree_vm_program_build_signature_side_abi(
 
   for (iree_host_size_t i = 0; i < types.count; ++i) {
     const iree_vm_module_signature_type_t type = types.data[i];
-    if (type.kind > IREE_VM_SCALAR_TYPE_INVALID &&
+    if (type.kind > IREE_VM_SCALAR_TYPE_NONE &&
         type.kind <= IREE_VM_SCALAR_TYPE_F64) {
       *field_storage->scalar_fields++ = (iree_vm_program_scalar_field_abi_t){
           .payload_mask = iree_vm_program_scalar_payload_mask(type.kind),

@@ -62,7 +62,7 @@ enum iree_vm_variant_tag_bits_e {
 // Returns the canonical moved-from/unused carrier.
 static inline iree_vm_variant_t iree_vm_variant_empty(void) {
   iree_vm_variant_t variant = {
-      0, IREE_VM_VARIANT_SCALAR_METADATA_(IREE_VM_SCALAR_TYPE_INVALID)};
+      0, IREE_VM_VARIANT_SCALAR_METADATA_(IREE_VM_SCALAR_TYPE_NONE)};
   return variant;
 }
 
@@ -76,7 +76,7 @@ static inline iree_vm_variant_t iree_vm_variant_null(void) {
 static inline bool iree_vm_variant_is_empty(iree_vm_variant_t variant) {
   return variant.payload == 0 &&
          variant.metadata ==
-             IREE_VM_VARIANT_SCALAR_METADATA_(IREE_VM_SCALAR_TYPE_INVALID);
+             IREE_VM_VARIANT_SCALAR_METADATA_(IREE_VM_SCALAR_TYPE_NONE);
 }
 
 // Returns true when |variant| is a canonical null ref or function ref.
@@ -86,11 +86,11 @@ static inline bool iree_vm_variant_is_null(iree_vm_variant_t variant) {
           variant.metadata == IREE_VM_VARIANT_TAG_FUNCTION_REF);
 }
 
-// Returns true when |variant| carries a non-INVALID scalar.
+// Returns true when |variant| carries a scalar value.
 static inline bool iree_vm_variant_is_scalar(iree_vm_variant_t variant) {
   return (variant.metadata & IREE_VM_VARIANT_TAG_MASK) ==
              IREE_VM_VARIANT_TAG_SCALAR &&
-         (variant.metadata >> 2) != IREE_VM_SCALAR_TYPE_INVALID;
+         (variant.metadata >> 2) != IREE_VM_SCALAR_TYPE_NONE;
 }
 
 // Returns true when |variant| carries a function reference.
@@ -105,12 +105,12 @@ static inline bool iree_vm_variant_is_ref(iree_vm_variant_t variant) {
          IREE_VM_VARIANT_TAG_BORROWED_REF;
 }
 
-// Returns the scalar type or INVALID when |variant| is not scalar.
+// Returns the scalar type or NONE when |variant| is not scalar.
 static inline iree_vm_scalar_type_t iree_vm_variant_scalar_type(
     iree_vm_variant_t variant) {
   return iree_vm_variant_is_scalar(variant)
              ? (iree_vm_scalar_type_t)(variant.metadata >> 2)
-             : (iree_vm_scalar_type_t)IREE_VM_SCALAR_TYPE_INVALID;
+             : (iree_vm_scalar_type_t)IREE_VM_SCALAR_TYPE_NONE;
 }
 
 // Returns the exact ref type or null for canonical null/non-ref values.

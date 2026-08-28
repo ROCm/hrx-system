@@ -15,7 +15,7 @@
 
 namespace {
 
-IREE_STATIC_ASSERT_ENUM_EQ(IREE_VM_SCALAR_TYPE_INVALID,
+IREE_STATIC_ASSERT_ENUM_EQ(IREE_VM_SCALAR_TYPE_NONE,
                            IREE_VM_BYTECODE_SIGNATURE_KIND_INVALID,
                            "VM scalar type must match bytecode signature kind");
 IREE_STATIC_ASSERT_ENUM_EQ(IREE_VM_SCALAR_TYPE_I8,
@@ -242,9 +242,9 @@ TEST(VMVariantTest, DynamicScalarConstructionCanonicalizesNarrowBits) {
 TEST(VMVariantTest, ScalarFailuresLeaveOutputsUntouched) {
   iree_vm_variant_t output = {0x1111, 0x2222};
   const iree_vm_variant_t original_output = output;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        iree_vm_variant_from_scalar_bits(
-                            IREE_VM_SCALAR_TYPE_INVALID, 0, &output));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_vm_variant_from_scalar_bits(IREE_VM_SCALAR_TYPE_NONE, 0, &output));
   EXPECT_EQ(output.payload, original_output.payload);
   EXPECT_EQ(output.metadata, original_output.metadata);
 
