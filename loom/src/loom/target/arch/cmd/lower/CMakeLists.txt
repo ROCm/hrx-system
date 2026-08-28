@@ -257,6 +257,7 @@ loom_cc_benchmark(
     "program_plan_benchmark.cc"
   DEPS
     ::program_plan
+    ::program_plan_index
     iree::base
     iree::base::internal::arena
     iree::testing::benchmark_main
