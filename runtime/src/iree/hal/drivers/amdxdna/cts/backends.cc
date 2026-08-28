@@ -93,6 +93,12 @@ static bool amdxdna_registered_ =
               {"AllocatorTest.BaselineBufferCompatibility",
                "amdxdna does not advertise QUEUE_TRANSFER compatibility until "
                "native blit support exists."},
+              {"AllocatorTest.AllocateBuffer",
+               "amdxdna HOST_ONLY memory rejects DEVICE_LOCAL without OPTIMAL; "
+               "CTS still requests DEVICE_LOCAL as a HIP-shaped default."},
+              {"AllocatorTest.AllocateEmptyBuffer",
+               "amdxdna HOST_ONLY memory rejects DEVICE_LOCAL without OPTIMAL; "
+               "CTS still requests DEVICE_LOCAL as a HIP-shaped default."},
               {"QueueAllocaTest.BasicAlloca",
                "CTS validates allocated contents with queue_fill; amdxdna does "
                "not expose queue transfer operations until native blit support "
