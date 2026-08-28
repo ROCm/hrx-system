@@ -82,3 +82,35 @@ func.def @index_shifts(%value: index, %amount: index) -> (index, index, index) {
   %unsigned_right = index.shrui %value, %amount : index
   func.return %left, %signed_right, %unsigned_right : index, index, index
 }
+
+// ====
+
+func.def @scalar_native_integer_ops(%lhs: i32, %rhs: i32) -> (i32, i32, i32, i32, i32) {
+  %quotient = scalar.divsi %lhs, %rhs : i32
+  %minimum = scalar.minui %lhs, %rhs : i32
+  %bits = scalar.ori %lhs, %rhs : i32
+  %rotated = scalar.rotli %bits, %rhs : i32
+  %leading_zeros = scalar.ctlzi %rotated : i32
+  func.return %quotient, %minimum, %bits, %rotated, %leading_zeros : i32, i32, i32, i32, i32
+}
+
+// ====
+
+func.def @scalar_boolean_logic(%lhs: i1, %rhs: i1) -> (i1, i1, i1) {
+  %both = scalar.andi %lhs, %rhs : i1
+  %either = scalar.ori %lhs, %rhs : i1
+  %different = scalar.xori %lhs, %rhs : i1
+  func.return %both, %either, %different : i1, i1, i1
+}
+
+// ====
+
+func.def @index_native_integer_ops(%lhs: index, %rhs: index, %stride: offset) -> (index, index, index, index, i1, offset) {
+  %difference = index.sub %lhs, %rhs : index
+  %bits = index.andi %difference, %rhs : index
+  %rotated = index.rotri %bits, %rhs : index
+  %population = index.ctpopi %rotated : index
+  %ordered = index.cmp ult, %population, %lhs : index
+  %byte_offset = index.scale %population, %stride : index, offset -> offset
+  func.return %difference, %bits, %rotated, %population, %ordered, %byte_offset : index, index, index, index, i1, offset
+}

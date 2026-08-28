@@ -36,8 +36,6 @@
 #undef LOOM_VM_SOURCE_LOWERING_LIMITS
 
 typedef struct loom_vm_source_lowering_row_t {
-  // Source operation kind matched by this row.
-  loom_op_kind_t source_op_kind;
   // Dense Core VM descriptor ordinal selected by this row.
   uint16_t descriptor_ordinal;
   // Descriptor-local selector immediate ordinal, or UINT8_MAX when absent.
@@ -49,6 +47,20 @@ typedef struct loom_vm_source_lowering_row_t {
   // Exact operand types followed by result types at generated maximum offsets.
   uint16_t type_keys[LOOM_VM_SOURCE_LOWERING_MAX_TYPE_COUNT];
 } loom_vm_source_lowering_row_t;
+
+typedef struct loom_vm_source_lowering_range_t {
+  // First row in kVmSourceLoweringRows for the source operation.
+  uint16_t row_start;
+  // Number of concrete type-signature rows for the source operation.
+  uint8_t row_count;
+} loom_vm_source_lowering_range_t;
+
+typedef struct loom_vm_source_lowering_dialect_ranges_t {
+  // Dense ranges indexed by the operation's dialect-local ordinal.
+  const loom_vm_source_lowering_range_t* ranges;
+  // Number of entries available in ranges.
+  uint16_t range_count;
+} loom_vm_source_lowering_dialect_ranges_t;
 
 typedef struct loom_vm_source_constant_t {
   // Source SSA result receiving the constant value.
@@ -64,8 +76,7 @@ static const loom_vm_source_lowering_row_t kVmSourceLoweringRows[] = {
 #define LOOM_VM_SOURCE_LOWERING_ROW(                                \
     source_op_kind, descriptor_ordinal, selector_immediate_ordinal, \
     selector_source_attr_ordinal, selector_value, ...)              \
-  {source_op_kind,                                                  \
-   descriptor_ordinal,                                              \
+  {descriptor_ordinal,                                              \
    selector_immediate_ordinal,                                      \
    selector_source_attr_ordinal,                                    \
    selector_value,                                                  \
@@ -75,6 +86,10 @@ static const loom_vm_source_lowering_row_t kVmSourceLoweringRows[] = {
 #undef LOOM_VM_SOURCE_LOWERING_LIMITS
 #undef LOOM_VM_SOURCE_TYPE_KEY
 };
+
+#define LOOM_VM_SOURCE_LOWERING_DEFINE_RANGES
+#include "loom/target/arch/vm/lowering_rows.inl"
+#undef LOOM_VM_SOURCE_LOWERING_DEFINE_RANGES
 
 static uint16_t loom_vm_source_type_key(loom_type_t type) {
   const loom_type_kind_t type_kind = loom_type_kind(type);
@@ -87,9 +102,6 @@ static uint16_t loom_vm_source_type_key(loom_type_t type) {
 static bool loom_vm_source_lowering_row_matches(
     const loom_module_t* module, const loom_op_t* source_op,
     const loom_vm_source_lowering_row_t* row) {
-  if (source_op->kind != row->source_op_kind) {
-    return false;
-  }
   const loom_value_id_t* operands = loom_op_const_operands(source_op);
   for (uint16_t i = 0; i < source_op->operand_count; ++i) {
     const loom_type_t type = loom_module_value_type(module, operands[i]);
@@ -274,8 +286,20 @@ static iree_status_t loom_vm_select_op(void* user_data,
   IREE_RETURN_IF_ERROR(
       loom_vm_module_resource_try_select_op(context, source_op, out_plan));
   if (!loom_low_lower_plan_is_empty(*out_plan)) return iree_ok_status();
-  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(kVmSourceLoweringRows); ++i) {
-    const loom_vm_source_lowering_row_t* row = &kVmSourceLoweringRows[i];
+
+  const uint8_t dialect_id = loom_op_dialect_id(source_op->kind);
+  if (dialect_id >= IREE_ARRAYSIZE(kVmSourceLoweringDialectRanges)) {
+    return iree_ok_status();
+  }
+  const loom_vm_source_lowering_dialect_ranges_t* dialect_ranges =
+      &kVmSourceLoweringDialectRanges[dialect_id];
+  const uint8_t op_index = loom_op_dialect_index(source_op->kind);
+  if (op_index >= dialect_ranges->range_count) return iree_ok_status();
+  const loom_vm_source_lowering_range_t range =
+      dialect_ranges->ranges[op_index];
+  for (uint8_t i = 0; i < range.row_count; ++i) {
+    const loom_vm_source_lowering_row_t* row =
+        &kVmSourceLoweringRows[range.row_start + i];
     if (loom_vm_source_lowering_row_matches(module, source_op, row)) {
       *out_plan = loom_low_lower_plan_make(row->descriptor_ordinal, row);
       return iree_ok_status();

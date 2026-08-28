@@ -168,3 +168,67 @@ low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = t
   %unsigned_right = integer.shift.right.u64 %value, %amount : reg<vm.value : index>
   return %left, %signed_right, %unsigned_right
 }
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_native_integer_ops(%lhs: i32, %rhs: i32) -> (i32, i32, i32, i32, i32) {
+  %quotient = scalar.divsi %lhs, %rhs : i32
+  %minimum = scalar.minui %lhs, %rhs : i32
+  %bits = scalar.ori %lhs, %rhs : i32
+  %rotated = scalar.rotli %bits, %rhs : i32
+  %leading_zeros = scalar.ctlzi %rotated : i32
+  func.return %quotient, %minimum, %bits, %rotated, %leading_zeros : i32, i32, i32, i32, i32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i32>, reg<vm.value : i32>) -> (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>)>}) @scalar_native_integer_ops(%lhs: reg<vm.value : i32>, %rhs: reg<vm.value : i32>) -> (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>) asm {
+  %quotient = integer.div.s32 %lhs, %rhs : reg<vm.value : i32>
+  %minimum = integer.min.u32 %lhs, %rhs : reg<vm.value : i32>
+  %bits = integer.or.i32 %lhs, %rhs : reg<vm.value : i32>
+  %rotated = integer.rotate.left.i32 %bits, %rhs : reg<vm.value : i32>
+  %leading_zeros = integer.count.leading.zeros.i32 %rotated : reg<vm.value : i32>
+  return %quotient, %minimum, %bits, %rotated, %leading_zeros
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_boolean_logic(%lhs: i1, %rhs: i1) -> (i1, i1, i1) {
+  %both = scalar.andi %lhs, %rhs : i1
+  %either = scalar.ori %lhs, %rhs : i1
+  %different = scalar.xori %lhs, %rhs : i1
+  func.return %both, %either, %different : i1, i1, i1
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i1>, reg<vm.value : i1>) -> (reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>)>}) @scalar_boolean_logic(%lhs: reg<vm.value : i1>, %rhs: reg<vm.value : i1>) -> (reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>) asm {
+  %both = integer.and.i32 %lhs, %rhs : reg<vm.value : i1>
+  %either = integer.or.i32 %lhs, %rhs : reg<vm.value : i1>
+  %different = integer.xor.i32 %lhs, %rhs : reg<vm.value : i1>
+  return %both, %either, %different
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @index_native_integer_ops(%lhs: index, %rhs: index, %stride: offset) -> (index, index, index, index, i1, offset) {
+  %difference = index.sub %lhs, %rhs : index
+  %bits = index.andi %difference, %rhs : index
+  %rotated = index.rotri %bits, %rhs : index
+  %population = index.ctpopi %rotated : index
+  %ordered = index.cmp ult, %population, %lhs : index
+  %byte_offset = index.scale %population, %stride : index, offset -> offset
+  func.return %difference, %bits, %rotated, %population, %ordered, %byte_offset : index, index, index, index, i1, offset
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : offset>) -> (reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : i1>, reg<vm.value : offset>)>}) @index_native_integer_ops(%lhs: reg<vm.value : index>, %rhs: reg<vm.value : index>, %stride: reg<vm.value : offset>) -> (reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : i1>, reg<vm.value : offset>) asm {
+  %difference = integer.sub.i64 %lhs, %rhs : reg<vm.value : index>
+  %bits = integer.and.i64 %difference, %rhs : reg<vm.value : index>
+  %rotated = integer.rotate.right.i64 %bits, %rhs : reg<vm.value : index>
+  %population = integer.popcount.i64 %rotated : reg<vm.value : index>
+  %ordered = integer.compare.i64 %population, %lhs, ult : reg<vm.value : i1>
+  %byte_offset = integer.mul.i64 %population, %stride : reg<vm.value : offset>
+  return %difference, %bits, %rotated, %population, %ordered, %byte_offset
+}

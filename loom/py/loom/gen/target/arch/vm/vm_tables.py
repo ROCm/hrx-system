@@ -11,11 +11,13 @@ from __future__ import annotations
 import argparse
 import sys
 from collections.abc import Sequence
+from itertools import groupby
 from pathlib import Path
 
 from model.isa import InstructionFieldRole
 from model.schema import SCALAR_ENCODINGS
 
+from loom.dsl import Op
 from loom.gen.ops.c_names import COPYRIGHT, c_enum_name
 from loom.gen.support.files import write_text_file
 from loom.gen.support.generated_file import line_comment_header
@@ -51,6 +53,34 @@ def _descriptor_ref_name(descriptor_key: str | None) -> str:
     if descriptor_key is None:
         return "UINT16_MAX"
     return descriptor_ref_constant_name(VM_CORE_DESCRIPTOR_SET, descriptor_key)
+
+
+def _source_lowering_ranges() -> tuple[tuple[Op, int, int], ...]:
+    """Returns contiguous row ranges grouped by exact source operation."""
+
+    ranges: list[tuple[Op, int, int]] = []
+    seen_op_names: set[str] = set()
+    row_start = 0
+    for source_op, rows_iter in groupby(
+        VM_SOURCE_LOWERINGS,
+        key=lambda row: row.source_op,
+    ):
+        if source_op.name in seen_op_names:
+            raise ValueError(f"{source_op.name}: VM source lowering rows must be contiguous")
+        seen_op_names.add(source_op.name)
+        row_count = sum(1 for _ in rows_iter)
+        if row_start > 0xFFFF or row_count > 0xFF:
+            raise ValueError(f"{source_op.name}: VM source lowering range exceeds u16/u8")
+        ranges.append((source_op, row_start, row_count))
+        row_start += row_count
+    if row_start != len(VM_SOURCE_LOWERINGS) or row_start > 0xFFFF:
+        raise ValueError("VM source lowering row count exceeds u16")
+    return tuple(ranges)
+
+
+def _dialect_range_symbol(dialect_name: str) -> str:
+    dialect_fragment = "".join(part.capitalize() for part in dialect_name.split("_"))
+    return f"kVmSourceLowering{dialect_fragment}Ranges"
 
 
 def generate_lowering_rows() -> str:
@@ -98,6 +128,33 @@ def generate_lowering_rows() -> str:
         ]
         lines.append("LOOM_VM_SOURCE_LOWERING_ROW(")
         lines.append("    " + ", ".join(arguments) + ")")
+    lines.append("#elif defined(LOOM_VM_SOURCE_LOWERING_DEFINE_RANGES)")
+    ranges_by_dialect: dict[str, list[tuple[Op, int, int]]] = {}
+    for source_op, row_start, row_count in _source_lowering_ranges():
+        if source_op.group is None or source_op.group.dialect_id == 0:
+            raise ValueError(f"{source_op.name}: VM source lowering requires a built-in dialect")
+        ranges_by_dialect.setdefault(source_op.group.name, []).append((source_op, row_start, row_count))
+    for dialect_name, ranges in ranges_by_dialect.items():
+        symbol = _dialect_range_symbol(dialect_name)
+        dialect_token = dialect_name.upper()
+        lines.extend(
+            [
+                "static const loom_vm_source_lowering_range_t",
+                f"    {symbol}[LOOM_OP_{dialect_token}_COUNT_] = {{",
+            ]
+        )
+        lines.extend(f"        [{c_enum_name(source_op)} & 0xFF] = {{{row_start}, {row_count}}}," for source_op, row_start, row_count in ranges)
+        lines.append("};")
+    lines.extend(
+        [
+            "static const loom_vm_source_lowering_dialect_ranges_t",
+            "    kVmSourceLoweringDialectRanges[LOOM_DIALECT_BUILTIN_COUNT_] = {",
+        ]
+    )
+    for dialect_name in ranges_by_dialect:
+        symbol = _dialect_range_symbol(dialect_name)
+        lines.append(f"        [LOOM_DIALECT_{dialect_name.upper()}] = {{{symbol}, IREE_ARRAYSIZE({symbol})}},")
+    lines.append("};")
     lines.append("#endif  // VM lowering projection")
     return "\n".join(lines) + "\n"
 

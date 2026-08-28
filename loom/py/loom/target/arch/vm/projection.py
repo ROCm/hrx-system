@@ -78,6 +78,7 @@ from loom.dialect.cfg import defs as cfg_defs
 from loom.dialect.func import defs as func_defs
 from loom.dialect.index import defs as index_defs
 from loom.dialect.scalar import arithmetic as scalar_arithmetic
+from loom.dialect.scalar import bitwise as scalar_bitwise
 from loom.dialect.scalar import comparison as scalar_comparison
 from loom.dialect.scalar import conversion as scalar_conversion
 from loom.dsl import ATTR_TYPE_ENUM, Op
@@ -1276,7 +1277,7 @@ def _source_lowering(
 
 def _same_type_binary(
     source_op: Op,
-    descriptor_by_type: dict[ScalarTypeKind, str],
+    descriptor_by_type: dict[ScalarTypeKind, str | VmSourceOpcode],
 ) -> tuple[VmSourceLowering, ...]:
     """Projects a same-type binary Loom op onto concrete VM instructions."""
 
@@ -1298,6 +1299,37 @@ def _same_type_binary(
         _source_lowering(
             source_op,
             (ScalarType(scalar_type), ScalarType(scalar_type)),
+            (ScalarType(scalar_type),),
+            descriptor_key,
+        )
+        for scalar_type, descriptor_key in descriptor_by_type.items()
+    )
+
+
+def _same_type_unary(
+    source_op: Op,
+    descriptor_by_type: dict[ScalarTypeKind, str | VmSourceOpcode],
+) -> tuple[VmSourceLowering, ...]:
+    """Projects a same-type unary Loom op onto concrete VM instructions."""
+
+    _require_fixed_source_shape(source_op, operand_count=1, result_count=1)
+    field_names = tuple(
+        field.name for field in (*source_op.operands, *source_op.results)
+    )
+    if not any(
+        constraint.name == "SameType" and constraint.args == field_names
+        for constraint in source_op.constraints
+    ):
+        raise ValueError(
+            f"{source_op.name}: same-type unary projection requires a "
+            f"SameType{field_names} constraint"
+        )
+    if not descriptor_by_type:
+        raise ValueError(f"{source_op.name}: same-type projection has no type cases")
+    return tuple(
+        _source_lowering(
+            source_op,
+            (ScalarType(scalar_type),),
             (ScalarType(scalar_type),),
             descriptor_key,
         )
@@ -1388,8 +1420,24 @@ VM_SOURCE_LOWERINGS = (
         },
     ),
     *_same_type_binary(
+        index_defs.index_sub,
+        {
+            ScalarTypeKind.INDEX: "vm.integer.sub.i64",
+            ScalarTypeKind.OFFSET: "vm.integer.sub.i64",
+        },
+    ),
+    *_same_type_binary(
         index_defs.index_mul,
         {ScalarTypeKind.INDEX: "vm.integer.mul.i64"},
+    ),
+    _source_lowering(
+        index_defs.index_scale,
+        (
+            ScalarType(ScalarTypeKind.INDEX),
+            ScalarType(ScalarTypeKind.OFFSET),
+        ),
+        (ScalarType(ScalarTypeKind.OFFSET),),
+        "vm.integer.mul.i64",
     ),
     *_same_type_binary(
         index_defs.index_div,
@@ -1398,6 +1446,26 @@ VM_SOURCE_LOWERINGS = (
     *_same_type_binary(
         index_defs.index_rem,
         {ScalarTypeKind.INDEX: "vm.integer.rem.u64"},
+    ),
+    *_same_type_binary(
+        index_defs.index_min,
+        {ScalarTypeKind.INDEX: "vm.integer.min.s64"},
+    ),
+    *_same_type_binary(
+        index_defs.index_max,
+        {ScalarTypeKind.INDEX: "vm.integer.max.s64"},
+    ),
+    *_same_type_binary(
+        index_defs.index_andi,
+        {ScalarTypeKind.INDEX: "vm.integer.and.i64"},
+    ),
+    *_same_type_binary(
+        index_defs.index_ori,
+        {ScalarTypeKind.INDEX: "vm.integer.or.i64"},
+    ),
+    *_same_type_binary(
+        index_defs.index_xori,
+        {ScalarTypeKind.INDEX: "vm.integer.xor.i64"},
     ),
     *_same_type_binary(
         index_defs.index_shli,
@@ -1410,6 +1478,33 @@ VM_SOURCE_LOWERINGS = (
     *_same_type_binary(
         index_defs.index_shrui,
         {ScalarTypeKind.INDEX: "vm.integer.shift.right.u64"},
+    ),
+    *_same_type_binary(
+        index_defs.index_rotli,
+        {ScalarTypeKind.INDEX: "vm.integer.rotate.left.i64"},
+    ),
+    *_same_type_binary(
+        index_defs.index_rotri,
+        {ScalarTypeKind.INDEX: "vm.integer.rotate.right.i64"},
+    ),
+    *_same_type_unary(
+        index_defs.index_ctlzi,
+        {ScalarTypeKind.INDEX: "vm.integer.count.leading.zeros.i64"},
+    ),
+    *_same_type_unary(
+        index_defs.index_cttzi,
+        {ScalarTypeKind.INDEX: "vm.integer.count.trailing.zeros.i64"},
+    ),
+    *_same_type_unary(
+        index_defs.index_ctpopi,
+        {ScalarTypeKind.INDEX: "vm.integer.popcount.i64"},
+    ),
+    *_integer_comparison(
+        index_defs.index_cmp,
+        {
+            ScalarTypeKind.INDEX: "vm.integer.compare.i64",
+            ScalarTypeKind.OFFSET: "vm.integer.compare.i64",
+        },
     ),
     *_same_type_binary(
         scalar_arithmetic.scalar_addi,
@@ -1430,6 +1525,156 @@ VM_SOURCE_LOWERINGS = (
         {
             ScalarTypeKind.I32: "vm.integer.mul.i32",
             ScalarTypeKind.I64: "vm.integer.mul.i64",
+        },
+    ),
+    *_same_type_binary(
+        scalar_arithmetic.scalar_divsi,
+        {
+            ScalarTypeKind.I32: "vm.integer.div.s32",
+            ScalarTypeKind.I64: "vm.integer.div.s64",
+        },
+    ),
+    *_same_type_binary(
+        scalar_arithmetic.scalar_divui,
+        {
+            ScalarTypeKind.I32: "vm.integer.div.u32",
+            ScalarTypeKind.I64: "vm.integer.div.u64",
+        },
+    ),
+    *_same_type_binary(
+        scalar_arithmetic.scalar_remsi,
+        {
+            ScalarTypeKind.I32: "vm.integer.rem.s32",
+            ScalarTypeKind.I64: "vm.integer.rem.s64",
+        },
+    ),
+    *_same_type_binary(
+        scalar_arithmetic.scalar_remui,
+        {
+            ScalarTypeKind.I32: "vm.integer.rem.u32",
+            ScalarTypeKind.I64: "vm.integer.rem.u64",
+        },
+    ),
+    *_same_type_unary(
+        scalar_arithmetic.scalar_negi,
+        {
+            ScalarTypeKind.I32: "vm.integer.neg.i32",
+            ScalarTypeKind.I64: "vm.integer.neg.i64",
+        },
+    ),
+    *_same_type_unary(
+        scalar_arithmetic.scalar_absi,
+        {
+            ScalarTypeKind.I32: "vm.integer.abs.s32",
+            ScalarTypeKind.I64: "vm.integer.abs.s64",
+        },
+    ),
+    *_same_type_binary(
+        scalar_arithmetic.scalar_minsi,
+        {
+            ScalarTypeKind.I32: "vm.integer.min.s32",
+            ScalarTypeKind.I64: "vm.integer.min.s64",
+        },
+    ),
+    *_same_type_binary(
+        scalar_arithmetic.scalar_maxsi,
+        {
+            ScalarTypeKind.I32: "vm.integer.max.s32",
+            ScalarTypeKind.I64: "vm.integer.max.s64",
+        },
+    ),
+    *_same_type_binary(
+        scalar_arithmetic.scalar_minui,
+        {
+            ScalarTypeKind.I32: "vm.integer.min.u32",
+            ScalarTypeKind.I64: "vm.integer.min.u64",
+        },
+    ),
+    *_same_type_binary(
+        scalar_arithmetic.scalar_maxui,
+        {
+            ScalarTypeKind.I32: "vm.integer.max.u32",
+            ScalarTypeKind.I64: "vm.integer.max.u64",
+        },
+    ),
+    *_same_type_binary(
+        scalar_bitwise.scalar_andi,
+        {
+            ScalarTypeKind.I1: "vm.integer.and.i32",
+            ScalarTypeKind.I32: "vm.integer.and.i32",
+            ScalarTypeKind.I64: "vm.integer.and.i64",
+        },
+    ),
+    *_same_type_binary(
+        scalar_bitwise.scalar_ori,
+        {
+            ScalarTypeKind.I1: "vm.integer.or.i32",
+            ScalarTypeKind.I32: "vm.integer.or.i32",
+            ScalarTypeKind.I64: "vm.integer.or.i64",
+        },
+    ),
+    *_same_type_binary(
+        scalar_bitwise.scalar_xori,
+        {
+            ScalarTypeKind.I1: "vm.integer.xor.i32",
+            ScalarTypeKind.I32: "vm.integer.xor.i32",
+            ScalarTypeKind.I64: "vm.integer.xor.i64",
+        },
+    ),
+    *_same_type_binary(
+        scalar_bitwise.scalar_shli,
+        {
+            ScalarTypeKind.I32: "vm.integer.shift.left.i32",
+            ScalarTypeKind.I64: "vm.integer.shift.left.i64",
+        },
+    ),
+    *_same_type_binary(
+        scalar_bitwise.scalar_shrsi,
+        {
+            ScalarTypeKind.I32: "vm.integer.shift.right.s32",
+            ScalarTypeKind.I64: "vm.integer.shift.right.s64",
+        },
+    ),
+    *_same_type_binary(
+        scalar_bitwise.scalar_shrui,
+        {
+            ScalarTypeKind.I32: "vm.integer.shift.right.u32",
+            ScalarTypeKind.I64: "vm.integer.shift.right.u64",
+        },
+    ),
+    *_same_type_binary(
+        scalar_bitwise.scalar_rotli,
+        {
+            ScalarTypeKind.I32: "vm.integer.rotate.left.i32",
+            ScalarTypeKind.I64: "vm.integer.rotate.left.i64",
+        },
+    ),
+    *_same_type_binary(
+        scalar_bitwise.scalar_rotri,
+        {
+            ScalarTypeKind.I32: "vm.integer.rotate.right.i32",
+            ScalarTypeKind.I64: "vm.integer.rotate.right.i64",
+        },
+    ),
+    *_same_type_unary(
+        scalar_bitwise.scalar_ctlzi,
+        {
+            ScalarTypeKind.I32: "vm.integer.count.leading.zeros.i32",
+            ScalarTypeKind.I64: "vm.integer.count.leading.zeros.i64",
+        },
+    ),
+    *_same_type_unary(
+        scalar_bitwise.scalar_cttzi,
+        {
+            ScalarTypeKind.I32: "vm.integer.count.trailing.zeros.i32",
+            ScalarTypeKind.I64: "vm.integer.count.trailing.zeros.i64",
+        },
+    ),
+    *_same_type_unary(
+        scalar_bitwise.scalar_ctpopi,
+        {
+            ScalarTypeKind.I32: "vm.integer.popcount.i32",
+            ScalarTypeKind.I64: "vm.integer.popcount.i64",
         },
     ),
     *_integer_comparison(
