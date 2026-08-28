@@ -2781,7 +2781,8 @@ static iree_status_t loom_low_verify_reg_class(
       reg_class->flags,
       LOOM_LOW_REG_CLASS_FLAG_VIRTUAL_ONLY | LOOM_LOW_REG_CLASS_FLAG_PHYSICAL |
           LOOM_LOW_REG_CLASS_FLAG_REFERENCE |
-          LOOM_LOW_REG_CLASS_FLAG_UNSPILLABLE,
+          LOOM_LOW_REG_CLASS_FLAG_UNSPILLABLE |
+          LOOM_LOW_REG_CLASS_FLAG_UNALIGNED_RANGES,
       "register class", reg_class_index));
   IREE_RETURN_IF_ERROR(loom_low_verify_required_string(
       descriptor_set, reg_class->name_string_offset, "reg_class.name"));

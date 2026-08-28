@@ -174,6 +174,19 @@ typedef uint32_t loom_low_register_part_mask_t;
 #define LOOM_LOW_REG_CLASS_FLAG_REFERENCE ((uint16_t)1u << 2)
 // Register class cannot be represented in spill storage.
 #define LOOM_LOW_REG_CLASS_FLAG_UNSPILLABLE ((uint16_t)1u << 3)
+// Contiguous multi-unit values may begin at any allocation-unit location.
+// Without this flag power-of-two widths require their natural unit alignment.
+#define LOOM_LOW_REG_CLASS_FLAG_UNALIGNED_RANGES ((uint16_t)1u << 4)
+
+// Returns the required base-unit alignment for a contiguous register range.
+static inline uint32_t loom_low_reg_class_range_alignment(
+    loom_low_reg_class_flags_t flags, uint32_t unit_count) {
+  if (iree_any_bit_set(flags, LOOM_LOW_REG_CLASS_FLAG_UNALIGNED_RANGES)) {
+    return 1;
+  }
+  return unit_count > 1 && (unit_count & (unit_count - 1u)) == 0 ? unit_count
+                                                                 : 1u;
+}
 
 typedef enum loom_low_spill_slot_space_e {
   // Unknown or uninitialized spill storage space.

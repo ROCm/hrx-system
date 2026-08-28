@@ -421,6 +421,19 @@ low.func.def target<test.low.core>(@test_target) @slice_uses_source_subrange(%wi
 
 // ====
 
+// RUN: emit low-allocation-json @fixed_unaligned_register_range fixed=%value:target_id:2:4
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @fixed_unaligned_register_range(%value: reg<test.ptr x4>) -> (reg<test.ptr x4>) asm {
+  return %value
+}
+
+// ----
+{"format":"loom.low.allocation.v0","function":"fixed_unaligned_register_range","target":"test_target","descriptor_set":"test.low.core","allocation_mode":"virtual","assignment_count":1,"remark_count":0,"copy_decision_count":0,"spill_count":0,"spill_plan_count":0,"coalesced_copy_count":0,"materialized_copy_count":0,"assignments":[{"index":0,"value":{"id":0,"name":"value","type":"reg<test.ptr x4>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":"index","register_class":"test.ptr"},"start_point":0,"end_point":1,"unit_count":4,"location":{"kind":"target_id","base":2,"count":4}}],"spill_plans":[],"copy_decisions":[],"remarks":[]}
+
+// ====
+
 // RUN: emit low-allocation-json @fixed_physical_span_exceeds_capacity fixed=%value:physical_register:40:1 output=none
 
 test.target<low_core> @test_target

@@ -39,9 +39,11 @@ uint32_t loom_low_allocation_live_range_interval_storage_end_point(
 uint32_t loom_low_allocation_live_range_interval_initial_unit_end_point(
     const loom_liveness_interval_t* interval);
 
-// Returns the preferred base-location alignment for |interval|.
+// Returns the required base-location alignment for |interval| in a register
+// class with |reg_class_flags|.
 uint32_t loom_low_allocation_live_range_interval_alignment(
-    const loom_liveness_interval_t* interval);
+    const loom_liveness_interval_t* interval,
+    loom_low_reg_class_flags_t reg_class_flags);
 
 // Returns the one-past-last live program point for one assigned unit. Unit
 // offsets outside |assignment|'s unit-count domain fall back to the assignment

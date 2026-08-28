@@ -1202,7 +1202,10 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
             _REG_I64, 64, SpillSlotSpace.PRIVATE, flags=(RegClassFlag.VIRTUAL_ONLY,)
         ),
         RegClass(
-            _REG_PTR, 64, SpillSlotSpace.PRIVATE, flags=(RegClassFlag.VIRTUAL_ONLY,)
+            _REG_PTR,
+            64,
+            SpillSlotSpace.PRIVATE,
+            flags=(RegClassFlag.VIRTUAL_ONLY, RegClassFlag.UNALIGNED_RANGES),
         ),
         RegClass(
             _REG_PHYS,

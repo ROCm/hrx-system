@@ -106,6 +106,8 @@ typedef struct loom_low_allocation_resolved_fixed_value_t {
 typedef struct loom_low_allocation_class_capacity_t {
   // Descriptor-set-local register class ID.
   uint16_t descriptor_reg_class_id;
+  // Register-class behavioral flags affecting allocation placement.
+  loom_low_reg_class_flags_t reg_class_flags;
   // Location kind used for this class.
   loom_low_allocation_location_kind_t location_kind;
   // Maximum allocation units when |is_bounded| is true.

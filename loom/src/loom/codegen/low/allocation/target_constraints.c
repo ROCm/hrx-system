@@ -205,6 +205,7 @@ iree_status_t loom_low_allocation_target_constraints_reg_class_capacity(
       !iree_any_bit_set(reg_class->flags, LOOM_LOW_REG_CLASS_FLAG_UNSPILLABLE);
   *out_capacity = (loom_low_allocation_class_capacity_t){
       .descriptor_reg_class_id = reg_class_id,
+      .reg_class_flags = reg_class->flags,
       .location_kind =
           loom_low_allocation_storage_reg_class_location_kind(reg_class),
       .max_units = max_units,
@@ -881,8 +882,14 @@ iree_status_t loom_low_allocation_target_constraints_resolve_fixed_values(
               fixed_value->location_count));
       continue;
     }
+    uint16_t reg_class_id = LOOM_LOW_REG_CLASS_NONE;
+    const loom_low_reg_class_t* reg_class = NULL;
+    IREE_RETURN_IF_ERROR(
+        loom_low_allocation_target_constraints_resolve_reg_class(
+            constraints, interval->value_class, &reg_class_id, &reg_class));
     const uint32_t alignment =
-        loom_low_allocation_live_range_interval_alignment(interval);
+        loom_low_allocation_live_range_interval_alignment(interval,
+                                                          reg_class->flags);
     if (fixed_value->location_base % alignment != 0) {
       IREE_RETURN_IF_ERROR(
           loom_low_allocation_target_constraints_emit_fixed_value_misalignment(
@@ -891,10 +898,6 @@ iree_status_t loom_low_allocation_target_constraints_resolve_fixed_values(
       continue;
     }
 
-    uint16_t reg_class_id = LOOM_LOW_REG_CLASS_NONE;
-    IREE_RETURN_IF_ERROR(
-        loom_low_allocation_target_constraints_resolve_reg_class(
-            constraints, interval->value_class, &reg_class_id, NULL));
     bool valid_range = false;
     IREE_RETURN_IF_ERROR(
         loom_low_allocation_target_constraints_validate_register_location_capacity(

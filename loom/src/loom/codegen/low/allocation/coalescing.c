@@ -787,8 +787,8 @@ static iree_status_t loom_low_allocation_coalescing_append_interval_at_location(
           &capacity, location_kind, location_base, unit_count)) {
     return iree_ok_status();
   }
-  const uint32_t alignment =
-      loom_low_allocation_live_range_interval_alignment(interval);
+  const uint32_t alignment = loom_low_allocation_live_range_interval_alignment(
+      interval, capacity.reg_class_flags);
   if (location_base % alignment != 0) {
     return iree_ok_status();
   }
@@ -1479,7 +1479,8 @@ loom_low_allocation_coalescing_default_concat_source_assembles_result(
   const uint32_t result_location_base =
       source_unit_location - relation->result_unit_offset;
   const uint32_t result_alignment =
-      loom_low_allocation_live_range_interval_alignment(result_interval);
+      loom_low_allocation_live_range_interval_alignment(
+          result_interval, result_capacity.reg_class_flags);
   if (result_location_base % result_alignment != 0 ||
       !loom_low_allocation_storage_reg_classes_share(
           context->search_context->descriptor_set,
@@ -1519,7 +1520,8 @@ loom_low_allocation_coalescing_default_concat_source_assembles_result(
         loom_low_allocation_target_constraints_interval_capacity(
             context->target_constraints, sibling_interval, &sibling_capacity));
     const uint32_t sibling_alignment =
-        loom_low_allocation_live_range_interval_alignment(sibling_interval);
+        loom_low_allocation_live_range_interval_alignment(
+            sibling_interval, sibling_capacity.reg_class_flags);
     if (!loom_low_allocation_storage_reg_classes_share(
             context->search_context->descriptor_set,
             source_capacity.descriptor_reg_class_id,
@@ -1568,9 +1570,11 @@ loom_low_allocation_coalescing_find_concat_result_location_for_source(
   }
 
   const uint32_t result_alignment =
-      loom_low_allocation_live_range_interval_alignment(result_interval);
+      loom_low_allocation_live_range_interval_alignment(
+          result_interval, capacity.reg_class_flags);
   const uint32_t source_alignment =
-      loom_low_allocation_live_range_interval_alignment(source_interval);
+      loom_low_allocation_live_range_interval_alignment(
+          source_interval, capacity.reg_class_flags);
   const uint32_t assigned_limit =
       loom_low_allocation_target_constraints_assigned_location_search_limit(
           context->target_constraints, capacity.descriptor_reg_class_id,

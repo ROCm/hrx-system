@@ -838,7 +838,7 @@ VM_CORE_DESCRIPTOR_SET = DescriptorSet(
             _VALUE_REGISTER_CLASS,
             alloc_unit_bits=64,
             spill_slot_space=SpillSlotSpace.PRIVATE,
-            flags=(RegClassFlag.PHYSICAL,),
+            flags=(RegClassFlag.PHYSICAL, RegClassFlag.UNALIGNED_RANGES),
             target_bank_id=1,
             allocatable_count=256,
             alias_set_id=1,
