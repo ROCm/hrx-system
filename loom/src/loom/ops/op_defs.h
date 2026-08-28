@@ -1322,6 +1322,10 @@ loom_string_id_t loom_func_like_import_symbol(loom_func_like_t func);
 // Returns the import policy enum value, or zero when absent.
 uint8_t loom_func_like_import_policy(loom_func_like_t func);
 
+// Returns metadata owned by the import declaration, or an empty slice if
+// absent.
+loom_named_attr_slice_t loom_func_like_import_metadata(loom_func_like_t func);
+
 // Returns the target record symbol ref for a func-like op, or null if
 // |func| has no target contract.
 loom_symbol_ref_t loom_func_like_target(loom_func_like_t func);
@@ -1363,6 +1367,10 @@ iree_string_view_t loom_func_like_export_name(const loom_module_t* module,
 
 // Returns the export payload attrs, or an empty slice if absent.
 loom_named_attr_slice_t loom_func_like_export_attrs(loom_func_like_t func);
+
+// Returns metadata owned by the export declaration, or an empty slice if
+// absent.
+loom_named_attr_slice_t loom_func_like_export_metadata(loom_func_like_t func);
 
 // Returns true when |func| is a source-level or target-low kernel entry.
 // Kernel entries are exported by symbol name even without an explicit export

@@ -744,6 +744,15 @@ uint8_t loom_func_like_import_policy(loom_func_like_t func) {
   return loom_attr_is_absent(attr) ? 0 : loom_attr_as_enum(attr);
 }
 
+loom_named_attr_slice_t loom_func_like_import_metadata(loom_func_like_t func) {
+  if (!func.vtable ||
+      func.vtable->import_metadata_attr_index == LOOM_ATTR_INDEX_NONE) {
+    return loom_named_attr_slice_empty();
+  }
+  return loom_attr_as_dict(
+      loom_op_attrs(func.op)[func.vtable->import_metadata_attr_index]);
+}
+
 loom_symbol_ref_t loom_func_like_target(loom_func_like_t func) {
   if (!func.vtable || func.vtable->target_attr_index == LOOM_ATTR_INDEX_NONE) {
     return loom_symbol_ref_null();
@@ -861,6 +870,15 @@ loom_named_attr_slice_t loom_func_like_export_attrs(loom_func_like_t func) {
   }
   return loom_attr_as_dict(
       loom_op_attrs(func.op)[func.vtable->export_attrs_attr_index]);
+}
+
+loom_named_attr_slice_t loom_func_like_export_metadata(loom_func_like_t func) {
+  if (!func.vtable ||
+      func.vtable->export_metadata_attr_index == LOOM_ATTR_INDEX_NONE) {
+    return loom_named_attr_slice_empty();
+  }
+  return loom_attr_as_dict(
+      loom_op_attrs(func.op)[func.vtable->export_metadata_attr_index]);
 }
 
 bool loom_func_like_is_kernel_entry(loom_func_like_t func) {

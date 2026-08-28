@@ -115,7 +115,8 @@ LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_def_abi, 8, loom_target_abi_kind_t)
 LOOM_DEFINE_ATTR_DICT(loom_func_def_abi_attrs, 9)
 LOOM_DEFINE_ATTR_STRING(loom_func_def_export_symbol, 10)
 LOOM_DEFINE_ATTR_DICT(loom_func_def_export_attrs, 11)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_def_retain, 12, loom_func_retain_t)
+LOOM_DEFINE_ATTR_DICT(loom_func_def_export_metadata, 12)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_def_retain, 13, loom_func_retain_t)
 LOOM_DEFINE_REGION(loom_func_def_body, 0)
 enum loom_func_def_build_flag_bits_e {
   LOOM_FUNC_DEF_BUILD_FLAG_HAS_VISIBILITY = 1u << 0,
@@ -129,7 +130,8 @@ enum loom_func_def_build_flag_bits_e {
   LOOM_FUNC_DEF_BUILD_FLAG_HAS_EXPORT_SYMBOL = 1u << 8,
   LOOM_FUNC_DEF_BUILD_FLAG_HAS_ABI_ATTRS = 1u << 9,
   LOOM_FUNC_DEF_BUILD_FLAG_HAS_EXPORT_ATTRS = 1u << 10,
-  LOOM_FUNC_DEF_BUILD_FLAG_HAS_PREDICATES = 1u << 11,
+  LOOM_FUNC_DEF_BUILD_FLAG_HAS_EXPORT_METADATA = 1u << 11,
+  LOOM_FUNC_DEF_BUILD_FLAG_HAS_PREDICATES = 1u << 12,
 };
 typedef uint32_t loom_func_def_build_flags_t;
 iree_status_t loom_func_def_build(
@@ -146,6 +148,7 @@ iree_status_t loom_func_def_build(
     loom_optional loom_named_attr_slice_t abi_attrs,
     loom_optional loom_string_id_t export_symbol,
     loom_optional loom_named_attr_slice_t export_attrs,
+    loom_optional loom_named_attr_slice_t export_metadata,
     loom_symbol_ref_t callee,
     const loom_type_t* arg_types,
     iree_host_size_t arg_types_count,
@@ -171,17 +174,19 @@ LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_decl_visibility, 1, loom_func_visibility_t
 LOOM_DEFINE_ATTR_STRING(loom_func_decl_import_module, 2)
 LOOM_DEFINE_ATTR_STRING(loom_func_decl_import_symbol, 3)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_decl_import_policy, 4, loom_func_decl_import_policy_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_decl_cc, 5, loom_func_cc_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_decl_purity, 6, loom_func_purity_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_decl_temperature, 7, loom_func_temperature_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_decl_inline_policy, 8, loom_inline_policy_t)
-LOOM_DEFINE_ATTR_SYMBOL(loom_func_decl_target, 9)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_decl_abi, 10, loom_target_abi_kind_t)
-LOOM_DEFINE_ATTR_DICT(loom_func_decl_abi_attrs, 11)
-LOOM_DEFINE_ATTR_STRING(loom_func_decl_export_symbol, 12)
-LOOM_DEFINE_ATTR_DICT(loom_func_decl_export_attrs, 13)
-LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_func_decl_predicates, 14)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_decl_retain, 15, loom_func_retain_t)
+LOOM_DEFINE_ATTR_DICT(loom_func_decl_import_metadata, 5)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_decl_cc, 6, loom_func_cc_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_decl_purity, 7, loom_func_purity_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_decl_temperature, 8, loom_func_temperature_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_decl_inline_policy, 9, loom_inline_policy_t)
+LOOM_DEFINE_ATTR_SYMBOL(loom_func_decl_target, 10)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_decl_abi, 11, loom_target_abi_kind_t)
+LOOM_DEFINE_ATTR_DICT(loom_func_decl_abi_attrs, 12)
+LOOM_DEFINE_ATTR_STRING(loom_func_decl_export_symbol, 13)
+LOOM_DEFINE_ATTR_DICT(loom_func_decl_export_attrs, 14)
+LOOM_DEFINE_ATTR_DICT(loom_func_decl_export_metadata, 15)
+LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_func_decl_predicates, 16)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_decl_retain, 17, loom_func_retain_t)
 enum loom_func_decl_build_flag_bits_e {
   LOOM_FUNC_DECL_BUILD_FLAG_HAS_VISIBILITY = 1u << 0,
   LOOM_FUNC_DECL_BUILD_FLAG_HAS_RETAIN = 1u << 1,
@@ -195,9 +200,11 @@ enum loom_func_decl_build_flag_bits_e {
   LOOM_FUNC_DECL_BUILD_FLAG_HAS_TARGET = 1u << 9,
   LOOM_FUNC_DECL_BUILD_FLAG_HAS_ABI = 1u << 10,
   LOOM_FUNC_DECL_BUILD_FLAG_HAS_EXPORT_SYMBOL = 1u << 11,
-  LOOM_FUNC_DECL_BUILD_FLAG_HAS_ABI_ATTRS = 1u << 12,
-  LOOM_FUNC_DECL_BUILD_FLAG_HAS_EXPORT_ATTRS = 1u << 13,
-  LOOM_FUNC_DECL_BUILD_FLAG_HAS_PREDICATES = 1u << 14,
+  LOOM_FUNC_DECL_BUILD_FLAG_HAS_IMPORT_METADATA = 1u << 12,
+  LOOM_FUNC_DECL_BUILD_FLAG_HAS_ABI_ATTRS = 1u << 13,
+  LOOM_FUNC_DECL_BUILD_FLAG_HAS_EXPORT_ATTRS = 1u << 14,
+  LOOM_FUNC_DECL_BUILD_FLAG_HAS_EXPORT_METADATA = 1u << 15,
+  LOOM_FUNC_DECL_BUILD_FLAG_HAS_PREDICATES = 1u << 16,
 };
 typedef uint32_t loom_func_decl_build_flags_t;
 iree_status_t loom_func_decl_build(
@@ -208,6 +215,7 @@ iree_status_t loom_func_decl_build(
     loom_optional uint8_t import_policy,
     loom_optional loom_string_id_t import_module,
     loom_optional loom_string_id_t import_symbol,
+    loom_optional loom_named_attr_slice_t import_metadata,
     loom_optional uint8_t cc,
     loom_optional uint8_t purity,
     loom_optional uint8_t temperature,
@@ -217,6 +225,7 @@ iree_status_t loom_func_decl_build(
     loom_optional loom_named_attr_slice_t abi_attrs,
     loom_optional loom_string_id_t export_symbol,
     loom_optional loom_named_attr_slice_t export_attrs,
+    loom_optional loom_named_attr_slice_t export_metadata,
     loom_symbol_ref_t callee,
     const loom_type_t* arg_types,
     iree_host_size_t arg_types_count,

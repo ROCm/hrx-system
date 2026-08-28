@@ -290,6 +290,20 @@ _EXPORT_FORMAT: list[FormatElement] = [
     ),
 ]
 
+_EXPORT_METADATA_FORMAT: list[FormatElement] = [
+    OptionalGroup(
+        [
+            kw("export_metadata"),
+            GLUE,
+            LPAREN,
+            AttrDict("export_metadata"),
+            GLUE,
+            RPAREN,
+        ],
+        anchor="export_metadata",
+    ),
+]
+
 # Additional import modifier for func.decl only:
 #   func.decl import("module") @name(...)
 #   func.decl public import("module", "original") @alias(...)
@@ -307,6 +321,20 @@ _IMPORT_FORMAT: list[FormatElement] = [
             RPAREN,
         ],
         anchor="import_module",
+    ),
+]
+
+_IMPORT_METADATA_FORMAT: list[FormatElement] = [
+    OptionalGroup(
+        [
+            kw("import_metadata"),
+            GLUE,
+            LPAREN,
+            AttrDict("import_metadata"),
+            GLUE,
+            RPAREN,
+        ],
+        anchor="import_metadata",
     ),
 ]
 
@@ -355,6 +383,12 @@ _CONTRACT_ATTRS = [
     AttrDef("abi_attrs", "dict", optional=True),
     AttrDef("export_symbol", "string", optional=True),
     AttrDef("export_attrs", "dict", optional=True),
+    AttrDef(
+        "export_metadata",
+        "dict",
+        optional=True,
+        doc="Stable typed metadata owned by this export declaration.",
+    ),
 ]
 
 # func.decl adds import attrs to the shared modifier set.
@@ -364,6 +398,12 @@ _DECL_ATTRS = [
     AttrDef("import_module", "string", optional=True),
     AttrDef("import_symbol", "string", optional=True),
     AttrDef("import_policy", "enum", enum_def=ImportPolicy, optional=True),
+    AttrDef(
+        "import_metadata",
+        "dict",
+        optional=True,
+        doc="Stable typed metadata owned by this import declaration.",
+    ),
     AttrDef("cc", "enum", enum_def=CallingConv, optional=True),
     AttrDef("purity", "enum", enum_def=Purity, optional=True),
     AttrDef("temperature", "enum", enum_def=Temperature, optional=True),
@@ -395,6 +435,7 @@ _FUNC_LIKE_CONTRACT: dict[str, Any] = dict(
     abi_attrs="abi_attrs",
     export_symbol="export_symbol",
     export_attrs="export_attrs",
+    export_metadata="export_metadata",
 )
 
 _FUNC_LIKE_DECL_CONTRACT: dict[str, Any] = dict(
@@ -402,6 +443,7 @@ _FUNC_LIKE_DECL_CONTRACT: dict[str, Any] = dict(
     import_module="import_module",
     import_symbol="import_symbol",
     import_policy="import_policy",
+    import_metadata="import_metadata",
 )
 
 # ============================================================================
@@ -432,6 +474,7 @@ func_def = Op(
         *_TARGET_FORMAT,
         *_ABI_FORMAT,
         *_EXPORT_FORMAT,
+        *_EXPORT_METADATA_FORMAT,
         *_SIGNATURE_FORMAT,
         Region("body"),
     ],
@@ -472,6 +515,7 @@ func_decl = Op(
         OptionalGroup([Attr("retain")], anchor="retain"),
         OptionalGroup([Attr("import_policy")], anchor="import_policy"),
         *_IMPORT_FORMAT,
+        *_IMPORT_METADATA_FORMAT,
         OptionalGroup([Attr("cc")], anchor="cc"),
         OptionalGroup([Attr("purity")], anchor="purity"),
         OptionalGroup([Attr("temperature")], anchor="temperature"),
@@ -479,6 +523,7 @@ func_decl = Op(
         *_TARGET_FORMAT,
         *_ABI_FORMAT,
         *_EXPORT_FORMAT,
+        *_EXPORT_METADATA_FORMAT,
         *_SIGNATURE_FORMAT,
     ],
     examples=[

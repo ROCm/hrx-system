@@ -843,7 +843,7 @@ func.def public export("request_entry") @entry(%x: i32) -> (i32) {
 )"),
                                    IREE_SV("requester.loom"));
   loom_module_t* library = Parse(IREE_SV(R"(
-func.def public export("library_helper") @helper(%x: i32) -> (i32) {
+func.def public export("library_helper") export_metadata({summary = "library helper"}) @helper(%x: i32) -> (i32) {
   func.return %x : i32
 }
 
@@ -882,6 +882,7 @@ func.def public export("unrelated") @unused(%x: i32) -> (i32) {
       loom_func_like_cast(materialization.product.module, helper->defining_op);
   ASSERT_TRUE(loom_func_like_isa(entry_func));
   ASSERT_TRUE(loom_func_like_isa(helper_func));
+  EXPECT_EQ(loom_func_like_export_metadata(helper_func).count, 0u);
   const loom_string_id_t entry_export =
       loom_func_like_export_symbol(entry_func);
   ASSERT_NE(entry_export, LOOM_STRING_ID_INVALID);

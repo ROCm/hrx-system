@@ -238,6 +238,12 @@ _FUNC_COMMON_ATTRS = [
     AttrDef("abi_layout", "dict", optional=True),
     AttrDef("export_symbol", "string", optional=True),
     AttrDef("export_attrs", "dict", optional=True),
+    AttrDef(
+        "export_metadata",
+        "dict",
+        optional=True,
+        doc="Stable typed metadata owned by this export declaration.",
+    ),
     AttrDef("visibility", "enum", enum_def=Visibility, optional=True),
     AttrDef("cc", "enum", enum_def=CallingConv, optional=True),
     AttrDef("purity", "enum", enum_def=Purity, optional=True),
@@ -282,6 +288,12 @@ _FUNC_DECL_IMPORT_ATTRS = [
     AttrDef("import_policy", "enum", enum_def=ImportPolicy, optional=True),
     AttrDef("import_module", "string", optional=True),
     AttrDef("import_symbol", "string", optional=True),
+    AttrDef(
+        "import_metadata",
+        "dict",
+        optional=True,
+        doc="Stable typed metadata owned by this import declaration.",
+    ),
     AttrDef("import_kind", "enum", enum_def=LowCodeImportKind, optional=True),
     AttrDef("code_symbol", "string", optional=True),
 ]
@@ -349,6 +361,20 @@ _FUNC_EXPORT_FORMAT: list[FormatElement] = [
             RPAREN,
         ],
         anchor="export_symbol",
+    ),
+]
+
+_FUNC_EXPORT_METADATA_FORMAT: list[FormatElement] = [
+    OptionalGroup(
+        [
+            kw("export_metadata"),
+            GLUE,
+            LPAREN,
+            AttrDict("export_metadata"),
+            GLUE,
+            RPAREN,
+        ],
+        anchor="export_metadata",
     ),
 ]
 
@@ -456,6 +482,20 @@ _FUNC_LINK_FORMAT: list[FormatElement] = [
     ),
 ]
 
+_FUNC_IMPORT_METADATA_FORMAT: list[FormatElement] = [
+    OptionalGroup(
+        [
+            kw("import_metadata"),
+            GLUE,
+            LPAREN,
+            AttrDict("import_metadata"),
+            GLUE,
+            RPAREN,
+        ],
+        anchor="import_metadata",
+    ),
+]
+
 _FUNC_SIGNATURE_FORMAT: list[FormatElement] = [
     SymbolRef("callee"),
     Scope(
@@ -494,6 +534,7 @@ _FUNC_LIKE_COMMON: dict[str, Any] = dict(
     abi_attrs="abi_attrs",
     export_symbol="export_symbol",
     export_attrs="export_attrs",
+    export_metadata="export_metadata",
     visibility="visibility",
     cc="cc",
     purity="purity",
@@ -505,6 +546,7 @@ _FUNC_LIKE_DECL: dict[str, Any] = dict(
     import_policy="import_policy",
     import_module="import_module",
     import_symbol="import_symbol",
+    import_metadata="import_metadata",
 )
 
 _KERNEL_FUNC_LIKE_COMMON: dict[str, Any] = dict(
@@ -550,6 +592,7 @@ low_func_def = Op(
         *_FUNC_ABI_FORMAT,
         *_KERNEL_ABI_LAYOUT_FORMAT,
         *_FUNC_EXPORT_FORMAT,
+        *_FUNC_EXPORT_METADATA_FORMAT,
         *_FUNC_SIGNATURE_FORMAT,
         Region("body", syntax="low.asm.optional"),
     ],
@@ -628,11 +671,13 @@ low_func_decl = Op(
     format=[
         *_FUNC_MODIFIER_FORMAT,
         *_FUNC_LINK_FORMAT,
+        *_FUNC_IMPORT_METADATA_FORMAT,
         *_FUNC_IMPORT_FORMAT,
         *_LOW_TARGET_FORMAT,
         *_FUNC_ABI_FORMAT,
         *_KERNEL_ABI_LAYOUT_FORMAT,
         *_FUNC_EXPORT_FORMAT,
+        *_FUNC_EXPORT_METADATA_FORMAT,
         *_FUNC_SIGNATURE_FORMAT,
     ],
     examples=[

@@ -155,6 +155,7 @@ class AmdgpuFeedbackTest : public ::testing::Test {
         loom_make_named_attr_slice(NULL, 0),
         loom_make_named_attr_slice(NULL, 0),
         /*export_symbol=*/LOOM_STRING_ID_INVALID,
+        loom_make_named_attr_slice(NULL, 0),
         loom_make_named_attr_slice(NULL, 0), callee, /*arg_types=*/NULL,
         /*arg_types_count=*/0, /*result_types=*/NULL, /*result_count=*/0,
         /*tied_results=*/NULL, /*tied_result_count=*/0, /*predicates=*/NULL,

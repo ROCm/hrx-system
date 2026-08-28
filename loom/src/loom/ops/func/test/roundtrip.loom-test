@@ -72,6 +72,15 @@ func.decl public import("upstream") @relu(%x: f32) -> (f32)
 
 // ====
 
+// Import and export declarations own independent typed metadata scopes.
+func.decl public import("upstream", "relu_v2") import_metadata({"runtime.optional" = true, "runtime.revision" = u64(2)}) export_metadata({"help.summary" = "Public ReLU", "wire.payload" = bytes("00feff")}) @relu_v2(%x: f32) -> (f32)
+
+func.def public export_metadata({"help.summary" = "Identity", "model.revision" = u64(7)}) @documented_identity(%x: f32) -> (f32) {
+  func.return %x : f32
+}
+
+// ====
+
 // Retained private callable symbols remain ordinary private symbols but are
 // preserved by symbol DCE.
 template.decl @test.effect(%value: i32) -> (i32)

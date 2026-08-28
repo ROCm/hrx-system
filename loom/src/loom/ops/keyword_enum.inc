@@ -89,3 +89,5 @@
   LOOM_KW_LINK = 80,  // "link"
   LOOM_KW_CASES = 81,  // "cases"
   LOOM_KW_TARGETS = 82,  // "targets"
+  LOOM_KW_IMPORT_METADATA = 83,  // "import_metadata"
+  LOOM_KW_EXPORT_METADATA = 84,  // "export_metadata"

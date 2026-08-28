@@ -512,6 +512,33 @@ static iree_status_t loom_function_verify_target_conditions(
   return iree_ok_status();
 }
 
+static iree_status_t loom_function_verify_export_metadata(
+    const loom_module_t* module, const loom_op_t* op, loom_func_like_t function,
+    iree_diagnostic_emitter_t emitter) {
+  const loom_named_attr_slice_t export_metadata =
+      loom_func_like_export_metadata(function);
+  if (export_metadata.count == 0) {
+    return iree_ok_status();
+  }
+  const loom_symbol_ref_t function_ref = loom_func_like_callee(function);
+  if (!loom_symbol_ref_is_valid(function_ref) || function_ref.module_id != 0 ||
+      function_ref.symbol_id >= module->symbols.count) {
+    return iree_ok_status();
+  }
+  const loom_symbol_t* symbol =
+      &module->symbols.entries[function_ref.symbol_id];
+  if (!iree_string_view_is_empty(
+          loom_func_like_export_name(module, symbol, function))) {
+    return iree_ok_status();
+  }
+  return loom_function_contract_emit_attr_value_error(
+      op, function.vtable->export_metadata_attr_index,
+      IREE_SV("export_metadata"), (int64_t)export_metadata.count,
+      IREE_SV("zero entries unless the function is public or explicitly "
+              "exported"),
+      emitter);
+}
+
 iree_status_t loom_function_contract_verify(const loom_module_t* module,
                                             const loom_op_t* op,
                                             iree_diagnostic_emitter_t emitter) {
@@ -520,7 +547,9 @@ iree_status_t loom_function_contract_verify(const loom_module_t* module,
   // require an authored target attribute.
   loom_func_like_t function = loom_func_like_cast(module, (loom_op_t*)op);
   IREE_ASSERT(loom_func_like_isa(function));
-  return loom_function_verify_target_conditions(module, op, function, emitter);
+  IREE_RETURN_IF_ERROR(
+      loom_function_verify_target_conditions(module, op, function, emitter));
+  return loom_function_verify_export_metadata(module, op, function, emitter);
 }
 
 iree_status_t loom_function_import_contract_verify(

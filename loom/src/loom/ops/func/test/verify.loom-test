@@ -5,6 +5,13 @@ func.def @semantic() {
   func.return
 }
 
+// Export metadata requires an actual export boundary so targets cannot
+// silently discard it from a private function.
+// ERROR@+1: STRUCTURE/014 {attr_name="export_metadata", actual_value="1", expected_constraint="zero entries unless the function is public or explicitly exported"}
+func.def export_metadata({"help.summary" = "Hidden"}) @private_metadata() {
+  func.return
+}
+
 // First-class calls use the target func.ref type as their complete contract.
 func.def @indirect(%target: func.ref<(i32) -> (i32)>, %value: i32) -> (i32) {
   %result = func.call.indirect %target(%value) : (i32) -> (i32)

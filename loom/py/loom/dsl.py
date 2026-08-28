@@ -5097,6 +5097,8 @@ class FuncLikeInterface(NamedTuple):
     import_symbol: str | None = None
     # Optional import policy enum attr for external declarations.
     import_policy: str | None = None
+    # Optional typed metadata dictionary owned by the import declaration.
+    import_metadata: str | None = None
     # Optional symbol ref attr naming the resolved target record.
     target: str | None = None
     # Optional string attr naming the intrinsic contract under which the
@@ -5111,6 +5113,8 @@ class FuncLikeInterface(NamedTuple):
     export_symbol: str | None = None
     # Optional export payload dictionary attr.
     export_attrs: str | None = None
+    # Optional typed metadata dictionary owned by the export declaration.
+    export_metadata: str | None = None
     # Optional export linkage attr for entry-style exports.
     export_linkage: str | None = None
     # Visibility enum attr (e.g., public). None if not applicable.

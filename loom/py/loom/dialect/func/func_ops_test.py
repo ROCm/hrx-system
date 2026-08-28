@@ -236,7 +236,7 @@ class TestFuncImportCrossFormatRoundTrip:
             _module_text('func.decl optional import("runtime", "feature_v2") @feature(%x: i32) -> (i32)'),
         )
 
-    def test_import_metadata_preserved(self) -> None:
+    def test_import_identity_preserved(self) -> None:
         module = _parse_module(_module_text('func.decl import("math_lib", "original") @alias(%a: f32) -> (f32)'))
         loaded = read_module(write_module(module))
         sym = loaded.symbols[0]
@@ -244,6 +244,13 @@ class TestFuncImportCrossFormatRoundTrip:
         assert sym.source_module == "math_lib"
         assert sym.source_symbol == "original"
         assert sym.name == "alias"
+
+    def test_boundary_metadata_survives_bytecode(self) -> None:
+        self._cross_roundtrip(
+            _module_text(
+                'func.decl public import("math_lib", "original") import_metadata({"runtime.optional" = true, "runtime.revision" = u64(3)}) export_metadata({"help.summary" = "Aliased math entry", "wire.payload" = bytes("00feff")}) @alias(%a: f32) -> (f32)',
+            )
+        )
 
     def test_mixed_module_survives_bytecode(self) -> None:
         self._cross_roundtrip(

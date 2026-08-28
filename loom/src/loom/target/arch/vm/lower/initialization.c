@@ -171,7 +171,8 @@ static iree_status_t loom_vm_initialization_build_function(
       /*visibility=*/0, /*retain=*/0, LOOM_FUNC_CC_INITIALIZER,
       /*purity=*/0, /*temperature=*/0, /*inline_policy=*/0, target_ref,
       /*abi=*/0, loom_named_attr_slice_empty(), export_name_id,
-      loom_named_attr_slice_empty(), function_ref,
+      loom_named_attr_slice_empty(), loom_named_attr_slice_empty(),
+      function_ref,
       /*arg_types=*/NULL, /*arg_types_count=*/0, /*result_types=*/NULL,
       /*result_count=*/0, /*tied_results=*/NULL, /*tied_result_count=*/0,
       /*predicates=*/NULL, /*predicates_count=*/0, location, &function_op));

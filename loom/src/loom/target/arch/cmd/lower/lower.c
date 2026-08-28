@@ -707,7 +707,7 @@ static iree_status_t loom_cmd_lower_create_function(
       descriptor_set_key, loom_symbol_ref_null(),
       LOOM_TARGET_ABI_COMMAND_PROGRAM, loom_named_attr_slice_empty(),
       loom_attr_as_dict(abi_layout_attr), LOOM_STRING_ID_INVALID,
-      loom_named_attr_slice_empty(), callee,
+      loom_named_attr_slice_empty(), loom_named_attr_slice_empty(), callee,
       /*arg_types=*/NULL, /*arg_types_count=*/0,
       /*result_types=*/NULL, /*result_count=*/0,
       /*tied_results=*/NULL, /*tied_result_count=*/0,

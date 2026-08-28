@@ -1077,6 +1077,10 @@ typedef struct loom_func_like_vtable_t {
   // absent.
   uint8_t import_policy_attr_index;
 
+  // Index of the optional import metadata dictionary. LOOM_ATTR_INDEX_NONE if
+  // absent.
+  uint8_t import_metadata_attr_index;
+
   // Index of the optional target record attr. LOOM_ATTR_INDEX_NONE if absent.
   uint8_t target_attr_index;
 
@@ -1097,6 +1101,10 @@ typedef struct loom_func_like_vtable_t {
 
   // Index of the optional export payload dict. LOOM_ATTR_INDEX_NONE if absent.
   uint8_t export_attrs_attr_index;
+
+  // Index of the optional export metadata dictionary. LOOM_ATTR_INDEX_NONE if
+  // absent.
+  uint8_t export_metadata_attr_index;
 
   // Index of the optional export linkage attr. LOOM_ATTR_INDEX_NONE if absent.
   uint8_t export_linkage_attr_index;

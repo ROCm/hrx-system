@@ -65,11 +65,19 @@ low.func.def public target<test.low.core>(@test_target) abi(object_function) @pr
   return %value
 }
 
+// ====
+
+// RUN: pass source-to-low
+
+test.target<low_core> @test_target
+
+func.def public target(@test_target) export_metadata({"help.summary" = "Identity", "model.revision" = u64(7)}) @identity(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
 // ----
 test.target<low_core> @test_target
 
-low.func.decl link("runtime", "callback") target<test.low.core>(@test_target) abi(object_function) @callback(%value: reg<test.i32>) -> (reg<test.i32>)
-
-low.func.def public target<test.low.core>(@test_target) abi(object_function) @preserves_authored_low(%value: reg<test.i32>) -> (reg<test.i32>) asm {
-  return %value
+low.func.def public target<test.low.core>(@test_target) abi(object_function) export_metadata({"help.summary" = "Identity", "model.revision" = u64(7)}) @identity(%value: reg<test.i32>) -> (reg<test.i32>) {
+  low.return %value : reg<test.i32>
 }

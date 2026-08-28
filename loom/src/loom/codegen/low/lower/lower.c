@@ -1951,6 +1951,8 @@ static iree_status_t loom_low_lower_create_func_op(
       loom_func_like_export_symbol(context->source_function);
   loom_named_attr_slice_t export_attrs =
       loom_func_like_export_attrs(context->source_function);
+  loom_named_attr_slice_t export_metadata =
+      loom_func_like_export_metadata(context->source_function);
   if (visibility != 0) {
     build_flags |= LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_VISIBILITY;
   }
@@ -1982,6 +1984,11 @@ static iree_status_t loom_low_lower_create_func_op(
           context->source_function.vtable->export_attrs_attr_index)) {
     build_flags |= LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_EXPORT_ATTRS;
   }
+  if (loom_low_lower_function_attr_present(
+          context->source_function,
+          context->source_function.vtable->export_metadata_attr_index)) {
+    build_flags |= LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_EXPORT_METADATA;
+  }
   uint8_t retain = 0;
   if (loom_low_lower_context_source_is_retained(context)) {
     build_flags |= LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_RETAIN;
@@ -1998,8 +2005,8 @@ static iree_status_t loom_low_lower_create_func_op(
       &context->builder, build_flags, visibility, retain, cc, purity,
       /*allocation=*/0, /*schedule=*/0, descriptor_set_key,
       context->options->target_ref, abi, abi_attrs, abi_layout, export_symbol,
-      export_attrs, low_func_ref, arg_types, arg_count, result_types,
-      result_count,
+      export_attrs, export_metadata, low_func_ref, arg_types, arg_count,
+      result_types, result_count,
       /*tied_results=*/NULL, /*tied_result_count=*/0,
       /*predicates=*/NULL, /*predicates_count=*/0,
       context->source_function.op->location, &context->low_func_op));
@@ -2346,6 +2353,10 @@ iree_status_t loom_low_lower_import_declaration(
         loom_func_like_export_symbol(source_declaration);
     loom_named_attr_slice_t export_attrs =
         loom_func_like_export_attrs(source_declaration);
+    loom_named_attr_slice_t export_metadata =
+        loom_func_like_export_metadata(source_declaration);
+    loom_named_attr_slice_t import_metadata =
+        loom_func_like_import_metadata(source_declaration);
     if (visibility != 0) {
       build_flags |= LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_VISIBILITY;
     }
@@ -2379,6 +2390,16 @@ iree_status_t loom_low_lower_import_declaration(
     }
     if (loom_low_lower_function_attr_present(
             source_declaration,
+            source_declaration.vtable->export_metadata_attr_index)) {
+      build_flags |= LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_EXPORT_METADATA;
+    }
+    if (loom_low_lower_function_attr_present(
+            source_declaration,
+            source_declaration.vtable->import_metadata_attr_index)) {
+      build_flags |= LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_IMPORT_METADATA;
+    }
+    if (loom_low_lower_function_attr_present(
+            source_declaration,
             source_declaration.vtable->predicates_attr_index)) {
       build_flags |= LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_PREDICATES;
     }
@@ -2402,9 +2423,10 @@ iree_status_t loom_low_lower_import_declaration(
         status = loom_low_func_decl_build(
             &context.builder, build_flags, visibility, retain, cc, purity,
             /*allocation=*/0, /*schedule=*/0, import_policy, import_module,
-            import_symbol, (uint8_t)options->policy->import_decl_kind,
-            code_symbol, descriptor_set_key, options->target_ref, abi,
-            abi_attrs, abi_layout, export_symbol, export_attrs, low_func_ref,
+            import_symbol, import_metadata,
+            (uint8_t)options->policy->import_decl_kind, code_symbol,
+            descriptor_set_key, options->target_ref, abi, abi_attrs, abi_layout,
+            export_symbol, export_attrs, export_metadata, low_func_ref,
             arg_types, arg_count, result_types, result_count,
             /*tied_results=*/NULL,
             /*tied_result_count=*/0, predicates, predicate_count,

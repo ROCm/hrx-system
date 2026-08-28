@@ -223,6 +223,7 @@ static iree_status_t loom_kernel_launch_config_program_build_function(
       LOOM_FUNC_PURITY_PURE, /*temperature=*/0, /*inline_policy=*/0,
       loom_symbol_ref_null(), /*abi=*/0, loom_named_attr_slice_empty(),
       private_export_name, loom_named_attr_slice_empty(),
+      loom_named_attr_slice_empty(),
       (loom_symbol_ref_t){.module_id = 0, .symbol_id = function_symbol_id},
       argument_types, source_arguments.count, result_types,
       IREE_ARRAYSIZE(result_types), /*tied_results=*/NULL,
