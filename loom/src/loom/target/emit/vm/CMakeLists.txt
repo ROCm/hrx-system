@@ -81,6 +81,7 @@ loom_check_test_suite(
     "test/control_flow.loom-test"
     "test/function_values.loom-test"
     "test/imports.loom-test"
+    "test/kernel.loom-test"
     "test/metadata.loom-test"
     "test/module.loom-test"
     "test/spills.loom-test"

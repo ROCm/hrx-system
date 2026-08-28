@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "iree/vm/bytecode/wire/module_format.h"
+#include "loom/codegen/low/function.h"
 #include "loom/format/text/printer.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
@@ -296,8 +297,8 @@ iree_status_t loom_vm_module_presentation_layout_build(
     const loom_type_t* result_types =
         loom_type_func_result_types(declaration.signature);
     const loom_named_attr_slice_t abi_layout =
-        loom_low_func_def_isa(declaration.op)
-            ? loom_low_func_def_abi_layout(declaration.op)
+        loom_low_function_def_isa(declaration.op)
+            ? loom_low_function_abi_layout(declaration.op)
             : loom_low_func_decl_abi_layout(declaration.op);
     loom_named_attr_slice_t argument_names = loom_named_attr_slice_empty();
     loom_named_attr_slice_t result_names = loom_named_attr_slice_empty();

@@ -15,6 +15,9 @@ static const loom_target_snapshot_t kVmCoreSnapshot = {
     .default_pointer_bitwidth = 64,
     .index_bitwidth = 64,
     .offset_bitwidth = 64,
+    .max_workgroup_size = {.x = 1, .y = 1, .z = 1},
+    .max_flat_workgroup_size = 1,
+    .subgroup_size = 1,
     .memory_spaces =
         {
             .generic = 0,
@@ -44,6 +47,12 @@ const loom_target_bundle_t loom_vm_target_bundle_core = {
     .export_plan = &kVmCoreExportPlan,
     .config = &kVmCoreConfig,
 };
+
+bool loom_vm_target_bundle_is_core(const loom_target_bundle_t* bundle) {
+  return bundle != NULL && bundle->config != NULL &&
+         iree_string_view_equal(bundle->config->contract_set_key,
+                                IREE_SV("vm.core"));
+}
 
 static const loom_target_bundle_t* const kVmTargetBundleValues[] = {
     NULL,

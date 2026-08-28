@@ -151,6 +151,7 @@ loom_cc_library(
     "lower/constants.h"
     "lower/control.h"
     "lower/initialization.h"
+    "lower/kernel.h"
     "lower/lower.h"
     "lower/resources.h"
     "lower/types.h"
@@ -158,16 +159,19 @@ loom_cc_library(
     "lower/constants.c"
     "lower/control.c"
     "lower/initialization.c"
+    "lower/kernel.c"
     "lower/lower.c"
     "lower/resources.c"
   DEPS
     ::abi_layout
     ::descriptors
     ::ops
+    ::target_records
     iree::base
     iree::base::internal
     iree::vm::bytecode::wire
     loom::codegen::low::builder
+    loom::codegen::low::function
     loom::codegen::low::lower
     loom::error::error_defs
     loom::ir
@@ -175,6 +179,7 @@ loom_cc_library(
     loom::ops::func
     loom::ops::global
     loom::ops::index
+    loom::ops::kernel
     loom::ops::low
     loom::ops::op_defs
     loom::ops::scalar
@@ -182,6 +187,7 @@ loom_cc_library(
     loom::rewrite::rewriter
     loom::target::low_legality
     loom::target::registers
+    loom::util::fact_table
   PUBLIC
 )
 endif()
@@ -288,6 +294,7 @@ loom_check_test_suite(
     "test/source_low/function_abi.loom-test"
     "test/source_low/function_contracts.loom-test"
     "test/source_low/function_values.loom-test"
+    "test/source_low/kernel_profile.loom-test"
     "test/source_low/low_verification.loom-test"
     "test/source_low/module_initialization.loom-test"
     "test/source_low/module_resources.loom-test"

@@ -52,6 +52,38 @@ uint8_t loom_low_function_schedule(const loom_op_t* function_op) {
   return 0;
 }
 
+const loom_value_id_t* loom_low_function_result_ids(
+    const loom_op_t* function_op, uint16_t* out_count) {
+  *out_count = 0;
+  if (loom_low_func_def_isa(function_op)) {
+    const loom_value_slice_t results = loom_low_func_def_results(function_op);
+    *out_count = results.count;
+    return results.values;
+  }
+  return NULL;
+}
+
+loom_named_attr_slice_t loom_low_function_abi_layout(
+    const loom_op_t* function_op) {
+  if (loom_low_func_def_isa(function_op)) {
+    return loom_low_func_def_abi_layout(function_op);
+  }
+  if (loom_low_kernel_def_isa(function_op)) {
+    return loom_low_kernel_def_abi_layout(function_op);
+  }
+  return loom_named_attr_slice_empty();
+}
+
+uint16_t loom_low_function_abi_layout_attr_index(const loom_op_t* function_op) {
+  if (loom_low_func_def_isa(function_op)) {
+    return loom_low_func_def_abi_layout_ATTR_INDEX;
+  }
+  if (loom_low_kernel_def_isa(function_op)) {
+    return loom_low_kernel_def_abi_layout_ATTR_INDEX;
+  }
+  return LOOM_ATTR_INDEX_NONE;
+}
+
 loom_region_t* loom_low_function_body(loom_op_t* function_op) {
   if (loom_low_func_def_isa(function_op)) {
     return loom_low_func_def_body(function_op);

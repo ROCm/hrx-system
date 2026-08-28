@@ -146,11 +146,7 @@ static iree_status_t loom_vm_module_layout_count(
       ++*out_import_count;
       continue;
     }
-    if (loom_low_kernel_def_isa(defining_op)) {
-      return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                              "VM kernel entry points are not implemented");
-    }
-    if (!loom_low_func_def_isa(defining_op)) continue;
+    if (!loom_low_function_def_isa(defining_op)) continue;
     if (*out_function_count == 65536u) {
       return iree_make_status(
           IREE_STATUS_OUT_OF_RANGE,
@@ -160,7 +156,7 @@ static iree_status_t loom_vm_module_layout_count(
   }
   if (*out_function_count == 0) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "VM module emission requires low.func.def");
+                            "VM module emission requires a low function");
   }
   return iree_ok_status();
 }
@@ -169,8 +165,8 @@ static iree_status_t loom_vm_module_layout_resolve_logical_signature(
     loom_module_t* module, iree_arena_allocator_t* arena,
     loom_op_t* function_op, loom_type_t* out_signature) {
   const loom_named_attr_slice_t abi_layout =
-      loom_low_func_def_isa(function_op)
-          ? loom_low_func_def_abi_layout(function_op)
+      loom_low_function_def_isa(function_op)
+          ? loom_low_function_abi_layout(function_op)
           : loom_low_func_decl_abi_layout(function_op);
   if (abi_layout.count != 0) {
     return loom_vm_call_abi_layout_resolve_signature(module, abi_layout,
@@ -201,7 +197,9 @@ static iree_status_t loom_vm_module_layout_populate_functions(
        ++symbol_index) {
     const loom_symbol_t* symbol = &module->symbols.entries[symbol_index];
     loom_op_t* function_op = symbol->defining_op;
-    if (function_op == NULL || !loom_low_func_def_isa(function_op)) continue;
+    if (function_op == NULL || !loom_low_function_def_isa(function_op)) {
+      continue;
+    }
 
     loom_vm_module_function_layout_t* function =
         &layout->functions[function_index++];

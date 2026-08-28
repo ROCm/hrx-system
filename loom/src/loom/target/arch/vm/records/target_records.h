@@ -18,6 +18,9 @@ extern "C" {
 // Core VM target bundle used for bytecode module functions.
 extern const loom_target_bundle_t loom_vm_target_bundle_core;
 
+// Returns true when |bundle| selects the Core VM target contract.
+bool loom_vm_target_bundle_is_core(const loom_target_bundle_t* bundle);
+
 // Dense target rows indexed by vm.target kind.
 extern const loom_target_bundle_table_t loom_vm_target_bundles;
 

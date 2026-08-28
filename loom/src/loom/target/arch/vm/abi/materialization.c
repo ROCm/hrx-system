@@ -34,9 +34,11 @@ static iree_status_t loom_vm_call_abi_validate_function(
   uint16_t argument_count = 0;
   const loom_value_id_t* arguments =
       loom_func_like_arg_ids(function, &argument_count);
-  const loom_value_slice_t results = loom_low_func_def_results(function.op);
+  uint16_t result_count = 0;
+  const loom_value_id_t* results =
+      loom_low_function_result_ids(function.op, &result_count);
   if (argument_count != layout->arguments.field_count ||
-      results.count != layout->results.field_count) {
+      result_count != layout->results.field_count) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "VM call ABI materialization requires an unmaterialized physical "
@@ -65,8 +67,8 @@ static iree_status_t loom_vm_call_abi_validate_function(
 
   const loom_type_t* logical_result_types =
       loom_type_func_result_types(layout->signature);
-  for (uint16_t i = 0; i < results.count; ++i) {
-    if (!loom_type_equal(loom_module_value_type(module, results.values[i]),
+  for (uint16_t i = 0; i < result_count; ++i) {
+    if (!loom_type_equal(loom_module_value_type(module, results[i]),
                          logical_result_types[i])) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
@@ -75,8 +77,7 @@ static iree_status_t loom_vm_call_abi_validate_function(
     }
     if (layout->results.fields[i].bank_ordinal >=
             IREE_VM_CALL_DIRECT_REGISTER_COUNT &&
-        loom_module_value_has_predicate_attribute_uses(module,
-                                                       results.values[i])) {
+        loom_module_value_has_predicate_attribute_uses(module, results[i])) {
       return iree_make_status(
           IREE_STATUS_FAILED_PRECONDITION,
           "VM result overflow requires function predicates to be "
@@ -92,7 +93,7 @@ static iree_status_t loom_vm_call_abi_build_logical_layout(
     iree_arena_allocator_t* arena, loom_vm_call_abi_layout_t* out_layout) {
   loom_type_t logical_signature = loom_type_none();
   const loom_named_attr_slice_t abi_layout =
-      loom_low_func_def_abi_layout(function.op);
+      loom_low_function_abi_layout(function.op);
   if (abi_layout.count != 0) {
     IREE_RETURN_IF_ERROR(loom_vm_call_abi_layout_resolve_signature(
         module, abi_layout, &logical_signature));
@@ -100,9 +101,11 @@ static iree_status_t loom_vm_call_abi_build_logical_layout(
     uint16_t argument_count = 0;
     const loom_value_id_t* arguments =
         loom_func_like_arg_ids(function, &argument_count);
-    const loom_value_slice_t results = loom_low_func_def_results(function.op);
+    uint16_t result_count = 0;
+    const loom_value_id_t* results =
+        loom_low_function_result_ids(function.op, &result_count);
     const iree_host_size_t type_count =
-        (iree_host_size_t)argument_count + results.count;
+        (iree_host_size_t)argument_count + result_count;
     loom_type_t* types = NULL;
     if (type_count != 0) {
       IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -111,13 +114,12 @@ static iree_status_t loom_vm_call_abi_build_logical_layout(
     for (uint16_t i = 0; i < argument_count; ++i) {
       types[i] = loom_module_value_type(module, arguments[i]);
     }
-    for (iree_host_size_t i = 0; i < results.count; ++i) {
-      types[argument_count + i] =
-          loom_module_value_type(module, results.values[i]);
+    for (uint16_t i = 0; i < result_count; ++i) {
+      types[argument_count + i] = loom_module_value_type(module, results[i]);
     }
     IREE_RETURN_IF_ERROR(loom_module_intern_function_type(
         module, types, argument_count,
-        results.count != 0 ? types + argument_count : NULL, results.count,
+        result_count != 0 ? types + argument_count : NULL, result_count,
         &logical_signature));
   }
   return loom_vm_call_abi_layout_build(module, logical_signature, arena,
@@ -464,7 +466,8 @@ static iree_status_t loom_vm_call_abi_materialize_function(
       module, function, LOOM_WALK_PRE_ORDER,
       (loom_walk_callback_t){loom_vm_call_abi_materialize_op, walk},
       walk->rewriter->arena, &walk_result));
-  if ((loom_vm_call_abi_side_has_overflow(&layout->arguments) ||
+  if (loom_low_func_def_isa(function.op) &&
+      (loom_vm_call_abi_side_has_overflow(&layout->arguments) ||
        loom_vm_call_abi_side_has_overflow(&layout->results)) &&
       loom_func_like_purity(function) != 0) {
     // ABI packet loads and stores are physical effects hidden by the logical
@@ -481,7 +484,9 @@ static iree_status_t loom_vm_call_abi_preserve_logical_signature(
   uint16_t argument_count = 0;
   const loom_value_id_t* arguments =
       loom_func_like_arg_ids(function, &argument_count);
-  const loom_value_slice_t results = loom_low_func_def_results(function.op);
+  uint16_t result_count = 0;
+  const loom_value_id_t* results =
+      loom_low_function_result_ids(function.op, &result_count);
   const loom_symbol_ref_t function_ref = loom_func_like_callee(function);
   const bool has_presentation =
       loom_symbol_ref_is_valid(function_ref) && function_ref.module_id == 0 &&
@@ -492,7 +497,10 @@ static iree_status_t loom_vm_call_abi_preserve_logical_signature(
           function));
 
   const loom_named_attr_slice_t abi_layout =
-      loom_low_func_def_abi_layout(function.op);
+      loom_low_function_abi_layout(function.op);
+  const uint16_t abi_layout_attr_index =
+      loom_low_function_abi_layout_attr_index(function.op);
+  IREE_ASSERT_NE(abi_layout_attr_index, LOOM_ATTR_INDEX_NONE);
   if (abi_layout.count != 0) {
     if (!has_presentation) return iree_ok_status();
     bool layout_changed = false;
@@ -504,18 +512,17 @@ static iree_status_t loom_vm_call_abi_preserve_logical_signature(
             .count = argument_count,
         },
         (loom_vm_call_abi_source_fields_t){
-            .values = results.values,
-            .count = results.count,
+            .values = results,
+            .count = result_count,
         },
         rewriter->arena, &layout_changed, &layout_attr));
     if (!layout_changed) return iree_ok_status();
-    return loom_rewriter_set_attr(rewriter, function.op,
-                                  loom_low_func_def_abi_layout_ATTR_INDEX,
+    return loom_rewriter_set_attr(rewriter, function.op, abi_layout_attr_index,
                                   layout_attr);
   }
 
   iree_host_size_t type_count = 0;
-  if (!iree_host_size_checked_add(argument_count, results.count, &type_count)) {
+  if (!iree_host_size_checked_add(argument_count, result_count, &type_count)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "VM logical signature type count overflows");
   }
@@ -527,14 +534,14 @@ static iree_status_t loom_vm_call_abi_preserve_logical_signature(
   for (uint16_t i = 0; i < argument_count; ++i) {
     types[i] = loom_module_value_type(rewriter->module, arguments[i]);
   }
-  for (iree_host_size_t i = 0; i < results.count; ++i) {
+  for (uint16_t i = 0; i < result_count; ++i) {
     types[argument_count + i] =
-        loom_module_value_type(rewriter->module, results.values[i]);
+        loom_module_value_type(rewriter->module, results[i]);
   }
 
   loom_attribute_t layout_attr = loom_attr_absent();
   const loom_type_t* result_types =
-      results.count != 0 ? types + argument_count : NULL;
+      result_count != 0 ? types + argument_count : NULL;
   IREE_RETURN_IF_ERROR(loom_vm_call_abi_layout_make_attr(
       rewriter->module,
       (loom_vm_call_abi_source_fields_t){
@@ -544,13 +551,32 @@ static iree_status_t loom_vm_call_abi_preserve_logical_signature(
       },
       (loom_vm_call_abi_source_fields_t){
           .types = result_types,
-          .values = has_presentation ? results.values : NULL,
-          .count = results.count,
+          .values = has_presentation ? results : NULL,
+          .count = result_count,
       },
       rewriter->arena, &layout_attr));
-  return loom_rewriter_set_attr(rewriter, function.op,
-                                loom_low_func_def_abi_layout_ATTR_INDEX,
+  return loom_rewriter_set_attr(rewriter, function.op, abi_layout_attr_index,
                                 layout_attr);
+}
+
+static bool loom_vm_call_abi_is_definition(const loom_module_t* module,
+                                           loom_func_like_t function) {
+  if (loom_low_func_def_isa(function.op)) {
+    return loom_func_like_abi(function) == LOOM_TARGET_ABI_VM_FUNCTION;
+  }
+  if (!loom_low_kernel_def_isa(function.op)) return false;
+  const loom_string_id_t descriptor_set_id =
+      loom_low_kernel_def_descriptor_set(function.op);
+  if (descriptor_set_id == LOOM_STRING_ID_INVALID ||
+      descriptor_set_id >= module->strings.count) {
+    return false;
+  }
+  const loom_low_descriptor_set_t* descriptor_set =
+      loom_vm_core_descriptor_set();
+  const iree_string_view_t expected_key = loom_low_descriptor_set_string(
+      descriptor_set, descriptor_set->key_string_offset);
+  return iree_string_view_equal(module->strings.entries[descriptor_set_id],
+                                expected_key);
 }
 
 iree_status_t loom_vm_materialize_call_abi_run(loom_pass_t* pass,
@@ -566,8 +592,7 @@ iree_status_t loom_vm_materialize_call_abi_run(loom_pass_t* pass,
   loom_op_t* op = NULL;
   loom_block_for_each_op(module_block, op) {
     loom_func_like_t function = loom_func_like_cast(module, op);
-    if (!loom_low_func_def_isa(op) ||
-        loom_func_like_abi(function) != LOOM_TARGET_ABI_VM_FUNCTION) {
+    if (!loom_vm_call_abi_is_definition(module, function)) {
       continue;
     }
     loom_vm_call_abi_layout_t layout = {0};

@@ -10,6 +10,7 @@
 #include "loom/pass/builder.h"
 #include "loom/target/arch/vm/descriptors.h"
 #include "loom/target/arch/vm/low_verify.h"
+#include "loom/target/arch/vm/lower/kernel.h"
 #include "loom/target/arch/vm/lower/lower.h"
 #include "loom/target/arch/vm/lower/resources.h"
 #include "loom/target/arch/vm/ops/registry.h"
@@ -31,6 +32,7 @@ static const loom_low_verify_provider_t* const kLoomVmLowVerifyProviders[] = {
 
 static const loom_target_low_legality_provider_t* const
     kLoomVmLowLegalityProviders[] = {
+        &loom_vm_kernel_low_legality_provider,
         &loom_vm_module_resource_low_legality_provider,
 };
 

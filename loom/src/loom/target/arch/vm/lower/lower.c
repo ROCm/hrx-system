@@ -11,6 +11,7 @@
 #include "loom/ops/cfg/ops.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/index/ops.h"
+#include "loom/ops/kernel/ops.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/target/arch/vm/abi/layout.h"
@@ -18,6 +19,7 @@
 #include "loom/target/arch/vm/lower/constants.h"
 #include "loom/target/arch/vm/lower/control.h"
 #include "loom/target/arch/vm/lower/initialization.h"
+#include "loom/target/arch/vm/lower/kernel.h"
 #include "loom/target/arch/vm/lower/resources.h"
 #include "loom/target/arch/vm/lower/types.h"
 
@@ -240,9 +242,12 @@ static iree_status_t loom_vm_map_abi_layout(
   return iree_ok_status();
 }
 
-static iree_status_t loom_vm_emit_initializer_preamble(
-    void* user_data, loom_low_lower_context_t* context) {
+static iree_status_t loom_vm_emit_preamble(void* user_data,
+                                           loom_low_lower_context_t* context) {
   (void)user_data;
+  if (loom_kernel_def_isa(loom_low_lower_context_source_function(context).op)) {
+    return loom_vm_kernel_emit_preamble(context);
+  }
   if (loom_func_like_cc(loom_low_lower_context_source_function(context)) !=
       LOOM_FUNC_CC_INITIALIZER) {
     return iree_ok_status();
@@ -256,6 +261,9 @@ static iree_status_t loom_vm_select_op(void* user_data,
                                        loom_low_lower_plan_t* out_plan) {
   (void)user_data;
   *out_plan = loom_low_lower_plan_empty();
+  if (loom_vm_kernel_try_select_op(source_op, out_plan)) {
+    return iree_ok_status();
+  }
   const loom_module_t* module = loom_low_lower_context_module(context);
   loom_vm_source_constant_t constant = {0};
   if (loom_vm_try_get_source_constant(module, source_op, &constant)) {
@@ -301,6 +309,11 @@ static iree_status_t loom_vm_emit_op(void* user_data,
                                      const loom_op_t* source_op,
                                      loom_low_lower_plan_t plan) {
   (void)user_data;
+  bool kernel_handled = false;
+  IREE_RETURN_IF_ERROR(
+      loom_vm_kernel_emit_op(context, source_op, plan, &kernel_handled));
+  if (kernel_handled) return iree_ok_status();
+
   bool resource_handled = false;
   IREE_RETURN_IF_ERROR(loom_vm_module_resource_emit_op(context, source_op, plan,
                                                        &resource_handled));
@@ -395,8 +408,7 @@ static const loom_low_lower_policy_t kVmCoreLowLowerPolicy = {
     .map_type = {.fn = loom_vm_map_type, .user_data = NULL},
     .source_type_supported = {.fn = loom_vm_source_type_supported,
                               .user_data = NULL},
-    .emit_preamble = {.fn = loom_vm_emit_initializer_preamble,
-                      .user_data = NULL},
+    .emit_preamble = {.fn = loom_vm_emit_preamble, .user_data = NULL},
     .map_abi_layout = {.fn = loom_vm_map_abi_layout, .user_data = NULL},
     .switch_lowering =
         {

@@ -15,6 +15,7 @@
 #include "loom/target/arch/vm/descriptors.h"
 #include "loom/target/arch/vm/lower/constants.h"
 #include "loom/target/arch/vm/ops/ops.h"
+#include "loom/target/arch/vm/records/target_records.h"
 
 typedef uint8_t loom_vm_module_resource_kind_t;
 enum loom_vm_module_resource_kind_e {
@@ -203,6 +204,10 @@ static iree_status_t loom_vm_module_resource_try_verify_op(
     bool* out_handled) {
   (void)provider;
   *out_handled = false;
+  if (!loom_vm_target_bundle_is_core(
+          loom_target_low_legality_bundle(context))) {
+    return iree_ok_status();
+  }
   if (!loom_global_load_isa(source_op) && !loom_global_store_isa(source_op)) {
     return iree_ok_status();
   }

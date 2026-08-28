@@ -32,7 +32,7 @@ typedef struct loom_vm_module_call_target_t {
 
 // One module-local bytecode function in module symbol order.
 typedef struct loom_vm_module_function_layout_t {
-  // Prepared low.func.def operation serialized for this function.
+  // Prepared low function definition serialized for this function.
   loom_op_t* function_op;
   // Borrowed public export name, or empty for a private function.
   iree_string_view_t export_name;
@@ -125,8 +125,8 @@ struct loom_vm_module_layout_t {
 // Collects supported low functions and assigns all module wire ordinals.
 //
 // The returned arrays borrow module strings and are owned by |arena|. The
-// Prepared low.func.decl operations with runtime link names become canonical
-// module imports. Plain declarations and kernel entry points are rejected.
+// prepared low.func.decl operations with runtime link names become canonical
+// module imports. Plain declarations are rejected.
 iree_status_t loom_vm_module_layout_build(loom_module_t* module,
                                           iree_arena_allocator_t* arena,
                                           loom_vm_module_layout_t* out_layout);
