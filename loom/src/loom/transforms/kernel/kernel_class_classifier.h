@@ -225,8 +225,9 @@ typedef struct loom_kernel_class_collection_options_t {
 static inline loom_kernel_class_collection_options_t
 loom_kernel_class_collection_options_default(void) {
   return (loom_kernel_class_collection_options_t){
-      .class_limit = LOOM_KERNEL_CLASS_DEFAULT_LIMIT,
-      .ranged_transfer_term_limit = LOOM_KERNEL_CLASS_DEFAULT_RANGED_TERM_LIMIT,
+      /*.class_limit=*/LOOM_KERNEL_CLASS_DEFAULT_LIMIT,
+      /*.ranged_transfer_term_limit=*/
+      LOOM_KERNEL_CLASS_DEFAULT_RANGED_TERM_LIMIT,
   };
 }
 
