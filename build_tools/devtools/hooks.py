@@ -8,11 +8,12 @@
 
 from __future__ import annotations
 
+import shlex
+
 from build_tools.devtools.command_plan import (
     CommandPlan,
     CommandStep,
     WriteFileStep,
-    quote_command,
 )
 from build_tools.devtools.environment import REPO_ROOT, ToolEnvironment
 
@@ -41,6 +42,13 @@ def lefthook_cli_compatibility_probe(tool_env: ToolEnvironment) -> CommandStep:
     )
 
 
+def _quote_lefthook_command(arguments: list[str]) -> str:
+    # Lefthook executes configured commands through a POSIX shell on every
+    # host. Normalize Windows paths before applying shell quoting so backslashes
+    # cannot be consumed as escape characters.
+    return shlex.join([argument.replace("\\", "/") for argument in arguments])
+
+
 def hook_content(lane: str, profile: str, python_executable: str) -> str:
     if lane not in ("bazel", "cmake"):
         raise ValueError(f"unknown lane: {lane}")
@@ -48,7 +56,7 @@ def hook_content(lane: str, profile: str, python_executable: str) -> str:
         "bazel": "Bazel",
         "cmake": "CMake",
     }[lane]
-    precommit_command = quote_command(
+    precommit_command = _quote_lefthook_command(
         [
             python_executable,
             str(REPO_ROOT / "dev.py"),
@@ -60,7 +68,7 @@ def hook_content(lane: str, profile: str, python_executable: str) -> str:
             "--verbose",
         ]
     )
-    commit_message_command = quote_command(
+    commit_message_command = _quote_lefthook_command(
         [
             python_executable,
             str(REPO_ROOT / "build_tools/lefthook/commit_msg.py"),

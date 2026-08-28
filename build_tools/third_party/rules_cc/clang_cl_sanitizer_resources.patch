@@ -1,0 +1,53 @@
+diff --git a/cc/private/toolchain/BUILD.windows.tpl b/cc/private/toolchain/BUILD.windows.tpl
+index c6641b4..d1136dd 100644
+--- a/cc/private/toolchain/BUILD.windows.tpl
++++ b/cc/private/toolchain/BUILD.windows.tpl
+@@ -17 +17,2 @@
++load("@rules_cc//cc:cc_import.bzl", "cc_import")
+ load("@rules_cc//cc:cc_library.bzl", "cc_library")
+@@ -62 +63,22 @@
++cc_import(
++    name = "clang_cl_x64_asan_dynamic_runtime",
++    interface_library = "clang_rt.asan_dynamic-x86_64.lib",
++    shared_library = "clang_rt.asan_dynamic-x86_64.dll",
++)
++
++cc_import(
++    name = "clang_cl_x64_asan_dynamic_runtime_thunk",
++    alwayslink = True,
++    static_library = "clang_rt.asan_dynamic_runtime_thunk-x86_64.lib",
++)
++
++cc_library(
++    name = "clang_cl_x64_asan_runtime",
++    deps = [
++        ":clang_cl_x64_asan_dynamic_runtime",
++        ":clang_cl_x64_asan_dynamic_runtime_thunk",
++    ],
++    linkopts = ["/INCLUDE:__asan_seh_interceptor"],
++)
++
+ filegroup(
+diff --git a/cc/private/toolchain/windows_cc_configure.bzl b/cc/private/toolchain/windows_cc_configure.bzl
+index 58db03a..0ee29b4 100644
+--- a/cc/private/toolchain/windows_cc_configure.bzl
++++ b/cc/private/toolchain/windows_cc_configure.bzl
+@@ -821,2 +821,3 @@
+     clang_include_path = (clang_dir + "\\include").replace("\\", "\\\\")
++    clang_share_path = (clang_dir + "\\share").replace("\\", "\\\\")
+     clang_lib_path = (clang_dir + "\\lib\\windows").replace("\\", "\\\\")
+@@ -822 +823,11 @@
+     clang_lib_path = (clang_dir + "\\lib\\windows").replace("\\", "\\\\")
++
++    if target_arch == "x64":
++        for runtime_file in [
++            "clang_rt.asan_dynamic-x86_64.dll",
++            "clang_rt.asan_dynamic-x86_64.lib",
++            "clang_rt.asan_dynamic_runtime_thunk-x86_64.lib",
++        ]:
++            runtime_path = repository_ctx.path(clang_dir + "\\lib\\windows\\" + runtime_file)
++            if runtime_path.exists:
++                repository_ctx.symlink(runtime_path, runtime_file)
+@@ -824 +835 @@
+-    clang_cl_include_directories = msvc_vars["%{msvc_cxx_builtin_include_directories_" + target_arch + "}"] + (",\n        \"%s\"" % clang_include_path)
++    clang_cl_include_directories = msvc_vars["%{msvc_cxx_builtin_include_directories_" + target_arch + "}"] + (",\n        \"%s\",\n        \"%s\"" % (clang_include_path, clang_share_path))

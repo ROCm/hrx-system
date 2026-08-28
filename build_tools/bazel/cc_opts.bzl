@@ -139,6 +139,35 @@ _CLANG_CL_CXXOPTS = _MSVC_CXXOPTS + [
     "-Wno-invalid-offsetof",
 ]
 
+# Sanitizer stack traces require frame pointers. Bazel sanitizer configs are
+# shared across hosts, so select the spelling understood by the active compiler
+# instead of leaking a Unix driver flag through a global --copt.
+_SANITIZER_FRAME_POINTER_COPTS = select({
+    "//build_tools/bazel:sanitizer_cc_compiler_clang_cl": ["/Oy-"],
+    "//build_tools/bazel:sanitizer_cc_compiler_msvc": ["/Oy-"],
+    "//build_tools/bazel:sanitizer_enabled": ["-fno-omit-frame-pointer"],
+    "//conditions:default": [],
+})
+
+# AddressSanitizer links through the compiler driver on Unix, but the Windows
+# clang-cl toolchain invokes lld-link directly. Mirror the runtime libraries
+# that clang-cl would have added while leaving build-time executables in their
+# unsanitized execution configuration.
+_ADDRESS_SANITIZER_LINKOPTS = select({
+    "//build_tools/bazel:address_sanitizer_cc_compiler_clang": ["-fsanitize=address"],
+    "//build_tools/bazel:address_sanitizer_cc_compiler_clang_cl_x86_64": [],
+    "//build_tools/bazel:address_sanitizer_cc_compiler_gcc": ["-fsanitize=address"],
+    "//build_tools/bazel:address_sanitizer_cc_compiler_msvc": ["/INFERASANLIBS"],
+    "//conditions:default": [],
+})
+
+_ADDRESS_SANITIZER_LINK_DEPS = select({
+    "//build_tools/bazel:address_sanitizer_cc_compiler_clang_cl_x86_64": [
+        "@local_config_cc//:clang_cl_x64_asan_runtime",
+    ],
+    "//conditions:default": [],
+})
+
 def _append(values, appended_values):
     if values == None:
         values = []
@@ -176,7 +205,7 @@ def _iree_code_compiler_options(
                 _GCC_COPTS,
                 _CLANG_CL_COPTS,
                 _MSVC_COPTS + _MSVC_ONLY_COPTS,
-            ),
+            ) + _SANITIZER_FRAME_POINTER_COPTS,
             copts,
         ),
         conlyopts = _append(
@@ -199,6 +228,16 @@ def _iree_code_compiler_options(
         ),
     )
 
+def _iree_code_link_options(linkopts = None):
+    """Returns linker options for first-party IREE executable targets."""
+    return _append(_ADDRESS_SANITIZER_LINKOPTS, linkopts)
+
+def _iree_code_link_dependencies(deps = None):
+    """Returns link dependencies for first-party IREE executable targets."""
+    return _append(deps, _ADDRESS_SANITIZER_LINK_DEPS)
+
 cc_opts = struct(
     iree_code_compiler_options = _iree_code_compiler_options,
+    iree_code_link_dependencies = _iree_code_link_dependencies,
+    iree_code_link_options = _iree_code_link_options,
 )

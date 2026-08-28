@@ -226,6 +226,18 @@ py_test(
 )
 
 py_test(
+    name = "hooks_test",
+    srcs = [
+        "__init__.py",
+        "command_plan.py",
+        "environment.py",
+        "hooks.py",
+        "hooks_test.py",
+    ],
+    main = "hooks_test.py",
+)
+
+py_test(
     name = "install_test",
     srcs = [
         "__init__.py",

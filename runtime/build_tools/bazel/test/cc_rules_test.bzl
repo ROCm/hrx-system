@@ -28,6 +28,11 @@ def _expect_path_suffix(env, paths, suffix):
             return
     env.fail("expected one of %s to end with %r" % (paths, suffix))
 
+def _expect_no_path_suffix(env, paths, suffix):
+    for path in paths:
+        if path.endswith(suffix):
+            env.fail("did not expect one of %s to end with %r" % (paths, suffix))
+
 def _expect_value(env, values, expected_value):
     if expected_value not in values:
         env.fail("expected %r in %r" % (expected_value, values))
@@ -105,6 +110,48 @@ def _test_runtime_binary_adds_runtime_include_root(name, **kwargs):
 def _test_runtime_binary_adds_runtime_include_root_impl(env, target):
     paths = _all_compilation_paths(target[CcInfo].compilation_context)
     _expect_path_suffix(env, paths, "runtime/src")
+    dependency_labels = [str(dep.label) for dep in target[TestingAspectInfo].attrs.deps]
+    _expect_no_path_suffix(env, dependency_labels, "//:clang_cl_x64_asan_runtime")
+
+def _test_runtime_binary_uses_address_sanitizer_link_policy(name, **kwargs):
+    util.helper_target(
+        iree_runtime_cc_binary,
+        name = name + "_subject",
+        srcs = [name + "_subject.c"],
+        tags = ["manual"],
+    )
+    analysis_test(
+        name = name,
+        attr_values = {
+            "timeout": "short",
+        },
+        config_settings = {
+            "//command_line_option:cc_output_directory_tag": "asan",
+            str(Label("//build_tools/bazel:sanitizer")): True,
+        },
+        impl = _test_runtime_binary_uses_address_sanitizer_link_policy_impl,
+        target = name + "_subject",
+        **kwargs
+    )
+
+def _test_runtime_binary_uses_address_sanitizer_link_policy_impl(env, target):
+    attrs = target[TestingAspectInfo].attrs
+    compile_action = _find_compile_action(env, target)
+    compiler_path = compile_action.argv[0].lower()
+    if compiler_path.endswith("clang-cl.exe"):
+        dependency_labels = [str(dep.label) for dep in attrs.deps]
+        _expect_path_suffix(env, dependency_labels, "//:clang_cl_x64_asan_runtime")
+        runfile_paths = [
+            file.path
+            for file in target[DefaultInfo].default_runfiles.files.to_list()
+        ]
+        _expect_path_suffix(env, runfile_paths, "clang_rt.asan_dynamic-x86_64.dll")
+        _expect_no_value(env, attrs.linkopts, "-fsanitize=address")
+        return
+    if compiler_path.endswith("cl.exe"):
+        _expect_value(env, attrs.linkopts, "/INFERASANLIBS")
+        return
+    _expect_value(env, attrs.linkopts, "-fsanitize=address")
 
 def _test_runtime_c_library_applies_c_options(name, **kwargs):
     util.helper_target(
@@ -134,6 +181,8 @@ def _test_runtime_c_library_applies_c_options_impl(env, target):
     _expect_value(env, copts, "-DUSER_SELECTED_COPT")
     _expect_no_value(env, copts, "-Wno-invalid-offsetof")
     compile_action = _find_compile_action(env, target)
+    _expect_no_value(env, compile_action.argv, "-fno-omit-frame-pointer")
+    _expect_no_value(env, compile_action.argv, "/Oy-")
     compiler_path = compile_action.argv[0].lower()
     if compiler_path.endswith("cl.exe") and not compiler_path.endswith("clang-cl.exe"):
         _expect_value(env, compile_action.argv, "/Zc:preprocessor")
@@ -146,6 +195,36 @@ def _test_runtime_c_library_applies_c_options_impl(env, target):
         _expect_value(env, compile_action.argv, "-Wno-unused-function")
         _expect_value(env, compile_action.argv, "-Wno-unused-lambda-capture")
         _expect_value(env, compile_action.argv, "-Wno-unused-variable")
+
+def _test_runtime_c_library_uses_sanitizer_frame_pointer_option(name, **kwargs):
+    util.helper_target(
+        iree_runtime_cc_library,
+        name = name + "_subject",
+        srcs = [name + "_subject.c"],
+        tags = ["manual"],
+    )
+    analysis_test(
+        name = name,
+        attr_values = {
+            "timeout": "short",
+        },
+        config_settings = {
+            str(Label("//build_tools/bazel:sanitizer")): True,
+        },
+        impl = _test_runtime_c_library_uses_sanitizer_frame_pointer_option_impl,
+        target = name + "_subject",
+        **kwargs
+    )
+
+def _test_runtime_c_library_uses_sanitizer_frame_pointer_option_impl(env, target):
+    compile_action = _find_compile_action(env, target)
+    compiler_path = compile_action.argv[0].lower()
+    if compiler_path.endswith("cl.exe"):
+        _expect_value(env, compile_action.argv, "/Oy-")
+        _expect_no_value(env, compile_action.argv, "-fno-omit-frame-pointer")
+        return
+    _expect_value(env, compile_action.argv, "-fno-omit-frame-pointer")
+    _expect_no_value(env, compile_action.argv, "/Oy-")
 
 def _test_runtime_cxx_binary_applies_cxx_options(name, **kwargs):
     util.helper_target(
@@ -241,7 +320,9 @@ def cc_rules_test_suite(name):
         tests = [
             _test_runtime_library_adds_runtime_include_root,
             _test_runtime_binary_adds_runtime_include_root,
+            _test_runtime_binary_uses_address_sanitizer_link_policy,
             _test_runtime_c_library_applies_c_options,
+            _test_runtime_c_library_uses_sanitizer_frame_pointer_option,
             _test_runtime_cxx_binary_applies_cxx_options,
             _test_runtime_library_allows_configurable_srcs,
             _test_runtime_test_adds_runtime_include_root,

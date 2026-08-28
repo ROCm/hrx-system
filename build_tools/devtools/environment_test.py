@@ -25,11 +25,42 @@ class EnvironmentTest(unittest.TestCase):
             git_executable.write_bytes(b"")
             bash_executable.write_bytes(b"")
 
-            result = environment.find_windows_bazel_sh(
-                {}, platform_name="nt", git_executable=str(git_executable)
-            )
+            with mock.patch.object(
+                environment,
+                "bazel_compatible_windows_shell_path",
+                return_value=str(bash_executable),
+            ) as compatible_path:
+                result = environment.find_windows_bazel_sh(
+                    {}, platform_name="nt", git_executable=str(git_executable)
+                )
 
             self.assertEqual(result, str(bash_executable))
+            self.assertEqual(compatible_path.call_args.args[0], str(bash_executable))
+
+    def test_windows_bazel_shell_handles_copied_git_hook_environment(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            local_app_data = Path(temporary_directory) / "AppData/Local"
+            git_root = local_app_data / "Programs/Git"
+            git_executable = git_root / "mingw64/libexec/git-core/git.exe"
+            bash_executable = git_root / "bin/bash.exe"
+            git_executable.parent.mkdir(parents=True)
+            bash_executable.parent.mkdir(parents=True)
+            git_executable.write_bytes(b"")
+            bash_executable.write_bytes(b"")
+
+            with mock.patch.object(
+                environment,
+                "bazel_compatible_windows_shell_path",
+                return_value=str(bash_executable),
+            ) as compatible_path:
+                result = environment.find_windows_bazel_sh(
+                    {"LOCALAPPDATA": str(local_app_data)},
+                    platform_name="nt",
+                    git_executable=str(git_executable),
+                )
+
+            self.assertEqual(result, str(bash_executable))
+            self.assertEqual(compatible_path.call_args.args[0], str(bash_executable))
 
     def test_windows_bazel_shell_preserves_explicit_override(self):
         result = environment.find_windows_bazel_sh(

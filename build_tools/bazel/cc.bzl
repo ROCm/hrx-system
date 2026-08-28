@@ -28,6 +28,7 @@ load(
     "cc_execution_impl",
     "cc_execution_initializer",
 )
+load(":cc_opts.bzl", "cc_opts")
 
 # Extending the rules_cc implementation keeps the public target as the actual
 # C/C++ rule: compilation actions, implicit outputs, aspects, and every parent
@@ -127,7 +128,7 @@ def _iree_cc_binary_impl(
         srcs = srcs,
         hdrs = None,
         textual_hdrs = None,
-        deps = deps,
+        deps = cc_opts.iree_code_link_dependencies(deps),
         data = data,
         copts = copts,
         conlyopts = conlyopts,
@@ -136,7 +137,7 @@ def _iree_cc_binary_impl(
         local_defines = local_defines,
         includes = includes,
         system_includes = system_includes,
-        linkopts = linkopts,
+        linkopts = cc_opts.iree_code_link_options(linkopts),
         linkstatic = linkstatic,
     )
     target_attrs = cc_attrs.merge_dicts(kwargs, target_attrs)
