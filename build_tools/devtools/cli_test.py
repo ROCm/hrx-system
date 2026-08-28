@@ -938,36 +938,39 @@ class CliTest(unittest.TestCase):
         self.assertTrue(args.dry_run)
         self.assertTrue(args.verbose)
         plan = args.handler(args)
-        description = normalized_plan_description(plan)
-        self.assertIn("bazel build --config=asan", description)
-        self.assertNotIn("-n", description)
-        self.assertNotIn("-v", description)
+        backend_argv = plan.steps[0].argv[2:]
+        self.assertIn("--config=asan", backend_argv)
+        self.assertNotIn("-nv", backend_argv)
+        self.assertNotIn("-n", backend_argv)
+        self.assertNotIn("-v", backend_argv)
 
         args = cli.parse_arguments(["bazel", "build", "--verbose"])
 
         self.assertTrue(args.verbose)
         plan = args.handler(args)
-        self.assertNotIn("--verbose", plan.describe())
+        self.assertNotIn("--verbose", plan.steps[0].argv)
 
         args = cli.parse_arguments(["bazel", "build", "--dry-run"])
 
         self.assertTrue(args.dry_run)
         plan = args.handler(args)
-        self.assertNotIn("--dry-run", plan.describe())
+        self.assertNotIn("--dry-run", plan.steps[0].argv)
 
     def test_explicit_separator_forwards_conflicting_native_options(self):
         args = cli.parse_arguments(["bazel", "build", "-n", "--", "--dry-run"])
 
         self.assertTrue(args.dry_run)
         plan = args.handler(args)
-        self.assertIn("bazel build --dry-run", normalized_plan_description(plan))
+        backend_argv = plan.steps[0].argv[2:]
+        self.assertIn("--dry-run", backend_argv)
+        self.assertNotIn("-n", backend_argv)
 
     def test_passthrough_tool_environment_options_are_wrapper_flags(self):
         args = cli.parse_arguments(["bazel", "build", "--system", "//runtime/..."])
 
         self.assertTrue(args.system)
         plan = args.handler(args)
-        self.assertNotIn("--system", plan.describe())
+        self.assertEqual(plan.steps[0].argv[2:], ["//runtime/..."])
 
         args = cli.parse_arguments(
             [
@@ -981,9 +984,12 @@ class CliTest(unittest.TestCase):
 
         self.assertEqual(args.cmake_build_dir, Path("build/cmake-debug"))
         plan = args.handler(args)
-        description = normalized_plan_description(plan)
-        self.assertIn("build/cmake-debug", description)
-        self.assertNotIn("--cmake-build-dir", description)
+        argv = plan.steps[0].argv
+        self.assertEqual(
+            Path(argv[2]), cli.REPO_ROOT / "build" / "cmake-debug"
+        )
+        self.assertEqual(argv[3:], ["--target", "hrx"])
+        self.assertNotIn("--cmake-build-dir", argv)
 
     def test_hyphenated_flags_accept_underscore_aliases(self):
         args = cli.parse_arguments(["--dry_run", "bazel", "build"])
