@@ -43,6 +43,7 @@ loom_cc_library(
     loom::codegen::low::function
     loom::codegen::low::packet
     loom::codegen::low::storage_layout
+    loom::codegen::low::target_binding
     loom::error::emitter
     loom::format::bytecode::writer::encoder
     loom::ir
@@ -68,6 +69,7 @@ loom_check_test_suite(
     "test/imports.loom-test"
     "test/module.loom-test"
     "test/spills.loom-test"
+    "test/suspension.loom-test"
   TEST_NAME_PREFIX_TO_STRIP
     "test/"
 )

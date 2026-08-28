@@ -1625,6 +1625,28 @@ TEST(LowDescriptorsTest, AcceptsNoReturnTerminator) {
   IREE_ASSERT_OK(loom_low_descriptor_set_verify(&tables.set));
 }
 
+TEST(LowDescriptorsTest, AcceptsMayYieldTerminator) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  AddAddDescriptorEffect(&tables, LOOM_LOW_EFFECT_KIND_CONTROL,
+                         LOOM_LOW_MEMORY_SPACE_NONE);
+  tables.descriptors[1].flags = LOOM_LOW_DESCRIPTOR_FLAG_SIDE_EFFECTING |
+                                LOOM_LOW_DESCRIPTOR_FLAG_TERMINATOR |
+                                LOOM_LOW_DESCRIPTOR_FLAG_MAY_YIELD;
+  tables.schedule_classes[1].flags = LOOM_LOW_SCHEDULE_CLASS_FLAG_CONTROL;
+
+  IREE_ASSERT_OK(loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsMayYieldWithoutSideEffecting) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.descriptors[1].flags = LOOM_LOW_DESCRIPTOR_FLAG_MAY_YIELD;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
 TEST(LowDescriptorsTest, RejectsControlEffectWithoutTerminator) {
   TestTables tables;
   InitializeTestTables(&tables);

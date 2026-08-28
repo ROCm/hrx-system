@@ -803,6 +803,7 @@ iree_status_t loom_vm_function_encode(
         "VM function layout and serialization byte lengths disagree");
   }
   out_encoding->row.callable_type_ordinal_u16 = function->callable_type_ordinal;
+  out_encoding->row.flags_u16 = function->flags;
   if (code_layout.has_call) {
     out_encoding->row.flags_u16 |= IREE_VM_BYTECODE_FUNCTION_FLAG_HAS_CALL;
   }

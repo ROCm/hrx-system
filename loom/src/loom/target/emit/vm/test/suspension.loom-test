@@ -1,0 +1,31 @@
+// RUN: emit vm-dis input=low
+
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i32>) -> (reg<vm.value : i32>)>}) @yield_once(%value: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+  control.yield.s32 ^resume(%value)
+^resume(%result: reg<vm.value : i32>):
+  return %result
+}
+
+// ----
+vm.module "module" core=0.0 bytes=184
+requirements:
+sections:
+  [0] signatures type=0x0004 flags=0x0000 bytes=[64, +28)
+  [1] callable_types type=0x0005 flags=0x0000 bytes=[96, +12)
+  [2] functions type=0x0008 flags=0x0000 bytes=[112, +72)
+resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
+module_metadata:
+ref_types:
+callable_types:
+  [0] (i32) -> (i32) may_yield
+imports:
+exports:
+functions:
+  [0] callable[0] signature[0] bytecode=[0, +20) registers=(1, 0, 0) locals=(0, 0, 0) switch_targets=0 may_yield
+    type = (i32) -> (i32)
+    +0000  control.block
+    +0004  control.yield.s32 target_rel32=0
+    +0012  control.block
+    +0016  control.return

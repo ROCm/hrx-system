@@ -942,14 +942,19 @@ iree_status_t loom_vm_module_type_tables_build(
                                                  sizeof(*root_callables),
                                                  (void**)&root_callables));
   for (iree_host_size_t i = 0; i < layout->function_count; ++i) {
+    const uint16_t callable_flags =
+        iree_any_bit_set(layout->functions[i].flags,
+                         IREE_VM_BYTECODE_FUNCTION_FLAG_MAY_YIELD)
+            ? IREE_VM_BYTECODE_CALLABLE_TYPE_FLAG_MAY_YIELD
+            : 0;
     IREE_RETURN_IF_ERROR(loom_vm_module_callable_collect(
-        &build, layout->functions[i].logical_signature, /*flags=*/0,
+        &build, layout->functions[i].logical_signature, callable_flags,
         &root_callables[i]));
   }
   for (iree_host_size_t i = 0; i < layout->import_declaration_count; ++i) {
     IREE_RETURN_IF_ERROR(loom_vm_module_callable_collect(
-        &build, layout->import_declarations[i].logical_signature, /*flags=*/0,
-        &root_callables[layout->function_count + i]));
+        &build, layout->import_declarations[i].logical_signature,
+        /*flags=*/0, &root_callables[layout->function_count + i]));
   }
   IREE_RETURN_IF_ERROR(
       loom_vm_module_collect_indirect_call_types(&build, layout));

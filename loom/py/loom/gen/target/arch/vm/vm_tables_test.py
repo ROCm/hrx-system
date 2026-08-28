@@ -48,7 +48,7 @@ from loom.target.low_descriptors import (
 
 def test_descriptors_preserve_instruction_identity() -> None:
     assert len(VM_INSTRUCTION_PROJECTIONS) == 171
-    assert len(VM_CORE_DESCRIPTOR_SET.descriptors) == len(VM_PACKET_DESCRIPTORS) + 1
+    assert len(VM_CORE_DESCRIPTOR_SET.descriptors) == len(VM_PACKET_DESCRIPTORS) + 2
     for descriptor, projection in zip(
         VM_PACKET_DESCRIPTORS,
         VM_INSTRUCTION_PROJECTIONS,
@@ -58,6 +58,19 @@ def test_descriptors_preserve_instruction_identity() -> None:
         assert descriptor.key == projection.key
         assert descriptor.mnemonic == projection.mnemonic
         assert descriptor.asm_forms
+
+    yield_s32 = VM_CORE_DESCRIPTOR_SET.descriptors[-2]
+    assert yield_s32.key == "vm.control.yield.s32"
+    assert yield_s32.carrier is DescriptorCarrier.BRANCH
+    assert yield_s32.encoding_id == 0x03
+    assert yield_s32.operands == ()
+    assert yield_s32.immediates == ()
+    assert tuple(effect.kind for effect in yield_s32.effects) == (EffectKind.CONTROL,)
+    assert yield_s32.flags == (
+        DescriptorFlag.SIDE_EFFECTING,
+        DescriptorFlag.TERMINATOR,
+        DescriptorFlag.MAY_YIELD,
+    )
 
     switch = VM_CORE_DESCRIPTOR_SET.descriptors[-1]
     assert switch.key == "vm.control.switch"

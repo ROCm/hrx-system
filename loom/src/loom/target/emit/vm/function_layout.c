@@ -95,6 +95,11 @@ static const loom_vm_function_control_layout_t
                 .second_opcode = IREE_VM_ISA_CORE_OPCODE_CONTROL_BRANCH_S32,
                 .second_byte_length = 8,
             },
+        [LOOM_VM_FUNCTION_CONTROL_ENCODING_YIELD_S32] =
+            {
+                .first_opcode = IREE_VM_ISA_CORE_OPCODE_CONTROL_YIELD_S32,
+                .first_byte_length = 8,
+            },
 };
 
 uint8_t loom_vm_function_descriptor_record_byte_length(
@@ -237,6 +242,13 @@ loom_vm_function_initial_control_encoding(
   const loom_op_t* op = packet->node->op;
   const uint32_t next_block_index = block_index + 1u;
   if (loom_low_br_isa(op)) {
+    if (packet->descriptor != NULL) {
+      IREE_ASSERT_EQ(packet->descriptor->carrier,
+                     LOOM_LOW_DESCRIPTOR_CARRIER_BRANCH);
+      IREE_ASSERT_EQ(packet->descriptor->encoding_id,
+                     IREE_VM_ISA_CORE_OPCODE_CONTROL_YIELD_S32);
+      return LOOM_VM_FUNCTION_CONTROL_ENCODING_YIELD_S32;
+    }
     const uint32_t target_block_index =
         loom_vm_function_target_block_index(schedule, loom_low_br_dest(op));
     return target_block_index == next_block_index
@@ -332,6 +344,7 @@ static void loom_vm_function_select_narrow_branch(
   uint32_t second_target_block_index = LOOM_LOW_PACKET_INDEX_NONE;
   uint32_t first_record_offset = layout->packet_offsets[packet->packet_index];
   if (loom_low_br_isa(op)) {
+    if (packet->descriptor != NULL) return;
     first_record_offset +=
         loom_vm_function_edge_move_byte_length(frame, packet);
     first_target_block_index = loom_vm_function_target_block_index(

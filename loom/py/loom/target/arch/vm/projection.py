@@ -826,6 +826,44 @@ def _switch_descriptor(instruction: Instruction) -> Descriptor:
     )
 
 
+def _yield_descriptor(instruction: Instruction) -> Descriptor:
+    """Projects an explicit suspension onto its structural Low branch."""
+
+    if instruction.control_flow is not ControlFlow.YIELD:
+        raise ValueError(f"{instruction.mnemonic}: expected yield control flow")
+    if instruction.suspension is not Suspension.ALWAYS:
+        raise ValueError(f"{instruction.mnemonic}: explicit yield must always suspend")
+    if instruction.byte_length != 8:
+        raise ValueError(f"{instruction.mnemonic}: structural yield must be 8 bytes")
+    target_fields = tuple(
+        field
+        for field in instruction.fields
+        if field.role is InstructionFieldRole.IMMEDIATE
+    )
+    if len(target_fields) != 1 or target_fields[0].name != "target_rel32":
+        raise ValueError(
+            f"{instruction.mnemonic}: structural yield requires one s32 target"
+        )
+    return Descriptor(
+        key=f"vm.{instruction.mnemonic}",
+        mnemonic=instruction.mnemonic,
+        semantic_tag=instruction.mnemonic,
+        operands=(),
+        schedule_class=_EXECUTE_SCHEDULE_CLASS,
+        carrier=DescriptorCarrier.BRANCH,
+        asm_forms=(AsmForm(),),
+        effects=_instruction_effects(instruction),
+        encoding_id=instruction.opcode,
+        flags=(
+            DescriptorFlag.SIDE_EFFECTING,
+            DescriptorFlag.TERMINATOR,
+            DescriptorFlag.MAY_YIELD,
+        ),
+        instruction_classes=(InstructionClass.CONTROL,),
+    )
+
+
+_CONTROL_YIELD_INSTRUCTION = _instruction("control.yield.s32")
 _CONTROL_SWITCH_INSTRUCTION = _instruction("control.switch")
 
 VM_PACKET_DESCRIPTORS = tuple(
@@ -908,6 +946,7 @@ VM_CORE_DESCRIPTOR_SET = DescriptorSet(
     enum_domains=VM_ENUM_DOMAINS,
     descriptors=(
         *VM_PACKET_DESCRIPTORS,
+        _yield_descriptor(_CONTROL_YIELD_INSTRUCTION),
         _switch_descriptor(_CONTROL_SWITCH_INSTRUCTION),
     ),
 )

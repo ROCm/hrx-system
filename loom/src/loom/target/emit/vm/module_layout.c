@@ -11,9 +11,11 @@
 #include "iree/vm/bytecode/wire/core/selectors.h"
 #include "iree/vm/bytecode/wire/module_format.h"
 #include "loom/codegen/low/function.h"
+#include "loom/codegen/low/target_binding.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/target/arch/vm/abi/layout.h"
+#include "loom/target/arch/vm/descriptors.h"
 
 static iree_string_view_t loom_vm_module_layout_string_or_empty(
     const loom_module_t* module, loom_string_id_t string_id) {
@@ -71,23 +73,45 @@ static bool loom_vm_module_layout_imports_equal(
          lhs->callable_type_ordinal == rhs->callable_type_ordinal;
 }
 
-static iree_status_t loom_vm_module_layout_count_switch_targets(
-    const loom_op_t* function_op, uint32_t* out_count) {
-  *out_count = 0;
+typedef struct loom_vm_module_function_summary_t {
+  // Derived wire function flags.
+  uint16_t flags;
+  // Aggregate switch-target entries in the prepared function CFG.
+  uint32_t switch_target_entry_count;
+} loom_vm_module_function_summary_t;
+
+static iree_status_t loom_vm_module_layout_summarize_function(
+    const loom_op_t* function_op,
+    loom_vm_module_function_summary_t* out_summary) {
+  *out_summary = (loom_vm_module_function_summary_t){0};
   const loom_region_t* body = loom_low_function_const_body(function_op);
   if (body == NULL) return iree_ok_status();
+  const loom_low_descriptor_set_t* descriptor_set =
+      loom_vm_core_descriptor_set();
   for (uint16_t block_index = 0; block_index < body->block_count;
        ++block_index) {
     const loom_op_t* op = NULL;
     loom_block_for_each_op(body->blocks[block_index], op) {
-      if (!loom_low_switch_isa(op)) continue;
-      const uint32_t target_count = loom_low_switch_target_dests(op).count;
-      if (target_count > UINT32_MAX - *out_count) {
-        return iree_make_status(
-            IREE_STATUS_OUT_OF_RANGE,
-            "VM function switch-target entry count exceeds u32");
+      if (loom_low_switch_isa(op)) {
+        const uint32_t target_count = loom_low_switch_target_dests(op).count;
+        if (target_count >
+            UINT32_MAX - out_summary->switch_target_entry_count) {
+          return iree_make_status(
+              IREE_STATUS_OUT_OF_RANGE,
+              "VM function switch-target entry count exceeds u32");
+        }
+        out_summary->switch_target_entry_count += target_count;
       }
-      *out_count += target_count;
+
+      const uint32_t descriptor_ordinal =
+          loom_low_descriptor_ordinal_for_op(op);
+      if (descriptor_ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) continue;
+      IREE_ASSERT_LT(descriptor_ordinal, descriptor_set->descriptor_count);
+      if (iree_any_bit_set(
+              descriptor_set->descriptors[descriptor_ordinal].flags,
+              LOOM_LOW_DESCRIPTOR_FLAG_MAY_YIELD)) {
+        out_summary->flags |= IREE_VM_BYTECODE_FUNCTION_FLAG_MAY_YIELD;
+      }
     }
   }
   return iree_ok_status();
@@ -194,8 +218,11 @@ static iree_status_t loom_vm_module_layout_populate_functions(
     IREE_RETURN_IF_ERROR(loom_vm_module_layout_resolve_logical_signature(
         module, arena, function_op, &function->logical_signature));
 
-    IREE_RETURN_IF_ERROR(loom_vm_module_layout_count_switch_targets(
-        function_op, &function->switch_target_entry_count));
+    loom_vm_module_function_summary_t summary = {0};
+    IREE_RETURN_IF_ERROR(
+        loom_vm_module_layout_summarize_function(function_op, &summary));
+    function->flags = summary.flags;
+    function->switch_target_entry_count = summary.switch_target_entry_count;
     if (function->switch_target_entry_count >
         UINT32_MAX - layout->switch_target_entry_count) {
       return iree_make_status(

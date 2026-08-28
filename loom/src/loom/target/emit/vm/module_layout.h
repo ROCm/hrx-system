@@ -41,6 +41,8 @@ typedef struct loom_vm_module_function_layout_t {
   uint16_t function_ordinal;
   // Canonical structural callable-type ordinal.
   uint16_t callable_type_ordinal;
+  // Derived wire function flags such as conservative suspension permission.
+  uint16_t flags;
   // Aggregate switch-target entries required by the function body.
   uint32_t switch_target_entry_count;
 } loom_vm_module_function_layout_t;
