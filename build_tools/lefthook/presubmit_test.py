@@ -769,10 +769,27 @@ class PresubmitTest(unittest.TestCase):
             "//build_tools/bazel/test:all",
         )
 
+    def test_clang_tidy_skips_on_windows(self):
+        output = io.StringIO()
+        with (
+            contextlib.redirect_stdout(output),
+            mock.patch.object(presubmit.sys, "platform", "win32"),
+        ):
+            ok = presubmit.run_clang_tidy(
+                input_scope(["runtime/src/iree/base/status.c"]),
+                profile="paranoid",
+                lane="bazel",
+                verbose=False,
+            )
+
+        self.assertTrue(ok)
+        self.assertIn("enforced by Linux presubmit CI", output.getvalue())
+
     def test_clang_tidy_skips_locally_when_llvm_is_missing(self):
         output = io.StringIO()
         with (
             contextlib.redirect_stdout(output),
+            mock.patch.object(presubmit.sys, "platform", "linux"),
             mock.patch.dict(os.environ, {}, clear=True),
             mock.patch.object(
                 presubmit, "CLANG_TIDY_PATH_PREFIXES", ("runtime/src/iree/",)
@@ -795,6 +812,7 @@ class PresubmitTest(unittest.TestCase):
         output = io.StringIO()
         with (
             contextlib.redirect_stdout(output),
+            mock.patch.object(presubmit.sys, "platform", "linux"),
             mock.patch.dict(os.environ, {"IREE_CLANG_TIDY_REQUIRED": "1"}),
             mock.patch.object(
                 presubmit, "CLANG_TIDY_PATH_PREFIXES", ("runtime/src/iree/",)
@@ -815,6 +833,7 @@ class PresubmitTest(unittest.TestCase):
 
     def test_clang_tidy_runs_bazel_package_for_candidate_file(self):
         with (
+            mock.patch.object(presubmit.sys, "platform", "linux"),
             mock.patch.object(
                 presubmit, "CLANG_TIDY_PATH_PREFIXES", ("build_tools/bazel/test/",)
             ),
@@ -844,6 +863,7 @@ class PresubmitTest(unittest.TestCase):
 
     def test_clang_tidy_ci_runs_bazel_packages_keep_going(self):
         with (
+            mock.patch.object(presubmit.sys, "platform", "linux"),
             mock.patch.object(
                 presubmit, "CLANG_TIDY_PATH_PREFIXES", ("build_tools/bazel/test/",)
             ),
@@ -934,6 +954,7 @@ class PresubmitTest(unittest.TestCase):
             ],
         )
         with (
+            mock.patch.object(presubmit.sys, "platform", "linux"),
             mock.patch.object(
                 presubmit, "clang_tidy_llvm_available", return_value=True
             ),
@@ -956,6 +977,7 @@ class PresubmitTest(unittest.TestCase):
 
     def test_clang_tidy_infra_runs_plugin_tests(self):
         with (
+            mock.patch.object(presubmit.sys, "platform", "linux"),
             mock.patch.object(
                 presubmit, "clang_tidy_llvm_available", return_value=True
             ),

@@ -2275,6 +2275,11 @@ def run_clang_tidy(
     verbose: bool,
     fix: bool = False,
 ) -> bool:
+    if sys.platform == "win32":
+        return skip_step(
+            "clang-tidy",
+            "native Windows execution is disabled; enforced by Linux presubmit CI",
+        )
     if lane == "cmake":
         return run_clang_tidy_cmake(inputs, profile, verbose, fix=fix)
     if lane != "bazel":
