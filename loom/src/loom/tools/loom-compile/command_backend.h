@@ -21,6 +21,9 @@ typedef struct loom_compile_command_backend_options_t {
   // Directory receiving canonical root artifact files.
   iree_string_view_t artifact_directory;
 
+  // Optional directory receiving independently compilable kernel requests.
+  iree_string_view_t kernel_request_directory;
+
   // Path receiving the artifact-set manifest.
   iree_string_view_t manifest_path;
 
@@ -34,12 +37,14 @@ typedef struct loom_compile_command_backend_options_t {
   uint32_t max_errors;
 } loom_compile_command_backend_options_t;
 
-// Emits all retained public command roots from an expanded-source module.
+// Emits all retained public command roots from an indexed source module.
 //
 // Root artifacts are written to |options->artifact_directory| using canonical
 // ordinal filenames. The schema-versioned manifest at |manifest_path| maps
 // root symbols to those files and records the shared executable-entry table.
-// Kernel implementation bodies are not opened or emitted by this backend.
+// Command preparation selectively opens configuration facets. Kernel
+// implementation bodies are opened only when the optional request sink is
+// enabled and are emitted as independent source products.
 //
 // Source contract failures emit diagnostics, leave |out_emitted| false, and
 // return OK. Infrastructure and filesystem failures return a non-OK status.

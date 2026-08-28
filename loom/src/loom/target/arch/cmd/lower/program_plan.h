@@ -19,6 +19,7 @@
 #include "loom/target/arch/cmd/lower/parameters.h"
 #include "loom/target/arch/cmd/lower/transients.h"
 #include "loom/target/arch/cmd/program.h"
+#include "loom/transforms/kernel/kernel_request_producer.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -31,7 +32,56 @@ extern "C" {
 typedef struct loom_cmd_entry_requirement_t {
   // Configured entry declaration owned by the plan's root module.
   const loom_op_t* declaration_op;
+
+  // True when an ordinary Loom source request was published for this entry.
+  bool has_source_request;
 } loom_cmd_entry_requirement_t;
+
+// One source request bound to a command-plan entry requirement.
+typedef struct loom_cmd_program_kernel_request_t {
+  // Plan-wide logical executable-entry requirement for this request.
+  uint32_t entry_requirement_index;
+
+  // Independently owned source request and its class metadata.
+  loom_kernel_request_t source;
+} loom_cmd_program_kernel_request_t;
+
+// Accepts ownership of one command-plan kernel request at callback entry.
+//
+// The callback must release or transfer |request.source.product| even when
+// returning an error. A non-OK status terminates command-plan preparation.
+typedef iree_status_t (*loom_cmd_program_kernel_request_publish_fn_t)(
+    void* user_data, loom_cmd_program_kernel_request_t request);
+
+// Required sink for optional source request publication.
+typedef struct loom_cmd_program_kernel_request_sink_t {
+  // Callback accepting each request.
+  loom_cmd_program_kernel_request_publish_fn_t publish;
+
+  // Opaque value passed to |publish|.
+  void* user_data;
+} loom_cmd_program_kernel_request_sink_t;
+
+// Optional indexed source environment for command-plan preparation.
+typedef struct loom_cmd_program_kernel_source_t {
+  // Reusable index-backed request producer.
+  loom_kernel_request_producer_t* producer;
+
+  // Exact indexed source-definition ordinal by preparation-module symbol ID.
+  struct {
+    // Borrowed dense projection storage.
+    const iree_host_size_t* values;
+
+    // Number of preparation-module symbol slots.
+    iree_host_size_t count;
+  } source_definitions;
+
+  // Bounded semantic class collection policy.
+  loom_kernel_class_collection_options_t collection_options;
+
+  // Sink receiving every independently owned class product.
+  loom_cmd_program_kernel_request_sink_t sink;
+} loom_cmd_program_kernel_source_t;
 
 // One prepared command root within a program plan.
 //
@@ -66,9 +116,10 @@ typedef struct loom_cmd_program_root_t {
 //
 // The root module contains every selected command symbol lowered to the
 // portable cmd low ISA together with the configured entry declarations they
-// require. Command preparation never materializes a kernel implementation or
-// manufactures a host launch-count program. No compilation or artifact
-// emission occurs while preparing the plan.
+// require. Body-blind command preparation never materializes a kernel
+// implementation or manufactures a host launch-count program. When an indexed
+// kernel source is supplied, class products are transferred to its sink and
+// only their logical entry requirements remain in the returned plan.
 typedef struct loom_cmd_program_plan_t {
   // Owned module containing all lowered command roots.
   loom_module_t* root_module;
@@ -110,6 +161,13 @@ typedef struct loom_cmd_program_plan_t {
 // function passes used to resolve root-local source structure. It is a
 // compiler-owned resource rather than part of the authored program contract.
 //
+// |kernel_source| optionally publishes independently owned source products for
+// the semantic classes reached by all selected roots. Publication is complete
+// before this function returns; the returned plan retains no source product or
+// kernel implementation state. The terminal status and |out_valid| commit the
+// publication as a complete parent product. A caller that receives a non-OK
+// status or false validity must cancel requests accepted earlier in the call.
+//
 // Unsupported portable mappings and infrastructure failures return a non-OK
 // status. Source contract violations emit diagnostics, set |out_valid| to
 // false, leave |out_plan| empty, and return OK. A valid plan sets |out_valid|
@@ -118,6 +176,7 @@ typedef struct loom_cmd_program_plan_t {
 iree_status_t loom_cmd_program_plan_prepare_materialization(
     loom_link_plan_materialization_t* materialization,
     const loom_symbol_ref_t* program_refs, iree_host_size_t program_count,
+    const loom_cmd_program_kernel_source_t* kernel_source,
     const loom_pass_registry_t* pass_registry,
     iree_diagnostic_emitter_t diagnostic_emitter,
     iree_arena_block_pool_t* block_pool, bool* out_valid,

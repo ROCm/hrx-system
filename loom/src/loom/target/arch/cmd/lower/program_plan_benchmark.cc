@@ -210,8 +210,9 @@ static void RunProgramPlanBenchmark(benchmark::State& state,
     loom_cmd_program_plan_t program_plan = {};
     CheckStatus(loom_cmd_program_plan_prepare_materialization(
         &materialization, &root_ref, /*program_count=*/1,
-        loom_pass_builtin_registry(), /*diagnostic_emitter=*/{},
-        fixture.block_pool(), &valid, &program_plan, iree_allocator_system()));
+        /*kernel_source=*/nullptr, loom_pass_builtin_registry(),
+        /*diagnostic_emitter=*/{}, fixture.block_pool(), &valid, &program_plan,
+        iree_allocator_system()));
     if (!valid) std::abort();
     benchmark::DoNotOptimize(program_plan.root_count);
 

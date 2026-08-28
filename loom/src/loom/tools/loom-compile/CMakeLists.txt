@@ -19,7 +19,12 @@ loom_cc_library(
   DEPS
     iree::base
     iree::base::internal::arena
+    iree::io::stream
+    loom::codegen::low::repr
     loom::error::diagnostic
+    loom::format::bytecode::writer
+    loom::format::low_repr
+    loom::link::materialization_environment
     loom::link::module_index
     loom::ops::command
     loom::ops::op_defs
@@ -29,6 +34,7 @@ loom_cc_library(
     loom::target::entry_selection
     loom::tooling::execution::session
     loom::tooling::io::file
+    loom::transforms::kernel::kernel_class_materializer
   PUBLIC
 )
 
@@ -120,6 +126,7 @@ iree_execution_test_suite(
     "loom-format=loom::tools::loom-format"
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-compile/command_artifacts.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-compile/command_kernel_requests.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-compile/rooted_template_provider.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-link/testdata/target_profile_template_selection.loom"
   LABELS

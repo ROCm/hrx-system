@@ -101,7 +101,11 @@ loom_cc_library(
     srcs = ["command_backend.c"],
     hdrs = ["command_backend.h"],
     deps = [
+        "//loom/src/loom/codegen/low:repr",
         "//loom/src/loom/error:diagnostic",
+        "//loom/src/loom/format:low_repr",
+        "//loom/src/loom/format/bytecode:writer",
+        "//loom/src/loom/link:materialization_environment",
         "//loom/src/loom/link:module_index",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/command",
@@ -111,8 +115,10 @@ loom_cc_library(
         "//loom/src/loom/target/arch/cmd/lower:program_plan_index",
         "//loom/src/loom/tooling/execution:session",
         "//loom/src/loom/tooling/io:file",
+        "//loom/src/loom/transforms/kernel:kernel_class_materializer",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:stream",
     ],
 )
 
@@ -160,6 +166,7 @@ iree_execution_test_suite(
     name = "execution_test",
     data = [
         "command_artifacts.loom",
+        "command_kernel_requests.loom",
         "rooted_template_provider.loom",
         "//loom/src/loom/tools/loom-link:testdata/target_profile_template_selection.loom",
     ],

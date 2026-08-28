@@ -279,7 +279,9 @@ compiler operations:
    and unroll the resulting ordinary dataflow.
 5. Resolve named parameters, physical dispatch counts, storage, and explicit
    schedule waves.
-6. Assign dense slots for distinct executable-entry requirements and lower
+6. Optionally classify all reachable launch sites and stream one independent
+   source request per live semantic kernel class.
+7. Assign dense slots for distinct executable-entry requirements and lower
    each closed root to portable command Low.
 
 The dependency kernels retain their ordinary target compilation paths. A
@@ -300,6 +302,7 @@ The prepared command plan owns three complementary products:
 | --- | --- |
 | Command root | Portable resource bindings, command schedule, and executable slots. |
 | Entry requirements | Atomic executable and entry bindings required by one or more command roots. |
+| Kernel source requests | Optional ordinary Loom bytecode modules specialized only by distinctions that change generated kernels. |
 | Parameter and storage requirements | Fixed parameter placements, rebindable bindings, transients, and any explicit indirect-count storage. |
 
 ## Emit the portable deployment artifacts
@@ -312,15 +315,19 @@ loom-compile model.loombc \
   --root=@two_layer \
   --backend=command \
   --output=commands.json \
-  --emit-command-artifacts=commands/
+  --emit-command-artifacts=commands/ \
+  --emit-kernel-requests=kernel-requests/
 ```
 
 The manifest maps `@two_layer` to its `.loomcmd` artifact and lists the logical
 kernel entries required by that schedule. The portable artifact contains the
 closed command topology, resource bindings, dispatch counts, and executable
-slots. Kernel implementations remain a separate target product and can be
-compiled from the same linked module or supplied by an embedding that already
-owns compatible executable entries.
+slots. Each source-backed entry names a `.loombc` request under
+`kernel-requests/`; launch sites whose facts select the same semantic class
+share one request across every selected command root. Each request is an
+ordinary rooted Loom module that can enter the normal target compilation and
+caching workflow. Bodyless entries have no source request and can be supplied
+by an embedding that already owns a compatible executable entry.
 
 In Bazel, [`loom_command_binary`](../workflows/build-with-bazel.md#command-binaries-package-schedules-with-their-kernels)
 performs one selective link and emits the command manifest, `.loomcmd` files,

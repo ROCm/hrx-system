@@ -116,6 +116,8 @@ iree_status_t loom_cmd_program_artifact_set_build(
         plan->root_module, loom_kernel_entry_decl_callee(declaration_op));
     artifact_set.entries.values[i].symbol =
         loom_cmd_program_artifact_set_copy_string(name, &string_cursor);
+    artifact_set.entries.values[i].has_source_request =
+        plan->entry_requirements[i].has_source_request;
   }
   for (iree_host_size_t i = 0;
        i < plan->root_count && iree_status_is_ok(status); ++i) {
@@ -185,6 +187,24 @@ iree_status_t loom_cmd_program_artifact_format_filename(
   return iree_ok_status();
 }
 
+iree_status_t loom_cmd_kernel_request_format_filename(
+    iree_host_size_t entry_ordinal, iree_host_size_t buffer_capacity,
+    char* buffer, iree_string_view_t* out_filename) {
+  if (buffer == NULL || out_filename == NULL || buffer_capacity == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "kernel request filename storage is required");
+  }
+  *out_filename = iree_string_view_empty();
+  const int length = iree_snprintf(buffer, buffer_capacity,
+                                   "kernel-%" PRIhsz ".loombc", entry_ordinal);
+  if (length < 0 || (iree_host_size_t)length >= buffer_capacity) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "kernel request filename is too large");
+  }
+  *out_filename = iree_make_string_view(buffer, (iree_host_size_t)length);
+  return iree_ok_status();
+}
+
 static iree_status_t loom_cmd_program_artifact_set_format_program_json(
     const loom_cmd_program_artifact_t* program,
     iree_host_size_t program_ordinal, loom_output_stream_t* stream) {
@@ -223,8 +243,9 @@ iree_status_t loom_cmd_program_artifact_set_format_manifest_json(
 
   loom_json_object_writer_t root;
   IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &root));
-  IREE_RETURN_IF_ERROR(
-      loom_json_object_write_uint32_field(&root, IREE_SV("schema_version"), 1));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &root, IREE_SV("schema_version"),
+      LOOM_CMD_PROGRAM_ARTIFACT_SET_SCHEMA_VERSION));
   IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
       &root, IREE_SV("format"),
       IREE_SV(LOOM_CMD_PROGRAM_ARTIFACT_SET_MANIFEST_FORMAT)));
@@ -247,6 +268,14 @@ iree_status_t loom_cmd_program_artifact_set_format_manifest_json(
     IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &entry));
     IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
         &entry, IREE_SV("symbol"), artifact_set->entries.values[i].symbol));
+    if (artifact_set->entries.values[i].has_source_request) {
+      char filename_storage[LOOM_CMD_KERNEL_REQUEST_FILENAME_CAPACITY];
+      iree_string_view_t filename = iree_string_view_empty();
+      IREE_RETURN_IF_ERROR(loom_cmd_kernel_request_format_filename(
+          i, sizeof(filename_storage), filename_storage, &filename));
+      IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+          &entry, IREE_SV("source_request"), filename));
+    }
     IREE_RETURN_IF_ERROR(loom_json_object_end(&entry));
   }
   IREE_RETURN_IF_ERROR(loom_json_array_end(&entries));

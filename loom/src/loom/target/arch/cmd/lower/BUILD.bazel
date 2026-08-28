@@ -128,8 +128,14 @@ loom_cc_library(
 
 loom_cc_library(
     name = "program_plan",
-    srcs = ["program_plan.c"],
-    hdrs = ["program_plan.h"],
+    srcs = [
+        "program_plan.c",
+        "program_plan_requests.c",
+    ],
+    hdrs = [
+        "program_plan.h",
+        "program_plan_requests.h",
+    ],
     visibility = ["//loom/src/loom/target/arch/cmd:__subpackages__"],
     deps = [
         ":dispatch_counts",
@@ -143,6 +149,7 @@ loom_cc_library(
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/ir",
         "//loom/src/loom/ir:facts",
+        "//loom/src/loom/link:module_index",
         "//loom/src/loom/link:plan_materializer",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops:type_registry",
@@ -153,6 +160,7 @@ loom_cc_library(
         "//loom/src/loom/pass:registry",
         "//loom/src/loom/target/arch/cmd:abi_layout",
         "//loom/src/loom/target/arch/cmd:program",
+        "//loom/src/loom/transforms/kernel:kernel_request_producer",
         "//loom/src/loom/transforms/kernel:resolve_launches",
         "//loom/src/loom/transforms/symbol:template_expansion_pipeline",
         "//loom/src/loom/util:fact_table",
@@ -175,9 +183,11 @@ loom_cc_library(
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/ir",
         "//loom/src/loom/link:index_materializer",
+        "//loom/src/loom/link:materialization_environment",
         "//loom/src/loom/link:module_index",
         "//loom/src/loom/link:planner",
         "//loom/src/loom/pass:registry",
+        "//loom/src/loom/transforms/kernel:kernel_request_producer",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],
