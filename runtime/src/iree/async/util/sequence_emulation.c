@@ -14,11 +14,10 @@
 // Coordinates completion counting across all steps and fires the sequence's
 // base callback exactly once when all step CQEs have been processed.
 //
-// CQE ordering varies by backend:
-//   io_uring: error CQE fires before cancelled CQEs for downstream steps.
-//   POSIX: dispatch_linked_continuation cancels downstream steps (firing their
-//          callbacks with CANCELLED) before the triggering step's callback.
-// The SAW_ERROR flag and internal.stashed_error handle both orderings.
+// The triggering error callback fires before cancelled callbacks for downstream
+// steps. The SAW_ERROR flag and internal.stashed_error preserve that causal
+// error until every step callback has run; otherwise the final cancelled step
+// would incorrectly make the whole sequence report CANCELLED.
 static void iree_async_sequence_link_trampoline(
     void* user_data, iree_async_operation_t* step, iree_status_t status,
     iree_async_completion_flags_t flags) {
@@ -27,8 +26,9 @@ static void iree_async_sequence_link_trampoline(
   iree_async_sequence_operation_t* sequence =
       (iree_async_sequence_operation_t*)user_data;
 
-  // Capture the first non-CANCELLED error. Subsequent errors (which should not
-  // occur in well-formed linked chains, but handled defensively) are discarded.
+  // Capture the first non-CANCELLED error. Subsequent errors should not occur
+  // in well-formed linked chains, but retain them as diagnostic context if a
+  // backend violates that contract.
   bool is_real_error = !iree_status_is_ok(status) &&
                        iree_status_code(status) != IREE_STATUS_CANCELLED;
   if (is_real_error) {
@@ -41,7 +41,8 @@ static void iree_async_sequence_link_trampoline(
       sequence->internal.stashed_error = status;
       status = iree_ok_status();
     } else {
-      iree_status_ignore(status);
+      sequence->internal.stashed_error =
+          iree_status_join(sequence->internal.stashed_error, status);
       status = iree_ok_status();
     }
   }
@@ -73,8 +74,9 @@ static void iree_async_sequence_link_trampoline(
     if (iree_any_bit_set(
             iree_async_operation_load_internal_flags(&sequence->base),
             IREE_ASYNC_SEQUENCE_INTERNAL_SAW_ERROR)) {
-      // Use the captured error. Discard the current status (OK or CANCELLED).
-      iree_status_ignore(status);
+      // Use the captured error. The current OK or CANCELLED status has already
+      // been accounted for by the aggregate sequence result.
+      iree_status_free(status);
       final_status = sequence->internal.stashed_error;
       sequence->internal.stashed_error = NULL;
     } else {
@@ -86,8 +88,9 @@ static void iree_async_sequence_link_trampoline(
     sequence->base.completion_fn(sequence->base.user_data, &sequence->base,
                                  final_status, IREE_ASYNC_COMPLETION_FLAG_NONE);
   } else {
-    // More step CQEs pending. Discard intermediate status.
-    iree_status_ignore(status);
+    // More step completions are pending. The intermediate status has either
+    // been stored above or is fully represented by the eventual aggregate.
+    iree_status_free(status);
   }
 }
 

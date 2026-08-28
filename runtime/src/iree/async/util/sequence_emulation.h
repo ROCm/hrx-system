@@ -60,10 +60,8 @@ extern "C" {
 //===----------------------------------------------------------------------===//
 
 // A non-CANCELLED error was received from a step. The error status is buffered
-// in sequence->internal.stashed_error. The link trampoline uses this to report
-// the correct error when CQE ordering varies by backend: io_uring delivers the
-// error CQE before cancelled CQEs, while POSIX delivers cancelled continuations
-// before the triggering error callback.
+// in sequence->internal.stashed_error until every downstream cancellation
+// callback has run, preserving the causal error as the sequence result.
 #define IREE_ASYNC_SEQUENCE_INTERNAL_SAW_ERROR (1u << 14)
 
 // Cancel was requested via iree_async_sequence_cancel(). The emulation

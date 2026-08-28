@@ -186,7 +186,7 @@ static LoopbackContext* CreateLoopbackContext(
   auto* ctx = new LoopbackContext();
 
   // Create proactor.
-  auto result = factory();
+  auto result = factory(iree_async_proactor_options_default());
   if (!result.ok()) {
     state.SkipWithError("Proactor creation failed");
     delete ctx;
@@ -442,7 +442,7 @@ static void BM_Throughput(::benchmark::State& state,
 static void BM_AcceptRate(::benchmark::State& state,
                           const ProactorFactory& factory) {
   // Create proactor and listener only.
-  auto result = factory();
+  auto result = factory(iree_async_proactor_options_default());
   if (!result.ok()) {
     state.SkipWithError("Proactor creation failed");
     return;

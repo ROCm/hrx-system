@@ -34,7 +34,8 @@
 #include "iree/async/platform/posix/socket.h"
 #include "iree/async/semaphore.h"
 #include "iree/async/span.h"
-#include "iree/async/util/operation_pool.h"
+#include "iree/async/util/continuation.h"
+#include "iree/async/util/operation_completion.h"
 #include "iree/async/util/semaphore_wait.h"
 #include "iree/base/internal/math.h"
 
@@ -53,33 +54,31 @@ typedef enum {
 } iree_async_io_result_t;
 
 static const iree_async_proactor_vtable_t iree_async_proactor_posix_vtable;
-static iree_host_size_t iree_async_proactor_posix_dispatch_linked_continuation(
-    iree_async_proactor_posix_t* proactor, iree_async_operation_t* operation,
-    iree_status_code_t trigger_status_code);
-static void iree_async_proactor_posix_process_notification_waits(
+static iree_host_size_t iree_async_proactor_posix_process_notification_waits(
     iree_async_proactor_posix_t* proactor,
     iree_async_notification_t* notification);
 static void iree_async_proactor_posix_signal_deinitialize(
     iree_async_proactor_posix_t* proactor);
 
-// Invokes an operation's completion callback and releases it to its pool.
-// Extracts the pool pointer before the callback (which may free the operation
-// when pool is NULL). For multishot operations (MORE flag set), skips pool
-// release since the operation is still in flight.
-static inline void iree_async_proactor_complete_operation(
-    iree_async_operation_t* operation, iree_status_t status,
-    iree_async_completion_flags_t flags) {
-  bool is_final = !iree_any_bit_set(flags, IREE_ASYNC_COMPLETION_FLAG_MORE);
-  iree_async_operation_pool_t* pool = is_final ? operation->pool : NULL;
-  status = iree_async_operation_resolve_completion(operation, status, &flags);
-  if (operation->completion_fn) {
-    operation->completion_fn(operation->user_data, operation, status, flags);
-  } else {
-    iree_status_ignore(status);
+// Completes an operation directly from the poll thread when no completion pool
+// entry is available. Returns the exact number of user callbacks invoked,
+// including failed continuations.
+static iree_host_size_t iree_async_proactor_posix_complete_direct(
+    iree_async_proactor_posix_t* proactor, iree_async_operation_t* operation,
+    iree_status_t status, iree_async_completion_flags_t flags) {
+  iree_async_continuation_t continuation = {0};
+  if (!iree_any_bit_set(flags, IREE_ASYNC_COMPLETION_FLAG_MORE)) {
+    iree_async_operation_t* chain_head =
+        iree_async_continuation_take(operation);
+    continuation = iree_async_continuation_begin(
+        iree_async_proactor_posix_submit_continuation, proactor, chain_head,
+        iree_status_code(status));
+    iree_async_operation_release_resources(operation);
   }
-  if (pool) {
-    iree_async_operation_pool_release(pool, operation);
-  }
+  iree_host_size_t completed_count =
+      iree_async_operation_complete(operation, status, flags);
+  completed_count += iree_async_continuation_finish(&continuation);
+  return completed_count;
 }
 
 //===----------------------------------------------------------------------===//
@@ -658,8 +657,9 @@ static iree_status_t iree_async_proactor_posix_register_notification_wait(
 // and fd_map. For timers: inserts into the sorted timer list.
 // Operations that were cancelled while in the queue (CANCELLED flag set)
 // are completed immediately with IREE_STATUS_CANCELLED.
-static void iree_async_proactor_posix_drain_pending_queue(
+static iree_host_size_t iree_async_proactor_posix_drain_pending_queue(
     iree_async_proactor_posix_t* proactor) {
+  iree_host_size_t completed_count = 0;
   iree_atomic_slist_entry_t* entry = NULL;
   while ((entry = iree_atomic_slist_pop(&proactor->pending_queue)) != NULL) {
     iree_async_operation_t* operation = (iree_async_operation_t*)entry;
@@ -685,12 +685,9 @@ static void iree_async_proactor_posix_drain_pending_queue(
               IREE_ASYNC_COMPLETION_FLAG_NONE);
       if (!iree_status_is_ok(push_status)) {
         // Pool exhausted — release resources and dispatch directly.
-        iree_status_ignore(push_status);
-        iree_async_operation_release_resources(operation);
-        iree_async_proactor_posix_dispatch_linked_continuation(
-            proactor, operation, IREE_STATUS_CANCELLED);
-        iree_async_proactor_complete_operation(
-            operation, iree_status_from_code(IREE_STATUS_CANCELLED),
+        iree_status_free(push_status);
+        completed_count += iree_async_proactor_posix_complete_direct(
+            proactor, operation, iree_status_from_code(IREE_STATUS_CANCELLED),
             IREE_ASYNC_COMPLETION_FLAG_NONE);
       }
       continue;
@@ -765,18 +762,19 @@ static void iree_async_proactor_posix_drain_pending_queue(
       // either during drain_completion_queue or inline in the fallback.
       iree_status_t push_status =
           iree_async_proactor_posix_complete_immediately(
-              proactor, operation, status, IREE_ASYNC_COMPLETION_FLAG_NONE);
+              proactor, operation, iree_status_clone(status),
+              IREE_ASYNC_COMPLETION_FLAG_NONE);
       if (!iree_status_is_ok(push_status)) {
         // Pool exhausted — release resources and dispatch directly.
-        iree_status_ignore(push_status);
-        iree_async_operation_release_resources(operation);
-        iree_async_proactor_posix_dispatch_linked_continuation(
-            proactor, operation, iree_status_code(status));
-        iree_async_proactor_complete_operation(operation, status,
-                                               IREE_ASYNC_COMPLETION_FLAG_NONE);
+        iree_status_free(push_status);
+        completed_count += iree_async_proactor_posix_complete_direct(
+            proactor, operation, status, IREE_ASYNC_COMPLETION_FLAG_NONE);
+      } else {
+        iree_status_free(status);
       }
     }
   }
+  return completed_count;
 }
 
 //===----------------------------------------------------------------------===//
@@ -1088,11 +1086,11 @@ static iree_status_t iree_async_proactor_posix_submit_semaphore_wait(
 static iree_status_t iree_async_proactor_posix_submit_message(
     iree_async_proactor_posix_t* proactor,
     iree_async_message_operation_t* message) {
+  bool skip_source_completion = iree_any_bit_set(
+      message->message_flags, IREE_ASYNC_MESSAGE_FLAG_SKIP_SOURCE_COMPLETION);
+  IREE_RETURN_IF_ERROR(iree_async_message_operation_validate(message));
+
   iree_async_proactor_t* target = message->target;
-  if (!target) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "MESSAGE target proactor is NULL");
-  }
   if (target->vtable != &iree_async_proactor_posix_vtable) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
@@ -1110,14 +1108,11 @@ static iree_status_t iree_async_proactor_posix_submit_message(
   }
 
   // Handle source-side completion.
-  if (iree_any_bit_set(message->message_flags,
-                       IREE_ASYNC_MESSAGE_FLAG_SKIP_SOURCE_COMPLETION)) {
-    // Fire-and-forget: no source completion callback. Dispatch linked
-    // continuation directly with the send status.
-    iree_async_proactor_posix_dispatch_linked_continuation(
-        proactor, &message->base, iree_status_code(send_status));
-    iree_status_ignore(send_status);
-    return iree_ok_status();
+  if (skip_source_completion) {
+    // Fire-and-forget: the operation deliberately produces no source
+    // completion. Returning the delivery status lets a linked predecessor's
+    // continuation dispatcher fail this tail through the normal contract.
+    return send_status;
   }
 
   // Push source completion through the completion queue so the caller's
@@ -1330,24 +1325,12 @@ static iree_status_t iree_async_proactor_posix_submit(
     return iree_make_status(IREE_STATUS_ABORTED, "proactor is shutting down");
   }
 
-  // Build linked_next chains from LINKED flags and validate.
-  // Operations with LINKED flag point to the next operation in the batch.
-  // Only "chain heads" (operations not preceded by a LINKED operation) are
-  // submitted to their backends; continuations stay in linked_next and are
-  // dispatched when the predecessor completes.
+  IREE_RETURN_IF_ERROR(iree_async_continuation_prepare_batch(operations));
   for (iree_host_size_t i = 0; i < operations.count; ++i) {
-    iree_async_operation_t* operation = operations.values[i];
-    operation->linked_next = NULL;
-    if (!iree_any_bit_set(operation->flags, IREE_ASYNC_OPERATION_FLAG_LINKED)) {
-      continue;
+    if (operations.values[i]->type == IREE_ASYNC_OPERATION_TYPE_MESSAGE) {
+      IREE_RETURN_IF_ERROR(iree_async_message_operation_validate(
+          (const iree_async_message_operation_t*)operations.values[i]));
     }
-    // LINKED on last operation is a contract violation.
-    if (i + 1 >= operations.count) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "LINKED flag set on last operation in batch (no successor)");
-    }
-    operation->linked_next = operations.values[i + 1];
   }
 
   for (iree_host_size_t i = 0; i < operations.count; ++i) {
@@ -1371,81 +1354,16 @@ static iree_status_t iree_async_proactor_posix_submit(
   return iree_ok_status();
 }
 
-//===----------------------------------------------------------------------===//
-// LINKED chain dispatch helpers
-//===----------------------------------------------------------------------===//
-
-// Cancels a continuation chain by directly invoking callbacks with CANCELLED.
-// Cancelled continuations were never submitted, so no resources were retained —
-// we bypass the completion queue (which would trigger
-// release_operation_resources on unretained resources). Returns the number of
-// callbacks invoked (for completion counting by callers).
-static iree_host_size_t iree_async_proactor_posix_cancel_continuation_chain(
-    iree_async_proactor_posix_t* proactor, iree_async_operation_t* chain_head) {
-  if (!chain_head) return 0;
-  (void)proactor;
-  iree_host_size_t cancelled_count = 0;
-  iree_async_operation_t* op = chain_head;
-  while (op) {
-    iree_async_operation_t* next = op->linked_next;
-    op->linked_next = NULL;
-    iree_async_proactor_complete_operation(
-        op, iree_status_from_code(IREE_STATUS_CANCELLED),
-        IREE_ASYNC_COMPLETION_FLAG_NONE);
-    ++cancelled_count;
-    op = next;
-  }
-  return cancelled_count;
-}
-
-// Submits a continuation chain from a linked_next pointer.
-// Only the chain head is dispatched here; when it completes,
-// dispatch_linked_continuation cascades to the next operation.
-// On submit failure, fires the chain head's callback with the error and
-// cancels remaining continuations.
-static void iree_async_proactor_posix_submit_continuation_chain(
-    iree_async_proactor_posix_t* proactor, iree_async_operation_t* chain_head) {
-  if (!chain_head) return;
-
+iree_status_t iree_async_proactor_posix_submit_continuation(
+    void* user_data, iree_async_operation_t* chain_head) {
+  iree_async_proactor_posix_t* proactor =
+      (iree_async_proactor_posix_t*)user_data;
   iree_status_t status =
       iree_async_proactor_posix_submit_operation(proactor, chain_head);
   if (iree_status_is_ok(status)) {
-    // The operation was registered (pending_queue, completion_queue, etc.).
-    // Wake the poll thread so it picks up the new work rather than blocking
-    // in event_set_wait.
     iree_async_proactor_posix_wake_poll_thread(proactor);
-    return;
   }
-
-  // Chain head submit failed. Fire its callback with the error, then cancel
-  // remaining continuations (they were never submitted).
-  iree_async_operation_t* continuation = chain_head->linked_next;
-  chain_head->linked_next = NULL;
-  iree_async_proactor_complete_operation(chain_head, status,
-                                         IREE_ASYNC_COMPLETION_FLAG_NONE);
-  iree_async_proactor_posix_cancel_continuation_chain(proactor, continuation);
-}
-
-// Dispatches a linked_next continuation chain based on the trigger's status.
-// On success: submits the chain for execution (completions counted via queue).
-// On failure: cancels the chain by directly invoking callbacks with CANCELLED.
-// Returns the number of directly-invoked callbacks (for completion counting).
-static iree_host_size_t iree_async_proactor_posix_dispatch_linked_continuation(
-    iree_async_proactor_posix_t* proactor, iree_async_operation_t* operation,
-    iree_status_code_t trigger_status_code) {
-  iree_async_operation_t* continuation = operation->linked_next;
-  if (!continuation) return 0;
-
-  // Detach the chain before potentially recursive submit.
-  operation->linked_next = NULL;
-
-  if (trigger_status_code == IREE_STATUS_OK) {
-    iree_async_proactor_posix_submit_continuation_chain(proactor, continuation);
-    return 0;  // Submitted ops produce completions counted by the drain loop.
-  } else {
-    return iree_async_proactor_posix_cancel_continuation_chain(proactor,
-                                                               continuation);
-  }
+  return status;
 }
 
 //===----------------------------------------------------------------------===//
@@ -1488,11 +1406,12 @@ static int iree_async_proactor_posix_calculate_timeout_ms(
 
 // Processes expired timers by pushing completions to the queue.
 // Uses remove-then-queue pattern with cancelled flag check for safety.
-// Returns the number of timer completions pushed to the queue.
+// Returns the number of callbacks invoked directly when the completion pool is
+// exhausted. Queued completions are counted when the queue is drained.
 static iree_host_size_t iree_async_proactor_posix_process_expired_timers(
     iree_async_proactor_posix_t* proactor) {
   iree_time_t now = iree_time_now();
-  iree_host_size_t timer_count = 0;
+  iree_host_size_t completed_count = 0;
 
   iree_async_timer_operation_t* timer = NULL;
   while ((timer = iree_async_posix_timer_list_pop_expired(&proactor->timers,
@@ -1520,18 +1439,13 @@ static iree_host_size_t iree_async_proactor_posix_process_expired_timers(
       completion->flags = IREE_ASYNC_COMPLETION_FLAG_NONE;
       iree_atomic_slist_push(&proactor->completion_queue,
                              &completion->slist_entry);
-      ++timer_count;
     } else {
-      // Pool exhausted — dispatch directly (same as drain_completion_queue).
-      iree_async_proactor_posix_dispatch_linked_continuation(
-          proactor, &timer->base, iree_status_code(status));
-      iree_async_operation_release_resources(&timer->base);
-      iree_async_proactor_complete_operation(&timer->base, status,
-                                             IREE_ASYNC_COMPLETION_FLAG_NONE);
+      completed_count += iree_async_proactor_posix_complete_direct(
+          proactor, &timer->base, status, IREE_ASYNC_COMPLETION_FLAG_NONE);
     }
   }
 
-  return timer_count;
+  return completed_count;
 }
 
 //===----------------------------------------------------------------------===//
@@ -1597,32 +1511,13 @@ static iree_host_size_t iree_async_proactor_posix_drain_completion_queue(
     iree_async_posix_completion_pool_release(&proactor->completion_pool,
                                              completion);
 
-    // Dispatch LINKED continuation chain (if any) before invoking callback.
-    // On success: submits the continuation chain for execution.
-    // On failure: cancels the chain (directly invokes callbacks with
-    // CANCELLED). Cancelled continuations bypass the completion queue, so their
-    // count is added directly here.
     if (operation) {
-      count += iree_async_proactor_posix_dispatch_linked_continuation(
-          proactor, operation, iree_status_code(status));
-    }
-
-    // Release resources retained during submission for final completions.
-    // Must happen BEFORE the callback since the callback may free the
-    // operation. Multishot operations (MORE flag set) keep their retained
-    // resources across intermediate completions.
-    if (operation &&
-        !iree_any_bit_set(flags, IREE_ASYNC_COMPLETION_FLAG_MORE)) {
-      iree_async_operation_release_resources(operation);
-    }
-
-    if (operation) {
-      iree_async_proactor_complete_operation(operation, status, flags);
+      count += iree_async_proactor_posix_complete_direct(proactor, operation,
+                                                         status, flags);
     } else {
-      iree_status_ignore(status);
+      iree_status_free(status);
     }
 
-    ++count;
     entry = next;
   }
   return count;
@@ -1679,28 +1574,12 @@ static iree_host_size_t iree_async_proactor_posix_drain_pending_semaphore_waits(
     iree_async_semaphore_wait_operation_t* wait_op = completion.operation;
     iree_status_t status = completion.status;
 
-    // Dispatch LINKED continuation chain (if any) before invoking callback.
-    // On success: submits the chain for execution (completions counted via
-    //   the completion queue drain).
-    // On failure: cancels the chain (directly invokes callbacks with
-    // CANCELLED).
-    //   Cancelled continuations bypass the completion queue, so their count is
-    //   added directly here.
-    if (completion.continuation_head) {
-      iree_async_operation_t* continuation = completion.continuation_head;
-      if (iree_status_is_ok(status)) {
-        iree_async_proactor_posix_submit_continuation_chain(proactor,
-                                                            continuation);
-      } else {
-        drained_count += iree_async_proactor_posix_cancel_continuation_chain(
-            proactor, continuation);
-      }
-    }
-
-    // Invoke the operation's callback.
-    iree_async_proactor_complete_operation(&wait_op->base, status,
-                                           IREE_ASYNC_COMPLETION_FLAG_NONE);
-    ++drained_count;
+    iree_async_continuation_t continuation = iree_async_continuation_begin(
+        iree_async_proactor_posix_submit_continuation, proactor,
+        completion.continuation_head, iree_status_code(status));
+    drained_count += iree_async_operation_complete(
+        &wait_op->base, status, IREE_ASYNC_COMPLETION_FLAG_NONE);
+    drained_count += iree_async_continuation_finish(&continuation);
 
     entry = next;
   }
@@ -2132,16 +2011,17 @@ static iree_async_socket_t* iree_async_proactor_posix_socket_from_io_operation(
 //
 // When the chain becomes empty, removes the fd from the event_set.
 // When operations remain, updates the event_set if the combined events changed.
-static void iree_async_proactor_posix_process_operation_chain(
+static iree_host_size_t iree_async_proactor_posix_process_operation_chain(
     iree_async_proactor_posix_t* proactor, int fd, short revents) {
   // Look up the chain head.
   iree_async_posix_fd_handler_type_t handler_type;
   void* handler;
   if (!iree_async_posix_fd_map_lookup(&proactor->fd_map, fd, &handler_type,
                                       &handler)) {
-    return;  // Already removed (stale event).
+    return 0;  // Already removed (stale event).
   }
 
+  iree_host_size_t completed_count = 0;
   iree_async_operation_t* chain_head = (iree_async_operation_t*)handler;
 
   // Track which event types have gotten EAGAIN, so we skip remaining operations
@@ -2209,12 +2089,9 @@ static void iree_async_proactor_posix_process_operation_chain(
               proactor, current, iree_status_from_code(IREE_STATUS_CANCELLED),
               IREE_ASYNC_COMPLETION_FLAG_NONE);
       if (!iree_status_is_ok(push_status)) {
-        iree_status_ignore(push_status);
-        iree_async_operation_release_resources(current);
-        iree_async_proactor_posix_dispatch_linked_continuation(
-            proactor, current, IREE_STATUS_CANCELLED);
-        iree_async_proactor_complete_operation(
-            current, iree_status_from_code(IREE_STATUS_CANCELLED),
+        iree_status_free(push_status);
+        completed_count += iree_async_proactor_posix_complete_direct(
+            proactor, current, iree_status_from_code(IREE_STATUS_CANCELLED),
             IREE_ASYNC_COMPLETION_FLAG_NONE);
       }
       current = next;
@@ -2285,8 +2162,8 @@ static void iree_async_proactor_posix_process_operation_chain(
         // Pool exhausted — dispatch directly. Multishot operations keep their
         // retained resources (no release_resources) and don't dispatch linked
         // continuations (those are for final completion only).
-        iree_async_proactor_complete_operation(completed_operation, op_status,
-                                               completion_flags);
+        completed_count += iree_async_proactor_posix_complete_direct(
+            proactor, completed_operation, op_status, completion_flags);
       }
       continue;
     }
@@ -2304,12 +2181,8 @@ static void iree_async_proactor_posix_process_operation_chain(
       iree_atomic_slist_push(&proactor->completion_queue,
                              &completion->slist_entry);
     } else {
-      // Pool exhausted — dispatch directly (same pattern as cancel fallback).
-      iree_async_proactor_posix_dispatch_linked_continuation(
-          proactor, current, iree_status_code(op_status));
-      iree_async_operation_release_resources(current);
-      iree_async_proactor_complete_operation(current, op_status,
-                                             completion_flags);
+      completed_count += iree_async_proactor_posix_complete_direct(
+          proactor, current, op_status, completion_flags);
     }
 
     // Don't update prev - we removed current, so prev stays the same.
@@ -2352,6 +2225,7 @@ static void iree_async_proactor_posix_process_operation_chain(
   // Skip event_set_modify — the registered events are already correct.
   // On macOS kqueue, redundant EV_ADD can reset the knote's pending state,
   // causing level-triggered events to be missed until a new state transition.
+  return completed_count;
 }
 
 // Processes pending notification waits, completing any whose epoch has advanced
@@ -2361,9 +2235,10 @@ static void iree_async_proactor_posix_process_operation_chain(
 //
 // Called from the poll thread when the notification's fd fires (POLLIN) and
 // during the epoch scan after ready-fd processing.
-static void iree_async_proactor_posix_process_notification_waits(
+static iree_host_size_t iree_async_proactor_posix_process_notification_waits(
     iree_async_proactor_posix_t* proactor,
     iree_async_notification_t* notification) {
+  iree_host_size_t completed_count = 0;
   // Drain the eventfd/pipe to reset for future signals.
   //   eventfd: single 8-byte read resets counter to 0.
   //   pipe: loop drains all accumulated bytes.
@@ -2412,12 +2287,8 @@ static void iree_async_proactor_posix_process_notification_waits(
         iree_atomic_slist_push(&proactor->completion_queue,
                                &completion->slist_entry);
       } else {
-        // Pool exhausted — release resources and dispatch directly.
-        iree_async_operation_release_resources(&wait->base);
-        iree_async_proactor_posix_dispatch_linked_continuation(
-            proactor, &wait->base, iree_status_code(status));
-        iree_async_proactor_complete_operation(&wait->base, status,
-                                               IREE_ASYNC_COMPLETION_FLAG_NONE);
+        completed_count += iree_async_proactor_posix_complete_direct(
+            proactor, &wait->base, status, IREE_ASYNC_COMPLETION_FLAG_NONE);
       }
     } else {
       // Still waiting — advance the previous pointer.
@@ -2435,6 +2306,7 @@ static void iree_async_proactor_posix_process_notification_waits(
     iree_status_ignore(
         iree_async_posix_event_set_remove(proactor->event_set, fd));
   }
+  return completed_count;
 }
 
 // Scans the timer_list for timers with the CANCELLED flag set and processes
@@ -2443,13 +2315,15 @@ static void iree_async_proactor_posix_process_notification_waits(
 // Without this scan, cancelled timers would linger in the timer_list until
 // their original deadline expires — potentially minutes or hours. This mirrors
 // the fd cancellation scan pattern for timely cancel completion.
-static void iree_async_proactor_posix_drain_pending_timer_cancellations(
+static iree_host_size_t
+iree_async_proactor_posix_drain_pending_timer_cancellations(
     iree_async_proactor_posix_t* proactor) {
   if (iree_atomic_load(&proactor->pending_timer_cancellation_count,
                        iree_memory_order_acquire) == 0) {
-    return;
+    return 0;
   }
 
+  iree_host_size_t completed_count = 0;
   iree_async_timer_operation_t* timer = proactor->timers.head;
   while (timer != NULL) {
     // Capture next before potential removal.
@@ -2475,12 +2349,8 @@ static void iree_async_proactor_posix_drain_pending_timer_cancellations(
       iree_atomic_slist_push(&proactor->completion_queue,
                              &completion->slist_entry);
     } else {
-      // Pool exhausted — dispatch directly (same as drain_completion_queue).
-      iree_async_proactor_posix_dispatch_linked_continuation(
-          proactor, &timer->base, IREE_STATUS_CANCELLED);
-      iree_async_operation_release_resources(&timer->base);
-      iree_async_proactor_complete_operation(
-          &timer->base, iree_status_from_code(IREE_STATUS_CANCELLED),
+      completed_count += iree_async_proactor_posix_complete_direct(
+          proactor, &timer->base, iree_status_from_code(IREE_STATUS_CANCELLED),
           IREE_ASYNC_COMPLETION_FLAG_NONE);
     }
 
@@ -2494,6 +2364,7 @@ static void iree_async_proactor_posix_drain_pending_timer_cancellations(
 
     timer = next;
   }
+  return completed_count;
 }
 
 // Scans the fd_map for operations with the CANCELLED flag set and processes
@@ -2509,13 +2380,15 @@ static void iree_async_proactor_posix_drain_pending_timer_cancellations(
 //   - Updates or removes the event_set registration
 //   - Pushes a CANCELLED completion to the completion queue
 //   - Decrements the pending cancellation counter
-static void iree_async_proactor_posix_drain_pending_fd_cancellations(
+static iree_host_size_t
+iree_async_proactor_posix_drain_pending_fd_cancellations(
     iree_async_proactor_posix_t* proactor) {
   if (iree_atomic_load(&proactor->pending_fd_cancellation_count,
                        iree_memory_order_acquire) == 0) {
-    return;
+    return 0;
   }
 
+  iree_host_size_t completed_count = 0;
   iree_async_posix_fd_map_t* map = &proactor->fd_map;
   for (iree_host_size_t i = 0; i < map->bucket_count; ++i) {
     iree_async_posix_fd_map_entry_t* entry = &map->buckets[i];
@@ -2578,12 +2451,9 @@ static void iree_async_proactor_posix_drain_pending_fd_cancellations(
                 proactor, op, iree_status_from_code(IREE_STATUS_CANCELLED),
                 IREE_ASYNC_COMPLETION_FLAG_NONE);
         if (!iree_status_is_ok(push_status)) {
-          iree_status_ignore(push_status);
-          iree_async_operation_release_resources(op);
-          iree_async_proactor_posix_dispatch_linked_continuation(
-              proactor, op, IREE_STATUS_CANCELLED);
-          iree_async_proactor_complete_operation(
-              op, iree_status_from_code(IREE_STATUS_CANCELLED),
+          iree_status_free(push_status);
+          completed_count += iree_async_proactor_posix_complete_direct(
+              proactor, op, iree_status_from_code(IREE_STATUS_CANCELLED),
               IREE_ASYNC_COMPLETION_FLAG_NONE);
         }
 
@@ -2602,6 +2472,7 @@ static void iree_async_proactor_posix_drain_pending_fd_cancellations(
       break;
     }
   }
+  return completed_count;
 }
 
 static iree_status_t iree_async_proactor_posix_poll(
@@ -2621,17 +2492,19 @@ static iree_status_t iree_async_proactor_posix_poll(
   // event_set/fd_map/timer_list. This is the only place where these
   // structures are mutated, ensuring thread-safety since poll() runs on
   // a single thread.
-  iree_async_proactor_posix_drain_pending_queue(proactor);
+  iree_host_size_t completed_count =
+      iree_async_proactor_posix_drain_pending_queue(proactor);
   iree_async_proactor_posix_drain_pending_fence_imports(proactor);
 
   // Process pending cancellations — both timers (which would otherwise linger
   // until their deadline) and fd operations (whose fds may never fire).
-  iree_async_proactor_posix_drain_pending_timer_cancellations(proactor);
-  iree_async_proactor_posix_drain_pending_fd_cancellations(proactor);
+  completed_count +=
+      iree_async_proactor_posix_drain_pending_timer_cancellations(proactor);
+  completed_count +=
+      iree_async_proactor_posix_drain_pending_fd_cancellations(proactor);
 
   // Drain completions and invoke callbacks.
-  iree_host_size_t completed_count =
-      iree_async_proactor_posix_drain_completion_queue(proactor);
+  completed_count += iree_async_proactor_posix_drain_completion_queue(proactor);
   completed_count +=
       iree_async_proactor_posix_drain_pending_semaphore_waits(proactor);
   // Re-drain: semaphore wait completions may dispatch LINKED continuations
@@ -2654,7 +2527,7 @@ static iree_status_t iree_async_proactor_posix_poll(
   // that go to the pending queue. These must be registered with event_set
   // before event_set_wait, otherwise their fds won't be monitored and the
   // poll will miss wakeups. Process any resulting immediate completions too.
-  iree_async_proactor_posix_drain_pending_queue(proactor);
+  completed_count += iree_async_proactor_posix_drain_pending_queue(proactor);
   completed_count += iree_async_proactor_posix_drain_completion_queue(proactor);
 
   // Calculate timeout considering both user request and pending timers.
@@ -2672,16 +2545,19 @@ static iree_status_t iree_async_proactor_posix_poll(
     iree_async_posix_wake_drain(&proactor->wake);
 
     // Process any expired timers (we may have woken due to timer expiry).
-    iree_async_proactor_posix_process_expired_timers(proactor);
+    completed_count +=
+        iree_async_proactor_posix_process_expired_timers(proactor);
 
     // Drain pending_queue again -- new operations may have arrived while
     // we were in event_set_wait.
-    iree_async_proactor_posix_drain_pending_queue(proactor);
+    completed_count += iree_async_proactor_posix_drain_pending_queue(proactor);
     iree_async_proactor_posix_drain_pending_fence_imports(proactor);
 
     // Process pending cancellations (cancel() called during wait).
-    iree_async_proactor_posix_drain_pending_timer_cancellations(proactor);
-    iree_async_proactor_posix_drain_pending_fd_cancellations(proactor);
+    completed_count +=
+        iree_async_proactor_posix_drain_pending_timer_cancellations(proactor);
+    completed_count +=
+        iree_async_proactor_posix_drain_pending_fd_cancellations(proactor);
 
     // Drain completion queue -- count all callbacks including LINKED
     // continuations that complete immediately during the drain.
@@ -2702,7 +2578,7 @@ static iree_status_t iree_async_proactor_posix_poll(
 
   // Process expired timers BEFORE fd events (timers have priority).
   // Pushes to completion queue; counted when drained below.
-  iree_async_proactor_posix_process_expired_timers(proactor);
+  completed_count += iree_async_proactor_posix_process_expired_timers(proactor);
 
   // Process ready fds using the unified fd_map dispatch.
   // Each fd is looked up once in the O(1) hash table, then dispatched by
@@ -2748,8 +2624,8 @@ static iree_status_t iree_async_proactor_posix_poll(
         iree_async_notification_t* notification =
             (iree_async_notification_t*)handler;
         // Process both pending async waits and notification-source relays.
-        iree_async_proactor_posix_process_notification_waits(proactor,
-                                                             notification);
+        completed_count += iree_async_proactor_posix_process_notification_waits(
+            proactor, notification);
         iree_async_proactor_posix_dispatch_notification_relays(proactor,
                                                                notification);
         break;
@@ -2768,8 +2644,8 @@ static iree_status_t iree_async_proactor_posix_poll(
       case IREE_ASYNC_POSIX_FD_HANDLER_OPERATION: {
         // Process operation chain. Handles multiple concurrent operations on
         // the same fd (e.g., concurrent sends, or send + recv).
-        iree_async_proactor_posix_process_operation_chain(proactor, fd,
-                                                          revents);
+        completed_count += iree_async_proactor_posix_process_operation_chain(
+            proactor, fd, revents);
         break;
       }
     }
@@ -2777,14 +2653,16 @@ static iree_status_t iree_async_proactor_posix_poll(
 
   // Drain pending_queue again — new operations may have arrived during fd
   // processing (e.g., LINKED continuations resubmitted from callbacks).
-  iree_async_proactor_posix_drain_pending_queue(proactor);
+  completed_count += iree_async_proactor_posix_drain_pending_queue(proactor);
   iree_async_proactor_posix_drain_pending_fence_imports(proactor);
 
   // Process pending cancellations not handled during ready-fd or timer dispatch
   // (e.g., cancelled operations on fds that didn't fire, or timers whose
   // deadlines haven't passed yet).
-  iree_async_proactor_posix_drain_pending_timer_cancellations(proactor);
-  iree_async_proactor_posix_drain_pending_fd_cancellations(proactor);
+  completed_count +=
+      iree_async_proactor_posix_drain_pending_timer_cancellations(proactor);
+  completed_count +=
+      iree_async_proactor_posix_drain_pending_fd_cancellations(proactor);
 
   // Drain completion queue — count all callbacks including LINKED
   // continuations that complete immediately during the drain.

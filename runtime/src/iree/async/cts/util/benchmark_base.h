@@ -181,7 +181,7 @@ inline BenchmarkContext* CreateBenchmarkContext(const ProactorFactory& factory,
                                                 ::benchmark::State& state) {
   auto* context = new BenchmarkContext();
 
-  auto result = factory();
+  auto result = factory(iree_async_proactor_options_default());
   if (!result.ok()) {
     if (result.status().code() == iree::StatusCode::kUnavailable) {
       state.SkipWithError("Backend unavailable on this system");

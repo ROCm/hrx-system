@@ -28,8 +28,8 @@
 #include "iree/async/proactor.h"
 #include "iree/async/semaphore.h"
 #include "iree/async/span.h"
+#include "iree/async/util/continuation.h"
 #include "iree/async/util/message_pool.h"
-#include "iree/async/util/operation_pool.h"
 #include "iree/async/util/semaphore_wait.h"
 #include "iree/async/util/sequence_emulation.h"
 #include "iree/base/internal/atomics.h"
@@ -46,91 +46,14 @@
 #include <windows.h>
 // clang-format on
 
-// Invokes an operation's completion callback and releases it to its pool.
-// Extracts the pool pointer before the callback (which may free the operation
-// when pool is NULL). For multishot operations (MORE flag set), skips pool
-// release since the operation is still in flight.
-static inline void iree_async_proactor_complete_operation(
-    iree_async_operation_t* operation, iree_status_t status,
-    iree_async_completion_flags_t flags) {
-  bool is_final = !iree_any_bit_set(flags, IREE_ASYNC_COMPLETION_FLAG_MORE);
-  iree_async_operation_pool_t* pool = is_final ? operation->pool : NULL;
-  status = iree_async_operation_resolve_completion(operation, status, &flags);
-  if (operation->completion_fn) {
-    operation->completion_fn(operation->user_data, operation, status, flags);
-  } else {
-    iree_status_ignore(status);
-  }
-  if (pool) {
-    iree_async_operation_pool_release(pool, operation);
-  }
-}
-
-//===----------------------------------------------------------------------===//
-// LINKED chain dispatch helpers
-//===----------------------------------------------------------------------===//
-
-// Forward declaration for submit_operation (used by submit_continuation_chain).
+// Forward declaration for the continuation submit adapter.
 static iree_status_t iree_async_proactor_iocp_submit_operation(
     iree_async_proactor_iocp_t* proactor, iree_async_operation_t* operation);
 
-// Cancels a continuation chain by directly invoking callbacks with CANCELLED.
-// Cancelled continuations were never submitted, so no resources were retained.
-// Returns the number of callbacks invoked.
-iree_host_size_t iree_async_proactor_iocp_cancel_continuation_chain(
-    iree_async_operation_t* chain_head) {
-  if (!chain_head) return 0;
-  iree_host_size_t cancelled_count = 0;
-  iree_async_operation_t* operation = chain_head;
-  while (operation) {
-    iree_async_operation_t* next = operation->linked_next;
-    operation->linked_next = NULL;
-    iree_async_proactor_complete_operation(
-        operation, iree_status_from_code(IREE_STATUS_CANCELLED),
-        IREE_ASYNC_COMPLETION_FLAG_NONE);
-    ++cancelled_count;
-    operation = next;
-  }
-  return cancelled_count;
-}
-
-// Submits a continuation chain head. On submit failure, fires the chain head's
-// callback with the error and cancels remaining continuations.
-void iree_async_proactor_iocp_submit_continuation_chain(
-    iree_async_proactor_iocp_t* proactor, iree_async_operation_t* chain_head) {
-  if (!chain_head) return;
-
-  iree_status_t status =
-      iree_async_proactor_iocp_submit_operation(proactor, chain_head);
-  if (iree_status_is_ok(status)) return;
-
-  // Submit failed: fire the failed operation's callback and cancel the rest.
-  iree_async_operation_t* rest = chain_head->linked_next;
-  chain_head->linked_next = NULL;
-  iree_async_proactor_complete_operation(chain_head, status,
-                                         IREE_ASYNC_COMPLETION_FLAG_NONE);
-  iree_async_proactor_iocp_cancel_continuation_chain(rest);
-}
-
-// Dispatches a linked_next continuation chain based on the trigger's status.
-// On success: submits the chain for execution.
-// On failure: cancels the chain by directly invoking callbacks with CANCELLED.
-// Returns the number of directly-invoked callbacks (for completion counting).
-iree_host_size_t iree_async_proactor_iocp_dispatch_linked_continuation(
-    iree_async_proactor_iocp_t* proactor, iree_async_operation_t* operation,
-    iree_status_t trigger_status) {
-  iree_async_operation_t* continuation = operation->linked_next;
-  if (!continuation) return 0;
-
-  // Detach the chain before potentially recursive submit.
-  operation->linked_next = NULL;
-
-  if (iree_status_is_ok(trigger_status)) {
-    iree_async_proactor_iocp_submit_continuation_chain(proactor, continuation);
-    return 0;  // Submitted ops produce completions counted by the drain loop.
-  } else {
-    return iree_async_proactor_iocp_cancel_continuation_chain(continuation);
-  }
+iree_status_t iree_async_proactor_iocp_submit_continuation(
+    void* user_data, iree_async_operation_t* chain_head) {
+  return iree_async_proactor_iocp_submit_operation(
+      (iree_async_proactor_iocp_t*)user_data, chain_head);
 }
 
 //===----------------------------------------------------------------------===//
@@ -891,11 +814,10 @@ static iree_status_t iree_async_proactor_iocp_submit_notification_signal(
 static iree_status_t iree_async_proactor_iocp_submit_message(
     iree_async_proactor_iocp_t* proactor,
     iree_async_message_operation_t* message) {
+  const bool skip_source_completion = iree_any_bit_set(
+      message->message_flags, IREE_ASYNC_MESSAGE_FLAG_SKIP_SOURCE_COMPLETION);
+  IREE_RETURN_IF_ERROR(iree_async_message_operation_validate(message));
   iree_async_proactor_t* target = message->target;
-  if (!target) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "MESSAGE target proactor is NULL");
-  }
   if (target->vtable != &iree_async_proactor_iocp_vtable) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
@@ -913,14 +835,11 @@ static iree_status_t iree_async_proactor_iocp_submit_message(
   }
 
   // Handle source-side completion.
-  if (iree_any_bit_set(message->message_flags,
-                       IREE_ASYNC_MESSAGE_FLAG_SKIP_SOURCE_COMPLETION)) {
-    // Fire-and-forget: no source completion callback. Dispatch linked
-    // continuation directly with the send status.
-    iree_async_proactor_iocp_dispatch_linked_continuation(
-        proactor, &message->base, send_status);
-    iree_status_ignore(send_status);
-    return iree_ok_status();
+  if (skip_source_completion) {
+    // No source callback observes this operation. Direct submitters receive
+    // synchronous backpressure; a linked predecessor's continuation dispatcher
+    // owns and handles the returned status.
+    return send_status;
   }
 
   // Post source completion through the completion port for poll-thread
@@ -1265,25 +1184,14 @@ iree_status_t iree_async_proactor_iocp_submit(
     return iree_make_status(IREE_STATUS_ABORTED, "proactor is shutting down");
   }
 
-  // Build linked_next chains from LINKED flags and validate.
-  // Operations with LINKED flag point to the next operation in the batch.
-  // Only "chain heads" (operations not preceded by a LINKED operation) are
-  // submitted to their backends; continuations stay in linked_next and are
-  // dispatched when the predecessor completes.
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_async_continuation_prepare_batch(operations));
   for (iree_host_size_t i = 0; i < operations.count; ++i) {
-    iree_async_operation_t* operation = operations.values[i];
-    operation->linked_next = NULL;
-    if (!iree_any_bit_set(operation->flags, IREE_ASYNC_OPERATION_FLAG_LINKED)) {
-      continue;
+    if (operations.values[i]->type == IREE_ASYNC_OPERATION_TYPE_MESSAGE) {
+      IREE_RETURN_AND_END_ZONE_IF_ERROR(
+          z0, iree_async_message_operation_validate(
+                  (const iree_async_message_operation_t*)operations.values[i]));
     }
-    // LINKED on last operation is a contract violation.
-    if (i + 1 >= operations.count) {
-      IREE_TRACE_ZONE_END(z0);
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "LINKED flag set on last operation in batch (no successor)");
-    }
-    operation->linked_next = operations.values[i + 1];
   }
 
   for (iree_host_size_t i = 0; i < operations.count; ++i) {

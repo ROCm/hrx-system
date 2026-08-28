@@ -19,20 +19,20 @@
 #include <vector>
 
 #include "iree/async/cts/util/registry.h"
-#include "iree/async/cts/util/socket_test_base.h"
+#include "iree/async/cts/util/test_base.h"
 #include "iree/async/operations/scheduling.h"
 
 namespace iree::async::cts {
 
 // Two-proactor fixture for message tests.
 // Creates a second proactor for cross-proactor communication.
-class MessageTest : public SocketTestBase<> {
+class MessageTest : public CtsTestBase<> {
  protected:
   void SetUp() override {
     CtsTestBase::SetUp();
     // Create a second proactor for message targets.
     BackendInfo backend = GetParam();
-    auto result = backend.factory();
+    auto result = backend.factory(iree_async_proactor_options_default());
     if (!result.ok()) {
       GTEST_SKIP() << "Failed to create second proactor: "
                    << result.status().ToString();
@@ -492,6 +492,174 @@ TEST_P(MessageTest, SendMessageFromMultipleThreads) {
   EXPECT_EQ(receiver.sum.load(), expected_sum);
 }
 
+// Exercises deterministic message delivery backpressure on backends that use
+// the bounded software message pool.
+class MessagePoolTest : public CtsTestBase<> {
+ protected:
+  void SetUp() override {
+    CtsTestBase::SetUp();
+    if (!proactor_) return;
+
+    iree_async_proactor_options_t options =
+        iree_async_proactor_options_default();
+    options.message_pool_capacity = 1;
+    auto result = GetParam().factory(options);
+    IREE_ASSERT_OK_AND_ASSIGN(target_proactor_, std::move(result));
+    iree_async_proactor_set_message_callback(
+        target_proactor_, iree_async_proactor_message_callback_t{
+                              MessageCallback, &received_messages_});
+  }
+
+  void TearDown() override {
+    iree_async_proactor_release(target_proactor_);
+    target_proactor_ = nullptr;
+    CtsTestBase::TearDown();
+  }
+
+  static void MessageCallback(iree_async_proactor_t* proactor,
+                              uint64_t message_data, void* user_data) {
+    static_cast<std::vector<uint64_t>*>(user_data)->push_back(message_data);
+  }
+
+  void PollTargetUntilReceived(iree_host_size_t message_count) {
+    while (received_messages_.size() < message_count) {
+      iree_host_size_t completed_count = 0;
+      IREE_ASSERT_OK(iree_async_proactor_poll(
+          target_proactor_, iree_infinite_timeout(), &completed_count));
+    }
+  }
+
+  void ExpectNoImmediateSourceCompletion() {
+    iree_host_size_t completed_count = 0;
+    iree_status_t status = iree_async_proactor_poll(
+        proactor_, iree_immediate_timeout(), &completed_count);
+    if (iree_status_is_deadline_exceeded(status)) {
+      iree_status_free(status);
+    } else {
+      IREE_ASSERT_OK(status);
+    }
+    EXPECT_EQ(completed_count, 0u);
+  }
+
+  iree_async_proactor_t* target_proactor_ = nullptr;
+  std::vector<uint64_t> received_messages_;
+};
+
+struct OrderedCompletions {
+  std::vector<iree_async_operation_t*> operations;
+  std::vector<iree_status_code_t> status_codes;
+
+  static void Callback(void* user_data, iree_async_operation_t* operation,
+                       iree_status_t status,
+                       iree_async_completion_flags_t flags) {
+    auto* completions = static_cast<OrderedCompletions*>(user_data);
+    completions->operations.push_back(operation);
+    completions->status_codes.push_back(iree_status_code(status));
+    iree_status_free(status);
+  }
+};
+
+TEST_P(MessagePoolTest, LinkedDeliveryFailurePreservesOrderAndCount) {
+  constexpr uint64_t kSeedMessage = 0xA11CE;
+  IREE_ASSERT_OK(
+      iree_async_proactor_send_message(target_proactor_, kSeedMessage));
+
+  OrderedCompletions completions;
+  iree_async_timer_operation_t timer = {};
+  timer.base.type = IREE_ASYNC_OPERATION_TYPE_TIMER;
+  timer.base.flags = IREE_ASYNC_OPERATION_FLAG_LINKED;
+  timer.base.completion_fn = OrderedCompletions::Callback;
+  timer.base.user_data = &completions;
+  timer.deadline_ns = iree_time_now();
+
+  iree_async_message_operation_t message = {};
+  message.base.type = IREE_ASYNC_OPERATION_TYPE_MESSAGE;
+  message.base.flags = IREE_ASYNC_OPERATION_FLAG_LINKED;
+  message.base.completion_fn = OrderedCompletions::Callback;
+  message.base.user_data = &completions;
+  message.target = target_proactor_;
+  message.message_data = 0xBAD;
+
+  iree_async_nop_operation_t nop = {};
+  nop.base.type = IREE_ASYNC_OPERATION_TYPE_NOP;
+  nop.base.completion_fn = OrderedCompletions::Callback;
+  nop.base.user_data = &completions;
+
+  iree_async_operation_t* operations[] = {&timer.base, &message.base,
+                                          &nop.base};
+  IREE_ASSERT_OK(iree_async_proactor_submit(
+      proactor_,
+      iree_async_operation_list_make(operations, IREE_ARRAYSIZE(operations))));
+
+  iree_host_size_t poll_completed_count = 0;
+  while (completions.operations.size() < IREE_ARRAYSIZE(operations)) {
+    iree_host_size_t completed_count = 0;
+    IREE_ASSERT_OK(iree_async_proactor_poll(proactor_, iree_infinite_timeout(),
+                                            &completed_count));
+    poll_completed_count += completed_count;
+  }
+
+  EXPECT_EQ(completions.operations,
+            (std::vector<iree_async_operation_t*>{&timer.base, &message.base,
+                                                  &nop.base}));
+  EXPECT_EQ(completions.status_codes,
+            (std::vector<iree_status_code_t>{IREE_STATUS_OK,
+                                             IREE_STATUS_RESOURCE_EXHAUSTED,
+                                             IREE_STATUS_CANCELLED}));
+  EXPECT_EQ(poll_completed_count, 3u);
+
+  PollTargetUntilReceived(1);
+  EXPECT_EQ(received_messages_, (std::vector<uint64_t>{kSeedMessage}));
+}
+
+TEST_P(MessagePoolTest, DirectSuppressedCompletionReportsBackpressure) {
+  constexpr uint64_t kSeedMessage = 0xA11CE;
+  IREE_ASSERT_OK(
+      iree_async_proactor_send_message(target_proactor_, kSeedMessage));
+
+  iree_async_message_operation_t message = {};
+  message.base.type = IREE_ASYNC_OPERATION_TYPE_MESSAGE;
+  message.target = target_proactor_;
+  message.message_data = 0xBAD;
+  message.message_flags = IREE_ASYNC_MESSAGE_FLAG_SKIP_SOURCE_COMPLETION;
+
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_RESOURCE_EXHAUSTED,
+      iree_async_proactor_submit_one(proactor_, &message.base));
+  ExpectNoImmediateSourceCompletion();
+
+  PollTargetUntilReceived(1);
+  EXPECT_EQ(received_messages_, (std::vector<uint64_t>{kSeedMessage}));
+}
+
+TEST_P(MessagePoolTest, SuppressedCompletionCannotLinkForward) {
+  iree_async_message_operation_t message = {};
+  message.base.type = IREE_ASYNC_OPERATION_TYPE_MESSAGE;
+  message.base.flags = IREE_ASYNC_OPERATION_FLAG_LINKED;
+  message.target = target_proactor_;
+  message.message_data = 0xBAD;
+  message.message_flags = IREE_ASYNC_MESSAGE_FLAG_SKIP_SOURCE_COMPLETION;
+
+  CompletionTracker nop_tracker;
+  iree_async_nop_operation_t nop = {};
+  nop.base.type = IREE_ASYNC_OPERATION_TYPE_NOP;
+  nop.base.completion_fn = CompletionTracker::Callback;
+  nop.base.user_data = &nop_tracker;
+
+  iree_async_operation_t* operations[] = {&message.base, &nop.base};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_async_proactor_submit(proactor_,
+                                 iree_async_operation_list_make(
+                                     operations, IREE_ARRAYSIZE(operations))));
+
+  ExpectNoImmediateSourceCompletion();
+  EXPECT_EQ(nop_tracker.call_count, 0);
+  EXPECT_TRUE(received_messages_.empty());
+}
+
 CTS_REGISTER_TEST_SUITE(MessageTest);
+CTS_REGISTER_TEST_SUITE_WITH_TAGS(MessagePoolTest, {"software_message_pool"},
+                                  {});
 
 }  // namespace iree::async::cts

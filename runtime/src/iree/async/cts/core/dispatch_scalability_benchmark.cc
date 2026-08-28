@@ -89,7 +89,7 @@ static IdleHandlerContext* CreateIdleHandlerContext(
     ::benchmark::State& state) {
   auto* ctx = new IdleHandlerContext();
 
-  auto result = factory();
+  auto result = factory(iree_async_proactor_options_default());
   if (!result.ok()) {
     state.SkipWithError("Proactor creation failed");
     delete ctx;
@@ -237,7 +237,7 @@ static RelayScalabilityContext* CreateRelayScalabilityContext(
     ::benchmark::State& state) {
   auto* ctx = new RelayScalabilityContext();
 
-  auto result = factory();
+  auto result = factory(iree_async_proactor_options_default());
   if (!result.ok()) {
     state.SkipWithError("Proactor creation failed");
     delete ctx;
@@ -364,7 +364,7 @@ static FanOutContext* CreateFanOutContext(const ProactorFactory& factory,
                                           ::benchmark::State& state) {
   auto* ctx = new FanOutContext();
 
-  auto result = factory();
+  auto result = factory(iree_async_proactor_options_default());
   if (!result.ok()) {
     state.SkipWithError("Proactor creation failed");
     delete ctx;

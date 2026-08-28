@@ -55,6 +55,8 @@ iree_cc_library(
     ::proactor_imports_js
     ::token_table
     iree::async
+    iree::async::util::continuation
+    iree::async::util::operation_completion
     iree::async::util::sequence_emulation
     iree::base
   PUBLIC

@@ -153,6 +153,9 @@ enum iree_async_operation_flag_bits_e {
   //
   // Semantics: "link TO next" - set on all operations EXCEPT the last in a
   // chain. The last operation must NOT have this flag set.
+  // The triggering operation's callback fires before any successor callback.
+  // Unsubmitted successors remain proactor-owned until their own final
+  // completion or deliberately suppressed completion is consumed.
   //
   // Requires IREE_ASYNC_PROACTOR_CAPABILITY_LINKED_OPERATIONS capability.
   IREE_ASYNC_OPERATION_FLAG_LINKED = 1u << 1,
@@ -238,6 +241,8 @@ typedef uint32_t iree_async_operation_internal_flags_t;
 //   next, internal_flags, linked_next, submit_time_ns (tracing only)
 //
 // After the final completion callback, all fields are caller-owned again.
+// MESSAGE operations that deliberately suppress source completion have a
+// narrower lifetime documented in operations/message.h.
 typedef struct iree_async_operation_t {
   // Intrusive linked list pointer (proactor-internal tracking).
   // Must not be touched by the caller while the operation is in flight.
@@ -254,15 +259,16 @@ typedef struct iree_async_operation_t {
   // Behavioral flags (MULTISHOT, etc.) set by caller before submit.
   iree_async_operation_flags_t flags;
 
-  // Callback invoked on completion (from poll context).
-  // Must not be NULL.
+  // Callback invoked on completion from poll context. Must not be NULL except
+  // for MESSAGE operations using SKIP_SOURCE_COMPLETION.
   iree_async_completion_fn_t completion_fn;
   void* user_data;
 
   // Optional: pool to release this operation to after the final callback.
   // If non-NULL, the proactor calls iree_async_operation_pool_release()
   // after the final callback returns. The caller must not access the
-  // operation after the callback in this case.
+  // operation after the callback in this case. Suppressed MESSAGE completions
+  // cannot use an operation pool.
   iree_async_operation_pool_t* pool;
 
   // LINKED chain continuation pointer (proactor-internal).

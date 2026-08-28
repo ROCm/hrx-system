@@ -31,6 +31,7 @@ iree_runtime_cc_library(
     srcs = ["continuation.c"],
     hdrs = ["continuation.h"],
     deps = [
+        ":operation_completion",
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
     ],
@@ -63,6 +64,30 @@ iree_runtime_cc_library(
     deps = [
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:atomic_slist",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "operation_completion",
+    srcs = ["operation_completion.c"],
+    hdrs = ["operation_completion.h"],
+    deps = [
+        ":operation_pool",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "operation_completion_test",
+    srcs = ["operation_completion_test.cc"],
+    deps = [
+        ":operation_completion",
+        ":operation_pool",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

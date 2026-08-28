@@ -31,6 +31,7 @@ iree_cc_library(
   SRCS
     "continuation.c"
   DEPS
+    ::operation_completion
     iree::async
     iree::base
   PUBLIC
@@ -70,6 +71,34 @@ iree_cc_library(
     iree::base
     iree::base::internal::atomic_slist
   PUBLIC
+)
+
+iree_cc_library(
+  NAME
+    operation_completion
+  HDRS
+    "operation_completion.h"
+  SRCS
+    "operation_completion.c"
+  DEPS
+    ::operation_pool
+    iree::async
+    iree::base
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    operation_completion_test
+  SRCS
+    "operation_completion_test.cc"
+  DEPS
+    ::operation_completion
+    ::operation_pool
+    iree::async
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 
 iree_cc_library(

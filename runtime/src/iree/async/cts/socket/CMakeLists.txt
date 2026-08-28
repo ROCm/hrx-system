@@ -146,7 +146,7 @@ iree_cc_library(
   DEPS
     iree::async
     iree::async::cts::util::registry
-    iree::async::cts::util::socket_test_base
+    iree::async::cts::util::test_base
   TESTONLY
   ALWAYSLINK
   PUBLIC

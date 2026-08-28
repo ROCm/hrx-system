@@ -58,7 +58,7 @@ static RelayContext* CreateRelayContext(const ProactorFactory& factory,
   auto* ctx = new RelayContext();
 
   // Create proactor.
-  auto result = factory();
+  auto result = factory(iree_async_proactor_options_default());
   if (!result.ok()) {
     state.SkipWithError("Proactor creation failed");
     delete ctx;
@@ -267,7 +267,7 @@ static ScalabilityContext* CreateScalabilityContext(
   auto* ctx = new ScalabilityContext();
 
   // Create proactor.
-  auto result = factory();
+  auto result = factory(iree_async_proactor_options_default());
   if (!result.ok()) {
     state.SkipWithError("Proactor creation failed");
     delete ctx;

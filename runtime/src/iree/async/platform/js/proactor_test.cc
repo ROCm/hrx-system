@@ -194,6 +194,10 @@ TEST_F(JsProactorTest, SubmitFutureTimer) {
 
   // Cancel to clean up the token table entry.
   IREE_ASSERT_OK(proactor_->vtable->cancel(proactor_, &timer.base));
+  IREE_ASSERT_OK(iree_async_proactor_poll(proactor_, iree_immediate_timeout(),
+                                          &poll_completed));
+  EXPECT_EQ(completed_count, 1);
+  EXPECT_EQ(poll_completed, 1u);
 }
 
 TEST_F(JsProactorTest, CancelNop) {
@@ -213,9 +217,8 @@ TEST_F(JsProactorTest, CancelNop) {
 }
 
 TEST_F(JsProactorTest, CancelFutureTimer) {
-  // Submit a future timer, then cancel it. In native stubs, timer_cancel
-  // returns 1 (always cancelled), so the completion fires immediately in
-  // the cancel call.
+  // Submit a future timer, then cancel it. The native timer_cancel stub returns
+  // 1, but the user callback remains deferred to poll like every completion.
   iree_status_code_t status_code = IREE_STATUS_OK;
   iree_async_timer_operation_t timer;
   iree_time_t far_future = iree_time_now() + 60ll * 1000000000ll;
@@ -224,8 +227,12 @@ TEST_F(JsProactorTest, CancelFutureTimer) {
   IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &timer.base));
   IREE_ASSERT_OK(proactor_->vtable->cancel(proactor_, &timer.base));
 
-  // The native stub cancels synchronously, so the callback already fired.
+  EXPECT_EQ(status_code, IREE_STATUS_OK);
+  iree_host_size_t poll_completed = 0;
+  IREE_ASSERT_OK(iree_async_proactor_poll(proactor_, iree_immediate_timeout(),
+                                          &poll_completed));
   EXPECT_EQ(status_code, IREE_STATUS_CANCELLED);
+  EXPECT_EQ(poll_completed, 1u);
 }
 
 TEST_F(JsProactorTest, UnsupportedOperationReturnsUnimplemented) {

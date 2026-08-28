@@ -22,8 +22,9 @@
 #include "iree/async/proactor.h"
 #include "iree/async/semaphore.h"
 #include "iree/async/span.h"
+#include "iree/async/util/continuation.h"
 #include "iree/async/util/message_pool.h"
-#include "iree/async/util/operation_pool.h"
+#include "iree/async/util/operation_completion.h"
 #include "iree/async/util/semaphore_wait.h"
 #include "iree/async/util/sequence_emulation.h"
 #include "iree/base/internal/atomics.h"
@@ -219,28 +220,8 @@ static iree_async_socket_t* iree_async_proactor_iocp_socket_from_io_operation(
   }
 }
 
-// Invokes an operation's completion callback and releases it to its pool.
-// Extracts the pool pointer before the callback (which may free the operation
-// when pool is NULL). For multishot operations (MORE flag set), skips pool
-// release since the operation is still in flight.
-static inline void iree_async_proactor_complete_operation(
-    iree_async_operation_t* operation, iree_status_t status,
-    iree_async_completion_flags_t flags) {
-  bool is_final = !iree_any_bit_set(flags, IREE_ASYNC_COMPLETION_FLAG_MORE);
-  iree_async_operation_pool_t* pool = is_final ? operation->pool : NULL;
-  status = iree_async_operation_resolve_completion(operation, status, &flags);
-  if (operation->completion_fn) {
-    operation->completion_fn(operation->user_data, operation, status, flags);
-  } else {
-    iree_status_ignore(status);
-  }
-  if (pool) {
-    iree_async_operation_pool_release(pool, operation);
-  }
-}
-
 // Dispatches completion for a single operation: sticky failure on socket,
-// linked continuation dispatch, resource release, then user callback.
+// resource release, user callback, then linked continuation callbacks.
 //
 // For intermediate multishot completions (MORE flag set), resource release and
 // linked continuation dispatch are skipped. The operation is still in flight:
@@ -258,13 +239,17 @@ static void iree_async_proactor_iocp_dispatch_completion(
       iree_async_socket_set_failure(socket, iree_status_code(status));
     }
   }
+  iree_async_continuation_t continuation = {0};
   if (!iree_any_bit_set(flags, IREE_ASYNC_COMPLETION_FLAG_MORE)) {
-    *completed_count += iree_async_proactor_iocp_dispatch_linked_continuation(
-        proactor, operation, status);
+    iree_async_operation_t* chain_head =
+        iree_async_continuation_take(operation);
+    continuation = iree_async_continuation_begin(
+        iree_async_proactor_iocp_submit_continuation, proactor, chain_head,
+        iree_status_code(status));
     iree_async_operation_release_resources(operation);
   }
-  iree_async_proactor_complete_operation(operation, status, flags);
-  ++(*completed_count);
+  *completed_count += iree_async_operation_complete(operation, status, flags);
+  *completed_count += iree_async_continuation_finish(&continuation);
 }
 
 //===----------------------------------------------------------------------===//
@@ -1154,22 +1139,12 @@ static iree_host_size_t iree_async_proactor_iocp_drain_pending_semaphore_waits(
     iree_async_semaphore_wait_operation_t* wait_op = completion.operation;
     iree_status_t status = completion.status;
 
-    // Dispatch LINKED continuation chain (if any) before invoking callback.
-    if (completion.continuation_head) {
-      iree_async_operation_t* continuation = completion.continuation_head;
-      if (iree_status_is_ok(status)) {
-        iree_async_proactor_iocp_submit_continuation_chain(proactor,
-                                                           continuation);
-      } else {
-        drained_count +=
-            iree_async_proactor_iocp_cancel_continuation_chain(continuation);
-      }
-    }
-
-    // Invoke the operation's callback and release to pool.
-    iree_async_proactor_complete_operation(&wait_op->base, status,
-                                           IREE_ASYNC_COMPLETION_FLAG_NONE);
-    ++drained_count;
+    iree_async_continuation_t continuation = iree_async_continuation_begin(
+        iree_async_proactor_iocp_submit_continuation, proactor,
+        completion.continuation_head, iree_status_code(status));
+    drained_count += iree_async_operation_complete(
+        &wait_op->base, status, IREE_ASYNC_COMPLETION_FLAG_NONE);
+    drained_count += iree_async_continuation_finish(&continuation);
 
     entry = next;
   }
