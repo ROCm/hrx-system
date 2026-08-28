@@ -24,6 +24,8 @@ extern "C" {
 
 // Inputs shared by each function encoded into one module.
 typedef struct loom_vm_function_encoder_options_t {
+  // Immutable module layout used to resolve direct call targets.
+  const loom_vm_module_layout_t* module_layout;
   // Descriptor registry used to resolve the function's exact low target.
   const loom_low_descriptor_registry_t* descriptor_registry;
   // Optional per-class register budgets for scheduling and allocation.

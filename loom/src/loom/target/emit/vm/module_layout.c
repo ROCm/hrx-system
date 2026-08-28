@@ -8,6 +8,7 @@
 
 #include <stdlib.h>
 
+#include "iree/vm/bytecode/wire/core/selectors.h"
 #include "loom/codegen/low/function.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
@@ -110,6 +111,11 @@ static iree_status_t loom_vm_module_layout_populate_functions(
     loom_vm_module_function_layout_t* function =
         &layout->functions[function_index++];
     function->function_op = function_op;
+    layout->call_targets_by_symbol[symbol_index] =
+        (loom_vm_module_call_target_t){
+            .kind = IREE_VM_ISA_CONTROL_CALL_TARGET_LOCAL,
+            .ordinal = (uint16_t)(function_index - 1),
+        };
     function->export_name =
         loom_vm_module_layout_export_name(module, symbol, function_op);
     if (!iree_string_view_is_empty(function->export_name)) {
@@ -189,8 +195,33 @@ iree_status_t loom_vm_module_layout_build(loom_module_t* module,
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, out_layout->function_count, sizeof(*out_layout->functions),
       (void**)&out_layout->functions));
+  if (module->symbols.count != 0) {
+    IREE_RETURN_IF_ERROR(
+        iree_arena_allocate_array(arena, module->symbols.count,
+                                  sizeof(*out_layout->call_targets_by_symbol),
+                                  (void**)&out_layout->call_targets_by_symbol));
+    for (iree_host_size_t i = 0; i < module->symbols.count; ++i) {
+      out_layout->call_targets_by_symbol[i] =
+          (loom_vm_module_call_target_t){.ordinal = UINT16_MAX};
+    }
+  }
   IREE_RETURN_IF_ERROR(
       loom_vm_module_layout_populate_functions(module, arena, out_layout));
   IREE_RETURN_IF_ERROR(loom_vm_module_layout_assign_exports(arena, out_layout));
   return loom_vm_module_type_tables_build(arena, out_layout);
+}
+
+bool loom_vm_module_layout_try_resolve_call_target(
+    const loom_vm_module_layout_t* layout, loom_symbol_ref_t symbol_ref,
+    loom_vm_module_call_target_t* out_target) {
+  *out_target = (loom_vm_module_call_target_t){0};
+  if (!loom_symbol_ref_is_valid(symbol_ref) || symbol_ref.module_id != 0 ||
+      symbol_ref.symbol_id >= layout->module->symbols.count) {
+    return false;
+  }
+  const loom_vm_module_call_target_t target =
+      layout->call_targets_by_symbol[symbol_ref.symbol_id];
+  if (target.ordinal == UINT16_MAX) return false;
+  *out_target = target;
+  return true;
 }

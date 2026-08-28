@@ -18,6 +18,15 @@
 extern "C" {
 #endif
 
+// Resolved direct-call target for one module symbol.
+typedef struct loom_vm_module_call_target_t {
+  // Selector identifying a local, required-import, or optional-import target.
+  uint8_t kind;
+  // Kind-selected target ordinal, or UINT16_MAX when the symbol is not
+  // callable.
+  uint16_t ordinal;
+} loom_vm_module_call_target_t;
+
 // One module-local bytecode function in module symbol order.
 typedef struct loom_vm_module_function_layout_t {
   // Prepared low.func.def operation serialized for this function.
@@ -44,6 +53,8 @@ struct loom_vm_module_layout_t {
   loom_vm_module_function_layout_t* functions;
   // Number of entries in |functions|.
   iree_host_size_t function_count;
+  // Arena-owned direct-call targets indexed by module symbol ID.
+  loom_vm_module_call_target_t* call_targets_by_symbol;
   // Arena-owned exported functions in strict byte-sorted export-name order.
   loom_vm_module_function_layout_t** exports;
   // Number of entries in |exports|.
@@ -62,6 +73,13 @@ struct loom_vm_module_layout_t {
 iree_status_t loom_vm_module_layout_build(loom_module_t* module,
                                           iree_arena_allocator_t* arena,
                                           loom_vm_module_layout_t* out_layout);
+
+// Resolves one module-local symbol reference to its direct-call target.
+//
+// Returns false for an invalid, external-module, or non-callable symbol.
+bool loom_vm_module_layout_try_resolve_call_target(
+    const loom_vm_module_layout_t* layout, loom_symbol_ref_t symbol_ref,
+    loom_vm_module_call_target_t* out_target);
 
 #ifdef __cplusplus
 }  // extern "C"

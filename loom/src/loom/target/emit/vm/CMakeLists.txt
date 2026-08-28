@@ -14,6 +14,7 @@ loom_cc_library(
     vm
   HDRS
     "artifact_emitter.h"
+    "function_call.h"
     "function_encoder.h"
     "function_layout.h"
     "module_emitter.h"
@@ -21,6 +22,7 @@ loom_cc_library(
     "module_types.h"
   SRCS
     "artifact_emitter.c"
+    "function_call.c"
     "function_encoder.c"
     "function_layout.c"
     "module_emitter.c"
@@ -57,6 +59,7 @@ loom_check_test_suite(
   NAME
     loom_check_file_test
   SRCS
+    "test/abi.loom-test"
     "test/control_flow.loom-test"
     "test/module.loom-test"
   TEST_NAME_PREFIX_TO_STRIP

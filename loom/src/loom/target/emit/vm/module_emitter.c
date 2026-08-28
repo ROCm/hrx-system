@@ -214,6 +214,7 @@ static iree_status_t loom_vm_module_write_functions(
 
   const uint64_t bytecode_start = writer->writer.total_written;
   const loom_vm_function_encoder_options_t function_options = {
+      .module_layout = layout,
       .descriptor_registry = options->descriptor_registry,
       .allocation_budgets = options->allocation_budgets,
       .allocation_budget_count = options->allocation_budget_count,

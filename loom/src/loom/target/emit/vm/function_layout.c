@@ -12,6 +12,7 @@
 #include "loom/ir/context.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
+#include "loom/target/emit/vm/function_call.h"
 
 static const uint8_t kLoomVmInstructionRecordByteLengths[] = {
 #define LOOM_VM_INSTRUCTION_ENCODING_LIMITS(maximum_record_byte_length)
@@ -140,8 +141,7 @@ static uint32_t loom_vm_function_edge_move_byte_length(
 static iree_status_t loom_vm_function_structural_packet_byte_length(
     const loom_low_emission_frame_t* frame,
     const loom_low_packet_view_t* packet,
-    loom_vm_function_control_encoding_t control_encoding,
-    uint32_t* out_byte_length) {
+    loom_vm_function_code_layout_t* code_layout, uint32_t* out_byte_length) {
   *out_byte_length = 0;
   const loom_op_t* op = packet->node->op;
   if (loom_low_return_isa(op)) {
@@ -153,8 +153,25 @@ static iree_status_t loom_vm_function_structural_packet_byte_length(
     *out_byte_length = loom_vm_function_packet_move_byte_length(frame, packet);
     return iree_ok_status();
   }
+  loom_vm_function_call_view_t call = {0};
+  if (loom_vm_function_call_try_view(op, &call)) {
+    loom_vm_call_abi_packet_layout_t call_layout = {0};
+    IREE_RETURN_IF_ERROR(
+        loom_vm_function_call_layout_build(frame->module, &call, &call_layout));
+    code_layout->local_byte_length =
+        iree_max(code_layout->local_byte_length,
+                 (uint16_t)call_layout.local_byte_length);
+    code_layout->local_ref_count =
+        iree_max(code_layout->local_ref_count, call_layout.local_ref_count);
+    code_layout->local_function_count = iree_max(
+        code_layout->local_function_count, call_layout.local_function_count);
+    code_layout->has_call = true;
+    *out_byte_length = loom_vm_function_call_record_byte_length(&call_layout);
+    return iree_ok_status();
+  }
   const loom_vm_function_control_layout_t* control_layout =
-      loom_vm_function_control_encoding_layout(control_encoding);
+      loom_vm_function_control_encoding_layout(
+          code_layout->control_encodings[packet->packet_index]);
   if (loom_low_br_isa(op)) {
     *out_byte_length = loom_vm_function_edge_move_byte_length(frame, packet) +
                        control_layout->first_byte_length;
@@ -238,6 +255,10 @@ loom_vm_function_initial_control_encoding(
 static iree_status_t loom_vm_function_code_layout_calculate_offsets(
     const loom_low_emission_frame_t* frame,
     loom_vm_function_code_layout_t* layout) {
+  layout->local_byte_length = 0;
+  layout->local_ref_count = 0;
+  layout->local_function_count = 0;
+  layout->has_call = false;
   uint64_t byte_offset = 0;
   for (uint32_t block_index = 0; block_index < frame->schedule.block_count;
        ++block_index) {
@@ -257,8 +278,7 @@ static iree_status_t loom_vm_function_code_layout_calculate_offsets(
       if (loom_low_packet_is_compile_time_only(&packet)) continue;
       uint32_t packet_byte_length = 0;
       IREE_RETURN_IF_ERROR(loom_vm_function_structural_packet_byte_length(
-          frame, &packet, layout->control_encodings[packet.packet_index],
-          &packet_byte_length));
+          frame, &packet, layout, &packet_byte_length));
       if (byte_offset + packet_byte_length > UINT32_MAX) {
         return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                                 "VM function bytecode length exceeds u32");

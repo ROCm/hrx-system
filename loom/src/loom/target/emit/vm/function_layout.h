@@ -60,6 +60,14 @@ typedef struct loom_vm_function_code_layout_t {
   loom_vm_function_control_encoding_t* control_encodings;
   // Aggregate switch-target entries required by structural switch packets.
   uint32_t switch_target_entry_count;
+  // Maximum caller-local byte prefix required by any call packet.
+  uint16_t local_byte_length;
+  // Maximum caller-local ref prefix required by any call packet.
+  uint32_t local_ref_count;
+  // Maximum caller-local function prefix required by any call packet.
+  uint32_t local_function_count;
+  // True when the function contains at least one direct or indirect call.
+  bool has_call;
   // Exact complete function record-stream byte length.
   uint32_t bytecode_length;
 } loom_vm_function_code_layout_t;

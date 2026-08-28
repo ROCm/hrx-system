@@ -21,6 +21,7 @@
 #include "loom/ops/op_defs.h"
 #include "loom/target/arch/vm/abi/layout.h"
 #include "loom/target/arch/vm/descriptors.h"
+#include "loom/target/emit/vm/function_call.h"
 #include "loom/target/emit/vm/function_layout.h"
 
 #define LOOM_VM_INSTRUCTION_ENCODING_LIMITS(maximum_record_byte_length) \
@@ -371,6 +372,7 @@ static iree_status_t loom_vm_function_encode_switch(
 
 static iree_status_t loom_vm_function_encode_structural_packet(
     const loom_low_emission_frame_t* frame,
+    const loom_vm_module_layout_t* module_layout,
     const loom_vm_function_code_layout_t* code_layout,
     const loom_low_packet_view_t* packet, uint32_t switch_target_base,
     iree_vm_bytecode_v0_switch_target_entry_t* switch_targets,
@@ -381,6 +383,14 @@ static iree_status_t loom_vm_function_encode_structural_packet(
         .zero_padding_u8 = {0, 0, 0},
     };
     return loom_bytecode_page_writer_write(writer, &record, sizeof(record));
+  }
+  loom_vm_function_call_view_t call = {0};
+  if (loom_vm_function_call_try_view(packet->node->op, &call)) {
+    loom_vm_call_abi_packet_layout_t call_layout = {0};
+    IREE_RETURN_IF_ERROR(
+        loom_vm_function_call_layout_build(frame->module, &call, &call_layout));
+    return loom_vm_function_call_encode(frame, module_layout, packet, &call,
+                                        &call_layout, writer);
   }
   if (loom_low_copy_isa(packet->node->op) ||
       loom_low_move_isa(packet->node->op) ||
@@ -412,8 +422,10 @@ static iree_status_t loom_vm_function_encode_structural_packet(
 
 static iree_status_t loom_vm_function_claim_direct_abi_location(
     const loom_module_t* module, loom_value_id_t value_id,
-    loom_vm_call_abi_bank_counts_t* bank_counts, uint32_t* out_location) {
+    loom_vm_call_abi_bank_counts_t* bank_counts, uint32_t* out_location,
+    bool* out_is_direct) {
   *out_location = 0;
+  *out_is_direct = false;
   loom_vm_call_abi_bank_t bank = LOOM_VM_CALL_ABI_BANK_NONE;
   IREE_RETURN_IF_ERROR(loom_vm_call_abi_classify_type(
       module, loom_module_value_type(module, value_id), &bank));
@@ -432,12 +444,83 @@ static iree_status_t loom_vm_function_claim_direct_abi_location(
       IREE_ASSERT_UNREACHABLE("classified VM call ABI bank");
       IREE_BUILTIN_UNREACHABLE();
   }
-  if (*bank_count == IREE_VM_CALL_DIRECT_REGISTER_COUNT) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "VM call ABI overflow was not materialized");
-  }
-  *out_location = *bank_count;
+  const uint16_t location = *bank_count;
   ++*bank_count;
+  if (location >= IREE_VM_CALL_DIRECT_REGISTER_COUNT) {
+    return iree_ok_status();
+  }
+  *out_location = location;
+  *out_is_direct = true;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_vm_function_collect_fixed_value_slice(
+    const loom_module_t* module, const loom_value_id_t* values,
+    uint16_t value_count, loom_low_allocation_fixed_value_t* fixed_values,
+    iree_host_size_t* inout_fixed_value_count) {
+  loom_vm_call_abi_bank_counts_t bank_counts = {0};
+  for (uint16_t i = 0; i < value_count; ++i) {
+    uint32_t location = 0;
+    bool is_direct = false;
+    IREE_RETURN_IF_ERROR(loom_vm_function_claim_direct_abi_location(
+        module, values[i], &bank_counts, &location, &is_direct));
+    if (!is_direct) continue;
+    if (*inout_fixed_value_count == IREE_HOST_SIZE_MAX) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "VM fixed call-boundary value count exceeds host size");
+    }
+    if (fixed_values != NULL) {
+      fixed_values[*inout_fixed_value_count] =
+          (loom_low_allocation_fixed_value_t){
+              .value_id = values[i],
+              .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+              .location_base = location,
+              .location_count = 1,
+          };
+    }
+    ++*inout_fixed_value_count;
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_vm_function_collect_fixed_boundary_values(
+    const loom_module_t* module,
+    const loom_vm_module_function_layout_t* function,
+    loom_low_allocation_fixed_value_t* fixed_values,
+    iree_host_size_t* out_fixed_value_count) {
+  *out_fixed_value_count = 0;
+  loom_func_like_t function_like =
+      loom_func_like_cast(module, function->function_op);
+  uint16_t argument_count = 0;
+  const loom_value_id_t* arguments =
+      loom_func_like_arg_ids(function_like, &argument_count);
+  IREE_RETURN_IF_ERROR(loom_vm_function_collect_fixed_value_slice(
+      module, arguments, argument_count, fixed_values, out_fixed_value_count));
+
+  const loom_region_t* body =
+      loom_low_function_const_body(function->function_op);
+  for (uint16_t block_index = 0; block_index < body->block_count;
+       ++block_index) {
+    const loom_op_t* op = NULL;
+    loom_block_for_each_op(body->blocks[block_index], op) {
+      if (loom_low_return_isa(op)) {
+        const loom_value_slice_t results = loom_low_return_values(op);
+        IREE_RETURN_IF_ERROR(loom_vm_function_collect_fixed_value_slice(
+            module, results.values, results.count, fixed_values,
+            out_fixed_value_count));
+        continue;
+      }
+      loom_vm_function_call_view_t call = {0};
+      if (!loom_vm_function_call_try_view(op, &call)) continue;
+      IREE_RETURN_IF_ERROR(loom_vm_function_collect_fixed_value_slice(
+          module, call.arguments.values, call.arguments.count, fixed_values,
+          out_fixed_value_count));
+      IREE_RETURN_IF_ERROR(loom_vm_function_collect_fixed_value_slice(
+          module, call.results.values, call.results.count, fixed_values,
+          out_fixed_value_count));
+    }
+  }
   return iree_ok_status();
 }
 
@@ -449,30 +532,15 @@ static iree_status_t loom_vm_function_collect_fixed_values(
     iree_host_size_t* out_fixed_value_count) {
   *out_fixed_values = NULL;
   *out_fixed_value_count = 0;
-  loom_func_like_t function_like =
-      loom_func_like_cast(module, function->function_op);
-  uint16_t argument_count = 0;
-  const loom_value_id_t* arguments =
-      loom_func_like_arg_ids(function_like, &argument_count);
-
   const loom_region_t* body =
       loom_low_function_const_body(function->function_op);
   if (body == NULL || body->block_count == 0) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "VM function must have a non-empty body");
   }
-  iree_host_size_t fixed_value_capacity = argument_count;
-  for (uint16_t i = 0; i < body->block_count; ++i) {
-    const loom_op_t* terminator = body->blocks[i]->last_op;
-    if (terminator == NULL || !loom_low_return_isa(terminator)) continue;
-    const loom_value_slice_t results = loom_low_return_values(terminator);
-    if (!iree_host_size_checked_add(fixed_value_capacity, results.count,
-                                    &fixed_value_capacity)) {
-      return iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "VM fixed call-boundary value count exceeds host size");
-    }
-  }
+  iree_host_size_t fixed_value_capacity = 0;
+  IREE_RETURN_IF_ERROR(loom_vm_function_collect_fixed_boundary_values(
+      module, function, /*fixed_values=*/NULL, &fixed_value_capacity));
 
   loom_low_allocation_fixed_value_t* fixed_values = NULL;
   if (fixed_value_capacity != 0) {
@@ -481,36 +549,8 @@ static iree_status_t loom_vm_function_collect_fixed_values(
                                                    (void**)&fixed_values));
   }
   iree_host_size_t fixed_value_count = 0;
-  loom_vm_call_abi_bank_counts_t argument_bank_counts = {0};
-  for (uint16_t i = 0; i < argument_count; ++i) {
-    uint32_t location = 0;
-    IREE_RETURN_IF_ERROR(loom_vm_function_claim_direct_abi_location(
-        module, arguments[i], &argument_bank_counts, &location));
-    fixed_values[fixed_value_count++] = (loom_low_allocation_fixed_value_t){
-        .value_id = arguments[i],
-        .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
-        .location_base = location,
-        .location_count = 1,
-    };
-  }
-  for (uint16_t block_index = 0; block_index < body->block_count;
-       ++block_index) {
-    const loom_op_t* terminator = body->blocks[block_index]->last_op;
-    if (terminator == NULL || !loom_low_return_isa(terminator)) continue;
-    const loom_value_slice_t results = loom_low_return_values(terminator);
-    loom_vm_call_abi_bank_counts_t result_bank_counts = {0};
-    for (iree_host_size_t i = 0; i < results.count; ++i) {
-      uint32_t location = 0;
-      IREE_RETURN_IF_ERROR(loom_vm_function_claim_direct_abi_location(
-          module, results.values[i], &result_bank_counts, &location));
-      fixed_values[fixed_value_count++] = (loom_low_allocation_fixed_value_t){
-          .value_id = results.values[i],
-          .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
-          .location_base = location,
-          .location_count = 1,
-      };
-    }
-  }
+  IREE_RETURN_IF_ERROR(loom_vm_function_collect_fixed_boundary_values(
+      module, function, fixed_values, &fixed_value_count));
   IREE_ASSERT_EQ(fixed_value_count, fixed_value_capacity);
   *out_fixed_values = fixed_values;
   *out_fixed_value_count = fixed_value_count;
@@ -608,8 +648,8 @@ iree_status_t loom_vm_function_encode(
             loom_vm_function_encode_descriptor_packet(&frame, &packet, writer));
       } else {
         IREE_RETURN_IF_ERROR(loom_vm_function_encode_structural_packet(
-            &frame, &code_layout, &packet, switch_target_base, switch_targets,
-            writer));
+            &frame, options->module_layout, &code_layout, &packet,
+            switch_target_base, switch_targets, writer));
         if (loom_low_switch_isa(packet.node->op)) {
           switch_target_base +=
               loom_low_switch_target_dests(packet.node->op).count;
@@ -626,11 +666,17 @@ iree_status_t loom_vm_function_encode(
         "VM function layout and serialization byte lengths disagree");
   }
   out_encoding->row.callable_type_ordinal_u16 = function->callable_type_ordinal;
+  if (code_layout.has_call) {
+    out_encoding->row.flags_u16 |= IREE_VM_BYTECODE_FUNCTION_FLAG_HAS_CALL;
+  }
   out_encoding->row.bytecode_length_u32 = (uint32_t)bytecode_length;
   out_encoding->row.value_register_count_u16 = (uint16_t)value_register_count;
   out_encoding->row.ref_register_count_u16 = (uint16_t)ref_register_count;
   out_encoding->row.function_register_count_u16 =
       (uint16_t)function_register_count;
+  out_encoding->row.local_byte_length_u16 = code_layout.local_byte_length;
+  out_encoding->row.local_ref_count_u32 = code_layout.local_ref_count;
+  out_encoding->row.local_function_count_u32 = code_layout.local_function_count;
   out_encoding->row.block_count_u32 = (uint32_t)frame.schedule.block_count;
   out_encoding->row.switch_target_entry_count_u32 =
       code_layout.switch_target_entry_count;

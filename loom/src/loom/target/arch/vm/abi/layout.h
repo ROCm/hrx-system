@@ -68,6 +68,31 @@ typedef struct loom_vm_call_abi_layout_t {
   loom_vm_call_abi_side_layout_t results;
 } loom_vm_call_abi_layout_t;
 
+// Canonical caller-local packet layout for one logical callsite.
+//
+// Every call in a function reuses the same local-storage prefixes. Value
+// overflow cells occupy naturally aligned 64-bit bytes, followed by result
+// cells. Ref and function overflow slots use their corresponding typed local
+// arrays with arguments followed by results. Direct ref arguments are fresh
+// staging values and are moved into the child packet.
+typedef struct loom_vm_call_abi_packet_layout_t {
+  // Logical argument counts in each independent register bank.
+  loom_vm_call_abi_bank_counts_t arguments;
+  // Logical result counts in each independent register bank.
+  loom_vm_call_abi_bank_counts_t results;
+  // Ownership-transfer mask covering every direct ref argument.
+  uint16_t direct_ref_move_mask;
+  // Complete caller-local byte prefix required by value overflow cells.
+  uint32_t local_byte_length;
+  // Complete caller-local ref prefix required by ref overflow slots.
+  uint32_t local_ref_count;
+  // Complete caller-local function prefix required by function overflow slots.
+  uint32_t local_function_count;
+} loom_vm_call_abi_packet_layout_t;
+
+// Returns the number of fields beyond the direct register prefix.
+uint16_t loom_vm_call_abi_overflow_count(uint16_t count);
+
 // Classifies one logical source type into its VM callable register bank.
 //
 // Returns false when the type is not a scalar, an exact managed reference, or
@@ -96,6 +121,17 @@ iree_status_t loom_vm_call_abi_layout_resolve_signature(
 iree_status_t loom_vm_call_abi_layout_build(
     const loom_module_t* module, loom_type_t signature,
     iree_arena_allocator_t* arena, loom_vm_call_abi_layout_t* out_layout);
+
+// Builds the canonical caller-local packet layout for one logical callsite.
+//
+// The argument and result values remain in source order. The returned bank
+// counts determine direct register ordinals and overflow slot offsets without
+// retaining a per-field mapping.
+iree_status_t loom_vm_call_abi_packet_layout_build(
+    const loom_module_t* module, const loom_value_id_t* arguments,
+    iree_host_size_t argument_count, const loom_value_id_t* results,
+    iree_host_size_t result_count,
+    loom_vm_call_abi_packet_layout_t* out_layout);
 
 // Builds a canonical abi_layout dictionary containing the logical mapped Low
 // function signature. The signature is independent of the physical function

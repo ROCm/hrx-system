@@ -113,6 +113,7 @@ loom_cc_library(
     ::descriptors
     iree::base
     iree::base::internal::arena
+    iree::vm
     loom::ir
     loom::ops::func
     loom::ops::type_registry

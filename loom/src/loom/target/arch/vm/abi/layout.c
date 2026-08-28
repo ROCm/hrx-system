@@ -8,6 +8,7 @@
 
 #include <inttypes.h>
 
+#include "iree/vm/module.h"
 #include "loom/ir/module.h"
 #include "loom/ops/func/reference.h"
 #include "loom/ops/type_registry.h"
@@ -136,6 +137,29 @@ static uint16_t* loom_vm_call_abi_bank_count(
   }
 }
 
+uint16_t loom_vm_call_abi_overflow_count(uint16_t count) {
+  return count > IREE_VM_CALL_DIRECT_REGISTER_COUNT
+             ? (uint16_t)(count - IREE_VM_CALL_DIRECT_REGISTER_COUNT)
+             : 0;
+}
+
+static iree_status_t loom_vm_call_abi_count_values(
+    const loom_module_t* module, const loom_value_id_t* values,
+    iree_host_size_t value_count, loom_vm_call_abi_bank_counts_t* out_counts) {
+  *out_counts = (loom_vm_call_abi_bank_counts_t){0};
+  if (value_count > UINT16_MAX) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "VM call field count exceeds u16");
+  }
+  for (iree_host_size_t i = 0; i < value_count; ++i) {
+    loom_vm_call_abi_bank_t bank = LOOM_VM_CALL_ABI_BANK_NONE;
+    IREE_RETURN_IF_ERROR(loom_vm_call_abi_classify_type(
+        module, loom_module_value_type(module, values[i]), &bank));
+    ++*loom_vm_call_abi_bank_count(out_counts, bank);
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_vm_call_abi_side_layout_build(
     const loom_module_t* module, const loom_type_t* types, uint16_t type_count,
     loom_vm_call_abi_field_layout_t* fields,
@@ -187,6 +211,56 @@ iree_status_t loom_vm_call_abi_layout_build(
   IREE_RETURN_IF_ERROR(loom_vm_call_abi_side_layout_build(
       module, loom_type_func_result_types(signature), result_count,
       fields != NULL ? fields + argument_count : NULL, &layout.results));
+  *out_layout = layout;
+  return iree_ok_status();
+}
+
+iree_status_t loom_vm_call_abi_packet_layout_build(
+    const loom_module_t* module, const loom_value_id_t* arguments,
+    iree_host_size_t argument_count, const loom_value_id_t* results,
+    iree_host_size_t result_count,
+    loom_vm_call_abi_packet_layout_t* out_layout) {
+  *out_layout = (loom_vm_call_abi_packet_layout_t){0};
+  loom_vm_call_abi_packet_layout_t layout = {0};
+  IREE_RETURN_IF_ERROR(loom_vm_call_abi_count_values(
+      module, arguments, argument_count, &layout.arguments));
+  IREE_RETURN_IF_ERROR(loom_vm_call_abi_count_values(
+      module, results, result_count, &layout.results));
+
+  const uint16_t direct_ref_argument_count =
+      iree_min(IREE_VM_CALL_DIRECT_REGISTER_COUNT, layout.arguments.ref);
+  layout.direct_ref_move_mask =
+      direct_ref_argument_count == IREE_VM_CALL_DIRECT_REGISTER_COUNT
+          ? UINT16_MAX
+          : (uint16_t)((1u << direct_ref_argument_count) - 1u);
+
+  const uint32_t value_overflow_count =
+      (uint32_t)loom_vm_call_abi_overflow_count(layout.arguments.value) +
+      loom_vm_call_abi_overflow_count(layout.results.value);
+  layout.local_byte_length = value_overflow_count * sizeof(uint64_t);
+  if (layout.local_byte_length > UINT16_MAX) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "VM call value overflow packet exceeds local byte storage");
+  }
+
+  layout.local_ref_count =
+      (uint32_t)loom_vm_call_abi_overflow_count(layout.arguments.ref) +
+      loom_vm_call_abi_overflow_count(layout.results.ref);
+  if (layout.local_ref_count > (uint32_t)UINT16_MAX + 1u) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "VM call ref overflow packet exceeds local ref storage");
+  }
+
+  layout.local_function_count =
+      (uint32_t)loom_vm_call_abi_overflow_count(layout.arguments.function) +
+      loom_vm_call_abi_overflow_count(layout.results.function);
+  if (layout.local_function_count > (uint32_t)UINT16_MAX + 1u) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "VM call function overflow packet exceeds local function storage");
+  }
   *out_layout = layout;
   return iree_ok_status();
 }

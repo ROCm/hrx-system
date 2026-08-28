@@ -1,0 +1,360 @@
+// RUN: emit vm-dis
+
+vm.target<core> @target
+
+func.def public target(@target) @value_overflow(%v0: i32, %v1: i32, %v2: i32, %v3: i32, %v4: i32, %v5: i32, %v6: i32, %v7: i32, %v8: i32, %v9: i32, %v10: i32, %v11: i32, %v12: i32, %v13: i32, %v14: i32, %v15: i32, %v16: i32) -> (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) {
+  func.return %v0, %v1, %v2, %v3, %v4, %v5, %v6, %v7, %v8, %v9, %v10, %v11, %v12, %v13, %v14, %v15, %v16 : i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32
+}
+
+// ----
+vm.module "module" core=0.0 bytes=388
+requirements:
+sections:
+  [0] strings type=0x0002 flags=0x0000 bytes=[96, +26)
+  [1] signatures type=0x0004 flags=0x0000 bytes=[128, +156)
+  [2] callable_types type=0x0005 flags=0x0000 bytes=[288, +12)
+  [3] exports type=0x0007 flags=0x0000 bytes=[304, +12)
+  [4] functions type=0x0008 flags=0x0000 bytes=[320, +68)
+resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
+module_metadata:
+ref_types:
+callable_types:
+  [0] (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) -> (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32)
+imports:
+exports:
+  [0] @value_overflow -> function[0] : (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) -> (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32)
+functions:
+  [0] callable[0] signature[0] bytecode=[0, +16) registers=(17, 0, 0) locals=(0, 0, 0) switch_targets=0
+    type = (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) -> (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32)
+    +0000  control.block
+    +0004  value.abi.argument.load dst_v8=16 slot_u16=0
+    +0008  value.abi.result.store src_v8=16 slot_u16=0
+    +0012  control.return
+
+// ====
+
+// RUN: emit vm-dis
+
+vm.target<core> @target
+
+func.def noinline target(@target) @add_one(%value: i32) -> (i32) {
+  %c1 = scalar.constant 1 : i32
+  %result = scalar.addi %value, %c1 : i32
+  func.return %result : i32
+}
+
+func.def public target(@target) @call_add_one(%value: i32) -> (i32) {
+  %result = func.call @add_one(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+vm.module "module" core=0.0 bytes=316
+requirements:
+sections:
+  [0] strings type=0x0002 flags=0x0000 bytes=[96, +24)
+  [1] signatures type=0x0004 flags=0x0000 bytes=[120, +28)
+  [2] callable_types type=0x0005 flags=0x0000 bytes=[152, +12)
+  [3] exports type=0x0007 flags=0x0000 bytes=[168, +12)
+  [4] functions type=0x0008 flags=0x0000 bytes=[184, +132)
+resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
+module_metadata:
+ref_types:
+callable_types:
+  [0] (i32) -> (i32)
+imports:
+exports:
+  [0] @call_add_one -> function[1] : (i32) -> (i32)
+functions:
+  [0] callable[0] signature[0] bytecode=[0, +16) registers=(2, 0, 0) locals=(0, 0, 0) switch_targets=0
+    type = (i32) -> (i32)
+    +0000  control.block
+    +0004  constant.s16 dst_v8=1 immediate_i16=1
+    +0008  integer.add.i32 dst_v8=0 lhs_v8=0 rhs_v8=1
+    +0012  control.return
+  [1] callable[0] signature[0] bytecode=[16, +16) registers=(1, 0, 0) locals=(0, 0, 0) switch_targets=0 has_call
+    type = (i32) -> (i32)
+    +0000  control.block
+    +0004  control.call target_kind_u8=0 target_ordinal_u16=0 direct_ref_move_mask_u16=0
+    +0012  control.return
+
+// ====
+
+// RUN: emit vm-dis
+
+vm.target<core> @target
+
+func.def pure noinline target(@target) @wide_identity(%v0: i32, %v1: i32, %v2: i32, %v3: i32, %v4: i32, %v5: i32, %v6: i32, %v7: i32, %v8: i32, %v9: i32, %v10: i32, %v11: i32, %v12: i32, %v13: i32, %v14: i32, %v15: i32, %v16: i32) -> (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) {
+  func.return %v0, %v1, %v2, %v3, %v4, %v5, %v6, %v7, %v8, %v9, %v10, %v11, %v12, %v13, %v14, %v15, %v16 : i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32
+}
+
+func.def public target(@target) @call_wide_identity(%value: i32) -> (i32) {
+  %r0, %r1, %r2, %r3, %r4, %r5, %r6, %r7, %r8, %r9, %r10, %r11, %r12, %r13, %r14, %r15, %r16 = func.call @wide_identity(%value, %value, %value, %value, %value, %value, %value, %value, %value, %value, %value, %value, %value, %value, %value, %value, %value) : (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) -> (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32)
+  func.return %r16 : i32
+}
+
+// ----
+vm.module "module" core=0.0 bytes=572
+requirements:
+sections:
+  [0] strings type=0x0002 flags=0x0000 bytes=[96, +30)
+  [1] signatures type=0x0004 flags=0x0000 bytes=[128, +180)
+  [2] callable_types type=0x0005 flags=0x0000 bytes=[312, +20)
+  [3] exports type=0x0007 flags=0x0000 bytes=[336, +12)
+  [4] functions type=0x0008 flags=0x0000 bytes=[352, +220)
+resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
+module_metadata:
+ref_types:
+callable_types:
+  [0] (i32) -> (i32)
+  [1] (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) -> (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32)
+imports:
+exports:
+  [0] @call_wide_identity -> function[1] : (i32) -> (i32)
+functions:
+  [0] callable[1] signature[1] bytecode=[0, +16) registers=(17, 0, 0) locals=(0, 0, 0) switch_targets=0
+    type = (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) -> (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32)
+    +0000  control.block
+    +0004  value.abi.argument.load dst_v8=16 slot_u16=0
+    +0008  value.abi.result.store src_v8=16 slot_u16=0
+    +0012  control.return
+  [1] callable[0] signature[0] bytecode=[16, +104) registers=(17, 0, 0) locals=(16, 0, 0) switch_targets=0 has_call
+    type = (i32) -> (i32)
+    +0000  control.block
+    +0004  value.copy dst_v8=16 src_v8=0
+    +0008  value.copy dst_v8=0 src_v8=16
+    +0012  value.copy dst_v8=1 src_v8=16
+    +0016  value.copy dst_v8=2 src_v8=16
+    +0020  value.copy dst_v8=3 src_v8=16
+    +0024  value.copy dst_v8=4 src_v8=16
+    +0028  value.copy dst_v8=5 src_v8=16
+    +0032  value.copy dst_v8=6 src_v8=16
+    +0036  value.copy dst_v8=7 src_v8=16
+    +0040  value.copy dst_v8=8 src_v8=16
+    +0044  value.copy dst_v8=9 src_v8=16
+    +0048  value.copy dst_v8=10 src_v8=16
+    +0052  value.copy dst_v8=11 src_v8=16
+    +0056  value.copy dst_v8=12 src_v8=16
+    +0060  value.copy dst_v8=13 src_v8=16
+    +0064  value.copy dst_v8=14 src_v8=16
+    +0068  value.copy dst_v8=15 src_v8=16
+    +0072  stack.store base_u16=0 src_v8=16 format_u8=12
+    +0080  control.call target_kind_u8=0 target_ordinal_u16=0 direct_ref_move_mask_u16=0
+    +0088  stack.load dst_v8=16 base_u16=8 format_u8=12
+    +0096  value.copy dst_v8=0 src_v8=16
+    +0100  control.return
+
+// ====
+
+// RUN: emit vm-dis
+
+vm.target<core> @target
+
+func.def noinline target(@target) @mixed_identity(%value: i32, %buffer: hal.buffer, %callback: func.ref<(i32) -> (i32)>) -> (hal.buffer, func.ref<(i32) -> (i32)>) {
+  func.return %buffer, %callback : hal.buffer, func.ref<(i32) -> (i32)>
+}
+
+func.def public target(@target) @call_mixed_identity(%value: i32, %buffer: hal.buffer, %callback: func.ref<(i32) -> (i32)>) -> (hal.buffer, func.ref<(i32) -> (i32)>) {
+  %result_buffer, %result_callback = func.call @mixed_identity(%value, %buffer, %callback) : (i32, hal.buffer, func.ref<(i32) -> (i32)>) -> (hal.buffer, func.ref<(i32) -> (i32)>)
+  func.return %result_buffer, %result_callback : hal.buffer, func.ref<(i32) -> (i32)>
+}
+
+// ----
+vm.module "module" core=0.0 bytes=404
+requirements:
+sections:
+  [0] strings type=0x0002 flags=0x0000 bytes=[112, +48)
+  [1] ref_types type=0x0003 flags=0x0000 bytes=[160, +16)
+  [2] signatures type=0x0004 flags=0x0000 bytes=[176, +64)
+  [3] callable_types type=0x0005 flags=0x0000 bytes=[240, +20)
+  [4] exports type=0x0007 flags=0x0000 bytes=[264, +12)
+  [5] functions type=0x0008 flags=0x0000 bytes=[280, +124)
+resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
+module_metadata:
+ref_types:
+  [0] ref<hal, buffer>
+callable_types:
+  [0] (i32) -> (i32)
+  [1] (i32, ref<hal, buffer>, func<module:0>) -> (ref<hal, buffer>, func<module:0>)
+imports:
+exports:
+  [0] @call_mixed_identity -> function[1] : (i32, ref<hal, buffer>, func<module:0>) -> (ref<hal, buffer>, func<module:0>)
+functions:
+  [0] callable[1] signature[1] bytecode=[0, +8) registers=(1, 1, 1) locals=(0, 0, 0) switch_targets=0
+    type = (i32, ref<hal, buffer>, func<module:0>) -> (ref<hal, buffer>, func<module:0>)
+    +0000  control.block
+    +0004  control.return
+  [1] callable[1] signature[1] bytecode=[8, +16) registers=(1, 1, 1) locals=(0, 0, 0) switch_targets=0 has_call
+    type = (i32, ref<hal, buffer>, func<module:0>) -> (ref<hal, buffer>, func<module:0>)
+    +0000  control.block
+    +0004  control.call target_kind_u8=0 target_ordinal_u16=0 direct_ref_move_mask_u16=1
+    +0012  control.return
+
+// ====
+
+// RUN: emit vm-dis
+
+vm.target<core> @target
+
+func.def noinline target(@target) @observe_buffers(%lhs: hal.buffer, %rhs: hal.buffer) {
+  func.return
+}
+
+func.def public target(@target) @call_then_return_buffer(%buffer: hal.buffer) -> (hal.buffer) {
+  func.call @observe_buffers(%buffer, %buffer) : (hal.buffer, hal.buffer)
+  func.return %buffer : hal.buffer
+}
+
+// ----
+vm.module "module" core=0.0 bytes=420
+requirements:
+sections:
+  [0] strings type=0x0002 flags=0x0000 bytes=[112, +52)
+  [1] ref_types type=0x0003 flags=0x0000 bytes=[168, +16)
+  [2] signatures type=0x0004 flags=0x0000 bytes=[184, +52)
+  [3] callable_types type=0x0005 flags=0x0000 bytes=[240, +20)
+  [4] exports type=0x0007 flags=0x0000 bytes=[264, +12)
+  [5] functions type=0x0008 flags=0x0000 bytes=[280, +140)
+resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
+module_metadata:
+ref_types:
+  [0] ref<hal, buffer>
+callable_types:
+  [0] (ref<hal, buffer>) -> (ref<hal, buffer>)
+  [1] (ref<hal, buffer>, ref<hal, buffer>) -> ()
+imports:
+exports:
+  [0] @call_then_return_buffer -> function[1] : (ref<hal, buffer>) -> (ref<hal, buffer>)
+functions:
+  [0] callable[1] signature[1] bytecode=[0, +8) registers=(0, 2, 0) locals=(0, 0, 0) switch_targets=0
+    type = (ref<hal, buffer>, ref<hal, buffer>) -> ()
+    +0000  control.block
+    +0004  control.return
+  [1] callable[0] signature[0] bytecode=[8, +32) registers=(0, 3, 0) locals=(0, 0, 0) switch_targets=0 has_call
+    type = (ref<hal, buffer>) -> (ref<hal, buffer>)
+    +0000  control.block
+    +0004  ref.move dst_r8=2 src_r8=0
+    +0008  ref.retain dst_r8=0 src_r8=2
+    +0012  ref.retain dst_r8=1 src_r8=2
+    +0016  control.call target_kind_u8=0 target_ordinal_u16=0 direct_ref_move_mask_u16=3
+    +0024  ref.move dst_r8=0 src_r8=2
+    +0028  control.return
+
+// ====
+
+// RUN: emit vm-dis
+
+vm.target<core> @target
+
+func.def noinline target(@target) @wide_ref_identity(%r0: hal.buffer, %r1: hal.buffer, %r2: hal.buffer, %r3: hal.buffer, %r4: hal.buffer, %r5: hal.buffer, %r6: hal.buffer, %r7: hal.buffer, %r8: hal.buffer, %r9: hal.buffer, %r10: hal.buffer, %r11: hal.buffer, %r12: hal.buffer, %r13: hal.buffer, %r14: hal.buffer, %r15: hal.buffer, %r16: hal.buffer) -> (hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) {
+  func.return %r0, %r1, %r2, %r3, %r4, %r5, %r6, %r7, %r8, %r9, %r10, %r11, %r12, %r13, %r14, %r15, %r16 : hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer
+}
+
+func.def public target(@target) @call_wide_ref_identity(%r0: hal.buffer, %r1: hal.buffer, %r2: hal.buffer, %r3: hal.buffer, %r4: hal.buffer, %r5: hal.buffer, %r6: hal.buffer, %r7: hal.buffer, %r8: hal.buffer, %r9: hal.buffer, %r10: hal.buffer, %r11: hal.buffer, %r12: hal.buffer, %r13: hal.buffer, %r14: hal.buffer, %r15: hal.buffer, %r16: hal.buffer) -> (hal.buffer) {
+  %o0, %o1, %o2, %o3, %o4, %o5, %o6, %o7, %o8, %o9, %o10, %o11, %o12, %o13, %o14, %o15, %o16 = func.call @wide_ref_identity(%r0, %r1, %r2, %r3, %r4, %r5, %r6, %r7, %r8, %r9, %r10, %r11, %r12, %r13, %r14, %r15, %r16) : (hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer)
+  func.return %o16 : hal.buffer
+}
+
+// ----
+vm.module "module" core=0.0 bytes=620
+requirements:
+sections:
+  [0] strings type=0x0002 flags=0x0000 bytes=[112, +51)
+  [1] ref_types type=0x0003 flags=0x0000 bytes=[168, +16)
+  [2] signatures type=0x0004 flags=0x0000 bytes=[184, +244)
+  [3] callable_types type=0x0005 flags=0x0000 bytes=[432, +20)
+  [4] exports type=0x0007 flags=0x0000 bytes=[456, +12)
+  [5] functions type=0x0008 flags=0x0000 bytes=[472, +148)
+resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
+module_metadata:
+ref_types:
+  [0] ref<hal, buffer>
+callable_types:
+  [0] (ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>) -> (ref<hal, buffer>)
+  [1] (ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>) -> (ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>)
+imports:
+exports:
+  [0] @call_wide_ref_identity -> function[1] : (ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>) -> (ref<hal, buffer>)
+functions:
+  [0] callable[1] signature[1] bytecode=[0, +16) registers=(0, 17, 0) locals=(0, 0, 0) switch_targets=0
+    type = (ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>) -> (ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>)
+    +0000  control.block
+    +0004  ref.abi.argument.load.move dst_r8=16 slot_u16=0
+    +0008  ref.abi.result.store.move src_r8=16 slot_u16=0
+    +0012  control.return
+  [1] callable[0] signature[0] bytecode=[16, +32) registers=(0, 17, 0) locals=(0, 2, 0) switch_targets=0 has_call
+    type = (ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>, ref<hal, buffer>) -> (ref<hal, buffer>)
+    +0000  control.block
+    +0004  ref.abi.argument.load.move dst_r8=16 slot_u16=0
+    +0008  ref.stack.store.move src_r8=16 slot_u16=0
+    +0012  control.call target_kind_u8=0 target_ordinal_u16=0 direct_ref_move_mask_u16=65535
+    +0020  ref.stack.load.move dst_r8=16 slot_u16=1
+    +0024  ref.move dst_r8=0 src_r8=16
+    +0028  control.return
+
+// ====
+
+// RUN: emit vm-dis
+
+vm.target<core> @target
+
+func.def noinline target(@target) @wide_function_identity(%f0: func.ref<(i32) -> (i32)>, %f1: func.ref<(i32) -> (i32)>, %f2: func.ref<(i32) -> (i32)>, %f3: func.ref<(i32) -> (i32)>, %f4: func.ref<(i32) -> (i32)>, %f5: func.ref<(i32) -> (i32)>, %f6: func.ref<(i32) -> (i32)>, %f7: func.ref<(i32) -> (i32)>, %f8: func.ref<(i32) -> (i32)>, %f9: func.ref<(i32) -> (i32)>, %f10: func.ref<(i32) -> (i32)>, %f11: func.ref<(i32) -> (i32)>, %f12: func.ref<(i32) -> (i32)>, %f13: func.ref<(i32) -> (i32)>, %f14: func.ref<(i32) -> (i32)>, %f15: func.ref<(i32) -> (i32)>, %f16: func.ref<(i32) -> (i32)>) -> (func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>) {
+  func.return %f0, %f1, %f2, %f3, %f4, %f5, %f6, %f7, %f8, %f9, %f10, %f11, %f12, %f13, %f14, %f15, %f16 : func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>
+}
+
+func.def public target(@target) @call_wide_function_identity(%callback: func.ref<(i32) -> (i32)>) -> (func.ref<(i32) -> (i32)>) {
+  %o0, %o1, %o2, %o3, %o4, %o5, %o6, %o7, %o8, %o9, %o10, %o11, %o12, %o13, %o14, %o15, %o16 = func.call @wide_function_identity(%callback, %callback, %callback, %callback, %callback, %callback, %callback, %callback, %callback, %callback, %callback, %callback, %callback, %callback, %callback, %callback, %callback) : (func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>) -> (func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>, func.ref<(i32) -> (i32)>)
+  func.return %o16 : func.ref<(i32) -> (i32)>
+}
+
+// ----
+vm.module "module" core=0.0 bytes=604
+requirements:
+sections:
+  [0] strings type=0x0002 flags=0x0000 bytes=[96, +39)
+  [1] signatures type=0x0004 flags=0x0000 bytes=[136, +204)
+  [2] callable_types type=0x0005 flags=0x0000 bytes=[344, +28)
+  [3] exports type=0x0007 flags=0x0000 bytes=[376, +12)
+  [4] functions type=0x0008 flags=0x0000 bytes=[392, +212)
+resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
+module_metadata:
+ref_types:
+callable_types:
+  [0] (i32) -> (i32)
+  [1] (func<module:0>) -> (func<module:0>)
+  [2] (func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>) -> (func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>)
+imports:
+exports:
+  [0] @call_wide_function_identity -> function[1] : (func<module:0>) -> (func<module:0>)
+functions:
+  [0] callable[2] signature[2] bytecode=[0, +16) registers=(0, 0, 17) locals=(0, 0, 0) switch_targets=0
+    type = (func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>) -> (func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>, func<module:0>)
+    +0000  control.block
+    +0004  func.abi.argument.load dst_f8=16 slot_u16=0
+    +0008  func.abi.result.store src_f8=16 slot_u16=0
+    +0012  control.return
+  [1] callable[1] signature[1] bytecode=[16, +96) registers=(0, 0, 17) locals=(0, 0, 2) switch_targets=0 has_call
+    type = (func<module:0>) -> (func<module:0>)
+    +0000  control.block
+    +0004  func.copy dst_f8=16 src_f8=0
+    +0008  func.copy dst_f8=0 src_f8=16
+    +0012  func.copy dst_f8=1 src_f8=16
+    +0016  func.copy dst_f8=2 src_f8=16
+    +0020  func.copy dst_f8=3 src_f8=16
+    +0024  func.copy dst_f8=4 src_f8=16
+    +0028  func.copy dst_f8=5 src_f8=16
+    +0032  func.copy dst_f8=6 src_f8=16
+    +0036  func.copy dst_f8=7 src_f8=16
+    +0040  func.copy dst_f8=8 src_f8=16
+    +0044  func.copy dst_f8=9 src_f8=16
+    +0048  func.copy dst_f8=10 src_f8=16
+    +0052  func.copy dst_f8=11 src_f8=16
+    +0056  func.copy dst_f8=12 src_f8=16
+    +0060  func.copy dst_f8=13 src_f8=16
+    +0064  func.copy dst_f8=14 src_f8=16
+    +0068  func.copy dst_f8=15 src_f8=16
+    +0072  func.stack.store src_f8=16 local_ordinal_u16=0
+    +0076  control.call target_kind_u8=0 target_ordinal_u16=0 direct_ref_move_mask_u16=0
+    +0084  func.stack.load dst_f8=16 local_ordinal_u16=1
+    +0088  func.copy dst_f8=0 src_f8=16
+    +0092  control.return

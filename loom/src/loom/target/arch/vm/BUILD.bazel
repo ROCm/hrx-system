@@ -124,6 +124,7 @@ loom_cc_library(
         "//loom/src/loom/target:registers",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/vm",
     ],
 )
 
