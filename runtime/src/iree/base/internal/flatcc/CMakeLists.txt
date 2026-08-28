@@ -23,17 +23,6 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
-    debugging
-  HDRS
-    "debugging.h"
-  DEPS
-    ::dummy
-    iree::third_party::flatcc_runtime
-  PUBLIC
-)
-
-iree_cc_library(
-  NAME
     parsing
   HDRS
     "parsing.h"

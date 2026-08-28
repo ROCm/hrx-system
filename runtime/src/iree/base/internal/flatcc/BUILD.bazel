@@ -24,15 +24,6 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
-    name = "debugging",
-    hdrs = ["debugging.h"],
-    deps = [
-        ":dummy",
-        "//third_party:flatcc_runtime",
-    ],
-)
-
-iree_runtime_cc_library(
     name = "parsing",
     hdrs = ["parsing.h"],
     deps = [
