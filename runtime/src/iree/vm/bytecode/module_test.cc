@@ -351,6 +351,13 @@ TEST(VMBytecodeModuleTest,
   EXPECT_EQ(image_allocator.free_count, 1u);
 }
 
+TEST(VMBytecodeModuleTest, VerificationDoesNotRequireRefTypeProviders) {
+  std::vector<uint8_t> image = BuildBufferModuleImage();
+  IREE_ASSERT_OK(iree_vm_bytecode_module_verify(
+      iree_make_const_byte_span(image.data(), image.size()),
+      iree_allocator_system()));
+}
+
 TEST(VMBytecodeModuleTest, InspectionAndExecutionShareStructuralDiagnostics) {
   std::vector<uint8_t> image = BuildOwnershipModuleImage();
   image[0] ^= 0xFF;

@@ -16,6 +16,15 @@
 extern "C" {
 #endif  // __cplusplus
 
+// Verifies that |contents| is a structurally valid executable bytecode image.
+//
+// This validates instruction semantics without resolving the ref types named by
+// the image. |contents| must be nonempty and eight-byte aligned and is borrowed
+// only for the duration of the call. Functions with large control-flow graphs
+// may use |scratch_allocator| for temporary verification storage.
+IREE_API_EXPORT iree_status_t iree_vm_bytecode_module_verify(
+    iree_const_byte_span_t contents, iree_allocator_t scratch_allocator);
+
 // Verifies and creates one executable bytecode module.
 //
 // |environment| supplies the canonical ref types named by the image and is

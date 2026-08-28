@@ -227,6 +227,22 @@ static void iree_vm_bytecode_initialize_rodata_roots(
 
 static const iree_vm_module_vtable_t iree_vm_bytecode_module_vtable;
 
+IREE_API_EXPORT iree_status_t iree_vm_bytecode_module_verify(
+    iree_const_byte_span_t contents, iree_allocator_t scratch_allocator) {
+  if (!contents.data || contents.data_length == 0 ||
+      !iree_host_ptr_has_alignment(contents.data,
+                                   IREE_VM_BYTECODE_IMAGE_ALIGNMENT)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "bytecode image contents must be nonempty and eight-byte aligned");
+  }
+
+  iree_vm_bytecode_module_plan_t plan = {0};
+  IREE_RETURN_IF_ERROR(
+      iree_vm_bytecode_module_verify_structure(contents, &plan));
+  return iree_vm_bytecode_module_verify_executable(&plan, scratch_allocator);
+}
+
 IREE_API_EXPORT iree_status_t iree_vm_bytecode_module_create(
     iree_vm_environment_t* environment, iree_string_view_t module_name,
     iree_vm_bytecode_module_storage_t storage, iree_allocator_t host_allocator,

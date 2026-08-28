@@ -9,7 +9,6 @@
 #include "iree/base/byte_sequence.h"
 #include "iree/vm/bytecode/module.h"
 #include "iree/vm/bytecode/tooling/dump.h"
-#include "iree/vm/environment.h"
 #include "loom/target/emit/vm/module_emitter.h"
 #include "loom/tools/loom-check/diagnostics.h"
 
@@ -63,21 +62,6 @@ static iree_status_t loom_vm_loom_check_append_dump(void* user_data,
                                            text);
 }
 
-static iree_status_t loom_vm_loom_check_verify_module(
-    iree_const_byte_span_t contents, iree_allocator_t host_allocator) {
-  iree_vm_environment_t* environment = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_vm_environment_allocate(host_allocator, &environment));
-  iree_vm_module_t* module = NULL;
-  iree_status_t status = iree_vm_bytecode_module_create(
-      environment, IREE_SV("module"),
-      (iree_vm_bytecode_module_storage_t){contents, iree_allocator_null()},
-      host_allocator, &module);
-  iree_vm_module_release(module);
-  iree_vm_environment_free(environment);
-  return status;
-}
-
 static iree_status_t loom_vm_loom_check_emit_provider_execute(
     const loom_check_emit_provider_t* provider,
     const loom_check_emit_provider_request_t* request) {
@@ -115,8 +99,8 @@ static iree_status_t loom_vm_loom_check_emit_provider_execute(
   const iree_const_byte_span_t module_contents = iree_make_const_byte_span(
       contiguous_contents.data, contiguous_contents.data_length);
   if (iree_status_is_ok(status) && contents != NULL) {
-    status = loom_vm_loom_check_verify_module(module_contents,
-                                              request->host_allocator);
+    status = iree_vm_bytecode_module_verify(module_contents,
+                                            request->host_allocator);
   }
   if (iree_status_is_ok(status) && contents != NULL) {
     status = iree_vm_bytecode_module_dump(
