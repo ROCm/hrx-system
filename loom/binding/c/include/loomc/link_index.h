@@ -29,6 +29,15 @@
 /// also retains its workspace, so the caller may release its module and
 /// workspace references after adding the provider.
 ///
+/// INPUT providers jointly own requester definitions and may contribute output
+/// roots. LIBRARY providers contribute exported resolution candidates. A
+/// public library definition selected only as a dependency becomes private in
+/// the linked product; provider visibility never implicitly re-exports it.
+///
+/// Index construction scans provider metadata once. Later selective operations
+/// share the frozen index and materialize only the selected roots, facets, and
+/// reachable dependencies instead of rebuilding the complete provider catalog.
+///
 /// @par Example
 /// Retain a frozen library index when handing it to an asynchronous worker:
 ///
@@ -478,9 +487,9 @@ LOOMC_API_EXPORT bool loomc_link_index_symbol_at(
 
 /// Looks up the first global symbol by name in canonical enumeration order.
 ///
-/// INPUT providers enumerate before LIBRARY providers and ties use source-slot
-/// order. This order does not resolve duplicate definitions; linkage validates
-/// uniqueness.
+/// INPUT providers enumerate before LIBRARY providers. Ties preserve
+/// provider-slot order. This order does not resolve duplicate definitions;
+/// linkage validates uniqueness.
 ///
 /// @param link_index Index to inspect.
 /// @param name Symbol name with or without a leading `@`.
