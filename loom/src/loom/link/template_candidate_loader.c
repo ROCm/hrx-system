@@ -58,15 +58,6 @@ struct loom_link_template_candidate_loader_t {
   } modules;
 };
 
-static bool loom_link_template_provider_membership_contains(
-    loom_link_template_provider_membership_t membership,
-    iree_host_size_t symbol_ordinal) {
-  IREE_ASSERT(symbol_ordinal < membership.symbol_count);
-  return membership.words != NULL &&
-         (membership.words[symbol_ordinal >> 6] &
-          (UINT64_C(1) << (symbol_ordinal & 63u))) != 0;
-}
-
 static iree_status_t loom_link_template_candidate_initialize_bytecode_module(
     loom_link_template_candidate_loader_t* loader,
     loom_link_template_candidate_module_t* cache) {
@@ -276,7 +267,6 @@ void loom_link_template_candidate_loader_free(
 iree_status_t loom_link_template_candidate_loader_load(
     loom_link_template_candidate_loader_t* loader, const loom_link_plan_t* plan,
     loom_link_plan_materialization_t* materialization,
-    loom_link_template_provider_membership_t selected_providers,
     iree_arena_allocator_t* arena,
     loom_template_provider_slice_t* out_candidates) {
   IREE_ASSERT_ARGUMENT(loader);
@@ -286,9 +276,6 @@ iree_status_t loom_link_template_candidate_loader_load(
   IREE_ASSERT_ARGUMENT(arena);
   IREE_ASSERT_ARGUMENT(out_candidates);
   *out_candidates = loom_template_provider_slice_empty();
-  IREE_ASSERT(selected_providers.symbol_count ==
-              loom_link_module_index_symbol_count(loader->index));
-
   iree_host_size_t candidate_capacity = 0;
   IREE_RETURN_IF_ERROR(
       loom_link_template_candidate_capacity(loader, plan, &candidate_capacity));
@@ -320,8 +307,7 @@ iree_status_t loom_link_template_candidate_loader_load(
       const loom_link_module_index_symbol_t* provider =
           loom_link_module_index_symbol_at(loader->index, provider_ordinal);
       IREE_ASSERT(provider != NULL);
-      if (!loom_link_template_provider_membership_contains(selected_providers,
-                                                           provider_ordinal)) {
+      if (!loom_link_plan_contains_symbol(plan, provider_ordinal)) {
         const loom_link_module_index_module_t* source_module =
             loom_link_module_index_symbol_module(loader->index, provider);
         IREE_ASSERT(source_module != NULL);

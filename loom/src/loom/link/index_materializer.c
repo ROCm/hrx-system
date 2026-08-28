@@ -94,15 +94,6 @@ static void loom_link_index_provider_roots_append(
   roots->ordinals.values[roots->ordinals.count++] = symbol_ordinal;
 }
 
-static loom_link_template_provider_membership_t
-loom_link_index_provider_root_membership(
-    const loom_link_index_provider_roots_t* roots) {
-  return (loom_link_template_provider_membership_t){
-      .words = roots->membership.values,
-      .symbol_count = roots->membership.symbol_count,
-  };
-}
-
 static void loom_link_index_apply_provider_roots(
     const loom_link_index_provider_roots_t* roots,
     loom_link_plan_options_t* options) {
@@ -129,9 +120,7 @@ static iree_status_t loom_link_index_query_candidates(
   loom_template_provider_slice_t external_candidates =
       loom_template_provider_slice_empty();
   IREE_RETURN_IF_ERROR(loom_link_template_candidate_loader_load(
-      candidate_loader, plan, materialization,
-      loom_link_index_provider_root_membership(roots), arena,
-      &external_candidates));
+      candidate_loader, plan, materialization, arena, &external_candidates));
 
   loom_symbol_fact_table_t fact_table;
   loom_symbol_fact_table_initialize(&fact_table, arena);
