@@ -34,12 +34,6 @@ iree_runtime_cc_library(
             "//conditions:default": [],
         }) +
         iree_select({
-            "//runtime/config/hal:driver_hip": [
-                "//runtime/src/iree/hal/drivers/hip/registration",
-            ],
-            "//conditions:default": [],
-        }) +
-        iree_select({
             "//runtime/config/hal:driver_local_sync": [
                 "//runtime/src/iree/hal/drivers/local_sync/registration",
             ],

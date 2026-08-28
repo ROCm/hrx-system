@@ -123,15 +123,7 @@ filegroup(
 )
 
 filegroup(
-    name = "empty_hip_api_headers",
-)
-
-filegroup(
     name = "empty_hsa_runtime_headers",
-)
-
-filegroup(
-    name = "empty_rccl_headers",
 )
 
 filegroup(
@@ -160,29 +152,6 @@ alias(
             "//runtime/config/hal:driver_amdgpu",
         ): "@hsa_runtime_headers//:hsa_runtime_headers",
         "//conditions:default": ":empty_hsa_runtime_headers",
-    }),
-    tags = ["manual"],
-    visibility = [
-        ":loom_users",
-        ":runtime_users",
-    ],
-)
-
-alias(
-    name = "hip_api_headers",
-    actual = select({
-        "//runtime/config/hal:driver_hip": "@hip_api_headers//:headers",
-        "//conditions:default": ":empty_hip_api_headers",
-    }),
-    tags = ["manual"],
-    visibility = [":runtime_users"],
-)
-
-alias(
-    name = "rccl_headers",
-    actual = select({
-        "//runtime/src/iree/hal/drivers/hip:rccl_enabled": "@rccl//:headers",
-        "//conditions:default": ":empty_rccl_headers",
     }),
     tags = ["manual"],
     visibility = [

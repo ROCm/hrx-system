@@ -392,10 +392,6 @@ loom_module(
         )
 
         self.assertEqual(
-            functions._convert_select_condition("//runtime/config/hal:driver_hip"),
-            "IREE_HAL_DRIVER_HIP",
-        )
-        self.assertEqual(
             functions._convert_select_condition(
                 "//build_tools/bazel:cc_compiler_clang"
             ),

@@ -58,7 +58,6 @@ _COMPILER_CMAKE_OPTIONS = {
 _RUNTIME_HAL_DRIVER_CMAKE_OPTIONS = {
     "//runtime/config/hal:driver_amdgpu": "IREE_HAL_DRIVER_AMDGPU",
     "//runtime/config/hal:driver_cuda": "IREE_HAL_DRIVER_CUDA",
-    "//runtime/config/hal:driver_hip": "IREE_HAL_DRIVER_HIP",
     "//runtime/config/hal:driver_local_sync": "IREE_HAL_DRIVER_LOCAL_SYNC",
     "//runtime/config/hal:driver_local_task": "IREE_HAL_DRIVER_LOCAL_TASK",
     "//runtime/config/hal:driver_null": "IREE_HAL_DRIVER_NULL",
@@ -67,7 +66,6 @@ _RUNTIME_HAL_DRIVER_CMAKE_OPTIONS = {
     "//runtime/config/hal:executable_loader_embedded_elf": "IREE_HAL_EXECUTABLE_LOADER_EMBEDDED_ELF",
     "//runtime/config/hal:executable_loader_system_library": "IREE_HAL_EXECUTABLE_LOADER_SYSTEM_LIBRARY",
     "//runtime/config/hal:executable_loader_vmvx_module": "IREE_HAL_EXECUTABLE_LOADER_VMVX_MODULE",
-    "//runtime/src/iree/hal/drivers/hip:rccl_enabled": "IREE_HAL_DRIVER_HIP_RCCL",
 }
 
 _LOOM_CONFIG_CMAKE_OPTIONS = {
