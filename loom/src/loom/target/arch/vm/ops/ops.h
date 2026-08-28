@@ -21,7 +21,9 @@ extern "C" {
 
 enum {
   LOOM_OP_VM_TARGET = LOOM_OP_KIND(LOOM_DIALECT_VM, 0),
-  LOOM_OP_VM_COUNT_ = 1,
+  LOOM_OP_VM_GLOBAL = LOOM_OP_KIND(LOOM_DIALECT_VM, 1),
+  LOOM_OP_VM_RODATA = LOOM_OP_KIND(LOOM_DIALECT_VM, 2),
+  LOOM_OP_VM_COUNT_ = 3,
 };
 
 // VM target row selected by vm.target.
@@ -136,6 +138,36 @@ iree_status_t loom_vm_target_build(
     loom_location_id_t location,
     loom_op_t** out_op);
 iree_status_t loom_target_record_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_VM_GLOBAL: Assign a generic value global its physical Core VM bank ordinal. The referenced definition determines the value, ref, or function bank and whether the ordinal belongs to its immutable prefix or mutable suffix.
+// vm.global @state ordinal(3)
+LOOM_DEFINE_ISA(loom_vm_global_isa, LOOM_OP_VM_GLOBAL)
+LOOM_DEFINE_ATTR_SYMBOL(loom_vm_global_source, 0)
+LOOM_DEFINE_ATTR_I64(loom_vm_global_ordinal, 1)
+iree_status_t loom_vm_global_build(
+    loom_builder_t* builder,
+    loom_symbol_ref_t source,
+    int64_t ordinal,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_vm_global_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_VM_RODATA: Assign a generic read-only data definition its physical Core VM rodata ordinal. The payload remains owned by the referenced source symbol and is not copied into this record.
+// vm.rodata @lookup_table ordinal(0)
+LOOM_DEFINE_ISA(loom_vm_rodata_isa, LOOM_OP_VM_RODATA)
+LOOM_DEFINE_ATTR_SYMBOL(loom_vm_rodata_source, 0)
+LOOM_DEFINE_ATTR_I64(loom_vm_rodata_ordinal, 1)
+iree_status_t loom_vm_rodata_build(
+    loom_builder_t* builder,
+    loom_symbol_ref_t source,
+    int64_t ordinal,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_vm_rodata_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 

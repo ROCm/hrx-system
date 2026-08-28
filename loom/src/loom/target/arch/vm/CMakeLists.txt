@@ -50,6 +50,7 @@ loom_generated_cc_library(
     loom::py::loom::gen::ops::c_tables_vm_generator
   SRCS
     "ops/registry.c"
+    "ops/resources.c"
     "ops/target.c"
   GENERATED_SRC_FLAGS
     "--builders"
@@ -67,6 +68,7 @@ loom_generated_cc_library(
     ::facts
     ::target_records
     iree::base
+    loom::error::emitter
     loom::error::error_defs
     loom::ir
     loom::ops::op_defs
@@ -149,14 +151,17 @@ loom_cc_library(
     "lower/constants.h"
     "lower/control.h"
     "lower/lower.h"
+    "lower/resources.h"
     "lower/types.h"
   SRCS
     "lower/constants.c"
     "lower/control.c"
     "lower/lower.c"
+    "lower/resources.c"
   DEPS
     ::abi_layout
     ::descriptors
+    ::ops
     iree::base
     iree::base::internal
     iree::vm::bytecode::wire
@@ -166,11 +171,13 @@ loom_cc_library(
     loom::ir
     loom::ops::cfg
     loom::ops::func
+    loom::ops::global
     loom::ops::index
     loom::ops::low
     loom::ops::op_defs
     loom::ops::scalar
     loom::ops::type_registry
+    loom::target::low_legality
     loom::target::registers
   PUBLIC
 )
@@ -260,6 +267,7 @@ loom_check_test_suite(
   NAME
     loom_check_file_test
   SRCS
+    "test/ops/resources.loom-test"
     "test/source_low/abi_materialization.loom-test"
     "test/source_low/abi_types.loom-test"
     "test/source_low/control_switch.loom-test"
@@ -269,6 +277,7 @@ loom_check_test_suite(
     "test/source_low/function_contracts.loom-test"
     "test/source_low/function_values.loom-test"
     "test/source_low/low_verification.loom-test"
+    "test/source_low/module_resources.loom-test"
     "test/source_low/program_failure.loom-test"
     "test/source_low/selector_assembly.loom-test"
   DATA

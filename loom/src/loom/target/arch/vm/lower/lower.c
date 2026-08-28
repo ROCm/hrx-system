@@ -20,6 +20,7 @@
 #include "loom/target/arch/vm/descriptors.h"
 #include "loom/target/arch/vm/lower/constants.h"
 #include "loom/target/arch/vm/lower/control.h"
+#include "loom/target/arch/vm/lower/resources.h"
 #include "loom/target/arch/vm/lower/types.h"
 
 #define LOOM_VM_SOURCE_LOWERING_LIMITS(max_operand_count, max_result_count) \
@@ -249,6 +250,9 @@ static iree_status_t loom_vm_select_op(void* user_data,
         loom_vm_constant_descriptor_ordinal(constant.bits), NULL);
     return iree_ok_status();
   }
+  IREE_RETURN_IF_ERROR(
+      loom_vm_module_resource_try_select_op(context, source_op, out_plan));
+  if (!loom_low_lower_plan_is_empty(*out_plan)) return iree_ok_status();
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(kVmSourceLoweringRows); ++i) {
     const loom_vm_source_lowering_row_t* row = &kVmSourceLoweringRows[i];
     if (loom_vm_source_lowering_row_matches(module, source_op, row)) {
@@ -284,6 +288,11 @@ static iree_status_t loom_vm_emit_op(void* user_data,
                                      const loom_op_t* source_op,
                                      loom_low_lower_plan_t plan) {
   (void)user_data;
+  bool resource_handled = false;
+  IREE_RETURN_IF_ERROR(loom_vm_module_resource_emit_op(context, source_op, plan,
+                                                       &resource_handled));
+  if (resource_handled) return iree_ok_status();
+
   const loom_low_descriptor_set_t* descriptor_set =
       loom_low_lower_context_descriptor_set(context);
   const loom_low_descriptor_t* descriptor =
@@ -348,6 +357,14 @@ static iree_status_t loom_vm_emit_op(void* user_data,
   return iree_ok_status();
 }
 
+static iree_status_t loom_vm_finalize_module(
+    void* user_data, loom_module_t* module,
+    loom_low_lower_module_state_t* module_state,
+    iree_arena_allocator_t* scratch_arena) {
+  (void)user_data;
+  return loom_vm_module_resources_finalize(module, module_state, scratch_arena);
+}
+
 static const loom_low_lower_policy_t kVmCoreLowLowerPolicy = {
     .name = IREE_SVL("vm-core-low-lower"),
     .flags = LOOM_LOW_LOWER_POLICY_FLAG_MODULE_IMPORTS,
@@ -364,6 +381,7 @@ static const loom_low_lower_policy_t kVmCoreLowLowerPolicy = {
         },
     .select_op = {.fn = loom_vm_select_op, .user_data = NULL},
     .emit_op = {.fn = loom_vm_emit_op, .user_data = NULL},
+    .finalize_module = {.fn = loom_vm_finalize_module, .user_data = NULL},
 };
 
 void loom_vm_low_lower_policy_registry_initialize(

@@ -21,6 +21,7 @@ from loom.target.arch.vm.projection import (
     VM_CORE_DESCRIPTOR_SET,
     VM_CORE_INSTRUCTIONS,
     VM_INSTRUCTION_PROJECTIONS,
+    VM_MODULE_RESOURCES,
     VM_PACKET_DESCRIPTORS,
     VM_SOURCE_LOWERINGS,
     VM_STRUCTURAL_INSTRUCTIONS,
@@ -209,6 +210,23 @@ def test_source_rows_reference_projected_descriptors() -> None:
     assert all(row.descriptor_key in descriptor_keys for row in VM_SOURCE_LOWERINGS)
 
 
+def test_module_resources_reference_projected_descriptors() -> None:
+    descriptor_keys = {descriptor.key for descriptor in VM_CORE_DESCRIPTOR_SET.descriptors}
+    assert len(VM_MODULE_RESOURCES) == 7
+    assert len({resource.kind for resource in VM_MODULE_RESOURCES}) == len(VM_MODULE_RESOURCES)
+    for resource in VM_MODULE_RESOURCES:
+        assert resource.load_descriptor_key in descriptor_keys
+        if resource.store_descriptor_key is not None:
+            assert resource.store_descriptor_key in descriptor_keys
+        if resource.store_preserve_descriptor_key is not None:
+            assert resource.store_preserve_descriptor_key in descriptor_keys
+    preserving_resources = (resource for resource in VM_MODULE_RESOURCES if resource.store_preserve_descriptor_key is not None)
+    assert {resource.kind.value for resource in preserving_resources} == {
+        "REF_IMMUTABLE",
+        "REF_MUTABLE",
+    }
+
+
 def test_same_type_projection_derives_source_signatures() -> None:
     add_rows = tuple(row for row in VM_SOURCE_LOWERINGS if row.source_op is scalar_arithmetic.scalar_addi)
     assert tuple((row.operand_types, row.result_types, row.descriptor_key) for row in add_rows) == (
@@ -256,6 +274,10 @@ def test_comparison_projection_copies_the_verified_predicate() -> None:
 
 def test_lowering_rows_are_data_only() -> None:
     rows = generate_lowering_rows()
+    assert "LOOM_VM_MODULE_RESOURCE_ROW(VALUE_IMMUTABLE" in rows
+    assert "LOOM_VM_MODULE_RESOURCE_ROW(RODATA" in rows
+    assert "VM_CORE_DESCRIPTOR_REF_BUFFER_RODATA_LOAD, UINT16_MAX, UINT16_MAX" in rows
+    assert "VM_CORE_DESCRIPTOR_REF_REF_RETAIN" in rows
     assert "LOOM_VM_SOURCE_LOWERING_LIMITS(\n    2, 1)" in rows
     assert "LOOM_OP_INDEX_MUL" in rows
     assert "VM_CORE_DESCRIPTOR_REF_INTEGER_MUL_I64" in rows

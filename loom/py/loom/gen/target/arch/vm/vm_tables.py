@@ -25,6 +25,7 @@ from loom.ir import BufferType, ScalarType, Type
 from loom.target.arch.vm.projection import (
     VM_CORE_DESCRIPTOR_SET,
     VM_INSTRUCTION_PROJECTIONS,
+    VM_MODULE_RESOURCES,
     VM_PACKET_DESCRIPTORS,
     VM_SOURCE_LOWERINGS,
 )
@@ -46,6 +47,12 @@ def _source_type_key(source_type: Type) -> str:
     raise ValueError(f"unsupported concrete VM source lowering type {source_type!r}")
 
 
+def _descriptor_ref_name(descriptor_key: str | None) -> str:
+    if descriptor_key is None:
+        return "UINT16_MAX"
+    return descriptor_ref_constant_name(VM_CORE_DESCRIPTOR_SET, descriptor_key)
+
+
 def generate_lowering_rows() -> str:
     """Returns the X-macro source-op signature projection."""
 
@@ -56,9 +63,23 @@ def generate_lowering_rows() -> str:
         "",
         *line_comment_header("//", generator="loom.gen.target.arch.vm.vm_tables"),
         "",
-        "LOOM_VM_SOURCE_LOWERING_LIMITS(",
-        f"    {maximum_operand_count}, {maximum_result_count})",
+        "#if defined(LOOM_VM_MODULE_RESOURCE_ROW)",
     ]
+    for resource in VM_MODULE_RESOURCES:
+        arguments = (
+            resource.kind.value,
+            _descriptor_ref_name(resource.load_descriptor_key),
+            _descriptor_ref_name(resource.store_descriptor_key),
+            _descriptor_ref_name(resource.store_preserve_descriptor_key),
+        )
+        lines.append("LOOM_VM_MODULE_RESOURCE_ROW(" + ", ".join(arguments) + ")")
+    lines.extend(
+        [
+            "#elif defined(LOOM_VM_SOURCE_LOWERING_ROW)",
+            "LOOM_VM_SOURCE_LOWERING_LIMITS(",
+            f"    {maximum_operand_count}, {maximum_result_count})",
+        ]
+    )
     for row in VM_SOURCE_LOWERINGS:
         operand_types = [_source_type_key(source_type) for source_type in row.operand_types]
         result_types = [_source_type_key(source_type) for source_type in row.result_types]
@@ -77,6 +98,7 @@ def generate_lowering_rows() -> str:
         ]
         lines.append("LOOM_VM_SOURCE_LOWERING_ROW(")
         lines.append("    " + ", ".join(arguments) + ")")
+    lines.append("#endif  // VM lowering projection")
     return "\n".join(lines) + "\n"
 
 

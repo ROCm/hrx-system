@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import dataclasses
+import enum
 import re
 from pathlib import Path
 
@@ -303,6 +304,28 @@ class VmSourceOpcode:
             raise ValueError(
                 "VM source selector requires one fixed name or source attribute"
             )
+
+
+class VmModuleResourceKind(enum.Enum):
+    """Physical VM module-resource kind projected into C."""
+
+    VALUE_IMMUTABLE = "VALUE_IMMUTABLE"
+    VALUE_MUTABLE = "VALUE_MUTABLE"
+    REF_IMMUTABLE = "REF_IMMUTABLE"
+    REF_MUTABLE = "REF_MUTABLE"
+    FUNCTION_IMMUTABLE = "FUNCTION_IMMUTABLE"
+    FUNCTION_MUTABLE = "FUNCTION_MUTABLE"
+    RODATA = "RODATA"
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class VmModuleResource:
+    """Physical resource kind and the ISA instructions that access it."""
+
+    kind: VmModuleResourceKind
+    load_descriptor_key: str
+    store_descriptor_key: str | None
+    store_preserve_descriptor_key: str | None
 
 
 def _instruction(mnemonic: str) -> Instruction:
@@ -954,6 +977,120 @@ VM_CORE_DESCRIPTOR_SET = DescriptorSet(
 _DESCRIPTORS_BY_KEY = {
     descriptor.key: descriptor for descriptor in VM_CORE_DESCRIPTOR_SET.descriptors
 }
+
+
+def _require_module_resource_descriptor(
+    descriptor_key: str,
+    *,
+    operand_count: int,
+    result_count: int,
+    ordinal_immediate: bool,
+) -> None:
+    descriptor = _DESCRIPTORS_BY_KEY.get(descriptor_key)
+    if descriptor is None:
+        raise ValueError(
+            f"VM module resource names unknown descriptor {descriptor_key!r}"
+        )
+    actual_operand_count = sum(
+        operand.role is OperandRole.OPERAND for operand in descriptor.operands
+    )
+    actual_result_count = sum(
+        operand.role is OperandRole.RESULT for operand in descriptor.operands
+    )
+    if (
+        actual_operand_count != operand_count
+        or actual_result_count != result_count
+        or len(descriptor.immediates) != (1 if ordinal_immediate else 0)
+        or (
+            ordinal_immediate
+            and descriptor.immediates[0].kind is not ImmediateKind.ORDINAL
+        )
+    ):
+        immediate_contract = "one ordinal" if ordinal_immediate else "no immediates"
+        raise ValueError(
+            f"{descriptor_key}: VM module resource descriptor must have "
+            f"{operand_count} operands, {result_count} results, and "
+            f"{immediate_contract}"
+        )
+
+
+def _module_resource(
+    kind: VmModuleResourceKind,
+    load_descriptor_key: str,
+    store_descriptor_key: str | None,
+    store_preserve_descriptor_key: str | None = None,
+) -> VmModuleResource:
+    _require_module_resource_descriptor(
+        load_descriptor_key,
+        operand_count=0,
+        result_count=1,
+        ordinal_immediate=True,
+    )
+    if store_descriptor_key is not None:
+        _require_module_resource_descriptor(
+            store_descriptor_key,
+            operand_count=1,
+            result_count=0,
+            ordinal_immediate=True,
+        )
+    if store_preserve_descriptor_key is not None:
+        if store_descriptor_key is None:
+            raise ValueError(
+                f"{kind.value}: store preservation requires a store descriptor"
+            )
+        _require_module_resource_descriptor(
+            store_preserve_descriptor_key,
+            operand_count=1,
+            result_count=1,
+            ordinal_immediate=False,
+        )
+    return VmModuleResource(
+        kind,
+        load_descriptor_key,
+        store_descriptor_key,
+        store_preserve_descriptor_key,
+    )
+
+
+VM_MODULE_RESOURCES = (
+    _module_resource(
+        VmModuleResourceKind.VALUE_IMMUTABLE,
+        "vm.global.value.immutable.load",
+        "vm.global.value.immutable.store",
+    ),
+    _module_resource(
+        VmModuleResourceKind.VALUE_MUTABLE,
+        "vm.global.value.mutable.load",
+        "vm.global.value.mutable.store",
+    ),
+    _module_resource(
+        VmModuleResourceKind.REF_IMMUTABLE,
+        "vm.global.ref.immutable.load.borrow",
+        "vm.global.ref.immutable.store.move",
+        "vm.ref.retain",
+    ),
+    _module_resource(
+        VmModuleResourceKind.REF_MUTABLE,
+        "vm.global.ref.mutable.load.retain",
+        "vm.global.ref.mutable.store.move",
+        "vm.ref.retain",
+    ),
+    _module_resource(
+        VmModuleResourceKind.FUNCTION_IMMUTABLE,
+        "vm.global.func.immutable.load",
+        "vm.global.func.immutable.store",
+    ),
+    _module_resource(
+        VmModuleResourceKind.FUNCTION_MUTABLE,
+        "vm.global.func.mutable.load",
+        "vm.global.func.mutable.store",
+    ),
+    _module_resource(
+        VmModuleResourceKind.RODATA,
+        "vm.buffer.rodata.load",
+        None,
+    ),
+)
 
 
 def _require_fixed_source_shape(

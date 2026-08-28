@@ -11,6 +11,7 @@
 #include "loom/target/arch/vm/descriptors.h"
 #include "loom/target/arch/vm/low_verify.h"
 #include "loom/target/arch/vm/lower/lower.h"
+#include "loom/target/arch/vm/lower/resources.h"
 #include "loom/target/arch/vm/ops/registry.h"
 #include "loom/target/arch/vm/pass_registry.h"
 #include "loom/target/low_descriptor_registry.h"
@@ -26,6 +27,11 @@ static void loom_vm_low_descriptor_registry_initialize(
 
 static const loom_low_verify_provider_t* const kLoomVmLowVerifyProviders[] = {
     &loom_vm_low_verify_provider,
+};
+
+static const loom_target_low_legality_provider_t* const
+    kLoomVmLowLegalityProviders[] = {
+        &loom_vm_module_resource_low_legality_provider,
 };
 
 static iree_status_t loom_vm_provider_build_string_attr(
@@ -93,6 +99,11 @@ const loom_target_provider_t loom_vm_target_provider = {
         loom_vm_low_descriptor_registry_initialize,
     .initialize_low_lower_policy_registry =
         loom_vm_low_lower_policy_registry_initialize,
+    .low_legality_provider_list =
+        {
+            .count = IREE_ARRAYSIZE(kLoomVmLowLegalityProviders),
+            .values = kLoomVmLowLegalityProviders,
+        },
     .low_verify_provider_list =
         {
             .count = IREE_ARRAYSIZE(kLoomVmLowVerifyProviders),
