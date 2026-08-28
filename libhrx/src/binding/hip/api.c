@@ -2533,6 +2533,9 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
         *value = physical_identity->pci.domain;
       }
       break;
+    case hipDeviceAttributeUnifiedAddressing:
+      *value = 1;
+      break;
     case hipDeviceAttributeManagedMemory:
       *value = 1;
       break;
