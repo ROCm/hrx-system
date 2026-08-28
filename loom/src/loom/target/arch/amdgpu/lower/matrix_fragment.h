@@ -24,7 +24,8 @@ enum {
   // Logical rank of a one-block matrix-fragment source or destination view.
   LOOM_AMDGPU_FRAGMENT_UNBLOCKED_VIEW_RANK = 2,
   // Logical rank of a blocked matrix-fragment source or destination view.
-  LOOM_AMDGPU_FRAGMENT_BLOCKED_VIEW_RANK = 3,
+  LOOM_AMDGPU_FRAGMENT_BLOCKED_VIEW_RANK =
+      LOOM_AMDGPU_FRAGMENT_MEMORY_VIEW_RANK_CAPACITY,
   // Physical byte width of one matrix-fragment register.
   LOOM_AMDGPU_FRAGMENT_REGISTER_BYTE_COUNT = 4,
   // Number of packed 16-bit elements carried by one fragment register.

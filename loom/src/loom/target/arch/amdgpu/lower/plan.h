@@ -1390,6 +1390,11 @@ typedef enum loom_amdgpu_fragment_memory_packetization_e {
   LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_PACKED_B16 = 2,
 } loom_amdgpu_fragment_memory_packetization_t;
 
+enum {
+  // Maximum physical rank of a blocked matrix-fragment view.
+  LOOM_AMDGPU_FRAGMENT_MEMORY_VIEW_RANK_CAPACITY = 3,
+};
+
 typedef enum loom_amdgpu_fragment_memory_epilogue_strategy_e {
   // No special result-fragment store epilogue strategy is selected.
   LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_NONE = 0,
@@ -1437,8 +1442,6 @@ typedef struct loom_amdgpu_fragment_memory_address_layout_t {
 } loom_amdgpu_fragment_memory_address_layout_t;
 
 typedef struct loom_amdgpu_fragment_memory_runtime_axis_t {
-  // Physical view axis whose byte stride is materialized at runtime.
-  uint8_t view_axis;
   // Power-of-two divisor applied to the subgroup lane ID.
   uint16_t lane_divisor;
   // Optional power-of-two modulus applied after division; zero omits it.
@@ -1471,11 +1474,10 @@ typedef struct loom_amdgpu_fragment_memory_plan_t {
   loom_value_id_t fp8_load_scale_source;
   // Exact compile-time byte stride for each view axis, or zero when dynamic.
   uint32_t static_axis_byte_strides[LOOM_ENCODING_ADDRESS_LAYOUT_MAX_RANK];
-  // Materialized runtime axes used by lane, register, or packed coordinates.
+  // Materialized runtime axes indexed by physical view axis. Entries whose
+  // byte stride kind is UNAVAILABLE have no runtime contribution.
   loom_amdgpu_fragment_memory_runtime_axis_t
-      runtime_axes[LOOM_MATRIX_FRAGMENT_AXIS_COUNT];
-  // Number of populated runtime axis plans.
-  uint8_t runtime_axis_count;
+      runtime_axes[LOOM_AMDGPU_FRAGMENT_MEMORY_VIEW_RANK_CAPACITY];
   // Rank of the typed view.
   uint8_t view_rank;
   // Number of target fragment coordinate registers in the selected layout.

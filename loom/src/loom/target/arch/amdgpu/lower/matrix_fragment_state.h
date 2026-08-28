@@ -53,8 +53,6 @@ typedef struct loom_amdgpu_fragment_memory_address_product_key_t {
 } loom_amdgpu_fragment_memory_address_product_key_t;
 
 typedef struct loom_amdgpu_fragment_memory_runtime_axis_base_key_t {
-  // Physical view axis represented by this runtime product.
-  uint8_t view_axis;
   // Power-of-two divisor applied to the subgroup lane ID.
   uint16_t lane_divisor;
   // Optional power-of-two modulus applied after division; zero omits it.
@@ -80,11 +78,10 @@ typedef struct loom_amdgpu_fragment_memory_address_base_key_t {
   // Source products used for dynamic byte-address terms.
   loom_amdgpu_fragment_memory_address_product_key_t
       dynamic_terms[LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_CAPACITY];
-  // Number of runtime physical axes in the key.
-  uint8_t runtime_axis_count;
-  // Runtime physical-axis products contributing to the shared base.
+  // Runtime products indexed by physical view axis. Empty products have no
+  // runtime contribution.
   loom_amdgpu_fragment_memory_runtime_axis_base_key_t
-      runtime_axes[LOOM_MATRIX_FRAGMENT_AXIS_COUNT];
+      runtime_axes[LOOM_AMDGPU_FRAGMENT_MEMORY_VIEW_RANK_CAPACITY];
 } loom_amdgpu_fragment_memory_address_base_key_t;
 
 typedef struct loom_amdgpu_fragment_memory_address_base_cache_t {
@@ -96,7 +93,7 @@ typedef struct loom_amdgpu_fragment_memory_address_base_cache_t {
   loom_amdgpu_fragment_memory_address_accumulator_t accumulator;
   // Cached byte-stride product for each runtime physical axis.
   loom_amdgpu_fragment_memory_address_accumulator_t
-      runtime_axis_byte_strides[LOOM_MATRIX_FRAGMENT_AXIS_COUNT];
+      runtime_axis_byte_strides[LOOM_AMDGPU_FRAGMENT_MEMORY_VIEW_RANK_CAPACITY];
 } loom_amdgpu_fragment_memory_address_base_cache_t;
 
 typedef struct loom_amdgpu_matrix_fragment_state_t {

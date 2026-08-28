@@ -37,10 +37,10 @@ typedef struct loom_amdgpu_fragment_memory_address_state_t {
   // Whether cursor storage is distinct from cached bases and stride products.
   bool cursor_storage_is_distinct;
   // Runtime coordinate currently accumulated into cursor for each axis.
-  uint32_t current_coordinates[LOOM_MATRIX_FRAGMENT_AXIS_COUNT];
+  uint32_t current_coordinates[LOOM_AMDGPU_FRAGMENT_MEMORY_VIEW_RANK_CAPACITY];
   // Materialized stride and packet-step state for each runtime axis.
   loom_amdgpu_fragment_memory_runtime_axis_address_state_t
-      runtime_axes[LOOM_MATRIX_FRAGMENT_AXIS_COUNT];
+      runtime_axes[LOOM_AMDGPU_FRAGMENT_MEMORY_VIEW_RANK_CAPACITY];
 } loom_amdgpu_fragment_memory_address_state_t;
 
 // Returns the exact byte offset contributed by one subgroup lane ID.

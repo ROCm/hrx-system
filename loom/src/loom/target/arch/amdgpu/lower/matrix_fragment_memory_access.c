@@ -89,9 +89,9 @@ static void loom_amdgpu_fragment_memory_add_runtime_packet_source_interval(
 
   loom_value_facts_t runtime_packet_offset = loom_value_facts_exact_i64(0);
   bool has_runtime_packet_offset = false;
-  for (uint8_t i = 0; i < plan->runtime_axis_count; ++i) {
+  for (uint8_t view_axis = 0; view_axis < plan->view_rank; ++view_axis) {
     const loom_amdgpu_fragment_memory_runtime_axis_t* runtime_axis =
-        &plan->runtime_axes[i];
+        &plan->runtime_axes[view_axis];
     const uint64_t packet_coordinate =
         (uint64_t)runtime_axis->register_coordinates[packet->register_index] +
         (uint64_t)element_index *
