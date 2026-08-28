@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from loom.gen.support.c import c_string_arg, c_string_classifier_lines
 from loom.gen.support.generated_file import line_comment_header
-from loom.scalar_type import SCALAR_TYPE_SPELLINGS, ScalarTypeKind
+from loom.scalar_type import SCALAR_TYPE_NONE, SCALAR_TYPE_SPELLINGS, ScalarTypeKind
 
 _COPYRIGHT = """\
 // Copyright 2026 The IREE Authors
@@ -52,6 +52,7 @@ def generate_scalar_type_table_inc() -> str:
     for kind, _ in cases:
         lines.append(f'static_assert({_c_constant(kind)} == {kind.value}, "{_c_constant(kind)} ordinal does not match Python");')
     lines.append(f'static_assert(LOOM_SCALAR_TYPE_COUNT_ == {len(cases)}, "scalar type count does not match Python");')
+    lines.append(f'static_assert(LOOM_SCALAR_TYPE_NONE == {SCALAR_TYPE_NONE}, "scalar type none sentinel does not match Python");')
     lines.append("")
 
     lines.append("static const char* const loom_scalar_type_names[LOOM_SCALAR_TYPE_COUNT_] = {")
@@ -64,7 +65,7 @@ def generate_scalar_type_table_inc() -> str:
         c_string_classifier_lines(
             tuple((spelling, _c_constant(kind)) for kind, spelling in cases),
             input_name="name",
-            unmatched_result="LOOM_SCALAR_TYPE_COUNT_",
+            unmatched_result="LOOM_SCALAR_TYPE_NONE",
             indent="  ",
         )
     )

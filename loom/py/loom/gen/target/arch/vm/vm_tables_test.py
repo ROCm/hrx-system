@@ -6,6 +6,8 @@
 
 """Tests for the Loom-facing Core VM table projection."""
 
+from loom.dialect.cfg import defs as cfg_defs
+from loom.dialect.func import defs as func_defs
 from loom.dialect.scalar import arithmetic as scalar_arithmetic
 from loom.dialect.scalar import comparison as scalar_comparison
 from loom.gen.target.arch.vm.vm_tables import (
@@ -13,7 +15,7 @@ from loom.gen.target.arch.vm.vm_tables import (
     generate_lowering_rows,
     generate_verification_rows,
 )
-from loom.scalar_type import ScalarTypeKind
+from loom.ir import BUFFER_TYPE, I1, I32, I64
 from loom.target.arch.vm.projection import (
     VM_ABI_INSTRUCTIONS,
     VM_CORE_DESCRIPTOR_SET,
@@ -45,7 +47,7 @@ from loom.target.low_descriptors import (
 
 
 def test_descriptors_preserve_instruction_identity() -> None:
-    assert len(VM_INSTRUCTION_PROJECTIONS) == 170
+    assert len(VM_INSTRUCTION_PROJECTIONS) == 171
     assert len(VM_CORE_DESCRIPTOR_SET.descriptors) == len(VM_PACKET_DESCRIPTORS) + 1
     for descriptor, projection in zip(
         VM_PACKET_DESCRIPTORS,
@@ -68,8 +70,8 @@ def test_descriptors_preserve_instruction_identity() -> None:
 
 def test_projection_partitions_every_core_instruction() -> None:
     assert len(VM_CORE_INSTRUCTIONS) == 183
-    assert len(VM_INSTRUCTION_PROJECTIONS) == 170
-    assert len(VM_STRUCTURAL_INSTRUCTIONS) == 13
+    assert len(VM_INSTRUCTION_PROJECTIONS) == 171
+    assert len(VM_STRUCTURAL_INSTRUCTIONS) == 12
     assert len(VM_ABI_INSTRUCTIONS) == 7
     partitioned_ids = {
         *(projection.instruction.entity_id for projection in VM_INSTRUCTION_PROJECTIONS),
@@ -131,6 +133,25 @@ def test_control_assert_reads_diagnostic_but_is_not_dead_removable() -> None:
     assert control_assert.flags == ()
 
 
+def test_control_fail_is_a_terminal_packet() -> None:
+    descriptors = {descriptor.key: descriptor for descriptor in VM_CORE_DESCRIPTOR_SET.descriptors}
+    control_fail = descriptors["vm.control.fail"]
+    assert control_fail.carrier is DescriptorCarrier.PACKET
+    assert control_fail.effects == (
+        Effect(EffectKind.CONTROL, flags=(EffectFlag.ORDERED,)),
+        Effect(
+            EffectKind.READ,
+            memory_space=MemorySpace.GENERIC,
+            flags=(EffectFlag.DEPENDENCY,),
+        ),
+    )
+    assert control_fail.flags == (
+        DescriptorFlag.SIDE_EFFECTING,
+        DescriptorFlag.TERMINATOR,
+        DescriptorFlag.NO_RETURN,
+    )
+
+
 def test_state_effects_preserve_memory_and_ownership_ordering() -> None:
     descriptors = {descriptor.key: descriptor for descriptor in VM_CORE_DESCRIPTOR_SET.descriptors}
     buffer_load = descriptors["vm.buffer.load"]
@@ -179,13 +200,13 @@ def test_same_type_projection_derives_source_signatures() -> None:
     add_rows = tuple(row for row in VM_SOURCE_LOWERINGS if row.source_op is scalar_arithmetic.scalar_addi)
     assert tuple((row.operand_types, row.result_types, row.descriptor_key) for row in add_rows) == (
         (
-            (ScalarTypeKind.I32, ScalarTypeKind.I32),
-            (ScalarTypeKind.I32,),
+            (I32, I32),
+            (I32,),
             "vm.integer.add.i32",
         ),
         (
-            (ScalarTypeKind.I64, ScalarTypeKind.I64),
-            (ScalarTypeKind.I64,),
+            (I64, I64),
+            (I64,),
             "vm.integer.add.i64",
         ),
     )
@@ -204,15 +225,15 @@ def test_comparison_projection_copies_the_verified_predicate() -> None:
         for row in compare_rows
     ) == (
         (
-            (ScalarTypeKind.I32, ScalarTypeKind.I32),
-            (ScalarTypeKind.I1,),
+            (I32, I32),
+            (I1,),
             "vm.integer.compare.i32",
             0,
             0,
         ),
         (
-            (ScalarTypeKind.I64, ScalarTypeKind.I64),
-            (ScalarTypeKind.I1,),
+            (I64, I64),
+            (I1,),
             "vm.integer.compare.i64",
             0,
             0,
@@ -227,6 +248,24 @@ def test_lowering_rows_are_data_only() -> None:
     assert "VM_CORE_DESCRIPTOR_REF_INTEGER_MUL_I64" in rows
     assert ("LOOM_OP_SCALAR_CMPI, VM_CORE_DESCRIPTOR_REF_INTEGER_COMPARE_I32, 0, 0, 0") in rows
     assert "LOOM_OP_SCALAR_ADDI, VM_CORE_DESCRIPTOR_REF_INTEGER_ADD_I32, 2, 1" not in rows
+    assert "LOOM_OP_CFG_ASSERT, VM_CORE_DESCRIPTOR_REF_CONTROL_ASSERT" in rows
+    assert "LOOM_VM_SOURCE_TYPE_KEY(LOOM_TYPE_BUFFER, LOOM_SCALAR_TYPE_NONE)" in rows
+    assert "LOOM_OP_FUNC_FAIL, VM_CORE_DESCRIPTOR_REF_CONTROL_FAIL, 0, 0, 0" in rows
+
+
+def test_program_failure_source_rows_preserve_public_types_and_status() -> None:
+    assert_rows = tuple(row for row in VM_SOURCE_LOWERINGS if row.source_op is cfg_defs.cfg_assert)
+    assert tuple((row.operand_types, row.result_types) for row in assert_rows) == (((I1, BUFFER_TYPE), ()),)
+    fail_rows = tuple(row for row in VM_SOURCE_LOWERINGS if row.source_op is func_defs.func_fail)
+    assert tuple(
+        (
+            row.operand_types,
+            row.result_types,
+            row.selector_immediate_ordinal,
+            row.selector_source_attr_ordinal,
+        )
+        for row in fail_rows
+    ) == (((BUFFER_TYPE,), (), 0, 0),)
 
 
 def test_encoding_rows_are_data_only() -> None:
@@ -248,6 +287,6 @@ def test_packet_constraints_preserve_isa_relationships() -> None:
 
 def test_verification_rows_are_data_only() -> None:
     rows = generate_verification_rows()
-    assert "LOOM_VM_PACKET_CONSTRAINT_LIMITS(\n    170, 26,\n    5, 16)" in rows
-    assert rows.count("LOOM_VM_PACKET_CONSTRAINT_RANGE_ROW(") == 170
+    assert "LOOM_VM_PACKET_CONSTRAINT_LIMITS(\n    171, 26,\n    5, 16)" in rows
+    assert rows.count("LOOM_VM_PACKET_CONSTRAINT_RANGE_ROW(") == 171
     assert rows.count("LOOM_VM_PACKET_CONSTRAINT_ROW(") == 26

@@ -23,6 +23,10 @@ bool loom_vm_call_abi_try_classify_logical_type(
     *out_bank = LOOM_VM_CALL_ABI_BANK_VALUE;
     return true;
   }
+  if (loom_type_is_buffer(type)) {
+    *out_bank = LOOM_VM_CALL_ABI_BANK_REF;
+    return true;
+  }
   if (loom_func_ref_type_isa(type)) {
     if (!loom_type_is_function(loom_func_ref_resolve_signature(module, type))) {
       return false;

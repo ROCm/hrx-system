@@ -11,6 +11,7 @@ from __future__ import annotations
 from enum import IntEnum, unique
 
 __all__ = [
+    "SCALAR_TYPE_NONE",
     "SCALAR_TYPE_SPELLINGS",
     "ScalarTypeKind",
     "parse_scalar_type_kind",
@@ -41,6 +42,11 @@ class ScalarTypeKind(IntEnum):
     BF16 = 10
     F32 = 11
     F64 = 12
+
+
+# Explicit absence of a scalar type. This matches ``LOOM_SCALAR_TYPE_NONE``
+# and remains outside all concrete scalar type tables.
+SCALAR_TYPE_NONE = len(ScalarTypeKind)
 
 
 # Canonical assembly spellings indexed by ScalarTypeKind ordinal. C name and

@@ -21,6 +21,7 @@ from loom.gen.support.files import write_text_file
 from loom.gen.support.generated_file import line_comment_header
 from loom.gen.target.low.c_spelling import descriptor_ref_constant_name
 from loom.gen.target.low.low_descriptors import write_descriptor_set_to_paths
+from loom.ir import BufferType, ScalarType, Type
 from loom.target.arch.vm.projection import (
     VM_CORE_DESCRIPTOR_SET,
     VM_INSTRUCTION_PROJECTIONS,
@@ -35,8 +36,14 @@ from loom.target.arch.vm.verification import (
 )
 
 
-def _scalar_type_name(scalar_type) -> str:
-    return f"LOOM_SCALAR_TYPE_{scalar_type.name}"
+def _source_type_key(source_type: Type) -> str:
+    """Returns one compact exact source-type key for generated C rows."""
+
+    if isinstance(source_type, ScalarType):
+        return f"LOOM_VM_SOURCE_TYPE_KEY(LOOM_TYPE_SCALAR, LOOM_SCALAR_TYPE_{source_type.kind.name})"
+    if isinstance(source_type, BufferType):
+        return "LOOM_VM_SOURCE_TYPE_KEY(LOOM_TYPE_BUFFER, LOOM_SCALAR_TYPE_NONE)"
+    raise ValueError(f"unsupported concrete VM source lowering type {source_type!r}")
 
 
 def generate_lowering_rows() -> str:
@@ -53,10 +60,11 @@ def generate_lowering_rows() -> str:
         f"    {maximum_operand_count}, {maximum_result_count})",
     ]
     for row in VM_SOURCE_LOWERINGS:
-        operand_types = [_scalar_type_name(scalar_type) for scalar_type in row.operand_types]
-        result_types = [_scalar_type_name(scalar_type) for scalar_type in row.result_types]
-        operand_types.extend(["LOOM_SCALAR_TYPE_INDEX"] * (maximum_operand_count - len(operand_types)))
-        result_types.extend(["LOOM_SCALAR_TYPE_INDEX"] * (maximum_result_count - len(result_types)))
+        operand_types = [_source_type_key(source_type) for source_type in row.operand_types]
+        result_types = [_source_type_key(source_type) for source_type in row.result_types]
+        unused_type = "LOOM_VM_SOURCE_TYPE_KEY(LOOM_TYPE_NONE, LOOM_SCALAR_TYPE_NONE)"
+        operand_types.extend([unused_type] * (maximum_operand_count - len(operand_types)))
+        result_types.extend([unused_type] * (maximum_result_count - len(result_types)))
         descriptor_name = descriptor_ref_constant_name(VM_CORE_DESCRIPTOR_SET, row.descriptor_key)
         arguments = [
             c_enum_name(row.source_op),

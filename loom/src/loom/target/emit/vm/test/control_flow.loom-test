@@ -212,3 +212,40 @@ functions:
     +0060  control.block
     +0064  value.copy dst_v8=0 src_v8=4
     +0068  control.return
+
+// ====
+
+// RUN: emit vm-dis
+
+vm.target<core> @target
+
+func.def public target(@target) @assert_then_fail(%condition: i1, %message: buffer) {
+  cfg.assert %condition, %message : buffer
+  func.fail invalid_argument, %message : buffer
+}
+
+// ----
+vm.module "module" core=0.0 bytes=304
+requirements:
+sections:
+  [0] strings type=0x0002 flags=0x0000 bytes=[112, +44)
+  [1] ref_types type=0x0003 flags=0x0000 bytes=[160, +16)
+  [2] signatures type=0x0004 flags=0x0000 bytes=[176, +28)
+  [3] callable_types type=0x0005 flags=0x0000 bytes=[208, +12)
+  [4] exports type=0x0007 flags=0x0000 bytes=[224, +12)
+  [5] functions type=0x0008 flags=0x0000 bytes=[240, +64)
+resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
+module_metadata:
+ref_types:
+  [0] ref<vm, buffer>
+callable_types:
+  [0] (i8, ref<vm, buffer>) -> ()
+imports:
+exports:
+  [0] @assert_then_fail -> function[0] : (i8, ref<vm, buffer>) -> ()
+functions:
+  [0] callable[0] signature[0] bytecode=[0, +12) registers=(1, 1, 0) locals=(0, 0, 0) switch_targets=0
+    type = (i8, ref<vm, buffer>) -> ()
+    +0000  control.block
+    +0004  control.assert condition_v8=0 message_r8_nullable=0
+    +0008  control.fail status_u8=3 message_r8_nullable=0

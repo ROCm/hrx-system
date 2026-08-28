@@ -2076,7 +2076,8 @@ static const loom_op_t* loom_verify_block_last_live_op(
 static bool loom_verify_op_is_terminator(loom_verify_state_t* state,
                                          const loom_op_t* op) {
   const loom_op_vtable_t* vtable = loom_verify_lookup_vtable(state, op->kind);
-  return vtable && iree_any_bit_set(vtable->traits, LOOM_TRAIT_TERMINATOR);
+  return vtable && iree_any_bit_set(loom_op_effective_traits(state->module, op),
+                                    LOOM_TRAIT_TERMINATOR);
 }
 
 static bool loom_verify_region_terminator_matches(

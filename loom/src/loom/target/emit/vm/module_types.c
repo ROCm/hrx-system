@@ -17,9 +17,9 @@
 #include "loom/target/registers.h"
 
 typedef struct loom_vm_module_ref_type_build_t {
-  // Borrowed namespace preceding the final dot in the registered type name.
+  // Borrowed VM ref-type namespace.
   iree_string_view_t namespace_name;
-  // Borrowed local name following the final dot in the registered type name.
+  // Borrowed VM ref-type name within |namespace_name|.
   iree_string_view_t type_name;
   // Canonical flat ref-type ordinal assigned after sorting.
   uint16_t ordinal;
@@ -132,6 +132,8 @@ static iree_status_t loom_vm_module_type_capacities_count(
             "VM callable candidate count exceeds host size");
       }
       ++out_capacities->callable_count;
+    } else if (loom_type_is_buffer(type)) {
+      ++out_capacities->ref_type_count;
     } else if (loom_type_is_dialect(type)) {
       const loom_type_descriptor_t* descriptor =
           loom_type_registry_resolve(layout->module, type);
@@ -287,25 +289,30 @@ static iree_status_t loom_vm_module_ref_type_find_or_add(
     loom_vm_module_type_build_t* build, loom_type_t type,
     loom_vm_module_ref_type_build_t** out_ref_type) {
   *out_ref_type = NULL;
-  const loom_type_descriptor_t* descriptor =
-      loom_type_registry_resolve(build->module, type);
-  if (descriptor == NULL ||
-      descriptor->semantics.semantic != LOOM_TYPE_SEMANTIC_MANAGED_REFERENCE) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "VM ref field has no managed-reference type");
+  iree_string_view_t namespace_name;
+  iree_string_view_t type_name;
+  if (loom_type_is_buffer(type)) {
+    namespace_name = IREE_SV("vm");
+    type_name = IREE_SV("buffer");
+  } else {
+    const loom_type_descriptor_t* descriptor =
+        loom_type_registry_resolve(build->module, type);
+    if (descriptor == NULL || descriptor->semantics.semantic !=
+                                  LOOM_TYPE_SEMANTIC_MANAGED_REFERENCE) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "VM ref field has no managed-reference type");
+    }
+    const iree_string_view_t full_name = loom_bstring_view(descriptor->name);
+    const iree_host_size_t dot = iree_string_view_find_last_of(
+        full_name, IREE_SV("."), IREE_STRING_VIEW_NPOS);
+    if (dot == IREE_STRING_VIEW_NPOS || dot == 0 || dot + 1 == full_name.size) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "VM ref type names must have nonempty namespace and local parts");
+    }
+    namespace_name = iree_string_view_substr(full_name, 0, dot);
+    type_name = iree_string_view_substr(full_name, dot + 1, IREE_HOST_SIZE_MAX);
   }
-  const iree_string_view_t full_name = loom_bstring_view(descriptor->name);
-  const iree_host_size_t dot = iree_string_view_find_last_of(
-      full_name, IREE_SV("."), IREE_STRING_VIEW_NPOS);
-  if (dot == IREE_STRING_VIEW_NPOS || dot == 0 || dot + 1 == full_name.size) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "VM ref type names must have nonempty namespace and local parts");
-  }
-  const iree_string_view_t namespace_name =
-      iree_string_view_substr(full_name, 0, dot);
-  const iree_string_view_t type_name =
-      iree_string_view_substr(full_name, dot + 1, IREE_HOST_SIZE_MAX);
   for (iree_host_size_t i = 0; i < build->ref_type_count; ++i) {
     loom_vm_module_ref_type_build_t* existing = &build->ref_type_storage[i];
     if (iree_string_view_equal(existing->namespace_name, namespace_name) &&

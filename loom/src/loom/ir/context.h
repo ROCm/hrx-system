@@ -363,8 +363,8 @@ iree_string_view_t loom_op_name(const loom_module_t* module,
 loom_op_semantics_t loom_op_semantics(const loom_module_t* module,
                                       const loom_op_t* op);
 
-// Returns true if |op| has the given trait bit(s) set in its vtable.
-// Returns false if no vtable is registered for the op's kind.
+// Returns true if |op| has any of the given effective trait bits set.
+// Instance-dependent traits are cached on the op when it is built or mutated.
 bool loom_op_has_trait(const loom_module_t* module, const loom_op_t* op,
                        loom_trait_flags_t trait);
 

@@ -440,6 +440,8 @@ typedef uint16_t loom_low_descriptor_flags_t;
 #define LOOM_LOW_DESCRIPTOR_FLAG_VARIADIC_OPERANDS ((uint16_t)1u << 6)
 // Descriptor results carry a distinct semantic identity per execution.
 #define LOOM_LOW_DESCRIPTOR_FLAG_UNIQUE_IDENTITY ((uint16_t)1u << 7)
+// Descriptor terminates the current control path without returning values.
+#define LOOM_LOW_DESCRIPTOR_FLAG_NO_RETURN ((uint16_t)1u << 8)
 
 // Target-neutral semantic classes attached to generated low descriptors.
 // Multiple classes may be present when a packet contributes to several

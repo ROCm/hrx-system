@@ -1693,6 +1693,8 @@ static iree_status_t loom_low_verify_descriptor_effect_contract(
       descriptor->flags, LOOM_LOW_DESCRIPTOR_FLAG_SIDE_EFFECTING);
   const bool is_terminator =
       iree_all_bits_set(descriptor->flags, LOOM_LOW_DESCRIPTOR_FLAG_TERMINATOR);
+  const bool is_no_return =
+      iree_all_bits_set(descriptor->flags, LOOM_LOW_DESCRIPTOR_FLAG_NO_RETURN);
   const bool is_dead_removable = iree_all_bits_set(
       descriptor->flags, LOOM_LOW_DESCRIPTOR_FLAG_DEAD_REMOVABLE);
   if (is_side_effecting && is_dead_removable) {
@@ -1705,6 +1707,12 @@ static iree_status_t loom_low_verify_descriptor_effect_contract(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "low descriptor %" PRIu32
                             " is a terminator but is not side-effecting",
+                            descriptor_index);
+  }
+  if (is_no_return && !is_terminator) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "low descriptor %" PRIu32
+                            " is no-return but is not a terminator",
                             descriptor_index);
   }
   if (descriptor->effect_count == 0 && is_side_effecting) {
@@ -2269,7 +2277,8 @@ static iree_status_t loom_low_verify_descriptor(
           LOOM_LOW_DESCRIPTOR_FLAG_PSEUDO | LOOM_LOW_DESCRIPTOR_FLAG_BARRIER |
           LOOM_LOW_DESCRIPTOR_FLAG_EARLY_CLOBBER |
           LOOM_LOW_DESCRIPTOR_FLAG_VARIADIC_OPERANDS |
-          LOOM_LOW_DESCRIPTOR_FLAG_UNIQUE_IDENTITY,
+          LOOM_LOW_DESCRIPTOR_FLAG_UNIQUE_IDENTITY |
+          LOOM_LOW_DESCRIPTOR_FLAG_NO_RETURN,
       "descriptor", descriptor_index));
   iree_string_view_t descriptor_key = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(loom_low_verify_non_empty_required_string(

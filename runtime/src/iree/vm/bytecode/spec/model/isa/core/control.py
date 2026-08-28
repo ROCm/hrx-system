@@ -878,7 +878,7 @@ CONTROL_FAIL = core_instruction(
             "The message is diagnostic-only borrowed state. Unwind releases all "
             "live owned refs through their private no-status teardown paths.",
         ),
-        assembly=("control.fail invalid_argument, %r2",),
+        assembly=("control.fail %r2, invalid_argument",),
         pseudocode=(
             "fail(status_from_architecture_selector(status_u8),\n"
             "     optional_message(message_r8_nullable));"

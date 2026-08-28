@@ -217,8 +217,9 @@ static iree_status_t loom_verify_region(
           status = loom_verify_emit_op_after_terminator(state, current, vtable,
                                                         terminator_op);
           if (!iree_status_is_ok(status)) break;
-        } else if (vtable &&
-                   iree_any_bit_set(vtable->traits, LOOM_TRAIT_TERMINATOR)) {
+        } else if (vtable && iree_any_bit_set(loom_op_effective_traits(
+                                                  state->module, current),
+                                              LOOM_TRAIT_TERMINATOR)) {
           terminator_op = current;
         }
       }

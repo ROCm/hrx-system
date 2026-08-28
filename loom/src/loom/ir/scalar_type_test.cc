@@ -20,7 +20,7 @@ TEST(ScalarTypeTest, RoundTripNames) {
     const char* name = loom_scalar_type_name(scalar_type);
     ASSERT_NE(name, nullptr) << i;
 
-    loom_scalar_type_t parsed = LOOM_SCALAR_TYPE_COUNT_;
+    loom_scalar_type_t parsed = LOOM_SCALAR_TYPE_NONE;
     ASSERT_TRUE(loom_scalar_type_parse(iree_make_cstring_view(name), &parsed))
         << name;
     EXPECT_EQ(parsed, scalar_type) << name;

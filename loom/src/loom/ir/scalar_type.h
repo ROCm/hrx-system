@@ -51,7 +51,11 @@ enum loom_scalar_type_e {
   LOOM_SCALAR_TYPE_F32 = 11,
   // IEEE 754 binary64 double-precision.
   LOOM_SCALAR_TYPE_F64 = 12,
+  // Number of concrete scalar types and first invalid scalar type ordinal.
   LOOM_SCALAR_TYPE_COUNT_,
+  // Explicit absence of a scalar type. This aliases the invalid count ordinal
+  // so it remains outside all concrete scalar type tables and sets.
+  LOOM_SCALAR_TYPE_NONE = LOOM_SCALAR_TYPE_COUNT_,
 };
 // Raw scalar type storage. Parsed and bytecode-loaded types may carry invalid
 // ordinals until validation reports them.

@@ -73,12 +73,14 @@ from model.isa.validation import (
 )
 from model.schema import ANY_BITS, SCALAR_ENCODINGS, EntityReference, FieldReference
 
+from loom.dialect.cfg import defs as cfg_defs
+from loom.dialect.func import defs as func_defs
 from loom.dialect.index import defs as index_defs
 from loom.dialect.scalar import arithmetic as scalar_arithmetic
 from loom.dialect.scalar import comparison as scalar_comparison
 from loom.dialect.scalar import conversion as scalar_conversion
 from loom.dsl import ATTR_TYPE_ENUM, Op
-from loom.ir import ScalarType
+from loom.ir import BUFFER_TYPE, I1, ScalarType, Type
 from loom.scalar_type import ScalarTypeKind
 from loom.target.low_descriptors import (
     AsmForm,
@@ -217,15 +219,18 @@ _MEMORY_SPACE_BY_STATE_RESOURCE = {
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class VmInstructionProjection:
-    """One physical sequential instruction visible to target-Low."""
+    """One fixed-size packet instruction visible to target-Low."""
 
     instruction: Instruction
 
     def __post_init__(self) -> None:
-        if self.instruction.control_flow is not ControlFlow.SEQUENTIAL:
+        if self.instruction.control_flow not in (
+            ControlFlow.SEQUENTIAL,
+            ControlFlow.FAIL,
+        ):
             raise ValueError(
-                f"{self.instruction.mnemonic}: ordinary Low projection requires "
-                "sequential control flow"
+                f"{self.instruction.mnemonic}: ordinary Low packet projection "
+                "requires sequential or failing control flow"
             )
         if self.instruction.suspension is not Suspension.NEVER:
             raise ValueError(
@@ -246,8 +251,8 @@ class VmSourceLowering:
     """One generated concrete source signature selecting a VM descriptor."""
 
     source_op: Op
-    operand_types: tuple[ScalarTypeKind, ...]
-    result_types: tuple[ScalarTypeKind, ...]
+    operand_types: tuple[Type, ...]
+    result_types: tuple[Type, ...]
     descriptor_key: str
     selector_immediate_ordinal: int | None = None
     selector_source_attr_ordinal: int | None = None
@@ -307,16 +312,17 @@ def _instruction(mnemonic: str) -> Instruction:
 VM_INSTRUCTION_PROJECTIONS = tuple(
     VmInstructionProjection(instruction)
     for instruction in sorted(_CORE_INSTRUCTIONS, key=lambda value: value.opcode)
-    if instruction.control_flow is ControlFlow.SEQUENTIAL
+    if instruction.control_flow in (ControlFlow.SEQUENTIAL, ControlFlow.FAIL)
 )
 
 # Control-flow records are emitted from Low structural operations because they
-# own successor edges rather than ordinary descriptor operands. Together with
-# the sequential descriptor projection they partition the complete Core ISA.
+# own successor edges rather than ordinary descriptor operands. Fixed-size fail
+# packets have no successor and remain ordinary descriptors. Together the two
+# projections partition the complete Core ISA.
 VM_STRUCTURAL_INSTRUCTIONS = tuple(
     instruction
     for instruction in VM_CORE_INSTRUCTIONS
-    if instruction.control_flow is not ControlFlow.SEQUENTIAL
+    if instruction.control_flow not in (ControlFlow.SEQUENTIAL, ControlFlow.FAIL)
 )
 VM_ABI_INSTRUCTIONS = tuple(
     instruction
@@ -640,9 +646,8 @@ def _instruction_classes(instruction: Instruction) -> tuple[InstructionClass, ..
 def _enum_domains() -> tuple[EnumDomain, ...]:
     selector_table_ids = {
         table_id
-        for instruction in _CORE_INSTRUCTIONS
-        if instruction.control_flow is ControlFlow.SEQUENTIAL
-        for field in instruction.fields
+        for projection in VM_INSTRUCTION_PROJECTIONS
+        for field in projection.instruction.fields
         if (table_id := _selector_table_id(field)) is not None
     }
     domains = [
@@ -657,9 +662,8 @@ def _enum_domains() -> tuple[EnumDomain, ...]:
     ]
     allowed_value_sets = {
         tuple(int(value) for value in rule_use.arguments[0])
-        for instruction in _CORE_INSTRUCTIONS
-        if instruction.control_flow is ControlFlow.SEQUENTIAL
-        for field in instruction.fields
+        for projection in VM_INSTRUCTION_PROJECTIONS
+        for field in projection.instruction.fields
         if (rule_use := _rule_use(field, ALLOWED_VALUES.entity_id)) is not None
     }
     domains.extend(
@@ -743,7 +747,14 @@ def _descriptor(projection: VmInstructionProjection) -> Descriptor:
         for effect in effects
     )
     has_results = any(operand.role is OperandRole.RESULT for operand in operands)
-    if side_effecting:
+    is_terminator = instruction.control_flow is not ControlFlow.SEQUENTIAL
+    if is_terminator:
+        flags = (
+            DescriptorFlag.SIDE_EFFECTING,
+            DescriptorFlag.TERMINATOR,
+            DescriptorFlag.NO_RETURN,
+        )
+    elif side_effecting:
         flags = (DescriptorFlag.SIDE_EFFECTING,)
     elif has_results:
         flags = (DescriptorFlag.DEAD_REMOVABLE,)
@@ -1039,25 +1050,23 @@ def _require_descriptor_shape(
 
 def _require_concrete_source_types(
     source_op: Op,
-    operand_types: tuple[ScalarTypeKind, ...],
-    result_types: tuple[ScalarTypeKind, ...],
+    operand_types: tuple[Type, ...],
+    result_types: tuple[Type, ...],
 ) -> None:
     fields = (*source_op.operands, *source_op.results)
-    scalar_types = (*operand_types, *result_types)
-    for field, scalar_type in zip(fields, scalar_types, strict=True):
-        if not type_satisfies_constraint(
-            ScalarType(scalar_type), field.type_constraint
-        ):
+    source_types = (*operand_types, *result_types)
+    for field, source_type in zip(fields, source_types, strict=True):
+        if not type_satisfies_constraint(source_type, field.type_constraint):
             raise ValueError(
-                f"{source_op.name}: {scalar_type.name} does not satisfy the "
+                f"{source_op.name}: {source_type!r} does not satisfy the "
                 f"{field.name} type constraint"
             )
 
 
 def _source_lowering(
     source_op: Op,
-    operand_types: tuple[ScalarTypeKind, ...],
-    result_types: tuple[ScalarTypeKind, ...],
+    operand_types: tuple[Type, ...],
+    result_types: tuple[Type, ...],
     source_opcode: str | VmSourceOpcode,
 ) -> VmSourceLowering:
     if isinstance(source_opcode, str):
@@ -1112,8 +1121,8 @@ def _same_type_binary(
     return tuple(
         _source_lowering(
             source_op,
-            (scalar_type, scalar_type),
-            (scalar_type,),
+            (ScalarType(scalar_type), ScalarType(scalar_type)),
+            (ScalarType(scalar_type),),
             descriptor_key,
         )
         for scalar_type, descriptor_key in descriptor_by_type.items()
@@ -1141,8 +1150,8 @@ def _integer_comparison(
     return tuple(
         _source_lowering(
             source_op,
-            (scalar_type, scalar_type),
-            (ScalarTypeKind.I1,),
+            (ScalarType(scalar_type), ScalarType(scalar_type)),
+            (I1,),
             VmSourceOpcode(
                 descriptor_key,
                 "integer.compare",
@@ -1167,8 +1176,8 @@ def _cast(
     return tuple(
         _source_lowering(
             source_op,
-            (source_type,),
-            (result_type,),
+            (ScalarType(source_type),),
+            (ScalarType(result_type),),
             source_opcode,
         )
         for (
@@ -1179,6 +1188,22 @@ def _cast(
 
 
 VM_SOURCE_LOWERINGS = (
+    _source_lowering(
+        cfg_defs.cfg_assert,
+        (I1, BUFFER_TYPE),
+        (),
+        "vm.control.assert",
+    ),
+    _source_lowering(
+        func_defs.func_fail,
+        (BUFFER_TYPE,),
+        (),
+        VmSourceOpcode(
+            "vm.control.fail",
+            "control.status",
+            selector_source_attr="status",
+        ),
+    ),
     *_same_type_binary(
         index_defs.index_add,
         {

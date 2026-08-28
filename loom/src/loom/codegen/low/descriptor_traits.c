@@ -67,6 +67,9 @@ loom_trait_flags_t loom_low_descriptor_effective_traits(
                        LOOM_LOW_DESCRIPTOR_FLAG_TERMINATOR)) {
     traits |= LOOM_TRAIT_TERMINATOR;
   }
+  if (iree_any_bit_set(descriptor->flags, LOOM_LOW_DESCRIPTOR_FLAG_NO_RETURN)) {
+    traits |= LOOM_TRAIT_NO_RETURN;
+  }
   if (iree_any_bit_set(descriptor->flags,
                        LOOM_LOW_DESCRIPTOR_FLAG_UNIQUE_IDENTITY)) {
     traits |= LOOM_TRAIT_UNIQUE_IDENTITY;

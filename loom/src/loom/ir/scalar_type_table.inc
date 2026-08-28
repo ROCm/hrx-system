@@ -22,6 +22,7 @@ static_assert(LOOM_SCALAR_TYPE_BF16 == 10, "LOOM_SCALAR_TYPE_BF16 ordinal does n
 static_assert(LOOM_SCALAR_TYPE_F32 == 11, "LOOM_SCALAR_TYPE_F32 ordinal does not match Python");
 static_assert(LOOM_SCALAR_TYPE_F64 == 12, "LOOM_SCALAR_TYPE_F64 ordinal does not match Python");
 static_assert(LOOM_SCALAR_TYPE_COUNT_ == 13, "scalar type count does not match Python");
+static_assert(LOOM_SCALAR_TYPE_NONE == 13, "scalar type none sentinel does not match Python");
 
 static const char* const loom_scalar_type_names[LOOM_SCALAR_TYPE_COUNT_] = {
     [LOOM_SCALAR_TYPE_INDEX] = "index",
@@ -91,5 +92,5 @@ static loom_scalar_type_t loom_scalar_type_classify_name(iree_string_view_t name
       }
       break;
   }
-  return LOOM_SCALAR_TYPE_COUNT_;
+  return LOOM_SCALAR_TYPE_NONE;
 }

@@ -28,6 +28,8 @@ iree_py_library(
     srcs = ["projection.py"],
     deps = [
         "//loom/py/loom:core",
+        "//loom/py/loom/dialect/cfg",
+        "//loom/py/loom/dialect/func",
         "//loom/py/loom/dialect/index",
         "//loom/py/loom/dialect/scalar",
         "//loom/py/loom/target:low_descriptors",

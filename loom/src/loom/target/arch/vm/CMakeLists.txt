@@ -249,6 +249,7 @@ loom_check_test_suite(
     "test/source_low/function_contracts.loom-test"
     "test/source_low/function_values.loom-test"
     "test/source_low/low_verification.loom-test"
+    "test/source_low/program_failure.loom-test"
     "test/source_low/selector_assembly.loom-test"
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_scalar_baseline.loom-test"

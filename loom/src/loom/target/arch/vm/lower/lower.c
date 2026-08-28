@@ -11,6 +11,8 @@
 #include "iree/base/internal/math.h"
 #include "loom/error/error_catalog.h"
 #include "loom/ir/module.h"
+#include "loom/ops/cfg/ops.h"
+#include "loom/ops/func/ops.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/scalar/ops.h"
@@ -43,8 +45,8 @@ typedef struct loom_vm_source_lowering_row_t {
   uint8_t selector_source_attr_ordinal;
   // Fixed selector value used when no source attribute supplies the value.
   uint8_t selector_value;
-  // Operand types followed by result types at the generated maximum offsets.
-  loom_scalar_type_t scalar_types[LOOM_VM_SOURCE_LOWERING_MAX_TYPE_COUNT];
+  // Exact operand types followed by result types at generated maximum offsets.
+  uint16_t type_keys[LOOM_VM_SOURCE_LOWERING_MAX_TYPE_COUNT];
 } loom_vm_source_lowering_row_t;
 
 typedef struct loom_vm_source_constant_t {
@@ -55,6 +57,8 @@ typedef struct loom_vm_source_constant_t {
 } loom_vm_source_constant_t;
 
 static const loom_vm_source_lowering_row_t kVmSourceLoweringRows[] = {
+#define LOOM_VM_SOURCE_TYPE_KEY(type_kind, scalar_type) \
+  ((uint16_t)(type_kind) | ((uint16_t)(scalar_type) << 8))
 #define LOOM_VM_SOURCE_LOWERING_LIMITS(...)
 #define LOOM_VM_SOURCE_LOWERING_ROW(                                \
     source_op_kind, descriptor_ordinal, selector_immediate_ordinal, \
@@ -68,7 +72,16 @@ static const loom_vm_source_lowering_row_t kVmSourceLoweringRows[] = {
 #include "loom/target/arch/vm/lowering_rows.inl"
 #undef LOOM_VM_SOURCE_LOWERING_ROW
 #undef LOOM_VM_SOURCE_LOWERING_LIMITS
+#undef LOOM_VM_SOURCE_TYPE_KEY
 };
+
+static uint16_t loom_vm_source_type_key(loom_type_t type) {
+  const loom_type_kind_t type_kind = loom_type_kind(type);
+  const uint8_t scalar_type = loom_type_is_scalar(type)
+                                  ? loom_type_element_type(type)
+                                  : LOOM_SCALAR_TYPE_NONE;
+  return (uint16_t)type_kind | ((uint16_t)scalar_type << 8);
+}
 
 static bool loom_vm_source_lowering_row_matches(
     const loom_module_t* module, const loom_op_t* source_op,
@@ -79,17 +92,15 @@ static bool loom_vm_source_lowering_row_matches(
   const loom_value_id_t* operands = loom_op_const_operands(source_op);
   for (uint16_t i = 0; i < source_op->operand_count; ++i) {
     const loom_type_t type = loom_module_value_type(module, operands[i]);
-    if (!loom_type_is_scalar(type) ||
-        loom_type_element_type(type) != row->scalar_types[i]) {
+    if (loom_vm_source_type_key(type) != row->type_keys[i]) {
       return false;
     }
   }
   const loom_value_id_t* results = loom_op_const_results(source_op);
   for (uint16_t i = 0; i < source_op->result_count; ++i) {
     const loom_type_t type = loom_module_value_type(module, results[i]);
-    if (!loom_type_is_scalar(type) ||
-        loom_type_element_type(type) !=
-            row->scalar_types[LOOM_VM_SOURCE_LOWERING_MAX_OPERAND_COUNT + i]) {
+    if (loom_vm_source_type_key(type) !=
+        row->type_keys[LOOM_VM_SOURCE_LOWERING_MAX_OPERAND_COUNT + i]) {
       return false;
     }
   }

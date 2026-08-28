@@ -35,6 +35,20 @@ TEST(LowDescriptorTraitsTest, UniqueIdentityDescriptorIsNotPure) {
   EXPECT_TRUE(loom_traits_has_unique_identity(traits));
 }
 
+TEST(LowDescriptorTraitsTest, NoReturnDescriptorIsATerminalNoReturnOp) {
+  const loom_low_descriptor_set_t descriptor_set = {};
+  loom_low_descriptor_t descriptor = {};
+  descriptor.flags = LOOM_LOW_DESCRIPTOR_FLAG_SIDE_EFFECTING |
+                     LOOM_LOW_DESCRIPTOR_FLAG_TERMINATOR |
+                     LOOM_LOW_DESCRIPTOR_FLAG_NO_RETURN;
+
+  const loom_trait_flags_t traits =
+      loom_low_descriptor_effective_traits(&descriptor_set, &descriptor);
+
+  EXPECT_TRUE(iree_all_bits_set(traits, LOOM_TRAIT_TERMINATOR));
+  EXPECT_TRUE(iree_all_bits_set(traits, LOOM_TRAIT_NO_RETURN));
+}
+
 TEST(LowDescriptorTraitsTest, BarrierIsAMemoryFence) {
   loom_low_effect_t effects[1] = {};
   effects[0].kind = LOOM_LOW_EFFECT_KIND_BARRIER;

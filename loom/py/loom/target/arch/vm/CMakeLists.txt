@@ -27,6 +27,8 @@ iree_py_library(
     "projection.py"
   DEPS
     loom::py::loom::core
+    loom::py::loom::dialect::cfg::cfg
+    loom::py::loom::dialect::func::func
     loom::py::loom::dialect::index::index
     loom::py::loom::dialect::scalar::scalar
     loom::py::loom::target::low_descriptors
