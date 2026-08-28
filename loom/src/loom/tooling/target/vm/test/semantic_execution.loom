@@ -6,6 +6,8 @@ global.variable @counter : i32
 
 global.rodata.def @message = align(1) bytes("6c6f6f6d2d766d")
 
+global.rodata.def @numbers = align(4) bytes("01000000feffffff785634122a000000")
+
 func.def initializer target(@vm) @initialize() {
   %bias_value = scalar.constant 5 : i32
   %counter_value = scalar.constant 0 : i32
@@ -39,6 +41,23 @@ func.def public target(@vm) @assert_message(%condition: i1) {
 check.case @rodata_execution {
   %condition = check.literal value(1) : i1
   func.call @assert_message(%condition) : (i1)
+  check.return
+}
+
+func.def public target(@vm) @load_rodata_element(%element: index) -> (i32) {
+  %element_bounded = index.assume %element [range(%element, 0, 3)] : index
+  %buffer = global.load @numbers : buffer
+  %base = index.constant 0 : offset
+  %view = buffer.view %buffer[%base] : buffer -> view<4xi32>
+  %value = view.load %view[%element_bounded] : view<4xi32> -> i32
+  func.return %value : i32
+}
+
+check.case @buffer_memory_execution {
+  %element = check.literal value(2) : index
+  %actual = func.call @load_rodata_element(%element) : (index) -> (i32)
+  %expected = check.literal value(305419896) : i32
+  check.expect.equal actual(%actual) expected(%expected) : i32
   check.return
 }
 

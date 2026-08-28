@@ -1,0 +1,55 @@
+// RUN: roundtrip
+
+func.def @vector_load_store_i8x1(%input: buffer, %output: buffer) -> (vector<1xi8>) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<1xi8>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi8>
+  %loaded = vector.load %input_view[0] : view<1xi8> -> vector<1xi8>
+  vector.store %loaded, %output_view[0] : vector<1xi8>, view<1xi8>
+  func.return %loaded : vector<1xi8>
+}
+
+// ====
+
+func.def @vector_load_store_i16x2(%input: buffer, %output: buffer) -> (vector<2xi16>) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<2xi16>
+  %output_view = buffer.view %output[%base] : buffer -> view<2xi16>
+  %loaded = vector.load %input_view[0] : view<2xi16> -> vector<2xi16>
+  vector.store %loaded, %output_view[0] : vector<2xi16>, view<2xi16>
+  func.return %loaded : vector<2xi16>
+}
+
+// ====
+
+func.def @vector_load_store_i32x4_dynamic(%input: buffer, %output: buffer, %element: index) -> (vector<4xi32>) {
+  %base = index.constant 0 : offset
+  %element_bounded = index.assume %element [range(%element, 0, 12)] : index
+  %input_view = buffer.view %input[%base] : buffer -> view<16xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<16xi32>
+  %loaded = vector.load %input_view[%element_bounded] : view<16xi32> -> vector<4xi32>
+  vector.store %loaded, %output_view[%element_bounded] : vector<4xi32>, view<16xi32>
+  func.return %loaded : vector<4xi32>
+}
+
+// ====
+
+func.def @vector_load_store_i64x8(%input: buffer, %output: buffer) -> (vector<8xi64>) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<8xi64>
+  %output_view = buffer.view %output[%base] : buffer -> view<8xi64>
+  %loaded = vector.load %input_view[0] : view<8xi64> -> vector<8xi64>
+  vector.store %loaded, %output_view[0] : vector<8xi64>, view<8xi64>
+  func.return %loaded : vector<8xi64>
+}
+
+// ====
+
+func.def @vector_load_store_f32x12(%input: buffer, %output: buffer, %value: vector<12xf32>) -> (vector<12xf32>) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<12xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<12xf32>
+  %loaded = vector.load %input_view[0] : view<12xf32> -> vector<12xf32>
+  vector.store %value, %output_view[0] : vector<12xf32>, view<12xf32>
+  func.return %loaded : vector<12xf32>
+}

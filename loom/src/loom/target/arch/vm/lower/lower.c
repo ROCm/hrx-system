@@ -17,10 +17,12 @@
 #include "loom/ops/scf/ops.h"
 #include "loom/target/arch/vm/abi/layout.h"
 #include "loom/target/arch/vm/descriptors.h"
+#include "loom/target/arch/vm/lower/arithmetic.h"
 #include "loom/target/arch/vm/lower/constants.h"
 #include "loom/target/arch/vm/lower/control.h"
 #include "loom/target/arch/vm/lower/initialization.h"
 #include "loom/target/arch/vm/lower/kernel.h"
+#include "loom/target/arch/vm/lower/memory.h"
 #include "loom/target/arch/vm/lower/resources.h"
 #include "loom/target/arch/vm/lower/types.h"
 #include "loom/target/arch/vm/lower/vector.h"
@@ -277,6 +279,9 @@ static iree_status_t loom_vm_select_op(void* user_data,
   if (loom_vm_kernel_try_select_op(source_op, out_plan)) {
     return iree_ok_status();
   }
+  if (loom_vm_arithmetic_try_select_op(source_op, out_plan)) {
+    return iree_ok_status();
+  }
   const loom_module_t* module = loom_low_lower_context_module(context);
   loom_vm_source_constant_t constant = {0};
   if (loom_vm_try_get_source_constant(module, source_op, &constant)) {
@@ -286,6 +291,9 @@ static iree_status_t loom_vm_select_op(void* user_data,
   }
   IREE_RETURN_IF_ERROR(
       loom_vm_module_resource_try_select_op(context, source_op, out_plan));
+  if (!loom_low_lower_plan_is_empty(*out_plan)) return iree_ok_status();
+  IREE_RETURN_IF_ERROR(
+      loom_vm_memory_try_select_op(context, source_op, out_plan));
   if (!loom_low_lower_plan_is_empty(*out_plan)) return iree_ok_status();
   if (loom_vm_vector_try_select_op(module, source_op, out_plan)) {
     return iree_ok_status();
@@ -310,6 +318,17 @@ static iree_status_t loom_vm_select_op(void* user_data,
     }
   }
   return iree_ok_status();
+}
+
+static void loom_vm_mark_plan_storage_demands(void* user_data,
+                                              loom_low_lower_context_t* context,
+                                              const loom_op_t* source_op,
+                                              loom_low_lower_plan_t plan) {
+  (void)user_data;
+  if (loom_vm_memory_mark_plan_storage_demands(context, source_op, plan)) {
+    return;
+  }
+  loom_low_lower_require_source_operands_storage(context, source_op);
 }
 
 static iree_status_t loom_vm_emit_constant(loom_low_lower_context_t* context,
@@ -346,6 +365,16 @@ static iree_status_t loom_vm_emit_op(void* user_data,
   IREE_RETURN_IF_ERROR(loom_vm_module_resource_emit_op(context, source_op, plan,
                                                        &resource_handled));
   if (resource_handled) return iree_ok_status();
+
+  bool arithmetic_handled = false;
+  IREE_RETURN_IF_ERROR(loom_vm_arithmetic_emit_op(context, source_op, plan,
+                                                  &arithmetic_handled));
+  if (arithmetic_handled) return iree_ok_status();
+
+  bool memory_handled = false;
+  IREE_RETURN_IF_ERROR(
+      loom_vm_memory_emit_op(context, source_op, plan, &memory_handled));
+  if (memory_handled) return iree_ok_status();
 
   bool vector_handled = false;
   IREE_RETURN_IF_ERROR(
@@ -450,6 +479,8 @@ static const loom_low_lower_policy_t kVmCoreLowLowerPolicy = {
             .user_data = NULL,
         },
     .select_op = {.fn = loom_vm_select_op, .user_data = NULL},
+    .mark_plan_storage_demands = {.fn = loom_vm_mark_plan_storage_demands,
+                                  .user_data = NULL},
     .emit_op = {.fn = loom_vm_emit_op, .user_data = NULL},
     .prepare_module = {.fn = loom_vm_prepare_module, .user_data = NULL},
     .finalize_module = {.fn = loom_vm_finalize_module, .user_data = NULL},

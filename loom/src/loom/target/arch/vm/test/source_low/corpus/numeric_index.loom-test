@@ -1,0 +1,150 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_index.loom-test
+// RUN: emit source-low output=low
+
+vm.target<core> @target
+func.def target(@target) @index_arithmetic(%lhs0: index, %rhs0: index, %stride: offset) -> (index, index, index, index, index, index, index, index, offset) {
+  %lhs, %rhs = index.assume %lhs0, %rhs0 [range(%lhs0, 0, 2147483647), range(%rhs0, 1, 1024)] : index, index
+  %add = index.add %lhs, %rhs : index
+  %sub = index.sub %lhs, %rhs : index
+  %mul = index.mul %lhs, %rhs : index
+  %div = index.div %lhs, %rhs : index
+  %rem = index.rem %lhs, %rhs : index
+  %min = index.min %lhs, %rhs : index
+  %max = index.max %lhs, %rhs : index
+  %madd = index.madd %lhs, %rhs, %sub : index
+  %scaled = index.scale %lhs, %stride : index, offset -> offset
+  func.return %add, %sub, %mul, %div, %rem, %min, %max, %madd, %scaled : index, index, index, index, index, index, index, index, offset
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : offset>) -> (reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : offset>)>}) @index_arithmetic(%lhs: reg<vm.value : index>, %rhs: reg<vm.value : index>, %stride: reg<vm.value : offset>) -> (reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : offset>) asm {
+  %add = integer.add.i64 %lhs, %rhs : reg<vm.value : index>
+  %sub = integer.sub.i64 %lhs, %rhs : reg<vm.value : index>
+  %mul = integer.mul.i64 %lhs, %rhs : reg<vm.value : index>
+  %div = integer.div.u64 %lhs, %rhs : reg<vm.value : index>
+  %rem = integer.rem.u64 %lhs, %rhs : reg<vm.value : index>
+  %min = integer.min.s64 %lhs, %rhs : reg<vm.value : index>
+  %max = integer.max.s64 %lhs, %rhs : reg<vm.value : index>
+  %madd = integer.add.i64 %mul, %sub : reg<vm.value : index>
+  %scaled = integer.mul.i64 %lhs, %stride : reg<vm.value : offset>
+  return %add, %sub, %mul, %div, %rem, %min, %max, %madd, %scaled
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @offset_arithmetic(%lhs: offset, %rhs: offset) -> (offset, offset) {
+  %add = index.add %lhs, %rhs : offset
+  %sub = index.sub %lhs, %rhs : offset
+  func.return %add, %sub : offset, offset
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : offset>, reg<vm.value : offset>) -> (reg<vm.value : offset>, reg<vm.value : offset>)>}) @offset_arithmetic(%lhs: reg<vm.value : offset>, %rhs: reg<vm.value : offset>) -> (reg<vm.value : offset>, reg<vm.value : offset>) asm {
+  %add = integer.add.i64 %lhs, %rhs : reg<vm.value : offset>
+  %sub = integer.sub.i64 %lhs, %rhs : reg<vm.value : offset>
+  return %add, %sub
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @index_bitwise(%input: index, %other: index, %amount0: index) -> (index, index, index, index, index, index, index, index, index, index, index) {
+  %amount = index.assume %amount0 [range(%amount0, 1, 31)] : index
+  %and = index.andi %input, %other : index
+  %or = index.ori %input, %other : index
+  %xor = index.xori %input, %other : index
+  %shl = index.shli %input, %amount : index
+  %shrs = index.shrsi %input, %amount : index
+  %shru = index.shrui %input, %amount : index
+  %rotl = index.rotli %input, %amount : index
+  %rotr = index.rotri %input, %amount : index
+  %clz = index.ctlzi %input : index
+  %ctz = index.cttzi %input : index
+  %pop = index.ctpopi %input : index
+  func.return %and, %or, %xor, %shl, %shrs, %shru, %rotl, %rotr, %clz, %ctz, %pop : index, index, index, index, index, index, index, index, index, index, index
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> (reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>)>}) @index_bitwise(%input: reg<vm.value : index>, %other: reg<vm.value : index>, %amount: reg<vm.value : index>) -> (reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) asm {
+  %and = integer.and.i64 %input, %other : reg<vm.value : index>
+  %or = integer.or.i64 %input, %other : reg<vm.value : index>
+  %xor = integer.xor.i64 %input, %other : reg<vm.value : index>
+  %shl = integer.shift.left.i64 %input, %amount : reg<vm.value : index>
+  %shrs = integer.shift.right.s64 %input, %amount : reg<vm.value : index>
+  %shru = integer.shift.right.u64 %input, %amount : reg<vm.value : index>
+  %rotl = integer.rotate.left.i64 %input, %amount : reg<vm.value : index>
+  %rotr = integer.rotate.right.i64 %input, %amount : reg<vm.value : index>
+  %clz = integer.count.leading.zeros.i64 %input : reg<vm.value : index>
+  %ctz = integer.count.trailing.zeros.i64 %input : reg<vm.value : index>
+  %pop = integer.popcount.i64 %input : reg<vm.value : index>
+  return %and, %or, %xor, %shl, %shrs, %shru, %rotl, %rotr, %clz, %ctz, %pop
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @index_compare_select(%lhs: index, %rhs: index) -> (i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, index) {
+  %eq = index.cmp eq, %lhs, %rhs : index
+  %ne = index.cmp ne, %lhs, %rhs : index
+  %slt = index.cmp slt, %lhs, %rhs : index
+  %sle = index.cmp sle, %lhs, %rhs : index
+  %sgt = index.cmp sgt, %lhs, %rhs : index
+  %sge = index.cmp sge, %lhs, %rhs : index
+  %ult = index.cmp ult, %lhs, %rhs : index
+  %ule = index.cmp ule, %lhs, %rhs : index
+  %ugt = index.cmp ugt, %lhs, %rhs : index
+  %uge = index.cmp uge, %lhs, %rhs : index
+  %selected = scf.select %ult, %lhs, %rhs : index
+  func.return %eq, %ne, %slt, %sle, %sgt, %sge, %ult, %ule, %ugt, %uge, %selected : i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, index
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : index>, reg<vm.value : index>) -> (reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : index>)>}) @index_compare_select(%lhs: reg<vm.value : index>, %rhs: reg<vm.value : index>) -> (reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : index>) asm {
+  %eq = integer.compare.i64 %lhs, %rhs, eq : reg<vm.value : i1>
+  %ne = integer.compare.i64 %lhs, %rhs, ne : reg<vm.value : i1>
+  %slt = integer.compare.i64 %lhs, %rhs, slt : reg<vm.value : i1>
+  %sle = integer.compare.i64 %lhs, %rhs, sle : reg<vm.value : i1>
+  %sgt = integer.compare.i64 %lhs, %rhs, sgt : reg<vm.value : i1>
+  %sge = integer.compare.i64 %lhs, %rhs, sge : reg<vm.value : i1>
+  %ult = integer.compare.i64 %lhs, %rhs, ult : reg<vm.value : i1>
+  %ule = integer.compare.i64 %lhs, %rhs, ule : reg<vm.value : i1>
+  %ugt = integer.compare.i64 %lhs, %rhs, ugt : reg<vm.value : i1>
+  %uge = integer.compare.i64 %lhs, %rhs, uge : reg<vm.value : i1>
+  %selected = value.select %ult, %lhs, %rhs : reg<vm.value : index>
+  return %eq, %ne, %slt, %sle, %sgt, %sge, %ult, %ule, %ugt, %uge, %selected
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @offset_compare_select(%lhs: offset, %rhs: offset) -> (i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, offset) {
+  %eq = index.cmp eq, %lhs, %rhs : offset
+  %ne = index.cmp ne, %lhs, %rhs : offset
+  %slt = index.cmp slt, %lhs, %rhs : offset
+  %sle = index.cmp sle, %lhs, %rhs : offset
+  %sgt = index.cmp sgt, %lhs, %rhs : offset
+  %sge = index.cmp sge, %lhs, %rhs : offset
+  %ult = index.cmp ult, %lhs, %rhs : offset
+  %ule = index.cmp ule, %lhs, %rhs : offset
+  %ugt = index.cmp ugt, %lhs, %rhs : offset
+  %uge = index.cmp uge, %lhs, %rhs : offset
+  %selected = scf.select %ult, %lhs, %rhs : offset
+  func.return %eq, %ne, %slt, %sle, %sgt, %sge, %ult, %ule, %ugt, %uge, %selected : i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, offset
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : offset>, reg<vm.value : offset>) -> (reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : offset>)>}) @offset_compare_select(%lhs: reg<vm.value : offset>, %rhs: reg<vm.value : offset>) -> (reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : offset>) asm {
+  %eq = integer.compare.i64 %lhs, %rhs, eq : reg<vm.value : i1>
+  %ne = integer.compare.i64 %lhs, %rhs, ne : reg<vm.value : i1>
+  %slt = integer.compare.i64 %lhs, %rhs, slt : reg<vm.value : i1>
+  %sle = integer.compare.i64 %lhs, %rhs, sle : reg<vm.value : i1>
+  %sgt = integer.compare.i64 %lhs, %rhs, sgt : reg<vm.value : i1>
+  %sge = integer.compare.i64 %lhs, %rhs, sge : reg<vm.value : i1>
+  %ult = integer.compare.i64 %lhs, %rhs, ult : reg<vm.value : i1>
+  %ule = integer.compare.i64 %lhs, %rhs, ule : reg<vm.value : i1>
+  %ugt = integer.compare.i64 %lhs, %rhs, ugt : reg<vm.value : i1>
+  %uge = integer.compare.i64 %lhs, %rhs, uge : reg<vm.value : i1>
+  %selected = value.select %ult, %lhs, %rhs : reg<vm.value : offset>
+  return %eq, %ne, %slt, %sle, %sgt, %sge, %ult, %ule, %ugt, %uge, %selected
+}

@@ -10,8 +10,10 @@
 #include "loom/pass/builder.h"
 #include "loom/target/arch/vm/descriptors.h"
 #include "loom/target/arch/vm/low_verify.h"
+#include "loom/target/arch/vm/lower/arithmetic.h"
 #include "loom/target/arch/vm/lower/kernel.h"
 #include "loom/target/arch/vm/lower/lower.h"
+#include "loom/target/arch/vm/lower/memory.h"
 #include "loom/target/arch/vm/lower/resources.h"
 #include "loom/target/arch/vm/lower/vector.h"
 #include "loom/target/arch/vm/math_policy.h"
@@ -34,7 +36,9 @@ static const loom_low_verify_provider_t* const kLoomVmLowVerifyProviders[] = {
 
 static const loom_target_low_legality_provider_t* const
     kLoomVmLowLegalityProviders[] = {
+        &loom_vm_arithmetic_low_legality_provider,
         &loom_vm_kernel_low_legality_provider,
+        &loom_vm_memory_low_legality_provider,
         &loom_vm_module_resource_low_legality_provider,
         &loom_vm_vector_low_legality_provider,
 };

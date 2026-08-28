@@ -148,20 +148,24 @@ loom_cc_library(
   NAME
     lower
   HDRS
+    "lower/arithmetic.h"
     "lower/constants.h"
     "lower/control.h"
     "lower/initialization.h"
     "lower/kernel.h"
     "lower/lower.h"
+    "lower/memory.h"
     "lower/resources.h"
     "lower/types.h"
     "lower/vector.h"
   SRCS
+    "lower/arithmetic.c"
     "lower/constants.c"
     "lower/control.c"
     "lower/initialization.c"
     "lower/kernel.c"
     "lower/lower.c"
+    "lower/memory.c"
     "lower/resources.c"
     "lower/vector.c"
   DEPS
@@ -175,8 +179,10 @@ loom_cc_library(
     loom::codegen::low::builder
     loom::codegen::low::function
     loom::codegen::low::lower
+    loom::codegen::low::source_memory_plan
     loom::error::error_defs
     loom::ir
+    loom::ops::buffer
     loom::ops::cfg
     loom::ops::func
     loom::ops::global
@@ -188,6 +194,7 @@ loom_cc_library(
     loom::ops::scf
     loom::ops::type_registry
     loom::ops::vector
+    loom::ops::view
     loom::rewrite::rewriter
     loom::target::low_legality
     loom::target::registers
@@ -296,6 +303,9 @@ loom_check_test_suite(
     "test/source_low/abi_types.loom-test"
     "test/source_low/constant_pool.loom-test"
     "test/source_low/control_switch.loom-test"
+    "test/source_low/corpus/memory_scalar_addressing.loom-test"
+    "test/source_low/corpus/memory_vector_baseline.loom-test"
+    "test/source_low/corpus/numeric_index.loom-test"
     "test/source_low/corpus/numeric_scalar_baseline.loom-test"
     "test/source_low/corpus/numeric_scalar_f32.loom-test"
     "test/source_low/corpus/numeric_scalar_i32.loom-test"
@@ -312,6 +322,9 @@ loom_check_test_suite(
     "test/source_low/scalar_diagnostics.loom-test"
     "test/source_low/selector_assembly.loom-test"
   DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/memory_scalar_addressing.loom-test"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/memory_vector_baseline.loom-test"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_index.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_scalar_baseline.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_scalar_f32.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_scalar_i32.loom-test"
