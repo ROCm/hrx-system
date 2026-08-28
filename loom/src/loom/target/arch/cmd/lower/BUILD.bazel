@@ -248,6 +248,7 @@ loom_cc_benchmark(
     srcs = ["program_plan_benchmark.cc"],
     deps = [
         ":program_plan",
+        ":program_plan_index",
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/ir",
         "//loom/src/loom/link:module_index",
