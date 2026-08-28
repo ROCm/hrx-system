@@ -228,11 +228,11 @@ TEST(DecisionProgramTest, ResolutionPolicyControlsHigherUnknownChoice) {
   loom_decision_program_evaluate(
       &program, /*binding=*/nullptr, feature_evaluator,
       loom_decision_program_predicate_refiner_empty(),
-      LOOM_DECISION_PROGRAM_SELECT_PROVEN, live_actions, &live_action_count,
-      &result);
+      LOOM_DECISION_PROGRAM_SELECT_PROVEN, /*live_action_ordinals=*/nullptr,
+      &live_action_count, &result);
   EXPECT_EQ(result.kind, LOOM_DECISION_PROGRAM_RESULT_SELECTED);
   EXPECT_EQ(result.action_ordinal, 5u);
-  EXPECT_EQ(LiveMask(live_actions, live_action_count), UINT64_C(1) << 5);
+  EXPECT_EQ(live_action_count, 1u);
 }
 
 TEST(DecisionProgramTest, HardUnknownPreservesEveryPossibleChoice) {

@@ -24,6 +24,31 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    class_partition
+  HDRS
+    "class_partition.h"
+  SRCS
+    "class_partition.c"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    class_partition_test
+  SRCS
+    "class_partition_test.cc"
+  DEPS
+    ::class_partition
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+loom_cc_library(
+  NAME
     program
   HDRS
     "program.h"
