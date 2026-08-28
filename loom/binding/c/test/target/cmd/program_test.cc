@@ -374,6 +374,38 @@ template.def<@request.schedule> priority(1) @small(%size: index) {
             source_requirement_ordinals.end());
   EXPECT_EQ(source_requirement_ordinals, (std::vector<uint32_t>{0, 1}));
 
+  const loomc_host_size_t repeated_roots[] = {
+      public_root.ordinal,
+      public_root.ordinal,
+  };
+  product_options.root_symbol_ordinals = repeated_roots;
+  product_options.root_symbol_count = std::size(repeated_roots);
+  product_options.flags = 0;
+  product_options.kernel_request_sink = {};
+  loomc_cmd_program_product_t* repeated_product = nullptr;
+  loomc_result_t* repeated_result = nullptr;
+  LOOMC_ASSERT_OK(loomc_cmd_program_product_build(
+      workspace.get(), &product_options, loomc_allocator_system(),
+      &repeated_product, &repeated_result));
+  ProductPtr repeated_product_ptr(repeated_product);
+  ResultPtr repeated_result_ptr(repeated_result);
+  ExpectSucceededResult(repeated_result_ptr.get());
+  ASSERT_EQ(loomc_cmd_program_product_program_count(repeated_product_ptr.get()),
+            2u);
+  loomc_cmd_program_t repeated_programs[2] = {};
+  ASSERT_TRUE(loomc_cmd_program_product_program_at(repeated_product_ptr.get(),
+                                                   0, &repeated_programs[0]));
+  ASSERT_TRUE(loomc_cmd_program_product_program_at(repeated_product_ptr.get(),
+                                                   1, &repeated_programs[1]));
+  EXPECT_EQ(ToString(repeated_programs[0].symbol), "public_root");
+  EXPECT_EQ(ToString(repeated_programs[1].symbol), "public_root");
+  ASSERT_EQ(repeated_programs[0].artifact.contents.data_length,
+            repeated_programs[1].artifact.contents.data_length);
+  EXPECT_EQ(std::memcmp(repeated_programs[0].artifact.contents.data,
+                        repeated_programs[1].artifact.contents.data,
+                        repeated_programs[0].artifact.contents.data_length),
+            0);
+
   RejectRequestState reject_state;
   const loomc_host_size_t public_roots[] = {public_root.ordinal};
   product_options.root_symbol_ordinals = public_roots;
