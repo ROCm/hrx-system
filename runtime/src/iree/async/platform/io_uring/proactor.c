@@ -38,6 +38,7 @@
 #include "iree/async/platform/io_uring/socket.h"
 #include "iree/async/semaphore.h"
 #include "iree/async/types.h"
+#include "iree/async/util/continuation.h"
 #include "iree/async/util/message_pool.h"
 #include "iree/async/util/operation_completion.h"
 #include "iree/async/util/semaphore_wait.h"
