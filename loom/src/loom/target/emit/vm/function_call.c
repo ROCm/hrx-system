@@ -96,7 +96,8 @@ static uint16_t* loom_vm_function_call_bank_ordinal(
 
 static uint8_t loom_vm_function_call_assigned_register(
     const loom_low_allocation_table_t* allocation,
-    loom_value_ordinal_t value_ordinal, uint16_t expected_reg_class_id) {
+    loom_value_ordinal_t value_ordinal, uint16_t expected_reg_class_id,
+    uint16_t unit_offset) {
   const loom_low_allocation_assignment_t* assignment =
       loom_low_allocation_assignment_for_value_ordinal(allocation,
                                                        value_ordinal, NULL);
@@ -104,9 +105,10 @@ static uint8_t loom_vm_function_call_assigned_register(
   IREE_ASSERT_EQ(assignment->location_kind,
                  LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER);
   IREE_ASSERT_EQ(assignment->descriptor_reg_class_id, expected_reg_class_id);
-  IREE_ASSERT_EQ(assignment->location_count, 1u);
-  IREE_ASSERT_LT(assignment->location_base, 256u);
-  return (uint8_t)assignment->location_base;
+  IREE_ASSERT_LT(unit_offset, assignment->location_count);
+  const uint32_t location = assignment->location_base + unit_offset;
+  IREE_ASSERT_LT(location, 256u);
+  return (uint8_t)location;
 }
 
 static uint16_t loom_vm_function_call_register_class_id(
@@ -240,23 +242,29 @@ iree_status_t loom_vm_function_call_encode(
       operand_ordinals + call->argument_operand_base;
   loom_vm_call_abi_bank_counts_t argument_ordinals = {0};
   for (uint16_t i = 0; i < call->arguments.count; ++i) {
-    loom_vm_call_abi_bank_t bank = LOOM_VM_CALL_ABI_BANK_NONE;
+    loom_vm_call_abi_register_layout_t register_layout = {0};
     IREE_RETURN_IF_ERROR(loom_vm_call_abi_classify_type(
         frame->module,
         loom_module_value_type(frame->module, call->arguments.values[i]),
-        &bank));
-    uint16_t* bank_ordinal =
-        loom_vm_function_call_bank_ordinal(&argument_ordinals, bank);
-    const uint16_t ordinal = (*bank_ordinal)++;
-    if (ordinal < IREE_VM_CALL_DIRECT_REGISTER_COUNT) continue;
+        &register_layout));
+    uint16_t* bank_ordinal = loom_vm_function_call_bank_ordinal(
+        &argument_ordinals, register_layout.bank);
+    const uint16_t ordinal_base = *bank_ordinal;
+    *bank_ordinal = (uint16_t)(*bank_ordinal + register_layout.unit_count);
     const uint16_t expected_reg_class_id =
-        loom_vm_function_call_register_class_id(bank);
-    const uint8_t source_register = loom_vm_function_call_assigned_register(
-        &frame->allocation, argument_operand_ordinals[i],
-        expected_reg_class_id);
-    IREE_RETURN_IF_ERROR(loom_vm_function_call_encode_argument_overflow(
-        bank, (uint16_t)(ordinal - IREE_VM_CALL_DIRECT_REGISTER_COUNT),
-        source_register, writer));
+        loom_vm_function_call_register_class_id(register_layout.bank);
+    for (uint16_t unit_offset = 0; unit_offset < register_layout.unit_count;
+         ++unit_offset) {
+      const uint32_t ordinal = (uint32_t)ordinal_base + unit_offset;
+      if (ordinal < IREE_VM_CALL_DIRECT_REGISTER_COUNT) continue;
+      const uint8_t source_register = loom_vm_function_call_assigned_register(
+          &frame->allocation, argument_operand_ordinals[i],
+          expected_reg_class_id, unit_offset);
+      IREE_RETURN_IF_ERROR(loom_vm_function_call_encode_argument_overflow(
+          register_layout.bank,
+          (uint16_t)(ordinal - IREE_VM_CALL_DIRECT_REGISTER_COUNT),
+          source_register, writer));
+    }
   }
 
   if (call->kind == LOOM_VM_FUNCTION_CALL_KIND_DIRECT) {
@@ -282,7 +290,8 @@ iree_status_t loom_vm_function_call_encode(
     IREE_RETURN_IF_ERROR(loom_vm_function_call_resolve_callable_ordinal(
         frame, module_layout, packet->node->op, &callable_type_ordinal));
     const uint8_t target_register = loom_vm_function_call_assigned_register(
-        &frame->allocation, operand_ordinals[0], VM_CORE_REG_CLASS_ID_FUNCTION);
+        &frame->allocation, operand_ordinals[0], VM_CORE_REG_CLASS_ID_FUNCTION,
+        /*unit_offset=*/0);
     const iree_vm_isa_control_call_indirect_record_t call_record = {
         .opcode_u8 = IREE_VM_ISA_CORE_OPCODE_CONTROL_CALL_INDIRECT,
         .target_f8 = target_register,
@@ -298,22 +307,30 @@ iree_status_t loom_vm_function_call_encode(
       loom_low_schedule_node_const_result_ordinals(packet->node);
   loom_vm_call_abi_bank_counts_t result_bank_ordinals = {0};
   for (uint16_t i = 0; i < call->results.count; ++i) {
-    loom_vm_call_abi_bank_t bank = LOOM_VM_CALL_ABI_BANK_NONE;
+    loom_vm_call_abi_register_layout_t register_layout = {0};
     IREE_RETURN_IF_ERROR(loom_vm_call_abi_classify_type(
         frame->module,
-        loom_module_value_type(frame->module, call->results.values[i]), &bank));
-    uint16_t* bank_ordinal =
-        loom_vm_function_call_bank_ordinal(&result_bank_ordinals, bank);
-    const uint16_t ordinal = (*bank_ordinal)++;
-    if (ordinal < IREE_VM_CALL_DIRECT_REGISTER_COUNT) continue;
+        loom_module_value_type(frame->module, call->results.values[i]),
+        &register_layout));
+    uint16_t* bank_ordinal = loom_vm_function_call_bank_ordinal(
+        &result_bank_ordinals, register_layout.bank);
+    const uint16_t ordinal_base = *bank_ordinal;
+    *bank_ordinal = (uint16_t)(*bank_ordinal + register_layout.unit_count);
     const uint16_t expected_reg_class_id =
-        loom_vm_function_call_register_class_id(bank);
-    const uint8_t destination_register =
-        loom_vm_function_call_assigned_register(
-            &frame->allocation, result_ordinals[i], expected_reg_class_id);
-    IREE_RETURN_IF_ERROR(loom_vm_function_call_encode_result_overflow(
-        layout, bank, (uint16_t)(ordinal - IREE_VM_CALL_DIRECT_REGISTER_COUNT),
-        destination_register, writer));
+        loom_vm_function_call_register_class_id(register_layout.bank);
+    for (uint16_t unit_offset = 0; unit_offset < register_layout.unit_count;
+         ++unit_offset) {
+      const uint32_t ordinal = (uint32_t)ordinal_base + unit_offset;
+      if (ordinal < IREE_VM_CALL_DIRECT_REGISTER_COUNT) continue;
+      const uint8_t destination_register =
+          loom_vm_function_call_assigned_register(
+              &frame->allocation, result_ordinals[i], expected_reg_class_id,
+              unit_offset);
+      IREE_RETURN_IF_ERROR(loom_vm_function_call_encode_result_overflow(
+          layout, register_layout.bank,
+          (uint16_t)(ordinal - IREE_VM_CALL_DIRECT_REGISTER_COUNT),
+          destination_register, writer));
+    }
   }
   return iree_ok_status();
 }

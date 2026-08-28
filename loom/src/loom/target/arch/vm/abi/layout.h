@@ -31,21 +31,36 @@ enum loom_vm_call_abi_bank_e {
   LOOM_VM_CALL_ABI_BANK_FUNCTION = 3,
 };
 
-// Counts of logical fields in each independent physical register bank.
+// Physical register representation of one logical callable field.
+typedef struct loom_vm_call_abi_register_layout_t {
+  // Independent physical register bank carrying the field.
+  loom_vm_call_abi_bank_t bank;
+  // Number of contiguous register units carrying the field.
+  uint16_t unit_count;
+} loom_vm_call_abi_register_layout_t;
+
+// Counts of register units in each independent physical register bank.
 typedef struct loom_vm_call_abi_bank_counts_t {
-  // Number of value-register fields.
+  // Number of value-register units.
   uint16_t value;
-  // Number of ref-register fields.
+  // Number of ref-register units.
   uint16_t ref;
-  // Number of function-register fields.
+  // Number of function-register units.
   uint16_t function;
 } loom_vm_call_abi_bank_counts_t;
+
+enum {
+  // Maximum physical units carried by one logical callable field.
+  LOOM_VM_CALL_ABI_MAX_FIELD_UNIT_COUNT = 256,
+};
 
 // Physical placement of one source-ordered logical callable field.
 typedef struct loom_vm_call_abi_field_layout_t {
   // Independent physical register bank carrying the field.
   loom_vm_call_abi_bank_t bank;
-  // Zero-based field ordinal within |bank|.
+  // Number of contiguous register units carrying the field.
+  uint16_t unit_count;
+  // Zero-based register-unit ordinal within |bank|.
   uint16_t bank_ordinal;
 } loom_vm_call_abi_field_layout_t;
 
@@ -55,7 +70,7 @@ typedef struct loom_vm_call_abi_side_layout_t {
   const loom_vm_call_abi_field_layout_t* fields;
   // Number of entries in |fields|.
   uint16_t field_count;
-  // Independent physical-bank field counts.
+  // Independent physical-bank register-unit counts.
   loom_vm_call_abi_bank_counts_t bank_counts;
 } loom_vm_call_abi_side_layout_t;
 
@@ -87,9 +102,9 @@ typedef struct loom_vm_call_abi_source_fields_t {
 // arrays with arguments followed by results. Direct ref arguments are fresh
 // staging values and are moved into the child packet.
 typedef struct loom_vm_call_abi_packet_layout_t {
-  // Logical argument counts in each independent register bank.
+  // Argument register-unit counts in each independent register bank.
   loom_vm_call_abi_bank_counts_t arguments;
-  // Logical result counts in each independent register bank.
+  // Result register-unit counts in each independent register bank.
   loom_vm_call_abi_bank_counts_t results;
   // Ownership-transfer mask covering every direct ref argument.
   uint16_t direct_ref_move_mask;
@@ -109,24 +124,24 @@ typedef struct loom_vm_call_abi_packet_layout_t {
 iree_vm_scalar_type_t loom_vm_call_abi_scalar_type(
     loom_scalar_type_t scalar_type);
 
-// Returns the number of fields beyond the direct register prefix.
+// Returns the number of register units beyond the direct prefix.
 uint16_t loom_vm_call_abi_overflow_count(uint16_t count);
 
-// Classifies one logical source type into its VM callable register bank.
+// Classifies one logical source type into its VM register representation.
 //
-// Returns false when the type is not a scalar, an exact managed reference, or
-// a structurally valid func.ref type.
+// Static vectors use one value-register unit per logical element. Returns false
+// when the type has no exact Core VM representation.
 bool loom_vm_call_abi_try_classify_logical_type(
     const loom_module_t* module, loom_type_t type,
-    loom_vm_call_abi_bank_t* out_bank);
+    loom_vm_call_abi_register_layout_t* out_layout);
 
 // Classifies one typed Core VM register used at a callable boundary.
 //
-// Version zero requires exactly one physical register unit carrying a scalar,
-// an exact managed-reference type, or a structurally valid func.ref type.
-iree_status_t loom_vm_call_abi_classify_type(const loom_module_t* module,
-                                             loom_type_t type,
-                                             loom_vm_call_abi_bank_t* out_bank);
+// The physical register class and unit count must exactly match the retained
+// logical type.
+iree_status_t loom_vm_call_abi_classify_type(
+    const loom_module_t* module, loom_type_t type,
+    loom_vm_call_abi_register_layout_t* out_layout);
 
 // Resolves the required structural signature from an abi_layout dictionary.
 iree_status_t loom_vm_call_abi_layout_resolve_signature(

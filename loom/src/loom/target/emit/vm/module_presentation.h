@@ -11,6 +11,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
+#include "loom/ir/ir.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -18,8 +19,11 @@ extern "C" {
 
 typedef struct loom_vm_module_layout_t loom_vm_module_layout_t;
 
-// Presentation for one logical argument or result field.
+// Presentation for one machine argument or result field.
 typedef struct loom_vm_module_presentation_field_layout_t {
+  // Borrowed typed register anchored at this machine field, or NULL.
+  // Aggregate continuation fields have no independent register type.
+  const loom_type_t* register_type;
   // Borrowed authored field name, or empty when unavailable.
   iree_string_view_t name;
   // Arena-owned canonical authored logical type.
@@ -54,7 +58,7 @@ typedef struct loom_vm_module_presentation_layout_t {
   loom_vm_module_presentation_entry_layout_t* entries;
   // Number of entries in |entries|.
   uint32_t entry_count;
-  // Arena-owned fields in entry order and logical source order.
+  // Arena-owned fields in entry and machine-signature order.
   loom_vm_module_presentation_field_layout_t* fields;
   // Number of entries in |fields|.
   uint32_t field_count;

@@ -48,21 +48,49 @@ iree_vm_scalar_type_t loom_vm_call_abi_scalar_type(
 
 bool loom_vm_call_abi_try_classify_logical_type(
     const loom_module_t* module, loom_type_t type,
-    loom_vm_call_abi_bank_t* out_bank) {
-  *out_bank = LOOM_VM_CALL_ABI_BANK_NONE;
+    loom_vm_call_abi_register_layout_t* out_layout) {
+  *out_layout = (loom_vm_call_abi_register_layout_t){0};
   if (loom_type_is_scalar(type)) {
-    *out_bank = LOOM_VM_CALL_ABI_BANK_VALUE;
+    if (loom_vm_call_abi_scalar_type(loom_type_element_type(type)) ==
+        IREE_VM_SCALAR_TYPE_NONE) {
+      return false;
+    }
+    *out_layout = (loom_vm_call_abi_register_layout_t){
+        .bank = LOOM_VM_CALL_ABI_BANK_VALUE,
+        .unit_count = 1,
+    };
+    return true;
+  }
+  if (loom_type_is_vector(type)) {
+    uint64_t element_count = 0;
+    if (!loom_type_static_element_count(type, &element_count) ||
+        element_count == 0 ||
+        element_count > LOOM_VM_CALL_ABI_MAX_FIELD_UNIT_COUNT ||
+        loom_vm_call_abi_scalar_type(loom_type_element_type(type)) ==
+            IREE_VM_SCALAR_TYPE_NONE) {
+      return false;
+    }
+    *out_layout = (loom_vm_call_abi_register_layout_t){
+        .bank = LOOM_VM_CALL_ABI_BANK_VALUE,
+        .unit_count = (uint16_t)element_count,
+    };
     return true;
   }
   if (loom_type_is_buffer(type)) {
-    *out_bank = LOOM_VM_CALL_ABI_BANK_REF;
+    *out_layout = (loom_vm_call_abi_register_layout_t){
+        .bank = LOOM_VM_CALL_ABI_BANK_REF,
+        .unit_count = 1,
+    };
     return true;
   }
   if (loom_func_ref_type_isa(type)) {
     if (!loom_type_is_function(loom_func_ref_resolve_signature(module, type))) {
       return false;
     }
-    *out_bank = LOOM_VM_CALL_ABI_BANK_FUNCTION;
+    *out_layout = (loom_vm_call_abi_register_layout_t){
+        .bank = LOOM_VM_CALL_ABI_BANK_FUNCTION,
+        .unit_count = 1,
+    };
     return true;
   }
   const loom_type_descriptor_t* descriptor =
@@ -71,21 +99,22 @@ bool loom_vm_call_abi_try_classify_logical_type(
       descriptor->semantics.semantic != LOOM_TYPE_SEMANTIC_MANAGED_REFERENCE) {
     return false;
   }
-  *out_bank = LOOM_VM_CALL_ABI_BANK_REF;
+  *out_layout = (loom_vm_call_abi_register_layout_t){
+      .bank = LOOM_VM_CALL_ABI_BANK_REF,
+      .unit_count = 1,
+  };
   return true;
 }
 
 iree_status_t loom_vm_call_abi_classify_type(
     const loom_module_t* module, loom_type_t type,
-    loom_vm_call_abi_bank_t* out_bank) {
-  *out_bank = LOOM_VM_CALL_ABI_BANK_NONE;
+    loom_vm_call_abi_register_layout_t* out_layout) {
+  *out_layout = (loom_vm_call_abi_register_layout_t){0};
   if (!loom_low_type_is_register(type) ||
       loom_low_register_type_descriptor_set_stable_id(type) !=
-          VM_CORE_DESCRIPTOR_SET_ID ||
-      loom_low_register_type_unit_count(type) != 1) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "VM callable fields must be exactly one vm.core register unit");
+          VM_CORE_DESCRIPTOR_SET_ID) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "VM callable fields must use vm.core registers");
   }
 
   const loom_type_t* value_type = loom_type_register_value_type(type);
@@ -94,22 +123,22 @@ iree_status_t loom_vm_call_abi_classify_type(
         IREE_STATUS_INVALID_ARGUMENT,
         "VM callable fields must retain their logical type");
   }
-  loom_vm_call_abi_bank_t logical_bank = LOOM_VM_CALL_ABI_BANK_NONE;
+  loom_vm_call_abi_register_layout_t logical_layout = {0};
   if (!loom_vm_call_abi_try_classify_logical_type(module, *value_type,
-                                                  &logical_bank)) {
+                                                  &logical_layout)) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "VM callable register carries an unsupported logical type");
   }
   switch (loom_low_register_type_class_id(type)) {
     case VM_CORE_REG_CLASS_ID_VALUE:
-      *out_bank = LOOM_VM_CALL_ABI_BANK_VALUE;
+      out_layout->bank = LOOM_VM_CALL_ABI_BANK_VALUE;
       break;
     case VM_CORE_REG_CLASS_ID_REF:
-      *out_bank = LOOM_VM_CALL_ABI_BANK_REF;
+      out_layout->bank = LOOM_VM_CALL_ABI_BANK_REF;
       break;
     case VM_CORE_REG_CLASS_ID_FUNCTION:
-      *out_bank = LOOM_VM_CALL_ABI_BANK_FUNCTION;
+      out_layout->bank = LOOM_VM_CALL_ABI_BANK_FUNCTION;
       break;
     default:
       return iree_make_status(
@@ -117,12 +146,15 @@ iree_status_t loom_vm_call_abi_classify_type(
           "VM callable field uses unknown register class %" PRIu16,
           loom_low_register_type_class_id(type));
   }
-  if (*out_bank != logical_bank) {
-    *out_bank = LOOM_VM_CALL_ABI_BANK_NONE;
+  const uint32_t register_unit_count = loom_low_register_type_unit_count(type);
+  if (out_layout->bank != logical_layout.bank ||
+      register_unit_count != logical_layout.unit_count) {
+    *out_layout = (loom_vm_call_abi_register_layout_t){0};
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "VM callable register bank does not match its logical type");
+        "VM callable register layout does not match its logical type");
   }
+  out_layout->unit_count = logical_layout.unit_count;
   return iree_ok_status();
 }
 
@@ -263,10 +295,16 @@ static iree_status_t loom_vm_call_abi_count_values(
                             "VM call field count exceeds u16");
   }
   for (iree_host_size_t i = 0; i < value_count; ++i) {
-    loom_vm_call_abi_bank_t bank = LOOM_VM_CALL_ABI_BANK_NONE;
+    loom_vm_call_abi_register_layout_t register_layout = {0};
     IREE_RETURN_IF_ERROR(loom_vm_call_abi_classify_type(
-        module, loom_module_value_type(module, values[i]), &bank));
-    ++*loom_vm_call_abi_bank_count(out_counts, bank);
+        module, loom_module_value_type(module, values[i]), &register_layout));
+    uint16_t* bank_count =
+        loom_vm_call_abi_bank_count(out_counts, register_layout.bank);
+    if (register_layout.unit_count > UINT16_MAX - *bank_count) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "VM call register count exceeds u16");
+    }
+    *bank_count = (uint16_t)(*bank_count + register_layout.unit_count);
   }
   return iree_ok_status();
 }
@@ -280,16 +318,21 @@ static iree_status_t loom_vm_call_abi_side_layout_build(
       .field_count = type_count,
   };
   for (uint16_t i = 0; i < type_count; ++i) {
-    loom_vm_call_abi_bank_t bank = LOOM_VM_CALL_ABI_BANK_NONE;
+    loom_vm_call_abi_register_layout_t register_layout = {0};
     IREE_RETURN_IF_ERROR(
-        loom_vm_call_abi_classify_type(module, types[i], &bank));
-    uint16_t* bank_count =
-        loom_vm_call_abi_bank_count(&out_layout->bank_counts, bank);
+        loom_vm_call_abi_classify_type(module, types[i], &register_layout));
+    uint16_t* bank_count = loom_vm_call_abi_bank_count(&out_layout->bank_counts,
+                                                       register_layout.bank);
+    if (register_layout.unit_count > UINT16_MAX - *bank_count) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "VM call register count exceeds u16");
+    }
     fields[i] = (loom_vm_call_abi_field_layout_t){
-        .bank = bank,
+        .bank = register_layout.bank,
+        .unit_count = register_layout.unit_count,
         .bank_ordinal = *bank_count,
     };
-    ++*bank_count;
+    *bank_count = (uint16_t)(*bank_count + register_layout.unit_count);
   }
   return iree_ok_status();
 }

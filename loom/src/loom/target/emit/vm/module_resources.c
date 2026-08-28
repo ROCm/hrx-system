@@ -96,13 +96,14 @@ static iree_status_t loom_vm_module_global_record_resolve(
   }
   out_record->ordinal = (uint16_t)ordinal;
   out_record->type = loom_module_value_type(module, type_value);
-  loom_vm_call_abi_bank_t abi_bank = LOOM_VM_CALL_ABI_BANK_NONE;
+  loom_vm_call_abi_register_layout_t abi_layout = {0};
   if (!loom_vm_call_abi_try_classify_logical_type(module, out_record->type,
-                                                  &abi_bank)) {
+                                                  &abi_layout) ||
+      abi_layout.unit_count != 1) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "VM global has an unsupported logical type");
   }
-  switch (abi_bank) {
+  switch (abi_layout.bank) {
     case LOOM_VM_CALL_ABI_BANK_VALUE:
       out_record->bank = LOOM_VM_MODULE_GLOBAL_BANK_VALUE;
       break;

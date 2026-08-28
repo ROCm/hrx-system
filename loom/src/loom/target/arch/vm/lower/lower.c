@@ -147,12 +147,8 @@ static bool loom_vm_try_get_source_constant(
   return true;
 }
 
-static uint16_t loom_vm_source_type_register_class(const loom_module_t* module,
-                                                   loom_type_t source_type) {
-  loom_vm_call_abi_bank_t bank = LOOM_VM_CALL_ABI_BANK_NONE;
-  if (!loom_vm_call_abi_try_classify_logical_type(module, source_type, &bank)) {
-    return LOOM_LOW_REGISTER_CLASS_ID_INVALID;
-  }
+static uint16_t loom_vm_register_class_for_abi_bank(
+    loom_vm_call_abi_bank_t bank) {
   switch (bank) {
     case LOOM_VM_CALL_ABI_BANK_VALUE:
       return VM_CORE_REG_CLASS_ID_VALUE;
@@ -172,11 +168,13 @@ static iree_status_t loom_vm_map_type(void* user_data,
                                       loom_type_t source_type,
                                       loom_type_t* out_low_type) {
   (void)user_data;
-  const uint16_t register_class = loom_vm_source_type_register_class(
-      loom_low_lower_context_module(context), source_type);
-  if (register_class != LOOM_LOW_REGISTER_CLASS_ID_INVALID) {
+  loom_vm_call_abi_register_layout_t register_layout = {0};
+  if (loom_vm_call_abi_try_classify_logical_type(
+          loom_low_lower_context_module(context), source_type,
+          &register_layout)) {
     return loom_low_lower_make_typed_register_type(
-        context, register_class, /*unit_count=*/1, source_type, out_low_type);
+        context, loom_vm_register_class_for_abi_bank(register_layout.bank),
+        register_layout.unit_count, source_type, out_low_type);
   }
   return loom_low_lower_emit_source_type_unsupported(
       context, source_op, IREE_SV("source"), source_type);
@@ -186,8 +184,9 @@ static bool loom_vm_source_type_supported(void* user_data,
                                           const loom_module_t* module,
                                           loom_type_t source_type) {
   (void)user_data;
-  return loom_vm_source_type_register_class(module, source_type) !=
-         LOOM_LOW_REGISTER_CLASS_ID_INVALID;
+  loom_vm_call_abi_register_layout_t register_layout = {0};
+  return loom_vm_call_abi_try_classify_logical_type(module, source_type,
+                                                    &register_layout);
 }
 
 static bool loom_vm_source_function_has_presentation(

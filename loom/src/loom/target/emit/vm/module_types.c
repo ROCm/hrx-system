@@ -61,9 +61,9 @@ struct loom_vm_module_callable_type_build_t {
   uint16_t ordinal;
   // Traversal state used to reject recursive callable types.
   loom_vm_module_callable_state_t state;
-  // Source-ordered argument count.
+  // Source-ordered machine argument field count.
   uint16_t argument_count;
-  // Source-ordered result count.
+  // Source-ordered machine result field count.
   uint16_t result_count;
   // Arena-owned argument-then-result field descriptions.
   loom_vm_module_signature_field_build_t* fields;
@@ -237,17 +237,18 @@ static iree_status_t loom_vm_module_signature_scalar_kind(loom_type_t type,
 
 static iree_status_t loom_vm_module_resolve_logical_type(
     const loom_module_t* module, loom_type_t type, loom_type_t* out_type,
-    loom_vm_call_abi_bank_t* out_bank) {
+    loom_vm_call_abi_register_layout_t* out_register_layout) {
   *out_type = loom_type_none();
-  *out_bank = LOOM_VM_CALL_ABI_BANK_NONE;
+  *out_register_layout = (loom_vm_call_abi_register_layout_t){0};
   if (loom_low_type_is_register(type)) {
     IREE_RETURN_IF_ERROR(
-        loom_vm_call_abi_classify_type(module, type, out_bank));
+        loom_vm_call_abi_classify_type(module, type, out_register_layout));
     const loom_type_t* value_type = loom_type_register_value_type(type);
     *out_type = *value_type;
     return iree_ok_status();
   }
-  if (!loom_vm_call_abi_try_classify_logical_type(module, type, out_bank)) {
+  if (!loom_vm_call_abi_try_classify_logical_type(module, type,
+                                                  out_register_layout)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "VM signature contains an unsupported type");
   }
@@ -356,31 +357,51 @@ static uint16_t* loom_vm_module_signature_bank_count(
   IREE_BUILTIN_UNREACHABLE();
 }
 
-static iree_status_t loom_vm_module_signature_field_build(
+static iree_status_t loom_vm_module_signature_fields_build(
     loom_vm_module_type_build_t* build,
     loom_vm_module_callable_type_build_t* callable,
     loom_vm_module_signature_side_t side, loom_type_t type,
-    loom_vm_module_signature_field_build_t* out_field) {
-  *out_field = (loom_vm_module_signature_field_build_t){0};
+    loom_vm_module_signature_field_build_t* out_fields,
+    uint16_t* out_field_count) {
+  *out_field_count = 0;
   loom_type_t logical_type = loom_type_none();
-  loom_vm_call_abi_bank_t bank = LOOM_VM_CALL_ABI_BANK_NONE;
+  loom_vm_call_abi_register_layout_t register_layout = {0};
   IREE_RETURN_IF_ERROR(loom_vm_module_resolve_logical_type(
-      build->module, type, &logical_type, &bank));
-  ++*loom_vm_module_signature_bank_count(callable, side, bank);
+      build->module, type, &logical_type, &register_layout));
+  uint16_t* bank_count =
+      loom_vm_module_signature_bank_count(callable, side, register_layout.bank);
+  if (register_layout.unit_count > UINT16_MAX - *bank_count) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "VM signature register count exceeds u16");
+  }
+  *bank_count = (uint16_t)(*bank_count + register_layout.unit_count);
+  *out_field_count = register_layout.unit_count;
 
-  switch (bank) {
-    case LOOM_VM_CALL_ABI_BANK_VALUE:
-      return loom_vm_module_signature_scalar_kind(logical_type,
-                                                  &out_field->kind);
+  switch (register_layout.bank) {
+    case LOOM_VM_CALL_ABI_BANK_VALUE: {
+      uint16_t kind = 0;
+      IREE_RETURN_IF_ERROR(
+          loom_vm_module_signature_scalar_kind(logical_type, &kind));
+      for (uint16_t i = 0; i < register_layout.unit_count; ++i) {
+        out_fields[i] = (loom_vm_module_signature_field_build_t){
+            .kind = kind,
+        };
+      }
+      return iree_ok_status();
+    }
     case LOOM_VM_CALL_ABI_BANK_REF: {
+      IREE_ASSERT_EQ(register_layout.unit_count, 1u);
       loom_vm_module_ref_type_build_t* ref_type = NULL;
       IREE_RETURN_IF_ERROR(
           loom_vm_module_ref_type_find_or_add(build, logical_type, &ref_type));
-      out_field->kind = IREE_VM_BYTECODE_SIGNATURE_KIND_REF;
-      out_field->type.ref_type = ref_type;
+      out_fields[0] = (loom_vm_module_signature_field_build_t){
+          .kind = IREE_VM_BYTECODE_SIGNATURE_KIND_REF,
+          .type.ref_type = ref_type,
+      };
       return iree_ok_status();
     }
     case LOOM_VM_CALL_ABI_BANK_FUNCTION: {
+      IREE_ASSERT_EQ(register_layout.unit_count, 1u);
       const loom_type_t nested_signature =
           loom_func_ref_resolve_signature(build->module, logical_type);
       uint16_t nested_flags = 0;
@@ -397,14 +418,36 @@ static iree_status_t loom_vm_module_signature_field_build(
       callable->nesting_depth =
           iree_max(callable->nesting_depth,
                    (uint16_t)(nested_callable->nesting_depth + 1));
-      out_field->kind = IREE_VM_BYTECODE_SIGNATURE_KIND_FUNCTION;
-      out_field->type.callable_type = nested_callable;
+      out_fields[0] = (loom_vm_module_signature_field_build_t){
+          .kind = IREE_VM_BYTECODE_SIGNATURE_KIND_FUNCTION,
+          .type.callable_type = nested_callable,
+      };
       return iree_ok_status();
     }
     default:
       IREE_ASSERT_UNREACHABLE("valid VM signature bank");
       IREE_BUILTIN_UNREACHABLE();
   }
+}
+
+static iree_status_t loom_vm_module_signature_field_count(
+    const loom_module_t* module, const loom_type_t* types, uint16_t type_count,
+    uint16_t* out_field_count) {
+  *out_field_count = 0;
+  uint32_t field_count = 0;
+  for (uint16_t i = 0; i < type_count; ++i) {
+    loom_type_t logical_type = loom_type_none();
+    loom_vm_call_abi_register_layout_t register_layout = {0};
+    IREE_RETURN_IF_ERROR(loom_vm_module_resolve_logical_type(
+        module, types[i], &logical_type, &register_layout));
+    field_count += register_layout.unit_count;
+    if (field_count > UINT16_MAX) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "VM signature field count exceeds u16");
+    }
+  }
+  *out_field_count = (uint16_t)field_count;
+  return iree_ok_status();
 }
 
 static iree_status_t loom_vm_module_callable_collect(
@@ -445,8 +488,16 @@ static iree_status_t loom_vm_module_callable_collect(
   }
 
   callable->state = LOOM_VM_MODULE_CALLABLE_STATE_VISITING;
-  callable->argument_count = loom_type_func_arg_count(signature);
-  callable->result_count = loom_type_func_result_count(signature);
+  const loom_type_t* argument_types = loom_type_func_arg_types(signature);
+  const uint16_t logical_argument_count = loom_type_func_arg_count(signature);
+  const loom_type_t* result_types = loom_type_func_result_types(signature);
+  const uint16_t logical_result_count = loom_type_func_result_count(signature);
+  IREE_RETURN_IF_ERROR(loom_vm_module_signature_field_count(
+      build->module, argument_types, logical_argument_count,
+      &callable->argument_count));
+  IREE_RETURN_IF_ERROR(loom_vm_module_signature_field_count(
+      build->module, result_types, logical_result_count,
+      &callable->result_count));
   const iree_host_size_t field_count =
       (iree_host_size_t)callable->argument_count + callable->result_count;
   if (field_count != 0) {
@@ -455,18 +506,27 @@ static iree_status_t loom_vm_module_callable_collect(
                                                    (void**)&callable->fields));
   }
 
-  const loom_type_t* argument_types = loom_type_func_arg_types(signature);
-  for (uint16_t i = 0; i < callable->argument_count; ++i) {
-    IREE_RETURN_IF_ERROR(loom_vm_module_signature_field_build(
+  uint16_t argument_field_offset = 0;
+  for (uint16_t i = 0; i < logical_argument_count; ++i) {
+    uint16_t emitted_field_count = 0;
+    IREE_RETURN_IF_ERROR(loom_vm_module_signature_fields_build(
         build, callable, LOOM_VM_MODULE_SIGNATURE_SIDE_ARGUMENT,
-        argument_types[i], &callable->fields[i]));
+        argument_types[i], &callable->fields[argument_field_offset],
+        &emitted_field_count));
+    argument_field_offset =
+        (uint16_t)(argument_field_offset + emitted_field_count);
   }
-  const loom_type_t* result_types = loom_type_func_result_types(signature);
-  for (uint16_t i = 0; i < callable->result_count; ++i) {
-    IREE_RETURN_IF_ERROR(loom_vm_module_signature_field_build(
+  IREE_ASSERT_EQ(argument_field_offset, callable->argument_count);
+  uint16_t result_field_offset = 0;
+  for (uint16_t i = 0; i < logical_result_count; ++i) {
+    uint16_t emitted_field_count = 0;
+    IREE_RETURN_IF_ERROR(loom_vm_module_signature_fields_build(
         build, callable, LOOM_VM_MODULE_SIGNATURE_SIDE_RESULT, result_types[i],
-        &callable->fields[callable->argument_count + i]));
+        &callable->fields[callable->argument_count + result_field_offset],
+        &emitted_field_count));
+    result_field_offset = (uint16_t)(result_field_offset + emitted_field_count);
   }
+  IREE_ASSERT_EQ(result_field_offset, callable->result_count);
   callable->state = LOOM_VM_MODULE_CALLABLE_STATE_COMPLETE;
   return iree_ok_status();
 }

@@ -1008,7 +1008,9 @@ _RECORD_DEFINITIONS = (
                 name="name_string_u16",
                 offset=0,
                 encoding_id=U16.entity_id,
-                description="Nullable argument or result name string ordinal.",
+                description=(
+                    "Nullable anchored argument or result name string ordinal."
+                ),
                 validation=(
                     RuleUse(
                         ORDINAL_OR_NULL.entity_id,
@@ -1020,7 +1022,7 @@ _RECORD_DEFINITIONS = (
                 name="authored_type_string_u16",
                 offset=2,
                 encoding_id=U16.entity_id,
-                description="Nullable authored field-type string ordinal.",
+                description="Nullable anchored authored field-type string ordinal.",
                 validation=(
                     RuleUse(
                         ORDINAL_OR_NULL.entity_id,

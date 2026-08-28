@@ -86,6 +86,7 @@ loom_check_test_suite(
     "test/module.loom-test"
     "test/spills.loom-test"
     "test/suspension.loom-test"
+    "test/vector_tuples.loom-test"
   TEST_NAME_PREFIX_TO_STRIP
     "test/"
 )

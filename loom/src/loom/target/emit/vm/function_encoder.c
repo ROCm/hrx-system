@@ -552,15 +552,16 @@ static iree_status_t loom_vm_function_encode_structural_packet(
 
 static iree_status_t loom_vm_function_claim_direct_abi_location(
     const loom_module_t* module, loom_value_id_t value_id,
-    loom_vm_call_abi_bank_counts_t* bank_counts, uint32_t* out_location,
-    bool* out_is_direct) {
-  *out_location = 0;
+    loom_vm_call_abi_bank_counts_t* bank_counts, uint32_t* out_location_base,
+    uint32_t* out_location_count, bool* out_is_direct) {
+  *out_location_base = 0;
+  *out_location_count = 0;
   *out_is_direct = false;
-  loom_vm_call_abi_bank_t bank = LOOM_VM_CALL_ABI_BANK_NONE;
+  loom_vm_call_abi_register_layout_t register_layout = {0};
   IREE_RETURN_IF_ERROR(loom_vm_call_abi_classify_type(
-      module, loom_module_value_type(module, value_id), &bank));
+      module, loom_module_value_type(module, value_id), &register_layout));
   uint16_t* bank_count = NULL;
-  switch (bank) {
+  switch (register_layout.bank) {
     case LOOM_VM_CALL_ABI_BANK_VALUE:
       bank_count = &bank_counts->value;
       break;
@@ -575,11 +576,16 @@ static iree_status_t loom_vm_function_claim_direct_abi_location(
       IREE_BUILTIN_UNREACHABLE();
   }
   const uint16_t location = *bank_count;
-  ++*bank_count;
+  if (register_layout.unit_count > UINT16_MAX - *bank_count) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "VM call register count exceeds u16");
+  }
+  *bank_count = (uint16_t)(*bank_count + register_layout.unit_count);
   if (location >= IREE_VM_CALL_DIRECT_REGISTER_COUNT) {
     return iree_ok_status();
   }
-  *out_location = location;
+  *out_location_base = location;
+  *out_location_count = register_layout.unit_count;
   *out_is_direct = true;
   return iree_ok_status();
 }
@@ -590,10 +596,12 @@ static iree_status_t loom_vm_function_collect_fixed_value_slice(
     iree_host_size_t* inout_fixed_value_count) {
   loom_vm_call_abi_bank_counts_t bank_counts = {0};
   for (uint16_t i = 0; i < value_count; ++i) {
-    uint32_t location = 0;
+    uint32_t location_base = 0;
+    uint32_t location_count = 0;
     bool is_direct = false;
     IREE_RETURN_IF_ERROR(loom_vm_function_claim_direct_abi_location(
-        module, values[i], &bank_counts, &location, &is_direct));
+        module, values[i], &bank_counts, &location_base, &location_count,
+        &is_direct));
     if (!is_direct) continue;
     if (*inout_fixed_value_count == IREE_HOST_SIZE_MAX) {
       return iree_make_status(
@@ -605,8 +613,8 @@ static iree_status_t loom_vm_function_collect_fixed_value_slice(
           (loom_low_allocation_fixed_value_t){
               .value_id = values[i],
               .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
-              .location_base = location,
-              .location_count = 1,
+              .location_base = location_base,
+              .location_count = location_count,
           };
     }
     ++*inout_fixed_value_count;

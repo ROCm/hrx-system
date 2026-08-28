@@ -55,7 +55,8 @@ static iree_status_t loom_vm_call_abi_validate_function(
           "VM physical argument %u does not match its logical ABI type",
           (unsigned)i);
     }
-    if (layout->arguments.fields[i].bank_ordinal >=
+    const loom_vm_call_abi_field_layout_t* field = &layout->arguments.fields[i];
+    if ((uint32_t)field->bank_ordinal + field->unit_count >
             IREE_VM_CALL_DIRECT_REGISTER_COUNT &&
         loom_module_value_has_predicate_attribute_uses(module, arguments[i])) {
       return iree_make_status(
@@ -75,7 +76,8 @@ static iree_status_t loom_vm_call_abi_validate_function(
           "VM physical result %u does not match its logical ABI type",
           (unsigned)i);
     }
-    if (layout->results.fields[i].bank_ordinal >=
+    const loom_vm_call_abi_field_layout_t* field = &layout->results.fields[i];
+    if ((uint32_t)field->bank_ordinal + field->unit_count >
             IREE_VM_CALL_DIRECT_REGISTER_COUNT &&
         loom_module_value_has_predicate_attribute_uses(module, results[i])) {
       return iree_make_status(
@@ -164,7 +166,7 @@ static iree_status_t loom_vm_call_abi_build_overflow_instruction(
 
 static iree_status_t loom_vm_call_abi_build_overflow_argument_load(
     loom_rewriter_t* rewriter, const loom_vm_call_abi_field_layout_t* field,
-    loom_type_t result_type, loom_location_id_t location,
+    uint16_t unit_offset, loom_type_t result_type, loom_location_id_t location,
     loom_value_id_t* out_result) {
   *out_result = LOOM_VALUE_ID_INVALID;
   uint16_t descriptor_ordinal = 0;
@@ -187,7 +189,8 @@ static iree_status_t loom_vm_call_abi_build_overflow_argument_load(
   IREE_RETURN_IF_ERROR(loom_vm_call_abi_build_overflow_instruction(
       rewriter, descriptor_ordinal, /*operands=*/NULL, /*operand_count=*/0,
       &result_type, /*result_count=*/1,
-      (uint16_t)(field->bank_ordinal - IREE_VM_CALL_DIRECT_REGISTER_COUNT),
+      (uint16_t)(field->bank_ordinal + unit_offset -
+                 IREE_VM_CALL_DIRECT_REGISTER_COUNT),
       location, &load_op));
   *out_result = loom_op_results(load_op)[0];
   return iree_ok_status();
@@ -195,7 +198,7 @@ static iree_status_t loom_vm_call_abi_build_overflow_argument_load(
 
 static iree_status_t loom_vm_call_abi_build_overflow_result_store(
     loom_rewriter_t* rewriter, const loom_vm_call_abi_field_layout_t* field,
-    loom_value_id_t source, loom_location_id_t location) {
+    uint16_t unit_offset, loom_value_id_t source, loom_location_id_t location) {
   uint16_t descriptor_ordinal = 0;
   switch (field->bank) {
     case LOOM_VM_CALL_ABI_BANK_VALUE:
@@ -216,7 +219,8 @@ static iree_status_t loom_vm_call_abi_build_overflow_result_store(
   return loom_vm_call_abi_build_overflow_instruction(
       rewriter, descriptor_ordinal, &source, /*operand_count=*/1,
       /*result_types=*/NULL, /*result_count=*/0,
-      (uint16_t)(field->bank_ordinal - IREE_VM_CALL_DIRECT_REGISTER_COUNT),
+      (uint16_t)(field->bank_ordinal + unit_offset -
+                 IREE_VM_CALL_DIRECT_REGISTER_COUNT),
       location, &store_op);
 }
 
@@ -242,15 +246,15 @@ static iree_status_t loom_vm_call_abi_build_transfer(
   *out_transfer_op = NULL;
   *out_result = LOOM_VALUE_ID_INVALID;
   const loom_type_t type = loom_module_value_type(rewriter->module, source);
-  loom_vm_call_abi_bank_t bank = LOOM_VM_CALL_ABI_BANK_NONE;
+  loom_vm_call_abi_register_layout_t register_layout = {0};
   IREE_RETURN_IF_ERROR(
-      loom_vm_call_abi_classify_type(rewriter->module, type, &bank));
-  if (bank == LOOM_VM_CALL_ABI_BANK_REF && consume_ref) {
+      loom_vm_call_abi_classify_type(rewriter->module, type, &register_layout));
+  if (register_layout.bank == LOOM_VM_CALL_ABI_BANK_REF && consume_ref) {
     IREE_RETURN_IF_ERROR(loom_low_move_build(&rewriter->builder, source,
                                              /*detached=*/false, type, location,
                                              out_transfer_op));
     *out_result = loom_low_move_result(*out_transfer_op);
-  } else if (bank == LOOM_VM_CALL_ABI_BANK_REF) {
+  } else if (register_layout.bank == LOOM_VM_CALL_ABI_BANK_REF) {
     IREE_RETURN_IF_ERROR(loom_vm_call_abi_build_ref_retain(
         rewriter, source, type, location, out_transfer_op));
     *out_result = loom_op_results(*out_transfer_op)[0];
@@ -270,6 +274,140 @@ static bool loom_vm_call_abi_side_has_overflow(
          layout->bank_counts.function > IREE_VM_CALL_DIRECT_REGISTER_COUNT;
 }
 
+static uint16_t loom_vm_call_abi_field_direct_unit_count(
+    const loom_vm_call_abi_field_layout_t* field) {
+  if (field->bank_ordinal >= IREE_VM_CALL_DIRECT_REGISTER_COUNT) return 0;
+  return iree_min(
+      field->unit_count,
+      (uint16_t)(IREE_VM_CALL_DIRECT_REGISTER_COUNT - field->bank_ordinal));
+}
+
+static iree_status_t loom_vm_call_abi_field_unit_type(
+    loom_rewriter_t* rewriter, const loom_vm_call_abi_field_layout_t* field,
+    loom_type_t field_type, loom_type_t* out_unit_type) {
+  *out_unit_type = loom_type_none();
+  if (field->unit_count == 1) {
+    *out_unit_type = field_type;
+    return iree_ok_status();
+  }
+  const loom_type_t* logical_type = loom_type_register_value_type(field_type);
+  if (field->bank != LOOM_VM_CALL_ABI_BANK_VALUE || logical_type == NULL ||
+      !loom_type_is_vector(*logical_type)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "multi-unit VM callable fields must carry static vectors");
+  }
+  return loom_low_build_typed_register_type(
+      rewriter->module, loom_vm_core_descriptor_set(),
+      VM_CORE_REG_CLASS_ID_VALUE, /*unit_count=*/1,
+      loom_type_scalar(loom_type_element_type(*logical_type)), out_unit_type);
+}
+
+static iree_status_t loom_vm_call_abi_field_fragment_type(
+    loom_rewriter_t* rewriter, const loom_vm_call_abi_field_layout_t* field,
+    loom_type_t field_type, uint16_t unit_count,
+    loom_type_t* out_fragment_type) {
+  *out_fragment_type = loom_type_none();
+  if (unit_count == 1) {
+    return loom_vm_call_abi_field_unit_type(rewriter, field, field_type,
+                                            out_fragment_type);
+  }
+  const loom_type_t* logical_type = loom_type_register_value_type(field_type);
+  if (field->bank != LOOM_VM_CALL_ABI_BANK_VALUE || logical_type == NULL ||
+      !loom_type_is_vector(*logical_type)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "multi-unit VM callable fragments must carry static vectors");
+  }
+  const loom_type_t fragment_type = loom_type_shaped_1d(
+      LOOM_TYPE_VECTOR, loom_type_element_type(*logical_type),
+      loom_dim_pack_static(unit_count), /*encoding_id=*/0);
+  return loom_low_build_typed_register_type(
+      rewriter->module, loom_vm_core_descriptor_set(),
+      VM_CORE_REG_CLASS_ID_VALUE, unit_count, fragment_type, out_fragment_type);
+}
+
+static iree_status_t loom_vm_call_abi_build_field_unit_slice(
+    loom_rewriter_t* rewriter, const loom_vm_call_abi_field_layout_t* field,
+    loom_value_id_t source, uint16_t unit_offset, loom_type_t unit_type,
+    loom_location_id_t location, loom_value_id_t* out_result) {
+  *out_result = LOOM_VALUE_ID_INVALID;
+  if (field->unit_count == 1) {
+    IREE_ASSERT_EQ(unit_offset, 0u);
+    *out_result = source;
+    return iree_ok_status();
+  }
+  loom_op_t* slice_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_slice_build(
+      &rewriter->builder, source, unit_offset, unit_type, location, &slice_op));
+  *out_result = loom_low_slice_result(slice_op);
+  return iree_ok_status();
+}
+
+static iree_status_t loom_vm_call_abi_materialize_entry_field(
+    loom_rewriter_t* rewriter, loom_value_id_t argument,
+    const loom_vm_call_abi_field_layout_t* field, loom_location_id_t location) {
+  const uint16_t direct_unit_count =
+      loom_vm_call_abi_field_direct_unit_count(field);
+  if (direct_unit_count == field->unit_count) {
+    loom_op_t* transfer_op = NULL;
+    loom_value_id_t transferred = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_vm_call_abi_build_transfer(
+        rewriter, argument, /*consume_ref=*/true, location, &transfer_op,
+        &transferred));
+    return loom_rewriter_replace_all_uses_except(rewriter, argument,
+                                                 transferred, transfer_op);
+  }
+
+  const loom_type_t argument_type =
+      loom_module_value_type(rewriter->module, argument);
+  loom_type_t unit_type = loom_type_none();
+  IREE_RETURN_IF_ERROR(loom_vm_call_abi_field_unit_type(
+      rewriter, field, argument_type, &unit_type));
+  const uint16_t source_count =
+      (uint16_t)((direct_unit_count != 0 ? 1 : 0) + field->unit_count -
+                 direct_unit_count);
+  loom_value_id_t* sources = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      rewriter->arena, source_count, sizeof(*sources), (void**)&sources));
+  uint16_t source_index = 0;
+  loom_op_t* direct_slice_op = NULL;
+  if (direct_unit_count != 0) {
+    loom_type_t fragment_type = loom_type_none();
+    IREE_RETURN_IF_ERROR(loom_vm_call_abi_field_fragment_type(
+        rewriter, field, argument_type, direct_unit_count, &fragment_type));
+    IREE_RETURN_IF_ERROR(loom_low_slice_build(&rewriter->builder, argument,
+                                              /*offset=*/0, fragment_type,
+                                              location, &direct_slice_op));
+    sources[source_index++] = loom_low_slice_result(direct_slice_op);
+  }
+  for (uint16_t unit_offset = direct_unit_count;
+       unit_offset < field->unit_count; ++unit_offset) {
+    IREE_RETURN_IF_ERROR(loom_vm_call_abi_build_overflow_argument_load(
+        rewriter, field, unit_offset, unit_type, location,
+        &sources[source_index++]));
+  }
+  IREE_ASSERT_EQ(source_index, source_count);
+
+  loom_value_id_t replacement = sources[0];
+  if (source_count != 1 ||
+      !loom_type_equal(loom_module_value_type(rewriter->module, replacement),
+                       argument_type)) {
+    loom_op_t* concat_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_low_concat_build(&rewriter->builder, sources,
+                                               source_count, argument_type,
+                                               location, &concat_op));
+    replacement = loom_low_concat_result(concat_op);
+  }
+  IREE_RETURN_IF_ERROR(
+      loom_rewriter_move_value_name(rewriter, argument, replacement));
+  if (direct_slice_op != NULL) {
+    return loom_rewriter_replace_all_uses_except(rewriter, argument,
+                                                 replacement, direct_slice_op);
+  }
+  return loom_rewriter_replace_all_uses_with(rewriter, argument, replacement);
+}
+
 static iree_status_t loom_vm_call_abi_materialize_entry(
     loom_rewriter_t* rewriter, loom_func_like_t function,
     const loom_vm_call_abi_side_layout_t* layout) {
@@ -283,25 +421,8 @@ static iree_status_t loom_vm_call_abi_materialize_entry(
   loom_builder_set_before(&rewriter->builder, entry_block->first_op);
   for (uint16_t i = 0; i < argument_count; ++i) {
     const loom_vm_call_abi_field_layout_t* field = &layout->fields[i];
-    if (field->bank_ordinal < IREE_VM_CALL_DIRECT_REGISTER_COUNT) {
-      loom_op_t* transfer_op = NULL;
-      loom_value_id_t transferred = LOOM_VALUE_ID_INVALID;
-      IREE_RETURN_IF_ERROR(loom_vm_call_abi_build_transfer(
-          rewriter, arguments[i], /*consume_ref=*/true, function.op->location,
-          &transfer_op, &transferred));
-      IREE_RETURN_IF_ERROR(loom_rewriter_replace_all_uses_except(
-          rewriter, arguments[i], transferred, transfer_op));
-      continue;
-    }
-
-    loom_value_id_t loaded = LOOM_VALUE_ID_INVALID;
-    IREE_RETURN_IF_ERROR(loom_vm_call_abi_build_overflow_argument_load(
-        rewriter, field, loom_module_value_type(rewriter->module, arguments[i]),
-        function.op->location, &loaded));
-    IREE_RETURN_IF_ERROR(
-        loom_rewriter_move_value_name(rewriter, arguments[i], loaded));
-    IREE_RETURN_IF_ERROR(
-        loom_rewriter_replace_all_uses_with(rewriter, arguments[i], loaded));
+    IREE_RETURN_IF_ERROR(loom_vm_call_abi_materialize_entry_field(
+        rewriter, arguments[i], field, function.op->location));
   }
   return iree_ok_status();
 }
@@ -338,12 +459,12 @@ static iree_status_t loom_vm_call_abi_materialize_call_operands(
   loom_builder_set_before(&rewriter->builder, op);
   for (uint16_t i = 0; i < operands.count; ++i) {
     const loom_value_id_t source = operands.values[i];
-    loom_vm_call_abi_bank_t bank = LOOM_VM_CALL_ABI_BANK_NONE;
+    loom_vm_call_abi_register_layout_t register_layout = {0};
     IREE_RETURN_IF_ERROR(loom_vm_call_abi_classify_type(
         rewriter->module, loom_module_value_type(rewriter->module, source),
-        &bank));
+        &register_layout));
     const bool consume_ref =
-        bank != LOOM_VM_CALL_ABI_BANK_REF ||
+        register_layout.bank != LOOM_VM_CALL_ABI_BANK_REF ||
         !loom_vm_call_abi_ref_requires_retain(rewriter->module, source);
     loom_op_t* transfer_op = NULL;
     loom_value_id_t transferred = LOOM_VALUE_ID_INVALID;
@@ -406,18 +527,34 @@ static iree_status_t loom_vm_call_abi_materialize_return(
   for (uint16_t i = 0; i < values.count; ++i) {
     const loom_vm_call_abi_field_layout_t* field =
         &walk->layout->results.fields[i];
-    if (field->bank_ordinal < IREE_VM_CALL_DIRECT_REGISTER_COUNT) {
+    const uint16_t direct_unit_count =
+        loom_vm_call_abi_field_direct_unit_count(field);
+    loom_value_id_t source = values.values[i];
+    if (direct_unit_count != 0) {
       loom_op_t* transfer_op = NULL;
       loom_value_id_t transferred = LOOM_VALUE_ID_INVALID;
       IREE_RETURN_IF_ERROR(loom_vm_call_abi_build_transfer(
-          walk->rewriter, values.values[i], /*consume_ref=*/true,
-          return_op->location, &transfer_op, &transferred));
+          walk->rewriter, source, /*consume_ref=*/true, return_op->location,
+          &transfer_op, &transferred));
       IREE_RETURN_IF_ERROR(
           loom_rewriter_set_operand(walk->rewriter, return_op, i, transferred));
-      continue;
+      source = transferred;
     }
-    IREE_RETURN_IF_ERROR(loom_vm_call_abi_build_overflow_result_store(
-        walk->rewriter, field, values.values[i], return_op->location));
+    if (direct_unit_count == field->unit_count) continue;
+
+    loom_type_t unit_type = loom_type_none();
+    IREE_RETURN_IF_ERROR(loom_vm_call_abi_field_unit_type(
+        walk->rewriter, field,
+        loom_module_value_type(walk->rewriter->module, source), &unit_type));
+    for (uint16_t unit_offset = direct_unit_count;
+         unit_offset < field->unit_count; ++unit_offset) {
+      loom_value_id_t unit = LOOM_VALUE_ID_INVALID;
+      IREE_RETURN_IF_ERROR(loom_vm_call_abi_build_field_unit_slice(
+          walk->rewriter, field, source, unit_offset, unit_type,
+          return_op->location, &unit));
+      IREE_RETURN_IF_ERROR(loom_vm_call_abi_build_overflow_result_store(
+          walk->rewriter, field, unit_offset, unit, return_op->location));
+    }
   }
   return iree_ok_status();
 }

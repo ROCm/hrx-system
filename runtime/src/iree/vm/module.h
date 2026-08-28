@@ -57,9 +57,9 @@ typedef struct iree_vm_module_signature_type_span_t {
 } iree_vm_module_signature_type_span_t;
 
 typedef struct iree_vm_module_signature_t {
-  // Source-ordered logical arguments.
+  // Source-ordered machine arguments.
   iree_vm_module_signature_type_span_t arguments;
-  // Source-ordered logical results.
+  // Source-ordered machine results.
   iree_vm_module_signature_type_span_t results;
 } iree_vm_module_signature_t;
 
@@ -235,9 +235,10 @@ typedef struct iree_vm_signature_type_span_t {
 typedef struct iree_vm_signature_field_t {
   // Required resolved VM type.
   iree_vm_signature_type_t type;
-  // Source-level field name, or an empty view when unavailable.
+  // Source-level field name anchored here, or an empty view when unavailable.
   iree_string_view_t name;
-  // Source-level authored type, or an empty view when unavailable.
+  // Source-level authored type anchored here, or empty when unavailable.
+  // Multi-field aggregates anchor both strings at their first machine field.
   iree_string_view_t authored_type;
 } iree_vm_signature_field_t;
 
@@ -269,9 +270,9 @@ typedef struct iree_vm_import_description_t {
   iree_vm_module_import_flags_t flags;
   // Expected callable behavior.
   iree_vm_callable_type_flags_t callable_flags;
-  // Source-ordered argument fields.
+  // Source-ordered machine argument fields.
   iree_vm_signature_field_span_t arguments;
-  // Source-ordered result fields.
+  // Source-ordered machine result fields.
   iree_vm_signature_field_span_t results;
   // Declaration documentation, or an empty view when unavailable.
   iree_string_view_t documentation;
@@ -284,9 +285,9 @@ typedef struct iree_vm_export_description_t {
   iree_string_view_t name;
   // Actual public callable behavior.
   iree_vm_callable_type_flags_t callable_flags;
-  // Source-ordered argument fields.
+  // Source-ordered machine argument fields.
   iree_vm_signature_field_span_t arguments;
-  // Source-ordered result fields.
+  // Source-ordered machine result fields.
   iree_vm_signature_field_span_t results;
   // Declaration documentation, or an empty view when unavailable.
   iree_string_view_t documentation;
@@ -320,7 +321,7 @@ typedef struct iree_vm_module_declaration_t {
 typedef struct iree_vm_module_presentation_query_t {
   // Declaration whose optional presentation is requested.
   iree_vm_module_declaration_t declaration;
-  // Complete argument-then-result field storage, or empty for a size probe.
+  // Complete machine argument-then-result fields, or empty for a size probe.
   iree_vm_signature_field_storage_t fields;
   // Max-aligned transient tail, or empty for a size probe.
   iree_byte_span_t transient_storage;

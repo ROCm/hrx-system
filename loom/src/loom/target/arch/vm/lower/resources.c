@@ -90,12 +90,14 @@ static loom_vm_module_resource_kind_t loom_vm_module_global_resource_kind(
     return LOOM_VM_MODULE_RESOURCE_KIND_NONE;
   }
 
-  loom_vm_call_abi_bank_t bank = LOOM_VM_CALL_ABI_BANK_NONE;
+  loom_vm_call_abi_register_layout_t register_layout = {0};
   const loom_type_t type = loom_module_value_type(module, global_value);
-  if (!loom_vm_call_abi_try_classify_logical_type(module, type, &bank)) {
+  if (!loom_vm_call_abi_try_classify_logical_type(module, type,
+                                                  &register_layout) ||
+      register_layout.unit_count != 1) {
     return LOOM_VM_MODULE_RESOURCE_KIND_NONE;
   }
-  switch (bank) {
+  switch (register_layout.bank) {
     case LOOM_VM_CALL_ABI_BANK_VALUE:
       return is_immutable ? LOOM_VM_MODULE_RESOURCE_KIND_VALUE_IMMUTABLE
                           : LOOM_VM_MODULE_RESOURCE_KIND_VALUE_MUTABLE;

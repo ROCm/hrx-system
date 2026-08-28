@@ -1,0 +1,240 @@
+// RUN: emit vm-dis
+
+vm.target<core> @target
+
+func.def public target(@target) @vector_identity(
+    %values: vector<4xi32>) -> (vector<4xi32>) {
+  func.return %values : vector<4xi32>
+}
+
+// ----
+vm.module "module" core=0.0 bytes=408
+requirements:
+sections:
+  [0] strings type=0x0002 flags=0x0000 bytes=[112, +92)
+  [1] signatures type=0x0004 flags=0x0000 bytes=[208, +52)
+  [2] callable_types type=0x0005 flags=0x0000 bytes=[264, +12)
+  [3] exports type=0x0007 flags=0x0000 bytes=[280, +12)
+  [4] functions type=0x0008 flags=0x0000 bytes=[296, +60)
+  [5] presentation type=0x000C flags=0x0001 bytes=[360, +48)
+resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
+module_metadata:
+ref_types:
+callable_types:
+  [0] (i32, i32, i32, i32) -> (i32, i32, i32, i32)
+imports:
+exports:
+  [0] @vector_identity -> function[0] : (values: i32, i32, i32, i32) -> (i32, i32, i32, i32)
+    authored_type = "(vector<4xi32>) -> (vector<4xi32>)"
+    argument[0].authored_type = "vector<4xi32>"
+    result[0].authored_type = "vector<4xi32>"
+functions:
+  [0] callable[0] signature[0] bytecode=[0, +8) registers=(4, 0, 0) locals=(0, 0, 0) switch_targets=0
+    type = (i32, i32, i32, i32) -> (i32, i32, i32, i32)
+    +0000  control.block
+    +0004  control.return
+
+// ====
+
+vm.target<core> @target
+
+func.def target(@target) @crossing_identity(
+    %v00: i32, %v01: i32, %v02: i32, %v03: i32,
+    %v04: i32, %v05: i32, %v06: i32, %v07: i32,
+    %v08: i32, %v09: i32, %v10: i32, %v11: i32,
+    %v12: i32, %v13: i32, %values: vector<4xi32>)
+    -> (i32, i32, i32, i32, i32, i32, i32, i32,
+        i32, i32, i32, i32, i32, i32, vector<4xi32>) {
+  func.return %v00, %v01, %v02, %v03, %v04, %v05, %v06, %v07,
+      %v08, %v09, %v10, %v11, %v12, %v13, %values :
+      i32, i32, i32, i32, i32, i32, i32, i32,
+      i32, i32, i32, i32, i32, i32, vector<4xi32>
+}
+
+// ----
+vm.module "module" core=0.0 bytes=324
+requirements:
+sections:
+  [0] signatures type=0x0004 flags=0x0000 bytes=[64, +164)
+  [1] callable_types type=0x0005 flags=0x0000 bytes=[232, +12)
+  [2] functions type=0x0008 flags=0x0000 bytes=[248, +76)
+resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
+module_metadata:
+ref_types:
+callable_types:
+  [0] (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) -> (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32)
+imports:
+exports:
+functions:
+  [0] callable[0] signature[0] bytecode=[0, +24) registers=(18, 0, 0) locals=(0, 0, 0) switch_targets=0
+    type = (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) -> (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32)
+    +0000  control.block
+    +0004  value.abi.argument.load dst_v8=16 slot_u16=0
+    +0008  value.abi.argument.load dst_v8=17 slot_u16=1
+    +0012  value.abi.result.store src_v8=16 slot_u16=0
+    +0016  value.abi.result.store src_v8=17 slot_u16=1
+    +0020  control.return
+
+// ====
+
+vm.target<core> @target
+
+func.def target(@target) @overflow_identity(
+    %v00: i32, %v01: i32, %v02: i32, %v03: i32,
+    %v04: i32, %v05: i32, %v06: i32, %v07: i32,
+    %v08: i32, %v09: i32, %v10: i32, %v11: i32,
+    %v12: i32, %v13: i32, %v14: i32, %v15: i32,
+    %values: vector<4xi32>)
+    -> (i32, i32, i32, i32, i32, i32, i32, i32,
+        i32, i32, i32, i32, i32, i32, i32, i32,
+        vector<4xi32>) {
+  func.return %v00, %v01, %v02, %v03, %v04, %v05, %v06, %v07,
+      %v08, %v09, %v10, %v11, %v12, %v13, %v14, %v15, %values :
+      i32, i32, i32, i32, i32, i32, i32, i32,
+      i32, i32, i32, i32, i32, i32, i32, i32, vector<4xi32>
+}
+
+// ----
+vm.module "module" core=0.0 bytes=356
+requirements:
+sections:
+  [0] signatures type=0x0004 flags=0x0000 bytes=[64, +180)
+  [1] callable_types type=0x0005 flags=0x0000 bytes=[248, +12)
+  [2] functions type=0x0008 flags=0x0000 bytes=[264, +92)
+resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
+module_metadata:
+ref_types:
+callable_types:
+  [0] (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) -> (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32)
+imports:
+exports:
+functions:
+  [0] callable[0] signature[0] bytecode=[0, +40) registers=(20, 0, 0) locals=(0, 0, 0) switch_targets=0
+    type = (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) -> (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32)
+    +0000  control.block
+    +0004  value.abi.argument.load dst_v8=16 slot_u16=0
+    +0008  value.abi.argument.load dst_v8=17 slot_u16=1
+    +0012  value.abi.argument.load dst_v8=18 slot_u16=2
+    +0016  value.abi.argument.load dst_v8=19 slot_u16=3
+    +0020  value.abi.result.store src_v8=16 slot_u16=0
+    +0024  value.abi.result.store src_v8=17 slot_u16=1
+    +0028  value.abi.result.store src_v8=18 slot_u16=2
+    +0032  value.abi.result.store src_v8=19 slot_u16=3
+    +0036  control.return
+
+// ====
+
+vm.target<core> @target
+
+func.def noinline target(@target) @tuple_identity(
+    %values: vector<4xi32>) -> (vector<4xi32>) {
+  func.return %values : vector<4xi32>
+}
+
+func.def target(@target) @call_tuple_identity(
+    %values: vector<4xi32>) -> (vector<4xi32>) {
+  %result = func.call @tuple_identity(%values) :
+      (vector<4xi32>) -> (vector<4xi32>)
+  func.return %result : vector<4xi32>
+}
+
+// ----
+vm.module "module" core=0.0 bytes=260
+requirements:
+sections:
+  [0] signatures type=0x0004 flags=0x0000 bytes=[64, +52)
+  [1] callable_types type=0x0005 flags=0x0000 bytes=[120, +12)
+  [2] functions type=0x0008 flags=0x0000 bytes=[136, +124)
+resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
+module_metadata:
+ref_types:
+callable_types:
+  [0] (i32, i32, i32, i32) -> (i32, i32, i32, i32)
+imports:
+exports:
+functions:
+  [0] callable[0] signature[0] bytecode=[0, +8) registers=(4, 0, 0) locals=(0, 0, 0) switch_targets=0
+    type = (i32, i32, i32, i32) -> (i32, i32, i32, i32)
+    +0000  control.block
+    +0004  control.return
+  [1] callable[0] signature[0] bytecode=[8, +16) registers=(4, 0, 0) locals=(0, 0, 0) switch_targets=0 has_call
+    type = (i32, i32, i32, i32) -> (i32, i32, i32, i32)
+    +0000  control.block
+    +0004  control.call target_kind_u8=0 target_ordinal_u16=0 direct_ref_move_mask_u16=0
+    +0012  control.return
+
+// ====
+
+vm.target<core> @target
+
+func.def noinline target(@target) @crossing_tuple_identity(
+    %v00: i32, %v01: i32, %v02: i32, %v03: i32,
+    %v04: i32, %v05: i32, %v06: i32, %v07: i32,
+    %v08: i32, %v09: i32, %v10: i32, %v11: i32,
+    %v12: i32, %v13: i32, %values: vector<4xi32>)
+    -> (i32, i32, i32, i32, i32, i32, i32, i32,
+        i32, i32, i32, i32, i32, i32, vector<4xi32>) {
+  func.return %v00, %v01, %v02, %v03, %v04, %v05, %v06, %v07,
+      %v08, %v09, %v10, %v11, %v12, %v13, %values :
+      i32, i32, i32, i32, i32, i32, i32, i32,
+      i32, i32, i32, i32, i32, i32, vector<4xi32>
+}
+
+func.def target(@target) @call_crossing_tuple_identity(
+    %v00: i32, %v01: i32, %v02: i32, %v03: i32,
+    %v04: i32, %v05: i32, %v06: i32, %v07: i32,
+    %v08: i32, %v09: i32, %v10: i32, %v11: i32,
+    %v12: i32, %v13: i32, %values: vector<4xi32>)
+    -> (i32, i32, i32, i32, i32, i32, i32, i32,
+        i32, i32, i32, i32, i32, i32, vector<4xi32>) {
+  %r00, %r01, %r02, %r03, %r04, %r05, %r06, %r07,
+      %r08, %r09, %r10, %r11, %r12, %r13, %result =
+      func.call @crossing_tuple_identity(
+          %v00, %v01, %v02, %v03, %v04, %v05, %v06, %v07,
+          %v08, %v09, %v10, %v11, %v12, %v13, %values) :
+          (i32, i32, i32, i32, i32, i32, i32, i32,
+           i32, i32, i32, i32, i32, i32, vector<4xi32>) ->
+          (i32, i32, i32, i32, i32, i32, i32, i32,
+           i32, i32, i32, i32, i32, i32, vector<4xi32>)
+  func.return %r00, %r01, %r02, %r03, %r04, %r05, %r06, %r07,
+      %r08, %r09, %r10, %r11, %r12, %r13, %result :
+      i32, i32, i32, i32, i32, i32, i32, i32,
+      i32, i32, i32, i32, i32, i32, vector<4xi32>
+}
+
+// ----
+vm.module "module" core=0.0 bytes=436
+requirements:
+sections:
+  [0] signatures type=0x0004 flags=0x0000 bytes=[64, +164)
+  [1] callable_types type=0x0005 flags=0x0000 bytes=[232, +12)
+  [2] functions type=0x0008 flags=0x0000 bytes=[248, +188)
+resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
+module_metadata:
+ref_types:
+callable_types:
+  [0] (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) -> (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32)
+imports:
+exports:
+functions:
+  [0] callable[0] signature[0] bytecode=[0, +24) registers=(18, 0, 0) locals=(0, 0, 0) switch_targets=0
+    type = (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) -> (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32)
+    +0000  control.block
+    +0004  value.abi.argument.load dst_v8=16 slot_u16=0
+    +0008  value.abi.argument.load dst_v8=17 slot_u16=1
+    +0012  value.abi.result.store src_v8=16 slot_u16=0
+    +0016  value.abi.result.store src_v8=17 slot_u16=1
+    +0020  control.return
+  [1] callable[0] signature[0] bytecode=[24, +64) registers=(18, 0, 0) locals=(32, 0, 0) switch_targets=0 has_call
+    type = (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) -> (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32)
+    +0000  control.block
+    +0004  value.abi.argument.load dst_v8=16 slot_u16=0
+    +0008  value.abi.argument.load dst_v8=17 slot_u16=1
+    +0012  stack.store base_u16=0 src_v8=16 format_u8=12
+    +0020  stack.store base_u16=8 src_v8=17 format_u8=12
+    +0028  control.call target_kind_u8=0 target_ordinal_u16=0 direct_ref_move_mask_u16=0
+    +0036  stack.load dst_v8=16 base_u16=16 format_u8=12
+    +0044  stack.load dst_v8=17 base_u16=24 format_u8=12
+    +0052  value.abi.result.store src_v8=16 slot_u16=0
+    +0056  value.abi.result.store src_v8=17 slot_u16=1
+    +0060  control.return
