@@ -784,35 +784,45 @@ CONTROL_ASSERT = core_instruction(
             InstructionFieldRole.OPERAND,
             "Complete 64-bit assertion condition.",
         ),
-        zero_padding("zero_padding_u8", 2, 2),
+        _diagnostic_message(),
+        zero_padding("zero_padding_u8", 3, 1),
     ),
-    state_effects=(),
+    state_effects=(state_read(StateResource.BUFFER, "message_r8_nullable"),),
     semantics=InstructionSemantics(
         description=(
             "Continues when the complete condition cell is nonzero and otherwise "
-            "terminates the invocation with failed_precondition."
+            "terminates the invocation with failed_precondition and optional "
+            "best-effort diagnostic bytes."
         ),
         verification=(
             "condition_v8 must be a valid value-register ordinal.",
-            "Both zero_padding_u8 bytes must equal zero and a decoded "
-            "sequential successor must follow this record.",
+            "message_r8_nullable must be a valid ref-register ordinal and "
+            "zero_padding_u8 must equal zero.",
+            "A decoded sequential successor must follow this record.",
         ),
         preconditions=(),
-        success=("A nonzero condition advances the program counter by four bytes.",),
+        success=(
+            "A nonzero condition advances the program counter by four bytes "
+            "without reading or mapping the diagnostic message.",
+        ),
         failures=(
             FailureCase(
                 "failed_precondition",
                 "condition_v8 contains the complete 64-bit zero value.",
-                "Public result storage remains untouched.",
+                "Optional diagnostic context is captured before all live frames "
+                "unwind; public result storage remains untouched.",
             ),
         ),
-        ownership=(),
-        assembly=("control.assert %v4",),
+        ownership=(
+            "The message is diagnostic-only borrowed state and is not retained "
+            "on the successful path.",
+        ),
+        assembly=("control.assert %v4, %r2",),
         pseudocode=(
             "if (values[condition_v8] != 0) {\n"
             "  pc = record_pc + 4;\n"
             "} else {\n"
-            "  fail(failed_precondition);\n"
+            "  fail(failed_precondition, optional_message(message_r8_nullable));\n"
             "}"
         ),
     ),

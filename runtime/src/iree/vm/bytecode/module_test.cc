@@ -590,8 +590,9 @@ TEST(VMBytecodeModuleTest, RejectsMalformedProgramFailure) {
   const auto build_assert_image = [&]() {
     std::vector<uint8_t> image = BuildSwitchInspectionModuleImage();
     MutableFunctionImage function = FindFunctionImage(&image, 0);
+    function.row->ref_register_count_u16 = 1;
     const iree_vm_isa_control_assert_record_t assert_record = {
-        IREE_VM_ISA_CORE_OPCODE_CONTROL_ASSERT, 0, {0, 0}};
+        IREE_VM_ISA_CORE_OPCODE_CONTROL_ASSERT, 0, 0, 0};
     std::memcpy(function.bytecode + kAssertOffset, &assert_record,
                 sizeof(assert_record));
     const iree_vm_isa_control_branch_s16_record_t branch_record = {
@@ -651,16 +652,16 @@ TEST(VMBytecodeModuleTest, RejectsMalformedProgramFailure) {
   expect_rejected(build_assert_image(), [&](MutableFunctionImage function) {
     auto* record = reinterpret_cast<iree_vm_isa_control_assert_record_t*>(
         function.bytecode + kAssertOffset);
-    record->zero_padding_u8[0] = 1;
+    record->message_r8_nullable = 1;
   });
   expect_rejected(build_assert_image(), [&](MutableFunctionImage function) {
     auto* record = reinterpret_cast<iree_vm_isa_control_assert_record_t*>(
         function.bytecode + kAssertOffset);
-    record->zero_padding_u8[1] = 1;
+    record->zero_padding_u8 = 1;
   });
   expect_rejected(build_assert_image(), [&](MutableFunctionImage function) {
     const iree_vm_isa_control_assert_record_t record = {
-        IREE_VM_ISA_CORE_OPCODE_CONTROL_ASSERT, 0, {0, 0}};
+        IREE_VM_ISA_CORE_OPCODE_CONTROL_ASSERT, 0, 0, 0};
     std::memcpy(function.bytecode + kFinalOffset, &record, sizeof(record));
   });
 
@@ -684,6 +685,91 @@ TEST(VMBytecodeModuleTest, RejectsMalformedProgramFailure) {
   });
 
   iree_vm_environment_free(environment);
+}
+
+TEST(VMBytecodeModuleTest, CapturesAssertionDiagnosticBeforeUnwind) {
+  std::vector<uint8_t> image = BuildRefModuleImage();
+  MutableFunctionImage function = FindFunctionImage(&image, 1);
+  ASSERT_NE(function.row, nullptr);
+  ASSERT_NE(function.bytecode, nullptr);
+  function.row->value_register_count_u16 = 1;
+  function.row->ref_register_count_u16 = 1;
+
+  uint8_t* cursor = function.bytecode;
+  const uint8_t* const end =
+      function.bytecode + function.row->bytecode_length_u32;
+  const iree_vm_isa_control_block_record_t block = {
+      IREE_VM_ISA_CORE_OPCODE_CONTROL_BLOCK, {0, 0, 0}};
+  std::memcpy(cursor, &block, sizeof(block));
+  cursor += sizeof(block);
+  const iree_vm_isa_constant_zero_record_t zero = {
+      IREE_VM_ISA_CORE_OPCODE_CONSTANT_ZERO, 0, 0};
+  std::memcpy(cursor, &zero, sizeof(zero));
+  cursor += sizeof(zero);
+  const iree_vm_isa_control_assert_record_t assertion = {
+      IREE_VM_ISA_CORE_OPCODE_CONTROL_ASSERT, 0, 0, 0};
+  std::memcpy(cursor, &assertion, sizeof(assertion));
+  cursor += sizeof(assertion);
+  while (cursor < end - sizeof(iree_vm_isa_control_return_record_t)) {
+    std::memcpy(cursor, &zero, sizeof(zero));
+    cursor += sizeof(zero);
+  }
+  const iree_vm_isa_control_return_record_t return_record = {
+      IREE_VM_ISA_CORE_OPCODE_CONTROL_RETURN, {0, 0, 0}};
+  std::memcpy(cursor, &return_record, sizeof(return_record));
+  cursor += sizeof(return_record);
+  ASSERT_EQ(cursor, end);
+
+  iree_vm_environment_t* environment = nullptr;
+  IREE_ASSERT_OK(
+      iree_vm_environment_allocate(iree_allocator_system(), &environment));
+  iree_vm_module_t* module = nullptr;
+  IREE_ASSERT_OK(iree_vm_bytecode_module_create(
+      environment, IREE_SV("assertion"),
+      {iree_make_const_byte_span(image.data(), image.size()),
+       iree_allocator_null()},
+      iree_allocator_system(), &module));
+  iree_vm_environment_free(environment);
+
+  iree_vm_ref_type_t buffer_type = nullptr;
+  IREE_ASSERT_OK(iree_vm_module_ref_type_by_ordinal(module, 0, &buffer_type));
+  const iree_vm_ref_types_t vm_types = {buffer_type};
+  iree_vm_program_t* program = nullptr;
+  IREE_ASSERT_OK(iree_vm_program_create({module, iree_vm_module_span_empty()},
+                                        iree_allocator_system(), &program));
+  iree_vm_invocation_t* invocation = nullptr;
+  IREE_ASSERT_OK(iree_vm_invocation_allocate(
+      kInvocationStorageSize, iree_allocator_system(), &invocation));
+  iree_vm_process_t* process = nullptr;
+  IREE_ASSERT_OK(iree_vm_process_create(program, invocation,
+                                        iree_vm_variant_span_empty(),
+                                        iree_allocator_system(), &process));
+  iree_vm_function_t fail = iree_vm_function_null();
+  IREE_ASSERT_OK(iree_vm_process_lookup_function(process, IREE_SV("assertion"),
+                                                 IREE_SV("fail"), &fail));
+
+  constexpr char kMessage[] = "assertion diagnostic";
+  iree_vm_buffer_t* message_buffer = nullptr;
+  IREE_ASSERT_OK(iree_vm_buffer_clone(
+      IREE_VM_BUFFER_ACCESS_FLAG_READ,
+      iree_make_const_byte_span(kMessage, sizeof(kMessage) - 1),
+      /*minimum_alignment=*/1, iree_allocator_system(), &message_buffer));
+  iree_vm_variant_t arguments[] = {
+      iree_vm_buffer_variant_from_ptr_move(&vm_types, &message_buffer),
+  };
+  iree_status_t status_value = iree_vm_invoke(
+      invocation, fail, iree_vm_variant_span_from_array(arguments),
+      iree_vm_variant_span_empty());
+  iree::Status status(std::move(status_value));
+  EXPECT_EQ(status.code(), iree::StatusCode::kFailedPrecondition);
+  EXPECT_NE(status.ToString().find(kMessage), std::string::npos)
+      << status.ToString();
+  EXPECT_TRUE(iree_vm_variant_is_empty(arguments[0]));
+
+  iree_vm_invocation_free(invocation);
+  iree_vm_process_release(process);
+  iree_vm_program_release(program);
+  iree_vm_module_release(module);
 }
 
 TEST(VMBytecodeModuleTest, ExecutesScalarStateInstructions) {

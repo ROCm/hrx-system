@@ -118,10 +118,16 @@ def test_partial_arithmetic_remains_memory_pure() -> None:
     assert integer_division.flags == (DescriptorFlag.DEAD_REMOVABLE,)
 
 
-def test_control_assert_is_pure_but_not_dead_removable() -> None:
+def test_control_assert_reads_diagnostic_but_is_not_dead_removable() -> None:
     descriptors = {descriptor.key: descriptor for descriptor in VM_CORE_DESCRIPTOR_SET.descriptors}
     control_assert = descriptors["vm.control.assert"]
-    assert control_assert.effects == ()
+    assert control_assert.effects == (
+        Effect(
+            EffectKind.READ,
+            memory_space=MemorySpace.GENERIC,
+            flags=(EffectFlag.DEPENDENCY,),
+        ),
+    )
     assert control_assert.flags == ()
 
 

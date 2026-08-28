@@ -145,6 +145,10 @@ typedef struct loom_vm_contract_materializer_t {
   loom_type_t i64_type;
   // Typed VM register carrying an f32 value.
   loom_type_t f32_type;
+  // Typed VM ref register carrying a logical buffer.
+  loom_type_t buffer_ref_type;
+  // Shared null diagnostic message emitted before the first assertion.
+  loom_value_id_t null_message;
   // Source location assigned to all materialized checks.
   loom_location_id_t location;
 } loom_vm_contract_materializer_t;
@@ -249,12 +253,26 @@ static iree_status_t loom_vm_contract_build_selected_binary(
 
 static iree_status_t loom_vm_contract_build_assert(
     loom_vm_contract_materializer_t* materializer, loom_value_id_t condition) {
+  if (materializer->null_message == LOOM_VALUE_ID_INVALID) {
+    loom_op_t* null_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_low_build_resolved_descriptor_op(
+        &materializer->rewriter->builder, materializer->descriptor_set,
+        loom_vm_contract_descriptor(materializer,
+                                    VM_CORE_DESCRIPTOR_REF_REF_NULL),
+        /*operands=*/NULL, /*operand_count=*/0, loom_named_attr_slice_empty(),
+        &materializer->buffer_ref_type, /*result_count=*/1,
+        /*tied_results=*/NULL, /*tied_result_count=*/0, materializer->location,
+        &null_op));
+    materializer->null_message = loom_op_results(null_op)[0];
+  }
+  const loom_value_id_t operands[] = {condition, materializer->null_message};
   loom_op_t* op = NULL;
   return loom_low_build_resolved_descriptor_op(
       &materializer->rewriter->builder, materializer->descriptor_set,
       loom_vm_contract_descriptor(materializer,
                                   VM_CORE_DESCRIPTOR_REF_CONTROL_ASSERT),
-      &condition, 1, loom_named_attr_slice_empty(), /*result_types=*/NULL,
+      operands, IREE_ARRAYSIZE(operands), loom_named_attr_slice_empty(),
+      /*result_types=*/NULL,
       /*result_count=*/0, /*tied_results=*/NULL, /*tied_result_count=*/0,
       materializer->location, &op);
 }
@@ -659,6 +677,7 @@ static iree_status_t loom_vm_contract_materializer_initialize(
   *out_materializer = (loom_vm_contract_materializer_t){
       .rewriter = rewriter,
       .descriptor_set = loom_vm_core_descriptor_set(),
+      .null_message = LOOM_VALUE_ID_INVALID,
       .location = location,
   };
   IREE_RETURN_IF_ERROR(loom_low_build_typed_register_type(
@@ -673,10 +692,14 @@ static iree_status_t loom_vm_contract_materializer_initialize(
       rewriter->module, out_materializer->descriptor_set,
       VM_CORE_REG_CLASS_ID_VALUE, /*unit_count=*/1,
       loom_type_scalar(LOOM_SCALAR_TYPE_I64), &out_materializer->i64_type));
-  return loom_low_build_typed_register_type(
+  IREE_RETURN_IF_ERROR(loom_low_build_typed_register_type(
       rewriter->module, out_materializer->descriptor_set,
       VM_CORE_REG_CLASS_ID_VALUE, /*unit_count=*/1,
-      loom_type_scalar(LOOM_SCALAR_TYPE_F32), &out_materializer->f32_type);
+      loom_type_scalar(LOOM_SCALAR_TYPE_F32), &out_materializer->f32_type));
+  return loom_low_build_typed_register_type(
+      rewriter->module, out_materializer->descriptor_set,
+      VM_CORE_REG_CLASS_ID_REF, /*unit_count=*/1, loom_type_buffer(),
+      &out_materializer->buffer_ref_type);
 }
 
 iree_status_t loom_vm_materialize_function_contracts_run(
