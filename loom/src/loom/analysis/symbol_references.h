@@ -113,6 +113,9 @@ typedef struct loom_template_demand_t {
   loom_symbol_id_t source_symbol_id;
   // Root region slot on source_symbol_id plus one, or zero for its contract.
   uint8_t source_root_region_index_plus_one;
+
+  // True when the application is nested under structured conditional control.
+  bool has_lexical_condition;
 } loom_template_demand_t;
 
 static_assert(sizeof(loom_template_demand_t) == 24,
@@ -168,6 +171,13 @@ typedef struct loom_symbol_reference_table_t {
     const loom_template_demand_t* values;
     // Number of entries in values.
     iree_host_size_t count;
+
+    // Unique demanded family symbol IDs in ascending order.
+    const loom_symbol_id_t* family_symbol_ids;
+
+    // Number of entries in family_symbol_ids.
+    iree_host_size_t family_count;
+
     // Dense bitset indexed by module symbol ID for demanded families, or NULL
     // when the module contains no template demands.
     const uint64_t* family_bits;

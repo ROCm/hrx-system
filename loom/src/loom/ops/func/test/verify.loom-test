@@ -95,3 +95,35 @@ template.ukernel<@test.invalid_condition> requires [#target.subgroup.size<0>] @i
 // provider requirements.
 // ERROR@+1: TARGET/068 {function_name="invalid_family_condition", condition_index="0", reason="parameterized attribute family 'test.tile' is not a target condition"}
 template.decl requires [#test.tile<width = 8>] @invalid_family_condition()
+
+// ====
+
+// Provider signatures are verified once against their family contract. Later
+// selection consumes this invariant without repeating type comparison at each
+// application site.
+template.decl @test.provider_signature(%value: i32)
+
+// ERROR@+1: TYPE/001 {field_a="implementation argument 0", type_a="f32", field_b="contract argument 0", type_b="i32"}
+template.def<@test.provider_signature> @wrong_provider_argument(%value: f32) {
+  template.return
+}
+
+// ====
+
+template.decl @test.provider_result(%value: f32) -> (i32)
+
+// ERROR@+1: TYPE/001 {field_a="implementation result 0", type_a="f32", field_b="contract result 0", type_b="i32"}
+template.def<@test.provider_result> @wrong_provider_result(%value: f32) -> (f32) {
+  template.return %value : f32
+}
+
+// ====
+
+// Applications are independently verified against the same family contract.
+template.decl @test.application_signature(%value: i32) -> (i32)
+
+func.def @wrong_application_argument(%value: f32) -> (i32) {
+  // ERROR@+1: TYPE/001 {field_a="operand 0", type_a="f32", field_b="contract argument 0", type_b="i32"}
+  %result = template.apply<@test.application_signature>(%value) : (f32) -> (i32)
+  func.return %result : i32
+}

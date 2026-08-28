@@ -20,6 +20,7 @@
 #include "loom/ops/global/ops.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/op_defs.h"
+#include "loom/ops/scf/ops.h"
 #include "loom/ops/target/ops.h"
 #include "loom/ops/template/ops.h"
 #include "loom/ops/test/ops.h"
@@ -41,6 +42,7 @@ class SymbolReferencesTest : public ::testing::Test {
     RegisterDialect(LOOM_DIALECT_FUNC, loom_func_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_GLOBAL, loom_global_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_KERNEL, loom_kernel_dialect_vtables);
+    RegisterDialect(LOOM_DIALECT_SCF, loom_scf_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_TARGET, loom_target_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_TEMPLATE, loom_template_dialect_vtables);
     IREE_ASSERT_OK(loom_test_dialect_register(&context_));
@@ -380,6 +382,9 @@ func.def public @entry(%arg: i32) -> (i32) {
   const loom_symbol_reference_table_t table = BuildTable(module.get());
 
   ASSERT_EQ(table.template_demands.count, 2u);
+  ASSERT_EQ(table.template_demands.family_count, 1u);
+  ASSERT_NE(table.template_demands.family_symbol_ids, nullptr);
+  EXPECT_EQ(table.template_demands.family_symbol_ids[0], family_symbol_id);
   EXPECT_TRUE(loom_symbol_reference_template_family_is_demanded(
       &table, family_symbol_id));
   EXPECT_FALSE(loom_symbol_reference_template_family_is_demanded(
@@ -420,6 +425,64 @@ func.def public @entry(%arg: i32) -> (i32) {
   EXPECT_EQ(
       table.template_providers.values[provider_id].next_family_provider_id,
       LOOM_TEMPLATE_PROVIDER_REFERENCE_ID_INVALID);
+}
+
+TEST_F(SymbolReferencesTest, TemplateDemandFamiliesAreUniqueAndSorted) {
+  ModulePtr module = ParseModule(R"(
+template.decl @first.contract(%value: i32) -> (i32)
+template.decl @second.contract(%value: i32) -> (i32)
+
+func.def public @entry(%arg: i32) -> (i32) {
+  %second = template.apply<@second.contract>(%arg) : (i32) -> (i32)
+  %first = template.apply<@first.contract>(%second) : (i32) -> (i32)
+  %again = template.apply<@second.contract>(%first) : (i32) -> (i32)
+  func.return %again : i32
+}
+)");
+
+  const loom_symbol_id_t first =
+      FindSymbol(module.get(), IREE_SV("first.contract"));
+  const loom_symbol_id_t second =
+      FindSymbol(module.get(), IREE_SV("second.contract"));
+  ASSERT_LT(first, second);
+
+  const loom_symbol_reference_table_t table = BuildTable(module.get());
+  ASSERT_EQ(table.template_demands.count, 3u);
+  ASSERT_EQ(table.template_demands.family_count, 2u);
+  ASSERT_NE(table.template_demands.family_symbol_ids, nullptr);
+  EXPECT_EQ(table.template_demands.family_symbol_ids[0], first);
+  EXPECT_EQ(table.template_demands.family_symbol_ids[1], second);
+}
+
+TEST_F(SymbolReferencesTest, TemplateDemandsRetainLexicalConditionContext) {
+  ModulePtr module = ParseModule(R"(
+template.decl @demo.contract(%value: i32) -> (i32)
+
+func.def public @entry(%condition: i1, %arg: i32) -> (i32) {
+  %flat = template.apply<@demo.contract>(%arg) : (i32) -> (i32)
+  %nested = scf.if %condition -> (i32) {
+    %then_value = template.apply<@demo.contract>(%flat) : (i32) -> (i32)
+    scf.yield %then_value : i32
+  } else {
+    scf.yield %flat : i32
+  }
+  func.return %nested : i32
+}
+)");
+
+  const loom_symbol_reference_table_t table = BuildTable(module.get());
+  ASSERT_EQ(table.template_demands.count, 2u);
+  uint32_t flat_count = 0;
+  uint32_t nested_count = 0;
+  for (iree_host_size_t i = 0; i < table.template_demands.count; ++i) {
+    if (table.template_demands.values[i].has_lexical_condition) {
+      ++nested_count;
+    } else {
+      ++flat_count;
+    }
+  }
+  EXPECT_EQ(flat_count, 1u);
+  EXPECT_EQ(nested_count, 1u);
 }
 
 TEST_F(SymbolReferencesTest, OpenParameterizedArraysAreNotSymbolReferences) {

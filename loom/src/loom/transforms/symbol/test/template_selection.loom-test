@@ -718,6 +718,40 @@ func.def public target(@external) @entry(%arg: i32) -> (i32) {
 
 // ====
 
+// Floating-point class facts participate in provider selection just like
+// integer range facts. Independently proven NaN and infinity exclusions imply
+// the finite predicate required by the higher-priority provider.
+// RUN: pass select-templates
+
+template.decl @demo.finite(%value: f32) -> (f32)
+
+template.def<@demo.finite> priority(10) @finite(%value: f32) -> (f32) where [finite(%value)] {
+  template.return %value : f32
+}
+
+template.def<@demo.finite> priority(1) @fallback(%value: f32) -> (f32) {
+  template.return %value : f32
+}
+
+func.def public @entry(%value: f32) -> (f32) where [not_nan(%value), not_inf(%value)] {
+  %result = template.apply<@demo.finite>(%value) : (f32) -> (f32)
+  func.return %result : f32
+}
+
+// ----
+template.decl @demo.finite(%value: f32) -> (f32)
+
+template.def<@demo.finite> priority(10) @finite(%value: f32) -> (f32) where [finite(%value)] {
+  template.return %value : f32
+}
+
+func.def public @entry(%value: f32) -> (f32) where [not_nan(%value), not_inf(%value)] {
+  %result = template.call @finite(%value) : (f32) -> (f32)
+  func.return %result : f32
+}
+
+// ====
+
 // A targetless caller does not disprove a targeted provider. Early selection
 // preserves that unresolved choice when it can outrank the proven fallback.
 // RUN: pass select-templates

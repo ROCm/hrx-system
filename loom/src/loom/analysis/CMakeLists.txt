@@ -789,7 +789,9 @@ loom_cc_library(
     loom::ir
     loom::ops::func
     loom::ops::op_defs
+    loom::ops::scf
     loom::ops::template
+    loom::util::adaptive_sort
   PUBLIC
 )
 
@@ -810,6 +812,7 @@ loom_cc_test(
     loom::ops::global
     loom::ops::kernel
     loom::ops::op_defs
+    loom::ops::scf
     loom::ops::target
     loom::ops::template
     loom::ops::test

@@ -11,15 +11,84 @@ iree_add_all_subdirs()
 
 loom_cc_library(
   NAME
-    template_selection
+    template_applicability
   HDRS
     "template_applicability.h"
-    "template_selection.h"
   SRCS
     "template_applicability.c"
+  DEPS
+    iree::base
+    loom::analysis::condition_facts
+    loom::analysis::template_provider_catalog
+    loom::decision::predicate
+    loom::ir
+    loom::ir::facts
+    loom::ops::op_defs
+    loom::ops::scf
+    loom::ops::template
+    loom::target::condition
+    loom::target::facts
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    template_decision_model
+  HDRS
+    "template_decision_model.h"
+  SRCS
+    "template_decision_model.c"
+  DEPS
+    ::template_applicability
+    iree::base
+    iree::base::internal::arena
+    loom::analysis::symbol_facts
+    loom::analysis::symbol_references
+    loom::analysis::template_provider_catalog
+    loom::decision::program
+    loom::ir
+    loom::ops::op_defs
+    loom::ops::target
+    loom::ops::template
+    loom::util::adaptive_sort
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    template_decision_model_test
+  SRCS
+    "template_decision_model_test.cc"
+  DEPS
+    ::template_applicability
+    ::template_decision_model
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::analysis::symbol_facts
+    loom::analysis::symbol_references
+    loom::analysis::template_provider_catalog
+    loom::format::text::parser
+    loom::ir
+    loom::ops::func
+    loom::ops::target
+    loom::ops::template
+    loom::ops::test
+    loom::testing::module_ptr
+    loom::util::fact_table
+)
+
+loom_cc_library(
+  NAME
+    template_selection
+  HDRS
+    "template_selection.h"
+  SRCS
     "template_selection.c"
   DEPS
     ::symbol_pruning
+    ::template_applicability
+    ::template_decision_model
     iree::base
     iree::base::internal::arena
     loom::analysis::condition_facts
@@ -47,6 +116,27 @@ loom_cc_library(
     loom::target::pass_environment
     loom::util::bstring
   PUBLIC
+)
+
+loom_cc_benchmark(
+  NAME
+    template_selection_benchmark
+  SRCS
+    "template_selection_benchmark.cc"
+  DEPS
+    ::template_decision_model
+    ::template_selection
+    iree::base::internal::arena
+    iree::testing::benchmark_main
+    loom::analysis::symbol_facts
+    loom::analysis::symbol_references
+    loom::analysis::template_provider_catalog
+    loom::format::text::parser
+    loom::ir
+    loom::testing::module_ptr
+    loom::tooling::context
+    loom::verify
+  TESTONLY
 )
 
 loom_cc_test(
