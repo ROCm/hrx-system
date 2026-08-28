@@ -81,6 +81,8 @@ enum loom_link_symbol_flag_bits_e {
   LOOM_LINK_SYMBOL_FLAG_CONFIG = 1u << 5,
   // Symbol exists only for test or benchmark tooling.
   LOOM_LINK_SYMBOL_FLAG_TEST_ONLY = 1u << 6,
+  // Source symbol is explicitly preserved by ordinary symbol pruning.
+  LOOM_LINK_SYMBOL_FLAG_RETAIN = 1u << 7,
 };
 typedef uint32_t loom_link_symbol_flags_t;
 

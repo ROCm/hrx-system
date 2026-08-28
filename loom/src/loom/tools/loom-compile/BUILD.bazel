@@ -122,8 +122,6 @@ loom_cc_library(
         "//loom/src/loom/format/bytecode:writer",
         "//loom/src/loom/link:materialization_environment",
         "//loom/src/loom/link:module_index",
-        "//loom/src/loom/ops:op_defs",
-        "//loom/src/loom/ops/command",
         "//loom/src/loom/pass:builtin_registry",
         "//loom/src/loom/target:entry_selection",
         "//loom/src/loom/target/arch/cmd:artifact_builder",

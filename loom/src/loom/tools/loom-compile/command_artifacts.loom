@@ -15,7 +15,7 @@ kernel.def @double() {
 // Unreachable library configuration does not constrain selected command roots.
 config.decl @unused.command_config : %value: index
 
-command.program.def public @increment_once() launch(%storage: buffer) {
+command.program.def retain @increment_once() launch(%storage: buffer) {
   kernel.launch @increment(%storage) : (buffer)
   command.return
 }

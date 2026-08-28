@@ -11,8 +11,6 @@
 #include "loom/format/bytecode/writer.h"
 #include "loom/format/low_repr.h"
 #include "loom/link/module_index.h"
-#include "loom/ops/command/ops.h"
-#include "loom/ops/op_defs.h"
 #include "loom/pass/builtin_registry.h"
 #include "loom/target/arch/cmd/artifact_builder.h"
 #include "loom/target/arch/cmd/artifact_set.h"
@@ -128,25 +126,6 @@ static iree_status_t loom_compile_command_backend_format_manifest_json(
   return loom_json_object_end(&root);
 }
 
-static bool loom_compile_command_backend_is_root(const loom_op_t* op) {
-  return loom_command_program_def_isa(op) &&
-         (loom_command_program_def_visibility(op) ==
-              LOOM_COMMAND_VISIBILITY_PUBLIC ||
-          loom_command_program_def_retain(op) == LOOM_COMMAND_RETAIN_RETAIN);
-}
-
-static iree_host_size_t loom_compile_command_backend_count_roots(
-    loom_module_t* module) {
-  iree_host_size_t root_count = 0;
-  loom_op_t* op = NULL;
-  loom_block_for_each_op(loom_module_block(module), op) {
-    if (loom_compile_command_backend_is_root(op)) {
-      ++root_count;
-    }
-  }
-  return root_count;
-}
-
 static iree_status_t loom_compile_command_backend_require_directory(
     iree_string_view_t path, iree_allocator_t host_allocator) {
   IREE_RETURN_IF_ERROR(
@@ -162,32 +141,45 @@ static iree_status_t loom_compile_command_backend_require_directory(
   return iree_ok_status();
 }
 
-static iree_status_t loom_compile_command_backend_index_roots(
+// Selects command roots from source roles retained by the module index. The
+// compact indexed-symbol scan replaces source-IR walks and allocates the result
+// once at its maximum possible size.
+static iree_status_t loom_compile_command_backend_collect_roots(
+    const loom_link_module_index_t* index,
     const loom_link_module_index_module_t* indexed_module,
-    loom_module_t* module, iree_host_size_t root_count,
     iree_arena_allocator_t* scratch_arena,
-    iree_host_size_t** out_root_symbol_ordinals) {
+    iree_host_size_t** out_root_symbol_ordinals,
+    iree_host_size_t* out_root_count) {
   *out_root_symbol_ordinals = NULL;
+  *out_root_count = 0;
+  if (indexed_module->symbol_count == 0) {
+    return iree_ok_status();
+  }
+
   iree_host_size_t* root_symbol_ordinals = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      scratch_arena, root_count, sizeof(*root_symbol_ordinals),
-      (void**)&root_symbol_ordinals));
+      scratch_arena, indexed_module->symbol_count,
+      sizeof(*root_symbol_ordinals), (void**)&root_symbol_ordinals));
 
-  iree_host_size_t root_ordinal = 0;
-  loom_op_t* op = NULL;
-  loom_block_for_each_op(loom_module_block(module), op) {
-    if (!loom_compile_command_backend_is_root(op)) {
+  iree_host_size_t root_count = 0;
+  for (iree_host_size_t i = 0; i < indexed_module->symbol_count; ++i) {
+    const iree_host_size_t symbol_ordinal =
+        indexed_module->symbol_start_ordinal + i;
+    const loom_link_module_index_symbol_t* symbol =
+        loom_link_module_index_symbol_at(index, symbol_ordinal);
+    IREE_ASSERT(symbol != NULL);
+    if (!iree_any_bit_set(symbol->facets.schema.interfaces,
+                          LOOM_SYMBOL_INTERFACE_COMMAND_PROGRAM) ||
+        !iree_any_bit_set(symbol->flags,
+                          LOOM_LINK_SYMBOL_FLAG_CONCRETE_DEFINITION) ||
+        !iree_any_bit_set(symbol->flags, LOOM_LINK_SYMBOL_FLAG_PUBLIC |
+                                             LOOM_LINK_SYMBOL_FLAG_RETAIN)) {
       continue;
     }
-    const loom_symbol_ref_t callee = loom_command_program_def_callee(op);
-    IREE_ASSERT(loom_symbol_ref_is_valid(callee));
-    IREE_ASSERT_EQ(callee.module_id, 0u);
-    IREE_ASSERT_LT(callee.symbol_id, indexed_module->symbol_count);
-    root_symbol_ordinals[root_ordinal++] =
-        indexed_module->symbol_start_ordinal + callee.symbol_id;
+    root_symbol_ordinals[root_count++] = symbol_ordinal;
   }
-  IREE_ASSERT_EQ(root_ordinal, root_count);
   *out_root_symbol_ordinals = root_symbol_ordinals;
+  *out_root_count = root_count;
   return iree_ok_status();
 }
 
@@ -307,19 +299,6 @@ iree_status_t loom_compile_command_backend_emit(
         "kernel request artifacts require a filesystem directory");
   }
 
-  const iree_host_size_t root_count =
-      loom_compile_command_backend_count_roots(run_module->module);
-  if (root_count == 0) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "command backend requires at least one retained command program root");
-  }
-
-  if (!iree_string_view_is_empty(options->kernel_request_directory)) {
-    IREE_RETURN_IF_ERROR(loom_compile_command_backend_require_directory(
-        options->kernel_request_directory, host_allocator));
-  }
-
   iree_arena_allocator_t scratch_arena;
   iree_arena_initialize(loom_run_session_block_pool(session), &scratch_arena);
   loom_link_module_index_t* index = NULL;
@@ -348,10 +327,21 @@ iree_status_t loom_compile_command_backend_emit(
   }
 
   iree_host_size_t* root_symbol_ordinals = NULL;
+  iree_host_size_t root_count = 0;
   if (iree_status_is_ok(status)) {
-    status = loom_compile_command_backend_index_roots(
-        indexed_module, run_module->module, root_count, &scratch_arena,
-        &root_symbol_ordinals);
+    status = loom_compile_command_backend_collect_roots(
+        index, indexed_module, &scratch_arena, &root_symbol_ordinals,
+        &root_count);
+  }
+  if (iree_status_is_ok(status) && root_count == 0) {
+    status = iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "command backend requires at least one retained command program root");
+  }
+  if (iree_status_is_ok(status) &&
+      !iree_string_view_is_empty(options->kernel_request_directory)) {
+    status = loom_compile_command_backend_require_directory(
+        options->kernel_request_directory, host_allocator);
   }
 
   const loom_target_entry_options_t diagnostic_options = {
