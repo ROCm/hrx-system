@@ -80,6 +80,22 @@ loom_cc_test(
 
 loom_cc_library(
   NAME
+    template_rewrite
+  HDRS
+    "template_rewrite.h"
+  SRCS
+    "template_rewrite.c"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+    loom::ir
+    loom::ops::template
+    loom::rewrite::rewriter
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     template_selection
   HDRS
     "template_selection.h"
@@ -89,6 +105,7 @@ loom_cc_library(
     ::symbol_pruning
     ::template_applicability
     ::template_decision_model
+    ::template_rewrite
     iree::base
     iree::base::internal::arena
     loom::analysis::condition_facts

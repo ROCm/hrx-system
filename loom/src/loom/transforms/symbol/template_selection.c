@@ -33,6 +33,7 @@
 #include "loom/transforms/symbol/symbol_pruning.h"
 #include "loom/transforms/symbol/template_applicability.h"
 #include "loom/transforms/symbol/template_decision_model.h"
+#include "loom/transforms/symbol/template_rewrite.h"
 #include "loom/util/bstring.h"
 
 //===----------------------------------------------------------------------===//
@@ -1331,69 +1332,14 @@ static iree_status_t loom_template_selection_emit_blockers(
 // Rewrite
 //===----------------------------------------------------------------------===//
 
-static iree_status_t loom_template_selection_copy_result_types(
-    loom_template_selection_state_t* state, const loom_op_t* apply_op,
-    loom_type_t** out_result_types) {
-  *out_result_types = NULL;
-  loom_value_slice_t results = loom_template_apply_results(apply_op);
-  if (results.count == 0) {
-    return iree_ok_status();
-  }
-
-  loom_type_t* result_types = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_arena_allocate_array(state->pass->arena, results.count,
-                                sizeof(*result_types), (void**)&result_types));
-  for (uint16_t i = 0; i < results.count; ++i) {
-    if (results.values[i] >= state->module->values.count) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "template.apply result value %u is outside the "
-                              "module value table",
-                              (uint32_t)results.values[i]);
-    }
-    result_types[i] = loom_module_value_type(state->module, results.values[i]);
-  }
-  *out_result_types = result_types;
-  return iree_ok_status();
-}
-
 static iree_status_t loom_template_selection_rewrite_entry(
     loom_template_selection_state_t* state, loom_rewriter_t* rewriter,
     const loom_template_selection_entry_t* entry) {
-  loom_value_slice_t operands =
+  const loom_value_slice_t operands =
       loom_template_apply_operands(entry->application_op);
-  loom_value_slice_t results =
-      loom_template_apply_results(entry->application_op);
-  loom_type_t* result_types = NULL;
-  IREE_RETURN_IF_ERROR(loom_template_selection_copy_result_types(
-      state, entry->application_op, &result_types));
-
-  loom_template_call_build_flags_t build_flags = 0;
-  uint8_t purity = loom_template_apply_purity(entry->application_op);
-  if (purity != 0) {
-    build_flags |= LOOM_TEMPLATE_CALL_BUILD_FLAG_HAS_PURITY;
-  }
-  uint8_t temperature = loom_template_apply_temperature(entry->application_op);
-  if (temperature != 0) {
-    build_flags |= LOOM_TEMPLATE_CALL_BUILD_FLAG_HAS_TEMPERATURE;
-  }
-
-  loom_builder_set_before(&rewriter->builder, entry->application_op);
-  loom_value_id_t value_checkpoint = loom_rewriter_value_checkpoint(rewriter);
-  loom_op_t* call_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_template_call_build(
-      &rewriter->builder, build_flags, purity, temperature,
-      entry->selected_provider->symbol, operands.values, operands.count,
-      result_types, results.count, loom_op_tied_results(entry->application_op),
-      entry->application_op->tied_result_count, entry->application_op->location,
-      &call_op));
-  loom_value_slice_t call_results = loom_template_call_results(call_op);
-  IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
-      rewriter, entry->application_op, call_results.values, call_results.count,
-      value_checkpoint));
-  IREE_RETURN_IF_ERROR(loom_rewriter_replace_all_uses_and_erase(
-      rewriter, entry->application_op, call_results.values,
-      call_results.count));
+  IREE_RETURN_IF_ERROR(loom_template_rewrite_apply_as_exact_call(
+      rewriter, entry->application_op, entry->selected_provider->symbol,
+      operands.values));
   loom_pass_mark_changed(state->pass);
   return iree_ok_status();
 }
