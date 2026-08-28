@@ -1,0 +1,12 @@
+// RUN: emit source-low output=none
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @gfx1100_f8e4m3_x64_to_bf16(%input: buffer, %base: offset) -> (vector<64xbf16>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %schema = encoding.define #encoding.operand<element_format=f8e4m3fn, payload_elements=64, payload_registers=16, rounding=finite_flush_subnormal> : encoding<schema>
+  %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %input_view = buffer.view %input[%base] : buffer -> view<64xf8E4M3, %storage>
+  %payload = vector.load %input_view[0] : view<64xf8E4M3, %storage> -> vector<64xf8E4M3>
+  %decoded = vector.extf %payload : vector<64xf8E4M3> to vector<64xbf16>
+  func.return %decoded : vector<64xbf16>
+}

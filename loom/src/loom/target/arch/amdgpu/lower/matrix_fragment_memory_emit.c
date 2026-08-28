@@ -798,9 +798,9 @@ void loom_amdgpu_mark_fragment_memory_plan_storage_demands(
                                                   term->stride_values[j]);
     }
   }
-  for (uint8_t i = 0; i < plan->runtime_axis_count; ++i) {
+  for (uint8_t view_axis = 0; view_axis < plan->view_rank; ++view_axis) {
     const loom_low_source_memory_axis_byte_stride_t* byte_stride =
-        &plan->runtime_axes[i].byte_stride;
+        &plan->runtime_axes[view_axis].byte_stride;
     for (uint8_t j = 0; j < byte_stride->dynamic_factor_count; ++j) {
       loom_low_lower_require_source_value_storage(
           context, byte_stride->dynamic_factors[j]);

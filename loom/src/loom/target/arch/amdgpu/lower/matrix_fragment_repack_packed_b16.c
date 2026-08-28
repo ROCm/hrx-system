@@ -81,22 +81,6 @@ bool loom_amdgpu_select_result_to_rhs_packed_b16_fragment_repack_plan(
   return true;
 }
 
-static iree_status_t loom_amdgpu_fragment_repack_source_registers(
-    loom_low_lower_context_t* context, const loom_op_t* source_op,
-    const loom_amdgpu_fragment_repack_plan_t* plan, loom_value_id_t low_source,
-    loom_type_t vgpr_type, loom_value_id_t* out_source_registers) {
-  if (plan->source_register_count == 1) {
-    out_source_registers[0] = low_source;
-    return iree_ok_status();
-  }
-  for (uint16_t i = 0; i < plan->source_register_count; ++i) {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_low_slice(context, source_op,
-                                                    low_source, i, vgpr_type,
-                                                    &out_source_registers[i]));
-  }
-  return iree_ok_status();
-}
-
 static iree_status_t loom_amdgpu_fragment_repack_vcc_constant(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_low_lower_resolved_descriptor_t* descriptor, uint32_t mask,
@@ -128,8 +112,14 @@ iree_status_t loom_amdgpu_lower_result_to_rhs_packed_b16_fragment_repack(
 
   loom_value_id_t source_registers[LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES] = {
       LOOM_VALUE_ID_INVALID};
-  IREE_RETURN_IF_ERROR(loom_amdgpu_fragment_repack_source_registers(
-      context, source_op, plan, low_source, vgpr_type, source_registers));
+  if (plan->source_register_count == 1) {
+    source_registers[0] = low_source;
+  } else {
+    for (uint16_t i = 0; i < plan->source_register_count; ++i) {
+      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_low_slice(
+          context, source_op, low_source, i, vgpr_type, &source_registers[i]));
+    }
+  }
 
   loom_low_lower_resolved_descriptor_t exchange_descriptor = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref(

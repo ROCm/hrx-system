@@ -151,8 +151,7 @@ static bool loom_amdgpu_fragment_memory_address_base_key_is_equal(
   if (lhs->block != rhs->block ||
       !loom_type_equal(lhs->vgpr_type, rhs->vgpr_type) ||
       lhs->lane_term_count != rhs->lane_term_count ||
-      lhs->dynamic_term_count != rhs->dynamic_term_count ||
-      lhs->runtime_axis_count != rhs->runtime_axis_count) {
+      lhs->dynamic_term_count != rhs->dynamic_term_count) {
     return false;
   }
   if (memcmp(lhs->lane_terms, rhs->lane_terms,
@@ -165,13 +164,12 @@ static bool loom_amdgpu_fragment_memory_address_base_key_is_equal(
       return false;
     }
   }
-  for (uint8_t i = 0; i < lhs->runtime_axis_count; ++i) {
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(lhs->runtime_axes); ++i) {
     const loom_amdgpu_fragment_memory_runtime_axis_base_key_t* lhs_axis =
         &lhs->runtime_axes[i];
     const loom_amdgpu_fragment_memory_runtime_axis_base_key_t* rhs_axis =
         &rhs->runtime_axes[i];
-    if (lhs_axis->view_axis != rhs_axis->view_axis ||
-        lhs_axis->lane_divisor != rhs_axis->lane_divisor ||
+    if (lhs_axis->lane_divisor != rhs_axis->lane_divisor ||
         lhs_axis->lane_modulus != rhs_axis->lane_modulus ||
         lhs_axis->lane_coordinate_scale != rhs_axis->lane_coordinate_scale ||
         !loom_amdgpu_fragment_memory_address_product_key_is_equal(
@@ -242,13 +240,11 @@ static bool loom_amdgpu_fragment_memory_address_base_key_for_plan(
       product->static_byte_coefficient = term->byte_stride;
     }
   }
-  out_key->runtime_axis_count = plan->runtime_axis_count;
-  for (uint8_t i = 0; i < plan->runtime_axis_count; ++i) {
+  for (uint8_t view_axis = 0; view_axis < plan->view_rank; ++view_axis) {
     const loom_amdgpu_fragment_memory_runtime_axis_t* plan_axis =
-        &plan->runtime_axes[i];
+        &plan->runtime_axes[view_axis];
     loom_amdgpu_fragment_memory_runtime_axis_base_key_t* key_axis =
-        &out_key->runtime_axes[i];
-    key_axis->view_axis = plan_axis->view_axis;
+        &out_key->runtime_axes[view_axis];
     key_axis->lane_divisor = plan_axis->lane_divisor;
     key_axis->lane_modulus = plan_axis->lane_modulus;
     key_axis->lane_coordinate_scale = plan_axis->lane_coordinate_scale;
@@ -406,12 +402,17 @@ static iree_status_t loom_amdgpu_emit_fragment_memory_dynamic_source_terms(
     } else {
       const loom_amdgpu_fragment_memory_address_accumulator_t*
           shared_axis_stride = NULL;
-      for (uint8_t runtime_axis = 0; runtime_axis < plan->runtime_axis_count;
-           ++runtime_axis) {
+      for (uint8_t view_axis = 0; view_axis < plan->view_rank; ++view_axis) {
+        const loom_amdgpu_fragment_memory_runtime_axis_t* runtime_axis =
+            &plan->runtime_axes[view_axis];
+        if (runtime_axis->byte_stride.kind !=
+            LOOM_LOW_SOURCE_MEMORY_AXIS_BYTE_STRIDE_DYNAMIC) {
+          continue;
+        }
         if (loom_amdgpu_fragment_memory_term_uses_axis_stride(
-                term, &plan->runtime_axes[runtime_axis].byte_stride)) {
+                term, &runtime_axis->byte_stride)) {
           shared_axis_stride =
-              &address_state->runtime_axes[runtime_axis].byte_stride;
+              &address_state->runtime_axes[view_axis].byte_stride;
           break;
         }
       }
@@ -572,12 +573,11 @@ bool loom_amdgpu_fragment_memory_register_group_is_contiguous(
         base_static_byte_offset + (uint64_t)i * register_byte_count) {
       return false;
     }
-    for (uint8_t runtime_axis = 0; runtime_axis < plan->runtime_axis_count;
-         ++runtime_axis) {
-      if (plan->runtime_axes[runtime_axis]
-              .register_coordinates[register_index + i] !=
-          plan->runtime_axes[runtime_axis]
-              .register_coordinates[register_index]) {
+    for (uint8_t view_axis = 0; view_axis < plan->view_rank; ++view_axis) {
+      const loom_amdgpu_fragment_memory_runtime_axis_t* runtime_axis =
+          &plan->runtime_axes[view_axis];
+      if (runtime_axis->register_coordinates[register_index + i] !=
+          runtime_axis->register_coordinates[register_index]) {
         return false;
       }
     }
@@ -601,8 +601,8 @@ static bool loom_amdgpu_fragment_memory_register_static_offset(
     return false;
   }
   if (plan->address_layout.packed_element_byte_stride == 0) {
-    for (uint8_t i = 0; i < plan->runtime_axis_count; ++i) {
-      if (plan->runtime_axes[i].packed_element_coordinate_stride != 0) {
+    for (uint8_t view_axis = 0; view_axis < plan->view_rank; ++view_axis) {
+      if (plan->runtime_axes[view_axis].packed_element_coordinate_stride != 0) {
         return true;
       }
     }
@@ -668,9 +668,9 @@ bool loom_amdgpu_fragment_memory_runtime_packet_offset_is_subgroup_uniform(
     const loom_amdgpu_fragment_memory_plan_t* plan, uint16_t register_index,
     uint16_t element_index) {
   IREE_ASSERT_LT(register_index, plan->register_count);
-  for (uint8_t i = 0; i < plan->runtime_axis_count; ++i) {
+  for (uint8_t view_axis = 0; view_axis < plan->view_rank; ++view_axis) {
     const loom_amdgpu_fragment_memory_runtime_axis_t* runtime_axis =
-        &plan->runtime_axes[i];
+        &plan->runtime_axes[view_axis];
     if (runtime_axis->lane_coordinate_scale != 0) {
       return false;
     }
@@ -765,7 +765,8 @@ iree_status_t loom_amdgpu_initialize_fragment_memory_address_state(
         loom_amdgpu_fragment_memory_address_base_key_is_equal(
             &cache->address_base.key, &key)) {
       out_state->cursor = cache->address_base.accumulator;
-      for (uint8_t i = 0; i < plan->runtime_axis_count; ++i) {
+      for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(out_state->runtime_axes);
+           ++i) {
         out_state->runtime_axes[i].byte_stride =
             cache->address_base.runtime_axis_byte_strides[i];
       }
@@ -775,13 +776,22 @@ iree_status_t loom_amdgpu_initialize_fragment_memory_address_state(
 
   loom_type_t sgpr_type = loom_type_none();
   IREE_RETURN_IF_ERROR(loom_amdgpu_make_sgpr_type(context, &sgpr_type));
-  for (uint8_t i = 0; i < plan->runtime_axis_count; ++i) {
+  for (uint8_t view_axis = 0; view_axis < plan->view_rank; ++view_axis) {
     const loom_amdgpu_fragment_memory_runtime_axis_t* runtime_axis =
-        &plan->runtime_axes[i];
+        &plan->runtime_axes[view_axis];
+    if (runtime_axis->byte_stride.kind !=
+        LOOM_LOW_SOURCE_MEMORY_AXIS_BYTE_STRIDE_DYNAMIC) {
+      continue;
+    }
     loom_amdgpu_fragment_memory_runtime_axis_address_state_t* axis_state =
-        &out_state->runtime_axes[i];
+        &out_state->runtime_axes[view_axis];
     bool reused_product = false;
-    for (uint8_t previous_axis = 0; previous_axis < i; ++previous_axis) {
+    for (uint8_t previous_axis = 0; previous_axis < view_axis;
+         ++previous_axis) {
+      if (plan->runtime_axes[previous_axis].byte_stride.kind !=
+          LOOM_LOW_SOURCE_MEMORY_AXIS_BYTE_STRIDE_DYNAMIC) {
+        continue;
+      }
       if (loom_amdgpu_fragment_memory_axis_stride_product_is_equal(
               &runtime_axis->byte_stride,
               &plan->runtime_axes[previous_axis].byte_stride)) {
@@ -806,11 +816,11 @@ iree_status_t loom_amdgpu_initialize_fragment_memory_address_state(
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fragment_memory_lane_terms(
       context, source_op, &plan->address_layout, lane_ids, sgpr_type, vgpr_type,
       &out_state->cursor));
-  for (uint8_t i = 0; i < plan->runtime_axis_count; ++i) {
+  for (uint8_t view_axis = 0; view_axis < plan->view_rank; ++view_axis) {
     const loom_amdgpu_fragment_memory_runtime_axis_t* runtime_axis =
-        &plan->runtime_axes[i];
+        &plan->runtime_axes[view_axis];
     loom_amdgpu_fragment_memory_runtime_axis_address_state_t* axis_state =
-        &out_state->runtime_axes[i];
+        &out_state->runtime_axes[view_axis];
     if (runtime_axis->lane_coordinate_scale == 0) {
       continue;
     }
@@ -843,7 +853,9 @@ iree_status_t loom_amdgpu_initialize_fragment_memory_address_state(
     cache->address_base.valid = true;
     cache->address_base.key = key;
     cache->address_base.accumulator = out_state->cursor;
-    for (uint8_t i = 0; i < plan->runtime_axis_count; ++i) {
+    for (iree_host_size_t i = 0;
+         i < IREE_ARRAYSIZE(cache->address_base.runtime_axis_byte_strides);
+         ++i) {
       cache->address_base.runtime_axis_byte_strides[i] =
           out_state->runtime_axes[i].byte_stride;
     }
@@ -917,16 +929,17 @@ static iree_status_t loom_amdgpu_fragment_memory_advance_runtime_coordinates(
     const loom_amdgpu_fragment_memory_plan_t* plan, uint16_t register_index,
     uint16_t element_index, loom_type_t sgpr_type, loom_type_t vgpr_type,
     loom_amdgpu_fragment_memory_address_state_t* address_state) {
-  for (uint8_t i = 0; i < plan->runtime_axis_count; ++i) {
+  for (uint8_t view_axis = 0; view_axis < plan->view_rank; ++view_axis) {
     const loom_amdgpu_fragment_memory_runtime_axis_t* runtime_axis =
-        &plan->runtime_axes[i];
+        &plan->runtime_axes[view_axis];
     const uint64_t target_coordinate_u64 =
         (uint64_t)runtime_axis->register_coordinates[register_index] +
         (uint64_t)element_index *
             runtime_axis->packed_element_coordinate_stride;
     IREE_ASSERT_LE(target_coordinate_u64, UINT32_MAX);
     const uint32_t target_coordinate = (uint32_t)target_coordinate_u64;
-    const uint32_t current_coordinate = address_state->current_coordinates[i];
+    const uint32_t current_coordinate =
+        address_state->current_coordinates[view_axis];
     if (target_coordinate == current_coordinate) {
       continue;
     }
@@ -935,7 +948,7 @@ static iree_status_t loom_amdgpu_fragment_memory_advance_runtime_coordinates(
             ? target_coordinate - current_coordinate
             : current_coordinate - target_coordinate;
     loom_amdgpu_fragment_memory_runtime_axis_address_state_t* axis_state =
-        &address_state->runtime_axes[i];
+        &address_state->runtime_axes[view_axis];
     loom_amdgpu_fragment_memory_address_accumulator_t scaled_byte_stride =
         axis_state->byte_stride;
     if (coordinate_magnitude > 1) {
@@ -967,7 +980,7 @@ static iree_status_t loom_amdgpu_fragment_memory_advance_runtime_coordinates(
           &address_state->cursor));
       address_state->cursor_storage_is_distinct = true;
     }
-    address_state->current_coordinates[i] = target_coordinate;
+    address_state->current_coordinates[view_axis] = target_coordinate;
   }
   return iree_ok_status();
 }

@@ -52,8 +52,9 @@ bool loom_amdgpu_fragment_memory_plan_packets(
     loom_amdgpu_fragment_memory_plan_t* plan,
     iree_string_view_t* out_constraint_key);
 
-// Annotates selected FP8 load packets with the exact target decode strategy.
-void loom_amdgpu_fragment_memory_apply_fp8_load_strategy_flags(
+// Selects the exact FP8 load decode plan. Returns false when the target cannot
+// emit any valid strategy for an FP8 payload accepted by earlier analysis.
+bool loom_amdgpu_fragment_memory_select_fp8_load_decode_plan(
     const loom_value_fact_table_t* fact_table,
     const loom_low_descriptor_set_t* descriptor_set, const loom_op_t* source_op,
     loom_amdgpu_fragment_memory_plan_t* plan);
@@ -80,7 +81,6 @@ typedef struct loom_amdgpu_fragment_memory_packet_report_t {
 // Queries cold-path report classification for one selected memory packet.
 void loom_amdgpu_fragment_memory_query_packet_report(
     const loom_low_descriptor_set_t* descriptor_set,
-    const loom_amdgpu_matrix_fragment_layout_t* layout,
     const loom_amdgpu_fragment_memory_plan_t* plan,
     const loom_amdgpu_fragment_memory_packet_plan_t* packet,
     loom_amdgpu_fragment_memory_packet_report_t* out_report);

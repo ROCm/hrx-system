@@ -111,6 +111,99 @@ typedef struct loom_amdgpu_fp8_encode_plan_t {
   loom_amdgpu_i8_pack_permute_plan_t packed_i8_permute;
 } loom_amdgpu_fp8_encode_plan_t;
 
+// Per-value facts that can simplify FP8 decode emission. These describe the
+// actual value being decoded, not the full source FP8 type.
+typedef enum loom_amdgpu_fp8_decode_value_flag_bits_e {
+  LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NONE = 0u,
+  LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NOT_NAN = 1u << 0,
+  LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NOT_INF = 1u << 1,
+  LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NOT_SUBNORMAL = 1u << 2,
+  LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NON_ZERO = 1u << 3,
+  LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_MASK =
+      LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NOT_NAN |
+      LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NOT_INF |
+      LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NOT_SUBNORMAL |
+      LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NON_ZERO,
+} loom_amdgpu_fp8_decode_value_flag_bits_t;
+typedef uint8_t loom_amdgpu_fp8_decode_value_flags_t;
+
+typedef uint8_t loom_amdgpu_fp8_decode_action_kind_t;
+enum loom_amdgpu_fp8_decode_action_kind_e {
+  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_NONE = 0,
+  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_IDENTITY_E8M0_PK8_BF16 = 1,
+  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_IDENTITY_E8M0_PK8_F16 = 2,
+  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_SCALEF32_BF16_PAIR = 3,
+  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_SCALEF32_F16_PAIR = 4,
+  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_NATIVE_F16_PAIR = 5,
+  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_NATIVE_F32_PAIR = 6,
+  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_NATIVE_F32_PAIR_BF16_PACK = 7,
+  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_PACKED_BF16_NORMAL = 8,
+  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_PACKED_BF16_EXACT_REPAIR = 9,
+  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_PACKED_BF16_EXACT_VIA_F16 = 10,
+  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_PACKED_F16_NORMAL = 11,
+  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_PACKED_F16_EXACT_REPAIR = 12,
+  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_FULL_BF16 = 13,
+  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_IDENTITY_E8M0_PK8_F32 = 14,
+  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_SCALEF32_F32_PAIR = 15,
+  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_SCALEF32_F32_PAIR_BF16_PACK = 16,
+  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_NATIVE_F32_LANE = 17,
+  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_NATIVE_F32_LANES_PACK = 18,
+  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_NATIVE_F32_LANES_BF16_PACK = 19,
+  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_NATIVE_F16_BYTE_SELECT = 20,
+  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_FULL_F32 = 21,
+  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_FULL_F16 = 22,
+  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_CONTINUATION = 23,
+  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_IDENTITY_E8M0_PK8_F32_LANES_PACK = 24,
+  LOOM_AMDGPU_FP8_DECODE_ACTION_KIND_IDENTITY_E8M0_PK8_F32_BF16_PACK = 25,
+};
+
+typedef enum loom_amdgpu_fp8_decode_action_detail_flag_bits_e {
+  // Packed decode repairs zero payloads after normal expansion.
+  LOOM_AMDGPU_FP8_DECODE_ACTION_DETAIL_FLAG_REPAIR_ZERO = 1u << 0,
+  // Packed decode repairs subnormal payloads with table packets.
+  LOOM_AMDGPU_FP8_DECODE_ACTION_DETAIL_FLAG_REPAIR_SUBNORMAL = 1u << 1,
+  // Packed BF16 decode repairs NaN payloads after expansion.
+  LOOM_AMDGPU_FP8_DECODE_ACTION_DETAIL_FLAG_REPAIR_NAN = 1u << 2,
+  // Packed BF16 decode repairs infinity payloads after expansion.
+  LOOM_AMDGPU_FP8_DECODE_ACTION_DETAIL_FLAG_REPAIR_INF = 1u << 3,
+  // Full decode was selected because value facts do not prove finiteness.
+  LOOM_AMDGPU_FP8_DECODE_ACTION_DETAIL_FLAG_MISSING_VALUE_FINITE = 1u << 4,
+  // Full decode was selected because values are not proven non-subnormal.
+  LOOM_AMDGPU_FP8_DECODE_ACTION_DETAIL_FLAG_MISSING_NOT_SUBNORMAL = 1u << 5,
+  // Full decode was selected because target packed packets are unavailable.
+  LOOM_AMDGPU_FP8_DECODE_ACTION_DETAIL_FLAG_MISSING_TARGET_PACKETS = 1u << 6,
+} loom_amdgpu_fp8_decode_action_detail_flag_bits_t;
+typedef uint8_t loom_amdgpu_fp8_decode_action_detail_flags_t;
+
+// Exact target action selected for one group of FP8 source lanes.
+typedef struct loom_amdgpu_fp8_decode_action_t {
+  // Selected FP8 decode action.
+  loom_amdgpu_fp8_decode_action_kind_t kind;
+  // Action-specific flags. The low nibble holds first-lane value facts or
+  // packed repair flags. Full two-lane actions use the high nibble for the
+  // second lane; fragment full-decode actions use it for fallback reasons.
+  union {
+    // Source value facts, optionally packed as one nibble per lane.
+    loom_amdgpu_fp8_decode_value_flags_t value_flags;
+    // Packed repair requirements or full-decode fallback reasons, optionally
+    // sharing the byte with first-lane value facts.
+    loom_amdgpu_fp8_decode_action_detail_flags_t detail_flags;
+  };
+} loom_amdgpu_fp8_decode_action_t;
+static_assert(sizeof(loom_amdgpu_fp8_decode_action_t) == 2,
+              "FP8 decode actions must stay cache dense");
+
+// Returns the retained value facts for |lane_index| within an action.
+static inline loom_amdgpu_fp8_decode_value_flags_t
+loom_amdgpu_fp8_decode_action_value_flags(
+    const loom_amdgpu_fp8_decode_action_t* action, uint32_t lane_index) {
+  IREE_ASSERT_LE(lane_index, 1u);
+  return (
+      loom_amdgpu_fp8_decode_value_flags_t)((action->value_flags >>
+                                             (lane_index * 4u)) &
+                                            LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_MASK);
+}
+
 typedef enum loom_amdgpu_vector_16bit_float_conversion_kind_e {
   LOOM_AMDGPU_VECTOR_16BIT_FLOAT_CONVERSION_KIND_NONE = 0,
   LOOM_AMDGPU_VECTOR_16BIT_FLOAT_CONVERSION_KIND_EXTF = 1,
@@ -143,6 +236,33 @@ typedef struct loom_amdgpu_fp4_decode_plan_t {
   const loom_amdgpu_fp4_native_pk8_decode_recipe_t* native_pk8_recipe;
 } loom_amdgpu_fp4_decode_plan_t;
 
+typedef uint8_t loom_amdgpu_vector_float_conversion_strategy_t;
+enum loom_amdgpu_vector_float_conversion_strategy_e {
+  // No vector conversion strategy has been selected.
+  LOOM_AMDGPU_VECTOR_FLOAT_CONVERSION_STRATEGY_NONE = 0,
+  // Conversion is fully described by the common type and storage fields.
+  LOOM_AMDGPU_VECTOR_FLOAT_CONVERSION_STRATEGY_STANDARD = 1,
+  // The strategy payload contains a selected packed FP4 decoder.
+  LOOM_AMDGPU_VECTOR_FLOAT_CONVERSION_STRATEGY_FP4_DECODE = 2,
+  // The strategy payload contains a selected packed FP8 encoder.
+  LOOM_AMDGPU_VECTOR_FLOAT_CONVERSION_STRATEGY_FP8_ENCODE = 3,
+  // The strategy payload contains selected FP8 decode actions.
+  LOOM_AMDGPU_VECTOR_FLOAT_CONVERSION_STRATEGY_FP8_DECODE = 4,
+};
+static_assert(LOOM_AMDGPU_MAX_PACKED_16BIT_FLOAT_LANES <= UINT8_MAX,
+              "vector conversion lane counts must fit compact plans");
+static_assert(LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES <= UINT8_MAX,
+              "vector conversion register counts must fit compact plans");
+
+typedef struct loom_amdgpu_vector_fp8_decode_plan_t {
+  // Exact action producing each physical result register. Multi-register
+  // actions mark every result after their first with CONTINUATION.
+  loom_amdgpu_fp8_decode_action_t
+      actions[LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES];
+} loom_amdgpu_vector_fp8_decode_plan_t;
+static_assert(sizeof(loom_amdgpu_vector_fp8_decode_plan_t) == 64,
+              "vector FP8 decode plans must stay cache dense");
+
 typedef struct loom_amdgpu_vector_16bit_float_conversion_plan_t {
   // Source vector value being converted.
   loom_value_id_t source;
@@ -156,41 +276,52 @@ typedef struct loom_amdgpu_vector_16bit_float_conversion_plan_t {
   loom_value_id_t scale_source;
   // Numeric format of scale_source, or NONE when there is no scale source.
   loom_value_fact_numeric_format_flags_t scale_format;
-  // Number of logical payload lanes covered by each scale value.
-  uint32_t scale_group_element_count;
-  // Number of encoded scale values covering the conversion.
-  uint32_t scale_count;
-  // Number of 32-bit registers carrying the encoded scale values.
-  uint32_t scale_register_count;
-  // Conversion operation selected for the source/result type pair.
-  loom_amdgpu_vector_16bit_float_conversion_kind_t kind;
-  // Source scalar element type.
-  loom_scalar_type_t source_element_type;
   // Exact numeric format represented by the source payload.
   loom_value_fact_numeric_format_flags_t source_format;
   // Semantically equivalent source format accepted by native descriptors.
   loom_value_fact_numeric_format_flags_t descriptor_source_format;
+  // Conversion operation selected for the source/result type pair.
+  loom_amdgpu_vector_16bit_float_conversion_kind_t kind;
+  // Source scalar element type.
+  loom_scalar_type_t source_element_type;
   // Result scalar element type.
   loom_scalar_type_t result_element_type;
+  // Discriminant selecting the active strategy union member.
+  loom_amdgpu_vector_float_conversion_strategy_t strategy_kind;
+  // Number of logical payload lanes covered by each scale value.
+  uint8_t scale_group_element_count;
+  // Number of encoded scale values covering the conversion.
+  uint8_t scale_count;
+  // Number of 32-bit registers carrying the encoded scale values.
+  uint8_t scale_register_count;
   // Static vector lane count.
-  uint32_t lane_count;
+  uint8_t lane_count;
   // Number of 32-bit source registers occupied by the source vector.
-  uint32_t source_register_count;
+  uint8_t source_register_count;
   // First logical lane read from storage_source for result lane zero.
-  uint32_t storage_lane_offset;
+  uint8_t storage_lane_offset;
   // Logical lane stride through storage_source for adjacent result lanes.
-  uint32_t storage_lane_stride;
+  uint8_t storage_lane_stride;
   // Number of scalar lanes proven available in storage_source.
-  uint32_t storage_lane_count;
+  uint8_t storage_lane_count;
   // Number of 32-bit registers occupied by storage_source.
-  uint32_t storage_register_count;
+  uint8_t storage_register_count;
   // Number of 32-bit result registers occupied by the result vector.
-  uint32_t result_register_count;
-  // Packed FP4 decode strategy, or NONE for other conversions.
-  loom_amdgpu_fp4_decode_plan_t fp4_decode;
-  // Native packed FP8 encode strategy for an FP8-result truncation.
-  loom_amdgpu_fp8_encode_plan_t fp8_encode;
+  uint8_t result_register_count;
+  // Byte reserved for a future bounded conversion-plan count.
+  uint8_t reserved;
+  // Strategy-specific data selected before emission.
+  union {
+    // Packed FP4 decode strategy when strategy_kind is FP4_DECODE.
+    loom_amdgpu_fp4_decode_plan_t fp4_decode;
+    // Packed FP8 encode strategy when strategy_kind is FP8_ENCODE.
+    loom_amdgpu_fp8_encode_plan_t fp8_encode;
+    // Exact FP8 decode actions when strategy_kind is FP8_DECODE.
+    loom_amdgpu_vector_fp8_decode_plan_t fp8_decode;
+  } strategy;
 } loom_amdgpu_vector_16bit_float_conversion_plan_t;
+static_assert(sizeof(loom_amdgpu_vector_16bit_float_conversion_plan_t) == 136,
+              "vector float conversion plans must stay cache dense");
 
 typedef enum loom_amdgpu_index_cast_kind_e {
   LOOM_AMDGPU_INDEX_CAST_KIND_NONE = 0,
@@ -1303,47 +1434,7 @@ typedef enum loom_amdgpu_fragment_memory_packet_flag_bits_e {
   LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_CROSSLANE_PACKED_B16_STORE_DPP = 1u
                                                                            << 1,
   // Same-lane f32 result values are packed into one BF16 store packet.
-  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_PACKED_B16_STORE = 1u << 19,
-  // Packed FP8-to-BF16 decode uses exact F16 arithmetic for subnormals.
-  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_EXACT_BF16_VIA_F16 = 1u << 20,
-  // FP8 load payloads are decoded with native packed FP8-to-F32 conversion.
-  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_NATIVE_F32_PAIR = 1u << 2,
-  // FP8 load payloads use native scale-f32 BF16 conversion.
-  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_SCALEF32_BF16_PAIR = 1u << 12,
-  // FP8 load payloads use native scale-f32 F16 conversion.
-  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_SCALEF32_F16_PAIR = 1u << 14,
-  // FP8 load payloads are decoded with native E8M0 scale-pk8 BF16 conversion
-  // using a packed identity scale operand.
-  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_IDENTITY_E8M0_PK8_BF16 = 1u << 17,
-  // FP8 load payloads are decoded with native E8M0 scale-pk8 F16 conversion
-  // using a packed identity scale operand.
-  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_IDENTITY_E8M0_PK8_F16 = 1u << 18,
-  // Native FP8-to-F32 conversion feeds native F32-to-BF16 packing.
-  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_NATIVE_BF16_PACK = 1u << 13,
-  // FP8 load payloads are decoded with native packed FP8-to-F16 conversion.
-  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_NATIVE_F16_PAIR = 1u << 15,
-  // FP8 load payloads are decoded with the finite packed-BF16 software path.
-  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_PACKED_BF16_DECODE = 1u << 3,
-  // FP8 load payloads are decoded with the finite packed-F16 software path.
-  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_PACKED_F16_DECODE = 1u << 16,
-  // FP8 load payloads require full per-lane BF16 software decode.
-  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_FULL_BF16_DECODE = 1u << 4,
-  // Full FP8 decode was selected because value facts do not prove finiteness.
-  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_MISSING_VALUE_FINITE = 1u << 5,
-  // Full FP8 decode was selected because value facts do not prove non-subnormal
-  // values.
-  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_MISSING_VALUE_NOT_SUBNORMAL =
-      1u << 6,
-  // Full FP8 decode was selected because target packets are unavailable.
-  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_MISSING_TARGET_PACKETS = 1u << 7,
-  // Packed FP8-to-16-bit decode repairs zero payloads after normal expansion.
-  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_REPAIR_ZERO = 1u << 8,
-  // Packed FP8-to-16-bit decode repairs subnormal payloads with table packets.
-  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_REPAIR_SUBNORMAL = 1u << 9,
-  // Packed FP8-to-BF16 decode repairs NaN payloads after expansion.
-  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_REPAIR_NAN = 1u << 10,
-  // Packed FP8-to-BF16 decode repairs infinity payloads after expansion.
-  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_REPAIR_INF = 1u << 11,
+  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_PACKED_B16_STORE = 1u << 2,
 } loom_amdgpu_fragment_memory_packet_flag_bits_t;
 
 // Bitset of loom_amdgpu_fragment_memory_packet_flag_bits_t values.
@@ -1389,6 +1480,11 @@ typedef enum loom_amdgpu_fragment_memory_packetization_e {
   // Two independently addressed 16-bit elements are packed per register.
   LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_PACKED_B16 = 2,
 } loom_amdgpu_fragment_memory_packetization_t;
+
+enum {
+  // Maximum physical rank of a blocked matrix-fragment view.
+  LOOM_AMDGPU_FRAGMENT_MEMORY_VIEW_RANK_CAPACITY = 3,
+};
 
 typedef enum loom_amdgpu_fragment_memory_epilogue_strategy_e {
   // No special result-fragment store epilogue strategy is selected.
@@ -1437,8 +1533,6 @@ typedef struct loom_amdgpu_fragment_memory_address_layout_t {
 } loom_amdgpu_fragment_memory_address_layout_t;
 
 typedef struct loom_amdgpu_fragment_memory_runtime_axis_t {
-  // Physical view axis whose byte stride is materialized at runtime.
-  uint8_t view_axis;
   // Power-of-two divisor applied to the subgroup lane ID.
   uint16_t lane_divisor;
   // Optional power-of-two modulus applied after division; zero omits it.
@@ -1465,17 +1559,18 @@ typedef struct loom_amdgpu_fragment_memory_plan_t {
   loom_low_source_memory_access_plan_t source;
   // Whether every dynamic source-address term is subgroup-uniform.
   bool dynamic_base_is_subgroup_uniform;
+  // Decode strategy and retained facts for an FP8 load payload.
+  loom_amdgpu_fp8_decode_action_t fp8_load_decode;
   // Source store payload or load result SSA value.
   loom_value_id_t payload;
   // Optional F32 scale applied while decoding an FP8 load payload.
   loom_value_id_t fp8_load_scale_source;
   // Exact compile-time byte stride for each view axis, or zero when dynamic.
   uint32_t static_axis_byte_strides[LOOM_ENCODING_ADDRESS_LAYOUT_MAX_RANK];
-  // Materialized runtime axes used by lane, register, or packed coordinates.
+  // Materialized runtime axes indexed by physical view axis. Entries whose
+  // byte stride kind is UNAVAILABLE have no runtime contribution.
   loom_amdgpu_fragment_memory_runtime_axis_t
-      runtime_axes[LOOM_MATRIX_FRAGMENT_AXIS_COUNT];
-  // Number of populated runtime axis plans.
-  uint8_t runtime_axis_count;
+      runtime_axes[LOOM_AMDGPU_FRAGMENT_MEMORY_VIEW_RANK_CAPACITY];
   // Rank of the typed view.
   uint8_t view_rank;
   // Number of target fragment coordinate registers in the selected layout.

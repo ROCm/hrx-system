@@ -24,7 +24,8 @@ enum {
   // Logical rank of a one-block matrix-fragment source or destination view.
   LOOM_AMDGPU_FRAGMENT_UNBLOCKED_VIEW_RANK = 2,
   // Logical rank of a blocked matrix-fragment source or destination view.
-  LOOM_AMDGPU_FRAGMENT_BLOCKED_VIEW_RANK = 3,
+  LOOM_AMDGPU_FRAGMENT_BLOCKED_VIEW_RANK =
+      LOOM_AMDGPU_FRAGMENT_MEMORY_VIEW_RANK_CAPACITY,
   // Physical byte width of one matrix-fragment register.
   LOOM_AMDGPU_FRAGMENT_REGISTER_BYTE_COUNT = 4,
   // Number of packed 16-bit elements carried by one fragment register.
@@ -80,13 +81,9 @@ uint16_t loom_amdgpu_matrix_fragment_payload_elements_per_register(
 bool loom_amdgpu_matrix_fragment_role_layout_uses_low_subword(
     const loom_matrix_fragment_role_layout_t* role_layout);
 
-// Returns the semantic axis containing packed elements in |role_layout|.
-bool loom_amdgpu_matrix_fragment_role_layout_packed_element_axis(
-    const loom_matrix_fragment_role_layout_t* role_layout,
-    loom_matrix_fragment_axis_t* out_axis);
-
 // Returns true when one result-role register stores two semantic b16 elements.
 bool loom_amdgpu_matrix_fragment_role_layout_uses_packed_b16_elements(
+    loom_contract_operand_role_t role,
     const loom_matrix_fragment_role_layout_t* role_layout);
 
 // Returns true when |blocks|, |rows|, and |columns| match the logical shape of

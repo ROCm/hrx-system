@@ -1201,9 +1201,7 @@ static bool loom_vector_to_scalar_mma_role_layouts_match(
          lhs->element_bit_count == rhs->element_bit_count &&
          lhs->payload_element_count == rhs->payload_element_count &&
          lhs->coordinate_element_count == rhs->coordinate_element_count &&
-         lhs->coordinate_element_offset == rhs->coordinate_element_offset &&
          lhs->coordinate_element_stride == rhs->coordinate_element_stride &&
-         lhs->coordinate_flags == rhs->coordinate_flags &&
          lhs->coordinate_projection_plan == rhs->coordinate_projection_plan;
 }
 
@@ -1213,16 +1211,8 @@ bool loom_vector_to_scalar_result_fragment_layout_is_supported(
     return false;
   }
   const loom_matrix_fragment_role_layout_t* result = &layout->result;
-  loom_matrix_fragment_coordinate_flags_t expected_flags =
-      LOOM_MATRIX_FRAGMENT_COORDINATE_ROW |
-      LOOM_MATRIX_FRAGMENT_COORDINATE_COLUMN;
-  if (layout->tile_shape.block_count > 1) {
-    expected_flags |= LOOM_MATRIX_FRAGMENT_COORDINATE_BLOCK;
-  }
   return layout->tile_shape.block_count > 0 &&
-         result->coordinate_flags == expected_flags &&
          result->payload_element_count != 0 &&
-         result->coordinate_element_offset == 0 &&
          result->coordinate_element_stride == 1 &&
          result->coordinate_projection_plan != NULL;
 }
@@ -1230,20 +1220,9 @@ bool loom_vector_to_scalar_result_fragment_layout_is_supported(
 static bool loom_vector_to_scalar_mma_reduction_role_layout_is_supported(
     const loom_matrix_fragment_layout_t* layout,
     const loom_matrix_fragment_role_layout_t* role_layout) {
-  loom_matrix_fragment_coordinate_flags_t shared_flags =
-      LOOM_MATRIX_FRAGMENT_COORDINATE_REDUCTION;
-  if (layout->tile_shape.block_count > 1) {
-    shared_flags |= LOOM_MATRIX_FRAGMENT_COORDINATE_BLOCK;
-  }
-  const bool carries_row = role_layout->coordinate_flags ==
-                           (shared_flags | LOOM_MATRIX_FRAGMENT_COORDINATE_ROW);
-  const bool carries_column =
-      role_layout->coordinate_flags ==
-      (shared_flags | LOOM_MATRIX_FRAGMENT_COORDINATE_COLUMN);
   return layout->tile_shape.block_count > 0 &&
          role_layout->payload_element_count != 0 &&
-         role_layout->coordinate_projection_plan != NULL &&
-         (carries_row || carries_column);
+         role_layout->coordinate_projection_plan != NULL;
 }
 
 static bool loom_vector_to_scalar_mma_distributed_static_is_supported(
@@ -1374,13 +1353,6 @@ static iree_status_t loom_vector_to_scalar_mma_build_forward_coordinate_terms(
       role_layout->coordinate_projection_plan;
   IREE_ASSERT_TRUE(plan != NULL);
   loom_vector_to_scalar_index_term_t coordinate_element = payload_element;
-  if (role_layout->coordinate_element_offset != 0) {
-    IREE_RETURN_IF_ERROR(loom_vector_to_scalar_build_term_binary(
-        state, LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_SUB, coordinate_element,
-        loom_vector_to_scalar_static_term(
-            role_layout->coordinate_element_offset),
-        &coordinate_element));
-  }
   if (role_layout->coordinate_element_stride > 1) {
     IREE_RETURN_IF_ERROR(loom_vector_to_scalar_build_term_binary(
         state, LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_DIV, coordinate_element,
@@ -1414,7 +1386,7 @@ static iree_status_t loom_vector_to_scalar_mma_build_inverse_coordinate_terms(
       state, plan->terms + plan->forward_term_count, plan->inverse_term_count,
       source_terms, physical_terms));
   loom_vector_to_scalar_index_term_t payload_element =
-      loom_vector_to_scalar_static_term(role_layout->coordinate_element_offset);
+      loom_vector_to_scalar_static_term(0);
   IREE_RETURN_IF_ERROR(loom_vector_to_scalar_mma_build_scaled_add(
       state, payload_element,
       physical_terms[LOOM_MATRIX_FRAGMENT_COORDINATE_DIMENSION_VALUE],

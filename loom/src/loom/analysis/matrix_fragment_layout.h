@@ -23,20 +23,6 @@
 extern "C" {
 #endif
 
-typedef enum loom_matrix_fragment_coordinate_flag_bits_e {
-  // Coordinate carries an independent block or batch value.
-  LOOM_MATRIX_FRAGMENT_COORDINATE_BLOCK = 1u << 0,
-  // Coordinate carries an M/result-row value.
-  LOOM_MATRIX_FRAGMENT_COORDINATE_ROW = 1u << 1,
-  // Coordinate carries an N/result-column value.
-  LOOM_MATRIX_FRAGMENT_COORDINATE_COLUMN = 1u << 2,
-  // Coordinate carries a K/reduction value.
-  LOOM_MATRIX_FRAGMENT_COORDINATE_REDUCTION = 1u << 3,
-} loom_matrix_fragment_coordinate_flag_bits_t;
-
-// Bitset of loom_matrix_fragment_coordinate_flag_bits_t values.
-typedef uint32_t loom_matrix_fragment_coordinate_flags_t;
-
 // Canonical semantic axes carried by matrix fragment layouts. The ordering is
 // also the row-major delinearization order for per-lane payload elements.
 typedef enum loom_matrix_fragment_axis_e {
@@ -115,8 +101,6 @@ typedef struct loom_matrix_fragment_packed_b16_publication_t {
 } loom_matrix_fragment_packed_b16_publication_t;
 
 typedef struct loom_matrix_fragment_role_layout_t {
-  // Contract operand role described by this role layout.
-  loom_contract_operand_role_t role;
   // Number of 32-bit payload registers held by each participating lane.
   uint16_t register_count;
   // Bit width of each logical scalar element. Elements are densely packed
@@ -126,8 +110,8 @@ typedef struct loom_matrix_fragment_role_layout_t {
   uint16_t payload_element_count;
   // Number of distinct stored coordinates represented by the payload.
   uint16_t coordinate_element_count;
-  // First payload element that carries a distinct logical coordinate.
-  uint16_t coordinate_element_offset;
+  // Reserved zero-valued storage for future generated role facts.
+  uint16_t reserved;
   // Payload element stride between distinct logical coordinates.
   uint16_t coordinate_element_stride;
   // Exact packed-B16 publication projections derived for this role.
@@ -137,11 +121,9 @@ typedef struct loom_matrix_fragment_role_layout_t {
     // Projection pairing adjacent result columns.
     loom_matrix_fragment_packed_b16_publication_t column;
   } packed_b16_publications;
-  // Coordinate axes produced by this role layout.
-  loom_matrix_fragment_coordinate_flags_t coordinate_flags;
-  // Single coordinate flag for the axis densely packed within each register,
-  // or zero when elements are not densely packed along one semantic axis.
-  loom_matrix_fragment_coordinate_flags_t packed_element_coordinate_flag;
+  // Axis densely packed within each register, or
+  // LOOM_MATRIX_FRAGMENT_AXIS_COUNT when no single axis is densely packed.
+  loom_matrix_fragment_axis_t packed_element_axis;
   // Physical-to-logical grouping for a compressed reduction axis.
   struct {
     // Number of elements physically stored in each reduction group.
@@ -176,26 +158,6 @@ typedef struct loom_matrix_fragment_layout_t {
   const loom_native_contraction_facts_t* native_contraction_facts;
 } loom_matrix_fragment_layout_t;
 
-typedef struct loom_matrix_fragment_coordinate_t {
-  // Coordinate axes populated for this role.
-  loom_matrix_fragment_coordinate_flags_t coordinate_flags;
-  // Independent block/batch coordinate when BLOCK is set.
-  uint16_t block;
-  // M/result-row coordinate when ROW is set.
-  uint16_t row;
-  // N/result-column coordinate when COLUMN is set.
-  uint16_t column;
-  // K/reduction coordinate when REDUCTION is set.
-  uint16_t reduction;
-} loom_matrix_fragment_coordinate_t;
-
-typedef struct loom_matrix_fragment_physical_element_t {
-  // Subgroup lane that owns or replicates the logical coordinate.
-  uint16_t lane;
-  // Scalar element ordinal in the source-level payload vector.
-  uint16_t payload_element_index;
-} loom_matrix_fragment_physical_element_t;
-
 // Applies a trusted generated coordinate projection term slice. |out_terms|
 // is cleared before the terms are accumulated.
 void loom_matrix_fragment_apply_coordinate_projection(
@@ -220,46 +182,6 @@ loom_matrix_fragment_axis_t loom_matrix_fragment_coordinate_dimension_axis(
 const loom_matrix_fragment_role_layout_t* loom_matrix_fragment_role_layout(
     const loom_matrix_fragment_layout_t* layout,
     loom_contract_operand_role_t role);
-
-// Maps a lane-local payload element to a logical matrix coordinate. Returns
-// false when |layout| is absent, the role is unmodeled, the lane/payload
-// element is outside the layout domain or names padding, or runtime metadata
-// is required to expand a compressed reduction coordinate.
-bool loom_matrix_fragment_coordinate(
-    const loom_matrix_fragment_layout_t* layout,
-    loom_contract_operand_role_t role, uint16_t lane,
-    uint16_t payload_element_index,
-    loom_matrix_fragment_coordinate_t* out_coordinate);
-
-// Maps a lane-local payload element using an already-selected role
-// layout. This is useful for lowering loops that walk a role layout once and
-// then enumerate all payload elements. Returns false when |layout| or
-// |role_layout| is absent, or the lane/payload element is outside the layout
-// domain.
-bool loom_matrix_fragment_coordinate_from_role_layout(
-    const loom_matrix_fragment_layout_t* layout,
-    const loom_matrix_fragment_role_layout_t* role_layout, uint16_t lane,
-    uint16_t payload_element_index,
-    loom_matrix_fragment_coordinate_t* out_coordinate);
-
-// Counts physical lane/payload elements that carry |coordinate| for |role|.
-// Some target fragment layouts intentionally replicate input operands across
-// lanes; callers that need a canonical owner can request occurrence zero from
-// loom_matrix_fragment_physical_element().
-bool loom_matrix_fragment_physical_element_count(
-    const loom_matrix_fragment_layout_t* layout,
-    loom_contract_operand_role_t role,
-    loom_matrix_fragment_coordinate_t coordinate, uint16_t* out_count);
-
-// Returns the |occurrence_index|-th physical lane/payload element that carries
-// |coordinate| for |role|. occurrence_index is zero-based and follows ascending
-// lane and payload-element order. Returns false when the role is unmodeled,
-// the coordinate does not match that role's axes, or the occurrence is absent.
-bool loom_matrix_fragment_physical_element(
-    const loom_matrix_fragment_layout_t* layout,
-    loom_contract_operand_role_t role,
-    loom_matrix_fragment_coordinate_t coordinate, uint16_t occurrence_index,
-    loom_matrix_fragment_physical_element_t* out_element);
 
 #ifdef __cplusplus
 }

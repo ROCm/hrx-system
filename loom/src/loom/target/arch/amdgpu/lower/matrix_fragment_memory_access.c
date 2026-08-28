@@ -89,9 +89,9 @@ static void loom_amdgpu_fragment_memory_add_runtime_packet_source_interval(
 
   loom_value_facts_t runtime_packet_offset = loom_value_facts_exact_i64(0);
   bool has_runtime_packet_offset = false;
-  for (uint8_t i = 0; i < plan->runtime_axis_count; ++i) {
+  for (uint8_t view_axis = 0; view_axis < plan->view_rank; ++view_axis) {
     const loom_amdgpu_fragment_memory_runtime_axis_t* runtime_axis =
-        &plan->runtime_axes[i];
+        &plan->runtime_axes[view_axis];
     const uint64_t packet_coordinate =
         (uint64_t)runtime_axis->register_coordinates[packet->register_index] +
         (uint64_t)element_index *
@@ -199,8 +199,8 @@ static iree_status_t loom_amdgpu_record_fragment_memory_packet(
   packet_source.vector_lane_count = vector_lane_count;
   packet_source.vector_lane_byte_stride = plan->element_byte_count;
   loom_amdgpu_fragment_memory_packet_report_t packet_report = {0};
-  loom_amdgpu_fragment_memory_query_packet_report(descriptor_set, layout, plan,
-                                                  packet, &packet_report);
+  loom_amdgpu_fragment_memory_query_packet_report(descriptor_set, plan, packet,
+                                                  &packet_report);
   loom_low_lower_memory_subgroup_access_report_t subgroup_access = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_fragment_memory_report_subgroup_access(
       context, source_op, layout, plan, packet, element_index, &issued,
