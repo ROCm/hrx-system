@@ -14,6 +14,7 @@ from loom.dialect.scalar import bitwise as scalar_bitwise
 from loom.dialect.scalar import comparison as scalar_comparison
 from loom.dialect.scalar import conversion as scalar_conversion
 from loom.dialect.scalar import math as scalar_math
+from loom.dialect.scf import defs as scf_defs
 from loom.gen.target.arch.vm.vm_tables import (
     generate_encoding_rows,
     generate_lowering_rows,
@@ -261,6 +262,14 @@ def test_same_type_projection_derives_source_signatures() -> None:
             (I64,),
             "vm.integer.add.i64",
         ),
+    )
+
+
+def test_scalar_select_projection_covers_every_scalar_type() -> None:
+    rows = tuple(row for row in VM_SOURCE_LOWERINGS if row.source_op is scf_defs.scf_select)
+    expected_types = tuple(ScalarType(scalar_type) for scalar_type in ScalarTypeKind)
+    assert tuple((row.operand_types, row.result_types, row.descriptor_key) for row in rows) == tuple(
+        ((I1, scalar_type, scalar_type), (scalar_type,), "vm.value.select") for scalar_type in expected_types
     )
 
 

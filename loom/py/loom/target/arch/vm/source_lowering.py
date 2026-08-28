@@ -20,6 +20,7 @@ from loom.dialect.scalar import bitwise as scalar_bitwise
 from loom.dialect.scalar import comparison as scalar_comparison
 from loom.dialect.scalar import conversion as scalar_conversion
 from loom.dialect.scalar import math as scalar_math
+from loom.dialect.scf import defs as scf_defs
 from loom.dsl import ATTR_TYPE_ENUM, Op
 from loom.ir import BUFFER_TYPE, I1, ScalarType, Type
 from loom.scalar_type import ScalarTypeKind
@@ -368,6 +369,32 @@ def _same_type_ternary(
     )
 
 
+def _scalar_select(source_op: Op) -> tuple[VmSourceLowering, ...]:
+    """Projects whole-cell scalar selection onto the VM value bank."""
+
+    _require_fixed_source_shape(source_op, operand_count=3, result_count=1)
+    payload_names = tuple(
+        field.name for field in (*source_op.operands[1:], *source_op.results)
+    )
+    if not any(
+        constraint.name == "SameType" and constraint.args == payload_names
+        for constraint in source_op.constraints
+    ):
+        raise ValueError(
+            f"{source_op.name}: scalar select projection requires a "
+            f"SameType{payload_names} constraint"
+        )
+    return tuple(
+        _source_lowering(
+            source_op,
+            (I1, ScalarType(scalar_type), ScalarType(scalar_type)),
+            (ScalarType(scalar_type),),
+            "vm.value.select",
+        )
+        for scalar_type in ScalarTypeKind
+    )
+
+
 def _float_width_opcodes(
     mnemonic_stem: str,
     *,
@@ -568,6 +595,7 @@ VM_SOURCE_LOWERINGS = (
             selector_source_attr="status",
         ),
     ),
+    *_scalar_select(scf_defs.scf_select),
     *_same_type_binary(
         index_defs.index_add,
         {

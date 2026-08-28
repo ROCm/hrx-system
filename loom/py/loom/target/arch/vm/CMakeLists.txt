@@ -43,6 +43,7 @@ iree_py_library(
     loom::py::loom::dialect::func::func
     loom::py::loom::dialect::index::index
     loom::py::loom::dialect::scalar::scalar
+    loom::py::loom::dialect::scf::scf
     loom::py::loom::target::low_descriptors
     iree::vm::bytecode::spec::model::isa::definitions
 )

@@ -183,6 +183,7 @@ loom_cc_library(
     loom::ops::low
     loom::ops::op_defs
     loom::ops::scalar
+    loom::ops::scf
     loom::ops::type_registry
     loom::rewrite::rewriter
     loom::target::low_legality

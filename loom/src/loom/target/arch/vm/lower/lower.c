@@ -14,6 +14,7 @@
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/scalar/ops.h"
+#include "loom/ops/scf/ops.h"
 #include "loom/target/arch/vm/abi/layout.h"
 #include "loom/target/arch/vm/descriptors.h"
 #include "loom/target/arch/vm/lower/constants.h"

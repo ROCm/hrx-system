@@ -43,6 +43,7 @@ iree_py_library(
         "//loom/py/loom/dialect/func",
         "//loom/py/loom/dialect/index",
         "//loom/py/loom/dialect/scalar",
+        "//loom/py/loom/dialect/scf",
         "//loom/py/loom/target:low_descriptors",
         "//runtime/src/iree/vm/bytecode/spec/model/isa:definitions",
     ],

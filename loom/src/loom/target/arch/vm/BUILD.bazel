@@ -190,6 +190,7 @@ loom_cc_library(
         "//loom/src/loom/ops/kernel",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/ops/scf",
         "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/target:low_legality",
         "//loom/src/loom/target:registers",
