@@ -668,12 +668,11 @@ static iree_status_t loom_amdgpu_fragment_store_plan_can_join_group(
     return iree_ok_status();
   }
   loom_amdgpu_fragment_memory_plan_t candidate_plan = {0};
-  bool selected = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_analyze_vector_fragment_memory_plan(
+  const bool selected = loom_amdgpu_analyze_vector_fragment_store_plan(
       context->module, context->fact_table, context->view_regions,
       loom_target_legalization_context_bundle(context), context->descriptor_set,
       loom_amdgpu_target_facts_cast(context->target_facts), context->function,
-      op, LOOM_LOW_SOURCE_MEMORY_OPERATION_STORE, &candidate_plan, &selected));
+      op, &candidate_plan);
   if (!selected ||
       !loom_amdgpu_fragment_epilogue_plan_needs_physical_loop(
           &candidate_plan) ||
@@ -834,12 +833,11 @@ static iree_status_t loom_amdgpu_legalize_result_fragment_store_epilogue_loop(
   }
 
   loom_amdgpu_fragment_memory_plan_t plan = {0};
-  bool selected = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_analyze_vector_fragment_memory_plan(
+  const bool selected = loom_amdgpu_analyze_vector_fragment_store_plan(
       context->module, context->fact_table, context->view_regions,
       loom_target_legalization_context_bundle(context), context->descriptor_set,
       loom_amdgpu_target_facts_cast(context->target_facts), context->function,
-      op, LOOM_LOW_SOURCE_MEMORY_OPERATION_STORE, &plan, &selected));
+      op, &plan);
   if (!selected ||
       !loom_amdgpu_fragment_epilogue_plan_needs_physical_loop(&plan) ||
       plan.view_rank != 2) {
