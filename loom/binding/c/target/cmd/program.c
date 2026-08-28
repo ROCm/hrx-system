@@ -22,8 +22,8 @@
 #include "loom/ir/module.h"
 #include "loom/link/module_index.h"
 #include "loom/pass/builtin_registry.h"
+#include "loom/target/arch/cmd/artifact_builder.h"
 #include "loom/target/arch/cmd/artifact_set.h"
-#include "loom/target/arch/cmd/lower/program_plan_index.h"
 #include "loom/transforms/kernel/kernel_class_materializer.h"
 #include "loomc/iree.h"
 
@@ -341,7 +341,6 @@ loomc_status_t loomc_cmd_program_product_build(
       loomc_result_create(LOOMC_RESULT_STATE_SUCCEEDED, allocator, &result));
   iree_arena_allocator_t scratch_arena;
   iree_arena_initialize(loomc_workspace_block_pool(workspace), &scratch_arena);
-  loom_cmd_program_plan_t plan = {0};
   loom_cmd_program_artifact_set_t artifact_set = {0};
   loomc_cmd_program_product_t* product = NULL;
   loomc_cmd_program_product_invocation_t invocation = {
@@ -384,16 +383,24 @@ loomc_status_t loomc_cmd_program_product_build(
   const loomc_host_size_t diagnostic_count_before =
       loomc_result_diagnostic_count(result);
   if (loomc_status_is_ok(status)) {
-    const iree_status_t plan_status = loom_cmd_program_plan_prepare_index(
-        loomc_link_index_module_index(options->link_index),
-        root_symbol_ordinals, root_symbol_count,
-        options->kernel_request_sink.publish != NULL ? &plan_options : NULL,
-        loom_pass_builtin_registry(),
-        (iree_diagnostic_emitter_t){
-            .fn = loomc_cmd_program_product_capture_diagnostic,
-            .user_data = &invocation,
-        },
-        &materialization_environment, &scratch_arena, &plan_valid, &plan);
+    const iree_status_t plan_status =
+        loom_cmd_program_artifact_set_build_from_index(
+            loomc_link_index_module_index(options->link_index),
+            root_symbol_ordinals, root_symbol_count,
+            &(loom_cmd_program_artifact_builder_options_t){
+                .plan_options = options->kernel_request_sink.publish != NULL
+                                    ? &plan_options
+                                    : NULL,
+                .pass_registry = loom_pass_builtin_registry(),
+                .diagnostic_emitter =
+                    {
+                        .fn = loomc_cmd_program_product_capture_diagnostic,
+                        .user_data = &invocation,
+                    },
+                .materialization_environment = &materialization_environment,
+            },
+            &scratch_arena, &plan_valid, &artifact_set,
+            iree_allocator_from_loomc(allocator));
     status = loomc_cmd_program_product_translate_plan_status(
         &invocation, diagnostic_count_before, plan_status);
   }
@@ -406,10 +413,6 @@ loomc_status_t loomc_cmd_program_product_build(
     } else {
       status = loomc_result_set_state(result, LOOMC_RESULT_STATE_FAILED);
     }
-  }
-  if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
-    status = loomc_status_from_iree(loom_cmd_program_artifact_set_build(
-        &plan, &artifact_set, iree_allocator_from_loomc(allocator)));
   }
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
     status =
@@ -426,7 +429,6 @@ loomc_status_t loomc_cmd_program_product_build(
 
   loomc_cmd_program_product_release(product);
   loom_cmd_program_artifact_set_deinitialize(&artifact_set);
-  loom_cmd_program_plan_deinitialize(&plan);
   iree_arena_deinitialize(&scratch_arena);
   loomc_result_release(result);
   return status;
