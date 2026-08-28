@@ -548,6 +548,23 @@ static iree_status_t loom_vm_module_collect_indirect_call_types(
   return iree_ok_status();
 }
 
+static iree_status_t loom_vm_module_collect_resource_types(
+    loom_vm_module_type_build_t* build, loom_vm_module_layout_t* layout,
+    loom_vm_module_ref_type_build_t** ref_global_types,
+    loom_vm_module_callable_type_build_t** function_global_types) {
+  for (uint32_t i = 0; i < layout->resources.ref_global_count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_vm_module_ref_type_find_or_add(
+        build, layout->resources.ref_global_types[i], &ref_global_types[i]));
+  }
+  for (uint32_t i = 0; i < layout->resources.function_global_count; ++i) {
+    const loom_type_t type = layout->resources.function_global_types[i];
+    IREE_RETURN_IF_ERROR(loom_vm_module_callable_collect(
+        build, loom_func_ref_resolve_signature(build->module, type),
+        loom_vm_module_function_ref_flags(type), &function_global_types[i]));
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_vm_module_ref_types_canonicalize(
     loom_vm_module_type_build_t* build) {
   if (build->ref_type_count > 65536u) {
@@ -671,6 +688,39 @@ static iree_status_t loom_vm_module_type_rows_build(
     }
   }
   IREE_ASSERT_EQ(descriptor_base, descriptor_count);
+  return iree_ok_status();
+}
+
+static iree_status_t loom_vm_module_resource_type_rows_build(
+    loom_vm_module_type_build_t* build,
+    loom_vm_module_ref_type_build_t* const* ref_global_types,
+    loom_vm_module_callable_type_build_t* const* function_global_types,
+    loom_vm_module_layout_t* layout) {
+  loom_vm_module_resource_layout_t* resources = &layout->resources;
+  if (resources->ref_global_count != 0) {
+    IREE_RETURN_IF_ERROR(
+        iree_arena_allocate_array(build->arena, resources->ref_global_count,
+                                  sizeof(*resources->ref_global_descriptors),
+                                  (void**)&resources->ref_global_descriptors));
+    for (uint32_t i = 0; i < resources->ref_global_count; ++i) {
+      resources->ref_global_descriptors[i] =
+          (iree_vm_bytecode_v0_global_ref_descriptor_row_t){
+              .ref_type_ordinal_u16 = ref_global_types[i]->ordinal,
+          };
+    }
+  }
+  if (resources->function_global_count != 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        build->arena, resources->function_global_count,
+        sizeof(*resources->function_global_descriptors),
+        (void**)&resources->function_global_descriptors));
+    for (uint32_t i = 0; i < resources->function_global_count; ++i) {
+      resources->function_global_descriptors[i] =
+          (iree_vm_bytecode_v0_global_function_descriptor_row_t){
+              .callable_type_ordinal_u16 = function_global_types[i]->ordinal,
+          };
+    }
+  }
   return iree_ok_status();
 }
 
@@ -960,12 +1010,29 @@ iree_status_t loom_vm_module_type_tables_build(
   IREE_RETURN_IF_ERROR(
       loom_vm_module_collect_indirect_call_types(&build, layout));
 
+  loom_vm_module_ref_type_build_t** ref_global_types = NULL;
+  if (layout->resources.ref_global_count != 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        arena, layout->resources.ref_global_count, sizeof(*ref_global_types),
+        (void**)&ref_global_types));
+  }
+  loom_vm_module_callable_type_build_t** function_global_types = NULL;
+  if (layout->resources.function_global_count != 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        arena, layout->resources.function_global_count,
+        sizeof(*function_global_types), (void**)&function_global_types));
+  }
+  IREE_RETURN_IF_ERROR(loom_vm_module_collect_resource_types(
+      &build, layout, ref_global_types, function_global_types));
+
   IREE_RETURN_IF_ERROR(loom_vm_module_ref_types_canonicalize(&build));
   iree_host_size_t callable_type_count = 0;
   IREE_RETURN_IF_ERROR(
       loom_vm_module_callables_canonicalize(&build, &callable_type_count));
   IREE_RETURN_IF_ERROR(loom_vm_module_type_rows_build(
       &build, callable_type_count, &layout->type_tables));
+  IREE_RETURN_IF_ERROR(loom_vm_module_resource_type_rows_build(
+      &build, ref_global_types, function_global_types, layout));
   IREE_RETURN_IF_ERROR(
       loom_vm_module_callable_type_lookup_build(&build, &layout->type_tables));
   IREE_RETURN_IF_ERROR(loom_vm_module_strings_build(&build, layout));

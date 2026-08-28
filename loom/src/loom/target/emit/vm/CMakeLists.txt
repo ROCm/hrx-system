@@ -20,6 +20,7 @@ loom_cc_library(
     "function_locals.h"
     "module_emitter.h"
     "module_layout.h"
+    "module_resources.h"
     "module_types.h"
   SRCS
     "artifact_emitter.c"
@@ -29,6 +30,7 @@ loom_cc_library(
     "function_locals.c"
     "module_emitter.c"
     "module_layout.c"
+    "module_resources.c"
     "module_types.c"
   DEPS
     iree::base
@@ -48,12 +50,14 @@ loom_cc_library(
     loom::format::bytecode::writer::encoder
     loom::ir
     loom::ops::func
+    loom::ops::global
     loom::ops::low
     loom::ops::op_defs
     loom::ops::type_registry
     loom::target::arch::vm::abi_layout
     loom::target::arch::vm::descriptors
     loom::target::arch::vm::facts
+    loom::target::arch::vm::ops
     loom::target::low_descriptor_registry
     loom::target::provider
     loom::target::registers

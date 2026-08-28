@@ -78,7 +78,10 @@ loom_generated_cc_library(
         "ops/tables.c",
     ],
     generator = "//loom/py/loom/gen/ops:c_tables_vm_generator",
-    visibility = ["//loom/binding/c:__pkg__"],
+    visibility = [
+        "//loom/binding/c:__pkg__",
+        "//loom/src/loom/target/emit/vm:__pkg__",
+    ],
     deps = [
         ":facts",
         ":target_records",

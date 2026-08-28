@@ -12,6 +12,7 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "loom/ir/ir.h"
+#include "loom/target/emit/vm/module_resources.h"
 #include "loom/target/emit/vm/module_types.h"
 
 #ifdef __cplusplus
@@ -109,6 +110,8 @@ struct loom_vm_module_layout_t {
   iree_host_size_t export_count;
   // Canonical wire-ready string and type tables.
   loom_vm_module_type_tables_t type_tables;
+  // Canonical physical global and read-only data layout.
+  loom_vm_module_resource_layout_t resources;
   // Aggregate switch-target entries across all functions.
   uint32_t switch_target_entry_count;
 };

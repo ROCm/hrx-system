@@ -302,3 +302,48 @@ functions:
     +0008  constant.s16 dst_v8=1 immediate_i16=1
     +0012  integer.bitstream.pack result_base_v8=0 source_base_v8=0 field_width_u8=8 source_count_u8=2 result_count_u8=1 source_width_u8=16 result_width_u8=16
     +0020  control.return
+
+// ====
+
+// RUN: emit vm-dis
+
+vm.target<core> @target
+
+global.variable @mutable_value : i64
+global.constant @immutable_value : i32
+global.variable @mutable_ref : hal.buffer
+global.constant @immutable_ref : hal.buffer
+global.variable @mutable_function : func.ref<(i32) -> (i32)>
+global.constant @immutable_function : func.ref<(i32) -> (i32)>
+global.rodata.def @small = bytes("010203")
+global.rodata.def @aligned = align(32) bytes("6c6f6f6d")
+
+func.def target(@target) @resource_owner() {
+  func.return
+}
+
+// ----
+vm.module "module" core=0.0 bytes=452
+requirements:
+sections:
+  [0] strings type=0x0002 flags=0x0000 bytes=[128, +25)
+  [1] ref_types type=0x0003 flags=0x0000 bytes=[160, +16)
+  [2] signatures type=0x0004 flags=0x0000 bytes=[176, +44)
+  [3] callable_types type=0x0005 flags=0x0000 bytes=[224, +20)
+  [4] functions type=0x0008 flags=0x0000 bytes=[248, +60)
+  [5] globals type=0x000A flags=0x0000 bytes=[312, +48)
+  [6] rodata type=0x000B flags=0x0000 alignment=32 bytes=[384, +68)
+resources: constants=0 globals=(values=2, refs=2, functions=2) rodata=2
+module_metadata:
+ref_types:
+  [0] ref<hal, buffer>
+callable_types:
+  [0] () -> ()
+  [1] (i32) -> (i32)
+imports:
+exports:
+functions:
+  [0] callable[0] signature[0] bytecode=[0, +8) registers=(0, 0, 0) locals=(0, 0, 0) switch_targets=0
+    type = () -> ()
+    +0000  control.block
+    +0004  control.return

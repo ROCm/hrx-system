@@ -524,6 +524,8 @@ iree_status_t loom_vm_module_layout_build(loom_module_t* module,
       loom_vm_module_layout_populate_functions(module, arena, out_layout));
   IREE_RETURN_IF_ERROR(
       loom_vm_module_layout_populate_imports(module, arena, out_layout));
+  IREE_RETURN_IF_ERROR(loom_vm_module_resource_layout_build(
+      module, arena, &out_layout->resources));
   IREE_RETURN_IF_ERROR(
       loom_vm_module_layout_derive_function_yieldability(arena, out_layout));
   IREE_RETURN_IF_ERROR(loom_vm_module_layout_assign_exports(arena, out_layout));
