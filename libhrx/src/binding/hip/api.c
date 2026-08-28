@@ -2489,6 +2489,9 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
                    ? 2147483647
                    : (int)device_obj->total_memory;
       break;
+    case hipDeviceAttributeUnifiedAddressing:
+      *value = 1;
+      break;
     case hipDeviceAttributeManagedMemory:
       *value = 1;
       break;

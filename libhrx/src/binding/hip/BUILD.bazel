@@ -225,6 +225,30 @@ hrx_cc_test(
 )
 
 hrx_cc_test(
+    name = "hip_unified_addressing_attribute_api_test",
+    srcs = [
+        "api.h",
+        "hip_unified_addressing_attribute_api_test.cc",
+    ],
+    # Exercise the public entry points from the exact shared object built by
+    # this target graph instead of linking a test-only implementation.
+    data = [":amdhip64"],
+    env = {
+        "HRX_TEST_LIBAMDHIP64": "$(location :amdhip64)",
+    },
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = _LINUX_COMPATIBILITY,
+    deps = [
+        "//build_tools/bazel:dl",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
     name = "hip_device_attribute_no_device_api_test",
     srcs = [
         "api.h",

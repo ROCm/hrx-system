@@ -250,6 +250,28 @@ endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 iree_cc_test(
   NAME
+    hip_unified_addressing_attribute_api_test
+  SRCS
+    "api.h"
+    "hip_unified_addressing_attribute_api_test.cc"
+  DATA
+    ::amdhip64
+  DEPS
+    ${CMAKE_DL_LIBS}
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+  ENV
+    "HRX_TEST_LIBAMDHIP64=$<TARGET_FILE:libhrx::src::binding::hip::amdhip64>"
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_test(
+  NAME
     hip_device_attribute_no_device_api_test
   SRCS
     "api.h"
@@ -414,7 +436,8 @@ foreach(_hrx_hip_dso_test
     libhrx_src_binding_hip_hip_device_attribute_no_device_api_test
     libhrx_src_binding_hip_hip_device_attribute_validation_api_test
     libhrx_src_binding_hip_hip_get_proc_address_test
-    libhrx_src_binding_hip_hip_launch_validation_api_test)
+    libhrx_src_binding_hip_hip_launch_validation_api_test
+    libhrx_src_binding_hip_hip_unified_addressing_attribute_api_test)
   if(TARGET ${_hrx_hip_dso_test})
     target_compile_definitions(${_hrx_hip_dso_test}
       PRIVATE
