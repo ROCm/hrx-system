@@ -337,6 +337,22 @@ loom_value_facts_t loom_value_facts_make_signed_raw_bits(uint64_t raw_bits,
       loom_value_facts_sign_extend_raw_bits(raw_bits, bit_count));
 }
 
+loom_value_facts_t loom_value_facts_sign_extend(loom_value_facts_t source_facts,
+                                                int32_t source_bit_count) {
+  if (source_bit_count <= 0 || source_bit_count > 64) {
+    return loom_value_facts_unknown();
+  }
+  if (source_bit_count != 1) return source_facts;
+
+  uint64_t raw_bits = 0;
+  loom_value_facts_t result_facts =
+      loom_value_facts_as_exact_raw_bits(source_facts, 1, &raw_bits)
+          ? loom_value_facts_make_signed_raw_bits(raw_bits, 1)
+          : loom_value_facts_make(-1, 0, 1);
+  loom_value_facts_propagate_unary_distribution(source_facts, &result_facts);
+  return result_facts;
+}
+
 loom_value_facts_t loom_value_facts_make_unsigned_bit_count_range(
     int64_t bit_count) {
   if (bit_count <= 0 || bit_count > 63) {
