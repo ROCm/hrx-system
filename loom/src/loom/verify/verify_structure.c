@@ -1351,6 +1351,7 @@ static iree_string_view_t loom_verify_encoding_attr_kind_name(
   static const iree_string_view_t kNames[LOOM_ATTR_COUNT_] = {
       [LOOM_ATTR_ABSENT] = IREE_SVL("absent"),
       [LOOM_ATTR_I64] = IREE_SVL("integer"),
+      [LOOM_ATTR_U64] = IREE_SVL("unsigned integer"),
       [LOOM_ATTR_F64] = IREE_SVL("float"),
       [LOOM_ATTR_STRING] = IREE_SVL("string"),
       [LOOM_ATTR_BOOL] = IREE_SVL("boolean"),

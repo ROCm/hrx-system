@@ -73,6 +73,13 @@ static iree_status_t loom_bytecode_write_attr_value_at_depth(
           loom_bytecode_page_writer_write_svarint(writer, attr.i64));
       break;
     }
+    case LOOM_ATTR_U64: {
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_page_writer_write_u8(writer, LOOM_BYTECODE_ATTR_U64));
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_page_writer_write_uvarint(writer, attr.u64));
+      break;
+    }
     case LOOM_ATTR_F64: {
       IREE_RETURN_IF_ERROR(
           loom_bytecode_page_writer_write_u8(writer, LOOM_BYTECODE_ATTR_F64));
@@ -427,6 +434,12 @@ static iree_status_t loom_bytecode_emit_attr_value_at_depth(
       IREE_RETURN_IF_ERROR(
           loom_bytecode_emit_u8(builder, LOOM_BYTECODE_ATTR_I64));
       IREE_RETURN_IF_ERROR(loom_bytecode_emit_svarint(builder, attr.i64));
+      break;
+    }
+    case LOOM_ATTR_U64: {
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_emit_u8(builder, LOOM_BYTECODE_ATTR_U64));
+      IREE_RETURN_IF_ERROR(loom_bytecode_emit_uvarint(builder, attr.u64));
       break;
     }
     case LOOM_ATTR_F64: {

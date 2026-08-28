@@ -1417,6 +1417,28 @@ TEST_F(ParserTest, AttrDictUnsortedKeysRoundTripInCanonicalOrder) {
       << "attribute dictionary keys should print in canonical order: " << text;
 }
 
+TEST_F(ParserTest, AttrDictQuotedKeyAndUnsignedIntegerRoundTrip) {
+  std::string text = RoundTrip(
+      "%c = test.constant 0.0 : f32\n"
+      "%s = test.attrs %c {\"model.revision\" = "
+      "u64(18446744073709551615)} : f32\n");
+  EXPECT_NE(text.find("{\"model.revision\" = "
+                      "u64(18446744073709551615)}"),
+            std::string::npos)
+      << "quoted dictionary keys and unsigned integers should round-trip: "
+      << text;
+}
+
+TEST_F(ParserTest, UnsignedIntegerRejectsValuesOutsideItsDomain) {
+  EXPECT_FALSE(ParseExpectErrors("%c = test.constant 0.0 : f32\n"
+                                 "%s = test.attrs %c {value = u64(-1)} : f32\n")
+                   .empty());
+  EXPECT_FALSE(ParseExpectErrors("%c = test.constant 0.0 : f32\n"
+                                 "%s = test.attrs %c {value = "
+                                 "u64(18446744073709551616)} : f32\n")
+                   .empty());
+}
+
 TEST_F(ParserTest, AttrDictSymbolRefRoundTrip) {
   std::string text = RoundTrip(
       "test.record @target {}\n"

@@ -381,6 +381,8 @@ static iree_status_t loom_low_packet_json_write_attr(
       return loom_output_stream_write_cstring(stream, "null");
     case LOOM_ATTR_I64:
       return loom_output_stream_write_format(stream, "%" PRId64, attr->i64);
+    case LOOM_ATTR_U64:
+      return loom_output_stream_write_format(stream, "%" PRIu64, attr->u64);
     case LOOM_ATTR_F64:
       return loom_low_packet_json_write_f64(attr->f64, stream);
     case LOOM_ATTR_STRING:

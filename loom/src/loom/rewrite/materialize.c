@@ -904,6 +904,7 @@ static iree_status_t loom_ir_move_attr_is_available(
   switch ((loom_attr_kind_t)attr->kind) {
     case LOOM_ATTR_ABSENT:
     case LOOM_ATTR_I64:
+    case LOOM_ATTR_U64:
     case LOOM_ATTR_F64:
     case LOOM_ATTR_STRING:
     case LOOM_ATTR_BOOL:

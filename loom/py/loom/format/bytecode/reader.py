@@ -104,6 +104,7 @@ from loom.ir import (
     TiedResult,
     Type,
     TypeKind,
+    U64Attr,
     Value,
     rebuild_value_metadata,
     replace_canonical_attr_dict,
@@ -2171,6 +2172,9 @@ class BytecodeReader:
                 return self._read_symbol_collection(
                     data, offset, attr_def, "symbol_set"
                 )
+            case 19:  # U64
+                value, offset = decode_varint(data, offset)
+                return U64Attr(value), offset
             case _:
                 raise BytecodeError(f"unknown attr value kind: {kind}")
 

@@ -71,6 +71,7 @@ from loom.ir import (
     TaggedLocation,
     Type,
     TypeKind,
+    U64Attr,
     Value,
 )
 
@@ -153,6 +154,7 @@ ATTR_KIND_PARAMETERIZED_ARRAY = 15
 ATTR_KIND_SIGNED_ENUM_SET = 16
 ATTR_KIND_SYMBOL_ARRAY = 17
 ATTR_KIND_SYMBOL_SET = 18
+ATTR_KIND_U64 = 19
 
 # Type kind bytes. These must match loom_bytecode_type_kind_e, not just the
 # current Python enum spelling.
@@ -179,7 +181,7 @@ BYTECODE_IR_KIND_BY_TYPE_KIND: dict[int, TypeKind] = {
 
 # File magic and version.
 MAGIC = b"LOOM"
-FORMAT_VERSION = 34
+FORMAT_VERSION = 35
 PRODUCER = "loom-py"
 
 SYMBOL_INTERFACE_BITS = {
@@ -1796,10 +1798,18 @@ class BytecodeWriter:
             buf.write_u8(ATTR_KIND_SYMBOL)
             buf.write_varint(self._ctx.strings[str(value)])
             return
-        if isinstance(value, bool):
+        if isinstance(value, U64Attr):
+            buf.write_u8(ATTR_KIND_U64)
+            buf.write_varint(value.value)
+        elif isinstance(value, bool):
             buf.write_u8(ATTR_KIND_BOOL)
             buf.write_u8(1 if value else 0)
-        elif isinstance(value, int):
+        elif type(value) is int:
+            if not -(2**63) <= value < 2**63:
+                raise ValueError(
+                    "plain integer attributes must fit in signed 64 bits; "
+                    f"use U64Attr for unsigned values, got {value}"
+                )
             buf.write_u8(ATTR_KIND_I64)
             buf.write_signed_varint(value)
         elif isinstance(value, float):
@@ -1829,19 +1839,22 @@ class BytecodeWriter:
             buf.write_u8(ATTR_KIND_ENCODING)
             buf.write_varint(self._module.add_encoding(value) + 1)
         elif isinstance(value, list | tuple):
-            # Check if all ints → i64_array.
-            if all(isinstance(v, int) for v in value):
-                buf.write_u8(ATTR_KIND_I64_ARRAY)
-                buf.write_varint(len(value))
-                for v in value:
-                    buf.write_signed_varint(v)
-            else:
-                # Mixed array — serialize as string.
-                buf.write_u8(ATTR_KIND_STRING)
-                buf.write_varint(self._ctx.strings[str(value)])
+            if not all(type(element) is int for element in value):
+                raise TypeError(
+                    "generic attribute arrays require signed 64-bit integer "
+                    f"elements, got {value!r}"
+                )
+            if not all(-(2**63) <= element < 2**63 for element in value):
+                raise ValueError(
+                    "generic integer array elements must fit in signed 64 bits, "
+                    f"got {value!r}"
+                )
+            buf.write_u8(ATTR_KIND_I64_ARRAY)
+            buf.write_varint(len(value))
+            for element in value:
+                buf.write_signed_varint(element)
         else:
-            buf.write_u8(ATTR_KIND_STRING)
-            buf.write_varint(self._ctx.strings[str(value)])
+            raise TypeError(f"unsupported generic attribute value {value!r}")
 
     def _dispatch_enum_attr_value(
         self, buf: ByteBuffer, value: Any, attr_def: Any | None

@@ -746,10 +746,12 @@
 // ==========================================================================
 //
 // attr-dict ::= '{' (attr-entry (',' attr-entry)*)? '}'
-// attr-entry ::= identifier '=' attr-value   // key-value pair
+// attr-entry ::= attr-key '=' attr-value     // key-value pair
 //              | identifier                    // unit attr (presence = true)
+// attr-key   ::= identifier | STRING
 //
 // attr-value ::= INTEGER (':' type)?
+//              | 'u64' '(' INTEGER ')'
 //              | FLOAT (':' type)?
 //              | STRING
 //              | 'true' | 'false'
@@ -757,6 +759,11 @@
 //              | '{' (attr-entry (',' attr-entry)*)? '}'
 //              | '#' identifier ('<' ... '>')?
 //              | type
+//
+// Bare integer values are signed 64-bit. The explicit u64 form carries values
+// in [0, 2^64) without losing their unsigned type. Dictionary keys use bare
+// identifiers when possible and canonical string literals otherwise, allowing
+// stable namespaced keys such as "model.revision".
 //
 // The attribute dictionary appears in the position specified by the
 // op's format spec (typically after operands, before types).

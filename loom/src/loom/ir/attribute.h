@@ -399,6 +399,8 @@ typedef enum loom_attr_kind_e {
   // duplicates. The operation field descriptor supplies the symbol interface
   // and reference role; generic dictionaries cannot carry this kind.
   LOOM_ATTR_SYMBOL_SET = 20,
+  // 64-bit unsigned integer.
+  LOOM_ATTR_U64 = 21,
   LOOM_ATTR_COUNT_,
 } loom_attr_kind_t;
 
@@ -418,29 +420,50 @@ typedef enum loom_attr_kind_e {
 // its family kind. BYTES uses reserved_1 for its byte length and points to
 // immutable bytes.
 typedef struct loom_attribute_t {
+  // Active loom_attr_kind_t payload tag.
   uint8_t kind;
+  // Reserved for future tag flags; must be zero.
   uint8_t reserved_0;
+  // Element, parameter, or word count for aggregate payload kinds.
   uint16_t count;
+  // Kind-specific auxiliary payload or reserved zero storage.
   uint32_t reserved_1;
   union {
+    // Signed integer payload for LOOM_ATTR_I64.
     int64_t i64;
+    // Unsigned integer payload for LOOM_ATTR_U64.
+    uint64_t u64;
+    // Floating-point payload for LOOM_ATTR_F64.
     double f64;
+    // Module string table index for LOOM_ATTR_STRING.
     loom_string_id_t string_id;
+    // Module-local symbol reference for LOOM_ATTR_SYMBOL.
     loom_symbol_ref_t symbol;
     // Arena-owned payload for LOOM_ATTR_SYMBOL_ARRAY and LOOM_ATTR_SYMBOL_SET.
     const loom_symbol_ref_t* symbol_refs;
+    // Arena-owned payload for LOOM_ATTR_I64_ARRAY.
     int64_t* i64_array;
+    // Arena-owned payload for LOOM_ATTR_ENUM_ARRAY.
     const uint8_t* enum_array;
+    // Arena-owned polarity words for LOOM_ATTR_SIGNED_ENUM_SET.
     const uint64_t* signed_enum_set_words;
+    // Module type table index for LOOM_ATTR_TYPE.
     loom_type_id_t type_id;
+    // Module static encoding table index for LOOM_ATTR_ENCODING.
     uint32_t encoding_id;
+    // Contract-local stable ordinal for LOOM_ATTR_SCOPED_ENUM.
     uint32_t scoped_enum;
+    // Arena-owned payload for LOOM_ATTR_PREDICATE_LIST.
     loom_predicate_t* predicate_list;
+    // Arena-owned canonical entries for LOOM_ATTR_DICT.
     const loom_named_attr_t* dict_entries;
+    // Arena-owned descriptor-indexed slots for LOOM_ATTR_PARAMETERIZED.
     const struct loom_attribute_t* parameterized_slots;
-    // Ordered complete PARAMETERIZED attribute values.
+    // Arena-owned complete values for LOOM_ATTR_PARAMETERIZED_ARRAY.
     const struct loom_attribute_t* parameterized_array;
+    // Arena-owned payload for LOOM_ATTR_BYTES.
     const uint8_t* bytes;
+    // Raw scalar backing used by boolean and enum payloads.
     uint64_t raw;
   };
 } loom_attribute_t;
@@ -495,6 +518,13 @@ static inline loom_attribute_t loom_attr_make_present(
 static inline loom_attribute_t loom_attr_i64(int64_t value) {
   loom_attribute_t attr = loom_attr_make_present(LOOM_ATTR_I64);
   attr.i64 = value;
+  return attr;
+}
+
+// Constructs an unsigned integer attribute.
+static inline loom_attribute_t loom_attr_u64(uint64_t value) {
+  loom_attribute_t attr = loom_attr_make_present(LOOM_ATTR_U64);
+  attr.u64 = value;
   return attr;
 }
 
@@ -768,6 +798,11 @@ uint32_t loom_attribute_hash(const loom_attribute_t* attr);
 // Returns the integer value of an I64 attribute.
 static inline int64_t loom_attr_as_i64(loom_attribute_t attr) {
   return attr.i64;
+}
+
+// Returns the unsigned integer value of a U64 attribute.
+static inline uint64_t loom_attr_as_u64(loom_attribute_t attr) {
+  return attr.u64;
 }
 
 // Returns the floating-point value of an F64 attribute.

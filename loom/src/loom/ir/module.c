@@ -2885,6 +2885,9 @@ static iree_status_t loom_module_canonicalize_attr_value(
     case LOOM_ATTR_I64:
       *out_value = loom_attr_i64(value.i64);
       return iree_ok_status();
+    case LOOM_ATTR_U64:
+      *out_value = loom_attr_u64(value.u64);
+      return iree_ok_status();
     case LOOM_ATTR_F64:
       *out_value = loom_attr_f64(value.f64);
       return iree_ok_status();
@@ -3318,6 +3321,7 @@ static iree_status_t loom_module_verify_canonical_attr_value(
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "attribute value is absent");
     case LOOM_ATTR_I64:
+    case LOOM_ATTR_U64:
     case LOOM_ATTR_F64:
     case LOOM_ATTR_SYMBOL:
       return loom_module_verify_canonical_attr_header(
@@ -4767,6 +4771,7 @@ static iree_status_t loom_module_replace_attribute_value_refs_impl(
   switch ((loom_attr_kind_t)attr.kind) {
     case LOOM_ATTR_ABSENT:
     case LOOM_ATTR_I64:
+    case LOOM_ATTR_U64:
     case LOOM_ATTR_F64:
     case LOOM_ATTR_STRING:
     case LOOM_ATTR_BOOL:

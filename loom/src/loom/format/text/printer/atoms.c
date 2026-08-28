@@ -923,6 +923,9 @@ static iree_status_t loom_print_attr_impl(
   switch (attr->kind) {
     case LOOM_ATTR_I64:
       return loom_output_stream_write_format(stream, "%" PRId64, attr->i64);
+    case LOOM_ATTR_U64:
+      return loom_output_stream_write_format(stream, "u64(%" PRIu64 ")",
+                                             attr->u64);
     case LOOM_ATTR_F64: {
       if (isnan(attr->f64)) {
         return loom_output_stream_write_cstring(stream, "nan");
@@ -1191,8 +1194,12 @@ static iree_status_t loom_print_attr_impl(
         }
         const loom_named_attr_t* entry = &attr->dict_entries[i];
         if (module && entry->name_id < module->strings.count) {
-          IREE_RETURN_IF_ERROR(loom_output_stream_write(
-              stream, module->strings.entries[entry->name_id]));
+          iree_string_view_t key = module->strings.entries[entry->name_id];
+          if (loom_print_is_bare_identifier(key)) {
+            IREE_RETURN_IF_ERROR(loom_output_stream_write(stream, key));
+          } else {
+            IREE_RETURN_IF_ERROR(loom_print_string_literal(stream, key));
+          }
         } else {
           IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
               stream, "<name:%" PRIu16 ">", entry->name_id));

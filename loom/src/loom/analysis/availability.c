@@ -240,6 +240,7 @@ static iree_status_t loom_availability_attr_is_available_before_op_impl(
   switch (attr->kind) {
     case LOOM_ATTR_ABSENT:
     case LOOM_ATTR_I64:
+    case LOOM_ATTR_U64:
     case LOOM_ATTR_F64:
     case LOOM_ATTR_STRING:
     case LOOM_ATTR_BOOL:

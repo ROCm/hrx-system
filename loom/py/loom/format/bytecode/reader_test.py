@@ -95,6 +95,7 @@ from loom.ir import (
     TiedResult,
     Type,
     TypeKind,
+    U64Attr,
     Use,
     Value,
 )
@@ -1329,6 +1330,18 @@ class TestAttributeRoundTrips:
 
     def test_i64_max(self) -> None:
         assert self._roundtrip_attr("v", 2**62) == 2**62
+
+    def test_u64_max(self) -> None:
+        value = U64Attr(2**64 - 1)
+        assert self._roundtrip_attr("v", value) == value
+
+    def test_plain_integer_outside_i64_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match="use U64Attr"):
+            self._roundtrip_attr("v", 2**63)
+
+    def test_mixed_generic_array_is_rejected(self) -> None:
+        with pytest.raises(TypeError, match="signed 64-bit integer elements"):
+            self._roundtrip_attr("v", [1, "two"])
 
     # Floats.
     def test_f64_positive(self) -> None:

@@ -127,6 +127,7 @@ from loom.ir import (
     TaggedLocation,
     Type,
     TypeKind,
+    U64Attr,
     Value,
     binding_element_type,
     parse_scalar_type_kind,
@@ -186,6 +187,47 @@ def _parse_float_literal(text: str) -> float:
     return float(text)
 
 
+def _parse_integer_literal(text: str) -> int:
+    """Parses the decimal or hexadecimal spelling accepted by INTEGER."""
+    unsigned_text = text[1:] if text.startswith("-") else text
+    return int(text, 16 if unsigned_text.startswith(("0x", "0X")) else 10)
+
+
+def _parse_attr_dict_key(tokenizer: Tokenizer) -> Token:
+    """Parse a generic dictionary key in bare or quoted form."""
+    if tokenizer.at(TokenKind.BARE_IDENT) or tokenizer.at(TokenKind.STRING):
+        return tokenizer.next()
+    return tokenizer.expect(TokenKind.BARE_IDENT)
+
+
+def _parse_i64_attr_value(token: Token, filename: str) -> int:
+    """Parses a signed 64-bit generic integer attribute value."""
+    value = _parse_integer_literal(token.text)
+    if not -(2**63) <= value < 2**63:
+        raise ParseError(
+            "integer attribute value must be in [-2^63, 2^63)",
+            token.location,
+            filename,
+        )
+    return value
+
+
+def _parse_u64_attr_value_from_tokens(tokenizer: Tokenizer, filename: str) -> U64Attr:
+    """Parse an exact ``u64(INTEGER)`` generic attribute value."""
+    tokenizer.expect(TokenKind.BARE_IDENT, "u64")
+    tokenizer.expect(TokenKind.LPAREN)
+    value_token = tokenizer.expect(TokenKind.INTEGER)
+    value = _parse_integer_literal(value_token.text)
+    if not 0 <= value < 2**64:
+        raise ParseError(
+            "u64 attribute value must be in [0, 2^64)",
+            value_token.location,
+            filename,
+        )
+    tokenizer.expect(TokenKind.RPAREN)
+    return U64Attr(value)
+
+
 def _concrete_type_for_constraint(constraint: TypeConstraint) -> Type | None:
     """Returns the concrete type implied by a singleton type constraint."""
     match constraint:
@@ -228,11 +270,16 @@ def _parse_generic_attr_value_from_tokens(
 ) -> Any:
     """Parse an untyped attr value from the current token stream."""
     if tokenizer.at(TokenKind.INTEGER):
-        return int(tokenizer.next().text)
+        return _parse_i64_attr_value(tokenizer.next(), filename)
     if tokenizer.at(TokenKind.FLOAT):
         return _parse_float_literal(tokenizer.next().text)
     if tokenizer.at(TokenKind.STRING):
         return tokenizer.next().text
+    if (
+        tokenizer.at(TokenKind.BARE_IDENT, "u64")
+        and tokenizer.peek_n(1).kind == TokenKind.LPAREN
+    ):
+        return _parse_u64_attr_value_from_tokens(tokenizer, filename)
     if (
         tokenizer.at(TokenKind.BARE_IDENT, "bytes")
         and tokenizer.peek_n(1).kind == TokenKind.LPAREN
@@ -288,9 +335,13 @@ def _parse_generic_attr_value_from_tokens(
         tokenizer.next()
         values: list[int] = []
         if not tokenizer.at(TokenKind.RBRACKET):
-            values.append(int(tokenizer.expect(TokenKind.INTEGER).text))
+            values.append(
+                _parse_i64_attr_value(tokenizer.expect(TokenKind.INTEGER), filename)
+            )
             while tokenizer.try_consume(TokenKind.COMMA):
-                values.append(int(tokenizer.expect(TokenKind.INTEGER).text))
+                values.append(
+                    _parse_i64_attr_value(tokenizer.expect(TokenKind.INTEGER), filename)
+                )
         tokenizer.expect(TokenKind.RBRACKET)
         return values
     if tokenizer.at(TokenKind.LBRACE):
@@ -305,7 +356,7 @@ def _parse_generic_attr_value_from_tokens(
         entries: list[tuple[str, Any]] = []
         seen_keys: set[str] = set()
         while not tokenizer.at(TokenKind.RBRACE):
-            key_token = tokenizer.expect(TokenKind.BARE_IDENT)
+            key_token = _parse_attr_dict_key(tokenizer)
             if key_token.text in seen_keys:
                 raise ParseError(
                     f"duplicate attribute dict key '{key_token.text}'",
@@ -4254,7 +4305,9 @@ class Parser:
         entries: list[tuple[str, Any]] = []
         seen_keys: set[str] = set()
         while not tok.at(TokenKind.RBRACE):
-            key_tok = tok.expect(TokenKind.BARE_IDENT)
+            key_tok = (
+                _parse_attr_dict_key(tok) if field else tok.expect(TokenKind.BARE_IDENT)
+            )
             key = key_tok.text
             if key in seen_keys:
                 raise ParseError(

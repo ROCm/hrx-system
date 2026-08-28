@@ -428,6 +428,37 @@ static bool loom_parse_next_generic_attr_is_bytes(loom_parser_t* parser) {
   return loom_tokenizer_at(&lookahead, LOOM_TOKEN_LPAREN);
 }
 
+static bool loom_parse_next_generic_attr_is_u64(loom_parser_t* parser) {
+  loom_tokenizer_t lookahead = parser->tokenizer;
+  if (!loom_tokenizer_try_consume_keyword(&lookahead, IREE_SV("u64"))) {
+    return false;
+  }
+  return loom_tokenizer_at(&lookahead, LOOM_TOKEN_LPAREN);
+}
+
+static iree_status_t loom_parse_u64_attr(loom_parser_t* parser,
+                                         loom_attribute_t* out_attr) {
+  if (!loom_tokenizer_try_consume_keyword(&parser->tokenizer, IREE_SV("u64"))) {
+    loom_token_t peek = loom_tokenizer_peek(&parser->tokenizer);
+    return loom_parser_emit_unexpected_token(parser, peek, IREE_SV("'u64'"));
+  }
+  LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_LPAREN, NULL);
+  loom_token_t value_token = loom_token_none();
+  LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_INTEGER, &value_token);
+  uint64_t value = 0;
+  if (iree_string_view_starts_with(value_token.text, IREE_SV("-")) ||
+      !iree_string_view_atoi_uint64(value_token.text, &value)) {
+    loom_diagnostic_param_t params[] = {
+        loom_param_string(value_token.text),
+    };
+    return loom_parser_emit(parser, LOOM_ERR_PARSE_015, params,
+                            IREE_ARRAYSIZE(params), value_token);
+  }
+  LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_RPAREN, NULL);
+  *out_attr = loom_attr_u64(value);
+  return iree_ok_status();
+}
+
 static bool loom_parse_next_generic_attr_is_type(loom_parser_t* parser) {
   loom_tokenizer_t lookahead = parser->tokenizer;
   if (!loom_tokenizer_try_consume_keyword(&lookahead, IREE_SV("type"))) {
@@ -1108,6 +1139,9 @@ static iree_status_t loom_parse_generic_attr_value_with_type_mode(
     case LOOM_TOKEN_SYMBOL:
       return loom_parse_symbol_ref_attr(parser, out_attr);
     case LOOM_TOKEN_BARE_IDENT: {
+      if (loom_parse_next_generic_attr_is_u64(parser)) {
+        return loom_parse_u64_attr(parser, out_attr);
+      }
       if (loom_parse_next_generic_attr_is_bytes(parser)) {
         return loom_parse_bytes_attr(parser, out_attr);
       }
@@ -1228,8 +1262,13 @@ static iree_status_t loom_parse_present_attr_dict(
                                                peek);
     }
 
-    loom_token_t key_token = loom_token_none();
-    LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_BARE_IDENT, &key_token);
+    loom_token_t key_token = loom_tokenizer_peek(&parser->tokenizer);
+    if (key_token.kind != LOOM_TOKEN_BARE_IDENT &&
+        key_token.kind != LOOM_TOKEN_STRING) {
+      return loom_parser_emit_unexpected_token(parser, key_token,
+                                               IREE_SV("a dictionary key"));
+    }
+    LOOM_PARSE_EXPECT(parser, key_token.kind, &key_token);
     loom_string_id_t key_id = LOOM_STRING_ID_INVALID;
     IREE_RETURN_IF_ERROR(
         loom_module_intern_string(parser->module, key_token.text, &key_id));

@@ -118,6 +118,7 @@ from loom.ir import (
     SymbolNameArray,
     SymbolNameSet,
     Type,
+    U64Attr,
     Value,
 )
 from loom.location_tag import builtin_location_tag_name
@@ -714,6 +715,33 @@ def _format_string_literal(value: str) -> str:
     return "".join(escaped_chunks)
 
 
+def _is_printable_identifier(value: Any, *, allow_dot: bool = False) -> bool:
+    """Returns true when value can be printed as a syntax identifier."""
+    if not isinstance(value, str) or not value:
+        return False
+    first = value[0]
+    if not (first.isascii() and (first.isalpha() or first in "_$")):
+        return False
+    for character in value[1:]:
+        if not character.isascii():
+            return False
+        if (
+            character.isalnum()
+            or character in "_$-"
+            or (allow_dot and character == ".")
+        ):
+            continue
+        return False
+    return True
+
+
+def _format_attr_dict_key(value: str) -> str:
+    """Formats a dictionary key in its canonical bare or quoted form."""
+    if _is_printable_identifier(value):
+        return value
+    return _format_string_literal(value)
+
+
 def _format_attr_value(
     value: Any,
     attr_def: AttrDef | None = None,
@@ -801,9 +829,16 @@ def _format_attr_value(
         if not isinstance(value, bytes | bytearray):
             raise TypeError(f"bytes attribute value must be bytes: {value!r}")
         return f'bytes("{bytes(value).hex()}")'
+    if isinstance(value, U64Attr):
+        return f"u64({value.value})"
     if isinstance(value, bool):
         return "true" if value else "false"
-    if isinstance(value, int):
+    if type(value) is int:
+        if not -(2**63) <= value < 2**63:
+            raise ValueError(
+                "plain integer attributes must fit in signed 64 bits; "
+                f"use U64Attr for unsigned values, got {value}"
+            )
         return str(value)
     if isinstance(value, float):
         return _format_float(value)
@@ -868,6 +903,16 @@ def _format_attr_value(
     if isinstance(value, str):
         return _format_string_literal(value)
     if isinstance(value, list | tuple):
+        if not all(type(element) is int for element in value):
+            raise TypeError(
+                "generic attribute arrays require signed 64-bit integer "
+                f"elements, got {value!r}"
+            )
+        if not all(-(2**63) <= element < 2**63 for element in value):
+            raise ValueError(
+                "generic integer array elements must fit in signed 64 bits, "
+                f"got {value!r}"
+            )
         parts = [
             _format_attr_value(
                 v,
@@ -889,7 +934,7 @@ def _format_attr_value(
                 encoding_alias_selectors=encoding_alias_selectors,
                 use_encoding_aliases=use_encoding_aliases,
             )
-            parts.append(f"{key} = {formatted_item}")
+            parts.append(f"{_format_attr_dict_key(key)} = {formatted_item}")
         return "{" + ", ".join(parts) + "}"
     if isinstance(value, EncodingInstance):
         return _format_encoding_instance(
@@ -897,7 +942,7 @@ def _format_attr_value(
             use_alias=use_encoding_aliases,
             encoding_alias_selectors=encoding_alias_selectors,
         )
-    return str(value)
+    raise TypeError(f"unsupported generic attribute value {value!r}")
 
 
 def _format_parameterized_attr_parameters(
@@ -983,22 +1028,7 @@ def _format_enum_attr_value(
 
 def _is_pipeline_printable_name(value: Any, *, allow_dot: bool) -> bool:
     """Returns true when value can be printed as a pipeline syntax identifier."""
-    if not isinstance(value, str) or not value:
-        return False
-    first = value[0]
-    if not (first.isascii() and (first.isalpha() or first in "_$")):
-        return False
-    for character in value[1:]:
-        if not character.isascii():
-            return False
-        if (
-            character.isalnum()
-            or character in "_$-"
-            or (allow_dot and character == ".")
-        ):
-            continue
-        return False
-    return True
+    return _is_printable_identifier(value, allow_dot=allow_dot)
 
 
 def _is_pipeline_printable_attr_value(
@@ -2553,7 +2583,9 @@ class Printer:
         """Format {key = value, ...} from a named dict attribute."""
         parts: list[str] = []
         for key, value in dict_value.items():
-            parts.append(f"{key} = {self._format_attr_value(value)}")
+            parts.append(
+                f"{_format_attr_dict_key(key)} = {self._format_attr_value(value)}"
+            )
         return "{" + ", ".join(parts) + "}"
 
     def _format_attr_dict(

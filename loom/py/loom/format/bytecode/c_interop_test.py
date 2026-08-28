@@ -41,6 +41,7 @@ from loom.ir import (
     SymbolName,
     SymbolNameArray,
     SymbolNameSet,
+    U64Attr,
 )
 
 
@@ -102,10 +103,14 @@ def _interop_module() -> tuple[Module, RegisterType]:
         "#test.feature_set<[low, -middle, high]>] "
         "using [#test.tile<width = 4>]\n"
         "  test.signed_enum_set_attrs [low, -middle, high] using []\n"
+        "  %metadata_seed = test.constant 0.0 : f32\n"
+        "  %metadata = test.attrs %metadata_seed "
+        '{"kernel.revision" = u64(18446744073709551614)} : f32\n'
         "  test.yield\n"
         "}\n"
         "test.record @parameterized_record "
-        "{options = #test.options<mode = precise, scopes = []>}\n"
+        '{"model.revision" = u64(18446744073709551615), '
+        "options = #test.options<mode = precise, scopes = []>}\n"
         "test.record @other_record\n"
         "test.decl @parameterized_types("
         "%scope: test.scope<subgroup>, "
@@ -270,6 +275,9 @@ def _assert_parameterized_arrays(entry_block: Block) -> None:
         raise AssertionError("signed enum set did not survive C bytecode")
     if signed_set_op.attributes["optional_features"] != SignedEnumSetAttr():
         raise AssertionError("present empty signed enum set changed")
+    metadata_op = next(op for op in entry_block.ops if op.name == "test.attrs")
+    if metadata_op.attributes["dict"]["kernel.revision"] != U64Attr(2**64 - 2):
+        raise AssertionError("body dict lost exact unsigned metadata")
 
 
 def _assert_symbol_payloads(module: Module) -> None:
@@ -291,6 +299,8 @@ def _assert_symbol_payloads(module: Module) -> None:
         or record_options.get("scopes") != EnumArrayAttr()
     ):
         raise AssertionError("record dict lost present empty parameter")
+    if record.attributes["dict"]["model.revision"] != U64Attr(2**64 - 1):
+        raise AssertionError("record dict lost exact unsigned metadata")
     parameterized_types = next(
         (
             symbol.op

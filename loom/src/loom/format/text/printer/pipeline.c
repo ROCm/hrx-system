@@ -141,6 +141,7 @@ static bool loom_print_pipeline_attr_value_is_printable(
     const loom_attr_descriptor_t* descriptor, uint8_t nesting_depth) {
   switch ((loom_attr_kind_t)attr->kind) {
     case LOOM_ATTR_I64:
+    case LOOM_ATTR_U64:
     case LOOM_ATTR_F64:
     case LOOM_ATTR_BOOL:
       return true;

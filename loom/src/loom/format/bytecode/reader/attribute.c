@@ -291,6 +291,11 @@ static iree_status_t loom_bytecode_attribute_validate_at_depth(
       return loom_bytecode_reader_read_svarint(validator->decoder, cursor,
                                                &value);
     }
+    case LOOM_BYTECODE_ATTR_U64: {
+      uint64_t value = 0;
+      return loom_bytecode_reader_read_uvarint(validator->decoder, cursor,
+                                               &value);
+    }
     case LOOM_BYTECODE_ATTR_F64: {
       uint64_t bits = 0;
       return loom_bytecode_reader_read_u64_le(validator->decoder, cursor,
@@ -888,6 +893,13 @@ static iree_status_t loom_bytecode_attribute_materialize_at_depth(
       IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_svarint(
           materializer->decoder, cursor, &value));
       *out_attr = loom_attr_i64(value);
+      return iree_ok_status();
+    }
+    case LOOM_BYTECODE_ATTR_U64: {
+      uint64_t value = 0;
+      IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
+          materializer->decoder, cursor, &value));
+      *out_attr = loom_attr_u64(value);
       return iree_ok_status();
     }
     case LOOM_BYTECODE_ATTR_F64: {

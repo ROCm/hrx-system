@@ -85,7 +85,7 @@ extern "C" {
 
 #define LOOM_BYTECODE_MAGIC "LOOM"
 #define LOOM_BYTECODE_MAGIC_LENGTH 4
-#define LOOM_BYTECODE_FORMAT_VERSION 34
+#define LOOM_BYTECODE_FORMAT_VERSION 35
 
 #define LOOM_BYTECODE_SOURCE_TRIVIA_LEADING_BLANK_LINE (1u << 0)
 #define LOOM_BYTECODE_SOURCE_TRIVIA_COMMENT_COUNT_SHIFT 1
@@ -827,8 +827,9 @@ typedef enum loom_bytecode_section_kind_e {
 // 7=TYPE, 8=PREDICATE_LIST, 9=DICT, 10=ENCODING, 11=BYTES,
 // 12=SCOPED_ENUM, 13=ENUM_ARRAY, 14=PARAMETERIZED,
 // 15=PARAMETERIZED_ARRAY, 16=SIGNED_ENUM_SET, 17=SYMBOL_ARRAY,
-// 18=SYMBOL_SET. ABSENT is never
+// 18=SYMBOL_SET, 19=U64. ABSENT is never
 // encoded as a payload value.
+// U64 value_data is an unsigned varint.
 // ENUM value_data is the raw uint8 case ordinal;
 // bytecode readers preserve it without consulting enum case tables so open enum
 // attrs can survive tools whose op tables do not yet name the ordinal. Closed
@@ -902,6 +903,7 @@ typedef enum loom_bytecode_attr_kind_e {
   LOOM_BYTECODE_ATTR_SIGNED_ENUM_SET = 16,
   LOOM_BYTECODE_ATTR_SYMBOL_ARRAY = 17,
   LOOM_BYTECODE_ATTR_SYMBOL_SET = 18,
+  LOOM_BYTECODE_ATTR_U64 = 19,
   LOOM_BYTECODE_ATTR_COUNT,
 } loom_bytecode_attr_kind_t;
 
