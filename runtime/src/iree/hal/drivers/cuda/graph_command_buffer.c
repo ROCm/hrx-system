@@ -784,11 +784,8 @@ static iree_status_t iree_hal_cuda_graph_command_buffer_dispatch(
 
   IREE_CUDA_GRAPH_COMMAND_BUFFER_TRACE_ZONE_BEGIN_EXTERNAL(
       command_buffer, IREE_HAL_STREAM_TRACING_VERBOSITY_FINE,
-      kernel_params->debug_info.source_filename.data,
-      kernel_params->debug_info.source_filename.size,
-      kernel_params->debug_info.source_line,
-      kernel_params->debug_info.function_name.data,
-      kernel_params->debug_info.function_name.size, /*name=*/NULL, 0);
+      /*source_file=*/NULL, 0, /*source_line=*/0, kernel_params->name.data,
+      kernel_params->name.size, /*name=*/NULL, 0);
 
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_hal_resource_set_insert(command_buffer->resource_set, 1,

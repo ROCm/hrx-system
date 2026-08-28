@@ -17,43 +17,12 @@ FLATCC_ARGS = [
     "--reader",
     "--builder",
     "--verifier",
-    "--json",
 ]
 
 iree_runtime_flatbuffer_c_library(
     name = "bytecode_module_def_c_fbs",
     srcs = ["bytecode_module_def.fbs"],
     flatcc_args = FLATCC_ARGS,
-)
-
-iree_runtime_flatbuffer_c_library(
-    name = "cuda_executable_def_c_fbs",
-    srcs = ["cuda_executable_def.fbs"],
-    flatcc_args = FLATCC_ARGS,
-    flatcc_includes = ["executable_debug_info.fbs"],
-    deps = [":executable_debug_info_c_fbs"],
-)
-
-iree_runtime_flatbuffer_c_library(
-    name = "executable_debug_info_c_fbs",
-    srcs = ["executable_debug_info.fbs"],
-    flatcc_args = FLATCC_ARGS,
-)
-
-iree_runtime_flatbuffer_c_library(
-    name = "hip_executable_def_c_fbs",
-    srcs = ["hip_executable_def.fbs"],
-    flatcc_args = FLATCC_ARGS,
-    flatcc_includes = ["executable_debug_info.fbs"],
-    deps = [":executable_debug_info_c_fbs"],
-)
-
-iree_runtime_flatbuffer_c_library(
-    name = "metal_executable_def_c_fbs",
-    srcs = ["metal_executable_def.fbs"],
-    flatcc_args = FLATCC_ARGS,
-    flatcc_includes = ["executable_debug_info.fbs"],
-    deps = [":executable_debug_info_c_fbs"],
 )
 
 cpu_data_headers = [

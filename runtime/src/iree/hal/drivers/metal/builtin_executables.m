@@ -63,21 +63,27 @@ static iree_status_t iree_hal_metal_compile_embedded_msl(id<MTLDevice> device,
     MTLCompileOptions* compile_options = [[MTLCompileOptions new] autorelease];
     compile_options.languageVersion = MTLLanguageVersion3_0;
 
-    NSString* shader_source =
-        [[[NSString alloc] initWithBytes:source_file.data
-                                  length:source_file.size
-                                encoding:[NSString defaultCStringEncoding]] autorelease];
+    NSString* shader_source = [[[NSString alloc] initWithBytes:source_file.data
+                                                        length:source_file.size
+                                                      encoding:NSUTF8StringEncoding] autorelease];
 
-    NSError* error = nil;
-    library = [device newLibraryWithSource:shader_source
-                                   options:compile_options
-                                     error:&error];  // +1
-    if (IREE_UNLIKELY(library == nil)) {
-      const char* ns_c_error = [error.localizedDescription
-          cStringUsingEncoding:[NSString defaultCStringEncoding]];  // autoreleased
+    if (IREE_UNLIKELY(shader_source == nil)) {
       status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "failed to create MTLLibrary from shader source in %s: %s",
-                                source_file.name, ns_c_error);
+                                "builtin Metal shader source in %s is not valid UTF-8",
+                                source_file.name);
+    } else {
+      NSError* error = nil;
+      library = [device newLibraryWithSource:shader_source
+                                     options:compile_options
+                                       error:&error];  // +1
+      if (IREE_UNLIKELY(library == nil)) {
+        const char* error_message =
+            [error.localizedDescription cStringUsingEncoding:NSUTF8StringEncoding];
+        status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "failed to create MTLLibrary from shader source in %s: %s",
+                                  source_file.name,
+                                  error_message ? error_message : "unknown Metal error");
+      }
     }
   }
 
@@ -108,6 +114,7 @@ static iree_status_t iree_hal_metal_load_builtin_libraries(
     status = iree_hal_metal_compile_embedded_msl(device, source_file, &library);
     if (!iree_status_is_ok(status)) break;
     [libraries addObject:library];
+    [library release];  // Ownership transferred to the array.
   }
 
   if (iree_status_is_ok(status)) {
@@ -126,10 +133,9 @@ static iree_status_t iree_hal_metal_create_builtin_pipeline(
     id<MTLDevice> device, id<MTLLibrary> library, iree_string_view_t entry_point,
     iree_hal_metal_builtin_pipeline_t* out_pipeline) {
   @autoreleasepool {
-    NSString* function_name =
-        [[[NSString alloc] initWithBytes:entry_point.data
-                                  length:entry_point.size
-                                encoding:[NSString defaultCStringEncoding]] autorelease];
+    NSString* function_name = [[[NSString alloc] initWithBytes:entry_point.data
+                                                        length:entry_point.size
+                                                      encoding:NSUTF8StringEncoding] autorelease];
     id<MTLFunction> function = [[library newFunctionWithName:function_name] autorelease];
     if (IREE_UNLIKELY(function == nil)) {
       return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
@@ -141,10 +147,11 @@ static iree_status_t iree_hal_metal_create_builtin_pipeline(
     id<MTLComputePipelineState> pipeline_state =
         [device newComputePipelineStateWithFunction:function error:&error];  // +1
     if (IREE_UNLIKELY(pipeline_state == nil)) {
-      const char* ns_c_error = [error.localizedDescription
-          cStringUsingEncoding:[NSString defaultCStringEncoding]];  // autoreleased
+      const char* error_message =
+          [error.localizedDescription cStringUsingEncoding:NSUTF8StringEncoding];
       return iree_make_status(IREE_STATUS_INTERNAL, "invalid shader source for builtin %.*s: %s",
-                              (int)entry_point.size, entry_point.data, ns_c_error);
+                              (int)entry_point.size, entry_point.data,
+                              error_message ? error_message : "unknown Metal error");
     }
 
     out_pipeline->pipeline_state = pipeline_state;
@@ -180,13 +187,6 @@ iree_status_t iree_hal_metal_builtin_executable_create(
                                   pipeline_info->entry_point.size);
 
       iree_hal_metal_builtin_pipeline_t* pipeline = &executable->pipelines[i];
-      IREE_TRACE({
-        const iree_file_toc_t* embedded_files = metal_buffer_kernels_create();
-        iree_file_toc_t source_file = embedded_files[pipeline_info->file_index];
-        pipeline->source_location.func_name = pipeline_info->entry_point;
-        pipeline->source_location.file_name = IREE_SV(source_file.name);
-        pipeline->source_location.line = 0;
-      });
 
       id<MTLLibrary> library =
           [executable->libraries objectAtIndex:pipeline_info->file_index];  // unretained

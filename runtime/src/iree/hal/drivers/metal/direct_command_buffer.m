@@ -906,7 +906,7 @@ static iree_status_t iree_hal_metal_command_buffer_prepare_dispatch(
 
     MTLResourceUsage usage = MTLResourceUsageRead;
     uint64_t binding_bit = 1ull << i;
-    if (iree_any_bit_set(pipeline->binding_read_only_bits, binding_bit)) {
+    if (!iree_any_bit_set(pipeline->binding_read_only_bits, binding_bit)) {
       usage |= MTLResourceUsageWrite;
     }
     descriptor->usage = usage;

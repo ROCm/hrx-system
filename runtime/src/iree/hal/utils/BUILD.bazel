@@ -95,27 +95,6 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
-    name = "executable_debug_info",
-    srcs = ["executable_debug_info.c"],
-    hdrs = ["executable_debug_info.h"],
-    deps = [
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal/flatcc:parsing",
-        "//runtime/src/iree/schemas:executable_debug_info_c_fbs",
-    ],
-)
-
-iree_runtime_cc_library(
-    name = "executable_header",
-    srcs = ["executable_header.c"],
-    hdrs = ["executable_header.h"],
-    deps = [
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal/flatcc:parsing",
-    ],
-)
-
-iree_runtime_cc_library(
     name = "elf_format",
     srcs = ["elf_format.c"],
     hdrs = ["elf_format.h"],

@@ -48,7 +48,6 @@ def _test_flatcc_headers_declares_selected_outputs(name, **kwargs):
             "--reader",
             "--builder",
             "--verifier",
-            "--json",
         ],
         flatcc_includes = ["flatcc_test_include.fbs"],
         srcs = ["flatcc_test_schema.fbs"],
@@ -73,8 +72,6 @@ def _test_flatcc_headers_declares_selected_outputs_impl(env, target):
             "flatcc_test_schema_reader.h",
             "flatcc_test_schema_builder.h",
             "flatcc_test_schema_verifier.h",
-            "flatcc_test_schema_json_parser.h",
-            "flatcc_test_schema_json_printer.h",
         ],
     )
     _expect_values(
@@ -89,7 +86,6 @@ def _test_flatcc_headers_declares_selected_outputs_impl(env, target):
             "--reader",
             "--builder",
             "--verifier",
-            "--json",
         ],
     )
 

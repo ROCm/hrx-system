@@ -109,33 +109,6 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
-    executable_debug_info
-  HDRS
-    "executable_debug_info.h"
-  SRCS
-    "executable_debug_info.c"
-  DEPS
-    iree::base
-    iree::base::internal::flatcc::parsing
-    iree::schemas::executable_debug_info_c_fbs
-  PUBLIC
-)
-
-iree_cc_library(
-  NAME
-    executable_header
-  HDRS
-    "executable_header.h"
-  SRCS
-    "executable_header.c"
-  DEPS
-    iree::base
-    iree::base::internal::flatcc::parsing
-  PUBLIC
-)
-
-iree_cc_library(
-  NAME
     elf_format
   HDRS
     "elf_format.h"

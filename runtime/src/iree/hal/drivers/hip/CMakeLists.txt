@@ -60,22 +60,18 @@ iree_cc_library(
     iree::base::internal
     iree::base::internal::arena
     iree::base::internal::atomic_slist
-    iree::base::internal::flatcc::parsing
     iree::base::threading
     iree::base::threading::thread
     iree::hal
+    iree::hal::drivers::hip::executable::format
     iree::hal::drivers::hip::util::hip_util
     iree::hal::utils::collective_batch
     iree::hal::utils::deferred_command_buffer
-    iree::hal::utils::executable_debug_info
-    iree::hal::utils::executable_header
     iree::hal::utils::files
     iree::hal::utils::queue_emulation
     iree::hal::utils::queue_host_call_emulation
     iree::hal::utils::resource_set
     iree::hal::utils::stream_tracing
-    iree::schemas::executable_debug_info_c_fbs
-    iree::schemas::hip_executable_def_c_fbs
   DEFINES
     ${_hip_platform_defines}
   PUBLIC

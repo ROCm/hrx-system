@@ -8,6 +8,32 @@ iree_add_all_subdirs()
 
 iree_cc_library(
   NAME
+    executable_format
+  HDRS
+    "executable_format.h"
+  SRCS
+    "executable_format.c"
+  DEPS
+    iree::base
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    executable_format_test
+  SRCS
+    "executable_format_test.cc"
+  DEPS
+    ::executable_format
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=runtime.hal.metal"
+)
+
+iree_cc_library(
+  NAME
     metal
   HDRS
     "api.h"
@@ -34,19 +60,15 @@ iree_cc_library(
     iree::base::core_headers
     iree::base::internal
     iree::base::internal::arena
-    iree::base::internal::flatcc::parsing
     iree::hal
+    ::executable_format
     iree::hal::drivers::metal::builtin
     iree::hal::utils::deferred_command_buffer
     iree::hal::utils::device_spec_builder
-    iree::hal::utils::executable_debug_info
-    iree::hal::utils::executable_header
     iree::hal::utils::files
     iree::hal::utils::queue_emulation
     iree::hal::utils::queue_host_call_emulation
     iree::hal::utils::resource_set
-    iree::schemas::executable_debug_info_c_fbs
-    iree::schemas::metal_executable_def_c_fbs
     "-framework Foundation"
     "-framework Metal"
   PUBLIC

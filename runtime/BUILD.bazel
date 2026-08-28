@@ -5,3 +5,29 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 package(default_visibility = ["//visibility:public"])
+
+# Packages that instantiate FlatCC-generated schema libraries. This is limited
+# to the generator self-test, the FlatCC adapter, and the single remaining VM
+# bytecode schema.
+package_group(
+    name = "flatcc_schema_packages",
+    packages = [
+        "//runtime/build_tools/bazel/test",
+        "//runtime/src/iree/base/internal/flatcc",
+        "//runtime/src/iree/schemas",
+    ],
+)
+
+# Packages that directly consume the FlatCC adapter or generated VM bytecode
+# schema. Keep this list exact so new FlatCC dependencies require an explicit
+# review of the VM migration boundary.
+package_group(
+    name = "flatcc_vm_consumers",
+    packages = [
+        "//loom/src/loom/target/emit/ireevm",
+        "//loom/src/loom/tooling/execution/ireevm",
+        "//runtime/src/iree/vm/bytecode",
+        "//runtime/src/iree/vm/bytecode/assembler",
+        "//runtime/src/iree/vm/bytecode/isa",
+    ],
+)

@@ -8,7 +8,7 @@ load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
 load("//runtime/build_tools/bazel:flatcc.bzl", "iree_runtime_flatbuffer_c_library")
 
 package(
-    default_visibility = ["//visibility:public"],
+    default_visibility = ["//visibility:private"],
     features = ["layering_check"],
     licenses = ["notice"],  # Apache 2.0
 )
@@ -16,6 +16,7 @@ package(
 iree_runtime_cc_library(
     name = "building",
     hdrs = ["building.h"],
+    visibility = ["//runtime:flatcc_vm_consumers"],
     deps = [
         ":dummy",
         ":parsing",
@@ -24,17 +25,12 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
-    name = "debugging",
-    hdrs = ["debugging.h"],
-    deps = [
-        ":dummy",
-        "//third_party:flatcc_runtime",
-    ],
-)
-
-iree_runtime_cc_library(
     name = "parsing",
     hdrs = ["parsing.h"],
+    visibility = [
+        "//runtime:flatcc_vm_consumers",
+        "//runtime/build_tools/bazel/test:__pkg__",
+    ],
     deps = [
         ":dummy",
         "//third_party:flatcc_parsing",
@@ -48,6 +44,5 @@ iree_runtime_flatbuffer_c_library(
         "--reader",
         "--builder",
         "--verifier",
-        "--json",
     ],
 )

@@ -24,12 +24,6 @@
 // implementation.
 #define IREE_HAL_HIP_MAX_DISPATCH_CONSTANT_COUNT 64
 
-typedef struct iree_hal_hip_kernel_debug_info_t {
-  iree_string_view_t function_name;
-  iree_string_view_t source_filename;
-  uint32_t source_line;
-} iree_hal_hip_kernel_debug_info_t;
-
 typedef struct iree_hal_hip_kernel_params_t {
   // Executable-local function name used for lookup and reflection.
   iree_string_view_t name;
@@ -44,9 +38,6 @@ typedef struct iree_hal_hip_kernel_params_t {
 
   // Required HIP block dimensions.
   uint32_t block_dims[3];
-
-  // Optional tracing metadata.
-  IREE_TRACE(iree_hal_hip_kernel_debug_info_t debug_info;)
 } iree_hal_hip_kernel_params_t;
 
 // Creates an IREE executable from a HSACO module. The module may contain

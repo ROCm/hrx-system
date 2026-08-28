@@ -24,8 +24,6 @@ cc_library(
         "config/config.h",
         "src/runtime/builder.c",
         "src/runtime/emitter.c",
-        "src/runtime/json_parser.c",
-        "src/runtime/json_printer.c",
         "src/runtime/refmap.c",
     ],
     hdrs = [
@@ -55,10 +53,6 @@ cc_library(
         "include/",
     ],
     strip_include_prefix = "include",
-    textual_hdrs = [
-        "include/flatcc/flatcc_json_parser.h",
-        "include/flatcc/flatcc_json_printer.h",
-    ],
     deps = [
         ":parsing",
     ],

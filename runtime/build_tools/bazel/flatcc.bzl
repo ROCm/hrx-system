@@ -21,12 +21,13 @@ IreeFlatccInfo = provider(
 _FLATCC_RUNTIME_DEP = Label("//third_party:flatcc_runtime")
 _FLATCC_TOOL = Label("//third_party:flatcc")
 _FLATCC_INCLUDE_ROOT = "runtime/src"
+_FLATCC_LIBRARY_VISIBILITY_BY_PACKAGE = {
+    "runtime/build_tools/bazel/test": ["//visibility:private"],
+    "runtime/src/iree/base/internal/flatcc": ["//visibility:private"],
+    "runtime/src/iree/schemas": ["//runtime:flatcc_vm_consumers"],
+}
 _FLATCC_OUTPUTS_BY_ARG = {
     "--builder": ["_builder.h"],
-    "--json": [
-        "_json_parser.h",
-        "_json_printer.h",
-    ],
     "--reader": ["_reader.h"],
     "--verifier": ["_verifier.h"],
 }
@@ -106,7 +107,7 @@ def _iree_runtime_flatbuffer_c_headers_impl(ctx):
         ),
     ]
 
-iree_runtime_flatbuffer_c_headers = rule(
+_iree_runtime_flatbuffer_c_headers_rule = rule(
     implementation = _iree_runtime_flatbuffer_c_headers_impl,
     attrs = {
         "flatcc_args": attr.string_list(
@@ -135,6 +136,50 @@ iree_runtime_flatbuffer_c_headers = rule(
     doc = "Generates C headers from FlatBuffers schemas with flatcc.",
 )
 
+def _flatcc_library_visibility():
+    package_name = native.package_name()
+    visibility = _FLATCC_LIBRARY_VISIBILITY_BY_PACKAGE.get(package_name)
+    if visibility == None:
+        fail("FlatCC schema generation is confined to VM bytecode support; package //%s is not approved" % package_name)
+    return visibility
+
+def iree_runtime_flatbuffer_c_headers(
+        name,
+        srcs,
+        flatcc_args = None,
+        flatcc_includes = None,
+        testonly = False,
+        **kwargs):
+    """Generates private C headers for an approved FlatBuffers schema package.
+
+    Args:
+      name: Generated header target name.
+      srcs: FlatBuffers schema files to compile.
+      flatcc_args: FlatCC arguments selecting generated header families.
+      flatcc_includes: Additional schema files available to FlatCC imports.
+      testonly: Whether the generated headers are only available to tests.
+      **kwargs: Additional attributes forwarded to the header generation rule.
+    """
+    _flatcc_library_visibility()
+    if "visibility" in kwargs:
+        fail("FlatCC generated header visibility is fixed at private")
+    if flatcc_args == None:
+        flatcc_args = [
+            "--common",
+            "--reader",
+        ]
+    if flatcc_includes == None:
+        flatcc_includes = []
+    _iree_runtime_flatbuffer_c_headers_rule(
+        name = name,
+        flatcc_args = flatcc_args,
+        flatcc_includes = flatcc_includes,
+        srcs = srcs,
+        testonly = testonly,
+        visibility = ["//visibility:private"],
+        **kwargs
+    )
+
 def _with_flatcc_runtime_deps(deps):
     if deps == None:
         deps = []
@@ -147,14 +192,13 @@ def iree_runtime_flatbuffer_c_library(
         flatcc_includes = None,
         deps = None,
         testonly = False,
-        visibility = None,
         **kwargs):
     """Generates a runtime C/C++ header library from FlatBuffers schemas.
 
     The macro invokes the repository-local flatcc tool and exposes generated C
     headers through a normal runtime C/C++ library target. Callers select the
     generated header families with flatcc's `--reader`, `--builder`,
-    `--verifier`, and `--json` arguments.
+    and `--verifier` arguments.
 
     Args:
       name: Generated header library target name.
@@ -168,9 +212,11 @@ def iree_runtime_flatbuffer_c_library(
         including generated header libraries for any imported schemas.
       testonly: Whether the generated schema library is only available to test
         targets.
-      visibility: Visibility for the generated header library.
       **kwargs: Additional attributes forwarded to `iree_runtime_cc_library`.
     """
+    visibility = _flatcc_library_visibility()
+    if "visibility" in kwargs:
+        fail("FlatCC schema library visibility is fixed by package")
     if flatcc_args == None:
         flatcc_args = [
             "--common",
@@ -186,7 +232,6 @@ def iree_runtime_flatbuffer_c_library(
         flatcc_includes = flatcc_includes,
         srcs = srcs,
         testonly = testonly,
-        visibility = ["//visibility:private"],
     )
     iree_runtime_cc_library(
         name = name,

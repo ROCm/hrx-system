@@ -20,7 +20,6 @@ extern "C" {
 // Object and launch parameters for a compute function.
 typedef struct iree_hal_metal_builtin_pipeline_t {
   id<MTLComputePipelineState> pipeline_state;
-  IREE_TRACE(iree_hal_metal_source_location_t source_location;)
 } iree_hal_metal_builtin_pipeline_t;
 
 typedef struct iree_hal_metal_builtin_executable_t {

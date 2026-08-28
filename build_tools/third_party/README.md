@@ -246,7 +246,6 @@ Google benchmark: //third_party:google_benchmark
                   iree::third_party::google_benchmark
                   iree::third_party::google_benchmark_main
 Flatcc:           //third_party:flatcc
-                  //third_party:flatcc_compiler
                   //third_party:flatcc_parsing
                   //third_party:flatcc_runtime
                   iree-flatcc-cli
