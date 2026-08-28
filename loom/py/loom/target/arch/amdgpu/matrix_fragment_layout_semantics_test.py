@@ -48,7 +48,6 @@ def _role(
         role=role,
         payload_element_count=payload_element_count,
         element_bit_count=element_bit_count,
-        coordinate_element_offset=0,
         coordinate_element_stride=1,
         reduction_group=None,
         axes=axes,

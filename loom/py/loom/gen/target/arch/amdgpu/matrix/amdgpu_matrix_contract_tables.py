@@ -1254,7 +1254,7 @@ def _fragment_role_initializer(
         f"    .element_bit_count = {role.element_bit_count},",
         f"    .payload_element_count = {role.payload_element_count},",
         f"    .coordinate_element_count = {role.coordinate_element_count},",
-        f"    .coordinate_element_offset = {role.coordinate_element_offset},",
+        "    .reserved = 0,",
         f"    .coordinate_element_stride = {role.coordinate_element_stride},",
     ]
     for packed_axis, packed_publication in packed_publications:

@@ -126,8 +126,8 @@ typedef struct loom_matrix_fragment_role_layout_t {
   uint16_t payload_element_count;
   // Number of distinct stored coordinates represented by the payload.
   uint16_t coordinate_element_count;
-  // First payload element that carries a distinct logical coordinate.
-  uint16_t coordinate_element_offset;
+  // Reserved zero-valued storage for future generated role facts.
+  uint16_t reserved;
   // Payload element stride between distinct logical coordinates.
   uint16_t coordinate_element_stride;
   // Exact packed-B16 publication projections derived for this role.

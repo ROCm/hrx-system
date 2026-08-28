@@ -113,7 +113,6 @@ def _matrix_fragment_packed_element_axis(
     elements_per_register = 32 // role.element_bit_count
     if (
         elements_per_register <= 1
-        or role.coordinate_element_offset != 0
         or role.coordinate_element_stride != 1
         or role.coordinate_element_count == 0
         or role.coordinate_element_count % elements_per_register != 0

@@ -1160,13 +1160,10 @@ static void loom_amdgpu_fragment_memory_register_coordinates(
   *out_intra_element_byte_offset =
       (register_index % payload_registers_per_element) *
       LOOM_AMDGPU_FRAGMENT_REGISTER_BYTE_COUNT;
-  IREE_ASSERT_GE(payload_element_index, role_layout->coordinate_element_offset);
-  const uint32_t relative_payload_element =
-      payload_element_index - role_layout->coordinate_element_offset;
-  IREE_ASSERT_EQ(
-      relative_payload_element % role_layout->coordinate_element_stride, 0);
+  IREE_ASSERT_EQ(payload_element_index % role_layout->coordinate_element_stride,
+                 0);
   const uint32_t coordinate_element_index =
-      relative_payload_element / role_layout->coordinate_element_stride;
+      payload_element_index / role_layout->coordinate_element_stride;
   IREE_ASSERT_LT(coordinate_element_index,
                  role_layout->coordinate_element_count);
   const loom_matrix_fragment_coordinate_projection_plan_t* projection =
@@ -1267,7 +1264,6 @@ static bool loom_amdgpu_fragment_memory_compile_address_layout(
       payload_elements_per_register != 0 ? payload_elements_per_register : 1;
   IREE_ASSERT_TRUE(payload_elements_per_register != 0 ||
                    payload_registers_per_element > 1);
-  IREE_ASSERT_EQ(role_layout->coordinate_element_offset, 0);
   IREE_ASSERT_GT(role_layout->coordinate_element_stride, 0);
   IREE_ASSERT_EQ(address_payload_elements_per_register %
                      role_layout->coordinate_element_stride,

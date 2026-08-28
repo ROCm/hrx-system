@@ -44,7 +44,6 @@ def _role(
     element_bit_count: int,
     axes: tuple[MatrixFragmentAxisLayout | None, ...],
     *,
-    coordinate_element_offset: int = 0,
     coordinate_element_stride: int = 1,
     reduction_group: MatrixFragmentReductionGroup | None = None,
 ) -> MatrixFragmentRoleLayout:
@@ -52,7 +51,6 @@ def _role(
         role=role,
         payload_element_count=payload_element_count,
         element_bit_count=element_bit_count,
-        coordinate_element_offset=coordinate_element_offset,
         coordinate_element_stride=coordinate_element_stride,
         reduction_group=reduction_group,
         axes=axes,

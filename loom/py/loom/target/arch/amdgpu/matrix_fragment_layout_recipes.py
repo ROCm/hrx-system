@@ -130,11 +130,9 @@ def matrix_fragment_result_to_lhs_bf16_projection(
     if (
         layout.tile_shape[0] != 1
         or source.element_bit_count != 32
-        or source.coordinate_element_offset != 0
         or source.coordinate_element_stride != 1
         or source.payload_element_count != source.register_count
         or destination.element_bit_count != 16
-        or destination.coordinate_element_offset != 0
         or destination.coordinate_element_stride != 1
         or destination.payload_element_count != destination.register_count * 2
         or source.register_count == 0
@@ -299,9 +297,7 @@ def matrix_fragment_result_to_rhs_packed_b16_projection(
         layout.wave_size != 32
         or source.element_bit_count != 16
         or destination.element_bit_count != 16
-        or source.coordinate_element_offset != 0
         or source.coordinate_element_stride != 2
-        or destination.coordinate_element_offset != 0
         or destination.coordinate_element_stride != 1
         or source.register_count == 0
         or source.register_count != destination.register_count
@@ -412,7 +408,6 @@ def matrix_fragment_packed_b16_publication_projection(
         or layout.tile_shape[0] != 1
         or layout.tile_shape[packed_axis_index] % 2 != 0
         or role.element_bit_count != 32
-        or role.coordinate_element_offset != 0
         or role.coordinate_element_stride != 1
         or role.payload_element_count != role.coordinate_element_count
         or role.payload_element_count != role.register_count

@@ -54,7 +54,6 @@ class MatrixFragmentRoleLayout:
     role: str
     payload_element_count: int
     element_bit_count: int
-    coordinate_element_offset: int
     coordinate_element_stride: int
     reduction_group: MatrixFragmentReductionGroup | None
     axes: tuple[MatrixFragmentAxisLayout | None, ...]
@@ -144,12 +143,7 @@ def _validate_role(
             f"{role.register_count} payload registers, exceeding the "
             f"{_MAX_FRAGMENT_REGISTER_COUNT}-register architectural limit"
         )
-    if (
-        role.coordinate_element_offset < 0
-        or role.coordinate_element_offset > 0xFFFF
-        or role.coordinate_element_stride <= 0
-        or role.coordinate_element_stride > 0xFFFF
-    ):
+    if role.coordinate_element_stride <= 0 or role.coordinate_element_stride > 0xFFFF:
         raise ValueError(
             f"matrix fragment layout '{layout.key}' role '{role.role}' has "
             "an invalid coordinate element mapping"
@@ -159,7 +153,7 @@ def _validate_role(
         if role.element_bit_count <= 32 and 32 % role.element_bit_count == 0
         else 0
     )
-    if role.coordinate_element_offset != 0 or (
+    if (
         payload_elements_per_register != 0
         and payload_elements_per_register % role.coordinate_element_stride != 0
     ):
@@ -189,9 +183,8 @@ def _validate_role(
                 "has an invalid reduction storage group"
             )
     last_payload_element = (
-        role.coordinate_element_offset
-        + (role.coordinate_element_count - 1) * role.coordinate_element_stride
-    )
+        role.coordinate_element_count - 1
+    ) * role.coordinate_element_stride
     if last_payload_element >= role.payload_element_count:
         raise ValueError(
             f"matrix fragment layout '{layout.key}' role '{role.role}' maps "
