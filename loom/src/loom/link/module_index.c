@@ -685,6 +685,9 @@ static loom_link_symbol_flags_t loom_link_materialized_symbol_flags(
   if (loom_symbol_definition_is_test_only(symbol->definition)) {
     flags |= LOOM_LINK_SYMBOL_FLAG_TEST_ONLY;
   }
+  if (iree_any_bit_set(symbol->flags, LOOM_SYMBOL_FLAG_RETAIN)) {
+    flags |= LOOM_LINK_SYMBOL_FLAG_RETAIN;
+  }
   loom_func_like_t func = loom_func_like_cast(module, symbol->defining_op);
   const bool has_import =
       loom_func_like_isa(func) &&
@@ -757,6 +760,9 @@ static loom_link_symbol_flags_t loom_link_bytecode_symbol_flags(
   }
   if (iree_any_bit_set(symbol->flags, LOOM_BYTECODE_SYMBOL_FLAG_TEST_ONLY)) {
     flags |= LOOM_LINK_SYMBOL_FLAG_TEST_ONLY;
+  }
+  if (iree_any_bit_set(symbol->flags, LOOM_BYTECODE_SYMBOL_FLAG_RETAIN)) {
+    flags |= LOOM_LINK_SYMBOL_FLAG_RETAIN;
   }
   return flags;
 }

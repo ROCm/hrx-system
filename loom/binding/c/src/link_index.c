@@ -290,6 +290,9 @@ static loomc_link_symbol_flags_t loomc_link_symbol_flags_from_loom(
   if (iree_all_bits_set(flags, LOOM_LINK_SYMBOL_FLAG_TEST_ONLY)) {
     result |= LOOMC_LINK_SYMBOL_FLAG_TEST_ONLY;
   }
+  if (iree_all_bits_set(flags, LOOM_LINK_SYMBOL_FLAG_RETAIN)) {
+    result |= LOOMC_LINK_SYMBOL_FLAG_RETAIN;
+  }
   return result;
 }
 

@@ -26,8 +26,6 @@ loom_cc_library(
     loom::format::low_repr
     loom::link::materialization_environment
     loom::link::module_index
-    loom::ops::command
-    loom::ops::op_defs
     loom::pass::builtin_registry
     loom::target::arch::cmd::artifact_builder
     loom::target::arch::cmd::artifact_set

@@ -360,6 +360,63 @@ func.def public @exported(%x: i32) -> (i32) {
   EXPECT_TRUE(iree_all_bits_set(symbol->flags, LOOM_LINK_SYMBOL_FLAG_EXPORT));
 }
 
+TEST_F(ModuleIndexTest, PreservesRetainedSymbolRoleAcrossProviderForms) {
+  const iree_string_view_t source = IREE_SV(R"(
+func.def retain @retained() {
+  func.return
+}
+
+func.def @ordinary() {
+  func.return
+}
+)");
+  loom_module_t* module = Parse(source);
+  std::vector<uint8_t> bytes = WriteModule(module);
+
+  auto verify_index = [&](const loom_link_module_index_t* index) {
+    const loom_link_module_index_module_t* indexed_module =
+        loom_link_module_index_module_at(index, 0);
+    ASSERT_NE(indexed_module, nullptr);
+    const loom_link_module_index_symbol_t* retained =
+        loom_link_module_index_lookup_private(index, indexed_module,
+                                              IREE_SV("retained"));
+    const loom_link_module_index_symbol_t* ordinary =
+        loom_link_module_index_lookup_private(index, indexed_module,
+                                              IREE_SV("ordinary"));
+    ASSERT_NE(retained, nullptr);
+    ASSERT_NE(ordinary, nullptr);
+    EXPECT_TRUE(
+        iree_all_bits_set(retained->flags, LOOM_LINK_SYMBOL_FLAG_RETAIN));
+    EXPECT_FALSE(
+        iree_any_bit_set(ordinary->flags, LOOM_LINK_SYMBOL_FLAG_RETAIN));
+  };
+
+  loom_link_module_index_add_options_t options = {
+      /*.provider_name=*/IREE_SV("input"),
+      /*.role=*/LOOM_LINK_PROVIDER_ROLE_INPUT,
+  };
+  IndexPtr materialized_index = CreateIndex();
+  IREE_ASSERT_OK(loom_link_module_index_add_materialized(
+      materialized_index.get(), module, &options,
+      /*out_provider_ordinal=*/nullptr));
+  verify_index(materialized_index.get());
+
+  IndexPtr bytecode_index = CreateIndex();
+  IREE_ASSERT_OK(loom_link_module_index_add_bytecode(
+      bytecode_index.get(),
+      iree_make_const_byte_span(bytes.data(), bytes.size()),
+      IREE_SV("input.loombc"), /*index_options=*/nullptr, &options,
+      /*out_provider_ordinal=*/nullptr));
+  verify_index(bytecode_index.get());
+
+  IndexPtr text_index = CreateIndex();
+  IREE_ASSERT_OK(loom_link_module_index_add_text(
+      text_index.get(), source, IREE_SV("input.loom"),
+      /*parse_options=*/nullptr, &options,
+      /*out_provider_ordinal=*/nullptr));
+  verify_index(text_index.get());
+}
+
 TEST_F(ModuleIndexTest, IndexesExplicitBytecodeExportWithoutPublicVisibility) {
   loom_module_t* module = Parse(IREE_SV(R"(
 func.def export("entry") @entry(%x: i32) -> (i32) {

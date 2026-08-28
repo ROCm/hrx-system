@@ -143,6 +143,9 @@ typedef enum loomc_link_symbol_flag_bits_e {
 
   /// Symbol exists only for test or benchmark tooling.
   LOOMC_LINK_SYMBOL_FLAG_TEST_ONLY = 1u << 6,
+
+  /// Source symbol is explicitly preserved by ordinary symbol pruning.
+  LOOMC_LINK_SYMBOL_FLAG_RETAIN = 1u << 7,
 } loomc_link_symbol_flag_bits_t;
 
 /// Bitmask of `loomc_link_symbol_flag_bits_t` values.
