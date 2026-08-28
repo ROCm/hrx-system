@@ -6,8 +6,11 @@
 
 #include "loom/target/emit/vm/module_presentation.h"
 
+#include <string.h>
+
 #include "iree/vm/bytecode/wire/module_format.h"
 #include "loom/format/text/printer.h"
+#include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/target/arch/vm/abi/layout.h"
@@ -86,6 +89,44 @@ static iree_status_t loom_vm_module_presentation_allocate_text(
                             "VM presentation text exceeds host size");
   }
   return iree_ok_status();
+}
+
+static iree_status_t loom_vm_module_presentation_measure_documentation(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_host_size_t* out_length) {
+  *out_length = 0;
+  iree_host_size_t comment_count = 0;
+  const iree_string_view_t* comments =
+      loom_module_op_comments(module, op, &comment_count);
+  for (iree_host_size_t i = 0; i < comment_count; ++i) {
+    if ((i != 0 && !iree_host_size_checked_add(*out_length, 1, out_length)) ||
+        !iree_host_size_checked_add(*out_length, comments[i].size,
+                                    out_length)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "VM declaration documentation exceeds host "
+                              "size");
+    }
+  }
+  return iree_ok_status();
+}
+
+static void loom_vm_module_presentation_emit_documentation(
+    const loom_module_t* module, const loom_op_t* op, char* storage,
+    iree_host_size_t storage_capacity, iree_string_view_t* out_text) {
+  iree_host_size_t comment_count = 0;
+  const iree_string_view_t* comments =
+      loom_module_op_comments(module, op, &comment_count);
+  iree_host_size_t offset = 0;
+  for (iree_host_size_t i = 0; i < comment_count; ++i) {
+    if (i != 0) storage[offset++] = '\n';
+    if (comments[i].size != 0) {
+      memcpy(storage + offset, comments[i].data, comments[i].size);
+    }
+    offset += comments[i].size;
+  }
+  IREE_ASSERT_EQ(offset + 1, storage_capacity);
+  storage[offset] = 0;
+  *out_text = iree_make_string_view(storage, offset);
 }
 
 static iree_status_t loom_vm_module_presentation_emit_field_type(
@@ -232,6 +273,12 @@ iree_status_t loom_vm_module_presentation_layout_build(
         .documentation_string_ordinal = UINT16_MAX,
         .field_base = field_base,
     };
+    IREE_RETURN_IF_ERROR(loom_vm_module_presentation_measure_documentation(
+        layout->module, declaration.op, &entries[i].documentation.size));
+    if (entries[i].documentation.size != 0) {
+      IREE_RETURN_IF_ERROR(loom_vm_module_presentation_allocate_text(
+          entries[i].documentation.size, &text_storage_length));
+    }
     IREE_RETURN_IF_ERROR(loom_vm_module_presentation_measure_signature(
         layout->module, declaration.signature, &entries[i].authored_type.size));
     IREE_RETURN_IF_ERROR(loom_vm_module_presentation_allocate_text(
@@ -305,6 +352,14 @@ iree_status_t loom_vm_module_presentation_layout_build(
     const loom_vm_module_presentation_declaration_t declaration =
         loom_vm_module_presentation_declaration(layout, i);
     loom_vm_module_presentation_entry_layout_t* entry = &entries[i];
+    if (entry->documentation.size != 0) {
+      const iree_host_size_t documentation_capacity =
+          entry->documentation.size + 1;
+      loom_vm_module_presentation_emit_documentation(
+          layout->module, declaration.op, text_storage + text_offset,
+          documentation_capacity, &entry->documentation);
+      text_offset += documentation_capacity;
+    }
     const iree_host_size_t signature_capacity = entry->authored_type.size + 1;
     IREE_RETURN_IF_ERROR(loom_vm_module_presentation_emit_signature(
         layout->module, declaration.signature, text_storage + text_offset,

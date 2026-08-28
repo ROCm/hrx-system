@@ -31,6 +31,7 @@
             "contains": [
               "vm.module \"module\" core=0.0",
               "@multiply_add -> function[0]",
+              "documentation = \"Multiplies the inputs and adds the left operand.\\n\\nReturns the combined i32 value.\"",
               "control.block",
               "integer.mul.i32",
               "integer.add.i32",
