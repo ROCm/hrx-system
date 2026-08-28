@@ -11,7 +11,7 @@
 # Parameters:
 # NAME: name of target (see Note)
 # SRCS: List of source files for the library
-# FLATCC_ARGS: List of flattbuffers arguments. Default:
+# FLATCC_ARGS: List of FlatBuffers arguments. Default:
 #             "--common"
 #             "--reader"
 # PUBLIC: Add this so that this library will be exported under iree::
@@ -32,7 +32,6 @@
 #     "--reader"
 #     "--builder"
 #     "--verifier"
-#     "--json"
 #   PUBLIC
 # )
 # iree_cc_binary(
@@ -52,6 +51,26 @@ function(flatbuffer_c_library)
 
   if(_RULE_TESTONLY AND NOT IREE_BUILD_TESTS)
     return()
+  endif()
+
+  file(REAL_PATH "${CMAKE_CURRENT_SOURCE_DIR}" _FLATCC_CALLER_DIR)
+  set(_FLATCC_ALLOWED_CALLER_DIRS
+    "${IREE_ROOT_DIR}/runtime/src/iree/base/internal/flatcc"
+    "${IREE_ROOT_DIR}/runtime/src/iree/schemas"
+  )
+  set(_FLATCC_CALLER_IS_ALLOWED OFF)
+  foreach(_FLATCC_ALLOWED_CALLER_DIR IN LISTS _FLATCC_ALLOWED_CALLER_DIRS)
+    file(REAL_PATH "${_FLATCC_ALLOWED_CALLER_DIR}" _FLATCC_ALLOWED_CALLER_DIR)
+    if(_FLATCC_CALLER_DIR STREQUAL _FLATCC_ALLOWED_CALLER_DIR)
+      set(_FLATCC_CALLER_IS_ALLOWED ON)
+      break()
+    endif()
+  endforeach()
+  if(NOT _FLATCC_CALLER_IS_ALLOWED)
+    message(FATAL_ERROR
+      "FlatCC schema generation is confined to VM bytecode support; "
+      "${CMAKE_CURRENT_SOURCE_DIR} is not an approved schema package"
+    )
   endif()
 
   # Prefix the library with the package name, so we get: iree_package_name
@@ -77,9 +96,11 @@ function(flatbuffer_c_library)
         list(APPEND _OUTS "${_SRC_FILENAME}_builder.h")
       elseif(_ARG STREQUAL "--verifier")
         list(APPEND _OUTS "${_SRC_FILENAME}_verifier.h")
-      elseif(_ARG STREQUAL "--json")
-        list(APPEND _OUTS "${_SRC_FILENAME}_json_printer.h")
-        list(APPEND _OUTS "${_SRC_FILENAME}_json_parser.h")
+      elseif(NOT _ARG STREQUAL "--common")
+        message(FATAL_ERROR
+          "Unsupported FlatCC argument ${_ARG}; generated output families are "
+          "limited to those required by VM bytecode"
+        )
       endif()
     endforeach()
   endforeach()

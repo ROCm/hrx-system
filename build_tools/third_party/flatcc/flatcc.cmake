@@ -88,8 +88,6 @@ function(iree_configure_flatcc)
   add_library(flatcc_runtime STATIC
     "${IREE_FLATCC_SOURCE_DIR}/src/runtime/builder.c"
     "${IREE_FLATCC_SOURCE_DIR}/src/runtime/emitter.c"
-    "${IREE_FLATCC_SOURCE_DIR}/src/runtime/json_parser.c"
-    "${IREE_FLATCC_SOURCE_DIR}/src/runtime/json_printer.c"
     "${IREE_FLATCC_SOURCE_DIR}/src/runtime/refmap.c"
   )
   target_include_directories(flatcc_runtime SYSTEM PUBLIC

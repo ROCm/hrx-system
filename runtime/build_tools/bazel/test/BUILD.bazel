@@ -4,6 +4,8 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+# bazel-to-cmake: skip
+
 load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
 load("//runtime/build_tools/bazel:flatcc.bzl", "iree_runtime_flatbuffer_c_library")
 load(":cc_benchmark_rules_test.bzl", "cc_benchmark_rules_test_suite")
@@ -27,7 +29,6 @@ iree_runtime_flatbuffer_c_library(
         "--reader",
         "--builder",
         "--verifier",
-        "--json",
     ],
     includes = ["."],
 )
@@ -39,7 +40,6 @@ iree_runtime_flatbuffer_c_library(
         "--reader",
         "--builder",
         "--verifier",
-        "--json",
     ],
     flatcc_includes = ["flatcc_test_include.fbs"],
     includes = ["."],

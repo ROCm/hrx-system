@@ -17,7 +17,6 @@ FLATCC_ARGS = [
     "--reader",
     "--builder",
     "--verifier",
-    "--json",
 ]
 
 iree_runtime_flatbuffer_c_library(
