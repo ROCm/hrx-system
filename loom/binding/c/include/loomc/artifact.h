@@ -67,11 +67,11 @@ typedef enum loomc_artifact_kind_e {
   LOOMC_ARTIFACT_KIND_LAUNCH_CONFIG = 4,
 } loomc_artifact_kind_t;
 
-/// Borrowed artifact view owned by a result object.
+/// Borrowed artifact view owned by a producer-specific result or product.
 ///
 /// @lifetime
-/// Artifact strings and bytes are owned by the result that returned this view.
-/// They remain valid until that result is released.
+/// Artifact strings and bytes are owned by the operation-specific object that
+/// returned this view. They remain valid until that owner is released.
 typedef struct loomc_artifact_t {
   /// Artifact kind.
   loomc_artifact_kind_t kind;
