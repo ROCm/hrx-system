@@ -1,0 +1,23 @@
+// The requester mixes a local kernel, a library-provided child program, and an
+// entry whose executable is supplied outside Loom.
+kernel.def @local() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%storage: buffer) {
+  kernel.return
+}
+
+command.program.decl @linked_stage(%size: index) launch(%storage: buffer)
+
+kernel.entry.decl @external(%storage: buffer)
+
+command.program.def public @heterogeneous() launch(%storage: buffer) {
+  %small = index.constant 64 : index
+  %large = index.constant 256 : index
+  %unit = index.constant 1 : index
+  kernel.launch @local(%storage) : (buffer)
+  command.program.launch @linked_stage[%small](%storage) : [index](buffer)
+  command.program.launch @linked_stage[%large](%storage) : [index](buffer)
+  kernel.dispatch @external[%unit](%storage) : [index](buffer)
+  command.return
+}
