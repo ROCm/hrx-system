@@ -181,17 +181,6 @@ static bool loom_amdgpu_fp8_decode_plan_has_packed_zero_repair(
       LOOM_AMDGPU_FP8_DECODE_PLAN_CAPABILITY_PACKED_ZERO_REPAIR);
 }
 
-bool loom_amdgpu_fp8_selects_exact_bf16_via_f16(
-    const loom_amdgpu_fp8_decode_plan_t* plan,
-    loom_amdgpu_fp8_decode_value_flags_t value_flags) {
-  return iree_any_bit_set(
-             plan->capabilities,
-             LOOM_AMDGPU_FP8_DECODE_PLAN_CAPABILITY_PACKED_EXACT_BF16_VIA_F16) &&
-         loom_amdgpu_fp8_decode_value_is_finite(value_flags) &&
-         !iree_any_bit_set(value_flags,
-                           LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NOT_SUBNORMAL);
-}
-
 static bool loom_amdgpu_fp8_decode_plan_has_mask_repair_split(
     const loom_amdgpu_fp8_decode_plan_t* plan) {
   return iree_any_bit_set(
@@ -264,6 +253,40 @@ bool loom_amdgpu_can_emit_fp8_pair_to_packed_bf16(
   return loom_amdgpu_fp8_pair_to_packed_bf16_missing_requirements(
              plan, value_flags) ==
          LOOM_AMDGPU_FP8_PACKED_BF16_MISSING_REQUIREMENT_NONE;
+}
+
+loom_amdgpu_fp8_packed_bf16_strategy_t
+loom_amdgpu_select_fp8_packed_bf16_strategy(
+    const loom_amdgpu_fp8_decode_plan_t* plan,
+    loom_amdgpu_fp8_decode_value_flags_t value_flags) {
+  const bool use_exact_f16 =
+      iree_any_bit_set(
+          plan->capabilities,
+          LOOM_AMDGPU_FP8_DECODE_PLAN_CAPABILITY_PACKED_EXACT_BF16_VIA_F16) &&
+      loom_amdgpu_fp8_decode_value_is_finite(value_flags) &&
+      !iree_any_bit_set(value_flags,
+                        LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NOT_SUBNORMAL);
+  if (use_exact_f16) {
+    return LOOM_AMDGPU_FP8_PACKED_BF16_STRATEGY_EXACT_VIA_F16;
+  }
+  const bool use_normal_path =
+      loom_amdgpu_can_emit_fp8_pair_to_packed_u16_finite_path(
+          plan, value_flags,
+          LOOM_AMDGPU_FP8_DECODE_PLAN_CAPABILITY_PACKED_NORMAL_BF16_PAYLOAD);
+  return use_normal_path ? LOOM_AMDGPU_FP8_PACKED_BF16_STRATEGY_NORMAL
+                         : LOOM_AMDGPU_FP8_PACKED_BF16_STRATEGY_EXACT_REPAIR;
+}
+
+loom_amdgpu_fp8_packed_f16_strategy_t
+loom_amdgpu_select_fp8_packed_f16_strategy(
+    const loom_amdgpu_fp8_decode_plan_t* plan,
+    loom_amdgpu_fp8_decode_value_flags_t value_flags) {
+  const bool use_normal_path =
+      loom_amdgpu_can_emit_fp8_pair_to_packed_u16_finite_path(
+          plan, value_flags,
+          LOOM_AMDGPU_FP8_DECODE_PLAN_CAPABILITY_PACKED_NORMAL_F16_PAYLOAD);
+  return use_normal_path ? LOOM_AMDGPU_FP8_PACKED_F16_STRATEGY_NORMAL
+                         : LOOM_AMDGPU_FP8_PACKED_F16_STRATEGY_EXACT_REPAIR;
 }
 
 bool loom_amdgpu_fp8_prefers_packed_bf16_pair_decode(
@@ -371,8 +394,9 @@ loom_amdgpu_fp8_pair_to_packed_bf16_repairs(
 }
 
 iree_string_view_t loom_amdgpu_fp8_packed_bf16_strategy_key(
-    bool exact_via_f16, loom_amdgpu_fp8_packed_u16_repairs_t repairs) {
-  if (exact_via_f16) {
+    loom_amdgpu_fp8_packed_bf16_strategy_t strategy,
+    loom_amdgpu_fp8_packed_u16_repairs_t repairs) {
+  if (strategy == LOOM_AMDGPU_FP8_PACKED_BF16_STRATEGY_EXACT_VIA_F16) {
     return IREE_SV("fp8_packed_bf16_decode_exact_via_f16");
   }
   IREE_ASSERT_LT(repairs,

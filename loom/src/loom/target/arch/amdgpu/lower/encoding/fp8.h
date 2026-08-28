@@ -73,17 +73,6 @@ typedef enum loom_amdgpu_fp8_decode_plan_capability_bits_e {
 } loom_amdgpu_fp8_decode_plan_capability_bits_t;
 typedef uint32_t loom_amdgpu_fp8_decode_plan_capabilities_t;
 
-// Per-value facts that can simplify the generated special-value decode path.
-// These describe the actual value being decoded, not the full source FP8 type.
-typedef enum loom_amdgpu_fp8_decode_value_flag_bits_e {
-  LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NONE = 0u,
-  LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NOT_NAN = 1u << 0,
-  LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NOT_INF = 1u << 1,
-  LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NOT_SUBNORMAL = 1u << 2,
-  LOOM_AMDGPU_FP8_DECODE_VALUE_FLAG_NON_ZERO = 1u << 3,
-} loom_amdgpu_fp8_decode_value_flag_bits_t;
-typedef uint32_t loom_amdgpu_fp8_decode_value_flags_t;
-
 // Maps target-independent value facts into FP8 decode simplification flags.
 loom_amdgpu_fp8_decode_value_flags_t
 loom_amdgpu_fp8_decode_value_flags_from_facts(loom_value_facts_t facts);
@@ -126,6 +115,24 @@ typedef enum loom_amdgpu_fp8_packed_u16_repair_bits_e {
   LOOM_AMDGPU_FP8_PACKED_U16_REPAIR_INF = 1u << 3,
 } loom_amdgpu_fp8_packed_u16_repair_bits_t;
 typedef uint32_t loom_amdgpu_fp8_packed_u16_repairs_t;
+
+typedef uint8_t loom_amdgpu_fp8_packed_bf16_strategy_t;
+enum loom_amdgpu_fp8_packed_bf16_strategy_e {
+  // Emit the packed normal payload plus any branchless zero repair.
+  LOOM_AMDGPU_FP8_PACKED_BF16_STRATEGY_NORMAL = 0,
+  // Emit the exact packed software repair path.
+  LOOM_AMDGPU_FP8_PACKED_BF16_STRATEGY_EXACT_REPAIR = 1,
+  // Convert through exact packed F16 arithmetic before producing BF16.
+  LOOM_AMDGPU_FP8_PACKED_BF16_STRATEGY_EXACT_VIA_F16 = 2,
+};
+
+typedef uint8_t loom_amdgpu_fp8_packed_f16_strategy_t;
+enum loom_amdgpu_fp8_packed_f16_strategy_e {
+  // Emit the packed normal payload plus any branchless zero repair.
+  LOOM_AMDGPU_FP8_PACKED_F16_STRATEGY_NORMAL = 0,
+  // Emit the exact packed software repair path.
+  LOOM_AMDGPU_FP8_PACKED_F16_STRATEGY_EXACT_REPAIR = 1,
+};
 
 enum {
   LOOM_AMDGPU_FP8_U16_BYTE_COUNT = 2u,
@@ -353,14 +360,25 @@ loom_amdgpu_fp8_pair_to_packed_bf16_repairs(
     const loom_amdgpu_fp8_decode_plan_t* plan,
     loom_amdgpu_fp8_decode_value_flags_t value_flags);
 
-// Returns true when packed BF16 decode uses the exact F16 arithmetic route.
-bool loom_amdgpu_fp8_selects_exact_bf16_via_f16(
+// Selects the packed BF16 emission strategy from target capabilities and value
+// facts. The caller must first prove that packed BF16 emission is available.
+loom_amdgpu_fp8_packed_bf16_strategy_t
+loom_amdgpu_select_fp8_packed_bf16_strategy(
+    const loom_amdgpu_fp8_decode_plan_t* plan,
+    loom_amdgpu_fp8_decode_value_flags_t value_flags);
+
+// Selects the finite packed F16 emission strategy from target capabilities and
+// value facts. The caller must first prove that packed F16 emission is
+// available.
+loom_amdgpu_fp8_packed_f16_strategy_t
+loom_amdgpu_select_fp8_packed_f16_strategy(
     const loom_amdgpu_fp8_decode_plan_t* plan,
     loom_amdgpu_fp8_decode_value_flags_t value_flags);
 
 // Returns the structured report key for the selected packed BF16 strategy.
 iree_string_view_t loom_amdgpu_fp8_packed_bf16_strategy_key(
-    bool exact_via_f16, loom_amdgpu_fp8_packed_u16_repairs_t repairs);
+    loom_amdgpu_fp8_packed_bf16_strategy_t strategy,
+    loom_amdgpu_fp8_packed_u16_repairs_t repairs);
 
 // Returns the zero/subnormal repairs emitted by the packed finite FP8-to-F16
 // pair decode path for |plan| and |value_flags|.
@@ -407,15 +425,16 @@ bool loom_amdgpu_fp8_prefers_packed_bf16_pair_decode(
     const loom_amdgpu_fp8_decode_plan_t* plan,
     loom_amdgpu_fp8_decode_value_flags_t value_flags);
 
-// Emits packed BF16 registers for adjacent FP8 byte-pair sources. Exact rare
-// subnormal repair is batched across all pairs so the hot path branches once
-// per packet instead of once per pair.
+// Emits packed BF16 registers for adjacent FP8 byte-pair sources using the
+// selected strategy and repairs. Exact rare subnormal repair is batched across
+// all pairs so the hot path branches once per packet instead of once per pair.
 iree_status_t loom_amdgpu_emit_fp8_pairs_to_packed_bf16(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_fp8_decode_plan_t* plan,
     const loom_amdgpu_fp8_packed_u16_pair_source_t* pair_sources,
     iree_host_size_t pair_count,
-    loom_amdgpu_fp8_decode_value_flags_t value_flags, loom_type_t vgpr_type,
+    loom_amdgpu_fp8_packed_bf16_strategy_t strategy,
+    loom_amdgpu_fp8_packed_u16_repairs_t repairs, loom_type_t vgpr_type,
     loom_type_t sgpr_type, loom_type_t mask_type,
     loom_value_id_t* out_low_packets);
 
@@ -427,14 +446,14 @@ bool loom_amdgpu_can_emit_fp8_pair_to_packed_f16_finite(
     const loom_amdgpu_fp8_decode_plan_t* plan,
     loom_amdgpu_fp8_decode_value_flags_t value_flags);
 
-// Emits packed F16 registers for adjacent FP8 byte-pair sources when value
-// facts prove finite storage.
+// Emits packed F16 registers for adjacent FP8 byte-pair sources using the
+// selected strategy and repairs when value facts prove finite storage.
 iree_status_t loom_amdgpu_emit_fp8_pairs_to_packed_f16_finite(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_fp8_decode_plan_t* plan,
     const loom_amdgpu_fp8_packed_u16_pair_source_t* pair_sources,
-    iree_host_size_t pair_count,
-    loom_amdgpu_fp8_decode_value_flags_t value_flags, loom_type_t vgpr_type,
+    iree_host_size_t pair_count, loom_amdgpu_fp8_packed_f16_strategy_t strategy,
+    loom_amdgpu_fp8_packed_u16_repairs_t repairs, loom_type_t vgpr_type,
     loom_type_t sgpr_type, loom_type_t mask_type,
     loom_value_id_t* out_low_packets);
 

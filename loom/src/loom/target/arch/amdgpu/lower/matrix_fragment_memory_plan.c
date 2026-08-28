@@ -1869,9 +1869,8 @@ static bool loom_amdgpu_analyze_vector_fragment_memory_plan_impl(
                                                 /*out_constraint_key=*/NULL)) {
     return false;
   }
-  loom_amdgpu_fragment_memory_apply_fp8_load_strategy_flags(
+  return loom_amdgpu_fragment_memory_select_fp8_load_decode_plan(
       fact_table, descriptor_set, source_op, out_plan);
-  return true;
 }
 
 bool loom_amdgpu_analyze_vector_fragment_store_plan(

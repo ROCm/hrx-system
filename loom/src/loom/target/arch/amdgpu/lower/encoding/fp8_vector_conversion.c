@@ -800,6 +800,10 @@ static iree_status_t loom_amdgpu_try_lower_vector_fp8_pair_to_packed_bf16(
                                                     value_flags)) {
     return iree_ok_status();
   }
+  const loom_amdgpu_fp8_packed_bf16_strategy_t strategy =
+      loom_amdgpu_select_fp8_packed_bf16_strategy(*decode_plan, value_flags);
+  const loom_amdgpu_fp8_packed_u16_repairs_t repairs =
+      loom_amdgpu_fp8_pair_to_packed_bf16_repairs(*decode_plan, value_flags);
 
   loom_value_id_t source_register = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_extract_vector_fp8_pair_register(
@@ -812,7 +816,7 @@ static iree_status_t loom_amdgpu_try_lower_vector_fp8_pair_to_packed_bf16(
       .live_lane_count = pair_storage.live_lane_count,
   };
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_pairs_to_packed_bf16(
-      context, source_op, *decode_plan, &pair_source, 1, value_flags,
+      context, source_op, *decode_plan, &pair_source, 1, strategy, repairs,
       result_lane_type, *sgpr_type, *mask_type, out_low_packet));
   return iree_ok_status();
 }
@@ -859,6 +863,10 @@ static iree_status_t loom_amdgpu_try_lower_vector_fp8_pairs_to_packed_bf16(
                                                        value_flags)) {
     return iree_ok_status();
   }
+  const loom_amdgpu_fp8_packed_bf16_strategy_t strategy =
+      loom_amdgpu_select_fp8_packed_bf16_strategy(*decode_plan, value_flags);
+  const loom_amdgpu_fp8_packed_u16_repairs_t repairs =
+      loom_amdgpu_fp8_pair_to_packed_bf16_repairs(*decode_plan, value_flags);
 
   loom_amdgpu_fp8_packed_u16_pair_source_t
       pair_sources[LOOM_AMDGPU_MAX_PACKED_32BIT_REGISTERS] = {0};
@@ -866,8 +874,8 @@ static iree_status_t loom_amdgpu_try_lower_vector_fp8_pairs_to_packed_bf16(
       context, source_op, plan, pair_storage, pair_count, low_source,
       source_lane_type, pair_sources));
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_pairs_to_packed_bf16(
-      context, source_op, *decode_plan, pair_sources, pair_count, value_flags,
-      result_lane_type, *sgpr_type, *mask_type, out_low_packets));
+      context, source_op, *decode_plan, pair_sources, pair_count, strategy,
+      repairs, result_lane_type, *sgpr_type, *mask_type, out_low_packets));
   return iree_ok_status();
 }
 
@@ -899,6 +907,10 @@ static iree_status_t loom_amdgpu_try_lower_vector_fp8_pairs_to_packed_f16(
                                                           value_flags)) {
     return iree_ok_status();
   }
+  const loom_amdgpu_fp8_packed_f16_strategy_t strategy =
+      loom_amdgpu_select_fp8_packed_f16_strategy(*decode_plan, value_flags);
+  const loom_amdgpu_fp8_packed_u16_repairs_t repairs =
+      loom_amdgpu_fp8_pair_to_packed_f16_repairs(*decode_plan, value_flags);
 
   loom_amdgpu_fp8_packed_u16_pair_source_t
       pair_sources[LOOM_AMDGPU_MAX_PACKED_32BIT_REGISTERS] = {0};
@@ -906,8 +918,8 @@ static iree_status_t loom_amdgpu_try_lower_vector_fp8_pairs_to_packed_f16(
       context, source_op, plan, pair_storage, pair_count, low_source,
       source_lane_type, pair_sources));
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_pairs_to_packed_f16_finite(
-      context, source_op, *decode_plan, pair_sources, pair_count, value_flags,
-      result_lane_type, *sgpr_type, *mask_type, out_low_packets));
+      context, source_op, *decode_plan, pair_sources, pair_count, strategy,
+      repairs, result_lane_type, *sgpr_type, *mask_type, out_low_packets));
   return iree_ok_status();
 }
 
@@ -938,6 +950,10 @@ static iree_status_t loom_amdgpu_try_lower_vector_fp8_pair_to_packed_f16(
                                                           value_flags)) {
     return iree_ok_status();
   }
+  const loom_amdgpu_fp8_packed_f16_strategy_t strategy =
+      loom_amdgpu_select_fp8_packed_f16_strategy(*decode_plan, value_flags);
+  const loom_amdgpu_fp8_packed_u16_repairs_t repairs =
+      loom_amdgpu_fp8_pair_to_packed_f16_repairs(*decode_plan, value_flags);
 
   loom_value_id_t source_register = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_extract_vector_fp8_pair_register(
@@ -949,7 +965,7 @@ static iree_status_t loom_amdgpu_try_lower_vector_fp8_pair_to_packed_f16(
       .live_lane_count = pair_storage.live_lane_count,
   };
   return loom_amdgpu_emit_fp8_pairs_to_packed_f16_finite(
-      context, source_op, *decode_plan, &pair_source, 1, value_flags,
+      context, source_op, *decode_plan, &pair_source, 1, strategy, repairs,
       result_lane_type, *sgpr_type, *mask_type, out_low_packet);
 }
 
@@ -2157,7 +2173,7 @@ static bool loom_amdgpu_vector_fp8_try_packed_bf16_plan_key(
   const loom_amdgpu_fp8_packed_u16_repairs_t repairs =
       loom_amdgpu_fp8_pair_to_packed_bf16_repairs(&decode_plan, value_flags);
   *out_plan_key = loom_amdgpu_fp8_packed_bf16_strategy_key(
-      loom_amdgpu_fp8_selects_exact_bf16_via_f16(&decode_plan, value_flags),
+      loom_amdgpu_select_fp8_packed_bf16_strategy(&decode_plan, value_flags),
       repairs);
   return true;
 }
