@@ -192,7 +192,8 @@ static iree_status_t loom_link_index_materialize_link(
       index, environment, &candidate_loader);
 
   loom_link_plan_t* stable_plan = NULL;
-  loom_module_t* stable_module = NULL;
+  loom_link_plan_materialization_t stable_product = {0};
+  iree_arena_allocator_t stable_arena = {0};
   iree_host_size_t queried_template_demand_count = 0;
   bool has_queried_template_demands = false;
   while (iree_status_is_ok(status) && stable_plan == NULL) {
@@ -217,23 +218,26 @@ static iree_status_t loom_link_index_materialize_link(
       break;
     }
 
-    iree_arena_allocator_t iteration_arena;
-    iree_arena_initialize(environment->block_pool, &iteration_arena);
+    iree_arena_allocator_t materialization_arena;
+    iree_arena_initialize(environment->block_pool, &materialization_arena);
     loom_link_plan_materialization_t analysis = {0};
     status = loom_link_plan_materialize(plan, environment, module_name,
-                                        &iteration_arena, &analysis);
+                                        &materialization_arena, &analysis);
+    iree_arena_allocator_t query_arena;
+    iree_arena_initialize(environment->block_pool, &query_arena);
     loom_template_selection_query_result_t query = {0};
     if (iree_status_is_ok(status)) {
       status = loom_link_index_query_candidates(
           index, candidate_loader, plan, &analysis, &selected, plan_options,
-          environment->block_pool, &iteration_arena, &query);
+          environment->block_pool, &query_arena, &query);
     }
     const bool changed =
         iree_status_is_ok(status) &&
         loom_link_index_append_query_selections(&query, &selected);
+    iree_arena_deinitialize(&query_arena);
     if (!iree_status_is_ok(status)) {
       loom_module_free(analysis.module);
-      iree_arena_deinitialize(&iteration_arena);
+      iree_arena_deinitialize(&materialization_arena);
       loom_link_plan_free(plan);
       break;
     }
@@ -243,36 +247,36 @@ static iree_status_t loom_link_index_materialize_link(
       loom_link_plan_free(plan);
     } else {
       stable_plan = plan;
-      stable_module = analysis.module;
-      analysis.module = NULL;
+      stable_product = analysis;
+      analysis = (loom_link_plan_materialization_t){0};
+      stable_arena = materialization_arena;
+      materialization_arena = (iree_arena_allocator_t){0};
     }
     loom_module_free(analysis.module);
-    iree_arena_deinitialize(&iteration_arena);
+    iree_arena_deinitialize(&materialization_arena);
   }
 
-  if (iree_status_is_ok(status) && stable_module != NULL) {
+  if (iree_status_is_ok(status) && stable_product.module != NULL) {
     out_materialization->plan = stable_plan;
-    out_materialization->module = stable_module;
+    out_materialization->product = stable_product;
+    out_materialization->arena = stable_arena;
     stable_plan = NULL;
-    stable_module = NULL;
+    stable_product = (loom_link_plan_materialization_t){0};
+    stable_arena = (iree_arena_allocator_t){0};
   } else if (iree_status_is_ok(status)) {
-    iree_arena_allocator_t final_arena;
-    iree_arena_initialize(environment->block_pool, &final_arena);
-    loom_link_plan_materialization_t final = {0};
+    iree_arena_initialize(environment->block_pool, &out_materialization->arena);
     status = loom_link_plan_materialize(stable_plan, environment, module_name,
-                                        &final_arena, &final);
+                                        &out_materialization->arena,
+                                        &out_materialization->product);
     if (iree_status_is_ok(status)) {
       out_materialization->plan = stable_plan;
-      out_materialization->module = final.module;
       stable_plan = NULL;
-    } else {
-      loom_module_free(final.module);
     }
-    iree_arena_deinitialize(&final_arena);
   }
 
   loom_link_plan_free(stable_plan);
-  loom_module_free(stable_module);
+  loom_module_free(stable_product.module);
+  iree_arena_deinitialize(&stable_arena);
   loom_link_template_candidate_loader_free(candidate_loader);
   loom_link_index_selected_providers_deinitialize(&selected);
   return status;
@@ -287,19 +291,14 @@ static iree_status_t loom_link_index_materialize_merge(
   loom_link_plan_t* plan = NULL;
   IREE_RETURN_IF_ERROR(
       loom_link_plan_build(index, plan_options, environment->allocator, &plan));
-  iree_arena_allocator_t arena;
-  iree_arena_initialize(environment->block_pool, &arena);
-  loom_link_plan_materialization_t result = {0};
+  iree_arena_initialize(environment->block_pool, &out_materialization->arena);
   iree_status_t status = loom_link_plan_materialize(
-      plan, environment, module_name, &arena, &result);
+      plan, environment, module_name, &out_materialization->arena,
+      &out_materialization->product);
   if (iree_status_is_ok(status)) {
     out_materialization->plan = plan;
-    out_materialization->module = result.module;
     plan = NULL;
-  } else {
-    loom_module_free(result.module);
   }
-  iree_arena_deinitialize(&arena);
   loom_link_plan_free(plan);
   return status;
 }
@@ -309,8 +308,9 @@ void loom_link_index_materialization_deinitialize(
   if (materialization == NULL) {
     return;
   }
-  loom_module_free(materialization->module);
+  loom_module_free(materialization->product.module);
   loom_link_plan_free(materialization->plan);
+  iree_arena_deinitialize(&materialization->arena);
   *materialization = (loom_link_index_materialization_t){0};
 }
 
@@ -332,14 +332,22 @@ iree_status_t loom_link_index_materialize(
         IREE_STATUS_INVALID_ARGUMENT,
         "index materialization owns template provider selection roots");
   }
+  iree_status_t status = iree_ok_status();
   switch (plan_options->mode) {
     case LOOM_LINK_PLAN_MERGE:
-      return loom_link_index_materialize_merge(
+      status = loom_link_index_materialize_merge(
           index, plan_options, environment, module_name, out_materialization);
+      break;
     case LOOM_LINK_PLAN_LINK:
-      return loom_link_index_materialize_link(index, plan_options, environment,
-                                              module_name, out_materialization);
+      status = loom_link_index_materialize_link(
+          index, plan_options, environment, module_name, out_materialization);
+      break;
+    default:
+      IREE_ASSERT_UNREACHABLE("unknown link plan mode");
+      IREE_BUILTIN_UNREACHABLE();
   }
-  IREE_ASSERT_UNREACHABLE("unknown link plan mode");
-  IREE_BUILTIN_UNREACHABLE();
+  if (!iree_status_is_ok(status)) {
+    loom_link_index_materialization_deinitialize(out_materialization);
+  }
+  return status;
 }

@@ -357,10 +357,12 @@ template.def<@demo.choose> priority(1) @slow(%x: i32) -> (i32) {
   loom_link_index_materialization_t materialization =
       Materialize(index.get(), IREE_SV("@entry"));
   ASSERT_NE(materialization.plan, nullptr);
-  ASSERT_NE(materialization.module, nullptr);
-  Verify(materialization.module);
-  EXPECT_NE(FindSymbol(materialization.module, IREE_SV("fast")), nullptr);
-  EXPECT_EQ(FindSymbol(materialization.module, IREE_SV("slow")), nullptr);
+  ASSERT_NE(materialization.product.module, nullptr);
+  Verify(materialization.product.module);
+  EXPECT_NE(FindSymbol(materialization.product.module, IREE_SV("fast")),
+            nullptr);
+  EXPECT_EQ(FindSymbol(materialization.product.module, IREE_SV("slow")),
+            nullptr);
 
   const loom_link_module_index_symbol_t* fast =
       loom_link_module_index_lookup_private(
@@ -459,18 +461,21 @@ template.def<@demo.choose> priority(1) @fallback(%x: i32) -> (i32) {
   loom_link_index_materialization_t materialization =
       Materialize(index.get(), IREE_SV("@entry"));
   ASSERT_NE(materialization.plan, nullptr);
-  ASSERT_NE(materialization.module, nullptr);
-  Verify(materialization.module);
-  EXPECT_NE(FindSymbol(materialization.module, IREE_SV("selected")), nullptr);
-  EXPECT_NE(FindSymbol(materialization.module, IREE_SV("matching_target")),
+  ASSERT_NE(materialization.product.module, nullptr);
+  Verify(materialization.product.module);
+  EXPECT_NE(FindSymbol(materialization.product.module, IREE_SV("selected")),
             nullptr);
+  EXPECT_NE(
+      FindSymbol(materialization.product.module, IREE_SV("matching_target")),
+      nullptr);
   for (const char* rejected_provider_name : rejected_provider_names) {
-    EXPECT_EQ(FindSymbol(materialization.module,
+    EXPECT_EQ(FindSymbol(materialization.product.module,
                          iree_make_cstring_view(rejected_provider_name)),
               nullptr);
   }
-  EXPECT_EQ(FindSymbol(materialization.module, IREE_SV("mismatched_target")),
-            nullptr);
+  EXPECT_EQ(
+      FindSymbol(materialization.product.module, IREE_SV("mismatched_target")),
+      nullptr);
   loom_link_index_materialization_deinitialize(&materialization);
 }
 
@@ -527,10 +532,11 @@ template.def<@demo.choose> @implementation(%x: i32) -> (i32) {
   loom_link_index_materialization_t materialization = MaterializeWithPolicy(
       index.get(), IREE_SV("@entry"), LOOM_LINK_PLAN_UNRESOLVED_ALLOW);
   ASSERT_NE(materialization.plan, nullptr);
-  ASSERT_NE(materialization.module, nullptr);
-  Verify(materialization.module);
-  EXPECT_EQ(FindSymbol(materialization.module, IREE_SV("implementation")),
-            nullptr);
+  ASSERT_NE(materialization.product.module, nullptr);
+  Verify(materialization.product.module);
+  EXPECT_EQ(
+      FindSymbol(materialization.product.module, IREE_SV("implementation")),
+      nullptr);
 
   const loom_link_module_index_symbol_t* implementation =
       loom_link_module_index_lookup_private(
@@ -575,10 +581,12 @@ template.def<@demo.choose> priority(1) @fallback(%arg: hal.buffer) -> (hal.buffe
 
   loom_link_index_materialization_t materialization =
       Materialize(index.get(), IREE_SV("@entry"));
-  Verify(materialization.module);
-  EXPECT_NE(FindSymbol(materialization.module, IREE_SV("implementation")),
+  Verify(materialization.product.module);
+  EXPECT_NE(
+      FindSymbol(materialization.product.module, IREE_SV("implementation")),
+      nullptr);
+  EXPECT_EQ(FindSymbol(materialization.product.module, IREE_SV("fallback")),
             nullptr);
-  EXPECT_EQ(FindSymbol(materialization.module, IREE_SV("fallback")), nullptr);
   loom_link_index_materialization_deinitialize(&materialization);
 }
 
@@ -603,7 +611,7 @@ func.def public @entry(%x: i32) -> (i32) {
       TryMaterialize(index.get(), IREE_SV("@entry"), LOOM_LINK_PLAN_LINK,
                      LOOM_LINK_PLAN_UNRESOLVED_ERROR, &materialization));
   EXPECT_EQ(materialization.plan, nullptr);
-  EXPECT_EQ(materialization.module, nullptr);
+  EXPECT_EQ(materialization.product.module, nullptr);
 }
 
 TEST_F(LinkIndexMaterializerTest, MergeRetainsOnlyInputProviders) {
@@ -638,12 +646,15 @@ template.def<@demo.choose> priority(1) @slow(%x: i32) -> (i32) {
 
   loom_link_index_materialization_t materialization = {};
   IREE_ASSERT_OK(TryMerge(index.get(), &materialization));
-  Verify(materialization.module);
-  EXPECT_NE(FindSymbol(materialization.module, IREE_SV("entry")), nullptr);
-  EXPECT_NE(FindSymbol(materialization.module, IREE_SV("demo.choose")),
+  Verify(materialization.product.module);
+  EXPECT_NE(FindSymbol(materialization.product.module, IREE_SV("entry")),
             nullptr);
-  EXPECT_EQ(FindSymbol(materialization.module, IREE_SV("fast")), nullptr);
-  EXPECT_EQ(FindSymbol(materialization.module, IREE_SV("slow")), nullptr);
+  EXPECT_NE(FindSymbol(materialization.product.module, IREE_SV("demo.choose")),
+            nullptr);
+  EXPECT_EQ(FindSymbol(materialization.product.module, IREE_SV("fast")),
+            nullptr);
+  EXPECT_EQ(FindSymbol(materialization.product.module, IREE_SV("slow")),
+            nullptr);
   loom_link_index_materialization_deinitialize(&materialization);
 }
 
@@ -673,7 +684,7 @@ func.def public @same(%x: i32) -> (i32) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_ALREADY_EXISTS,
                         TryMerge(index.get(), &materialization));
   EXPECT_EQ(materialization.plan, nullptr);
-  EXPECT_EQ(materialization.module, nullptr);
+  EXPECT_EQ(materialization.product.module, nullptr);
 }
 
 TEST_F(LinkIndexMaterializerTest,
@@ -739,12 +750,15 @@ template.def<@demo.leaf> @leaf_impl(%x: i32) -> (i32) {
 
   loom_link_index_materialization_t materialization =
       Materialize(index.get(), IREE_SV("@entry"));
-  Verify(materialization.module);
-  EXPECT_NE(FindSymbol(materialization.module, IREE_SV("left_impl")), nullptr);
-  EXPECT_NE(FindSymbol(materialization.module, IREE_SV("right_impl")), nullptr);
-  EXPECT_NE(FindSymbol(materialization.module, IREE_SV("shared_impl")),
+  Verify(materialization.product.module);
+  EXPECT_NE(FindSymbol(materialization.product.module, IREE_SV("left_impl")),
             nullptr);
-  EXPECT_NE(FindSymbol(materialization.module, IREE_SV("leaf_impl")), nullptr);
+  EXPECT_NE(FindSymbol(materialization.product.module, IREE_SV("right_impl")),
+            nullptr);
+  EXPECT_NE(FindSymbol(materialization.product.module, IREE_SV("shared_impl")),
+            nullptr);
+  EXPECT_NE(FindSymbol(materialization.product.module, IREE_SV("leaf_impl")),
+            nullptr);
 
   const struct {
     iree_host_size_t module_ordinal;
@@ -799,31 +813,32 @@ func.def public export("unrelated") @unused(%x: i32) -> (i32) {
 
   loom_link_index_materialization_t materialization =
       Materialize(index.get(), IREE_SV("@entry"));
-  Verify(materialization.module);
+  Verify(materialization.product.module);
 
   const loom_symbol_t* entry =
-      FindSymbol(materialization.module, IREE_SV("entry"));
+      FindSymbol(materialization.product.module, IREE_SV("entry"));
   const loom_symbol_t* helper =
-      FindSymbol(materialization.module, IREE_SV("helper"));
+      FindSymbol(materialization.product.module, IREE_SV("helper"));
   ASSERT_NE(entry, nullptr);
   ASSERT_NE(helper, nullptr);
-  EXPECT_EQ(FindSymbol(materialization.module, IREE_SV("unused")), nullptr);
+  EXPECT_EQ(FindSymbol(materialization.product.module, IREE_SV("unused")),
+            nullptr);
   EXPECT_TRUE(iree_all_bits_set(
       entry->flags, LOOM_SYMBOL_FLAG_PUBLIC | LOOM_SYMBOL_FLAG_RETAIN));
   EXPECT_FALSE(iree_any_bit_set(
       helper->flags, LOOM_SYMBOL_FLAG_PUBLIC | LOOM_SYMBOL_FLAG_RETAIN));
 
   loom_func_like_t entry_func =
-      loom_func_like_cast(materialization.module, entry->defining_op);
+      loom_func_like_cast(materialization.product.module, entry->defining_op);
   loom_func_like_t helper_func =
-      loom_func_like_cast(materialization.module, helper->defining_op);
+      loom_func_like_cast(materialization.product.module, helper->defining_op);
   ASSERT_TRUE(loom_func_like_isa(entry_func));
   ASSERT_TRUE(loom_func_like_isa(helper_func));
   const loom_string_id_t entry_export =
       loom_func_like_export_symbol(entry_func);
   ASSERT_NE(entry_export, LOOM_STRING_ID_INVALID);
   EXPECT_TRUE(iree_string_view_equal(
-      materialization.module->strings.entries[entry_export],
+      materialization.product.module->strings.entries[entry_export],
       IREE_SV("request_entry")));
   EXPECT_EQ(loom_func_like_export_symbol(helper_func), LOOM_STRING_ID_INVALID);
 
@@ -851,7 +866,7 @@ func.def public export("provider_identity") @identity(%x: i32) -> (i32) {
 
   loom_link_index_materialization_t materialization =
       Materialize(index.get(), IREE_SV("@identity"));
-  Verify(materialization.module);
+  Verify(materialization.product.module);
 
   const loom_link_module_index_module_t* library_module =
       loom_link_module_index_module_at(index.get(), 0);
@@ -864,13 +879,13 @@ func.def public export("provider_identity") @identity(%x: i32) -> (i32) {
                                              library_identity->ordinal));
 
   const loom_symbol_t* identity =
-      FindSymbol(materialization.module, IREE_SV("identity"));
+      FindSymbol(materialization.product.module, IREE_SV("identity"));
   ASSERT_NE(identity, nullptr);
   EXPECT_TRUE(iree_all_bits_set(
       identity->flags, LOOM_SYMBOL_FLAG_PUBLIC | LOOM_SYMBOL_FLAG_RETAIN));
   EXPECT_FALSE(loom_symbol_definition_is_declaration(identity->definition));
-  loom_func_like_t identity_func =
-      loom_func_like_cast(materialization.module, identity->defining_op);
+  loom_func_like_t identity_func = loom_func_like_cast(
+      materialization.product.module, identity->defining_op);
   ASSERT_TRUE(loom_func_like_isa(identity_func));
   EXPECT_EQ(loom_func_like_import_module(identity_func),
             LOOM_STRING_ID_INVALID);
@@ -880,7 +895,7 @@ func.def public export("provider_identity") @identity(%x: i32) -> (i32) {
       loom_func_like_export_symbol(identity_func);
   ASSERT_NE(export_symbol, LOOM_STRING_ID_INVALID);
   EXPECT_TRUE(iree_string_view_equal(
-      materialization.module->strings.entries[export_symbol],
+      materialization.product.module->strings.entries[export_symbol],
       IREE_SV("request_identity")));
 
   loom_link_index_materialization_deinitialize(&materialization);
@@ -898,16 +913,16 @@ func.decl public import("upstream", "identity") export("request_identity") @iden
 
   loom_link_index_materialization_t materialization = MaterializeWithPolicy(
       index.get(), IREE_SV("@identity"), LOOM_LINK_PLAN_UNRESOLVED_ALLOW);
-  Verify(materialization.module);
+  Verify(materialization.product.module);
 
   const loom_symbol_t* identity =
-      FindSymbol(materialization.module, IREE_SV("identity"));
+      FindSymbol(materialization.product.module, IREE_SV("identity"));
   ASSERT_NE(identity, nullptr);
   EXPECT_TRUE(iree_all_bits_set(
       identity->flags, LOOM_SYMBOL_FLAG_PUBLIC | LOOM_SYMBOL_FLAG_RETAIN));
   EXPECT_TRUE(loom_symbol_definition_is_declaration(identity->definition));
-  loom_func_like_t identity_func =
-      loom_func_like_cast(materialization.module, identity->defining_op);
+  loom_func_like_t identity_func = loom_func_like_cast(
+      materialization.product.module, identity->defining_op);
   ASSERT_TRUE(loom_func_like_isa(identity_func));
   EXPECT_NE(loom_func_like_import_module(identity_func),
             LOOM_STRING_ID_INVALID);
@@ -931,10 +946,10 @@ func.def @entry(%x: i32) -> (i32) {
 
   loom_link_index_materialization_t materialization =
       Materialize(index.get(), IREE_SV("@entry"));
-  Verify(materialization.module);
+  Verify(materialization.product.module);
 
   const loom_symbol_t* entry =
-      FindSymbol(materialization.module, IREE_SV("entry"));
+      FindSymbol(materialization.product.module, IREE_SV("entry"));
   ASSERT_NE(entry, nullptr);
   EXPECT_TRUE(iree_any_bit_set(entry->flags, LOOM_SYMBOL_FLAG_RETAIN));
   EXPECT_FALSE(iree_any_bit_set(entry->flags, LOOM_SYMBOL_FLAG_PUBLIC));
@@ -957,20 +972,20 @@ func.def export("entry") @entry(%x: i32) -> (i32) {
 
   loom_link_index_materialization_t materialization =
       Materialize(index.get(), IREE_SV("@entry"));
-  Verify(materialization.module);
+  Verify(materialization.product.module);
 
   const loom_symbol_t* entry =
-      FindSymbol(materialization.module, IREE_SV("entry"));
+      FindSymbol(materialization.product.module, IREE_SV("entry"));
   ASSERT_NE(entry, nullptr);
   EXPECT_TRUE(iree_any_bit_set(entry->flags, LOOM_SYMBOL_FLAG_RETAIN));
   EXPECT_FALSE(iree_any_bit_set(entry->flags, LOOM_SYMBOL_FLAG_PUBLIC));
   loom_func_like_t function =
-      loom_func_like_cast(materialization.module, entry->defining_op);
+      loom_func_like_cast(materialization.product.module, entry->defining_op);
   ASSERT_TRUE(loom_func_like_isa(function));
   const loom_string_id_t export_symbol = loom_func_like_export_symbol(function);
   ASSERT_NE(export_symbol, LOOM_STRING_ID_INVALID);
   EXPECT_TRUE(iree_string_view_equal(
-      materialization.module->strings.entries[export_symbol],
+      materialization.product.module->strings.entries[export_symbol],
       IREE_SV("entry")));
 
   loom_link_index_materialization_deinitialize(&materialization);
@@ -1001,16 +1016,16 @@ func.def public export("library_helper") @helper(%x: i32) -> (i32) {
 
   loom_link_index_materialization_t materialization = {};
   IREE_ASSERT_OK(TryMerge(index.get(), &materialization));
-  Verify(materialization.module);
+  Verify(materialization.product.module);
 
   const loom_symbol_t* helper =
-      FindSymbol(materialization.module, IREE_SV("helper"));
+      FindSymbol(materialization.product.module, IREE_SV("helper"));
   ASSERT_NE(helper, nullptr);
   EXPECT_TRUE(loom_symbol_definition_is_declaration(helper->definition));
   EXPECT_FALSE(iree_any_bit_set(helper->flags, LOOM_SYMBOL_FLAG_PUBLIC));
 
   const loom_symbol_t* entry =
-      FindSymbol(materialization.module, IREE_SV("entry"));
+      FindSymbol(materialization.product.module, IREE_SV("entry"));
   ASSERT_NE(entry, nullptr);
   EXPECT_TRUE(iree_any_bit_set(entry->flags, LOOM_SYMBOL_FLAG_PUBLIC));
 
@@ -1034,10 +1049,10 @@ check.benchmark<@case> @benchmark
 
   loom_link_index_materialization_t materialization =
       Materialize(index.get(), IREE_SV("@benchmark"));
-  Verify(materialization.module);
+  Verify(materialization.product.module);
 
   const loom_symbol_t* check_case =
-      FindSymbol(materialization.module, IREE_SV("case"));
+      FindSymbol(materialization.product.module, IREE_SV("case"));
   ASSERT_NE(check_case, nullptr);
   EXPECT_FALSE(iree_any_bit_set(check_case->flags, LOOM_SYMBOL_FLAG_PUBLIC));
 
@@ -1105,11 +1120,11 @@ func.def public export("partial_unused") @partial_unused(%x: i32) -> (i32) {
   loom_link_index_materialization_t partial_materialization =
       MaterializeWithPolicy(partial_index.get(), IREE_SV("@partial"),
                             LOOM_LINK_PLAN_UNRESOLVED_ALLOW);
-  Verify(partial_materialization.module);
+  Verify(partial_materialization.product.module);
   ASSERT_EQ(loom_link_plan_symbol_count(partial_materialization.plan), 2u);
-  ASSERT_EQ(partial_materialization.module->symbols.count, 2u);
+  ASSERT_EQ(partial_materialization.product.module->symbols.count, 2u);
   const std::vector<uint8_t> partial_bytecode =
-      WriteModule(partial_materialization.module);
+      WriteModule(partial_materialization.product.module);
   loom_link_index_materialization_deinitialize(&partial_materialization);
 
   enum ProviderId {
@@ -1193,10 +1208,10 @@ func.def public export("partial_unused") @partial_unused(%x: i32) -> (i32) {
     loom_link_index_materialization_t materialization = {};
     IREE_ASSERT_OK(
         TryMaterializeWithOptions(index.get(), &options, &materialization));
-    Verify(materialization.module);
+    Verify(materialization.product.module);
 
     EXPECT_EQ(loom_link_plan_symbol_count(materialization.plan), 10u);
-    EXPECT_EQ(materialization.module->symbols.count, 7u);
+    EXPECT_EQ(materialization.product.module->symbols.count, 7u);
     const auto expect_selected = [&](iree_host_size_t provider,
                                      iree_string_view_t name, bool expected) {
       const loom_link_module_index_symbol_t* symbol =
@@ -1216,19 +1231,19 @@ func.def public export("partial_unused") @partial_unused(%x: i32) -> (i32) {
               nullptr);
 
     const loom_symbol_t* entry =
-        FindSymbol(materialization.module, IREE_SV("entry"));
+        FindSymbol(materialization.product.module, IREE_SV("entry"));
     const loom_symbol_t* api =
-        FindSymbol(materialization.module, IREE_SV("api"));
+        FindSymbol(materialization.product.module, IREE_SV("api"));
     const loom_symbol_t* private_root =
-        FindSymbol(materialization.module, IREE_SV("private_root"));
+        FindSymbol(materialization.product.module, IREE_SV("private_root"));
     const loom_symbol_t* local =
-        FindSymbol(materialization.module, IREE_SV("local"));
+        FindSymbol(materialization.product.module, IREE_SV("local"));
     const loom_symbol_t* provided =
-        FindSymbol(materialization.module, IREE_SV("provided"));
+        FindSymbol(materialization.product.module, IREE_SV("provided"));
     const loom_symbol_t* linked_partial =
-        FindSymbol(materialization.module, IREE_SV("partial"));
+        FindSymbol(materialization.product.module, IREE_SV("partial"));
     const loom_symbol_t* external =
-        FindSymbol(materialization.module, IREE_SV("external"));
+        FindSymbol(materialization.product.module, IREE_SV("external"));
     ASSERT_NE(entry, nullptr);
     ASSERT_NE(api, nullptr);
     ASSERT_NE(private_root, nullptr);
@@ -1236,6 +1251,35 @@ func.def public export("partial_unused") @partial_unused(%x: i32) -> (i32) {
     ASSERT_NE(provided, nullptr);
     ASSERT_NE(linked_partial, nullptr);
     ASSERT_NE(external, nullptr);
+    ASSERT_EQ(materialization.product.target_source_definitions.count,
+              materialization.product.module->symbols.count);
+    const auto expect_source_definition =
+        [&](iree_host_size_t provider, iree_string_view_t source_name,
+            const loom_symbol_t* target_symbol) {
+          const loom_link_module_index_symbol_t* source_symbol =
+              FindIndexedProviderSymbol(index.get(), provider, source_name);
+          ASSERT_NE(source_symbol, nullptr);
+          const iree_host_size_t target_symbol_id =
+              target_symbol - materialization.product.module->symbols.entries;
+          ASSERT_LT(target_symbol_id,
+                    materialization.product.target_source_definitions.count);
+          EXPECT_EQ(materialization.product.target_source_definitions
+                        .values[target_symbol_id],
+                    source_symbol->ordinal);
+        };
+    expect_source_definition(requester_provider, IREE_SV("entry"), entry);
+    expect_source_definition(chosen_provider, IREE_SV("api"), api);
+    expect_source_definition(requester_provider, IREE_SV("private_root"),
+                             private_root);
+    expect_source_definition(requester_provider, IREE_SV("local"), local);
+    expect_source_definition(chosen_provider, IREE_SV("provided"), provided);
+    expect_source_definition(partial_provider, IREE_SV("partial"),
+                             linked_partial);
+    const iree_host_size_t external_symbol_id =
+        external - materialization.product.module->symbols.entries;
+    EXPECT_EQ(materialization.product.target_source_definitions
+                  .values[external_symbol_id],
+              LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL);
     EXPECT_TRUE(iree_all_bits_set(
         entry->flags, LOOM_SYMBOL_FLAG_PUBLIC | LOOM_SYMBOL_FLAG_RETAIN));
     EXPECT_TRUE(iree_all_bits_set(
@@ -1249,25 +1293,27 @@ func.def public export("partial_unused") @partial_unused(%x: i32) -> (i32) {
     EXPECT_TRUE(loom_symbol_definition_is_declaration(external->definition));
     EXPECT_FALSE(iree_any_bit_set(
         external->flags, LOOM_SYMBOL_FLAG_PUBLIC | LOOM_SYMBOL_FLAG_RETAIN));
-    EXPECT_EQ(FindSymbol(materialization.module, IREE_SV("unused")), nullptr);
-    EXPECT_EQ(FindSymbol(materialization.module, IREE_SV("partial_unused")),
+    EXPECT_EQ(FindSymbol(materialization.product.module, IREE_SV("unused")),
               nullptr);
+    EXPECT_EQ(
+        FindSymbol(materialization.product.module, IREE_SV("partial_unused")),
+        nullptr);
 
     const loom_func_like_t entry_function =
-        loom_func_like_cast(materialization.module, entry->defining_op);
+        loom_func_like_cast(materialization.product.module, entry->defining_op);
     const loom_func_like_t api_function =
-        loom_func_like_cast(materialization.module, api->defining_op);
+        loom_func_like_cast(materialization.product.module, api->defining_op);
     ASSERT_TRUE(loom_func_like_isa(entry_function));
     ASSERT_TRUE(loom_func_like_isa(api_function));
-    EXPECT_EQ(OptionalString(materialization.module,
+    EXPECT_EQ(OptionalString(materialization.product.module,
                              loom_func_like_export_symbol(entry_function)),
               "request_entry");
-    EXPECT_EQ(OptionalString(materialization.module,
+    EXPECT_EQ(OptionalString(materialization.product.module,
                              loom_func_like_export_symbol(api_function)),
               "request_api");
 
     const std::vector<LinkedSymbolShape> product_symbols =
-        CaptureSymbolShapes(materialization.module);
+        CaptureSymbolShapes(materialization.product.module);
     if (!reference_symbols.empty()) {
       EXPECT_EQ(product_symbols, reference_symbols);
     } else {

@@ -20,8 +20,10 @@ extern "C" {
 typedef struct loom_link_index_materialization_t {
   // Stable final plan including every selected template provider.
   loom_link_plan_t* plan;
-  // Standalone linked output module.
-  loom_module_t* module;
+  // Standalone linked product and its exact index projections.
+  loom_link_plan_materialization_t product;
+  // Storage retaining every projection in |product|.
+  iree_arena_allocator_t arena;
 } loom_link_index_materialization_t;
 
 // Releases every owned object in |materialization|.

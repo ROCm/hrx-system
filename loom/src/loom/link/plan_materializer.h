@@ -30,6 +30,17 @@ typedef struct loom_link_plan_materialization_t {
     // Number of index-wide source symbol slots.
     iree_host_size_t count;
   } target_symbols;
+  // Dense concrete source-definition ordinals indexed by target module symbol
+  // ID. A target assembled from a declaration and definition names the
+  // definition selected by the plan. Declarations without an indexed provider
+  // and synthetic symbols contain LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL.
+  // Storage belongs to the caller's arena.
+  struct {
+    // Arena-owned target-to-source definition projection.
+    iree_host_size_t* values;
+    // Number of target module symbol slots.
+    iree_host_size_t count;
+  } target_source_definitions;
   // Dense target refs indexed by template-family ordinal. Each demanded family
   // resolves through whichever equivalent declaration was selected, rather
   // than depending on one canonical source declaration being live.
