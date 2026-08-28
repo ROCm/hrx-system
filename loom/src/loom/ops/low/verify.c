@@ -843,13 +843,15 @@ static iree_status_t loom_low_emit_register_value_relation_error(
                        IREE_ARRAYSIZE(params));
 }
 
-// Returns true when a one-unit slice is the exact scalar projection of a
-// rank-1 vector represented with one register unit per element.
+// Returns true when a slice preserves a static vector's element sequence.
+//
+// Static vectors use one register unit per element. A structural slice may
+// project either a scalar element or a contiguous vector fragment, independent
+// of the source and fragment ranks.
 static bool loom_low_slice_has_exact_vector_value_relation(
     loom_type_t source_type, loom_type_t result_type) {
   if (!loom_type_register_has_value_type(source_type) ||
-      !loom_type_register_has_value_type(result_type) ||
-      loom_low_register_type_unit_count(result_type) != 1) {
+      !loom_type_register_has_value_type(result_type)) {
     return false;
   }
   const loom_type_t* source_value_type =
@@ -857,44 +859,67 @@ static bool loom_low_slice_has_exact_vector_value_relation(
   const loom_type_t* result_value_type =
       loom_type_register_value_type(result_type);
   if (!loom_type_is_vector(*source_value_type) ||
-      loom_type_rank(*source_value_type) != 1 ||
       !loom_type_is_all_static(*source_value_type) ||
-      !loom_type_is_scalar(*result_value_type) ||
       !loom_type_element_type_equals(*source_value_type, *result_value_type)) {
     return false;
   }
-  return (uint64_t)loom_type_dim_static_size_at(*source_value_type, 0) ==
-         loom_low_register_type_unit_count(source_type);
+  uint64_t source_element_count = 0;
+  if (!loom_type_static_element_count(*source_value_type,
+                                      &source_element_count) ||
+      source_element_count != loom_low_register_type_unit_count(source_type)) {
+    return false;
+  }
+  const uint32_t result_unit_count =
+      loom_low_register_type_unit_count(result_type);
+  if (loom_type_is_scalar(*result_value_type)) return result_unit_count == 1;
+  uint64_t result_element_count = 0;
+  return loom_type_is_vector(*result_value_type) &&
+         loom_type_is_all_static(*result_value_type) &&
+         loom_type_static_element_count(*result_value_type,
+                                        &result_element_count) &&
+         result_element_count == result_unit_count;
 }
 
-// Returns true when scalar sources exactly construct a rank-1 vector
-// represented with one register unit per element.
+// Returns true when scalar and static-vector fragments exactly construct a
+// static vector represented with one register unit per element.
 static bool loom_low_concat_has_exact_vector_value_relation(
     const loom_module_t* module, loom_value_slice_t sources,
     loom_type_t result_type) {
   if (!loom_type_register_has_value_type(result_type)) return false;
   const loom_type_t* result_value_type =
       loom_type_register_value_type(result_type);
+  uint64_t result_element_count = 0;
   if (!loom_type_is_vector(*result_value_type) ||
-      loom_type_rank(*result_value_type) != 1 ||
       !loom_type_is_all_static(*result_value_type) ||
-      (uint64_t)loom_type_dim_static_size_at(*result_value_type, 0) !=
-          sources.count ||
-      sources.count != loom_low_register_type_unit_count(result_type)) {
+      !loom_type_static_element_count(*result_value_type,
+                                      &result_element_count) ||
+      result_element_count != loom_low_register_type_unit_count(result_type)) {
     return false;
   }
   for (iree_host_size_t i = 0; i < sources.count; ++i) {
     const loom_type_t source_type =
         loom_module_value_type(module, sources.values[i]);
-    if (!loom_type_register_has_value_type(source_type) ||
-        loom_low_register_type_unit_count(source_type) != 1) {
+    if (!loom_type_register_has_value_type(source_type)) {
       return false;
     }
     const loom_type_t* source_value_type =
         loom_type_register_value_type(source_type);
-    if (!loom_type_is_scalar(*source_value_type) ||
-        !loom_type_element_type_equals(*source_value_type,
+    if (!loom_type_element_type_equals(*source_value_type,
                                        *result_value_type)) {
+      return false;
+    }
+    const uint32_t source_unit_count =
+        loom_low_register_type_unit_count(source_type);
+    if (loom_type_is_scalar(*source_value_type)) {
+      if (source_unit_count != 1) return false;
+      continue;
+    }
+    uint64_t source_element_count = 0;
+    if (!loom_type_is_vector(*source_value_type) ||
+        !loom_type_is_all_static(*source_value_type) ||
+        !loom_type_static_element_count(*source_value_type,
+                                        &source_element_count) ||
+        source_element_count != source_unit_count) {
       return false;
     }
   }

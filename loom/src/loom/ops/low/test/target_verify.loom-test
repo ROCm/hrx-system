@@ -183,6 +183,16 @@ low.func.def target<test.low.core>(@test_target) @typed_scalar_singleton_vector_
 
 // ====
 
+test.target<low_core> @test_target
+low.func.def target<test.low.core>(@test_target) @typed_vector_fragment_structural_relations(%vector: reg<test.i32 x4 : vector<2x2xi32>>) -> (reg<test.i32 x2 : vector<2xi32>>, reg<test.i32 x3 : vector<3xi32>>) {
+  %middle = low.slice %vector[1] : reg<test.i32 x4 : vector<2x2xi32>> -> reg<test.i32 x2 : vector<2xi32>>
+  %last = low.slice %vector[3] : reg<test.i32 x4 : vector<2x2xi32>> -> reg<test.i32 : i32>
+  %combined = low.concat(%middle, %last) : (reg<test.i32 x2 : vector<2xi32>>, reg<test.i32 : i32>) -> reg<test.i32 x3 : vector<3xi32>>
+  low.return %middle, %combined : reg<test.i32 x2 : vector<2xi32>>, reg<test.i32 x3 : vector<3xi32>>
+}
+
+// ====
+
 test.target<low_core> @test_target {contract_set_key = "missing.low"}
 
 // ERROR@+1: PARSE/034 "unknown Low representation contract"
