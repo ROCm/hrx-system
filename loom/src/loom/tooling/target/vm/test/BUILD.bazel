@@ -1,0 +1,31 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+_VM_COMPATIBLE_WITH = loom_config_compatible_with([
+    "//loom/config/target/arch:vm",
+])
+
+iree_execution_test_suite(
+    name = "iree_test_loom_execution_test",
+    data = [
+        "semantic_execution.loom",
+    ],
+    manifests = ["iree-test-loom_vm.test.json"],
+    tags = ["hostonly"],
+    target_compatible_with = _VM_COMPATIBLE_WITH,
+    tools = {
+        "iree-test-loom": "//loom/src/loom/tools/iree-test-loom",
+    },
+)

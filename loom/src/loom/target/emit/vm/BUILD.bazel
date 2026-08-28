@@ -40,6 +40,7 @@ loom_cc_library(
     visibility = [
         "//loom/binding/c:__pkg__",
         "//loom/src/loom/target/arch/vm:__pkg__",
+        "//loom/src/loom/tools/iree-test-loom:__pkg__",
         "//loom/src/loom/tools/loom-compile:__pkg__",
     ],
     deps = [

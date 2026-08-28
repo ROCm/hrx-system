@@ -45,16 +45,16 @@ IREE_FLAG_NAMED(int32_t, max_samples_per_case, "max-samples-per-case",
                 LOOM_TESTBENCH_DEFAULT_MAX_SAMPLES_PER_CASE,
                 "Maximum number of samples planned per check.case.");
 IREE_FLAG(string, pipeline, "default",
-          "Pass pipeline used for HAL kernel launches. Use 'default', "
+          "Pass pipeline used for target compilation. Use 'default', "
           "'none', '@symbol', or a comma-separated pass list.");
 IREE_FLAG_LIST(
     string, config,
-    "Compile-time config binding for HAL kernel launches. Repeat as "
+    "Compile-time config binding for target compilation. Repeat as "
     "--config=key=value. Bindings not referenced by the loaded module are "
     "ignored.");
 IREE_FLAG_LIST_NAMED(
     string, config_file, "config-file",
-    "JSON/JSONC config object file for HAL kernel launches. Repeat for "
+    "JSON/JSONC config object file for target compilation. Repeat for "
     "multiple files. Nested object keys are flattened with '.' separators.");
 IREE_FLAG(string, sanitizer, "none",
           "Sanitizer checks inserted by the target pipeline. Use 'none', "
@@ -189,6 +189,23 @@ static bool iree_test_loom_case_matches_selection(
     iree_string_view_t selected_case_name) {
   return iree_string_view_is_empty(selected_case_name) ||
          iree_string_view_equal(case_plan->name, selected_case_name);
+}
+
+static bool iree_test_loom_module_has_function_calls(
+    const loom_testbench_module_plan_t* module_plan) {
+  for (iree_host_size_t case_index = 0; case_index < module_plan->case_count;
+       ++case_index) {
+    const loom_testbench_case_plan_t* case_plan =
+        &module_plan->cases[case_index];
+    for (iree_host_size_t invocation_index = 0;
+         invocation_index < case_plan->invocation_count; ++invocation_index) {
+      if (case_plan->invocations[invocation_index].kind ==
+          LOOM_TESTBENCH_INVOCATION_FUNCTION_CALL) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 static iree_status_t iree_test_loom_validate_sample_flag(
@@ -541,14 +558,14 @@ static void iree_test_loom_print_agents_markdown(FILE* stream) {
       "cases.\n"
       "`--max-samples-per-case=N` bounds planning for generator-heavy cases.\n"
       "\n"
-      "### Kernel launches\n"
+      "### Target execution\n"
       "\n"
-      "A case can mix reference/oracle checks with HAL kernel launches. "
-      "Kernel\n"
-      "launches use the selected HAL artifact provider, target provider, "
-      "and HAL device linked into this binary. "
-      "`--pipeline=default|none|@symbol|pass,list` controls the HAL kernel "
-      "compile pipeline. `--config=key=value` and `--config-file=path` "
+      "A case can mix semantic function calls, reference/oracle checks, and "
+      "HAL kernel launches. Function calls and kernel launches use the "
+      "execution providers linked into this binary. "
+      "`--pipeline=default|none|@symbol|pass,list` controls the private "
+      "target compile pipeline. `--config=key=value` and "
+      "`--config-file=path` "
       "materialize config declarations in the private compile copy before "
       "lowering runs. Case sample values remain runtime invocation inputs. "
       "`--sanitizer=...` and "
@@ -761,6 +778,23 @@ int iree_test_loom_main(int argc, char** argv,
             .fn = iree_test_loom_open_file_for_read,
             .user_data = &file_provider,
         };
+    bool function_call_provider_initialized = false;
+    if (iree_status_is_ok(status) &&
+        iree_test_loom_module_has_function_calls(&module_plan)) {
+      if (configuration->function_call_provider.prepare == NULL ||
+          configuration->function_call_provider.deinitialize == NULL) {
+        status = iree_make_status(
+            IREE_STATUS_UNAVAILABLE,
+            "no complete semantic function-call provider is linked");
+      } else {
+        status = configuration->function_call_provider.prepare(
+            configuration->function_call_provider.user_data, &session,
+            configuration->target_environment, &run_module, &module_plan,
+            iree_make_cstring_view(FLAG_pipeline), &config_set, allocator,
+            &execution_options.invocation.function_call);
+        function_call_provider_initialized = iree_status_is_ok(status);
+      }
+    }
     if (iree_status_is_ok(status) &&
         iree_test_loom_selected_cases_have_device_event_expectation(
             &module_plan, selected_case_name)) {
@@ -831,6 +865,10 @@ int iree_test_loom_main(int argc, char** argv,
     if (iree_status_is_ok(status) &&
         (failed_sample_count != 0 || planning_issue_count != 0)) {
       exit_code = 1;
+    }
+    if (function_call_provider_initialized) {
+      configuration->function_call_provider.deinitialize(
+          configuration->function_call_provider.user_data);
     }
   }
 

@@ -50,12 +50,28 @@ _SPIRV_VULKAN_TARGET_DEPS = iree_select({
     "//conditions:default": [],
 })
 
+_VM_TARGET_COPTS = iree_select({
+    "//loom/config/target/arch:vm": [
+        "-DIREE_TEST_LOOM_HAVE_VM=1",
+    ],
+    "//conditions:default": [],
+})
+
+_VM_TARGET_DEPS = iree_select({
+    "//loom/config/target/arch:vm": [
+        "//loom/src/loom/target/arch/vm:provider",
+        "//loom/src/loom/target/emit/vm",
+        "//loom/src/loom/tooling/target/vm:testbench_actual",
+    ],
+    "//conditions:default": [],
+})
+
 _IREE_TEST_LOOM_TARGET_COPTS = (
-    _AMDGPU_TARGET_COPTS + _SPIRV_VULKAN_TARGET_COPTS
+    _AMDGPU_TARGET_COPTS + _SPIRV_VULKAN_TARGET_COPTS + _VM_TARGET_COPTS
 )
 
 _IREE_TEST_LOOM_TARGET_DEPS = (
-    _AMDGPU_TARGET_DEPS + _SPIRV_VULKAN_TARGET_DEPS
+    _AMDGPU_TARGET_DEPS + _SPIRV_VULKAN_TARGET_DEPS + _VM_TARGET_DEPS
 )
 
 loom_cc_library(
@@ -81,6 +97,7 @@ loom_cc_library(
         "//loom/src/loom/tooling/io:file",
         "//loom/src/loom/tooling/testbench:device_event",
         "//loom/src/loom/tooling/testbench:executor",
+        "//loom/src/loom/tooling/testbench:invocation",
         "//loom/src/loom/tooling/testbench:issue_report",
         "//loom/src/loom/tooling/testbench:reference",
         "//loom/src/loom/tooling/testbench:requirements",
