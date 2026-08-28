@@ -17,9 +17,6 @@
 extern "C" {
 #endif
 
-// Stable public format name for one serialized portable command program.
-#define LOOM_CMD_PROGRAM_ARTIFACT_FORMAT "loom-command"
-
 // File extension convention for a serialized portable command program.
 #define LOOM_CMD_PROGRAM_ARTIFACT_EXTENSION ".loomcmd"
 
