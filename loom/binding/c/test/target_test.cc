@@ -908,7 +908,7 @@ func.def public @entry(%x: i32) -> (i32) {
   func.return %x : i32
 }
 )");
-  loomc_link_index_source_options_t source_options = {
+  loomc_link_index_provider_options_t source_options = {
       /*.provider_name=*/loomc_make_cstring_view("jit-input"),
       /*.role=*/LOOMC_LINK_PROVIDER_ROLE_INPUT,
   };

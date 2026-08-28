@@ -100,12 +100,12 @@ class LinkProviderRootsTest : public ::testing::Test {
                                         loomc_allocator_system(), &source));
     SourcePtr source_ptr(source);
 
-    const loomc_link_index_source_options_t index_options = {
+    const loomc_link_index_provider_options_t index_options = {
         /*.provider_name=*/
         loomc_make_string_view(provider_name.data(), provider_name.size()),
         /*.role=*/LOOMC_LINK_PROVIDER_ROLE_LIBRARY,
     };
-    loomc_link_index_source_slot_t slot = {};
+    loomc_link_index_provider_slot_t slot = {};
     LOOMC_ASSERT_OK(loomc_link_index_builder_add_source(
         builder, source_ptr.get(), &index_options, &slot));
     *out_provider_ordinal = slot.ordinal;

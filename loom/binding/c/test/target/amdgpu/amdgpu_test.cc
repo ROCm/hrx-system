@@ -195,7 +195,7 @@ LinkIndexPtr CreateLinkIndex(loomc_context_t* context, loomc_source_t* source) {
   LOOMC_EXPECT_OK(loomc_link_index_builder_create(
       context, nullptr, loomc_allocator_system(), &raw_builder));
   LinkIndexBuilderPtr builder(raw_builder);
-  const loomc_link_index_source_options_t source_options = {
+  const loomc_link_index_provider_options_t source_options = {
       /*.provider_name=*/loomc_make_cstring_view("sealed-replay"),
       /*.role=*/LOOMC_LINK_PROVIDER_ROLE_INPUT,
   };

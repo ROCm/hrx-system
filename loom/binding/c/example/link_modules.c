@@ -202,7 +202,7 @@ static loomc_status_t create_resources(link_modules_state_t* state) {
 }
 
 static loomc_status_t build_link_index(link_modules_state_t* state) {
-  const loomc_link_index_source_options_t harness_options = {
+  const loomc_link_index_provider_options_t harness_options = {
       .provider_name = loomc_make_cstring_view("harness"),
       .role = LOOMC_LINK_PROVIDER_ROLE_INPUT,
   };
@@ -210,7 +210,7 @@ static loomc_status_t build_link_index(link_modules_state_t* state) {
       state->index_builder, state->harness_source, &harness_options, NULL);
   if (loomc_status_is_ok(status)) {
     // --8<-- [start:library-source]
-    const loomc_link_index_source_options_t library_options = {
+    const loomc_link_index_provider_options_t library_options = {
         .provider_name = loomc_make_cstring_view("library"),
         .role = LOOMC_LINK_PROVIDER_ROLE_LIBRARY,
     };

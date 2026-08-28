@@ -190,7 +190,7 @@ class LinkCatalogFixture {
         context_.get(), /*options=*/nullptr, loom_allocator(), &builder)));
     LinkIndexBuilderPtr builder_ptr(builder);
 
-    const loomc_link_index_source_options_t source_options = {
+    const loomc_link_index_provider_options_t source_options = {
         /*.provider_name=*/loomc_make_cstring_view("catalog"),
         /*.role=*/LOOMC_LINK_PROVIDER_ROLE_INPUT,
     };

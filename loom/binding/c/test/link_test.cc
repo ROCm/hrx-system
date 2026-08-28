@@ -388,7 +388,7 @@ void FinishIndex(loomc_link_index_builder_t* builder,
 void AddSource(loomc_link_index_builder_t* builder, loomc_source_t* source,
                const char* provider_name,
                loomc_link_provider_role_t provider_role) {
-  loomc_link_index_source_options_t options = {
+  loomc_link_index_provider_options_t options = {
       /*.provider_name=*/loomc_make_cstring_view(provider_name),
       /*.role=*/provider_role,
   };

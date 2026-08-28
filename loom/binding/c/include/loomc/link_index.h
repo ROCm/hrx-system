@@ -9,21 +9,25 @@
 
 #include "loomc/config.h"
 #include "loomc/context.h"
+#include "loomc/module.h"
 #include "loomc/result.h"
 
 /// @file
-/// Reusable link indexes for deterministic library and source discovery.
+/// Reusable link indexes for deterministic provider discovery.
 ///
-/// A frozen link index records source/provider identity and symbol metadata so
-/// link operations can resolve live roots without rebuilding reusable library
-/// indexes. Builders reserve deterministic source slots, accept source handles
-/// in any slot order, and finish into an immutable, shareable index whose
-/// provider order is independent of scheduling order.
+/// A frozen link index records provider identity and symbol metadata so link
+/// operations can resolve live roots without rebuilding reusable library
+/// indexes. Providers may be immutable source handles or already materialized
+/// modules. Builders reserve deterministic provider slots, fill them in any
+/// order, and finish into an immutable, shareable index whose provider order is
+/// independent of scheduling order.
 ///
-/// The first indexing contract is intentionally explicit about lifetimes:
-/// source handles are retained by the builder, and a frozen index owns the
-/// persistent storage needed for provider/module/symbol metadata. Resetting a
-/// caller workspace never invalidates a frozen link index.
+/// Source and module handles are retained by the builder and transferred to a
+/// successful frozen index. Materialized modules therefore enter recursive
+/// composition without a serialization round trip. A module must not be
+/// mutated while retained by a builder or frozen index. The retained module
+/// also retains its workspace, so the caller may release its module and
+/// workspace references after adding the provider.
 ///
 /// @par Example
 /// Retain a frozen library index when handing it to an asynchronous worker:
@@ -61,7 +65,7 @@ typedef struct loomc_link_index_builder_t loomc_link_index_builder_t;
 /// across many threads.
 typedef struct loomc_link_index_t loomc_link_index_t;
 
-/// Linkage role assigned to a source provider in a link index.
+/// Linkage role assigned to a provider in a link index.
 typedef enum loomc_link_provider_role_e {
   /// Direct sources jointly owned by the module being assembled.
   LOOMC_LINK_PROVIDER_ROLE_INPUT = 0,
@@ -70,7 +74,7 @@ typedef enum loomc_link_provider_role_e {
   LOOMC_LINK_PROVIDER_ROLE_LIBRARY = 1,
 } loomc_link_provider_role_t;
 
-/// Source representation kind recorded for an indexed provider.
+/// Representation kind recorded for an indexed provider.
 typedef enum loomc_link_provider_kind_e {
   /// Provider kind is unknown.
   LOOMC_LINK_PROVIDER_KIND_UNKNOWN = 0,
@@ -169,28 +173,28 @@ typedef struct loomc_link_index_builder_options_t {
   loomc_host_size_t block_size;
 } loomc_link_index_builder_options_t;
 
-/// Deterministic source slot reserved by a link-index builder.
+/// Deterministic provider slot reserved by a link-index builder.
 ///
 /// Slots are stable within a builder. Parallel workers fill distinct slots so
 /// provider order and diagnostics do not depend on fill scheduling order.
-typedef struct loomc_link_index_source_slot_t {
+typedef struct loomc_link_index_provider_slot_t {
   /// Deterministic provider slot ordinal reserved by the builder.
   loomc_host_size_t ordinal;
-} loomc_link_index_source_slot_t;
+} loomc_link_index_provider_slot_t;
 
-/// Source provider options used when adding sources to a link index.
+/// Provider options used when adding sources or modules to a link index.
 ///
 /// @lifetime
 /// String views are borrowed for the duration of the builder call that consumes
 /// this descriptor unless that call explicitly documents a copy.
-typedef struct loomc_link_index_source_options_t {
+typedef struct loomc_link_index_provider_options_t {
   /// Stable provider label for diagnostics and private-name determinism.
   loomc_string_view_t provider_name;
 
   /// Provider linkage role.
   loomc_link_provider_role_t role;
 
-} loomc_link_index_source_options_t;
+} loomc_link_index_provider_options_t;
 
 /// Indexed provider metadata.
 ///
@@ -300,25 +304,25 @@ LOOMC_API_EXPORT loomc_status_t loomc_link_index_builder_create(
 LOOMC_API_EXPORT void loomc_link_index_builder_release(
     loomc_link_index_builder_t* builder);
 
-/// Reserves a deterministic source slot.
+/// Reserves a deterministic provider slot.
 ///
 /// @param builder Builder to mutate.
 /// @param options Provider options copied by this call, or `NULL` for defaults.
-/// @param out_slot Receives the reserved source slot.
+/// @param out_slot Receives the reserved provider slot.
 /// @return OK when the slot was reserved.
 ///
 /// @thread_safety
 /// Reserving slots requires exclusive access to `builder`.
-LOOMC_API_EXPORT loomc_status_t loomc_link_index_builder_reserve_source_slot(
+LOOMC_API_EXPORT loomc_status_t loomc_link_index_builder_reserve_provider_slot(
     loomc_link_index_builder_t* builder,
-    const loomc_link_index_source_options_t* options,
-    loomc_link_index_source_slot_t* out_slot);
+    const loomc_link_index_provider_options_t* options,
+    loomc_link_index_provider_slot_t* out_slot);
 
-/// Fills an already reserved source slot.
+/// Fills an already reserved provider slot with a source.
 ///
 /// @param builder Builder that owns `slot`.
-/// @param slot Source slot previously returned by
-/// `loomc_link_index_builder_reserve_source_slot`.
+/// @param slot Provider slot previously returned by
+/// `loomc_link_index_builder_reserve_provider_slot`.
 /// @param source Source retained by the builder on success.
 /// @return OK when the slot was filled.
 ///
@@ -326,20 +330,55 @@ LOOMC_API_EXPORT loomc_status_t loomc_link_index_builder_reserve_source_slot(
 /// Distinct reserved slots may be filled concurrently when each slot is filled
 /// by at most one thread and no thread calls reserve or finish concurrently.
 LOOMC_API_EXPORT loomc_status_t loomc_link_index_builder_fill_source_slot(
-    loomc_link_index_builder_t* builder, loomc_link_index_source_slot_t slot,
+    loomc_link_index_builder_t* builder, loomc_link_index_provider_slot_t slot,
     loomc_source_t* source);
 
-/// Reserves and fills the next source slot.
+/// Fills an already reserved provider slot with a materialized module.
+///
+/// @param builder Builder that owns `slot`.
+/// @param slot Provider slot previously returned by
+/// `loomc_link_index_builder_reserve_provider_slot`.
+/// @param module Module retained by the builder on success.
+/// @return OK when the slot was filled.
+///
+/// @lifetime
+/// The caller must not mutate `module` until the builder and any frozen index
+/// produced from it have released their retained references.
+///
+/// @thread_safety
+/// Distinct reserved slots may be filled concurrently when each slot is filled
+/// by at most one thread and no thread calls reserve or finish concurrently.
+LOOMC_API_EXPORT loomc_status_t loomc_link_index_builder_fill_module_slot(
+    loomc_link_index_builder_t* builder, loomc_link_index_provider_slot_t slot,
+    loomc_module_t* module);
+
+/// Reserves and fills the next provider slot with a source.
 ///
 /// @param builder Builder to mutate.
 /// @param source Source retained by the builder on success.
 /// @param options Provider options copied by this call, or `NULL` for defaults.
-/// @param out_slot Receives the source slot, or `NULL` if not needed.
+/// @param out_slot Receives the provider slot, or `NULL` if not needed.
 /// @return OK when the source was queued for indexing.
 LOOMC_API_EXPORT loomc_status_t loomc_link_index_builder_add_source(
     loomc_link_index_builder_t* builder, loomc_source_t* source,
-    const loomc_link_index_source_options_t* options,
-    loomc_link_index_source_slot_t* out_slot);
+    const loomc_link_index_provider_options_t* options,
+    loomc_link_index_provider_slot_t* out_slot);
+
+/// Reserves and fills the next provider slot with a materialized module.
+///
+/// @param builder Builder to mutate.
+/// @param module Module retained by the builder on success.
+/// @param options Provider options copied by this call, or `NULL` for defaults.
+/// @param out_slot Receives the provider slot, or `NULL` if not needed.
+/// @return OK when the module was queued for indexing.
+///
+/// @lifetime
+/// The caller must not mutate `module` until the builder and any frozen index
+/// produced from it have released their retained references.
+LOOMC_API_EXPORT loomc_status_t loomc_link_index_builder_add_module(
+    loomc_link_index_builder_t* builder, loomc_module_t* module,
+    const loomc_link_index_provider_options_t* options,
+    loomc_link_index_provider_slot_t* out_slot);
 
 /// Finishes a builder into a frozen immutable link index.
 ///
