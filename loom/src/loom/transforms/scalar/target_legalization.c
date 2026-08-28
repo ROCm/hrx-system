@@ -29,52 +29,66 @@ static iree_status_t loom_scalar_legalize_build_i32_constant(
       out_value);
 }
 
-static iree_status_t loom_scalar_legalize_build_binary_i32(
+static iree_status_t loom_scalar_legalize_build_binary_integer(
     loom_builder_t* builder, loom_location_id_t location, loom_op_kind_t kind,
-    loom_value_id_t lhs, loom_value_id_t rhs, loom_value_id_t* out_value) {
-  loom_type_t i32_type = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+    loom_type_t type, loom_value_id_t lhs, loom_value_id_t rhs,
+    loom_value_id_t* out_value) {
   loom_op_t* op = NULL;
   switch (kind) {
     case LOOM_OP_SCALAR_ADDI:
       (void)0;
-      IREE_RETURN_IF_ERROR(loom_scalar_addi_build(builder, 0, lhs, rhs,
-                                                  i32_type, location, &op));
+      IREE_RETURN_IF_ERROR(
+          loom_scalar_addi_build(builder, 0, lhs, rhs, type, location, &op));
       *out_value = loom_scalar_addi_result(op);
       return iree_ok_status();
     case LOOM_OP_SCALAR_ANDI:
       (void)0;
       IREE_RETURN_IF_ERROR(
-          loom_scalar_andi_build(builder, lhs, rhs, i32_type, location, &op));
+          loom_scalar_andi_build(builder, lhs, rhs, type, location, &op));
       *out_value = loom_scalar_andi_result(op);
       return iree_ok_status();
     case LOOM_OP_SCALAR_ORI:
       (void)0;
       IREE_RETURN_IF_ERROR(
-          loom_scalar_ori_build(builder, lhs, rhs, i32_type, location, &op));
+          loom_scalar_ori_build(builder, lhs, rhs, type, location, &op));
       *out_value = loom_scalar_ori_result(op);
       return iree_ok_status();
     case LOOM_OP_SCALAR_SHLI:
       (void)0;
-      IREE_RETURN_IF_ERROR(loom_scalar_shli_build(builder, 0, lhs, rhs,
-                                                  i32_type, location, &op));
+      IREE_RETURN_IF_ERROR(
+          loom_scalar_shli_build(builder, 0, lhs, rhs, type, location, &op));
       *out_value = loom_scalar_shli_result(op);
+      return iree_ok_status();
+    case LOOM_OP_SCALAR_SHRSI:
+      (void)0;
+      IREE_RETURN_IF_ERROR(
+          loom_scalar_shrsi_build(builder, lhs, rhs, type, location, &op));
+      *out_value = loom_scalar_shrsi_result(op);
       return iree_ok_status();
     case LOOM_OP_SCALAR_SHRUI:
       (void)0;
       IREE_RETURN_IF_ERROR(
-          loom_scalar_shrui_build(builder, lhs, rhs, i32_type, location, &op));
+          loom_scalar_shrui_build(builder, lhs, rhs, type, location, &op));
       *out_value = loom_scalar_shrui_result(op);
       return iree_ok_status();
     case LOOM_OP_SCALAR_SUBI:
       (void)0;
-      IREE_RETURN_IF_ERROR(loom_scalar_subi_build(builder, 0, lhs, rhs,
-                                                  i32_type, location, &op));
+      IREE_RETURN_IF_ERROR(
+          loom_scalar_subi_build(builder, 0, lhs, rhs, type, location, &op));
       *out_value = loom_scalar_subi_result(op);
       return iree_ok_status();
     default:
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "unsupported scalar i32 legalizer op");
+                              "unsupported scalar integer legalizer op");
   }
+}
+
+static iree_status_t loom_scalar_legalize_build_binary_i32(
+    loom_builder_t* builder, loom_location_id_t location, loom_op_kind_t kind,
+    loom_value_id_t lhs, loom_value_id_t rhs, loom_value_id_t* out_value) {
+  return loom_scalar_legalize_build_binary_integer(
+      builder, location, kind, loom_type_scalar(LOOM_SCALAR_TYPE_I32), lhs, rhs,
+      out_value);
 }
 
 static iree_status_t loom_scalar_legalize_build_binary_i32_const_rhs(
@@ -87,7 +101,7 @@ static iree_status_t loom_scalar_legalize_build_binary_i32_const_rhs(
                                                rhs, out_value);
 }
 
-static iree_status_t loom_scalar_legalize_build_cmpi_i32(
+static iree_status_t loom_scalar_legalize_build_cmpi_integer(
     loom_builder_t* builder, loom_location_id_t location,
     loom_scalar_cmpi_predicate_t predicate, loom_value_id_t lhs,
     loom_value_id_t rhs, loom_value_id_t* out_value) {
@@ -105,8 +119,8 @@ static iree_status_t loom_scalar_legalize_build_cmpi_i32_const_rhs(
   loom_value_id_t rhs = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_scalar_legalize_build_i32_constant(
       builder, location, rhs_value, &rhs));
-  return loom_scalar_legalize_build_cmpi_i32(builder, location, predicate, lhs,
-                                             rhs, out_value);
+  return loom_scalar_legalize_build_cmpi_integer(builder, location, predicate,
+                                                 lhs, rhs, out_value);
 }
 
 static iree_status_t loom_scalar_legalize_build_select(
@@ -331,6 +345,186 @@ static iree_status_t loom_scalar_legalize_build_fp8_storage_byte(
   return iree_ok_status();
 }
 
+static iree_status_t loom_scalar_legalize_build_bitfield_carrier(
+    loom_builder_t* builder, loom_location_id_t location,
+    loom_value_id_t source, loom_type_t source_type,
+    loom_type_t* out_carrier_type, loom_value_id_t* out_carrier) {
+  const int32_t source_width =
+      loom_scalar_type_bitwidth(loom_type_element_type(source_type));
+  const loom_type_t carrier_type = loom_type_scalar(
+      source_width > 32 ? LOOM_SCALAR_TYPE_I64 : LOOM_SCALAR_TYPE_I32);
+  *out_carrier_type = carrier_type;
+  if (loom_type_equal(source_type, carrier_type)) {
+    *out_carrier = source;
+    return iree_ok_status();
+  }
+
+  // Bitfield extraction treats the source as raw bits. Zero-extension into a
+  // canonical carrier preserves those bits while keeping the reference
+  // sequence on the i32/i64 integer baseline shared by targets.
+  loom_op_t* extend_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_scalar_extui_build(
+      builder, source, source_type, carrier_type, location, &extend_op));
+  *out_carrier = loom_scalar_extui_result(extend_op);
+  return iree_ok_status();
+}
+
+static iree_status_t loom_scalar_legalize_build_bitfield_result(
+    loom_builder_t* builder, loom_location_id_t location,
+    loom_value_id_t carrier, loom_type_t carrier_type, loom_type_t result_type,
+    bool signed_extract, loom_value_id_t* out_result) {
+  if (loom_type_equal(carrier_type, result_type)) {
+    *out_result = carrier;
+    return iree_ok_status();
+  }
+
+  const loom_scalar_type_t result_scalar_type =
+      loom_type_element_type(result_type);
+  if (result_scalar_type == LOOM_SCALAR_TYPE_I1) {
+    loom_value_id_t zero = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_scalar_legalize_build_scalar_constant(
+        builder, location, carrier_type, 0, &zero));
+    return loom_scalar_legalize_build_cmpi_integer(
+        builder, location, LOOM_SCALAR_CMPI_PREDICATE_NE, carrier, zero,
+        out_result);
+  }
+
+  const int32_t result_width = loom_scalar_type_bitwidth(result_scalar_type);
+  const int32_t carrier_width =
+      loom_scalar_type_bitwidth(loom_type_element_type(carrier_type));
+  loom_op_t* cast_op = NULL;
+  if (carrier_width > result_width) {
+    IREE_RETURN_IF_ERROR(loom_scalar_trunci_build(
+        builder, carrier, carrier_type, result_type, location, &cast_op));
+    *out_result = loom_scalar_trunci_result(cast_op);
+  } else if (signed_extract) {
+    IREE_RETURN_IF_ERROR(loom_scalar_extsi_build(
+        builder, carrier, carrier_type, result_type, location, &cast_op));
+    *out_result = loom_scalar_extsi_result(cast_op);
+  } else {
+    IREE_RETURN_IF_ERROR(loom_scalar_extui_build(
+        builder, carrier, carrier_type, result_type, location, &cast_op));
+    *out_result = loom_scalar_extui_result(cast_op);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_scalar_legalize_bitfield_extract(
+    loom_target_legalization_context_t* context, loom_op_t* op,
+    loom_value_id_t source, loom_value_id_t result, int64_t offset,
+    int64_t width, bool signed_extract,
+    loom_target_legalizer_result_t* out_result) {
+  *out_result = (loom_target_legalizer_result_t){
+      .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
+  };
+
+  const loom_type_t source_type =
+      loom_module_value_type(context->module, source);
+  const loom_type_t result_type =
+      loom_module_value_type(context->module, result);
+  if (!loom_type_is_scalar(source_type) || !loom_type_is_scalar(result_type) ||
+      !loom_scalar_type_is_integer(loom_type_element_type(source_type)) ||
+      !loom_scalar_type_is_integer(loom_type_element_type(result_type))) {
+    return iree_ok_status();
+  }
+  const int32_t source_width =
+      loom_scalar_type_bitwidth(loom_type_element_type(source_type));
+  const int32_t result_width =
+      loom_scalar_type_bitwidth(loom_type_element_type(result_type));
+  if (offset < 0 || offset >= source_width || width <= 0 ||
+      width > source_width - offset || width > result_width) {
+    return iree_ok_status();
+  }
+
+  loom_rewriter_t* rewriter = context->rewriter;
+  loom_builder_set_before(&rewriter->builder, op);
+  const loom_value_id_t value_checkpoint =
+      loom_rewriter_value_checkpoint(rewriter);
+
+  loom_type_t carrier_type = loom_type_none();
+  loom_value_id_t carrier = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_scalar_legalize_build_bitfield_carrier(
+      &rewriter->builder, op->location, source, source_type, &carrier_type,
+      &carrier));
+  const int32_t carrier_width =
+      loom_scalar_type_bitwidth(loom_type_element_type(carrier_type));
+
+  loom_value_id_t extracted = LOOM_VALUE_ID_INVALID;
+  if (signed_extract) {
+    loom_value_id_t left_shift = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_scalar_legalize_build_scalar_constant(
+        &rewriter->builder, op->location, carrier_type,
+        carrier_width - offset - width, &left_shift));
+    IREE_RETURN_IF_ERROR(loom_scalar_legalize_build_binary_integer(
+        &rewriter->builder, op->location, LOOM_OP_SCALAR_SHLI, carrier_type,
+        carrier, left_shift, &extracted));
+
+    loom_value_id_t right_shift = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_scalar_legalize_build_scalar_constant(
+        &rewriter->builder, op->location, carrier_type, carrier_width - width,
+        &right_shift));
+    IREE_RETURN_IF_ERROR(loom_scalar_legalize_build_binary_integer(
+        &rewriter->builder, op->location, LOOM_OP_SCALAR_SHRSI, carrier_type,
+        extracted, right_shift, &extracted));
+  } else {
+    loom_value_id_t right_shift = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_scalar_legalize_build_scalar_constant(
+        &rewriter->builder, op->location, carrier_type, offset, &right_shift));
+    IREE_RETURN_IF_ERROR(loom_scalar_legalize_build_binary_integer(
+        &rewriter->builder, op->location, LOOM_OP_SCALAR_SHRUI, carrier_type,
+        carrier, right_shift, &extracted));
+
+    const int64_t mask = width == 64
+                             ? INT64_C(-1)
+                             : (int64_t)((UINT64_C(1) << width) - UINT64_C(1));
+    loom_value_id_t mask_value = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_scalar_legalize_build_scalar_constant(
+        &rewriter->builder, op->location, carrier_type, mask, &mask_value));
+    IREE_RETURN_IF_ERROR(loom_scalar_legalize_build_binary_integer(
+        &rewriter->builder, op->location, LOOM_OP_SCALAR_ANDI, carrier_type,
+        extracted, mask_value, &extracted));
+  }
+
+  loom_value_id_t replacement = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_scalar_legalize_build_bitfield_result(
+      &rewriter->builder, op->location, extracted, carrier_type, result_type,
+      signed_extract, &replacement));
+  IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
+      rewriter, op, &replacement, 1, value_checkpoint));
+  IREE_RETURN_IF_ERROR(
+      loom_rewriter_replace_all_uses_and_erase(rewriter, op, &replacement, 1));
+  *out_result = (loom_target_legalizer_result_t){
+      .action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN,
+  };
+  return iree_ok_status();
+}
+
+static iree_status_t loom_scalar_legalize_bitfield_extractu(
+    const loom_target_legalizer_entry_t* entry,
+    loom_target_legalization_context_t* context, loom_op_t* op,
+    loom_target_legalizer_result_t* out_result) {
+  (void)entry;
+  return loom_scalar_legalize_bitfield_extract(
+      context, op, loom_scalar_bitfield_extractu_source(op),
+      loom_scalar_bitfield_extractu_result(op),
+      loom_scalar_bitfield_extractu_offset(op),
+      loom_scalar_bitfield_extractu_width(op), /*signed_extract=*/false,
+      out_result);
+}
+
+static iree_status_t loom_scalar_legalize_bitfield_extracts(
+    const loom_target_legalizer_entry_t* entry,
+    loom_target_legalization_context_t* context, loom_op_t* op,
+    loom_target_legalizer_result_t* out_result) {
+  (void)entry;
+  return loom_scalar_legalize_bitfield_extract(
+      context, op, loom_scalar_bitfield_extracts_source(op),
+      loom_scalar_bitfield_extracts_result(op),
+      loom_scalar_bitfield_extracts_offset(op),
+      loom_scalar_bitfield_extracts_width(op), /*signed_extract=*/true,
+      out_result);
+}
+
 static iree_status_t loom_scalar_legalize_extf(
     const loom_target_legalizer_entry_t* entry,
     loom_target_legalization_context_t* context, loom_op_t* op,
@@ -463,6 +657,14 @@ static iree_status_t loom_scalar_legalize_fmai(
 }
 
 static const loom_target_legalizer_entry_t kScalarLegalizerEntries[] = {
+    {
+        .root_kind = LOOM_OP_SCALAR_BITFIELD_EXTRACTU,
+        .legalize = loom_scalar_legalize_bitfield_extractu,
+    },
+    {
+        .root_kind = LOOM_OP_SCALAR_BITFIELD_EXTRACTS,
+        .legalize = loom_scalar_legalize_bitfield_extracts,
+    },
     {
         .root_kind = LOOM_OP_SCALAR_EXTF,
         .legalize = loom_scalar_legalize_extf,

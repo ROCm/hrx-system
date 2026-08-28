@@ -294,6 +294,7 @@ loom_check_test_suite(
     "test/source_low/control_switch.loom-test"
     "test/source_low/corpus/numeric_scalar_baseline.loom-test"
     "test/source_low/corpus/numeric_scalar_f32.loom-test"
+    "test/source_low/corpus/numeric_scalar_i32.loom-test"
     "test/source_low/corpus/numeric_scalar_literals.loom-test"
     "test/source_low/function_abi.loom-test"
     "test/source_low/function_contracts.loom-test"
@@ -308,6 +309,7 @@ loom_check_test_suite(
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_scalar_baseline.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_scalar_f32.loom-test"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_scalar_i32.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_scalar_literals.loom-test"
   TEST_NAME_PREFIX_TO_STRIP
     "test/source_low/"
