@@ -13,6 +13,7 @@
 #define IREE_ASYNC_PLATFORM_IOCP_PROACTOR_H_
 
 #include "iree/async/platform/iocp/api.h"
+#include "iree/async/platform/iocp/completion_port.h"
 #include "iree/async/platform/iocp/timer_list.h"
 #include "iree/async/proactor.h"
 #include "iree/async/semaphore.h"
@@ -44,6 +45,7 @@ extern "C" {
 
 typedef struct iree_async_semaphore_wait_operation_t
     iree_async_semaphore_wait_operation_t;
+typedef struct iree_async_proactor_iocp_t iree_async_proactor_iocp_t;
 
 //===----------------------------------------------------------------------===//
 // Internal flags for IOCP proactor operations
@@ -90,6 +92,20 @@ enum iree_async_iocp_carrier_type_e {
 };
 typedef uint8_t iree_async_iocp_carrier_type_t;
 
+// Legacy event-wait callback handoff after a completion post fails.
+enum iree_async_iocp_fallback_completion_state_e {
+  // The Windows callback has not started.
+  IREE_ASYNC_IOCP_FALLBACK_COMPLETION_NONE = 0,
+
+  // The callback started and may still be posting. After synchronized wait
+  // unregistration this state means the IOCP packet was posted successfully.
+  IREE_ASYNC_IOCP_FALLBACK_COMPLETION_CALLBACK_ACTIVE,
+
+  // Posting failed and the callback published fallback completion. The poll
+  // owner must synchronize wait unregistration before recycling the carrier.
+  IREE_ASYNC_IOCP_FALLBACK_COMPLETION_READY,
+};
+
 // Carrier wrapping an operation for delivery through the IOCP port.
 //
 // For event waits: the RegisterWaitForSingleObject callback fires on an OS
@@ -118,9 +134,13 @@ typedef struct iree_async_iocp_carrier_t {
   // Discriminator for the data union.
   iree_async_iocp_carrier_type_t type;
 
-  // Completion port handle for PostQueuedCompletionStatus in callbacks.
-  // Stored here because callbacks have no access to the proactor struct.
-  uintptr_t completion_port;
+  // Owning proactor used by Windows-managed callbacks to post or request the
+  // fallback poll wake. The proactor outlives every outstanding carrier.
+  iree_async_proactor_iocp_t* proactor;
+
+  // State published by a legacy event-wait callback when its completion
+  // packet could not be posted. The poll owner dispatches only READY state.
+  iree_atomic_int32_t fallback_completion_state;
 
   // The operation this carrier delivers. Set during submit/registration,
   // consumed during poll dispatch.
@@ -236,15 +256,13 @@ struct iree_async_event_source_t {
 //   - poll() calls GetQueuedCompletionStatusEx to dequeue completions
 //   - wake() uses PostQueuedCompletionStatus with a sentinel
 //   - MPSC pending_queue only for non-I/O operations (timers, events, etc.)
-typedef struct iree_async_proactor_iocp_t {
+struct iree_async_proactor_iocp_t {
   // Must be first for safe casting.
   iree_async_proactor_t base;
   iree_atomic_int32_t shutdown_requested;
 
-  // IOCP completion port handle. All overlapped I/O completions and
-  // cross-thread wakeups are delivered through this single handle.
-  // Stored as uintptr_t to avoid requiring windows.h in headers.
-  uintptr_t completion_port;
+  // IOCP handle, checked synthetic-post boundary, and fallback poll wake.
+  iree_async_iocp_completion_port_t completion_port;
 
   // MPSC queue for operations that cannot be submitted directly as overlapped
   // I/O (timers, event waits, notification waits, relay management). Submit()
@@ -374,7 +392,7 @@ typedef struct iree_async_proactor_iocp_t {
   // allocation, decremented at carrier release. Asserted zero at destroy to
   // catch callers that destroy the proactor with pending overlapped I/O.
   iree_atomic_int32_t outstanding_carrier_count;
-} iree_async_proactor_iocp_t;
+};
 
 static inline iree_async_proactor_iocp_t* iree_async_proactor_iocp_cast(
     iree_async_proactor_t* proactor) {

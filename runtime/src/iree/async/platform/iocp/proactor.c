@@ -91,11 +91,17 @@ typedef NTSTATUS(NTAPI* iree_pfn_NtAssociateWaitCompletionPacket_t)(
 typedef NTSTATUS(NTAPI* iree_pfn_NtCancelWaitCompletionPacket_t)(
     HANDLE WaitCompletionPacketHandle, BOOLEAN RemoveSignaledPacket);
 
-// IOCP port handle for the proactor that owns signal handling. The console ctrl
-// handler fires on an OS thread pool thread with no user_data parameter, so we
-// store the completion port globally. Only one proactor may own signals
-// (enforced by iree_async_signal_claim_ownership).
-static HANDLE g_iocp_signal_completion_port = NULL;
+// Proactor that owns signal handling. The console ctrl handler fires on an OS
+// thread pool thread with no user_data parameter, so it reaches the checked
+// completion-post boundary through this singleton. Only one proactor may own
+// signals (enforced by iree_async_signal_claim_ownership).
+static iree_atomic_intptr_t g_iocp_signal_proactor = IREE_ATOMIC_VAR_INIT(0);
+
+// Number of console ctrl handlers that may still access the signal proactor.
+// Deinitialization clears the singleton and waits for this rundown count before
+// releasing any state a handler could observe.
+static iree_atomic_int32_t g_iocp_active_signal_handler_count =
+    IREE_ATOMIC_VAR_INIT(0);
 
 // Atomic bitmask of pending console control events. The handler ORs in
 // (1 << ctrl_type) for each event; the poll thread atomically exchanges the
@@ -105,8 +111,8 @@ static HANDLE g_iocp_signal_completion_port = NULL;
 static iree_atomic_int32_t g_iocp_pending_ctrl_events = IREE_ATOMIC_VAR_INIT(0);
 
 // Console ctrl handler registered via SetConsoleCtrlHandler. Fires on an OS
-// thread pool thread — no proactor state access, only atomic bitmask update
-// and IOCP post.
+// thread pool thread and only touches the global signal state plus the
+// proactor's completion-port wake component.
 static BOOL WINAPI
 iree_async_proactor_iocp_console_ctrl_handler(DWORD ctrl_type) {
   switch (ctrl_type) {
@@ -114,16 +120,38 @@ iree_async_proactor_iocp_console_ctrl_handler(DWORD ctrl_type) {
     case CTRL_BREAK_EVENT:
     case CTRL_CLOSE_EVENT:
     case CTRL_LOGOFF_EVENT:
-    case CTRL_SHUTDOWN_EVENT:
+    case CTRL_SHUTDOWN_EVENT: {
+      // Increment before loading the proactor so deinitialization can prove
+      // that no handler retaining the old pointer remains. Sequentially
+      // consistent ordering closes the late-handler race around the rundown
+      // count and singleton exchange.
+      iree_atomic_fetch_add(&g_iocp_active_signal_handler_count, 1,
+                            iree_memory_order_seq_cst);
+      iree_async_proactor_iocp_t* proactor =
+          (iree_async_proactor_iocp_t*)iree_atomic_load(
+              &g_iocp_signal_proactor, iree_memory_order_seq_cst);
+      if (!proactor) {
+        iree_atomic_fetch_sub(&g_iocp_active_signal_handler_count, 1,
+                              iree_memory_order_seq_cst);
+        return TRUE;
+      }
+
       iree_atomic_fetch_or(&g_iocp_pending_ctrl_events,
                            (int32_t)(1u << ctrl_type),
                            iree_memory_order_release);
-      // Wake the poll thread. The completion port handle is guaranteed non-NULL
-      // while the handler is registered (set before SetConsoleCtrlHandler,
-      // cleared after RemoveConsoleCtrlHandler).
-      PostQueuedCompletionStatus(g_iocp_signal_completion_port, 0,
-                                 IREE_ASYNC_IOCP_SIGNAL_COMPLETION_KEY, NULL);
+      DWORD error_code = ERROR_SUCCESS;
+      if (!iree_async_iocp_completion_port_try_post(
+              &proactor->completion_port, 0,
+              IREE_ASYNC_IOCP_SIGNAL_COMPLETION_KEY, NULL, &error_code)) {
+        // The pending bitmask is the durable signal state. An APC makes the
+        // alertable poll observe it without requiring another IOCP packet.
+        iree_async_iocp_completion_port_request_fallback_wake(
+            &proactor->completion_port);
+      }
+      iree_atomic_fetch_sub(&g_iocp_active_signal_handler_count, 1,
+                            iree_memory_order_seq_cst);
       return TRUE;
+    }
     default:
       return FALSE;
   }
@@ -136,9 +164,7 @@ iree_async_proactor_iocp_console_ctrl_handler(DWORD ctrl_type) {
 void iree_async_proactor_iocp_wake(iree_async_proactor_t* base_proactor) {
   iree_async_proactor_iocp_t* proactor =
       iree_async_proactor_iocp_cast(base_proactor);
-  // Post a sentinel completion with NULL overlapped to wake the poll thread.
-  // CompletionKey = 0 and lpOverlapped = NULL distinguish this from real I/O.
-  PostQueuedCompletionStatus((HANDLE)proactor->completion_port, 0, 0, NULL);
+  iree_async_iocp_completion_port_wake(&proactor->completion_port);
 }
 
 //===----------------------------------------------------------------------===//
@@ -339,7 +365,8 @@ iree_status_t iree_async_proactor_create_iocp(
                             "CreateIoCompletionPort failed (error %lu)",
                             (unsigned long)error);
   }
-  proactor->completion_port = (uintptr_t)completion_port;
+  iree_async_iocp_completion_port_initialize(completion_port,
+                                             &proactor->completion_port);
 
   // Probe for NT wait completion packet APIs (Windows 8.1+). ntdll.dll is
   // always loaded in every Windows process; GetModuleHandleW does not increment
@@ -448,13 +475,14 @@ static iree_status_t iree_async_proactor_iocp_signal_initialize(
         "signal handling requires a console application on Windows");
   }
 
-  // Store completion port for the global console ctrl handler.
-  g_iocp_signal_completion_port = (HANDLE)proactor->completion_port;
+  // Store the proactor before registering the global console ctrl handler.
+  iree_atomic_store(&g_iocp_signal_proactor, (intptr_t)proactor,
+                    iree_memory_order_seq_cst);
 
   if (!SetConsoleCtrlHandler(iree_async_proactor_iocp_console_ctrl_handler,
                              TRUE)) {
     DWORD error = GetLastError();
-    g_iocp_signal_completion_port = NULL;
+    iree_atomic_store(&g_iocp_signal_proactor, 0, iree_memory_order_seq_cst);
     IREE_TRACE_ZONE_END(z0);
     return iree_make_status(IREE_STATUS_INTERNAL,
                             "SetConsoleCtrlHandler failed (error %lu)",
@@ -473,11 +501,18 @@ static void iree_async_proactor_iocp_signal_deinitialize(
     iree_async_proactor_iocp_t* proactor) {
   iree_allocator_t allocator = proactor->base.allocator;
 
-  // Remove console ctrl handler before clearing the completion port pointer.
-  // SetConsoleCtrlHandler(handler, FALSE) synchronously removes the handler,
-  // so after this returns no new completions will be posted.
-  SetConsoleCtrlHandler(iree_async_proactor_iocp_console_ctrl_handler, FALSE);
-  g_iocp_signal_completion_port = NULL;
+  // Remove the handler and clear the singleton to prevent any late handler
+  // from acquiring the proactor. Windows may already have launched a handler
+  // thread, so wait for every thread that observed the old pointer to finish.
+  if (!SetConsoleCtrlHandler(iree_async_proactor_iocp_console_ctrl_handler,
+                             FALSE)) {
+    iree_abort();
+  }
+  iree_atomic_store(&g_iocp_signal_proactor, 0, iree_memory_order_seq_cst);
+  while (iree_atomic_load(&g_iocp_active_signal_handler_count,
+                          iree_memory_order_seq_cst) != 0) {
+    YieldProcessor();
+  }
 
   // Drain any pending events that arrived before the handler was removed.
   iree_atomic_exchange(&g_iocp_pending_ctrl_events, 0,
@@ -617,13 +652,16 @@ static void iree_async_proactor_iocp_destroy(
         // WaitCompletionPacket path: cancel and close. Always non-blocking.
         proactor->nt_wait_api.NtCancelWaitCompletionPacket(
             carrier->data.event_wait.wait_handle, TRUE);
-        CloseHandle(carrier->data.event_wait.wait_handle);
+        if (!CloseHandle(carrier->data.event_wait.wait_handle)) iree_abort();
       } else {
         // RegisterWaitForSingleObject path: INVALID_HANDLE_VALUE blocks until
         // the threadpool callback has completed, ensuring no dangling refs.
-        UnregisterWaitEx(carrier->data.event_wait.wait_handle,
-                         INVALID_HANDLE_VALUE);
+        if (!UnregisterWaitEx(carrier->data.event_wait.wait_handle,
+                              INVALID_HANDLE_VALUE)) {
+          iree_abort();
+        }
       }
+      carrier->data.event_wait.wait_handle = NULL;
     }
     iree_async_proactor_iocp_release_carrier(proactor, carrier);
   }
@@ -662,11 +700,7 @@ static void iree_async_proactor_iocp_destroy(
     iree_async_proactor_iocp_relay_release_resources(relay);
   }
 
-  // Close the completion port.
-  if (proactor->completion_port != 0) {
-    CloseHandle((HANDLE)proactor->completion_port);
-    proactor->completion_port = 0;
-  }
+  iree_async_iocp_completion_port_deinitialize(&proactor->completion_port);
 
   // Clean up Winsock (ref-counted, matches WSAStartup in create).
   WSACleanup();
@@ -703,15 +737,32 @@ iree_async_proactor_iocp_query_capabilities(
 
 // Callback invoked by the OS thread pool when a RegisterWaitForSingleObject
 // wait is satisfied. Posts a completion to the IOCP port for the poll thread
-// to dispatch. This is the ONLY work done on the thread pool thread — no
-// proactor state mutation.
+// to dispatch. If posting fails, publishes that completion fact atomically and
+// interrupts the poll owner's alertable wait.
 static VOID CALLBACK
 iree_async_proactor_iocp_event_wait_callback(PVOID context, BOOLEAN timed_out) {
   iree_async_iocp_carrier_t* carrier = (iree_async_iocp_carrier_t*)context;
   // timed_out is always FALSE because we register with INFINITE timeout.
   (void)timed_out;
-  PostQueuedCompletionStatus((HANDLE)carrier->completion_port, 0, 0,
-                             &carrier->overlapped);
+  // Publish callback ownership before posting. A successful post is the final
+  // carrier access; synchronized unregistration then distinguishes that
+  // stable ACTIVE state from a callback that never ran.
+  iree_atomic_store(&carrier->fallback_completion_state,
+                    IREE_ASYNC_IOCP_FALLBACK_COMPLETION_CALLBACK_ACTIVE,
+                    iree_memory_order_release);
+  DWORD error_code = ERROR_SUCCESS;
+  if (!iree_async_iocp_completion_port_try_post(
+          &carrier->proactor->completion_port, 0, 0, &carrier->overlapped,
+          &error_code)) {
+    // Publish the durable completion fact before interrupting the poll owner.
+    // READY authorizes fallback dispatch, which synchronizes wait
+    // unregistration before recycling anything the callback can still access.
+    iree_atomic_store(&carrier->fallback_completion_state,
+                      IREE_ASYNC_IOCP_FALLBACK_COMPLETION_READY,
+                      iree_memory_order_release);
+    iree_async_iocp_completion_port_request_fallback_wake(
+        &carrier->proactor->completion_port);
+  }
 }
 
 //===----------------------------------------------------------------------===//
@@ -739,7 +790,7 @@ static void iree_async_proactor_iocp_submit_handle_wait(
   }
   memset(carrier, 0, sizeof(*carrier));
   carrier->type = IREE_ASYNC_IOCP_CARRIER_EVENT_WAIT;
-  carrier->completion_port = proactor->completion_port;
+  carrier->proactor = proactor;
   carrier->operation = operation;
   iree_atomic_fetch_add(&proactor->outstanding_carrier_count, 1,
                         iree_memory_order_relaxed);
@@ -768,8 +819,8 @@ static void iree_async_proactor_iocp_submit_handle_wait(
     // function pointer declaration in proactor.h.
     LONG already_signaled = FALSE;
     nt_status = proactor->nt_wait_api.NtAssociateWaitCompletionPacket(
-        wcp_handle, (HANDLE)proactor->completion_port, wait_target, (PVOID)0,
-        &carrier->overlapped, 0, 0, &already_signaled);
+        wcp_handle, (HANDLE)proactor->completion_port.handle, wait_target,
+        (PVOID)0, &carrier->overlapped, 0, 0, &already_signaled);
     if (!NT_SUCCESS(nt_status)) {
       CloseHandle(wcp_handle);
       iree_async_proactor_iocp_release_carrier(proactor, carrier);
@@ -789,9 +840,10 @@ static void iree_async_proactor_iocp_submit_handle_wait(
     // completion, causing use-after-free when Phase 6 processes the same
     // carrier twice.
   } else {
-    // RegisterWaitForSingleObject path: the OS threadpool monitors the
-    // handle and fires a callback that posts to our IOCP port.
-    // WT_EXECUTEONLYONCE auto-unregisters after the callback fires once.
+    // RegisterWaitForSingleObject path: the OS threadpool monitors the handle
+    // and fires a callback that posts to our IOCP port. WT_EXECUTEONLYONCE
+    // limits callback count; the carrier still owns and must unregister the
+    // wait before it can be recycled.
     BOOL registered = RegisterWaitForSingleObject(
         &carrier->data.event_wait.wait_handle, wait_target,
         iree_async_proactor_iocp_event_wait_callback, carrier, INFINITE,
@@ -993,11 +1045,11 @@ static iree_host_size_t iree_async_proactor_iocp_drain_timer_cancellations(
 //   WaitCompletionPacket path: NtCancelWaitCompletionPacket + CloseHandle.
 //     NT_SUCCESS means the WCP was pending or its queued completion was removed
 //     from the IOCP. Failure means the completion was already dequeued.
-//   RegisterWaitForSingleObject path: UnregisterWaitEx(wait_handle, NULL).
-//     TRUE means successfully unregistered. FALSE with ERROR_IO_PENDING means
-//     the callback is executing or already posted to IOCP.
-// In both failure cases, the carrier dispatch (Phase 6) will check the
-// CANCELLED flag and handle it.
+//   RegisterWaitForSingleObject path: blocking UnregisterWaitEx ensures no
+//     callback can still access the carrier. Its published state then tells us
+//     whether a completion was delivered.
+// When either path observes an already-delivered completion, carrier dispatch
+// checks the CANCELLED flag and reports cancellation.
 static iree_host_size_t iree_async_proactor_iocp_drain_event_wait_cancellations(
     iree_async_proactor_iocp_t* proactor) {
   int32_t cancellation_count =
@@ -1029,12 +1081,22 @@ static iree_host_size_t iree_async_proactor_iocp_drain_event_wait_cancellations(
       NTSTATUS cancel_status =
           proactor->nt_wait_api.NtCancelWaitCompletionPacket(
               carrier->data.event_wait.wait_handle, TRUE);
-      CloseHandle(carrier->data.event_wait.wait_handle);
+      if (!CloseHandle(carrier->data.event_wait.wait_handle)) iree_abort();
+      carrier->data.event_wait.wait_handle = NULL;
       cancel_succeeded = NT_SUCCESS(cancel_status);
     } else {
-      // NULL = non-blocking: don't wait for an in-progress callback.
+      // The callback posts or publishes fallback state without depending on
+      // poll progress, so blocking here cannot form a callback/poll deadlock.
+      // Recycling before this synchronization would race a queued callback.
+      if (!UnregisterWaitEx(carrier->data.event_wait.wait_handle,
+                            INVALID_HANDLE_VALUE)) {
+        iree_abort();
+      }
+      carrier->data.event_wait.wait_handle = NULL;
+      int32_t callback_state = iree_atomic_load(
+          &carrier->fallback_completion_state, iree_memory_order_acquire);
       cancel_succeeded =
-          UnregisterWaitEx(carrier->data.event_wait.wait_handle, NULL) == TRUE;
+          callback_state == IREE_ASYNC_IOCP_FALLBACK_COMPLETION_NONE;
     }
 
     if (cancel_succeeded) {
@@ -1360,14 +1422,16 @@ static DWORD iree_async_proactor_iocp_calculate_timeout_ms(
 // completed_count accumulator. The carrier is released (returned to the
 // freelist) and the completion dispatched before returning.
 
-// Completes an event wait or handle poll carrier. Unlinks the carrier from the
-// active list, closes the WaitCompletionPacket handle (NtWait path only), and
-// dispatches the completion. For HANDLE_POLL operations, populates
-// result_events with POLLIN since RegisterWaitForSingleObject /
-// NtAssociateWaitCompletionPacket only fires on signal.
+// Completes an event wait or handle poll carrier. Unlinks the carrier, releases
+// its wait registration, and dispatches the completion. For HANDLE_POLL
+// operations, populates result_events with POLLIN since
+// RegisterWaitForSingleObject / NtAssociateWaitCompletionPacket only fires on
+// signal.
 static void iree_async_proactor_iocp_complete_event_wait(
     iree_async_proactor_iocp_t* proactor, iree_async_iocp_carrier_t* carrier,
     iree_async_operation_t* operation, iree_host_size_t* completed_count) {
+  iree_status_t cleanup_status = iree_ok_status();
+
   // Unlink carrier from active list (O(1) via prev/next).
   if (carrier->prev) {
     carrier->prev->next = carrier->next;
@@ -1377,12 +1441,26 @@ static void iree_async_proactor_iocp_complete_event_wait(
   if (carrier->next) {
     carrier->next->prev = carrier->prev;
   }
-  // WaitCompletionPacket path: close the WCP handle now that the one-shot
-  // association has fired. RegisterWaitForSingleObject path:
-  // WT_EXECUTEONLYONCE auto-unregistered when the callback fired; the
-  // wait_handle is no longer valid and must not be closed.
-  if (proactor->nt_wait_api.available) {
-    CloseHandle(carrier->data.event_wait.wait_handle);
+  // Release the registration before recycling the carrier. The legacy path
+  // synchronizes with the callback even for WT_EXECUTEONLYONCE waits.
+  if (carrier->data.event_wait.wait_handle != NULL) {
+    if (proactor->nt_wait_api.available) {
+      if (!CloseHandle(carrier->data.event_wait.wait_handle)) {
+        DWORD error_code = GetLastError();
+        cleanup_status = iree_make_status(
+            iree_status_code_from_win32_error(error_code),
+            "CloseHandle failed for wait completion packet (error %lu)",
+            (unsigned long)error_code);
+      }
+    } else if (!UnregisterWaitEx(carrier->data.event_wait.wait_handle,
+                                 INVALID_HANDLE_VALUE)) {
+      DWORD error_code = GetLastError();
+      cleanup_status = iree_make_status(
+          iree_status_code_from_win32_error(error_code),
+          "UnregisterWaitEx failed for completed event wait (error %lu)",
+          (unsigned long)error_code);
+    }
+    carrier->data.event_wait.wait_handle = NULL;
   }
   operation->next = NULL;
   iree_async_proactor_iocp_release_carrier(proactor, carrier);
@@ -1390,10 +1468,11 @@ static void iree_async_proactor_iocp_complete_event_wait(
   // Check CANCELLED flag — cancel() may have been called between the
   // completion being posted to IOCP and this dispatch. The cancellation drain
   // decremented the counter for this case, so we don't touch it here.
-  iree_status_t status = iree_ok_status();
+  iree_status_t status = cleanup_status;
   if (iree_any_bit_set(iree_async_operation_load_internal_flags(operation),
                        IREE_ASYNC_IOCP_INTERNAL_FLAG_CANCELLED)) {
-    status = iree_status_from_code(IREE_STATUS_CANCELLED);
+    status =
+        iree_status_join(iree_status_from_code(IREE_STATUS_CANCELLED), status);
   }
   // Populate result_events for HANDLE_POLL operations.
   // RegisterWaitForSingleObject / NtAssociateWaitCompletionPacket fires when
@@ -1407,6 +1486,32 @@ static void iree_async_proactor_iocp_complete_event_wait(
   iree_async_proactor_iocp_dispatch_completion(proactor, operation, status,
                                                IREE_ASYNC_COMPLETION_FLAG_NONE,
                                                completed_count);
+}
+
+// Dispatches legacy event-wait callbacks whose completion packet could not be
+// posted. The Windows callback publishes the flag before requesting its APC,
+// so this poll-thread scan observes the same completion exactly once without
+// requiring a second carrier queue.
+static iree_host_size_t
+iree_async_proactor_iocp_drain_event_wait_fallback_completions(
+    iree_async_proactor_iocp_t* proactor) {
+  iree_host_size_t completed_count = 0;
+  iree_async_iocp_carrier_t* carrier = proactor->active_carriers;
+  while (carrier) {
+    iree_async_iocp_carrier_t* next = carrier->next;
+    int32_t fallback_state = iree_atomic_load(
+        &carrier->fallback_completion_state, iree_memory_order_acquire);
+    if (carrier->type == IREE_ASYNC_IOCP_CARRIER_EVENT_WAIT &&
+        fallback_state == IREE_ASYNC_IOCP_FALLBACK_COMPLETION_READY) {
+      iree_atomic_store(&carrier->fallback_completion_state,
+                        IREE_ASYNC_IOCP_FALLBACK_COMPLETION_NONE,
+                        iree_memory_order_relaxed);
+      iree_async_proactor_iocp_complete_event_wait(
+          proactor, carrier, carrier->operation, &completed_count);
+    }
+    carrier = next;
+  }
+  return completed_count;
 }
 
 // Retrieves the overlapped I/O result for a socket carrier and checks for
@@ -1438,8 +1543,8 @@ static iree_status_t iree_async_proactor_iocp_get_socket_io_result(
   // Check for cancellation (may race with natural completion).
   if (iree_any_bit_set(iree_async_operation_load_internal_flags(operation),
                        IREE_ASYNC_IOCP_INTERNAL_FLAG_CANCELLED)) {
-    iree_status_ignore(io_status);
-    io_status = iree_status_from_code(IREE_STATUS_CANCELLED);
+    io_status = iree_status_join(iree_status_from_code(IREE_STATUS_CANCELLED),
+                                 io_status);
   }
 
   return io_status;
@@ -1657,7 +1762,8 @@ static void iree_async_proactor_iocp_complete_accept(
           wsa_error);
     } else {
       HANDLE assoc_result = CreateIoCompletionPort(
-          (HANDLE)new_accept_sock, (HANDLE)proactor->completion_port, 0, 0);
+          (HANDLE)new_accept_sock, (HANDLE)proactor->completion_port.handle, 0,
+          0);
       if (assoc_result == NULL) {
         DWORD error = GetLastError();
         closesocket(new_accept_sock);
@@ -1824,8 +1930,8 @@ static void iree_async_proactor_iocp_complete_file_io(
 
   if (iree_any_bit_set(iree_async_operation_load_internal_flags(operation),
                        IREE_ASYNC_IOCP_INTERNAL_FLAG_CANCELLED)) {
-    iree_status_ignore(io_status);
-    io_status = iree_status_from_code(IREE_STATUS_CANCELLED);
+    io_status = iree_status_join(iree_status_from_code(IREE_STATUS_CANCELLED),
+                                 io_status);
   }
 
   // Write results to the operation.
@@ -1860,6 +1966,11 @@ static iree_status_t iree_async_proactor_iocp_poll(
   iree_async_proactor_iocp_t* proactor =
       iree_async_proactor_iocp_cast(base_proactor);
   iree_host_size_t completed_count = 0;
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_async_iocp_completion_port_bind_poll_thread(
+              &proactor->completion_port));
+  bool observed_wake = iree_async_iocp_completion_port_consume_fallback_wake(
+      &proactor->completion_port);
 
   // Phase 1: Drain pending queue (register new operations).
   completed_count += iree_async_proactor_iocp_drain_pending_queue(proactor);
@@ -1903,24 +2014,38 @@ static iree_status_t iree_async_proactor_iocp_poll(
   iree_status_t gqcs_status = iree_ok_status();
   bool retry_wait = false;
   do {
+    // Recheck immediately before the alertable wait. A user callback executed
+    // during an earlier phase may itself have entered an alertable wait and
+    // consumed the APC, but the durable fallback flag must still prevent this
+    // poll from blocking after the represented work was published.
+    observed_wake |= iree_async_iocp_completion_port_consume_fallback_wake(
+        &proactor->completion_port);
+
     // Phase 3: Calculate the effective timeout considering timer deadlines.
     DWORD timeout_ms =
         iree_async_proactor_iocp_calculate_timeout_ms(proactor, timeout);
     const bool force_nonblocking =
-        completed_count > 0 || base_proactor->progress_list;
+        completed_count > 0 || base_proactor->progress_list || observed_wake;
     if (force_nonblocking) timeout_ms = 0;
 
     // Phase 4: Dequeue completions from the IOCP port.
     entry_count = 0;
-    BOOL success =
-        GetQueuedCompletionStatusEx((HANDLE)proactor->completion_port, entries,
-                                    IREE_ASYNC_IOCP_MAX_COMPLETIONS_PER_POLL,
-                                    &entry_count, timeout_ms, FALSE);
+    BOOL success = GetQueuedCompletionStatusEx(
+        (HANDLE)proactor->completion_port.handle, entries,
+        IREE_ASYNC_IOCP_MAX_COMPLETIONS_PER_POLL, &entry_count, timeout_ms,
+        TRUE);
     bool wait_timed_out = false;
     if (!success) {
       DWORD error = GetLastError();
       wait_timed_out = error == WAIT_TIMEOUT;
-      if (!wait_timed_out) {
+      if (error == WAIT_IO_COMPLETION) {
+        // APC delivery is the non-destructive fallback when a synthetic
+        // completion cannot be posted. APCs from other subsystems are also
+        // real poll-owner work and therefore count as explicit wakes.
+        observed_wake = true;
+        iree_async_iocp_completion_port_consume_fallback_wake(
+            &proactor->completion_port);
+      } else if (!wait_timed_out) {
         // Stash the error but continue through remaining phases so that timer
         // expirations, notification waits, and re-drains still run. The error
         // is returned after all phases complete.
@@ -1937,10 +2062,17 @@ static iree_status_t iree_async_proactor_iocp_poll(
         iree_async_proactor_iocp_process_expired_timers(proactor);
 
     retry_wait = wait_timed_out && entry_count == 0 && completed_count == 0 &&
-                 !force_nonblocking &&
+                 !force_nonblocking && !observed_wake &&
                  (iree_timeout_is_infinite(timeout) ||
                   iree_time_now() < iree_timeout_as_deadline_ns(timeout));
   } while (retry_wait);
+
+  // A failed signal post leaves its bit in the durable process-global mask.
+  // Dispatching unconditionally also coalesces normal signal packets.
+  iree_async_proactor_iocp_dispatch_pending_signals(proactor);
+
+  completed_count +=
+      iree_async_proactor_iocp_drain_event_wait_fallback_completions(proactor);
 
   // Phase 6: Process GQCS completions.
   for (ULONG i = 0; i < entry_count; ++i) {
@@ -1974,7 +2106,7 @@ static iree_status_t iree_async_proactor_iocp_poll(
       // completion. No manual post needed — the kernel handles it.
       LONG already_signaled = FALSE;
       proactor->nt_wait_api.NtAssociateWaitCompletionPacket(
-          wcp_handle, (HANDLE)proactor->completion_port, wake_event,
+          wcp_handle, (HANDLE)proactor->completion_port.handle, wake_event,
           (PVOID)IREE_ASYNC_IOCP_SHARED_NOTIFICATION_COMPLETION_KEY,
           (PVOID)notification, 0, 0, &already_signaled);
       // AlreadySignaled convergence: if TRUE, the kernel queued a completion
@@ -2103,7 +2235,7 @@ static iree_status_t iree_async_proactor_iocp_poll(
   if (out_completed_count) *out_completed_count = completed_count;
   IREE_TRACE_ZONE_END(z0);
   if (!iree_status_is_ok(gqcs_status)) return gqcs_status;
-  return completed_count > 0 || entry_count > 0
+  return completed_count > 0 || entry_count > 0 || observed_wake
              ? iree_ok_status()
              : iree_status_from_code(IREE_STATUS_DEADLINE_EXCEEDED);
 }
@@ -2287,7 +2419,8 @@ static iree_status_t iree_async_proactor_iocp_import_file(
   // Associate the file handle with the IOCP port. This is required for
   // overlapped ReadFile/WriteFile completions to flow to this port.
   HANDLE result = CreateIoCompletionPort(
-      (HANDLE)handle, (HANDLE)proactor->completion_port, /*CompletionKey=*/0,
+      (HANDLE)handle, (HANDLE)proactor->completion_port.handle,
+      /*CompletionKey=*/0,
       /*NumberOfConcurrentThreads=*/0);
   if (result == NULL) {
     DWORD error = GetLastError();
@@ -2474,7 +2607,7 @@ static VOID CALLBACK iree_async_proactor_iocp_shared_notification_callback(
   iree_async_notification_t* notification = (iree_async_notification_t*)context;
   iree_async_proactor_iocp_t* proactor =
       iree_async_proactor_iocp_cast(notification->proactor);
-  PostQueuedCompletionStatus((HANDLE)proactor->completion_port, 0, 0, NULL);
+  iree_async_iocp_completion_port_wake(&proactor->completion_port);
 }
 
 static void iree_async_proactor_iocp_destroy_notification(
@@ -2548,7 +2681,7 @@ static iree_status_t iree_async_proactor_iocp_create_notification_shared(
             options->wake_primitive.value.win32_handle;
         LONG already_signaled = FALSE;
         nt_status = proactor->nt_wait_api.NtAssociateWaitCompletionPacket(
-            wcp_handle, (HANDLE)proactor->completion_port, wake_event,
+            wcp_handle, (HANDLE)proactor->completion_port.handle, wake_event,
             (PVOID)IREE_ASYNC_IOCP_SHARED_NOTIFICATION_COMPLETION_KEY,
             (PVOID)notification, 0, 0, &already_signaled);
         if (!NT_SUCCESS(nt_status)) {
@@ -2617,8 +2750,11 @@ static void iree_async_proactor_iocp_destroy_notification(
       } else {
         // RegisterWaitForSingleObject path: INVALID_HANDLE_VALUE blocks until
         // any in-flight threadpool callbacks complete.
-        UnregisterWaitEx((HANDLE)notification->platform.iocp.wait_registration,
-                         INVALID_HANDLE_VALUE);
+        if (!UnregisterWaitEx(
+                (HANDLE)notification->platform.iocp.wait_registration,
+                INVALID_HANDLE_VALUE)) {
+          iree_abort();
+        }
       }
     }
     // Do not close the wake/signal Events — caller owns them.
