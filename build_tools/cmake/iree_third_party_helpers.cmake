@@ -74,6 +74,29 @@ function(iree_get_locked_dependency_property out_var dep_name property_name)
   set(${out_var} "${${_variable_name}}" PARENT_SCOPE)
 endfunction()
 
+function(_iree_dependency_resolve_patch out_var patch_label)
+  if(NOT patch_label MATCHES "^//([^:]*):([^:]+)$")
+    message(FATAL_ERROR
+      "Locked dependency patch '${patch_label}' is not a root-repository label")
+  endif()
+  set(_patch_package "${CMAKE_MATCH_1}")
+  set(_patch_filename "${CMAKE_MATCH_2}")
+  if(_patch_package MATCHES "(^|/)\\.\\.(/|$)" OR
+     _patch_filename MATCHES "(^|/)\\.\\.(/|$)")
+    message(FATAL_ERROR
+      "Locked dependency patch '${patch_label}' escapes the repository root")
+  endif()
+  set(_patch_path
+    "${IREE_ROOT_DIR}/${_patch_package}/${_patch_filename}")
+  cmake_path(NORMAL_PATH _patch_path)
+  if(NOT EXISTS "${_patch_path}")
+    message(FATAL_ERROR
+      "Locked dependency patch '${patch_label}' does not exist at "
+      "${_patch_path}")
+  endif()
+  set(${out_var} "${_patch_path}" PARENT_SCOPE)
+endfunction()
+
 function(iree_declare_locked_fetch_content dep_name)
   cmake_parse_arguments(PARSE_ARGV 1 _ARGS "" "FETCH_NAME;SOURCE_SUBDIR" "")
   if(_ARGS_UNPARSED_ARGUMENTS)
@@ -89,6 +112,8 @@ function(iree_declare_locked_fetch_content dep_name)
 
   iree_get_locked_dependency_property(_urls "${dep_name}" "URLS")
   iree_get_locked_dependency_property(_sha256 "${dep_name}" "SHA256")
+  iree_get_locked_dependency_property(_patches "${dep_name}" "PATCHES")
+  iree_get_locked_dependency_property(_patch_args "${dep_name}" "PATCH_ARGS")
   if(NOT _urls)
     message(FATAL_ERROR "${dep_name} has no locked source URLs")
   endif()
@@ -100,6 +125,38 @@ function(iree_declare_locked_fetch_content dep_name)
   if(_ARGS_SOURCE_SUBDIR)
     list(APPEND _source_subdir_args SOURCE_SUBDIR "${_ARGS_SOURCE_SUBDIR}")
   endif()
+  set(_patch_command)
+  if(_patches)
+    if(NOT _patch_args)
+      message(FATAL_ERROR
+        "${dep_name} has locked patches without explicit patch arguments")
+    endif()
+    find_program(_iree_dependency_git_executable NAMES git)
+    if(NOT _iree_dependency_git_executable)
+      message(FATAL_ERROR
+        "${dep_name} has locked patches but Git is not available")
+    endif()
+    set(_patch_files)
+    set(_patch_fingerprints)
+    foreach(_patch IN LISTS _patches)
+      _iree_dependency_resolve_patch(_patch_file "${_patch}")
+      list(APPEND _patch_files "${_patch_file}")
+      file(SHA256 "${_patch_file}" _patch_sha256)
+      list(APPEND _patch_fingerprints "${_patch}:${_patch_sha256}")
+    endforeach()
+    list(JOIN _patch_fingerprints ";" _patch_fingerprint)
+    string(SHA256 _patch_set_sha256 "${_patch_fingerprint}")
+    list(APPEND _patch_command
+      PATCH_COMMAND
+      "${CMAKE_COMMAND}"
+      "-DIREE_PATCH_SET_SHA256=${_patch_set_sha256}"
+      "-DIREE_PATCH_GIT_EXECUTABLE=${_iree_dependency_git_executable}"
+      "-DIREE_PATCH_SOURCE_DIR=<SOURCE_DIR>"
+      "-DIREE_PATCH_ARGS=${_patch_args}"
+      "-DIREE_PATCH_FILES=${_patch_files}"
+      -P "${IREE_ROOT_DIR}/build_tools/cmake/iree_apply_dependency_patches.cmake"
+    )
+  endif()
   FetchContent_Declare(
     ${_fetch_name}
     URL ${_urls}
@@ -107,6 +164,7 @@ function(iree_declare_locked_fetch_content dep_name)
     DOWNLOAD_EXTRACT_TIMESTAMP FALSE
     EXCLUDE_FROM_ALL
     ${_source_subdir_args}
+    ${_patch_command}
   )
 endfunction()
 
