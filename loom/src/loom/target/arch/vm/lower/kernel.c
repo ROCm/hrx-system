@@ -38,6 +38,10 @@ static const loom_vm_kernel_plan_kind_t
     kLoomVmKernelPlanKinds[LOOM_OP_KERNEL_COUNT_] = {
         [LOOM_VM_KERNEL_OP_INDEX(LOOM_OP_KERNEL_BARRIER)] =
             LOOM_VM_KERNEL_PLAN_KIND_NOOP,
+        [LOOM_VM_KERNEL_OP_INDEX(LOOM_OP_KERNEL_ASYNC_GROUP)] =
+            LOOM_VM_KERNEL_PLAN_KIND_NOOP,
+        [LOOM_VM_KERNEL_OP_INDEX(LOOM_OP_KERNEL_ASYNC_WAIT)] =
+            LOOM_VM_KERNEL_PLAN_KIND_NOOP,
         [LOOM_VM_KERNEL_OP_INDEX(LOOM_OP_KERNEL_WORKITEM_ID)] =
             LOOM_VM_KERNEL_PLAN_KIND_WORKITEM_ID,
         [LOOM_VM_KERNEL_OP_INDEX(LOOM_OP_KERNEL_WORKGROUP_ID)] =
@@ -451,6 +455,11 @@ iree_status_t loom_vm_kernel_emit_op(loom_low_lower_context_t* context,
 
   if (loom_vm_kernel_plan_kind_for_plan(plan) ==
       LOOM_VM_KERNEL_PLAN_KIND_NOOP) {
+    const loom_value_id_t* source_results = loom_op_const_results(source_op);
+    for (uint16_t i = 0; i < source_op->result_count; ++i) {
+      IREE_RETURN_IF_ERROR(
+          loom_low_lower_elide_value(context, source_results[i]));
+    }
     return iree_ok_status();
   }
   const loom_value_id_t source_result = loom_vm_kernel_query_result(source_op);

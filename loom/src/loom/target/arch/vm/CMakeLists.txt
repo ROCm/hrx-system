@@ -311,6 +311,7 @@ loom_check_test_suite(
     "test/source_low/abi_types.loom-test"
     "test/source_low/constant_pool.loom-test"
     "test/source_low/control_switch.loom-test"
+    "test/source_low/corpus/async_empty.loom-test"
     "test/source_low/corpus/memory_scalar_addressing.loom-test"
     "test/source_low/corpus/memory_vector_baseline.loom-test"
     "test/source_low/corpus/numeric_conversion.loom-test"
@@ -342,6 +343,7 @@ loom_check_test_suite(
     "test/source_low/selector_assembly.loom-test"
     "test/source_low/vector_construction.loom-test"
   DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/async_empty.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/memory_scalar_addressing.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/memory_vector_baseline.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_conversion.loom-test"
