@@ -967,6 +967,21 @@ func.def @select_uniform_true(%a: vector<4xi32>, %b: vector<4xi32>) -> (vector<4
 
 // ====
 
+// A dynamically uniform mask is whole-value selection. Keeping the scalar
+// condition avoids materializing and transporting a redundant mask vector.
+func.def @select_splat_condition(%condition: i1, %a: vector<4xi16>, %b: vector<4xi16>) -> (vector<4xi16>) {
+  %mask = vector.splat %condition : vector<4xi1>
+  %r = vector.select %mask, %a, %b : vector<4xi16>
+  func.return %r : vector<4xi16>
+}
+// ----
+func.def @select_splat_condition(%condition: i1, %a: vector<4xi16>, %b: vector<4xi16>) -> (vector<4xi16>) {
+  %r = scf.select %condition, %a, %b : vector<4xi16>
+  func.return %r : vector<4xi16>
+}
+
+// ====
+
 // Repeated scalar operands are more regular as a splat.
 func.def @from_elements_same_operand_to_splat(%x: f32) -> (vector<4xf32>) {
   %v = vector.from_elements %x, %x, %x, %x : vector<4xf32>

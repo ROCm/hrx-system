@@ -93,6 +93,7 @@ loom_generated_cc_library(
     loom::ops::index
     loom::ops::op_defs
     loom::ops::scalar
+    loom::ops::scf
     loom::ops::view
     loom::rewrite::rewriter
     loom::rewrite::type_propagation
