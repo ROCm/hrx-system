@@ -46,8 +46,9 @@ static loom_region_t* loom_motion_region_stack_pop(
 // Analysis state
 //===----------------------------------------------------------------------===//
 
-iree_status_t loom_motion_analysis_initialize(
-    const loom_module_t* module, loom_value_fact_table_t* fact_table,
+iree_status_t loom_motion_analysis_initialize_region(
+    const loom_module_t* module, const loom_region_t* region,
+    loom_value_fact_table_t* fact_table,
     const loom_local_value_domain_t* value_domain,
     iree_arena_allocator_t* arena, loom_motion_analysis_t* out_analysis) {
   *out_analysis = (loom_motion_analysis_t){
@@ -56,8 +57,8 @@ iree_status_t loom_motion_analysis_initialize(
       .fact_table = fact_table,
       .value_domain = value_domain,
   };
-  IREE_RETURN_IF_ERROR(loom_availability_analysis_initialize(
-      module, arena, &out_analysis->availability));
+  IREE_RETURN_IF_ERROR(loom_availability_analysis_initialize_region(
+      module, region, arena, &out_analysis->availability));
   if (fact_table && value_domain) {
     IREE_RETURN_IF_ERROR(loom_movement_analysis_initialize(
         fact_table, value_domain, arena, &out_analysis->movement));
