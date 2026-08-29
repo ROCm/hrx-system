@@ -53,6 +53,12 @@ static iree_status_t loom_scalar_legalize_build_binary_integer(
           loom_scalar_ori_build(builder, lhs, rhs, type, location, &op));
       *out_value = loom_scalar_ori_result(op);
       return iree_ok_status();
+    case LOOM_OP_SCALAR_XORI:
+      (void)0;
+      IREE_RETURN_IF_ERROR(
+          loom_scalar_xori_build(builder, lhs, rhs, type, location, &op));
+      *out_value = loom_scalar_xori_result(op);
+      return iree_ok_status();
     case LOOM_OP_SCALAR_SHLI:
       (void)0;
       IREE_RETURN_IF_ERROR(
@@ -148,6 +154,83 @@ static iree_status_t loom_scalar_legalize_build_or_i32(
     loom_value_id_t rhs, loom_value_id_t* out_value) {
   return loom_scalar_legalize_build_binary_i32(
       builder, location, LOOM_OP_SCALAR_ORI, lhs, rhs, out_value);
+}
+
+static bool loom_scalar_legalize_is_narrow_integer(loom_type_t type) {
+  if (!loom_type_is_scalar(type)) return false;
+  const loom_scalar_type_t scalar_type = loom_type_element_type(type);
+  const int32_t bit_width = loom_scalar_type_bitwidth(scalar_type);
+  return loom_scalar_type_is_integer(scalar_type) && bit_width > 1 &&
+         bit_width < 32;
+}
+
+static iree_status_t loom_scalar_legalize_extend_integer(
+    loom_builder_t* builder, loom_location_id_t location,
+    loom_value_id_t source, loom_type_t source_type, bool signed_extension,
+    loom_value_id_t* out_result) {
+  const loom_type_t i32_type = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  loom_op_t* op = NULL;
+  if (signed_extension) {
+    IREE_RETURN_IF_ERROR(loom_scalar_extsi_build(builder, source, source_type,
+                                                 i32_type, location, &op));
+    *out_result = loom_scalar_extsi_result(op);
+  } else {
+    IREE_RETURN_IF_ERROR(loom_scalar_extui_build(builder, source, source_type,
+                                                 i32_type, location, &op));
+    *out_result = loom_scalar_extui_result(op);
+  }
+  return iree_ok_status();
+}
+
+iree_status_t loom_scalar_target_legalize_narrow_integer_binary_reference(
+    loom_target_legalization_context_t* context, loom_op_t* op,
+    loom_target_legalizer_result_t* out_result) {
+  *out_result = (loom_target_legalizer_result_t){
+      .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
+  };
+
+  const loom_value_id_t source_result = loom_op_const_results(op)[0];
+  const loom_type_t source_type =
+      loom_module_value_type(context->module, source_result);
+  if (!loom_scalar_legalize_is_narrow_integer(source_type)) {
+    return iree_ok_status();
+  }
+
+  loom_rewriter_t* rewriter = context->rewriter;
+  loom_builder_set_before(&rewriter->builder, op);
+  const loom_value_id_t value_checkpoint =
+      loom_rewriter_value_checkpoint(rewriter);
+  const loom_value_id_t* source_operands = loom_op_const_operands(op);
+  // Raw bit operations use zero-extended carriers. Arithmetic right shift is
+  // the exception: its source must be sign-extended before the i32 operation.
+  // Truncation restores the authored wrapping width in every case.
+  const bool signed_lhs = op->kind == LOOM_OP_SCALAR_SHRSI;
+  loom_value_id_t lhs_i32 = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_scalar_legalize_extend_integer(
+      &rewriter->builder, op->location, source_operands[0], source_type,
+      signed_lhs, &lhs_i32));
+  loom_value_id_t rhs_i32 = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_scalar_legalize_extend_integer(
+      &rewriter->builder, op->location, source_operands[1], source_type,
+      /*signed_extension=*/false, &rhs_i32));
+
+  loom_value_id_t wide_result = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_scalar_legalize_build_binary_i32(
+      &rewriter->builder, op->location, op->kind, lhs_i32, rhs_i32,
+      &wide_result));
+  loom_op_t* truncate_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_scalar_trunci_build(
+      &rewriter->builder, wide_result, loom_type_scalar(LOOM_SCALAR_TYPE_I32),
+      source_type, op->location, &truncate_op));
+  loom_value_id_t replacement = loom_scalar_trunci_result(truncate_op);
+  IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
+      rewriter, op, &replacement, 1, value_checkpoint));
+  IREE_RETURN_IF_ERROR(
+      loom_rewriter_replace_all_uses_and_erase(rewriter, op, &replacement, 1));
+  *out_result = (loom_target_legalizer_result_t){
+      .action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN,
+  };
+  return iree_ok_status();
 }
 
 static iree_status_t loom_scalar_legalize_build_fp8_leading_index(

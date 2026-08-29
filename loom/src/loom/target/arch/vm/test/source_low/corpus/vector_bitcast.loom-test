@@ -1,0 +1,270 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/vector_bitcast.loom-test
+// RUN: emit source-low output=low
+
+vm.target<core> @target
+func.def target(@target) @i32_to_i8x4_bitcast(%word: vector<1xi32>) -> (vector<4xi8>) {
+  %bytes = vector.bitcast %word : vector<1xi32> to vector<4xi8>
+  func.return %bytes : vector<4xi8>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : vector<1xi32>>) -> (reg<vm.value x4 : vector<4xi8>>)>}) @i32_to_i8x4_bitcast(%word: reg<vm.value : vector<1xi32>>) -> (reg<vm.value x4 : vector<4xi8>>) asm {
+  %28 = slice %word[0] : reg<vm.value : vector<1xi32>> -> reg<vm.value : i32>
+  %29 = constant.s16 255 : reg<vm.value : i32>
+  %30 = integer.and.i32 %28, %29 : reg<vm.value : i32>
+  %31 = conversion.integer %30, i32.to.i8 : reg<vm.value : i8>
+  %32 = constant.s16 8 : reg<vm.value : i32>
+  %33 = integer.shift.right.u32 %28, %32 : reg<vm.value : i32>
+  %34 = integer.and.i32 %33, %29 : reg<vm.value : i32>
+  %35 = conversion.integer %34, i32.to.i8 : reg<vm.value : i8>
+  %36 = constant.s16 16 : reg<vm.value : i32>
+  %37 = integer.shift.right.u32 %28, %36 : reg<vm.value : i32>
+  %38 = integer.and.i32 %37, %29 : reg<vm.value : i32>
+  %39 = conversion.integer %38, i32.to.i8 : reg<vm.value : i8>
+  %40 = constant.s16 24 : reg<vm.value : i32>
+  %41 = integer.shift.right.u32 %28, %40 : reg<vm.value : i32>
+  %42 = integer.and.i32 %41, %29 : reg<vm.value : i32>
+  %43 = conversion.integer %42, i32.to.i8 : reg<vm.value : i8>
+  %bytes = concat(%31, %35, %39, %43) : (reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>) -> reg<vm.value x4 : vector<4xi8>>
+  return %bytes
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @i32x2_to_i8x8_bitcast(%words: vector<2xi32>) -> (vector<8xi8>) {
+  %bytes = vector.bitcast %words : vector<2xi32> to vector<8xi8>
+  func.return %bytes : vector<8xi8>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x2 : vector<2xi32>>) -> (reg<vm.value x8 : vector<8xi8>>)>}) @i32x2_to_i8x8_bitcast(%words: reg<vm.value x2 : vector<2xi32>>) -> (reg<vm.value x8 : vector<8xi8>>) asm {
+  %50 = slice %words[0] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %51 = constant.s16 255 : reg<vm.value : i32>
+  %52 = integer.and.i32 %50, %51 : reg<vm.value : i32>
+  %53 = conversion.integer %52, i32.to.i8 : reg<vm.value : i8>
+  %54 = constant.s16 8 : reg<vm.value : i32>
+  %55 = integer.shift.right.u32 %50, %54 : reg<vm.value : i32>
+  %56 = integer.and.i32 %55, %51 : reg<vm.value : i32>
+  %57 = conversion.integer %56, i32.to.i8 : reg<vm.value : i8>
+  %58 = constant.s16 16 : reg<vm.value : i32>
+  %59 = integer.shift.right.u32 %50, %58 : reg<vm.value : i32>
+  %60 = integer.and.i32 %59, %51 : reg<vm.value : i32>
+  %61 = conversion.integer %60, i32.to.i8 : reg<vm.value : i8>
+  %62 = constant.s16 24 : reg<vm.value : i32>
+  %63 = integer.shift.right.u32 %50, %62 : reg<vm.value : i32>
+  %64 = integer.and.i32 %63, %51 : reg<vm.value : i32>
+  %65 = conversion.integer %64, i32.to.i8 : reg<vm.value : i8>
+  %66 = slice %words[1] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %67 = integer.and.i32 %66, %51 : reg<vm.value : i32>
+  %68 = conversion.integer %67, i32.to.i8 : reg<vm.value : i8>
+  %69 = integer.shift.right.u32 %66, %54 : reg<vm.value : i32>
+  %70 = integer.and.i32 %69, %51 : reg<vm.value : i32>
+  %71 = conversion.integer %70, i32.to.i8 : reg<vm.value : i8>
+  %72 = integer.shift.right.u32 %66, %58 : reg<vm.value : i32>
+  %73 = integer.and.i32 %72, %51 : reg<vm.value : i32>
+  %74 = conversion.integer %73, i32.to.i8 : reg<vm.value : i8>
+  %75 = integer.shift.right.u32 %66, %62 : reg<vm.value : i32>
+  %76 = integer.and.i32 %75, %51 : reg<vm.value : i32>
+  %77 = conversion.integer %76, i32.to.i8 : reg<vm.value : i8>
+  %bytes = concat(%53, %57, %61, %65, %68, %71, %74, %77) : (reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>) -> reg<vm.value x8 : vector<8xi8>>
+  return %bytes
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @f32x2_to_i32x2_bitcast(%floats: vector<2xf32>) -> (vector<2xi32>) {
+  %bits = vector.bitcast %floats : vector<2xf32> to vector<2xi32>
+  func.return %bits : vector<2xi32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x2 : vector<2xf32>>) -> (reg<vm.value x2 : vector<2xi32>>)>}) @f32x2_to_i32x2_bitcast(%floats: reg<vm.value x2 : vector<2xf32>>) -> (reg<vm.value x2 : vector<2xi32>>) asm {
+  %10 = slice %floats[0] : reg<vm.value x2 : vector<2xf32>> -> reg<vm.value : f32>
+  %11 = value.copy %10 : reg<vm.value : i32>
+  %12 = slice %floats[1] : reg<vm.value x2 : vector<2xf32>> -> reg<vm.value : f32>
+  %13 = value.copy %12 : reg<vm.value : i32>
+  %bits = concat(%11, %13) : (reg<vm.value : i32>, reg<vm.value : i32>) -> reg<vm.value x2 : vector<2xi32>>
+  return %bits
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @f16x2_to_i32_bitcast(%halves: vector<2xf16>) -> (vector<1xi32>) {
+  %bits = vector.bitcast %halves : vector<2xf16> to vector<1xi32>
+  func.return %bits : vector<1xi32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x2 : vector<2xf16>>) -> (reg<vm.value : vector<1xi32>>)>}) @f16x2_to_i32_bitcast(%halves: reg<vm.value x2 : vector<2xf16>>) -> (reg<vm.value : vector<1xi32>>) asm {
+  %16 = slice %halves[0] : reg<vm.value x2 : vector<2xf16>> -> reg<vm.value : f16>
+  %17 = value.copy %16 : reg<vm.value : i16>
+  %18 = conversion.integer %17, u16.to.i32 : reg<vm.value : i32>
+  %19 = slice %halves[1] : reg<vm.value x2 : vector<2xf16>> -> reg<vm.value : f16>
+  %20 = value.copy %19 : reg<vm.value : i16>
+  %21 = conversion.integer %20, u16.to.i32 : reg<vm.value : i32>
+  %22 = constant.s16 16 : reg<vm.value : i32>
+  %23 = integer.shift.left.i32 %21, %22 : reg<vm.value : i32>
+  %24 = integer.or.i32 %18, %23 : reg<vm.value : i32>
+  %bits = concat(%24) : (reg<vm.value : i32>) -> reg<vm.value : vector<1xi32>>
+  return %bits
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @bf16x2_to_i32_bitcast(%halves: vector<2xbf16>) -> (vector<1xi32>) {
+  %bits = vector.bitcast %halves : vector<2xbf16> to vector<1xi32>
+  func.return %bits : vector<1xi32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x2 : vector<2xbf16>>) -> (reg<vm.value : vector<1xi32>>)>}) @bf16x2_to_i32_bitcast(%halves: reg<vm.value x2 : vector<2xbf16>>) -> (reg<vm.value : vector<1xi32>>) asm {
+  %16 = slice %halves[0] : reg<vm.value x2 : vector<2xbf16>> -> reg<vm.value : bf16>
+  %17 = value.copy %16 : reg<vm.value : i16>
+  %18 = conversion.integer %17, u16.to.i32 : reg<vm.value : i32>
+  %19 = slice %halves[1] : reg<vm.value x2 : vector<2xbf16>> -> reg<vm.value : bf16>
+  %20 = value.copy %19 : reg<vm.value : i16>
+  %21 = conversion.integer %20, u16.to.i32 : reg<vm.value : i32>
+  %22 = constant.s16 16 : reg<vm.value : i32>
+  %23 = integer.shift.left.i32 %21, %22 : reg<vm.value : i32>
+  %24 = integer.or.i32 %18, %23 : reg<vm.value : i32>
+  %bits = concat(%24) : (reg<vm.value : i32>) -> reg<vm.value : vector<1xi32>>
+  return %bits
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @i8x2_f16_shape_changing_bitcast(%bytes: vector<2xi8>, %half: vector<1xf16>) -> (vector<1xf16>, vector<2xi8>) {
+  %to_half = vector.bitcast %bytes : vector<2xi8> to vector<1xf16>
+  %to_bytes = vector.bitcast %half : vector<1xf16> to vector<2xi8>
+  func.return %to_half, %to_bytes : vector<1xf16>, vector<2xi8>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x2 : vector<2xi8>>, reg<vm.value : vector<1xf16>>) -> (reg<vm.value : vector<1xf16>>, reg<vm.value x2 : vector<2xi8>>)>}) @i8x2_f16_shape_changing_bitcast(%bytes: reg<vm.value x2 : vector<2xi8>>, %half: reg<vm.value : vector<1xf16>>) -> (reg<vm.value : vector<1xf16>>, reg<vm.value x2 : vector<2xi8>>) asm {
+  %62 = slice %bytes[0] : reg<vm.value x2 : vector<2xi8>> -> reg<vm.value : i8>
+  %63 = slice %bytes[1] : reg<vm.value x2 : vector<2xi8>> -> reg<vm.value : i8>
+  %64 = conversion.integer %63, u8.to.i32 : reg<vm.value : i32>
+  %65 = constant.s16 8 : reg<vm.value : i32>
+  %66 = integer.shift.left.i32 %64, %65 : reg<vm.value : i32>
+  %67 = conversion.integer %66, i32.to.i16 : reg<vm.value : i16>
+  %68 = conversion.integer %62, u8.to.i32 : reg<vm.value : i32>
+  %69 = conversion.integer %67, u16.to.i32 : reg<vm.value : i32>
+  %70 = integer.or.i32 %68, %69 : reg<vm.value : i32>
+  %71 = conversion.integer %70, i32.to.i16 : reg<vm.value : i16>
+  %72 = value.copy %71 : reg<vm.value : f16>
+  %to_half = concat(%72) : (reg<vm.value : f16>) -> reg<vm.value : vector<1xf16>>
+  %74 = slice %half[0] : reg<vm.value : vector<1xf16>> -> reg<vm.value : f16>
+  %75 = value.copy %74 : reg<vm.value : i16>
+  %76 = conversion.integer %75, u16.to.i32 : reg<vm.value : i32>
+  %77 = constant.s16 255 : reg<vm.value : i32>
+  %78 = integer.and.i32 %76, %77 : reg<vm.value : i32>
+  %79 = conversion.integer %78, i32.to.i8 : reg<vm.value : i8>
+  %80 = integer.shift.right.u32 %76, %65 : reg<vm.value : i32>
+  %81 = conversion.integer %80, i32.to.i8 : reg<vm.value : i8>
+  %to_bytes = concat(%79, %81) : (reg<vm.value : i8>, reg<vm.value : i8>) -> reg<vm.value x2 : vector<2xi8>>
+  return %to_half, %to_bytes
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @i8x2_bf16_shape_changing_bitcast(%bytes: vector<2xi8>, %half: vector<1xbf16>) -> (vector<1xbf16>, vector<2xi8>) {
+  %to_half = vector.bitcast %bytes : vector<2xi8> to vector<1xbf16>
+  %to_bytes = vector.bitcast %half : vector<1xbf16> to vector<2xi8>
+  func.return %to_half, %to_bytes : vector<1xbf16>, vector<2xi8>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x2 : vector<2xi8>>, reg<vm.value : vector<1xbf16>>) -> (reg<vm.value : vector<1xbf16>>, reg<vm.value x2 : vector<2xi8>>)>}) @i8x2_bf16_shape_changing_bitcast(%bytes: reg<vm.value x2 : vector<2xi8>>, %half: reg<vm.value : vector<1xbf16>>) -> (reg<vm.value : vector<1xbf16>>, reg<vm.value x2 : vector<2xi8>>) asm {
+  %62 = slice %bytes[0] : reg<vm.value x2 : vector<2xi8>> -> reg<vm.value : i8>
+  %63 = slice %bytes[1] : reg<vm.value x2 : vector<2xi8>> -> reg<vm.value : i8>
+  %64 = conversion.integer %63, u8.to.i32 : reg<vm.value : i32>
+  %65 = constant.s16 8 : reg<vm.value : i32>
+  %66 = integer.shift.left.i32 %64, %65 : reg<vm.value : i32>
+  %67 = conversion.integer %66, i32.to.i16 : reg<vm.value : i16>
+  %68 = conversion.integer %62, u8.to.i32 : reg<vm.value : i32>
+  %69 = conversion.integer %67, u16.to.i32 : reg<vm.value : i32>
+  %70 = integer.or.i32 %68, %69 : reg<vm.value : i32>
+  %71 = conversion.integer %70, i32.to.i16 : reg<vm.value : i16>
+  %72 = value.copy %71 : reg<vm.value : bf16>
+  %to_half = concat(%72) : (reg<vm.value : bf16>) -> reg<vm.value : vector<1xbf16>>
+  %74 = slice %half[0] : reg<vm.value : vector<1xbf16>> -> reg<vm.value : bf16>
+  %75 = value.copy %74 : reg<vm.value : i16>
+  %76 = conversion.integer %75, u16.to.i32 : reg<vm.value : i32>
+  %77 = constant.s16 255 : reg<vm.value : i32>
+  %78 = integer.and.i32 %76, %77 : reg<vm.value : i32>
+  %79 = conversion.integer %78, i32.to.i8 : reg<vm.value : i8>
+  %80 = integer.shift.right.u32 %76, %65 : reg<vm.value : i32>
+  %81 = conversion.integer %80, i32.to.i8 : reg<vm.value : i8>
+  %to_bytes = concat(%79, %81) : (reg<vm.value : i8>, reg<vm.value : i8>) -> reg<vm.value x2 : vector<2xi8>>
+  return %to_half, %to_bytes
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @f8e4m3_i8x4_bitcast(%floats: vector<4xf8E4M3>, %bytes: vector<4xi8>) -> (vector<4xi8>, vector<4xf8E4M3>) {
+  %encoded_bits = vector.bitcast %floats : vector<4xf8E4M3> to vector<4xi8>
+  %encoded = vector.bitcast %bytes : vector<4xi8> to vector<4xf8E4M3>
+  func.return %encoded_bits, %encoded : vector<4xi8>, vector<4xf8E4M3>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x4 : vector<4xf8E4M3>>, reg<vm.value x4 : vector<4xi8>>) -> (reg<vm.value x4 : vector<4xi8>>, reg<vm.value x4 : vector<4xf8E4M3>>)>}) @f8e4m3_i8x4_bitcast(%floats: reg<vm.value x4 : vector<4xf8E4M3>>, %bytes: reg<vm.value x4 : vector<4xi8>>) -> (reg<vm.value x4 : vector<4xi8>>, reg<vm.value x4 : vector<4xf8E4M3>>) asm {
+  %28 = slice %floats[0] : reg<vm.value x4 : vector<4xf8E4M3>> -> reg<vm.value : f8E4M3>
+  %29 = value.copy %28 : reg<vm.value : i8>
+  %30 = slice %floats[1] : reg<vm.value x4 : vector<4xf8E4M3>> -> reg<vm.value : f8E4M3>
+  %31 = value.copy %30 : reg<vm.value : i8>
+  %32 = slice %floats[2] : reg<vm.value x4 : vector<4xf8E4M3>> -> reg<vm.value : f8E4M3>
+  %33 = value.copy %32 : reg<vm.value : i8>
+  %34 = slice %floats[3] : reg<vm.value x4 : vector<4xf8E4M3>> -> reg<vm.value : f8E4M3>
+  %35 = value.copy %34 : reg<vm.value : i8>
+  %encoded_bits = concat(%29, %31, %33, %35) : (reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>) -> reg<vm.value x4 : vector<4xi8>>
+  %37 = slice %bytes[0] : reg<vm.value x4 : vector<4xi8>> -> reg<vm.value : i8>
+  %38 = value.copy %37 : reg<vm.value : f8E4M3>
+  %39 = slice %bytes[1] : reg<vm.value x4 : vector<4xi8>> -> reg<vm.value : i8>
+  %40 = value.copy %39 : reg<vm.value : f8E4M3>
+  %41 = slice %bytes[2] : reg<vm.value x4 : vector<4xi8>> -> reg<vm.value : i8>
+  %42 = value.copy %41 : reg<vm.value : f8E4M3>
+  %43 = slice %bytes[3] : reg<vm.value x4 : vector<4xi8>> -> reg<vm.value : i8>
+  %44 = value.copy %43 : reg<vm.value : f8E4M3>
+  %encoded = concat(%38, %40, %42, %44) : (reg<vm.value : f8E4M3>, reg<vm.value : f8E4M3>, reg<vm.value : f8E4M3>, reg<vm.value : f8E4M3>) -> reg<vm.value x4 : vector<4xf8E4M3>>
+  return %encoded_bits, %encoded
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @f8e5m2_i8x4_bitcast(%floats: vector<4xf8E5M2>, %bytes: vector<4xi8>) -> (vector<4xi8>, vector<4xf8E5M2>) {
+  %encoded_bits = vector.bitcast %floats : vector<4xf8E5M2> to vector<4xi8>
+  %encoded = vector.bitcast %bytes : vector<4xi8> to vector<4xf8E5M2>
+  func.return %encoded_bits, %encoded : vector<4xi8>, vector<4xf8E5M2>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x4 : vector<4xf8E5M2>>, reg<vm.value x4 : vector<4xi8>>) -> (reg<vm.value x4 : vector<4xi8>>, reg<vm.value x4 : vector<4xf8E5M2>>)>}) @f8e5m2_i8x4_bitcast(%floats: reg<vm.value x4 : vector<4xf8E5M2>>, %bytes: reg<vm.value x4 : vector<4xi8>>) -> (reg<vm.value x4 : vector<4xi8>>, reg<vm.value x4 : vector<4xf8E5M2>>) asm {
+  %28 = slice %floats[0] : reg<vm.value x4 : vector<4xf8E5M2>> -> reg<vm.value : f8E5M2>
+  %29 = value.copy %28 : reg<vm.value : i8>
+  %30 = slice %floats[1] : reg<vm.value x4 : vector<4xf8E5M2>> -> reg<vm.value : f8E5M2>
+  %31 = value.copy %30 : reg<vm.value : i8>
+  %32 = slice %floats[2] : reg<vm.value x4 : vector<4xf8E5M2>> -> reg<vm.value : f8E5M2>
+  %33 = value.copy %32 : reg<vm.value : i8>
+  %34 = slice %floats[3] : reg<vm.value x4 : vector<4xf8E5M2>> -> reg<vm.value : f8E5M2>
+  %35 = value.copy %34 : reg<vm.value : i8>
+  %encoded_bits = concat(%29, %31, %33, %35) : (reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>) -> reg<vm.value x4 : vector<4xi8>>
+  %37 = slice %bytes[0] : reg<vm.value x4 : vector<4xi8>> -> reg<vm.value : i8>
+  %38 = value.copy %37 : reg<vm.value : f8E5M2>
+  %39 = slice %bytes[1] : reg<vm.value x4 : vector<4xi8>> -> reg<vm.value : i8>
+  %40 = value.copy %39 : reg<vm.value : f8E5M2>
+  %41 = slice %bytes[2] : reg<vm.value x4 : vector<4xi8>> -> reg<vm.value : i8>
+  %42 = value.copy %41 : reg<vm.value : f8E5M2>
+  %43 = slice %bytes[3] : reg<vm.value x4 : vector<4xi8>> -> reg<vm.value : i8>
+  %44 = value.copy %43 : reg<vm.value : f8E5M2>
+  %encoded = concat(%38, %40, %42, %44) : (reg<vm.value : f8E5M2>, reg<vm.value : f8E5M2>, reg<vm.value : f8E5M2>, reg<vm.value : f8E5M2>) -> reg<vm.value x4 : vector<4xf8E5M2>>
+  return %encoded_bits, %encoded
+}

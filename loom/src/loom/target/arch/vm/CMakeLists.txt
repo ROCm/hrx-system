@@ -265,6 +265,7 @@ loom_cc_library(
     loom::ops::global
     loom::ops::low
     loom::ops::op_defs
+    loom::ops::scalar
     loom::ops::scf
     loom::ops::vector
     loom::pass::builder
@@ -276,6 +277,7 @@ loom_cc_library(
     loom::target::math_policy
     loom::target::provider
     loom::target::types
+    loom::transforms::scalar::target_legalization
     loom::transforms::vector::to_scalar
     loom::util::adaptive_sort
     loom::util::walk
@@ -329,6 +331,7 @@ loom_check_test_suite(
     "test/source_low/corpus/numeric_scalar_literals.loom-test"
     "test/source_low/corpus/ordinary_vector_structure.loom-test"
     "test/source_low/corpus/sync_barrier.loom-test"
+    "test/source_low/corpus/vector_bitcast.loom-test"
     "test/source_low/corpus/vector_carrier_structure.loom-test"
     "test/source_low/corpus/vector_v4.loom-test"
     "test/source_low/function_abi.loom-test"
@@ -338,6 +341,7 @@ loom_check_test_suite(
     "test/source_low/low_verification.loom-test"
     "test/source_low/module_initialization.loom-test"
     "test/source_low/module_resources.loom-test"
+    "test/source_low/narrow_integer.loom-test"
     "test/source_low/program_failure.loom-test"
     "test/source_low/scalar_diagnostics.loom-test"
     "test/source_low/selector_assembly.loom-test"
@@ -361,6 +365,7 @@ loom_check_test_suite(
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_scalar_literals.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/ordinary_vector_structure.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/sync_barrier.loom-test"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/vector_bitcast.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/vector_carrier_structure.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/vector_v4.loom-test"
   TEST_NAME_PREFIX_TO_STRIP
