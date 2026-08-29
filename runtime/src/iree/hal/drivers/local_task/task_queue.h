@@ -21,6 +21,10 @@
 //
 // Operations are arena-allocated at submit time and freed by the completion
 // callback. No per-submission task allocations at issue time.
+//
+// Shutdown first retires the control process, the sole compute-item producer,
+// and only its release callback requests compute-process termination. This
+// orders full-pool cleanup after producer quiescence without blocking a worker.
 
 #ifndef IREE_HAL_DRIVERS_LOCAL_TASK_TASK_QUEUE_H_
 #define IREE_HAL_DRIVERS_LOCAL_TASK_TASK_QUEUE_H_
@@ -418,6 +422,13 @@ typedef struct iree_hal_task_queue_debug_state_t {
 } iree_hal_task_queue_debug_state_t;
 #endif  // !defined(NDEBUG)
 
+// Ordered queue shutdown phases.
+typedef enum iree_hal_task_queue_shutdown_phase_e {
+  IREE_HAL_TASK_QUEUE_SHUTDOWN_PHASE_RUNNING = 0,
+  IREE_HAL_TASK_QUEUE_SHUTDOWN_PHASE_CONTROL = 1,
+  IREE_HAL_TASK_QUEUE_SHUTDOWN_PHASE_COMPUTE = 2,
+} iree_hal_task_queue_shutdown_phase_t;
+
 struct iree_hal_task_queue_t {
   // Affinity mask this queue processes.
   iree_hal_queue_affinity_t affinity;
@@ -488,17 +499,16 @@ struct iree_hal_task_queue_t {
   // by the submitting thread (fast path when all waits are satisfied).
   iree_hal_task_queue_op_slist_t ready_list;
 
-  // Set during deinitialize to signal the queue process to complete.
-  // The queue process checks this at the start of each drain call and
-  // returns completed=true when set, triggering normal process completion
-  // and scope_end via the release callback.
-  iree_atomic_int32_t shutting_down;
+  // Monotonic shutdown phase. RUNNING accepts work, CONTROL rejects new work
+  // and terminates the control process, and COMPUTE terminates the compute
+  // process after the control process has released its producer ownership.
+  iree_atomic_int32_t shutdown_phase;
 
   // The queue's persistent control process. Uses wake_budget == 1 and drains
   // operations from the ready list sequentially. When the ready list is empty,
   // the process returns did_work=false and the executor's sleeping protocol
-  // parks it. New submissions wake it via schedule_process. Completes when
-  // shutting_down is set during deinitialize.
+  // parks it. New submissions wake it via schedule_process. Completes during
+  // the CONTROL shutdown phase started by deinitialize.
   //
   // For COMMANDS operations, this process fills a recording item and pushes
   // it to compute_pending (delegating actual execution to the compute
@@ -529,7 +539,9 @@ struct iree_hal_task_queue_t {
   // stays in its slot until shutdown.
   //
   // Participates in the queue's scope: scope_begin at initialization,
-  // scope_end in the release callback after the last drainer exits.
+  // scope_end in the release callback after the last drainer exits. Completes
+  // only after the control process release callback advances shutdown to the
+  // COMPUTE phase, ensuring no producer can still touch the item pool.
   iree_alignas(iree_hardware_destructive_interference_size)
       iree_task_process_t compute_process;
 
