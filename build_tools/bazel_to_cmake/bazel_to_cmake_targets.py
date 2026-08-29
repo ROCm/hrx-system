@@ -20,10 +20,6 @@ class TargetConverter:
                 f"{root_repo}//build_tools/bazel:pthreads": [],
                 f"{root_repo}//build_tools/bazel:dl": ["${CMAKE_DL_LIBS}"],
                 f"{root_repo}//build_tools/bazel:rt": [],
-                # NCCL
-                "@nccl//:headers": [
-                    "nccl::headers",
-                ],
                 # Tracy.
                 "@tracy_client//:runtime": ["tracy_client::runtime"],
                 # Misc single targets
@@ -82,12 +78,6 @@ class TargetConverter:
     def _update_target_mappings(self, mappings: Dict[str, List[str]]):
         self._explicit_target_mapping.update(mappings)
 
-    def _convert_iree_cuda_target(self, target):
-        # Convert like:
-        #   @iree_cuda//:libdevice_embedded -> iree_cuda::libdevice_embedded
-        label = target.rsplit(":")[-1]
-        return [f"iree_cuda::{label}"]
-
     def _convert_to_cmake_path(self, bazel_path_fragment: str) -> str:
         cmake_path = bazel_path_fragment
         # Bazel `//iree/base`     -> CMake `iree::base`
@@ -138,8 +128,6 @@ class TargetConverter:
         root_repo = self._repo_alias("@hrx")
         if target in self._explicit_target_mapping:
             return self._explicit_target_mapping[target]
-        if target.startswith("@iree_cuda//"):
-            return self._convert_iree_cuda_target(target)
         # pip dependencies don't exist in CMake (system Python is used).
         if target.startswith("@pip//"):
             return []
