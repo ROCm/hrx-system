@@ -25,7 +25,7 @@ type ScalarTypeCase = tuple[ScalarTypeKind, str]
 
 def _scalar_type_cases() -> tuple[ScalarTypeCase, ...]:
     """Returns validated scalar kinds and spellings in ordinal order."""
-    cases = tuple((ScalarTypeKind(ordinal), spelling) for ordinal, spelling in enumerate(SCALAR_TYPE_SPELLINGS))
+    cases = tuple(zip(ScalarTypeKind, SCALAR_TYPE_SPELLINGS, strict=True))
     for kind, spelling in cases:
         if not spelling or not spelling.isascii() or not spelling.isalnum():
             raise ValueError(f"scalar type {kind.name} spelling must be non-empty ASCII alphanumeric text: {spelling!r}")
@@ -51,7 +51,7 @@ def generate_scalar_type_table_inc() -> str:
 
     for kind, _ in cases:
         lines.append(f'static_assert({_c_constant(kind)} == {kind.value}, "{_c_constant(kind)} ordinal does not match Python");')
-    lines.append(f'static_assert(LOOM_SCALAR_TYPE_COUNT_ == {len(cases)}, "scalar type count does not match Python");')
+    lines.append(f'static_assert(LOOM_SCALAR_TYPE_COUNT_ == {max(kind.value for kind, _ in cases) + 1}, "scalar type count does not match Python");')
     lines.append(f'static_assert(LOOM_SCALAR_TYPE_NONE == {SCALAR_TYPE_NONE}, "scalar type none sentinel does not match Python");')
     lines.append("")
 

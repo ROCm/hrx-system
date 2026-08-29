@@ -399,8 +399,8 @@ loom_amdgpu_scalar_conversion_rule_for(
     loom_amdgpu_scalar_conversion_op_group_t op_group,
     loom_scalar_type_t source_type, loom_scalar_type_t result_type) {
   if (op_group >= LOOM_AMDGPU_SCALAR_CONVERSION_OP_COUNT_ ||
-      source_type >= LOOM_SCALAR_TYPE_COUNT_ ||
-      result_type >= LOOM_SCALAR_TYPE_COUNT_) {
+      !loom_scalar_type_is_valid(source_type) ||
+      !loom_scalar_type_is_valid(result_type)) {
     return NULL;
   }
   const uint8_t rule_index =

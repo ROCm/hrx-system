@@ -325,9 +325,8 @@ bool loom_numeric_format_uses_unsigned_integer_semantics(
 
 loom_value_fact_numeric_format_flags_t loom_numeric_format_from_scalar_type(
     loom_scalar_type_t type) {
-  return type < IREE_ARRAYSIZE(kLoomNumericFormatsByScalarType)
-             ? kLoomNumericFormatsByScalarType[type]
-             : LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE;
+  return loom_scalar_type_is_valid(type) ? kLoomNumericFormatsByScalarType[type]
+                                         : LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE;
 }
 
 #undef LOOM_NUMERIC_FORMAT_FINITE_NAN_UNSIGNED_ZERO_SELECTOR_FLAGS

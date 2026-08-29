@@ -138,6 +138,8 @@ TEST(NumericFormatTest, MapsDirectScalarTypesToNumericFormats) {
             LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE);
   EXPECT_EQ(loom_numeric_format_from_scalar_type(LOOM_SCALAR_TYPE_I64),
             LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE);
+  EXPECT_EQ(loom_numeric_format_from_scalar_type(LOOM_SCALAR_TYPE_NONE),
+            LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE);
   EXPECT_EQ(loom_numeric_format_from_scalar_type(LOOM_SCALAR_TYPE_COUNT_),
             LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE);
 }

@@ -8,21 +8,21 @@
 // Regenerate: python3 loom/py/loom/gen/run.py c_tables --in-place
 // clang-format off
 
-static_assert(LOOM_SCALAR_TYPE_INDEX == 0, "LOOM_SCALAR_TYPE_INDEX ordinal does not match Python");
-static_assert(LOOM_SCALAR_TYPE_OFFSET == 1, "LOOM_SCALAR_TYPE_OFFSET ordinal does not match Python");
-static_assert(LOOM_SCALAR_TYPE_I1 == 2, "LOOM_SCALAR_TYPE_I1 ordinal does not match Python");
-static_assert(LOOM_SCALAR_TYPE_I8 == 3, "LOOM_SCALAR_TYPE_I8 ordinal does not match Python");
-static_assert(LOOM_SCALAR_TYPE_I16 == 4, "LOOM_SCALAR_TYPE_I16 ordinal does not match Python");
-static_assert(LOOM_SCALAR_TYPE_I32 == 5, "LOOM_SCALAR_TYPE_I32 ordinal does not match Python");
-static_assert(LOOM_SCALAR_TYPE_I64 == 6, "LOOM_SCALAR_TYPE_I64 ordinal does not match Python");
-static_assert(LOOM_SCALAR_TYPE_F8E4M3 == 7, "LOOM_SCALAR_TYPE_F8E4M3 ordinal does not match Python");
-static_assert(LOOM_SCALAR_TYPE_F8E5M2 == 8, "LOOM_SCALAR_TYPE_F8E5M2 ordinal does not match Python");
-static_assert(LOOM_SCALAR_TYPE_F16 == 9, "LOOM_SCALAR_TYPE_F16 ordinal does not match Python");
-static_assert(LOOM_SCALAR_TYPE_BF16 == 10, "LOOM_SCALAR_TYPE_BF16 ordinal does not match Python");
-static_assert(LOOM_SCALAR_TYPE_F32 == 11, "LOOM_SCALAR_TYPE_F32 ordinal does not match Python");
-static_assert(LOOM_SCALAR_TYPE_F64 == 12, "LOOM_SCALAR_TYPE_F64 ordinal does not match Python");
-static_assert(LOOM_SCALAR_TYPE_COUNT_ == 13, "scalar type count does not match Python");
-static_assert(LOOM_SCALAR_TYPE_NONE == 13, "scalar type none sentinel does not match Python");
+static_assert(LOOM_SCALAR_TYPE_INDEX == 1, "LOOM_SCALAR_TYPE_INDEX ordinal does not match Python");
+static_assert(LOOM_SCALAR_TYPE_OFFSET == 2, "LOOM_SCALAR_TYPE_OFFSET ordinal does not match Python");
+static_assert(LOOM_SCALAR_TYPE_I1 == 3, "LOOM_SCALAR_TYPE_I1 ordinal does not match Python");
+static_assert(LOOM_SCALAR_TYPE_I8 == 4, "LOOM_SCALAR_TYPE_I8 ordinal does not match Python");
+static_assert(LOOM_SCALAR_TYPE_I16 == 5, "LOOM_SCALAR_TYPE_I16 ordinal does not match Python");
+static_assert(LOOM_SCALAR_TYPE_I32 == 6, "LOOM_SCALAR_TYPE_I32 ordinal does not match Python");
+static_assert(LOOM_SCALAR_TYPE_I64 == 7, "LOOM_SCALAR_TYPE_I64 ordinal does not match Python");
+static_assert(LOOM_SCALAR_TYPE_F8E4M3 == 8, "LOOM_SCALAR_TYPE_F8E4M3 ordinal does not match Python");
+static_assert(LOOM_SCALAR_TYPE_F8E5M2 == 9, "LOOM_SCALAR_TYPE_F8E5M2 ordinal does not match Python");
+static_assert(LOOM_SCALAR_TYPE_F16 == 10, "LOOM_SCALAR_TYPE_F16 ordinal does not match Python");
+static_assert(LOOM_SCALAR_TYPE_BF16 == 11, "LOOM_SCALAR_TYPE_BF16 ordinal does not match Python");
+static_assert(LOOM_SCALAR_TYPE_F32 == 12, "LOOM_SCALAR_TYPE_F32 ordinal does not match Python");
+static_assert(LOOM_SCALAR_TYPE_F64 == 13, "LOOM_SCALAR_TYPE_F64 ordinal does not match Python");
+static_assert(LOOM_SCALAR_TYPE_COUNT_ == 14, "scalar type count does not match Python");
+static_assert(LOOM_SCALAR_TYPE_NONE == 0, "scalar type none sentinel does not match Python");
 
 static const char* const loom_scalar_type_names[LOOM_SCALAR_TYPE_COUNT_] = {
     [LOOM_SCALAR_TYPE_INDEX] = "index",

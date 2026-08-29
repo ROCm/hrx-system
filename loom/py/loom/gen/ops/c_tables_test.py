@@ -250,6 +250,7 @@ def test_type_constraint_map_covers_every_constraint() -> None:
 def test_generate_scalar_type_table_uses_length_partitioned_classification() -> None:
     generated = generate_scalar_type_table_inc()
 
+    assert SCALAR_TYPE_NONE == 0
     assert "loom_scalar_type_names[LOOM_SCALAR_TYPE_COUNT_]" in generated
     assert f"LOOM_SCALAR_TYPE_NONE == {SCALAR_TYPE_NONE}" in generated
     assert "return LOOM_SCALAR_TYPE_NONE;" in generated

@@ -29,28 +29,28 @@ class ScalarTypeKind(IntEnum):
     Ordered: address types, integers by width, floats by width.
     """
 
-    INDEX = 0
-    OFFSET = 1
-    I1 = 2
-    I8 = 3
-    I16 = 4
-    I32 = 5
-    I64 = 6
-    F8E4M3 = 7
-    F8E5M2 = 8
-    F16 = 9
-    BF16 = 10
-    F32 = 11
-    F64 = 12
+    INDEX = 1
+    OFFSET = 2
+    I1 = 3
+    I8 = 4
+    I16 = 5
+    I32 = 6
+    I64 = 7
+    F8E4M3 = 8
+    F8E5M2 = 9
+    F16 = 10
+    BF16 = 11
+    F32 = 12
+    F64 = 13
 
 
-# Explicit absence of a scalar type. This matches ``LOOM_SCALAR_TYPE_NONE``
-# and remains outside all concrete scalar type tables.
-SCALAR_TYPE_NONE = len(ScalarTypeKind)
+# Explicit absence of a scalar type. This matches ``LOOM_SCALAR_TYPE_NONE`` and
+# ensures zero-initialized storage cannot be mistaken for a concrete type.
+SCALAR_TYPE_NONE = 0
 
 
-# Canonical assembly spellings indexed by ScalarTypeKind ordinal. C name and
-# classification tables are generated directly from this declaration.
+# Canonical assembly spellings ordered by concrete ScalarTypeKind ordinal. C
+# name and classification tables are generated directly from this declaration.
 SCALAR_TYPE_SPELLINGS: tuple[str, ...] = (
     "index",
     "offset",
@@ -69,20 +69,20 @@ SCALAR_TYPE_SPELLINGS: tuple[str, ...] = (
 
 if len(SCALAR_TYPE_SPELLINGS) != len(ScalarTypeKind):
     raise ValueError("scalar type spellings must cover every scalar type kind")
-if any(kind.value != ordinal for ordinal, kind in enumerate(ScalarTypeKind)):
-    raise ValueError("scalar type kinds must use contiguous declaration ordinals")
+if any(kind.value != ordinal for ordinal, kind in enumerate(ScalarTypeKind, 1)):
+    raise ValueError("concrete scalar type kinds must use contiguous non-zero ordinals")
 if len(set(SCALAR_TYPE_SPELLINGS)) != len(SCALAR_TYPE_SPELLINGS):
     raise ValueError("scalar type spellings must be unique")
 
 _SCALAR_TYPE_BY_SPELLING = {
-    spelling: ScalarTypeKind(ordinal)
-    for ordinal, spelling in enumerate(SCALAR_TYPE_SPELLINGS)
+    spelling: kind
+    for kind, spelling in zip(ScalarTypeKind, SCALAR_TYPE_SPELLINGS, strict=True)
 }
 
 
 def scalar_type_name(kind: ScalarTypeKind) -> str:
     """Returns the canonical assembly spelling for ``kind``."""
-    return SCALAR_TYPE_SPELLINGS[kind]
+    return SCALAR_TYPE_SPELLINGS[kind.value - 1]
 
 
 def parse_scalar_type_kind(name: str) -> ScalarTypeKind | None:

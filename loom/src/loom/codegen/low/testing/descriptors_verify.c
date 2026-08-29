@@ -895,7 +895,8 @@ static iree_status_t loom_low_verify_asm_result_value_type(
     uint32_t value_type_index) {
   switch (value_type->kind) {
     case LOOM_LOW_ASM_RESULT_VALUE_TYPE_KIND_NONE:
-      if (value_type->element_type != 0 || value_type->vector_lane_count != 0) {
+      if (value_type->element_type != LOOM_SCALAR_TYPE_NONE ||
+          value_type->vector_lane_count != 0) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                 "absent low asm result value type %" PRIu32
                                 " must have zero element type and lane count",
@@ -903,7 +904,7 @@ static iree_status_t loom_low_verify_asm_result_value_type(
       }
       return iree_ok_status();
     case LOOM_LOW_ASM_RESULT_VALUE_TYPE_KIND_SCALAR:
-      if (value_type->element_type >= LOOM_SCALAR_TYPE_COUNT_ ||
+      if (!loom_scalar_type_is_valid(value_type->element_type) ||
           value_type->vector_lane_count != 0) {
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
@@ -913,7 +914,7 @@ static iree_status_t loom_low_verify_asm_result_value_type(
       }
       return iree_ok_status();
     case LOOM_LOW_ASM_RESULT_VALUE_TYPE_KIND_VECTOR:
-      if (value_type->element_type >= LOOM_SCALAR_TYPE_COUNT_ ||
+      if (!loom_scalar_type_is_valid(value_type->element_type) ||
           value_type->vector_lane_count == 0) {
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
