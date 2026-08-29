@@ -52,6 +52,8 @@ class Dependency:
     strip_prefix: str = ""
     source_url: str = ""
     build_file: str = ""
+    patches: tuple[str, ...] = ()
+    patch_args: tuple[str, ...] = ()
 
 
 class DummyModuleExtension:
@@ -197,6 +199,8 @@ class ModuleParser:
                 "build_file",
                 "integrity",
                 "name",
+                "patch_args",
+                "patches",
                 "sha256",
                 "strip_prefix",
                 "url",
@@ -208,6 +212,9 @@ class ModuleParser:
         sha256 = _sha256_from_kwargs(kwargs, f"http_archive({name})")
         strip_prefix = _optional_string(kwargs, "strip_prefix", "")
         build_file = _optional_string(kwargs, "build_file", "")
+        patches = _optional_string_list(kwargs, "patches", "http_archive")
+        patch_args = _optional_string_list(kwargs, "patch_args", "http_archive")
+        _validate_patch_configuration(patches, patch_args, f"http_archive({name})")
         self.dependencies.append(
             Dependency(
                 name=name,
@@ -221,6 +228,8 @@ class ModuleParser:
                 sha256=sha256,
                 strip_prefix=strip_prefix,
                 build_file=build_file,
+                patches=tuple(patches),
+                patch_args=tuple(patch_args),
             )
         )
 
@@ -535,6 +544,8 @@ def render_cmake_lock(dependencies: Iterable[Dependency]) -> str:
         _append_cmake_scalar(lines, identifier, "SHA256", dependency.sha256)
         _append_cmake_scalar(lines, identifier, "STRIP_PREFIX", dependency.strip_prefix)
         _append_cmake_scalar(lines, identifier, "BUILD_FILE", dependency.build_file)
+        _append_cmake_list(lines, identifier, "PATCHES", dependency.patches)
+        _append_cmake_list(lines, identifier, "PATCH_ARGS", dependency.patch_args)
         lines.append("")
     return "\n".join(lines)
 
@@ -556,6 +567,10 @@ def _append_cmake_list(
     property_name: str,
     values: Iterable[str],
 ) -> None:
+    values = list(values)
+    if not values:
+        _append_cmake_scalar(lines, dependency_identifier, property_name, "")
+        return
     lines.append(f"set(IREE_DEP_{dependency_identifier}_{property_name}")
     for value in values:
         lines.append(f'  "{_cmake_escape(value)}"')
@@ -615,6 +630,31 @@ def _optional_string(kwargs: dict[str, Any], name: str, default: str) -> str:
     if not isinstance(value, str):
         raise ValueError(f"{name} must be a string")
     return value
+
+
+def _optional_string_list(kwargs: dict[str, Any], name: str, context: str) -> list[str]:
+    value = kwargs.get(name, [])
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise ValueError(f"{context} requires {name} to be a list of strings")
+    return value
+
+
+def _validate_patch_configuration(
+    patches: list[str], patch_args: list[str], context: str
+) -> None:
+    if patch_args and not patches:
+        raise ValueError(f"{context} declares patch_args without patches")
+    if patches and not patch_args:
+        raise ValueError(
+            f"{context} must declare patch_args explicitly for CMake parity"
+        )
+    for patch in patches:
+        if not re.fullmatch(r"//[^:]*:[^:]+", patch) or re.search(
+            r"(^|/)\.\.(/|:)", patch
+        ):
+            raise ValueError(
+                f"{context} patch {patch!r} must be a root-repository label"
+            )
 
 
 def _optional_json_string(source: dict[str, Any], name: str, default: str) -> str:

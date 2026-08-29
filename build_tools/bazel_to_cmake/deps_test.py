@@ -39,11 +39,13 @@ def _write_module_files(root: Path, fragment: str) -> None:
     fragment_path.write_text(textwrap.dedent(fragment), encoding="utf-8")
 
 
-def _write_lock(root: Path, locked_deps: list[deps.Dependency]) -> None:
-    (root / "MODULE.cmake.lock").write_text(
+def _write_lock(root: Path, locked_deps: list[deps.Dependency]) -> Path:
+    lock_path = root / "MODULE.cmake.lock"
+    lock_path.write_text(
         deps.render_cmake_lock(locked_deps),
         encoding="utf-8",
     )
+    return lock_path
 
 
 class DepsTest(unittest.TestCase):
@@ -183,6 +185,41 @@ class DepsTest(unittest.TestCase):
 
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("MODULE.cmake.lock is stale", result.stderr)
+
+    def test_http_archive_preserves_patch_configuration(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            _write_module_files(
+                root,
+                """\
+                http_archive = use_repo_rule(
+                    "@bazel_tools//tools/build_defs/repo:http.bzl",
+                    "http_archive",
+                )
+
+                http_archive(
+                    name = "archive_dep",
+                    patch_args = ["-p1"],
+                    patches = ["//build_tools/third_party/archive:fix.patch"],
+                    sha256 = "1111111111111111111111111111111111111111111111111111111111111111",
+                    url = "https://example.com/archive_dep.tar.gz",
+                )
+                """,
+            )
+
+            parsed = deps.ModuleParser(root).parse(root / "MODULE.bazel")
+
+            self.assertEqual(
+                parsed[0].patches,
+                ("//build_tools/third_party/archive:fix.patch",),
+            )
+            self.assertEqual(parsed[0].patch_args, ("-p1",))
+            lock = deps.parse_cmake_lock(_write_lock(root, parsed))
+            self.assertEqual(
+                lock["archive_dep"]["PATCHES"],
+                ["//build_tools/third_party/archive:fix.patch"],
+            )
+            self.assertEqual(lock["archive_dep"]["PATCH_ARGS"], ["-p1"])
 
     def test_rocm_repository_locks_pinned_sources_only(self):
         with tempfile.TemporaryDirectory() as temp_dir:

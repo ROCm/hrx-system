@@ -123,6 +123,13 @@ The update path may fetch BCR `source.json` files in order to translate a
 prefix CMake needs. Direct `http_archive` declarations are resolved without
 network access because the URL and hash are already in the Bazel fragment.
 
+Root-repository patches and their explicit strip arguments are copied into the
+CMake lock. Pinned CMake fetches apply the same patch set with Git, and include
+the patch contents in the FetchContent command fingerprint so edited patches
+invalidate an existing population step. Reconfiguration accepts a patch set
+that is already applied and fails loudly when the populated source is in an
+incompatible state that requires a clean fetch.
+
 CI uses offline check mode:
 
 ```bash
