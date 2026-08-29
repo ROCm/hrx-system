@@ -28,6 +28,15 @@ iree_byte_sequence_length(const iree_byte_sequence_t* sequence) {
   return sequence->length;
 }
 
+IREE_API_EXPORT bool iree_byte_sequence_try_get_contiguous_span(
+    const iree_byte_sequence_t* sequence, iree_const_byte_span_t* out_span) {
+  IREE_ASSERT_ARGUMENT(sequence);
+  IREE_ASSERT_ARGUMENT(out_span);
+  *out_span = iree_const_byte_span_empty();
+  return sequence->vtable->try_get_contiguous_span != NULL &&
+         sequence->vtable->try_get_contiguous_span(sequence, out_span);
+}
+
 IREE_API_EXPORT iree_status_t
 iree_byte_sequence_enumerate(const iree_byte_sequence_t* sequence,
                              iree_byte_sequence_segment_callback_t callback) {
@@ -79,10 +88,21 @@ static iree_status_t iree_owned_span_byte_sequence_enumerate(
                      iree_const_cast_byte_span(sequence->span));
 }
 
+static bool iree_owned_span_byte_sequence_try_get_contiguous_span(
+    const iree_byte_sequence_t* base_sequence,
+    iree_const_byte_span_t* out_span) {
+  const iree_owned_span_byte_sequence_t* sequence =
+      iree_owned_span_byte_sequence_const_cast(base_sequence);
+  *out_span = iree_const_cast_byte_span(sequence->span);
+  return true;
+}
+
 static const iree_byte_sequence_vtable_t iree_owned_span_byte_sequence_vtable =
     {
         .destroy = iree_owned_span_byte_sequence_destroy,
         .enumerate = iree_owned_span_byte_sequence_enumerate,
+        .try_get_contiguous_span =
+            iree_owned_span_byte_sequence_try_get_contiguous_span,
 };
 
 IREE_API_EXPORT iree_status_t iree_byte_sequence_create_from_span_move(

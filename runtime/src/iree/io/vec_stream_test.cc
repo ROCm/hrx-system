@@ -548,6 +548,11 @@ TEST(VecStreamTest, MoveEmptyContentsLeavesReusableStream) {
 
   ASSERT_NE(sequence, nullptr);
   EXPECT_EQ(iree_byte_sequence_length(sequence), 0u);
+  iree_const_byte_span_t empty_span = iree_make_const_byte_span("x", 1);
+  EXPECT_TRUE(
+      iree_byte_sequence_try_get_contiguous_span(sequence, &empty_span));
+  EXPECT_EQ(empty_span.data, nullptr);
+  EXPECT_EQ(empty_span.data_length, 0u);
   iree_host_size_t segment_count = 0;
   iree_byte_sequence_segment_callback_t callback = {
       count_segment,
@@ -566,6 +571,14 @@ TEST(VecStreamTest, MoveEmptyContentsLeavesReusableStream) {
       iree_io_vec_stream_move_contents(stream.get(), &second_sequence));
   ByteSequencePtr second_sequence_owner(second_sequence,
                                         iree_byte_sequence_release);
+
+  iree_const_byte_span_t contiguous_span = iree_const_byte_span_empty();
+  EXPECT_TRUE(iree_byte_sequence_try_get_contiguous_span(second_sequence,
+                                                         &contiguous_span));
+  EXPECT_THAT(
+      std::vector<uint8_t>(contiguous_span.data,
+                           contiguous_span.data + contiguous_span.data_length),
+      ElementsAre(4, 5, 6));
 
   iree_byte_span_t clone = iree_byte_span_empty();
   IREE_ASSERT_OK(iree_byte_sequence_clone(second_sequence,
@@ -625,6 +638,9 @@ TEST(VecStreamTest, MoveContentsTransfersBlocksWithoutCopying) {
   EXPECT_EQ(iree_io_stream_offset(stream.get()), 0);
   EXPECT_EQ(iree_io_stream_length(stream.get()), 0);
   EXPECT_EQ(iree_byte_sequence_length(sequence), expected.size());
+  iree_const_byte_span_t contiguous_span = iree_const_byte_span_empty();
+  EXPECT_FALSE(
+      iree_byte_sequence_try_get_contiguous_span(sequence, &contiguous_span));
 
   stream.reset();
   segment_comparison_state_t comparison_state = {

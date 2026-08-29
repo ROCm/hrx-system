@@ -61,6 +61,15 @@ IREE_API_EXPORT void iree_byte_sequence_release(iree_byte_sequence_t* sequence);
 IREE_API_EXPORT uint64_t
 iree_byte_sequence_length(const iree_byte_sequence_t* sequence);
 
+// Attempts to expose |sequence| as one contiguous immutable span.
+//
+// Returns true and populates |out_span| when the concrete storage is already
+// contiguous. The span remains valid while |sequence| is retained. Returns
+// false and leaves |out_span| empty when the sequence is segmented. Empty
+// sequences may return true with an empty span.
+IREE_API_EXPORT bool iree_byte_sequence_try_get_contiguous_span(
+    const iree_byte_sequence_t* sequence, iree_const_byte_span_t* out_span);
+
 // Enumerates every non-empty segment in |sequence| in logical byte order.
 //
 // Implementations perform no allocation, copying, mapping, or locking and
@@ -106,6 +115,10 @@ typedef struct iree_byte_sequence_vtable_t {
   iree_status_t(IREE_API_PTR* enumerate)(
       const iree_byte_sequence_t* sequence,
       iree_byte_sequence_segment_callback_t callback);
+  // Attempts to expose the complete sequence as one contiguous span. NULL
+  // indicates that the representation is never directly contiguous.
+  bool(IREE_API_PTR* try_get_contiguous_span)(
+      const iree_byte_sequence_t* sequence, iree_const_byte_span_t* out_span);
 } iree_byte_sequence_vtable_t;
 
 // Base structure embedded at offset zero by byte sequence implementations.

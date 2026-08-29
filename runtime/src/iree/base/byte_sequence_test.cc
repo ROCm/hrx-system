@@ -67,8 +67,9 @@ static iree_status_t test_byte_sequence_enumerate(
 }
 
 static const iree_byte_sequence_vtable_t test_byte_sequence_vtable = {
-    test_byte_sequence_destroy,
-    test_byte_sequence_enumerate,
+    /*.destroy=*/test_byte_sequence_destroy,
+    /*.enumerate=*/test_byte_sequence_enumerate,
+    /*.try_get_contiguous_span=*/NULL,
 };
 
 static void test_byte_sequence_initialize(
@@ -105,6 +106,7 @@ TEST(ByteSequenceTest, OwnedSpanMovesStorage) {
       (void**)&source_span.data));
   const uint8_t expected[] = {1, 2, 3, 4};
   memcpy(source_span.data, expected, sizeof(expected));
+  const uint8_t* source_data = source_span.data;
 
   iree_byte_sequence_t* sequence = NULL;
   IREE_ASSERT_OK(iree_byte_sequence_create_from_span_move(
@@ -114,6 +116,11 @@ TEST(ByteSequenceTest, OwnedSpanMovesStorage) {
   EXPECT_EQ(source_span.data, nullptr);
   EXPECT_EQ(source_span.data_length, 0u);
   EXPECT_EQ(iree_byte_sequence_length(sequence), sizeof(expected));
+  iree_const_byte_span_t contiguous_span = iree_const_byte_span_empty();
+  EXPECT_TRUE(
+      iree_byte_sequence_try_get_contiguous_span(sequence, &contiguous_span));
+  EXPECT_EQ(contiguous_span.data, source_data);
+  EXPECT_EQ(contiguous_span.data_length, sizeof(expected));
   std::vector<uint8_t> actual;
   IREE_EXPECT_OK(
       iree_byte_sequence_enumerate(sequence, make_append_callback(&actual)));
@@ -167,6 +174,14 @@ TEST(ByteSequenceTest, EnumeratesMultipleSegmentsInOrder) {
   IREE_EXPECT_OK(iree_byte_sequence_enumerate(&sequence.base,
                                               make_append_callback(&actual)));
   EXPECT_THAT(actual, ElementsAre(0, 1, 2, 3, 4, 5));
+
+  uint8_t sentinel = 0;
+  iree_const_byte_span_t contiguous_span =
+      iree_make_const_byte_span(&sentinel, 1);
+  EXPECT_FALSE(iree_byte_sequence_try_get_contiguous_span(&sequence.base,
+                                                          &contiguous_span));
+  EXPECT_EQ(contiguous_span.data, nullptr);
+  EXPECT_EQ(contiguous_span.data_length, 0u);
 
   iree_byte_sequence_release(&sequence.base);
 }

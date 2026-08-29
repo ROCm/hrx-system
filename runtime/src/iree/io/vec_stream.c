@@ -184,10 +184,29 @@ static iree_status_t iree_io_vec_stream_byte_sequence_enumerate(
   return iree_ok_status();
 }
 
+static bool iree_io_vec_stream_byte_sequence_try_get_contiguous_span(
+    const iree_byte_sequence_t* base_sequence,
+    iree_const_byte_span_t* out_span) {
+  const iree_io_vec_stream_byte_sequence_t* sequence =
+      iree_io_vec_stream_byte_sequence_const_cast(base_sequence);
+  if (sequence->block_head == NULL) {
+    *out_span = iree_const_byte_span_empty();
+    return true;
+  }
+  if (sequence->block_head->next != NULL) {
+    return false;
+  }
+  *out_span = iree_make_const_byte_span(sequence->block_head->contents,
+                                        sequence->block_head->length);
+  return true;
+}
+
 static const iree_byte_sequence_vtable_t
     iree_io_vec_stream_byte_sequence_vtable = {
         .destroy = iree_io_vec_stream_byte_sequence_destroy,
         .enumerate = iree_io_vec_stream_byte_sequence_enumerate,
+        .try_get_contiguous_span =
+            iree_io_vec_stream_byte_sequence_try_get_contiguous_span,
 };
 
 IREE_API_EXPORT iree_status_t iree_io_vec_stream_move_contents(
