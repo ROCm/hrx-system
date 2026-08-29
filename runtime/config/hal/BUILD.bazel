@@ -8,18 +8,16 @@ load("@bazel_skylib//rules:common_settings.bzl", "string_list_flag")
 
 package(default_visibility = ["//visibility:public"])
 
-# Driver registration defaults to the dependency-light host drivers. GPU drivers
+# Driver registration defaults to the dependency-light host driver. GPU drivers
 # remain opt-in so embedders do not fetch SDK packages by depending on the
 # runtime's default driver registry.
 DEFAULT_DRIVERS = [
     "local-task",
-    "null",
 ]
 
 SUPPORTED_DRIVERS = [
     "amdgpu",
     "local-task",
-    "null",
     "vulkan",
     "webgpu",
 ]

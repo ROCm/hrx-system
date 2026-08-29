@@ -34,12 +34,6 @@ iree_runtime_cc_library(
             "//conditions:default": [],
         }) +
         iree_select({
-            "//runtime/config/hal:driver_null": [
-                "//runtime/src/iree/hal/drivers/null/registration",
-            ],
-            "//conditions:default": [],
-        }) +
-        iree_select({
             "//runtime/config/hal:driver_vulkan": [
                 "//runtime/src/iree/hal/drivers/vulkan/registration",
             ],

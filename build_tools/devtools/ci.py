@@ -31,7 +31,6 @@ CMAKE_SANITIZER_OPTIONS = {
 BAZEL_HAL_DRIVER_DEFINES = (
     ("amdgpu", "IREE_HAL_DRIVER_AMDGPU"),
     ("local-task", "IREE_HAL_DRIVER_LOCAL_TASK"),
-    ("null", "IREE_HAL_DRIVER_NULL"),
     ("vulkan", "IREE_HAL_DRIVER_VULKAN"),
     ("webgpu", "IREE_HAL_DRIVER_WEBGPU"),
 )
@@ -56,7 +55,6 @@ CI_SUPPORTED_HAL_DRIVERS = frozenset(driver for driver, _ in BAZEL_HAL_DRIVER_DE
 REPOSITORY_BUILD_HAL_DRIVERS = (
     "amdgpu",
     "local-task",
-    "null",
     "vulkan",
     "webgpu",
 )

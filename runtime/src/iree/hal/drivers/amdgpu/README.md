@@ -20,7 +20,7 @@ compiled for your local GPU architecture:
 
 ```sh
 iree-bazel-build //tools:iree-run-module \
-  --//runtime/config/hal:drivers=amdgpu,local-task,null \
+  --//runtime/config/hal:drivers=amdgpu,local-task \
   --//runtime/src/iree/hal/drivers/amdgpu:targets=gfx1100
 ```
 
@@ -87,7 +87,7 @@ IREE_TRACY_CAPTURE=/path/to/tracy-capture \
   --trace \
   --trace_name=amdgpu_runtime \
   //tools:iree-run-module \
-  --//runtime/config/hal:drivers=amdgpu,local-task,null \
+  --//runtime/config/hal:drivers=amdgpu,local-task \
   --//runtime/src/iree/hal/drivers/amdgpu:targets=gfx1100 \
   -- \
   --device=amdgpu \

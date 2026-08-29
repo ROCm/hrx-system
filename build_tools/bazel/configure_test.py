@@ -120,7 +120,7 @@ class ConfigureBazelTest(unittest.TestCase):
             config = self.configure_bazel.generate_config(args)
 
         self.assertIn(
-            "build --//runtime/config/hal:drivers=local-task,null,amdgpu",
+            "build --//runtime/config/hal:drivers=local-task,amdgpu",
             config,
         )
         self.assertIn("common --repo_env=IREE_DEPENDENCY_MODE=pinned", config)
@@ -134,14 +134,14 @@ class ConfigureBazelTest(unittest.TestCase):
 
             args = self.configure_bazel.parse_arguments(
                 [
-                    "--//runtime/config/hal:drivers=amdgpu,local-task,null",
+                    "--//runtime/config/hal:drivers=amdgpu,local-task",
                     f"--repo_env=IREE_ROCM_PATH={rocm_root}",
                 ]
             )
             config = self.configure_bazel.generate_config(args)
 
         self.assertIn(
-            "build --//runtime/config/hal:drivers=local-task,null,amdgpu",
+            "build --//runtime/config/hal:drivers=local-task,amdgpu",
             config,
         )
         self.assertIn("common --repo_env=IREE_DEPENDENCY_MODE=pinned", config)
@@ -156,7 +156,7 @@ class ConfigureBazelTest(unittest.TestCase):
 
             args = self.configure_bazel.parse_arguments(
                 [
-                    "--//runtime/config/hal:drivers=amdgpu,local-task,null",
+                    "--//runtime/config/hal:drivers=amdgpu,local-task",
                     "--repo_env=IREE_ROCM_DEPENDENCY_MODE=pinned",
                     f"--repo_env=IREE_ROCM_PATH={rocm_root}",
                 ]
@@ -173,7 +173,7 @@ class ConfigureBazelTest(unittest.TestCase):
         config = self.configure_bazel.generate_config(args)
 
         self.assertIn(
-            "build --//runtime/config/hal:drivers=local-task,null,webgpu",
+            "build --//runtime/config/hal:drivers=local-task,webgpu",
             config,
         )
         self.assertIn("common --repo_env=IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=none", config)
@@ -185,7 +185,7 @@ class ConfigureBazelTest(unittest.TestCase):
         config = self.configure_bazel.generate_config(args)
 
         self.assertIn(
-            "build --//runtime/config/hal:drivers=local-task,null,vulkan",
+            "build --//runtime/config/hal:drivers=local-task,vulkan",
             config,
         )
         self.assertIn("common --repo_env=IREE_DEPENDENCY_MODE=pinned", config)
