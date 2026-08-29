@@ -18,118 +18,19 @@
 #include "loom/target/arch/vm/descriptors.h"
 #include "loom/target/arch/vm/lower/constants.h"
 #include "loom/target/arch/vm/lower/types.h"
+#include "loom/util/walk.h"
 
 static const loom_pass_info_t
     loom_vm_materialize_function_contracts_pass_info_storage = {
         .name = IREE_SVL("vm-materialize-function-contracts"),
         .description =
-            IREE_SVL("Materialize VM function predicates as entry checks."),
+            IREE_SVL("Materialize VM function predicates as executable "
+                     "preconditions and postconditions."),
         .kind = LOOM_PASS_FUNCTION,
 };
 
 const loom_pass_info_t* loom_vm_materialize_function_contracts_pass_info(void) {
   return &loom_vm_materialize_function_contracts_pass_info_storage;
-}
-
-static bool loom_vm_contract_scalar_is_integer(loom_scalar_type_t scalar_type) {
-  return loom_scalar_type_is_integer(scalar_type) ||
-         scalar_type == LOOM_SCALAR_TYPE_INDEX ||
-         scalar_type == LOOM_SCALAR_TYPE_OFFSET;
-}
-
-static bool loom_vm_contract_value_is_argument(const loom_value_id_t* arguments,
-                                               uint16_t argument_count,
-                                               loom_value_id_t value) {
-  for (uint16_t i = 0; i < argument_count; ++i) {
-    if (arguments[i] == value) return true;
-  }
-  return false;
-}
-
-static iree_status_t loom_vm_contract_value_scalar_type(
-    const loom_module_t* module, loom_value_id_t value,
-    loom_scalar_type_t* out_scalar_type) {
-  if (value >= module->values.count ||
-      !loom_vm_value_register_scalar_type(loom_module_value_type(module, value),
-                                          out_scalar_type)) {
-    return iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "VM function predicate value %u must be one scalar vm.value register",
-        value);
-  }
-  return iree_ok_status();
-}
-
-static bool loom_vm_contract_predicate_is_float(
-    loom_predicate_kind_t predicate_kind) {
-  return predicate_kind == LOOM_PREDICATE_NOT_NAN ||
-         predicate_kind == LOOM_PREDICATE_NOT_INF ||
-         predicate_kind == LOOM_PREDICATE_FINITE;
-}
-
-static iree_status_t loom_vm_contract_preflight_predicate(
-    const loom_module_t* module, const loom_value_id_t* arguments,
-    uint16_t argument_count, const loom_predicate_t* predicate) {
-  const char* predicate_name = loom_predicate_kind_name(predicate->kind);
-  if (predicate->arg_count == 0 ||
-      predicate->arg_tags[0] != LOOM_PRED_ARG_VALUE) {
-    return iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "VM function predicate '%s' must constrain a function argument",
-        predicate_name ? predicate_name : "<unknown>");
-  }
-
-  const bool is_float = loom_vm_contract_predicate_is_float(predicate->kind);
-  for (uint8_t i = 0; i < predicate->arg_count; ++i) {
-    if (predicate->arg_tags[i] == LOOM_PRED_ARG_CONST) {
-      if (!is_float) continue;
-      return iree_make_status(
-          IREE_STATUS_UNIMPLEMENTED,
-          "VM floating-point predicate '%s' cannot use an integer literal",
-          predicate_name ? predicate_name : "<unknown>");
-    }
-    if (predicate->arg_tags[i] != LOOM_PRED_ARG_VALUE ||
-        predicate->args[i] < 0 || predicate->args[i] > UINT32_MAX) {
-      return iree_make_status(
-          IREE_STATUS_UNIMPLEMENTED,
-          "VM function predicate '%s' argument %u is not a supported value",
-          predicate_name ? predicate_name : "<unknown>", (unsigned)i);
-    }
-    const loom_value_id_t value = (loom_value_id_t)predicate->args[i];
-    if (!loom_vm_contract_value_is_argument(arguments, argument_count, value)) {
-      return iree_make_status(
-          IREE_STATUS_UNIMPLEMENTED,
-          "VM function predicate '%s' value %u is not a function argument",
-          predicate_name ? predicate_name : "<unknown>", value);
-    }
-    loom_scalar_type_t scalar_type = LOOM_SCALAR_TYPE_NONE;
-    IREE_RETURN_IF_ERROR(
-        loom_vm_contract_value_scalar_type(module, value, &scalar_type));
-    const bool type_supported =
-        is_float ? loom_scalar_type_is_float(scalar_type)
-                 : loom_vm_contract_scalar_is_integer(scalar_type);
-    if (!type_supported) {
-      return iree_make_status(
-          IREE_STATUS_UNIMPLEMENTED,
-          "VM function predicate '%s' argument %u has an unsupported scalar "
-          "type",
-          predicate_name ? predicate_name : "<unknown>", (unsigned)i);
-    }
-  }
-  return iree_ok_status();
-}
-
-static iree_status_t loom_vm_contract_preflight(
-    const loom_module_t* module, loom_func_like_t function,
-    const loom_predicate_t* predicates, uint16_t predicate_count) {
-  uint16_t argument_count = 0;
-  const loom_value_id_t* arguments =
-      loom_func_like_arg_ids(function, &argument_count);
-  for (uint16_t i = 0; i < predicate_count; ++i) {
-    IREE_RETURN_IF_ERROR(loom_vm_contract_preflight_predicate(
-        module, arguments, argument_count, &predicates[i]));
-  }
-  return iree_ok_status();
 }
 
 typedef struct loom_vm_contract_materializer_t {
@@ -147,11 +48,62 @@ typedef struct loom_vm_contract_materializer_t {
   loom_type_t f32_type;
   // Typed VM ref register carrying a logical buffer.
   loom_type_t buffer_ref_type;
-  // Shared null diagnostic message emitted before the first assertion.
+  // Function result state used to substitute each return site's values.
+  struct {
+    // Signature result placeholders referenced by postconditions.
+    const loom_value_id_t* placeholders;
+    // Values produced by the return currently being materialized.
+    const loom_value_id_t* values;
+    // Number of function results in both arrays.
+    uint16_t count;
+  } results;
+  // Null diagnostic message shared by assertions at one insertion site.
   loom_value_id_t null_message;
-  // Source location assigned to all materialized checks.
+  // Source location assigned to checks at the current insertion site.
   loom_location_id_t location;
 } loom_vm_contract_materializer_t;
+
+static loom_scalar_type_t loom_vm_contract_value_scalar_type(
+    const loom_module_t* module, loom_value_id_t value) {
+  loom_scalar_type_t scalar_type = LOOM_SCALAR_TYPE_NONE;
+  if (!loom_vm_value_register_scalar_type(loom_module_value_type(module, value),
+                                          &scalar_type)) {
+    IREE_ASSERT_UNREACHABLE(
+        "verified VM function predicate values are scalar vm.value registers");
+    IREE_BUILTIN_UNREACHABLE();
+  }
+  return scalar_type;
+}
+
+static bool loom_vm_contract_predicate_references_result(
+    const loom_vm_contract_materializer_t* materializer,
+    const loom_predicate_t* predicate) {
+  for (uint8_t argument_index = 0; argument_index < predicate->arg_count;
+       ++argument_index) {
+    if (predicate->arg_tags[argument_index] != LOOM_PRED_ARG_VALUE) continue;
+    const loom_value_id_t value =
+        (loom_value_id_t)predicate->args[argument_index];
+    for (uint16_t result_index = 0; result_index < materializer->results.count;
+         ++result_index) {
+      if (materializer->results.placeholders[result_index] == value) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+static loom_value_id_t loom_vm_contract_resolve_value(
+    const loom_vm_contract_materializer_t* materializer,
+    loom_value_id_t value) {
+  for (uint16_t result_index = 0; result_index < materializer->results.count;
+       ++result_index) {
+    if (materializer->results.placeholders[result_index] != value) continue;
+    IREE_ASSERT(materializer->results.values != NULL);
+    return materializer->results.values[result_index];
+  }
+  return value;
+}
 
 static const loom_low_descriptor_t* loom_vm_contract_descriptor(
     const loom_vm_contract_materializer_t* materializer,
@@ -340,8 +292,9 @@ static iree_status_t loom_vm_contract_normalize_integer_value(
   return iree_ok_status();
 }
 
-static int loom_vm_contract_integer_width(const loom_module_t* module,
-                                          const loom_predicate_t* predicate) {
+static int loom_vm_contract_integer_width(
+    const loom_vm_contract_materializer_t* materializer,
+    const loom_predicate_t* predicate) {
   for (uint8_t i = 0; i < predicate->arg_count; ++i) {
     if (predicate->arg_tags[i] == LOOM_PRED_ARG_CONST) {
       if (predicate->args[i] < INT32_MIN || predicate->args[i] > INT32_MAX) {
@@ -349,12 +302,10 @@ static int loom_vm_contract_integer_width(const loom_module_t* module,
       }
       continue;
     }
-    loom_scalar_type_t scalar_type = LOOM_SCALAR_TYPE_NONE;
-    const loom_value_id_t value = (loom_value_id_t)predicate->args[i];
-    const bool has_scalar_type = loom_vm_value_register_scalar_type(
-        loom_module_value_type(module, value), &scalar_type);
-    IREE_ASSERT(has_scalar_type);
-    (void)has_scalar_type;
+    const loom_value_id_t value = loom_vm_contract_resolve_value(
+        materializer, (loom_value_id_t)predicate->args[i]);
+    const loom_scalar_type_t scalar_type = loom_vm_contract_value_scalar_type(
+        materializer->rewriter->module, value);
     if (scalar_type == LOOM_SCALAR_TYPE_I64 ||
         scalar_type == LOOM_SCALAR_TYPE_INDEX ||
         scalar_type == LOOM_SCALAR_TYPE_OFFSET) {
@@ -372,11 +323,10 @@ static iree_status_t loom_vm_contract_build_integer_arg(
     return loom_vm_contract_build_integer_constant(
         materializer, width, predicate->args[argument_index], out_result);
   }
-  const loom_value_id_t value =
-      (loom_value_id_t)predicate->args[argument_index];
-  loom_scalar_type_t scalar_type = LOOM_SCALAR_TYPE_NONE;
-  IREE_RETURN_IF_ERROR(loom_vm_contract_value_scalar_type(
-      materializer->rewriter->module, value, &scalar_type));
+  const loom_value_id_t value = loom_vm_contract_resolve_value(
+      materializer, (loom_value_id_t)predicate->args[argument_index]);
+  const loom_scalar_type_t scalar_type =
+      loom_vm_contract_value_scalar_type(materializer->rewriter->module, value);
   return loom_vm_contract_normalize_integer_value(
       materializer, value, scalar_type, width, out_result);
 }
@@ -437,8 +387,7 @@ static enum loom_vm_contract_comparison_e loom_vm_contract_relation_comparison(
 static iree_status_t loom_vm_contract_materialize_relation(
     loom_vm_contract_materializer_t* materializer,
     const loom_predicate_t* predicate) {
-  const int width =
-      loom_vm_contract_integer_width(materializer->rewriter->module, predicate);
+  const int width = loom_vm_contract_integer_width(materializer, predicate);
   loom_value_id_t lhs = LOOM_VALUE_ID_INVALID;
   loom_value_id_t rhs = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_vm_contract_build_integer_arg(
@@ -456,8 +405,7 @@ static iree_status_t loom_vm_contract_materialize_relation(
 static iree_status_t loom_vm_contract_materialize_range(
     loom_vm_contract_materializer_t* materializer,
     const loom_predicate_t* predicate) {
-  const int width =
-      loom_vm_contract_integer_width(materializer->rewriter->module, predicate);
+  const int width = loom_vm_contract_integer_width(materializer, predicate);
   loom_value_id_t value = LOOM_VALUE_ID_INVALID;
   loom_value_id_t lower = LOOM_VALUE_ID_INVALID;
   loom_value_id_t upper = LOOM_VALUE_ID_INVALID;
@@ -482,8 +430,7 @@ static iree_status_t loom_vm_contract_materialize_range(
 static iree_status_t loom_vm_contract_materialize_multiple(
     loom_vm_contract_materializer_t* materializer,
     const loom_predicate_t* predicate) {
-  const int width =
-      loom_vm_contract_integer_width(materializer->rewriter->module, predicate);
+  const int width = loom_vm_contract_integer_width(materializer, predicate);
   loom_value_id_t value = LOOM_VALUE_ID_INVALID;
   loom_value_id_t divisor = LOOM_VALUE_ID_INVALID;
   loom_value_id_t zero = LOOM_VALUE_ID_INVALID;
@@ -518,8 +465,7 @@ static iree_status_t loom_vm_contract_materialize_multiple(
 static iree_status_t loom_vm_contract_materialize_power_of_two(
     loom_vm_contract_materializer_t* materializer,
     const loom_predicate_t* predicate) {
-  const int width =
-      loom_vm_contract_integer_width(materializer->rewriter->module, predicate);
+  const int width = loom_vm_contract_integer_width(materializer, predicate);
   loom_value_id_t value = LOOM_VALUE_ID_INVALID;
   loom_value_id_t zero = LOOM_VALUE_ID_INVALID;
   loom_value_id_t one = LOOM_VALUE_ID_INVALID;
@@ -597,10 +543,10 @@ static iree_status_t loom_vm_contract_normalize_float_value(
 static iree_status_t loom_vm_contract_materialize_float(
     loom_vm_contract_materializer_t* materializer,
     const loom_predicate_t* predicate) {
-  const loom_value_id_t source = (loom_value_id_t)predicate->args[0];
-  loom_scalar_type_t scalar_type = LOOM_SCALAR_TYPE_NONE;
-  IREE_RETURN_IF_ERROR(loom_vm_contract_value_scalar_type(
-      materializer->rewriter->module, source, &scalar_type));
+  const loom_value_id_t source = loom_vm_contract_resolve_value(
+      materializer, (loom_value_id_t)predicate->args[0]);
+  const loom_scalar_type_t scalar_type = loom_vm_contract_value_scalar_type(
+      materializer->rewriter->module, source);
   loom_value_id_t value = LOOM_VALUE_ID_INVALID;
   int width = 0;
   IREE_RETURN_IF_ERROR(loom_vm_contract_normalize_float_value(
@@ -666,9 +612,47 @@ static iree_status_t loom_vm_contract_materialize_predicate(
     case LOOM_PREDICATE_COUNT_:
       break;
   }
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "unsupported VM function predicate kind %u",
-                          (unsigned)predicate->kind);
+  IREE_ASSERT_UNREACHABLE("verified VM function predicate kind");
+  IREE_BUILTIN_UNREACHABLE();
+}
+
+typedef struct loom_vm_contract_return_walk_t {
+  // Materializer shared across all return sites in the function.
+  loom_vm_contract_materializer_t* materializer;
+  // Verified function predicates retained on the Low definition.
+  const loom_predicate_t* predicates;
+  // Number of entries in |predicates|.
+  uint16_t predicate_count;
+} loom_vm_contract_return_walk_t;
+
+static iree_status_t loom_vm_contract_materialize_return(
+    void* user_data, loom_op_t* op, const loom_walk_context_t* context,
+    loom_walk_result_t* out_result) {
+  (void)context;
+  *out_result = LOOM_WALK_CONTINUE;
+  if (!loom_low_return_isa(op)) return iree_ok_status();
+
+  loom_vm_contract_return_walk_t* walk =
+      (loom_vm_contract_return_walk_t*)user_data;
+  loom_vm_contract_materializer_t* materializer = walk->materializer;
+  const loom_value_slice_t return_values = loom_low_return_values(op);
+  IREE_ASSERT_EQ(return_values.count, materializer->results.count);
+  materializer->results.values = return_values.values;
+  materializer->null_message = LOOM_VALUE_ID_INVALID;
+  materializer->location = op->location;
+  loom_builder_set_before(&materializer->rewriter->builder, op);
+
+  iree_status_t status = iree_ok_status();
+  for (uint16_t i = 0; i < walk->predicate_count && iree_status_is_ok(status);
+       ++i) {
+    if (loom_vm_contract_predicate_references_result(materializer,
+                                                     &walk->predicates[i])) {
+      status = loom_vm_contract_materialize_predicate(materializer,
+                                                      &walk->predicates[i]);
+    }
+  }
+  materializer->results.values = NULL;
+  return status;
 }
 
 static iree_status_t loom_vm_contract_materializer_initialize(
@@ -712,8 +696,6 @@ iree_status_t loom_vm_materialize_function_contracts_run(
   const loom_predicate_t* predicates =
       loom_func_like_predicates(function, &predicate_count);
   if (predicate_count == 0) return iree_ok_status();
-  IREE_RETURN_IF_ERROR(loom_vm_contract_preflight(module, function, predicates,
-                                                  predicate_count));
 
   loom_rewriter_t rewriter = {0};
   IREE_RETURN_IF_ERROR(
@@ -721,6 +703,9 @@ iree_status_t loom_vm_materialize_function_contracts_run(
   loom_vm_contract_materializer_t materializer;
   iree_status_t status = loom_vm_contract_materializer_initialize(
       &rewriter, function.op->location, &materializer);
+  materializer.results.placeholders = loom_op_const_results(function.op);
+  materializer.results.count = function.op->result_count;
+  bool has_postconditions = false;
   if (iree_status_is_ok(status)) {
     loom_region_t* body = loom_low_func_def_body(function.op);
     loom_block_t* entry_block = loom_region_entry_block(body);
@@ -728,17 +713,34 @@ iree_status_t loom_vm_materialize_function_contracts_run(
     loom_builder_set_before(&rewriter.builder, entry_block->first_op);
     for (uint16_t i = 0; i < predicate_count && iree_status_is_ok(status);
          ++i) {
-      status =
-          loom_vm_contract_materialize_predicate(&materializer, &predicates[i]);
+      if (loom_vm_contract_predicate_references_result(&materializer,
+                                                       &predicates[i])) {
+        has_postconditions = true;
+      } else {
+        status = loom_vm_contract_materialize_predicate(&materializer,
+                                                        &predicates[i]);
+      }
     }
+  }
+  if (iree_status_is_ok(status) && has_postconditions) {
+    loom_vm_contract_return_walk_t walk = {
+        .materializer = &materializer,
+        .predicates = predicates,
+        .predicate_count = predicate_count,
+    };
+    loom_walk_result_t walk_result = LOOM_WALK_CONTINUE;
+    status = loom_walk_function(
+        module, function, LOOM_WALK_PRE_ORDER,
+        (loom_walk_callback_t){loom_vm_contract_materialize_return, &walk},
+        pass->arena, &walk_result);
   }
   if (iree_status_is_ok(status)) {
     status = loom_rewriter_set_attr(&rewriter, function.op,
                                     loom_low_func_def_predicates_ATTR_INDEX,
                                     loom_attr_absent());
   }
-  // Entry checks make the lowered function observably effectful even when the
-  // source function was pure over inputs satisfying its contract.
+  // Executable checks make the lowered function observably effectful even when
+  // the source function was pure over values satisfying its contract.
   if (iree_status_is_ok(status) && loom_func_like_purity(function) != 0) {
     status = loom_rewriter_set_attr(&rewriter, function.op,
                                     loom_low_func_def_purity_ATTR_INDEX,

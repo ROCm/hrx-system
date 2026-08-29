@@ -19,7 +19,8 @@ extern "C" {
 // Returns static pass metadata for vm-materialize-function-contracts.
 const loom_pass_info_t* loom_vm_materialize_function_contracts_pass_info(void);
 
-// Materializes function predicates as executable entry checks.
+// Materializes function predicates as executable precondition and
+// postcondition checks.
 iree_status_t loom_vm_materialize_function_contracts_run(
     loom_pass_t* pass, loom_module_t* module, loom_func_like_t function);
 

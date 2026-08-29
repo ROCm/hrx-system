@@ -2113,12 +2113,21 @@ static iree_status_t loom_low_lower_remap_function_predicates(
   IREE_RETURN_IF_ERROR(loom_ir_remap_initialize(
       context->module, context->module, &context->function_arena,
       /*options=*/NULL, &remap));
+  IREE_ASSERT_EQ(context->source_function.op->result_count,
+                 context->low_func_op->result_count);
+  IREE_RETURN_IF_ERROR(loom_ir_remap_map_values(
+      &remap, loom_op_const_results(context->source_function.op),
+      loom_op_const_results(context->low_func_op),
+      context->source_function.op->result_count));
   for (uint16_t i = 0; i < predicate_count; ++i) {
     for (uint8_t j = 0; j < source_predicates[i].arg_count; ++j) {
       if (source_predicates[i].arg_tags[j] != LOOM_PRED_ARG_VALUE) continue;
       loom_value_id_t source_value =
           (loom_value_id_t)source_predicates[i].args[j];
       loom_value_id_t low_value = LOOM_VALUE_ID_INVALID;
+      if (loom_ir_remap_try_lookup_value(&remap, source_value, &low_value)) {
+        continue;
+      }
       IREE_RETURN_IF_ERROR(
           loom_low_lower_lookup_value(context, source_value, &low_value));
       IREE_RETURN_IF_ERROR(
