@@ -4,6 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <vector>
@@ -68,6 +69,19 @@ iree_status_t InvokeLaunchConfig(iree_vm_invocation_t* invocation,
   };
   return iree_vm_invoke(invocation, function,
                         iree_vm_variant_span_from_array(arguments), results);
+}
+
+IREE_ATTRIBUTE_NOINLINE iree_status_t
+InvokeLaunchConfigOnStack(iree_vm_function_t function, uint32_t row_count,
+                          iree_vm_variant_span_t results) {
+  alignas(max_align_t) uint8_t storage[kInvocationStorageSize];
+  iree_vm_invocation_t* invocation = nullptr;
+  IREE_RETURN_IF_ERROR(iree_vm_invocation_initialize(
+      iree_make_byte_span(storage, sizeof(storage)), &invocation));
+  iree_status_t status =
+      InvokeLaunchConfig(invocation, function, row_count, results);
+  iree_vm_invocation_deinitialize(invocation);
+  return status;
 }
 
 iree_status_t InitializeBenchmarkContext(BenchmarkContext* context) {
@@ -220,6 +234,7 @@ iree_status_t RunProcessCreateBenchmark(
 enum class BenchmarkMode {
   kRaw,
   kChecked,
+  kStack16KChecked,
 };
 
 iree_status_t RunEmptyBenchmark(iree_benchmark_state_t* benchmark_state) {
@@ -268,8 +283,13 @@ iree_status_t RunLaunchConfigBenchmark(iree_benchmark_state_t* benchmark_state,
   while (iree_status_is_ok(status) &&
          iree_benchmark_keep_running(benchmark_state, 1)) {
     iree_vm_variant_t results[11];
-    status = InvokeLaunchConfig(context.invocation, context.function, row_count,
-                                iree_vm_variant_span_from_array(results));
+    status = mode != BenchmarkMode::kStack16KChecked
+                 ? InvokeLaunchConfig(context.invocation, context.function,
+                                      row_count,
+                                      iree_vm_variant_span_from_array(results))
+                 : InvokeLaunchConfigOnStack(
+                       context.function, row_count,
+                       iree_vm_variant_span_from_array(results));
     for (iree_host_size_t i = 0;
          i < IREE_ARRAYSIZE(results) && iree_status_is_ok(status); ++i) {
       if (mode == BenchmarkMode::kRaw) {
@@ -312,6 +332,12 @@ IREE_BENCHMARK_FN(BM_BytecodeLaunchConfigReuseChecked) {
   return RunLaunchConfigBenchmark(benchmark_state, BenchmarkMode::kChecked);
 }
 IREE_BENCHMARK_REGISTER(BM_BytecodeLaunchConfigReuseChecked);
+
+IREE_BENCHMARK_FN(BM_BytecodeLaunchConfigStack16KChecked) {
+  return RunLaunchConfigBenchmark(benchmark_state,
+                                  BenchmarkMode::kStack16KChecked);
+}
+IREE_BENCHMARK_REGISTER(BM_BytecodeLaunchConfigStack16KChecked);
 
 IREE_BENCHMARK_FN(BM_BytecodeEmptyReuse) {
   return RunEmptyBenchmark(benchmark_state);
