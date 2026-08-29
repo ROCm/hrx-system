@@ -14,7 +14,7 @@
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
 #include "iree/hal/api.h"
-#include "iree/hal/drivers/local_sync/sync_device.h"
+#include "iree/hal/drivers/local_task/registration/driver_module.h"
 #include "iree/io/file_handle.h"
 #include "iree/io/parameter_index.h"
 #include "iree/io/parameter_provider.h"
@@ -48,7 +48,7 @@ class Ref {
   T* value_ = nullptr;
 };
 
-static iree_hal_device_group_t* CreateLocalSyncDeviceGroup() {
+static iree_hal_device_group_t* CreateLocalTaskDeviceGroup() {
   Ref<iree_async_proactor_pool_t, iree_async_proactor_pool_release>
       proactor_pool;
   IREE_CHECK_OK(iree_async_proactor_pool_create(
@@ -56,22 +56,21 @@ static iree_hal_device_group_t* CreateLocalSyncDeviceGroup() {
       iree_async_proactor_pool_options_default(), iree_allocator_system(),
       proactor_pool.out()));
 
-  Ref<iree_hal_allocator_t, iree_hal_allocator_release> device_allocator;
-  IREE_CHECK_OK(iree_hal_allocator_create_heap(
-      IREE_SV("parameter-index-provider-test"), iree_allocator_system(),
-      iree_allocator_system(), device_allocator.out()));
+  iree_hal_driver_registry_t* registry = nullptr;
+  IREE_CHECK_OK(
+      iree_hal_driver_registry_allocate(iree_allocator_system(), &registry));
+  IREE_CHECK_OK(iree_hal_local_task_driver_module_register(registry));
 
-  iree_hal_sync_device_params_t sync_params;
-  iree_hal_sync_device_params_initialize(&sync_params);
   iree_hal_device_create_params_t create_params =
       iree_hal_device_create_params_default();
   create_params.proactor_pool = proactor_pool.get();
 
   iree_hal_device_t* device = nullptr;
-  IREE_CHECK_OK(iree_hal_sync_device_create(
-      IREE_SV("parameter-index-provider-test"), &sync_params, &create_params,
-      /*loader_count=*/0, /*loaders=*/nullptr, device_allocator.get(),
-      iree_allocator_system(), &device));
+  iree_status_t status =
+      iree_hal_create_device(registry, IREE_SV("local-task"), &create_params,
+                             iree_allocator_system(), &device);
+  iree_hal_driver_registry_free(registry);
+  IREE_CHECK_OK(status);
 
   Ref<iree_async_frontier_tracker_t, iree_async_frontier_tracker_release>
       frontier_tracker;
@@ -189,7 +188,7 @@ static void ExpectBufferBytesEqual(iree_hal_buffer_t* buffer,
 
 class ParameterIndexProviderTest : public ::testing::Test {
  protected:
-  static void SetUpTestSuite() { device_group_ = CreateLocalSyncDeviceGroup(); }
+  static void SetUpTestSuite() { device_group_ = CreateLocalTaskDeviceGroup(); }
 
   static void TearDownTestSuite() {
     iree_hal_device_group_release(device_group_);

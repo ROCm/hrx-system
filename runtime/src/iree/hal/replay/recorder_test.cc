@@ -13,7 +13,7 @@
 
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
-#include "iree/hal/drivers/local_sync/sync_device.h"
+#include "iree/hal/drivers/local_task/registration/driver_module.h"
 #include "iree/hal/replay/execute.h"
 #include "iree/hal/replay/file_reader.h"
 #include "iree/hal/testing/mock_device.h"
@@ -66,36 +66,33 @@ static iree_hal_device_group_t* CreateMockDeviceGroup() {
   return group;
 }
 
-static iree_hal_device_t* CreateSyncDevice(const char* identifier) {
+static iree_hal_device_t* CreateLocalTaskDevice() {
   iree_async_proactor_pool_t* proactor_pool = nullptr;
   IREE_CHECK_OK(iree_async_proactor_pool_create(
       1, /*node_ids=*/nullptr, iree_async_proactor_pool_options_default(),
       iree_allocator_system(), &proactor_pool));
 
-  iree_hal_allocator_t* device_allocator = nullptr;
-  IREE_CHECK_OK(iree_hal_allocator_create_heap(
-      iree_make_cstring_view("local"), iree_allocator_system(),
-      iree_allocator_system(), &device_allocator));
+  iree_hal_driver_registry_t* registry = nullptr;
+  IREE_CHECK_OK(
+      iree_hal_driver_registry_allocate(iree_allocator_system(), &registry));
+  IREE_CHECK_OK(iree_hal_local_task_driver_module_register(registry));
 
-  iree_hal_sync_device_params_t sync_params;
-  iree_hal_sync_device_params_initialize(&sync_params);
   iree_hal_device_create_params_t create_params =
       iree_hal_device_create_params_default();
   create_params.proactor_pool = proactor_pool;
 
   iree_hal_device_t* device = nullptr;
-  iree_status_t status = iree_hal_sync_device_create(
-      iree_make_cstring_view(identifier), &sync_params, &create_params,
-      /*loader_count=*/0, /*loaders=*/nullptr, device_allocator,
-      iree_allocator_system(), &device);
-  iree_hal_allocator_release(device_allocator);
+  iree_status_t status =
+      iree_hal_create_device(registry, IREE_SV("local-task"), &create_params,
+                             iree_allocator_system(), &device);
+  iree_hal_driver_registry_free(registry);
   iree_async_proactor_pool_release(proactor_pool);
   IREE_CHECK_OK(status);
   return device;
 }
 
-static iree_hal_device_group_t* CreateSyncDeviceGroup() {
-  iree_hal_device_t* device = CreateSyncDevice("local-sync");
+static iree_hal_device_group_t* CreateLocalTaskDeviceGroup() {
+  iree_hal_device_t* device = CreateLocalTaskDevice();
   iree_hal_device_t* devices[] = {device};
   iree_hal_device_group_t* group = CreateDeviceGroup(1, devices);
   iree_hal_device_release(device);
@@ -457,7 +454,7 @@ TEST(ReplayRecorderTest, WrappedDeviceRecordsHostCallAsUnsupported) {
   std::vector<uint8_t> storage(16384, 0);
   iree_hal_replay_recorder_t* recorder = CreateHostAllocationRecorder(&storage);
 
-  iree_hal_device_group_t* source_group = CreateSyncDeviceGroup();
+  iree_hal_device_group_t* source_group = CreateLocalTaskDeviceGroup();
   iree_hal_device_group_t* wrapped_group = nullptr;
   IREE_ASSERT_OK(iree_hal_replay_wrap_device_group(
       recorder, source_group, iree_allocator_system(), &wrapped_group));
@@ -467,12 +464,26 @@ TEST(ReplayRecorderTest, WrappedDeviceRecordsHostCallAsUnsupported) {
   int call_count = 0;
   iree_hal_host_call_t call =
       iree_hal_make_host_call(CountHostCall, &call_count);
+  iree_hal_semaphore_t* signal_semaphore = nullptr;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      wrapped_device, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
+      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &signal_semaphore));
+  uint64_t signal_value = 1;
+  const iree_hal_semaphore_list_t signal_semaphore_list = {
+      /*.count=*/1,
+      /*.semaphores=*/&signal_semaphore,
+      /*.payload_values=*/&signal_value,
+  };
   const uint64_t args[4] = {0, 1, 2, 3};
   IREE_ASSERT_OK(iree_hal_device_queue_host_call(
       wrapped_device, IREE_HAL_QUEUE_AFFINITY_ANY,
-      iree_hal_semaphore_list_empty(), iree_hal_semaphore_list_empty(), call,
-      args, IREE_HAL_HOST_CALL_FLAG_NONE));
+      iree_hal_semaphore_list_empty(), signal_semaphore_list, call, args,
+      IREE_HAL_HOST_CALL_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(signal_semaphore, signal_value,
+                                         iree_infinite_timeout(),
+                                         IREE_ASYNC_WAIT_FLAG_NONE));
   EXPECT_EQ(1, call_count);
+  iree_hal_semaphore_release(signal_semaphore);
 
   IREE_ASSERT_OK(iree_hal_replay_recorder_close(recorder));
   iree_hal_replay_recorder_release(recorder);
@@ -488,7 +499,7 @@ TEST(ReplayRecorderTest,
   std::vector<uint8_t> storage(32768, 0);
   iree_hal_replay_recorder_t* recorder = CreateHostAllocationRecorder(&storage);
 
-  iree_hal_device_group_t* source_group = CreateSyncDeviceGroup();
+  iree_hal_device_group_t* source_group = CreateLocalTaskDeviceGroup();
   iree_hal_device_group_t* wrapped_group = nullptr;
   IREE_ASSERT_OK(iree_hal_replay_wrap_device_group(
       recorder, source_group, iree_allocator_system(), &wrapped_group));
@@ -547,7 +558,7 @@ TEST(ReplayRecorderTest, WrappedAllocatorRecordsBuffersAndMapping) {
   std::vector<uint8_t> storage(32768, 0);
   iree_hal_replay_recorder_t* recorder = CreateHostAllocationRecorder(&storage);
 
-  iree_hal_device_group_t* source_group = CreateSyncDeviceGroup();
+  iree_hal_device_group_t* source_group = CreateLocalTaskDeviceGroup();
   iree_hal_device_group_t* wrapped_group = nullptr;
   IREE_ASSERT_OK(iree_hal_replay_wrap_device_group(
       recorder, source_group, iree_allocator_system(), &wrapped_group));
@@ -602,7 +613,7 @@ TEST(ReplayRecorderTest, PersistentWriteMapsFailLoud) {
   std::vector<uint8_t> storage(32768, 0);
   iree_hal_replay_recorder_t* recorder = CreateHostAllocationRecorder(&storage);
 
-  iree_hal_device_group_t* source_group = CreateSyncDeviceGroup();
+  iree_hal_device_group_t* source_group = CreateLocalTaskDeviceGroup();
   iree_hal_device_group_t* wrapped_group = nullptr;
   IREE_ASSERT_OK(iree_hal_replay_wrap_device_group(
       recorder, source_group, iree_allocator_system(), &wrapped_group));
@@ -649,7 +660,7 @@ TEST(ReplayRecorderTest, ExternalFileFailPolicyRejectsFdBackedFiles) {
   iree_hal_replay_recorder_t* recorder =
       CreateHostAllocationRecorder(&storage, &options);
 
-  iree_hal_device_group_t* source_group = CreateSyncDeviceGroup();
+  iree_hal_device_group_t* source_group = CreateLocalTaskDeviceGroup();
   iree_hal_device_group_t* wrapped_group = nullptr;
   IREE_ASSERT_OK(iree_hal_replay_wrap_device_group(
       recorder, source_group, iree_allocator_system(), &wrapped_group));
@@ -694,7 +705,7 @@ TEST(ReplayRecorderTest, ExternalFileCaptureAllPolicyEmbedsFdBackedFiles) {
   iree_hal_replay_recorder_t* recorder =
       CreateHostAllocationRecorder(&storage, &options);
 
-  iree_hal_device_group_t* source_group = CreateSyncDeviceGroup();
+  iree_hal_device_group_t* source_group = CreateLocalTaskDeviceGroup();
   iree_hal_device_group_t* wrapped_group = nullptr;
   IREE_ASSERT_OK(iree_hal_replay_wrap_device_group(
       recorder, source_group, iree_allocator_system(), &wrapped_group));
@@ -732,7 +743,7 @@ TEST(ReplayRecorderTest, WrappedDeviceRecordsQueueExecuteSemaphores) {
   std::vector<uint8_t> storage(32768, 0);
   iree_hal_replay_recorder_t* recorder = CreateHostAllocationRecorder(&storage);
 
-  iree_hal_device_group_t* source_group = CreateSyncDeviceGroup();
+  iree_hal_device_group_t* source_group = CreateLocalTaskDeviceGroup();
   iree_hal_device_group_t* wrapped_group = nullptr;
   IREE_ASSERT_OK(iree_hal_replay_wrap_device_group(
       recorder, source_group, iree_allocator_system(), &wrapped_group));
@@ -777,6 +788,8 @@ TEST(ReplayRecorderTest, WrappedDeviceRecordsQueueExecuteSemaphores) {
       IREE_HAL_EXECUTE_FLAG_NONE));
   IREE_ASSERT_OK(
       iree_hal_device_queue_flush(wrapped_device, IREE_HAL_QUEUE_AFFINITY_ANY));
+  IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
+      signal_list, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
 
   iree_hal_semaphore_release(signal_semaphore);
   iree_hal_semaphore_release(wait_semaphore);
@@ -799,7 +812,7 @@ TEST(ReplayRecorderTest, RecordsAndReplaysCommandBufferAtomicOperations) {
   std::vector<uint8_t> storage(65536, 0);
   iree_hal_replay_recorder_t* recorder = CreateHostAllocationRecorder(&storage);
 
-  iree_hal_device_group_t* source_group = CreateSyncDeviceGroup();
+  iree_hal_device_group_t* source_group = CreateLocalTaskDeviceGroup();
   iree_hal_device_group_t* wrapped_group = nullptr;
   IREE_ASSERT_OK(iree_hal_replay_wrap_device_group(
       recorder, source_group, iree_allocator_system(), &wrapped_group));
@@ -941,7 +954,7 @@ TEST(ReplayRecorderTest, RecordsAndReplaysCommandBufferAtomicOperations) {
   EXPECT_EQ(rmw_params.operation, rmw_payload.params.operation);
   EXPECT_EQ(0u, rmw_payload.params.reserved0);
 
-  iree_hal_device_group_t* replay_group = CreateSyncDeviceGroup();
+  iree_hal_device_group_t* replay_group = CreateLocalTaskDeviceGroup();
   IREE_ASSERT_OK(iree_hal_replay_execute_file(GetCapturedFileContents(storage),
                                               replay_group, /*options=*/nullptr,
                                               iree_allocator_system()));
@@ -952,7 +965,7 @@ TEST(ReplayRecorderTest, RecordsDeviceQueueAtomicOperations) {
   std::vector<uint8_t> storage(65536, 0);
   iree_hal_replay_recorder_t* recorder = CreateHostAllocationRecorder(&storage);
 
-  iree_hal_device_group_t* source_group = CreateSyncDeviceGroup();
+  iree_hal_device_group_t* source_group = CreateLocalTaskDeviceGroup();
   iree_hal_device_group_t* wrapped_group = nullptr;
   IREE_ASSERT_OK(iree_hal_replay_wrap_device_group(
       recorder, source_group, iree_allocator_system(), &wrapped_group));
@@ -1028,15 +1041,21 @@ TEST(ReplayRecorderTest, RecordsDeviceQueueAtomicOperations) {
       /*.operation=*/IREE_HAL_ATOMIC_RMW_OPERATION_ADD,
   };
 
-  IREE_EXPECT_OK(iree_hal_device_queue_atomic_wait(
+  IREE_ASSERT_OK(iree_hal_device_queue_atomic_wait(
       wrapped_device, /*queue_affinity=*/1, wait_list, wait_signal_list, buffer,
       /*target_offset=*/8, wait_params));
-  IREE_EXPECT_OK(iree_hal_device_queue_atomic_store(
+  IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
+      wait_signal_list, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_device_queue_atomic_store(
       wrapped_device, /*queue_affinity=*/1, wait_list, store_signal_list,
       buffer, /*target_offset=*/16, store_params));
-  IREE_EXPECT_OK(iree_hal_device_queue_atomic_rmw(
+  IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
+      store_signal_list, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_device_queue_atomic_rmw(
       wrapped_device, /*queue_affinity=*/1, wait_list, rmw_signal_list, buffer,
       /*target_offset=*/24, rmw_params));
+  IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
+      rmw_signal_list, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
 
   iree_hal_semaphore_release(signal_semaphore);
   iree_hal_semaphore_release(wait_semaphore);

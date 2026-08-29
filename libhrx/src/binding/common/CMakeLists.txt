@@ -144,7 +144,7 @@ iree_cc_test(
     iree::async::platform
     iree::base
     iree::hal
-    iree::hal::drivers::local_sync::sync_driver
+    iree::hal::drivers::local_task::task_driver
     iree::testing::gtest
     iree::testing::gtest_main
     libhrx_defs
