@@ -660,9 +660,12 @@ _RECORD_DEFINITIONS = (
                 name="bytecode_length_u32",
                 offset=8,
                 encoding_id=U32.entity_id,
-                description="Nonzero record-stream length in bytes.",
+                description=(
+                    "Nonzero record-stream length within the signed 32-bit "
+                    "address-difference range."
+                ),
                 validation=(
-                    RuleUse(ALLOWED_RANGE.entity_id, (1, 4294967295)),
+                    RuleUse(ALLOWED_RANGE.entity_id, (1, 2147483647)),
                     RuleUse(MULTIPLE.entity_id, (4,)),
                 ),
             ),

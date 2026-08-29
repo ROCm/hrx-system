@@ -947,6 +947,7 @@ static iree_status_t iree_vm_bytecode_verify_functions(
     if ((row->flags_u16 & ~(IREE_VM_BYTECODE_FUNCTION_FLAG_MAY_YIELD |
                             IREE_VM_BYTECODE_FUNCTION_FLAG_HAS_CALL)) != 0 ||
         row->bytecode_length_u32 == 0 || row->bytecode_length_u32 % 4 != 0 ||
+        row->bytecode_length_u32 > INT32_MAX ||
         row->switch_target_base_u32 != switch_target_count ||
         row->bytecode_offset_u32 != bytecode_length ||
         row->switch_target_entry_count_u32 > UINT32_MAX - switch_target_count ||
@@ -955,8 +956,10 @@ static iree_status_t iree_vm_bytecode_verify_functions(
         row->block_count_u32 > row->bytecode_length_u32 / 4u ||
         row->value_register_count_u16 > 256 ||
         row->ref_register_count_u16 > 256 ||
-        row->function_register_count_u16 > 256 || row->reserved_u32[0] != 0 ||
-        row->reserved_u32[1] != 0) {
+        row->function_register_count_u16 > 256 ||
+        row->local_ref_count_u32 > (uint32_t)UINT16_MAX + 1u ||
+        row->local_function_count_u32 > (uint32_t)UINT16_MAX + 1u ||
+        row->reserved_u32[0] != 0 || row->reserved_u32[1] != 0) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "function row %" PRIu32 " is invalid", i);
     }

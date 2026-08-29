@@ -1603,21 +1603,6 @@ iree_status_t iree_vm_bytecode_module_verify_executable(
   for (uint32_t i = 0; i < plan->layout.functions.count; ++i) {
     const iree_vm_bytecode_v0_function_row_t* function =
         &plan->layout.functions.rows[i];
-    if ((uint64_t)function->bytecode_length_u32 > (uint64_t)PTRDIFF_MAX) {
-      return iree_make_status(
-          IREE_STATUS_UNIMPLEMENTED,
-          "function bytecode exceeds the host pointer-difference range");
-    }
-    if (function->local_ref_count_u32 > (uint32_t)UINT16_MAX + 1u) {
-      return iree_make_status(
-          IREE_STATUS_UNIMPLEMENTED,
-          "bytecode functions support only direct local ref slots");
-    }
-    if (function->local_function_count_u32 > (uint32_t)UINT16_MAX + 1u) {
-      return iree_make_status(
-          IREE_STATUS_UNIMPLEMENTED,
-          "bytecode functions support only direct local function slots");
-    }
     maximum_block_count =
         iree_max(maximum_block_count, function->block_count_u32);
   }

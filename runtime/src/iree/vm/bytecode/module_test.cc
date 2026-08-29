@@ -2056,7 +2056,7 @@ TEST(VMBytecodeModuleTest, RejectsMalformedRefInstructions) {
   function.row->local_ref_count_u32 = (uint32_t)UINT16_MAX + 2u;
   iree_vm_module_t* module = nullptr;
   IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_UNIMPLEMENTED,
+      IREE_STATUS_INVALID_ARGUMENT,
       iree_vm_bytecode_module_create(
           environment, IREE_SV("ref_slot_overflow"),
           {iree_make_const_byte_span(image.data(), image.size()),
@@ -2096,6 +2096,22 @@ TEST(VMBytecodeModuleTest, RejectsMalformedFunctionInstructions) {
       iree_allocator_system(), &valid_module));
   iree_vm_module_release(valid_module);
 
+  std::vector<uint8_t> maximum_local_image = BuildFunctionModuleImage();
+  MutableFunctionImage maximum_local_function =
+      FindFunctionImage(&maximum_local_image, 0);
+  ASSERT_NE(maximum_local_function.row, nullptr);
+  maximum_local_function.row->local_ref_count_u32 = (uint32_t)UINT16_MAX + 1u;
+  maximum_local_function.row->local_function_count_u32 =
+      (uint32_t)UINT16_MAX + 1u;
+  iree_vm_module_t* maximum_local_module = nullptr;
+  IREE_ASSERT_OK(iree_vm_bytecode_module_create(
+      environment, IREE_SV("maximum_locals"),
+      {iree_make_const_byte_span(maximum_local_image.data(),
+                                 maximum_local_image.size()),
+       iree_allocator_null()},
+      iree_allocator_system(), &maximum_local_module));
+  iree_vm_module_release(maximum_local_module);
+
   const auto expect_rejected = [&](const auto& mutate) {
     std::vector<uint8_t> image = BuildFunctionModuleImage();
     const MutableFunctionImage function = FindFunctionImage(&image, 0);
@@ -2103,6 +2119,10 @@ TEST(VMBytecodeModuleTest, RejectsMalformedFunctionInstructions) {
     mutate(function);
     expect_image_status(image, IREE_STATUS_INVALID_ARGUMENT);
   };
+
+  expect_rejected([](MutableFunctionImage function) {
+    function.row->bytecode_length_u32 = (uint32_t)INT32_MAX + 1u;
+  });
 
   constexpr uint32_t kNullOffset = 4;
   constexpr uint32_t kCompareNullOffset = 8;
@@ -2210,7 +2230,7 @@ TEST(VMBytecodeModuleTest, RejectsMalformedFunctionInstructions) {
     MutableFunctionImage function = FindFunctionImage(&image, 0);
     ASSERT_NE(function.row, nullptr);
     function.row->local_function_count_u32 = (uint32_t)UINT16_MAX + 2u;
-    expect_image_status(image, IREE_STATUS_UNIMPLEMENTED);
+    expect_image_status(image, IREE_STATUS_INVALID_ARGUMENT);
   }
 
   iree_vm_environment_free(environment);
