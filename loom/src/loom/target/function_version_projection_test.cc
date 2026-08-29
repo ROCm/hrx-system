@@ -319,6 +319,7 @@ class TargetFunctionVersionProjectionTest : public ::testing::Test {
             /*.facts=*/facts,
         },
         /*.target_context_ordinal=*/0,
+        /*.target_binding_source=*/LOOM_TARGET_BINDING_SOURCE_SPECIALIZATION,
         /*.authored_target_is_exact=*/false,
         /*.function_target_facts=*/facts,
     };

@@ -329,6 +329,8 @@ TEST_F(LowLowerPassTest, SourceSelectionUsesPerFunctionTargetFacts) {
   function_version.authored_target_name = target_requirement_symbol_facts->name;
   function_version.target_requirement_facts =
       target_requirement_symbol_facts->projection;
+  function_version.target_binding_source =
+      LOOM_TARGET_BINDING_SOURCE_SPECIALIZATION;
   function_version.function_target_facts = function_target_facts;
   loom_function_version_t* function_version_values[] = {
       &function_version.base,

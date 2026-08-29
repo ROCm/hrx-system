@@ -50,6 +50,11 @@ typedef struct loom_target_function_version_t {
   // Dense compilation-local identity of |resolved_target|.
   loom_target_context_ordinal_t target_context_ordinal;
 
+  // Origin of the effective target binding carried by this version. This is
+  // independent of |authored_target_is_exact|: a specialization may resolve
+  // exactly to the authored target.
+  loom_target_binding_source_t target_binding_source;
+
   // True when the live function's authored target definition is an exact IR
   // witness for |resolved_target|.
   bool authored_target_is_exact;

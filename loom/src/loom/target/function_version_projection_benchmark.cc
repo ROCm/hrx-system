@@ -257,6 +257,11 @@ class FunctionVersionProjectionFixture {
             },
             /*.target_context_ordinal=*/
             static_cast<loom_target_context_ordinal_t>(context_ordinal),
+            /*.target_binding_source=*/
+            static_cast<loom_target_binding_source_t>(
+                authored_target_is_exact
+                    ? LOOM_TARGET_BINDING_SOURCE_AUTHORED
+                    : LOOM_TARGET_BINDING_SOURCE_SPECIALIZATION),
             /*.authored_target_is_exact=*/authored_target_is_exact,
             /*.function_target_facts=*/&facts_[context_ordinal],
         };

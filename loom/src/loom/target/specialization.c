@@ -421,6 +421,7 @@ static iree_status_t loom_target_specialization_prepare_versions(
                 : NULL,
         .resolved_target = specialization->resolved_target,
         .target_context_ordinal = specialization->target_context_ordinal,
+        .target_binding_source = LOOM_TARGET_BINDING_SOURCE_SPECIALIZATION,
         .authored_target_is_exact =
             specialization->target_requirement_symbol_facts != NULL &&
             loom_target_facts_are_equivalent(

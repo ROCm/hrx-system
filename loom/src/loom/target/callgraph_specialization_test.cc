@@ -278,6 +278,139 @@ class TargetCallgraphSpecializationTest : public ::testing::Test {
 };
 
 TEST_F(TargetCallgraphSpecializationTest,
+       SeedsExactAuthoredRootsAndSharesTheirTargetlessCallees) {
+  ModulePtr module = Parse(R"(
+test.target<low_core> @wave32 {subgroup_size = 32}
+
+func.def @helper() -> (index) {
+  %size = target.subgroup.size : index
+  func.return %size : index
+}
+
+func.def target(@wave32) @private_exact() {
+  func.return
+}
+
+func.def target(@wave32) export("first") @first() -> (index) {
+  %size = func.call @helper() : () -> (index)
+  func.return %size : index
+}
+
+func.def target(@wave32) export("second") @second() -> (index) {
+  %size = func.call @helper() : () -> (index)
+  func.return %size : index
+}
+)");
+  loom_target_specialization_result_t specialization =
+      Specialize(module.get(), /*requests=*/nullptr, /*request_count=*/0);
+  ASSERT_EQ(specialization.function_versions.list.count, 0u);
+
+  EXPECT_TRUE(Run(module.get(), &specialization.function_versions));
+
+  ASSERT_EQ(specialization.function_versions.list.count, 3u);
+  const loom_func_like_t first = Function(module.get(), IREE_SV("first"));
+  const loom_func_like_t second = Function(module.get(), IREE_SV("second"));
+  const loom_func_like_t private_exact =
+      Function(module.get(), IREE_SV("private_exact"));
+  const loom_symbol_ref_t helper_ref = OnlySemanticCallee(module.get(), first);
+  EXPECT_EQ(OnlySemanticCallee(module.get(), second).symbol_id,
+            helper_ref.symbol_id);
+  const loom_func_like_t helper = Function(module.get(), helper_ref);
+  const loom_target_function_version_t* first_version =
+      Version(specialization.function_versions, first);
+  const loom_target_function_version_t* second_version =
+      Version(specialization.function_versions, second);
+  const loom_target_function_version_t* helper_version =
+      Version(specialization.function_versions, helper);
+  const loom_target_function_version_t* private_exact_version =
+      Version(specialization.function_versions, private_exact);
+  ASSERT_NE(first_version, nullptr);
+  ASSERT_NE(second_version, nullptr);
+  ASSERT_NE(helper_version, nullptr);
+  EXPECT_EQ(private_exact_version, nullptr);
+  EXPECT_EQ(first_version->target_binding_source,
+            LOOM_TARGET_BINDING_SOURCE_AUTHORED);
+  EXPECT_EQ(second_version->target_binding_source,
+            LOOM_TARGET_BINDING_SOURCE_AUTHORED);
+  EXPECT_EQ(helper_version->target_binding_source,
+            LOOM_TARGET_BINDING_SOURCE_SPECIALIZATION);
+  EXPECT_TRUE(first_version->authored_target_is_exact);
+  EXPECT_TRUE(second_version->authored_target_is_exact);
+  EXPECT_FALSE(helper_version->authored_target_is_exact);
+  EXPECT_EQ(first_version->resolved_target.provider, &kTestProvider);
+  EXPECT_EQ(second_version->resolved_target.provider, &kTestProvider);
+  EXPECT_EQ(helper_version->resolved_target.provider, &kTestProvider);
+  EXPECT_EQ(first_version->resolved_target.facts,
+            second_version->resolved_target.facts);
+  EXPECT_EQ(first_version->resolved_target.facts,
+            helper_version->resolved_target.facts);
+  EXPECT_EQ(first_version->target_context_ordinal,
+            second_version->target_context_ordinal);
+  EXPECT_EQ(first_version->target_context_ordinal,
+            helper_version->target_context_ordinal);
+  EXPECT_EQ(first_version->function_target_facts->storage.export_plan.abi_kind,
+            LOOM_TARGET_ABI_OBJECT_FUNCTION);
+  EXPECT_EQ(second_version->function_target_facts->storage.export_plan.abi_kind,
+            LOOM_TARGET_ABI_OBJECT_FUNCTION);
+  EXPECT_EQ(helper_version->function_target_facts->storage.export_plan.abi_kind,
+            LOOM_TARGET_ABI_UNKNOWN);
+
+  EXPECT_FALSE(Run(module.get(), &specialization.function_versions));
+  EXPECT_EQ(specialization.function_versions.list.count, 3u);
+}
+
+TEST_F(TargetCallgraphSpecializationTest,
+       PropagatesTargetsOnlyThroughExecutableBodies) {
+  ModulePtr module = Parse(R"(
+test.target<low_core> @wave32 {subgroup_size = 32}
+
+func.def @config_helper() {
+  func.return
+}
+
+func.def @body_helper() {
+  func.return
+}
+
+kernel.def target(@wave32) @root() {
+  func.call @config_helper() : ()
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch() {
+  func.call @body_helper() : ()
+  kernel.return
+}
+)");
+  loom_target_specialization_result_t specialization =
+      Specialize(module.get(), /*requests=*/nullptr, /*request_count=*/0);
+
+  EXPECT_TRUE(Run(module.get(), &specialization.function_versions));
+
+  ASSERT_EQ(specialization.function_versions.list.count, 2u);
+  const loom_target_function_version_t* root_version =
+      Version(specialization.function_versions,
+              Function(module.get(), IREE_SV("root")));
+  const loom_target_function_version_t* body_helper_version =
+      Version(specialization.function_versions,
+              Function(module.get(), IREE_SV("body_helper")));
+  const loom_target_function_version_t* config_helper_version =
+      Version(specialization.function_versions,
+              Function(module.get(), IREE_SV("config_helper")));
+  ASSERT_NE(root_version, nullptr);
+  ASSERT_NE(body_helper_version, nullptr);
+  EXPECT_EQ(config_helper_version, nullptr);
+  EXPECT_EQ(root_version->target_context_ordinal,
+            body_helper_version->target_context_ordinal);
+  EXPECT_EQ(root_version->target_binding_source,
+            LOOM_TARGET_BINDING_SOURCE_AUTHORED);
+  EXPECT_EQ(body_helper_version->target_binding_source,
+            LOOM_TARGET_BINDING_SOURCE_SPECIALIZATION);
+
+  EXPECT_FALSE(Run(module.get(), &specialization.function_versions));
+  EXPECT_EQ(specialization.function_versions.list.count, 2u);
+}
+
+TEST_F(TargetCallgraphSpecializationTest,
        SharesTargetlessHelpersWithinEachInvocationContext) {
   ModulePtr module = Parse(R"(
 func.def @leaf() -> (index) {
@@ -554,10 +687,14 @@ func.def public @root() {
       helper_version->resolved_target.facts->storage.snapshot.subgroup_size,
       32u);
   EXPECT_TRUE(helper_version->authored_target_is_exact);
+  EXPECT_EQ(helper_version->target_binding_source,
+            LOOM_TARGET_BINDING_SOURCE_SPECIALIZATION);
   const loom_target_function_version_t* root_version =
       Version(specialization.function_versions,
               Function(module.get(), IREE_SV("root")));
   ASSERT_NE(root_version, nullptr);
+  EXPECT_EQ(root_version->target_binding_source,
+            LOOM_TARGET_BINDING_SOURCE_SPECIALIZATION);
   EXPECT_NE(helper_version->target_context_ordinal,
             root_version->target_context_ordinal);
   const loom_target_context_ordinal_t helper_context_ordinal =

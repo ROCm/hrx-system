@@ -250,7 +250,7 @@ static iree_status_t loom_low_source_selection_try_symbol(
       loom_target_function_version_const_cast(version_handle);
   const loom_symbol_ref_t target_ref = func_facts->target_symbol;
   const loom_target_binding_source_t target_source =
-      target_version != NULL ? LOOM_TARGET_BINDING_SOURCE_SPECIALIZATION
+      target_version != NULL ? target_version->target_binding_source
                              : LOOM_TARGET_BINDING_SOURCE_AUTHORED;
   const loom_target_facts_t* target_facts = NULL;
   if (target_version != NULL) {

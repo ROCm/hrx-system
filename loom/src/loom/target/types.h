@@ -296,7 +296,7 @@ enum {
   LOOM_TARGET_BINDING_SOURCE_UNKNOWN = 0,
   // The source function authored its target record explicitly.
   LOOM_TARGET_BINDING_SOURCE_AUTHORED = 1,
-  // The source function was bound by an invocation specialization request.
+  // The effective target was selected or inherited through specialization.
   LOOM_TARGET_BINDING_SOURCE_SPECIALIZATION = 2,
 };
 
