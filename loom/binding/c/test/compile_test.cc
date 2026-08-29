@@ -254,12 +254,10 @@ RequestPtr CreateSingleRootRequest(
       /*.module_ordinal=*/0,
       /*.symbol_ordinal=*/0,
   };
-  loomc_source_t* transferred_source = source.release();
   loomc_request_t* request = nullptr;
-  loomc_status_t status = loomc_request_create_take_source(
-      product_descriptor, &transferred_source, &root, 1, /*bindings=*/nullptr,
+  loomc_status_t status = loomc_request_create(
+      product_descriptor, source.get(), &root, 1, /*bindings=*/nullptr,
       /*binding_count=*/0, loomc_allocator_system(), &request);
-  loomc_source_release(transferred_source);
   LOOMC_EXPECT_OK(status);
   return RequestPtr(request);
 }

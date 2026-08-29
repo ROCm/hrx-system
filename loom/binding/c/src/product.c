@@ -146,6 +146,61 @@ loomc_status_t loomc_request_create_take_source(
   return loomc_ok_status();
 }
 
+loomc_status_t loomc_request_create(
+    const loomc_product_descriptor_t* product_descriptor,
+    loomc_source_t* source, const loomc_request_root_t* roots,
+    loomc_host_size_t root_count, const loomc_request_binding_t* bindings,
+    loomc_host_size_t binding_count, loomc_allocator_t allocator,
+    loomc_request_t** out_request) {
+  if (out_request == NULL) {
+    return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
+                             "out_request must not be NULL");
+  }
+  *out_request = NULL;
+  if (product_descriptor == NULL || source == NULL) {
+    return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
+                             "product_descriptor and source must not be NULL");
+  }
+  if (!loomc_allocator_is_valid(allocator)) {
+    return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
+                             "allocator must be valid");
+  }
+  if (loomc_source_format(source) != LOOMC_SOURCE_FORMAT_BYTECODE) {
+    return loomc_make_status(LOOMC_STATUS_FAILED_PRECONDITION,
+                             "request source is not Loom bytecode");
+  }
+  if (root_count == 0 || roots == NULL || root_count > UINT32_MAX) {
+    return loomc_make_status(
+        LOOMC_STATUS_INVALID_ARGUMENT,
+        "request roots must contain between 1 and UINT32_MAX entries");
+  }
+  if (binding_count != 0 && bindings == NULL) {
+    return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
+                             "binding_count is nonzero but bindings is NULL");
+  }
+  for (loomc_host_size_t i = 0; i < binding_count; ++i) {
+    if (bindings[i].root_ordinal >= root_count) {
+      return loomc_make_status(
+          LOOMC_STATUS_INVALID_ARGUMENT,
+          "request binding refers to an unavailable root ordinal");
+    }
+    if (i != 0 && bindings[i - 1].requirement_ordinal >=
+                      bindings[i].requirement_ordinal) {
+      return loomc_make_status(
+          LOOMC_STATUS_INVALID_ARGUMENT,
+          "request bindings are not strictly ordered by requirement ordinal");
+    }
+  }
+
+  loomc_source_retain(source);
+  loomc_source_t* transferred_source = source;
+  loomc_status_t status = loomc_request_create_take_source(
+      product_descriptor, &transferred_source, roots, root_count, bindings,
+      binding_count, allocator, out_request);
+  loomc_source_release(transferred_source);
+  return status;
+}
+
 void loomc_request_retain(loomc_request_t* request) {
   if (request == NULL) return;
   iree_atomic_ref_count_inc(&request->ref_count);

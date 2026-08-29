@@ -9,6 +9,7 @@
 
 #include "loomc/artifact.h"
 #include "loomc/config.h"
+#include "loomc/context.h"
 #include "loomc/link_index.h"
 #include "loomc/product.h"
 #include "loomc/result.h"
@@ -117,6 +118,39 @@ typedef struct loomc_cmd_program_product_options_t {
   loomc_request_sink_t request_sink;
 } loomc_cmd_program_product_options_t;
 
+/// Command-product options for an ordinary bytecode request.
+///
+/// The request source is appended to an invocation-local module-index overlay
+/// as its only INPUT provider. An optional frozen library supplies dependencies
+/// without being traversed or copied. Request roots select command programs by
+/// exact bytecode-local identity and preserve their order and duplicates in the
+/// returned product.
+typedef struct loomc_cmd_program_request_options_t {
+  /// Structure type. Must be
+  /// `LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_REQUEST_OPTIONS` when nonzero.
+  loomc_structure_type_t type;
+
+  /// Size of this structure in bytes.
+  loomc_host_size_t structure_size;
+
+  /// Optional invocation extensions such as
+  /// `loomc_target_specialization_options_t`.
+  const void* next;
+
+  /// Optional frozen library-only index used to resolve request declarations.
+  /// Passing NULL plans against the request source alone.
+  const loomc_link_index_t* library_index;
+
+  /// Per-invocation config bindings applied during selective materialization.
+  loomc_config_options_t config;
+
+  /// Optional sink enabling source-backed kernel request publication.
+  ///
+  /// A NULL callback leaves kernel implementation bodies unopened and returns
+  /// only executable-entry requirements.
+  loomc_request_sink_t request_sink;
+} loomc_cmd_program_request_options_t;
+
 /// One serialized command root and its executable-entry projection.
 ///
 /// @lifetime
@@ -185,6 +219,49 @@ typedef struct loomc_cmd_entry_requirement_t {
 LOOMC_API_EXPORT loomc_status_t loomc_cmd_program_product_build(
     loomc_workspace_t* workspace,
     const loomc_cmd_program_product_options_t* options,
+    loomc_allocator_t allocator, loomc_product_t** out_product,
+    loomc_result_t** out_result);
+
+/// Builds portable command programs from an ordinary bytecode request.
+///
+/// The operation indexes only `request`, maps its exact roots into an overlay
+/// over `options->library_index`, and directly plans the command product. It
+/// does not print, reparse names, or serialize an intermediate linked request.
+/// The returned product preserves request-root order as export order. Published
+/// kernel requests carry provisional bindings to its executable-entry
+/// requirements.
+///
+/// @param context Context used to decode the request and shared with the
+/// optional library index.
+/// @param workspace Invocation-local compiler workspace.
+/// @param request Immutable request requiring a command-program product.
+/// @param options Product selection and specialization options, or NULL.
+/// @param allocator Host allocator used for returned product and result state.
+/// @param out_product Receives one retained product when the result succeeds;
+/// receives NULL when the result fails.
+/// @param out_result Receives one retained result for the operation.
+/// @return OK when the operation ran to a result. Non-OK statuses represent
+/// structural API misuse, callback failure, or infrastructure failure.
+///
+/// @ownership
+/// The caller owns `out_product` when non-NULL and releases it with
+/// `loomc_product_release`. The caller owns `out_result` on an OK return and
+/// releases it with `loomc_result_release`. Each request is transferred
+/// independently to `options->request_sink`.
+///
+/// @lifetime
+/// The operation borrows `context`, `workspace`, `request`, `options`, and the
+/// optional library index synchronously. The product and published requests
+/// retain none of them.
+///
+/// @thread_safety
+/// Calls may share a context, immutable request, and frozen library index. Each
+/// concurrent call requires a distinct workspace. Callback synchronization is
+/// owned by the embedding.
+LOOMC_API_EXPORT loomc_status_t loomc_cmd_program_product_build_request(
+    loomc_context_t* context, loomc_workspace_t* workspace,
+    const loomc_request_t* request,
+    const loomc_cmd_program_request_options_t* options,
     loomc_allocator_t allocator, loomc_product_t** out_product,
     loomc_result_t** out_result);
 

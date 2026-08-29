@@ -8,6 +8,7 @@
 #define LOOMC_PRODUCT_H_
 
 #include "loomc/artifact.h"
+#include "loomc/source.h"
 
 /// @file
 /// Immutable compiler products and their recursively published requests.
@@ -164,6 +165,40 @@ typedef struct loomc_request_binding_t {
 /// Requests are immutable after publication. Retained handles may be queued,
 /// cached, and shared across threads independently of the producer lifetime.
 typedef struct loomc_request_t loomc_request_t;
+
+/// Creates an immutable request over ordinary Loom bytecode.
+///
+/// @param product_descriptor Process-lifetime descriptor for the required
+/// successful product representation.
+/// @param source Bytecode source retained by the request.
+/// @param roots Source-local roots copied in product export order.
+/// @param root_count Number of entries in `roots`; must be nonzero.
+/// @param bindings Optional parent-requirement bindings copied into the
+/// request. Entries must have strictly increasing requirement ordinals and
+/// refer to valid request-local roots.
+/// @param binding_count Number of entries in `bindings`.
+/// @param allocator Host allocator used for request and metadata storage.
+/// @param out_request Receives one retained request.
+/// @return OK when the immutable request was created.
+///
+/// Root addresses are validated against the bytecode source by the operation
+/// that consumes the request. This constructor performs no source indexing or
+/// module scan, so a caller may resolve human-readable names once through a
+/// link index and form many requests by exact ordinal.
+///
+/// @ownership
+/// The caller retains `source` and owns the returned request. Release the
+/// request with `loomc_request_release`.
+///
+/// @thread_safety
+/// Creation is local to the caller. The returned request is immutable and may
+/// be retained and shared across threads.
+LOOMC_API_EXPORT loomc_status_t loomc_request_create(
+    const loomc_product_descriptor_t* product_descriptor,
+    loomc_source_t* source, const loomc_request_root_t* roots,
+    loomc_host_size_t root_count, const loomc_request_binding_t* bindings,
+    loomc_host_size_t binding_count, loomc_allocator_t allocator,
+    loomc_request_t** out_request);
 
 /// Accepts ownership of one published request at callback entry.
 ///

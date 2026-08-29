@@ -289,6 +289,9 @@ typedef enum loomc_structure_type_e {
 
   /// `loomc_link_request_options_t`.
   LOOMC_STRUCTURE_TYPE_LINK_REQUEST_OPTIONS = 38,
+
+  /// `loomc_cmd_program_request_options_t`.
+  LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_REQUEST_OPTIONS = 39,
 } loomc_structure_type_t;
 
 /// One loose string option entry.

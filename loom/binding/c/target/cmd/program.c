@@ -17,6 +17,7 @@
 #include "loom/binding/c/src/module.h"
 #include "loom/binding/c/src/module_bytecode.h"
 #include "loom/binding/c/src/product.h"
+#include "loom/binding/c/src/request_index_overlay.h"
 #include "loom/binding/c/src/result.h"
 #include "loom/binding/c/src/target.h"
 #include "loom/binding/c/src/workspace.h"
@@ -151,6 +152,74 @@ static loomc_status_t loomc_cmd_program_product_validate_options(
           *out_target_specialization,
           loomc_context_target_environment(
               loomc_link_index_context(options->link_index))));
+  return loomc_config_validate_options(&options->config);
+}
+
+static loomc_status_t loomc_cmd_program_product_validate_request_options(
+    loomc_context_t* context, loomc_workspace_t* workspace,
+    const loomc_request_t* request,
+    const loomc_cmd_program_request_options_t* options,
+    loomc_allocator_t allocator,
+    const loomc_target_specialization_options_t** out_target_specialization) {
+  *out_target_specialization = NULL;
+  if (context == NULL || workspace == NULL || request == NULL) {
+    return loomc_make_status(
+        LOOMC_STATUS_INVALID_ARGUMENT,
+        "context, workspace, and request must not be NULL");
+  }
+  if (!loomc_allocator_is_valid(allocator)) {
+    return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
+                             "allocator must be valid");
+  }
+  if (loomc_request_product_descriptor(request) !=
+      loomc_cmd_program_product_descriptor()) {
+    return loomc_make_status(
+        LOOMC_STATUS_INVALID_ARGUMENT,
+        "request does not require a command-program product");
+  }
+  if (loomc_source_format(loomc_request_source(request)) !=
+      LOOMC_SOURCE_FORMAT_BYTECODE) {
+    return loomc_make_status(LOOMC_STATUS_FAILED_PRECONDITION,
+                             "request source is not Loom bytecode");
+  }
+  if (loomc_request_root_count(request) == 0) {
+    return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
+                             "command request must contain at least one root");
+  }
+  if (options == NULL) {
+    return loomc_ok_status();
+  }
+  if (options->type != LOOMC_STRUCTURE_TYPE_NONE &&
+      options->type != LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_REQUEST_OPTIONS) {
+    return loomc_make_status(
+        LOOMC_STATUS_INVALID_ARGUMENT,
+        "command request options have an unknown structure type");
+  }
+  if (options->structure_size != 0 &&
+      options->structure_size < sizeof(*options)) {
+    return loomc_make_status(
+        LOOMC_STATUS_INVALID_ARGUMENT,
+        "command request options structure_size is too small");
+  }
+  LOOMC_RETURN_IF_ERROR(loomc_target_specialization_options_resolve(
+      options->next, out_target_specialization));
+  if (options->library_index != NULL) {
+    if (loomc_link_index_context(options->library_index) != context) {
+      return loomc_make_status(
+          LOOMC_STATUS_INVALID_ARGUMENT,
+          "command request library index was created with another context");
+    }
+    if (loom_link_module_index_input_provider_count(
+            loomc_link_index_module_index(options->library_index)) != 0) {
+      return loomc_make_status(
+          LOOMC_STATUS_INVALID_ARGUMENT,
+          "command request library index contains INPUT providers");
+    }
+  }
+  LOOMC_RETURN_IF_ERROR(
+      loomc_target_specialization_options_validate_environment(
+          *out_target_specialization,
+          loomc_context_target_environment(context)));
   return loomc_config_validate_options(&options->config);
 }
 
@@ -392,6 +461,86 @@ static loomc_status_t loomc_cmd_program_product_allocate(
   return loomc_ok_status();
 }
 
+static loomc_status_t loomc_cmd_program_product_build_indexed(
+    loomc_context_t* context, loomc_workspace_t* workspace,
+    const loom_link_module_index_t* module_index,
+    const iree_host_size_t* root_symbol_ordinals,
+    iree_host_size_t root_symbol_count,
+    const loom_link_plan_materialization_environment_t*
+        materialization_environment,
+    loomc_request_sink_t request_sink, iree_arena_allocator_t* scratch_arena,
+    loomc_result_t* result, loomc_allocator_t allocator,
+    loomc_product_t** out_product) {
+  *out_product = NULL;
+  loom_cmd_program_artifact_set_t artifact_set = {0};
+  loomc_product_t* product = NULL;
+  loomc_cmd_program_product_invocation_t invocation = {
+      .request =
+          {
+              .context = context,
+              .block_pool = loomc_workspace_block_pool(workspace),
+              .allocator = allocator,
+          },
+      .result = result,
+      .request_sink = request_sink,
+  };
+  loomc_status_t status = loomc_ok_status();
+  loom_cmd_program_plan_index_options_t plan_options;
+  loom_cmd_program_plan_index_options_initialize(&plan_options);
+  if (request_sink.publish != NULL) {
+    plan_options.kernel_request_sink = (loom_cmd_program_kernel_request_sink_t){
+        .publish = loomc_cmd_program_product_publish_kernel_request,
+        .user_data = &invocation,
+    };
+  }
+
+  bool plan_valid = false;
+  const loomc_host_size_t diagnostic_count_before =
+      loomc_result_diagnostic_count(result);
+  if (loomc_status_is_ok(status)) {
+    const iree_status_t plan_status =
+        loom_cmd_program_artifact_set_build_from_index(
+            module_index, root_symbol_ordinals, root_symbol_count,
+            &(loom_cmd_program_artifact_builder_options_t){
+                .plan_options =
+                    request_sink.publish != NULL ? &plan_options : NULL,
+                .pass_registry = loom_pass_builtin_registry(),
+                .diagnostic_emitter =
+                    {
+                        .fn = loomc_cmd_program_product_capture_diagnostic,
+                        .user_data = &invocation,
+                    },
+                .materialization_environment = materialization_environment,
+            },
+            scratch_arena, &plan_valid, &artifact_set,
+            iree_allocator_from_loomc(allocator));
+    status = loomc_cmd_program_product_translate_plan_status(
+        &invocation, diagnostic_count_before, plan_status);
+  }
+  if (loomc_status_is_ok(status) && loomc_result_succeeded(result) &&
+      !plan_valid) {
+    if (loomc_result_diagnostic_count(result) == diagnostic_count_before) {
+      status = loomc_make_status(
+          LOOMC_STATUS_INTERNAL,
+          "command program preparation failed without a diagnostic");
+    } else {
+      status = loomc_result_set_state(result, LOOMC_RESULT_STATE_FAILED);
+    }
+  }
+  if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
+    status =
+        loomc_cmd_program_product_allocate(&artifact_set, allocator, &product);
+  }
+  if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
+    *out_product = product;
+    product = NULL;
+  }
+
+  loomc_product_release(product);
+  loom_cmd_program_artifact_set_deinitialize(&artifact_set);
+  return status;
+}
+
 loomc_status_t loomc_cmd_program_product_build(
     loomc_workspace_t* workspace,
     const loomc_cmd_program_product_options_t* options,
@@ -412,18 +561,7 @@ loomc_status_t loomc_cmd_program_product_build(
       loomc_result_create(LOOMC_RESULT_STATE_SUCCEEDED, allocator, &result));
   iree_arena_allocator_t scratch_arena;
   iree_arena_initialize(loomc_workspace_block_pool(workspace), &scratch_arena);
-  loom_cmd_program_artifact_set_t artifact_set = {0};
   loomc_product_t* product = NULL;
-  loomc_cmd_program_product_invocation_t invocation = {
-      .request =
-          {
-              .context = loomc_link_index_context(options->link_index),
-              .block_pool = loomc_workspace_block_pool(workspace),
-              .allocator = allocator,
-          },
-      .result = result,
-      .request_sink = options->request_sink,
-  };
   loomc_status_t status = loomc_ok_status();
 
   const iree_host_size_t* root_symbol_ordinals = NULL;
@@ -433,73 +571,91 @@ loomc_status_t loomc_cmd_program_product_build(
         options, &scratch_arena, &root_symbol_ordinals, &root_symbol_count);
   }
 
-  loomc_link_materialization_state_t materialization_state = {0};
-  loomc_link_materialization_state_initialize(
-      invocation.request.context, workspace, options->link_index,
-      &options->config, target_specialization, result, allocator,
-      &materialization_state);
-  const loom_link_plan_materialization_environment_t
-      materialization_environment =
-          loomc_link_materialization_state_environment(&materialization_state);
-  loom_cmd_program_plan_index_options_t plan_options;
-  loom_cmd_program_plan_index_options_initialize(&plan_options);
-  if (options->request_sink.publish != NULL) {
-    plan_options.kernel_request_sink = (loom_cmd_program_kernel_request_sink_t){
-        .publish = loomc_cmd_program_product_publish_kernel_request,
-        .user_data = &invocation,
-    };
-  }
-
-  bool plan_valid = false;
-  const loomc_host_size_t diagnostic_count_before =
-      loomc_result_diagnostic_count(result);
   if (loomc_status_is_ok(status)) {
-    const iree_status_t plan_status =
-        loom_cmd_program_artifact_set_build_from_index(
-            loomc_link_index_module_index(options->link_index),
-            root_symbol_ordinals, root_symbol_count,
-            &(loom_cmd_program_artifact_builder_options_t){
-                .plan_options = options->request_sink.publish != NULL
-                                    ? &plan_options
-                                    : NULL,
-                .pass_registry = loom_pass_builtin_registry(),
-                .diagnostic_emitter =
-                    {
-                        .fn = loomc_cmd_program_product_capture_diagnostic,
-                        .user_data = &invocation,
-                    },
-                .materialization_environment = &materialization_environment,
-            },
-            &scratch_arena, &plan_valid, &artifact_set,
-            iree_allocator_from_loomc(allocator));
-    status = loomc_cmd_program_product_translate_plan_status(
-        &invocation, diagnostic_count_before, plan_status);
-  }
-  if (loomc_status_is_ok(status) && loomc_result_succeeded(result) &&
-      !plan_valid) {
-    if (loomc_result_diagnostic_count(result) == diagnostic_count_before) {
-      status = loomc_make_status(
-          LOOMC_STATUS_INTERNAL,
-          "command program preparation failed without a diagnostic");
-    } else {
-      status = loomc_result_set_state(result, LOOMC_RESULT_STATE_FAILED);
-    }
-  }
-  if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
-    status =
-        loomc_cmd_program_product_allocate(&artifact_set, allocator, &product);
+    loomc_link_materialization_state_t materialization_state = {0};
+    loomc_link_materialization_state_initialize(
+        loomc_link_index_context(options->link_index), workspace,
+        options->link_index, &options->config, target_specialization, result,
+        allocator, &materialization_state);
+    const loom_link_plan_materialization_environment_t
+        materialization_environment =
+            loomc_link_materialization_state_environment(
+                &materialization_state);
+    status = loomc_cmd_program_product_build_indexed(
+        loomc_link_index_context(options->link_index), workspace,
+        loomc_link_index_module_index(options->link_index),
+        root_symbol_ordinals, root_symbol_count, &materialization_environment,
+        options->request_sink, &scratch_arena, result, allocator, &product);
   }
   if (loomc_status_is_ok(status)) {
-    if (loomc_result_succeeded(result)) {
-      *out_product = product;
-      product = NULL;
-    }
+    *out_product = product;
+    product = NULL;
     *out_result = result;
     result = NULL;
   }
 
   loomc_product_release(product);
-  loom_cmd_program_artifact_set_deinitialize(&artifact_set);
+  iree_arena_deinitialize(&scratch_arena);
+  loomc_result_release(result);
+  return status;
+}
+
+loomc_status_t loomc_cmd_program_product_build_request(
+    loomc_context_t* context, loomc_workspace_t* workspace,
+    const loomc_request_t* request,
+    const loomc_cmd_program_request_options_t* options,
+    loomc_allocator_t allocator, loomc_product_t** out_product,
+    loomc_result_t** out_result) {
+  if (out_product == NULL || out_result == NULL) {
+    return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
+                             "out_product and out_result must not be NULL");
+  }
+  *out_product = NULL;
+  *out_result = NULL;
+  const loomc_target_specialization_options_t* target_specialization = NULL;
+  LOOMC_RETURN_IF_ERROR(loomc_cmd_program_product_validate_request_options(
+      context, workspace, request, options, allocator, &target_specialization));
+
+  const loomc_cmd_program_request_options_t default_options = {0};
+  if (options == NULL) options = &default_options;
+
+  loomc_result_t* result = NULL;
+  LOOMC_RETURN_IF_ERROR(
+      loomc_result_create(LOOMC_RESULT_STATE_SUCCEEDED, allocator, &result));
+  iree_arena_allocator_t scratch_arena;
+  iree_arena_initialize(loomc_workspace_block_pool(workspace), &scratch_arena);
+  loomc_request_index_overlay_t request_overlay = {0};
+  loomc_product_t* product = NULL;
+  loomc_status_t status = loomc_request_index_overlay_initialize(
+      context, loomc_workspace_block_pool(workspace), options->library_index,
+      request, result, &scratch_arena, allocator, &request_overlay);
+
+  if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
+    loomc_link_materialization_state_t materialization_state = {0};
+    loomc_link_materialization_state_initialize_overlay(
+        context, workspace, options->library_index,
+        request_overlay.request_provider_ordinal, loomc_request_source(request),
+        &options->config, target_specialization, result, allocator,
+        &materialization_state);
+    const loom_link_plan_materialization_environment_t
+        materialization_environment =
+            loomc_link_materialization_state_environment(
+                &materialization_state);
+    status = loomc_cmd_program_product_build_indexed(
+        context, workspace, request_overlay.module_index,
+        request_overlay.root_symbol_ordinals, request_overlay.root_symbol_count,
+        &materialization_environment, options->request_sink, &scratch_arena,
+        result, allocator, &product);
+  }
+  if (loomc_status_is_ok(status)) {
+    *out_product = product;
+    product = NULL;
+    *out_result = result;
+    result = NULL;
+  }
+
+  loomc_product_release(product);
+  loomc_request_index_overlay_deinitialize(&request_overlay);
   iree_arena_deinitialize(&scratch_arena);
   loomc_result_release(result);
   return status;

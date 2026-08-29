@@ -4,10 +4,11 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Benchmarks command-product construction through the public LoomC API. A
-// frozen bytecode index and warm worker-local workspace model the reusable
-// state owned by a JIT embedding. Timed regions include parent artifact
-// serialization and, when enabled, immutable child-request serialization.
+// Benchmarks command-product construction through the public LoomC API. The
+// frozen-index and ordinary-request paths share identical bytecode and a warm
+// worker-local workspace. Timed regions include parent artifact serialization,
+// request overlay construction when selected, and optional immutable child
+// request serialization.
 
 #include <cstdint>
 #include <string>
@@ -64,6 +65,16 @@ static std::string BuildIndependentKernelSource(
 struct RequestCapture {
   // Request references transferred by the active product build.
   std::vector<RequestPtr> requests;
+};
+
+enum class CommandProductInput {
+  kFrozenIndex,
+  kRequest,
+};
+
+enum class RequestPublication {
+  kBodyBlind,
+  kPublish,
 };
 
 static loomc_status_t CaptureRequest(void* user_data,
@@ -164,6 +175,18 @@ class CommandProductFixture {
                               "command root was not indexed");
     }
     root_symbol_ordinal_ = root_symbol.ordinal;
+    const loomc_request_root_t request_root = {
+        /*.module_ordinal=*/
+        static_cast<uint32_t>(root_symbol.provider_module_ordinal),
+        /*.symbol_ordinal=*/
+        static_cast<uint32_t>(root_symbol.module_symbol_ordinal),
+    };
+    loomc_request_t* request = nullptr;
+    IREE_RETURN_IF_ERROR(to_iree_status(loomc_request_create(
+        loomc_cmd_program_product_descriptor(), bytecode_source_ptr.get(),
+        &request_root, /*root_count=*/1, /*bindings=*/nullptr,
+        /*binding_count=*/0, loom_allocator(), &request)));
+    request_.reset(request);
     index_.reset(index_ptr.release());
 
     loomc_workspace_t* workspace = nullptr;
@@ -173,31 +196,50 @@ class CommandProductFixture {
     return iree_ok_status();
   }
 
-  iree_status_t Build(bool publish_requests, RequestCapture* capture,
-                      CmdProductPtr* out_product, ResultPtr* out_result) const {
+  iree_status_t Build(CommandProductInput input,
+                      RequestPublication request_publication,
+                      RequestCapture* capture, CmdProductPtr* out_product,
+                      ResultPtr* out_result) const {
     capture->requests.clear();
     out_product->reset();
     out_result->reset();
-    const loomc_cmd_program_product_options_t options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_PRODUCT_OPTIONS,
-        /*.structure_size=*/sizeof(options),
-        /*.next=*/nullptr,
-        /*.link_index=*/index_.get(),
-        /*.root_symbol_ordinals=*/&root_symbol_ordinal_,
-        /*.root_symbol_count=*/1,
-        /*.flags=*/0,
-        /*.config=*/{},
-        /*.request_sink=*/
-        publish_requests ? loomc_request_sink_t{
-                               /*.publish=*/CaptureRequest,
-                               /*.user_data=*/capture,
-                           }
-                         : loomc_request_sink_t{},
-    };
+    const loomc_request_sink_t request_sink =
+        request_publication == RequestPublication::kPublish
+            ? loomc_request_sink_t{
+                  /*.publish=*/CaptureRequest,
+                  /*.user_data=*/capture,
+              }
+            : loomc_request_sink_t{};
     loomc_product_t* product = nullptr;
     loomc_result_t* result = nullptr;
-    iree_status_t status = to_iree_status(loomc_cmd_program_product_build(
-        workspace_.get(), &options, loom_allocator(), &product, &result));
+    iree_status_t status = iree_ok_status();
+    if (input == CommandProductInput::kFrozenIndex) {
+      const loomc_cmd_program_product_options_t options = {
+          /*.type=*/LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_PRODUCT_OPTIONS,
+          /*.structure_size=*/sizeof(options),
+          /*.next=*/nullptr,
+          /*.link_index=*/index_.get(),
+          /*.root_symbol_ordinals=*/&root_symbol_ordinal_,
+          /*.root_symbol_count=*/1,
+          /*.flags=*/0,
+          /*.config=*/{},
+          /*.request_sink=*/request_sink,
+      };
+      status = to_iree_status(loomc_cmd_program_product_build(
+          workspace_.get(), &options, loom_allocator(), &product, &result));
+    } else {
+      const loomc_cmd_program_request_options_t options = {
+          /*.type=*/LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_REQUEST_OPTIONS,
+          /*.structure_size=*/sizeof(options),
+          /*.next=*/nullptr,
+          /*.library_index=*/nullptr,
+          /*.config=*/{},
+          /*.request_sink=*/request_sink,
+      };
+      status = to_iree_status(loomc_cmd_program_product_build_request(
+          context_.get(), workspace_.get(), request_.get(), &options,
+          loom_allocator(), &product, &result));
+    }
     CmdProductPtr product_ptr(product);
     ResultPtr result_ptr(result);
     IREE_RETURN_IF_ERROR(status);
@@ -208,7 +250,9 @@ class CommandProductFixture {
         loomc_cmd_program_product_entry_requirement_count(product_ptr.get()) !=
             launched_kernel_count_ ||
         capture->requests.size() !=
-            (publish_requests ? launched_kernel_count_ : 0)) {
+            (request_publication == RequestPublication::kPublish
+                 ? launched_kernel_count_
+                 : 0)) {
       return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                               "command product has an unexpected shape");
     }
@@ -242,12 +286,16 @@ class CommandProductFixture {
   // Frozen source index reused by every command-product build.
   LinkIndexPtr index_;
 
+  // Immutable request selecting the same command root by source-local ordinal.
+  RequestPtr request_;
+
   // Warm mutable storage owned by this benchmark worker.
   WorkspacePtr workspace_;
 };
 
 static void RunCommandProductBenchmark(benchmark::State& state,
-                                       bool publish_requests) {
+                                       CommandProductInput input,
+                                       RequestPublication request_publication) {
   CommandProductFixture fixture(static_cast<uint32_t>(state.range(0)),
                                 static_cast<uint32_t>(state.range(1)));
   if (SkipOnError(state, fixture.Initialize())) {
@@ -258,8 +306,8 @@ static void RunCommandProductBenchmark(benchmark::State& state,
   capture.requests.reserve(fixture.launched_kernel_count());
   CmdProductPtr product;
   ResultPtr result;
-  if (SkipOnError(state, fixture.Build(publish_requests, &capture, &product,
-                                       &result))) {
+  if (SkipOnError(state, fixture.Build(input, request_publication, &capture,
+                                       &product, &result))) {
     return;
   }
   uint64_t request_bytes = 0;
@@ -273,8 +321,8 @@ static void RunCommandProductBenchmark(benchmark::State& state,
 
   int64_t build_count = 0;
   for (auto _ : state) {
-    if (SkipOnError(state, fixture.Build(publish_requests, &capture, &product,
-                                         &result))) {
+    if (SkipOnError(state, fixture.Build(input, request_publication, &capture,
+                                         &product, &result))) {
       break;
     }
     benchmark::DoNotOptimize(product.get());
@@ -297,16 +345,29 @@ static void RunCommandProductBenchmark(benchmark::State& state,
       static_cast<double>(fixture.launched_kernel_count());
   state.counters["request_bytes"] = static_cast<double>(request_bytes);
   state.counters["requests"] =
-      publish_requests ? static_cast<double>(fixture.launched_kernel_count())
-                       : 0.0;
+      request_publication == RequestPublication::kPublish
+          ? static_cast<double>(fixture.launched_kernel_count())
+          : 0.0;
 }
 
 static void BM_CommandProductBodyBlind(benchmark::State& state) {
-  RunCommandProductBenchmark(state, /*publish_requests=*/false);
+  RunCommandProductBenchmark(state, CommandProductInput::kFrozenIndex,
+                             RequestPublication::kBodyBlind);
 }
 
 static void BM_CommandProductRequests(benchmark::State& state) {
-  RunCommandProductBenchmark(state, /*publish_requests=*/true);
+  RunCommandProductBenchmark(state, CommandProductInput::kFrozenIndex,
+                             RequestPublication::kPublish);
+}
+
+static void BM_CommandRequestBodyBlind(benchmark::State& state) {
+  RunCommandProductBenchmark(state, CommandProductInput::kRequest,
+                             RequestPublication::kBodyBlind);
+}
+
+static void BM_CommandRequestRequests(benchmark::State& state) {
+  RunCommandProductBenchmark(state, CommandProductInput::kRequest,
+                             RequestPublication::kPublish);
 }
 
 static void ProductScales(benchmark::Benchmark* benchmark) {
@@ -335,16 +396,32 @@ static void BM_CommandProductRequests_Smoke(benchmark::State& state) {
   BM_CommandProductRequests(state);
 }
 
+static void BM_CommandRequestBodyBlind_Smoke(benchmark::State& state) {
+  BM_CommandRequestBodyBlind(state);
+}
+
+static void BM_CommandRequestRequests_Smoke(benchmark::State& state) {
+  BM_CommandRequestRequests(state);
+}
+
 BENCHMARK(BM_CommandProductBodyBlind)
     ->Apply(ProductScales)
     ->Complexity(benchmark::oN);
 BENCHMARK(BM_CommandProductRequests)
     ->Apply(ProductScales)
     ->Complexity(benchmark::oN);
+BENCHMARK(BM_CommandRequestBodyBlind)
+    ->Apply(ProductScales)
+    ->Complexity(benchmark::oN);
+BENCHMARK(BM_CommandRequestRequests)
+    ->Apply(ProductScales)
+    ->Complexity(benchmark::oN);
 BENCHMARK(BM_CommandProductBodyBlindUnrelatedCatalog)->Apply(CatalogScales);
 BENCHMARK(BM_CommandProductRequestsUnrelatedCatalog)->Apply(CatalogScales);
 BENCHMARK(BM_CommandProductBodyBlind_Smoke)->Args({4, 4});
 BENCHMARK(BM_CommandProductRequests_Smoke)->Args({4, 4});
+BENCHMARK(BM_CommandRequestBodyBlind_Smoke)->Args({4, 4});
+BENCHMARK(BM_CommandRequestRequests_Smoke)->Args({4, 4});
 
 }  // namespace
 }  // namespace loomc::bench
