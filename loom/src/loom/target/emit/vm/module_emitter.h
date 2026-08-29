@@ -16,6 +16,7 @@
 #include "loom/error/emitter.h"
 #include "loom/ir/ir.h"
 #include "loom/target/low_descriptor_registry.h"
+#include "loom/target/provider.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -31,6 +32,11 @@ typedef struct loom_vm_module_emitter_options_t {
   iree_host_size_t allocation_budget_count;
   // Structured diagnostic emitter for user-facing compilation failures.
   iree_diagnostic_emitter_t diagnostic_emitter;
+  // Optional concrete compiler function versions represented in the module.
+  const loom_function_version_list_t* function_versions;
+  // Optional caller-owned buffer receiving public export ordinals for
+  // functions with stable compiler versions.
+  loom_target_emit_export_projection_buffer_t* export_projection;
 } loom_vm_module_emitter_options_t;
 
 // Emits one immutable segmented VM bytecode image from prepared target-low IR.

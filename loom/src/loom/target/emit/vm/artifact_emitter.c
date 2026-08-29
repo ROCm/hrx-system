@@ -19,18 +19,35 @@ static iree_status_t loom_vm_bytecode_artifact_emit(
         "VM bytecode emission does not produce artifact manifests");
   }
 
-  const loom_vm_module_emitter_options_t options = {
+  loom_target_emit_export_projection_t* export_projections = NULL;
+  const iree_host_size_t export_projection_capacity =
+      request->function_versions != NULL ? request->function_versions->count
+                                         : 0;
+  if (export_projection_capacity != 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        request->scratch_arena, export_projection_capacity,
+        sizeof(*export_projections), (void**)&export_projections));
+  }
+  loom_target_emit_export_projection_buffer_t export_projection = {
+      .values = export_projections,
+      .capacity = export_projection_capacity,
+  };
+  const loom_vm_module_emitter_options_t emission_options = {
       .descriptor_registry = request->low_descriptor_registry,
       .diagnostic_emitter = request->diagnostic_emitter,
+      .function_versions = request->function_versions,
+      .export_projection = &export_projection,
   };
   iree_byte_sequence_t* contents = NULL;
-  iree_status_t status =
-      loom_vm_emit_module(request->module, &options, request->scratch_arena,
-                          request->allocator, &contents);
+  iree_status_t status = loom_vm_emit_module(request->module, &emission_options,
+                                             request->scratch_arena,
+                                             request->allocator, &contents);
   if (iree_status_is_ok(status) && contents != NULL) {
     out_artifact->target_artifact_format =
         LOOM_TARGET_ARTIFACT_FORMAT_VM_BYTECODE;
     out_artifact->contents = contents;
+    out_artifact->export_projections = export_projection.values;
+    out_artifact->export_projection_count = export_projection.count;
     contents = NULL;
   }
   iree_byte_sequence_release(contents);

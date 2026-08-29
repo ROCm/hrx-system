@@ -65,12 +65,36 @@ loom_cc_library(
     loom::target::arch::vm::facts
     loom::target::arch::vm::ops
     loom::target::arch::vm::structural_ops
+    loom::target::function_version
     loom::target::low_descriptor_registry
     loom::target::provider
     loom::target::registers
     loom::util::call_graph
     loom::util::stream
   PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    artifact_emitter_test
+  SRCS
+    "artifact_emitter_test.cc"
+  DEPS
+    ::vm
+    iree::base
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::codegen::low::text_asm
+    loom::format::text::parser
+    loom::ir
+    loom::ops::op_registry
+    loom::target::arch::vm::descriptors
+    loom::target::arch::vm::ops
+    loom::target::function_version
+    loom::target::low_descriptor_registry
+    loom::testing::diagnostic_matchers
+    loom::testing::module_ptr
 )
 
 loom_check_test_suite(

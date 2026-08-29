@@ -1078,6 +1078,40 @@ static iree_status_t loom_amdgpu_hal_kernel_library_entries(
   return status;
 }
 
+static iree_status_t loom_amdgpu_hal_kernel_library_prepare_export_projection(
+    loom_target_entry_list_t entries,
+    loom_target_emit_export_projection_buffer_t* projection,
+    iree_host_size_t* out_projection_count) {
+  *out_projection_count = 0;
+  if (projection == NULL) return iree_ok_status();
+  projection->count = 0;
+  if (projection->capacity != 0 && projection->values == NULL) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "AMDGPU export projection capacity requires caller-owned row storage");
+  }
+
+  iree_host_size_t projection_count = 0;
+  for (uint16_t i = 0; i < entries.count; ++i) {
+    const loom_target_function_version_t* function_version =
+        entries.values[i].function_version;
+    if (function_version == NULL) continue;
+    if (projection_count >= projection->capacity) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "AMDGPU export projection capacity %" PRIhsz
+                              " is too small for mapped exports",
+                              projection->capacity);
+    }
+    projection->values[projection_count++] =
+        (loom_target_emit_export_projection_t){
+            .function_version = &function_version->base,
+            .ordinal = i,
+        };
+  }
+  *out_projection_count = projection_count;
+  return iree_ok_status();
+}
+
 iree_status_t loom_amdgpu_emit_hal_kernel_library(
     loom_module_t* module,
     const loom_amdgpu_hal_kernel_library_options_t* options,
@@ -1085,6 +1119,9 @@ iree_status_t loom_amdgpu_emit_hal_kernel_library(
     loom_amdgpu_hal_kernel_library_t* out_library) {
   *out_emitted = false;
   *out_library = (loom_amdgpu_hal_kernel_library_t){0};
+  loom_target_emit_export_projection_buffer_t* export_projection =
+      options ? options->export_projection : NULL;
+  if (export_projection != NULL) export_projection->count = 0;
   const loom_amdgpu_runtime_global_flags_t runtime_globals =
       options ? options->runtime_globals : LOOM_AMDGPU_RUNTIME_GLOBAL_NONE;
   IREE_RETURN_IF_ERROR(
@@ -1137,6 +1174,12 @@ iree_status_t loom_amdgpu_emit_hal_kernel_library(
         module, &target_options, entry_predicate, &diagnostic_emitter,
         IREE_SV("AMDGPU HAL-native"), &table_arena, &selected, &entries);
   }
+  iree_host_size_t export_projection_count = 0;
+  if (iree_status_is_ok(status) && selected &&
+      diagnostic_emitter.error_count == 0) {
+    status = loom_amdgpu_hal_kernel_library_prepare_export_projection(
+        entries, export_projection, &export_projection_count);
+  }
   if (iree_status_is_ok(status) && selected &&
       diagnostic_emitter.error_count == 0 && report != NULL) {
     if (entries.count == 1) {
@@ -1162,6 +1205,9 @@ iree_status_t loom_amdgpu_emit_hal_kernel_library(
   if (iree_status_is_ok(status) && *out_emitted && report != NULL) {
     loom_target_compile_report_record_artifact_size(
         report, iree_byte_sequence_length(out_library->hsaco_data));
+  }
+  if (iree_status_is_ok(status) && *out_emitted && export_projection != NULL) {
+    export_projection->count = export_projection_count;
   }
 
   if (!iree_status_is_ok(status)) {

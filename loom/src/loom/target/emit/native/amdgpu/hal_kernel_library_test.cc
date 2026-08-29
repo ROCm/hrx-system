@@ -786,8 +786,13 @@ TEST_F(AmdgpuHalKernelLibraryTest,
   loom_target_compile_report_t report = {};
   loom_target_compile_report_initialize(&report, iree_allocator_system());
   DiagnosticCapture capture;
+  loom_target_emit_export_projection_t export_projection_rows[1] = {};
+  loom_target_emit_export_projection_buffer_t export_projection = {};
+  export_projection.values = export_projection_rows;
+  export_projection.capacity = IREE_ARRAYSIZE(export_projection_rows);
   loom_amdgpu_hal_kernel_library_options_t options = {};
   options.function_versions = &function_versions;
+  options.export_projection = &export_projection;
   options.diagnostic_sink = capture.sink();
   options.max_errors = 20;
   options.report = &report;
@@ -798,6 +803,10 @@ TEST_F(AmdgpuHalKernelLibraryTest,
 
   EXPECT_TRUE(emitted) << DiagnosticSummary(capture);
   EXPECT_TRUE(capture.diagnostics.empty()) << DiagnosticSummary(capture);
+  ASSERT_EQ(export_projection.count, 1u);
+  EXPECT_EQ(export_projection.values[0].function_version,
+            &function_version.base);
+  EXPECT_EQ(export_projection.values[0].ordinal, 0u);
   char expected_target_key_storage[128] = {};
   iree_string_view_t expected_target_key = iree_string_view_empty();
   IREE_ASSERT_OK(loom_amdgpu_artifact_key_format(

@@ -6,6 +6,7 @@
 
 #include "loom/target/emit/vm/module_emitter.h"
 
+#include <inttypes.h>
 #include <string.h>
 
 #include "iree/io/vec_stream.h"
@@ -13,6 +14,7 @@
 #include "loom/format/bytecode/writer/encoder.h"
 #include "loom/target/emit/vm/function_encoder.h"
 #include "loom/target/emit/vm/module_layout.h"
+#include "loom/target/function_version.h"
 
 enum {
   LOOM_VM_MODULE_MAX_SECTION_COUNT = 12,
@@ -639,14 +641,63 @@ static iree_status_t loom_vm_module_write_image(
   return iree_ok_status();
 }
 
+static iree_status_t loom_vm_module_prepare_export_projection(
+    const loom_vm_module_layout_t* layout,
+    const loom_vm_module_emitter_options_t* options,
+    iree_arena_allocator_t* scratch_arena,
+    iree_host_size_t* out_projection_count) {
+  *out_projection_count = 0;
+  loom_target_emit_export_projection_buffer_t* projection =
+      options->export_projection;
+  if (projection == NULL) return iree_ok_status();
+  projection->count = 0;
+  if (projection->capacity != 0 && projection->values == NULL) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "VM export projection capacity requires caller-owned row storage");
+  }
+
+  loom_target_function_version_snapshot_t version_snapshot = {0};
+  IREE_RETURN_IF_ERROR(loom_target_function_version_snapshot_build(
+      layout->module, options->function_versions, scratch_arena,
+      &version_snapshot));
+  iree_host_size_t projection_count = 0;
+  for (iree_host_size_t i = 0; i < layout->export_count; ++i) {
+    const loom_vm_module_function_layout_t* export = layout->exports[i];
+    loom_function_version_t* function_version =
+        loom_target_function_version_snapshot_handle_at(&version_snapshot,
+                                                        export->symbol_id);
+    if (function_version == NULL) continue;
+    if (projection_count >= projection->capacity) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "VM export projection capacity %" PRIhsz
+                              " is too small for mapped exports",
+                              projection->capacity);
+    }
+    projection->values[projection_count++] =
+        (loom_target_emit_export_projection_t){
+            .function_version = function_version,
+            .ordinal = (uint32_t)i,
+        };
+  }
+  *out_projection_count = projection_count;
+  return iree_ok_status();
+}
+
 iree_status_t loom_vm_emit_module(
     loom_module_t* module, const loom_vm_module_emitter_options_t* options,
     iree_arena_allocator_t* scratch_arena, iree_allocator_t host_allocator,
     iree_byte_sequence_t** out_contents) {
   *out_contents = NULL;
+  if (options->export_projection != NULL) {
+    options->export_projection->count = 0;
+  }
   loom_vm_module_layout_t layout = {0};
   IREE_RETURN_IF_ERROR(
       loom_vm_module_layout_build(module, scratch_arena, &layout));
+  iree_host_size_t export_projection_count = 0;
+  IREE_RETURN_IF_ERROR(loom_vm_module_prepare_export_projection(
+      &layout, options, scratch_arena, &export_projection_count));
 
   loom_vm_module_writer_t writer = {0};
   iree_status_t status = iree_io_vec_stream_create(
@@ -663,6 +714,10 @@ iree_status_t loom_vm_emit_module(
   }
   if (iree_status_is_ok(status) && is_complete) {
     status = iree_io_vec_stream_move_contents(writer.stream, out_contents);
+  }
+  if (iree_status_is_ok(status) && *out_contents != NULL &&
+      options->export_projection != NULL) {
+    options->export_projection->count = export_projection_count;
   }
   iree_io_stream_release(writer.stream);
   return status;

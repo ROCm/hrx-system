@@ -34,6 +34,8 @@ typedef struct loom_vm_module_call_target_t {
 typedef struct loom_vm_module_function_layout_t {
   // Prepared low function definition serialized for this function.
   loom_op_t* function_op;
+  // Module-local symbol ID naming |function_op|.
+  loom_symbol_id_t symbol_id;
   // Borrowed public export name, or empty for a private function.
   iree_string_view_t export_name;
   // Complete source-ordered logical ABI signature.

@@ -4,7 +4,11 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library")
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_library",
+    "loom_cc_test",
+)
 load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test_suite")
 
 package(
@@ -66,6 +70,7 @@ loom_cc_library(
         "//loom/src/loom/ops/global",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/ops/metadata",
+        "//loom/src/loom/target:function_version",
         "//loom/src/loom/target:low_descriptor_registry",
         "//loom/src/loom/target:provider",
         "//loom/src/loom/target:registers",
@@ -81,6 +86,28 @@ loom_cc_library(
         "//runtime/src/iree/io:stream",
         "//runtime/src/iree/vm",
         "//runtime/src/iree/vm/bytecode/wire",
+    ],
+)
+
+loom_cc_test(
+    name = "artifact_emitter_test",
+    srcs = ["artifact_emitter_test.cc"],
+    deps = [
+        ":vm",
+        "//loom/src/loom/codegen/low:text_asm",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/target:function_version",
+        "//loom/src/loom/target:low_descriptor_registry",
+        "//loom/src/loom/target/arch/vm:descriptors",
+        "//loom/src/loom/target/arch/vm:ops",
+        "//loom/src/loom/testing:diagnostic_matchers",
+        "//loom/src/loom/testing:module_ptr",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

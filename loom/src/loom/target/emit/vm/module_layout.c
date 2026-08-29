@@ -210,6 +210,7 @@ static iree_status_t loom_vm_module_layout_populate_functions(
     loom_vm_module_function_layout_t* function =
         &layout->functions[function_index++];
     function->function_op = function_op;
+    function->symbol_id = (loom_symbol_id_t)symbol_index;
     layout->call_targets_by_symbol[symbol_index] =
         (loom_vm_module_call_target_t){
             .kind = IREE_VM_ISA_CONTROL_CALL_TARGET_LOCAL,

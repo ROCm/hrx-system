@@ -90,6 +90,27 @@ typedef struct loom_target_emit_sidecar_artifact_t {
   iree_byte_sequence_t* contents;
 } loom_target_emit_sidecar_artifact_t;
 
+// Transient compiler identity for one public callable in an emitted artifact.
+typedef struct loom_target_emit_export_projection_t {
+  // Stable function-version handle borrowed from the emission request.
+  const loom_function_version_t* function_version;
+
+  // Artifact-local public callable ordinal used by the artifact consumer.
+  uint32_t ordinal;
+} loom_target_emit_export_projection_t;
+
+// Caller-owned storage populated with transient artifact export projections.
+typedef struct loom_target_emit_export_projection_buffer_t {
+  // Writable caller-owned row storage, or NULL when |capacity| is zero.
+  loom_target_emit_export_projection_t* values;
+
+  // Number of rows available in |values|.
+  iree_host_size_t capacity;
+
+  // Number of valid rows published in |values| after successful emission.
+  iree_host_size_t count;
+} loom_target_emit_export_projection_buffer_t;
+
 // One target artifact produced by an emitter.
 typedef struct loom_target_emit_artifact_t {
   // Target-neutral artifact format produced by the emitter.
@@ -104,6 +125,16 @@ typedef struct loom_target_emit_artifact_t {
 
   // Number of entries in |sidecars|.
   iree_host_size_t sidecar_count;
+
+  // Transient export projections in artifact-local ordinal order. Row storage
+  // is borrowed from the emission scratch arena and function-version handles
+  // are borrowed from the emission request. Consumers must copy the dense
+  // ordinals they need before either compiler-owned lifetime ends.
+  const loom_target_emit_export_projection_t* export_projections;
+
+  // Number of entries in |export_projections|. This may be smaller than the
+  // artifact's public export count when some exports have no compiler version.
+  iree_host_size_t export_projection_count;
 
   // Optional emitter-owned storage that keeps sidecar descriptors, identifier
   // strings, or other provider-specific metadata alive until released.
