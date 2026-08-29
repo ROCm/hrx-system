@@ -512,32 +512,18 @@ IREE_FLAG(
     "--device_profiling_output. When --device_profiling_mode is empty,\n"
     "tooling requests the producer's lightweight execution-statistics mode.");
 
-IREE_FLAG(
-    string, device_capture_tool, "",
-    "Optional external profiler/tool capture provider such as 'renderdoc' or\n"
-    "'metal'. External captures produce provider-specific artifacts and are\n"
-    "separate from HAL-native --device_profiling_mode output.");
-IREE_FLAG(string, device_capture_file, "",
-          "Optional provider-specific external capture output path or path "
-          "template.");
-IREE_FLAG(string, device_capture_label, "",
-          "Optional provider-specific external capture range label.");
-
 struct iree_hal_profiling_from_flags_t {
   // Host allocator used for this session object.
   iree_allocator_t host_allocator;
 
-  // Devices retained while profiling/capture state is active.
+  // Devices retained while profiling is active.
   iree_hal_device_t** devices;
 
-  // Number of entries in |devices| and the active-state arrays.
+  // Number of entries in |devices| and |profile_active|.
   iree_host_size_t device_count;
 
-  // Per-device true when a nonempty HAL-native profiling session is active.
-  bool* native_profile_active;
-
-  // Per-device true when iree_hal_device_external_capture_begin succeeded.
-  bool* external_capture_active;
+  // Per-device true when a nonempty HAL profiling session is active.
+  bool* profile_active;
 
   // Periodic flush interval in milliseconds, or 0 when disabled.
   iree_duration_t flush_interval_ms;
@@ -724,25 +710,10 @@ static bool iree_hal_device_profiling_filter_flags_present(void) {
          FLAG_device_profiling_filter_queue >= 0;
 }
 
-static bool iree_hal_device_external_capture_flags_present(void) {
-  return strlen(FLAG_device_capture_tool) != 0 ||
-         strlen(FLAG_device_capture_file) != 0 ||
-         strlen(FLAG_device_capture_label) != 0;
-}
-
-static iree_status_t iree_hal_device_external_capture_begin_from_flags(
-    iree_hal_device_t* device) {
-  iree_hal_device_external_capture_options_t options = {0};
-  options.provider = iree_make_cstring_view(FLAG_device_capture_tool);
-  options.file_path = iree_make_cstring_view(FLAG_device_capture_file);
-  options.label = iree_make_cstring_view(FLAG_device_capture_label);
-  return iree_hal_device_external_capture_begin(device, &options);
-}
-
-static bool iree_hal_profiling_from_flags_any_native_profile_active(
+static bool iree_hal_profiling_from_flags_any_profile_active(
     const iree_hal_profiling_from_flags_t* profiling) {
   for (iree_host_size_t i = 0; i < profiling->device_count; ++i) {
-    if (profiling->native_profile_active[i]) return true;
+    if (profiling->profile_active[i]) return true;
   }
   return false;
 }
@@ -774,13 +745,13 @@ static iree_status_t iree_hal_profiling_from_flags_consume_flush_status(
 iree_status_t iree_hal_flush_profiling_from_flags(
     iree_hal_profiling_from_flags_t* profiling) {
   if (!profiling ||
-      !iree_hal_profiling_from_flags_any_native_profile_active(profiling)) {
+      !iree_hal_profiling_from_flags_any_profile_active(profiling)) {
     return iree_ok_status();
   }
   iree_slim_mutex_lock(&profiling->flush_mutex);
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0; i < profiling->device_count; ++i) {
-    if (profiling->native_profile_active[i]) {
+    if (profiling->profile_active[i]) {
       status = iree_status_join(
           status, iree_hal_device_profiling_flush(profiling->devices[i]));
     }
@@ -812,7 +783,7 @@ static int iree_hal_profiling_from_flags_flush_thread_main(void* arg) {
 
 static iree_status_t iree_hal_profiling_from_flags_start_periodic_flush(
     iree_hal_profiling_from_flags_t* profiling) {
-  if (!iree_hal_profiling_from_flags_any_native_profile_active(profiling) ||
+  if (!iree_hal_profiling_from_flags_any_profile_active(profiling) ||
       profiling->flush_interval_ms == 0) {
     return iree_ok_status();
   }
@@ -861,10 +832,7 @@ static void iree_hal_profiling_from_flags_release_devices(
   for (iree_host_size_t i = 0; i < profiling->device_count; ++i) {
     iree_hal_device_release(profiling->devices[i]);
   }
-  iree_allocator_free(profiling->host_allocator,
-                      profiling->external_capture_active);
-  iree_allocator_free(profiling->host_allocator,
-                      profiling->native_profile_active);
+  iree_allocator_free(profiling->host_allocator, profiling->profile_active);
   iree_allocator_free(profiling->host_allocator, profiling->devices);
 }
 
@@ -881,14 +849,7 @@ static iree_status_t iree_hal_begin_device_list_profiling_from_flags(
   iree_hal_device_profiling_options_t options = {0};
   IREE_RETURN_IF_ERROR(iree_hal_device_profiling_data_families_from_flags(
       &options.data_families));
-  const bool external_capture_requested = strlen(FLAG_device_capture_tool) != 0;
   const bool statistics_requested = FLAG_print_device_statistics;
-  if (!external_capture_requested &&
-      iree_hal_device_external_capture_flags_present()) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "--device_capture_file and --device_capture_label "
-                            "require --device_capture_tool");
-  }
   if (statistics_requested && strlen(FLAG_device_profiling_output) != 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "--print_device_statistics cannot be combined with "
@@ -926,7 +887,7 @@ static iree_status_t iree_hal_begin_device_list_profiling_from_flags(
     }
     if (statistics_requested) {
       options.flags |= IREE_HAL_DEVICE_PROFILING_FLAG_LIGHTWEIGHT_STATISTICS;
-    } else if (!external_capture_requested) {
+    } else {
       return iree_ok_status();
     }
   }
@@ -969,9 +930,8 @@ static iree_status_t iree_hal_begin_device_list_profiling_from_flags(
   bool allocation_sizes_valid =
       iree_host_size_checked_mul(device_count, sizeof(*profiling->devices),
                                  &devices_size) &&
-      iree_host_size_checked_mul(device_count,
-                                 sizeof(*profiling->native_profile_active),
-                                 &active_size);
+      iree_host_size_checked_mul(
+          device_count, sizeof(*profiling->profile_active), &active_size);
   if (IREE_UNLIKELY(!allocation_sizes_valid)) {
     iree_slim_mutex_deinitialize(&profiling->flush_mutex);
     iree_allocator_free(host_allocator, profiling);
@@ -983,11 +943,7 @@ static iree_status_t iree_hal_begin_device_list_profiling_from_flags(
                                                (void**)&profiling->devices);
   if (iree_status_is_ok(status)) {
     status = iree_allocator_malloc(host_allocator, active_size,
-                                   (void**)&profiling->native_profile_active);
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_allocator_malloc(host_allocator, active_size,
-                                   (void**)&profiling->external_capture_active);
+                                   (void**)&profiling->profile_active);
   }
   if (!iree_status_is_ok(status)) {
     iree_hal_profiling_from_flags_release_devices(profiling);
@@ -996,8 +952,7 @@ static iree_status_t iree_hal_begin_device_list_profiling_from_flags(
     return status;
   }
   memset(profiling->devices, 0, devices_size);
-  memset(profiling->native_profile_active, 0, active_size);
-  memset(profiling->external_capture_active, 0, active_size);
+  memset(profiling->profile_active, 0, active_size);
   profiling->device_count = device_count;
   for (iree_host_size_t i = 0; i < device_count; ++i) {
     if (!devices[i]) {
@@ -1027,19 +982,11 @@ static iree_status_t iree_hal_begin_device_list_profiling_from_flags(
     for (iree_host_size_t i = 0; i < device_count && iree_status_is_ok(status);
          ++i) {
       status = iree_hal_device_profiling_begin(profiling->devices[i], &options);
-      profiling->native_profile_active[i] =
+      profiling->profile_active[i] =
           iree_status_is_ok(status) &&
           (options.data_families != IREE_HAL_DEVICE_PROFILING_DATA_NONE ||
            iree_hal_device_profiling_options_requests_lightweight_statistics(
                &options));
-    }
-  }
-  if (iree_status_is_ok(status) && external_capture_requested) {
-    for (iree_host_size_t i = 0; i < device_count && iree_status_is_ok(status);
-         ++i) {
-      status = iree_hal_device_external_capture_begin_from_flags(
-          profiling->devices[i]);
-      profiling->external_capture_active[i] = iree_status_is_ok(status);
     }
   }
   if (iree_status_is_ok(status)) {
@@ -1049,13 +996,7 @@ static iree_status_t iree_hal_begin_device_list_profiling_from_flags(
     status = iree_status_join(
         status, iree_hal_profiling_from_flags_stop_periodic_flush(profiling));
     for (iree_host_size_t i = profiling->device_count; i > 0; --i) {
-      if (profiling->external_capture_active[i - 1]) {
-        status = iree_status_join(status, iree_hal_device_external_capture_end(
-                                              profiling->devices[i - 1]));
-      }
-    }
-    for (iree_host_size_t i = profiling->device_count; i > 0; --i) {
-      if (profiling->native_profile_active[i - 1]) {
+      if (profiling->profile_active[i - 1]) {
         status = iree_status_join(
             status, iree_hal_device_profiling_end(profiling->devices[i - 1]));
       }
@@ -1121,13 +1062,7 @@ iree_status_t iree_hal_end_profiling_from_flags(
   iree_status_t status =
       iree_hal_profiling_from_flags_stop_periodic_flush(profiling);
   for (iree_host_size_t i = profiling->device_count; i > 0; --i) {
-    if (profiling->external_capture_active[i - 1]) {
-      status = iree_status_join(status, iree_hal_device_external_capture_end(
-                                            profiling->devices[i - 1]));
-    }
-  }
-  for (iree_host_size_t i = profiling->device_count; i > 0; --i) {
-    if (profiling->native_profile_active[i - 1]) {
+    if (profiling->profile_active[i - 1]) {
       status = iree_status_join(
           status, iree_hal_device_profiling_end(profiling->devices[i - 1]));
     }

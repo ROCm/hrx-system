@@ -1705,20 +1705,6 @@ static iree_status_t iree_hal_vulkan_logical_device_profiling_end(
   return status;
 }
 
-static iree_status_t iree_hal_vulkan_logical_device_external_capture_begin(
-    iree_hal_device_t* base_device,
-    const iree_hal_device_external_capture_options_t* options) {
-  (void)base_device;
-  (void)options;
-  return iree_hal_vulkan_unimplemented(IREE_SV("external capture"));
-}
-
-static iree_status_t iree_hal_vulkan_logical_device_external_capture_end(
-    iree_hal_device_t* base_device) {
-  (void)base_device;
-  return iree_hal_vulkan_unimplemented(IREE_SV("external capture"));
-}
-
 static iree_status_t iree_hal_vulkan_logical_device_create(
     iree_string_view_t identifier, const iree_hal_vulkan_libvulkan_t* libvulkan,
     iree_allocator_t host_allocator,
@@ -2364,7 +2350,4 @@ static const iree_hal_device_vtable_t iree_hal_vulkan_logical_device_vtable = {
     .profiling_begin = iree_hal_vulkan_logical_device_profiling_begin,
     .profiling_flush = iree_hal_vulkan_logical_device_profiling_flush,
     .profiling_end = iree_hal_vulkan_logical_device_profiling_end,
-    .external_capture_begin =
-        iree_hal_vulkan_logical_device_external_capture_begin,
-    .external_capture_end = iree_hal_vulkan_logical_device_external_capture_end,
 };

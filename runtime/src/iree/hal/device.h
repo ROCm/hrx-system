@@ -295,33 +295,6 @@ iree_hal_device_create_params_default(void) {
 IREE_API_EXPORT iree_status_t iree_hal_device_create_params_verify(
     const iree_hal_device_create_params_t* params);
 
-// Bitfield selecting external capture behavior.
-typedef uint64_t iree_hal_device_external_capture_flags_t;
-enum iree_hal_device_external_capture_flag_bits_t {
-  IREE_HAL_DEVICE_EXTERNAL_CAPTURE_FLAG_NONE = 0u,
-};
-
-// Controls an external profiler/tool capture range.
-//
-// External capture controls tools that produce non-IREE artifacts such as
-// RenderDoc .rdc captures, Metal .gputrace documents, vendor profiler UI
-// sessions, or future CUPTI/PIX/RGP-style captures. It is separate from
-// HAL-native profiling: success does not imply an iree_hal_profile_sink_t
-// session, and native profiling success must not depend on external tools.
-typedef struct iree_hal_device_external_capture_options_t {
-  // External capture provider/tool id, such as "renderdoc" or "metal".
-  iree_string_view_t provider;
-
-  // Optional provider-specific output path or path template.
-  iree_string_view_t file_path;
-
-  // Optional human-readable range label for providers with named captures.
-  iree_string_view_t label;
-
-  // External capture behavior flags.
-  iree_hal_device_external_capture_flags_t flags;
-} iree_hal_device_external_capture_options_t;
-
 // Bitfield specifying flags controlling an async allocation operation.
 typedef uint64_t iree_hal_alloca_flags_t;
 enum iree_hal_alloca_flag_bits_t {
@@ -1334,25 +1307,6 @@ iree_hal_device_profiling_flush(iree_hal_device_t* device);
 IREE_API_EXPORT iree_status_t
 iree_hal_device_profiling_end(iree_hal_device_t* device);
 
-// Begins an external profiler/tool capture range on |device|.
-//
-// External capture is for provider-specific artifacts and UI sessions outside
-// the HAL-native profile sink format. Examples include RenderDoc .rdc captures
-// and Metal .gputrace documents. A successful begin means the requested
-// provider started its capture; it does not imply any HAL profile chunks will
-// be produced.
-//
-// A device may support at most one active external capture unless the provider
-// explicitly documents nested or concurrent capture support.
-IREE_API_EXPORT iree_status_t iree_hal_device_external_capture_begin(
-    iree_hal_device_t* device,
-    const iree_hal_device_external_capture_options_t* options);
-
-// Ends an external profiler/tool capture range previously started with
-// iree_hal_device_external_capture_begin.
-IREE_API_EXPORT iree_status_t
-iree_hal_device_external_capture_end(iree_hal_device_t* device);
-
 //===----------------------------------------------------------------------===//
 // iree_hal_device_list_t
 //===----------------------------------------------------------------------===//
@@ -1571,11 +1525,6 @@ typedef struct iree_hal_device_vtable_t {
       const iree_hal_device_profiling_options_t* options);
   iree_status_t(IREE_API_PTR* profiling_flush)(iree_hal_device_t* device);
   iree_status_t(IREE_API_PTR* profiling_end)(iree_hal_device_t* device);
-
-  iree_status_t(IREE_API_PTR* external_capture_begin)(
-      iree_hal_device_t* device,
-      const iree_hal_device_external_capture_options_t* options);
-  iree_status_t(IREE_API_PTR* external_capture_end)(iree_hal_device_t* device);
 } iree_hal_device_vtable_t;
 IREE_HAL_ASSERT_VTABLE_LAYOUT(iree_hal_device_vtable_t);
 

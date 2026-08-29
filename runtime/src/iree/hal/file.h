@@ -53,12 +53,7 @@ typedef uint32_t iree_hal_external_file_flags_t;
 // Files are used for bulk data upload and download and on some implementations
 // may have hardware-optimized transfer paths.
 //
-// Implementations with support:
-//  CPU: file descriptors/HANDLEs
-//  Direct3D: IDStorageFileX
-//    https://learn.microsoft.com/en-us/gaming/gdk/_content/gc/system/overviews/directstorage/directstorage-overview
-//  Metal: MTLIOFileHandle
-//    https://developer.apple.com/documentation/metal/resource_loading?language=objc
+// Current CPU implementations use file descriptors or HANDLEs.
 //
 // Some implementations may allow additional non-native contents to be wrapped
 // in file handles to provide implementation-controlled transfer even if not

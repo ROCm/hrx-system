@@ -952,32 +952,6 @@ iree_hal_device_profiling_end(iree_hal_device_t* device) {
   return status;
 }
 
-IREE_API_EXPORT iree_status_t iree_hal_device_external_capture_begin(
-    iree_hal_device_t* device,
-    const iree_hal_device_external_capture_options_t* options) {
-  IREE_ASSERT_ARGUMENT(device);
-  IREE_ASSERT_ARGUMENT(options);
-  if (iree_string_view_is_empty(options->provider)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "external capture provider must be specified");
-  }
-
-  IREE_TRACE_ZONE_BEGIN(z0);
-  iree_status_t status =
-      _VTABLE_DISPATCH(device, external_capture_begin)(device, options);
-  IREE_TRACE_ZONE_END(z0);
-  return status;
-}
-
-IREE_API_EXPORT iree_status_t
-iree_hal_device_external_capture_end(iree_hal_device_t* device) {
-  IREE_ASSERT_ARGUMENT(device);
-  IREE_TRACE_ZONE_BEGIN(z0);
-  iree_status_t status = _VTABLE_DISPATCH(device, external_capture_end)(device);
-  IREE_TRACE_ZONE_END(z0);
-  return status;
-}
-
 //===----------------------------------------------------------------------===//
 // iree_hal_device_list_t
 //===----------------------------------------------------------------------===//

@@ -81,14 +81,13 @@ typedef uint64_t iree_hal_topology_device_bitmap_t;
 //
 //  Non-coherent: device-local memory optimized for compute bandwidth.
 //    Requires explicit transfers (DMA or host staging) for cross-device access.
-//    Maps to: AMD coarse-grained pools, Metal private storage, and Vulkan
-//    non-HOST_COHERENT device-local memory.
+//    Maps to: AMD coarse-grained pools and Vulkan non-HOST_COHERENT
+//    device-local memory.
 //
 //  Coherent: memory with hardware-maintained coherency across devices.
 //    May be directly load/store accessible by peer devices without transfers.
 //    Trades some compute bandwidth for zero-copy cross-device sharing.
-//    Maps to: AMD fine-grained pools, Metal shared storage, and Vulkan
-//    HOST_COHERENT memory types.
+//    Maps to: AMD fine-grained pools and Vulkan HOST_COHERENT memory types.
 //
 // Both modes use the same interop mode enum (NATIVE/IMPORT/COPY/NONE) but a
 // given device pair often has different modes for each. For example, two XGMI-
@@ -282,8 +281,6 @@ enum iree_hal_topology_handle_type_bits_t {
   IREE_HAL_TOPOLOGY_HANDLE_TYPE_RDMA_MR = 1u << 4,
   // POSIX shared memory segment (shm_open/mmap).
   IREE_HAL_TOPOLOGY_HANDLE_TYPE_SHM = 1u << 5,
-  // Apple Metal IOSurface.
-  IREE_HAL_TOPOLOGY_HANDLE_TYPE_METAL_IOSURFACE = 1u << 6,
   // Android HardwareBuffer (AHB).
   IREE_HAL_TOPOLOGY_HANDLE_TYPE_ANDROID_HARDWARE_BUFFER = 1u << 7,
 };

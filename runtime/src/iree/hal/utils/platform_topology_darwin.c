@@ -70,7 +70,6 @@ iree_status_t iree_hal_platform_query_pcie_bdf_from_path_impl(
 
   // macOS: PCIe BDF query would require parsing IORegistry paths with IOKit.
   // This is complex and beyond the scope of the fallback implementation.
-  // Most HAL drivers on macOS (Metal) don't need PCIe topology.
   return iree_make_status(
       IREE_STATUS_UNIMPLEMENTED,
       "PCIe BDF query not implemented on macOS (would require IOKit)");

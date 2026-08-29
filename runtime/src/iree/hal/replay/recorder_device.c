@@ -1530,31 +1530,6 @@ static iree_status_t iree_hal_replay_device_profiling_end(
       &pending_record, iree_hal_device_profiling_end(device->base_device));
 }
 
-static iree_status_t iree_hal_replay_device_external_capture_begin(
-    iree_hal_device_t* base_device,
-    const iree_hal_device_external_capture_options_t* options) {
-  iree_hal_replay_device_t* device = iree_hal_replay_device_cast(base_device);
-  iree_hal_replay_pending_record_t pending_record;
-  IREE_RETURN_IF_ERROR(iree_hal_replay_device_begin_operation(
-      device, IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_EXTERNAL_CAPTURE_BEGIN,
-      &pending_record));
-  return iree_hal_replay_device_complete_operation(
-      &pending_record,
-      iree_hal_device_external_capture_begin(device->base_device, options));
-}
-
-static iree_status_t iree_hal_replay_device_external_capture_end(
-    iree_hal_device_t* base_device) {
-  iree_hal_replay_device_t* device = iree_hal_replay_device_cast(base_device);
-  iree_hal_replay_pending_record_t pending_record;
-  IREE_RETURN_IF_ERROR(iree_hal_replay_device_begin_operation(
-      device, IREE_HAL_REPLAY_OPERATION_CODE_DEVICE_EXTERNAL_CAPTURE_END,
-      &pending_record));
-  return iree_hal_replay_device_complete_operation(
-      &pending_record,
-      iree_hal_device_external_capture_end(device->base_device));
-}
-
 static iree_status_t iree_hal_replay_wrap_device(
     iree_hal_replay_recorder_t* recorder, iree_hal_device_group_t* base_group,
     iree_hal_device_t* base_device, iree_allocator_t host_allocator,
@@ -1693,6 +1668,4 @@ static const iree_hal_device_vtable_t iree_hal_replay_device_vtable = {
     .profiling_begin = iree_hal_replay_device_profiling_begin,
     .profiling_flush = iree_hal_replay_device_profiling_flush,
     .profiling_end = iree_hal_replay_device_profiling_end,
-    .external_capture_begin = iree_hal_replay_device_external_capture_begin,
-    .external_capture_end = iree_hal_replay_device_external_capture_end,
 };

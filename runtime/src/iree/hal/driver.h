@@ -36,7 +36,7 @@ typedef struct iree_hal_driver_info_t {
   IREE_API_UNSTABLE
 
   // Canonical name of the driver as used in command lines, documentation, etc.
-  // Examples: 'metal', 'vulkan'
+  // Examples: 'amdgpu', 'vulkan'.
   iree_string_view_t driver_name;
 
   // Full human-readable name of the driver for display.
