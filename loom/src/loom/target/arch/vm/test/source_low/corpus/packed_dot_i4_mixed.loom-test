@@ -1,0 +1,87 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/packed_dot_i4_mixed.loom-test
+// RUN: emit source-low output=low
+
+vm.target<core> @target
+func.def target(@target) @dot8i4_u4s4(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+  %dot = vector.dot8i4<u4s4> %lhs, %rhs, %acc : vector<1xi32>
+  func.return %dot : vector<1xi32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : vector<1xi32>>, reg<vm.value : vector<1xi32>>, reg<vm.value : vector<1xi32>>) -> (reg<vm.value : vector<1xi32>>)>}) @dot8i4_u4s4(%lhs: reg<vm.value : vector<1xi32>>, %rhs: reg<vm.value : vector<1xi32>>, %acc: reg<vm.value : vector<1xi32>>) -> (reg<vm.value : vector<1xi32>>) asm {
+  %84 = slice %lhs[0] : reg<vm.value : vector<1xi32>> -> reg<vm.value : i32>
+  %85 = slice %rhs[0] : reg<vm.value : vector<1xi32>> -> reg<vm.value : i32>
+  %86 = slice %acc[0] : reg<vm.value : vector<1xi32>> -> reg<vm.value : i32>
+  %87 = constant.s16 15 : reg<vm.value : i32>
+  %88 = constant.s16 4 : reg<vm.value : i32>
+  %89 = constant.s16 8 : reg<vm.value : i32>
+  %90 = constant.s16 12 : reg<vm.value : i32>
+  %91 = constant.s16 16 : reg<vm.value : i32>
+  %92 = constant.s16 20 : reg<vm.value : i32>
+  %93 = constant.s16 24 : reg<vm.value : i32>
+  %94 = constant.s16 28 : reg<vm.value : i32>
+  %95 = integer.and.i32 %84, %87 : reg<vm.value : i32>
+  %96 = integer.and.i32 %85, %87 : reg<vm.value : i32>
+  %97 = integer.shift.left.i32 %96, %94 : reg<vm.value : i32>
+  %98 = integer.shift.right.s32 %97, %94 : reg<vm.value : i32>
+  %99 = integer.mul.i32 %95, %98 : reg<vm.value : i32>
+  %100 = integer.add.i32 %86, %99 : reg<vm.value : i32>
+  %101 = integer.shift.right.u32 %84, %88 : reg<vm.value : i32>
+  %102 = integer.and.i32 %101, %87 : reg<vm.value : i32>
+  %103 = integer.shift.right.u32 %85, %88 : reg<vm.value : i32>
+  %104 = integer.and.i32 %103, %87 : reg<vm.value : i32>
+  %105 = integer.shift.left.i32 %104, %94 : reg<vm.value : i32>
+  %106 = integer.shift.right.s32 %105, %94 : reg<vm.value : i32>
+  %107 = integer.mul.i32 %102, %106 : reg<vm.value : i32>
+  %108 = integer.add.i32 %100, %107 : reg<vm.value : i32>
+  %109 = integer.shift.right.u32 %84, %89 : reg<vm.value : i32>
+  %110 = integer.and.i32 %109, %87 : reg<vm.value : i32>
+  %111 = integer.shift.right.u32 %85, %89 : reg<vm.value : i32>
+  %112 = integer.and.i32 %111, %87 : reg<vm.value : i32>
+  %113 = integer.shift.left.i32 %112, %94 : reg<vm.value : i32>
+  %114 = integer.shift.right.s32 %113, %94 : reg<vm.value : i32>
+  %115 = integer.mul.i32 %110, %114 : reg<vm.value : i32>
+  %116 = integer.add.i32 %108, %115 : reg<vm.value : i32>
+  %117 = integer.shift.right.u32 %84, %90 : reg<vm.value : i32>
+  %118 = integer.and.i32 %117, %87 : reg<vm.value : i32>
+  %119 = integer.shift.right.u32 %85, %90 : reg<vm.value : i32>
+  %120 = integer.and.i32 %119, %87 : reg<vm.value : i32>
+  %121 = integer.shift.left.i32 %120, %94 : reg<vm.value : i32>
+  %122 = integer.shift.right.s32 %121, %94 : reg<vm.value : i32>
+  %123 = integer.mul.i32 %118, %122 : reg<vm.value : i32>
+  %124 = integer.add.i32 %116, %123 : reg<vm.value : i32>
+  %125 = integer.shift.right.u32 %84, %91 : reg<vm.value : i32>
+  %126 = integer.and.i32 %125, %87 : reg<vm.value : i32>
+  %127 = integer.shift.right.u32 %85, %91 : reg<vm.value : i32>
+  %128 = integer.and.i32 %127, %87 : reg<vm.value : i32>
+  %129 = integer.shift.left.i32 %128, %94 : reg<vm.value : i32>
+  %130 = integer.shift.right.s32 %129, %94 : reg<vm.value : i32>
+  %131 = integer.mul.i32 %126, %130 : reg<vm.value : i32>
+  %132 = integer.add.i32 %124, %131 : reg<vm.value : i32>
+  %133 = integer.shift.right.u32 %84, %92 : reg<vm.value : i32>
+  %134 = integer.and.i32 %133, %87 : reg<vm.value : i32>
+  %135 = integer.shift.right.u32 %85, %92 : reg<vm.value : i32>
+  %136 = integer.and.i32 %135, %87 : reg<vm.value : i32>
+  %137 = integer.shift.left.i32 %136, %94 : reg<vm.value : i32>
+  %138 = integer.shift.right.s32 %137, %94 : reg<vm.value : i32>
+  %139 = integer.mul.i32 %134, %138 : reg<vm.value : i32>
+  %140 = integer.add.i32 %132, %139 : reg<vm.value : i32>
+  %141 = integer.shift.right.u32 %84, %93 : reg<vm.value : i32>
+  %142 = integer.and.i32 %141, %87 : reg<vm.value : i32>
+  %143 = integer.shift.right.u32 %85, %93 : reg<vm.value : i32>
+  %144 = integer.and.i32 %143, %87 : reg<vm.value : i32>
+  %145 = integer.shift.left.i32 %144, %94 : reg<vm.value : i32>
+  %146 = integer.shift.right.s32 %145, %94 : reg<vm.value : i32>
+  %147 = integer.mul.i32 %142, %146 : reg<vm.value : i32>
+  %148 = integer.add.i32 %140, %147 : reg<vm.value : i32>
+  %149 = integer.shift.right.u32 %84, %94 : reg<vm.value : i32>
+  %150 = integer.and.i32 %149, %87 : reg<vm.value : i32>
+  %151 = integer.shift.right.u32 %85, %94 : reg<vm.value : i32>
+  %152 = integer.and.i32 %151, %87 : reg<vm.value : i32>
+  %153 = integer.shift.left.i32 %152, %94 : reg<vm.value : i32>
+  %154 = integer.shift.right.s32 %153, %94 : reg<vm.value : i32>
+  %155 = integer.mul.i32 %150, %154 : reg<vm.value : i32>
+  %156 = integer.add.i32 %148, %155 : reg<vm.value : i32>
+  %dot = concat(%156) : (reg<vm.value : i32>) -> reg<vm.value : vector<1xi32>>
+  return %dot
+}
