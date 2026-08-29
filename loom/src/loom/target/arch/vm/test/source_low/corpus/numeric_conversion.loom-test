@@ -1,0 +1,2955 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_conversion.loom-test
+// RUN: emit source-low output=low
+
+vm.target<core> @target
+func.def target(@target) @vector_sitofp_i32x2(%input: vector<2xi32>, %scale: vector<2xf32>) -> (vector<2xf32>) {
+  %converted = vector.sitofp %input : vector<2xi32> to vector<2xf32>
+  %scaled = vector.mulf %converted, %scale : vector<2xf32>
+  func.return %scaled : vector<2xf32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x2 : vector<2xi32>>, reg<vm.value x2 : vector<2xf32>>) -> (reg<vm.value x2 : vector<2xf32>>)>}) @vector_sitofp_i32x2(%input: reg<vm.value x2 : vector<2xi32>>, %scale: reg<vm.value x2 : vector<2xf32>>) -> (reg<vm.value x2 : vector<2xf32>>) asm {
+  %17 = slice %input[0] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %18 = conversion.integer.to.float %17, s32.to.f32 : reg<vm.value : f32>
+  %19 = slice %scale[0] : reg<vm.value x2 : vector<2xf32>> -> reg<vm.value : f32>
+  %20 = float.mul.f32 %18, %19 : reg<vm.value : f32>
+  %21 = slice %input[1] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %22 = conversion.integer.to.float %21, s32.to.f32 : reg<vm.value : f32>
+  %23 = slice %scale[1] : reg<vm.value x2 : vector<2xf32>> -> reg<vm.value : f32>
+  %24 = float.mul.f32 %22, %23 : reg<vm.value : f32>
+  %scaled = concat(%20, %24) : (reg<vm.value : f32>, reg<vm.value : f32>) -> reg<vm.value x2 : vector<2xf32>>
+  return %scaled
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @vector_decode_splat_f8_scale(%input: buffer, %base: offset, %scale: vector<1xf32>) -> (vector<2xf32>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %input_view = buffer.view %input[%base] : buffer -> view<1xf8E4M3, %layout>
+  %raw = view.load %input_view[0] : view<1xf8E4M3, %layout> -> f8E4M3
+  %payload = vector.splat %raw : vector<2xf8E4M3>
+  %schema = encoding.define #encoding.f8e4m3<affine=scale_only, payload_elements=2, scale_format=f32, scale_group_elements=2, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %decoded = vector.decode %payload using %schema {scale = %scale : vector<1xf32>} : vector<2xf8E4M3>, encoding<schema> -> vector<2xf32>
+  func.return %decoded : vector<2xf32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.value : offset>, reg<vm.value : vector<1xf32>>) -> (reg<vm.value x2 : vector<2xf32>>)>}) @vector_decode_splat_f8_scale(%input: reg<vm.ref : buffer>, %base: reg<vm.value : offset>, %scale: reg<vm.value : vector<1xf32>>) -> (reg<vm.value x2 : vector<2xf32>>) asm {
+  %140 = constant.zero : reg<vm.value : offset>
+  %raw = buffer.load %input, %140, %base, 1, i8.x1 : reg<vm.value : f8E4M3>
+  %142 = value.copy %raw : reg<vm.value : i8>
+  %143 = conversion.integer %142, u8.to.i32 : reg<vm.value : i32>
+  %144 = constant.s16 128 : reg<vm.value : i32>
+  %145 = integer.and.i32 %143, %144 : reg<vm.value : i32>
+  %146 = constant.s16 24 : reg<vm.value : i32>
+  %147 = integer.shift.left.i32 %145, %146 : reg<vm.value : i32>
+  %148 = constant.s16 120 : reg<vm.value : i32>
+  %149 = integer.and.i32 %143, %148 : reg<vm.value : i32>
+  %150 = constant.s16 3 : reg<vm.value : i32>
+  %151 = integer.shift.right.u32 %149, %150 : reg<vm.value : i32>
+  %152 = constant.s16 7 : reg<vm.value : i32>
+  %153 = integer.and.i32 %143, %152 : reg<vm.value : i32>
+  %154 = integer.add.i32 %151, %148 : reg<vm.value : i32>
+  %155 = constant.s16 23 : reg<vm.value : i32>
+  %156 = integer.shift.left.i32 %154, %155 : reg<vm.value : i32>
+  %157 = constant.s16 20 : reg<vm.value : i32>
+  %158 = integer.shift.left.i32 %153, %157 : reg<vm.value : i32>
+  %159 = integer.or.i32 %147, %156 : reg<vm.value : i32>
+  %160 = integer.or.i32 %159, %158 : reg<vm.value : i32>
+  %161 = constant.zero : reg<vm.value : i32>
+  %162 = constant.s16 2 : reg<vm.value : i32>
+  %163 = integer.and.i32 %153, %162 : reg<vm.value : i32>
+  %164 = integer.compare.i32 %163, %161, ne : reg<vm.value : i1>
+  %165 = constant.s16 1 : reg<vm.value : i32>
+  %166 = value.select %164, %165, %161 : reg<vm.value : i32>
+  %167 = constant.s16 4 : reg<vm.value : i32>
+  %168 = integer.and.i32 %153, %167 : reg<vm.value : i32>
+  %169 = integer.compare.i32 %168, %161, ne : reg<vm.value : i1>
+  %170 = value.select %169, %162, %166 : reg<vm.value : i32>
+  %171 = constant.s16 118 : reg<vm.value : i32>
+  %172 = integer.add.i32 %170, %171 : reg<vm.value : i32>
+  %173 = integer.shift.left.i32 %172, %155 : reg<vm.value : i32>
+  %174 = integer.sub.i32 %155, %170 : reg<vm.value : i32>
+  %175 = integer.shift.left.i32 %153, %174 : reg<vm.value : i32>
+  %176 = constant.i32 8388607 : reg<vm.value : i32>
+  %177 = integer.and.i32 %175, %176 : reg<vm.value : i32>
+  %178 = integer.or.i32 %147, %173 : reg<vm.value : i32>
+  %179 = integer.or.i32 %178, %177 : reg<vm.value : i32>
+  %180 = integer.compare.i32 %153, %161, eq : reg<vm.value : i1>
+  %181 = value.select %180, %147, %179 : reg<vm.value : i32>
+  %182 = integer.compare.i32 %151, %161, eq : reg<vm.value : i1>
+  %183 = value.select %182, %181, %160 : reg<vm.value : i32>
+  %184 = constant.s16 15 : reg<vm.value : i32>
+  %185 = integer.compare.i32 %151, %184, eq : reg<vm.value : i1>
+  %186 = constant.i32 2143289344 : reg<vm.value : i32>
+  %187 = integer.compare.i32 %153, %152, eq : reg<vm.value : i1>
+  %188 = constant.zero : reg<vm.value : i1>
+  %189 = value.select %185, %187, %188 : reg<vm.value : i1>
+  %190 = value.select %189, %186, %183 : reg<vm.value : i32>
+  %191 = value.copy %190 : reg<vm.value : f32>
+  %192 = slice %scale[0] : reg<vm.value : vector<1xf32>> -> reg<vm.value : f32>
+  %193 = float.mul.f32 %191, %192 : reg<vm.value : f32>
+  %decoded = concat(%193, %193) : (reg<vm.value : f32>, reg<vm.value : f32>) -> reg<vm.value x2 : vector<2xf32>>
+  return %decoded
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @vector_sitofp_i8x4(%input: vector<4xi8>) -> (vector<4xf32>) {
+  %converted = vector.sitofp %input : vector<4xi8> to vector<4xf32>
+  func.return %converted : vector<4xf32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x4 : vector<4xi8>>) -> (reg<vm.value x4 : vector<4xf32>>)>}) @vector_sitofp_i8x4(%input: reg<vm.value x4 : vector<4xi8>>) -> (reg<vm.value x4 : vector<4xf32>>) asm {
+  %25 = slice %input[0] : reg<vm.value x4 : vector<4xi8>> -> reg<vm.value : i8>
+  %26 = conversion.integer %25, s8.to.i32 : reg<vm.value : i32>
+  %27 = conversion.integer.to.float %26, s32.to.f32 : reg<vm.value : f32>
+  %28 = slice %input[1] : reg<vm.value x4 : vector<4xi8>> -> reg<vm.value : i8>
+  %29 = conversion.integer %28, s8.to.i32 : reg<vm.value : i32>
+  %30 = conversion.integer.to.float %29, s32.to.f32 : reg<vm.value : f32>
+  %31 = slice %input[2] : reg<vm.value x4 : vector<4xi8>> -> reg<vm.value : i8>
+  %32 = conversion.integer %31, s8.to.i32 : reg<vm.value : i32>
+  %33 = conversion.integer.to.float %32, s32.to.f32 : reg<vm.value : f32>
+  %34 = slice %input[3] : reg<vm.value x4 : vector<4xi8>> -> reg<vm.value : i8>
+  %35 = conversion.integer %34, s8.to.i32 : reg<vm.value : i32>
+  %36 = conversion.integer.to.float %35, s32.to.f32 : reg<vm.value : f32>
+  %converted = concat(%27, %30, %33, %36) : (reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>) -> reg<vm.value x4 : vector<4xf32>>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @vector_uitofp_i8x4(%input: vector<4xi8>) -> (vector<4xf32>) {
+  %converted = vector.uitofp %input : vector<4xi8> to vector<4xf32>
+  func.return %converted : vector<4xf32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x4 : vector<4xi8>>) -> (reg<vm.value x4 : vector<4xf32>>)>}) @vector_uitofp_i8x4(%input: reg<vm.value x4 : vector<4xi8>>) -> (reg<vm.value x4 : vector<4xf32>>) asm {
+  %25 = slice %input[0] : reg<vm.value x4 : vector<4xi8>> -> reg<vm.value : i8>
+  %26 = conversion.integer %25, u8.to.i32 : reg<vm.value : i32>
+  %27 = conversion.integer.to.float %26, u32.to.f32 : reg<vm.value : f32>
+  %28 = slice %input[1] : reg<vm.value x4 : vector<4xi8>> -> reg<vm.value : i8>
+  %29 = conversion.integer %28, u8.to.i32 : reg<vm.value : i32>
+  %30 = conversion.integer.to.float %29, u32.to.f32 : reg<vm.value : f32>
+  %31 = slice %input[2] : reg<vm.value x4 : vector<4xi8>> -> reg<vm.value : i8>
+  %32 = conversion.integer %31, u8.to.i32 : reg<vm.value : i32>
+  %33 = conversion.integer.to.float %32, u32.to.f32 : reg<vm.value : f32>
+  %34 = slice %input[3] : reg<vm.value x4 : vector<4xi8>> -> reg<vm.value : i8>
+  %35 = conversion.integer %34, u8.to.i32 : reg<vm.value : i32>
+  %36 = conversion.integer.to.float %35, u32.to.f32 : reg<vm.value : f32>
+  %converted = concat(%27, %30, %33, %36) : (reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>) -> reg<vm.value x4 : vector<4xf32>>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @vector_uitofp_i8x8(%input: vector<8xi8>) -> (vector<8xf32>) {
+  %converted = vector.uitofp %input : vector<8xi8> to vector<8xf32>
+  func.return %converted : vector<8xf32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x8 : vector<8xi8>>) -> (reg<vm.value x8 : vector<8xf32>>)>}) @vector_uitofp_i8x8(%input: reg<vm.value x8 : vector<8xi8>>) -> (reg<vm.value x8 : vector<8xf32>>) asm {
+  %41 = slice %input[0] : reg<vm.value x8 : vector<8xi8>> -> reg<vm.value : i8>
+  %42 = conversion.integer %41, u8.to.i32 : reg<vm.value : i32>
+  %43 = conversion.integer.to.float %42, u32.to.f32 : reg<vm.value : f32>
+  %44 = slice %input[1] : reg<vm.value x8 : vector<8xi8>> -> reg<vm.value : i8>
+  %45 = conversion.integer %44, u8.to.i32 : reg<vm.value : i32>
+  %46 = conversion.integer.to.float %45, u32.to.f32 : reg<vm.value : f32>
+  %47 = slice %input[2] : reg<vm.value x8 : vector<8xi8>> -> reg<vm.value : i8>
+  %48 = conversion.integer %47, u8.to.i32 : reg<vm.value : i32>
+  %49 = conversion.integer.to.float %48, u32.to.f32 : reg<vm.value : f32>
+  %50 = slice %input[3] : reg<vm.value x8 : vector<8xi8>> -> reg<vm.value : i8>
+  %51 = conversion.integer %50, u8.to.i32 : reg<vm.value : i32>
+  %52 = conversion.integer.to.float %51, u32.to.f32 : reg<vm.value : f32>
+  %53 = slice %input[4] : reg<vm.value x8 : vector<8xi8>> -> reg<vm.value : i8>
+  %54 = conversion.integer %53, u8.to.i32 : reg<vm.value : i32>
+  %55 = conversion.integer.to.float %54, u32.to.f32 : reg<vm.value : f32>
+  %56 = slice %input[5] : reg<vm.value x8 : vector<8xi8>> -> reg<vm.value : i8>
+  %57 = conversion.integer %56, u8.to.i32 : reg<vm.value : i32>
+  %58 = conversion.integer.to.float %57, u32.to.f32 : reg<vm.value : f32>
+  %59 = slice %input[6] : reg<vm.value x8 : vector<8xi8>> -> reg<vm.value : i8>
+  %60 = conversion.integer %59, u8.to.i32 : reg<vm.value : i32>
+  %61 = conversion.integer.to.float %60, u32.to.f32 : reg<vm.value : f32>
+  %62 = slice %input[7] : reg<vm.value x8 : vector<8xi8>> -> reg<vm.value : i8>
+  %63 = conversion.integer %62, u8.to.i32 : reg<vm.value : i32>
+  %64 = conversion.integer.to.float %63, u32.to.f32 : reg<vm.value : f32>
+  %converted = concat(%43, %46, %49, %52, %55, %58, %61, %64) : (reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>) -> reg<vm.value x8 : vector<8xf32>>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @vector_sitofp_i16x2(%input: vector<2xi16>) -> (vector<2xf32>) {
+  %converted = vector.sitofp %input : vector<2xi16> to vector<2xf32>
+  func.return %converted : vector<2xf32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x2 : vector<2xi16>>) -> (reg<vm.value x2 : vector<2xf32>>)>}) @vector_sitofp_i16x2(%input: reg<vm.value x2 : vector<2xi16>>) -> (reg<vm.value x2 : vector<2xf32>>) asm {
+  %17 = slice %input[0] : reg<vm.value x2 : vector<2xi16>> -> reg<vm.value : i16>
+  %18 = conversion.integer %17, s16.to.i32 : reg<vm.value : i32>
+  %19 = conversion.integer.to.float %18, s32.to.f32 : reg<vm.value : f32>
+  %20 = slice %input[1] : reg<vm.value x2 : vector<2xi16>> -> reg<vm.value : i16>
+  %21 = conversion.integer %20, s16.to.i32 : reg<vm.value : i32>
+  %22 = conversion.integer.to.float %21, s32.to.f32 : reg<vm.value : f32>
+  %converted = concat(%19, %22) : (reg<vm.value : f32>, reg<vm.value : f32>) -> reg<vm.value x2 : vector<2xf32>>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @vector_uitofp_i16x2(%input: vector<2xi16>) -> (vector<2xf32>) {
+  %converted = vector.uitofp %input : vector<2xi16> to vector<2xf32>
+  func.return %converted : vector<2xf32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x2 : vector<2xi16>>) -> (reg<vm.value x2 : vector<2xf32>>)>}) @vector_uitofp_i16x2(%input: reg<vm.value x2 : vector<2xi16>>) -> (reg<vm.value x2 : vector<2xf32>>) asm {
+  %17 = slice %input[0] : reg<vm.value x2 : vector<2xi16>> -> reg<vm.value : i16>
+  %18 = conversion.integer %17, u16.to.i32 : reg<vm.value : i32>
+  %19 = conversion.integer.to.float %18, u32.to.f32 : reg<vm.value : f32>
+  %20 = slice %input[1] : reg<vm.value x2 : vector<2xi16>> -> reg<vm.value : i16>
+  %21 = conversion.integer %20, u16.to.i32 : reg<vm.value : i32>
+  %22 = conversion.integer.to.float %21, u32.to.f32 : reg<vm.value : f32>
+  %converted = concat(%19, %22) : (reg<vm.value : f32>, reg<vm.value : f32>) -> reg<vm.value x2 : vector<2xf32>>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @vector_fptosi_i32x4(%input: vector<4xf32>) -> (vector<4xi32>) {
+  %converted = vector.fptosi %input : vector<4xf32> to vector<4xi32>
+  func.return %converted : vector<4xi32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x4 : vector<4xf32>>) -> (reg<vm.value x4 : vector<4xi32>>)>}) @vector_fptosi_i32x4(%input: reg<vm.value x4 : vector<4xf32>>) -> (reg<vm.value x4 : vector<4xi32>>) asm {
+  %25 = slice %input[0] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %26 = conversion.float.to.integer %25, f32.to.s32 : reg<vm.value : i32>
+  %27 = slice %input[1] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %28 = conversion.float.to.integer %27, f32.to.s32 : reg<vm.value : i32>
+  %29 = slice %input[2] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %30 = conversion.float.to.integer %29, f32.to.s32 : reg<vm.value : i32>
+  %31 = slice %input[3] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %32 = conversion.float.to.integer %31, f32.to.s32 : reg<vm.value : i32>
+  %converted = concat(%26, %28, %30, %32) : (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>) -> reg<vm.value x4 : vector<4xi32>>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @vector_fptoui_i32x4(%input: vector<4xf32>) -> (vector<4xi32>) {
+  %converted = vector.fptoui %input : vector<4xf32> to vector<4xi32>
+  func.return %converted : vector<4xi32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x4 : vector<4xf32>>) -> (reg<vm.value x4 : vector<4xi32>>)>}) @vector_fptoui_i32x4(%input: reg<vm.value x4 : vector<4xf32>>) -> (reg<vm.value x4 : vector<4xi32>>) asm {
+  %25 = slice %input[0] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %26 = conversion.float.to.integer %25, f32.to.u32 : reg<vm.value : i32>
+  %27 = slice %input[1] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %28 = conversion.float.to.integer %27, f32.to.u32 : reg<vm.value : i32>
+  %29 = slice %input[2] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %30 = conversion.float.to.integer %29, f32.to.u32 : reg<vm.value : i32>
+  %31 = slice %input[3] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %32 = conversion.float.to.integer %31, f32.to.u32 : reg<vm.value : i32>
+  %converted = concat(%26, %28, %30, %32) : (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>) -> reg<vm.value x4 : vector<4xi32>>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @vector_fptosi_i8x4(%input: vector<4xf32>) -> (vector<4xi8>) {
+  %converted = vector.fptosi %input : vector<4xf32> to vector<4xi8>
+  func.return %converted : vector<4xi8>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x4 : vector<4xf32>>) -> (reg<vm.value x4 : vector<4xi8>>)>}) @vector_fptosi_i8x4(%input: reg<vm.value x4 : vector<4xf32>>) -> (reg<vm.value x4 : vector<4xi8>>) asm {
+  %25 = slice %input[0] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %26 = conversion.float.to.integer %25, f32.to.s8 : reg<vm.value : i8>
+  %27 = slice %input[1] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %28 = conversion.float.to.integer %27, f32.to.s8 : reg<vm.value : i8>
+  %29 = slice %input[2] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %30 = conversion.float.to.integer %29, f32.to.s8 : reg<vm.value : i8>
+  %31 = slice %input[3] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %32 = conversion.float.to.integer %31, f32.to.s8 : reg<vm.value : i8>
+  %converted = concat(%26, %28, %30, %32) : (reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>) -> reg<vm.value x4 : vector<4xi8>>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @vector_fptosi_i8x8(%input: vector<8xf32>) -> (vector<8xi8>) {
+  %converted = vector.fptosi %input : vector<8xf32> to vector<8xi8>
+  func.return %converted : vector<8xi8>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x8 : vector<8xf32>>) -> (reg<vm.value x8 : vector<8xi8>>)>}) @vector_fptosi_i8x8(%input: reg<vm.value x8 : vector<8xf32>>) -> (reg<vm.value x8 : vector<8xi8>>) asm {
+  %41 = slice %input[0] : reg<vm.value x8 : vector<8xf32>> -> reg<vm.value : f32>
+  %42 = conversion.float.to.integer %41, f32.to.s8 : reg<vm.value : i8>
+  %43 = slice %input[1] : reg<vm.value x8 : vector<8xf32>> -> reg<vm.value : f32>
+  %44 = conversion.float.to.integer %43, f32.to.s8 : reg<vm.value : i8>
+  %45 = slice %input[2] : reg<vm.value x8 : vector<8xf32>> -> reg<vm.value : f32>
+  %46 = conversion.float.to.integer %45, f32.to.s8 : reg<vm.value : i8>
+  %47 = slice %input[3] : reg<vm.value x8 : vector<8xf32>> -> reg<vm.value : f32>
+  %48 = conversion.float.to.integer %47, f32.to.s8 : reg<vm.value : i8>
+  %49 = slice %input[4] : reg<vm.value x8 : vector<8xf32>> -> reg<vm.value : f32>
+  %50 = conversion.float.to.integer %49, f32.to.s8 : reg<vm.value : i8>
+  %51 = slice %input[5] : reg<vm.value x8 : vector<8xf32>> -> reg<vm.value : f32>
+  %52 = conversion.float.to.integer %51, f32.to.s8 : reg<vm.value : i8>
+  %53 = slice %input[6] : reg<vm.value x8 : vector<8xf32>> -> reg<vm.value : f32>
+  %54 = conversion.float.to.integer %53, f32.to.s8 : reg<vm.value : i8>
+  %55 = slice %input[7] : reg<vm.value x8 : vector<8xf32>> -> reg<vm.value : f32>
+  %56 = conversion.float.to.integer %55, f32.to.s8 : reg<vm.value : i8>
+  %converted = concat(%42, %44, %46, %48, %50, %52, %54, %56) : (reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>) -> reg<vm.value x8 : vector<8xi8>>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @vector_fptoui_i8x4(%input: vector<4xf32>) -> (vector<4xi8>) {
+  %converted = vector.fptoui %input : vector<4xf32> to vector<4xi8>
+  func.return %converted : vector<4xi8>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x4 : vector<4xf32>>) -> (reg<vm.value x4 : vector<4xi8>>)>}) @vector_fptoui_i8x4(%input: reg<vm.value x4 : vector<4xf32>>) -> (reg<vm.value x4 : vector<4xi8>>) asm {
+  %25 = slice %input[0] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %26 = conversion.float.to.integer %25, f32.to.u8 : reg<vm.value : i8>
+  %27 = slice %input[1] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %28 = conversion.float.to.integer %27, f32.to.u8 : reg<vm.value : i8>
+  %29 = slice %input[2] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %30 = conversion.float.to.integer %29, f32.to.u8 : reg<vm.value : i8>
+  %31 = slice %input[3] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %32 = conversion.float.to.integer %31, f32.to.u8 : reg<vm.value : i8>
+  %converted = concat(%26, %28, %30, %32) : (reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>) -> reg<vm.value x4 : vector<4xi8>>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @vector_fptoui_i8x3(%input: vector<3xf32>) -> (vector<3xi8>) {
+  %converted = vector.fptoui %input : vector<3xf32> to vector<3xi8>
+  func.return %converted : vector<3xi8>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x3 : vector<3xf32>>) -> (reg<vm.value x3 : vector<3xi8>>)>}) @vector_fptoui_i8x3(%input: reg<vm.value x3 : vector<3xf32>>) -> (reg<vm.value x3 : vector<3xi8>>) asm {
+  %21 = slice %input[0] : reg<vm.value x3 : vector<3xf32>> -> reg<vm.value : f32>
+  %22 = conversion.float.to.integer %21, f32.to.u8 : reg<vm.value : i8>
+  %23 = slice %input[1] : reg<vm.value x3 : vector<3xf32>> -> reg<vm.value : f32>
+  %24 = conversion.float.to.integer %23, f32.to.u8 : reg<vm.value : i8>
+  %25 = slice %input[2] : reg<vm.value x3 : vector<3xf32>> -> reg<vm.value : f32>
+  %26 = conversion.float.to.integer %25, f32.to.u8 : reg<vm.value : i8>
+  %converted = concat(%22, %24, %26) : (reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>) -> reg<vm.value x3 : vector<3xi8>>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @vector_fptoui_i8x8(%input: vector<8xf32>) -> (vector<8xi8>) {
+  %converted = vector.fptoui %input : vector<8xf32> to vector<8xi8>
+  func.return %converted : vector<8xi8>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x8 : vector<8xf32>>) -> (reg<vm.value x8 : vector<8xi8>>)>}) @vector_fptoui_i8x8(%input: reg<vm.value x8 : vector<8xf32>>) -> (reg<vm.value x8 : vector<8xi8>>) asm {
+  %41 = slice %input[0] : reg<vm.value x8 : vector<8xf32>> -> reg<vm.value : f32>
+  %42 = conversion.float.to.integer %41, f32.to.u8 : reg<vm.value : i8>
+  %43 = slice %input[1] : reg<vm.value x8 : vector<8xf32>> -> reg<vm.value : f32>
+  %44 = conversion.float.to.integer %43, f32.to.u8 : reg<vm.value : i8>
+  %45 = slice %input[2] : reg<vm.value x8 : vector<8xf32>> -> reg<vm.value : f32>
+  %46 = conversion.float.to.integer %45, f32.to.u8 : reg<vm.value : i8>
+  %47 = slice %input[3] : reg<vm.value x8 : vector<8xf32>> -> reg<vm.value : f32>
+  %48 = conversion.float.to.integer %47, f32.to.u8 : reg<vm.value : i8>
+  %49 = slice %input[4] : reg<vm.value x8 : vector<8xf32>> -> reg<vm.value : f32>
+  %50 = conversion.float.to.integer %49, f32.to.u8 : reg<vm.value : i8>
+  %51 = slice %input[5] : reg<vm.value x8 : vector<8xf32>> -> reg<vm.value : f32>
+  %52 = conversion.float.to.integer %51, f32.to.u8 : reg<vm.value : i8>
+  %53 = slice %input[6] : reg<vm.value x8 : vector<8xf32>> -> reg<vm.value : f32>
+  %54 = conversion.float.to.integer %53, f32.to.u8 : reg<vm.value : i8>
+  %55 = slice %input[7] : reg<vm.value x8 : vector<8xf32>> -> reg<vm.value : f32>
+  %56 = conversion.float.to.integer %55, f32.to.u8 : reg<vm.value : i8>
+  %converted = concat(%42, %44, %46, %48, %50, %52, %54, %56) : (reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>) -> reg<vm.value x8 : vector<8xi8>>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @vector_fptosi_i16x2(%input: vector<2xf32>) -> (vector<2xi16>) {
+  %converted = vector.fptosi %input : vector<2xf32> to vector<2xi16>
+  func.return %converted : vector<2xi16>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x2 : vector<2xf32>>) -> (reg<vm.value x2 : vector<2xi16>>)>}) @vector_fptosi_i16x2(%input: reg<vm.value x2 : vector<2xf32>>) -> (reg<vm.value x2 : vector<2xi16>>) asm {
+  %17 = slice %input[0] : reg<vm.value x2 : vector<2xf32>> -> reg<vm.value : f32>
+  %18 = conversion.float.to.integer %17, f32.to.s16 : reg<vm.value : i16>
+  %19 = slice %input[1] : reg<vm.value x2 : vector<2xf32>> -> reg<vm.value : f32>
+  %20 = conversion.float.to.integer %19, f32.to.s16 : reg<vm.value : i16>
+  %converted = concat(%18, %20) : (reg<vm.value : i16>, reg<vm.value : i16>) -> reg<vm.value x2 : vector<2xi16>>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @vector_fptoui_i16x2(%input: vector<2xf32>) -> (vector<2xi16>) {
+  %converted = vector.fptoui %input : vector<2xf32> to vector<2xi16>
+  func.return %converted : vector<2xi16>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x2 : vector<2xf32>>) -> (reg<vm.value x2 : vector<2xi16>>)>}) @vector_fptoui_i16x2(%input: reg<vm.value x2 : vector<2xf32>>) -> (reg<vm.value x2 : vector<2xi16>>) asm {
+  %17 = slice %input[0] : reg<vm.value x2 : vector<2xf32>> -> reg<vm.value : f32>
+  %18 = conversion.float.to.integer %17, f32.to.u16 : reg<vm.value : i16>
+  %19 = slice %input[1] : reg<vm.value x2 : vector<2xf32>> -> reg<vm.value : f32>
+  %20 = conversion.float.to.integer %19, f32.to.u16 : reg<vm.value : i16>
+  %converted = concat(%18, %20) : (reg<vm.value : i16>, reg<vm.value : i16>) -> reg<vm.value x2 : vector<2xi16>>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @vector_trunci_i32_to_i8x4(%input: vector<4xi32>) -> (vector<4xi8>) {
+  %converted = vector.trunci %input : vector<4xi32> to vector<4xi8>
+  func.return %converted : vector<4xi8>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x4 : vector<4xi32>>) -> (reg<vm.value x4 : vector<4xi8>>)>}) @vector_trunci_i32_to_i8x4(%input: reg<vm.value x4 : vector<4xi32>>) -> (reg<vm.value x4 : vector<4xi8>>) asm {
+  %25 = slice %input[0] : reg<vm.value x4 : vector<4xi32>> -> reg<vm.value : i32>
+  %26 = conversion.integer %25, i32.to.i8 : reg<vm.value : i8>
+  %27 = slice %input[1] : reg<vm.value x4 : vector<4xi32>> -> reg<vm.value : i32>
+  %28 = conversion.integer %27, i32.to.i8 : reg<vm.value : i8>
+  %29 = slice %input[2] : reg<vm.value x4 : vector<4xi32>> -> reg<vm.value : i32>
+  %30 = conversion.integer %29, i32.to.i8 : reg<vm.value : i8>
+  %31 = slice %input[3] : reg<vm.value x4 : vector<4xi32>> -> reg<vm.value : i32>
+  %32 = conversion.integer %31, i32.to.i8 : reg<vm.value : i8>
+  %converted = concat(%26, %28, %30, %32) : (reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>) -> reg<vm.value x4 : vector<4xi8>>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @vector_trunci_i32_to_i16x2(%input: vector<2xi32>) -> (vector<2xi16>) {
+  %converted = vector.trunci %input : vector<2xi32> to vector<2xi16>
+  func.return %converted : vector<2xi16>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x2 : vector<2xi32>>) -> (reg<vm.value x2 : vector<2xi16>>)>}) @vector_trunci_i32_to_i16x2(%input: reg<vm.value x2 : vector<2xi32>>) -> (reg<vm.value x2 : vector<2xi16>>) asm {
+  %17 = slice %input[0] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %18 = conversion.integer %17, i32.to.i16 : reg<vm.value : i16>
+  %19 = slice %input[1] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %20 = conversion.integer %19, i32.to.i16 : reg<vm.value : i16>
+  %converted = concat(%18, %20) : (reg<vm.value : i16>, reg<vm.value : i16>) -> reg<vm.value x2 : vector<2xi16>>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @vector_trunci_i16_to_i8x4(%input: vector<4xi16>) -> (vector<4xi8>) {
+  %converted = vector.trunci %input : vector<4xi16> to vector<4xi8>
+  func.return %converted : vector<4xi8>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x4 : vector<4xi16>>) -> (reg<vm.value x4 : vector<4xi8>>)>}) @vector_trunci_i16_to_i8x4(%input: reg<vm.value x4 : vector<4xi16>>) -> (reg<vm.value x4 : vector<4xi8>>) asm {
+  %25 = slice %input[0] : reg<vm.value x4 : vector<4xi16>> -> reg<vm.value : i16>
+  %26 = conversion.integer %25, i16.to.i8 : reg<vm.value : i8>
+  %27 = slice %input[1] : reg<vm.value x4 : vector<4xi16>> -> reg<vm.value : i16>
+  %28 = conversion.integer %27, i16.to.i8 : reg<vm.value : i8>
+  %29 = slice %input[2] : reg<vm.value x4 : vector<4xi16>> -> reg<vm.value : i16>
+  %30 = conversion.integer %29, i16.to.i8 : reg<vm.value : i8>
+  %31 = slice %input[3] : reg<vm.value x4 : vector<4xi16>> -> reg<vm.value : i16>
+  %32 = conversion.integer %31, i16.to.i8 : reg<vm.value : i8>
+  %converted = concat(%26, %28, %30, %32) : (reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>) -> reg<vm.value x4 : vector<4xi8>>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @vector_trunci_i64_to_i32x2(%input: vector<2xi64>) -> (vector<2xi32>) {
+  %converted = vector.trunci %input : vector<2xi64> to vector<2xi32>
+  func.return %converted : vector<2xi32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x2 : vector<2xi64>>) -> (reg<vm.value x2 : vector<2xi32>>)>}) @vector_trunci_i64_to_i32x2(%input: reg<vm.value x2 : vector<2xi64>>) -> (reg<vm.value x2 : vector<2xi32>>) asm {
+  %17 = slice %input[0] : reg<vm.value x2 : vector<2xi64>> -> reg<vm.value : i64>
+  %18 = conversion.integer %17, i64.to.i32 : reg<vm.value : i32>
+  %19 = slice %input[1] : reg<vm.value x2 : vector<2xi64>> -> reg<vm.value : i64>
+  %20 = conversion.integer %19, i64.to.i32 : reg<vm.value : i32>
+  %converted = concat(%18, %20) : (reg<vm.value : i32>, reg<vm.value : i32>) -> reg<vm.value x2 : vector<2xi32>>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @vector_trunci_i64_to_i16x2(%input: vector<2xi64>) -> (vector<2xi16>) {
+  %converted = vector.trunci %input : vector<2xi64> to vector<2xi16>
+  func.return %converted : vector<2xi16>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x2 : vector<2xi64>>) -> (reg<vm.value x2 : vector<2xi16>>)>}) @vector_trunci_i64_to_i16x2(%input: reg<vm.value x2 : vector<2xi64>>) -> (reg<vm.value x2 : vector<2xi16>>) asm {
+  %17 = slice %input[0] : reg<vm.value x2 : vector<2xi64>> -> reg<vm.value : i64>
+  %18 = conversion.integer %17, i64.to.i16 : reg<vm.value : i16>
+  %19 = slice %input[1] : reg<vm.value x2 : vector<2xi64>> -> reg<vm.value : i64>
+  %20 = conversion.integer %19, i64.to.i16 : reg<vm.value : i16>
+  %converted = concat(%18, %20) : (reg<vm.value : i16>, reg<vm.value : i16>) -> reg<vm.value x2 : vector<2xi16>>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @vector_trunci_i64_to_i8x4(%input: vector<4xi64>) -> (vector<4xi8>) {
+  %converted = vector.trunci %input : vector<4xi64> to vector<4xi8>
+  func.return %converted : vector<4xi8>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x4 : vector<4xi64>>) -> (reg<vm.value x4 : vector<4xi8>>)>}) @vector_trunci_i64_to_i8x4(%input: reg<vm.value x4 : vector<4xi64>>) -> (reg<vm.value x4 : vector<4xi8>>) asm {
+  %25 = slice %input[0] : reg<vm.value x4 : vector<4xi64>> -> reg<vm.value : i64>
+  %26 = conversion.integer %25, i64.to.i8 : reg<vm.value : i8>
+  %27 = slice %input[1] : reg<vm.value x4 : vector<4xi64>> -> reg<vm.value : i64>
+  %28 = conversion.integer %27, i64.to.i8 : reg<vm.value : i8>
+  %29 = slice %input[2] : reg<vm.value x4 : vector<4xi64>> -> reg<vm.value : i64>
+  %30 = conversion.integer %29, i64.to.i8 : reg<vm.value : i8>
+  %31 = slice %input[3] : reg<vm.value x4 : vector<4xi64>> -> reg<vm.value : i64>
+  %32 = conversion.integer %31, i64.to.i8 : reg<vm.value : i8>
+  %converted = concat(%26, %28, %30, %32) : (reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>) -> reg<vm.value x4 : vector<4xi8>>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @vector_quantize_round_f32_to_i8x4(%values: vector<4xf32>, %inverse_scale: f32) -> (vector<4xi8>) {
+  %scale = vector.splat %inverse_scale : vector<4xf32>
+  %scaled = vector.mulf %values, %scale : vector<4xf32>
+  %rounded = vector.roundf %scaled : vector<4xf32>
+  %i32 = vector.fptosi %rounded : vector<4xf32> to vector<4xi32>
+  %packed = vector.trunci %i32 : vector<4xi32> to vector<4xi8>
+  func.return %packed : vector<4xi8>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x4 : vector<4xf32>>, reg<vm.value : f32>) -> (reg<vm.value x4 : vector<4xi8>>)>}) @vector_quantize_round_f32_to_i8x4(%values: reg<vm.value x4 : vector<4xf32>>, %inverse_scale: reg<vm.value : f32>) -> (reg<vm.value x4 : vector<4xi8>>) asm {
+  %32 = slice %values[0] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %33 = float.mul.f32 %32, %inverse_scale : reg<vm.value : f32>
+  %34 = float.math.unary.f32 %33, round : reg<vm.value : f32>
+  %35 = conversion.float.to.integer %34, f32.to.s32 : reg<vm.value : i32>
+  %36 = conversion.integer %35, i32.to.i8 : reg<vm.value : i8>
+  %37 = slice %values[1] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %38 = float.mul.f32 %37, %inverse_scale : reg<vm.value : f32>
+  %39 = float.math.unary.f32 %38, round : reg<vm.value : f32>
+  %40 = conversion.float.to.integer %39, f32.to.s32 : reg<vm.value : i32>
+  %41 = conversion.integer %40, i32.to.i8 : reg<vm.value : i8>
+  %42 = slice %values[2] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %43 = float.mul.f32 %42, %inverse_scale : reg<vm.value : f32>
+  %44 = float.math.unary.f32 %43, round : reg<vm.value : f32>
+  %45 = conversion.float.to.integer %44, f32.to.s32 : reg<vm.value : i32>
+  %46 = conversion.integer %45, i32.to.i8 : reg<vm.value : i8>
+  %47 = slice %values[3] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %48 = float.mul.f32 %47, %inverse_scale : reg<vm.value : f32>
+  %49 = float.math.unary.f32 %48, round : reg<vm.value : f32>
+  %50 = conversion.float.to.integer %49, f32.to.s32 : reg<vm.value : i32>
+  %51 = conversion.integer %50, i32.to.i8 : reg<vm.value : i8>
+  %packed = concat(%36, %41, %46, %51) : (reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>) -> reg<vm.value x4 : vector<4xi8>>
+  return %packed
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @vector_quantize_round_afn_f32_to_i8x4(%values: vector<4xf32>, %inverse_scale: f32) -> (vector<4xi8>) {
+  %scale = vector.splat %inverse_scale : vector<4xf32>
+  %scaled = vector.mulf %values, %scale : vector<4xf32>
+  %rounded = vector.roundf<afn> %scaled : vector<4xf32>
+  %i32 = vector.fptosi %rounded : vector<4xf32> to vector<4xi32>
+  %packed = vector.trunci %i32 : vector<4xi32> to vector<4xi8>
+  func.return %packed : vector<4xi8>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x4 : vector<4xf32>>, reg<vm.value : f32>) -> (reg<vm.value x4 : vector<4xi8>>)>}) @vector_quantize_round_afn_f32_to_i8x4(%values: reg<vm.value x4 : vector<4xf32>>, %inverse_scale: reg<vm.value : f32>) -> (reg<vm.value x4 : vector<4xi8>>) asm {
+  %32 = slice %values[0] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %33 = float.mul.f32 %32, %inverse_scale : reg<vm.value : f32>
+  %34 = float.math.unary.f32 %33, round : reg<vm.value : f32>
+  %35 = conversion.float.to.integer %34, f32.to.s32 : reg<vm.value : i32>
+  %36 = conversion.integer %35, i32.to.i8 : reg<vm.value : i8>
+  %37 = slice %values[1] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %38 = float.mul.f32 %37, %inverse_scale : reg<vm.value : f32>
+  %39 = float.math.unary.f32 %38, round : reg<vm.value : f32>
+  %40 = conversion.float.to.integer %39, f32.to.s32 : reg<vm.value : i32>
+  %41 = conversion.integer %40, i32.to.i8 : reg<vm.value : i8>
+  %42 = slice %values[2] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %43 = float.mul.f32 %42, %inverse_scale : reg<vm.value : f32>
+  %44 = float.math.unary.f32 %43, round : reg<vm.value : f32>
+  %45 = conversion.float.to.integer %44, f32.to.s32 : reg<vm.value : i32>
+  %46 = conversion.integer %45, i32.to.i8 : reg<vm.value : i8>
+  %47 = slice %values[3] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %48 = float.mul.f32 %47, %inverse_scale : reg<vm.value : f32>
+  %49 = float.math.unary.f32 %48, round : reg<vm.value : f32>
+  %50 = conversion.float.to.integer %49, f32.to.s32 : reg<vm.value : i32>
+  %51 = conversion.integer %50, i32.to.i8 : reg<vm.value : i8>
+  %packed = concat(%36, %41, %46, %51) : (reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>) -> reg<vm.value x4 : vector<4xi8>>
+  return %packed
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @vector_quantize_arcp_round_afn_f32_to_i8x4(%values: vector<4xf32>, %amax: f32) -> (vector<4xi8>) {
+  %scale_limit = scalar.constant 127.0 : f32
+  %inverse_scale = scalar.divf<nnan|ninf|nsz|arcp> %scale_limit, %amax : f32
+  %scale = vector.splat %inverse_scale : vector<4xf32>
+  %scaled = vector.mulf<nnan|ninf|nsz|arcp> %values, %scale : vector<4xf32>
+  %rounded = vector.roundf<afn> %scaled : vector<4xf32>
+  %i32 = vector.fptosi %rounded : vector<4xf32> to vector<4xi32>
+  %packed = vector.trunci %i32 : vector<4xi32> to vector<4xi8>
+  func.return %packed : vector<4xi8>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x4 : vector<4xf32>>, reg<vm.value : f32>) -> (reg<vm.value x4 : vector<4xi8>>)>}) @vector_quantize_arcp_round_afn_f32_to_i8x4(%values: reg<vm.value x4 : vector<4xf32>>, %amax: reg<vm.value : f32>) -> (reg<vm.value x4 : vector<4xi8>>) asm {
+  %scale_limit = constant.i32 1123942400 : reg<vm.value : f32>
+  %inverse_scale = float.div.f32 %scale_limit, %amax : reg<vm.value : f32>
+  %36 = slice %values[0] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %37 = float.mul.f32 %36, %inverse_scale : reg<vm.value : f32>
+  %38 = float.math.unary.f32 %37, round : reg<vm.value : f32>
+  %39 = conversion.float.to.integer %38, f32.to.s32 : reg<vm.value : i32>
+  %40 = conversion.integer %39, i32.to.i8 : reg<vm.value : i8>
+  %41 = slice %values[1] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %42 = float.mul.f32 %41, %inverse_scale : reg<vm.value : f32>
+  %43 = float.math.unary.f32 %42, round : reg<vm.value : f32>
+  %44 = conversion.float.to.integer %43, f32.to.s32 : reg<vm.value : i32>
+  %45 = conversion.integer %44, i32.to.i8 : reg<vm.value : i8>
+  %46 = slice %values[2] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %47 = float.mul.f32 %46, %inverse_scale : reg<vm.value : f32>
+  %48 = float.math.unary.f32 %47, round : reg<vm.value : f32>
+  %49 = conversion.float.to.integer %48, f32.to.s32 : reg<vm.value : i32>
+  %50 = conversion.integer %49, i32.to.i8 : reg<vm.value : i8>
+  %51 = slice %values[3] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %52 = float.mul.f32 %51, %inverse_scale : reg<vm.value : f32>
+  %53 = float.math.unary.f32 %52, round : reg<vm.value : f32>
+  %54 = conversion.float.to.integer %53, f32.to.s32 : reg<vm.value : i32>
+  %55 = conversion.integer %54, i32.to.i8 : reg<vm.value : i8>
+  %packed = concat(%40, %45, %50, %55) : (reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>) -> reg<vm.value x4 : vector<4xi8>>
+  return %packed
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @vector_quantize_roundeven_f32_to_i8x4(%values: vector<4xf32>, %inverse_scale: f32) -> (vector<4xi8>) {
+  %scale = vector.splat %inverse_scale : vector<4xf32>
+  %scaled = vector.mulf %values, %scale : vector<4xf32>
+  %rounded = vector.roundevenf %scaled : vector<4xf32>
+  %i32 = vector.fptosi %rounded : vector<4xf32> to vector<4xi32>
+  %packed = vector.trunci %i32 : vector<4xi32> to vector<4xi8>
+  func.return %packed : vector<4xi8>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x4 : vector<4xf32>>, reg<vm.value : f32>) -> (reg<vm.value x4 : vector<4xi8>>)>}) @vector_quantize_roundeven_f32_to_i8x4(%values: reg<vm.value x4 : vector<4xf32>>, %inverse_scale: reg<vm.value : f32>) -> (reg<vm.value x4 : vector<4xi8>>) asm {
+  %32 = slice %values[0] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %33 = float.mul.f32 %32, %inverse_scale : reg<vm.value : f32>
+  %34 = float.math.unary.f32 %33, roundeven : reg<vm.value : f32>
+  %35 = conversion.float.to.integer %34, f32.to.s32 : reg<vm.value : i32>
+  %36 = conversion.integer %35, i32.to.i8 : reg<vm.value : i8>
+  %37 = slice %values[1] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %38 = float.mul.f32 %37, %inverse_scale : reg<vm.value : f32>
+  %39 = float.math.unary.f32 %38, roundeven : reg<vm.value : f32>
+  %40 = conversion.float.to.integer %39, f32.to.s32 : reg<vm.value : i32>
+  %41 = conversion.integer %40, i32.to.i8 : reg<vm.value : i8>
+  %42 = slice %values[2] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %43 = float.mul.f32 %42, %inverse_scale : reg<vm.value : f32>
+  %44 = float.math.unary.f32 %43, roundeven : reg<vm.value : f32>
+  %45 = conversion.float.to.integer %44, f32.to.s32 : reg<vm.value : i32>
+  %46 = conversion.integer %45, i32.to.i8 : reg<vm.value : i8>
+  %47 = slice %values[3] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %48 = float.mul.f32 %47, %inverse_scale : reg<vm.value : f32>
+  %49 = float.math.unary.f32 %48, roundeven : reg<vm.value : f32>
+  %50 = conversion.float.to.integer %49, f32.to.s32 : reg<vm.value : i32>
+  %51 = conversion.integer %50, i32.to.i8 : reg<vm.value : i8>
+  %packed = concat(%36, %41, %46, %51) : (reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>) -> reg<vm.value x4 : vector<4xi8>>
+  return %packed
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @vector_quantize_scalarized_roundeven_f32_to_i8x4(%values: vector<4xf32>, %inverse_scale: f32) -> (vector<4xi8>) {
+  %scale = vector.splat %inverse_scale : vector<4xf32>
+  %scaled = vector.mulf %values, %scale : vector<4xf32>
+  %lane0 = vector.extract %scaled[0] : vector<4xf32> -> f32
+  %rounded0 = scalar.roundevenf %lane0 : f32
+  %i32_0 = scalar.fptosi %rounded0 : f32 to i32
+  %i8_0 = scalar.trunci %i32_0 : i32 to i8
+  %lane1 = vector.extract %scaled[1] : vector<4xf32> -> f32
+  %rounded1 = scalar.roundevenf %lane1 : f32
+  %i32_1 = scalar.fptosi %rounded1 : f32 to i32
+  %i8_1 = scalar.trunci %i32_1 : i32 to i8
+  %lane2 = vector.extract %scaled[2] : vector<4xf32> -> f32
+  %rounded2 = scalar.roundevenf %lane2 : f32
+  %i32_2 = scalar.fptosi %rounded2 : f32 to i32
+  %i8_2 = scalar.trunci %i32_2 : i32 to i8
+  %lane3 = vector.extract %scaled[3] : vector<4xf32> -> f32
+  %rounded3 = scalar.roundevenf %lane3 : f32
+  %i32_3 = scalar.fptosi %rounded3 : f32 to i32
+  %i8_3 = scalar.trunci %i32_3 : i32 to i8
+  %packed = vector.from_elements %i8_0, %i8_1, %i8_2, %i8_3 : vector<4xi8>
+  func.return %packed : vector<4xi8>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x4 : vector<4xf32>>, reg<vm.value : f32>) -> (reg<vm.value x4 : vector<4xi8>>)>}) @vector_quantize_scalarized_roundeven_f32_to_i8x4(%values: reg<vm.value x4 : vector<4xf32>>, %inverse_scale: reg<vm.value : f32>) -> (reg<vm.value x4 : vector<4xi8>>) asm {
+  %49 = slice %values[0] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %50 = float.mul.f32 %49, %inverse_scale : reg<vm.value : f32>
+  %51 = float.math.unary.f32 %50, roundeven : reg<vm.value : f32>
+  %52 = conversion.float.to.integer %51, f32.to.s32 : reg<vm.value : i32>
+  %53 = conversion.integer %52, i32.to.i8 : reg<vm.value : i8>
+  %54 = slice %values[1] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %55 = float.mul.f32 %54, %inverse_scale : reg<vm.value : f32>
+  %56 = float.math.unary.f32 %55, roundeven : reg<vm.value : f32>
+  %57 = conversion.float.to.integer %56, f32.to.s32 : reg<vm.value : i32>
+  %58 = conversion.integer %57, i32.to.i8 : reg<vm.value : i8>
+  %59 = slice %values[2] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %60 = float.mul.f32 %59, %inverse_scale : reg<vm.value : f32>
+  %61 = float.math.unary.f32 %60, roundeven : reg<vm.value : f32>
+  %62 = conversion.float.to.integer %61, f32.to.s32 : reg<vm.value : i32>
+  %63 = conversion.integer %62, i32.to.i8 : reg<vm.value : i8>
+  %64 = slice %values[3] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %65 = float.mul.f32 %64, %inverse_scale : reg<vm.value : f32>
+  %66 = float.math.unary.f32 %65, roundeven : reg<vm.value : f32>
+  %67 = conversion.float.to.integer %66, f32.to.s32 : reg<vm.value : i32>
+  %68 = conversion.integer %67, i32.to.i8 : reg<vm.value : i8>
+  %packed = concat(%53, %58, %63, %68) : (reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>) -> reg<vm.value x4 : vector<4xi8>>
+  return %packed
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @vector_quantize_scalarized_roundeven_f32_to_i8x4_with_sum(%values: vector<4xf32>, %inverse_scale: f32) -> (vector<4xi8>, vector<4xf32>) {
+  %scale = vector.splat %inverse_scale : vector<4xf32>
+  %scaled = vector.mulf %values, %scale : vector<4xf32>
+  %rounded = vector.roundevenf %scaled : vector<4xf32>
+  %lane0 = vector.extract %rounded[0] : vector<4xf32> -> f32
+  %q0_i32 = scalar.fptosi %lane0 : f32 to i32
+  %q0_f32 = scalar.sitofp %q0_i32 : i32 to f32
+  %q0_i8 = scalar.trunci %q0_i32 : i32 to i8
+  %lane1 = vector.extract %rounded[1] : vector<4xf32> -> f32
+  %q1_i32 = scalar.fptosi %lane1 : f32 to i32
+  %q1_f32 = scalar.sitofp %q1_i32 : i32 to f32
+  %q1_i8 = scalar.trunci %q1_i32 : i32 to i8
+  %lane2 = vector.extract %rounded[2] : vector<4xf32> -> f32
+  %q2_i32 = scalar.fptosi %lane2 : f32 to i32
+  %q2_f32 = scalar.sitofp %q2_i32 : i32 to f32
+  %q2_i8 = scalar.trunci %q2_i32 : i32 to i8
+  %lane3 = vector.extract %rounded[3] : vector<4xf32> -> f32
+  %q3_i32 = scalar.fptosi %lane3 : f32 to i32
+  %q3_f32 = scalar.sitofp %q3_i32 : i32 to f32
+  %q3_i8 = scalar.trunci %q3_i32 : i32 to i8
+  %q_f32 = vector.from_elements %q0_f32, %q1_f32, %q2_f32, %q3_f32 : vector<4xf32>
+  %packed = vector.from_elements %q0_i8, %q1_i8, %q2_i8, %q3_i8 : vector<4xi8>
+  func.return %packed, %q_f32 : vector<4xi8>, vector<4xf32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x4 : vector<4xf32>>, reg<vm.value : f32>) -> (reg<vm.value x4 : vector<4xi8>>, reg<vm.value x4 : vector<4xf32>>)>}) @vector_quantize_scalarized_roundeven_f32_to_i8x4_with_sum(%values: reg<vm.value x4 : vector<4xf32>>, %inverse_scale: reg<vm.value : f32>) -> (reg<vm.value x4 : vector<4xi8>>, reg<vm.value x4 : vector<4xf32>>) asm {
+  %75 = slice %values[0] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %76 = float.mul.f32 %75, %inverse_scale : reg<vm.value : f32>
+  %77 = float.math.unary.f32 %76, roundeven : reg<vm.value : f32>
+  %78 = conversion.float.to.integer %77, f32.to.s32 : reg<vm.value : i32>
+  %79 = conversion.integer.to.float %78, s32.to.f32 : reg<vm.value : f32>
+  %80 = slice %values[1] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %81 = float.mul.f32 %80, %inverse_scale : reg<vm.value : f32>
+  %82 = float.math.unary.f32 %81, roundeven : reg<vm.value : f32>
+  %83 = conversion.float.to.integer %82, f32.to.s32 : reg<vm.value : i32>
+  %84 = conversion.integer.to.float %83, s32.to.f32 : reg<vm.value : f32>
+  %85 = slice %values[2] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %86 = float.mul.f32 %85, %inverse_scale : reg<vm.value : f32>
+  %87 = float.math.unary.f32 %86, roundeven : reg<vm.value : f32>
+  %88 = conversion.float.to.integer %87, f32.to.s32 : reg<vm.value : i32>
+  %89 = conversion.integer.to.float %88, s32.to.f32 : reg<vm.value : f32>
+  %90 = slice %values[3] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %91 = float.mul.f32 %90, %inverse_scale : reg<vm.value : f32>
+  %92 = float.math.unary.f32 %91, roundeven : reg<vm.value : f32>
+  %93 = conversion.float.to.integer %92, f32.to.s32 : reg<vm.value : i32>
+  %94 = conversion.integer.to.float %93, s32.to.f32 : reg<vm.value : f32>
+  %q_f32 = concat(%79, %84, %89, %94) : (reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>) -> reg<vm.value x4 : vector<4xf32>>
+  %96 = conversion.integer %78, i32.to.i8 : reg<vm.value : i8>
+  %97 = conversion.integer %83, i32.to.i8 : reg<vm.value : i8>
+  %98 = conversion.integer %88, i32.to.i8 : reg<vm.value : i8>
+  %99 = conversion.integer %93, i32.to.i8 : reg<vm.value : i8>
+  %packed = concat(%96, %97, %98, %99) : (reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>) -> reg<vm.value x4 : vector<4xi8>>
+  return %packed, %q_f32
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_uitofp_i32(%input: i32) -> (f32) {
+  %converted = scalar.uitofp %input : i32 to f32
+  func.return %converted : f32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i32>) -> (reg<vm.value : f32>)>}) @scalar_uitofp_i32(%input: reg<vm.value : i32>) -> (reg<vm.value : f32>) asm {
+  %converted = conversion.integer.to.float %input, u32.to.f32 : reg<vm.value : f32>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_uitofp_i8(%input: i8) -> (f32) {
+  %converted = scalar.uitofp %input : i8 to f32
+  func.return %converted : f32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i8>) -> (reg<vm.value : f32>)>}) @scalar_uitofp_i8(%input: reg<vm.value : i8>) -> (reg<vm.value : f32>) asm {
+  %5 = conversion.integer %input, u8.to.i32 : reg<vm.value : i32>
+  %converted = conversion.integer.to.float %5, u32.to.f32 : reg<vm.value : f32>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_uitofp_i16(%input: i16) -> (f32) {
+  %converted = scalar.uitofp %input : i16 to f32
+  func.return %converted : f32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i16>) -> (reg<vm.value : f32>)>}) @scalar_uitofp_i16(%input: reg<vm.value : i16>) -> (reg<vm.value : f32>) asm {
+  %5 = conversion.integer %input, u16.to.i32 : reg<vm.value : i32>
+  %converted = conversion.integer.to.float %5, u32.to.f32 : reg<vm.value : f32>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_sitofp_i32(%input: i32) -> (f32) {
+  %converted = scalar.sitofp %input : i32 to f32
+  func.return %converted : f32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i32>) -> (reg<vm.value : f32>)>}) @scalar_sitofp_i32(%input: reg<vm.value : i32>) -> (reg<vm.value : f32>) asm {
+  %converted = conversion.integer.to.float %input, s32.to.f32 : reg<vm.value : f32>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_sitofp_i32_to_f16(%input: i32) -> (f16) {
+  %converted = scalar.sitofp %input : i32 to f16
+  func.return %converted : f16
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i32>) -> (reg<vm.value : f16>)>}) @scalar_sitofp_i32_to_f16(%input: reg<vm.value : i32>) -> (reg<vm.value : f16>) asm {
+  %5 = conversion.integer.to.float %input, s32.to.f32 : reg<vm.value : f32>
+  %converted = conversion.float.truncate %5, f32.to.f16 : reg<vm.value : f16>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_f16_cfg_cond_join(%lhs: i32, %rhs: i32, %then_input: i32, %else_input: i32) -> (f16) {
+  %condition = scalar.cmpi slt, %lhs, %rhs : i32
+  cfg.cond_br %condition, ^then, ^else
+^then:
+  %then_half = scalar.sitofp %then_input : i32 to f16
+  cfg.br ^join(%then_half: f16)
+^else:
+  %else_half = scalar.sitofp %else_input : i32 to f16
+  cfg.br ^join(%else_half: f16)
+^join(%selected: f16):
+  func.return %selected : f16
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>) -> (reg<vm.value : f16>)>}) @scalar_f16_cfg_cond_join(%lhs: reg<vm.value : i32>, %rhs: reg<vm.value : i32>, %then_input: reg<vm.value : i32>, %else_input: reg<vm.value : i32>) -> (reg<vm.value : f16>) asm {
+  %condition = integer.compare.i32 %lhs, %rhs, slt : reg<vm.value : i1>
+  low.cond_br %condition, ^then, ^else : reg<vm.value : i1>
+^then:
+  %16 = conversion.integer.to.float %then_input, s32.to.f32 : reg<vm.value : f32>
+  %then_half = conversion.float.truncate %16, f32.to.f16 : reg<vm.value : f16>
+  low.br ^join(%then_half: reg<vm.value : f16>)
+^else:
+  %18 = conversion.integer.to.float %else_input, s32.to.f32 : reg<vm.value : f32>
+  %else_half = conversion.float.truncate %18, f32.to.f16 : reg<vm.value : f16>
+  low.br ^join(%else_half: reg<vm.value : f16>)
+^join(%selected: reg<vm.value : f16>):
+  return %selected
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_sitofp_i16(%input: i16) -> (f32) {
+  %converted = scalar.sitofp %input : i16 to f32
+  func.return %converted : f32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i16>) -> (reg<vm.value : f32>)>}) @scalar_sitofp_i16(%input: reg<vm.value : i16>) -> (reg<vm.value : f32>) asm {
+  %5 = conversion.integer %input, s16.to.i32 : reg<vm.value : i32>
+  %converted = conversion.integer.to.float %5, s32.to.f32 : reg<vm.value : f32>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_fptosi_i32(%input: f32) -> (i32) {
+  %converted = scalar.fptosi %input : f32 to i32
+  func.return %converted : i32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : f32>) -> (reg<vm.value : i32>)>}) @scalar_fptosi_i32(%input: reg<vm.value : f32>) -> (reg<vm.value : i32>) asm {
+  %converted = conversion.float.to.integer %input, f32.to.s32 : reg<vm.value : i32>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_fptoui_i32(%input: f32) -> (i32) {
+  %converted = scalar.fptoui %input : f32 to i32
+  func.return %converted : i32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : f32>) -> (reg<vm.value : i32>)>}) @scalar_fptoui_i32(%input: reg<vm.value : f32>) -> (reg<vm.value : i32>) asm {
+  %converted = conversion.float.to.integer %input, f32.to.u32 : reg<vm.value : i32>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_fptosi_i8(%input: f32) -> (i8) {
+  %converted = scalar.fptosi %input : f32 to i8
+  func.return %converted : i8
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : f32>) -> (reg<vm.value : i8>)>}) @scalar_fptosi_i8(%input: reg<vm.value : f32>) -> (reg<vm.value : i8>) asm {
+  %converted = conversion.float.to.integer %input, f32.to.s8 : reg<vm.value : i8>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_fptosi_i16(%input: f32) -> (i16) {
+  %converted = scalar.fptosi %input : f32 to i16
+  func.return %converted : i16
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : f32>) -> (reg<vm.value : i16>)>}) @scalar_fptosi_i16(%input: reg<vm.value : f32>) -> (reg<vm.value : i16>) asm {
+  %converted = conversion.float.to.integer %input, f32.to.s16 : reg<vm.value : i16>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_fptoui_i8(%input: f32) -> (i8) {
+  %converted = scalar.fptoui %input : f32 to i8
+  func.return %converted : i8
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : f32>) -> (reg<vm.value : i8>)>}) @scalar_fptoui_i8(%input: reg<vm.value : f32>) -> (reg<vm.value : i8>) asm {
+  %converted = conversion.float.to.integer %input, f32.to.u8 : reg<vm.value : i8>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_fptoui_i16(%input: f32) -> (i16) {
+  %converted = scalar.fptoui %input : f32 to i16
+  func.return %converted : i16
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : f32>) -> (reg<vm.value : i16>)>}) @scalar_fptoui_i16(%input: reg<vm.value : f32>) -> (reg<vm.value : i16>) asm {
+  %converted = conversion.float.to.integer %input, f32.to.u16 : reg<vm.value : i16>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_trunci_i32_to_i8(%input: i32) -> (i8) {
+  %converted = scalar.trunci %input : i32 to i8
+  func.return %converted : i8
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i32>) -> (reg<vm.value : i8>)>}) @scalar_trunci_i32_to_i8(%input: reg<vm.value : i32>) -> (reg<vm.value : i8>) asm {
+  %converted = conversion.integer %input, i32.to.i8 : reg<vm.value : i8>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_trunci_i16_to_i8(%input: i16) -> (i8) {
+  %converted = scalar.trunci %input : i16 to i8
+  func.return %converted : i8
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i16>) -> (reg<vm.value : i8>)>}) @scalar_trunci_i16_to_i8(%input: reg<vm.value : i16>) -> (reg<vm.value : i8>) asm {
+  %converted = conversion.integer %input, i16.to.i8 : reg<vm.value : i8>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_trunci_i32_to_i16(%input: i32) -> (i16) {
+  %converted = scalar.trunci %input : i32 to i16
+  func.return %converted : i16
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i32>) -> (reg<vm.value : i16>)>}) @scalar_trunci_i32_to_i16(%input: reg<vm.value : i32>) -> (reg<vm.value : i16>) asm {
+  %converted = conversion.integer %input, i32.to.i16 : reg<vm.value : i16>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_trunci_i64_to_i8(%input: i64) -> (i8) {
+  %converted = scalar.trunci %input : i64 to i8
+  func.return %converted : i8
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i64>) -> (reg<vm.value : i8>)>}) @scalar_trunci_i64_to_i8(%input: reg<vm.value : i64>) -> (reg<vm.value : i8>) asm {
+  %converted = conversion.integer %input, i64.to.i8 : reg<vm.value : i8>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_trunci_i64_to_i16(%input: i64) -> (i16) {
+  %converted = scalar.trunci %input : i64 to i16
+  func.return %converted : i16
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i64>) -> (reg<vm.value : i16>)>}) @scalar_trunci_i64_to_i16(%input: reg<vm.value : i64>) -> (reg<vm.value : i16>) asm {
+  %converted = conversion.integer %input, i64.to.i16 : reg<vm.value : i16>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_trunci_i64_to_i32(%input: i64) -> (i32) {
+  %converted = scalar.trunci %input : i64 to i32
+  func.return %converted : i32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i64>) -> (reg<vm.value : i32>)>}) @scalar_trunci_i64_to_i32(%input: reg<vm.value : i64>) -> (reg<vm.value : i32>) asm {
+  %converted = conversion.integer %input, i64.to.i32 : reg<vm.value : i32>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_f16_dequant_pair(%q0: i32, %q1: i32, %scale: f16) -> (vector<2xf16>) {
+  %q0_half = scalar.sitofp %q0 : i32 to f16
+  %dequant0 = scalar.mulf %q0_half, %scale : f16
+  %q1_half = scalar.sitofp %q1 : i32 to f16
+  %dequant1 = scalar.mulf %q1_half, %scale : f16
+  %packed = vector.from_elements %dequant0, %dequant1 : vector<2xf16>
+  func.return %packed : vector<2xf16>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : f16>) -> (reg<vm.value x2 : vector<2xf16>>)>}) @scalar_f16_dequant_pair(%q0: reg<vm.value : i32>, %q1: reg<vm.value : i32>, %scale: reg<vm.value : f16>) -> (reg<vm.value x2 : vector<2xf16>>) asm {
+  %21 = conversion.integer.to.float %q0, s32.to.f32 : reg<vm.value : f32>
+  %q0_half = conversion.float.truncate %21, f32.to.f16 : reg<vm.value : f16>
+  %23 = conversion.float.extend %q0_half, f16.to.f32 : reg<vm.value : f32>
+  %24 = conversion.float.extend %scale, f16.to.f32 : reg<vm.value : f32>
+  %25 = float.mul.f32 %23, %24 : reg<vm.value : f32>
+  %dequant0 = conversion.float.truncate %25, f32.to.f16 : reg<vm.value : f16>
+  %27 = conversion.integer.to.float %q1, s32.to.f32 : reg<vm.value : f32>
+  %q1_half = conversion.float.truncate %27, f32.to.f16 : reg<vm.value : f16>
+  %29 = conversion.float.extend %q1_half, f16.to.f32 : reg<vm.value : f32>
+  %30 = float.mul.f32 %29, %24 : reg<vm.value : f32>
+  %dequant1 = conversion.float.truncate %30, f32.to.f16 : reg<vm.value : f16>
+  %packed = concat(%dequant0, %dequant1) : (reg<vm.value : f16>, reg<vm.value : f16>) -> reg<vm.value x2 : vector<2xf16>>
+  return %packed
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @scalar_sitofp_i8_load_store() {
+  %count = index.constant 1 : index
+  kernel.launch.config workgroups(%count, %count, %count) workgroup_size(%count, %count, %count) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %index = index.constant 0 : index
+  %input_global = buffer.assume.memory_space<global> %input : buffer
+  %output_global = buffer.assume.memory_space<global> %output : buffer
+  %input_noalias, %output_noalias = buffer.assume.noalias %input_global, %output_global : buffer, buffer
+  %input_view = buffer.view %input_noalias[%base] : buffer -> view<1xi8>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<1xf32>
+  %loaded = view.load %input_view[%index] : view<1xi8> -> i8
+  %converted = scalar.sitofp %loaded : i8 to f32
+  view.store %converted, %output_view[%index] : f32, view<1xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @scalar_sitofp_i8_load_store(%input_noalias: reg<vm.ref : buffer>, %output_noalias: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %27 = constant.zero : reg<vm.value : offset>
+  %loaded = buffer.load %input_noalias, %27, %27, 0, i8.x1 : reg<vm.value : i8>
+  %29 = conversion.integer %loaded, s8.to.i32 : reg<vm.value : i32>
+  %converted = conversion.integer.to.float %29, s32.to.f32 : reg<vm.value : f32>
+  buffer.store %output_noalias, %27, %27, %converted, 0, i32.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_extf_f16(%input: f16) -> (f32) {
+  %converted = scalar.extf %input : f16 to f32
+  func.return %converted : f32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : f16>) -> (reg<vm.value : f32>)>}) @scalar_extf_f16(%input: reg<vm.value : f16>) -> (reg<vm.value : f32>) asm {
+  %converted = conversion.float.extend %input, f16.to.f32 : reg<vm.value : f32>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_extf_bf16(%input: bf16) -> (f32) {
+  %converted = scalar.extf %input : bf16 to f32
+  func.return %converted : f32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : bf16>) -> (reg<vm.value : f32>)>}) @scalar_extf_bf16(%input: reg<vm.value : bf16>) -> (reg<vm.value : f32>) asm {
+  %converted = conversion.float.extend %input, bf16.to.f32 : reg<vm.value : f32>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @scalar_extf_bf16_load_store() {
+  %count = index.constant 1 : index
+  kernel.launch.config workgroups(%count, %count, %count) workgroup_size(%count, %count, %count) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %index = index.constant 0 : index
+  %input_global = buffer.assume.memory_space<global> %input : buffer
+  %output_global = buffer.assume.memory_space<global> %output : buffer
+  %input_noalias, %output_noalias = buffer.assume.noalias %input_global, %output_global : buffer, buffer
+  %input_view = buffer.view %input_noalias[%base] : buffer -> view<1xbf16>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<1xf32>
+  %loaded = view.load %input_view[%index] : view<1xbf16> -> bf16
+  %converted = scalar.extf %loaded : bf16 to f32
+  view.store %converted, %output_view[%index] : f32, view<1xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @scalar_extf_bf16_load_store(%input_noalias: reg<vm.ref : buffer>, %output_noalias: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %27 = constant.zero : reg<vm.value : offset>
+  %loaded = buffer.load %input_noalias, %27, %27, 0, i16.x1 : reg<vm.value : bf16>
+  %converted = conversion.float.extend %loaded, bf16.to.f32 : reg<vm.value : f32>
+  buffer.store %output_noalias, %27, %27, %converted, 0, i32.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_fptrunc_f32_store(%output: buffer, %input: f32) {
+  %base = index.constant 0 : offset
+  %output_view = buffer.view %output[%base] : buffer -> view<1xf16>
+  %converted = scalar.fptrunc %input : f32 to f16
+  view.store %converted, %output_view[0] : f16, view<1xf16>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.value : f32>) -> ()>}) @scalar_fptrunc_f32_store(%output: reg<vm.ref : buffer>, %input: reg<vm.value : f32>) asm {
+  %converted = conversion.float.truncate %input, f32.to.f16 : reg<vm.value : f16>
+  %8 = constant.zero : reg<vm.value : offset>
+  buffer.store %output, %8, %8, %converted, 0, i16.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @vector_extf_f16x2(%input: vector<2xf16>) -> (vector<2xf32>) {
+  %converted = vector.extf %input : vector<2xf16> to vector<2xf32>
+  func.return %converted : vector<2xf32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x2 : vector<2xf16>>) -> (reg<vm.value x2 : vector<2xf32>>)>}) @vector_extf_f16x2(%input: reg<vm.value x2 : vector<2xf16>>) -> (reg<vm.value x2 : vector<2xf32>>) asm {
+  %10 = slice %input[0] : reg<vm.value x2 : vector<2xf16>> -> reg<vm.value : f16>
+  %11 = conversion.float.extend %10, f16.to.f32 : reg<vm.value : f32>
+  %12 = slice %input[1] : reg<vm.value x2 : vector<2xf16>> -> reg<vm.value : f16>
+  %13 = conversion.float.extend %12, f16.to.f32 : reg<vm.value : f32>
+  %converted = concat(%11, %13) : (reg<vm.value : f32>, reg<vm.value : f32>) -> reg<vm.value x2 : vector<2xf32>>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @vector_extf_f16x3(%input: vector<3xf16>) -> (vector<3xf32>) {
+  %converted = vector.extf %input : vector<3xf16> to vector<3xf32>
+  func.return %converted : vector<3xf32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x3 : vector<3xf16>>) -> (reg<vm.value x3 : vector<3xf32>>)>}) @vector_extf_f16x3(%input: reg<vm.value x3 : vector<3xf16>>) -> (reg<vm.value x3 : vector<3xf32>>) asm {
+  %12 = slice %input[0] : reg<vm.value x3 : vector<3xf16>> -> reg<vm.value : f16>
+  %13 = conversion.float.extend %12, f16.to.f32 : reg<vm.value : f32>
+  %14 = slice %input[1] : reg<vm.value x3 : vector<3xf16>> -> reg<vm.value : f16>
+  %15 = conversion.float.extend %14, f16.to.f32 : reg<vm.value : f32>
+  %16 = slice %input[2] : reg<vm.value x3 : vector<3xf16>> -> reg<vm.value : f16>
+  %17 = conversion.float.extend %16, f16.to.f32 : reg<vm.value : f32>
+  %converted = concat(%13, %15, %17) : (reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>) -> reg<vm.value x3 : vector<3xf32>>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @vector_fptrunc_f16x3(%input: vector<3xf32>) -> (vector<3xf16>) {
+  %converted = vector.fptrunc %input : vector<3xf32> to vector<3xf16>
+  func.return %converted : vector<3xf16>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x3 : vector<3xf32>>) -> (reg<vm.value x3 : vector<3xf16>>)>}) @vector_fptrunc_f16x3(%input: reg<vm.value x3 : vector<3xf32>>) -> (reg<vm.value x3 : vector<3xf16>>) asm {
+  %12 = slice %input[0] : reg<vm.value x3 : vector<3xf32>> -> reg<vm.value : f32>
+  %13 = conversion.float.truncate %12, f32.to.f16 : reg<vm.value : f16>
+  %14 = slice %input[1] : reg<vm.value x3 : vector<3xf32>> -> reg<vm.value : f32>
+  %15 = conversion.float.truncate %14, f32.to.f16 : reg<vm.value : f16>
+  %16 = slice %input[2] : reg<vm.value x3 : vector<3xf32>> -> reg<vm.value : f32>
+  %17 = conversion.float.truncate %16, f32.to.f16 : reg<vm.value : f16>
+  %converted = concat(%13, %15, %17) : (reg<vm.value : f16>, reg<vm.value : f16>, reg<vm.value : f16>) -> reg<vm.value x3 : vector<3xf16>>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_fptrunc_bf16_store(%output: buffer, %input: f32) {
+  %base = index.constant 0 : offset
+  %output_view = buffer.view %output[%base] : buffer -> view<1xbf16>
+  %converted = scalar.fptrunc %input : f32 to bf16
+  view.store %converted, %output_view[0] : bf16, view<1xbf16>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.value : f32>) -> ()>}) @scalar_fptrunc_bf16_store(%output: reg<vm.ref : buffer>, %input: reg<vm.value : f32>) asm {
+  %converted = conversion.float.truncate %input, f32.to.bf16 : reg<vm.value : bf16>
+  %8 = constant.zero : reg<vm.value : offset>
+  buffer.store %output, %8, %8, %converted, 0, i16.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @vector_extf_bf16x3(%input: vector<3xbf16>) -> (vector<3xf32>) {
+  %converted = vector.extf %input : vector<3xbf16> to vector<3xf32>
+  func.return %converted : vector<3xf32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x3 : vector<3xbf16>>) -> (reg<vm.value x3 : vector<3xf32>>)>}) @vector_extf_bf16x3(%input: reg<vm.value x3 : vector<3xbf16>>) -> (reg<vm.value x3 : vector<3xf32>>) asm {
+  %12 = slice %input[0] : reg<vm.value x3 : vector<3xbf16>> -> reg<vm.value : bf16>
+  %13 = conversion.float.extend %12, bf16.to.f32 : reg<vm.value : f32>
+  %14 = slice %input[1] : reg<vm.value x3 : vector<3xbf16>> -> reg<vm.value : bf16>
+  %15 = conversion.float.extend %14, bf16.to.f32 : reg<vm.value : f32>
+  %16 = slice %input[2] : reg<vm.value x3 : vector<3xbf16>> -> reg<vm.value : bf16>
+  %17 = conversion.float.extend %16, bf16.to.f32 : reg<vm.value : f32>
+  %converted = concat(%13, %15, %17) : (reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>) -> reg<vm.value x3 : vector<3xf32>>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @vector_fptrunc_bf16x3(%input: vector<3xf32>) -> (vector<3xbf16>) {
+  %converted = vector.fptrunc %input : vector<3xf32> to vector<3xbf16>
+  func.return %converted : vector<3xbf16>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x3 : vector<3xf32>>) -> (reg<vm.value x3 : vector<3xbf16>>)>}) @vector_fptrunc_bf16x3(%input: reg<vm.value x3 : vector<3xf32>>) -> (reg<vm.value x3 : vector<3xbf16>>) asm {
+  %12 = slice %input[0] : reg<vm.value x3 : vector<3xf32>> -> reg<vm.value : f32>
+  %13 = conversion.float.truncate %12, f32.to.bf16 : reg<vm.value : bf16>
+  %14 = slice %input[1] : reg<vm.value x3 : vector<3xf32>> -> reg<vm.value : f32>
+  %15 = conversion.float.truncate %14, f32.to.bf16 : reg<vm.value : bf16>
+  %16 = slice %input[2] : reg<vm.value x3 : vector<3xf32>> -> reg<vm.value : f32>
+  %17 = conversion.float.truncate %16, f32.to.bf16 : reg<vm.value : bf16>
+  %converted = concat(%13, %15, %17) : (reg<vm.value : bf16>, reg<vm.value : bf16>, reg<vm.value : bf16>) -> reg<vm.value x3 : vector<3xbf16>>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @vector_extf_fptrunc_bf16_origin_alias(%input: vector<4xbf16>) -> (vector<4xbf16>) {
+  %wide = vector.extf %input : vector<4xbf16> to vector<4xf32>
+  %rounded = vector.fptrunc %wide : vector<4xf32> to vector<4xbf16>
+  func.return %rounded : vector<4xbf16>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x4 : vector<4xbf16>>) -> (reg<vm.value x4 : vector<4xbf16>>)>}) @vector_extf_fptrunc_bf16_origin_alias(%input: reg<vm.value x4 : vector<4xbf16>>) -> (reg<vm.value x4 : vector<4xbf16>>) asm {
+  return %input
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_bitcast_f32_to_i32(%input: f32) -> (i32) {
+  %bits = scalar.bitcast %input : f32 to i32
+  func.return %bits : i32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : f32>) -> (reg<vm.value : i32>)>}) @scalar_bitcast_f32_to_i32(%input: reg<vm.value : f32>) -> (reg<vm.value : i32>) asm {
+  %bits = value.copy %input : reg<vm.value : i32>
+  return %bits
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_bitcast_i64_to_f64(%input: i64) -> (f64) {
+  %value = scalar.bitcast %input : i64 to f64
+  func.return %value : f64
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i64>) -> (reg<vm.value : f64>)>}) @scalar_bitcast_i64_to_f64(%input: reg<vm.value : i64>) -> (reg<vm.value : f64>) asm {
+  %value = value.copy %input : reg<vm.value : f64>
+  return %value
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_bitcast_f64_to_i64(%input: f64) -> (i64) {
+  %bits = scalar.bitcast %input : f64 to i64
+  func.return %bits : i64
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : f64>) -> (reg<vm.value : i64>)>}) @scalar_bitcast_f64_to_i64(%input: reg<vm.value : f64>) -> (reg<vm.value : i64>) asm {
+  %bits = value.copy %input : reg<vm.value : i64>
+  return %bits
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_bitcast_f16_to_i16(%input: f16) -> (i16) {
+  %bits = scalar.bitcast %input : f16 to i16
+  func.return %bits : i16
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : f16>) -> (reg<vm.value : i16>)>}) @scalar_bitcast_f16_to_i16(%input: reg<vm.value : f16>) -> (reg<vm.value : i16>) asm {
+  %bits = value.copy %input : reg<vm.value : i16>
+  return %bits
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_bitcast_i16_to_f16(%input: i16) -> (f16) {
+  %half = scalar.bitcast %input : i16 to f16
+  func.return %half : f16
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i16>) -> (reg<vm.value : f16>)>}) @scalar_bitcast_i16_to_f16(%input: reg<vm.value : i16>) -> (reg<vm.value : f16>) asm {
+  %half = value.copy %input : reg<vm.value : f16>
+  return %half
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_bitcast_bf16_to_i16(%input: bf16) -> (i16) {
+  %bits = scalar.bitcast %input : bf16 to i16
+  func.return %bits : i16
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : bf16>) -> (reg<vm.value : i16>)>}) @scalar_bitcast_bf16_to_i16(%input: reg<vm.value : bf16>) -> (reg<vm.value : i16>) asm {
+  %bits = value.copy %input : reg<vm.value : i16>
+  return %bits
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_bitcast_i16_to_bf16(%input: i16) -> (bf16) {
+  %half = scalar.bitcast %input : i16 to bf16
+  func.return %half : bf16
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i16>) -> (reg<vm.value : bf16>)>}) @scalar_bitcast_i16_to_bf16(%input: reg<vm.value : i16>) -> (reg<vm.value : bf16>) asm {
+  %half = value.copy %input : reg<vm.value : bf16>
+  return %half
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_extsi_i8_to_i16(%input: i8) -> (i16) {
+  %converted = scalar.extsi %input : i8 to i16
+  func.return %converted : i16
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i8>) -> (reg<vm.value : i16>)>}) @scalar_extsi_i8_to_i16(%input: reg<vm.value : i8>) -> (reg<vm.value : i16>) asm {
+  %converted = conversion.integer %input, s8.to.i16 : reg<vm.value : i16>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_extsi_i8_to_i32(%input: i8) -> (i32) {
+  %converted = scalar.extsi %input : i8 to i32
+  func.return %converted : i32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i8>) -> (reg<vm.value : i32>)>}) @scalar_extsi_i8_to_i32(%input: reg<vm.value : i8>) -> (reg<vm.value : i32>) asm {
+  %converted = conversion.integer %input, s8.to.i32 : reg<vm.value : i32>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_extsi_i8_to_i64(%input: i8) -> (i64) {
+  %converted = scalar.extsi %input : i8 to i64
+  func.return %converted : i64
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i8>) -> (reg<vm.value : i64>)>}) @scalar_extsi_i8_to_i64(%input: reg<vm.value : i8>) -> (reg<vm.value : i64>) asm {
+  %converted = conversion.integer %input, s8.to.i64 : reg<vm.value : i64>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_extsi_i16_to_i32(%input: i16) -> (i32) {
+  %converted = scalar.extsi %input : i16 to i32
+  func.return %converted : i32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i16>) -> (reg<vm.value : i32>)>}) @scalar_extsi_i16_to_i32(%input: reg<vm.value : i16>) -> (reg<vm.value : i32>) asm {
+  %converted = conversion.integer %input, s16.to.i32 : reg<vm.value : i32>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_extsi_i16_to_i64(%input: i16) -> (i64) {
+  %converted = scalar.extsi %input : i16 to i64
+  func.return %converted : i64
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i16>) -> (reg<vm.value : i64>)>}) @scalar_extsi_i16_to_i64(%input: reg<vm.value : i16>) -> (reg<vm.value : i64>) asm {
+  %converted = conversion.integer %input, s16.to.i64 : reg<vm.value : i64>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_extsi_i32_to_i64(%input: i32) -> (i64) {
+  %converted = scalar.extsi %input : i32 to i64
+  func.return %converted : i64
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i32>) -> (reg<vm.value : i64>)>}) @scalar_extsi_i32_to_i64(%input: reg<vm.value : i32>) -> (reg<vm.value : i64>) asm {
+  %converted = conversion.integer %input, s32.to.i64 : reg<vm.value : i64>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_extui_i1_to_i32(%input: i1) -> (i32) {
+  %converted = scalar.extui %input : i1 to i32
+  func.return %converted : i32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i1>) -> (reg<vm.value : i32>)>}) @scalar_extui_i1_to_i32(%input: reg<vm.value : i1>) -> (reg<vm.value : i32>) asm {
+  %8 = constant.s16 1 : reg<vm.value : i32>
+  %9 = constant.zero : reg<vm.value : i32>
+  %converted = value.select %input, %8, %9 : reg<vm.value : i32>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_extui_i8_to_i16(%input: i8) -> (i16) {
+  %converted = scalar.extui %input : i8 to i16
+  func.return %converted : i16
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i8>) -> (reg<vm.value : i16>)>}) @scalar_extui_i8_to_i16(%input: reg<vm.value : i8>) -> (reg<vm.value : i16>) asm {
+  %converted = conversion.integer %input, u8.to.i16 : reg<vm.value : i16>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_extui_i8_to_i32(%input: i8) -> (i32) {
+  %converted = scalar.extui %input : i8 to i32
+  func.return %converted : i32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i8>) -> (reg<vm.value : i32>)>}) @scalar_extui_i8_to_i32(%input: reg<vm.value : i8>) -> (reg<vm.value : i32>) asm {
+  %converted = conversion.integer %input, u8.to.i32 : reg<vm.value : i32>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_extui_i8_to_i64(%input: i8) -> (i64) {
+  %converted = scalar.extui %input : i8 to i64
+  func.return %converted : i64
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i8>) -> (reg<vm.value : i64>)>}) @scalar_extui_i8_to_i64(%input: reg<vm.value : i8>) -> (reg<vm.value : i64>) asm {
+  %converted = conversion.integer %input, u8.to.i64 : reg<vm.value : i64>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_extui_i16_to_i32(%input: i16) -> (i32) {
+  %converted = scalar.extui %input : i16 to i32
+  func.return %converted : i32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i16>) -> (reg<vm.value : i32>)>}) @scalar_extui_i16_to_i32(%input: reg<vm.value : i16>) -> (reg<vm.value : i32>) asm {
+  %converted = conversion.integer %input, u16.to.i32 : reg<vm.value : i32>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_extui_i16_to_i64(%input: i16) -> (i64) {
+  %converted = scalar.extui %input : i16 to i64
+  func.return %converted : i64
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i16>) -> (reg<vm.value : i64>)>}) @scalar_extui_i16_to_i64(%input: reg<vm.value : i16>) -> (reg<vm.value : i64>) asm {
+  %converted = conversion.integer %input, u16.to.i64 : reg<vm.value : i64>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_extui_i32_to_i64(%input: i32) -> (i64) {
+  %converted = scalar.extui %input : i32 to i64
+  func.return %converted : i64
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i32>) -> (reg<vm.value : i64>)>}) @scalar_extui_i32_to_i64(%input: reg<vm.value : i32>) -> (reg<vm.value : i64>) asm {
+  %converted = conversion.integer %input, u32.to.i64 : reg<vm.value : i64>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @scalar_bitcast_direct_i32_arg_f32_store() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%output: buffer, %scale_bits: i32) {
+  %output_base = index.constant 0 : offset
+  %output_element = index.constant 0 : index
+  %output_view = buffer.view %output[%output_base] : buffer -> view<1xf32>
+  %scale = scalar.bitcast %scale_bits : i32 to f32
+  %unit = scalar.constant 1.0 : f32
+  %scaled = scalar.mulf %unit, %scale : f32
+  view.store %scaled, %output_view[%output_element] : f32, view<1xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.value : i32>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.value : i32>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @scalar_bitcast_direct_i32_arg_f32_store(%output: reg<vm.ref : buffer>, %scale_bits: reg<vm.value : i32>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %scale = value.copy %scale_bits : reg<vm.value : f32>
+  %24 = constant.zero : reg<vm.value : offset>
+  buffer.store %output, %24, %24, %scale, 0, i32.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @scalar_bitcast_lane_byte_decode_select_tree_store() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %input_view = buffer.view %input[%base] : buffer -> view<64xi8>
+  %output_view = buffer.view %output[%base] : buffer -> view<64xf32>
+  %byte = view.load %input_view[%lane] : view<64xi8> -> i8
+  %wide = scalar.extui %byte : i8 to i32
+  %sign_mask = scalar.constant 128 : i32
+  %sign = scalar.andi %wide, %sign_mask : i32
+  %sign_shift = scalar.constant 24 : i32
+  %sign_bits = scalar.shli %sign, %sign_shift : i32
+  %exp_mask = scalar.constant 120 : i32
+  %exp_bits = scalar.andi %wide, %exp_mask : i32
+  %exp_shift = scalar.constant 3 : i32
+  %exp = scalar.shrui %exp_bits, %exp_shift : i32
+  %mantissa_mask = scalar.constant 7 : i32
+  %mantissa = scalar.andi %wide, %mantissa_mask : i32
+  %absent_mantissa_bit = scalar.constant 0 : i32
+  %base_mantissa_shift = scalar.constant 0 : i32
+  %zero_exponent = scalar.constant 0 : i32
+  %mantissa_bit1_mask = scalar.constant 2 : i32
+  %mantissa_bit1 = scalar.andi %mantissa, %mantissa_bit1_mask : i32
+  %has_mantissa_bit1 = scalar.cmpi ne, %mantissa_bit1, %absent_mantissa_bit : i32
+  %low_mantissa_shift = scalar.constant 1 : i32
+  %shift0 = scf.select %has_mantissa_bit1, %low_mantissa_shift, %base_mantissa_shift : i32
+  %mantissa_bit2_mask = scalar.constant 4 : i32
+  %mantissa_bit2 = scalar.andi %mantissa, %mantissa_bit2_mask : i32
+  %has_mantissa_bit2 = scalar.cmpi ne, %mantissa_bit2, %absent_mantissa_bit : i32
+  %high_mantissa_shift = scalar.constant 2 : i32
+  %selected_shift = scf.select %has_mantissa_bit2, %high_mantissa_shift, %shift0 : i32
+  %bias = scalar.constant 118 : i32
+  %biased_exp = scalar.addi %selected_shift, %bias : i32
+  %f32_exp_shift = scalar.constant 23 : i32
+  %f32_exp = scalar.shli %biased_exp, %f32_exp_shift : i32
+  %remaining_shift = scalar.subi %f32_exp_shift, %selected_shift : i32
+  %shifted_mantissa = scalar.shli %mantissa, %remaining_shift : i32
+  %f32_mantissa_mask = scalar.constant 8388607 : i32
+  %f32_mantissa = scalar.andi %shifted_mantissa, %f32_mantissa_mask : i32
+  %normal_head = scalar.ori %sign_bits, %f32_exp : i32
+  %normal_bits = scalar.ori %normal_head, %f32_mantissa : i32
+  %subnormal = scf.select %has_mantissa_bit2, %normal_bits, %sign_bits : i32
+  %is_zero_exp = scalar.cmpi eq, %exp, %zero_exponent : i32
+  %regular_exp_bias = scalar.constant 120 : i32
+  %regular_exp = scalar.addi %exp, %regular_exp_bias : i32
+  %regular_exp_bits = scalar.shli %regular_exp, %f32_exp_shift : i32
+  %regular_head = scalar.ori %sign_bits, %regular_exp_bits : i32
+  %regular_bits = scalar.ori %regular_head, %f32_mantissa : i32
+  %finite_bits = scf.select %is_zero_exp, %subnormal, %regular_bits : i32
+  %all_ones_exp = scalar.constant 15 : i32
+  %is_special_exp = scalar.cmpi eq, %exp, %all_ones_exp : i32
+  %all_ones_mantissa = scalar.constant 7 : i32
+  %is_nan_payload = scalar.cmpi eq, %mantissa, %all_ones_mantissa : i32
+  %false = scalar.constant false : i1
+  %use_nan = scf.select %is_special_exp, %is_nan_payload, %false : i1
+  %nan_bits = scalar.constant 2143289344 : i32
+  %bits = scf.select %use_nan, %nan_bits, %finite_bits : i32
+  %value = scalar.bitcast %bits : i32 to f32
+  view.store %value, %output_view[%lane] : f32, view<64xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @scalar_bitcast_lane_byte_decode_select_tree_store(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %74 = constant.zero : reg<vm.value : offset>
+  %byte = buffer.load %input, %74, %workitem_id_x, 1, i8.x1 : reg<vm.value : i8>
+  %wide = conversion.integer %byte, u8.to.i32 : reg<vm.value : i32>
+  %sign_mask = constant.s16 128 : reg<vm.value : i32>
+  %sign = integer.and.i32 %wide, %sign_mask : reg<vm.value : i32>
+  %sign_shift = constant.s16 24 : reg<vm.value : i32>
+  %sign_bits = integer.shift.left.i32 %sign, %sign_shift : reg<vm.value : i32>
+  %exp_mask = constant.s16 120 : reg<vm.value : i32>
+  %exp_bits = integer.and.i32 %wide, %exp_mask : reg<vm.value : i32>
+  %exp_shift = constant.s16 3 : reg<vm.value : i32>
+  %exp = integer.shift.right.u32 %exp_bits, %exp_shift : reg<vm.value : i32>
+  %mantissa_mask = constant.s16 7 : reg<vm.value : i32>
+  %mantissa = integer.and.i32 %wide, %mantissa_mask : reg<vm.value : i32>
+  %absent_mantissa_bit = constant.zero : reg<vm.value : i32>
+  %mantissa_bit1_mask = constant.s16 2 : reg<vm.value : i32>
+  %mantissa_bit1 = integer.and.i32 %mantissa, %mantissa_bit1_mask : reg<vm.value : i32>
+  %has_mantissa_bit1 = integer.compare.i32 %mantissa_bit1, %absent_mantissa_bit, ne : reg<vm.value : i1>
+  %low_mantissa_shift = constant.s16 1 : reg<vm.value : i32>
+  %shift0 = value.select %has_mantissa_bit1, %low_mantissa_shift, %absent_mantissa_bit : reg<vm.value : i32>
+  %mantissa_bit2_mask = constant.s16 4 : reg<vm.value : i32>
+  %mantissa_bit2 = integer.and.i32 %mantissa, %mantissa_bit2_mask : reg<vm.value : i32>
+  %has_mantissa_bit2 = integer.compare.i32 %mantissa_bit2, %absent_mantissa_bit, ne : reg<vm.value : i1>
+  %selected_shift = value.select %has_mantissa_bit2, %mantissa_bit1_mask, %shift0 : reg<vm.value : i32>
+  %bias = constant.s16 118 : reg<vm.value : i32>
+  %biased_exp = integer.add.i32 %selected_shift, %bias : reg<vm.value : i32>
+  %f32_exp_shift = constant.s16 23 : reg<vm.value : i32>
+  %f32_exp = integer.shift.left.i32 %biased_exp, %f32_exp_shift : reg<vm.value : i32>
+  %remaining_shift = integer.sub.i32 %f32_exp_shift, %selected_shift : reg<vm.value : i32>
+  %shifted_mantissa = integer.shift.left.i32 %mantissa, %remaining_shift : reg<vm.value : i32>
+  %f32_mantissa_mask = constant.i32 8388607 : reg<vm.value : i32>
+  %f32_mantissa = integer.and.i32 %shifted_mantissa, %f32_mantissa_mask : reg<vm.value : i32>
+  %normal_head = integer.or.i32 %sign_bits, %f32_exp : reg<vm.value : i32>
+  %normal_bits = integer.or.i32 %normal_head, %f32_mantissa : reg<vm.value : i32>
+  %subnormal = value.select %has_mantissa_bit2, %normal_bits, %sign_bits : reg<vm.value : i32>
+  %is_zero_exp = integer.compare.i32 %exp, %absent_mantissa_bit, eq : reg<vm.value : i1>
+  %regular_exp = integer.add.i32 %exp, %exp_mask : reg<vm.value : i32>
+  %regular_exp_bits = integer.shift.left.i32 %regular_exp, %f32_exp_shift : reg<vm.value : i32>
+  %regular_head = integer.or.i32 %sign_bits, %regular_exp_bits : reg<vm.value : i32>
+  %regular_bits = integer.or.i32 %regular_head, %f32_mantissa : reg<vm.value : i32>
+  %finite_bits = value.select %is_zero_exp, %subnormal, %regular_bits : reg<vm.value : i32>
+  %all_ones_exp = constant.s16 15 : reg<vm.value : i32>
+  %is_special_exp = integer.compare.i32 %exp, %all_ones_exp, eq : reg<vm.value : i1>
+  %is_nan_payload = integer.compare.i32 %mantissa, %mantissa_mask, eq : reg<vm.value : i1>
+  %false = constant.zero : reg<vm.value : i1>
+  %use_nan = value.select %is_special_exp, %is_nan_payload, %false : reg<vm.value : i1>
+  %nan_bits = constant.i32 2143289344 : reg<vm.value : i32>
+  %bits = value.select %use_nan, %nan_bits, %finite_bits : reg<vm.value : i32>
+  %value = value.copy %bits : reg<vm.value : f32>
+  buffer.store %output, %74, %workitem_id_x, %value, 4, i32.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @scalar_extf_direct_f8e4m3_load_store() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %input_view = buffer.view %input[%base] : buffer -> view<64xf8E4M3>
+  %output_view = buffer.view %output[%base] : buffer -> view<64xf32>
+  %packed = view.load %input_view[%lane] : view<64xf8E4M3> -> f8E4M3
+  %value = scalar.extf %packed : f8E4M3 to f32
+  view.store %value, %output_view[%lane] : f32, view<64xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @scalar_extf_direct_f8e4m3_load_store(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %83 = constant.zero : reg<vm.value : offset>
+  %packed = buffer.load %input, %83, %workitem_id_x, 1, i8.x1 : reg<vm.value : f8E4M3>
+  %85 = value.copy %packed : reg<vm.value : i8>
+  %86 = conversion.integer %85, u8.to.i32 : reg<vm.value : i32>
+  %87 = constant.s16 128 : reg<vm.value : i32>
+  %88 = integer.and.i32 %86, %87 : reg<vm.value : i32>
+  %89 = constant.s16 24 : reg<vm.value : i32>
+  %90 = integer.shift.left.i32 %88, %89 : reg<vm.value : i32>
+  %91 = constant.s16 120 : reg<vm.value : i32>
+  %92 = integer.and.i32 %86, %91 : reg<vm.value : i32>
+  %93 = constant.s16 3 : reg<vm.value : i32>
+  %94 = integer.shift.right.u32 %92, %93 : reg<vm.value : i32>
+  %95 = constant.s16 7 : reg<vm.value : i32>
+  %96 = integer.and.i32 %86, %95 : reg<vm.value : i32>
+  %97 = integer.add.i32 %94, %91 : reg<vm.value : i32>
+  %98 = constant.s16 23 : reg<vm.value : i32>
+  %99 = integer.shift.left.i32 %97, %98 : reg<vm.value : i32>
+  %100 = constant.s16 20 : reg<vm.value : i32>
+  %101 = integer.shift.left.i32 %96, %100 : reg<vm.value : i32>
+  %102 = integer.or.i32 %90, %99 : reg<vm.value : i32>
+  %103 = integer.or.i32 %102, %101 : reg<vm.value : i32>
+  %104 = constant.zero : reg<vm.value : i32>
+  %105 = constant.s16 2 : reg<vm.value : i32>
+  %106 = integer.and.i32 %96, %105 : reg<vm.value : i32>
+  %107 = integer.compare.i32 %106, %104, ne : reg<vm.value : i1>
+  %108 = constant.s16 1 : reg<vm.value : i32>
+  %109 = value.select %107, %108, %104 : reg<vm.value : i32>
+  %110 = constant.s16 4 : reg<vm.value : i32>
+  %111 = integer.and.i32 %96, %110 : reg<vm.value : i32>
+  %112 = integer.compare.i32 %111, %104, ne : reg<vm.value : i1>
+  %113 = value.select %112, %105, %109 : reg<vm.value : i32>
+  %114 = constant.s16 118 : reg<vm.value : i32>
+  %115 = integer.add.i32 %113, %114 : reg<vm.value : i32>
+  %116 = integer.shift.left.i32 %115, %98 : reg<vm.value : i32>
+  %117 = integer.sub.i32 %98, %113 : reg<vm.value : i32>
+  %118 = integer.shift.left.i32 %96, %117 : reg<vm.value : i32>
+  %119 = constant.i32 8388607 : reg<vm.value : i32>
+  %120 = integer.and.i32 %118, %119 : reg<vm.value : i32>
+  %121 = integer.or.i32 %90, %116 : reg<vm.value : i32>
+  %122 = integer.or.i32 %121, %120 : reg<vm.value : i32>
+  %123 = integer.compare.i32 %96, %104, eq : reg<vm.value : i1>
+  %124 = value.select %123, %90, %122 : reg<vm.value : i32>
+  %125 = integer.compare.i32 %94, %104, eq : reg<vm.value : i1>
+  %126 = value.select %125, %124, %103 : reg<vm.value : i32>
+  %127 = constant.s16 15 : reg<vm.value : i32>
+  %128 = integer.compare.i32 %94, %127, eq : reg<vm.value : i1>
+  %129 = constant.i32 2143289344 : reg<vm.value : i32>
+  %130 = integer.compare.i32 %96, %95, eq : reg<vm.value : i1>
+  %131 = constant.zero : reg<vm.value : i1>
+  %132 = value.select %128, %130, %131 : reg<vm.value : i1>
+  %133 = value.select %132, %129, %126 : reg<vm.value : i32>
+  %value = value.copy %133 : reg<vm.value : f32>
+  buffer.store %output, %83, %workitem_id_x, %value, 4, i32.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @scalar_extf_direct_f8e5m2_load_store() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %input_view = buffer.view %input[%base] : buffer -> view<64xf8E5M2>
+  %output_view = buffer.view %output[%base] : buffer -> view<64xf32>
+  %packed = view.load %input_view[%lane] : view<64xf8E5M2> -> f8E5M2
+  %value = scalar.extf %packed : f8E5M2 to f32
+  view.store %value, %output_view[%lane] : f32, view<64xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @scalar_extf_direct_f8e5m2_load_store(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %78 = constant.zero : reg<vm.value : offset>
+  %packed = buffer.load %input, %78, %workitem_id_x, 1, i8.x1 : reg<vm.value : f8E5M2>
+  %80 = value.copy %packed : reg<vm.value : i8>
+  %81 = conversion.integer %80, u8.to.i32 : reg<vm.value : i32>
+  %82 = constant.s16 128 : reg<vm.value : i32>
+  %83 = integer.and.i32 %81, %82 : reg<vm.value : i32>
+  %84 = constant.s16 24 : reg<vm.value : i32>
+  %85 = integer.shift.left.i32 %83, %84 : reg<vm.value : i32>
+  %86 = constant.s16 124 : reg<vm.value : i32>
+  %87 = integer.and.i32 %81, %86 : reg<vm.value : i32>
+  %88 = constant.s16 2 : reg<vm.value : i32>
+  %89 = integer.shift.right.u32 %87, %88 : reg<vm.value : i32>
+  %90 = constant.s16 3 : reg<vm.value : i32>
+  %91 = integer.and.i32 %81, %90 : reg<vm.value : i32>
+  %92 = constant.s16 112 : reg<vm.value : i32>
+  %93 = integer.add.i32 %89, %92 : reg<vm.value : i32>
+  %94 = constant.s16 23 : reg<vm.value : i32>
+  %95 = integer.shift.left.i32 %93, %94 : reg<vm.value : i32>
+  %96 = constant.s16 21 : reg<vm.value : i32>
+  %97 = integer.shift.left.i32 %91, %96 : reg<vm.value : i32>
+  %98 = integer.or.i32 %85, %95 : reg<vm.value : i32>
+  %99 = integer.or.i32 %98, %97 : reg<vm.value : i32>
+  %100 = constant.zero : reg<vm.value : i32>
+  %101 = integer.and.i32 %91, %88 : reg<vm.value : i32>
+  %102 = integer.compare.i32 %101, %100, ne : reg<vm.value : i1>
+  %103 = constant.s16 1 : reg<vm.value : i32>
+  %104 = value.select %102, %103, %100 : reg<vm.value : i32>
+  %105 = constant.s16 111 : reg<vm.value : i32>
+  %106 = integer.add.i32 %104, %105 : reg<vm.value : i32>
+  %107 = integer.shift.left.i32 %106, %94 : reg<vm.value : i32>
+  %108 = integer.sub.i32 %94, %104 : reg<vm.value : i32>
+  %109 = integer.shift.left.i32 %91, %108 : reg<vm.value : i32>
+  %110 = constant.i32 8388607 : reg<vm.value : i32>
+  %111 = integer.and.i32 %109, %110 : reg<vm.value : i32>
+  %112 = integer.or.i32 %85, %107 : reg<vm.value : i32>
+  %113 = integer.or.i32 %112, %111 : reg<vm.value : i32>
+  %114 = integer.compare.i32 %91, %100, eq : reg<vm.value : i1>
+  %115 = value.select %114, %85, %113 : reg<vm.value : i32>
+  %116 = integer.compare.i32 %89, %100, eq : reg<vm.value : i1>
+  %117 = value.select %116, %115, %99 : reg<vm.value : i32>
+  %118 = constant.s16 31 : reg<vm.value : i32>
+  %119 = integer.compare.i32 %89, %118, eq : reg<vm.value : i1>
+  %120 = constant.i32 2143289344 : reg<vm.value : i32>
+  %121 = constant.i32 2139095040 : reg<vm.value : i32>
+  %122 = integer.or.i32 %85, %121 : reg<vm.value : i32>
+  %123 = value.select %114, %122, %120 : reg<vm.value : i32>
+  %124 = value.select %119, %123, %117 : reg<vm.value : i32>
+  %value = value.copy %124 : reg<vm.value : f32>
+  buffer.store %output, %78, %workitem_id_x, %value, 4, i32.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @vector_extf_direct_f8e4m3_load_store() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x4xf32>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E4M3> -> vector<4xf8E4M3>
+  %value = vector.extf %packed : vector<4xf8E4M3> to vector<4xf32>
+  vector.store %value, %output_view[%lane, 0] : vector<4xf32>, view<64x4xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @vector_extf_direct_f8e4m3_load_store(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %302 = constant.zero : reg<vm.value : offset>
+  %303 = buffer.load %input, %302, %workitem_id_x, 4, i8.x1 : reg<vm.value : f8E4M3>
+  %304 = value.copy %303 : reg<vm.value : i8>
+  %305 = conversion.integer %304, u8.to.i32 : reg<vm.value : i32>
+  %306 = constant.s16 128 : reg<vm.value : i32>
+  %307 = integer.and.i32 %305, %306 : reg<vm.value : i32>
+  %308 = constant.s16 24 : reg<vm.value : i32>
+  %309 = integer.shift.left.i32 %307, %308 : reg<vm.value : i32>
+  %310 = constant.s16 120 : reg<vm.value : i32>
+  %311 = integer.and.i32 %305, %310 : reg<vm.value : i32>
+  %312 = constant.s16 3 : reg<vm.value : i32>
+  %313 = integer.shift.right.u32 %311, %312 : reg<vm.value : i32>
+  %314 = constant.s16 7 : reg<vm.value : i32>
+  %315 = integer.and.i32 %305, %314 : reg<vm.value : i32>
+  %316 = integer.add.i32 %313, %310 : reg<vm.value : i32>
+  %317 = constant.s16 23 : reg<vm.value : i32>
+  %318 = integer.shift.left.i32 %316, %317 : reg<vm.value : i32>
+  %319 = constant.s16 20 : reg<vm.value : i32>
+  %320 = integer.shift.left.i32 %315, %319 : reg<vm.value : i32>
+  %321 = integer.or.i32 %309, %318 : reg<vm.value : i32>
+  %322 = integer.or.i32 %321, %320 : reg<vm.value : i32>
+  %323 = constant.zero : reg<vm.value : i32>
+  %324 = constant.s16 2 : reg<vm.value : i32>
+  %325 = integer.and.i32 %315, %324 : reg<vm.value : i32>
+  %326 = integer.compare.i32 %325, %323, ne : reg<vm.value : i1>
+  %327 = constant.s16 1 : reg<vm.value : i32>
+  %328 = value.select %326, %327, %323 : reg<vm.value : i32>
+  %329 = constant.s16 4 : reg<vm.value : i32>
+  %330 = integer.and.i32 %315, %329 : reg<vm.value : i32>
+  %331 = integer.compare.i32 %330, %323, ne : reg<vm.value : i1>
+  %332 = value.select %331, %324, %328 : reg<vm.value : i32>
+  %333 = constant.s16 118 : reg<vm.value : i32>
+  %334 = integer.add.i32 %332, %333 : reg<vm.value : i32>
+  %335 = integer.shift.left.i32 %334, %317 : reg<vm.value : i32>
+  %336 = integer.sub.i32 %317, %332 : reg<vm.value : i32>
+  %337 = integer.shift.left.i32 %315, %336 : reg<vm.value : i32>
+  %338 = constant.i32 8388607 : reg<vm.value : i32>
+  %339 = integer.and.i32 %337, %338 : reg<vm.value : i32>
+  %340 = integer.or.i32 %309, %335 : reg<vm.value : i32>
+  %341 = integer.or.i32 %340, %339 : reg<vm.value : i32>
+  %342 = integer.compare.i32 %315, %323, eq : reg<vm.value : i1>
+  %343 = value.select %342, %309, %341 : reg<vm.value : i32>
+  %344 = integer.compare.i32 %313, %323, eq : reg<vm.value : i1>
+  %345 = value.select %344, %343, %322 : reg<vm.value : i32>
+  %346 = constant.s16 15 : reg<vm.value : i32>
+  %347 = integer.compare.i32 %313, %346, eq : reg<vm.value : i1>
+  %348 = constant.i32 2143289344 : reg<vm.value : i32>
+  %349 = integer.compare.i32 %315, %314, eq : reg<vm.value : i1>
+  %350 = constant.zero : reg<vm.value : i1>
+  %351 = value.select %347, %349, %350 : reg<vm.value : i1>
+  %352 = value.select %351, %348, %345 : reg<vm.value : i32>
+  %353 = value.copy %352 : reg<vm.value : f32>
+  %354 = constant.s16 1 : reg<vm.value : offset>
+  %355 = buffer.load %input, %354, %workitem_id_x, 4, i8.x1 : reg<vm.value : f8E4M3>
+  %356 = value.copy %355 : reg<vm.value : i8>
+  %357 = conversion.integer %356, u8.to.i32 : reg<vm.value : i32>
+  %358 = integer.and.i32 %357, %306 : reg<vm.value : i32>
+  %359 = integer.shift.left.i32 %358, %308 : reg<vm.value : i32>
+  %360 = integer.and.i32 %357, %310 : reg<vm.value : i32>
+  %361 = integer.shift.right.u32 %360, %312 : reg<vm.value : i32>
+  %362 = integer.and.i32 %357, %314 : reg<vm.value : i32>
+  %363 = integer.add.i32 %361, %310 : reg<vm.value : i32>
+  %364 = integer.shift.left.i32 %363, %317 : reg<vm.value : i32>
+  %365 = integer.shift.left.i32 %362, %319 : reg<vm.value : i32>
+  %366 = integer.or.i32 %359, %364 : reg<vm.value : i32>
+  %367 = integer.or.i32 %366, %365 : reg<vm.value : i32>
+  %368 = integer.and.i32 %362, %324 : reg<vm.value : i32>
+  %369 = integer.compare.i32 %368, %323, ne : reg<vm.value : i1>
+  %370 = value.select %369, %327, %323 : reg<vm.value : i32>
+  %371 = integer.and.i32 %362, %329 : reg<vm.value : i32>
+  %372 = integer.compare.i32 %371, %323, ne : reg<vm.value : i1>
+  %373 = value.select %372, %324, %370 : reg<vm.value : i32>
+  %374 = integer.add.i32 %373, %333 : reg<vm.value : i32>
+  %375 = integer.shift.left.i32 %374, %317 : reg<vm.value : i32>
+  %376 = integer.sub.i32 %317, %373 : reg<vm.value : i32>
+  %377 = integer.shift.left.i32 %362, %376 : reg<vm.value : i32>
+  %378 = integer.and.i32 %377, %338 : reg<vm.value : i32>
+  %379 = integer.or.i32 %359, %375 : reg<vm.value : i32>
+  %380 = integer.or.i32 %379, %378 : reg<vm.value : i32>
+  %381 = integer.compare.i32 %362, %323, eq : reg<vm.value : i1>
+  %382 = value.select %381, %359, %380 : reg<vm.value : i32>
+  %383 = integer.compare.i32 %361, %323, eq : reg<vm.value : i1>
+  %384 = value.select %383, %382, %367 : reg<vm.value : i32>
+  %385 = integer.compare.i32 %361, %346, eq : reg<vm.value : i1>
+  %386 = integer.compare.i32 %362, %314, eq : reg<vm.value : i1>
+  %387 = value.select %385, %386, %350 : reg<vm.value : i1>
+  %388 = value.select %387, %348, %384 : reg<vm.value : i32>
+  %389 = value.copy %388 : reg<vm.value : f32>
+  %390 = constant.s16 2 : reg<vm.value : offset>
+  %391 = buffer.load %input, %390, %workitem_id_x, 4, i8.x1 : reg<vm.value : f8E4M3>
+  %392 = value.copy %391 : reg<vm.value : i8>
+  %393 = conversion.integer %392, u8.to.i32 : reg<vm.value : i32>
+  %394 = integer.and.i32 %393, %306 : reg<vm.value : i32>
+  %395 = integer.shift.left.i32 %394, %308 : reg<vm.value : i32>
+  %396 = integer.and.i32 %393, %310 : reg<vm.value : i32>
+  %397 = integer.shift.right.u32 %396, %312 : reg<vm.value : i32>
+  %398 = integer.and.i32 %393, %314 : reg<vm.value : i32>
+  %399 = integer.add.i32 %397, %310 : reg<vm.value : i32>
+  %400 = integer.shift.left.i32 %399, %317 : reg<vm.value : i32>
+  %401 = integer.shift.left.i32 %398, %319 : reg<vm.value : i32>
+  %402 = integer.or.i32 %395, %400 : reg<vm.value : i32>
+  %403 = integer.or.i32 %402, %401 : reg<vm.value : i32>
+  %404 = integer.and.i32 %398, %324 : reg<vm.value : i32>
+  %405 = integer.compare.i32 %404, %323, ne : reg<vm.value : i1>
+  %406 = value.select %405, %327, %323 : reg<vm.value : i32>
+  %407 = integer.and.i32 %398, %329 : reg<vm.value : i32>
+  %408 = integer.compare.i32 %407, %323, ne : reg<vm.value : i1>
+  %409 = value.select %408, %324, %406 : reg<vm.value : i32>
+  %410 = integer.add.i32 %409, %333 : reg<vm.value : i32>
+  %411 = integer.shift.left.i32 %410, %317 : reg<vm.value : i32>
+  %412 = integer.sub.i32 %317, %409 : reg<vm.value : i32>
+  %413 = integer.shift.left.i32 %398, %412 : reg<vm.value : i32>
+  %414 = integer.and.i32 %413, %338 : reg<vm.value : i32>
+  %415 = integer.or.i32 %395, %411 : reg<vm.value : i32>
+  %416 = integer.or.i32 %415, %414 : reg<vm.value : i32>
+  %417 = integer.compare.i32 %398, %323, eq : reg<vm.value : i1>
+  %418 = value.select %417, %395, %416 : reg<vm.value : i32>
+  %419 = integer.compare.i32 %397, %323, eq : reg<vm.value : i1>
+  %420 = value.select %419, %418, %403 : reg<vm.value : i32>
+  %421 = integer.compare.i32 %397, %346, eq : reg<vm.value : i1>
+  %422 = integer.compare.i32 %398, %314, eq : reg<vm.value : i1>
+  %423 = value.select %421, %422, %350 : reg<vm.value : i1>
+  %424 = value.select %423, %348, %420 : reg<vm.value : i32>
+  %425 = value.copy %424 : reg<vm.value : f32>
+  %426 = constant.s16 3 : reg<vm.value : offset>
+  %427 = buffer.load %input, %426, %workitem_id_x, 4, i8.x1 : reg<vm.value : f8E4M3>
+  %428 = value.copy %427 : reg<vm.value : i8>
+  %429 = conversion.integer %428, u8.to.i32 : reg<vm.value : i32>
+  %430 = integer.and.i32 %429, %306 : reg<vm.value : i32>
+  %431 = integer.shift.left.i32 %430, %308 : reg<vm.value : i32>
+  %432 = integer.and.i32 %429, %310 : reg<vm.value : i32>
+  %433 = integer.shift.right.u32 %432, %312 : reg<vm.value : i32>
+  %434 = integer.and.i32 %429, %314 : reg<vm.value : i32>
+  %435 = integer.add.i32 %433, %310 : reg<vm.value : i32>
+  %436 = integer.shift.left.i32 %435, %317 : reg<vm.value : i32>
+  %437 = integer.shift.left.i32 %434, %319 : reg<vm.value : i32>
+  %438 = integer.or.i32 %431, %436 : reg<vm.value : i32>
+  %439 = integer.or.i32 %438, %437 : reg<vm.value : i32>
+  %440 = integer.and.i32 %434, %324 : reg<vm.value : i32>
+  %441 = integer.compare.i32 %440, %323, ne : reg<vm.value : i1>
+  %442 = value.select %441, %327, %323 : reg<vm.value : i32>
+  %443 = integer.and.i32 %434, %329 : reg<vm.value : i32>
+  %444 = integer.compare.i32 %443, %323, ne : reg<vm.value : i1>
+  %445 = value.select %444, %324, %442 : reg<vm.value : i32>
+  %446 = integer.add.i32 %445, %333 : reg<vm.value : i32>
+  %447 = integer.shift.left.i32 %446, %317 : reg<vm.value : i32>
+  %448 = integer.sub.i32 %317, %445 : reg<vm.value : i32>
+  %449 = integer.shift.left.i32 %434, %448 : reg<vm.value : i32>
+  %450 = integer.and.i32 %449, %338 : reg<vm.value : i32>
+  %451 = integer.or.i32 %431, %447 : reg<vm.value : i32>
+  %452 = integer.or.i32 %451, %450 : reg<vm.value : i32>
+  %453 = integer.compare.i32 %434, %323, eq : reg<vm.value : i1>
+  %454 = value.select %453, %431, %452 : reg<vm.value : i32>
+  %455 = integer.compare.i32 %433, %323, eq : reg<vm.value : i1>
+  %456 = value.select %455, %454, %439 : reg<vm.value : i32>
+  %457 = integer.compare.i32 %433, %346, eq : reg<vm.value : i1>
+  %458 = integer.compare.i32 %434, %314, eq : reg<vm.value : i1>
+  %459 = value.select %457, %458, %350 : reg<vm.value : i1>
+  %460 = value.select %459, %348, %456 : reg<vm.value : i32>
+  %461 = value.copy %460 : reg<vm.value : f32>
+  %value = concat(%353, %389, %425, %461) : (reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>) -> reg<vm.value x4 : vector<4xf32>>
+  buffer.store %output, %302, %workitem_id_x, %value, 16, i32.x4
+  return
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @vector_extf_scaled_f8e4m3_to_bf16_store() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %scale: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3>
+  %scale_view = buffer.view %scale[%base] : buffer -> view<64xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x4xbf16>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E4M3> -> vector<4xf8E4M3>
+  %wide = vector.extf %packed : vector<4xf8E4M3> to vector<4xf32>
+  %row_scale = view.load %scale_view[%lane] : view<64xf32> -> f32
+  %scale_vector = vector.splat %row_scale : vector<4xf32>
+  %scaled = vector.mulf %wide, %scale_vector : vector<4xf32>
+  %rounded = vector.fptrunc %scaled : vector<4xf32> to vector<4xbf16>
+  vector.store %rounded, %output_view[%lane, 0] : vector<4xbf16>, view<64x4xbf16>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @vector_extf_scaled_f8e4m3_to_bf16_store(%input: reg<vm.ref : buffer>, %scale: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %317 = constant.zero : reg<vm.value : offset>
+  %row_scale = buffer.load %scale, %317, %workitem_id_x, 4, i32.x1 : reg<vm.value : f32>
+  %320 = buffer.load %input, %317, %workitem_id_x, 4, i8.x1 : reg<vm.value : f8E4M3>
+  %321 = value.copy %320 : reg<vm.value : i8>
+  %322 = conversion.integer %321, u8.to.i32 : reg<vm.value : i32>
+  %323 = constant.s16 128 : reg<vm.value : i32>
+  %324 = integer.and.i32 %322, %323 : reg<vm.value : i32>
+  %325 = constant.s16 24 : reg<vm.value : i32>
+  %326 = integer.shift.left.i32 %324, %325 : reg<vm.value : i32>
+  %327 = constant.s16 120 : reg<vm.value : i32>
+  %328 = integer.and.i32 %322, %327 : reg<vm.value : i32>
+  %329 = constant.s16 3 : reg<vm.value : i32>
+  %330 = integer.shift.right.u32 %328, %329 : reg<vm.value : i32>
+  %331 = constant.s16 7 : reg<vm.value : i32>
+  %332 = integer.and.i32 %322, %331 : reg<vm.value : i32>
+  %333 = integer.add.i32 %330, %327 : reg<vm.value : i32>
+  %334 = constant.s16 23 : reg<vm.value : i32>
+  %335 = integer.shift.left.i32 %333, %334 : reg<vm.value : i32>
+  %336 = constant.s16 20 : reg<vm.value : i32>
+  %337 = integer.shift.left.i32 %332, %336 : reg<vm.value : i32>
+  %338 = integer.or.i32 %326, %335 : reg<vm.value : i32>
+  %339 = integer.or.i32 %338, %337 : reg<vm.value : i32>
+  %340 = constant.zero : reg<vm.value : i32>
+  %341 = constant.s16 2 : reg<vm.value : i32>
+  %342 = integer.and.i32 %332, %341 : reg<vm.value : i32>
+  %343 = integer.compare.i32 %342, %340, ne : reg<vm.value : i1>
+  %344 = constant.s16 1 : reg<vm.value : i32>
+  %345 = value.select %343, %344, %340 : reg<vm.value : i32>
+  %346 = constant.s16 4 : reg<vm.value : i32>
+  %347 = integer.and.i32 %332, %346 : reg<vm.value : i32>
+  %348 = integer.compare.i32 %347, %340, ne : reg<vm.value : i1>
+  %349 = value.select %348, %341, %345 : reg<vm.value : i32>
+  %350 = constant.s16 118 : reg<vm.value : i32>
+  %351 = integer.add.i32 %349, %350 : reg<vm.value : i32>
+  %352 = integer.shift.left.i32 %351, %334 : reg<vm.value : i32>
+  %353 = integer.sub.i32 %334, %349 : reg<vm.value : i32>
+  %354 = integer.shift.left.i32 %332, %353 : reg<vm.value : i32>
+  %355 = constant.i32 8388607 : reg<vm.value : i32>
+  %356 = integer.and.i32 %354, %355 : reg<vm.value : i32>
+  %357 = integer.or.i32 %326, %352 : reg<vm.value : i32>
+  %358 = integer.or.i32 %357, %356 : reg<vm.value : i32>
+  %359 = integer.compare.i32 %332, %340, eq : reg<vm.value : i1>
+  %360 = value.select %359, %326, %358 : reg<vm.value : i32>
+  %361 = integer.compare.i32 %330, %340, eq : reg<vm.value : i1>
+  %362 = value.select %361, %360, %339 : reg<vm.value : i32>
+  %363 = constant.s16 15 : reg<vm.value : i32>
+  %364 = integer.compare.i32 %330, %363, eq : reg<vm.value : i1>
+  %365 = constant.i32 2143289344 : reg<vm.value : i32>
+  %366 = integer.compare.i32 %332, %331, eq : reg<vm.value : i1>
+  %367 = constant.zero : reg<vm.value : i1>
+  %368 = value.select %364, %366, %367 : reg<vm.value : i1>
+  %369 = value.select %368, %365, %362 : reg<vm.value : i32>
+  %370 = value.copy %369 : reg<vm.value : f32>
+  %371 = float.mul.f32 %370, %row_scale : reg<vm.value : f32>
+  %372 = conversion.float.truncate %371, f32.to.bf16 : reg<vm.value : bf16>
+  %373 = constant.s16 1 : reg<vm.value : offset>
+  %374 = buffer.load %input, %373, %workitem_id_x, 4, i8.x1 : reg<vm.value : f8E4M3>
+  %375 = value.copy %374 : reg<vm.value : i8>
+  %376 = conversion.integer %375, u8.to.i32 : reg<vm.value : i32>
+  %377 = integer.and.i32 %376, %323 : reg<vm.value : i32>
+  %378 = integer.shift.left.i32 %377, %325 : reg<vm.value : i32>
+  %379 = integer.and.i32 %376, %327 : reg<vm.value : i32>
+  %380 = integer.shift.right.u32 %379, %329 : reg<vm.value : i32>
+  %381 = integer.and.i32 %376, %331 : reg<vm.value : i32>
+  %382 = integer.add.i32 %380, %327 : reg<vm.value : i32>
+  %383 = integer.shift.left.i32 %382, %334 : reg<vm.value : i32>
+  %384 = integer.shift.left.i32 %381, %336 : reg<vm.value : i32>
+  %385 = integer.or.i32 %378, %383 : reg<vm.value : i32>
+  %386 = integer.or.i32 %385, %384 : reg<vm.value : i32>
+  %387 = integer.and.i32 %381, %341 : reg<vm.value : i32>
+  %388 = integer.compare.i32 %387, %340, ne : reg<vm.value : i1>
+  %389 = value.select %388, %344, %340 : reg<vm.value : i32>
+  %390 = integer.and.i32 %381, %346 : reg<vm.value : i32>
+  %391 = integer.compare.i32 %390, %340, ne : reg<vm.value : i1>
+  %392 = value.select %391, %341, %389 : reg<vm.value : i32>
+  %393 = integer.add.i32 %392, %350 : reg<vm.value : i32>
+  %394 = integer.shift.left.i32 %393, %334 : reg<vm.value : i32>
+  %395 = integer.sub.i32 %334, %392 : reg<vm.value : i32>
+  %396 = integer.shift.left.i32 %381, %395 : reg<vm.value : i32>
+  %397 = integer.and.i32 %396, %355 : reg<vm.value : i32>
+  %398 = integer.or.i32 %378, %394 : reg<vm.value : i32>
+  %399 = integer.or.i32 %398, %397 : reg<vm.value : i32>
+  %400 = integer.compare.i32 %381, %340, eq : reg<vm.value : i1>
+  %401 = value.select %400, %378, %399 : reg<vm.value : i32>
+  %402 = integer.compare.i32 %380, %340, eq : reg<vm.value : i1>
+  %403 = value.select %402, %401, %386 : reg<vm.value : i32>
+  %404 = integer.compare.i32 %380, %363, eq : reg<vm.value : i1>
+  %405 = integer.compare.i32 %381, %331, eq : reg<vm.value : i1>
+  %406 = value.select %404, %405, %367 : reg<vm.value : i1>
+  %407 = value.select %406, %365, %403 : reg<vm.value : i32>
+  %408 = value.copy %407 : reg<vm.value : f32>
+  %409 = float.mul.f32 %408, %row_scale : reg<vm.value : f32>
+  %410 = conversion.float.truncate %409, f32.to.bf16 : reg<vm.value : bf16>
+  %411 = constant.s16 2 : reg<vm.value : offset>
+  %412 = buffer.load %input, %411, %workitem_id_x, 4, i8.x1 : reg<vm.value : f8E4M3>
+  %413 = value.copy %412 : reg<vm.value : i8>
+  %414 = conversion.integer %413, u8.to.i32 : reg<vm.value : i32>
+  %415 = integer.and.i32 %414, %323 : reg<vm.value : i32>
+  %416 = integer.shift.left.i32 %415, %325 : reg<vm.value : i32>
+  %417 = integer.and.i32 %414, %327 : reg<vm.value : i32>
+  %418 = integer.shift.right.u32 %417, %329 : reg<vm.value : i32>
+  %419 = integer.and.i32 %414, %331 : reg<vm.value : i32>
+  %420 = integer.add.i32 %418, %327 : reg<vm.value : i32>
+  %421 = integer.shift.left.i32 %420, %334 : reg<vm.value : i32>
+  %422 = integer.shift.left.i32 %419, %336 : reg<vm.value : i32>
+  %423 = integer.or.i32 %416, %421 : reg<vm.value : i32>
+  %424 = integer.or.i32 %423, %422 : reg<vm.value : i32>
+  %425 = integer.and.i32 %419, %341 : reg<vm.value : i32>
+  %426 = integer.compare.i32 %425, %340, ne : reg<vm.value : i1>
+  %427 = value.select %426, %344, %340 : reg<vm.value : i32>
+  %428 = integer.and.i32 %419, %346 : reg<vm.value : i32>
+  %429 = integer.compare.i32 %428, %340, ne : reg<vm.value : i1>
+  %430 = value.select %429, %341, %427 : reg<vm.value : i32>
+  %431 = integer.add.i32 %430, %350 : reg<vm.value : i32>
+  %432 = integer.shift.left.i32 %431, %334 : reg<vm.value : i32>
+  %433 = integer.sub.i32 %334, %430 : reg<vm.value : i32>
+  %434 = integer.shift.left.i32 %419, %433 : reg<vm.value : i32>
+  %435 = integer.and.i32 %434, %355 : reg<vm.value : i32>
+  %436 = integer.or.i32 %416, %432 : reg<vm.value : i32>
+  %437 = integer.or.i32 %436, %435 : reg<vm.value : i32>
+  %438 = integer.compare.i32 %419, %340, eq : reg<vm.value : i1>
+  %439 = value.select %438, %416, %437 : reg<vm.value : i32>
+  %440 = integer.compare.i32 %418, %340, eq : reg<vm.value : i1>
+  %441 = value.select %440, %439, %424 : reg<vm.value : i32>
+  %442 = integer.compare.i32 %418, %363, eq : reg<vm.value : i1>
+  %443 = integer.compare.i32 %419, %331, eq : reg<vm.value : i1>
+  %444 = value.select %442, %443, %367 : reg<vm.value : i1>
+  %445 = value.select %444, %365, %441 : reg<vm.value : i32>
+  %446 = value.copy %445 : reg<vm.value : f32>
+  %447 = float.mul.f32 %446, %row_scale : reg<vm.value : f32>
+  %448 = conversion.float.truncate %447, f32.to.bf16 : reg<vm.value : bf16>
+  %449 = constant.s16 3 : reg<vm.value : offset>
+  %450 = buffer.load %input, %449, %workitem_id_x, 4, i8.x1 : reg<vm.value : f8E4M3>
+  %451 = value.copy %450 : reg<vm.value : i8>
+  %452 = conversion.integer %451, u8.to.i32 : reg<vm.value : i32>
+  %453 = integer.and.i32 %452, %323 : reg<vm.value : i32>
+  %454 = integer.shift.left.i32 %453, %325 : reg<vm.value : i32>
+  %455 = integer.and.i32 %452, %327 : reg<vm.value : i32>
+  %456 = integer.shift.right.u32 %455, %329 : reg<vm.value : i32>
+  %457 = integer.and.i32 %452, %331 : reg<vm.value : i32>
+  %458 = integer.add.i32 %456, %327 : reg<vm.value : i32>
+  %459 = integer.shift.left.i32 %458, %334 : reg<vm.value : i32>
+  %460 = integer.shift.left.i32 %457, %336 : reg<vm.value : i32>
+  %461 = integer.or.i32 %454, %459 : reg<vm.value : i32>
+  %462 = integer.or.i32 %461, %460 : reg<vm.value : i32>
+  %463 = integer.and.i32 %457, %341 : reg<vm.value : i32>
+  %464 = integer.compare.i32 %463, %340, ne : reg<vm.value : i1>
+  %465 = value.select %464, %344, %340 : reg<vm.value : i32>
+  %466 = integer.and.i32 %457, %346 : reg<vm.value : i32>
+  %467 = integer.compare.i32 %466, %340, ne : reg<vm.value : i1>
+  %468 = value.select %467, %341, %465 : reg<vm.value : i32>
+  %469 = integer.add.i32 %468, %350 : reg<vm.value : i32>
+  %470 = integer.shift.left.i32 %469, %334 : reg<vm.value : i32>
+  %471 = integer.sub.i32 %334, %468 : reg<vm.value : i32>
+  %472 = integer.shift.left.i32 %457, %471 : reg<vm.value : i32>
+  %473 = integer.and.i32 %472, %355 : reg<vm.value : i32>
+  %474 = integer.or.i32 %454, %470 : reg<vm.value : i32>
+  %475 = integer.or.i32 %474, %473 : reg<vm.value : i32>
+  %476 = integer.compare.i32 %457, %340, eq : reg<vm.value : i1>
+  %477 = value.select %476, %454, %475 : reg<vm.value : i32>
+  %478 = integer.compare.i32 %456, %340, eq : reg<vm.value : i1>
+  %479 = value.select %478, %477, %462 : reg<vm.value : i32>
+  %480 = integer.compare.i32 %456, %363, eq : reg<vm.value : i1>
+  %481 = integer.compare.i32 %457, %331, eq : reg<vm.value : i1>
+  %482 = value.select %480, %481, %367 : reg<vm.value : i1>
+  %483 = value.select %482, %365, %479 : reg<vm.value : i32>
+  %484 = value.copy %483 : reg<vm.value : f32>
+  %485 = float.mul.f32 %484, %row_scale : reg<vm.value : f32>
+  %486 = conversion.float.truncate %485, f32.to.bf16 : reg<vm.value : bf16>
+  %rounded = concat(%372, %410, %448, %486) : (reg<vm.value : bf16>, reg<vm.value : bf16>, reg<vm.value : bf16>, reg<vm.value : bf16>) -> reg<vm.value x4 : vector<4xbf16>>
+  buffer.store %output, %317, %workitem_id_x, %rounded, 8, i16.x4
+  return
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @vector_extf_direct_f8e4m3_to_bf16_store() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x4xbf16>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E4M3> -> vector<4xf8E4M3>
+  %value = vector.extf %packed : vector<4xf8E4M3> to vector<4xbf16>
+  vector.store %value, %output_view[%lane, 0] : vector<4xbf16>, view<64x4xbf16>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @vector_extf_direct_f8e4m3_to_bf16_store(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %66 = constant.zero : reg<vm.value : offset>
+  %67 = buffer.load %input, %66, %workitem_id_x, 4, i8.x1 : reg<vm.value : f8E4M3>
+  %68 = conversion.float.extend %67, f8e4m3.to.f32 : reg<vm.value : f32>
+  %69 = conversion.float.truncate %68, f32.to.bf16 : reg<vm.value : bf16>
+  %70 = constant.s16 1 : reg<vm.value : offset>
+  %71 = buffer.load %input, %70, %workitem_id_x, 4, i8.x1 : reg<vm.value : f8E4M3>
+  %72 = conversion.float.extend %71, f8e4m3.to.f32 : reg<vm.value : f32>
+  %73 = conversion.float.truncate %72, f32.to.bf16 : reg<vm.value : bf16>
+  %74 = constant.s16 2 : reg<vm.value : offset>
+  %75 = buffer.load %input, %74, %workitem_id_x, 4, i8.x1 : reg<vm.value : f8E4M3>
+  %76 = conversion.float.extend %75, f8e4m3.to.f32 : reg<vm.value : f32>
+  %77 = conversion.float.truncate %76, f32.to.bf16 : reg<vm.value : bf16>
+  %78 = constant.s16 3 : reg<vm.value : offset>
+  %79 = buffer.load %input, %78, %workitem_id_x, 4, i8.x1 : reg<vm.value : f8E4M3>
+  %80 = conversion.float.extend %79, f8e4m3.to.f32 : reg<vm.value : f32>
+  %81 = conversion.float.truncate %80, f32.to.bf16 : reg<vm.value : bf16>
+  %value = concat(%69, %73, %77, %81) : (reg<vm.value : bf16>, reg<vm.value : bf16>, reg<vm.value : bf16>, reg<vm.value : bf16>) -> reg<vm.value x4 : vector<4xbf16>>
+  buffer.store %output, %66, %workitem_id_x, %value, 8, i16.x4
+  return
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @vector_extf_direct_f8e5m2_load_store() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x4xf32>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E5M2> -> vector<4xf8E5M2>
+  %value = vector.extf %packed : vector<4xf8E5M2> to vector<4xf32>
+  vector.store %value, %output_view[%lane, 0] : vector<4xf32>, view<64x4xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @vector_extf_direct_f8e5m2_load_store(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %282 = constant.zero : reg<vm.value : offset>
+  %283 = buffer.load %input, %282, %workitem_id_x, 4, i8.x1 : reg<vm.value : f8E5M2>
+  %284 = value.copy %283 : reg<vm.value : i8>
+  %285 = conversion.integer %284, u8.to.i32 : reg<vm.value : i32>
+  %286 = constant.s16 128 : reg<vm.value : i32>
+  %287 = integer.and.i32 %285, %286 : reg<vm.value : i32>
+  %288 = constant.s16 24 : reg<vm.value : i32>
+  %289 = integer.shift.left.i32 %287, %288 : reg<vm.value : i32>
+  %290 = constant.s16 124 : reg<vm.value : i32>
+  %291 = integer.and.i32 %285, %290 : reg<vm.value : i32>
+  %292 = constant.s16 2 : reg<vm.value : i32>
+  %293 = integer.shift.right.u32 %291, %292 : reg<vm.value : i32>
+  %294 = constant.s16 3 : reg<vm.value : i32>
+  %295 = integer.and.i32 %285, %294 : reg<vm.value : i32>
+  %296 = constant.s16 112 : reg<vm.value : i32>
+  %297 = integer.add.i32 %293, %296 : reg<vm.value : i32>
+  %298 = constant.s16 23 : reg<vm.value : i32>
+  %299 = integer.shift.left.i32 %297, %298 : reg<vm.value : i32>
+  %300 = constant.s16 21 : reg<vm.value : i32>
+  %301 = integer.shift.left.i32 %295, %300 : reg<vm.value : i32>
+  %302 = integer.or.i32 %289, %299 : reg<vm.value : i32>
+  %303 = integer.or.i32 %302, %301 : reg<vm.value : i32>
+  %304 = constant.zero : reg<vm.value : i32>
+  %305 = integer.and.i32 %295, %292 : reg<vm.value : i32>
+  %306 = integer.compare.i32 %305, %304, ne : reg<vm.value : i1>
+  %307 = constant.s16 1 : reg<vm.value : i32>
+  %308 = value.select %306, %307, %304 : reg<vm.value : i32>
+  %309 = constant.s16 111 : reg<vm.value : i32>
+  %310 = integer.add.i32 %308, %309 : reg<vm.value : i32>
+  %311 = integer.shift.left.i32 %310, %298 : reg<vm.value : i32>
+  %312 = integer.sub.i32 %298, %308 : reg<vm.value : i32>
+  %313 = integer.shift.left.i32 %295, %312 : reg<vm.value : i32>
+  %314 = constant.i32 8388607 : reg<vm.value : i32>
+  %315 = integer.and.i32 %313, %314 : reg<vm.value : i32>
+  %316 = integer.or.i32 %289, %311 : reg<vm.value : i32>
+  %317 = integer.or.i32 %316, %315 : reg<vm.value : i32>
+  %318 = integer.compare.i32 %295, %304, eq : reg<vm.value : i1>
+  %319 = value.select %318, %289, %317 : reg<vm.value : i32>
+  %320 = integer.compare.i32 %293, %304, eq : reg<vm.value : i1>
+  %321 = value.select %320, %319, %303 : reg<vm.value : i32>
+  %322 = constant.s16 31 : reg<vm.value : i32>
+  %323 = integer.compare.i32 %293, %322, eq : reg<vm.value : i1>
+  %324 = constant.i32 2143289344 : reg<vm.value : i32>
+  %325 = constant.i32 2139095040 : reg<vm.value : i32>
+  %326 = integer.or.i32 %289, %325 : reg<vm.value : i32>
+  %327 = value.select %318, %326, %324 : reg<vm.value : i32>
+  %328 = value.select %323, %327, %321 : reg<vm.value : i32>
+  %329 = value.copy %328 : reg<vm.value : f32>
+  %330 = constant.s16 1 : reg<vm.value : offset>
+  %331 = buffer.load %input, %330, %workitem_id_x, 4, i8.x1 : reg<vm.value : f8E5M2>
+  %332 = value.copy %331 : reg<vm.value : i8>
+  %333 = conversion.integer %332, u8.to.i32 : reg<vm.value : i32>
+  %334 = integer.and.i32 %333, %286 : reg<vm.value : i32>
+  %335 = integer.shift.left.i32 %334, %288 : reg<vm.value : i32>
+  %336 = integer.and.i32 %333, %290 : reg<vm.value : i32>
+  %337 = integer.shift.right.u32 %336, %292 : reg<vm.value : i32>
+  %338 = integer.and.i32 %333, %294 : reg<vm.value : i32>
+  %339 = integer.add.i32 %337, %296 : reg<vm.value : i32>
+  %340 = integer.shift.left.i32 %339, %298 : reg<vm.value : i32>
+  %341 = integer.shift.left.i32 %338, %300 : reg<vm.value : i32>
+  %342 = integer.or.i32 %335, %340 : reg<vm.value : i32>
+  %343 = integer.or.i32 %342, %341 : reg<vm.value : i32>
+  %344 = integer.and.i32 %338, %292 : reg<vm.value : i32>
+  %345 = integer.compare.i32 %344, %304, ne : reg<vm.value : i1>
+  %346 = value.select %345, %307, %304 : reg<vm.value : i32>
+  %347 = integer.add.i32 %346, %309 : reg<vm.value : i32>
+  %348 = integer.shift.left.i32 %347, %298 : reg<vm.value : i32>
+  %349 = integer.sub.i32 %298, %346 : reg<vm.value : i32>
+  %350 = integer.shift.left.i32 %338, %349 : reg<vm.value : i32>
+  %351 = integer.and.i32 %350, %314 : reg<vm.value : i32>
+  %352 = integer.or.i32 %335, %348 : reg<vm.value : i32>
+  %353 = integer.or.i32 %352, %351 : reg<vm.value : i32>
+  %354 = integer.compare.i32 %338, %304, eq : reg<vm.value : i1>
+  %355 = value.select %354, %335, %353 : reg<vm.value : i32>
+  %356 = integer.compare.i32 %337, %304, eq : reg<vm.value : i1>
+  %357 = value.select %356, %355, %343 : reg<vm.value : i32>
+  %358 = integer.compare.i32 %337, %322, eq : reg<vm.value : i1>
+  %359 = integer.or.i32 %335, %325 : reg<vm.value : i32>
+  %360 = value.select %354, %359, %324 : reg<vm.value : i32>
+  %361 = value.select %358, %360, %357 : reg<vm.value : i32>
+  %362 = value.copy %361 : reg<vm.value : f32>
+  %363 = constant.s16 2 : reg<vm.value : offset>
+  %364 = buffer.load %input, %363, %workitem_id_x, 4, i8.x1 : reg<vm.value : f8E5M2>
+  %365 = value.copy %364 : reg<vm.value : i8>
+  %366 = conversion.integer %365, u8.to.i32 : reg<vm.value : i32>
+  %367 = integer.and.i32 %366, %286 : reg<vm.value : i32>
+  %368 = integer.shift.left.i32 %367, %288 : reg<vm.value : i32>
+  %369 = integer.and.i32 %366, %290 : reg<vm.value : i32>
+  %370 = integer.shift.right.u32 %369, %292 : reg<vm.value : i32>
+  %371 = integer.and.i32 %366, %294 : reg<vm.value : i32>
+  %372 = integer.add.i32 %370, %296 : reg<vm.value : i32>
+  %373 = integer.shift.left.i32 %372, %298 : reg<vm.value : i32>
+  %374 = integer.shift.left.i32 %371, %300 : reg<vm.value : i32>
+  %375 = integer.or.i32 %368, %373 : reg<vm.value : i32>
+  %376 = integer.or.i32 %375, %374 : reg<vm.value : i32>
+  %377 = integer.and.i32 %371, %292 : reg<vm.value : i32>
+  %378 = integer.compare.i32 %377, %304, ne : reg<vm.value : i1>
+  %379 = value.select %378, %307, %304 : reg<vm.value : i32>
+  %380 = integer.add.i32 %379, %309 : reg<vm.value : i32>
+  %381 = integer.shift.left.i32 %380, %298 : reg<vm.value : i32>
+  %382 = integer.sub.i32 %298, %379 : reg<vm.value : i32>
+  %383 = integer.shift.left.i32 %371, %382 : reg<vm.value : i32>
+  %384 = integer.and.i32 %383, %314 : reg<vm.value : i32>
+  %385 = integer.or.i32 %368, %381 : reg<vm.value : i32>
+  %386 = integer.or.i32 %385, %384 : reg<vm.value : i32>
+  %387 = integer.compare.i32 %371, %304, eq : reg<vm.value : i1>
+  %388 = value.select %387, %368, %386 : reg<vm.value : i32>
+  %389 = integer.compare.i32 %370, %304, eq : reg<vm.value : i1>
+  %390 = value.select %389, %388, %376 : reg<vm.value : i32>
+  %391 = integer.compare.i32 %370, %322, eq : reg<vm.value : i1>
+  %392 = integer.or.i32 %368, %325 : reg<vm.value : i32>
+  %393 = value.select %387, %392, %324 : reg<vm.value : i32>
+  %394 = value.select %391, %393, %390 : reg<vm.value : i32>
+  %395 = value.copy %394 : reg<vm.value : f32>
+  %396 = constant.s16 3 : reg<vm.value : offset>
+  %397 = buffer.load %input, %396, %workitem_id_x, 4, i8.x1 : reg<vm.value : f8E5M2>
+  %398 = value.copy %397 : reg<vm.value : i8>
+  %399 = conversion.integer %398, u8.to.i32 : reg<vm.value : i32>
+  %400 = integer.and.i32 %399, %286 : reg<vm.value : i32>
+  %401 = integer.shift.left.i32 %400, %288 : reg<vm.value : i32>
+  %402 = integer.and.i32 %399, %290 : reg<vm.value : i32>
+  %403 = integer.shift.right.u32 %402, %292 : reg<vm.value : i32>
+  %404 = integer.and.i32 %399, %294 : reg<vm.value : i32>
+  %405 = integer.add.i32 %403, %296 : reg<vm.value : i32>
+  %406 = integer.shift.left.i32 %405, %298 : reg<vm.value : i32>
+  %407 = integer.shift.left.i32 %404, %300 : reg<vm.value : i32>
+  %408 = integer.or.i32 %401, %406 : reg<vm.value : i32>
+  %409 = integer.or.i32 %408, %407 : reg<vm.value : i32>
+  %410 = integer.and.i32 %404, %292 : reg<vm.value : i32>
+  %411 = integer.compare.i32 %410, %304, ne : reg<vm.value : i1>
+  %412 = value.select %411, %307, %304 : reg<vm.value : i32>
+  %413 = integer.add.i32 %412, %309 : reg<vm.value : i32>
+  %414 = integer.shift.left.i32 %413, %298 : reg<vm.value : i32>
+  %415 = integer.sub.i32 %298, %412 : reg<vm.value : i32>
+  %416 = integer.shift.left.i32 %404, %415 : reg<vm.value : i32>
+  %417 = integer.and.i32 %416, %314 : reg<vm.value : i32>
+  %418 = integer.or.i32 %401, %414 : reg<vm.value : i32>
+  %419 = integer.or.i32 %418, %417 : reg<vm.value : i32>
+  %420 = integer.compare.i32 %404, %304, eq : reg<vm.value : i1>
+  %421 = value.select %420, %401, %419 : reg<vm.value : i32>
+  %422 = integer.compare.i32 %403, %304, eq : reg<vm.value : i1>
+  %423 = value.select %422, %421, %409 : reg<vm.value : i32>
+  %424 = integer.compare.i32 %403, %322, eq : reg<vm.value : i1>
+  %425 = integer.or.i32 %401, %325 : reg<vm.value : i32>
+  %426 = value.select %420, %425, %324 : reg<vm.value : i32>
+  %427 = value.select %424, %426, %423 : reg<vm.value : i32>
+  %428 = value.copy %427 : reg<vm.value : f32>
+  %value = concat(%329, %362, %395, %428) : (reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>) -> reg<vm.value x4 : vector<4xf32>>
+  buffer.store %output, %282, %workitem_id_x, %value, 16, i32.x4
+  return
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @vector_extf_direct_f8e5m2_to_bf16_store() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x4xbf16>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E5M2> -> vector<4xf8E5M2>
+  %value = vector.extf %packed : vector<4xf8E5M2> to vector<4xbf16>
+  vector.store %value, %output_view[%lane, 0] : vector<4xbf16>, view<64x4xbf16>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @vector_extf_direct_f8e5m2_to_bf16_store(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %66 = constant.zero : reg<vm.value : offset>
+  %67 = buffer.load %input, %66, %workitem_id_x, 4, i8.x1 : reg<vm.value : f8E5M2>
+  %68 = conversion.float.extend %67, f8e5m2.to.f32 : reg<vm.value : f32>
+  %69 = conversion.float.truncate %68, f32.to.bf16 : reg<vm.value : bf16>
+  %70 = constant.s16 1 : reg<vm.value : offset>
+  %71 = buffer.load %input, %70, %workitem_id_x, 4, i8.x1 : reg<vm.value : f8E5M2>
+  %72 = conversion.float.extend %71, f8e5m2.to.f32 : reg<vm.value : f32>
+  %73 = conversion.float.truncate %72, f32.to.bf16 : reg<vm.value : bf16>
+  %74 = constant.s16 2 : reg<vm.value : offset>
+  %75 = buffer.load %input, %74, %workitem_id_x, 4, i8.x1 : reg<vm.value : f8E5M2>
+  %76 = conversion.float.extend %75, f8e5m2.to.f32 : reg<vm.value : f32>
+  %77 = conversion.float.truncate %76, f32.to.bf16 : reg<vm.value : bf16>
+  %78 = constant.s16 3 : reg<vm.value : offset>
+  %79 = buffer.load %input, %78, %workitem_id_x, 4, i8.x1 : reg<vm.value : f8E5M2>
+  %80 = conversion.float.extend %79, f8e5m2.to.f32 : reg<vm.value : f32>
+  %81 = conversion.float.truncate %80, f32.to.bf16 : reg<vm.value : bf16>
+  %value = concat(%69, %73, %77, %81) : (reg<vm.value : bf16>, reg<vm.value : bf16>, reg<vm.value : bf16>, reg<vm.value : bf16>) -> reg<vm.value x4 : vector<4xbf16>>
+  buffer.store %output, %66, %workitem_id_x, %value, 8, i16.x4
+  return
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @vector_extf_scaled_f8e5m2_to_bf16_store() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %scale: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2>
+  %scale_view = buffer.view %scale[%base] : buffer -> view<64xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x4xbf16>
+  %packed = vector.load %input_view[%lane, 0] : view<64x4xf8E5M2> -> vector<4xf8E5M2>
+  %wide = vector.extf %packed : vector<4xf8E5M2> to vector<4xf32>
+  %row_scale = view.load %scale_view[%lane] : view<64xf32> -> f32
+  %scale_vector = vector.splat %row_scale : vector<4xf32>
+  %scaled = vector.mulf %wide, %scale_vector : vector<4xf32>
+  %rounded = vector.fptrunc %scaled : vector<4xf32> to vector<4xbf16>
+  vector.store %rounded, %output_view[%lane, 0] : vector<4xbf16>, view<64x4xbf16>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @vector_extf_scaled_f8e5m2_to_bf16_store(%input: reg<vm.ref : buffer>, %scale: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %297 = constant.zero : reg<vm.value : offset>
+  %row_scale = buffer.load %scale, %297, %workitem_id_x, 4, i32.x1 : reg<vm.value : f32>
+  %300 = buffer.load %input, %297, %workitem_id_x, 4, i8.x1 : reg<vm.value : f8E5M2>
+  %301 = value.copy %300 : reg<vm.value : i8>
+  %302 = conversion.integer %301, u8.to.i32 : reg<vm.value : i32>
+  %303 = constant.s16 128 : reg<vm.value : i32>
+  %304 = integer.and.i32 %302, %303 : reg<vm.value : i32>
+  %305 = constant.s16 24 : reg<vm.value : i32>
+  %306 = integer.shift.left.i32 %304, %305 : reg<vm.value : i32>
+  %307 = constant.s16 124 : reg<vm.value : i32>
+  %308 = integer.and.i32 %302, %307 : reg<vm.value : i32>
+  %309 = constant.s16 2 : reg<vm.value : i32>
+  %310 = integer.shift.right.u32 %308, %309 : reg<vm.value : i32>
+  %311 = constant.s16 3 : reg<vm.value : i32>
+  %312 = integer.and.i32 %302, %311 : reg<vm.value : i32>
+  %313 = constant.s16 112 : reg<vm.value : i32>
+  %314 = integer.add.i32 %310, %313 : reg<vm.value : i32>
+  %315 = constant.s16 23 : reg<vm.value : i32>
+  %316 = integer.shift.left.i32 %314, %315 : reg<vm.value : i32>
+  %317 = constant.s16 21 : reg<vm.value : i32>
+  %318 = integer.shift.left.i32 %312, %317 : reg<vm.value : i32>
+  %319 = integer.or.i32 %306, %316 : reg<vm.value : i32>
+  %320 = integer.or.i32 %319, %318 : reg<vm.value : i32>
+  %321 = constant.zero : reg<vm.value : i32>
+  %322 = integer.and.i32 %312, %309 : reg<vm.value : i32>
+  %323 = integer.compare.i32 %322, %321, ne : reg<vm.value : i1>
+  %324 = constant.s16 1 : reg<vm.value : i32>
+  %325 = value.select %323, %324, %321 : reg<vm.value : i32>
+  %326 = constant.s16 111 : reg<vm.value : i32>
+  %327 = integer.add.i32 %325, %326 : reg<vm.value : i32>
+  %328 = integer.shift.left.i32 %327, %315 : reg<vm.value : i32>
+  %329 = integer.sub.i32 %315, %325 : reg<vm.value : i32>
+  %330 = integer.shift.left.i32 %312, %329 : reg<vm.value : i32>
+  %331 = constant.i32 8388607 : reg<vm.value : i32>
+  %332 = integer.and.i32 %330, %331 : reg<vm.value : i32>
+  %333 = integer.or.i32 %306, %328 : reg<vm.value : i32>
+  %334 = integer.or.i32 %333, %332 : reg<vm.value : i32>
+  %335 = integer.compare.i32 %312, %321, eq : reg<vm.value : i1>
+  %336 = value.select %335, %306, %334 : reg<vm.value : i32>
+  %337 = integer.compare.i32 %310, %321, eq : reg<vm.value : i1>
+  %338 = value.select %337, %336, %320 : reg<vm.value : i32>
+  %339 = constant.s16 31 : reg<vm.value : i32>
+  %340 = integer.compare.i32 %310, %339, eq : reg<vm.value : i1>
+  %341 = constant.i32 2143289344 : reg<vm.value : i32>
+  %342 = constant.i32 2139095040 : reg<vm.value : i32>
+  %343 = integer.or.i32 %306, %342 : reg<vm.value : i32>
+  %344 = value.select %335, %343, %341 : reg<vm.value : i32>
+  %345 = value.select %340, %344, %338 : reg<vm.value : i32>
+  %346 = value.copy %345 : reg<vm.value : f32>
+  %347 = float.mul.f32 %346, %row_scale : reg<vm.value : f32>
+  %348 = conversion.float.truncate %347, f32.to.bf16 : reg<vm.value : bf16>
+  %349 = constant.s16 1 : reg<vm.value : offset>
+  %350 = buffer.load %input, %349, %workitem_id_x, 4, i8.x1 : reg<vm.value : f8E5M2>
+  %351 = value.copy %350 : reg<vm.value : i8>
+  %352 = conversion.integer %351, u8.to.i32 : reg<vm.value : i32>
+  %353 = integer.and.i32 %352, %303 : reg<vm.value : i32>
+  %354 = integer.shift.left.i32 %353, %305 : reg<vm.value : i32>
+  %355 = integer.and.i32 %352, %307 : reg<vm.value : i32>
+  %356 = integer.shift.right.u32 %355, %309 : reg<vm.value : i32>
+  %357 = integer.and.i32 %352, %311 : reg<vm.value : i32>
+  %358 = integer.add.i32 %356, %313 : reg<vm.value : i32>
+  %359 = integer.shift.left.i32 %358, %315 : reg<vm.value : i32>
+  %360 = integer.shift.left.i32 %357, %317 : reg<vm.value : i32>
+  %361 = integer.or.i32 %354, %359 : reg<vm.value : i32>
+  %362 = integer.or.i32 %361, %360 : reg<vm.value : i32>
+  %363 = integer.and.i32 %357, %309 : reg<vm.value : i32>
+  %364 = integer.compare.i32 %363, %321, ne : reg<vm.value : i1>
+  %365 = value.select %364, %324, %321 : reg<vm.value : i32>
+  %366 = integer.add.i32 %365, %326 : reg<vm.value : i32>
+  %367 = integer.shift.left.i32 %366, %315 : reg<vm.value : i32>
+  %368 = integer.sub.i32 %315, %365 : reg<vm.value : i32>
+  %369 = integer.shift.left.i32 %357, %368 : reg<vm.value : i32>
+  %370 = integer.and.i32 %369, %331 : reg<vm.value : i32>
+  %371 = integer.or.i32 %354, %367 : reg<vm.value : i32>
+  %372 = integer.or.i32 %371, %370 : reg<vm.value : i32>
+  %373 = integer.compare.i32 %357, %321, eq : reg<vm.value : i1>
+  %374 = value.select %373, %354, %372 : reg<vm.value : i32>
+  %375 = integer.compare.i32 %356, %321, eq : reg<vm.value : i1>
+  %376 = value.select %375, %374, %362 : reg<vm.value : i32>
+  %377 = integer.compare.i32 %356, %339, eq : reg<vm.value : i1>
+  %378 = integer.or.i32 %354, %342 : reg<vm.value : i32>
+  %379 = value.select %373, %378, %341 : reg<vm.value : i32>
+  %380 = value.select %377, %379, %376 : reg<vm.value : i32>
+  %381 = value.copy %380 : reg<vm.value : f32>
+  %382 = float.mul.f32 %381, %row_scale : reg<vm.value : f32>
+  %383 = conversion.float.truncate %382, f32.to.bf16 : reg<vm.value : bf16>
+  %384 = constant.s16 2 : reg<vm.value : offset>
+  %385 = buffer.load %input, %384, %workitem_id_x, 4, i8.x1 : reg<vm.value : f8E5M2>
+  %386 = value.copy %385 : reg<vm.value : i8>
+  %387 = conversion.integer %386, u8.to.i32 : reg<vm.value : i32>
+  %388 = integer.and.i32 %387, %303 : reg<vm.value : i32>
+  %389 = integer.shift.left.i32 %388, %305 : reg<vm.value : i32>
+  %390 = integer.and.i32 %387, %307 : reg<vm.value : i32>
+  %391 = integer.shift.right.u32 %390, %309 : reg<vm.value : i32>
+  %392 = integer.and.i32 %387, %311 : reg<vm.value : i32>
+  %393 = integer.add.i32 %391, %313 : reg<vm.value : i32>
+  %394 = integer.shift.left.i32 %393, %315 : reg<vm.value : i32>
+  %395 = integer.shift.left.i32 %392, %317 : reg<vm.value : i32>
+  %396 = integer.or.i32 %389, %394 : reg<vm.value : i32>
+  %397 = integer.or.i32 %396, %395 : reg<vm.value : i32>
+  %398 = integer.and.i32 %392, %309 : reg<vm.value : i32>
+  %399 = integer.compare.i32 %398, %321, ne : reg<vm.value : i1>
+  %400 = value.select %399, %324, %321 : reg<vm.value : i32>
+  %401 = integer.add.i32 %400, %326 : reg<vm.value : i32>
+  %402 = integer.shift.left.i32 %401, %315 : reg<vm.value : i32>
+  %403 = integer.sub.i32 %315, %400 : reg<vm.value : i32>
+  %404 = integer.shift.left.i32 %392, %403 : reg<vm.value : i32>
+  %405 = integer.and.i32 %404, %331 : reg<vm.value : i32>
+  %406 = integer.or.i32 %389, %402 : reg<vm.value : i32>
+  %407 = integer.or.i32 %406, %405 : reg<vm.value : i32>
+  %408 = integer.compare.i32 %392, %321, eq : reg<vm.value : i1>
+  %409 = value.select %408, %389, %407 : reg<vm.value : i32>
+  %410 = integer.compare.i32 %391, %321, eq : reg<vm.value : i1>
+  %411 = value.select %410, %409, %397 : reg<vm.value : i32>
+  %412 = integer.compare.i32 %391, %339, eq : reg<vm.value : i1>
+  %413 = integer.or.i32 %389, %342 : reg<vm.value : i32>
+  %414 = value.select %408, %413, %341 : reg<vm.value : i32>
+  %415 = value.select %412, %414, %411 : reg<vm.value : i32>
+  %416 = value.copy %415 : reg<vm.value : f32>
+  %417 = float.mul.f32 %416, %row_scale : reg<vm.value : f32>
+  %418 = conversion.float.truncate %417, f32.to.bf16 : reg<vm.value : bf16>
+  %419 = constant.s16 3 : reg<vm.value : offset>
+  %420 = buffer.load %input, %419, %workitem_id_x, 4, i8.x1 : reg<vm.value : f8E5M2>
+  %421 = value.copy %420 : reg<vm.value : i8>
+  %422 = conversion.integer %421, u8.to.i32 : reg<vm.value : i32>
+  %423 = integer.and.i32 %422, %303 : reg<vm.value : i32>
+  %424 = integer.shift.left.i32 %423, %305 : reg<vm.value : i32>
+  %425 = integer.and.i32 %422, %307 : reg<vm.value : i32>
+  %426 = integer.shift.right.u32 %425, %309 : reg<vm.value : i32>
+  %427 = integer.and.i32 %422, %311 : reg<vm.value : i32>
+  %428 = integer.add.i32 %426, %313 : reg<vm.value : i32>
+  %429 = integer.shift.left.i32 %428, %315 : reg<vm.value : i32>
+  %430 = integer.shift.left.i32 %427, %317 : reg<vm.value : i32>
+  %431 = integer.or.i32 %424, %429 : reg<vm.value : i32>
+  %432 = integer.or.i32 %431, %430 : reg<vm.value : i32>
+  %433 = integer.and.i32 %427, %309 : reg<vm.value : i32>
+  %434 = integer.compare.i32 %433, %321, ne : reg<vm.value : i1>
+  %435 = value.select %434, %324, %321 : reg<vm.value : i32>
+  %436 = integer.add.i32 %435, %326 : reg<vm.value : i32>
+  %437 = integer.shift.left.i32 %436, %315 : reg<vm.value : i32>
+  %438 = integer.sub.i32 %315, %435 : reg<vm.value : i32>
+  %439 = integer.shift.left.i32 %427, %438 : reg<vm.value : i32>
+  %440 = integer.and.i32 %439, %331 : reg<vm.value : i32>
+  %441 = integer.or.i32 %424, %437 : reg<vm.value : i32>
+  %442 = integer.or.i32 %441, %440 : reg<vm.value : i32>
+  %443 = integer.compare.i32 %427, %321, eq : reg<vm.value : i1>
+  %444 = value.select %443, %424, %442 : reg<vm.value : i32>
+  %445 = integer.compare.i32 %426, %321, eq : reg<vm.value : i1>
+  %446 = value.select %445, %444, %432 : reg<vm.value : i32>
+  %447 = integer.compare.i32 %426, %339, eq : reg<vm.value : i1>
+  %448 = integer.or.i32 %424, %342 : reg<vm.value : i32>
+  %449 = value.select %443, %448, %341 : reg<vm.value : i32>
+  %450 = value.select %447, %449, %446 : reg<vm.value : i32>
+  %451 = value.copy %450 : reg<vm.value : f32>
+  %452 = float.mul.f32 %451, %row_scale : reg<vm.value : f32>
+  %453 = conversion.float.truncate %452, f32.to.bf16 : reg<vm.value : bf16>
+  %rounded = concat(%348, %383, %418, %453) : (reg<vm.value : bf16>, reg<vm.value : bf16>, reg<vm.value : bf16>, reg<vm.value : bf16>) -> reg<vm.value x4 : vector<4xbf16>>
+  buffer.store %output, %297, %workitem_id_x, %rounded, 8, i16.x4
+  return
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @vector_extf_splat_finite_f8e4m3_to_bf16_store(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<1xf8E4M3>
+  %output_view = buffer.view %output[%base] : buffer -> view<2xbf16>
+  %raw = view.load %input_view[0] : view<1xf8E4M3> -> f8E4M3
+  %finite = scalar.assume %raw [finite(%raw)] : f8E4M3
+  %packed = vector.splat %finite : vector<2xf8E4M3>
+  %value = vector.extf %packed : vector<2xf8E4M3> to vector<2xbf16>
+  vector.store %value, %output_view[0] : vector<2xbf16>, view<2xbf16>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>}) @vector_extf_splat_finite_f8e4m3_to_bf16_store(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>) asm {
+  %13 = constant.zero : reg<vm.value : offset>
+  %finite = buffer.load %input, %13, %13, 0, i8.x1 : reg<vm.value : f8E4M3>
+  %15 = conversion.float.extend %finite, f8e4m3.to.f32 : reg<vm.value : f32>
+  %16 = conversion.float.truncate %15, f32.to.bf16 : reg<vm.value : bf16>
+  %value = concat(%16, %16) : (reg<vm.value : bf16>, reg<vm.value : bf16>) -> reg<vm.value x2 : vector<2xbf16>>
+  buffer.store %output, %13, %13, %value, 0, i16.x2
+  return
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @vector_extf_splat_finite_f8e5m2_to_bf16_store(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<1xf8E5M2>
+  %output_view = buffer.view %output[%base] : buffer -> view<2xbf16>
+  %raw = view.load %input_view[0] : view<1xf8E5M2> -> f8E5M2
+  %finite = scalar.assume %raw [finite(%raw)] : f8E5M2
+  %packed = vector.splat %finite : vector<2xf8E5M2>
+  %value = vector.extf %packed : vector<2xf8E5M2> to vector<2xbf16>
+  vector.store %value, %output_view[0] : vector<2xbf16>, view<2xbf16>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>}) @vector_extf_splat_finite_f8e5m2_to_bf16_store(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>) asm {
+  %13 = constant.zero : reg<vm.value : offset>
+  %finite = buffer.load %input, %13, %13, 0, i8.x1 : reg<vm.value : f8E5M2>
+  %15 = conversion.float.extend %finite, f8e5m2.to.f32 : reg<vm.value : f32>
+  %16 = conversion.float.truncate %15, f32.to.bf16 : reg<vm.value : bf16>
+  %value = concat(%16, %16) : (reg<vm.value : bf16>, reg<vm.value : bf16>) -> reg<vm.value x2 : vector<2xbf16>>
+  buffer.store %output, %13, %13, %value, 0, i16.x2
+  return
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @vector_extf_splat_not_nan_f8e5m2_to_bf16_store(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<1xf8E5M2>
+  %output_view = buffer.view %output[%base] : buffer -> view<2xbf16>
+  %raw = view.load %input_view[0] : view<1xf8E5M2> -> f8E5M2
+  %not_nan = scalar.assume %raw [not_nan(%raw)] : f8E5M2
+  %packed = vector.splat %not_nan : vector<2xf8E5M2>
+  %value = vector.extf %packed : vector<2xf8E5M2> to vector<2xbf16>
+  vector.store %value, %output_view[0] : vector<2xbf16>, view<2xbf16>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>}) @vector_extf_splat_not_nan_f8e5m2_to_bf16_store(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>) asm {
+  %13 = constant.zero : reg<vm.value : offset>
+  %not_nan = buffer.load %input, %13, %13, 0, i8.x1 : reg<vm.value : f8E5M2>
+  %15 = conversion.float.extend %not_nan, f8e5m2.to.f32 : reg<vm.value : f32>
+  %16 = conversion.float.truncate %15, f32.to.bf16 : reg<vm.value : bf16>
+  %value = concat(%16, %16) : (reg<vm.value : bf16>, reg<vm.value : bf16>) -> reg<vm.value x2 : vector<2xbf16>>
+  buffer.store %output, %13, %13, %value, 0, i16.x2
+  return
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @vector_extf_splat_not_inf_f8e5m2_to_bf16_store(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<1xf8E5M2>
+  %output_view = buffer.view %output[%base] : buffer -> view<2xbf16>
+  %raw = view.load %input_view[0] : view<1xf8E5M2> -> f8E5M2
+  %not_inf = scalar.assume %raw [not_inf(%raw)] : f8E5M2
+  %packed = vector.splat %not_inf : vector<2xf8E5M2>
+  %value = vector.extf %packed : vector<2xf8E5M2> to vector<2xbf16>
+  vector.store %value, %output_view[0] : vector<2xbf16>, view<2xbf16>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>}) @vector_extf_splat_not_inf_f8e5m2_to_bf16_store(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>) asm {
+  %13 = constant.zero : reg<vm.value : offset>
+  %not_inf = buffer.load %input, %13, %13, 0, i8.x1 : reg<vm.value : f8E5M2>
+  %15 = conversion.float.extend %not_inf, f8e5m2.to.f32 : reg<vm.value : f32>
+  %16 = conversion.float.truncate %15, f32.to.bf16 : reg<vm.value : bf16>
+  %value = concat(%16, %16) : (reg<vm.value : bf16>, reg<vm.value : bf16>) -> reg<vm.value x2 : vector<2xbf16>>
+  buffer.store %output, %13, %13, %value, 0, i16.x2
+  return
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @vector_uitofp_i32x2(%input: vector<2xi32>) -> (vector<2xf32>) {
+  %converted = vector.uitofp %input : vector<2xi32> to vector<2xf32>
+  func.return %converted : vector<2xf32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x2 : vector<2xi32>>) -> (reg<vm.value x2 : vector<2xf32>>)>}) @vector_uitofp_i32x2(%input: reg<vm.value x2 : vector<2xi32>>) -> (reg<vm.value x2 : vector<2xf32>>) asm {
+  %17 = slice %input[0] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %18 = conversion.integer.to.float %17, u32.to.f32 : reg<vm.value : f32>
+  %19 = slice %input[1] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %20 = conversion.integer.to.float %19, u32.to.f32 : reg<vm.value : f32>
+  %converted = concat(%18, %20) : (reg<vm.value : f32>, reg<vm.value : f32>) -> reg<vm.value x2 : vector<2xf32>>
+  return %converted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_extsi_i32_store(%output: buffer, %input: i32) {
+  %base = index.constant 0 : offset
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi64>
+  %converted = scalar.extsi %input : i32 to i64
+  view.store %converted, %output_view[0] : i64, view<1xi64>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.value : i32>) -> ()>}) @scalar_extsi_i32_store(%output: reg<vm.ref : buffer>, %input: reg<vm.value : i32>) asm {
+  %converted = conversion.integer %input, s32.to.i64 : reg<vm.value : i64>
+  %8 = constant.zero : reg<vm.value : offset>
+  buffer.store %output, %8, %8, %converted, 0, i64.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_extui_i32_store(%output: buffer, %input: i32) {
+  %base = index.constant 0 : offset
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi64>
+  %converted = scalar.extui %input : i32 to i64
+  view.store %converted, %output_view[0] : i64, view<1xi64>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.value : i32>) -> ()>}) @scalar_extui_i32_store(%output: reg<vm.ref : buffer>, %input: reg<vm.value : i32>) asm {
+  %converted = conversion.integer %input, u32.to.i64 : reg<vm.value : i64>
+  %8 = constant.zero : reg<vm.value : offset>
+  buffer.store %output, %8, %8, %converted, 0, i64.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_extui_i32_store_mask(%output: buffer, %input: i32) {
+  %base = index.constant 0 : offset
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi64>
+  %true = scalar.constant true : i1
+  %mask = vector.splat %true : vector<1xi1>
+  %converted = scalar.extui %input : i32 to i64
+  %value = vector.splat %converted : vector<1xi64>
+  vector.store.mask %value, %output_view[0], %mask : vector<1xi64>, view<1xi64>, vector<1xi1>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.value : i32>) -> ()>}) @scalar_extui_i32_store_mask(%output: reg<vm.ref : buffer>, %input: reg<vm.value : i32>) asm {
+  %converted = conversion.integer %input, u32.to.i64 : reg<vm.value : i64>
+  %value = concat(%converted) : (reg<vm.value : i64>) -> reg<vm.value : vector<1xi64>>
+  %12 = constant.zero : reg<vm.value : offset>
+  buffer.store %output, %12, %12, %value, 0, i64.x1
+  return
+}

@@ -224,9 +224,12 @@ static iree_status_t loom_vm_map_abi_layout(
     loom_named_attr_slice_t* out_abi_layout) {
   (void)user_data;
   *out_abi_layout = loom_named_attr_slice_empty();
-  if (layout_kind != LOOM_LOW_LOWER_ABI_LAYOUT_KIND_FUNC) {
-    return iree_ok_status();
+  if (layout_kind == LOOM_LOW_LOWER_ABI_LAYOUT_KIND_KERNEL) {
+    IREE_ASSERT_EQ(result_count, 0u);
+    return loom_vm_kernel_map_abi_layout(context, argument_types,
+                                         argument_count, out_abi_layout);
   }
+  IREE_ASSERT_EQ(layout_kind, LOOM_LOW_LOWER_ABI_LAYOUT_KIND_FUNC);
   const loom_func_like_t source_function =
       loom_low_lower_context_source_function(context);
   const loom_module_t* module = loom_low_lower_context_module(context);
@@ -253,7 +256,8 @@ static iree_status_t loom_vm_map_abi_layout(
           .values = result_values,
           .count = result_count,
       },
-      loom_low_lower_context_function_arena(context), &layout_attr));
+      loom_type_none(), loom_low_lower_context_function_arena(context),
+      &layout_attr));
   *out_abi_layout = loom_attr_as_dict(layout_attr);
   return iree_ok_status();
 }

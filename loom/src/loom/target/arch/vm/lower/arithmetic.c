@@ -63,6 +63,30 @@ static iree_status_t loom_vm_arithmetic_emit_binary(
   return iree_ok_status();
 }
 
+iree_status_t loom_vm_arithmetic_emit_mul_i64(loom_low_lower_context_t* context,
+                                              loom_value_id_t lhs,
+                                              loom_value_id_t rhs,
+                                              loom_type_t result_type,
+                                              loom_location_id_t location,
+                                              loom_value_id_t* out_result) {
+  return loom_vm_arithmetic_emit_binary(
+      context, VM_CORE_DESCRIPTOR_REF_INTEGER_MUL_I64, lhs, rhs, result_type,
+      location, out_result);
+}
+
+iree_status_t loom_vm_arithmetic_emit_madd_i64(
+    loom_low_lower_context_t* context, loom_value_id_t a, loom_value_id_t b,
+    loom_value_id_t c, loom_type_t result_type, loom_location_id_t location,
+    loom_value_id_t* out_result) {
+  *out_result = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t product = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_vm_arithmetic_emit_mul_i64(
+      context, a, b, result_type, location, &product));
+  return loom_vm_arithmetic_emit_binary(
+      context, VM_CORE_DESCRIPTOR_REF_INTEGER_ADD_I64, product, c, result_type,
+      location, out_result);
+}
+
 iree_status_t loom_vm_arithmetic_emit_op(loom_low_lower_context_t* context,
                                          const loom_op_t* source_op,
                                          loom_low_lower_plan_t plan,
@@ -85,13 +109,8 @@ iree_status_t loom_vm_arithmetic_emit_op(loom_low_lower_context_t* context,
   loom_type_t result_type = loom_type_none();
   IREE_RETURN_IF_ERROR(loom_low_lower_map_value(context, source_op,
                                                 source_result, &result_type));
-  loom_value_id_t product = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_vm_arithmetic_emit_binary(
-      context, VM_CORE_DESCRIPTOR_REF_INTEGER_MUL_I64, a, b, result_type,
-      source_op->location, &product));
   loom_value_id_t result = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_vm_arithmetic_emit_binary(
-      context, VM_CORE_DESCRIPTOR_REF_INTEGER_ADD_I64, product, c, result_type,
-      source_op->location, &result));
+  IREE_RETURN_IF_ERROR(loom_vm_arithmetic_emit_madd_i64(
+      context, a, b, c, result_type, source_op->location, &result));
   return loom_low_lower_bind_value(context, source_result, result);
 }

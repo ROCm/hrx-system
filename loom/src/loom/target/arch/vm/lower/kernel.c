@@ -9,7 +9,9 @@
 #include "loom/codegen/low/function.h"
 #include "loom/ir/module.h"
 #include "loom/ops/kernel/ops.h"
+#include "loom/target/arch/vm/abi/layout.h"
 #include "loom/target/arch/vm/descriptors.h"
+#include "loom/target/arch/vm/lower/arithmetic.h"
 #include "loom/target/arch/vm/lower/constants.h"
 #include "loom/target/arch/vm/records/target_records.h"
 #include "loom/util/fact_table.h"
@@ -20,8 +22,13 @@ enum loom_vm_kernel_plan_kind_e {
   LOOM_VM_KERNEL_PLAN_KIND_CONSTANT_ZERO = 1,
   LOOM_VM_KERNEL_PLAN_KIND_CONSTANT_ONE = 2,
   LOOM_VM_KERNEL_PLAN_KIND_WORKGROUP_ID = 3,
-  LOOM_VM_KERNEL_PLAN_KIND_WORKGROUP_COUNT = 4,
-  LOOM_VM_KERNEL_PLAN_KIND_NOOP = 5,
+  LOOM_VM_KERNEL_PLAN_KIND_WORKGROUP_SIZE = 4,
+  LOOM_VM_KERNEL_PLAN_KIND_WORKGROUP_COUNT = 5,
+  LOOM_VM_KERNEL_PLAN_KIND_WORKITEM_ID = 6,
+  LOOM_VM_KERNEL_PLAN_KIND_WORKITEM_DISPATCH_ID = 7,
+  LOOM_VM_KERNEL_PLAN_KIND_SUBGROUP_ID = 8,
+  LOOM_VM_KERNEL_PLAN_KIND_SUBGROUP_COUNT = 9,
+  LOOM_VM_KERNEL_PLAN_KIND_NOOP = 10,
 };
 
 #define LOOM_VM_KERNEL_OP_INDEX(op_kind) ((op_kind) & 0xFFu)
@@ -32,19 +39,19 @@ static const loom_vm_kernel_plan_kind_t
         [LOOM_VM_KERNEL_OP_INDEX(LOOM_OP_KERNEL_BARRIER)] =
             LOOM_VM_KERNEL_PLAN_KIND_NOOP,
         [LOOM_VM_KERNEL_OP_INDEX(LOOM_OP_KERNEL_WORKITEM_ID)] =
-            LOOM_VM_KERNEL_PLAN_KIND_CONSTANT_ZERO,
+            LOOM_VM_KERNEL_PLAN_KIND_WORKITEM_ID,
         [LOOM_VM_KERNEL_OP_INDEX(LOOM_OP_KERNEL_WORKGROUP_ID)] =
             LOOM_VM_KERNEL_PLAN_KIND_WORKGROUP_ID,
         [LOOM_VM_KERNEL_OP_INDEX(LOOM_OP_KERNEL_WORKGROUP_SIZE)] =
-            LOOM_VM_KERNEL_PLAN_KIND_CONSTANT_ONE,
+            LOOM_VM_KERNEL_PLAN_KIND_WORKGROUP_SIZE,
         [LOOM_VM_KERNEL_OP_INDEX(LOOM_OP_KERNEL_WORKGROUP_COUNT)] =
             LOOM_VM_KERNEL_PLAN_KIND_WORKGROUP_COUNT,
         [LOOM_VM_KERNEL_OP_INDEX(LOOM_OP_KERNEL_WORKITEM_DISPATCH_ID)] =
-            LOOM_VM_KERNEL_PLAN_KIND_WORKGROUP_ID,
+            LOOM_VM_KERNEL_PLAN_KIND_WORKITEM_DISPATCH_ID,
         [LOOM_VM_KERNEL_OP_INDEX(LOOM_OP_KERNEL_SUBGROUP_ID)] =
-            LOOM_VM_KERNEL_PLAN_KIND_CONSTANT_ZERO,
+            LOOM_VM_KERNEL_PLAN_KIND_SUBGROUP_ID,
         [LOOM_VM_KERNEL_OP_INDEX(LOOM_OP_KERNEL_SUBGROUP_COUNT)] =
-            LOOM_VM_KERNEL_PLAN_KIND_CONSTANT_ONE,
+            LOOM_VM_KERNEL_PLAN_KIND_SUBGROUP_COUNT,
         [LOOM_VM_KERNEL_OP_INDEX(LOOM_OP_KERNEL_SUBGROUP_SIZE)] =
             LOOM_VM_KERNEL_PLAN_KIND_CONSTANT_ONE,
         [LOOM_VM_KERNEL_OP_INDEX(LOOM_OP_KERNEL_SUBGROUP_LANE_ID)] =
@@ -57,16 +64,25 @@ enum {
   LOOM_VM_KERNEL_LAUNCH_ARGUMENT_WORKGROUP_ID_X = 0,
   LOOM_VM_KERNEL_LAUNCH_ARGUMENT_WORKGROUP_ID_Y = 1,
   LOOM_VM_KERNEL_LAUNCH_ARGUMENT_WORKGROUP_ID_Z = 2,
-  LOOM_VM_KERNEL_LAUNCH_ARGUMENT_WORKGROUP_COUNT_X = 3,
-  LOOM_VM_KERNEL_LAUNCH_ARGUMENT_WORKGROUP_COUNT_Y = 4,
-  LOOM_VM_KERNEL_LAUNCH_ARGUMENT_WORKGROUP_COUNT_Z = 5,
-  LOOM_VM_KERNEL_LAUNCH_ARGUMENT_COUNT = 6,
+  LOOM_VM_KERNEL_LAUNCH_ARGUMENT_WORKGROUP_SIZE_X = 3,
+  LOOM_VM_KERNEL_LAUNCH_ARGUMENT_WORKGROUP_SIZE_Y = 4,
+  LOOM_VM_KERNEL_LAUNCH_ARGUMENT_WORKGROUP_SIZE_Z = 5,
+  LOOM_VM_KERNEL_LAUNCH_ARGUMENT_WORKGROUP_COUNT_X = 6,
+  LOOM_VM_KERNEL_LAUNCH_ARGUMENT_WORKGROUP_COUNT_Y = 7,
+  LOOM_VM_KERNEL_LAUNCH_ARGUMENT_WORKGROUP_COUNT_Z = 8,
+  LOOM_VM_KERNEL_LAUNCH_ARGUMENT_WORKITEM_ID_X = 9,
+  LOOM_VM_KERNEL_LAUNCH_ARGUMENT_WORKITEM_ID_Y = 10,
+  LOOM_VM_KERNEL_LAUNCH_ARGUMENT_WORKITEM_ID_Z = 11,
+  LOOM_VM_KERNEL_LAUNCH_ARGUMENT_COUNT = 12,
 };
 
 static const iree_string_view_t kLoomVmKernelLaunchArgumentNames[] = {
     IREE_SVL("workgroup_id_x"),    IREE_SVL("workgroup_id_y"),
-    IREE_SVL("workgroup_id_z"),    IREE_SVL("workgroup_count_x"),
-    IREE_SVL("workgroup_count_y"), IREE_SVL("workgroup_count_z"),
+    IREE_SVL("workgroup_id_z"),    IREE_SVL("workgroup_size_x"),
+    IREE_SVL("workgroup_size_y"),  IREE_SVL("workgroup_size_z"),
+    IREE_SVL("workgroup_count_x"), IREE_SVL("workgroup_count_y"),
+    IREE_SVL("workgroup_count_z"), IREE_SVL("workitem_id_x"),
+    IREE_SVL("workitem_id_y"),     IREE_SVL("workitem_id_z"),
 };
 static_assert(IREE_ARRAYSIZE(kLoomVmKernelLaunchArgumentNames) ==
                   LOOM_VM_KERNEL_LAUNCH_ARGUMENT_COUNT,
@@ -173,6 +189,52 @@ static iree_status_t loom_vm_kernel_bind_constant(
   return loom_low_lower_bind_value(context, source_result, low_result);
 }
 
+iree_status_t loom_vm_kernel_map_abi_layout(
+    loom_low_lower_context_t* context, const loom_type_t* argument_types,
+    iree_host_size_t argument_count, loom_named_attr_slice_t* out_abi_layout) {
+  *out_abi_layout = loom_named_attr_slice_empty();
+  iree_host_size_t abi_argument_count = 0;
+  if (!iree_host_size_checked_add(argument_count,
+                                  LOOM_VM_KERNEL_LAUNCH_ARGUMENT_COUNT,
+                                  &abi_argument_count) ||
+      abi_argument_count > UINT16_MAX) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "VM kernel ABI argument count exceeds u16");
+  }
+
+  loom_type_t* abi_argument_types = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_emission_array(
+      context, abi_argument_count, sizeof(*abi_argument_types),
+      (void**)&abi_argument_types));
+  for (iree_host_size_t i = 0; i < argument_count; ++i) {
+    abi_argument_types[i] = argument_types[i];
+  }
+  loom_type_t launch_argument_type = loom_type_none();
+  IREE_RETURN_IF_ERROR(loom_low_lower_make_typed_register_type(
+      context, VM_CORE_REG_CLASS_ID_VALUE, /*unit_count=*/1,
+      loom_type_scalar(LOOM_SCALAR_TYPE_INDEX), &launch_argument_type));
+  for (iree_host_size_t i = argument_count; i < abi_argument_count; ++i) {
+    abi_argument_types[i] = launch_argument_type;
+  }
+
+  loom_module_t* module = loom_low_lower_context_module(context);
+  loom_type_t authored_signature = loom_type_none();
+  IREE_RETURN_IF_ERROR(loom_module_intern_function_type(
+      module, argument_types, (uint16_t)argument_count,
+      /*result_types=*/NULL, /*result_count=*/0, &authored_signature));
+  loom_attribute_t layout_attr = loom_attr_absent();
+  IREE_RETURN_IF_ERROR(loom_vm_call_abi_layout_make_attr(
+      module,
+      (loom_vm_call_abi_source_fields_t){
+          .types = abi_argument_types,
+          .count = abi_argument_count,
+      },
+      (loom_vm_call_abi_source_fields_t){0}, authored_signature,
+      loom_low_lower_context_function_arena(context), &layout_attr));
+  *out_abi_layout = loom_attr_as_dict(layout_attr);
+  return iree_ok_status();
+}
+
 static iree_status_t loom_vm_kernel_append_launch_arguments(
     loom_low_lower_context_t* context,
     loom_value_id_t out_arguments[LOOM_VM_KERNEL_LAUNCH_ARGUMENT_COUNT]) {
@@ -205,6 +267,68 @@ static iree_status_t loom_vm_kernel_name_launch_arguments(
         loom_module_set_value_name(module, arguments[i], name_id));
   }
   return iree_ok_status();
+}
+
+static uint16_t loom_vm_kernel_direct_argument_base(
+    loom_vm_kernel_plan_kind_t plan_kind) {
+  switch (plan_kind) {
+    case LOOM_VM_KERNEL_PLAN_KIND_WORKGROUP_ID:
+      return LOOM_VM_KERNEL_LAUNCH_ARGUMENT_WORKGROUP_ID_X;
+    case LOOM_VM_KERNEL_PLAN_KIND_WORKGROUP_SIZE:
+      return LOOM_VM_KERNEL_LAUNCH_ARGUMENT_WORKGROUP_SIZE_X;
+    case LOOM_VM_KERNEL_PLAN_KIND_WORKGROUP_COUNT:
+      return LOOM_VM_KERNEL_LAUNCH_ARGUMENT_WORKGROUP_COUNT_X;
+    case LOOM_VM_KERNEL_PLAN_KIND_WORKITEM_ID:
+      return LOOM_VM_KERNEL_LAUNCH_ARGUMENT_WORKITEM_ID_X;
+    default:
+      IREE_ASSERT_UNREACHABLE("direct VM kernel launch argument");
+      IREE_BUILTIN_UNREACHABLE();
+  }
+}
+
+static iree_status_t loom_vm_kernel_emit_dispatch_id(
+    loom_low_lower_context_t* context,
+    const loom_value_id_t arguments[LOOM_VM_KERNEL_LAUNCH_ARGUMENT_COUNT],
+    loom_kernel_dimension_t dimension, loom_type_t result_type,
+    loom_location_id_t location, loom_value_id_t* out_result) {
+  return loom_vm_arithmetic_emit_madd_i64(
+      context,
+      arguments[LOOM_VM_KERNEL_LAUNCH_ARGUMENT_WORKGROUP_ID_X + dimension],
+      arguments[LOOM_VM_KERNEL_LAUNCH_ARGUMENT_WORKGROUP_SIZE_X + dimension],
+      arguments[LOOM_VM_KERNEL_LAUNCH_ARGUMENT_WORKITEM_ID_X + dimension],
+      result_type, location, out_result);
+}
+
+static iree_status_t loom_vm_kernel_emit_subgroup_id(
+    loom_low_lower_context_t* context,
+    const loom_value_id_t arguments[LOOM_VM_KERNEL_LAUNCH_ARGUMENT_COUNT],
+    loom_type_t result_type, loom_location_id_t location,
+    loom_value_id_t* out_result) {
+  loom_value_id_t yz = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_vm_arithmetic_emit_madd_i64(
+      context, arguments[LOOM_VM_KERNEL_LAUNCH_ARGUMENT_WORKGROUP_SIZE_Y],
+      arguments[LOOM_VM_KERNEL_LAUNCH_ARGUMENT_WORKITEM_ID_Z],
+      arguments[LOOM_VM_KERNEL_LAUNCH_ARGUMENT_WORKITEM_ID_Y], result_type,
+      location, &yz));
+  return loom_vm_arithmetic_emit_madd_i64(
+      context, arguments[LOOM_VM_KERNEL_LAUNCH_ARGUMENT_WORKGROUP_SIZE_X], yz,
+      arguments[LOOM_VM_KERNEL_LAUNCH_ARGUMENT_WORKITEM_ID_X], result_type,
+      location, out_result);
+}
+
+static iree_status_t loom_vm_kernel_emit_subgroup_count(
+    loom_low_lower_context_t* context,
+    const loom_value_id_t arguments[LOOM_VM_KERNEL_LAUNCH_ARGUMENT_COUNT],
+    loom_type_t result_type, loom_location_id_t location,
+    loom_value_id_t* out_result) {
+  loom_value_id_t xy = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_vm_arithmetic_emit_mul_i64(
+      context, arguments[LOOM_VM_KERNEL_LAUNCH_ARGUMENT_WORKGROUP_SIZE_X],
+      arguments[LOOM_VM_KERNEL_LAUNCH_ARGUMENT_WORKGROUP_SIZE_Y], result_type,
+      location, &xy));
+  return loom_vm_arithmetic_emit_mul_i64(
+      context, xy, arguments[LOOM_VM_KERNEL_LAUNCH_ARGUMENT_WORKGROUP_SIZE_Z],
+      result_type, location, out_result);
 }
 
 iree_status_t loom_vm_kernel_emit_preamble(loom_low_lower_context_t* context) {
@@ -252,15 +376,50 @@ iree_status_t loom_vm_kernel_emit_preamble(loom_low_lower_context_t* context) {
       continue;
     }
 
-    const loom_kernel_dimension_t dimension =
-        loom_vm_kernel_query_dimension(source_op);
-    IREE_ASSERT_LT(dimension, LOOM_KERNEL_DIMENSION_COUNT_);
-    const uint16_t argument_base =
-        plan_kind == LOOM_VM_KERNEL_PLAN_KIND_WORKGROUP_ID
-            ? LOOM_VM_KERNEL_LAUNCH_ARGUMENT_WORKGROUP_ID_X
-            : LOOM_VM_KERNEL_LAUNCH_ARGUMENT_WORKGROUP_COUNT_X;
-    IREE_RETURN_IF_ERROR(loom_low_lower_bind_value(
-        context, source_result, launch_arguments[argument_base + dimension]));
+    if (plan_kind >= LOOM_VM_KERNEL_PLAN_KIND_WORKGROUP_ID &&
+        plan_kind <= LOOM_VM_KERNEL_PLAN_KIND_WORKITEM_ID) {
+      const loom_kernel_dimension_t dimension =
+          loom_vm_kernel_query_dimension(source_op);
+      IREE_ASSERT_LT(dimension, LOOM_KERNEL_DIMENSION_COUNT_);
+      const uint16_t argument_base =
+          loom_vm_kernel_direct_argument_base(plan_kind);
+      IREE_RETURN_IF_ERROR(loom_low_lower_bind_value(
+          context, source_result, launch_arguments[argument_base + dimension]));
+      continue;
+    }
+
+    loom_type_t result_type = loom_type_none();
+    IREE_RETURN_IF_ERROR(loom_low_lower_map_value(context, source_op,
+                                                  source_result, &result_type));
+    loom_value_id_t low_result = LOOM_VALUE_ID_INVALID;
+    switch (plan_kind) {
+      case LOOM_VM_KERNEL_PLAN_KIND_WORKITEM_DISPATCH_ID: {
+        const loom_kernel_dimension_t dimension =
+            loom_vm_kernel_query_dimension(source_op);
+        IREE_ASSERT_LT(dimension, LOOM_KERNEL_DIMENSION_COUNT_);
+        IREE_RETURN_IF_ERROR(loom_vm_kernel_emit_dispatch_id(
+            context, launch_arguments, dimension, result_type,
+            source_op->location, &low_result));
+        break;
+      }
+      case LOOM_VM_KERNEL_PLAN_KIND_SUBGROUP_ID: {
+        IREE_RETURN_IF_ERROR(loom_vm_kernel_emit_subgroup_id(
+            context, launch_arguments, result_type, source_op->location,
+            &low_result));
+        break;
+      }
+      case LOOM_VM_KERNEL_PLAN_KIND_SUBGROUP_COUNT: {
+        IREE_RETURN_IF_ERROR(loom_vm_kernel_emit_subgroup_count(
+            context, launch_arguments, result_type, source_op->location,
+            &low_result));
+        break;
+      }
+      default:
+        IREE_ASSERT_UNREACHABLE("derived VM kernel query");
+        IREE_BUILTIN_UNREACHABLE();
+    }
+    IREE_RETURN_IF_ERROR(
+        loom_low_lower_bind_value(context, source_result, low_result));
   }
   return loom_vm_kernel_name_launch_arguments(context, launch_arguments);
 }

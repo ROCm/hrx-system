@@ -148,6 +148,14 @@ iree_status_t loom_vm_call_abi_layout_resolve_signature(
     const loom_module_t* module, loom_named_attr_slice_t abi_layout,
     loom_type_t* out_signature);
 
+// Resolves the optional source-authored signature from an abi_layout.
+//
+// When present, the authored arguments and results must each be exact prefixes
+// of |abi_signature|. When absent, |abi_signature| is returned unchanged.
+iree_status_t loom_vm_call_abi_layout_resolve_authored_signature(
+    const loom_module_t* module, loom_named_attr_slice_t abi_layout,
+    loom_type_t abi_signature, loom_type_t* out_authored_signature);
+
 // Resolves optional source field names from an abi_layout dictionary.
 //
 // Present name tables contain exactly one entry per logical field, including
@@ -191,15 +199,18 @@ iree_status_t loom_vm_call_abi_packet_layout_build(
     iree_host_size_t result_count,
     loom_vm_call_abi_packet_layout_t* out_layout);
 
-// Builds a canonical abi_layout dictionary containing the logical mapped Low
-// function signature and optional source field names.
+// Builds a canonical abi_layout dictionary containing the complete logical Low
+// ABI signature, an optional source-authored prefix signature, and optional
+// source field names.
 //
 // The signature is independent of the physical function boundary and remains
-// unchanged as boundary values are materialized. A NULL |values| pointer omits
-// presentation names for that side while retaining its types.
+// unchanged as boundary values are materialized. |authored_signature| may be
+// none when the complete ABI signature is also the authored signature. A NULL
+// |values| pointer omits presentation names for that side while retaining its
+// types.
 iree_status_t loom_vm_call_abi_layout_make_attr(
     loom_module_t* module, loom_vm_call_abi_source_fields_t arguments,
-    loom_vm_call_abi_source_fields_t results,
+    loom_vm_call_abi_source_fields_t results, loom_type_t authored_signature,
     iree_arena_allocator_t* scratch_arena, loom_attribute_t* out_attr);
 
 #ifdef __cplusplus

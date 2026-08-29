@@ -161,16 +161,21 @@ static iree_status_t loom_vm_module_layout_count(
   return iree_ok_status();
 }
 
-static iree_status_t loom_vm_module_layout_resolve_logical_signature(
+static iree_status_t loom_vm_module_layout_resolve_signatures(
     loom_module_t* module, iree_arena_allocator_t* arena,
-    loom_op_t* function_op, loom_type_t* out_signature) {
+    loom_op_t* function_op, loom_type_t* out_logical_signature,
+    loom_type_t* out_authored_signature) {
+  *out_logical_signature = loom_type_none();
+  *out_authored_signature = loom_type_none();
   const loom_named_attr_slice_t abi_layout =
       loom_low_function_def_isa(function_op)
           ? loom_low_function_abi_layout(function_op)
           : loom_low_func_decl_abi_layout(function_op);
   if (abi_layout.count != 0) {
-    return loom_vm_call_abi_layout_resolve_signature(module, abi_layout,
-                                                     out_signature);
+    IREE_RETURN_IF_ERROR(loom_vm_call_abi_layout_resolve_signature(
+        module, abi_layout, out_logical_signature));
+    return loom_vm_call_abi_layout_resolve_authored_signature(
+        module, abi_layout, *out_logical_signature, out_authored_signature);
   }
 
   loom_func_like_t function_like = loom_func_like_cast(module, function_op);
@@ -185,7 +190,8 @@ static iree_status_t loom_vm_module_layout_resolve_logical_signature(
   IREE_RETURN_IF_ERROR(iree_arena_allocate(arena, sizeof(*empty_signature),
                                            (void**)&empty_signature));
   *empty_signature = (loom_func_type_data_t){0};
-  *out_signature = loom_type_function(empty_signature);
+  *out_logical_signature = loom_type_function(empty_signature);
+  *out_authored_signature = *out_logical_signature;
   return iree_ok_status();
 }
 
@@ -214,8 +220,9 @@ static iree_status_t loom_vm_module_layout_populate_functions(
     if (!iree_string_view_is_empty(function->export_name)) {
       ++layout->export_count;
     }
-    IREE_RETURN_IF_ERROR(loom_vm_module_layout_resolve_logical_signature(
-        module, arena, function_op, &function->logical_signature));
+    IREE_RETURN_IF_ERROR(loom_vm_module_layout_resolve_signatures(
+        module, arena, function_op, &function->logical_signature,
+        &function->authored_signature));
 
     loom_vm_module_function_summary_t summary = {0};
     IREE_RETURN_IF_ERROR(loom_vm_module_layout_summarize_function(
@@ -278,8 +285,9 @@ static iree_status_t loom_vm_module_layout_populate_imports(
           IREE_STATUS_INVALID_ARGUMENT,
           "VM runtime import module and symbol names must be nonempty");
     }
-    IREE_RETURN_IF_ERROR(loom_vm_module_layout_resolve_logical_signature(
-        module, arena, declaration_op, &import->logical_signature));
+    IREE_RETURN_IF_ERROR(loom_vm_module_layout_resolve_signatures(
+        module, arena, declaration_op, &import->logical_signature,
+        &import->authored_signature));
     layout->imports[import_index - 1] = import;
   }
   IREE_ASSERT_EQ(import_index, layout->import_declaration_count);

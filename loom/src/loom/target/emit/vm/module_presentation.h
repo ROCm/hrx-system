@@ -21,10 +21,10 @@ typedef struct loom_vm_module_layout_t loom_vm_module_layout_t;
 
 // Presentation for one machine argument or result field.
 typedef struct loom_vm_module_presentation_field_layout_t {
-  // Borrowed typed register anchored at this machine field, or NULL.
-  // Aggregate continuation fields have no independent register type.
+  // Borrowed authored register type anchored at this machine field, or NULL
+  // for target-added fields and aggregate continuation fields.
   const loom_type_t* register_type;
-  // Borrowed authored field name, or empty when unavailable.
+  // Borrowed presentation field name, or empty when unavailable.
   iree_string_view_t name;
   // Arena-owned canonical authored logical type.
   iree_string_view_t authored_type;
@@ -66,10 +66,11 @@ typedef struct loom_vm_module_presentation_layout_t {
 
 // Builds canonical presentation text from finalized public declarations.
 //
-// Logical types are recovered from the semantic value types retained by VM
-// typed registers. Declaration and field strings are allocated together from
-// |arena|. Missing source names and documentation remain absent rather than
-// being synthesized.
+// Authored types are recovered from the semantic value types retained by VM
+// typed registers. Target-added ABI fields retain their machine names but have
+// no authored type. Declaration and field strings are allocated together from
+// |arena|. Missing names and documentation remain absent rather than being
+// synthesized.
 iree_status_t loom_vm_module_presentation_layout_build(
     iree_arena_allocator_t* arena, loom_vm_module_layout_t* layout);
 

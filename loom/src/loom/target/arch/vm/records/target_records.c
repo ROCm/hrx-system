@@ -15,8 +15,6 @@ static const loom_target_snapshot_t kVmCoreSnapshot = {
     .default_pointer_bitwidth = 64,
     .index_bitwidth = 64,
     .offset_bitwidth = 64,
-    .max_workgroup_size = {.x = 1, .y = 1, .z = 1},
-    .max_flat_workgroup_size = 1,
     .subgroup_size = 1,
     .memory_spaces =
         {

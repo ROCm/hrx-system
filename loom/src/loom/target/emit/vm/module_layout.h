@@ -36,8 +36,10 @@ typedef struct loom_vm_module_function_layout_t {
   loom_op_t* function_op;
   // Borrowed public export name, or empty for a private function.
   iree_string_view_t export_name;
-  // Preserved source-ordered logical callable signature.
+  // Complete source-ordered logical ABI signature.
   loom_type_t logical_signature;
+  // Original authored signature used only for public presentation.
+  loom_type_t authored_signature;
   // String-table ordinal of |export_name|, or UINT16_MAX when private.
   uint16_t export_name_string_ordinal;
   // Canonical module-local function ordinal.
@@ -60,8 +62,10 @@ typedef struct loom_vm_module_import_layout_t {
   iree_string_view_t module_name;
   // Borrowed target export name.
   iree_string_view_t symbol_name;
-  // Preserved source-ordered logical callable signature.
+  // Complete source-ordered logical ABI signature.
   loom_type_t logical_signature;
+  // Original authored signature used only for public presentation.
+  loom_type_t authored_signature;
   // String-table ordinal of |module_name|.
   uint16_t module_name_string_ordinal;
   // String-table ordinal of |symbol_name|.

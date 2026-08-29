@@ -691,7 +691,7 @@ static iree_status_t loom_vm_call_abi_preserve_logical_signature(
           .values = has_presentation ? results : NULL,
           .count = result_count,
       },
-      rewriter->arena, &layout_attr));
+      loom_type_none(), rewriter->arena, &layout_attr));
   return loom_rewriter_set_attr(rewriter, function.op, abi_layout_attr_index,
                                 layout_attr);
 }

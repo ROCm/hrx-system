@@ -169,8 +169,10 @@ static iree_status_t loom_vm_module_presentation_emit_signature(
 typedef struct loom_vm_module_presentation_declaration_t {
   // Prepared public import declaration or export definition.
   loom_op_t* op;
-  // Preserved source-ordered logical callable signature.
-  loom_type_t signature;
+  // Complete source-ordered logical ABI signature.
+  loom_type_t logical_signature;
+  // Original source-authored callable signature.
+  loom_type_t authored_signature;
   // Canonical module-local machine callable type.
   uint16_t callable_type_ordinal;
   // Import or export declaration kind.
@@ -186,7 +188,8 @@ loom_vm_module_presentation_declaration(const loom_vm_module_layout_t* layout,
     const loom_vm_module_import_layout_t* import = layout->imports[entry_index];
     return (loom_vm_module_presentation_declaration_t){
         .op = import->declaration_op,
-        .signature = import->logical_signature,
+        .logical_signature = import->logical_signature,
+        .authored_signature = import->authored_signature,
         .callable_type_ordinal = import->callable_type_ordinal,
         .kind = IREE_VM_BYTECODE_PRESENTATION_DECLARATION_KIND_IMPORT,
         .ordinal = (uint16_t)entry_index,
@@ -197,7 +200,8 @@ loom_vm_module_presentation_declaration(const loom_vm_module_layout_t* layout,
       layout->exports[export_index];
   return (loom_vm_module_presentation_declaration_t){
       .op = function->function_op,
-      .signature = function->logical_signature,
+      .logical_signature = function->logical_signature,
+      .authored_signature = function->authored_signature,
       .callable_type_ordinal = function->callable_type_ordinal,
       .kind = IREE_VM_BYTECODE_PRESENTATION_DECLARATION_KIND_EXPORT,
       .ordinal = (uint16_t)export_index,
@@ -256,44 +260,54 @@ static iree_status_t loom_vm_module_presentation_count_fields(
 }
 
 static iree_status_t loom_vm_module_presentation_prepare_fields(
-    const loom_module_t* module, const loom_type_t* register_types,
-    uint16_t logical_count, loom_named_attr_slice_t names,
+    const loom_module_t* module, const loom_type_t* logical_register_types,
+    uint16_t logical_count, const loom_type_t* authored_register_types,
+    uint16_t authored_count, loom_named_attr_slice_t names,
     const loom_value_id_t* values, uint16_t value_count,
     loom_vm_module_presentation_field_layout_t* fields, uint32_t machine_count,
     iree_host_size_t* inout_text_storage_length) {
+  for (uint32_t i = 0; i < machine_count; ++i) {
+    fields[i] = (loom_vm_module_presentation_field_layout_t){
+        .name_string_ordinal = UINT16_MAX,
+        .authored_type_string_ordinal = UINT16_MAX,
+    };
+  }
   uint32_t machine_ordinal = 0;
   for (uint16_t i = 0; i < logical_count; ++i) {
     loom_vm_call_abi_register_layout_t register_layout = {0};
     IREE_RETURN_IF_ERROR(loom_vm_call_abi_classify_type(
-        module, register_types[i], &register_layout));
-    IREE_ASSERT_LE(machine_ordinal, machine_count);
-    IREE_ASSERT_LE((uint32_t)register_layout.unit_count,
-                   machine_count - machine_ordinal);
-    for (uint16_t j = 0; j < register_layout.unit_count; ++j) {
-      fields[machine_ordinal + j] =
-          (loom_vm_module_presentation_field_layout_t){
-              .name_string_ordinal = UINT16_MAX,
-              .authored_type_string_ordinal = UINT16_MAX,
-          };
+        module, logical_register_types[i], &register_layout));
+    if (machine_ordinal > machine_count ||
+        (uint32_t)register_layout.unit_count >
+            machine_count - machine_ordinal) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "VM logical signature exceeds its machine field count");
     }
 
-    // Presentation follows the machine signature. Anchor source aggregate
+    // Presentation follows the machine signature. Anchor logical field
     // metadata at its first machine field and leave continuation fields empty.
     loom_vm_module_presentation_field_layout_t* field =
         &fields[machine_ordinal];
-    field->register_type = &register_types[i];
     field->name = names.count != 0
                       ? loom_vm_module_presentation_field_name(module, names, i)
                   : value_count == logical_count
                       ? loom_module_value_name(module, values[i])
                       : iree_string_view_empty();
-    IREE_RETURN_IF_ERROR(loom_vm_module_presentation_measure_field_type(
-        module, register_types[i], &field->authored_type.size));
-    IREE_RETURN_IF_ERROR(loom_vm_module_presentation_allocate_text(
-        field->authored_type.size, inout_text_storage_length));
+    if (i < authored_count) {
+      field->register_type = &authored_register_types[i];
+      IREE_RETURN_IF_ERROR(loom_vm_module_presentation_measure_field_type(
+          module, authored_register_types[i], &field->authored_type.size));
+      IREE_RETURN_IF_ERROR(loom_vm_module_presentation_allocate_text(
+          field->authored_type.size, inout_text_storage_length));
+    }
     machine_ordinal += register_layout.unit_count;
   }
-  IREE_ASSERT_EQ(machine_ordinal, machine_count);
+  if (machine_ordinal != machine_count) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "VM logical signature does not fill its machine fields");
+  }
   return iree_ok_status();
 }
 
@@ -332,10 +346,14 @@ iree_status_t loom_vm_module_presentation_layout_build(
   for (uint32_t i = 0; i < entry_count; ++i) {
     const loom_vm_module_presentation_declaration_t declaration =
         loom_vm_module_presentation_declaration(layout, i);
-    const uint16_t argument_count =
-        loom_type_func_arg_count(declaration.signature);
-    const uint16_t result_count =
-        loom_type_func_result_count(declaration.signature);
+    const uint16_t logical_argument_count =
+        loom_type_func_arg_count(declaration.logical_signature);
+    const uint16_t logical_result_count =
+        loom_type_func_result_count(declaration.logical_signature);
+    const uint16_t authored_argument_count =
+        loom_type_func_arg_count(declaration.authored_signature);
+    const uint16_t authored_result_count =
+        loom_type_func_result_count(declaration.authored_signature);
     const loom_vm_module_presentation_field_counts_t machine_counts =
         loom_vm_module_presentation_field_counts(layout, declaration);
     const uint32_t declaration_field_count =
@@ -354,7 +372,8 @@ iree_status_t loom_vm_module_presentation_layout_build(
           entries[i].documentation.size, &text_storage_length));
     }
     IREE_RETURN_IF_ERROR(loom_vm_module_presentation_measure_signature(
-        layout->module, declaration.signature, &entries[i].authored_type.size));
+        layout->module, declaration.authored_signature,
+        &entries[i].authored_type.size));
     IREE_RETURN_IF_ERROR(loom_vm_module_presentation_allocate_text(
         entries[i].authored_type.size, &text_storage_length));
 
@@ -365,10 +384,14 @@ iree_status_t loom_vm_module_presentation_layout_build(
         loom_func_like_arg_ids(function, &physical_argument_count);
     const loom_value_id_t* results = loom_op_const_results(declaration.op);
     const uint16_t physical_result_count = declaration.op->result_count;
-    const loom_type_t* argument_types =
-        loom_type_func_arg_types(declaration.signature);
-    const loom_type_t* result_types =
-        loom_type_func_result_types(declaration.signature);
+    const loom_type_t* logical_argument_types =
+        loom_type_func_arg_types(declaration.logical_signature);
+    const loom_type_t* logical_result_types =
+        loom_type_func_result_types(declaration.logical_signature);
+    const loom_type_t* authored_argument_types =
+        loom_type_func_arg_types(declaration.authored_signature);
+    const loom_type_t* authored_result_types =
+        loom_type_func_result_types(declaration.authored_signature);
     const loom_named_attr_slice_t abi_layout =
         loom_low_function_def_isa(declaration.op)
             ? loom_low_function_abi_layout(declaration.op)
@@ -376,8 +399,8 @@ iree_status_t loom_vm_module_presentation_layout_build(
     loom_named_attr_slice_t argument_names = loom_named_attr_slice_empty();
     loom_named_attr_slice_t result_names = loom_named_attr_slice_empty();
     IREE_RETURN_IF_ERROR(loom_vm_call_abi_layout_resolve_presentation_names(
-        layout->module, abi_layout, argument_count, result_count,
-        &argument_names, &result_names));
+        layout->module, abi_layout, logical_argument_count,
+        logical_result_count, &argument_names, &result_names));
     loom_vm_module_presentation_field_layout_t* argument_fields =
         machine_counts.arguments != 0 ? &fields[field_base] : NULL;
     loom_vm_module_presentation_field_layout_t* result_fields =
@@ -385,11 +408,13 @@ iree_status_t loom_vm_module_presentation_layout_build(
             ? &fields[field_base + machine_counts.arguments]
             : NULL;
     IREE_RETURN_IF_ERROR(loom_vm_module_presentation_prepare_fields(
-        layout->module, argument_types, argument_count, argument_names,
+        layout->module, logical_argument_types, logical_argument_count,
+        authored_argument_types, authored_argument_count, argument_names,
         arguments, physical_argument_count, argument_fields,
         machine_counts.arguments, &text_storage_length));
     IREE_RETURN_IF_ERROR(loom_vm_module_presentation_prepare_fields(
-        layout->module, result_types, result_count, result_names, results,
+        layout->module, logical_result_types, logical_result_count,
+        authored_result_types, authored_result_count, result_names, results,
         physical_result_count, result_fields, machine_counts.results,
         &text_storage_length));
     field_base += declaration_field_count;
@@ -414,8 +439,8 @@ iree_status_t loom_vm_module_presentation_layout_build(
     }
     const iree_host_size_t signature_capacity = entry->authored_type.size + 1;
     IREE_RETURN_IF_ERROR(loom_vm_module_presentation_emit_signature(
-        layout->module, declaration.signature, text_storage + text_offset,
-        signature_capacity, &entry->authored_type));
+        layout->module, declaration.authored_signature,
+        text_storage + text_offset, signature_capacity, &entry->authored_type));
     text_offset += signature_capacity;
 
     const loom_vm_module_presentation_field_counts_t machine_counts =

@@ -28,8 +28,16 @@ bool loom_vm_kernel_try_select_op(const loom_op_t* source_op,
 extern const loom_target_low_legality_provider_t
     loom_vm_kernel_low_legality_provider;
 
-// Appends the canonical VM kernel launch arguments and binds selected query
-// results to either those arguments or scalar-profile constants.
+// Builds the complete VM kernel ABI layout from authored kernel arguments.
+//
+// The runtime signature appends the target-owned launch arguments while the
+// authored signature remains available for public presentation.
+iree_status_t loom_vm_kernel_map_abi_layout(
+    loom_low_lower_context_t* context, const loom_type_t* argument_types,
+    iree_host_size_t argument_count, loom_named_attr_slice_t* out_abi_layout);
+
+// Appends the canonical VM kernel invocation arguments and binds selected
+// topology queries to those arguments, derived values, or profile constants.
 iree_status_t loom_vm_kernel_emit_preamble(loom_low_lower_context_t* context);
 
 // Emits or erases one selected scalar kernel-profile operation.

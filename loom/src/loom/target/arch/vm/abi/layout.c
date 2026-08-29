@@ -158,35 +158,107 @@ iree_status_t loom_vm_call_abi_classify_type(
   return iree_ok_status();
 }
 
-iree_status_t loom_vm_call_abi_layout_resolve_signature(
+static iree_status_t loom_vm_call_abi_layout_resolve_signature_entry(
     const loom_module_t* module, loom_named_attr_slice_t abi_layout,
-    loom_type_t* out_signature) {
+    iree_string_view_t key, bool required, loom_type_t* out_signature) {
   *out_signature = loom_type_none();
-  const loom_string_id_t signature_key =
-      loom_module_lookup_string(module, IREE_SV("signature"));
+  const loom_string_id_t signature_key = loom_module_lookup_string(module, key);
   const loom_attribute_t* signature_attr = NULL;
   for (iree_host_size_t i = 0; i < abi_layout.count; ++i) {
     const loom_named_attr_t* entry = &abi_layout.entries[i];
     if (entry->name_id != signature_key) continue;
     if (signature_attr != NULL) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "VM abi_layout has duplicate signature entries");
+                              "VM abi_layout has duplicate %.*s entries",
+                              (int)key.size, key.data);
     }
     signature_attr = &entry->value;
   }
+  if (signature_attr == NULL && !required) return iree_ok_status();
   if (signature_attr == NULL || signature_attr->kind != LOOM_ATTR_TYPE ||
       signature_attr->type_id >= module->types.count) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "VM abi_layout requires a valid signature type entry");
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "VM abi_layout requires a valid %.*s type entry",
+                            (int)key.size, key.data);
   }
   const loom_type_t signature = module->types.entries[signature_attr->type_id];
   if (!loom_type_is_function(signature)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "VM abi_layout signature must be a function type");
+                            "VM abi_layout %.*s must be a function type",
+                            (int)key.size, key.data);
   }
   *out_signature = signature;
   return iree_ok_status();
+}
+
+iree_status_t loom_vm_call_abi_layout_resolve_signature(
+    const loom_module_t* module, loom_named_attr_slice_t abi_layout,
+    loom_type_t* out_signature) {
+  return loom_vm_call_abi_layout_resolve_signature_entry(
+      module, abi_layout, IREE_SV("signature"), /*required=*/true,
+      out_signature);
+}
+
+static iree_status_t loom_vm_call_abi_layout_validate_authored_signature(
+    loom_type_t abi_signature, loom_type_t authored_signature) {
+  if (!loom_type_is_function(abi_signature) ||
+      !loom_type_is_function(authored_signature)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "VM authored signature validation requires function types");
+  }
+  const uint16_t abi_argument_count = loom_type_func_arg_count(abi_signature);
+  const uint16_t authored_argument_count =
+      loom_type_func_arg_count(authored_signature);
+  const uint16_t abi_result_count = loom_type_func_result_count(abi_signature);
+  const uint16_t authored_result_count =
+      loom_type_func_result_count(authored_signature);
+  if (authored_argument_count > abi_argument_count ||
+      authored_result_count > abi_result_count) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "VM authored signature exceeds the complete ABI signature");
+  }
+  const loom_type_t* abi_argument_types =
+      loom_type_func_arg_types(abi_signature);
+  const loom_type_t* authored_argument_types =
+      loom_type_func_arg_types(authored_signature);
+  for (uint16_t i = 0; i < authored_argument_count; ++i) {
+    if (!loom_type_equal(authored_argument_types[i], abi_argument_types[i])) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "VM authored argument %u is not an ABI-signature prefix field",
+          (unsigned)i);
+    }
+  }
+  const loom_type_t* abi_result_types =
+      loom_type_func_result_types(abi_signature);
+  const loom_type_t* authored_result_types =
+      loom_type_func_result_types(authored_signature);
+  for (uint16_t i = 0; i < authored_result_count; ++i) {
+    if (!loom_type_equal(authored_result_types[i], abi_result_types[i])) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "VM authored result %u is not an ABI-signature prefix field",
+          (unsigned)i);
+    }
+  }
+  return iree_ok_status();
+}
+
+iree_status_t loom_vm_call_abi_layout_resolve_authored_signature(
+    const loom_module_t* module, loom_named_attr_slice_t abi_layout,
+    loom_type_t abi_signature, loom_type_t* out_authored_signature) {
+  *out_authored_signature = loom_type_none();
+  IREE_RETURN_IF_ERROR(loom_vm_call_abi_layout_resolve_signature_entry(
+      module, abi_layout, IREE_SV("authored_signature"), /*required=*/false,
+      out_authored_signature));
+  if (loom_type_kind(*out_authored_signature) == LOOM_TYPE_NONE) {
+    *out_authored_signature = abi_signature;
+    return iree_ok_status();
+  }
+  return loom_vm_call_abi_layout_validate_authored_signature(
+      abi_signature, *out_authored_signature);
 }
 
 enum {
@@ -534,7 +606,7 @@ iree_status_t loom_vm_call_abi_layout_preserve_presentation_names(
 
 iree_status_t loom_vm_call_abi_layout_make_attr(
     loom_module_t* module, loom_vm_call_abi_source_fields_t arguments,
-    loom_vm_call_abi_source_fields_t results,
+    loom_vm_call_abi_source_fields_t results, loom_type_t authored_signature,
     iree_arena_allocator_t* scratch_arena, loom_attribute_t* out_attr) {
   *out_attr = loom_attr_absent();
   if (arguments.count > UINT16_MAX || results.count > UINT16_MAX) {
@@ -551,6 +623,10 @@ iree_status_t loom_vm_call_abi_layout_make_attr(
   IREE_RETURN_IF_ERROR(loom_module_intern_function_type(
       module, arguments.types, (uint16_t)arguments.count, results.types,
       (uint16_t)results.count, &signature));
+  if (loom_type_kind(authored_signature) != LOOM_TYPE_NONE) {
+    IREE_RETURN_IF_ERROR(loom_vm_call_abi_layout_validate_authored_signature(
+        signature, authored_signature));
+  }
   loom_type_id_t signature_id = LOOM_TYPE_ID_INVALID;
   IREE_RETURN_IF_ERROR(
       loom_module_intern_type_id(module, signature, &signature_id));
@@ -562,7 +638,7 @@ iree_status_t loom_vm_call_abi_layout_make_attr(
   IREE_RETURN_IF_ERROR(loom_vm_call_abi_layout_make_name_table(
       module, results, scratch_arena, &result_names));
 
-  loom_named_attr_t entries[3] = {0};
+  loom_named_attr_t entries[4] = {0};
   iree_host_size_t entry_count = 0;
   if (!loom_attr_is_absent(argument_names)) {
     IREE_RETURN_IF_ERROR(loom_module_intern_string(
@@ -581,6 +657,15 @@ iree_status_t loom_vm_call_abi_layout_make_attr(
       .name_id = signature_key,
       .value = loom_attr_type(signature_id),
   };
+  if (loom_type_kind(authored_signature) != LOOM_TYPE_NONE &&
+      !loom_type_equal(authored_signature, signature)) {
+    loom_type_id_t authored_signature_id = LOOM_TYPE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_module_intern_type_id(module, authored_signature,
+                                                    &authored_signature_id));
+    IREE_RETURN_IF_ERROR(loom_module_intern_string(
+        module, IREE_SV("authored_signature"), &entries[entry_count].name_id));
+    entries[entry_count++].value = loom_attr_type(authored_signature_id);
+  }
   return loom_module_make_canonical_attr_dict(
       module, loom_make_named_attr_slice(entries, entry_count), out_attr);
 }

@@ -17,37 +17,31 @@ kernel.def target(@target) export("scalar_kernel") @scalar_kernel(%workgroup_cou
 }
 
 // ----
-vm.module "module" core=0.0 bytes=580
+vm.module "module" core=0.0 bytes=692
 requirements:
 sections:
-  [0] strings type=0x0002 flags=0x0000 bytes=[128, +218)
-  [1] signatures type=0x0004 flags=0x0000 bytes=[352, +48)
-  [2] callable_types type=0x0005 flags=0x0000 bytes=[400, +12)
-  [3] exports type=0x0007 flags=0x0000 bytes=[416, +12)
-  [4] functions type=0x0008 flags=0x0000 bytes=[432, +72)
-  [5] globals type=0x000A flags=0x0000 bytes=[504, +32)
-  [6] presentation type=0x000C flags=0x0001 bytes=[536, +44)
+  [0] strings type=0x0002 flags=0x0000 bytes=[128, +287)
+  [1] signatures type=0x0004 flags=0x0000 bytes=[416, +72)
+  [2] callable_types type=0x0005 flags=0x0000 bytes=[488, +12)
+  [3] exports type=0x0007 flags=0x0000 bytes=[504, +12)
+  [4] functions type=0x0008 flags=0x0000 bytes=[520, +72)
+  [5] globals type=0x000A flags=0x0000 bytes=[592, +32)
+  [6] presentation type=0x000C flags=0x0001 bytes=[624, +68)
 resources: constants=0 globals=(values=1, refs=0, functions=0) rodata=0
 module_metadata:
 ref_types:
 callable_types:
-  [0] (i64, i64, i64, i64, i64, i64, i64) -> ()
+  [0] (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64) -> ()
 imports:
 exports:
-  [0] @scalar_kernel -> function[0] : (bias: i64, workgroup_id_x: i64, workgroup_id_y: i64, workgroup_id_z: i64, workgroup_count_x: i64, workgroup_count_y: i64, workgroup_count_z: i64) -> ()
-    authored_type = "(index, index, index, index, index, index, index) -> ()"
+  [0] @scalar_kernel -> function[0] : (bias: i64, workgroup_id_x: i64, workgroup_id_y: i64, workgroup_id_z: i64, workgroup_size_x: i64, workgroup_size_y: i64, workgroup_size_z: i64, workgroup_count_x: i64, workgroup_count_y: i64, workgroup_count_z: i64, workitem_id_x: i64, workitem_id_y: i64, workitem_id_z: i64) -> ()
+    authored_type = "(index) -> ()"
     argument[0].authored_type = "index"
-    argument[1].authored_type = "index"
-    argument[2].authored_type = "index"
-    argument[3].authored_type = "index"
-    argument[4].authored_type = "index"
-    argument[5].authored_type = "index"
-    argument[6].authored_type = "index"
 functions:
-  [0] callable[0] signature[0] bytecode=[0, +20) registers=(7, 0, 0) locals=(0, 0, 0) switch_targets=0
-    type = (i64, i64, i64, i64, i64, i64, i64) -> ()
+  [0] callable[0] signature[0] bytecode=[0, +20) registers=(13, 0, 0) locals=(0, 0, 0) switch_targets=0
+    type = (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64) -> ()
     +0000  control.block
     +0004  integer.add.i64 dst_v8=0 lhs_v8=0 rhs_v8=1
-    +0008  integer.add.i64 dst_v8=0 lhs_v8=0 rhs_v8=5
+    +0008  integer.add.i64 dst_v8=0 lhs_v8=0 rhs_v8=8
     +0012  global.value.mutable.store src_v8=0 global_u16=0
     +0016  control.return
