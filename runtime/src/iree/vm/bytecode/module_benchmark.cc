@@ -18,9 +18,14 @@ namespace {
 
 constexpr iree_host_size_t kInvocationStorageSize = 16 * 1024;
 
+// Amortizes timer suspension around construction-object teardown.
+constexpr uint64_t kConstructionBatchSize = 64;
+
 struct BenchmarkContext {
   // Immutable borrowed bytecode image storage.
   std::vector<uint8_t> image;
+  // Owned type environment used by repeated module construction.
+  iree_vm_environment_t* environment = nullptr;
   // Owned bytecode module.
   iree_vm_module_t* module = nullptr;
   // Owned immutable linked program.
@@ -42,10 +47,12 @@ void DeinitializeBenchmarkContext(BenchmarkContext* context) {
   iree_vm_process_release(context->process);
   iree_vm_program_release(context->program);
   iree_vm_module_release(context->module);
+  iree_vm_environment_free(context->environment);
   context->invocation = nullptr;
   context->process = nullptr;
   context->program = nullptr;
   context->module = nullptr;
+  context->environment = nullptr;
   context->function = iree_vm_function_null();
   context->empty_function = iree_vm_function_null();
   context->noop_function = iree_vm_function_null();
@@ -65,18 +72,16 @@ iree_status_t InvokeLaunchConfig(iree_vm_invocation_t* invocation,
 
 iree_status_t InitializeBenchmarkContext(BenchmarkContext* context) {
   context->image = BuildLaunchConfigModuleImage();
-  iree_vm_environment_t* environment = nullptr;
-  iree_status_t status =
-      iree_vm_environment_allocate(iree_allocator_system(), &environment);
+  iree_status_t status = iree_vm_environment_allocate(iree_allocator_system(),
+                                                      &context->environment);
   if (iree_status_is_ok(status)) {
     status = iree_vm_bytecode_module_create(
-        environment, IREE_SV("launch"),
+        context->environment, IREE_SV("launch"),
         {iree_make_const_byte_span(context->image.data(),
                                    context->image.size()),
          iree_allocator_null()},
         iree_allocator_system(), &context->module);
   }
-  iree_vm_environment_free(environment);
   if (iree_status_is_ok(status)) {
     status =
         iree_vm_program_create({context->module, iree_vm_module_span_empty()},
@@ -122,6 +127,93 @@ iree_status_t InitializeBenchmarkContext(BenchmarkContext* context) {
     }
   }
   if (!iree_status_is_ok(status)) DeinitializeBenchmarkContext(context);
+  return status;
+}
+
+iree_status_t RunModuleCreateBenchmark(
+    iree_benchmark_state_t* benchmark_state) {
+  BenchmarkContext context;
+  IREE_RETURN_IF_ERROR(InitializeBenchmarkContext(&context));
+
+  iree_status_t status = iree_ok_status();
+  while (iree_status_is_ok(status) &&
+         iree_benchmark_keep_running(benchmark_state, kConstructionBatchSize)) {
+    iree_vm_module_t* modules[kConstructionBatchSize];
+    iree_host_size_t module_count = 0;
+    while (module_count < IREE_ARRAYSIZE(modules) &&
+           iree_status_is_ok(status)) {
+      status = iree_vm_bytecode_module_create(
+          context.environment, IREE_SV("launch"),
+          {iree_make_const_byte_span(context.image.data(),
+                                     context.image.size()),
+           iree_allocator_null()},
+          iree_allocator_system(), &modules[module_count]);
+      if (iree_status_is_ok(status)) ++module_count;
+    }
+    iree_benchmark_pause_timing(benchmark_state);
+    for (iree_host_size_t i = 0; i < module_count; ++i) {
+      iree_vm_module_release(modules[i]);
+    }
+    iree_benchmark_resume_timing(benchmark_state);
+  }
+
+  DeinitializeBenchmarkContext(&context);
+  return status;
+}
+
+iree_status_t RunProgramCreateBenchmark(
+    iree_benchmark_state_t* benchmark_state) {
+  BenchmarkContext context;
+  IREE_RETURN_IF_ERROR(InitializeBenchmarkContext(&context));
+
+  iree_status_t status = iree_ok_status();
+  while (iree_status_is_ok(status) &&
+         iree_benchmark_keep_running(benchmark_state, kConstructionBatchSize)) {
+    iree_vm_program_t* programs[kConstructionBatchSize];
+    iree_host_size_t program_count = 0;
+    while (program_count < IREE_ARRAYSIZE(programs) &&
+           iree_status_is_ok(status)) {
+      status = iree_vm_program_create(
+          {context.module, iree_vm_module_span_empty()},
+          iree_allocator_system(), &programs[program_count]);
+      if (iree_status_is_ok(status)) ++program_count;
+    }
+    iree_benchmark_pause_timing(benchmark_state);
+    for (iree_host_size_t i = 0; i < program_count; ++i) {
+      iree_vm_program_release(programs[i]);
+    }
+    iree_benchmark_resume_timing(benchmark_state);
+  }
+
+  DeinitializeBenchmarkContext(&context);
+  return status;
+}
+
+iree_status_t RunProcessCreateBenchmark(
+    iree_benchmark_state_t* benchmark_state) {
+  BenchmarkContext context;
+  IREE_RETURN_IF_ERROR(InitializeBenchmarkContext(&context));
+
+  iree_status_t status = iree_ok_status();
+  while (iree_status_is_ok(status) &&
+         iree_benchmark_keep_running(benchmark_state, kConstructionBatchSize)) {
+    iree_vm_process_t* processes[kConstructionBatchSize];
+    iree_host_size_t process_count = 0;
+    while (process_count < IREE_ARRAYSIZE(processes) &&
+           iree_status_is_ok(status)) {
+      status = iree_vm_process_create(
+          context.program, context.invocation, iree_vm_variant_span_empty(),
+          iree_allocator_system(), &processes[process_count]);
+      if (iree_status_is_ok(status)) ++process_count;
+    }
+    iree_benchmark_pause_timing(benchmark_state);
+    for (iree_host_size_t i = 0; i < process_count; ++i) {
+      iree_vm_process_release(processes[i]);
+    }
+    iree_benchmark_resume_timing(benchmark_state);
+  }
+
+  DeinitializeBenchmarkContext(&context);
   return status;
 }
 
@@ -200,6 +292,21 @@ IREE_BENCHMARK_FN(BM_BytecodeLaunchConfigReuseRaw) {
   return RunLaunchConfigBenchmark(benchmark_state, BenchmarkMode::kRaw);
 }
 IREE_BENCHMARK_REGISTER(BM_BytecodeLaunchConfigReuseRaw);
+
+IREE_BENCHMARK_FN(BM_BytecodeModuleCreate) {
+  return RunModuleCreateBenchmark(benchmark_state);
+}
+IREE_BENCHMARK_REGISTER(BM_BytecodeModuleCreate);
+
+IREE_BENCHMARK_FN(BM_BytecodeProgramCreate) {
+  return RunProgramCreateBenchmark(benchmark_state);
+}
+IREE_BENCHMARK_REGISTER(BM_BytecodeProgramCreate);
+
+IREE_BENCHMARK_FN(BM_BytecodeProcessCreate) {
+  return RunProcessCreateBenchmark(benchmark_state);
+}
+IREE_BENCHMARK_REGISTER(BM_BytecodeProcessCreate);
 
 IREE_BENCHMARK_FN(BM_BytecodeLaunchConfigReuseChecked) {
   return RunLaunchConfigBenchmark(benchmark_state, BenchmarkMode::kChecked);
