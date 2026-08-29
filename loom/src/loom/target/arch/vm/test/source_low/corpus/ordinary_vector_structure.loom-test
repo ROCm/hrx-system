@@ -1,0 +1,86 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/ordinary_vector_structure.loom-test
+// RUN: emit source-low output=low
+
+vm.target<core> @target
+kernel.def target(@target) @ordinary_vector_structure_i32() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base_byte_offset = index.constant 0 : offset
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %input_view = buffer.view %input_aligned[%base_byte_offset] : buffer -> view<4xi32>
+  %output_view = buffer.view %output_aligned[%base_byte_offset] : buffer -> view<4xi32>
+  %a = view.load %input_view[0] : view<4xi32> -> i32
+  %b = view.load %input_view[1] : view<4xi32> -> i32
+  %c = view.load %input_view[2] : view<4xi32> -> i32
+  %d = view.load %input_view[3] : view<4xi32> -> i32
+  %condition = scalar.cmpi sgt, %a, %b : i32
+  %singleton_from = vector.from_elements %b : vector<1xi32>
+  %singleton_splat = vector.splat %a : vector<1xi32>
+  %singleton_constant = vector.constant 10 : vector<1xi32>
+  %singleton_selected = scf.select %condition, %singleton_splat, %singleton_from : vector<1xi32>
+  %singleton_inserted = vector.insert %a into %singleton_selected[0] : i32, vector<1xi32>
+  %singleton_value = vector.extract %singleton_inserted[0] : vector<1xi32> -> i32
+  %singleton_constant_value = vector.extract %singleton_constant[0] : vector<1xi32> -> i32
+  %from = vector.from_elements %a, %b, %c, %d : vector<4xi32>
+  %constant = vector.constant 10 : vector<4xi32>
+  %splat = vector.splat %singleton_value : vector<4xi32>
+  %candidate = scf.select %condition, %from, %constant : vector<4xi32>
+  %selected = scf.if %condition -> (vector<4xi32>) {
+    view.store %a, %output_view[0] : i32, view<4xi32>
+    scf.yield %candidate : vector<4xi32>
+  } else {
+    view.store %b, %output_view[0] : i32, view<4xi32>
+    scf.yield %splat : vector<4xi32>
+  }
+  %inserted = vector.insert %singleton_constant_value into %selected[2] : i32, vector<4xi32>
+  %final = scf.select %condition, %selected, %inserted : vector<4xi32>
+  %result0 = vector.extract %final[0] : vector<4xi32> -> i32
+  %result1 = vector.extract %final[1] : vector<4xi32> -> i32
+  %result2 = vector.extract %final[2] : vector<4xi32> -> i32
+  %result3 = vector.extract %final[3] : vector<4xi32> -> i32
+  view.store %result0, %output_view[0] : i32, view<4xi32>
+  view.store %result1, %output_view[1] : i32, view<4xi32>
+  view.store %result2, %output_view[2] : i32, view<4xi32>
+  view.store %result3, %output_view[3] : i32, view<4xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @ordinary_vector_structure_i32(%input_aligned: reg<vm.ref : buffer>, %output_aligned: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %71 = constant.zero : reg<vm.value : offset>
+  %a = buffer.load %input_aligned, %71, %71, 0, i32.x1 : reg<vm.value : i32>
+  %74 = constant.s16 4 : reg<vm.value : offset>
+  %b = buffer.load %input_aligned, %74, %71, 0, i32.x1 : reg<vm.value : i32>
+  %77 = constant.s16 8 : reg<vm.value : offset>
+  %c = buffer.load %input_aligned, %77, %71, 0, i32.x1 : reg<vm.value : i32>
+  %80 = constant.s16 12 : reg<vm.value : offset>
+  %d = buffer.load %input_aligned, %80, %71, 0, i32.x1 : reg<vm.value : i32>
+  %condition = integer.compare.i32 %a, %b, sgt : reg<vm.value : i1>
+  %singleton_constant_value = constant.s16 10 : reg<vm.value : i32>
+  %splat = concat(%a, %a, %a, %a) : (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>) -> reg<vm.value x4 : vector<4xi32>>
+  %85 = value.select %condition, %a, %singleton_constant_value : reg<vm.value : i32>
+  %86 = value.select %condition, %b, %singleton_constant_value : reg<vm.value : i32>
+  %87 = value.select %condition, %c, %singleton_constant_value : reg<vm.value : i32>
+  %88 = value.select %condition, %d, %singleton_constant_value : reg<vm.value : i32>
+  %candidate = concat(%85, %86, %87, %88) : (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>) -> reg<vm.value x4 : vector<4xi32>>
+  low.cond_br %condition, ^_bb1, ^_bb2 : reg<vm.value : i1>
+^_bb1:
+  buffer.store %output_aligned, %71, %71, %a, 0, i32.x1
+  low.br ^_bb3(%candidate: reg<vm.value x4 : vector<4xi32>>)
+^_bb2:
+  buffer.store %output_aligned, %71, %71, %b, 0, i32.x1
+  low.br ^_bb3(%splat: reg<vm.value x4 : vector<4xi32>>)
+^_bb3(%selected: reg<vm.value x4 : vector<4xi32>>):
+  %92 = slice %selected[0] : reg<vm.value x4 : vector<4xi32>> -> reg<vm.value : i32>
+  %93 = slice %selected[1] : reg<vm.value x4 : vector<4xi32>> -> reg<vm.value : i32>
+  %94 = slice %selected[2] : reg<vm.value x4 : vector<4xi32>> -> reg<vm.value : i32>
+  %95 = value.select %condition, %94, %singleton_constant_value : reg<vm.value : i32>
+  %96 = slice %selected[3] : reg<vm.value x4 : vector<4xi32>> -> reg<vm.value : i32>
+  buffer.store %output_aligned, %71, %71, %92, 0, i32.x1
+  buffer.store %output_aligned, %74, %71, %93, 0, i32.x1
+  buffer.store %output_aligned, %77, %71, %95, 0, i32.x1
+  buffer.store %output_aligned, %80, %71, %96, 0, i32.x1
+  return
+}

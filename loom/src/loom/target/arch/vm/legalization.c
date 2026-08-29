@@ -6,6 +6,7 @@
 
 #include "loom/target/arch/vm/legalization.h"
 
+#include "loom/ops/scf/ops.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/target/arch/vm/descriptors.h"
 #include "loom/transforms/vector/to_scalar.h"
@@ -39,6 +40,7 @@ static iree_status_t loom_vm_legalize_vector_to_scalar(
   }
 
 static const loom_target_legalizer_entry_t kVmLegalizerEntries[] = {
+    LOOM_VM_VECTOR_TO_SCALAR_ENTRY(LOOM_OP_SCF_SELECT),
     LOOM_VM_VECTOR_TO_SCALAR_ENTRY(LOOM_OP_VECTOR_TRANSPOSE),
     LOOM_VM_VECTOR_TO_SCALAR_ENTRY(LOOM_OP_VECTOR_SHUFFLE),
     LOOM_VM_VECTOR_TO_SCALAR_ENTRY(LOOM_OP_VECTOR_SELECT),
