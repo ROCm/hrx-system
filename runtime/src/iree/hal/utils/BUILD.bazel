@@ -61,30 +61,6 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
-    name = "deferred_command_buffer",
-    srcs = ["deferred_command_buffer.c"],
-    hdrs = ["deferred_command_buffer.h"],
-    deps = [
-        ":resource_set",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal:arena",
-        "//runtime/src/iree/hal",
-    ],
-)
-
-iree_runtime_cc_test(
-    name = "deferred_command_buffer_test",
-    srcs = ["deferred_command_buffer_test.cc"],
-    deps = [
-        ":deferred_command_buffer",
-        "//runtime/src/iree/base/internal:arena",
-        "//runtime/src/iree/hal",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-    ],
-)
-
-iree_runtime_cc_library(
     name = "device_spec_builder",
     srcs = ["device_spec_builder.c"],
     hdrs = ["device_spec_builder.h"],

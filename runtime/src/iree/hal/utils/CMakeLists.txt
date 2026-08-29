@@ -68,34 +68,6 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
-    deferred_command_buffer
-  HDRS
-    "deferred_command_buffer.h"
-  SRCS
-    "deferred_command_buffer.c"
-  DEPS
-    ::resource_set
-    iree::base
-    iree::base::internal::arena
-    iree::hal
-  PUBLIC
-)
-
-iree_cc_test(
-  NAME
-    deferred_command_buffer_test
-  SRCS
-    "deferred_command_buffer_test.cc"
-  DEPS
-    ::deferred_command_buffer
-    iree::base::internal::arena
-    iree::hal
-    iree::testing::gtest
-    iree::testing::gtest_main
-)
-
-iree_cc_library(
-  NAME
     device_spec_builder
   HDRS
     "device_spec_builder.h"
