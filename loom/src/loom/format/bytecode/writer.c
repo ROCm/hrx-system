@@ -506,6 +506,16 @@ iree_status_t loom_bytecode_write_module(
     status = iree_io_stream_write(stream, 8, &module_length);
   }
 
+  if (iree_status_is_ok(status) && options != NULL) {
+    const loom_bytecode_symbol_projection_t* projection =
+        &options->symbol_projection;
+    for (iree_host_size_t i = 0; i < projection->count; ++i) {
+      IREE_ASSERT_LT(projection->module_symbol_ids[i], module->symbols.count);
+      projection->wire_symbol_ordinals[i] = loom_bytecode_wire_symbol_ordinal(
+          &numbering, projection->module_symbol_ids[i]);
+    }
+  }
+
   // All numbering tables, value maps, and IR region lists were arena-allocated.
   // One call returns all blocks to the shared pool.
   if (record_plan_initialized) {

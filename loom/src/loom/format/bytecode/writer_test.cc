@@ -1084,6 +1084,63 @@ TEST_F(WriterTest, ZeroExtentVectorTypeWrites) {
   loom_module_free(module);
 }
 
+TEST_F(WriterTest, ProjectsModuleSymbolsIntoPresentationOrder) {
+  loom_module_t* module = CreateModule("test");
+  loom_builder_t builder;
+  loom_builder_initialize(module, &module->arena, loom_module_block(module),
+                          &builder);
+
+  loom_string_id_t first_name_id = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_builder_intern_string(&builder, IREE_SV("first"), &first_name_id));
+  loom_symbol_id_t first_symbol_id = LOOM_SYMBOL_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_add_symbol(module, first_name_id, &first_symbol_id));
+  loom_string_id_t second_name_id = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_builder_intern_string(&builder, IREE_SV("second"), &second_name_id));
+  loom_symbol_id_t second_symbol_id = LOOM_SYMBOL_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_add_symbol(module, second_name_id, &second_symbol_id));
+
+  loom_op_t* second_op = nullptr;
+  IREE_ASSERT_OK(loom_test_func_build(
+      &builder, 0, /*visibility=*/0, /*cc=*/0,
+      loom_symbol_ref_t{/*.module_id=*/0, second_symbol_id},
+      /*arg_types=*/nullptr, 0, /*result_types=*/nullptr, 0,
+      /*arg_names=*/nullptr, 0, /*result_names=*/nullptr, 0,
+      LOOM_LOCATION_UNKNOWN, &second_op));
+  loom_op_t* first_op = nullptr;
+  IREE_ASSERT_OK(loom_test_func_build(
+      &builder, 0, /*visibility=*/0, /*cc=*/0,
+      loom_symbol_ref_t{/*.module_id=*/0, first_symbol_id},
+      /*arg_types=*/nullptr, 0, /*result_types=*/nullptr, 0,
+      /*arg_names=*/nullptr, 0, /*result_names=*/nullptr, 0,
+      LOOM_LOCATION_UNKNOWN, &first_op));
+
+  const loom_symbol_id_t module_symbol_ids[] = {first_symbol_id,
+                                                second_symbol_id};
+  loom_symbol_id_t wire_symbol_ordinals[] = {LOOM_SYMBOL_ID_INVALID,
+                                             LOOM_SYMBOL_ID_INVALID};
+  loom_bytecode_write_options_t options = {
+      /*.producer=*/{},
+      /*.location_mode=*/{},
+      /*.low_repr_environment=*/{},
+      /*.symbol_projection=*/
+      {
+          /*.module_symbol_ids=*/module_symbol_ids,
+          /*.wire_symbol_ordinals=*/wire_symbol_ordinals,
+          /*.count=*/IREE_ARRAYSIZE(module_symbol_ids),
+      },
+  };
+  auto bytes = WriteModule(module, &options);
+  EXPECT_GT(bytes.size(), 0u);
+  EXPECT_EQ(wire_symbol_ordinals[0], 1u);
+  EXPECT_EQ(wire_symbol_ordinals[1], 0u);
+
+  loom_module_free(module);
+}
+
 //===----------------------------------------------------------------------===//
 // Error handling
 //===----------------------------------------------------------------------===//
