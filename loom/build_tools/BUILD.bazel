@@ -13,6 +13,7 @@ package(
 
 py_test(
     name = "presubmit_test",
+    size = "small",
     srcs = [
         "presubmit.py",
         "presubmit_test.py",
@@ -20,6 +21,7 @@ py_test(
     data = [
         "//loom/src/loom/test/corpus/authoring/linking:checks.loom",
     ],
+    tags = ["manual"],
     deps = [
         "//build_tools/devtools",
         "//loom/py/loom/gen:checked_in_artifacts",
@@ -28,7 +30,20 @@ py_test(
 
 py_test(
     name = "loom_source_lint_self_test",
+    size = "small",
     srcs = ["linters/loom_source_lint.py"],
     args = ["--self-test"],
     main = "linters/loom_source_lint.py",
+    tags = ["manual"],
+)
+
+# Project policy tests run in the repository Presubmit lane when this
+# build_tools subtree or its shared support changes.
+test_suite(
+    name = "presubmit_tests",
+    tags = ["manual"],
+    tests = [
+        ":loom_source_lint_self_test",
+        ":presubmit_test",
+    ],
 )

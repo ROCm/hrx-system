@@ -194,9 +194,13 @@ The GitHub Presubmit workflow calls:
 python dev.py bazel presubmit --profile ci --no-project-tests
 ```
 
-That workflow still runs full tracked-tree hygiene, root devtools tests, and
-configured static-analysis providers. It skips runtime/libhrx/loom project
-tests because dedicated CI workflows own those project build and test lanes.
+That workflow still runs full tracked-tree hygiene, changed repository-tool
+test suites, and configured static-analysis providers. Developer workflow,
+Lefthook, and project-presubmit policy tests are tagged `manual` so product and
+platform wildcard builds do not rediscover them. The dispatcher selects their
+explicit suites only when the owning scripts, shared support, or workflow
+configuration changes. Runtime/libhrx/loom product tests remain skipped because
+dedicated CI workflows own those build and test lanes.
 
 `lefthook.yml` requires Lefthook 2.1.9 or newer because the repository uses
 custom manual hook groups in addition to Git hook names.

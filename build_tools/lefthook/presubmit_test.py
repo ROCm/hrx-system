@@ -1059,18 +1059,80 @@ class PresubmitTest(unittest.TestCase):
         run_command.assert_not_called()
         self.assertIn("enforced by the Linux paranoid presubmit", output.getvalue())
 
-    def test_requirements_and_docs_workflow_trigger_root_devtools_tests(self):
+    def test_workflows_and_requirements_trigger_devtools_tests(self):
         self.assertTrue(
-            presubmit.is_root_devtools_trigger(".github/workflows/docs.yml")
+            presubmit.is_devtools_test_trigger(".github/workflows/docs.yml")
         )
-        self.assertTrue(presubmit.is_root_devtools_trigger("requirements-analysis.in"))
+        self.assertTrue(presubmit.is_devtools_test_trigger("requirements-analysis.in"))
         self.assertTrue(
-            presubmit.is_root_devtools_trigger("requirements-analysis.lock.txt")
+            presubmit.is_devtools_test_trigger("requirements-analysis.lock.txt")
         )
         self.assertTrue(
-            presubmit.is_root_devtools_trigger("loom/docs/requirements.lock.txt")
+            presubmit.is_devtools_test_trigger("loom/docs/requirements.lock.txt")
         )
-        self.assertFalse(presubmit.is_root_devtools_trigger("runtime/requirements.txt"))
+        self.assertFalse(presubmit.is_devtools_test_trigger("runtime/requirements.txt"))
+        self.assertFalse(presubmit.is_devtools_test_trigger("README.md"))
+
+    def test_repository_tool_tests_follow_changed_file_ownership(self):
+        cases = (
+            (
+                ["runtime/src/iree/base/status.c"],
+                [],
+            ),
+            (
+                [".github/workflows/ci_core_windows.yml"],
+                [presubmit.DEVTOOLS_PRESUBMIT_TEST_TARGET],
+            ),
+            (
+                [".github/workflows/presubmit.yml"],
+                [
+                    presubmit.DEVTOOLS_PRESUBMIT_TEST_TARGET,
+                    presubmit.LEFTHOOK_PRESUBMIT_TEST_TARGET,
+                ],
+            ),
+            (
+                ["build_tools/lefthook/presubmit.py"],
+                [presubmit.LEFTHOOK_PRESUBMIT_TEST_TARGET],
+            ),
+            (
+                ["build_tools/lefthook/README.md"],
+                [],
+            ),
+            (
+                ["runtime/build_tools/presubmit.py"],
+                ["//runtime/build_tools:presubmit_tests"],
+            ),
+            (
+                ["runtime/build_tools/BUILD.bazel"],
+                ["//runtime/build_tools:presubmit_tests"],
+            ),
+            (
+                ["runtime/build_tools/bazel/cc.bzl"],
+                [],
+            ),
+            (
+                ["loom/build_tools/linters/loom_source_lint.py"],
+                ["//loom/build_tools:presubmit_tests"],
+            ),
+            (
+                ["loom/build_tools/amdgpu/target_config.py"],
+                [],
+            ),
+            (
+                ["build_tools/devtools/project_presubmit.py"],
+                [
+                    presubmit.DEVTOOLS_PRESUBMIT_TEST_TARGET,
+                    "//runtime/build_tools:presubmit_tests",
+                    "//loom/build_tools:presubmit_tests",
+                ],
+            ),
+        )
+        for paths, expected_targets in cases:
+            with self.subTest(paths=paths):
+                self.assertEqual(
+                    presubmit.repository_tool_test_targets(paths),
+                    expected_targets,
+                )
 
     def test_existing_project_scripts_include_loom(self):
         self.assertIn(
@@ -1114,7 +1176,7 @@ class PresubmitTest(unittest.TestCase):
         self.assertEqual(description, "loom hygiene")
         self.assertFalse(verbose)
 
-    def test_disabling_project_tests_preserves_project_hygiene(self):
+    def test_disabling_project_tests_preserves_hygiene_and_tool_tests(self):
         project = presubmit.Project(
             name="loom",
             root="loom/",
@@ -1139,8 +1201,8 @@ class PresubmitTest(unittest.TestCase):
                 presubmit, "run_project_presubmits", return_value=True
             ) as run_project_presubmits,
             mock.patch.object(
-                presubmit, "run_root_devtools_tests_for_lane", return_value=True
-            ),
+                presubmit, "run_repository_tool_tests_for_lane", return_value=True
+            ) as run_repository_tool_tests,
             mock.patch.object(presubmit, "skip_step", return_value=True),
         ):
             self.assertEqual(
@@ -1156,6 +1218,9 @@ class PresubmitTest(unittest.TestCase):
         self.assertEqual(
             run_project_presubmits.call_args.kwargs["phase"],
             "hygiene",
+        )
+        run_repository_tool_tests.assert_called_once_with(
+            ["loom/test.loom"], lane="bazel", verbose=False
         )
 
 

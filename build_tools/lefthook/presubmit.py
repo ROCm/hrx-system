@@ -157,6 +157,8 @@ class Project:
     name: str
     root: str
     script: str
+    presubmit_test_target: str | None = None
+    presubmit_test_dependencies: tuple[str, ...] = ()
 
 
 PROJECTS = (
@@ -164,6 +166,11 @@ PROJECTS = (
         name="runtime",
         root="runtime/",
         script="runtime/build_tools/presubmit.py",
+        presubmit_test_target="//runtime/build_tools:presubmit_tests",
+        presubmit_test_dependencies=(
+            "build_tools/devtools/BUILD.bazel",
+            "build_tools/devtools/project_presubmit.py",
+        ),
     ),
     Project(
         name="libhrx",
@@ -174,6 +181,13 @@ PROJECTS = (
         name="loom",
         root="loom/",
         script="loom/build_tools/presubmit.py",
+        presubmit_test_target="//loom/build_tools:presubmit_tests",
+        presubmit_test_dependencies=(
+            "build_tools/devtools/BUILD.bazel",
+            "build_tools/devtools/project_presubmit.py",
+            "build_tools/devtools/source_lock.py",
+            "loom/build_tools/linters/loom_source_lint.py",
+        ),
     ),
 )
 
@@ -184,20 +198,28 @@ GLOBAL_PROJECT_TRIGGERS = (
     ".bazel_to_cmake.cfg.py",
     "requirements",
 )
-ROOT_DEVTOOLS_TRIGGERS = (
-    ".github/workflows/docs.yml",
-    ".github/workflows/presubmit.yml",
-    "CONTRIBUTING.md",
-    "README.md",
+DEVTOOLS_TEST_TRIGGERS = (
+    ".github/workflows/",
     "dev.py",
-    "lefthook.yml",
     "requirements-analysis",
     "requirements-dev",
     "loom/docs/requirements",
-    "build_tools/static_analysis/",
     "build_tools/devtools/",
-    "build_tools/lefthook/",
 )
+LEFTHOOK_TEST_PATHS = frozenset(
+    {
+        ".github/workflows/presubmit.yml",
+        "lefthook.yml",
+        "build_tools/lefthook/BUILD.bazel",
+        "build_tools/lefthook/commit_msg.py",
+        "build_tools/lefthook/commit_msg_test.py",
+        "build_tools/lefthook/presubmit.py",
+        "build_tools/lefthook/presubmit_test.py",
+        "build_tools/devtools/source_lock.py",
+    }
+)
+DEVTOOLS_PRESUBMIT_TEST_TARGET = "//build_tools/devtools:presubmit_tests"
+LEFTHOOK_PRESUBMIT_TEST_TARGET = "//build_tools/lefthook:presubmit_tests"
 CLANG_TIDY_FULL_SCOPE_EXACT_PATHS = {
     ".bazelrc",
     ".bazelversion",
@@ -323,7 +345,10 @@ def parse_arguments() -> argparse.Namespace:
         dest="project_tests",
         action="store_false",
         default=True,
-        help="Skip runtime/libhrx/loom project tests while still running root devtools tests.",
+        help=(
+            "Skip runtime/libhrx/loom product tests while still running "
+            "changed repository-tool tests."
+        ),
     )
     parser.add_argument(
         "--static-analysis",
@@ -1555,9 +1580,35 @@ def run_project_presubmits(
     return ok
 
 
-def run_root_devtools_tests(paths: list[str], verbose: bool) -> bool:
-    if not any(is_root_devtools_trigger(path) for path in paths):
-        return skip_step("Root devtools tests", "no root devtools inputs")
+def is_project_presubmit_test_trigger(project: Project, path: str) -> bool:
+    script_stem = project.script.removesuffix(".py")
+    build_file = project.script.rpartition("/")[0] + "/BUILD.bazel"
+    return path in (
+        project.script,
+        f"{script_stem}_test.py",
+        build_file,
+        *project.presubmit_test_dependencies,
+    )
+
+
+def repository_tool_test_targets(paths: list[str]) -> list[str]:
+    targets = []
+    if any(is_devtools_test_trigger(path) for path in paths):
+        targets.append(DEVTOOLS_PRESUBMIT_TEST_TARGET)
+    if any(is_lefthook_test_trigger(path) for path in paths):
+        targets.append(LEFTHOOK_PRESUBMIT_TEST_TARGET)
+    for project in existing_project_scripts():
+        if project.presubmit_test_target and any(
+            is_project_presubmit_test_trigger(project, path) for path in paths
+        ):
+            targets.append(project.presubmit_test_target)
+    return targets
+
+
+def run_repository_tool_tests(paths: list[str], verbose: bool) -> bool:
+    test_targets = repository_tool_test_targets(paths)
+    if not test_targets:
+        return skip_step("Repository tool tests", "no repository tool inputs")
     ok = True
     ok = (
         run_command(
@@ -1565,37 +1616,37 @@ def run_root_devtools_tests(paths: list[str], verbose: bool) -> bool:
                 "bazel",
                 "test",
                 "--config=presubmit",
-                "//build_tools/devtools:all",
-                "//build_tools/lefthook:all",
+                *test_targets,
             ],
-            "Root devtools Bazel tests",
+            "Repository tool Bazel tests",
             verbose,
         )
         and ok
     )
-    ok = (
-        run_command(
-            [
-                "python",
-                "build_tools/devtools/cli_smoke_test.py",
-            ],
-            "Root devtools command smoke test",
-            verbose,
+    if DEVTOOLS_PRESUBMIT_TEST_TARGET in test_targets:
+        ok = (
+            run_command(
+                [
+                    "python",
+                    "build_tools/devtools/cli_smoke_test.py",
+                ],
+                "Root devtools command smoke test",
+                verbose,
+            )
+            and ok
         )
-        and ok
-    )
     return ok
 
 
-def run_root_devtools_tests_for_lane(
+def run_repository_tool_tests_for_lane(
     paths: list[str], lane: str, verbose: bool
 ) -> bool:
     if lane == "bazel":
-        return run_root_devtools_tests(paths, verbose)
+        return run_repository_tool_tests(paths, verbose)
     if lane != "cmake":
         raise ValueError(f"unknown lane: {lane}")
-    if not any(is_root_devtools_trigger(path) for path in paths):
-        return skip_step("Root devtools tests", "no root devtools inputs")
+    if not any(is_devtools_test_trigger(path) for path in paths):
+        return skip_step("Repository tool tests", "no devtools inputs")
     return run_command(
         [
             "python",
@@ -1613,15 +1664,19 @@ def run_root_devtools_tests_for_lane(
     )
 
 
-def is_root_devtools_trigger(path: str) -> bool:
+def is_devtools_test_trigger(path: str) -> bool:
     if path.startswith("requirements-") and (
         path.endswith(".in") or path.endswith(".lock.txt")
     ):
         return True
     return any(
         path == trigger or path.startswith(trigger)
-        for trigger in ROOT_DEVTOOLS_TRIGGERS
+        for trigger in DEVTOOLS_TEST_TRIGGERS
     )
+
+
+def is_lefthook_test_trigger(path: str) -> bool:
+    return path in LEFTHOOK_TEST_PATHS
 
 
 def run_semgrep(inputs: PresubmitInputs, profile: str, verbose: bool) -> bool:
@@ -2546,7 +2601,7 @@ def run_presubmit(
     if args.tests:
         print_section("Tests")
         ok = (
-            run_root_devtools_tests_for_lane(
+            run_repository_tool_tests_for_lane(
                 paths, lane=args.lane, verbose=args.verbose
             )
             and ok
