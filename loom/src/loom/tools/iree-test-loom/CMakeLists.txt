@@ -67,6 +67,7 @@ if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND LOOM_EXECUTE_IREE_HAL AND IREE
   list(APPEND _iree_test_loom_platform_deps loom::tooling::target::spirv::testbench_requirements)
 endif()
 if(LOOM_TARGET_ARCH_VM)
+  list(APPEND _iree_test_loom_platform_deps iree::vm::execution_test_provider)
   list(APPEND _iree_test_loom_platform_deps loom::target::arch::vm::provider)
   list(APPEND _iree_test_loom_platform_deps loom::target::emit::vm)
   list(APPEND _iree_test_loom_platform_deps loom::tooling::target::vm::testbench_actual)
@@ -83,6 +84,7 @@ loom_cc_binary(
     iree::base
     loom::tooling::execution::execution_provider
     ${_iree_test_loom_platform_deps}
+  TESTONLY
 )
 
 iree_execution_test_suite(

@@ -1,0 +1,15 @@
+vm.target<core> @vm
+
+global.rodata.def @message = align(1) bytes("657870656374656420564d2070726f6772616d206661696c757265")
+
+func.def public target(@vm) @fail() {
+  %condition = scalar.constant 0 : i1
+  %message = global.load @message : buffer
+  cfg.assert %condition, %message : buffer
+  func.return
+}
+
+check.case @program_failure {
+  func.call @fail() : ()
+  check.return
+}

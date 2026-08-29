@@ -11,10 +11,12 @@
         "contains": {
           "unordered": [
             "\"format\":\"loom.test.v0\"",
-            "\"case_count\":9",
-            "\"sample_count\":9",
+            "\"case_count\":11",
+            "\"sample_count\":11",
             "\"failed_sample_count\":0",
             "\"case\":\"initializer_and_export_alias\"",
+            "\"case\":\"native_module_execution\"",
+            "\"case\":\"native_module_suspension\"",
             "\"case\":\"shared_process_sequence\"",
             "\"case\":\"direct_control_flow\"",
             "\"case\":\"integer_execution\"",
@@ -25,6 +27,21 @@
             "\"case\":\"constant_pool_execution\""
           ]
         }
+      }
+    },
+    {
+      "name": "reports VM program failure",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": ["{srcdir}/semantic_failure.loom"]
+      },
+      "exit": {
+        "nonzero": true
+      },
+      "stderr": {
+        "contains": [
+          "FAILED_PRECONDITION; expected VM program failure"
+        ]
       }
     }
   ]

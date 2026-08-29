@@ -367,7 +367,7 @@ static iree_status_t loom_vm_testbench_compile_program(
   if (iree_status_is_ok(status)) {
     const iree_vm_program_modules_t modules = {
         .executable = runtime_module,
-        .libraries = iree_vm_module_span_empty(),
+        .libraries = options->runtime_libraries,
     };
     status = iree_vm_program_create(modules, options->host_allocator, &program);
   }

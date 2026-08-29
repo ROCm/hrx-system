@@ -62,7 +62,9 @@ def loom_tools_toolchains(
     ``<name>_<role>_toolchain`` registrations for the benchmark, compile,
     format, lint, link, and test roles. Splitting the roles prevents a rule
     using one executable from configuring the dependency graphs of the other
-    tools.
+    tools. The test implementation and registration remain test-only so their
+    runner may depend on test providers without making those providers part of
+    production tool graphs.
     """
     tools = {
         "benchmark": benchmark_tool,
@@ -74,9 +76,11 @@ def loom_tools_toolchains(
     }
     for role, tool in tools.items():
         implementation_name = "%s_%s" % (name, role)
+        is_test_role = role == "test"
         _loom_toolchain(
             name = implementation_name,
             tags = tags,
+            testonly = is_test_role,
             tool = tool,
             visibility = ["//visibility:private"],
         )
@@ -86,6 +90,7 @@ def loom_tools_toolchains(
             "tags": tags,
             "target_compatible_with": target_compatible_with,
             "target_settings": target_settings,
+            "testonly": is_test_role,
             "toolchain": ":" + implementation_name,
             "toolchain_type": _TOOLCHAIN_TYPES[role],
         }

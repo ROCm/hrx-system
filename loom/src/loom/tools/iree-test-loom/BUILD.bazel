@@ -62,6 +62,7 @@ _VM_TARGET_DEPS = iree_select({
         "//loom/src/loom/target/arch/vm:provider",
         "//loom/src/loom/target/emit/vm",
         "//loom/src/loom/tooling/target/vm:testbench_actual",
+        "//runtime/src/iree/vm:execution_test_provider",
     ],
     "//conditions:default": [],
 })
@@ -113,6 +114,7 @@ loom_cc_library(
 
 loom_cc_binary(
     name = "iree-test-loom",
+    testonly = True,
     srcs = ["iree-test-loom.c"],
     copts = _IREE_TEST_LOOM_TARGET_COPTS,
     deps = [

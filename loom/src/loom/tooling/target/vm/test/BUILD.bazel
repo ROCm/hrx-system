@@ -21,6 +21,7 @@ iree_execution_test_suite(
     name = "iree_test_loom_execution_test",
     data = [
         "semantic_execution.loom",
+        "semantic_failure.loom",
     ],
     manifests = ["iree-test-loom_vm.test.json"],
     tags = ["hostonly"],

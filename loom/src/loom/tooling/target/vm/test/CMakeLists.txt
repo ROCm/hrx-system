@@ -19,6 +19,7 @@ iree_execution_test_suite(
     "iree-test-loom=loom::tools::iree-test-loom"
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/vm/test/semantic_execution.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/vm/test/semantic_failure.loom"
   LABELS
     "hostonly"
 )

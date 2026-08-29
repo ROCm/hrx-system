@@ -10,6 +10,7 @@
 #define LOOM_TOOLING_TARGET_VM_TESTBENCH_ACTUAL_H_
 
 #include "iree/base/api.h"
+#include "iree/vm/program.h"
 #include "loom/target/provider.h"
 #include "loom/tooling/config/config.h"
 #include "loom/tooling/execution/session.h"
@@ -20,7 +21,6 @@ extern "C" {
 #endif
 
 typedef struct iree_vm_invocation_t iree_vm_invocation_t;
-typedef struct iree_vm_program_t iree_vm_program_t;
 typedef struct iree_vm_variant_t iree_vm_variant_t;
 
 typedef struct loom_vm_testbench_actual_options_t {
@@ -32,6 +32,9 @@ typedef struct loom_vm_testbench_actual_options_t {
   const loom_run_module_t* run_module;
   // Complete module plan selecting the union of function-call roots.
   const loom_testbench_module_plan_t* module_plan;
+  // Runtime modules borrowed during initialization to satisfy VM imports. The
+  // resulting program retains every participating module.
+  iree_vm_module_span_t runtime_libraries;
   // User-selected compiler pipeline.
   iree_string_view_t pipeline;
   // Compile-time config bindings materialized into the private module.
