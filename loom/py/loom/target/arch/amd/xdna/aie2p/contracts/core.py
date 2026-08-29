@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""AMD XDNA AIE2P scalar source-to-Low contract fragment."""
+"""AMD XDNA AIE2P core source-to-Low contract fragment."""
 
 from __future__ import annotations
 
@@ -15,6 +15,8 @@ from loom.dialect.scalar import arithmetic as scalar_arithmetic
 from loom.dialect.scalar import bitwise as scalar_bitwise
 from loom.dialect.scalar import comparison as scalar_comparison
 from loom.dialect.scalar import conversion as scalar_conversion
+from loom.dialect.vector import ALL_VECTOR_OPS
+from loom.dialect.vector import defs as vector
 from loom.dsl import Op
 from loom.target.arch.amd.xdna.aie2p.core_descriptors import (
     AIE2P_CORE_DESCRIPTOR_SET,
@@ -29,14 +31,22 @@ from loom.target.contracts import (
     Guard,
     Scalar,
     TypePattern,
+    ValueAliasRule,
     ValueProject,
     ValueRef,
+    Vector,
     descriptor_by_key,
 )
 from loom.target.low_descriptors import Descriptor
 
 _I1 = Scalar("i1")
+_I8 = Scalar("i8")
+_I16 = Scalar("i16")
 _I32 = Scalar("i32")
+_I8_VECTOR = Vector("i8", minimum_lanes=1, maximum_lanes=64)
+_I16_VECTOR = Vector("i16", minimum_lanes=1, maximum_lanes=32)
+_I32_VECTOR = Vector("i32", minimum_lanes=1, maximum_lanes=16)
+_INTEGER_VECTOR_TYPES = (_I8_VECTOR, _I16_VECTOR, _I32_VECTOR)
 
 _I32_MIN = -(2**31)
 _I32_MAX = (2**31) - 1
@@ -59,7 +69,7 @@ def _op_emit(
     *,
     operands: Mapping[str, ValueRef] | None = None,
     results: Mapping[str, ValueRef] | None = None,
-    result_types: Mapping[str, TypePattern] | None = None,
+    result_types: Mapping[str, TypePattern | ValueRef] | None = None,
 ) -> EmitDescriptorOp:
     return EmitDescriptorOp(
         descriptor=descriptor,
@@ -153,6 +163,110 @@ def _binary_rule(
                 results={"d0": ValueRef.result("result")},
             ),
         ),
+    )
+
+
+def _vector_binary_rule(
+    source_op: Op,
+    type_pattern: TypePattern,
+    descriptor_key: str,
+) -> DescriptorRule:
+    descriptor = _descriptor(descriptor_key)
+    return DescriptorRule(
+        source_op=source_op,
+        descriptor=descriptor,
+        guards=_typed_guards(("lhs", "rhs", "result"), type_pattern),
+        emit=(
+            _op_emit(
+                descriptor,
+                operands={
+                    "s1": ValueRef.operand("lhs"),
+                    "s2": ValueRef.operand("rhs"),
+                },
+                results={"d": ValueRef.result("result")},
+            ),
+        ),
+    )
+
+
+def _vector_splat_rule(
+    scalar_type: TypePattern,
+    result_type: TypePattern,
+    descriptor_key: str,
+) -> DescriptorRule:
+    descriptor = _descriptor(descriptor_key)
+    return DescriptorRule(
+        source_op=vector.vector_splat,
+        descriptor=descriptor,
+        guards=(
+            Guard.value_type("scalar", scalar_type),
+            Guard.value_type("result", result_type),
+        ),
+        emit=(
+            _op_emit(
+                descriptor,
+                operands={"src": ValueRef.operand("scalar")},
+                results={"dst": ValueRef.result("result")},
+            ),
+        ),
+    )
+
+
+def _vector_xor_rule(
+    type_pattern: TypePattern,
+    subtract_descriptor_key: str,
+) -> DescriptorRule:
+    bitwise_or = _descriptor("amd.xdna.aie2p.or.bits512")
+    bitwise_and = _descriptor("amd.xdna.aie2p.and.bits512")
+    subtract = _descriptor(subtract_descriptor_key)
+    return DescriptorRule(
+        source_op=vector.vector_xori,
+        descriptor=subtract,
+        guards=_typed_guards(("lhs", "rhs", "result"), type_pattern),
+        emit=(
+            _op_emit(
+                bitwise_or,
+                operands={
+                    "s1": ValueRef.operand("lhs"),
+                    "s2": ValueRef.operand("rhs"),
+                },
+                results={"d": ValueRef.temporary("union")},
+                result_types={"d": ValueRef.operand("lhs")},
+            ),
+            _op_emit(
+                bitwise_and,
+                operands={
+                    "s1": ValueRef.operand("lhs"),
+                    "s2": ValueRef.operand("rhs"),
+                },
+                results={"d": ValueRef.temporary("intersection")},
+                result_types={"d": ValueRef.operand("lhs")},
+            ),
+            _op_emit(
+                subtract,
+                operands={
+                    "s1": ValueRef.temporary("union"),
+                    "s2": ValueRef.temporary("intersection"),
+                },
+                results={"d": ValueRef.result("result")},
+            ),
+        ),
+    )
+
+
+def _vector_bitcast_alias_rules() -> tuple[ValueAliasRule, ...]:
+    return tuple(
+        ValueAliasRule(
+            source_op=vector.vector_bitcast,
+            source=ValueRef.operand("input"),
+            result=ValueRef.result("result"),
+            guards=(
+                Guard.value_type("input", source_type),
+                Guard.value_type("result", result_type),
+            ),
+        )
+        for source_type in _INTEGER_VECTOR_TYPES
+        for result_type in _INTEGER_VECTOR_TYPES
     )
 
 
@@ -334,6 +448,93 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
             "amd.xdna.aie2p.mul.i32",
         ),
         *(
+            _vector_binary_rule(source_op, type_pattern, descriptor_key)
+            for source_op, type_pattern, descriptor_key in (
+                (
+                    vector.vector_addi,
+                    _I8_VECTOR,
+                    "amd.xdna.aie2p.add.i8x64",
+                ),
+                (
+                    vector.vector_subi,
+                    _I8_VECTOR,
+                    "amd.xdna.aie2p.sub.i8x64",
+                ),
+                (
+                    vector.vector_addi,
+                    _I16_VECTOR,
+                    "amd.xdna.aie2p.add.i16x32",
+                ),
+                (
+                    vector.vector_subi,
+                    _I16_VECTOR,
+                    "amd.xdna.aie2p.sub.i16x32",
+                ),
+                (
+                    vector.vector_addi,
+                    _I32_VECTOR,
+                    "amd.xdna.aie2p.add.i32x16",
+                ),
+                (
+                    vector.vector_subi,
+                    _I32_VECTOR,
+                    "amd.xdna.aie2p.sub.i32x16",
+                ),
+            )
+        ),
+        *(
+            _vector_binary_rule(source_op, type_pattern, descriptor_key)
+            for source_op, type_pattern, descriptor_key in (
+                (
+                    vector.vector_andi,
+                    _I8_VECTOR,
+                    "amd.xdna.aie2p.and.bits512",
+                ),
+                (
+                    vector.vector_andi,
+                    _I16_VECTOR,
+                    "amd.xdna.aie2p.and.bits512",
+                ),
+                (
+                    vector.vector_andi,
+                    _I32_VECTOR,
+                    "amd.xdna.aie2p.and.bits512",
+                ),
+                (
+                    vector.vector_ori,
+                    _I8_VECTOR,
+                    "amd.xdna.aie2p.or.bits512",
+                ),
+                (
+                    vector.vector_ori,
+                    _I16_VECTOR,
+                    "amd.xdna.aie2p.or.bits512",
+                ),
+                (
+                    vector.vector_ori,
+                    _I32_VECTOR,
+                    "amd.xdna.aie2p.or.bits512",
+                ),
+            )
+        ),
+        *(
+            _vector_xor_rule(type_pattern, subtract_descriptor_key)
+            for type_pattern, subtract_descriptor_key in (
+                (_I8_VECTOR, "amd.xdna.aie2p.sub.i8x64"),
+                (_I16_VECTOR, "amd.xdna.aie2p.sub.i16x32"),
+                (_I32_VECTOR, "amd.xdna.aie2p.sub.i32x16"),
+            )
+        ),
+        *(
+            _vector_splat_rule(scalar_type, result_type, descriptor_key)
+            for scalar_type, result_type, descriptor_key in (
+                (_I8, _I8_VECTOR, "amd.xdna.aie2p.splat.i8x64"),
+                (_I16, _I16_VECTOR, "amd.xdna.aie2p.splat.i16x32"),
+                (_I32, _I32_VECTOR, "amd.xdna.aie2p.splat.i32x16"),
+            )
+        ),
+        *_vector_bitcast_alias_rules(),
+        *(
             _binary_rule(source_op, type_pattern, descriptor_key)
             for source_op, type_pattern, descriptor_key in (
                 (
@@ -427,7 +628,10 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
     )
 
 
-AIE2P_CORE_CONTRACT_DIALECT_OPS = {"scalar": ALL_SCALAR_OPS}
+AIE2P_CORE_CONTRACT_DIALECT_OPS = {
+    "scalar": ALL_SCALAR_OPS,
+    "vector": ALL_VECTOR_OPS,
+}
 
 AIE2P_CORE_CONTRACT_FRAGMENT = ContractFragment(
     name="amd.xdna.aie2p.core",
