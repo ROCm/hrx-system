@@ -141,8 +141,8 @@ loom_vector_fragment_store_to_scalar_physical_result_loop_rewrite_ops(
 uint32_t loom_vector_fragment_store_to_scalar_reference_rejection_bits(
     loom_pass_t* pass, loom_rewriter_t* rewriter, loom_op_t* op);
 
-// Rewrites one scalar-result vector.extract when its lane can be rematerialized
-// from the source producer tree.
+// Rewrites one scalar-result vector.extract by rematerializing its source lane
+// or selecting from the statically bounded source lanes.
 iree_status_t loom_vector_extract_to_scalar_rewrite_op(
     loom_pass_t* pass, loom_rewriter_t* rewriter, loom_op_t* op,
     bool* out_rewritten);

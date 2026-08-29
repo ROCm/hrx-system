@@ -312,9 +312,9 @@ static iree_status_t loom_vector_to_scalar_lower_atomic_cmpxchg_op(
   return loom_vector_to_scalar_replace_one_result(&state, replacement);
 }
 
-static iree_status_t loom_vector_to_scalar_lower_scalar_extract(
+static iree_status_t loom_vector_to_scalar_lower_scalar_extract_impl(
     loom_pass_t* pass, loom_rewriter_t* rewriter, loom_op_t* op,
-    bool* out_handled) {
+    bool allow_dynamic_lane_selection, bool* out_handled) {
   loom_value_id_t result = loom_vector_extract_result(op);
   loom_type_t result_type = loom_module_value_type(rewriter->module, result);
   if (loom_type_is_vector(result_type)) {
@@ -354,8 +354,44 @@ static iree_status_t loom_vector_to_scalar_lower_scalar_extract(
       &state, source, source_type, source_indices, &materialized,
       &replacement));
   if (loom_pass_has_error_diagnostics(pass)) return iree_ok_status();
+  if (!materialized && allow_dynamic_lane_selection &&
+      loom_vector_to_scalar_indices_are_dynamic(source_indices) &&
+      loom_type_is_all_static(source_type)) {
+    uint64_t lane_count = 0;
+    if (loom_type_static_element_count(source_type, &lane_count) &&
+        lane_count > 0 && lane_count <= UINT16_MAX) {
+      loom_vector_to_scalar_index_term_t source_ordinal = {0};
+      IREE_RETURN_IF_ERROR(loom_vector_to_scalar_linear_ordinal_term(
+          &state, source_type, source_indices, &source_ordinal));
+      IREE_RETURN_IF_ERROR(loom_vector_to_scalar_materialize_linear_lane(
+          &state, source, source_type, loom_vector_to_scalar_static_term(0),
+          &replacement));
+      for (uint64_t lane_ordinal = 1; lane_ordinal < lane_count;
+           ++lane_ordinal) {
+        loom_value_id_t lane = LOOM_VALUE_ID_INVALID;
+        IREE_RETURN_IF_ERROR(loom_vector_to_scalar_materialize_linear_lane(
+            &state, source, source_type,
+            loom_vector_to_scalar_static_term((int64_t)lane_ordinal), &lane));
+        loom_value_id_t is_selected = LOOM_VALUE_ID_INVALID;
+        IREE_RETURN_IF_ERROR(loom_vector_to_scalar_build_index_term_cmp(
+            &state, LOOM_INDEX_CMP_PREDICATE_EQ, source_ordinal,
+            loom_vector_to_scalar_static_term((int64_t)lane_ordinal),
+            &is_selected));
+        IREE_RETURN_IF_ERROR(loom_vector_to_scalar_build_select_lane(
+            &state, is_selected, lane, replacement, &replacement));
+      }
+      materialized = true;
+    }
+  }
   if (!materialized) return iree_ok_status();
   return loom_vector_to_scalar_replace_one_result(&state, replacement);
+}
+
+static iree_status_t loom_vector_to_scalar_lower_scalar_extract(
+    loom_pass_t* pass, loom_rewriter_t* rewriter, loom_op_t* op,
+    bool* out_handled) {
+  return loom_vector_to_scalar_lower_scalar_extract_impl(
+      pass, rewriter, op, /*allow_dynamic_lane_selection=*/false, out_handled);
 }
 
 static iree_status_t loom_vector_to_scalar_lower_static_constant(
@@ -1068,8 +1104,8 @@ iree_status_t loom_vector_extract_to_scalar_rewrite_op(
   }
   loom_builder_set_before(&rewriter->builder, op);
   bool handled = false;
-  IREE_RETURN_IF_ERROR(
-      loom_vector_to_scalar_lower_scalar_extract(pass, rewriter, op, &handled));
+  IREE_RETURN_IF_ERROR(loom_vector_to_scalar_lower_scalar_extract_impl(
+      pass, rewriter, op, /*allow_dynamic_lane_selection=*/true, &handled));
   if (handled && !loom_pass_has_error_diagnostics(pass) &&
       iree_any_bit_set(op->flags, LOOM_OP_FLAG_DEAD)) {
     *out_rewritten = true;
