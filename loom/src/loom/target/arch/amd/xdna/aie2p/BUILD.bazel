@@ -164,10 +164,12 @@ loom_check_test_suite(
     srcs = [
         "test/source_low/numeric_scalar_i32.loom-test",
         "test/source_low/packed_i8_arithmetic.loom-test",
+        "test/source_low/packed_integer_arithmetic.loom-test",
     ],
     data = [
         "//loom/src/loom/test/corpus/source_low:numeric_scalar_i32.loom-test",
         "//loom/src/loom/test/corpus/source_low:packed_i8_arithmetic.loom-test",
+        "//loom/src/loom/test/corpus/source_low:packed_integer_arithmetic.loom-test",
     ],
     runner = ":loom-check",
     test_name_prefix_to_strip = "test/source_low/",
@@ -176,6 +178,7 @@ loom_check_test_suite(
 iree_execution_test_suite(
     name = "loom_compile_execution_test",
     data = [
+        "test/end_to_end/packed_integer.loom",
         "test/end_to_end/scalar_i32.loom",
         "test/end_to_end/vector_integer.loom",
         "test/end_to_end/vector_predicate.loom",

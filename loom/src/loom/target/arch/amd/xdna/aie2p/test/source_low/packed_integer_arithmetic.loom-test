@@ -1,0 +1,225 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/packed_integer_arithmetic.loom-test
+// RUN: emit source-low output=low
+
+aie2p.target<core> @target
+func.def target(@target) @i8x8_bitwise_storage_tuple(%lhs: vector<8xi8>, %rhs: vector<8xi8>) -> (vector<8xi8>, vector<8xi8>, vector<8xi8>) {
+  %and = vector.andi %lhs, %rhs : vector<8xi8>
+  %or = vector.ori %lhs, %rhs : vector<8xi8>
+  %xor = vector.xori %lhs, %rhs : vector<8xi8>
+  func.return %and, %or, %xor : vector<8xi8>, vector<8xi8>, vector<8xi8>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i8x8_bitwise_storage_tuple(%lhs: reg<aie2p.vec512>, %rhs: reg<aie2p.vec512>) -> (reg<aie2p.vec512>, reg<aie2p.vec512>, reg<aie2p.vec512>) asm {
+  %and = vband %lhs, %rhs
+  %or = vbor %lhs, %rhs
+  %xor = vsub.8 %or, %and
+  return %and, %or, %xor
+}
+
+// ====
+
+aie2p.target<core> @target
+func.def target(@target) @i16x4_bitwise_storage_tuple(%lhs: vector<4xi16>, %rhs: vector<4xi16>) -> (vector<4xi16>, vector<4xi16>, vector<4xi16>) {
+  %and = vector.andi %lhs, %rhs : vector<4xi16>
+  %or = vector.ori %lhs, %rhs : vector<4xi16>
+  %xor = vector.xori %lhs, %rhs : vector<4xi16>
+  func.return %and, %or, %xor : vector<4xi16>, vector<4xi16>, vector<4xi16>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i16x4_bitwise_storage_tuple(%lhs: reg<aie2p.vec512>, %rhs: reg<aie2p.vec512>) -> (reg<aie2p.vec512>, reg<aie2p.vec512>, reg<aie2p.vec512>) asm {
+  %and = vband %lhs, %rhs
+  %or = vbor %lhs, %rhs
+  %xor = vsub.16 %or, %and
+  return %and, %or, %xor
+}
+
+// ====
+
+aie2p.target<core> @target
+func.def target(@target) @i16x4_add_sub_storage_tuple(%lhs: vector<4xi16>, %rhs: vector<4xi16>) -> (vector<4xi16>, vector<4xi16>) {
+  %sum = vector.addi %lhs, %rhs : vector<4xi16>
+  %diff = vector.subi %lhs, %rhs : vector<4xi16>
+  func.return %sum, %diff : vector<4xi16>, vector<4xi16>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i16x4_add_sub_storage_tuple(%lhs: reg<aie2p.vec512>, %rhs: reg<aie2p.vec512>) -> (reg<aie2p.vec512>, reg<aie2p.vec512>) asm {
+  %sum = vadd.16 %lhs, %rhs
+  %diff = vsub.16 %lhs, %rhs
+  return %sum, %diff
+}
+
+// ====
+
+aie2p.target<core> @target
+func.def target(@target) @i16x4_mul_minmax_storage_tuple(%lhs: vector<4xi16>, %rhs: vector<4xi16>) -> (vector<4xi16>, vector<4xi16>, vector<4xi16>, vector<4xi16>, vector<4xi16>) {
+  %product = vector.muli %lhs, %rhs : vector<4xi16>
+  %smin = vector.minsi %lhs, %rhs : vector<4xi16>
+  %smax = vector.maxsi %lhs, %rhs : vector<4xi16>
+  %umin = vector.minui %lhs, %rhs : vector<4xi16>
+  %umax = vector.maxui %lhs, %rhs : vector<4xi16>
+  func.return %product, %smin, %smax, %umin, %umax : vector<4xi16>, vector<4xi16>, vector<4xi16>, vector<4xi16>, vector<4xi16>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i16x4_mul_minmax_storage_tuple(%lhs: reg<aie2p.vec512>, %rhs: reg<aie2p.vec512>) -> (reg<aie2p.vec512>, reg<aie2p.vec512>, reg<aie2p.vec512>, reg<aie2p.vec512>, reg<aie2p.vec512>) asm {
+  %19 = mova.i32 858
+  %20 = mov.shift 0
+  %21 = vmul.i16x32 %lhs, %rhs, %19
+  set.rounding 0
+  set.srs-mode 1
+  set.saturation 0
+  %product = vsrs.trunc.s16x32 %21, %20
+  %smin = min.s16x32 %lhs, %rhs
+  %smax = max.s16x32 %lhs, %rhs
+  %umin = min.u16x32 %lhs, %rhs
+  %umax = max.u16x32 %lhs, %rhs
+  return %product, %smin, %smax, %umin, %umax
+}
+
+// ====
+
+aie2p.target<core> @target
+func.def target(@target) @i16x4_shift_storage_tuple(%value: vector<4xi16>, %shift: vector<4xi16>) -> (vector<4xi16>, vector<4xi16>, vector<4xi16>) {
+  %left = vector.shli %value, %shift : vector<4xi16>
+  %signed_right = vector.shrsi %value, %shift : vector<4xi16>
+  %unsigned_right = vector.shrui %value, %shift : vector<4xi16>
+  func.return %left, %signed_right, %unsigned_right : vector<4xi16>, vector<4xi16>, vector<4xi16>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i16x4_shift_storage_tuple(%value: reg<aie2p.vec512>, %shift: reg<aie2p.vec512>) -> (reg<aie2p.vec512>, reg<aie2p.vec512>, reg<aie2p.vec512>) asm {
+  %64 = vextract.16.imm %value, 0
+  %65 = vextract.16.imm %shift, 0
+  %66 = lshl %64, %65
+  %67 = vextract.16.imm %value, 1
+  %68 = vextract.16.imm %shift, 1
+  %69 = lshl %67, %68
+  %70 = vextract.16.imm %value, 2
+  %71 = vextract.16.imm %shift, 2
+  %72 = lshl %70, %71
+  %73 = vextract.16.imm %value, 3
+  %74 = vextract.16.imm %shift, 3
+  %75 = lshl %73, %74
+  %76 = vbcst.16 %66
+  %77 = mov.short 1
+  %78 = copy %77 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %79 = vinsert.16.reg %76, %78, %69
+  %80 = mov.short 2
+  %81 = copy %80 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %82 = vinsert.16.reg %79, %81, %72
+  %83 = mov.short 3
+  %84 = copy %83 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %left = vinsert.16.reg %82, %84, %75
+  %86 = extend.s16 %64
+  %87 = mov.short 0
+  %88 = sub %87, %65
+  %89 = ashl %86, %88
+  %90 = extend.s16 %67
+  %92 = sub %87, %68
+  %93 = ashl %90, %92
+  %94 = extend.s16 %70
+  %96 = sub %87, %71
+  %97 = ashl %94, %96
+  %98 = extend.s16 %73
+  %100 = sub %87, %74
+  %101 = ashl %98, %100
+  %102 = vbcst.16 %89
+  %104 = copy %77 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %105 = vinsert.16.reg %102, %104, %93
+  %107 = copy %80 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %108 = vinsert.16.reg %105, %107, %97
+  %110 = copy %83 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %signed_right = vinsert.16.reg %108, %110, %101
+  %113 = sub %87, %65
+  %114 = lshl %64, %113
+  %116 = sub %87, %68
+  %117 = lshl %67, %116
+  %119 = sub %87, %71
+  %120 = lshl %70, %119
+  %122 = sub %87, %74
+  %123 = lshl %73, %122
+  %124 = vbcst.16 %114
+  %126 = copy %77 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %127 = vinsert.16.reg %124, %126, %117
+  %129 = copy %80 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %130 = vinsert.16.reg %127, %129, %120
+  %132 = copy %83 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %unsigned_right = vinsert.16.reg %130, %132, %123
+  return %left, %signed_right, %unsigned_right
+}
+
+// ====
+
+aie2p.target<core> @target
+func.def target(@target) @i16x4_bitcast_mul_maxui_chain(%packed: vector<2xi32>, %scale: vector<4xi16>, %limit: vector<4xi16>) -> (vector<4xi16>) {
+  %lanes = vector.bitcast %packed : vector<2xi32> to vector<4xi16>
+  %product = vector.muli %lanes, %scale : vector<4xi16>
+  %result = vector.maxui %product, %limit : vector<4xi16>
+  func.return %result : vector<4xi16>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i16x4_bitcast_mul_maxui_chain(%lanes: reg<aie2p.vec512>, %scale: reg<aie2p.vec512>, %limit: reg<aie2p.vec512>) -> (reg<aie2p.vec512>) asm {
+  %11 = mova.i32 858
+  %12 = mov.shift 0
+  %13 = vmul.i16x32 %lanes, %scale, %11
+  set.rounding 0
+  set.srs-mode 1
+  set.saturation 0
+  %product = vsrs.trunc.s16x32 %13, %12
+  %result = max.u16x32 %product, %limit
+  return %result
+}
+
+// ====
+
+aie2p.target<core> @target
+func.def target(@target) @i16x4_select_xori(%lhs: i32, %rhs: i32, %true_value: vector<4xi16>, %false_value: vector<4xi16>, %mask: vector<4xi16>) -> (vector<4xi16>) {
+  %condition = scalar.cmpi slt, %lhs, %rhs : i32
+  %predicate = vector.splat %condition : vector<4xi1>
+  %selected = vector.select %predicate, %true_value, %false_value : vector<4xi16>
+  %result = vector.xori %selected, %mask : vector<4xi16>
+  func.return %result : vector<4xi16>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i16x4_select_xori(%lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>, %true_value: reg<aie2p.vec512>, %false_value: reg<aie2p.vec512>, %mask: reg<aie2p.vec512>) -> (reg<aie2p.vec512>) asm {
+  %condition = lt %lhs, %rhs
+  %18 = select.mask %condition, -1
+  %selected = vsel.32 %true_value, %false_value, %18
+  %20 = vbor %selected, %mask
+  %21 = vband %selected, %mask
+  %result = vsub.16 %20, %21
+  return %result
+}
+
+// ====
+
+aie2p.target<core> @target
+func.def target(@target) @i16x4_cfg_arg_andi(%lhs: i32, %rhs: i32, %true_value: vector<4xi16>, %false_value: vector<4xi16>, %mask: vector<4xi16>) -> (vector<4xi16>) {
+  %condition = scalar.cmpi slt, %lhs, %rhs : i32
+  cfg.cond_br %condition, ^then, ^else
+^then:
+  cfg.br ^join(%true_value: vector<4xi16>)
+^else:
+  cfg.br ^join(%false_value: vector<4xi16>)
+^join(%selected: vector<4xi16>):
+  %result = vector.andi %selected, %mask : vector<4xi16>
+  func.return %result : vector<4xi16>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i16x4_cfg_arg_andi(%lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>, %true_value: reg<aie2p.vec512>, %false_value: reg<aie2p.vec512>, %mask: reg<aie2p.vec512>) -> (reg<aie2p.vec512>) asm {
+  %condition = lt %lhs, %rhs
+  low.cond_br %condition, ^then, ^else : reg<aie2p.er>
+^then:
+  low.br ^join(%true_value: reg<aie2p.vec512>)
+^else:
+  low.br ^join(%false_value: reg<aie2p.vec512>)
+^join(%selected: reg<aie2p.vec512>):
+  %result = vband %selected, %mask
+  return %result
+}

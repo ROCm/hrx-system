@@ -448,6 +448,12 @@ _DESCRIPTOR_SPECS = (
     _DescriptorSpec("XOR", f"{_TARGET_KEY}.xor.i32", "integer.xor.i32", "II_XOR"),
     _DescriptorSpec("ASHL", f"{_TARGET_KEY}.ashl.i32", "integer.ashl.i32", "II_ASHL"),
     _DescriptorSpec("LSHL", f"{_TARGET_KEY}.lshl.i32", "integer.lshl.i32", "II_LSHL"),
+    _DescriptorSpec(
+        "EXTEND_s16",
+        f"{_TARGET_KEY}.extend.signed.i16",
+        "integer.extend.signed.i16",
+        "II_EXTEND_s16",
+    ),
     _DescriptorSpec("EQ", f"{_TARGET_KEY}.cmp.eq.i32", "integer.cmp.eq.i32", "II_EQ"),
     _DescriptorSpec("NE", f"{_TARGET_KEY}.cmp.ne.i32", "integer.cmp.ne.i32", "II_NE"),
     _DescriptorSpec(

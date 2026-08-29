@@ -46,7 +46,7 @@ def test_core_descriptor_closure_is_complete() -> None:
     descriptor_set = AIE2P_CORE_DESCRIPTOR_SET
     assert len(descriptor_set.physical_registers) == 359
     assert len(descriptor_set.reg_classes) == 20
-    assert len(descriptor_set.descriptors) == 68
+    assert len(descriptor_set.descriptors) == 69
     assert tuple(row.name for row in descriptor_set.physical_registers) == tuple(
         row.name for row in CORE_MACHINE_TABLE.physical_registers
     )

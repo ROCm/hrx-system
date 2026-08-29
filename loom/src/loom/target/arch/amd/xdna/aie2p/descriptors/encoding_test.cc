@@ -235,6 +235,28 @@ TEST(DescriptorEncodingTest, I16MultiplyMatchesOracleInstructionEncodings) {
   EXPECT_EQ(program, std::vector<uint8_t>(expected.begin(), expected.end()));
 }
 
+TEST(DescriptorEncodingTest, SignedI16ExtendMatchesOracleInstructionEncoding) {
+  const loom_low_descriptor_set_t* descriptor_set =
+      loom_aie2p_core_descriptor_set();
+  std::vector<uint8_t> program;
+
+  loom_aie2p_encoded_slot_t zero;
+  IREE_ASSERT_OK(EncodeDescriptor(
+      descriptor_set, "amd.xdna.aie2p.constant.i32.mova", {"r1"}, {0}, &zero));
+  loom_aie2p_encoded_slot_t sign_extend;
+  IREE_ASSERT_OK(EncodeDescriptor(descriptor_set,
+                                  "amd.xdna.aie2p.extend.signed.i16",
+                                  {"r0", "r1"}, {}, &sign_extend));
+  IREE_ASSERT_OK(AppendBundle(
+      loom_aie2p_encoding_find_bundle_format(IREE_SV("I48_LDA_ALU")),
+      {zero, sign_extend}, &program));
+
+  const std::array<uint8_t, 6> expected = {
+      0x2C, 0xE0, 0x80, 0x00, 0x01, 0x00,  // mova r1, #0; extend.s16 r0, r1
+  };
+  EXPECT_EQ(program, std::vector<uint8_t>(expected.begin(), expected.end()));
+}
+
 TEST(DescriptorEncodingTest, PhysicalRegisterRowsAlignWithMachineTable) {
   const loom_low_descriptor_set_t* descriptor_set =
       loom_aie2p_core_descriptor_set();

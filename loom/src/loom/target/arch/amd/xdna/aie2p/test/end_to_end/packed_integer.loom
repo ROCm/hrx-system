@@ -1,0 +1,11 @@
+aie2p.target<core> @target
+
+func.def public target(@target) @packed_integer(
+    %value: vector<4xi16>,
+    %shift: vector<4xi16>
+) -> (vector<4xi16>, vector<4xi16>, vector<4xi16>) {
+  %left = vector.shli %value, %shift : vector<4xi16>
+  %signed_right = vector.shrsi %value, %shift : vector<4xi16>
+  %unsigned_right = vector.shrui %value, %shift : vector<4xi16>
+  func.return %left, %signed_right, %unsigned_right : vector<4xi16>, vector<4xi16>, vector<4xi16>
+}
