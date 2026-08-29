@@ -21,7 +21,6 @@ set(IREE_DEPENDENCY_IDS
   "vulkan_headers"
   "flatcc"
   "hsa_runtime_headers"
-  "hip_api_headers"
 )
 
 set(IREE_DEP_GOOGLE_BENCHMARK_KIND "bazel_dep")
@@ -163,17 +162,3 @@ set(IREE_DEP_HSA_RUNTIME_HEADERS_URLS
 set(IREE_DEP_HSA_RUNTIME_HEADERS_SHA256 "a906b35e77b9cee074995d144cf7718a0069eba08ba7bc741ee7576950fde923")
 set(IREE_DEP_HSA_RUNTIME_HEADERS_STRIP_PREFIX "hsa-runtime-headers-4285513114a70f7cf4830c89279c8cfa57b901bb")
 set(IREE_DEP_HSA_RUNTIME_HEADERS_BUILD_FILE "//build_tools/third_party/rocm:hsa_runtime_headers.BUILD.bazel")
-
-set(IREE_DEP_HIP_API_HEADERS_KIND "rocm_repository")
-set(IREE_DEP_HIP_API_HEADERS_OWNER "shared")
-set(IREE_DEP_HIP_API_HEADERS_MODULE_NAME "hip_api_headers")
-set(IREE_DEP_HIP_API_HEADERS_REPO_NAME "hip_api_headers")
-set(IREE_DEP_HIP_API_HEADERS_VERSION "")
-set(IREE_DEP_HIP_API_HEADERS_DEV_DEPENDENCY "FALSE")
-set(IREE_DEP_HIP_API_HEADERS_SOURCE_URL "")
-set(IREE_DEP_HIP_API_HEADERS_URLS
-  "https://github.com/iree-org/hip-build-deps/archive/c64ec391ab8eaf4c9872660b24a71fda8026b438.tar.gz"
-)
-set(IREE_DEP_HIP_API_HEADERS_SHA256 "6304eb646a811032bb4ec2db2927170afed677d3a59b8592e986b79dfaae805c")
-set(IREE_DEP_HIP_API_HEADERS_STRIP_PREFIX "hip-build-deps-c64ec391ab8eaf4c9872660b24a71fda8026b438")
-set(IREE_DEP_HIP_API_HEADERS_BUILD_FILE "//build_tools/third_party/rocm:hip_api_headers.BUILD.bazel")

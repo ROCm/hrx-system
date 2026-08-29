@@ -259,11 +259,6 @@ IREE_ROCM_PATH=/opt/rocm python dev.py bazel configure \
   -DIREE_ROCM_DEPENDENCY_MODE=pinned
 ```
 
-The Bazel HIP HAL driver is an opt-in testing/development path, not part of the
-default libhrx build path. It uses pinned HIP API headers by default and only
-requires `IREE_ROCM_PATH` when package mode or ROCm device/runtime tooling is
-required.
-
 Loom target options describe product compiler capability: `LOOM_TARGET_AMDGPU=ON`
 means Loom can compile for AMDGPU, including the target architecture metadata and
 production artifact emission needed by that backend. Runtime execution remains a

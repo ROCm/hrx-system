@@ -204,9 +204,9 @@ class DepsTest(unittest.TestCase):
                 )
 
                 rocm_repository(
-                    name = "rccl",
-                    build_file = "//build_tools/third_party/rocm:rccl_headers.BUILD.bazel",
-                    display_name = "RCCL headers",
+                    name = "system_headers",
+                    build_file = "//rocm:system_headers.BUILD.bazel",
+                    display_name = "System-only headers",
                 )
                 """,
             )
