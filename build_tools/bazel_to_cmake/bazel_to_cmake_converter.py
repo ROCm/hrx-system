@@ -58,7 +58,6 @@ _COMPILER_CMAKE_OPTIONS = {
 _RUNTIME_HAL_DRIVER_CMAKE_OPTIONS = {
     "//runtime/config/hal:driver_amdgpu": "IREE_HAL_DRIVER_AMDGPU",
     "//runtime/config/hal:driver_local_task": "IREE_HAL_DRIVER_LOCAL_TASK",
-    "//runtime/config/hal:driver_null": "IREE_HAL_DRIVER_NULL",
     "//runtime/config/hal:driver_vulkan": "IREE_HAL_DRIVER_VULKAN",
     "//runtime/config/hal:driver_webgpu": "IREE_HAL_DRIVER_WEBGPU",
     "//runtime/config/hal:executable_loader_embedded_elf": "IREE_HAL_EXECUTABLE_LOADER_EMBEDDED_ELF",

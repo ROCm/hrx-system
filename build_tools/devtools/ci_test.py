@@ -188,7 +188,6 @@ class CiTest(unittest.TestCase):
         for define in (
             "IREE_HAL_DRIVER_AMDGPU",
             "IREE_HAL_DRIVER_LOCAL_TASK",
-            "IREE_HAL_DRIVER_NULL",
             "IREE_HAL_DRIVER_VULKAN",
             "IREE_HAL_DRIVER_WEBGPU",
         ):
