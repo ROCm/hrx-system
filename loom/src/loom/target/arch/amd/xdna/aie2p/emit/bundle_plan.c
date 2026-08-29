@@ -251,6 +251,12 @@ static iree_status_t loom_aie2p_bundle_plan_encode_packet(
                 descriptor->operand_count * sizeof(*operand_assignments))
           : NULL;
   for (uint16_t i = 0; i < descriptor->operand_count; ++i) {
+    const loom_low_operand_t* operand =
+        &descriptor_set->operands[descriptor->operand_start + i];
+    if (operand->encoding_field_id == 0) {
+      operand_assignments[i] = NULL;
+      continue;
+    }
     const loom_low_allocation_assignment_t* assignment =
         loom_low_packet_descriptor_operand_assignment(&frame->allocation,
                                                       packet, i);
@@ -308,13 +314,19 @@ static iree_status_t loom_aie2p_bundle_plan_encode_packet(
 }
 
 static loom_aie2p_encoded_slot_t
-loom_aie2p_bundle_plan_encode_operandless_descriptor(
+loom_aie2p_bundle_plan_encode_structural_descriptor(
     const loom_low_descriptor_set_t* descriptor_set,
     uint32_t descriptor_ordinal) {
   const loom_low_descriptor_t* descriptor =
       &descriptor_set->descriptors[descriptor_ordinal];
-  IREE_ASSERT(descriptor->operand_count == 0 &&
-              descriptor->immediate_count == 0);
+  for (uint16_t i = 0; i < descriptor->operand_count; ++i) {
+    const loom_low_operand_t* operand =
+        &descriptor_set->operands[descriptor->operand_start + i];
+    IREE_ASSERT(operand->encoding_field_id == 0 &&
+                "structural descriptor operands must not encode bits");
+  }
+  IREE_ASSERT(descriptor->immediate_count == 0 &&
+              "structural descriptors must not carry immediates");
   return loom_aie2p_descriptor_encode(descriptor_set, descriptor_ordinal, NULL,
                                       NULL);
 }
@@ -347,7 +359,7 @@ static iree_status_t loom_aie2p_bundle_plan_encode_cycle(
       frame->target.descriptor_set;
   if (include_return) {
     out_slots[slot_count++] = (loom_aie2p_planned_slot_t){
-        .encoded_slot = loom_aie2p_bundle_plan_encode_operandless_descriptor(
+        .encoded_slot = loom_aie2p_bundle_plan_encode_structural_descriptor(
             descriptor_set, AIE2P_CORE_DESCRIPTOR_REF_RETURN_),
         .scheduled_packet_index = return_packet_index,
         .flags = LOOM_AIE2P_PLANNED_SLOT_FLAG_STRUCTURAL_CONTROL,
@@ -355,7 +367,7 @@ static iree_status_t loom_aie2p_bundle_plan_encode_cycle(
   }
   if (slot_count == 0) {
     out_slots[slot_count++] = (loom_aie2p_planned_slot_t){
-        .encoded_slot = loom_aie2p_bundle_plan_encode_operandless_descriptor(
+        .encoded_slot = loom_aie2p_bundle_plan_encode_structural_descriptor(
             descriptor_set, AIE2P_CORE_DESCRIPTOR_REF_NOP),
         .scheduled_packet_index = LOOM_AIE2P_BUNDLE_PLAN_PACKET_NONE,
         .flags = LOOM_AIE2P_PLANNED_SLOT_FLAG_SYNTHETIC_NOP,

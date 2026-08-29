@@ -30,7 +30,13 @@ iree_status_t EncodeDescriptor(
   }
   const loom_low_descriptor_t* descriptor =
       &descriptor_set->descriptors[descriptor_ordinal];
-  if (register_names.size() != descriptor->operand_count) {
+  iree_host_size_t encoded_operand_count = 0;
+  for (uint16_t i = 0; i < descriptor->operand_count; ++i) {
+    const loom_low_operand_t* operand =
+        &descriptor_set->operands[descriptor->operand_start + i];
+    encoded_operand_count += operand->encoding_field_id != 0;
+  }
+  if (register_names.size() != encoded_operand_count) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "AIE2P test register count differs");
   }
@@ -38,13 +44,17 @@ iree_status_t EncodeDescriptor(
   std::vector<loom_low_allocation_assignment_t> assignments(
       descriptor->operand_count);
   std::vector<const loom_low_allocation_assignment_t*> assignment_ptrs(
-      descriptor->operand_count);
+      descriptor->operand_count, nullptr);
+  iree_host_size_t encoded_operand_index = 0;
   for (uint16_t i = 0; i < descriptor->operand_count; ++i) {
     const loom_low_operand_t* operand =
         &descriptor_set->operands[descriptor->operand_start + i];
+    if (operand->encoding_field_id == 0) continue;
     const loom_aie2p_physical_register_id_t register_id =
         loom_aie2p_machine_find_physical_register(iree_make_string_view(
-            register_names[i].data(), register_names[i].size()));
+            register_names[encoded_operand_index].data(),
+            register_names[encoded_operand_index].size()));
+    ++encoded_operand_index;
     if (register_id == LOOM_AIE2P_PHYSICAL_REGISTER_ID_INVALID) {
       return iree_make_status(IREE_STATUS_NOT_FOUND,
                               "AIE2P test register was not found");
