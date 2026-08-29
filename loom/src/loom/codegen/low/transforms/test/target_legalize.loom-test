@@ -455,3 +455,70 @@ low.func.def target<test.low.core>(@test_target) abi(object_function) @lowers_sc
   %result = low.op<test.from_elements.v4i32>(%69, %78, %87, %96) : (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>) -> reg<test.i32 x4>
   low.return %result : reg<test.i32 x4>
 }
+
+// ====
+// RUN: pass target-legalize{mode=eager,policy=reference-only},dce
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @scalarizes_vector_shifts_to_structural_lanes(%lhs: vector<4xi32>, %rhs: vector<4xi32>) -> (vector<4xi32>, vector<4xi32>, vector<4xi32>) {
+  %shl = vector.shli %lhs, %rhs : vector<4xi32>
+  %shrs = vector.shrsi %lhs, %rhs : vector<4xi32>
+  %shru = vector.shrui %lhs, %rhs : vector<4xi32>
+  func.return %shl, %shrs, %shru : vector<4xi32>, vector<4xi32>, vector<4xi32>
+}
+
+// ----
+test.target<low_core> @test_target
+
+func.def target(@test_target) @scalarizes_vector_shifts_to_structural_lanes(%lhs: vector<4xi32>, %rhs: vector<4xi32>) -> (vector<4xi32>, vector<4xi32>, vector<4xi32>) {
+  %42 = vector.extract %lhs[0] : vector<4xi32> -> i32
+  %43 = vector.extract %rhs[0] : vector<4xi32> -> i32
+  %44 = scalar.shli %42, %43 : i32
+  %45 = vector.extract %lhs[1] : vector<4xi32> -> i32
+  %46 = vector.extract %rhs[1] : vector<4xi32> -> i32
+  %47 = scalar.shli %45, %46 : i32
+  %48 = vector.extract %lhs[2] : vector<4xi32> -> i32
+  %49 = vector.extract %rhs[2] : vector<4xi32> -> i32
+  %50 = scalar.shli %48, %49 : i32
+  %51 = vector.extract %lhs[3] : vector<4xi32> -> i32
+  %52 = vector.extract %rhs[3] : vector<4xi32> -> i32
+  %53 = scalar.shli %51, %52 : i32
+  %55 = vector.splat %44 : vector<4xi32>
+  %56 = vector.insert %47 into %55[1] : i32, vector<4xi32>
+  %57 = vector.insert %50 into %56[2] : i32, vector<4xi32>
+  %shl = vector.insert %53 into %57[3] : i32, vector<4xi32>
+  %25 = vector.extract %lhs[0] : vector<4xi32> -> i32
+  %26 = vector.extract %rhs[0] : vector<4xi32> -> i32
+  %27 = scalar.shrsi %25, %26 : i32
+  %28 = vector.extract %lhs[1] : vector<4xi32> -> i32
+  %29 = vector.extract %rhs[1] : vector<4xi32> -> i32
+  %30 = scalar.shrsi %28, %29 : i32
+  %31 = vector.extract %lhs[2] : vector<4xi32> -> i32
+  %32 = vector.extract %rhs[2] : vector<4xi32> -> i32
+  %33 = scalar.shrsi %31, %32 : i32
+  %34 = vector.extract %lhs[3] : vector<4xi32> -> i32
+  %35 = vector.extract %rhs[3] : vector<4xi32> -> i32
+  %36 = scalar.shrsi %34, %35 : i32
+  %38 = vector.splat %27 : vector<4xi32>
+  %39 = vector.insert %30 into %38[1] : i32, vector<4xi32>
+  %40 = vector.insert %33 into %39[2] : i32, vector<4xi32>
+  %shrs = vector.insert %36 into %40[3] : i32, vector<4xi32>
+  %8 = vector.extract %lhs[0] : vector<4xi32> -> i32
+  %9 = vector.extract %rhs[0] : vector<4xi32> -> i32
+  %10 = scalar.shrui %8, %9 : i32
+  %11 = vector.extract %lhs[1] : vector<4xi32> -> i32
+  %12 = vector.extract %rhs[1] : vector<4xi32> -> i32
+  %13 = scalar.shrui %11, %12 : i32
+  %14 = vector.extract %lhs[2] : vector<4xi32> -> i32
+  %15 = vector.extract %rhs[2] : vector<4xi32> -> i32
+  %16 = scalar.shrui %14, %15 : i32
+  %17 = vector.extract %lhs[3] : vector<4xi32> -> i32
+  %18 = vector.extract %rhs[3] : vector<4xi32> -> i32
+  %19 = scalar.shrui %17, %18 : i32
+  %21 = vector.splat %10 : vector<4xi32>
+  %22 = vector.insert %13 into %21[1] : i32, vector<4xi32>
+  %23 = vector.insert %16 into %22[2] : i32, vector<4xi32>
+  %shru = vector.insert %19 into %23[3] : i32, vector<4xi32>
+  func.return %shl, %shrs, %shru : vector<4xi32>, vector<4xi32>, vector<4xi32>
+}
