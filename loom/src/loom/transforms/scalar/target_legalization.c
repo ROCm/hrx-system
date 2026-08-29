@@ -41,6 +41,42 @@ static iree_status_t loom_scalar_legalize_build_binary_integer(
           loom_scalar_addi_build(builder, 0, lhs, rhs, type, location, &op));
       *out_value = loom_scalar_addi_result(op);
       return iree_ok_status();
+    case LOOM_OP_SCALAR_SUBI:
+      (void)0;
+      IREE_RETURN_IF_ERROR(
+          loom_scalar_subi_build(builder, 0, lhs, rhs, type, location, &op));
+      *out_value = loom_scalar_subi_result(op);
+      return iree_ok_status();
+    case LOOM_OP_SCALAR_MULI:
+      (void)0;
+      IREE_RETURN_IF_ERROR(
+          loom_scalar_muli_build(builder, 0, lhs, rhs, type, location, &op));
+      *out_value = loom_scalar_muli_result(op);
+      return iree_ok_status();
+    case LOOM_OP_SCALAR_MINSI:
+      (void)0;
+      IREE_RETURN_IF_ERROR(
+          loom_scalar_minsi_build(builder, lhs, rhs, type, location, &op));
+      *out_value = loom_scalar_minsi_result(op);
+      return iree_ok_status();
+    case LOOM_OP_SCALAR_MAXSI:
+      (void)0;
+      IREE_RETURN_IF_ERROR(
+          loom_scalar_maxsi_build(builder, lhs, rhs, type, location, &op));
+      *out_value = loom_scalar_maxsi_result(op);
+      return iree_ok_status();
+    case LOOM_OP_SCALAR_MINUI:
+      (void)0;
+      IREE_RETURN_IF_ERROR(
+          loom_scalar_minui_build(builder, lhs, rhs, type, location, &op));
+      *out_value = loom_scalar_minui_result(op);
+      return iree_ok_status();
+    case LOOM_OP_SCALAR_MAXUI:
+      (void)0;
+      IREE_RETURN_IF_ERROR(
+          loom_scalar_maxui_build(builder, lhs, rhs, type, location, &op));
+      *out_value = loom_scalar_maxui_result(op);
+      return iree_ok_status();
     case LOOM_OP_SCALAR_ANDI:
       (void)0;
       IREE_RETURN_IF_ERROR(
@@ -76,12 +112,6 @@ static iree_status_t loom_scalar_legalize_build_binary_integer(
       IREE_RETURN_IF_ERROR(
           loom_scalar_shrui_build(builder, lhs, rhs, type, location, &op));
       *out_value = loom_scalar_shrui_result(op);
-      return iree_ok_status();
-    case LOOM_OP_SCALAR_SUBI:
-      (void)0;
-      IREE_RETURN_IF_ERROR(
-          loom_scalar_subi_build(builder, 0, lhs, rhs, type, location, &op));
-      *out_value = loom_scalar_subi_result(op);
       return iree_ok_status();
     default:
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -201,10 +231,14 @@ iree_status_t loom_scalar_target_legalize_narrow_integer_binary_reference(
   const loom_value_id_t value_checkpoint =
       loom_rewriter_value_checkpoint(rewriter);
   const loom_value_id_t* source_operands = loom_op_const_operands(op);
-  // Raw bit operations use zero-extended carriers. Arithmetic right shift is
-  // the exception: its source must be sign-extended before the i32 operation.
-  // Truncation restores the authored wrapping width in every case.
-  const bool signed_lhs = op->kind == LOOM_OP_SCALAR_SHRSI;
+  // Modular arithmetic and raw bit operations use zero-extended carriers.
+  // Signed min/max and the source of an arithmetic right shift require signed
+  // carriers. Truncation restores the authored width in every case.
+  const bool signed_lhs = op->kind == LOOM_OP_SCALAR_MINSI ||
+                          op->kind == LOOM_OP_SCALAR_MAXSI ||
+                          op->kind == LOOM_OP_SCALAR_SHRSI;
+  const bool signed_rhs =
+      op->kind == LOOM_OP_SCALAR_MINSI || op->kind == LOOM_OP_SCALAR_MAXSI;
   loom_value_id_t lhs_i32 = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_scalar_legalize_extend_integer(
       &rewriter->builder, op->location, source_operands[0], source_type,
@@ -212,7 +246,7 @@ iree_status_t loom_scalar_target_legalize_narrow_integer_binary_reference(
   loom_value_id_t rhs_i32 = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_scalar_legalize_extend_integer(
       &rewriter->builder, op->location, source_operands[1], source_type,
-      /*signed_extension=*/false, &rhs_i32));
+      signed_rhs, &rhs_i32));
 
   loom_value_id_t wide_result = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_scalar_legalize_build_binary_i32(
