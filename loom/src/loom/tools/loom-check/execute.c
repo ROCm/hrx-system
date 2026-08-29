@@ -7,6 +7,7 @@
 #include "loom/tools/loom-check/execute.h"
 
 #include "loom/codegen/low/lower/lower.h"
+#include "loom/codegen/low/pipeline/legalizer_registry.h"
 #include "loom/codegen/low/pipeline/pass_environment.h"
 #include "loom/codegen/low/text_asm.h"
 #include "loom/codegen/low/verify.h"
@@ -561,12 +562,22 @@ static iree_status_t loom_check_execute_pass_with_output(
             loom_pass_registry_storage_registry(&pass_registry_storage);
       }
     }
+    loom_target_legalizer_registry_storage_t legalizer_registry_storage = {0};
+    if (iree_status_is_ok(status)) {
+      const loom_target_legalizer_provider_list_t legalizer_provider_list =
+          environment ? environment->legalizer_provider_list
+                      : loom_target_legalizer_provider_list_empty();
+      status = loom_low_legalizer_registry_storage_initialize(
+          legalizer_provider_list, iree_arena_allocator(&diagnostic_arena),
+          &legalizer_registry_storage);
+    }
     loom_pass_tool_run_options_t run_options = {
         .registry = pass_registry,
         .environment = loom_low_pass_environment_storage_initialize(
             &low_registry.registry, low_lower_policy_registry_ref,
             environment ? &environment->low_legality_provider_list : NULL,
-            environment ? &environment->legalizer_provider_list : NULL,
+            loom_target_legalizer_registry_storage_registry(
+                &legalizer_registry_storage),
             math_policy_registry_ref, compile_report_ref,
             environment ? environment->target_environment : NULL,
             /*function_versions=*/NULL, &low_pass_environment_storage),
@@ -580,6 +591,8 @@ static iree_status_t loom_check_execute_pass_with_output(
       status = loom_pass_tool_run_flat_pipeline(module, test_case->pipeline,
                                                 &run_options, &run_result);
     }
+    loom_target_legalizer_registry_storage_deinitialize(
+        &legalizer_registry_storage);
   }
   if (!iree_status_is_ok(status)) {
     status = loom_check_execute_finish_status_failure(

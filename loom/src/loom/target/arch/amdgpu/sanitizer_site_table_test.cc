@@ -80,7 +80,7 @@ class AmdgpuSanitizerSiteTableTest : public ::testing::Test {
     loom_pass_environment_t environment =
         loom_low_pass_environment_storage_initialize(
             &low_registry_.registry, &policy_registry_, &legality_provider_list,
-            /*legalizer_provider_list=*/nullptr,
+            /*legalizer_registry=*/nullptr,
             /*math_policy_registry=*/nullptr, /*compile_report=*/nullptr,
             /*target_environment=*/nullptr,
             /*function_versions=*/nullptr, &environment_storage);

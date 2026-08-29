@@ -497,6 +497,17 @@ loom_cc_library(
 )
 
 loom_cc_test(
+    name = "legalization_test",
+    srcs = ["legalization_test.cc"],
+    deps = [
+        ":legalization",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "contract_test",
     srcs = ["contract_test.cc"],
     deps = [

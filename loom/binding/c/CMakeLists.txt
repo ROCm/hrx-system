@@ -102,6 +102,7 @@ loom_cc_library(
     iree::vm::bytecode
     loom::analysis::symbol_value_constraints
     loom::codegen::low::launch_config_program
+    loom::codegen::low::pipeline::legalizer_registry
     loom::codegen::low::pipeline::pass_environment
     loom::codegen::low::repr
     loom::codegen::low::target_binding

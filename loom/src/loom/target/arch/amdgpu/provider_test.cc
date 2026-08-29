@@ -397,7 +397,7 @@ class AmdgpuProviderTest : public ::testing::Test {
             /*descriptor_registry=*/nullptr,
             /*lower_policy_registry=*/nullptr,
             /*legality_provider_list=*/nullptr,
-            /*legalizer_provider_list=*/nullptr,
+            /*legalizer_registry=*/nullptr,
             /*math_policy_registry=*/nullptr,
             /*compile_report=*/nullptr, &target_environment_,
             /*function_versions=*/nullptr, &environment_storage);

@@ -11,6 +11,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/tooling/flags.h"
+#include "loom/codegen/low/pipeline/legalizer_registry.h"
 #include "loom/codegen/low/pipeline/pass_environment.h"
 #include "loom/codegen/low/text_asm.h"
 #include "loom/codegen/low/verify.h"
@@ -899,11 +900,17 @@ static iree_status_t loom_opt_run_passes(
   loom_function_version_owner_t function_versions;
   loom_function_version_owner_initialize(&function_version_arena,
                                          &function_versions);
+  loom_target_legalizer_registry_storage_t legalizer_registry_storage = {0};
+  iree_status_t status = loom_low_legalizer_registry_storage_initialize(
+      legalizer_provider_list, iree_arena_allocator(&function_version_arena),
+      &legalizer_registry_storage);
   loom_pass_tool_run_options_t run_options = {
       .registry = pass_registry,
       .environment = loom_low_pass_environment_storage_initialize_mutable(
           &low_registry->registry, &low_lower_policy_registry,
-          &low_legality_provider_list, &legalizer_provider_list,
+          &low_legality_provider_list,
+          loom_target_legalizer_registry_storage_registry(
+              &legalizer_registry_storage),
           &math_policy_registry, /*compile_report=*/NULL, target_environment,
           &function_versions, &low_pass_environment_storage),
       .function_versions = &function_versions.list,
@@ -916,17 +923,18 @@ static iree_status_t loom_opt_run_passes(
       .trace = trace_ptr,
   };
 
-  iree_status_t status = iree_ok_status();
-  if (pipeline_kind == LOOM_OPT_PIPELINE_MODULE_SYMBOL) {
+  if (iree_status_is_ok(status) &&
+      pipeline_kind == LOOM_OPT_PIPELINE_MODULE_SYMBOL) {
     *out_execution_started = true;
     status = loom_pass_tool_run_pipeline_symbol(module, pipeline_symbol,
                                                 &run_options, out_result);
-  } else if (pipeline_kind == LOOM_OPT_PIPELINE_SOURCE_LOW ||
-             pipeline_kind == LOOM_OPT_PIPELINE_PREPARED_LOW) {
+  } else if (iree_status_is_ok(status) &&
+             (pipeline_kind == LOOM_OPT_PIPELINE_SOURCE_LOW ||
+              pipeline_kind == LOOM_OPT_PIPELINE_PREPARED_LOW)) {
     *out_execution_started = true;
     status = loom_opt_run_shared_compile_pipeline(
         module, pipeline_kind, target_environment, &run_options, out_result);
-  } else {
+  } else if (iree_status_is_ok(status)) {
     iree_string_builder_t pipeline_builder;
     iree_string_builder_initialize(allocator, &pipeline_builder);
     status = loom_opt_join_pass_list(passes, &pipeline_builder);
@@ -938,6 +946,8 @@ static iree_status_t loom_opt_run_passes(
     }
     iree_string_builder_deinitialize(&pipeline_builder);
   }
+  loom_target_legalizer_registry_storage_deinitialize(
+      &legalizer_registry_storage);
   iree_arena_deinitialize(&function_version_arena);
   return status;
 }

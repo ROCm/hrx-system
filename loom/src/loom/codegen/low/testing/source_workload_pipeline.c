@@ -125,7 +125,7 @@ static iree_status_t loom_low_source_workload_prepare_low_functions(
   loom_pass_environment_t environment =
       loom_low_pass_environment_storage_initialize(
           options->descriptor_registry, /*lower_policy_registry=*/NULL,
-          /*legality_provider_list=*/NULL, /*legalizer_provider_list=*/NULL,
+          /*legality_provider_list=*/NULL, /*legalizer_registry=*/NULL,
           /*math_policy_registry=*/NULL, /*compile_report=*/NULL,
           /*target_environment=*/NULL, /*function_versions=*/NULL,
           &environment_storage);

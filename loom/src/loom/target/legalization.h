@@ -241,6 +241,20 @@ typedef struct loom_target_legalizer_registry_t {
   uint16_t entry_count;
 } loom_target_legalizer_registry_t;
 
+// Owned storage for a composed target legalizer registry.
+//
+// Provider-owned names, callbacks, and payload pointers remain borrowed from
+// their defining compiler packages. The allocation contains only the dense
+// dispatch tables and copied entry records required to query them efficiently.
+typedef struct loom_target_legalizer_registry_storage_t {
+  // Allocator used to release |allocation|.
+  iree_allocator_t allocator;
+  // Single allocation backing every pointer in |registry|.
+  iree_byte_span_t allocation;
+  // Immutable registry view over |allocation|.
+  loom_target_legalizer_registry_t registry;
+} loom_target_legalizer_registry_storage_t;
+
 // Looks up the compact legalizer span for an op kind in a composed registry.
 static inline loom_target_legalizer_op_entry_t
 loom_target_legalizer_registry_lookup_kind(
@@ -262,13 +276,25 @@ loom_target_legalizer_registry_lookup_kind(
   return dialect_table->op_entries[op_index];
 }
 
-// Composes |providers| into a dense op-kind dispatch registry allocated from
-// |arena|. Provider order is preserved within each op span.
-iree_status_t loom_target_legalizer_registry_compose(
-    const loom_target_legalizer_provider_t* const* providers,
-    iree_host_size_t provider_count,
-    loom_target_legalizer_registry_t* out_registry,
-    iree_arena_allocator_t* arena);
+// Initializes owned storage by composing one or more ordered provider lists.
+//
+// List order and provider order within each list are preserved within every op
+// span. The initialized storage must be deinitialized before |allocator| is
+// released.
+iree_status_t loom_target_legalizer_registry_storage_initialize(
+    const loom_target_legalizer_provider_list_t* provider_lists,
+    iree_host_size_t provider_list_count, iree_allocator_t allocator,
+    loom_target_legalizer_registry_storage_t* out_storage);
+
+// Releases storage initialized by
+// loom_target_legalizer_registry_storage_initialize.
+void loom_target_legalizer_registry_storage_deinitialize(
+    loom_target_legalizer_registry_storage_t* storage);
+
+// Returns the immutable registry view owned by |storage|.
+const loom_target_legalizer_registry_t*
+loom_target_legalizer_registry_storage_registry(
+    const loom_target_legalizer_registry_storage_t* storage);
 
 // Queries whether |op| is already legal for the selected target contract.
 iree_status_t loom_target_legalization_query_contract(
