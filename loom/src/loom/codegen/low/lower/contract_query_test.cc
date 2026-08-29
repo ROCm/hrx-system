@@ -576,36 +576,25 @@ TEST_F(LowContractQuerySourceMemoryTest,
   IREE_ASSERT_OK(loom_view_region_table_initialize(
       &value_domain, &expression_context, &view_regions));
   IREE_ASSERT_OK(loom_view_region_table_analyze(&view_regions));
-  const loom_low_lower_source_memory_t source_memory = {
-      /*.flags=*/0,
-      /*.operation_kind=*/LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD,
-      /*.root_kind=*/LOOM_LOW_LOWER_SOURCE_MEMORY_ROOT_BLOCK_ARGUMENT,
-      /*.address_layout=*/LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_LAYOUT_ANY,
-      /*.memory_space_mask=*/LOOM_LOW_LOWER_MEMORY_SPACE_UNKNOWN |
-          LOOM_LOW_LOWER_MEMORY_SPACE_GENERIC |
-          LOOM_LOW_LOWER_MEMORY_SPACE_GLOBAL |
-          LOOM_LOW_LOWER_MEMORY_SPACE_WORKGROUP |
-          LOOM_LOW_LOWER_MEMORY_SPACE_PRIVATE |
-          LOOM_LOW_LOWER_MEMORY_SPACE_CONSTANT |
-          LOOM_LOW_LOWER_MEMORY_SPACE_DESCRIPTOR,
-      /*.element_byte_count=*/4,
-      /*.vector_lane_count=*/1,
-      /*.vector_lane_byte_stride=*/4,
-      /*.static_byte_offset_minimum=*/INT64_MIN,
-      /*.static_byte_offset_maximum=*/INT64_MAX,
-      /*.minimum_alignment=*/0,
-      /*.dynamic_term_count=*/1,
-      /*.dynamic_term_count_minimum=*/0,
-      /*.dynamic_view_base_term_count=*/0,
-      /*.dynamic_index_source=*/
-      LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_VALUE,
-      /*.dynamic_byte_stride=*/4,
-      /*.dynamic_offset_unsigned_bit_count=*/0,
-      /*.dynamic_offset_diagnostic_index=*/0,
-      /*.address_layout_diagnostic_index=*/0,
-      /*.cache_policy_build_flags=*/0,
-      /*.diagnostic_index=*/0,
-  };
+  loom_low_lower_source_memory_t source_memory = {};
+  source_memory.operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD;
+  source_memory.root_kind = LOOM_LOW_LOWER_SOURCE_MEMORY_ROOT_BLOCK_ARGUMENT;
+  source_memory.memory_space_mask = LOOM_LOW_LOWER_MEMORY_SPACE_UNKNOWN |
+                                    LOOM_LOW_LOWER_MEMORY_SPACE_GENERIC |
+                                    LOOM_LOW_LOWER_MEMORY_SPACE_GLOBAL |
+                                    LOOM_LOW_LOWER_MEMORY_SPACE_WORKGROUP |
+                                    LOOM_LOW_LOWER_MEMORY_SPACE_PRIVATE |
+                                    LOOM_LOW_LOWER_MEMORY_SPACE_CONSTANT |
+                                    LOOM_LOW_LOWER_MEMORY_SPACE_DESCRIPTOR;
+  source_memory.element_byte_count = 4;
+  source_memory.vector_lane_count = 1;
+  source_memory.vector_lane_byte_stride = 4;
+  source_memory.static_byte_offset_minimum = INT64_MIN;
+  source_memory.static_byte_offset_maximum = INT64_MAX;
+  source_memory.dynamic_term_count = 1;
+  source_memory.dynamic_index_source =
+      LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_VALUE;
+  source_memory.dynamic_byte_stride = 4;
   const loom_low_lower_emit_t emit = {
       /*.kind=*/LOOM_LOW_LOWER_EMIT_DESCRIPTOR_OP,
       /*.flags=*/0,

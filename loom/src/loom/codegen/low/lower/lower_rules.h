@@ -474,28 +474,12 @@ typedef uint16_t loom_low_lower_source_memory_flags_t;
   ((uint16_t)1u << 2)
 
 typedef struct loom_low_lower_source_memory_t {
-  // Bitfield of source-memory row option bits.
-  loom_low_lower_source_memory_flags_t flags;
   // Source memory operation category required by this row.
-  loom_low_source_memory_operation_kind_t operation_kind;
+  uint8_t operation_kind;
   // Source provenance required for the root memory value.
-  loom_low_lower_source_memory_root_kind_t root_kind;
+  uint8_t root_kind;
   // Target-independent address-layout classification required by this row.
-  loom_low_lower_source_memory_address_layout_t address_layout;
-  // Accepted target-independent source memory spaces.
-  loom_low_lower_memory_space_mask_t memory_space_mask;
-  // Required byte count of one addressed view element.
-  uint32_t element_byte_count;
-  // Required static number of vector lanes addressed by the operation.
-  uint32_t vector_lane_count;
-  // Required byte stride between adjacent vector lanes.
-  int64_t vector_lane_byte_stride;
-  // Minimum accepted static byte offset from the storage root.
-  int64_t static_byte_offset_minimum;
-  // Maximum accepted static byte offset from the storage root.
-  int64_t static_byte_offset_maximum;
-  // Minimum required final address byte alignment, or zero if unconstrained.
-  uint32_t minimum_alignment;
+  uint8_t address_layout;
   // Required number of dynamic address terms.
   uint8_t dynamic_term_count;
   // Minimum accepted dynamic term count when dynamic_term_count is ANY.
@@ -503,45 +487,65 @@ typedef struct loom_low_lower_source_memory_t {
   // Required number of dynamic view-base terms, or ANY if unconstrained.
   uint8_t dynamic_view_base_term_count;
   // Required provenance for each dynamic address term.
-  loom_low_source_memory_dynamic_index_source_t dynamic_index_source;
-  // Required byte stride for each dynamic address term unless ANY is set.
-  int64_t dynamic_byte_stride;
+  uint8_t dynamic_index_source;
   // Required unsigned dynamic byte offset bit width, or zero if unconstrained.
   uint8_t dynamic_offset_unsigned_bit_count;
+  // Source-memory value used as the complete-address base.
+  uint8_t address_base_kind;
+  // Semantic source type carried by materialized address coordinates.
+  uint8_t address_coordinate_type;
+  // Bitfield of source-memory row option bits.
+  loom_low_lower_source_memory_flags_t flags;
+  // Accepted target-independent source memory spaces.
+  loom_low_lower_memory_space_mask_t memory_space_mask;
+  // Reserved storage completing the compact match classifier header.
+  uint16_t reserved_classifier;
+  // Required byte count of one addressed view element.
+  uint32_t element_byte_count;
+  // Required static number of vector lanes addressed by the operation.
+  uint32_t vector_lane_count;
+  // Minimum required final address byte alignment, or zero if unconstrained.
+  uint32_t minimum_alignment;
+  // Required source cache-policy build flags.
+  uint32_t cache_policy_build_flags;
+  // Number of bytes represented by one materialized address coordinate unit.
+  uint32_t address_coordinate_unit_byte_count;
+  // Reserved storage aligning the compact 64-bit match geometry.
+  uint32_t reserved_geometry;
+  // Required byte stride between adjacent vector lanes.
+  int64_t vector_lane_byte_stride;
+  // Minimum accepted static byte offset from the storage root.
+  int64_t static_byte_offset_minimum;
+  // Maximum accepted static byte offset from the storage root.
+  int64_t static_byte_offset_maximum;
+  // Required byte stride for each dynamic address term unless ANY is set.
+  int64_t dynamic_byte_stride;
+  // Minimum accepted complete address coordinate.
+  int64_t address_coordinate_minimum;
+  // Maximum accepted complete address coordinate.
+  int64_t address_coordinate_maximum;
+  // Rule-set B-string offset for the i64 constant immediate field.
+  loom_bstring_table_offset_t byte_offset_const_i64_immediate_string_offset;
+  // Rule-set B-string offset for the coordinate constant immediate field.
+  loom_bstring_table_offset_t address_const_coordinate_immediate_string_offset;
   // Diagnostic emitted when the dynamic byte offset width check rejects.
   uint16_t dynamic_offset_diagnostic_index;
   // Diagnostic emitted when the address-layout classification rejects.
   uint16_t address_layout_diagnostic_index;
-  // Required source cache-policy build flags.
-  uint32_t cache_policy_build_flags;
   // Diagnostic table row emitted when this source-memory row rejects.
   uint16_t diagnostic_index;
   // Diagnostic table row emitted when complete address materialization rejects.
   uint16_t address_diagnostic_index;
   // Descriptor ref used to materialize i64 constants for dynamic byte offsets.
   loom_low_lower_descriptor_ref_t byte_offset_const_i64_descriptor_ref;
-  // Rule-set B-string offset for the i64 constant immediate field.
-  loom_bstring_table_offset_t byte_offset_const_i64_immediate_string_offset;
   // Descriptor ref used to materialize i64 additions for dynamic byte offsets.
   loom_low_lower_descriptor_ref_t byte_offset_add_i64_descriptor_ref;
   // Descriptor ref used to materialize i64 multiplies for dynamic byte offsets.
   loom_low_lower_descriptor_ref_t byte_offset_mul_i64_descriptor_ref;
   // Descriptor ref used to materialize i64 shifts for dynamic byte offsets.
   loom_low_lower_descriptor_ref_t byte_offset_shl_i64_descriptor_ref;
-  // Source-memory value used as the complete-address base.
-  loom_low_lower_source_memory_address_base_t address_base_kind;
-  // Semantic source type carried by materialized address coordinates.
-  loom_low_lower_source_memory_address_coordinate_t address_coordinate_type;
-  // Number of bytes represented by one materialized address coordinate unit.
-  uint32_t address_coordinate_unit_byte_count;
-  // Minimum accepted complete address coordinate.
-  int64_t address_coordinate_minimum;
-  // Maximum accepted complete address coordinate.
-  int64_t address_coordinate_maximum;
   // Descriptor ref used to materialize a complete address coordinate constant.
   loom_low_lower_descriptor_ref_t address_const_coordinate_descriptor_ref;
-  // Rule-set B-string offset for the coordinate constant immediate field.
-  loom_bstring_table_offset_t address_const_coordinate_immediate_string_offset;
   // Descriptor ref used to add complete address coordinate values.
   loom_low_lower_descriptor_ref_t address_add_coordinate_descriptor_ref;
   // Descriptor ref used to multiply complete address coordinate values.
@@ -555,9 +559,11 @@ typedef struct loom_low_lower_source_memory_t {
   loom_low_lower_descriptor_ref_t address_index_to_coordinate_descriptor_ref;
   // Descriptor ref used to materialize the final target address.
   loom_low_lower_descriptor_ref_t address_descriptor_ref;
+  // Reserved storage completing the second 64-byte row half.
+  uint16_t reserved_materialization;
 } loom_low_lower_source_memory_t;
-static_assert(sizeof(loom_low_lower_source_memory_t) == 168,
-              "loom_low_lower_source_memory_t must be 168 bytes");
+static_assert(sizeof(loom_low_lower_source_memory_t) == 128,
+              "loom_low_lower_source_memory_t must be 128 bytes");
 
 typedef enum loom_low_lower_guard_kind_e {
   // Invalid or uninitialized guard.
