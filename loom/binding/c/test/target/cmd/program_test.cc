@@ -31,8 +31,7 @@ using BuilderPtr =
 using ContextPtr = HandlePtr<loomc_context_t, loomc_context_release>;
 using LinkIndexPtr = HandlePtr<loomc_link_index_t, loomc_link_index_release>;
 using ModulePtr = HandlePtr<loomc_module_t, loomc_module_release>;
-using ProductPtr =
-    HandlePtr<loomc_cmd_program_product_t, loomc_cmd_program_product_release>;
+using ProductPtr = HandlePtr<loomc_product_t, loomc_product_release>;
 using RequestPtr = HandlePtr<loomc_request_t, loomc_request_release>;
 using ResultPtr = HandlePtr<loomc_result_t, loomc_result_release>;
 using SourcePtr = HandlePtr<loomc_source_t, loomc_source_release>;
@@ -281,7 +280,7 @@ template.def<@request.schedule> priority(1) @small(%size: index) {
           /*.user_data=*/&capture,
       },
   };
-  loomc_cmd_program_product_t* product = nullptr;
+  loomc_product_t* product = nullptr;
   loomc_result_t* result = nullptr;
   loomc_status_t status = loomc_cmd_program_product_build(
       workspace.get(), &product_options, loomc_allocator_system(), &product,
@@ -292,6 +291,11 @@ template.def<@request.schedule> priority(1) @small(%size: index) {
   ExpectSucceededResult(result_ptr.get());
   ASSERT_TRUE(result_ptr && loomc_result_succeeded(result_ptr.get()));
 
+  EXPECT_EQ(loomc_product_descriptor(product_ptr.get()),
+            loomc_cmd_program_product_descriptor());
+  EXPECT_EQ(loomc_product_artifact_count(product_ptr.get()), 2u);
+  EXPECT_EQ(loomc_product_export_count(product_ptr.get()), 2u);
+  EXPECT_EQ(loomc_product_requirement_count(product_ptr.get()), 3u);
   ASSERT_EQ(loomc_cmd_program_product_program_count(product_ptr.get()), 2u);
   loomc_cmd_program_t private_program = {};
   ASSERT_TRUE(loomc_cmd_program_product_program_at(product_ptr.get(), 0,
@@ -303,6 +307,10 @@ template.def<@request.schedule> priority(1) @small(%size: index) {
   EXPECT_EQ(ToString(private_program.artifact.identifier), "private_root");
   EXPECT_GT(loomc_byte_sequence_length(private_program.artifact.contents), 0u);
   EXPECT_EQ(private_program.entry_requirement_count, 1u);
+  const loomc_artifact_t* private_artifact =
+      loomc_product_artifact_at(product_ptr.get(), 0);
+  ASSERT_NE(private_artifact, nullptr);
+  EXPECT_EQ(private_artifact->contents, private_program.artifact.contents);
 
   loomc_cmd_program_t public_program = {};
   ASSERT_TRUE(loomc_cmd_program_product_program_at(product_ptr.get(), 1,
@@ -329,21 +337,20 @@ template.def<@request.schedule> priority(1) @small(%size: index) {
 
   ASSERT_EQ(
       loomc_cmd_program_product_entry_requirement_count(product_ptr.get()), 3u);
-  loomc_host_size_t source_requirement_count = 0;
+  loomc_host_size_t classified_requirement_count = 0;
   loomc_host_size_t external_requirement_count = 0;
   for (loomc_host_size_t i = 0; i < 3; ++i) {
     loomc_cmd_entry_requirement_t requirement = {};
     ASSERT_TRUE(loomc_cmd_program_product_entry_requirement_at(
         product_ptr.get(), i, &requirement));
-    if (requirement.has_request) {
-      ++source_requirement_count;
-      EXPECT_EQ(ToString(requirement.symbol), "classified");
+    if (ToString(requirement.symbol) == "classified") {
+      ++classified_requirement_count;
     } else {
       ++external_requirement_count;
       EXPECT_EQ(ToString(requirement.symbol), "external");
     }
   }
-  EXPECT_EQ(source_requirement_count, 2u);
+  EXPECT_EQ(classified_requirement_count, 2u);
   EXPECT_EQ(external_requirement_count, 1u);
   std::sort(request_requirement_ordinals.begin(),
             request_requirement_ordinals.end());
@@ -358,7 +365,7 @@ template.def<@request.schedule> priority(1) @small(%size: index) {
   product_options.root_symbol_count = std::size(repeated_roots);
   product_options.flags = 0;
   product_options.request_sink = {};
-  loomc_cmd_program_product_t* repeated_product = nullptr;
+  loomc_product_t* repeated_product = nullptr;
   loomc_result_t* repeated_result = nullptr;
   LOOMC_ASSERT_OK(loomc_cmd_program_product_build(
       workspace.get(), &product_options, loomc_allocator_system(),
@@ -387,7 +394,7 @@ template.def<@request.schedule> priority(1) @small(%size: index) {
       /*.publish=*/RejectRequest,
       /*.user_data=*/&reject_state,
   };
-  product = reinterpret_cast<loomc_cmd_program_product_t*>(0x1);
+  product = reinterpret_cast<loomc_product_t*>(0x1);
   result = reinterpret_cast<loomc_result_t*>(0x1);
   LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_ABORTED,
                          loomc_cmd_program_product_build(

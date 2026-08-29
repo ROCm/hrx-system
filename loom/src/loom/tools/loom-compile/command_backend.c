@@ -85,7 +85,8 @@ static iree_status_t loom_compile_command_backend_format_program_json(
 
 static iree_status_t loom_compile_command_backend_format_manifest_json(
     const loom_cmd_program_artifact_set_t* artifact_set,
-    loom_output_stream_t* stream) {
+    const uint32_t* source_requirement_indices,
+    iree_host_size_t source_requirement_count, loom_output_stream_t* stream) {
   loom_json_object_writer_t root;
   IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &root));
   IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
@@ -106,13 +107,15 @@ static iree_status_t loom_compile_command_backend_format_manifest_json(
   IREE_RETURN_IF_ERROR(loom_json_object_begin_field(&root, IREE_SV("entries")));
   loom_json_array_writer_t entries;
   IREE_RETURN_IF_ERROR(loom_json_array_begin(stream, &entries));
+  iree_host_size_t source_requirement_cursor = 0;
   for (iree_host_size_t i = 0; i < artifact_set->entries.count; ++i) {
     IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&entries));
     loom_json_object_writer_t entry;
     IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &entry));
     IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
         &entry, IREE_SV("symbol"), artifact_set->entries.values[i].symbol));
-    if (artifact_set->entries.values[i].has_source_request) {
+    if (source_requirement_cursor < source_requirement_count &&
+        source_requirement_indices[source_requirement_cursor] == i) {
       char filename_storage[LOOM_COMPILE_COMMAND_FILENAME_CAPACITY];
       iree_string_view_t filename = iree_string_view_empty();
       IREE_RETURN_IF_ERROR(
@@ -120,9 +123,11 @@ static iree_status_t loom_compile_command_backend_format_manifest_json(
               i, sizeof(filename_storage), filename_storage, &filename));
       IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
           &entry, IREE_SV("source_request"), filename));
+      ++source_requirement_cursor;
     }
     IREE_RETURN_IF_ERROR(loom_json_object_end(&entry));
   }
+  IREE_ASSERT_EQ(source_requirement_cursor, source_requirement_count);
   IREE_RETURN_IF_ERROR(loom_json_array_end(&entries));
   return loom_json_object_end(&root);
 }
@@ -210,12 +215,15 @@ static iree_status_t loom_compile_command_backend_write_programs(
 
 static iree_status_t loom_compile_command_backend_write_manifest(
     const loom_cmd_program_artifact_set_t* artifact_set,
-    iree_string_view_t manifest_path, iree_allocator_t host_allocator) {
+    const uint32_t* source_requirement_indices,
+    iree_host_size_t source_requirement_count, iree_string_view_t manifest_path,
+    iree_allocator_t host_allocator) {
   loom_tooling_output_stream_t output;
   IREE_RETURN_IF_ERROR(
       loom_tooling_output_stream_open(manifest_path, host_allocator, &output));
   iree_status_t status = loom_compile_command_backend_format_manifest_json(
-      artifact_set, &output.stream);
+      artifact_set, source_requirement_indices, source_requirement_count,
+      &output.stream);
   if (iree_status_is_ok(status)) {
     status = loom_output_stream_write_cstring(&output.stream, "\n");
   }
@@ -234,7 +242,46 @@ typedef struct loom_compile_kernel_request_writer_t {
 
   // Host allocator for paths and file streams.
   iree_allocator_t host_allocator;
+
+  // Requirements whose request files were written during this operation.
+  struct {
+    // Sorted plan-local requirement ordinal table.
+    uint32_t* values;
+
+    // Number of entries in |values|.
+    iree_host_size_t count;
+
+    // Number of allocated entries in |values|.
+    iree_host_size_t capacity;
+  } source_requirements;
 } loom_compile_kernel_request_writer_t;
+
+static iree_status_t loom_compile_kernel_request_writer_record_requirement(
+    loom_compile_kernel_request_writer_t* writer, uint32_t requirement_index) {
+  IREE_ASSERT(writer->source_requirements.count == 0 ||
+              writer->source_requirements
+                      .values[writer->source_requirements.count - 1] <
+                  requirement_index);
+  if (writer->source_requirements.count ==
+      writer->source_requirements.capacity) {
+    iree_host_size_t new_capacity = 8;
+    if (writer->source_requirements.capacity != 0 &&
+        !iree_host_size_checked_add(writer->source_requirements.capacity,
+                                    writer->source_requirements.capacity,
+                                    &new_capacity)) {
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "kernel request table is too large");
+    }
+    IREE_RETURN_IF_ERROR(iree_allocator_realloc_array(
+        writer->host_allocator, new_capacity,
+        sizeof(*writer->source_requirements.values),
+        (void**)&writer->source_requirements.values));
+    writer->source_requirements.capacity = new_capacity;
+  }
+  writer->source_requirements.values[writer->source_requirements.count++] =
+      requirement_index;
+  return iree_ok_status();
+}
 
 static iree_status_t loom_compile_command_backend_write_kernel_request(
     void* user_data, loom_cmd_program_kernel_request_t request) {
@@ -246,6 +293,10 @@ static iree_status_t loom_compile_command_backend_write_kernel_request(
       loom_compile_command_backend_format_kernel_request_filename(
           request.entry_requirement_index, sizeof(filename_storage),
           filename_storage, &filename);
+  if (iree_status_is_ok(status)) {
+    status = loom_compile_kernel_request_writer_record_requirement(
+        writer, request.entry_requirement_index);
+  }
 
   char* path_storage = NULL;
   if (iree_status_is_ok(status)) {
@@ -405,13 +456,17 @@ iree_status_t loom_compile_command_backend_emit(
   }
   if (iree_status_is_ok(status) && plan_valid) {
     status = loom_compile_command_backend_write_manifest(
-        &artifact_set, options->manifest_path, host_allocator);
+        &artifact_set, kernel_request_writer.source_requirements.values,
+        kernel_request_writer.source_requirements.count, options->manifest_path,
+        host_allocator);
   }
   if (iree_status_is_ok(status) && plan_valid) {
     *out_emitted = true;
   }
 
   loom_cmd_program_artifact_set_deinitialize(&artifact_set);
+  iree_allocator_free(host_allocator,
+                      kernel_request_writer.source_requirements.values);
   loom_link_module_index_free(index);
   iree_arena_deinitialize(&scratch_arena);
   return status;

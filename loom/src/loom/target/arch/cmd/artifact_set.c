@@ -115,8 +115,6 @@ iree_status_t loom_cmd_program_artifact_set_build(
         plan->root_module, loom_kernel_entry_decl_callee(declaration_op));
     artifact_set.entries.values[i].symbol =
         loom_cmd_program_artifact_set_copy_string(name, &string_cursor);
-    artifact_set.entries.values[i].has_source_request =
-        plan->entry_requirements[i].has_source_request;
   }
   for (iree_host_size_t i = 0;
        i < plan->root_count && iree_status_is_ok(status); ++i) {

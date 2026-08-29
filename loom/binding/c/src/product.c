@@ -9,7 +9,61 @@
 #include <string.h>
 
 #include "iree/base/api.h"
-#include "iree/base/internal/atomics.h"
+
+void loomc_product_initialize(const loomc_product_descriptor_t* descriptor,
+                              const loomc_artifact_t* artifacts,
+                              loomc_host_size_t artifact_count,
+                              loomc_host_size_t export_count,
+                              loomc_host_size_t requirement_count,
+                              loomc_product_t* out_product) {
+  iree_atomic_ref_count_init(&out_product->ref_count);
+  out_product->descriptor = descriptor;
+  out_product->artifacts.values = artifacts;
+  out_product->artifacts.count = artifact_count;
+  out_product->export_count = export_count;
+  out_product->requirement_count = requirement_count;
+}
+
+bool loomc_product_isa(const loomc_product_t* product,
+                       const loomc_product_descriptor_t* descriptor) {
+  return product != NULL && product->descriptor == descriptor;
+}
+
+void loomc_product_retain(loomc_product_t* product) {
+  if (product == NULL) return;
+  iree_atomic_ref_count_inc(&product->ref_count);
+}
+
+void loomc_product_release(loomc_product_t* product) {
+  if (product == NULL) return;
+  if (iree_atomic_ref_count_dec(&product->ref_count) == 1) {
+    product->descriptor->destroy(product);
+  }
+}
+
+const loomc_product_descriptor_t* loomc_product_descriptor(
+    const loomc_product_t* product) {
+  return product ? product->descriptor : NULL;
+}
+
+loomc_host_size_t loomc_product_artifact_count(const loomc_product_t* product) {
+  return product ? product->artifacts.count : 0;
+}
+
+const loomc_artifact_t* loomc_product_artifact_at(
+    const loomc_product_t* product, loomc_host_size_t ordinal) {
+  if (product == NULL || ordinal >= product->artifacts.count) return NULL;
+  return &product->artifacts.values[ordinal];
+}
+
+loomc_host_size_t loomc_product_export_count(const loomc_product_t* product) {
+  return product ? product->export_count : 0;
+}
+
+loomc_host_size_t loomc_product_requirement_count(
+    const loomc_product_t* product) {
+  return product ? product->requirement_count : 0;
+}
 
 struct loomc_request_t {
   // Atomic reference count for shared immutable ownership.

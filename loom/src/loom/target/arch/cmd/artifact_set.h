@@ -21,9 +21,6 @@ extern "C" {
 typedef struct loom_cmd_program_artifact_entry_t {
   // Logical kernel symbol resolved by the embedding executable catalog.
   iree_string_view_t symbol;
-
-  // True when the plan published an ordinary Loom source request artifact.
-  bool has_source_request;
 } loom_cmd_program_artifact_entry_t;
 
 // One serialized command root and its plan-wide entry projection.

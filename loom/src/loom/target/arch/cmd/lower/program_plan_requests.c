@@ -39,7 +39,6 @@ static iree_status_t loom_cmd_program_kernel_request_publish(
   bridge->plan->entry_requirements[requirement_index] =
       (loom_cmd_entry_requirement_t){
           .declaration_op = bridge->declaration_op,
-          .has_source_request = true,
       };
   IREE_ASSERT_LT(source_request.class_ordinal, bridge->class_capacity);
   bridge->requirement_by_class[source_request.class_ordinal] =

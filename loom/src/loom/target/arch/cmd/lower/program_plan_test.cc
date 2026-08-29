@@ -446,7 +446,6 @@ command.program.def public @root() launch() {
   ASSERT_TRUE(body_blind_valid);
   ASSERT_EQ(body_blind_plan.root_count, 1u);
   ASSERT_EQ(body_blind_plan.entry_requirement_count, 1u);
-  EXPECT_FALSE(body_blind_plan.entry_requirements[0].has_source_request);
   loom_cmd_program_plan_deinitialize(&body_blind_plan);
   iree_arena_deinitialize(&body_blind_arena);
 
@@ -613,17 +612,14 @@ command.program.def public @root_b() launch(%storage: buffer) {
             request_capture.requests[1].source.class_ordinal);
 
   ASSERT_EQ(plan.entry_requirement_count, 4u);
-  iree_host_size_t source_requirement_count = 0;
-  iree_host_size_t external_requirement_count = 0;
-  for (iree_host_size_t i = 0; i < plan.entry_requirement_count; ++i) {
-    if (plan.entry_requirements[i].has_source_request) {
-      ++source_requirement_count;
-    } else {
-      ++external_requirement_count;
-    }
+  std::vector<uint32_t> requested_requirement_indices;
+  for (const loom_cmd_program_kernel_request_t& request :
+       request_capture.requests) {
+    requested_requirement_indices.push_back(request.entry_requirement_index);
   }
-  EXPECT_EQ(source_requirement_count, 3u);
-  EXPECT_EQ(external_requirement_count, 1u);
+  std::sort(requested_requirement_indices.begin(),
+            requested_requirement_indices.end());
+  EXPECT_EQ(requested_requirement_indices, (std::vector<uint32_t>{0, 1, 2}));
 
   ASSERT_EQ(plan.root_count, 2u);
   const loom_cmd_program_root_t& root_a = plan.roots[0];
@@ -638,8 +634,10 @@ command.program.def public @root_b() launch(%storage: buffer) {
             root_b.entry_requirement_indices[2]);
   EXPECT_EQ(root_a.entry_requirement_indices[3],
             root_b.entry_requirement_indices[3]);
-  EXPECT_FALSE(plan.entry_requirements[root_a.entry_requirement_indices[3]]
-                   .has_source_request);
+  EXPECT_EQ(std::find(requested_requirement_indices.begin(),
+                      requested_requirement_indices.end(),
+                      root_a.entry_requirement_indices[3]),
+            requested_requirement_indices.end());
 
   for (loom_cmd_program_kernel_request_t& request : request_capture.requests) {
     ASSERT_NE(request.source.product.module, nullptr);

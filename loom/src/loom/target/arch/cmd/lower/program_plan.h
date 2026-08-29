@@ -32,9 +32,6 @@ extern "C" {
 typedef struct loom_cmd_entry_requirement_t {
   // Configured entry declaration owned by the plan's root module.
   const loom_op_t* declaration_op;
-
-  // True when an ordinary Loom source request was published for this entry.
-  bool has_source_request;
 } loom_cmd_entry_requirement_t;
 
 // One source request bound to a command-plan entry requirement.

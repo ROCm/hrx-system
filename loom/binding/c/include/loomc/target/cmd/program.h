@@ -41,7 +41,7 @@
 ///     .root_symbol_ordinals = &root_symbol_ordinal,
 ///     .root_symbol_count = 1,
 /// };
-/// loomc_cmd_program_product_t* product = NULL;
+/// loomc_product_t* product = NULL;
 /// loomc_result_t* result = NULL;
 /// loomc_status_t status = loomc_cmd_program_product_build(
 ///     workspace, &options, loomc_allocator_system(), &product, &result);
@@ -52,7 +52,7 @@
 ///   }
 /// }
 /// loomc_result_release(result);
-/// loomc_cmd_program_product_release(product);
+/// loomc_product_release(product);
 /// @endcode
 
 #ifdef __cplusplus
@@ -61,17 +61,6 @@ extern "C" {
 
 /// Stable format name for serialized portable command-program bytes.
 #define LOOMC_ARTIFACT_FORMAT_CMD_PROGRAM "loom-command"
-
-/// Immutable command-program product.
-///
-/// Products own their serialized program bytes, root projections, and copied
-/// symbol names. They retain no source module, link index, workspace, compiler
-/// plan, or analysis state.
-///
-/// @thread_safety
-/// Products are immutable after construction. Retained handles may be shared
-/// across threads.
-typedef struct loomc_cmd_program_product_t loomc_cmd_program_product_t;
 
 /// Command-product operation flag bits.
 typedef enum loomc_cmd_program_product_flag_bits_e {
@@ -159,12 +148,16 @@ typedef struct loomc_cmd_program_t {
 typedef struct loomc_cmd_entry_requirement_t {
   /// Logical kernel entry symbol without a leading `@`.
   loomc_string_view_t symbol;
-
-  /// True when the operation published a request for this semantic class.
-  bool has_request;
 } loomc_cmd_entry_requirement_t;
 
 /// Builds portable command programs and optional kernel source requests.
+///
+/// The returned product has the command descriptor, one executable artifact
+/// and exported root per selected command root, and one requirement per
+/// product-wide executable-entry binding. Command-specific queries expose the
+/// root symbols, root-to-requirement projections, and requirement symbols.
+/// The product owns all serialized bytes and copied names and retains no source
+/// module, link index, workspace, compiler plan, or analysis state.
 ///
 /// @param workspace Invocation-local compiler workspace.
 /// @param options Product selection and specialization options.
@@ -177,9 +170,9 @@ typedef struct loomc_cmd_entry_requirement_t {
 ///
 /// @ownership
 /// The caller owns `out_product` when non-NULL and releases it with
-/// `loomc_cmd_program_product_release`. The caller owns `out_result` on an OK
-/// return and releases it with `loomc_result_release`. Each request is
-/// transferred independently to `options->request_sink`.
+/// `loomc_product_release`. The caller owns `out_result` on an OK return and
+/// releases it with `loomc_result_release`. Each request is transferred
+/// independently to `options->request_sink`.
 ///
 /// @lifetime
 /// The operation borrows `options`, its arrays, `link_index`, and `workspace`
@@ -192,27 +185,24 @@ typedef struct loomc_cmd_entry_requirement_t {
 LOOMC_API_EXPORT loomc_status_t loomc_cmd_program_product_build(
     loomc_workspace_t* workspace,
     const loomc_cmd_program_product_options_t* options,
-    loomc_allocator_t allocator, loomc_cmd_program_product_t** out_product,
+    loomc_allocator_t allocator, loomc_product_t** out_product,
     loomc_result_t** out_result);
 
-/// Retains a command product for another owner.
+/// Returns the process-local command-product descriptor.
 ///
-/// @param product Product to retain.
-LOOMC_API_EXPORT void loomc_cmd_program_product_retain(
-    loomc_cmd_program_product_t* product);
-
-/// Releases a command product.
+/// The returned pointer may be compared with `loomc_product_descriptor` to
+/// identify products before using command-specific projections.
 ///
-/// @param product Product to release. Passing NULL is allowed.
-LOOMC_API_EXPORT void loomc_cmd_program_product_release(
-    loomc_cmd_program_product_t* product);
+/// @return Process-lifetime command-product descriptor.
+LOOMC_API_EXPORT const loomc_product_descriptor_t*
+loomc_cmd_program_product_descriptor(void);
 
 /// Returns the number of serialized command roots in `product`.
 ///
 /// @param product Product to query.
 /// @return Number of serialized command roots.
-LOOMC_API_EXPORT loomc_host_size_t loomc_cmd_program_product_program_count(
-    const loomc_cmd_program_product_t* product);
+LOOMC_API_EXPORT loomc_host_size_t
+loomc_cmd_program_product_program_count(const loomc_product_t* product);
 
 /// Returns serialized command-root metadata by product-local ordinal.
 ///
@@ -221,7 +211,7 @@ LOOMC_API_EXPORT loomc_host_size_t loomc_cmd_program_product_program_count(
 /// @param out_program Receives the borrowed root record when found.
 /// @return True when `ordinal` was valid and `out_program` was populated.
 LOOMC_API_EXPORT bool loomc_cmd_program_product_program_at(
-    const loomc_cmd_program_product_t* product, loomc_host_size_t ordinal,
+    const loomc_product_t* product, loomc_host_size_t ordinal,
     loomc_cmd_program_t* out_program);
 
 /// Returns the number of product-wide executable-entry requirements.
@@ -230,7 +220,7 @@ LOOMC_API_EXPORT bool loomc_cmd_program_product_program_at(
 /// @return Number of product-wide executable-entry requirements.
 LOOMC_API_EXPORT loomc_host_size_t
 loomc_cmd_program_product_entry_requirement_count(
-    const loomc_cmd_program_product_t* product);
+    const loomc_product_t* product);
 
 /// Returns an executable-entry requirement by product-local ordinal.
 ///
@@ -239,7 +229,7 @@ loomc_cmd_program_product_entry_requirement_count(
 /// @param out_requirement Receives the borrowed requirement when found.
 /// @return True when `ordinal` was valid and `out_requirement` was populated.
 LOOMC_API_EXPORT bool loomc_cmd_program_product_entry_requirement_at(
-    const loomc_cmd_program_product_t* product, loomc_host_size_t ordinal,
+    const loomc_product_t* product, loomc_host_size_t ordinal,
     loomc_cmd_entry_requirement_t* out_requirement);
 
 #ifdef __cplusplus

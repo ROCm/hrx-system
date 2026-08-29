@@ -22,8 +22,7 @@
 namespace loomc::bench {
 namespace {
 
-using CmdProductPtr =
-    HandlePtr<loomc_cmd_program_product_t, loomc_cmd_program_product_release>;
+using CmdProductPtr = HandlePtr<loomc_product_t, loomc_product_release>;
 using RequestPtr = HandlePtr<loomc_request_t, loomc_request_release>;
 
 static bool SkipOnError(benchmark::State& state, iree_status_t status) {
@@ -191,7 +190,7 @@ class CommandProductFixture {
                            }
                          : loomc_request_sink_t{},
     };
-    loomc_cmd_program_product_t* product = nullptr;
+    loomc_product_t* product = nullptr;
     loomc_result_t* result = nullptr;
     iree_status_t status = to_iree_status(loomc_cmd_program_product_build(
         workspace_.get(), &options, loom_allocator(), &product, &result));

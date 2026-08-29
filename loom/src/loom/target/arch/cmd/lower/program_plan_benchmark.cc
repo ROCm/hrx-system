@@ -387,7 +387,6 @@ static void RunIndexedProgramPlanBenchmark(benchmark::State& state,
   iree_host_size_t request_count = 0;
   iree_host_size_t root_count = 0;
   iree_host_size_t entry_requirement_count = 0;
-  iree_host_size_t source_requirement_count = 0;
   for (auto _ : state) {
     state.PauseTiming();
     iree_arena_allocator_t scratch_arena;
@@ -410,16 +409,10 @@ static void RunIndexedProgramPlanBenchmark(benchmark::State& state,
     request_count = capture.requests.size();
     root_count = program_plan.root_count;
     entry_requirement_count = program_plan.entry_requirement_count;
-    source_requirement_count = 0;
-    for (iree_host_size_t i = 0; i < entry_requirement_count; ++i) {
-      source_requirement_count +=
-          program_plan.entry_requirements[i].has_source_request ? 1 : 0;
-    }
     if (root_count != 1 ||
         (request_mode == KernelRequestMode::kPublish &&
          request_count != ExpectedKernelRequestCount(launch_shape,
-                                                     fixture.launch_count())) ||
-        source_requirement_count != request_count) {
+                                                     fixture.launch_count()))) {
       std::abort();
     }
     if (request_count != 0) {
@@ -437,12 +430,8 @@ static void RunIndexedProgramPlanBenchmark(benchmark::State& state,
   state.SetComplexityN(fixture.launch_count());
   state.counters["entry_requirements"] =
       static_cast<double>(entry_requirement_count);
-  state.counters["external_requirements"] =
-      static_cast<double>(entry_requirement_count - source_requirement_count);
   state.counters["requests"] = static_cast<double>(request_count);
   state.counters["roots"] = static_cast<double>(root_count);
-  state.counters["source_requirements"] =
-      static_cast<double>(source_requirement_count);
   if (first_request_nanoseconds != 0) {
     state.counters["first_request_ns"] =
         static_cast<double>(first_request_nanoseconds) / state.iterations();

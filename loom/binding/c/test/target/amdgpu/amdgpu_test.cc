@@ -37,8 +37,7 @@ using loomc::testing::HandlePtr;
 
 using CompilerPtr = HandlePtr<loomc_compiler_t, loomc_compiler_release>;
 using ContextPtr = HandlePtr<loomc_context_t, loomc_context_release>;
-using CmdProgramProductPtr =
-    HandlePtr<loomc_cmd_program_product_t, loomc_cmd_program_product_release>;
+using CmdProgramProductPtr = HandlePtr<loomc_product_t, loomc_product_release>;
 using LaunchConfigProgramPtr = HandlePtr<loomc_launch_config_program_t,
                                          loomc_launch_config_program_release>;
 using LinkIndexBuilderPtr =
@@ -1002,7 +1001,7 @@ command.program.def public @dispatch() launch() {
           /*.user_data=*/&request_capture,
       },
   };
-  loomc_cmd_program_product_t* product = nullptr;
+  loomc_product_t* product = nullptr;
   loomc_result_t* product_result = nullptr;
   LOOMC_ASSERT_OK(loomc_cmd_program_product_build(
       workspace.get(), &product_options, loomc_allocator_system(), &product,

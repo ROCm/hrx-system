@@ -7,10 +7,22 @@
 #ifndef LOOMC_PRODUCT_H_
 #define LOOMC_PRODUCT_H_
 
-#include "loomc/source.h"
+#include "loomc/artifact.h"
 
 /// @file
-/// Durable requests published while constructing compiler products.
+/// Immutable compiler products and their recursively published requests.
+///
+/// A product is the immutable value returned by a successful compiler
+/// operation. It owns that operation's artifacts and exposes the two ordinal
+/// spaces needed for composition: exported roots that may satisfy a parent
+/// binding and requirements that must be satisfied by child products or an
+/// embedding. Product-specific APIs project richer metadata from the same
+/// handle without changing its ownership model.
+///
+/// `loomc_result_t` and `loomc_product_t` deliberately answer different
+/// questions. A result reports whether an operation succeeded and carries its
+/// diagnostics. A product exists only on success and carries the immutable
+/// value produced by the operation.
 ///
 /// A request is an independently compilable ordinary Loom bytecode source.
 /// It owns the exact source roots selected by its producer and the provisional
@@ -24,6 +36,85 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/// Opaque process-local identity for one product representation.
+///
+/// Descriptor pointers are stable for the lifetime of the process and may be
+/// compared by identity. They are never serialized and do not replace the
+/// defining Loom operation used to route a durable request.
+typedef struct loomc_product_descriptor_t loomc_product_descriptor_t;
+
+/// Immutable successful compiler product.
+///
+/// Product artifacts, exported roots, and requirements use product-local
+/// ordinals. An operation-specific API defines the metadata and meaning of
+/// each root and requirement. A request binding associates one requirement
+/// ordinal in a parent product with one root ordinal in a child request; the
+/// resulting child product preserves that request-root order as its exported
+/// root order.
+///
+/// @thread_safety
+/// Products are immutable after construction. Retained handles may be queued,
+/// cached, and shared across threads independently of the producing compiler
+/// invocation.
+typedef struct loomc_product_t loomc_product_t;
+
+/// Retains a product for another owner.
+///
+/// @param product Product to retain. Passing NULL is allowed.
+LOOMC_API_EXPORT void loomc_product_retain(loomc_product_t* product);
+
+/// Releases a product.
+///
+/// @param product Product to release. Passing NULL is allowed.
+LOOMC_API_EXPORT void loomc_product_release(loomc_product_t* product);
+
+/// Returns the process-local descriptor identifying `product`.
+///
+/// @param product Product to inspect, or NULL.
+/// @return Product descriptor, or NULL for a NULL product.
+LOOMC_API_EXPORT const loomc_product_descriptor_t* loomc_product_descriptor(
+    const loomc_product_t* product);
+
+/// Returns the number of artifacts owned by `product`.
+///
+/// @param product Product to inspect, or NULL.
+/// @return Artifact count, or zero for a NULL product.
+LOOMC_API_EXPORT loomc_host_size_t
+loomc_product_artifact_count(const loomc_product_t* product);
+
+/// Returns an artifact by product-local ordinal.
+///
+/// @param product Product to inspect.
+/// @param ordinal Zero-based artifact ordinal.
+/// @return Borrowed artifact view, or NULL when `ordinal` is out of range.
+///
+/// @lifetime
+/// The returned view and its strings remain valid while `product` is retained.
+/// Callers that need independent byte ownership retain `artifact->contents`.
+LOOMC_API_EXPORT const loomc_artifact_t* loomc_product_artifact_at(
+    const loomc_product_t* product, loomc_host_size_t ordinal);
+
+/// Returns the number of roots exported by `product`.
+///
+/// Export ordinals preserve the root order of the request or direct build that
+/// produced the product. Product-specific APIs expose root metadata.
+///
+/// @param product Product to inspect, or NULL.
+/// @return Exported-root count, or zero for a NULL product.
+LOOMC_API_EXPORT loomc_host_size_t
+loomc_product_export_count(const loomc_product_t* product);
+
+/// Returns the number of unresolved requirements in `product`.
+///
+/// Requirements are addressed by `loomc_requirement_ordinal_t`. Their typed
+/// contracts are exposed by product-specific APIs; source requests carry the
+/// provisional child bindings needed by a composing host.
+///
+/// @param product Product to inspect, or NULL.
+/// @return Requirement count, or zero for a NULL product.
+LOOMC_API_EXPORT loomc_host_size_t
+loomc_product_requirement_count(const loomc_product_t* product);
 
 /// Parent-product-local requirement ordinal.
 typedef uint32_t loomc_requirement_ordinal_t;
