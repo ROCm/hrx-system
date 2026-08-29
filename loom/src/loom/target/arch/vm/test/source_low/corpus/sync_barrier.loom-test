@@ -1,0 +1,26 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/sync_barrier.loom-test
+// RUN: emit source-low output=low
+
+vm.target<core> @target
+func.def target(@target) @workgroup_barrier() {
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  func.return
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<() -> ()>}) @workgroup_barrier() asm {
+  return
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @subgroup_shared_memory_barrier() {
+  kernel.barrier<workgroup> scope(subgroup) ordering(acq_rel)
+  func.return
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<() -> ()>}) @subgroup_shared_memory_barrier() asm {
+  return
+}
