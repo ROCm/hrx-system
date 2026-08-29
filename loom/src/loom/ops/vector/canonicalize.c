@@ -13,6 +13,7 @@
 #include "loom/ops/index/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/scalar/ops.h"
+#include "loom/ops/scf/ops.h"
 #include "loom/ops/vector/memory.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/ops/view/ops.h"
@@ -1702,6 +1703,23 @@ static iree_status_t loom_vector_canonicalize_select(loom_op_t* op,
   if (loom_vector_value_is_all_bool(rewriter, condition, false)) {
     IREE_RETURN_IF_ERROR(loom_vector_replace_single_result_with_value(
         op, rewriter, false_value));
+    *out_changed = true;
+    return iree_ok_status();
+  }
+
+  loom_op_t* condition_def_op = NULL;
+  if (loom_vector_value_def_op(rewriter, condition, &condition_def_op) &&
+      loom_vector_splat_isa(condition_def_op)) {
+    loom_type_t result_type =
+        loom_module_value_type(rewriter->module, loom_vector_select_result(op));
+    loom_builder_set_before(&rewriter->builder, op);
+    loom_value_id_t value_checkpoint = loom_rewriter_value_checkpoint(rewriter);
+    loom_op_t* replacement_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_scf_select_build(
+        &rewriter->builder, loom_vector_splat_scalar(condition_def_op),
+        true_value, false_value, result_type, op->location, &replacement_op));
+    IREE_RETURN_IF_ERROR(loom_vector_replace_single_result_with_new_op(
+        op, rewriter, replacement_op, value_checkpoint));
     *out_changed = true;
   }
   return iree_ok_status();
