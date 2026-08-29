@@ -235,26 +235,31 @@ TEST(DescriptorEncodingTest, I16MultiplyMatchesOracleInstructionEncodings) {
   EXPECT_EQ(program, std::vector<uint8_t>(expected.begin(), expected.end()));
 }
 
-TEST(DescriptorEncodingTest, SignedI16ExtendMatchesOracleInstructionEncoding) {
+TEST(DescriptorEncodingTest, NarrowExtendsMatchOracleInstructionEncodings) {
   const loom_low_descriptor_set_t* descriptor_set =
       loom_aie2p_core_descriptor_set();
-  std::vector<uint8_t> program;
-
-  loom_aie2p_encoded_slot_t zero;
-  IREE_ASSERT_OK(EncodeDescriptor(
-      descriptor_set, "amd.xdna.aie2p.constant.i32.mova", {"r1"}, {0}, &zero));
-  loom_aie2p_encoded_slot_t sign_extend;
-  IREE_ASSERT_OK(EncodeDescriptor(descriptor_set,
-                                  "amd.xdna.aie2p.extend.signed.i16",
-                                  {"r0", "r1"}, {}, &sign_extend));
-  IREE_ASSERT_OK(AppendBundle(
-      loom_aie2p_encoding_find_bundle_format(IREE_SV("I48_LDA_ALU")),
-      {zero, sign_extend}, &program));
-
-  const std::array<uint8_t, 6> expected = {
-      0x2C, 0xE0, 0x80, 0x00, 0x01, 0x00,  // mova r1, #0; extend.s16 r0, r1
+  struct TestCase {
+    std::string_view descriptor_key;
+    std::array<uint8_t, 4> expected;
   };
-  EXPECT_EQ(program, std::vector<uint8_t>(expected.begin(), expected.end()));
+  const TestCase test_cases[] = {
+      {"amd.xdna.aie2p.extend.signed.i8", {0x18, 0x50, 0x40, 0x10}},
+      {"amd.xdna.aie2p.extend.signed.i16", {0x18, 0x70, 0x40, 0x10}},
+      {"amd.xdna.aie2p.extend.unsigned.i8", {0x18, 0x90, 0x40, 0x10}},
+      {"amd.xdna.aie2p.extend.unsigned.i16", {0x18, 0xB0, 0x40, 0x10}},
+  };
+
+  for (const TestCase& test_case : test_cases) {
+    std::vector<uint8_t> program;
+    loom_aie2p_encoded_slot_t extend;
+    IREE_ASSERT_OK(EncodeDescriptor(descriptor_set, test_case.descriptor_key,
+                                    {"r0", "r1"}, {}, &extend));
+    IREE_ASSERT_OK(
+        AppendBundle(loom_aie2p_encoding_find_bundle_format(IREE_SV("I32_ALU")),
+                     {extend}, &program));
+    EXPECT_EQ(program, std::vector<uint8_t>(test_case.expected.begin(),
+                                            test_case.expected.end()));
+  }
 }
 
 TEST(DescriptorEncodingTest, PhysicalRegisterRowsAlignWithMachineTable) {

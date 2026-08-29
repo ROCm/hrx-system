@@ -1,0 +1,769 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/packed_dot_integer.loom-test
+// RUN: emit source-low output=low
+
+aie2p.target<core> @target
+func.def target(@target) @dot4i_s8s8(%lhs: vector<4xi8>, %rhs: vector<4xi8>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+  %dot = vector.dot4i<s8s8> %lhs, %rhs, %acc : vector<4xi8>, vector<4xi8>, vector<1xi32>
+  func.return %dot : vector<1xi32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot4i_s8s8(%lhs: reg<aie2p.vec512>, %rhs: reg<aie2p.vec512>, %acc: reg<aie2p.vec512>) -> (reg<aie2p.vec512>) asm {
+  %36 = vextract.32.imm %acc, 0
+  %37 = vextract.8.imm %lhs, 0
+  %38 = vextract.8.imm %rhs, 0
+  %39 = extend.s8 %37
+  %40 = extend.s8 %38
+  %41 = mul %39, %40
+  %42 = add.rr %36, %41
+  %43 = vextract.8.imm %lhs, 1
+  %44 = vextract.8.imm %rhs, 1
+  %45 = extend.s8 %43
+  %46 = extend.s8 %44
+  %47 = mul %45, %46
+  %48 = add.rr %42, %47
+  %49 = vextract.8.imm %lhs, 2
+  %50 = vextract.8.imm %rhs, 2
+  %51 = extend.s8 %49
+  %52 = extend.s8 %50
+  %53 = mul %51, %52
+  %54 = add.rr %48, %53
+  %55 = vextract.8.imm %lhs, 3
+  %56 = vextract.8.imm %rhs, 3
+  %57 = extend.s8 %55
+  %58 = extend.s8 %56
+  %59 = mul %57, %58
+  %60 = add.rr %54, %59
+  %dot = vbcst.32 %60
+  return %dot
+}
+
+// ====
+
+aie2p.target<core> @target
+func.def target(@target) @dot4i_u8u8(%lhs: vector<4xi8>, %rhs: vector<4xi8>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+  %dot = vector.dot4i<u8u8> %lhs, %rhs, %acc : vector<4xi8>, vector<4xi8>, vector<1xi32>
+  func.return %dot : vector<1xi32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot4i_u8u8(%lhs: reg<aie2p.vec512>, %rhs: reg<aie2p.vec512>, %acc: reg<aie2p.vec512>) -> (reg<aie2p.vec512>) asm {
+  %36 = vextract.32.imm %acc, 0
+  %37 = vextract.8.imm %lhs, 0
+  %38 = vextract.8.imm %rhs, 0
+  %39 = extend.u8 %37
+  %40 = extend.u8 %38
+  %41 = mul %39, %40
+  %42 = add.rr %36, %41
+  %43 = vextract.8.imm %lhs, 1
+  %44 = vextract.8.imm %rhs, 1
+  %45 = extend.u8 %43
+  %46 = extend.u8 %44
+  %47 = mul %45, %46
+  %48 = add.rr %42, %47
+  %49 = vextract.8.imm %lhs, 2
+  %50 = vextract.8.imm %rhs, 2
+  %51 = extend.u8 %49
+  %52 = extend.u8 %50
+  %53 = mul %51, %52
+  %54 = add.rr %48, %53
+  %55 = vextract.8.imm %lhs, 3
+  %56 = vextract.8.imm %rhs, 3
+  %57 = extend.u8 %55
+  %58 = extend.u8 %56
+  %59 = mul %57, %58
+  %60 = add.rr %54, %59
+  %dot = vbcst.32 %60
+  return %dot
+}
+
+// ====
+
+aie2p.target<core> @target
+func.def target(@target) @dot8i4_u4u4(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+  %dot = vector.dot8i4<u4u4> %lhs, %rhs, %acc : vector<1xi32>
+  func.return %dot : vector<1xi32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot8i4_u4u4(%lhs: reg<aie2p.vec512>, %rhs: reg<aie2p.vec512>, %acc: reg<aie2p.vec512>) -> (reg<aie2p.vec512>) asm {
+  %68 = vextract.32.imm %lhs, 0
+  %69 = vextract.32.imm %rhs, 0
+  %70 = vextract.32.imm %acc, 0
+  %71 = mov.short 15
+  %72 = mov.short 4
+  %73 = mov.short 8
+  %74 = mov.short 12
+  %75 = mov.short 16
+  %76 = mov.short 20
+  %77 = mov.short 24
+  %78 = mov.short 28
+  %79 = and %68, %71
+  %80 = and %69, %71
+  %81 = mul %79, %80
+  %82 = add.rr %70, %81
+  %83 = mov.short 0
+  %84 = sub %83, %72
+  %85 = lshl %68, %84
+  %86 = and %85, %71
+  %88 = sub %83, %72
+  %89 = lshl %69, %88
+  %90 = and %89, %71
+  %91 = mul %86, %90
+  %92 = add.rr %82, %91
+  %94 = sub %83, %73
+  %95 = lshl %68, %94
+  %96 = and %95, %71
+  %98 = sub %83, %73
+  %99 = lshl %69, %98
+  %100 = and %99, %71
+  %101 = mul %96, %100
+  %102 = add.rr %92, %101
+  %104 = sub %83, %74
+  %105 = lshl %68, %104
+  %106 = and %105, %71
+  %108 = sub %83, %74
+  %109 = lshl %69, %108
+  %110 = and %109, %71
+  %111 = mul %106, %110
+  %112 = add.rr %102, %111
+  %114 = sub %83, %75
+  %115 = lshl %68, %114
+  %116 = and %115, %71
+  %118 = sub %83, %75
+  %119 = lshl %69, %118
+  %120 = and %119, %71
+  %121 = mul %116, %120
+  %122 = add.rr %112, %121
+  %124 = sub %83, %76
+  %125 = lshl %68, %124
+  %126 = and %125, %71
+  %128 = sub %83, %76
+  %129 = lshl %69, %128
+  %130 = and %129, %71
+  %131 = mul %126, %130
+  %132 = add.rr %122, %131
+  %134 = sub %83, %77
+  %135 = lshl %68, %134
+  %136 = and %135, %71
+  %138 = sub %83, %77
+  %139 = lshl %69, %138
+  %140 = and %139, %71
+  %141 = mul %136, %140
+  %142 = add.rr %132, %141
+  %144 = sub %83, %78
+  %145 = lshl %68, %144
+  %146 = and %145, %71
+  %148 = sub %83, %78
+  %149 = lshl %69, %148
+  %150 = and %149, %71
+  %151 = mul %146, %150
+  %152 = add.rr %142, %151
+  %dot = vbcst.32 %152
+  return %dot
+}
+
+// ====
+
+aie2p.target<core> @target
+func.def target(@target) @dot4i_u8s8(%lhs: vector<4xi8>, %rhs: vector<4xi8>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+  %dot = vector.dot4i<u8s8> %lhs, %rhs, %acc : vector<4xi8>, vector<4xi8>, vector<1xi32>
+  func.return %dot : vector<1xi32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot4i_u8s8(%lhs: reg<aie2p.vec512>, %rhs: reg<aie2p.vec512>, %acc: reg<aie2p.vec512>) -> (reg<aie2p.vec512>) asm {
+  %36 = vextract.32.imm %acc, 0
+  %37 = vextract.8.imm %lhs, 0
+  %38 = vextract.8.imm %rhs, 0
+  %39 = extend.u8 %37
+  %40 = extend.s8 %38
+  %41 = mul %39, %40
+  %42 = add.rr %36, %41
+  %43 = vextract.8.imm %lhs, 1
+  %44 = vextract.8.imm %rhs, 1
+  %45 = extend.u8 %43
+  %46 = extend.s8 %44
+  %47 = mul %45, %46
+  %48 = add.rr %42, %47
+  %49 = vextract.8.imm %lhs, 2
+  %50 = vextract.8.imm %rhs, 2
+  %51 = extend.u8 %49
+  %52 = extend.s8 %50
+  %53 = mul %51, %52
+  %54 = add.rr %48, %53
+  %55 = vextract.8.imm %lhs, 3
+  %56 = vextract.8.imm %rhs, 3
+  %57 = extend.u8 %55
+  %58 = extend.s8 %56
+  %59 = mul %57, %58
+  %60 = add.rr %54, %59
+  %dot = vbcst.32 %60
+  return %dot
+}
+
+// ====
+
+aie2p.target<core> @target
+func.def target(@target) @dot4i_s8u8(%lhs: vector<4xi8>, %rhs: vector<4xi8>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+  %dot = vector.dot4i<s8u8> %lhs, %rhs, %acc : vector<4xi8>, vector<4xi8>, vector<1xi32>
+  func.return %dot : vector<1xi32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot4i_s8u8(%lhs: reg<aie2p.vec512>, %rhs: reg<aie2p.vec512>, %acc: reg<aie2p.vec512>) -> (reg<aie2p.vec512>) asm {
+  %36 = vextract.32.imm %acc, 0
+  %37 = vextract.8.imm %lhs, 0
+  %38 = vextract.8.imm %rhs, 0
+  %39 = extend.s8 %37
+  %40 = extend.u8 %38
+  %41 = mul %39, %40
+  %42 = add.rr %36, %41
+  %43 = vextract.8.imm %lhs, 1
+  %44 = vextract.8.imm %rhs, 1
+  %45 = extend.s8 %43
+  %46 = extend.u8 %44
+  %47 = mul %45, %46
+  %48 = add.rr %42, %47
+  %49 = vextract.8.imm %lhs, 2
+  %50 = vextract.8.imm %rhs, 2
+  %51 = extend.s8 %49
+  %52 = extend.u8 %50
+  %53 = mul %51, %52
+  %54 = add.rr %48, %53
+  %55 = vextract.8.imm %lhs, 3
+  %56 = vextract.8.imm %rhs, 3
+  %57 = extend.s8 %55
+  %58 = extend.u8 %56
+  %59 = mul %57, %58
+  %60 = add.rr %54, %59
+  %dot = vbcst.32 %60
+  return %dot
+}
+
+// ====
+
+aie2p.target<core> @target
+func.def target(@target) @dot8i4_s4s4(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+  %dot = vector.dot8i4<s4s4> %lhs, %rhs, %acc : vector<1xi32>
+  func.return %dot : vector<1xi32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot8i4_s4s4(%lhs: reg<aie2p.vec512>, %rhs: reg<aie2p.vec512>, %acc: reg<aie2p.vec512>) -> (reg<aie2p.vec512>) asm {
+  %100 = vextract.32.imm %lhs, 0
+  %101 = vextract.32.imm %rhs, 0
+  %102 = vextract.32.imm %acc, 0
+  %103 = mov.short 15
+  %104 = mov.short 4
+  %105 = mov.short 8
+  %106 = mov.short 12
+  %107 = mov.short 16
+  %108 = mov.short 20
+  %109 = mov.short 24
+  %110 = mov.short 28
+  %111 = and %100, %103
+  %112 = lshl %111, %110
+  %113 = mov.short 0
+  %114 = sub %113, %110
+  %115 = ashl %112, %114
+  %116 = and %101, %103
+  %117 = lshl %116, %110
+  %119 = sub %113, %110
+  %120 = ashl %117, %119
+  %121 = mul %115, %120
+  %122 = add.rr %102, %121
+  %124 = sub %113, %104
+  %125 = lshl %100, %124
+  %126 = and %125, %103
+  %127 = lshl %126, %110
+  %129 = sub %113, %110
+  %130 = ashl %127, %129
+  %132 = sub %113, %104
+  %133 = lshl %101, %132
+  %134 = and %133, %103
+  %135 = lshl %134, %110
+  %137 = sub %113, %110
+  %138 = ashl %135, %137
+  %139 = mul %130, %138
+  %140 = add.rr %122, %139
+  %142 = sub %113, %105
+  %143 = lshl %100, %142
+  %144 = and %143, %103
+  %145 = lshl %144, %110
+  %147 = sub %113, %110
+  %148 = ashl %145, %147
+  %150 = sub %113, %105
+  %151 = lshl %101, %150
+  %152 = and %151, %103
+  %153 = lshl %152, %110
+  %155 = sub %113, %110
+  %156 = ashl %153, %155
+  %157 = mul %148, %156
+  %158 = add.rr %140, %157
+  %160 = sub %113, %106
+  %161 = lshl %100, %160
+  %162 = and %161, %103
+  %163 = lshl %162, %110
+  %165 = sub %113, %110
+  %166 = ashl %163, %165
+  %168 = sub %113, %106
+  %169 = lshl %101, %168
+  %170 = and %169, %103
+  %171 = lshl %170, %110
+  %173 = sub %113, %110
+  %174 = ashl %171, %173
+  %175 = mul %166, %174
+  %176 = add.rr %158, %175
+  %178 = sub %113, %107
+  %179 = lshl %100, %178
+  %180 = and %179, %103
+  %181 = lshl %180, %110
+  %183 = sub %113, %110
+  %184 = ashl %181, %183
+  %186 = sub %113, %107
+  %187 = lshl %101, %186
+  %188 = and %187, %103
+  %189 = lshl %188, %110
+  %191 = sub %113, %110
+  %192 = ashl %189, %191
+  %193 = mul %184, %192
+  %194 = add.rr %176, %193
+  %196 = sub %113, %108
+  %197 = lshl %100, %196
+  %198 = and %197, %103
+  %199 = lshl %198, %110
+  %201 = sub %113, %110
+  %202 = ashl %199, %201
+  %204 = sub %113, %108
+  %205 = lshl %101, %204
+  %206 = and %205, %103
+  %207 = lshl %206, %110
+  %209 = sub %113, %110
+  %210 = ashl %207, %209
+  %211 = mul %202, %210
+  %212 = add.rr %194, %211
+  %214 = sub %113, %109
+  %215 = lshl %100, %214
+  %216 = and %215, %103
+  %217 = lshl %216, %110
+  %219 = sub %113, %110
+  %220 = ashl %217, %219
+  %222 = sub %113, %109
+  %223 = lshl %101, %222
+  %224 = and %223, %103
+  %225 = lshl %224, %110
+  %227 = sub %113, %110
+  %228 = ashl %225, %227
+  %229 = mul %220, %228
+  %230 = add.rr %212, %229
+  %232 = sub %113, %110
+  %233 = lshl %100, %232
+  %234 = and %233, %103
+  %235 = lshl %234, %110
+  %237 = sub %113, %110
+  %238 = ashl %235, %237
+  %240 = sub %113, %110
+  %241 = lshl %101, %240
+  %242 = and %241, %103
+  %243 = lshl %242, %110
+  %245 = sub %113, %110
+  %246 = ashl %243, %245
+  %247 = mul %238, %246
+  %248 = add.rr %230, %247
+  %dot = vbcst.32 %248
+  return %dot
+}
+
+// ====
+
+aie2p.target<core> @target
+func.def target(@target) @dot8i4_u4s4(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+  %dot = vector.dot8i4<u4s4> %lhs, %rhs, %acc : vector<1xi32>
+  func.return %dot : vector<1xi32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot8i4_u4s4(%lhs: reg<aie2p.vec512>, %rhs: reg<aie2p.vec512>, %acc: reg<aie2p.vec512>) -> (reg<aie2p.vec512>) asm {
+  %84 = vextract.32.imm %lhs, 0
+  %85 = vextract.32.imm %rhs, 0
+  %86 = vextract.32.imm %acc, 0
+  %87 = mov.short 15
+  %88 = mov.short 4
+  %89 = mov.short 8
+  %90 = mov.short 12
+  %91 = mov.short 16
+  %92 = mov.short 20
+  %93 = mov.short 24
+  %94 = mov.short 28
+  %95 = and %84, %87
+  %96 = and %85, %87
+  %97 = lshl %96, %94
+  %98 = mov.short 0
+  %99 = sub %98, %94
+  %100 = ashl %97, %99
+  %101 = mul %95, %100
+  %102 = add.rr %86, %101
+  %104 = sub %98, %88
+  %105 = lshl %84, %104
+  %106 = and %105, %87
+  %108 = sub %98, %88
+  %109 = lshl %85, %108
+  %110 = and %109, %87
+  %111 = lshl %110, %94
+  %113 = sub %98, %94
+  %114 = ashl %111, %113
+  %115 = mul %106, %114
+  %116 = add.rr %102, %115
+  %118 = sub %98, %89
+  %119 = lshl %84, %118
+  %120 = and %119, %87
+  %122 = sub %98, %89
+  %123 = lshl %85, %122
+  %124 = and %123, %87
+  %125 = lshl %124, %94
+  %127 = sub %98, %94
+  %128 = ashl %125, %127
+  %129 = mul %120, %128
+  %130 = add.rr %116, %129
+  %132 = sub %98, %90
+  %133 = lshl %84, %132
+  %134 = and %133, %87
+  %136 = sub %98, %90
+  %137 = lshl %85, %136
+  %138 = and %137, %87
+  %139 = lshl %138, %94
+  %141 = sub %98, %94
+  %142 = ashl %139, %141
+  %143 = mul %134, %142
+  %144 = add.rr %130, %143
+  %146 = sub %98, %91
+  %147 = lshl %84, %146
+  %148 = and %147, %87
+  %150 = sub %98, %91
+  %151 = lshl %85, %150
+  %152 = and %151, %87
+  %153 = lshl %152, %94
+  %155 = sub %98, %94
+  %156 = ashl %153, %155
+  %157 = mul %148, %156
+  %158 = add.rr %144, %157
+  %160 = sub %98, %92
+  %161 = lshl %84, %160
+  %162 = and %161, %87
+  %164 = sub %98, %92
+  %165 = lshl %85, %164
+  %166 = and %165, %87
+  %167 = lshl %166, %94
+  %169 = sub %98, %94
+  %170 = ashl %167, %169
+  %171 = mul %162, %170
+  %172 = add.rr %158, %171
+  %174 = sub %98, %93
+  %175 = lshl %84, %174
+  %176 = and %175, %87
+  %178 = sub %98, %93
+  %179 = lshl %85, %178
+  %180 = and %179, %87
+  %181 = lshl %180, %94
+  %183 = sub %98, %94
+  %184 = ashl %181, %183
+  %185 = mul %176, %184
+  %186 = add.rr %172, %185
+  %188 = sub %98, %94
+  %189 = lshl %84, %188
+  %190 = and %189, %87
+  %192 = sub %98, %94
+  %193 = lshl %85, %192
+  %194 = and %193, %87
+  %195 = lshl %194, %94
+  %197 = sub %98, %94
+  %198 = ashl %195, %197
+  %199 = mul %190, %198
+  %200 = add.rr %186, %199
+  %dot = vbcst.32 %200
+  return %dot
+}
+
+// ====
+
+aie2p.target<core> @target
+func.def target(@target) @dot8i4_s4u4(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+  %dot = vector.dot8i4<s4u4> %lhs, %rhs, %acc : vector<1xi32>
+  func.return %dot : vector<1xi32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot8i4_s4u4(%lhs: reg<aie2p.vec512>, %rhs: reg<aie2p.vec512>, %acc: reg<aie2p.vec512>) -> (reg<aie2p.vec512>) asm {
+  %84 = vextract.32.imm %lhs, 0
+  %85 = vextract.32.imm %rhs, 0
+  %86 = vextract.32.imm %acc, 0
+  %87 = mov.short 15
+  %88 = mov.short 4
+  %89 = mov.short 8
+  %90 = mov.short 12
+  %91 = mov.short 16
+  %92 = mov.short 20
+  %93 = mov.short 24
+  %94 = mov.short 28
+  %95 = and %84, %87
+  %96 = lshl %95, %94
+  %97 = mov.short 0
+  %98 = sub %97, %94
+  %99 = ashl %96, %98
+  %100 = and %85, %87
+  %101 = mul %99, %100
+  %102 = add.rr %86, %101
+  %104 = sub %97, %88
+  %105 = lshl %84, %104
+  %106 = and %105, %87
+  %107 = lshl %106, %94
+  %109 = sub %97, %94
+  %110 = ashl %107, %109
+  %112 = sub %97, %88
+  %113 = lshl %85, %112
+  %114 = and %113, %87
+  %115 = mul %110, %114
+  %116 = add.rr %102, %115
+  %118 = sub %97, %89
+  %119 = lshl %84, %118
+  %120 = and %119, %87
+  %121 = lshl %120, %94
+  %123 = sub %97, %94
+  %124 = ashl %121, %123
+  %126 = sub %97, %89
+  %127 = lshl %85, %126
+  %128 = and %127, %87
+  %129 = mul %124, %128
+  %130 = add.rr %116, %129
+  %132 = sub %97, %90
+  %133 = lshl %84, %132
+  %134 = and %133, %87
+  %135 = lshl %134, %94
+  %137 = sub %97, %94
+  %138 = ashl %135, %137
+  %140 = sub %97, %90
+  %141 = lshl %85, %140
+  %142 = and %141, %87
+  %143 = mul %138, %142
+  %144 = add.rr %130, %143
+  %146 = sub %97, %91
+  %147 = lshl %84, %146
+  %148 = and %147, %87
+  %149 = lshl %148, %94
+  %151 = sub %97, %94
+  %152 = ashl %149, %151
+  %154 = sub %97, %91
+  %155 = lshl %85, %154
+  %156 = and %155, %87
+  %157 = mul %152, %156
+  %158 = add.rr %144, %157
+  %160 = sub %97, %92
+  %161 = lshl %84, %160
+  %162 = and %161, %87
+  %163 = lshl %162, %94
+  %165 = sub %97, %94
+  %166 = ashl %163, %165
+  %168 = sub %97, %92
+  %169 = lshl %85, %168
+  %170 = and %169, %87
+  %171 = mul %166, %170
+  %172 = add.rr %158, %171
+  %174 = sub %97, %93
+  %175 = lshl %84, %174
+  %176 = and %175, %87
+  %177 = lshl %176, %94
+  %179 = sub %97, %94
+  %180 = ashl %177, %179
+  %182 = sub %97, %93
+  %183 = lshl %85, %182
+  %184 = and %183, %87
+  %185 = mul %180, %184
+  %186 = add.rr %172, %185
+  %188 = sub %97, %94
+  %189 = lshl %84, %188
+  %190 = and %189, %87
+  %191 = lshl %190, %94
+  %193 = sub %97, %94
+  %194 = ashl %191, %193
+  %196 = sub %97, %94
+  %197 = lshl %85, %196
+  %198 = and %197, %87
+  %199 = mul %194, %198
+  %200 = add.rr %186, %199
+  %dot = vbcst.32 %200
+  return %dot
+}
+
+// ====
+
+aie2p.target<core> @target
+func.def target(@target) @dot8i4_s4u4_q4_offset_binary(%rows: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+  %offset_to_signed_mask = vector.constant -2004318072 : vector<1xi32>
+  %signed_rows = vector.xori %rows, %offset_to_signed_mask : vector<1xi32>
+  %dot = vector.dot8i4<s4u4> %signed_rows, %rhs, %acc : vector<1xi32>
+  func.return %dot : vector<1xi32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot8i4_s4u4_q4_offset_binary(%rows: reg<aie2p.vec512>, %rhs: reg<aie2p.vec512>, %acc: reg<aie2p.vec512>) -> (reg<aie2p.vec512>) asm {
+  %88 = vextract.32.imm %rows, 0
+  %89 = mov.i32 -2004318072
+  %90 = xor %88, %89
+  %91 = vextract.32.imm %rhs, 0
+  %92 = vextract.32.imm %acc, 0
+  %93 = mov.short 15
+  %94 = mov.short 4
+  %95 = mov.short 8
+  %96 = mov.short 12
+  %97 = mov.short 16
+  %98 = mov.short 20
+  %99 = mov.short 24
+  %100 = mov.short 28
+  %101 = and %90, %93
+  %102 = lshl %101, %100
+  %103 = mov.short 0
+  %104 = sub %103, %100
+  %105 = ashl %102, %104
+  %106 = and %91, %93
+  %107 = mul %105, %106
+  %108 = add.rr %92, %107
+  %110 = sub %103, %94
+  %111 = lshl %90, %110
+  %112 = and %111, %93
+  %113 = lshl %112, %100
+  %115 = sub %103, %100
+  %116 = ashl %113, %115
+  %118 = sub %103, %94
+  %119 = lshl %91, %118
+  %120 = and %119, %93
+  %121 = mul %116, %120
+  %122 = add.rr %108, %121
+  %124 = sub %103, %95
+  %125 = lshl %90, %124
+  %126 = and %125, %93
+  %127 = lshl %126, %100
+  %129 = sub %103, %100
+  %130 = ashl %127, %129
+  %132 = sub %103, %95
+  %133 = lshl %91, %132
+  %134 = and %133, %93
+  %135 = mul %130, %134
+  %136 = add.rr %122, %135
+  %138 = sub %103, %96
+  %139 = lshl %90, %138
+  %140 = and %139, %93
+  %141 = lshl %140, %100
+  %143 = sub %103, %100
+  %144 = ashl %141, %143
+  %146 = sub %103, %96
+  %147 = lshl %91, %146
+  %148 = and %147, %93
+  %149 = mul %144, %148
+  %150 = add.rr %136, %149
+  %152 = sub %103, %97
+  %153 = lshl %90, %152
+  %154 = and %153, %93
+  %155 = lshl %154, %100
+  %157 = sub %103, %100
+  %158 = ashl %155, %157
+  %160 = sub %103, %97
+  %161 = lshl %91, %160
+  %162 = and %161, %93
+  %163 = mul %158, %162
+  %164 = add.rr %150, %163
+  %166 = sub %103, %98
+  %167 = lshl %90, %166
+  %168 = and %167, %93
+  %169 = lshl %168, %100
+  %171 = sub %103, %100
+  %172 = ashl %169, %171
+  %174 = sub %103, %98
+  %175 = lshl %91, %174
+  %176 = and %175, %93
+  %177 = mul %172, %176
+  %178 = add.rr %164, %177
+  %180 = sub %103, %99
+  %181 = lshl %90, %180
+  %182 = and %181, %93
+  %183 = lshl %182, %100
+  %185 = sub %103, %100
+  %186 = ashl %183, %185
+  %188 = sub %103, %99
+  %189 = lshl %91, %188
+  %190 = and %189, %93
+  %191 = mul %186, %190
+  %192 = add.rr %178, %191
+  %194 = sub %103, %100
+  %195 = lshl %90, %194
+  %196 = and %195, %93
+  %197 = lshl %196, %100
+  %199 = sub %103, %100
+  %200 = ashl %197, %199
+  %202 = sub %103, %100
+  %203 = lshl %91, %202
+  %204 = and %203, %93
+  %205 = mul %200, %204
+  %206 = add.rr %192, %205
+  %dot = vbcst.32 %206
+  return %dot
+}
+
+// ====
+
+aie2p.target<core> @target
+func.def target(@target) @dot4i_s8s8_q6_offset_binary(%codes: vector<1xi32>, %rhs: vector<4xi8>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+  %offset_to_signed_bias = vector.constant -32 : vector<4xi8>
+  %bytes = vector.bitcast %codes : vector<1xi32> to vector<4xi8>
+  %signed_bytes = vector.addi %bytes, %offset_to_signed_bias : vector<4xi8>
+  %dot = vector.dot4i<s8s8> %signed_bytes, %rhs, %acc : vector<4xi8>, vector<4xi8>, vector<1xi32>
+  func.return %dot : vector<1xi32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot4i_s8s8_q6_offset_binary(%codes: reg<aie2p.vec512>, %rhs: reg<aie2p.vec512>, %acc: reg<aie2p.vec512>) -> (reg<aie2p.vec512>) asm {
+  %65 = vextract.32.imm %acc, 0
+  %66 = vextract.32.imm %codes, 0
+  %67 = mov.short 255
+  %68 = and %66, %67
+  %69 = mov.short -32
+  %70 = add.rr %68, %69
+  %71 = vextract.8.imm %rhs, 0
+  %72 = extend.s8 %70
+  %73 = extend.s8 %71
+  %74 = mul %72, %73
+  %75 = add.rr %65, %74
+  %76 = mov.short 8
+  %77 = mov.short 0
+  %78 = sub %77, %76
+  %79 = lshl %66, %78
+  %80 = and %79, %67
+  %81 = add.rr %80, %69
+  %82 = vextract.8.imm %rhs, 1
+  %83 = extend.s8 %81
+  %84 = extend.s8 %82
+  %85 = mul %83, %84
+  %86 = add.rr %75, %85
+  %87 = mov.short 16
+  %89 = sub %77, %87
+  %90 = lshl %66, %89
+  %91 = and %90, %67
+  %92 = add.rr %91, %69
+  %93 = vextract.8.imm %rhs, 2
+  %94 = extend.s8 %92
+  %95 = extend.s8 %93
+  %96 = mul %94, %95
+  %97 = add.rr %86, %96
+  %98 = mov.short 24
+  %100 = sub %77, %98
+  %101 = lshl %66, %100
+  %102 = and %101, %67
+  %103 = add.rr %102, %69
+  %104 = vextract.8.imm %rhs, 3
+  %105 = extend.s8 %103
+  %106 = extend.s8 %104
+  %107 = mul %105, %106
+  %108 = add.rr %97, %107
+  %dot = vbcst.32 %108
+  return %dot
+}

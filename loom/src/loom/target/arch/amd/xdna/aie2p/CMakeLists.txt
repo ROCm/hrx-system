@@ -178,12 +178,14 @@ loom_check_test_suite(
     loom_check_file_test
   SRCS
     "test/source_low/numeric_scalar_i32.loom-test"
+    "test/source_low/packed_dot_integer.loom-test"
     "test/source_low/packed_i8_arithmetic.loom-test"
     "test/source_low/packed_integer_arithmetic.loom-test"
   RUNNER
     ::loom-check
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_scalar_i32.loom-test"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/packed_dot_integer.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/packed_i8_arithmetic.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/packed_integer_arithmetic.loom-test"
   TEST_NAME_PREFIX_TO_STRIP
@@ -198,6 +200,7 @@ iree_execution_test_suite(
   TOOLS
     "loom-compile=loom::tools::loom-compile"
   DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/target/arch/amd/xdna/aie2p/test/end_to_end/packed_dot_integer.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/target/arch/amd/xdna/aie2p/test/end_to_end/packed_integer.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/target/arch/amd/xdna/aie2p/test/end_to_end/scalar_i32.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/target/arch/amd/xdna/aie2p/test/end_to_end/vector_integer.loom"

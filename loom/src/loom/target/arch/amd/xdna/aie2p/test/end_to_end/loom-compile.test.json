@@ -2,6 +2,34 @@
   "version": 1,
   "cases": [
     {
+      "name": "compiles packed integer dot products to an AIE2P tile image",
+      "run": {
+        "tool": "loom-compile",
+        "args": [
+          "{srcdir}/packed_dot_integer.loom",
+          "--backend=elf-aie2p",
+          "--output={tmp}/packed_dot_integer.elf",
+          "--compile-report=details"
+        ]
+      },
+      "stderr": {
+        "contains": {
+          "unordered": [
+            "\"artifact_kind\":\"target-artifact\"",
+            "\"backend\":\"amd-xdna-aie2p-tile-elf\"",
+            "\"artifact_format\":\"elf\"",
+            "\"status\":{\"code\":0,\"name\":\"OK\"}"
+          ]
+        }
+      },
+      "files": [
+        {
+          "path": "{tmp}/packed_dot_integer.elf",
+          "non_empty": true
+        }
+      ]
+    },
+    {
       "name": "compiles packed integer shifts to an AIE2P tile image",
       "run": {
         "tool": "loom-compile",

@@ -24,7 +24,7 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
         for case in AIE2P_CORE_CONTRACT_FRAGMENT.cases
         if isinstance(case, DescriptorRule)
     )
-    assert len(rules) == 88
+    assert len(rules) == 107
 
     constant_rules = [
         rule for rule in rules if rule.source_op is scalar_conversion.scalar_constant
@@ -36,6 +36,19 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
         "amd.xdna.aie2p.constant.i32",
         "amd.xdna.aie2p.constant.i32.short",
         "amd.xdna.aie2p.constant.i32",
+    ]
+
+    conversion_rules = [
+        rule
+        for rule in rules
+        if rule.source_op
+        in (scalar_conversion.scalar_extsi, scalar_conversion.scalar_extui)
+    ]
+    assert [rule.descriptor.key for rule in conversion_rules] == [
+        "amd.xdna.aie2p.extend.signed.i8",
+        "amd.xdna.aie2p.extend.signed.i16",
+        "amd.xdna.aie2p.extend.unsigned.i8",
+        "amd.xdna.aie2p.extend.unsigned.i16",
     ]
 
     vector_constant_rules = [
@@ -131,16 +144,20 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
         "amd.xdna.aie2p.lshl.i32",
         "amd.xdna.aie2p.ashl.i32",
         "amd.xdna.aie2p.lshl.i32",
+        "amd.xdna.aie2p.lshl.i32",
+        "amd.xdna.aie2p.ashl.i32",
+        "amd.xdna.aie2p.lshl.i32",
     ]
-    assert [len(rule.emit) for rule in shift_rules] == [1, 3, 3, 1, 4, 3]
-    signed_i16_shift = shift_rules[4]
+    assert [len(rule.emit) for rule in shift_rules] == [1, 3, 3, 2, 5, 5, 2, 5, 5]
+    signed_i16_shift = shift_rules[7]
     assert [emit.descriptor.key for emit in signed_i16_shift.emit] == [
         "amd.xdna.aie2p.extend.signed.i16",
+        "amd.xdna.aie2p.extend.unsigned.i16",
         "amd.xdna.aie2p.constant.i32.short",
         "amd.xdna.aie2p.sub.i32",
         "amd.xdna.aie2p.ashl.i32",
     ]
-    assert signed_i16_shift.emit[1].immediates == {"i": 0}
+    assert signed_i16_shift.emit[2].immediates == {"i": 0}
 
     vector_rules = [
         rule
@@ -284,4 +301,14 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
     assert (
         len([rule for rule in alias_rules if rule.source_op is vector.vector_broadcast])
         == 3
+    )
+    assert (
+        len(
+            [
+                rule
+                for rule in alias_rules
+                if rule.source_op is scalar_conversion.scalar_trunci
+            ]
+        )
+        == 2
     )
