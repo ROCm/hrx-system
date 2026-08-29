@@ -198,9 +198,9 @@ typedef struct iree_async_semaphore_link_t {
 //
 // HAL backends typically:
 //   1. Embed iree_async_semaphore_t as the first member of their struct
-//   2. Store the native GPU primitive (CUevent, hsa_signal_t, VkSemaphore)
+//   2. Store any native device synchronization primitive
 //   3. Implement vtable methods by calling iree_async_semaphore_* helpers
-//      for common operations, plus native GPU code for hardware signaling
+//      for common operations, plus device code for hardware signaling
 typedef struct iree_async_semaphore_vtable_t {
   // Destroy. At vtable offset 0 for toll-free bridging.
   void (*destroy)(iree_async_semaphore_t* semaphore);
@@ -263,9 +263,8 @@ typedef struct iree_async_semaphore_vtable_t {
 //   - Failure tracking (sticky first-failure-wins)
 //   - Taint watermark (external source tracking for buffer reuse safety)
 //
-// Hardware backends (AMDGPU, CUDA, Vulkan) embed this at offset 0 and add
-// device-specific state (HSA signals, CUevents, VkSemaphores) after it.
-// The hardware primitives are additive acceleration.
+// HAL implementations embed this at offset 0 and may add device-specific state
+// after it. Hardware synchronization primitives are additive acceleration.
 //
 // ## Embedding
 //
@@ -619,14 +618,14 @@ iree_async_semaphore_query_untainted_value(iree_async_semaphore_t* semaphore);
 //   static iree_status_t my_semaphore_signal(
 //       iree_async_semaphore_t* base, uint64_t value,
 //       const iree_async_frontier_t* frontier) {
-//     my_semaphore_t* sem = (my_semaphore_t*)base;
+//     my_semaphore_t* semaphore = (my_semaphore_t*)base;
 //
 //     // Advance timeline value and merge frontier.
 //     IREE_RETURN_IF_ERROR(
 //         iree_async_semaphore_advance_timeline(base, value, frontier));
 //
-//     // Signal native GPU primitive.
-//     cudaEventRecord(sem->event, sem->stream);
+//     // Signal the native device primitive.
+//     my_semaphore_signal_device(semaphore, value);
 //
 //     // Dispatch satisfied timepoints.
 //     iree_async_semaphore_dispatch_timepoints(base, value);

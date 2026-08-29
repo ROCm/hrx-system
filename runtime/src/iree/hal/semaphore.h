@@ -232,35 +232,12 @@ typedef enum iree_hal_external_timepoint_type_e {
   // This type is handled in the base HAL layer (hal/semaphore.c) via the
   // semaphore's proactor and does not dispatch to the driver vtable.
   IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_ASYNC_PRIMITIVE,
-
-  // A CUDA event (cuEvent) referencing a specific timepoint.
-  // Ownership of the event is transferred upon import or export and any
-  // operations performed on the event after are undefined.
-  //
-  // When imported the caller is allowed to record the event using
-  // `cuEventRecord`. Since ownership is transferred the caller must only record
-  // a single occurrence of the event using the reference to the event it
-  // retains. It is safest to record the event prior to importing.
-  //
-  // When exported the caller is allowed to query the timepoint for completion
-  // using `cuEventQuery` or wait on it using either `cuEventSynchronize` or
-  // `cuStreamWaitEvent`. When no longer required the caller must use
-  // `cuEventDestroy` _only after the timepoint has been reached_. Attempting to
-  // destroy an exported event before it has been reached results in undefined
-  // behavior (but most likely a crash).
-  IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_CUDA_EVENT,
 } iree_hal_external_timepoint_type_t;
 
 // Returns true if |type| identifies a concrete external timepoint type.
 static inline bool iree_hal_external_timepoint_type_is_valid(
     iree_hal_external_timepoint_type_t type) {
-  switch (type) {
-    case IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_ASYNC_PRIMITIVE:
-    case IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_CUDA_EVENT:
-      return true;
-    default:
-      return false;
-  }
+  return type == IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_ASYNC_PRIMITIVE;
 }
 
 // A bitmask of iree_hal_external_timepoint_type_t values.
@@ -271,9 +248,6 @@ typedef enum iree_hal_external_timepoint_type_mask_bits_e {
   // Bit for IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_ASYNC_PRIMITIVE.
   IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_ASYNC_PRIMITIVE =
       1u << IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_ASYNC_PRIMITIVE,
-  // Bit for IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_CUDA_EVENT.
-  IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_CUDA_EVENT =
-      1u << IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_CUDA_EVENT,
 } iree_hal_external_timepoint_type_mask_bits_t;
 
 // Returns the mask bit for |type| or NONE for an invalid/sentinel type.
@@ -311,8 +285,6 @@ typedef struct iree_hal_external_timepoint_t {
   union {
     // IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_ASYNC_PRIMITIVE
     iree_async_primitive_t async_primitive;
-    // IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_CUDA_EVENT
-    void* cuda_event;  // cuEvent
   } handle;
 } iree_hal_external_timepoint_t;
 
@@ -423,23 +395,17 @@ IREE_API_EXPORT iree_wait_source_t
 iree_hal_semaphore_await(iree_hal_semaphore_t* semaphore, uint64_t value);
 
 // Imports a timepoint at |value| on the |semaphore| timeline from an external
-// handle. ASYNC_PRIMITIVE types are handled in the base layer via the
-// semaphore's proactor (zero-cost, no vtable dispatch). Driver-specific types
-// (CUDA_EVENT, HIP_EVENT) dispatch through the driver vtable.
-// See the iree_hal_external_timepoint_type_t enum for more information.
+// handle. The semaphore's proactor monitors the primitive and advances the
+// timeline when it becomes ready.
 IREE_API_EXPORT iree_status_t iree_hal_semaphore_import_timepoint(
     iree_hal_semaphore_t* semaphore, uint64_t value,
-    iree_hal_queue_affinity_t queue_affinity,
     iree_hal_external_timepoint_t external_timepoint);
 
 // Exports a timepoint at |value| on the |semaphore| timeline as an external
-// handle. ASYNC_PRIMITIVE types are handled in the base layer via the
-// semaphore's proactor (zero-cost, no vtable dispatch). Driver-specific types
-// (CUDA_EVENT, HIP_EVENT) dispatch through the driver vtable.
-// See the iree_hal_external_timepoint_type_t enum for more information.
+// handle. The returned primitive becomes ready when the semaphore timeline
+// reaches |value|.
 IREE_API_EXPORT iree_status_t iree_hal_semaphore_export_timepoint(
     iree_hal_semaphore_t* semaphore, uint64_t value,
-    iree_hal_queue_affinity_t queue_affinity,
     iree_hal_external_timepoint_type_t requested_type,
     iree_hal_external_timepoint_flags_t requested_flags,
     iree_hal_external_timepoint_t* IREE_RESTRICT out_external_timepoint);
@@ -539,14 +505,14 @@ IREE_API_EXPORT iree_status_t iree_hal_semaphore_list_wait(
 // first member). HAL-specific methods follow after the embedded async vtable.
 //
 // Implementations populate the .async member with core semaphore operations
-// (destroy, query, signal, fail, timepoint management) using the async
-// semaphore signatures. HAL dispatch adapts between the public HAL API
-// signatures and the async vtable signatures (e.g., iree_hal_semaphore_query
-// wraps the uint64_t return from async.query into a status + out_value).
+// (destroy, query, signal, and failure notification) using the async semaphore
+// signatures. HAL dispatch adapts between the public HAL API signatures and the
+// async vtable signatures (e.g., iree_hal_semaphore_query wraps the uint64_t
+// return from async.query into a status + out_value).
 typedef struct iree_hal_semaphore_vtable_t {
   // Core semaphore operations. At offset 0 for toll-free casting between
   // iree_hal_semaphore_vtable_t* and iree_async_semaphore_vtable_t*.
-  // Provides: destroy, query, signal, fail.
+  // Provides: destroy, query, signal, and failure notification.
   iree_async_semaphore_vtable_t async;
 
   // Blocks the caller until the semaphore reaches or exceeds |value| or the
@@ -555,20 +521,6 @@ typedef struct iree_hal_semaphore_vtable_t {
   iree_status_t(IREE_API_PTR* wait)(iree_hal_semaphore_t* semaphore,
                                     uint64_t value, iree_timeout_t timeout,
                                     iree_async_wait_flags_t flags);
-
-  // Imports an external timepoint at |value| on the semaphore timeline.
-  iree_status_t(IREE_API_PTR* import_timepoint)(
-      iree_hal_semaphore_t* semaphore, uint64_t value,
-      iree_hal_queue_affinity_t queue_affinity,
-      iree_hal_external_timepoint_t external_timepoint);
-
-  // Exports a timepoint at |value| on the semaphore timeline.
-  iree_status_t(IREE_API_PTR* export_timepoint)(
-      iree_hal_semaphore_t* semaphore, uint64_t value,
-      iree_hal_queue_affinity_t queue_affinity,
-      iree_hal_external_timepoint_type_t requested_type,
-      iree_hal_external_timepoint_flags_t requested_flags,
-      iree_hal_external_timepoint_t* IREE_RESTRICT out_external_timepoint);
 } iree_hal_semaphore_vtable_t;
 
 // The async vtable must be at offset 0 so that casting an

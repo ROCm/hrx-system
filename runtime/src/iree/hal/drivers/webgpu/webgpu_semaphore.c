@@ -178,30 +178,6 @@ static iree_status_t iree_hal_webgpu_semaphore_wait(
       flags, iree_allocator_system());
 }
 
-static iree_status_t iree_hal_webgpu_semaphore_import_timepoint(
-    iree_hal_semaphore_t* base_semaphore, uint64_t value,
-    iree_hal_queue_affinity_t queue_affinity,
-    iree_hal_external_timepoint_t external_timepoint) {
-  // WebGPU has no native timepoint handle type.
-  // ASYNC_PRIMITIVE types are handled in the base HAL layer via the
-  // semaphore's proactor, so this vtable method is only reached for
-  // driver-specific types that WebGPU does not support.
-  return iree_make_status(
-      IREE_STATUS_UNAVAILABLE,
-      "WebGPU does not support driver-specific timepoint import");
-}
-
-static iree_status_t iree_hal_webgpu_semaphore_export_timepoint(
-    iree_hal_semaphore_t* base_semaphore, uint64_t value,
-    iree_hal_queue_affinity_t queue_affinity,
-    iree_hal_external_timepoint_type_t requested_type,
-    iree_hal_external_timepoint_flags_t requested_flags,
-    iree_hal_external_timepoint_t* IREE_RESTRICT out_external_timepoint) {
-  return iree_make_status(
-      IREE_STATUS_UNAVAILABLE,
-      "WebGPU does not support driver-specific timepoint export");
-}
-
 static const iree_hal_semaphore_vtable_t iree_hal_webgpu_semaphore_vtable = {
     .async =
         {
@@ -212,6 +188,4 @@ static const iree_hal_semaphore_vtable_t iree_hal_webgpu_semaphore_vtable = {
             // has no GPU-side waiter to notify on failure.
         },
     .wait = iree_hal_webgpu_semaphore_wait,
-    .import_timepoint = iree_hal_webgpu_semaphore_import_timepoint,
-    .export_timepoint = iree_hal_webgpu_semaphore_export_timepoint,
 };

@@ -47,11 +47,6 @@
 // only be enabled when tracking down missing instrumentation.
 #define IREE_TRACING_FEATURE_INSTRUMENTATION_CALLSTACKS (1 << 1)
 
-// Enables instrumentation of external device APIs (GPUs, etc) when supported.
-// This can have significant code size and runtime overhead and should only be
-// used when specifically tracing device-side execution.
-#define IREE_TRACING_FEATURE_INSTRUMENTATION_DEVICE (1 << 2)
-
 // Tracks all allocations (we know about) via new/delete/malloc/free.
 // This allows fine-grained allocation and usage tracking down to the code that
 // performed the allocations. Allocations or frees that are performed outside of
@@ -111,25 +106,22 @@
 #undef IREE_TRACING_MAX_CALLSTACK_DEPTH
 #define IREE_TRACING_MAX_CALLSTACK_DEPTH 0
 #elif defined(IREE_TRACING_MODE) && IREE_TRACING_MODE == 2
-#define IREE_TRACING_FEATURES_REQUESTED          \
-  (IREE_TRACING_FEATURE_INSTRUMENTATION |        \
-   IREE_TRACING_FEATURE_INSTRUMENTATION_DEVICE | \
-   IREE_TRACING_FEATURE_ALLOCATION_TRACKING |    \
+#define IREE_TRACING_FEATURES_REQUESTED       \
+  (IREE_TRACING_FEATURE_INSTRUMENTATION |     \
+   IREE_TRACING_FEATURE_ALLOCATION_TRACKING | \
    IREE_TRACING_FEATURE_LOG_MESSAGES)
 // TODO(#9627): make tracy fibers faster; too slow for on-by-default!
 // | IREE_TRACING_FEATURE_FIBERS)
 #elif defined(IREE_TRACING_MODE) && IREE_TRACING_MODE == 3
-#define IREE_TRACING_FEATURES_REQUESTED          \
-  (IREE_TRACING_FEATURE_INSTRUMENTATION |        \
-   IREE_TRACING_FEATURE_INSTRUMENTATION_DEVICE | \
-   IREE_TRACING_FEATURE_ALLOCATION_TRACKING |    \
-   IREE_TRACING_FEATURE_ALLOCATION_CALLSTACKS |  \
+#define IREE_TRACING_FEATURES_REQUESTED         \
+  (IREE_TRACING_FEATURE_INSTRUMENTATION |       \
+   IREE_TRACING_FEATURE_ALLOCATION_TRACKING |   \
+   IREE_TRACING_FEATURE_ALLOCATION_CALLSTACKS | \
    IREE_TRACING_FEATURE_LOG_MESSAGES | IREE_TRACING_FEATURE_FIBERS)
 #elif defined(IREE_TRACING_MODE) && IREE_TRACING_MODE >= 4
 #define IREE_TRACING_FEATURES_REQUESTED              \
   (IREE_TRACING_FEATURE_INSTRUMENTATION |            \
    IREE_TRACING_FEATURE_INSTRUMENTATION_CALLSTACKS | \
-   IREE_TRACING_FEATURE_INSTRUMENTATION_DEVICE |     \
    IREE_TRACING_FEATURE_ALLOCATION_TRACKING |        \
    IREE_TRACING_FEATURE_ALLOCATION_CALLSTACKS |      \
    IREE_TRACING_FEATURE_LOG_MESSAGES | IREE_TRACING_FEATURE_FIBERS)

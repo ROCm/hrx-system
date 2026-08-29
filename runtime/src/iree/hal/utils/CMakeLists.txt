@@ -349,42 +349,9 @@ iree_cc_test(
     iree::testing::gtest_main
 )
 
-iree_cc_library(
-  NAME
-    stream_tracing
-  HDRS
-    "stream_tracing.h"
-  SRCS
-    "stream_tracing.c"
-  DEPS
-    iree::base
-    iree::base::internal::arena
-    iree::base::threading
-    iree::hal
-  PUBLIC
-)
-
 if(NOT IREE_ENABLE_THREADING)
   return()
 endif()
-
-iree_cc_library(
-  NAME
-    deferred_work_queue
-  HDRS
-    "deferred_work_queue.h"
-  SRCS
-    "deferred_work_queue.c"
-  DEPS
-    ::deferred_command_buffer
-    ::resource_set
-    iree::base
-    iree::base::internal::arena
-    iree::base::threading
-    iree::base::threading::thread
-    iree::hal
-  PUBLIC
-)
 
 iree_cc_library(
   NAME

@@ -303,18 +303,6 @@ iree_runtime_cc_test(
     ],
 )
 
-iree_runtime_cc_library(
-    name = "stream_tracing",
-    srcs = ["stream_tracing.c"],
-    hdrs = ["stream_tracing.h"],
-    deps = [
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal:arena",
-        "//runtime/src/iree/base/threading",
-        "//runtime/src/iree/hal",
-    ],
-)
-
 iree_cmake_extra_content(
     content = """
 if(NOT IREE_ENABLE_THREADING)
@@ -322,21 +310,6 @@ if(NOT IREE_ENABLE_THREADING)
 endif()
 """,
     inline = True,
-)
-
-iree_runtime_cc_library(
-    name = "deferred_work_queue",
-    srcs = ["deferred_work_queue.c"],
-    hdrs = ["deferred_work_queue.h"],
-    deps = [
-        ":deferred_command_buffer",
-        ":resource_set",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal:arena",
-        "//runtime/src/iree/base/threading",
-        "//runtime/src/iree/base/threading:thread",
-        "//runtime/src/iree/hal",
-    ],
 )
 
 iree_runtime_cc_library(

@@ -55,8 +55,6 @@ typedef uint32_t iree_hal_external_file_flags_t;
 //
 // Implementations with support:
 //  CPU: file descriptors/HANDLEs
-//  CUDA: cuFile
-//    https://docs.nvidia.com/gpudirect-storage/api-reference-guide/index.html
 //  Direct3D: IDStorageFileX
 //    https://learn.microsoft.com/en-us/gaming/gdk/_content/gc/system/overviews/directstorage/directstorage-overview
 //  Metal: MTLIOFileHandle

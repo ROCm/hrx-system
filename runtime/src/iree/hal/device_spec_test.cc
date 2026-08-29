@@ -932,26 +932,20 @@ TEST(DeviceSpecTest, FindsVirtualMemoryAndExternalHandleRecords) {
       /*.flags=*/IREE_HAL_DEVICE_VIRTUAL_MEMORY_SPEC_FLAG_NONE,
   };
 
-  iree_hal_external_timepoint_handle_spec_t external_timepoint_handles[2] = {
+  iree_hal_external_timepoint_handle_spec_t external_timepoint_handles[1] = {
       {
-          /*.handle_type=*/IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_CUDA_EVENT,
+          /*.handle_type=*/IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_ASYNC_PRIMITIVE,
           /*.direction_flags=*/IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_IMPORT |
               IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_EXPORT,
           /*.compatibility=*/IREE_HAL_SEMAPHORE_COMPATIBILITY_HOST_WAIT |
-              IREE_HAL_SEMAPHORE_COMPATIBILITY_DEVICE_WAIT,
-          /*.flags=*/IREE_HAL_EXTERNAL_HANDLE_CAPABILITY_FLAG_CROSS_PROCESS,
-      },
-      {
-          /*.handle_type=*/IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_ASYNC_PRIMITIVE,
-          /*.direction_flags=*/IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_IMPORT,
-          /*.compatibility=*/IREE_HAL_SEMAPHORE_COMPATIBILITY_HOST_WAIT,
+              IREE_HAL_SEMAPHORE_COMPATIBILITY_HOST_SIGNAL,
           /*.flags=*/IREE_HAL_EXTERNAL_HANDLE_CAPABILITY_FLAG_NONE,
       },
   };
   iree_hal_device_queue_spec_t queues = {
       /*.family_count=*/0,
       /*.families=*/NULL,
-      /*.external_timepoint_handle_count=*/2,
+      /*.external_timepoint_handle_count=*/1,
       /*.external_timepoint_handles=*/external_timepoint_handles,
       /*.flags=*/IREE_HAL_DEVICE_QUEUE_SPEC_FLAG_NONE,
   };
@@ -1023,21 +1017,20 @@ TEST(DeviceSpecTest, FindsVirtualMemoryAndExternalHandleRecords) {
             nullptr);
 
   iree_hal_external_timepoint_handle_selection_t timepoint_selection = {
-      /*.handle_type=*/IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_CUDA_EVENT,
+      /*.handle_type=*/IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_ASYNC_PRIMITIVE,
       /*.direction_flags=*/IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_IMPORT,
-      /*.compatibility=*/IREE_HAL_SEMAPHORE_COMPATIBILITY_DEVICE_WAIT,
-      /*.capability_flags=*/
-      IREE_HAL_EXTERNAL_HANDLE_CAPABILITY_FLAG_CROSS_PROCESS,
+      /*.compatibility=*/IREE_HAL_SEMAPHORE_COMPATIBILITY_HOST_WAIT,
+      /*.capability_flags=*/IREE_HAL_EXTERNAL_HANDLE_CAPABILITY_FLAG_NONE,
   };
   const iree_hal_external_timepoint_handle_spec_t* timepoint_handle =
       iree_hal_device_spec_find_external_timepoint_handle(spec,
                                                           &timepoint_selection);
   ASSERT_NE(timepoint_handle, nullptr);
   EXPECT_EQ(timepoint_handle->handle_type,
-            IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_CUDA_EVENT);
+            IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_ASYNC_PRIMITIVE);
 
   timepoint_selection.compatibility =
-      IREE_HAL_SEMAPHORE_COMPATIBILITY_DEVICE_SIGNAL;
+      IREE_HAL_SEMAPHORE_COMPATIBILITY_DEVICE_WAIT;
   EXPECT_EQ(iree_hal_device_spec_find_external_timepoint_handle(
                 spec, &timepoint_selection),
             nullptr);

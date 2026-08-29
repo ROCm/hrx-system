@@ -242,11 +242,9 @@ TEST(TopologyEdge, ColdWordBitfieldIndependence) {
 
   // Set semaphore import timepoint types.
   hi = iree_hal_topology_edge_set_semaphore_import_timepoint_types(
-      hi, IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_CUDA_EVENT |
-              IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_ASYNC_PRIMITIVE);
+      hi, IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_ASYNC_PRIMITIVE);
   EXPECT_EQ(iree_hal_topology_edge_semaphore_import_timepoint_types(hi),
-            IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_CUDA_EVENT |
-                IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_ASYNC_PRIMITIVE);
+            IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_ASYNC_PRIMITIVE);
   EXPECT_EQ(iree_hal_topology_edge_semaphore_export_timepoint_types(hi),
             IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_NONE);
   EXPECT_EQ(iree_hal_topology_edge_buffer_import_types(hi), 0);
@@ -260,8 +258,7 @@ TEST(TopologyEdge, ColdWordBitfieldIndependence) {
   EXPECT_EQ(iree_hal_topology_edge_buffer_export_types(hi),
             IREE_HAL_TOPOLOGY_HANDLE_TYPE_DMA_BUF);
   EXPECT_EQ(iree_hal_topology_edge_semaphore_import_timepoint_types(hi),
-            IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_CUDA_EVENT |
-                IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_ASYNC_PRIMITIVE);
+            IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_ASYNC_PRIMITIVE);
 
   // Physical-path details are independent from resource handle masks.
   hi = iree_hal_topology_edge_set_link_type(hi,
@@ -273,8 +270,7 @@ TEST(TopologyEdge, ColdWordBitfieldIndependence) {
   EXPECT_EQ(iree_hal_topology_edge_buffer_export_types(hi),
             IREE_HAL_TOPOLOGY_HANDLE_TYPE_DMA_BUF);
   EXPECT_EQ(iree_hal_topology_edge_semaphore_import_timepoint_types(hi),
-            IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_CUDA_EVENT |
-                IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_ASYNC_PRIMITIVE);
+            IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_ASYNC_PRIMITIVE);
 }
 
 //===----------------------------------------------------------------------===//

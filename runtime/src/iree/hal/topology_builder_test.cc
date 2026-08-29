@@ -292,9 +292,9 @@ TEST(TopologyBuilder, FullEdgePreservation) {
       edge.lo, IREE_HAL_TOPOLOGY_LINK_CLASS_FABRIC);
 
   edge.hi = iree_hal_topology_edge_set_semaphore_import_timepoint_types(
-      edge.hi, IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_CUDA_EVENT);
+      edge.hi, IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_ASYNC_PRIMITIVE);
   edge.hi = iree_hal_topology_edge_set_semaphore_export_timepoint_types(
-      edge.hi, IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_CUDA_EVENT);
+      edge.hi, IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_ASYNC_PRIMITIVE);
   edge.hi = iree_hal_topology_edge_set_buffer_import_types(
       edge.hi, IREE_HAL_TOPOLOGY_HANDLE_TYPE_RDMA_MR |
                    IREE_HAL_TOPOLOGY_HANDLE_TYPE_SHM);
@@ -328,9 +328,9 @@ TEST(TopologyBuilder, FullEdgePreservation) {
 
   // Verify the entire cold word survived.
   EXPECT_EQ(iree_hal_topology_edge_semaphore_import_timepoint_types(result.hi),
-            IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_CUDA_EVENT);
+            IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_ASYNC_PRIMITIVE);
   EXPECT_EQ(iree_hal_topology_edge_semaphore_export_timepoint_types(result.hi),
-            IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_CUDA_EVENT);
+            IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_ASYNC_PRIMITIVE);
   EXPECT_EQ(iree_hal_topology_edge_buffer_import_types(result.hi),
             IREE_HAL_TOPOLOGY_HANDLE_TYPE_RDMA_MR |
                 IREE_HAL_TOPOLOGY_HANDLE_TYPE_SHM);

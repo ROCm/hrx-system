@@ -291,8 +291,6 @@ struct iree_hal_slab_provider_vtable_t {
   //     and zeroing, eliminating lazy zero-fill page faults on first write.
   //   CPU (Windows): PrefetchVirtualMemory or page-strided writes.
   //   CPU (any): NUMA pinning via mbind + first-touch policy.
-  //   CUDA: cudaMemAdvise for managed memory migration to device.
-  //
   // Providers where acquire_slab already commits all pages implement this
   // as an empty function.
   void (*prefault)(iree_hal_slab_provider_t* provider, iree_hal_slab_t* slab);
