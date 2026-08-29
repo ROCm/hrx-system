@@ -16,7 +16,7 @@
 #include "iree/async/proactor_platform.h"
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
-#include "iree/hal/drivers/local_sync/sync_semaphore.h"
+#include "iree/hal/drivers/local_task/task_semaphore.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -300,9 +300,9 @@ class EventTimestampPoolPendingTest : public EventTimestampPoolTest {
 
   void SetUp() override {
     EventTimestampPoolTest::SetUp();
-    IREE_ASSERT_OK(iree_hal_sync_semaphore_create(
-        proactor_, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0ull,
-        IREE_HAL_SEMAPHORE_FLAG_NONE, iree_allocator_system(), &semaphore_));
+    IREE_ASSERT_OK(
+        iree_hal_task_semaphore_create(proactor_, /*initial_value=*/0ull,
+                                       iree_allocator_system(), &semaphore_));
   }
   void TearDown() override {
     iree_hal_semaphore_release(semaphore_);

@@ -28,18 +28,6 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
-    name = "collective_batch",
-    srcs = ["collective_batch.c"],
-    hdrs = ["collective_batch.h"],
-    deps = [
-        ":resource_set",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal:arena",
-        "//runtime/src/iree/hal",
-    ],
-)
-
-iree_runtime_cc_library(
     name = "caching_allocator",
     srcs = ["caching_allocator.c"],
     hdrs = ["caching_allocator.h"],
@@ -57,30 +45,6 @@ iree_runtime_cc_library(
     deps = [
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
-    ],
-)
-
-iree_runtime_cc_library(
-    name = "deferred_command_buffer",
-    srcs = ["deferred_command_buffer.c"],
-    hdrs = ["deferred_command_buffer.h"],
-    deps = [
-        ":resource_set",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal:arena",
-        "//runtime/src/iree/hal",
-    ],
-)
-
-iree_runtime_cc_test(
-    name = "deferred_command_buffer_test",
-    srcs = ["deferred_command_buffer_test.cc"],
-    deps = [
-        ":deferred_command_buffer",
-        "//runtime/src/iree/base/internal:arena",
-        "//runtime/src/iree/hal",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

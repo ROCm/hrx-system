@@ -957,8 +957,8 @@ TEST_P(SemaphoreSubmissionTest, PropagateFailSignal) {
 }
 
 // Requires "async_queue" because most tests submit work that waits on
-// semaphores signaled after queue_execute returns. Synchronous drivers
-// (local_sync) would deadlock on the inline wait.
+// semaphores signaled after queue_execute returns. A queue implementation that
+// blocks inside submission would deadlock before the signal can be issued.
 CTS_REGISTER_TEST_SUITE_WITH_TAGS(SemaphoreSubmissionTest, {"async_queue"}, {});
 
 }  // namespace iree::hal::cts

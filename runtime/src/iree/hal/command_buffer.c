@@ -42,76 +42,6 @@ static iree_atomic_int64_t iree_hal_command_buffer_next_profile_id =
 // String utils
 //===----------------------------------------------------------------------===//
 
-IREE_API_EXPORT iree_string_view_t iree_hal_collective_op_format(
-    const iree_hal_collective_op_t* op, iree_bitfield_string_temp_t* out_temp) {
-  static const iree_string_view_t
-      kind_names[IREE_HAL_COLLECTIVE_KIND_MAX_VALUE + 1] = {
-          [IREE_HAL_COLLECTIVE_KIND_ALL_GATHER] = IREE_SVL("all_gather"),
-          [IREE_HAL_COLLECTIVE_KIND_ALL_REDUCE] = IREE_SVL("all_reduce"),
-          [IREE_HAL_COLLECTIVE_KIND_ALL_TO_ALL] = IREE_SVL("all_to_all"),
-          [IREE_HAL_COLLECTIVE_KIND_BROADCAST] = IREE_SVL("broadcast"),
-          [IREE_HAL_COLLECTIVE_KIND_REDUCE] = IREE_SVL("reduce"),
-          [IREE_HAL_COLLECTIVE_KIND_REDUCE_SCATTER] =
-              IREE_SVL("reduce_scatter"),
-          [IREE_HAL_COLLECTIVE_KIND_SEND] = IREE_SVL("send"),
-          [IREE_HAL_COLLECTIVE_KIND_RECV] = IREE_SVL("recv"),
-          [IREE_HAL_COLLECTIVE_KIND_SEND_RECV] = IREE_SVL("send_recv"),
-      };
-  static const iree_string_view_t
-      reduction_names[IREE_HAL_COLLECTIVE_REDUCTION_MAX_VALUE + 1] = {
-          [IREE_HAL_COLLECTIVE_REDUCTION_SUM] = IREE_SVL("sum"),
-          [IREE_HAL_COLLECTIVE_REDUCTION_PRODUCT] = IREE_SVL("product"),
-          [IREE_HAL_COLLECTIVE_REDUCTION_MINIMUM] = IREE_SVL("minimum"),
-          [IREE_HAL_COLLECTIVE_REDUCTION_MAXIMUM] = IREE_SVL("maximum"),
-          [IREE_HAL_COLLECTIVE_REDUCTION_AVERAGE] = IREE_SVL("average"),
-      };
-  static const iree_string_view_t
-      element_type_names[IREE_HAL_COLLECTIVE_ELEMENT_TYPE_MAX_VALUE + 1] = {
-          [IREE_HAL_COLLECTIVE_ELEMENT_TYPE_SINT_8] = IREE_SVL("si8"),
-          [IREE_HAL_COLLECTIVE_ELEMENT_TYPE_UINT_8] = IREE_SVL("ui8"),
-          [IREE_HAL_COLLECTIVE_ELEMENT_TYPE_SINT_16] = IREE_SVL("si16"),
-          [IREE_HAL_COLLECTIVE_ELEMENT_TYPE_UINT_16] = IREE_SVL("ui16"),
-          [IREE_HAL_COLLECTIVE_ELEMENT_TYPE_SINT_32] = IREE_SVL("si32"),
-          [IREE_HAL_COLLECTIVE_ELEMENT_TYPE_UINT_32] = IREE_SVL("ui32"),
-          [IREE_HAL_COLLECTIVE_ELEMENT_TYPE_SINT_64] = IREE_SVL("si64"),
-          [IREE_HAL_COLLECTIVE_ELEMENT_TYPE_UINT_64] = IREE_SVL("ui64"),
-          [IREE_HAL_COLLECTIVE_ELEMENT_TYPE_FLOAT_16] = IREE_SVL("f16"),
-          [IREE_HAL_COLLECTIVE_ELEMENT_TYPE_FLOAT_32] = IREE_SVL("f32"),
-          [IREE_HAL_COLLECTIVE_ELEMENT_TYPE_FLOAT_64] = IREE_SVL("f64"),
-          [IREE_HAL_COLLECTIVE_ELEMENT_TYPE_BFLOAT_16] = IREE_SVL("bf16"),
-      };
-  IREE_ASSERT_LE((int)op->kind, IREE_HAL_COLLECTIVE_KIND_MAX_VALUE);
-  IREE_ASSERT_LE((int)op->reduction, IREE_HAL_COLLECTIVE_REDUCTION_MAX_VALUE);
-  IREE_ASSERT_LE((int)op->element_type,
-                 IREE_HAL_COLLECTIVE_ELEMENT_TYPE_MAX_VALUE);
-  const iree_string_view_t kind_name = kind_names[(int)op->kind];
-  const iree_string_view_t element_type_name =
-      element_type_names[(int)op->element_type];
-  int length = 0;
-  switch (op->kind) {
-    default:
-      length = iree_snprintf(
-          out_temp->buffer, sizeof(out_temp->buffer),
-          "iree_hal_collective_%.*s_%.*s", (int)kind_name.size, kind_name.data,
-          (int)element_type_name.size, element_type_name.data);
-      break;
-    case IREE_HAL_COLLECTIVE_KIND_ALL_REDUCE:
-    case IREE_HAL_COLLECTIVE_KIND_REDUCE:
-    case IREE_HAL_COLLECTIVE_KIND_REDUCE_SCATTER: {
-      const iree_string_view_t reduction_name =
-          reduction_names[(int)op->reduction];
-      length = iree_snprintf(
-          out_temp->buffer, sizeof(out_temp->buffer),
-          "iree_hal_collective_%.*s_%.*s_%.*s", (int)kind_name.size,
-          kind_name.data, (int)reduction_name.size, reduction_name.data,
-          (int)element_type_name.size, element_type_name.data);
-      break;
-    }
-  }
-  return length > 0 ? iree_make_string_view(out_temp->buffer, length)
-                    : IREE_SV("iree_hal_collective_unknown");
-}
-
 IREE_API_EXPORT iree_string_view_t
 iree_hal_command_buffer_mode_format(iree_hal_command_buffer_mode_t value,
                                     iree_bitfield_string_temp_t* out_temp) {
@@ -142,35 +72,6 @@ IREE_API_EXPORT iree_string_view_t iree_hal_command_category_format(
   };
   return iree_bitfield_format_inline(value, IREE_ARRAYSIZE(mappings), mappings,
                                      out_temp);
-}
-
-//===----------------------------------------------------------------------===//
-// iree_hal_collective_element_t
-//===----------------------------------------------------------------------===//
-
-IREE_API_EXPORT iree_device_size_t iree_hal_collective_element_byte_count(
-    iree_hal_collective_element_type_t element_type) {
-  switch (element_type) {
-    case IREE_HAL_COLLECTIVE_ELEMENT_TYPE_SINT_8:
-    case IREE_HAL_COLLECTIVE_ELEMENT_TYPE_UINT_8:
-      return 1;
-    case IREE_HAL_COLLECTIVE_ELEMENT_TYPE_SINT_16:
-    case IREE_HAL_COLLECTIVE_ELEMENT_TYPE_UINT_16:
-    case IREE_HAL_COLLECTIVE_ELEMENT_TYPE_FLOAT_16:
-    case IREE_HAL_COLLECTIVE_ELEMENT_TYPE_BFLOAT_16:
-      return 2;
-    case IREE_HAL_COLLECTIVE_ELEMENT_TYPE_SINT_32:
-    case IREE_HAL_COLLECTIVE_ELEMENT_TYPE_UINT_32:
-    case IREE_HAL_COLLECTIVE_ELEMENT_TYPE_FLOAT_32:
-      return 4;
-    case IREE_HAL_COLLECTIVE_ELEMENT_TYPE_SINT_64:
-    case IREE_HAL_COLLECTIVE_ELEMENT_TYPE_UINT_64:
-    case IREE_HAL_COLLECTIVE_ELEMENT_TYPE_FLOAT_64:
-      return 8;
-    default:
-      IREE_ASSERT(false, "unhandled element type for collective op");
-      return 0;
-  }
 }
 
 //===----------------------------------------------------------------------===//
@@ -501,33 +402,6 @@ IREE_API_EXPORT iree_status_t iree_hal_command_buffer_copy_buffer(
   });
   iree_status_t status = _VTABLE_DISPATCH(command_buffer, copy_buffer)(
       command_buffer, source_ref, target_ref, flags);
-  IREE_TRACE_ZONE_END(z0);
-  return status;
-}
-
-IREE_API_EXPORT iree_status_t iree_hal_command_buffer_collective(
-    iree_hal_command_buffer_t* command_buffer, iree_hal_channel_t* channel,
-    iree_hal_collective_op_t op, uint32_t param, iree_hal_buffer_ref_t send_ref,
-    iree_hal_buffer_ref_t recv_ref, iree_device_size_t element_count) {
-  IREE_ASSERT_ARGUMENT(command_buffer);
-  IREE_ASSERT_ARGUMENT(channel);
-  IREE_TRACE_ZONE_BEGIN(z0);
-  IF_VALIDATING(command_buffer, {
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_hal_command_buffer_collective_validation(
-                command_buffer, VALIDATION_STATE(command_buffer), channel, op,
-                param, send_ref, recv_ref, element_count));
-  });
-#if IREE_HAL_VERBOSE_TRACING_ENABLE
-  IREE_TRACE({
-    iree_bitfield_string_temp_t string_temp;
-    iree_string_view_t collective_str =
-        iree_hal_collective_op_format(&op, &string_temp);
-    IREE_TRACE_ZONE_APPEND_TEXT(z0, collective_str.data, collective_str.size);
-  });
-#endif  // IREE_HAL_VERBOSE_TRACING_ENABLE
-  iree_status_t status = _VTABLE_DISPATCH(command_buffer, collective)(
-      command_buffer, channel, op, param, send_ref, recv_ref, element_count);
   IREE_TRACE_ZONE_END(z0);
   return status;
 }

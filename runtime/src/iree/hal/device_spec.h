@@ -394,8 +394,6 @@ typedef enum iree_hal_queue_family_role_flag_bits_e {
   IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER = 1u << 1,
   // Queue family can run host callback operations.
   IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_HOST_CALL = 1u << 2,
-  // Queue family can participate in collective operations.
-  IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_COLLECTIVE = 1u << 3,
   // Queue family can produce profiling timestamps.
   IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_PROFILING = 1u << 4,
   // Queue family can execute atomic memory operations.

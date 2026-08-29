@@ -862,8 +862,14 @@ typedef struct iree_hal_task_queue_wait_entry_t {
 } iree_hal_task_queue_wait_entry_t;
 
 static bool iree_hal_task_queue_is_shutting_down(iree_hal_task_queue_t* queue) {
-  return iree_atomic_load(&queue->shutting_down, iree_memory_order_acquire) !=
-         0;
+  return iree_atomic_load(&queue->shutdown_phase, iree_memory_order_acquire) !=
+         IREE_HAL_TASK_QUEUE_SHUTDOWN_PHASE_RUNNING;
+}
+
+static bool iree_hal_task_queue_is_compute_shutting_down(
+    iree_hal_task_queue_t* queue) {
+  return iree_atomic_load(&queue->shutdown_phase, iree_memory_order_acquire) ==
+         IREE_HAL_TASK_QUEUE_SHUTDOWN_PHASE_COMPUTE;
 }
 
 static iree_status_t iree_hal_task_queue_make_shutdown_status(void) {
@@ -2467,8 +2473,9 @@ static iree_status_t iree_hal_task_queue_compute_process_drain(
     iree_task_process_drain_result_t* out_result) {
   iree_hal_task_queue_t* queue = (iree_hal_task_queue_t*)process->user_data;
 
-  // Check for shutdown.
-  if (iree_hal_task_queue_is_shutting_down(queue)) {
+  // Compute shutdown begins only after the control process has released and
+  // can no longer initialize or publish items into the compute pool.
+  if (iree_hal_task_queue_is_compute_shutting_down(queue)) {
     IREE_TRACE(iree_hal_task_queue_trace_compute_drain_event());
     out_result->did_work = false;
     out_result->completed = true;
@@ -2727,11 +2734,12 @@ static void iree_hal_task_queue_compute_process_release(
   //
   // All three classes are handled uniformly by compute_item_cleanup.
   //
-  // The pool scan is race-free because the slot release only fires after
-  // slot->active_drainers reaches the sentinel (no workers in drain), and
-  // the compute process's schedule_state transitions to IDLE exclusively in
-  // release_compute_process (never from drain), so no other slot lifetime
-  // can overlap this callback.
+  // The pool scan is race-free because compute shutdown is requested only by
+  // the control process release callback after the sole item producer has
+  // quiesced. The slot release also fires only after slot->active_drainers
+  // reaches the sentinel (no workers in drain), and the compute process's
+  // schedule_state transitions to IDLE exclusively in release_compute_process
+  // (never from drain), so no other slot lifetime can overlap this callback.
   for (iree_hal_task_queue_compute_item_t* item = queue->compute_item_head;
        item != NULL; item = item->next_allocated) {
     if (item->operation || item->processor_context ||
@@ -3070,6 +3078,16 @@ static iree_status_t iree_hal_task_queue_drain_write(
 // terminal status for us when no callback is installed.
 static void iree_hal_task_queue_process_release(iree_task_process_t* process) {
   iree_hal_task_queue_t* queue = (iree_hal_task_queue_t*)process->user_data;
+
+  // This callback is the control process's producer-quiescence barrier. Its
+  // single worker has returned from drain and can no longer allocate,
+  // initialize, or publish compute items. Only now may the compute process
+  // terminate and clean the full item pool.
+  iree_atomic_store(&queue->shutdown_phase,
+                    IREE_HAL_TASK_QUEUE_SHUTDOWN_PHASE_COMPUTE,
+                    iree_memory_order_release);
+  iree_task_executor_schedule_process(queue->executor, &queue->compute_process);
+
   iree_task_scope_end(&queue->scope);
   iree_atomic_fetch_sub(&queue->pending_process_release_count, 1,
                         iree_memory_order_release);
@@ -3307,6 +3325,9 @@ iree_status_t iree_hal_task_queue_initialize(
   iree_task_executor_retain(out_queue->executor);
   out_queue->proactor = proactor;
   iree_atomic_store(&out_queue->epoch, 0, iree_memory_order_relaxed);
+  iree_atomic_store(&out_queue->shutdown_phase,
+                    IREE_HAL_TASK_QUEUE_SHUTDOWN_PHASE_RUNNING,
+                    iree_memory_order_relaxed);
   out_queue->inline_transfer_threshold = inline_transfer_threshold;
   out_queue->small_block_pool = small_block_pool;
   out_queue->large_block_pool = large_block_pool;
@@ -3417,16 +3438,19 @@ void iree_hal_task_queue_retire_frontier(iree_hal_task_queue_t* queue) {
 void iree_hal_task_queue_deinitialize(iree_hal_task_queue_t* queue) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  // Signal both processes to complete. The next drain call on each sees this
-  // flag and returns completed=true, triggering normal process completion.
-  iree_atomic_store(&queue->shutting_down, 1, iree_memory_order_release);
-
-  // Schedule both processes so workers pick them up and see the shutdown flag.
-  // If a process is already being drained, schedule_process sets needs_drain
-  // and the worker will see shutting_down on the next iteration. If IDLE,
-  // schedule_process pushes it to the appropriate run list.
+  // Reject new work and request control-process termination. If the process is
+  // already being drained, schedule_process sets needs_drain and the worker
+  // observes the phase on its next iteration. If IDLE, schedule_process pushes
+  // it to the immediate run list.
+  //
+  // The control release callback advances to COMPUTE and schedules the compute
+  // process only after the control worker has left drain. This producer-first
+  // ordering prevents compute item cleanup from racing control item
+  // initialization and also remains live with a single-worker executor.
+  iree_atomic_store(&queue->shutdown_phase,
+                    IREE_HAL_TASK_QUEUE_SHUTDOWN_PHASE_CONTROL,
+                    iree_memory_order_release);
   iree_task_executor_schedule_process(queue->executor, &queue->process);
-  iree_task_executor_schedule_process(queue->executor, &queue->compute_process);
 
   // Wait for all outstanding operations and both processes to complete.
   // The wake_budget == 1 process's scope_end fires in its release callback.

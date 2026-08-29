@@ -145,7 +145,7 @@ iree_cc_binary_benchmark(
     ::device_spec_builder
     ::executable_environment
     ::executable_library
-    ::local
+    ::executable_loader
     iree::base
     iree::base::tooling::flags
     iree::hal
@@ -262,20 +262,6 @@ iree_cc_test(
 
 iree_cc_library(
   NAME
-    inline_dispatch
-  HDRS
-    "inline_dispatch.h"
-  SRCS
-    "inline_dispatch.c"
-  DEPS
-    ::local
-    iree::base
-    iree::hal
-  PUBLIC
-)
-
-iree_cc_library(
-  NAME
     profile
   HDRS
     "profile.h"
@@ -301,28 +287,6 @@ iree_cc_test(
     iree::hal
     iree::testing::gtest
     iree::testing::gtest_main
-)
-
-iree_cc_library(
-  NAME
-    local
-  HDRS
-    "executable_loader.h"
-    "inline_command_buffer.h"
-    "local_executable.h"
-  SRCS
-    "inline_command_buffer.c"
-  DEPS
-    ::atomic
-    ::executable_environment
-    ::executable_library
-    ::profile
-    iree::base
-    iree::base::internal
-    iree::base::internal::cpu
-    iree::base::internal::fpu_state
-    iree::hal
-  PUBLIC
 )
 
 iree_cc_library(

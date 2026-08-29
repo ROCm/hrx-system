@@ -157,7 +157,7 @@ iree_runtime_cc_test(
 
 iree_cmake_extra_content(
     content = """
-if(TARGET iree::hal::drivers::local_sync::sync_driver)
+if(TARGET iree::hal::drivers::local_task::registration)
 """,
     inline = True,
 )
@@ -173,7 +173,7 @@ iree_runtime_cc_test(
         "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/drivers/local_sync:sync_driver",
+        "//runtime/src/iree/hal/drivers/local_task/registration",
         "//runtime/src/iree/hal/testing:mock_device",
         "//runtime/src/iree/io:file_handle",
         "//runtime/src/iree/testing:gtest",
@@ -196,7 +196,7 @@ iree_runtime_cc_test(
         "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/drivers/local_sync:sync_driver",
+        "//runtime/src/iree/hal/drivers/local_task/registration",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
@@ -222,7 +222,7 @@ iree_runtime_cc_test(
 
 iree_cmake_extra_content(
     content = """
-if(TARGET iree::hal::drivers::local_sync::sync_driver)
+if(TARGET iree::hal::drivers::local_task::registration)
 """,
     inline = True,
 )
@@ -238,7 +238,7 @@ iree_runtime_cc_test(
         "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/drivers/local_sync:sync_driver",
+        "//runtime/src/iree/hal/drivers/local_task/registration",
         "//runtime/src/iree/hal/testing:mock_device",
         "//runtime/src/iree/io:file_handle",
         "//runtime/src/iree/testing:gtest",

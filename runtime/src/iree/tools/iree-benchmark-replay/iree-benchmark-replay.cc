@@ -81,9 +81,9 @@ static const char kIreeBenchmarkReplayUsage[] =
     "      `iree-run-replay --agents_md` for the full replay tool playbook.\n"
     "\n"
     "Examples:\n"
-    "  iree-benchmark-replay --device=local-sync --benchmark_min_time=20x \\\n"
+    "  iree-benchmark-replay --device=local-task --benchmark_min_time=20x \\\n"
     "      /tmp/model.ireereplay\n"
-    "  iree-benchmark-replay --device=local-sync --benchmark_min_time=20x \\\n"
+    "  iree-benchmark-replay --device=local-task --benchmark_min_time=20x \\\n"
     "      --replay_scope=execute /tmp/model.ireereplay\n";
 
 static void PrintBenchmarkReplayAgentMarkdown(FILE* file) {
@@ -97,7 +97,7 @@ static void PrintBenchmarkReplayAgentMarkdown(FILE* file) {
       "Use fixed iteration counts for small replay workloads:\n"
       "\n"
       "```bash\n"
-      "iree-benchmark-replay --device=local-sync --benchmark_min_time=20x \\\n"
+      "iree-benchmark-replay --device=local-task --benchmark_min_time=20x \\\n"
       "  /tmp/model.ireereplay\n"
       "```\n"
       "\n"
@@ -108,7 +108,7 @@ static void PrintBenchmarkReplayAgentMarkdown(FILE* file) {
       "numbers for the VM invocation or another named phase:\n"
       "\n"
       "```bash\n"
-      "iree-benchmark-replay --device=local-sync --benchmark_min_time=20x \\\n"
+      "iree-benchmark-replay --device=local-task --benchmark_min_time=20x \\\n"
       "  --replay_scope=execute /tmp/model.ireereplay\n"
       "```\n"
       "\n"

@@ -20,7 +20,7 @@ iree_runtime_cc_library(
     deps = [
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/local",
+        "//runtime/src/iree/hal/local:executable_loader",
     ] + iree_select({
         "//runtime/config/hal:executable_loader_embedded_elf": [
             "//runtime/src/iree/hal/local/loaders:embedded_elf_loader",

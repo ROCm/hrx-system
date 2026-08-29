@@ -158,7 +158,7 @@ active.""",
   python dev.py bazel configure -DLOOM_TARGET_AMDGPU=ON
   python dev.py bazel configure --importer-env tilelang
   python dev.py bazel configure --importer-env mlir
-  python dev.py bazel configure --//runtime/config/hal:drivers=amdgpu,local-sync,local-task,null --repo_env=IREE_ROCM_PATH=/opt/rocm
+  python dev.py bazel configure --//runtime/config/hal:drivers=amdgpu,local-task,null --repo_env=IREE_ROCM_PATH=/opt/rocm
 
 This writes .bazelrc.configured. Published portable build options live in
 BUILDING.md. Use .bazelrc.local for checkout-specific Bazel overrides.
@@ -597,7 +597,7 @@ such as `//runtime/src/iree/base/...`, not `:target`.
 iree-bazel-configure
 iree-bazel-configure -DIREE_HAL_DRIVER_AMDGPU=ON
 iree-bazel-configure -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=/opt/rocm -DIREE_ROCM_DEPENDENCY_MODE=pinned
-iree-bazel-configure --//runtime/config/hal:drivers=amdgpu,local-sync,local-task,null --repo_env=IREE_ROCM_PATH=/opt/rocm --repo_env=IREE_ROCM_DEPENDENCY_MODE=pinned
+iree-bazel-configure --//runtime/config/hal:drivers=amdgpu,local-task,null --repo_env=IREE_ROCM_PATH=/opt/rocm --repo_env=IREE_ROCM_DEPENDENCY_MODE=pinned
 iree-bazel-build [targets...]
 iree-bazel-test [targets...]
 iree-bazel-query 'deps(//runtime/src/iree/base)'
@@ -667,7 +667,7 @@ personal Bazel overrides in `.bazelrc.local`.
 iree-bazel-configure
 iree-bazel-configure -DIREE_HAL_DRIVER_AMDGPU=ON
 iree-bazel-configure -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=/opt/rocm -DIREE_ROCM_DEPENDENCY_MODE=pinned
-iree-bazel-configure --//runtime/config/hal:drivers=amdgpu,local-sync,local-task,null --repo_env=IREE_ROCM_PATH=/opt/rocm --repo_env=IREE_ROCM_DEPENDENCY_MODE=pinned
+iree-bazel-configure --//runtime/config/hal:drivers=amdgpu,local-task,null --repo_env=IREE_ROCM_PATH=/opt/rocm --repo_env=IREE_ROCM_DEPENDENCY_MODE=pinned
 ```
 
 Published portable configuration options live in `BUILDING.md`."""

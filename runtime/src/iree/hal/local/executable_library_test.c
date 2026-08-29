@@ -18,10 +18,9 @@
 // This is the lowest level of the system right before calling into generated
 // code.
 //
-// This shows what the various execution systems are doing (through a lot
-// of fancy means): all `inline_command_buffer.c` and `task_command_buffer.c`
-// lead up to just calling into the iree_hal_executable_dispatch_v0_t entry
-// point functions with a state structure and a workgroup XYZ.
+// This shows what the local-task execution machinery ultimately does: call
+// into the iree_hal_executable_dispatch_v0_t entry point functions with a
+// state structure and a workgroup XYZ.
 //
 // Below walks through acquiring the library pointer (which in this case is a
 // hand-coded example to show the codegen-side), setting up the I/O buffers and
