@@ -247,7 +247,7 @@ class ConfigureBazelTest(unittest.TestCase):
         config = self.configure_bazel.generate_config(args)
 
         self.assertIn(
-            "build --//loom/config/target:enable=amdgpu,llvmir,spirv,x86",
+            "build --//loom/config/target:enable=amdgpu,llvmir,spirv,xdna,x86",
             config,
         )
         self.assertIn("build --//loom/config/execute:enable=iree_hal", config)
@@ -259,7 +259,7 @@ class ConfigureBazelTest(unittest.TestCase):
         config = self.configure_bazel.generate_config(args)
 
         self.assertIn(
-            "build --//loom/config/target:enable=amdgpu,llvmir,spirv,wasm,x86",
+            "build --//loom/config/target:enable=amdgpu,llvmir,spirv,wasm,xdna,x86",
             config,
         )
         self.assertIn("build --//loom/config/execute:enable=iree_hal", config)
@@ -272,7 +272,7 @@ class ConfigureBazelTest(unittest.TestCase):
         config = self.configure_bazel.generate_config(args)
 
         self.assertIn(
-            "build --//loom/config/target:enable=llvmir,spirv,x86",
+            "build --//loom/config/target:enable=llvmir,spirv,xdna,x86",
             config,
         )
         self.assertIn("build --//loom/config/execute:enable=iree_hal", config)
@@ -283,7 +283,7 @@ class ConfigureBazelTest(unittest.TestCase):
         config = self.configure_bazel.generate_config(args)
 
         self.assertIn(
-            "build --//loom/config/target:enable=amdgpu,llvmir,spirv,x86",
+            "build --//loom/config/target:enable=amdgpu,llvmir,spirv,xdna,x86",
             config,
         )
         self.assertIn("build --//loom/config/execute:enable=", config)
@@ -294,7 +294,7 @@ class ConfigureBazelTest(unittest.TestCase):
         config = self.configure_bazel.generate_config(args)
 
         self.assertIn(
-            "build --//loom/config/target:enable=amdgpu,llvmir,spirv,x86",
+            "build --//loom/config/target:enable=amdgpu,llvmir,spirv,xdna,x86",
             config,
         )
         self.assertIn("build --//loom/config/execute:enable=iree_hal", config)

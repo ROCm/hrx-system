@@ -82,10 +82,6 @@ PACKAGE_INITS = (
         "AMD XDNA AIE2P target descriptor inputs.",
     ),
     PackageInit(
-        "loom/py/loom/target/arch/ireevm/contracts/__init__.py",
-        "IREE VM source-to-low contract fragments.",
-    ),
-    PackageInit(
         "loom/py/loom/target/emit/__init__.py",
         "Emission-target descriptor inputs.",
     ),

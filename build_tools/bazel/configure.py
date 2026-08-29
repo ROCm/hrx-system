@@ -20,11 +20,11 @@ from pathlib import Path, PurePath
 
 LOOM_EXECUTE_SUBSTRATES = ("iree_hal",)
 LOOM_IMPORTERS = ("mlir", "tilelang")
-LOOM_TARGETS = ("amdgpu", "llvmir", "spirv", "wasm", "x86")
-LOOM_EMITTERS = ("amdgpu", "llvmir", "spirv", "wasm")
+LOOM_TARGETS = ("amdgpu", "llvmir", "spirv", "wasm", "xdna", "x86")
+LOOM_EMITTERS = ("amdgpu", "llvmir", "spirv", "wasm", "xdna")
 HOST_DRIVERS = ("task",)
 DEFAULT_LOOM_EXECUTE = LOOM_EXECUTE_SUBSTRATES
-DEFAULT_LOOM_TARGETS = ("amdgpu", "llvmir", "spirv", "x86")
+DEFAULT_LOOM_TARGETS = ("amdgpu", "llvmir", "spirv", "xdna", "x86")
 
 SDK_DRIVER_PACKAGES = {
     "amdgpu": (
@@ -65,10 +65,12 @@ LOOM_TARGET_DEFINES = {
     "LOOM_TARGET_LLVMIR": "llvmir",
     "LOOM_TARGET_SPIRV": "spirv",
     "LOOM_TARGET_WASM": "wasm",
+    "LOOM_TARGET_XDNA": "xdna",
     "LOOM_TARGET_X86": "x86",
 }
 LOOM_EMIT_DEFINES = {
     "LOOM_EMIT_LLVMIR": "llvmir",
+    "LOOM_EMIT_XDNA": "xdna",
 }
 LOOM_EXECUTE_DEFINES = {
     "LOOM_EXECUTE_IREE_HAL": "iree_hal",

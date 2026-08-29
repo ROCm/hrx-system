@@ -1,0 +1,8 @@
+aie2p.target<core> @target
+
+func.def public target(@target) @scalar_i32(%lhs: i32, %rhs: i32) -> (i32) {
+  %sum = scalar.addi %lhs, %rhs : i32
+  %product = scalar.muli %sum, %rhs : i32
+  %mixed = scalar.xori %product, %lhs : i32
+  func.return %mixed : i32
+}

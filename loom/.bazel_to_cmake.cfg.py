@@ -55,6 +55,7 @@ _LOOM_CONFIG_CMAKE_OPTIONS = {
     "//loom/config/emit:llvmir": "LOOM_EMIT_LLVMIR",
     "//loom/config/emit:spirv": "LOOM_EMIT_SPIRV",
     "//loom/config/emit:wasm": "LOOM_EMIT_WASM",
+    "//loom/config/emit:xdna": "LOOM_EMIT_XDNA",
     "//loom/config/execute:amdgpu_hal": "LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU",
     "//loom/config/execute:iree_hal": "LOOM_EXECUTE_IREE_HAL",
     "//loom/config/execute:iree_hal_amdgpu": "LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU",
@@ -65,11 +66,13 @@ _LOOM_CONFIG_CMAKE_OPTIONS = {
     "//loom/config/target:amdgpu": "LOOM_TARGET_AMDGPU",
     "//loom/config/target:spirv": "LOOM_TARGET_SPIRV",
     "//loom/config/target:wasm": "LOOM_TARGET_WASM",
+    "//loom/config/target:xdna": "LOOM_TARGET_XDNA",
     "//loom/config/target:x86": "LOOM_TARGET_X86",
     "//loom/config/target/arch:amdgpu": "LOOM_TARGET_ARCH_AMDGPU",
     "//loom/config/target/arch:llvmir": "LOOM_TARGET_ARCH_LLVMIR",
     "//loom/config/target/arch:spirv": "LOOM_TARGET_ARCH_SPIRV",
     "//loom/config/target/arch:wasm": "LOOM_TARGET_ARCH_WASM",
+    "//loom/config/target/arch:xdna": "LOOM_TARGET_ARCH_XDNA",
     "//loom/config/target/arch:x86": "LOOM_TARGET_ARCH_X86",
 }
 _LOOM_CONFIG_CMAKE_OPTIONS.update(_loom_amdgpu_config_cmake_options())

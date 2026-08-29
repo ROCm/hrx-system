@@ -99,6 +99,108 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    target_records
+  HDRS
+    "records/target_records.h"
+  SRCS
+    "records/target_records.c"
+  DEPS
+    iree::base
+    loom::target::types
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    lower
+  HDRS
+    "lower/lower.h"
+  SRCS
+    "lower/registry.c"
+  DEPS
+    ::core_descriptors
+    iree::base
+    loom::codegen::low::lower
+    loom::error::error_defs
+    loom::ir
+    loom::target::arch::amd::xdna::aie2p::contracts::core
+    loom::target::arch::amd::xdna::aie2p::contracts::core_lower_rules
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    provider
+  HDRS
+    "provider.h"
+  SRCS
+    "provider.c"
+  DEPS
+    ::artifact_emitter
+    ::low_registry
+    ::lower
+    iree::base
+    loom::target::arch::amd::xdna::aie2p::ops
+    loom::target::provider
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    check_provider
+  HDRS
+    "check/provider.h"
+  SRCS
+    "check/provider.c"
+  DEPS
+    ::provider
+    iree::base
+    loom::tools::loom-check::provider
+  TESTONLY
+  PUBLIC
+)
+
+loom_cc_binary(
+  NAME
+    loom-check
+  SRCS
+    "check/loom-check.c"
+  DEPS
+    ::check_provider
+    iree::base
+    loom::tools::loom-check::provider
+    loom::tools::loom-check::test_provider
+  TESTONLY
+)
+
+loom_check_test_suite(
+  NAME
+    loom_check_file_test
+  SRCS
+    "test/source_low/numeric_scalar_i32.loom-test"
+  RUNNER
+    ::loom-check
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_scalar_i32.loom-test"
+  TEST_NAME_PREFIX_TO_STRIP
+    "test/source_low/"
+)
+
+iree_execution_test_suite(
+  NAME
+    loom_compile_execution_test
+  MANIFESTS
+    "test/end_to_end/loom-compile.test.json"
+  TOOLS
+    "loom-compile=loom::tools::loom-compile"
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/target/arch/amd/xdna/aie2p/test/end_to_end/scalar_i32.loom"
+  LABELS
+    "hostonly"
+)
+
+loom_cc_library(
+  NAME
     bundle_plan
   HDRS
     "emit/bundle_plan.h"
@@ -131,6 +233,46 @@ loom_cc_library(
     iree::base::internal::arena
     loom::codegen::low::diagnostics
     loom::target::emit::native::object
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    tile_image
+  HDRS
+    "emit/tile_image.h"
+  SRCS
+    "emit/tile_image.c"
+  DEPS
+    ::bundle_plan
+    iree::base
+    iree::base::internal::arena
+    iree::io::stream
+    loom::target::emit::native::contribution
+    loom::target::emit::native::elf
+    loom::target::emit::native::object
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    artifact_emitter
+  HDRS
+    "emit/artifact_emitter.h"
+  SRCS
+    "emit/artifact_emitter.c"
+  DEPS
+    ::bundle_plan
+    ::leaf_object
+    ::tile_image
+    iree::base
+    iree::io::stream
+    loom::codegen::low::frame
+    loom::codegen::low::function
+    loom::target::emit::native::object
+    loom::target::function_version
+    loom::target::provider
+    loom::target::reporting::low
   PUBLIC
 )
 
@@ -191,6 +333,43 @@ loom_cc_test(
     loom::ir
     loom::ops::low
     loom::target::emit::native::object
+)
+
+loom_cc_test(
+  NAME
+    tile_image_test
+  SRCS
+    "emit/tile_image_test.cc"
+  DEPS
+    ::tile_image
+    iree::base::internal::arena
+    iree::io::stream
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::target::emit::native::object
+)
+
+loom_cc_test(
+  NAME
+    artifact_emitter_test
+  SRCS
+    "emit/artifact_emitter_test.cc"
+  DEPS
+    ::artifact_emitter
+    ::low_registry
+    iree::base
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::codegen::low::text_asm
+    loom::codegen::low::verify
+    loom::format::text::parser
+    loom::ir
+    loom::ops::low
+    loom::target::arch::amd::xdna::aie2p::ops
+    loom::target::emit::native::elf
+    loom::target::provider
+    loom::target::reporting::report
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "compiles scalar source to an AIE2P tile image",
+      "run": {
+        "tool": "loom-compile",
+        "args": [
+          "{srcdir}/scalar_i32.loom",
+          "--backend=elf-aie2p",
+          "--output={tmp}/scalar_i32.elf",
+          "--compile-report=details"
+        ]
+      },
+      "stderr": {
+        "contains": {
+          "unordered": [
+            "\"artifact_kind\":\"target-artifact\"",
+            "\"backend\":\"amd-xdna-aie2p-tile-elf\"",
+            "\"artifact_format\":\"elf\"",
+            "\"status\":{\"code\":0,\"name\":\"OK\"}"
+          ]
+        }
+      },
+      "files": [
+        {
+          "path": "{tmp}/scalar_i32.elf",
+          "non_empty": true
+        }
+      ]
+    }
+  ]
+}

@@ -20,6 +20,17 @@ iree_py_library(
 
 iree_py_library(
   NAME
+    dialect
+  SRCS
+    "dialect.py"
+  DEPS
+    loom::py::loom::target::arch::amd::xdna::aie2p::package_init
+    loom::py::loom::core
+    loom::py::loom::dialect::target::target
+)
+
+iree_py_library(
+  NAME
     encoding_data
   SRCS
     "core_encoding_data.py"

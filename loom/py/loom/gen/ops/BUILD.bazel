@@ -16,6 +16,7 @@ GENERATOR_VISIBILITY = [
     "//loom/src/loom/ops:__pkg__",
     "//loom/src/loom/ops:__subpackages__",
     "//loom/src/loom/target/arch/amdgpu/ops:__pkg__",
+    "//loom/src/loom/target/arch/amd/xdna/aie2p/ops:__pkg__",
     "//loom/src/loom/target/arch/spirv/ops:__pkg__",
     "//loom/src/loom/target/arch/wasm/ops:__pkg__",
     "//loom/src/loom/target/arch/x86/ops:__pkg__",
@@ -24,6 +25,7 @@ GENERATOR_VISIBILITY = [
 C_TABLE_MODEL_ALL_DIALECT_DEPS = [
     "//loom/py/loom/dialect:package",
     "//loom/py/loom/target/arch/amdgpu:dialect",
+    "//loom/py/loom/target/arch/amd/xdna/aie2p:dialect",
     "//loom/py/loom/target/arch/spirv:dialect",
     "//loom/py/loom/target/arch/wasm:dialect",
     "//loom/py/loom/target/arch/x86:dialect",
@@ -106,6 +108,13 @@ iree_py_binary(
     main_module = "loom.gen.ops.c_tables",
     visibility = GENERATOR_VISIBILITY,
     deps = C_TABLES_BASE_DEPS + ["//loom/py/loom/target/arch/amdgpu:dialect"],
+)
+
+iree_py_binary(
+    name = "c_tables_aie2p_generator",
+    main_module = "loom.gen.ops.c_tables",
+    visibility = GENERATOR_VISIBILITY,
+    deps = C_TABLES_BASE_DEPS + ["//loom/py/loom/target/arch/amd/xdna/aie2p:dialect"],
 )
 
 iree_py_binary(

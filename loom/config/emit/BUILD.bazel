@@ -19,6 +19,7 @@ SUPPORTED_VALUES = [
     "llvmir",
     "spirv",
     "wasm",
+    "xdna",
 ]
 
 string_list_flag(
@@ -49,5 +50,6 @@ string_list_flag(
         "llvmir",
         "spirv",
         "wasm",
+        "xdna",
     ]
 ]

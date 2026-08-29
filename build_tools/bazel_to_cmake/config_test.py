@@ -513,6 +513,10 @@ loom_module(
             ),
             "LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND IREE_HAL_DRIVER_VULKAN",
         )
+        self.assertEqual(
+            functions._convert_select_condition("//loom/config/target:xdna_artifacts"),
+            "LOOM_TARGET_ARCH_XDNA AND LOOM_EMIT_XDNA",
+        )
         with self.assertRaises(NotImplementedError):
             functions.select(
                 {

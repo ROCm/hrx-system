@@ -39,7 +39,7 @@ class LoomPresubmitTest(unittest.TestCase):
         self.assertEqual(command[:3], ["bazel", "test", "--config=presubmit"])
         self.assertEqual(command[-1], "//loom/...")
         self.assertIn(
-            "--//loom/config/target:enable=amdgpu,llvmir,spirv,wasm,x86",
+            "--//loom/config/target:enable=amdgpu,llvmir,spirv,wasm,xdna,x86",
             command,
         )
 
@@ -325,6 +325,7 @@ class LoomPresubmitTest(unittest.TestCase):
             "LOOM_TARGET_AMDGPU": "OFF",
             "LOOM_TARGET_LLVMIR": "ON",
             "LOOM_TARGET_SPIRV": "OFF",
+            "LOOM_TARGET_XDNA": "ON",
             "LOOM_TARGET_X86": "ON",
         }
         output = io.StringIO()
@@ -426,7 +427,7 @@ class LoomPresubmitTest(unittest.TestCase):
             cmake_target="loom::tools::loom-format",
             bazel_args=(
                 "--config=locked",
-                "--//loom/config/target:enable=amdgpu,llvmir,spirv,wasm,x86",
+                "--//loom/config/target:enable=amdgpu,llvmir,spirv,wasm,xdna,x86",
             ),
         )
         run_command.assert_called_once_with(

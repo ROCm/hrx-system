@@ -30,6 +30,9 @@ endif()
 if(NOT DEFINED LOOM_TARGET_WASM_DEFAULT)
   set(LOOM_TARGET_WASM_DEFAULT OFF)
 endif()
+if(NOT DEFINED LOOM_TARGET_XDNA_DEFAULT)
+  set(LOOM_TARGET_XDNA_DEFAULT ${LOOM_TARGET_DEFAULTS})
+endif()
 if(NOT DEFINED LOOM_TARGET_X86_DEFAULT)
   set(LOOM_TARGET_X86_DEFAULT ${LOOM_TARGET_DEFAULTS})
 endif()
@@ -51,6 +54,9 @@ option(LOOM_TARGET_SPIRV
 option(LOOM_TARGET_WASM
   "Enables Loom WebAssembly target support."
   ${LOOM_TARGET_WASM_DEFAULT})
+option(LOOM_TARGET_XDNA
+  "Enables Loom AMD XDNA target support."
+  ${LOOM_TARGET_XDNA_DEFAULT})
 option(LOOM_TARGET_X86
   "Enables Loom x86 target support."
   ${LOOM_TARGET_X86_DEFAULT})
@@ -67,6 +73,9 @@ option(LOOM_TARGET_ARCH_SPIRV
 option(LOOM_TARGET_ARCH_WASM
   "Enables the WebAssembly Loom target architecture slice."
   OFF)
+option(LOOM_TARGET_ARCH_XDNA
+  "Enables the AMD XDNA Loom target architecture slice."
+  OFF)
 option(LOOM_TARGET_ARCH_X86
   "Enables the x86 Loom target architecture slice."
   OFF)
@@ -75,6 +84,7 @@ mark_as_advanced(
   LOOM_TARGET_ARCH_LLVMIR
   LOOM_TARGET_ARCH_SPIRV
   LOOM_TARGET_ARCH_WASM
+  LOOM_TARGET_ARCH_XDNA
   LOOM_TARGET_ARCH_X86
 )
 
@@ -89,11 +99,15 @@ option(LOOM_EMIT_SPIRV
 option(LOOM_EMIT_WASM
   "Enables the WebAssembly Loom artifact emitter slice."
   OFF)
+option(LOOM_EMIT_XDNA
+  "Enables the AMD XDNA Loom artifact emitter slice."
+  OFF)
 mark_as_advanced(
   LOOM_EMIT_AMDGPU
   LOOM_EMIT_LLVMIR
   LOOM_EMIT_SPIRV
   LOOM_EMIT_WASM
+  LOOM_EMIT_XDNA
 )
 
 if(LOOM_TARGET_AMDGPU)
@@ -111,6 +125,10 @@ endif()
 if(LOOM_TARGET_WASM)
   set(LOOM_TARGET_ARCH_WASM ON)
   set(LOOM_EMIT_WASM ON)
+endif()
+if(LOOM_TARGET_XDNA)
+  set(LOOM_TARGET_ARCH_XDNA ON)
+  set(LOOM_EMIT_XDNA ON)
 endif()
 if(LOOM_TARGET_X86)
   set(LOOM_TARGET_ARCH_X86 ON)
@@ -152,6 +170,11 @@ endif()
 if(LOOM_EMIT_WASM AND NOT LOOM_TARGET_ARCH_WASM)
   message(FATAL_ERROR
     "LOOM_EMIT_WASM=ON requires LOOM_TARGET_ARCH_WASM=ON.")
+endif()
+
+if(LOOM_EMIT_XDNA AND NOT LOOM_TARGET_ARCH_XDNA)
+  message(FATAL_ERROR
+    "LOOM_EMIT_XDNA=ON requires LOOM_TARGET_ARCH_XDNA=ON.")
 endif()
 
 function(loom_configure_project)

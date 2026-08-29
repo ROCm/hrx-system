@@ -4,11 +4,17 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_binary",
     "loom_cc_library",
     "loom_cc_test",
     "loom_generated_file_family",
+)
+load(
+    "//loom/build_tools/bazel:loom_check.bzl",
+    "loom_check_test_suite",
 )
 
 package(
@@ -89,6 +95,89 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "target_records",
+    srcs = ["records/target_records.c"],
+    hdrs = ["records/target_records.h"],
+    visibility = ["//loom/src/loom/target/arch/amd/xdna/aie2p/ops:__pkg__"],
+    deps = [
+        "//loom/src/loom/target:types",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "lower",
+    srcs = ["lower/registry.c"],
+    hdrs = ["lower/lower.h"],
+    deps = [
+        ":core_descriptors",
+        "//loom/src/loom/codegen/low/lower",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/contracts:core",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/contracts:core_lower_rules",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "provider",
+    srcs = ["provider.c"],
+    hdrs = ["provider.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":artifact_emitter",
+        ":low_registry",
+        ":lower",
+        "//loom/src/loom/target:provider",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/ops",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "check_provider",
+    testonly = True,
+    srcs = ["check/provider.c"],
+    hdrs = ["check/provider.h"],
+    deps = [
+        ":provider",
+        "//loom/src/loom/tools/loom-check:provider",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_binary(
+    name = "loom-check",
+    testonly = True,
+    srcs = ["check/loom-check.c"],
+    deps = [
+        ":check_provider",
+        "//loom/src/loom/tools/loom-check:provider",
+        "//loom/src/loom/tools/loom-check:test_provider",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_check_test_suite(
+    name = "loom_check_file_test",
+    srcs = ["test/source_low/numeric_scalar_i32.loom-test"],
+    data = ["//loom/src/loom/test/corpus/source_low:numeric_scalar_i32.loom-test"],
+    runner = ":loom-check",
+    test_name_prefix_to_strip = "test/source_low/",
+)
+
+iree_execution_test_suite(
+    name = "loom_compile_execution_test",
+    data = ["test/end_to_end/scalar_i32.loom"],
+    manifests = ["test/end_to_end/loom-compile.test.json"],
+    tags = ["hostonly"],
+    tools = {
+        "loom-compile": "//loom/src/loom/tools/loom-compile",
+    },
+)
+
+loom_cc_library(
     name = "bundle_plan",
     srcs = ["emit/bundle_plan.c"],
     hdrs = ["emit/bundle_plan.h"],
@@ -116,6 +205,40 @@ loom_cc_library(
         "//loom/src/loom/target/emit/native:object",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "tile_image",
+    srcs = ["emit/tile_image.c"],
+    hdrs = ["emit/tile_image.h"],
+    deps = [
+        ":bundle_plan",
+        "//loom/src/loom/target/emit/native:contribution",
+        "//loom/src/loom/target/emit/native:elf",
+        "//loom/src/loom/target/emit/native:object",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:stream",
+    ],
+)
+
+loom_cc_library(
+    name = "artifact_emitter",
+    srcs = ["emit/artifact_emitter.c"],
+    hdrs = ["emit/artifact_emitter.h"],
+    deps = [
+        ":bundle_plan",
+        ":leaf_object",
+        ":tile_image",
+        "//loom/src/loom/codegen/low:frame",
+        "//loom/src/loom/codegen/low:function",
+        "//loom/src/loom/target:function_version",
+        "//loom/src/loom/target:provider",
+        "//loom/src/loom/target/emit/native:object",
+        "//loom/src/loom/target/reporting:low",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/io:stream",
     ],
 )
 
@@ -168,6 +291,41 @@ loom_cc_test(
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/target/emit/native:object",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "tile_image_test",
+    srcs = ["emit/tile_image_test.cc"],
+    deps = [
+        ":tile_image",
+        "//loom/src/loom/target/emit/native:object",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:stream",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "artifact_emitter_test",
+    srcs = ["emit/artifact_emitter_test.cc"],
+    deps = [
+        ":artifact_emitter",
+        ":low_registry",
+        "//loom/src/loom/codegen/low:text_asm",
+        "//loom/src/loom/codegen/low:verify",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target:provider",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/ops",
+        "//loom/src/loom/target/emit/native:elf",
+        "//loom/src/loom/target/reporting:report",
+        "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
