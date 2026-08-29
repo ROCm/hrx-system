@@ -1,0 +1,91 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:python.bzl", "iree_py_library", "iree_py_test")
+
+package(
+    default_visibility = ["//visibility:private"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+iree_py_library(
+    name = "package_init",
+    srcs = ["__init__.py"],
+    visibility = ["//visibility:public"],
+    deps = ["//loom/py/loom/target/arch/amd/xdna:package_init"],
+)
+
+iree_py_library(
+    name = "encoding_data",
+    srcs = ["core_encoding_data.py"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":package_init",
+        "//loom/py/loom/target/arch/amd/xdna/aie:encoding",
+    ],
+)
+
+iree_py_library(
+    name = "machine_data",
+    srcs = ["core_machine_data.py"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":encoding_data",
+        ":package_init",
+        "//loom/py/loom/target/arch/amd/xdna/aie:machine",
+    ],
+)
+
+iree_py_library(
+    name = "descriptors",
+    srcs = ["core_descriptors.py"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":encoding_data",
+        ":machine_data",
+        "//loom/py/loom/target:low_descriptors",
+        "//loom/py/loom/target/arch/amd/xdna/aie:machine",
+    ],
+)
+
+iree_py_test(
+    name = "encoding_test",
+    srcs = [
+        "encoding_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.target.arch.amd.xdna.aie2p.encoding_test"],
+    main = "pytest_style_runner.py",
+    deps = [":encoding_data"],
+)
+
+iree_py_test(
+    name = "machine_test",
+    srcs = [
+        "machine_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.target.arch.amd.xdna.aie2p.machine_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":machine_data",
+        "//loom/py/loom/target/arch/amd/xdna/aie:machine",
+    ],
+)
+
+iree_py_test(
+    name = "descriptors_test",
+    srcs = [
+        "core_descriptors_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.target.arch.amd.xdna.aie2p.core_descriptors_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":descriptors",
+        ":machine_data",
+    ],
+)

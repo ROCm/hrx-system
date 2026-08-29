@@ -1,0 +1,42 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:python.bzl", "iree_py_library")
+
+package(
+    default_visibility = ["//visibility:private"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+iree_py_library(
+    name = "package_init",
+    srcs = ["__init__.py"],
+    visibility = ["//visibility:public"],
+    deps = ["//loom/py/loom/target/arch/amd/xdna:package_init"],
+)
+
+iree_py_library(
+    name = "encoding",
+    srcs = ["encoding.py"],
+    visibility = [
+        "//loom/py/loom/gen/target/arch/amd/xdna:__subpackages__",
+        "//loom/py/loom/target/arch/amd/xdna:__subpackages__",
+    ],
+    deps = [":package_init"],
+)
+
+iree_py_library(
+    name = "machine",
+    srcs = ["machine.py"],
+    visibility = [
+        "//loom/py/loom/gen/target/arch/amd/xdna:__subpackages__",
+        "//loom/py/loom/target/arch/amd/xdna:__subpackages__",
+    ],
+    deps = [
+        ":encoding",
+        ":package_init",
+    ],
+)
