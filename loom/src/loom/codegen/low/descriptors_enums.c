@@ -179,6 +179,18 @@ iree_string_view_t loom_low_model_quality_name(
   }
 }
 
+iree_string_view_t loom_low_issue_use_kind_name(
+    loom_low_issue_use_kind_t kind) {
+  switch (kind) {
+    case LOOM_LOW_ISSUE_USE_KIND_REQUIRED:
+      return IREE_SV("required");
+    case LOOM_LOW_ISSUE_USE_KIND_RESERVED:
+      return IREE_SV("reserved");
+    default:
+      return IREE_SV("unknown");
+  }
+}
+
 iree_string_view_t loom_low_resource_kind_name(loom_low_resource_kind_t kind) {
   switch (kind) {
     case LOOM_LOW_RESOURCE_KIND_SCALAR_ALU:

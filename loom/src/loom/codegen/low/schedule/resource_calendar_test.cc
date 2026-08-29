@@ -109,6 +109,26 @@ TEST_F(ScheduleResourceCalendarTest, ResetRetainsAnEmptyCalendar) {
   EXPECT_EQ(FindEarliest(consumer, 0), 0u);
 }
 
+TEST_F(ScheduleResourceCalendarTest,
+       ReservationsOverlapButExcludeRequiredUses) {
+  const loom_low_schedule_class_t* required =
+      ScheduleClass(TEST_LOW_CORE_DESCRIPTOR_REF_TEST_RESOURCE_REQUIRED_I32);
+  const loom_low_schedule_class_t* reserved =
+      ScheduleClass(TEST_LOW_CORE_DESCRIPTOR_REF_TEST_RESOURCE_RESERVED_I32);
+
+  Commit(reserved, 0);
+  EXPECT_EQ(FindEarliest(reserved, 0), 0u);
+  Commit(reserved, 0);
+  EXPECT_EQ(FindEarliest(required, 0), 0u);
+  Commit(required, 0);
+  EXPECT_EQ(FindEarliest(required, 0), 1u);
+
+  loom_low_schedule_resource_calendar_reset(&calendar_);
+  Commit(required, 0);
+  Commit(required, 0);
+  EXPECT_EQ(FindEarliest(reserved, 0), 1u);
+}
+
 TEST_F(ScheduleResourceCalendarTest, LargeIssueCycleUsesACompactRollingWindow) {
   const loom_low_schedule_class_t* fast =
       ScheduleClass(TEST_LOW_CORE_DESCRIPTOR_REF_TEST_EVENT_FAST_I32);
@@ -124,8 +144,8 @@ TEST_F(ScheduleResourceCalendarTest, LargeIssueCycleUsesACompactRollingWindow) {
   const loom_low_schedule_resource_calendar_row_t* row =
       &calendar_.rows[row_index];
   EXPECT_EQ(row->base_issue_cycle, kLargeIssueCycle);
-  EXPECT_EQ(row->occupied_cycle_count, 2u);
-  EXPECT_LE(row->occupied_cycle_capacity, 16u);
+  EXPECT_EQ(row->cycle_count, 2u);
+  EXPECT_LE(row->cycle_capacity, 16u);
 }
 
 }  // namespace

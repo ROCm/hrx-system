@@ -657,6 +657,7 @@ def emit_source_for_views(
                 f".cycles = {issue_use.cycles},",
                 f".units = {issue_use.units},",
                 f".stage = {issue_use.stage},",
+                f".kind = {issue_use.kind.c_name},",
             ]
             for issue_use in compiled.issue_uses
         ],

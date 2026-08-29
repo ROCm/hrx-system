@@ -577,6 +577,16 @@ TEST(LowDescriptorsTest, EnumNamesAreStableDiagnosticSpellings) {
             "fallback");
 
   EXPECT_EQ(StringViewToString(
+                loom_low_issue_use_kind_name(LOOM_LOW_ISSUE_USE_KIND_REQUIRED)),
+            "required");
+  EXPECT_EQ(StringViewToString(
+                loom_low_issue_use_kind_name(LOOM_LOW_ISSUE_USE_KIND_RESERVED)),
+            "reserved");
+  EXPECT_EQ(StringViewToString(loom_low_issue_use_kind_name(
+                static_cast<loom_low_issue_use_kind_t>(99))),
+            "unknown");
+
+  EXPECT_EQ(StringViewToString(
                 loom_low_resource_kind_name(LOOM_LOW_RESOURCE_KIND_UNKNOWN)),
             "unknown");
   EXPECT_EQ(StringViewToString(
@@ -2194,6 +2204,15 @@ TEST(LowDescriptorsTest, RejectsZeroIssueUseUnits) {
   TestTables tables;
   InitializeTestTables(&tables);
   tables.issue_uses[0].units = 0;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsInvalidIssueUseKind) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.issue_uses[0].kind = static_cast<loom_low_issue_use_kind_t>(99);
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         loom_low_descriptor_set_verify(&tables.set));

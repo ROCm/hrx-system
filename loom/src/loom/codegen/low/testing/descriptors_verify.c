@@ -3013,6 +3013,12 @@ static iree_status_t loom_low_verify_issue_use(
                             " consumes zero resource units",
                             issue_use_index);
   }
+  if (issue_use->kind != LOOM_LOW_ISSUE_USE_KIND_REQUIRED &&
+      issue_use->kind != LOOM_LOW_ISSUE_USE_KIND_RESERVED) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "low issue-use %" PRIu32 " has invalid kind %u",
+                            issue_use_index, (unsigned)issue_use->kind);
+  }
   const loom_low_resource_t* resource =
       &descriptor_set->resources[issue_use->resource_id];
   if (issue_use->units > resource->capacity_per_cycle) {

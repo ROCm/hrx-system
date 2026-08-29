@@ -73,10 +73,9 @@ void loom_low_schedule_resource_calendar_reset(
     loom_low_schedule_resource_calendar_t* calendar) {
   for (uint16_t i = 0; i < calendar->row_count; ++i) {
     loom_low_schedule_resource_calendar_row_t* row = &calendar->rows[i];
-    if (row->occupied_cycle_count != 0) {
-      memset(row->occupied_units, 0,
-             row->occupied_cycle_count * sizeof(*row->occupied_units));
-      row->occupied_cycle_count = 0;
+    if (row->cycle_count != 0) {
+      memset(row->cycles, 0, row->cycle_count * sizeof(*row->cycles));
+      row->cycle_count = 0;
     }
     row->base_issue_cycle = 0;
   }
@@ -90,34 +89,34 @@ static void loom_low_schedule_resource_calendar_advance(
     loom_low_schedule_resource_calendar_row_t* row = &calendar->rows[i];
     IREE_ASSERT_LE(row->base_issue_cycle, issue_cycle);
     const uint32_t elapsed_cycles = issue_cycle - row->base_issue_cycle;
-    if (elapsed_cycles >= row->occupied_cycle_count) {
-      if (row->occupied_cycle_count != 0) {
-        memset(row->occupied_units, 0,
-               row->occupied_cycle_count * sizeof(*row->occupied_units));
+    if (elapsed_cycles >= row->cycle_count) {
+      if (row->cycle_count != 0) {
+        memset(row->cycles, 0, row->cycle_count * sizeof(*row->cycles));
       }
-      row->occupied_cycle_count = 0;
+      row->cycle_count = 0;
       row->base_issue_cycle = issue_cycle;
       continue;
     }
     if (elapsed_cycles == 0) {
       continue;
     }
-    const uint32_t retained_cycle_count =
-        row->occupied_cycle_count - elapsed_cycles;
-    memmove(row->occupied_units, &row->occupied_units[elapsed_cycles],
-            retained_cycle_count * sizeof(*row->occupied_units));
-    memset(&row->occupied_units[retained_cycle_count], 0,
-           elapsed_cycles * sizeof(*row->occupied_units));
-    row->occupied_cycle_count = retained_cycle_count;
+    const uint32_t retained_cycle_count = row->cycle_count - elapsed_cycles;
+    memmove(row->cycles, &row->cycles[elapsed_cycles],
+            retained_cycle_count * sizeof(*row->cycles));
+    memset(&row->cycles[retained_cycle_count], 0,
+           elapsed_cycles * sizeof(*row->cycles));
+    row->cycle_count = retained_cycle_count;
     row->base_issue_cycle = issue_cycle;
   }
 }
 
-static uint16_t loom_low_schedule_resource_calendar_candidate_units(
+static loom_low_schedule_resource_occupancy_t
+loom_low_schedule_resource_calendar_candidate_occupancy(
     const loom_low_schedule_resource_calendar_t* calendar,
     const loom_low_schedule_class_t* schedule_class, uint16_t row_index,
     uint32_t relative_cycle, uint16_t* out_resource_id) {
-  uint32_t units = 0;
+  uint32_t required_units = 0;
+  uint32_t reserved_units = 0;
   for (uint16_t i = 0; i < schedule_class->issue_use_count; ++i) {
     const loom_low_issue_use_t* issue_use =
         &calendar->descriptor_set
@@ -129,11 +128,20 @@ static uint16_t loom_low_schedule_resource_calendar_candidate_units(
         relative_cycle >= (uint32_t)issue_use->stage + issue_use->cycles) {
       continue;
     }
-    units += issue_use->units;
+    if (issue_use->kind == LOOM_LOW_ISSUE_USE_KIND_REQUIRED) {
+      required_units += issue_use->units;
+    } else {
+      IREE_ASSERT_EQ(issue_use->kind, LOOM_LOW_ISSUE_USE_KIND_RESERVED);
+      reserved_units = iree_max(reserved_units, issue_use->units);
+    }
     *out_resource_id = issue_use->resource_id;
   }
-  IREE_ASSERT_LE(units, calendar->rows[row_index].capacity_per_cycle);
-  return (uint16_t)units;
+  IREE_ASSERT_LE(required_units + reserved_units,
+                 calendar->rows[row_index].capacity_per_cycle);
+  return (loom_low_schedule_resource_occupancy_t){
+      .required_units = (uint16_t)required_units,
+      .reserved_units = (uint16_t)reserved_units,
+  };
 }
 
 static bool loom_low_schedule_resource_calendar_issue_fits(
@@ -158,18 +166,22 @@ static bool loom_low_schedule_resource_calendar_issue_fits(
         return false;
       }
       uint16_t candidate_resource_id = issue_use->resource_id;
-      const uint16_t candidate_units =
-          loom_low_schedule_resource_calendar_candidate_units(
+      const loom_low_schedule_resource_occupancy_t candidate =
+          loom_low_schedule_resource_calendar_candidate_occupancy(
               calendar, schedule_class, row_index, relative_cycle,
               &candidate_resource_id);
       IREE_ASSERT_LE(row->base_issue_cycle, absolute_cycle);
-      const uint64_t occupied_cycle_index =
-          absolute_cycle - row->base_issue_cycle;
-      const uint16_t occupied_units =
-          occupied_cycle_index < row->occupied_cycle_count
-              ? row->occupied_units[(uint32_t)occupied_cycle_index]
-              : 0;
-      if (occupied_units > row->capacity_per_cycle - candidate_units) {
+      const uint64_t cycle_index = absolute_cycle - row->base_issue_cycle;
+      const loom_low_schedule_resource_occupancy_t occupied =
+          cycle_index < row->cycle_count
+              ? row->cycles[(uint32_t)cycle_index]
+              : (loom_low_schedule_resource_occupancy_t){0};
+      const uint32_t combined_required_units =
+          (uint32_t)occupied.required_units + candidate.required_units;
+      const uint32_t combined_reserved_units =
+          iree_max(occupied.reserved_units, candidate.reserved_units);
+      if (combined_required_units + combined_reserved_units >
+          row->capacity_per_cycle) {
         *out_bottleneck_resource_id = candidate_resource_id;
         return false;
       }
@@ -230,28 +242,33 @@ iree_status_t loom_low_schedule_resource_calendar_commit(
     IREE_ASSERT_EQ(row->base_issue_cycle, issue_cycle);
     const uint32_t use_start = issue_use->stage;
     const uint32_t use_end = use_start + issue_use->cycles;
-    if (use_end > row->occupied_cycle_capacity) {
-      const iree_host_size_t old_count = row->occupied_cycle_count;
+    if (use_end > row->cycle_capacity) {
+      const iree_host_size_t old_count = row->cycle_count;
       IREE_RETURN_IF_ERROR(iree_arena_grow_array(
           calendar->arena, old_count, (iree_host_size_t)use_end,
-          sizeof(*row->occupied_units), &row->occupied_cycle_capacity,
-          (void**)&row->occupied_units));
-      memset(&row->occupied_units[old_count], 0,
-             (row->occupied_cycle_capacity - old_count) *
-                 sizeof(*row->occupied_units));
+          sizeof(*row->cycles), &row->cycle_capacity, (void**)&row->cycles));
+      memset(&row->cycles[old_count], 0,
+             (row->cycle_capacity - old_count) * sizeof(*row->cycles));
     }
-    if (use_end > row->occupied_cycle_count) {
-      memset(
-          &row->occupied_units[row->occupied_cycle_count], 0,
-          (use_end - row->occupied_cycle_count) * sizeof(*row->occupied_units));
+    if (use_end > row->cycle_count) {
+      memset(&row->cycles[row->cycle_count], 0,
+             (use_end - row->cycle_count) * sizeof(*row->cycles));
     }
     for (uint32_t cycle = use_start; cycle < use_end; ++cycle) {
-      IREE_ASSERT_LE(row->occupied_units[cycle],
-                     row->capacity_per_cycle - issue_use->units);
-      row->occupied_units[cycle] += issue_use->units;
+      loom_low_schedule_resource_occupancy_t* occupancy = &row->cycles[cycle];
+      if (issue_use->kind == LOOM_LOW_ISSUE_USE_KIND_REQUIRED) {
+        occupancy->required_units += issue_use->units;
+      } else {
+        IREE_ASSERT_EQ(issue_use->kind, LOOM_LOW_ISSUE_USE_KIND_RESERVED);
+        occupancy->reserved_units =
+            iree_max(occupancy->reserved_units, issue_use->units);
+      }
+      IREE_ASSERT_LE(
+          (uint32_t)occupancy->required_units + occupancy->reserved_units,
+          row->capacity_per_cycle);
     }
-    if (use_end > row->occupied_cycle_count) {
-      row->occupied_cycle_count = (uint32_t)use_end;
+    if (use_end > row->cycle_count) {
+      row->cycle_count = (uint32_t)use_end;
     }
   }
   return iree_ok_status();

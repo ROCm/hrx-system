@@ -45,6 +45,7 @@ from loom.target.low_descriptors import (
     ImmediateFlag,
     ImmediateKind,
     InstructionClass,
+    IssueUseKind,
     NativeAsmValue,
     NativeAsmValueKind,
     OperandAddressMapKind,
@@ -1538,6 +1539,8 @@ def test_generate_test_low_core_descriptor_set() -> None:
     assert '"OpIAdd"' in generated.source
     assert ".op_kind = LOOM_LOW_DESCRIPTOR_OP_KIND_CONST," in generated.source
     assert (".instruction_class_flags = LOOM_LOW_INSTRUCTION_CLASS_FLAG_SCALAR_ALU") in generated.source
+    assert ".kind = LOOM_LOW_ISSUE_USE_KIND_REQUIRED," in generated.source
+    assert ".kind = LOOM_LOW_ISSUE_USE_KIND_RESERVED," in generated.source
 
 
 def test_generator_resolves_symbolic_hazard_resources() -> None:
@@ -2647,6 +2650,90 @@ def test_generator_rejects_aggregate_issue_use_exceeding_shared_capacity() -> No
     with pytest.raises(
         ValueError,
         match=re.escape("descriptor set 'test.low.core' schedule class 'test.event.fast' consumes 3 units from group:1 at relative cycle 0, exceeding capacity 2"),
+    ):
+        generate_descriptor_set(
+            replace(
+                TEST_LOW_CORE_DESCRIPTOR_SET,
+                schedule_classes=schedule_classes,
+            )
+        )
+
+
+def test_generator_allows_overlapping_resource_reservations() -> None:
+    schedule_classes = tuple(
+        replace(
+            schedule_class,
+            issue_uses=tuple(
+                replace(issue_use, kind=IssueUseKind.RESERVED)
+                for issue_use in (
+                    schedule_class.issue_uses[0],
+                    schedule_class.issue_uses[0],
+                    schedule_class.issue_uses[0],
+                )
+            ),
+        )
+        if schedule_class.name == "test.event.fast"
+        else schedule_class
+        for schedule_class in TEST_LOW_CORE_DESCRIPTOR_SET.schedule_classes
+    )
+
+    generate_descriptor_set(
+        replace(
+            TEST_LOW_CORE_DESCRIPTOR_SET,
+            schedule_classes=schedule_classes,
+        )
+    )
+
+
+def test_generator_rejects_required_uses_overlapping_a_reservation() -> None:
+    schedule_classes = tuple(
+        replace(
+            schedule_class,
+            issue_uses=(
+                schedule_class.issue_uses[0],
+                schedule_class.issue_uses[0],
+                replace(
+                    schedule_class.issue_uses[0],
+                    kind=IssueUseKind.RESERVED,
+                ),
+            ),
+        )
+        if schedule_class.name == "test.event.fast"
+        else schedule_class
+        for schedule_class in TEST_LOW_CORE_DESCRIPTOR_SET.schedule_classes
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor set 'test.low.core' schedule class 'test.event.fast' consumes 3 units from group:1 at relative cycle 0, exceeding capacity 2"),
+    ):
+        generate_descriptor_set(
+            replace(
+                TEST_LOW_CORE_DESCRIPTOR_SET,
+                schedule_classes=schedule_classes,
+            )
+        )
+
+
+def test_generator_rejects_invalid_issue_use_kind() -> None:
+    schedule_classes = tuple(
+        replace(
+            schedule_class,
+            issue_uses=(
+                replace(
+                    schedule_class.issue_uses[0],
+                    kind=cast(IssueUseKind, "invalid"),
+                ),
+            ),
+        )
+        if schedule_class.name == "test.event.fast"
+        else schedule_class
+        for schedule_class in TEST_LOW_CORE_DESCRIPTOR_SET.schedule_classes
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor set 'test.low.core' schedule class 'test.event.fast' has invalid issue-use kind 'invalid'"),
     ):
         generate_descriptor_set(
             replace(

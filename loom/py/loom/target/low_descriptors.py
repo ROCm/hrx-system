@@ -207,6 +207,11 @@ class ScheduleClassFlag(CEnum):
     CONTROL = "LOOM_LOW_SCHEDULE_CLASS_FLAG_CONTROL"
 
 
+class IssueUseKind(CEnum):
+    REQUIRED = "LOOM_LOW_ISSUE_USE_KIND_REQUIRED"
+    RESERVED = "LOOM_LOW_ISSUE_USE_KIND_RESERVED"
+
+
 class ResourceKind(CEnum):
     SCALAR_ALU = "LOOM_LOW_RESOURCE_KIND_SCALAR_ALU"
     VECTOR_ALU = "LOOM_LOW_RESOURCE_KIND_VECTOR_ALU"
@@ -593,6 +598,7 @@ class IssueUse:
     cycles: int
     units: int
     stage: int = 0
+    kind: IssueUseKind = IssueUseKind.REQUIRED
 
 
 @dataclass(frozen=True, slots=True)

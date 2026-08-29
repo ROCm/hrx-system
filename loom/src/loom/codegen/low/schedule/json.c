@@ -804,6 +804,11 @@ iree_status_t loom_low_schedule_format_json(
             &use_object, IREE_SV("issue_cycle"), node->issue_cycle));
         IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
             &use_object, IREE_SV("issue_use_ordinal"), issue_use_ordinal));
+        IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+            &use_object, IREE_SV("issue_use_kind"), issue_use->kind));
+        IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+            &use_object, IREE_SV("issue_use_kind_name"),
+            loom_low_issue_use_kind_name(issue_use->kind)));
         IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
             &use_object, IREE_SV("resource"),
             loom_low_descriptor_set_string(descriptor_set,

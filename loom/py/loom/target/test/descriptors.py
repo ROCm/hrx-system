@@ -32,6 +32,7 @@ from loom.target.low_descriptors import (
     ImmediateKind,
     InstructionClass,
     IssueUse,
+    IssueUseKind,
     LatencyKind,
     MemorySpace,
     ModelQuality,
@@ -90,6 +91,8 @@ _SCHEDULE_CONTROL = "test.control"
 _SCHEDULE_EVENT_FAST = "test.event.fast"
 _SCHEDULE_EVENT_SLOW = "test.event.slow"
 _SCHEDULE_EVENT_CONSUMER = "test.event.consumer"
+_SCHEDULE_RESOURCE_REQUIRED = "test.resource.required"
+_SCHEDULE_RESOURCE_RESERVED = "test.resource.reserved"
 
 _EVENT_FAST_WRITE = "test.write.fast"
 _EVENT_SLOW_WRITE = "test.write.slow"
@@ -514,6 +517,26 @@ TEST_LOW_EVENT_SLOW_I32_DESCRIPTOR = Descriptor(
     ),
     asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
     schedule_class=_SCHEDULE_EVENT_SLOW,
+    flags=(DescriptorFlag.DEAD_REMOVABLE,),
+)
+
+TEST_LOW_RESOURCE_REQUIRED_I32_DESCRIPTOR = Descriptor(
+    key="test.resource.required.i32",
+    mnemonic="test.resource.required.i32",
+    semantic_tag="test.resource.required.i32",
+    operands=(_i32_result(), _i32_operand("lhs"), _i32_operand("rhs")),
+    asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
+    schedule_class=_SCHEDULE_RESOURCE_REQUIRED,
+    flags=(DescriptorFlag.DEAD_REMOVABLE,),
+)
+
+TEST_LOW_RESOURCE_RESERVED_I32_DESCRIPTOR = Descriptor(
+    key="test.resource.reserved.i32",
+    mnemonic="test.resource.reserved.i32",
+    semantic_tag="test.resource.reserved.i32",
+    operands=(_i32_result(), _i32_operand("lhs"), _i32_operand("rhs")),
+    asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
+    schedule_class=_SCHEDULE_RESOURCE_RESERVED,
     flags=(DescriptorFlag.DEAD_REMOVABLE,),
 )
 
@@ -1639,6 +1662,27 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
             issue_uses=(IssueUse(_RESOURCE_SHARED_B, cycles=1, units=1),),
             model_quality=ModelQuality.EXACT,
         ),
+        ScheduleClass(
+            _SCHEDULE_RESOURCE_REQUIRED,
+            latency_kind=LatencyKind.EXACT,
+            latency_cycles=1,
+            issue_uses=(IssueUse(_RESOURCE_SHARED_B, cycles=1, units=1),),
+            model_quality=ModelQuality.EXACT,
+        ),
+        ScheduleClass(
+            _SCHEDULE_RESOURCE_RESERVED,
+            latency_kind=LatencyKind.EXACT,
+            latency_cycles=1,
+            issue_uses=(
+                IssueUse(
+                    _RESOURCE_SHARED_A,
+                    cycles=1,
+                    units=1,
+                    kind=IssueUseKind.RESERVED,
+                ),
+            ),
+            model_quality=ModelQuality.EXACT,
+        ),
     ),
     descriptors=(
         TEST_LOW_CONST_I32_DESCRIPTOR,
@@ -1649,6 +1693,8 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_MUL_I32_DESCRIPTOR,
         TEST_LOW_EVENT_FAST_I32_DESCRIPTOR,
         TEST_LOW_EVENT_SLOW_I32_DESCRIPTOR,
+        TEST_LOW_RESOURCE_REQUIRED_I32_DESCRIPTOR,
+        TEST_LOW_RESOURCE_RESERVED_I32_DESCRIPTOR,
         TEST_LOW_EVENT_EARLY_CONSUMER_I32_DESCRIPTOR,
         TEST_LOW_EVENT_LATE_CONSUMER_I32_DESCRIPTOR,
         TEST_LOW_EVENT_MEMORY_READ_I32_DESCRIPTOR,

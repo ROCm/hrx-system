@@ -17,15 +17,22 @@
 extern "C" {
 #endif
 
+typedef struct loom_low_schedule_resource_occupancy_t {
+  // Capacity consumed by required uses in this cycle.
+  uint16_t required_units;
+  // Maximum capacity reserved by any overlapping reservation in this cycle.
+  uint16_t reserved_units;
+} loom_low_schedule_resource_occupancy_t;
+
 typedef struct loom_low_schedule_resource_calendar_row_t {
-  // Occupied units indexed relative to base_issue_cycle.
-  uint16_t* occupied_units;
-  // Absolute issue cycle represented by occupied_units[0].
+  // Occupancy indexed relative to base_issue_cycle.
+  loom_low_schedule_resource_occupancy_t* cycles;
+  // Absolute issue cycle represented by cycles[0].
   uint32_t base_issue_cycle;
-  // Number of meaningful entries in occupied_units.
-  uint32_t occupied_cycle_count;
-  // Allocated entries in occupied_units.
-  iree_host_size_t occupied_cycle_capacity;
+  // Number of meaningful entries in cycles.
+  uint32_t cycle_count;
+  // Allocated entries in cycles.
+  iree_host_size_t cycle_capacity;
   // Units available in each cycle.
   uint16_t capacity_per_cycle;
 } loom_low_schedule_resource_calendar_row_t;

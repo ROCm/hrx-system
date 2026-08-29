@@ -359,6 +359,15 @@ typedef enum loom_low_model_quality_e {
   LOOM_LOW_MODEL_QUALITY_FALLBACK = 4,
 } loom_low_model_quality_t;
 
+enum loom_low_issue_use_kind_e {
+  // Resource capacity is consumed and accumulates with other required uses.
+  LOOM_LOW_ISSUE_USE_KIND_REQUIRED = 0,
+  // Resource capacity excludes required uses while overlapping reservations
+  // share the same reserved capacity.
+  LOOM_LOW_ISSUE_USE_KIND_RESERVED = 1,
+};
+typedef uint8_t loom_low_issue_use_kind_t;
+
 // Bitset of schedule-class flags.
 typedef uint16_t loom_low_schedule_class_flags_t;
 
@@ -789,6 +798,8 @@ typedef struct loom_low_issue_use_t {
   uint16_t units;
   // Pipeline stage associated with this use.
   uint16_t stage;
+  // Capacity-composition rule for this resource use.
+  loom_low_issue_use_kind_t kind;
 } loom_low_issue_use_t;
 
 typedef struct loom_low_pressure_delta_t {
@@ -1590,6 +1601,9 @@ iree_string_view_t loom_low_latency_kind_name(loom_low_latency_kind_t kind);
 // Returns the stable diagnostic spelling for a model-quality kind.
 iree_string_view_t loom_low_model_quality_name(
     loom_low_model_quality_t quality);
+
+// Returns the stable diagnostic spelling for an issue-use kind.
+iree_string_view_t loom_low_issue_use_kind_name(loom_low_issue_use_kind_t kind);
 
 // Returns the stable diagnostic spelling for a scheduler resource kind.
 iree_string_view_t loom_low_resource_kind_name(loom_low_resource_kind_t kind);

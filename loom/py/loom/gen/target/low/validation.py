@@ -28,6 +28,7 @@ from loom.target.low_descriptors import (
     Immediate,
     ImmediateFlag,
     ImmediateKind,
+    IssueUseKind,
     Operand,
     OperandAddressMapKind,
     OperandFlag,
@@ -643,8 +644,11 @@ def validate_schedule_model(descriptor_set: DescriptorSet) -> None:
             f"{description} minimum issue separation",
         )
 
-        occupied_units: dict[tuple[str, int], int] = {}
+        required_units: dict[tuple[str, int], int] = {}
+        reserved_units: dict[tuple[str, int], int] = {}
         for issue_use in schedule_class.issue_uses:
+            if not isinstance(issue_use.kind, IssueUseKind):
+                raise ValueError(f"{description} has invalid issue-use kind {issue_use.kind!r}")
             resource = resources.get(issue_use.resource)
             if resource is None:
                 raise ValueError(f"{description} references unknown resource '{issue_use.resource}'")
@@ -660,10 +664,13 @@ def validate_schedule_model(descriptor_set: DescriptorSet) -> None:
             calendar_key = f"group:{resource.contention_group_id}" if resource.contention_group_id != 0 else f"resource:{resource.name}"
             for cycle in range(issue_use.stage, issue_use.stage + issue_use.cycles):
                 key = (calendar_key, cycle)
-                units = occupied_units.get(key, 0) + issue_use.units
+                if issue_use.kind == IssueUseKind.REQUIRED:
+                    required_units[key] = required_units.get(key, 0) + issue_use.units
+                else:
+                    reserved_units[key] = max(reserved_units.get(key, 0), issue_use.units)
+                units = required_units.get(key, 0) + reserved_units.get(key, 0)
                 if units > resource.capacity_per_cycle:
                     raise ValueError(f"{description} consumes {units} units from {calendar_key} at relative cycle {cycle}, exceeding capacity {resource.capacity_per_cycle}")
-                occupied_units[key] = units
 
     for descriptor in descriptor_set.descriptors:
         for operand in descriptor.operands:
