@@ -1719,6 +1719,15 @@ TEST(ReplayExecuteTest, ExecutesRecordedCommandBufferTransfers) {
   IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
       command_buffer, iree_hal_make_buffer_ref(buffer, 0, 16), &fill_pattern,
       sizeof(fill_pattern), IREE_HAL_FILL_FLAG_NONE));
+  const iree_hal_memory_barrier_t transfer_barrier = {
+      /*.source_scope=*/IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+      /*.target_scope=*/IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+  };
+  IREE_ASSERT_OK(iree_hal_command_buffer_execution_barrier(
+      command_buffer, IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      IREE_HAL_EXECUTION_STAGE_TRANSFER, IREE_HAL_EXECUTION_BARRIER_FLAG_NONE,
+      /*memory_barrier_count=*/1, &transfer_barrier,
+      /*buffer_barrier_count=*/0, /*buffer_barriers=*/nullptr));
   const uint8_t update_data[8] = {
       0xE0, 0x20, 0x21, 0x22, 0x23, 0xE1, 0xE2, 0xE3,
   };
