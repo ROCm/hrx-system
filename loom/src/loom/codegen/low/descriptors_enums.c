@@ -207,6 +207,8 @@ iree_string_view_t loom_low_resource_kind_name(loom_low_resource_kind_t kind) {
       return IREE_SV("control");
     case LOOM_LOW_RESOURCE_KIND_ADDRESS:
       return IREE_SV("address");
+    case LOOM_LOW_RESOURCE_KIND_PIPELINE:
+      return IREE_SV("pipeline");
     default:
       return IREE_SV("unknown");
   }
