@@ -38,25 +38,6 @@ enum iree_hal_command_buffer_mode_bits_t {
   // If this bit is not set the command buffer may be submitted multiple times.
   IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT = 1u << 0,
 
-  // Indicates that the command buffer execution is allowed to execute inline
-  // with recording. The exact execution behavior is unspecified by the API and
-  // intentionally unknowable and must always assume to happen entirely
-  // asynchronously and that it will only have completed after waiting on device
-  // idle or the wait semaphores specified in the submission are signaled.
-  //
-  // Local backends can use this to avoid recording when the calling program can
-  // guarantee that it makes no assumptions about execution being deferred until
-  // a submission. The command buffer must still be submitted for scheduling and
-  // must have no wait semaphores specified. This allows the same program code
-  // to execute work both synchronously and asynchronously as remote backends
-  // are allowed to ignore this.
-  //
-  // Remote backends can use this to flush the command buffer more aggressively
-  // to begin early execution and overlap with continued recording.
-  //
-  // Requires IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT.
-  IREE_HAL_COMMAND_BUFFER_MODE_ALLOW_INLINE_EXECUTION = 1u << 4,
-
   // Disables additional command buffer validation (if present).
   // By default all command buffers will be validated if
   // `IREE_HAL_COMMAND_BUFFER_VALIDATION_ENABLE=1` - if shimming command buffers
@@ -413,11 +394,9 @@ enum iree_hal_dispatch_flag_bits_t {
   // the submitting thread without multi-worker tile distribution. Devices are
   // free to ignore this hint and use their normal execution path.
   //
-  // This parallels IREE_HAL_COMMAND_BUFFER_MODE_ALLOW_INLINE_EXECUTION at the
-  // individual dispatch level. Useful for queue_dispatch operations where a
-  // single dispatch is submitted directly (no command buffer) and the caller
-  // knows the workload is small enough that worker wake-up latency would
-  // dominate the total cost.
+  // Useful for queue_dispatch operations where a single dispatch is submitted
+  // directly and the caller knows the workload is small enough that worker
+  // wake-up latency would dominate the total cost.
   IREE_HAL_DISPATCH_FLAG_ALLOW_INLINE_EXECUTION = 1ull << 5,
 
   // Allows queue_dispatch implementations to borrow resource lifetimes instead

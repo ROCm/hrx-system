@@ -375,9 +375,7 @@ iree_status_t DispatchAndWait(iree_hal_device_t* device,
   uint64_t signal_value = 1;
 
   iree_status_t status = iree_hal_command_buffer_create(
-      device,
-      IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT |
-          IREE_HAL_COMMAND_BUFFER_MODE_ALLOW_INLINE_EXECUTION,
+      device, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
       IREE_HAL_COMMAND_CATEGORY_DISPATCH, IREE_HAL_QUEUE_AFFINITY_ANY,
       /*binding_capacity=*/0, &command_buffer);
   if (iree_status_is_ok(status)) {
