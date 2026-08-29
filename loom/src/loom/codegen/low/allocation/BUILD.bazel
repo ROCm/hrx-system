@@ -50,6 +50,7 @@ loom_cc_library(
     deps = [
         ":assignment",
         ":live_range",
+        ":storage",
         ":unit_liveness",
         "//loom/src/loom/analysis:liveness",
         "//loom/src/loom/codegen/low:descriptors",

@@ -147,6 +147,17 @@ static bool loom_low_schedule_candidate_pair_affinity_differs(
           lhs->pair_placement_option_count != rhs->pair_placement_option_count);
 }
 
+// Returns true when the candidate can preserve a pending placement pair
+// without waiting on a data or hazard prerequisite. Resource occupancy is not
+// included: pair affinity describes an opportunity to replace two adjacent
+// packets with one target packet, so charging the second component's ordinary
+// standalone issue resource before considering the pair defeats the hint.
+static bool loom_low_schedule_candidate_has_ready_pair_affinity(
+    const loom_low_schedule_candidate_score_t* score) {
+  return score->pair_affinity_score != 0 &&
+         score->data_ready_stall_cycles == 0 && score->hazard_stall_cycles == 0;
+}
+
 static loom_low_schedule_candidate_compare_mode_t
 loom_low_schedule_choose_candidate_compare_mode(
     const loom_low_schedule_candidate_score_t* scores,
@@ -198,6 +209,17 @@ static bool loom_low_schedule_candidate_score_less(
           lhs->critical_path_cycles != rhs->critical_path_cycles) {
         return lhs->critical_path_cycles > rhs->critical_path_cycles;
       }
+    }
+    const bool lhs_has_ready_pair_affinity =
+        loom_low_schedule_candidate_has_ready_pair_affinity(lhs);
+    const bool rhs_has_ready_pair_affinity =
+        loom_low_schedule_candidate_has_ready_pair_affinity(rhs);
+    if (lhs_has_ready_pair_affinity != rhs_has_ready_pair_affinity) {
+      return lhs_has_ready_pair_affinity;
+    }
+    if (lhs_has_ready_pair_affinity &&
+        loom_low_schedule_candidate_pair_affinity_differs(lhs, rhs)) {
+      return loom_low_schedule_candidate_has_better_pair_affinity(lhs, rhs);
     }
     if (lhs->effective_stall_cycles != rhs->effective_stall_cycles) {
       return lhs->effective_stall_cycles < rhs->effective_stall_cycles;
@@ -287,6 +309,7 @@ void loom_low_schedule_candidate_policy_record_decision(
       (loom_low_schedule_candidate_decision_t){
           .block_index = block_index,
           .scheduled_ordinal = scheduled_ordinal,
+          .issue_cycle = state->nodes[selection->chosen_node].issue_cycle,
           .ready_candidate_count = selection->ready_candidate_count,
           .scored_candidate_count = selection->scored_candidate_count,
           .chosen_node = selection->chosen_node,

@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "loom/codegen/low/allocation/live_range.h"
+#include "loom/codegen/low/allocation/storage.h"
 
 enum {
   // Tiny functions are cheaper to scan linearly than to index.
@@ -132,7 +133,10 @@ static bool loom_low_allocation_active_assignment_conflicts(
 
 static bool loom_low_allocation_active_unit_index_can_insert_assignment(
     const loom_low_allocation_active_unit_index_t* index,
-    const loom_low_allocation_assignment_t* assignment) {
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_allocation_assignment_t* assignment,
+    uint32_t* out_atomic_unit_count) {
+  *out_atomic_unit_count = 0;
   if (!loom_low_allocation_active_unit_index_is_enabled(index) ||
       !loom_low_allocation_location_kind_is_register_like(
           assignment->location_kind) ||
@@ -140,8 +144,14 @@ static bool loom_low_allocation_active_unit_index_can_insert_assignment(
       assignment->location_base > UINT32_MAX - assignment->location_count) {
     return false;
   }
-  return assignment->location_count <=
-         index->entry_capacity - index->entry_count;
+  const uint32_t atomic_unit_count =
+      loom_low_allocation_storage_assignment_atomic_unit_count(descriptor_set,
+                                                               assignment);
+  if (atomic_unit_count > index->entry_capacity - index->entry_count) {
+    return false;
+  }
+  *out_atomic_unit_count = atomic_unit_count;
+  return true;
 }
 
 iree_status_t loom_low_allocation_active_unit_index_initialize(
@@ -189,6 +199,14 @@ iree_status_t loom_low_allocation_active_unit_index_initialize(
 
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, assignment_capacity,
+      sizeof(*out_index->entry_counts_by_assignment_index),
+      (void**)&out_index->entry_counts_by_assignment_index));
+  memset(out_index->entry_counts_by_assignment_index, 0,
+         assignment_capacity *
+             sizeof(*out_index->entry_counts_by_assignment_index));
+
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, assignment_capacity,
       sizeof(*out_index->seen_generations_by_assignment_index),
       (void**)&out_index->seen_generations_by_assignment_index));
   memset(out_index->seen_generations_by_assignment_index, 0,
@@ -202,7 +220,8 @@ bool loom_low_allocation_active_unit_index_is_enabled(
   IREE_ASSERT_ARGUMENT(index);
   return index->bucket_heads != NULL && index->bucket_count != 0 &&
          index->entries != NULL &&
-         index->entry_starts_by_assignment_index != NULL;
+         index->entry_starts_by_assignment_index != NULL &&
+         index->entry_counts_by_assignment_index != NULL;
 }
 
 bool loom_low_allocation_active_unit_index_contains_assignment(
@@ -241,16 +260,17 @@ bool loom_low_allocation_active_unit_index_conflicts(
           candidate->location_kind)) {
     return false;
   }
-  const uint32_t storage_key = loom_low_reg_class_storage_key(
-      descriptor_set, candidate->descriptor_reg_class_id);
   const uint32_t generation =
       loom_low_allocation_active_unit_next_seen_generation(index);
-  for (uint32_t unit_offset = 0; unit_offset < candidate->location_count;
+  const uint32_t atomic_unit_count =
+      loom_low_allocation_storage_assignment_atomic_unit_count(descriptor_set,
+                                                               candidate);
+  for (uint32_t unit_offset = 0; unit_offset < atomic_unit_count;
        ++unit_offset) {
-    if (candidate->location_base > UINT32_MAX - unit_offset) {
-      break;
-    }
-    const uint32_t location = candidate->location_base + unit_offset;
+    uint32_t storage_key = 0;
+    uint32_t location = 0;
+    loom_low_allocation_storage_assignment_atomic_unit(
+        descriptor_set, candidate, unit_offset, &storage_key, &location);
     const uint32_t bucket_index = loom_low_allocation_active_unit_bucket_index(
         index, candidate->location_kind, storage_key, location);
     uint32_t entry_index = index->bucket_heads[bucket_index];
@@ -294,16 +314,17 @@ iree_status_t loom_low_allocation_active_unit_index_collect_conflicts(
           candidate->location_kind)) {
     return iree_ok_status();
   }
-  const uint32_t storage_key = loom_low_reg_class_storage_key(
-      descriptor_set, candidate->descriptor_reg_class_id);
   const uint32_t generation =
       loom_low_allocation_active_unit_next_seen_generation(index);
-  for (uint32_t unit_offset = 0; unit_offset < candidate->location_count;
+  const uint32_t atomic_unit_count =
+      loom_low_allocation_storage_assignment_atomic_unit_count(descriptor_set,
+                                                               candidate);
+  for (uint32_t unit_offset = 0; unit_offset < atomic_unit_count;
        ++unit_offset) {
-    if (candidate->location_base > UINT32_MAX - unit_offset) {
-      break;
-    }
-    const uint32_t location = candidate->location_base + unit_offset;
+    uint32_t storage_key = 0;
+    uint32_t location = 0;
+    loom_low_allocation_storage_assignment_atomic_unit(
+        descriptor_set, candidate, unit_offset, &storage_key, &location);
     const uint32_t bucket_index = loom_low_allocation_active_unit_bucket_index(
         index, candidate->location_kind, storage_key, location);
     uint32_t entry_index = index->bucket_heads[bucket_index];
@@ -355,8 +376,9 @@ void loom_low_allocation_active_unit_index_insert_assignment(
           assignment->location_kind)) {
     return;
   }
+  uint32_t atomic_unit_count = 0;
   if (!loom_low_allocation_active_unit_index_can_insert_assignment(
-          index, assignment)) {
+          index, descriptor_set, assignment, &atomic_unit_count)) {
     ++index->unindexed_count;
     return;
   }
@@ -365,11 +387,13 @@ void loom_low_allocation_active_unit_index_insert_assignment(
   IREE_ASSERT(entry_start <= UINT32_MAX);
   index->entry_starts_by_assignment_index[assignment_index] =
       (uint32_t)entry_start;
-  const uint32_t storage_key = loom_low_reg_class_storage_key(
-      descriptor_set, assignment->descriptor_reg_class_id);
-  for (uint32_t unit_offset = 0; unit_offset < assignment->location_count;
+  index->entry_counts_by_assignment_index[assignment_index] = atomic_unit_count;
+  for (uint32_t unit_offset = 0; unit_offset < atomic_unit_count;
        ++unit_offset) {
-    const uint32_t location = assignment->location_base + unit_offset;
+    uint32_t storage_key = 0;
+    uint32_t location = 0;
+    loom_low_allocation_storage_assignment_atomic_unit(
+        descriptor_set, assignment, unit_offset, &storage_key, &location);
     const uint32_t bucket_index = loom_low_allocation_active_unit_bucket_index(
         index, assignment->location_kind, storage_key, location);
     const uint32_t entry_index = (uint32_t)index->entry_count++;
@@ -416,8 +440,9 @@ void loom_low_allocation_active_unit_index_remove_assignment(
     --index->unindexed_count;
     return;
   }
-  for (uint32_t unit_offset = 0; unit_offset < assignment->location_count;
-       ++unit_offset) {
+  const uint32_t entry_count =
+      index->entry_counts_by_assignment_index[assignment_index];
+  for (uint32_t unit_offset = 0; unit_offset < entry_count; ++unit_offset) {
     const uint32_t entry_index = entry_start + unit_offset;
     IREE_ASSERT_LT(entry_index, index->entry_count);
     loom_low_allocation_active_unit_entry_t* entry =
@@ -437,4 +462,5 @@ void loom_low_allocation_active_unit_index_remove_assignment(
     entry->previous_entry = UINT32_MAX;
   }
   index->entry_starts_by_assignment_index[assignment_index] = UINT32_MAX;
+  index->entry_counts_by_assignment_index[assignment_index] = 0;
 }

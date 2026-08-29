@@ -118,6 +118,7 @@ def _packed_dot_schedule_classes(
             _PACKED_DOT_VECTOR_WIDTH_TO_SCHEDULE[vector_bit_width],
             latency_kind=LatencyKind.ESTIMATE,
             latency_cycles=4,
+            minimum_issue_separation_cycles=4,
             issue_uses=(
                 IssueUse(
                     _RESOURCE_DOT,

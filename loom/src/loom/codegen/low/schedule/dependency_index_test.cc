@@ -33,14 +33,19 @@ class ScheduleDependencyIndexTest : public ::testing::Test {
 
   void Append(loom_low_schedule_dependency_graph_t* graph,
               uint32_t producer_node, uint32_t consumer_node,
-              loom_low_schedule_dependency_kind_t kind,
-              uint32_t operand_index) {
-    const loom_low_schedule_dependency_t dependency = {
-        /*producer_node=*/producer_node,
-        /*consumer_node=*/consumer_node,
-        /*kind=*/kind,
-        /*operand_index=*/operand_index,
-    };
+              loom_low_schedule_dependency_kind_t kind, uint16_t operand_index,
+              int32_t minimum_issue_separation_cycles = 0) {
+    loom_low_schedule_dependency_t dependency = {};
+    dependency.producer_node = producer_node;
+    dependency.consumer_node = consumer_node;
+    dependency.minimum_issue_separation_cycles =
+        minimum_issue_separation_cycles;
+    dependency.producer_attachment_index = UINT16_MAX;
+    dependency.consumer_attachment_index = UINT16_MAX;
+    dependency.producer_event_id = UINT16_MAX;
+    dependency.consumer_event_id = UINT16_MAX;
+    dependency.value_operand_index = operand_index;
+    dependency.kind = kind;
     IREE_ASSERT_OK(
         loom_low_schedule_dependency_graph_append(graph, dependency, &arena_));
   }
@@ -53,11 +58,11 @@ class ScheduleDependencyIndexTest : public ::testing::Test {
 TEST_F(ScheduleDependencyIndexTest, GroupsDuplicateProducerConsumerEdges) {
   loom_low_schedule_dependency_graph_t graph;
   loom_low_schedule_dependency_graph_initialize(&graph);
-  Append(&graph, 0, 3, LOOM_LOW_SCHEDULE_DEPENDENCY_SSA, 0);
-  Append(&graph, 0, 4, LOOM_LOW_SCHEDULE_DEPENDENCY_EFFECT, UINT32_MAX);
-  Append(&graph, 1, 3, LOOM_LOW_SCHEDULE_DEPENDENCY_STORAGE, 0);
-  Append(&graph, 0, 3, LOOM_LOW_SCHEDULE_DEPENDENCY_SSA, 1);
-  Append(&graph, 0, 3, LOOM_LOW_SCHEDULE_DEPENDENCY_EFFECT, UINT32_MAX);
+  Append(&graph, 0, 3, LOOM_LOW_SCHEDULE_DEPENDENCY_SSA, 0, -5);
+  Append(&graph, 0, 4, LOOM_LOW_SCHEDULE_DEPENDENCY_EFFECT, UINT16_MAX);
+  Append(&graph, 1, 3, LOOM_LOW_SCHEDULE_DEPENDENCY_STORAGE, 0, 3);
+  Append(&graph, 0, 3, LOOM_LOW_SCHEDULE_DEPENDENCY_SSA, 1, -2);
+  Append(&graph, 0, 3, LOOM_LOW_SCHEDULE_DEPENDENCY_EFFECT, UINT16_MAX, -4);
   Append(&graph, 2, 3, LOOM_LOW_SCHEDULE_DEPENDENCY_SSA, 2);
 
   std::array<uint32_t, 5> indegrees;
@@ -83,6 +88,7 @@ TEST_F(ScheduleDependencyIndexTest, GroupsDuplicateProducerConsumerEdges) {
       loom_low_schedule_dependency_index_group_at(&index, 3);
   EXPECT_EQ(group0->consumer_node, 3u);
   EXPECT_EQ(group0->dependency_count, 3u);
+  EXPECT_EQ(group0->minimum_issue_separation_cycles, -2);
   EXPECT_TRUE(loom_low_schedule_dependency_index_group_has_ssa(&index, 0));
   EXPECT_TRUE(loom_low_schedule_dependency_index_group_has_effect(&index, 0));
   EXPECT_EQ(group1->consumer_node, 4u);
@@ -97,6 +103,7 @@ TEST_F(ScheduleDependencyIndexTest, GroupsDuplicateProducerConsumerEdges) {
   EXPECT_FALSE(loom_low_schedule_dependency_index_group_has_effect(&index, 2));
   EXPECT_TRUE(loom_low_schedule_dependency_index_group_has_ssa(&index, 3));
   EXPECT_FALSE(loom_low_schedule_dependency_index_group_has_effect(&index, 3));
+  EXPECT_EQ(group2->minimum_issue_separation_cycles, 3);
 
   loom_low_schedule_dependency_frontier_t frontier;
   IREE_ASSERT_OK(loom_low_schedule_dependency_frontier_initialize(

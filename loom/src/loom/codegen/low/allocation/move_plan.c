@@ -38,21 +38,33 @@ static bool loom_low_allocation_move_group_uses_location(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_move_t* moves, iree_host_size_t move_count,
     const loom_low_move_location_t* location) {
+  const loom_low_allocation_assignment_t location_assignment = {
+      .descriptor_reg_class_id = location->descriptor_reg_class_id,
+      .location_kind = location->location_kind,
+      .location_base = location->location,
+      .location_count = 1,
+  };
   for (iree_host_size_t i = 0; i < move_count; ++i) {
     const loom_low_move_location_t* source = &moves[i].source;
     const loom_low_move_location_t* destination = &moves[i].destination;
-    if (source->location_kind == location->location_kind &&
-        source->location == location->location &&
-        loom_low_allocation_storage_reg_classes_share(
-            descriptor_set, source->descriptor_reg_class_id,
-            location->descriptor_reg_class_id)) {
+    const loom_low_allocation_assignment_t source_assignment = {
+        .descriptor_reg_class_id = source->descriptor_reg_class_id,
+        .location_kind = source->location_kind,
+        .location_base = source->location,
+        .location_count = 1,
+    };
+    if (loom_low_allocation_storage_assignment_ranges_overlap(
+            descriptor_set, &source_assignment, &location_assignment)) {
       return true;
     }
-    if (destination->location_kind == location->location_kind &&
-        destination->location == location->location &&
-        loom_low_allocation_storage_reg_classes_share(
-            descriptor_set, destination->descriptor_reg_class_id,
-            location->descriptor_reg_class_id)) {
+    const loom_low_allocation_assignment_t destination_assignment = {
+        .descriptor_reg_class_id = destination->descriptor_reg_class_id,
+        .location_kind = destination->location_kind,
+        .location_base = destination->location,
+        .location_count = 1,
+    };
+    if (loom_low_allocation_storage_assignment_ranges_overlap(
+            descriptor_set, &destination_assignment, &location_assignment)) {
       return true;
     }
   }
@@ -105,6 +117,12 @@ static iree_status_t loom_low_allocation_move_plan_resolve_temporary(
         IREE_SV("parallel-move-storage-kind-mismatch"));
   }
 
+  const loom_low_reg_class_t* reg_class =
+      &context->descriptor_set
+           ->reg_classes[storage_class->descriptor_reg_class_id];
+  const bool uses_explicit_physical_registers =
+      loom_low_reg_class_uses_explicit_physical_registers(reg_class);
+
   uint32_t last_location = 0;
   if (capacity.is_bounded) {
     if (capacity.max_units == 0) {
@@ -127,9 +145,22 @@ static iree_status_t loom_low_allocation_move_plan_resolve_temporary(
     }
   }
 
+  const uint32_t candidate_count =
+      uses_explicit_physical_registers
+          ? iree_min((uint32_t)reg_class->allocatable_count,
+                     capacity.is_bounded ? capacity.max_units : UINT32_MAX)
+          : last_location + 1u;
   const uint32_t program_point =
       loom_low_allocation_move_group_program_point(group_context);
-  for (uint32_t location = 0; location <= last_location; ++location) {
+  for (uint32_t candidate_ordinal = 0; candidate_ordinal < candidate_count;
+       ++candidate_ordinal) {
+    const uint32_t location =
+        uses_explicit_physical_registers
+            ? loom_low_descriptor_set_physical_register_candidate(
+                  context->descriptor_set,
+                  storage_class->descriptor_reg_class_id,
+                  (uint16_t)candidate_ordinal)
+            : candidate_ordinal;
     const loom_low_move_location_t temporary = {
         .location_kind = storage_class->location_kind,
         .value_class = storage_class->value_class,
@@ -145,9 +176,6 @@ static iree_status_t loom_low_allocation_move_plan_resolve_temporary(
             &temporary, program_point) ||
         loom_low_allocation_move_group_uses_location(
             context->descriptor_set, moves, move_count, &temporary)) {
-      if (location == UINT32_MAX) {
-        break;
-      }
       continue;
     }
     *out_temporary = temporary;

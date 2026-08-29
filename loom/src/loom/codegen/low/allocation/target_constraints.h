@@ -193,6 +193,7 @@ iree_status_t loom_low_allocation_target_constraints_interval_capacity(
 
 // Returns true when |location_*| fits inside |capacity|.
 bool loom_low_allocation_target_constraints_location_range_fits_capacity(
+    const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_allocation_class_capacity_t* capacity,
     loom_low_allocation_location_kind_t location_kind, uint32_t location_base,
     uint32_t location_count);

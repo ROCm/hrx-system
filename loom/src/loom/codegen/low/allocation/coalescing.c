@@ -870,7 +870,8 @@ static iree_status_t loom_low_allocation_coalescing_append_interval_at_location(
     return iree_ok_status();
   }
   if (!loom_low_allocation_target_constraints_location_range_fits_capacity(
-          &capacity, location_kind, location_base, unit_count)) {
+          context->search_context->descriptor_set, &capacity, location_kind,
+          location_base, unit_count)) {
     return iree_ok_status();
   }
   const uint32_t alignment =
@@ -1572,7 +1573,8 @@ loom_low_allocation_coalescing_default_concat_source_assembles_result(
           source_capacity.descriptor_reg_class_id,
           result_capacity.descriptor_reg_class_id) ||
       !loom_low_allocation_target_constraints_location_range_fits_capacity(
-          &result_capacity, source_capacity.location_kind, result_location_base,
+          context->search_context->descriptor_set, &result_capacity,
+          source_capacity.location_kind, result_location_base,
           result_interval->unit_count)) {
     return iree_ok_status();
   }
@@ -1611,8 +1613,9 @@ loom_low_allocation_coalescing_default_concat_source_assembles_result(
             source_capacity.descriptor_reg_class_id,
             sibling_capacity.descriptor_reg_class_id) ||
         !loom_low_allocation_target_constraints_location_range_fits_capacity(
-            &sibling_capacity, source_capacity.location_kind,
-            sibling_location_base, sibling_interval->unit_count) ||
+            context->search_context->descriptor_set, &sibling_capacity,
+            source_capacity.location_kind, sibling_location_base,
+            sibling_interval->unit_count) ||
         sibling_location_base % sibling_alignment != 0 ||
         loom_low_allocation_search_location_conflicts(
             context->search_context, sibling_interval,
@@ -1647,6 +1650,12 @@ loom_low_allocation_coalescing_find_concat_result_location_for_source(
     loom_low_allocation_assignment_flags_t reservation_flags,
     const loom_value_id_t* ignored_value_ids, uint16_t ignored_value_count,
     uint32_t* out_result_location_base) {
+  const loom_low_reg_class_t* reg_class =
+      &context->search_context->descriptor_set
+           ->reg_classes[capacity.descriptor_reg_class_id];
+  if (loom_low_reg_class_uses_explicit_physical_registers(reg_class)) {
+    return false;
+  }
   if (result_interval->unit_count == 0 ||
       (capacity.is_bounded &&
        result_interval->unit_count > capacity.max_units)) {
@@ -1831,12 +1840,26 @@ loom_low_allocation_coalescing_assign_concat_source_or_result(
       const uint32_t current_location_end =
           context->target_constraints
               ->max_assigned_location_end_by_reg_class[reg_class_id];
-      const uint32_t source_location_end =
-          iree_max(current_location_end,
-                   source_location_base + source_interval->unit_count);
-      const uint32_t result_location_end =
-          iree_max(current_location_end,
-                   result_location_base + result_interval->unit_count);
+      const loom_low_allocation_assignment_t source_assignment = {
+          .descriptor_reg_class_id = reg_class_id,
+          .location_kind = capacity.location_kind,
+          .location_base = source_location_base,
+          .location_count = source_interval->unit_count,
+      };
+      const loom_low_allocation_assignment_t result_assignment = {
+          .descriptor_reg_class_id = reg_class_id,
+          .location_kind = capacity.location_kind,
+          .location_base = result_location_base,
+          .location_count = result_interval->unit_count,
+      };
+      const uint32_t source_location_end = iree_max(
+          current_location_end,
+          loom_low_allocation_storage_assignment_pressure_extent(
+              context->search_context->descriptor_set, &source_assignment));
+      const uint32_t result_location_end = iree_max(
+          current_location_end,
+          loom_low_allocation_storage_assignment_pressure_extent(
+              context->search_context->descriptor_set, &result_assignment));
       if (result_location_end > source_location_end) {
         const loom_target_residency_model_t* residency_model =
             context->search_context->residency_model;

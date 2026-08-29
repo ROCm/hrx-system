@@ -121,6 +121,11 @@ iree_status_t loom_low_allocation_storage_lease_unit_index_insert(
   if (!loom_low_allocation_location_kind_is_register_like(location_kind)) {
     return iree_ok_status();
   }
+  const loom_low_reg_class_t* reg_class =
+      &descriptor_set->reg_classes[descriptor_reg_class_id];
+  if (loom_low_reg_class_uses_explicit_physical_registers(reg_class)) {
+    return iree_ok_status();
+  }
   if (location_count > index->entry_capacity - index->entry_count) {
     return iree_make_status(
         IREE_STATUS_OUT_OF_RANGE,
@@ -376,11 +381,14 @@ static bool loom_low_allocation_storage_lease_instance_conflicts(
           candidate->descriptor_reg_class_id)) {
     return false;
   }
-  const uint64_t lease_begin = lease->location_base;
-  const uint64_t candidate_begin = candidate->location_base;
-  const uint64_t lease_end = lease_begin + lease->location_count;
-  const uint64_t candidate_end = candidate_begin + candidate->location_count;
-  return lease_begin < candidate_end && candidate_begin < lease_end;
+  const loom_low_allocation_assignment_t lease_assignment = {
+      .descriptor_reg_class_id = lease->descriptor_reg_class_id,
+      .location_kind = lease->location_kind,
+      .location_base = lease->location_base,
+      .location_count = lease->location_count,
+  };
+  return loom_low_allocation_storage_assignment_ranges_overlap(
+      descriptor_set, &lease_assignment, candidate);
 }
 
 static bool loom_low_allocation_storage_lease_value_is_ignored(
@@ -785,6 +793,12 @@ bool loom_low_allocation_storage_lease_state_conflicts(
           candidate->location_kind)) {
     return false;
   }
+  if (loom_low_allocation_storage_assignment_uses_explicit_physical_register(
+          descriptor_set, candidate)) {
+    return loom_low_allocation_storage_lease_scan_conflicts(
+        state, descriptor_set, liveness, candidate, ignored_value_ids,
+        ignored_value_count, policy);
+  }
   if (!loom_low_allocation_storage_lease_unit_index_is_enabled(
           state->unit_index)) {
     return loom_low_allocation_storage_lease_scan_conflicts(
@@ -905,6 +919,12 @@ iree_status_t loom_low_allocation_storage_lease_state_record_release_actions(
       !loom_low_allocation_location_kind_is_register_like(
           candidate->location_kind)) {
     return iree_ok_status();
+  }
+  if (loom_low_allocation_storage_assignment_uses_explicit_physical_register(
+          descriptor_set, candidate)) {
+    return loom_low_allocation_storage_lease_state_scan_release_actions(
+        state, descriptor_set, liveness, candidate, ignored_value_ids,
+        ignored_value_count);
   }
   if (!loom_low_allocation_storage_lease_unit_index_is_enabled(
           state->unit_index)) {

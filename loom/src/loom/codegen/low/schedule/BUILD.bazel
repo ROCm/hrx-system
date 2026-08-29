@@ -59,6 +59,17 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "resource_calendar",
+    srcs = ["resource_calendar.c"],
+    hdrs = ["resource_calendar.h"],
+    deps = [
+        "//loom/src/loom/codegen/low:descriptors",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "schedule",
     srcs = [
         "candidate_policy.c",
@@ -93,6 +104,7 @@ loom_cc_library(
         ":dependencies",
         ":dependency_index",
         ":ready_frontier",
+        ":resource_calendar",
         "//loom/src/loom/analysis:liveness",
         "//loom/src/loom/analysis:liveness_json",
         "//loom/src/loom/codegen/low:descriptors",
@@ -161,6 +173,17 @@ loom_cc_test(
     srcs = ["dependencies_test.cc"],
     deps = [
         ":dependencies",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "resource_calendar_test",
+    srcs = ["resource_calendar_test.cc"],
+    deps = [
+        ":resource_calendar",
+        "//loom/src/loom/target/test:descriptors",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

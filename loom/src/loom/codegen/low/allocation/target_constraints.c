@@ -26,14 +26,6 @@ loom_low_allocation_target_constraints_reg_class_at(
   return &descriptor_set->reg_classes[reg_class_id];
 }
 
-static bool loom_low_allocation_target_constraints_location_range_overlaps(
-    uint32_t lhs_base, uint32_t lhs_count, uint32_t rhs_base,
-    uint32_t rhs_count) {
-  const uint64_t lhs_end = (uint64_t)lhs_base + lhs_count;
-  const uint64_t rhs_end = (uint64_t)rhs_base + rhs_count;
-  return lhs_base < rhs_end && rhs_base < lhs_end;
-}
-
 static bool loom_low_allocation_target_constraints_value_id_is_ignored(
     loom_value_id_t value_id, const loom_value_id_t* ignored_value_ids,
     uint16_t ignored_value_count) {
@@ -430,13 +422,23 @@ static iree_status_t loom_low_allocation_target_constraints_validate_range(
 }
 
 bool loom_low_allocation_target_constraints_location_range_fits_capacity(
+    const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_allocation_class_capacity_t* capacity,
     loom_low_allocation_location_kind_t location_kind, uint32_t location_base,
     uint32_t location_count) {
+  IREE_ASSERT_ARGUMENT(descriptor_set);
   IREE_ASSERT_ARGUMENT(capacity);
   if (location_kind != capacity->location_kind || location_count == 0 ||
       (uint64_t)location_base + location_count > UINT32_MAX) {
     return false;
+  }
+  const loom_low_reg_class_t* reg_class =
+      &descriptor_set->reg_classes[capacity->descriptor_reg_class_id];
+  if (loom_low_reg_class_uses_explicit_physical_registers(reg_class)) {
+    return location_count == 1 &&
+           loom_low_descriptor_set_find_physical_register_candidate(
+               descriptor_set, capacity->descriptor_reg_class_id, location_base,
+               NULL);
   }
   return !capacity->is_bounded ||
          (uint64_t)location_base + location_count <= capacity->max_units;
@@ -532,6 +534,20 @@ loom_low_allocation_target_constraints_validate_register_location_capacity(
   const loom_low_reg_class_t* reg_class =
       loom_low_allocation_target_constraints_reg_class_at(
           constraints->target->descriptor_set, reg_class_id);
+  if (loom_low_reg_class_uses_explicit_physical_registers(reg_class)) {
+    if (location_count != 1 ||
+        !loom_low_descriptor_set_find_physical_register_candidate(
+            constraints->target->descriptor_set, reg_class_id, location_base,
+            NULL)) {
+      IREE_RETURN_IF_ERROR(
+          loom_low_allocation_target_constraints_emit_capacity_failure(
+              constraints, diagnostic_op, reg_class_id, subject, location_base,
+              location_count, location_end, reg_class->allocatable_count));
+      return iree_ok_status();
+    }
+    *out_valid = true;
+    return iree_ok_status();
+  }
   const bool fits_fixed_location_window =
       loom_low_reg_class_fixed_location_range_contains(reg_class, location_base,
                                                        location_count);
@@ -666,9 +682,20 @@ loom_low_allocation_target_constraints_resolve_reserved_ranges(
               existing->descriptor_reg_class_id)) {
         continue;
       }
-      if (loom_low_allocation_target_constraints_location_range_overlaps(
-              reserved_range->location_base, reserved_range->location_count,
-              existing->location_base, existing->location_count)) {
+      const loom_low_allocation_assignment_t candidate_assignment = {
+          .descriptor_reg_class_id = reg_class_id,
+          .location_kind = reserved_range->location_kind,
+          .location_base = reserved_range->location_base,
+          .location_count = reserved_range->location_count,
+      };
+      const loom_low_allocation_assignment_t existing_assignment = {
+          .descriptor_reg_class_id = existing->descriptor_reg_class_id,
+          .location_kind = existing->location_kind,
+          .location_base = existing->location_base,
+          .location_count = existing->location_count,
+      };
+      if (loom_low_allocation_storage_assignment_ranges_overlap(
+              descriptor_set, &candidate_assignment, &existing_assignment)) {
         IREE_RETURN_IF_ERROR(
             loom_low_allocation_target_constraints_emit_reserved_range_overlap(
                 constraints, i, reserved_range, j, existing, reg_class_id));
@@ -999,12 +1026,6 @@ loom_low_allocation_target_constraints_fixed_value_for_value(
   return NULL;
 }
 
-static uint32_t loom_low_allocation_target_constraints_location_end(
-    uint32_t location_base, uint32_t location_count) {
-  const uint64_t location_end = (uint64_t)location_base + location_count;
-  return location_end > UINT32_MAX ? UINT32_MAX : (uint32_t)location_end;
-}
-
 void loom_low_allocation_target_constraints_record_location_extent(
     loom_low_allocation_target_constraints_t* constraints,
     uint16_t descriptor_reg_class_id,
@@ -1025,9 +1046,15 @@ void loom_low_allocation_target_constraints_record_location_extent(
                                                        location_count)) {
     return;
   }
+  const loom_low_allocation_assignment_t assignment = {
+      .descriptor_reg_class_id = descriptor_reg_class_id,
+      .location_kind = location_kind,
+      .location_base = location_base,
+      .location_count = location_count,
+  };
   const uint32_t location_end =
-      loom_low_allocation_target_constraints_location_end(location_base,
-                                                          location_count);
+      loom_low_allocation_storage_assignment_pressure_extent(
+          constraints->target->descriptor_set, &assignment);
   uint32_t* current_end =
       &constraints
            ->max_assigned_location_end_by_reg_class[descriptor_reg_class_id];
@@ -1183,9 +1210,20 @@ bool loom_low_allocation_target_constraints_reserved_range_conflicts(
             reg_class_id)) {
       continue;
     }
-    if (loom_low_allocation_target_constraints_location_range_overlaps(
-            reserved_range->location_base, reserved_range->location_count,
-            location_base, location_count)) {
+    const loom_low_allocation_assignment_t reserved_assignment = {
+        .descriptor_reg_class_id = reserved_range->descriptor_reg_class_id,
+        .location_kind = reserved_range->location_kind,
+        .location_base = reserved_range->location_base,
+        .location_count = reserved_range->location_count,
+    };
+    const loom_low_allocation_assignment_t candidate_assignment = {
+        .descriptor_reg_class_id = reg_class_id,
+        .location_kind = location_kind,
+        .location_base = location_base,
+        .location_count = location_count,
+    };
+    if (loom_low_allocation_storage_assignment_ranges_overlap(
+            descriptor_set, &reserved_assignment, &candidate_assignment)) {
       return true;
     }
   }

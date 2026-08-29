@@ -594,6 +594,7 @@ def _rdna4m_core_descriptor_set(
                 _SCHEDULE_WMMA,
                 latency_kind=LatencyKind.ESTIMATE,
                 latency_cycles=5,
+                minimum_issue_separation_cycles=5,
                 issue_uses=(
                     IssueUse(_RESOURCE_VALU, cycles=1, units=1),
                     IssueUse(_RESOURCE_WMMA, cycles=1, units=1),
@@ -605,6 +606,7 @@ def _rdna4m_core_descriptor_set(
                 _SCHEDULE_SWMMAC,
                 latency_kind=LatencyKind.ESTIMATE,
                 latency_cycles=5,
+                minimum_issue_separation_cycles=5,
                 issue_uses=(
                     IssueUse(_RESOURCE_VALU, cycles=1, units=1),
                     IssueUse(_RESOURCE_SWMMAC, cycles=1, units=1),

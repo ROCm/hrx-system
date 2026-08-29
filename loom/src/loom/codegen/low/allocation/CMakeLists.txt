@@ -50,6 +50,7 @@ loom_cc_library(
   DEPS
     ::assignment
     ::live_range
+    ::storage
     ::unit_liveness
     iree::base
     iree::base::internal::arena

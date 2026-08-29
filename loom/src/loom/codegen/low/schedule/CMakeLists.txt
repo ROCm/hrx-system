@@ -66,6 +66,20 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    resource_calendar
+  HDRS
+    "resource_calendar.h"
+  SRCS
+    "resource_calendar.c"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+    loom::codegen::low::descriptors
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     schedule
   HDRS
     "json.h"
@@ -98,6 +112,7 @@ loom_cc_library(
     ::dependencies
     ::dependency_index
     ::ready_frontier
+    ::resource_calendar
     iree::base
     iree::base::internal
     iree::base::internal::arena
@@ -173,6 +188,18 @@ loom_cc_test(
     ::dependencies
     iree::testing::gtest
     iree::testing::gtest_main
+)
+
+loom_cc_test(
+  NAME
+    resource_calendar_test
+  SRCS
+    "resource_calendar_test.cc"
+  DEPS
+    ::resource_calendar
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::target::test::descriptors
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

@@ -147,6 +147,7 @@ static void loom_low_schedule_dependency_index_fill_groups(
         *loom_low_schedule_dependency_index_mutable_group_at(
             index, next_group_index++) = (loom_low_schedule_dependency_group_t){
             .consumer_node = consumer_node,
+            .minimum_issue_separation_cycles = INT32_MIN,
         };
       }
       const uint32_t group_index = consumer_group_indices[consumer_node];
@@ -155,6 +156,9 @@ static void loom_low_schedule_dependency_index_fill_groups(
                                                               group_index);
       IREE_ASSERT_NE(group->dependency_count, UINT32_MAX);
       ++group->dependency_count;
+      group->minimum_issue_separation_cycles =
+          iree_max(group->minimum_issue_separation_cycles,
+                   dependency->minimum_issue_separation_cycles);
       if (dependency->kind == LOOM_LOW_SCHEDULE_DEPENDENCY_SSA) {
         index->ssa_group_bits[group_index >> 3] |=
             (uint8_t)(1u << (group_index & 7u));

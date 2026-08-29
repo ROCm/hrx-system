@@ -248,6 +248,10 @@ typedef struct loom_low_schedule_node_t {
   uint32_t source_ordinal;
   // Scheduled ordinal within |block| after topological scheduling.
   uint32_t scheduled_ordinal;
+  // Abstract issue cycle within |block| after timing-aware scheduling.
+  uint32_t issue_cycle;
+  // Table-wide issue-group ordinal containing this node.
+  uint32_t issue_group_ordinal;
   // Source memory-access record attached to this node, or NONE.
   uint32_t memory_access_record_index;
   // Effective traits used for conservative structural ordering.
@@ -326,6 +330,8 @@ typedef struct loom_low_schedule_pressure_step_t {
   uint32_t block_index;
   // Scheduled ordinal within |block_index|.
   uint32_t scheduled_ordinal;
+  // Abstract issue cycle within |block_index|.
+  uint32_t issue_cycle;
   // Aggregate register live units before scheduling the node.
   uint64_t live_units_before;
   // Register live units killed by the node.
@@ -345,6 +351,8 @@ typedef struct loom_low_schedule_candidate_decision_t {
   uint32_t block_index;
   // Scheduled ordinal within |block_index|.
   uint32_t scheduled_ordinal;
+  // Abstract issue cycle within |block_index|.
+  uint32_t issue_cycle;
   // Number of dependency-ready candidates at this ordinal.
   uint32_t ready_candidate_count;
   // Number of ready candidates selected for exact scoring.
@@ -379,14 +387,13 @@ typedef struct loom_low_schedule_candidate_decision_t {
   uint64_t rejected_produced_live_units;
   // Chosen cycles until all latency-bearing dependencies are ready.
   uint32_t chosen_data_ready_stall_cycles;
-  // Chosen cycles blocked by descriptor resource occupancy.
+  // Chosen resource stall after data and hazard prerequisites are satisfied.
   uint32_t chosen_resource_stall_cycles;
   // Chosen cycles blocked by target hazard distance rows.
   uint32_t chosen_hazard_stall_cycles;
   // Chosen target-provided issue cost for a completion wait.
   uint32_t chosen_completion_wait_cycles;
-  // Chosen maximum stall across dependencies, resources, hazards, and
-  // completion waits.
+  // Chosen total stall before the candidate can issue.
   uint32_t chosen_effective_stall_cycles;
   // Target resource table identifier causing the chosen resource stall, or
   // LOOM_LOW_RESOURCE_NONE.
@@ -403,14 +410,13 @@ typedef struct loom_low_schedule_candidate_decision_t {
   uint32_t chosen_units_until_pressure_cliff;
   // Best rejected cycles until all latency-bearing dependencies are ready.
   uint32_t rejected_data_ready_stall_cycles;
-  // Best rejected cycles blocked by descriptor resource occupancy.
+  // Rejected resource stall after data and hazard prerequisites are satisfied.
   uint32_t rejected_resource_stall_cycles;
   // Best rejected cycles blocked by target hazard distance rows.
   uint32_t rejected_hazard_stall_cycles;
   // Best rejected target-provided issue cost for a completion wait.
   uint32_t rejected_completion_wait_cycles;
-  // Best rejected maximum stall across dependencies, resources, hazards, and
-  // completion waits.
+  // Best rejected total stall before the candidate can issue.
   uint32_t rejected_effective_stall_cycles;
   // Target resource table identifier causing the rejected resource stall, or
   // LOOM_LOW_RESOURCE_NONE.
@@ -438,6 +444,8 @@ typedef struct loom_low_schedule_effect_use_t {
   uint32_t block_index;
   // Scheduled ordinal within |block_index|.
   uint32_t scheduled_ordinal;
+  // Abstract issue cycle within |block_index|.
+  uint32_t issue_cycle;
   // Effect row ordinal within the node's descriptor.
   uint16_t effect_ordinal;
   // Effect kind used by dependency and legality construction.
@@ -465,6 +473,8 @@ typedef struct loom_low_schedule_hazard_use_t {
   uint32_t block_index;
   // Scheduled ordinal within |block_index|.
   uint32_t scheduled_ordinal;
+  // Abstract issue cycle within |block_index|.
+  uint32_t issue_cycle;
   // Hazard row ordinal within the node's schedule class.
   uint16_t hazard_ordinal;
   // Hazard kind used by schedule policy and verification.
@@ -500,6 +510,10 @@ typedef struct loom_low_schedule_hazard_gap_t {
   uint32_t producer_scheduled_ordinal;
   // Scheduled ordinal of the consumer node within |block_index|.
   uint32_t consumer_scheduled_ordinal;
+  // Abstract issue cycle of the producer node within |block_index|.
+  uint32_t producer_issue_cycle;
+  // Abstract issue cycle of the consumer node within |block_index|.
+  uint32_t consumer_issue_cycle;
   // Hazard row ordinal within the producer node's schedule class.
   uint16_t producer_hazard_ordinal;
   // Hazard row ordinal within the consumer node's schedule class.
@@ -516,11 +530,11 @@ typedef struct loom_low_schedule_hazard_gap_t {
   uint16_t producer_stage;
   // Consumer pipeline stage participating in the hazard.
   uint16_t consumer_stage;
-  // Required minimum distance in abstract issue slots.
+  // Required minimum distance in abstract issue cycles.
   uint16_t required_distance;
-  // Actual scheduled distance in abstract issue slots.
+  // Actual scheduled distance in abstract issue cycles.
   uint32_t actual_distance;
-  // Additional abstract issue slots needed before the consumer.
+  // Additional abstract issue cycles needed before the consumer.
   uint16_t required_delay;
   // Hazard flags for target-owned refinements.
   loom_low_hazard_flags_t hazard_flags;
@@ -578,6 +592,18 @@ typedef struct loom_low_schedule_resource_summary_t {
   uint16_t peak_units_per_cycle;
 } loom_low_schedule_resource_summary_t;
 
+// Maximal contiguous run of scheduled nodes that issue in one block cycle.
+typedef struct loom_low_schedule_issue_group_t {
+  // Region block containing every node in the group.
+  uint32_t block_index;
+  // Abstract issue cycle shared by every node in the group.
+  uint32_t issue_cycle;
+  // First entry in the table scheduled-node-index array.
+  uint32_t scheduled_node_start;
+  // Number of scheduled-node-index entries in the group.
+  uint32_t scheduled_node_count;
+} loom_low_schedule_issue_group_t;
+
 // Schedule metadata for one low function block.
 typedef struct loom_low_schedule_block_t {
   // Region block represented by this record.
@@ -590,6 +616,10 @@ typedef struct loom_low_schedule_block_t {
   uint32_t scheduled_node_start;
   // Number of scheduled-node-index entries owned by this block.
   uint32_t scheduled_node_count;
+  // First entry in the table issue-group array.
+  uint32_t issue_group_start;
+  // Number of issue groups owned by this block.
+  uint32_t issue_group_count;
 } loom_low_schedule_block_t;
 
 // Options controlling low schedule construction.
@@ -668,6 +698,10 @@ typedef struct loom_low_schedule_table_t {
   const uint32_t* scheduled_node_indices;
   // Number of scheduled node indices.
   iree_host_size_t scheduled_node_count;
+  // Contiguous same-cycle node groups in block and issue order.
+  const loom_low_schedule_issue_group_t* issue_groups;
+  // Number of issue groups.
+  iree_host_size_t issue_group_count;
   // Concrete placement-sensitive pair opportunities in scheduled order.
   loom_low_placement_pair_use_list_t placement_pair_uses;
   // Number of error diagnostics emitted while attempting scheduling.

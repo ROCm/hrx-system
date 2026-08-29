@@ -37,13 +37,25 @@ TEST_F(ScheduleDependenciesTest, StableAcrossSegmentBoundaries) {
   constexpr uint32_t kDependencyCount =
       LOOM_LOW_SCHEDULE_DEPENDENCY_SEGMENT_CAPACITY + 1;
   for (uint32_t i = 0; i < kDependencyCount; ++i) {
+    loom_low_schedule_dependency_t dependency = {};
+    dependency.producer_node = i;
+    dependency.consumer_node = i + 1;
+    dependency.minimum_issue_separation_cycles = (i & 1u) == 0 ? -3 : 5;
+    dependency.producer_attachment_index = static_cast<uint16_t>(i & 7u);
+    dependency.consumer_attachment_index = static_cast<uint16_t>(i & 15u);
+    dependency.producer_event_id = static_cast<uint16_t>(i & 31u);
+    dependency.consumer_event_id = static_cast<uint16_t>(i & 63u);
+    dependency.value_operand_index = static_cast<uint16_t>(i & 3u);
+    dependency.producer_attachment_kind =
+        LOOM_LOW_SCHEDULE_DEPENDENCY_ATTACHMENT_OPERAND;
+    dependency.consumer_attachment_kind =
+        LOOM_LOW_SCHEDULE_DEPENDENCY_ATTACHMENT_EFFECT;
+    dependency.kind = LOOM_LOW_SCHEDULE_DEPENDENCY_SSA;
+    dependency.separation_source =
+        LOOM_LOW_SCHEDULE_SEPARATION_SOURCE_EVENT_PAIR;
+    dependency.model_quality = 4;
     IREE_ASSERT_OK(loom_low_schedule_dependency_graph_append(
-        &source,
-        {/*.producer_node=*/i,
-         /*.consumer_node=*/i + 1,
-         /*.kind=*/LOOM_LOW_SCHEDULE_DEPENDENCY_SSA,
-         /*.operand_index=*/i & 3u},
-        &arena_));
+        &source, dependency, &arena_));
   }
 
   loom_low_schedule_dependency_graph_t graph;
@@ -56,7 +68,20 @@ TEST_F(ScheduleDependenciesTest, StableAcrossSegmentBoundaries) {
         loom_low_schedule_dependency_graph_at(&graph, i);
     EXPECT_EQ(dependency->producer_node, i);
     EXPECT_EQ(dependency->consumer_node, i + 1);
-    EXPECT_EQ(dependency->operand_index, i & 3u);
+    EXPECT_EQ(dependency->minimum_issue_separation_cycles,
+              (i & 1u) == 0 ? -3 : 5);
+    EXPECT_EQ(dependency->producer_attachment_index, i & 7u);
+    EXPECT_EQ(dependency->consumer_attachment_index, i & 15u);
+    EXPECT_EQ(dependency->producer_event_id, i & 31u);
+    EXPECT_EQ(dependency->consumer_event_id, i & 63u);
+    EXPECT_EQ(dependency->value_operand_index, i & 3u);
+    EXPECT_EQ(dependency->producer_attachment_kind,
+              LOOM_LOW_SCHEDULE_DEPENDENCY_ATTACHMENT_OPERAND);
+    EXPECT_EQ(dependency->consumer_attachment_kind,
+              LOOM_LOW_SCHEDULE_DEPENDENCY_ATTACHMENT_EFFECT);
+    EXPECT_EQ(dependency->separation_source,
+              LOOM_LOW_SCHEDULE_SEPARATION_SOURCE_EVENT_PAIR);
+    EXPECT_EQ(dependency->model_quality, 4);
   }
 }
 

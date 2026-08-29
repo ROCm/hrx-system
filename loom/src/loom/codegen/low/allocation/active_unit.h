@@ -37,6 +37,9 @@ typedef struct loom_low_allocation_active_unit_index_t {
   // First entry for each assignment index. Unindexed assignments contain
   // UINT32_MAX.
   uint32_t* entry_starts_by_assignment_index;
+  // Number of indexed atomic-unit entries for each assignment. Unindexed
+  // assignments contain zero.
+  uint32_t* entry_counts_by_assignment_index;
   // Number of assignment-index entries tracked by this index.
   iree_host_size_t assignment_capacity;
   // Currently active register-like assignments not represented in |entries|.
