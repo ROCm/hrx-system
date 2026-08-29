@@ -205,7 +205,7 @@ static iree_status_t loomc_launch_config_measure_functions(
   return iree_ok_status();
 }
 
-static iree_status_t loomc_launch_config_program_allocate(
+static iree_status_t loomc_launch_config_program_create_slab(
     iree_vm_module_t* module, iree_host_size_t argument_type_count,
     iree_host_size_t max_argument_count, loomc_allocator_t allocator,
     loomc_launch_config_program_t** out_program) {
@@ -382,7 +382,7 @@ static loomc_status_t loomc_launch_config_program_load_impl(
                                                    &max_argument_count);
   }
   if (iree_status_is_ok(status)) {
-    status = loomc_launch_config_program_allocate(
+    status = loomc_launch_config_program_create_slab(
         module, argument_type_count, max_argument_count, allocator, &program);
   }
   if (iree_status_is_ok(status)) {
