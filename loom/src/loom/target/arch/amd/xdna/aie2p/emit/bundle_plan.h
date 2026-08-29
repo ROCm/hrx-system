@@ -29,6 +29,8 @@ enum loom_aie2p_planned_slot_flag_bits_e {
   LOOM_AIE2P_PLANNED_SLOT_FLAG_SYNTHETIC_NOP = 1u << 0,
   // Slot materializes a structural Low control operation.
   LOOM_AIE2P_PLANNED_SLOT_FLAG_STRUCTURAL_CONTROL = 1u << 1,
+  // Slot materializes one allocation-planned structural register move.
+  LOOM_AIE2P_PLANNED_SLOT_FLAG_STRUCTURAL_MOVE = 1u << 2,
 };
 typedef uint16_t loom_aie2p_planned_slot_flags_t;
 
@@ -46,6 +48,8 @@ typedef struct loom_aie2p_planned_slot_t {
 typedef struct loom_aie2p_planned_bundle_t {
   // Physical issue cycle in the contiguous core program.
   uint32_t issue_cycle;
+  // Logical Low schedule cycle expanded into this physical bundle.
+  uint32_t logical_issue_cycle;
   // First slot record in the owning plan.
   uint32_t slot_start;
   // Physical bundle format selected from the owned target table.
@@ -74,8 +78,12 @@ typedef struct loom_aie2p_bundle_plan_t {
 //
 // The current core program representation accepts one basic block. Structural
 // low.return is materialized as the architectural RET instruction and hoisted
-// over useful delay-slot work when the physical bundle table permits it. Empty
-// issue cycles are materialized as NOP bundles so schedule cycles remain exact.
+// over useful delay-slot work when the physical bundle table permits it.
+// Descriptor runs use the minimum contiguous partition of exact physical
+// bundle formats because AIE2P's format domain is not downward closed.
+// Allocation-planned structural moves split a logical schedule cycle into
+// ordered physical bundles; later logical cycles retain or increase every
+// scheduled separation. Empty issue cycles are materialized as NOP bundles.
 // The returned plan borrows |frame| and owns its tables in |arena|.
 iree_status_t loom_aie2p_bundle_plan_build(
     const loom_low_emission_frame_t* frame, iree_arena_allocator_t* arena,

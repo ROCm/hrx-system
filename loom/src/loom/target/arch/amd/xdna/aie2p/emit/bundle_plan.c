@@ -7,6 +7,7 @@
 #include "loom/target/arch/amd/xdna/aie2p/emit/bundle_plan.h"
 
 #include <stddef.h>
+#include <string.h>
 
 #include "loom/codegen/low/packet.h"
 #include "loom/ops/low/ops.h"
@@ -39,90 +40,19 @@ static loom_aie2p_instruction_info_t loom_aie2p_bundle_plan_instruction_info(
   return info;
 }
 
-static const loom_low_schedule_issue_group_t*
-loom_aie2p_bundle_plan_find_issue_group(
-    const loom_low_schedule_table_t* schedule,
-    const loom_low_schedule_block_t* block, uint32_t issue_cycle) {
-  for (uint32_t i = 0; i < block->issue_group_count; ++i) {
-    const loom_low_schedule_issue_group_t* group =
-        &schedule->issue_groups[block->issue_group_start + i];
-    if (group->issue_cycle == issue_cycle) return group;
-    if (group->issue_cycle > issue_cycle) break;
-  }
-  return NULL;
+static bool loom_aie2p_bundle_plan_structural_move_isa(const loom_op_t* op) {
+  return loom_low_copy_isa(op) || loom_low_move_isa(op) ||
+         loom_low_slice_isa(op) || loom_low_concat_isa(op);
 }
 
-static bool loom_aie2p_bundle_plan_append_slot(loom_aie2p_slot_t slot,
-                                               loom_aie2p_slot_t* slots,
-                                               iree_host_size_t* slot_count) {
-  for (iree_host_size_t i = 0; i < *slot_count; ++i) {
-    if (slots[i] == slot) return false;
+static const loom_low_allocation_packet_move_group_t*
+loom_aie2p_bundle_plan_packet_move_group(const loom_low_emission_frame_t* frame,
+                                         const loom_low_packet_view_t* packet) {
+  if (!loom_aie2p_bundle_plan_structural_move_isa(packet->node->op)) {
+    return NULL;
   }
-  if (*slot_count == LOOM_AIE2P_ENCODING_MAX_BUNDLE_SLOT_COUNT) return false;
-  slots[(*slot_count)++] = slot;
-  return true;
-}
-
-static bool loom_aie2p_bundle_plan_gather_cycle_slots(
-    const loom_low_emission_frame_t* frame,
-    const loom_low_schedule_issue_group_t* group, bool include_return,
-    loom_aie2p_slot_t* slots, iree_host_size_t* out_slot_count) {
-  const loom_low_schedule_table_t* schedule = &frame->schedule;
-  iree_host_size_t slot_count = 0;
-  if (group != NULL) {
-    for (uint32_t i = 0; i < group->scheduled_node_count; ++i) {
-      const iree_host_size_t packet_index = group->scheduled_node_start + i;
-      const loom_low_packet_view_t packet =
-          loom_low_packet_at(schedule, packet_index);
-      if (loom_low_packet_is_compile_time_only(&packet) ||
-          packet.descriptor == NULL) {
-        continue;
-      }
-      const loom_aie2p_instruction_info_t info =
-          loom_aie2p_bundle_plan_instruction_info(
-              packet.descriptor->encoding_id);
-      if (!loom_aie2p_bundle_plan_append_slot(info.slot, slots, &slot_count)) {
-        return false;
-      }
-    }
-  }
-  if (include_return) {
-    const loom_low_descriptor_set_t* descriptor_set =
-        frame->target.descriptor_set;
-    const loom_low_descriptor_t* return_descriptor =
-        &descriptor_set->descriptors[AIE2P_CORE_DESCRIPTOR_REF_RETURN_];
-    const loom_aie2p_instruction_info_t return_info =
-        loom_aie2p_bundle_plan_instruction_info(return_descriptor->encoding_id);
-    if (!loom_aie2p_bundle_plan_append_slot(return_info.slot, slots,
-                                            &slot_count)) {
-      return false;
-    }
-  }
-  *out_slot_count = slot_count;
-  return true;
-}
-
-static loom_aie2p_bundle_format_id_t loom_aie2p_bundle_plan_select_cycle_format(
-    const loom_low_emission_frame_t* frame,
-    const loom_low_schedule_issue_group_t* group, bool include_return,
-    iree_host_size_t* out_slot_count) {
-  loom_aie2p_slot_t slots[LOOM_AIE2P_ENCODING_MAX_BUNDLE_SLOT_COUNT];
-  iree_host_size_t slot_count = 0;
-  if (!loom_aie2p_bundle_plan_gather_cycle_slots(frame, group, include_return,
-                                                 slots, &slot_count)) {
-    return LOOM_AIE2P_BUNDLE_FORMAT_ID_INVALID;
-  }
-  if (slot_count == 0) {
-    const loom_low_descriptor_set_t* descriptor_set =
-        frame->target.descriptor_set;
-    const loom_low_descriptor_t* nop_descriptor =
-        &descriptor_set->descriptors[AIE2P_CORE_DESCRIPTOR_REF_NOP];
-    slots[slot_count++] =
-        loom_aie2p_bundle_plan_instruction_info(nop_descriptor->encoding_id)
-            .slot;
-  }
-  *out_slot_count = slot_count;
-  return loom_aie2p_encoding_find_bundle_format_for_slots(slots, slot_count);
+  return loom_low_allocation_find_packet_move_group_by_source_ordinal(
+      &frame->allocation, packet->node->source_ordinal);
 }
 
 static iree_status_t loom_aie2p_bundle_plan_analyze(
@@ -180,6 +110,9 @@ static iree_status_t loom_aie2p_bundle_plan_analyze(
             "AIE2P physical RET is materialized from structural low.return; "
             "descriptor-backed ret packets are not accepted");
       }
+      continue;
+    }
+    if (loom_aie2p_bundle_plan_structural_move_isa(packet.node->op)) {
       continue;
     }
     if (!loom_low_return_isa(packet.node->op)) {
@@ -331,49 +264,252 @@ loom_aie2p_bundle_plan_encode_structural_descriptor(
                                       NULL);
 }
 
-static iree_status_t loom_aie2p_bundle_plan_encode_cycle(
-    const loom_low_emission_frame_t* frame,
-    const loom_low_schedule_issue_group_t* group, uint32_t return_packet_index,
-    bool include_return, loom_aie2p_planned_slot_t* out_slots,
-    iree_host_size_t* out_slot_count) {
-  iree_host_size_t slot_count = 0;
-  if (group != NULL) {
-    for (uint32_t i = 0; i < group->scheduled_node_count; ++i) {
-      const uint32_t packet_index = group->scheduled_node_start + i;
-      const loom_low_packet_view_t packet =
-          loom_low_packet_at(&frame->schedule, packet_index);
-      if (loom_low_packet_is_compile_time_only(&packet) ||
-          packet.descriptor == NULL) {
-        continue;
-      }
-      loom_aie2p_encoded_slot_t encoded_slot;
-      IREE_RETURN_IF_ERROR(
-          loom_aie2p_bundle_plan_encode_packet(frame, &packet, &encoded_slot));
-      out_slots[slot_count++] = (loom_aie2p_planned_slot_t){
-          .encoded_slot = encoded_slot,
-          .scheduled_packet_index = packet_index,
-      };
-    }
-  }
+static iree_status_t loom_aie2p_bundle_plan_encode_move(
+    const loom_low_emission_frame_t* frame, const loom_low_move_t* move,
+    loom_aie2p_encoded_slot_t* out_encoded_slot) {
+  IREE_ASSERT_EQ(move->destination.location_kind,
+                 LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER);
+  IREE_ASSERT_EQ(move->source.location_kind,
+                 LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER);
   const loom_low_descriptor_set_t* descriptor_set =
       frame->target.descriptor_set;
-  if (include_return) {
-    out_slots[slot_count++] = (loom_aie2p_planned_slot_t){
-        .encoded_slot = loom_aie2p_bundle_plan_encode_structural_descriptor(
-            descriptor_set, AIE2P_CORE_DESCRIPTOR_REF_RETURN_),
-        .scheduled_packet_index = return_packet_index,
-        .flags = LOOM_AIE2P_PLANNED_SLOT_FLAG_STRUCTURAL_CONTROL,
-    };
+  IREE_ASSERT_LT(move->destination.location,
+                 descriptor_set->physical_register_count);
+  IREE_ASSERT_LT(move->source.location,
+                 descriptor_set->physical_register_count);
+  if (!loom_low_descriptor_set_find_physical_register_candidate(
+          descriptor_set, AIE2P_CORE_REG_CLASS_ID_AIE2P_ER,
+          move->destination.location, NULL) ||
+      !loom_low_descriptor_set_find_physical_register_candidate(
+          descriptor_set, AIE2P_CORE_REG_CLASS_ID_AIE2P_ER,
+          move->source.location, NULL)) {
+    const iree_string_view_t destination_name = loom_low_descriptor_set_string(
+        descriptor_set,
+        descriptor_set->physical_registers[move->destination.location]
+            .name_string_offset);
+    const iree_string_view_t source_name = loom_low_descriptor_set_string(
+        descriptor_set,
+        descriptor_set->physical_registers[move->source.location]
+            .name_string_offset);
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "AIE2P has no selected physical move route from %.*s to %.*s",
+        (int)source_name.size, source_name.data, (int)destination_name.size,
+        destination_name.data);
   }
-  if (slot_count == 0) {
-    out_slots[slot_count++] = (loom_aie2p_planned_slot_t){
-        .encoded_slot = loom_aie2p_bundle_plan_encode_structural_descriptor(
-            descriptor_set, AIE2P_CORE_DESCRIPTOR_REF_NOP),
-        .scheduled_packet_index = LOOM_AIE2P_BUNDLE_PLAN_PACKET_NONE,
-        .flags = LOOM_AIE2P_PLANNED_SLOT_FLAG_SYNTHETIC_NOP,
-    };
+
+  const loom_low_allocation_assignment_t destination_assignment = {
+      .descriptor_reg_class_id = AIE2P_CORE_REG_CLASS_ID_AIE2P_ER,
+      .unit_count = 1,
+      .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+      .location_base = move->destination.location,
+      .location_count = 1,
+  };
+  const loom_low_allocation_assignment_t source_assignment = {
+      .descriptor_reg_class_id = AIE2P_CORE_REG_CLASS_ID_AIE2P_ER,
+      .unit_count = 1,
+      .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+      .location_base = move->source.location,
+      .location_count = 1,
+  };
+  const loom_low_allocation_assignment_t* operand_assignments[] = {
+      &destination_assignment,
+      &source_assignment,
+  };
+  *out_encoded_slot = loom_aie2p_descriptor_encode(
+      descriptor_set, AIE2P_CORE_DESCRIPTOR_REF_MOVE_SCALAR,
+      operand_assignments, NULL);
+  return iree_ok_status();
+}
+
+static iree_status_t loom_aie2p_bundle_plan_append_bundle(
+    uint32_t logical_issue_cycle, iree_host_size_t slot_start,
+    iree_host_size_t slot_count, const loom_aie2p_planned_slot_t* slots,
+    loom_aie2p_planned_bundle_t* bundles,
+    iree_host_size_t* inout_bundle_count) {
+  if (slot_count > LOOM_AIE2P_ENCODING_MAX_BUNDLE_SLOT_COUNT) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "AIE2P logical issue cycle %u requires %zu physical slots in one "
+        "ordered segment",
+        (unsigned)logical_issue_cycle, slot_count);
   }
-  *out_slot_count = slot_count;
+  loom_aie2p_slot_t physical_slots[LOOM_AIE2P_ENCODING_MAX_BUNDLE_SLOT_COUNT];
+  for (iree_host_size_t i = 0; i < slot_count; ++i) {
+    physical_slots[i] = slots[slot_start + i].encoded_slot.slot;
+  }
+  const loom_aie2p_bundle_format_id_t format =
+      loom_aie2p_encoding_find_bundle_format_for_slots(physical_slots,
+                                                       slot_count);
+  if (format == LOOM_AIE2P_BUNDLE_FORMAT_ID_INVALID) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "AIE2P logical issue cycle %u has no legal physical bundle format",
+        (unsigned)logical_issue_cycle);
+  }
+  loom_aie2p_bundle_format_info_t format_info;
+  const bool found =
+      loom_aie2p_encoding_query_bundle_format_info(format, &format_info);
+  IREE_ASSERT(found && format_info.slot_count == slot_count &&
+              format_info.bit_count % 8 == 0);
+  const uint32_t physical_issue_cycle = (uint32_t)*inout_bundle_count;
+  bundles[(*inout_bundle_count)++] = (loom_aie2p_planned_bundle_t){
+      .issue_cycle = physical_issue_cycle,
+      .logical_issue_cycle = logical_issue_cycle,
+      .slot_start = (uint32_t)slot_start,
+      .format = format,
+      .slot_count = (uint8_t)slot_count,
+  };
+  return iree_ok_status();
+}
+
+// Partitions one scheduled descriptor run into the minimum number of
+// contiguous physical bundles. AIE2P's exact bundle-format domain is not
+// downward closed: a wide format can exist while one of its slot subsets does
+// not. Keeping the scheduled order while minimizing contiguous partitions
+// preserves every dependency and timing separation without rejecting those
+// representable runs.
+static iree_status_t loom_aie2p_bundle_plan_append_descriptor_run(
+    uint32_t logical_issue_cycle, iree_host_size_t slot_start,
+    iree_host_size_t slot_count, const loom_aie2p_planned_slot_t* slots,
+    loom_aie2p_planned_bundle_t* bundles,
+    iree_host_size_t* inout_bundle_count) {
+  IREE_ASSERT_GT(slot_count, 0u);
+  if (slot_count > LOOM_AIE2P_ENCODING_MAX_BUNDLE_SLOT_COUNT) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "AIE2P logical issue cycle %u contains %zu descriptor slots in one "
+        "ordered run",
+        (unsigned)logical_issue_cycle, slot_count);
+  }
+
+  uint8_t minimum_bundle_counts[LOOM_AIE2P_ENCODING_MAX_BUNDLE_SLOT_COUNT + 1];
+  uint8_t predecessor_indices[LOOM_AIE2P_ENCODING_MAX_BUNDLE_SLOT_COUNT + 1];
+  memset(minimum_bundle_counts, UINT8_MAX, sizeof(minimum_bundle_counts));
+  memset(predecessor_indices, UINT8_MAX, sizeof(predecessor_indices));
+  minimum_bundle_counts[0] = 0;
+  for (iree_host_size_t end = 1; end <= slot_count; ++end) {
+    for (iree_host_size_t begin = 0; begin < end; ++begin) {
+      if (minimum_bundle_counts[begin] == UINT8_MAX) continue;
+      loom_aie2p_slot_t
+          physical_slots[LOOM_AIE2P_ENCODING_MAX_BUNDLE_SLOT_COUNT];
+      const iree_host_size_t candidate_slot_count = end - begin;
+      for (iree_host_size_t i = 0; i < candidate_slot_count; ++i) {
+        physical_slots[i] = slots[slot_start + begin + i].encoded_slot.slot;
+      }
+      if (loom_aie2p_encoding_find_bundle_format_for_slots(
+              physical_slots, candidate_slot_count) ==
+          LOOM_AIE2P_BUNDLE_FORMAT_ID_INVALID) {
+        continue;
+      }
+      const uint8_t candidate_bundle_count =
+          (uint8_t)(minimum_bundle_counts[begin] + 1u);
+      if (candidate_bundle_count < minimum_bundle_counts[end]) {
+        minimum_bundle_counts[end] = candidate_bundle_count;
+        predecessor_indices[end] = (uint8_t)begin;
+      }
+    }
+  }
+  if (minimum_bundle_counts[slot_count] == UINT8_MAX) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "AIE2P logical issue cycle %u has an unrepresentable descriptor run",
+        (unsigned)logical_issue_cycle);
+  }
+
+  uint8_t partition_starts[LOOM_AIE2P_ENCODING_MAX_BUNDLE_SLOT_COUNT];
+  uint8_t partition_ends[LOOM_AIE2P_ENCODING_MAX_BUNDLE_SLOT_COUNT];
+  uint8_t partition_count = 0;
+  for (uint8_t end = (uint8_t)slot_count; end != 0;) {
+    const uint8_t begin = predecessor_indices[end];
+    IREE_ASSERT_NE(begin, UINT8_MAX);
+    partition_starts[partition_count] = begin;
+    partition_ends[partition_count] = end;
+    ++partition_count;
+    end = begin;
+  }
+  while (partition_count != 0) {
+    --partition_count;
+    const iree_host_size_t begin = partition_starts[partition_count];
+    const iree_host_size_t end = partition_ends[partition_count];
+    IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_append_bundle(
+        logical_issue_cycle, slot_start + begin, end - begin, slots, bundles,
+        inout_bundle_count));
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_aie2p_bundle_plan_append_nop_bundle(
+    const loom_low_descriptor_set_t* descriptor_set,
+    uint32_t logical_issue_cycle, loom_aie2p_planned_bundle_t* bundles,
+    iree_host_size_t* inout_bundle_count, loom_aie2p_planned_slot_t* slots,
+    iree_host_size_t* inout_slot_count) {
+  const iree_host_size_t slot_start = *inout_slot_count;
+  slots[(*inout_slot_count)++] = (loom_aie2p_planned_slot_t){
+      .encoded_slot = loom_aie2p_bundle_plan_encode_structural_descriptor(
+          descriptor_set, AIE2P_CORE_DESCRIPTOR_REF_NOP),
+      .scheduled_packet_index = LOOM_AIE2P_BUNDLE_PLAN_PACKET_NONE,
+      .flags = LOOM_AIE2P_PLANNED_SLOT_FLAG_SYNTHETIC_NOP,
+  };
+  return loom_aie2p_bundle_plan_append_bundle(
+      logical_issue_cycle, slot_start, 1, slots, bundles, inout_bundle_count);
+}
+
+static iree_status_t loom_aie2p_bundle_plan_try_place_return(
+    const loom_low_descriptor_set_t* descriptor_set,
+    uint32_t return_packet_index, iree_host_size_t candidate_bundle_index,
+    loom_aie2p_planned_bundle_t* bundles, iree_host_size_t bundle_count,
+    loom_aie2p_planned_slot_t* slots, iree_host_size_t* inout_slot_count,
+    bool* out_placed) {
+  *out_placed = false;
+  loom_aie2p_planned_bundle_t* candidate_bundle =
+      &bundles[candidate_bundle_index];
+  loom_aie2p_planned_slot_t return_slot = {
+      .encoded_slot = loom_aie2p_bundle_plan_encode_structural_descriptor(
+          descriptor_set, AIE2P_CORE_DESCRIPTOR_REF_RETURN_),
+      .scheduled_packet_index = return_packet_index,
+      .flags = LOOM_AIE2P_PLANNED_SLOT_FLAG_STRUCTURAL_CONTROL,
+  };
+  loom_aie2p_slot_t physical_slots[LOOM_AIE2P_ENCODING_MAX_BUNDLE_SLOT_COUNT];
+  const iree_host_size_t candidate_slot_start = candidate_bundle->slot_start;
+  const bool replaces_nop =
+      candidate_bundle->slot_count == 1 &&
+      iree_any_bit_set(slots[candidate_slot_start].flags,
+                       LOOM_AIE2P_PLANNED_SLOT_FLAG_SYNTHETIC_NOP);
+  const iree_host_size_t retained_slot_count =
+      replaces_nop ? 0 : candidate_bundle->slot_count;
+  if (retained_slot_count == LOOM_AIE2P_ENCODING_MAX_BUNDLE_SLOT_COUNT) {
+    return iree_ok_status();
+  }
+  for (iree_host_size_t i = 0; i < retained_slot_count; ++i) {
+    physical_slots[i] = slots[candidate_slot_start + i].encoded_slot.slot;
+  }
+  physical_slots[retained_slot_count] = return_slot.encoded_slot.slot;
+  const iree_host_size_t candidate_slot_count = retained_slot_count + 1;
+  const loom_aie2p_bundle_format_id_t format =
+      loom_aie2p_encoding_find_bundle_format_for_slots(physical_slots,
+                                                       candidate_slot_count);
+  if (format == LOOM_AIE2P_BUNDLE_FORMAT_ID_INVALID) {
+    return iree_ok_status();
+  }
+
+  if (replaces_nop) {
+    slots[candidate_slot_start] = return_slot;
+  } else {
+    const iree_host_size_t insert_index =
+        candidate_slot_start + candidate_bundle->slot_count;
+    memmove(&slots[insert_index + 1], &slots[insert_index],
+            (*inout_slot_count - insert_index) * sizeof(*slots));
+    slots[insert_index] = return_slot;
+    ++*inout_slot_count;
+    for (iree_host_size_t i = candidate_bundle_index + 1; i < bundle_count;
+         ++i) {
+      ++bundles[i].slot_start;
+    }
+  }
+  candidate_bundle->format = format;
+  candidate_bundle->slot_count = (uint8_t)candidate_slot_count;
+  *out_placed = true;
   return iree_ok_status();
 }
 
@@ -394,46 +530,46 @@ iree_status_t loom_aie2p_bundle_plan_build(
   const uint8_t return_delay_slot_count =
       loom_aie2p_bundle_plan_instruction_info(return_descriptor->encoding_id)
           .delay_slot_count;
-  const uint32_t candidate_return_cycle =
-      analysis.return_issue_cycle >= return_delay_slot_count
-          ? analysis.return_issue_cycle - return_delay_slot_count
-          : 0;
   const loom_low_schedule_block_t* block = &frame->schedule.blocks[0];
-  const loom_low_schedule_issue_group_t* candidate_group =
-      loom_aie2p_bundle_plan_find_issue_group(&frame->schedule, block,
-                                              candidate_return_cycle);
-  iree_host_size_t candidate_slot_count = 0;
-  const loom_aie2p_bundle_format_id_t candidate_format =
-      loom_aie2p_bundle_plan_select_cycle_format(frame, candidate_group,
-                                                 /*include_return=*/true,
-                                                 &candidate_slot_count);
-  const uint64_t return_cycle_64 =
-      candidate_format != LOOM_AIE2P_BUNDLE_FORMAT_ID_INVALID
-          ? candidate_return_cycle
-          : (uint64_t)analysis.maximum_issue_cycle + 1;
-  const uint64_t return_delay_end_cycle_64 =
-      return_cycle_64 + return_delay_slot_count;
-  const uint64_t final_cycle_64 = iree_max(
-      return_delay_end_cycle_64, (uint64_t)analysis.maximum_issue_cycle);
-  const uint64_t bundle_count_64 = final_cycle_64 + 1;
   const uint64_t maximum_bundle_count =
       LOOM_AIE2P_CORE_PROGRAM_MEMORY_SIZE / 2u;
-  if (bundle_count_64 > maximum_bundle_count) {
+  const uint64_t logical_bundle_count_64 =
+      (uint64_t)analysis.maximum_issue_cycle + 1u;
+  if (logical_bundle_count_64 > maximum_bundle_count) {
     return iree_make_status(
         IREE_STATUS_RESOURCE_EXHAUSTED,
         "AIE2P bundle plan exceeds the 16 KiB core program memory");
   }
-  const uint32_t return_cycle = (uint32_t)return_cycle_64;
-  const uint32_t final_cycle = (uint32_t)final_cycle_64;
-  const iree_host_size_t bundle_count = (iree_host_size_t)bundle_count_64;
+  iree_host_size_t bundle_capacity = (iree_host_size_t)logical_bundle_count_64;
+  if (!iree_host_size_checked_add(bundle_capacity,
+                                  frame->schedule.scheduled_node_count,
+                                  &bundle_capacity) ||
+      !iree_host_size_checked_add(bundle_capacity,
+                                  frame->allocation.packet_move_count,
+                                  &bundle_capacity) ||
+      !iree_host_size_checked_add(
+          bundle_capacity, (iree_host_size_t)return_delay_slot_count + 1u,
+          &bundle_capacity)) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "AIE2P bundle-plan storage capacity exceeds host size");
+  }
+  // The same upper bound covers slots: each scheduled node and allocation
+  // move can contribute at most one slot, while every empty logical cycle and
+  // return-delay cycle contributes one synthetic slot.
+  const iree_host_size_t slot_capacity = bundle_capacity;
 
   loom_aie2p_planned_bundle_t* bundles = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, bundle_count, sizeof(*bundles), (void**)&bundles));
+      arena, bundle_capacity, sizeof(*bundles), (void**)&bundles));
+  loom_aie2p_planned_slot_t* slots = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, slot_capacity, sizeof(*slots), (void**)&slots));
+  iree_host_size_t bundle_count = 0;
   iree_host_size_t slot_count = 0;
-  iree_host_size_t encoded_byte_length = 0;
   uint32_t issue_group_index = 0;
-  for (uint32_t issue_cycle = 0; issue_cycle <= final_cycle; ++issue_cycle) {
+  for (uint32_t issue_cycle = 0; issue_cycle <= analysis.maximum_issue_cycle;
+       ++issue_cycle) {
     const loom_low_schedule_issue_group_t* group = NULL;
     if (issue_group_index < block->issue_group_count) {
       const loom_low_schedule_issue_group_t* next_group =
@@ -444,28 +580,116 @@ iree_status_t loom_aie2p_bundle_plan_build(
         ++issue_group_index;
       }
     }
-    iree_host_size_t cycle_slot_count = 0;
-    const loom_aie2p_bundle_format_id_t format =
-        loom_aie2p_bundle_plan_select_cycle_format(
-            frame, group, issue_cycle == return_cycle, &cycle_slot_count);
-    if (format == LOOM_AIE2P_BUNDLE_FORMAT_ID_INVALID) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "AIE2P issue cycle %u has no legal physical bundle format",
-          (unsigned)issue_cycle);
+    const iree_host_size_t cycle_bundle_start = bundle_count;
+    iree_host_size_t segment_slot_start = slot_count;
+    if (group != NULL) {
+      for (uint32_t i = 0; i < group->scheduled_node_count; ++i) {
+        const uint32_t packet_index = group->scheduled_node_start + i;
+        const loom_low_packet_view_t packet =
+            loom_low_packet_at(&frame->schedule, packet_index);
+        if (loom_low_packet_is_compile_time_only(&packet) ||
+            loom_low_return_isa(packet.node->op)) {
+          continue;
+        }
+        if (packet.descriptor != NULL) {
+          loom_aie2p_encoded_slot_t encoded_slot;
+          IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_encode_packet(
+              frame, &packet, &encoded_slot));
+          slots[slot_count++] = (loom_aie2p_planned_slot_t){
+              .encoded_slot = encoded_slot,
+              .scheduled_packet_index = packet_index,
+          };
+          continue;
+        }
+
+        const loom_low_allocation_packet_move_group_t* move_group =
+            loom_aie2p_bundle_plan_packet_move_group(frame, &packet);
+        if (move_group == NULL) continue;
+        if (slot_count != segment_slot_start) {
+          IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_append_descriptor_run(
+              issue_cycle, segment_slot_start, slot_count - segment_slot_start,
+              slots, bundles, &bundle_count));
+          segment_slot_start = slot_count;
+        }
+        for (iree_host_size_t move_ordinal = 0;
+             move_ordinal < move_group->move_group.moves.count;
+             ++move_ordinal) {
+          const iree_host_size_t move_index =
+              move_group->move_group.moves.start + move_ordinal;
+          loom_aie2p_encoded_slot_t encoded_move;
+          IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_encode_move(
+              frame, &frame->allocation.moves[move_index], &encoded_move));
+          const iree_host_size_t move_slot_start = slot_count;
+          slots[slot_count++] = (loom_aie2p_planned_slot_t){
+              .encoded_slot = encoded_move,
+              .scheduled_packet_index = packet_index,
+              .flags = LOOM_AIE2P_PLANNED_SLOT_FLAG_STRUCTURAL_MOVE,
+          };
+          IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_append_bundle(
+              issue_cycle, move_slot_start, 1, slots, bundles, &bundle_count));
+          segment_slot_start = slot_count;
+        }
+      }
     }
-    loom_aie2p_bundle_format_info_t format_info;
-    const bool found =
-        loom_aie2p_encoding_query_bundle_format_info(format, &format_info);
-    IREE_ASSERT(found && format_info.slot_count == cycle_slot_count &&
-                format_info.bit_count % 8 == 0);
-    bundles[issue_cycle] = (loom_aie2p_planned_bundle_t){
-        .issue_cycle = issue_cycle,
-        .slot_start = (uint32_t)slot_count,
-        .format = format,
-        .slot_count = (uint8_t)cycle_slot_count,
+    if (slot_count != segment_slot_start) {
+      IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_append_descriptor_run(
+          issue_cycle, segment_slot_start, slot_count - segment_slot_start,
+          slots, bundles, &bundle_count));
+    }
+    if (bundle_count == cycle_bundle_start) {
+      IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_append_nop_bundle(
+          descriptor_set, issue_cycle, bundles, &bundle_count, slots,
+          &slot_count));
+    }
+  }
+
+  IREE_ASSERT_GT(bundle_count, 0u);
+  const iree_host_size_t candidate_return_cycle =
+      bundle_count - 1 >= return_delay_slot_count
+          ? bundle_count - 1 - return_delay_slot_count
+          : 0;
+  bool return_placed = false;
+  IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_try_place_return(
+      descriptor_set, analysis.return_packet_index, candidate_return_cycle,
+      bundles, bundle_count, slots, &slot_count, &return_placed));
+  if (return_placed) {
+    const iree_host_size_t required_bundle_count =
+        candidate_return_cycle + return_delay_slot_count + 1;
+    while (bundle_count < required_bundle_count) {
+      IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_append_nop_bundle(
+          descriptor_set, analysis.return_issue_cycle, bundles, &bundle_count,
+          slots, &slot_count));
+    }
+  } else {
+    const iree_host_size_t return_slot_start = slot_count;
+    slots[slot_count++] = (loom_aie2p_planned_slot_t){
+        .encoded_slot = loom_aie2p_bundle_plan_encode_structural_descriptor(
+            descriptor_set, AIE2P_CORE_DESCRIPTOR_REF_RETURN_),
+        .scheduled_packet_index = analysis.return_packet_index,
+        .flags = LOOM_AIE2P_PLANNED_SLOT_FLAG_STRUCTURAL_CONTROL,
     };
-    slot_count += cycle_slot_count;
+    IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_append_bundle(
+        analysis.return_issue_cycle, return_slot_start, 1, slots, bundles,
+        &bundle_count));
+    for (uint8_t i = 0; i < return_delay_slot_count; ++i) {
+      IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_append_nop_bundle(
+          descriptor_set, analysis.return_issue_cycle, bundles, &bundle_count,
+          slots, &slot_count));
+    }
+  }
+
+  if (bundle_count > maximum_bundle_count) {
+    return iree_make_status(
+        IREE_STATUS_RESOURCE_EXHAUSTED,
+        "AIE2P bundle plan exceeds the 16 KiB core program memory");
+  }
+  iree_host_size_t encoded_byte_length = 0;
+  for (iree_host_size_t i = 0; i < bundle_count; ++i) {
+    loom_aie2p_bundle_format_info_t format_info;
+    const bool found = loom_aie2p_encoding_query_bundle_format_info(
+        bundles[i].format, &format_info);
+    IREE_ASSERT(found && format_info.slot_count == bundles[i].slot_count &&
+                format_info.bit_count % 8 == 0);
     encoded_byte_length += format_info.bit_count / 8;
   }
   if (encoded_byte_length > LOOM_AIE2P_CORE_PROGRAM_MEMORY_SIZE) {
@@ -473,29 +697,6 @@ iree_status_t loom_aie2p_bundle_plan_build(
         IREE_STATUS_RESOURCE_EXHAUSTED,
         "AIE2P encoded leaf requires %zu bytes of 16 KiB program memory",
         encoded_byte_length);
-  }
-
-  loom_aie2p_planned_slot_t* slots = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, slot_count, sizeof(*slots), (void**)&slots));
-  issue_group_index = 0;
-  for (uint32_t issue_cycle = 0; issue_cycle <= final_cycle; ++issue_cycle) {
-    const loom_low_schedule_issue_group_t* group = NULL;
-    if (issue_group_index < block->issue_group_count) {
-      const loom_low_schedule_issue_group_t* next_group =
-          &frame->schedule
-               .issue_groups[block->issue_group_start + issue_group_index];
-      if (next_group->issue_cycle == issue_cycle) {
-        group = next_group;
-        ++issue_group_index;
-      }
-    }
-    const loom_aie2p_planned_bundle_t* bundle = &bundles[issue_cycle];
-    iree_host_size_t encoded_slot_count = 0;
-    IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_encode_cycle(
-        frame, group, analysis.return_packet_index, issue_cycle == return_cycle,
-        &slots[bundle->slot_start], &encoded_slot_count));
-    IREE_ASSERT(encoded_slot_count == bundle->slot_count);
   }
 
   *out_plan = (loom_aie2p_bundle_plan_t){

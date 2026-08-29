@@ -6,21 +6,27 @@
 
 from __future__ import annotations
 
+from itertools import combinations
+
 from loom.target.arch.amd.xdna.aie.schedule import (
     PipelineStageKind,
     pipeline_uses,
 )
 from loom.target.arch.amd.xdna.aie2p.core_descriptors import (
+    _BUNDLE_SLOT_EXCLUSIONS,
     _DESCRIPTOR_SPECS,
     _INSTRUCTION_ENCODINGS,
     _SCHEDULE_CLASS_NAMES,
+    _SLOT_RESOURCE_KINDS,
     AIE2P_CORE_DESCRIPTOR_SET,
+    _bundle_exclusion_resource_name,
     _constraints,
     _itinerary,
     _low_register_class_name,
     _pipeline_resource_name,
     _slot_resource_name,
 )
+from loom.target.arch.amd.xdna.aie2p.core_encoding_data import CORE_ENCODING_TABLE
 from loom.target.arch.amd.xdna.aie2p.core_machine_data import CORE_MACHINE_TABLE
 from loom.target.arch.amd.xdna.aie2p.core_schedule_data import CORE_SCHEDULE_TABLE
 from loom.target.low_descriptors import (
@@ -38,8 +44,8 @@ from loom.target.low_descriptors import (
 def test_core_descriptor_closure_is_complete() -> None:
     descriptor_set = AIE2P_CORE_DESCRIPTOR_SET
     assert len(descriptor_set.physical_registers) == 359
-    assert len(descriptor_set.reg_classes) == 7
-    assert len(descriptor_set.descriptors) == 37
+    assert len(descriptor_set.reg_classes) == 9
+    assert len(descriptor_set.descriptors) == 53
     assert tuple(row.name for row in descriptor_set.physical_registers) == tuple(
         row.name for row in CORE_MACHINE_TABLE.physical_registers
     )
@@ -50,16 +56,23 @@ def test_core_descriptor_closure_is_complete() -> None:
 
 def test_complete_schedule_domain_drives_selected_low_descriptors() -> None:
     descriptor_set = AIE2P_CORE_DESCRIPTOR_SET
-    assert len(descriptor_set.resources) == 81
+    assert len(descriptor_set.resources) == 90
     assert len(descriptor_set.timing_events) == 38
     assert len(descriptor_set.event_separations) == 651
-    assert len(descriptor_set.schedule_classes) == 15
+    assert len(descriptor_set.schedule_classes) == 21
     assert {
         resource.name
         for resource in descriptor_set.resources
         if resource.kind is ResourceKind.PIPELINE
     } == {
-        _pipeline_resource_name(resource) for resource in CORE_SCHEDULE_TABLE.resources
+        *(
+            _pipeline_resource_name(resource)
+            for resource in CORE_SCHEDULE_TABLE.resources
+        ),
+        *(
+            _bundle_exclusion_resource_name(exclusion)
+            for exclusion in _BUNDLE_SLOT_EXCLUSIONS
+        ),
     }
 
     schedule_classes = {
@@ -75,10 +88,26 @@ def test_complete_schedule_domain_drives_selected_low_descriptors() -> None:
         assert schedule_class.issue_uses[0].stage == 0
         assert schedule_class.issue_uses[0].cycles == 1
         assert schedule_class.issue_uses[0].kind is IssueUseKind.REQUIRED
+        expected_exclusions = tuple(
+            exclusion for exclusion in _BUNDLE_SLOT_EXCLUSIONS if slot in exclusion
+        )
+        exclusion_uses = schedule_class.issue_uses[1 : 1 + len(expected_exclusions)]
+        assert tuple(use.resource for use in exclusion_uses) == tuple(
+            _bundle_exclusion_resource_name(exclusion)
+            for exclusion in expected_exclusions
+        )
+        assert all(use.stage == 0 for use in exclusion_uses)
+        assert all(use.cycles == 1 for use in exclusion_uses)
+        assert all(use.units == 1 for use in exclusion_uses)
+        assert all(use.kind is IssueUseKind.REQUIRED for use in exclusion_uses)
         expected_pipeline_uses = pipeline_uses(_itinerary(spec))
-        assert len(schedule_class.issue_uses) == len(expected_pipeline_uses) + 1
+        assert len(schedule_class.issue_uses) == (
+            len(expected_pipeline_uses) + len(expected_exclusions) + 1
+        )
         for actual, expected in zip(
-            schedule_class.issue_uses[1:], expected_pipeline_uses, strict=True
+            schedule_class.issue_uses[1 + len(expected_exclusions) :],
+            expected_pipeline_uses,
+            strict=True,
         ):
             assert len(expected.resources) == 1
             assert actual.resource == _pipeline_resource_name(expected.resources[0])
@@ -90,6 +119,32 @@ def test_complete_schedule_domain_drives_selected_low_descriptors() -> None:
                 if expected.kind is PipelineStageKind.REQUIRED
                 else IssueUseKind.RESERVED
             )
+
+
+def test_bundle_resources_exactly_model_every_extendable_physical_slot_set() -> None:
+    descriptor_set = AIE2P_CORE_DESCRIPTOR_SET
+    resources = {resource.name: resource for resource in descriptor_set.resources}
+    for exclusion in _BUNDLE_SLOT_EXCLUSIONS:
+        resource = resources[_bundle_exclusion_resource_name(exclusion)]
+        assert resource.capacity_per_cycle == len(exclusion) - 1
+        assert resource.kind is ResourceKind.PIPELINE
+
+    legal_signatures = {
+        frozenset(field.slot for field in bundle_format.fields)
+        for bundle_format in CORE_ENCODING_TABLE.bundle_formats
+    }
+    slots = tuple(sorted(_SLOT_RESOURCE_KINDS))
+    for slot_count in range(1, len(slots) + 1):
+        for candidate in combinations(slots, slot_count):
+            admitted_by_resources = all(
+                len(set(candidate).intersection(exclusion)) < len(exclusion)
+                for exclusion in _BUNDLE_SLOT_EXCLUSIONS
+            )
+            extendable_to_bundle = any(
+                frozenset(candidate).issubset(signature)
+                for signature in legal_signatures
+            )
+            assert admitted_by_resources == extendable_to_bundle
 
 
 def test_low_register_classes_retain_machine_candidate_order() -> None:
@@ -171,6 +226,18 @@ def test_descriptor_encoding_ids_and_adapters_are_materialized() -> None:
         assert descriptor.operands[0].encoding_adapter_id != 0
         assert descriptor.operands[0].ready_stage == 1
 
+    scalar_move = descriptors["amd.xdna.aie2p.move.scalar"]
+    assert [operand.field_name for operand in scalar_move.operands] == [
+        "dst",
+        "src",
+    ]
+    assert all(
+        operand.reg_alts[0].reg_class == "aie2p.er" for operand in scalar_move.operands
+    )
+    assert all(operand.encoding_adapter_id != 0 for operand in scalar_move.operands)
+    assert scalar_move.operands[0].ready_stage == 1
+    assert scalar_move.operands[1].read_stage == 1
+
 
 def test_implicit_registers_and_machine_ties_reach_low() -> None:
     descriptors = {
@@ -203,6 +270,34 @@ def test_implicit_registers_and_machine_ties_reach_low() -> None:
         OperandFlag.STATE_READ,
     }
     assert link_register.reg_alts[0].reg_class == "aie2p.state.lr"
+
+    vector_extract = descriptors["amd.xdna.aie2p.extract.i8.immediate"]
+    vector_add_sign = next(
+        operand
+        for operand in vector_extract.operands
+        if operand.field_name == "implicit_use_vaddsign0"
+    )
+    assert vector_add_sign.reg_alts[0].reg_class == "aie2p.state.vaddsign0"
+    assert vector_add_sign.reg_alts[0].flags == (RegClassAltFlag.PHYSICAL_ONLY,)
+    vector_add_sign_class = next(
+        register_class
+        for register_class in AIE2P_CORE_DESCRIPTOR_SET.reg_classes
+        if register_class.name == "aie2p.state.vaddsign0"
+    )
+    assert vector_add_sign_class.alloc_unit_bits == 32
+    assert vector_add_sign_class.physical_registers == ("vaddSign0",)
+
+    vector_insert = descriptors["amd.xdna.aie2p.insert.i32.register"]
+    insert_index = next(
+        operand for operand in vector_insert.operands if operand.field_name == "idx"
+    )
+    assert insert_index.reg_alts[0].reg_class == "aie2p.mr29_insert"
+    insert_index_class = next(
+        register_class
+        for register_class in AIE2P_CORE_DESCRIPTOR_SET.reg_classes
+        if register_class.name == "aie2p.mr29_insert"
+    )
+    assert insert_index_class.physical_registers == ("r29",)
 
     divs = next(form for form in CORE_MACHINE_TABLE.forms if form.name == "DIVS")
     constraints = _constraints(divs, (*divs.outputs, *divs.inputs))

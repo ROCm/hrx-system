@@ -20,6 +20,7 @@ static iree_status_t loom_aie2p_map_type(void* user_data,
   (void)user_data;
   if (loom_type_is_scalar(source_type)) {
     switch (loom_type_element_type(source_type)) {
+      case LOOM_SCALAR_TYPE_INDEX:
       case LOOM_SCALAR_TYPE_I1:
       case LOOM_SCALAR_TYPE_I8:
       case LOOM_SCALAR_TYPE_I16:

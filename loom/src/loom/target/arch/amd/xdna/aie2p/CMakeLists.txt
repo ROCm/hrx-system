@@ -315,6 +315,7 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     loom::codegen::low::frame
+    loom::codegen::low::packet
     loom::codegen::low::text_asm
     loom::codegen::low::verify
     loom::format::text::parser

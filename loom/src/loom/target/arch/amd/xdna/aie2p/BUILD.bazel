@@ -275,6 +275,7 @@ loom_cc_test(
         ":leaf_object",
         ":low_registry",
         "//loom/src/loom/codegen/low:frame",
+        "//loom/src/loom/codegen/low:packet",
         "//loom/src/loom/codegen/low:text_asm",
         "//loom/src/loom/codegen/low:verify",
         "//loom/src/loom/format/text:parser",
