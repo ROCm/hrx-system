@@ -1384,6 +1384,67 @@ static iree_status_t loom_link_plan_select_root(
       /*out_new_symbol_plan_ordinal=*/NULL);
 }
 
+static iree_status_t loom_link_plan_select_root_symbol_ordinals(
+    loom_link_plan_t* plan, const loom_link_plan_options_t* options) {
+  const iree_host_size_t root_count =
+      options ? options->root_symbol_ordinals.count : 0;
+  const iree_host_size_t* root_ordinals =
+      options ? options->root_symbol_ordinals.values : NULL;
+  if (root_count != 0 && root_ordinals == NULL) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "root symbol ordinal count is non-zero but values is NULL");
+  }
+  const iree_host_size_t symbol_count =
+      loom_link_module_index_symbol_count(plan->index);
+  for (iree_host_size_t i = 0; i < root_count; ++i) {
+    const iree_host_size_t symbol_ordinal = root_ordinals[i];
+    if (symbol_ordinal >= symbol_count) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "root symbol ordinal %" PRIhsz
+                              " is outside the %" PRIhsz "-symbol index",
+                              symbol_ordinal, symbol_count);
+    }
+    const loom_link_module_index_symbol_t* symbol =
+        loom_link_module_index_symbol_at(plan->index, symbol_ordinal);
+    const loom_link_plan_live_cause_t cause = {
+        .reason = LOOM_LINK_PLAN_LIVE_ROOT,
+        .symbol_plan_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL,
+        .facet_plan_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL,
+        .root_name = symbol->name,
+    };
+    iree_host_size_t root_plan_ordinal = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL;
+    IREE_RETURN_IF_ERROR(loom_link_plan_select_required_symbol(
+        plan, options, symbol, cause, &root_plan_ordinal));
+    if (root_plan_ordinal == LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL) {
+      IREE_RETURN_IF_ERROR(loom_link_plan_lookup_symbol_ordinal(
+          plan, symbol_ordinal, &root_plan_ordinal));
+      loom_link_plan_symbol_work_item_t* symbol_work_item =
+          &plan->symbols.values[root_plan_ordinal];
+      symbol_work_item->selection.reason = LOOM_LINK_PLAN_LIVE_ROOT;
+      symbol_work_item->selection.cause_ordinal =
+          LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL;
+      symbol_work_item->selection.root_name = symbol->name;
+      iree_host_size_t facet_plan_ordinal =
+          symbol_work_item->selection.primary_facet_ordinal;
+      while (facet_plan_ordinal != LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL) {
+        loom_link_plan_facet_work_item_t* facet_work_item =
+            &plan->facets.values[facet_plan_ordinal];
+        facet_work_item->selection.reason = LOOM_LINK_PLAN_LIVE_ROOT;
+        facet_work_item->selection.cause_ordinal =
+            LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL;
+        facet_plan_ordinal = facet_work_item->next_symbol_facet_plan_ordinal;
+      }
+    }
+    const loom_link_plan_facet_request_t definition_request = {
+        .mode = LOOM_LINK_PLAN_FACET_REQUEST_COMPLETE,
+    };
+    IREE_RETURN_IF_ERROR(loom_link_plan_resolve_declaration(
+        plan, options, symbol, root_plan_ordinal, definition_request));
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_link_plan_select_export(
     loom_link_plan_t* plan, const loom_link_plan_options_t* options,
     const loom_link_module_index_symbol_t* symbol) {
@@ -1527,6 +1588,8 @@ static iree_status_t loom_link_plan_select_roots(
     IREE_RETURN_IF_ERROR(loom_link_plan_select_root(
         plan, options, options->root_symbols.values[i]));
   }
+  IREE_RETURN_IF_ERROR(
+      loom_link_plan_select_root_symbol_ordinals(plan, options));
   IREE_RETURN_IF_ERROR(loom_link_plan_select_root_facets(plan, options));
   if (plan->symbols.count == 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -1604,8 +1667,9 @@ static iree_status_t loom_link_plan_validate_options(
   if (!options || options->mode != LOOM_LINK_PLAN_MERGE) {
     return iree_ok_status();
   }
-  if (options->root_symbols.count != 0 || options->include_input_exports ||
-      options->root_providers.count != 0 ||
+  if (options->root_symbols.count != 0 ||
+      options->root_symbol_ordinals.count != 0 ||
+      options->include_input_exports || options->root_providers.count != 0 ||
       options->template_provider_roots.count != 0 ||
       options->root_facets.count != 0) {
     return iree_make_status(

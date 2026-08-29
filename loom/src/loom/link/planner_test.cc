@@ -351,6 +351,92 @@ TEST_F(LinkPlannerTest, LinkRootClosureSelectsPrivateDependencyOnly) {
   EXPECT_EQ(planned_helper->cause_ordinal, planned_entry->ordinal);
 }
 
+TEST_F(LinkPlannerTest, LinkExactRootOrdinalPreservesPrivateIdentity) {
+  loom_module_t* first = Parse(IREE_SV(R"(
+func.def @entry(%x: i32) -> (i32) {
+  %result = func.call @helper(%x) : (i32) -> (i32)
+  func.return %result : i32
+}
+func.def @helper(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+)"),
+                               IREE_SV("first.loom"));
+  loom_module_t* second = Parse(IREE_SV(R"(
+func.def @entry(%x: i32) -> (i32) {
+  %result = func.call @helper(%x) : (i32) -> (i32)
+  func.return %result : i32
+}
+func.def @helper(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+)"),
+                                IREE_SV("second.loom"));
+
+  IndexPtr index = CreateIndex();
+  AddMaterialized(index.get(), first, IREE_SV("first"),
+                  LOOM_LINK_PROVIDER_ROLE_INPUT);
+  AddMaterialized(index.get(), second, IREE_SV("second"),
+                  LOOM_LINK_PROVIDER_ROLE_INPUT);
+  const loom_link_module_index_module_t* first_module =
+      loom_link_module_index_module_at(index.get(), 0);
+  const loom_link_module_index_module_t* second_module =
+      loom_link_module_index_module_at(index.get(), 1);
+  ASSERT_NE(first_module, nullptr);
+  ASSERT_NE(second_module, nullptr);
+  const loom_link_module_index_symbol_t* first_entry =
+      loom_link_module_index_lookup_private(index.get(), first_module,
+                                            IREE_SV("entry"));
+  const loom_link_module_index_symbol_t* first_helper =
+      loom_link_module_index_lookup_private(index.get(), first_module,
+                                            IREE_SV("helper"));
+  const loom_link_module_index_symbol_t* second_entry =
+      loom_link_module_index_lookup_private(index.get(), second_module,
+                                            IREE_SV("entry"));
+  const loom_link_module_index_symbol_t* second_helper =
+      loom_link_module_index_lookup_private(index.get(), second_module,
+                                            IREE_SV("helper"));
+  ASSERT_NE(first_entry, nullptr);
+  ASSERT_NE(first_helper, nullptr);
+  ASSERT_NE(second_entry, nullptr);
+  ASSERT_NE(second_helper, nullptr);
+
+  const iree_host_size_t root_ordinals[] = {second_entry->ordinal};
+  loom_link_plan_options_t options = {};
+  options.mode = LOOM_LINK_PLAN_LINK;
+  options.root_symbol_ordinals = {
+      /*.count=*/IREE_ARRAYSIZE(root_ordinals),
+      /*.values=*/root_ordinals,
+  };
+  PlanPtr plan = BuildPlan(index.get(), &options);
+
+  EXPECT_FALSE(ContainsSymbol(plan.get(), first_entry));
+  EXPECT_FALSE(ContainsSymbol(plan.get(), first_helper));
+  EXPECT_TRUE(ContainsSymbol(plan.get(), second_entry));
+  EXPECT_TRUE(ContainsSymbol(plan.get(), second_helper));
+}
+
+TEST_F(LinkPlannerTest, LinkExactRootOrdinalRejectsOutOfRangeIdentity) {
+  loom_module_t* module = Parse(Fixture(IREE_SV(
+      "link_root_closure_selects_private_dependency_only_module.loom")));
+  IndexPtr index = CreateIndex();
+  AddMaterialized(index.get(), module, IREE_SV("input"),
+                  LOOM_LINK_PROVIDER_ROLE_INPUT);
+
+  const iree_host_size_t root_ordinals[] = {
+      loom_link_module_index_symbol_count(index.get()),
+  };
+  loom_link_plan_options_t options = {};
+  options.mode = LOOM_LINK_PLAN_LINK;
+  options.root_symbol_ordinals = {
+      /*.count=*/IREE_ARRAYSIZE(root_ordinals),
+      /*.values=*/root_ordinals,
+  };
+  PlanPtr plan;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                        BuildPlanStatus(index.get(), &options, &plan));
+}
+
 TEST_F(LinkPlannerTest,
        OrdinaryDefinitionFacetCombinesEveryRootAcrossProviderForms) {
   const iree_string_view_t source =
@@ -1013,13 +1099,6 @@ TEST_F(LinkPlannerTest, OverlayPlansInputAgainstImmutableLibrary) {
   AddBytecode(overlay.get(), harness_bytecode, IREE_SV("harness"),
               LOOM_LINK_PROVIDER_ROLE_INPUT);
 
-  iree_string_view_t roots[] = {IREE_SV("@entry")};
-  const loom_link_plan_options_t options = {
-      /*.mode=*/LOOM_LINK_PLAN_LINK,
-      /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
-  };
-  PlanPtr plan = BuildPlan(overlay.get(), &options);
-
   const loom_link_module_index_symbol_t* entry =
       loom_link_module_index_lookup_global(overlay.get(), IREE_SV("entry"));
   const loom_link_module_index_symbol_t* declaration =
@@ -1029,9 +1108,28 @@ TEST_F(LinkPlannerTest, OverlayPlansInputAgainstImmutableLibrary) {
   const loom_link_module_index_symbol_t* definition =
       loom_link_module_index_next_global_duplicate(overlay.get(), declaration);
   ASSERT_NE(definition, nullptr);
+
+  iree_string_view_t roots[] = {IREE_SV("@entry")};
+  const iree_host_size_t exact_roots[] = {declaration->ordinal};
+  loom_link_plan_options_t options = {};
+  options.mode = LOOM_LINK_PLAN_LINK;
+  options.root_symbols = {
+      /*.count=*/IREE_ARRAYSIZE(roots),
+      /*.values=*/roots,
+  };
+  options.root_symbol_ordinals = {
+      /*.count=*/IREE_ARRAYSIZE(exact_roots),
+      /*.values=*/exact_roots,
+  };
+  PlanPtr plan = BuildPlan(overlay.get(), &options);
+
   EXPECT_TRUE(ContainsSymbol(plan.get(), entry));
   EXPECT_TRUE(ContainsSymbol(plan.get(), declaration));
   EXPECT_TRUE(ContainsSymbol(plan.get(), definition));
+  const loom_link_plan_symbol_t* declaration_selection =
+      FindPlannedSymbol(plan.get(), declaration);
+  ASSERT_NE(declaration_selection, nullptr);
+  EXPECT_EQ(declaration_selection->reason, LOOM_LINK_PLAN_LIVE_ROOT);
 
   const loom_link_module_index_provider_t* definition_provider =
       loom_link_module_index_symbol_provider(overlay.get(), definition);
