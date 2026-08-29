@@ -44,6 +44,7 @@ using loomc::bench::CloneModule;
 using loomc::bench::CompilerPtr;
 using loomc::bench::ContextPtr;
 using loomc::bench::CreateBenchmarkKernelSource;
+using loomc::bench::CreateTextSource;
 using loomc::bench::CreateWorkspace;
 using loomc::bench::DeserializeSource;
 using loomc::bench::FindArtifact;
@@ -97,60 +98,45 @@ static iree_status_t ValidateExpectedLaunchConfig(
   return iree_ok_status();
 }
 
+static std::string BuildLaunchConfigScaleSource(
+    iree_host_size_t function_count) {
+  std::string source = "amdgpu.target<gfx1100> @gfx1100\n\n";
+  source.reserve(source.size() + function_count * 640);
+  for (iree_host_size_t i = 0; i < function_count; ++i) {
+    source.append("kernel.def target(@gfx1100) @scale_");
+    source.append(std::to_string(i));
+    source.append(R"((%element_count: index) {
+  %c1 = index.constant 1 : index
+  %rounding = index.constant 255 : index
+  %workgroup_size = index.constant 256 : index
+  %rounded_count = index.add %element_count, %rounding : index
+  %workgroup_count = index.div %rounded_count, %workgroup_size : index
+  kernel.launch.config workgroups(%workgroup_count, %c1, %c1) workgroup_size(%workgroup_size, %c1, %c1) : index
+} launch() {
+  kernel.return
+}
+
+)");
+  }
+  return source;
+}
+
 class LaunchConfigBenchmarkFixture {
  public:
   iree_status_t SetUpCompiler(loomc_string_view_t source_identifier) {
-    IREE_RETURN_IF_ERROR(CreateAmdgpuTargetEnvironment(&target_environment_));
-
-    const loomc_context_target_options_t target_options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS,
-        /*.structure_size=*/sizeof(target_options),
-        /*.next=*/nullptr,
-        /*.target_environment=*/target_environment_.get(),
-    };
-    const loomc_context_options_t context_options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_CONTEXT_OPTIONS,
-        /*.structure_size=*/sizeof(context_options),
-        /*.next=*/&target_options,
-    };
-    loomc_context_t* context = nullptr;
-    IREE_RETURN_IF_ERROR(to_iree_status(
-        loomc_context_create(&context_options, loom_allocator(), &context)));
-    context_.reset(context);
-
-    loomc_compiler_t* compiler = nullptr;
-    IREE_RETURN_IF_ERROR(to_iree_status(loomc_compiler_create(
-        context_.get(), /*options=*/nullptr, loom_allocator(), &compiler)));
-    compiler_.reset(compiler);
-
-    const loomc_target_pipeline_options_t pipeline_options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_PIPELINE_OPTIONS,
-        /*.structure_size=*/sizeof(pipeline_options),
-        /*.next=*/nullptr,
-        /*.identifier=*/loomc_make_cstring_view("launch-config-benchmark"),
-        /*.kind=*/LOOMC_TARGET_PIPELINE_KIND_PREPARED_LOW,
-        /*.control_flow_lowering=*/LOOMC_TARGET_CONTROL_FLOW_LOWERING_CFG,
-        /*.source_to_low_max_errors=*/20,
-    };
-    loomc_pass_program_t* pass_program = nullptr;
-    loomc_result_t* pipeline_result = nullptr;
-    iree_status_t status =
-        to_iree_status(loomc_pass_program_create_from_target_pipeline(
-            context_.get(), &pipeline_options, loom_allocator(), &pass_program,
-            &pipeline_result));
-    PassProgramPtr pass_program_owner(pass_program);
-    ResultPtr pipeline_result_owner(pipeline_result);
-    IREE_RETURN_IF_ERROR(status);
-    IREE_RETURN_IF_ERROR(RequireSucceededResult(pipeline_result_owner.get(),
-                                                "target pipeline preparation"));
-    pass_program_.reset(pass_program_owner.release());
-
-    IREE_RETURN_IF_ERROR(CreateWorkspace(/*block_size=*/0, &workspace_));
+    IREE_RETURN_IF_ERROR(SetUpCompilerInfrastructure());
     IREE_RETURN_IF_ERROR(
         CreateBenchmarkKernelSource(source_identifier, &source_));
-    IREE_RETURN_IF_ERROR(DeserializeSource(context_.get(), workspace_.get(),
-                                           source_.get(), &template_module_));
-    return iree_ok_status();
+    return DeserializeTemplateModule();
+  }
+
+  iree_status_t SetUpScaleCompiler(iree_host_size_t function_count) {
+    IREE_RETURN_IF_ERROR(SetUpCompilerInfrastructure());
+    const std::string source_text =
+        BuildLaunchConfigScaleSource(function_count);
+    IREE_RETURN_IF_ERROR(
+        CreateTextSource("launch_config_scale.loom", source_text, &source_));
+    return DeserializeTemplateModule();
   }
 
   iree_status_t Compile(loomc_compile_artifact_flags_t artifact_flags,
@@ -180,16 +166,12 @@ class LaunchConfigBenchmarkFixture {
 
   iree_status_t SetUpArtifact(loomc_string_view_t source_identifier) {
     IREE_RETURN_IF_ERROR(SetUpCompiler(source_identifier));
-    IREE_RETURN_IF_ERROR(
-        Compile(LOOMC_COMPILE_ARTIFACT_FLAG_LAUNCH_CONFIG, &compile_result_));
-    artifact_ = FindArtifact(
-        compile_result_.get(), LOOMC_ARTIFACT_KIND_LAUNCH_CONFIG,
-        loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_VM_BYTECODE));
-    if (artifact_ == nullptr) {
-      return iree_make_status(IREE_STATUS_NOT_FOUND,
-                              "launch-config artifact was not produced");
-    }
-    return iree_ok_status();
+    return CompileArtifact();
+  }
+
+  iree_status_t SetUpScaleArtifact(iree_host_size_t function_count) {
+    IREE_RETURN_IF_ERROR(SetUpScaleCompiler(function_count));
+    return CompileArtifact();
   }
 
   iree_status_t LoadProgram(const loomc_artifact_t* artifact,
@@ -239,6 +221,74 @@ class LaunchConfigBenchmarkFixture {
   }
 
  private:
+  iree_status_t SetUpCompilerInfrastructure() {
+    IREE_RETURN_IF_ERROR(CreateAmdgpuTargetEnvironment(&target_environment_));
+
+    const loomc_context_target_options_t target_options = {
+        /*.type=*/LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS,
+        /*.structure_size=*/sizeof(target_options),
+        /*.next=*/nullptr,
+        /*.target_environment=*/target_environment_.get(),
+    };
+    const loomc_context_options_t context_options = {
+        /*.type=*/LOOMC_STRUCTURE_TYPE_CONTEXT_OPTIONS,
+        /*.structure_size=*/sizeof(context_options),
+        /*.next=*/&target_options,
+    };
+    loomc_context_t* context = nullptr;
+    IREE_RETURN_IF_ERROR(to_iree_status(
+        loomc_context_create(&context_options, loom_allocator(), &context)));
+    context_.reset(context);
+
+    loomc_compiler_t* compiler = nullptr;
+    IREE_RETURN_IF_ERROR(to_iree_status(loomc_compiler_create(
+        context_.get(), /*options=*/nullptr, loom_allocator(), &compiler)));
+    compiler_.reset(compiler);
+
+    const loomc_target_pipeline_options_t pipeline_options = {
+        /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_PIPELINE_OPTIONS,
+        /*.structure_size=*/sizeof(pipeline_options),
+        /*.next=*/nullptr,
+        /*.identifier=*/loomc_make_cstring_view("launch-config-benchmark"),
+        /*.kind=*/LOOMC_TARGET_PIPELINE_KIND_PREPARED_LOW,
+        /*.control_flow_lowering=*/LOOMC_TARGET_CONTROL_FLOW_LOWERING_CFG,
+        /*.source_to_low_max_errors=*/20,
+    };
+    loomc_pass_program_t* pass_program = nullptr;
+    loomc_result_t* pipeline_result = nullptr;
+    iree_status_t status =
+        to_iree_status(loomc_pass_program_create_from_target_pipeline(
+            context_.get(), &pipeline_options, loom_allocator(), &pass_program,
+            &pipeline_result));
+    PassProgramPtr pass_program_owner(pass_program);
+    ResultPtr pipeline_result_owner(pipeline_result);
+    IREE_RETURN_IF_ERROR(status);
+    IREE_RETURN_IF_ERROR(RequireSucceededResult(pipeline_result_owner.get(),
+                                                "target pipeline preparation"));
+    pass_program_.reset(pass_program_owner.release());
+
+    IREE_RETURN_IF_ERROR(CreateWorkspace(/*block_size=*/0, &workspace_));
+    return iree_ok_status();
+  }
+
+  iree_status_t DeserializeTemplateModule() {
+    return DeserializeSource(context_.get(), workspace_.get(), source_.get(),
+                             &template_module_);
+  }
+
+  iree_status_t CompileArtifact() {
+    IREE_RETURN_IF_ERROR(
+        Compile(LOOMC_COMPILE_ARTIFACT_FLAG_LAUNCH_CONFIG, &compile_result_));
+    artifact_ = FindArtifact(
+        compile_result_.get(), LOOMC_ARTIFACT_KIND_LAUNCH_CONFIG,
+        loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_VM_BYTECODE));
+    if (artifact_ == nullptr) {
+      return iree_make_status(IREE_STATUS_NOT_FOUND,
+                              "launch-config artifact was not produced");
+    }
+    return iree_ok_status();
+  }
+
   // Immutable target provider composition shared by compilation.
   TargetEnvironmentPtr target_environment_;
 
@@ -254,7 +304,7 @@ class LaunchConfigBenchmarkFixture {
   // Reusable arena block pool for compilation-local module storage.
   WorkspacePtr workspace_;
 
-  // Immutable source containing both benchmark launch-config functions.
+  // Immutable source containing the benchmark module.
   SourcePtr source_;
 
   // Immutable parsed source cloned for each compilation iteration.
@@ -537,14 +587,8 @@ static bool SkipOnError(benchmark::State& state, iree_status_t status) {
 }
 
 static void RunLaunchConfigCompileBenchmark(
-    benchmark::State& state, const char* source_identifier,
+    benchmark::State& state, LaunchConfigBenchmarkFixture& fixture,
     loomc_compile_artifact_flags_t artifact_flags) {
-  LaunchConfigBenchmarkFixture fixture;
-  if (SkipOnError(state, fixture.SetUpCompiler(
-                             loomc_make_cstring_view(source_identifier)))) {
-    return;
-  }
-
   ResultPtr warm_result;
   if (SkipOnError(state, fixture.Compile(artifact_flags, &warm_result))) {
     return;
@@ -587,8 +631,12 @@ static void RunLaunchConfigCompileBenchmark(
 
 static void BM_DeviceCompileSmoke(benchmark::State& state,
                                   const char* source_identifier) {
-  RunLaunchConfigCompileBenchmark(state, source_identifier,
-                                  /*artifact_flags=*/0);
+  LaunchConfigBenchmarkFixture fixture;
+  if (SkipOnError(state, fixture.SetUpCompiler(
+                             loomc_make_cstring_view(source_identifier)))) {
+    return;
+  }
+  RunLaunchConfigCompileBenchmark(state, fixture, /*artifact_flags=*/0);
 }
 BENCHMARK_CAPTURE(BM_DeviceCompileSmoke, OneFunction,
                   "launch_config_compile.loom")
@@ -596,13 +644,15 @@ BENCHMARK_CAPTURE(BM_DeviceCompileSmoke, OneFunction,
 BENCHMARK_CAPTURE(BM_DeviceCompileSmoke, CallableClosure,
                   "launch_config_closure.loom")
     ->UseRealTime();
-BENCHMARK_CAPTURE(BM_DeviceCompileSmoke, EightFunctions,
-                  "launch_config_scale.loom")
-    ->UseRealTime();
 
 static void BM_DeviceCompileWithLaunchConfigSmoke(
     benchmark::State& state, const char* source_identifier) {
-  RunLaunchConfigCompileBenchmark(state, source_identifier,
+  LaunchConfigBenchmarkFixture fixture;
+  if (SkipOnError(state, fixture.SetUpCompiler(
+                             loomc_make_cstring_view(source_identifier)))) {
+    return;
+  }
+  RunLaunchConfigCompileBenchmark(state, fixture,
                                   LOOMC_COMPILE_ARTIFACT_FLAG_LAUNCH_CONFIG);
 }
 BENCHMARK_CAPTURE(BM_DeviceCompileWithLaunchConfigSmoke, OneFunction,
@@ -611,18 +661,38 @@ BENCHMARK_CAPTURE(BM_DeviceCompileWithLaunchConfigSmoke, OneFunction,
 BENCHMARK_CAPTURE(BM_DeviceCompileWithLaunchConfigSmoke, CallableClosure,
                   "launch_config_closure.loom")
     ->UseRealTime();
-BENCHMARK_CAPTURE(BM_DeviceCompileWithLaunchConfigSmoke, EightFunctions,
-                  "launch_config_scale.loom")
-    ->UseRealTime();
 
-static void BM_VmLaunchConfigProgramLoadSmoke(benchmark::State& state,
-                                              const char* source_identifier) {
+static void BM_DeviceCompileScale(benchmark::State& state) {
   LaunchConfigBenchmarkFixture fixture;
-  if (SkipOnError(state, fixture.SetUpArtifact(
-                             loomc_make_cstring_view(source_identifier)))) {
+  if (SkipOnError(state, fixture.SetUpScaleCompiler(state.range(0)))) {
     return;
   }
+  RunLaunchConfigCompileBenchmark(state, fixture, /*artifact_flags=*/0);
+}
+BENCHMARK(BM_DeviceCompileScale)
+    ->Arg(1)
+    ->Arg(8)
+    ->Arg(80)
+    ->Arg(1024)
+    ->UseRealTime();
 
+static void BM_DeviceCompileWithLaunchConfigScale(benchmark::State& state) {
+  LaunchConfigBenchmarkFixture fixture;
+  if (SkipOnError(state, fixture.SetUpScaleCompiler(state.range(0)))) {
+    return;
+  }
+  RunLaunchConfigCompileBenchmark(state, fixture,
+                                  LOOMC_COMPILE_ARTIFACT_FLAG_LAUNCH_CONFIG);
+}
+BENCHMARK(BM_DeviceCompileWithLaunchConfigScale)
+    ->Arg(1)
+    ->Arg(8)
+    ->Arg(80)
+    ->Arg(1024)
+    ->UseRealTime();
+
+static void RunVmLaunchConfigProgramLoadBenchmark(
+    benchmark::State& state, LaunchConfigBenchmarkFixture& fixture) {
   LaunchConfigProgramPtr warm_program;
   if (SkipOnError(state, fixture.LoadProgram(&warm_program))) {
     return;
@@ -647,14 +717,35 @@ static void BM_VmLaunchConfigProgramLoadSmoke(benchmark::State& state,
   state.counters["artifact_bytes"] =
       static_cast<double>(fixture.artifact_byte_length());
 }
+
+static void BM_VmLaunchConfigProgramLoadSmoke(benchmark::State& state,
+                                              const char* source_identifier) {
+  LaunchConfigBenchmarkFixture fixture;
+  if (SkipOnError(state, fixture.SetUpArtifact(
+                             loomc_make_cstring_view(source_identifier)))) {
+    return;
+  }
+  RunVmLaunchConfigProgramLoadBenchmark(state, fixture);
+}
 BENCHMARK_CAPTURE(BM_VmLaunchConfigProgramLoadSmoke, OneFunction,
                   "launch_config_compile.loom")
     ->UseRealTime();
 BENCHMARK_CAPTURE(BM_VmLaunchConfigProgramLoadSmoke, CallableClosure,
                   "launch_config_closure.loom")
     ->UseRealTime();
-BENCHMARK_CAPTURE(BM_VmLaunchConfigProgramLoadSmoke, EightFunctions,
-                  "launch_config_scale.loom")
+
+static void BM_VmLaunchConfigProgramLoadScale(benchmark::State& state) {
+  LaunchConfigBenchmarkFixture fixture;
+  if (SkipOnError(state, fixture.SetUpScaleArtifact(state.range(0)))) {
+    return;
+  }
+  RunVmLaunchConfigProgramLoadBenchmark(state, fixture);
+}
+BENCHMARK(BM_VmLaunchConfigProgramLoadScale)
+    ->Arg(1)
+    ->Arg(8)
+    ->Arg(80)
+    ->Arg(1024)
     ->UseRealTime();
 
 static void BM_VmLaunchConfigFunctionLookupSmoke(benchmark::State& state) {
