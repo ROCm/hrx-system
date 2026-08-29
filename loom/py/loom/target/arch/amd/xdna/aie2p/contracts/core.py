@@ -15,6 +15,8 @@ from loom.dialect.scalar import arithmetic as scalar_arithmetic
 from loom.dialect.scalar import bitwise as scalar_bitwise
 from loom.dialect.scalar import comparison as scalar_comparison
 from loom.dialect.scalar import conversion as scalar_conversion
+from loom.dialect.scf import ALL_SCF_OPS
+from loom.dialect.scf import defs as scf
 from loom.dialect.vector import ALL_VECTOR_OPS
 from loom.dialect.vector import defs as vector
 from loom.dsl import Op
@@ -49,6 +51,7 @@ _INDEX = Scalar("index")
 _I8_VECTOR = Vector("i8", minimum_lanes=1, maximum_lanes=64)
 _I16_VECTOR = Vector("i16", minimum_lanes=1, maximum_lanes=32)
 _I32_VECTOR = Vector("i32", minimum_lanes=1, maximum_lanes=16)
+_I1_VECTOR = Vector("i1", minimum_lanes=1, maximum_lanes=64)
 _INTEGER_VECTOR_TYPES = (_I8_VECTOR, _I16_VECTOR, _I32_VECTOR)
 
 _I8_MIN = -(2**7)
@@ -216,6 +219,88 @@ def _vector_splat_rule(
                 descriptor,
                 operands={"src": ValueRef.operand("scalar")},
                 results={"dst": ValueRef.result("result")},
+            ),
+        ),
+    )
+
+
+def _vector_predicate_splat_rule() -> DescriptorRule:
+    broadcast = _descriptor("amd.xdna.aie2p.splat.i8x64")
+    compare = _descriptor("amd.xdna.aie2p.cmp.eqz.i8x64")
+    return DescriptorRule(
+        source_op=vector.vector_splat,
+        descriptor=compare,
+        guards=(
+            Guard.value_type("scalar", _I1),
+            Guard.value_type("result", _I1_VECTOR),
+        ),
+        emit=(
+            _op_emit(
+                broadcast,
+                operands={"src": ValueRef.operand("scalar")},
+                results={"dst": ValueRef.temporary("broadcast_condition")},
+                result_types={"dst": DescriptorResultType()},
+            ),
+            _op_emit(
+                compare,
+                operands={"s2": ValueRef.temporary("broadcast_condition")},
+                results={"cmp": ValueRef.result("result")},
+                result_types={"cmp": DescriptorResultType()},
+            ),
+        ),
+    )
+
+
+def _vector_select_rule() -> DescriptorRule:
+    descriptor = _descriptor("amd.xdna.aie2p.select.i8x64")
+    return DescriptorRule(
+        source_op=vector.vector_select,
+        descriptor=descriptor,
+        guards=(
+            Guard.value_type("condition", _I1_VECTOR),
+            *_typed_guards(("true_value", "false_value", "result"), _I8_VECTOR),
+        ),
+        emit=(
+            _op_emit(
+                descriptor,
+                operands={
+                    "s1": ValueRef.operand("true_value"),
+                    "s2": ValueRef.operand("false_value"),
+                    "sel": ValueRef.operand("condition"),
+                },
+                results={"d": ValueRef.result("result")},
+            ),
+        ),
+    )
+
+
+def _whole_i8_vector_select_rule() -> DescriptorRule:
+    subtract_one = _descriptor("amd.xdna.aie2p.select.mask.i32")
+    select = _descriptor("amd.xdna.aie2p.select.i32x16")
+    return DescriptorRule(
+        source_op=scf.scf_select,
+        descriptor=select,
+        guards=(
+            Guard.value_type("condition", _I1),
+            *_typed_guards(("true_value", "false_value", "result"), _I8_VECTOR),
+        ),
+        emit=(
+            EmitDescriptorOp(
+                descriptor=subtract_one,
+                operands={"s0": ValueRef.operand("condition")},
+                results={"d0": ValueRef.temporary("hardware_selector")},
+                result_types={"d0": DescriptorResultType()},
+                immediates={"imm": -1},
+                form=DescriptorEmitForm.OP,
+            ),
+            _op_emit(
+                select,
+                operands={
+                    "s1": ValueRef.operand("true_value"),
+                    "s2": ValueRef.operand("false_value"),
+                    "sel": ValueRef.temporary("hardware_selector"),
+                },
+                results={"d": ValueRef.result("result")},
             ),
         ),
     )
@@ -941,6 +1026,9 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
                 (_I32, _I32_VECTOR, "amd.xdna.aie2p.splat.i32x16"),
             )
         ),
+        _vector_predicate_splat_rule(),
+        _vector_select_rule(),
+        _whole_i8_vector_select_rule(),
         *_vector_bitcast_alias_rules(),
         *(
             _binary_rule(source_op, type_pattern, descriptor_key)
@@ -1038,6 +1126,7 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
 
 AIE2P_CORE_CONTRACT_DIALECT_OPS = {
     "scalar": ALL_SCALAR_OPS,
+    "scf": ALL_SCF_OPS,
     "vector": ALL_VECTOR_OPS,
 }
 

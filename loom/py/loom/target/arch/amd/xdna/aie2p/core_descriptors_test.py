@@ -44,8 +44,8 @@ from loom.target.low_descriptors import (
 def test_core_descriptor_closure_is_complete() -> None:
     descriptor_set = AIE2P_CORE_DESCRIPTOR_SET
     assert len(descriptor_set.physical_registers) == 359
-    assert len(descriptor_set.reg_classes) == 9
-    assert len(descriptor_set.descriptors) == 53
+    assert len(descriptor_set.reg_classes) == 11
+    assert len(descriptor_set.descriptors) == 57
     assert tuple(row.name for row in descriptor_set.physical_registers) == tuple(
         row.name for row in CORE_MACHINE_TABLE.physical_registers
     )
@@ -59,7 +59,7 @@ def test_complete_schedule_domain_drives_selected_low_descriptors() -> None:
     assert len(descriptor_set.resources) == 90
     assert len(descriptor_set.timing_events) == 38
     assert len(descriptor_set.event_separations) == 651
-    assert len(descriptor_set.schedule_classes) == 21
+    assert len(descriptor_set.schedule_classes) == 23
     assert {
         resource.name
         for resource in descriptor_set.resources
@@ -237,6 +237,36 @@ def test_descriptor_encoding_ids_and_adapters_are_materialized() -> None:
     assert all(operand.encoding_adapter_id != 0 for operand in scalar_move.operands)
     assert scalar_move.operands[0].ready_stage == 1
     assert scalar_move.operands[1].read_stage == 1
+
+    predicate_compare = descriptors["amd.xdna.aie2p.cmp.eqz.i8x64"]
+    assert [operand.field_name for operand in predicate_compare.operands] == [
+        "cmp",
+        "s2",
+    ]
+    assert predicate_compare.operands[0].reg_alts[0].reg_class == "aie2p.el"
+    assert predicate_compare.operands[1].reg_alts[0].reg_class == "aie2p.vec512"
+
+    byte_select = descriptors["amd.xdna.aie2p.select.i8x64"]
+    word_select = descriptors["amd.xdna.aie2p.select.i32x16"]
+    assert [operand.field_name for operand in byte_select.operands] == [
+        "d",
+        "s1",
+        "s2",
+        "sel",
+    ]
+    assert [operand.reg_alts[0].reg_class for operand in byte_select.operands] == [
+        "aie2p.vec512",
+        "aie2p.vec512",
+        "aie2p.vec512",
+        "aie2p.el",
+    ]
+    assert word_select.operands[-1].reg_alts[0].reg_class == "aie2p.ers16"
+
+    scalar_selector = descriptors["amd.xdna.aie2p.select.mask.i32"]
+    assert scalar_selector.operands[0].field_name == "d0"
+    assert scalar_selector.operands[0].reg_alts[0].reg_class == "aie2p.ers16"
+    assert scalar_selector.operands[1].field_name == "s0"
+    assert scalar_selector.operands[1].reg_alts[0].reg_class == "aie2p.er"
 
 
 def test_implicit_registers_and_machine_ties_reach_low() -> None:

@@ -160,8 +160,14 @@ loom_cc_binary(
 
 loom_check_test_suite(
     name = "loom_check_file_test",
-    srcs = ["test/source_low/numeric_scalar_i32.loom-test"],
-    data = ["//loom/src/loom/test/corpus/source_low:numeric_scalar_i32.loom-test"],
+    srcs = [
+        "test/source_low/numeric_scalar_i32.loom-test",
+        "test/source_low/packed_i8_arithmetic.loom-test",
+    ],
+    data = [
+        "//loom/src/loom/test/corpus/source_low:numeric_scalar_i32.loom-test",
+        "//loom/src/loom/test/corpus/source_low:packed_i8_arithmetic.loom-test",
+    ],
     runner = ":loom-check",
     test_name_prefix_to_strip = "test/source_low/",
 )
