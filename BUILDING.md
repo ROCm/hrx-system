@@ -144,10 +144,9 @@ root independently through build configuration.
 
 The repository-wide GCC lane intentionally uses the complete `//...` pattern,
 not a hand-maintained project list or exclusions. Platform-incompatible targets
-remain incompatible through their declared Bazel constraints; CUDA and Metal
-join this lane when their Linux Bazel dependency surfaces are enabled. The
-lane does not override GCC's linker selection; Bazel uses the GNU binutils
-provided by the system toolchain. The copyable build-shape command is:
+remain incompatible through their declared Bazel constraints. The lane does
+not override GCC's linker selection; Bazel uses the GNU binutils provided by
+the system toolchain. The copyable build-shape command is:
 
 ```bash
 CC=gcc CXX=g++ AR=ar \

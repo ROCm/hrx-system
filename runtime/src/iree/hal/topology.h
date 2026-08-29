@@ -81,14 +81,14 @@ typedef uint64_t iree_hal_topology_device_bitmap_t;
 //
 //  Non-coherent: device-local memory optimized for compute bandwidth.
 //    Requires explicit transfers (DMA or host staging) for cross-device access.
-//    Maps to: AMD coarse-grained pools, CUDA cudaMalloc, Metal private storage,
-//    Vulkan non-HOST_COHERENT device-local memory.
+//    Maps to: AMD coarse-grained pools, Metal private storage, and Vulkan
+//    non-HOST_COHERENT device-local memory.
 //
 //  Coherent: memory with hardware-maintained coherency across devices.
 //    May be directly load/store accessible by peer devices without transfers.
 //    Trades some compute bandwidth for zero-copy cross-device sharing.
-//    Maps to: AMD fine-grained pools, CUDA managed memory (UVM), Metal shared
-//    storage, Vulkan HOST_COHERENT memory types.
+//    Maps to: AMD fine-grained pools, Metal shared storage, and Vulkan
+//    HOST_COHERENT memory types.
 //
 // Both modes use the same interop mode enum (NATIVE/IMPORT/COPY/NONE) but a
 // given device pair often has different modes for each. For example, two XGMI-
@@ -698,7 +698,7 @@ iree_hal_topology_edge_buffer_write_mode_coherent(
 // guarantees. A usable atomic cell requires both its width and scope bits;
 // queue-family and memory-type capabilities are required independently.
 // ATOMIC_SYSTEM requires platform support (PCIe atomics, vendor extensions).
-// Check CUDA unified addressing, ROCm fine-grained memory, etc.
+// Check platform unified addressing and fine-grained memory capabilities.
 static inline iree_hal_topology_capability_t
 iree_hal_topology_edge_capability_flags(
     iree_hal_topology_edge_scheduling_word_t word) {
@@ -816,8 +816,8 @@ static inline uint8_t iree_hal_topology_edge_numa_distance(
 // - ISOLATED: No direct connection (requires host coordination)
 //
 // Implementations should query platform interconnect topology. On Linux sysfs
-// provides PCIe topology, vendor APIs (ROCm/CUDA) expose GPU links. This field
-// must be symmetric: link_class(i,j) must equal link_class(j,i).
+// provides PCIe topology and vendor APIs may expose accelerator links. This
+// field must be symmetric: link_class(i,j) must equal link_class(j,i).
 static inline iree_hal_topology_link_class_t iree_hal_topology_edge_link_class(
     iree_hal_topology_edge_scheduling_word_t word) {
   return (word >> IREE_HAL_TOPOLOGY_EDGE_LINK_CLASS_SHIFT) &
@@ -836,8 +836,8 @@ static inline iree_hal_topology_link_class_t iree_hal_topology_edge_link_class(
 // semaphore timepoint types can be imported for waiting by the destination
 // device.
 //
-// Implementations should query platform capabilities (e.g., Vulkan/CUDA/ROCm
-// external semaphore support) and set corresponding bits for supported types.
+// Implementations should query platform external synchronization capabilities
+// and set corresponding bits for supported types.
 static inline iree_hal_external_timepoint_type_mask_t
 iree_hal_topology_edge_semaphore_import_timepoint_types(
     iree_hal_topology_edge_interop_word_t word) {
@@ -868,8 +868,8 @@ iree_hal_topology_edge_semaphore_export_timepoint_types(
 // Critical for zero-copy buffer sharing across drivers.
 //
 // Implementations should check for DMA-BUF (Linux), RDMA memory regions,
-// shared memory, or vendor-specific handles (CUDA IPC, HIP IPC). Only set bits
-// for handles that provide actual memory access, not just metadata transfer.
+// shared memory, or driver-specific IPC handles. Only set bits for handles that
+// provide actual memory access, not just metadata transfer.
 static inline iree_hal_topology_handle_type_t
 iree_hal_topology_edge_buffer_import_types(
     iree_hal_topology_edge_interop_word_t word) {

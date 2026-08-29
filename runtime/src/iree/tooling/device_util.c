@@ -401,8 +401,8 @@ iree_status_t iree_hal_create_devices_from_flags(
 
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0; i < flag_list.count; ++i) {
-    // Create the device, which may be slow and dynamically load big
-    // dependencies (CUDA, Vulkan, etc).
+    // Create the device, which may be slow and dynamically load platform SDKs
+    // or runtime libraries.
     iree_hal_device_t* device = NULL;
     status = iree_hal_create_device(driver_registry, flag_list.values[i],
                                     create_params, host_allocator, &device);

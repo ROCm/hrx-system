@@ -418,37 +418,6 @@ static iree_status_t iree_hal_vulkan_semaphore_wait(
   return status;
 }
 
-static iree_status_t iree_hal_vulkan_semaphore_import_timepoint(
-    iree_hal_semaphore_t* base_semaphore, uint64_t value,
-    iree_hal_queue_affinity_t queue_affinity,
-    iree_hal_external_timepoint_t external_timepoint) {
-  (void)base_semaphore;
-  (void)value;
-  (void)queue_affinity;
-  (void)external_timepoint;
-  return iree_make_status(
-      IREE_STATUS_UNIMPLEMENTED,
-      "Vulkan semaphore timepoint import requires external semaphore interop");
-}
-
-static iree_status_t iree_hal_vulkan_semaphore_export_timepoint(
-    iree_hal_semaphore_t* base_semaphore, uint64_t value,
-    iree_hal_queue_affinity_t queue_affinity,
-    iree_hal_external_timepoint_type_t requested_type,
-    iree_hal_external_timepoint_flags_t requested_flags,
-    iree_hal_external_timepoint_t* IREE_RESTRICT out_external_timepoint) {
-  IREE_ASSERT_ARGUMENT(out_external_timepoint);
-  (void)base_semaphore;
-  (void)value;
-  (void)queue_affinity;
-  (void)requested_type;
-  (void)requested_flags;
-  memset(out_external_timepoint, 0, sizeof(*out_external_timepoint));
-  return iree_make_status(
-      IREE_STATUS_UNIMPLEMENTED,
-      "Vulkan semaphore timepoint export requires external semaphore interop");
-}
-
 static const iree_hal_semaphore_vtable_t iree_hal_vulkan_semaphore_vtable = {
     .async =
         {
@@ -458,6 +427,4 @@ static const iree_hal_semaphore_vtable_t iree_hal_vulkan_semaphore_vtable = {
             .on_fail = iree_hal_vulkan_semaphore_on_fail,
         },
     .wait = iree_hal_vulkan_semaphore_wait,
-    .import_timepoint = iree_hal_vulkan_semaphore_import_timepoint,
-    .export_timepoint = iree_hal_vulkan_semaphore_export_timepoint,
 };

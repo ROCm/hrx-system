@@ -38,11 +38,6 @@ SDK_DRIVER_PACKAGES = {
         "runtime/src/iree/hal/drivers/amdgpu/registration",
         "runtime/src/iree/hal/drivers/amdgpu/util",
     ),
-    "cuda": (
-        "runtime/src/iree/hal/drivers/cuda",
-        "runtime/src/iree/hal/drivers/cuda/cts",
-        "runtime/src/iree/hal/drivers/cuda/registration",
-    ),
     "vulkan": (
         "runtime/src/iree/hal/drivers/vulkan",
         "runtime/src/iree/hal/drivers/vulkan/cts",
@@ -87,7 +82,6 @@ LOOM_IMPORT_DEFINES = {
     "LOOM_IMPORT_TILELANG": "tilelang",
 }
 UNSUPPORTED_DRIVER_DEFINES = {
-    "IREE_HAL_DRIVER_CUDA": "cuda",
     "IREE_HAL_DRIVER_METAL": "metal",
 }
 REMOVED_OPTIONS = frozenset(

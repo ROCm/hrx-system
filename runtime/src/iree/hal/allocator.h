@@ -136,12 +136,6 @@ typedef enum iree_hal_external_buffer_type_e {
   // CPU:
   //  When using the default heap allocator this is just a host pointer.
   //
-  // CUDA:
-  //  Requires device support.
-  //  Uses cuMemHostRegister / cuMemHostUnregister.
-  //  The memory type specified on import/export determines the required device
-  //  capabilities.
-  //
   // Vulkan:
   //  Requires VK_EXT_external_memory_host.
   //  Uses VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT.
@@ -155,9 +149,6 @@ typedef enum iree_hal_external_buffer_type_e {
   // CPU:
   //  When using the default heap allocator this is just a host pointer.
   //
-  // CUDA:
-  //  Buffer usage is declared on import.
-  //
   // Vulkan:
   //  Requires VK_KHR_buffer_device_address.
   //  Treats the pointer as VkDeviceAddress.
@@ -169,10 +160,6 @@ typedef enum iree_hal_external_buffer_type_e {
   // An imported/exported handle owns a reference to the underlying allocator
   // memory. May only be shared with the same underlying driver and device
   //
-  // CUDA:
-  //  Requires device support.
-  //  Uses CU_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD.
-  //
   // Vulkan:
   //  Requires device support.
   //  Uses VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT.
@@ -183,10 +170,6 @@ typedef enum iree_hal_external_buffer_type_e {
   // Get/SetHandleInformation. All other usage with system APIs is undefined.
   // An imported/exported handle owns a reference to the underlying allocator
   // memory. Must only be shared with the same underlying driver and device.
-  //
-  // CUDA:
-  //  Requires device support.
-  //  Uses CU_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32.
   //
   // Vulkan:
   //  Requires device support.
@@ -235,7 +218,6 @@ typedef struct iree_hal_external_buffer_t {
       //
       // Common implementations:
       //    CPU: host memory pointer
-      //   CUDA: CUdeviceptr
       //  Metal: MTLBuffer
       // Vulkan: VkDeviceMemory
       uint64_t ptr;
@@ -261,23 +243,23 @@ typedef struct iree_hal_external_buffer_t {
 typedef struct iree_hal_physical_memory_t iree_hal_physical_memory_t;
 
 // Memory protection flags for controlling access to virtual address ranges.
-// Maps to mprotect/VirtualProtect (POSIX/Windows), cuMemSetAccess (CUDA), etc.
+// Maps to the equivalent host or device virtual memory protection API.
 enum iree_hal_memory_protection_bits_t {
   // No access. Removes existing access permissions.
-  // Platform: PROT_NONE (POSIX), PAGE_NOACCESS (Windows), PROT_NONE (CUDA).
+  // Platform: PROT_NONE (POSIX), PAGE_NOACCESS (Windows), or equivalent.
   IREE_HAL_MEMORY_PROTECTION_NONE = 0ull,
 
   // Read-only access.
-  // Platform: PROT_READ (POSIX), PAGE_READONLY (Windows), PROT_READ (CUDA).
+  // Platform: PROT_READ (POSIX), PAGE_READONLY (Windows), or equivalent.
   IREE_HAL_MEMORY_PROTECTION_READ = 1ull << 0,
 
   // Write-only access (uncommon, typically combined with READ).
-  // Platform: Not directly supported on CPU (needs READ), PROT_WRITE (CUDA).
+  // This is not directly supported on all platforms and may require READ.
   IREE_HAL_MEMORY_PROTECTION_WRITE = 1ull << 1,
 
   // Read-write access (most common).
-  // Platform: PROT_READ|PROT_WRITE (POSIX), PAGE_READWRITE (Windows),
-  //           PROT_READWRITE (CUDA).
+  // Platform: PROT_READ|PROT_WRITE (POSIX), PAGE_READWRITE (Windows), or
+  // equivalent.
   IREE_HAL_MEMORY_PROTECTION_READ_WRITE =
       IREE_HAL_MEMORY_PROTECTION_READ | IREE_HAL_MEMORY_PROTECTION_WRITE,
 };
@@ -291,13 +273,12 @@ enum iree_hal_memory_advice_bits_t {
   IREE_HAL_MEMORY_ADVICE_NORMAL = 0ull,
 
   // Will access this memory soon. Prefetch into cache/VRAM.
-  // Platform: MADV_WILLNEED (POSIX), no direct equivalent (Windows/CUDA/HIP).
+  // Platform: MADV_WILLNEED (POSIX); no direct equivalent on Windows.
   IREE_HAL_MEMORY_ADVICE_WILL_NEED = 1ull << 0,
 
   // Don't need this memory anymore. Can discard and zero on next access.
   // Platform: MADV_DONTNEED (POSIX - zeros immediately),
-  //           MADV_FREE (POSIX - lazy), no direct equivalent
-  //           (Windows/CUDA/HIP).
+  // MADV_FREE (POSIX - lazy); no direct equivalent on Windows.
   // NOTE: On CPU, this may immediately free physical memory.
   IREE_HAL_MEMORY_ADVICE_DONT_NEED = 1ull << 1,
 };
@@ -490,8 +471,8 @@ IREE_API_EXPORT bool iree_hal_allocator_supports_virtual_memory(
 //
 // All sizes and offsets passed to virtual memory operations must be aligned to
 // at least the minimum page size. Allocations should use the recommended page
-// size for optimal performance (typically 2MB on CUDA, 64KB on HIP, 4-64KB on
-// CPU).
+// size for optimal performance. Both values are platform and memory-type
+// dependent and must be queried instead of assumed.
 //
 // Returns IREE_STATUS_UNAVAILABLE if virtual memory is not supported.
 IREE_API_EXPORT iree_status_t
@@ -621,9 +602,9 @@ IREE_API_EXPORT iree_status_t iree_hal_allocator_virtual_memory_protect(
 // iree_hal_memory_advice_bits_t flags.
 //
 // Advice is advisory only - incorrect hints may reduce performance but will
-// not cause incorrect behavior. Unsupported hints are silently ignored. On CPU
-// this maps to madvise (POSIX). On GPU (CUDA/HIP) this is currently a no-op
-// but reserved for future prefetch/eviction support.
+// not cause incorrect behavior. Unsupported hints are silently ignored. Host
+// implementations may map this to madvise; device implementations without an
+// equivalent hint may ignore it.
 //
 // Returns IREE_STATUS_UNAVAILABLE if virtual memory is not supported.
 IREE_API_EXPORT iree_status_t iree_hal_allocator_virtual_memory_advise(
