@@ -64,6 +64,29 @@ static iree_status_t loom_vm_legalize_dynamic_vector_insert(
   return loom_vm_legalize_vector_to_scalar(entry, context, op, out_result);
 }
 
+static iree_status_t loom_vm_legalize_dynamic_vector_extract(
+    const loom_target_legalizer_entry_t* entry,
+    loom_target_legalization_context_t* context, loom_op_t* op,
+    loom_target_legalizer_result_t* out_result) {
+  (void)entry;
+  *out_result = (loom_target_legalizer_result_t){
+      .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
+  };
+  if (context->descriptor_set != loom_vm_core_descriptor_set() ||
+      loom_vector_extract_indices(op).count == 0) {
+    return iree_ok_status();
+  }
+  bool rewritten = false;
+  IREE_RETURN_IF_ERROR(loom_vector_extract_to_scalar_rewrite_op(
+      context->pass, context->rewriter, op, &rewritten));
+  if (rewritten) {
+    *out_result = (loom_target_legalizer_result_t){
+        .action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN,
+    };
+  }
+  return iree_ok_status();
+}
+
 #define LOOM_VM_VECTOR_TO_SCALAR_ENTRY(op_kind)      \
   {                                                  \
       .root_kind = (op_kind),                        \
@@ -92,6 +115,10 @@ static const loom_target_legalizer_entry_t kVmLegalizerEntries[] = {
     LOOM_VM_NARROW_INTEGER_ENTRY(LOOM_OP_SCALAR_SHRUI),
     LOOM_VM_VECTOR_TO_SCALAR_ENTRY(LOOM_OP_SCF_SELECT),
     {
+        .root_kind = LOOM_OP_VECTOR_EXTRACT,
+        .legalize = loom_vm_legalize_dynamic_vector_extract,
+    },
+    {
         .root_kind = LOOM_OP_VECTOR_INSERT,
         .legalize = loom_vm_legalize_dynamic_vector_insert,
     },
@@ -99,6 +126,7 @@ static const loom_target_legalizer_entry_t kVmLegalizerEntries[] = {
     LOOM_VM_VECTOR_TO_SCALAR_ENTRY(LOOM_OP_VECTOR_SHUFFLE),
     LOOM_VM_VECTOR_TO_SCALAR_ENTRY(LOOM_OP_VECTOR_SELECT),
     LOOM_VM_VECTOR_TO_SCALAR_ENTRY(LOOM_OP_VECTOR_BITCAST),
+    LOOM_VM_VECTOR_TO_SCALAR_ENTRY(LOOM_OP_VECTOR_TABLE_LOOKUP),
 #define LOOM_VECTOR_SCALARIZATION_ROW(vector_op, scalar_op, flags, \
                                       seed_operand_index)          \
   LOOM_VM_VECTOR_TO_SCALAR_ENTRY(vector_op),

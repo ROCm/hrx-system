@@ -1,0 +1,577 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/lookup_table.loom-test
+// RUN: emit source-low output=low
+
+vm.target<core> @target
+kernel.def target(@target) @f32_table_lookup_i8_codes() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 2 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%codes_buffer: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %base_offset = index.constant 0 : offset
+  %code_stride = index.constant 4 : index
+  %base = index.mul %lane, %code_stride : index
+  %codes_view = buffer.view %codes_buffer[%base_offset] : buffer -> view<8xi8>
+  %output_view = buffer.view %output[%base_offset] : buffer -> view<8xf32>
+  %codes = vector.load %codes_view[%base] : view<8xi8> -> vector<4xi8>
+  %g0 = scalar.constant -1.0 : f32
+  %g1 = scalar.constant -0.5 : f32
+  %g2 = scalar.constant 0.5 : f32
+  %g3 = scalar.constant 1.5 : f32
+  %grid = vector.from_elements %g0, %g1, %g2, %g3 : vector<4xf32>
+  %decoded = vector.table.lookup %grid[%codes] : vector<4xf32>, vector<4xi8> -> vector<4xf32>
+  vector.store %decoded, %output_view[%base] : vector<4xf32>, view<8xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(2, 1, 1) workgroup_count(1, 1, 1) @f32_table_lookup_i8_codes(%codes_buffer: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %94 = constant.s16 2 : reg<vm.value : index>
+  %g0 = constant.i32 3212836864 : reg<vm.value : f32>
+  %g1 = constant.i32 3204448256 : reg<vm.value : f32>
+  %g2 = constant.i32 1056964608 : reg<vm.value : f32>
+  %g3 = constant.i32 1069547520 : reg<vm.value : f32>
+  %99 = constant.zero : reg<vm.value : offset>
+  %100 = buffer.load %codes_buffer, %99, %workitem_id_x, 4, i8.x1 : reg<vm.value : i8>
+  %101 = conversion.integer %100, s8.to.i64 : reg<vm.value : index>
+  %102 = constant.s16 1 : reg<vm.value : index>
+  %103 = integer.compare.i64 %101, %102, eq : reg<vm.value : i1>
+  %104 = value.select %103, %g1, %g0 : reg<vm.value : f32>
+  %105 = integer.compare.i64 %101, %94, eq : reg<vm.value : i1>
+  %106 = value.select %105, %g2, %104 : reg<vm.value : f32>
+  %107 = constant.s16 3 : reg<vm.value : index>
+  %108 = integer.compare.i64 %101, %107, eq : reg<vm.value : i1>
+  %109 = value.select %108, %g3, %106 : reg<vm.value : f32>
+  %110 = constant.s16 1 : reg<vm.value : offset>
+  %111 = buffer.load %codes_buffer, %110, %workitem_id_x, 4, i8.x1 : reg<vm.value : i8>
+  %112 = conversion.integer %111, s8.to.i64 : reg<vm.value : index>
+  %113 = integer.compare.i64 %112, %102, eq : reg<vm.value : i1>
+  %114 = value.select %113, %g1, %g0 : reg<vm.value : f32>
+  %115 = integer.compare.i64 %112, %94, eq : reg<vm.value : i1>
+  %116 = value.select %115, %g2, %114 : reg<vm.value : f32>
+  %117 = integer.compare.i64 %112, %107, eq : reg<vm.value : i1>
+  %118 = value.select %117, %g3, %116 : reg<vm.value : f32>
+  %119 = constant.s16 2 : reg<vm.value : offset>
+  %120 = buffer.load %codes_buffer, %119, %workitem_id_x, 4, i8.x1 : reg<vm.value : i8>
+  %121 = conversion.integer %120, s8.to.i64 : reg<vm.value : index>
+  %122 = integer.compare.i64 %121, %102, eq : reg<vm.value : i1>
+  %123 = value.select %122, %g1, %g0 : reg<vm.value : f32>
+  %124 = integer.compare.i64 %121, %94, eq : reg<vm.value : i1>
+  %125 = value.select %124, %g2, %123 : reg<vm.value : f32>
+  %126 = integer.compare.i64 %121, %107, eq : reg<vm.value : i1>
+  %127 = value.select %126, %g3, %125 : reg<vm.value : f32>
+  %128 = constant.s16 3 : reg<vm.value : offset>
+  %129 = buffer.load %codes_buffer, %128, %workitem_id_x, 4, i8.x1 : reg<vm.value : i8>
+  %130 = conversion.integer %129, s8.to.i64 : reg<vm.value : index>
+  %131 = integer.compare.i64 %130, %102, eq : reg<vm.value : i1>
+  %132 = value.select %131, %g1, %g0 : reg<vm.value : f32>
+  %133 = integer.compare.i64 %130, %94, eq : reg<vm.value : i1>
+  %134 = value.select %133, %g2, %132 : reg<vm.value : f32>
+  %135 = integer.compare.i64 %130, %107, eq : reg<vm.value : i1>
+  %136 = value.select %135, %g3, %134 : reg<vm.value : f32>
+  %decoded = concat(%109, %118, %127, %136) : (reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>) -> reg<vm.value x4 : vector<4xf32>>
+  buffer.store %output, %99, %workitem_id_x, %decoded, 16, i32.x4
+  return
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @f32_table_lookup_i32_codes(%codes: vector<2xi32>) -> (vector<2xf32>) {
+  %g0 = scalar.constant 2.0 : f32
+  %g1 = scalar.constant -3.0 : f32
+  %g2 = scalar.constant 5.0 : f32
+  %grid = vector.from_elements %g0, %g1, %g2 : vector<3xf32>
+  %decoded = vector.table.lookup %grid[%codes] : vector<3xf32>, vector<2xi32> -> vector<2xf32>
+  func.return %decoded : vector<2xf32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x2 : vector<2xi32>>) -> (reg<vm.value x2 : vector<2xf32>>)>}) @f32_table_lookup_i32_codes(%codes: reg<vm.value x2 : vector<2xi32>>) -> (reg<vm.value x2 : vector<2xf32>>) asm {
+  %g0 = constant.i32 1073741824 : reg<vm.value : f32>
+  %g1 = constant.i32 3225419776 : reg<vm.value : f32>
+  %g2 = constant.i32 1084227584 : reg<vm.value : f32>
+  %31 = slice %codes[0] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %32 = conversion.integer %31, s32.to.i64 : reg<vm.value : index>
+  %33 = constant.s16 1 : reg<vm.value : index>
+  %34 = integer.compare.i64 %32, %33, eq : reg<vm.value : i1>
+  %35 = value.select %34, %g1, %g0 : reg<vm.value : f32>
+  %36 = constant.s16 2 : reg<vm.value : index>
+  %37 = integer.compare.i64 %32, %36, eq : reg<vm.value : i1>
+  %38 = value.select %37, %g2, %35 : reg<vm.value : f32>
+  %39 = slice %codes[1] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %40 = conversion.integer %39, s32.to.i64 : reg<vm.value : index>
+  %41 = integer.compare.i64 %40, %33, eq : reg<vm.value : i1>
+  %42 = value.select %41, %g1, %g0 : reg<vm.value : f32>
+  %43 = integer.compare.i64 %40, %36, eq : reg<vm.value : i1>
+  %44 = value.select %43, %g2, %42 : reg<vm.value : f32>
+  %decoded = concat(%38, %44) : (reg<vm.value : f32>, reg<vm.value : f32>) -> reg<vm.value x2 : vector<2xf32>>
+  return %decoded
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @f32_table_lookup_dynamic_grid(%grid: vector<3xf32>, %codes: vector<2xi32>) -> (vector<2xf32>) {
+  %decoded = vector.table.lookup %grid[%codes] : vector<3xf32>, vector<2xi32> -> vector<2xf32>
+  func.return %decoded : vector<2xf32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x3 : vector<3xf32>>, reg<vm.value x2 : vector<2xi32>>) -> (reg<vm.value x2 : vector<2xf32>>)>}) @f32_table_lookup_dynamic_grid(%grid: reg<vm.value x3 : vector<3xf32>>, %codes: reg<vm.value x2 : vector<2xi32>>) -> (reg<vm.value x2 : vector<2xf32>>) asm {
+  %32 = slice %codes[0] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %33 = conversion.integer %32, s32.to.i64 : reg<vm.value : index>
+  %34 = slice %grid[0] : reg<vm.value x3 : vector<3xf32>> -> reg<vm.value : f32>
+  %35 = slice %grid[1] : reg<vm.value x3 : vector<3xf32>> -> reg<vm.value : f32>
+  %36 = constant.s16 1 : reg<vm.value : index>
+  %37 = integer.compare.i64 %33, %36, eq : reg<vm.value : i1>
+  %38 = value.select %37, %35, %34 : reg<vm.value : f32>
+  %39 = slice %grid[2] : reg<vm.value x3 : vector<3xf32>> -> reg<vm.value : f32>
+  %40 = constant.s16 2 : reg<vm.value : index>
+  %41 = integer.compare.i64 %33, %40, eq : reg<vm.value : i1>
+  %42 = value.select %41, %39, %38 : reg<vm.value : f32>
+  %43 = slice %codes[1] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %44 = conversion.integer %43, s32.to.i64 : reg<vm.value : index>
+  %45 = integer.compare.i64 %44, %36, eq : reg<vm.value : i1>
+  %46 = value.select %45, %35, %34 : reg<vm.value : f32>
+  %47 = integer.compare.i64 %44, %40, eq : reg<vm.value : i1>
+  %48 = value.select %47, %39, %46 : reg<vm.value : f32>
+  %decoded = concat(%42, %48) : (reg<vm.value : f32>, reg<vm.value : f32>) -> reg<vm.value x2 : vector<2xf32>>
+  return %decoded
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @i8_table_lookup_fact_known_codes(%grid: vector<4xi8>) -> (vector<4xi8>) {
+  %c0 = scalar.constant 0 : i8
+  %c1 = scalar.constant 1 : i8
+  %c2 = scalar.constant 2 : i8
+  %c3 = scalar.constant 3 : i8
+  %codes = vector.from_elements %c2, %c0, %c3, %c1 : vector<4xi8>
+  %decoded = vector.table.lookup %grid[%codes] : vector<4xi8>, vector<4xi8> -> vector<4xi8>
+  func.return %decoded : vector<4xi8>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x4 : vector<4xi8>>) -> (reg<vm.value x4 : vector<4xi8>>)>}) @i8_table_lookup_fact_known_codes(%grid: reg<vm.value x4 : vector<4xi8>>) -> (reg<vm.value x4 : vector<4xi8>>) asm {
+  %23 = slice %grid[2] : reg<vm.value x4 : vector<4xi8>> -> reg<vm.value : i8>
+  %24 = slice %grid[0] : reg<vm.value x4 : vector<4xi8>> -> reg<vm.value : i8>
+  %25 = slice %grid[3] : reg<vm.value x4 : vector<4xi8>> -> reg<vm.value : i8>
+  %26 = slice %grid[1] : reg<vm.value x4 : vector<4xi8>> -> reg<vm.value : i8>
+  %decoded = concat(%23, %24, %25, %26) : (reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>) -> reg<vm.value x4 : vector<4xi8>>
+  return %decoded
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @i8_table_lookup_constant_table() -> (vector<4xi8>) {
+  %g0 = scalar.constant -4 : i8
+  %g1 = scalar.constant -1 : i8
+  %g2 = scalar.constant 2 : i8
+  %g3 = scalar.constant 7 : i8
+  %grid = vector.from_elements %g0, %g1, %g2, %g3 : vector<4xi8>
+  %c0 = scalar.constant 0 : i8
+  %c1 = scalar.constant 1 : i8
+  %c2 = scalar.constant 2 : i8
+  %c3 = scalar.constant 3 : i8
+  %codes = vector.from_elements %c3, %c2, %c1, %c0 : vector<4xi8>
+  %decoded = vector.table.lookup %grid[%codes] : vector<4xi8>, vector<4xi8> -> vector<4xi8>
+  func.return %decoded : vector<4xi8>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<() -> (reg<vm.value x4 : vector<4xi8>>)>}) @i8_table_lookup_constant_table() -> (reg<vm.value x4 : vector<4xi8>>) asm {
+  %g0 = constant.s16 252 : reg<vm.value : i8>
+  %g1 = constant.s16 255 : reg<vm.value : i8>
+  %g2 = constant.s16 2 : reg<vm.value : i8>
+  %g3 = constant.s16 7 : reg<vm.value : i8>
+  %decoded = concat(%g3, %g2, %g1, %g0) : (reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>) -> reg<vm.value x4 : vector<4xi8>>
+  return %decoded
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @i8_table_lookup_u4_dynamic_table(%grid: vector<16xi8>, %packed: vector<2xi8>) -> (vector<4xi8>) {
+  %codes = vector.bitunpacku<4> %packed : vector<2xi8> -> vector<4xi8>
+  %decoded = vector.table.lookup %grid[%codes] : vector<16xi8>, vector<4xi8> -> vector<4xi8>
+  func.return %decoded : vector<4xi8>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x16 : vector<16xi8>>, reg<vm.value x2 : vector<2xi8>>) -> (reg<vm.value x4 : vector<4xi8>>)>}) @i8_table_lookup_u4_dynamic_table(%grid: reg<vm.value x16 : vector<16xi8>>, %packed: reg<vm.value x2 : vector<2xi8>>) -> (reg<vm.value x4 : vector<4xi8>>) asm {
+  %293 = slice %packed[0] : reg<vm.value x2 : vector<2xi8>> -> reg<vm.value : i8>
+  %294 = conversion.integer %293, u8.to.i32 : reg<vm.value : i32>
+  %295 = constant.s16 15 : reg<vm.value : i32>
+  %296 = integer.and.i32 %294, %295 : reg<vm.value : i32>
+  %297 = conversion.integer %296, i32.to.i8 : reg<vm.value : i8>
+  %298 = conversion.integer %297, s8.to.i64 : reg<vm.value : index>
+  %299 = slice %grid[0] : reg<vm.value x16 : vector<16xi8>> -> reg<vm.value : i8>
+  %300 = slice %grid[1] : reg<vm.value x16 : vector<16xi8>> -> reg<vm.value : i8>
+  %301 = constant.s16 1 : reg<vm.value : index>
+  %302 = integer.compare.i64 %298, %301, eq : reg<vm.value : i1>
+  %303 = value.select %302, %300, %299 : reg<vm.value : i8>
+  %304 = slice %grid[2] : reg<vm.value x16 : vector<16xi8>> -> reg<vm.value : i8>
+  %305 = constant.s16 2 : reg<vm.value : index>
+  %306 = integer.compare.i64 %298, %305, eq : reg<vm.value : i1>
+  %307 = value.select %306, %304, %303 : reg<vm.value : i8>
+  %308 = slice %grid[3] : reg<vm.value x16 : vector<16xi8>> -> reg<vm.value : i8>
+  %309 = constant.s16 3 : reg<vm.value : index>
+  %310 = integer.compare.i64 %298, %309, eq : reg<vm.value : i1>
+  %311 = value.select %310, %308, %307 : reg<vm.value : i8>
+  %312 = slice %grid[4] : reg<vm.value x16 : vector<16xi8>> -> reg<vm.value : i8>
+  %313 = constant.s16 4 : reg<vm.value : index>
+  %314 = integer.compare.i64 %298, %313, eq : reg<vm.value : i1>
+  %315 = value.select %314, %312, %311 : reg<vm.value : i8>
+  %316 = slice %grid[5] : reg<vm.value x16 : vector<16xi8>> -> reg<vm.value : i8>
+  %317 = constant.s16 5 : reg<vm.value : index>
+  %318 = integer.compare.i64 %298, %317, eq : reg<vm.value : i1>
+  %319 = value.select %318, %316, %315 : reg<vm.value : i8>
+  %320 = slice %grid[6] : reg<vm.value x16 : vector<16xi8>> -> reg<vm.value : i8>
+  %321 = constant.s16 6 : reg<vm.value : index>
+  %322 = integer.compare.i64 %298, %321, eq : reg<vm.value : i1>
+  %323 = value.select %322, %320, %319 : reg<vm.value : i8>
+  %324 = slice %grid[7] : reg<vm.value x16 : vector<16xi8>> -> reg<vm.value : i8>
+  %325 = constant.s16 7 : reg<vm.value : index>
+  %326 = integer.compare.i64 %298, %325, eq : reg<vm.value : i1>
+  %327 = value.select %326, %324, %323 : reg<vm.value : i8>
+  %328 = slice %grid[8] : reg<vm.value x16 : vector<16xi8>> -> reg<vm.value : i8>
+  %329 = constant.s16 8 : reg<vm.value : index>
+  %330 = integer.compare.i64 %298, %329, eq : reg<vm.value : i1>
+  %331 = value.select %330, %328, %327 : reg<vm.value : i8>
+  %332 = slice %grid[9] : reg<vm.value x16 : vector<16xi8>> -> reg<vm.value : i8>
+  %333 = constant.s16 9 : reg<vm.value : index>
+  %334 = integer.compare.i64 %298, %333, eq : reg<vm.value : i1>
+  %335 = value.select %334, %332, %331 : reg<vm.value : i8>
+  %336 = slice %grid[10] : reg<vm.value x16 : vector<16xi8>> -> reg<vm.value : i8>
+  %337 = constant.s16 10 : reg<vm.value : index>
+  %338 = integer.compare.i64 %298, %337, eq : reg<vm.value : i1>
+  %339 = value.select %338, %336, %335 : reg<vm.value : i8>
+  %340 = slice %grid[11] : reg<vm.value x16 : vector<16xi8>> -> reg<vm.value : i8>
+  %341 = constant.s16 11 : reg<vm.value : index>
+  %342 = integer.compare.i64 %298, %341, eq : reg<vm.value : i1>
+  %343 = value.select %342, %340, %339 : reg<vm.value : i8>
+  %344 = slice %grid[12] : reg<vm.value x16 : vector<16xi8>> -> reg<vm.value : i8>
+  %345 = constant.s16 12 : reg<vm.value : index>
+  %346 = integer.compare.i64 %298, %345, eq : reg<vm.value : i1>
+  %347 = value.select %346, %344, %343 : reg<vm.value : i8>
+  %348 = slice %grid[13] : reg<vm.value x16 : vector<16xi8>> -> reg<vm.value : i8>
+  %349 = constant.s16 13 : reg<vm.value : index>
+  %350 = integer.compare.i64 %298, %349, eq : reg<vm.value : i1>
+  %351 = value.select %350, %348, %347 : reg<vm.value : i8>
+  %352 = slice %grid[14] : reg<vm.value x16 : vector<16xi8>> -> reg<vm.value : i8>
+  %353 = constant.s16 14 : reg<vm.value : index>
+  %354 = integer.compare.i64 %298, %353, eq : reg<vm.value : i1>
+  %355 = value.select %354, %352, %351 : reg<vm.value : i8>
+  %356 = slice %grid[15] : reg<vm.value x16 : vector<16xi8>> -> reg<vm.value : i8>
+  %357 = constant.s16 15 : reg<vm.value : index>
+  %358 = integer.compare.i64 %298, %357, eq : reg<vm.value : i1>
+  %359 = value.select %358, %356, %355 : reg<vm.value : i8>
+  %360 = constant.s16 4 : reg<vm.value : i32>
+  %361 = integer.shift.right.u32 %294, %360 : reg<vm.value : i32>
+  %362 = conversion.integer %361, i32.to.i8 : reg<vm.value : i8>
+  %363 = conversion.integer %362, s8.to.i64 : reg<vm.value : index>
+  %364 = integer.compare.i64 %363, %301, eq : reg<vm.value : i1>
+  %365 = value.select %364, %300, %299 : reg<vm.value : i8>
+  %366 = integer.compare.i64 %363, %305, eq : reg<vm.value : i1>
+  %367 = value.select %366, %304, %365 : reg<vm.value : i8>
+  %368 = integer.compare.i64 %363, %309, eq : reg<vm.value : i1>
+  %369 = value.select %368, %308, %367 : reg<vm.value : i8>
+  %370 = integer.compare.i64 %363, %313, eq : reg<vm.value : i1>
+  %371 = value.select %370, %312, %369 : reg<vm.value : i8>
+  %372 = integer.compare.i64 %363, %317, eq : reg<vm.value : i1>
+  %373 = value.select %372, %316, %371 : reg<vm.value : i8>
+  %374 = integer.compare.i64 %363, %321, eq : reg<vm.value : i1>
+  %375 = value.select %374, %320, %373 : reg<vm.value : i8>
+  %376 = integer.compare.i64 %363, %325, eq : reg<vm.value : i1>
+  %377 = value.select %376, %324, %375 : reg<vm.value : i8>
+  %378 = integer.compare.i64 %363, %329, eq : reg<vm.value : i1>
+  %379 = value.select %378, %328, %377 : reg<vm.value : i8>
+  %380 = integer.compare.i64 %363, %333, eq : reg<vm.value : i1>
+  %381 = value.select %380, %332, %379 : reg<vm.value : i8>
+  %382 = integer.compare.i64 %363, %337, eq : reg<vm.value : i1>
+  %383 = value.select %382, %336, %381 : reg<vm.value : i8>
+  %384 = integer.compare.i64 %363, %341, eq : reg<vm.value : i1>
+  %385 = value.select %384, %340, %383 : reg<vm.value : i8>
+  %386 = integer.compare.i64 %363, %345, eq : reg<vm.value : i1>
+  %387 = value.select %386, %344, %385 : reg<vm.value : i8>
+  %388 = integer.compare.i64 %363, %349, eq : reg<vm.value : i1>
+  %389 = value.select %388, %348, %387 : reg<vm.value : i8>
+  %390 = integer.compare.i64 %363, %353, eq : reg<vm.value : i1>
+  %391 = value.select %390, %352, %389 : reg<vm.value : i8>
+  %392 = integer.compare.i64 %363, %357, eq : reg<vm.value : i1>
+  %393 = value.select %392, %356, %391 : reg<vm.value : i8>
+  %394 = slice %packed[1] : reg<vm.value x2 : vector<2xi8>> -> reg<vm.value : i8>
+  %395 = conversion.integer %394, u8.to.i32 : reg<vm.value : i32>
+  %396 = integer.and.i32 %395, %295 : reg<vm.value : i32>
+  %397 = conversion.integer %396, i32.to.i8 : reg<vm.value : i8>
+  %398 = conversion.integer %397, s8.to.i64 : reg<vm.value : index>
+  %399 = integer.compare.i64 %398, %301, eq : reg<vm.value : i1>
+  %400 = value.select %399, %300, %299 : reg<vm.value : i8>
+  %401 = integer.compare.i64 %398, %305, eq : reg<vm.value : i1>
+  %402 = value.select %401, %304, %400 : reg<vm.value : i8>
+  %403 = integer.compare.i64 %398, %309, eq : reg<vm.value : i1>
+  %404 = value.select %403, %308, %402 : reg<vm.value : i8>
+  %405 = integer.compare.i64 %398, %313, eq : reg<vm.value : i1>
+  %406 = value.select %405, %312, %404 : reg<vm.value : i8>
+  %407 = integer.compare.i64 %398, %317, eq : reg<vm.value : i1>
+  %408 = value.select %407, %316, %406 : reg<vm.value : i8>
+  %409 = integer.compare.i64 %398, %321, eq : reg<vm.value : i1>
+  %410 = value.select %409, %320, %408 : reg<vm.value : i8>
+  %411 = integer.compare.i64 %398, %325, eq : reg<vm.value : i1>
+  %412 = value.select %411, %324, %410 : reg<vm.value : i8>
+  %413 = integer.compare.i64 %398, %329, eq : reg<vm.value : i1>
+  %414 = value.select %413, %328, %412 : reg<vm.value : i8>
+  %415 = integer.compare.i64 %398, %333, eq : reg<vm.value : i1>
+  %416 = value.select %415, %332, %414 : reg<vm.value : i8>
+  %417 = integer.compare.i64 %398, %337, eq : reg<vm.value : i1>
+  %418 = value.select %417, %336, %416 : reg<vm.value : i8>
+  %419 = integer.compare.i64 %398, %341, eq : reg<vm.value : i1>
+  %420 = value.select %419, %340, %418 : reg<vm.value : i8>
+  %421 = integer.compare.i64 %398, %345, eq : reg<vm.value : i1>
+  %422 = value.select %421, %344, %420 : reg<vm.value : i8>
+  %423 = integer.compare.i64 %398, %349, eq : reg<vm.value : i1>
+  %424 = value.select %423, %348, %422 : reg<vm.value : i8>
+  %425 = integer.compare.i64 %398, %353, eq : reg<vm.value : i1>
+  %426 = value.select %425, %352, %424 : reg<vm.value : i8>
+  %427 = integer.compare.i64 %398, %357, eq : reg<vm.value : i1>
+  %428 = value.select %427, %356, %426 : reg<vm.value : i8>
+  %429 = integer.shift.right.u32 %395, %360 : reg<vm.value : i32>
+  %430 = conversion.integer %429, i32.to.i8 : reg<vm.value : i8>
+  %431 = conversion.integer %430, s8.to.i64 : reg<vm.value : index>
+  %432 = integer.compare.i64 %431, %301, eq : reg<vm.value : i1>
+  %433 = value.select %432, %300, %299 : reg<vm.value : i8>
+  %434 = integer.compare.i64 %431, %305, eq : reg<vm.value : i1>
+  %435 = value.select %434, %304, %433 : reg<vm.value : i8>
+  %436 = integer.compare.i64 %431, %309, eq : reg<vm.value : i1>
+  %437 = value.select %436, %308, %435 : reg<vm.value : i8>
+  %438 = integer.compare.i64 %431, %313, eq : reg<vm.value : i1>
+  %439 = value.select %438, %312, %437 : reg<vm.value : i8>
+  %440 = integer.compare.i64 %431, %317, eq : reg<vm.value : i1>
+  %441 = value.select %440, %316, %439 : reg<vm.value : i8>
+  %442 = integer.compare.i64 %431, %321, eq : reg<vm.value : i1>
+  %443 = value.select %442, %320, %441 : reg<vm.value : i8>
+  %444 = integer.compare.i64 %431, %325, eq : reg<vm.value : i1>
+  %445 = value.select %444, %324, %443 : reg<vm.value : i8>
+  %446 = integer.compare.i64 %431, %329, eq : reg<vm.value : i1>
+  %447 = value.select %446, %328, %445 : reg<vm.value : i8>
+  %448 = integer.compare.i64 %431, %333, eq : reg<vm.value : i1>
+  %449 = value.select %448, %332, %447 : reg<vm.value : i8>
+  %450 = integer.compare.i64 %431, %337, eq : reg<vm.value : i1>
+  %451 = value.select %450, %336, %449 : reg<vm.value : i8>
+  %452 = integer.compare.i64 %431, %341, eq : reg<vm.value : i1>
+  %453 = value.select %452, %340, %451 : reg<vm.value : i8>
+  %454 = integer.compare.i64 %431, %345, eq : reg<vm.value : i1>
+  %455 = value.select %454, %344, %453 : reg<vm.value : i8>
+  %456 = integer.compare.i64 %431, %349, eq : reg<vm.value : i1>
+  %457 = value.select %456, %348, %455 : reg<vm.value : i8>
+  %458 = integer.compare.i64 %431, %353, eq : reg<vm.value : i1>
+  %459 = value.select %458, %352, %457 : reg<vm.value : i8>
+  %460 = integer.compare.i64 %431, %357, eq : reg<vm.value : i1>
+  %461 = value.select %460, %356, %459 : reg<vm.value : i8>
+  %decoded = concat(%359, %393, %428, %461) : (reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>) -> reg<vm.value x4 : vector<4xi8>>
+  return %decoded
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @i8_table_lookup_u4_constant_table(%packed: vector<2xi8>) -> (vector<4xi8>) {
+  %g0 = scalar.constant 0 : i8
+  %g1 = scalar.constant -1 : i8
+  %g2 = scalar.constant 2 : i8
+  %g3 = scalar.constant -3 : i8
+  %g4 = scalar.constant 4 : i8
+  %g5 = scalar.constant -5 : i8
+  %g6 = scalar.constant 6 : i8
+  %g7 = scalar.constant -7 : i8
+  %g8 = scalar.constant 8 : i8
+  %g9 = scalar.constant -9 : i8
+  %g10 = scalar.constant 10 : i8
+  %g11 = scalar.constant -11 : i8
+  %g12 = scalar.constant 12 : i8
+  %g13 = scalar.constant -13 : i8
+  %g14 = scalar.constant 14 : i8
+  %g15 = scalar.constant -15 : i8
+  %grid = vector.from_elements %g0, %g1, %g2, %g3, %g4, %g5, %g6, %g7, %g8, %g9, %g10, %g11, %g12, %g13, %g14, %g15 : vector<16xi8>
+  %codes = vector.bitunpacku<4> %packed : vector<2xi8> -> vector<4xi8>
+  %decoded = vector.table.lookup %grid[%codes] : vector<16xi8>, vector<4xi8> -> vector<4xi8>
+  func.return %decoded : vector<4xi8>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x2 : vector<2xi8>>) -> (reg<vm.value x4 : vector<4xi8>>)>}) @i8_table_lookup_u4_constant_table(%packed: reg<vm.value x2 : vector<2xi8>>) -> (reg<vm.value x4 : vector<4xi8>>) asm {
+  %g0 = constant.zero : reg<vm.value : i8>
+  %g1 = constant.s16 255 : reg<vm.value : i8>
+  %g2 = constant.s16 2 : reg<vm.value : i8>
+  %g3 = constant.s16 253 : reg<vm.value : i8>
+  %g4 = constant.s16 4 : reg<vm.value : i8>
+  %g5 = constant.s16 251 : reg<vm.value : i8>
+  %g6 = constant.s16 6 : reg<vm.value : i8>
+  %g7 = constant.s16 249 : reg<vm.value : i8>
+  %g8 = constant.s16 8 : reg<vm.value : i8>
+  %g9 = constant.s16 247 : reg<vm.value : i8>
+  %g10 = constant.s16 10 : reg<vm.value : i8>
+  %g11 = constant.s16 245 : reg<vm.value : i8>
+  %g12 = constant.s16 12 : reg<vm.value : i8>
+  %g13 = constant.s16 243 : reg<vm.value : i8>
+  %g14 = constant.s16 14 : reg<vm.value : i8>
+  %g15 = constant.s16 241 : reg<vm.value : i8>
+  %260 = slice %packed[0] : reg<vm.value x2 : vector<2xi8>> -> reg<vm.value : i8>
+  %261 = conversion.integer %260, u8.to.i32 : reg<vm.value : i32>
+  %262 = constant.s16 15 : reg<vm.value : i32>
+  %263 = integer.and.i32 %261, %262 : reg<vm.value : i32>
+  %264 = conversion.integer %263, i32.to.i8 : reg<vm.value : i8>
+  %265 = conversion.integer %264, s8.to.i64 : reg<vm.value : index>
+  %266 = constant.s16 1 : reg<vm.value : index>
+  %267 = integer.compare.i64 %265, %266, eq : reg<vm.value : i1>
+  %268 = value.select %267, %g1, %g0 : reg<vm.value : i8>
+  %269 = constant.s16 2 : reg<vm.value : index>
+  %270 = integer.compare.i64 %265, %269, eq : reg<vm.value : i1>
+  %271 = value.select %270, %g2, %268 : reg<vm.value : i8>
+  %272 = constant.s16 3 : reg<vm.value : index>
+  %273 = integer.compare.i64 %265, %272, eq : reg<vm.value : i1>
+  %274 = value.select %273, %g3, %271 : reg<vm.value : i8>
+  %275 = constant.s16 4 : reg<vm.value : index>
+  %276 = integer.compare.i64 %265, %275, eq : reg<vm.value : i1>
+  %277 = value.select %276, %g4, %274 : reg<vm.value : i8>
+  %278 = constant.s16 5 : reg<vm.value : index>
+  %279 = integer.compare.i64 %265, %278, eq : reg<vm.value : i1>
+  %280 = value.select %279, %g5, %277 : reg<vm.value : i8>
+  %281 = constant.s16 6 : reg<vm.value : index>
+  %282 = integer.compare.i64 %265, %281, eq : reg<vm.value : i1>
+  %283 = value.select %282, %g6, %280 : reg<vm.value : i8>
+  %284 = constant.s16 7 : reg<vm.value : index>
+  %285 = integer.compare.i64 %265, %284, eq : reg<vm.value : i1>
+  %286 = value.select %285, %g7, %283 : reg<vm.value : i8>
+  %287 = constant.s16 8 : reg<vm.value : index>
+  %288 = integer.compare.i64 %265, %287, eq : reg<vm.value : i1>
+  %289 = value.select %288, %g8, %286 : reg<vm.value : i8>
+  %290 = constant.s16 9 : reg<vm.value : index>
+  %291 = integer.compare.i64 %265, %290, eq : reg<vm.value : i1>
+  %292 = value.select %291, %g9, %289 : reg<vm.value : i8>
+  %293 = constant.s16 10 : reg<vm.value : index>
+  %294 = integer.compare.i64 %265, %293, eq : reg<vm.value : i1>
+  %295 = value.select %294, %g10, %292 : reg<vm.value : i8>
+  %296 = constant.s16 11 : reg<vm.value : index>
+  %297 = integer.compare.i64 %265, %296, eq : reg<vm.value : i1>
+  %298 = value.select %297, %g11, %295 : reg<vm.value : i8>
+  %299 = constant.s16 12 : reg<vm.value : index>
+  %300 = integer.compare.i64 %265, %299, eq : reg<vm.value : i1>
+  %301 = value.select %300, %g12, %298 : reg<vm.value : i8>
+  %302 = constant.s16 13 : reg<vm.value : index>
+  %303 = integer.compare.i64 %265, %302, eq : reg<vm.value : i1>
+  %304 = value.select %303, %g13, %301 : reg<vm.value : i8>
+  %305 = constant.s16 14 : reg<vm.value : index>
+  %306 = integer.compare.i64 %265, %305, eq : reg<vm.value : i1>
+  %307 = value.select %306, %g14, %304 : reg<vm.value : i8>
+  %308 = constant.s16 15 : reg<vm.value : index>
+  %309 = integer.compare.i64 %265, %308, eq : reg<vm.value : i1>
+  %310 = value.select %309, %g15, %307 : reg<vm.value : i8>
+  %311 = constant.s16 4 : reg<vm.value : i32>
+  %312 = integer.shift.right.u32 %261, %311 : reg<vm.value : i32>
+  %313 = conversion.integer %312, i32.to.i8 : reg<vm.value : i8>
+  %314 = conversion.integer %313, s8.to.i64 : reg<vm.value : index>
+  %315 = integer.compare.i64 %314, %266, eq : reg<vm.value : i1>
+  %316 = value.select %315, %g1, %g0 : reg<vm.value : i8>
+  %317 = integer.compare.i64 %314, %269, eq : reg<vm.value : i1>
+  %318 = value.select %317, %g2, %316 : reg<vm.value : i8>
+  %319 = integer.compare.i64 %314, %272, eq : reg<vm.value : i1>
+  %320 = value.select %319, %g3, %318 : reg<vm.value : i8>
+  %321 = integer.compare.i64 %314, %275, eq : reg<vm.value : i1>
+  %322 = value.select %321, %g4, %320 : reg<vm.value : i8>
+  %323 = integer.compare.i64 %314, %278, eq : reg<vm.value : i1>
+  %324 = value.select %323, %g5, %322 : reg<vm.value : i8>
+  %325 = integer.compare.i64 %314, %281, eq : reg<vm.value : i1>
+  %326 = value.select %325, %g6, %324 : reg<vm.value : i8>
+  %327 = integer.compare.i64 %314, %284, eq : reg<vm.value : i1>
+  %328 = value.select %327, %g7, %326 : reg<vm.value : i8>
+  %329 = integer.compare.i64 %314, %287, eq : reg<vm.value : i1>
+  %330 = value.select %329, %g8, %328 : reg<vm.value : i8>
+  %331 = integer.compare.i64 %314, %290, eq : reg<vm.value : i1>
+  %332 = value.select %331, %g9, %330 : reg<vm.value : i8>
+  %333 = integer.compare.i64 %314, %293, eq : reg<vm.value : i1>
+  %334 = value.select %333, %g10, %332 : reg<vm.value : i8>
+  %335 = integer.compare.i64 %314, %296, eq : reg<vm.value : i1>
+  %336 = value.select %335, %g11, %334 : reg<vm.value : i8>
+  %337 = integer.compare.i64 %314, %299, eq : reg<vm.value : i1>
+  %338 = value.select %337, %g12, %336 : reg<vm.value : i8>
+  %339 = integer.compare.i64 %314, %302, eq : reg<vm.value : i1>
+  %340 = value.select %339, %g13, %338 : reg<vm.value : i8>
+  %341 = integer.compare.i64 %314, %305, eq : reg<vm.value : i1>
+  %342 = value.select %341, %g14, %340 : reg<vm.value : i8>
+  %343 = integer.compare.i64 %314, %308, eq : reg<vm.value : i1>
+  %344 = value.select %343, %g15, %342 : reg<vm.value : i8>
+  %345 = slice %packed[1] : reg<vm.value x2 : vector<2xi8>> -> reg<vm.value : i8>
+  %346 = conversion.integer %345, u8.to.i32 : reg<vm.value : i32>
+  %347 = integer.and.i32 %346, %262 : reg<vm.value : i32>
+  %348 = conversion.integer %347, i32.to.i8 : reg<vm.value : i8>
+  %349 = conversion.integer %348, s8.to.i64 : reg<vm.value : index>
+  %350 = integer.compare.i64 %349, %266, eq : reg<vm.value : i1>
+  %351 = value.select %350, %g1, %g0 : reg<vm.value : i8>
+  %352 = integer.compare.i64 %349, %269, eq : reg<vm.value : i1>
+  %353 = value.select %352, %g2, %351 : reg<vm.value : i8>
+  %354 = integer.compare.i64 %349, %272, eq : reg<vm.value : i1>
+  %355 = value.select %354, %g3, %353 : reg<vm.value : i8>
+  %356 = integer.compare.i64 %349, %275, eq : reg<vm.value : i1>
+  %357 = value.select %356, %g4, %355 : reg<vm.value : i8>
+  %358 = integer.compare.i64 %349, %278, eq : reg<vm.value : i1>
+  %359 = value.select %358, %g5, %357 : reg<vm.value : i8>
+  %360 = integer.compare.i64 %349, %281, eq : reg<vm.value : i1>
+  %361 = value.select %360, %g6, %359 : reg<vm.value : i8>
+  %362 = integer.compare.i64 %349, %284, eq : reg<vm.value : i1>
+  %363 = value.select %362, %g7, %361 : reg<vm.value : i8>
+  %364 = integer.compare.i64 %349, %287, eq : reg<vm.value : i1>
+  %365 = value.select %364, %g8, %363 : reg<vm.value : i8>
+  %366 = integer.compare.i64 %349, %290, eq : reg<vm.value : i1>
+  %367 = value.select %366, %g9, %365 : reg<vm.value : i8>
+  %368 = integer.compare.i64 %349, %293, eq : reg<vm.value : i1>
+  %369 = value.select %368, %g10, %367 : reg<vm.value : i8>
+  %370 = integer.compare.i64 %349, %296, eq : reg<vm.value : i1>
+  %371 = value.select %370, %g11, %369 : reg<vm.value : i8>
+  %372 = integer.compare.i64 %349, %299, eq : reg<vm.value : i1>
+  %373 = value.select %372, %g12, %371 : reg<vm.value : i8>
+  %374 = integer.compare.i64 %349, %302, eq : reg<vm.value : i1>
+  %375 = value.select %374, %g13, %373 : reg<vm.value : i8>
+  %376 = integer.compare.i64 %349, %305, eq : reg<vm.value : i1>
+  %377 = value.select %376, %g14, %375 : reg<vm.value : i8>
+  %378 = integer.compare.i64 %349, %308, eq : reg<vm.value : i1>
+  %379 = value.select %378, %g15, %377 : reg<vm.value : i8>
+  %380 = integer.shift.right.u32 %346, %311 : reg<vm.value : i32>
+  %381 = conversion.integer %380, i32.to.i8 : reg<vm.value : i8>
+  %382 = conversion.integer %381, s8.to.i64 : reg<vm.value : index>
+  %383 = integer.compare.i64 %382, %266, eq : reg<vm.value : i1>
+  %384 = value.select %383, %g1, %g0 : reg<vm.value : i8>
+  %385 = integer.compare.i64 %382, %269, eq : reg<vm.value : i1>
+  %386 = value.select %385, %g2, %384 : reg<vm.value : i8>
+  %387 = integer.compare.i64 %382, %272, eq : reg<vm.value : i1>
+  %388 = value.select %387, %g3, %386 : reg<vm.value : i8>
+  %389 = integer.compare.i64 %382, %275, eq : reg<vm.value : i1>
+  %390 = value.select %389, %g4, %388 : reg<vm.value : i8>
+  %391 = integer.compare.i64 %382, %278, eq : reg<vm.value : i1>
+  %392 = value.select %391, %g5, %390 : reg<vm.value : i8>
+  %393 = integer.compare.i64 %382, %281, eq : reg<vm.value : i1>
+  %394 = value.select %393, %g6, %392 : reg<vm.value : i8>
+  %395 = integer.compare.i64 %382, %284, eq : reg<vm.value : i1>
+  %396 = value.select %395, %g7, %394 : reg<vm.value : i8>
+  %397 = integer.compare.i64 %382, %287, eq : reg<vm.value : i1>
+  %398 = value.select %397, %g8, %396 : reg<vm.value : i8>
+  %399 = integer.compare.i64 %382, %290, eq : reg<vm.value : i1>
+  %400 = value.select %399, %g9, %398 : reg<vm.value : i8>
+  %401 = integer.compare.i64 %382, %293, eq : reg<vm.value : i1>
+  %402 = value.select %401, %g10, %400 : reg<vm.value : i8>
+  %403 = integer.compare.i64 %382, %296, eq : reg<vm.value : i1>
+  %404 = value.select %403, %g11, %402 : reg<vm.value : i8>
+  %405 = integer.compare.i64 %382, %299, eq : reg<vm.value : i1>
+  %406 = value.select %405, %g12, %404 : reg<vm.value : i8>
+  %407 = integer.compare.i64 %382, %302, eq : reg<vm.value : i1>
+  %408 = value.select %407, %g13, %406 : reg<vm.value : i8>
+  %409 = integer.compare.i64 %382, %305, eq : reg<vm.value : i1>
+  %410 = value.select %409, %g14, %408 : reg<vm.value : i8>
+  %411 = integer.compare.i64 %382, %308, eq : reg<vm.value : i1>
+  %412 = value.select %411, %g15, %410 : reg<vm.value : i8>
+  %decoded = concat(%310, %344, %379, %412) : (reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>) -> reg<vm.value x4 : vector<4xi8>>
+  return %decoded
+}

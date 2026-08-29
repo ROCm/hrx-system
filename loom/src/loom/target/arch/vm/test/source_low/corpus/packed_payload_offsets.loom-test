@@ -1,0 +1,128 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/packed_payload_offsets.loom-test
+// RUN: emit source-low output=low
+
+vm.target<core> @target
+func.def target(@target) @packed4_payload_word_offset(%weights: buffer, %block0: index, %word0: index) -> (i32) {
+  %block = index.assume %block0 [range(%block0, 0, 63)] : index
+  %word = index.assume %word0 [range(%word0, 0, 3)] : index
+  %block_byte_stride = index.constant 18 : offset
+  %payload_header_offset = index.constant 2 : offset
+  %word_byte_stride = index.constant 4 : offset
+  %block_base = index.scale %block, %block_byte_stride : index, offset -> offset
+  %payload_base = index.add %block_base, %payload_header_offset : offset
+  %word_byte_offset = index.scale %word, %word_byte_stride : index, offset -> offset
+  %byte_offset = index.add %payload_base, %word_byte_offset : offset
+  %weights_global = buffer.assume.memory_space<global> %weights : buffer
+  %word_view = buffer.view %weights_global[%byte_offset] : buffer -> view<1xi32>
+  %packed_word = view.load %word_view[0] : view<1xi32> -> i32
+  func.return %packed_word : i32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>) -> (reg<vm.value : i32>)>}) @packed4_payload_word_offset(%weights_global: reg<vm.ref : buffer>, %block: reg<vm.value : index>, %word: reg<vm.value : index>) -> (reg<vm.value : i32>) asm {
+  %20 = constant.s16 18 : reg<vm.value : offset>
+  %21 = integer.mul.i64 %block, %20 : reg<vm.value : offset>
+  %22 = constant.s16 2 : reg<vm.value : offset>
+  %23 = integer.shift.left.i64 %word, %22 : reg<vm.value : offset>
+  %24 = integer.add.i64 %21, %23 : reg<vm.value : offset>
+  %25 = constant.zero : reg<vm.value : offset>
+  %27 = integer.add.i64 %24, %22 : reg<vm.value : offset>
+  %packed_word = buffer.load %weights_global, %27, %25, 0, i32.x1 : reg<vm.value : i32>
+  return %packed_word
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @packed5_split_payload_offsets(%weights: buffer, %block0: index, %word0: index) -> (i32, i32) {
+  %block = index.assume %block0 [range(%block0, 0, 63)] : index
+  %word = index.assume %word0 [range(%word0, 0, 3)] : index
+  %block_byte_stride = index.constant 22 : offset
+  %side_bits_header_offset = index.constant 2 : offset
+  %low_bits_header_offset = index.constant 6 : offset
+  %word_byte_stride = index.constant 4 : offset
+  %block_base = index.scale %block, %block_byte_stride : index, offset -> offset
+  %side_bits_byte_offset = index.add %block_base, %side_bits_header_offset : offset
+  %low_bits_base = index.add %block_base, %low_bits_header_offset : offset
+  %low_word_byte_offset = index.scale %word, %word_byte_stride : index, offset -> offset
+  %low_bits_byte_offset = index.add %low_bits_base, %low_word_byte_offset : offset
+  %weights_global = buffer.assume.memory_space<global> %weights : buffer
+  %side_bits_view = buffer.view %weights_global[%side_bits_byte_offset] : buffer -> view<1xi32>
+  %low_bits_view = buffer.view %weights_global[%low_bits_byte_offset] : buffer -> view<1xi32>
+  %side_bits_word = view.load %side_bits_view[0] : view<1xi32> -> i32
+  %low_bits_word = view.load %low_bits_view[0] : view<1xi32> -> i32
+  func.return %side_bits_word, %low_bits_word : i32, i32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>) -> (reg<vm.value : i32>, reg<vm.value : i32>)>}) @packed5_split_payload_offsets(%weights_global: reg<vm.ref : buffer>, %block: reg<vm.value : index>, %word: reg<vm.value : index>) -> (reg<vm.value : i32>, reg<vm.value : i32>) asm {
+  %26 = constant.s16 2 : reg<vm.value : offset>
+  %side_bits_word = buffer.load %weights_global, %26, %block, 22, i32.x1 : reg<vm.value : i32>
+  %28 = constant.s16 22 : reg<vm.value : offset>
+  %29 = integer.mul.i64 %block, %28 : reg<vm.value : offset>
+  %31 = integer.shift.left.i64 %word, %26 : reg<vm.value : offset>
+  %32 = integer.add.i64 %29, %31 : reg<vm.value : offset>
+  %33 = constant.zero : reg<vm.value : offset>
+  %34 = constant.s16 6 : reg<vm.value : offset>
+  %35 = integer.add.i64 %32, %34 : reg<vm.value : offset>
+  %low_bits_word = buffer.load %weights_global, %35, %33, 0, i32.x1 : reg<vm.value : i32>
+  return %side_bits_word, %low_bits_word
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @packed6_split_payload_offsets(%weights: buffer, %block0: index, %low_word0: index, %high_word0: index, %scale0: index) -> (i32, i32, f16) {
+  %block = index.assume %block0 [range(%block0, 0, 63)] : index
+  %low_word = index.assume %low_word0 [range(%low_word0, 0, 31)] : index
+  %high_word = index.assume %high_word0 [range(%high_word0, 0, 15)] : index
+  %scale = index.assume %scale0 [range(%scale0, 0, 15)] : index
+  %block_byte_stride = index.constant 210 : offset
+  %low_bits_header_offset = index.constant 0 : offset
+  %high_bits_header_offset = index.constant 128 : offset
+  %scale_header_offset = index.constant 192 : offset
+  %word_byte_stride = index.constant 4 : offset
+  %half_byte_stride = index.constant 2 : offset
+  %block_base = index.scale %block, %block_byte_stride : index, offset -> offset
+  %low_bits_base = index.add %block_base, %low_bits_header_offset : offset
+  %high_bits_base = index.add %block_base, %high_bits_header_offset : offset
+  %scale_base = index.add %block_base, %scale_header_offset : offset
+  %low_word_byte_offset = index.scale %low_word, %word_byte_stride : index, offset -> offset
+  %high_word_byte_offset = index.scale %high_word, %word_byte_stride : index, offset -> offset
+  %scale_element_byte_offset = index.scale %scale, %half_byte_stride : index, offset -> offset
+  %low_bits_byte_offset = index.add %low_bits_base, %low_word_byte_offset : offset
+  %high_bits_byte_offset = index.add %high_bits_base, %high_word_byte_offset : offset
+  %scale_byte_offset = index.add %scale_base, %scale_element_byte_offset : offset
+  %weights_global = buffer.assume.memory_space<global> %weights : buffer
+  %low_bits_view = buffer.view %weights_global[%low_bits_byte_offset] : buffer -> view<1xi32>
+  %high_bits_view = buffer.view %weights_global[%high_bits_byte_offset] : buffer -> view<1xi32>
+  %scale_view = buffer.view %weights_global[%scale_byte_offset] : buffer -> view<1xf16>
+  %low_bits_word = view.load %low_bits_view[0] : view<1xi32> -> i32
+  %high_bits_word = view.load %high_bits_view[0] : view<1xi32> -> i32
+  %scale_value = view.load %scale_view[0] : view<1xf16> -> f16
+  func.return %low_bits_word, %high_bits_word, %scale_value : i32, i32, f16
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : f16>)>}) @packed6_split_payload_offsets(%weights_global: reg<vm.ref : buffer>, %block: reg<vm.value : index>, %low_word: reg<vm.value : index>, %high_word: reg<vm.value : index>, %scale: reg<vm.value : index>) -> (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : f16>) asm {
+  %block_byte_stride = constant.s16 210 : reg<vm.value : offset>
+  %word_byte_stride = constant.s16 4 : reg<vm.value : offset>
+  %block_base = integer.mul.i64 %block, %block_byte_stride : reg<vm.value : offset>
+  %low_word_byte_offset = integer.mul.i64 %low_word, %word_byte_stride : reg<vm.value : offset>
+  %low_bits_byte_offset = integer.add.i64 %block_base, %low_word_byte_offset : reg<vm.value : offset>
+  %48 = constant.zero : reg<vm.value : offset>
+  %low_bits_word = buffer.load %weights_global, %48, %low_bits_byte_offset, 1, i32.x1 : reg<vm.value : i32>
+  %52 = constant.s16 2 : reg<vm.value : offset>
+  %53 = integer.shift.left.i64 %high_word, %52 : reg<vm.value : offset>
+  %54 = integer.add.i64 %block_base, %53 : reg<vm.value : offset>
+  %56 = constant.s16 128 : reg<vm.value : offset>
+  %57 = integer.add.i64 %54, %56 : reg<vm.value : offset>
+  %high_bits_word = buffer.load %weights_global, %57, %48, 0, i32.x1 : reg<vm.value : i32>
+  %61 = constant.s16 1 : reg<vm.value : offset>
+  %62 = integer.shift.left.i64 %scale, %61 : reg<vm.value : offset>
+  %63 = integer.add.i64 %block_base, %62 : reg<vm.value : offset>
+  %65 = constant.s16 192 : reg<vm.value : offset>
+  %66 = integer.add.i64 %63, %65 : reg<vm.value : offset>
+  %scale_value = buffer.load %weights_global, %66, %48, 0, i16.x1 : reg<vm.value : f16>
+  return %low_bits_word, %high_bits_word, %scale_value
+}
