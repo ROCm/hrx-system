@@ -17,10 +17,8 @@ load(
     "//runtime/requirements:defs.bzl",
     "AMDGPU_RESOURCE",
     "HAL_AMDGPU",
-    "HAL_CUDA",
     "HAL_VULKAN",
     "HAL_WEBGPU",
-    "NVIDIA_GPU_RESOURCE",
     "VULKAN_DEVICE_RESOURCE",
     "WEBGPU_DEVICE_RESOURCE",
 )
@@ -34,15 +32,6 @@ PACKAGE_POLICIES = [
         packages = ["runtime/src/iree/hal/drivers/amdgpu/..."],
         run_requirements = [AMDGPU_RESOURCE],
         resource_group = "iree-hal-drivers-amdgpu-tests",
-    ),
-    package_policy(
-        packages = ["runtime/src/iree/hal/drivers/cuda/..."],
-        build_requirements = [HAL_CUDA],
-    ),
-    package_policy(
-        packages = ["runtime/src/iree/hal/drivers/cuda/cts/..."],
-        run_requirements = [NVIDIA_GPU_RESOURCE],
-        resource_group = "iree-hal-drivers-cuda-tests",
     ),
     package_policy(
         packages = ["runtime/src/iree/hal/drivers/vulkan/..."],

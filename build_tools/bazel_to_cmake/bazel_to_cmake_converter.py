@@ -57,7 +57,6 @@ _COMPILER_CMAKE_OPTIONS = {
 
 _RUNTIME_HAL_DRIVER_CMAKE_OPTIONS = {
     "//runtime/config/hal:driver_amdgpu": "IREE_HAL_DRIVER_AMDGPU",
-    "//runtime/config/hal:driver_cuda": "IREE_HAL_DRIVER_CUDA",
     "//runtime/config/hal:driver_local_sync": "IREE_HAL_DRIVER_LOCAL_SYNC",
     "//runtime/config/hal:driver_local_task": "IREE_HAL_DRIVER_LOCAL_TASK",
     "//runtime/config/hal:driver_null": "IREE_HAL_DRIVER_NULL",

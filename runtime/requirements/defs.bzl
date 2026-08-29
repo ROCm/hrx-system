@@ -19,13 +19,6 @@ HAL_AMDGPU = build_requirement(
     cmake_condition = "IREE_HAL_DRIVER_AMDGPU",
 )
 
-HAL_CUDA = build_requirement(
-    id = "runtime.hal.cuda",
-    label = Label("//runtime/requirements:hal_cuda"),
-    enabled_by = Label("//runtime/config/hal:driver_cuda"),
-    cmake_condition = "IREE_HAL_DRIVER_CUDA",
-)
-
 HAL_VULKAN = build_requirement(
     id = "runtime.hal.vulkan",
     label = Label("//runtime/requirements:hal_vulkan"),
@@ -47,13 +40,6 @@ AMDGPU_RESOURCE = run_requirement(
     skip_contract = "Tests skip when no compatible AMD GPU/HSA agent is available.",
 )
 
-NVIDIA_GPU_RESOURCE = run_requirement(
-    id = "runtime.resource.nvidia_gpu",
-    label = Label("//runtime/requirements:nvidia_gpu"),
-    cmake_label = "runtime-resource=nvidia-gpu",
-    skip_contract = "Tests skip when no compatible NVIDIA GPU/CUDA device is available.",
-)
-
 VULKAN_DEVICE_RESOURCE = run_requirement(
     id = "runtime.resource.vulkan_device",
     label = Label("//runtime/requirements:vulkan_device"),
@@ -70,11 +56,9 @@ WEBGPU_DEVICE_RESOURCE = run_requirement(
 
 REQUIREMENTS = [
     HAL_AMDGPU,
-    HAL_CUDA,
     HAL_VULKAN,
     HAL_WEBGPU,
     AMDGPU_RESOURCE,
-    NVIDIA_GPU_RESOURCE,
     VULKAN_DEVICE_RESOURCE,
     WEBGPU_DEVICE_RESOURCE,
 ]
