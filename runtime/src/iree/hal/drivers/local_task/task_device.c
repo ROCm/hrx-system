@@ -462,15 +462,6 @@ static iree_hal_allocator_t* iree_hal_task_device_allocator(
   return device->device_allocator;
 }
 
-static iree_status_t iree_hal_task_replace_device_allocator(
-    iree_hal_device_t* base_device, iree_hal_allocator_t* new_allocator) {
-  iree_hal_task_device_t* device = iree_hal_task_device_cast(base_device);
-  iree_hal_allocator_retain(new_allocator);
-  iree_hal_allocator_release(device->device_allocator);
-  device->device_allocator = new_allocator;
-  return iree_ok_status();
-}
-
 static void iree_hal_task_replace_channel_provider(
     iree_hal_device_t* base_device, iree_hal_channel_provider_t* new_provider) {
   iree_hal_task_device_t* device = iree_hal_task_device_cast(base_device);
@@ -1219,7 +1210,6 @@ static const iree_hal_device_vtable_t iree_hal_task_device_vtable = {
     .id = iree_hal_task_device_id,
     .host_allocator = iree_hal_task_device_host_allocator,
     .device_allocator = iree_hal_task_device_allocator,
-    .replace_device_allocator = iree_hal_task_replace_device_allocator,
     .replace_channel_provider = iree_hal_task_replace_channel_provider,
     .trim = iree_hal_task_device_trim,
     .device_spec = iree_hal_task_device_spec,

@@ -16,7 +16,6 @@
 #include "iree/base/threading/thread.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/hal/drivers/init.h"
-#include "iree/hal/utils/allocators.h"
 #include "iree/hal/utils/mpi_channel_provider.h"
 #include "iree/hal/utils/profile_file.h"
 #include "iree/hal/utils/statistics_sink.h"
@@ -292,28 +291,6 @@ IREE_FLAG_CALLBACK(
     "  Show all devices from a particular driver: --dump_devices=vulkan");
 
 //===----------------------------------------------------------------------===//
-// Allocator configuration
-//===----------------------------------------------------------------------===//
-
-IREE_FLAG_LIST(
-    string, device_allocator,
-    "Specifies one or more HAL device allocator specs to augment the base\n"
-    "device allocator. See each allocator type for supported configurations.");
-
-// Configures the |device| allocator based on the --device_allocator= flag.
-// This will wrap the underlying device allocator in zero or more configurable
-// allocator shims.
-//
-// WARNING: not thread-safe and must only be called immediately after device
-// creation.
-static iree_status_t iree_hal_configure_allocator_from_flags(
-    iree_hal_device_t* device) {
-  const iree_flag_string_list_t list = FLAG_device_allocator_list();
-  return iree_hal_configure_allocator_from_specs(list.count, list.values,
-                                                 device);
-}
-
-//===----------------------------------------------------------------------===//
 // Collectives configuration
 //===----------------------------------------------------------------------===//
 
@@ -406,14 +383,6 @@ iree_status_t iree_hal_create_devices_from_flags(
     iree_hal_device_t* device = NULL;
     status = iree_hal_create_device(driver_registry, flag_list.values[i],
                                     create_params, host_allocator, &device);
-
-    // Optionally wrap the base device allocator with caching/pooling.
-    // Doing this here satisfies the requirement that no buffers have been
-    // allocated yet - if we returned the device without doing this the caller
-    // can more easily break the rules.
-    if (iree_status_is_ok(status)) {
-      status = iree_hal_configure_allocator_from_flags(device);
-    }
 
     // Optionally set a collective channel provider used by devices to
     // initialize their default channels. Hosting libraries or applications can

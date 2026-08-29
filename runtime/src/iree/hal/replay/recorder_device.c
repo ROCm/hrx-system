@@ -109,28 +109,6 @@ static iree_hal_allocator_t* iree_hal_replay_device_allocator(
   return device->allocator;
 }
 
-static iree_status_t iree_hal_replay_replace_device_allocator(
-    iree_hal_device_t* base_device, iree_hal_allocator_t* new_allocator) {
-  iree_hal_replay_device_t* device = iree_hal_replay_device_cast(base_device);
-  iree_hal_allocator_t* new_replay_allocator = NULL;
-  iree_status_t status = iree_hal_replay_recorder_wrap_allocator(
-      device->recorder, device->device_id, base_device, new_allocator,
-      device->host_allocator, &new_replay_allocator);
-  if (!iree_status_is_ok(status)) {
-    iree_hal_replay_recorder_fail(device->recorder, iree_status_code(status));
-    return status;
-  }
-  status =
-      iree_hal_device_replace_allocator(device->base_device, new_allocator);
-  if (iree_status_is_ok(status)) {
-    iree_hal_allocator_release(device->allocator);
-    device->allocator = new_replay_allocator;
-  } else {
-    iree_hal_allocator_release(new_replay_allocator);
-  }
-  return status;
-}
-
 static void iree_hal_replay_replace_channel_provider(
     iree_hal_device_t* base_device, iree_hal_channel_provider_t* new_provider) {
   iree_hal_replay_device_t* device = iree_hal_replay_device_cast(base_device);
@@ -1634,7 +1612,6 @@ static const iree_hal_device_vtable_t iree_hal_replay_device_vtable = {
     .id = iree_hal_replay_device_id,
     .host_allocator = iree_hal_replay_device_host_allocator,
     .device_allocator = iree_hal_replay_device_allocator,
-    .replace_device_allocator = iree_hal_replay_replace_device_allocator,
     .replace_channel_provider = iree_hal_replay_replace_channel_provider,
     .trim = iree_hal_replay_device_trim,
     .device_spec = iree_hal_replay_device_spec,
