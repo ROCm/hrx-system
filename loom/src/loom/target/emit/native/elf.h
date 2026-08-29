@@ -4,12 +4,12 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Tiny ELF64 little-endian writer for native target emission.
+// Tiny little-endian ELF writer for native target emission.
 //
 // This is not a linker, object reader, or general-purpose ELF library. It owns
-// only the late native-emission shape Loom needs: a fixed ELF64LE envelope,
-// caller-provided section payloads, caller-provided program segments over
-// contiguous section ranges, and a generated section-name string table.
+// only the late native-emission shape Loom needs: fixed ELF32LE and ELF64LE
+// envelopes, caller-provided section payloads, caller-provided program segments
+// over contiguous section ranges, and a generated section-name string table.
 
 #ifndef LOOM_TARGET_EMIT_NATIVE_ELF_H_
 #define LOOM_TARGET_EMIT_NATIVE_ELF_H_
@@ -34,6 +34,7 @@ typedef enum loom_native_elf_machine_e {
   LOOM_NATIVE_ELF_MACHINE_AARCH64 = 183,
   LOOM_NATIVE_ELF_MACHINE_AMDGPU = 224,
   LOOM_NATIVE_ELF_MACHINE_RISCV = 243,
+  LOOM_NATIVE_ELF_MACHINE_AIE = 264,
 } loom_native_elf_machine_t;
 
 typedef enum loom_native_elf_os_abi_e {
@@ -99,7 +100,7 @@ typedef enum loom_native_elf_amdgpu_flag_bits_e {
   LOOM_NATIVE_ELF_AMDGPU_FLAG_MACH_GFX1153 = 0x058,
 } loom_native_elf_amdgpu_flag_bits_t;
 
-typedef struct loom_native_elf64le_section_t {
+typedef struct loom_native_elf_section_t {
   // Section-table name emitted into the generated `.shstrtab`.
   iree_string_view_t name;
   // ELF SHT_* section type.
@@ -118,9 +119,9 @@ typedef struct loom_native_elf64le_section_t {
   uint32_t info;
   // Section bytes written into the file.
   iree_const_byte_span_t contents;
-} loom_native_elf64le_section_t;
+} loom_native_elf_section_t;
 
-typedef struct loom_native_elf64le_segment_t {
+typedef struct loom_native_elf_segment_t {
   // ELF PT_* program header type.
   uint32_t type;
   // ELF PF_* program header flags.
@@ -141,7 +142,31 @@ typedef struct loom_native_elf64le_segment_t {
   uint64_t physical_address;
   // Program-header alignment in bytes. Zero is normalized to one byte.
   uint64_t alignment;
-} loom_native_elf64le_segment_t;
+} loom_native_elf_segment_t;
+
+typedef struct loom_native_elf32le_file_t {
+  // ELF ET_* file type.
+  uint16_t type;
+  // ELF EM_* machine identifier.
+  uint16_t machine;
+  // ELF e_ident OS ABI identifier.
+  uint8_t os_abi;
+  // ELF e_ident ABI version.
+  uint8_t abi_version;
+  // Processor-specific ELF e_flags.
+  uint32_t flags;
+  // Entry point virtual address, or zero when the object has no entry.
+  uint32_t entry;
+  // Caller-provided sections. The writer prepends SHN_UNDEF and appends
+  // `.shstrtab`; segment section indices refer only to this caller array.
+  const loom_native_elf_section_t* sections;
+  // Number of caller-provided sections.
+  iree_host_size_t section_count;
+  // Caller-provided program segments over contiguous ranges of |sections|.
+  const loom_native_elf_segment_t* segments;
+  // Number of caller-provided program segments.
+  iree_host_size_t segment_count;
+} loom_native_elf32le_file_t;
 
 typedef struct loom_native_elf64le_file_t {
   // ELF ET_* file type.
@@ -158,14 +183,27 @@ typedef struct loom_native_elf64le_file_t {
   uint64_t entry;
   // Caller-provided sections. The writer prepends SHN_UNDEF and appends
   // `.shstrtab`; segment section indices refer only to this caller array.
-  const loom_native_elf64le_section_t* sections;
+  const loom_native_elf_section_t* sections;
   // Number of caller-provided sections.
   iree_host_size_t section_count;
   // Caller-provided program segments over contiguous ranges of |sections|.
-  const loom_native_elf64le_segment_t* segments;
+  const loom_native_elf_segment_t* segments;
   // Number of caller-provided program segments.
   iree_host_size_t segment_count;
 } loom_native_elf64le_file_t;
+
+// Writes |file| as a complete ELF32 little-endian object to |stream|.
+//
+// The writer emits bytes sequentially. It computes all layout metadata before
+// writing and does not patch or seek backward, making it suitable for ordinary
+// output streams. All public and computed ELF32 fields are range-checked before
+// any bytes are written. Temporary layout and `.shstrtab` storage use
+// |scratch_arena|, which must remain live until this call returns. On failure
+// the arena may contain abandoned transient allocations that will be reclaimed
+// by the next arena reset.
+iree_status_t loom_native_elf32le_write_file(
+    const loom_native_elf32le_file_t* file, iree_io_stream_t* stream,
+    iree_arena_allocator_t* scratch_arena);
 
 // Writes |file| as a complete ELF64 little-endian object to |stream|.
 //

@@ -433,7 +433,7 @@ TEST(AmdgpuMetadataTest, WritesElfEnvelopeContainingMetadataNote) {
   std::string note = BuilderString(note_builder);
   iree_string_builder_deinitialize(&note_builder);
 
-  const loom_native_elf64le_section_t sections[] = {{
+  const loom_native_elf_section_t sections[] = {{
       /*.name=*/IREE_SV(".note"),
       /*.type=*/LOOM_NATIVE_ELF_SECTION_TYPE_NOTE,
       /*.flags=*/LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC,
@@ -444,7 +444,7 @@ TEST(AmdgpuMetadataTest, WritesElfEnvelopeContainingMetadataNote) {
       /*.info=*/0,
       /*.contents=*/iree_make_const_byte_span(note.data(), note.size()),
   }};
-  const loom_native_elf64le_segment_t segments[] = {{
+  const loom_native_elf_segment_t segments[] = {{
       /*.type=*/LOOM_NATIVE_ELF_PROGRAM_TYPE_NOTE,
       /*.flags=*/LOOM_NATIVE_ELF_PROGRAM_FLAG_READ,
       /*.file_offset=*/{},
