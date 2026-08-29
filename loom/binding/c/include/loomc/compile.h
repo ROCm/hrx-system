@@ -10,6 +10,7 @@
 #include "loomc/config.h"
 #include "loomc/module.h"
 #include "loomc/pass.h"
+#include "loomc/product.h"
 #include "loomc/result.h"
 #include "loomc/workspace.h"
 
@@ -250,6 +251,53 @@ LOOMC_API_EXPORT loomc_status_t loomc_compile_module(
     const loomc_pass_program_t* pass_program, loomc_module_t* module,
     const loomc_compile_options_t* options, loomc_allocator_t allocator,
     loomc_result_t** out_result);
+
+/// Compiles one immutable leaf request into a compiler product.
+///
+/// The request source is deserialized into `workspace` and compiled with the
+/// same pass program and invocation options as `loomc_compile_module`. The
+/// returned product owns the emitted artifact views and preserves request-root
+/// order as its exported-root order. It has no unresolved requirements.
+///
+/// This is the synchronous leaf operation used by a composing host after a
+/// cache miss. Cache hits bypass the operation entirely. Selecting the pass
+/// program remains the host's responsibility; the defining operation of
+/// the request roots provides the route without a target-kind enum.
+///
+/// @param compiler Prepared compiler.
+/// @param workspace Invocation-local scratch workspace.
+/// @param pass_program Prepared pass program selected for the request roots.
+/// @param request Immutable independently compilable request.
+/// @param options Compile invocation options, or `NULL` for defaults.
+/// @param allocator Host allocator used for the returned product and result.
+/// @param out_product Receives a retained product when the result succeeds;
+/// receives NULL when the result fails.
+/// @param out_result Receives a retained result for the operation.
+/// @return OK when deserialization and compilation ran to a result. Non-OK
+/// statuses represent API misuse or infrastructure failure.
+///
+/// @ownership
+/// The caller owns `out_product` when non-NULL and releases it with
+/// `loomc_product_release`. The caller owns `out_result` on an OK return and
+/// releases it with `loomc_result_release`. The product does not retain
+/// `request`, its source, `workspace`, or the deserialized module. Result
+/// diagnostics may retain the request source when they reference it.
+///
+/// @thread_safety
+/// Calls may share `compiler`, `pass_program`, and `request`. Each concurrent
+/// call requires a distinct workspace.
+LOOMC_API_EXPORT loomc_status_t loomc_compile_request(
+    loomc_compiler_t* compiler, loomc_workspace_t* workspace,
+    const loomc_pass_program_t* pass_program, const loomc_request_t* request,
+    const loomc_compile_options_t* options, loomc_allocator_t allocator,
+    loomc_product_t** out_product, loomc_result_t** out_result);
+
+/// Returns the process-local descriptor for products from
+/// `loomc_compile_request`.
+///
+/// @return Process-lifetime compiled-module product descriptor.
+LOOMC_API_EXPORT const loomc_product_descriptor_t*
+loomc_compiled_module_product_descriptor(void);
 
 /// Retains a prepared compiler for another owner.
 ///
