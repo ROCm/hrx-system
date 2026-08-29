@@ -6,19 +6,32 @@
 
 from __future__ import annotations
 
+from loom.target.arch.amd.xdna.aie.schedule import (
+    PipelineStageKind,
+    pipeline_uses,
+)
 from loom.target.arch.amd.xdna.aie2p.core_descriptors import (
+    _DESCRIPTOR_SPECS,
+    _INSTRUCTION_ENCODINGS,
+    _SCHEDULE_CLASS_NAMES,
     AIE2P_CORE_DESCRIPTOR_SET,
     _constraints,
+    _itinerary,
     _low_register_class_name,
+    _pipeline_resource_name,
+    _slot_resource_name,
 )
 from loom.target.arch.amd.xdna.aie2p.core_machine_data import CORE_MACHINE_TABLE
+from loom.target.arch.amd.xdna.aie2p.core_schedule_data import CORE_SCHEDULE_TABLE
 from loom.target.low_descriptors import (
     ConstraintKind,
     EffectKind,
+    IssueUseKind,
     OperandFlag,
     OperandRole,
     RegClassAltFlag,
     RegClassFlag,
+    ResourceKind,
 )
 
 
@@ -33,6 +46,50 @@ def test_core_descriptor_closure_is_complete() -> None:
     assert tuple(
         row.atomic_units for row in descriptor_set.physical_registers
     ) == tuple(row.atomic_units for row in CORE_MACHINE_TABLE.physical_registers)
+
+
+def test_complete_schedule_domain_drives_selected_low_descriptors() -> None:
+    descriptor_set = AIE2P_CORE_DESCRIPTOR_SET
+    assert len(descriptor_set.resources) == 81
+    assert len(descriptor_set.timing_events) == 38
+    assert len(descriptor_set.event_separations) == 651
+    assert len(descriptor_set.schedule_classes) == 14
+    assert {
+        resource.name
+        for resource in descriptor_set.resources
+        if resource.kind is ResourceKind.PIPELINE
+    } == {
+        _pipeline_resource_name(resource) for resource in CORE_SCHEDULE_TABLE.resources
+    }
+
+    schedule_classes = {
+        schedule_class.name: schedule_class
+        for schedule_class in descriptor_set.schedule_classes
+    }
+    for spec in _DESCRIPTOR_SPECS:
+        schedule_class = schedule_classes[
+            _SCHEDULE_CLASS_NAMES[(spec.form_name, spec.itinerary)]
+        ]
+        slot = _INSTRUCTION_ENCODINGS[spec.form_name].slot
+        assert schedule_class.issue_uses[0].resource == _slot_resource_name(slot)
+        assert schedule_class.issue_uses[0].stage == 0
+        assert schedule_class.issue_uses[0].cycles == 1
+        assert schedule_class.issue_uses[0].kind is IssueUseKind.REQUIRED
+        expected_pipeline_uses = pipeline_uses(_itinerary(spec))
+        assert len(schedule_class.issue_uses) == len(expected_pipeline_uses) + 1
+        for actual, expected in zip(
+            schedule_class.issue_uses[1:], expected_pipeline_uses, strict=True
+        ):
+            assert len(expected.resources) == 1
+            assert actual.resource == _pipeline_resource_name(expected.resources[0])
+            assert actual.stage == expected.start_cycle
+            assert actual.cycles == expected.cycles
+            assert actual.units == 1
+            assert actual.kind is (
+                IssueUseKind.REQUIRED
+                if expected.kind is PipelineStageKind.REQUIRED
+                else IssueUseKind.RESERVED
+            )
 
 
 def test_low_register_classes_retain_machine_candidate_order() -> None:

@@ -51,14 +51,26 @@ iree_py_library(
 )
 
 iree_py_library(
+    name = "schedule_data",
+    srcs = ["core_schedule_data.py"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":package_init",
+        "//loom/py/loom/target/arch/amd/xdna/aie:schedule",
+    ],
+)
+
+iree_py_library(
     name = "descriptors",
     srcs = ["core_descriptors.py"],
     visibility = ["//visibility:public"],
     deps = [
         ":encoding_data",
         ":machine_data",
+        ":schedule_data",
         "//loom/py/loom/target:low_descriptors",
         "//loom/py/loom/target/arch/amd/xdna/aie:machine",
+        "//loom/py/loom/target/arch/amd/xdna/aie:schedule",
     ],
 )
 
@@ -84,6 +96,21 @@ iree_py_test(
     deps = [
         ":machine_data",
         "//loom/py/loom/target/arch/amd/xdna/aie:machine",
+    ],
+)
+
+iree_py_test(
+    name = "schedule_test",
+    srcs = [
+        "schedule_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.target.arch.amd.xdna.aie2p.schedule_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":machine_data",
+        ":schedule_data",
+        "//loom/py/loom/target/arch/amd/xdna/aie:schedule",
     ],
 )
 
