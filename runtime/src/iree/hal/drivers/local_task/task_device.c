@@ -19,11 +19,11 @@
 #include "iree/hal/drivers/local_task/block_command_buffer.h"
 #include "iree/hal/drivers/local_task/task_queue.h"
 #include "iree/hal/drivers/local_task/task_semaphore.h"
+#include "iree/hal/drivers/local_task/transient_buffer.h"
 #include "iree/hal/local/atomic.h"
 #include "iree/hal/local/device_spec_builder.h"
 #include "iree/hal/local/executable_environment.h"
 #include "iree/hal/local/profile.h"
-#include "iree/hal/local/transient_buffer.h"
 #include "iree/hal/memory/cpu_slab_provider.h"
 #include "iree/hal/memory/passthrough_pool.h"
 #include "iree/hal/memory/tlsf_pool.h"
@@ -744,7 +744,7 @@ static iree_status_t iree_hal_task_device_prepare_alloca_wrapper(
     placement.flags |= IREE_HAL_BUFFER_PLACEMENT_FLAG_INDETERMINATE_LIFETIME;
   }
 
-  IREE_RETURN_IF_ERROR(iree_hal_local_transient_buffer_create(
+  IREE_RETURN_IF_ERROR(iree_hal_task_transient_buffer_create(
       placement, *params, allocation_size, allocation_size,
       iree_hal_allocator_host_allocator(iree_hal_device_allocator(base_device)),
       out_buffer));
@@ -840,7 +840,7 @@ static iree_status_t iree_hal_task_device_queue_dealloca(
   const iree_hal_buffer_placement_t placement =
       iree_hal_buffer_allocation_placement(buffer);
   if (placement.device == base_device &&
-      iree_hal_local_transient_buffer_isa(buffer)) {
+      iree_hal_task_transient_buffer_isa(buffer)) {
     // Native dealloca: decommit the transient buffer in the queue drain handler
     // after all wait semaphores have been satisfied and before signaling
     // dealloca completion.

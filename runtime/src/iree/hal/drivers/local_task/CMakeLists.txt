@@ -11,6 +11,21 @@ iree_add_all_subdirs()
 
 iree_cc_library(
   NAME
+    transient_buffer
+  HDRS
+    "transient_buffer.h"
+  SRCS
+    "transient_buffer.c"
+  DEPS
+    iree::async
+    iree::base
+    iree::base::threading
+    iree::hal
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     block_builder
   HDRS
     "block_builder.h"
@@ -49,6 +64,7 @@ iree_cc_library(
     ::block_builder
     ::block_command_ops
     ::block_isa
+    ::transient_buffer
     iree::async
     iree::base
     iree::base::internal::arena
@@ -56,7 +72,6 @@ iree_cc_library(
     iree::hal::local::atomic
     iree::hal::local::executable_library
     iree::hal::local::executable_loader
-    iree::hal::local::transient_buffer
     iree::hal::utils::resource_set
   PUBLIC
 )
@@ -158,6 +173,7 @@ iree_cc_library(
     ::block_command_buffer
     ::block_command_ops
     ::block_processor
+    ::transient_buffer
     iree::async
     iree::async::util::proactor_pool
     iree::base
@@ -174,7 +190,6 @@ iree_cc_library(
     iree::hal::local::executable_library
     iree::hal::local::executable_loader
     iree::hal::local::profile
-    iree::hal::local::transient_buffer
     iree::hal::memory::cpu_slab_provider
     iree::hal::memory::passthrough_pool
     iree::hal::memory::tlsf_pool
