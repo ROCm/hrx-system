@@ -219,12 +219,24 @@ loom_cc_library(
     hdrs = ["low_verify.h"],
     deps = [
         ":descriptors",
+        ":structural_ops",
         "//loom/src/loom/codegen/low:diagnostics",
         "//loom/src/loom/codegen/low:packet",
         "//loom/src/loom/codegen/low:verify",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/ir",
         "//loom/src/loom/target:registers",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "structural_ops",
+    srcs = ["structural_ops.c"],
+    hdrs = ["structural_ops.h"],
+    visibility = ["//loom/src/loom/target/emit/vm:__pkg__"],
+    deps = [
+        "//loom/src/loom/ops/low",
         "//runtime/src/iree/base",
     ],
 )

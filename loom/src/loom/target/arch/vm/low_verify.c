@@ -12,6 +12,7 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/target/arch/vm/descriptors.h"
+#include "loom/target/arch/vm/structural_ops.h"
 #include "loom/target/registers.h"
 
 typedef enum loom_vm_packet_constraint_kind_e {
@@ -346,10 +347,9 @@ static iree_string_view_t loom_vm_low_constraint_name(uint8_t kind) {
   }
 }
 
-static iree_status_t loom_vm_low_emit_constraint_error(
-    loom_low_verify_context_t* context,
-    const loom_low_descriptor_packet_t* packet,
-    const loom_vm_packet_constraint_t* constraint) {
+static iree_status_t loom_vm_low_emit_op_constraint_error(
+    loom_low_verify_context_t* context, const loom_op_t* op,
+    iree_string_view_t constraint_name) {
   const loom_low_resolved_target_t* target =
       loom_low_verify_context_target(context);
   const loom_module_t* module = loom_low_verify_context_module(context);
@@ -359,11 +359,19 @@ static iree_status_t loom_vm_low_emit_constraint_error(
       loom_param_string(loom_low_diagnostic_config_key(target)),
       loom_param_string(loom_low_diagnostic_function_name(
           module, loom_low_verify_context_function_op(context))),
-      loom_param_string(loom_op_name(module, packet->op)),
-      loom_param_string(loom_vm_low_constraint_name(constraint->kind)),
+      loom_param_string(loom_op_name(module, op)),
+      loom_param_string(constraint_name),
   };
-  return loom_low_verify_context_emit(context, packet->op, LOOM_ERR_TARGET_032,
-                                      params, IREE_ARRAYSIZE(params));
+  return loom_low_verify_context_emit(context, op, LOOM_ERR_TARGET_032, params,
+                                      IREE_ARRAYSIZE(params));
+}
+
+static iree_status_t loom_vm_low_emit_constraint_error(
+    loom_low_verify_context_t* context,
+    const loom_low_descriptor_packet_t* packet,
+    const loom_vm_packet_constraint_t* constraint) {
+  return loom_vm_low_emit_op_constraint_error(
+      context, packet->op, loom_vm_low_constraint_name(constraint->kind));
 }
 
 static iree_status_t loom_vm_low_verify_op(
@@ -373,11 +381,20 @@ static iree_status_t loom_vm_low_verify_op(
   (void)provider;
   (void)provider_state;
   if (loom_low_verify_context_should_stop(context) ||
-      packet->descriptor == NULL ||
       loom_low_verify_context_target(context)->descriptor_set !=
-          loom_vm_core_descriptor_set() ||
-      packet->descriptor_ordinal >=
-          IREE_ARRAYSIZE(kLoomVmPacketConstraintRanges)) {
+          loom_vm_core_descriptor_set()) {
+    return iree_ok_status();
+  }
+  if (packet->descriptor == NULL) {
+    if (loom_vm_structural_op_classify(packet->op) ==
+        LOOM_VM_STRUCTURAL_OP_KIND_NONE) {
+      return loom_vm_low_emit_op_constraint_error(
+          context, packet->op, IREE_SV("structural_encoding"));
+    }
+    return iree_ok_status();
+  }
+  if (packet->descriptor_ordinal >=
+      IREE_ARRAYSIZE(kLoomVmPacketConstraintRanges)) {
     return iree_ok_status();
   }
   const loom_vm_packet_constraint_range_t range =

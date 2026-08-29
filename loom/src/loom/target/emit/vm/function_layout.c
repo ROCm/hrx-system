@@ -13,6 +13,7 @@
 #include "loom/ir/context.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
+#include "loom/target/arch/vm/structural_ops.h"
 #include "loom/target/emit/vm/function_call.h"
 #include "loom/target/emit/vm/function_locals.h"
 
@@ -151,67 +152,8 @@ static iree_status_t loom_vm_function_structural_packet_byte_length(
     loom_vm_function_code_layout_t* code_layout, uint32_t* out_byte_length) {
   *out_byte_length = 0;
   const loom_op_t* op = packet->node->op;
-  if (loom_low_return_isa(op)) {
-    *out_byte_length = 4;
-    return iree_ok_status();
-  }
-  if (loom_low_copy_isa(op) || loom_low_move_isa(op) ||
-      loom_low_slice_isa(op) || loom_low_concat_isa(op)) {
-    *out_byte_length = loom_vm_function_packet_move_byte_length(frame, packet);
-    return iree_ok_status();
-  }
-  if (loom_low_storage_reserve_isa(op) || loom_low_storage_view_isa(op)) {
-    return iree_ok_status();
-  }
-  if (loom_vm_function_local_transfer_is_packet(packet)) {
-    *out_byte_length =
-        loom_vm_function_local_transfer_byte_length(frame, packet);
-    return iree_ok_status();
-  }
-  loom_vm_function_call_view_t call = {0};
-  if (loom_vm_function_call_try_view(op, &call)) {
-    loom_vm_call_abi_packet_layout_t call_layout = {0};
-    IREE_RETURN_IF_ERROR(
-        loom_vm_function_call_layout_build(frame->module, &call, &call_layout));
-    *out_byte_length =
-        loom_vm_function_call_record_byte_length(&call, &call_layout);
-    return iree_ok_status();
-  }
-  if (loom_low_func_null_isa(op)) {
-    *out_byte_length = sizeof(iree_vm_isa_func_null_record_t);
-    return iree_ok_status();
-  }
-  if (loom_low_func_compare_null_isa(op)) {
-    *out_byte_length = sizeof(iree_vm_isa_func_compare_null_record_t);
-    return iree_ok_status();
-  }
-  if (loom_low_func_address_isa(op)) {
-    *out_byte_length = sizeof(iree_vm_isa_func_address_record_t);
-    return iree_ok_status();
-  }
-  if (loom_low_func_import_resolved_isa(op)) {
-    *out_byte_length = sizeof(iree_vm_isa_func_import_resolved_record_t);
-    return iree_ok_status();
-  }
-  const loom_vm_function_control_layout_t* control_layout =
-      loom_vm_function_control_encoding_layout(
-          code_layout->control_encodings[packet->packet_index]);
-  if (loom_low_br_isa(op)) {
-    *out_byte_length = loom_vm_function_edge_move_byte_length(frame, packet) +
-                       control_layout->first_byte_length;
-    return iree_ok_status();
-  }
-  if (loom_low_cond_br_isa(op)) {
-    *out_byte_length =
-        control_layout->first_byte_length + control_layout->second_byte_length;
-    return iree_ok_status();
-  }
-  if (loom_low_switch_isa(op)) {
-    *out_byte_length = sizeof(iree_vm_isa_control_switch_record_t) +
-                       control_layout->first_byte_length;
-    return iree_ok_status();
-  }
-  if (packet->descriptor != NULL) {
+  if (packet->descriptor != NULL &&
+      packet->descriptor->carrier == LOOM_LOW_DESCRIPTOR_CARRIER_PACKET) {
     const uint32_t descriptor_ordinal =
         (uint32_t)(packet->descriptor -
                    frame->target.descriptor_set->descriptors);
@@ -219,13 +161,82 @@ static iree_status_t loom_vm_function_structural_packet_byte_length(
         loom_vm_function_descriptor_record_byte_length(descriptor_ordinal);
     return iree_ok_status();
   }
+
+  const loom_vm_structural_op_kind_t kind = loom_vm_structural_op_classify(op);
+  switch (kind) {
+    case LOOM_VM_STRUCTURAL_OP_KIND_RETURN:
+      *out_byte_length = 4;
+      return iree_ok_status();
+    case LOOM_VM_STRUCTURAL_OP_KIND_RETAIN_TRANSFER:
+    case LOOM_VM_STRUCTURAL_OP_KIND_MOVE_TRANSFER:
+      *out_byte_length =
+          loom_vm_function_packet_move_byte_length(frame, packet);
+      return iree_ok_status();
+    case LOOM_VM_STRUCTURAL_OP_KIND_STORAGE:
+      return iree_ok_status();
+    case LOOM_VM_STRUCTURAL_OP_KIND_LOCAL_TRANSFER:
+      *out_byte_length =
+          loom_vm_function_local_transfer_byte_length(frame, packet);
+      return iree_ok_status();
+    case LOOM_VM_STRUCTURAL_OP_KIND_CALL: {
+      loom_vm_function_call_view_t call = {0};
+      const bool is_call = loom_vm_function_call_try_view(op, &call);
+      IREE_ASSERT(is_call);
+      (void)is_call;
+      loom_vm_call_abi_packet_layout_t call_layout = {0};
+      IREE_RETURN_IF_ERROR(loom_vm_function_call_layout_build(
+          frame->module, &call, &call_layout));
+      *out_byte_length =
+          loom_vm_function_call_record_byte_length(&call, &call_layout);
+      return iree_ok_status();
+    }
+    case LOOM_VM_STRUCTURAL_OP_KIND_FUNCTION_VALUE:
+      if (loom_low_func_null_isa(op)) {
+        *out_byte_length = sizeof(iree_vm_isa_func_null_record_t);
+      } else if (loom_low_func_compare_null_isa(op)) {
+        *out_byte_length = sizeof(iree_vm_isa_func_compare_null_record_t);
+      } else if (loom_low_func_address_isa(op)) {
+        *out_byte_length = sizeof(iree_vm_isa_func_address_record_t);
+      } else {
+        IREE_ASSERT(loom_low_func_import_resolved_isa(op));
+        *out_byte_length = sizeof(iree_vm_isa_func_import_resolved_record_t);
+      }
+      return iree_ok_status();
+    case LOOM_VM_STRUCTURAL_OP_KIND_BRANCH: {
+      const loom_vm_function_control_layout_t* control_layout =
+          loom_vm_function_control_encoding_layout(
+              code_layout->control_encodings[packet->packet_index]);
+      *out_byte_length = loom_vm_function_edge_move_byte_length(frame, packet) +
+                         control_layout->first_byte_length;
+      return iree_ok_status();
+    }
+    case LOOM_VM_STRUCTURAL_OP_KIND_CONDITIONAL_BRANCH: {
+      const loom_vm_function_control_layout_t* control_layout =
+          loom_vm_function_control_encoding_layout(
+              code_layout->control_encodings[packet->packet_index]);
+      *out_byte_length = control_layout->first_byte_length +
+                         control_layout->second_byte_length;
+      return iree_ok_status();
+    }
+    case LOOM_VM_STRUCTURAL_OP_KIND_SWITCH: {
+      const loom_vm_function_control_layout_t* control_layout =
+          loom_vm_function_control_encoding_layout(
+              code_layout->control_encodings[packet->packet_index]);
+      *out_byte_length = sizeof(iree_vm_isa_control_switch_record_t) +
+                         control_layout->first_byte_length;
+      return iree_ok_status();
+    }
+    case LOOM_VM_STRUCTURAL_OP_KIND_NONE:
+    default:
+      break;
+  }
   const loom_op_vtable_t* vtable = loom_op_vtable(frame->module, op);
   const iree_string_view_t op_name =
       vtable != NULL ? loom_op_vtable_name(vtable) : IREE_SV("<unknown>");
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "VM function layout does not support structural "
-                          "operation %.*s",
-                          (int)op_name.size, op_name.data);
+  return iree_make_status(
+      IREE_STATUS_FAILED_PRECONDITION,
+      "unsupported structural operation %.*s reached VM layout",
+      (int)op_name.size, op_name.data);
 }
 
 static uint32_t loom_vm_function_target_block_index(

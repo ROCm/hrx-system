@@ -64,6 +64,7 @@ loom_cc_library(
     loom::target::arch::vm::descriptors
     loom::target::arch::vm::facts
     loom::target::arch::vm::ops
+    loom::target::arch::vm::structural_ops
     loom::target::low_descriptor_registry
     loom::target::provider
     loom::target::registers

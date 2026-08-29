@@ -73,6 +73,7 @@ loom_cc_library(
         "//loom/src/loom/target/arch/vm:descriptors",
         "//loom/src/loom/target/arch/vm:facts",
         "//loom/src/loom/target/arch/vm:ops",
+        "//loom/src/loom/target/arch/vm:structural_ops",
         "//loom/src/loom/util:call_graph",
         "//loom/src/loom/util:stream",
         "//runtime/src/iree/base",

@@ -23,6 +23,7 @@
 #include "loom/ops/op_defs.h"
 #include "loom/target/arch/vm/abi/layout.h"
 #include "loom/target/arch/vm/descriptors.h"
+#include "loom/target/arch/vm/structural_ops.h"
 #include "loom/target/emit/vm/function_call.h"
 #include "loom/target/emit/vm/function_layout.h"
 #include "loom/target/emit/vm/function_locals.h"
@@ -492,62 +493,63 @@ static iree_status_t loom_vm_function_encode_structural_packet(
     const loom_low_packet_view_t* packet, uint32_t switch_target_base,
     iree_vm_bytecode_v0_switch_target_entry_t* switch_targets,
     loom_bytecode_page_writer_t* writer) {
-  if (loom_low_return_isa(packet->node->op)) {
-    const iree_vm_isa_control_return_record_t record = {
-        .opcode_u8 = IREE_VM_ISA_CORE_OPCODE_CONTROL_RETURN,
-        .zero_padding_u8 = {0, 0, 0},
-    };
-    return loom_bytecode_page_writer_write(writer, &record, sizeof(record));
+  const loom_vm_structural_op_kind_t kind =
+      loom_vm_structural_op_classify(packet->node->op);
+  switch (kind) {
+    case LOOM_VM_STRUCTURAL_OP_KIND_RETURN: {
+      const iree_vm_isa_control_return_record_t record = {
+          .opcode_u8 = IREE_VM_ISA_CORE_OPCODE_CONTROL_RETURN,
+          .zero_padding_u8 = {0, 0, 0},
+      };
+      return loom_bytecode_page_writer_write(writer, &record, sizeof(record));
+    }
+    case LOOM_VM_STRUCTURAL_OP_KIND_STORAGE:
+      return iree_ok_status();
+    case LOOM_VM_STRUCTURAL_OP_KIND_LOCAL_TRANSFER:
+      return loom_vm_function_local_transfer_encode(frame, &code_layout->locals,
+                                                    packet, writer);
+    case LOOM_VM_STRUCTURAL_OP_KIND_CALL: {
+      loom_vm_function_call_view_t call = {0};
+      const bool is_call =
+          loom_vm_function_call_try_view(packet->node->op, &call);
+      IREE_ASSERT(is_call);
+      (void)is_call;
+      loom_vm_call_abi_packet_layout_t call_layout = {0};
+      IREE_RETURN_IF_ERROR(loom_vm_function_call_layout_build(
+          frame->module, &call, &call_layout));
+      return loom_vm_function_call_encode(frame, module_layout, packet, &call,
+                                          &call_layout, writer);
+    }
+    case LOOM_VM_STRUCTURAL_OP_KIND_RETAIN_TRANSFER:
+    case LOOM_VM_STRUCTURAL_OP_KIND_MOVE_TRANSFER: {
+      const loom_low_allocation_packet_move_group_t* group =
+          loom_low_allocation_find_packet_move_group_by_source_ordinal(
+              &frame->allocation, packet->node->source_ordinal);
+      const loom_vm_function_ref_transfer_t ref_transfer =
+          kind == LOOM_VM_STRUCTURAL_OP_KIND_RETAIN_TRANSFER
+              ? LOOM_VM_FUNCTION_REF_TRANSFER_RETAIN
+              : LOOM_VM_FUNCTION_REF_TRANSFER_MOVE;
+      return loom_vm_function_encode_move_group(
+          &frame->allocation, group != NULL ? &group->move_group : NULL,
+          ref_transfer, writer);
+    }
+    case LOOM_VM_STRUCTURAL_OP_KIND_FUNCTION_VALUE:
+      return loom_vm_function_encode_function_packet(frame, module_layout,
+                                                     packet, writer);
+    case LOOM_VM_STRUCTURAL_OP_KIND_BRANCH:
+    case LOOM_VM_STRUCTURAL_OP_KIND_CONDITIONAL_BRANCH:
+      return loom_vm_function_encode_control_packet(frame, code_layout, packet,
+                                                    writer);
+    case LOOM_VM_STRUCTURAL_OP_KIND_SWITCH:
+      return loom_vm_function_encode_switch(frame, code_layout, packet,
+                                            switch_target_base, switch_targets,
+                                            writer);
+    case LOOM_VM_STRUCTURAL_OP_KIND_NONE:
+    default:
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "unsupported structural operation reached VM encoding");
   }
-  if (loom_low_storage_reserve_isa(packet->node->op) ||
-      loom_low_storage_view_isa(packet->node->op)) {
-    return iree_ok_status();
-  }
-  if (loom_vm_function_local_transfer_is_packet(packet)) {
-    return loom_vm_function_local_transfer_encode(frame, &code_layout->locals,
-                                                  packet, writer);
-  }
-  loom_vm_function_call_view_t call = {0};
-  if (loom_vm_function_call_try_view(packet->node->op, &call)) {
-    loom_vm_call_abi_packet_layout_t call_layout = {0};
-    IREE_RETURN_IF_ERROR(
-        loom_vm_function_call_layout_build(frame->module, &call, &call_layout));
-    return loom_vm_function_call_encode(frame, module_layout, packet, &call,
-                                        &call_layout, writer);
-  }
-  if (loom_low_copy_isa(packet->node->op) ||
-      loom_low_move_isa(packet->node->op) ||
-      loom_low_slice_isa(packet->node->op) ||
-      loom_low_concat_isa(packet->node->op)) {
-    const loom_low_allocation_packet_move_group_t* group =
-        loom_low_allocation_find_packet_move_group_by_source_ordinal(
-            &frame->allocation, packet->node->source_ordinal);
-    const loom_vm_function_ref_transfer_t ref_transfer =
-        loom_low_copy_isa(packet->node->op)
-            ? LOOM_VM_FUNCTION_REF_TRANSFER_RETAIN
-            : LOOM_VM_FUNCTION_REF_TRANSFER_MOVE;
-    return loom_vm_function_encode_move_group(
-        &frame->allocation, group != NULL ? &group->move_group : NULL,
-        ref_transfer, writer);
-  }
-  if (loom_low_func_null_isa(packet->node->op) ||
-      loom_low_func_compare_null_isa(packet->node->op) ||
-      loom_low_func_address_isa(packet->node->op) ||
-      loom_low_func_import_resolved_isa(packet->node->op)) {
-    return loom_vm_function_encode_function_packet(frame, module_layout, packet,
-                                                   writer);
-  }
-  if (loom_low_br_isa(packet->node->op) ||
-      loom_low_cond_br_isa(packet->node->op)) {
-    return loom_vm_function_encode_control_packet(frame, code_layout, packet,
-                                                  writer);
-  }
-  if (loom_low_switch_isa(packet->node->op)) {
-    return loom_vm_function_encode_switch(
-        frame, code_layout, packet, switch_target_base, switch_targets, writer);
-  }
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "VM structural operation is not implemented");
 }
 
 static iree_status_t loom_vm_function_claim_direct_abi_location(

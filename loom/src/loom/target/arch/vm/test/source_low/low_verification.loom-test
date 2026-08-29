@@ -58,3 +58,16 @@ low.func.def target<vm.core>(@target) @packed_selector_must_be_assigned(%buffer:
   buffer.atomic.reduce %buffer, %offset, %operand, 0, 0
   return
 }
+
+// ====
+
+// RUN: verify
+
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) @structural_op_must_have_vm_encoding() {
+  %storage = low.storage.reserve {byte_alignment = 8, byte_length = 8} : low.storage<private>
+  // ERROR@+1: TARGET/032 {op_name="low.storage.address", op_constraint="structural_encoding"}
+  %address = low.storage.address %storage : low.storage<private> -> reg<vm.value : i64>
+  low.return
+}

@@ -215,6 +215,7 @@ loom_cc_library(
     "low_verify.c"
   DEPS
     ::descriptors
+    ::structural_ops
     iree::base
     loom::codegen::low::diagnostics
     loom::codegen::low::packet
@@ -222,6 +223,21 @@ loom_cc_library(
     loom::error::error_defs
     loom::ir
     loom::target::registers
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
+    structural_ops
+  HDRS
+    "structural_ops.h"
+  SRCS
+    "structural_ops.c"
+  DEPS
+    iree::base
+    loom::ops::low
   PUBLIC
 )
 endif()
