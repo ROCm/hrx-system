@@ -239,6 +239,8 @@ struct loom_low_lower_context_t {
   const loom_low_lower_options_t* options;
   // Target-low lowering policy selected by the caller.
   const loom_low_lower_policy_t* policy;
+  // Immutable policy contract set cached beside hot lowering state.
+  const loom_low_lower_contract_set_t* contract_set;
   // Descriptor set selected by source legality.
   const loom_low_descriptor_set_t* descriptor_set;
   // Result object receiving counters and emitted low function metadata.
@@ -258,8 +260,6 @@ struct loom_low_lower_context_t {
   loom_low_lower_module_state_t* module_state;
   // Function-local state for this source-to-low lowering run.
   loom_low_lowering_frame_t lowering;
-  // Dense root contract index composed from the active policy shards.
-  loom_target_contract_index_t contract_index;
   // Builder used while emitting the low function.
   loom_builder_t builder;
   // Emitted target-low function operation, or NULL before emission starts.

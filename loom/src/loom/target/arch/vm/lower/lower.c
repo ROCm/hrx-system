@@ -477,6 +477,12 @@ static iree_status_t loom_vm_prepare_module(
                                          scratch_arena, out_result);
 }
 
+static const loom_target_contract_index_t kVmCoreContractIndex = {0};
+
+static const loom_low_lower_contract_set_t kVmCoreContractSet = {
+    .index = &kVmCoreContractIndex,
+};
+
 static const loom_low_lower_policy_t kVmCoreLowLowerPolicy = {
     .name = IREE_SVL("vm-core-low-lower"),
     .flags = LOOM_LOW_LOWER_POLICY_FLAG_MODULE_IMPORTS,
@@ -486,6 +492,7 @@ static const loom_low_lower_policy_t kVmCoreLowLowerPolicy = {
                               .user_data = NULL},
     .emit_preamble = {.fn = loom_vm_emit_preamble, .user_data = NULL},
     .map_abi_layout = {.fn = loom_vm_map_abi_layout, .user_data = NULL},
+    .contract_set = &kVmCoreContractSet,
     .switch_lowering =
         {
             .can_emit = loom_vm_switch_lowering_can_emit,

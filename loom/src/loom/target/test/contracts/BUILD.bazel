@@ -7,7 +7,8 @@
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
     "loom_cc_library",
-    "loom_target_contract_table_cc_libraries",
+    "loom_target_contract_cc_libraries",
+    "loom_target_contract_file_family",
 )
 
 package(
@@ -16,12 +17,17 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
-loom_target_contract_table_cc_libraries(
+loom_target_contract_file_family(
+    name = "contract_tables_gen",
+    contract_sets = {"test_low": ["core"]},
+    fragments = {"core": "test_low_core"},
+    generator = "//loom/py/loom/gen/target/contracts:test_low_contract_table_family",
+)
+
+loom_target_contract_cc_libraries(
     name = "core",
     testonly = True,
-    args = ["--contract-fragment=test_low_core"],
     contract_deps = ["//loom/src/loom/target:contract"],
-    generator = "//loom/py/loom/gen/target/contracts:test_low_contract_table_family",
     lower_rule_deps = [
         "//loom/src/loom/codegen/low/lower",
         "//loom/src/loom/ops/buffer",
@@ -33,14 +39,28 @@ loom_target_contract_table_cc_libraries(
 )
 
 loom_cc_library(
+    name = "sets",
+    testonly = True,
+    srcs = ["sets.c"],
+    hdrs = ["sets.h"],
+    deps = [
+        ":core",
+        ":core_lower_rules",
+        "//loom/src/loom/codegen/low/lower",
+    ],
+)
+
+loom_cc_library(
     name = "contracts",
     testonly = True,
     hdrs = [
         "core.h",
         "core_lower_rules.h",
+        "sets.h",
     ],
     deps = [
         ":core",
         ":core_lower_rules",
+        ":sets",
     ],
 )

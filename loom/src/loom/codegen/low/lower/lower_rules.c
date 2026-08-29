@@ -1696,7 +1696,8 @@ static iree_status_t loom_low_lower_rule_descriptor_maps_initialize(
   context->lowering.rule_descriptor_maps = NULL;
   context->lowering.rule_descriptor_map_count = 0;
 
-  const loom_low_lower_rule_set_list_t rule_sets = context->policy->rule_sets;
+  const loom_low_lower_rule_set_list_t rule_sets =
+      context->contract_set->rule_sets;
   if (rule_sets.count == 0) {
     return iree_ok_status();
   }

@@ -25,7 +25,7 @@ extern "C" {
 #endif
 
 typedef struct loom_low_lower_contract_query_options_t {
-  // Optional composed contract index used for direct op-to-case lookup.
+  // Optional generated policy contract index for direct op-to-case lookup.
   const loom_target_contract_index_t* contract_index;
   // Rule sets to query in priority order.
   loom_low_lower_rule_set_list_t rule_sets;
@@ -39,10 +39,10 @@ typedef struct loom_low_lower_contract_query_options_t {
   loom_low_lower_descriptor_matrix_t descriptor_matrix;
 } loom_low_lower_contract_query_options_t;
 
-// Returns true and assigns the generated lower-rule row referenced by a
-// composed target-contract case. The row may be an emission program or a
-// contract-only guard recipe. Target-owned systems without lower-rule rows
-// return false so callers can leave them unhandled.
+// Returns true and assigns the generated lower-rule row referenced by a policy
+// contract case. The row may be an emission program or a contract-only guard
+// recipe. Target-owned systems without lower-rule rows return false so callers
+// can leave them unhandled.
 static inline bool loom_low_lower_contract_case_lower_rule_index(
     const loom_target_contract_index_t* index,
     const loom_target_contract_case_t* contract_case,

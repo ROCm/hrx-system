@@ -685,11 +685,14 @@ TEST_F(LowLowerPassTest,
   const loom_low_lower_rule_set_t* rule_sets[] = {
       &no_span_rule_set,
   };
-  loom_low_lower_policy_t policy = *loom_test_low_lower_policy();
-  policy.rule_sets = {
+  loom_low_lower_contract_set_t contract_set =
+      *loom_test_low_lower_policy()->contract_set;
+  contract_set.rule_sets = {
       /*.count=*/IREE_ARRAYSIZE(rule_sets),
       /*.values=*/rule_sets,
   };
+  loom_low_lower_policy_t policy = *loom_test_low_lower_policy();
+  policy.contract_set = &contract_set;
   const loom_low_lower_policy_registry_entry_t entries[] = {
       {
           /*.contract_set_key=*/IREE_SVL("test.low.core"),

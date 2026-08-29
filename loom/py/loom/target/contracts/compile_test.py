@@ -14,7 +14,12 @@ from loom.dialect.vector import ALL_VECTOR_OPS
 from loom.dialect.vector import defs as vector
 from loom.dsl import ANY, Dialect, Op, Operand, Result
 from loom.target.contracts import (
+    CONTRACT_ROW_NONE,
+    CompiledCase,
+    CompiledContractFragment,
     CompiledDescriptorRule,
+    CompiledOpEntry,
+    CompiledOpSpan,
     ContractFragment,
     ContractSystem,
     DescriptorMatrixRule,
@@ -27,6 +32,7 @@ from loom.target.contracts import (
     ValueRef,
     Vector,
     compile_contract_fragment,
+    compile_contract_set,
 )
 from loom.target.test.descriptors import (
     TEST_LOW_ADD_I32_DESCRIPTOR,
@@ -306,4 +312,78 @@ def test_compile_contract_fragment_rejects_mismatched_dialect_key() -> None:
             dialect_ops={"not_scalar": ALL_SCALAR_OPS},
             descriptor_rule_rows={},
             lower_rule_indices={},
+        )
+
+
+def test_compile_contract_set_composes_dense_policy_index() -> None:
+    rule_fragment = CompiledContractFragment(
+        name="rule-first",
+        target_contract_query=True,
+        op_spans=(
+            CompiledOpSpan(
+                op_kind=(3 << 8) | 1,
+                op_name="test_low.rule",
+                case_start=0,
+                case_count=1,
+            ),
+        ),
+        cases=(CompiledCase(ContractSystem.DESCRIPTOR_RULE, 7),),
+        descriptor_rules=(),
+        descriptor_matrices=(),
+    )
+    fallback_fragment = CompiledContractFragment(
+        name="rule-fallback",
+        target_contract_query=True,
+        op_spans=(
+            CompiledOpSpan(
+                op_kind=(3 << 8) | 1,
+                op_name="test_low.fallback",
+                case_start=0,
+                case_count=1,
+            ),
+        ),
+        cases=(CompiledCase(ContractSystem.VALUE_ALIAS, 4),),
+        descriptor_rules=(),
+        descriptor_matrices=(),
+    )
+    matrix_fragment = CompiledContractFragment(
+        name="matrix",
+        target_contract_query=True,
+        op_spans=(
+            CompiledOpSpan(
+                op_kind=5 << 8,
+                op_name="matrix.rule",
+                case_start=0,
+                case_count=1,
+            ),
+        ),
+        cases=(CompiledCase(ContractSystem.DESCRIPTOR_MATRIX, 2),),
+        descriptor_rules=(),
+        descriptor_matrices=(),
+    )
+
+    compiled = compile_contract_set(
+        "test.policy",
+        (rule_fragment, fallback_fragment, matrix_fragment),
+    )
+
+    assert compiled.dialect_base_id == 3
+    assert [dialect.dialect_id for dialect in compiled.dialects] == [3, 4, 5]
+    assert compiled.dialects[1].op_entries == ()
+    shared_entry = compiled.dialects[0].op_entries[1]
+    assert shared_entry.case_start == 0
+    assert shared_entry.case_count == 2
+    assert [case.binding_index for case in compiled.cases[:2]] == [0, 1]
+    assert compiled.dialects[2].op_entries[0] == CompiledOpEntry(2, 1)
+    assert compiled.cases[2].binding_index == 2
+    assert compiled.bindings[0].rule_set_index == 0
+    assert compiled.bindings[1].rule_set_index == 1
+    assert compiled.bindings[2].rule_set_index == CONTRACT_ROW_NONE
+
+
+def test_compile_contract_set_rejects_empty_set() -> None:
+    with pytest.raises(ValueError, match=r"must contain a fragment"):
+        compile_contract_set(
+            "test.empty",
+            (),
         )

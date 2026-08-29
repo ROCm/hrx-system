@@ -15,27 +15,7 @@
 #include "loom/ops/scf/ops.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/ops/view/ops.h"
-#include "loom/target/arch/amdgpu/contracts/arithmetic.h"
-#include "loom/target/arch/amdgpu/contracts/arithmetic_lower_rules.h"
-#include "loom/target/arch/amdgpu/contracts/async.h"
-#include "loom/target/arch/amdgpu/contracts/async_lower_rules.h"
-#include "loom/target/arch/amdgpu/contracts/buffer.h"
-#include "loom/target/arch/amdgpu/contracts/buffer_lower_rules.h"
-#include "loom/target/arch/amdgpu/contracts/compare.h"
-#include "loom/target/arch/amdgpu/contracts/compare_lower_rules.h"
-#include "loom/target/arch/amdgpu/contracts/config.h"
-#include "loom/target/arch/amdgpu/contracts/config_lower_rules.h"
-#include "loom/target/arch/amdgpu/contracts/dot.h"
-#include "loom/target/arch/amdgpu/contracts/dot_lower_rules.h"
-#include "loom/target/arch/amdgpu/contracts/integer.h"
-#include "loom/target/arch/amdgpu/contracts/integer_lower_rules.h"
-#include "loom/target/arch/amdgpu/contracts/matrix.h"
-#include "loom/target/arch/amdgpu/contracts/reduce.h"
-#include "loom/target/arch/amdgpu/contracts/reduce_lower_rules.h"
-#include "loom/target/arch/amdgpu/contracts/sanitizer.h"
-#include "loom/target/arch/amdgpu/contracts/sanitizer_lower_rules.h"
-#include "loom/target/arch/amdgpu/contracts/view.h"
-#include "loom/target/arch/amdgpu/contracts/view_lower_rules.h"
+#include "loom/target/arch/amdgpu/contracts/sets.h"
 #include "loom/target/arch/amdgpu/descriptors/lower_capabilities.h"
 #include "loom/target/arch/amdgpu/error_catalog.h"
 #include "loom/target/arch/amdgpu/lower/abi.h"
@@ -1678,54 +1658,6 @@ static iree_status_t loom_amdgpu_low_legality_try_verify_op(
   return row->verify(provider, context, op, out_handled);
 }
 
-#define LOOM_AMDGPU_RULE_SET_FRAGMENTS(F)                                   \
-  F(ARITHMETIC, loom_amdgpu_arithmetic_contract_fragment,                   \
-    loom_amdgpu_arithmetic_lower_rule_set)                                  \
-  F(BUFFER, loom_amdgpu_buffer_contract_fragment,                           \
-    loom_amdgpu_buffer_lower_rule_set)                                      \
-  F(CONFIG, loom_amdgpu_config_contract_fragment,                           \
-    loom_amdgpu_config_lower_rule_set)                                      \
-  F(INTEGER, loom_amdgpu_integer_contract_fragment,                         \
-    loom_amdgpu_integer_lower_rule_set)                                     \
-  F(COMPARE, loom_amdgpu_compare_contract_fragment,                         \
-    loom_amdgpu_compare_lower_rule_set)                                     \
-  F(DOT, loom_amdgpu_dot_contract_fragment, loom_amdgpu_dot_lower_rule_set) \
-  F(REDUCE, loom_amdgpu_reduce_contract_fragment,                           \
-    loom_amdgpu_reduce_lower_rule_set)                                      \
-  F(ASYNC, loom_amdgpu_async_contract_fragment,                             \
-    loom_amdgpu_async_lower_rule_set)                                       \
-  F(SANITIZER, loom_amdgpu_sanitizer_contract_fragment,                     \
-    loom_amdgpu_sanitizer_lower_rule_set)                                   \
-  F(VIEW, loom_amdgpu_view_contract_fragment, loom_amdgpu_view_lower_rule_set)
-
-// clang-format off
-typedef enum loom_amdgpu_rule_set_index_e {
-#define LOOM_AMDGPU_RULE_SET_ENUM(name, fragment, rule_set) \
-  LOOM_AMDGPU_RULE_SET_INDEX_##name,
-  LOOM_AMDGPU_RULE_SET_FRAGMENTS(LOOM_AMDGPU_RULE_SET_ENUM)
-#undef LOOM_AMDGPU_RULE_SET_ENUM
-  LOOM_AMDGPU_RULE_SET_INDEX_COUNT_,
-} loom_amdgpu_rule_set_index_t;
-
-static const loom_low_lower_rule_set_t* const kAmdgpuRuleSets[] = {
-#define LOOM_AMDGPU_RULE_SET_ROW(name, fragment, rule_set) &rule_set,
-  LOOM_AMDGPU_RULE_SET_FRAGMENTS(LOOM_AMDGPU_RULE_SET_ROW)
-#undef LOOM_AMDGPU_RULE_SET_ROW
-};
-
-static const loom_target_contract_binding_t kAmdgpuContractBindings[] = {
-#define LOOM_AMDGPU_CONTRACT_BINDING_ROW(name, fragment, rule_set) \
-  {&fragment, LOOM_AMDGPU_RULE_SET_INDEX_##name},
-  LOOM_AMDGPU_RULE_SET_FRAGMENTS(LOOM_AMDGPU_CONTRACT_BINDING_ROW)
-#undef LOOM_AMDGPU_CONTRACT_BINDING_ROW
-  {&loom_amdgpu_matrix_contract_fragment, UINT16_MAX},
-};
-// clang-format on
-
-static_assert(IREE_ARRAYSIZE(kAmdgpuRuleSets) ==
-                  LOOM_AMDGPU_RULE_SET_INDEX_COUNT_,
-              "AMDGPU rule-set index enum must match the rule-set table");
-
 static const loom_low_lower_policy_t kAmdgpuLowLowerPolicy = {
     .name = IREE_SVL("amdgpu-register-lower"),
     .error_catalog = &loom_amdgpu_error_catalog,
@@ -1745,13 +1677,7 @@ static const loom_low_lower_policy_t kAmdgpuLowLowerPolicy = {
     .materialize_structural_operand =
         {.fn = loom_amdgpu_materialize_structural_operand, .user_data = NULL},
     .emit_cond_branch = {.fn = loom_amdgpu_emit_cond_branch, .user_data = NULL},
-    .rule_sets =
-        {
-            .count = IREE_ARRAYSIZE(kAmdgpuRuleSets),
-            .values = kAmdgpuRuleSets,
-        },
-    .contract_bindings = kAmdgpuContractBindings,
-    .contract_binding_count = IREE_ARRAYSIZE(kAmdgpuContractBindings),
+    .contract_set = &loom_amdgpu_contract_set,
     .descriptor_matrix =
         {
             .options = loom_amdgpu_descriptor_matrix_options,

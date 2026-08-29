@@ -29,6 +29,7 @@
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/sanitizer/options.h"
+#include "loom/target/contract.h"
 #include "loom/target/low_legality.h"
 #include "loom/target/types.h"
 #include "loom/util/fact_table.h"
@@ -95,6 +96,13 @@ static inline bool loom_low_lower_rule_set_list_is_empty(
     loom_low_lower_rule_set_list_t list) {
   return list.count == 0;
 }
+
+typedef struct loom_low_lower_contract_set_t {
+  // Rule sets in the same priority order referenced by index bindings.
+  loom_low_lower_rule_set_list_t rule_sets;
+  // Immutable dense source-op contract index.
+  const loom_target_contract_index_t* index;
+} loom_low_lower_contract_set_t;
 
 typedef iree_status_t (*loom_low_lower_map_type_fn_t)(
     void* user_data, loom_low_lower_context_t* context,
@@ -848,15 +856,10 @@ typedef struct loom_low_lower_policy_t {
   // Low declaration physical code import kind for target-bound source imports.
   // Zero preserves only source module linkage on the low declaration.
   loom_low_func_decl_import_kind_t import_decl_kind;
-  // Optional table-driven source-op lowering rule sets in selection order. Rule
+  // Immutable source-op contracts and lowering rules in selection order. Rule
   // sets may overlap; the first matching rule wins and failed diagnostics use
   // the most-specific rejected candidate.
-  loom_low_lower_rule_set_list_t rule_sets;
-  // Active contract fragments composed into a dense root index for direct
-  // source-op lookup and read-only legality queries.
-  const loom_target_contract_binding_t* contract_bindings;
-  // Number of active contract fragments.
-  uint16_t contract_binding_count;
+  const loom_low_lower_contract_set_t* contract_set;
   // Optional target-owned descriptor-matrix projection used by generated
   // descriptor-matrix contract cases.
   loom_low_lower_descriptor_matrix_t descriptor_matrix;

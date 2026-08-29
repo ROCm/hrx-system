@@ -10,13 +10,22 @@
 iree_add_all_subdirs()
 
 if(LOOM_TARGET_ARCH_LLVMIR)
-loom_target_contract_table_cc_libraries(
+loom_target_contract_file_family(
   NAME
-    generic_core
+    contract_tables_gen
   GENERATOR
     loom::py::loom::gen::target::contracts::llvmir_contract_table_family
-  ARGS
-    "--contract-fragment=llvmir.generic.core"
+  FRAGMENTS
+    "generic_core=llvmir.generic.core"
+  CONTRACT_SETS
+    "llvmir_generic=generic_core"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_LLVMIR)
+loom_target_contract_cc_libraries(
+  NAME
+    generic_core
   CONTRACT_DEPS
     loom::target::contract
   LOWER_RULE_DEPS
@@ -35,13 +44,31 @@ endif()
 if(LOOM_TARGET_ARCH_LLVMIR)
 loom_cc_library(
   NAME
+    sets
+  HDRS
+    "sets.h"
+  SRCS
+    "sets.c"
+  DEPS
+    ::generic_core
+    ::generic_core_lower_rules
+    loom::codegen::low::lower
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_LLVMIR)
+loom_cc_library(
+  NAME
     contracts
   HDRS
     "generic_core.h"
     "generic_core_lower_rules.h"
+    "sets.h"
   DEPS
     ::generic_core
     ::generic_core_lower_rules
+    ::sets
   PUBLIC
 )
 endif()

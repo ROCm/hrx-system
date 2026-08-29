@@ -257,6 +257,8 @@ static void loom_low_lower_assert_options(
               options->target_facts);
   IREE_ASSERT(options->descriptor_registry != NULL);
   IREE_ASSERT(options->policy != NULL);
+  IREE_ASSERT(options->policy->contract_set != NULL);
+  IREE_ASSERT(options->policy->contract_set->index != NULL);
 }
 
 static iree_status_t loom_low_lower_intern_type_id(
@@ -1246,7 +1248,7 @@ static iree_status_t loom_low_lower_plan_op_from_contract_index(
     loom_low_lower_rule_source_memory_state_t* source_memory_state,
     bool* out_selected) {
   *out_selected = false;
-  const loom_target_contract_index_t* index = &context->contract_index;
+  const loom_target_contract_index_t* index = context->contract_set->index;
   const loom_target_contract_op_entry_t op_entry =
       loom_target_contract_index_lookup_kind(index, source_op->kind);
   if (loom_target_contract_op_entry_is_empty(op_entry)) {
@@ -1299,9 +1301,7 @@ static iree_status_t loom_low_lower_plan_op_from_contract_index(
       continue;
     }
     const loom_low_lower_rule_set_t* rule_set =
-        context->policy->rule_sets.values[binding->rule_set_index];
-    match_context.policy_rule_set_ordinal =
-        (uint16_t)(binding->rule_set_index + 1u);
+        context->contract_set->rule_sets.values[binding->rule_set_index];
     if (rule_set->source_memory_count != 0 && !view_regions_resolved) {
       IREE_RETURN_IF_ERROR(loom_low_lower_context_view_regions(
           context, &match_context.view_regions));
@@ -1427,8 +1427,8 @@ static iree_status_t loom_low_lower_query_target_contract_from_context(
       .environment = &query_environment,
   };
   const loom_low_lower_contract_query_options_t query_options = {
-      .contract_index = &context->contract_index,
-      .rule_sets = context->policy->rule_sets,
+      .contract_index = context->contract_set->index,
+      .rule_sets = context->contract_set->rule_sets,
       .map_value =
           {
               .fn = loom_low_lower_contract_query_map_value,
@@ -1487,6 +1487,7 @@ iree_status_t loom_low_lower_source_query_scope_create(
       .source_function = source_function,
       .options = options,
       .policy = options->policy,
+      .contract_set = options->policy->contract_set,
       .result = &scope->result,
   };
   scope->context.lowering.fact_table = options->fact_table;
@@ -1504,12 +1505,6 @@ iree_status_t loom_low_lower_source_query_scope_create(
     status = loom_low_lowering_frame_initialize_value_ordinals(&scope->context,
                                                                source_body);
     scope->value_domain_initialized = iree_status_is_ok(status);
-  }
-  if (iree_status_is_ok(status)) {
-    status = loom_target_contract_index_compose(
-        scope->context.policy->contract_bindings,
-        scope->context.policy->contract_binding_count,
-        &scope->context.contract_index, &scope->context.function_arena);
   }
   if (!iree_status_is_ok(status)) {
     loom_low_lower_source_query_scope_destroy(scope);
@@ -1733,7 +1728,7 @@ static iree_status_t loom_low_lower_plan_op(loom_low_lower_context_t* context,
   loom_low_lower_rule_source_memory_state_initialize(
       source_op, &source_memory_access, &source_memory_state);
   bool selected_rule = false;
-  if (context->contract_index.case_count != 0) {
+  if (context->contract_set->index->case_count != 0) {
     IREE_RETURN_IF_ERROR(loom_low_lower_plan_op_from_contract_index(
         context, source_op, &failed_rule_set, &failed_rule_selection,
         &source_memory_state, &selected_rule));
@@ -3887,6 +3882,7 @@ iree_status_t loom_low_lower_function(loom_module_t* module,
       .source_function = source_function,
       .options = options,
       .policy = options->policy,
+      .contract_set = options->policy->contract_set,
       .result = out_result,
       .module_state = options->module_state,
   };
@@ -3905,13 +3901,6 @@ iree_status_t loom_low_lower_function(loom_module_t* module,
     iree_arena_deinitialize(&context.function_arena);
     return iree_ok_status();
   }
-  if (iree_status_is_ok(status)) {
-    status = loom_target_contract_index_compose(
-        context.policy->contract_bindings,
-        context.policy->contract_binding_count, &context.contract_index,
-        &context.function_arena);
-  }
-
   loom_vector_memory_footprint_result_t footprint_result = {0};
   if (iree_status_is_ok(status)) {
     const loom_vector_memory_footprint_options_t footprint_options = {

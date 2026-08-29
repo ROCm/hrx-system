@@ -522,7 +522,6 @@ loom_cc_library(
     ::facts
     ::types
     iree::base
-    iree::base::internal::arena
     loom::codegen::low::descriptors
     loom::error::error_defs
     loom::ir
@@ -571,7 +570,6 @@ loom_cc_test(
   DEPS
     ::contract
     iree::base
-    iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
     loom::ir

@@ -23,9 +23,12 @@ loom_target_contract_file_family(
     "config=amdgpu.config"
     "dot=amdgpu.dot"
     "integer=amdgpu.integer"
+    "matrix=amdgpu.matrix"
     "reduce=amdgpu.reduce"
     "sanitizer=amdgpu.sanitizer"
     "view=amdgpu.view"
+  CONTRACT_SETS
+    "amdgpu=arithmetic,buffer,config,integer,compare,dot,reduce,async,sanitizer,view,matrix"
   COMMENT
     "Generating AMDGPU contract table families"
 )
@@ -125,15 +128,16 @@ loom_target_contract_cc_libraries(
 endif()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
-loom_target_table_cc_library(
+loom_cc_library(
   NAME
     matrix
-  GENERATOR
-    loom::py::loom::gen::target::contracts::amdgpu_contract_fragment
-  ARGS
-    "--contract-fragment=amdgpu.matrix"
+  HDRS
+    "matrix.h"
+  SRCS
+    "matrix.c"
   DEPS
     loom::target::contract
+  PUBLIC
 )
 endif()
 
@@ -178,6 +182,41 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU)
 loom_cc_library(
   NAME
+    sets
+  HDRS
+    "sets.h"
+  SRCS
+    "sets.c"
+  DEPS
+    ::arithmetic
+    ::arithmetic_lower_rules
+    ::async
+    ::async_lower_rules
+    ::buffer
+    ::buffer_lower_rules
+    ::compare
+    ::compare_lower_rules
+    ::config
+    ::config_lower_rules
+    ::dot
+    ::dot_lower_rules
+    ::integer
+    ::integer_lower_rules
+    ::matrix
+    ::reduce
+    ::reduce_lower_rules
+    ::sanitizer
+    ::sanitizer_lower_rules
+    ::view
+    ::view_lower_rules
+    loom::codegen::low::lower
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_cc_library(
+  NAME
     contracts
   HDRS
     "arithmetic.h"
@@ -199,6 +238,7 @@ loom_cc_library(
     "reduce_lower_rules.h"
     "sanitizer.h"
     "sanitizer_lower_rules.h"
+    "sets.h"
     "view.h"
     "view_lower_rules.h"
   DEPS
@@ -221,6 +261,7 @@ loom_cc_library(
     ::reduce_lower_rules
     ::sanitizer
     ::sanitizer_lower_rules
+    ::sets
     ::view
     ::view_lower_rules
   PUBLIC

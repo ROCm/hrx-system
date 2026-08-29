@@ -9,8 +9,7 @@
 #include "loom/ir/module.h"
 #include "loom/ops/cfg/ops.h"
 #include "loom/target/registers.h"
-#include "loom/target/test/contracts/core.h"
-#include "loom/target/test/contracts/core_lower_rules.h"
+#include "loom/target/test/contracts/sets.h"
 #include "loom/target/test/descriptors.h"
 #include "loom/target/test/lower.h"
 
@@ -336,17 +335,6 @@ static iree_status_t loom_test_low_emit_switch(
       &low_switch_op);
 }
 
-static const loom_low_lower_rule_set_t* const kTestLowRuleSets[] = {
-    &loom_test_low_core_lower_rule_set,
-};
-
-static const loom_target_contract_binding_t kTestLowContractBindings[] = {
-    {
-        .fragment = &loom_test_low_core_contract_fragment,
-        .rule_set_index = 0,
-    },
-};
-
 static const loom_low_lower_policy_t kTestLowLowerPolicy = {
     .name = IREE_SVL("test-low-lower-policy"),
     .error_catalog = &loom_error_catalog_core,
@@ -354,13 +342,7 @@ static const loom_low_lower_policy_t kTestLowLowerPolicy = {
     .map_contract_value = {.fn = loom_test_low_lower_map_contract_value,
                            .user_data = NULL},
     .map_argument = {.fn = loom_test_low_lower_map_argument, .user_data = NULL},
-    .rule_sets =
-        {
-            .count = IREE_ARRAYSIZE(kTestLowRuleSets),
-            .values = kTestLowRuleSets,
-        },
-    .contract_bindings = kTestLowContractBindings,
-    .contract_binding_count = IREE_ARRAYSIZE(kTestLowContractBindings),
+    .contract_set = &loom_test_low_contract_set,
     .descriptor_matrix =
         {
             .options = loom_test_low_matrix_options,

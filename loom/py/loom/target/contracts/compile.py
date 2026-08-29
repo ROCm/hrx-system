@@ -38,6 +38,23 @@ class CompiledOpSpan:
 
 
 @dataclass(frozen=True, slots=True)
+class CompiledOpEntry:
+    """Dense dialect-local op table entry."""
+
+    case_start: int = CONTRACT_ROW_NONE
+    case_count: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class CompiledDialectTable:
+    """Compiled table for one source dialect."""
+
+    dialect_id: int
+    dialect_name: str
+    op_entries: tuple[CompiledOpEntry, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class CompiledCase:
     """Compiled generic case row."""
 
@@ -69,6 +86,151 @@ class CompiledContractFragment:
     cases: tuple[CompiledCase, ...]
     descriptor_rules: tuple[CompiledDescriptorRule, ...]
     descriptor_matrices: tuple[CompiledDescriptorMatrix, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class CompiledContractSetBinding:
+    """One ordered fragment binding in a compiled contract set."""
+
+    rule_set_index: int = CONTRACT_ROW_NONE
+
+
+@dataclass(frozen=True, slots=True)
+class CompiledContractSetCase:
+    """One contract case projected into a policy-wide dense index."""
+
+    system: ContractSystem
+    binding_index: int
+    row_index: int = CONTRACT_ROW_NONE
+
+
+@dataclass(frozen=True, slots=True)
+class CompiledContractSet:
+    """Immutable policy contract set ready for C emission."""
+
+    name: str
+    dialect_base_id: int
+    dialects: tuple[CompiledDialectTable, ...]
+    cases: tuple[CompiledContractSetCase, ...]
+    bindings: tuple[CompiledContractSetBinding, ...]
+
+
+def compile_contract_set(
+    name: str,
+    fragments: Sequence[CompiledContractFragment],
+) -> CompiledContractSet:
+    """Composes ordered fragments into one immutable policy contract set."""
+
+    if not name:
+        raise ValueError("contract set name must not be empty")
+    if not fragments:
+        raise ValueError(f"contract set '{name}' must contain a fragment")
+    if len(fragments) > 0xFF:
+        raise ValueError(f"contract set '{name}' binding count exceeds uint8_t")
+
+    bindings: list[CompiledContractSetBinding] = []
+    rule_set_count = 0
+    lower_rule_systems = {
+        ContractSystem.DESCRIPTOR_RULE,
+        ContractSystem.VALUE_ALIAS,
+        ContractSystem.VALUE_ELIDE,
+        ContractSystem.RECIPE_RULE,
+    }
+    for fragment in fragments:
+        rule_set_index = CONTRACT_ROW_NONE
+        if any(case.system in lower_rule_systems for case in fragment.cases):
+            rule_set_index = rule_set_count
+            rule_set_count += 1
+        bindings.append(
+            CompiledContractSetBinding(
+                rule_set_index=rule_set_index,
+            )
+        )
+
+    dialect_names: dict[int, str] = {}
+    dialect_op_counts: dict[int, int] = {}
+    cases_by_op: dict[tuple[int, int], list[CompiledContractSetCase]] = {}
+    for binding_index, fragment in enumerate(fragments):
+        for op_span in fragment.op_spans:
+            dialect_id = op_span.op_kind >> 8
+            op_index = op_span.op_kind & 0xFF
+            dialect_name, separator, _ = op_span.op_name.partition(".")
+            if not separator:
+                raise ValueError(
+                    f"contract set '{name}' op '{op_span.op_name}' has no "
+                    "dialect-qualified name"
+                )
+            existing_name = dialect_names.setdefault(dialect_id, dialect_name)
+            if existing_name != dialect_name:
+                raise ValueError(
+                    f"contract set '{name}' dialect {dialect_id} has "
+                    f"conflicting names '{existing_name}' and "
+                    f"'{dialect_name}'"
+                )
+            dialect_op_counts[dialect_id] = max(
+                dialect_op_counts.get(dialect_id, 0),
+                op_index + 1,
+            )
+            case_limit = op_span.case_start + op_span.case_count
+            if case_limit > len(fragment.cases):
+                raise ValueError(
+                    f"contract set '{name}' op '{op_span.op_name}' case span "
+                    "exceeds fragment case rows"
+                )
+            op_cases = cases_by_op.setdefault((dialect_id, op_index), [])
+            for fragment_case in fragment.cases[op_span.case_start : case_limit]:
+                op_cases.append(
+                    CompiledContractSetCase(
+                        system=fragment_case.system,
+                        binding_index=binding_index,
+                        row_index=fragment_case.row_index,
+                    )
+                )
+
+    dialect_base_id = min(dialect_op_counts) if dialect_op_counts else 0
+    dialect_limit = max(dialect_op_counts) + 1 if dialect_op_counts else 0
+    if dialect_limit - dialect_base_id > 0xFF:
+        raise ValueError(f"contract set '{name}' dialect span exceeds uint8_t")
+
+    compiled_cases: list[CompiledContractSetCase] = []
+    dialects: list[CompiledDialectTable] = []
+    for dialect_id in range(dialect_base_id, dialect_limit):
+        op_entries: list[CompiledOpEntry] = []
+        for op_index in range(dialect_op_counts.get(dialect_id, 0)):
+            op_cases = cases_by_op.get((dialect_id, op_index), ())
+            if not op_cases:
+                op_entries.append(CompiledOpEntry())
+                continue
+            if len(op_cases) > 0xFFFF:
+                raise ValueError(
+                    f"contract set '{name}' dialect {dialect_id} op "
+                    f"{op_index} case count exceeds uint16_t"
+                )
+            case_start = len(compiled_cases)
+            if case_start + len(op_cases) > 0xFFFF:
+                raise ValueError(f"contract set '{name}' case count exceeds uint16_t")
+            compiled_cases.extend(op_cases)
+            op_entries.append(
+                CompiledOpEntry(
+                    case_start=case_start,
+                    case_count=len(op_cases),
+                )
+            )
+        dialects.append(
+            CompiledDialectTable(
+                dialect_id=dialect_id,
+                dialect_name=dialect_names.get(dialect_id, ""),
+                op_entries=tuple(op_entries),
+            )
+        )
+
+    return CompiledContractSet(
+        name=name,
+        dialect_base_id=dialect_base_id,
+        dialects=tuple(dialects),
+        cases=tuple(compiled_cases),
+        bindings=tuple(bindings),
+    )
 
 
 def compile_contract_fragment(

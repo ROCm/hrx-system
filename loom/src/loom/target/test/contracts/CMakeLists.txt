@@ -9,13 +9,20 @@
 
 iree_add_all_subdirs()
 
-loom_target_contract_table_cc_libraries(
+loom_target_contract_file_family(
   NAME
-    core
+    contract_tables_gen
   GENERATOR
     loom::py::loom::gen::target::contracts::test_low_contract_table_family
-  ARGS
-    "--contract-fragment=test_low_core"
+  FRAGMENTS
+    "core=test_low_core"
+  CONTRACT_SETS
+    "test_low=core"
+)
+
+loom_target_contract_cc_libraries(
+  NAME
+    core
   CONTRACT_DEPS
     loom::target::contract
   LOWER_RULE_DEPS
@@ -30,13 +37,30 @@ loom_target_contract_table_cc_libraries(
 
 loom_cc_library(
   NAME
+    sets
+  HDRS
+    "sets.h"
+  SRCS
+    "sets.c"
+  DEPS
+    ::core
+    ::core_lower_rules
+    loom::codegen::low::lower
+  TESTONLY
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     contracts
   HDRS
     "core.h"
     "core_lower_rules.h"
+    "sets.h"
   DEPS
     ::core
     ::core_lower_rules
+    ::sets
   TESTONLY
   PUBLIC
 )
