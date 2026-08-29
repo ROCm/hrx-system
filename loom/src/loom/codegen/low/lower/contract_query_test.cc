@@ -277,6 +277,60 @@ class LowContractQuerySourceMemoryTest : public ::testing::Test {
   loom_builder_t builder_;
 };
 
+TEST_F(LowContractQuerySourceMemoryTest,
+       MaterializesImplicitTargetContextDiagnosticParams) {
+  loom_op_t* source_op = nullptr;
+  IREE_ASSERT_OK(loom_index_constant_build(
+      &builder_, loom_attr_i64(0), loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET),
+      LOOM_LOCATION_UNKNOWN, &source_op));
+  const loom_low_lower_diagnostic_param_t diagnostic_params[] = {
+      {
+          /*.kind=*/LOOM_LOW_LOWER_DIAGNOSTIC_PARAM_STRING_LITERAL,
+          /*.reserved=*/{},
+          /*.value=*/{/*.string_value_offset=*/kRuleStringField},
+      },
+      {
+          /*.kind=*/LOOM_LOW_LOWER_DIAGNOSTIC_PARAM_STRING_LITERAL,
+          /*.reserved=*/{},
+          /*.value=*/{/*.string_value_offset=*/kRuleStringValue},
+      },
+      {
+          /*.kind=*/LOOM_LOW_LOWER_DIAGNOSTIC_PARAM_STRING_LITERAL,
+          /*.reserved=*/{},
+          /*.value=*/{/*.string_value_offset=*/kRuleStringAttrKind},
+      },
+  };
+  const loom_low_lower_diagnostic_t diagnostic = {
+      /*.error_ref=*/LOOM_ERR_TARGET_003_REF,
+      /*.param_start=*/0,
+      /*.param_count=*/8,
+      /*.flags=*/LOOM_LOW_LOWER_DIAGNOSTIC_FLAG_IMPLICIT_TARGET_CONTEXT,
+  };
+  loom_low_lower_rule_set_t rule_set = {};
+  rule_set.string_table = kRuleStringTable;
+  rule_set.diagnostic_params = diagnostic_params;
+  rule_set.diagnostic_param_count = IREE_ARRAYSIZE(diagnostic_params);
+  loom_low_lower_rule_match_context_t match_context = {};
+  match_context.module = module_;
+  match_context.function = function_;
+  match_context.bundle = &kTargetBundle;
+  loom_diagnostic_param_t params[8] = {};
+
+  loom_low_lower_rule_materialize_diagnostic_params(
+      &match_context, &rule_set, source_op, &diagnostic, params);
+
+  EXPECT_TRUE(iree_string_view_equal(params[0].string, IREE_SV("test-target")));
+  EXPECT_TRUE(iree_string_view_equal(params[1].string, IREE_SV("test-export")));
+  EXPECT_TRUE(iree_string_view_equal(params[2].string, IREE_SV("test-config")));
+  EXPECT_TRUE(
+      iree_string_view_equal(params[3].string, IREE_SV("source_memory")));
+  EXPECT_TRUE(
+      iree_string_view_equal(params[4].string, IREE_SV("index.constant")));
+  EXPECT_TRUE(iree_string_view_equal(params[5].string, IREE_SV("field")));
+  EXPECT_TRUE(iree_string_view_equal(params[6].string, IREE_SV("value")));
+  EXPECT_TRUE(iree_string_view_equal(params[7].string, IREE_SV("attr_kind")));
+}
+
 TEST(LowContractQueryTest, ContractIndexDescriptorRuleSelectsLegalCase) {
   loom_low_lower_rule_descriptor_ref_t descriptor_ref = {
       /*.key_string_offset=*/kRuleStringDescriptor,
@@ -362,31 +416,43 @@ TEST(LowContractQueryTest, ContractIndexDescriptorRuleReportsRejectedCase) {
   loom_low_lower_diagnostic_param_t diagnostic_params[] = {
       {
           /*.kind=*/LOOM_LOW_LOWER_DIAGNOSTIC_PARAM_TARGET_KEY,
+          /*.reserved=*/{},
+          /*.value=*/{},
       },
       {
           /*.kind=*/LOOM_LOW_LOWER_DIAGNOSTIC_PARAM_EXPORT_NAME,
+          /*.reserved=*/{},
+          /*.value=*/{},
       },
       {
           /*.kind=*/LOOM_LOW_LOWER_DIAGNOSTIC_PARAM_CONFIG_KEY,
+          /*.reserved=*/{},
+          /*.value=*/{},
       },
       {
           /*.kind=*/LOOM_LOW_LOWER_DIAGNOSTIC_PARAM_FUNCTION_NAME,
+          /*.reserved=*/{},
+          /*.value=*/{},
       },
       {
           /*.kind=*/LOOM_LOW_LOWER_DIAGNOSTIC_PARAM_STRING_LITERAL,
-          /*.string_value_offset=*/kRuleStringSource,
+          /*.reserved=*/{},
+          /*.value=*/{/*.string_value_offset=*/kRuleStringSource},
       },
       {
           /*.kind=*/LOOM_LOW_LOWER_DIAGNOSTIC_PARAM_STRING_LITERAL,
-          /*.string_value_offset=*/kRuleStringField,
+          /*.reserved=*/{},
+          /*.value=*/{/*.string_value_offset=*/kRuleStringField},
       },
       {
           /*.kind=*/LOOM_LOW_LOWER_DIAGNOSTIC_PARAM_STRING_LITERAL,
-          /*.string_value_offset=*/kRuleStringValue,
+          /*.reserved=*/{},
+          /*.value=*/{/*.string_value_offset=*/kRuleStringValue},
       },
       {
           /*.kind=*/LOOM_LOW_LOWER_DIAGNOSTIC_PARAM_STRING_LITERAL,
-          /*.string_value_offset=*/kRuleStringAttrKind,
+          /*.reserved=*/{},
+          /*.value=*/{/*.string_value_offset=*/kRuleStringAttrKind},
       },
   };
   loom_low_lower_diagnostic_t diagnostic = {};

@@ -183,6 +183,7 @@ class LowerDiagnostic:
 
     error: ErrorDef
     params: tuple[LowerDiagnosticParam, ...]
+    target_context_param_count: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -1847,7 +1848,11 @@ class _LowerRuleSetCompiler:
         params = [
             self._lower_diagnostic_param(source_op, param) for param in ref.params
         ]
-        return LowerDiagnostic(ref.error, tuple(params))
+        return LowerDiagnostic(
+            ref.error,
+            tuple(params),
+            target_context_param_count=ref.target_context_param_count,
+        )
 
     def _lower_diagnostic_param(
         self,

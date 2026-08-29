@@ -24,6 +24,7 @@ from loom.target.contracts import (
     GuardKind,
     LowerAttrCopy,
     LowerAttrCopyKind,
+    LowerDiagnostic,
     LowerDiagnosticParam,
     LowerEmit,
     LowerEmitKind,
@@ -103,6 +104,22 @@ def guard_uses_other_value_ref(kind: GuardKind) -> bool:
 
 def attr_copy_uses_value_ref(kind: LowerAttrCopyKind) -> bool:
     return kind in _ATTR_COPY_VALUE_REF_KINDS
+
+
+def diagnostic_has_implicit_target_context(row: LowerDiagnostic) -> bool:
+    """Returns whether a diagnostic carries authored target context."""
+
+    return row.target_context_param_count != 0
+
+
+def diagnostic_stored_params(
+    row: LowerDiagnostic,
+) -> tuple[LowerDiagnosticParam, ...]:
+    """Returns parameter rows that must be stored in the generated C table."""
+
+    if not diagnostic_has_implicit_target_context(row):
+        return row.params
+    return row.params[row.target_context_param_count :]
 
 
 def emit_optional_array(
@@ -852,7 +869,7 @@ def rule_set_row(
         descriptor_ref_keys,
         descriptor_refs_name,
     )
-    diagnostic_param_rows = tuple(param for diagnostic in table.diagnostics for param in diagnostic.params)
+    diagnostic_param_rows = tuple(param for diagnostic in table.diagnostics for param in diagnostic_stored_params(diagnostic))
     _append_table_fields(
         fields,
         "diagnostic_params",
@@ -908,30 +925,45 @@ def diagnostic_param_row(
     if row.kind == DiagnosticParamKind.STRING_LITERAL:
         _append_field(
             fields,
-            "string_value_offset",
-            string_value_offset,
+            "value",
+            f"{{.string_value_offset = {string_value_offset}}}",
             always=True,
         )
     if row.kind == DiagnosticParamKind.VALUE_TYPE:
-        _append_field(fields, "value_ref_index", row.value_ref_index, always=True)
+        _append_field(
+            fields,
+            "value",
+            f"{{.value_ref_index = {row.value_ref_index}}}",
+            always=True,
+        )
     if row.kind == DiagnosticParamKind.I64_LITERAL:
         _append_field(
             fields,
-            "i64_value",
-            _c_i64_literal(row.i64_value),
+            "value",
+            f"{{.i64_value = {_c_i64_literal(row.i64_value)}}}",
             always=True,
         )
     if row.kind == DiagnosticParamKind.U32_LITERAL:
-        _append_field(fields, "u32_value", row.u32_value, always=True)
+        _append_field(
+            fields,
+            "value",
+            f"{{.u32_value = {row.u32_value}}}",
+            always=True,
+        )
     if row.kind == DiagnosticParamKind.U64_LITERAL:
         _append_field(
             fields,
-            "u64_value",
-            lower_rule_spelling.u64_c_literal(row.u64_value),
+            "value",
+            f"{{.u64_value = {lower_rule_spelling.u64_c_literal(row.u64_value)}}}",
             always=True,
         )
     if row.kind == DiagnosticParamKind.BOOL_LITERAL:
-        _append_field(fields, "bool_value", str(row.bool_value).lower(), always=True)
+        _append_field(
+            fields,
+            "value",
+            f"{{.bool_value = {str(row.bool_value).lower()}}}",
+            always=True,
+        )
     return fields
 
 

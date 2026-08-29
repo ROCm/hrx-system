@@ -14,6 +14,7 @@ from enum import Enum, unique
 from loom.errors import ErrorDef, ParamKind
 
 MAX_TARGET_DIAGNOSTIC_PARAMS = 16
+TARGET_CONTEXT_DIAGNOSTIC_PARAM_COUNT = 5
 
 
 @unique
@@ -49,6 +50,14 @@ _PARAM_KIND_BY_PROJECTION = {
     DiagnosticParamKind.SOURCE_MEMORY_MINIMUM_ALIGNMENT: ParamKind.U32,
 }
 
+_TARGET_CONTEXT_PARAM_KINDS = (
+    DiagnosticParamKind.TARGET_KEY,
+    DiagnosticParamKind.EXPORT_NAME,
+    DiagnosticParamKind.CONFIG_KEY,
+    DiagnosticParamKind.FUNCTION_NAME,
+    DiagnosticParamKind.SOURCE_OP_NAME,
+)
+
 
 @dataclass(frozen=True, slots=True)
 class DiagnosticParam:
@@ -82,8 +91,28 @@ class DiagnosticRef:
 
     error: ErrorDef
     params: tuple[DiagnosticParam, ...]
+    target_context_param_count: int = 0
 
     def __post_init__(self) -> None:
+        if self.target_context_param_count not in (
+            0,
+            TARGET_CONTEXT_DIAGNOSTIC_PARAM_COUNT,
+        ):
+            raise ValueError(
+                "diagnostic target-context parameter count must be "
+                f"0 or {TARGET_CONTEXT_DIAGNOSTIC_PARAM_COUNT}"
+            )
+        if (
+            self.target_context_param_count
+            and tuple(
+                param.kind for param in self.params[: self.target_context_param_count]
+            )
+            != _TARGET_CONTEXT_PARAM_KINDS
+        ):
+            raise ValueError(
+                "diagnostic target-context parameters must use the canonical "
+                "target, export, config, function, and source-op projections"
+            )
         expected_params = self.error.params
         if len(self.params) > MAX_TARGET_DIAGNOSTIC_PARAMS:
             raise ValueError(
@@ -180,4 +209,5 @@ def target_diagnostic(error: ErrorDef, *params: DiagnosticParam) -> DiagnosticRe
             source_op_name(),
             *params,
         ),
+        target_context_param_count=TARGET_CONTEXT_DIAGNOSTIC_PARAM_COUNT,
     )

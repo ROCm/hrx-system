@@ -155,8 +155,6 @@ iree_status_t loom_low_lower_emit_error_ref(
   return loom_low_lower_emit(context, source_op, error, params, param_count);
 }
 
-#define LOOM_LOW_LOWER_TARGET_CONTEXT_PARAM_COUNT 5
-
 static void loom_low_lower_make_target_context_params(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_diagnostic_param_t* params) {

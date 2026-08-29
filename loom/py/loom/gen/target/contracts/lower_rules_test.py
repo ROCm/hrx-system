@@ -13,10 +13,13 @@ from loom.dialect.scalar import ALL_SCALAR_OPS
 from loom.dialect.scalar import arithmetic as scalar_arithmetic
 from loom.dialect.vector import ALL_VECTOR_OPS
 from loom.dialect.vector import defs as vector
+from loom.error.target import ERR_TARGET_003
 from loom.gen.target.contracts.lower_rule_rows import (
     attr_copy_row,
     descriptor_ref_keys,
+    diagnostic_has_implicit_target_context,
     diagnostic_param_row,
+    diagnostic_stored_params,
     guard_row,
     source_memory_row,
     value_ref_row,
@@ -37,6 +40,7 @@ from loom.target.contracts import (
     GuardKind,
     LowerAttrCopy,
     LowerAttrCopyKind,
+    LowerDiagnostic,
     LowerDiagnosticParam,
     LowerEmit,
     LowerEmitKind,
@@ -586,7 +590,72 @@ def test_diagnostic_param_row_emits_portable_signed_i64_literal() -> None:
         )
     )
 
-    assert ".i64_value = (-INT64_C(2147483648))" in fields
+    assert ".value = {.i64_value = (-INT64_C(2147483648))}" in fields
+
+
+def test_diagnostic_rows_use_recorded_target_context() -> None:
+    target_context_params = (
+        LowerDiagnosticParam("target_key", DiagnosticParamKind.TARGET_KEY),
+        LowerDiagnosticParam("export_name", DiagnosticParamKind.EXPORT_NAME),
+        LowerDiagnosticParam("config_key", DiagnosticParamKind.CONFIG_KEY),
+        LowerDiagnosticParam("function_name", DiagnosticParamKind.FUNCTION_NAME),
+        LowerDiagnosticParam("op_name", DiagnosticParamKind.SOURCE_OP_NAME),
+    )
+    literal_params = (
+        LowerDiagnosticParam(
+            "subject_role",
+            DiagnosticParamKind.STRING_LITERAL,
+            string_value="operand",
+        ),
+        LowerDiagnosticParam(
+            "subject_name",
+            DiagnosticParamKind.STRING_LITERAL,
+            string_value="lhs",
+        ),
+        LowerDiagnosticParam(
+            "constraint_key",
+            DiagnosticParamKind.STRING_LITERAL,
+            string_value="type",
+        ),
+    )
+    canonical = LowerDiagnostic(
+        ERR_TARGET_003,
+        (*target_context_params, *literal_params),
+        target_context_param_count=5,
+    )
+    unmarked = LowerDiagnostic(
+        ERR_TARGET_003,
+        (*target_context_params, *literal_params),
+    )
+
+    assert diagnostic_has_implicit_target_context(canonical)
+    assert diagnostic_stored_params(canonical) == literal_params
+    assert not diagnostic_has_implicit_target_context(unmarked)
+    assert diagnostic_stored_params(unmarked) == unmarked.params
+
+
+def test_generate_lower_rule_set_elides_authored_target_context_rows() -> None:
+    table = ContractFragment(
+        name="test.low.diagnostic_context",
+        descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+        public_header=_TEST_PUBLIC_HEADER,
+        cases=[
+            RecipeRule(
+                source_op=scalar_arithmetic.scalar_addi,
+                guards=(Guard.value_type("lhs", Scalar("i32")),),
+            )
+        ],
+    )
+
+    generated = generate_lower_rule_set(table, dialect_ops={"scalar": ALL_SCALAR_OPS})
+
+    assert "LOOM_LOW_LOWER_DIAGNOSTIC_FLAG_IMPLICIT_TARGET_CONTEXT" in generated.source
+    assert ".param_count = 8," in generated.source
+    assert "LOOM_LOW_LOWER_DIAGNOSTIC_PARAM_TARGET_KEY" not in generated.source
+    assert "LOOM_LOW_LOWER_DIAGNOSTIC_PARAM_EXPORT_NAME" not in generated.source
+    assert "LOOM_LOW_LOWER_DIAGNOSTIC_PARAM_CONFIG_KEY" not in generated.source
+    assert "LOOM_LOW_LOWER_DIAGNOSTIC_PARAM_FUNCTION_NAME" not in generated.source
+    assert "LOOM_LOW_LOWER_DIAGNOSTIC_PARAM_SOURCE_OP_NAME" not in generated.source
 
 
 def test_generate_lower_rule_set_emits_static_element_count_type_pattern() -> None:

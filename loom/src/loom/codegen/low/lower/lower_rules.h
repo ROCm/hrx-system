@@ -326,6 +326,7 @@ static_assert(sizeof(loom_low_lower_attr_copy_t) == 32,
 typedef uint8_t loom_low_lower_diagnostic_param_kind_t;
 
 #define LOOM_LOW_LOWER_MAX_DIAGNOSTIC_PARAMS 16
+#define LOOM_LOW_LOWER_TARGET_CONTEXT_PARAM_COUNT 5
 
 enum loom_low_lower_diagnostic_param_kind_e {
   // Target bundle key selected for lowering.
@@ -357,30 +358,46 @@ enum loom_low_lower_diagnostic_param_kind_e {
 typedef struct loom_low_lower_diagnostic_param_t {
   // Parameter projection operation.
   loom_low_lower_diagnostic_param_kind_t kind;
-  // Rule-set B-string offset for STRING_LITERAL payloads.
-  loom_bstring_table_offset_t string_value_offset;
-  // Source value-ref row consumed by VALUE_TYPE rows.
-  uint16_t value_ref_index;
-  // Signed literal payload for I64_LITERAL rows.
-  int64_t i64_value;
-  // Unsigned literal payload for U32_LITERAL rows.
-  uint32_t u32_value;
-  // Unsigned literal payload for U64_LITERAL rows.
-  uint64_t u64_value;
-  // Boolean literal payload for BOOL_LITERAL rows.
-  bool bool_value;
+  // Reserved padding available to future compact projection metadata.
+  uint8_t reserved[7];
+  // Projection payload selected by kind.
+  union {
+    // Rule-set B-string offset for STRING_LITERAL payloads.
+    loom_bstring_table_offset_t string_value_offset;
+    // Source value-ref row consumed by VALUE_TYPE rows.
+    uint16_t value_ref_index;
+    // Signed literal payload for I64_LITERAL rows.
+    int64_t i64_value;
+    // Unsigned literal payload for U32_LITERAL rows.
+    uint32_t u32_value;
+    // Unsigned literal payload for U64_LITERAL rows.
+    uint64_t u64_value;
+    // Boolean literal payload for BOOL_LITERAL rows.
+    bool bool_value;
+  } value;
 } loom_low_lower_diagnostic_param_t;
-static_assert(sizeof(loom_low_lower_diagnostic_param_t) == 48,
-              "loom_low_lower_diagnostic_param_t must be 48 bytes");
+static_assert(sizeof(loom_low_lower_diagnostic_param_t) == 16,
+              "loom_low_lower_diagnostic_param_t must be 16 bytes");
+
+enum loom_low_lower_diagnostic_flag_bits_e {
+  // Materialize the canonical five target-context parameters before stored
+  // parameter rows.
+  LOOM_LOW_LOWER_DIAGNOSTIC_FLAG_IMPLICIT_TARGET_CONTEXT = 1u << 0,
+};
+typedef uint8_t loom_low_lower_diagnostic_flags_t;
 
 typedef struct loom_low_lower_diagnostic_t {
   // Stable structured diagnostic identity.
   loom_error_ref_t error_ref;
-  // First parameter projection row.
+  // First stored parameter projection row.
   uint16_t param_start;
-  // Number of parameter projection rows.
+  // Total number of materialized parameters, including implicit context.
   uint8_t param_count;
+  // Parameter projection behavior flags.
+  loom_low_lower_diagnostic_flags_t flags;
 } loom_low_lower_diagnostic_t;
+static_assert(sizeof(loom_low_lower_diagnostic_t) == 6,
+              "loom_low_lower_diagnostic_t must be 6 bytes");
 
 #define LOOM_LOW_LOWER_DIAGNOSTIC_NONE UINT16_MAX
 

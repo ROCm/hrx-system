@@ -253,14 +253,15 @@ def _generate_source(
     diagnostic_rows: list[list[str]] = []
     for row in table.diagnostics:
         param_start = len(diagnostic_param_rows)
-        diagnostic_param_rows.extend(row.params)
-        diagnostic_rows.append(
-            [
-                f".error_ref = {lower_rule_spelling.error_ref_c_expr(row.error)}",
-                f".param_start = {param_start}",
-                f".param_count = {len(row.params)}",
-            ]
-        )
+        diagnostic_param_rows.extend(lower_rule_rows.diagnostic_stored_params(row))
+        fields = [
+            f".error_ref = {lower_rule_spelling.error_ref_c_expr(row.error)}",
+            f".param_start = {param_start}",
+            f".param_count = {len(row.params)}",
+        ]
+        if lower_rule_rows.diagnostic_has_implicit_target_context(row):
+            fields.append(".flags = LOOM_LOW_LOWER_DIAGNOSTIC_FLAG_IMPLICIT_TARGET_CONTEXT")
+        diagnostic_rows.append(fields)
 
     diagnostic_params_name = f"k{c_table_prefix}DiagnosticParams"
     lines.extend(
@@ -432,7 +433,7 @@ def _build_string_pool(
             )
     diagnostic_param_index = 0
     for diagnostic in table.diagnostics:
-        for param in diagnostic.params:
+        for param in lower_rule_rows.diagnostic_stored_params(diagnostic):
             if param.kind == DiagnosticParamKind.STRING_LITERAL:
                 pool.intern(
                     _diagnostic_param_string_label(diagnostic_param_index),
@@ -496,7 +497,7 @@ def _validate_c_table_shape(
             _require_i64(param.i64_value, f"{param_subject} i64 value")
             _require_u32(param.u32_value, f"{param_subject} u32 value")
             _require_u64(param.u64_value, f"{param_subject} u64 value")
-        diagnostic_param_count += param_count
+        diagnostic_param_count += len(lower_rule_rows.diagnostic_stored_params(row))
     _require_u16(diagnostic_param_count, f"{subject} diagnostic-param count")
 
     for index, row in enumerate(table.type_patterns):
