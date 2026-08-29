@@ -24,7 +24,7 @@ loom_cc_library(
     "profile_rows.c"
     "spirv.c"
   DEPS
-    iree::io::byte_sequence
+    iree::base
     loom::binding::c::loomc
     loom::error::error_defs
     loom::target::arch::spirv::cooperative_properties

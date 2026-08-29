@@ -639,12 +639,12 @@ static loomc_status_t loomc_emit_add_compile_report_artifact(
 static loomc_status_t loomc_emit_add_byte_sequence_artifact(
     loomc_result_t* result, loomc_artifact_kind_t kind,
     loomc_string_view_t format, loomc_string_view_t identifier,
-    const iree_io_byte_sequence_t* contents) {
+    const iree_byte_sequence_t* contents) {
   const loomc_allocator_t allocator = loomc_result_allocator(result);
   const iree_allocator_t host_allocator = iree_allocator_from_loomc(allocator);
   iree_byte_span_t cloned_contents = iree_byte_span_empty();
   loomc_status_t status = loomc_status_from_iree(
-      iree_io_byte_sequence_clone(contents, host_allocator, &cloned_contents));
+      iree_byte_sequence_clone(contents, host_allocator, &cloned_contents));
   if (loomc_status_is_ok(status)) {
     status = loomc_result_add_artifact_take_contents(
         result, kind, format, identifier,
@@ -834,7 +834,7 @@ loomc_status_t loomc_emit_module(loomc_target_environment_t* target_environment,
           if (target_artifact.contents != NULL) {
             loom_target_compile_report_record_artifact_size(
                 &compile_report,
-                iree_io_byte_sequence_length(target_artifact.contents));
+                iree_byte_sequence_length(target_artifact.contents));
           }
         }
         status = loomc_status_from_iree(emit_status);

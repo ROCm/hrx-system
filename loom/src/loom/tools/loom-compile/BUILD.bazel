@@ -157,7 +157,6 @@ loom_cc_binary(
         "//loom/src/loom/tooling/pass:trace_cli",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/tooling:flags",
-        "//runtime/src/iree/io:byte_sequence",
         "//runtime/src/iree/io:file_handle",
     ] + _AMDGPU_COMPILE_DEPS + _SPIRV_VULKAN_COMPILE_DEPS + _LLVMIR_COMPILE_DEPS + _LLVMIR_AMDGPU_TARGET_ENV_DEPS + _LLVMIR_X86_TARGET_ENV_DEPS,
 )

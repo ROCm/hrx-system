@@ -64,7 +64,7 @@ static iree_status_t loom_llvmir_artifact_emitter_options_resolve(
 
 static iree_status_t loom_llvmir_artifact_write_text(
     const loom_llvmir_module_t* module, iree_allocator_t allocator,
-    iree_io_byte_sequence_t** out_contents) {
+    iree_byte_sequence_t** out_contents) {
   *out_contents = NULL;
   iree_string_builder_t builder;
   iree_string_builder_initialize(allocator, &builder);
@@ -76,8 +76,8 @@ static iree_status_t loom_llvmir_artifact_write_text(
     const iree_host_size_t contents_length = iree_string_builder_size(&builder);
     contents = iree_make_byte_span(iree_string_builder_take_storage(&builder),
                                    contents_length);
-    status = iree_io_byte_sequence_create_from_span_move(&contents, allocator,
-                                                         out_contents);
+    status = iree_byte_sequence_create_from_span_move(&contents, allocator,
+                                                      out_contents);
   }
   iree_allocator_free(allocator, contents.data);
   iree_string_builder_deinitialize(&builder);
@@ -86,7 +86,7 @@ static iree_status_t loom_llvmir_artifact_write_text(
 
 static iree_status_t loom_llvmir_artifact_write_bitcode(
     const loom_llvmir_module_t* module, iree_allocator_t allocator,
-    iree_io_byte_sequence_t** out_contents) {
+    iree_byte_sequence_t** out_contents) {
   *out_contents = NULL;
   iree_io_stream_t* stream = NULL;
   iree_status_t status = iree_io_vec_stream_create(
@@ -142,7 +142,7 @@ static iree_status_t loom_llvmir_artifact_emit(
     status = loom_llvmir_verify_module(module);
   }
 
-  iree_io_byte_sequence_t* contents = NULL;
+  iree_byte_sequence_t* contents = NULL;
   if (iree_status_is_ok(status)) {
     switch (format) {
       case LOOM_LLVMIR_ARTIFACT_EMITTER_FORMAT_TEXT:
@@ -161,7 +161,7 @@ static iree_status_t loom_llvmir_artifact_emit(
     contents = NULL;
   }
 
-  iree_io_byte_sequence_release(contents);
+  iree_byte_sequence_release(contents);
   loom_llvmir_module_free(module);
   return status;
 }

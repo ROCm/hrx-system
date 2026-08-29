@@ -257,7 +257,6 @@ loom_cc_test(
         "//loom/src/loom/target:provider",
         "//loom/src/loom/target/test:target_record_table",
         "//runtime/src/iree/base",
-        "//runtime/src/iree/io:byte_sequence",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
         "//runtime/src/iree/testing:temp_file",

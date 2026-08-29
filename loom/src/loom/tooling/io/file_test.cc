@@ -20,9 +20,8 @@ namespace {
 
 using StreamPtr =
     std::unique_ptr<iree_io_stream_t, decltype(&iree_io_stream_release)>;
-using ByteSequencePtr =
-    std::unique_ptr<iree_io_byte_sequence_t,
-                    decltype(&iree_io_byte_sequence_release)>;
+using ByteSequencePtr = std::unique_ptr<iree_byte_sequence_t,
+                                        decltype(&iree_byte_sequence_release)>;
 
 static iree_status_t CountSegment(void* user_data,
                                   iree_const_byte_span_t segment) {
@@ -43,12 +42,12 @@ TEST(FileTest, WritesSegmentedByteSequenceInLogicalOrder) {
   }
   IREE_ASSERT_OK(iree_io_stream_write(stream, sizeof(expected), expected));
 
-  iree_io_byte_sequence_t* sequence = nullptr;
+  iree_byte_sequence_t* sequence = nullptr;
   IREE_ASSERT_OK(iree_io_vec_stream_move_contents(stream, &sequence));
-  ByteSequencePtr sequence_owner(sequence, iree_io_byte_sequence_release);
+  ByteSequencePtr sequence_owner(sequence, iree_byte_sequence_release);
   iree_host_size_t segment_count = 0;
-  IREE_ASSERT_OK(iree_io_byte_sequence_enumerate(
-      sequence, (iree_io_byte_sequence_segment_callback_t){
+  IREE_ASSERT_OK(iree_byte_sequence_enumerate(
+      sequence, (iree_byte_sequence_segment_callback_t){
                     /*.fn=*/CountSegment,
                     /*.user_data=*/&segment_count,
                 }));

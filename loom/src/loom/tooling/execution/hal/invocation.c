@@ -220,13 +220,13 @@ iree_status_t loom_run_hal_artifact_prepare(
         "HAL artifact was not emitted for the active device target");
   }
   if (artifact->executable_data == NULL ||
-      iree_io_byte_sequence_length(artifact->executable_data) == 0) {
+      iree_byte_sequence_length(artifact->executable_data) == 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "HAL artifact has no executable contents");
   }
 
   iree_byte_span_t executable_data = iree_byte_span_empty();
-  iree_status_t status = iree_io_byte_sequence_clone(
+  iree_status_t status = iree_byte_sequence_clone(
       artifact->executable_data, host_allocator, &executable_data);
   if (iree_status_is_ok(status)) {
     iree_hal_executable_load_params_t load_params;

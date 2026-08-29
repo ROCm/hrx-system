@@ -18,7 +18,6 @@ loom_cc_library(
     hdrs = ["byte_sequence.h"],
     deps = [
         "//runtime/src/iree/base",
-        "//runtime/src/iree/io:byte_sequence",
     ],
 )
 

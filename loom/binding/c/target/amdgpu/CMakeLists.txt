@@ -22,7 +22,6 @@ loom_cc_library(
     "amdgpu.c"
   DEPS
     iree::base
-    iree::io::byte_sequence
     loom::binding::c::loomc
     loom::error::emitter
     loom::ir

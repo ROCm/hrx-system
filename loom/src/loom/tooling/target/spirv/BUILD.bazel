@@ -55,7 +55,6 @@ loom_cc_library(
         "//loom/src/loom/tooling/execution/hal:artifact",
         "//loom/src/loom/tooling/execution/hal:runtime",
         "//runtime/src/iree/base",
-        "//runtime/src/iree/io:byte_sequence",
     ],
 )
 

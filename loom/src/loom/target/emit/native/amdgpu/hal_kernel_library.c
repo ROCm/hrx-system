@@ -387,7 +387,7 @@ static iree_status_t loom_amdgpu_hal_kernel_library_write_hsaco(
     iree_host_size_t contribution_count,
     const loom_amdgpu_kernel_hsaco_write_options_t* write_options,
     iree_arena_allocator_t* table_arena, iree_allocator_t allocator,
-    iree_io_byte_sequence_t** out_hsaco) {
+    iree_byte_sequence_t** out_hsaco) {
   *out_hsaco = NULL;
 
   iree_io_stream_t* stream = NULL;
@@ -410,14 +410,14 @@ void loom_amdgpu_hal_kernel_library_deinitialize(
     return;
   }
   iree_allocator_free(allocator, (void*)library->target_key.data);
-  iree_io_byte_sequence_release(library->hsaco_data);
-  iree_io_byte_sequence_release(library->target_listing_data);
-  iree_io_byte_sequence_release(library->artifact_manifest.contents);
+  iree_byte_sequence_release(library->hsaco_data);
+  iree_byte_sequence_release(library->target_listing_data);
+  iree_byte_sequence_release(library->artifact_manifest.contents);
   *library = (loom_amdgpu_hal_kernel_library_t){0};
 }
 
 static iree_status_t loom_amdgpu_hal_kernel_library_set_contents(
-    iree_string_view_t target_key, iree_io_byte_sequence_t* hsaco,
+    iree_string_view_t target_key, iree_byte_sequence_t* hsaco,
     iree_allocator_t allocator, loom_amdgpu_hal_kernel_library_t* out_library) {
   *out_library = (loom_amdgpu_hal_kernel_library_t){0};
 
@@ -985,7 +985,7 @@ static iree_status_t loom_amdgpu_hal_kernel_library_entries(
   }
   if (iree_status_is_ok(status) && !diagnostics_failed &&
       diagnostic_emitter->error_count == 0) {
-    iree_io_byte_sequence_t* hsaco = NULL;
+    iree_byte_sequence_t* hsaco = NULL;
     const loom_amdgpu_hsaco_data_symbol_t* code_object_data_symbols = NULL;
     iree_host_size_t code_object_data_symbol_count = 0;
     status = loom_amdgpu_hal_kernel_library_compose_data_symbols(
@@ -1017,7 +1017,7 @@ static iree_status_t loom_amdgpu_hal_kernel_library_entries(
             iree_string_builder_size(&target_listing);
         iree_byte_span_t listing_contents = iree_make_byte_span(
             iree_string_builder_take_storage(&target_listing), listing_length);
-        status = iree_io_byte_sequence_create_from_span_move(
+        status = iree_byte_sequence_create_from_span_move(
             &listing_contents, allocator, &out_library->target_listing_data);
         iree_allocator_free(allocator, listing_contents.data);
         if (iree_status_is_ok(status)) {
@@ -1036,7 +1036,7 @@ static iree_status_t loom_amdgpu_hal_kernel_library_entries(
         manifest_options.flags =
             LOOM_TARGET_ARTIFACT_MANIFEST_COLLECT_FLAG_ARTIFACT_BYTE_LENGTH;
         manifest_options.artifact_byte_length =
-            iree_io_byte_sequence_length(out_library->hsaco_data);
+            iree_byte_sequence_length(out_library->hsaco_data);
         loom_target_artifact_manifest_json_t artifact_manifest_json = {0};
         status = loom_target_artifact_manifest_collect_json_from_entries(
             module, entries, &manifest_options, table_arena, allocator,
@@ -1046,8 +1046,8 @@ static iree_status_t loom_amdgpu_hal_kernel_library_entries(
           iree_byte_span_t manifest_contents = iree_make_byte_span(
               (uint8_t*)artifact_manifest_json.contents.data,
               artifact_manifest_json.contents.data_length);
-          iree_io_byte_sequence_t* manifest_sequence = NULL;
-          status = iree_io_byte_sequence_create_from_span_move(
+          iree_byte_sequence_t* manifest_sequence = NULL;
+          status = iree_byte_sequence_create_from_span_move(
               &manifest_contents, allocator, &manifest_sequence);
           if (iree_status_is_ok(status)) {
             artifact_manifest_json.contents = iree_const_byte_span_empty();
@@ -1067,7 +1067,7 @@ static iree_status_t loom_amdgpu_hal_kernel_library_entries(
         *out_emitted = true;
       }
     }
-    iree_io_byte_sequence_release(hsaco);
+    iree_byte_sequence_release(hsaco);
   }
   if (target_listing_initialized) {
     iree_string_builder_deinitialize(&target_listing);
@@ -1160,7 +1160,7 @@ iree_status_t loom_amdgpu_emit_hal_kernel_library(
   }
   if (iree_status_is_ok(status) && *out_emitted && report != NULL) {
     loom_target_compile_report_record_artifact_size(
-        report, iree_io_byte_sequence_length(out_library->hsaco_data));
+        report, iree_byte_sequence_length(out_library->hsaco_data));
   }
 
   if (!iree_status_is_ok(status)) {

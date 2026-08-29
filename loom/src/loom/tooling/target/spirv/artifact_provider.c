@@ -19,7 +19,7 @@
 
 typedef struct loom_spirv_hal_artifact_storage_t {
   // Immutable SPIR-V binary module contents.
-  iree_io_byte_sequence_t* module_contents;
+  iree_byte_sequence_t* module_contents;
   // Durable target bundle resolved from the emitted entry.
   loom_target_bundle_storage_t target_bundle_storage;
   // Artifact manifest sidecar emitted for module.
@@ -31,8 +31,8 @@ static void loom_spirv_hal_artifact_storage_free(
   if (storage == NULL) {
     return;
   }
-  iree_io_byte_sequence_release(storage->module_contents);
-  iree_io_byte_sequence_release(storage->artifact_manifest.contents);
+  iree_byte_sequence_release(storage->module_contents);
+  iree_byte_sequence_release(storage->artifact_manifest.contents);
   iree_allocator_free(allocator, storage);
 }
 
@@ -207,7 +207,7 @@ static iree_status_t loom_spirv_hal_artifact_provider_emit_entries(
   if (iree_status_is_ok(status) && diagnostic_emitter->error_count == 0) {
     iree_byte_span_t module_contents = iree_make_byte_span(
         module_binary.words, module_binary.word_count * sizeof(uint32_t));
-    status = iree_io_byte_sequence_create_from_span_move(
+    status = iree_byte_sequence_create_from_span_move(
         &module_contents, allocator, &storage->module_contents);
     if (iree_status_is_ok(status)) {
       module_binary = (loom_spirv_module_binary_t){0};
@@ -230,7 +230,7 @@ static iree_status_t loom_spirv_hal_artifact_provider_emit_entries(
       manifest_options.flags =
           LOOM_TARGET_ARTIFACT_MANIFEST_COLLECT_FLAG_ARTIFACT_BYTE_LENGTH;
       manifest_options.artifact_byte_length =
-          iree_io_byte_sequence_length(storage->module_contents);
+          iree_byte_sequence_length(storage->module_contents);
       loom_target_artifact_manifest_json_t artifact_manifest_json = {0};
       status = loom_target_artifact_manifest_collect_json_from_entries(
           module, entries, &manifest_options, arena, allocator,
@@ -240,8 +240,8 @@ static iree_status_t loom_spirv_hal_artifact_provider_emit_entries(
         iree_byte_span_t manifest_contents =
             iree_make_byte_span((uint8_t*)artifact_manifest_json.contents.data,
                                 artifact_manifest_json.contents.data_length);
-        iree_io_byte_sequence_t* manifest_sequence = NULL;
-        status = iree_io_byte_sequence_create_from_span_move(
+        iree_byte_sequence_t* manifest_sequence = NULL;
+        status = iree_byte_sequence_create_from_span_move(
             &manifest_contents, allocator, &manifest_sequence);
         if (iree_status_is_ok(status)) {
           artifact_manifest_json.contents = iree_const_byte_span_empty();

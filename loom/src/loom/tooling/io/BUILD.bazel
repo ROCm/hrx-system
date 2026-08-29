@@ -24,7 +24,6 @@ loom_cc_library(
         "//loom/src/loom/util:stream",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:path",
-        "//runtime/src/iree/io:byte_sequence",
         "//runtime/src/iree/io:file_handle",
         "//runtime/src/iree/io:stream",
     ],
@@ -46,7 +45,6 @@ loom_cc_test(
     deps = [
         ":file",
         "//runtime/src/iree/base",
-        "//runtime/src/iree/io:byte_sequence",
         "//runtime/src/iree/io:file_handle",
         "//runtime/src/iree/io:stream",
         "//runtime/src/iree/testing:gtest",

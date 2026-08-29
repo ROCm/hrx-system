@@ -584,7 +584,6 @@ loom_cc_library(
         "//loom/src/loom/target/reporting:report",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
-        "//runtime/src/iree/io:byte_sequence",
     ],
 )
 

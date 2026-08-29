@@ -10,7 +10,7 @@
 #include <memory>
 #include <string>
 
-#include "iree/io/byte_sequence.h"
+#include "iree/base/byte_sequence.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/temp_file.h"
 #include "loom/ops/op_defs.h"
@@ -71,14 +71,14 @@ void FakeArtifactSidecarStorageRelease(void* storage) {
   iree_allocator_free(artifact_storage->allocator, artifact_storage);
 }
 
-iree_status_t CreateFakeArtifactContents(
-    iree_const_byte_span_t source, iree_allocator_t allocator,
-    iree_io_byte_sequence_t** out_contents) {
+iree_status_t CreateFakeArtifactContents(iree_const_byte_span_t source,
+                                         iree_allocator_t allocator,
+                                         iree_byte_sequence_t** out_contents) {
   *out_contents = nullptr;
   void* data = nullptr;
   IREE_RETURN_IF_ERROR(iree_allocator_clone(allocator, source, &data));
   iree_byte_span_t contents = iree_make_byte_span(data, source.data_length);
-  iree_status_t status = iree_io_byte_sequence_create_from_span_move(
+  iree_status_t status = iree_byte_sequence_create_from_span_move(
       &contents, allocator, out_contents);
   iree_allocator_free(allocator, contents.data);
   return status;
@@ -98,7 +98,7 @@ iree_status_t EmitFakeArtifact(const loom_target_emit_request_t* request,
   out_artifact->target_artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_ELF;
   if (request->artifact_manifest.mode ==
       LOOM_TARGET_ARTIFACT_MANIFEST_MODE_NONE) {
-    iree_io_byte_sequence_t* contents = nullptr;
+    iree_byte_sequence_t* contents = nullptr;
     IREE_RETURN_IF_ERROR(CreateFakeArtifactContents(
         iree_make_const_byte_span(kContents, sizeof(kContents)),
         request->allocator, &contents));
@@ -111,7 +111,7 @@ iree_status_t EmitFakeArtifact(const loom_target_emit_request_t* request,
       request->allocator, sizeof(*storage), (void**)&storage));
   *storage = {};
   storage->allocator = request->allocator;
-  iree_io_byte_sequence_t* contents = nullptr;
+  iree_byte_sequence_t* contents = nullptr;
   iree_status_t status = CreateFakeArtifactContents(
       iree_make_const_byte_span(kContents, sizeof(kContents)),
       request->allocator, &contents);
@@ -121,8 +121,8 @@ iree_status_t EmitFakeArtifact(const loom_target_emit_request_t* request,
         request->allocator, &storage->sidecar.contents);
   }
   if (!iree_status_is_ok(status)) {
-    iree_io_byte_sequence_release(contents);
-    iree_io_byte_sequence_release(storage->sidecar.contents);
+    iree_byte_sequence_release(contents);
+    iree_byte_sequence_release(storage->sidecar.contents);
     FakeArtifactSidecarStorageRelease(storage);
     return status;
   }

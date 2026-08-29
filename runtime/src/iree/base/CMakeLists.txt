@@ -62,6 +62,8 @@ iree_cc_library(
     "bitfield.h"
     "bitmap.c"
     "bitmap.h"
+    "byte_sequence.c"
+    "byte_sequence.h"
     "printf.c"
     "printf.h"
     "status.c"
@@ -118,6 +120,17 @@ iree_cc_test(
     bitfield_test
   SRCS
     "bitfield_test.cc"
+  DEPS
+    ::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_test(
+  NAME
+    byte_sequence_test
+  SRCS
+    "byte_sequence_test.cc"
   DEPS
     ::base
     iree::testing::gtest

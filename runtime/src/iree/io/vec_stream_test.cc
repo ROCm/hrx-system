@@ -23,8 +23,8 @@ using testing::ElementsAre;
 
 using StreamPtr =
     std::unique_ptr<iree_io_stream_t, void (*)(iree_io_stream_t*)>;
-using ByteSequencePtr = std::unique_ptr<iree_io_byte_sequence_t,
-                                        void (*)(iree_io_byte_sequence_t*)>;
+using ByteSequencePtr =
+    std::unique_ptr<iree_byte_sequence_t, void (*)(iree_byte_sequence_t*)>;
 
 typedef struct segment_view_t {
   // Borrowed segment data pointer.
@@ -542,18 +542,18 @@ TEST(VecStreamTest, MoveEmptyContentsLeavesReusableStream) {
                             CreateStream(IREE_IO_STREAM_MODE_READABLE |
                                          IREE_IO_STREAM_MODE_WRITABLE));
 
-  iree_io_byte_sequence_t* sequence = NULL;
+  iree_byte_sequence_t* sequence = NULL;
   IREE_ASSERT_OK(iree_io_vec_stream_move_contents(stream.get(), &sequence));
-  ByteSequencePtr sequence_owner(sequence, iree_io_byte_sequence_release);
+  ByteSequencePtr sequence_owner(sequence, iree_byte_sequence_release);
 
   ASSERT_NE(sequence, nullptr);
-  EXPECT_EQ(iree_io_byte_sequence_length(sequence), 0u);
+  EXPECT_EQ(iree_byte_sequence_length(sequence), 0u);
   iree_host_size_t segment_count = 0;
-  iree_io_byte_sequence_segment_callback_t callback = {
+  iree_byte_sequence_segment_callback_t callback = {
       count_segment,
       &segment_count,
   };
-  IREE_EXPECT_OK(iree_io_byte_sequence_enumerate(sequence, callback));
+  IREE_EXPECT_OK(iree_byte_sequence_enumerate(sequence, callback));
   EXPECT_EQ(segment_count, 0u);
   EXPECT_EQ(iree_io_stream_offset(stream.get()), 0);
   EXPECT_EQ(iree_io_stream_length(stream.get()), 0);
@@ -561,15 +561,15 @@ TEST(VecStreamTest, MoveEmptyContentsLeavesReusableStream) {
   const uint8_t new_contents[] = {4, 5, 6};
   IREE_ASSERT_OK(
       iree_io_stream_write(stream.get(), sizeof(new_contents), new_contents));
-  iree_io_byte_sequence_t* second_sequence = NULL;
+  iree_byte_sequence_t* second_sequence = NULL;
   IREE_ASSERT_OK(
       iree_io_vec_stream_move_contents(stream.get(), &second_sequence));
   ByteSequencePtr second_sequence_owner(second_sequence,
-                                        iree_io_byte_sequence_release);
+                                        iree_byte_sequence_release);
 
   iree_byte_span_t clone = iree_byte_span_empty();
-  IREE_ASSERT_OK(iree_io_byte_sequence_clone(second_sequence,
-                                             iree_allocator_system(), &clone));
+  IREE_ASSERT_OK(iree_byte_sequence_clone(second_sequence,
+                                          iree_allocator_system(), &clone));
   EXPECT_THAT(std::vector<uint8_t>(clone.data, clone.data + clone.data_length),
               ElementsAre(4, 5, 6));
   iree_allocator_free(iree_allocator_system(), clone.data);
@@ -618,13 +618,13 @@ TEST(VecStreamTest, MoveContentsTransfersBlocksWithoutCopying) {
   const iree_host_size_t allocation_count_before_move =
       allocator_state.allocation_count;
 
-  iree_io_byte_sequence_t* sequence = NULL;
+  iree_byte_sequence_t* sequence = NULL;
   IREE_ASSERT_OK(iree_io_vec_stream_move_contents(stream.get(), &sequence));
-  ByteSequencePtr sequence_owner(sequence, iree_io_byte_sequence_release);
+  ByteSequencePtr sequence_owner(sequence, iree_byte_sequence_release);
   EXPECT_EQ(allocator_state.allocation_count, allocation_count_before_move + 1);
   EXPECT_EQ(iree_io_stream_offset(stream.get()), 0);
   EXPECT_EQ(iree_io_stream_length(stream.get()), 0);
-  EXPECT_EQ(iree_io_byte_sequence_length(sequence), expected.size());
+  EXPECT_EQ(iree_byte_sequence_length(sequence), expected.size());
 
   stream.reset();
   segment_comparison_state_t comparison_state = {
@@ -632,17 +632,17 @@ TEST(VecStreamTest, MoveContentsTransfersBlocksWithoutCopying) {
       0,
       true,
   };
-  iree_io_byte_sequence_segment_callback_t callback = {
+  iree_byte_sequence_segment_callback_t callback = {
       compare_segment_view,
       &comparison_state,
   };
-  IREE_ASSERT_OK(iree_io_byte_sequence_enumerate(sequence, callback));
+  IREE_ASSERT_OK(iree_byte_sequence_enumerate(sequence, callback));
   EXPECT_TRUE(comparison_state.all_match);
   EXPECT_EQ(comparison_state.index, source_segments.size());
 
   iree_byte_span_t clone = iree_byte_span_empty();
   IREE_ASSERT_OK(
-      iree_io_byte_sequence_clone(sequence, iree_allocator_system(), &clone));
+      iree_byte_sequence_clone(sequence, iree_allocator_system(), &clone));
   EXPECT_EQ(std::vector<uint8_t>(clone.data, clone.data + clone.data_length),
             expected);
   iree_allocator_free(iree_allocator_system(), clone.data);
@@ -661,9 +661,9 @@ TEST(VecStreamTest, MoveContentsUpdatesRetainedAliases) {
   iree_io_stream_retain(stream.get());
   StreamPtr alias(stream.get(), iree_io_stream_release);
 
-  iree_io_byte_sequence_t* sequence = NULL;
+  iree_byte_sequence_t* sequence = NULL;
   IREE_ASSERT_OK(iree_io_vec_stream_move_contents(stream.get(), &sequence));
-  ByteSequencePtr sequence_owner(sequence, iree_io_byte_sequence_release);
+  ByteSequencePtr sequence_owner(sequence, iree_byte_sequence_release);
   EXPECT_EQ(iree_io_stream_offset(alias.get()), 0);
   EXPECT_EQ(iree_io_stream_length(alias.get()), 0);
 
@@ -675,7 +675,7 @@ TEST(VecStreamTest, MoveContentsUpdatesRetainedAliases) {
 
   iree_byte_span_t clone = iree_byte_span_empty();
   IREE_ASSERT_OK(
-      iree_io_byte_sequence_clone(sequence, iree_allocator_system(), &clone));
+      iree_byte_sequence_clone(sequence, iree_allocator_system(), &clone));
   EXPECT_THAT(std::vector<uint8_t>(clone.data, clone.data + clone.data_length),
               ElementsAre(1, 2, 3));
   iree_allocator_free(iree_allocator_system(), clone.data);
@@ -713,8 +713,8 @@ TEST(VecStreamTest, MoveContentsFailurePreservesStream) {
   const iree_host_size_t original_free_count = allocator_state.free_count;
   allocator_state.fail_allocations = true;
 
-  iree_io_byte_sequence_t sentinel;
-  iree_io_byte_sequence_t* sequence = &sentinel;
+  iree_byte_sequence_t sentinel;
+  iree_byte_sequence_t* sequence = &sentinel;
   EXPECT_THAT(Status(iree_io_vec_stream_move_contents(stream.get(), &sequence)),
               StatusIs(StatusCode::kResourceExhausted));
   EXPECT_EQ(sequence, nullptr);

@@ -20,7 +20,6 @@ loom_cc_library(
   DEPS
     ::vulkan_profile
     iree::base
-    iree::io::byte_sequence
     loom::target::arch::spirv::descriptors::low_registry
     loom::target::arch::spirv::facts
     loom::target::arch::spirv::low_verify

@@ -9,7 +9,7 @@
 #include <inttypes.h>
 
 #include "iree/base/alignment.h"
-#include "iree/io/byte_sequence.h"
+#include "iree/base/byte_sequence.h"
 #include "loom/codegen/low/allocation_json.h"
 #include "loom/codegen/low/frame.h"
 #include "loom/codegen/low/packet_json.h"
@@ -443,9 +443,9 @@ static iree_status_t loom_amdgpu_loom_check_emit_hal_kernel_assembly(
           IREE_STATUS_INTERNAL,
           "AMDGPU HAL kernel library omitted its requested assembly listing");
     } else {
-      status = iree_io_byte_sequence_enumerate(
+      status = iree_byte_sequence_enumerate(
           library.target_listing_data,
-          (iree_io_byte_sequence_segment_callback_t){
+          (iree_byte_sequence_segment_callback_t){
               .fn = loom_amdgpu_loom_check_append_artifact_segment,
               .user_data = &request->result->actual_output,
           });

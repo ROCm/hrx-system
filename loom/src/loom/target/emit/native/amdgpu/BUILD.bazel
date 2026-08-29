@@ -122,7 +122,6 @@ loom_cc_library(
         "//loom/src/loom/tools/loom-check:execute",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base:core_headers",
-        "//runtime/src/iree/io:byte_sequence",
     ],
 )
 
@@ -520,7 +519,6 @@ loom_cc_library(
         "//loom/src/loom/verify",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
-        "//runtime/src/iree/io:byte_sequence",
         "//runtime/src/iree/io:stream",
     ],
 )
@@ -558,7 +556,6 @@ loom_cc_test(
         "//loom/src/loom/tooling/compile:pipeline",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
-        "//runtime/src/iree/io:byte_sequence",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

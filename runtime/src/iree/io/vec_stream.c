@@ -141,7 +141,7 @@ IREE_API_EXPORT iree_status_t iree_io_vec_stream_enumerate_blocks(
 
 typedef struct iree_io_vec_stream_byte_sequence_t {
   // Byte sequence interface exposed to callers.
-  iree_io_byte_sequence_t base;
+  iree_byte_sequence_t base;
   // Allocator owning both the wrapper and detached stream blocks.
   iree_allocator_t host_allocator;
   // Head of the detached block list or NULL when empty.
@@ -150,18 +150,18 @@ typedef struct iree_io_vec_stream_byte_sequence_t {
 
 static iree_io_vec_stream_byte_sequence_t*
 iree_io_vec_stream_byte_sequence_cast(
-    iree_io_byte_sequence_t* IREE_RESTRICT base_sequence) {
+    iree_byte_sequence_t* IREE_RESTRICT base_sequence) {
   return (iree_io_vec_stream_byte_sequence_t*)base_sequence;
 }
 
 static const iree_io_vec_stream_byte_sequence_t*
 iree_io_vec_stream_byte_sequence_const_cast(
-    const iree_io_byte_sequence_t* IREE_RESTRICT base_sequence) {
+    const iree_byte_sequence_t* IREE_RESTRICT base_sequence) {
   return (const iree_io_vec_stream_byte_sequence_t*)base_sequence;
 }
 
 static void iree_io_vec_stream_byte_sequence_destroy(
-    iree_io_byte_sequence_t* IREE_RESTRICT base_sequence) {
+    iree_byte_sequence_t* IREE_RESTRICT base_sequence) {
   iree_io_vec_stream_byte_sequence_t* sequence =
       iree_io_vec_stream_byte_sequence_cast(base_sequence);
   iree_allocator_t host_allocator = sequence->host_allocator;
@@ -170,8 +170,8 @@ static void iree_io_vec_stream_byte_sequence_destroy(
 }
 
 static iree_status_t iree_io_vec_stream_byte_sequence_enumerate(
-    const iree_io_byte_sequence_t* base_sequence,
-    iree_io_byte_sequence_segment_callback_t callback) {
+    const iree_byte_sequence_t* base_sequence,
+    iree_byte_sequence_segment_callback_t callback) {
   const iree_io_vec_stream_byte_sequence_t* sequence =
       iree_io_vec_stream_byte_sequence_const_cast(base_sequence);
   for (const iree_io_vec_block_t* block = sequence->block_head; block != NULL;
@@ -184,14 +184,14 @@ static iree_status_t iree_io_vec_stream_byte_sequence_enumerate(
   return iree_ok_status();
 }
 
-static const iree_io_byte_sequence_vtable_t
+static const iree_byte_sequence_vtable_t
     iree_io_vec_stream_byte_sequence_vtable = {
         .destroy = iree_io_vec_stream_byte_sequence_destroy,
         .enumerate = iree_io_vec_stream_byte_sequence_enumerate,
 };
 
 IREE_API_EXPORT iree_status_t iree_io_vec_stream_move_contents(
-    iree_io_stream_t* base_stream, iree_io_byte_sequence_t** out_sequence) {
+    iree_io_stream_t* base_stream, iree_byte_sequence_t** out_sequence) {
   IREE_ASSERT_ARGUMENT(base_stream);
   IREE_ASSERT_ARGUMENT(out_sequence);
   *out_sequence = NULL;
@@ -200,8 +200,8 @@ IREE_API_EXPORT iree_status_t iree_io_vec_stream_move_contents(
   iree_io_vec_stream_byte_sequence_t* sequence = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_uninitialized(
       stream->host_allocator, sizeof(*sequence), (void**)&sequence));
-  iree_io_byte_sequence_initialize(&iree_io_vec_stream_byte_sequence_vtable,
-                                   (uint64_t)stream->length, &sequence->base);
+  iree_byte_sequence_initialize(&iree_io_vec_stream_byte_sequence_vtable,
+                                (uint64_t)stream->length, &sequence->base);
   sequence->host_allocator = stream->host_allocator;
   sequence->block_head = stream->block_head;
 

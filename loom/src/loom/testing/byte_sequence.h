@@ -9,7 +9,7 @@
 #ifndef LOOM_TESTING_BYTE_SEQUENCE_H_
 #define LOOM_TESTING_BYTE_SEQUENCE_H_
 
-#include "iree/io/byte_sequence.h"
+#include "iree/base/byte_sequence.h"
 
 namespace loom::testing {
 
@@ -25,10 +25,10 @@ class ByteSequenceClone {
   ByteSequenceClone& operator=(const ByteSequenceClone&) = delete;
 
   // Replaces the current contents with a clone of |sequence|.
-  iree_status_t Clone(const iree_io_byte_sequence_t* sequence) {
+  iree_status_t Clone(const iree_byte_sequence_t* sequence) {
     iree_allocator_free(allocator_, contents_.data);
     contents_ = iree_byte_span_empty();
-    return iree_io_byte_sequence_clone(sequence, allocator_, &contents_);
+    return iree_byte_sequence_clone(sequence, allocator_, &contents_);
   }
 
   // Returns a borrowed immutable view over the clone.

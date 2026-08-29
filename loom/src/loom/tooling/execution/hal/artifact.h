@@ -17,8 +17,8 @@
 #define LOOM_TOOLING_EXECUTION_HAL_ARTIFACT_H_
 
 #include "iree/base/api.h"
+#include "iree/base/byte_sequence.h"
 #include "iree/hal/api.h"
-#include "iree/io/byte_sequence.h"
 #include "loom/error/diagnostic.h"
 #include "loom/ir/module.h"
 #include "loom/target/pipeline_options.h"
@@ -69,17 +69,17 @@ typedef struct loom_run_hal_artifact_t {
   // Target-native artifact format.
   loom_target_artifact_format_t target_artifact_format;
   // Borrowed target-native artifact contents owned by |storage|.
-  iree_io_byte_sequence_t* target_artifact_data;
+  iree_byte_sequence_t* target_artifact_data;
   // Target-owned textual listing format, such as `amdgpu-assembly`.
   iree_string_view_t target_listing_format;
   // Borrowed textual listing contents owned by |storage|.
-  iree_io_byte_sequence_t* target_listing_data;
+  iree_byte_sequence_t* target_listing_data;
   // Optional sidecar artifacts produced beside executable_data.
   const loom_target_emit_sidecar_artifact_t* sidecars;
   // Number of entries in |sidecars|.
   iree_host_size_t sidecar_count;
   // Borrowed executable contents owned by |storage|.
-  iree_io_byte_sequence_t* executable_data;
+  iree_byte_sequence_t* executable_data;
   // Provider-owned storage released by |deinitialize_artifact|.
   void* storage;
 } loom_run_hal_artifact_t;

@@ -9,8 +9,8 @@
 #include <stdio.h>
 
 #include "iree/base/api.h"
+#include "iree/base/byte_sequence.h"
 #include "iree/base/tooling/flags.h"
-#include "iree/io/byte_sequence.h"
 #include "iree/io/file_contents.h"
 #include "loom/codegen/low/text_asm.h"
 #include "loom/error/diagnostic.h"
@@ -594,7 +594,7 @@ static iree_status_t loom_compile_write_optional_target_artifact(
     return iree_ok_status();
   }
   if (artifact->target_artifact_data == NULL ||
-      iree_io_byte_sequence_length(artifact->target_artifact_data) == 0) {
+      iree_byte_sequence_length(artifact->target_artifact_data) == 0) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "selected HAL artifact provider produced no "
                             "target-native artifact");
@@ -925,12 +925,12 @@ static iree_status_t loom_compile_emit_target(
     if (artifact.contents != NULL) {
       loom_target_compile_report_record_artifact_size(
           compile_options->report,
-          iree_io_byte_sequence_length(artifact.contents));
+          iree_byte_sequence_length(artifact.contents));
     }
   }
   if (iree_status_is_ok(status) && diagnostic_emitter.error_count == 0 &&
       artifact.contents != NULL &&
-      iree_io_byte_sequence_length(artifact.contents) != 0) {
+      iree_byte_sequence_length(artifact.contents) != 0) {
     status = loom_tooling_write_output_byte_sequence(
         output_path, artifact.contents, allocator);
     if (iree_status_is_ok(status)) {

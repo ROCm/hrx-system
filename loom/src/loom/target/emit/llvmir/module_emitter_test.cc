@@ -9,8 +9,8 @@
 #include <memory>
 #include <string>
 
+#include "iree/base/byte_sequence.h"
 #include "iree/base/internal/arena.h"
-#include "iree/io/byte_sequence.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/analysis/symbol_facts.h"
@@ -250,8 +250,8 @@ class LlvmirModuleEmitterTest : public ::testing::Test {
     iree_status_t status = text_emitter->emit(&request, &artifact);
     iree_byte_span_t contents = iree_byte_span_empty();
     if (iree_status_is_ok(status) && artifact.contents != nullptr) {
-      status = iree_io_byte_sequence_clone(artifact.contents,
-                                           iree_allocator_system(), &contents);
+      status = iree_byte_sequence_clone(artifact.contents,
+                                        iree_allocator_system(), &contents);
     }
     if (iree_status_is_ok(status)) {
       out_text->assign(reinterpret_cast<const char*>(contents.data),
