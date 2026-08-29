@@ -257,10 +257,6 @@ function(iree_configure_test TEST_NAME)
     set_property(TEST ${TEST_NAME} APPEND PROPERTY ENVIRONMENT "IREE_VULKAN_DISABLE=1")
   endif()
 
-  if(NOT IREE_HAL_DRIVER_METAL)
-    set_property(TEST ${TEST_NAME} APPEND PROPERTY ENVIRONMENT "IREE_METAL_DISABLE=1")
-  endif()
-
 endfunction()
 
 # iree_create_ctest_customization
