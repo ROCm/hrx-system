@@ -1,5 +1,37 @@
 // RUN: pass vector-to-scalar,canonicalize
 
+func.def @scalarizes_whole_vector_select(%condition: i1, %true_value: vector<2xi32>, %false_value: vector<2xi32>) -> (vector<2xi32>) {
+  %selected = scf.select %condition, %true_value, %false_value : vector<2xi32>
+  func.return %selected : vector<2xi32>
+}
+
+// ----
+func.def @scalarizes_whole_vector_select(%condition: i1, %true_value: vector<2xi32>, %false_value: vector<2xi32>) -> (vector<2xi32>) {
+  %5 = vector.extract %true_value[0] : vector<2xi32> -> i32
+  %6 = vector.extract %false_value[0] : vector<2xi32> -> i32
+  %7 = scf.select %condition, %5, %6 : i32
+  %8 = vector.extract %true_value[1] : vector<2xi32> -> i32
+  %9 = vector.extract %false_value[1] : vector<2xi32> -> i32
+  %10 = scf.select %condition, %8, %9 : i32
+  %selected = vector.from_elements %7, %10 : vector<2xi32>
+  func.return %selected : vector<2xi32>
+}
+
+// ====
+
+func.def @preserves_scalar_select(%condition: i1, %true_value: i32, %false_value: i32) -> (i32) {
+  %selected = scf.select %condition, %true_value, %false_value : i32
+  func.return %selected : i32
+}
+
+// ----
+func.def @preserves_scalar_select(%condition: i1, %true_value: i32, %false_value: i32) -> (i32) {
+  %selected = scf.select %condition, %true_value, %false_value : i32
+  func.return %selected : i32
+}
+
+// ====
+
 // A specialized zero vector extent erases the scalarized load/store loops. This
 // is the optional-feature shape we want to be boring: valid dynamic IR enters
 // lowering and disappears when facts say there are no lanes.

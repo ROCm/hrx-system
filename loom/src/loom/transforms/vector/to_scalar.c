@@ -694,6 +694,9 @@ static iree_status_t loom_vector_to_scalar_try_direct_lowerer(
 static iree_status_t loom_vector_to_scalar_lower_descriptor_op(
     loom_pass_t* pass, loom_rewriter_t* rewriter, loom_op_t* op) {
   if (op->result_count != 1) return iree_ok_status();
+  loom_type_t result_type =
+      loom_module_value_type(rewriter->module, loom_op_results(op)[0]);
+  if (!loom_type_is_vector(result_type)) return iree_ok_status();
 
   loom_vector_to_scalar_descriptor_t descriptor = {0};
   if (!loom_vector_to_scalar_resolve_descriptor(op->kind, &descriptor)) {
