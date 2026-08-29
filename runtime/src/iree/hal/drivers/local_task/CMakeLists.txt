@@ -33,7 +33,7 @@ iree_cc_test(
     ::block_command_ops
     ::block_isa
     iree::base::internal::arena
-    iree::hal::local
+    iree::hal::local::executable_loader
     iree::testing::gtest
     iree::testing::gtest_main
 )
@@ -53,7 +53,6 @@ iree_cc_library(
     iree::base
     iree::base::internal::arena
     iree::hal
-    iree::hal::local
     iree::hal::local::atomic
     iree::hal::local::executable_library
     iree::hal::local::executable_loader
@@ -74,8 +73,8 @@ iree_cc_library(
     ::block_isa
     iree::base
     iree::hal
-    iree::hal::local
     iree::hal::local::executable_library
+    iree::hal::local::executable_loader
   PUBLIC
 )
 
@@ -169,11 +168,11 @@ iree_cc_library(
     iree::base::threading
     iree::base::threading::thread
     iree::hal
-    iree::hal::local
     iree::hal::local::atomic
     iree::hal::local::device_spec_builder
     iree::hal::local::executable_environment
     iree::hal::local::executable_library
+    iree::hal::local::executable_loader
     iree::hal::local::profile
     iree::hal::local::transient_buffer
     iree::hal::memory::cpu_slab_provider

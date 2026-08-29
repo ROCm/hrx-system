@@ -24,7 +24,7 @@ iree_cc_library(
     "init.c"
   DEPS
     iree::base
-    iree::hal::local
+    iree::hal::local::executable_loader
     ${IREE_HAL_EXECUTABLE_LOADER_EXTRA_DEPS}
     ${IREE_HAL_EXECUTABLE_LOADER_MODULES}
   PUBLIC
