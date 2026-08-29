@@ -1,0 +1,405 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_reduce.loom-test
+// RUN: emit source-low output=low
+
+vm.target<core> @target
+func.def target(@target) @i32_reduce_add(%input: buffer, %output: buffer) {
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<4xi32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xi32>
+  %loaded = vector.load %input_view[0] : view<4xi32> -> vector<4xi32>
+  %init = scalar.constant 0 : i32
+  %sum = vector.reduce<addi> %loaded, %init : vector<4xi32>, i32
+  %stored = vector.from_elements %sum : vector<1xi32>
+  vector.store %stored, %output_view[0] : vector<1xi32>, view<1xi32>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>}) @i32_reduce_add(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>) asm {
+  %20 = constant.zero : reg<vm.value : offset>
+  %21 = buffer.load %input, %20, %20, 0, i32.x1 : reg<vm.value : i32>
+  %23 = constant.s16 4 : reg<vm.value : offset>
+  %24 = buffer.load %input, %23, %20, 0, i32.x1 : reg<vm.value : i32>
+  %25 = integer.add.i32 %21, %24 : reg<vm.value : i32>
+  %27 = constant.s16 8 : reg<vm.value : offset>
+  %28 = buffer.load %input, %27, %20, 0, i32.x1 : reg<vm.value : i32>
+  %29 = integer.add.i32 %25, %28 : reg<vm.value : i32>
+  %31 = constant.s16 12 : reg<vm.value : offset>
+  %32 = buffer.load %input, %31, %20, 0, i32.x1 : reg<vm.value : i32>
+  %sum = integer.add.i32 %29, %32 : reg<vm.value : i32>
+  %stored = concat(%sum) : (reg<vm.value : i32>) -> reg<vm.value : vector<1xi32>>
+  buffer.store %output, %20, %20, %stored, 0, i32.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @f32_reduce_add(%input: buffer, %output: buffer) {
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<4xf32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xf32>
+  %loaded = vector.load %input_view[0] : view<4xf32> -> vector<4xf32>
+  %init = scalar.constant 0.0 : f32
+  %sum = vector.reduce<addf> %loaded, %init : vector<4xf32>, f32
+  %stored = vector.from_elements %sum : vector<1xf32>
+  vector.store %stored, %output_view[0] : vector<1xf32>, view<1xf32>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>}) @f32_reduce_add(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>) asm {
+  %init = constant.zero : reg<vm.value : f32>
+  %21 = constant.zero : reg<vm.value : offset>
+  %22 = buffer.load %input, %21, %21, 0, i32.x1 : reg<vm.value : f32>
+  %23 = float.add.f32 %init, %22 : reg<vm.value : f32>
+  %25 = constant.s16 4 : reg<vm.value : offset>
+  %26 = buffer.load %input, %25, %21, 0, i32.x1 : reg<vm.value : f32>
+  %27 = float.add.f32 %23, %26 : reg<vm.value : f32>
+  %29 = constant.s16 8 : reg<vm.value : offset>
+  %30 = buffer.load %input, %29, %21, 0, i32.x1 : reg<vm.value : f32>
+  %31 = float.add.f32 %27, %30 : reg<vm.value : f32>
+  %33 = constant.s16 12 : reg<vm.value : offset>
+  %34 = buffer.load %input, %33, %21, 0, i32.x1 : reg<vm.value : f32>
+  %sum = float.add.f32 %31, %34 : reg<vm.value : f32>
+  %stored = concat(%sum) : (reg<vm.value : f32>) -> reg<vm.value : vector<1xf32>>
+  buffer.store %output, %21, %21, %stored, 0, i32.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @f32_reduce_add_fastmath(%input: buffer, %output: buffer) {
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<4xf32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xf32>
+  %loaded = vector.load %input_view[0] : view<4xf32> -> vector<4xf32>
+  %init = scalar.constant 0.0 : f32
+  %sum = vector.reduce<addf, reassoc|nnan|nsz> %loaded, %init : vector<4xf32>, f32
+  %stored = vector.from_elements %sum : vector<1xf32>
+  vector.store %stored, %output_view[0] : vector<1xf32>, view<1xf32>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>}) @f32_reduce_add_fastmath(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>) asm {
+  %20 = constant.zero : reg<vm.value : offset>
+  %21 = buffer.load %input, %20, %20, 0, i32.x1 : reg<vm.value : f32>
+  %23 = constant.s16 4 : reg<vm.value : offset>
+  %24 = buffer.load %input, %23, %20, 0, i32.x1 : reg<vm.value : f32>
+  %25 = float.add.f32 %21, %24 : reg<vm.value : f32>
+  %27 = constant.s16 8 : reg<vm.value : offset>
+  %28 = buffer.load %input, %27, %20, 0, i32.x1 : reg<vm.value : f32>
+  %30 = constant.s16 12 : reg<vm.value : offset>
+  %31 = buffer.load %input, %30, %20, 0, i32.x1 : reg<vm.value : f32>
+  %32 = float.add.f32 %28, %31 : reg<vm.value : f32>
+  %33 = float.add.f32 %25, %32 : reg<vm.value : f32>
+  %stored = concat(%33) : (reg<vm.value : f32>) -> reg<vm.value : vector<1xf32>>
+  buffer.store %output, %20, %20, %stored, 0, i32.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @f32x64_reduce_add_fastmath(%input: buffer, %output: buffer) {
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xf32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xf32>
+  %loaded = vector.load %input_view[0] : view<64xf32> -> vector<64xf32>
+  %init = scalar.constant 0.0 : f32
+  %sum = vector.reduce<addf, reassoc|nnan|nsz> %loaded, %init : vector<64xf32>, f32
+  %stored = vector.from_elements %sum : vector<1xf32>
+  vector.store %stored, %output_view[0] : vector<1xf32>, view<1xf32>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>}) @f32x64_reduce_add_fastmath(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>) asm {
+  %140 = constant.zero : reg<vm.value : offset>
+  %141 = buffer.load %input, %140, %140, 0, i32.x1 : reg<vm.value : f32>
+  %143 = constant.s16 4 : reg<vm.value : offset>
+  %144 = buffer.load %input, %143, %140, 0, i32.x1 : reg<vm.value : f32>
+  %145 = float.add.f32 %141, %144 : reg<vm.value : f32>
+  %147 = constant.s16 8 : reg<vm.value : offset>
+  %148 = buffer.load %input, %147, %140, 0, i32.x1 : reg<vm.value : f32>
+  %150 = constant.s16 12 : reg<vm.value : offset>
+  %151 = buffer.load %input, %150, %140, 0, i32.x1 : reg<vm.value : f32>
+  %152 = float.add.f32 %148, %151 : reg<vm.value : f32>
+  %153 = float.add.f32 %145, %152 : reg<vm.value : f32>
+  %155 = constant.s16 16 : reg<vm.value : offset>
+  %156 = buffer.load %input, %155, %140, 0, i32.x1 : reg<vm.value : f32>
+  %158 = constant.s16 20 : reg<vm.value : offset>
+  %159 = buffer.load %input, %158, %140, 0, i32.x1 : reg<vm.value : f32>
+  %160 = float.add.f32 %156, %159 : reg<vm.value : f32>
+  %162 = constant.s16 24 : reg<vm.value : offset>
+  %163 = buffer.load %input, %162, %140, 0, i32.x1 : reg<vm.value : f32>
+  %165 = constant.s16 28 : reg<vm.value : offset>
+  %166 = buffer.load %input, %165, %140, 0, i32.x1 : reg<vm.value : f32>
+  %167 = float.add.f32 %163, %166 : reg<vm.value : f32>
+  %168 = float.add.f32 %160, %167 : reg<vm.value : f32>
+  %169 = float.add.f32 %153, %168 : reg<vm.value : f32>
+  %171 = constant.s16 32 : reg<vm.value : offset>
+  %172 = buffer.load %input, %171, %140, 0, i32.x1 : reg<vm.value : f32>
+  %174 = constant.s16 36 : reg<vm.value : offset>
+  %175 = buffer.load %input, %174, %140, 0, i32.x1 : reg<vm.value : f32>
+  %176 = float.add.f32 %172, %175 : reg<vm.value : f32>
+  %178 = constant.s16 40 : reg<vm.value : offset>
+  %179 = buffer.load %input, %178, %140, 0, i32.x1 : reg<vm.value : f32>
+  %181 = constant.s16 44 : reg<vm.value : offset>
+  %182 = buffer.load %input, %181, %140, 0, i32.x1 : reg<vm.value : f32>
+  %183 = float.add.f32 %179, %182 : reg<vm.value : f32>
+  %184 = float.add.f32 %176, %183 : reg<vm.value : f32>
+  %186 = constant.s16 48 : reg<vm.value : offset>
+  %187 = buffer.load %input, %186, %140, 0, i32.x1 : reg<vm.value : f32>
+  %189 = constant.s16 52 : reg<vm.value : offset>
+  %190 = buffer.load %input, %189, %140, 0, i32.x1 : reg<vm.value : f32>
+  %191 = float.add.f32 %187, %190 : reg<vm.value : f32>
+  %193 = constant.s16 56 : reg<vm.value : offset>
+  %194 = buffer.load %input, %193, %140, 0, i32.x1 : reg<vm.value : f32>
+  %196 = constant.s16 60 : reg<vm.value : offset>
+  %197 = buffer.load %input, %196, %140, 0, i32.x1 : reg<vm.value : f32>
+  %198 = float.add.f32 %194, %197 : reg<vm.value : f32>
+  %199 = float.add.f32 %191, %198 : reg<vm.value : f32>
+  %200 = float.add.f32 %184, %199 : reg<vm.value : f32>
+  %201 = float.add.f32 %169, %200 : reg<vm.value : f32>
+  %203 = constant.s16 64 : reg<vm.value : offset>
+  %204 = buffer.load %input, %203, %140, 0, i32.x1 : reg<vm.value : f32>
+  %206 = constant.s16 68 : reg<vm.value : offset>
+  %207 = buffer.load %input, %206, %140, 0, i32.x1 : reg<vm.value : f32>
+  %208 = float.add.f32 %204, %207 : reg<vm.value : f32>
+  %210 = constant.s16 72 : reg<vm.value : offset>
+  %211 = buffer.load %input, %210, %140, 0, i32.x1 : reg<vm.value : f32>
+  %213 = constant.s16 76 : reg<vm.value : offset>
+  %214 = buffer.load %input, %213, %140, 0, i32.x1 : reg<vm.value : f32>
+  %215 = float.add.f32 %211, %214 : reg<vm.value : f32>
+  %216 = float.add.f32 %208, %215 : reg<vm.value : f32>
+  %218 = constant.s16 80 : reg<vm.value : offset>
+  %219 = buffer.load %input, %218, %140, 0, i32.x1 : reg<vm.value : f32>
+  %221 = constant.s16 84 : reg<vm.value : offset>
+  %222 = buffer.load %input, %221, %140, 0, i32.x1 : reg<vm.value : f32>
+  %223 = float.add.f32 %219, %222 : reg<vm.value : f32>
+  %225 = constant.s16 88 : reg<vm.value : offset>
+  %226 = buffer.load %input, %225, %140, 0, i32.x1 : reg<vm.value : f32>
+  %228 = constant.s16 92 : reg<vm.value : offset>
+  %229 = buffer.load %input, %228, %140, 0, i32.x1 : reg<vm.value : f32>
+  %230 = float.add.f32 %226, %229 : reg<vm.value : f32>
+  %231 = float.add.f32 %223, %230 : reg<vm.value : f32>
+  %232 = float.add.f32 %216, %231 : reg<vm.value : f32>
+  %234 = constant.s16 96 : reg<vm.value : offset>
+  %235 = buffer.load %input, %234, %140, 0, i32.x1 : reg<vm.value : f32>
+  %237 = constant.s16 100 : reg<vm.value : offset>
+  %238 = buffer.load %input, %237, %140, 0, i32.x1 : reg<vm.value : f32>
+  %239 = float.add.f32 %235, %238 : reg<vm.value : f32>
+  %241 = constant.s16 104 : reg<vm.value : offset>
+  %242 = buffer.load %input, %241, %140, 0, i32.x1 : reg<vm.value : f32>
+  %244 = constant.s16 108 : reg<vm.value : offset>
+  %245 = buffer.load %input, %244, %140, 0, i32.x1 : reg<vm.value : f32>
+  %246 = float.add.f32 %242, %245 : reg<vm.value : f32>
+  %247 = float.add.f32 %239, %246 : reg<vm.value : f32>
+  %249 = constant.s16 112 : reg<vm.value : offset>
+  %250 = buffer.load %input, %249, %140, 0, i32.x1 : reg<vm.value : f32>
+  %252 = constant.s16 116 : reg<vm.value : offset>
+  %253 = buffer.load %input, %252, %140, 0, i32.x1 : reg<vm.value : f32>
+  %254 = float.add.f32 %250, %253 : reg<vm.value : f32>
+  %256 = constant.s16 120 : reg<vm.value : offset>
+  %257 = buffer.load %input, %256, %140, 0, i32.x1 : reg<vm.value : f32>
+  %259 = constant.s16 124 : reg<vm.value : offset>
+  %260 = buffer.load %input, %259, %140, 0, i32.x1 : reg<vm.value : f32>
+  %261 = float.add.f32 %257, %260 : reg<vm.value : f32>
+  %262 = float.add.f32 %254, %261 : reg<vm.value : f32>
+  %263 = float.add.f32 %247, %262 : reg<vm.value : f32>
+  %264 = float.add.f32 %232, %263 : reg<vm.value : f32>
+  %265 = float.add.f32 %201, %264 : reg<vm.value : f32>
+  %267 = constant.s16 128 : reg<vm.value : offset>
+  %268 = buffer.load %input, %267, %140, 0, i32.x1 : reg<vm.value : f32>
+  %270 = constant.s16 132 : reg<vm.value : offset>
+  %271 = buffer.load %input, %270, %140, 0, i32.x1 : reg<vm.value : f32>
+  %272 = float.add.f32 %268, %271 : reg<vm.value : f32>
+  %274 = constant.s16 136 : reg<vm.value : offset>
+  %275 = buffer.load %input, %274, %140, 0, i32.x1 : reg<vm.value : f32>
+  %277 = constant.s16 140 : reg<vm.value : offset>
+  %278 = buffer.load %input, %277, %140, 0, i32.x1 : reg<vm.value : f32>
+  %279 = float.add.f32 %275, %278 : reg<vm.value : f32>
+  %280 = float.add.f32 %272, %279 : reg<vm.value : f32>
+  %282 = constant.s16 144 : reg<vm.value : offset>
+  %283 = buffer.load %input, %282, %140, 0, i32.x1 : reg<vm.value : f32>
+  %285 = constant.s16 148 : reg<vm.value : offset>
+  %286 = buffer.load %input, %285, %140, 0, i32.x1 : reg<vm.value : f32>
+  %287 = float.add.f32 %283, %286 : reg<vm.value : f32>
+  %289 = constant.s16 152 : reg<vm.value : offset>
+  %290 = buffer.load %input, %289, %140, 0, i32.x1 : reg<vm.value : f32>
+  %292 = constant.s16 156 : reg<vm.value : offset>
+  %293 = buffer.load %input, %292, %140, 0, i32.x1 : reg<vm.value : f32>
+  %294 = float.add.f32 %290, %293 : reg<vm.value : f32>
+  %295 = float.add.f32 %287, %294 : reg<vm.value : f32>
+  %296 = float.add.f32 %280, %295 : reg<vm.value : f32>
+  %298 = constant.s16 160 : reg<vm.value : offset>
+  %299 = buffer.load %input, %298, %140, 0, i32.x1 : reg<vm.value : f32>
+  %301 = constant.s16 164 : reg<vm.value : offset>
+  %302 = buffer.load %input, %301, %140, 0, i32.x1 : reg<vm.value : f32>
+  %303 = float.add.f32 %299, %302 : reg<vm.value : f32>
+  %305 = constant.s16 168 : reg<vm.value : offset>
+  %306 = buffer.load %input, %305, %140, 0, i32.x1 : reg<vm.value : f32>
+  %308 = constant.s16 172 : reg<vm.value : offset>
+  %309 = buffer.load %input, %308, %140, 0, i32.x1 : reg<vm.value : f32>
+  %310 = float.add.f32 %306, %309 : reg<vm.value : f32>
+  %311 = float.add.f32 %303, %310 : reg<vm.value : f32>
+  %313 = constant.s16 176 : reg<vm.value : offset>
+  %314 = buffer.load %input, %313, %140, 0, i32.x1 : reg<vm.value : f32>
+  %316 = constant.s16 180 : reg<vm.value : offset>
+  %317 = buffer.load %input, %316, %140, 0, i32.x1 : reg<vm.value : f32>
+  %318 = float.add.f32 %314, %317 : reg<vm.value : f32>
+  %320 = constant.s16 184 : reg<vm.value : offset>
+  %321 = buffer.load %input, %320, %140, 0, i32.x1 : reg<vm.value : f32>
+  %323 = constant.s16 188 : reg<vm.value : offset>
+  %324 = buffer.load %input, %323, %140, 0, i32.x1 : reg<vm.value : f32>
+  %325 = float.add.f32 %321, %324 : reg<vm.value : f32>
+  %326 = float.add.f32 %318, %325 : reg<vm.value : f32>
+  %327 = float.add.f32 %311, %326 : reg<vm.value : f32>
+  %328 = float.add.f32 %296, %327 : reg<vm.value : f32>
+  %330 = constant.s16 192 : reg<vm.value : offset>
+  %331 = buffer.load %input, %330, %140, 0, i32.x1 : reg<vm.value : f32>
+  %333 = constant.s16 196 : reg<vm.value : offset>
+  %334 = buffer.load %input, %333, %140, 0, i32.x1 : reg<vm.value : f32>
+  %335 = float.add.f32 %331, %334 : reg<vm.value : f32>
+  %337 = constant.s16 200 : reg<vm.value : offset>
+  %338 = buffer.load %input, %337, %140, 0, i32.x1 : reg<vm.value : f32>
+  %340 = constant.s16 204 : reg<vm.value : offset>
+  %341 = buffer.load %input, %340, %140, 0, i32.x1 : reg<vm.value : f32>
+  %342 = float.add.f32 %338, %341 : reg<vm.value : f32>
+  %343 = float.add.f32 %335, %342 : reg<vm.value : f32>
+  %345 = constant.s16 208 : reg<vm.value : offset>
+  %346 = buffer.load %input, %345, %140, 0, i32.x1 : reg<vm.value : f32>
+  %348 = constant.s16 212 : reg<vm.value : offset>
+  %349 = buffer.load %input, %348, %140, 0, i32.x1 : reg<vm.value : f32>
+  %350 = float.add.f32 %346, %349 : reg<vm.value : f32>
+  %352 = constant.s16 216 : reg<vm.value : offset>
+  %353 = buffer.load %input, %352, %140, 0, i32.x1 : reg<vm.value : f32>
+  %355 = constant.s16 220 : reg<vm.value : offset>
+  %356 = buffer.load %input, %355, %140, 0, i32.x1 : reg<vm.value : f32>
+  %357 = float.add.f32 %353, %356 : reg<vm.value : f32>
+  %358 = float.add.f32 %350, %357 : reg<vm.value : f32>
+  %359 = float.add.f32 %343, %358 : reg<vm.value : f32>
+  %361 = constant.s16 224 : reg<vm.value : offset>
+  %362 = buffer.load %input, %361, %140, 0, i32.x1 : reg<vm.value : f32>
+  %364 = constant.s16 228 : reg<vm.value : offset>
+  %365 = buffer.load %input, %364, %140, 0, i32.x1 : reg<vm.value : f32>
+  %366 = float.add.f32 %362, %365 : reg<vm.value : f32>
+  %368 = constant.s16 232 : reg<vm.value : offset>
+  %369 = buffer.load %input, %368, %140, 0, i32.x1 : reg<vm.value : f32>
+  %371 = constant.s16 236 : reg<vm.value : offset>
+  %372 = buffer.load %input, %371, %140, 0, i32.x1 : reg<vm.value : f32>
+  %373 = float.add.f32 %369, %372 : reg<vm.value : f32>
+  %374 = float.add.f32 %366, %373 : reg<vm.value : f32>
+  %376 = constant.s16 240 : reg<vm.value : offset>
+  %377 = buffer.load %input, %376, %140, 0, i32.x1 : reg<vm.value : f32>
+  %379 = constant.s16 244 : reg<vm.value : offset>
+  %380 = buffer.load %input, %379, %140, 0, i32.x1 : reg<vm.value : f32>
+  %381 = float.add.f32 %377, %380 : reg<vm.value : f32>
+  %383 = constant.s16 248 : reg<vm.value : offset>
+  %384 = buffer.load %input, %383, %140, 0, i32.x1 : reg<vm.value : f32>
+  %386 = constant.s16 252 : reg<vm.value : offset>
+  %387 = buffer.load %input, %386, %140, 0, i32.x1 : reg<vm.value : f32>
+  %388 = float.add.f32 %384, %387 : reg<vm.value : f32>
+  %389 = float.add.f32 %381, %388 : reg<vm.value : f32>
+  %390 = float.add.f32 %374, %389 : reg<vm.value : f32>
+  %391 = float.add.f32 %359, %390 : reg<vm.value : f32>
+  %392 = float.add.f32 %328, %391 : reg<vm.value : f32>
+  %393 = float.add.f32 %265, %392 : reg<vm.value : f32>
+  %stored = concat(%393) : (reg<vm.value : f32>) -> reg<vm.value : vector<1xf32>>
+  buffer.store %output, %140, %140, %stored, 0, i32.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+config.def @runtime.vector_width = 4 : index
+
+kernel.def target(@target) @f32_configured_width_square_reduce() {
+  %singleton_dimension = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%singleton_dimension, %singleton_dimension, %singleton_dimension) workgroup_size(%workgroup_size, %singleton_dimension, %singleton_dimension) : index
+} launch(%input: buffer, %output: buffer) {
+  %buffer_base = index.constant 0 : offset
+  %lane0 = kernel.workitem.id<x> : index
+  %lane = index.assume %lane0 [range(%lane0, 0, 63)] : index
+  %vector_width = config.get @runtime.vector_width : index
+  %vector_width_bounded = index.assume %vector_width [range(%vector_width, 2, 4)] : index
+  %element_count = index.constant 256 : index
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<[%element_count]xf32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xf32>
+  %linear0 = index.mul %lane, %vector_width_bounded : index
+  %linear = index.assume %linear0 [range(%linear0, 0, 252)] : index
+  %loaded = vector.load %input_view[%linear] : view<[%element_count]xf32> -> vector<[%vector_width_bounded]xf32>
+  %squared = vector.mulf<reassoc|nnan|ninf|nsz|contract> %loaded, %loaded : vector<[%vector_width_bounded]xf32>
+  %initial_sum = scalar.constant 0.0 : f32
+  %sum = vector.reduce<addf, reassoc|nnan|ninf|nsz|contract> %squared, %initial_sum : vector<[%vector_width_bounded]xf32>, f32
+  %stored = vector.from_elements %sum : vector<1xf32>
+  vector.store %stored, %output_view[0] : vector<1xf32>, view<1xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f32_configured_width_square_reduce(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %lane: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %65 = constant.zero : reg<vm.value : offset>
+  %66 = buffer.load %input, %65, %lane, 16, i32.x1 : reg<vm.value : f32>
+  %67 = float.mul.f32 %66, %66 : reg<vm.value : f32>
+  %68 = constant.s16 4 : reg<vm.value : offset>
+  %69 = buffer.load %input, %68, %lane, 16, i32.x1 : reg<vm.value : f32>
+  %70 = float.math.ternary.f32 %69, %69, %67, fma : reg<vm.value : f32>
+  %71 = constant.s16 8 : reg<vm.value : offset>
+  %72 = buffer.load %input, %71, %lane, 16, i32.x1 : reg<vm.value : f32>
+  %73 = float.math.ternary.f32 %72, %72, %70, fma : reg<vm.value : f32>
+  %74 = constant.s16 12 : reg<vm.value : offset>
+  %75 = buffer.load %input, %74, %lane, 16, i32.x1 : reg<vm.value : f32>
+  %sum = float.math.ternary.f32 %75, %75, %73, fma : reg<vm.value : f32>
+  %stored = concat(%sum) : (reg<vm.value : f32>) -> reg<vm.value : vector<1xf32>>
+  buffer.store %output, %65, %65, %stored, 0, i32.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @i32_reduce_minui_select_sentinel(%values: vector<4xi32>) -> (i32) {
+  %empty_value = scalar.constant 0 : i32
+  %zeros = vector.splat %empty_value : vector<4xi32>
+  %is_zero = vector.cmpi eq, %values, %zeros : vector<4xi32> -> vector<4xi1>
+  %start = scalar.constant 0 : i32
+  %step = scalar.constant 1 : i32
+  %indices = vector.iota %start step %step : vector<4xi32>
+  %sentinel = scalar.constant 2147483647 : i32
+  %sentinels = vector.splat %sentinel : vector<4xi32>
+  %selected = vector.select %is_zero, %indices, %sentinels : vector<4xi32>
+  %result = vector.reduce<minui> %selected, %sentinel : vector<4xi32>, i32
+  func.return %result : i32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x4 : vector<4xi32>>) -> (reg<vm.value : i32>)>}) @i32_reduce_minui_select_sentinel(%values: reg<vm.value x4 : vector<4xi32>>) -> (reg<vm.value : i32>) asm {
+  %45 = constant.zero : reg<vm.value : i32>
+  %46 = constant.s16 1 : reg<vm.value : i32>
+  %47 = constant.s16 2 : reg<vm.value : i32>
+  %48 = constant.s16 3 : reg<vm.value : i32>
+  %sentinel = constant.i32 2147483647 : reg<vm.value : i32>
+  %50 = slice %values[0] : reg<vm.value x4 : vector<4xi32>> -> reg<vm.value : i32>
+  %51 = integer.compare.i32 %50, %45, eq : reg<vm.value : i1>
+  %52 = value.select %51, %45, %sentinel : reg<vm.value : i32>
+  %53 = integer.min.u32 %sentinel, %52 : reg<vm.value : i32>
+  %54 = slice %values[1] : reg<vm.value x4 : vector<4xi32>> -> reg<vm.value : i32>
+  %55 = integer.compare.i32 %54, %45, eq : reg<vm.value : i1>
+  %56 = value.select %55, %46, %sentinel : reg<vm.value : i32>
+  %57 = integer.min.u32 %53, %56 : reg<vm.value : i32>
+  %58 = slice %values[2] : reg<vm.value x4 : vector<4xi32>> -> reg<vm.value : i32>
+  %59 = integer.compare.i32 %58, %45, eq : reg<vm.value : i1>
+  %60 = value.select %59, %47, %sentinel : reg<vm.value : i32>
+  %61 = integer.min.u32 %57, %60 : reg<vm.value : i32>
+  %62 = slice %values[3] : reg<vm.value x4 : vector<4xi32>> -> reg<vm.value : i32>
+  %63 = integer.compare.i32 %62, %45, eq : reg<vm.value : i1>
+  %64 = value.select %63, %48, %sentinel : reg<vm.value : i32>
+  %result = integer.min.u32 %61, %64 : reg<vm.value : i32>
+  return %result
+}
