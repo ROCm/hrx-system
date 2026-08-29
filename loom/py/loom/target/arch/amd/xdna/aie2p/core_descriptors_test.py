@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from loom.target.arch.amd.xdna.aie2p.core_descriptors import (
     AIE2P_CORE_DESCRIPTOR_SET,
+    _low_register_class_name,
 )
 from loom.target.arch.amd.xdna.aie2p.core_machine_data import CORE_MACHINE_TABLE
 from loom.target.low_descriptors import EffectKind, OperandRole, RegClassFlag
@@ -16,7 +17,7 @@ from loom.target.low_descriptors import EffectKind, OperandRole, RegClassFlag
 def test_core_descriptor_closure_is_complete() -> None:
     descriptor_set = AIE2P_CORE_DESCRIPTOR_SET
     assert len(descriptor_set.physical_registers) == 359
-    assert len(descriptor_set.reg_classes) == 9
+    assert len(descriptor_set.reg_classes) == 5
     assert len(descriptor_set.descriptors) == 11
     assert tuple(row.name for row in descriptor_set.physical_registers) == tuple(
         row.name for row in CORE_MACHINE_TABLE.physical_registers
@@ -27,7 +28,11 @@ def test_core_descriptor_closure_is_complete() -> None:
 
 
 def test_low_register_classes_retain_machine_candidate_order() -> None:
-    machine_classes = {row.name: row for row in CORE_MACHINE_TABLE.register_classes}
+    machine_classes = {
+        _low_register_class_name(row.name): row
+        for row in CORE_MACHINE_TABLE.register_classes
+    }
+    assert len(machine_classes) == len(CORE_MACHINE_TABLE.register_classes)
     for register_class in AIE2P_CORE_DESCRIPTOR_SET.reg_classes:
         assert (
             register_class.physical_registers
@@ -36,6 +41,39 @@ def test_low_register_classes_retain_machine_candidate_order() -> None:
         assert RegClassFlag.PHYSICAL in register_class.flags
         assert RegClassFlag.EXPLICIT_PHYSICAL_REGISTERS in register_class.flags
         assert RegClassFlag.UNSPILLABLE in register_class.flags
+
+
+def test_vector_encoding_roles_share_one_low_storage_class() -> None:
+    descriptors = {
+        descriptor.key: descriptor
+        for descriptor in AIE2P_CORE_DESCRIPTOR_SET.descriptors
+    }
+    vector_keys = (
+        "amd.xdna.aie2p.load.a.i8x64.indexed.immediate",
+        "amd.xdna.aie2p.load.b.i8x64.indexed.immediate",
+        "amd.xdna.aie2p.add.i8x64",
+        "amd.xdna.aie2p.store.i8x64.indexed.immediate",
+    )
+    vector_register_classes = [
+        alternative.reg_class
+        for key in vector_keys
+        for operand in descriptors[key].operands
+        if operand.encoding_adapter_id != 0
+        for alternative in operand.reg_alts
+    ]
+    assert vector_register_classes
+    assert set(vector_register_classes) == {"aie2p.vec512"}
+    assert (
+        len(
+            {
+                operand.encoding_adapter_id
+                for key in vector_keys
+                for operand in descriptors[key].operands
+                if operand.encoding_adapter_id != 0
+            }
+        )
+        == 5
+    )
 
 
 def test_descriptor_encoding_ids_and_adapters_are_materialized() -> None:

@@ -143,6 +143,20 @@ _MACHINE_ADAPTERS = {
 _MACHINE_IMMEDIATES = {
     immediate.name: immediate for immediate in CORE_MACHINE_TABLE.immediates
 }
+
+# LLVM's mXa/mXb/mXm/mXn/mXs names describe instruction-operand encoding
+# roles, not distinct storage domains. They have the same 512-bit layout and
+# ordered X-register candidates as the canonical VEC512 class. Low values use
+# that canonical storage class while each operand retains its role-specific
+# adapter below, allowing loads, arithmetic, and stores to compose without
+# erasing the encoding distinction.
+_LOW_REGISTER_CLASS_BY_MACHINE_CLASS = {
+    "mXa": "VEC512",
+    "mXb": "VEC512",
+    "mXm": "VEC512",
+    "mXn": "VEC512",
+    "mXs": "VEC512",
+}
 _INSTRUCTION_ENCODINGS = {
     instruction.name: instruction for instruction in CORE_ENCODING_TABLE.instructions
 }
@@ -182,18 +196,35 @@ _IMMEDIATE_IDS = {
 }
 
 
-def _operand_register_class(operand: MachineOperand) -> str:
+def _operand_storage_machine_class(operand: MachineOperand) -> str:
     if operand.kind is MachineOperandKind.REGISTER_CLASS:
-        return operand.type_name
-    if operand.kind is MachineOperandKind.REGISTER_ADAPTER:
-        return _MACHINE_ADAPTERS[operand.type_name].register_class
-    raise ValueError(f"{operand.name}: immediate is not a register operand")
+        machine_class = operand.type_name
+    elif operand.kind is MachineOperandKind.REGISTER_ADAPTER:
+        machine_class = _MACHINE_ADAPTERS[operand.type_name].register_class
+    else:
+        raise ValueError(f"{operand.name}: immediate is not a register operand")
+    low_class = _LOW_REGISTER_CLASS_BY_MACHINE_CLASS.get(machine_class, machine_class)
+    source = _MACHINE_CLASSES[machine_class]
+    target = _MACHINE_CLASSES[low_class]
+    if source.layout != target.layout or source.candidates != target.candidates:
+        raise ValueError(
+            f"{machine_class}: canonical Low class {low_class} changes storage domain"
+        )
+    return low_class
 
 
-_SEED_REGISTER_CLASS_NAMES = tuple(
+def _low_register_class_name(machine_class: str) -> str:
+    return f"aie2p.{machine_class.lower()}"
+
+
+def _operand_register_class(operand: MachineOperand) -> str:
+    return _low_register_class_name(_operand_storage_machine_class(operand))
+
+
+_SEED_STORAGE_MACHINE_CLASS_NAMES = tuple(
     sorted(
         {
-            _operand_register_class(operand)
+            _operand_storage_machine_class(operand)
             for form_name in _SEED_FORMS
             for operand in (
                 *_MACHINE_FORMS[form_name].outputs,
@@ -207,11 +238,13 @@ _SEED_REGISTER_CLASS_NAMES = tuple(
 
 def _reg_classes() -> tuple[RegClass, ...]:
     result = []
-    for target_bank_id, name in enumerate(_SEED_REGISTER_CLASS_NAMES, start=1):
-        machine_class = _MACHINE_CLASSES[name]
+    for target_bank_id, machine_name in enumerate(
+        _SEED_STORAGE_MACHINE_CLASS_NAMES, start=1
+    ):
+        machine_class = _MACHINE_CLASSES[machine_name]
         result.append(
             RegClass(
-                name=name,
+                name=_low_register_class_name(machine_name),
                 alloc_unit_bits=machine_class.layout.register_size_bits,
                 spill_slot_space=SpillSlotSpace.PRIVATE,
                 flags=(

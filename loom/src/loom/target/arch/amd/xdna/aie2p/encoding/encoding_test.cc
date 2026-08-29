@@ -208,6 +208,34 @@ TEST(EncodingTest, DenseIdsRoundTripStableNames) {
             LOOM_AIE2P_BUNDLE_FORMAT_ID_INVALID);
 }
 
+TEST(EncodingTest, BundleFormatsAreSelectedByExactSlotSet) {
+  const loom_aie2p_slot_t dual_load_slots[] = {
+      LOOM_AIE2P_SLOT_LDB,
+      LOOM_AIE2P_SLOT_LDA,
+  };
+  const loom_aie2p_bundle_format_id_t dual_load_format =
+      loom_aie2p_encoding_find_bundle_format_for_slots(
+          dual_load_slots, IREE_ARRAYSIZE(dual_load_slots));
+  EXPECT_EQ(dual_load_format,
+            loom_aie2p_encoding_find_bundle_format(IREE_SV("I48_LDA_LDB")));
+
+  const loom_aie2p_slot_t duplicate_slots[] = {
+      LOOM_AIE2P_SLOT_LDA,
+      LOOM_AIE2P_SLOT_LDA,
+  };
+  EXPECT_EQ(loom_aie2p_encoding_find_bundle_format_for_slots(
+                duplicate_slots, IREE_ARRAYSIZE(duplicate_slots)),
+            LOOM_AIE2P_BUNDLE_FORMAT_ID_INVALID);
+
+  const loom_aie2p_slot_t unsupported_slots[] = {
+      LOOM_AIE2P_SLOT_NOP,
+      LOOM_AIE2P_SLOT_ALU,
+  };
+  EXPECT_EQ(loom_aie2p_encoding_find_bundle_format_for_slots(
+                unsupported_slots, IREE_ARRAYSIZE(unsupported_slots)),
+            LOOM_AIE2P_BUNDLE_FORMAT_ID_INVALID);
+}
+
 TEST(EncodingTest, ReproducesRetainedVectorLeaves) {
   const EncodingIds ids = ResolveEncodingIds();
   ASSERT_EQ(loom_aie2p_encoding_instruction_count(), 880);

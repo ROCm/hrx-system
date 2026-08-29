@@ -337,6 +337,42 @@ loom_aie2p_bundle_format_id_t loom_aie2p_encoding_find_bundle_format(
   return LOOM_AIE2P_BUNDLE_FORMAT_ID_INVALID;
 }
 
+loom_aie2p_bundle_format_id_t loom_aie2p_encoding_find_bundle_format_for_slots(
+    const loom_aie2p_slot_t* slots, iree_host_size_t slot_count) {
+  if (slot_count == 0 ||
+      slot_count > LOOM_AIE2P_ENCODING_MAX_BUNDLE_SLOT_COUNT || slots == NULL) {
+    return LOOM_AIE2P_BUNDLE_FORMAT_ID_INVALID;
+  }
+  uint16_t requested_slot_mask = 0;
+  for (iree_host_size_t i = 0; i < slot_count; ++i) {
+    if (slots[i] <= LOOM_AIE2P_SLOT_INVALID ||
+        slots[i] >= LOOM_AIE2P_SLOT_COUNT) {
+      return LOOM_AIE2P_BUNDLE_FORMAT_ID_INVALID;
+    }
+    const uint16_t slot_bit = (uint16_t)(1u << slots[i]);
+    if (requested_slot_mask & slot_bit) {
+      return LOOM_AIE2P_BUNDLE_FORMAT_ID_INVALID;
+    }
+    requested_slot_mask |= slot_bit;
+  }
+
+  for (iree_host_size_t format = 1;
+       format < IREE_ARRAYSIZE(kLoomAie2pBundleLayouts); ++format) {
+    const loom_aie2p_bundle_layout_t* layout = &kLoomAie2pBundleLayouts[format];
+    if (layout->field_count != slot_count) continue;
+    uint16_t format_slot_mask = 0;
+    for (uint8_t i = 0; i < layout->field_count; ++i) {
+      const loom_aie2p_bundle_field_layout_t* field =
+          &kLoomAie2pBundleFields[layout->field_offset + i];
+      format_slot_mask |= (uint16_t)(1u << field->slot_id);
+    }
+    if (format_slot_mask == requested_slot_mask) {
+      return (loom_aie2p_bundle_format_id_t)format;
+    }
+  }
+  return LOOM_AIE2P_BUNDLE_FORMAT_ID_INVALID;
+}
+
 iree_string_view_t loom_aie2p_encoding_field_name(
     loom_aie2p_encoding_field_id_t field) {
   if (field == LOOM_AIE2P_ENCODING_FIELD_ID_INVALID ||

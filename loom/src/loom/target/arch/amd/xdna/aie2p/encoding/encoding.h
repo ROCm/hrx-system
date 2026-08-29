@@ -131,6 +131,12 @@ loom_aie2p_encoding_field_id_t loom_aie2p_encoding_find_field(
 loom_aie2p_bundle_format_id_t loom_aie2p_encoding_find_bundle_format(
     iree_string_view_t name);
 
+// Finds the unique bundle format carrying exactly |slots| in any order, or
+// returns INVALID when the slot set is malformed or has no physical format.
+// Generated table validation proves that no two formats share a slot set.
+loom_aie2p_bundle_format_id_t loom_aie2p_encoding_find_bundle_format_for_slots(
+    const loom_aie2p_slot_t* slots, iree_host_size_t slot_count);
+
 // Returns the stable target field name, or an empty view for an invalid ID.
 iree_string_view_t loom_aie2p_encoding_field_name(
     loom_aie2p_encoding_field_id_t field);
