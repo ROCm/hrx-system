@@ -172,6 +172,69 @@ TEST(DescriptorEncodingTest, PhysicalAssignmentsReproduceVectorLeaves) {
   }
 }
 
+TEST(DescriptorEncodingTest, I16MultiplyMatchesOracleInstructionEncodings) {
+  const loom_low_descriptor_set_t* descriptor_set =
+      loom_aie2p_core_descriptor_set();
+  std::vector<uint8_t> program;
+
+  loom_aie2p_encoded_slot_t multiply_control;
+  IREE_ASSERT_OK(EncodeDescriptor(descriptor_set,
+                                  "amd.xdna.aie2p.constant.i32.mova", {"r0"},
+                                  {0x35A}, &multiply_control));
+  IREE_ASSERT_OK(
+      AppendBundle(loom_aie2p_encoding_find_bundle_format(IREE_SV("I32_LDA")),
+                   {multiply_control}, &program));
+
+  loom_aie2p_encoded_slot_t narrow_shift;
+  IREE_ASSERT_OK(EncodeDescriptor(descriptor_set,
+                                  "amd.xdna.aie2p.constant.i32.shift", {"s0"},
+                                  {0}, &narrow_shift));
+  IREE_ASSERT_OK(
+      AppendBundle(loom_aie2p_encoding_find_bundle_format(IREE_SV("I32_MV")),
+                   {narrow_shift}, &program));
+
+  loom_aie2p_encoded_slot_t multiply;
+  IREE_ASSERT_OK(EncodeDescriptor(descriptor_set,
+                                  "amd.xdna.aie2p.multiply.i16x32.configured",
+                                  {"dm0", "x2", "x4", "r0"}, {}, &multiply));
+  IREE_ASSERT_OK(
+      AppendBundle(loom_aie2p_encoding_find_bundle_format(IREE_SV("I32_VEC")),
+                   {multiply}, &program));
+
+  for (const auto& [key, value] :
+       std::array<std::pair<std::string_view, int64_t>, 3>{
+           std::pair{"amd.xdna.aie2p.state.rounding.immediate", 0},
+           std::pair{"amd.xdna.aie2p.state.srs-mode.immediate", 1},
+           std::pair{"amd.xdna.aie2p.state.saturation.immediate", 0},
+       }) {
+    loom_aie2p_encoded_slot_t state_write;
+    IREE_ASSERT_OK(
+        EncodeDescriptor(descriptor_set, key, {}, {value}, &state_write));
+    IREE_ASSERT_OK(
+        AppendBundle(loom_aie2p_encoding_find_bundle_format(IREE_SV("I32_MV")),
+                     {state_write}, &program));
+  }
+
+  loom_aie2p_encoded_slot_t narrow;
+  IREE_ASSERT_OK(EncodeDescriptor(descriptor_set,
+                                  "amd.xdna.aie2p.narrow.trunc.signed.i16x32",
+                                  {"x0", "dm0", "s0"}, {}, &narrow));
+  IREE_ASSERT_OK(
+      AppendBundle(loom_aie2p_encoding_find_bundle_format(IREE_SV("I32_ST")),
+                   {narrow}, &program));
+
+  const std::array<uint8_t, 28> expected = {
+      0x18, 0x00, 0x5A, 0x03,  // mova r0, #0x35a
+      0xB8, 0x00, 0xE0, 0x18,  // mov s0, #0
+      0x08, 0x81, 0xE4, 0x00,  // vmul dm0, x2, x4, r0
+      0xB8, 0x00, 0xB0, 0x1F,  // mov crRnd, #0
+      0xB8, 0x02, 0x70, 0x1C,  // mov crSRSMode, #1
+      0xB8, 0x00, 0x70, 0x1A,  // mov crSat, #0
+      0x18, 0x26, 0x64, 0x08,  // vsrs.4x x0, dm0, s0, srsSign1
+  };
+  EXPECT_EQ(program, std::vector<uint8_t>(expected.begin(), expected.end()));
+}
+
 TEST(DescriptorEncodingTest, PhysicalRegisterRowsAlignWithMachineTable) {
   const loom_low_descriptor_set_t* descriptor_set =
       loom_aie2p_core_descriptor_set();

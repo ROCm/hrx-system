@@ -12,6 +12,7 @@ from loom.dialect.scalar import conversion as scalar_conversion
 from loom.dialect.scf import defs as scf
 from loom.dialect.vector import defs as vector
 from loom.target.arch.amd.xdna.aie2p.contracts.core import (
+    _I16_ELEMENTWISE_MULTIPLY_CONTROL,
     AIE2P_CORE_CONTRACT_FRAGMENT,
 )
 from loom.target.contracts import DescriptorResultType, DescriptorRule, ValueAliasRule
@@ -23,7 +24,7 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
         for case in AIE2P_CORE_CONTRACT_FRAGMENT.cases
         if isinstance(case, DescriptorRule)
     )
-    assert len(rules) == 84
+    assert len(rules) == 85
 
     constant_rules = [
         rule for rule in rules if rule.source_op is scalar_conversion.scalar_constant
@@ -149,6 +150,32 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
         and rule.emit[0].results["d"].field == "result"
         for rule in vector_minmax_rules
     )
+
+    vector_multiply_rules = [
+        rule for rule in rules if rule.source_op is vector.vector_muli
+    ]
+    assert len(vector_multiply_rules) == 1
+    vector_multiply = vector_multiply_rules[0]
+    assert vector_multiply.descriptor.key == (
+        "amd.xdna.aie2p.narrow.trunc.signed.i16x32"
+    )
+    assert [emit.descriptor.key for emit in vector_multiply.emit] == [
+        "amd.xdna.aie2p.constant.i32.mova",
+        "amd.xdna.aie2p.constant.i32.shift",
+        "amd.xdna.aie2p.multiply.i16x32.configured",
+        "amd.xdna.aie2p.state.rounding.immediate",
+        "amd.xdna.aie2p.state.srs-mode.immediate",
+        "amd.xdna.aie2p.state.saturation.immediate",
+        "amd.xdna.aie2p.narrow.trunc.signed.i16x32",
+    ]
+    assert _I16_ELEMENTWISE_MULTIPLY_CONTROL == 0x35A
+    assert vector_multiply.emit[0].immediates == {
+        "i": _I16_ELEMENTWISE_MULTIPLY_CONTROL
+    }
+    assert vector_multiply.emit[1].immediates == {"i": 0}
+    assert vector_multiply.emit[3].immediates == {"i": 0}
+    assert vector_multiply.emit[4].immediates == {"i": 1}
+    assert vector_multiply.emit[5].immediates == {"i": 0}
 
     vector_bitwise_rules = [
         rule
