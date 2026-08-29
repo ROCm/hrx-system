@@ -318,9 +318,6 @@ static loomc_status_t loomc_compile_emit_launch_config_module(
   loom_function_version_owner_initialize(&module->arena, &function_versions);
   loomc_status_t status = loomc_status_from_iree(
       loomc_compile_bind_launch_config_vm_target(module, target_ref));
-  if (loomc_status_is_ok(status)) {
-    status = loomc_result_verify_loom_module(module, /*source=*/NULL, result);
-  }
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
     status = loomc_compile_run_pass_program(
         workspace, compiler->launch_config.pass_program, module,
