@@ -696,14 +696,16 @@ static iree_status_t loom_vm_call_abi_preserve_logical_signature(
                                 layout_attr);
 }
 
-static bool loom_vm_call_abi_is_definition(const loom_module_t* module,
-                                           loom_func_like_t function) {
+static bool loom_vm_call_abi_is_vm_definition(const loom_module_t* module,
+                                              loom_func_like_t function) {
+  loom_string_id_t descriptor_set_id = LOOM_STRING_ID_INVALID;
   if (loom_low_func_def_isa(function.op)) {
-    return loom_func_like_abi(function) == LOOM_TARGET_ABI_VM_FUNCTION;
+    descriptor_set_id = loom_low_func_def_descriptor_set(function.op);
+  } else if (loom_low_kernel_def_isa(function.op)) {
+    descriptor_set_id = loom_low_kernel_def_descriptor_set(function.op);
+  } else {
+    return false;
   }
-  if (!loom_low_kernel_def_isa(function.op)) return false;
-  const loom_string_id_t descriptor_set_id =
-      loom_low_kernel_def_descriptor_set(function.op);
   if (descriptor_set_id == LOOM_STRING_ID_INVALID ||
       descriptor_set_id >= module->strings.count) {
     return false;
@@ -729,7 +731,7 @@ iree_status_t loom_vm_materialize_call_abi_run(loom_pass_t* pass,
   loom_op_t* op = NULL;
   loom_block_for_each_op(module_block, op) {
     loom_func_like_t function = loom_func_like_cast(module, op);
-    if (!loom_vm_call_abi_is_definition(module, function)) {
+    if (!loom_vm_call_abi_is_vm_definition(module, function)) {
       continue;
     }
     loom_vm_call_abi_layout_t layout = {0};

@@ -2,14 +2,14 @@
 
 vm.target<core> @target
 
-low.func.def target<vm.core>(@target) abi(vm_function) @return_input(%input: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+low.func.def target<vm.core>(@target) @return_input(%input: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
   return %input
 }
 
 // ----
 vm.target<core> @target
 
-low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i32>) -> (reg<vm.value : i32>)>}) @return_input(%input: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+low.func.def target<vm.core>(@target) abi_layout({signature = type<(reg<vm.value : i32>) -> (reg<vm.value : i32>)>}) @return_input(%input: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
   %2 = copy %input : reg<vm.value : i32> -> reg<vm.value : i32>
   %3 = copy %2 : reg<vm.value : i32> -> reg<vm.value : i32>
   return %3
