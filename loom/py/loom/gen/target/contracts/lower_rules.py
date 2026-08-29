@@ -630,6 +630,21 @@ def _validate_c_table_shape(
             "diagnostic",
         )
         _require_u64(row.u64, f"{row_subject} u64 payload")
+        if row.kind == GuardKind.I64_ARRAY_ELEMENT_RANGE:
+            _require_u16(row.u64, f"{row_subject} array element index")
+        if row.kind in (
+            GuardKind.VALUE_PACKED_INTEGER_PAYLOAD_FROM_LANES,
+            GuardKind.VALUE_PACKED_INTEGER_LANES_FROM_PAYLOAD,
+        ):
+            _require_u32(row.u64, f"{row_subject} storage payload multiple")
+            _require_u32(
+                row.minimum_i64,
+                f"{row_subject} storage unit bit count",
+            )
+            _require_u32(
+                row.maximum_i64,
+                f"{row_subject} maximum lane count",
+            )
         _require_u16(row.register_class_id, f"{row_subject} register class id")
         _require_i64(row.minimum_i64, f"{row_subject} minimum i64")
         _require_i64(row.maximum_i64, f"{row_subject} maximum i64")

@@ -320,6 +320,47 @@ def test_validate_c_table_shape_rejects_guard_other_value_ref_index_oob() -> Non
     )
 
 
+def test_validate_c_table_shape_rejects_guard_array_element_index_oob() -> None:
+    table = _compiled_lower_rule_set(
+        guards=(
+            LowerGuard(
+                kind=GuardKind.I64_ARRAY_ELEMENT_RANGE,
+                u64=0x10000,
+            ),
+        ),
+    )
+
+    _expect_value_error(
+        lambda: _validate_c_table_shape(table, _c_shape_contract(), ()),
+        "lower-rule set 'test.low.generated_c_shape' guard 0 array element index exceeds uint16_t",
+    )
+
+
+def test_validate_c_table_shape_rejects_packed_guard_u32_payload_oob() -> None:
+    value_refs = (
+        LowerValueRef(kind=SourceValueKind.OPERAND, index=0),
+        LowerValueRef(kind=SourceValueKind.OPERAND, index=1),
+    )
+    table = _compiled_lower_rule_set(
+        value_refs=value_refs,
+        guards=(
+            LowerGuard(
+                kind=GuardKind.VALUE_PACKED_INTEGER_LANES_FROM_PAYLOAD,
+                value_ref_index=0,
+                other_value_ref_index=1,
+                u64=0x100000000,
+                minimum_i64=32,
+                maximum_i64=32,
+            ),
+        ),
+    )
+
+    _expect_value_error(
+        lambda: _validate_c_table_shape(table, _c_shape_contract(), ()),
+        "lower-rule set 'test.low.generated_c_shape' guard 0 storage payload multiple exceeds uint32_t",
+    )
+
+
 def test_validate_c_table_shape_rejects_attr_copy_value_ref_index_oob() -> None:
     table = _compiled_lower_rule_set(
         attr_copies=(
@@ -463,7 +504,7 @@ def test_generate_lower_rule_set_emits_value_ref_for_float_equals_guard() -> Non
     guard_end = generated.source.index("},", guard_start)
     guard_text = generated.source[guard_start:guard_end]
     assert ".value_ref_index = 1," in guard_text
-    assert ".u64 = UINT64_C(0)," in guard_text
+    assert ".payload = {.u64 = UINT64_C(0)" in guard_text
 
 
 def test_generate_lower_rule_set_emits_storage_element_format_guard() -> None:
@@ -502,7 +543,7 @@ def test_generate_lower_rule_set_emits_storage_element_format_guard() -> None:
     guard_end = generated.source.index("},", guard_start)
     guard_text = generated.source[guard_start:guard_end]
     assert ".value_ref_index = 0," in guard_text
-    assert ".u64 = LOOM_VALUE_FACT_NUMERIC_FORMAT_U8," in guard_text
+    assert ".payload = {.u64 = LOOM_VALUE_FACT_NUMERIC_FORMAT_U8" in guard_text
 
 
 def test_generate_lower_rule_set_emits_packed_integer_storage_guard() -> None:
@@ -535,9 +576,9 @@ def test_generate_lower_rule_set_emits_packed_integer_storage_guard() -> None:
     assert ".value_ref_index = 0," in guard_text
     assert ".other_value_ref_index = 1," in guard_text
     assert ".attr_index = 0," in guard_text
-    assert ".u64 = UINT64_C(16)," in guard_text
-    assert ".minimum_i64 = INT64_C(32)," in guard_text
-    assert ".maximum_i64 = INT64_C(32)," in guard_text
+    assert ".storage_payload_multiple = UINT32_C(16)" in guard_text
+    assert ".storage_unit_bit_count = UINT32_C(32)" in guard_text
+    assert ".maximum_lane_count = UINT32_C(32)" in guard_text
 
 
 def test_guard_row_emits_portable_signed_i64_bounds() -> None:
@@ -550,8 +591,22 @@ def test_guard_row_emits_portable_signed_i64_bounds() -> None:
         ),
     )
 
-    assert ".minimum_i64 = (-INT64_C(2147483648))" in fields
-    assert ".maximum_i64 = INT64_C(2147483647)" in fields
+    assert (".payload = {.i64_range = {.minimum = (-INT64_C(2147483648)), .maximum = INT64_C(2147483647)}}") in fields
+
+
+def test_guard_row_overlays_array_element_index_and_range() -> None:
+    fields = guard_row(
+        {},
+        LowerGuard(
+            kind=GuardKind.I64_ARRAY_ELEMENT_RANGE,
+            u64=3,
+            minimum_i64=-4,
+            maximum_i64=7,
+        ),
+    )
+
+    assert ".index = {.element_index = 3}" in fields
+    assert (".payload = {.i64_range = {.minimum = (-INT64_C(4)), .maximum = INT64_C(7)}}") in fields
 
 
 def test_guard_row_emits_value_memory_space_mask() -> None:
@@ -564,7 +619,7 @@ def test_guard_row_emits_value_memory_space_mask() -> None:
     )
 
     assert ".value_ref_index = 0" in fields
-    assert (".u64 = LOOM_LOW_LOWER_MEMORY_SPACE_UNKNOWN | LOOM_LOW_LOWER_MEMORY_SPACE_GLOBAL | LOOM_LOW_LOWER_MEMORY_SPACE_DESCRIPTOR") in fields
+    assert (".payload = {.u64 = LOOM_LOW_LOWER_MEMORY_SPACE_UNKNOWN | LOOM_LOW_LOWER_MEMORY_SPACE_GLOBAL | LOOM_LOW_LOWER_MEMORY_SPACE_DESCRIPTOR}") in fields
 
 
 def test_attr_copy_row_emits_portable_signed_i64_literal() -> None:

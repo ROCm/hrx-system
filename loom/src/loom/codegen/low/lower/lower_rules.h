@@ -645,11 +645,21 @@ typedef enum loom_low_lower_guard_kind_e {
   LOOM_LOW_LOWER_GUARD_VALUE_STATIC_ELEMENT_COUNT_EQ = 31,
   // Source buffer/view reference facts must name a space present in u64.
   LOOM_LOW_LOWER_GUARD_VALUE_MEMORY_SPACE = 32,
+  // Maximum guard kind value plus one.
+  LOOM_LOW_LOWER_GUARD_COUNT_,
 } loom_low_lower_guard_kind_t;
 
+static_assert(LOOM_LOW_LOWER_GUARD_COUNT_ <= UINT8_MAX,
+              "lower guard kinds must fit in uint8_t storage");
+static_assert(LOOM_ATTR_COUNT_ <= UINT8_MAX,
+              "attribute kinds must fit in uint8_t guard storage");
+
 typedef struct loom_low_lower_guard_t {
-  // Guard operation to evaluate.
-  loom_low_lower_guard_kind_t kind;
+  // Guard operation to evaluate, stored as a loom_low_lower_guard_kind_t.
+  uint8_t kind;
+  // Required attribute kind for ATTR_KIND guards, stored as a
+  // loom_attr_kind_t.
+  uint8_t attr_kind;
   // Primary source value-ref table index used by value guards.
   uint16_t value_ref_index;
   // Second source value-ref table index used by pairwise value guards.
@@ -658,28 +668,47 @@ typedef struct loom_low_lower_guard_t {
   // used by operand-segment guards, or op-specific attribute ordinal used by
   // semantic guards.
   uint16_t attr_index;
-  // Type-pattern table index used by VALUE_TYPE guards.
-  uint16_t type_pattern_index;
+  // Kind-selected secondary table or source index.
+  union {
+    // Type-pattern table index used by VALUE_TYPE guards.
+    uint16_t type_pattern_index;
+    // Source i64-array element ordinal used by element-range guards.
+    uint16_t element_index;
+  } index;
   // Diagnostic table index emitted when this guard rejects.
   uint16_t diagnostic_index;
-  // Required attribute kind for ATTR_KIND guards.
-  loom_attr_kind_t attr_kind;
-  // Required enum value, divisor adjustment, expected count, element index,
-  // bit-count limit, register unit count, exact f64 bit pattern, flag mask,
-  // storage element format, memory-space mask, storage unit cap, or storage
-  // payload multiple.
-  uint64_t u64;
   // Descriptor-set register-class ID used by LOW_VALUE_REGISTER_CLASS guards.
   uint16_t register_class_id;
   // Rule-set-local descriptor ref used by DESCRIPTOR_AVAILABLE guards.
   loom_low_lower_descriptor_ref_t descriptor_ref;
-  // Inclusive lower i64 bound for range guards or storage unit bit count for
-  // packed integer storage guards.
-  int64_t minimum_i64;
-  // Inclusive upper i64 bound for range guards or maximum lane count for
-  // packed integer storage guards.
-  int64_t maximum_i64;
+  // Kind-selected immediate payload.
+  union {
+    // Required enum value, divisor adjustment, expected count, bit-count
+    // limit, register unit count, exact f64 bit pattern, flag mask, storage
+    // element format, or memory-space mask.
+    uint64_t u64;
+    // Inclusive signed range payload.
+    struct {
+      // Inclusive lower bound.
+      int64_t minimum;
+      // Inclusive upper bound.
+      int64_t maximum;
+    } i64_range;
+    // Packed integer storage-shape payload.
+    struct {
+      // Required storage payload multiple or maximum storage unit count.
+      uint32_t storage_payload_multiple;
+      // Bit count in one packed storage unit.
+      uint32_t storage_unit_bit_count;
+      // Maximum permitted lane count, or zero when not constrained.
+      uint32_t maximum_lane_count;
+      // Reserved storage available to future packed integer guards.
+      uint32_t reserved;
+    } packed_integer;
+  } payload;
 } loom_low_lower_guard_t;
+static_assert(sizeof(loom_low_lower_guard_t) == 32,
+              "loom_low_lower_guard_t must be 32 bytes");
 
 typedef enum loom_low_lower_emit_kind_e {
   // Invalid or uninitialized emit action.

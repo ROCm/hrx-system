@@ -1167,8 +1167,7 @@ static bool loom_low_lower_rule_storage_width(
   *out_storage_unit_bit_count = 0;
   *out_width = 0;
   if (guard->attr_index >= source_op->attribute_count ||
-      loom_op_const_attrs(source_op)[guard->attr_index].kind != LOOM_ATTR_I64 ||
-      guard->minimum_i64 <= 0 || guard->minimum_i64 > UINT32_MAX) {
+      loom_op_const_attrs(source_op)[guard->attr_index].kind != LOOM_ATTR_I64) {
     return false;
   }
   const int64_t width_i64 =
@@ -1176,7 +1175,8 @@ static bool loom_low_lower_rule_storage_width(
   if (width_i64 <= 0 || width_i64 > UINT32_MAX) {
     return false;
   }
-  const uint32_t storage_unit_bit_count = (uint32_t)guard->minimum_i64;
+  const uint32_t storage_unit_bit_count =
+      guard->payload.packed_integer.storage_unit_bit_count;
   const uint32_t width = (uint32_t)width_i64;
   if ((storage_unit_bit_count % width) != 0) {
     return false;
@@ -1190,9 +1190,6 @@ static bool loom_low_lower_rule_packed_integer_payload_from_lanes_matches(
     const loom_low_lower_rule_match_context_t* match_context,
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
     const loom_low_lower_guard_t* guard) {
-  if (guard->u64 == 0 || guard->u64 > UINT32_MAX) {
-    return false;
-  }
   uint32_t storage_unit_bit_count = 0;
   uint32_t width = 0;
   if (!loom_low_lower_rule_storage_width(source_op, guard,
@@ -1212,17 +1209,14 @@ static bool loom_low_lower_rule_packed_integer_payload_from_lanes_matches(
     return false;
   }
 
-  return (match.result_shape.payload_bit_count % (uint32_t)guard->u64) == 0;
+  return (match.result_shape.payload_bit_count %
+          guard->payload.packed_integer.storage_payload_multiple) == 0;
 }
 
 static bool loom_low_lower_rule_packed_integer_lanes_from_payload_matches(
     const loom_low_lower_rule_match_context_t* match_context,
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
     const loom_low_lower_guard_t* guard) {
-  if (guard->u64 == 0 || guard->u64 > UINT32_MAX || guard->maximum_i64 <= 0 ||
-      guard->maximum_i64 > UINT32_MAX) {
-    return false;
-  }
   uint32_t storage_unit_bit_count = 0;
   uint32_t width = 0;
   if (!loom_low_lower_rule_storage_width(source_op, guard,
@@ -1237,8 +1231,9 @@ static bool loom_low_lower_rule_packed_integer_lanes_from_payload_matches(
   if (!loom_vector_packed_integer_lanes_from_payload_match(
           loom_module_value_type(match_context->module, storage_value_id),
           loom_module_value_type(match_context->module, lane_value_id), width,
-          storage_unit_bit_count, (uint32_t)guard->u64,
-          (uint32_t)guard->maximum_i64, NULL)) {
+          storage_unit_bit_count,
+          guard->payload.packed_integer.storage_payload_multiple,
+          guard->payload.packed_integer.maximum_lane_count, NULL)) {
     return false;
   }
   return true;
@@ -1256,7 +1251,7 @@ static iree_status_t loom_low_lower_rule_guard_matches(
       loom_type_t type =
           loom_module_value_type(match_context->module, value_id);
       *out_matches = loom_low_lower_rule_type_matches(
-          &rule_set->type_patterns[guard->type_pattern_index], type);
+          &rule_set->type_patterns[guard->index.type_pattern_index], type);
       return iree_ok_status();
     }
     case LOOM_LOW_LOWER_GUARD_ATTR_KIND:
@@ -1270,10 +1265,10 @@ static iree_status_t loom_low_lower_rule_guard_matches(
       if (guard->attr_index >= source_op->attribute_count) {
         return iree_ok_status();
       }
-      *out_matches =
-          loom_op_const_attrs(source_op)[guard->attr_index].kind ==
-              LOOM_ATTR_ENUM &&
-          loom_op_const_attrs(source_op)[guard->attr_index].raw == guard->u64;
+      *out_matches = loom_op_const_attrs(source_op)[guard->attr_index].kind ==
+                         LOOM_ATTR_ENUM &&
+                     loom_op_const_attrs(source_op)[guard->attr_index].raw ==
+                         guard->payload.u64;
       return iree_ok_status();
     case LOOM_LOW_LOWER_GUARD_ATTR_I64_RANGE:
       if (guard->attr_index >= source_op->attribute_count ||
@@ -1282,9 +1277,9 @@ static iree_status_t loom_low_lower_rule_guard_matches(
         return iree_ok_status();
       }
       *out_matches = loom_op_const_attrs(source_op)[guard->attr_index].i64 >=
-                         guard->minimum_i64 &&
+                         guard->payload.i64_range.minimum &&
                      loom_op_const_attrs(source_op)[guard->attr_index].i64 <=
-                         guard->maximum_i64;
+                         guard->payload.i64_range.maximum;
       return iree_ok_status();
     case LOOM_LOW_LOWER_GUARD_ATTR_I64_ARRAY_COUNT_EQ:
       if (guard->attr_index >= source_op->attribute_count ||
@@ -1294,7 +1289,7 @@ static iree_status_t loom_low_lower_rule_guard_matches(
       }
       *out_matches =
           (uint64_t)loom_op_const_attrs(source_op)[guard->attr_index].count ==
-          guard->u64;
+          guard->payload.u64;
       return iree_ok_status();
     case LOOM_LOW_LOWER_GUARD_ATTR_I64_ARRAY_ELEMENT_RANGE:
       if (guard->attr_index >= source_op->attribute_count ||
@@ -1302,14 +1297,16 @@ static iree_status_t loom_low_lower_rule_guard_matches(
               LOOM_ATTR_I64_ARRAY) {
         return iree_ok_status();
       }
-      if (guard->u64 >=
+      if (guard->index.element_index >=
           loom_op_const_attrs(source_op)[guard->attr_index].count) {
         return iree_ok_status();
       }
       *out_matches = loom_op_const_attrs(source_op)[guard->attr_index]
-                             .i64_array[guard->u64] >= guard->minimum_i64 &&
+                             .i64_array[guard->index.element_index] >=
+                         guard->payload.i64_range.minimum &&
                      loom_op_const_attrs(source_op)[guard->attr_index]
-                             .i64_array[guard->u64] <= guard->maximum_i64;
+                             .i64_array[guard->index.element_index] <=
+                         guard->payload.i64_range.maximum;
       return iree_ok_status();
     case LOOM_LOW_LOWER_GUARD_ATTR_I64_ARRAY_ELEMENTS_RANGE: {
       if (guard->attr_index >= source_op->attribute_count ||
@@ -1320,8 +1317,8 @@ static iree_status_t loom_low_lower_rule_guard_matches(
       *out_matches = true;
       loom_attribute_t attr = loom_op_const_attrs(source_op)[guard->attr_index];
       for (uint16_t i = 0; i < attr.count; ++i) {
-        if (attr.i64_array[i] < guard->minimum_i64 ||
-            attr.i64_array[i] > guard->maximum_i64) {
+        if (attr.i64_array[i] < guard->payload.i64_range.minimum ||
+            attr.i64_array[i] > guard->payload.i64_range.maximum) {
           *out_matches = false;
           break;
         }
@@ -1351,11 +1348,11 @@ static iree_status_t loom_low_lower_rule_guard_matches(
           match_context, rule_set, source_op, guard->value_ref_index,
           &mapped_value));
       *out_matches = mapped_value.is_register &&
-                     mapped_value.register_unit_count == guard->u64;
+                     mapped_value.register_unit_count == guard->payload.u64;
       return iree_ok_status();
     }
     case LOOM_LOW_LOWER_GUARD_VALUE_STATIC_DIM0_MULTIPLE: {
-      IREE_ASSERT_GT(guard->u64, 0);
+      IREE_ASSERT_GT(guard->payload.u64, 0);
       loom_value_id_t value_id = loom_low_lower_rule_source_value(
           match_context->module, rule_set, source_op, guard->value_ref_index);
       loom_type_t type =
@@ -1365,7 +1362,7 @@ static iree_status_t loom_low_lower_rule_guard_matches(
       }
       const int64_t static_dim0 = loom_type_dim_static_size_at(type, 0);
       *out_matches =
-          static_dim0 >= 0 && ((uint64_t)static_dim0 % guard->u64) == 0;
+          static_dim0 >= 0 && ((uint64_t)static_dim0 % guard->payload.u64) == 0;
       return iree_ok_status();
     }
     case LOOM_LOW_LOWER_GUARD_LOW_VALUE_REGISTER_UNIT_COUNT_EQ: {
@@ -1426,17 +1423,17 @@ static iree_status_t loom_low_lower_rule_guard_matches(
         segment_count =
             (uint16_t)(source_op->operand_count - guard->attr_index);
       }
-      *out_matches = segment_count == guard->u64;
+      *out_matches = segment_count == guard->payload.u64;
       return iree_ok_status();
     }
     case LOOM_LOW_LOWER_GUARD_VALUE_SIGNED_BIT_COUNT:
       return loom_low_lower_rule_value_facts_fit_bit_count(
           match_context, rule_set, source_op, guard->value_ref_index,
-          guard->u64, /*is_signed_domain=*/true, out_matches);
+          guard->payload.u64, /*is_signed_domain=*/true, out_matches);
     case LOOM_LOW_LOWER_GUARD_VALUE_UNSIGNED_BIT_COUNT:
       return loom_low_lower_rule_value_facts_fit_bit_count(
           match_context, rule_set, source_op, guard->value_ref_index,
-          guard->u64, /*is_signed_domain=*/false, out_matches);
+          guard->payload.u64, /*is_signed_domain=*/false, out_matches);
     case LOOM_LOW_LOWER_GUARD_VALUE_EXACT_I64:
       *out_matches = loom_low_lower_rule_value_facts_exact_i64(
           match_context, rule_set, source_op, guard->value_ref_index);
@@ -1448,7 +1445,7 @@ static iree_status_t loom_low_lower_rule_guard_matches(
     case LOOM_LOW_LOWER_GUARD_VALUE_U32_DIVISOR_MAGIC_IS_ADD:
       *out_matches = loom_low_lower_rule_value_facts_u32_divisor_magic_is_add(
           match_context, rule_set, source_op, guard->value_ref_index,
-          guard->u64 != 0);
+          guard->payload.u64 != 0);
       return iree_ok_status();
     case LOOM_LOW_LOWER_GUARD_VALUE_EXACT_FLOAT:
       *out_matches = loom_low_lower_rule_value_facts_exact_float(
@@ -1457,7 +1454,7 @@ static iree_status_t loom_low_lower_rule_guard_matches(
     case LOOM_LOW_LOWER_GUARD_VALUE_I64_RANGE:
       *out_matches = loom_low_lower_rule_value_facts_i64_range(
           match_context, rule_set, source_op, guard->value_ref_index,
-          guard->minimum_i64, guard->maximum_i64);
+          guard->payload.i64_range.minimum, guard->payload.i64_range.maximum);
       return iree_ok_status();
     case LOOM_LOW_LOWER_GUARD_VALUE_I64_RANGE_LE:
       *out_matches = loom_low_lower_rule_value_facts_i64_range_le(
@@ -1472,17 +1469,17 @@ static iree_status_t loom_low_lower_rule_guard_matches(
     case LOOM_LOW_LOWER_GUARD_VALUE_FLOAT_EQUALS:
       *out_matches = loom_low_lower_rule_value_facts_float_equals(
           match_context, rule_set, source_op, guard->value_ref_index,
-          guard->u64);
+          guard->payload.u64);
       return iree_ok_status();
     case LOOM_LOW_LOWER_GUARD_VALUE_STORAGE_ELEMENT_FORMAT:
       *out_matches = loom_low_lower_rule_value_storage_element_format(
           match_context, rule_set, source_op, guard->value_ref_index,
-          guard->u64);
+          guard->payload.u64);
       return iree_ok_status();
     case LOOM_LOW_LOWER_GUARD_VALUE_MEMORY_SPACE:
       *out_matches = loom_low_lower_rule_value_memory_space_matches(
           match_context, rule_set, source_op, guard->value_ref_index,
-          guard->u64);
+          guard->payload.u64);
       return iree_ok_status();
     case LOOM_LOW_LOWER_GUARD_VALUE_PACKED_INTEGER_PAYLOAD_FROM_LANES:
       *out_matches =
@@ -1506,7 +1503,8 @@ static iree_status_t loom_low_lower_rule_guard_matches(
           match_context, rule_set, source_op, guard);
       return iree_ok_status();
     case LOOM_LOW_LOWER_GUARD_INSTANCE_FLAGS_HAS_ALL:
-      *out_matches = iree_all_bits_set(source_op->instance_flags, guard->u64);
+      *out_matches =
+          iree_all_bits_set(source_op->instance_flags, guard->payload.u64);
       return iree_ok_status();
     default:
       IREE_ASSERT_UNREACHABLE("unknown generated lower guard kind");

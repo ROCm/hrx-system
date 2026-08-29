@@ -529,7 +529,19 @@ def guard_row(descriptor_refs: Mapping[str, int], row: LowerGuard) -> list[str]:
         _append_field(fields, "attr_index", row.attr_index, always=True)
 
     if row.kind == GuardKind.VALUE_TYPE:
-        _append_field(fields, "type_pattern_index", row.type_pattern_index, always=True)
+        _append_field(
+            fields,
+            "index",
+            f"{{.type_pattern_index = {row.type_pattern_index}}}",
+            always=True,
+        )
+    elif row.kind == GuardKind.I64_ARRAY_ELEMENT_RANGE:
+        _append_field(
+            fields,
+            "index",
+            f"{{.element_index = {row.u64}}}",
+            always=True,
+        )
     if row.diagnostic_index != 0xFFFF:
         _append_field(
             fields,
@@ -539,31 +551,31 @@ def guard_row(descriptor_refs: Mapping[str, int], row: LowerGuard) -> list[str]:
         )
     if row.kind == GuardKind.ATTR_KIND:
         _append_field(fields, "attr_kind", lower_rule_spelling.attr_kind_c_name(row.attr_kind), always=True)
+    u64_payload: str | None = None
     if row.kind in (
         GuardKind.ENUM_ATTR_EQUALS,
         GuardKind.OPERAND_SEGMENT_COUNT,
         GuardKind.LOW_VALUE_REGISTER_UNIT_COUNT,
         GuardKind.VALUE_STATIC_DIM0_MULTIPLE,
         GuardKind.I64_ARRAY_COUNT,
-        GuardKind.I64_ARRAY_ELEMENT_RANGE,
         GuardKind.VALUE_SIGNED_BIT_COUNT,
         GuardKind.VALUE_UNSIGNED_BIT_COUNT,
         GuardKind.VALUE_U32_DIVISOR_MAGIC_IS_ADD,
         GuardKind.VALUE_FLOAT_EQUALS,
         GuardKind.INSTANCE_FLAGS_HAS_ALL,
-        GuardKind.VALUE_PACKED_INTEGER_PAYLOAD_FROM_LANES,
-        GuardKind.VALUE_PACKED_INTEGER_LANES_FROM_PAYLOAD,
     ):
-        _append_field(fields, "u64", lower_rule_spelling.u64_c_literal(row.u64), always=True)
-    if row.kind == GuardKind.VALUE_STORAGE_ELEMENT_FORMAT:
+        u64_payload = lower_rule_spelling.u64_c_literal(row.u64)
+    elif row.kind == GuardKind.VALUE_STORAGE_ELEMENT_FORMAT:
         if row.u64_c_expression is None:
             raise ValueError("storage element-format guard is missing expression")
-        _append_field(fields, "u64", row.u64_c_expression, always=True)
-    if row.kind == GuardKind.VALUE_MEMORY_SPACE:
+        u64_payload = row.u64_c_expression
+    elif row.kind == GuardKind.VALUE_MEMORY_SPACE:
+        u64_payload = lower_rule_spelling.memory_space_mask(row.memory_spaces)
+    if u64_payload is not None:
         _append_field(
             fields,
-            "u64",
-            lower_rule_spelling.memory_space_mask(row.memory_spaces),
+            "payload",
+            f"{{.u64 = {u64_payload}}}",
             always=True,
         )
     if row.kind == GuardKind.DESCRIPTOR_AVAILABLE:
@@ -580,26 +592,21 @@ def guard_row(descriptor_refs: Mapping[str, int], row: LowerGuard) -> list[str]:
         GuardKind.I64_ARRAY_ELEMENT_RANGE,
         GuardKind.I64_ARRAY_ELEMENTS_RANGE,
         GuardKind.VALUE_I64_RANGE,
+    ):
+        _append_field(
+            fields,
+            "payload",
+            f"{{.i64_range = {{.minimum = {_c_i64_literal(row.minimum_i64)}, .maximum = {_c_i64_literal(row.maximum_i64)}}}}}",
+            always=True,
+        )
+    elif row.kind in (
         GuardKind.VALUE_PACKED_INTEGER_PAYLOAD_FROM_LANES,
         GuardKind.VALUE_PACKED_INTEGER_LANES_FROM_PAYLOAD,
     ):
         _append_field(
             fields,
-            "minimum_i64",
-            _c_i64_literal(row.minimum_i64),
-            always=True,
-        )
-    if row.kind in (
-        GuardKind.I64_RANGE,
-        GuardKind.I64_ARRAY_ELEMENT_RANGE,
-        GuardKind.I64_ARRAY_ELEMENTS_RANGE,
-        GuardKind.VALUE_I64_RANGE,
-        GuardKind.VALUE_PACKED_INTEGER_LANES_FROM_PAYLOAD,
-    ):
-        _append_field(
-            fields,
-            "maximum_i64",
-            _c_i64_literal(row.maximum_i64),
+            "payload",
+            f"{{.packed_integer = {{.storage_payload_multiple = UINT32_C({row.u64}), .storage_unit_bit_count = UINT32_C({row.minimum_i64}), .maximum_lane_count = UINT32_C({row.maximum_i64})}}}}",
             always=True,
         )
     return fields
