@@ -30,7 +30,6 @@ CMAKE_SANITIZER_OPTIONS = {
 }
 BAZEL_HAL_DRIVER_DEFINES = (
     ("amdgpu", "IREE_HAL_DRIVER_AMDGPU"),
-    ("hip", "IREE_HAL_DRIVER_HIP"),
     ("local-sync", "IREE_HAL_DRIVER_LOCAL_SYNC"),
     ("local-task", "IREE_HAL_DRIVER_LOCAL_TASK"),
     ("null", "IREE_HAL_DRIVER_NULL"),
@@ -39,7 +38,6 @@ BAZEL_HAL_DRIVER_DEFINES = (
 )
 CMAKE_HAL_DRIVER_DEFINES = (
     ("amdgpu", "IREE_HAL_DRIVER_AMDGPU"),
-    ("hip", "IREE_HAL_DRIVER_HIP"),
     ("vulkan", "IREE_HAL_DRIVER_VULKAN"),
     ("webgpu", "IREE_HAL_DRIVER_WEBGPU"),
 )
@@ -58,7 +56,6 @@ CMAKE_LOOM_IMPORTER_DEFINES = (
 CI_SUPPORTED_HAL_DRIVERS = frozenset(driver for driver, _ in BAZEL_HAL_DRIVER_DEFINES)
 REPOSITORY_BUILD_HAL_DRIVERS = (
     "amdgpu",
-    "hip",
     "local-sync",
     "local-task",
     "null",
@@ -248,7 +245,7 @@ def bazel_configure_step(
     for driver, define in BAZEL_HAL_DRIVER_DEFINES:
         if driver in enabled_driver_set:
             command.append(f"-D{define}=ON")
-    if enabled_driver_set.intersection(("amdgpu", "hip")):
+    if "amdgpu" in enabled_driver_set:
         command.append(ROCM_PINNED_DEPENDENCY_MODE_OPTION)
         rocm_root = os.environ.get("HRX_ROCM_ROOT")
         if rocm_root:

@@ -57,7 +57,6 @@ TAG_SUGGESTION_RULES = (
         score=40,
         path_prefixes=(
             "runtime/src/iree/hal/drivers/amdgpu/",
-            "runtime/src/iree/hal/drivers/hip/",
             "build_tools/amdgpu/",
         ),
     ),

@@ -8,8 +8,6 @@ package(default_visibility = ["//visibility:public"])
 
 exports_files([
     "headers.cmake",
-    "hip_api_headers.BUILD.bazel",
     "hsa_runtime_headers.BUILD.bazel",
-    "rccl_headers.BUILD.bazel",
     "repository.bzl",
 ])

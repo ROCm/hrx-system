@@ -20,7 +20,6 @@ DEFAULT_DRIVERS = [
 SUPPORTED_DRIVERS = [
     "amdgpu",
     "cuda",
-    "hip",
     "local-sync",
     "local-task",
     "null",

@@ -114,7 +114,7 @@ static iree_hal_device_spec_t* CreateTestDeviceSpec(
   };
   iree_hal_external_timepoint_handle_spec_t external_timepoint_handles[1] = {
       {
-          /*.handle_type=*/IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_HIP_EVENT,
+          /*.handle_type=*/IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_ASYNC_PRIMITIVE,
           /*.direction_flags=*/IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_IMPORT |
               IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_EXPORT,
           /*.compatibility=*/IREE_HAL_SEMAPHORE_COMPATIBILITY_DEVICE_WAIT,
@@ -243,10 +243,10 @@ TEST(TopologyEdge, ColdWordBitfieldIndependence) {
   // Set semaphore import timepoint types.
   hi = iree_hal_topology_edge_set_semaphore_import_timepoint_types(
       hi, IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_CUDA_EVENT |
-              IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_HIP_EVENT);
+              IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_ASYNC_PRIMITIVE);
   EXPECT_EQ(iree_hal_topology_edge_semaphore_import_timepoint_types(hi),
             IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_CUDA_EVENT |
-                IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_HIP_EVENT);
+                IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_ASYNC_PRIMITIVE);
   EXPECT_EQ(iree_hal_topology_edge_semaphore_export_timepoint_types(hi),
             IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_NONE);
   EXPECT_EQ(iree_hal_topology_edge_buffer_import_types(hi), 0);
@@ -261,7 +261,7 @@ TEST(TopologyEdge, ColdWordBitfieldIndependence) {
             IREE_HAL_TOPOLOGY_HANDLE_TYPE_DMA_BUF);
   EXPECT_EQ(iree_hal_topology_edge_semaphore_import_timepoint_types(hi),
             IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_CUDA_EVENT |
-                IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_HIP_EVENT);
+                IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_ASYNC_PRIMITIVE);
 
   // Physical-path details are independent from resource handle masks.
   hi = iree_hal_topology_edge_set_link_type(hi,
@@ -274,7 +274,7 @@ TEST(TopologyEdge, ColdWordBitfieldIndependence) {
             IREE_HAL_TOPOLOGY_HANDLE_TYPE_DMA_BUF);
   EXPECT_EQ(iree_hal_topology_edge_semaphore_import_timepoint_types(hi),
             IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_CUDA_EVENT |
-                IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_HIP_EVENT);
+                IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_ASYNC_PRIMITIVE);
 }
 
 //===----------------------------------------------------------------------===//
@@ -385,9 +385,9 @@ TEST(TopologyEdge, CreateHostStaged) {
 
 TEST(TopologyEdge, SameBackendSpecDoesNotImplyNativeSynchronization) {
   iree_hal_device_spec_t* spec_a = CreateTestDeviceSpec(
-      "hip", "hsa", 0, TEST_DEVICE_SPEC_FLAG_NONE, 0, MakeTestUuid(0));
+      "driver", "backend", 0, TEST_DEVICE_SPEC_FLAG_NONE, 0, MakeTestUuid(0));
   iree_hal_device_spec_t* spec_b = CreateTestDeviceSpec(
-      "hip", "hsa", 1, TEST_DEVICE_SPEC_FLAG_NONE, 0, MakeTestUuid(0));
+      "driver", "backend", 1, TEST_DEVICE_SPEC_FLAG_NONE, 0, MakeTestUuid(0));
 
   iree_hal_topology_edge_t edge =
       iree_hal_topology_edge_from_device_specs(spec_a, spec_b);
@@ -448,10 +448,12 @@ TEST(TopologyEdge, RefineSameRuntimeDomainUsesNativeSynchronizationOnly) {
 }
 
 TEST(TopologyEdge, UnknownNumaDoesNotProjectDistanceFromNodeZero) {
-  iree_hal_device_spec_t* spec_a = CreateTestDeviceSpec(
-      "hip", "hsa", 0, TEST_DEVICE_SPEC_FLAG_NUMA_NODE, 1, MakeTestUuid(0));
-  iree_hal_device_spec_t* spec_b = CreateTestDeviceSpec(
-      "vulkan", "vulkan", 1, TEST_DEVICE_SPEC_FLAG_NONE, 0, MakeTestUuid(0));
+  iree_hal_device_spec_t* spec_a =
+      CreateTestDeviceSpec("driver-a", "backend-a", 0,
+                           TEST_DEVICE_SPEC_FLAG_NUMA_NODE, 1, MakeTestUuid(0));
+  iree_hal_device_spec_t* spec_b =
+      CreateTestDeviceSpec("driver-b", "backend-b", 1,
+                           TEST_DEVICE_SPEC_FLAG_NONE, 0, MakeTestUuid(0));
 
   iree_hal_topology_edge_t edge =
       iree_hal_topology_edge_from_device_specs(spec_a, spec_b);
@@ -463,10 +465,10 @@ TEST(TopologyEdge, UnknownNumaDoesNotProjectDistanceFromNodeZero) {
 
 TEST(TopologyEdge, ExternalBufferHandlesUseImportModes) {
   TestDeviceSpecFlags flags = TEST_DEVICE_SPEC_FLAG_EXTERNAL_BUFFER_HANDLES;
-  iree_hal_device_spec_t* spec_a =
-      CreateTestDeviceSpec("vulkan", "vulkan", 0, flags, 0, MakeTestUuid(0));
-  iree_hal_device_spec_t* spec_b =
-      CreateTestDeviceSpec("hip", "hsa", 1, flags, 0, MakeTestUuid(0));
+  iree_hal_device_spec_t* spec_a = CreateTestDeviceSpec(
+      "producer", "producer", 0, flags, 0, MakeTestUuid(0));
+  iree_hal_device_spec_t* spec_b = CreateTestDeviceSpec(
+      "consumer", "consumer", 1, flags, 0, MakeTestUuid(0));
 
   iree_hal_topology_edge_t edge =
       iree_hal_topology_edge_from_device_specs(spec_a, spec_b);
@@ -503,9 +505,9 @@ TEST(TopologyEdge, ExternalTimepointsUseImportModes) {
   EXPECT_EQ(iree_hal_topology_edge_signal_mode(edge.lo),
             IREE_HAL_TOPOLOGY_INTEROP_MODE_IMPORT);
   EXPECT_EQ(iree_hal_topology_edge_semaphore_import_timepoint_types(edge.hi),
-            IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_HIP_EVENT);
+            IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_ASYNC_PRIMITIVE);
   EXPECT_EQ(iree_hal_topology_edge_semaphore_export_timepoint_types(edge.hi),
-            IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_HIP_EVENT);
+            IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_ASYNC_PRIMITIVE);
   EXPECT_TRUE(iree_hal_topology_edge_capability_flags(edge.lo) &
               IREE_HAL_TOPOLOGY_CAPABILITY_TIMELINE_SEMAPHORE);
   EXPECT_LT(iree_hal_topology_edge_wait_cost(edge.lo), 10);
@@ -516,10 +518,11 @@ TEST(TopologyEdge, ExternalTimepointsUseImportModes) {
 
 TEST(TopologyEdge, ExternalTimepointExportWithoutImportStaysHostStaged) {
   iree_hal_device_spec_t* spec_a = CreateTestDeviceSpec(
-      "hip", "hsa", 0, TEST_DEVICE_SPEC_FLAG_EXTERNAL_TIMEPOINT_HANDLES, 0,
-      MakeTestUuid(0));
-  iree_hal_device_spec_t* spec_b = CreateTestDeviceSpec(
-      "vulkan", "vulkan", 1, TEST_DEVICE_SPEC_FLAG_NONE, 0, MakeTestUuid(0));
+      "producer", "producer", 0,
+      TEST_DEVICE_SPEC_FLAG_EXTERNAL_TIMEPOINT_HANDLES, 0, MakeTestUuid(0));
+  iree_hal_device_spec_t* spec_b =
+      CreateTestDeviceSpec("consumer", "consumer", 1,
+                           TEST_DEVICE_SPEC_FLAG_NONE, 0, MakeTestUuid(0));
 
   iree_hal_topology_edge_t edge =
       iree_hal_topology_edge_from_device_specs(spec_a, spec_b);
@@ -542,9 +545,9 @@ TEST(TopologyEdge, PhysicalUuidMatchingIsPlacementNotAliasing) {
   TestDeviceSpecFlags flags = TEST_DEVICE_SPEC_FLAG_UUID;
   iree_hal_uuid_t uuid = MakeTestUuid(42);
   iree_hal_device_spec_t* spec_a =
-      CreateTestDeviceSpec("vulkan", "vulkan", 0, flags, 0, uuid);
+      CreateTestDeviceSpec("driver-a", "backend-a", 0, flags, 0, uuid);
   iree_hal_device_spec_t* spec_b =
-      CreateTestDeviceSpec("hip", "hsa", 1, flags, 0, uuid);
+      CreateTestDeviceSpec("driver-b", "backend-b", 1, flags, 0, uuid);
 
   iree_hal_topology_edge_t edge =
       iree_hal_topology_edge_from_device_specs(spec_a, spec_b);
@@ -723,16 +726,16 @@ TEST(TopologyEdge, BufferHandlesAndTimepointTypesAreIndependent) {
       hi, IREE_HAL_TOPOLOGY_HANDLE_TYPE_RDMA_MR |
               IREE_HAL_TOPOLOGY_HANDLE_TYPE_SHM);
   hi = iree_hal_topology_edge_set_semaphore_import_timepoint_types(
-      hi, IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_HIP_EVENT);
+      hi, IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_ASYNC_PRIMITIVE);
   hi = iree_hal_topology_edge_set_semaphore_export_timepoint_types(
-      hi, IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_HIP_EVENT);
+      hi, IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_ASYNC_PRIMITIVE);
 
   // Verify RDMA_MR is set for buffers while semaphores retain only the
   // requested timepoint type.
   EXPECT_TRUE(iree_hal_topology_edge_buffer_import_types(hi) &
               IREE_HAL_TOPOLOGY_HANDLE_TYPE_RDMA_MR);
   EXPECT_EQ(iree_hal_topology_edge_semaphore_import_timepoint_types(hi),
-            IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_HIP_EVENT);
+            IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_ASYNC_PRIMITIVE);
 
   // Verify SHM is retained as a buffer handle.
   EXPECT_TRUE(iree_hal_topology_edge_buffer_import_types(hi) &

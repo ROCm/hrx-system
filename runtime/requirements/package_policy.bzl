@@ -18,7 +18,6 @@ load(
     "AMDGPU_RESOURCE",
     "HAL_AMDGPU",
     "HAL_CUDA",
-    "HAL_HIP",
     "HAL_VULKAN",
     "HAL_WEBGPU",
     "NVIDIA_GPU_RESOURCE",
@@ -44,18 +43,6 @@ PACKAGE_POLICIES = [
         packages = ["runtime/src/iree/hal/drivers/cuda/cts/..."],
         run_requirements = [NVIDIA_GPU_RESOURCE],
         resource_group = "iree-hal-drivers-cuda-tests",
-    ),
-    package_policy(
-        packages = ["runtime/src/iree/hal/drivers/hip/..."],
-        build_requirements = [HAL_HIP],
-    ),
-    package_policy(
-        packages = [
-            "runtime/src/iree/hal/drivers/hip",
-            "runtime/src/iree/hal/drivers/hip/cts/...",
-        ],
-        run_requirements = [AMDGPU_RESOURCE],
-        resource_group = "iree-hal-drivers-hip-tests",
     ),
     package_policy(
         packages = ["runtime/src/iree/hal/drivers/vulkan/..."],

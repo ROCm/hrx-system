@@ -43,12 +43,6 @@ SDK_DRIVER_PACKAGES = {
         "runtime/src/iree/hal/drivers/cuda/cts",
         "runtime/src/iree/hal/drivers/cuda/registration",
     ),
-    "hip": (
-        "runtime/src/iree/hal/drivers/hip",
-        "runtime/src/iree/hal/drivers/hip/cts",
-        "runtime/src/iree/hal/drivers/hip/registration",
-        "runtime/src/iree/hal/drivers/hip/util",
-    ),
     "vulkan": (
         "runtime/src/iree/hal/drivers/vulkan",
         "runtime/src/iree/hal/drivers/vulkan/cts",
@@ -61,15 +55,12 @@ SDK_DRIVER_PACKAGES = {
         "runtime/src/iree/hal/drivers/webgpu/registration",
     ),
 }
-ROCM_DRIVERS = frozenset(("amdgpu", "hip"))
+ROCM_DRIVERS = frozenset(("amdgpu",))
 DEPENDENCY_MODES = frozenset(("pinned", "package", "auto"))
-SUPPORTED_ENABLE_DRIVERS = frozenset(
-    (*HOST_DRIVERS, "amdgpu", "hip", "vulkan", "webgpu")
-)
+SUPPORTED_ENABLE_DRIVERS = frozenset((*HOST_DRIVERS, "amdgpu", "vulkan", "webgpu"))
 ALL_DRIVERS = tuple(HOST_DRIVERS) + tuple(SDK_DRIVER_PACKAGES)
 DRIVER_DEFINES = {
     "IREE_HAL_DRIVER_AMDGPU": "amdgpu",
-    "IREE_HAL_DRIVER_HIP": "hip",
     "IREE_HAL_DRIVER_LOCAL_SYNC": "local-sync",
     "IREE_HAL_DRIVER_LOCAL_TASK": "local-task",
     "IREE_HAL_DRIVER_NULL": "null",

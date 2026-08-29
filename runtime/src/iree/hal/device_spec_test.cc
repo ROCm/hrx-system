@@ -934,7 +934,7 @@ TEST(DeviceSpecTest, FindsVirtualMemoryAndExternalHandleRecords) {
 
   iree_hal_external_timepoint_handle_spec_t external_timepoint_handles[2] = {
       {
-          /*.handle_type=*/IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_HIP_EVENT,
+          /*.handle_type=*/IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_CUDA_EVENT,
           /*.direction_flags=*/IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_IMPORT |
               IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_EXPORT,
           /*.compatibility=*/IREE_HAL_SEMAPHORE_COMPATIBILITY_HOST_WAIT |
@@ -1023,7 +1023,7 @@ TEST(DeviceSpecTest, FindsVirtualMemoryAndExternalHandleRecords) {
             nullptr);
 
   iree_hal_external_timepoint_handle_selection_t timepoint_selection = {
-      /*.handle_type=*/IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_HIP_EVENT,
+      /*.handle_type=*/IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_CUDA_EVENT,
       /*.direction_flags=*/IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_IMPORT,
       /*.compatibility=*/IREE_HAL_SEMAPHORE_COMPATIBILITY_DEVICE_WAIT,
       /*.capability_flags=*/
@@ -1034,7 +1034,7 @@ TEST(DeviceSpecTest, FindsVirtualMemoryAndExternalHandleRecords) {
                                                           &timepoint_selection);
   ASSERT_NE(timepoint_handle, nullptr);
   EXPECT_EQ(timepoint_handle->handle_type,
-            IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_HIP_EVENT);
+            IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_CUDA_EVENT);
 
   timepoint_selection.compatibility =
       IREE_HAL_SEMAPHORE_COMPATIBILITY_DEVICE_SIGNAL;

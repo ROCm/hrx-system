@@ -249,11 +249,6 @@ typedef enum iree_hal_external_timepoint_type_e {
   // destroy an exported event before it has been reached results in undefined
   // behavior (but most likely a crash).
   IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_CUDA_EVENT,
-
-  // A HIP event (hipEvent) referencing a specific timepoint.
-  // See IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_CUDA_EVENT for more
-  // information.
-  IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_HIP_EVENT,
 } iree_hal_external_timepoint_type_t;
 
 // Returns true if |type| identifies a concrete external timepoint type.
@@ -262,7 +257,6 @@ static inline bool iree_hal_external_timepoint_type_is_valid(
   switch (type) {
     case IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_ASYNC_PRIMITIVE:
     case IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_CUDA_EVENT:
-    case IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_HIP_EVENT:
       return true;
     default:
       return false;
@@ -280,9 +274,6 @@ typedef enum iree_hal_external_timepoint_type_mask_bits_e {
   // Bit for IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_CUDA_EVENT.
   IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_CUDA_EVENT =
       1u << IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_CUDA_EVENT,
-  // Bit for IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_HIP_EVENT.
-  IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_MASK_HIP_EVENT =
-      1u << IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_HIP_EVENT,
 } iree_hal_external_timepoint_type_mask_bits_t;
 
 // Returns the mask bit for |type| or NONE for an invalid/sentinel type.
@@ -322,8 +313,6 @@ typedef struct iree_hal_external_timepoint_t {
     iree_async_primitive_t async_primitive;
     // IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_CUDA_EVENT
     void* cuda_event;  // cuEvent
-    // IREE_HAL_EXTERNAL_TIMEPOINT_TYPE_HIP_EVENT
-    void* hip_event;  // hipEvent
   } handle;
 } iree_hal_external_timepoint_t;
 

@@ -27,7 +27,7 @@ iree-bazel-build //tools:iree-run-module \
 The AMDGPU target selector accepts exact targets such as `gfx1100`, generic
 code-object targets such as `gfx11-generic`, and TheRock-style selector
 families such as `gfx110X-all`. It is the runtime's supported AMDGPU target
-set: embedded device libraries, AMDGPU/HIP HAL CTS assets, and source-built
+set: embedded device libraries, AMDGPU HAL CTS assets, and source-built
 util test/benchmark assets all use this same selector. Override for your
 hardware:
 
@@ -207,7 +207,7 @@ and the package-local notes in
 The `IREE_HAL_AMDGPU_TARGETS` CMake variable defaults to
 `gfx9-generic;gfx90a;gfx9-4-generic;gfx10-1-generic;gfx10-3-generic;gfx11-generic;gfx12-generic`,
 which embeds the current checked-in generic-family set plus `gfx90a` and drives
-the AMDGPU/HIP HAL CTS and source-built util test/benchmark assets. Packagers
+the AMDGPU HAL CTS and source-built util test/benchmark assets. Packagers
 can set it to exact target architectures, LLVM generic ISA targets,
 TheRock-style generic target families, or TheRock-style product bundles. Exact
 targets use the HSA ISA spelling, such as `gfx1100`. LLVM generic ISA targets

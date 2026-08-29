@@ -26,13 +26,6 @@ HAL_CUDA = build_requirement(
     cmake_condition = "IREE_HAL_DRIVER_CUDA",
 )
 
-HAL_HIP = build_requirement(
-    id = "runtime.hal.hip",
-    label = Label("//runtime/requirements:hal_hip"),
-    enabled_by = Label("//runtime/config/hal:driver_hip"),
-    cmake_condition = "IREE_HAL_DRIVER_HIP",
-)
-
 HAL_VULKAN = build_requirement(
     id = "runtime.hal.vulkan",
     label = Label("//runtime/requirements:hal_vulkan"),
@@ -78,7 +71,6 @@ WEBGPU_DEVICE_RESOURCE = run_requirement(
 REQUIREMENTS = [
     HAL_AMDGPU,
     HAL_CUDA,
-    HAL_HIP,
     HAL_VULKAN,
     HAL_WEBGPU,
     AMDGPU_RESOURCE,

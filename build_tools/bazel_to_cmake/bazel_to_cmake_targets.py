@@ -20,17 +20,9 @@ class TargetConverter:
                 f"{root_repo}//build_tools/bazel:pthreads": [],
                 f"{root_repo}//build_tools/bazel:dl": ["${CMAKE_DL_LIBS}"],
                 f"{root_repo}//build_tools/bazel:rt": [],
-                # HIP
-                "@hip_api_headers//:headers": [
-                    "iree::third_party::hip_api_headers",
-                ],
                 # NCCL
                 "@nccl//:headers": [
                     "nccl::headers",
-                ],
-                # RCCL
-                "@rccl//:headers": [
-                    "iree::third_party::rccl_headers",
                 ],
                 # Tracy.
                 "@tracy_client//:runtime": ["tracy_client::runtime"],
@@ -55,10 +47,8 @@ class TargetConverter:
                 "//third_party:aqlprofile_sdk_headers": [
                     "iree::third_party::aqlprofile_sdk_headers"
                 ],
-                "//third_party:hip_api_headers": ["iree::third_party::hip_api_headers"],
                 "//third_party:libbacktrace": ["${IREE_LIBBACKTRACE_TARGET}"],
                 "//third_party:zstd": ["iree::third_party::zstd"],
-                "//third_party:rccl_headers": ["iree::third_party::rccl_headers"],
                 "//third_party:spirv_as": ["iree::third_party::spirv_as"],
                 "//third_party:spirv_dis": ["iree::third_party::spirv_dis"],
                 "//third_party:spirv_val": ["iree::third_party::spirv_val"],

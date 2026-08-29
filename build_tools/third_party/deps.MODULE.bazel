@@ -70,18 +70,3 @@ rocm_repository(
     strip_prefix = "hsa-runtime-headers-4285513114a70f7cf4830c89279c8cfa57b901bb",
     url = "https://github.com/iree-org/hsa-runtime-headers/archive/4285513114a70f7cf4830c89279c8cfa57b901bb.tar.gz",
 )
-
-rocm_repository(
-    name = "hip_api_headers",
-    build_file = "//build_tools/third_party/rocm:hip_api_headers.BUILD.bazel",
-    display_name = "HIP API headers",
-    sha256 = "6304eb646a811032bb4ec2db2927170afed677d3a59b8592e986b79dfaae805c",
-    strip_prefix = "hip-build-deps-c64ec391ab8eaf4c9872660b24a71fda8026b438",
-    url = "https://github.com/iree-org/hip-build-deps/archive/c64ec391ab8eaf4c9872660b24a71fda8026b438.tar.gz",
-)
-
-rocm_repository(
-    name = "rccl",
-    build_file = "//build_tools/third_party/rocm:rccl_headers.BUILD.bazel",
-    display_name = "RCCL headers",
-)

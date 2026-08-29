@@ -126,7 +126,7 @@ The runtime build owns the shared AMDGPU support selector:
 
 | Bazel flag | Consumer |
 | --- | --- |
-| `//runtime/src/iree/hal/drivers/amdgpu:targets` | Runtime AMDGPU support: embedded device libraries, AMDGPU/HIP HAL CTS, source-built util test/benchmark assets, and libhrx CTS native executable assets. |
+| `//runtime/src/iree/hal/drivers/amdgpu:targets` | Runtime AMDGPU support: embedded device libraries, AMDGPU HAL CTS, source-built util test/benchmark assets, and libhrx CTS native executable assets. |
 
 Source-built binaries use the optional `@iree_amdgpu_device_toolchain`
 repository. It is inert by default. A real producer is selected with:
@@ -197,7 +197,7 @@ The matching CMake selector variable is:
 
 | CMake variable | Consumer |
 | --- | --- |
-| `IREE_HAL_AMDGPU_TARGETS` | Runtime AMDGPU support: embedded device libraries, AMDGPU/HIP HAL CTS, source-built util test/benchmark assets, and libhrx CTS native executable assets. |
+| `IREE_HAL_AMDGPU_TARGETS` | Runtime AMDGPU support: embedded device libraries, AMDGPU HAL CTS, source-built util test/benchmark assets, and libhrx CTS native executable assets. |
 
 `iree_amdgpu_binary(...)` builds a single AMDGPU ELF shared object.
 `iree_amdgpu_binary_variants(...)` builds one shared object per selected
