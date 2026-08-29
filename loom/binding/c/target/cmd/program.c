@@ -72,6 +72,9 @@ typedef struct loomc_cmd_program_product_invocation_t {
     // Context providing the bytecode representation environment.
     loomc_context_t* context;
 
+    // Workspace block pool used while materializing request sources.
+    iree_arena_block_pool_t* block_pool;
+
     // Allocator used for request sources and handles.
     loomc_allocator_t allocator;
   } request;
@@ -263,24 +266,31 @@ static iree_string_view_t loomc_cmd_program_product_kernel_name(
 }
 
 static iree_status_t loomc_cmd_program_product_publish_kernel_request(
-    void* user_data, loom_cmd_program_kernel_request_t request) {
+    void* user_data, const loom_cmd_program_kernel_request_t* request) {
   loomc_cmd_program_product_invocation_t* invocation =
       (loomc_cmd_program_product_invocation_t*)user_data;
-  const iree_string_view_t root_symbol =
-      loomc_cmd_program_product_kernel_name(&request.product);
-
-  const loom_symbol_id_t module_symbol_id = request.product.kernel.symbol_id;
-  loom_symbol_id_t bytecode_symbol_ordinal = LOOM_SYMBOL_ID_INVALID;
-  const loomc_module_symbol_projection_t projection = {
-      .module_symbol_ids = &module_symbol_id,
-      .bytecode_symbol_ordinals = &bytecode_symbol_ordinal,
-      .count = 1,
-  };
+  loom_kernel_class_product_t kernel_product = {0};
+  loomc_status_t status =
+      loomc_status_from_iree(loom_kernel_request_materialize(
+          request->kernel_request, invocation->request.block_pool,
+          iree_allocator_from_loomc(invocation->request.allocator),
+          &kernel_product));
   loomc_source_t* source = NULL;
-  loomc_status_t status = loomc_module_serialize_internal_bytecode_to_source(
-      invocation->request.context, request.product.module,
-      loomc_string_view_from_iree(root_symbol), &projection,
-      invocation->request.allocator, &source);
+  loom_symbol_id_t bytecode_symbol_ordinal = LOOM_SYMBOL_ID_INVALID;
+  if (loomc_status_is_ok(status)) {
+    const iree_string_view_t root_symbol =
+        loomc_cmd_program_product_kernel_name(&kernel_product);
+    const loom_symbol_id_t module_symbol_id = kernel_product.kernel.symbol_id;
+    const loomc_module_symbol_projection_t projection = {
+        .module_symbol_ids = &module_symbol_id,
+        .bytecode_symbol_ordinals = &bytecode_symbol_ordinal,
+        .count = 1,
+    };
+    status = loomc_module_serialize_internal_bytecode_to_source(
+        invocation->request.context, kernel_product.module,
+        loomc_string_view_from_iree(root_symbol), &projection,
+        invocation->request.allocator, &source);
+  }
 
   loomc_request_t* public_request = NULL;
   if (loomc_status_is_ok(status)) {
@@ -289,7 +299,7 @@ static iree_status_t loomc_cmd_program_product_publish_kernel_request(
         .symbol_ordinal = bytecode_symbol_ordinal,
     };
     const loomc_request_binding_t binding = {
-        .requirement_ordinal = request.entry_requirement_index,
+        .requirement_ordinal = request->entry_requirement_index,
         .root_ordinal = 0,
     };
     status = loomc_request_create_take_source(&source, &root, 1, &binding, 1,
@@ -306,7 +316,7 @@ static iree_status_t loomc_cmd_program_product_publish_kernel_request(
 
   loomc_request_release(public_request);
   loomc_source_release(source);
-  loom_kernel_class_product_deinitialize(&request.product);
+  loom_kernel_class_product_deinitialize(&kernel_product);
   return iree_status_from_loomc(status);
 }
 
@@ -407,6 +417,7 @@ loomc_status_t loomc_cmd_program_product_build(
       .request =
           {
               .context = loomc_link_index_context(options->link_index),
+              .block_pool = loomc_workspace_block_pool(workspace),
               .allocator = allocator,
           },
       .result = result,

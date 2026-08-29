@@ -35,7 +35,8 @@ typedef struct loom_cmd_program_kernel_site_root_t {
 // Schedule rows and the existing source fact table are the authoritative site
 // inventory. The function performs no IR walk or symbol-name lookup. Sites are
 // grouped by their configured target entry symbol so all roots contribute to
-// one closed bounded class collection before its first product is transferred.
+// one closed bounded class collection before its first class request is
+// visited.
 // Per-kernel analysis storage is rewound after its site projection is complete,
 // bounding scratch usage by the largest live kernel rather than their sum.
 iree_status_t loom_cmd_program_plan_publish_kernel_requests(

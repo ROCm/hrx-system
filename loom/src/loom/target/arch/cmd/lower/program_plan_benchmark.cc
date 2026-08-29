@@ -9,7 +9,6 @@
 #include <chrono>
 #include <cstdlib>
 #include <string>
-#include <vector>
 
 #include "benchmark/benchmark.h"
 #include "iree/base/internal/arena.h"
@@ -319,8 +318,8 @@ static void BM_PrepareDistinctWorkloads(benchmark::State& state) {
 }
 
 struct KernelRequestCapture {
-  // Products transferred by the current command-plan preparation.
-  std::vector<loom_cmd_program_kernel_request_t> requests;
+  // Number of class probes visited by the current preparation.
+  iree_host_size_t request_count = 0;
 
   // Timestamp immediately before the current preparation began.
   std::chrono::steady_clock::time_point start_time;
@@ -330,13 +329,14 @@ struct KernelRequestCapture {
 };
 
 static iree_status_t CaptureKernelRequest(
-    void* user_data, loom_cmd_program_kernel_request_t request) {
+    void* user_data, const loom_cmd_program_kernel_request_t* request) {
+  (void)request;
   KernelRequestCapture* capture = static_cast<KernelRequestCapture*>(user_data);
-  if (capture->requests.empty()) {
+  if (capture->request_count == 0) {
     capture->first_request_time =
         std::chrono::steady_clock::now() - capture->start_time;
   }
-  capture->requests.push_back(request);
+  ++capture->request_count;
   return iree_ok_status();
 }
 
@@ -375,7 +375,6 @@ static void RunIndexedProgramPlanBenchmark(benchmark::State& state,
   loom_cmd_program_plan_index_options_t options;
   loom_cmd_program_plan_index_options_initialize(&options);
   KernelRequestCapture capture;
-  capture.requests.reserve(options.kernel_class_collection.class_limit);
   if (request_mode == KernelRequestMode::kPublish) {
     options.kernel_request_sink = {
         /*.publish=*/CaptureKernelRequest,
@@ -391,7 +390,7 @@ static void RunIndexedProgramPlanBenchmark(benchmark::State& state,
     state.PauseTiming();
     iree_arena_allocator_t scratch_arena;
     iree_arena_initialize(fixture.block_pool(), &scratch_arena);
-    capture.requests.clear();
+    capture.request_count = 0;
     capture.first_request_time = {};
     state.ResumeTiming();
 
@@ -406,7 +405,7 @@ static void RunIndexedProgramPlanBenchmark(benchmark::State& state,
     if (!valid) std::abort();
     benchmark::DoNotOptimize(program_plan.root_count);
 
-    request_count = capture.requests.size();
+    request_count = capture.request_count;
     root_count = program_plan.root_count;
     entry_requirement_count = program_plan.entry_requirement_count;
     if (root_count != 1 ||
@@ -419,9 +418,6 @@ static void RunIndexedProgramPlanBenchmark(benchmark::State& state,
       first_request_nanoseconds += capture.first_request_time.count();
     }
     state.PauseTiming();
-    for (loom_cmd_program_kernel_request_t& request : capture.requests) {
-      loom_kernel_class_product_deinitialize(&request.product);
-    }
     loom_cmd_program_plan_deinitialize(&program_plan);
     iree_arena_deinitialize(&scratch_arena);
     state.ResumeTiming();

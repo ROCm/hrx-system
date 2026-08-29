@@ -34,30 +34,23 @@ typedef struct loom_cmd_entry_requirement_t {
   const loom_op_t* declaration_op;
 } loom_cmd_entry_requirement_t;
 
-// One source request bound to a command-plan entry requirement.
+// One borrowed source request bound to a command-plan entry requirement.
 typedef struct loom_cmd_program_kernel_request_t {
   // Plan-wide logical executable-entry requirement for this request.
   uint32_t entry_requirement_index;
 
-  // Exact index-wide kernel definition ordinal rooted by this request.
-  iree_host_size_t source_symbol_ordinal;
-
-  // Dense class ordinal within this kernel publication.
-  loom_decision_class_ordinal_t class_ordinal;
-
-  // Number of launch sites assigned to this class.
-  iree_host_size_t member_count;
-
-  // Independently owned ordinary Loom source module and kernel root.
-  loom_kernel_class_product_t product;
+  // Callback-lived class request supporting resolution before materialization.
+  const loom_kernel_request_t* kernel_request;
 } loom_cmd_program_kernel_request_t;
 
-// Accepts ownership of one command-plan kernel request at callback entry.
+// Visits one command-plan kernel request before source materialization.
 //
-// The callback must release or transfer |request.product| even when
-// returning an error. A non-OK status terminates command-plan preparation.
+// |request| and |request.kernel_request| remain valid only for the callback.
+// The callback may resolve an existing product from the class identity or
+// materialize an independently owned source product on a miss. A non-OK status
+// terminates command-plan preparation.
 typedef iree_status_t (*loom_cmd_program_kernel_request_publish_fn_t)(
-    void* user_data, loom_cmd_program_kernel_request_t request);
+    void* user_data, const loom_cmd_program_kernel_request_t* request);
 
 // Required sink for optional source request publication.
 typedef struct loom_cmd_program_kernel_request_sink_t {
@@ -88,7 +81,7 @@ typedef struct loom_cmd_program_kernel_source_t {
   // Bounded semantic class collection policy.
   loom_kernel_class_collection_options_t collection_options;
 
-  // Sink receiving every independently owned class product.
+  // Sink visiting every live source class before materialization.
   loom_cmd_program_kernel_request_sink_t sink;
 } loom_cmd_program_kernel_source_t;
 
@@ -127,8 +120,9 @@ typedef struct loom_cmd_program_root_t {
 // portable cmd low ISA together with the configured entry declarations they
 // require. Body-blind command preparation never materializes a kernel
 // implementation or manufactures a host launch-count program. When an indexed
-// kernel source is supplied, class products are transferred to its sink and
-// only their logical entry requirements remain in the returned plan.
+// kernel source is supplied, its sink visits each live class before optional
+// materialization and only logical entry requirements remain in the returned
+// plan.
 typedef struct loom_cmd_program_plan_t {
   // Owned module containing all lowered command roots.
   loom_module_t* root_module;
@@ -171,12 +165,13 @@ typedef struct loom_cmd_program_plan_t {
 // function passes used to resolve root-local source structure. It is a
 // compiler-owned resource rather than part of the authored program contract.
 //
-// |kernel_source| optionally publishes independently owned source products for
-// the semantic classes reached by all selected roots. Publication is complete
-// before this function returns; the returned plan retains no source product or
-// kernel implementation state. The terminal status and |out_valid| commit the
-// publication as a complete parent product. A caller that receives a non-OK
-// status or false validity must cancel requests accepted earlier in the call.
+// |kernel_source| optionally visits the semantic classes reached by all
+// selected roots before source materialization. Publication is complete before
+// this function returns; the returned plan retains no request, source product,
+// or kernel implementation state. The terminal status and |out_valid| commit
+// the publication as a complete parent product. A caller that receives a
+// non-OK status or false validity must cancel work accepted earlier in the
+// call.
 //
 // Unsupported portable mappings and infrastructure failures return a non-OK
 // status. Source contract violations emit diagnostics, set |out_valid| to

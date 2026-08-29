@@ -285,18 +285,23 @@ static iree_status_t loom_compile_kernel_request_writer_record_requirement(
 }
 
 static iree_status_t loom_compile_command_backend_write_kernel_request(
-    void* user_data, loom_cmd_program_kernel_request_t request) {
+    void* user_data, const loom_cmd_program_kernel_request_t* request) {
   loom_compile_kernel_request_writer_t* writer =
       (loom_compile_kernel_request_writer_t*)user_data;
+  loom_kernel_class_product_t kernel_product = {0};
+  iree_status_t status = loom_kernel_request_materialize(
+      request->kernel_request, writer->block_pool, writer->host_allocator,
+      &kernel_product);
   char filename_storage[LOOM_COMPILE_COMMAND_FILENAME_CAPACITY];
   iree_string_view_t filename = iree_string_view_empty();
-  iree_status_t status =
-      loom_compile_command_backend_format_kernel_request_filename(
-          request.entry_requirement_index, sizeof(filename_storage),
-          filename_storage, &filename);
+  if (iree_status_is_ok(status)) {
+    status = loom_compile_command_backend_format_kernel_request_filename(
+        request->entry_requirement_index, sizeof(filename_storage),
+        filename_storage, &filename);
+  }
   if (iree_status_is_ok(status)) {
     status = loom_compile_kernel_request_writer_record_requirement(
-        writer, request.entry_requirement_index);
+        writer, request->entry_requirement_index);
   }
 
   char* path_storage = NULL;
@@ -312,7 +317,7 @@ static iree_status_t loom_compile_command_backend_write_kernel_request(
   }
   if (iree_status_is_ok(status)) {
     status = loom_bytecode_write_module(
-        request.product.module, stream,
+        kernel_product.module, stream,
         &(loom_bytecode_write_options_t){
             .producer = IREE_SV("loom-compile"),
             .location_mode = LOOM_BYTECODE_LOCATION_MODE_SOURCE_LOCATIONS,
@@ -322,7 +327,7 @@ static iree_status_t loom_compile_command_backend_write_kernel_request(
   }
   iree_io_stream_release(stream);
   iree_allocator_free(writer->host_allocator, path_storage);
-  loom_kernel_class_product_deinitialize(&request.product);
+  loom_kernel_class_product_deinitialize(&kernel_product);
   return status;
 }
 

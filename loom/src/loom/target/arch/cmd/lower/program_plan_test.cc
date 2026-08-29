@@ -37,13 +37,34 @@ using ::loom::testing::DiagnosticCapture;
 using ::loom::testing::DiagnosticEmissionCapture;
 using ModulePtr = ::loom::testing::ModulePtr;
 
+typedef struct CapturedKernelRequest {
+  uint32_t entry_requirement_index;
+  iree_host_size_t source_symbol_ordinal;
+  loom_decision_class_ordinal_t class_ordinal;
+  iree_host_size_t member_count;
+  loom_kernel_class_product_t product;
+} CapturedKernelRequest;
+
 typedef struct KernelRequestCapture {
-  std::vector<loom_cmd_program_kernel_request_t> requests;
+  iree_arena_block_pool_t* block_pool;
+  std::vector<CapturedKernelRequest> requests;
 } KernelRequestCapture;
 
 static iree_status_t CaptureKernelRequest(
-    void* user_data, loom_cmd_program_kernel_request_t request) {
-  static_cast<KernelRequestCapture*>(user_data)->requests.push_back(request);
+    void* user_data, const loom_cmd_program_kernel_request_t* request) {
+  KernelRequestCapture* capture = static_cast<KernelRequestCapture*>(user_data);
+  loom_kernel_class_product_t product = {0};
+  IREE_RETURN_IF_ERROR(loom_kernel_request_materialize(
+      request->kernel_request, capture->block_pool, iree_allocator_system(),
+      &product));
+  capture->requests.push_back((CapturedKernelRequest){
+      /*.entry_requirement_index=*/request->entry_requirement_index,
+      /*.source_symbol_ordinal=*/
+      request->kernel_request->source_symbol_ordinal,
+      /*.class_ordinal=*/request->kernel_request->class_ordinal,
+      /*.member_count=*/request->kernel_request->member_count,
+      /*.product=*/product,
+  });
   return iree_ok_status();
 }
 
@@ -52,11 +73,11 @@ typedef struct RejectKernelRequestState {
 } RejectKernelRequestState;
 
 static iree_status_t RejectKernelRequest(
-    void* user_data, loom_cmd_program_kernel_request_t request) {
+    void* user_data, const loom_cmd_program_kernel_request_t* request) {
+  (void)request;
   RejectKernelRequestState* state =
       static_cast<RejectKernelRequestState*>(user_data);
   ++state->publish_count;
-  loom_kernel_class_product_deinitialize(&request.product);
   return iree_make_status(IREE_STATUS_ABORTED, "kernel request sink stopped");
 }
 
@@ -449,7 +470,9 @@ command.program.def public @root() launch() {
   loom_cmd_program_plan_deinitialize(&body_blind_plan);
   iree_arena_deinitialize(&body_blind_arena);
 
-  KernelRequestCapture request_capture;
+  KernelRequestCapture request_capture = {
+      /*.block_pool=*/&block_pool_,
+  };
   loom_cmd_program_plan_index_options_t request_options;
   loom_cmd_program_plan_index_options_initialize(&request_options);
   request_options.kernel_request_sink = {
@@ -551,7 +574,9 @@ command.program.def public @root_b() launch(%storage: buffer) {
       indexed_module->symbol_start_ordinal + root_b_ref.symbol_id,
   };
 
-  KernelRequestCapture request_capture;
+  KernelRequestCapture request_capture = {
+      /*.block_pool=*/&block_pool_,
+  };
   loom_cmd_program_plan_index_options_t plan_options;
   loom_cmd_program_plan_index_options_initialize(&plan_options);
   plan_options.kernel_request_sink = {
@@ -613,8 +638,7 @@ command.program.def public @root_b() launch(%storage: buffer) {
 
   ASSERT_EQ(plan.entry_requirement_count, 4u);
   std::vector<uint32_t> requested_requirement_indices;
-  for (const loom_cmd_program_kernel_request_t& request :
-       request_capture.requests) {
+  for (const CapturedKernelRequest& request : request_capture.requests) {
     requested_requirement_indices.push_back(request.entry_requirement_index);
   }
   std::sort(requested_requirement_indices.begin(),
@@ -639,7 +663,7 @@ command.program.def public @root_b() launch(%storage: buffer) {
                       root_a.entry_requirement_indices[3]),
             requested_requirement_indices.end());
 
-  for (loom_cmd_program_kernel_request_t& request : request_capture.requests) {
+  for (CapturedKernelRequest& request : request_capture.requests) {
     ASSERT_NE(request.product.module, nullptr);
     loom_verify_options_t verify_options = {};
     verify_options.sink.fn = loom_diagnostic_stderr_sink;
