@@ -9,6 +9,8 @@
 #ifndef LOOM_CODEGEN_LOW_LAUNCH_CONFIG_ABI_H_
 #define LOOM_CODEGEN_LOW_LAUNCH_CONFIG_ABI_H_
 
+#include "iree/base/api.h"
+
 enum {
   // Prefix on every private VM export name. Consumers remove exactly one byte
   // before exposing the corresponding compiled-kernel export name. This keeps
@@ -32,5 +34,10 @@ enum {
   LOOM_KERNEL_LAUNCH_CONFIG_RESULT_WORKGROUP_STORAGE_BYTES = 10,
   LOOM_KERNEL_LAUNCH_CONFIG_RESULT_COUNT = 11,
 };
+
+// Returns the private symbol reserved for the companion's execution target.
+static inline iree_string_view_t loom_kernel_launch_config_target_name(void) {
+  return IREE_SV("__loom_launch_config_vm_target");
+}
 
 #endif  // LOOM_CODEGEN_LOW_LAUNCH_CONFIG_ABI_H_

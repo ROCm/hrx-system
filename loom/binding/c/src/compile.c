@@ -290,20 +290,7 @@ static loomc_status_t loomc_compile_initialize_launch_config_compiler(
 }
 
 static iree_status_t loomc_compile_bind_launch_config_vm_target(
-    loom_module_t* module) {
-  // Captured function symbols always begin with '$', reserving this fixed name
-  // for the compiler-owned target definition.
-  loom_string_id_t target_name = LOOM_STRING_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_module_intern_string(
-      module, IREE_SV("__loom_launch_config_vm_target"), &target_name));
-  loom_symbol_id_t target_symbol = LOOM_SYMBOL_ID_INVALID;
-  IREE_RETURN_IF_ERROR(
-      loom_module_add_symbol(module, target_name, &target_symbol));
-  const loom_symbol_ref_t target_ref = {
-      .module_id = 0,
-      .symbol_id = target_symbol,
-  };
-
+    loom_module_t* module, loom_symbol_ref_t target_ref) {
   loom_builder_t builder;
   loom_builder_initialize(module, &module->arena, loom_module_block(module),
                           &builder);
@@ -324,13 +311,13 @@ static iree_status_t loomc_compile_bind_launch_config_vm_target(
 
 static loomc_status_t loomc_compile_emit_launch_config_module(
     loomc_compiler_t* compiler, loomc_workspace_t* workspace,
-    loom_module_t* module, loomc_result_t* result,
+    loom_module_t* module, loom_symbol_ref_t target_ref, loomc_result_t* result,
     iree_byte_sequence_t** out_contents) {
   *out_contents = NULL;
   loom_function_version_owner_t function_versions = {0};
   loom_function_version_owner_initialize(&module->arena, &function_versions);
   loomc_status_t status = loomc_status_from_iree(
-      loomc_compile_bind_launch_config_vm_target(module));
+      loomc_compile_bind_launch_config_vm_target(module, target_ref));
   if (loomc_status_is_ok(status)) {
     status = loomc_result_verify_loom_module(module, /*source=*/NULL, result);
   }
@@ -802,8 +789,8 @@ static loomc_status_t loomc_compile_module_into_result(
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result) &&
       launch_config_module != NULL) {
     status = loomc_compile_emit_launch_config_module(
-        compiler, workspace, launch_config_module, result,
-        &launch_config_contents);
+        compiler, workspace, launch_config_module,
+        launch_config_program.target_ref, result, &launch_config_contents);
   }
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
     loomc_module_publish_function_versions(module, function_versions);

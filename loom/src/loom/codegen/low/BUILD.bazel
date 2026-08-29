@@ -277,6 +277,7 @@ loom_cc_library(
     deps = [
         ":storage_layout",
         "//loom/src/loom/ir",
+        "//loom/src/loom/link:symbol_policy",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops:special_values",
         "//loom/src/loom/ops:type_registry",

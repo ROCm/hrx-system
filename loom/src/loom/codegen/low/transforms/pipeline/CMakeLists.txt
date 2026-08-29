@@ -24,6 +24,7 @@ loom_cc_library(
     loom::codegen::low::lower::source_selection
     loom::codegen::low::pipeline::pass_environment
     loom::ir
+    loom::ops::kernel
     loom::pass::pipeline
     loom::pass::registry
     loom::pass::types

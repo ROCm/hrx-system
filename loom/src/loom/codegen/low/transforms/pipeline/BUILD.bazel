@@ -28,6 +28,7 @@ loom_cc_library(
         "//loom/src/loom/codegen/low/lower:source_selection",
         "//loom/src/loom/codegen/low/pipeline:pass_environment",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops/kernel",
         "//loom/src/loom/pass:pipeline",
         "//loom/src/loom/pass:registry",
         "//loom/src/loom/pass:types",

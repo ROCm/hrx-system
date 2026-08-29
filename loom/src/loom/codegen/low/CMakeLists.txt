@@ -273,6 +273,7 @@ loom_cc_library(
     iree::base
     iree::base::internal::arena
     loom::ir
+    loom::link::symbol_policy
     loom::ops::func
     loom::ops::kernel
     loom::ops::low

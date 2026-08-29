@@ -1,0 +1,23 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
+
+package(
+    default_visibility = ["//loom/binding/c/test/target/amdgpu:__pkg__"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+iree_c_embed_data(
+    name = "launch_config_callable_closure",
+    testonly = True,
+    srcs = ["launch_config_callable_closure.loom"],
+    c_file_output = "launch_config_callable_closure_testdata.c",
+    flatten = True,
+    h_file_output = "launch_config_callable_closure_testdata.h",
+    identifier = "loomc_launch_config_callable_closure_testdata",
+)

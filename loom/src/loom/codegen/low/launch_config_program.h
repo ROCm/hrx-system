@@ -24,6 +24,8 @@ extern "C" {
 
 typedef struct loom_kernel_launch_config_program_entry_t
     loom_kernel_launch_config_program_entry_t;
+typedef struct loom_kernel_launch_config_program_projection_t
+    loom_kernel_launch_config_program_projection_t;
 
 // Compiler-owned launch-config product accumulated while source kernels lower.
 //
@@ -38,6 +40,12 @@ typedef struct loom_kernel_launch_config_program_t {
 
   // Host launch-config module under construction.
   loom_module_t* module;
+
+  // Reserved execution-target symbol in |module|.
+  loom_symbol_ref_t target_ref;
+
+  // Lazily initialized source-to-host callable projection.
+  loom_kernel_launch_config_program_projection_t* projection;
 
   // Captured kernel entries.
   struct {

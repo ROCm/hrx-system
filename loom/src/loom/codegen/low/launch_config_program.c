@@ -7,11 +7,13 @@
 #include "loom/codegen/low/launch_config_program.h"
 
 #include <inttypes.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "loom/codegen/low/launch_config_abi.h"
 #include "loom/codegen/low/storage_layout.h"
 #include "loom/ir/context.h"
+#include "loom/link/symbol_policy.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/kernel/launch_config.h"
 #include "loom/ops/kernel/ops.h"
@@ -42,6 +44,29 @@ struct loom_kernel_launch_config_program_entry_t {
       result_values[LOOM_KERNEL_LAUNCH_CONFIG_RESULT_WORKGROUP_STORAGE_BYTES];
 };
 
+struct loom_kernel_launch_config_program_projection_t {
+  // Immutable module containing launch regions and their callable closure.
+  const loom_module_t* source_module;
+
+  // Source symbol count captured before projection begins.
+  iree_host_size_t source_symbol_count;
+
+  // Shared source-to-host IR correspondence for every captured entry.
+  loom_ir_remap_t remap;
+
+  // Host symbol reference indexed by source symbol ID.
+  loom_symbol_ref_t* target_symbols;
+
+  // Source callable symbol IDs pending projection.
+  loom_symbol_id_t* worklist;
+
+  // Number of callable symbol IDs stored in |worklist|.
+  iree_host_size_t worklist_count;
+
+  // First callable symbol ID in |worklist| not yet projected.
+  iree_host_size_t worklist_cursor;
+};
+
 static const loom_pass_environment_capability_type_t
     loom_kernel_launch_config_program_capability_type = {
         .name = IREE_SVL("kernel-launch-config-program"),
@@ -54,8 +79,30 @@ iree_status_t loom_kernel_launch_config_program_initialize(
   *out_program = (loom_kernel_launch_config_program_t){0};
   out_program->capability.type =
       &loom_kernel_launch_config_program_capability_type;
-  return loom_module_allocate(context, IREE_SV("launch_config"), block_pool,
-                              /*hints=*/NULL, allocator, &out_program->module);
+  iree_status_t status =
+      loom_module_allocate(context, IREE_SV("launch_config"), block_pool,
+                           /*hints=*/NULL, allocator, &out_program->module);
+  loom_string_id_t target_name_id = LOOM_STRING_ID_INVALID;
+  if (iree_status_is_ok(status)) {
+    status = loom_module_intern_string(out_program->module,
+                                       loom_kernel_launch_config_target_name(),
+                                       &target_name_id);
+  }
+  loom_symbol_id_t target_symbol_id = LOOM_SYMBOL_ID_INVALID;
+  if (iree_status_is_ok(status)) {
+    status = loom_module_add_symbol(out_program->module, target_name_id,
+                                    &target_symbol_id);
+  }
+  if (iree_status_is_ok(status)) {
+    out_program->target_ref = (loom_symbol_ref_t){
+        .module_id = 0,
+        .symbol_id = target_symbol_id,
+    };
+  } else {
+    loom_module_free(out_program->module);
+    *out_program = (loom_kernel_launch_config_program_t){0};
+  }
+  return status;
 }
 
 void loom_kernel_launch_config_program_deinitialize(
@@ -69,6 +116,158 @@ loom_kernel_launch_config_program_from_pass(const loom_pass_t* pass) {
   if (pass == NULL || pass->environment == NULL) return NULL;
   return (loom_kernel_launch_config_program_t*)loom_pass_environment_lookup(
       pass->environment, &loom_kernel_launch_config_program_capability_type);
+}
+
+static iree_status_t loom_kernel_launch_config_program_intern_dependency_name(
+    loom_kernel_launch_config_program_projection_t* projection,
+    loom_symbol_id_t source_symbol_id, loom_string_id_t* out_target_name_id) {
+  const loom_symbol_t* source_symbol =
+      &projection->source_module->symbols.entries[source_symbol_id];
+  IREE_RETURN_IF_ERROR(
+      loom_ir_remap_string_id(&projection->remap, source_symbol->name_id,
+                              /*allow_invalid=*/false, out_target_name_id));
+  if (loom_module_find_symbol(projection->remap.target_module,
+                              *out_target_name_id) == LOOM_SYMBOL_ID_INVALID) {
+    return iree_ok_status();
+  }
+
+  const iree_string_view_t source_name =
+      projection->source_module->strings.entries[source_symbol->name_id];
+  iree_host_size_t candidate_capacity = 0;
+  if (!iree_host_size_checked_add(source_name.size, 48, &candidate_capacity)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "launch dependency symbol name is too large");
+  }
+  char* candidate = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate(&projection->remap.target_module->arena,
+                          candidate_capacity, (void**)&candidate));
+  memcpy(candidate, source_name.data, source_name.size);
+  for (iree_host_size_t collision_ordinal = 0;; ++collision_ordinal) {
+    const int suffix_length =
+        snprintf(candidate + source_name.size, 48, "$launch%u_%" PRIhsz,
+                 (unsigned)source_symbol_id, collision_ordinal);
+    if (suffix_length < 0 || suffix_length >= 48) {
+      return iree_make_status(
+          IREE_STATUS_RESOURCE_EXHAUSTED,
+          "launch dependency symbol suffix exceeds reserved capacity");
+    }
+    const iree_string_view_t candidate_name = iree_make_string_view(
+        candidate, source_name.size + (iree_host_size_t)suffix_length);
+    const loom_string_id_t candidate_name_id = loom_module_lookup_string(
+        projection->remap.target_module, candidate_name);
+    if (candidate_name_id != LOOM_STRING_ID_INVALID &&
+        loom_module_find_symbol(projection->remap.target_module,
+                                candidate_name_id) != LOOM_SYMBOL_ID_INVALID) {
+      continue;
+    }
+    return loom_module_intern_string(projection->remap.target_module,
+                                     candidate_name, out_target_name_id);
+  }
+}
+
+static iree_status_t loom_kernel_launch_config_program_remap_symbol(
+    void* user_data, const loom_module_t* source_module,
+    loom_module_t* target_module, loom_symbol_ref_t source_ref,
+    loom_symbol_ref_t* out_target_ref) {
+  loom_kernel_launch_config_program_projection_t* projection =
+      (loom_kernel_launch_config_program_projection_t*)user_data;
+  IREE_ASSERT(source_module == projection->source_module);
+  IREE_ASSERT(target_module == projection->remap.target_module);
+  IREE_ASSERT(source_ref.module_id == 0);
+  IREE_ASSERT(source_ref.symbol_id < projection->source_symbol_count);
+
+  const loom_symbol_id_t source_symbol_id = source_ref.symbol_id;
+  if (loom_symbol_ref_is_valid(projection->target_symbols[source_symbol_id])) {
+    *out_target_ref = projection->target_symbols[source_symbol_id];
+    return iree_ok_status();
+  }
+
+  loom_string_id_t target_name_id = LOOM_STRING_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_kernel_launch_config_program_intern_dependency_name(
+      projection, source_symbol_id, &target_name_id));
+  loom_symbol_id_t target_symbol_id = LOOM_SYMBOL_ID_INVALID;
+  IREE_RETURN_IF_ERROR(
+      loom_module_add_symbol(target_module, target_name_id, &target_symbol_id));
+  const loom_symbol_ref_t target_ref = {
+      .module_id = 0,
+      .symbol_id = target_symbol_id,
+  };
+  projection->target_symbols[source_symbol_id] = target_ref;
+  *out_target_ref = target_ref;
+
+  const loom_symbol_t* source_symbol =
+      &source_module->symbols.entries[source_symbol_id];
+  if (source_symbol->defining_op == NULL) return iree_ok_status();
+  if (loom_func_def_isa(source_symbol->defining_op) ||
+      loom_func_decl_isa(source_symbol->defining_op)) {
+    projection->worklist[projection->worklist_count++] = source_symbol_id;
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_kernel_launch_config_program_initialize_projection(
+    loom_kernel_launch_config_program_t* program,
+    const loom_module_t* source_module) {
+  if (program->projection != NULL) {
+    if (program->projection->source_module != source_module ||
+        program->projection->source_symbol_count !=
+            source_module->symbols.count) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "launch configuration source module changed during capture");
+    }
+    return iree_ok_status();
+  }
+
+  loom_kernel_launch_config_program_projection_t* projection = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate(
+      &program->module->arena, sizeof(*projection), (void**)&projection));
+  memset(projection, 0, sizeof(*projection));
+  projection->source_module = source_module;
+  const iree_host_size_t symbol_count = source_module->symbols.count;
+  projection->source_symbol_count = symbol_count;
+  if (symbol_count != 0) {
+    IREE_RETURN_IF_ERROR(
+        iree_arena_allocate_array(&program->module->arena, symbol_count,
+                                  sizeof(*projection->target_symbols),
+                                  (void**)&projection->target_symbols));
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        &program->module->arena, symbol_count, sizeof(*projection->worklist),
+        (void**)&projection->worklist));
+    for (iree_host_size_t i = 0; i < symbol_count; ++i) {
+      projection->target_symbols[i] = loom_symbol_ref_null();
+    }
+  }
+  const loom_ir_remap_options_t remap_options = {
+      .remap_symbol = loom_ir_remap_symbol_callback_make(
+          loom_kernel_launch_config_program_remap_symbol, projection),
+  };
+  IREE_RETURN_IF_ERROR(loom_ir_remap_initialize(
+      source_module, program->module, &program->module->arena, &remap_options,
+      &projection->remap));
+  program->projection = projection;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_kernel_launch_config_program_project_callables(
+    loom_kernel_launch_config_program_t* program) {
+  loom_kernel_launch_config_program_projection_t* projection =
+      program->projection;
+  loom_builder_t builder;
+  loom_builder_initialize(program->module, &program->module->arena,
+                          loom_module_block(program->module), &builder);
+  while (projection->worklist_cursor < projection->worklist_count) {
+    const loom_symbol_id_t source_symbol_id =
+        projection->worklist[projection->worklist_cursor++];
+    const loom_symbol_t* source_symbol =
+        &projection->source_module->symbols.entries[source_symbol_id];
+    loom_op_t* target_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_ir_clone_op(&builder, source_symbol->defining_op,
+                                          &projection->remap, &target_op));
+    loom_link_symbol_internalize(program->module, target_op);
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t loom_kernel_launch_config_copy_value_name(
@@ -178,9 +377,9 @@ static iree_status_t loom_kernel_launch_config_program_build_function(
   IREE_RETURN_IF_ERROR(loom_module_intern_string(
       target_module, source_function_name, &source_name_id));
 
-  loom_ir_remap_t remap = {0};
-  IREE_RETURN_IF_ERROR(loom_ir_remap_initialize(
-      source_module, target_module, scratch_arena, /*options=*/NULL, &remap));
+  IREE_RETURN_IF_ERROR(loom_kernel_launch_config_program_initialize_projection(
+      program, source_module));
+  loom_ir_remap_t* remap = &program->projection->remap;
   const loom_value_slice_t source_arguments =
       loom_kernel_workload_arg_ids(source_module, source_kernel);
   loom_type_t* argument_types = NULL;
@@ -200,7 +399,7 @@ static iree_status_t loom_kernel_launch_config_program_build_function(
           (unsigned)i);
     }
     IREE_RETURN_IF_ERROR(
-        loom_ir_remap_type(&remap, source_type, &argument_types[i]));
+        loom_ir_remap_type(remap, source_type, &argument_types[i]));
   }
 
   loom_type_t result_types[LOOM_KERNEL_LAUNCH_CONFIG_RESULT_COUNT];
@@ -208,8 +407,8 @@ static iree_status_t loom_kernel_launch_config_program_build_function(
     result_types[i] = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
   }
   loom_location_id_t target_location = LOOM_LOCATION_UNKNOWN;
-  IREE_RETURN_IF_ERROR(loom_ir_remap_location_id(
-      &remap, source_kernel->location, &target_location));
+  IREE_RETURN_IF_ERROR(loom_ir_remap_location_id(remap, source_kernel->location,
+                                                 &target_location));
   loom_builder_t builder;
   loom_builder_initialize(target_module, &target_module->arena,
                           loom_module_block(target_module), &builder);
@@ -235,16 +434,16 @@ static iree_status_t loom_kernel_launch_config_program_build_function(
   uint16_t target_argument_count = 0;
   const loom_value_id_t* target_arguments =
       loom_func_like_arg_ids(launch_function, &target_argument_count);
-  IREE_RETURN_IF_ERROR(loom_ir_remap_map_values(&remap, source_arguments.values,
+  IREE_RETURN_IF_ERROR(loom_ir_remap_map_values(remap, source_arguments.values,
                                                 target_arguments,
                                                 source_arguments.count));
   for (uint16_t i = 0; i < source_arguments.count; ++i) {
     IREE_RETURN_IF_ERROR(loom_kernel_launch_config_copy_value_name(
-        source_module, target_module, &remap, source_arguments.values[i],
+        source_module, target_module, remap, source_arguments.values[i],
         target_arguments[i]));
   }
   IREE_RETURN_IF_ERROR(loom_kernel_launch_config_copy_workload_predicates(
-      source_kernel, &remap, scratch_arena, function_op));
+      source_kernel, remap, scratch_arena, function_op));
 
   loom_builder_enter_region(&builder, function_op,
                             loom_func_like_body(launch_function));
@@ -264,27 +463,27 @@ static iree_status_t loom_kernel_launch_config_program_build_function(
     if (!materialize_results) {
       loom_op_t* cloned_op = NULL;
       IREE_RETURN_IF_ERROR(
-          loom_ir_clone_op(&builder, source_op, &remap, &cloned_op));
+          loom_ir_clone_op(&builder, source_op, remap, &cloned_op));
       continue;
     }
 
     loom_location_id_t result_location = LOOM_LOCATION_UNKNOWN;
-    IREE_RETURN_IF_ERROR(loom_ir_remap_location_id(&remap, source_op->location,
+    IREE_RETURN_IF_ERROR(loom_ir_remap_location_id(remap, source_op->location,
                                                    &result_location));
     for (uint16_t i = 0; i < source_op->result_count; ++i) {
       const loom_value_id_t source_result = source_results[i];
       loom_type_t target_type = {0};
       IREE_RETURN_IF_ERROR(loom_ir_remap_type(
-          &remap, loom_module_value_type(source_module, source_result),
+          remap, loom_module_value_type(source_module, source_result),
           &target_type));
       loom_value_id_t target_result = LOOM_VALUE_ID_INVALID;
       IREE_RETURN_IF_ERROR(loom_constant_build(
           &builder, loom_value_fact_table_lookup(source_facts, source_result),
           target_type, result_location, &target_result));
       IREE_RETURN_IF_ERROR(
-          loom_ir_remap_map_value(&remap, source_result, target_result));
+          loom_ir_remap_map_value(remap, source_result, target_result));
       IREE_RETURN_IF_ERROR(loom_kernel_launch_config_copy_value_name(
-          source_module, target_module, &remap, source_result, target_result));
+          source_module, target_module, remap, source_result, target_result));
     }
   }
 
@@ -305,7 +504,7 @@ static iree_status_t loom_kernel_launch_config_program_build_function(
       loom_kernel_launch_config_workgroup_size_z(source_launch_config),
   };
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(source_results); ++i) {
-    IREE_RETURN_IF_ERROR(loom_ir_remap_resolve_value(&remap, source_results[i],
+    IREE_RETURN_IF_ERROR(loom_ir_remap_resolve_value(remap, source_results[i],
                                                      &entry->result_values[i]));
   }
 
@@ -313,7 +512,7 @@ static iree_status_t loom_kernel_launch_config_program_build_function(
           source_launch_config)) {
     for (uint8_t dimension = 0; dimension < 3; ++dimension) {
       IREE_RETURN_IF_ERROR(loom_ir_remap_resolve_value(
-          &remap,
+          remap,
           loom_kernel_launch_config_workgroup_cluster_size_operand(
               source_launch_config, (loom_kernel_dimension_t)dimension),
           &entry->result_values
@@ -334,6 +533,8 @@ static iree_status_t loom_kernel_launch_config_program_build_function(
   IREE_RETURN_IF_ERROR(loom_kernel_launch_config_build_constant(
       &builder, target_bundle->snapshot->subgroup_size, target_location,
       &entry->result_values[LOOM_KERNEL_LAUNCH_CONFIG_RESULT_SUBGROUP_SIZE]));
+  IREE_RETURN_IF_ERROR(
+      loom_kernel_launch_config_program_project_callables(program));
 
   if (program->entries.tail != NULL) {
     program->entries.tail->next = entry;
