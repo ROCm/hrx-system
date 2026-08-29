@@ -64,6 +64,40 @@ _SHORT_MIN = -1024
 _SHORT_MAX = 1023
 
 
+def _plain_integer_multiply_control(
+    *,
+    lhs_signed: bool,
+    rhs_signed: bool,
+    lhs_mode: int,
+    rhs_mode: int,
+    variant: int,
+) -> int:
+    """Encodes the AIE2P control word for a non-accumulating integer multiply."""
+
+    if lhs_mode < 0 or lhs_mode > 0b11:
+        raise ValueError("AIE2P multiply lhs mode must fit two bits")
+    if rhs_mode < 0 or rhs_mode > 0b11:
+        raise ValueError("AIE2P multiply rhs mode must fit two bits")
+    if variant < 0 or variant > 0b111:
+        raise ValueError("AIE2P multiply variant must fit three bits")
+    return (
+        int(lhs_signed) << 9
+        | int(rhs_signed) << 8
+        | lhs_mode << 1
+        | rhs_mode << 3
+        | variant << 5
+    )
+
+
+_I16_ELEMENTWISE_MULTIPLY_CONTROL = _plain_integer_multiply_control(
+    lhs_signed=True,
+    rhs_signed=True,
+    lhs_mode=1,
+    rhs_mode=3,
+    variant=2,
+)
+
+
 def _descriptor(key: str) -> Descriptor:
     return descriptor_by_key(AIE2P_CORE_DESCRIPTOR_SET, key)
 
@@ -196,6 +230,68 @@ def _vector_binary_rule(
                     "s2": ValueRef.operand("rhs"),
                 },
                 results={"d": ValueRef.result("result")},
+            ),
+        ),
+    )
+
+
+def _vector_multiply_i16_rule() -> DescriptorRule:
+    config_constant = _descriptor("amd.xdna.aie2p.constant.i32.mova")
+    shift_constant = _descriptor("amd.xdna.aie2p.constant.i32.shift")
+    multiply = _descriptor("amd.xdna.aie2p.multiply.i16x32.configured")
+    set_rounding = _descriptor("amd.xdna.aie2p.state.rounding.immediate")
+    set_srs_mode = _descriptor("amd.xdna.aie2p.state.srs-mode.immediate")
+    set_saturation = _descriptor("amd.xdna.aie2p.state.saturation.immediate")
+    narrow = _descriptor("amd.xdna.aie2p.narrow.trunc.signed.i16x32")
+    return DescriptorRule(
+        source_op=vector.vector_muli,
+        descriptor=narrow,
+        guards=_typed_guards(("lhs", "rhs", "result"), _I16_VECTOR),
+        emit=(
+            _const_emit(
+                config_constant,
+                ValueRef.temporary("multiply_control"),
+                _I16_ELEMENTWISE_MULTIPLY_CONTROL,
+                result_type=DescriptorResultType(),
+            ),
+            _const_emit(
+                shift_constant,
+                ValueRef.temporary("narrow_shift"),
+                0,
+                result_type=DescriptorResultType(),
+            ),
+            _op_emit(
+                multiply,
+                operands={
+                    "s1": ValueRef.operand("lhs"),
+                    "s2": ValueRef.operand("rhs"),
+                    "acc": ValueRef.temporary("multiply_control"),
+                },
+                results={"dst": ValueRef.temporary("wide_product")},
+                result_types={"dst": DescriptorResultType()},
+            ),
+            EmitDescriptorOp(
+                descriptor=set_rounding,
+                immediates={"i": 0},
+                form=DescriptorEmitForm.OP,
+            ),
+            EmitDescriptorOp(
+                descriptor=set_srs_mode,
+                immediates={"i": 1},
+                form=DescriptorEmitForm.OP,
+            ),
+            EmitDescriptorOp(
+                descriptor=set_saturation,
+                immediates={"i": 0},
+                form=DescriptorEmitForm.OP,
+            ),
+            _op_emit(
+                narrow,
+                operands={
+                    "src": ValueRef.temporary("wide_product"),
+                    "su": ValueRef.temporary("narrow_shift"),
+                },
+                results={"dst": ValueRef.result("result")},
             ),
         ),
     )
@@ -1002,6 +1098,7 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
                 ),
             )
         ),
+        _vector_multiply_i16_rule(),
         *(
             _vector_binary_rule(source_op, type_pattern, descriptor_key)
             for source_op, type_pattern, descriptor_key in (

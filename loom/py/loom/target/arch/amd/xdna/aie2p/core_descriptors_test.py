@@ -31,6 +31,7 @@ from loom.target.arch.amd.xdna.aie2p.core_machine_data import CORE_MACHINE_TABLE
 from loom.target.arch.amd.xdna.aie2p.core_schedule_data import CORE_SCHEDULE_TABLE
 from loom.target.low_descriptors import (
     ConstraintKind,
+    DescriptorFlag,
     EffectKind,
     IssueUseKind,
     OperandFlag,
@@ -44,8 +45,8 @@ from loom.target.low_descriptors import (
 def test_core_descriptor_closure_is_complete() -> None:
     descriptor_set = AIE2P_CORE_DESCRIPTOR_SET
     assert len(descriptor_set.physical_registers) == 359
-    assert len(descriptor_set.reg_classes) == 13
-    assert len(descriptor_set.descriptors) == 61
+    assert len(descriptor_set.reg_classes) == 20
+    assert len(descriptor_set.descriptors) == 68
     assert tuple(row.name for row in descriptor_set.physical_registers) == tuple(
         row.name for row in CORE_MACHINE_TABLE.physical_registers
     )
@@ -59,7 +60,7 @@ def test_complete_schedule_domain_drives_selected_low_descriptors() -> None:
     assert len(descriptor_set.resources) == 90
     assert len(descriptor_set.timing_events) == 38
     assert len(descriptor_set.event_separations) == 651
-    assert len(descriptor_set.schedule_classes) == 24
+    assert len(descriptor_set.schedule_classes) == 28
     assert {
         resource.name
         for resource in descriptor_set.resources
@@ -302,6 +303,80 @@ def test_descriptor_encoding_ids_and_adapters_are_materialized() -> None:
         assert descriptor.operands[-1].reg_alts[0].reg_class == (
             f"aie2p.state.{sign_register}"
         )
+
+
+def test_vector_multiply_descriptors_own_configuration_state() -> None:
+    descriptors = {
+        descriptor.key: descriptor
+        for descriptor in AIE2P_CORE_DESCRIPTOR_SET.descriptors
+    }
+
+    config_constant = descriptors["amd.xdna.aie2p.constant.i32.mova"]
+    shift_constant = descriptors["amd.xdna.aie2p.constant.i32.shift"]
+    assert config_constant.operands[0].reg_alts[0].reg_class == "aie2p.er"
+    assert shift_constant.operands[0].reg_alts[0].reg_class == "aie2p.es"
+
+    multiply = descriptors["amd.xdna.aie2p.multiply.i16x32.configured"]
+    assert [operand.field_name for operand in multiply.operands] == [
+        "dst",
+        "s1",
+        "s2",
+        "acc",
+    ]
+    assert [operand.reg_alts[0].reg_class for operand in multiply.operands] == [
+        "aie2p.edm",
+        "aie2p.vec512",
+        "aie2p.vec512",
+        "aie2p.er",
+    ]
+
+    narrow = descriptors["amd.xdna.aie2p.narrow.trunc.signed.i16x32"]
+    assert [operand.reg_alts[0].reg_class for operand in narrow.operands[:3]] == [
+        "aie2p.vec512",
+        "aie2p.edm",
+        "aie2p.es",
+    ]
+    narrow_state_classes = {
+        operand.field_name: operand.reg_alts[0].reg_class
+        for operand in narrow.operands[3:]
+    }
+
+    for key, state_field, register_class, encoded_register in (
+        (
+            "amd.xdna.aie2p.state.rounding.immediate",
+            "implicit_use_crrnd",
+            "aie2p.mcrrnd",
+            123,
+        ),
+        (
+            "amd.xdna.aie2p.state.srs-mode.immediate",
+            "implicit_use_crsrsmode",
+            "aie2p.mcrsrsmode",
+            71,
+        ),
+        (
+            "amd.xdna.aie2p.state.saturation.immediate",
+            "implicit_use_crsat",
+            "aie2p.mcrsat",
+            39,
+        ),
+    ):
+        setter = descriptors[key]
+        assert setter.asm_forms[0].results == ()
+        assert len(setter.operands) == 1
+        state_write = setter.operands[0]
+        assert state_write.role is OperandRole.IMPLICIT
+        assert state_write.reg_alts[0].reg_class == register_class
+        assert set(state_write.flags) == {
+            OperandFlag.IMPLICIT,
+            OperandFlag.STATE_WRITE,
+        }
+        assert state_write.encoding_field_id == 0
+        assert len(setter.encoding_field_values) == 1
+        assert setter.encoding_field_values[0].value == encoded_register
+        assert DescriptorFlag.SIDE_EFFECTING in setter.flags
+        assert DescriptorFlag.DEAD_REMOVABLE not in setter.flags
+        assert narrow_state_classes[state_field] == register_class
 
 
 def test_implicit_registers_and_machine_ties_reach_low() -> None:

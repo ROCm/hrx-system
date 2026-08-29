@@ -46,6 +46,7 @@ from loom.target.low_descriptors import (
     Effect,
     EffectFlag,
     EffectKind,
+    EncodingFieldValue,
     EventSeparation,
     Immediate,
     ImmediateFlag,
@@ -85,7 +86,7 @@ class _DescriptorSpec:
     itinerary: str
     storage_overrides: tuple[tuple[str, str], ...] = ()
     op_kind: DescriptorOpKind = DescriptorOpKind.OP
-    hardwired_outputs: tuple[str, ...] = ()
+    implicit_outputs: tuple[str, ...] = ()
     asm_mnemonic: str | None = None
 
 
@@ -169,7 +170,7 @@ _DESCRIPTOR_SPECS = (
         f"{_TARGET_KEY}.min.signed.i16x32",
         "integer.min.signed.i16x32",
         "II_VMIN_GE_16_vaddSign1",
-        hardwired_outputs=("cmp",),
+        implicit_outputs=("cmp",),
         asm_mnemonic="min.s16x32",
     ),
     _DescriptorSpec(
@@ -177,7 +178,7 @@ _DESCRIPTOR_SPECS = (
         f"{_TARGET_KEY}.max.signed.i16x32",
         "integer.max.signed.i16x32",
         "II_VMAX_LT_16_vaddSign1",
-        hardwired_outputs=("cmp",),
+        implicit_outputs=("cmp",),
         asm_mnemonic="max.s16x32",
     ),
     _DescriptorSpec(
@@ -185,7 +186,7 @@ _DESCRIPTOR_SPECS = (
         f"{_TARGET_KEY}.min.unsigned.i16x32",
         "integer.min.unsigned.i16x32",
         "II_VMIN_GE_16_vaddSign0",
-        hardwired_outputs=("cmp",),
+        implicit_outputs=("cmp",),
         asm_mnemonic="min.u16x32",
     ),
     _DescriptorSpec(
@@ -193,8 +194,22 @@ _DESCRIPTOR_SPECS = (
         f"{_TARGET_KEY}.max.unsigned.i16x32",
         "integer.max.unsigned.i16x32",
         "II_VMAX_LT_16_vaddSign0",
-        hardwired_outputs=("cmp",),
+        implicit_outputs=("cmp",),
         asm_mnemonic="max.u16x32",
+    ),
+    _DescriptorSpec(
+        "VMUL_vmul_cm_core_X_X",
+        f"{_TARGET_KEY}.multiply.i16x32.configured",
+        "integer.multiply.i16x32.configured",
+        "II_VMUL_vmul_cm_core_X_X",
+        asm_mnemonic="vmul.i16x32",
+    ),
+    _DescriptorSpec(
+        "VSRS_4x_mv_x_srs_dm_srsSign1",
+        f"{_TARGET_KEY}.narrow.trunc.signed.i16x32",
+        "integer.narrow.trunc.signed.i16x32",
+        "II_VSRS_4x_mv_x_srs_dm_srsSign1",
+        asm_mnemonic="vsrs.trunc.s16x32",
     ),
     _DescriptorSpec(
         "VBAND",
@@ -353,12 +368,57 @@ _DESCRIPTOR_SPECS = (
         "II_VST_dmx_sts_x_idx_imm",
     ),
     _DescriptorSpec(
+        "MOVA",
+        f"{_TARGET_KEY}.constant.i32.mova",
+        "integer.const.i32",
+        "II_MOVA_eR",
+        (("dst", "eR"),),
+        DescriptorOpKind.CONST,
+        asm_mnemonic="mova.i32",
+    ),
+    _DescriptorSpec(
         "MOV_alu_mv_mv_mv_cg",
         f"{_TARGET_KEY}.constant.i32.short",
         "integer.const.i32",
         "II_MOV_alu_mv_mv_mv_cg_eR",
         (("dst", "eR"),),
         DescriptorOpKind.CONST,
+    ),
+    _DescriptorSpec(
+        "MOV_alu_mv_mv_mv_cg",
+        f"{_TARGET_KEY}.constant.i32.shift",
+        "integer.const.i32",
+        "II_MOV_alu_mv_mv_mv_cg_eS",
+        (("dst", "eS"),),
+        DescriptorOpKind.CONST,
+        asm_mnemonic="mov.shift",
+    ),
+    _DescriptorSpec(
+        "MOV_alu_mv_mv_mv_cg",
+        f"{_TARGET_KEY}.state.rounding.immediate",
+        "state.write.rounding",
+        "II_MOV_alu_mv_mv_mv_cg_mCRRnd",
+        (("dst", "mCRRnd"),),
+        implicit_outputs=("dst",),
+        asm_mnemonic="set.rounding",
+    ),
+    _DescriptorSpec(
+        "MOV_alu_mv_mv_mv_cg",
+        f"{_TARGET_KEY}.state.srs-mode.immediate",
+        "state.write.srs-mode",
+        "II_MOV_alu_mv_mv_mv_cg_mCRSRSMode",
+        (("dst", "mCRSRSMode"),),
+        implicit_outputs=("dst",),
+        asm_mnemonic="set.srs-mode",
+    ),
+    _DescriptorSpec(
+        "MOV_alu_mv_mv_mv_cg",
+        f"{_TARGET_KEY}.state.saturation.immediate",
+        "state.write.saturation",
+        "II_MOV_alu_mv_mv_mv_cg_mCRSat",
+        (("dst", "mCRSat"),),
+        implicit_outputs=("dst",),
+        asm_mnemonic="set.saturation",
     ),
     _DescriptorSpec(
         "MOVXM",
@@ -471,6 +531,8 @@ _LOW_REGISTER_CLASS_BY_MACHINE_CLASS = {
     "mXm": "VEC512",
     "mXn": "VEC512",
     "mXs": "VEC512",
+    "mXv": "VEC512",
+    "mXw": "VEC512",
 }
 _INSTRUCTION_ENCODINGS = {
     instruction.name: instruction for instruction in CORE_ENCODING_TABLE.instructions
@@ -594,11 +656,31 @@ _IMPLICIT_REGISTER_LAYOUT_OVERRIDES = {
 }
 
 
+def _selected_singleton_machine_class_name(register_name: str) -> str | None:
+    matches = tuple(
+        machine_class_name
+        for machine_class_name in _EXPLICIT_STORAGE_MACHINE_CLASS_NAMES
+        if _MACHINE_CLASSES[machine_class_name].candidates == (register_name,)
+    )
+    if len(matches) > 1:
+        raise ValueError(
+            f"implicit register {register_name} has ambiguous selected singleton "
+            f"classes {list(matches)}"
+        )
+    return matches[0] if matches else None
+
+
 def _implicit_register_class_name(register_name: str) -> str:
+    selected_class = _selected_singleton_machine_class_name(register_name)
+    if selected_class is not None:
+        return _low_register_class_name(selected_class)
     return f"aie2p.state.{register_name.lower()}"
 
 
 def _implicit_register_layout(register_name: str) -> RegisterLayout:
+    selected_class = _selected_singleton_machine_class_name(register_name)
+    if selected_class is not None:
+        return _MACHINE_CLASSES[selected_class].layout
     override = _IMPLICIT_REGISTER_LAYOUT_OVERRIDES.get(register_name)
     if override is not None:
         machine_class = _MACHINE_CLASSES[override]
@@ -659,10 +741,13 @@ def _reg_classes() -> tuple[RegClass, ...]:
         }
     )
     for register_name in selected_implicit_registers:
+        register_class_name = _implicit_register_class_name(register_name)
+        if any(row.name == register_class_name for row in result):
+            continue
         layout = _implicit_register_layout(register_name)
         result.append(
             RegClass(
-                name=_implicit_register_class_name(register_name),
+                name=register_class_name,
                 alloc_unit_bits=layout.register_size_bits,
                 spill_slot_space=SpillSlotSpace.PRIVATE,
                 flags=(
@@ -810,35 +895,37 @@ def _low_operand(
     )
 
 
-def _hardwired_output_operand(
+def _implicit_output_storage(
     spec: _DescriptorSpec,
     operand: MachineOperand,
-) -> Operand:
-    """Models one hardwired architectural output without producing Low SSA."""
-
+) -> tuple[str, str]:
     form = _MACHINE_FORMS[spec.form_name]
     if operand not in form.outputs:
         raise ValueError(
-            f"{spec.form_name}.{operand.name}: hardwired output is not a machine output"
+            f"{spec.form_name}.{operand.name}: implicit output is not a machine output"
         )
     if operand.kind is MachineOperandKind.IMMEDIATE:
         raise ValueError(
-            f"{spec.form_name}.{operand.name}: hardwired output must be a register"
-        )
-    encoded_field_names = {
-        field.name for field in _INSTRUCTION_ENCODINGS[spec.form_name].fields
-    }
-    if operand.name in encoded_field_names:
-        raise ValueError(
-            f"{spec.form_name}.{operand.name}: encoded output cannot be implicitized"
+            f"{spec.form_name}.{operand.name}: implicit output must be a register"
         )
     machine_class_name = _operand_storage_machine_class(spec, operand)
     machine_class = _MACHINE_CLASSES[machine_class_name]
     if len(machine_class.candidates) != 1:
         raise ValueError(
-            f"{spec.form_name}.{operand.name}: hardwired output class "
+            f"{spec.form_name}.{operand.name}: implicit output class "
             f"{machine_class_name} must name exactly one physical register"
         )
+    return machine_class_name, machine_class.candidates[0]
+
+
+def _implicit_output_operand(
+    spec: _DescriptorSpec,
+    operand: MachineOperand,
+) -> Operand:
+    """Models one fixed architectural output without producing Low SSA."""
+
+    machine_class_name, _ = _implicit_output_storage(spec, operand)
+    form = _MACHINE_FORMS[spec.form_name]
     operand_ordinal = _operand_ordinal(form, operand)
     read_stage, ready_stage = _operand_stages(spec, operand)
     return Operand(
@@ -855,6 +942,41 @@ def _hardwired_output_operand(
         ready_stage=ready_stage,
         write_event=_register_timing_event(spec, operand_ordinal, "write"),
     )
+
+
+def _implicit_output_encoding_field_values(
+    spec: _DescriptorSpec,
+    operands: tuple[MachineOperand, ...],
+) -> tuple[EncodingFieldValue, ...]:
+    instruction = _INSTRUCTION_ENCODINGS[spec.form_name]
+    fields = {field.name: field for field in instruction.fields}
+    result = []
+    for operand in operands:
+        field = fields.get(operand.name)
+        if field is None:
+            continue
+        _, register_name = _implicit_output_storage(spec, operand)
+        if operand.kind is not MachineOperandKind.REGISTER_ADAPTER:
+            raise ValueError(
+                f"{spec.form_name}.{operand.name}: encoded implicit output must "
+                "use a register adapter"
+            )
+        adapter = _MACHINE_ADAPTERS[operand.type_name]
+        register_encodings = dict(adapter.effective_register_encodings)
+        encoded_register = register_encodings[register_name]
+        if encoded_register & ~field.value_mask:
+            raise ValueError(
+                f"{spec.form_name}.{operand.name}: adapted register value "
+                f"{encoded_register} exceeds encoding field mask "
+                f"{field.value_mask:#x}"
+            )
+        result.append(
+            EncodingFieldValue(
+                _ENCODING_FIELD_IDS[operand.name],
+                encoded_register,
+            )
+        )
+    return tuple(result)
 
 
 def _implicit_operands(spec: _DescriptorSpec) -> tuple[Operand, ...]:
@@ -996,12 +1118,17 @@ def _effects(spec: _DescriptorSpec, form: MachineForm) -> tuple[Effect, ...]:
     return tuple(result)
 
 
-def _descriptor_flags(form: MachineForm) -> tuple[DescriptorFlag, ...]:
+def _descriptor_flags(
+    form: MachineForm,
+    *,
+    owns_implicit_state: bool,
+) -> tuple[DescriptorFlag, ...]:
     result = []
     if (
         has_property(form, "hasSideEffects")
         or has_property(form, "mayStore")
         or form.control_flow_kind is not None
+        or owns_implicit_state
     ):
         result.append(DescriptorFlag.SIDE_EFFECTING)
     if form.control_flow_kind == "return" or has_property(form, "isTerminator"):
@@ -1011,6 +1138,7 @@ def _descriptor_flags(form: MachineForm) -> tuple[DescriptorFlag, ...]:
         and not has_property(form, "mayStore")
         and form.control_flow_kind is None
         and form.name != "RET"
+        and not owns_implicit_state
     ):
         result.append(DescriptorFlag.DEAD_REMOVABLE)
     return tuple(result)
@@ -1075,23 +1203,23 @@ def _descriptor(spec: _DescriptorSpec) -> Descriptor:
             f"{form.name}: itinerary override {spec.itinerary} requires a storage "
             "specialization"
         )
-    if len(set(spec.hardwired_outputs)) != len(spec.hardwired_outputs):
-        raise ValueError(f"{form.name}: hardwired output names must be unique")
+    if len(set(spec.implicit_outputs)) != len(spec.implicit_outputs):
+        raise ValueError(f"{form.name}: implicit output names must be unique")
     machine_output_names = {operand.name for operand in form.outputs}
-    unknown_hardwired_outputs = set(spec.hardwired_outputs) - machine_output_names
-    if unknown_hardwired_outputs:
+    unknown_implicit_outputs = set(spec.implicit_outputs) - machine_output_names
+    if unknown_implicit_outputs:
         raise ValueError(
-            f"{form.name}: hardwired outputs name unknown machine outputs "
-            f"{sorted(unknown_hardwired_outputs)}"
+            f"{form.name}: implicit outputs name unknown machine outputs "
+            f"{sorted(unknown_implicit_outputs)}"
         )
-    hardwired_outputs = tuple(
-        operand for operand in form.outputs if operand.name in spec.hardwired_outputs
+    implicit_outputs = tuple(
+        operand for operand in form.outputs if operand.name in spec.implicit_outputs
     )
     register_outputs = tuple(
         operand
         for operand in form.outputs
         if operand.kind is not MachineOperandKind.IMMEDIATE
-        and operand.name not in spec.hardwired_outputs
+        and operand.name not in spec.implicit_outputs
     )
     register_inputs = tuple(
         operand
@@ -1104,16 +1232,16 @@ def _descriptor(spec: _DescriptorSpec) -> Descriptor:
         if operand.kind is MachineOperandKind.IMMEDIATE
     )
     explicit_register_operands = (*register_outputs, *register_inputs)
-    tied_hardwired_outputs = {
+    tied_implicit_outputs = {
         name
         for tie in form.ties
         for name in (tie.definition, tie.use)
-        if name in spec.hardwired_outputs
+        if name in spec.implicit_outputs
     }
-    if tied_hardwired_outputs:
+    if tied_implicit_outputs:
         raise ValueError(
-            f"{form.name}: tied outputs cannot be hardwired architectural outputs "
-            f"{sorted(tied_hardwired_outputs)}"
+            f"{form.name}: tied outputs cannot be implicit architectural outputs "
+            f"{sorted(tied_implicit_outputs)}"
         )
     mnemonic = spec.asm_mnemonic or _ASM_MNEMONIC_BY_FORM.get(
         spec.form_name, form.assembly.split("\t", 1)[0].strip()
@@ -1131,14 +1259,14 @@ def _descriptor(spec: _DescriptorSpec) -> Descriptor:
                 _low_operand(spec, operand, OperandRole.OPERAND)
                 for operand in register_inputs
             ),
-            *(
-                _hardwired_output_operand(spec, operand)
-                for operand in hardwired_outputs
-            ),
+            *(_implicit_output_operand(spec, operand) for operand in implicit_outputs),
             *_implicit_operands(spec),
         ),
         immediates=tuple(
             _immediate(spec.form_name, operand) for operand in immediate_inputs
+        ),
+        encoding_field_values=_implicit_output_encoding_field_values(
+            spec, implicit_outputs
         ),
         schedule_class=_SCHEDULE_CLASS_NAMES[(spec.form_name, spec.itinerary)],
         op_kind=spec.op_kind,
@@ -1155,16 +1283,30 @@ def _descriptor(spec: _DescriptorSpec) -> Descriptor:
         effects=_effects(spec, form),
         constraints=_constraints(form, explicit_register_operands),
         encoding_id=_INSTRUCTION_IDS[spec.form_name],
-        flags=_descriptor_flags(form),
+        flags=_descriptor_flags(
+            form,
+            owns_implicit_state=bool(implicit_outputs) and not register_outputs,
+        ),
         instruction_classes=_instruction_classes(spec, form),
     )
     expected_fields = {
         field.name for field in _INSTRUCTION_ENCODINGS[spec.form_name].fields
     }
-    encoded_fields = {
-        row.field_name
+    encoded_field_ids = {
+        row.encoding_field_id
         for row in (*descriptor.operands, *descriptor.immediates)
         if row.encoding_field_id
+    }
+    fixed_field_ids = {
+        row.encoding_field_id for row in descriptor.encoding_field_values
+    }
+    if encoded_field_ids & fixed_field_ids:
+        raise ValueError(f"{spec.form_name}: dynamic and fixed encoding fields overlap")
+    field_names_by_id = {
+        field_id: field_name for field_name, field_id in _ENCODING_FIELD_IDS.items()
+    }
+    encoded_fields = {
+        field_names_by_id[field_id] for field_id in encoded_field_ids | fixed_field_ids
     }
     if encoded_fields != expected_fields:
         raise ValueError(
