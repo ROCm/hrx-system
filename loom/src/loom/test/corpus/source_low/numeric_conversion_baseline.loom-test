@@ -1,0 +1,48 @@
+// RUN: roundtrip
+
+func.def @integer_to_float_composition(%signed_narrow: i8, %unsigned_narrow: i16, %signed_wide: i32) -> (f32, f16, bf16) {
+  %signed_result = scalar.sitofp %signed_narrow : i8 to f32
+  %unsigned_result = scalar.uitofp %unsigned_narrow : i16 to f16
+  %bf16_result = scalar.sitofp %signed_wide : i32 to bf16
+  func.return %signed_result, %unsigned_result, %bf16_result : f32, f16, bf16
+}
+
+// ====
+
+func.def @float_to_integer_composition(%narrow: f16, %wide: f32) -> (i64, i8, i16) {
+  %signed_wide = scalar.fptosi %narrow : f16 to i64
+  %unsigned_narrow = scalar.fptoui %wide : f32 to i8
+  %signed_narrow = scalar.fptosi %narrow : f16 to i16
+  func.return %signed_wide, %unsigned_narrow, %signed_narrow : i64, i8, i16
+}
+
+// ====
+
+func.def @float_width_composition(%fp8: f8E4M3, %half: f16) -> (f64, bf16, f8E5M2) {
+  %wide = scalar.extf %fp8 : f8E4M3 to f64
+  %bf16 = scalar.extf %fp8 : f8E4M3 to bf16
+  %narrow = scalar.fptrunc %half : f16 to f8E5M2
+  func.return %wide, %bf16, %narrow : f64, bf16, f8E5M2
+}
+
+// ====
+
+func.def @narrow_float_arithmetic(%lhs: f16, %rhs: f16) -> (f16) {
+  %sum = scalar.addf %lhs, %rhs : f16
+  %product = scalar.mulf %sum, %rhs : f16
+  func.return %product : f16
+}
+
+// ====
+
+func.def @vector_integer_to_float_composition(%input: vector<4xi8>) -> (vector<4xf32>) {
+  %result = vector.sitofp %input : vector<4xi8> to vector<4xf32>
+  func.return %result : vector<4xf32>
+}
+
+// ====
+
+func.def @vector_float_to_integer_direct(%input: vector<2xf32>) -> (vector<2xi8>) {
+  %result = vector.fptosi %input : vector<2xf32> to vector<2xi8>
+  func.return %result : vector<2xi8>
+}

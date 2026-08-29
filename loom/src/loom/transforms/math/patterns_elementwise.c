@@ -855,7 +855,7 @@ static iree_status_t loom_math_legalize_binary_source_initialize(
   IREE_BUILTIN_UNREACHABLE();
 }
 
-static iree_status_t loom_math_legalize_build_widen_f32_round_bf16(
+static iree_status_t loom_math_legalize_build_widen_f32_round_narrow(
     loom_builder_t* builder, const loom_math_legalize_recipe_context_t* context,
     const loom_op_t* op, loom_value_id_t* out_value) {
   loom_math_legalize_binary_source_t source;
@@ -904,8 +904,8 @@ static iree_status_t loom_math_legalize_build_recipe(
     const loom_math_legalize_recipe_context_t* context, loom_op_t* op,
     loom_rewriter_t* rewriter, loom_value_id_t* out_value) {
   if (context->decision.recipe ==
-      LOOM_TARGET_MATH_RECIPE_WIDEN_F32_ROUND_BF16) {
-    return loom_math_legalize_build_widen_f32_round_bf16(
+      LOOM_TARGET_MATH_RECIPE_WIDEN_F32_ROUND_NARROW) {
+    return loom_math_legalize_build_widen_f32_round_narrow(
         &rewriter->builder, context, op, out_value);
   }
 
@@ -955,7 +955,7 @@ static iree_status_t loom_math_legalize_build_recipe(
     case LOOM_TARGET_MATH_RECIPE_GELU_LOGISTIC_F32:
       return loom_math_legalize_build_gelu_logistic(&rewriter->builder, &source,
                                                     op, out_value);
-    case LOOM_TARGET_MATH_RECIPE_WIDEN_F32_ROUND_BF16:
+    case LOOM_TARGET_MATH_RECIPE_WIDEN_F32_ROUND_NARROW:
       IREE_ASSERT_UNREACHABLE("recipe is not elementwise math legalization");
       IREE_BUILTIN_UNREACHABLE();
     case LOOM_TARGET_MATH_RECIPE_UNKNOWN:
@@ -997,7 +997,7 @@ static bool loom_math_legalize_elementwise_recipe_is_supported(
     case LOOM_TARGET_MATH_RECIPE_GELU_TANH_F32:
     case LOOM_TARGET_MATH_RECIPE_GELU_ERF_F32:
     case LOOM_TARGET_MATH_RECIPE_GELU_LOGISTIC_F32:
-    case LOOM_TARGET_MATH_RECIPE_WIDEN_F32_ROUND_BF16:
+    case LOOM_TARGET_MATH_RECIPE_WIDEN_F32_ROUND_NARROW:
       return true;
     case LOOM_TARGET_MATH_RECIPE_UNKNOWN:
       return false;

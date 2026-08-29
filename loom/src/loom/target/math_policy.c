@@ -146,8 +146,8 @@ iree_string_view_t loom_target_math_recipe_name(
       return IREE_SV("erf-rational-f32");
     case LOOM_TARGET_MATH_RECIPE_GELU_ERF_F32:
       return IREE_SV("gelu-erf-f32");
-    case LOOM_TARGET_MATH_RECIPE_WIDEN_F32_ROUND_BF16:
-      return IREE_SV("widen-f32-round-bf16");
+    case LOOM_TARGET_MATH_RECIPE_WIDEN_F32_ROUND_NARROW:
+      return IREE_SV("widen-f32-round-narrow");
     case LOOM_TARGET_MATH_RECIPE_LOG_LOG2_F32:
       return IREE_SV("log-log2-f32");
     case LOOM_TARGET_MATH_RECIPE_SIN_TURNS_F32:

@@ -20,6 +20,7 @@
 #include "loom/target/arch/vm/lower/arithmetic.h"
 #include "loom/target/arch/vm/lower/constants.h"
 #include "loom/target/arch/vm/lower/control.h"
+#include "loom/target/arch/vm/lower/conversion.h"
 #include "loom/target/arch/vm/lower/initialization.h"
 #include "loom/target/arch/vm/lower/kernel.h"
 #include "loom/target/arch/vm/lower/memory.h"
@@ -300,22 +301,25 @@ static iree_status_t loom_vm_select_op(void* user_data,
   }
 
   const uint8_t dialect_id = loom_op_dialect_id(source_op->kind);
-  if (dialect_id >= IREE_ARRAYSIZE(kVmSourceLoweringDialectRanges)) {
-    return iree_ok_status();
-  }
-  const loom_vm_source_lowering_dialect_ranges_t* dialect_ranges =
-      &kVmSourceLoweringDialectRanges[dialect_id];
-  const uint8_t op_index = loom_op_dialect_index(source_op->kind);
-  if (op_index >= dialect_ranges->range_count) return iree_ok_status();
-  const loom_vm_source_lowering_range_t range =
-      dialect_ranges->ranges[op_index];
-  for (uint8_t i = 0; i < range.row_count; ++i) {
-    const loom_vm_source_lowering_row_t* row =
-        &kVmSourceLoweringRows[range.row_start + i];
-    if (loom_vm_source_lowering_row_matches(module, source_op, row)) {
-      *out_plan = loom_low_lower_plan_make(row->descriptor_ordinal, row);
-      return iree_ok_status();
+  if (dialect_id < IREE_ARRAYSIZE(kVmSourceLoweringDialectRanges)) {
+    const loom_vm_source_lowering_dialect_ranges_t* dialect_ranges =
+        &kVmSourceLoweringDialectRanges[dialect_id];
+    const uint8_t op_index = loom_op_dialect_index(source_op->kind);
+    if (op_index < dialect_ranges->range_count) {
+      const loom_vm_source_lowering_range_t range =
+          dialect_ranges->ranges[op_index];
+      for (uint8_t i = 0; i < range.row_count; ++i) {
+        const loom_vm_source_lowering_row_t* row =
+            &kVmSourceLoweringRows[range.row_start + i];
+        if (loom_vm_source_lowering_row_matches(module, source_op, row)) {
+          *out_plan = loom_low_lower_plan_make(row->descriptor_ordinal, row);
+          return iree_ok_status();
+        }
+      }
     }
+  }
+  if (loom_vm_conversion_try_select_op(module, source_op, out_plan)) {
+    return iree_ok_status();
   }
   return iree_ok_status();
 }
@@ -370,6 +374,11 @@ static iree_status_t loom_vm_emit_op(void* user_data,
   IREE_RETURN_IF_ERROR(loom_vm_arithmetic_emit_op(context, source_op, plan,
                                                   &arithmetic_handled));
   if (arithmetic_handled) return iree_ok_status();
+
+  bool conversion_handled = false;
+  IREE_RETURN_IF_ERROR(loom_vm_conversion_emit_op(context, source_op, plan,
+                                                  &conversion_handled));
+  if (conversion_handled) return iree_ok_status();
 
   bool memory_handled = false;
   IREE_RETURN_IF_ERROR(

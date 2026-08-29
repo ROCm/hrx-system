@@ -22,6 +22,28 @@ static loom_target_math_policy_decision_t loom_vm_math_reject(
   };
 }
 
+static loom_target_math_policy_decision_t loom_vm_math_rewrite(
+    loom_target_math_recipe_t recipe, iree_string_view_t constraint_key) {
+  return (loom_target_math_policy_decision_t){
+      .action = LOOM_TARGET_MATH_POLICY_ACTION_REWRITE,
+      .recipe = recipe,
+      .constraint_key = constraint_key,
+  };
+}
+
+static bool loom_vm_math_op_is_basic_arithmetic(loom_target_math_op_t math_op) {
+  return math_op == LOOM_TARGET_MATH_OP_ADDF ||
+         math_op == LOOM_TARGET_MATH_OP_MULF;
+}
+
+static bool loom_vm_math_element_type_is_narrow_float(
+    loom_scalar_type_t element_type) {
+  return element_type == LOOM_SCALAR_TYPE_F8E4M3 ||
+         element_type == LOOM_SCALAR_TYPE_F8E5M2 ||
+         element_type == LOOM_SCALAR_TYPE_F16 ||
+         element_type == LOOM_SCALAR_TYPE_BF16;
+}
+
 static void loom_vm_math_policy_query(
     const loom_target_math_policy_t* policy,
     const loom_target_math_query_t* query,
@@ -30,6 +52,15 @@ static void loom_vm_math_policy_query(
   if (query->lane_domain != LOOM_TARGET_MATH_LANE_DOMAIN_SCALAR &&
       query->lane_domain != LOOM_TARGET_MATH_LANE_DOMAIN_VECTOR) {
     *out_decision = loom_vm_math_reject(IREE_SV("math.lane.scalar_vector"));
+    return;
+  }
+  // F32 preserves every bit that can affect a correctly rounded add or
+  // multiply result in the supported narrow formats.
+  if (loom_vm_math_element_type_is_narrow_float(query->element_type) &&
+      loom_vm_math_op_is_basic_arithmetic(query->math_op)) {
+    *out_decision =
+        loom_vm_math_rewrite(LOOM_TARGET_MATH_RECIPE_WIDEN_F32_ROUND_NARROW,
+                             IREE_SV("math.recipe.widen_f32_round_narrow"));
     return;
   }
   if (query->element_type != LOOM_SCALAR_TYPE_F32 &&

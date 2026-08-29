@@ -6,6 +6,8 @@
 
 """Tests for the Loom-facing Core VM table projection."""
 
+from itertools import pairwise
+
 from loom.dialect.cfg import defs as cfg_defs
 from loom.dialect.func import defs as func_defs
 from loom.dialect.index import defs as index_defs
@@ -45,7 +47,12 @@ from loom.target.arch.vm.projection import (
     VM_PACKET_DESCRIPTORS,
     VM_STRUCTURAL_INSTRUCTIONS,
 )
-from loom.target.arch.vm.source_lowering import VM_SOURCE_LOWERINGS
+from loom.target.arch.vm.source_lowering import (
+    VM_DIRECT_CONVERSION_LOWERINGS,
+    VM_SOURCE_CONVERSION_LOWERINGS,
+    VM_SOURCE_CONVERSION_MAX_STEP_COUNT,
+    VM_SOURCE_LOWERINGS,
+)
 from loom.target.arch.vm.verification import (
     VM_MEMORY_FORMAT_UNIT_COUNTS,
     VM_MODULE_DEPENDENT_CONSTRAINTS,
@@ -533,6 +540,7 @@ def test_conversion_projection_covers_exact_core_type_pairs() -> None:
     integer_types = (I1, I8, I16, I32, I64)
     integer_extension_pairs = {(source_type, result_type) for source_ordinal, source_type in enumerate(integer_types) for result_type in integer_types[source_ordinal + 1 :]}
     integer_truncation_pairs = {(source_type, result_type) for source_ordinal, source_type in enumerate(integer_types) for result_type in integer_types[:source_ordinal]}
+    float_to_integer_pairs = {(source_type, result_type) for source_type in (F32, F64) for result_type in integer_types}
 
     expected_type_pairs = {
         scalar_conversion.scalar_extf: {
@@ -569,24 +577,14 @@ def test_conversion_projection_covers_exact_core_type_pairs() -> None:
             (I32, BF16),
             (I64, BF16),
         },
-        scalar_conversion.scalar_fptosi: {
-            (F32, I32),
-            (F32, I64),
-            (F64, I32),
-            (F64, I64),
-        },
-        scalar_conversion.scalar_fptoui: {
-            (F32, I32),
-            (F32, I64),
-            (F64, I32),
-            (F64, I64),
-        },
+        scalar_conversion.scalar_fptosi: float_to_integer_pairs,
+        scalar_conversion.scalar_fptoui: float_to_integer_pairs,
         scalar_conversion.scalar_extsi: integer_extension_pairs,
         scalar_conversion.scalar_extui: integer_extension_pairs,
         scalar_conversion.scalar_trunci: integer_truncation_pairs,
     }
     for source_op, expected_pairs in expected_type_pairs.items():
-        actual_pairs = {(row.operand_types[0], row.result_types[0]) for row in VM_SOURCE_LOWERINGS if row.source_op is source_op}
+        actual_pairs = {(row.operand_types[0], row.result_types[0]) for row in VM_DIRECT_CONVERSION_LOWERINGS if row.source_op is source_op}
         assert actual_pairs == expected_pairs
 
     bitcast_rows = tuple(row for row in VM_SOURCE_LOWERINGS if row.source_op is scalar_conversion.scalar_bitcast)
@@ -605,6 +603,68 @@ def test_conversion_projection_covers_exact_core_type_pairs() -> None:
     assert {(row.operand_types[0], row.result_types[0]) for row in index_cast_rows} == expected_index_cast_pairs
     assert sum(row.descriptor_key == "vm.value.copy" for row in index_cast_rows) == 6
     assert sum(row.descriptor_key == "vm.conversion.integer" for row in index_cast_rows) == 16
+
+
+def test_conversion_lowerings_cover_every_legal_scalar_pair() -> None:
+    float_types = (
+        ScalarTypeKind.F8E4M3,
+        ScalarTypeKind.F8E5M2,
+        ScalarTypeKind.F16,
+        ScalarTypeKind.BF16,
+        ScalarTypeKind.F32,
+        ScalarTypeKind.F64,
+    )
+    integer_types = (
+        ScalarTypeKind.I1,
+        ScalarTypeKind.I8,
+        ScalarTypeKind.I16,
+        ScalarTypeKind.I32,
+        ScalarTypeKind.I64,
+    )
+    expected_pairs = {
+        scalar_conversion.scalar_sitofp: {(source_type, result_type) for source_type in integer_types for result_type in float_types},
+        scalar_conversion.scalar_uitofp: {(source_type, result_type) for source_type in integer_types for result_type in float_types},
+        scalar_conversion.scalar_fptosi: {(source_type, result_type) for source_type in float_types for result_type in integer_types},
+        scalar_conversion.scalar_fptoui: {(source_type, result_type) for source_type in float_types for result_type in integer_types},
+        scalar_conversion.scalar_extf: {
+            (source_type, result_type) for source_type in float_types for result_type in float_types if ScalarType(source_type).bitwidth < ScalarType(result_type).bitwidth
+        },
+        scalar_conversion.scalar_fptrunc: {
+            (source_type, result_type) for source_type in float_types for result_type in float_types if ScalarType(source_type).bitwidth > ScalarType(result_type).bitwidth
+        },
+    }
+    for source_op, pairs in expected_pairs.items():
+        lowering_pairs = {(lowering.source_type, lowering.result_type) for lowering in VM_SOURCE_CONVERSION_LOWERINGS if lowering.source_op is source_op}
+        assert lowering_pairs == pairs
+
+    direct_signatures = {(row.source_op, row.operand_types[0], row.result_types[0]) for row in VM_DIRECT_CONVERSION_LOWERINGS}
+    lowering_signatures = [(lowering.source_op, lowering.source_type, lowering.result_type) for lowering in VM_SOURCE_CONVERSION_LOWERINGS]
+    assert len(lowering_signatures) == len(set(lowering_signatures))
+    for lowering in VM_SOURCE_CONVERSION_LOWERINGS:
+        assert 1 <= len(lowering.steps) <= VM_SOURCE_CONVERSION_MAX_STEP_COUNT
+        assert lowering.steps[0].operand_types == (ScalarType(lowering.source_type),)
+        assert lowering.steps[-1].result_types == (ScalarType(lowering.result_type),)
+        for step in lowering.steps:
+            assert (
+                step.source_op,
+                step.operand_types[0],
+                step.result_types[0],
+            ) in direct_signatures
+        for lhs, rhs in pairwise(lowering.steps):
+            assert lhs.result_types == rhs.operand_types
+
+    i64_to_bf16 = next(
+        lowering
+        for lowering in VM_SOURCE_CONVERSION_LOWERINGS
+        if lowering.source_op is scalar_conversion.scalar_sitofp and lowering.source_type is ScalarTypeKind.I64 and lowering.result_type is ScalarTypeKind.BF16
+    )
+    assert len(i64_to_bf16.steps) == 1
+    i64_to_f16 = next(
+        lowering
+        for lowering in VM_SOURCE_CONVERSION_LOWERINGS
+        if lowering.source_op is scalar_conversion.scalar_sitofp and lowering.source_type is ScalarTypeKind.I64 and lowering.result_type is ScalarTypeKind.F16
+    )
+    assert tuple(step.result_types[0] for step in i64_to_f16.steps) == (F32, F16)
 
 
 def test_lowering_rows_are_data_only() -> None:
@@ -628,6 +688,10 @@ def test_lowering_rows_are_data_only() -> None:
     scalar_and_start = next(index for index, row in enumerate(VM_SOURCE_LOWERINGS) if row.source_op is scalar_bitwise.scalar_andi)
     assert f"[LOOM_OP_SCALAR_ANDI & 0xFF] = {{{scalar_and_start}, 3}}" in rows
     assert "kVmSourceLoweringDialectRanges[LOOM_DIALECT_BUILTIN_COUNT_]" in rows
+    assert "LOOM_VM_CONVERSION_LOWERING_LIMITS(3)" in rows
+    assert "LOOM_VM_CONVERSION_LOWERING_STEP_ROW(" in rows
+    assert "LOOM_VM_CONVERSION_LOWERING_ROW(" in rows
+    assert "kVmConversionLoweringRanges[LOOM_OP_SCALAR_COUNT_]" in rows
 
 
 def test_program_failure_source_rows_preserve_public_types_and_status() -> None:

@@ -30,7 +30,11 @@ from loom.target.arch.vm.projection import (
     VM_MODULE_RESOURCES,
     VM_PACKET_DESCRIPTORS,
 )
-from loom.target.arch.vm.source_lowering import VM_SOURCE_LOWERINGS
+from loom.target.arch.vm.source_lowering import (
+    VM_SOURCE_CONVERSION_LOWERINGS,
+    VM_SOURCE_CONVERSION_MAX_STEP_COUNT,
+    VM_SOURCE_LOWERINGS,
+)
 from loom.target.arch.vm.verification import (
     VM_MEMORY_FORMAT_UNIT_COUNTS,
     VM_PACKED_IMMEDIATE_MASKS,
@@ -81,6 +85,29 @@ def _source_lowering_ranges() -> tuple[tuple[Op, int, int], ...]:
 def _dialect_range_symbol(dialect_name: str) -> str:
     dialect_fragment = "".join(part.capitalize() for part in dialect_name.split("_"))
     return f"kVmSourceLowering{dialect_fragment}Ranges"
+
+
+def _conversion_lowering_ranges() -> tuple[tuple[Op, int, int], ...]:
+    """Returns contiguous conversion-lowering ranges grouped by source op."""
+
+    ranges: list[tuple[Op, int, int]] = []
+    seen_op_names: set[str] = set()
+    lowering_start = 0
+    for source_op, lowerings_iter in groupby(
+        VM_SOURCE_CONVERSION_LOWERINGS,
+        key=lambda lowering: lowering.source_op,
+    ):
+        if source_op.name in seen_op_names:
+            raise ValueError(f"{source_op.name}: VM conversion lowerings must be contiguous")
+        seen_op_names.add(source_op.name)
+        lowering_count = sum(1 for _ in lowerings_iter)
+        if lowering_start > 0xFFFF or lowering_count > 0xFF:
+            raise ValueError(f"{source_op.name}: VM conversion range exceeds u16/u8")
+        ranges.append((source_op, lowering_start, lowering_count))
+        lowering_start += lowering_count
+    if lowering_start != len(VM_SOURCE_CONVERSION_LOWERINGS) or lowering_start > 0xFFFF:
+        raise ValueError("VM conversion lowering count exceeds u16")
+    return tuple(ranges)
 
 
 def generate_lowering_rows() -> str:
@@ -154,6 +181,58 @@ def generate_lowering_rows() -> str:
     for dialect_name in ranges_by_dialect:
         symbol = _dialect_range_symbol(dialect_name)
         lines.append(f"        [LOOM_DIALECT_{dialect_name.upper()}] = {{{symbol}, IREE_ARRAYSIZE({symbol})}},")
+    lines.append("};")
+    lines.append("#elif defined(LOOM_VM_CONVERSION_LOWERING_LIMITS)")
+    lines.append(f"LOOM_VM_CONVERSION_LOWERING_LIMITS({VM_SOURCE_CONVERSION_MAX_STEP_COUNT})")
+    lines.append("#elif defined(LOOM_VM_CONVERSION_LOWERING_STEP_ROW)")
+    step_count = 0
+    for lowering in VM_SOURCE_CONVERSION_LOWERINGS:
+        for step in lowering.steps:
+            if step_count > 0xFFFF:
+                raise ValueError("VM conversion lowering step count exceeds u16")
+            lines.append(
+                "LOOM_VM_CONVERSION_LOWERING_STEP_ROW("
+                + ", ".join(
+                    (
+                        descriptor_ref_constant_name(
+                            VM_CORE_DESCRIPTOR_SET,
+                            step.descriptor_key,
+                        ),
+                        str(step.selector_value),
+                        f"LOOM_SCALAR_TYPE_{step.result_types[0].kind.name}",
+                    )
+                )
+                + ")"
+            )
+            step_count += 1
+    lines.append("#elif defined(LOOM_VM_CONVERSION_LOWERING_ROW)")
+    step_start = 0
+    for lowering in VM_SOURCE_CONVERSION_LOWERINGS:
+        if len(lowering.steps) > 0xFF:
+            raise ValueError(f"{lowering.source_op.name}: VM conversion lowering exceeds u8")
+        lines.append(
+            "LOOM_VM_CONVERSION_LOWERING_ROW("
+            + ", ".join(
+                (
+                    f"LOOM_SCALAR_TYPE_{lowering.source_type.name}",
+                    f"LOOM_SCALAR_TYPE_{lowering.result_type.name}",
+                    str(step_start),
+                    str(len(lowering.steps)),
+                )
+            )
+            + ")"
+        )
+        step_start += len(lowering.steps)
+    if step_start != step_count:
+        raise ValueError("VM conversion lowering step projection drifted")
+    lines.append("#elif defined(LOOM_VM_CONVERSION_LOWERING_DEFINE_RANGES)")
+    lines.extend(
+        (
+            "static const loom_vm_conversion_lowering_range_t",
+            "    kVmConversionLoweringRanges[LOOM_OP_SCALAR_COUNT_] = {",
+        )
+    )
+    lines.extend(f"        [{c_enum_name(source_op)} & 0xFF] = {{{lowering_start}, {lowering_count}}}," for source_op, lowering_start, lowering_count in _conversion_lowering_ranges())
     lines.append("};")
     lines.append("#endif  // VM lowering projection")
     return "\n".join(lines) + "\n"

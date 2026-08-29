@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import dataclasses
+from itertools import pairwise
 
 from model.isa.selectors import (
     SELECTOR_TABLES_BY_NAME,
@@ -81,6 +82,50 @@ class VmSourceLowering:
             )
         if not 0 <= self.selector_value <= 0xFF:
             raise ValueError("VM source selector value exceeds u8")
+
+
+VM_SOURCE_CONVERSION_MAX_STEP_COUNT = 3
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class VmSourceConversionLowering:
+    """One source conversion implemented by exact VM conversion steps."""
+
+    source_op: Op
+    source_type: ScalarTypeKind
+    result_type: ScalarTypeKind
+    steps: tuple[VmSourceLowering, ...]
+
+    def __post_init__(self) -> None:
+        if not 1 <= len(self.steps) <= VM_SOURCE_CONVERSION_MAX_STEP_COUNT:
+            raise ValueError(
+                f"{self.source_op.name}: VM conversion requires one to "
+                f"{VM_SOURCE_CONVERSION_MAX_STEP_COUNT} steps"
+            )
+        if any(
+            len(step.operand_types) != 1 or len(step.result_types) != 1
+            for step in self.steps
+        ):
+            raise ValueError(
+                f"{self.source_op.name}: VM conversion steps must be unary"
+            )
+        if self.steps[0].operand_types != (ScalarType(self.source_type),):
+            raise ValueError(f"{self.source_op.name}: VM conversion source type drifts")
+        if self.steps[-1].result_types != (ScalarType(self.result_type),):
+            raise ValueError(f"{self.source_op.name}: VM conversion result type drifts")
+        for lhs, rhs in pairwise(self.steps):
+            if lhs.result_types != rhs.operand_types:
+                raise ValueError(
+                    f"{self.source_op.name}: VM conversion steps are discontinuous"
+                )
+        if any(
+            step.selector_immediate_ordinal != 0
+            or step.selector_source_attr_ordinal is not None
+            for step in self.steps
+        ):
+            raise ValueError(
+                f"{self.source_op.name}: VM conversion steps require one fixed selector"
+            )
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -683,6 +728,355 @@ def _cast(
     )
 
 
+_FIXED_INTEGER_TYPES = (
+    ScalarTypeKind.I1,
+    ScalarTypeKind.I8,
+    ScalarTypeKind.I16,
+    ScalarTypeKind.I32,
+    ScalarTypeKind.I64,
+)
+
+_FLOAT_TYPES = (
+    ScalarTypeKind.F8E4M3,
+    ScalarTypeKind.F8E5M2,
+    ScalarTypeKind.F16,
+    ScalarTypeKind.BF16,
+    ScalarTypeKind.F32,
+    ScalarTypeKind.F64,
+)
+
+
+def _direct_conversion_lowerings() -> tuple[VmSourceLowering, ...]:
+    """Projects every conversion implemented by one Core VM instruction."""
+
+    def float_to_integer_cases(
+        signedness: str,
+    ) -> tuple[tuple[ScalarTypeKind, ScalarTypeKind, str], ...]:
+        return tuple(
+            (
+                source_type,
+                result_type,
+                f"f{ScalarType(source_type).bitwidth}.to."
+                f"{signedness}{ScalarType(result_type).bitwidth}",
+            )
+            for source_type in (ScalarTypeKind.F32, ScalarTypeKind.F64)
+            for result_type in _FIXED_INTEGER_TYPES
+        )
+
+    return (
+        *_selected_cast(
+            scalar_conversion.scalar_extf,
+            "vm.conversion.float.extend",
+            "float.extend",
+            (
+                (ScalarTypeKind.F8E4M3, ScalarTypeKind.F32, "f8e4m3.to.f32"),
+                (ScalarTypeKind.F8E5M2, ScalarTypeKind.F32, "f8e5m2.to.f32"),
+                (ScalarTypeKind.F16, ScalarTypeKind.F32, "f16.to.f32"),
+                (ScalarTypeKind.BF16, ScalarTypeKind.F32, "bf16.to.f32"),
+            ),
+        ),
+        *_selected_cast(
+            scalar_conversion.scalar_extf,
+            "vm.conversion.float.width",
+            "float.width",
+            ((ScalarTypeKind.F32, ScalarTypeKind.F64, "f32.to.f64"),),
+        ),
+        *_selected_cast(
+            scalar_conversion.scalar_fptrunc,
+            "vm.conversion.float.truncate",
+            "float.truncate",
+            (
+                (ScalarTypeKind.F32, ScalarTypeKind.F8E4M3, "f32.to.f8e4m3"),
+                (ScalarTypeKind.F32, ScalarTypeKind.F8E5M2, "f32.to.f8e5m2"),
+                (ScalarTypeKind.F32, ScalarTypeKind.F16, "f32.to.f16"),
+                (ScalarTypeKind.F32, ScalarTypeKind.BF16, "f32.to.bf16"),
+                (ScalarTypeKind.F64, ScalarTypeKind.F8E4M3, "f64.to.f8e4m3"),
+                (ScalarTypeKind.F64, ScalarTypeKind.F8E5M2, "f64.to.f8e5m2"),
+                (ScalarTypeKind.F64, ScalarTypeKind.F16, "f64.to.f16"),
+                (ScalarTypeKind.F64, ScalarTypeKind.BF16, "f64.to.bf16"),
+            ),
+        ),
+        *_selected_cast(
+            scalar_conversion.scalar_fptrunc,
+            "vm.conversion.float.width",
+            "float.width",
+            ((ScalarTypeKind.F64, ScalarTypeKind.F32, "f64.to.f32"),),
+        ),
+        *_selected_cast(
+            scalar_conversion.scalar_sitofp,
+            "vm.conversion.integer.to.float",
+            "integer.to.float",
+            (
+                (ScalarTypeKind.I32, ScalarTypeKind.F32, "s32.to.f32"),
+                (ScalarTypeKind.I32, ScalarTypeKind.F64, "s32.to.f64"),
+                (ScalarTypeKind.I64, ScalarTypeKind.F32, "s64.to.f32"),
+                (ScalarTypeKind.I64, ScalarTypeKind.F64, "s64.to.f64"),
+                (ScalarTypeKind.I32, ScalarTypeKind.BF16, "s32.to.bf16"),
+                (ScalarTypeKind.I64, ScalarTypeKind.BF16, "s64.to.bf16"),
+            ),
+        ),
+        *_selected_cast(
+            scalar_conversion.scalar_uitofp,
+            "vm.conversion.integer.to.float",
+            "integer.to.float",
+            (
+                (ScalarTypeKind.I32, ScalarTypeKind.F32, "u32.to.f32"),
+                (ScalarTypeKind.I32, ScalarTypeKind.F64, "u32.to.f64"),
+                (ScalarTypeKind.I64, ScalarTypeKind.F32, "u64.to.f32"),
+                (ScalarTypeKind.I64, ScalarTypeKind.F64, "u64.to.f64"),
+                (ScalarTypeKind.I32, ScalarTypeKind.BF16, "u32.to.bf16"),
+                (ScalarTypeKind.I64, ScalarTypeKind.BF16, "u64.to.bf16"),
+            ),
+        ),
+        *_selected_cast(
+            scalar_conversion.scalar_fptosi,
+            "vm.conversion.float.to.integer",
+            "float.to.integer",
+            float_to_integer_cases("s"),
+        ),
+        *_selected_cast(
+            scalar_conversion.scalar_fptoui,
+            "vm.conversion.float.to.integer",
+            "float.to.integer",
+            float_to_integer_cases("u"),
+        ),
+        *_selected_cast(
+            scalar_conversion.scalar_extsi,
+            "vm.conversion.integer",
+            "integer.convert",
+            _integer_conversion_cases("sign_extend"),
+        ),
+        *_selected_cast(
+            scalar_conversion.scalar_extui,
+            "vm.conversion.integer",
+            "integer.convert",
+            _integer_conversion_cases("zero_extend"),
+        ),
+        *_selected_cast(
+            scalar_conversion.scalar_trunci,
+            "vm.conversion.integer",
+            "integer.convert",
+            _integer_conversion_cases("truncate"),
+        ),
+    )
+
+
+VM_DIRECT_CONVERSION_LOWERINGS = _direct_conversion_lowerings()
+
+_DIRECT_CONVERSION_BY_SIGNATURE = {
+    (
+        row.source_op,
+        row.operand_types[0].kind,
+        row.result_types[0].kind,
+    ): row
+    for row in VM_DIRECT_CONVERSION_LOWERINGS
+}
+
+
+def _composed_conversion_lowering(
+    source_op: Op,
+    source_type: ScalarTypeKind,
+    result_type: ScalarTypeKind,
+    step_signatures: tuple[tuple[Op, ScalarTypeKind, ScalarTypeKind], ...],
+) -> VmSourceConversionLowering:
+    """Builds and validates one lowering from two or three direct steps."""
+
+    _require_fixed_source_shape(source_op, operand_count=1, result_count=1)
+    _require_concrete_source_types(
+        source_op,
+        (ScalarType(source_type),),
+        (ScalarType(result_type),),
+    )
+    try:
+        steps = tuple(
+            _DIRECT_CONVERSION_BY_SIGNATURE[signature] for signature in step_signatures
+        )
+    except KeyError as exc:
+        raise ValueError(
+            f"{source_op.name}: composed VM conversion references a non-direct step"
+        ) from exc
+    return VmSourceConversionLowering(source_op, source_type, result_type, steps)
+
+
+def _composed_conversion_lowerings() -> tuple[VmSourceConversionLowering, ...]:
+    """Builds every semantics-preserving multi-instruction conversion route."""
+
+    lowerings: list[VmSourceConversionLowering] = []
+
+    for source_op, extension_op in (
+        (scalar_conversion.scalar_sitofp, scalar_conversion.scalar_extsi),
+        (scalar_conversion.scalar_uitofp, scalar_conversion.scalar_extui),
+    ):
+        for source_type in _FIXED_INTEGER_TYPES:
+            for result_type in _FLOAT_TYPES:
+                signature = (source_op, source_type, result_type)
+                if signature in _DIRECT_CONVERSION_BY_SIGNATURE:
+                    continue
+                working_type = source_type
+                steps: list[tuple[Op, ScalarTypeKind, ScalarTypeKind]] = []
+                if ScalarType(source_type).bitwidth < 32:
+                    steps.append((extension_op, source_type, ScalarTypeKind.I32))
+                    working_type = ScalarTypeKind.I32
+                if result_type in (
+                    ScalarTypeKind.F8E4M3,
+                    ScalarTypeKind.F8E5M2,
+                    ScalarTypeKind.F16,
+                ):
+                    # Every integer that can affect a finite f8/f16 result or
+                    # its overflow boundary is exactly representable in f32.
+                    # BF16 spans a much wider exponent range and therefore has
+                    # direct integer conversion selectors instead.
+                    steps.extend(
+                        (
+                            (source_op, working_type, ScalarTypeKind.F32),
+                            (
+                                scalar_conversion.scalar_fptrunc,
+                                ScalarTypeKind.F32,
+                                result_type,
+                            ),
+                        )
+                    )
+                else:
+                    steps.append((source_op, working_type, result_type))
+                lowerings.append(
+                    _composed_conversion_lowering(
+                        source_op,
+                        source_type,
+                        result_type,
+                        tuple(steps),
+                    )
+                )
+
+    for source_op in (
+        scalar_conversion.scalar_fptosi,
+        scalar_conversion.scalar_fptoui,
+    ):
+        for source_type in _FLOAT_TYPES:
+            for result_type in _FIXED_INTEGER_TYPES:
+                signature = (source_op, source_type, result_type)
+                if signature in _DIRECT_CONVERSION_BY_SIGNATURE:
+                    continue
+                lowerings.append(
+                    _composed_conversion_lowering(
+                        source_op,
+                        source_type,
+                        result_type,
+                        (
+                            (
+                                scalar_conversion.scalar_extf,
+                                source_type,
+                                ScalarTypeKind.F32,
+                            ),
+                            (source_op, ScalarTypeKind.F32, result_type),
+                        ),
+                    )
+                )
+
+    for source_type in _FLOAT_TYPES:
+        for result_type in _FLOAT_TYPES:
+            if ScalarType(result_type).bitwidth <= ScalarType(source_type).bitwidth:
+                continue
+            signature = (scalar_conversion.scalar_extf, source_type, result_type)
+            if signature in _DIRECT_CONVERSION_BY_SIGNATURE:
+                continue
+            second_op = (
+                scalar_conversion.scalar_extf
+                if result_type is ScalarTypeKind.F64
+                else scalar_conversion.scalar_fptrunc
+            )
+            lowerings.append(
+                _composed_conversion_lowering(
+                    scalar_conversion.scalar_extf,
+                    source_type,
+                    result_type,
+                    (
+                        (
+                            scalar_conversion.scalar_extf,
+                            source_type,
+                            ScalarTypeKind.F32,
+                        ),
+                        (second_op, ScalarTypeKind.F32, result_type),
+                    ),
+                )
+            )
+
+    for source_type in _FLOAT_TYPES:
+        for result_type in _FLOAT_TYPES:
+            if ScalarType(result_type).bitwidth >= ScalarType(source_type).bitwidth:
+                continue
+            signature = (
+                scalar_conversion.scalar_fptrunc,
+                source_type,
+                result_type,
+            )
+            if signature in _DIRECT_CONVERSION_BY_SIGNATURE:
+                continue
+            lowerings.append(
+                _composed_conversion_lowering(
+                    scalar_conversion.scalar_fptrunc,
+                    source_type,
+                    result_type,
+                    (
+                        (
+                            scalar_conversion.scalar_extf,
+                            source_type,
+                            ScalarTypeKind.F32,
+                        ),
+                        (
+                            scalar_conversion.scalar_fptrunc,
+                            ScalarTypeKind.F32,
+                            result_type,
+                        ),
+                    ),
+                )
+            )
+
+    signatures = tuple(
+        (lowering.source_op.name, lowering.source_type, lowering.result_type)
+        for lowering in lowerings
+    )
+    if len(signatures) != len(set(signatures)):
+        raise ValueError("composed VM conversions repeat a source signature")
+    return tuple(lowerings)
+
+
+def _conversion_lowerings() -> tuple[VmSourceConversionLowering, ...]:
+    """Combines direct and composed routes for every scalar conversion."""
+
+    direct_lowerings = tuple(
+        VmSourceConversionLowering(
+            row.source_op,
+            row.operand_types[0].kind,
+            row.result_types[0].kind,
+            (row,),
+        )
+        for row in VM_DIRECT_CONVERSION_LOWERINGS
+    )
+    composed_lowerings = _composed_conversion_lowerings()
+    source_ops = tuple(dict.fromkeys(row.source_op for row in direct_lowerings))
+    lowerings = tuple(
+        lowering
+        for source_op in source_ops
+        for lowering in sorted(
+            (
+                row
+                for row in (*direct_lowerings, *composed_lowerings)
+                if row.source_op is source_op
+            ),
+            key=lambda row: (row.source_type, row.result_type),
+        )
+    )
+    signatures = tuple(
+        (row.source_op.name, row.source_type, row.result_type) for row in lowerings
+    )
+    if len(signatures) != len(set(signatures)):
+        raise ValueError("VM conversion lowerings repeat a source signature")
+    return lowerings
+
+
+VM_SOURCE_CONVERSION_LOWERINGS = _conversion_lowerings()
+
+
 VM_SOURCE_LOWERINGS = (
     _source_lowering(
         cfg_defs.cfg_assert,
@@ -1093,110 +1487,6 @@ VM_SOURCE_LOWERINGS = (
             selector_table="float.math.ternary",
             selector_name="fma",
         ),
-    ),
-    *_selected_cast(
-        scalar_conversion.scalar_extf,
-        "vm.conversion.float.extend",
-        "float.extend",
-        (
-            (ScalarTypeKind.F8E4M3, ScalarTypeKind.F32, "f8e4m3.to.f32"),
-            (ScalarTypeKind.F8E5M2, ScalarTypeKind.F32, "f8e5m2.to.f32"),
-            (ScalarTypeKind.F16, ScalarTypeKind.F32, "f16.to.f32"),
-            (ScalarTypeKind.BF16, ScalarTypeKind.F32, "bf16.to.f32"),
-        ),
-    ),
-    *_selected_cast(
-        scalar_conversion.scalar_extf,
-        "vm.conversion.float.width",
-        "float.width",
-        ((ScalarTypeKind.F32, ScalarTypeKind.F64, "f32.to.f64"),),
-    ),
-    *_selected_cast(
-        scalar_conversion.scalar_fptrunc,
-        "vm.conversion.float.truncate",
-        "float.truncate",
-        (
-            (ScalarTypeKind.F32, ScalarTypeKind.F8E4M3, "f32.to.f8e4m3"),
-            (ScalarTypeKind.F32, ScalarTypeKind.F8E5M2, "f32.to.f8e5m2"),
-            (ScalarTypeKind.F32, ScalarTypeKind.F16, "f32.to.f16"),
-            (ScalarTypeKind.F32, ScalarTypeKind.BF16, "f32.to.bf16"),
-            (ScalarTypeKind.F64, ScalarTypeKind.F8E4M3, "f64.to.f8e4m3"),
-            (ScalarTypeKind.F64, ScalarTypeKind.F8E5M2, "f64.to.f8e5m2"),
-            (ScalarTypeKind.F64, ScalarTypeKind.F16, "f64.to.f16"),
-            (ScalarTypeKind.F64, ScalarTypeKind.BF16, "f64.to.bf16"),
-        ),
-    ),
-    *_selected_cast(
-        scalar_conversion.scalar_fptrunc,
-        "vm.conversion.float.width",
-        "float.width",
-        ((ScalarTypeKind.F64, ScalarTypeKind.F32, "f64.to.f32"),),
-    ),
-    *_selected_cast(
-        scalar_conversion.scalar_sitofp,
-        "vm.conversion.integer.to.float",
-        "integer.to.float",
-        (
-            (ScalarTypeKind.I32, ScalarTypeKind.F32, "s32.to.f32"),
-            (ScalarTypeKind.I32, ScalarTypeKind.F64, "s32.to.f64"),
-            (ScalarTypeKind.I64, ScalarTypeKind.F32, "s64.to.f32"),
-            (ScalarTypeKind.I64, ScalarTypeKind.F64, "s64.to.f64"),
-            (ScalarTypeKind.I32, ScalarTypeKind.BF16, "s32.to.bf16"),
-            (ScalarTypeKind.I64, ScalarTypeKind.BF16, "s64.to.bf16"),
-        ),
-    ),
-    *_selected_cast(
-        scalar_conversion.scalar_uitofp,
-        "vm.conversion.integer.to.float",
-        "integer.to.float",
-        (
-            (ScalarTypeKind.I32, ScalarTypeKind.F32, "u32.to.f32"),
-            (ScalarTypeKind.I32, ScalarTypeKind.F64, "u32.to.f64"),
-            (ScalarTypeKind.I64, ScalarTypeKind.F32, "u64.to.f32"),
-            (ScalarTypeKind.I64, ScalarTypeKind.F64, "u64.to.f64"),
-            (ScalarTypeKind.I32, ScalarTypeKind.BF16, "u32.to.bf16"),
-            (ScalarTypeKind.I64, ScalarTypeKind.BF16, "u64.to.bf16"),
-        ),
-    ),
-    *_selected_cast(
-        scalar_conversion.scalar_fptosi,
-        "vm.conversion.float.to.integer",
-        "float.to.integer",
-        (
-            (ScalarTypeKind.F32, ScalarTypeKind.I32, "f32.to.s32"),
-            (ScalarTypeKind.F32, ScalarTypeKind.I64, "f32.to.s64"),
-            (ScalarTypeKind.F64, ScalarTypeKind.I32, "f64.to.s32"),
-            (ScalarTypeKind.F64, ScalarTypeKind.I64, "f64.to.s64"),
-        ),
-    ),
-    *_selected_cast(
-        scalar_conversion.scalar_fptoui,
-        "vm.conversion.float.to.integer",
-        "float.to.integer",
-        (
-            (ScalarTypeKind.F32, ScalarTypeKind.I32, "f32.to.u32"),
-            (ScalarTypeKind.F32, ScalarTypeKind.I64, "f32.to.u64"),
-            (ScalarTypeKind.F64, ScalarTypeKind.I32, "f64.to.u32"),
-            (ScalarTypeKind.F64, ScalarTypeKind.I64, "f64.to.u64"),
-        ),
-    ),
-    *_selected_cast(
-        scalar_conversion.scalar_extsi,
-        "vm.conversion.integer",
-        "integer.convert",
-        _integer_conversion_cases("sign_extend"),
-    ),
-    *_selected_cast(
-        scalar_conversion.scalar_extui,
-        "vm.conversion.integer",
-        "integer.convert",
-        _integer_conversion_cases("zero_extend"),
-    ),
-    *_selected_cast(
-        scalar_conversion.scalar_trunci,
-        "vm.conversion.integer",
-        "integer.convert",
-        _integer_conversion_cases("truncate"),
     ),
     *_cast(
         scalar_conversion.scalar_bitcast,

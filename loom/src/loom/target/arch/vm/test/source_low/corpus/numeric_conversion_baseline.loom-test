@@ -1,0 +1,125 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_conversion_baseline.loom-test
+// RUN: emit source-low output=low
+
+vm.target<core> @target
+func.def target(@target) @integer_to_float_composition(%signed_narrow: i8, %unsigned_narrow: i16, %signed_wide: i32) -> (f32, f16, bf16) {
+  %signed_result = scalar.sitofp %signed_narrow : i8 to f32
+  %unsigned_result = scalar.uitofp %unsigned_narrow : i16 to f16
+  %bf16_result = scalar.sitofp %signed_wide : i32 to bf16
+  func.return %signed_result, %unsigned_result, %bf16_result : f32, f16, bf16
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i8>, reg<vm.value : i16>, reg<vm.value : i32>) -> (reg<vm.value : f32>, reg<vm.value : f16>, reg<vm.value : bf16>)>}) @integer_to_float_composition(%signed_narrow: reg<vm.value : i8>, %unsigned_narrow: reg<vm.value : i16>, %signed_wide: reg<vm.value : i32>) -> (reg<vm.value : f32>, reg<vm.value : f16>, reg<vm.value : bf16>) asm {
+  %15 = conversion.integer %signed_narrow, s8.to.i32 : reg<vm.value : i32>
+  %signed_result = conversion.integer.to.float %15, s32.to.f32 : reg<vm.value : f32>
+  %17 = conversion.integer %unsigned_narrow, u16.to.i32 : reg<vm.value : i32>
+  %18 = conversion.integer.to.float %17, u32.to.f32 : reg<vm.value : f32>
+  %unsigned_result = conversion.float.truncate %18, f32.to.f16 : reg<vm.value : f16>
+  %bf16_result = conversion.integer.to.float %signed_wide, s32.to.bf16 : reg<vm.value : bf16>
+  return %signed_result, %unsigned_result, %bf16_result
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @float_to_integer_composition(%narrow: f16, %wide: f32) -> (i64, i8, i16) {
+  %signed_wide = scalar.fptosi %narrow : f16 to i64
+  %unsigned_narrow = scalar.fptoui %wide : f32 to i8
+  %signed_narrow = scalar.fptosi %narrow : f16 to i16
+  func.return %signed_wide, %unsigned_narrow, %signed_narrow : i64, i8, i16
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : f16>, reg<vm.value : f32>) -> (reg<vm.value : i64>, reg<vm.value : i8>, reg<vm.value : i16>)>}) @float_to_integer_composition(%narrow: reg<vm.value : f16>, %wide: reg<vm.value : f32>) -> (reg<vm.value : i64>, reg<vm.value : i8>, reg<vm.value : i16>) asm {
+  %13 = conversion.float.extend %narrow, f16.to.f32 : reg<vm.value : f32>
+  %signed_wide = conversion.float.to.integer %13, f32.to.s64 : reg<vm.value : i64>
+  %unsigned_narrow = conversion.float.to.integer %wide, f32.to.u8 : reg<vm.value : i8>
+  %signed_narrow = conversion.float.to.integer %13, f32.to.s16 : reg<vm.value : i16>
+  return %signed_wide, %unsigned_narrow, %signed_narrow
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @float_width_composition(%fp8: f8E4M3, %half: f16) -> (f64, bf16, f8E5M2) {
+  %wide = scalar.extf %fp8 : f8E4M3 to f64
+  %bf16 = scalar.extf %fp8 : f8E4M3 to bf16
+  %narrow = scalar.fptrunc %half : f16 to f8E5M2
+  func.return %wide, %bf16, %narrow : f64, bf16, f8E5M2
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : f8E4M3>, reg<vm.value : f16>) -> (reg<vm.value : f64>, reg<vm.value : bf16>, reg<vm.value : f8E5M2>)>}) @float_width_composition(%fp8: reg<vm.value : f8E4M3>, %half: reg<vm.value : f16>) -> (reg<vm.value : f64>, reg<vm.value : bf16>, reg<vm.value : f8E5M2>) asm {
+  %13 = conversion.float.extend %fp8, f8e4m3.to.f32 : reg<vm.value : f32>
+  %wide = conversion.float.width %13, f32.to.f64 : reg<vm.value : f64>
+  %bf16 = conversion.float.truncate %13, f32.to.bf16 : reg<vm.value : bf16>
+  %17 = conversion.float.extend %half, f16.to.f32 : reg<vm.value : f32>
+  %narrow = conversion.float.truncate %17, f32.to.f8e5m2 : reg<vm.value : f8E5M2>
+  return %wide, %bf16, %narrow
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @narrow_float_arithmetic(%lhs: f16, %rhs: f16) -> (f16) {
+  %sum = scalar.addf %lhs, %rhs : f16
+  %product = scalar.mulf %sum, %rhs : f16
+  func.return %product : f16
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : f16>, reg<vm.value : f16>) -> (reg<vm.value : f16>)>}) @narrow_float_arithmetic(%lhs: reg<vm.value : f16>, %rhs: reg<vm.value : f16>) -> (reg<vm.value : f16>) asm {
+  %16 = conversion.float.extend %lhs, f16.to.f32 : reg<vm.value : f32>
+  %17 = conversion.float.extend %rhs, f16.to.f32 : reg<vm.value : f32>
+  %18 = float.add.f32 %16, %17 : reg<vm.value : f32>
+  %sum = conversion.float.truncate %18, f32.to.f16 : reg<vm.value : f16>
+  %20 = conversion.float.extend %sum, f16.to.f32 : reg<vm.value : f32>
+  %21 = float.mul.f32 %20, %17 : reg<vm.value : f32>
+  %product = conversion.float.truncate %21, f32.to.f16 : reg<vm.value : f16>
+  return %product
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @vector_integer_to_float_composition(%input: vector<4xi8>) -> (vector<4xf32>) {
+  %result = vector.sitofp %input : vector<4xi8> to vector<4xf32>
+  func.return %result : vector<4xf32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x4 : vector<4xi8>>) -> (reg<vm.value x4 : vector<4xf32>>)>}) @vector_integer_to_float_composition(%input: reg<vm.value x4 : vector<4xi8>>) -> (reg<vm.value x4 : vector<4xf32>>) asm {
+  %25 = slice %input[0] : reg<vm.value x4 : vector<4xi8>> -> reg<vm.value : i8>
+  %26 = conversion.integer %25, s8.to.i32 : reg<vm.value : i32>
+  %27 = conversion.integer.to.float %26, s32.to.f32 : reg<vm.value : f32>
+  %28 = slice %input[1] : reg<vm.value x4 : vector<4xi8>> -> reg<vm.value : i8>
+  %29 = conversion.integer %28, s8.to.i32 : reg<vm.value : i32>
+  %30 = conversion.integer.to.float %29, s32.to.f32 : reg<vm.value : f32>
+  %31 = slice %input[2] : reg<vm.value x4 : vector<4xi8>> -> reg<vm.value : i8>
+  %32 = conversion.integer %31, s8.to.i32 : reg<vm.value : i32>
+  %33 = conversion.integer.to.float %32, s32.to.f32 : reg<vm.value : f32>
+  %34 = slice %input[3] : reg<vm.value x4 : vector<4xi8>> -> reg<vm.value : i8>
+  %35 = conversion.integer %34, s8.to.i32 : reg<vm.value : i32>
+  %36 = conversion.integer.to.float %35, s32.to.f32 : reg<vm.value : f32>
+  %result = concat(%27, %30, %33, %36) : (reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>) -> reg<vm.value x4 : vector<4xf32>>
+  return %result
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @vector_float_to_integer_direct(%input: vector<2xf32>) -> (vector<2xi8>) {
+  %result = vector.fptosi %input : vector<2xf32> to vector<2xi8>
+  func.return %result : vector<2xi8>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x2 : vector<2xf32>>) -> (reg<vm.value x2 : vector<2xi8>>)>}) @vector_float_to_integer_direct(%input: reg<vm.value x2 : vector<2xf32>>) -> (reg<vm.value x2 : vector<2xi8>>) asm {
+  %17 = slice %input[0] : reg<vm.value x2 : vector<2xf32>> -> reg<vm.value : f32>
+  %18 = conversion.float.to.integer %17, f32.to.s8 : reg<vm.value : i8>
+  %19 = slice %input[1] : reg<vm.value x2 : vector<2xf32>> -> reg<vm.value : f32>
+  %20 = conversion.float.to.integer %19, f32.to.s8 : reg<vm.value : i8>
+  %result = concat(%18, %20) : (reg<vm.value : i8>, reg<vm.value : i8>) -> reg<vm.value x2 : vector<2xi8>>
+  return %result
+}
