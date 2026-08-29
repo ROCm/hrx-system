@@ -9,10 +9,12 @@
 #include <string>
 #include <vector>
 
+#include "iree/base/alignment.h"
 #include "iree/testing/gtest.h"
 #include "loom/binding/c/src/module.h"
 #include "loom/binding/c/src/module_bytecode.h"
 #include "loom/binding/c/src/product.h"
+#include "loom/format/bytecode/format.h"
 #include "loom/ir/module.h"
 #include "loomc/compile.h"
 #include "loomc/link.h"
@@ -117,19 +119,26 @@ ModulePtr DeserializeModule(loomc_context_t* context,
   return ModulePtr(module);
 }
 
-std::string SerializeModuleToText(const loomc_module_t* module) {
+SourcePtr SerializeModuleToSource(const loomc_module_t* module,
+                                  loomc_source_format_t format,
+                                  const char* identifier) {
   const loomc_module_serialize_options_t options = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
       /*.structure_size=*/sizeof(options),
       /*.next=*/nullptr,
-      /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
-      /*.identifier=*/loomc_make_cstring_view("linked.loom"),
+      /*.format=*/format,
+      /*.identifier=*/loomc_make_cstring_view(identifier),
   };
   loomc_source_t* source = nullptr;
   LOOMC_EXPECT_OK(loomc_module_serialize_to_source(
       module, &options, loomc_allocator_system(), &source));
-  SourcePtr source_ptr(source);
-  return ToString(loomc_source_contents(source_ptr.get()));
+  return SourcePtr(source);
+}
+
+std::string SerializeModuleToText(const loomc_module_t* module) {
+  SourcePtr source =
+      SerializeModuleToSource(module, LOOMC_SOURCE_FORMAT_TEXT, "linked.loom");
+  return ToString(loomc_source_contents(source.get()));
 }
 
 RequestPtr CreateRequest(
@@ -184,15 +193,96 @@ RequestPtr CreateRequest(
   return RequestPtr(request);
 }
 
-RequestPtr CreateRawRequest(SourcePtr source, loomc_request_root_t root) {
+RequestPtr CreateRawRequest(SourcePtr source,
+                            std::initializer_list<loomc_request_root_t> roots) {
   loomc_source_t* transferred_source = source.release();
   loomc_request_t* request = nullptr;
   loomc_status_t status = loomc_request_create_take_source(
-      loomc_compiled_module_product_descriptor(), &transferred_source, &root, 1,
-      nullptr, 0, loomc_allocator_system(), &request);
+      loomc_compiled_module_product_descriptor(), &transferred_source,
+      roots.begin(), roots.size(), nullptr, 0, loomc_allocator_system(),
+      &request);
   loomc_source_release(transferred_source);
   LOOMC_EXPECT_OK(status);
   return RequestPtr(request);
+}
+
+loomc_host_size_t BytecodeHeaderEnd(loomc_byte_span_t bytecode) {
+  loomc_host_size_t offset = sizeof(loom_bytecode_file_header_t);
+  while (offset < bytecode.data_length && bytecode.data[offset] != 0) {
+    ++offset;
+  }
+  if (offset == bytecode.data_length) {
+    ADD_FAILURE() << "bytecode producer is not null terminated";
+    return 0;
+  }
+  return iree_host_align(++offset, 8);
+}
+
+std::vector<uint8_t> CreateTwoModuleArchive(loomc_byte_span_t first,
+                                            iree_string_view_t first_name,
+                                            loomc_byte_span_t second,
+                                            iree_string_view_t second_name) {
+  const loomc_host_size_t first_directory_offset = BytecodeHeaderEnd(first);
+  const loomc_host_size_t second_directory_offset = BytecodeHeaderEnd(second);
+  if (first_directory_offset == 0 || second_directory_offset == 0) return {};
+  const uint64_t first_module_offset =
+      iree_unaligned_load_le_u64(first.data + first_directory_offset + 8);
+  const uint64_t first_module_length =
+      iree_unaligned_load_le_u64(first.data + first_directory_offset + 16);
+  const uint64_t second_module_offset =
+      iree_unaligned_load_le_u64(second.data + second_directory_offset + 8);
+  const uint64_t second_module_length =
+      iree_unaligned_load_le_u64(second.data + second_directory_offset + 16);
+  EXPECT_LE(first_module_offset + first_module_length, first.data_length);
+  EXPECT_LE(second_module_offset + second_module_length, second.data_length);
+  EXPECT_EQ(first.data[5], second.data[5]);
+
+  const iree_string_view_t producer = IREE_SV("link-request-test");
+  const loomc_host_size_t archive_directory_offset = iree_host_align(
+      sizeof(loom_bytecode_file_header_t) + producer.size + 1, 8);
+  const loomc_host_size_t string_pool_offset =
+      archive_directory_offset + 2 * sizeof(loom_bytecode_module_dir_entry_t);
+  const uint32_t string_pool_length =
+      (uint32_t)(first_name.size + second_name.size);
+  const uint64_t archive_first_module_offset =
+      iree_host_align(string_pool_offset + string_pool_length, 8);
+  const uint64_t archive_second_module_offset =
+      archive_first_module_offset + first_module_length;
+  std::vector<uint8_t> archive(
+      archive_second_module_offset + second_module_length, 0);
+
+  memcpy(archive.data(), LOOM_BYTECODE_MAGIC, LOOM_BYTECODE_MAGIC_LENGTH);
+  archive[4] = LOOM_BYTECODE_FORMAT_VERSION;
+  archive[5] = first.data[5];
+  iree_unaligned_store_le_u16(archive.data() + 6, 2);
+  iree_unaligned_store_le_u32(archive.data() + 8, string_pool_length);
+  memcpy(archive.data() + sizeof(loom_bytecode_file_header_t), producer.data,
+         producer.size);
+
+  const loomc_host_size_t second_entry_offset =
+      archive_directory_offset + sizeof(loom_bytecode_module_dir_entry_t);
+  iree_unaligned_store_le_u16(archive.data() + archive_directory_offset + 4,
+                              (uint16_t)first_name.size);
+  iree_unaligned_store_le_u64(archive.data() + archive_directory_offset + 8,
+                              archive_first_module_offset);
+  iree_unaligned_store_le_u64(archive.data() + archive_directory_offset + 16,
+                              first_module_length);
+  iree_unaligned_store_le_u32(archive.data() + second_entry_offset,
+                              (uint32_t)first_name.size);
+  iree_unaligned_store_le_u16(archive.data() + second_entry_offset + 4,
+                              (uint16_t)second_name.size);
+  iree_unaligned_store_le_u64(archive.data() + second_entry_offset + 8,
+                              archive_second_module_offset);
+  iree_unaligned_store_le_u64(archive.data() + second_entry_offset + 16,
+                              second_module_length);
+  memcpy(archive.data() + string_pool_offset, first_name.data, first_name.size);
+  memcpy(archive.data() + string_pool_offset + first_name.size,
+         second_name.data, second_name.size);
+  memcpy(archive.data() + archive_first_module_offset,
+         first.data + first_module_offset, first_module_length);
+  memcpy(archive.data() + archive_second_module_offset,
+         second.data + second_module_offset, second_module_length);
+  return archive;
 }
 
 LinkIndexPtr CreateIndex(loomc_context_t* context, loomc_source_t* source,
@@ -410,6 +500,50 @@ func.def public @caller(%x: i32) -> (i32) {
   EXPECT_THAT(text, ::testing::Not(::testing::HasSubstr("@unused_library")));
 }
 
+TEST_F(LinkRequestTest, RepeatedLinksProduceIdenticalRequests) {
+  SourcePtr library_source = CreateTextSource("library.loom", R"(
+func.def public @identity(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+)");
+  LinkIndexPtr library_index = CreateIndex(context_.get(), library_source.get(),
+                                           LOOMC_LINK_PROVIDER_ROLE_LIBRARY);
+  RequestPtr input_request = CreateRequestFromText(R"(
+func.decl @identity(%x: i32) -> (i32)
+
+func.def public @entry(%x: i32) -> (i32) {
+  %result = func.call @identity(%x) : (i32) -> (i32)
+  func.return %result : i32
+}
+)",
+                                                   {"entry"});
+  const loomc_link_request_options_t options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_LINK_REQUEST_OPTIONS,
+      /*.structure_size=*/sizeof(options),
+      /*.next=*/nullptr,
+      /*.library_index=*/library_index.get(),
+      /*.module_name=*/loomc_make_cstring_view("deterministic"),
+  };
+
+  ResultPtr first_result;
+  RequestPtr first_request =
+      LinkRequest(input_request.get(), &options, &first_result);
+  ExpectSucceededResult(first_result.get());
+  ASSERT_NE(first_request, nullptr);
+  ResultPtr second_result;
+  RequestPtr second_request =
+      LinkRequest(input_request.get(), &options, &second_result);
+  ExpectSucceededResult(second_result.get());
+  ASSERT_NE(second_request, nullptr);
+
+  EXPECT_EQ(ToString(loomc_source_contents(
+                loomc_request_source(first_request.get()))),
+            ToString(loomc_source_contents(
+                loomc_request_source(second_request.get()))));
+  EXPECT_EQ(ResolveRequestRootNames(context_.get(), first_request.get()),
+            ResolveRequestRootNames(context_.get(), second_request.get()));
+}
+
 TEST_F(LinkRequestTest, SelectsPrivateRootByIndexedIdentity) {
   SourcePtr library_source = CreateTextSource("library.loom", R"(
 func.def @library_helper(%x: i32) -> (i32) {
@@ -449,6 +583,50 @@ func.def @entry(%x: i32) -> (i32) {
   const std::string text = SerializeRequestToText(output_request.get());
   EXPECT_THAT(text, ::testing::HasSubstr("@request_helper"));
   EXPECT_THAT(text, ::testing::Not(::testing::HasSubstr("@library_helper")));
+}
+
+TEST_F(LinkRequestTest, SelectsRootsFromMultipleBytecodeModules) {
+  SourcePtr first_text = CreateTextSource("first.loom", R"(
+func.def public @first(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+)");
+  ModulePtr first_module =
+      DeserializeModule(context_.get(), workspace_.get(), first_text.get());
+  SourcePtr first_bytecode = SerializeModuleToSource(
+      first_module.get(), LOOMC_SOURCE_FORMAT_BYTECODE, "first.loombc");
+
+  SourcePtr second_text = CreateTextSource("second.loom", R"(
+func.def public @second(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+)");
+  ModulePtr second_module =
+      DeserializeModule(context_.get(), workspace_.get(), second_text.get());
+  SourcePtr second_bytecode = SerializeModuleToSource(
+      second_module.get(), LOOMC_SOURCE_FORMAT_BYTECODE, "second.loombc");
+
+  const std::vector<uint8_t> archive = CreateTwoModuleArchive(
+      loomc_source_contents(first_bytecode.get()), IREE_SV("first"),
+      loomc_source_contents(second_bytecode.get()), IREE_SV("second"));
+  RequestPtr input_request = CreateRawRequest(
+      CreateSource(LOOMC_SOURCE_FORMAT_BYTECODE, "request-archive.loombc",
+                   archive.data(), archive.size()),
+      {
+          {/*.module_ordinal=*/1, /*.symbol_ordinal=*/0},
+          {/*.module_ordinal=*/0, /*.symbol_ordinal=*/0},
+      });
+
+  ResultPtr result;
+  RequestPtr output_request =
+      LinkRequest(input_request.get(), nullptr, &result);
+  ExpectSucceededResult(result.get());
+  ASSERT_NE(output_request, nullptr);
+  EXPECT_EQ(ResolveRequestRootNames(context_.get(), output_request.get()),
+            (std::vector<std::string>{"second", "first"}));
+  const std::string text = SerializeRequestToText(output_request.get());
+  EXPECT_THAT(text, ::testing::HasSubstr("@first"));
+  EXPECT_THAT(text, ::testing::HasSubstr("@second"));
 }
 
 TEST_F(LinkRequestTest, AppliesInvocationConfig) {
@@ -496,7 +674,7 @@ TEST_F(LinkRequestTest, MalformedBytecodeProducesFailedResult) {
   RequestPtr input_request = CreateRawRequest(
       CreateSource(LOOMC_SOURCE_FORMAT_BYTECODE, "malformed.loombc",
                    malformed_bytecode, sizeof(malformed_bytecode) - 1),
-      {/*.module_ordinal=*/0, /*.symbol_ordinal=*/0});
+      {{/*.module_ordinal=*/0, /*.symbol_ordinal=*/0}});
 
   ResultPtr result;
   RequestPtr output_request =

@@ -36,6 +36,8 @@
 #include "loomc/compile.h"
 #include "loomc/pass.h"
 #include "module.h"
+#include "module_bytecode.h"
+#include "product.h"
 #include "target.h"
 #include "test/util.h"
 
@@ -55,6 +57,7 @@ using ResultPtr = HandlePtr<loomc_result_t, loomc_result_release>;
 using CompilerPtr = HandlePtr<loomc_compiler_t, loomc_compiler_release>;
 using PassProgramPtr =
     HandlePtr<loomc_pass_program_t, loomc_pass_program_release>;
+using RequestPtr = HandlePtr<loomc_request_t, loomc_request_release>;
 using TargetEnvironmentPtr =
     HandlePtr<loomc_target_environment_t, loomc_target_environment_release>;
 using TargetProfilePtr =
@@ -496,6 +499,46 @@ const loom_symbol_t* FindModuleSymbol(const loom_module_t* module,
 
 bool ModuleHasSymbol(const loom_module_t* module, const char* name) {
   return FindModuleSymbol(module, name) != nullptr;
+}
+
+RequestPtr CreateModuleRequest(loomc_context_t* context,
+                               const loomc_module_t* module,
+                               const char* root_name) {
+  const loom_module_t* internal_module = loomc_module_const_loom_module(module);
+  EXPECT_NE(internal_module, nullptr);
+  if (internal_module == nullptr) return RequestPtr();
+
+  const loom_string_id_t root_name_id = loom_module_lookup_string(
+      internal_module, iree_make_cstring_view(root_name));
+  EXPECT_NE(root_name_id, LOOM_STRING_ID_INVALID);
+  if (root_name_id == LOOM_STRING_ID_INVALID) return RequestPtr();
+  const loom_symbol_id_t module_symbol_id =
+      loom_module_find_symbol(internal_module, root_name_id);
+  EXPECT_NE(module_symbol_id, LOOM_SYMBOL_ID_INVALID);
+  if (module_symbol_id == LOOM_SYMBOL_ID_INVALID) return RequestPtr();
+
+  loom_symbol_id_t wire_symbol_ordinal = LOOM_SYMBOL_ID_INVALID;
+  const loomc_module_symbol_projection_t projection = {
+      /*.module_symbol_ids=*/&module_symbol_id,
+      /*.bytecode_symbol_ordinals=*/&wire_symbol_ordinal,
+      /*.count=*/1,
+  };
+  loomc_source_t* source = nullptr;
+  LOOMC_EXPECT_OK(loomc_module_serialize_internal_bytecode_to_source(
+      context, internal_module, loomc_make_cstring_view("request.loombc"),
+      &projection, loomc_allocator_system(), &source));
+
+  const loomc_request_root_t root = {
+      /*.module_ordinal=*/0,
+      /*.symbol_ordinal=*/wire_symbol_ordinal,
+  };
+  loomc_request_t* request = nullptr;
+  loomc_status_t status = loomc_request_create_take_source(
+      loomc_compiled_module_product_descriptor(), &source, &root, 1, nullptr, 0,
+      loomc_allocator_system(), &request);
+  loomc_source_release(source);
+  LOOMC_EXPECT_OK(status);
+  return RequestPtr(request);
 }
 
 std::string PrintModule(const loom_module_t* module) {
@@ -1190,6 +1233,71 @@ TEST(LinkTest, TargetSpecializationParticipatesInProviderSelection) {
   EXPECT_TRUE(ModuleHasSymbol(replay_internal, "profile_provider"));
   EXPECT_FALSE(ModuleHasSymbol(replay_internal, "fallback_provider"));
   EXPECT_NE(SerializeModuleToText(replay_module.get())
+                .find("test.target<low_core> @__loom_target_context_0_0"),
+            std::string::npos);
+}
+
+TEST(LinkTest, RequestLinkingForwardsTargetSpecialization) {
+  TargetEnvironmentPtr target_environment = CreateFakeTargetEnvironment();
+  TargetProfilePtr profile = CreateFakeTargetProfile(target_environment.get());
+  ContextPtr context = CreateContext(target_environment.get());
+  WorkspacePtr workspace = CreateWorkspace();
+  SourcePtr root_source = CreateEmbeddedTargetLinkSource("root.loom");
+  SourcePtr provider_source = CreateEmbeddedTargetLinkSource("providers.loom");
+  ASSERT_NE(root_source.get(), nullptr);
+  ASSERT_NE(provider_source.get(), nullptr);
+
+  ModulePtr root_module = DeserializeModuleFromSource(
+      context.get(), workspace.get(), root_source.get());
+  RequestPtr input_request =
+      CreateModuleRequest(context.get(), root_module.get(), "entry");
+  ASSERT_NE(input_request.get(), nullptr);
+
+  BuilderPtr builder = CreateBuilder(context.get());
+  AddSource(builder.get(), provider_source.get(), "providers",
+            LOOMC_LINK_PROVIDER_ROLE_LIBRARY);
+  LinkIndexPtr library_index;
+  FinishIndex(builder.get(), &library_index);
+  LinkerPtr linker = CreateLinker(context.get());
+
+  const loomc_target_specialization_t specialization = {
+      /*.function_symbol=*/loomc_make_cstring_view("entry"),
+      /*.target_profile=*/profile.get(),
+  };
+  const loomc_target_specialization_options_t target_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
+      /*.structure_size=*/sizeof(target_options),
+      /*.next=*/nullptr,
+      /*.specializations=*/&specialization,
+      /*.specialization_count=*/1,
+  };
+  const loomc_link_request_options_t link_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_LINK_REQUEST_OPTIONS,
+      /*.structure_size=*/sizeof(link_options),
+      /*.next=*/&target_options,
+      /*.library_index=*/library_index.get(),
+  };
+  loomc_request_t* output_request = nullptr;
+  loomc_result_t* result = nullptr;
+  LOOMC_EXPECT_OK(loomc_link_request(
+      linker.get(), workspace.get(), input_request.get(), &link_options,
+      loomc_allocator_system(), &output_request, &result));
+  RequestPtr output_request_ptr(output_request);
+  ResultPtr result_ptr(result);
+  ASSERT_TRUE(loomc_result_succeeded(result_ptr.get()));
+  ASSERT_NE(output_request_ptr.get(), nullptr);
+
+  ModulePtr linked_module = DeserializeModuleFromSource(
+      context.get(), workspace.get(),
+      loomc_request_source(output_request_ptr.get()));
+  const loom_module_t* linked_internal =
+      loomc_module_const_loom_module(linked_module.get());
+  ASSERT_NE(linked_internal, nullptr);
+  VerifyModule(linked_internal);
+  EXPECT_TRUE(ModuleHasSymbol(linked_internal, "profile_provider"));
+  EXPECT_FALSE(ModuleHasSymbol(linked_internal, "fallback_provider"));
+  EXPECT_FALSE(ModuleHasSymbol(linked_internal, "incompatible_provider"));
+  EXPECT_NE(SerializeModuleToText(linked_module.get())
                 .find("test.target<low_core> @__loom_target_context_0_0"),
             std::string::npos);
 }

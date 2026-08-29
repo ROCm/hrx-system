@@ -167,9 +167,11 @@ loom_cc_test(
     "link_request_test.cc"
   DEPS
     ::test_util
+    iree::base::core_headers
     iree::testing::gtest
     iree::testing::gtest_main
     loom::binding::c::loomc
+    loom::format::bytecode::format
     loom::ir
 )
 

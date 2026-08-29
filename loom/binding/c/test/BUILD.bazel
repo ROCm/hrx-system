@@ -168,7 +168,9 @@ loom_cc_test(
     deps = [
         ":test_util",
         "//loom/binding/c:loomc",
+        "//loom/src/loom/format/bytecode:format",
         "//loom/src/loom/ir",
+        "//runtime/src/iree/base:core_headers",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
