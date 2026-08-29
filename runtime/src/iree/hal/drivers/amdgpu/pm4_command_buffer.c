@@ -1938,14 +1938,12 @@ static iree_status_t iree_hal_amdgpu_pm4_command_buffer_verify_create(
         IREE_STATUS_UNIMPLEMENTED,
         "PM4 command buffers require reusable command-buffer mode");
   }
-  const iree_hal_command_buffer_mode_t unsupported_modes =
-      IREE_HAL_COMMAND_BUFFER_MODE_ALLOW_INLINE_EXECUTION |
-      IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_DISPATCH_METADATA;
-  if (iree_any_bit_set(mode, unsupported_modes)) {
-    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                            "PM4 command-buffer mode bits 0x%08" PRIx32
-                            " are not implemented",
-                            mode & unsupported_modes);
+  if (iree_any_bit_set(mode,
+                       IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_DISPATCH_METADATA)) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "PM4 command-buffer mode bits 0x%08" PRIx32 " are not implemented",
+        mode & IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_DISPATCH_METADATA);
   }
   const iree_hal_command_category_t supported_categories =
       IREE_HAL_COMMAND_CATEGORY_DISPATCH | IREE_HAL_COMMAND_CATEGORY_ATOMIC |

@@ -37,26 +37,13 @@ static iree_status_t iree_hal_device_transfer_and_wait(
   IREE_ASSERT_ARGUMENT(!transfer_count || transfer_commands);
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  // We only want to allow inline execution if we have not been instructed to
-  // wait on a semaphore and it hasn't yet been signaled.
-  iree_hal_command_buffer_mode_t mode = IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT;
-  if (wait_semaphore) {
-    uint64_t current_value = 0ull;
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_hal_semaphore_query(wait_semaphore, &current_value));
-    if (current_value >= wait_value) {
-      mode |= IREE_HAL_COMMAND_BUFFER_MODE_ALLOW_INLINE_EXECUTION;
-    }
-  } else {
-    mode |= IREE_HAL_COMMAND_BUFFER_MODE_ALLOW_INLINE_EXECUTION;
-  }
-
   // Create a command buffer performing all of the transfer operations.
   iree_hal_command_buffer_t* command_buffer = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_hal_create_transfer_command_buffer(
-              device, mode, IREE_HAL_QUEUE_AFFINITY_ANY, transfer_count,
-              transfer_commands, &command_buffer));
+              device, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
+              IREE_HAL_QUEUE_AFFINITY_ANY, transfer_count, transfer_commands,
+              &command_buffer));
 
   // Perform a full submit-and-wait. On devices with multiple queues this can
   // run out-of-order/overlapped with other work and return earlier than device

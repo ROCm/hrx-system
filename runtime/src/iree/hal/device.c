@@ -598,24 +598,6 @@ IREE_API_EXPORT iree_status_t iree_hal_device_queue_execute(
                         signal_semaphore_list.payload_values));
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  // TODO(benvanik): move into devices instead? then a synchronous/inline device
-  // could assert the waits are resolved instead of blanket failing on an
-  // already-resolved semaphore. This would make using stream-ordered
-  // allocations easier.
-  if (wait_semaphore_list.count > 0 && command_buffer &&
-      iree_all_bits_set(iree_hal_command_buffer_mode(command_buffer),
-                        IREE_HAL_COMMAND_BUFFER_MODE_ALLOW_INLINE_EXECUTION)) {
-    // Inline command buffers are not allowed to wait (as they could have
-    // already been executed!). This is a requirement of the API so we
-    // validate it across all backends even if they don't support inline
-    // execution and ignore it.
-    IREE_TRACE_ZONE_END(z0);
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "inline command buffer submitted with a wait; inline command "
-        "buffers must be ready to execute immediately");
-  }
-
   // Validate command buffer bindings against the provided binding tables.
   // This will error out if a binding table is required but not provided or if
   // any binding in the table does not match the requirements of the command

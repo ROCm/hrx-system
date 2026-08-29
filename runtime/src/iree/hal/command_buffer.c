@@ -47,8 +47,6 @@ iree_hal_command_buffer_mode_format(iree_hal_command_buffer_mode_t value,
                                     iree_bitfield_string_temp_t* out_temp) {
   static const iree_bitfield_string_mapping_t mappings[] = {
       {IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT, IREE_SVL("ONE_SHOT")},
-      {IREE_HAL_COMMAND_BUFFER_MODE_ALLOW_INLINE_EXECUTION,
-       IREE_SVL("ALLOW_INLINE_EXECUTION")},
       {IREE_HAL_COMMAND_BUFFER_MODE_UNVALIDATED, IREE_SVL("UNVALIDATED")},
       {IREE_HAL_COMMAND_BUFFER_MODE_UNRETAINED, IREE_SVL("UNRETAINED")},
       {IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA,
@@ -138,18 +136,6 @@ IREE_API_EXPORT iree_status_t iree_hal_command_buffer_create(
   IREE_ASSERT_ARGUMENT(device);
   IREE_ASSERT_ARGUMENT(out_command_buffer);
   *out_command_buffer = NULL;
-
-  if (iree_all_bits_set(mode,
-                        IREE_HAL_COMMAND_BUFFER_MODE_ALLOW_INLINE_EXECUTION)) {
-    if (!iree_all_bits_set(mode, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT)) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "inline command buffers must be one-shot");
-    } else if (binding_capacity > 0) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "inline command buffers cannot have indirect bindings");
-    }
-  }
 
   IREE_TRACE_ZONE_BEGIN(z0);
   iree_status_t status =

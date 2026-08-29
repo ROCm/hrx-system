@@ -191,9 +191,7 @@ iree_status_t iree_tooling_transfer_variants(
   iree_hal_command_buffer_t* command_buffer = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_hal_command_buffer_create(
-              target_device,
-              IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT |
-                  IREE_HAL_COMMAND_BUFFER_MODE_ALLOW_INLINE_EXECUTION,
+              target_device, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
               IREE_HAL_COMMAND_CATEGORY_TRANSFER, target_params.queue_affinity,
               /*binding_capacity=*/0, &command_buffer));
 

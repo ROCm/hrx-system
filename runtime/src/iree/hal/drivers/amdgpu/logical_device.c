@@ -2754,10 +2754,8 @@ static bool iree_hal_amdgpu_logical_device_can_auto_select_pm4_command_buffer(
   if (iree_any_bit_set(mode, IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT)) {
     return false;
   }
-  const iree_hal_command_buffer_mode_t unsupported_modes =
-      IREE_HAL_COMMAND_BUFFER_MODE_ALLOW_INLINE_EXECUTION |
-      IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_DISPATCH_METADATA;
-  if (iree_any_bit_set(mode, unsupported_modes)) {
+  if (iree_any_bit_set(mode,
+                       IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_DISPATCH_METADATA)) {
     return false;
   }
   const iree_hal_command_category_t supported_categories =
