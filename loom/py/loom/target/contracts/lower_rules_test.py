@@ -266,6 +266,33 @@ def test_compile_lower_rule_set_compiles_direct_scalar_rule() -> None:
     assert compiled.emits[0].result_ref_count == 1
 
 
+def test_compile_lower_rule_set_interns_exact_rule_programs() -> None:
+    table = ContractFragment(
+        name="test.scalar",
+        descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+        cases=(
+            _binary_rule(
+                source_op=scalar_arithmetic.scalar_addi,
+                type_pattern=Scalar("i32"),
+            ),
+            _binary_rule(
+                source_op=scalar_arithmetic.scalar_addi,
+                type_pattern=Scalar("i32"),
+            ),
+        ),
+    )
+
+    compiled = compile_lower_rule_set(table, dialect_ops={"scalar": ALL_SCALAR_OPS})
+
+    assert len(compiled.rules) == 2
+    assert len(compiled.guards) == 3
+    assert len(compiled.emits) == 1
+    assert compiled.rules[0].guard_start == compiled.rules[1].guard_start
+    assert compiled.rules[0].emit_start == compiled.rules[1].emit_start
+    assert compiled.rules[0].guard_count == compiled.rules[1].guard_count == 3
+    assert compiled.rules[0].emit_count == compiled.rules[1].emit_count == 1
+
+
 def test_compile_lower_rule_set_compiles_descriptor_result_type_binding() -> None:
     table = ContractFragment(
         name="test.scalar",
