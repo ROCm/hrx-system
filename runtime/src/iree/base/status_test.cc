@@ -88,6 +88,50 @@ TEST(StatusMacro, ReturnIfErrorFormat) {
   IREE_EXPECT_OK(returnIfError(OkStatus()));
 }
 
+#if IREE_STATUS_FEATURES == 0
+TEST(StatusMacro, ModeZeroDoesNotEvaluateDiagnosticArguments) {
+  int evaluation_count = 0;
+  auto evaluate_argument = [&]() {
+    ++evaluation_count;
+    return 42;
+  };
+  auto evaluate_message = [&]() {
+    ++evaluation_count;
+    return IREE_SV("diagnostic message");
+  };
+
+  int diagnostic_only_value = 1;
+  iree_status_t status =
+      iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "diagnostic %d %d",
+                       diagnostic_only_value, evaluate_argument());
+  status = iree_status_annotate(status, evaluate_message());
+  status = iree_status_annotate_f(status, "diagnostic %d %d",
+                                  diagnostic_only_value, evaluate_argument());
+
+  auto return_if_error = [&](iree_status_t status) -> iree_status_t {
+    int annotation_only_value = 2;
+    IREE_RETURN_IF_ERROR(status, "diagnostic %d %d", annotation_only_value,
+                         evaluate_argument());
+    return iree_ok_status();
+  };
+  status = return_if_error(status);
+
+  int tail_evaluation_count = 0;
+  auto return_and_evaluate = [&](iree_status_t status) -> iree_status_t {
+    int annotation_only_value = 3;
+    IREE_RETURN_AND_EVAL_IF_ERROR(++tail_evaluation_count, status,
+                                  "diagnostic %d %d", annotation_only_value,
+                                  evaluate_argument());
+    return iree_ok_status();
+  };
+  status = return_and_evaluate(status);
+
+  EXPECT_EQ(iree_status_consume_code(status), IREE_STATUS_INVALID_ARGUMENT);
+  EXPECT_EQ(evaluation_count, 0);
+  EXPECT_EQ(tail_evaluation_count, 1);
+}
+#endif  // IREE_STATUS_FEATURES == 0
+
 TEST(StatusMacro, AssignOrReturn) {
   auto assignOrReturn = [](StatusOr<std::string> statusOr) -> iree_status_t {
     IREE_ASSIGN_OR_RETURN(auto ret, std::move(statusOr));

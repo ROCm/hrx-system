@@ -860,7 +860,6 @@ static bool iree_status_format_message(iree_status_t status,
 
   // Prefix with source location and status code string (may be 'OK').
   iree_host_size_t buffer_length = 0;
-  int n = 0;
 
 #if (IREE_STATUS_FEATURES & IREE_STATUS_FEATURE_ANNOTATIONS) != 0
   // Append base storage message.
@@ -869,7 +868,8 @@ static bool iree_status_format_message(iree_status_t status,
         buffer && buffer_length < buffer_capacity
             ? buffer_capacity - buffer_length
             : 0;
-    n = iree_snprintf(remaining_capacity > 0 ? buffer + buffer_length : NULL,
+    int n =
+        iree_snprintf(remaining_capacity > 0 ? buffer + buffer_length : NULL,
                       remaining_capacity, has_prefix ? "; %.*s" : "%.*s",
                       (int)storage->message.size, storage->message.data);
     if (IREE_UNLIKELY(n < 0)) {
