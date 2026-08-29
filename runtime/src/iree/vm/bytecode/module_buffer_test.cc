@@ -487,7 +487,7 @@ TEST(VMBytecodeModuleBufferTest, VerifiesBufferInstructionRecords) {
       atomic_rmw.selector0_u8 = (uint8_t)(carrier << 7);
       atomic_rmw.selector1_u8 = 0;
       expect_record_status("unsupported atomic carrier", atomic_rmw,
-                           IREE_STATUS_UNIMPLEMENTED);
+                           IREE_STATUS_INCOMPATIBLE);
       continue;
     }
 

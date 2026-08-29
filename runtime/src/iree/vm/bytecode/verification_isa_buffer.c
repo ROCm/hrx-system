@@ -14,7 +14,7 @@
 
 static iree_status_t iree_vm_bytecode_verify_atomic_carrier(uint8_t carrier) {
   if (!iree_vm_bytecode_atomic_carrier_is_supported(carrier)) {
-    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+    return iree_make_status(IREE_STATUS_INCOMPATIBLE,
                             "atomic carrier is unsupported on this target");
   }
   return iree_ok_status();
