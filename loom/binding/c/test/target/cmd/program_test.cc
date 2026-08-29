@@ -33,6 +33,7 @@ using LinkIndexPtr = HandlePtr<loomc_link_index_t, loomc_link_index_release>;
 using ModulePtr = HandlePtr<loomc_module_t, loomc_module_release>;
 using ProductPtr =
     HandlePtr<loomc_cmd_program_product_t, loomc_cmd_program_product_release>;
+using RequestPtr = HandlePtr<loomc_request_t, loomc_request_release>;
 using ResultPtr = HandlePtr<loomc_result_t, loomc_result_release>;
 using SourcePtr = HandlePtr<loomc_source_t, loomc_source_release>;
 using WorkspacePtr = HandlePtr<loomc_workspace_t, loomc_workspace_release>;
@@ -147,49 +148,13 @@ LinkIndexPtr FinishIndex(loomc_link_index_builder_t* builder) {
   return LinkIndexPtr(link_index);
 }
 
-void ExpectKernelRoot(loomc_module_t* module, const std::string& root_symbol) {
-  loomc_module_function_query_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_FUNCTION_QUERY_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.function_symbol=*/
-      loomc_make_string_view(root_symbol.data(), root_symbol.size()),
-      /*.kind=*/LOOMC_MODULE_FUNCTION_KIND_KERNEL,
-  };
-  loomc_module_function_t function = {};
-  loomc_host_size_t function_count = 0;
-  loomc_result_t* result = nullptr;
-  loomc_status_t status =
-      loomc_module_query_functions(module, &options, loomc_allocator_system(),
-                                   1, &function, &function_count, &result);
-  LOOMC_EXPECT_OK(status);
-  ResultPtr result_ptr(result);
-  ASSERT_TRUE(result_ptr && loomc_result_succeeded(result_ptr.get()));
-  ASSERT_EQ(function_count, 1u);
-  EXPECT_EQ(ToString(function.symbol_name), root_symbol);
-  EXPECT_EQ(function.kind, LOOMC_MODULE_FUNCTION_KIND_KERNEL);
-}
-
-struct CapturedRequest {
-  uint32_t entry_requirement_ordinal = 0;
-  std::string root_symbol;
-  loomc_host_size_t member_count = 0;
-  ModulePtr module;
-};
-
 struct RequestCapture {
-  std::vector<CapturedRequest> requests;
+  std::vector<RequestPtr> requests;
 };
 
-loomc_status_t CaptureRequest(void* user_data,
-                              loomc_cmd_kernel_request_t request) {
+loomc_status_t CaptureRequest(void* user_data, loomc_request_t* request) {
   RequestCapture* capture = static_cast<RequestCapture*>(user_data);
-  capture->requests.push_back(CapturedRequest{
-      request.entry_requirement_ordinal,
-      ToString(request.root_symbol),
-      request.member_count,
-      ModulePtr(request.module),
-  });
+  capture->requests.push_back(RequestPtr(request));
   return loomc_ok_status();
 }
 
@@ -197,17 +162,16 @@ struct RejectRequestState {
   loomc_host_size_t publish_count = 0;
 };
 
-loomc_status_t RejectRequest(void* user_data,
-                             loomc_cmd_kernel_request_t request) {
+loomc_status_t RejectRequest(void* user_data, loomc_request_t* request) {
   RejectRequestState* state = static_cast<RejectRequestState*>(user_data);
   ++state->publish_count;
-  loomc_module_release(request.module);
+  loomc_request_release(request);
   return loomc_make_status(LOOMC_STATUS_ABORTED,
                            "embedding rejected kernel request");
 }
 
 TEST(TargetCmdProgramTest,
-     ComposesMixedProvidersAndPublishesOrdinaryKernelModules) {
+     ComposesMixedProvidersAndPublishesDurableKernelRequests) {
   ContextPtr context = CreateContext();
   WorkspacePtr workspace = CreateWorkspace();
 
@@ -311,7 +275,7 @@ template.def<@request.schedule> priority(1) @small(%size: index) {
       /*.root_symbol_count=*/std::size(explicit_roots),
       /*.flags=*/LOOMC_CMD_PROGRAM_PRODUCT_FLAG_INCLUDE_INPUT_EXPORTS,
       /*.config=*/{},
-      /*.kernel_request_sink=*/
+      /*.request_sink=*/
       {
           /*.publish=*/CaptureRequest,
           /*.user_data=*/&capture,
@@ -348,17 +312,20 @@ template.def<@request.schedule> priority(1) @small(%size: index) {
   EXPECT_EQ(public_program.entry_requirement_count, 3u);
 
   ASSERT_EQ(capture.requests.size(), 2u);
-  std::vector<loomc_host_size_t> member_counts;
-  std::vector<uint32_t> source_requirement_ordinals;
-  for (const CapturedRequest& request : capture.requests) {
-    EXPECT_EQ(request.root_symbol, "classified");
-    ASSERT_NE(request.module, nullptr);
-    ExpectKernelRoot(request.module.get(), request.root_symbol);
-    member_counts.push_back(request.member_count);
-    source_requirement_ordinals.push_back(request.entry_requirement_ordinal);
+  std::vector<loomc_requirement_ordinal_t> request_requirement_ordinals;
+  for (const RequestPtr& request : capture.requests) {
+    ASSERT_NE(request, nullptr);
+    EXPECT_EQ(loomc_request_root_count(request.get()), 1u);
+    EXPECT_EQ(loomc_request_binding_count(request.get()), 1u);
+    loomc_request_binding_t binding = {};
+    ASSERT_TRUE(loomc_request_binding_at(request.get(), 0, &binding));
+    EXPECT_EQ(binding.root_ordinal, 0u);
+    request_requirement_ordinals.push_back(binding.requirement_ordinal);
+    loomc_source_t* request_source = loomc_request_source(request.get());
+    ASSERT_NE(request_source, nullptr);
+    EXPECT_EQ(loomc_source_format(request_source),
+              LOOMC_SOURCE_FORMAT_BYTECODE);
   }
-  std::sort(member_counts.begin(), member_counts.end());
-  EXPECT_EQ(member_counts, (std::vector<loomc_host_size_t>{1, 2}));
 
   ASSERT_EQ(
       loomc_cmd_program_product_entry_requirement_count(product_ptr.get()), 3u);
@@ -368,7 +335,7 @@ template.def<@request.schedule> priority(1) @small(%size: index) {
     loomc_cmd_entry_requirement_t requirement = {};
     ASSERT_TRUE(loomc_cmd_program_product_entry_requirement_at(
         product_ptr.get(), i, &requirement));
-    if (requirement.has_source_request) {
+    if (requirement.has_request) {
       ++source_requirement_count;
       EXPECT_EQ(ToString(requirement.symbol), "classified");
     } else {
@@ -378,9 +345,10 @@ template.def<@request.schedule> priority(1) @small(%size: index) {
   }
   EXPECT_EQ(source_requirement_count, 2u);
   EXPECT_EQ(external_requirement_count, 1u);
-  std::sort(source_requirement_ordinals.begin(),
-            source_requirement_ordinals.end());
-  EXPECT_EQ(source_requirement_ordinals, (std::vector<uint32_t>{0, 1}));
+  std::sort(request_requirement_ordinals.begin(),
+            request_requirement_ordinals.end());
+  EXPECT_EQ(request_requirement_ordinals,
+            (std::vector<loomc_requirement_ordinal_t>{0, 1}));
 
   const loomc_host_size_t repeated_roots[] = {
       public_root.ordinal,
@@ -389,7 +357,7 @@ template.def<@request.schedule> priority(1) @small(%size: index) {
   product_options.root_symbol_ordinals = repeated_roots;
   product_options.root_symbol_count = std::size(repeated_roots);
   product_options.flags = 0;
-  product_options.kernel_request_sink = {};
+  product_options.request_sink = {};
   loomc_cmd_program_product_t* repeated_product = nullptr;
   loomc_result_t* repeated_result = nullptr;
   LOOMC_ASSERT_OK(loomc_cmd_program_product_build(
@@ -415,7 +383,7 @@ template.def<@request.schedule> priority(1) @small(%size: index) {
   product_options.root_symbol_ordinals = public_roots;
   product_options.root_symbol_count = std::size(public_roots);
   product_options.flags = 0;
-  product_options.kernel_request_sink = {
+  product_options.request_sink = {
       /*.publish=*/RejectRequest,
       /*.user_data=*/&reject_state,
   };
@@ -439,14 +407,32 @@ template.def<@request.schedule> priority(1) @small(%size: index) {
   context.reset();
 
   ContextPtr restored_context = CreateContext();
-  WorkspacePtr restored_workspace = CreateWorkspace();
-  for (const CapturedRequest& request : capture.requests) {
-    SourcePtr request_bytecode =
-        SerializeModuleToBytecode(request.module.get(), "request.loombc");
-    ModulePtr restored =
-        DeserializeModule(restored_context.get(), restored_workspace.get(),
-                          request_bytecode.get());
-    ExpectKernelRoot(restored.get(), request.root_symbol);
+  for (const RequestPtr& request : capture.requests) {
+    loomc_request_root_t root = {};
+    ASSERT_TRUE(loomc_request_root_at(request.get(), 0, &root));
+    BuilderPtr restored_builder = CreateIndexBuilder(restored_context.get());
+    loomc_link_index_source_options_t options = {
+        /*.provider_name=*/loomc_make_cstring_view("restored_request"),
+        /*.role=*/LOOMC_LINK_PROVIDER_ROLE_INPUT,
+    };
+    LOOMC_ASSERT_OK(loomc_link_index_builder_add_source(
+        restored_builder.get(), loomc_request_source(request.get()), &options,
+        nullptr));
+    LinkIndexPtr restored_index = FinishIndex(restored_builder.get());
+    loomc_link_index_provider_t provider = {};
+    ASSERT_TRUE(
+        loomc_link_index_provider_at(restored_index.get(), 0, &provider));
+    ASSERT_LT(root.module_ordinal, provider.module_count);
+    loomc_link_index_module_t module = {};
+    ASSERT_TRUE(loomc_link_index_module_at(
+        restored_index.get(),
+        provider.module_start_ordinal + root.module_ordinal, &module));
+    ASSERT_LT(root.symbol_ordinal, module.symbol_count);
+    loomc_link_index_symbol_t symbol = {};
+    ASSERT_TRUE(loomc_link_index_symbol_at(
+        restored_index.get(), module.symbol_start_ordinal + root.symbol_ordinal,
+        &symbol));
+    EXPECT_EQ(ToString(symbol.name), "classified");
   }
 
   EXPECT_EQ(ToString(private_program.symbol), "private_root");

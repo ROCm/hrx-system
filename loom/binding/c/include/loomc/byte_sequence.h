@@ -57,31 +57,51 @@ LOOMC_API_EXPORT loomc_status_t loomc_byte_sequence_create_copy(
     loomc_byte_sequence_t** out_sequence);
 
 /// Retains `sequence` for another owner. Passing `NULL` is allowed.
+///
+/// @param sequence Sequence to retain.
 LOOMC_API_EXPORT void loomc_byte_sequence_retain(
     loomc_byte_sequence_t* sequence);
 
 /// Releases `sequence` from one owner. Passing `NULL` is allowed.
+///
+/// @param sequence Sequence to release.
 LOOMC_API_EXPORT void loomc_byte_sequence_release(
     loomc_byte_sequence_t* sequence);
 
 /// Returns the logical byte length of `sequence`.
+///
+/// @param sequence Sequence to inspect, or NULL.
+/// @return Sequence length, or zero for a NULL sequence.
 LOOMC_API_EXPORT uint64_t
 loomc_byte_sequence_length(const loomc_byte_sequence_t* sequence);
 
 /// Attempts to borrow the complete sequence as one contiguous span.
 ///
-/// Returns true and populates `out_span` when the producer storage is already
-/// contiguous. The span remains valid while `sequence` is retained. Returns
-/// false and leaves `out_span` empty for segmented storage.
+/// @param sequence Sequence to inspect.
+/// @param out_span Receives the borrowed contiguous span when available.
+/// @return True when the producer storage is already contiguous. False leaves
+/// `out_span` empty for a NULL sequence or segmented storage.
+///
+/// The span remains valid while `sequence` is retained.
 LOOMC_API_EXPORT bool loomc_byte_sequence_try_get_contiguous_span(
     const loomc_byte_sequence_t* sequence, loomc_byte_span_t* out_span);
 
 /// Enumerates all non-empty segments in logical byte order.
+///
+/// @param sequence Sequence to enumerate.
+/// @param callback Callback invoked for each segment.
+/// @return OK after every segment was visited, or the callback status that
+/// stopped enumeration.
 LOOMC_API_EXPORT loomc_status_t
 loomc_byte_sequence_enumerate(const loomc_byte_sequence_t* sequence,
                               loomc_byte_sequence_callback_t callback);
 
 /// Clones `sequence` into one contiguous allocator-owned span.
+///
+/// @param sequence Sequence to clone.
+/// @param allocator Host allocator owning the returned storage.
+/// @param out_span Receives the contiguous clone on success.
+/// @return OK when the complete sequence was cloned.
 ///
 /// The caller frees `out_span->data` with `allocator`. Empty sequences return
 /// an empty span without allocating. On failure `out_span` is empty.

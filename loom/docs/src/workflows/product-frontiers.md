@@ -6,9 +6,9 @@ portable command bytes without embedding every kernel body, and it lets each
 required kernel compile or resolve from a cache independently.
 
 The frontier is a normal selective-link boundary. It does not introduce a fact
-sidecar, generated source format, or graph-specific package. Parent and child
-products remain ordinary Loom modules and artifacts, so the same formatter,
-linker, compiler, diagnostics, and cache keys apply at every level.
+sidecar, generated source format, or graph-specific package. Child requests
+carry ordinary Loom bytecode plus exact roots, so the same formatter, linker,
+compiler, diagnostics, and cache keys apply at every level.
 
 ## Start from requester ownership
 
@@ -89,10 +89,11 @@ requirements:
 
 The two `@classified` requests come from one kernel definition. They are split
 because the launch-site facts select different generated programs, not merely
-because the argument tuples differ. Each request is ordinary rooted Loom IR:
-the selected template call and the assumptions that justify it travel with the
-module. A target compiler can consume it directly, and a content-addressed host
-can cache it at the same boundary as any other Loom input.
+because the argument tuples differ. Each request contains ordinary rooted Loom
+IR: the selected template call and the assumptions that justify it travel with
+the bytecode. A target compiler can consume it directly, and a
+content-addressed host can cache it at the same boundary as any other Loom
+input.
 
 The external dispatch remains equally real in the parent artifact. Its missing
 source is not a degraded request or a failed lookup; it is a binding requirement
@@ -129,23 +130,24 @@ The native `loomc` path exposes these lifetimes directly:
 
 | Object | Ownership and sharing |
 | --- | --- |
-| Frozen link index | Retains indexed source or module providers and may be shared across workers. |
+| Frozen link index | Retains immutable indexed source providers and may be shared across workers. |
 | Workspace | Mutable invocation scratch owned by one active worker. |
 | Command product | Owns serialized root bytes, copied names, entry requirements, and resource projections; it retains no source module, link index, compiler plan, or analysis state. |
-| Kernel request module | Transfers independently to the request callback and follows ordinary module ownership. |
+| Kernel request | Owns immutable Loom bytecode, exact source roots, and provisional parent bindings; it retains no module, workspace, plan, or analysis state. |
 
 Omitting the request callback is the body-blind path: command construction
 leaves every kernel implementation unopened and returns only executable-entry
 requirements. Supplying it classifies surviving source-backed launch sites and
-publishes at most one child module for each live semantic class. Publication is
-provisional until the parent operation returns an OK status with a succeeded
-result; an embedding can stage accepted children concurrently and commit them
-to its cache only when the parent succeeds.
+publishes at most one immutable request for each live semantic class.
+Publication is provisional until the parent operation returns an OK status
+with a succeeded result; an embedding can stage accepted children concurrently
+and commit their parent bindings only when the parent succeeds.
 
-The returned command product never becomes a lifetime root for child modules.
-That independence is what permits target compilation, remote lookup, and
-runtime executable loading to overlap parent construction without retaining a
-large compiler graph.
+The returned command product never becomes a lifetime root for child requests.
+Each accepted request can outlive the producer context and workspace. That
+independence is what permits target compilation, remote lookup, and runtime
+executable loading to overlap parent construction without retaining a large
+compiler graph.
 
 ## Keep failures at the frontier that owns them
 
@@ -156,7 +158,7 @@ The boundaries distinguish unsupported source from deliberately external work:
 | A reachable `kernel.launch` has no configuration facet | The logical launch cannot derive physical counts; provide the defining kernel or repair its declaration/library dependency. |
 | A reachable exact declaration has no provider in a closed link | The source universe is incomplete; add its declared library or deliberately emit a partial link. |
 | A `kernel.dispatch` targets a bodyless `kernel.entry.decl` | Valid external binding; the parent records the requirement without asking for source. |
-| A request callback or artifact write fails | Infrastructure failure cancels the parent operation; already transferred request modules remain owned by their recipients. |
+| A request callback or artifact write fails | Infrastructure failure cancels the parent operation; already transferred requests remain independently owned by their recipients, but their provisional parent bindings are not committed. |
 | Authored facts, signatures, or providers conflict | The operation returns a normal failed compiler result with diagnostics at the source contract. |
 
 Use [`loom-link --print-plan`](link-and-package.md#inspect-before-linking) to

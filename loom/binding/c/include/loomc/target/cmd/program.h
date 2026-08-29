@@ -10,7 +10,7 @@
 #include "loomc/artifact.h"
 #include "loomc/config.h"
 #include "loomc/link_index.h"
-#include "loomc/module.h"
+#include "loomc/product.h"
 #include "loomc/result.h"
 #include "loomc/workspace.h"
 
@@ -19,15 +19,15 @@
 ///
 /// Command product construction selects command roots from a reusable frozen
 /// link index, lowers their host-side orchestration to portable command bytes,
-/// and optionally publishes independently compilable kernel source modules.
+/// and optionally publishes independently compilable kernel requests.
 /// The operation never prints or reparses a module. Exact root ordinals let a
 /// high-throughput embedding resolve human-readable names once at ingress and
 /// use indexed identity throughout planning.
 ///
 /// Without a request sink, construction leaves kernel implementation facets
 /// unopened. With a sink, it classifies only surviving source-backed launch
-/// sites and publishes one ordinary module per live semantic class. Published
-/// modules transfer independently and are never retained by the command
+/// sites and publishes one ordinary bytecode request per live semantic class.
+/// Published requests transfer independently and are never retained by the
 /// product.
 ///
 /// @par Example
@@ -83,57 +83,6 @@ typedef enum loomc_cmd_program_product_flag_bits_e {
 /// Bitmask of `loomc_cmd_program_product_flag_bits_t` values.
 typedef uint32_t loomc_cmd_program_product_flags_t;
 
-/// One independently compilable kernel source request.
-///
-/// The request module is ordinary Loom IR and may be passed directly to the
-/// module query, serialization, compilation, and emission APIs. It contains
-/// one exported kernel root specialized for every launch site represented by
-/// this semantic class.
-typedef struct loomc_cmd_kernel_request_t {
-  /// Product-local executable-entry requirement satisfied by this request.
-  uint32_t entry_requirement_ordinal;
-
-  /// Exported kernel root in `module`, without a leading `@`.
-  ///
-  /// This view borrows from `module` and remains valid until that module is
-  /// released or mutated.
-  loomc_string_view_t root_symbol;
-
-  /// Number of command-program launch sites represented by this request.
-  loomc_host_size_t member_count;
-
-  /// Independently owned ordinary Loom source module.
-  loomc_module_t* module;
-} loomc_cmd_kernel_request_t;
-
-/// Accepts ownership of one kernel source request at callback entry.
-///
-/// @param user_data Callback-owned state.
-/// @param request Request whose `module` reference transfers to the callback.
-/// @return OK to continue publication or a non-OK status to terminate the
-/// parent operation.
-///
-/// @ownership
-/// The callback owns `request.module` at entry, including when it returns a
-/// non-OK status. It must release or transfer that module reference.
-///
-/// @par Transaction
-/// Publication is provisional until the parent operation returns OK with a
-/// succeeded result. A non-OK status or failed result cancels the parent
-/// product; the embedding remains responsible for requests it accepted before
-/// cancellation.
-typedef loomc_status_t(LOOMC_API_PTR* loomc_cmd_kernel_request_publish_fn_t)(
-    void* user_data, loomc_cmd_kernel_request_t request);
-
-/// Optional destination for streamed kernel source requests.
-typedef struct loomc_cmd_kernel_request_sink_t {
-  /// Callback accepting ownership of each published request.
-  loomc_cmd_kernel_request_publish_fn_t publish;
-
-  /// Opaque value passed to `publish`.
-  void* user_data;
-} loomc_cmd_kernel_request_sink_t;
-
 /// Command-product construction options.
 ///
 /// Callers zero-initialize this descriptor, set `type` to
@@ -172,11 +121,11 @@ typedef struct loomc_cmd_program_product_options_t {
   /// Per-invocation config bindings applied during selective materialization.
   loomc_config_options_t config;
 
-  /// Optional sink enabling source-backed kernel request publication.
+  /// Optional sink enabling source-backed request publication.
   ///
   /// A NULL callback leaves kernel implementation bodies unopened and returns
   /// only executable-entry requirements.
-  loomc_cmd_kernel_request_sink_t kernel_request_sink;
+  loomc_request_sink_t request_sink;
 } loomc_cmd_program_product_options_t;
 
 /// One serialized command root and its executable-entry projection.
@@ -196,7 +145,7 @@ typedef struct loomc_cmd_program_t {
   loomc_artifact_t artifact;
 
   /// Product-local entry requirement ordinals in root-local slot order.
-  const uint32_t* entry_requirement_ordinals;
+  const loomc_requirement_ordinal_t* entry_requirement_ordinals;
 
   /// Number of entries in `entry_requirement_ordinals`.
   loomc_host_size_t entry_requirement_count;
@@ -211,9 +160,8 @@ typedef struct loomc_cmd_entry_requirement_t {
   /// Logical kernel entry symbol without a leading `@`.
   loomc_string_view_t symbol;
 
-  /// True when the operation published an ordinary Loom source request for
-  /// this exact semantic class.
-  bool has_source_request;
+  /// True when the operation published a request for this semantic class.
+  bool has_request;
 } loomc_cmd_entry_requirement_t;
 
 /// Builds portable command programs and optional kernel source requests.
@@ -230,13 +178,13 @@ typedef struct loomc_cmd_entry_requirement_t {
 /// @ownership
 /// The caller owns `out_product` when non-NULL and releases it with
 /// `loomc_cmd_program_product_release`. The caller owns `out_result` on an OK
-/// return and releases it with `loomc_result_release`. Each request module is
-/// transferred independently to `options->kernel_request_sink`.
+/// return and releases it with `loomc_result_release`. Each request is
+/// transferred independently to `options->request_sink`.
 ///
 /// @lifetime
 /// The operation borrows `options`, its arrays, `link_index`, and `workspace`
-/// synchronously. The returned product borrows none of them. Request modules
-/// retain `workspace` through their normal module ownership contract.
+/// synchronously. The returned product and published requests borrow none of
+/// them.
 ///
 /// @thread_safety
 /// Calls may share a frozen link index. Each concurrent call requires a

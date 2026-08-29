@@ -22,6 +22,7 @@
 #include "loomc/link_index.h"
 #include "loomc/module.h"
 #include "loomc/pass.h"
+#include "loomc/product.h"
 #include "loomc/result.h"
 #include "loomc/source.h"
 #include "loomc/status.h"
@@ -47,6 +48,7 @@ using LinkerPtr = HandlePtr<loomc_linker_t, loomc_linker_release>;
 using ModulePtr = HandlePtr<loomc_module_t, loomc_module_release>;
 using PassProgramPtr =
     HandlePtr<loomc_pass_program_t, loomc_pass_program_release>;
+using RequestPtr = HandlePtr<loomc_request_t, loomc_request_release>;
 using ResultPtr = HandlePtr<loomc_result_t, loomc_result_release>;
 using SourcePtr = HandlePtr<loomc_source_t, loomc_source_release>;
 using TargetEnvironmentPtr =
@@ -74,28 +76,14 @@ std::string ToString(const loomc_byte_sequence_t* value) {
   return result;
 }
 
-struct CapturedKernelRequest {
-  // Exported kernel root in the transferred source module.
-  std::string root_symbol;
-  // Launch sites represented by this semantic class.
-  loomc_host_size_t member_count;
-  // Independently owned ordinary Loom source module.
-  ModulePtr module;
-};
-
 struct KernelRequestCapture {
   // Requests transferred by one command-product construction.
-  std::vector<CapturedKernelRequest> requests;
+  std::vector<RequestPtr> requests;
 };
 
-loomc_status_t CaptureKernelRequest(void* user_data,
-                                    loomc_cmd_kernel_request_t request) {
+loomc_status_t CaptureKernelRequest(void* user_data, loomc_request_t* request) {
   KernelRequestCapture* capture = static_cast<KernelRequestCapture*>(user_data);
-  capture->requests.push_back(CapturedKernelRequest{
-      ToString(request.root_symbol),
-      request.member_count,
-      ModulePtr(request.module),
-  });
+  capture->requests.push_back(RequestPtr(request));
   return loomc_ok_status();
 }
 
@@ -1008,7 +996,7 @@ command.program.def public @dispatch() launch() {
       /*.root_symbol_count=*/0,
       /*.flags=*/LOOMC_CMD_PROGRAM_PRODUCT_FLAG_INCLUDE_INPUT_EXPORTS,
       /*.config=*/{},
-      /*.kernel_request_sink=*/
+      /*.request_sink=*/
       {
           /*.publish=*/CaptureKernelRequest,
           /*.user_data=*/&request_capture,
@@ -1024,10 +1012,31 @@ command.program.def public @dispatch() launch() {
   ExpectSucceededResult(product_result_ptr.get());
   ASSERT_EQ(loomc_cmd_program_product_program_count(product_ptr.get()), 1u);
   ASSERT_EQ(request_capture.requests.size(), 1u);
-  EXPECT_EQ(request_capture.requests[0].root_symbol, "record_subgroup_size");
-  EXPECT_EQ(request_capture.requests[0].member_count, 1u);
-  SourcePtr request_source = SerializeModule(
-      request_capture.requests[0].module.get(), LOOMC_SOURCE_FORMAT_BYTECODE);
+  loomc_request_t* request = request_capture.requests[0].get();
+  ASSERT_EQ(loomc_request_root_count(request), 1u);
+  ASSERT_EQ(loomc_request_binding_count(request), 1u);
+  loomc_request_binding_t request_binding = {};
+  ASSERT_TRUE(loomc_request_binding_at(request, 0, &request_binding));
+  EXPECT_EQ(request_binding.requirement_ordinal, 0u);
+  EXPECT_EQ(request_binding.root_ordinal, 0u);
+  loomc_source_t* request_source = loomc_request_source(request);
+  ASSERT_NE(request_source, nullptr);
+  EXPECT_EQ(loomc_source_format(request_source), LOOMC_SOURCE_FORMAT_BYTECODE);
+
+  product_result_ptr.reset();
+  product_ptr.reset();
+  index.reset();
+  source.reset();
+  pass_program.reset();
+  compiler.reset();
+  workspace.reset();
+  context.reset();
+
+  ContextPtr request_context = CreateAmdgpuContext(target_environment.get());
+  WorkspacePtr request_workspace = CreateWorkspace();
+  CompilerPtr request_compiler = CreateCompiler(request_context.get());
+  PassProgramPtr request_pass_program =
+      CreatePreparedLowPassProgram(request_context.get());
 
   struct TargetCase {
     // Prepared target profile used for this independent compilation.
@@ -1050,8 +1059,8 @@ command.program.def public @dispatch() launch() {
       },
   };
   for (const TargetCase& target_case : target_cases) {
-    ModulePtr request_module =
-        DeserializeModule(context.get(), workspace.get(), request_source.get());
+    ModulePtr request_module = DeserializeModule(
+        request_context.get(), request_workspace.get(), request_source);
     const loomc_target_specialization_t specialization = {
         /*.function_symbol=*/
         loomc_make_cstring_view("record_subgroup_size"),
@@ -1073,9 +1082,9 @@ command.program.def public @dispatch() launch() {
     };
     loomc_result_t* compile_result = nullptr;
     LOOMC_ASSERT_OK(loomc_compile_module(
-        compiler.get(), workspace.get(), pass_program.get(),
-        request_module.get(), &compile_options, loomc_allocator_system(),
-        &compile_result));
+        request_compiler.get(), request_workspace.get(),
+        request_pass_program.get(), request_module.get(), &compile_options,
+        loomc_allocator_system(), &compile_result));
     ResultPtr compile_result_ptr(compile_result);
     ExpectSucceededResult(compile_result_ptr.get());
     const loomc_artifact_t* text_artifact =

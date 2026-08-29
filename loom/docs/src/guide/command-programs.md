@@ -301,12 +301,12 @@ Command preparation has two independent ownership channels:
 | Owner | Responsibility |
 | --- | --- |
 | Prepared command plan | Portable roots, atomic entry requirements, parameter placements, rebindable bindings, transients, and explicit indirect-count storage. |
-| Optional request recipient | Independently owned ordinary Loom modules specialized only by distinctions that change generated kernels. |
+| Optional request recipient | Immutable ordinary Loom bytecode requests specialized only by distinctions that change generated kernels. |
 
-The plan never retains a request module, source provider, kernel body, or
-classification state. A request transfers to its recipient as it is published;
-the parent operation's terminal result determines whether the complete set is
-committed or cancelled.
+The plan never retains a request, source provider, kernel body, or
+classification state. A request transfers to its recipient as it is published
+and can outlive the producer workspace; the parent operation's terminal result
+determines whether its provisional bindings are committed or cancelled.
 
 ## Emit the portable deployment artifacts
 

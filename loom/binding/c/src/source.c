@@ -24,7 +24,7 @@ struct loomc_source_t {
   loomc_allocator_t allocator;
   // Source format.
   loomc_source_format_t format;
-  // Copied diagnostic/cache identifier.
+  // Copied diagnostic/provider identifier.
   loomc_string_view_t identifier;
   // Source bytes.
   loomc_byte_span_t contents;
@@ -40,7 +40,7 @@ typedef struct loomc_source_resolved_load_options_t {
   // Loaded source format.
   loomc_source_format_t format;
 
-  // Identifier used in diagnostics and cache keys.
+  // Identifier used in diagnostics and provider labels.
   loomc_string_view_t identifier;
 } loomc_source_resolved_load_options_t;
 

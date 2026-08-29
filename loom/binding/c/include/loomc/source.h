@@ -14,9 +14,10 @@
 /// @file
 /// Immutable source handles used by parsing, indexing, linking, and compiling.
 ///
-/// Sources carry bytes plus stable identity. They are distinct from parsed
-/// modules and from output artifacts. Source identity is used for diagnostics,
-/// cache keys, and deterministic link-index provenance.
+/// Sources carry bytes plus diagnostic identity. They are distinct from parsed
+/// modules and from output artifacts. Source identifiers label diagnostics and
+/// link-index providers but do not participate in content or compilation cache
+/// identity.
 ///
 /// @par Example
 /// Copy source bytes when the caller does not want source lifetime to depend on
@@ -134,7 +135,7 @@ typedef struct loomc_source_options_t {
   /// Input source format.
   loomc_source_format_t format;
 
-  /// Stable identifier used in diagnostics and cache keys.
+  /// Stable identifier used in diagnostics and provider labels.
   loomc_string_view_t identifier;
 
   /// Input bytes.
@@ -169,7 +170,7 @@ typedef struct loomc_source_load_options_t {
   /// Loaded source format.
   loomc_source_format_t format;
 
-  /// Stable identifier used in diagnostics and cache keys.
+  /// Stable identifier used in diagnostics and provider labels.
   ///
   /// Empty uses no identifier for open-file loads and uses `path` for path
   /// loads.

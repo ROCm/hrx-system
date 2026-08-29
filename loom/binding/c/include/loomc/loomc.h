@@ -30,6 +30,7 @@
 #include "loomc/link_index.h"
 #include "loomc/module.h"
 #include "loomc/pass.h"
+#include "loomc/product.h"
 #include "loomc/result.h"
 #include "loomc/sanitizer.h"
 #include "loomc/source.h"

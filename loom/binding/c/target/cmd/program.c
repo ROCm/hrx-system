@@ -16,6 +16,8 @@
 #include "loom/binding/c/src/link_index.h"
 #include "loom/binding/c/src/link_materialization.h"
 #include "loom/binding/c/src/module.h"
+#include "loom/binding/c/src/module_bytecode.h"
+#include "loom/binding/c/src/product.h"
 #include "loom/binding/c/src/result.h"
 #include "loom/binding/c/src/target.h"
 #include "loom/binding/c/src/workspace.h"
@@ -44,23 +46,20 @@ struct loomc_cmd_program_product_t {
 };
 
 typedef struct loomc_cmd_program_product_invocation_t {
-  // Public composition resources borrowed by this invocation.
+  // Resources used to serialize immutable requests.
   struct {
-    // Context shared by every source and returned request module.
+    // Context providing the bytecode representation environment.
     loomc_context_t* context;
 
-    // Workspace retained independently by each returned request module.
-    loomc_workspace_t* workspace;
-
-    // Allocator used for public request module handles.
+    // Allocator used for request sources and handles.
     loomc_allocator_t allocator;
-  } composition;
+  } request;
 
   // Operation result receiving command preparation diagnostics.
   loomc_result_t* result;
 
   // Optional embedding sink accepting source-backed kernel requests.
-  loomc_cmd_kernel_request_sink_t request_sink;
+  loomc_request_sink_t request_sink;
 
   // True after the embedding request callback returns a non-OK status.
   bool request_callback_failed;
@@ -249,31 +248,44 @@ static iree_status_t loomc_cmd_program_product_publish_kernel_request(
   const iree_string_view_t root_symbol =
       loomc_cmd_program_product_kernel_name(&request.source.product);
 
-  loomc_module_t* module = NULL;
-  loomc_status_t status = loomc_module_create_empty(
-      invocation->composition.context, invocation->composition.workspace,
-      invocation->composition.allocator, &module);
+  const loom_symbol_id_t module_symbol_id =
+      request.source.product.kernel.symbol_id;
+  loom_symbol_id_t bytecode_symbol_ordinal = LOOM_SYMBOL_ID_INVALID;
+  const loomc_module_symbol_projection_t projection = {
+      .module_symbol_ids = &module_symbol_id,
+      .bytecode_symbol_ordinals = &bytecode_symbol_ordinal,
+      .count = 1,
+  };
+  loomc_source_t* source = NULL;
+  loomc_status_t status = loomc_module_serialize_internal_bytecode_to_source(
+      invocation->request.context, request.source.product.module,
+      loomc_string_view_from_iree(root_symbol), &projection,
+      invocation->request.allocator, &source);
+
+  loomc_request_t* public_request = NULL;
   if (loomc_status_is_ok(status)) {
-    status =
-        loomc_module_set_loom_module(module, request.source.product.module);
-    if (loomc_status_is_ok(status)) {
-      request.source.product.module = NULL;
-    }
+    const loomc_request_root_t root = {
+        .module_ordinal = 0,
+        .symbol_ordinal = bytecode_symbol_ordinal,
+    };
+    const loomc_request_binding_t binding = {
+        .requirement_ordinal = request.entry_requirement_index,
+        .root_ordinal = 0,
+    };
+    status = loomc_request_create_take_source(&source, &root, 1, &binding, 1,
+                                              invocation->request.allocator,
+                                              &public_request);
   }
   if (loomc_status_is_ok(status)) {
-    loomc_cmd_kernel_request_t public_request = {
-        .entry_requirement_ordinal = request.entry_requirement_index,
-        .root_symbol = loomc_string_view_from_iree(root_symbol),
-        .member_count = request.source.member_count,
-        .module = module,
-    };
-    module = NULL;
+    loomc_request_t* transferred_request = public_request;
+    public_request = NULL;
     status = invocation->request_sink.publish(
-        invocation->request_sink.user_data, public_request);
+        invocation->request_sink.user_data, transferred_request);
     invocation->request_callback_failed = !loomc_status_is_ok(status);
   }
 
-  loomc_module_release(module);
+  loomc_request_release(public_request);
+  loomc_source_release(source);
   loom_kernel_class_product_deinitialize(&request.source.product);
   return iree_status_from_loomc(status);
 }
@@ -344,14 +356,13 @@ loomc_status_t loomc_cmd_program_product_build(
   loom_cmd_program_artifact_set_t artifact_set = {0};
   loomc_cmd_program_product_t* product = NULL;
   loomc_cmd_program_product_invocation_t invocation = {
-      .composition =
+      .request =
           {
               .context = loomc_link_index_context(options->link_index),
-              .workspace = workspace,
               .allocator = allocator,
           },
       .result = result,
-      .request_sink = options->kernel_request_sink,
+      .request_sink = options->request_sink,
   };
   loomc_status_t status = loomc_ok_status();
 
@@ -364,7 +375,7 @@ loomc_status_t loomc_cmd_program_product_build(
 
   loomc_link_materialization_state_t materialization_state = {0};
   loomc_link_materialization_state_initialize(
-      invocation.composition.context, workspace, options->link_index,
+      invocation.request.context, workspace, options->link_index,
       &options->config, target_specialization, result, allocator,
       &materialization_state);
   const loom_link_plan_materialization_environment_t
@@ -372,7 +383,7 @@ loomc_status_t loomc_cmd_program_product_build(
           loomc_link_materialization_state_environment(&materialization_state);
   loom_cmd_program_plan_index_options_t plan_options;
   loom_cmd_program_plan_index_options_initialize(&plan_options);
-  if (options->kernel_request_sink.publish != NULL) {
+  if (options->request_sink.publish != NULL) {
     plan_options.kernel_request_sink = (loom_cmd_program_kernel_request_sink_t){
         .publish = loomc_cmd_program_product_publish_kernel_request,
         .user_data = &invocation,
@@ -388,7 +399,7 @@ loomc_status_t loomc_cmd_program_product_build(
             loomc_link_index_module_index(options->link_index),
             root_symbol_ordinals, root_symbol_count,
             &(loom_cmd_program_artifact_builder_options_t){
-                .plan_options = options->kernel_request_sink.publish != NULL
+                .plan_options = options->request_sink.publish != NULL
                                     ? &plan_options
                                     : NULL,
                 .pass_registry = loom_pass_builtin_registry(),
@@ -501,7 +512,7 @@ bool loomc_cmd_program_product_entry_requirement_at(
       &product->artifact_set.entries.values[ordinal];
   *out_requirement = (loomc_cmd_entry_requirement_t){
       .symbol = loomc_string_view_from_iree(entry->symbol),
-      .has_source_request = entry->has_source_request,
+      .has_request = entry->has_source_request,
   };
   return true;
 }
