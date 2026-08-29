@@ -240,9 +240,6 @@ command.program.def @private_root() launch(%storage: buffer) {
   command.return
 }
 )");
-  ModulePtr requester =
-      DeserializeModule(context.get(), workspace.get(), requester_source.get());
-
   SourcePtr kernel_text_source = CreateTextSource("large_schedule.loom", R"(
 template.decl @request.schedule(%size: index)
 
@@ -264,20 +261,21 @@ template.def<@request.schedule> priority(1) @small(%size: index) {
 )");
 
   BuilderPtr builder = CreateIndexBuilder(context.get());
-  loomc_link_index_provider_options_t requester_options = {
+  loomc_link_index_source_options_t requester_options = {
       /*.provider_name=*/loomc_make_cstring_view("requester"),
       /*.role=*/LOOMC_LINK_PROVIDER_ROLE_INPUT,
   };
-  loomc_link_index_provider_slot_t requester_slot = {};
-  LOOMC_ASSERT_OK(loomc_link_index_builder_add_module(
-      builder.get(), requester.get(), &requester_options, &requester_slot));
-  loomc_link_index_provider_options_t schedule_options = {
+  loomc_link_index_source_slot_t requester_slot = {};
+  LOOMC_ASSERT_OK(
+      loomc_link_index_builder_add_source(builder.get(), requester_source.get(),
+                                          &requester_options, &requester_slot));
+  loomc_link_index_source_options_t schedule_options = {
       /*.provider_name=*/loomc_make_cstring_view("schedule"),
       /*.role=*/LOOMC_LINK_PROVIDER_ROLE_LIBRARY,
   };
   LOOMC_ASSERT_OK(loomc_link_index_builder_add_source(
       builder.get(), schedule_source.get(), &schedule_options, nullptr));
-  loomc_link_index_provider_options_t kernel_options = {
+  loomc_link_index_source_options_t kernel_options = {
       /*.provider_name=*/loomc_make_cstring_view("kernel"),
       /*.role=*/LOOMC_LINK_PROVIDER_ROLE_LIBRARY,
   };
@@ -432,7 +430,6 @@ template.def<@request.schedule> priority(1) @small(%size: index) {
   EXPECT_EQ(reject_state.publish_count, 1u);
 
   link_index.reset();
-  requester.reset();
   kernel_module.reset();
   requester_source.reset();
   kernel_text_source.reset();
