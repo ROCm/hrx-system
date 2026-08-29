@@ -444,38 +444,5 @@ TEST(DeviceProfilingOptionsTest, CloneOwnsBorrowedStringsAndArrays) {
                                                  iree_allocator_system());
 }
 
-TEST(DeviceExternalCaptureTest, BeginRequiresProvider) {
-  iree_hal_mock_device_options_t mock_options;
-  iree_hal_mock_device_options_initialize(&mock_options);
-
-  iree_hal_device_t* device = NULL;
-  IREE_ASSERT_OK(iree_hal_mock_device_create(&mock_options,
-                                             iree_allocator_system(), &device));
-
-  iree_hal_device_external_capture_options_t capture_options = {};
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      iree_hal_device_external_capture_begin(device, &capture_options));
-
-  iree_hal_device_release(device);
-}
-
-TEST(DeviceExternalCaptureTest, BeginWithoutBackendHookIsUnimplemented) {
-  iree_hal_mock_device_options_t mock_options;
-  iree_hal_mock_device_options_initialize(&mock_options);
-
-  iree_hal_device_t* device = NULL;
-  IREE_ASSERT_OK(iree_hal_mock_device_create(&mock_options,
-                                             iree_allocator_system(), &device));
-
-  iree_hal_device_external_capture_options_t capture_options = {};
-  capture_options.provider = IREE_SV("renderdoc");
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_UNIMPLEMENTED,
-      iree_hal_device_external_capture_begin(device, &capture_options));
-
-  iree_hal_device_release(device);
-}
-
 }  // namespace
 }  // namespace iree::hal

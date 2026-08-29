@@ -5,8 +5,8 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 // Tests for HAL command buffer dispatch with both push constants and buffer
-// bindings in the same dispatch call.  Push constants and buffer descriptors
-// compete for register space on Metal/Vulkan, and testing them in isolation
+// bindings in the same dispatch call. Some backends allocate constants and
+// descriptors from shared argument resources, so testing them in isolation
 // misses interaction bugs.
 
 #include <cstdint>

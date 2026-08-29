@@ -330,7 +330,7 @@ enum hrx_device_event_flag_bits_t {
 typedef struct hrx_device_event_source_t {
   // Stable device identifier string when available.
   hrx_string_view_t device_id;
-  // Backend name such as "amdgpu", "hip", "vulkan", "metal", or "webgpu".
+  // Backend name such as "amdgpu", "local-task", "vulkan", or "webgpu".
   hrx_string_view_t driver_id;
   // Physical device ordinal, or UINT32_MAX when not applicable.
   uint32_t physical_device_ordinal;

@@ -692,7 +692,7 @@ TEST(Topology, MatrixFormatting) {
 TEST(TopologyEdge, NewHandleTypes) {
   iree_hal_topology_edge_interop_word_t hi = 0;
 
-  // Set all 8 handle type bits.
+  // Set every defined handle type bit, including the high bit.
   iree_hal_topology_handle_type_t all_types =
       IREE_HAL_TOPOLOGY_HANDLE_TYPE_NATIVE |
       IREE_HAL_TOPOLOGY_HANDLE_TYPE_OPAQUE_FD |
@@ -700,12 +700,10 @@ TEST(TopologyEdge, NewHandleTypes) {
       IREE_HAL_TOPOLOGY_HANDLE_TYPE_DMA_BUF |
       IREE_HAL_TOPOLOGY_HANDLE_TYPE_RDMA_MR |
       IREE_HAL_TOPOLOGY_HANDLE_TYPE_SHM |
-      IREE_HAL_TOPOLOGY_HANDLE_TYPE_METAL_IOSURFACE |
       IREE_HAL_TOPOLOGY_HANDLE_TYPE_ANDROID_HARDWARE_BUFFER;
 
   hi = iree_hal_topology_edge_set_buffer_import_types(hi, all_types);
   EXPECT_EQ(iree_hal_topology_edge_buffer_import_types(hi), all_types);
-  EXPECT_EQ(iree_hal_topology_edge_buffer_import_types(hi), 0xFF);
 }
 
 // Tests that buffer handle types and semaphore timepoint types are separate

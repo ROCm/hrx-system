@@ -145,7 +145,7 @@ CPU_RESOURCE_TAG_EXCLUDES = (
     "-iree-run-requirement=runtime.resource.vulkan_device",
     "-iree-run-requirement=runtime.resource.webgpu_device",
 )
-NON_CPU_HAL_DRIVER_CTEST_REGEX = r"^iree/hal/drivers/(amdgpu|metal|vulkan|webgpu)/"
+NON_CPU_HAL_DRIVER_CTEST_REGEX = r"^iree/hal/drivers/(amdgpu|vulkan|webgpu)/"
 
 AMDGPU_CMAKE_DRIVER_TARGETS = ("runtime/src/iree/hal/drivers/amdgpu/all",)
 DEFAULT_AMDGPU_TARGET_SELECTOR = "gfx942"

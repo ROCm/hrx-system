@@ -81,9 +81,6 @@ LOOM_IMPORT_DEFINES = {
     "LOOM_IMPORT_MLIR": "mlir",
     "LOOM_IMPORT_TILELANG": "tilelang",
 }
-UNSUPPORTED_DRIVER_DEFINES = {
-    "IREE_HAL_DRIVER_METAL": "metal",
-}
 REMOVED_OPTIONS = frozenset(
     ("--enable-driver", "--include-driver", "--exclude-driver", "--rocm-path")
 )
@@ -476,10 +473,6 @@ def apply_define(request: ConfigRequest, define: str) -> None:
     name, value = parse_define(define)
     if name in DRIVER_DEFINES:
         request.set_driver(DRIVER_DEFINES[name], parse_bool(name, value))
-        return
-    if name in UNSUPPORTED_DRIVER_DEFINES:
-        if parse_bool(name, value):
-            raise SystemExit(f"{name}=ON is not configured in the Bazel graph yet.")
         return
     if name in LOOM_TARGET_DEFINES:
         request.set_loom_target(LOOM_TARGET_DEFINES[name], parse_bool(name, value))
