@@ -44,6 +44,7 @@ CMAKE_SOURCE_FORMAT_TARGET_DEFINES = (
     ("llvmir", "LOOM_TARGET_LLVMIR"),
     ("spirv", "LOOM_TARGET_SPIRV"),
     ("wasm", "LOOM_TARGET_WASM"),
+    ("xdna", "LOOM_TARGET_XDNA"),
     ("x86", "LOOM_TARGET_X86"),
 )
 CI_LOOM_TARGETS = ",".join(

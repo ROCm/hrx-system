@@ -90,6 +90,16 @@ iree_py_library(
 
 iree_py_library(
   NAME
+    aie2p_contract_table_family
+  MAIN_MODULE
+    "loom.gen.target.contracts.contract_table_family"
+  DEPS
+    loom::py::loom::gen::target::contracts::contract_table_family
+    loom::py::loom::target::arch::amd::xdna::aie2p::contracts::contracts
+)
+
+iree_py_library(
+  NAME
     llvmir_contract_table_family
   MAIN_MODULE
     "loom.gen.target.contracts.contract_table_family"

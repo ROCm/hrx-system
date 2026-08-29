@@ -207,6 +207,12 @@ def _load_amdgpu_generation() -> DialectGeneration:
     return DialectGeneration(amdgpu_ops, list(ALL_AMDGPU_OPS), None)
 
 
+def _load_aie2p_generation() -> DialectGeneration:
+    from loom.target.arch.amd.xdna.aie2p.dialect import ALL_AIE2P_OPS, aie2p_ops
+
+    return DialectGeneration(aie2p_ops, list(ALL_AIE2P_OPS), None)
+
+
 def _load_x86_generation() -> DialectGeneration:
     from loom.target.arch.x86.dialect import ALL_X86_OPS, x86_ops
 
@@ -249,6 +255,7 @@ _DIALECT_GENERATION_LOADERS: tuple[tuple[str, DialectGenerationLoader], ...] = (
     ("config", _load_config_generation),
     ("sanitizer", _load_sanitizer_generation),
     ("amdgpu", _load_amdgpu_generation),
+    ("aie2p", _load_aie2p_generation),
     ("x86", _load_x86_generation),
     ("spirv", _load_spirv_generation),
     ("wasm", _load_wasm_generation),

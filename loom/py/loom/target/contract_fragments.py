@@ -39,6 +39,13 @@ class ContractFragmentRegistration:
 
 CONTRACT_FRAGMENT_REGISTRATIONS = (
     ContractFragmentRegistration(
+        key="amd.xdna.aie2p.core",
+        module_name="loom.target.arch.amd.xdna.aie2p.contracts.core",
+        symbol_name="AIE2P_CORE_CONTRACT_FRAGMENT",
+        dialect_ops_symbol_name="AIE2P_CORE_CONTRACT_DIALECT_OPS",
+        aliases=("amd_xdna_aie2p_core",),
+    ),
+    ContractFragmentRegistration(
         key="amdgpu.async",
         module_name="loom.target.arch.amdgpu.contracts.async",
         symbol_name="AMDGPU_ASYNC_CONTRACT_FRAGMENT",

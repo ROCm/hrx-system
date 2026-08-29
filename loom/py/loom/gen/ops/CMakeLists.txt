@@ -78,6 +78,7 @@ iree_py_library(
     loom::py::loom::gen::ops::c_tables
     loom::py::loom::dialect::package
     loom::py::loom::target::arch::amdgpu::dialect
+    loom::py::loom::target::arch::amd::xdna::aie2p::dialect
     loom::py::loom::target::arch::spirv::dialect
     loom::py::loom::target::arch::wasm::dialect
     loom::py::loom::target::arch::x86::dialect
@@ -91,6 +92,16 @@ iree_py_library(
   DEPS
     loom::py::loom::gen::ops::c_tables
     loom::py::loom::target::arch::amdgpu::dialect
+)
+
+iree_py_library(
+  NAME
+    c_tables_aie2p_generator
+  MAIN_MODULE
+    "loom.gen.ops.c_tables"
+  DEPS
+    loom::py::loom::gen::ops::c_tables
+    loom::py::loom::target::arch::amd::xdna::aie2p::dialect
 )
 
 iree_py_library(

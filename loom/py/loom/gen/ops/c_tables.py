@@ -144,7 +144,11 @@ def checked_in_file_set(model: GenerationModel | None = None) -> GeneratedFileSe
         dialect_dir = output_root / _c_dialect_path(generation.dialect)
         for filename, contents in c_dialect.generate_dialect_contents(generation).items():
             path = (dialect_dir / filename).as_posix()
-            if filename in ("ops.h", "types.h", "tables.h"):
+            if generation.dialect.checked_in_headers and filename in (
+                "ops.h",
+                "types.h",
+                "tables.h",
+            ):
                 checked_in_outputs[path] = contents
             else:
                 build_output_paths.append(path)

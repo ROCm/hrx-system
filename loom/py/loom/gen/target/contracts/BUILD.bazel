@@ -14,6 +14,7 @@ package(
 GENERATOR_VISIBILITY = [
     "//loom/py/loom/gen:__subpackages__",
     "//loom/src/loom/target/arch/amdgpu/contracts:__pkg__",
+    "//loom/src/loom/target/arch/amd/xdna/aie2p/contracts:__pkg__",
     "//loom/src/loom/target/arch/llvmir/contracts:__pkg__",
     "//loom/src/loom/target/arch/spirv/contracts:__pkg__",
     "//loom/src/loom/target/arch/x86/contracts:__pkg__",
@@ -99,6 +100,16 @@ iree_py_binary(
     deps = [
         ":contract_table_family",
         "//loom/py/loom/target/arch/amdgpu/contracts",
+    ],
+)
+
+iree_py_binary(
+    name = "aie2p_contract_table_family",
+    main_module = "loom.gen.target.contracts.contract_table_family",
+    visibility = GENERATOR_VISIBILITY,
+    deps = [
+        ":contract_table_family",
+        "//loom/py/loom/target/arch/amd/xdna/aie2p/contracts",
     ],
 )
 

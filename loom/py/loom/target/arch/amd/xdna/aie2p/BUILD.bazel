@@ -19,6 +19,17 @@ iree_py_library(
 )
 
 iree_py_library(
+    name = "dialect",
+    srcs = ["dialect.py"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":package_init",
+        "//loom/py/loom:core",
+        "//loom/py/loom/dialect/target",
+    ],
+)
+
+iree_py_library(
     name = "encoding_data",
     srcs = ["core_encoding_data.py"],
     visibility = ["//visibility:public"],
