@@ -184,4 +184,20 @@ iree_cc_library(
   PUBLIC
 )
 
+iree_cc_test(
+  NAME
+    task_queue_test
+  SRCS
+    "task_queue_test.cc"
+  DEPS
+    ::task_driver
+    iree::async
+    iree::async::util::proactor_pool
+    iree::base
+    iree::hal
+    iree::task
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
