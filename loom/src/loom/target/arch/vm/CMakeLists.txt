@@ -261,8 +261,10 @@ loom_cc_library(
     loom::codegen::low::function
     loom::error::error_defs
     loom::ir
+    loom::ops::buffer
     loom::ops::func
     loom::ops::global
+    loom::ops::kernel
     loom::ops::low
     loom::ops::op_defs
     loom::ops::scalar
@@ -311,10 +313,13 @@ loom_check_test_suite(
     "test/ops/resources.loom-test"
     "test/source_low/abi_materialization.loom-test"
     "test/source_low/abi_types.loom-test"
+    "test/source_low/async_gather.loom-test"
     "test/source_low/buffer_allocation.loom-test"
+    "test/source_low/buffer_copy.loom-test"
     "test/source_low/constant_pool.loom-test"
     "test/source_low/control_switch.loom-test"
     "test/source_low/corpus/async_empty.loom-test"
+    "test/source_low/corpus/async_gather.loom-test"
     "test/source_low/corpus/index_addressing.loom-test"
     "test/source_low/corpus/lookup_table.loom-test"
     "test/source_low/corpus/memory_cache_policy_non_temporal.loom-test"
@@ -379,6 +384,7 @@ loom_check_test_suite(
     "test/source_low/vector_construction.loom-test"
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/async_empty.loom-test"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/async_gather.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/index_addressing.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/lookup_table.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/memory_cache_policy_non_temporal.loom-test"

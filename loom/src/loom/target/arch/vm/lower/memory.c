@@ -13,6 +13,7 @@
 #include "loom/codegen/low/source_memory_plan.h"
 #include "loom/ir/module.h"
 #include "loom/ops/buffer/ops.h"
+#include "loom/ops/kernel/ops.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/vector/ops.h"
@@ -40,7 +41,9 @@ enum loom_vm_memory_plan_kind_e {
   LOOM_VM_MEMORY_PLAN_KIND_ACCESS = 0,
   LOOM_VM_MEMORY_PLAN_KIND_ALIAS = 1,
   LOOM_VM_MEMORY_PLAN_KIND_ALLOCATE = 2,
-  LOOM_VM_MEMORY_PLAN_KIND_COUNT_ = 3,
+  LOOM_VM_MEMORY_PLAN_KIND_COPY = 3,
+  LOOM_VM_MEMORY_PLAN_KIND_ASYNC_GATHER = 4,
+  LOOM_VM_MEMORY_PLAN_KIND_COUNT_ = 5,
 };
 
 // One retained product contributing to a byte address.
@@ -66,7 +69,7 @@ typedef struct loom_vm_memory_plan_t {
   // Source SSA value naming the underlying buffer root.
   loom_value_id_t root_value_id;
   // Number of consecutive scalar value cells transferred.
-  uint16_t vector_lane_count;
+  uint32_t vector_lane_count;
   // Number of populated dynamic terms.
   uint8_t term_count;
   // Base-two logarithm of the transferred scalar byte width.
@@ -78,6 +81,30 @@ typedef struct loom_vm_memory_plan_t {
   // Dynamic address terms followed by their packed source SSA factor IDs.
   loom_vm_memory_term_t terms[];
 } loom_vm_memory_plan_t;
+
+// Retained endpoints for one scalar-profile asynchronous gather.
+typedef struct loom_vm_async_gather_plan_t {
+  // Source view byte address.
+  loom_vm_memory_plan_t* source;
+  // Destination lane-zero byte address.
+  loom_vm_memory_plan_t* target;
+  // Exact number of bytes copied from the source view.
+  uint64_t byte_length;
+} loom_vm_async_gather_plan_t;
+
+// Temporary source analysis used to validate and retain an async gather plan.
+typedef struct loom_vm_async_gather_selection_t {
+  // Target-independent source-view access plan.
+  loom_low_source_memory_access_plan_t source;
+  // Target-independent destination-view access plan.
+  loom_low_source_memory_access_plan_t target;
+  // Exact number of source bytes copied to lane zero.
+  uint64_t byte_length;
+  // Number of packed dynamic factors in the source address.
+  uint16_t source_factor_count;
+  // Number of packed dynamic factors in the target address.
+  uint16_t target_factor_count;
+} loom_vm_async_gather_selection_t;
 
 enum loom_vm_atomic_component_e {
   LOOM_VM_ATOMIC_COMPONENT_KIND = 0,
@@ -303,6 +330,41 @@ static bool loom_vm_memory_atomic_payload_supported(
   return true;
 }
 
+static bool loom_vm_memory_address_plan_supported(
+    const loom_module_t* module,
+    const loom_low_source_memory_access_plan_t* source_plan,
+    uint16_t* out_factor_count) {
+  *out_factor_count = 0;
+  if (source_plan->root_value_id >= module->values.count ||
+      !loom_type_is_buffer(
+          loom_module_value_type(module, source_plan->root_value_id))) {
+    return false;
+  }
+  if (loom_low_source_memory_access_dynamic_offset_has_materialized_view_base(
+          source_plan) &&
+      source_plan->dynamic_view_base_value_id >= module->values.count) {
+    return false;
+  }
+
+  uint32_t factor_count = 0;
+  for (uint8_t i = 0; i < source_plan->dynamic_term_count; ++i) {
+    const loom_low_source_memory_dynamic_term_t* term =
+        &source_plan->dynamic_terms[i];
+    if (term->index >= module->values.count ||
+        factor_count > UINT16_MAX - term->stride_value_count ||
+        (term->byte_shift != LOOM_LOW_SOURCE_MEMORY_ACCESS_BYTE_SHIFT_NONE &&
+         term->byte_shift >= 64)) {
+      return false;
+    }
+    factor_count += term->stride_value_count;
+    for (uint8_t j = 0; j < term->stride_value_count; ++j) {
+      if (term->stride_values[j] >= module->values.count) return false;
+    }
+  }
+  *out_factor_count = (uint16_t)factor_count;
+  return true;
+}
+
 static bool loom_vm_memory_source_plan_supported(
     const loom_module_t* module, const loom_op_t* source_op,
     loom_memory_access_t access,
@@ -311,9 +373,6 @@ static bool loom_vm_memory_source_plan_supported(
   *out_element_byte_log2 = 0;
   *out_factor_count = 0;
   if (!loom_vm_memory_source_op_supported(source_op) ||
-      source_plan->root_value_id >= module->values.count ||
-      !loom_type_is_buffer(
-          loom_module_value_type(module, source_plan->root_value_id)) ||
       source_plan->vector_lane_count == 0 ||
       source_plan->vector_lane_count > LOOM_VM_CALL_ABI_MAX_FIELD_UNIT_COUNT ||
       source_plan->vector_offset_kind !=
@@ -336,11 +395,6 @@ static bool loom_vm_memory_source_plan_supported(
   if (!payload_supported) {
     return false;
   }
-  if (loom_low_source_memory_access_dynamic_offset_has_materialized_view_base(
-          source_plan) &&
-      source_plan->dynamic_view_base_value_id >= module->values.count) {
-    return false;
-  }
 
   int64_t final_byte_offset = 0;
   if (!iree_checked_mul_add_i64(source_plan->static_byte_offset,
@@ -350,24 +404,8 @@ static bool loom_vm_memory_source_plan_supported(
     return false;
   }
   (void)final_byte_offset;
-
-  uint32_t factor_count = 0;
-  for (uint8_t i = 0; i < source_plan->dynamic_term_count; ++i) {
-    const loom_low_source_memory_dynamic_term_t* term =
-        &source_plan->dynamic_terms[i];
-    if (term->index >= module->values.count ||
-        factor_count > UINT16_MAX - term->stride_value_count ||
-        (term->byte_shift != LOOM_LOW_SOURCE_MEMORY_ACCESS_BYTE_SHIFT_NONE &&
-         term->byte_shift >= 64)) {
-      return false;
-    }
-    factor_count += term->stride_value_count;
-    for (uint8_t j = 0; j < term->stride_value_count; ++j) {
-      if (term->stride_values[j] >= module->values.count) return false;
-    }
-  }
-  *out_factor_count = (uint16_t)factor_count;
-  return true;
+  return loom_vm_memory_address_plan_supported(module, source_plan,
+                                               out_factor_count);
 }
 
 static bool loom_vm_memory_source_plan_build(
@@ -386,6 +424,81 @@ static bool loom_vm_memory_source_plan_build(
   return loom_vm_memory_source_plan_supported(
       module, source_op, access, out_source_plan, out_element_byte_log2,
       out_factor_count);
+}
+
+static bool loom_vm_memory_view_base_plan_build(
+    const loom_module_t* module, const loom_view_region_table_t* view_regions,
+    loom_low_source_memory_operation_kind_t operation_kind,
+    loom_value_id_t view_value_id,
+    loom_vector_memory_cache_policy_t cache_policy,
+    loom_low_source_memory_access_plan_t* out_plan,
+    loom_low_source_memory_access_diagnostic_t* out_diagnostic) {
+  if (view_value_id >= module->values.count) return false;
+  const loom_type_t view_type = loom_module_value_type(module, view_value_id);
+  if (!loom_type_is_view(view_type) ||
+      loom_type_rank(view_type) > LOOM_ENCODING_ADDRESS_LAYOUT_MAX_RANK) {
+    return false;
+  }
+
+  int64_t zero_indices[LOOM_ENCODING_ADDRESS_LAYOUT_MAX_RANK] = {0};
+  const loom_attribute_t static_indices =
+      loom_attr_i64_array(zero_indices, loom_type_rank(view_type));
+  const loom_type_t scalar_vector_type =
+      loom_type_shaped_1d(LOOM_TYPE_VECTOR, loom_type_element_type(view_type),
+                          loom_dim_pack_static(1), /*encoding_id=*/0);
+  return loom_low_source_memory_access_plan_build_indexed(
+      view_regions, operation_kind, view_value_id, (loom_value_slice_t){0},
+      static_indices, scalar_vector_type, cache_policy, out_plan,
+      out_diagnostic);
+}
+
+static bool loom_vm_memory_async_gather_select(
+    const loom_module_t* module, const loom_view_region_table_t* view_regions,
+    const loom_op_t* source_op,
+    loom_vm_async_gather_selection_t* out_selection) {
+  *out_selection = (loom_vm_async_gather_selection_t){0};
+  if (!loom_kernel_async_gather_isa(source_op) ||
+      source_op->attribute_count < 2) {
+    return false;
+  }
+
+  loom_vector_memory_cache_policy_t cache_policy = {0};
+  if (!loom_vector_memory_cache_policy_from_attrs(
+          loom_op_const_attrs(source_op)[0], loom_op_const_attrs(source_op)[1],
+          &cache_policy)) {
+    return false;
+  }
+  loom_low_source_memory_access_diagnostic_t diagnostic = {0};
+  if (!loom_low_source_memory_access_plan_build_view(
+          view_regions, LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD,
+          loom_kernel_async_gather_source(source_op), cache_policy,
+          &out_selection->source, &diagnostic) ||
+      !loom_vm_memory_view_base_plan_build(
+          module, view_regions, LOOM_LOW_SOURCE_MEMORY_OPERATION_STORE,
+          loom_kernel_async_gather_dest(source_op),
+          (loom_vector_memory_cache_policy_t){0}, &out_selection->target,
+          &diagnostic)) {
+    return false;
+  }
+
+  if (out_selection->source.vector_lane_count == 0 ||
+      out_selection->source.vector_offset_kind !=
+          LOOM_LOW_SOURCE_MEMORY_VECTOR_OFFSET_NONE ||
+      (out_selection->source.vector_lane_count > 1 &&
+       out_selection->source.vector_lane_byte_stride !=
+           (int64_t)out_selection->source.element_byte_count) ||
+      !loom_vm_memory_address_plan_supported(
+          module, &out_selection->source,
+          &out_selection->source_factor_count) ||
+      !loom_vm_memory_address_plan_supported(
+          module, &out_selection->target,
+          &out_selection->target_factor_count) ||
+      !iree_checked_mul_u64(out_selection->source.vector_lane_count,
+                            out_selection->source.element_byte_count,
+                            &out_selection->byte_length)) {
+    return false;
+  }
+  return true;
 }
 
 static iree_status_t loom_vm_memory_plan_retain(
@@ -413,7 +526,7 @@ static iree_status_t loom_vm_memory_plan_retain(
   memset(plan, 0, sizeof(*plan));
   plan->static_byte_offset = source_plan->static_byte_offset;
   plan->root_value_id = source_plan->root_value_id;
-  plan->vector_lane_count = (uint16_t)source_plan->vector_lane_count;
+  plan->vector_lane_count = source_plan->vector_lane_count;
   plan->term_count = term_count;
   plan->element_byte_log2 = element_byte_log2;
   plan->direct_scale = 0;
@@ -458,6 +571,32 @@ static iree_status_t loom_vm_memory_plan_retain(
   return iree_ok_status();
 }
 
+static iree_status_t loom_vm_memory_async_gather_plan_retain(
+    loom_low_lower_context_t* context,
+    const loom_vm_async_gather_selection_t* selection,
+    loom_vm_async_gather_plan_t** out_plan) {
+  *out_plan = NULL;
+  loom_vm_memory_plan_t* source_plan = NULL;
+  IREE_RETURN_IF_ERROR(loom_vm_memory_plan_retain(
+      context, &selection->source, /*element_byte_log2=*/0,
+      selection->source_factor_count, &source_plan));
+  loom_vm_memory_plan_t* target_plan = NULL;
+  IREE_RETURN_IF_ERROR(loom_vm_memory_plan_retain(
+      context, &selection->target, /*element_byte_log2=*/0,
+      selection->target_factor_count, &target_plan));
+
+  loom_vm_async_gather_plan_t* plan = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_low_lower_allocate_plan_data(context, sizeof(*plan), (void**)&plan));
+  *plan = (loom_vm_async_gather_plan_t){
+      .source = source_plan,
+      .target = target_plan,
+      .byte_length = selection->byte_length,
+  };
+  *out_plan = plan;
+  return iree_ok_status();
+}
+
 static iree_status_t loom_vm_memory_try_verify_op(
     const loom_target_low_legality_provider_t* provider,
     loom_target_low_legality_context_t* context, const loom_op_t* source_op,
@@ -481,6 +620,17 @@ static iree_status_t loom_vm_memory_try_verify_op(
     *out_handled = true;
     return iree_ok_status();
   }
+  if (source_op->kind == LOOM_OP_BUFFER_COPY) {
+    *out_handled = true;
+    return iree_ok_status();
+  }
+  if (source_op->kind == LOOM_OP_KERNEL_ASYNC_GATHER) {
+    loom_vm_async_gather_selection_t selection = {0};
+    *out_handled = loom_vm_memory_async_gather_select(
+        loom_target_low_legality_module(context),
+        loom_target_low_legality_view_regions(context), source_op, &selection);
+    return iree_ok_status();
+  }
   if (!loom_vm_memory_source_op_supported(source_op)) return iree_ok_status();
   loom_low_source_memory_access_plan_t source_plan = {0};
   uint8_t element_byte_log2 = 0;
@@ -496,6 +646,7 @@ const loom_target_low_legality_provider_t loom_vm_memory_low_legality_provider =
     {
         .name = IREE_SVL("vm-buffer-memory"),
         .builtin_dialect_bits = (UINT64_C(1) << LOOM_DIALECT_BUFFER) |
+                                (UINT64_C(1) << LOOM_DIALECT_KERNEL) |
                                 (UINT64_C(1) << LOOM_DIALECT_VIEW) |
                                 (UINT64_C(1) << LOOM_DIALECT_VECTOR),
         .try_verify_op = loom_vm_memory_try_verify_op,
@@ -517,6 +668,30 @@ iree_status_t loom_vm_memory_try_select_op(loom_low_lower_context_t* context,
     *out_plan = loom_low_lower_plan_make(
         kLoomVmMemoryPlanIdBase + LOOM_VM_MEMORY_PLAN_KIND_ALLOCATE,
         /*target_data=*/NULL);
+    return iree_ok_status();
+  }
+  if (source_op->kind == LOOM_OP_BUFFER_COPY) {
+    *out_plan = loom_low_lower_plan_make(
+        kLoomVmMemoryPlanIdBase + LOOM_VM_MEMORY_PLAN_KIND_COPY,
+        /*target_data=*/NULL);
+    return iree_ok_status();
+  }
+  if (source_op->kind == LOOM_OP_KERNEL_ASYNC_GATHER) {
+    const loom_view_region_table_t* view_regions = NULL;
+    IREE_RETURN_IF_ERROR(
+        loom_low_lower_context_view_regions(context, &view_regions));
+    loom_vm_async_gather_selection_t selection = {0};
+    if (!loom_vm_memory_async_gather_select(
+            loom_low_lower_context_module(context), view_regions, source_op,
+            &selection)) {
+      return iree_ok_status();
+    }
+    loom_vm_async_gather_plan_t* retained_plan = NULL;
+    IREE_RETURN_IF_ERROR(loom_vm_memory_async_gather_plan_retain(
+        context, &selection, &retained_plan));
+    *out_plan = loom_low_lower_plan_make(
+        kLoomVmMemoryPlanIdBase + LOOM_VM_MEMORY_PLAN_KIND_ASYNC_GATHER,
+        retained_plan);
     return iree_ok_status();
   }
   if (!loom_vm_memory_source_op_supported(source_op)) return iree_ok_status();
@@ -541,6 +716,20 @@ iree_status_t loom_vm_memory_try_select_op(loom_low_lower_context_t* context,
   return iree_ok_status();
 }
 
+static void loom_vm_memory_mark_address_storage_demands(
+    loom_low_lower_context_t* context, const loom_vm_memory_plan_t* plan) {
+  loom_low_lower_require_source_value_storage(context, plan->root_value_id);
+  const loom_value_id_t* factors = loom_vm_memory_plan_factors(plan);
+  for (uint8_t i = 0; i < plan->term_count; ++i) {
+    const loom_vm_memory_term_t* term = &plan->terms[i];
+    loom_low_lower_require_source_value_storage(context, term->index);
+    for (uint8_t j = 0; j < term->factor_count; ++j) {
+      loom_low_lower_require_source_value_storage(
+          context, factors[term->factor_start + j]);
+    }
+  }
+}
+
 bool loom_vm_memory_mark_plan_storage_demands(loom_low_lower_context_t* context,
                                               const loom_op_t* source_op,
                                               loom_low_lower_plan_t plan) {
@@ -558,19 +747,20 @@ bool loom_vm_memory_mark_plan_storage_demands(loom_low_lower_context_t* context,
     loom_low_lower_require_source_operands_storage(context, source_op);
     return true;
   }
+  if (loom_vm_memory_plan_kind(plan) == LOOM_VM_MEMORY_PLAN_KIND_COPY) {
+    loom_low_lower_require_source_operands_storage(context, source_op);
+    return true;
+  }
+  if (loom_vm_memory_plan_kind(plan) == LOOM_VM_MEMORY_PLAN_KIND_ASYNC_GATHER) {
+    const loom_vm_async_gather_plan_t* gather_plan = plan.target_data;
+    IREE_ASSERT(gather_plan != NULL);
+    loom_vm_memory_mark_address_storage_demands(context, gather_plan->source);
+    loom_vm_memory_mark_address_storage_demands(context, gather_plan->target);
+    return true;
+  }
   const loom_vm_memory_plan_t* memory_plan = plan.target_data;
   IREE_ASSERT(memory_plan != NULL);
-  loom_low_lower_require_source_value_storage(context,
-                                              memory_plan->root_value_id);
-  const loom_value_id_t* factors = loom_vm_memory_plan_factors(memory_plan);
-  for (uint8_t i = 0; i < memory_plan->term_count; ++i) {
-    const loom_vm_memory_term_t* term = &memory_plan->terms[i];
-    loom_low_lower_require_source_value_storage(context, term->index);
-    for (uint8_t j = 0; j < term->factor_count; ++j) {
-      loom_low_lower_require_source_value_storage(
-          context, factors[term->factor_start + j]);
-    }
-  }
+  loom_vm_memory_mark_address_storage_demands(context, memory_plan);
   if (memory_plan->operation_kind == LOOM_LOW_SOURCE_MEMORY_OPERATION_STORE) {
     const loom_memory_access_t access = loom_memory_access_cast(
         loom_low_lower_context_module(context), source_op);
@@ -707,6 +897,84 @@ static iree_status_t loom_vm_memory_materialize_complete_offset(
   return loom_vm_memory_emit_binary(
       context, VM_CORE_DESCRIPTOR_REF_INTEGER_ADD_I64, dynamic_offset,
       static_offset, address_type, source_op->location, out_offset);
+}
+
+static iree_status_t loom_vm_memory_emit_copy_instruction(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t low_target, loom_value_id_t low_target_offset,
+    loom_value_id_t low_source, loom_value_id_t low_source_offset,
+    loom_value_id_t low_byte_length) {
+  const loom_low_descriptor_t* descriptor =
+      loom_low_descriptor_set_descriptor_at(
+          loom_low_lower_context_descriptor_set(context),
+          VM_CORE_DESCRIPTOR_REF_BUFFER_COPY);
+  IREE_ASSERT(descriptor != NULL);
+  const loom_low_lower_resolved_descriptor_t resolved_descriptor = {
+      .descriptor = descriptor,
+  };
+  const loom_value_id_t operands[] = {
+      low_target,        low_target_offset, low_source,
+      low_source_offset, low_byte_length,
+  };
+  loom_op_t* low_op = NULL;
+  return loom_low_lower_emit_resolved_descriptor_op(
+      context, &resolved_descriptor, operands, IREE_ARRAYSIZE(operands),
+      loom_named_attr_slice_empty(), /*result_types=*/NULL,
+      /*result_count=*/0, /*tied_results=*/NULL, /*tied_result_count=*/0,
+      source_op->location, &low_op);
+}
+
+static iree_status_t loom_vm_memory_emit_direct_copy(
+    loom_low_lower_context_t* context, const loom_op_t* source_op) {
+  loom_value_id_t low_source = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_low_lower_lookup_value(
+      context, loom_buffer_copy_source(source_op), &low_source));
+  loom_value_id_t low_source_offset = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_low_lower_lookup_value(
+      context, loom_buffer_copy_source_offset(source_op), &low_source_offset));
+  loom_value_id_t low_target = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_low_lower_lookup_value(
+      context, loom_buffer_copy_target(source_op), &low_target));
+  loom_value_id_t low_target_offset = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_low_lower_lookup_value(
+      context, loom_buffer_copy_target_offset(source_op), &low_target_offset));
+  loom_value_id_t low_byte_length = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_low_lower_lookup_value(
+      context, loom_buffer_copy_byte_length(source_op), &low_byte_length));
+  return loom_vm_memory_emit_copy_instruction(
+      context, source_op, low_target, low_target_offset, low_source,
+      low_source_offset, low_byte_length);
+}
+
+static iree_status_t loom_vm_memory_emit_async_gather(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_vm_async_gather_plan_t* plan) {
+  loom_value_id_t low_source = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_low_lower_lookup_value(
+      context, plan->source->root_value_id, &low_source));
+  loom_value_id_t low_target = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_low_lower_lookup_value(
+      context, plan->target->root_value_id, &low_target));
+
+  loom_type_t address_type = loom_type_none();
+  IREE_RETURN_IF_ERROR(loom_vm_memory_make_value_type(
+      context, loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET), /*unit_count=*/1,
+      &address_type));
+  loom_value_id_t low_source_offset = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_vm_memory_materialize_complete_offset(
+      context, source_op, plan->source, address_type, &low_source_offset));
+  loom_value_id_t low_target_offset = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_vm_memory_materialize_complete_offset(
+      context, source_op, plan->target, address_type, &low_target_offset));
+  loom_value_id_t low_byte_length = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(
+      loom_vm_memory_emit_constant(context, plan->byte_length, address_type,
+                                   source_op->location, &low_byte_length));
+  IREE_RETURN_IF_ERROR(loom_vm_memory_emit_copy_instruction(
+      context, source_op, low_target, low_target_offset, low_source,
+      low_source_offset, low_byte_length));
+  return loom_low_lower_elide_value(context,
+                                    loom_kernel_async_gather_token(source_op));
 }
 
 static uint8_t loom_vm_memory_packet_lane_count(uint16_t remaining_lanes) {
@@ -980,6 +1248,14 @@ iree_status_t loom_vm_memory_emit_op(loom_low_lower_context_t* context,
   if (!*out_handled) return iree_ok_status();
   if (loom_vm_memory_plan_kind(plan) == LOOM_VM_MEMORY_PLAN_KIND_ALLOCATE) {
     return loom_vm_memory_emit_allocation(context, source_op);
+  }
+  if (loom_vm_memory_plan_kind(plan) == LOOM_VM_MEMORY_PLAN_KIND_COPY) {
+    return loom_vm_memory_emit_direct_copy(context, source_op);
+  }
+  if (loom_vm_memory_plan_kind(plan) == LOOM_VM_MEMORY_PLAN_KIND_ASYNC_GATHER) {
+    const loom_vm_async_gather_plan_t* gather_plan = plan.target_data;
+    IREE_ASSERT(gather_plan != NULL);
+    return loom_vm_memory_emit_async_gather(context, source_op, gather_plan);
   }
   loom_value_id_t alias_source = LOOM_VALUE_ID_INVALID;
   loom_value_id_t alias_result = LOOM_VALUE_ID_INVALID;

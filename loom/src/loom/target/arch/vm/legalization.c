@@ -6,12 +6,31 @@
 
 #include "loom/target/arch/vm/legalization.h"
 
+#include "loom/ops/buffer/ops.h"
+#include "loom/ops/kernel/ops.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/scf/ops.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/target/arch/vm/descriptors.h"
 #include "loom/transforms/scalar/target_legalization.h"
 #include "loom/transforms/vector/to_scalar.h"
+
+static iree_status_t loom_vm_retain_direct_target_op(
+    const loom_target_legalizer_entry_t* entry,
+    loom_target_legalization_context_t* context, loom_op_t* op,
+    loom_target_legalizer_result_t* out_result) {
+  (void)entry;
+  (void)op;
+  *out_result = (loom_target_legalizer_result_t){
+      .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
+  };
+  if (context->descriptor_set == loom_vm_core_descriptor_set()) {
+    *out_result = (loom_target_legalizer_result_t){
+        .action = LOOM_TARGET_LEGALIZER_ACTION_DEFER,
+    };
+  }
+  return iree_ok_status();
+}
 
 static iree_status_t loom_vm_legalize_narrow_integer_binary(
     const loom_target_legalizer_entry_t* entry,
@@ -100,6 +119,14 @@ static iree_status_t loom_vm_legalize_dynamic_vector_extract(
   }
 
 static const loom_target_legalizer_entry_t kVmLegalizerEntries[] = {
+    {
+        .root_kind = LOOM_OP_BUFFER_COPY,
+        .legalize = loom_vm_retain_direct_target_op,
+    },
+    {
+        .root_kind = LOOM_OP_KERNEL_ASYNC_GATHER,
+        .legalize = loom_vm_retain_direct_target_op,
+    },
     LOOM_VM_NARROW_INTEGER_ENTRY(LOOM_OP_SCALAR_ADDI),
     LOOM_VM_NARROW_INTEGER_ENTRY(LOOM_OP_SCALAR_SUBI),
     LOOM_VM_NARROW_INTEGER_ENTRY(LOOM_OP_SCALAR_MULI),

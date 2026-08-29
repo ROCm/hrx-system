@@ -1,0 +1,33 @@
+// RUN: emit source-low output=low
+
+vm.target<core> @target
+
+kernel.def target(@target) @async_gather_dynamic_lane() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%input: buffer, %lane_count: index, %dest_offset: offset) {
+  %tid = kernel.workitem.id<x> : index
+  %buffer_base = index.constant 0 : offset
+  %bytes = index.constant 1024 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source_base = buffer.view %global[%buffer_base] : buffer -> view<64x16xi8>
+  %source = view.subview %source_base[%tid, 0] : view<64x16xi8> -> view<1x16xi8>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %dest = buffer.view %scratch[%dest_offset] : buffer -> view<[%lane_count]x1x16xi8>
+  %copy = kernel.async.gather %source to %dest {cache_scope = device, cache_temporal = regular} : view<1x16xi8> to view<[%lane_count]x1x16xi8> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : offset>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : offset>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @async_gather_dynamic_lane(%global: reg<vm.ref : buffer>, %lane_count: reg<vm.value : index>, %dest_offset: reg<vm.value : offset>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %bytes = constant.s16 1024 : reg<vm.value : offset>
+  %scratch = buffer.allocate %bytes, 4 : reg<vm.ref : buffer>
+  %32 = constant.s16 4 : reg<vm.value : offset>
+  %33 = integer.shift.left.i64 %workitem_id_x, %32 : reg<vm.value : offset>
+  %34 = constant.s16 16 : reg<vm.value : offset>
+  buffer.copy %scratch, %dest_offset, %global, %33, %34
+  return
+}
