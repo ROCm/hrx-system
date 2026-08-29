@@ -333,6 +333,7 @@ loom_check_test_suite(
     "test/source_low/corpus/sync_barrier.loom-test"
     "test/source_low/corpus/vector_bitcast.loom-test"
     "test/source_low/corpus/vector_carrier_structure.loom-test"
+    "test/source_low/corpus/vector_mask_select.loom-test"
     "test/source_low/corpus/vector_v4.loom-test"
     "test/source_low/function_abi.loom-test"
     "test/source_low/function_contracts.loom-test"
@@ -367,6 +368,7 @@ loom_check_test_suite(
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/sync_barrier.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/vector_bitcast.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/vector_carrier_structure.loom-test"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/vector_mask_select.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/vector_v4.loom-test"
   TEST_NAME_PREFIX_TO_STRIP
     "test/source_low/"
