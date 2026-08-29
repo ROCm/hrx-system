@@ -6,6 +6,7 @@
 
 #include "loom/target/emit/native/elf.h"
 
+#include <cstring>
 #include <memory>
 #include <string>
 
@@ -80,6 +81,155 @@ uint64_t LoadLeU64(const std::string& bytes, size_t offset) {
   return value;
 }
 
+TEST(NativeElfTest, WritesAieElf32ExecutableEnvelope) {
+  const uint8_t text[16] = {
+      0x10, 0x32, 0x54, 0x76, 0x98, 0xba, 0xdc, 0xfe,
+      0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
+  };
+  const loom_native_elf_section_t sections[] = {{
+      /*.name=*/IREE_SV(".text"),
+      /*.type=*/LOOM_NATIVE_ELF_SECTION_TYPE_PROGBITS,
+      /*.flags=*/LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC |
+          LOOM_NATIVE_ELF_SECTION_FLAG_EXECINSTR,
+      /*.address=*/0,
+      /*.alignment=*/16,
+      /*.entry_size=*/0,
+      /*.link=*/0,
+      /*.info=*/0,
+      /*.contents=*/iree_make_const_byte_span(text, sizeof(text)),
+  }};
+  const loom_native_elf_segment_t segments[] = {{
+      /*.type=*/LOOM_NATIVE_ELF_PROGRAM_TYPE_LOAD,
+      /*.flags=*/LOOM_NATIVE_ELF_PROGRAM_FLAG_READ |
+          LOOM_NATIVE_ELF_PROGRAM_FLAG_EXECUTE,
+      /*.file_offset=*/0,
+      /*.file_size=*/0,
+      /*.memory_size=*/0,
+      /*.first_section=*/0,
+      /*.section_count=*/1,
+      /*.virtual_address=*/0,
+      /*.physical_address=*/0,
+      /*.alignment=*/16,
+  }};
+  const loom_native_elf32le_file_t file = {
+      /*.type=*/LOOM_NATIVE_ELF_FILE_TYPE_EXEC,
+      /*.machine=*/LOOM_NATIVE_ELF_MACHINE_AIE,
+      /*.os_abi=*/LOOM_NATIVE_ELF_OS_ABI_NONE,
+      /*.abi_version=*/LOOM_NATIVE_ELF_ABI_VERSION_NONE,
+      /*.flags=*/3,
+      /*.entry=*/0,
+      /*.sections=*/sections,
+      /*.section_count=*/IREE_ARRAYSIZE(sections),
+      /*.segments=*/segments,
+      /*.segment_count=*/IREE_ARRAYSIZE(segments),
+  };
+
+  StreamPtr stream = CreateStream();
+  TestArena arena;
+  IREE_ASSERT_OK(
+      loom_native_elf32le_write_file(&file, stream.get(), arena.arena()));
+  const std::string bytes = StreamBytes(stream.get());
+
+  constexpr size_t kProgramHeaderOffset = 52;
+  constexpr size_t kTextOffset = 96;
+  constexpr size_t kStringTableOffset = kTextOffset + sizeof(text);
+  constexpr size_t kStringTableSize = 17;
+  constexpr size_t kSectionHeaderOffset = 132;
+  ASSERT_EQ(bytes.size(), 252u);
+  EXPECT_EQ(bytes.substr(0, 4), std::string("\x7f"
+                                            "ELF",
+                                            4));
+  EXPECT_EQ((uint8_t)bytes[4], 1u);
+  EXPECT_EQ((uint8_t)bytes[5], 1u);
+  EXPECT_EQ((uint8_t)bytes[6], 1u);
+  EXPECT_EQ(LoadLeU16(bytes, 16), LOOM_NATIVE_ELF_FILE_TYPE_EXEC);
+  EXPECT_EQ(LoadLeU16(bytes, 18), LOOM_NATIVE_ELF_MACHINE_AIE);
+  EXPECT_EQ(LoadLeU32(bytes, 20), 1u);
+  EXPECT_EQ(LoadLeU32(bytes, 24), 0u);
+  EXPECT_EQ(LoadLeU32(bytes, 28), kProgramHeaderOffset);
+  EXPECT_EQ(LoadLeU32(bytes, 32), kSectionHeaderOffset);
+  EXPECT_EQ(LoadLeU32(bytes, 36), 3u);
+  EXPECT_EQ(LoadLeU16(bytes, 40), 52u);
+  EXPECT_EQ(LoadLeU16(bytes, 42), 32u);
+  EXPECT_EQ(LoadLeU16(bytes, 44), 1u);
+  EXPECT_EQ(LoadLeU16(bytes, 46), 40u);
+  EXPECT_EQ(LoadLeU16(bytes, 48), 3u);
+  EXPECT_EQ(LoadLeU16(bytes, 50), 2u);
+
+  EXPECT_EQ(LoadLeU32(bytes, kProgramHeaderOffset + 0),
+            LOOM_NATIVE_ELF_PROGRAM_TYPE_LOAD);
+  EXPECT_EQ(LoadLeU32(bytes, kProgramHeaderOffset + 4), kTextOffset);
+  EXPECT_EQ(LoadLeU32(bytes, kProgramHeaderOffset + 8), 0u);
+  EXPECT_EQ(LoadLeU32(bytes, kProgramHeaderOffset + 12), 0u);
+  EXPECT_EQ(LoadLeU32(bytes, kProgramHeaderOffset + 16), sizeof(text));
+  EXPECT_EQ(LoadLeU32(bytes, kProgramHeaderOffset + 20), sizeof(text));
+  EXPECT_EQ(
+      LoadLeU32(bytes, kProgramHeaderOffset + 24),
+      LOOM_NATIVE_ELF_PROGRAM_FLAG_READ | LOOM_NATIVE_ELF_PROGRAM_FLAG_EXECUTE);
+  EXPECT_EQ(LoadLeU32(bytes, kProgramHeaderOffset + 28), 16u);
+
+  EXPECT_EQ(0, std::memcmp(bytes.data() + kTextOffset, text, sizeof(text)));
+  EXPECT_EQ(bytes.substr(kStringTableOffset, kStringTableSize),
+            std::string("\0.text\0.shstrtab\0", kStringTableSize));
+  for (size_t i = 0; i < 40; ++i) {
+    EXPECT_EQ((uint8_t)bytes[kSectionHeaderOffset + i], 0u);
+  }
+
+  constexpr size_t kTextSectionHeaderOffset = kSectionHeaderOffset + 40;
+  EXPECT_EQ(LoadLeU32(bytes, kTextSectionHeaderOffset + 0), 1u);
+  EXPECT_EQ(LoadLeU32(bytes, kTextSectionHeaderOffset + 4),
+            LOOM_NATIVE_ELF_SECTION_TYPE_PROGBITS);
+  EXPECT_EQ(LoadLeU32(bytes, kTextSectionHeaderOffset + 8),
+            LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC |
+                LOOM_NATIVE_ELF_SECTION_FLAG_EXECINSTR);
+  EXPECT_EQ(LoadLeU32(bytes, kTextSectionHeaderOffset + 16), kTextOffset);
+  EXPECT_EQ(LoadLeU32(bytes, kTextSectionHeaderOffset + 20), sizeof(text));
+  EXPECT_EQ(LoadLeU32(bytes, kTextSectionHeaderOffset + 32), 16u);
+
+  constexpr size_t kStringTableSectionHeaderOffset =
+      kTextSectionHeaderOffset + 40;
+  EXPECT_EQ(LoadLeU32(bytes, kStringTableSectionHeaderOffset + 0), 7u);
+  EXPECT_EQ(LoadLeU32(bytes, kStringTableSectionHeaderOffset + 4),
+            LOOM_NATIVE_ELF_SECTION_TYPE_STRTAB);
+  EXPECT_EQ(LoadLeU32(bytes, kStringTableSectionHeaderOffset + 16),
+            kStringTableOffset);
+  EXPECT_EQ(LoadLeU32(bytes, kStringTableSectionHeaderOffset + 20),
+            kStringTableSize);
+  EXPECT_EQ(LoadLeU32(bytes, kStringTableSectionHeaderOffset + 32), 1u);
+}
+
+TEST(NativeElfTest, RejectsElf32FieldOverflowBeforeWriting) {
+  const uint8_t contents[] = {0};
+  const loom_native_elf_section_t sections[] = {{
+      /*.name=*/IREE_SV(".text"),
+      /*.type=*/LOOM_NATIVE_ELF_SECTION_TYPE_PROGBITS,
+      /*.flags=*/UINT64_MAX,
+      /*.address=*/0,
+      /*.alignment=*/1,
+      /*.entry_size=*/0,
+      /*.link=*/0,
+      /*.info=*/0,
+      /*.contents=*/iree_make_const_byte_span(contents, sizeof(contents)),
+  }};
+  const loom_native_elf32le_file_t file = {
+      /*.type=*/LOOM_NATIVE_ELF_FILE_TYPE_REL,
+      /*.machine=*/LOOM_NATIVE_ELF_MACHINE_AIE,
+      /*.os_abi=*/0,
+      /*.abi_version=*/0,
+      /*.flags=*/3,
+      /*.entry=*/0,
+      /*.sections=*/sections,
+      /*.section_count=*/IREE_ARRAYSIZE(sections),
+  };
+
+  StreamPtr stream = CreateStream();
+  TestArena arena;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_OUT_OF_RANGE,
+      loom_native_elf32le_write_file(&file, stream.get(), arena.arena()));
+  EXPECT_EQ(iree_io_stream_length(stream.get()), 0);
+}
+
 TEST(NativeElfTest, WritesAmdgpuNoteElfEnvelope) {
   const std::string note = std::string(
       "\x07\x00\x00\x00"
@@ -89,7 +239,7 @@ TEST(NativeElfTest, WritesAmdgpuNoteElfEnvelope) {
       "\0"
       "payload!",
       28);
-  const loom_native_elf64le_section_t sections[] = {{
+  const loom_native_elf_section_t sections[] = {{
       /*.name=*/IREE_SV(".note"),
       /*.type=*/LOOM_NATIVE_ELF_SECTION_TYPE_NOTE,
       /*.flags=*/LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC,
@@ -100,7 +250,7 @@ TEST(NativeElfTest, WritesAmdgpuNoteElfEnvelope) {
       /*.info=*/0,
       /*.contents=*/iree_make_const_byte_span(note.data(), note.size()),
   }};
-  const loom_native_elf64le_segment_t segments[] = {{
+  const loom_native_elf_segment_t segments[] = {{
       /*.type=*/LOOM_NATIVE_ELF_PROGRAM_TYPE_NOTE,
       /*.flags=*/LOOM_NATIVE_ELF_PROGRAM_FLAG_READ,
       /*.file_offset=*/{},
@@ -201,7 +351,7 @@ TEST(NativeElfTest, WritesAmdgpuNoteElfEnvelope) {
 
 TEST(NativeElfTest, RejectsInvalidSectionAlignment) {
   const uint8_t contents[] = {0};
-  const loom_native_elf64le_section_t sections[] = {{
+  const loom_native_elf_section_t sections[] = {{
       /*.name=*/IREE_SV(".bad"),
       /*.type=*/LOOM_NATIVE_ELF_SECTION_TYPE_PROGBITS,
       /*.flags=*/{},
@@ -232,7 +382,7 @@ TEST(NativeElfTest, RejectsInvalidSectionAlignment) {
 
 TEST(NativeElfTest, RejectsInvalidSegmentRange) {
   const uint8_t contents[] = {0};
-  const loom_native_elf64le_section_t sections[] = {{
+  const loom_native_elf_section_t sections[] = {{
       /*.name=*/IREE_SV(".note"),
       /*.type=*/LOOM_NATIVE_ELF_SECTION_TYPE_NOTE,
       /*.flags=*/{},
@@ -243,7 +393,7 @@ TEST(NativeElfTest, RejectsInvalidSegmentRange) {
       /*.info=*/{},
       /*.contents=*/iree_make_const_byte_span(contents, sizeof(contents)),
   }};
-  const loom_native_elf64le_segment_t segments[] = {{
+  const loom_native_elf_segment_t segments[] = {{
       /*.type=*/LOOM_NATIVE_ELF_PROGRAM_TYPE_NOTE,
       /*.flags=*/{},
       /*.file_offset=*/{},

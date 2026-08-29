@@ -11,7 +11,7 @@
 
 typedef struct loom_native_section_accumulator_t {
   // Section descriptor being assembled.
-  loom_native_elf64le_section_t section;
+  loom_native_elf_section_t section;
   // Total assembled byte length so far, before final allocation.
   uint64_t next_offset;
 } loom_native_section_accumulator_t;
@@ -67,7 +67,7 @@ static iree_status_t loom_native_contribution_validate(
 }
 
 static bool loom_native_contribution_sections_match(
-    const loom_native_elf64le_section_t* section,
+    const loom_native_elf_section_t* section,
     const loom_native_section_contribution_t* contribution) {
   return section->type == contribution->section_type &&
          section->flags == contribution->section_flags &&
@@ -172,8 +172,7 @@ static iree_status_t loom_native_contribution_plan_layout(
 
 static iree_status_t loom_native_contribution_allocate_output(
     const loom_native_section_accumulator_t* accumulators,
-    iree_host_size_t section_count,
-    loom_native_elf64le_section_t** out_sections,
+    iree_host_size_t section_count, loom_native_elf_section_t** out_sections,
     uint8_t*** out_section_contents, iree_arena_allocator_t* arena) {
   *out_sections = NULL;
   *out_section_contents = NULL;
@@ -195,7 +194,7 @@ static iree_status_t loom_native_contribution_allocate_output(
         iree_arena_allocate(arena, section_name_bytes, (void**)&section_names));
   }
 
-  loom_native_elf64le_section_t* sections = NULL;
+  loom_native_elf_section_t* sections = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, section_count, sizeof(*sections), (void**)&sections));
   uint8_t** section_contents = NULL;
@@ -290,7 +289,7 @@ iree_status_t loom_native_assemble_section_contributions(
         contributions, contribution_count, accumulators, &section_count,
         contribution_layouts);
   }
-  loom_native_elf64le_section_t* sections = NULL;
+  loom_native_elf_section_t* sections = NULL;
   uint8_t** section_contents = NULL;
   if (iree_status_is_ok(status)) {
     status = loom_native_contribution_allocate_output(

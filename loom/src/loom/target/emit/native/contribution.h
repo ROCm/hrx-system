@@ -55,9 +55,8 @@ typedef struct loom_native_section_contribution_layout_t {
 
 // Output of assembling section contributions into ELF section payloads.
 typedef struct loom_native_section_contribution_assembly_t {
-  // Arena-backed ELF section descriptors suitable for
-  // loom_native_elf64le_file_t.
-  loom_native_elf64le_section_t* sections;
+  // Arena-backed class-neutral ELF section descriptors.
+  loom_native_elf_section_t* sections;
   // Number of entries in |sections|.
   iree_host_size_t section_count;
   // Arena-backed per-input contribution placement rows.

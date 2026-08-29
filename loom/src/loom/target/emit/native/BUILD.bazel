@@ -45,7 +45,7 @@ loom_cc_library(
     name = "elf",
     srcs = ["elf.c"],
     hdrs = ["elf.h"],
-    visibility = _NATIVE_AMDGPU_VISIBILITY,
+    visibility = _NATIVE_AMDGPU_VISIBILITY + _NATIVE_AIE2P_VISIBILITY,
     deps = [
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
@@ -57,6 +57,7 @@ loom_cc_library(
     name = "contribution",
     srcs = ["contribution.c"],
     hdrs = ["contribution.h"],
+    visibility = _NATIVE_AIE2P_VISIBILITY,
     deps = [
         ":elf",
         "//runtime/src/iree/base",
