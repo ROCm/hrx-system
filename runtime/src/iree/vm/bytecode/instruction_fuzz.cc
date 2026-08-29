@@ -392,12 +392,13 @@ void InvokeRecord(iree_vm_invocation_t* invocation, iree_vm_function_t function,
       invocation, function,
       iree_vm_variant_span_from_ptr(arguments->data(), arguments->size()),
       iree_vm_variant_span_from_ptr(results->data(), results->size()));
+  const bool invocation_succeeded = IsSuccessfulOrExpectedFailure(
+      status, {IREE_STATUS_INVALID_ARGUMENT, IREE_STATUS_OUT_OF_RANGE,
+               IREE_STATUS_FAILED_PRECONDITION});
   for (const iree_vm_variant_t argument : *arguments) {
     if (!iree_vm_variant_is_empty(argument)) std::abort();
   }
-  if (IsSuccessfulOrExpectedFailure(
-          status, {IREE_STATUS_INVALID_ARGUMENT, IREE_STATUS_OUT_OF_RANGE,
-                   IREE_STATUS_FAILED_PRECONDITION})) {
+  if (invocation_succeeded) {
     if constexpr (ResultCount > 0) {
       iree_vm_variant_span_reset(
           iree_vm_variant_span_from_ptr(results->data(), results->size()));
@@ -410,12 +411,6 @@ void InvokeRecord(iree_vm_invocation_t* invocation, iree_vm_function_t function,
       }
     }
   }
-}
-
-bool AllowsUnimplementedSelector(uint8_t opcode) {
-  return opcode == IREE_VM_ISA_CORE_OPCODE_CONVERSION_INTEGER ||
-         opcode == IREE_VM_ISA_CORE_OPCODE_CONVERSION_FLOAT_EXTEND ||
-         opcode == IREE_VM_ISA_CORE_OPCODE_CONVERSION_FLOAT_TO_INTEGER;
 }
 
 void ExerciseExecutable(const std::vector<uint8_t>& image,
@@ -431,13 +426,8 @@ void ExerciseExecutable(const std::vector<uint8_t>& image,
        iree_allocator_null()},
       iree_allocator_system(), &module);
   iree_vm_environment_free(environment);
-  const bool module_created =
-      AllowsUnimplementedSelector(opcode)
-          ? IsSuccessfulOrExpectedFailure(
-                module_status,
-                {IREE_STATUS_INVALID_ARGUMENT, IREE_STATUS_UNIMPLEMENTED})
-          : IsSuccessfulOrExpectedFailure(module_status,
-                                          {IREE_STATUS_INVALID_ARGUMENT});
+  const bool module_created = IsSuccessfulOrExpectedFailure(
+      module_status, {IREE_STATUS_INVALID_ARGUMENT});
   if (!module_created) {
     if (module != nullptr) std::abort();
     return;

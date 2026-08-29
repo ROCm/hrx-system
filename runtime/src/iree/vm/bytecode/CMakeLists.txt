@@ -324,6 +324,25 @@ iree_cc_fuzz(
     iree::vm::bytecode::wire
 )
 
+iree_cc_test(
+  NAME
+    instruction_fuzz_test
+  SRCS
+    "instruction_fuzz.cc"
+    "instruction_fuzz_test.cc"
+    "module_test_data.cc"
+    "module_test_data.h"
+  DEPS
+    ::bytecode
+    ::dump
+    ::inspection
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::vm
+    iree::vm::bytecode::wire
+)
+
 iree_cc_fuzz(
   NAME
     module_factory_fuzz

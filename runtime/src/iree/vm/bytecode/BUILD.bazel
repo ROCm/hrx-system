@@ -402,6 +402,26 @@ iree_runtime_cc_fuzz(
     ],
 )
 
+iree_runtime_cc_test(
+    name = "instruction_fuzz_test",
+    srcs = [
+        "instruction_fuzz.cc",
+        "instruction_fuzz_test.cc",
+        "module_test_data.cc",
+        "module_test_data.h",
+    ],
+    deps = [
+        ":bytecode",
+        ":dump",
+        ":inspection",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm",
+        "//runtime/src/iree/vm/bytecode/wire",
+    ],
+)
+
 iree_runtime_cc_fuzz(
     name = "module_factory_fuzz",
     srcs = [
