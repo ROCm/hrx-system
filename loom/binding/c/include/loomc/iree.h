@@ -10,6 +10,7 @@
 #include <stddef.h>
 
 #include "iree/base/api.h"
+#include "iree/base/byte_sequence.h"
 #include "loomc/loomc.h"
 
 /// @file
@@ -213,6 +214,22 @@ static inline loomc_byte_span_t loomc_byte_span_from_iree(
 static inline iree_const_byte_span_t iree_const_byte_span_from_loomc(
     loomc_byte_span_t value) {
   return iree_make_const_byte_span(value.data, value.data_length);
+}
+
+/// Reinterprets an IREE byte sequence as a Loom byte sequence.
+///
+/// The returned pointer aliases `sequence` and does not retain it.
+static inline loomc_byte_sequence_t* loomc_byte_sequence_from_iree(
+    iree_byte_sequence_t* sequence) {
+  return (loomc_byte_sequence_t*)sequence;
+}
+
+/// Reinterprets a Loom byte sequence as an IREE byte sequence.
+///
+/// The returned pointer aliases `sequence` and does not retain it.
+static inline iree_byte_sequence_t* iree_byte_sequence_from_loomc(
+    loomc_byte_sequence_t* sequence) {
+  return (iree_byte_sequence_t*)sequence;
 }
 
 /// Converts an IREE allocator to a Loom allocator.

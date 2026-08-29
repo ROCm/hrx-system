@@ -29,6 +29,7 @@ using loomc::bench::CreateWorkspace;
 using loomc::bench::DeserializeSource;
 using loomc::bench::loom_allocator;
 using loomc::bench::ModulePtr;
+using loomc::bench::ReadArtifactPrefix;
 using loomc::bench::RequireSucceededResult;
 using loomc::bench::ResultPtr;
 using loomc::bench::RunCompileBenchmarkDirect;
@@ -124,8 +125,10 @@ class AmdgpuTargetCompileScenario : public TargetCompileScenario {
     const loomc_artifact_t* artifact = loomc::bench::FindArtifact(
         result.get(), LOOMC_ARTIFACT_KIND_EXECUTABLE,
         loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_AMDGPU_HSACO));
-    if (std::memcmp(artifact->contents.data, kElfMagic, sizeof(kElfMagic)) !=
-        0) {
+    uint8_t magic[sizeof(kElfMagic)] = {0};
+    IREE_RETURN_IF_ERROR(ReadArtifactPrefix(
+        artifact, iree_make_byte_span(magic, sizeof(magic))));
+    if (std::memcmp(magic, kElfMagic, sizeof(kElfMagic)) != 0) {
       return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                               "AMDGPU executable is not an ELF image");
     }

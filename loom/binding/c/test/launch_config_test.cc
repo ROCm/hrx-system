@@ -22,6 +22,8 @@ namespace {
 
 using loomc::testing::HandlePtr;
 
+using ByteSequencePtr =
+    HandlePtr<loomc_byte_sequence_t, loomc_byte_sequence_release>;
 using ContextPtr = HandlePtr<loomc_context_t, loomc_context_release>;
 using ModulePtr = HandlePtr<loomc_module_t, loomc_module_release>;
 using ProgramPtr = HandlePtr<loomc_launch_config_program_t,
@@ -31,7 +33,7 @@ using SourcePtr = HandlePtr<loomc_source_t, loomc_source_release>;
 using WorkspacePtr = HandlePtr<loomc_workspace_t, loomc_workspace_release>;
 
 struct LaunchArtifact {
-  SourcePtr source;
+  ByteSequencePtr contents;
   loomc_artifact_t artifact;
 };
 
@@ -94,20 +96,23 @@ LaunchArtifact CompileLaunchArtifact(const char* text) {
   LOOMC_EXPECT_OK(loomc_module_serialize_to_source(
       module.get(), &options, loomc_allocator_system(), &source));
   SourcePtr source_ptr(source);
+  loomc_byte_sequence_t* contents = nullptr;
+  LOOMC_EXPECT_OK(
+      loomc_byte_sequence_create_copy(loomc_source_contents(source_ptr.get()),
+                                      loomc_allocator_system(), &contents));
   const loomc_artifact_t artifact = {
       /*.kind=*/LOOMC_ARTIFACT_KIND_LAUNCH_CONFIG,
       /*.format=*/loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_LOOM_BYTECODE),
       /*.identifier=*/loomc_make_cstring_view("launch_config.loombc"),
-      /*.contents=*/loomc_source_contents(source_ptr.get()),
+      /*.contents=*/contents,
   };
-  return LaunchArtifact{std::move(source_ptr), artifact};
+  return LaunchArtifact{ByteSequencePtr(contents), artifact};
 }
 
 ProgramPtr LoadProgram(const LaunchArtifact& artifact) {
   loomc_launch_config_program_t* program = nullptr;
-  LOOMC_EXPECT_OK(
-      loomc_launch_config_program_load(&artifact.artifact, nullptr, nullptr,
-                                       loomc_allocator_system(), &program));
+  LOOMC_EXPECT_OK(loomc_launch_config_program_load(
+      &artifact.artifact, loomc_allocator_system(), &program));
   return ProgramPtr(program);
 }
 
@@ -236,24 +241,6 @@ TEST(LaunchConfigProgramTest, SupportsRepeatedInvocations) {
   }
 }
 
-void CountRelease(void* user_data, loomc_byte_span_t contents) {
-  int* release_count = static_cast<int*>(user_data);
-  EXPECT_NE(contents.data, nullptr);
-  EXPECT_NE(contents.data_length, 0u);
-  ++*release_count;
-}
-
-TEST(LaunchConfigProgramTest, ReleasesTransferredArtifactAfterLoad) {
-  LaunchArtifact artifact = CompileLaunchArtifact(kLaunchProgram);
-  int release_count = 0;
-  loomc_launch_config_program_t* program = nullptr;
-  LOOMC_ASSERT_OK(loomc_launch_config_program_load(
-      &artifact.artifact, CountRelease, &release_count,
-      loomc_allocator_system(), &program));
-  ProgramPtr program_ptr(program);
-  EXPECT_EQ(release_count, 1);
-}
-
 TEST(LaunchConfigProgramTest, RejectsMalformedProgramContract) {
   LaunchArtifact artifact = CompileLaunchArtifact(R"(
 func.def public pure @incomplete() -> (index, index, index) {
@@ -261,14 +248,12 @@ func.def public pure @incomplete() -> (index, index, index) {
   func.return %c1, %c1, %c1 : index, index, index
 }
 )");
-  int release_count = 0;
   loomc_launch_config_program_t* program = nullptr;
-  LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_INVALID_ARGUMENT,
-                         loomc_launch_config_program_load(
-                             &artifact.artifact, CountRelease, &release_count,
-                             loomc_allocator_system(), &program));
+  LOOMC_EXPECT_STATUS_IS(
+      LOOMC_STATUS_INVALID_ARGUMENT,
+      loomc_launch_config_program_load(&artifact.artifact,
+                                       loomc_allocator_system(), &program));
   EXPECT_EQ(program, nullptr);
-  EXPECT_EQ(release_count, 1);
 }
 
 TEST(LaunchConfigProgramTest, ClearsOutputsOnInvalidArguments) {
@@ -277,8 +262,7 @@ TEST(LaunchConfigProgramTest, ClearsOutputsOnInvalidArguments) {
   LOOMC_EXPECT_STATUS_IS(
       LOOMC_STATUS_INVALID_ARGUMENT,
       loomc_launch_config_program_load(
-          /*artifact=*/nullptr, /*release=*/nullptr,
-          /*release_user_data=*/nullptr, loomc_allocator_system(), &program));
+          /*artifact=*/nullptr, loomc_allocator_system(), &program));
   EXPECT_EQ(program, nullptr);
 
   loomc_launch_config_function_t function = {/*.value=*/0};

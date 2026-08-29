@@ -143,6 +143,15 @@ std::string ToString(loomc_byte_span_t value) {
                     : std::string();
 }
 
+std::string ToString(const loomc_byte_sequence_t* value) {
+  loomc_byte_span_t contents = loomc_byte_span_empty();
+  LOOMC_EXPECT_OK(
+      loomc_byte_sequence_clone(value, loomc_allocator_system(), &contents));
+  std::string result = ToString(contents);
+  loomc_allocator_free(loomc_allocator_system(), (void*)contents.data);
+  return result;
+}
+
 void ExpectSucceededResult(const loomc_result_t* result) {
   ASSERT_NE(result, nullptr);
   if (!loomc_result_succeeded(result) &&
@@ -418,7 +427,7 @@ TEST(CompileTest, CompileModuleEmitsRequestedArtifacts) {
                    LOOMC_ARTIFACT_FORMAT_LOOM_BYTECODE);
   ASSERT_NE(bytecode_artifact, nullptr);
   EXPECT_EQ(ToString(bytecode_artifact->identifier), "jit_kernel.loombc");
-  EXPECT_NE(bytecode_artifact->contents.data_length, 0u);
+  EXPECT_NE(loomc_byte_sequence_length(bytecode_artifact->contents), 0u);
   loomc_source_t* bytecode_source = nullptr;
   status = loomc_artifact_create_source(
       bytecode_artifact, LOOMC_SOURCE_FORMAT_UNKNOWN, loomc_allocator_system(),

@@ -68,8 +68,9 @@ static iree_status_t loom_compile_command_backend_format_program_json(
       &object, IREE_SV("symbol"), program->symbol));
   IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
       &object, IREE_SV("artifact"), filename));
-  IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
-      &object, IREE_SV("byte_length"), program->data.data_length));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+      &object, IREE_SV("byte_length"),
+      iree_byte_sequence_length(program->data)));
   IREE_RETURN_IF_ERROR(
       loom_json_object_begin_field(&object, IREE_SV("entry_requirements")));
   loom_json_array_writer_t entry_requirements;
@@ -199,11 +200,8 @@ static iree_status_t loom_compile_command_backend_write_programs(
         artifact_directory, filename, host_allocator, &artifact_path_storage));
     const iree_string_view_t artifact_path =
         iree_make_cstring_view(artifact_path_storage);
-    const iree_byte_span_t data = artifact_set->programs.values[i].data;
-    iree_status_t status = loom_tooling_write_output_file(
-        artifact_path,
-        iree_make_string_view((const char*)data.data, data.data_length),
-        host_allocator);
+    iree_status_t status = loom_tooling_write_output_byte_sequence(
+        artifact_path, artifact_set->programs.values[i].data, host_allocator);
     iree_allocator_free(host_allocator, artifact_path_storage);
     IREE_RETURN_IF_ERROR(status);
   }

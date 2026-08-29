@@ -255,7 +255,7 @@ static loomc_status_t prepare_and_evaluate_launch(
   }
 
   loomc_status_t status = loomc_launch_config_program_load(
-      artifact, NULL, NULL, loomc_allocator_system(), &state->launch_program);
+      artifact, loomc_allocator_system(), &state->launch_program);
   if (loomc_status_is_ok(status)) {
     jit_kernel_state_reset_result(state);
   }
@@ -322,11 +322,11 @@ static loomc_status_t inspect_products(
     return loomc_make_status(LOOMC_STATUS_NOT_FOUND,
                              "AMDGPU executable artifact was not produced");
   }
-  static const uint8_t kElfMagic[] = {0x7F, 'E', 'L', 'F'};
-  if (executable->contents.data_length < sizeof(kElfMagic) ||
-      memcmp(executable->contents.data, kElfMagic, sizeof(kElfMagic)) != 0) {
+  const uint64_t executable_length =
+      loomc_byte_sequence_length(executable->contents);
+  if (executable_length < 4) {
     return loomc_make_status(LOOMC_STATUS_FAILED_PRECONDITION,
-                             "AMDGPU executable is not an ELF artifact");
+                             "AMDGPU executable artifact is too small");
   }
 
   printf("workload=%llu workgroups=%ux%ux%u workgroup_size=%ux%ux%u\n",
@@ -334,10 +334,10 @@ static loomc_status_t inspect_products(
          launch_config->workgroup_count.y, launch_config->workgroup_count.z,
          launch_config->workgroup_size.x, launch_config->workgroup_size.y,
          launch_config->workgroup_size.z);
-  printf("artifact=%.*s format=%.*s bytes=%zu\n",
+  printf("artifact=%.*s format=%.*s bytes=%llu\n",
          (int)executable->identifier.size, executable->identifier.data,
          (int)executable->format.size, executable->format.data,
-         (size_t)executable->contents.data_length);
+         (unsigned long long)executable_length);
   return loomc_ok_status();
 }
 

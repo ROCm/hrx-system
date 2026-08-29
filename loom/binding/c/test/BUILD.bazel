@@ -61,6 +61,17 @@ loom_cc_test(
 )
 
 loom_cc_test(
+    name = "byte_sequence_test",
+    srcs = ["byte_sequence_test.cc"],
+    deps = [
+        ":test_util",
+        "//loom/binding/c:loomc",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "iree_adapter_test",
     srcs = ["iree_adapter_test.cc"],
     deps = [
@@ -77,6 +88,8 @@ loom_cc_test(
     deps = [
         ":test_util",
         "//loom/binding/c:loomc",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/io:stream",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
         "//runtime/src/iree/testing:temp_file",

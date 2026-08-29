@@ -135,8 +135,14 @@ iree_status_t loom_cmd_program_artifact_set_build(
              root->entry_requirement_count * sizeof(*entry_projection_cursor));
       entry_projection_cursor += root->entry_requirement_count;
     }
-    status = loom_cmd_program_plan_serialize_root(plan, i, &artifact->data,
-                                                  host_allocator);
+    iree_byte_span_t data = iree_byte_span_empty();
+    status =
+        loom_cmd_program_plan_serialize_root(plan, i, &data, host_allocator);
+    if (iree_status_is_ok(status)) {
+      status = iree_byte_sequence_create_from_span_move(&data, host_allocator,
+                                                        &artifact->data);
+    }
+    iree_allocator_free(host_allocator, data.data);
   }
 
   if (iree_status_is_ok(status)) {
@@ -153,8 +159,7 @@ void loom_cmd_program_artifact_set_deinitialize(
     return;
   }
   for (iree_host_size_t i = 0; i < artifact_set->programs.count; ++i) {
-    iree_allocator_free(artifact_set->host_allocator,
-                        artifact_set->programs.values[i].data.data);
+    iree_byte_sequence_release(artifact_set->programs.values[i].data);
   }
   iree_allocator_free(artifact_set->host_allocator,
                       artifact_set->entry_requirement_index_storage);

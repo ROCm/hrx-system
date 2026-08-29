@@ -65,6 +65,15 @@ std::string ToString(loomc_byte_span_t value) {
                     : std::string();
 }
 
+std::string ToString(const loomc_byte_sequence_t* value) {
+  loomc_byte_span_t contents = loomc_byte_span_empty();
+  LOOMC_EXPECT_OK(
+      loomc_byte_sequence_clone(value, loomc_allocator_system(), &contents));
+  std::string result = ToString(contents);
+  loomc_allocator_free(loomc_allocator_system(), (void*)contents.data);
+  return result;
+}
+
 struct CapturedKernelRequest {
   // Exported kernel root in the transferred source module.
   std::string root_symbol;
@@ -553,11 +562,12 @@ void ExpectReplayEmission(const loomc_result_t* result, const char* selector,
       FindArtifact(result, LOOMC_ARTIFACT_KIND_EXECUTABLE,
                    LOOMC_ARTIFACT_FORMAT_AMDGPU_HSACO);
   ASSERT_NE(hsaco, nullptr);
+  const std::string hsaco_contents = ToString(hsaco->contents);
   static constexpr uint8_t kElfMagic[] = {0x7F, 'E', 'L', 'F'};
-  ASSERT_GE(hsaco->contents.data_length, sizeof(kElfMagic));
-  EXPECT_EQ(std::memcmp(hsaco->contents.data, kElfMagic, sizeof(kElfMagic)), 0);
-  EXPECT_NE(ToString(hsaco->contents).find(code_object_target),
-            std::string::npos);
+  ASSERT_GE(hsaco_contents.size(), sizeof(kElfMagic));
+  EXPECT_EQ(std::memcmp(hsaco_contents.data(), kElfMagic, sizeof(kElfMagic)),
+            0);
+  EXPECT_NE(hsaco_contents.find(code_object_target), std::string::npos);
 
   const loomc_artifact_t* manifest =
       FindArtifact(result, LOOMC_ARTIFACT_KIND_REPORT,
@@ -705,8 +715,7 @@ kernel.def target(@gfx11_wave64) @target_specialized_launch(%expert_count: index
 
     loomc_launch_config_program_t* launch_program = nullptr;
     LOOMC_EXPECT_OK(loomc_launch_config_program_load(
-        artifact, /*release=*/nullptr, /*release_user_data=*/nullptr,
-        loomc_allocator_system(), &launch_program));
+        artifact, loomc_allocator_system(), &launch_program));
     LaunchConfigProgramPtr launch_program_ptr(launch_program);
     result_ptr.reset();
 
@@ -793,8 +802,7 @@ kernel.def target(@gfx1151) @decode(%row_count: i32, %scale: bf16) {
 
   loomc_launch_config_program_t* launch_program = nullptr;
   LOOMC_EXPECT_OK(loomc_launch_config_program_load(
-      artifact, /*release=*/nullptr, /*release_user_data=*/nullptr,
-      loomc_allocator_system(), &launch_program));
+      artifact, loomc_allocator_system(), &launch_program));
   LaunchConfigProgramPtr launch_program_ptr(launch_program);
 
   loomc_launch_config_function_t prefill_function =

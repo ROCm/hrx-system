@@ -31,7 +31,7 @@ loomc_result_set_state(loomc_result_t* result, loomc_result_state_t state);
 LOOMC_API_PRIVATE loomc_status_t loomc_result_add_diagnostic(
     loomc_result_t* result, const loomc_diagnostic_t* diagnostic);
 
-// Adds a copied artifact to result.
+// Adds an artifact by copying metadata and retaining immutable contents.
 LOOMC_API_PRIVATE loomc_status_t loomc_result_add_artifact(
     loomc_result_t* result, const loomc_artifact_t* artifact);
 

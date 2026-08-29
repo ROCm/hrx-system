@@ -6,12 +6,18 @@
 
 #include "src/result.h"
 
+#include <memory>
 #include <string>
 
 #include "iree/testing/gtest.h"
 #include "test/util.h"
 
 namespace {
+
+using loomc::testing::HandlePtr;
+
+using ByteSequencePtr =
+    HandlePtr<loomc_byte_sequence_t, loomc_byte_sequence_release>;
 
 std::string ToString(loomc_string_view_t value) {
   return std::string(value.data, value.size);
@@ -20,6 +26,15 @@ std::string ToString(loomc_string_view_t value) {
 std::string ToString(loomc_byte_span_t value) {
   return std::string(reinterpret_cast<const char*>(value.data),
                      value.data_length);
+}
+
+std::string ToString(const loomc_byte_sequence_t* value) {
+  loomc_byte_span_t contents = loomc_byte_span_empty();
+  LOOMC_EXPECT_OK(
+      loomc_byte_sequence_clone(value, loomc_allocator_system(), &contents));
+  std::string result = ToString(contents);
+  loomc_allocator_free(loomc_allocator_system(), (void*)contents.data);
+  return result;
 }
 
 TEST(ResultTest, OwnsDiagnosticsAndArtifacts) {
@@ -63,14 +78,20 @@ TEST(ResultTest, OwnsDiagnosticsAndArtifacts) {
   char format[] = "text";
   char identifier[] = "report";
   char contents[] = "hello";
+  loomc_byte_sequence_t* contents_sequence = nullptr;
+  LOOMC_ASSERT_OK(loomc_byte_sequence_create_copy(
+      loomc_make_byte_span(contents, sizeof(contents) - 1),
+      loomc_allocator_system(), &contents_sequence));
+  ByteSequencePtr contents_owner(contents_sequence);
   loomc_artifact_t artifact = {
       /*.kind=*/LOOMC_ARTIFACT_KIND_REPORT,
       /*.format=*/loomc_make_string_view(format, sizeof(format) - 1),
       /*.identifier=*/
       loomc_make_string_view(identifier, sizeof(identifier) - 1),
-      /*.contents=*/loomc_make_byte_span(contents, sizeof(contents) - 1),
+      /*.contents=*/contents_sequence,
   };
   LOOMC_ASSERT_OK(loomc_result_add_artifact(result, &artifact));
+  contents_owner.reset();
 
   code[0] = 'X';
   message[0] = 'X';
@@ -111,11 +132,7 @@ TEST(ResultTest, RejectsMalformedArtifact) {
       /*.kind=*/LOOMC_ARTIFACT_KIND_REPORT,
       /*.format=*/loomc_make_cstring_view("text"),
       /*.identifier=*/loomc_make_cstring_view("broken"),
-      /*.contents=*/
-      {
-          /*.data=*/nullptr,
-          /*.data_length=*/1,
-      },
+      /*.contents=*/nullptr,
   };
   loomc_status_t status = loomc_result_add_artifact(result, &artifact);
   LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_INVALID_ARGUMENT, status);

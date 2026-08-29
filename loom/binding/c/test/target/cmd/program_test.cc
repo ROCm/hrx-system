@@ -41,6 +41,16 @@ std::string ToString(loomc_string_view_t value) {
   return value.data ? std::string(value.data, value.size) : std::string();
 }
 
+std::string ToString(const loomc_byte_sequence_t* value) {
+  loomc_byte_span_t contents = loomc_byte_span_empty();
+  LOOMC_EXPECT_OK(
+      loomc_byte_sequence_clone(value, loomc_allocator_system(), &contents));
+  std::string result(reinterpret_cast<const char*>(contents.data),
+                     contents.data_length);
+  loomc_allocator_free(loomc_allocator_system(), (void*)contents.data);
+  return result;
+}
+
 void ExpectSucceededResult(const loomc_result_t* result) {
   if (result && !loomc_result_succeeded(result)) {
     for (loomc_host_size_t i = 0; i < loomc_result_diagnostic_count(result);
@@ -329,14 +339,14 @@ template.def<@request.schedule> priority(1) @small(%size: index) {
   EXPECT_EQ(ToString(private_program.artifact.format),
             LOOMC_ARTIFACT_FORMAT_CMD_PROGRAM);
   EXPECT_EQ(ToString(private_program.artifact.identifier), "private_root");
-  EXPECT_GT(private_program.artifact.contents.data_length, 0u);
+  EXPECT_GT(loomc_byte_sequence_length(private_program.artifact.contents), 0u);
   EXPECT_EQ(private_program.entry_requirement_count, 1u);
 
   loomc_cmd_program_t public_program = {};
   ASSERT_TRUE(loomc_cmd_program_product_program_at(product_ptr.get(), 1,
                                                    &public_program));
   EXPECT_EQ(ToString(public_program.symbol), "public_root");
-  EXPECT_GT(public_program.artifact.contents.data_length, 0u);
+  EXPECT_GT(loomc_byte_sequence_length(public_program.artifact.contents), 0u);
   EXPECT_EQ(public_program.entry_requirement_count, 3u);
 
   ASSERT_EQ(capture.requests.size(), 2u);
@@ -399,12 +409,8 @@ template.def<@request.schedule> priority(1) @small(%size: index) {
                                                    1, &repeated_programs[1]));
   EXPECT_EQ(ToString(repeated_programs[0].symbol), "public_root");
   EXPECT_EQ(ToString(repeated_programs[1].symbol), "public_root");
-  ASSERT_EQ(repeated_programs[0].artifact.contents.data_length,
-            repeated_programs[1].artifact.contents.data_length);
-  EXPECT_EQ(std::memcmp(repeated_programs[0].artifact.contents.data,
-                        repeated_programs[1].artifact.contents.data,
-                        repeated_programs[0].artifact.contents.data_length),
-            0);
+  EXPECT_EQ(ToString(repeated_programs[0].artifact.contents),
+            ToString(repeated_programs[1].artifact.contents));
 
   RejectRequestState reject_state;
   const loomc_host_size_t public_roots[] = {public_root.ordinal};
@@ -447,7 +453,7 @@ template.def<@request.schedule> priority(1) @small(%size: index) {
   }
 
   EXPECT_EQ(ToString(private_program.symbol), "private_root");
-  EXPECT_GT(private_program.artifact.contents.data_length, 0u);
+  EXPECT_GT(loomc_byte_sequence_length(private_program.artifact.contents), 0u);
 }
 
 }  // namespace

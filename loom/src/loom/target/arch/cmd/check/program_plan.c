@@ -233,11 +233,12 @@ static iree_status_t loom_cmd_program_plan_check_roundtrip_artifacts(
     const loom_cmd_program_artifact_t* artifact =
         &artifact_set.programs.values[i];
     if (iree_status_is_ok(status)) {
+      iree_const_byte_span_t artifact_data = iree_const_byte_span_empty();
+      const bool is_contiguous = iree_byte_sequence_try_get_contiguous_span(
+          artifact->data, &artifact_data);
+      IREE_ASSERT(is_contiguous);
       loom_cmd_program_t program = {0};
-      status = loom_cmd_program_parse(
-          iree_make_const_byte_span(artifact->data.data,
-                                    artifact->data.data_length),
-          &program);
+      status = loom_cmd_program_parse(artifact_data, &program);
     }
   }
   loom_cmd_program_artifact_set_deinitialize(&artifact_set);

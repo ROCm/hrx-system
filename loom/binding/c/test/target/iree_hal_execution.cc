@@ -357,11 +357,16 @@ iree_status_t PrepareExecutableFromArtifact(
 
   iree_hal_executable_load_params_t load_params;
   iree_hal_executable_load_params_initialize(&load_params);
+  loomc_byte_span_t executable_data = loomc_byte_span_empty();
+  IREE_RETURN_IF_ERROR(iree_status_from_loomc(loomc_byte_sequence_clone(
+      artifact->contents, loomc_allocator_system(), &executable_data)));
   load_params.executable_data = iree_make_const_byte_span(
-      artifact->contents.data, artifact->contents.data_length);
-  return iree_hal_device_load_executable(device, IREE_HAL_QUEUE_AFFINITY_ANY,
-                                         target_result.target, &load_params,
-                                         out_executable);
+      executable_data.data, executable_data.data_length);
+  iree_status_t status = iree_hal_device_load_executable(
+      device, IREE_HAL_QUEUE_AFFINITY_ANY, target_result.target, &load_params,
+      out_executable);
+  loomc_allocator_free(loomc_allocator_system(), (void*)executable_data.data);
+  return status;
 }
 
 iree_status_t DispatchAndWait(iree_hal_device_t* device,
@@ -529,9 +534,7 @@ void RunIreeHalKernelExecutionTest(const IreeHalKernelExecutionTarget& target) {
   ASSERT_NE(launch_config_artifact, nullptr);
   loomc_launch_config_program_t* launch_program = nullptr;
   LOOMC_ASSERT_OK(loomc_launch_config_program_load(
-      launch_config_artifact, /*release=*/nullptr,
-      /*release_user_data=*/nullptr, loomc_allocator_system(),
-      &launch_program));
+      launch_config_artifact, loomc_allocator_system(), &launch_program));
   LaunchConfigProgramPtr launch_program_ptr(launch_program);
 
   loomc_launch_config_function_t launch_function =
@@ -562,7 +565,7 @@ void RunIreeHalKernelExecutionTest(const IreeHalKernelExecutionTarget& target) {
   const loomc_artifact_t* artifact = FindArtifact(
       result.get(), LOOMC_ARTIFACT_KIND_EXECUTABLE, target.artifact_format);
   ASSERT_NE(artifact, nullptr);
-  ASSERT_GE(artifact->contents.data_length, sizeof(uint32_t));
+  ASSERT_GE(loomc_byte_sequence_length(artifact->contents), sizeof(uint32_t));
 
   iree_hal_executable_t* executable = nullptr;
   IREE_ASSERT_OK(PrepareExecutableFromArtifact(target, device.get(), artifact,

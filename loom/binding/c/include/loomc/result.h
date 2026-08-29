@@ -44,7 +44,8 @@
 ///        ++i) {
 ///     const loomc_artifact_t* artifact = loomc_result_artifact_at(result, i);
 ///     // `handle_artifact` is application-owned loading or packaging policy.
-///     handle_artifact(artifact->kind, artifact->format, artifact->contents);
+///     handle_artifact(artifact->kind, artifact->format,
+///                     artifact->contents);
 ///   }
 /// }
 ///

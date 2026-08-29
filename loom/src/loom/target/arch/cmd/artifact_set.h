@@ -10,6 +10,7 @@
 #define LOOM_TARGET_ARCH_CMD_ARTIFACT_SET_H_
 
 #include "iree/base/api.h"
+#include "iree/base/byte_sequence.h"
 #include "loom/target/arch/cmd/lower/program_plan.h"
 
 #ifdef __cplusplus
@@ -31,7 +32,7 @@ typedef struct loom_cmd_program_artifact_t {
   iree_string_view_t symbol;
 
   // Complete portable command-program bytes.
-  iree_byte_span_t data;
+  iree_byte_sequence_t* data;
 
   // Plan-wide entry indices in root-local executable/entry slot order.
   const uint32_t* entry_requirement_indices;

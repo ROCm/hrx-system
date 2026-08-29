@@ -17,6 +17,7 @@
 #include "loomc/artifact.h"
 #include "loomc/artifact_manifest.h"
 #include "loomc/base.h"
+#include "loomc/byte_sequence.h"
 #include "loomc/compile.h"
 #include "loomc/compile_report.h"
 #include "loomc/config.h"

@@ -477,8 +477,7 @@ bool loomc_cmd_program_product_program_at(
               .format =
                   loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_CMD_PROGRAM),
               .identifier = symbol,
-              .contents = loomc_byte_span_from_iree(iree_make_const_byte_span(
-                  artifact->data.data, artifact->data.data_length)),
+              .contents = loomc_byte_sequence_from_iree(artifact->data),
           },
       .entry_requirement_ordinals = artifact->entry_requirement_indices,
       .entry_requirement_count = artifact->entry_requirement_count,
