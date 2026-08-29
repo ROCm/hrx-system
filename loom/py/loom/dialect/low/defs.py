@@ -1180,7 +1180,11 @@ low_copy = Op(
     "low.copy",
     group=low_ops,
     phase=OpPhase.EXECUTABLE,
-    doc=("Explicit virtual-register copy used by lowering and allocation. Each copy produces a fresh virtual-register identity."),
+    doc=(
+        "Explicit virtual-register copy used by lowering and allocation. Each "
+        "copy produces a fresh virtual-register identity and may constrain the "
+        "result to a different target register class with the same unit count."
+    ),
     operands=[Operand("source", REGISTER)],
     attrs=[
         AttrDef(
@@ -1192,9 +1196,6 @@ low_copy = Op(
         ),
     ],
     results=[Result("result", REGISTER, allocates=True)],
-    constraints=[
-        SameRegisterClass("source", "result"),
-    ],
     traits=[STORAGE_RELATION],
     verify="loom_low_copy_verify",
     facts="loom_low_copy_facts",

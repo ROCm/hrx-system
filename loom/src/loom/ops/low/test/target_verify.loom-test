@@ -91,6 +91,14 @@ low.func.def target<test.low.core>(@test_target) @copy_bad_units(%pair: reg<test
 // ====
 
 test.target<low_core> @test_target
+low.func.def target<test.low.core>(@test_target) @copy_changes_storage_class(%value: reg<test.i32 : i32>) -> (reg<test.f32 : i32>) {
+  %copy = low.copy %value : reg<test.i32 : i32> -> reg<test.f32 : i32>
+  low.return %copy : reg<test.f32 : i32>
+}
+
+// ====
+
+test.target<low_core> @test_target
 low.func.def target<test.low.core>(@test_target) @slice_bad_class(%pair: reg<test.i32 x2>) {
   // ERROR@+1: TYPE/001
   %lane = low.slice %pair[0] : reg<test.i32 x2> -> reg<test.i64>
