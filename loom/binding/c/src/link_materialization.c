@@ -36,8 +36,16 @@ static loom_diagnostic_sink_t loomc_link_materialization_diagnostic_sink(
     void* user_data, const loom_link_module_index_provider_t* provider) {
   loomc_link_materialization_state_t* state =
       (loomc_link_materialization_state_t*)user_data;
-  state->diagnostics.source = loomc_link_index_source_for_provider(
-      state->composition.link_index, provider->ordinal);
+  const loomc_source_t* source = NULL;
+  if (state->composition.sources.appended.source != NULL &&
+      provider->ordinal ==
+          state->composition.sources.appended.provider_ordinal) {
+    source = state->composition.sources.appended.source;
+  } else {
+    source = loomc_link_index_source_for_provider(
+        state->composition.sources.link_index, provider->ordinal);
+  }
+  state->diagnostics.source = source;
   return (loom_diagnostic_sink_t){
       .fn = loomc_link_materialization_capture_diagnostic,
       .user_data = state,
@@ -107,7 +115,7 @@ static iree_status_t loomc_link_materialization_prepare_module(
 
 void loomc_link_materialization_state_initialize(
     loomc_context_t* context, loomc_workspace_t* workspace,
-    loomc_link_index_t* link_index, const loomc_config_options_t* config,
+    const loomc_link_index_t* link_index, const loomc_config_options_t* config,
     const loomc_target_specialization_options_t* target_specialization,
     loomc_result_t* result, loomc_allocator_t allocator,
     loomc_link_materialization_state_t* out_state) {
@@ -115,8 +123,15 @@ void loomc_link_materialization_state_initialize(
       .composition =
           {
               .context = context,
-              .link_index = link_index,
               .workspace = workspace,
+              .sources =
+                  {
+                      .link_index = link_index,
+                      .appended =
+                          {
+                              .provider_ordinal = IREE_HOST_SIZE_MAX,
+                          },
+                  },
           },
       .specialization =
           {
@@ -129,6 +144,22 @@ void loomc_link_materialization_state_initialize(
           },
       .allocator = allocator,
   };
+}
+
+void loomc_link_materialization_state_initialize_overlay(
+    loomc_context_t* context, loomc_workspace_t* workspace,
+    const loomc_link_index_t* library_index,
+    iree_host_size_t appended_provider_ordinal,
+    const loomc_source_t* appended_source, const loomc_config_options_t* config,
+    const loomc_target_specialization_options_t* target_specialization,
+    loomc_result_t* result, loomc_allocator_t allocator,
+    loomc_link_materialization_state_t* out_state) {
+  loomc_link_materialization_state_initialize(context, workspace, library_index,
+                                              config, target_specialization,
+                                              result, allocator, out_state);
+  out_state->composition.sources.appended.source = appended_source;
+  out_state->composition.sources.appended.provider_ordinal =
+      appended_provider_ordinal;
 }
 
 loom_link_plan_materialization_environment_t

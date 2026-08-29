@@ -32,11 +32,23 @@ typedef struct loomc_link_materialization_state_t {
     // Context shared by the index and all materialized modules.
     loomc_context_t* context;
 
-    // Frozen provider index supplying source and diagnostic identity.
-    loomc_link_index_t* link_index;
-
     // Workspace block pool backing transient and returned modules.
     loomc_workspace_t* workspace;
+
+    // Provider-to-source map used for diagnostic identity.
+    struct {
+      // Frozen index supplying the base provider source domain, or NULL.
+      const loomc_link_index_t* link_index;
+
+      // One appended provider not owned by |link_index|.
+      struct {
+        // Borrowed source associated with the appended provider, or NULL.
+        const loomc_source_t* source;
+
+        // Internal index ordinal associated with |source|.
+        iree_host_size_t provider_ordinal;
+      } appended;
+    } sources;
   } composition;
 
   // Per-invocation specialization inputs.
@@ -64,7 +76,18 @@ typedef struct loomc_link_materialization_state_t {
 // Initializes borrowed state shared by one selective materialization.
 LOOMC_API_PRIVATE void loomc_link_materialization_state_initialize(
     loomc_context_t* context, loomc_workspace_t* workspace,
-    loomc_link_index_t* link_index, const loomc_config_options_t* config,
+    const loomc_link_index_t* link_index, const loomc_config_options_t* config,
+    const loomc_target_specialization_options_t* target_specialization,
+    loomc_result_t* result, loomc_allocator_t allocator,
+    loomc_link_materialization_state_t* out_state);
+
+// Initializes borrowed materialization state for an immutable library index
+// overlaid by one invocation-local source provider.
+LOOMC_API_PRIVATE void loomc_link_materialization_state_initialize_overlay(
+    loomc_context_t* context, loomc_workspace_t* workspace,
+    const loomc_link_index_t* library_index,
+    iree_host_size_t appended_provider_ordinal,
+    const loomc_source_t* appended_source, const loomc_config_options_t* config,
     const loomc_target_specialization_options_t* target_specialization,
     loomc_result_t* result, loomc_allocator_t allocator,
     loomc_link_materialization_state_t* out_state);

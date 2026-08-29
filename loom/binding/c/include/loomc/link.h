@@ -10,6 +10,7 @@
 #include "loomc/config.h"
 #include "loomc/link_index.h"
 #include "loomc/module.h"
+#include "loomc/product.h"
 #include "loomc/result.h"
 #include "loomc/workspace.h"
 
@@ -181,6 +182,36 @@ typedef struct loomc_link_options_t {
   loomc_host_size_t root_provider_count;
 } loomc_link_options_t;
 
+/// Request-linking options.
+///
+/// Request linking treats the request source as one primary INPUT provider,
+/// selects its roots by exact indexed identity, resolves their complete closure
+/// against an optional immutable library universe, and serializes the result as
+/// a new ordinary bytecode request. The output preserves the input product
+/// descriptor, root order, and provisional parent bindings.
+typedef struct loomc_link_request_options_t {
+  /// Structure type. Must be `LOOMC_STRUCTURE_TYPE_LINK_REQUEST_OPTIONS` when
+  /// nonzero.
+  loomc_structure_type_t type;
+
+  /// Size of this structure in bytes.
+  loomc_host_size_t structure_size;
+
+  /// Optional invocation extensions such as
+  /// `loomc_target_specialization_options_t`.
+  const void* next;
+
+  /// Optional frozen library-only index used to resolve request declarations.
+  /// Passing `NULL` seals the request against its own source only.
+  const loomc_link_index_t* library_index;
+
+  /// Output module name. Empty uses the linker's default module name.
+  loomc_string_view_t module_name;
+
+  /// Config bindings materialized into the linked request.
+  loomc_config_options_t config;
+} loomc_link_request_options_t;
+
 /// Creates a prepared immutable linker.
 ///
 /// @param context Context shared with all link indexes used by this linker.
@@ -228,6 +259,45 @@ LOOMC_API_EXPORT loomc_status_t
 loomc_link_module(loomc_linker_t* linker, loomc_workspace_t* workspace,
                   const loomc_link_options_t* options,
                   loomc_module_t** out_module, loomc_result_t** out_result);
+
+/// Seals an ordinary request against an optional frozen library index.
+///
+/// @param linker Prepared linker.
+/// @param workspace Invocation-local scratch workspace.
+/// @param input_request Immutable ordinary bytecode request to link.
+/// @param options Request-linking options, or `NULL` for a source-only link.
+/// @param allocator Host allocator owning the returned request and result.
+/// @param out_request Receives an independently owned linked request when the
+/// result succeeds. Receives `NULL` when the result fails.
+/// @param out_result Receives a retained result for the operation.
+/// @return OK when the invocation ran to a result. Non-OK statuses represent
+/// API misuse or infrastructure failures before a result could be produced.
+///
+/// @ownership
+/// The caller owns `out_request` when non-NULL and releases it with
+/// `loomc_request_release`. The caller always owns `out_result` on an OK return
+/// and releases it with `loomc_result_release`.
+///
+/// @lifetime
+/// The returned request owns standalone bytecode and does not retain
+/// `input_request`, `options->library_index`, or `workspace`. It remains valid
+/// after those objects are released or trimmed.
+///
+/// @thread_safety
+/// Calls using the same linker and frozen library index may run concurrently
+/// when each call uses a distinct workspace. The same workspace requires
+/// external synchronization.
+///
+/// @error_contract
+/// Malformed request bytecode, unresolved link contracts, invalid source IR,
+/// and specialization failures produce OK status plus a failed result with
+/// diagnostics. Structural request inconsistencies and API misuse produce a
+/// non-OK status without a result.
+LOOMC_API_EXPORT loomc_status_t loomc_link_request(
+    loomc_linker_t* linker, loomc_workspace_t* workspace,
+    const loomc_request_t* input_request,
+    const loomc_link_request_options_t* options, loomc_allocator_t allocator,
+    loomc_request_t** out_request, loomc_result_t** out_result);
 
 /// Retains a prepared linker for another owner.
 ///

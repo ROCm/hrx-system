@@ -196,3 +196,13 @@ bool loomc_request_binding_at(const loomc_request_t* request,
   *out_binding = request->bindings.values[ordinal];
   return true;
 }
+
+const loomc_request_root_t* loomc_request_roots(
+    const loomc_request_t* request) {
+  return request ? request->roots.values : NULL;
+}
+
+const loomc_request_binding_t* loomc_request_bindings(
+    const loomc_request_t* request) {
+  return request ? request->bindings.values : NULL;
+}
