@@ -187,7 +187,6 @@ class CiTest(unittest.TestCase):
         configure_step = steps[0]
         for define in (
             "IREE_HAL_DRIVER_AMDGPU",
-            "IREE_HAL_DRIVER_LOCAL_SYNC",
             "IREE_HAL_DRIVER_LOCAL_TASK",
             "IREE_HAL_DRIVER_NULL",
             "IREE_HAL_DRIVER_VULKAN",

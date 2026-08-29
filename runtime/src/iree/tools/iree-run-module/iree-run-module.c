@@ -49,7 +49,7 @@ static const char kIreeRunModuleUsage[] =
     "      `iree-run-replay --agents_md` for the full replay tool playbook.\n"
     "\n"
     "Example:\n"
-    "  iree-run-module --device=local-sync --module=model.vmfb \\\n"
+    "  iree-run-module --device=local-task --module=model.vmfb \\\n"
     "      --function=main --input=@inputs.txt \\\n"
     "      --device_replay_output=/tmp/model.ireereplay \\\n"
     "      --device_replay_file_policy=reference\n";

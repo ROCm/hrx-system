@@ -30,7 +30,6 @@ CMAKE_SANITIZER_OPTIONS = {
 }
 BAZEL_HAL_DRIVER_DEFINES = (
     ("amdgpu", "IREE_HAL_DRIVER_AMDGPU"),
-    ("local-sync", "IREE_HAL_DRIVER_LOCAL_SYNC"),
     ("local-task", "IREE_HAL_DRIVER_LOCAL_TASK"),
     ("null", "IREE_HAL_DRIVER_NULL"),
     ("vulkan", "IREE_HAL_DRIVER_VULKAN"),
@@ -56,7 +55,6 @@ CMAKE_LOOM_IMPORTER_DEFINES = (
 CI_SUPPORTED_HAL_DRIVERS = frozenset(driver for driver, _ in BAZEL_HAL_DRIVER_DEFINES)
 REPOSITORY_BUILD_HAL_DRIVERS = (
     "amdgpu",
-    "local-sync",
     "local-task",
     "null",
     "vulkan",

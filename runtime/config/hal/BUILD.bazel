@@ -12,14 +12,12 @@ package(default_visibility = ["//visibility:public"])
 # remain opt-in so embedders do not fetch SDK packages by depending on the
 # runtime's default driver registry.
 DEFAULT_DRIVERS = [
-    "local-sync",
     "local-task",
     "null",
 ]
 
 SUPPORTED_DRIVERS = [
     "amdgpu",
-    "local-sync",
     "local-task",
     "null",
     "vulkan",
