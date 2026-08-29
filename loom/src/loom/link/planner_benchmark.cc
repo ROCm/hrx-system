@@ -51,13 +51,14 @@ class PlannerCatalogFixture {
                                      &block_pool_, nullptr,
                                      iree_allocator_system(), &module));
     BuildModule(module);
-    SerializeModule(module);
+    SerializeModule(module, &bytes_);
     module_ = module;
 
     CheckStatus(loom_module_allocate(&context_, IREE_SV("planner_requester"),
                                      &block_pool_, nullptr,
                                      iree_allocator_system(), &input_module_));
     BuildIdentityModule(input_module_, IREE_SV("requester_entry"));
+    SerializeModule(input_module_, &input_bytes_);
   }
 
   PlannerCatalogFixture(const PlannerCatalogFixture&) = delete;
@@ -84,6 +85,24 @@ class PlannerCatalogFixture {
     CheckStatus(loom_link_module_index_add_bytecode(
         index, iree_make_const_byte_span(bytes_.data(), bytes_.size()),
         IREE_SV("planner_catalog.loombc"), /*index_options=*/nullptr, &options,
+        /*out_provider_ordinal=*/nullptr));
+    return index;
+  }
+
+  loom_link_module_index_t* BuildOneInputOverlay(
+      const loom_link_module_index_t* base_index) {
+    loom_link_module_index_t* index = nullptr;
+    CheckStatus(loom_link_module_index_allocate_overlay(
+        base_index, &block_pool_, iree_allocator_system(), &index));
+    const loom_link_module_index_add_options_t options = {
+        /*.provider_name=*/IREE_SV("requester"),
+        /*.role=*/LOOM_LINK_PROVIDER_ROLE_INPUT,
+    };
+    CheckStatus(loom_link_module_index_add_bytecode(
+        index,
+        iree_make_const_byte_span(input_bytes_.data(), input_bytes_.size()),
+        IREE_SV("planner_requester.loombc"), /*index_options=*/nullptr,
+        &options,
         /*out_provider_ordinal=*/nullptr));
     return index;
   }
@@ -259,7 +278,8 @@ class PlannerCatalogFixture {
     }
   }
 
-  void SerializeModule(const loom_module_t* module) {
+  void SerializeModule(const loom_module_t* module,
+                       std::vector<uint8_t>* out_bytes) {
     iree_io_stream_t* stream = nullptr;
     CheckStatus(iree_io_vec_stream_create(
         IREE_IO_STREAM_MODE_WRITABLE | IREE_IO_STREAM_MODE_SEEKABLE |
@@ -268,10 +288,10 @@ class PlannerCatalogFixture {
     CheckStatus(loom_bytecode_write_module(module, stream, /*options=*/nullptr,
                                            &block_pool_));
     const iree_io_stream_pos_t length = iree_io_stream_length(stream);
-    bytes_.resize((size_t)length);
+    out_bytes->resize((size_t)length);
     CheckStatus(iree_io_stream_seek(stream, IREE_IO_STREAM_SEEK_SET, 0));
-    CheckStatus(
-        iree_io_stream_read(stream, bytes_.size(), bytes_.data(), nullptr));
+    CheckStatus(iree_io_stream_read(stream, out_bytes->size(),
+                                    out_bytes->data(), nullptr));
     iree_io_stream_release(stream);
   }
 
@@ -282,6 +302,8 @@ class PlannerCatalogFixture {
   loom_module_t* input_module_ = nullptr;
   std::vector<loom_module_t*> benchmark_modules_;
   std::vector<uint8_t> bytes_;
+  // Serialized one-symbol requester indexed by each timed overlay.
+  std::vector<uint8_t> input_bytes_;
 };
 
 static void SetCounters(benchmark::State& state,
@@ -305,6 +327,22 @@ static void BM_ModuleIndex_Catalog(benchmark::State& state) {
     state.ResumeTiming();
   }
   SetCounters(state, fixture, /*selected_symbol_count=*/0);
+}
+
+static void BM_ModuleIndex_OverlayOneInput_Catalog(benchmark::State& state) {
+  PlannerCatalogFixture fixture((uint32_t)state.range(0));
+  loom_link_module_index_t* base_index =
+      fixture.BuildIndex(LOOM_LINK_PROVIDER_ROLE_LIBRARY);
+  for (auto _ : state) {
+    loom_link_module_index_t* index = fixture.BuildOneInputOverlay(base_index);
+    benchmark::DoNotOptimize(index);
+    state.PauseTiming();
+    loom_link_module_index_free(index);
+    state.ResumeTiming();
+  }
+  state.counters["base_providers"] = 1.0;
+  SetCounters(state, fixture, /*selected_symbol_count=*/1);
+  loom_link_module_index_free(base_index);
 }
 
 static void BenchmarkPlan(benchmark::State& state, loom_link_plan_mode_t mode,
@@ -680,6 +718,9 @@ static void CatalogScales(benchmark::Benchmark* benchmark) {
 }
 
 BENCHMARK(BM_ModuleIndex_Catalog)->Apply(CatalogScales)->Complexity();
+BENCHMARK(BM_ModuleIndex_OverlayOneInput_Catalog)
+    ->Apply(CatalogScales)
+    ->Complexity(benchmark::o1);
 BENCHMARK(BM_Plan_Merge_Catalog)->Apply(CatalogScales)->Complexity();
 BENCHMARK(BM_Plan_LinkLeaf_Catalog)->Apply(CatalogScales)->Complexity();
 BENCHMARK(BM_Plan_LinkChain_Catalog)->Apply(CatalogScales)->Complexity();

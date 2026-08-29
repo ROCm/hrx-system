@@ -586,13 +586,12 @@ static void loom_link_dependency_fill_template_candidates(
           builder->index, requirement->target.template_family_ordinal);
   IREE_ASSERT(family);
   iree_host_size_t position = requirement->candidates.first;
-  iree_host_size_t symbol_ordinal = family->providers.first_symbol_ordinal;
-  while (symbol_ordinal != LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL) {
-    const loom_link_module_index_symbol_t* candidate =
-        loom_link_module_index_symbol_at(builder->index, symbol_ordinal);
+  const loom_link_module_index_symbol_t* candidate =
+      loom_link_module_index_symbol_at(builder->index,
+                                       family->providers.first_symbol_ordinal);
+  while (candidate != NULL) {
     const loom_link_module_index_provider_t* provider =
         loom_link_module_index_symbol_provider(builder->index, candidate);
-    IREE_ASSERT(candidate);
     IREE_ASSERT(provider);
     candidates[position++] = (loom_link_dependency_candidate_t){
         .symbol_ordinal = candidate->ordinal,
@@ -600,7 +599,8 @@ static void loom_link_dependency_fill_template_candidates(
         .origin = loom_link_dependency_candidate_origin(builder, provider),
         .compatible = true,
     };
-    symbol_ordinal = candidate->next.template_provider_ordinal;
+    candidate = loom_link_module_index_next_template_provider(builder->index,
+                                                              candidate);
   }
   IREE_ASSERT_EQ(position,
                  requirement->candidates.first + requirement->candidates.count);

@@ -313,12 +313,11 @@ iree_status_t loom_link_template_candidate_loader_load(
         materialization->target_template_families.values[family_ordinal];
     IREE_ASSERT(loom_symbol_ref_is_valid(target_family));
 
-    iree_host_size_t provider_ordinal = family->providers.first_symbol_ordinal;
-    while (provider_ordinal != LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL) {
-      const loom_link_module_index_symbol_t* provider =
-          loom_link_module_index_symbol_at(loader->index, provider_ordinal);
-      IREE_ASSERT(provider != NULL);
-      if (!loom_link_plan_contains_symbol(plan, provider_ordinal)) {
+    const loom_link_module_index_symbol_t* provider =
+        loom_link_module_index_symbol_at(
+            loader->index, family->providers.first_symbol_ordinal);
+    while (provider != NULL) {
+      if (!loom_link_plan_contains_symbol(plan, provider->ordinal)) {
         const loom_link_module_index_module_t* source_module =
             loom_link_module_index_symbol_module(loader->index, provider);
         IREE_ASSERT(source_module != NULL);
@@ -337,7 +336,7 @@ iree_status_t loom_link_template_candidate_loader_load(
                       : UINT32_MAX);
           IREE_RETURN_IF_ERROR(loom_template_provider_summary_bind_family(
               source_summary, materialization->module, target_family,
-              target_symbol, provider_ordinal, arena,
+              target_symbol, provider->ordinal, arena,
               &candidates[candidate_count++]));
         } else {
           const loom_link_bytecode_template_contract_t* contract = NULL;
@@ -350,11 +349,12 @@ iree_status_t loom_link_template_candidate_loader_load(
                   contract->target_symbol_ordinal);
           IREE_RETURN_IF_ERROR(loom_template_provider_contract_bind_family(
               &contract->provider, materialization->module, target_family,
-              target_symbol, provider_ordinal, arena,
+              target_symbol, provider->ordinal, arena,
               &candidates[candidate_count++]));
         }
       }
-      provider_ordinal = provider->next.template_provider_ordinal;
+      provider = loom_link_module_index_next_template_provider(loader->index,
+                                                               provider);
     }
   }
   IREE_ASSERT(candidate_count <= candidate_capacity);

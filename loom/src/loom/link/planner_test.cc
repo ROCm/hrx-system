@@ -135,6 +135,13 @@ class LinkPlannerTest : public ::testing::Test {
     return IndexPtr(index);
   }
 
+  IndexPtr CreateOverlay(const loom_link_module_index_t* base_index) {
+    loom_link_module_index_t* index = nullptr;
+    IREE_CHECK_OK(loom_link_module_index_allocate_overlay(
+        base_index, &block_pool_, iree_allocator_system(), &index));
+    return IndexPtr(index);
+  }
+
   std::vector<uint8_t> WriteModule(const loom_module_t* module) {
     iree_io_stream_t* stream = nullptr;
     IREE_CHECK_OK(iree_io_vec_stream_create(
@@ -987,6 +994,51 @@ TEST_F(LinkPlannerTest, LinkImportFreeDeclarationPullsConcreteDefinition) {
   AddBytecode(bytecode_index.get(), library_bytecode, IREE_SV("library"),
               LOOM_LINK_PROVIDER_ROLE_LIBRARY);
   verify_index(bytecode_index.get());
+}
+
+TEST_F(LinkPlannerTest, OverlayPlansInputAgainstImmutableLibrary) {
+  loom_module_t* harness =
+      Parse(Fixture(IREE_SV("link_import_free_declaration_pulls_concrete_"
+                            "definition_harness_source.loom")));
+  loom_module_t* library =
+      Parse(Fixture(IREE_SV("link_import_free_declaration_pulls_concrete_"
+                            "definition_library_source.loom")));
+  const std::vector<uint8_t> harness_bytecode = WriteModule(harness);
+  const std::vector<uint8_t> library_bytecode = WriteModule(library);
+
+  IndexPtr base_index = CreateIndex();
+  AddBytecode(base_index.get(), library_bytecode, IREE_SV("library"),
+              LOOM_LINK_PROVIDER_ROLE_LIBRARY);
+  IndexPtr overlay = CreateOverlay(base_index.get());
+  AddBytecode(overlay.get(), harness_bytecode, IREE_SV("harness"),
+              LOOM_LINK_PROVIDER_ROLE_INPUT);
+
+  iree_string_view_t roots[] = {IREE_SV("@entry")};
+  const loom_link_plan_options_t options = {
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
+      /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
+  };
+  PlanPtr plan = BuildPlan(overlay.get(), &options);
+
+  const loom_link_module_index_symbol_t* entry =
+      loom_link_module_index_lookup_global(overlay.get(), IREE_SV("entry"));
+  const loom_link_module_index_symbol_t* declaration =
+      loom_link_module_index_lookup_global(overlay.get(), IREE_SV("callee"));
+  ASSERT_NE(entry, nullptr);
+  ASSERT_NE(declaration, nullptr);
+  const loom_link_module_index_symbol_t* definition =
+      loom_link_module_index_next_global_duplicate(overlay.get(), declaration);
+  ASSERT_NE(definition, nullptr);
+  EXPECT_TRUE(ContainsSymbol(plan.get(), entry));
+  EXPECT_TRUE(ContainsSymbol(plan.get(), declaration));
+  EXPECT_TRUE(ContainsSymbol(plan.get(), definition));
+
+  const loom_link_module_index_provider_t* definition_provider =
+      loom_link_module_index_symbol_provider(overlay.get(), definition);
+  ASSERT_NE(definition_provider, nullptr);
+  EXPECT_EQ(definition_provider,
+            loom_link_module_index_provider_at(base_index.get(), 0));
+  EXPECT_EQ(StringViewToString(definition_provider->name), "library");
 }
 
 TEST_F(LinkPlannerTest, LinkTargetRequirementUsesConcreteEnvironment) {
