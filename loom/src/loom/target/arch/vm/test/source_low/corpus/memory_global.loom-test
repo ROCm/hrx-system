@@ -1,0 +1,2526 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/memory_global.loom-test
+// RUN: emit source-low output=low
+
+vm.target<core> @target
+func.def target(@target) @global_saddr_fallback(%input: buffer, %output: buffer) {
+  %base = index.constant 4 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<4xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<4xi32>
+  %loaded = vector.load %input_view[0] : view<4xi32> -> vector<4xi32>
+  vector.store %loaded, %output_view[0] : vector<4xi32>, view<4xi32>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>}) @global_saddr_fallback(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>) asm {
+  %8 = constant.zero : reg<vm.value : offset>
+  %9 = constant.s16 4 : reg<vm.value : offset>
+  %loaded = buffer.load %input, %9, %8, 0, i32.x4 : reg<vm.value x4 : vector<4xi32>>
+  buffer.store %output, %9, %8, %loaded, 0, i32.x4
+  return
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @global_f32x7_roundtrip(%input: buffer, %output: buffer) {
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<7xf32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<7xf32>
+  %loaded = vector.load %input_view[0] : view<7xf32> -> vector<7xf32>
+  vector.store %loaded, %output_view[0] : vector<7xf32>, view<7xf32>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>}) @global_f32x7_roundtrip(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>) asm {
+  %8 = constant.zero : reg<vm.value : offset>
+  %9 = buffer.load %input, %8, %8, 0, i32.x4 : reg<vm.value x4 : vector<4xf32>>
+  %10 = constant.s16 16 : reg<vm.value : offset>
+  %11 = buffer.load %input, %10, %8, 0, i32.x2 : reg<vm.value x2 : vector<2xf32>>
+  %12 = constant.s16 24 : reg<vm.value : offset>
+  %13 = buffer.load %input, %12, %8, 0, i32.x1 : reg<vm.value : vector<1xf32>>
+  buffer.store %output, %8, %8, %9, 0, i32.x4
+  buffer.store %output, %10, %8, %11, 0, i32.x2
+  buffer.store %output, %12, %8, %13, 0, i32.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @global_f32x64_roundtrip(%input: buffer, %output: buffer) {
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xf32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xf32>
+  %loaded = vector.load %input_view[0] : view<64xf32> -> vector<64xf32>
+  vector.store %loaded, %output_view[0] : vector<64xf32>, view<64xf32>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>}) @global_f32x64_roundtrip(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>) asm {
+  %8 = constant.zero : reg<vm.value : offset>
+  %9 = buffer.load %input, %8, %8, 0, i32.x8 : reg<vm.value x8 : vector<8xf32>>
+  %10 = constant.s16 32 : reg<vm.value : offset>
+  %11 = buffer.load %input, %10, %8, 0, i32.x8 : reg<vm.value x8 : vector<8xf32>>
+  %12 = constant.s16 64 : reg<vm.value : offset>
+  %13 = buffer.load %input, %12, %8, 0, i32.x8 : reg<vm.value x8 : vector<8xf32>>
+  %14 = constant.s16 96 : reg<vm.value : offset>
+  %15 = buffer.load %input, %14, %8, 0, i32.x8 : reg<vm.value x8 : vector<8xf32>>
+  %16 = constant.s16 128 : reg<vm.value : offset>
+  %17 = buffer.load %input, %16, %8, 0, i32.x8 : reg<vm.value x8 : vector<8xf32>>
+  %18 = constant.s16 160 : reg<vm.value : offset>
+  %19 = buffer.load %input, %18, %8, 0, i32.x8 : reg<vm.value x8 : vector<8xf32>>
+  %20 = constant.s16 192 : reg<vm.value : offset>
+  %21 = buffer.load %input, %20, %8, 0, i32.x8 : reg<vm.value x8 : vector<8xf32>>
+  %22 = constant.s16 224 : reg<vm.value : offset>
+  %23 = buffer.load %input, %22, %8, 0, i32.x8 : reg<vm.value x8 : vector<8xf32>>
+  buffer.store %output, %8, %8, %9, 0, i32.x8
+  buffer.store %output, %10, %8, %11, 0, i32.x8
+  buffer.store %output, %12, %8, %13, 0, i32.x8
+  buffer.store %output, %14, %8, %15, 0, i32.x8
+  buffer.store %output, %16, %8, %17, 0, i32.x8
+  buffer.store %output, %18, %8, %19, 0, i32.x8
+  buffer.store %output, %20, %8, %21, 0, i32.x8
+  buffer.store %output, %22, %8, %23, 0, i32.x8
+  return
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @global_f32x64_add_roundtrip(%lhs: buffer, %rhs: buffer, %output: buffer) {
+  %buffer_base = index.constant 0 : offset
+  %lhs_view = buffer.view %lhs[%buffer_base] : buffer -> view<64xf32>
+  %rhs_view = buffer.view %rhs[%buffer_base] : buffer -> view<64xf32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xf32>
+  %lhs_loaded = vector.load %lhs_view[0] : view<64xf32> -> vector<64xf32>
+  %rhs_loaded = vector.load %rhs_view[0] : view<64xf32> -> vector<64xf32>
+  %sum = vector.addf %lhs_loaded, %rhs_loaded : vector<64xf32>
+  vector.store %sum, %output_view[0] : vector<64xf32>, view<64xf32>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>}) @global_f32x64_add_roundtrip(%lhs: reg<vm.ref : buffer>, %rhs: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>) asm {
+  %206 = constant.zero : reg<vm.value : offset>
+  %207 = buffer.load %lhs, %206, %206, 0, i32.x1 : reg<vm.value : f32>
+  %209 = buffer.load %rhs, %206, %206, 0, i32.x1 : reg<vm.value : f32>
+  %210 = float.add.f32 %207, %209 : reg<vm.value : f32>
+  %212 = constant.s16 4 : reg<vm.value : offset>
+  %213 = buffer.load %lhs, %212, %206, 0, i32.x1 : reg<vm.value : f32>
+  %216 = buffer.load %rhs, %212, %206, 0, i32.x1 : reg<vm.value : f32>
+  %217 = float.add.f32 %213, %216 : reg<vm.value : f32>
+  %219 = constant.s16 8 : reg<vm.value : offset>
+  %220 = buffer.load %lhs, %219, %206, 0, i32.x1 : reg<vm.value : f32>
+  %223 = buffer.load %rhs, %219, %206, 0, i32.x1 : reg<vm.value : f32>
+  %224 = float.add.f32 %220, %223 : reg<vm.value : f32>
+  %226 = constant.s16 12 : reg<vm.value : offset>
+  %227 = buffer.load %lhs, %226, %206, 0, i32.x1 : reg<vm.value : f32>
+  %230 = buffer.load %rhs, %226, %206, 0, i32.x1 : reg<vm.value : f32>
+  %231 = float.add.f32 %227, %230 : reg<vm.value : f32>
+  %233 = constant.s16 16 : reg<vm.value : offset>
+  %234 = buffer.load %lhs, %233, %206, 0, i32.x1 : reg<vm.value : f32>
+  %237 = buffer.load %rhs, %233, %206, 0, i32.x1 : reg<vm.value : f32>
+  %238 = float.add.f32 %234, %237 : reg<vm.value : f32>
+  %240 = constant.s16 20 : reg<vm.value : offset>
+  %241 = buffer.load %lhs, %240, %206, 0, i32.x1 : reg<vm.value : f32>
+  %244 = buffer.load %rhs, %240, %206, 0, i32.x1 : reg<vm.value : f32>
+  %245 = float.add.f32 %241, %244 : reg<vm.value : f32>
+  %247 = constant.s16 24 : reg<vm.value : offset>
+  %248 = buffer.load %lhs, %247, %206, 0, i32.x1 : reg<vm.value : f32>
+  %251 = buffer.load %rhs, %247, %206, 0, i32.x1 : reg<vm.value : f32>
+  %252 = float.add.f32 %248, %251 : reg<vm.value : f32>
+  %254 = constant.s16 28 : reg<vm.value : offset>
+  %255 = buffer.load %lhs, %254, %206, 0, i32.x1 : reg<vm.value : f32>
+  %258 = buffer.load %rhs, %254, %206, 0, i32.x1 : reg<vm.value : f32>
+  %259 = float.add.f32 %255, %258 : reg<vm.value : f32>
+  %261 = constant.s16 32 : reg<vm.value : offset>
+  %262 = buffer.load %lhs, %261, %206, 0, i32.x1 : reg<vm.value : f32>
+  %265 = buffer.load %rhs, %261, %206, 0, i32.x1 : reg<vm.value : f32>
+  %266 = float.add.f32 %262, %265 : reg<vm.value : f32>
+  %268 = constant.s16 36 : reg<vm.value : offset>
+  %269 = buffer.load %lhs, %268, %206, 0, i32.x1 : reg<vm.value : f32>
+  %272 = buffer.load %rhs, %268, %206, 0, i32.x1 : reg<vm.value : f32>
+  %273 = float.add.f32 %269, %272 : reg<vm.value : f32>
+  %275 = constant.s16 40 : reg<vm.value : offset>
+  %276 = buffer.load %lhs, %275, %206, 0, i32.x1 : reg<vm.value : f32>
+  %279 = buffer.load %rhs, %275, %206, 0, i32.x1 : reg<vm.value : f32>
+  %280 = float.add.f32 %276, %279 : reg<vm.value : f32>
+  %282 = constant.s16 44 : reg<vm.value : offset>
+  %283 = buffer.load %lhs, %282, %206, 0, i32.x1 : reg<vm.value : f32>
+  %286 = buffer.load %rhs, %282, %206, 0, i32.x1 : reg<vm.value : f32>
+  %287 = float.add.f32 %283, %286 : reg<vm.value : f32>
+  %289 = constant.s16 48 : reg<vm.value : offset>
+  %290 = buffer.load %lhs, %289, %206, 0, i32.x1 : reg<vm.value : f32>
+  %293 = buffer.load %rhs, %289, %206, 0, i32.x1 : reg<vm.value : f32>
+  %294 = float.add.f32 %290, %293 : reg<vm.value : f32>
+  %296 = constant.s16 52 : reg<vm.value : offset>
+  %297 = buffer.load %lhs, %296, %206, 0, i32.x1 : reg<vm.value : f32>
+  %300 = buffer.load %rhs, %296, %206, 0, i32.x1 : reg<vm.value : f32>
+  %301 = float.add.f32 %297, %300 : reg<vm.value : f32>
+  %303 = constant.s16 56 : reg<vm.value : offset>
+  %304 = buffer.load %lhs, %303, %206, 0, i32.x1 : reg<vm.value : f32>
+  %307 = buffer.load %rhs, %303, %206, 0, i32.x1 : reg<vm.value : f32>
+  %308 = float.add.f32 %304, %307 : reg<vm.value : f32>
+  %310 = constant.s16 60 : reg<vm.value : offset>
+  %311 = buffer.load %lhs, %310, %206, 0, i32.x1 : reg<vm.value : f32>
+  %314 = buffer.load %rhs, %310, %206, 0, i32.x1 : reg<vm.value : f32>
+  %315 = float.add.f32 %311, %314 : reg<vm.value : f32>
+  %317 = constant.s16 64 : reg<vm.value : offset>
+  %318 = buffer.load %lhs, %317, %206, 0, i32.x1 : reg<vm.value : f32>
+  %321 = buffer.load %rhs, %317, %206, 0, i32.x1 : reg<vm.value : f32>
+  %322 = float.add.f32 %318, %321 : reg<vm.value : f32>
+  %324 = constant.s16 68 : reg<vm.value : offset>
+  %325 = buffer.load %lhs, %324, %206, 0, i32.x1 : reg<vm.value : f32>
+  %328 = buffer.load %rhs, %324, %206, 0, i32.x1 : reg<vm.value : f32>
+  %329 = float.add.f32 %325, %328 : reg<vm.value : f32>
+  %331 = constant.s16 72 : reg<vm.value : offset>
+  %332 = buffer.load %lhs, %331, %206, 0, i32.x1 : reg<vm.value : f32>
+  %335 = buffer.load %rhs, %331, %206, 0, i32.x1 : reg<vm.value : f32>
+  %336 = float.add.f32 %332, %335 : reg<vm.value : f32>
+  %338 = constant.s16 76 : reg<vm.value : offset>
+  %339 = buffer.load %lhs, %338, %206, 0, i32.x1 : reg<vm.value : f32>
+  %342 = buffer.load %rhs, %338, %206, 0, i32.x1 : reg<vm.value : f32>
+  %343 = float.add.f32 %339, %342 : reg<vm.value : f32>
+  %345 = constant.s16 80 : reg<vm.value : offset>
+  %346 = buffer.load %lhs, %345, %206, 0, i32.x1 : reg<vm.value : f32>
+  %349 = buffer.load %rhs, %345, %206, 0, i32.x1 : reg<vm.value : f32>
+  %350 = float.add.f32 %346, %349 : reg<vm.value : f32>
+  %352 = constant.s16 84 : reg<vm.value : offset>
+  %353 = buffer.load %lhs, %352, %206, 0, i32.x1 : reg<vm.value : f32>
+  %356 = buffer.load %rhs, %352, %206, 0, i32.x1 : reg<vm.value : f32>
+  %357 = float.add.f32 %353, %356 : reg<vm.value : f32>
+  %359 = constant.s16 88 : reg<vm.value : offset>
+  %360 = buffer.load %lhs, %359, %206, 0, i32.x1 : reg<vm.value : f32>
+  %363 = buffer.load %rhs, %359, %206, 0, i32.x1 : reg<vm.value : f32>
+  %364 = float.add.f32 %360, %363 : reg<vm.value : f32>
+  %366 = constant.s16 92 : reg<vm.value : offset>
+  %367 = buffer.load %lhs, %366, %206, 0, i32.x1 : reg<vm.value : f32>
+  %370 = buffer.load %rhs, %366, %206, 0, i32.x1 : reg<vm.value : f32>
+  %371 = float.add.f32 %367, %370 : reg<vm.value : f32>
+  %373 = constant.s16 96 : reg<vm.value : offset>
+  %374 = buffer.load %lhs, %373, %206, 0, i32.x1 : reg<vm.value : f32>
+  %377 = buffer.load %rhs, %373, %206, 0, i32.x1 : reg<vm.value : f32>
+  %378 = float.add.f32 %374, %377 : reg<vm.value : f32>
+  %380 = constant.s16 100 : reg<vm.value : offset>
+  %381 = buffer.load %lhs, %380, %206, 0, i32.x1 : reg<vm.value : f32>
+  %384 = buffer.load %rhs, %380, %206, 0, i32.x1 : reg<vm.value : f32>
+  %385 = float.add.f32 %381, %384 : reg<vm.value : f32>
+  %387 = constant.s16 104 : reg<vm.value : offset>
+  %388 = buffer.load %lhs, %387, %206, 0, i32.x1 : reg<vm.value : f32>
+  %391 = buffer.load %rhs, %387, %206, 0, i32.x1 : reg<vm.value : f32>
+  %392 = float.add.f32 %388, %391 : reg<vm.value : f32>
+  %394 = constant.s16 108 : reg<vm.value : offset>
+  %395 = buffer.load %lhs, %394, %206, 0, i32.x1 : reg<vm.value : f32>
+  %398 = buffer.load %rhs, %394, %206, 0, i32.x1 : reg<vm.value : f32>
+  %399 = float.add.f32 %395, %398 : reg<vm.value : f32>
+  %401 = constant.s16 112 : reg<vm.value : offset>
+  %402 = buffer.load %lhs, %401, %206, 0, i32.x1 : reg<vm.value : f32>
+  %405 = buffer.load %rhs, %401, %206, 0, i32.x1 : reg<vm.value : f32>
+  %406 = float.add.f32 %402, %405 : reg<vm.value : f32>
+  %408 = constant.s16 116 : reg<vm.value : offset>
+  %409 = buffer.load %lhs, %408, %206, 0, i32.x1 : reg<vm.value : f32>
+  %412 = buffer.load %rhs, %408, %206, 0, i32.x1 : reg<vm.value : f32>
+  %413 = float.add.f32 %409, %412 : reg<vm.value : f32>
+  %415 = constant.s16 120 : reg<vm.value : offset>
+  %416 = buffer.load %lhs, %415, %206, 0, i32.x1 : reg<vm.value : f32>
+  %419 = buffer.load %rhs, %415, %206, 0, i32.x1 : reg<vm.value : f32>
+  %420 = float.add.f32 %416, %419 : reg<vm.value : f32>
+  %422 = constant.s16 124 : reg<vm.value : offset>
+  %423 = buffer.load %lhs, %422, %206, 0, i32.x1 : reg<vm.value : f32>
+  %426 = buffer.load %rhs, %422, %206, 0, i32.x1 : reg<vm.value : f32>
+  %427 = float.add.f32 %423, %426 : reg<vm.value : f32>
+  %429 = constant.s16 128 : reg<vm.value : offset>
+  %430 = buffer.load %lhs, %429, %206, 0, i32.x1 : reg<vm.value : f32>
+  %433 = buffer.load %rhs, %429, %206, 0, i32.x1 : reg<vm.value : f32>
+  %434 = float.add.f32 %430, %433 : reg<vm.value : f32>
+  %436 = constant.s16 132 : reg<vm.value : offset>
+  %437 = buffer.load %lhs, %436, %206, 0, i32.x1 : reg<vm.value : f32>
+  %440 = buffer.load %rhs, %436, %206, 0, i32.x1 : reg<vm.value : f32>
+  %441 = float.add.f32 %437, %440 : reg<vm.value : f32>
+  %443 = constant.s16 136 : reg<vm.value : offset>
+  %444 = buffer.load %lhs, %443, %206, 0, i32.x1 : reg<vm.value : f32>
+  %447 = buffer.load %rhs, %443, %206, 0, i32.x1 : reg<vm.value : f32>
+  %448 = float.add.f32 %444, %447 : reg<vm.value : f32>
+  %450 = constant.s16 140 : reg<vm.value : offset>
+  %451 = buffer.load %lhs, %450, %206, 0, i32.x1 : reg<vm.value : f32>
+  %454 = buffer.load %rhs, %450, %206, 0, i32.x1 : reg<vm.value : f32>
+  %455 = float.add.f32 %451, %454 : reg<vm.value : f32>
+  %457 = constant.s16 144 : reg<vm.value : offset>
+  %458 = buffer.load %lhs, %457, %206, 0, i32.x1 : reg<vm.value : f32>
+  %461 = buffer.load %rhs, %457, %206, 0, i32.x1 : reg<vm.value : f32>
+  %462 = float.add.f32 %458, %461 : reg<vm.value : f32>
+  %464 = constant.s16 148 : reg<vm.value : offset>
+  %465 = buffer.load %lhs, %464, %206, 0, i32.x1 : reg<vm.value : f32>
+  %468 = buffer.load %rhs, %464, %206, 0, i32.x1 : reg<vm.value : f32>
+  %469 = float.add.f32 %465, %468 : reg<vm.value : f32>
+  %471 = constant.s16 152 : reg<vm.value : offset>
+  %472 = buffer.load %lhs, %471, %206, 0, i32.x1 : reg<vm.value : f32>
+  %475 = buffer.load %rhs, %471, %206, 0, i32.x1 : reg<vm.value : f32>
+  %476 = float.add.f32 %472, %475 : reg<vm.value : f32>
+  %478 = constant.s16 156 : reg<vm.value : offset>
+  %479 = buffer.load %lhs, %478, %206, 0, i32.x1 : reg<vm.value : f32>
+  %482 = buffer.load %rhs, %478, %206, 0, i32.x1 : reg<vm.value : f32>
+  %483 = float.add.f32 %479, %482 : reg<vm.value : f32>
+  %485 = constant.s16 160 : reg<vm.value : offset>
+  %486 = buffer.load %lhs, %485, %206, 0, i32.x1 : reg<vm.value : f32>
+  %489 = buffer.load %rhs, %485, %206, 0, i32.x1 : reg<vm.value : f32>
+  %490 = float.add.f32 %486, %489 : reg<vm.value : f32>
+  %492 = constant.s16 164 : reg<vm.value : offset>
+  %493 = buffer.load %lhs, %492, %206, 0, i32.x1 : reg<vm.value : f32>
+  %496 = buffer.load %rhs, %492, %206, 0, i32.x1 : reg<vm.value : f32>
+  %497 = float.add.f32 %493, %496 : reg<vm.value : f32>
+  %499 = constant.s16 168 : reg<vm.value : offset>
+  %500 = buffer.load %lhs, %499, %206, 0, i32.x1 : reg<vm.value : f32>
+  %503 = buffer.load %rhs, %499, %206, 0, i32.x1 : reg<vm.value : f32>
+  %504 = float.add.f32 %500, %503 : reg<vm.value : f32>
+  %506 = constant.s16 172 : reg<vm.value : offset>
+  %507 = buffer.load %lhs, %506, %206, 0, i32.x1 : reg<vm.value : f32>
+  %510 = buffer.load %rhs, %506, %206, 0, i32.x1 : reg<vm.value : f32>
+  %511 = float.add.f32 %507, %510 : reg<vm.value : f32>
+  %513 = constant.s16 176 : reg<vm.value : offset>
+  %514 = buffer.load %lhs, %513, %206, 0, i32.x1 : reg<vm.value : f32>
+  %517 = buffer.load %rhs, %513, %206, 0, i32.x1 : reg<vm.value : f32>
+  %518 = float.add.f32 %514, %517 : reg<vm.value : f32>
+  %520 = constant.s16 180 : reg<vm.value : offset>
+  %521 = buffer.load %lhs, %520, %206, 0, i32.x1 : reg<vm.value : f32>
+  %524 = buffer.load %rhs, %520, %206, 0, i32.x1 : reg<vm.value : f32>
+  %525 = float.add.f32 %521, %524 : reg<vm.value : f32>
+  %527 = constant.s16 184 : reg<vm.value : offset>
+  %528 = buffer.load %lhs, %527, %206, 0, i32.x1 : reg<vm.value : f32>
+  %531 = buffer.load %rhs, %527, %206, 0, i32.x1 : reg<vm.value : f32>
+  %532 = float.add.f32 %528, %531 : reg<vm.value : f32>
+  %534 = constant.s16 188 : reg<vm.value : offset>
+  %535 = buffer.load %lhs, %534, %206, 0, i32.x1 : reg<vm.value : f32>
+  %538 = buffer.load %rhs, %534, %206, 0, i32.x1 : reg<vm.value : f32>
+  %539 = float.add.f32 %535, %538 : reg<vm.value : f32>
+  %541 = constant.s16 192 : reg<vm.value : offset>
+  %542 = buffer.load %lhs, %541, %206, 0, i32.x1 : reg<vm.value : f32>
+  %545 = buffer.load %rhs, %541, %206, 0, i32.x1 : reg<vm.value : f32>
+  %546 = float.add.f32 %542, %545 : reg<vm.value : f32>
+  %548 = constant.s16 196 : reg<vm.value : offset>
+  %549 = buffer.load %lhs, %548, %206, 0, i32.x1 : reg<vm.value : f32>
+  %552 = buffer.load %rhs, %548, %206, 0, i32.x1 : reg<vm.value : f32>
+  %553 = float.add.f32 %549, %552 : reg<vm.value : f32>
+  %555 = constant.s16 200 : reg<vm.value : offset>
+  %556 = buffer.load %lhs, %555, %206, 0, i32.x1 : reg<vm.value : f32>
+  %559 = buffer.load %rhs, %555, %206, 0, i32.x1 : reg<vm.value : f32>
+  %560 = float.add.f32 %556, %559 : reg<vm.value : f32>
+  %562 = constant.s16 204 : reg<vm.value : offset>
+  %563 = buffer.load %lhs, %562, %206, 0, i32.x1 : reg<vm.value : f32>
+  %566 = buffer.load %rhs, %562, %206, 0, i32.x1 : reg<vm.value : f32>
+  %567 = float.add.f32 %563, %566 : reg<vm.value : f32>
+  %569 = constant.s16 208 : reg<vm.value : offset>
+  %570 = buffer.load %lhs, %569, %206, 0, i32.x1 : reg<vm.value : f32>
+  %573 = buffer.load %rhs, %569, %206, 0, i32.x1 : reg<vm.value : f32>
+  %574 = float.add.f32 %570, %573 : reg<vm.value : f32>
+  %576 = constant.s16 212 : reg<vm.value : offset>
+  %577 = buffer.load %lhs, %576, %206, 0, i32.x1 : reg<vm.value : f32>
+  %580 = buffer.load %rhs, %576, %206, 0, i32.x1 : reg<vm.value : f32>
+  %581 = float.add.f32 %577, %580 : reg<vm.value : f32>
+  %583 = constant.s16 216 : reg<vm.value : offset>
+  %584 = buffer.load %lhs, %583, %206, 0, i32.x1 : reg<vm.value : f32>
+  %587 = buffer.load %rhs, %583, %206, 0, i32.x1 : reg<vm.value : f32>
+  %588 = float.add.f32 %584, %587 : reg<vm.value : f32>
+  %590 = constant.s16 220 : reg<vm.value : offset>
+  %591 = buffer.load %lhs, %590, %206, 0, i32.x1 : reg<vm.value : f32>
+  %594 = buffer.load %rhs, %590, %206, 0, i32.x1 : reg<vm.value : f32>
+  %595 = float.add.f32 %591, %594 : reg<vm.value : f32>
+  %597 = constant.s16 224 : reg<vm.value : offset>
+  %598 = buffer.load %lhs, %597, %206, 0, i32.x1 : reg<vm.value : f32>
+  %601 = buffer.load %rhs, %597, %206, 0, i32.x1 : reg<vm.value : f32>
+  %602 = float.add.f32 %598, %601 : reg<vm.value : f32>
+  %604 = constant.s16 228 : reg<vm.value : offset>
+  %605 = buffer.load %lhs, %604, %206, 0, i32.x1 : reg<vm.value : f32>
+  %608 = buffer.load %rhs, %604, %206, 0, i32.x1 : reg<vm.value : f32>
+  %609 = float.add.f32 %605, %608 : reg<vm.value : f32>
+  %611 = constant.s16 232 : reg<vm.value : offset>
+  %612 = buffer.load %lhs, %611, %206, 0, i32.x1 : reg<vm.value : f32>
+  %615 = buffer.load %rhs, %611, %206, 0, i32.x1 : reg<vm.value : f32>
+  %616 = float.add.f32 %612, %615 : reg<vm.value : f32>
+  %618 = constant.s16 236 : reg<vm.value : offset>
+  %619 = buffer.load %lhs, %618, %206, 0, i32.x1 : reg<vm.value : f32>
+  %622 = buffer.load %rhs, %618, %206, 0, i32.x1 : reg<vm.value : f32>
+  %623 = float.add.f32 %619, %622 : reg<vm.value : f32>
+  %625 = constant.s16 240 : reg<vm.value : offset>
+  %626 = buffer.load %lhs, %625, %206, 0, i32.x1 : reg<vm.value : f32>
+  %629 = buffer.load %rhs, %625, %206, 0, i32.x1 : reg<vm.value : f32>
+  %630 = float.add.f32 %626, %629 : reg<vm.value : f32>
+  %632 = constant.s16 244 : reg<vm.value : offset>
+  %633 = buffer.load %lhs, %632, %206, 0, i32.x1 : reg<vm.value : f32>
+  %636 = buffer.load %rhs, %632, %206, 0, i32.x1 : reg<vm.value : f32>
+  %637 = float.add.f32 %633, %636 : reg<vm.value : f32>
+  %639 = constant.s16 248 : reg<vm.value : offset>
+  %640 = buffer.load %lhs, %639, %206, 0, i32.x1 : reg<vm.value : f32>
+  %643 = buffer.load %rhs, %639, %206, 0, i32.x1 : reg<vm.value : f32>
+  %644 = float.add.f32 %640, %643 : reg<vm.value : f32>
+  %646 = constant.s16 252 : reg<vm.value : offset>
+  %647 = buffer.load %lhs, %646, %206, 0, i32.x1 : reg<vm.value : f32>
+  %650 = buffer.load %rhs, %646, %206, 0, i32.x1 : reg<vm.value : f32>
+  %651 = float.add.f32 %647, %650 : reg<vm.value : f32>
+  %sum = concat(%210, %217, %224, %231, %238, %245, %252, %259, %266, %273, %280, %287, %294, %301, %308, %315, %322, %329, %336, %343, %350, %357, %364, %371, %378, %385, %392, %399, %406, %413, %420, %427, %434, %441, %448, %455, %462, %469, %476, %483, %490, %497, %504, %511, %518, %525, %532, %539, %546, %553, %560, %567, %574, %581, %588, %595, %602, %609, %616, %623, %630, %637, %644, %651) : (reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>) -> reg<vm.value x64 : vector<64xf32>>
+  %654 = slice %sum[0] : reg<vm.value x64 : vector<64xf32>> -> reg<vm.value x8 : vector<8xf32>>
+  buffer.store %output, %206, %206, %654, 0, i32.x8
+  %656 = slice %sum[8] : reg<vm.value x64 : vector<64xf32>> -> reg<vm.value x8 : vector<8xf32>>
+  buffer.store %output, %261, %206, %656, 0, i32.x8
+  %658 = slice %sum[16] : reg<vm.value x64 : vector<64xf32>> -> reg<vm.value x8 : vector<8xf32>>
+  buffer.store %output, %317, %206, %658, 0, i32.x8
+  %660 = slice %sum[24] : reg<vm.value x64 : vector<64xf32>> -> reg<vm.value x8 : vector<8xf32>>
+  buffer.store %output, %373, %206, %660, 0, i32.x8
+  %662 = slice %sum[32] : reg<vm.value x64 : vector<64xf32>> -> reg<vm.value x8 : vector<8xf32>>
+  buffer.store %output, %429, %206, %662, 0, i32.x8
+  %664 = slice %sum[40] : reg<vm.value x64 : vector<64xf32>> -> reg<vm.value x8 : vector<8xf32>>
+  buffer.store %output, %485, %206, %664, 0, i32.x8
+  %666 = slice %sum[48] : reg<vm.value x64 : vector<64xf32>> -> reg<vm.value x8 : vector<8xf32>>
+  buffer.store %output, %541, %206, %666, 0, i32.x8
+  %668 = slice %sum[56] : reg<vm.value x64 : vector<64xf32>> -> reg<vm.value x8 : vector<8xf32>>
+  buffer.store %output, %597, %206, %668, 0, i32.x8
+  return
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @global_bf16x14_roundtrip(%input: buffer, %output: buffer) {
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<14xbf16>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<14xbf16>
+  %loaded = vector.load %input_view[0] : view<14xbf16> -> vector<14xbf16>
+  vector.store %loaded, %output_view[0] : vector<14xbf16>, view<14xbf16>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>}) @global_bf16x14_roundtrip(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>) asm {
+  %8 = constant.zero : reg<vm.value : offset>
+  %9 = buffer.load %input, %8, %8, 0, i16.x8 : reg<vm.value x8 : vector<8xbf16>>
+  %10 = constant.s16 16 : reg<vm.value : offset>
+  %11 = buffer.load %input, %10, %8, 0, i16.x4 : reg<vm.value x4 : vector<4xbf16>>
+  %12 = constant.s16 24 : reg<vm.value : offset>
+  %13 = buffer.load %input, %12, %8, 0, i16.x2 : reg<vm.value x2 : vector<2xbf16>>
+  buffer.store %output, %8, %8, %9, 0, i16.x8
+  buffer.store %output, %10, %8, %11, 0, i16.x4
+  buffer.store %output, %12, %8, %13, 0, i16.x2
+  return
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @global_bf16x64_roundtrip(%input: buffer, %output: buffer) {
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xbf16>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xbf16>
+  %loaded = vector.load %input_view[0] : view<64xbf16> -> vector<64xbf16>
+  vector.store %loaded, %output_view[0] : vector<64xbf16>, view<64xbf16>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>}) @global_bf16x64_roundtrip(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>) asm {
+  %8 = constant.zero : reg<vm.value : offset>
+  %9 = buffer.load %input, %8, %8, 0, i16.x8 : reg<vm.value x8 : vector<8xbf16>>
+  %10 = constant.s16 16 : reg<vm.value : offset>
+  %11 = buffer.load %input, %10, %8, 0, i16.x8 : reg<vm.value x8 : vector<8xbf16>>
+  %12 = constant.s16 32 : reg<vm.value : offset>
+  %13 = buffer.load %input, %12, %8, 0, i16.x8 : reg<vm.value x8 : vector<8xbf16>>
+  %14 = constant.s16 48 : reg<vm.value : offset>
+  %15 = buffer.load %input, %14, %8, 0, i16.x8 : reg<vm.value x8 : vector<8xbf16>>
+  %16 = constant.s16 64 : reg<vm.value : offset>
+  %17 = buffer.load %input, %16, %8, 0, i16.x8 : reg<vm.value x8 : vector<8xbf16>>
+  %18 = constant.s16 80 : reg<vm.value : offset>
+  %19 = buffer.load %input, %18, %8, 0, i16.x8 : reg<vm.value x8 : vector<8xbf16>>
+  %20 = constant.s16 96 : reg<vm.value : offset>
+  %21 = buffer.load %input, %20, %8, 0, i16.x8 : reg<vm.value x8 : vector<8xbf16>>
+  %22 = constant.s16 112 : reg<vm.value : offset>
+  %23 = buffer.load %input, %22, %8, 0, i16.x8 : reg<vm.value x8 : vector<8xbf16>>
+  buffer.store %output, %8, %8, %9, 0, i16.x8
+  buffer.store %output, %10, %8, %11, 0, i16.x8
+  buffer.store %output, %12, %8, %13, 0, i16.x8
+  buffer.store %output, %14, %8, %15, 0, i16.x8
+  buffer.store %output, %16, %8, %17, 0, i16.x8
+  buffer.store %output, %18, %8, %19, 0, i16.x8
+  buffer.store %output, %20, %8, %21, 0, i16.x8
+  buffer.store %output, %22, %8, %23, 0, i16.x8
+  return
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @global_f16x7_roundtrip(%input: buffer, %output: buffer) {
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<7xf16>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<7xf16>
+  %loaded = vector.load %input_view[0] : view<7xf16> -> vector<7xf16>
+  vector.store %loaded, %output_view[0] : vector<7xf16>, view<7xf16>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>}) @global_f16x7_roundtrip(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>) asm {
+  %8 = constant.zero : reg<vm.value : offset>
+  %9 = buffer.load %input, %8, %8, 0, i16.x4 : reg<vm.value x4 : vector<4xf16>>
+  %10 = constant.s16 8 : reg<vm.value : offset>
+  %11 = buffer.load %input, %10, %8, 0, i16.x2 : reg<vm.value x2 : vector<2xf16>>
+  %12 = constant.s16 12 : reg<vm.value : offset>
+  %13 = buffer.load %input, %12, %8, 0, i16.x1 : reg<vm.value : vector<1xf16>>
+  buffer.store %output, %8, %8, %9, 0, i16.x4
+  buffer.store %output, %10, %8, %11, 0, i16.x2
+  buffer.store %output, %12, %8, %13, 0, i16.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @global_bf16x7_roundtrip(%input: buffer, %output: buffer) {
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<7xbf16>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<7xbf16>
+  %loaded = vector.load %input_view[0] : view<7xbf16> -> vector<7xbf16>
+  vector.store %loaded, %output_view[0] : vector<7xbf16>, view<7xbf16>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>}) @global_bf16x7_roundtrip(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>) asm {
+  %8 = constant.zero : reg<vm.value : offset>
+  %9 = buffer.load %input, %8, %8, 0, i16.x4 : reg<vm.value x4 : vector<4xbf16>>
+  %10 = constant.s16 8 : reg<vm.value : offset>
+  %11 = buffer.load %input, %10, %8, 0, i16.x2 : reg<vm.value x2 : vector<2xbf16>>
+  %12 = constant.s16 12 : reg<vm.value : offset>
+  %13 = buffer.load %input, %12, %8, 0, i16.x1 : reg<vm.value : vector<1xbf16>>
+  buffer.store %output, %8, %8, %9, 0, i16.x4
+  buffer.store %output, %10, %8, %11, 0, i16.x2
+  buffer.store %output, %12, %8, %13, 0, i16.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @global_saddr_dynamic_offset_argument(%input: buffer, %byte_offset: offset) -> (i32) {
+  %input_global = buffer.assume.memory_space<global> %input : buffer
+  %input_view = buffer.view %input_global[%byte_offset] : buffer -> view<1xi32>
+  %loaded = view.load %input_view[0] : view<1xi32> -> i32
+  func.return %loaded : i32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.value : offset>) -> (reg<vm.value : i32>)>}) @global_saddr_dynamic_offset_argument(%input_global: reg<vm.ref : buffer>, %byte_offset: reg<vm.value : offset>) -> (reg<vm.value : i32>) asm {
+  %9 = constant.zero : reg<vm.value : offset>
+  %loaded = buffer.load %input_global, %9, %byte_offset, 1, i32.x1 : reg<vm.value : i32>
+  return %loaded
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @global_store_i32_constant_saddr(%output: buffer) {
+  %buffer_base = index.constant 0 : offset
+  %output_global = buffer.assume.memory_space<global> %output : buffer
+  %output_view = buffer.view %output_global[%buffer_base] : buffer -> view<1xi32>
+  %value = scalar.constant 42 : i32
+  view.store %value, %output_view[0] : i32, view<1xi32>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>) -> ()>}) @global_store_i32_constant_saddr(%output_global: reg<vm.ref : buffer>) asm {
+  %value = constant.s16 42 : reg<vm.value : i32>
+  %7 = constant.zero : reg<vm.value : offset>
+  buffer.store %output_global, %7, %7, %value, 0, i32.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @global_store_i8_saddr(%output: buffer, %value: i8) {
+  %base = index.constant 0 : offset
+  %output_global = buffer.assume.memory_space<global> %output : buffer
+  %output_view = buffer.view %output_global[%base] : buffer -> view<1xi8>
+  view.store %value, %output_view[0] : i8, view<1xi8>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.value : i8>) -> ()>}) @global_store_i8_saddr(%output_global: reg<vm.ref : buffer>, %value: reg<vm.value : i8>) asm {
+  %7 = constant.zero : reg<vm.value : offset>
+  buffer.store %output_global, %7, %7, %value, 0, i8.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @global_load_i16_saddr(%input: buffer) -> (i16) {
+  %buffer_base = index.constant 0 : offset
+  %input_global = buffer.assume.memory_space<global> %input : buffer
+  %input_view = buffer.view %input_global[%buffer_base] : buffer -> view<1xi16>
+  %loaded = view.load %input_view[0] : view<1xi16> -> i16
+  func.return %loaded : i16
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>) -> (reg<vm.value : i16>)>}) @global_load_i16_saddr(%input_global: reg<vm.ref : buffer>) -> (reg<vm.value : i16>) asm {
+  %8 = constant.zero : reg<vm.value : offset>
+  %loaded = buffer.load %input_global, %8, %8, 0, i16.x1 : reg<vm.value : i16>
+  return %loaded
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @global_store_i16_saddr(%output: buffer, %value: i16) {
+  %buffer_base = index.constant 0 : offset
+  %output_global = buffer.assume.memory_space<global> %output : buffer
+  %output_view = buffer.view %output_global[%buffer_base] : buffer -> view<1xi16>
+  view.store %value, %output_view[0] : i16, view<1xi16>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.value : i16>) -> ()>}) @global_store_i16_saddr(%output_global: reg<vm.ref : buffer>, %value: reg<vm.value : i16>) asm {
+  %7 = constant.zero : reg<vm.value : offset>
+  buffer.store %output_global, %7, %7, %value, 0, i16.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @i8x2_buffer_load(%input: buffer) -> (vector<2xi8>) {
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<2xi8>
+  %loaded = vector.load %input_view[0] : view<2xi8> -> vector<2xi8>
+  func.return %loaded : vector<2xi8>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>) -> (reg<vm.value x2 : vector<2xi8>>)>}) @i8x2_buffer_load(%input: reg<vm.ref : buffer>) -> (reg<vm.value x2 : vector<2xi8>>) asm {
+  %7 = constant.zero : reg<vm.value : offset>
+  %loaded = buffer.load %input, %7, %7, 0, i8.x2 : reg<vm.value x2 : vector<2xi8>>
+  return %loaded
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @global_load_i8x2_saddr(%input: buffer) -> (vector<2xi8>) {
+  %buffer_base = index.constant 0 : offset
+  %input_global = buffer.assume.memory_space<global> %input : buffer
+  %input_view = buffer.view %input_global[%buffer_base] : buffer -> view<2xi8>
+  %loaded = vector.load %input_view[0] : view<2xi8> -> vector<2xi8>
+  func.return %loaded : vector<2xi8>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>) -> (reg<vm.value x2 : vector<2xi8>>)>}) @global_load_i8x2_saddr(%input_global: reg<vm.ref : buffer>) -> (reg<vm.value x2 : vector<2xi8>>) asm {
+  %8 = constant.zero : reg<vm.value : offset>
+  %loaded = buffer.load %input_global, %8, %8, 0, i8.x2 : reg<vm.value x2 : vector<2xi8>>
+  return %loaded
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @global_store_i8x2_saddr(%output: buffer, %value: vector<2xi8>) {
+  %buffer_base = index.constant 0 : offset
+  %output_global = buffer.assume.memory_space<global> %output : buffer
+  %output_view = buffer.view %output_global[%buffer_base] : buffer -> view<2xi8>
+  vector.store %value, %output_view[0] : vector<2xi8>, view<2xi8>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.value x2 : vector<2xi8>>) -> ()>}) @global_store_i8x2_saddr(%output_global: reg<vm.ref : buffer>, %value: reg<vm.value x2 : vector<2xi8>>) asm {
+  %7 = constant.zero : reg<vm.value : offset>
+  buffer.store %output_global, %7, %7, %value, 0, i8.x2
+  return
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @descriptor_load_i16(%input: buffer) -> (i16) {
+  %buffer_base = index.constant 0 : offset
+  %input_descriptor = buffer.assume.memory_space<descriptor> %input : buffer
+  %input_view = buffer.view %input_descriptor[%buffer_base] : buffer -> view<1xi16>
+  %loaded = view.load %input_view[0] : view<1xi16> -> i16
+  func.return %loaded : i16
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>) -> (reg<vm.value : i16>)>}) @descriptor_load_i16(%input_descriptor: reg<vm.ref : buffer>) -> (reg<vm.value : i16>) asm {
+  %8 = constant.zero : reg<vm.value : offset>
+  %loaded = buffer.load %input_descriptor, %8, %8, 0, i16.x1 : reg<vm.value : i16>
+  return %loaded
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @descriptor_store_i16(%output: buffer, %value: i16) {
+  %buffer_base = index.constant 0 : offset
+  %output_descriptor = buffer.assume.memory_space<descriptor> %output : buffer
+  %output_view = buffer.view %output_descriptor[%buffer_base] : buffer -> view<1xi16>
+  view.store %value, %output_view[0] : i16, view<1xi16>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.value : i16>) -> ()>}) @descriptor_store_i16(%output_descriptor: reg<vm.ref : buffer>, %value: reg<vm.value : i16>) asm {
+  %7 = constant.zero : reg<vm.value : offset>
+  buffer.store %output_descriptor, %7, %7, %value, 0, i16.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @descriptor_load_i8x2(%input: buffer) -> (vector<2xi8>) {
+  %buffer_base = index.constant 0 : offset
+  %input_descriptor = buffer.assume.memory_space<descriptor> %input : buffer
+  %input_view = buffer.view %input_descriptor[%buffer_base] : buffer -> view<2xi8>
+  %loaded = vector.load %input_view[0] : view<2xi8> -> vector<2xi8>
+  func.return %loaded : vector<2xi8>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>) -> (reg<vm.value x2 : vector<2xi8>>)>}) @descriptor_load_i8x2(%input_descriptor: reg<vm.ref : buffer>) -> (reg<vm.value x2 : vector<2xi8>>) asm {
+  %8 = constant.zero : reg<vm.value : offset>
+  %loaded = buffer.load %input_descriptor, %8, %8, 0, i8.x2 : reg<vm.value x2 : vector<2xi8>>
+  return %loaded
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @descriptor_store_i8x2(%output: buffer, %value: vector<2xi8>) {
+  %buffer_base = index.constant 0 : offset
+  %output_descriptor = buffer.assume.memory_space<descriptor> %output : buffer
+  %output_view = buffer.view %output_descriptor[%buffer_base] : buffer -> view<2xi8>
+  vector.store %value, %output_view[0] : vector<2xi8>, view<2xi8>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.value x2 : vector<2xi8>>) -> ()>}) @descriptor_store_i8x2(%output_descriptor: reg<vm.ref : buffer>, %value: reg<vm.value x2 : vector<2xi8>>) asm {
+  %7 = constant.zero : reg<vm.value : offset>
+  buffer.store %output_descriptor, %7, %7, %value, 0, i8.x2
+  return
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @descriptor_b128_off_zero(%input: buffer) -> (vector<4xi32>) {
+  %buffer_base = index.constant 0 : offset
+  %input_descriptor = buffer.assume.memory_space<descriptor> %input : buffer
+  %input_view = buffer.view %input_descriptor[%buffer_base] : buffer -> view<4xi32>
+  %loaded = vector.load %input_view[0] : view<4xi32> -> vector<4xi32>
+  func.return %loaded : vector<4xi32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>) -> (reg<vm.value x4 : vector<4xi32>>)>}) @descriptor_b128_off_zero(%input_descriptor: reg<vm.ref : buffer>) -> (reg<vm.value x4 : vector<4xi32>>) asm {
+  %8 = constant.zero : reg<vm.value : offset>
+  %loaded = buffer.load %input_descriptor, %8, %8, 0, i32.x4 : reg<vm.value x4 : vector<4xi32>>
+  return %loaded
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @descriptor_dynamic_base_static_extent_load_i32(%input: buffer, %base_i32: i32) -> (i32) {
+  %base0 = index.cast %base_i32 : i32 to offset
+  %base = index.assume %base0 [range(%base0, 0, 4092), mul(%base0, 4)] : offset
+  %input_descriptor = buffer.assume.memory_space<descriptor> %input : buffer
+  %input_view = buffer.view %input_descriptor[%base] : buffer -> view<4xi32>
+  %loaded = view.load %input_view[2] : view<4xi32> -> i32
+  func.return %loaded : i32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.value : i32>) -> (reg<vm.value : i32>)>}) @descriptor_dynamic_base_static_extent_load_i32(%input_descriptor: reg<vm.ref : buffer>, %base_i32: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+  %base = conversion.integer %base_i32, u32.to.i64 : reg<vm.value : offset>
+  %12 = constant.s16 8 : reg<vm.value : offset>
+  %loaded = buffer.load %input_descriptor, %12, %base, 1, i32.x1 : reg<vm.value : i32>
+  return %loaded
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @descriptor_dynamic_projected_base_static_extent_load_i32(%input: buffer, %base_i32: i32) -> (i32) {
+  %base0 = index.cast %base_i32 : i32 to offset
+  %base = index.assume %base0 [range(%base0, 0, 4092), mul(%base0, 4)] : offset
+  %input_descriptor = buffer.assume.memory_space<descriptor> %input : buffer
+  %input_view = buffer.view %input_descriptor[%base] : buffer -> view<8xi32>
+  %input_subview = view.subview %input_view[1] : view<8xi32> -> view<4xi32>
+  %input_refined = view.refine %input_subview : view<4xi32> -> view<4xi32>
+  %loaded = view.load %input_refined[2] : view<4xi32> -> i32
+  func.return %loaded : i32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.value : i32>) -> (reg<vm.value : i32>)>}) @descriptor_dynamic_projected_base_static_extent_load_i32(%input_refined: reg<vm.ref : buffer>, %base_i32: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+  %base = conversion.integer %base_i32, u32.to.i64 : reg<vm.value : offset>
+  %14 = constant.s16 12 : reg<vm.value : offset>
+  %loaded = buffer.load %input_refined, %14, %base, 1, i32.x1 : reg<vm.value : i32>
+  return %loaded
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @descriptor_dynamic_extent_load_f32(%input: buffer, %element_count_i32: i32, %element_i32: i32) -> (f32) {
+  %base = index.constant 0 : offset
+  %input_descriptor = buffer.assume.memory_space<descriptor> %input : buffer
+  %element_count0 = index.cast %element_count_i32 : i32 to index
+  %element_count = index.assume %element_count0 [range(%element_count0, 1, 1024)] : index
+  %element0 = index.cast %element_i32 : i32 to index
+  %element = index.assume %element0 [range(%element0, 0, 1023), lt(%element0, %element_count)] : index
+  %input_view = buffer.view %input_descriptor[%base] : buffer -> view<[%element_count]xf32>
+  %loaded = view.load %input_view[%element] : view<[%element_count]xf32> -> f32
+  func.return %loaded : f32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.value : i32>, reg<vm.value : i32>) -> (reg<vm.value : f32>)>}) @descriptor_dynamic_extent_load_f32(%input_descriptor: reg<vm.ref : buffer>, %element_count_i32: reg<vm.value : i32>, %element_i32: reg<vm.value : i32>) -> (reg<vm.value : f32>) asm {
+  %element = conversion.integer %element_i32, s32.to.i64 : reg<vm.value : index>
+  %18 = constant.zero : reg<vm.value : offset>
+  %loaded = buffer.load %input_descriptor, %18, %element, 4, i32.x1 : reg<vm.value : f32>
+  return %loaded
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @descriptor_static_extent_overflow_fallback_load_i32(%input: buffer, %element_i32: i32) -> (i32) {
+  %base = index.constant 0 : offset
+  %input_descriptor = buffer.assume.memory_space<descriptor> %input : buffer
+  %element0 = index.cast %element_i32 : i32 to index
+  %element = index.assume %element0 [range(%element0, 0, 1073741823)] : index
+  %input_view = buffer.view %input_descriptor[%base] : buffer -> view<1073741824xi32>
+  %loaded = view.load %input_view[%element] : view<1073741824xi32> -> i32
+  func.return %loaded : i32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.value : i32>) -> (reg<vm.value : i32>)>}) @descriptor_static_extent_overflow_fallback_load_i32(%input_descriptor: reg<vm.ref : buffer>, %element_i32: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+  %element = conversion.integer %element_i32, s32.to.i64 : reg<vm.value : index>
+  %13 = constant.zero : reg<vm.value : offset>
+  %loaded = buffer.load %input_descriptor, %13, %element, 4, i32.x1 : reg<vm.value : i32>
+  return %loaded
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @descriptor_dynamic_extent_overflow_fallback_load_f32(%input: buffer, %element_count_i32: i32, %element_i32: i32) -> (f32) {
+  %base = index.constant 0 : offset
+  %input_descriptor = buffer.assume.memory_space<descriptor> %input : buffer
+  %element_count0 = index.cast %element_count_i32 : i32 to index
+  %element_count = index.assume %element_count0 [range(%element_count0, 1, 1073741824)] : index
+  %element0 = index.cast %element_i32 : i32 to index
+  %element = index.assume %element0 [range(%element0, 0, 1073741823), lt(%element0, %element_count)] : index
+  %input_view = buffer.view %input_descriptor[%base] : buffer -> view<[%element_count]xf32>
+  %loaded = view.load %input_view[%element] : view<[%element_count]xf32> -> f32
+  func.return %loaded : f32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.value : i32>, reg<vm.value : i32>) -> (reg<vm.value : f32>)>}) @descriptor_dynamic_extent_overflow_fallback_load_f32(%input_descriptor: reg<vm.ref : buffer>, %element_count_i32: reg<vm.value : i32>, %element_i32: reg<vm.value : i32>) -> (reg<vm.value : f32>) asm {
+  %element = conversion.integer %element_i32, s32.to.i64 : reg<vm.value : index>
+  %18 = constant.zero : reg<vm.value : offset>
+  %loaded = buffer.load %input_descriptor, %18, %element, 4, i32.x1 : reg<vm.value : f32>
+  return %loaded
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @descriptor_dynamic_base_extent_load_f32(%input: buffer, %base_i32: i32, %element_count_i32: i32, %element_i32: i32) -> (f32) {
+  %base0 = index.cast %base_i32 : i32 to offset
+  %base = index.assume %base0 [range(%base0, 0, 4096), mul(%base0, 4)] : offset
+  %input_descriptor = buffer.assume.memory_space<descriptor> %input : buffer
+  %element_count0 = index.cast %element_count_i32 : i32 to index
+  %element_count = index.assume %element_count0 [range(%element_count0, 1, 1024)] : index
+  %element0 = index.cast %element_i32 : i32 to index
+  %element = index.assume %element0 [range(%element0, 0, 1023), lt(%element0, %element_count)] : index
+  %input_view = buffer.view %input_descriptor[%base] : buffer -> view<[%element_count]xf32>
+  %loaded = view.load %input_view[%element] : view<[%element_count]xf32> -> f32
+  func.return %loaded : f32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>) -> (reg<vm.value : f32>)>}) @descriptor_dynamic_base_extent_load_f32(%input_descriptor: reg<vm.ref : buffer>, %base_i32: reg<vm.value : i32>, %element_count_i32: reg<vm.value : i32>, %element_i32: reg<vm.value : i32>) -> (reg<vm.value : f32>) asm {
+  %base = conversion.integer %base_i32, u32.to.i64 : reg<vm.value : offset>
+  %element = conversion.integer %element_i32, s32.to.i64 : reg<vm.value : index>
+  %22 = constant.s16 2 : reg<vm.value : offset>
+  %23 = integer.shift.left.i64 %element, %22 : reg<vm.value : offset>
+  %24 = integer.add.i64 %base, %23 : reg<vm.value : offset>
+  %25 = constant.zero : reg<vm.value : offset>
+  %loaded = buffer.load %input_descriptor, %24, %25, 0, i32.x1 : reg<vm.value : f32>
+  return %loaded
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @descriptor_dynamic_extent_store_f32x4(%output: buffer, %value: vector<4xf32>, %row_count_i32: i32, %row_i32: i32) {
+  %base = index.constant 0 : offset
+  %first_column = index.constant 0 : index
+  %output_descriptor = buffer.assume.memory_space<descriptor> %output : buffer
+  %row_count0 = index.cast %row_count_i32 : i32 to index
+  %row_count = index.assume %row_count0 [range(%row_count0, 1, 1024)] : index
+  %row0 = index.cast %row_i32 : i32 to index
+  %row = index.assume %row0 [range(%row0, 0, 1023), lt(%row0, %row_count)] : index
+  %output_view = buffer.view %output_descriptor[%base] : buffer -> view<[%row_count]x4xf32>
+  vector.store %value, %output_view[%row, %first_column] : vector<4xf32>, view<[%row_count]x4xf32>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.value x4 : vector<4xf32>>, reg<vm.value : i32>, reg<vm.value : i32>) -> ()>}) @descriptor_dynamic_extent_store_f32x4(%output_descriptor: reg<vm.ref : buffer>, %value: reg<vm.value x4 : vector<4xf32>>, %row_count_i32: reg<vm.value : i32>, %row_i32: reg<vm.value : i32>) asm {
+  %row = conversion.integer %row_i32, s32.to.i64 : reg<vm.value : index>
+  %18 = constant.zero : reg<vm.value : offset>
+  buffer.store %output_descriptor, %18, %row, %value, 16, i32.x4
+  return
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @descriptor_dynamic_base_extent_store_f32x4(%output: buffer, %value: vector<4xf32>, %base_i32: i32, %row_count_i32: i32, %row_i32: i32) {
+  %base0 = index.cast %base_i32 : i32 to offset
+  %base = index.assume %base0 [range(%base0, 0, 8192), mul(%base0, 16)] : offset
+  %first_column = index.constant 0 : index
+  %output_descriptor = buffer.assume.memory_space<descriptor> %output : buffer
+  %row_count0 = index.cast %row_count_i32 : i32 to index
+  %row_count = index.assume %row_count0 [range(%row_count0, 1, 512)] : index
+  %row0 = index.cast %row_i32 : i32 to index
+  %row = index.assume %row0 [range(%row0, 0, 511), lt(%row0, %row_count)] : index
+  %output_view = buffer.view %output_descriptor[%base] : buffer -> view<[%row_count]x4xf32>
+  vector.store %value, %output_view[%row, %first_column] : vector<4xf32>, view<[%row_count]x4xf32>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.value x4 : vector<4xf32>>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>) -> ()>}) @descriptor_dynamic_base_extent_store_f32x4(%output_descriptor: reg<vm.ref : buffer>, %value: reg<vm.value x4 : vector<4xf32>>, %base_i32: reg<vm.value : i32>, %row_count_i32: reg<vm.value : i32>, %row_i32: reg<vm.value : i32>) asm {
+  %base = conversion.integer %base_i32, u32.to.i64 : reg<vm.value : offset>
+  %row = conversion.integer %row_i32, s32.to.i64 : reg<vm.value : index>
+  %22 = constant.s16 4 : reg<vm.value : offset>
+  %23 = integer.shift.left.i64 %row, %22 : reg<vm.value : offset>
+  %24 = integer.add.i64 %base, %23 : reg<vm.value : offset>
+  %25 = constant.zero : reg<vm.value : offset>
+  buffer.store %output_descriptor, %24, %25, %value, 0, i32.x4
+  return
+}
+
+// ====
+
+vm.target<core> @target
+
+kernel.def target(@target) @i32_readonly_uniform_smem() {
+  %unit = index.constant 1 : index
+  %workgroups = index.constant 16 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%workgroups, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %workgroup = kernel.workgroup.id<x> : index
+  %base = index.constant 0 : offset
+  %input_global = buffer.assume.memory_space<global> %input : buffer
+  %input_noalias = buffer.assume.noalias %input_global : buffer
+  %output_global = buffer.assume.memory_space<global> %output : buffer
+  %output_noalias = buffer.assume.noalias %output_global : buffer
+  %input_view = buffer.view %input_noalias[%base] : buffer -> view<16x2xi32>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<16xi32>
+  %loaded = vector.load %input_view[%workgroup, 0] : view<16x2xi32> -> vector<2xi32>
+  %lane = vector.extract %loaded[0] : vector<2xi32> -> i32
+  view.store %lane, %output_view[%workgroup] : i32, view<16xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(64, 1, 1) workgroup_count(16, 1, 1) @i32_readonly_uniform_smem(%input_noalias: reg<vm.ref : buffer>, %output_noalias: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %36 = constant.zero : reg<vm.value : offset>
+  %lane = buffer.load %input_noalias, %36, %workgroup_id_x, 8, i32.x1 : reg<vm.value : i32>
+  buffer.store %output_noalias, %36, %workgroup_id_x, %lane, 4, i32.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+
+kernel.def target(@target) @f32x4_readonly_uniform_smem_copy() {
+  %unit = index.constant 1 : index
+  %workgroups = index.constant 16 : index
+  kernel.launch.config workgroups(%workgroups, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %workgroup = kernel.workgroup.id<x> : index
+  %base = index.constant 0 : offset
+  %vector_width = index.constant 4 : index
+  %source_base0 = index.mul %workgroup, %vector_width : index
+  %source_base = index.assume %source_base0 [range(%source_base0, 0, 60), mul(%source_base0, 4)] : index
+  %output_prefix = index.constant 6 : index
+  %output_base0 = index.add %source_base, %output_prefix : index
+  %output_base = index.assume %output_base0 [range(%output_base0, 6, 66)] : index
+  %input_global = buffer.assume.memory_space<global> %input : buffer
+  %output_global = buffer.assume.memory_space<global> %output : buffer
+  %input_noalias, %output_noalias = buffer.assume.noalias %input_global, %output_global : buffer, buffer
+  %input_view = buffer.view %input_noalias[%base] : buffer -> view<64xf32>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<70xf32>
+  %loaded = vector.load %input_view[%source_base] : view<64xf32> -> vector<4xf32>
+  vector.store %loaded, %output_view[%output_base] : vector<4xf32>, view<70xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(1, 1, 1) workgroup_count(16, 1, 1) @f32x4_readonly_uniform_smem_copy(%input_noalias: reg<vm.ref : buffer>, %output_noalias: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %39 = constant.zero : reg<vm.value : offset>
+  %loaded = buffer.load %input_noalias, %39, %workgroup_id_x, 16, i32.x4 : reg<vm.value x4 : vector<4xf32>>
+  %41 = constant.s16 24 : reg<vm.value : offset>
+  buffer.store %output_noalias, %41, %workgroup_id_x, %loaded, 16, i32.x4
+  return
+}
+
+// ====
+
+vm.target<core> @target
+
+kernel.def target(@target) @f32x8_readonly_uniform_smem_copy() {
+  %unit = index.constant 1 : index
+  %workgroups = index.constant 16 : index
+  kernel.launch.config workgroups(%workgroups, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %workgroup = kernel.workgroup.id<x> : index
+  %base = index.constant 0 : offset
+  %vector_width = index.constant 8 : index
+  %source_base0 = index.mul %workgroup, %vector_width : index
+  %source_base = index.assume %source_base0 [range(%source_base0, 0, 120), mul(%source_base0, 8)] : index
+  %output_prefix = index.constant 8 : index
+  %output_base0 = index.add %source_base, %output_prefix : index
+  %output_base = index.assume %output_base0 [range(%output_base0, 8, 128)] : index
+  %input_global = buffer.assume.memory_space<global> %input : buffer
+  %output_global = buffer.assume.memory_space<global> %output : buffer
+  %input_noalias, %output_noalias = buffer.assume.noalias %input_global, %output_global : buffer, buffer
+  %input_view = buffer.view %input_noalias[%base] : buffer -> view<128xf32>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<136xf32>
+  %loaded = vector.load %input_view[%source_base] : view<128xf32> -> vector<8xf32>
+  vector.store %loaded, %output_view[%output_base] : vector<8xf32>, view<136xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(1, 1, 1) workgroup_count(16, 1, 1) @f32x8_readonly_uniform_smem_copy(%input_noalias: reg<vm.ref : buffer>, %output_noalias: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %39 = constant.zero : reg<vm.value : offset>
+  %loaded = buffer.load %input_noalias, %39, %workgroup_id_x, 32, i32.x8 : reg<vm.value x8 : vector<8xf32>>
+  %41 = constant.s16 32 : reg<vm.value : offset>
+  buffer.store %output_noalias, %41, %workgroup_id_x, %loaded, 32, i32.x8
+  return
+}
+
+// ====
+
+vm.target<core> @target
+
+kernel.def target(@target) @i32_workgroup_global_saddr() {
+  %unit = index.constant 1 : index
+  %workgroups = index.constant 16 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%workgroups, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %workgroup = kernel.workgroup.id<x> : index
+  %column = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<16x64xf16>
+  %output_view = buffer.view %output[%base] : buffer -> view<16x64xf16>
+  %loaded = view.load %input_view[%workgroup, %column] : view<16x64xf16> -> f16
+  view.store %loaded, %output_view[%workgroup, %column] : f16, view<16x64xf16>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(64, 1, 1) workgroup_count(16, 1, 1) @i32_workgroup_global_saddr(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %32 = constant.s16 7 : reg<vm.value : offset>
+  %33 = integer.shift.left.i64 %workgroup_id_x, %32 : reg<vm.value : offset>
+  %34 = constant.s16 1 : reg<vm.value : offset>
+  %35 = integer.shift.left.i64 %workitem_id_x, %34 : reg<vm.value : offset>
+  %36 = integer.add.i64 %33, %35 : reg<vm.value : offset>
+  %37 = constant.zero : reg<vm.value : offset>
+  %loaded = buffer.load %input, %36, %37, 0, i16.x1 : reg<vm.value : f16>
+  buffer.store %output, %36, %37, %loaded, 0, i16.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+
+kernel.def target(@target) @i32_zero_workgroup_saddr_term() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %workgroup = kernel.workgroup.id<x> : index
+  %column = kernel.workitem.id<x> : index
+  %row_width = index.constant 64 : index
+  %linear = index.madd %workgroup, %row_width, %column : index
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<64xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<64xi32>
+  %loaded = view.load %input_view[%linear] : view<64xi32> -> i32
+  view.store %loaded, %output_view[%column] : i32, view<64xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @i32_zero_workgroup_saddr_term(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %26 = constant.zero : reg<vm.value : offset>
+  %loaded = buffer.load %input, %26, %workitem_id_x, 4, i32.x1 : reg<vm.value : i32>
+  buffer.store %output, %26, %workitem_id_x, %loaded, 4, i32.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+
+kernel.def target(@target) @i32_dynamic_leading_dim_global_saddr() {
+  %unit = index.constant 1 : index
+  %workgroups_x = index.constant 2 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%workgroups_x, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%output: buffer, %columns_i32: i32) {
+  %workgroup = kernel.workgroup.id<x> : index
+  %column = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %columns0 = index.cast %columns_i32 : i32 to index
+  %columns = index.assume %columns0 [range(%columns0, 32, 2147483647)] : index
+  %output_global = buffer.assume.memory_space<global> %output : buffer
+  %output_view = buffer.view %output_global[%base] : buffer -> view<2x[%columns]x8xi32>
+  %cleared_value = scalar.constant 0 : i32
+  view.store %cleared_value, %output_view[%workgroup, %column, 0] : i32, view<2x[%columns]x8xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.value : i32>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.value : i32>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(32, 1, 1) workgroup_count(2, 1, 1) @i32_dynamic_leading_dim_global_saddr(%output_global: reg<vm.ref : buffer>, %columns_i32: reg<vm.value : i32>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %columns = conversion.integer %columns_i32, s32.to.i64 : reg<vm.value : index>
+  %cleared_value = constant.zero : reg<vm.value : i32>
+  %29 = integer.mul.i64 %workgroup_id_x, %columns : reg<vm.value : offset>
+  %30 = constant.s16 5 : reg<vm.value : offset>
+  %31 = integer.shift.left.i64 %29, %30 : reg<vm.value : offset>
+  %33 = integer.shift.left.i64 %workitem_id_x, %30 : reg<vm.value : offset>
+  %34 = integer.add.i64 %31, %33 : reg<vm.value : offset>
+  %35 = constant.zero : reg<vm.value : offset>
+  buffer.store %output_global, %34, %35, %cleared_value, 0, i32.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+
+kernel.def target(@target) @i32_readonly_uniform_smem_non_power_two_stride() {
+  %unit = index.constant 1 : index
+  %workgroups = index.constant 2 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%workgroups, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %workgroup = kernel.workgroup.id<x> : index
+  %base = index.constant 0 : offset
+  %input_global = buffer.assume.memory_space<global> %input : buffer
+  %input_noalias = buffer.assume.noalias %input_global : buffer
+  %output_global = buffer.assume.memory_space<global> %output : buffer
+  %input_view = buffer.view %input_noalias[%base] : buffer -> view<2x3xi32>
+  %output_view = buffer.view %output_global[%base] : buffer -> view<2xi32>
+  %loaded = view.load %input_view[%workgroup, 0] : view<2x3xi32> -> i32
+  view.store %loaded, %output_view[%workgroup] : i32, view<2xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(64, 1, 1) workgroup_count(2, 1, 1) @i32_readonly_uniform_smem_non_power_two_stride(%input_noalias: reg<vm.ref : buffer>, %output_global: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %31 = constant.zero : reg<vm.value : offset>
+  %loaded = buffer.load %input_noalias, %31, %workgroup_id_x, 12, i32.x1 : reg<vm.value : i32>
+  buffer.store %output_global, %31, %workgroup_id_x, %loaded, 4, i32.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+
+kernel.def target(@target) @i32_readonly_uniform_smem_scalar_branch() {
+  %unit = index.constant 1 : index
+  %workgroups = index.constant 16 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%workgroups, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %workgroup = kernel.workgroup.id<x> : index
+  %base = index.constant 0 : offset
+  %input_global = buffer.assume.memory_space<global> %input : buffer
+  %input_noalias = buffer.assume.noalias %input_global : buffer
+  %output_global = buffer.assume.memory_space<global> %output : buffer
+  %output_noalias = buffer.assume.noalias %output_global : buffer
+  %input_view = buffer.view %input_noalias[%base] : buffer -> view<16xi32>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<16xi32>
+  %loaded = view.load %input_view[%workgroup] : view<16xi32> -> i32
+  %clamp_floor = scalar.constant 0 : i32
+  %negative = scalar.cmpi slt, %loaded, %clamp_floor : i32
+  cfg.cond_br %negative, ^then, ^join
+^then:
+  view.store %clamp_floor, %output_view[%workgroup] : i32, view<16xi32>
+  cfg.br ^join
+^join:
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(64, 1, 1) workgroup_count(16, 1, 1) @i32_readonly_uniform_smem_scalar_branch(%input_noalias: reg<vm.ref : buffer>, %output_noalias: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %30 = constant.zero : reg<vm.value : offset>
+  %loaded = buffer.load %input_noalias, %30, %workgroup_id_x, 4, i32.x1 : reg<vm.value : i32>
+  %clamp_floor = constant.zero : reg<vm.value : i32>
+  %negative = integer.compare.i32 %loaded, %clamp_floor, slt : reg<vm.value : i1>
+  low.cond_br %negative, ^then, ^join : reg<vm.value : i1>
+^then:
+  buffer.store %output_noalias, %30, %workgroup_id_x, %clamp_floor, 4, i32.x1
+  low.br ^join
+^join:
+  return
+}
+
+// ====
+
+vm.target<core> @target
+
+kernel.def target(@target) @i32_readonly_uniform_smem_loop_bound() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%control: buffer, %input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %start = index.constant 0 : index
+  %step = index.constant 1 : index
+  %initial_sum = scalar.constant 0.0 : f32
+  %control_noalias, %input_noalias, %output_noalias = buffer.assume.noalias %control, %input, %output : buffer, buffer, buffer
+  %control_view = buffer.view %control_noalias[%base] : buffer -> view<1xi32>
+  %input_view = buffer.view %input_noalias[%base] : buffer -> view<128xf32>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<1xf32>
+  %limit_i32 = view.load %control_view[0] : view<1xi32> -> i32
+  %limit0 = index.cast %limit_i32 : i32 to index
+  %limit = index.assume %limit0 [range(%limit0, 0, 128)] : index
+  %sum = scf.for %position = [%start to %limit step %step](%current_sum = %initial_sum : f32) -> (f32) {
+    %loaded = view.load %input_view[%position] : view<128xf32> -> f32
+    %next_sum = scalar.addf<reassoc|nnan|nsz> %current_sum, %loaded : f32
+    scf.yield %next_sum : f32
+  }
+  view.store %sum, %output_view[0] : f32, view<1xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @i32_readonly_uniform_smem_loop_bound(%control_noalias: reg<vm.ref : buffer>, %input_noalias: reg<vm.ref : buffer>, %output_noalias: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %start = constant.zero : reg<vm.value : index>
+  %step = constant.s16 1 : reg<vm.value : index>
+  %initial_sum = constant.zero : reg<vm.value : f32>
+  %49 = constant.zero : reg<vm.value : offset>
+  %limit_i32 = buffer.load %control_noalias, %49, %49, 0, i32.x1 : reg<vm.value : i32>
+  %limit = conversion.integer %limit_i32, s32.to.i64 : reg<vm.value : index>
+  low.br ^_bb1(%start: reg<vm.value : index>, %initial_sum: reg<vm.value : f32>)
+^_bb1(%position: reg<vm.value : index>, %current_sum: reg<vm.value : f32>):
+  %52 = integer.compare.i64 %position, %limit, slt : reg<vm.value : i1>
+  low.cond_br %52, ^_bb2, ^_bb3 : reg<vm.value : i1>
+^_bb2:
+  %loaded = buffer.load %input_noalias, %49, %position, 4, i32.x1 : reg<vm.value : f32>
+  %next_sum = float.add.f32 %current_sum, %loaded : reg<vm.value : f32>
+  %56 = integer.add.i64 %position, %step : reg<vm.value : index>
+  low.br ^_bb1(%56: reg<vm.value : index>, %next_sum: reg<vm.value : f32>)
+^_bb3:
+  buffer.store %output_noalias, %49, %49, %current_sum, 0, i32.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+
+kernel.def target(@target) @f32_readonly_uniform_smem_vector_math() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%control: buffer, %input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %control_global = buffer.assume.memory_space<global> %control : buffer
+  %control_noalias = buffer.assume.noalias %control_global : buffer
+  %input_global = buffer.assume.memory_space<global> %input : buffer
+  %output_global = buffer.assume.memory_space<global> %output : buffer
+  %control_view = buffer.view %control_noalias[%base] : buffer -> view<1xf32>
+  %input_view = buffer.view %input_global[%base] : buffer -> view<64x4xf32>
+  %output_view = buffer.view %output_global[%base] : buffer -> view<64x4xf32>
+  %scale = view.load %control_view[0] : view<1xf32> -> f32
+  %scale_vector = vector.splat %scale : vector<4xf32>
+  %input_vector = vector.load %input_view[%lane, 0] : view<64x4xf32> -> vector<4xf32>
+  %scaled = vector.mulf %input_vector, %scale_vector : vector<4xf32>
+  vector.store %scaled, %output_view[%lane, 0] : vector<4xf32>, view<64x4xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f32_readonly_uniform_smem_vector_math(%control_noalias: reg<vm.ref : buffer>, %input_global: reg<vm.ref : buffer>, %output_global: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %75 = constant.zero : reg<vm.value : offset>
+  %scale = buffer.load %control_noalias, %75, %75, 0, i32.x1 : reg<vm.value : f32>
+  %78 = buffer.load %input_global, %75, %workitem_id_x, 16, i32.x1 : reg<vm.value : f32>
+  %79 = float.mul.f32 %78, %scale : reg<vm.value : f32>
+  %80 = constant.s16 4 : reg<vm.value : offset>
+  %81 = buffer.load %input_global, %80, %workitem_id_x, 16, i32.x1 : reg<vm.value : f32>
+  %82 = float.mul.f32 %81, %scale : reg<vm.value : f32>
+  %83 = constant.s16 8 : reg<vm.value : offset>
+  %84 = buffer.load %input_global, %83, %workitem_id_x, 16, i32.x1 : reg<vm.value : f32>
+  %85 = float.mul.f32 %84, %scale : reg<vm.value : f32>
+  %86 = constant.s16 12 : reg<vm.value : offset>
+  %87 = buffer.load %input_global, %86, %workitem_id_x, 16, i32.x1 : reg<vm.value : f32>
+  %88 = float.mul.f32 %87, %scale : reg<vm.value : f32>
+  %scaled = concat(%79, %82, %85, %88) : (reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>) -> reg<vm.value x4 : vector<4xf32>>
+  buffer.store %output_global, %75, %workitem_id_x, %scaled, 16, i32.x4
+  return
+}
+
+// ====
+
+vm.target<core> @target
+
+kernel.def target(@target) @i32_readonly_uniform_smem_address() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%control: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %control_global = buffer.assume.memory_space<global> %control : buffer
+  %control_noalias = buffer.assume.noalias %control_global : buffer
+  %output_global = buffer.assume.memory_space<global> %output : buffer
+  %control_view = buffer.view %control_noalias[%base] : buffer -> view<1xi32>
+  %output_view = buffer.view %output_global[%base] : buffer -> view<64xi32>
+  %column_i32 = view.load %control_view[0] : view<1xi32> -> i32
+  %column0 = index.cast %column_i32 : i32 to index
+  %column = index.assume %column0 [range(%column0, 0, 63)] : index
+  %cleared_value = scalar.constant 0 : i32
+  view.store %cleared_value, %output_view[%column] : i32, view<64xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @i32_readonly_uniform_smem_address(%control_noalias: reg<vm.ref : buffer>, %output_global: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %27 = constant.zero : reg<vm.value : offset>
+  %column_i32 = buffer.load %control_noalias, %27, %27, 0, i32.x1 : reg<vm.value : i32>
+  %column = conversion.integer %column_i32, s32.to.i64 : reg<vm.value : index>
+  %cleared_value = constant.zero : reg<vm.value : i32>
+  buffer.store %output_global, %27, %column, %cleared_value, 4, i32.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+
+kernel.def target(@target) @i32_readonly_uniform_smem_guarded_index_address() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%control: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %control_view = buffer.view %control[%base] : buffer -> view<1xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<64xi32>
+  %column_i32 = view.load %control_view[0] : view<1xi32> -> i32
+  %column = index.cast %column_i32 : i32 to index
+  %minimum_column = scalar.constant 0 : i32
+  %cleared_value = scalar.constant 0 : i32
+  %limit_i32 = scalar.constant 64 : i32
+  %nonnegative = scalar.cmpi sge, %column_i32, %minimum_column : i32
+  %below = scalar.cmpi slt, %column_i32, %limit_i32 : i32
+  %guard = scalar.andi %nonnegative, %below : i1
+  scf.if %guard {
+    view.store %cleared_value, %output_view[%column] : i32, view<64xi32>
+  }
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @i32_readonly_uniform_smem_guarded_index_address(%control: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %29 = constant.zero : reg<vm.value : offset>
+  %column_i32 = buffer.load %control, %29, %29, 0, i32.x1 : reg<vm.value : i32>
+  %column = conversion.integer %column_i32, s32.to.i64 : reg<vm.value : index>
+  %minimum_column = constant.zero : reg<vm.value : i32>
+  %limit_i32 = constant.s16 64 : reg<vm.value : i32>
+  %nonnegative = integer.compare.i32 %column_i32, %minimum_column, sge : reg<vm.value : i1>
+  %below = integer.compare.i32 %column_i32, %limit_i32, slt : reg<vm.value : i1>
+  %guard = integer.and.i32 %nonnegative, %below : reg<vm.value : i1>
+  low.cond_br %guard, ^_bb1, ^_bb2 : reg<vm.value : i1>
+^_bb1:
+  buffer.store %output, %29, %column, %minimum_column, 4, i32.x1
+  low.br ^_bb2
+^_bb2:
+  return
+}
+
+// ====
+
+vm.target<core> @target
+
+kernel.def target(@target) @i64_readonly_uniform_smem_guarded_index_address() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%control: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %control_view = buffer.view %control[%base] : buffer -> view<1xi64>
+  %output_view = buffer.view %output[%base] : buffer -> view<64xi32>
+  %column_i64 = view.load %control_view[0] : view<1xi64> -> i64
+  %minimum_column = scalar.constant 0 : i64
+  %limit_i64 = scalar.constant 64 : i64
+  %nonnegative = scalar.cmpi sge, %column_i64, %minimum_column : i64
+  %below = scalar.cmpi slt, %column_i64, %limit_i64 : i64
+  %guard = scalar.andi %nonnegative, %below : i1
+  %cleared_value = scalar.constant 0 : i32
+  scf.if %guard {
+    %bounded_column_i64 = scalar.assume %column_i64 [range(%column_i64, 0, 63)] : i64
+    %column = index.cast %bounded_column_i64 : i64 to index
+    view.store %cleared_value, %output_view[%column] : i32, view<64xi32>
+  }
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @i64_readonly_uniform_smem_guarded_index_address(%control: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %29 = constant.zero : reg<vm.value : offset>
+  %bounded_column_i64 = buffer.load %control, %29, %29, 0, i64.x1 : reg<vm.value : i64>
+  %minimum_column = constant.zero : reg<vm.value : i64>
+  %limit_i64 = constant.s16 64 : reg<vm.value : i64>
+  %nonnegative = integer.compare.i64 %bounded_column_i64, %minimum_column, sge : reg<vm.value : i1>
+  %below = integer.compare.i64 %bounded_column_i64, %limit_i64, slt : reg<vm.value : i1>
+  %cleared_value = constant.zero : reg<vm.value : i32>
+  %guard = integer.and.i32 %nonnegative, %below : reg<vm.value : i1>
+  low.cond_br %guard, ^_bb1, ^_bb2 : reg<vm.value : i1>
+^_bb1:
+  %column = value.copy %bounded_column_i64 : reg<vm.value : index>
+  buffer.store %output, %29, %column, %cleared_value, 4, i32.x1
+  low.br ^_bb2
+^_bb2:
+  return
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @i32_b128() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x4xi32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x4xi32>
+  %loaded = vector.load %input_view[%lane, 0] : view<64x4xi32> -> vector<4xi32>
+  %raise = vector.constant 9 : vector<4xi32>
+  %raised = vector.addi %loaded, %raise : vector<4xi32>
+  %drop = vector.constant 4 : vector<4xi32>
+  %result = vector.subi %raised, %drop : vector<4xi32>
+  vector.store %result, %output_view[%lane, 0] : vector<4xi32>, view<64x4xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @i32_b128(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %97 = constant.zero : reg<vm.value : offset>
+  %98 = buffer.load %input, %97, %workitem_id_x, 16, i32.x1 : reg<vm.value : i32>
+  %99 = constant.s16 5 : reg<vm.value : i32>
+  %100 = integer.add.i32 %98, %99 : reg<vm.value : i32>
+  %101 = constant.s16 4 : reg<vm.value : offset>
+  %102 = buffer.load %input, %101, %workitem_id_x, 16, i32.x1 : reg<vm.value : i32>
+  %103 = integer.add.i32 %102, %99 : reg<vm.value : i32>
+  %104 = constant.s16 8 : reg<vm.value : offset>
+  %105 = buffer.load %input, %104, %workitem_id_x, 16, i32.x1 : reg<vm.value : i32>
+  %106 = integer.add.i32 %105, %99 : reg<vm.value : i32>
+  %107 = constant.s16 12 : reg<vm.value : offset>
+  %108 = buffer.load %input, %107, %workitem_id_x, 16, i32.x1 : reg<vm.value : i32>
+  %109 = integer.add.i32 %108, %99 : reg<vm.value : i32>
+  %result = concat(%100, %103, %106, %109) : (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>) -> reg<vm.value x4 : vector<4xi32>>
+  buffer.store %output, %97, %workitem_id_x, %result, 16, i32.x4
+  return
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @f32x8_split_b128() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x8xf32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x8xf32>
+  %loaded = vector.load %input_view[%lane, 0] : view<64x8xf32> -> vector<8xf32>
+  %raise = vector.constant 2.0 : vector<8xf32>
+  %result = vector.addf %loaded, %raise : vector<8xf32>
+  vector.store %result, %output_view[%lane, 0] : vector<8xf32>, view<64x8xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f32x8_split_b128(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %111 = constant.zero : reg<vm.value : offset>
+  %112 = buffer.load %input, %111, %workitem_id_x, 32, i32.x1 : reg<vm.value : f32>
+  %113 = constant.i32 1073741824 : reg<vm.value : f32>
+  %114 = float.add.f32 %112, %113 : reg<vm.value : f32>
+  %115 = constant.s16 4 : reg<vm.value : offset>
+  %116 = buffer.load %input, %115, %workitem_id_x, 32, i32.x1 : reg<vm.value : f32>
+  %117 = float.add.f32 %116, %113 : reg<vm.value : f32>
+  %118 = constant.s16 8 : reg<vm.value : offset>
+  %119 = buffer.load %input, %118, %workitem_id_x, 32, i32.x1 : reg<vm.value : f32>
+  %120 = float.add.f32 %119, %113 : reg<vm.value : f32>
+  %121 = constant.s16 12 : reg<vm.value : offset>
+  %122 = buffer.load %input, %121, %workitem_id_x, 32, i32.x1 : reg<vm.value : f32>
+  %123 = float.add.f32 %122, %113 : reg<vm.value : f32>
+  %124 = constant.s16 16 : reg<vm.value : offset>
+  %125 = buffer.load %input, %124, %workitem_id_x, 32, i32.x1 : reg<vm.value : f32>
+  %126 = float.add.f32 %125, %113 : reg<vm.value : f32>
+  %127 = constant.s16 20 : reg<vm.value : offset>
+  %128 = buffer.load %input, %127, %workitem_id_x, 32, i32.x1 : reg<vm.value : f32>
+  %129 = float.add.f32 %128, %113 : reg<vm.value : f32>
+  %130 = constant.s16 24 : reg<vm.value : offset>
+  %131 = buffer.load %input, %130, %workitem_id_x, 32, i32.x1 : reg<vm.value : f32>
+  %132 = float.add.f32 %131, %113 : reg<vm.value : f32>
+  %133 = constant.s16 28 : reg<vm.value : offset>
+  %134 = buffer.load %input, %133, %workitem_id_x, 32, i32.x1 : reg<vm.value : f32>
+  %135 = float.add.f32 %134, %113 : reg<vm.value : f32>
+  %result = concat(%114, %117, %120, %123, %126, %129, %132, %135) : (reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>) -> reg<vm.value x8 : vector<8xf32>>
+  buffer.store %output, %111, %workitem_id_x, %result, 32, i32.x8
+  return
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @i32_scalar_2d_store() {
+  %unit = index.constant 1 : index
+  %columns = index.constant 8 : index
+  %rows = index.constant 4 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%columns, %rows, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %column = kernel.workitem.id<x> : index
+  %row = kernel.workitem.id<y> : index
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<4x8xi32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<4x8xi32>
+  %loaded = vector.load %input_view[%row, %column] : view<4x8xi32> -> vector<1xi32>
+  vector.store %loaded, %output_view[%row, %column] : vector<1xi32>, view<4x8xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(8, 4, 1) workgroup_count(1, 1, 1) @i32_scalar_2d_store(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %32 = constant.s16 2 : reg<vm.value : offset>
+  %33 = integer.shift.left.i64 %workitem_id_x, %32 : reg<vm.value : offset>
+  %34 = constant.s16 5 : reg<vm.value : offset>
+  %35 = integer.shift.left.i64 %workitem_id_y, %34 : reg<vm.value : offset>
+  %36 = integer.add.i64 %33, %35 : reg<vm.value : offset>
+  %37 = constant.zero : reg<vm.value : offset>
+  %loaded = buffer.load %input, %36, %37, 0, i32.x1 : reg<vm.value : vector<1xi32>>
+  buffer.store %output, %36, %37, %loaded, 0, i32.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @i32_view_scalar_2d_store() {
+  %unit = index.constant 1 : index
+  %columns = index.constant 8 : index
+  %rows = index.constant 4 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%columns, %rows, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %column = kernel.workitem.id<x> : index
+  %row = kernel.workitem.id<y> : index
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<4x8xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<4x8xi32>
+  %loaded = view.load %input_view[%row, %column] : view<4x8xi32> -> i32
+  view.store %loaded, %output_view[%row, %column] : i32, view<4x8xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(8, 4, 1) workgroup_count(1, 1, 1) @i32_view_scalar_2d_store(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %32 = constant.s16 2 : reg<vm.value : offset>
+  %33 = integer.shift.left.i64 %workitem_id_x, %32 : reg<vm.value : offset>
+  %34 = constant.s16 5 : reg<vm.value : offset>
+  %35 = integer.shift.left.i64 %workitem_id_y, %34 : reg<vm.value : offset>
+  %36 = integer.add.i64 %33, %35 : reg<vm.value : offset>
+  %37 = constant.zero : reg<vm.value : offset>
+  %loaded = buffer.load %input, %36, %37, 0, i32.x1 : reg<vm.value : i32>
+  buffer.store %output, %36, %37, %loaded, 0, i32.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @i32_dynamic_constant_index() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %buffer_base = index.constant 0 : offset
+  %singleton_axis = index.constant 0 : index
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x1x4xi32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x1x4xi32>
+  %loaded = vector.load %input_view[%lane, %singleton_axis, 0] : view<64x1x4xi32> -> vector<4xi32>
+  vector.store %loaded, %output_view[%lane, %singleton_axis, 0] : vector<4xi32>, view<64x1x4xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @i32_dynamic_constant_index(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %35 = constant.zero : reg<vm.value : offset>
+  %loaded = buffer.load %input, %35, %workitem_id_x, 16, i32.x4 : reg<vm.value x4 : vector<4xi32>>
+  buffer.store %output, %35, %workitem_id_x, %loaded, 16, i32.x4
+  return
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @i32_scalar_arg_index() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer, %column_i32: i32) {
+  %base = index.constant 0 : offset
+  %column0 = index.cast %column_i32 : i32 to index
+  %column = index.assume %column0 [range(%column0, 0, 7)] : index
+  %input_view = buffer.view %input[%base] : buffer -> view<8xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<8xi32>
+  %loaded = view.load %input_view[%column] : view<8xi32> -> i32
+  view.store %loaded, %output_view[%column] : i32, view<8xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : i32>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : i32>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @i32_scalar_arg_index(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %column_i32: reg<vm.value : i32>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %column = conversion.integer %column_i32, s32.to.i64 : reg<vm.value : index>
+  %26 = constant.zero : reg<vm.value : offset>
+  %loaded = buffer.load %input, %26, %column, 4, i32.x1 : reg<vm.value : i32>
+  buffer.store %output, %26, %column, %loaded, 4, i32.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @i32_dynamic_view_base() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%control: buffer, %output: buffer, %offset_i32: i32) {
+  %base0 = index.cast %offset_i32 : i32 to offset
+  %base = index.assume %base0 [range(%base0, 0, 4092), mul(%base0, 4)] : offset
+  %output_base = index.constant 0 : offset
+  %control_view = buffer.view %control[%base] : buffer -> view<4xi32>
+  %output_view = buffer.view %output[%output_base] : buffer -> view<1xi32>
+  %loaded = view.load %control_view[2] : view<4xi32> -> i32
+  view.store %loaded, %output_view[0] : i32, view<1xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : i32>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : i32>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @i32_dynamic_view_base(%control: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %offset_i32: reg<vm.value : i32>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %base = conversion.integer %offset_i32, u32.to.i64 : reg<vm.value : offset>
+  %26 = constant.s16 8 : reg<vm.value : offset>
+  %loaded = buffer.load %control, %26, %base, 1, i32.x1 : reg<vm.value : i32>
+  %28 = constant.zero : reg<vm.value : offset>
+  buffer.store %output, %28, %28, %loaded, 0, i32.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @i32_dynamic_view_base_loaded() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%control: buffer, %output: buffer) {
+  %header_base = index.constant 0 : offset
+  %output_base = index.constant 0 : offset
+  %header_view = buffer.view %control[%header_base] : buffer -> view<8xi32>
+  %base_i32 = view.load %header_view[7] : view<8xi32> -> i32
+  %base = index.cast %base_i32 : i32 to offset
+  %control_view = buffer.view %control[%base] : buffer -> view<4xi32>
+  %output_view = buffer.view %output[%output_base] : buffer -> view<1xi32>
+  %loaded = view.load %control_view[2] : view<4xi32> -> i32
+  view.store %loaded, %output_view[0] : i32, view<1xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @i32_dynamic_view_base_loaded(%control: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %25 = constant.zero : reg<vm.value : offset>
+  %26 = constant.s16 28 : reg<vm.value : offset>
+  %base_i32 = buffer.load %control, %26, %25, 0, i32.x1 : reg<vm.value : i32>
+  %base = conversion.integer %base_i32, u32.to.i64 : reg<vm.value : offset>
+  %29 = constant.s16 8 : reg<vm.value : offset>
+  %loaded = buffer.load %control, %29, %base, 1, i32.x1 : reg<vm.value : i32>
+  buffer.store %output, %25, %25, %loaded, 0, i32.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @i32x4_dynamic_view_base_b128() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer, %offset_i32: i32) {
+  %base0 = index.cast %offset_i32 : i32 to offset
+  %base = index.assume %base0 [range(%base0, 0, 4096), mul(%base0, 16)] : offset
+  %output_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<4xi32>
+  %output_view = buffer.view %output[%output_base] : buffer -> view<4xi32>
+  %loaded = vector.load %input_view[0] : view<4xi32> -> vector<4xi32>
+  vector.store %loaded, %output_view[0] : vector<4xi32>, view<4xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : i32>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : i32>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @i32x4_dynamic_view_base_b128(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %offset_i32: reg<vm.value : i32>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %base = conversion.integer %offset_i32, u32.to.i64 : reg<vm.value : offset>
+  %26 = constant.zero : reg<vm.value : offset>
+  %loaded = buffer.load %input, %26, %base, 1, i32.x4 : reg<vm.value x4 : vector<4xi32>>
+  buffer.store %output, %26, %26, %loaded, 0, i32.x4
+  return
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @f32x4_dynamic_view_base_large_static_offset() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 256 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer, %offset_i32: i32) {
+  %input_base0 = index.cast %offset_i32 : i32 to offset
+  %input_base = index.assume %input_base0 [range(%input_base0, 0, 2147483647)] : offset
+  %lane = kernel.workitem.id<x> : index
+  %channel_vector_width = index.constant 4 : index
+  %channel_base0 = index.mul %lane, %channel_vector_width : index
+  %channel_base = index.assume %channel_base0 [range(%channel_base0, 0, 1020)] : index
+  %tap = index.constant 6 : index
+  %output_base = index.constant 0 : offset
+  %input_global = buffer.assume.memory_space<global> %input : buffer
+  %output_global = buffer.assume.memory_space<global> %output : buffer
+  %input_noalias, %output_noalias = buffer.assume.noalias %input_global, %output_global : buffer, buffer
+  %input_view = buffer.view %input_noalias[%input_base] : buffer -> view<7x1024xf32>
+  %output_view = buffer.view %output_noalias[%output_base] : buffer -> view<1024xf32>
+  %loaded = vector.load %input_view[%tap, %channel_base] : view<7x1024xf32> -> vector<4xf32>
+  vector.store %loaded, %output_view[%channel_base] : vector<4xf32>, view<1024xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : i32>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : i32>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(256, 1, 1) workgroup_count(1, 1, 1) @f32x4_dynamic_view_base_large_static_offset(%input_noalias: reg<vm.ref : buffer>, %output_noalias: reg<vm.ref : buffer>, %offset_i32: reg<vm.value : i32>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %input_base = conversion.integer %offset_i32, u32.to.i64 : reg<vm.value : offset>
+  %44 = constant.s16 4 : reg<vm.value : offset>
+  %45 = integer.shift.left.i64 %workitem_id_x, %44 : reg<vm.value : offset>
+  %46 = integer.add.i64 %input_base, %45 : reg<vm.value : offset>
+  %47 = constant.zero : reg<vm.value : offset>
+  %48 = constant.s16 24576 : reg<vm.value : offset>
+  %49 = integer.add.i64 %46, %48 : reg<vm.value : offset>
+  %loaded = buffer.load %input_noalias, %49, %47, 0, i32.x4 : reg<vm.value x4 : vector<4xf32>>
+  buffer.store %output_noalias, %47, %workitem_id_x, %loaded, 16, i32.x4
+  return
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @f16_view_scalar() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer, %column_i32: i32) {
+  %base = index.constant 0 : offset
+  %first_column = index.constant 0 : index
+  %column0 = index.cast %column_i32 : i32 to index
+  %column = index.assume %column0 [range(%column0, 0, 7)] : index
+  %input_view = buffer.view %input[%base] : buffer -> view<8xf16>
+  %output_view = buffer.view %output[%base] : buffer -> view<8xf16>
+  %loaded = view.load %input_view[%column] : view<8xf16> -> f16
+  view.store %loaded, %output_view[%column] : f16, view<8xf16>
+  %cleared = scalar.constant 0.0 : f16
+  view.store %cleared, %output_view[%first_column] : f16, view<8xf16>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : i32>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : i32>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @f16_view_scalar(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %column_i32: reg<vm.value : i32>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %column = conversion.integer %column_i32, s32.to.i64 : reg<vm.value : index>
+  %28 = constant.zero : reg<vm.value : offset>
+  %loaded = buffer.load %input, %28, %column, 2, i16.x1 : reg<vm.value : f16>
+  buffer.store %output, %28, %column, %loaded, 2, i16.x1
+  %cleared = constant.zero : reg<vm.value : f16>
+  buffer.store %output, %28, %28, %cleared, 0, i16.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @bf16_view_scalar() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer, %column_i32: i32) {
+  %base = index.constant 0 : offset
+  %first_column = index.constant 0 : index
+  %column0 = index.cast %column_i32 : i32 to index
+  %column = index.assume %column0 [range(%column0, 0, 7)] : index
+  %input_view = buffer.view %input[%base] : buffer -> view<8xbf16>
+  %output_view = buffer.view %output[%base] : buffer -> view<8xbf16>
+  %loaded = view.load %input_view[%column] : view<8xbf16> -> bf16
+  view.store %loaded, %output_view[%column] : bf16, view<8xbf16>
+  %cleared = scalar.constant 0.0 : bf16
+  view.store %cleared, %output_view[%first_column] : bf16, view<8xbf16>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : i32>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : i32>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @bf16_view_scalar(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %column_i32: reg<vm.value : i32>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %column = conversion.integer %column_i32, s32.to.i64 : reg<vm.value : index>
+  %28 = constant.zero : reg<vm.value : offset>
+  %loaded = buffer.load %input, %28, %column, 2, i16.x1 : reg<vm.value : bf16>
+  buffer.store %output, %28, %column, %loaded, 2, i16.x1
+  %cleared = constant.zero : reg<vm.value : bf16>
+  buffer.store %output, %28, %28, %cleared, 0, i16.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @f16x2_b32() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x2xf16>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x2xf16>
+  %loaded = vector.load %input_view[%lane, 0] : view<64x2xf16> -> vector<2xf16>
+  vector.store %loaded, %output_view[%lane, 0] : vector<2xf16>, view<64x2xf16>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f16x2_b32(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %34 = constant.zero : reg<vm.value : offset>
+  %loaded = buffer.load %input, %34, %workitem_id_x, 4, i16.x2 : reg<vm.value x2 : vector<2xf16>>
+  buffer.store %output, %34, %workitem_id_x, %loaded, 4, i16.x2
+  return
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @f16x4_b64() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x4xf16>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x4xf16>
+  %loaded = vector.load %input_view[%lane, 0] : view<64x4xf16> -> vector<4xf16>
+  vector.store %loaded, %output_view[%lane, 0] : vector<4xf16>, view<64x4xf16>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f16x4_b64(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %34 = constant.zero : reg<vm.value : offset>
+  %loaded = buffer.load %input, %34, %workitem_id_x, 8, i16.x4 : reg<vm.value x4 : vector<4xf16>>
+  buffer.store %output, %34, %workitem_id_x, %loaded, 8, i16.x4
+  return
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @bf16x2_b32() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x2xbf16>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x2xbf16>
+  %loaded = vector.load %input_view[%lane, 0] : view<64x2xbf16> -> vector<2xbf16>
+  vector.store %loaded, %output_view[%lane, 0] : vector<2xbf16>, view<64x2xbf16>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @bf16x2_b32(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %34 = constant.zero : reg<vm.value : offset>
+  %loaded = buffer.load %input, %34, %workitem_id_x, 4, i16.x2 : reg<vm.value x2 : vector<2xbf16>>
+  buffer.store %output, %34, %workitem_id_x, %loaded, 4, i16.x2
+  return
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @bf16x4_b64() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x4xbf16>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x4xbf16>
+  %loaded = vector.load %input_view[%lane, 0] : view<64x4xbf16> -> vector<4xbf16>
+  vector.store %loaded, %output_view[%lane, 0] : vector<4xbf16>, view<64x4xbf16>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @bf16x4_b64(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %34 = constant.zero : reg<vm.value : offset>
+  %loaded = buffer.load %input, %34, %workitem_id_x, 8, i16.x4 : reg<vm.value x4 : vector<4xbf16>>
+  buffer.store %output, %34, %workitem_id_x, %loaded, 8, i16.x4
+  return
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @bf16_strided_gather_dot2(%latent: vector<2xbf16>, %weights: buffer, %origin: index, %accumulator: vector<1xf32>) -> (vector<1xf32>) {
+  %base = index.constant 0 : offset
+  %start = index.constant 0 : index
+  %step = index.constant 7 : index
+  %origin_bounded = index.assume %origin [range(%origin, 0, 4088)] : index
+  %weights_view = buffer.view %weights[%base] : buffer -> view<4096xbf16>
+  %offsets = vector.iota %start step %step : vector<2xindex>
+  %weight = vector.gather %weights_view[%origin_bounded][%offsets] : view<4096xbf16>, vector<2xindex> -> vector<2xbf16>
+  %dot = vector.dot2f %latent, %weight, %accumulator : vector<2xbf16>, vector<2xbf16>, vector<1xf32>
+  func.return %dot : vector<1xf32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x2 : vector<2xbf16>>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : vector<1xf32>>) -> (reg<vm.value : vector<1xf32>>)>}) @bf16_strided_gather_dot2(%latent: reg<vm.value x2 : vector<2xbf16>>, %weights: reg<vm.ref : buffer>, %origin_bounded: reg<vm.value : index>, %accumulator: reg<vm.value : vector<1xf32>>) -> (reg<vm.value : vector<1xf32>>) asm {
+  %36 = slice %accumulator[0] : reg<vm.value : vector<1xf32>> -> reg<vm.value : f32>
+  %37 = slice %latent[0] : reg<vm.value x2 : vector<2xbf16>> -> reg<vm.value : bf16>
+  %38 = constant.zero : reg<vm.value : offset>
+  %39 = buffer.load %weights, %38, %origin_bounded, 2, i16.x1 : reg<vm.value : bf16>
+  %40 = conversion.float.extend %37, bf16.to.f32 : reg<vm.value : f32>
+  %41 = conversion.float.extend %39, bf16.to.f32 : reg<vm.value : f32>
+  %42 = float.math.ternary.f32 %40, %41, %36, fma : reg<vm.value : f32>
+  %43 = slice %latent[1] : reg<vm.value x2 : vector<2xbf16>> -> reg<vm.value : bf16>
+  %44 = constant.s16 14 : reg<vm.value : offset>
+  %45 = buffer.load %weights, %44, %origin_bounded, 2, i16.x1 : reg<vm.value : bf16>
+  %46 = conversion.float.extend %43, bf16.to.f32 : reg<vm.value : f32>
+  %47 = conversion.float.extend %45, bf16.to.f32 : reg<vm.value : f32>
+  %48 = float.math.ternary.f32 %46, %47, %42, fma : reg<vm.value : f32>
+  %dot = concat(%48) : (reg<vm.value : f32>) -> reg<vm.value : vector<1xf32>>
+  return %dot
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @i32_dynamic_flat_store() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer, %row_count_i32: i32, %row_i32: i32) {
+  %base = index.constant 0 : offset
+  %start = index.constant 0 : index
+  %row_count0 = index.cast %row_count_i32 : i32 to index
+  %row_count = index.assume %row_count0 [range(%row_count0, 1, 2147483647)] : index
+  %row0 = index.cast %row_i32 : i32 to index
+  %row = index.assume %row0 [range(%row0, 0, 2147483646), lt(%row0, %row_count)] : index
+  %input_view = buffer.view %input[%base] : buffer -> view<1xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<[%row_count]x128xi32>
+  %loaded = view.load %input_view[%start] : view<1xi32> -> i32
+  view.store %loaded, %output_view[%row, %start] : i32, view<[%row_count]x128xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : i32>, reg<vm.value : i32>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @i32_dynamic_flat_store(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %row_count_i32: reg<vm.value : i32>, %row_i32: reg<vm.value : i32>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %row = conversion.integer %row_i32, s32.to.i64 : reg<vm.value : index>
+  %32 = constant.zero : reg<vm.value : offset>
+  %loaded = buffer.load %input, %32, %32, 0, i32.x1 : reg<vm.value : i32>
+  %34 = constant.s16 9 : reg<vm.value : offset>
+  %35 = integer.shift.left.i64 %row, %34 : reg<vm.value : offset>
+  buffer.store %output, %35, %32, %loaded, 0, i32.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @loaded_i32_row_stride_store() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%idx: buffer, %output: buffer, %value: f32, %stride_i32: i32, %element_count_i32: i32) {
+  %base = index.constant 0 : offset
+  %stride0 = index.cast %stride_i32 : i32 to index
+  %stride = index.assume %stride0 [range(%stride0, 1, 1073741823)] : index
+  %element_count0 = index.cast %element_count_i32 : i32 to index
+  %element_count = index.assume %element_count0 [range(%element_count0, 1, 2147483647)] : index
+  %idx_view = buffer.view %idx[%base] : buffer -> view<1xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<[%element_count]xf32>
+  %row_i32 = view.load %idx_view[0] : view<1xi32> -> i32
+  %row0 = index.cast %row_i32 : i32 to index
+  %row = index.assume %row0 [range(%row0, 0, 1073741823)] : index
+  %raw = index.mul %row, %stride : index
+  %element = index.assume %raw [range(%raw, 0, 1073741823), lt(%raw, %element_count)] : index
+  view.store %value, %output_view[%element] : f32, view<[%element_count]xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : f32>, reg<vm.value : i32>, reg<vm.value : i32>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : f32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @loaded_i32_row_stride_store(%idx: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %value: reg<vm.value : f32>, %stride_i32: reg<vm.value : i32>, %element_count_i32: reg<vm.value : i32>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %stride = conversion.integer %stride_i32, s32.to.i64 : reg<vm.value : index>
+  %37 = constant.zero : reg<vm.value : offset>
+  %row_i32 = buffer.load %idx, %37, %37, 0, i32.x1 : reg<vm.value : i32>
+  %row = conversion.integer %row_i32, s32.to.i64 : reg<vm.value : index>
+  %element = integer.mul.i64 %row, %stride : reg<vm.value : index>
+  buffer.store %output, %37, %element, %value, 4, i32.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @loaded_i64_row_stride_store() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%idx: buffer, %output: buffer, %value: f32, %stride_i32: i32, %element_count_i32: i32) {
+  %base = index.constant 0 : offset
+  %stride0 = index.cast %stride_i32 : i32 to index
+  %stride = index.assume %stride0 [range(%stride0, 1, 1073741823)] : index
+  %element_count0 = index.cast %element_count_i32 : i32 to index
+  %element_count = index.assume %element_count0 [range(%element_count0, 1, 2147483647)] : index
+  %idx_view = buffer.view %idx[%base] : buffer -> view<1xi64>
+  %output_view = buffer.view %output[%base] : buffer -> view<[%element_count]xf32>
+  %row_i64_raw = view.load %idx_view[0] : view<1xi64> -> i64
+  %row_i64 = scalar.assume %row_i64_raw [range(%row_i64_raw, 0, 1073741823)] : i64
+  %row = index.cast %row_i64 : i64 to index
+  %raw = index.mul %row, %stride : index
+  %element = index.assume %raw [range(%raw, 0, 1073741823), lt(%raw, %element_count)] : index
+  view.store %value, %output_view[%element] : f32, view<[%element_count]xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : f32>, reg<vm.value : i32>, reg<vm.value : i32>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : f32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @loaded_i64_row_stride_store(%idx: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %value: reg<vm.value : f32>, %stride_i32: reg<vm.value : i32>, %element_count_i32: reg<vm.value : i32>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %stride = conversion.integer %stride_i32, s32.to.i64 : reg<vm.value : index>
+  %37 = constant.zero : reg<vm.value : offset>
+  %row_i64 = buffer.load %idx, %37, %37, 0, i64.x1 : reg<vm.value : i64>
+  %row = value.copy %row_i64 : reg<vm.value : index>
+  %element = integer.mul.i64 %row, %stride : reg<vm.value : index>
+  buffer.store %output, %37, %element, %value, 4, i32.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @loaded_i64_row_stride_load() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%idx: buffer, %input: buffer, %output: buffer, %stride_i32: i32, %element_count_i32: i32) {
+  %base = index.constant 0 : offset
+  %start = index.constant 0 : index
+  %stride0 = index.cast %stride_i32 : i32 to index
+  %stride = index.assume %stride0 [range(%stride0, 1, 1073741823)] : index
+  %element_count0 = index.cast %element_count_i32 : i32 to index
+  %element_count = index.assume %element_count0 [range(%element_count0, 1, 2147483647)] : index
+  %idx_view = buffer.view %idx[%base] : buffer -> view<1xi64>
+  %input_view = buffer.view %input[%base] : buffer -> view<[%element_count]xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xf32>
+  %row_i64_raw = view.load %idx_view[0] : view<1xi64> -> i64
+  %row_i64 = scalar.assume %row_i64_raw [range(%row_i64_raw, 0, 1073741823)] : i64
+  %row = index.cast %row_i64 : i64 to index
+  %raw = index.mul %row, %stride : index
+  %element = index.assume %raw [range(%raw, 0, 1073741823), lt(%raw, %element_count)] : index
+  %loaded = view.load %input_view[%element] : view<[%element_count]xf32> -> f32
+  view.store %loaded, %output_view[%start] : f32, view<1xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : i32>, reg<vm.value : i32>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @loaded_i64_row_stride_load(%idx: reg<vm.ref : buffer>, %input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %stride_i32: reg<vm.value : i32>, %element_count_i32: reg<vm.value : i32>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %stride = conversion.integer %stride_i32, s32.to.i64 : reg<vm.value : index>
+  %40 = constant.zero : reg<vm.value : offset>
+  %row_i64 = buffer.load %idx, %40, %40, 0, i64.x1 : reg<vm.value : i64>
+  %row = value.copy %row_i64 : reg<vm.value : index>
+  %element = integer.mul.i64 %row, %stride : reg<vm.value : index>
+  %loaded = buffer.load %input, %40, %element, 4, i32.x1 : reg<vm.value : f32>
+  buffer.store %output, %40, %40, %loaded, 0, i32.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @loaded_i32_row_shift_store() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%idx: buffer, %output: buffer, %value: f32, %element_count_i32: i32) {
+  %base = index.constant 0 : offset
+  %shift = index.constant 2 : index
+  %element_count0 = index.cast %element_count_i32 : i32 to index
+  %element_count = index.assume %element_count0 [range(%element_count0, 1, 2147483647)] : index
+  %idx_view = buffer.view %idx[%base] : buffer -> view<1xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<[%element_count]xf32>
+  %row_i32 = view.load %idx_view[0] : view<1xi32> -> i32
+  %row0 = index.cast %row_i32 : i32 to index
+  %row = index.assume %row0 [range(%row0, 0, 1073741823)] : index
+  %raw = index.shli %row, %shift : index
+  %element = index.assume %raw [range(%raw, 0, 1073741823), lt(%raw, %element_count)] : index
+  view.store %value, %output_view[%element] : f32, view<[%element_count]xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : f32>, reg<vm.value : i32>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : f32>, reg<vm.value : i32>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @loaded_i32_row_shift_store(%idx: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %value: reg<vm.value : f32>, %element_count_i32: reg<vm.value : i32>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %34 = constant.zero : reg<vm.value : offset>
+  %row_i32 = buffer.load %idx, %34, %34, 0, i32.x1 : reg<vm.value : i32>
+  %row = conversion.integer %row_i32, s32.to.i64 : reg<vm.value : index>
+  buffer.store %output, %34, %row, %value, 16, i32.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @loaded_i32_row_shift_load() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%idx: buffer, %input: buffer, %output: buffer, %element_count_i32: i32) {
+  %base = index.constant 0 : offset
+  %shift = index.constant 2 : index
+  %start = index.constant 0 : index
+  %element_count0 = index.cast %element_count_i32 : i32 to index
+  %element_count = index.assume %element_count0 [range(%element_count0, 1, 2147483647)] : index
+  %idx_view = buffer.view %idx[%base] : buffer -> view<1xi32>
+  %input_view = buffer.view %input[%base] : buffer -> view<[%element_count]xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xf32>
+  %row_i32 = view.load %idx_view[0] : view<1xi32> -> i32
+  %row0 = index.cast %row_i32 : i32 to index
+  %row = index.assume %row0 [range(%row0, 0, 1073741823)] : index
+  %raw = index.shli %row, %shift : index
+  %element = index.assume %raw [range(%raw, 0, 1073741823), lt(%raw, %element_count)] : index
+  %loaded = view.load %input_view[%element] : view<[%element_count]xf32> -> f32
+  view.store %loaded, %output_view[%start] : f32, view<1xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : i32>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : i32>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @loaded_i32_row_shift_load(%idx: reg<vm.ref : buffer>, %input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %element_count_i32: reg<vm.value : i32>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %37 = constant.zero : reg<vm.value : offset>
+  %row_i32 = buffer.load %idx, %37, %37, 0, i32.x1 : reg<vm.value : i32>
+  %row = conversion.integer %row_i32, s32.to.i64 : reg<vm.value : index>
+  %loaded = buffer.load %input, %37, %row, 16, i32.x1 : reg<vm.value : f32>
+  buffer.store %output, %37, %37, %loaded, 0, i32.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @selected_i32_row_shift_store() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%idx: buffer, %output: buffer, %value: f32, %element_count_i32: i32, %condition_i32: i32) {
+  %base = index.constant 0 : offset
+  %inactive_condition = index.constant 0 : index
+  %inactive_element = index.constant 0 : index
+  %shift = index.constant 2 : index
+  %element_count0 = index.cast %element_count_i32 : i32 to index
+  %element_count = index.assume %element_count0 [range(%element_count0, 1, 2147483647)] : index
+  %idx_view = buffer.view %idx[%base] : buffer -> view<1xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<[%element_count]xf32>
+  %row_i32 = view.load %idx_view[0] : view<1xi32> -> i32
+  %row0 = index.cast %row_i32 : i32 to index
+  %row = index.assume %row0 [range(%row0, 0, 1073741823)] : index
+  %raw = index.shli %row, %shift : index
+  %condition0 = index.cast %condition_i32 : i32 to index
+  %condition = index.assume %condition0 [range(%condition0, 1, 1)] : index
+  %selected_condition = index.cmp ne, %condition, %inactive_condition : index
+  %selected = scf.select %selected_condition, %raw, %inactive_element : index
+  %element = index.assume %selected [range(%selected, 0, 1073741823), lt(%selected, %element_count)] : index
+  view.store %value, %output_view[%element] : f32, view<[%element_count]xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : f32>, reg<vm.value : i32>, reg<vm.value : i32>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : f32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @selected_i32_row_shift_store(%idx: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %value: reg<vm.value : f32>, %element_count_i32: reg<vm.value : i32>, %condition_i32: reg<vm.value : i32>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %42 = constant.zero : reg<vm.value : offset>
+  %row_i32 = buffer.load %idx, %42, %42, 0, i32.x1 : reg<vm.value : i32>
+  %row = conversion.integer %row_i32, s32.to.i64 : reg<vm.value : index>
+  buffer.store %output, %42, %row, %value, 16, i32.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @selected_workgroup_load() {
+  %unit = index.constant 1 : index
+  %workgroup_count = index.constant 64 : index
+  kernel.launch.config workgroups(%workgroup_count, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer, %element_count: index) {
+  %base = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %bounded_element_count = index.assume %element_count [range(%element_count, 1, 1024)] : index
+  %input_view = buffer.view %input[%base] : buffer -> view<[%bounded_element_count]xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xf32>
+  %workgroup = kernel.workgroup.id<x> : index
+  %valid = index.cmp ult, %workgroup, %bounded_element_count : index
+  %safe_workgroup = scf.select %valid, %workgroup, %c0 : index
+  %input_index = index.assume %safe_workgroup [lt(%safe_workgroup, %bounded_element_count)] : index
+  %value = view.load %input_view[%input_index] : view<[%bounded_element_count]xf32> -> f32
+  view.store %value, %output_view[%c0] : f32, view<1xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(1, 1, 1) workgroup_count(64, 1, 1) @selected_workgroup_load(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %bounded_element_count: reg<vm.value : index>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %c0 = constant.zero : reg<vm.value : index>
+  %valid = integer.compare.i64 %workgroup_id_x, %bounded_element_count, ult : reg<vm.value : i1>
+  %input_index = value.select %valid, %workgroup_id_x, %c0 : reg<vm.value : index>
+  %33 = constant.zero : reg<vm.value : offset>
+  %value = buffer.load %input, %33, %input_index, 4, i32.x1 : reg<vm.value : f32>
+  buffer.store %output, %33, %33, %value, 0, i32.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @loaded_i32_row_stride_f32_to_f16_store() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%idx: buffer, %output: buffer, %value: f32, %stride_i32: i32, %element_count_i32: i32) {
+  %base = index.constant 0 : offset
+  %stride0 = index.cast %stride_i32 : i32 to index
+  %stride = index.assume %stride0 [range(%stride0, 1, 1073741823)] : index
+  %element_count0 = index.cast %element_count_i32 : i32 to index
+  %element_count = index.assume %element_count0 [range(%element_count0, 1, 2147483647)] : index
+  %idx_view = buffer.view %idx[%base] : buffer -> view<1xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<[%element_count]xf16>
+  %row_i32 = view.load %idx_view[0] : view<1xi32> -> i32
+  %row0 = index.cast %row_i32 : i32 to index
+  %row = index.assume %row0 [range(%row0, 0, 1073741823)] : index
+  %raw = index.mul %row, %stride : index
+  %element = index.assume %raw [range(%raw, 0, 1073741823), lt(%raw, %element_count)] : index
+  %half = scalar.fptrunc %value : f32 to f16
+  view.store %half, %output_view[%element] : f16, view<[%element_count]xf16>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : f32>, reg<vm.value : i32>, reg<vm.value : i32>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : f32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @loaded_i32_row_stride_f32_to_f16_store(%idx: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %value: reg<vm.value : f32>, %stride_i32: reg<vm.value : i32>, %element_count_i32: reg<vm.value : i32>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %stride = conversion.integer %stride_i32, s32.to.i64 : reg<vm.value : index>
+  %38 = constant.zero : reg<vm.value : offset>
+  %row_i32 = buffer.load %idx, %38, %38, 0, i32.x1 : reg<vm.value : i32>
+  %row = conversion.integer %row_i32, s32.to.i64 : reg<vm.value : index>
+  %element = integer.mul.i64 %row, %stride : reg<vm.value : index>
+  %half = conversion.float.truncate %value, f32.to.f16 : reg<vm.value : f16>
+  buffer.store %output, %38, %element, %half, 2, i16.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @loaded_i32_row_stride_f32_to_f16_bits_store() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%idx: buffer, %output: buffer, %value: f32, %stride_i32: i32, %element_count_i32: i32) {
+  %base = index.constant 0 : offset
+  %stride0 = index.cast %stride_i32 : i32 to index
+  %stride = index.assume %stride0 [range(%stride0, 1, 1073741823)] : index
+  %element_count0 = index.cast %element_count_i32 : i32 to index
+  %element_count = index.assume %element_count0 [range(%element_count0, 1, 2147483647)] : index
+  %idx_view = buffer.view %idx[%base] : buffer -> view<1xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<[%element_count]xi16>
+  %row_i32 = view.load %idx_view[0] : view<1xi32> -> i32
+  %row0 = index.cast %row_i32 : i32 to index
+  %row = index.assume %row0 [range(%row0, 0, 1073741823)] : index
+  %raw = index.mul %row, %stride : index
+  %element = index.assume %raw [range(%raw, 0, 1073741823), lt(%raw, %element_count)] : index
+  %half = scalar.fptrunc %value : f32 to f16
+  %bits = scalar.bitcast %half : f16 to i16
+  view.store %bits, %output_view[%element] : i16, view<[%element_count]xi16>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : f32>, reg<vm.value : i32>, reg<vm.value : i32>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : f32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @loaded_i32_row_stride_f32_to_f16_bits_store(%idx: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %value: reg<vm.value : f32>, %stride_i32: reg<vm.value : i32>, %element_count_i32: reg<vm.value : i32>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %stride = conversion.integer %stride_i32, s32.to.i64 : reg<vm.value : index>
+  %39 = constant.zero : reg<vm.value : offset>
+  %row_i32 = buffer.load %idx, %39, %39, 0, i32.x1 : reg<vm.value : i32>
+  %row = conversion.integer %row_i32, s32.to.i64 : reg<vm.value : index>
+  %element = integer.mul.i64 %row, %stride : reg<vm.value : index>
+  %half = conversion.float.truncate %value, f32.to.f16 : reg<vm.value : f16>
+  %bits = value.copy %half : reg<vm.value : i16>
+  buffer.store %output, %39, %element, %bits, 2, i16.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @loaded_i32_row_stride_f32_to_bf16_bits_store() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%idx: buffer, %output: buffer, %value: f32, %stride_i32: i32, %element_count_i32: i32) {
+  %base = index.constant 0 : offset
+  %stride0 = index.cast %stride_i32 : i32 to index
+  %stride = index.assume %stride0 [range(%stride0, 1, 1073741823)] : index
+  %element_count0 = index.cast %element_count_i32 : i32 to index
+  %element_count = index.assume %element_count0 [range(%element_count0, 1, 2147483647)] : index
+  %idx_view = buffer.view %idx[%base] : buffer -> view<1xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<[%element_count]xi16>
+  %row_i32 = view.load %idx_view[0] : view<1xi32> -> i32
+  %row0 = index.cast %row_i32 : i32 to index
+  %row = index.assume %row0 [range(%row0, 0, 1073741823)] : index
+  %raw = index.mul %row, %stride : index
+  %element = index.assume %raw [range(%raw, 0, 1073741823), lt(%raw, %element_count)] : index
+  %half = scalar.fptrunc %value : f32 to bf16
+  %bits = scalar.bitcast %half : bf16 to i16
+  view.store %bits, %output_view[%element] : i16, view<[%element_count]xi16>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : f32>, reg<vm.value : i32>, reg<vm.value : i32>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : f32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @loaded_i32_row_stride_f32_to_bf16_bits_store(%idx: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %value: reg<vm.value : f32>, %stride_i32: reg<vm.value : i32>, %element_count_i32: reg<vm.value : i32>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %stride = conversion.integer %stride_i32, s32.to.i64 : reg<vm.value : index>
+  %39 = constant.zero : reg<vm.value : offset>
+  %row_i32 = buffer.load %idx, %39, %39, 0, i32.x1 : reg<vm.value : i32>
+  %row = conversion.integer %row_i32, s32.to.i64 : reg<vm.value : index>
+  %element = integer.mul.i64 %row, %stride : reg<vm.value : index>
+  %half = conversion.float.truncate %value, f32.to.bf16 : reg<vm.value : bf16>
+  %bits = value.copy %half : reg<vm.value : i16>
+  buffer.store %output, %39, %element, %bits, 2, i16.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @loaded_i32_row_stride_f16_to_f32_load() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%idx: buffer, %input: buffer, %output: buffer, %stride_i32: i32, %element_count_i32: i32) {
+  %base = index.constant 0 : offset
+  %start = index.constant 0 : index
+  %stride0 = index.cast %stride_i32 : i32 to index
+  %stride = index.assume %stride0 [range(%stride0, 1, 1073741823)] : index
+  %element_count0 = index.cast %element_count_i32 : i32 to index
+  %element_count = index.assume %element_count0 [range(%element_count0, 1, 2147483647)] : index
+  %idx_view = buffer.view %idx[%base] : buffer -> view<1xi32>
+  %input_view = buffer.view %input[%base] : buffer -> view<[%element_count]xf16>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xf32>
+  %row_i32 = view.load %idx_view[0] : view<1xi32> -> i32
+  %row0 = index.cast %row_i32 : i32 to index
+  %row = index.assume %row0 [range(%row0, 0, 1073741823)] : index
+  %raw = index.mul %row, %stride : index
+  %element = index.assume %raw [range(%raw, 0, 1073741823), lt(%raw, %element_count)] : index
+  %half = view.load %input_view[%element] : view<[%element_count]xf16> -> f16
+  %loaded = scalar.extf %half : f16 to f32
+  view.store %loaded, %output_view[%start] : f32, view<1xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : i32>, reg<vm.value : i32>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @loaded_i32_row_stride_f16_to_f32_load(%idx: reg<vm.ref : buffer>, %input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %stride_i32: reg<vm.value : i32>, %element_count_i32: reg<vm.value : i32>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %stride = conversion.integer %stride_i32, s32.to.i64 : reg<vm.value : index>
+  %41 = constant.zero : reg<vm.value : offset>
+  %row_i32 = buffer.load %idx, %41, %41, 0, i32.x1 : reg<vm.value : i32>
+  %row = conversion.integer %row_i32, s32.to.i64 : reg<vm.value : index>
+  %element = integer.mul.i64 %row, %stride : reg<vm.value : index>
+  %half = buffer.load %input, %41, %element, 2, i16.x1 : reg<vm.value : f16>
+  %loaded = conversion.float.extend %half, f16.to.f32 : reg<vm.value : f32>
+  buffer.store %output, %41, %41, %loaded, 0, i32.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @wide_intermediate_narrowed_f16_index_madd_load() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer, %row_i32: i32, %element_count_i32: i32) {
+  %base = index.constant 0 : offset
+  %start = index.constant 0 : index
+  %row_stride = index.constant 65536 : index
+  %lane = kernel.workitem.id<x> : index
+  %row0 = index.cast %row_i32 : i32 to index
+  %row = index.assume %row0 [range(%row0, 0, 65536)] : index
+  %element_count0 = index.cast %element_count_i32 : i32 to index
+  %element_count = index.assume %element_count0 [range(%element_count0, 1, 1073741824)] : index
+  %raw_index = index.madd %row, %row_stride, %lane : index
+  %index = index.assume %raw_index [range(%raw_index, 0, 1073741823), lt(%raw_index, %element_count)] : index
+  %input_view = buffer.view %input[%base] : buffer -> view<[%element_count]xf16>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xf32>
+  %half = view.load %input_view[%index] : view<[%element_count]xf16> -> f16
+  %loaded = scalar.extf %half : f16 to f32
+  view.store %loaded, %output_view[%start] : f32, view<1xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : i32>, reg<vm.value : i32>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @wide_intermediate_narrowed_f16_index_madd_load(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %row_i32: reg<vm.value : i32>, %element_count_i32: reg<vm.value : i32>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %row = conversion.integer %row_i32, s32.to.i64 : reg<vm.value : index>
+  %41 = constant.s16 17 : reg<vm.value : offset>
+  %42 = integer.shift.left.i64 %row, %41 : reg<vm.value : offset>
+  %43 = constant.s16 1 : reg<vm.value : offset>
+  %44 = integer.shift.left.i64 %workitem_id_x, %43 : reg<vm.value : offset>
+  %45 = integer.add.i64 %42, %44 : reg<vm.value : offset>
+  %46 = constant.zero : reg<vm.value : offset>
+  %half = buffer.load %input, %45, %46, 0, i16.x1 : reg<vm.value : f16>
+  %loaded = conversion.float.extend %half, f16.to.f32 : reg<vm.value : f32>
+  buffer.store %output, %46, %46, %loaded, 0, i32.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @rank2_vector_tile_transpose() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 16 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %block = kernel.workitem.id<x> : index
+  %tile_width = index.constant 4 : index
+  %tile_base0 = index.mul %block, %tile_width : index
+  %tile_base = index.assume %tile_base0 [range(%tile_base0, 0, 60)] : index
+  %input_view = buffer.view %input[%base] : buffer -> view<4x64xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x4xf32>
+  %nct_tile = vector.load %input_view[0, %tile_base] : view<4x64xf32> -> vector<4x4xf32>
+  %ntc_tile = vector.transpose<[1, 0]> %nct_tile : vector<4x4xf32> -> vector<4x4xf32>
+  vector.store %ntc_tile, %output_view[%tile_base, 0] : vector<4x4xf32>, view<64x4xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(16, 1, 1) workgroup_count(1, 1, 1) @rank2_vector_tile_transpose(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %187 = constant.zero : reg<vm.value : offset>
+  %188 = buffer.load %input, %187, %workitem_id_x, 16, i32.x1 : reg<vm.value : f32>
+  %189 = constant.s16 256 : reg<vm.value : offset>
+  %190 = buffer.load %input, %189, %workitem_id_x, 16, i32.x1 : reg<vm.value : f32>
+  %191 = constant.s16 512 : reg<vm.value : offset>
+  %192 = buffer.load %input, %191, %workitem_id_x, 16, i32.x1 : reg<vm.value : f32>
+  %193 = constant.s16 768 : reg<vm.value : offset>
+  %194 = buffer.load %input, %193, %workitem_id_x, 16, i32.x1 : reg<vm.value : f32>
+  %195 = constant.s16 4 : reg<vm.value : offset>
+  %196 = buffer.load %input, %195, %workitem_id_x, 16, i32.x1 : reg<vm.value : f32>
+  %197 = constant.s16 260 : reg<vm.value : offset>
+  %198 = buffer.load %input, %197, %workitem_id_x, 16, i32.x1 : reg<vm.value : f32>
+  %199 = constant.s16 516 : reg<vm.value : offset>
+  %200 = buffer.load %input, %199, %workitem_id_x, 16, i32.x1 : reg<vm.value : f32>
+  %201 = constant.s16 772 : reg<vm.value : offset>
+  %202 = buffer.load %input, %201, %workitem_id_x, 16, i32.x1 : reg<vm.value : f32>
+  %203 = constant.s16 8 : reg<vm.value : offset>
+  %204 = buffer.load %input, %203, %workitem_id_x, 16, i32.x1 : reg<vm.value : f32>
+  %205 = constant.s16 264 : reg<vm.value : offset>
+  %206 = buffer.load %input, %205, %workitem_id_x, 16, i32.x1 : reg<vm.value : f32>
+  %207 = constant.s16 520 : reg<vm.value : offset>
+  %208 = buffer.load %input, %207, %workitem_id_x, 16, i32.x1 : reg<vm.value : f32>
+  %209 = constant.s16 776 : reg<vm.value : offset>
+  %210 = buffer.load %input, %209, %workitem_id_x, 16, i32.x1 : reg<vm.value : f32>
+  %211 = constant.s16 12 : reg<vm.value : offset>
+  %212 = buffer.load %input, %211, %workitem_id_x, 16, i32.x1 : reg<vm.value : f32>
+  %213 = constant.s16 268 : reg<vm.value : offset>
+  %214 = buffer.load %input, %213, %workitem_id_x, 16, i32.x1 : reg<vm.value : f32>
+  %215 = constant.s16 524 : reg<vm.value : offset>
+  %216 = buffer.load %input, %215, %workitem_id_x, 16, i32.x1 : reg<vm.value : f32>
+  %217 = constant.s16 780 : reg<vm.value : offset>
+  %218 = buffer.load %input, %217, %workitem_id_x, 16, i32.x1 : reg<vm.value : f32>
+  %219 = concat(%188, %190, %192, %194, %196, %198, %200, %202, %204, %206, %208, %210, %212, %214, %216, %218) : (reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>) -> reg<vm.value x16 : vector<16xf32>>
+  %220 = slice %219[0] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value x4 : vector<4xf32>>
+  buffer.store %output, %187, %workitem_id_x, %220, 64, i32.x4
+  %222 = slice %219[4] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value x4 : vector<4xf32>>
+  %223 = constant.s16 16 : reg<vm.value : offset>
+  buffer.store %output, %223, %workitem_id_x, %222, 64, i32.x4
+  %224 = slice %219[8] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value x4 : vector<4xf32>>
+  %225 = constant.s16 32 : reg<vm.value : offset>
+  buffer.store %output, %225, %workitem_id_x, %224, 64, i32.x4
+  %226 = slice %219[12] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value x4 : vector<4xf32>>
+  %227 = constant.s16 48 : reg<vm.value : offset>
+  buffer.store %output, %227, %workitem_id_x, %226, 64, i32.x4
+  return
+}
+
+// ====
+
+vm.target<core> @target
+
+kernel.def target(@target) @grid_stride_store_offset() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%target: buffer, %byte_length: offset, %pattern: i32) {
+  %lane_index = kernel.workitem.id<x> : index
+  %lane = index.cast %lane_index : index to offset
+  %step_index = index.constant 64 : index
+  %step = index.cast %step_index : index to offset
+  %target_global = buffer.assume.memory_space<global> %target : buffer
+  %value = vector.from_elements %pattern : vector<1xi32>
+  cfg.br ^loop(%lane: offset)
+^loop(%byte_offset: offset):
+  %inside = index.cmp ult, %byte_offset, %byte_length : offset
+  cfg.cond_br %inside, ^body, ^done
+^body:
+  %target_view = buffer.view %target_global[%byte_offset] : buffer -> view<1xi32>
+  vector.store %value, %target_view[0] : vector<1xi32>, view<1xi32>
+  %next = index.add %byte_offset, %step : offset
+  cfg.br ^loop(%next: offset)
+^done:
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.value : offset>, reg<vm.value : i32>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.value : offset>, reg<vm.value : i32>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @grid_stride_store_offset(%target_global: reg<vm.ref : buffer>, %byte_length: reg<vm.value : offset>, %pattern: reg<vm.value : i32>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %lane = value.copy %workitem_id_x : reg<vm.value : offset>
+  %step = constant.s16 64 : reg<vm.value : offset>
+  %value = concat(%pattern) : (reg<vm.value : i32>) -> reg<vm.value : vector<1xi32>>
+  low.br ^loop(%lane: reg<vm.value : offset>)
+^loop(%byte_offset: reg<vm.value : offset>):
+  %inside = integer.compare.i64 %byte_offset, %byte_length, ult : reg<vm.value : i1>
+  low.cond_br %inside, ^body, ^done : reg<vm.value : i1>
+^body:
+  %37 = constant.zero : reg<vm.value : offset>
+  buffer.store %target_global, %37, %byte_offset, %value, 1, i32.x1
+  %next = integer.add.i64 %byte_offset, %step : reg<vm.value : offset>
+  low.br ^loop(%next: reg<vm.value : offset>)
+^done:
+  return
+}
