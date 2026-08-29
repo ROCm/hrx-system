@@ -191,7 +191,8 @@ static iree_status_t loom_vm_kernel_bind_constant(
 
 iree_status_t loom_vm_kernel_map_abi_layout(
     loom_low_lower_context_t* context, const loom_type_t* argument_types,
-    iree_host_size_t argument_count, loom_named_attr_slice_t* out_abi_layout) {
+    const loom_value_id_t* argument_values, iree_host_size_t argument_count,
+    loom_named_attr_slice_t* out_abi_layout) {
   *out_abi_layout = loom_named_attr_slice_empty();
   iree_host_size_t abi_argument_count = 0;
   if (!iree_host_size_checked_add(argument_count,
@@ -218,6 +219,22 @@ iree_status_t loom_vm_kernel_map_abi_layout(
   }
 
   loom_module_t* module = loom_low_lower_context_module(context);
+  iree_string_view_t* abi_argument_names = NULL;
+  if (argument_values != NULL) {
+    IREE_RETURN_IF_ERROR(loom_low_lower_allocate_emission_array(
+        context, abi_argument_count, sizeof(*abi_argument_names),
+        (void**)&abi_argument_names));
+    for (iree_host_size_t i = 0; i < argument_count; ++i) {
+      abi_argument_names[i] =
+          loom_module_value_name(module, argument_values[i]);
+    }
+    for (iree_host_size_t i = 0; i < LOOM_VM_KERNEL_LAUNCH_ARGUMENT_COUNT;
+         ++i) {
+      abi_argument_names[argument_count + i] =
+          kLoomVmKernelLaunchArgumentNames[i];
+    }
+  }
+
   loom_type_t authored_signature = loom_type_none();
   IREE_RETURN_IF_ERROR(loom_module_intern_function_type(
       module, argument_types, (uint16_t)argument_count,
@@ -227,6 +244,7 @@ iree_status_t loom_vm_kernel_map_abi_layout(
       module,
       (loom_vm_call_abi_source_fields_t){
           .types = abi_argument_types,
+          .presentation_names = abi_argument_names,
           .count = abi_argument_count,
       },
       (loom_vm_call_abi_source_fields_t){0}, authored_signature,

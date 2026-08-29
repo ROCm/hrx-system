@@ -90,7 +90,9 @@ typedef struct loom_vm_call_abi_source_fields_t {
   const loom_type_t* types;
   // Borrowed source values supplying optional presentation names.
   const loom_value_id_t* values;
-  // Number of entries in |types| and, when present, |values|.
+  // Borrowed explicit presentation names when no source values exist.
+  const iree_string_view_t* presentation_names;
+  // Number of entries in |types| and the selected presentation source.
   iree_host_size_t count;
 } loom_vm_call_abi_source_fields_t;
 
@@ -205,9 +207,9 @@ iree_status_t loom_vm_call_abi_packet_layout_build(
 //
 // The signature is independent of the physical function boundary and remains
 // unchanged as boundary values are materialized. |authored_signature| may be
-// none when the complete ABI signature is also the authored signature. A NULL
-// |values| pointer omits presentation names for that side while retaining its
-// types.
+// none when the complete ABI signature is also the authored signature. Exactly
+// one of |values| and |presentation_names| may supply names; when both are NULL
+// the side retains its types without presentation names.
 iree_status_t loom_vm_call_abi_layout_make_attr(
     loom_module_t* module, loom_vm_call_abi_source_fields_t arguments,
     loom_vm_call_abi_source_fields_t results, loom_type_t authored_signature,

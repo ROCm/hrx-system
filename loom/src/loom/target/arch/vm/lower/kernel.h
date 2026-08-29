@@ -31,10 +31,13 @@ extern const loom_target_low_legality_provider_t
 // Builds the complete VM kernel ABI layout from authored kernel arguments.
 //
 // The runtime signature appends the target-owned launch arguments while the
-// authored signature remains available for public presentation.
+// authored signature remains available for public presentation. When present,
+// |argument_values| supply authored field names and the target supplies stable
+// names for its appended fields.
 iree_status_t loom_vm_kernel_map_abi_layout(
     loom_low_lower_context_t* context, const loom_type_t* argument_types,
-    iree_host_size_t argument_count, loom_named_attr_slice_t* out_abi_layout);
+    const loom_value_id_t* argument_values, iree_host_size_t argument_count,
+    loom_named_attr_slice_t* out_abi_layout);
 
 // Appends the canonical VM kernel invocation arguments and binds selected
 // topology queries to those arguments, derived values, or profile constants.

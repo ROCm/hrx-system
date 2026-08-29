@@ -495,22 +495,36 @@ static iree_status_t loom_vm_call_abi_layout_make_name_table(
     loom_module_t* module, loom_vm_call_abi_source_fields_t fields,
     iree_arena_allocator_t* scratch_arena, loom_attribute_t* out_attr) {
   *out_attr = loom_attr_absent();
-  if (fields.values == NULL || fields.count == 0) return iree_ok_status();
+  if (fields.values != NULL && fields.presentation_names != NULL) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "VM ABI fields have multiple presentation name sources");
+  }
+  if ((fields.values == NULL && fields.presentation_names == NULL) ||
+      fields.count == 0) {
+    return iree_ok_status();
+  }
 
   bool has_names = false;
   for (iree_host_size_t i = 0; i < fields.count; ++i) {
-    if (fields.values[i] >= module->values.count) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "VM ABI name source value is out of range");
+    iree_string_view_t name = iree_string_view_empty();
+    if (fields.presentation_names != NULL) {
+      name = fields.presentation_names[i];
+    } else {
+      if (fields.values[i] >= module->values.count) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "VM ABI name source value is out of range");
+      }
+      const loom_string_id_t name_id =
+          loom_module_value(module, fields.values[i])->name_id;
+      if (name_id != LOOM_STRING_ID_INVALID &&
+          name_id >= module->strings.count) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "VM ABI source value name is out of range");
+      }
+      name = loom_module_value_name(module, fields.values[i]);
     }
-    const loom_string_id_t name_id =
-        loom_module_value(module, fields.values[i])->name_id;
-    if (name_id != LOOM_STRING_ID_INVALID && name_id >= module->strings.count) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "VM ABI source value name is out of range");
-    }
-    has_names |= !iree_string_view_is_empty(
-        loom_module_value_name(module, fields.values[i]));
+    has_names |= !iree_string_view_is_empty(name);
   }
   if (!has_names) return iree_ok_status();
 
@@ -527,12 +541,17 @@ static iree_status_t loom_vm_call_abi_layout_make_name_table(
     loom_string_id_t field_key_id = LOOM_STRING_ID_INVALID;
     IREE_RETURN_IF_ERROR(
         loom_module_intern_string(module, field_key, &field_key_id));
-    const loom_string_id_t name_id =
-        loom_module_value(module, fields.values[i])->name_id;
+    loom_string_id_t name_id = LOOM_STRING_ID_INVALID;
+    if (fields.presentation_names != NULL) {
+      IREE_RETURN_IF_ERROR(loom_module_intern_string(
+          module, fields.presentation_names[i], &name_id));
+    } else {
+      name_id = loom_module_value(module, fields.values[i])->name_id;
+      if (name_id == LOOM_STRING_ID_INVALID) name_id = empty_name_id;
+    }
     entries[i] = (loom_named_attr_t){
         .name_id = field_key_id,
-        .value = loom_attr_string(
-            name_id != LOOM_STRING_ID_INVALID ? name_id : empty_name_id),
+        .value = loom_attr_string(name_id),
     };
   }
   *out_attr = loom_make_canonical_attr_dict(entries, fields.count);

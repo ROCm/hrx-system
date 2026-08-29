@@ -224,12 +224,6 @@ static iree_status_t loom_vm_map_abi_layout(
     loom_named_attr_slice_t* out_abi_layout) {
   (void)user_data;
   *out_abi_layout = loom_named_attr_slice_empty();
-  if (layout_kind == LOOM_LOW_LOWER_ABI_LAYOUT_KIND_KERNEL) {
-    IREE_ASSERT_EQ(result_count, 0u);
-    return loom_vm_kernel_map_abi_layout(context, argument_types,
-                                         argument_count, out_abi_layout);
-  }
-  IREE_ASSERT_EQ(layout_kind, LOOM_LOW_LOWER_ABI_LAYOUT_KIND_FUNC);
   const loom_func_like_t source_function =
       loom_low_lower_context_source_function(context);
   const loom_module_t* module = loom_low_lower_context_module(context);
@@ -239,6 +233,13 @@ static iree_status_t loom_vm_map_abi_layout(
       has_presentation
           ? loom_vm_source_function_argument_values(context, argument_count)
           : NULL;
+  if (layout_kind == LOOM_LOW_LOWER_ABI_LAYOUT_KIND_KERNEL) {
+    IREE_ASSERT_EQ(result_count, 0u);
+    return loom_vm_kernel_map_abi_layout(context, argument_types,
+                                         argument_values, argument_count,
+                                         out_abi_layout);
+  }
+  IREE_ASSERT_EQ(layout_kind, LOOM_LOW_LOWER_ABI_LAYOUT_KIND_FUNC);
   const loom_value_id_t* result_values =
       has_presentation ? loom_op_const_results(source_function.op) : NULL;
   IREE_ASSERT(!has_presentation ||
