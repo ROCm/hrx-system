@@ -274,7 +274,9 @@ def _vector_select_rule() -> DescriptorRule:
     )
 
 
-def _whole_i8_vector_select_rule() -> DescriptorRule:
+def _whole_integer_vector_select_rule(
+    result_type: TypePattern,
+) -> DescriptorRule:
     subtract_one = _descriptor("amd.xdna.aie2p.select.mask.i32")
     select = _descriptor("amd.xdna.aie2p.select.i32x16")
     return DescriptorRule(
@@ -282,7 +284,7 @@ def _whole_i8_vector_select_rule() -> DescriptorRule:
         descriptor=select,
         guards=(
             Guard.value_type("condition", _I1),
-            *_typed_guards(("true_value", "false_value", "result"), _I8_VECTOR),
+            *_typed_guards(("true_value", "false_value", "result"), result_type),
         ),
         emit=(
             EmitDescriptorOp(
@@ -976,6 +978,31 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
             )
         ),
         *(
+            _vector_binary_rule(
+                source_op,
+                _I16_VECTOR,
+                descriptor_key,
+            )
+            for source_op, descriptor_key in (
+                (
+                    vector.vector_minsi,
+                    "amd.xdna.aie2p.min.signed.i16x32",
+                ),
+                (
+                    vector.vector_maxsi,
+                    "amd.xdna.aie2p.max.signed.i16x32",
+                ),
+                (
+                    vector.vector_minui,
+                    "amd.xdna.aie2p.min.unsigned.i16x32",
+                ),
+                (
+                    vector.vector_maxui,
+                    "amd.xdna.aie2p.max.unsigned.i16x32",
+                ),
+            )
+        ),
+        *(
             _vector_binary_rule(source_op, type_pattern, descriptor_key)
             for source_op, type_pattern, descriptor_key in (
                 (
@@ -1028,7 +1055,10 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
         ),
         _vector_predicate_splat_rule(),
         _vector_select_rule(),
-        _whole_i8_vector_select_rule(),
+        *(
+            _whole_integer_vector_select_rule(result_type)
+            for result_type in _INTEGER_VECTOR_TYPES
+        ),
         *_vector_bitcast_alias_rules(),
         *(
             _binary_rule(source_op, type_pattern, descriptor_key)

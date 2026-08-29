@@ -85,6 +85,7 @@ class _DescriptorSpec:
     itinerary: str
     storage_overrides: tuple[tuple[str, str], ...] = ()
     op_kind: DescriptorOpKind = DescriptorOpKind.OP
+    hardwired_outputs: tuple[str, ...] = ()
     asm_mnemonic: str | None = None
 
 
@@ -162,6 +163,38 @@ _DESCRIPTOR_SPECS = (
         f"{_TARGET_KEY}.sub.i32x16",
         "integer.sub.i32x16",
         "II_VSUB_32",
+    ),
+    _DescriptorSpec(
+        "VMIN_GE_16_vaddSign1",
+        f"{_TARGET_KEY}.min.signed.i16x32",
+        "integer.min.signed.i16x32",
+        "II_VMIN_GE_16_vaddSign1",
+        hardwired_outputs=("cmp",),
+        asm_mnemonic="min.s16x32",
+    ),
+    _DescriptorSpec(
+        "VMAX_LT_16_vaddSign1",
+        f"{_TARGET_KEY}.max.signed.i16x32",
+        "integer.max.signed.i16x32",
+        "II_VMAX_LT_16_vaddSign1",
+        hardwired_outputs=("cmp",),
+        asm_mnemonic="max.s16x32",
+    ),
+    _DescriptorSpec(
+        "VMIN_GE_16_vaddSign0",
+        f"{_TARGET_KEY}.min.unsigned.i16x32",
+        "integer.min.unsigned.i16x32",
+        "II_VMIN_GE_16_vaddSign0",
+        hardwired_outputs=("cmp",),
+        asm_mnemonic="min.u16x32",
+    ),
+    _DescriptorSpec(
+        "VMAX_LT_16_vaddSign0",
+        f"{_TARGET_KEY}.max.unsigned.i16x32",
+        "integer.max.unsigned.i16x32",
+        "II_VMAX_LT_16_vaddSign0",
+        hardwired_outputs=("cmp",),
+        asm_mnemonic="max.u16x32",
     ),
     _DescriptorSpec(
         "VBAND",
@@ -777,6 +810,53 @@ def _low_operand(
     )
 
 
+def _hardwired_output_operand(
+    spec: _DescriptorSpec,
+    operand: MachineOperand,
+) -> Operand:
+    """Models one hardwired architectural output without producing Low SSA."""
+
+    form = _MACHINE_FORMS[spec.form_name]
+    if operand not in form.outputs:
+        raise ValueError(
+            f"{spec.form_name}.{operand.name}: hardwired output is not a machine output"
+        )
+    if operand.kind is MachineOperandKind.IMMEDIATE:
+        raise ValueError(
+            f"{spec.form_name}.{operand.name}: hardwired output must be a register"
+        )
+    encoded_field_names = {
+        field.name for field in _INSTRUCTION_ENCODINGS[spec.form_name].fields
+    }
+    if operand.name in encoded_field_names:
+        raise ValueError(
+            f"{spec.form_name}.{operand.name}: encoded output cannot be implicitized"
+        )
+    machine_class_name = _operand_storage_machine_class(spec, operand)
+    machine_class = _MACHINE_CLASSES[machine_class_name]
+    if len(machine_class.candidates) != 1:
+        raise ValueError(
+            f"{spec.form_name}.{operand.name}: hardwired output class "
+            f"{machine_class_name} must name exactly one physical register"
+        )
+    operand_ordinal = _operand_ordinal(form, operand)
+    read_stage, ready_stage = _operand_stages(spec, operand)
+    return Operand(
+        field_name=f"implicit_output_{operand.name}",
+        role=OperandRole.IMPLICIT,
+        reg_alts=(
+            RegClassAlt(
+                _low_register_class_name(machine_class_name),
+                flags=(RegClassAltFlag.PHYSICAL_ONLY,),
+            ),
+        ),
+        flags=(OperandFlag.IMPLICIT, OperandFlag.STATE_WRITE),
+        read_stage=read_stage,
+        ready_stage=ready_stage,
+        write_event=_register_timing_event(spec, operand_ordinal, "write"),
+    )
+
+
 def _implicit_operands(spec: _DescriptorSpec) -> tuple[Operand, ...]:
     form = _MACHINE_FORMS[spec.form_name]
     result: list[Operand] = []
@@ -995,10 +1075,23 @@ def _descriptor(spec: _DescriptorSpec) -> Descriptor:
             f"{form.name}: itinerary override {spec.itinerary} requires a storage "
             "specialization"
         )
+    if len(set(spec.hardwired_outputs)) != len(spec.hardwired_outputs):
+        raise ValueError(f"{form.name}: hardwired output names must be unique")
+    machine_output_names = {operand.name for operand in form.outputs}
+    unknown_hardwired_outputs = set(spec.hardwired_outputs) - machine_output_names
+    if unknown_hardwired_outputs:
+        raise ValueError(
+            f"{form.name}: hardwired outputs name unknown machine outputs "
+            f"{sorted(unknown_hardwired_outputs)}"
+        )
+    hardwired_outputs = tuple(
+        operand for operand in form.outputs if operand.name in spec.hardwired_outputs
+    )
     register_outputs = tuple(
         operand
         for operand in form.outputs
         if operand.kind is not MachineOperandKind.IMMEDIATE
+        and operand.name not in spec.hardwired_outputs
     )
     register_inputs = tuple(
         operand
@@ -1011,6 +1104,17 @@ def _descriptor(spec: _DescriptorSpec) -> Descriptor:
         if operand.kind is MachineOperandKind.IMMEDIATE
     )
     explicit_register_operands = (*register_outputs, *register_inputs)
+    tied_hardwired_outputs = {
+        name
+        for tie in form.ties
+        for name in (tie.definition, tie.use)
+        if name in spec.hardwired_outputs
+    }
+    if tied_hardwired_outputs:
+        raise ValueError(
+            f"{form.name}: tied outputs cannot be hardwired architectural outputs "
+            f"{sorted(tied_hardwired_outputs)}"
+        )
     mnemonic = spec.asm_mnemonic or _ASM_MNEMONIC_BY_FORM.get(
         spec.form_name, form.assembly.split("\t", 1)[0].strip()
     )
@@ -1026,6 +1130,10 @@ def _descriptor(spec: _DescriptorSpec) -> Descriptor:
             *(
                 _low_operand(spec, operand, OperandRole.OPERAND)
                 for operand in register_inputs
+            ),
+            *(
+                _hardwired_output_operand(spec, operand)
+                for operand in hardwired_outputs
             ),
             *_implicit_operands(spec),
         ),

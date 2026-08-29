@@ -23,7 +23,7 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
         for case in AIE2P_CORE_CONTRACT_FRAGMENT.cases
         if isinstance(case, DescriptorRule)
     )
-    assert len(rules) == 78
+    assert len(rules) == 84
 
     constant_rules = [
         rule for rule in rules if rule.source_op is scalar_conversion.scalar_constant
@@ -127,6 +127,29 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
         "amd.xdna.aie2p.sub.i32x16",
     ]
 
+    vector_minmax_rules = [
+        rule
+        for rule in rules
+        if rule.source_op
+        in (
+            vector.vector_minsi,
+            vector.vector_maxsi,
+            vector.vector_minui,
+            vector.vector_maxui,
+        )
+    ]
+    assert [rule.descriptor.key for rule in vector_minmax_rules] == [
+        "amd.xdna.aie2p.min.signed.i16x32",
+        "amd.xdna.aie2p.max.signed.i16x32",
+        "amd.xdna.aie2p.min.unsigned.i16x32",
+        "amd.xdna.aie2p.max.unsigned.i16x32",
+    ]
+    assert all(
+        tuple(rule.emit[0].results) == ("d",)
+        and rule.emit[0].results["d"].field == "result"
+        for rule in vector_minmax_rules
+    )
+
     vector_bitwise_rules = [
         rule
         for rule in rules
@@ -183,13 +206,16 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
 
     whole_select_rules = [rule for rule in rules if rule.source_op is scf.scf_select]
     assert [rule.descriptor.key for rule in whole_select_rules] == [
-        "amd.xdna.aie2p.select.i32x16"
-    ]
-    assert [emit.descriptor.key for emit in whole_select_rules[0].emit] == [
-        "amd.xdna.aie2p.select.mask.i32",
+        "amd.xdna.aie2p.select.i32x16",
+        "amd.xdna.aie2p.select.i32x16",
         "amd.xdna.aie2p.select.i32x16",
     ]
-    assert whole_select_rules[0].emit[-1].copy_operands == ()
+    for rule in whole_select_rules:
+        assert [emit.descriptor.key for emit in rule.emit] == [
+            "amd.xdna.aie2p.select.mask.i32",
+            "amd.xdna.aie2p.select.i32x16",
+        ]
+        assert rule.emit[-1].copy_operands == ()
 
     alias_rules = [
         case
