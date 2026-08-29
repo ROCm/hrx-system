@@ -91,6 +91,45 @@ low.func.def target<test.low.core>(@test_target) @copy_bad_units(%pair: reg<test
 // ====
 
 test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @copy_changes_storage_class(%value: reg<test.i32 : i32>) -> (reg<test.f32 : i32>) asm {
+  %copy = copy %value : reg<test.i32 : i32> -> reg<test.f32 : i32>
+  return %copy
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @copy_changes_class_preserves_units(%value: reg<test.i32 x2>) {
+  // ERROR@+1: TYPE/001 {field_a="source", type_a="reg<test.i32 x2>", field_b="result", type_b="reg<test.phys>"}
+  %copy = low.copy %value : reg<test.i32 x2> -> reg<test.phys>
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @copy_changes_class_preserves_value(%value: reg<test.i32 : i32>) {
+  // ERROR@+1: TYPE/017 {op_name="low.copy", source_type="reg<test.i32 : i32>", result_type="reg<test.phys : f32>"}
+  %copy = low.copy %value : reg<test.i32 : i32> -> reg<test.phys : f32>
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @copy_changes_class_preserves_value_annotation(%value: reg<test.i32 : i32>) {
+  // ERROR@+1: TYPE/017 {op_name="low.copy", source_type="reg<test.i32 : i32>", result_type="reg<test.phys>"}
+  %copy = low.copy %value : reg<test.i32 : i32> -> reg<test.phys>
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
 low.func.def target<test.low.core>(@test_target) @slice_bad_class(%pair: reg<test.i32 x2>) {
   // ERROR@+1: TYPE/001
   %lane = low.slice %pair[0] : reg<test.i32 x2> -> reg<test.i64>

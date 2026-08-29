@@ -1,0 +1,49 @@
+// RUN: pass source-to-low
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @copied_scalar_operand(%a: index, %b: index, %c: index) -> (index) {
+  %result = index.madd %a, %b, %c : index
+  func.return %result : index
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) abi(object_function) @copied_scalar_operand(%a: reg<test.i32>, %b: reg<test.i32>, %c: reg<test.i32>) -> (reg<test.i32>) {
+  %9 = low.op<test.mul.i32>(%a, %b) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %10 = low.copy %c : reg<test.i32> -> reg<test.phys>
+  %result = low.op<test.add.i32.phys_rhs>(%9, %10) : (reg<test.i32>, reg<test.phys>) -> reg<test.i32>
+  low.return %result : reg<test.i32>
+}
+
+// ====
+// RUN: pass source-to-low
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @copied_per_lane_aggregate(%lhs: vector<4xi32>, %rhs: vector<4xi32>) -> (vector<4xi32>) {
+  %result = vector.addi %lhs, %rhs : vector<4xi32>
+  func.return %result : vector<4xi32>
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) abi(object_function) @copied_per_lane_aggregate(%lhs: reg<test.i32 x4>, %rhs: reg<test.i32 x4>) -> (reg<test.i32 x4>) {
+  %7 = low.copy %rhs : reg<test.i32 x4> -> reg<test.phys x4>
+  %8 = low.slice %lhs[0] : reg<test.i32 x4> -> reg<test.i32>
+  %9 = low.slice %7[0] : reg<test.phys x4> -> reg<test.phys>
+  %10 = low.op<test.add.i32.phys_rhs>(%8, %9) : (reg<test.i32>, reg<test.phys>) -> reg<test.i32>
+  %11 = low.slice %lhs[1] : reg<test.i32 x4> -> reg<test.i32>
+  %12 = low.slice %7[1] : reg<test.phys x4> -> reg<test.phys>
+  %13 = low.op<test.add.i32.phys_rhs>(%11, %12) : (reg<test.i32>, reg<test.phys>) -> reg<test.i32>
+  %14 = low.slice %lhs[2] : reg<test.i32 x4> -> reg<test.i32>
+  %15 = low.slice %7[2] : reg<test.phys x4> -> reg<test.phys>
+  %16 = low.op<test.add.i32.phys_rhs>(%14, %15) : (reg<test.i32>, reg<test.phys>) -> reg<test.i32>
+  %17 = low.slice %lhs[3] : reg<test.i32 x4> -> reg<test.i32>
+  %18 = low.slice %7[3] : reg<test.phys x4> -> reg<test.phys>
+  %19 = low.op<test.add.i32.phys_rhs>(%17, %18) : (reg<test.i32>, reg<test.phys>) -> reg<test.i32>
+  %result = low.concat(%10, %13, %16, %19) : (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>) -> reg<test.i32 x4>
+  low.return %result : reg<test.i32 x4>
+}

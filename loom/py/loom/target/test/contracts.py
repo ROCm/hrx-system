@@ -49,6 +49,7 @@ from loom.target.low_descriptors import Descriptor
 from loom.target.test.descriptors import (
     TEST_LOW_ADD_F32_DESCRIPTOR,
     TEST_LOW_ADD_I32_DESCRIPTOR,
+    TEST_LOW_ADD_I32_PHYS_RHS_DESCRIPTOR,
     TEST_LOW_CMP_EQ_I32_DESCRIPTOR,
     TEST_LOW_CONST_I32_DESCRIPTOR,
     TEST_LOW_CORE_DESCRIPTOR_SET,
@@ -392,11 +393,25 @@ TEST_LOW_CORE_CONTRACT_FRAGMENT = ContractFragment(
             _V4F32,
             semantic_tag="float.mul.f32",
         ),
-        _binary_rule(
-            vector.vector_addi,
-            TEST_LOW_ADD_I32_DESCRIPTOR,
-            _V4I32,
-            semantic_tag="integer.add.i32",
+        DescriptorRule(
+            source_op=vector.vector_addi,
+            descriptor=TEST_LOW_ADD_I32_PHYS_RHS_DESCRIPTOR,
+            guards=(
+                Guard.value_type("lhs", _V4I32),
+                Guard.value_type("rhs", _V4I32),
+                Guard.value_type("result", _V4I32),
+            ),
+            emit=(
+                EmitDescriptorOp(
+                    descriptor=TEST_LOW_ADD_I32_PHYS_RHS_DESCRIPTOR,
+                    operands={
+                        "lhs": ValueRef.operand("lhs"),
+                        "rhs": ValueRef.operand("rhs"),
+                    },
+                    results={"dst": ValueRef.result("result")},
+                    copy_operands=("rhs",),
+                ),
+            ),
         ),
         _binary_rule(
             vector.vector_muli,
@@ -615,7 +630,7 @@ TEST_LOW_CORE_CONTRACT_FRAGMENT = ContractFragment(
         ),
         DescriptorRule(
             source_op=index.index_madd,
-            descriptor=TEST_LOW_ADD_I32_DESCRIPTOR,
+            descriptor=TEST_LOW_ADD_I32_PHYS_RHS_DESCRIPTOR,
             guards=(
                 Guard.value_type("a", _INDEX),
                 Guard.value_type("b", _INDEX),
@@ -624,7 +639,7 @@ TEST_LOW_CORE_CONTRACT_FRAGMENT = ContractFragment(
             ),
             emit=(
                 EmitDescriptorOp(
-                    descriptor=TEST_LOW_ADD_I32_DESCRIPTOR,
+                    descriptor=TEST_LOW_MUL_I32_DESCRIPTOR,
                     operands={
                         "lhs": ValueRef.operand("a"),
                         "rhs": ValueRef.operand("b"),
@@ -633,7 +648,7 @@ TEST_LOW_CORE_CONTRACT_FRAGMENT = ContractFragment(
                     result_types={"dst": ValueRef.result("result")},
                 ),
                 EmitDescriptorOp(
-                    descriptor=TEST_LOW_ADD_I32_DESCRIPTOR,
+                    descriptor=TEST_LOW_ADD_I32_PHYS_RHS_DESCRIPTOR,
                     operands={
                         "lhs": ValueRef.temporary("product"),
                         "rhs": ValueRef.operand("c"),

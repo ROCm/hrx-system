@@ -27,6 +27,13 @@ iree_status_t loom_low_lower_rule_descriptor_result_type(
     loom_low_lower_context_t* context, const loom_low_descriptor_t* descriptor,
     uint16_t result_index, loom_type_t* out_type);
 
+// Returns the register type for a copied packet operand. The descriptor's
+// concrete register class is used when the source class is not accepted while
+// preserving any semantic value type carried by the source register.
+iree_status_t loom_low_lower_rule_descriptor_copy_operand_type(
+    loom_low_lower_context_t* context, const loom_low_descriptor_t* descriptor,
+    uint16_t operand_index, loom_type_t source_type, loom_type_t* out_type);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

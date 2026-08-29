@@ -846,11 +846,14 @@ static iree_status_t loom_low_verify_transfer_register_value_relation(
     loom_value_id_t result_id, iree_diagnostic_emitter_t emitter) {
   const loom_type_t source_type = loom_module_value_type(module, source_id);
   const loom_type_t result_type = loom_module_value_type(module, result_id);
-  if (!loom_low_register_type_same_class(source_type, result_type) ||
-      !loom_low_register_type_same_unit_count(source_type, result_type) ||
-      (!loom_type_register_has_value_type(source_type) &&
-       !loom_type_register_has_value_type(result_type)) ||
-      loom_type_equal(source_type, result_type)) {
+  const loom_type_t* source_value_type =
+      loom_type_register_value_type(source_type);
+  const loom_type_t* result_value_type =
+      loom_type_register_value_type(result_type);
+  if (!loom_low_register_type_same_unit_count(source_type, result_type) ||
+      (!source_value_type && !result_value_type) ||
+      (source_value_type && result_value_type &&
+       loom_type_equal(*source_value_type, *result_value_type))) {
     return iree_ok_status();
   }
   return loom_low_emit_register_value_relation_error(
