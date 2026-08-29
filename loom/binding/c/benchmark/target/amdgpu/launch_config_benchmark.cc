@@ -25,11 +25,16 @@
 #include "loom/format/text/parser.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/link/linker.h"
 #include "loom/ops/func_symbol_facts.h"
 #include "loom/ops/op_registry.h"
+#include "loom/target/arch/amdgpu/artifact_key.h"
+#include "loom/target/arch/amdgpu/profile.h"
 #include "loom/target/arch/amdgpu/provider.h"
 #include "loom/target/function_contract.h"
+#include "loom/target/function_version.h"
 #include "loom/target/provider.h"
+#include "loom/tooling/compile/pipeline.h"
 #include "loomc/launch_config.h"
 #include "loomc/target/amdgpu.h"
 
@@ -187,13 +192,18 @@ class LaunchConfigBenchmarkFixture {
     return iree_ok_status();
   }
 
-  iree_status_t LoadProgram(LaunchConfigProgramPtr* out_program) const {
+  iree_status_t LoadProgram(const loomc_artifact_t* artifact,
+                            LaunchConfigProgramPtr* out_program) const {
     out_program->reset();
     loomc_launch_config_program_t* program = nullptr;
     IREE_RETURN_IF_ERROR(to_iree_status(loomc_launch_config_program_load(
-        artifact_, loom_allocator(), &program)));
+        artifact, loom_allocator(), &program)));
     out_program->reset(program);
     return iree_ok_status();
+  }
+
+  iree_status_t LoadProgram(LaunchConfigProgramPtr* out_program) const {
+    return LoadProgram(artifact_, out_program);
   }
 
   iree_host_size_t artifact_byte_length() const {
@@ -290,16 +300,24 @@ class ValueFactsLaunchConfigBenchmarkFixture {
     iree_arena_block_pool_deinitialize(&block_pool_);
   }
 
-  iree_status_t SetUp() {
+  iree_status_t SetUp(loomc_string_view_t source_identifier) {
     IREE_RETURN_IF_ERROR(loom_target_environment_initialize(
         &loom_amdgpu_target_provider_set, &target_environment_));
+    IREE_RETURN_IF_ERROR(
+        loom_target_environment_initialize_low_descriptor_registry(
+            &target_environment_, &low_descriptor_registry_));
+    loom_amdgpu_target_identity_t target_identity = {};
+    IREE_RETURN_IF_ERROR(
+        loom_amdgpu_artifact_key_parse(IREE_SV("gfx1100"), &target_identity));
+    IREE_RETURN_IF_ERROR(loom_amdgpu_target_profile_initialize(
+        &target_identity, &target_profile_));
     IREE_RETURN_IF_ERROR(loom_op_registry_register_all_dialects(&context_));
     IREE_RETURN_IF_ERROR(loom_target_environment_register_context(
         &target_environment_, &context_));
     IREE_RETURN_IF_ERROR(loom_context_finalize(&context_));
 
-    IREE_RETURN_IF_ERROR(CreateBenchmarkKernelSource(
-        loomc_make_cstring_view("launch_config.loom"), &source_));
+    IREE_RETURN_IF_ERROR(
+        CreateBenchmarkKernelSource(source_identifier, &source_));
     const iree_const_byte_span_t contents =
         iree_const_byte_span_from_loomc(loomc_source_contents(source_.get()));
     const iree_string_view_t identifier =
@@ -350,6 +368,88 @@ class ValueFactsLaunchConfigBenchmarkFixture {
     return ValidateExpectedLaunchConfig(&warm_config_);
   }
 
+  iree_status_t PrepareLegacyReadiness(
+      loom_module_t** out_module,
+      loom_compile_pipeline_result_t* out_pipeline_result) {
+    *out_module = nullptr;
+    *out_pipeline_result = {};
+
+    const loom_module_t* source_modules[] = {module_};
+    const iree_string_view_t root_symbols[] = {IREE_SV("unchecked_1d")};
+    const loom_link_options_t link_options = {
+        /*.module_name=*/IREE_SV("legacy_launch_config"),
+        /*.root_symbols=*/
+        {
+            /*.count=*/IREE_ARRAYSIZE(root_symbols),
+            /*.values=*/root_symbols,
+        },
+    };
+    loom_module_t* prepared_module = nullptr;
+    iree_status_t status = loom_link_materialized_modules(
+        source_modules, IREE_ARRAYSIZE(source_modules), &link_options,
+        &block_pool_, iree_allocator_system(), &prepared_module);
+
+    loom_compile_pipeline_result_t pipeline_result = {};
+    bool pipeline_result_initialized = false;
+    if (iree_status_is_ok(status)) {
+      const loom_target_specialization_request_t specialization = {
+          /*.function_name=*/IREE_SV("unchecked_1d"),
+          /*.target_profile=*/&target_profile_.base,
+      };
+      loom_compile_pipeline_options_t options = {};
+      loom_compile_pipeline_options_initialize(&options);
+      options.default_pipeline = LOOM_COMPILE_DEFAULT_PIPELINE_EXPANDED_SOURCE;
+      options.target_environment = &target_environment_;
+      options.target_specializations = {
+          /*.values=*/&specialization,
+          /*.count=*/1,
+      };
+      options.low_descriptor_registry = &low_descriptor_registry_;
+      status = loom_compile_run_pipeline(prepared_module, &options,
+                                         &block_pool_, &pipeline_result);
+      pipeline_result_initialized = true;
+    }
+    if (iree_status_is_ok(status) && pipeline_result.pass.error_count != 0) {
+      status = iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "legacy launch-config preparation produced pass diagnostics");
+    }
+
+    const loom_target_function_version_t* function_version = nullptr;
+    if (iree_status_is_ok(status)) {
+      const loom_string_id_t name_id =
+          loom_module_lookup_string(prepared_module, IREE_SV("unchecked_1d"));
+      const loom_symbol_id_t symbol_id =
+          name_id != LOOM_STRING_ID_INVALID
+              ? loom_module_find_symbol(prepared_module, name_id)
+              : LOOM_SYMBOL_ID_INVALID;
+      if (symbol_id != LOOM_SYMBOL_ID_INVALID) {
+        function_version = loom_target_function_version_list_find(
+            &pipeline_result.function_versions.list,
+            loom_func_like_cast(
+                prepared_module,
+                prepared_module->symbols.entries[symbol_id].defining_op));
+      }
+      if (function_version == nullptr ||
+          function_version->function_target_facts == nullptr) {
+        status = iree_make_status(
+            IREE_STATUS_FAILED_PRECONDITION,
+            "legacy launch-config preparation produced no target facts");
+      }
+    }
+
+    if (iree_status_is_ok(status)) {
+      *out_module = prepared_module;
+      *out_pipeline_result = pipeline_result;
+    } else {
+      if (pipeline_result_initialized) {
+        loom_compile_pipeline_result_deinitialize(&pipeline_result);
+      }
+      loom_module_free(prepared_module);
+    }
+    return status;
+  }
+
   iree_status_t Evaluate(int64_t element_count,
                          loomc_launch_config_t* out_config) {
     const loom_kernel_launch_config_options_t options = {
@@ -396,6 +496,12 @@ class ValueFactsLaunchConfigBenchmarkFixture {
 
   // AMDGPU target provider composition required to parse the retained module.
   loom_target_environment_t target_environment_ = {};
+
+  // Target-low descriptor registry used by the production compile pipeline.
+  loom_target_low_descriptor_registry_t low_descriptor_registry_ = {};
+
+  // Exact target used by the production launch-preparation specialization.
+  loom_amdgpu_target_profile_t target_profile_ = {};
 
   // Context owning the operation and target dialect registrations.
   loom_context_t context_ = {};
@@ -624,7 +730,8 @@ BENCHMARK_CAPTURE(BM_VmLaunchConfigInvokeSmoke, Checked1D, "launch_config.loom",
 
 static void BM_ValueFactsLaunchConfigInvokeSmoke(benchmark::State& state) {
   ValueFactsLaunchConfigBenchmarkFixture fixture;
-  if (SkipOnError(state, fixture.SetUp())) {
+  if (SkipOnError(state, fixture.SetUp(
+                             loomc_make_cstring_view("launch_config.loom")))) {
     return;
   }
 
@@ -647,5 +754,149 @@ static void BM_ValueFactsLaunchConfigInvokeSmoke(benchmark::State& state) {
   state.SetItemsProcessed(state.iterations());
 }
 BENCHMARK(BM_ValueFactsLaunchConfigInvokeSmoke)->Unit(benchmark::kNanosecond);
+
+static void BM_LegacyLaunchConfigReadinessSmoke(benchmark::State& state) {
+  LaunchConfigBenchmarkFixture compile_fixture;
+  if (SkipOnError(state, compile_fixture.SetUpCompiler(loomc_make_cstring_view(
+                             "launch_config_compile.loom")))) {
+    return;
+  }
+  ValueFactsLaunchConfigBenchmarkFixture legacy_fixture;
+  if (SkipOnError(state, legacy_fixture.SetUp(loomc_make_cstring_view(
+                             "launch_config_compile.loom")))) {
+    return;
+  }
+
+  ResultPtr warm_device_result;
+  loom_module_t* warm_launch_module = nullptr;
+  loom_compile_pipeline_result_t warm_launch_pipeline_result = {};
+  iree_status_t warm_status =
+      compile_fixture.Compile(/*artifact_flags=*/0, &warm_device_result);
+  if (iree_status_is_ok(warm_status)) {
+    warm_status = legacy_fixture.PrepareLegacyReadiness(
+        &warm_launch_module, &warm_launch_pipeline_result);
+  }
+  loom_compile_pipeline_result_deinitialize(&warm_launch_pipeline_result);
+  loom_module_free(warm_launch_module);
+  warm_device_result.reset();
+  if (SkipOnError(state, warm_status)) {
+    return;
+  }
+
+  for (auto _ : state) {
+    (void)_;
+    ResultPtr device_result;
+    loom_module_t* launch_module = nullptr;
+    loom_compile_pipeline_result_t launch_pipeline_result = {};
+    iree_status_t status =
+        compile_fixture.Compile(/*artifact_flags=*/0, &device_result);
+    if (iree_status_is_ok(status)) {
+      status = legacy_fixture.PrepareLegacyReadiness(&launch_module,
+                                                     &launch_pipeline_result);
+    }
+    if (IREE_UNLIKELY(!iree_status_is_ok(status))) {
+      state.PauseTiming();
+      loom_compile_pipeline_result_deinitialize(&launch_pipeline_result);
+      loom_module_free(launch_module);
+      SkipOnError(state, status);
+      break;
+    }
+    benchmark::DoNotOptimize(device_result.get());
+    benchmark::DoNotOptimize(launch_module);
+    state.PauseTiming();
+    loom_compile_pipeline_result_deinitialize(&launch_pipeline_result);
+    loom_module_free(launch_module);
+    device_result.reset();
+    state.ResumeTiming();
+  }
+  state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_LegacyLaunchConfigReadinessSmoke)->UseRealTime();
+
+static void BM_VmLaunchConfigReadinessSmoke(benchmark::State& state) {
+  LaunchConfigBenchmarkFixture fixture;
+  if (SkipOnError(state, fixture.SetUpCompiler(loomc_make_cstring_view(
+                             "launch_config_compile.loom")))) {
+    return;
+  }
+
+  ResultPtr warm_result;
+  LaunchConfigProgramPtr warm_program;
+  iree_status_t warm_status =
+      fixture.Compile(LOOMC_COMPILE_ARTIFACT_FLAG_LAUNCH_CONFIG, &warm_result);
+  const loomc_artifact_t* warm_artifact = nullptr;
+  if (iree_status_is_ok(warm_status)) {
+    warm_artifact = FindArtifact(
+        warm_result.get(), LOOMC_ARTIFACT_KIND_LAUNCH_CONFIG,
+        loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_VM_BYTECODE));
+    if (warm_artifact == nullptr) {
+      warm_status = iree_make_status(IREE_STATUS_NOT_FOUND,
+                                     "launch-config artifact was not produced");
+    }
+  }
+  if (iree_status_is_ok(warm_status)) {
+    warm_status = fixture.LoadProgram(warm_artifact, &warm_program);
+  }
+  loomc_launch_config_function_t warm_function =
+      loomc_launch_config_function_invalid();
+  if (iree_status_is_ok(warm_status)) {
+    warm_status = to_iree_status(loomc_launch_config_program_lookup_function(
+        warm_program.get(), loomc_make_cstring_view("unchecked_1d"),
+        &warm_function));
+  }
+  benchmark::DoNotOptimize(warm_function);
+  warm_program.reset();
+  warm_result.reset();
+  if (SkipOnError(state, warm_status)) {
+    return;
+  }
+
+  int64_t total_artifact_bytes = 0;
+  for (auto _ : state) {
+    (void)_;
+    ResultPtr result;
+    LaunchConfigProgramPtr program;
+    loomc_launch_config_function_t function =
+        loomc_launch_config_function_invalid();
+    iree_status_t status =
+        fixture.Compile(LOOMC_COMPILE_ARTIFACT_FLAG_LAUNCH_CONFIG, &result);
+    const loomc_artifact_t* artifact = nullptr;
+    if (iree_status_is_ok(status)) {
+      artifact = FindArtifact(
+          result.get(), LOOMC_ARTIFACT_KIND_LAUNCH_CONFIG,
+          loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_VM_BYTECODE));
+      if (artifact == nullptr) {
+        status = iree_make_status(IREE_STATUS_NOT_FOUND,
+                                  "launch-config artifact was not produced");
+      }
+    }
+    if (iree_status_is_ok(status)) {
+      status = fixture.LoadProgram(artifact, &program);
+    }
+    if (iree_status_is_ok(status)) {
+      status = to_iree_status(loomc_launch_config_program_lookup_function(
+          program.get(), loomc_make_cstring_view("unchecked_1d"), &function));
+    }
+    if (IREE_UNLIKELY(!iree_status_is_ok(status))) {
+      state.PauseTiming();
+      SkipOnError(state, status);
+      break;
+    }
+    total_artifact_bytes += loomc_byte_sequence_length(artifact->contents);
+    benchmark::DoNotOptimize(program.get());
+    benchmark::DoNotOptimize(function);
+    state.PauseTiming();
+    program.reset();
+    result.reset();
+    state.ResumeTiming();
+  }
+  state.SetItemsProcessed(state.iterations());
+  state.SetBytesProcessed(total_artifact_bytes);
+  state.counters["artifact_bytes"] =
+      state.iterations() == 0
+          ? 0.0
+          : (double)total_artifact_bytes / (double)state.iterations();
+}
+BENCHMARK(BM_VmLaunchConfigReadinessSmoke)->UseRealTime();
 
 }  // namespace

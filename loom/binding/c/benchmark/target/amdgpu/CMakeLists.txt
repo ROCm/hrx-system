@@ -45,11 +45,16 @@ loom_cc_benchmark(
     loom::binding::c::target::amdgpu
     loom::format::text::parser
     loom::ir
+    loom::link::linker
     loom::ops::func_symbol_facts
     loom::ops::op_registry
+    loom::target::arch::amdgpu::artifact_key
+    loom::target::arch::amdgpu::profile
     loom::target::arch::amdgpu::provider
     loom::target::function_contract
+    loom::target::function_version
     loom::target::provider
+    loom::tooling::compile::pipeline
   ARGS
     "--benchmark_filter=Smoke"
   TESTONLY

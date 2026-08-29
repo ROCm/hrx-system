@@ -239,6 +239,7 @@ loom_cc_library(
         _AMDGPU_BINDING_VISIBILITY +
         _AMDGPU_NATIVE_VISIBILITY +
         _AMDGPU_TOOLING_VISIBILITY + [
+            "//loom/binding/c/benchmark/target/amdgpu:__pkg__",
             "//loom/src/loom/tools/loom-link:__pkg__",
         ]
     ),
