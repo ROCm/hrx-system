@@ -86,9 +86,8 @@ func.def target(@target) @i8x4_select_addi(%lhs: i32, %rhs: i32, %true_value: ve
 // ----
 low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i8x4_select_addi(%lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>, %true_value: reg<aie2p.vec512>, %false_value: reg<aie2p.vec512>, %bias: reg<aie2p.vec512>) -> (reg<aie2p.vec512>) asm {
   %condition = lt %lhs, %rhs
-  %17 = vbcst.8 %condition
-  %mask = veqz.8 %17
-  %selected = vsel.8 %true_value, %false_value, %mask
+  %18 = select.mask %condition, -1
+  %selected = vsel.32 %true_value, %false_value, %18
   %result = vadd.8 %selected, %bias
   return %result
 }
@@ -107,9 +106,8 @@ func.def target(@target) @i8x4_select_subi(%lhs: i32, %rhs: i32, %true_value: ve
 // ----
 low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i8x4_select_subi(%lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>, %true_value: reg<aie2p.vec512>, %false_value: reg<aie2p.vec512>, %bias: reg<aie2p.vec512>) -> (reg<aie2p.vec512>) asm {
   %condition = lt %lhs, %rhs
-  %17 = vbcst.8 %condition
-  %mask = veqz.8 %17
-  %selected = vsel.8 %true_value, %false_value, %mask
+  %18 = select.mask %condition, -1
+  %selected = vsel.32 %true_value, %false_value, %18
   %result = vsub.8 %selected, %bias
   return %result
 }

@@ -44,8 +44,8 @@ from loom.target.low_descriptors import (
 def test_core_descriptor_closure_is_complete() -> None:
     descriptor_set = AIE2P_CORE_DESCRIPTOR_SET
     assert len(descriptor_set.physical_registers) == 359
-    assert len(descriptor_set.reg_classes) == 11
-    assert len(descriptor_set.descriptors) == 57
+    assert len(descriptor_set.reg_classes) == 13
+    assert len(descriptor_set.descriptors) == 61
     assert tuple(row.name for row in descriptor_set.physical_registers) == tuple(
         row.name for row in CORE_MACHINE_TABLE.physical_registers
     )
@@ -59,7 +59,7 @@ def test_complete_schedule_domain_drives_selected_low_descriptors() -> None:
     assert len(descriptor_set.resources) == 90
     assert len(descriptor_set.timing_events) == 38
     assert len(descriptor_set.event_separations) == 651
-    assert len(descriptor_set.schedule_classes) == 23
+    assert len(descriptor_set.schedule_classes) == 24
     assert {
         resource.name
         for resource in descriptor_set.resources
@@ -267,6 +267,41 @@ def test_descriptor_encoding_ids_and_adapters_are_materialized() -> None:
     assert scalar_selector.operands[0].reg_alts[0].reg_class == "aie2p.ers16"
     assert scalar_selector.operands[1].field_name == "s0"
     assert scalar_selector.operands[1].reg_alts[0].reg_class == "aie2p.er"
+
+    for key, sign_register in (
+        ("amd.xdna.aie2p.min.signed.i16x32", "vaddsign1"),
+        ("amd.xdna.aie2p.max.signed.i16x32", "vaddsign1"),
+        ("amd.xdna.aie2p.min.unsigned.i16x32", "vaddsign0"),
+        ("amd.xdna.aie2p.max.unsigned.i16x32", "vaddsign0"),
+    ):
+        descriptor = descriptors[key]
+        assert [operand.field_name for operand in descriptor.operands[:3]] == [
+            "d",
+            "s1",
+            "s2",
+        ]
+        assert [
+            operand.reg_alts[0].reg_class for operand in descriptor.operands[:3]
+        ] == [
+            "aie2p.vec512",
+            "aie2p.vec512",
+            "aie2p.vec512",
+        ]
+        hardwired_compare = descriptor.operands[3]
+        assert hardwired_compare.field_name == "implicit_output_cmp"
+        assert hardwired_compare.role is OperandRole.IMPLICIT
+        assert hardwired_compare.reg_alts[0].reg_class == "aie2p.mr16_vcompare"
+        assert hardwired_compare.reg_alts[0].flags == (RegClassAltFlag.PHYSICAL_ONLY,)
+        assert set(hardwired_compare.flags) == {
+            OperandFlag.IMPLICIT,
+            OperandFlag.STATE_WRITE,
+        }
+        assert hardwired_compare.encoding_field_id == 0
+        assert descriptor.asm_forms[0].results == ("d",)
+        assert descriptor.operands[-1].field_name == f"implicit_use_{sign_register}"
+        assert descriptor.operands[-1].reg_alts[0].reg_class == (
+            f"aie2p.state.{sign_register}"
+        )
 
 
 def test_implicit_registers_and_machine_ties_reach_low() -> None:
