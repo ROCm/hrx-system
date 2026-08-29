@@ -21,6 +21,7 @@ loom_target_contract_table_cc_libraries(
   LOWER_RULE_DEPS
     loom::codegen::low::lower
     loom::ops::scalar
+    loom::ops::vector
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

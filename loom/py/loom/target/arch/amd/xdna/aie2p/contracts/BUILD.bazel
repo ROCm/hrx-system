@@ -21,6 +21,7 @@ iree_py_library(
     deps = [
         "//loom/py/loom:core",
         "//loom/py/loom/dialect/scalar",
+        "//loom/py/loom/dialect/vector",
         "//loom/py/loom/target/arch/amd/xdna/aie2p:descriptors",
         "//loom/py/loom/target/contracts",
     ],
@@ -37,6 +38,7 @@ iree_py_test(
     deps = [
         ":contracts",
         "//loom/py/loom/dialect/scalar",
+        "//loom/py/loom/dialect/vector",
         "//loom/py/loom/target/contracts",
     ],
 )

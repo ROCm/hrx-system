@@ -1,0 +1,19 @@
+aie2p.target<core> @target
+
+func.def public target(@target) @vector_integer(
+    %lhs: vector<16xi32>,
+    %rhs: vector<16xi32>,
+    %bias: vector<16xi32>,
+    %scalar: i32
+) -> (vector<16xi32>) {
+  %splat = vector.splat %scalar : vector<16xi32>
+  %sum = vector.addi %lhs, %rhs : vector<16xi32>
+  %difference = vector.subi %sum, %bias : vector<16xi32>
+  %intersection = vector.andi %difference, %splat : vector<16xi32>
+  %union = vector.ori %intersection, %rhs : vector<16xi32>
+  %mixed = vector.xori %union, %lhs : vector<16xi32>
+  %bytes = vector.bitcast %mixed : vector<16xi32> to vector<64xi8>
+  %incremented = vector.addi %bytes, %bytes : vector<64xi8>
+  %result = vector.bitcast %incremented : vector<64xi8> to vector<16xi32>
+  func.return %result : vector<16xi32>
+}

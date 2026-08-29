@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include "loom/error/error_catalog.h"
+#include "loom/ir/module.h"
 #include "loom/ir/scalar_type.h"
 #include "loom/target/arch/amd/xdna/aie2p/contracts/core.h"
 #include "loom/target/arch/amd/xdna/aie2p/contracts/core_lower_rules.h"
@@ -20,11 +21,26 @@ static iree_status_t loom_aie2p_map_type(void* user_data,
   if (loom_type_is_scalar(source_type)) {
     switch (loom_type_element_type(source_type)) {
       case LOOM_SCALAR_TYPE_I1:
+      case LOOM_SCALAR_TYPE_I8:
+      case LOOM_SCALAR_TYPE_I16:
       case LOOM_SCALAR_TYPE_I32:
         return loom_low_lower_make_register_type(
             context, AIE2P_CORE_REG_CLASS_ID_AIE2P_ER, 1, out_low_type);
       default:
         break;
+    }
+  }
+  if (loom_type_is_vector(source_type) && loom_type_rank(source_type) == 1 &&
+      loom_type_is_all_static(source_type)) {
+    const int64_t lane_count = loom_type_dim_static_size_at(source_type, 0);
+    const loom_scalar_type_t element_type = loom_type_element_type(source_type);
+    const bool fits_vec512 =
+        (element_type == LOOM_SCALAR_TYPE_I8 && lane_count <= 64) ||
+        (element_type == LOOM_SCALAR_TYPE_I16 && lane_count <= 32) ||
+        (element_type == LOOM_SCALAR_TYPE_I32 && lane_count <= 16);
+    if (lane_count > 0 && fits_vec512) {
+      return loom_low_lower_make_register_type(
+          context, AIE2P_CORE_REG_CLASS_ID_AIE2P_VEC512, 1, out_low_type);
     }
   }
   return loom_low_lower_emit_source_type_unsupported(

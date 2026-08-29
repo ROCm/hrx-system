@@ -169,7 +169,10 @@ loom_check_test_suite(
 
 iree_execution_test_suite(
     name = "loom_compile_execution_test",
-    data = ["test/end_to_end/scalar_i32.loom"],
+    data = [
+        "test/end_to_end/scalar_i32.loom",
+        "test/end_to_end/vector_integer.loom",
+    ],
     manifests = ["test/end_to_end/loom-compile.test.json"],
     tags = ["hostonly"],
     tools = {

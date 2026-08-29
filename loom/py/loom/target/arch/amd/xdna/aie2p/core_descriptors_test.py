@@ -39,7 +39,7 @@ def test_core_descriptor_closure_is_complete() -> None:
     descriptor_set = AIE2P_CORE_DESCRIPTOR_SET
     assert len(descriptor_set.physical_registers) == 359
     assert len(descriptor_set.reg_classes) == 7
-    assert len(descriptor_set.descriptors) == 29
+    assert len(descriptor_set.descriptors) == 37
     assert tuple(row.name for row in descriptor_set.physical_registers) == tuple(
         row.name for row in CORE_MACHINE_TABLE.physical_registers
     )
@@ -53,7 +53,7 @@ def test_complete_schedule_domain_drives_selected_low_descriptors() -> None:
     assert len(descriptor_set.resources) == 81
     assert len(descriptor_set.timing_events) == 38
     assert len(descriptor_set.event_separations) == 651
-    assert len(descriptor_set.schedule_classes) == 14
+    assert len(descriptor_set.schedule_classes) == 15
     assert {
         resource.name
         for resource in descriptor_set.resources

@@ -195,6 +195,7 @@ iree_execution_test_suite(
     "loom-compile=loom::tools::loom-compile"
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/target/arch/amd/xdna/aie2p/test/end_to_end/scalar_i32.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/target/arch/amd/xdna/aie2p/test/end_to_end/vector_integer.loom"
   LABELS
     "hostonly"
 )
