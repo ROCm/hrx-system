@@ -221,14 +221,7 @@ def _compile_view_asm_forms(
         view_spec.descriptors,
         label_scope=f"view_{view_spec.key}",
     )
-    compiler.append_asm_form_table_spans(
-        asm_forms,
-        compiled.asm_operand_indices,
-        compiled.asm_operand_segments,
-        compiled.asm_result_value_types,
-        compiled.asm_immediates,
-        compiled.native_asm_values,
-    )
+    compiled.asm_table_storage.append_forms(asm_forms)
     return asm_forms
 
 

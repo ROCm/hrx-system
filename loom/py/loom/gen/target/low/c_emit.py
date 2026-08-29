@@ -352,6 +352,7 @@ def emit_source_for_views(
 ) -> str:
     spec = compiled.spec
     pool = compiled.string_pool
+    asm_table_storage = compiled.asm_table_storage
     for view in views:
         _intern_descriptor_set_view_metadata(compiled, view.spec)
     lines = [
@@ -743,12 +744,12 @@ def emit_source_for_views(
                 for descriptor_key, descriptor_ordinal in view.descriptor_refs
             ],
         )
-    if compiled.asm_operand_indices:
+    if asm_table_storage.operand_indices:
         c_arrays.append_value_array(
             lines,
             "uint16_t",
             f"k{spec.c_table_prefix}AsmOperandIndices",
-            [str(operand_index) for operand_index in compiled.asm_operand_indices],
+            [str(operand_index) for operand_index in asm_table_storage.operand_indices],
         )
     _emit_array(
         lines,
@@ -761,7 +762,7 @@ def emit_source_for_views(
                 f".operand_count = {segment.operand_count},",
                 f".flags = {'LOOM_LOW_ASM_OPERAND_SEGMENT_FLAG_VARIADIC' if segment.has_variadic_operand else '0'},",
             ]
-            for segment in compiled.asm_operand_segments
+            for segment in asm_table_storage.operand_segments
         ],
     )
     _emit_array(
@@ -769,7 +770,7 @@ def emit_source_for_views(
         "loom_low_asm_result_value_type_t",
         spec.c_table_prefix,
         "AsmResultValueTypes",
-        _asm_result_value_type_row_lines(compiled.asm_result_value_types),
+        _asm_result_value_type_row_lines(asm_table_storage.result_value_types),
     )
     _emit_array(
         lines,
@@ -781,7 +782,7 @@ def emit_source_for_views(
                 f".immediate_index = {immediate.immediate_index},",
                 f".name_string_offset = {c_spelling.optional_string_expr(pool, immediate.name_label)},",
             ]
-            for immediate in compiled.asm_immediates
+            for immediate in asm_table_storage.immediates
         ],
     )
     _emit_array(
@@ -796,7 +797,7 @@ def emit_source_for_views(
         "loom_low_native_asm_value_t",
         spec.c_table_prefix,
         "NativeAsmValues",
-        _native_asm_value_row_lines(compiled, compiled.native_asm_values),
+        _native_asm_value_row_lines(compiled, asm_table_storage.native_values),
     )
     for view in views:
         if view.uses_storage_asm_form_tables:
@@ -847,8 +848,12 @@ def emit_source_for_views(
         "operand_form_operand_indices": "operand_form_operand_index_count",
     }
 
-    def append_optional_table(field_name: str, table_name: str, view_lines: list[str]) -> None:
-        rows = getattr(compiled, field_name)
+    def append_optional_table(
+        field_name: str,
+        table_name: str,
+        rows: Sequence[object],
+        view_lines: list[str],
+    ) -> None:
         if rows:
             view_lines.append(f"    .{field_name} = k{spec.c_table_prefix}{table_name},")
             view_lines.append(f"    .{table_count_fields[field_name]} = IREE_ARRAYSIZE(k{spec.c_table_prefix}{table_name}),")
@@ -887,46 +892,79 @@ def emit_source_for_views(
             f"    .descriptor_ref_count = IREE_ARRAYSIZE(k{view_spec.c_table_prefix}DescriptorRefs),",
         ]
 
-        append_optional_table("operands", "Operands", view_lines)
-        append_optional_table("immediates", "Immediates", view_lines)
-        append_optional_table("immediate_encoding_slices", "ImmediateEncodingSlices", view_lines)
-        append_optional_table("enum_domains", "EnumDomains", view_lines)
-        append_optional_table("enum_values", "EnumValues", view_lines)
-        append_optional_table("effects", "Effects", view_lines)
-        append_optional_table("constraints", "Constraints", view_lines)
-        append_optional_table("storage_leases", "StorageLeases", view_lines)
-        append_optional_table("reg_classes", "RegClasses", view_lines)
-        append_optional_table("register_parts", "RegisterParts", view_lines)
-        append_optional_table("reg_class_alts", "RegClassAlts", view_lines)
-        append_optional_table("schedule_classes", "ScheduleClasses", view_lines)
-        append_optional_table("issue_uses", "IssueUses", view_lines)
-        append_optional_table("resources", "Resources", view_lines)
-        append_optional_table("hazards", "Hazards", view_lines)
-        append_optional_table("pressure_deltas", "PressureDeltas", view_lines)
+        append_optional_table("operands", "Operands", compiled.operands, view_lines)
+        append_optional_table("immediates", "Immediates", compiled.immediates, view_lines)
+        append_optional_table(
+            "immediate_encoding_slices",
+            "ImmediateEncodingSlices",
+            compiled.immediate_encoding_slices,
+            view_lines,
+        )
+        append_optional_table("enum_domains", "EnumDomains", compiled.enum_domains, view_lines)
+        append_optional_table("enum_values", "EnumValues", compiled.enum_values, view_lines)
+        append_optional_table("effects", "Effects", compiled.effects, view_lines)
+        append_optional_table("constraints", "Constraints", compiled.constraints, view_lines)
+        append_optional_table("storage_leases", "StorageLeases", compiled.storage_leases, view_lines)
+        append_optional_table("reg_classes", "RegClasses", compiled.reg_classes, view_lines)
+        append_optional_table("register_parts", "RegisterParts", compiled.register_parts, view_lines)
+        append_optional_table("reg_class_alts", "RegClassAlts", compiled.reg_class_alts, view_lines)
+        append_optional_table("schedule_classes", "ScheduleClasses", compiled.schedule_classes, view_lines)
+        append_optional_table("issue_uses", "IssueUses", compiled.issue_uses, view_lines)
+        append_optional_table("resources", "Resources", compiled.resources, view_lines)
+        append_optional_table("hazards", "Hazards", compiled.hazards, view_lines)
+        append_optional_table("pressure_deltas", "PressureDeltas", compiled.pressure_deltas, view_lines)
         if view.asm_forms:
             view_lines.append(f"    .asm_forms = k{asm_form_table_prefix}AsmForms,")
             view_lines.append(f"    .asm_form_count = IREE_ARRAYSIZE(k{asm_form_table_prefix}AsmForms),")
-            append_optional_table("asm_operand_indices", "AsmOperandIndices", view_lines)
-            append_optional_table("asm_operand_segments", "AsmOperandSegments", view_lines)
+            append_optional_table(
+                "asm_operand_indices",
+                "AsmOperandIndices",
+                asm_table_storage.operand_indices,
+                view_lines,
+            )
+            append_optional_table(
+                "asm_operand_segments",
+                "AsmOperandSegments",
+                asm_table_storage.operand_segments,
+                view_lines,
+            )
             append_optional_table(
                 "asm_result_value_types",
                 "AsmResultValueTypes",
+                asm_table_storage.result_value_types,
                 view_lines,
             )
-            append_optional_table("asm_immediates", "AsmImmediates", view_lines)
-            append_optional_table("native_asm_values", "NativeAsmValues", view_lines)
-        append_optional_table("encoding_field_values", "EncodingFieldValues", view_lines)
+            append_optional_table(
+                "asm_immediates",
+                "AsmImmediates",
+                asm_table_storage.immediates,
+                view_lines,
+            )
+            append_optional_table(
+                "native_asm_values",
+                "NativeAsmValues",
+                asm_table_storage.native_values,
+                view_lines,
+            )
+        append_optional_table(
+            "encoding_field_values",
+            "EncodingFieldValues",
+            compiled.encoding_field_values,
+            view_lines,
+        )
         if view.operand_forms:
             view_lines.append(f"    .operand_forms = k{operand_form_table_prefix}OperandForms,")
             view_lines.append(f"    .operand_form_count = IREE_ARRAYSIZE(k{operand_form_table_prefix}OperandForms),")
         append_optional_table(
             "operand_form_matches",
             "OperandFormMatches",
+            compiled.operand_form_matches,
             view_lines,
         )
         append_optional_table(
             "operand_form_operand_indices",
             "OperandFormOperandIndices",
+            compiled.operand_form_operand_indices,
             view_lines,
         )
         if compiled.feature_mask_words:

@@ -1200,9 +1200,8 @@ def test_descriptor_set_family_emits_prefix_view_local_asm_forms() -> None:
     assert "static const loom_low_asm_form_t kTestLowViewCoreAsmForms[]" in source
     assert ".descriptors = kTestLowViewCoreDescriptors," in source
     assert ".asm_forms = kTestLowViewCoreAsmForms," in source
-    assert source.count(".kind = LOOM_LOW_ASM_RESULT_VALUE_TYPE_KIND_SCALAR,") == 2
-    assert ".result_value_type_start = 0," in source
-    assert ".result_value_type_start = 1," in source
+    assert source.count(".kind = LOOM_LOW_ASM_RESULT_VALUE_TYPE_KIND_SCALAR,") == 1
+    assert source.count(".result_value_type_start = 0,") == 2
 
 
 def test_descriptor_set_family_compares_derived_descriptor_projections() -> None:
@@ -1496,8 +1495,8 @@ def test_generator_emits_trailing_variadic_operand_segment() -> None:
 
     assert compiled.asm_forms[0].operand_indices == (1, 2)
     assert compiled.asm_forms[0].operand_segment_start == 0
-    assert compiled.asm_operand_segments[0].operand_count == 2
-    assert compiled.asm_operand_segments[0].has_variadic_operand
+    assert compiled.asm_table_storage.operand_segments[0].operand_count == 2
+    assert compiled.asm_table_storage.operand_segments[0].has_variadic_operand
     assert compiled.descriptor_rows[0]["minimum_packet_operand_count"] == 1
     assert DescriptorFlag.VARIADIC_OPERANDS in compiled.descriptors[0].flags
     assert "LOOM_LOW_OPERAND_FLAG_VARIADIC" in generated.source
@@ -1562,7 +1561,7 @@ def test_generator_emits_exact_asm_result_value_type() -> None:
     generated = generate_descriptor_set(descriptor_set)
 
     assert compiled.asm_forms[0].result_value_type_start == 0
-    assert compiled.asm_result_value_types == [AsmResultValueType(ScalarTypeKind.I32, vector_lane_count=4)]
+    assert compiled.asm_table_storage.result_value_types == [AsmResultValueType(ScalarTypeKind.I32, vector_lane_count=4)]
     assert "static const loom_low_asm_result_value_type_t kTestLowCoreAsmResultValueTypes[]" in generated.source
     assert ".kind = LOOM_LOW_ASM_RESULT_VALUE_TYPE_KIND_VECTOR," in generated.source
     assert ".element_type = LOOM_SCALAR_TYPE_I32," in generated.source
@@ -1596,7 +1595,7 @@ def test_generator_emits_partial_multi_result_value_type_recipe() -> None:
     compiled = compiler.compile_descriptor_set(descriptor_set)
     generated = generate_descriptor_set(descriptor_set)
 
-    assert compiled.asm_result_value_types == [
+    assert compiled.asm_table_storage.result_value_types == [
         AsmResultValueType(ScalarTypeKind.I32),
         None,
     ]
