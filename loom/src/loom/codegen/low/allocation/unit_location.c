@@ -58,25 +58,27 @@ bool loom_low_allocation_unit_location_is_live_at_point(
   IREE_ASSERT_ARGUMENT(descriptor_set);
   IREE_ASSERT_ARGUMENT(unit_liveness);
   IREE_ASSERT_ARGUMENT(location);
+  const loom_low_allocation_assignment_t location_assignment = {
+      .descriptor_reg_class_id = location->descriptor_reg_class_id,
+      .location_kind = location->location_kind,
+      .location_base = location->location,
+      .location_count = 1,
+  };
   for (iree_host_size_t i = 0; i < assignment_count; ++i) {
     const loom_low_allocation_assignment_t* assignment = &assignments[i];
     if (assignment->location_kind != location->location_kind ||
         point < assignment->start_point) {
       continue;
     }
-    if (!loom_low_allocation_storage_reg_classes_share(
-            descriptor_set, assignment->descriptor_reg_class_id,
-            location->descriptor_reg_class_id)) {
-      continue;
-    }
-    const uint64_t assignment_end =
-        (uint64_t)assignment->location_base + assignment->location_count;
-    if (location->location < assignment->location_base ||
-        location->location >= assignment_end) {
+    if (!loom_low_allocation_storage_assignment_ranges_overlap(
+            descriptor_set, assignment, &location_assignment)) {
       continue;
     }
     const uint32_t unit_offset =
-        (uint32_t)(location->location - assignment->location_base);
+        loom_low_allocation_storage_assignment_uses_explicit_physical_register(
+            descriptor_set, assignment)
+            ? 0
+            : (uint32_t)(location->location - assignment->location_base);
     const uint32_t unit_start_point =
         loom_low_allocation_live_range_assignment_unit_start_point(
             unit_liveness->start_points, unit_liveness->point_count, assignment,

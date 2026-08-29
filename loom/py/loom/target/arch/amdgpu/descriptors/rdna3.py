@@ -87,7 +87,7 @@ _AMDGPU_RDNA3_CORE_DESCRIPTOR_SET_BASE = _amdgpu_core_descriptor_set(
             _SCHEDULE_WMMA,
             latency_kind=LatencyKind.ESTIMATE,
             latency_cycles=5,
-            schedule_distance_cycles=32,
+            minimum_issue_separation_cycles=32,
             issue_uses=(IssueUse(_RESOURCE_WMMA, cycles=1, units=1),),
             hazards=_matrix_hazards(_RESOURCE_WMMA),
             model_quality=ModelQuality.ESTIMATED,

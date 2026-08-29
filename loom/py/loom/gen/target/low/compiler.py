@@ -883,7 +883,13 @@ def compile_descriptor_set(
     if spec.generator_version == 0:
         raise ValueError(f"descriptor set '{spec.key}' has zero generator version")
     reg_class_inputs = _dedupe_by_name(spec.reg_classes, lambda item: item.name)
-    validation.validate_register_classes(spec.key, tuple(reg_class_inputs.values()))
+    physical_register_inputs = _dedupe_by_name(spec.physical_registers, lambda item: item.name)
+    validation.validate_register_classes(
+        spec.key,
+        tuple(reg_class_inputs.values()),
+        tuple(physical_register_inputs.values()),
+    )
+    validation.validate_schedule_model(spec)
     register_part_inputs = _dedupe_by_name(spec.register_parts, lambda item: item.name)
     resource_inputs = _dedupe_by_name(spec.resources, lambda item: item.name)
     schedule_inputs = _dedupe_by_name(spec.schedule_classes, lambda item: item.name)
@@ -933,6 +939,7 @@ def compile_descriptor_set(
     used_register_part_names: set[str] = set()
     used_resource_names: set[str] = set()
     used_schedule_names = set(required_schedule_class_names)
+    used_timing_event_names: set[str] = set()
     unknown_required_schedule_names = sorted(used_schedule_names - schedule_inputs.keys())
     if unknown_required_schedule_names:
         raise ValueError(f"descriptor set '{spec.key}' requires unknown schedule classes: {', '.join(unknown_required_schedule_names)}")
@@ -955,6 +962,12 @@ def compile_descriptor_set(
             raise ValueError(f"descriptor '{descriptor.key}' references unknown schedule class '{descriptor.schedule_class}'")
         used_schedule_names.add(descriptor.schedule_class)
         for immediate in descriptor.immediates:
+            validation.validate_u64(
+                immediate.value_step,
+                f"descriptor '{descriptor.key}' immediate '{immediate.field_name}' value step",
+            )
+            if immediate.value_step == 0:
+                raise ValueError(f"descriptor '{descriptor.key}' immediate '{immediate.field_name}' has zero value step")
             validation.validate_u16(
                 immediate.encoding_field_id,
                 f"descriptor '{descriptor.key}' immediate '{immediate.field_name}' encoding field id",
@@ -965,6 +978,8 @@ def compile_descriptor_set(
             )
             validation.validate_immediate_encoding(descriptor, immediate)
             if immediate.kind is ImmediateKind.ENUM:
+                if immediate.value_step != 1:
+                    raise ValueError(f"descriptor '{descriptor.key}' enum immediate '{immediate.field_name}' has non-unit value step {immediate.value_step}")
                 if immediate.enum_domain is None:
                     raise ValueError(f"descriptor '{descriptor.key}' enum immediate '{immediate.field_name}' has no enum domain")
                 if immediate.enum_domain not in enum_domain_inputs:
@@ -1003,6 +1018,13 @@ def compile_descriptor_set(
                     )
                 used_register_part_names.add(operand.register_part)
                 used_reg_class_names.add(register_part.reg_class)
+            if operand.read_event is not None:
+                used_timing_event_names.add(operand.read_event)
+            if operand.write_event is not None:
+                used_timing_event_names.add(operand.write_event)
+        for effect in descriptor.effects:
+            if effect.timing_event is not None:
+                used_timing_event_names.add(effect.timing_event)
         seen_fixed_encoding_fields: set[int] = set()
         for field_value in descriptor.encoding_field_values:
             validation.validate_u16(
@@ -1087,17 +1109,32 @@ def compile_descriptor_set(
             raise ValueError(f"register part '{part_name}' mask 0x{register_part.mask:x} exceeds full mask 0x{reg_class.full_register_part_mask:x} for register class '{reg_class.name}'")
 
     reg_classes = [reg_class for reg_class in spec.reg_classes if reg_class.name in used_reg_class_names]
+    physical_registers = list(spec.physical_registers)
     register_parts = [part for part in spec.register_parts if part.name in used_register_part_names]
     resources = [resource for resource in spec.resources if resource.name in used_resource_names]
     schedule_classes = [schedule_class for schedule_class in spec.schedule_classes if schedule_class.name in used_schedule_names]
+    timing_events = [timing_event for timing_event in spec.timing_events if timing_event.name in used_timing_event_names]
     enum_domains = [domain for domain in spec.enum_domains if domain.name in used_enum_domain_names]
 
     validation.validate_u16_table_count(len(reg_classes), f"descriptor set '{spec.key}' register class")
+    validation.validate_u16_table_count(
+        len(physical_registers),
+        f"descriptor set '{spec.key}' physical register",
+    )
     validation.validate_u16_table_count(len(register_parts), f"descriptor set '{spec.key}' register part")
     reg_class_ids = {reg_class.name: i for i, reg_class in enumerate(reg_classes)}
+    physical_register_ids = {physical_register.name: i for i, physical_register in enumerate(physical_registers)}
     register_part_ids = {part.name: i for i, part in enumerate(register_parts)}
     resource_ids = {resource.name: i for i, resource in enumerate(resources)}
     schedule_class_ids = {schedule_class.name: i for i, schedule_class in enumerate(schedule_classes)}
+    timing_event_ids = {timing_event.name: i for i, timing_event in enumerate(timing_events)}
+    event_separations = sorted(
+        (separation for separation in spec.event_separations if separation.producer_event in timing_event_ids and separation.consumer_event in timing_event_ids),
+        key=lambda separation: (
+            timing_event_ids[separation.producer_event],
+            timing_event_ids[separation.consumer_event],
+        ),
+    )
     enum_domain_ids = {domain.name: i for i, domain in enumerate(enum_domains)}
 
     string_pool = CStringPool(spec.c_enum_prefix)
@@ -1109,12 +1146,19 @@ def compile_descriptor_set(
         string_pool.intern("feature_key", spec.feature_key)
     for reg_class in reg_classes:
         string_pool.intern(f"reg_{reg_class.name}", reg_class.name)
+    for physical_register in physical_registers:
+        string_pool.intern(
+            f"physical_register_{physical_register.name}",
+            physical_register.name,
+        )
     for part in register_parts:
         string_pool.intern(f"register_part_{part.name}", part.name)
     for resource in resources:
         string_pool.intern(f"resource_{resource.name}", resource.name)
     for schedule_class in schedule_classes:
         string_pool.intern(f"schedule_{schedule_class.name}", schedule_class.name)
+    for timing_event in timing_events:
+        string_pool.intern(f"timing_event_{timing_event.name}", timing_event.name)
     for enum_domain in enum_domains:
         string_pool.intern(f"enum_domain_{enum_domain.name}", enum_domain.name)
         for enum_value in validation.validate_enum_domain(enum_domain):
@@ -1191,6 +1235,18 @@ def compile_descriptor_set(
     descriptor_rows: list[dict[str, int]] = []
     schedule_rows: list[dict[str, int]] = []
     enum_domain_rows: list[dict[str, int]] = []
+
+    physical_register_atomic_units: list[int] = []
+    physical_register_atomic_unit_starts: list[int] = []
+    for physical_register in physical_registers:
+        physical_register_atomic_unit_starts.append(len(physical_register_atomic_units))
+        physical_register_atomic_units.extend(physical_register.atomic_units)
+
+    physical_register_candidate_ids: list[int] = []
+    physical_register_candidate_starts: list[int] = []
+    for reg_class in reg_classes:
+        physical_register_candidate_starts.append(len(physical_register_candidate_ids))
+        physical_register_candidate_ids.extend(physical_register_ids[name] for name in reg_class.physical_registers)
 
     for schedule_class in schedule_classes:
         issue_use_start = len(issue_uses)
@@ -1383,14 +1439,22 @@ def compile_descriptor_set(
         descriptors=selected_descriptors,
         instruction_classes=instruction_classes,
         reg_classes=reg_classes,
+        physical_registers=physical_registers,
+        physical_register_candidate_ids=physical_register_candidate_ids,
+        physical_register_candidate_starts=physical_register_candidate_starts,
+        physical_register_atomic_units=physical_register_atomic_units,
+        physical_register_atomic_unit_starts=physical_register_atomic_unit_starts,
         register_parts=register_parts,
         resources=resources,
         schedule_classes=schedule_classes,
+        timing_events=timing_events,
+        event_separations=event_separations,
         enum_domains=enum_domains,
         reg_class_ids=reg_class_ids,
         register_part_ids=register_part_ids,
         resource_ids=resource_ids,
         schedule_class_ids=schedule_class_ids,
+        timing_event_ids=timing_event_ids,
         enum_domain_ids=enum_domain_ids,
         string_pool=string_pool,
         reg_class_alts=reg_class_alts,

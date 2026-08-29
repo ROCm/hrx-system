@@ -157,6 +157,7 @@ void InitializeTestTables(TestTables* tables) {
       TEST_STRING_OFFSET(field_value);
   tables->immediates[0].kind = LOOM_LOW_IMMEDIATE_KIND_SIGNED;
   tables->immediates[0].bit_width = 32;
+  tables->immediates[0].value_step = 1;
   tables->immediates[0].enum_domain_id = LOOM_LOW_ENUM_DOMAIN_NONE;
   tables->immediates[0].signed_min = INT32_MIN;
   tables->immediates[0].unsigned_max = INT32_MAX;
@@ -1318,6 +1319,26 @@ TEST(LowDescriptorsTest, AcceptsDefaultedImmediate) {
   tables.immediates[0].default_value = 7;
 
   IREE_ASSERT_OK(loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsZeroImmediateValueStep) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.immediates[0].value_step = 0;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsMisalignedImmediateDefault) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.immediates[0].flags = LOOM_LOW_IMMEDIATE_FLAG_DEFAULT_VALUE;
+  tables.immediates[0].value_step = 4;
+  tables.immediates[0].default_value = 7;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
 }
 
 TEST(LowDescriptorsTest, RejectsDefaultWithoutDefaultFlag) {

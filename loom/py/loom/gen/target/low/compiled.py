@@ -22,6 +22,7 @@ from loom.target.low_descriptors import (
     EncodingFieldValue,
     EnumDomain,
     EnumValue,
+    EventSeparation,
     Hazard,
     Immediate,
     ImmediateEncodingSlice,
@@ -31,6 +32,7 @@ from loom.target.low_descriptors import (
     Operand,
     OperandFormImmediateAction,
     OperandFormMatchKind,
+    PhysicalRegister,
     PressureDelta,
     RegClass,
     RegClassAltFlag,
@@ -38,6 +40,7 @@ from loom.target.low_descriptors import (
     Resource,
     ScheduleClass,
     StorageLease,
+    TimingEvent,
 )
 
 
@@ -76,14 +79,22 @@ class CompiledDescriptorSet:
     descriptors: list[Descriptor]
     instruction_classes: list[tuple[InstructionClass, ...]]
     reg_classes: list[RegClass]
+    physical_registers: list[PhysicalRegister]
+    physical_register_candidate_ids: list[int]
+    physical_register_candidate_starts: list[int]
+    physical_register_atomic_units: list[int]
+    physical_register_atomic_unit_starts: list[int]
     register_parts: list[RegisterPart]
     resources: list[Resource]
     schedule_classes: list[ScheduleClass]
+    timing_events: list[TimingEvent]
+    event_separations: list[EventSeparation]
     enum_domains: list[EnumDomain]
     reg_class_ids: dict[str, int]
     register_part_ids: dict[str, int]
     resource_ids: dict[str, int]
     schedule_class_ids: dict[str, int]
+    timing_event_ids: dict[str, int]
     enum_domain_ids: dict[str, int]
     string_pool: CStringPool
     reg_class_alts: list[tuple[int | None, tuple[RegClassAltFlag, ...]]]

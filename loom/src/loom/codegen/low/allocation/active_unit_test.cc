@@ -198,5 +198,98 @@ TEST(LowAllocationActiveUnitTest, TracksUnindexedAssignments) {
   iree_arena_block_pool_deinitialize(&block_pool);
 }
 
+TEST(LowAllocationActiveUnitTest, IndexesExplicitRegisterAtomicUnits) {
+  iree_arena_block_pool_t block_pool;
+  iree_arena_block_pool_initialize(/*block_size=*/4096, iree_allocator_system(),
+                                   &block_pool);
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&block_pool, &arena);
+
+  loom_low_reg_class_t reg_classes[2] = {};
+  for (loom_low_reg_class_t& reg_class : reg_classes) {
+    reg_class.flags = LOOM_LOW_REG_CLASS_FLAG_PHYSICAL |
+                      LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS;
+  }
+  reg_classes[0].allocatable_count = 2;
+  reg_classes[1].allocatable_count = 1;
+  reg_classes[1].physical_register_candidate_start = 2;
+  const loom_low_physical_register_t physical_registers[] = {
+      {
+          /*.name_string_offset=*/0,
+          /*.atomic_unit_start=*/0,
+          /*.atomic_unit_count=*/2,
+          /*.reserved=*/0,
+      },
+      {
+          /*.name_string_offset=*/0,
+          /*.atomic_unit_start=*/2,
+          /*.atomic_unit_count=*/1,
+          /*.reserved=*/0,
+      },
+      {
+          /*.name_string_offset=*/0,
+          /*.atomic_unit_start=*/3,
+          /*.atomic_unit_count=*/2,
+          /*.reserved=*/0,
+      },
+  };
+  const uint16_t candidates[] = {0, 2, 1};
+  const uint16_t atomic_units[] = {0, 1, 0, 2, 3};
+  loom_low_descriptor_set_t descriptor_set =
+      DescriptorSet(reg_classes, IREE_ARRAYSIZE(reg_classes));
+  descriptor_set.physical_registers = physical_registers;
+  descriptor_set.physical_register_count = IREE_ARRAYSIZE(physical_registers);
+  descriptor_set.physical_register_candidate_ids = candidates;
+  descriptor_set.physical_register_candidate_count = IREE_ARRAYSIZE(candidates);
+  descriptor_set.physical_register_atomic_units = atomic_units;
+  descriptor_set.physical_register_atomic_unit_count =
+      IREE_ARRAYSIZE(atomic_units);
+
+  uint32_t unit_end_points[] = {10, 10};
+  loom_low_allocation_unit_liveness_t unit_liveness = {};
+  unit_liveness.end_points = unit_end_points;
+  unit_liveness.point_count = IREE_ARRAYSIZE(unit_end_points);
+  loom_low_allocation_assignment_t assignments[] = {
+      Assignment(/*value_id=*/1, /*descriptor_reg_class_id=*/0,
+                 /*start_point=*/0, /*end_point=*/10, /*location_base=*/0,
+                 /*location_count=*/1, /*unit_point_start=*/0),
+      Assignment(/*value_id=*/2, /*descriptor_reg_class_id=*/1,
+                 /*start_point=*/0, /*end_point=*/10, /*location_base=*/1,
+                 /*location_count=*/1, /*unit_point_start=*/1),
+      Assignment(/*value_id=*/3, /*descriptor_reg_class_id=*/0,
+                 /*start_point=*/0, /*end_point=*/10, /*location_base=*/2,
+                 /*location_count=*/1, /*unit_point_start=*/1),
+  };
+
+  loom_low_allocation_active_unit_index_t index = {};
+  IREE_ASSERT_OK(loom_low_allocation_active_unit_index_initialize(
+      IREE_ARRAYSIZE(assignments), /*unit_capacity=*/32, &arena, &index));
+  loom_low_allocation_active_unit_index_insert_assignment(
+      &index, &descriptor_set, assignments, IREE_ARRAYSIZE(assignments),
+      /*assignment_index=*/0);
+
+  EXPECT_TRUE(loom_low_allocation_active_unit_index_conflicts(
+      &index, &descriptor_set, &kEmptyLiveness, &unit_liveness, assignments,
+      IREE_ARRAYSIZE(assignments), &assignments[1],
+      /*ignored_value_ids=*/nullptr,
+      /*ignored_value_count=*/0));
+  EXPECT_FALSE(loom_low_allocation_active_unit_index_conflicts(
+      &index, &descriptor_set, &kEmptyLiveness, &unit_liveness, assignments,
+      IREE_ARRAYSIZE(assignments), &assignments[2],
+      /*ignored_value_ids=*/nullptr,
+      /*ignored_value_count=*/0));
+  loom_low_allocation_active_unit_index_remove_assignment(
+      &index, assignments, IREE_ARRAYSIZE(assignments),
+      /*assignment_index=*/0);
+  EXPECT_FALSE(loom_low_allocation_active_unit_index_conflicts(
+      &index, &descriptor_set, &kEmptyLiveness, &unit_liveness, assignments,
+      IREE_ARRAYSIZE(assignments), &assignments[1],
+      /*ignored_value_ids=*/nullptr,
+      /*ignored_value_count=*/0));
+
+  iree_arena_deinitialize(&arena);
+  iree_arena_block_pool_deinitialize(&block_pool);
+}
+
 }  // namespace
 }  // namespace loom

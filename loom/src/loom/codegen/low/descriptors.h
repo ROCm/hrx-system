@@ -65,6 +65,9 @@ extern "C" {
 // Sentinel for absent resources.
 #define LOOM_LOW_RESOURCE_NONE UINT16_MAX
 
+// Sentinel for absent timing events.
+#define LOOM_LOW_TIMING_EVENT_NONE UINT16_MAX
+
 typedef uint8_t loom_low_operand_role_t;
 
 enum loom_low_operand_role_e {
@@ -173,6 +176,10 @@ typedef uint32_t loom_low_register_part_mask_t;
 #define LOOM_LOW_REG_CLASS_FLAG_REFERENCE ((uint16_t)1u << 2)
 // Register class cannot be represented in spill storage.
 #define LOOM_LOW_REG_CLASS_FLAG_UNSPILLABLE ((uint16_t)1u << 3)
+// Class locations are descriptor-set physical-register IDs selected from an
+// explicit candidate slice. Each physical register owns an arbitrary set of
+// atomic storage units used for overlap checks.
+#define LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS ((uint16_t)1u << 4)
 
 typedef enum loom_low_spill_slot_space_e {
   // Unknown or uninitialized spill storage space.
@@ -515,6 +522,10 @@ typedef struct loom_low_reg_class_t {
   // Number of contiguous ABI-fixed physical locations at
   // |fixed_location_base|, or zero when none exist.
   uint16_t fixed_location_count;
+  // First descriptor-set physical-register candidate ID. Explicit physical
+  // classes use |allocatable_count| rows beginning here; linear classes leave
+  // this zero.
+  uint32_t physical_register_candidate_start;
   // Dense one-based alias-set identifier shared by overlapping register
   // classes, or zero when this class has a disjoint storage namespace.
   uint16_t alias_set_id;
@@ -525,6 +536,19 @@ typedef struct loom_low_reg_class_t {
   // Storage space used when values from this class are spilled.
   uint8_t spill_slot_space;
 } loom_low_reg_class_t;
+
+// One named physical register and the atomic storage units it occupies.
+// Physical-register IDs are dense descriptor-set-local row ordinals.
+typedef struct loom_low_physical_register_t {
+  // String-table offset for the stable physical-register name.
+  loom_bstring_table_offset_t name_string_offset;
+  // First row in the descriptor set's packed atomic-unit table.
+  uint32_t atomic_unit_start;
+  // Number of sorted unique atomic storage units occupied by this register.
+  uint16_t atomic_unit_count;
+  // Reserved for future physical-register flags.
+  uint16_t reserved;
+} loom_low_physical_register_t;
 
 // Returns true when the non-empty physical range is wholly contained in the
 // register class's non-allocatable ABI-fixed location window.
@@ -570,8 +594,9 @@ typedef struct loom_low_operand_t {
   loom_low_operand_role_t role;
   // Canonical source binding for dynamic contract adapters.
   loom_low_operand_source_binding_t source_binding;
-  // Reserved bytes preserving the compact operand row layout.
-  uint16_t reserved0;
+  // Target-owned physical-register adapter identifier, or zero when native
+  // encoding uses the physical register's direct hardware encoding.
+  uint16_t encoding_adapter_id;
   // Operand flags used by verifier, allocator, and emitter.
   loom_low_operand_flags_t flags;
   // First register-class alternative row for this operand.
@@ -598,9 +623,13 @@ typedef struct loom_low_operand_t {
   uint16_t read_stage;
   // Scheduling stage where the operand result becomes ready.
   uint16_t ready_stage;
+  // Target timing event observed when this operand is read, or NONE.
+  uint16_t read_event_id;
+  // Target timing event observed when this operand is written, or NONE.
+  uint16_t write_event_id;
 } loom_low_operand_t;
 
-static_assert(sizeof(loom_low_operand_t) == 36,
+static_assert(sizeof(loom_low_operand_t) == 40,
               "low descriptor operand rows must remain compact");
 static_assert(offsetof(loom_low_operand_t, source_value_index) == 6,
               "source value index must occupy the existing layout padding");
@@ -627,6 +656,9 @@ typedef struct loom_low_immediate_t {
   loom_low_immediate_flags_t flags;
   // Encoded immediate width in bits.
   uint16_t bit_width;
+  // Positive semantic value granularity. Numeric values must be multiples of
+  // this step in addition to satisfying their kind-specific range.
+  uint64_t value_step;
   // Enum-domain table identifier for ENUM immediates.
   uint16_t enum_domain_id;
   // Reserved for generator-owned immediate encoding variants.
@@ -689,6 +721,10 @@ typedef struct loom_low_effect_t {
   uint16_t counter_id;
   // Access width in bits, or zero when not width-specific.
   uint16_t width_bits;
+  // Target timing event observed by this effect, or NONE.
+  uint16_t timing_event_id;
+  // Reserved for future effect timing refinements.
+  uint16_t reserved;
 } loom_low_effect_t;
 
 // Summary of descriptor memory effect widths.
@@ -775,6 +811,24 @@ typedef struct loom_low_resource_t {
   uint16_t contention_group_id;
 } loom_low_resource_t;
 
+// Named target event used as an endpoint in dependency timing rules.
+typedef struct loom_low_timing_event_t {
+  // String-table offset for the stable timing-event name.
+  loom_bstring_table_offset_t name_string_offset;
+} loom_low_timing_event_t;
+
+// Signed minimum separation between two target timing events.
+typedef struct loom_low_event_separation_t {
+  // Producer timing-event identifier.
+  uint16_t producer_event_id;
+  // Consumer timing-event identifier.
+  uint16_t consumer_event_id;
+  // Minimum consumer issue cycle relative to producer issue.
+  int32_t minimum_issue_separation_cycles;
+  // Quality of this event-pair timing fact.
+  loom_low_model_quality_t model_quality;
+} loom_low_event_separation_t;
+
 typedef struct loom_low_hazard_t {
   // Hazard kind used by schedule policy and verification.
   loom_low_hazard_kind_t kind;
@@ -798,10 +852,9 @@ typedef struct loom_low_schedule_class_t {
   loom_bstring_table_offset_t name_string_offset;
   // Latency in cycles when latency_kind is exact or estimated.
   uint16_t latency_cycles;
-  // Scheduler dependency distance in cycles, or zero to use latency_cycles.
-  // This permits target models to keep hardware dependency latency separate
-  // from a conservative readiness distance used only for instruction order.
-  uint16_t schedule_distance_cycles;
+  // Default signed issue separation for dependencies without an event-pair
+  // timing rule. This is independent of result latency.
+  int32_t minimum_issue_separation_cycles;
   // Latency interpretation for scheduling and diagnostics.
   loom_low_latency_kind_t latency_kind;
   // First issue-use row for this schedule class.
@@ -821,16 +874,6 @@ typedef struct loom_low_schedule_class_t {
   // Number of pressure-delta rows for this schedule class.
   uint16_t pressure_delta_count;
 } loom_low_schedule_class_t;
-
-// Returns the scheduler dependency distance for |schedule_class|.
-// A zero override preserves the historical latency_cycles behavior.
-static inline uint16_t loom_low_schedule_class_schedule_distance_cycles(
-    const loom_low_schedule_class_t* schedule_class) {
-  if (schedule_class == NULL) return 0;
-  return schedule_class->schedule_distance_cycles != 0
-             ? schedule_class->schedule_distance_cycles
-             : schedule_class->latency_cycles;
-}
 
 enum loom_low_descriptor_op_kind_e {
   // Descriptor packets use the general low.op representation.
@@ -1198,6 +1241,18 @@ typedef struct loom_low_descriptor_set_t {
   const loom_low_reg_class_t* reg_classes;
   // Number of register classes owned by this set.
   uint32_t reg_class_count;
+  // Dense named physical registers referenced by explicit register classes.
+  const loom_low_physical_register_t* physical_registers;
+  // Number of physical-register rows owned by this set.
+  uint32_t physical_register_count;
+  // Packed physical-register IDs referenced by register-class slices.
+  const uint16_t* physical_register_candidate_ids;
+  // Number of packed physical-register candidate IDs owned by this set.
+  uint32_t physical_register_candidate_count;
+  // Packed atomic storage-unit IDs referenced by physical-register rows.
+  const uint16_t* physical_register_atomic_units;
+  // Number of packed atomic storage-unit IDs owned by this set.
+  uint32_t physical_register_atomic_unit_count;
   // Dense register parts referenced by descriptor operands.
   const loom_low_register_part_t* register_parts;
   // Number of register parts owned by this set.
@@ -1210,6 +1265,14 @@ typedef struct loom_low_descriptor_set_t {
   const loom_low_schedule_class_t* schedule_classes;
   // Number of schedule classes owned by this set.
   uint32_t schedule_class_count;
+  // Dense named timing events referenced by operands and effects.
+  const loom_low_timing_event_t* timing_events;
+  // Number of timing-event rows owned by this set.
+  uint32_t timing_event_count;
+  // Sorted event-pair minimum issue separations.
+  const loom_low_event_separation_t* event_separations;
+  // Number of event-separation rows owned by this set.
+  uint32_t event_separation_count;
   // Dense issue-use rows referenced by schedule classes.
   const loom_low_issue_use_t* issue_uses;
   // Number of issue-use rows owned by this set.
@@ -1257,20 +1320,71 @@ loom_low_descriptor_set_descriptor_view(
                                                     descriptor_ordinal);
 }
 
-// Returns the target-storage identity key for |reg_class_id|. Register classes
-// in the same non-zero alias set intentionally return the same key; all other
-// classes use a disjoint class-local key.
+// Returns the target-storage identity key for |reg_class_id|. Explicit
+// physical-register classes share key zero and their global atomic-unit IDs
+// disambiguate storage. Linear classes in the same non-zero alias set share a
+// key; all other linear classes use a disjoint class-local key.
 static inline uint32_t loom_low_reg_class_storage_key(
     const loom_low_descriptor_set_t* descriptor_set, uint16_t reg_class_id) {
   if (descriptor_set && reg_class_id < descriptor_set->reg_class_count) {
     const loom_low_reg_class_t* reg_class =
         &descriptor_set->reg_classes[reg_class_id];
+    if (iree_any_bit_set(reg_class->flags,
+                         LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS)) {
+      return 0;
+    }
     if (reg_class->alias_set_id != 0) {
       return reg_class->alias_set_id;
     }
   }
   return UINT32_C(0x10000) + reg_class_id;
 }
+
+// Returns true when |reg_class| allocates whole registers from an explicit
+// descriptor-set candidate list instead of a contiguous numeric range.
+static inline bool loom_low_reg_class_uses_explicit_physical_registers(
+    const loom_low_reg_class_t* reg_class) {
+  return reg_class &&
+         iree_any_bit_set(reg_class->flags,
+                          LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS);
+}
+
+// Returns a physical-register row, or NULL when |physical_register_id| is out
+// of range.
+const loom_low_physical_register_t*
+loom_low_descriptor_set_physical_register_at(
+    const loom_low_descriptor_set_t* descriptor_set,
+    uint32_t physical_register_id);
+
+// Returns the physical-register ID at |candidate_ordinal| in |reg_class_id|.
+// Descriptor sets produced by the generator guarantee that both indices are
+// valid.
+uint16_t loom_low_descriptor_set_physical_register_candidate(
+    const loom_low_descriptor_set_t* descriptor_set, uint16_t reg_class_id,
+    uint16_t candidate_ordinal);
+
+// Finds |physical_register_id| in an explicit register class. The returned
+// ordinal is the allocator preference and pressure order for the class.
+bool loom_low_descriptor_set_find_physical_register_candidate(
+    const loom_low_descriptor_set_t* descriptor_set, uint16_t reg_class_id,
+    uint32_t physical_register_id, uint16_t* out_candidate_ordinal);
+
+// Returns the sorted atomic-unit slice occupied by |physical_register_id|.
+// The returned pointer is borrowed from |descriptor_set|.
+const uint16_t* loom_low_descriptor_set_physical_register_atomic_units(
+    const loom_low_descriptor_set_t* descriptor_set,
+    uint32_t physical_register_id, uint16_t* out_atomic_unit_count);
+
+// Returns the stable name of |timing_event_id|, or an empty view for NONE.
+iree_string_view_t loom_low_descriptor_set_timing_event_name(
+    const loom_low_descriptor_set_t* descriptor_set, uint16_t timing_event_id);
+
+// Finds the signed separation rule for an event pair, or NULL when the target
+// model uses its schedule-class default for the dependency.
+const loom_low_event_separation_t*
+loom_low_descriptor_set_lookup_event_separation(
+    const loom_low_descriptor_set_t* descriptor_set, uint16_t producer_event_id,
+    uint16_t consumer_event_id);
 
 // Returns a borrowed descriptor set linked into a target package. Providers
 // must be stable and return the same non-NULL descriptor set for each call.

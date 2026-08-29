@@ -73,7 +73,17 @@ static iree_status_t loom_low_schedule_initialize_value_records(
     *value = (loom_low_schedule_value_record_t){
         .value_id = value_id,
         .producer_node = LOOM_LOW_SCHEDULE_NODE_NONE,
-        .state_next_write_node = LOOM_LOW_SCHEDULE_NODE_NONE,
+        .state_next_write =
+            {
+                .node_index = LOOM_LOW_SCHEDULE_NODE_NONE,
+                .endpoint =
+                    {
+                        .attachment_index = LOOM_LOW_ID_NONE,
+                        .timing_event_id = LOOM_LOW_TIMING_EVENT_NONE,
+                        .attachment_kind =
+                            LOOM_LOW_SCHEDULE_DEPENDENCY_ATTACHMENT_NONE,
+                    },
+            },
         .register_class_id = LOOM_LOW_REG_CLASS_NONE,
     };
     const loom_type_t type = loom_module_value_type(state->module, value_id);
@@ -108,6 +118,9 @@ static iree_status_t loom_low_schedule_initialize_storage(
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         state->arena, node_count, sizeof(*state->scheduled_node_indices),
         (void**)&state->scheduled_node_indices));
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        state->arena, node_count, sizeof(*state->issue_groups),
+        (void**)&state->issue_groups));
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         state->arena, node_count, sizeof(*state->scheduled_ops),
         (void**)&state->scheduled_ops));
@@ -149,12 +162,12 @@ static iree_status_t loom_low_schedule_initialize_storage(
           state->arena, node_count, sizeof(*state->candidate_decisions),
           (void**)&state->candidate_decisions));
     }
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        state->arena, node_count, sizeof(*state->node_ready_issue_cycles),
+        (void**)&state->node_ready_issue_cycles));
+    memset(state->node_ready_issue_cycles, 0,
+           node_count * sizeof(*state->node_ready_issue_cycles));
     if (state->options->strategy == LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL) {
-      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-          state->arena, node_count, sizeof(*state->node_ready_issue_cycles),
-          (void**)&state->node_ready_issue_cycles));
-      memset(state->node_ready_issue_cycles, 0,
-             node_count * sizeof(*state->node_ready_issue_cycles));
       IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
           state->arena, node_count, sizeof(*state->node_completion_wait_cycles),
           (void**)&state->node_completion_wait_cycles));
@@ -487,7 +500,6 @@ static iree_status_t loom_low_schedule_initialize_descriptor_tables(
     loom_low_schedule_build_state_t* state, iree_host_size_t node_count) {
   iree_host_size_t effect_use_capacity = 0;
   iree_host_size_t hazard_use_capacity = 0;
-  bool has_state_reg_class = false;
   bool has_resource_uses = false;
   iree_host_size_t max_descriptor_operand_count = 0;
   const loom_low_descriptor_set_t* descriptor_set =
@@ -501,15 +513,14 @@ static iree_status_t loom_low_schedule_initialize_descriptor_tables(
     memset(state->reg_class_state_flags, 0,
            reg_class_count * sizeof(*state->reg_class_state_flags));
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        state->arena, reg_class_count, sizeof(*state->state_last_write_nodes),
-        (void**)&state->state_last_write_nodes));
+        state->arena, reg_class_count, sizeof(*state->state_last_writes),
+        (void**)&state->state_last_writes));
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        state->arena, reg_class_count, sizeof(*state->state_first_write_nodes),
-        (void**)&state->state_first_write_nodes));
+        state->arena, reg_class_count, sizeof(*state->state_first_writes),
+        (void**)&state->state_first_writes));
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        state->arena, reg_class_count,
-        sizeof(*state->state_ordering_frontier_nodes),
-        (void**)&state->state_ordering_frontier_nodes));
+        state->arena, reg_class_count, sizeof(*state->state_ordering_frontiers),
+        (void**)&state->state_ordering_frontiers));
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         state->arena, reg_class_count, sizeof(*state->state_read_heads),
         (void**)&state->state_read_heads));
@@ -544,15 +555,6 @@ static iree_status_t loom_low_schedule_initialize_descriptor_tables(
                               "out of range");
     }
     state->reg_class_state_flags[alt->reg_class_id] |= access_flags;
-    has_state_reg_class = true;
-  }
-  if (has_state_reg_class && node_count != 0) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        state->arena, node_count,
-        sizeof(*state->state_last_dependency_consumer_nodes),
-        (void**)&state->state_last_dependency_consumer_nodes));
-    memset(state->state_last_dependency_consumer_nodes, 0xFF,
-           node_count * sizeof(*state->state_last_dependency_consumer_nodes));
   }
   IREE_RETURN_IF_ERROR(loom_low_schedule_verify_structural_state_reads(state));
   for (iree_host_size_t node_index = 0; node_index < node_count; ++node_index) {
@@ -618,14 +620,9 @@ static iree_status_t loom_low_schedule_initialize_descriptor_tables(
       };
     }
   }
-  if (resource_count != 0 &&
-      state->options->strategy == LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL) {
-    IREE_RETURN_IF_ERROR(
-        iree_arena_allocate_array(state->arena, resource_count,
-                                  sizeof(*state->resource_ready_issue_cycles),
-                                  (void**)&state->resource_ready_issue_cycles));
-    memset(state->resource_ready_issue_cycles, 0,
-           resource_count * sizeof(*state->resource_ready_issue_cycles));
+  if (state->options->strategy == LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL) {
+    IREE_RETURN_IF_ERROR(loom_low_schedule_resource_calendar_initialize(
+        descriptor_set, state->arena, &state->resource_calendar));
   }
   if (effect_use_capacity != 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -642,20 +639,13 @@ static iree_status_t loom_low_schedule_initialize_descriptor_tables(
   }
   if (effect_read_capacity != 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        state->arena, effect_read_capacity, sizeof(*state->effect_read_nodes),
-        (void**)&state->effect_read_nodes));
-    IREE_RETURN_IF_ERROR(
-        iree_arena_allocate_array(state->arena, effect_read_capacity,
-                                  sizeof(*state->effect_read_summaries),
-                                  (void**)&state->effect_read_summaries));
+        state->arena, effect_read_capacity, sizeof(*state->effect_read_entries),
+        (void**)&state->effect_read_entries));
     state->effect_read_capacity = effect_read_capacity;
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        state->arena, effect_read_capacity, sizeof(*state->effect_write_nodes),
-        (void**)&state->effect_write_nodes));
     IREE_RETURN_IF_ERROR(
         iree_arena_allocate_array(state->arena, effect_read_capacity,
-                                  sizeof(*state->effect_write_summaries),
-                                  (void**)&state->effect_write_summaries));
+                                  sizeof(*state->effect_write_entries),
+                                  (void**)&state->effect_write_entries));
     state->effect_write_capacity = effect_read_capacity;
   }
   if (hazard_use_capacity != 0) {
@@ -823,9 +813,10 @@ static loom_value_id_t loom_low_schedule_state_value_for_dependency(
       &state->nodes[dependency->producer_node];
   const loom_value_ordinal_t* operand_ordinals =
       loom_low_schedule_node_const_operand_ordinals(reader);
-  if (dependency->operand_index != UINT32_MAX) {
-    IREE_ASSERT_LT(dependency->operand_index, reader->operand_count);
-    return state->values[operand_ordinals[dependency->operand_index]].value_id;
+  if (dependency->value_operand_index != LOOM_LOW_ID_NONE) {
+    IREE_ASSERT_LT(dependency->value_operand_index, reader->operand_count);
+    return state->values[operand_ordinals[dependency->value_operand_index]]
+        .value_id;
   }
   loom_value_id_t state_value_id = LOOM_VALUE_ID_INVALID;
   for (uint16_t i = 0; i < reader->operand_count; ++i) {
@@ -833,7 +824,7 @@ static loom_value_id_t loom_low_schedule_state_value_for_dependency(
         &state->values[operand_ordinals[i]];
     if (value->register_class_id == LOOM_LOW_REG_CLASS_NONE ||
         state->reg_class_state_flags[value->register_class_id] == 0 ||
-        value->state_next_write_node != dependency->consumer_node) {
+        value->state_next_write.node_index != dependency->consumer_node) {
       continue;
     }
     if (state_value_id != LOOM_VALUE_ID_INVALID &&
@@ -887,7 +878,9 @@ static void loom_low_schedule_record_dependency_cycle_failure(
       .producer_node = producer_node,
       .consumer_node = consumer_node,
       .dependency_kind = dependency->kind,
-      .operand_index = dependency->operand_index,
+      .operand_index = dependency->value_operand_index == LOOM_LOW_ID_NONE
+                           ? UINT32_MAX
+                           : dependency->value_operand_index,
       .state_value_id =
           loom_low_schedule_state_value_for_dependency(state, dependency),
       .cycle_node_count = 0,
@@ -961,7 +954,7 @@ static bool loom_low_schedule_record_source_range_cycle(
     }
     selected_dependency = dependency;
     if (dependency->kind == LOOM_LOW_SCHEDULE_DEPENDENCY_STATE &&
-        dependency->operand_index != UINT32_MAX) {
+        dependency->value_operand_index != LOOM_LOW_ID_NONE) {
       break;
     }
   }
@@ -1086,6 +1079,47 @@ static iree_status_t loom_low_schedule_handle_dependency_cycle(
   return iree_ok_status();
 }
 
+static uint32_t loom_low_schedule_add_signed_issue_separation(
+    uint32_t producer_issue_cycle, int32_t minimum_separation_cycles) {
+  if (minimum_separation_cycles >= 0) {
+    return iree_math_saturating_add_u32(producer_issue_cycle,
+                                        (uint32_t)minimum_separation_cycles);
+  }
+  const uint32_t magnitude = minimum_separation_cycles == INT32_MIN
+                                 ? (uint32_t)INT32_MAX + 1u
+                                 : (uint32_t)-minimum_separation_cycles;
+  return producer_issue_cycle > magnitude ? producer_issue_cycle - magnitude
+                                          : 0;
+}
+
+static void loom_low_schedule_note_issue_group(
+    loom_low_schedule_build_state_t* state, uint32_t node_index) {
+  loom_low_schedule_node_t* node = &state->nodes[node_index];
+  if (state->issue_group_count != 0) {
+    loom_low_schedule_issue_group_t* group =
+        &state->issue_groups[state->issue_group_count - 1];
+    if (group->block_index == node->block_index) {
+      IREE_ASSERT_LE(group->issue_cycle, node->issue_cycle);
+    }
+    if (group->block_index == node->block_index &&
+        group->issue_cycle == node->issue_cycle) {
+      IREE_ASSERT_NE(group->scheduled_node_count, UINT32_MAX);
+      ++group->scheduled_node_count;
+      node->issue_group_ordinal = (uint32_t)state->issue_group_count - 1;
+      return;
+    }
+  }
+  IREE_ASSERT_LT(state->issue_group_count, UINT32_MAX);
+  node->issue_group_ordinal = (uint32_t)state->issue_group_count;
+  state->issue_groups[state->issue_group_count++] =
+      (loom_low_schedule_issue_group_t){
+          .block_index = node->block_index,
+          .issue_cycle = node->issue_cycle,
+          .scheduled_node_start = (uint32_t)state->scheduled_node_count,
+          .scheduled_node_count = 1,
+      };
+}
+
 static iree_status_t loom_low_schedule_run_list_scheduler(
     loom_low_schedule_build_state_t* state, iree_host_size_t node_count) {
   uint32_t* indegrees = NULL;
@@ -1156,6 +1190,8 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
         block_record->node_start + block_record->node_count;
     block_record->scheduled_node_start = (uint32_t)state->scheduled_node_count;
     block_record->scheduled_node_count = 0;
+    block_record->issue_group_start = (uint32_t)state->issue_group_count;
+    block_record->issue_group_count = 0;
     state->liveness_block_orders[block_index] = (loom_liveness_block_order_t){
         .block = block_record->block,
         .ops = block_record->node_count != 0
@@ -1166,11 +1202,7 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
     state->current_block_index = block_index;
     state->current_issue_cycle = 0;
     state->pending_pair_affinity_node = LOOM_LOW_SCHEDULE_NODE_NONE;
-    if (state->resource_ready_issue_cycles != NULL) {
-      memset(state->resource_ready_issue_cycles, 0,
-             state->target.descriptor_set->resource_count *
-                 sizeof(*state->resource_ready_issue_cycles));
-    }
+    loom_low_schedule_resource_calendar_reset(&state->resource_calendar);
     if (loom_low_schedule_strategy_uses_pressure(state->options->strategy)) {
       loom_low_schedule_pressure_initialize_block(state, block_record,
                                                   &pressure_state);
@@ -1191,7 +1223,6 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
         range_end);
     uint32_t scheduled_in_range = 0;
     while (scheduled_in_block < block_record->node_count) {
-      state->current_issue_cycle = scheduled_in_block;
       const uint32_t ready_candidate_count =
           loom_low_schedule_ready_frontier_count(&ready_policy.frontier);
       if (ready_candidate_count == 0) {
@@ -1206,12 +1237,27 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
       const uint32_t chosen_node = selection.chosen_node;
       loom_low_schedule_ready_policy_remove(state, &ready_policy, chosen_node);
 
-      state->nodes[chosen_node].scheduled_ordinal = scheduled_in_block++;
+      loom_low_schedule_node_t* chosen = &state->nodes[chosen_node];
+      const bool is_storage_setup = iree_any_bit_set(
+          chosen->flags, LOOM_LOW_SCHEDULE_NODE_FLAG_STORAGE_SETUP);
+      uint32_t issue_cycle = state->current_issue_cycle;
+      if (state->options->strategy ==
+          LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL) {
+        issue_cycle = iree_math_saturating_add_u32(
+            issue_cycle, selection.chosen_score.effective_stall_cycles);
+      } else if (!is_storage_setup) {
+        issue_cycle =
+            iree_max(issue_cycle, state->node_ready_issue_cycles[chosen_node]);
+      }
+      state->current_issue_cycle = issue_cycle;
+      chosen->scheduled_ordinal = scheduled_in_block++;
+      chosen->issue_cycle = issue_cycle;
+      loom_low_schedule_note_issue_group(state, chosen_node);
+      block_record->issue_group_count =
+          (uint32_t)state->issue_group_count - block_record->issue_group_start;
       ++scheduled_in_range;
-      state->current_issue_cycle = state->nodes[chosen_node].scheduled_ordinal;
       state->scheduled_node_indices[state->scheduled_node_count] = chosen_node;
-      state->scheduled_ops[state->scheduled_node_count] =
-          state->nodes[chosen_node].op;
+      state->scheduled_ops[state->scheduled_node_count] = chosen->op;
       ++state->scheduled_node_count;
       ++block_record->scheduled_node_count;
       loom_low_schedule_ready_policy_note_node_scheduled(state, chosen_node);
@@ -1227,24 +1273,19 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
       IREE_RETURN_IF_ERROR(
           loom_low_schedule_note_descriptor_rows_for_node(state, chosen_node));
 
-      uint32_t node_issue_cycle = state->current_issue_cycle;
-      uint32_t result_ready_issue_cycle = state->current_issue_cycle;
-      uint32_t completion_ready_issue_cycle = state->current_issue_cycle;
+      const uint32_t producer_available_issue_cycle =
+          iree_max(issue_cycle, state->node_ready_issue_cycles[chosen_node]);
+      uint32_t completion_ready_issue_cycle = producer_available_issue_cycle;
       bool has_wait_counter_hazard = false;
       uint16_t completion_wait_cycles = 0;
-      if (state->node_ready_issue_cycles != NULL) {
-        node_issue_cycle = iree_max(
-            node_issue_cycle, state->node_ready_issue_cycles[chosen_node]);
+      if (state->node_completion_wait_cycles != NULL) {
         const loom_low_schedule_class_t* schedule_class =
             state->nodes[chosen_node].schedule_class;
         has_wait_counter_hazard = loom_low_schedule_class_query_completion_wait(
             state->target.descriptor_set, schedule_class,
             &completion_wait_cycles);
-        result_ready_issue_cycle = iree_math_saturating_add_u32(
-            node_issue_cycle,
-            loom_low_schedule_class_schedule_distance_cycles(schedule_class));
         completion_ready_issue_cycle = iree_math_saturating_add_u32(
-            node_issue_cycle,
+            producer_available_issue_cycle,
             schedule_class != NULL ? schedule_class->latency_cycles : 0);
       }
       const uint32_t group_begin =
@@ -1270,29 +1311,28 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
                 state, &pressure_state, remaining_producer, consumer_node);
           }
         }
-        if (state->node_ready_issue_cycles != NULL) {
-          uint32_t dependency_ready_issue_cycle = 0;
-          if (loom_low_schedule_dependency_index_group_has_ssa(
-                  &state->dependency_index, group_index)) {
-            dependency_ready_issue_cycle = result_ready_issue_cycle;
-          }
+        uint32_t consumer_ready_issue_cycle =
+            loom_low_schedule_add_signed_issue_separation(
+                producer_available_issue_cycle,
+                group->minimum_issue_separation_cycles);
+        if (state->node_completion_wait_cycles != NULL) {
           // Memory effects only require completion latency when the target
           // identifies the producer as counter-tracked. Other effect edges
           // order issue but do not imply a completion wait.
           if (has_wait_counter_hazard &&
               loom_low_schedule_dependency_index_group_has_effect(
                   &state->dependency_index, group_index)) {
-            dependency_ready_issue_cycle = iree_max(
-                dependency_ready_issue_cycle, completion_ready_issue_cycle);
+            consumer_ready_issue_cycle = iree_max(
+                consumer_ready_issue_cycle, completion_ready_issue_cycle);
             state->node_completion_wait_cycles[consumer_node] =
                 iree_max(state->node_completion_wait_cycles[consumer_node],
                          completion_wait_cycles);
           }
-          if (dependency_ready_issue_cycle >
-              state->node_ready_issue_cycles[consumer_node]) {
-            state->node_ready_issue_cycles[consumer_node] =
-                dependency_ready_issue_cycle;
-          }
+        }
+        if (consumer_ready_issue_cycle >
+            state->node_ready_issue_cycles[consumer_node]) {
+          state->node_ready_issue_cycles[consumer_node] =
+              consumer_ready_issue_cycle;
         }
         if (indegrees[consumer_node] == 0 && consumer_node >= range_start &&
             consumer_node < range_end) {
@@ -1300,9 +1340,26 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
                                               &ready_policy, consumer_node);
         }
       }
+      if (scheduled_in_block < block_record->node_count &&
+          state->options->strategy !=
+              LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL) {
+        if (state->current_issue_cycle == UINT32_MAX) {
+          return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                  "low schedule issue cycle overflows");
+        }
+        ++state->current_issue_cycle;
+      }
       if (scheduled_in_range == range_end - range_start) {
         range_start = range_end;
         if (range_start < block_node_end) {
+          if (state->options->strategy ==
+              LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL) {
+            if (state->current_issue_cycle == UINT32_MAX) {
+              return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                      "low schedule issue cycle overflows");
+            }
+            ++state->current_issue_cycle;
+          }
           range_end = loom_low_schedule_source_range_end(state, range_start,
                                                          block_node_end);
           scheduled_in_range = 0;
@@ -1522,6 +1579,8 @@ iree_status_t loom_low_schedule_function(
             state.unlock_summary_publication_count,
         .scheduled_node_indices = state.scheduled_node_indices,
         .scheduled_node_count = state.scheduled_node_count,
+        .issue_groups = state.issue_groups,
+        .issue_group_count = state.issue_group_count,
         .placement_pair_uses =
             {
                 .values = state.placement_pair_uses,

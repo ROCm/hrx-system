@@ -388,7 +388,7 @@ def test_rdna4m_matrix_schedule_matches_llvm_gfx11_model() -> None:
         schedule_class = schedule_classes[schedule_class_name]
         assert schedule_class.latency_kind is LatencyKind.ESTIMATE
         assert schedule_class.latency_cycles == 5
-        assert schedule_class.schedule_distance_cycles == 0
+        assert schedule_class.minimum_issue_separation_cycles == 5
         assert schedule_class.issue_uses == (
             IssueUse(_RESOURCE_VALU, cycles=1, units=1),
             IssueUse(matrix_resource_name, cycles=1, units=1),

@@ -572,11 +572,6 @@ static bool loom_low_allocation_interval_assignment_tied_location_matches(
     uint16_t counterpart_reg_class_id,
     loom_low_allocation_location_kind_t counterpart_location_kind,
     uint32_t counterpart_location_base, uint32_t counterpart_location_count) {
-  if (fixed_location_kind != counterpart_location_kind ||
-      !loom_low_allocation_storage_reg_classes_share(
-          descriptor_set, fixed_reg_class_id, counterpart_reg_class_id)) {
-    return false;
-  }
   if (relation->unit_count != fixed_location_count ||
       relation->unit_count != counterpart_location_count) {
     return false;
@@ -592,13 +587,24 @@ static bool loom_low_allocation_interval_assignment_tied_location_matches(
       relation->unit_count > fixed_location_count - fixed_unit_offset ||
       counterpart_unit_offset > counterpart_location_count ||
       relation->unit_count >
-          counterpart_location_count - counterpart_unit_offset ||
-      fixed_location_base > UINT32_MAX - fixed_unit_offset ||
-      counterpart_location_base > UINT32_MAX - counterpart_unit_offset) {
+          counterpart_location_count - counterpart_unit_offset) {
     return false;
   }
-  return fixed_location_base + fixed_unit_offset ==
-         counterpart_location_base + counterpart_unit_offset;
+  const loom_low_allocation_assignment_t fixed_assignment = {
+      .descriptor_reg_class_id = fixed_reg_class_id,
+      .location_kind = fixed_location_kind,
+      .location_base = fixed_location_base,
+      .location_count = fixed_location_count,
+  };
+  const loom_low_allocation_assignment_t counterpart_assignment = {
+      .descriptor_reg_class_id = counterpart_reg_class_id,
+      .location_kind = counterpart_location_kind,
+      .location_base = counterpart_location_base,
+      .location_count = counterpart_location_count,
+  };
+  return loom_low_allocation_storage_assignment_subranges_equal(
+      descriptor_set, &fixed_assignment, fixed_unit_offset,
+      &counterpart_assignment, counterpart_unit_offset, relation->unit_count);
 }
 
 static bool loom_low_allocation_interval_assignment_tied_fixed_location_matches(
@@ -822,8 +828,21 @@ loom_low_allocation_interval_assignment_initialize_result_storage(
                                   (void**)&state->result.assignments));
     memset(state->result.assignments, 0,
            order->interval_count * sizeof(*state->result.assignments));
+    uint32_t maximum_atomic_units_per_register = 1;
+    const loom_low_descriptor_set_t* descriptor_set =
+        state->context->target->descriptor_set;
+    for (uint32_t i = 0; i < descriptor_set->physical_register_count; ++i) {
+      maximum_atomic_units_per_register = iree_max(
+          maximum_atomic_units_per_register,
+          (uint32_t)descriptor_set->physical_registers[i].atomic_unit_count);
+    }
+    const iree_host_size_t active_unit_capacity =
+        order->unit_count >
+                IREE_HOST_SIZE_MAX / maximum_atomic_units_per_register
+            ? IREE_HOST_SIZE_MAX
+            : order->unit_count * maximum_atomic_units_per_register;
     IREE_RETURN_IF_ERROR(loom_low_allocation_active_set_initialize(
-        state->context->liveness, order->interval_count, order->unit_count,
+        state->context->liveness, order->interval_count, active_unit_capacity,
         state->context->arena, &state->active));
     IREE_RETURN_IF_ERROR(
         iree_arena_allocate_array(state->context->arena, order->interval_count,

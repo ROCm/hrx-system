@@ -24,6 +24,7 @@ from loom.target.low_descriptors import (
     Effect,
     EffectFlag,
     EffectKind,
+    EventSeparation,
     Hazard,
     HazardKind,
     Immediate,
@@ -49,6 +50,7 @@ from loom.target.low_descriptors import (
     ScheduleClass,
     ScheduleClassFlag,
     SpillSlotSpace,
+    TimingEvent,
 )
 
 _REG_I32 = "test.i32"
@@ -74,6 +76,8 @@ _RESOURCE_LOAD = "test.load"
 _RESOURCE_STORE = "test.store"
 _RESOURCE_CALL = "test.call"
 _RESOURCE_CONTROL = "test.control"
+_RESOURCE_SHARED_A = "test.shared_a"
+_RESOURCE_SHARED_B = "test.shared_b"
 
 _SCHEDULE_CONST = "test.const"
 _SCHEDULE_SCALAR_ALU = "test.scalar.alu"
@@ -83,6 +87,18 @@ _SCHEDULE_COUNTER_LOAD = "test.counter_load"
 _SCHEDULE_STORE = "test.store"
 _SCHEDULE_CALL = "test.call"
 _SCHEDULE_CONTROL = "test.control"
+_SCHEDULE_EVENT_FAST = "test.event.fast"
+_SCHEDULE_EVENT_SLOW = "test.event.slow"
+_SCHEDULE_EVENT_CONSUMER = "test.event.consumer"
+
+_EVENT_FAST_WRITE = "test.write.fast"
+_EVENT_SLOW_WRITE = "test.write.slow"
+_EVENT_EARLY_READ = "test.read.early"
+_EVENT_LATE_READ = "test.read.late"
+_EVENT_MEMORY_READ = "test.memory.read"
+_EVENT_MEMORY_WRITE = "test.memory.write"
+_EVENT_STATE_READ = "test.state.read"
+_EVENT_STATE_WRITE = "test.state.write"
 
 _I32_ALT = (RegClassAlt(_REG_I32),)
 _I8_ALT = (RegClassAlt(_REG_I8),)
@@ -198,11 +214,21 @@ def _phys_operand(field_name: str) -> Operand:
 
 
 def _schedule_state_result(field_name: str = "dst") -> Operand:
-    return Operand(field_name, OperandRole.RESULT, _SCHEDULE_STATE_ALT)
+    return Operand(
+        field_name,
+        OperandRole.RESULT,
+        _SCHEDULE_STATE_ALT,
+        write_event=_EVENT_STATE_WRITE,
+    )
 
 
 def _schedule_state_operand(field_name: str) -> Operand:
-    return Operand(field_name, OperandRole.OPERAND, _SCHEDULE_STATE_ALT)
+    return Operand(
+        field_name,
+        OperandRole.OPERAND,
+        _SCHEDULE_STATE_ALT,
+        read_event=_EVENT_STATE_READ,
+    )
 
 
 def _pressure_alias32_result(
@@ -231,6 +257,7 @@ def _schedule_state_operand_read(field_name: str) -> Operand:
         OperandRole.OPERAND,
         _SCHEDULE_STATE_ALT,
         flags=(OperandFlag.STATE_READ,),
+        read_event=_EVENT_STATE_READ,
     )
 
 
@@ -240,6 +267,7 @@ def _schedule_state_read(field_name: str = "state_in") -> Operand:
         OperandRole.IMPLICIT,
         _SCHEDULE_STATE_ALT,
         flags=(OperandFlag.IMPLICIT, OperandFlag.STATE_READ),
+        read_event=_EVENT_STATE_READ,
     )
 
 
@@ -249,6 +277,7 @@ def _schedule_state_write(field_name: str = "state_out") -> Operand:
         OperandRole.IMPLICIT,
         _SCHEDULE_STATE_ALT,
         flags=(OperandFlag.IMPLICIT, OperandFlag.STATE_WRITE),
+        write_event=_EVENT_STATE_WRITE,
     )
 
 
@@ -348,6 +377,7 @@ _LOAD_EFFECT = Effect(
     memory_space=MemorySpace.GENERIC,
     flags=(EffectFlag.DEPENDENCY,),
     width_bits=128,
+    timing_event=_EVENT_MEMORY_READ,
 )
 
 _COUNTER_LOAD_EFFECT = Effect(
@@ -363,6 +393,7 @@ _STORE_EFFECT = Effect(
     memory_space=MemorySpace.GENERIC,
     flags=(EffectFlag.DEPENDENCY,),
     width_bits=128,
+    timing_event=_EVENT_MEMORY_WRITE,
 )
 
 _CALL_EFFECT = Effect(
@@ -446,6 +477,114 @@ TEST_LOW_MUL_I32_DESCRIPTOR = Descriptor(
     asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
     schedule_class=_SCHEDULE_SCALAR_ALU,
     flags=(DescriptorFlag.DEAD_REMOVABLE,),
+)
+
+TEST_LOW_EVENT_FAST_I32_DESCRIPTOR = Descriptor(
+    key="test.event.fast.i32",
+    mnemonic="test.event.fast.i32",
+    semantic_tag="integer.add.i32",
+    operands=(
+        Operand(
+            "dst",
+            OperandRole.RESULT,
+            _I32_ALT,
+            write_event=_EVENT_FAST_WRITE,
+        ),
+        _i32_operand("lhs"),
+        _i32_operand("rhs"),
+    ),
+    asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
+    schedule_class=_SCHEDULE_EVENT_FAST,
+    flags=(DescriptorFlag.DEAD_REMOVABLE,),
+)
+
+TEST_LOW_EVENT_SLOW_I32_DESCRIPTOR = Descriptor(
+    key="test.event.slow.i32",
+    mnemonic="test.event.slow.i32",
+    semantic_tag="integer.add.i32",
+    operands=(
+        Operand(
+            "dst",
+            OperandRole.RESULT,
+            _I32_ALT,
+            write_event=_EVENT_SLOW_WRITE,
+        ),
+        _i32_operand("lhs"),
+        _i32_operand("rhs"),
+    ),
+    asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
+    schedule_class=_SCHEDULE_EVENT_SLOW,
+    flags=(DescriptorFlag.DEAD_REMOVABLE,),
+)
+
+TEST_LOW_EVENT_EARLY_CONSUMER_I32_DESCRIPTOR = Descriptor(
+    key="test.event.consume.early.i32",
+    mnemonic="test.event.consume.early.i32",
+    semantic_tag="integer.add.i32",
+    operands=(
+        Operand(
+            "dst",
+            OperandRole.RESULT,
+            _I32_ALT,
+            write_event=_EVENT_FAST_WRITE,
+        ),
+        Operand(
+            "lhs",
+            OperandRole.OPERAND,
+            _I32_ALT,
+            read_event=_EVENT_EARLY_READ,
+        ),
+        _i32_operand("rhs"),
+    ),
+    asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
+    schedule_class=_SCHEDULE_EVENT_CONSUMER,
+    flags=(DescriptorFlag.DEAD_REMOVABLE,),
+)
+
+TEST_LOW_EVENT_LATE_CONSUMER_I32_DESCRIPTOR = Descriptor(
+    key="test.event.consume.late.i32",
+    mnemonic="test.event.consume.late.i32",
+    semantic_tag="integer.add.i32",
+    operands=(
+        Operand(
+            "dst",
+            OperandRole.RESULT,
+            _I32_ALT,
+            write_event=_EVENT_FAST_WRITE,
+        ),
+        Operand(
+            "lhs",
+            OperandRole.OPERAND,
+            _I32_ALT,
+            read_event=_EVENT_LATE_READ,
+        ),
+        _i32_operand("rhs"),
+    ),
+    asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
+    schedule_class=_SCHEDULE_EVENT_CONSUMER,
+    flags=(DescriptorFlag.DEAD_REMOVABLE,),
+)
+
+TEST_LOW_EVENT_MEMORY_READ_I32_DESCRIPTOR = Descriptor(
+    key="test.event.memory.read.i32",
+    mnemonic="test.event.memory.read.i32",
+    semantic_tag="test.event.memory.read.i32",
+    operands=(_i32_operand("value"),),
+    asm_forms=_asm(operands=("value",)),
+    effects=(_LOAD_EFFECT,),
+    schedule_class=_SCHEDULE_EVENT_FAST,
+    flags=(DescriptorFlag.SIDE_EFFECTING,),
+)
+
+TEST_LOW_EVENT_MEMORY_WRITE_I32_DESCRIPTOR = Descriptor(
+    key="test.event.memory.write.i32",
+    mnemonic="test.event.memory.write.i32",
+    semantic_tag="test.event.memory.write.i32",
+    operands=(_i32_operand("value"),),
+    asm_forms=_asm(operands=("value",)),
+    effects=(_STORE_EFFECT,),
+    schedule_class=_SCHEDULE_EVENT_CONSUMER,
+    flags=(DescriptorFlag.SIDE_EFFECTING,),
 )
 
 TEST_LOW_TIED_ANY_DESCRIPTOR = Descriptor(
@@ -1294,6 +1433,78 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         RegisterPart(_REG_PART_I32_LOW16, _REG_I32, 0x1),
         RegisterPart(_REG_PART_I32_HIGH16, _REG_I32, 0x2),
     ),
+    timing_events=(
+        TimingEvent(_EVENT_FAST_WRITE),
+        TimingEvent(_EVENT_SLOW_WRITE),
+        TimingEvent(_EVENT_EARLY_READ),
+        TimingEvent(_EVENT_LATE_READ),
+        TimingEvent(_EVENT_MEMORY_READ),
+        TimingEvent(_EVENT_MEMORY_WRITE),
+        TimingEvent(_EVENT_STATE_READ),
+        TimingEvent(_EVENT_STATE_WRITE),
+    ),
+    event_separations=(
+        EventSeparation(
+            _EVENT_FAST_WRITE,
+            _EVENT_EARLY_READ,
+            minimum_issue_separation_cycles=0,
+            model_quality=ModelQuality.EXACT,
+        ),
+        EventSeparation(
+            _EVENT_SLOW_WRITE,
+            _EVENT_EARLY_READ,
+            minimum_issue_separation_cycles=3,
+            model_quality=ModelQuality.CALIBRATED,
+        ),
+        EventSeparation(
+            _EVENT_FAST_WRITE,
+            _EVENT_LATE_READ,
+            minimum_issue_separation_cycles=-2,
+            model_quality=ModelQuality.EXACT,
+        ),
+        EventSeparation(
+            _EVENT_MEMORY_READ,
+            _EVENT_MEMORY_WRITE,
+            minimum_issue_separation_cycles=0,
+            model_quality=ModelQuality.EXACT,
+        ),
+        EventSeparation(
+            _EVENT_MEMORY_WRITE,
+            _EVENT_MEMORY_READ,
+            minimum_issue_separation_cycles=2,
+            model_quality=ModelQuality.EXACT,
+        ),
+        EventSeparation(
+            _EVENT_MEMORY_WRITE,
+            _EVENT_MEMORY_WRITE,
+            minimum_issue_separation_cycles=1,
+            model_quality=ModelQuality.EXACT,
+        ),
+        EventSeparation(
+            _EVENT_STATE_READ,
+            _EVENT_STATE_READ,
+            minimum_issue_separation_cycles=0,
+            model_quality=ModelQuality.EXACT,
+        ),
+        EventSeparation(
+            _EVENT_STATE_READ,
+            _EVENT_STATE_WRITE,
+            minimum_issue_separation_cycles=0,
+            model_quality=ModelQuality.EXACT,
+        ),
+        EventSeparation(
+            _EVENT_STATE_WRITE,
+            _EVENT_STATE_READ,
+            minimum_issue_separation_cycles=3,
+            model_quality=ModelQuality.EXACT,
+        ),
+        EventSeparation(
+            _EVENT_STATE_WRITE,
+            _EVENT_STATE_WRITE,
+            minimum_issue_separation_cycles=1,
+            model_quality=ModelQuality.EXACT,
+        ),
+    ),
     resources=(
         Resource(_RESOURCE_SCALAR, capacity_per_cycle=1, kind=ResourceKind.SCALAR_ALU),
         Resource(_RESOURCE_VECTOR, capacity_per_cycle=1, kind=ResourceKind.VECTOR_ALU),
@@ -1302,11 +1513,24 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         Resource(_RESOURCE_STORE, capacity_per_cycle=1, kind=ResourceKind.STORE),
         Resource(_RESOURCE_CALL, capacity_per_cycle=1, kind=ResourceKind.CONTROL),
         Resource(_RESOURCE_CONTROL, capacity_per_cycle=1, kind=ResourceKind.CONTROL),
+        Resource(
+            _RESOURCE_SHARED_A,
+            capacity_per_cycle=2,
+            kind=ResourceKind.SCALAR_ALU,
+            contention_group_id=1,
+        ),
+        Resource(
+            _RESOURCE_SHARED_B,
+            capacity_per_cycle=2,
+            kind=ResourceKind.SCALAR_ALU,
+            contention_group_id=1,
+        ),
     ),
     schedule_classes=(
         ScheduleClass(
             _SCHEDULE_CONST,
             latency_kind=LatencyKind.EXACT,
+            minimum_issue_separation_cycles=0,
             model_quality=ModelQuality.EXACT,
         ),
         ScheduleClass(
@@ -1320,6 +1544,7 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
             _SCHEDULE_VECTOR_ALU,
             latency_kind=LatencyKind.ESTIMATE,
             latency_cycles=2,
+            minimum_issue_separation_cycles=2,
             issue_uses=(IssueUse(_RESOURCE_VECTOR, cycles=1, units=1),),
             model_quality=ModelQuality.ESTIMATED,
         ),
@@ -1327,6 +1552,7 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
             _SCHEDULE_LOAD,
             latency_kind=LatencyKind.VARIABLE,
             latency_cycles=4,
+            minimum_issue_separation_cycles=4,
             issue_uses=(
                 IssueUse(_RESOURCE_ADDRESS, cycles=1, units=1, stage=0),
                 IssueUse(_RESOURCE_LOAD, cycles=1, units=1, stage=1),
@@ -1347,7 +1573,7 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
             _SCHEDULE_COUNTER_LOAD,
             latency_kind=LatencyKind.VARIABLE,
             latency_cycles=4,
-            schedule_distance_cycles=1,
+            minimum_issue_separation_cycles=1,
             issue_uses=(
                 IssueUse(_RESOURCE_ADDRESS, cycles=1, units=1, stage=0),
                 IssueUse(_RESOURCE_LOAD, cycles=1, units=1, stage=1),
@@ -1366,6 +1592,7 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
             _SCHEDULE_STORE,
             latency_kind=LatencyKind.VARIABLE,
             latency_cycles=2,
+            minimum_issue_separation_cycles=2,
             issue_uses=(
                 IssueUse(_RESOURCE_ADDRESS, cycles=1, units=1, stage=0),
                 IssueUse(_RESOURCE_STORE, cycles=1, units=1, stage=1),
@@ -1377,6 +1604,7 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
             _SCHEDULE_CALL,
             latency_kind=LatencyKind.VARIABLE,
             latency_cycles=8,
+            minimum_issue_separation_cycles=8,
             issue_uses=(IssueUse(_RESOURCE_CALL, cycles=1, units=1),),
             flags=(ScheduleClassFlag.MAY_CALL,),
             model_quality=ModelQuality.FALLBACK,
@@ -1389,6 +1617,28 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
             flags=(ScheduleClassFlag.CONTROL,),
             model_quality=ModelQuality.EXACT,
         ),
+        ScheduleClass(
+            _SCHEDULE_EVENT_FAST,
+            latency_kind=LatencyKind.EXACT,
+            latency_cycles=9,
+            minimum_issue_separation_cycles=7,
+            issue_uses=(IssueUse(_RESOURCE_SHARED_A, cycles=2, units=1),),
+            model_quality=ModelQuality.EXACT,
+        ),
+        ScheduleClass(
+            _SCHEDULE_EVENT_SLOW,
+            latency_kind=LatencyKind.EXACT,
+            latency_cycles=1,
+            issue_uses=(IssueUse(_RESOURCE_SHARED_A, cycles=1, units=1, stage=1),),
+            model_quality=ModelQuality.EXACT,
+        ),
+        ScheduleClass(
+            _SCHEDULE_EVENT_CONSUMER,
+            latency_kind=LatencyKind.EXACT,
+            latency_cycles=1,
+            issue_uses=(IssueUse(_RESOURCE_SHARED_B, cycles=1, units=1),),
+            model_quality=ModelQuality.EXACT,
+        ),
     ),
     descriptors=(
         TEST_LOW_CONST_I32_DESCRIPTOR,
@@ -1397,6 +1647,12 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_ADD_I32_DESCRIPTOR,
         TEST_LOW_CONVERGENT_I32_DESCRIPTOR,
         TEST_LOW_MUL_I32_DESCRIPTOR,
+        TEST_LOW_EVENT_FAST_I32_DESCRIPTOR,
+        TEST_LOW_EVENT_SLOW_I32_DESCRIPTOR,
+        TEST_LOW_EVENT_EARLY_CONSUMER_I32_DESCRIPTOR,
+        TEST_LOW_EVENT_LATE_CONSUMER_I32_DESCRIPTOR,
+        TEST_LOW_EVENT_MEMORY_READ_I32_DESCRIPTOR,
+        TEST_LOW_EVENT_MEMORY_WRITE_I32_DESCRIPTOR,
         TEST_LOW_ADD_F32_DESCRIPTOR,
         TEST_LOW_SUB_F32_DESCRIPTOR,
         TEST_LOW_MUL_F32_DESCRIPTOR,

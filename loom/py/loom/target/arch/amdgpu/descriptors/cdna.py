@@ -129,6 +129,7 @@ _AMDGPU_CDNA4_CORE_DESCRIPTOR_SET_BASE = _amdgpu_core_descriptor_set(
             _SCHEDULE_VMEM_LOAD_LDS,
             latency_kind=LatencyKind.VARIABLE,
             latency_cycles=16,
+            minimum_issue_separation_cycles=16,
             issue_uses=(
                 IssueUse(_RESOURCE_VMEM_LOAD, cycles=1, units=1),
                 IssueUse(_RESOURCE_LDS_STORE, cycles=1, units=1),
@@ -141,6 +142,7 @@ _AMDGPU_CDNA4_CORE_DESCRIPTOR_SET_BASE = _amdgpu_core_descriptor_set(
             _SCHEDULE_MFMA,
             latency_kind=LatencyKind.ESTIMATE,
             latency_cycles=32,
+            minimum_issue_separation_cycles=32,
             issue_uses=(IssueUse(_RESOURCE_MFMA, cycles=1, units=1),),
             hazards=_matrix_hazards(_RESOURCE_MFMA),
             model_quality=ModelQuality.ESTIMATED,

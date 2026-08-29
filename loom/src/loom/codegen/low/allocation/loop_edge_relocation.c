@@ -225,8 +225,8 @@ static iree_status_t loom_low_allocation_loop_edge_relocation_collect_candidate(
       state->context->target_constraints, destination_interval,
       &destination_capacity));
   if (!loom_low_allocation_target_constraints_location_range_fits_capacity(
-          &destination_capacity, source_assignment->location_kind,
-          source_assignment->location_base,
+          state->context->descriptor_set, &destination_capacity,
+          source_assignment->location_kind, source_assignment->location_base,
           source_assignment->location_count)) {
     return iree_ok_status();
   }
@@ -419,8 +419,9 @@ static bool loom_low_allocation_loop_edge_relocation_eviction_location_is_legal(
   loom_low_allocation_assignment_t assignment = eviction->assignment;
   assignment.location_base = vacated_assignment->location_base;
   if (!loom_low_allocation_target_constraints_location_range_fits_capacity(
-          &eviction->capacity, assignment.location_kind,
-          assignment.location_base, assignment.location_count)) {
+          state->context->descriptor_set, &eviction->capacity,
+          assignment.location_kind, assignment.location_base,
+          assignment.location_count)) {
     return false;
   }
   const uint32_t required_alignment =

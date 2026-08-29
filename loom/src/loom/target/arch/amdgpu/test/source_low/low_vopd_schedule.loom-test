@@ -151,11 +151,11 @@ low.func.def target<amdgpu.rdna3.core>(@target) @rdna3_vopd_shared_broadcast(%lh
 
 // ----
   v_dual_mul_f32 v2, v8, v2 :: v_dual_mul_f32 v3, v3, v8
-  v_dual_mul_f32 v2, v8, v6 :: v_dual_mul_f32 v3, v7, v8
   v_mov_b32 v2, v8
   s_delay_alu instid0(VALU_DEP_1)
   v_dual_mul_f32 v0, v0, v8 :: v_dual_mul_f32 v1, v1, v2
   v_dual_mul_f32 v0, v4, v8 :: v_dual_mul_f32 v1, v5, v2
+  v_dual_mul_f32 v0, v8, v6 :: v_dual_mul_f32 v1, v7, v8
   s_endpgm
 
 // ====
@@ -222,11 +222,11 @@ low.func.def target<amdgpu.rdna4.core>(@target) @rdna4_vopd_shared_broadcast(%lh
 
 // ----
   v_dual_mul_f32 v2, v8, v2 :: v_dual_mul_f32 v3, v3, v8
-  v_dual_mul_f32 v2, v8, v6 :: v_dual_mul_f32 v3, v7, v8
   v_mov_b32 v2, v8
   s_delay_alu instid0(VALU_DEP_1)
   v_dual_mul_f32 v0, v0, v8 :: v_dual_mul_f32 v1, v1, v2
   v_dual_mul_f32 v0, v4, v8 :: v_dual_mul_f32 v1, v5, v2
+  v_dual_mul_f32 v0, v8, v6 :: v_dual_mul_f32 v1, v7, v8
   s_endpgm
 
 // ====
@@ -257,11 +257,11 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @gfx1250_vopd_shared_bro
 
 // ----
   v_dual_mul_f32 v2, v8, v2 :: v_dual_mul_f32 v3, v3, v8
-  v_dual_mul_f32 v2, v8, v6 :: v_dual_mul_f32 v3, v7, v8
   v_mov_b32 v2, v8
   s_delay_alu instid0(VALU_DEP_1)
   v_dual_mul_f32 v0, v0, v8 :: v_dual_mul_f32 v1, v1, v2
   v_dual_mul_f32 v0, v4, v8 :: v_dual_mul_f32 v1, v5, v2
+  v_dual_mul_f32 v0, v8, v6 :: v_dual_mul_f32 v1, v7, v8
   s_endpgm
 
 // ====

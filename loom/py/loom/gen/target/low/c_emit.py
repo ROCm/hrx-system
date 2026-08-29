@@ -399,16 +399,44 @@ def emit_source_for_views(
                 f".target_bank_id = {reg_class.target_bank_id},",
                 f".flags = {c_spelling.flag_expr(reg_class.flags)},",
                 f".alloc_unit_bits = {reg_class.alloc_unit_bits},",
-                f".allocatable_count = {reg_class.allocatable_count},",
+                ".allocatable_count = " + str(len(reg_class.physical_registers) if reg_class.physical_registers else reg_class.allocatable_count) + ",",
                 f".fixed_location_base = {reg_class.fixed_location_base},",
                 f".fixed_location_count = {reg_class.fixed_location_count},",
+                ".physical_register_candidate_start = " + str(compiled.physical_register_candidate_starts[i] if reg_class.physical_registers else 0) + ",",
                 f".alias_set_id = {reg_class.alias_set_id},",
                 ".spill_class_id = " + ("LOOM_LOW_REG_CLASS_NONE" if reg_class.spill_class is None else str(compiled.reg_class_ids[reg_class.spill_class])) + ",",
                 f".full_register_part_mask = {c_spelling.hex_u32_literal(reg_class.full_register_part_mask)},",
                 f".spill_slot_space = {reg_class.spill_slot_space.c_name},",
             ]
-            for reg_class in compiled.reg_classes
+            for i, reg_class in enumerate(compiled.reg_classes)
         ],
+    )
+    _emit_array(
+        lines,
+        "loom_low_physical_register_t",
+        spec.c_table_prefix,
+        "PhysicalRegisters",
+        [
+            [
+                ".name_string_offset = " + pool.ref(f"physical_register_{physical_register.name}") + ",",
+                ".atomic_unit_start = " + str(compiled.physical_register_atomic_unit_starts[i]) + ",",
+                f".atomic_unit_count = {len(physical_register.atomic_units)},",
+                ".reserved = 0,",
+            ]
+            for i, physical_register in enumerate(compiled.physical_registers)
+        ],
+    )
+    c_arrays.append_value_array(
+        lines,
+        "uint16_t",
+        f"k{spec.c_table_prefix}PhysicalRegisterCandidates",
+        [str(value) for value in compiled.physical_register_candidate_ids],
+    )
+    c_arrays.append_value_array(
+        lines,
+        "uint16_t",
+        f"k{spec.c_table_prefix}PhysicalRegisterAtomicUnits",
+        [str(value) for value in compiled.physical_register_atomic_units],
     )
     _emit_array(
         lines,
@@ -449,7 +477,7 @@ def emit_source_for_views(
                 ".source_value_index = " + ("LOOM_LOW_ID_NONE" if compiled.operand_source_value_indices[i] is None else str(compiled.operand_source_value_indices[i])) + ",",
                 f".role = {operand.role.c_name},",
                 f".source_binding = {operand_source_binding(operand.field_name, operand.role).c_name},",
-                ".reserved0 = 0,",
+                f".encoding_adapter_id = {operand.encoding_adapter_id},",
                 f".flags = {_operand_flag_expr(operand, compiled.operand_rematerializable[i])},",
                 f".reg_class_alt_start = {compiled.operand_alt_starts[i]},",
                 f".reg_class_alt_count = {len(operand.reg_alts)},",
@@ -462,6 +490,8 @@ def emit_source_for_views(
                 f".register_part_id = {_register_part_id_expr(compiled, operand.register_part)},",
                 f".read_stage = {operand.read_stage},",
                 f".ready_stage = {operand.ready_stage},",
+                ".read_event_id = " + ("LOOM_LOW_TIMING_EVENT_NONE" if operand.read_event is None else str(compiled.timing_event_ids[operand.read_event])) + ",",
+                ".write_event_id = " + ("LOOM_LOW_TIMING_EVENT_NONE" if operand.write_event is None else str(compiled.timing_event_ids[operand.write_event])) + ",",
             ]
             for i, operand in enumerate(compiled.operands)
         ],
@@ -478,6 +508,7 @@ def emit_source_for_views(
                 f".kind = {immediate.kind.c_name},",
                 f".flags = {c_spelling.flag_expr(immediate.flags)},",
                 f".bit_width = {immediate.bit_width},",
+                f".value_step = {c_spelling.u64_literal(immediate.value_step)},",
                 f".encoding_field_id = {immediate.encoding_field_id},",
                 f".encoding_slice_count = {len(immediate.encoding_slices)},",
                 ".enum_domain_id = " + ("LOOM_LOW_ENUM_DOMAIN_NONE" if compiled.immediate_enum_domain_ids[i] is None else str(compiled.immediate_enum_domain_ids[i])) + ",",
@@ -544,6 +575,8 @@ def emit_source_for_views(
                 f".flags = {c_spelling.flag_expr(effect.flags)},",
                 f".counter_id = {effect.counter_id},",
                 f".width_bits = {effect.width_bits},",
+                ".timing_event_id = " + ("LOOM_LOW_TIMING_EVENT_NONE" if effect.timing_event is None else str(compiled.timing_event_ids[effect.timing_event])) + ",",
+                ".reserved = 0,",
             ]
             for effect in compiled.effects
         ],
@@ -569,6 +602,33 @@ def emit_source_for_views(
         spec.c_table_prefix,
         "StorageLeases",
         _storage_lease_row_lines(compiled),
+    )
+    _emit_array(
+        lines,
+        "loom_low_timing_event_t",
+        spec.c_table_prefix,
+        "TimingEvents",
+        [
+            [
+                f".name_string_offset = {pool.ref(f'timing_event_{timing_event.name}')},",
+            ]
+            for timing_event in compiled.timing_events
+        ],
+    )
+    _emit_array(
+        lines,
+        "loom_low_event_separation_t",
+        spec.c_table_prefix,
+        "EventSeparations",
+        [
+            [
+                f".producer_event_id = {compiled.timing_event_ids[separation.producer_event]},",
+                f".consumer_event_id = {compiled.timing_event_ids[separation.consumer_event]},",
+                f".minimum_issue_separation_cycles = {separation.minimum_issue_separation_cycles},",
+                f".model_quality = {separation.model_quality.c_name},",
+            ]
+            for separation in compiled.event_separations
+        ],
     )
     _emit_array(
         lines,
@@ -641,7 +701,7 @@ def emit_source_for_views(
             [
                 f".name_string_offset = {pool.ref(f'schedule_{schedule_class.name}')},",
                 f".latency_cycles = {schedule_class.latency_cycles},",
-                f".schedule_distance_cycles = {schedule_class.schedule_distance_cycles},",
+                f".minimum_issue_separation_cycles = {schedule_class.minimum_issue_separation_cycles},",
                 f".latency_kind = {schedule_class.latency_kind.c_name},",
                 f".issue_use_start = {compiled.schedule_rows[i]['issue_use_start']},",
                 f".issue_use_count = {compiled.schedule_rows[i]['issue_use_count']},",
@@ -857,9 +917,14 @@ def emit_source_for_views(
         "constraints": "constraint_count",
         "storage_leases": "storage_lease_count",
         "reg_classes": "reg_class_count",
+        "physical_registers": "physical_register_count",
+        "physical_register_candidate_ids": "physical_register_candidate_count",
+        "physical_register_atomic_units": "physical_register_atomic_unit_count",
         "register_parts": "register_part_count",
         "reg_class_alts": "reg_class_alt_count",
         "schedule_classes": "schedule_class_count",
+        "timing_events": "timing_event_count",
+        "event_separations": "event_separation_count",
         "issue_uses": "issue_use_count",
         "resources": "resource_count",
         "hazards": "hazard_count",
@@ -937,9 +1002,24 @@ def emit_source_for_views(
         append_optional_table("constraints", "Constraints", compiled.constraints, view_lines)
         append_optional_table("storage_leases", "StorageLeases", compiled.storage_leases, view_lines)
         append_optional_table("reg_classes", "RegClasses", compiled.reg_classes, view_lines)
+        append_optional_table("physical_registers", "PhysicalRegisters", compiled.physical_registers, view_lines)
+        append_optional_table(
+            "physical_register_candidate_ids",
+            "PhysicalRegisterCandidates",
+            compiled.physical_register_candidate_ids,
+            view_lines,
+        )
+        append_optional_table(
+            "physical_register_atomic_units",
+            "PhysicalRegisterAtomicUnits",
+            compiled.physical_register_atomic_units,
+            view_lines,
+        )
         append_optional_table("register_parts", "RegisterParts", compiled.register_parts, view_lines)
         append_optional_table("reg_class_alts", "RegClassAlts", compiled.reg_class_alts, view_lines)
         append_optional_table("schedule_classes", "ScheduleClasses", compiled.schedule_classes, view_lines)
+        append_optional_table("timing_events", "TimingEvents", compiled.timing_events, view_lines)
+        append_optional_table("event_separations", "EventSeparations", compiled.event_separations, view_lines)
         append_optional_table("issue_uses", "IssueUses", compiled.issue_uses, view_lines)
         append_optional_table("resources", "Resources", compiled.resources, view_lines)
         append_optional_table("hazards", "Hazards", compiled.hazards, view_lines)

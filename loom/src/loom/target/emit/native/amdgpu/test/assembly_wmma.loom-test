@@ -94,6 +94,8 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_wmma_concat_resourc
   v_and_b32 v1, 15, v0
   v_lshlrev_b32 v1, 5, v1
   global_load_b32 v8, v1, s[0:1] offset:0
+  v_lshlrev_b32 v0, 2, v0
+  global_load_b32 v16, v0, s[4:5] offset:0
   global_load_b32 v9, v1, s[0:1] offset:4
   global_load_b32 v10, v1, s[0:1] offset:8
   global_load_b32 v11, v1, s[0:1] offset:12
@@ -101,25 +103,23 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_wmma_concat_resourc
   global_load_b32 v13, v1, s[0:1] offset:20
   global_load_b32 v14, v1, s[0:1] offset:24
   global_load_b32 v15, v1, s[0:1] offset:28
-  global_load_b32 v16, v1, s[2:3] offset:0
-  global_load_b32 v17, v1, s[2:3] offset:4
-  global_load_b32 v18, v1, s[2:3] offset:8
-  global_load_b32 v19, v1, s[2:3] offset:12
-  global_load_b32 v20, v1, s[2:3] offset:16
-  global_load_b32 v21, v1, s[2:3] offset:20
-  global_load_b32 v22, v1, s[2:3] offset:24
-  global_load_b32 v23, v1, s[2:3] offset:28
-  v_lshlrev_b32 v0, 2, v0
-  global_load_b32 v24, v0, s[4:5] offset:0
-  global_load_b32 v25, v0, s[4:5] offset:128
-  global_load_b32 v26, v0, s[4:5] offset:256
-  global_load_b32 v27, v0, s[4:5] offset:384
-  global_load_b32 v28, v0, s[4:5] offset:512
-  global_load_b32 v29, v0, s[4:5] offset:640
-  global_load_b32 v30, v0, s[4:5] offset:768
-  global_load_b32 v31, v0, s[4:5] offset:896
-  v_wmma_f32_16x16x16_f16 v[24:31], v[8:15], v[16:23], v[24:31]
-  global_store_b32 v0, v24, s[6:7] offset:0
+  global_load_b32 v24, v1, s[2:3] offset:0
+  global_load_b32 v25, v1, s[2:3] offset:4
+  global_load_b32 v26, v1, s[2:3] offset:8
+  global_load_b32 v27, v1, s[2:3] offset:12
+  global_load_b32 v28, v1, s[2:3] offset:16
+  global_load_b32 v29, v1, s[2:3] offset:20
+  global_load_b32 v30, v1, s[2:3] offset:24
+  global_load_b32 v31, v1, s[2:3] offset:28
+  global_load_b32 v17, v0, s[4:5] offset:128
+  global_load_b32 v18, v0, s[4:5] offset:256
+  global_load_b32 v19, v0, s[4:5] offset:384
+  global_load_b32 v20, v0, s[4:5] offset:512
+  global_load_b32 v21, v0, s[4:5] offset:640
+  global_load_b32 v22, v0, s[4:5] offset:768
+  global_load_b32 v23, v0, s[4:5] offset:896
+  v_wmma_f32_16x16x16_f16 v[16:23], v[8:15], v[24:31], v[16:23]
+  global_store_b32 v0, v16, s[6:7] offset:0
   s_endpgm
 
 // ====

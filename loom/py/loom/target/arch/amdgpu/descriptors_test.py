@@ -909,7 +909,7 @@ def test_gfx11_wmma_separates_hardware_latency_from_schedule_distance() -> None:
     schedule_class = schedule_classes[_SCHEDULE_WMMA]
     assert schedule_class.latency_kind is LatencyKind.ESTIMATE
     assert schedule_class.latency_cycles == 5
-    assert schedule_class.schedule_distance_cycles == 32
+    assert schedule_class.minimum_issue_separation_cycles == 32
 
 
 def test_gfx12_matrix_schedule_classes_match_processor_model() -> None:

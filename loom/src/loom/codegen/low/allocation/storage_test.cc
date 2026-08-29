@@ -180,6 +180,80 @@ TEST(LowAllocationStorageTest, SharesRegisterClassAliasSets) {
       loom_low_allocation_storage_reg_classes_share(&descriptor_set, 0, 2));
 }
 
+TEST(LowAllocationStorageTest, MatchesExplicitRegisterAtomicStorage) {
+  const loom_low_reg_class_t reg_classes[2] = {
+      RegClass(/*alias_set_id=*/0, /*allocatable_count=*/2,
+               LOOM_LOW_REG_CLASS_FLAG_PHYSICAL |
+                   LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS),
+      RegClass(/*alias_set_id=*/0, /*allocatable_count=*/1,
+               LOOM_LOW_REG_CLASS_FLAG_PHYSICAL |
+                   LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS),
+  };
+  const uint16_t atomic_units[] = {0, 1, 0, 2, 3};
+  const loom_low_physical_register_t physical_registers[] = {
+      {
+          /*.name_string_offset=*/0,
+          /*.atomic_unit_start=*/0,
+          /*.atomic_unit_count=*/2,
+          /*.reserved=*/0,
+      },
+      {
+          /*.name_string_offset=*/0,
+          /*.atomic_unit_start=*/2,
+          /*.atomic_unit_count=*/1,
+          /*.reserved=*/0,
+      },
+      {
+          /*.name_string_offset=*/0,
+          /*.atomic_unit_start=*/3,
+          /*.atomic_unit_count=*/2,
+          /*.reserved=*/0,
+      },
+  };
+  const uint16_t candidates[] = {0, 2, 1};
+  loom_low_descriptor_set_t descriptor_set =
+      DescriptorSet(reg_classes, IREE_ARRAYSIZE(reg_classes));
+  descriptor_set.physical_registers = physical_registers;
+  descriptor_set.physical_register_count = IREE_ARRAYSIZE(physical_registers);
+  descriptor_set.physical_register_candidate_ids = candidates;
+  descriptor_set.physical_register_candidate_count = IREE_ARRAYSIZE(candidates);
+  descriptor_set.physical_register_atomic_units = atomic_units;
+  descriptor_set.physical_register_atomic_unit_count =
+      IREE_ARRAYSIZE(atomic_units);
+  loom_low_reg_class_t explicit_reg_classes[2] = {reg_classes[0],
+                                                  reg_classes[1]};
+  explicit_reg_classes[1].physical_register_candidate_start = 2;
+  descriptor_set.reg_classes = explicit_reg_classes;
+
+  const loom_low_allocation_assignment_t wide0 = Assignment(
+      /*descriptor_reg_class_id=*/0,
+      LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER, /*location_base=*/0,
+      /*location_count=*/1);
+  const loom_low_allocation_assignment_t low0 = Assignment(
+      /*descriptor_reg_class_id=*/1,
+      LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER, /*location_base=*/1,
+      /*location_count=*/1);
+  const loom_low_allocation_assignment_t wide1 = Assignment(
+      /*descriptor_reg_class_id=*/0,
+      LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER, /*location_base=*/2,
+      /*location_count=*/1);
+
+  EXPECT_TRUE(
+      loom_low_allocation_storage_reg_classes_share(&descriptor_set, 0, 1));
+  EXPECT_FALSE(loom_low_allocation_storage_assignment_ranges_equal(
+      &descriptor_set, &wide0, &low0));
+  EXPECT_TRUE(loom_low_allocation_storage_assignment_ranges_overlap(
+      &descriptor_set, &wide0, &low0));
+  EXPECT_FALSE(loom_low_allocation_storage_assignment_ranges_overlap(
+      &descriptor_set, &wide0, &wide1));
+  EXPECT_EQ(loom_low_allocation_storage_assignment_atomic_unit_count(
+                &descriptor_set, &wide0),
+            2u);
+  EXPECT_EQ(loom_low_allocation_storage_assignment_pressure_extent(
+                &descriptor_set, &wide1),
+            2u);
+}
+
 TEST(LowAllocationStorageTest, MapsRegisterClassToLocationKind) {
   const loom_low_reg_class_t allocatable_reg_class =
       RegClass(/*alias_set_id=*/0, /*allocatable_count=*/16);

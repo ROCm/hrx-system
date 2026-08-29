@@ -149,7 +149,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @gfx1250_valu_matrix_lat
   // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", chosen_latency_cycles="16", rejected_latency_cycles="16"}
   %first = v_wmma_f32_16x16x4_f32 %a0, %b0, %acc0
   %dependent = v_wmma_f32_16x16x4_f32 %a1, %b1, %first
-  // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", chosen_latency_cycles="16", rejected_dependency_latency_cycles="16", rejected_data_ready_stall_cycles="15"}
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", chosen_latency_cycles="16", chosen_resource_stall_cycles="1", chosen_effective_stall_cycles="1", rejected_dependency_latency_cycles="16", rejected_data_ready_stall_cycles="16", rejected_effective_stall_cycles="16"}
   %independent = v_wmma_f32_16x16x4_f32 %a2, %b2, %acc2
   return %dependent, %independent
 }
@@ -462,6 +462,12 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) @bf16_four_k_block_loads
   s_waitcnt vmcnt(12) lgkmcnt(63)
   s_delay_alu instid0(VALU_DEP_1)
   v_wmma_f32_16x16x16_bf16 v[8:15], v[16:23], v[24:31], v[8:15]
+  s_waitcnt vmcnt(8) lgkmcnt(63)
+  s_delay_alu instid0(VALU_DEP_1)
+  v_wmma_f32_16x16x16_bf16 v[8:15], v[32:39], v[40:47], v[8:15]
+  s_waitcnt vmcnt(4) lgkmcnt(63)
+  s_delay_alu instid0(VALU_DEP_1)
+  v_wmma_f32_16x16x16_bf16 v[8:15], v[48:55], v[56:63], v[8:15]
   s_waitcnt vmcnt(2) lgkmcnt(63)
   v_mov_b32 v16, v4
   v_mov_b32 v17, v5
@@ -471,11 +477,8 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) @bf16_four_k_block_loads
   v_mov_b32 v21, v65
   v_mov_b32 v22, v66
   v_mov_b32 v23, v67
-  v_wmma_f32_16x16x16_bf16 v[8:15], v[32:39], v[40:47], v[8:15]
-  s_delay_alu instid0(VALU_DEP_1)
-  v_wmma_f32_16x16x16_bf16 v[8:15], v[48:55], v[56:63], v[8:15]
   s_waitcnt vmcnt(0) lgkmcnt(63)
-  s_delay_alu instid0(VALU_DEP_1) | instid1(VALU_DEP_3)
+  s_delay_alu instid0(VALU_DEP_1)
   v_wmma_f32_16x16x16_bf16 v[8:15], v[16:23], v[72:79], v[8:15]
   global_store_b32 v0, v8, s[4:5] offset:0
   global_store_b32 v0, v9, s[4:5] offset:128

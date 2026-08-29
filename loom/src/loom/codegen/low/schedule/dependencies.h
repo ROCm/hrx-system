@@ -18,10 +18,10 @@ extern "C" {
 #endif
 
 // Number of dependency rows stored in each stable segment.
-#define LOOM_LOW_SCHEDULE_DEPENDENCY_SEGMENT_CAPACITY 4096u
+#define LOOM_LOW_SCHEDULE_DEPENDENCY_SEGMENT_CAPACITY 2048u
 
 // Shift mapping a dependency index to its segment index.
-#define LOOM_LOW_SCHEDULE_DEPENDENCY_SEGMENT_SHIFT 12u
+#define LOOM_LOW_SCHEDULE_DEPENDENCY_SEGMENT_SHIFT 11u
 
 // Mask mapping a dependency index to its row within a segment.
 #define LOOM_LOW_SCHEDULE_DEPENDENCY_SEGMENT_MASK \
@@ -31,7 +31,9 @@ static_assert((1u << LOOM_LOW_SCHEDULE_DEPENDENCY_SEGMENT_SHIFT) ==
                   LOOM_LOW_SCHEDULE_DEPENDENCY_SEGMENT_CAPACITY,
               "dependency segment capacity must match its index shift");
 
-typedef enum loom_low_schedule_dependency_kind_e {
+typedef uint8_t loom_low_schedule_dependency_kind_t;
+
+enum loom_low_schedule_dependency_kind_e {
   // Unknown or uninitialized dependency kind.
   LOOM_LOW_SCHEDULE_DEPENDENCY_UNKNOWN = 0,
   // SSA producer-to-consumer dependency.
@@ -42,7 +44,29 @@ typedef enum loom_low_schedule_dependency_kind_e {
   LOOM_LOW_SCHEDULE_DEPENDENCY_STATE = 3,
   // Tied-result storage dependency keeping older readers before an overwrite.
   LOOM_LOW_SCHEDULE_DEPENDENCY_STORAGE = 4,
-} loom_low_schedule_dependency_kind_t;
+};
+
+typedef uint8_t loom_low_schedule_dependency_attachment_kind_t;
+
+enum loom_low_schedule_dependency_attachment_kind_e {
+  // Dependency endpoint has no descriptor attachment.
+  LOOM_LOW_SCHEDULE_DEPENDENCY_ATTACHMENT_NONE = 0,
+  // Dependency endpoint names a descriptor operand row.
+  LOOM_LOW_SCHEDULE_DEPENDENCY_ATTACHMENT_OPERAND = 1,
+  // Dependency endpoint names a descriptor effect row.
+  LOOM_LOW_SCHEDULE_DEPENDENCY_ATTACHMENT_EFFECT = 2,
+};
+
+typedef uint8_t loom_low_schedule_separation_source_t;
+
+enum loom_low_schedule_separation_source_e {
+  // Structural fallback used when the producer has no schedule class.
+  LOOM_LOW_SCHEDULE_SEPARATION_SOURCE_STRUCTURAL = 0,
+  // Producer schedule-class fallback used without an event-pair rule.
+  LOOM_LOW_SCHEDULE_SEPARATION_SOURCE_SCHEDULE_CLASS = 1,
+  // Exact producer/consumer timing-event pair rule.
+  LOOM_LOW_SCHEDULE_SEPARATION_SOURCE_EVENT_PAIR = 2,
+};
 
 // One dependency edge between two schedule nodes.
 typedef struct loom_low_schedule_dependency_t {
@@ -50,12 +74,36 @@ typedef struct loom_low_schedule_dependency_t {
   uint32_t producer_node;
   // Consumer node index.
   uint32_t consumer_node;
-  // Dependency kind.
+  // Signed minimum consumer issue cycle relative to producer issue.
+  int32_t minimum_issue_separation_cycles;
+  // Descriptor attachment index on the producer, or LOOM_LOW_ID_NONE.
+  uint16_t producer_attachment_index;
+  // Descriptor attachment index on the consumer, or LOOM_LOW_ID_NONE.
+  uint16_t consumer_attachment_index;
+  // Producer timing-event identifier, or LOOM_LOW_TIMING_EVENT_NONE.
+  uint16_t producer_event_id;
+  // Consumer timing-event identifier, or LOOM_LOW_TIMING_EVENT_NONE.
+  uint16_t consumer_event_id;
+  // Packet operand carrying the value witness, or LOOM_LOW_ID_NONE. SSA edges
+  // name a consumer operand while state antidependencies name a producer
+  // operand.
+  uint16_t value_operand_index;
+  // Kind of descriptor attachment on the producer.
+  loom_low_schedule_dependency_attachment_kind_t producer_attachment_kind;
+  // Kind of descriptor attachment on the consumer.
+  loom_low_schedule_dependency_attachment_kind_t consumer_attachment_kind;
+  // Semantic dependency kind.
   loom_low_schedule_dependency_kind_t kind;
-  // Operand index for SSA and explicit state-value dependencies, or
-  // UINT32_MAX for dependencies without one owning operand.
-  uint32_t operand_index;
+  // Origin of the minimum issue separation.
+  loom_low_schedule_separation_source_t separation_source;
+  // Target model quality encoded as loom_low_model_quality_t.
+  uint8_t model_quality;
+  // Reserved for future dependency timing flags.
+  uint8_t reserved[3];
 } loom_low_schedule_dependency_t;
+
+static_assert(sizeof(loom_low_schedule_dependency_t) == 32,
+              "schedule dependency rows must remain compact");
 
 // Stable storage for one range of indexed scheduler dependencies.
 typedef iree_alignas(64) struct loom_low_schedule_dependency_segment_t {

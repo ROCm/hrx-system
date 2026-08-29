@@ -23,9 +23,38 @@ loom_low_allocation_location_kind_t
 loom_low_allocation_storage_reg_class_location_kind(
     const loom_low_reg_class_t* reg_class);
 
+// Returns true when |assignment| names one whole physical register selected
+// from an explicit descriptor-set candidate list.
+bool loom_low_allocation_storage_assignment_uses_explicit_physical_register(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_allocation_assignment_t* assignment);
+
+// Returns the number of atomic storage units used to index |assignment|.
+// Linear assignments return |location_count|; explicit physical registers
+// return their arbitrary atomic-unit set size.
+uint32_t loom_low_allocation_storage_assignment_atomic_unit_count(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_allocation_assignment_t* assignment);
+
+// Resolves one assignment atomic unit to its storage namespace and location.
+// |atomic_unit_ordinal| must be less than the count returned above.
+void loom_low_allocation_storage_assignment_atomic_unit(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_allocation_assignment_t* assignment,
+    uint32_t atomic_unit_ordinal, uint32_t* out_storage_key,
+    uint32_t* out_location);
+
+// Returns the class-local pressure extent of |assignment|. Linear assignments
+// use their exclusive numeric end; explicit physical registers use one past
+// their candidate preference ordinal.
+uint32_t loom_low_allocation_storage_assignment_pressure_extent(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_allocation_assignment_t* assignment);
+
 // Returns true when the two descriptor register classes address the same
-// backing storage space. Classes share storage when they are the same class or
-// when both opt into the same non-zero alias set.
+// backing storage space. Linear classes share when they are the same class or
+// opt into the same non-zero alias set. All explicit physical-register classes
+// share the descriptor set's global atomic-unit namespace.
 bool loom_low_allocation_storage_reg_classes_share(
     const loom_low_descriptor_set_t* descriptor_set, uint16_t lhs_reg_class_id,
     uint16_t rhs_reg_class_id);

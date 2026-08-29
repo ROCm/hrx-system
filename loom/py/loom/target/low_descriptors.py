@@ -110,6 +110,7 @@ class RegClassFlag(CEnum):
     PHYSICAL = "LOOM_LOW_REG_CLASS_FLAG_PHYSICAL"
     REFERENCE = "LOOM_LOW_REG_CLASS_FLAG_REFERENCE"
     UNSPILLABLE = "LOOM_LOW_REG_CLASS_FLAG_UNSPILLABLE"
+    EXPLICIT_PHYSICAL_REGISTERS = "LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS"
 
 
 class SpillSlotSpace(CEnum):
@@ -234,6 +235,23 @@ class HazardReferenceKind(CEnum):
     TARGET = "LOOM_LOW_HAZARD_REFERENCE_KIND_TARGET"
 
 
+@dataclass(frozen=True, slots=True)
+class TimingEvent:
+    """Named target event used to measure dependency separation."""
+
+    name: str
+
+
+@dataclass(frozen=True, slots=True)
+class EventSeparation:
+    """Minimum issue separation between a producer and consumer event."""
+
+    producer_event: str
+    consumer_event: str
+    minimum_issue_separation_cycles: int
+    model_quality: ModelQuality
+
+
 class DescriptorFlag(CEnum):
     SIDE_EFFECTING = "LOOM_LOW_DESCRIPTOR_FLAG_SIDE_EFFECTING"
     TERMINATOR = "LOOM_LOW_DESCRIPTOR_FLAG_TERMINATOR"
@@ -354,6 +372,13 @@ class RegClass:
     alias_set_id: int = 0
     spill_class: str | None = None
     full_register_part_mask: int = 1
+    physical_registers: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class PhysicalRegister:
+    name: str
+    atomic_units: tuple[int, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -380,10 +405,13 @@ class Operand:
     addressable_unit_count: int = 0
     address_state_slot: int = 0
     encoding_field_id: int = 0
+    encoding_adapter_id: int = 0
     data_format_id: int = 0
     register_part: str | None = None
     read_stage: int = 0
     ready_stage: int = 0
+    read_event: str | None = None
+    write_event: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -399,6 +427,7 @@ class Immediate:
     kind: ImmediateKind
     flags: tuple[ImmediateFlag, ...] = ()
     bit_width: int = 0
+    value_step: int = 1
     encoding_field_id: int = 0
     encoding_slices: tuple[ImmediateEncodingSlice, ...] = ()
     enum_domain: str | None = None
@@ -487,6 +516,7 @@ class Effect:
     flags: tuple[EffectFlag, ...] = ()
     counter_id: int = 0
     width_bits: int = 0
+    timing_event: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -598,7 +628,7 @@ class ScheduleClass:
     latency_kind: LatencyKind
     model_quality: ModelQuality
     latency_cycles: int = 0
-    schedule_distance_cycles: int = 0
+    minimum_issue_separation_cycles: int = 1
     issue_uses: tuple[IssueUse, ...] = ()
     hazards: tuple[Hazard, ...] = ()
     flags: tuple[ScheduleClassFlag, ...] = ()
@@ -649,7 +679,10 @@ class DescriptorSet:
     schedule_classes: tuple[ScheduleClass, ...]
     descriptors: tuple[Descriptor, ...]
     descriptor_set_ordinal: int | None = None
+    physical_registers: tuple[PhysicalRegister, ...] = ()
     register_parts: tuple[RegisterPart, ...] = ()
+    timing_events: tuple[TimingEvent, ...] = ()
+    event_separations: tuple[EventSeparation, ...] = ()
     enum_domains: tuple[EnumDomain, ...] = ()
     categories: tuple[DescriptorCategory, ...] = ()
     default_category: DescriptorCategory | None = None

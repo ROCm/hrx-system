@@ -21,10 +21,10 @@ extern "C" {
 #define LOOM_LOW_SCHEDULE_DEPENDENCY_GROUP_NONE UINT32_MAX
 
 // Number of grouped dependency rows stored in each stable segment.
-#define LOOM_LOW_SCHEDULE_DEPENDENCY_GROUP_SEGMENT_CAPACITY 8192u
+#define LOOM_LOW_SCHEDULE_DEPENDENCY_GROUP_SEGMENT_CAPACITY 4096u
 
 // Shift mapping a group index to its segment index.
-#define LOOM_LOW_SCHEDULE_DEPENDENCY_GROUP_SEGMENT_SHIFT 13u
+#define LOOM_LOW_SCHEDULE_DEPENDENCY_GROUP_SEGMENT_SHIFT 12u
 
 // Mask mapping a group index to its row within a segment.
 #define LOOM_LOW_SCHEDULE_DEPENDENCY_GROUP_SEGMENT_MASK \
@@ -55,6 +55,10 @@ typedef struct loom_low_schedule_dependency_group_t {
   uint32_t consumer_node;
   // Number of raw dependency rows represented by this group.
   uint32_t dependency_count;
+  // Strongest signed issue-separation requirement in this relation.
+  int32_t minimum_issue_separation_cycles;
+  // Reserved for future grouped dependency timing facts.
+  uint32_t reserved;
 } loom_low_schedule_dependency_group_t;
 
 // Stable storage for one segment of producer/consumer groups.
