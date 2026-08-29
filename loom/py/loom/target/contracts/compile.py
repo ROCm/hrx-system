@@ -28,20 +28,13 @@ CONTRACT_ROW_NONE = 0xFFFF
 
 
 @dataclass(frozen=True, slots=True)
-class CompiledOpEntry:
-    """Dense dialect-local op table entry."""
+class CompiledOpSpan:
+    """Populated source-op case span."""
 
-    case_start: int = CONTRACT_ROW_NONE
-    case_count: int = 0
-
-
-@dataclass(frozen=True, slots=True)
-class CompiledDialectTable:
-    """Compiled table for one source dialect."""
-
-    dialect_id: int
-    dialect_name: str
-    op_entries: tuple[CompiledOpEntry, ...]
+    op_kind: int
+    op_name: str
+    case_start: int
+    case_count: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,8 +65,7 @@ class CompiledContractFragment:
 
     name: str
     target_contract_query: bool
-    dialect_base_id: int
-    dialects: tuple[CompiledDialectTable, ...]
+    op_spans: tuple[CompiledOpSpan, ...]
     cases: tuple[CompiledCase, ...]
     descriptor_rules: tuple[CompiledDescriptorRule, ...]
     descriptor_matrices: tuple[CompiledDescriptorMatrix, ...]
@@ -86,7 +78,7 @@ def compile_contract_fragment(
     descriptor_rule_rows: Mapping[int, CompiledDescriptorRule],
     lower_rule_indices: Mapping[int, int],
 ) -> CompiledContractFragment:
-    """Compiles an authored contract fragment into dense target fragment rows."""
+    """Compiles an authored contract fragment into compact target fragment rows."""
 
     op_indexes = _build_op_indexes(dialect_ops)
     cases_by_op: dict[int, list[tuple[int, ContractCase]]] = {}
@@ -116,67 +108,49 @@ def compile_contract_fragment(
         )
 
     compiled_cases: list[CompiledCase] = []
-    sparse_dialect_tables: dict[int, CompiledDialectTable] = {}
-
-    for dialect_name, ops in sorted(
-        dialect_ops.items(),
-        key=lambda item: _require_dialect(item[1], item[0]).dialect_id,
-    ):
-        dialect = _require_dialect(ops, dialect_name)
-        op_entries: list[CompiledOpEntry] = []
-        for op in ops:
-            op_cases = cases_by_op.get(id(op), [])
-            if not op_cases:
-                op_entries.append(CompiledOpEntry())
-                continue
-            case_start = len(compiled_cases)
-            for authored_case_index, contract_case in op_cases:
-                compiled_case = _compile_case(
-                    contract_case,
-                    descriptor_rule_index=descriptor_rule_ordinals.get(
-                        authored_case_index,
-                        CONTRACT_ROW_NONE,
-                    ),
-                    lower_rule_index=lower_rule_indices.get(
-                        authored_case_index,
-                        CONTRACT_ROW_NONE,
-                    ),
-                    descriptor_matrix_index=(
-                        descriptor_matrix_ordinals[contract_case.source]
-                        if isinstance(contract_case, DescriptorMatrixRule)
-                        else CONTRACT_ROW_NONE
-                    ),
-                )
-                compiled_cases.append(compiled_case)
-            op_entries.append(
-                CompiledOpEntry(case_start=case_start, case_count=len(op_cases))
-            )
-        if any(entry.case_count for entry in op_entries):
-            sparse_dialect_tables[dialect.dialect_id] = CompiledDialectTable(
-                dialect_id=dialect.dialect_id,
-                dialect_name=dialect.name,
-                op_entries=tuple(op_entries),
-            )
-
-    dialect_base_id = min(sparse_dialect_tables) if sparse_dialect_tables else 0
-    dialect_limit = max(sparse_dialect_tables) + 1 if sparse_dialect_tables else 0
-    dialect_tables = tuple(
-        sparse_dialect_tables.get(
-            dialect_id,
-            CompiledDialectTable(
-                dialect_id=dialect_id,
-                dialect_name="",
-                op_entries=(),
-            ),
-        )
-        for dialect_id in range(dialect_base_id, dialect_limit)
+    op_spans: list[CompiledOpSpan] = []
+    sorted_op_cases = sorted(
+        cases_by_op.items(),
+        key=lambda item: (
+            op_indexes[item[0]][0].dialect_id,
+            op_indexes[item[0]][1],
+        ),
     )
+    for op_identity, op_cases in sorted_op_cases:
+        dialect, op_index = op_indexes[op_identity]
+        source_op = op_cases[0][1].source_op
+        case_start = len(compiled_cases)
+        for authored_case_index, contract_case in op_cases:
+            compiled_case = _compile_case(
+                contract_case,
+                descriptor_rule_index=descriptor_rule_ordinals.get(
+                    authored_case_index,
+                    CONTRACT_ROW_NONE,
+                ),
+                lower_rule_index=lower_rule_indices.get(
+                    authored_case_index,
+                    CONTRACT_ROW_NONE,
+                ),
+                descriptor_matrix_index=(
+                    descriptor_matrix_ordinals[contract_case.source]
+                    if isinstance(contract_case, DescriptorMatrixRule)
+                    else CONTRACT_ROW_NONE
+                ),
+            )
+            compiled_cases.append(compiled_case)
+        op_spans.append(
+            CompiledOpSpan(
+                op_kind=(dialect.dialect_id << 8) | op_index,
+                op_name=source_op.name,
+                case_start=case_start,
+                case_count=len(op_cases),
+            )
+        )
 
     return CompiledContractFragment(
         name=table.name,
         target_contract_query=table.target_contract_query,
-        dialect_base_id=dialect_base_id,
-        dialects=dialect_tables,
+        op_spans=tuple(op_spans),
         cases=tuple(compiled_cases),
         descriptor_rules=tuple(descriptor_rules),
         descriptor_matrices=tuple(descriptor_matrices),

@@ -47,12 +47,8 @@ loom_target_contract_cc_libraries(
     contract_deps = ["//loom/src/loom/target:contract"],
     lower_rule_deps = [
         "//loom/src/loom/codegen/low/lower",
-        "//loom/src/loom/ops/buffer",
-        "//loom/src/loom/ops/index",
         "//loom/src/loom/ops/scalar",
-        "//loom/src/loom/ops/scf",
         "//loom/src/loom/ops/vector",
-        "//loom/src/loom/ops/view",
     ],
 )
 
@@ -61,12 +57,7 @@ loom_target_contract_cc_libraries(
     contract_deps = ["//loom/src/loom/target:contract"],
     lower_rule_deps = [
         "//loom/src/loom/codegen/low/lower",
-        "//loom/src/loom/ops/buffer",
-        "//loom/src/loom/ops/index",
-        "//loom/src/loom/ops/scalar",
-        "//loom/src/loom/ops/scf",
         "//loom/src/loom/ops/vector",
-        "//loom/src/loom/ops/view",
     ],
 )
 

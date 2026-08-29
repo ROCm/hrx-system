@@ -1749,9 +1749,17 @@ iree_status_t loom_low_lower_rule_match_descriptor_ref_from_lowering(
   loom_low_lower_context_t* context = (loom_low_lower_context_t*)user_data;
   IREE_RETURN_IF_ERROR(loom_low_lower_rule_descriptor_maps_initialize(
       context, match_context->descriptor_set));
-  const loom_low_lower_rule_descriptor_map_t* map =
-      loom_low_lower_rule_descriptor_map_find(context, rule_set);
+  const loom_low_lower_rule_descriptor_map_t* map = NULL;
+  if (match_context->policy_rule_set_ordinal == 0) {
+    map = loom_low_lower_rule_descriptor_map_find(context, rule_set);
+  } else {
+    const uint16_t rule_set_index =
+        (uint16_t)(match_context->policy_rule_set_ordinal - 1u);
+    IREE_ASSERT_LT(rule_set_index, context->lowering.rule_descriptor_map_count);
+    map = &context->lowering.rule_descriptor_maps[rule_set_index];
+  }
   IREE_ASSERT(map != NULL);
+  IREE_ASSERT_EQ(map->rule_set, rule_set);
   IREE_ASSERT_LT(descriptor_ref, map->descriptor_count);
   *out_descriptor = map->descriptors[descriptor_ref];
   return iree_ok_status();
@@ -2027,7 +2035,7 @@ iree_status_t loom_low_lower_rule_set_emit_selection_failure(
 }
 
 iree_status_t loom_low_lower_rule_set_resolve_emit_program(
-    loom_low_lower_context_t* context,
+    loom_low_lower_context_t* context, uint16_t rule_set_index,
     const loom_low_lower_rule_set_t* rule_set,
     const loom_low_lower_rule_t* rule,
     const loom_low_lower_resolved_emit_t** out_resolved_emits) {
@@ -2044,6 +2052,7 @@ iree_status_t loom_low_lower_rule_set_resolve_emit_program(
   loom_low_lower_rule_match_context_initialize_from_lowering(
       context, /*view_regions=*/NULL, /*source_memory_state=*/NULL,
       &match_context);
+  match_context.policy_rule_set_ordinal = (uint16_t)(rule_set_index + 1u);
   for (uint16_t i = 0; i < rule->emit_count; ++i) {
     const uint16_t emit_index = (uint16_t)(rule->emit_start + i);
     const loom_low_lower_emit_t* emit = &rule_set->emits[emit_index];

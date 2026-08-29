@@ -10,19 +10,14 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
 
-from loom.dialect.buffer import ALL_BUFFER_OPS
-from loom.dialect.index import ALL_INDEX_OPS
 from loom.dialect.scalar import ALL_SCALAR_OPS
 from loom.dialect.scalar import arithmetic as scalar_arithmetic
 from loom.dialect.scalar import conversion as scalar_conversion
 from loom.dialect.scalar import math as scalar_math
-from loom.dialect.scf import ALL_SCF_OPS
 from loom.dialect.vector import ALL_VECTOR_OPS
 from loom.dialect.vector import defs as vector
-from loom.dialect.view import ALL_VIEW_OPS
 from loom.dsl import Op
 from loom.target.arch.x86.contracts.memory import x86_vector_memory_rules
-from loom.target.arch.x86.contracts.scalar import x86_scalar_core_cases
 from loom.target.arch.x86.descriptors import X86_AVX2_DESCRIPTOR_SET
 from loom.target.contracts import (
     AttrProject,
@@ -389,11 +384,9 @@ def _reduce_f32x4_rule(
     )
 
 
-def x86_avx2_core_cases(
-    descriptor_lookup: _DescriptorLookup,
-) -> Sequence[ContractCase]:
+def _cases() -> Sequence[ContractCase]:
+    descriptor_lookup = _descriptor
     return (
-        *x86_scalar_core_cases(descriptor_lookup),
         _conversion_rule(
             scalar_conversion.scalar_bitcast,
             _F32,
@@ -514,17 +507,13 @@ def x86_avx2_core_cases(
 
 
 X86_AVX2_CONTRACT_DIALECT_OPS = {
-    "buffer": ALL_BUFFER_OPS,
-    "index": ALL_INDEX_OPS,
     "scalar": ALL_SCALAR_OPS,
-    "scf": ALL_SCF_OPS,
     "vector": ALL_VECTOR_OPS,
-    "view": ALL_VIEW_OPS,
 }
 
 X86_AVX2_CONTRACT_FRAGMENT = ContractFragment(
     name="x86.avx2",
     descriptor_set=X86_AVX2_DESCRIPTOR_SET,
     public_header="loom/target/arch/x86/contracts/avx2.h",
-    cases=x86_avx2_core_cases(_descriptor),
+    cases=_cases(),
 )

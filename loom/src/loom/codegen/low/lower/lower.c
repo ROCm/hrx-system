@@ -1080,7 +1080,7 @@ static iree_status_t loom_low_lower_record_selected_rule_plan(
     const loom_low_lower_rule_source_memory_state_t* source_memory_state) {
   const loom_low_lower_resolved_emit_t* resolved_emits = NULL;
   IREE_RETURN_IF_ERROR(loom_low_lower_rule_set_resolve_emit_program(
-      context, rule_set, rule_selection.rule, &resolved_emits));
+      context, rule_set_index, rule_set, rule_selection.rule, &resolved_emits));
   const loom_low_source_memory_access_plan_t* source_memory_access = NULL;
   if (rule_selection.uses_source_memory_access) {
     IREE_ASSERT(source_memory_state != NULL);
@@ -1268,6 +1268,8 @@ static iree_status_t loom_low_lower_plan_op_from_contract_index(
     }
     const loom_low_lower_rule_set_t* rule_set =
         context->policy->rule_sets.values[binding->rule_set_index];
+    match_context.policy_rule_set_ordinal =
+        (uint16_t)(binding->rule_set_index + 1u);
     if (rule_set->source_memory_count != 0 && !view_regions_resolved) {
       IREE_RETURN_IF_ERROR(loom_low_lower_context_view_regions(
           context, &match_context.view_regions));

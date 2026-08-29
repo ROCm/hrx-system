@@ -19,21 +19,11 @@ namespace {
 constexpr uint8_t kTestDialectId = 7;
 constexpr uint8_t kLegalOpIndex = 3;
 
-const loom_target_contract_op_entry_t kOpEntries[] = {
-    {LOOM_TARGET_CONTRACT_ROW_NONE, 0},
-    {LOOM_TARGET_CONTRACT_ROW_NONE, 0},
-    {LOOM_TARGET_CONTRACT_ROW_NONE, 0},
-    {0, 1},
-};
-
-const loom_target_contract_dialect_table_t kDialectTables[] = {
+const loom_target_contract_fragment_op_span_t kOpSpans[] = {
     {
+        LOOM_OP_KIND(kTestDialectId, kLegalOpIndex),
         0,
-        nullptr,
-    },
-    {
-        IREE_ARRAYSIZE(kOpEntries),
-        kOpEntries,
+        1,
     },
 };
 
@@ -52,10 +42,10 @@ const loom_target_contract_descriptor_rule_t kDescriptorRules[] = {
 };
 
 const loom_target_contract_fragment_t kContractFragment = {
-    kTestDialectId - 1,
-    IREE_ARRAYSIZE(kDialectTables),
+    IREE_ARRAYSIZE(kOpSpans),
     0,
-    kDialectTables,
+    0,
+    kOpSpans,
     IREE_ARRAYSIZE(kFragmentCases),
     kFragmentCases,
     IREE_ARRAYSIZE(kDescriptorRules),

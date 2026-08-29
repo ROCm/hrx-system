@@ -198,6 +198,9 @@ struct loom_low_lower_rule_match_context_t {
   loom_symbolic_expr_context_t* symbolic_expr_context;
   // Match behavior flags.
   loom_low_lower_rule_match_flags_t flags;
+  // One-based policy rule-set ordinal supplied by composed contract selection;
+  // zero when no policy owner is known.
+  uint16_t policy_rule_set_ordinal;
 };
 
 typedef struct loom_low_lower_rule_descriptor_ref_t {
@@ -1051,7 +1054,7 @@ iree_status_t loom_low_lower_rule_set_emit_selection_failure(
 // rows are arena-owned by |context| and remain valid for the current lowering
 // run.
 iree_status_t loom_low_lower_rule_set_resolve_emit_program(
-    loom_low_lower_context_t* context,
+    loom_low_lower_context_t* context, uint16_t rule_set_index,
     const loom_low_lower_rule_set_t* rule_set,
     const loom_low_lower_rule_t* rule,
     const loom_low_lower_resolved_emit_t** out_resolved_emits);

@@ -12,8 +12,7 @@ from loom.target.contracts.compile import (
     CompiledContractFragment,
     CompiledDescriptorMatrix,
     CompiledDescriptorRule,
-    CompiledDialectTable,
-    CompiledOpEntry,
+    CompiledOpSpan,
     compile_contract_fragment,
 )
 from loom.target.contracts.descriptors import (
@@ -138,9 +137,8 @@ __all__ = [
     "CompiledContractFragment",
     "CompiledDescriptorMatrix",
     "CompiledDescriptorRule",
-    "CompiledDialectTable",
     "CompiledLowerRuleSet",
-    "CompiledOpEntry",
+    "CompiledOpSpan",
     "ContractCase",
     "ContractSystem",
     "ContractFragment",

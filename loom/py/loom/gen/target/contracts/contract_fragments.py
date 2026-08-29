@@ -30,7 +30,6 @@ from loom.target.contracts import (
     contract_fragment_public_header,
 )
 
-_UINT8_MAX = 0xFF
 _UINT16_MAX = 0xFFFF
 
 _CONTRACT_SYSTEM_C_NAMES = {
@@ -190,31 +189,17 @@ def _generate_source(
         ]
     )
 
-    dialect_table_names: list[str | None] = []
-    for dialect in table.dialects:
-        if not dialect.op_entries:
-            dialect_table_names.append(None)
-            continue
-        array_name = f"k{c_table_prefix}{_pascal_identifier(dialect.dialect_name)}OpEntries"
-        dialect_table_names.append(array_name)
-        lines.append(f"static const loom_target_contract_op_entry_t {array_name}[] = {{")
-        for entry in dialect.op_entries:
-            case_start = "LOOM_TARGET_CONTRACT_ROW_NONE" if entry.case_start == CONTRACT_ROW_NONE else str(entry.case_start)
-            lines.append(f"    {{{case_start}, {entry.case_count}}},")
+    op_spans_name = f"k{c_table_prefix}OpSpans"
+    if table.op_spans:
+        lines.append(f"static const loom_target_contract_fragment_op_span_t {op_spans_name}[] = {{")
+        for op_span in table.op_spans:
+            dialect_id = op_span.op_kind >> 8
+            op_index = op_span.op_kind & 0xFF
+            lines.append(f"    {{LOOM_OP_KIND(0x{dialect_id:02X}, {op_index}), {op_span.case_start}, {op_span.case_count}}},  // {op_span.op_name}")
         lines.extend(["};", ""])
-
-    dialects_name = f"k{c_table_prefix}Dialects"
-    if table.dialects:
-        lines.append(f"static const loom_target_contract_dialect_table_t {dialects_name}[] = {{")
-        for dialect, op_entries_name in zip(table.dialects, dialect_table_names, strict=True):
-            if op_entries_name is None:
-                lines.append("    {0, NULL},")
-            else:
-                lines.append(f"    {{{len(dialect.op_entries)}, {op_entries_name}}},")
-        lines.extend(["};", ""])
-        dialects_value = dialects_name
+        op_spans_value = op_spans_name
     else:
-        dialects_value = "NULL"
+        op_spans_value = "NULL"
 
     cases_name = f"k{c_table_prefix}Cases"
     if table.cases:
@@ -250,10 +235,10 @@ def _generate_source(
     lines.extend(
         [
             f"const loom_target_contract_fragment_t {symbol_name} = {{",
-            f"    {table.dialect_base_id},",
-            f"    {len(table.dialects)},",
+            f"    {len(table.op_spans)},",
             f"    {flags_value},",
-            f"    {dialects_value},",
+            "    0,",
+            f"    {op_spans_value},",
             f"    {len(table.cases)},",
             f"    {cases_value},",
             f"    {len(table.descriptor_rules)},",
@@ -268,19 +253,19 @@ def _generate_source(
 
 
 def _validate_c_shard_shape(table: CompiledContractFragment) -> None:
-    if table.dialect_base_id > _UINT8_MAX:
-        raise ValueError(f"contract fragment '{table.name}' dialect base exceeds uint8_t")
-    if len(table.dialects) > _UINT8_MAX:
-        raise ValueError(f"contract fragment '{table.name}' dialect count exceeds uint8_t")
+    if len(table.op_spans) > _UINT16_MAX:
+        raise ValueError(f"contract fragment '{table.name}' op-span count exceeds uint16_t")
     if len(table.cases) > _UINT16_MAX:
         raise ValueError(f"contract fragment '{table.name}' case count exceeds uint16_t")
     if len(table.descriptor_rules) > _UINT16_MAX:
         raise ValueError(f"contract fragment '{table.name}' descriptor-rule count exceeds uint16_t")
     if len(table.descriptor_matrices) > _UINT16_MAX:
         raise ValueError(f"contract fragment '{table.name}' descriptor-matrix count exceeds uint16_t")
-    for dialect in table.dialects:
-        if len(dialect.op_entries) > _UINT16_MAX:
-            raise ValueError(f"contract fragment '{table.name}' dialect '{dialect.dialect_name}' op count exceeds uint16_t")
+    for op_span in table.op_spans:
+        if op_span.op_kind > _UINT16_MAX:
+            raise ValueError(f"contract fragment '{table.name}' op '{op_span.op_name}' kind exceeds uint16_t")
+        if op_span.case_start + op_span.case_count > len(table.cases):
+            raise ValueError(f"contract fragment '{table.name}' op '{op_span.op_name}' case span exceeds case rows")
 
 
 def _descriptor_matrix_rule_initializer(

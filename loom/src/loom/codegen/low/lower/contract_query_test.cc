@@ -91,49 +91,22 @@ loom_target_facts_t MakeTargetFacts() {
   return facts;
 }
 
-loom_target_contract_fragment_t MakeContractFragment(
-    loom_target_contract_op_entry_t* op_entries,
-    loom_target_contract_dialect_table_t* dialects,
-    loom_target_contract_fragment_case_t* cases,
-    loom_target_contract_descriptor_rule_t* descriptor_rules) {
-  op_entries[loom_op_dialect_index(kSourceOpKind)].case_start = 0;
-  op_entries[loom_op_dialect_index(kSourceOpKind)].case_count = 1;
-  dialects[0].op_count = 4;
-  dialects[0].op_entries = op_entries;
-  cases[0].system = LOOM_TARGET_CONTRACT_SYSTEM_DESCRIPTOR_RULE;
-  cases[0].row_index = 0;
-  descriptor_rules[0].rule_index = 0;
-
-  loom_target_contract_fragment_t fragment = {};
-  fragment.dialect_base_id = loom_op_dialect_id(kSourceOpKind);
-  fragment.dialect_count = 1;
-  fragment.flags = LOOM_TARGET_CONTRACT_FRAGMENT_FLAG_TARGET_QUERY;
-  fragment.dialects = dialects;
-  fragment.case_count = 1;
-  fragment.cases = cases;
-  fragment.descriptor_rule_count = 1;
-  fragment.descriptor_rules = descriptor_rules;
-  return fragment;
-}
-
 loom_target_contract_fragment_t MakeContractFragmentForOp(
-    loom_op_kind_t source_op_kind, loom_target_contract_op_entry_t* op_entries,
-    uint16_t op_entry_count, loom_target_contract_dialect_table_t* dialects,
+    loom_op_kind_t source_op_kind,
+    loom_target_contract_fragment_op_span_t* op_spans,
     loom_target_contract_fragment_case_t* cases,
     loom_target_contract_descriptor_rule_t* descriptor_rules) {
-  op_entries[loom_op_dialect_index(source_op_kind)].case_start = 0;
-  op_entries[loom_op_dialect_index(source_op_kind)].case_count = 1;
-  dialects[0].op_count = op_entry_count;
-  dialects[0].op_entries = op_entries;
+  op_spans[0].op_kind = source_op_kind;
+  op_spans[0].case_start = 0;
+  op_spans[0].case_count = 1;
   cases[0].system = LOOM_TARGET_CONTRACT_SYSTEM_DESCRIPTOR_RULE;
   cases[0].row_index = 0;
   descriptor_rules[0].rule_index = 0;
 
   loom_target_contract_fragment_t fragment = {};
-  fragment.dialect_base_id = loom_op_dialect_id(source_op_kind);
-  fragment.dialect_count = 1;
+  fragment.op_span_count = 1;
   fragment.flags = LOOM_TARGET_CONTRACT_FRAGMENT_FLAG_TARGET_QUERY;
-  fragment.dialects = dialects;
+  fragment.op_spans = op_spans;
   fragment.case_count = 1;
   fragment.cases = cases;
   fragment.descriptor_rule_count = 1;
@@ -351,12 +324,11 @@ TEST(LowContractQueryTest, ContractIndexDescriptorRuleSelectsLegalCase) {
   rule_set.emit_count = 1;
   const loom_low_lower_rule_set_t* rule_sets[] = {&rule_set};
 
-  loom_target_contract_op_entry_t op_entries[4] = {};
-  loom_target_contract_dialect_table_t dialects[1] = {};
+  loom_target_contract_fragment_op_span_t op_spans[1] = {};
   loom_target_contract_fragment_case_t cases[1] = {};
   loom_target_contract_descriptor_rule_t descriptor_rules[1] = {};
-  loom_target_contract_fragment_t fragment =
-      MakeContractFragment(op_entries, dialects, cases, descriptor_rules);
+  loom_target_contract_fragment_t fragment = MakeContractFragmentForOp(
+      kSourceOpKind, op_spans, cases, descriptor_rules);
   const loom_target_contract_binding_t bindings[] = {
       {
           &fragment,
@@ -473,12 +445,11 @@ TEST(LowContractQueryTest, ContractIndexDescriptorRuleReportsRejectedCase) {
   rule_set.diagnostic_count = 1;
   const loom_low_lower_rule_set_t* rule_sets[] = {&rule_set};
 
-  loom_target_contract_op_entry_t op_entries[4] = {};
-  loom_target_contract_dialect_table_t dialects[1] = {};
+  loom_target_contract_fragment_op_span_t op_spans[1] = {};
   loom_target_contract_fragment_case_t cases[1] = {};
   loom_target_contract_descriptor_rule_t descriptor_rules[1] = {};
-  loom_target_contract_fragment_t fragment =
-      MakeContractFragment(op_entries, dialects, cases, descriptor_rules);
+  loom_target_contract_fragment_t fragment = MakeContractFragmentForOp(
+      kSourceOpKind, op_spans, cases, descriptor_rules);
   const loom_target_contract_binding_t bindings[] = {
       {
           &fragment,
@@ -626,13 +597,11 @@ TEST_F(LowContractQuerySourceMemoryTest,
   rule_set.emit_count = 1;
   const loom_low_lower_rule_set_t* rule_sets[] = {&rule_set};
 
-  loom_target_contract_op_entry_t op_entries[LOOM_OP_VECTOR_COUNT_] = {};
-  loom_target_contract_dialect_table_t dialects[1] = {};
+  loom_target_contract_fragment_op_span_t op_spans[1] = {};
   loom_target_contract_fragment_case_t cases[1] = {};
   loom_target_contract_descriptor_rule_t descriptor_rules[1] = {};
   loom_target_contract_fragment_t fragment = MakeContractFragmentForOp(
-      LOOM_OP_VECTOR_LOAD, op_entries, IREE_ARRAYSIZE(op_entries), dialects,
-      cases, descriptor_rules);
+      LOOM_OP_VECTOR_LOAD, op_spans, cases, descriptor_rules);
   const loom_target_contract_binding_t bindings[] = {
       {
           &fragment,

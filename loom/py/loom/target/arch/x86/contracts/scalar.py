@@ -1236,9 +1236,8 @@ def _madd_address_rules(
     return tuple(rules)
 
 
-def x86_scalar_core_cases(
-    descriptor_lookup: _DescriptorLookup,
-) -> Sequence[ContractCase]:
+def _cases() -> Sequence[ContractCase]:
+    descriptor_lookup = _descriptor
     return (
         _buffer_view_rule(),
         _buffer_load_i8_u_rule(descriptor_lookup),
@@ -1507,5 +1506,5 @@ X86_SCALAR_CONTRACT_FRAGMENT = ContractFragment(
     name="x86.scalar",
     descriptor_set=X86_SCALAR_DESCRIPTOR_SET,
     public_header="loom/target/arch/x86/contracts/scalar.h",
-    cases=x86_scalar_core_cases(_descriptor),
+    cases=_cases(),
 )

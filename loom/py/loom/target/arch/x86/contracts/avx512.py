@@ -10,15 +10,9 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 
-from loom.dialect.buffer import ALL_BUFFER_OPS
-from loom.dialect.index import ALL_INDEX_OPS
-from loom.dialect.scalar import ALL_SCALAR_OPS
-from loom.dialect.scf import ALL_SCF_OPS
 from loom.dialect.vector import ALL_VECTOR_OPS
 from loom.dialect.vector import defs as vector
-from loom.dialect.view import ALL_VIEW_OPS
 from loom.dsl import Op
-from loom.target.arch.x86.contracts.avx2 import x86_avx2_core_cases
 from loom.target.arch.x86.contracts.memory import x86_vector_memory_rules
 from loom.target.arch.x86.descriptors import X86_AVX512_CORE_DESCRIPTOR_SET
 from loom.target.contracts import (
@@ -342,7 +336,6 @@ def _reduce_f32x16_rule() -> DescriptorRule:
 
 def _cases() -> Sequence[ContractCase]:
     return (
-        *x86_avx2_core_cases(_descriptor),
         _splat_rule(_I32, _V16I32, "x86.avx512.vpbroadcastd.zmm"),
         _splat_rule(_F32, _V16F32, "x86.avx512.vbroadcastss.zmm"),
         _select_rule(_V16I1, _V16I32, "x86.avx512.vpblendmd.zmm"),
@@ -453,12 +446,7 @@ def _cases() -> Sequence[ContractCase]:
 
 
 X86_AVX512_CONTRACT_DIALECT_OPS = {
-    "buffer": ALL_BUFFER_OPS,
-    "index": ALL_INDEX_OPS,
-    "scalar": ALL_SCALAR_OPS,
-    "scf": ALL_SCF_OPS,
     "vector": ALL_VECTOR_OPS,
-    "view": ALL_VIEW_OPS,
 }
 
 X86_AVX512_CONTRACT_FRAGMENT = ContractFragment(

@@ -376,47 +376,55 @@ static iree_status_t loom_x86_map_avx512_packed_dot_argument(
                                              &out_argument->abi_type);
 }
 
-static const loom_low_lower_rule_set_t* const kX86Avx512RuleSets[] = {
-    &loom_x86_avx512_lower_rule_set,
+enum {
+  kLoomX86CoreScalarComponent = 0u,
+  kLoomX86CoreAvx2Component = 1u,
+  kLoomX86CoreAvx512Component = 2u,
+  kLoomX86CorePackedDotComponent = 3u,
+  kLoomX86CoreComponentCount = 4u,
 };
 
-static const loom_low_lower_rule_set_t* const kX86Avx2RuleSets[] = {
-    &loom_x86_avx2_lower_rule_set,
-};
-
-static const loom_low_lower_rule_set_t* const kX86ScalarRuleSets[] = {
-    &loom_x86_scalar_lower_rule_set,
+// Ordered capability components. Scalar, AVX2, and AVX512 policies consume
+// progressively longer prefixes; the combined packed-dot policy consumes all
+// components. This order preserves the historical flattened rule precedence.
+static const loom_low_lower_rule_set_t* const
+    kX86CoreRuleSets[kLoomX86CoreComponentCount] = {
+        [kLoomX86CoreScalarComponent] = &loom_x86_scalar_lower_rule_set,
+        [kLoomX86CoreAvx2Component] = &loom_x86_avx2_lower_rule_set,
+        [kLoomX86CoreAvx512Component] = &loom_x86_avx512_lower_rule_set,
+        [kLoomX86CorePackedDotComponent] = &loom_x86_packed_dot_lower_rule_set,
 };
 
 static const loom_low_lower_rule_set_t* const kX86PackedDotRuleSets[] = {
     &loom_x86_packed_dot_lower_rule_set,
 };
 
-static const loom_low_lower_rule_set_t* const kX86Avx512PackedDotRuleSets[] = {
-    &loom_x86_avx512_lower_rule_set,
-    &loom_x86_packed_dot_lower_rule_set,
-};
-
-static const loom_target_contract_binding_t kX86Avx512ContractBindings[] = {
-    {&loom_x86_avx512_contract_fragment, 0},
-};
-
-static const loom_target_contract_binding_t kX86Avx2ContractBindings[] = {
-    {&loom_x86_avx2_contract_fragment, 0},
-};
-
-static const loom_target_contract_binding_t kX86ScalarContractBindings[] = {
-    {&loom_x86_scalar_contract_fragment, 0},
+static const loom_target_contract_binding_t
+    kX86CoreContractBindings[kLoomX86CoreComponentCount] = {
+        [kLoomX86CoreScalarComponent] =
+            {
+                &loom_x86_scalar_contract_fragment,
+                kLoomX86CoreScalarComponent,
+            },
+        [kLoomX86CoreAvx2Component] =
+            {
+                &loom_x86_avx2_contract_fragment,
+                kLoomX86CoreAvx2Component,
+            },
+        [kLoomX86CoreAvx512Component] =
+            {
+                &loom_x86_avx512_contract_fragment,
+                kLoomX86CoreAvx512Component,
+            },
+        [kLoomX86CorePackedDotComponent] =
+            {
+                &loom_x86_packed_dot_contract_fragment,
+                kLoomX86CorePackedDotComponent,
+            },
 };
 
 static const loom_target_contract_binding_t kX86PackedDotContractBindings[] = {
     {&loom_x86_packed_dot_contract_fragment, 0},
-};
-
-static const loom_target_contract_binding_t
-    kX86Avx512PackedDotContractBindings[] = {
-        {&loom_x86_avx512_contract_fragment, 0},
-        {&loom_x86_packed_dot_contract_fragment, 1},
 };
 
 static const loom_low_lower_policy_t kX86Avx512LowLowerPolicy = {
@@ -428,11 +436,11 @@ static const loom_low_lower_policy_t kX86Avx512LowLowerPolicy = {
                               .user_data = NULL},
     .rule_sets =
         {
-            .count = IREE_ARRAYSIZE(kX86Avx512RuleSets),
-            .values = kX86Avx512RuleSets,
+            .count = kLoomX86CoreAvx512Component + 1u,
+            .values = kX86CoreRuleSets,
         },
-    .contract_bindings = kX86Avx512ContractBindings,
-    .contract_binding_count = IREE_ARRAYSIZE(kX86Avx512ContractBindings),
+    .contract_bindings = kX86CoreContractBindings,
+    .contract_binding_count = kLoomX86CoreAvx512Component + 1u,
 };
 
 static const loom_low_lower_policy_t kX86Avx2LowLowerPolicy = {
@@ -444,11 +452,11 @@ static const loom_low_lower_policy_t kX86Avx2LowLowerPolicy = {
                               .user_data = NULL},
     .rule_sets =
         {
-            .count = IREE_ARRAYSIZE(kX86Avx2RuleSets),
-            .values = kX86Avx2RuleSets,
+            .count = kLoomX86CoreAvx2Component + 1u,
+            .values = kX86CoreRuleSets,
         },
-    .contract_bindings = kX86Avx2ContractBindings,
-    .contract_binding_count = IREE_ARRAYSIZE(kX86Avx2ContractBindings),
+    .contract_bindings = kX86CoreContractBindings,
+    .contract_binding_count = kLoomX86CoreAvx2Component + 1u,
 };
 
 static const loom_low_lower_policy_t kX86ScalarLowLowerPolicy = {
@@ -460,11 +468,11 @@ static const loom_low_lower_policy_t kX86ScalarLowLowerPolicy = {
                               .user_data = NULL},
     .rule_sets =
         {
-            .count = IREE_ARRAYSIZE(kX86ScalarRuleSets),
-            .values = kX86ScalarRuleSets,
+            .count = kLoomX86CoreScalarComponent + 1u,
+            .values = kX86CoreRuleSets,
         },
-    .contract_bindings = kX86ScalarContractBindings,
-    .contract_binding_count = IREE_ARRAYSIZE(kX86ScalarContractBindings),
+    .contract_bindings = kX86CoreContractBindings,
+    .contract_binding_count = kLoomX86CoreScalarComponent + 1u,
 };
 
 static const loom_low_lower_policy_t kX86PackedDotLowLowerPolicy = {
@@ -498,12 +506,11 @@ static const loom_low_lower_policy_t kX86Avx512PackedDotLowLowerPolicy = {
         },
     .rule_sets =
         {
-            .count = IREE_ARRAYSIZE(kX86Avx512PackedDotRuleSets),
-            .values = kX86Avx512PackedDotRuleSets,
+            .count = IREE_ARRAYSIZE(kX86CoreRuleSets),
+            .values = kX86CoreRuleSets,
         },
-    .contract_bindings = kX86Avx512PackedDotContractBindings,
-    .contract_binding_count =
-        IREE_ARRAYSIZE(kX86Avx512PackedDotContractBindings),
+    .contract_bindings = kX86CoreContractBindings,
+    .contract_binding_count = IREE_ARRAYSIZE(kX86CoreContractBindings),
 };
 
 const loom_low_lower_policy_t* loom_x86_avx512_low_lower_policy(void) {
