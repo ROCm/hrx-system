@@ -25,6 +25,13 @@
 #include "loom/ops/vector/storage.h"
 #include "loom/target/registers.h"
 
+iree_string_view_t loom_low_lower_rule_set_string(
+    const loom_low_lower_rule_set_t* rule_set,
+    loom_bstring_table_offset_t string_offset) {
+  return loom_bstring_view(
+      loom_bstring_table_get(&rule_set->string_table, string_offset));
+}
+
 static const loom_low_lower_rule_span_t* loom_low_lower_rule_set_find_span(
     const loom_low_lower_rule_set_t* rule_set, loom_op_kind_t source_op_kind) {
   uint16_t low = 0;
@@ -256,7 +263,8 @@ iree_status_t loom_low_lower_rule_resolve_descriptor_ref(
   }
   IREE_ASSERT(match_context->descriptor_set != NULL);
   IREE_ASSERT(rule_set->descriptor_refs != NULL);
-  const iree_string_view_t key = rule_set->descriptor_refs[descriptor_ref].key;
+  const iree_string_view_t key = loom_low_lower_rule_set_string(
+      rule_set, rule_set->descriptor_refs[descriptor_ref].key_string_offset);
   const uint32_t descriptor_ordinal = loom_low_descriptor_set_lookup_descriptor(
       match_context->descriptor_set, key);
   if (descriptor_ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
@@ -1719,7 +1727,8 @@ static iree_status_t loom_low_lower_rule_descriptor_maps_initialize(
     map->descriptors = descriptors;
     for (uint16_t j = 0; j < rule_set->descriptor_ref_count; ++j) {
       descriptors[j] = NULL;
-      const iree_string_view_t key = rule_set->descriptor_refs[j].key;
+      const iree_string_view_t key = loom_low_lower_rule_set_string(
+          rule_set, rule_set->descriptor_refs[j].key_string_offset);
       const uint32_t descriptor_ordinal =
           loom_low_descriptor_set_lookup_descriptor(descriptor_set, key);
       if (descriptor_ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
@@ -1866,7 +1875,8 @@ void loom_low_lower_rule_materialize_diagnostic_params(
             loom_param_string(loom_op_name(match_context->module, source_op));
         break;
       case LOOM_LOW_LOWER_DIAGNOSTIC_PARAM_STRING_LITERAL:
-        out_params[i] = loom_param_string(row->string_value);
+        out_params[i] = loom_param_string(
+            loom_low_lower_rule_set_string(rule_set, row->string_value_offset));
         break;
       case LOOM_LOW_LOWER_DIAGNOSTIC_PARAM_VALUE_TYPE: {
         const loom_value_id_t value_id = loom_low_lower_rule_source_value(
@@ -2049,9 +2059,11 @@ static iree_status_t loom_low_lower_rule_build_attrs(
     uint16_t attr_copy_index = (uint16_t)(emit->attr_copy_start + i);
     const loom_low_lower_attr_copy_t* attr_copy =
         &rule_set->attr_copies[attr_copy_index];
-    IREE_RETURN_IF_ERROR(
-        loom_module_intern_string(loom_low_lower_context_module(context),
-                                  attr_copy->target_name, &attrs[i].name_id));
+    IREE_RETURN_IF_ERROR(loom_module_intern_string(
+        loom_low_lower_context_module(context),
+        loom_low_lower_rule_set_string(rule_set,
+                                       attr_copy->target_name_string_offset),
+        &attrs[i].name_id));
     switch (attr_copy->kind) {
       case LOOM_LOW_LOWER_ATTR_COPY_DIRECT:
         IREE_ASSERT_LT(attr_copy->source_attr_index,

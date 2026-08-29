@@ -11,8 +11,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from loom.gen.support import c_arrays
-from loom.gen.support.c import c_string_literal
 from loom.gen.support.generated_file import line_comment_header
+from loom.gen.support.string_pool import emit_c_string_table
 from loom.gen.target.low import c_spelling, validation
 from loom.gen.target.low.compiled import (
     CompiledAsmForm,
@@ -157,38 +157,11 @@ def _emit_string_table(compiled: CompiledDescriptorSet, lines: list[str]) -> Non
     spec = compiled.spec
     pool = compiled.string_pool
     lines.extend(
-        [
-            "// clang-format off",
-            f"static const uint8_t k{spec.c_table_prefix}StringData[] =",
-        ]
+        emit_c_string_table(
+            pool,
+            f"k{spec.c_table_prefix}StringData",
+        )
     )
-    for entry in pool.entries:
-        length = len(entry.value.encode())
-        escaped = c_string_literal(entry.value)
-        lines.append(f'    LOOM_BSTRING_LITERAL({length}, "{escaped}")')
-    lines[-1] += ";"
-    lines.append("// clang-format on")
-    lines.append("")
-    lines.append("enum {")
-    previous_label: str | None = None
-    entries_by_label = pool.entries_by_label
-    for entry in pool.entries:
-        enum_name = f"{pool.c_enum_prefix}_STRING_{entry.label}"
-        if previous_label is None:
-            lines.append(f"  {enum_name} = 0,")
-        else:
-            previous_entry = entries_by_label[previous_label]
-            previous_enum_name = f"{pool.c_enum_prefix}_STRING_{previous_label}"
-            lines.append(f'  {enum_name} = {previous_enum_name} + sizeof("{c_string_literal(previous_entry.value)}"),')
-        previous_label = entry.label
-    if previous_label is None:
-        lines.append(f"  {pool.c_enum_prefix}_STRING_END = 0,")
-    else:
-        previous_entry = entries_by_label[previous_label]
-        previous_enum_name = f"{pool.c_enum_prefix}_STRING_{previous_label}"
-        lines.append(f'  {pool.c_enum_prefix}_STRING_END = {previous_enum_name} + sizeof("{c_string_literal(previous_entry.value)}"),')
-    lines.append("};")
-    lines.append("")
     lines.append(f'static_assert({pool.c_enum_prefix}_STRING_END == sizeof(k{spec.c_table_prefix}StringData) - 1, "descriptor string offsets must cover the table payload");')
     lines.append("")
 

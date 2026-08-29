@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from loom.gen.support.c import CIdentifierCase, c_identifier
+from loom.gen.support.c import CIdentifierCase, c_identifier, c_string_literal
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,3 +70,39 @@ class CStringPool:
     def ref(self, label: str) -> str:
         """Returns a C expression naming the interned string offset enum."""
         return self.enum_name(label)
+
+
+def emit_c_string_table(pool: CStringPool, data_name: str) -> list[str]:
+    """Emits one packed B-string byte table and its offset constants."""
+    if not pool.entries:
+        return []
+    lines = [
+        "// clang-format off",
+        f"static const uint8_t {data_name}[] =",
+    ]
+    for entry in pool.entries:
+        length = len(entry.value.encode())
+        escaped = c_string_literal(entry.value)
+        lines.append(f'    LOOM_BSTRING_LITERAL({length}, "{escaped}")')
+    lines[-1] += ";"
+    lines.extend(["// clang-format on", "", "enum {"])
+    for index, entry in enumerate(pool.entries):
+        enum_name = pool.enum_name(entry.label)
+        if index == 0:
+            lines.append(f"  {enum_name} = 0,")
+        else:
+            previous_entry = pool.entries[index - 1]
+            previous_enum_name = pool.enum_name(previous_entry.label)
+            previous_value = c_string_literal(previous_entry.value)
+            lines.append(f'  {enum_name} = {previous_enum_name} + sizeof("{previous_value}"),')
+    previous_entry = pool.entries[-1]
+    previous_enum_name = pool.enum_name(previous_entry.label)
+    previous_value = c_string_literal(previous_entry.value)
+    lines.extend(
+        [
+            f'  {pool.c_enum_prefix}_STRING_END = {previous_enum_name} + sizeof("{previous_value}"),',
+            "};",
+            "",
+        ]
+    )
+    return lines

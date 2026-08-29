@@ -31,6 +31,26 @@ namespace {
 constexpr loom_op_kind_t kSourceOpKind = LOOM_OP_KIND(7, 3);
 constexpr uint64_t kDescriptorId = UINT64_C(0x123456789abcdef0);
 
+const uint8_t kRuleStringData[] = LOOM_BSTRING_LITERAL(15, "test.descriptor")
+    LOOM_BSTRING_LITERAL(11, "test.source") LOOM_BSTRING_LITERAL(5, "field")
+        LOOM_BSTRING_LITERAL(5, "value") LOOM_BSTRING_LITERAL(9, "attr_kind");
+
+enum : loom_bstring_table_offset_t {
+  kRuleStringDescriptor = 0,
+  kRuleStringSource = kRuleStringDescriptor + sizeof("test.descriptor"),
+  kRuleStringField = kRuleStringSource + sizeof("test.source"),
+  kRuleStringValue = kRuleStringField + sizeof("field"),
+  kRuleStringAttrKind = kRuleStringValue + sizeof("value"),
+  kRuleStringEnd = kRuleStringAttrKind + sizeof("attr_kind"),
+};
+
+const loom_bstring_table_t kRuleStringTable = {
+    /*.data=*/kRuleStringData,
+    /*.data_length=*/sizeof(kRuleStringData) - 1,
+};
+
+static_assert(kRuleStringEnd == sizeof(kRuleStringData) - 1);
+
 const loom_low_descriptor_t kDescriptor = {
     /*.key_string_offset=*/0,
     /*.stable_id=*/kDescriptorId,
@@ -259,7 +279,7 @@ class LowContractQuerySourceMemoryTest : public ::testing::Test {
 
 TEST(LowContractQueryTest, ContractIndexDescriptorRuleSelectsLegalCase) {
   loom_low_lower_rule_descriptor_ref_t descriptor_ref = {
-      /*.key=*/IREE_SV("test.descriptor"),
+      /*.key_string_offset=*/kRuleStringDescriptor,
   };
   loom_low_lower_emit_t emit = {};
   emit.kind = LOOM_LOW_LOWER_EMIT_DESCRIPTOR_OP;
@@ -268,6 +288,7 @@ TEST(LowContractQueryTest, ContractIndexDescriptorRuleSelectsLegalCase) {
   rule.source_op_kind = kSourceOpKind;
   rule.emit_count = 1;
   loom_low_lower_rule_set_t rule_set = {};
+  rule_set.string_table = kRuleStringTable;
   rule_set.rules = &rule;
   rule_set.rule_count = 1;
   rule_set.descriptor_refs = &descriptor_ref;
@@ -353,19 +374,19 @@ TEST(LowContractQueryTest, ContractIndexDescriptorRuleReportsRejectedCase) {
       },
       {
           /*.kind=*/LOOM_LOW_LOWER_DIAGNOSTIC_PARAM_STRING_LITERAL,
-          /*.string_value=*/IREE_SV("test.source"),
+          /*.string_value_offset=*/kRuleStringSource,
       },
       {
           /*.kind=*/LOOM_LOW_LOWER_DIAGNOSTIC_PARAM_STRING_LITERAL,
-          /*.string_value=*/IREE_SV("field"),
+          /*.string_value_offset=*/kRuleStringField,
       },
       {
           /*.kind=*/LOOM_LOW_LOWER_DIAGNOSTIC_PARAM_STRING_LITERAL,
-          /*.string_value=*/IREE_SV("value"),
+          /*.string_value_offset=*/kRuleStringValue,
       },
       {
           /*.kind=*/LOOM_LOW_LOWER_DIAGNOSTIC_PARAM_STRING_LITERAL,
-          /*.string_value=*/IREE_SV("attr_kind"),
+          /*.string_value_offset=*/kRuleStringAttrKind,
       },
   };
   loom_low_lower_diagnostic_t diagnostic = {};
@@ -375,6 +396,7 @@ TEST(LowContractQueryTest, ContractIndexDescriptorRuleReportsRejectedCase) {
   rule.source_op_kind = kSourceOpKind;
   rule.guard_count = 1;
   loom_low_lower_rule_set_t rule_set = {};
+  rule_set.string_table = kRuleStringTable;
   rule_set.rules = &rule;
   rule_set.rule_count = 1;
   rule_set.guards = &guard;

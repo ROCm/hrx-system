@@ -1624,7 +1624,9 @@ static iree_status_t loom_low_lower_record_report_row(
           selected_plan->rule->report_key_ordinal - 1u;
       IREE_ASSERT_LT(report_key_index,
                      selected_plan->rule_set->report_key_count);
-      row.plan_key = selected_plan->rule_set->report_keys[report_key_index];
+      row.plan_key = loom_low_lower_rule_set_string(
+          selected_plan->rule_set,
+          selected_plan->rule_set->report_key_string_offsets[report_key_index]);
     }
     if (selected_plan->rule->emit_count != 0 &&
         selected_plan->resolved_emits != NULL) {

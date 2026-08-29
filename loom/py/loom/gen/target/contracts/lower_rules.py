@@ -16,6 +16,7 @@ from loom.dsl import Op
 from loom.gen.support.c import c_identifier as _c_identifier
 from loom.gen.support.files import write_text_file
 from loom.gen.support.generated_file import line_comment_header
+from loom.gen.support.string_pool import CStringPool, emit_c_string_table
 from loom.gen.target.contracts import lower_rule_rows, lower_rule_spelling
 from loom.target.contracts import (
     LOWER_EMIT_FLAG_BIND_RESULTS_TO_REFS,
@@ -172,6 +173,23 @@ def _generate_source(
     )
     lines.append("")
 
+    descriptor_ref_keys = lower_rule_rows.descriptor_ref_keys(table, source_contract)
+    report_keys = _collect_report_keys(table)
+    _validate_c_table_shape(table, source_contract, descriptor_ref_keys)
+    descriptor_refs = {key: index for index, key in enumerate(descriptor_ref_keys)}
+    report_key_ordinals = {key: index + 1 for index, key in enumerate(report_keys)}
+    string_pool = _build_string_pool(
+        table,
+        descriptor_ref_keys=descriptor_ref_keys,
+        report_keys=report_keys,
+        c_enum_prefix=f"{_c_identifier(table.name).upper()}_LOWER",
+    )
+    string_data_name = f"k{c_table_prefix}StringData"
+    lines.extend(emit_c_string_table(string_pool, string_data_name))
+    if string_pool.entries:
+        lines.append(f'static_assert({string_pool.c_enum_prefix}_STRING_END == sizeof({string_data_name}) - 1, "lower-rule string offsets must cover the table payload");')
+        lines.append("")
+
     type_patterns_name = f"k{c_table_prefix}TypePatterns"
     lines.extend(
         lower_rule_rows.emit_optional_array(
@@ -205,17 +223,12 @@ def _generate_source(
         )
     )
 
-    descriptor_ref_keys = lower_rule_rows.descriptor_ref_keys(table, source_contract)
-    report_keys = _collect_report_keys(table)
-    _validate_c_table_shape(table, source_contract, descriptor_ref_keys)
-    descriptor_refs = {key: index for index, key in enumerate(descriptor_ref_keys)}
-    report_key_ordinals = {key: index + 1 for index, key in enumerate(report_keys)}
     descriptor_refs_name = f"k{c_table_prefix}DescriptorRefs"
     lines.extend(
         lower_rule_rows.emit_optional_array(
             descriptor_refs_name,
             "loom_low_lower_rule_descriptor_ref_t",
-            [lower_rule_rows.descriptor_ref_row(key) for key in descriptor_ref_keys],
+            [lower_rule_rows.descriptor_ref_row(string_pool.ref(_descriptor_ref_string_label(index))) for index, _ in enumerate(descriptor_ref_keys)],
         )
     )
 
@@ -224,7 +237,15 @@ def _generate_source(
         lower_rule_rows.emit_optional_array(
             source_memories_name,
             "loom_low_lower_source_memory_t",
-            [lower_rule_rows.source_memory_row(descriptor_refs, row) for row in table.source_memories],
+            [
+                lower_rule_rows.source_memory_row(
+                    descriptor_refs,
+                    row,
+                    byte_offset_immediate_string_offset=(string_pool.ref(_source_memory_byte_offset_string_label(index)) if row.byte_offset_materializer is not None else None),
+                    address_immediate_string_offset=(string_pool.ref(_source_memory_address_string_label(index)) if row.address_materializer is not None else None),
+                )
+                for index, row in enumerate(table.source_memories)
+            ],
         )
     )
 
@@ -246,7 +267,13 @@ def _generate_source(
         lower_rule_rows.emit_optional_array(
             diagnostic_params_name,
             "loom_low_lower_diagnostic_param_t",
-            [lower_rule_rows.diagnostic_param_row(row) for row in diagnostic_param_rows],
+            [
+                lower_rule_rows.diagnostic_param_row(
+                    row,
+                    string_value_offset=(string_pool.ref(_diagnostic_param_string_label(index)) if row.kind == DiagnosticParamKind.STRING_LITERAL else None),
+                )
+                for index, row in enumerate(diagnostic_param_rows)
+            ],
         )
     )
 
@@ -273,7 +300,13 @@ def _generate_source(
         lower_rule_rows.emit_optional_array(
             attr_copies_name,
             "loom_low_lower_attr_copy_t",
-            [lower_rule_rows.attr_copy_row(row) for row in table.attr_copies],
+            [
+                lower_rule_rows.attr_copy_row(
+                    row,
+                    target_name_string_offset=string_pool.ref(_attr_copy_string_label(index)),
+                )
+                for index, row in enumerate(table.attr_copies)
+            ],
         )
     )
 
@@ -297,10 +330,10 @@ def _generate_source(
 
     report_keys_name = f"k{c_table_prefix}ReportKeys"
     lines.extend(
-        lower_rule_rows.emit_optional_array(
+        lower_rule_rows.emit_optional_value_array(
             report_keys_name,
-            "iree_string_view_t",
-            [lower_rule_rows.report_key_row(key) for key in report_keys],
+            "loom_bstring_table_offset_t",
+            [string_pool.ref(_report_key_string_label(index)) for index, _ in enumerate(report_keys)],
         )
     )
 
@@ -328,6 +361,8 @@ def _generate_source(
         for field in lower_rule_rows.rule_set_row(
             table=table,
             source_contract=source_contract,
+            string_pool=string_pool,
+            string_data_name=string_data_name,
             spans_name=spans_name,
             rules_name=rules_name,
             report_keys=report_keys,
@@ -348,6 +383,67 @@ def _generate_source(
     )
     lines.extend(["};", ""])
     return "\n".join(lines)
+
+
+def _descriptor_ref_string_label(index: int) -> str:
+    return f"descriptor_ref_{index}_key"
+
+
+def _source_memory_byte_offset_string_label(index: int) -> str:
+    return f"source_memory_{index}_byte_offset_immediate"
+
+
+def _source_memory_address_string_label(index: int) -> str:
+    return f"source_memory_{index}_address_immediate"
+
+
+def _diagnostic_param_string_label(index: int) -> str:
+    return f"diagnostic_param_{index}_literal"
+
+
+def _attr_copy_string_label(index: int) -> str:
+    return f"attr_copy_{index}_target_name"
+
+
+def _report_key_string_label(index: int) -> str:
+    return f"report_key_{index}"
+
+
+def _build_string_pool(
+    table: CompiledLowerRuleSet,
+    *,
+    descriptor_ref_keys: tuple[str, ...],
+    report_keys: tuple[str, ...],
+    c_enum_prefix: str,
+) -> CStringPool:
+    pool = CStringPool(c_enum_prefix)
+    for index, key in enumerate(descriptor_ref_keys):
+        pool.intern(_descriptor_ref_string_label(index), key)
+    for index, row in enumerate(table.source_memories):
+        if row.byte_offset_materializer is not None:
+            pool.intern(
+                _source_memory_byte_offset_string_label(index),
+                row.byte_offset_materializer.const_i64_immediate,
+            )
+        if row.address_materializer is not None:
+            pool.intern(
+                _source_memory_address_string_label(index),
+                row.address_materializer.const_coordinate_immediate,
+            )
+    diagnostic_param_index = 0
+    for diagnostic in table.diagnostics:
+        for param in diagnostic.params:
+            if param.kind == DiagnosticParamKind.STRING_LITERAL:
+                pool.intern(
+                    _diagnostic_param_string_label(diagnostic_param_index),
+                    param.string_value,
+                )
+            diagnostic_param_index += 1
+    for index, row in enumerate(table.attr_copies):
+        pool.intern(_attr_copy_string_label(index), row.target_name)
+    for index, key in enumerate(report_keys):
+        pool.intern(_report_key_string_label(index), key)
+    return pool
 
 
 def _validate_c_table_shape(

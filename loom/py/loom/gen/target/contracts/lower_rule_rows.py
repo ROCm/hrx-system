@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from loom.gen.support.c import c_i64_literal as _c_i64_literal
-from loom.gen.support.c import c_string_literal as _c_string_literal
+from loom.gen.support.string_pool import CStringPool
 from loom.gen.target.contracts import lower_rule_spelling
 from loom.target.contracts import (
     LOWER_EMIT_FLAG_BIND_RESULTS_TO_REFS,
@@ -121,6 +121,19 @@ def emit_optional_array(
     return lines
 
 
+def emit_optional_value_array(
+    name: str,
+    c_type: str,
+    values: list[str],
+) -> list[str]:
+    if not values:
+        return []
+    lines = [f"static const {c_type} {name}[] = {{"]
+    lines.extend(f"    {value}," for value in values)
+    lines.extend(["};", ""])
+    return lines
+
+
 def _append_field(
     fields: list[str],
     name: str,
@@ -151,7 +164,14 @@ def value_ref_row(row: LowerValueRef) -> list[str]:
 def source_memory_row(
     descriptor_refs: Mapping[str, int],
     row: LowerSourceMemory,
+    *,
+    byte_offset_immediate_string_offset: str | None = None,
+    address_immediate_string_offset: str | None = None,
 ) -> list[str]:
+    if row.byte_offset_materializer is not None and byte_offset_immediate_string_offset is None:
+        raise ValueError("source-memory byte-offset materializer is missing its string offset")
+    if row.address_materializer is not None and address_immediate_string_offset is None:
+        raise ValueError("source-memory address materializer is missing its string offset")
     constraint = row.constraint
     fields: list[str] = []
     flags: list[str] = []
@@ -291,8 +311,8 @@ def source_memory_row(
         )
         _append_field(
             fields,
-            "byte_offset_const_i64_immediate",
-            f'IREE_SVL("{_c_string_literal(materializer.const_i64_immediate)}")',
+            "byte_offset_const_i64_immediate_string_offset",
+            byte_offset_immediate_string_offset,
             always=True,
         )
         _append_field(
@@ -357,8 +377,8 @@ def source_memory_row(
         )
         _append_field(
             fields,
-            "address_const_coordinate_immediate",
-            f'IREE_SVL("{_c_string_literal(materializer.const_coordinate_immediate)}")',
+            "address_const_coordinate_immediate_string_offset",
+            address_immediate_string_offset,
             always=True,
         )
         _append_field(
@@ -443,16 +463,8 @@ def descriptor_ref_keys(table: CompiledLowerRuleSet, source_contract: ContractFr
     return tuple(descriptor.key for descriptor in source_contract.descriptor_set.descriptors if descriptor.key in used_keys)
 
 
-def descriptor_ref_row(key: str) -> list[str]:
-    return [f'.key = IREE_SVL("{_c_string_literal(key)}")']
-
-
-def report_key_row(key: str) -> list[str]:
-    literal = _c_string_literal(key)
-    return [
-        f'.data = "{literal}"',
-        f'.size = IREE_ARRAYSIZE("{literal}") - 1',
-    ]
+def descriptor_ref_row(key_string_offset: str) -> list[str]:
+    return [f".key_string_offset = {key_string_offset}"]
 
 
 def _descriptor_ref_index(descriptor_refs: Mapping[str, int], descriptor: Descriptor | None) -> int:
@@ -576,13 +588,19 @@ def guard_row(descriptor_refs: Mapping[str, int], row: LowerGuard) -> list[str]:
     return fields
 
 
-def attr_copy_row(row: LowerAttrCopy) -> list[str]:
+def attr_copy_row(
+    row: LowerAttrCopy,
+    *,
+    target_name_string_offset: str | None = None,
+) -> list[str]:
+    if target_name_string_offset is None:
+        raise ValueError("attribute-copy row is missing its target-name string offset")
     fields: list[str] = []
     _append_field(fields, "kind", lower_rule_spelling.ATTR_COPY_KIND_C_NAMES[row.kind], always=True)
     _append_field(
         fields,
-        "target_name",
-        f'IREE_SVL("{_c_string_literal(row.target_name)}")',
+        "target_name_string_offset",
+        target_name_string_offset,
         always=True,
     )
     if row.kind in (
@@ -777,6 +795,8 @@ def rule_set_row(
     *,
     table: CompiledLowerRuleSet,
     source_contract: ContractFragment,
+    string_pool: CStringPool,
+    string_data_name: str,
     spans_name: str,
     rules_name: str,
     report_keys: tuple[str, ...],
@@ -797,9 +817,16 @@ def rule_set_row(
     fields: list[str] = []
     if source_contract.target_contract_query:
         fields.append(".flags = LOOM_LOW_LOWER_RULE_SET_FLAG_TARGET_CONTRACT_QUERY")
+    if string_pool.entries:
+        fields.append(f".string_table = {{.data = {string_data_name}, .data_length = sizeof({string_data_name}) - 1}}")
     _append_table_fields(fields, "spans", table.spans, spans_name)
     _append_table_fields(fields, "rules", table.rules, rules_name)
-    _append_table_fields(fields, "report_keys", report_keys, report_keys_name)
+    _append_table_fields(
+        fields,
+        "report_key_string_offsets",
+        report_keys,
+        report_keys_name,
+    )
     _append_table_fields(
         fields,
         "type_patterns",
@@ -859,10 +886,18 @@ def _table_count_field_name(field_name: str) -> str:
         return "source_memory_count"
     if field_name == "diagnostic_params":
         return "diagnostic_param_count"
+    if field_name == "report_key_string_offsets":
+        return "report_key_count"
     return f"{field_name[:-1]}_count"
 
 
-def diagnostic_param_row(row: LowerDiagnosticParam) -> list[str]:
+def diagnostic_param_row(
+    row: LowerDiagnosticParam,
+    *,
+    string_value_offset: str | None = None,
+) -> list[str]:
+    if row.kind == DiagnosticParamKind.STRING_LITERAL and string_value_offset is None:
+        raise ValueError("diagnostic string literal is missing its string offset")
     fields: list[str] = []
     _append_field(
         fields,
@@ -873,8 +908,8 @@ def diagnostic_param_row(row: LowerDiagnosticParam) -> list[str]:
     if row.kind == DiagnosticParamKind.STRING_LITERAL:
         _append_field(
             fields,
-            "string_value",
-            f'IREE_SVL("{_c_string_literal(row.string_value)}")',
+            "string_value_offset",
+            string_value_offset,
             always=True,
         )
     if row.kind == DiagnosticParamKind.VALUE_TYPE:

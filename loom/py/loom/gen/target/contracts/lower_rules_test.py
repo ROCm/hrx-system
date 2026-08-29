@@ -396,11 +396,10 @@ def test_generate_lower_rule_set_emits_report_key_ordinals() -> None:
 
     generated = generate_lower_rule_set(table, dialect_ops={"scalar": ALL_SCALAR_OPS})
 
-    assert "static const iree_string_view_t" in generated.source
-    assert '.data = "test.scalar_mulf.strategy.native"' in generated.source
-    assert '.size = IREE_ARRAYSIZE("test.scalar_mulf.strategy.native") - 1' in generated.source
+    assert 'LOOM_BSTRING_LITERAL(32, "test.scalar_mulf.strategy.native")' in generated.source
+    assert "static const loom_bstring_table_offset_t" in generated.source
     assert ".report_key_ordinal = 1," in generated.source
-    assert ".report_keys = " in generated.source
+    assert ".report_key_string_offsets = " in generated.source
     assert ".report_key_count = IREE_ARRAYSIZE(" in generated.source
 
 
@@ -570,9 +569,11 @@ def test_attr_copy_row_emits_portable_signed_i64_literal() -> None:
             kind=LowerAttrCopyKind.I64_LITERAL,
             target_name="value",
             literal_i64=-(1 << 31),
-        )
+        ),
+        target_name_string_offset="TEST_STRING_VALUE",
     )
 
+    assert ".target_name_string_offset = TEST_STRING_VALUE" in fields
     assert ".literal_i64 = (-INT64_C(2147483648))" in fields
 
 
@@ -685,7 +686,8 @@ def test_generate_lower_rule_set_emits_source_instance_flags_projection() -> Non
     generated = generate_lower_rule_set(table, dialect_ops={"scalar": ALL_SCALAR_OPS})
 
     assert "LOOM_LOW_LOWER_ATTR_COPY_SOURCE_OP_INSTANCE_FLAGS" in generated.source
-    assert 'IREE_SVL("fast_math_flags")' in generated.source
+    assert 'LOOM_BSTRING_LITERAL(15, "fast_math_flags")' in generated.source
+    assert ".target_name_string_offset = " in generated.source
 
 
 def test_generate_lower_rule_set_emits_balanced_accumulator_flag() -> None:
@@ -995,7 +997,11 @@ def test_source_memory_row_emits_complete_address_materializer() -> None:
         TEST_LOW_MUL_I32_DESCRIPTOR.key: 2,
     }
 
-    fields = source_memory_row(descriptor_refs, row)
+    fields = source_memory_row(
+        descriptor_refs,
+        row,
+        address_immediate_string_offset="TEST_STRING_I32_VALUE",
+    )
 
     assert ".address_diagnostic_index = 5" in fields
     assert ".root_kind = LOOM_LOW_LOWER_SOURCE_MEMORY_ROOT_ALLOCA" in fields
@@ -1005,7 +1011,7 @@ def test_source_memory_row_emits_complete_address_materializer() -> None:
     assert ".address_coordinate_minimum = INT64_C(0)" in fields
     assert ".address_coordinate_maximum = INT64_C(2147483647)" in fields
     assert ".address_const_coordinate_descriptor_ref = 0" in fields
-    assert '.address_const_coordinate_immediate = IREE_SVL("i32_value")' in fields
+    assert (".address_const_coordinate_immediate_string_offset = TEST_STRING_I32_VALUE") in fields
     assert ".address_add_coordinate_descriptor_ref = 1" in fields
     assert ".address_shl_coordinate_descriptor_ref = 65535" in fields
     assert ".address_index_to_coordinate_input_descriptor_ref = 65535" in fields

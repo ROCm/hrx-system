@@ -83,6 +83,7 @@ loom_cc_library(
         "//loom/src/loom/target:low_legality",
         "//loom/src/loom/target:registers",
         "//loom/src/loom/target:types",
+        "//loom/src/loom/util:bstring",
         "//loom/src/loom/util:cfg_graph",
         "//loom/src/loom/util:cfg_loop",
         "//loom/src/loom/util:fact_table",

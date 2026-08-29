@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from loom.gen.support.string_pool import CStringPool
+from loom.gen.support.string_pool import CStringPool, emit_c_string_table
 
 
 def test_intern_records_unique_entries_with_byte_offsets() -> None:
@@ -59,3 +59,24 @@ def test_intern_rejects_bstring_payload_overflow() -> None:
 def test_canonical_label_matches_c_identifier_policy() -> None:
     assert CStringPool.canonical_label("...") == "empty"
     assert CStringPool.canonical_label("9-lives") == "_9_lives"
+
+
+def test_emit_c_string_table_uses_packed_offsets() -> None:
+    pool = CStringPool("TEST")
+    pool.intern("alpha", "a")
+    pool.intern("beta", "b\nc")
+
+    assert emit_c_string_table(pool, "kTestStringData") == [
+        "// clang-format off",
+        "static const uint8_t kTestStringData[] =",
+        '    LOOM_BSTRING_LITERAL(1, "a")',
+        r'    LOOM_BSTRING_LITERAL(3, "b\nc");',
+        "// clang-format on",
+        "",
+        "enum {",
+        "  TEST_STRING_alpha = 0,",
+        '  TEST_STRING_beta = TEST_STRING_alpha + sizeof("a"),',
+        r'  TEST_STRING_END = TEST_STRING_beta + sizeof("b\nc"),',
+        "};",
+        "",
+    ]

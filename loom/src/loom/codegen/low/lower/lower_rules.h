@@ -20,6 +20,7 @@
 #include "loom/codegen/low/source_memory_plan.h"
 #include "loom/error/error_defs.h"
 #include "loom/ir/ir.h"
+#include "loom/util/bstring.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -200,9 +201,11 @@ struct loom_low_lower_rule_match_context_t {
 };
 
 typedef struct loom_low_lower_rule_descriptor_ref_t {
-  // Stable descriptor key resolved once against the selected descriptor set.
-  iree_string_view_t key;
+  // Rule-set B-string offset for the stable descriptor key.
+  loom_bstring_table_offset_t key_string_offset;
 } loom_low_lower_rule_descriptor_ref_t;
+static_assert(sizeof(loom_low_lower_rule_descriptor_ref_t) == 4,
+              "loom_low_lower_rule_descriptor_ref_t must be 4 bytes");
 
 typedef struct loom_low_lower_value_ref_t {
   // Source value namespace being referenced.
@@ -293,8 +296,8 @@ typedef enum loom_low_lower_attr_copy_kind_e {
 typedef struct loom_low_lower_attr_copy_t {
   // Attribute projection operation to perform.
   loom_low_lower_attr_copy_kind_t kind;
-  // Target low packet attribute name to emit.
-  iree_string_view_t target_name;
+  // Rule-set B-string offset for the target low packet attribute name.
+  loom_bstring_table_offset_t target_name_string_offset;
   // Primary source op attribute ordinal consumed by projection rows.
   uint16_t source_attr_index;
   // Second source op attribute ordinal consumed by two-attr projections.
@@ -317,8 +320,8 @@ typedef struct loom_low_lower_attr_copy_t {
   // remainder rows.
   int64_t literal_i64;
 } loom_low_lower_attr_copy_t;
-static_assert(sizeof(loom_low_lower_attr_copy_t) == 48,
-              "loom_low_lower_attr_copy_t must be 48 bytes");
+static_assert(sizeof(loom_low_lower_attr_copy_t) == 32,
+              "loom_low_lower_attr_copy_t must be 32 bytes");
 
 typedef uint8_t loom_low_lower_diagnostic_param_kind_t;
 
@@ -354,8 +357,8 @@ enum loom_low_lower_diagnostic_param_kind_e {
 typedef struct loom_low_lower_diagnostic_param_t {
   // Parameter projection operation.
   loom_low_lower_diagnostic_param_kind_t kind;
-  // String literal payload for STRING_LITERAL rows.
-  iree_string_view_t string_value;
+  // Rule-set B-string offset for STRING_LITERAL payloads.
+  loom_bstring_table_offset_t string_value_offset;
   // Source value-ref row consumed by VALUE_TYPE rows.
   uint16_t value_ref_index;
   // Signed literal payload for I64_LITERAL rows.
@@ -367,6 +370,8 @@ typedef struct loom_low_lower_diagnostic_param_t {
   // Boolean literal payload for BOOL_LITERAL rows.
   bool bool_value;
 } loom_low_lower_diagnostic_param_t;
+static_assert(sizeof(loom_low_lower_diagnostic_param_t) == 48,
+              "loom_low_lower_diagnostic_param_t must be 48 bytes");
 
 typedef struct loom_low_lower_diagnostic_t {
   // Stable structured diagnostic identity.
@@ -498,8 +503,8 @@ typedef struct loom_low_lower_source_memory_t {
   uint16_t address_diagnostic_index;
   // Descriptor ref used to materialize i64 constants for dynamic byte offsets.
   loom_low_lower_descriptor_ref_t byte_offset_const_i64_descriptor_ref;
-  // Immediate field populated when materializing an i64 constant.
-  iree_string_view_t byte_offset_const_i64_immediate;
+  // Rule-set B-string offset for the i64 constant immediate field.
+  loom_bstring_table_offset_t byte_offset_const_i64_immediate_string_offset;
   // Descriptor ref used to materialize i64 additions for dynamic byte offsets.
   loom_low_lower_descriptor_ref_t byte_offset_add_i64_descriptor_ref;
   // Descriptor ref used to materialize i64 multiplies for dynamic byte offsets.
@@ -518,8 +523,8 @@ typedef struct loom_low_lower_source_memory_t {
   int64_t address_coordinate_maximum;
   // Descriptor ref used to materialize a complete address coordinate constant.
   loom_low_lower_descriptor_ref_t address_const_coordinate_descriptor_ref;
-  // Immediate field populated for a complete address coordinate constant.
-  iree_string_view_t address_const_coordinate_immediate;
+  // Rule-set B-string offset for the coordinate constant immediate field.
+  loom_bstring_table_offset_t address_const_coordinate_immediate_string_offset;
   // Descriptor ref used to add complete address coordinate values.
   loom_low_lower_descriptor_ref_t address_add_coordinate_descriptor_ref;
   // Descriptor ref used to multiply complete address coordinate values.
@@ -534,6 +539,8 @@ typedef struct loom_low_lower_source_memory_t {
   // Descriptor ref used to materialize the final target address.
   loom_low_lower_descriptor_ref_t address_descriptor_ref;
 } loom_low_lower_source_memory_t;
+static_assert(sizeof(loom_low_lower_source_memory_t) == 168,
+              "loom_low_lower_source_memory_t must be 168 bytes");
 
 typedef enum loom_low_lower_guard_kind_e {
   // Invalid or uninitialized guard.
@@ -809,6 +816,8 @@ typedef uint16_t loom_low_lower_rule_set_flags_t;
 typedef struct loom_low_lower_rule_set_t {
   // Rule-set behavior flags.
   loom_low_lower_rule_set_flags_t flags;
+  // Packed generated strings referenced by rule-set-local table rows.
+  loom_bstring_table_t string_table;
   // Source op kind to rule-span lookup table sorted by source_op_kind.
   const loom_low_lower_rule_span_t* spans;
   // Number of rows in spans.
@@ -817,9 +826,9 @@ typedef struct loom_low_lower_rule_set_t {
   const loom_low_lower_rule_t* rules;
   // Number of rows in rules.
   uint16_t rule_count;
-  // Structured report keys referenced by one-based rule report-key ordinals.
-  const iree_string_view_t* report_keys;
-  // Number of rows in report_keys.
+  // Rule-set B-string offsets referenced by one-based report-key ordinals.
+  const loom_bstring_table_offset_t* report_key_string_offsets;
+  // Number of rows in report_key_string_offsets.
   uint16_t report_key_count;
   // Type-pattern rows referenced by guards.
   const loom_low_lower_type_pattern_t* type_patterns;
@@ -866,6 +875,12 @@ typedef struct loom_low_lower_rule_set_t {
   // Number of rows in diagnostics.
   uint16_t diagnostic_count;
 } loom_low_lower_rule_set_t;
+
+// Returns the rule-set B-string view at |string_offset|. Generated rule sets
+// and offsets are trusted compiler-owned tables.
+iree_string_view_t loom_low_lower_rule_set_string(
+    const loom_low_lower_rule_set_t* rule_set,
+    loom_bstring_table_offset_t string_offset);
 
 typedef struct loom_low_lower_rule_selection_t {
   // Selected rule row, or NULL when no rule accepted the source op.
