@@ -33,6 +33,7 @@ class AttrProjectKind(Enum):
     I64_SHIFTED_LOW_BIT_CLEAR_MASK = "i64_shifted_low_bit_clear_mask"
     I64_LITERAL_MINUS_ATTR = "i64_literal_minus_attr"
     I64_LITERAL_MINUS_ATTRS = "i64_literal_minus_attrs"
+    I64_ATTR_MINUS_LITERAL = "i64_attr_minus_literal"
     EXPAND_LANE_I64_ARRAY_TO_BYTE_LANES = "expand_lane_i64_array_to_byte_lanes"
 
 
@@ -194,6 +195,14 @@ class AttrProject:
         )
 
     @classmethod
+    def i64_attr_minus_literal(cls, source_attr: str, *, literal: int) -> Self:
+        return cls(
+            kind=AttrProjectKind.I64_ATTR_MINUS_LITERAL,
+            source_attr=source_attr,
+            literal_i64=literal,
+        )
+
+    @classmethod
     def expand_lane_i64_array_to_byte_lanes(
         cls,
         *,
@@ -232,6 +241,7 @@ class AttrProject:
         literal_kinds = (
             AttrProjectKind.I64_LITERAL_MINUS_ATTR,
             AttrProjectKind.I64_LITERAL_MINUS_ATTRS,
+            AttrProjectKind.I64_ATTR_MINUS_LITERAL,
         )
         if self.kind not in literal_kinds and self.literal_i64 != 0:
             raise ValueError(f"{self.kind.value} projection must not name a literal")
@@ -339,11 +349,12 @@ class AttrProject:
                 require_unsigned_immediate=True,
             )
             return
-        literal_minus_kinds = (
+        i64_arithmetic_kinds = (
             AttrProjectKind.I64_LITERAL_MINUS_ATTR,
             AttrProjectKind.I64_LITERAL_MINUS_ATTRS,
+            AttrProjectKind.I64_ATTR_MINUS_LITERAL,
         )
-        if self.kind in literal_minus_kinds:
+        if self.kind in i64_arithmetic_kinds:
             self._validate_i64_attr_projection(
                 source_op,
                 descriptor,

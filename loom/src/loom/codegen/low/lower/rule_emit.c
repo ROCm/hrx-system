@@ -255,6 +255,17 @@ static int64_t loom_low_lower_rule_attr_copy_literal_minus_i64_attrs(
   return projected_value;
 }
 
+static int64_t loom_low_lower_rule_attr_copy_i64_attr_minus_literal(
+    const loom_op_t* source_op, const loom_attribute_t* source_attrs,
+    const loom_low_lower_attr_copy_t* attr_copy) {
+  const int64_t source_value = loom_low_lower_rule_i64_source_attr(
+      source_op, source_attrs, attr_copy->source_attr_index);
+  int64_t projected_value = 0;
+  IREE_ASSERT(iree_checked_sub_i64(source_value, attr_copy->literal_i64,
+                                   &projected_value));
+  return projected_value;
+}
+
 iree_status_t loom_low_lower_rule_set_resolve_emit_program(
     loom_low_lower_context_t* context, uint16_t rule_set_index,
     const loom_low_lower_rule_set_t* rule_set,
@@ -438,6 +449,12 @@ static iree_status_t loom_low_lower_rule_build_attrs(
         IREE_ASSERT_EQ(attr_copy->target_bit_offset, 0);
         attrs[i].value =
             loom_attr_i64(loom_low_lower_rule_attr_copy_literal_minus_i64_attrs(
+                source_op, source_attrs, attr_copy));
+        break;
+      case LOOM_LOW_LOWER_ATTR_COPY_I64_ATTR_MINUS_LITERAL:
+        IREE_ASSERT_EQ(attr_copy->target_bit_offset, 0);
+        attrs[i].value =
+            loom_attr_i64(loom_low_lower_rule_attr_copy_i64_attr_minus_literal(
                 source_op, source_attrs, attr_copy));
         break;
       case LOOM_LOW_LOWER_ATTR_COPY_I64_LITERAL:
