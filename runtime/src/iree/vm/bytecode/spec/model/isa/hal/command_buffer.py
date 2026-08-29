@@ -45,8 +45,6 @@ from model.isa.validation import (
     LOCAL_BYTES_FIXED_BASE,
     LOCAL_BYTES_RANGE_BASE,
     LOCAL_BYTES_RANGE_LENGTH,
-    PACKED_SELECTOR_INDEXED_ALLOWED_MASK,
-    PACKED_SELECTORS,
     RANGE_BASE,
     RANGE_COUNT,
     SELECTOR,
@@ -897,159 +895,6 @@ HAL_CMD_COPY_BUFFER = hal_instruction(
 )
 
 
-def _collective_op_field():
-    components = tuple(
-        (
-            component_name,
-            bit_offset,
-            8,
-            EntityReference(SELECTOR_TABLES_BY_NAME[selector_name].entity_id),
-            (),
-        )
-        for component_name, bit_offset, selector_name in (
-            ("kind", 0, "hal.collective.kind"),
-            ("reduction", 8, "hal.collective.reduction"),
-            ("element", 16, "hal.collective.element"),
-        )
-    )
-    return instruction_field(
-        "op_u32",
-        4,
-        U32.entity_id,
-        InstructionFieldRole.IMMEDIATE,
-        "Packed collective kind, reduction, and element selectors.",
-        (RuleUse(PACKED_SELECTORS.entity_id, (0xFF000000, components)),),
-    )
-
-
-HAL_CMD_COLLECTIVE = hal_instruction(
-    entity_id="hal.instruction.cmd.collective",
-    since=HAL_0,
-    summary="Records one context-sensitive channel collective.",
-    opcode=0x1E,
-    mnemonic="hal.cmd.collective",
-    byte_length=20,
-    family_id=FAMILY.entity_id,
-    fields=(
-        hal_ref("command_buffer_r8", 2, "hal.command_buffer"),
-        hal_ref("channel_r8", 3, "hal.channel"),
-        _collective_op_field(),
-        _value("param_v8", 8, "Collective root/peer packed u32 parameter."),
-        _direct_or_slot_ref("send_buffer_r8_nullable", 9),
-        _value("send_slot_v8", 10, "Unsigned send binding slot."),
-        _value("send_offset_v8", 11, "Unsigned send device-byte offset."),
-        _value("send_length_v8", 12, "Available send byte length."),
-        _direct_or_slot_ref("recv_buffer_r8_nullable", 13),
-        _value("recv_slot_v8", 14, "Unsigned receive binding slot."),
-        _value("recv_offset_v8", 15, "Unsigned receive device-byte offset."),
-        _value("recv_length_v8", 16, "Available receive byte length."),
-        _value("element_count_v8", 17, "Logical collective element count."),
-        zero_padding("zero_padding_u8", 18, 2),
-    ),
-    constraints=(
-        RuleUse(
-            PACKED_SELECTOR_INDEXED_ALLOWED_MASK.entity_id,
-            (
-                FieldReference("op_u32"),
-                "kind",
-                "reduction",
-                (0x01, 0x3E, 0x01, 0x01, 0x3E, 0x3E, 0x01, 0x01, 0x01),
-            ),
-        ),
-    ),
-    state_effects=(
-        state_write(StateResource.HAL_COMMAND_BUFFER, "command_buffer_r8"),
-        state_read(StateResource.HAL_CHANNEL, "channel_r8"),
-        state_synchronize(StateResource.HAL_CHANNEL, "channel_r8"),
-        state_read(
-            StateResource.BUFFER,
-            "send_buffer_r8_nullable",
-            "send_slot_v8",
-        ),
-        state_write(
-            StateResource.BUFFER,
-            "recv_buffer_r8_nullable",
-            "recv_slot_v8",
-        ),
-    ),
-    semantics=InstructionSemantics(
-        description=(
-            "Queries immutable channel rank/count, derives context-dependent send "
-            "and receive use/byte requirements from the verified packed operation, "
-            "and records one collective."
-        ),
-        verification=(
-            "Every register/padding field must be valid; op_u32's high byte must be "
-            "zero; kind/reduction/element must be assigned selectors; ALL_REDUCE, "
-            "REDUCE, and REDUCE_SCATTER require reductions 1..5 and every other "
-            "kind requires NONE=0.",
-        ),
-        preconditions=(
-            "The command buffer and channel must be non-null exact. param_v8 must "
-            "fit u32 and element_count_v8 must fit device size. Root/peer ranks "
-            "must satisfy the selected kind and checked byte-size multiplication "
-            "must not overflow.",
-            "Each contextually used side must form a valid direct-or-slot ref at "
-            "least as large as its required bytes. An unused side must be the exact "
-            "canonical all-zero ref/slot/offset/length packet.",
-        ),
-        success=(
-            "HAL records the same contextual-side contract, captures channel and "
-            "used direct resources, and the program counter advances by 20 bytes. "
-            "A required null ref with slot zero remains valid indirect slot zero, "
-            "including for zero elements.",
-        ),
-        failures=(
-            *_command_failures(),
-            *required_ref_failures(
-                "hal.channel",
-                "No collective call occurs and recording state is unchanged.",
-            ),
-            *_direct_or_slot_failures(),
-            FailureCase(
-                "invalid_argument",
-                "An unused side is not canonical zero or ALL_TO_ALL count is not divisible by channel count.",
-                "No collective call occurs and recording state is unchanged.",
-            ),
-            FailureCase(
-                "out_of_range",
-                "param/count/rank, checked byte multiplication, or required side length is invalid.",
-                "No collective call occurs and recording state is unchanged.",
-            ),
-        ),
-        ownership=(
-            "The command buffer/channel/direct buffers are borrowed synchronously. "
-            "HAL captures channel and used direct resources; unused and indirect "
-            "sides capture no VM ref.",
-        ),
-        assembly=(
-            "hal.cmd.collective %r<command_buffer>, %r<channel>, {op}, %v<param>, "
-            "%r<send>?/%v<send_slot>, %v<send_offset>, %v<send_length>, "
-            "%r<recv>?/%v<recv_slot>, %v<recv_offset>, %v<recv_length>, "
-            "%v<element_count>",
-        ),
-        pseudocode=(
-            "command_buffer = require_command_buffer(command_buffer_r8);\n"
-            "channel = require_hal_ref(refs[channel_r8], hal_channel_type);\n"
-            "op = verified_collective_op(op_u32);\n"
-            "param = checked_u32(values[param_v8]);\n"
-            "element_count = checked_device_size(values[element_count_v8]);\n"
-            "rank, count = hal_channel_query_rank_and_count(channel);\n"
-            "sides = resolve_collective_sides_and_lengths(\n"
-            "    op, param, rank, count, element_count);\n"
-            "send = sides.send_used ? checked_ref_at_least(send_packet, sides.send_bytes)\n"
-            "    : require_canonical_zero_ref_packet(send_packet);\n"
-            "recv = sides.recv_used ? checked_ref_at_least(recv_packet, sides.recv_bytes)\n"
-            "    : require_canonical_zero_ref_packet(recv_packet);\n"
-            "status = hal_command_buffer_collective(command_buffer, channel, op,\n"
-            "    param, send, recv, element_count);\n"
-            "if (status failed) return status;\n"
-            "pc = pc + 20;"
-        ),
-    ),
-)
-
-
 def _barrier_before_field():
     table = SELECTOR_TABLES_BY_NAME["hal.cmd.dispatch.barrier_before"]
     return instruction_field(
@@ -1157,7 +1002,7 @@ HAL_CMD_DISPATCH = hal_instruction(
     entity_id="hal.instruction.cmd.dispatch",
     since=HAL_0,
     summary="Records a static-count table dispatch with an optional fused barrier.",
-    opcode=0x1F,
+    opcode=0x1E,
     mnemonic="hal.cmd.dispatch",
     byte_length=28,
     family_id=FAMILY.entity_id,
@@ -1250,7 +1095,7 @@ HAL_CMD_DISPATCH_INDIRECT_COUNT = hal_instruction(
     entity_id="hal.instruction.cmd.dispatch.indirect.count",
     since=HAL_0,
     summary="Records an indirect-count table dispatch with an optional fused barrier.",
-    opcode=0x20,
+    opcode=0x1F,
     mnemonic="hal.cmd.dispatch.indirect.count",
     byte_length=32,
     family_id=FAMILY.entity_id,
@@ -1360,7 +1205,7 @@ HAL_CMD_DEBUG_GROUP_BEGIN = hal_instruction(
     entity_id="hal.instruction.cmd.debug.group.begin",
     since=HAL_0,
     summary="Begins one provider-managed diagnostic label group.",
-    opcode=0x21,
+    opcode=0x20,
     mnemonic="hal.cmd.debug.group.begin",
     byte_length=12,
     family_id=FAMILY.entity_id,
@@ -1425,7 +1270,7 @@ HAL_CMD_DEBUG_GROUP_END = hal_instruction(
     entity_id="hal.instruction.cmd.debug.group.end",
     since=HAL_0,
     summary="Ends the innermost provider-managed diagnostic group.",
-    opcode=0x22,
+    opcode=0x21,
     mnemonic="hal.cmd.debug.group.end",
     byte_length=4,
     family_id=FAMILY.entity_id,
@@ -1465,7 +1310,6 @@ INSTRUCTIONS = (
     HAL_CMD_FILL_BUFFER,
     HAL_CMD_UPDATE_BUFFER,
     HAL_CMD_COPY_BUFFER,
-    HAL_CMD_COLLECTIVE,
     HAL_CMD_DISPATCH,
     HAL_CMD_DISPATCH_INDIRECT_COUNT,
     HAL_CMD_DEBUG_GROUP_BEGIN,

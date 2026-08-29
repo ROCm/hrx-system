@@ -1206,7 +1206,6 @@ HAL_QUEUE_EXECUTE = hal_instruction(
         state_read(StateResource.BUFFER),
         state_write(StateResource.BUFFER),
         state_synchronize(StateResource.BUFFER),
-        state_synchronize(StateResource.HAL_CHANNEL),
         state_read(
             StateResource.FRAME_LOCALS,
             "binding_buffer_base_u16",

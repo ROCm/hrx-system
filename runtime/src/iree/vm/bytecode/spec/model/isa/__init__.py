@@ -97,7 +97,6 @@ class StateResource(enum.Enum):
     HAL_COMMAND_BUFFER = "hal.command_buffer"
     HAL_QUEUE = "hal.queue"
     HAL_SEMAPHORE = "hal.semaphore"
-    HAL_CHANNEL = "hal.channel"
     IO_FILE = "io.file"
 
 

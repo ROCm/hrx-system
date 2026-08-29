@@ -82,14 +82,14 @@ class ProjectionTest(unittest.TestCase):
             sum(isinstance(entity, NumericValue) for entity in module_entities),
             30,
         )
-        self.assertEqual(len(instructions), 217)
+        self.assertEqual(len(instructions), 216)
         self.assertEqual(
             sum(instruction.since.domain == "core" for instruction in instructions),
             183,
         )
         self.assertEqual(
             sum(instruction.since.domain == "hal" for instruction in instructions),
-            34,
+            33,
         )
         self.assertEqual(
             sum(isinstance(entity, InstructionFamily) for entity in isa_entities),
@@ -134,8 +134,8 @@ class ProjectionTest(unittest.TestCase):
             for entity_id in instruction.referenced_entity_ids()
         }
 
-        self.assertEqual(len(tables), 27)
-        self.assertEqual(len(values), 248)
+        self.assertEqual(len(tables), 24)
+        self.assertEqual(len(values), 221)
         for table in tables:
             self.assertNotIn("Closed selector domain", table.summary)
             self.assertIn(table.entity_id, consumed_entity_ids)
@@ -278,10 +278,6 @@ class ProjectionTest(unittest.TestCase):
         execute_effects = entities["hal.instruction.queue.execute"].state_effects
         self.assertIn(
             StateEffect(StateAccess.WRITE, StateResource.BUFFER),
-            execute_effects,
-        )
-        self.assertIn(
-            StateEffect(StateAccess.SYNCHRONIZE, StateResource.HAL_CHANNEL),
             execute_effects,
         )
 
@@ -495,7 +491,7 @@ class ProjectionTest(unittest.TestCase):
                     re.MULTILINE,
                 )
             ),
-            248 + 217,
+            221 + 216,
         )
 
     def test_generated_flag_types_follow_runtime_vocabulary(self) -> None:
