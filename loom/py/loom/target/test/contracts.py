@@ -49,6 +49,7 @@ from loom.target.low_descriptors import Descriptor
 from loom.target.test.descriptors import (
     TEST_LOW_ADD_F32_DESCRIPTOR,
     TEST_LOW_ADD_I32_DESCRIPTOR,
+    TEST_LOW_ADD_I32_PHYS_RHS_DESCRIPTOR,
     TEST_LOW_CMP_EQ_I32_DESCRIPTOR,
     TEST_LOW_CONST_I32_DESCRIPTOR,
     TEST_LOW_CORE_DESCRIPTOR_SET,
@@ -615,7 +616,7 @@ TEST_LOW_CORE_CONTRACT_FRAGMENT = ContractFragment(
         ),
         DescriptorRule(
             source_op=index.index_madd,
-            descriptor=TEST_LOW_ADD_I32_DESCRIPTOR,
+            descriptor=TEST_LOW_ADD_I32_PHYS_RHS_DESCRIPTOR,
             guards=(
                 Guard.value_type("a", _INDEX),
                 Guard.value_type("b", _INDEX),
@@ -633,7 +634,7 @@ TEST_LOW_CORE_CONTRACT_FRAGMENT = ContractFragment(
                     result_types={"dst": ValueRef.result("result")},
                 ),
                 EmitDescriptorOp(
-                    descriptor=TEST_LOW_ADD_I32_DESCRIPTOR,
+                    descriptor=TEST_LOW_ADD_I32_PHYS_RHS_DESCRIPTOR,
                     operands={
                         "lhs": ValueRef.temporary("product"),
                         "rhs": ValueRef.operand("c"),

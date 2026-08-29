@@ -24,6 +24,7 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/func/ops.h"
+#include "loom/ops/index/ops.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/pass/ops.h"
 #include "loom/ops/scalar/ops.h"
@@ -106,6 +107,7 @@ class LowLowerPassTest : public ::testing::Test {
     RegisterDialect(LOOM_DIALECT_PASS, loom_pass_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_TARGET, loom_target_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_FUNC, loom_func_dialect_vtables);
+    RegisterDialect(LOOM_DIALECT_INDEX, loom_index_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_LOW, loom_low_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_SCALAR, loom_scalar_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_TEMPLATE, loom_template_dialect_vtables);
@@ -490,6 +492,48 @@ TEST_F(LowLowerPassTest, ModuleInternalVersionLowersWithoutArtifactAbi) {
   EXPECT_FALSE(loom_symbol_ref_is_valid(
       loom_low_func_def_target(function_version.base.function.op)));
   iree_arena_deinitialize(&arena);
+}
+
+TEST_F(LowLowerPassTest, CopiedOperandUsesDescriptorRegisterClass) {
+  ModulePtr module = Parse(IREE_SV(
+      "test.target<low_core> @test_target\n"
+      "func.def target(@test_target) @madd(%a: index, %b: index, %c: index) "
+      "-> (index) {\n"
+      "  %result = index.madd %a, %b, %c : index\n"
+      "  func.return %result : index\n"
+      "}\n"));
+
+  IREE_ASSERT_OK(RunSourceToLow(&policy_registry_, module.get()));
+  const loom_symbol_ref_t function_ref =
+      FindSymbolRef(module.get(), IREE_SV("madd"));
+  loom_op_t* function_op =
+      module->symbols.entries[function_ref.symbol_id].defining_op;
+  ASSERT_TRUE(loom_low_func_def_isa(function_op));
+  const loom_block_t* entry = loom_region_entry_block(
+      loom_func_like_body(loom_func_like_cast(module.get(), function_op)));
+  ASSERT_NE(entry, nullptr);
+
+  const loom_op_t* copy_op = nullptr;
+  const loom_op_t* copy_consumer_op = nullptr;
+  for (const loom_op_t* op = entry->first_op; op != nullptr; op = op->next_op) {
+    if (loom_low_copy_isa(op)) {
+      copy_op = op;
+      copy_consumer_op = op->next_op;
+      break;
+    }
+  }
+  ASSERT_NE(copy_op, nullptr);
+  ASSERT_NE(copy_consumer_op, nullptr);
+  ASSERT_TRUE(loom_low_op_isa(copy_consumer_op));
+  const loom_value_id_t copy_source = loom_low_copy_source(copy_op);
+  const loom_value_id_t copy_result = loom_low_copy_result(copy_op);
+  EXPECT_FALSE(
+      loom_type_equal(loom_module_value_type(module.get(), copy_source),
+                      loom_module_value_type(module.get(), copy_result)));
+  const loom_value_slice_t consumer_operands =
+      loom_low_op_operands(copy_consumer_op);
+  ASSERT_EQ(consumer_operands.count, 2u);
+  EXPECT_EQ(consumer_operands.values[1], copy_result);
 }
 
 TEST_F(LowLowerPassTest,

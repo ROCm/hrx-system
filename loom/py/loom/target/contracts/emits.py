@@ -259,6 +259,11 @@ class EmitDescriptorOp:
                     f"{source_op.name}: copied descriptor operand "
                     f"'{descriptor_field}' is not an operand binding"
                 )
+            _require_descriptor_copy_operand(
+                source_op,
+                self.descriptor,
+                descriptor_field,
+            )
         if self.form == DescriptorEmitForm.ACCUMULATE_LANES:
             if self.accumulator is None:
                 raise ValueError(
@@ -498,6 +503,34 @@ def _require_descriptor_result_type_operand(
         raise ValueError(
             f"{source_op.name}: descriptor result '{operand.field_name}' cannot "
             "infer a descriptor result type with zero register units"
+        )
+
+
+def _require_descriptor_copy_operand(
+    source_op: Op,
+    descriptor: Descriptor,
+    descriptor_field: str,
+) -> None:
+    operand = _require_descriptor_operand(
+        descriptor,
+        descriptor_field,
+        "copied descriptor operand",
+    )
+    register_alternatives = tuple(
+        alternative
+        for alternative in operand.reg_alts
+        if alternative.reg_class is not None
+        and RegClassAltFlag.IMMEDIATE not in alternative.flags
+    )
+    if not register_alternatives:
+        raise ValueError(
+            f"{source_op.name}: copied descriptor operand "
+            f"'{descriptor_field}' has no register alternative"
+        )
+    if operand.unit_count == 0:
+        raise ValueError(
+            f"{source_op.name}: copied descriptor operand "
+            f"'{descriptor_field}' has zero register units"
         )
 
 

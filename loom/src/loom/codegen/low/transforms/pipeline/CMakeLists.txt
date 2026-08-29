@@ -90,6 +90,7 @@ loom_cc_test(
     loom::format::text::parser
     loom::ir
     loom::ops::func
+    loom::ops::index
     loom::ops::low
     loom::ops::pass
     loom::ops::scalar

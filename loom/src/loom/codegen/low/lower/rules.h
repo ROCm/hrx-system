@@ -688,8 +688,9 @@ typedef struct loom_low_lower_emit_t {
   // Number of low operands to copy from value-ref rows.
   uint16_t operand_ref_count;
   // Bitmask of emitted low operand ordinals copied through low.copy before the
-  // descriptor op consumes them. Used for destructive/tied packet operands
-  // without clobbering the source SSA value's later uses.
+  // descriptor op consumes them. The copy uses the descriptor operand's
+  // concrete register class, supporting destructive/tied operands and fixed
+  // physical-register constraints without changing source SSA values.
   uint16_t copy_operand_mask;
   // Operand ordinal that carries the threaded scalar accumulator for
   // DESCRIPTOR_OP_ACCUMULATE_LANES.
