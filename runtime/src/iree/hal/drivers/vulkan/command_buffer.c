@@ -2798,21 +2798,6 @@ static iree_status_t iree_hal_vulkan_command_buffer_copy_buffer(
   return iree_ok_status();
 }
 
-static iree_status_t iree_hal_vulkan_command_buffer_collective(
-    iree_hal_command_buffer_t* base_command_buffer, iree_hal_channel_t* channel,
-    iree_hal_collective_op_t op, uint32_t param, iree_hal_buffer_ref_t send_ref,
-    iree_hal_buffer_ref_t recv_ref, iree_device_size_t element_count) {
-  (void)base_command_buffer;
-  (void)channel;
-  (void)op;
-  (void)param;
-  (void)send_ref;
-  (void)recv_ref;
-  (void)element_count;
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "Vulkan command buffer collectives are unsupported");
-}
-
 static iree_status_t iree_hal_vulkan_command_buffer_validate_dispatch_bda(
     const iree_hal_vulkan_pipeline_t* pipeline,
     iree_const_byte_span_t constants, iree_hal_buffer_ref_list_t bindings) {
@@ -3002,6 +2987,5 @@ static const iree_hal_command_buffer_vtable_t
         .fill_buffer = iree_hal_vulkan_command_buffer_fill_buffer,
         .update_buffer = iree_hal_vulkan_command_buffer_update_buffer,
         .copy_buffer = iree_hal_vulkan_command_buffer_copy_buffer,
-        .collective = iree_hal_vulkan_command_buffer_collective,
         .dispatch = iree_hal_vulkan_command_buffer_dispatch,
 };

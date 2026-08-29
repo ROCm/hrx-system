@@ -939,33 +939,6 @@ IREE_VM_ABI_EXPORT(iree_hal_module_command_buffer_copy_buffer,  //
                                              target_ref, flags);
 }
 
-IREE_VM_ABI_EXPORT(iree_hal_module_command_buffer_collective,  //
-                   iree_hal_module_state_t,                    //
-                   rriiiirrIIIII, v) {
-  iree_hal_command_buffer_t* command_buffer = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_hal_command_buffer_check_deref(args->r0, &command_buffer));
-  iree_hal_channel_t* channel = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_channel_check_deref(args->r1, &channel));
-  iree_hal_collective_op_t op = {.packed = args->i2};
-  uint32_t param = args->i3;
-  uint32_t send_buffer_slot = (uint32_t)args->i4;
-  uint32_t recv_buffer_slot = (uint32_t)args->i5;
-  iree_hal_buffer_ref_t send_ref = iree_hal_make_indirect_buffer_ref(
-      send_buffer_slot, iree_hal_cast_device_size(args->i8),
-      iree_hal_cast_device_size(args->i9));
-  IREE_RETURN_IF_ERROR(
-      iree_hal_buffer_check_deref_or_null(args->r6, &send_ref.buffer));
-  iree_hal_buffer_ref_t recv_ref = iree_hal_make_indirect_buffer_ref(
-      recv_buffer_slot, iree_hal_cast_device_size(args->i10),
-      iree_hal_cast_device_size(args->i11));
-  IREE_RETURN_IF_ERROR(
-      iree_hal_buffer_check_deref_or_null(args->r7, &recv_ref.buffer));
-  iree_device_size_t element_count = iree_hal_cast_device_size(args->i12);
-  return iree_hal_command_buffer_collective(command_buffer, channel, op, param,
-                                            send_ref, recv_ref, element_count);
-}
-
 // Argument signature: rrIiiiICiDCiirIID
 typedef struct {
   union {

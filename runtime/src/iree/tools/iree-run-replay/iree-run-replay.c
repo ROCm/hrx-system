@@ -235,7 +235,7 @@ static void iree_run_replay_print_agent_markdown(FILE* file) {
       "Missing\n"
       "or identity-mismatched referenced files, persistent host write maps "
       "without\n"
-      "observable flush/unmap boundaries, host calls, collectives, channels,\n"
+      "observable flush/unmap boundaries, host calls, channels,\n"
       "allocator import/export, opaque external handles, and replacement "
       "executable\n"
       "ABI mismatches should remain visible in dumps and fail in strict "

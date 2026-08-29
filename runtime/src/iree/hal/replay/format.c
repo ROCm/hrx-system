@@ -173,8 +173,6 @@ IREE_API_EXPORT const char* iree_hal_replay_operation_code_string(
       return "command_buffer.update_buffer";
     case IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_COPY_BUFFER:
       return "command_buffer.copy_buffer";
-    case IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_COLLECTIVE:
-      return "command_buffer.collective";
     case IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_DISPATCH:
       return "command_buffer.dispatch";
     case IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_ATOMIC_WAIT:
