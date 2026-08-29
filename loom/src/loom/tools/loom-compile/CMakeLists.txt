@@ -33,6 +33,7 @@ loom_cc_library(
     loom::tooling::execution::session
     loom::tooling::io::file
     loom::transforms::kernel::kernel_class_materializer
+    loom::transforms::kernel::kernel_request_producer
     loom::util::json
     loom::util::stream
   PUBLIC

@@ -16,6 +16,7 @@
 #include "loom/target/arch/cmd/artifact_set.h"
 #include "loom/target/entry_selection.h"
 #include "loom/tooling/io/file.h"
+#include "loom/transforms/kernel/kernel_request_producer.h"
 #include "loom/util/json.h"
 #include "loom/util/stream.h"
 
@@ -311,7 +312,7 @@ static iree_status_t loom_compile_command_backend_write_kernel_request(
   }
   if (iree_status_is_ok(status)) {
     status = loom_bytecode_write_module(
-        request.source.product.module, stream,
+        request.product.module, stream,
         &(loom_bytecode_write_options_t){
             .producer = IREE_SV("loom-compile"),
             .location_mode = LOOM_BYTECODE_LOCATION_MODE_SOURCE_LOCATIONS,
@@ -321,7 +322,7 @@ static iree_status_t loom_compile_command_backend_write_kernel_request(
   }
   iree_io_stream_release(stream);
   iree_allocator_free(writer->host_allocator, path_storage);
-  loom_kernel_class_product_deinitialize(&request.source.product);
+  loom_kernel_class_product_deinitialize(&request.product);
   return status;
 }
 

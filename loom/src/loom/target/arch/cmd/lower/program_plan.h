@@ -39,13 +39,22 @@ typedef struct loom_cmd_program_kernel_request_t {
   // Plan-wide logical executable-entry requirement for this request.
   uint32_t entry_requirement_index;
 
-  // Independently owned source request and its class metadata.
-  loom_kernel_request_t source;
+  // Exact index-wide kernel definition ordinal rooted by this request.
+  iree_host_size_t source_symbol_ordinal;
+
+  // Dense class ordinal within this kernel publication.
+  loom_decision_class_ordinal_t class_ordinal;
+
+  // Number of launch sites assigned to this class.
+  iree_host_size_t member_count;
+
+  // Independently owned ordinary Loom source module and kernel root.
+  loom_kernel_class_product_t product;
 } loom_cmd_program_kernel_request_t;
 
 // Accepts ownership of one command-plan kernel request at callback entry.
 //
-// The callback must release or transfer |request.source.product| even when
+// The callback must release or transfer |request.product| even when
 // returning an error. A non-OK status terminates command-plan preparation.
 typedef iree_status_t (*loom_cmd_program_kernel_request_publish_fn_t)(
     void* user_data, loom_cmd_program_kernel_request_t request);
@@ -61,8 +70,11 @@ typedef struct loom_cmd_program_kernel_request_sink_t {
 
 // Optional indexed source environment for command-plan preparation.
 typedef struct loom_cmd_program_kernel_source_t {
-  // Reusable index-backed request producer.
+  // Invocation-local index-backed request producer.
   loom_kernel_request_producer_t* producer;
+
+  // Invocation environment providing diagnostics and specialization.
+  const loom_link_plan_materialization_environment_t* environment;
 
   // Exact indexed source-definition ordinal by preparation-module symbol ID.
   struct {

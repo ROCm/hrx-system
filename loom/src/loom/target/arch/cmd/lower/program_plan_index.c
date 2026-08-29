@@ -112,6 +112,7 @@ iree_status_t loom_cmd_program_plan_prepare_index(
     if (iree_status_is_ok(status)) {
       kernel_source = (loom_cmd_program_kernel_source_t){
           .producer = kernel_request_producer,
+          .environment = materialization_environment,
           .source_definitions =
               {
                   .values =
@@ -128,7 +129,7 @@ iree_status_t loom_cmd_program_plan_prepare_index(
   if (iree_status_is_ok(status)) {
     status = loom_cmd_program_plan_prepare_materialization(
         &materialization.product, target_root_refs, program_count,
-        kernel_request_producer != NULL ? &kernel_source : NULL, pass_registry,
+        kernel_source.producer != NULL ? &kernel_source : NULL, pass_registry,
         diagnostic_emitter, materialization_environment->block_pool, out_valid,
         out_plan, materialization_environment->allocator);
   }

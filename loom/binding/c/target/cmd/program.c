@@ -26,6 +26,7 @@
 #include "loom/target/arch/cmd/artifact_builder.h"
 #include "loom/target/arch/cmd/artifact_set.h"
 #include "loom/transforms/kernel/kernel_class_materializer.h"
+#include "loom/transforms/kernel/kernel_request_producer.h"
 #include "loomc/iree.h"
 
 enum {
@@ -266,10 +267,9 @@ static iree_status_t loomc_cmd_program_product_publish_kernel_request(
   loomc_cmd_program_product_invocation_t* invocation =
       (loomc_cmd_program_product_invocation_t*)user_data;
   const iree_string_view_t root_symbol =
-      loomc_cmd_program_product_kernel_name(&request.source.product);
+      loomc_cmd_program_product_kernel_name(&request.product);
 
-  const loom_symbol_id_t module_symbol_id =
-      request.source.product.kernel.symbol_id;
+  const loom_symbol_id_t module_symbol_id = request.product.kernel.symbol_id;
   loom_symbol_id_t bytecode_symbol_ordinal = LOOM_SYMBOL_ID_INVALID;
   const loomc_module_symbol_projection_t projection = {
       .module_symbol_ids = &module_symbol_id,
@@ -278,7 +278,7 @@ static iree_status_t loomc_cmd_program_product_publish_kernel_request(
   };
   loomc_source_t* source = NULL;
   loomc_status_t status = loomc_module_serialize_internal_bytecode_to_source(
-      invocation->request.context, request.source.product.module,
+      invocation->request.context, request.product.module,
       loomc_string_view_from_iree(root_symbol), &projection,
       invocation->request.allocator, &source);
 
@@ -306,7 +306,7 @@ static iree_status_t loomc_cmd_program_product_publish_kernel_request(
 
   loomc_request_release(public_request);
   loomc_source_release(source);
-  loom_kernel_class_product_deinitialize(&request.source.product);
+  loom_kernel_class_product_deinitialize(&request.product);
   return iree_status_from_loomc(status);
 }
 

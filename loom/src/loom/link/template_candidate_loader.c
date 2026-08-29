@@ -16,6 +16,7 @@
 typedef struct loom_link_template_candidate_module_t {
   // Indexed source module described by this cache.
   const loom_link_module_index_module_t* source_module;
+
   // Representation-specific candidate source state.
   union {
     // State derived from an already-materialized source module.
@@ -45,13 +46,19 @@ typedef struct loom_link_template_candidate_module_t {
 struct loom_link_template_candidate_loader_t {
   // Borrowed provider-backed source index.
   const loom_link_module_index_t* index;
-  // Borrowed materialization environment shared with the specializing link.
-  const loom_link_plan_materialization_environment_t* environment;
+
+  // Finalized context used to decode bytecode provider contracts.
+  loom_context_t* context;
+
+  // Host allocator used for loader storage.
+  iree_allocator_t allocator;
+
   // Persistent source-summary and fact storage.
   iree_arena_allocator_t arena;
+
   // One lazy cache per indexed module.
   struct {
-    // Arena-owned module cache records.
+    // Arena-owned module cache records allocated on first template demand.
     loom_link_template_candidate_module_t* values;
     // Number of indexed modules.
     iree_host_size_t count;
@@ -72,8 +79,8 @@ static iree_status_t loom_link_template_candidate_initialize_bytecode_module(
       &provider->bytecode.metadata
            .modules[source_module->provider_module_ordinal];
   return loom_link_bytecode_template_contract_reader_initialize(
-      provider->bytecode.contents, loader->environment->context, metadata,
-      &loader->arena, &cache->source.bytecode.contracts);
+      provider->bytecode.contents, loader->context, metadata, &loader->arena,
+      &cache->source.bytecode.contracts);
 }
 
 static iree_status_t
@@ -101,6 +108,16 @@ loom_link_template_candidate_initialize_materialized_module(
         provider;
   }
   return iree_ok_status();
+}
+
+static iree_status_t loom_link_template_candidate_loader_ensure_modules(
+    loom_link_template_candidate_loader_t* loader) {
+  if (loader->modules.values != NULL || loader->modules.count == 0) {
+    return iree_ok_status();
+  }
+  return iree_allocator_malloc_array(
+      iree_arena_allocator(&loader->arena), loader->modules.count,
+      sizeof(*loader->modules.values), (void**)&loader->modules.values);
 }
 
 static iree_status_t loom_link_template_candidate_initialize_module(
@@ -229,6 +246,7 @@ iree_status_t loom_link_template_candidate_loader_allocate(
     loom_link_template_candidate_loader_t** out_loader) {
   IREE_ASSERT_ARGUMENT(index);
   IREE_ASSERT_ARGUMENT(environment);
+  IREE_ASSERT_ARGUMENT(environment->context);
   IREE_ASSERT_ARGUMENT(environment->block_pool);
   IREE_ASSERT_ARGUMENT(out_loader);
   *out_loader = NULL;
@@ -237,21 +255,12 @@ iree_status_t loom_link_template_candidate_loader_allocate(
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(environment->allocator,
                                              sizeof(*loader), (void**)&loader));
   loader->index = index;
-  loader->environment = environment;
+  loader->context = environment->context;
+  loader->allocator = environment->allocator;
   iree_arena_initialize(environment->block_pool, &loader->arena);
   loader->modules.count = loom_link_module_index_module_count(index);
-  iree_status_t status = iree_ok_status();
-  if (loader->modules.count != 0) {
-    status = iree_allocator_malloc_array(
-        iree_arena_allocator(&loader->arena), loader->modules.count,
-        sizeof(*loader->modules.values), (void**)&loader->modules.values);
-  }
-  if (iree_status_is_ok(status)) {
-    *out_loader = loader;
-  } else {
-    loom_link_template_candidate_loader_free(loader);
-  }
-  return status;
+  *out_loader = loader;
+  return iree_ok_status();
 }
 
 void loom_link_template_candidate_loader_free(
@@ -259,7 +268,7 @@ void loom_link_template_candidate_loader_free(
   if (loader == NULL) {
     return;
   }
-  const iree_allocator_t allocator = loader->environment->allocator;
+  const iree_allocator_t allocator = loader->allocator;
   iree_arena_deinitialize(&loader->arena);
   iree_allocator_free(allocator, loader);
 }
@@ -282,6 +291,8 @@ iree_status_t loom_link_template_candidate_loader_load(
   if (candidate_capacity == 0) {
     return iree_ok_status();
   }
+  IREE_RETURN_IF_ERROR(
+      loom_link_template_candidate_loader_ensure_modules(loader));
   loom_template_provider_summary_t* candidates = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, candidate_capacity, sizeof(*candidates), (void**)&candidates));

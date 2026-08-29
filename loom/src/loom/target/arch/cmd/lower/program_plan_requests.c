@@ -27,10 +27,16 @@ typedef struct loom_cmd_program_kernel_request_bridge_t {
 
   // Number of writable entries in |requirement_by_class|.
   iree_host_size_t class_capacity;
+
+  // Block pool used for independently owned request modules.
+  iree_arena_block_pool_t* block_pool;
+
+  // Host allocator used for independently owned request modules.
+  iree_allocator_t allocator;
 } loom_cmd_program_kernel_request_bridge_t;
 
 static iree_status_t loom_cmd_program_kernel_request_publish(
-    void* user_data, loom_kernel_request_t source_request) {
+    void* user_data, const loom_kernel_request_t* source_request) {
   loom_cmd_program_kernel_request_bridge_t* bridge =
       (loom_cmd_program_kernel_request_bridge_t*)user_data;
   IREE_ASSERT_LT(bridge->plan->entry_requirement_count, UINT32_MAX);
@@ -40,14 +46,22 @@ static iree_status_t loom_cmd_program_kernel_request_publish(
       (loom_cmd_entry_requirement_t){
           .declaration_op = bridge->declaration_op,
       };
-  IREE_ASSERT_LT(source_request.class_ordinal, bridge->class_capacity);
-  bridge->requirement_by_class[source_request.class_ordinal] =
+  IREE_ASSERT_LT(source_request->class_ordinal, bridge->class_capacity);
+  bridge->requirement_by_class[source_request->class_ordinal] =
       requirement_index;
-  return bridge->sink.publish(bridge->sink.user_data,
-                              (loom_cmd_program_kernel_request_t){
-                                  .entry_requirement_index = requirement_index,
-                                  .source = source_request,
-                              });
+
+  loom_kernel_class_product_t product = {0};
+  IREE_RETURN_IF_ERROR(loom_kernel_request_materialize(
+      source_request, bridge->block_pool, bridge->allocator, &product));
+  return bridge->sink.publish(
+      bridge->sink.user_data,
+      (loom_cmd_program_kernel_request_t){
+          .entry_requirement_index = requirement_index,
+          .source_symbol_ordinal = source_request->source_symbol_ordinal,
+          .class_ordinal = source_request->class_ordinal,
+          .member_count = source_request->member_count,
+          .product = product,
+      });
 }
 
 iree_status_t loom_cmd_program_plan_publish_kernel_requests(
@@ -61,6 +75,7 @@ iree_status_t loom_cmd_program_plan_publish_kernel_requests(
   IREE_ASSERT_ARGUMENT(source_facts);
   IREE_ASSERT_ARGUMENT(kernel_source);
   IREE_ASSERT_ARGUMENT(kernel_source->producer);
+  IREE_ASSERT_ARGUMENT(kernel_source->environment);
   IREE_ASSERT_ARGUMENT(kernel_source->source_definitions.values);
   IREE_ASSERT_ARGUMENT(kernel_source->sink.publish);
   IREE_ASSERT_ARGUMENT(roots);
@@ -173,11 +188,14 @@ iree_status_t loom_cmd_program_plan_publish_kernel_requests(
         .sink = kernel_source->sink,
         .requirement_by_class = requirement_by_class,
         .class_capacity = site_count,
+        .block_pool = kernel_source->environment->block_pool,
+        .allocator = kernel_source->environment->allocator,
     };
     loom_kernel_class_collection_t collection = {0};
     IREE_RETURN_IF_ERROR(loom_kernel_request_producer_publish(
-        kernel_source->producer, source_symbol_ordinal, &sites[site_offset],
-        site_count, &kernel_source->collection_options,
+        kernel_source->producer, kernel_source->environment,
+        source_symbol_ordinal, &sites[site_offset], site_count,
+        &kernel_source->collection_options,
         (loom_kernel_request_sink_t){
             .publish = loom_cmd_program_kernel_request_publish,
             .user_data = &bridge,

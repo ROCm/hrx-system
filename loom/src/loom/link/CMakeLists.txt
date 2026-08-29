@@ -417,6 +417,7 @@ loom_cc_library(
     ::planner
     iree::base
     iree::base::internal::arena
+    iree::base::threading
     loom::analysis::symbol_facts
     loom::analysis::template_provider_catalog
     loom::ir

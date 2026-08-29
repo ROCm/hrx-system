@@ -28,6 +28,7 @@ loom_cc_library(
     loom::target::arch::cmd::artifact_builder
     loom::target::arch::cmd::artifact_set
     loom::transforms::kernel::kernel_class_materializer
+    loom::transforms::kernel::kernel_request_producer
   PUBLIC
 )
 

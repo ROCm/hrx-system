@@ -45,7 +45,8 @@ static loom_diagnostic_sink_t loomc_link_materialization_diagnostic_sink(
 }
 
 static iree_status_t loomc_link_materialization_prepare_module(
-    void* user_data, loom_module_t** inout_module) {
+    void* user_data, iree_arena_block_pool_t* block_pool,
+    iree_allocator_t allocator, loom_module_t** inout_module) {
   loomc_link_materialization_state_t* state =
       (loomc_link_materialization_state_t*)user_data;
   const loomc_config_apply_to_module_options_t apply_options = {
@@ -53,8 +54,8 @@ static iree_status_t loomc_link_materialization_prepare_module(
       .module = *inout_module,
       .result = state->diagnostics.result,
       .diagnostic_code = loomc_make_cstring_view("CONFIG/INVALID"),
-      .block_pool = loomc_workspace_block_pool(state->composition.workspace),
-      .allocator = state->allocator,
+      .block_pool = block_pool,
+      .allocator = loomc_allocator_from_iree(allocator),
   };
   loomc_status_t status = loomc_config_apply_to_module(&apply_options);
   if (!loomc_status_is_ok(status)) {
@@ -72,8 +73,7 @@ static iree_status_t loomc_link_materialization_prepare_module(
   }
 
   iree_arena_allocator_t arena;
-  iree_arena_initialize(
-      loomc_workspace_block_pool(state->composition.workspace), &arena);
+  iree_arena_initialize(block_pool, &arena);
   loom_target_specialization_request_list_t requests = {0};
   loom_target_declaration_binding_list_t bindings = {0};
   status = loomc_target_specialization_options_make_lists(target, &arena,
@@ -88,9 +88,7 @@ static iree_status_t loomc_link_materialization_prepare_module(
             .fn = loomc_link_materialization_capture_emission,
             .user_data = state,
         },
-        loomc_workspace_block_pool(state->composition.workspace),
-        iree_allocator_from_loomc(state->allocator), inout_module,
-        &error_count));
+        block_pool, allocator, inout_module, &error_count));
   }
   iree_arena_deinitialize(&arena);
   if (!loomc_status_is_ok(status)) {

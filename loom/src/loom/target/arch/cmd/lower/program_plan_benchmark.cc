@@ -420,7 +420,7 @@ static void RunIndexedProgramPlanBenchmark(benchmark::State& state,
     }
     state.PauseTiming();
     for (loom_cmd_program_kernel_request_t& request : capture.requests) {
-      loom_kernel_class_product_deinitialize(&request.source.product);
+      loom_kernel_class_product_deinitialize(&request.product);
     }
     loom_cmd_program_plan_deinitialize(&program_plan);
     iree_arena_deinitialize(&scratch_arena);

@@ -35,10 +35,11 @@ static bool SkipOnError(benchmark::State& state, iree_status_t status) {
   return true;
 }
 
-static std::string BuildIndependentKernelSource(uint32_t kernel_count) {
+static std::string BuildIndependentKernelSource(
+    uint32_t catalog_kernel_count, uint32_t launched_kernel_count) {
   std::string source;
-  source.reserve(static_cast<size_t>(kernel_count) * 320u);
-  for (uint32_t i = 0; i < kernel_count; ++i) {
+  source.reserve(static_cast<size_t>(catalog_kernel_count) * 320u);
+  for (uint32_t i = 0; i < catalog_kernel_count; ++i) {
     source.append("kernel.def @kernel_");
     source.append(std::to_string(i));
     source.append(R"(() {
@@ -51,7 +52,7 @@ static std::string BuildIndependentKernelSource(uint32_t kernel_count) {
 )");
   }
   source.append("command.program.def public @root() launch() {\n");
-  for (uint32_t i = 0; i < kernel_count; ++i) {
+  for (uint32_t i = 0; i < launched_kernel_count; ++i) {
     source.append("  kernel.launch @kernel_");
     source.append(std::to_string(i));
     source.append("() : ()\n");
@@ -74,8 +75,10 @@ static loomc_status_t CaptureRequest(void* user_data,
 
 class CommandProductFixture {
  public:
-  explicit CommandProductFixture(uint32_t kernel_count)
-      : kernel_count_(kernel_count) {}
+  CommandProductFixture(uint32_t catalog_kernel_count,
+                        uint32_t launched_kernel_count)
+      : catalog_kernel_count_(catalog_kernel_count),
+        launched_kernel_count_(launched_kernel_count) {}
 
   iree_status_t Initialize() {
     loomc_context_t* context = nullptr;
@@ -88,7 +91,8 @@ class CommandProductFixture {
         /*options=*/nullptr, loom_allocator(), &source_workspace)));
     WorkspacePtr source_workspace_ptr(source_workspace);
 
-    const std::string source_text = BuildIndependentKernelSource(kernel_count_);
+    const std::string source_text = BuildIndependentKernelSource(
+        catalog_kernel_count_, launched_kernel_count_);
     const loomc_source_options_t source_options = {
         /*.type=*/LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
         /*.structure_size=*/sizeof(source_options),
@@ -202,8 +206,9 @@ class CommandProductFixture {
     if (product_ptr == nullptr ||
         loomc_cmd_program_product_program_count(product_ptr.get()) != 1 ||
         loomc_cmd_program_product_entry_requirement_count(product_ptr.get()) !=
-            kernel_count_ ||
-        capture->requests.size() != (publish_requests ? kernel_count_ : 0)) {
+            launched_kernel_count_ ||
+        capture->requests.size() !=
+            (publish_requests ? launched_kernel_count_ : 0)) {
       return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                               "command product has an unexpected shape");
     }
@@ -212,13 +217,18 @@ class CommandProductFixture {
     return iree_ok_status();
   }
 
-  uint32_t kernel_count() const { return kernel_count_; }
+  uint32_t catalog_kernel_count() const { return catalog_kernel_count_; }
+
+  uint32_t launched_kernel_count() const { return launched_kernel_count_; }
 
   size_t source_size() const { return source_size_; }
 
  private:
-  // Number of independent source-backed kernels in the command program.
-  uint32_t kernel_count_ = 0;
+  // Number of independent source-backed kernels available in the catalog.
+  uint32_t catalog_kernel_count_ = 0;
+
+  // Number of catalog kernels launched by the selected command program.
+  uint32_t launched_kernel_count_ = 0;
 
   // Serialized input catalog size in bytes.
   size_t source_size_ = 0;
@@ -238,13 +248,14 @@ class CommandProductFixture {
 
 static void RunCommandProductBenchmark(benchmark::State& state,
                                        bool publish_requests) {
-  CommandProductFixture fixture(static_cast<uint32_t>(state.range(0)));
+  CommandProductFixture fixture(static_cast<uint32_t>(state.range(0)),
+                                static_cast<uint32_t>(state.range(1)));
   if (SkipOnError(state, fixture.Initialize())) {
     return;
   }
 
   RequestCapture capture;
-  capture.requests.reserve(fixture.kernel_count());
+  capture.requests.reserve(fixture.launched_kernel_count());
   CmdProductPtr product;
   ResultPtr result;
   if (SkipOnError(state, fixture.Build(publish_requests, &capture, &product,
@@ -276,14 +287,18 @@ static void RunCommandProductBenchmark(benchmark::State& state,
   }
 
   const int64_t item_count =
-      build_count * static_cast<int64_t>(fixture.kernel_count());
+      build_count * static_cast<int64_t>(fixture.launched_kernel_count());
   state.SetItemsProcessed(item_count);
-  state.SetComplexityN(fixture.kernel_count());
+  state.SetComplexityN(fixture.launched_kernel_count());
   state.counters["catalog_bytes"] = static_cast<double>(fixture.source_size());
-  state.counters["kernels"] = static_cast<double>(fixture.kernel_count());
+  state.counters["catalog_kernels"] =
+      static_cast<double>(fixture.catalog_kernel_count());
+  state.counters["launched_kernels"] =
+      static_cast<double>(fixture.launched_kernel_count());
   state.counters["request_bytes"] = static_cast<double>(request_bytes);
   state.counters["requests"] =
-      publish_requests ? static_cast<double>(fixture.kernel_count()) : 0.0;
+      publish_requests ? static_cast<double>(fixture.launched_kernel_count())
+                       : 0.0;
 }
 
 static void BM_CommandProductBodyBlind(benchmark::State& state) {
@@ -295,7 +310,21 @@ static void BM_CommandProductRequests(benchmark::State& state) {
 }
 
 static void ProductScales(benchmark::Benchmark* benchmark) {
-  benchmark->Arg(1)->Arg(16)->Arg(256)->Arg(1024);
+  benchmark->Args({1, 1})->Args({16, 16})->Args({256, 256})->Args({1024, 1024});
+}
+
+static void CatalogScales(benchmark::Benchmark* benchmark) {
+  benchmark->Args({1, 1})->Args({16, 1})->Args({256, 1})->Args({1024, 1})->Args(
+      {4096, 1});
+}
+
+static void BM_CommandProductBodyBlindUnrelatedCatalog(
+    benchmark::State& state) {
+  BM_CommandProductBodyBlind(state);
+}
+
+static void BM_CommandProductRequestsUnrelatedCatalog(benchmark::State& state) {
+  BM_CommandProductRequests(state);
 }
 
 static void BM_CommandProductBodyBlind_Smoke(benchmark::State& state) {
@@ -312,8 +341,10 @@ BENCHMARK(BM_CommandProductBodyBlind)
 BENCHMARK(BM_CommandProductRequests)
     ->Apply(ProductScales)
     ->Complexity(benchmark::oN);
-BENCHMARK(BM_CommandProductBodyBlind_Smoke)->Arg(4);
-BENCHMARK(BM_CommandProductRequests_Smoke)->Arg(4);
+BENCHMARK(BM_CommandProductBodyBlindUnrelatedCatalog)->Apply(CatalogScales);
+BENCHMARK(BM_CommandProductRequestsUnrelatedCatalog)->Apply(CatalogScales);
+BENCHMARK(BM_CommandProductBodyBlind_Smoke)->Args({4, 4});
+BENCHMARK(BM_CommandProductRequests_Smoke)->Args({4, 4});
 
 }  // namespace
 }  // namespace loomc::bench

@@ -56,7 +56,7 @@ static iree_status_t RejectKernelRequest(
   RejectKernelRequestState* state =
       static_cast<RejectKernelRequestState*>(user_data);
   ++state->publish_count;
-  loom_kernel_class_product_deinitialize(&request.source.product);
+  loom_kernel_class_product_deinitialize(&request.product);
   return iree_make_status(IREE_STATUS_ABORTED, "kernel request sink stopped");
 }
 
@@ -605,11 +605,11 @@ command.program.def public @root_b() launch(%storage: buffer) {
   iree_arena_deinitialize(&scratch_arena);
 
   ASSERT_EQ(request_capture.requests.size(), 3u);
-  EXPECT_EQ(request_capture.requests[0].source.member_count, 2u);
-  EXPECT_EQ(request_capture.requests[1].source.member_count, 2u);
-  EXPECT_EQ(request_capture.requests[2].source.member_count, 3u);
-  EXPECT_NE(request_capture.requests[0].source.class_ordinal,
-            request_capture.requests[1].source.class_ordinal);
+  EXPECT_EQ(request_capture.requests[0].member_count, 2u);
+  EXPECT_EQ(request_capture.requests[1].member_count, 2u);
+  EXPECT_EQ(request_capture.requests[2].member_count, 3u);
+  EXPECT_NE(request_capture.requests[0].class_ordinal,
+            request_capture.requests[1].class_ordinal);
 
   ASSERT_EQ(plan.entry_requirement_count, 4u);
   std::vector<uint32_t> requested_requirement_indices;
@@ -640,14 +640,14 @@ command.program.def public @root_b() launch(%storage: buffer) {
             requested_requirement_indices.end());
 
   for (loom_cmd_program_kernel_request_t& request : request_capture.requests) {
-    ASSERT_NE(request.source.product.module, nullptr);
+    ASSERT_NE(request.product.module, nullptr);
     loom_verify_options_t verify_options = {};
     verify_options.sink.fn = loom_diagnostic_stderr_sink;
     loom_verify_result_t verify_result = {};
-    IREE_ASSERT_OK(loom_verify_module(request.source.product.module,
-                                      &verify_options, &verify_result));
+    IREE_ASSERT_OK(loom_verify_module(request.product.module, &verify_options,
+                                      &verify_result));
     EXPECT_EQ(verify_result.error_count, 0u);
-    loom_kernel_class_product_deinitialize(&request.source.product);
+    loom_kernel_class_product_deinitialize(&request.product);
   }
   loom_cmd_program_plan_deinitialize(&plan);
 }
