@@ -22,7 +22,7 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
         for case in AIE2P_CORE_CONTRACT_FRAGMENT.cases
         if isinstance(case, DescriptorRule)
     )
-    assert len(rules) == 49
+    assert len(rules) == 75
 
     constant_rules = [
         rule for rule in rules if rule.source_op is scalar_conversion.scalar_constant
@@ -30,8 +30,64 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
     assert [rule.descriptor.key for rule in constant_rules] == [
         "amd.xdna.aie2p.constant.i32.short",
         "amd.xdna.aie2p.constant.i32.short",
+        "amd.xdna.aie2p.constant.i32.short",
+        "amd.xdna.aie2p.constant.i32",
+        "amd.xdna.aie2p.constant.i32.short",
         "amd.xdna.aie2p.constant.i32",
     ]
+
+    vector_constant_rules = [
+        rule for rule in rules if rule.source_op is vector.vector_constant
+    ]
+    assert [rule.descriptor.key for rule in vector_constant_rules] == [
+        "amd.xdna.aie2p.splat.i8x64",
+        "amd.xdna.aie2p.splat.i16x32",
+        "amd.xdna.aie2p.splat.i16x32",
+        "amd.xdna.aie2p.splat.i32x16",
+        "amd.xdna.aie2p.splat.i32x16",
+    ]
+    assert all(len(rule.emit) == 2 for rule in vector_constant_rules)
+
+    vector_broadcast_rules = [
+        rule for rule in rules if rule.source_op is vector.vector_broadcast
+    ]
+    assert [rule.descriptor.key for rule in vector_broadcast_rules] == [
+        "amd.xdna.aie2p.broadcast.i8x64.from-vector",
+        "amd.xdna.aie2p.broadcast.i16x32.from-vector",
+        "amd.xdna.aie2p.broadcast.i32x16.from-vector",
+    ]
+
+    vector_extract_rules = [
+        rule for rule in rules if rule.source_op is vector.vector_extract
+    ]
+    assert [rule.descriptor.key for rule in vector_extract_rules] == [
+        "amd.xdna.aie2p.extract.i8.immediate",
+        "amd.xdna.aie2p.extract.i8.register",
+        "amd.xdna.aie2p.extract.i16.immediate",
+        "amd.xdna.aie2p.extract.i16.register",
+        "amd.xdna.aie2p.extract.i32.immediate",
+        "amd.xdna.aie2p.extract.i32.register",
+    ]
+
+    vector_insert_rules = [
+        rule for rule in rules if rule.source_op is vector.vector_insert
+    ]
+    assert [rule.descriptor.key for rule in vector_insert_rules] == [
+        "amd.xdna.aie2p.insert.i8.zero",
+        "amd.xdna.aie2p.insert.i8.register",
+        "amd.xdna.aie2p.insert.i8.register",
+        "amd.xdna.aie2p.insert.i16.zero",
+        "amd.xdna.aie2p.insert.i16.register",
+        "amd.xdna.aie2p.insert.i16.register",
+        "amd.xdna.aie2p.insert.i32.zero",
+        "amd.xdna.aie2p.insert.i32.register",
+        "amd.xdna.aie2p.insert.i32.register",
+    ]
+    for rule in vector_insert_rules:
+        expected_copy_operands = (
+            ("idx",) if rule.descriptor.key.endswith(".register") else ()
+        )
+        assert rule.emit[-1].copy_operands == expected_copy_operands
 
     compare_rules = [
         rule for rule in rules if rule.source_op is scalar_comparison.scalar_cmpi
@@ -112,4 +168,11 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
         for case in AIE2P_CORE_CONTRACT_FRAGMENT.cases
         if isinstance(case, ValueAliasRule)
     ]
-    assert [rule.source_op for rule in alias_rules] == [vector.vector_bitcast] * 9
+    assert (
+        len([rule for rule in alias_rules if rule.source_op is vector.vector_bitcast])
+        == 9
+    )
+    assert (
+        len([rule for rule in alias_rules if rule.source_op is vector.vector_broadcast])
+        == 3
+    )

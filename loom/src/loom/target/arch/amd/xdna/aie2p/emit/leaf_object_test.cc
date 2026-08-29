@@ -6,6 +6,7 @@
 
 #include "loom/target/arch/amd/xdna/aie2p/emit/leaf_object.h"
 
+#include <algorithm>
 #include <array>
 #include <string>
 #include <string_view>
@@ -13,6 +14,7 @@
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/codegen/low/packet.h"
 #include "loom/codegen/low/text_asm.h"
 #include "loom/codegen/low/verify.h"
 #include "loom/format/text/parser.h"
@@ -257,6 +259,69 @@ TEST_F(Aie2pLeafObjectTest, ReturnFallsBackAfterAnOccupiedAluCycle) {
   EXPECT_EQ(structural_control_count, 1u);
   EXPECT_EQ(leaf.object.section_count, 1u);
   EXPECT_EQ(leaf.object.symbol_count, 1u);
+
+  ResetLeaf(&leaf);
+}
+
+TEST_F(Aie2pLeafObjectTest, MaterializesFixedRegisterCopiesAsScalarMoves) {
+  CompiledLeaf leaf;
+  IREE_ASSERT_OK(CompileSource(
+      "low.func.def target<amd.xdna.aie2p.core> @insert_lane(\n"
+      "    %vector: reg<aie2p.vec512>, %index: reg<aie2p.er>,\n"
+      "    %value: reg<aie2p.er>) -> (reg<aie2p.vec512>) {\n"
+      "  %fixed_index = low.copy %index {detached = true} : "
+      "reg<aie2p.er> -> reg<aie2p.mr29_insert>\n"
+      "  %result = low.op<amd.xdna.aie2p.insert.i8.register>("
+      "%vector, %fixed_index, %value) : (reg<aie2p.vec512>, "
+      "reg<aie2p.mr29_insert>, reg<aie2p.er>) -> reg<aie2p.vec512>\n"
+      "  low.return %result : reg<aie2p.vec512>\n"
+      "}\n",
+      &leaf));
+
+  ASSERT_EQ(leaf.frame.allocation.materialized_copy_count, 1u);
+  const loom_aie2p_instruction_id_t scalar_move =
+      loom_aie2p_encoding_find_instruction(IREE_SV("MOV_alu_mv_mv_mv_scl"));
+  ASSERT_NE(scalar_move, LOOM_AIE2P_INSTRUCTION_ID_INVALID);
+
+  iree_host_size_t structural_move_count = 0;
+  for (iree_host_size_t i = 0; i < leaf.plan.slot_count; ++i) {
+    const loom_aie2p_planned_slot_t* slot = &leaf.plan.slots[i];
+    if (!iree_any_bit_set(slot->flags,
+                          LOOM_AIE2P_PLANNED_SLOT_FLAG_STRUCTURAL_MOVE)) {
+      continue;
+    }
+    ++structural_move_count;
+    EXPECT_EQ(slot->encoded_slot.slot, LOOM_AIE2P_SLOT_MV);
+    ASSERT_NE(slot->scheduled_packet_index, LOOM_AIE2P_BUNDLE_PLAN_PACKET_NONE);
+    const loom_low_packet_view_t packet =
+        loom_low_packet_at(&leaf.frame.schedule, slot->scheduled_packet_index);
+    ASSERT_TRUE(loom_low_copy_isa(packet.node->op));
+
+    std::array<loom_aie2p_instruction_id_t, 16> candidates;
+    const iree_host_size_t candidate_count =
+        loom_aie2p_encoding_query_instruction_candidates(
+            slot->encoded_slot.slot, slot->encoded_slot.value,
+            candidates.size(), candidates.data());
+    ASSERT_LE(candidate_count, candidates.size());
+    EXPECT_NE(std::find(candidates.begin(),
+                        candidates.begin() + candidate_count, scalar_move),
+              candidates.begin() + candidate_count);
+
+    const loom_aie2p_planned_bundle_t* owning_bundle = nullptr;
+    for (iree_host_size_t bundle_index = 0;
+         bundle_index < leaf.plan.bundle_count; ++bundle_index) {
+      const loom_aie2p_planned_bundle_t* bundle =
+          &leaf.plan.bundles[bundle_index];
+      if (i >= bundle->slot_start &&
+          i < bundle->slot_start + bundle->slot_count) {
+        owning_bundle = bundle;
+        break;
+      }
+    }
+    ASSERT_NE(owning_bundle, nullptr);
+    EXPECT_EQ(owning_bundle->logical_issue_cycle, packet.node->issue_cycle);
+  }
+  EXPECT_EQ(structural_move_count, 1u);
 
   ResetLeaf(&leaf);
 }

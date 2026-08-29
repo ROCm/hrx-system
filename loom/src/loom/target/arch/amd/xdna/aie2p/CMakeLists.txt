@@ -196,6 +196,7 @@ iree_execution_test_suite(
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/target/arch/amd/xdna/aie2p/test/end_to_end/scalar_i32.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/target/arch/amd/xdna/aie2p/test/end_to_end/vector_integer.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/target/arch/amd/xdna/aie2p/test/end_to_end/vector_structure.loom"
   LABELS
     "hostonly"
 )
@@ -328,6 +329,7 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     loom::codegen::low::frame
+    loom::codegen::low::packet
     loom::codegen::low::text_asm
     loom::codegen::low::verify
     loom::format::text::parser

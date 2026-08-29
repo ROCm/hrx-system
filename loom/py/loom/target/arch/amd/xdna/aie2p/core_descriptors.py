@@ -9,12 +9,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from itertools import combinations
 from pathlib import Path
 
 from loom.target.arch.amd.xdna.aie.machine import (
     MachineForm,
     MachineOperand,
     MachineOperandKind,
+    RegisterLayout,
     has_property,
 )
 from loom.target.arch.amd.xdna.aie.schedule import (
@@ -183,6 +185,96 @@ _DESCRIPTOR_SPECS = (
         "II_VBCST_32",
     ),
     _DescriptorSpec(
+        "VEXTBCST_8_vec_extract_broadcast_imm",
+        f"{_TARGET_KEY}.broadcast.i8x64.from-vector",
+        "integer.broadcast.i8x64.from-vector",
+        "II_VEXTBCST_8_vec_extract_broadcast_imm",
+    ),
+    _DescriptorSpec(
+        "VEXTBCST_16_vec_extract_broadcast_imm",
+        f"{_TARGET_KEY}.broadcast.i16x32.from-vector",
+        "integer.broadcast.i16x32.from-vector",
+        "II_VEXTBCST_16_vec_extract_broadcast_imm",
+    ),
+    _DescriptorSpec(
+        "VEXTBCST_32_vec_extract_broadcast_imm",
+        f"{_TARGET_KEY}.broadcast.i32x16.from-vector",
+        "integer.broadcast.i32x16.from-vector",
+        "II_VEXTBCST_32_vec_extract_broadcast_imm",
+    ),
+    _DescriptorSpec(
+        "VEXTRACT_8_vec_extract_imm_vaddSign0",
+        f"{_TARGET_KEY}.extract.i8.immediate",
+        "integer.extract.i8",
+        "II_VEXTRACT_8_vec_extract_imm_vaddSign0",
+    ),
+    _DescriptorSpec(
+        "VEXTRACT_8_vec_extract_r_vaddSign0",
+        f"{_TARGET_KEY}.extract.i8.register",
+        "integer.extract.i8",
+        "II_VEXTRACT_8_vec_extract_r_vaddSign0",
+    ),
+    _DescriptorSpec(
+        "VEXTRACT_16_vec_extract_imm_vaddSign0",
+        f"{_TARGET_KEY}.extract.i16.immediate",
+        "integer.extract.i16",
+        "II_VEXTRACT_16_vec_extract_imm_vaddSign0",
+    ),
+    _DescriptorSpec(
+        "VEXTRACT_16_vec_extract_r_vaddSign0",
+        f"{_TARGET_KEY}.extract.i16.register",
+        "integer.extract.i16",
+        "II_VEXTRACT_16_vec_extract_r_vaddSign0",
+    ),
+    _DescriptorSpec(
+        "VEXTRACT_32_vec_extract_imm_vaddSign0",
+        f"{_TARGET_KEY}.extract.i32.immediate",
+        "integer.extract.i32",
+        "II_VEXTRACT_32_vec_extract_imm_vaddSign0",
+    ),
+    _DescriptorSpec(
+        "VEXTRACT_32_vec_extract_r_vaddSign0",
+        f"{_TARGET_KEY}.extract.i32.register",
+        "integer.extract.i32",
+        "II_VEXTRACT_32_vec_extract_r_vaddSign0",
+    ),
+    _DescriptorSpec(
+        "VINSERT_8_mIdxImm0",
+        f"{_TARGET_KEY}.insert.i8.zero",
+        "integer.insert.i8",
+        "II_VINSERT_8_mIdxImm0",
+    ),
+    _DescriptorSpec(
+        "VINSERT_8_mR29_insert",
+        f"{_TARGET_KEY}.insert.i8.register",
+        "integer.insert.i8",
+        "II_VINSERT_8_mR29_insert",
+    ),
+    _DescriptorSpec(
+        "VINSERT_16_mIdxImm0",
+        f"{_TARGET_KEY}.insert.i16.zero",
+        "integer.insert.i16",
+        "II_VINSERT_16_mIdxImm0",
+    ),
+    _DescriptorSpec(
+        "VINSERT_16_mR29_insert",
+        f"{_TARGET_KEY}.insert.i16.register",
+        "integer.insert.i16",
+        "II_VINSERT_16_mR29_insert",
+    ),
+    _DescriptorSpec(
+        "VINSERT_32_mIdxImm0",
+        f"{_TARGET_KEY}.insert.i32.zero",
+        "integer.insert.i32",
+        "II_VINSERT_32_mIdxImm0",
+    ),
+    _DescriptorSpec(
+        "VINSERT_32_mR29_insert",
+        f"{_TARGET_KEY}.insert.i32.register",
+        "integer.insert.i32",
+        "II_VINSERT_32_mR29_insert",
+    ),
+    _DescriptorSpec(
         "VLDA_dmx_lda_x_idx_imm",
         f"{_TARGET_KEY}.load.a.i8x64.indexed.immediate",
         "memory.load.indexed.i8x64",
@@ -215,6 +307,13 @@ _DESCRIPTOR_SPECS = (
         "II_MOVXM_eR",
         (("dst", "eR"),),
         DescriptorOpKind.CONST,
+    ),
+    _DescriptorSpec(
+        "MOV_alu_mv_mv_mv_scl",
+        f"{_TARGET_KEY}.move.scalar",
+        "register.move.scalar",
+        "II_MOV_alu_mv_mv_mv_scl_eR_eR",
+        (("dst", "eR"), ("src", "eR")),
     ),
     _DescriptorSpec(
         "ADD_alu_r_rr",
@@ -271,8 +370,21 @@ _DESCRIPTOR_SPECS = (
 
 _ASM_MNEMONIC_BY_FORM = {
     "MOV_alu_mv_mv_mv_cg": "mov.short",
+    "MOV_alu_mv_mv_mv_scl": "mov.scalar",
     "MOVXM": "mov.i32",
     "ADD_alu_r_rr": "add.rr",
+    "VEXTRACT_8_vec_extract_imm_vaddSign0": "vextract.8.imm",
+    "VEXTRACT_8_vec_extract_r_vaddSign0": "vextract.8.reg",
+    "VEXTRACT_16_vec_extract_imm_vaddSign0": "vextract.16.imm",
+    "VEXTRACT_16_vec_extract_r_vaddSign0": "vextract.16.reg",
+    "VEXTRACT_32_vec_extract_imm_vaddSign0": "vextract.32.imm",
+    "VEXTRACT_32_vec_extract_r_vaddSign0": "vextract.32.reg",
+    "VINSERT_8_mIdxImm0": "vinsert.8.zero",
+    "VINSERT_8_mR29_insert": "vinsert.8.reg",
+    "VINSERT_16_mIdxImm0": "vinsert.16.zero",
+    "VINSERT_16_mR29_insert": "vinsert.16.reg",
+    "VINSERT_32_mIdxImm0": "vinsert.32.zero",
+    "VINSERT_32_mR29_insert": "vinsert.32.reg",
 }
 
 _MACHINE_FORMS = {form.name: form for form in CORE_MACHINE_TABLE.forms}
@@ -415,14 +527,44 @@ _EXPLICIT_STORAGE_MACHINE_CLASS_NAMES = tuple(
     )
 )
 
-_IMPLICIT_REGISTER_MACHINE_CLASSES = {
+_IMPLICIT_REGISTER_LAYOUT_OVERRIDES = {
+    # The link register participates in both the 20-bit address and 32-bit
+    # scalar domains. RET consumes the architectural return address.
     "lr": "mLRa",
-    "srCarry": "mSRCarry",
 }
 
 
 def _implicit_register_class_name(register_name: str) -> str:
     return f"aie2p.state.{register_name.lower()}"
+
+
+def _implicit_register_layout(register_name: str) -> RegisterLayout:
+    override = _IMPLICIT_REGISTER_LAYOUT_OVERRIDES.get(register_name)
+    if override is not None:
+        machine_class = _MACHINE_CLASSES[override]
+        if machine_class.candidates != (register_name,):
+            raise ValueError(
+                f"{override}: implicit state layout override must name only "
+                f"{register_name}"
+            )
+        return machine_class.layout
+
+    candidate_classes = tuple(
+        machine_class
+        for machine_class in CORE_MACHINE_TABLE.register_classes
+        if register_name in machine_class.candidates
+    )
+    if not candidate_classes:
+        raise ValueError(
+            f"implicit register {register_name} is absent from every machine class"
+        )
+    layouts = {machine_class.layout for machine_class in candidate_classes}
+    if len(layouts) != 1:
+        raise ValueError(
+            f"implicit register {register_name} has ambiguous machine layouts in "
+            f"{[machine_class.name for machine_class in candidate_classes]}"
+        )
+    return next(iter(layouts))
 
 
 def _reg_classes() -> tuple[RegClass, ...]:
@@ -456,27 +598,12 @@ def _reg_classes() -> tuple[RegClass, ...]:
             )
         }
     )
-    unknown_implicit_registers = (
-        set(selected_implicit_registers) - _IMPLICIT_REGISTER_MACHINE_CLASSES.keys()
-    )
-    if unknown_implicit_registers:
-        raise ValueError(
-            "selected AIE2P forms require unclassified implicit registers: "
-            f"{sorted(unknown_implicit_registers)}"
-        )
     for register_name in selected_implicit_registers:
-        machine_class = _MACHINE_CLASSES[
-            _IMPLICIT_REGISTER_MACHINE_CLASSES[register_name]
-        ]
-        if machine_class.candidates != (register_name,):
-            raise ValueError(
-                f"{machine_class.name}: implicit state class must name only "
-                f"{register_name}"
-            )
+        layout = _implicit_register_layout(register_name)
         result.append(
             RegClass(
                 name=_implicit_register_class_name(register_name),
-                alloc_unit_bits=machine_class.layout.register_size_bits,
+                alloc_unit_bits=layout.register_size_bits,
                 spill_slot_space=SpillSlotSpace.PRIVATE,
                 flags=(
                     RegClassFlag.PHYSICAL,
@@ -484,7 +611,7 @@ def _reg_classes() -> tuple[RegClass, ...]:
                     RegClassFlag.EXPLICIT_PHYSICAL_REGISTERS,
                 ),
                 target_bank_id=next_bank_id,
-                physical_registers=machine_class.candidates,
+                physical_registers=(register_name,),
             )
         )
         next_bank_id += 1
@@ -807,7 +934,9 @@ def _instruction_classes(
         for operand in register_operands
     )
     result = [InstructionClass.VECTOR_ALU if is_vector else InstructionClass.SCALAR_ALU]
-    if has_property(form, "isMoveImm"):
+    if has_property(form, "isMoveImm") or spec.semantic_tag.startswith(
+        "register.move."
+    ):
         result.append(InstructionClass.REGISTER_MOVE)
     return tuple(result)
 
@@ -934,10 +1063,62 @@ def _pipeline_resource_name(resource: str) -> str:
     return f"{_TARGET_KEY}.pipeline.{resource.lower()}"
 
 
+def _bundle_exclusion_resource_name(slots: tuple[str, ...]) -> str:
+    return f"{_TARGET_KEY}.bundle.exclusion.{'.'.join(slots)}"
+
+
+def _bundle_slot_exclusions() -> tuple[tuple[str, ...], ...]:
+    """Derives minimal slot sets no physical bundle can contain."""
+
+    encoding_slots = {
+        instruction.slot for instruction in CORE_ENCODING_TABLE.instructions
+    }
+    if encoding_slots != _SLOT_RESOURCE_KINDS.keys():
+        raise ValueError(
+            "AIE2P schedule slot resources disagree with the encoding table: "
+            f"{sorted(encoding_slots)} != {sorted(_SLOT_RESOURCE_KINDS)}"
+        )
+    legal_signatures = {
+        frozenset(field.slot for field in bundle_format.fields)
+        for bundle_format in CORE_ENCODING_TABLE.bundle_formats
+    }
+    extendable_signatures: set[frozenset[str]] = set()
+    for signature in legal_signatures:
+        ordered_signature = tuple(sorted(signature))
+        for subset_count in range(1, len(ordered_signature) + 1):
+            for subset in combinations(ordered_signature, subset_count):
+                extendable_signatures.add(frozenset(subset))
+
+    slots = tuple(sorted(encoding_slots))
+    result = []
+    for slot_count in range(2, len(slots) + 1):
+        for candidate in combinations(slots, slot_count):
+            signature = frozenset(candidate)
+            if signature in extendable_signatures:
+                continue
+            if all(
+                frozenset(subset) in extendable_signatures
+                for subset in combinations(candidate, slot_count - 1)
+            ):
+                result.append(candidate)
+    return tuple(result)
+
+
+_BUNDLE_SLOT_EXCLUSIONS = _bundle_slot_exclusions()
+
+
 _RESOURCES = (
     *(
         Resource(_slot_resource_name(slot), 1, kind)
         for slot, kind in sorted(_SLOT_RESOURCE_KINDS.items())
+    ),
+    *(
+        Resource(
+            _bundle_exclusion_resource_name(slots),
+            len(slots) - 1,
+            ResourceKind.PIPELINE,
+        )
+        for slots in _BUNDLE_SLOT_EXCLUSIONS
     ),
     *(
         Resource(
@@ -1118,7 +1299,14 @@ def _schedule_issue_uses(
     itinerary: Itinerary,
 ) -> tuple[IssueUse, ...]:
     slot = _INSTRUCTION_ENCODINGS[spec.form_name].slot
-    result = [IssueUse(_slot_resource_name(slot), 1, 1)]
+    result = [
+        IssueUse(_slot_resource_name(slot), 1, 1),
+        *(
+            IssueUse(_bundle_exclusion_resource_name(exclusion), 1, 1)
+            for exclusion in _BUNDLE_SLOT_EXCLUSIONS
+            if slot in exclusion
+        ),
+    ]
     for use in pipeline_uses(itinerary):
         if len(use.resources) != 1:
             raise ValueError(

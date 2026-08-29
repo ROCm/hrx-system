@@ -172,6 +172,7 @@ iree_execution_test_suite(
     data = [
         "test/end_to_end/scalar_i32.loom",
         "test/end_to_end/vector_integer.loom",
+        "test/end_to_end/vector_structure.loom",
     ],
     manifests = ["test/end_to_end/loom-compile.test.json"],
     tags = ["hostonly"],
@@ -288,6 +289,7 @@ loom_cc_test(
         ":leaf_object",
         ":low_registry",
         "//loom/src/loom/codegen/low:frame",
+        "//loom/src/loom/codegen/low:packet",
         "//loom/src/loom/codegen/low:text_asm",
         "//loom/src/loom/codegen/low:verify",
         "//loom/src/loom/format/text:parser",

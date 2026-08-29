@@ -56,6 +56,34 @@
           "non_empty": true
         }
       ]
+    },
+    {
+      "name": "compiles structural integer vectors to an AIE2P tile image",
+      "run": {
+        "tool": "loom-compile",
+        "args": [
+          "{srcdir}/vector_structure.loom",
+          "--backend=elf-aie2p",
+          "--output={tmp}/vector_structure.elf",
+          "--compile-report=details"
+        ]
+      },
+      "stderr": {
+        "contains": {
+          "unordered": [
+            "\"artifact_kind\":\"target-artifact\"",
+            "\"backend\":\"amd-xdna-aie2p-tile-elf\"",
+            "\"artifact_format\":\"elf\"",
+            "\"status\":{\"code\":0,\"name\":\"OK\"}"
+          ]
+        }
+      },
+      "files": [
+        {
+          "path": "{tmp}/vector_structure.elf",
+          "non_empty": true
+        }
+      ]
     }
   ]
 }

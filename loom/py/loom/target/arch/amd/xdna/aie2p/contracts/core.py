@@ -26,9 +26,11 @@ from loom.target.contracts import (
     ContractCase,
     ContractFragment,
     DescriptorEmitForm,
+    DescriptorResultType,
     DescriptorRule,
     EmitDescriptorOp,
     Guard,
+    ResultTypeBinding,
     Scalar,
     TypePattern,
     ValueAliasRule,
@@ -43,11 +45,16 @@ _I1 = Scalar("i1")
 _I8 = Scalar("i8")
 _I16 = Scalar("i16")
 _I32 = Scalar("i32")
+_INDEX = Scalar("index")
 _I8_VECTOR = Vector("i8", minimum_lanes=1, maximum_lanes=64)
 _I16_VECTOR = Vector("i16", minimum_lanes=1, maximum_lanes=32)
 _I32_VECTOR = Vector("i32", minimum_lanes=1, maximum_lanes=16)
 _INTEGER_VECTOR_TYPES = (_I8_VECTOR, _I16_VECTOR, _I32_VECTOR)
 
+_I8_MIN = -(2**7)
+_I8_MAX = (2**7) - 1
+_I16_MIN = -(2**15)
+_I16_MAX = (2**15) - 1
 _I32_MIN = -(2**31)
 _I32_MAX = (2**31) - 1
 _SHORT_MIN = -1024
@@ -69,13 +76,15 @@ def _op_emit(
     *,
     operands: Mapping[str, ValueRef] | None = None,
     results: Mapping[str, ValueRef] | None = None,
-    result_types: Mapping[str, TypePattern | ValueRef] | None = None,
+    result_types: Mapping[str, ResultTypeBinding] | None = None,
+    copy_operands: Sequence[str] = (),
 ) -> EmitDescriptorOp:
     return EmitDescriptorOp(
         descriptor=descriptor,
         operands={} if operands is None else operands,
         results={} if results is None else results,
         result_types=result_types,
+        copy_operands=copy_operands,
         form=DescriptorEmitForm.OP,
     )
 
@@ -85,7 +94,7 @@ def _const_emit(
     result: ValueRef,
     value: AttrProject | int,
     *,
-    result_type: TypePattern | None = None,
+    result_type: ResultTypeBinding | None = None,
 ) -> EmitDescriptorOp:
     return EmitDescriptorOp(
         descriptor=descriptor,
@@ -207,6 +216,246 @@ def _vector_splat_rule(
                 descriptor,
                 operands={"src": ValueRef.operand("scalar")},
                 results={"dst": ValueRef.result("result")},
+            ),
+        ),
+    )
+
+
+def _vector_constant_rule(
+    result_type: TypePattern,
+    constant_descriptor_key: str,
+    broadcast_descriptor_key: str,
+    minimum: int,
+    maximum: int,
+) -> DescriptorRule:
+    constant = _descriptor(constant_descriptor_key)
+    broadcast = _descriptor(broadcast_descriptor_key)
+    return DescriptorRule(
+        source_op=vector.vector_constant,
+        descriptor=broadcast,
+        guards=(
+            Guard.attr_kind("value", "i64"),
+            Guard.value_type("result", result_type),
+            Guard.i64_range("value", minimum, maximum),
+        ),
+        emit=(
+            _const_emit(
+                constant,
+                ValueRef.temporary("scalar"),
+                AttrProject.direct("value"),
+                result_type=DescriptorResultType(),
+            ),
+            _op_emit(
+                broadcast,
+                operands={"src": ValueRef.temporary("scalar")},
+                results={"dst": ValueRef.result("result")},
+            ),
+        ),
+    )
+
+
+def _vector_broadcast_alias_rules() -> tuple[ValueAliasRule, ...]:
+    return tuple(
+        ValueAliasRule(
+            source_op=vector.vector_broadcast,
+            source=ValueRef.operand("source"),
+            result=ValueRef.result("result"),
+            guards=(
+                Guard.value_type("source", type_pattern),
+                Guard.value_type("result", type_pattern),
+                Guard.value_static_element_count_eq("source", "result"),
+            ),
+        )
+        for type_pattern in _INTEGER_VECTOR_TYPES
+    )
+
+
+def _vector_broadcast_rule(
+    element_type: str,
+    maximum_lanes: int,
+    descriptor_key: str,
+) -> DescriptorRule:
+    source_type = Vector(element_type, lanes=1)
+    result_type = Vector(element_type, minimum_lanes=2, maximum_lanes=maximum_lanes)
+    descriptor = _descriptor(descriptor_key)
+    return DescriptorRule(
+        source_op=vector.vector_broadcast,
+        descriptor=descriptor,
+        guards=(
+            Guard.value_type("source", source_type),
+            Guard.value_type("result", result_type),
+        ),
+        emit=(
+            EmitDescriptorOp(
+                descriptor=descriptor,
+                operands={"s1": ValueRef.operand("source")},
+                results={"dst": ValueRef.result("result")},
+                immediates={"idx": 0},
+                form=DescriptorEmitForm.OP,
+            ),
+        ),
+    )
+
+
+def _vector_extract_static_rule(
+    source_type: TypePattern,
+    result_type: TypePattern,
+    maximum_index: int,
+    descriptor_key: str,
+) -> DescriptorRule:
+    descriptor = _descriptor(descriptor_key)
+    return DescriptorRule(
+        source_op=vector.vector_extract,
+        descriptor=descriptor,
+        guards=(
+            Guard.value_type("source", source_type),
+            Guard.value_type("result", result_type),
+            Guard.operand_segment_count("indices", 0),
+            Guard.i64_array_count("static_indices", 1),
+            Guard.i64_array_element_range("static_indices", 0, 0, maximum_index),
+        ),
+        emit=(
+            EmitDescriptorOp(
+                descriptor=descriptor,
+                operands={"s1": ValueRef.operand("source")},
+                results={"dst": ValueRef.result("result")},
+                immediates={
+                    "idx": AttrProject.i64_array_element("static_indices", element=0)
+                },
+                form=DescriptorEmitForm.OP,
+            ),
+        ),
+    )
+
+
+def _vector_extract_dynamic_rule(
+    source_type: TypePattern,
+    result_type: TypePattern,
+    descriptor_key: str,
+) -> DescriptorRule:
+    descriptor = _descriptor(descriptor_key)
+    return DescriptorRule(
+        source_op=vector.vector_extract,
+        descriptor=descriptor,
+        guards=(
+            Guard.value_type("source", source_type),
+            Guard.value_type("result", result_type),
+            Guard.value_type("indices", _INDEX),
+            Guard.operand_segment_count("indices", 1),
+            Guard.i64_array_count("static_indices", 1),
+            Guard.i64_array_element_range("static_indices", 0, -(2**63), -(2**63)),
+        ),
+        emit=(
+            _op_emit(
+                descriptor,
+                operands={
+                    "s1": ValueRef.operand("source"),
+                    "idx": ValueRef.operand("indices"),
+                },
+                results={"dst": ValueRef.result("result")},
+            ),
+        ),
+    )
+
+
+def _vector_insert_zero_rule(
+    value_type: TypePattern,
+    vector_type: TypePattern,
+    descriptor_key: str,
+) -> DescriptorRule:
+    descriptor = _descriptor(descriptor_key)
+    return DescriptorRule(
+        source_op=vector.vector_insert,
+        descriptor=descriptor,
+        guards=(
+            Guard.value_type("value", value_type),
+            Guard.value_type("dest", vector_type),
+            Guard.value_type("result", vector_type),
+            Guard.operand_segment_count("indices", 0),
+            Guard.i64_array_count("static_indices", 1),
+            Guard.i64_array_element_range("static_indices", 0, 0, 0),
+        ),
+        emit=(
+            _op_emit(
+                descriptor,
+                operands={
+                    "s1": ValueRef.operand("dest"),
+                    "src": ValueRef.operand("value"),
+                },
+                results={"dst": ValueRef.result("result")},
+            ),
+        ),
+    )
+
+
+def _vector_insert_static_rule(
+    value_type: TypePattern,
+    vector_type: TypePattern,
+    maximum_index: int,
+    descriptor_key: str,
+) -> DescriptorRule:
+    constant = _descriptor("amd.xdna.aie2p.constant.i32.short")
+    descriptor = _descriptor(descriptor_key)
+    return DescriptorRule(
+        source_op=vector.vector_insert,
+        descriptor=descriptor,
+        guards=(
+            Guard.value_type("value", value_type),
+            Guard.value_type("dest", vector_type),
+            Guard.value_type("result", vector_type),
+            Guard.operand_segment_count("indices", 0),
+            Guard.i64_array_count("static_indices", 1),
+            Guard.i64_array_element_range("static_indices", 0, 1, maximum_index),
+        ),
+        emit=(
+            _const_emit(
+                constant,
+                ValueRef.temporary("index"),
+                AttrProject.i64_array_element("static_indices", element=0),
+                result_type=DescriptorResultType(),
+            ),
+            _op_emit(
+                descriptor,
+                operands={
+                    "s1": ValueRef.operand("dest"),
+                    "idx": ValueRef.temporary("index"),
+                    "src": ValueRef.operand("value"),
+                },
+                results={"dst": ValueRef.result("result")},
+                copy_operands=("idx",),
+            ),
+        ),
+    )
+
+
+def _vector_insert_dynamic_rule(
+    value_type: TypePattern,
+    vector_type: TypePattern,
+    descriptor_key: str,
+) -> DescriptorRule:
+    descriptor = _descriptor(descriptor_key)
+    return DescriptorRule(
+        source_op=vector.vector_insert,
+        descriptor=descriptor,
+        guards=(
+            Guard.value_type("value", value_type),
+            Guard.value_type("dest", vector_type),
+            Guard.value_type("result", vector_type),
+            Guard.value_type("indices", _INDEX),
+            Guard.operand_segment_count("indices", 1),
+            Guard.i64_array_count("static_indices", 1),
+            Guard.i64_array_element_range("static_indices", 0, -(2**63), -(2**63)),
+        ),
+        emit=(
+            _op_emit(
+                descriptor,
+                operands={
+                    "s1": ValueRef.operand("dest"),
+                    "idx": ValueRef.operand("indices"),
+                    "src": ValueRef.operand("value"),
+                },
+                results={"dst": ValueRef.result("result")},
+                copy_operands=("idx",),
             ),
         ),
     )
@@ -421,6 +670,24 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
     return (
         _logical_constant_rule(),
         _constant_rule(
+            _I8,
+            "amd.xdna.aie2p.constant.i32.short",
+            _I8_MIN,
+            _I8_MAX,
+        ),
+        _constant_rule(
+            _I16,
+            "amd.xdna.aie2p.constant.i32.short",
+            _SHORT_MIN,
+            _SHORT_MAX,
+        ),
+        _constant_rule(
+            _I16,
+            "amd.xdna.aie2p.constant.i32",
+            _I16_MIN,
+            _I16_MAX,
+        ),
+        _constant_rule(
             _I32,
             "amd.xdna.aie2p.constant.i32.short",
             _SHORT_MIN,
@@ -431,6 +698,147 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
             "amd.xdna.aie2p.constant.i32",
             _I32_MIN,
             _I32_MAX,
+        ),
+        _vector_constant_rule(
+            _I8_VECTOR,
+            "amd.xdna.aie2p.constant.i32.short",
+            "amd.xdna.aie2p.splat.i8x64",
+            _I8_MIN,
+            _I8_MAX,
+        ),
+        _vector_constant_rule(
+            _I16_VECTOR,
+            "amd.xdna.aie2p.constant.i32.short",
+            "amd.xdna.aie2p.splat.i16x32",
+            _SHORT_MIN,
+            _SHORT_MAX,
+        ),
+        _vector_constant_rule(
+            _I16_VECTOR,
+            "amd.xdna.aie2p.constant.i32",
+            "amd.xdna.aie2p.splat.i16x32",
+            _I16_MIN,
+            _I16_MAX,
+        ),
+        _vector_constant_rule(
+            _I32_VECTOR,
+            "amd.xdna.aie2p.constant.i32.short",
+            "amd.xdna.aie2p.splat.i32x16",
+            _SHORT_MIN,
+            _SHORT_MAX,
+        ),
+        _vector_constant_rule(
+            _I32_VECTOR,
+            "amd.xdna.aie2p.constant.i32",
+            "amd.xdna.aie2p.splat.i32x16",
+            _I32_MIN,
+            _I32_MAX,
+        ),
+        *_vector_broadcast_alias_rules(),
+        *(
+            _vector_broadcast_rule(element_type, maximum_lanes, descriptor_key)
+            for element_type, maximum_lanes, descriptor_key in (
+                (
+                    "i8",
+                    64,
+                    "amd.xdna.aie2p.broadcast.i8x64.from-vector",
+                ),
+                (
+                    "i16",
+                    32,
+                    "amd.xdna.aie2p.broadcast.i16x32.from-vector",
+                ),
+                (
+                    "i32",
+                    16,
+                    "amd.xdna.aie2p.broadcast.i32x16.from-vector",
+                ),
+            )
+        ),
+        *(
+            rule
+            for (
+                scalar_type,
+                vector_type,
+                maximum_index,
+                immediate_key,
+                register_key,
+            ) in (
+                (
+                    _I8,
+                    _I8_VECTOR,
+                    63,
+                    "amd.xdna.aie2p.extract.i8.immediate",
+                    "amd.xdna.aie2p.extract.i8.register",
+                ),
+                (
+                    _I16,
+                    _I16_VECTOR,
+                    31,
+                    "amd.xdna.aie2p.extract.i16.immediate",
+                    "amd.xdna.aie2p.extract.i16.register",
+                ),
+                (
+                    _I32,
+                    _I32_VECTOR,
+                    15,
+                    "amd.xdna.aie2p.extract.i32.immediate",
+                    "amd.xdna.aie2p.extract.i32.register",
+                ),
+            )
+            for rule in (
+                _vector_extract_static_rule(
+                    vector_type,
+                    scalar_type,
+                    maximum_index,
+                    immediate_key,
+                ),
+                _vector_extract_dynamic_rule(
+                    vector_type,
+                    scalar_type,
+                    register_key,
+                ),
+            )
+        ),
+        *(
+            rule
+            for scalar_type, vector_type, maximum_index, zero_key, register_key in (
+                (
+                    _I8,
+                    _I8_VECTOR,
+                    63,
+                    "amd.xdna.aie2p.insert.i8.zero",
+                    "amd.xdna.aie2p.insert.i8.register",
+                ),
+                (
+                    _I16,
+                    _I16_VECTOR,
+                    31,
+                    "amd.xdna.aie2p.insert.i16.zero",
+                    "amd.xdna.aie2p.insert.i16.register",
+                ),
+                (
+                    _I32,
+                    _I32_VECTOR,
+                    15,
+                    "amd.xdna.aie2p.insert.i32.zero",
+                    "amd.xdna.aie2p.insert.i32.register",
+                ),
+            )
+            for rule in (
+                _vector_insert_zero_rule(scalar_type, vector_type, zero_key),
+                _vector_insert_static_rule(
+                    scalar_type,
+                    vector_type,
+                    maximum_index,
+                    register_key,
+                ),
+                _vector_insert_dynamic_rule(
+                    scalar_type,
+                    vector_type,
+                    register_key,
+                ),
+            )
         ),
         _binary_rule(
             scalar_arithmetic.scalar_addi,
