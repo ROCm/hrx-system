@@ -610,6 +610,9 @@ TEST(LowDescriptorsTest, EnumNamesAreStableDiagnosticSpellings) {
   EXPECT_EQ(StringViewToString(
                 loom_low_resource_kind_name(LOOM_LOW_RESOURCE_KIND_ADDRESS)),
             "address");
+  EXPECT_EQ(StringViewToString(
+                loom_low_resource_kind_name(LOOM_LOW_RESOURCE_KIND_PIPELINE)),
+            "pipeline");
 
   EXPECT_EQ(StringViewToString(
                 loom_low_hazard_kind_name(LOOM_LOW_HAZARD_KIND_UNKNOWN)),

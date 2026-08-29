@@ -1514,6 +1514,7 @@ static bool loom_low_resource_kind_is_valid(loom_low_resource_kind_t kind) {
     case LOOM_LOW_RESOURCE_KIND_STORE:
     case LOOM_LOW_RESOURCE_KIND_CONTROL:
     case LOOM_LOW_RESOURCE_KIND_ADDRESS:
+    case LOOM_LOW_RESOURCE_KIND_PIPELINE:
       return true;
     default:
       return false;
