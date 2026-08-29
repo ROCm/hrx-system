@@ -15,18 +15,6 @@ package(
 )
 
 iree_runtime_cc_library(
-    name = "allocators",
-    srcs = ["allocators.c"],
-    hdrs = ["allocators.h"],
-    deps = [
-        ":caching_allocator",
-        ":debug_allocator",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/hal",
-    ],
-)
-
-iree_runtime_cc_library(
     name = "caching_allocator",
     srcs = ["caching_allocator.c"],
     hdrs = ["caching_allocator.h"],

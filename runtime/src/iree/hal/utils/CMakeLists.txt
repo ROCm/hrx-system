@@ -11,21 +11,6 @@ iree_add_all_subdirs()
 
 iree_cc_library(
   NAME
-    allocators
-  HDRS
-    "allocators.h"
-  SRCS
-    "allocators.c"
-  DEPS
-    ::caching_allocator
-    ::debug_allocator
-    iree::base
-    iree::hal
-  PUBLIC
-)
-
-iree_cc_library(
-  NAME
     caching_allocator
   HDRS
     "caching_allocator.h"

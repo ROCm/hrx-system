@@ -119,7 +119,6 @@ iree_cc_library(
     iree::base::tooling::flags
     iree::hal
     iree::hal::drivers
-    iree::hal::utils::allocators
     iree::hal::utils::mpi_channel_provider
     iree::hal::utils::profile_file
     iree::hal::utils::statistics_sink
