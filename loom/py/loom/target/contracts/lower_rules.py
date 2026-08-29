@@ -125,6 +125,7 @@ class LowerAttrCopyKind(Enum):
     I64_SHIFTED_LOW_BIT_CLEAR_MASK = "i64_shifted_low_bit_clear_mask"
     I64_LITERAL_MINUS_ATTR = "i64_literal_minus_attr"
     I64_LITERAL_MINUS_ATTRS = "i64_literal_minus_attrs"
+    I64_ATTR_MINUS_LITERAL = "i64_attr_minus_literal"
 
 
 LOWER_EMIT_FLAG_SWAP_OPERANDS_0_1 = 1 << 0
@@ -1721,6 +1722,13 @@ class _LowerRuleSetCompiler:
                     source_op,
                     project.other_source_attr,
                 ),
+                literal_i64=project.literal_i64,
+            )
+        if project.kind == AttrProjectKind.I64_ATTR_MINUS_LITERAL:
+            return LowerAttrCopy(
+                kind=LowerAttrCopyKind.I64_ATTR_MINUS_LITERAL,
+                target_name=target_name,
+                source_attr_index=source_attr_index,
                 literal_i64=project.literal_i64,
             )
         raise ValueError(

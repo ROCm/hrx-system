@@ -1290,6 +1290,7 @@ def test_compile_lower_rule_set_compiles_i64_bit_mask_attr_projection() -> None:
             Immediate("clear", ImmediateKind.UNSIGNED, bit_width=32),
             Immediate("shift", ImmediateKind.UNSIGNED, bit_width=8),
             Immediate("align", ImmediateKind.UNSIGNED, bit_width=8),
+            Immediate("reverse_shift", ImmediateKind.SIGNED, bit_width=8),
         ),
     )
     descriptor_set = replace(
@@ -1327,6 +1328,10 @@ def test_compile_lower_rule_set_compiles_i64_bit_mask_attr_projection() -> None:
                                 other_source_attr="width",
                                 literal=32,
                             ),
+                            "reverse_shift": AttrProject.i64_attr_minus_literal(
+                                "width",
+                                literal=32,
+                            ),
                         },
                     ),
                 ),
@@ -1336,8 +1341,8 @@ def test_compile_lower_rule_set_compiles_i64_bit_mask_attr_projection() -> None:
 
     compiled = compile_lower_rule_set(table, dialect_ops={"scalar": ALL_SCALAR_OPS})
 
-    assert len(compiled.attr_copies) == 5
-    low, target, clear, shift, align = compiled.attr_copies
+    assert len(compiled.attr_copies) == 6
+    low, target, clear, shift, align, reverse_shift = compiled.attr_copies
     assert low.kind == LowerAttrCopyKind.I64_LOW_BIT_MASK
     assert low.source_attr_index == 1
     assert target.kind == LowerAttrCopyKind.I64_SHIFTED_LOW_BIT_MASK
@@ -1353,6 +1358,9 @@ def test_compile_lower_rule_set_compiles_i64_bit_mask_attr_projection() -> None:
     assert align.source_attr_index == 0
     assert align.other_source_attr_index == 1
     assert align.literal_i64 == 32
+    assert reverse_shift.kind == LowerAttrCopyKind.I64_ATTR_MINUS_LITERAL
+    assert reverse_shift.source_attr_index == 1
+    assert reverse_shift.literal_i64 == 32
 
     _expect_value_error(
         lambda: ContractFragment(

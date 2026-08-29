@@ -206,6 +206,8 @@ typedef enum loom_low_lower_attr_copy_kind_e {
   LOOM_LOW_LOWER_ATTR_COPY_SOURCE_MEMORY_STATIC_BYTE_OFFSET_QUOTIENT = 26,
   // Emits selected source-memory static byte offset modulo literal_i64.
   LOOM_LOW_LOWER_ATTR_COPY_SOURCE_MEMORY_STATIC_BYTE_OFFSET_REMAINDER = 27,
+  // Emits one i64 source attribute minus literal_i64.
+  LOOM_LOW_LOWER_ATTR_COPY_I64_ATTR_MINUS_LITERAL = 28,
 } loom_low_lower_attr_copy_kind_t;
 
 typedef struct loom_low_lower_attr_copy_t {

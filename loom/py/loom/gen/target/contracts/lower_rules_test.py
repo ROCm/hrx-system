@@ -638,6 +638,22 @@ def test_attr_copy_row_emits_portable_signed_i64_literal() -> None:
     assert ".literal_i64 = (-INT64_C(2147483648))" in fields
 
 
+def test_attr_copy_row_emits_attr_minus_literal_payload() -> None:
+    fields = attr_copy_row(
+        LowerAttrCopy(
+            kind=LowerAttrCopyKind.I64_ATTR_MINUS_LITERAL,
+            target_name="shift",
+            source_attr_index=2,
+            literal_i64=32,
+        ),
+        target_name_string_offset="TEST_STRING_SHIFT",
+    )
+
+    assert ".target_name_string_offset = TEST_STRING_SHIFT" in fields
+    assert ".source_attr_index = 2" in fields
+    assert ".literal_i64 = INT64_C(32)" in fields
+
+
 def test_diagnostic_param_row_emits_portable_signed_i64_literal() -> None:
     fields = diagnostic_param_row(
         LowerDiagnosticParam(

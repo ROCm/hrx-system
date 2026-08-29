@@ -14,6 +14,7 @@ from loom.dialect.index import ALL_INDEX_OPS
 from loom.dialect.index import defs as index
 from loom.dialect.scalar import ALL_SCALAR_OPS
 from loom.dialect.scalar import arithmetic as scalar_arithmetic
+from loom.dialect.scalar import bitwise as scalar_bitwise
 from loom.dialect.scalar import conversion as scalar_conversion
 from loom.dialect.vector import ALL_VECTOR_OPS
 from loom.dialect.vector import defs as vector
@@ -462,6 +463,27 @@ TEST_LOW_CORE_CONTRACT_FRAGMENT = ContractFragment(
         _const_i32_rule(scalar_conversion.scalar_constant, _I32),
         _const_i32_rule(index.index_constant, _INDEX),
         _const_i32_rule(index.index_constant, _OFFSET),
+        DescriptorRule(
+            source_op=scalar_bitwise.scalar_bitfield_extracts,
+            descriptor=TEST_LOW_CONST_I32_DESCRIPTOR,
+            guards=(
+                Guard.value_type("source", _I32),
+                Guard.value_type("result", _I32),
+            ),
+            emit=(
+                EmitDescriptorOp(
+                    descriptor=TEST_LOW_CONST_I32_DESCRIPTOR,
+                    results={"dst": ValueRef.result("result")},
+                    immediates={
+                        "i32_value": AttrProject.i64_attr_minus_literal(
+                            "width",
+                            literal=32,
+                        )
+                    },
+                    form=DescriptorEmitForm.CONST,
+                ),
+            ),
+        ),
         DescriptorRule(
             source_op=vector.vector_extract,
             descriptor=TEST_LOW_CONST_I32_DESCRIPTOR,

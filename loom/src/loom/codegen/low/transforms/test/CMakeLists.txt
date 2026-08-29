@@ -14,6 +14,7 @@ loom_check_test_suite(
     test
   SRCS
     "allocation_materialization.loom-test"
+    "attr_projection.loom-test"
     "cfg_tuple_decomposition.loom-test"
     "dce.loom-test"
     "source_to_low_options.loom-test"

@@ -639,6 +639,7 @@ def attr_copy_row(
         LowerAttrCopyKind.I64_SHIFTED_LOW_BIT_CLEAR_MASK,
         LowerAttrCopyKind.I64_LITERAL_MINUS_ATTR,
         LowerAttrCopyKind.I64_LITERAL_MINUS_ATTRS,
+        LowerAttrCopyKind.I64_ATTR_MINUS_LITERAL,
     ):
         _append_field(fields, "source_attr_index", row.source_attr_index, always=True)
     if row.kind in (
@@ -692,6 +693,7 @@ def attr_copy_row(
         LowerAttrCopyKind.I64_ARRAY_LANE_BYTE,
         LowerAttrCopyKind.I64_LITERAL_MINUS_ATTR,
         LowerAttrCopyKind.I64_LITERAL_MINUS_ATTRS,
+        LowerAttrCopyKind.I64_ATTR_MINUS_LITERAL,
         LowerAttrCopyKind.SOURCE_MEMORY_STATIC_BYTE_OFFSET_QUOTIENT,
         LowerAttrCopyKind.SOURCE_MEMORY_STATIC_BYTE_OFFSET_REMAINDER,
     ):
