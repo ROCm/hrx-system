@@ -611,6 +611,20 @@ def test_guard_row_overlays_array_element_index_and_range() -> None:
     assert (".payload = {.i64_range = {.minimum = (-INT64_C(4)), .maximum = INT64_C(7)}}") in fields
 
 
+def test_guard_row_emits_static_element_count_value_refs() -> None:
+    fields = guard_row(
+        {},
+        LowerGuard(
+            kind=GuardKind.VALUE_STATIC_ELEMENT_COUNT_EQ,
+            value_ref_index=2,
+            other_value_ref_index=3,
+        ),
+    )
+
+    assert ".value_ref_index = 2" in fields
+    assert ".other_value_ref_index = 3" in fields
+
+
 def test_guard_row_emits_value_memory_space_mask() -> None:
     fields = guard_row(
         {},
