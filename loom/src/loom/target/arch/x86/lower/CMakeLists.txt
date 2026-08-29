@@ -15,11 +15,9 @@ loom_cc_library(
     lower
   HDRS
     "contraction.h"
-    "internal.h"
     "lower.h"
   SRCS
     "contraction.c"
-    "packed_dot.c"
     "registry.c"
   DEPS
     iree::base

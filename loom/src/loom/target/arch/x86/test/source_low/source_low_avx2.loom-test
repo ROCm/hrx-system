@@ -150,3 +150,24 @@ low.func.def target<x86.avx2.core>(@target) abi(object_function) @i32x4_index_ma
   vmovdqu32.store.indexed.xmm %loaded, %output_view, %15 {disp32 = 0, scale = 4}
   return
 }
+
+// ====
+
+x86.target<avx2> @target
+
+func.def target(@target) @i8x32_memory_indexed(%input: buffer, %output: buffer, %i: index) {
+  %bounded_i = index.assume %i [range(%i, 0, 32)] : index
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xi8>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xi8>
+  %loaded = vector.load %input_view[%bounded_i] : view<64xi8> -> vector<32xi8>
+  vector.store %loaded, %output_view[%bounded_i] : vector<32xi8>, view<64xi8>
+  func.return
+}
+
+// ----
+low.func.def target<x86.avx2.core>(@target) abi(object_function) @i8x32_memory_indexed(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %bounded_i: reg<x86.gpr64>) asm {
+  %loaded = vmovdqu32.load.indexed.ymm %input_view, %bounded_i {disp32 = 0, scale = 1}
+  vmovdqu32.store.indexed.ymm %loaded, %output_view, %bounded_i {disp32 = 0, scale = 1}
+  return
+}

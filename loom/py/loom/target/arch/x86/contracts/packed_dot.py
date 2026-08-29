@@ -31,8 +31,11 @@ from loom.target.contracts import (
     DescriptorMatrixRule,
     DescriptorRule,
     DotDescriptorCase,
+    Guard,
     GuardDiagnostic,
     TypePattern,
+    ValueAliasRule,
+    ValueRef,
     Vector,
     descriptor_by_key,
     dot_descriptor_rules,
@@ -171,6 +174,29 @@ def _packed_dot_rules() -> tuple[DescriptorRule, ...]:
     )
 
 
+def _packed_byte_alias_rules() -> tuple[ValueAliasRule, ...]:
+    rules: list[ValueAliasRule] = []
+    for byte_lane_count, word_lane_count in ((16, 4), (32, 8), (64, 16)):
+        byte_type = Vector("i8", lanes=byte_lane_count)
+        word_type = Vector("i32", lanes=word_lane_count)
+        for source_type, result_type in (
+            (byte_type, word_type),
+            (word_type, byte_type),
+        ):
+            rules.append(
+                ValueAliasRule(
+                    source_op=vector.vector_bitcast,
+                    source=ValueRef.operand("input"),
+                    result=ValueRef.result("result"),
+                    guards=(
+                        Guard.value_type("input", source_type),
+                        Guard.value_type("result", result_type),
+                    ),
+                )
+            )
+    return tuple(rules)
+
+
 X86_PACKED_DOT_CONTRACT_DIALECT_OPS = {
     "vector": ALL_VECTOR_OPS,
 }
@@ -180,6 +206,7 @@ X86_PACKED_DOT_CONTRACT_FRAGMENT = ContractFragment(
     descriptor_set=X86_PACKED_DOT_DESCRIPTOR_SET,
     public_header="loom/target/arch/x86/contracts/packed_dot.h",
     cases=(
+        *_packed_byte_alias_rules(),
         *_packed_dot_rules(),
         DescriptorMatrixRule(source_op=vector.vector_mma, source="vector_mma"),
     ),

@@ -17,62 +17,50 @@
 #include "loom/target/arch/x86/contracts/scalar.h"
 #include "loom/target/arch/x86/contracts/scalar_lower_rules.h"
 #include "loom/target/arch/x86/lower/contraction.h"
-#include "loom/target/arch/x86/lower/internal.h"
+#include "loom/target/arch/x86/lower/lower.h"
+#include "loom/target/arch/x86/register_classes.h"
 
-static bool loom_x86_type_is_vector_16xi32(loom_type_t type) {
-  return loom_type_is_vector(type) && loom_type_rank(type) == 1 &&
-         loom_type_is_all_static(type) &&
-         loom_type_element_type(type) == LOOM_SCALAR_TYPE_I32 &&
-         loom_type_dim_static_size_at(type, 0) == 16;
-}
-
-static bool loom_x86_type_is_vector_16xf32(loom_type_t type) {
-  return loom_type_is_vector(type) && loom_type_rank(type) == 1 &&
-         loom_type_is_all_static(type) &&
-         loom_type_element_type(type) == LOOM_SCALAR_TYPE_F32 &&
-         loom_type_dim_static_size_at(type, 0) == 16;
-}
-
-static bool loom_x86_type_is_vector_16xi1(loom_type_t type) {
+static bool loom_x86_type_is_vector_i1(loom_type_t type, int64_t lane_count) {
   return loom_type_is_vector(type) && loom_type_rank(type) == 1 &&
          loom_type_is_all_static(type) &&
          loom_type_element_type(type) == LOOM_SCALAR_TYPE_I1 &&
-         loom_type_dim_static_size_at(type, 0) == 16;
+         loom_type_dim_static_size_at(type, 0) == lane_count;
 }
 
-static bool loom_x86_type_is_vector_4xi32(loom_type_t type) {
-  return loom_type_is_vector(type) && loom_type_rank(type) == 1 &&
-         loom_type_is_all_static(type) &&
-         loom_type_element_type(type) == LOOM_SCALAR_TYPE_I32 &&
-         loom_type_dim_static_size_at(type, 0) == 4;
+static bool loom_x86_vector_element_bit_width(loom_scalar_type_t scalar_type,
+                                              uint32_t* out_bit_width) {
+  static const loom_scalar_type_set_t kRegisterElementTypes =
+      LOOM_SCALAR_TYPE_SET_I8 | LOOM_SCALAR_TYPE_SET_I16 |
+      LOOM_SCALAR_TYPE_SET_I32 | LOOM_SCALAR_TYPE_SET_16BIT_FLOAT |
+      LOOM_SCALAR_TYPE_SET_F32;
+  if (!loom_scalar_type_set_contains(kRegisterElementTypes, scalar_type)) {
+    *out_bit_width = 0;
+    return false;
+  }
+  *out_bit_width = (uint32_t)loom_scalar_type_bitwidth(scalar_type);
+  return true;
 }
 
-static bool loom_x86_type_is_vector_4xf32(loom_type_t type) {
-  return loom_type_is_vector(type) && loom_type_rank(type) == 1 &&
-         loom_type_is_all_static(type) &&
-         loom_type_element_type(type) == LOOM_SCALAR_TYPE_F32 &&
-         loom_type_dim_static_size_at(type, 0) == 4;
-}
-
-static bool loom_x86_type_is_vector_8xi32(loom_type_t type) {
-  return loom_type_is_vector(type) && loom_type_rank(type) == 1 &&
-         loom_type_is_all_static(type) &&
-         loom_type_element_type(type) == LOOM_SCALAR_TYPE_I32 &&
-         loom_type_dim_static_size_at(type, 0) == 8;
-}
-
-static bool loom_x86_type_is_vector_8xf32(loom_type_t type) {
-  return loom_type_is_vector(type) && loom_type_rank(type) == 1 &&
-         loom_type_is_all_static(type) &&
-         loom_type_element_type(type) == LOOM_SCALAR_TYPE_F32 &&
-         loom_type_dim_static_size_at(type, 0) == 8;
-}
-
-static bool loom_x86_type_is_vector_4xi1(loom_type_t type) {
-  return loom_type_is_vector(type) && loom_type_rank(type) == 1 &&
-         loom_type_is_all_static(type) &&
-         loom_type_element_type(type) == LOOM_SCALAR_TYPE_I1 &&
-         loom_type_dim_static_size_at(type, 0) == 4;
+static bool loom_x86_static_vector_register_class_for_source_type(
+    loom_type_t source_type, uint32_t maximum_vector_bit_width,
+    loom_x86_register_class_t* out_register_class) {
+  if (!loom_type_is_vector(source_type) || loom_type_rank(source_type) != 1 ||
+      !loom_type_is_all_static(source_type)) {
+    return false;
+  }
+  uint32_t element_bit_width = 0;
+  if (!loom_x86_vector_element_bit_width(loom_type_element_type(source_type),
+                                         &element_bit_width)) {
+    return false;
+  }
+  const int64_t lane_count = loom_type_dim_static_size_at(source_type, 0);
+  if (lane_count <= 0 ||
+      (uint64_t)lane_count > maximum_vector_bit_width / element_bit_width) {
+    return false;
+  }
+  const uint32_t vector_bit_width = (uint32_t)lane_count * element_bit_width;
+  return loom_x86_register_class_for_vector_bit_width(vector_bit_width,
+                                                      out_register_class);
 }
 
 static bool loom_x86_type_is_scalar_i1(loom_type_t type) {
@@ -169,18 +157,12 @@ static bool loom_x86_avx2_register_class_for_source_type(
     return true;
   }
   if (loom_x86_type_is_scalar_f32(source_type) ||
-      loom_x86_type_is_scalar_f64(source_type) ||
-      loom_x86_type_is_vector_4xi32(source_type) ||
-      loom_x86_type_is_vector_4xf32(source_type)) {
+      loom_x86_type_is_scalar_f64(source_type)) {
     *out_register_class = LOOM_X86_REGISTER_CLASS_XMM;
     return true;
   }
-  if (loom_x86_type_is_vector_8xi32(source_type) ||
-      loom_x86_type_is_vector_8xf32(source_type)) {
-    *out_register_class = LOOM_X86_REGISTER_CLASS_YMM;
-    return true;
-  }
-  return false;
+  return loom_x86_static_vector_register_class_for_source_type(
+      source_type, /*maximum_vector_bit_width=*/256, out_register_class);
 }
 
 static bool loom_x86_avx512_register_class_for_source_type(
@@ -189,20 +171,16 @@ static bool loom_x86_avx512_register_class_for_source_type(
                                                    out_register_class)) {
     return true;
   }
-  if (loom_x86_type_is_vector_4xi1(source_type) ||
-      loom_x86_type_is_vector_16xi1(source_type)) {
+  if (loom_x86_type_is_vector_i1(source_type, 4) ||
+      loom_x86_type_is_vector_i1(source_type, 16)) {
     *out_register_class = LOOM_X86_REGISTER_CLASS_K;
     return true;
   }
-  if (loom_x86_type_is_vector_16xi32(source_type) ||
-      loom_x86_type_is_vector_16xf32(source_type)) {
-    *out_register_class = LOOM_X86_REGISTER_CLASS_ZMM;
-    return true;
-  }
-  return false;
+  return loom_x86_static_vector_register_class_for_source_type(
+      source_type, /*maximum_vector_bit_width=*/512, out_register_class);
 }
 
-iree_status_t loom_x86_make_register_type(
+static iree_status_t loom_x86_make_register_type(
     loom_low_lower_context_t* context, loom_x86_register_class_t register_class,
     loom_type_t* out_type) {
   uint16_t descriptor_reg_class_id = LOOM_LOW_REG_CLASS_NONE;
@@ -249,6 +227,19 @@ static iree_status_t loom_x86_map_scalar_type(void* user_data,
   loom_x86_register_class_t register_class = 0;
   if (loom_x86_scalar_register_class_for_source_type(source_type,
                                                      &register_class)) {
+    return loom_x86_make_register_type(context, register_class, out_low_type);
+  }
+  return loom_low_lower_emit_source_type_unsupported(
+      context, source_op, IREE_SV("source"), source_type);
+}
+
+static iree_status_t loom_x86_map_packed_dot_type(
+    void* user_data, loom_low_lower_context_t* context,
+    const loom_op_t* source_op, loom_type_t source_type,
+    loom_type_t* out_low_type) {
+  loom_x86_register_class_t register_class = 0;
+  if (loom_x86_static_vector_register_class_for_source_type(
+          source_type, /*maximum_vector_bit_width=*/512, &register_class)) {
     return loom_x86_make_register_type(context, register_class, out_low_type);
   }
   return loom_low_lower_emit_source_type_unsupported(
@@ -346,14 +337,10 @@ static iree_status_t loom_x86_map_avx512_packed_dot_type(
     void* user_data, loom_low_lower_context_t* context,
     const loom_op_t* source_op, loom_type_t source_type,
     loom_type_t* out_low_type) {
-  uint32_t vector_bit_width = 0;
-  if (loom_x86_packed_dot_type_static_vector_bit_width(source_type,
-                                                       &vector_bit_width)) {
-    loom_x86_register_class_t register_class = 0;
-    if (loom_x86_register_class_for_vector_bit_width(vector_bit_width,
-                                                     &register_class)) {
-      return loom_x86_make_register_type(context, register_class, out_low_type);
-    }
+  loom_x86_register_class_t register_class = 0;
+  if (loom_x86_static_vector_register_class_for_source_type(
+          source_type, /*maximum_vector_bit_width=*/512, &register_class)) {
+    return loom_x86_make_register_type(context, register_class, out_low_type);
   }
   return loom_x86_map_avx512_type(user_data, context, source_op, source_type,
                                   out_low_type);
