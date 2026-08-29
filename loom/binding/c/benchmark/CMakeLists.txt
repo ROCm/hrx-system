@@ -105,6 +105,21 @@ loom_cc_benchmark(
 
 loom_cc_benchmark(
   NAME
+    link_request_benchmark
+  SRCS
+    "link_request_benchmark.cc"
+  DEPS
+    ::benchmark_support
+    iree::base
+    iree::testing::benchmark_main
+    loom::binding::c::loomc
+  ARGS
+    "--benchmark_filter=Smoke"
+  TESTONLY
+)
+
+loom_cc_benchmark(
+  NAME
     product_throughput_benchmark
   SRCS
     "product_throughput_benchmark.cc"
