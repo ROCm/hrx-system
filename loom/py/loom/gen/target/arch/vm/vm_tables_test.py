@@ -48,6 +48,8 @@ from loom.target.arch.vm.projection import (
     VM_STRUCTURAL_INSTRUCTIONS,
 )
 from loom.target.arch.vm.source_lowering import (
+    VM_ATOMIC_COMPONENT_NAMES,
+    VM_ATOMIC_SOURCE_LOWERINGS,
     VM_DIRECT_CONVERSION_LOWERINGS,
     VM_SOURCE_CONVERSION_LOWERINGS,
     VM_SOURCE_CONVERSION_MAX_STEP_COUNT,
@@ -673,6 +675,9 @@ def test_lowering_rows_are_data_only() -> None:
     assert "LOOM_VM_MODULE_RESOURCE_ROW(RODATA" in rows
     assert "VM_CORE_DESCRIPTOR_REF_BUFFER_RODATA_LOAD, UINT16_MAX, UINT16_MAX" in rows
     assert "VM_CORE_DESCRIPTOR_REF_REF_RETAIN" in rows
+    assert "LOOM_VM_ATOMIC_SOURCE_LOWERING_ROW(" in rows
+    assert ("LOOM_LOW_SOURCE_MEMORY_OPERATION_ATOMIC_REDUCE, VM_CORE_DESCRIPTOR_REF_BUFFER_ATOMIC_REDUCE, 2, 0, 0, 0, 7, 1, 0") in rows
+    assert ("LOOM_LOW_SOURCE_MEMORY_OPERATION_ATOMIC_CMPXCHG, VM_CORE_DESCRIPTOR_REF_BUFFER_ATOMIC_CMPXCHG, 2, UINT8_MAX, 0, 0, 7") in rows
     assert "LOOM_VM_SOURCE_LOWERING_LIMITS(\n    3, 1)" in rows
     assert "LOOM_OP_INDEX_MUL" in rows
     assert "VM_CORE_DESCRIPTOR_REF_INTEGER_MUL_I64" in rows
@@ -692,6 +697,51 @@ def test_lowering_rows_are_data_only() -> None:
     assert "LOOM_VM_CONVERSION_LOWERING_STEP_ROW(" in rows
     assert "LOOM_VM_CONVERSION_LOWERING_ROW(" in rows
     assert "kVmConversionLoweringRanges[LOOM_OP_SCALAR_COUNT_]" in rows
+
+
+def test_atomic_source_rows_preserve_packed_isa_selectors() -> None:
+    assert tuple((lowering.operation_kind, lowering.descriptor_key) for lowering in VM_ATOMIC_SOURCE_LOWERINGS) == (
+        ("ATOMIC_REDUCE", "vm.buffer.atomic.reduce"),
+        ("ATOMIC_RMW", "vm.buffer.atomic.rmw"),
+        ("ATOMIC_CMPXCHG", "vm.buffer.atomic.cmpxchg"),
+    )
+    assert VM_ATOMIC_COMPONENT_NAMES == (
+        "kind",
+        "carrier",
+        "ordering",
+        "success_ordering",
+        "failure_ordering",
+        "scope",
+    )
+
+    def component_locations(lowering):
+        return tuple(
+            None
+            if component is None
+            else (
+                component.selector_ordinal,
+                component.bit_offset,
+                component.bit_length,
+            )
+            for component in lowering.components
+        )
+
+    assert component_locations(VM_ATOMIC_SOURCE_LOWERINGS[0]) == (
+        (0, 0, 4),
+        (0, 7, 1),
+        (1, 0, 3),
+        None,
+        None,
+        (1, 3, 3),
+    )
+    assert component_locations(VM_ATOMIC_SOURCE_LOWERINGS[2]) == (
+        None,
+        (0, 7, 1),
+        None,
+        (0, 0, 3),
+        (0, 3, 3),
+        (1, 0, 3),
+    )
 
 
 def test_program_failure_source_rows_preserve_public_types_and_status() -> None:

@@ -39,6 +39,7 @@ iree_py_library(
     deps = [
         ":projection",
         "//loom/py/loom:core",
+        "//loom/py/loom/dialect:shared",
         "//loom/py/loom/dialect/cfg",
         "//loom/py/loom/dialect/func",
         "//loom/py/loom/dialect/index",

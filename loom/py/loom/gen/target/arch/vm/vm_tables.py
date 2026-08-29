@@ -31,6 +31,7 @@ from loom.target.arch.vm.projection import (
     VM_PACKET_DESCRIPTORS,
 )
 from loom.target.arch.vm.source_lowering import (
+    VM_ATOMIC_SOURCE_LOWERINGS,
     VM_SOURCE_CONVERSION_LOWERINGS,
     VM_SOURCE_CONVERSION_MAX_STEP_COUNT,
     VM_SOURCE_LOWERINGS,
@@ -130,6 +131,30 @@ def generate_lowering_rows() -> str:
             _descriptor_ref_name(resource.store_preserve_descriptor_key),
         )
         lines.append("LOOM_VM_MODULE_RESOURCE_ROW(" + ", ".join(arguments) + ")")
+    lines.extend(
+        [
+            "#elif defined(LOOM_VM_ATOMIC_SOURCE_LOWERING_ROW)",
+        ]
+    )
+    for lowering in VM_ATOMIC_SOURCE_LOWERINGS:
+        component_arguments: list[str] = []
+        for component in lowering.components:
+            if component is None:
+                component_arguments.extend(("UINT8_MAX", "0"))
+            else:
+                component_arguments.extend((str(component.selector_ordinal), str(component.bit_offset)))
+        lines.append(
+            "LOOM_VM_ATOMIC_SOURCE_LOWERING_ROW("
+            + ", ".join(
+                (
+                    f"LOOM_LOW_SOURCE_MEMORY_OPERATION_{lowering.operation_kind}",
+                    _descriptor_ref_name(lowering.descriptor_key),
+                    str(lowering.selector_count),
+                    *component_arguments,
+                )
+            )
+            + ")"
+        )
     lines.extend(
         [
             "#elif defined(LOOM_VM_SOURCE_LOWERING_ROW)",

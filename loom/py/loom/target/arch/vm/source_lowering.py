@@ -11,12 +11,16 @@ from __future__ import annotations
 import dataclasses
 from itertools import pairwise
 
+from model.isa import InstructionFieldRole
 from model.isa.selectors import (
     SELECTOR_TABLES_BY_NAME,
     SELECTOR_VALUES,
     parse_integer_conversion_name,
 )
+from model.isa.validation import PACKED_SELECTORS
+from model.schema import EntityReference
 
+from loom.dialect.atomic import AtomicKind, AtomicOrdering, AtomicScope
 from loom.dialect.cfg import defs as cfg_defs
 from loom.dialect.func import defs as func_defs
 from loom.dialect.index import defs as index_defs
@@ -29,7 +33,10 @@ from loom.dialect.scf import defs as scf_defs
 from loom.dsl import ATTR_TYPE_ENUM, Op
 from loom.ir import BUFFER_TYPE, I1, ScalarType, Type
 from loom.scalar_type import ScalarTypeKind
-from loom.target.arch.vm.projection import VM_CORE_DESCRIPTOR_SET
+from loom.target.arch.vm.projection import (
+    VM_CORE_DESCRIPTOR_SET,
+    VM_INSTRUCTION_PROJECTIONS,
+)
 from loom.target.low_descriptors import DescriptorOpKind, ImmediateKind, OperandRole
 from loom.verify import type_satisfies_constraint
 
@@ -149,6 +156,35 @@ class VmSourceOpcode:
             raise ValueError(
                 "VM source selector requires one fixed name or source attribute"
             )
+
+
+VM_ATOMIC_COMPONENT_NAMES = (
+    "kind",
+    "carrier",
+    "ordering",
+    "success_ordering",
+    "failure_ordering",
+    "scope",
+)
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class VmAtomicSelectorComponent:
+    """Location of one logical atomic selector within a packed immediate."""
+
+    selector_ordinal: int
+    bit_offset: int
+    bit_length: int
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class VmAtomicSourceLowering:
+    """Generated bridge from one source atomic family to its VM record."""
+
+    operation_kind: str
+    descriptor_key: str
+    selector_count: int
+    components: tuple[VmAtomicSelectorComponent | None, ...]
 
 
 def _integer_conversion_cases(
@@ -374,6 +410,173 @@ def _require_descriptor_shape(
                 f"{source_opcode.selector_table!r} uses {target_value}"
             )
     return selector_immediate_ordinals[0], source_attr_ordinal, 0
+
+
+def _require_atomic_selector_bridge() -> None:
+    """Proves that source atomic enums are exact VM selector ordinals."""
+
+    kind_names = (
+        "exchange.integer",
+        "exchange.float",
+        "add.integer",
+        "add.float",
+        "subtract.integer",
+        "and.integer",
+        "or.integer",
+        "xor.integer",
+        "minimum.signed",
+        "maximum.signed",
+        "minimum.unsigned",
+        "maximum.unsigned",
+        "minimum.float",
+        "maximum.float",
+        "minnum.float",
+        "maxnum.float",
+    )
+    source_and_target_names = (
+        (AtomicKind, "buffer.atomic.kind", kind_names),
+        (
+            AtomicOrdering,
+            "buffer.atomic.ordering",
+            tuple(case.keyword for case in AtomicOrdering.cases),
+        ),
+        (
+            AtomicScope,
+            "buffer.atomic.scope",
+            tuple(case.keyword for case in AtomicScope.cases),
+        ),
+    )
+    for source_enum, table_name, target_names in source_and_target_names:
+        if len(source_enum.cases) != len(target_names):
+            raise ValueError(f"{table_name}: source and VM selector counts differ")
+        table_id = SELECTOR_TABLES_BY_NAME[table_name].entity_id
+        for source_case, target_name in zip(
+            source_enum.cases, target_names, strict=True
+        ):
+            target_value = _SELECTOR_VALUES_BY_KEY.get((table_id, target_name))
+            if target_value != source_case.value:
+                raise ValueError(
+                    f"{table_name}: source {source_case.keyword!r} uses "
+                    f"{source_case.value}, but VM {target_name!r} uses "
+                    f"{target_value}"
+                )
+
+    carrier_table_id = SELECTOR_TABLES_BY_NAME["buffer.atomic.carrier"].entity_id
+    carrier_values = tuple(
+        _SELECTOR_VALUES_BY_KEY.get((carrier_table_id, name)) for name in ("i32", "i64")
+    )
+    if carrier_values != (0, 1):
+        raise ValueError("VM atomic carriers must encode i32/i64 as 0/1")
+
+
+def _atomic_source_lowering(
+    operation_kind: str,
+    mnemonic: str,
+    expected_component_names: frozenset[str],
+) -> VmAtomicSourceLowering:
+    descriptor_key = f"vm.{mnemonic}"
+    descriptor = _DESCRIPTORS_BY_KEY[descriptor_key]
+    projection = next(
+        (
+            projection
+            for projection in VM_INSTRUCTION_PROJECTIONS
+            if projection.mnemonic == mnemonic
+        ),
+        None,
+    )
+    if projection is None:
+        raise ValueError(f"{descriptor_key}: atomic instruction is not projected")
+
+    component_table_names = {
+        "kind": "buffer.atomic.kind",
+        "carrier": "buffer.atomic.carrier",
+        "ordering": "buffer.atomic.ordering",
+        "success_ordering": "buffer.atomic.ordering",
+        "failure_ordering": "buffer.atomic.ordering",
+        "scope": "buffer.atomic.scope",
+    }
+    components: dict[str, VmAtomicSelectorComponent] = {}
+    selector_ordinal = 0
+    for field in projection.instruction.fields:
+        if field.role is not InstructionFieldRole.IMMEDIATE:
+            continue
+        if field.array_length != 1:
+            raise ValueError(f"{descriptor_key}: atomic selector must be scalar")
+        rules = tuple(
+            rule
+            for rule in field.validation
+            if rule.rule_id == PACKED_SELECTORS.entity_id
+        )
+        if len(rules) != 1 or len(rules[0].arguments) != 2:
+            raise ValueError(
+                f"{descriptor_key}: every immediate must be one packed selector"
+            )
+        _, packed_components = rules[0].arguments
+        if not isinstance(packed_components, tuple) or not packed_components:
+            raise ValueError(f"{descriptor_key}: malformed packed selector")
+        for packed_component in packed_components:
+            if not isinstance(packed_component, tuple) or len(packed_component) != 5:
+                raise ValueError(f"{descriptor_key}: malformed selector component")
+            name, bit_offset, bit_length, table_reference, _ = packed_component
+            if (
+                name not in component_table_names
+                or name in components
+                or not isinstance(bit_offset, int)
+                or not isinstance(bit_length, int)
+                or not isinstance(table_reference, EntityReference)
+            ):
+                raise ValueError(f"{descriptor_key}: malformed selector component")
+            expected_table_id = SELECTOR_TABLES_BY_NAME[
+                component_table_names[name]
+            ].entity_id
+            if table_reference.entity_id != expected_table_id:
+                raise ValueError(
+                    f"{descriptor_key}: selector component {name!r} uses the "
+                    "wrong enum domain"
+                )
+            if bit_length <= 0 or bit_offset < 0 or bit_offset + bit_length > 8:
+                raise ValueError(
+                    f"{descriptor_key}: selector component {name!r} exceeds u8"
+                )
+            components[name] = VmAtomicSelectorComponent(
+                selector_ordinal, bit_offset, bit_length
+            )
+        selector_ordinal += 1
+
+    if selector_ordinal != len(descriptor.immediates):
+        raise ValueError(f"{descriptor_key}: atomic selector projection drifted")
+    if set(components) != expected_component_names:
+        raise ValueError(
+            f"{descriptor_key}: atomic selector components are "
+            f"{sorted(components)}, expected {sorted(expected_component_names)}"
+        )
+    return VmAtomicSourceLowering(
+        operation_kind=operation_kind,
+        descriptor_key=descriptor_key,
+        selector_count=selector_ordinal,
+        components=tuple(components.get(name) for name in VM_ATOMIC_COMPONENT_NAMES),
+    )
+
+
+def _atomic_source_lowerings() -> tuple[VmAtomicSourceLowering, ...]:
+    """Projects source memory-atomic families from the authoritative ISA."""
+
+    _require_atomic_selector_bridge()
+    apply_components = frozenset(("kind", "carrier", "ordering", "scope"))
+    return (
+        _atomic_source_lowering(
+            "ATOMIC_REDUCE", "buffer.atomic.reduce", apply_components
+        ),
+        _atomic_source_lowering("ATOMIC_RMW", "buffer.atomic.rmw", apply_components),
+        _atomic_source_lowering(
+            "ATOMIC_CMPXCHG",
+            "buffer.atomic.cmpxchg",
+            frozenset(("carrier", "success_ordering", "failure_ordering", "scope")),
+        ),
+    )
+
+
+VM_ATOMIC_SOURCE_LOWERINGS = _atomic_source_lowerings()
 
 
 def _require_concrete_source_types(

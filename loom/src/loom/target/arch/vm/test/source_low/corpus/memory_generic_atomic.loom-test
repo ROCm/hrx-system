@@ -1,0 +1,44 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/memory_generic_atomic.loom-test
+// RUN: emit source-low output=low
+
+vm.target<core> @target
+func.def target(@target) @generic_atomic_i32_static(%input: buffer) {
+  %buffer_base = index.constant 0 : offset
+  %generic = buffer.assume.memory_space<generic> %input : buffer
+  %view = buffer.view %generic[%buffer_base] : buffer -> view<1xi32>
+  %increment = scalar.constant 1 : i32
+  view.atomic.reduce<addi> %increment, %view[0] {ordering = relaxed, scope = device} : i32, view<1xi32>
+  %old_add = view.atomic.rmw<addi> %increment, %view[0] {ordering = relaxed, scope = device} : i32, view<1xi32> -> i32
+  func.return
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>) -> ()>}) @generic_atomic_i32_static(%generic: reg<vm.ref : buffer>) asm {
+  %increment = constant.s16 1 : reg<vm.value : i32>
+  %8 = constant.zero : reg<vm.value : offset>
+  buffer.atomic.reduce %generic, %8, %increment, 2, 24
+  %old_add = buffer.atomic.rmw %generic, %8, %increment, 2, 24 : reg<vm.value : i32>
+  return
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @generic_atomic_cmpxchg_i32_static(%input: buffer) {
+  %buffer_base = index.constant 0 : offset
+  %generic = buffer.assume.memory_space<generic> %input : buffer
+  %view = buffer.view %generic[%buffer_base] : buffer -> view<1xi32>
+  %expected = scalar.constant 7 : i32
+  %replacement = scalar.constant 9 : i32
+  %old_cmpxchg = view.atomic.cmpxchg %expected, %replacement, %view[0] {failure_ordering = relaxed, scope = device, success_ordering = relaxed} : i32, view<1xi32> -> i32
+  func.return
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>) -> ()>}) @generic_atomic_cmpxchg_i32_static(%generic: reg<vm.ref : buffer>) asm {
+  %expected = constant.s16 7 : reg<vm.value : i32>
+  %replacement = constant.s16 9 : reg<vm.value : i32>
+  %10 = constant.zero : reg<vm.value : offset>
+  %old_cmpxchg = buffer.atomic.cmpxchg %generic, %10, %expected, %replacement, 0, 3 : reg<vm.value : i32>
+  return
+}

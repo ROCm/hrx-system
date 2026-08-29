@@ -39,6 +39,7 @@ iree_py_library(
   DEPS
     loom::py::loom::target::arch::vm::projection
     loom::py::loom::core
+    loom::py::loom::dialect::shared
     loom::py::loom::dialect::cfg::cfg
     loom::py::loom::dialect::func::func
     loom::py::loom::dialect::index::index
