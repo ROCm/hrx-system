@@ -1,0 +1,16 @@
+// RUN: emit source-low output=low
+
+vm.target<core> @target
+
+func.def target(@target) @aligned_private_allocation() -> (buffer) {
+  %bytes = index.constant 256 : offset
+  %scratch = buffer.alloca<private> align(256) %bytes : buffer
+  func.return %scratch : buffer
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<() -> (reg<vm.ref : buffer>)>}) @aligned_private_allocation() -> (reg<vm.ref : buffer>) asm {
+  %bytes = constant.s16 256 : reg<vm.value : offset>
+  %scratch = buffer.allocate %bytes, 8 : reg<vm.ref : buffer>
+  return %scratch
+}

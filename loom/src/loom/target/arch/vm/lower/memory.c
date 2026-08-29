@@ -40,7 +40,8 @@ enum loom_vm_memory_plan_kind_e {
   LOOM_VM_MEMORY_PLAN_KIND_LOAD = 0,
   LOOM_VM_MEMORY_PLAN_KIND_STORE = 1,
   LOOM_VM_MEMORY_PLAN_KIND_ALIAS = 2,
-  LOOM_VM_MEMORY_PLAN_KIND_COUNT_ = 3,
+  LOOM_VM_MEMORY_PLAN_KIND_ALLOCATE = 3,
+  LOOM_VM_MEMORY_PLAN_KIND_COUNT_ = 4,
 };
 
 // One retained product contributing to a byte address.
@@ -351,6 +352,13 @@ static iree_status_t loom_vm_memory_try_verify_op(
     *out_handled = true;
     return iree_ok_status();
   }
+  // The Core VM profile owns one scalar invocation. Source scratch spaces
+  // therefore materialize as fresh invocation-local buffers; a kernel
+  // executor owns any cross-workitem sharing required by its execution ABI.
+  if (source_op->kind == LOOM_OP_BUFFER_ALLOCA) {
+    *out_handled = true;
+    return iree_ok_status();
+  }
   if (!loom_vm_memory_source_op_supported(source_op)) return iree_ok_status();
   loom_low_source_memory_access_plan_t source_plan = {0};
   uint8_t element_byte_log2 = 0;
@@ -380,6 +388,12 @@ iree_status_t loom_vm_memory_try_select_op(loom_low_lower_context_t* context,
   if (loom_vm_memory_alias_values(source_op, &alias_source, &alias_result)) {
     *out_plan = loom_low_lower_plan_make(
         kLoomVmMemoryPlanIdBase + LOOM_VM_MEMORY_PLAN_KIND_ALIAS,
+        /*target_data=*/NULL);
+    return iree_ok_status();
+  }
+  if (source_op->kind == LOOM_OP_BUFFER_ALLOCA) {
+    *out_plan = loom_low_lower_plan_make(
+        kLoomVmMemoryPlanIdBase + LOOM_VM_MEMORY_PLAN_KIND_ALLOCATE,
         /*target_data=*/NULL);
     return iree_ok_status();
   }
@@ -420,6 +434,10 @@ bool loom_vm_memory_mark_plan_storage_demands(loom_low_lower_context_t* context,
     // Only the aliased storage root must survive when the view value itself is
     // required by another alias in the chain.
     loom_low_lower_require_source_value_storage(context, alias_source);
+    return true;
+  }
+  if (loom_vm_memory_plan_kind(plan) == LOOM_VM_MEMORY_PLAN_KIND_ALLOCATE) {
+    loom_low_lower_require_source_operands_storage(context, source_op);
     return true;
   }
   const loom_vm_memory_plan_t* memory_plan = plan.target_data;
@@ -542,13 +560,13 @@ static uint8_t loom_vm_memory_lane_log2(uint8_t lane_count) {
   return (uint8_t)iree_math_count_trailing_zeros_u32(lane_count);
 }
 
-static iree_status_t loom_vm_memory_build_packet_attrs(
+static iree_status_t loom_vm_memory_build_immediate_attrs(
     loom_low_lower_context_t* context, const loom_low_descriptor_t* descriptor,
-    loom_named_attr_t out_attrs[2]) {
-  IREE_ASSERT_EQ(descriptor->immediate_count, 2);
+    loom_named_attr_t* out_attrs, iree_host_size_t attr_count) {
+  IREE_ASSERT_EQ(descriptor->immediate_count, attr_count);
   const loom_low_descriptor_set_t* descriptor_set =
       loom_low_lower_context_descriptor_set(context);
-  for (uint8_t i = 0; i < 2; ++i) {
+  for (iree_host_size_t i = 0; i < attr_count; ++i) {
     const loom_low_immediate_t* immediate =
         &descriptor_set->immediates[descriptor->immediate_start + i];
     IREE_RETURN_IF_ERROR(loom_builder_intern_string(
@@ -558,6 +576,43 @@ static iree_status_t loom_vm_memory_build_packet_attrs(
         &out_attrs[i].name_id));
   }
   return iree_ok_status();
+}
+
+static iree_status_t loom_vm_memory_emit_allocation(
+    loom_low_lower_context_t* context, const loom_op_t* source_op) {
+  const uint8_t alignment_log2 = (uint8_t)iree_math_count_trailing_zeros_u64(
+      (uint64_t)loom_buffer_alloca_base_alignment(source_op));
+
+  loom_value_id_t low_byte_length = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_low_lower_lookup_value(
+      context, loom_buffer_alloca_byte_length(source_op), &low_byte_length));
+  loom_type_t low_result_type = loom_type_none();
+  IREE_RETURN_IF_ERROR(loom_low_lower_map_value(
+      context, source_op, loom_buffer_alloca_result(source_op),
+      &low_result_type));
+
+  const loom_low_descriptor_t* descriptor =
+      loom_low_descriptor_set_descriptor_at(
+          loom_low_lower_context_descriptor_set(context),
+          VM_CORE_DESCRIPTOR_REF_BUFFER_ALLOCATE);
+  IREE_ASSERT(descriptor != NULL);
+  const loom_low_lower_resolved_descriptor_t resolved_descriptor = {
+      .descriptor = descriptor,
+  };
+  loom_named_attr_t alignment_attr = {0};
+  IREE_RETURN_IF_ERROR(loom_vm_memory_build_immediate_attrs(
+      context, descriptor, &alignment_attr, 1));
+  alignment_attr.value = loom_attr_i64(alignment_log2);
+
+  loom_op_t* low_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_emit_resolved_descriptor_op(
+      context, &resolved_descriptor, &low_byte_length, /*operand_count=*/1,
+      loom_make_named_attr_slice(&alignment_attr, 1), &low_result_type,
+      /*result_count=*/1, /*tied_results=*/NULL, /*tied_result_count=*/0,
+      source_op->location, &low_op));
+  return loom_low_lower_bind_value(context,
+                                   loom_buffer_alloca_result(source_op),
+                                   loom_op_const_results(low_op)[0]);
 }
 
 static iree_status_t loom_vm_memory_packet_address(
@@ -650,6 +705,9 @@ iree_status_t loom_vm_memory_emit_op(loom_low_lower_context_t* context,
                                      bool* out_handled) {
   *out_handled = loom_vm_memory_plan_is_selected(plan);
   if (!*out_handled) return iree_ok_status();
+  if (loom_vm_memory_plan_kind(plan) == LOOM_VM_MEMORY_PLAN_KIND_ALLOCATE) {
+    return loom_vm_memory_emit_allocation(context, source_op);
+  }
   loom_value_id_t alias_source = LOOM_VALUE_ID_INVALID;
   loom_value_id_t alias_result = LOOM_VALUE_ID_INVALID;
   if (loom_vm_memory_alias_values(source_op, &alias_source, &alias_result)) {
@@ -706,8 +764,8 @@ iree_status_t loom_vm_memory_emit_op(loom_low_lower_context_t* context,
       .descriptor = descriptor,
   };
   loom_named_attr_t packet_attrs[2] = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_vm_memory_build_packet_attrs(context, descriptor, packet_attrs));
+  IREE_RETURN_IF_ERROR(loom_vm_memory_build_immediate_attrs(
+      context, descriptor, packet_attrs, IREE_ARRAYSIZE(packet_attrs)));
 
   loom_value_id_t loaded_fragments[LOOM_VM_MEMORY_MAX_PACKET_COUNT];
   uint8_t loaded_fragment_count = 0;
