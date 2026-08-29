@@ -1,0 +1,320 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Benchmarks command-product construction through the public LoomC API. A
+// frozen bytecode index and warm worker-local workspace model the reusable
+// state owned by a JIT embedding. Timed regions include parent artifact
+// serialization and, when enabled, immutable child-request serialization.
+
+#include <cstdint>
+#include <string>
+#include <vector>
+
+#include "benchmark/benchmark.h"
+#include "iree/base/api.h"
+#include "loom/binding/c/benchmark/util/benchmark_support.h"
+#include "loomc/iree.h"
+#include "loomc/target/cmd.h"
+
+namespace loomc::bench {
+namespace {
+
+using CmdProductPtr =
+    HandlePtr<loomc_cmd_program_product_t, loomc_cmd_program_product_release>;
+using RequestPtr = HandlePtr<loomc_request_t, loomc_request_release>;
+
+static bool SkipOnError(benchmark::State& state, iree_status_t status) {
+  if (iree_status_is_ok(status)) {
+    return false;
+  }
+  const std::string message = FormatStatus(status);
+  iree_status_free(status);
+  state.SkipWithError(message.c_str());
+  return true;
+}
+
+static std::string BuildIndependentKernelSource(uint32_t kernel_count) {
+  std::string source;
+  source.reserve(static_cast<size_t>(kernel_count) * 320u);
+  for (uint32_t i = 0; i < kernel_count; ++i) {
+    source.append("kernel.def @kernel_");
+    source.append(std::to_string(i));
+    source.append(R"(() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch() {
+  kernel.return
+}
+
+)");
+  }
+  source.append("command.program.def public @root() launch() {\n");
+  for (uint32_t i = 0; i < kernel_count; ++i) {
+    source.append("  kernel.launch @kernel_");
+    source.append(std::to_string(i));
+    source.append("() : ()\n");
+  }
+  source.append("  command.return\n}\n");
+  return source;
+}
+
+struct RequestCapture {
+  // Request references transferred by the active product build.
+  std::vector<RequestPtr> requests;
+};
+
+static loomc_status_t CaptureRequest(void* user_data,
+                                     loomc_request_t* request) {
+  RequestCapture* capture = static_cast<RequestCapture*>(user_data);
+  capture->requests.push_back(RequestPtr(request));
+  return loomc_ok_status();
+}
+
+class CommandProductFixture {
+ public:
+  explicit CommandProductFixture(uint32_t kernel_count)
+      : kernel_count_(kernel_count) {}
+
+  iree_status_t Initialize() {
+    loomc_context_t* context = nullptr;
+    IREE_RETURN_IF_ERROR(to_iree_status(loomc_context_create(
+        /*options=*/nullptr, loom_allocator(), &context)));
+    context_.reset(context);
+
+    loomc_workspace_t* source_workspace = nullptr;
+    IREE_RETURN_IF_ERROR(to_iree_status(loomc_workspace_create(
+        /*options=*/nullptr, loom_allocator(), &source_workspace)));
+    WorkspacePtr source_workspace_ptr(source_workspace);
+
+    const std::string source_text = BuildIndependentKernelSource(kernel_count_);
+    const loomc_source_options_t source_options = {
+        /*.type=*/LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
+        /*.structure_size=*/sizeof(source_options),
+        /*.next=*/nullptr,
+        /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
+        /*.identifier=*/loomc_make_cstring_view("command_product.loom"),
+        /*.contents=*/
+        loomc_make_byte_span(source_text.data(), source_text.size()),
+        /*.storage=*/LOOMC_SOURCE_STORAGE_COPY,
+        /*.release=*/nullptr,
+        /*.release_user_data=*/nullptr,
+    };
+    loomc_source_t* text_source = nullptr;
+    IREE_RETURN_IF_ERROR(to_iree_status(
+        loomc_source_create(&source_options, loom_allocator(), &text_source)));
+    SourcePtr text_source_ptr(text_source);
+
+    loomc_module_t* module = nullptr;
+    loomc_result_t* parse_result = nullptr;
+    iree_status_t status = to_iree_status(loomc_module_deserialize_from_source(
+        context_.get(), source_workspace_ptr.get(), text_source_ptr.get(),
+        /*options=*/nullptr, loom_allocator(), &module, &parse_result));
+    ModulePtr module_ptr(module);
+    ResultPtr parse_result_ptr(parse_result);
+    IREE_RETURN_IF_ERROR(status);
+    IREE_RETURN_IF_ERROR(
+        RequireSucceededResult(parse_result_ptr.get(), "catalog parsing"));
+
+    const loomc_module_serialize_options_t serialize_options = {
+        /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
+        /*.structure_size=*/sizeof(serialize_options),
+        /*.next=*/nullptr,
+        /*.format=*/LOOMC_SOURCE_FORMAT_BYTECODE,
+        /*.identifier=*/loomc_make_cstring_view("command_product.loombc"),
+        /*.text_presentation=*/LOOMC_MODULE_TEXT_PRESENTATION_DEFAULT,
+    };
+    loomc_source_t* bytecode_source = nullptr;
+    IREE_RETURN_IF_ERROR(to_iree_status(
+        loomc_module_serialize_to_source(module_ptr.get(), &serialize_options,
+                                         loom_allocator(), &bytecode_source)));
+    SourcePtr bytecode_source_ptr(bytecode_source);
+    source_size_ = loomc_source_contents(bytecode_source_ptr.get()).data_length;
+
+    loomc_link_index_builder_t* builder = nullptr;
+    IREE_RETURN_IF_ERROR(to_iree_status(loomc_link_index_builder_create(
+        context_.get(), /*options=*/nullptr, loom_allocator(), &builder)));
+    LinkIndexBuilderPtr builder_ptr(builder);
+    const loomc_link_index_source_options_t index_source_options = {
+        /*.provider_name=*/loomc_make_cstring_view("command_product"),
+        /*.role=*/LOOMC_LINK_PROVIDER_ROLE_INPUT,
+    };
+    IREE_RETURN_IF_ERROR(to_iree_status(loomc_link_index_builder_add_source(
+        builder_ptr.get(), bytecode_source_ptr.get(), &index_source_options,
+        /*out_slot=*/nullptr)));
+
+    loomc_link_index_t* index = nullptr;
+    loomc_result_t* index_result = nullptr;
+    status = to_iree_status(loomc_link_index_builder_finish(
+        builder_ptr.get(), &index, &index_result));
+    LinkIndexPtr index_ptr(index);
+    ResultPtr index_result_ptr(index_result);
+    IREE_RETURN_IF_ERROR(status);
+    IREE_RETURN_IF_ERROR(RequireSucceededResult(index_result_ptr.get(),
+                                                "link index construction"));
+    loomc_link_index_symbol_t root_symbol = {};
+    if (!loomc_link_index_lookup_global(
+            index_ptr.get(), loomc_make_cstring_view("root"), &root_symbol)) {
+      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "command root was not indexed");
+    }
+    root_symbol_ordinal_ = root_symbol.ordinal;
+    index_.reset(index_ptr.release());
+
+    loomc_workspace_t* workspace = nullptr;
+    IREE_RETURN_IF_ERROR(to_iree_status(loomc_workspace_create(
+        /*options=*/nullptr, loom_allocator(), &workspace)));
+    workspace_.reset(workspace);
+    return iree_ok_status();
+  }
+
+  iree_status_t Build(bool publish_requests, RequestCapture* capture,
+                      CmdProductPtr* out_product, ResultPtr* out_result) const {
+    capture->requests.clear();
+    out_product->reset();
+    out_result->reset();
+    const loomc_cmd_program_product_options_t options = {
+        /*.type=*/LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_PRODUCT_OPTIONS,
+        /*.structure_size=*/sizeof(options),
+        /*.next=*/nullptr,
+        /*.link_index=*/index_.get(),
+        /*.root_symbol_ordinals=*/&root_symbol_ordinal_,
+        /*.root_symbol_count=*/1,
+        /*.flags=*/0,
+        /*.config=*/{},
+        /*.request_sink=*/
+        publish_requests ? loomc_request_sink_t{
+                               /*.publish=*/CaptureRequest,
+                               /*.user_data=*/capture,
+                           }
+                         : loomc_request_sink_t{},
+    };
+    loomc_cmd_program_product_t* product = nullptr;
+    loomc_result_t* result = nullptr;
+    iree_status_t status = to_iree_status(loomc_cmd_program_product_build(
+        workspace_.get(), &options, loom_allocator(), &product, &result));
+    CmdProductPtr product_ptr(product);
+    ResultPtr result_ptr(result);
+    IREE_RETURN_IF_ERROR(status);
+    IREE_RETURN_IF_ERROR(
+        RequireSucceededResult(result_ptr.get(), "command product build"));
+    if (product_ptr == nullptr ||
+        loomc_cmd_program_product_program_count(product_ptr.get()) != 1 ||
+        loomc_cmd_program_product_entry_requirement_count(product_ptr.get()) !=
+            kernel_count_ ||
+        capture->requests.size() != (publish_requests ? kernel_count_ : 0)) {
+      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "command product has an unexpected shape");
+    }
+    out_product->reset(product_ptr.release());
+    out_result->reset(result_ptr.release());
+    return iree_ok_status();
+  }
+
+  uint32_t kernel_count() const { return kernel_count_; }
+
+  size_t source_size() const { return source_size_; }
+
+ private:
+  // Number of independent source-backed kernels in the command program.
+  uint32_t kernel_count_ = 0;
+
+  // Serialized input catalog size in bytes.
+  size_t source_size_ = 0;
+
+  // Public command root ordinal in |index_|.
+  loomc_host_size_t root_symbol_ordinal_ = 0;
+
+  // Reusable API context shared by the index and active workspace.
+  ContextPtr context_;
+
+  // Frozen source index reused by every command-product build.
+  LinkIndexPtr index_;
+
+  // Warm mutable storage owned by this benchmark worker.
+  WorkspacePtr workspace_;
+};
+
+static void RunCommandProductBenchmark(benchmark::State& state,
+                                       bool publish_requests) {
+  CommandProductFixture fixture(static_cast<uint32_t>(state.range(0)));
+  if (SkipOnError(state, fixture.Initialize())) {
+    return;
+  }
+
+  RequestCapture capture;
+  capture.requests.reserve(fixture.kernel_count());
+  CmdProductPtr product;
+  ResultPtr result;
+  if (SkipOnError(state, fixture.Build(publish_requests, &capture, &product,
+                                       &result))) {
+    return;
+  }
+  uint64_t request_bytes = 0;
+  for (const RequestPtr& request : capture.requests) {
+    loomc_source_t* source = loomc_request_source(request.get());
+    request_bytes += loomc_source_contents(source).data_length;
+  }
+  capture.requests.clear();
+  result.reset();
+  product.reset();
+
+  int64_t build_count = 0;
+  for (auto _ : state) {
+    if (SkipOnError(state, fixture.Build(publish_requests, &capture, &product,
+                                         &result))) {
+      break;
+    }
+    benchmark::DoNotOptimize(product.get());
+    ++build_count;
+    state.PauseTiming();
+    capture.requests.clear();
+    result.reset();
+    product.reset();
+    state.ResumeTiming();
+  }
+
+  const int64_t item_count =
+      build_count * static_cast<int64_t>(fixture.kernel_count());
+  state.SetItemsProcessed(item_count);
+  state.SetComplexityN(fixture.kernel_count());
+  state.counters["catalog_bytes"] = static_cast<double>(fixture.source_size());
+  state.counters["kernels"] = static_cast<double>(fixture.kernel_count());
+  state.counters["request_bytes"] = static_cast<double>(request_bytes);
+  state.counters["requests"] =
+      publish_requests ? static_cast<double>(fixture.kernel_count()) : 0.0;
+}
+
+static void BM_CommandProductBodyBlind(benchmark::State& state) {
+  RunCommandProductBenchmark(state, /*publish_requests=*/false);
+}
+
+static void BM_CommandProductRequests(benchmark::State& state) {
+  RunCommandProductBenchmark(state, /*publish_requests=*/true);
+}
+
+static void ProductScales(benchmark::Benchmark* benchmark) {
+  benchmark->Arg(1)->Arg(16)->Arg(256)->Arg(1024);
+}
+
+static void BM_CommandProductBodyBlind_Smoke(benchmark::State& state) {
+  BM_CommandProductBodyBlind(state);
+}
+
+static void BM_CommandProductRequests_Smoke(benchmark::State& state) {
+  BM_CommandProductRequests(state);
+}
+
+BENCHMARK(BM_CommandProductBodyBlind)
+    ->Apply(ProductScales)
+    ->Complexity(benchmark::oN);
+BENCHMARK(BM_CommandProductRequests)
+    ->Apply(ProductScales)
+    ->Complexity(benchmark::oN);
+BENCHMARK(BM_CommandProductBodyBlind_Smoke)->Arg(4);
+BENCHMARK(BM_CommandProductRequests_Smoke)->Arg(4);
+
+}  // namespace
+}  // namespace loomc::bench
