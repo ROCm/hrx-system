@@ -202,9 +202,10 @@ class LaunchConfigBenchmarkFixture {
                : 0;
   }
 
-  iree_status_t SetUpInvocation(iree_string_view_t function_name) {
+  iree_status_t SetUpInvocation(iree_string_view_t source_identifier,
+                                iree_string_view_t function_name) {
     IREE_RETURN_IF_ERROR(
-        SetUpArtifact(loomc_make_cstring_view("launch_config.loom")));
+        SetUpArtifact(loomc_string_view_from_iree(source_identifier)));
     IREE_RETURN_IF_ERROR(LoadProgram(&program_));
 
     IREE_RETURN_IF_ERROR(LookupFunction(function_name, &function_));
@@ -486,6 +487,9 @@ static void BM_DeviceCompileSmoke(benchmark::State& state,
 BENCHMARK_CAPTURE(BM_DeviceCompileSmoke, OneFunction,
                   "launch_config_compile.loom")
     ->UseRealTime();
+BENCHMARK_CAPTURE(BM_DeviceCompileSmoke, CallableClosure,
+                  "launch_config_closure.loom")
+    ->UseRealTime();
 BENCHMARK_CAPTURE(BM_DeviceCompileSmoke, EightFunctions,
                   "launch_config_scale.loom")
     ->UseRealTime();
@@ -497,6 +501,9 @@ static void BM_DeviceCompileWithLaunchConfigSmoke(
 }
 BENCHMARK_CAPTURE(BM_DeviceCompileWithLaunchConfigSmoke, OneFunction,
                   "launch_config_compile.loom")
+    ->UseRealTime();
+BENCHMARK_CAPTURE(BM_DeviceCompileWithLaunchConfigSmoke, CallableClosure,
+                  "launch_config_closure.loom")
     ->UseRealTime();
 BENCHMARK_CAPTURE(BM_DeviceCompileWithLaunchConfigSmoke, EightFunctions,
                   "launch_config_scale.loom")
@@ -537,13 +544,17 @@ static void BM_VmLaunchConfigProgramLoadSmoke(benchmark::State& state,
 BENCHMARK_CAPTURE(BM_VmLaunchConfigProgramLoadSmoke, OneFunction,
                   "launch_config_compile.loom")
     ->UseRealTime();
+BENCHMARK_CAPTURE(BM_VmLaunchConfigProgramLoadSmoke, CallableClosure,
+                  "launch_config_closure.loom")
+    ->UseRealTime();
 BENCHMARK_CAPTURE(BM_VmLaunchConfigProgramLoadSmoke, EightFunctions,
                   "launch_config_scale.loom")
     ->UseRealTime();
 
 static void BM_VmLaunchConfigFunctionLookupSmoke(benchmark::State& state) {
   LaunchConfigBenchmarkFixture fixture;
-  if (SkipOnError(state, fixture.SetUpInvocation(IREE_SV("unchecked_1d")))) {
+  if (SkipOnError(state, fixture.SetUpInvocation(IREE_SV("launch_config.loom"),
+                                                 IREE_SV("unchecked_1d")))) {
     return;
   }
 
@@ -567,9 +578,11 @@ static void BM_VmLaunchConfigFunctionLookupSmoke(benchmark::State& state) {
 BENCHMARK(BM_VmLaunchConfigFunctionLookupSmoke)->Unit(benchmark::kNanosecond);
 
 static void RunLaunchConfigInvokeBenchmark(benchmark::State& state,
+                                           const char* source_identifier,
                                            const char* function_name) {
   LaunchConfigBenchmarkFixture fixture;
   if (SkipOnError(state, fixture.SetUpInvocation(
+                             iree_make_cstring_view(source_identifier),
                              iree_make_cstring_view(function_name)))) {
     return;
   }
@@ -594,13 +607,19 @@ static void RunLaunchConfigInvokeBenchmark(benchmark::State& state,
 }
 
 static void BM_VmLaunchConfigInvokeSmoke(benchmark::State& state,
+                                         const char* source_identifier,
                                          const char* function_name) {
-  RunLaunchConfigInvokeBenchmark(state, function_name);
+  RunLaunchConfigInvokeBenchmark(state, source_identifier, function_name);
 }
 
-BENCHMARK_CAPTURE(BM_VmLaunchConfigInvokeSmoke, Unchecked1D, "unchecked_1d")
+BENCHMARK_CAPTURE(BM_VmLaunchConfigInvokeSmoke, Unchecked1D,
+                  "launch_config.loom", "unchecked_1d")
     ->Unit(benchmark::kNanosecond);
-BENCHMARK_CAPTURE(BM_VmLaunchConfigInvokeSmoke, Checked1D, "checked_1d")
+BENCHMARK_CAPTURE(BM_VmLaunchConfigInvokeSmoke, CallableClosure,
+                  "launch_config_closure.loom", "callable_1d")
+    ->Unit(benchmark::kNanosecond);
+BENCHMARK_CAPTURE(BM_VmLaunchConfigInvokeSmoke, Checked1D, "launch_config.loom",
+                  "checked_1d")
     ->Unit(benchmark::kNanosecond);
 
 static void BM_ValueFactsLaunchConfigInvokeSmoke(benchmark::State& state) {
