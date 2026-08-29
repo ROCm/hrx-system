@@ -13,9 +13,19 @@ package(
 
 py_test(
     name = "presubmit_test",
+    size = "small",
     srcs = [
         "presubmit.py",
         "presubmit_test.py",
     ],
+    tags = ["manual"],
     deps = ["//build_tools/devtools"],
+)
+
+# Project policy tests run in the repository Presubmit lane when this
+# build_tools subtree or its shared support changes.
+test_suite(
+    name = "presubmit_tests",
+    tags = ["manual"],
+    tests = [":presubmit_test"],
 )

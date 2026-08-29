@@ -12,6 +12,12 @@ load("//build_tools/bazel:cc.bzl", "iree_cc_binary")
 
 package(default_visibility = ["//visibility:public"])
 
+# Repository tooling checks are owned by the changed-path-aware Presubmit lane.
+# Keep product/platform wildcard builds from rediscovering them in every job.
+_PRESUBMIT_TEST_SIZE = "small"
+
+_PRESUBMIT_TEST_TAGS = ["manual"]
+
 py_library(
     name = "devtools",
     srcs = [
@@ -67,10 +73,12 @@ py_binary(
     ],
     imports = ["build_tools/devtools"],
     main = "cli_smoke_test.py",
+    tags = _PRESUBMIT_TEST_TAGS,
 )
 
 py_test(
     name = "bazel_test",
+    size = _PRESUBMIT_TEST_SIZE,
     srcs = [
         "bazel.py",
         "bazel_launcher.py",
@@ -80,20 +88,24 @@ py_test(
         "fuzz.py",
     ],
     main = "bazel_test.py",
+    tags = _PRESUBMIT_TEST_TAGS,
     deps = ["//build_tools/bazel:compile_commands_merge_lib"],
 )
 
 py_test(
     name = "bazel_launcher_test",
+    size = _PRESUBMIT_TEST_SIZE,
     srcs = [
         "bazel_launcher.py",
         "bazel_launcher_test.py",
     ],
     main = "bazel_launcher_test.py",
+    tags = _PRESUBMIT_TEST_TAGS,
 )
 
 py_test(
     name = "ci_test",
+    size = _PRESUBMIT_TEST_SIZE,
     srcs = [
         "__init__.py",
         "ci.py",
@@ -116,10 +128,12 @@ py_test(
         "//:.github/workflows/test_core_linux_gpu_source.yml",
     ],
     main = "ci_test.py",
+    tags = _PRESUBMIT_TEST_TAGS,
 )
 
 py_test(
     name = "cli_test",
+    size = _PRESUBMIT_TEST_SIZE,
     srcs = [
         "aliases.py",
         "bazel.py",
@@ -142,20 +156,24 @@ py_test(
         "setup.py",
     ],
     main = "cli_test.py",
+    tags = _PRESUBMIT_TEST_TAGS,
     deps = ["//build_tools/bazel:compile_commands_merge_lib"],
 )
 
 py_test(
     name = "cmake_file_api_test",
+    size = _PRESUBMIT_TEST_SIZE,
     srcs = [
         "cmake_file_api.py",
         "cmake_file_api_test.py",
     ],
     main = "cmake_file_api_test.py",
+    tags = _PRESUBMIT_TEST_TAGS,
 )
 
 py_test(
     name = "cmake_test",
+    size = _PRESUBMIT_TEST_SIZE,
     srcs = [
         "__init__.py",
         "cmake.py",
@@ -169,19 +187,23 @@ py_test(
         "fuzz.py",
     ],
     main = "cmake_test.py",
+    tags = _PRESUBMIT_TEST_TAGS,
 )
 
 py_test(
     name = "command_plan_test",
+    size = _PRESUBMIT_TEST_SIZE,
     srcs = [
         "command_plan.py",
         "command_plan_test.py",
     ],
     main = "command_plan_test.py",
+    tags = _PRESUBMIT_TEST_TAGS,
 )
 
 py_test(
     name = "ctest_test",
+    size = _PRESUBMIT_TEST_SIZE,
     srcs = [
         "__init__.py",
         "command_plan.py",
@@ -190,19 +212,23 @@ py_test(
         "environment.py",
     ],
     main = "ctest_test.py",
+    tags = _PRESUBMIT_TEST_TAGS,
 )
 
 py_test(
     name = "environment_test",
+    size = _PRESUBMIT_TEST_SIZE,
     srcs = [
         "environment.py",
         "environment_test.py",
     ],
     main = "environment_test.py",
+    tags = _PRESUBMIT_TEST_TAGS,
 )
 
 py_test(
     name = "hooks_test",
+    size = _PRESUBMIT_TEST_SIZE,
     srcs = [
         "__init__.py",
         "command_plan.py",
@@ -211,46 +237,56 @@ py_test(
         "hooks_test.py",
     ],
     main = "hooks_test.py",
+    tags = _PRESUBMIT_TEST_TAGS,
 )
 
 py_test(
     name = "install_test",
+    size = _PRESUBMIT_TEST_SIZE,
     srcs = [
         "__init__.py",
         "install.py",
         "install_test.py",
     ],
     main = "install_test.py",
+    tags = _PRESUBMIT_TEST_TAGS,
 )
 
 py_test(
     name = "project_presubmit_test",
+    size = _PRESUBMIT_TEST_SIZE,
     srcs = ["project_presubmit_test.py"],
     main = "project_presubmit_test.py",
+    tags = _PRESUBMIT_TEST_TAGS,
     deps = [":devtools"],
 )
 
 py_test(
     name = "source_lock_test",
+    size = _PRESUBMIT_TEST_SIZE,
     srcs = [
         "source_lock.py",
         "source_lock_test.py",
     ],
     main = "source_lock_test.py",
+    tags = _PRESUBMIT_TEST_TAGS,
 )
 
 py_test(
     name = "smoke_test_lib_test",
+    size = _PRESUBMIT_TEST_SIZE,
     srcs = [
         "environment.py",
         "smoke_test_lib.py",
         "smoke_test_lib_test.py",
     ],
     main = "smoke_test_lib_test.py",
+    tags = _PRESUBMIT_TEST_TAGS,
 )
 
 py_test(
     name = "setup_test",
+    size = _PRESUBMIT_TEST_SIZE,
     srcs = [
         "__init__.py",
         "aliases.py",
@@ -261,4 +297,27 @@ py_test(
         "setup_test.py",
     ],
     main = "setup_test.py",
+    tags = _PRESUBMIT_TEST_TAGS,
+)
+
+test_suite(
+    name = "presubmit_tests",
+    tags = _PRESUBMIT_TEST_TAGS,
+    tests = [
+        ":bazel_launcher_test",
+        ":bazel_test",
+        ":ci_test",
+        ":cli_test",
+        ":cmake_file_api_test",
+        ":cmake_test",
+        ":command_plan_test",
+        ":ctest_test",
+        ":environment_test",
+        ":hooks_test",
+        ":install_test",
+        ":project_presubmit_test",
+        ":setup_test",
+        ":smoke_test_lib_test",
+        ":source_lock_test",
+    ],
 )

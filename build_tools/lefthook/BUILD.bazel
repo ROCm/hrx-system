@@ -4,25 +4,47 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+# Python repository-policy tools have no CMake target surface.
+# bazel-to-cmake: skip
+
 load("@rules_python//python:defs.bzl", "py_test")
 
 package(default_visibility = ["//visibility:public"])
 
+# Repository policy tests are owned by the changed-path-aware Presubmit lane.
+# Keep product/platform wildcard builds from rediscovering them in every job.
+_PRESUBMIT_TEST_SIZE = "small"
+
+_PRESUBMIT_TEST_TAGS = ["manual"]
+
 py_test(
     name = "commit_msg_test",
+    size = _PRESUBMIT_TEST_SIZE,
     srcs = [
         "commit_msg.py",
         "commit_msg_test.py",
     ],
     main = "commit_msg_test.py",
+    tags = _PRESUBMIT_TEST_TAGS,
 )
 
 py_test(
     name = "presubmit_test",
+    size = _PRESUBMIT_TEST_SIZE,
     srcs = [
         "presubmit.py",
         "presubmit_test.py",
     ],
     main = "presubmit_test.py",
+    tags = _PRESUBMIT_TEST_TAGS,
     deps = ["//build_tools/devtools"],
+)
+
+test_suite(
+    name = "presubmit_tests",
+    tags = _PRESUBMIT_TEST_TAGS,
+    tests = [
+        ":commit_msg_test",
+        ":presubmit_test",
+    ],
 )
