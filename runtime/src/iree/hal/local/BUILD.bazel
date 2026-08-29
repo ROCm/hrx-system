@@ -230,28 +230,3 @@ iree_runtime_cc_test(
         "//runtime/src/iree/testing:gtest_main",
     ],
 )
-
-iree_runtime_cc_library(
-    name = "profile",
-    srcs = ["profile.c"],
-    hdrs = ["profile.h"],
-    deps = [
-        ":executable_loader",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base/threading",
-        "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/utils:profile_event_ring",
-    ],
-)
-
-iree_runtime_cc_test(
-    name = "profile_test",
-    srcs = ["profile_test.cc"],
-    deps = [
-        ":executable_loader",
-        ":profile",
-        "//runtime/src/iree/hal",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-    ],
-)

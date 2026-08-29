@@ -340,10 +340,10 @@ struct iree_hal_vulkan_queue_pending_submission_t {
   // HAL-native profiling metadata captured for this submission.
   struct {
     // Recorder active when the submission was captured. Borrowed.
-    iree_hal_local_profile_recorder_t* recorder;
+    iree_hal_vulkan_profile_recorder_t* recorder;
 
     // Queue metadata scope active when the submission was captured.
-    iree_hal_local_profile_queue_scope_t scope;
+    iree_hal_vulkan_profile_queue_scope_t scope;
 
     // Queue event type corresponding to |kind|.
     iree_hal_profile_queue_event_type_t type;
@@ -1975,14 +1975,14 @@ static void iree_hal_vulkan_queue_release_native_command_buffer(
 
 static bool iree_hal_vulkan_queue_profile_requests_queue_device_event(
     const iree_hal_vulkan_queue_pending_submission_t* submission) {
-  return iree_hal_local_profile_recorder_is_enabled(
+  return iree_hal_vulkan_profile_recorder_is_enabled(
       submission->profile.recorder,
       IREE_HAL_DEVICE_PROFILING_DATA_DEVICE_QUEUE_EVENTS);
 }
 
 static bool iree_hal_vulkan_queue_profile_requests_dispatch_events(
     const iree_hal_vulkan_queue_pending_submission_t* submission) {
-  return iree_hal_local_profile_recorder_is_enabled(
+  return iree_hal_vulkan_profile_recorder_is_enabled(
       submission->profile.recorder,
       IREE_HAL_DEVICE_PROFILING_DATA_DISPATCH_EVENTS);
 }
@@ -3036,8 +3036,8 @@ static uint64_t iree_hal_vulkan_queue_profile_payload_length(
 static void iree_hal_vulkan_queue_profile_submission_initialize(
     iree_hal_vulkan_queue_t* queue,
     iree_hal_vulkan_queue_pending_submission_t* submission) {
-  iree_hal_local_profile_recorder_t* recorder = queue->profile_recorder;
-  if (!iree_hal_local_profile_recorder_is_enabled(
+  iree_hal_vulkan_profile_recorder_t* recorder = queue->profile_recorder;
+  if (!iree_hal_vulkan_profile_recorder_is_enabled(
           recorder, IREE_HAL_DEVICE_PROFILING_DATA_QUEUE_EVENTS |
                         IREE_HAL_DEVICE_PROFILING_DATA_DISPATCH_EVENTS |
                         IREE_HAL_DEVICE_PROFILING_DATA_DEVICE_QUEUE_EVENTS |
@@ -3132,7 +3132,7 @@ static void iree_hal_vulkan_queue_profile_record_submission(
       submission->profile.queue_event_recorded) {
     return;
   }
-  if (!iree_hal_local_profile_recorder_is_enabled(
+  if (!iree_hal_vulkan_profile_recorder_is_enabled(
           submission->profile.recorder,
           IREE_HAL_DEVICE_PROFILING_DATA_QUEUE_EVENTS)) {
     return;
@@ -3141,8 +3141,8 @@ static void iree_hal_vulkan_queue_profile_record_submission(
   submission->profile.ready_host_time_ns = iree_time_now();
   iree_hal_vulkan_queue_profile_populate_submission_metrics(submission);
 
-  iree_hal_local_profile_queue_event_info_t event_info =
-      iree_hal_local_profile_queue_event_info_default();
+  iree_hal_vulkan_profile_queue_event_info_t event_info =
+      iree_hal_vulkan_profile_queue_event_info_default();
   event_info.type = submission->profile.type;
   event_info.flags = submission->profile.flags;
   event_info.dependency_strategy = submission->profile.dependency_strategy;
@@ -3160,7 +3160,7 @@ static void iree_hal_vulkan_queue_profile_record_submission(
       submission->signal_semaphore_list.count);
   event_info.operation_count = submission->profile.operation_count;
   event_info.payload_length = submission->profile.payload_length;
-  iree_hal_local_profile_recorder_append_queue_event(
+  iree_hal_vulkan_profile_recorder_append_queue_event(
       submission->profile.recorder, &event_info, /*out_event_id=*/NULL);
 }
 
@@ -3185,11 +3185,11 @@ static bool iree_hal_vulkan_queue_profile_submission_requires_native_timestamp(
 }
 
 static bool iree_hal_vulkan_queue_profile_filter_matches_dispatch(
-    iree_hal_local_profile_recorder_t* profile_recorder,
-    iree_hal_local_profile_queue_scope_t scope, uint64_t command_buffer_id,
+    iree_hal_vulkan_profile_recorder_t* profile_recorder,
+    iree_hal_vulkan_profile_queue_scope_t scope, uint64_t command_buffer_id,
     uint32_t command_index, const iree_hal_vulkan_pipeline_t* pipeline) {
   const iree_hal_device_profiling_options_t* options =
-      iree_hal_local_profile_recorder_options(profile_recorder);
+      iree_hal_vulkan_profile_recorder_options(profile_recorder);
   if (!options) return false;
   const iree_hal_profile_capture_filter_t* filter = &options->capture_filter;
   if (!iree_hal_profile_capture_filter_matches_location(
@@ -3270,8 +3270,8 @@ static iree_status_t iree_hal_vulkan_queue_append_dispatch_profile_event(
         "Vulkan dispatch profiling timestamp range is not monotonic");
   }
 
-  iree_hal_local_profile_dispatch_event_info_t event_info =
-      iree_hal_local_profile_dispatch_event_info_default();
+  iree_hal_vulkan_profile_dispatch_event_info_t event_info =
+      iree_hal_vulkan_profile_dispatch_event_info_default();
   event_info.scope = submission->profile.scope;
   event_info.submission_id = submission->profile.submission_id;
   event_info.command_buffer_id = 0;
@@ -3292,20 +3292,20 @@ static iree_status_t iree_hal_vulkan_queue_append_dispatch_profile_event(
          sizeof(event_info.workgroup_size));
   event_info.start_tick = ticks[0];
   event_info.end_tick = ticks[1];
-  return iree_hal_local_profile_recorder_append_dispatch_event(
+  return iree_hal_vulkan_profile_recorder_append_dispatch_event(
       submission->profile.recorder, &event_info, /*out_event_id=*/NULL);
 }
 
 static iree_status_t iree_hal_vulkan_queue_record_dispatch_profile_metadata(
     iree_hal_vulkan_queue_pending_submission_t* submission) {
-  iree_hal_local_profile_recorder_t* profile_recorder =
+  iree_hal_vulkan_profile_recorder_t* profile_recorder =
       submission->queue->profile_recorder;
-  if (!iree_hal_local_profile_recorder_is_enabled(
+  if (!iree_hal_vulkan_profile_recorder_is_enabled(
           profile_recorder,
           IREE_HAL_DEVICE_PROFILING_DATA_EXECUTABLE_METADATA)) {
     return iree_ok_status();
   }
-  return iree_hal_local_profile_recorder_record_executable_with_id(
+  return iree_hal_vulkan_profile_recorder_record_executable(
       profile_recorder, submission->dispatch.executable,
       iree_hal_vulkan_executable_profile_id(submission->dispatch.executable));
 }
@@ -3525,8 +3525,8 @@ static iree_status_t iree_hal_vulkan_queue_profile_record_queue_device_event(
   submission->profile.queue_device_event_recorded = true;
 
   iree_hal_vulkan_queue_profile_populate_submission_metrics(submission);
-  iree_hal_local_profile_queue_device_event_info_t event_info =
-      iree_hal_local_profile_queue_device_event_info_default();
+  iree_hal_vulkan_profile_queue_device_event_info_t event_info =
+      iree_hal_vulkan_profile_queue_device_event_info_default();
   event_info.type = submission->profile.type;
   event_info.flags = submission->profile.flags;
   event_info.scope = submission->profile.scope;
@@ -3541,7 +3541,7 @@ static iree_status_t iree_hal_vulkan_queue_profile_record_queue_device_event(
       submission->profile.query_values[submission->profile.queue_start_query];
   event_info.end_tick =
       submission->profile.query_values[submission->profile.queue_end_query];
-  return iree_hal_local_profile_recorder_append_queue_device_event(
+  return iree_hal_vulkan_profile_recorder_append_queue_device_event(
       submission->profile.recorder, &event_info, /*out_event_id=*/NULL);
 }
 
@@ -3566,7 +3566,7 @@ static void iree_hal_vulkan_queue_profile_record_memory_event(
     iree_hal_pool_t* pool, iree_hal_buffer_params_t params,
     const iree_hal_pool_reservation_t* reservation, uint64_t backing_id,
     iree_device_size_t length, uint64_t frontier_entry_count) {
-  if (!iree_hal_local_profile_recorder_is_enabled(
+  if (!iree_hal_vulkan_profile_recorder_is_enabled(
           submission->profile.recorder,
           IREE_HAL_DEVICE_PROFILING_DATA_MEMORY_EVENTS)) {
     return;
@@ -3600,7 +3600,7 @@ static void iree_hal_vulkan_queue_profile_record_memory_event(
     }
   }
   iree_hal_vulkan_queue_profile_populate_memory_event_pool_stats(pool, &event);
-  iree_hal_local_profile_recorder_append_memory_event(
+  iree_hal_vulkan_profile_recorder_append_memory_event(
       submission->profile.recorder, &event, /*out_event_id=*/NULL);
 }
 
@@ -6274,8 +6274,8 @@ void iree_hal_vulkan_queue_retire_frontier(iree_hal_vulkan_queue_t* queue) {
 
 void iree_hal_vulkan_queue_set_profile_recorder(
     iree_hal_vulkan_queue_t* queue,
-    iree_hal_local_profile_recorder_t* profile_recorder,
-    iree_hal_local_profile_queue_scope_t profile_scope,
+    iree_hal_vulkan_profile_recorder_t* profile_recorder,
+    iree_hal_vulkan_profile_queue_scope_t profile_scope,
     iree_atomic_int64_t* submission_counter,
     iree_hal_vulkan_profile_clock_alignment_t* clock_alignment) {
   if (profile_recorder) {

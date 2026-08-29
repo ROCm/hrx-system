@@ -263,6 +263,40 @@ endif()
 if(IREE_HAL_DRIVER_VULKAN)
 iree_cc_library(
   NAME
+    profile
+  HDRS
+    "profile.h"
+  SRCS
+    "profile.c"
+  DEPS
+    iree::base
+    iree::base::threading
+    iree::hal
+    iree::hal::utils::profile_event_ring
+  PUBLIC
+)
+endif()
+
+if(IREE_HAL_DRIVER_VULKAN)
+iree_cc_test(
+  NAME
+    profile_test
+  SRCS
+    "profile_test.cc"
+  DEPS
+    ::profile
+    iree::hal
+    iree::hal::cts::util::profile_test_util
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=runtime.hal.vulkan"
+)
+endif()
+
+if(IREE_HAL_DRIVER_VULKAN)
+iree_cc_library(
+  NAME
     vulkan
   SRCS
     "allocator.c"
@@ -309,6 +343,7 @@ iree_cc_library(
   DEPS
     ::api
     ::device_spec_builder
+    ::profile
     ::transient_buffer
     iree::async
     iree::async::util::proactor_pool
@@ -321,7 +356,6 @@ iree_cc_library(
     iree::hal
     iree::hal::drivers::vulkan::device::library
     iree::hal::drivers::vulkan::util::libvulkan
-    iree::hal::local::profile
     iree::hal::memory::passthrough_pool
     iree::hal::memory::slab_provider
     iree::hal::memory::tlsf_pool

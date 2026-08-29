@@ -29,10 +29,10 @@
 #include "iree/hal/drivers/vulkan/executable.h"
 #include "iree/hal/drivers/vulkan/physical_device.h"
 #include "iree/hal/drivers/vulkan/physical_device_selection.h"
+#include "iree/hal/drivers/vulkan/profile.h"
 #include "iree/hal/drivers/vulkan/queue.h"
 #include "iree/hal/drivers/vulkan/semaphore.h"
 #include "iree/hal/drivers/vulkan/syms.h"
-#include "iree/hal/local/profile.h"
 #include "iree/hal/utils/file_registry.h"
 
 //===----------------------------------------------------------------------===//
@@ -175,7 +175,7 @@ struct iree_hal_vulkan_logical_device_t {
   // Active profiling session state.
   struct {
     // Active HAL-native profile recorder, when profiling is enabled.
-    iree_hal_local_profile_recorder_t* recorder;
+    iree_hal_vulkan_profile_recorder_t* recorder;
 
     // Host time domain selected for calibrated profiling samples.
     VkTimeDomainEXT host_time_domain;
@@ -423,7 +423,7 @@ static bool iree_hal_vulkan_profile_clock_alignment_record_clock_tick(
 
 static iree_status_t iree_hal_vulkan_logical_device_write_clock_correlation(
     iree_hal_vulkan_logical_device_t* device) {
-  if (!iree_hal_local_profile_recorder_is_enabled(
+  if (!iree_hal_vulkan_profile_recorder_is_enabled(
           device->profile.recorder,
           IREE_HAL_DEVICE_PROFILING_DATA_DEVICE_QUEUE_EVENTS |
               IREE_HAL_DEVICE_PROFILING_DATA_DISPATCH_EVENTS)) {
@@ -477,16 +477,16 @@ static iree_status_t iree_hal_vulkan_logical_device_write_clock_correlation(
   record.host_system_frequency_hz = host_frequency_hz;
   record.host_time_begin_ns = host_time_begin_ns;
   record.host_time_end_ns = host_time_end_ns;
-  return iree_hal_local_profile_recorder_write_clock_correlations(
+  return iree_hal_vulkan_profile_recorder_write_clock_correlations(
       device->profile.recorder, 1, &record);
 }
 
-static iree_hal_local_profile_queue_scope_t
+static iree_hal_vulkan_profile_queue_scope_t
 iree_hal_vulkan_logical_device_profile_queue_scope(
     const iree_hal_vulkan_logical_device_t* device, uint32_t queue_ordinal) {
   const uint32_t physical_device_ordinal =
       device->topology_info.topology ? device->topology_info.topology_index : 0;
-  return (iree_hal_local_profile_queue_scope_t){
+  return (iree_hal_vulkan_profile_queue_scope_t){
       .physical_device_ordinal = physical_device_ordinal,
       .queue_ordinal = queue_ordinal,
       .stream_id = ((uint64_t)physical_device_ordinal << 32) | queue_ordinal,
@@ -1526,11 +1526,7 @@ static iree_status_t iree_hal_vulkan_logical_device_profiling_begin(
   const iree_hal_device_profiling_options_t resolved_options =
       iree_hal_vulkan_logical_device_resolve_profiling_options(options);
   const iree_hal_device_profiling_data_families_t supported_data_families =
-      IREE_HAL_DEVICE_PROFILING_DATA_QUEUE_EVENTS |
-      IREE_HAL_DEVICE_PROFILING_DATA_DISPATCH_EVENTS |
-      IREE_HAL_DEVICE_PROFILING_DATA_EXECUTABLE_METADATA |
-      IREE_HAL_DEVICE_PROFILING_DATA_MEMORY_EVENTS |
-      IREE_HAL_DEVICE_PROFILING_DATA_DEVICE_QUEUE_EVENTS;
+      iree_hal_vulkan_profile_recorder_supported_data_families();
   const iree_hal_device_profiling_data_families_t unsupported_data_families =
       resolved_options.data_families & ~supported_data_families;
   if (unsupported_data_families != IREE_HAL_DEVICE_PROFILING_DATA_NONE) {
@@ -1586,7 +1582,7 @@ static iree_status_t iree_hal_vulkan_logical_device_profiling_begin(
   for (iree_host_size_t i = 0; i < device->queues.lane_count; ++i) {
     const uint32_t queue_ordinal =
         iree_hal_vulkan_logical_device_profile_count(i);
-    const iree_hal_local_profile_queue_scope_t scope =
+    const iree_hal_vulkan_profile_queue_scope_t scope =
         iree_hal_vulkan_logical_device_profile_queue_scope(device,
                                                            queue_ordinal);
     queue_records[i] = iree_hal_profile_queue_record_default();
@@ -1595,7 +1591,7 @@ static iree_status_t iree_hal_vulkan_logical_device_profiling_begin(
     queue_records[i].stream_id = scope.stream_id;
   }
 
-  iree_hal_local_profile_recorder_options_t recorder_options = {
+  iree_hal_vulkan_profile_recorder_options_t recorder_options = {
       .name = device->identifier,
       .session_id = ++device->profile.next_session_id,
       .device_record_count = 1,
@@ -1606,20 +1602,13 @@ static iree_status_t iree_hal_vulkan_logical_device_profiling_begin(
           IREE_HAL_VULKAN_LOGICAL_DEVICE_PROFILE_DISPATCH_EVENT_CAPACITY,
       .queue_event_capacity =
           IREE_HAL_VULKAN_LOGICAL_DEVICE_PROFILE_QUEUE_EVENT_CAPACITY,
-      .producer_data_families =
-          (dispatch_events_enabled
-               ? IREE_HAL_DEVICE_PROFILING_DATA_DISPATCH_EVENTS
-               : IREE_HAL_DEVICE_PROFILING_DATA_NONE) |
-          (device_queue_events_enabled
-               ? IREE_HAL_DEVICE_PROFILING_DATA_DEVICE_QUEUE_EVENTS
-               : IREE_HAL_DEVICE_PROFILING_DATA_NONE),
       .queue_device_event_capacity =
           IREE_HAL_VULKAN_LOGICAL_DEVICE_PROFILE_QUEUE_DEVICE_EVENT_CAPACITY,
       .memory_event_capacity =
           IREE_HAL_VULKAN_LOGICAL_DEVICE_PROFILE_MEMORY_EVENT_CAPACITY,
   };
-  iree_hal_local_profile_recorder_t* recorder = NULL;
-  iree_status_t status = iree_hal_local_profile_recorder_create(
+  iree_hal_vulkan_profile_recorder_t* recorder = NULL;
+  iree_status_t status = iree_hal_vulkan_profile_recorder_create(
       &recorder_options, &resolved_options, device->host_allocator, &recorder);
   iree_allocator_free(device->host_allocator, queue_records);
   if (!iree_status_is_ok(status) || !recorder) return status;
@@ -1630,9 +1619,9 @@ static iree_status_t iree_hal_vulkan_logical_device_profiling_begin(
   status = iree_hal_vulkan_logical_device_write_clock_correlation(device);
   if (!iree_status_is_ok(status)) {
     device->profile.recorder = NULL;
-    status =
-        iree_status_join(status, iree_hal_local_profile_recorder_end(recorder));
-    iree_hal_local_profile_recorder_destroy(recorder);
+    status = iree_status_join(status,
+                              iree_hal_vulkan_profile_recorder_end(recorder));
+    iree_hal_vulkan_profile_recorder_destroy(recorder);
     return status;
   }
 
@@ -1658,7 +1647,7 @@ static iree_status_t iree_hal_vulkan_logical_device_profiling_flush(
   iree_status_t status =
       iree_hal_vulkan_logical_device_write_clock_correlation(device);
   if (iree_status_is_ok(status)) {
-    status = iree_hal_local_profile_recorder_flush(device->profile.recorder);
+    status = iree_hal_vulkan_profile_recorder_flush(device->profile.recorder);
   }
   return status;
 }
@@ -1667,7 +1656,7 @@ static iree_status_t iree_hal_vulkan_logical_device_profiling_end(
     iree_hal_device_t* base_device) {
   iree_hal_vulkan_logical_device_t* device =
       iree_hal_vulkan_logical_device_cast(base_device);
-  iree_hal_local_profile_recorder_t* recorder = device->profile.recorder;
+  iree_hal_vulkan_profile_recorder_t* recorder = device->profile.recorder;
   if (!recorder) return iree_ok_status();
 
   for (iree_host_size_t i = 0; i < device->queues.lane_count; ++i) {
@@ -1676,8 +1665,8 @@ static iree_status_t iree_hal_vulkan_logical_device_profiling_end(
   iree_status_t status =
       iree_hal_vulkan_logical_device_write_clock_correlation(device);
 
-  const iree_hal_local_profile_queue_scope_t empty_scope =
-      iree_hal_local_profile_queue_scope_default();
+  const iree_hal_vulkan_profile_queue_scope_t empty_scope =
+      iree_hal_vulkan_profile_queue_scope_default();
   for (iree_host_size_t i = 0; i < device->queues.lane_count; ++i) {
     iree_hal_vulkan_queue_set_profile_recorder(
         &device->queues.lanes[i], /*profile_recorder=*/NULL, empty_scope,
@@ -1690,8 +1679,8 @@ static iree_status_t iree_hal_vulkan_logical_device_profiling_end(
                     iree_memory_order_relaxed);
 
   status =
-      iree_status_join(status, iree_hal_local_profile_recorder_end(recorder));
-  iree_hal_local_profile_recorder_destroy(recorder);
+      iree_status_join(status, iree_hal_vulkan_profile_recorder_end(recorder));
+  iree_hal_vulkan_profile_recorder_destroy(recorder);
   return status;
 }
 

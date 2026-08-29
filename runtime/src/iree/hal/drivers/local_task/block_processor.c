@@ -905,13 +905,13 @@ static void iree_hal_cmd_block_processor_profile_make_dispatch_event(
     uint64_t tile_count, int64_t tile_duration_sum_ns,
     iree_status_code_t status_code, iree_time_t start_host_time_ns,
     iree_time_t end_host_time_ns,
-    iree_hal_local_profile_host_execution_event_info_t* out_event_info) {
+    iree_hal_task_profile_host_execution_event_info_t* out_event_info) {
   uint32_t workgroup_count[3];
   iree_hal_cmd_dispatch_read_workgroup_count(dispatch, binding_ptrs,
                                              workgroup_count);
 
-  iree_hal_local_profile_host_execution_event_info_t event_info =
-      iree_hal_local_profile_host_execution_event_info_default();
+  iree_hal_task_profile_host_execution_event_info_t event_info =
+      iree_hal_task_profile_host_execution_event_info_default();
   event_info.type = IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_DISPATCH;
   event_info.flags = IREE_HAL_PROFILE_HOST_EXECUTION_EVENT_FLAG_COMMAND_BUFFER |
                      IREE_HAL_PROFILE_HOST_EXECUTION_EVENT_FLAG_DEFERRED;
@@ -949,11 +949,11 @@ static void iree_hal_cmd_block_processor_profile_append_dispatch_event(
     uint64_t tile_count, int64_t tile_duration_sum_ns,
     iree_status_code_t status_code, iree_time_t start_host_time_ns,
     iree_time_t end_host_time_ns) {
-  iree_hal_local_profile_host_execution_event_info_t event_info;
+  iree_hal_task_profile_host_execution_event_info_t event_info;
   iree_hal_cmd_block_processor_profile_make_dispatch_event(
       context, dispatch, binding_ptrs, tile_count, tile_duration_sum_ns,
       status_code, start_host_time_ns, end_host_time_ns, &event_info);
-  iree_hal_local_profile_recorder_append_host_execution_event(
+  iree_hal_task_profile_recorder_append_host_execution_event(
       context->profile.recorder, &event_info, /*out_event_id=*/NULL);
 }
 
@@ -966,10 +966,9 @@ static iree_status_t iree_hal_cmd_execute_dispatch_tiles_profiled(
     uint32_t worker_count, uint32_t* out_tiles_completed) {
   *out_tiles_completed = 0;
 
-  iree_hal_local_profile_recorder_t* recorder = context->profile.recorder;
-  const bool profile_host_execution =
-      iree_hal_local_profile_recorder_is_enabled(
-          recorder, IREE_HAL_DEVICE_PROFILING_DATA_HOST_EXECUTION_EVENTS);
+  iree_hal_task_profile_recorder_t* recorder = context->profile.recorder;
+  const bool profile_host_execution = iree_hal_task_profile_recorder_is_enabled(
+      recorder, IREE_HAL_DEVICE_PROFILING_DATA_HOST_EXECUTION_EVENTS);
   const bool aggregate_host_execution = profile_host_execution &&
                                         context->worker_count > 1 &&
                                         context->profile.dispatches != NULL;
@@ -1011,10 +1010,10 @@ static iree_status_t iree_hal_cmd_execute_dispatch_tiles_profiled(
 static iree_host_size_t iree_hal_cmd_block_processor_profile_snapshot_region(
     iree_hal_cmd_block_processor_context_t* context,
     const iree_hal_cmd_barrier_t* barrier, void** binding_ptrs,
-    iree_hal_local_profile_host_execution_event_info_t* out_events,
+    iree_hal_task_profile_host_execution_event_info_t* out_events,
     iree_host_size_t event_capacity) {
   if (!context->profile.dispatches ||
-      !iree_hal_local_profile_recorder_is_enabled(
+      !iree_hal_task_profile_recorder_is_enabled(
           context->profile.recorder,
           IREE_HAL_DEVICE_PROFILING_DATA_HOST_EXECUTION_EVENTS)) {
     return 0;
@@ -1062,10 +1061,10 @@ static iree_host_size_t iree_hal_cmd_block_processor_profile_snapshot_region(
 
 static void iree_hal_cmd_block_processor_profile_append_host_execution_events(
     iree_hal_cmd_block_processor_context_t* context,
-    const iree_hal_local_profile_host_execution_event_info_t* events,
+    const iree_hal_task_profile_host_execution_event_info_t* events,
     iree_host_size_t event_count) {
   for (iree_host_size_t i = 0; i < event_count; ++i) {
-    iree_hal_local_profile_recorder_append_host_execution_event(
+    iree_hal_task_profile_recorder_append_host_execution_event(
         context->profile.recorder, &events[i], /*out_event_id=*/NULL);
   }
 }
@@ -1845,8 +1844,8 @@ static void iree_hal_cmd_block_processor_profile_append_command_region_event(
         IREE_HAL_PROFILE_COMMAND_REGION_EVENT_FLAG_HAS_NEXT_REGION;
   }
 
-  iree_hal_local_profile_command_region_event_info_t event_info =
-      iree_hal_local_profile_command_region_event_info_default();
+  iree_hal_task_profile_command_region_event_info_t event_info =
+      iree_hal_task_profile_command_region_event_info_default();
   event_info.flags = IREE_HAL_PROFILE_COMMAND_REGION_EVENT_FLAG_COMMAND_BUFFER |
                      transition_flags;
   event_info.scope = context->profile.scope;
@@ -1911,7 +1910,7 @@ static void iree_hal_cmd_block_processor_profile_append_command_region_event(
       region_snapshot.command_region.retention.publish_keep_active_count;
   event_info.retention.keep_warm_count =
       region_snapshot.command_region.retention.keep_warm_count;
-  iree_hal_local_profile_recorder_append_command_region_event(
+  iree_hal_task_profile_recorder_append_command_region_event(
       context->profile.recorder, &event_info, /*out_event_id=*/NULL);
 }
 
@@ -1942,13 +1941,13 @@ static void iree_hal_cmd_block_processor_handle_region_completion(
   const iree_hal_cmd_block_processor_profile_region_snapshot_t
       completed_region_profile =
           iree_hal_cmd_block_processor_profile_snapshot_active_region(context);
-  iree_hal_local_profile_host_execution_event_info_t* profile_events = NULL;
+  iree_hal_task_profile_host_execution_event_info_t* profile_events = NULL;
   iree_host_size_t profile_event_capacity = completed_barrier->dispatch_count;
   iree_host_size_t profile_event_count = 0;
   if (IREE_UNLIKELY(profile_event_capacity != 0 &&
                     context->profile.dispatches != NULL)) {
     profile_events =
-        (iree_hal_local_profile_host_execution_event_info_t*)iree_alloca(
+        (iree_hal_task_profile_host_execution_event_info_t*)iree_alloca(
             profile_event_capacity * sizeof(*profile_events));
     profile_event_count = iree_hal_cmd_block_processor_profile_snapshot_region(
         context, completed_barrier, binding_ptrs, profile_events,
@@ -2423,8 +2422,8 @@ void iree_hal_cmd_block_processor_context_initialize(
 
 void iree_hal_cmd_block_processor_context_set_profile_recorder(
     iree_hal_cmd_block_processor_context_t* context,
-    iree_hal_local_profile_recorder_t* recorder,
-    iree_hal_local_profile_queue_scope_t scope, uint64_t submission_id,
+    iree_hal_task_profile_recorder_t* recorder,
+    iree_hal_task_profile_queue_scope_t scope, uint64_t submission_id,
     uint64_t command_buffer_id,
     iree_hal_cmd_block_processor_profile_dispatch_t* dispatches,
     iree_host_size_t dispatch_capacity) {
@@ -2436,7 +2435,7 @@ void iree_hal_cmd_block_processor_context_set_profile_recorder(
   context->profile.dispatches = dispatches;
   context->profile.dispatch_capacity = dispatch_capacity;
   context->profile.command_region.events_enabled =
-      iree_hal_local_profile_recorder_is_enabled(
+      iree_hal_task_profile_recorder_is_enabled(
           recorder, IREE_HAL_DEVICE_PROFILING_DATA_COMMAND_REGION_EVENTS);
   iree_hal_cmd_block_processor_profile_reset_dispatches(context);
   if (context->worker_count > 1 &&
