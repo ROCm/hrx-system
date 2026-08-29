@@ -9,6 +9,7 @@
 #include "loom/ir/module.h"
 #include "loom/pass/builder.h"
 #include "loom/target/arch/vm/descriptors.h"
+#include "loom/target/arch/vm/facts.h"
 #include "loom/target/arch/vm/legalization.h"
 #include "loom/target/arch/vm/low_verify.h"
 #include "loom/target/arch/vm/lower/arithmetic.h"
@@ -114,6 +115,7 @@ static iree_status_t loom_vm_provider_contribute_pipeline(
 }
 
 const loom_target_provider_t loom_vm_target_provider = {
+    .fact_type = &loom_vm_target_fact_type,
     .register_context = loom_vm_ops_register_dialect,
     .initialize_low_descriptor_registry =
         loom_vm_low_descriptor_registry_initialize,

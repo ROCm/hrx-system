@@ -60,6 +60,7 @@ loom_cc_library(
     iree::base
     loom::target::arch::wasm::descriptors::low_registry
     loom::target::arch::wasm::ops
+    loom::target::arch::wasm::records::target_records
     loom::target::emit::wasm::lower
     loom::target::provider
   PUBLIC

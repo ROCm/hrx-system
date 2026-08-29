@@ -325,6 +325,7 @@ loom_cc_library(
   SRCS
     "provider.c"
   DEPS
+    ::facts
     ::low_verify
     ::math_policy
     ::profile

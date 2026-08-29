@@ -96,6 +96,7 @@ static const loom_target_profile_type_t kTestProfileType = {
 };
 
 static const loom_target_provider_t kTestProvider = {
+    /*.fact_type=*/&loom_test_target_fact_type,
     /*.profile_type=*/&kTestProfileType,
     /*.materialize_definition=*/MaterializeTestTargetDefinition,
 };

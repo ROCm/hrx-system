@@ -267,6 +267,7 @@ loom_cc_library(
   DEPS
     ::abi_layout
     ::descriptors
+    ::facts
     ::low_verify
     ::lower
     ::ops

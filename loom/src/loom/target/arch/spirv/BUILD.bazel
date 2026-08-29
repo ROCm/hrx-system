@@ -296,6 +296,7 @@ loom_cc_library(
     hdrs = ["provider.h"],
     visibility = _SPIRV_PROVIDER_VISIBILITY,
     deps = [
+        ":facts",
         ":low_verify",
         ":math_policy",
         ":profile",

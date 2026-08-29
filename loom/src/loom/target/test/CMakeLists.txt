@@ -55,6 +55,7 @@ loom_cc_library(
     "provider.c"
   DEPS
     ::lower
+    ::target_record_table
     iree::base
     loom::pass::test::registry
     loom::target::low_descriptor_registry_core_test

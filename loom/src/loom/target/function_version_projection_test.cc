@@ -111,11 +111,13 @@ static iree_status_t MaterializeTestTargetDefinition(
 }
 
 static const loom_target_provider_t kTestProvider = {
+    /*.fact_type=*/&loom_test_target_fact_type,
     /*.profile_type=*/&kTestProfileType,
     /*.materialize_definition=*/MaterializeTestTargetDefinition,
 };
 
 static const loom_target_provider_t kMissingMaterializerProvider = {
+    /*.fact_type=*/&loom_test_target_fact_type,
     /*.profile_type=*/&kTestProfileType,
 };
 

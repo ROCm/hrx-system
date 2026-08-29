@@ -46,6 +46,7 @@ const loom_run_execution_backend_t* const kDuplicateFakeExecutionBackends[] = {
 };
 
 const loom_target_provider_t kCoreTestTargetProvider = {
+    /*.fact_type=*/{},
     /*.profile_type=*/{},
     /*.materialize_definition=*/{},
     /*.register_context=*/{},

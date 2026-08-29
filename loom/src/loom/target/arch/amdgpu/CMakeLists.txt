@@ -445,6 +445,7 @@ loom_cc_library(
   SRCS
     "provider.c"
   DEPS
+    ::facts
     ::legalization
     ::low_asm_diagnostics
     ::low_verify

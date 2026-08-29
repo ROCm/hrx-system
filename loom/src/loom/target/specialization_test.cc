@@ -76,6 +76,7 @@ static TestTargetProfile MakeTestProfile(loom_test_target_kind_t kind) {
 }
 
 static const loom_target_provider_t kTestProvider = {
+    /*.fact_type=*/&loom_test_target_fact_type,
     /*.profile_type=*/&kTestProfileType,
     /*.materialize_definition=*/nullptr,
     /*.register_context=*/nullptr,

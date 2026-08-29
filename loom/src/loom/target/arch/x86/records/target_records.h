@@ -11,7 +11,7 @@
 
 #include <stdint.h>
 
-#include "loom/target/types.h"
+#include "loom/target/facts.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -19,6 +19,9 @@ extern "C" {
 
 // Stable target-family identity for x86 low descriptor sets.
 #define LOOM_X86_TARGET_STABLE_ID UINT64_C(0x3f1e78197f70e441)
+
+// Static fact type shared by authored x86 target records and their provider.
+extern const loom_target_fact_type_t loom_x86_target_fact_type;
 
 extern const loom_target_bundle_table_t loom_x86_target_bundles;
 

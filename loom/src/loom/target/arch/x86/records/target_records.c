@@ -10,6 +10,15 @@
 
 #include "loom/target/arch/x86/feature_bits.h"
 
+const loom_target_fact_type_t loom_x86_target_fact_type = {
+    .name = IREE_SVL("x86"),
+    .storage_size = sizeof(loom_target_facts_t),
+    .satisfies_identity_requirement =
+        loom_target_facts_selector_satisfies_identity_requirement,
+    .satisfies_specialization_requirement =
+        loom_target_facts_structural_satisfy_specialization_requirement,
+};
+
 #define LOOM_X86_LOW_SNAPSHOT(symbol, snapshot_name)           \
   static const loom_target_snapshot_t symbol = {               \
       .name = IREE_SVL(snapshot_name),                         \

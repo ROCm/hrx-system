@@ -10,6 +10,7 @@
 #include "loom/pass/builder.h"
 #include "loom/target/arch/amdgpu/descriptors/low_registry.h"
 #include "loom/target/arch/amdgpu/diagnostics/packet_diagnostics.h"
+#include "loom/target/arch/amdgpu/facts.h"
 #include "loom/target/arch/amdgpu/legalization.h"
 #include "loom/target/arch/amdgpu/low_asm_diagnostics.h"
 #include "loom/target/arch/amdgpu/low_verify.h"
@@ -112,6 +113,7 @@ static iree_status_t loom_amdgpu_provider_contribute_pipeline(
 }
 
 const loom_target_provider_t loom_amdgpu_target_provider = {
+    .fact_type = &loom_amdgpu_target_fact_type,
     .profile_type = &loom_amdgpu_target_profile_type,
     .materialize_definition = loom_amdgpu_target_materialize_definition,
     .register_context = loom_amdgpu_ops_register_dialect,

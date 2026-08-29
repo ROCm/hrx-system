@@ -183,6 +183,7 @@ loom_cc_test(
     loom::target::low_descriptor_registry_core_test
     loom::target::provider
     loom::target::test::lower
+    loom::target::test::target_record_table
     loom::testing::context
 )
 

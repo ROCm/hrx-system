@@ -455,6 +455,7 @@ loom_cc_library(
     hdrs = ["provider.h"],
     visibility = _AMDGPU_PROVIDER_VISIBILITY,
     deps = [
+        ":facts",
         ":legalization",
         ":low_asm_diagnostics",
         ":low_verify",

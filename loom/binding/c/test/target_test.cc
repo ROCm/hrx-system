@@ -200,6 +200,7 @@ static iree_status_t RegisterTestTargetContext(loom_context_t* context) {
 // can prove loss prevention without relying on an incomplete production
 // target.
 static const loom_target_provider_t kTestTargetProvider = {
+    /*.fact_type=*/&loom_test_target_fact_type,
     /*.profile_type=*/&kTestTargetProfileType,
     /*.materialize_definition=*/nullptr,
     /*.register_context=*/RegisterTestTargetContext,
@@ -220,6 +221,7 @@ static void DeinitializeTestTargetProfile(loom_target_profile_t* base_profile,
 }
 
 static const loom_target_provider_t kFakeElfProvider = {
+    /*.fact_type=*/nullptr,
     /*.profile_type=*/nullptr,
     /*.materialize_definition=*/nullptr,
     /*.register_context=*/nullptr,
@@ -241,6 +243,7 @@ static const loom_target_provider_t kFakeElfProvider = {
 };
 
 static const loom_target_provider_t kFakeWasmProvider = {
+    /*.fact_type=*/nullptr,
     /*.profile_type=*/nullptr,
     /*.materialize_definition=*/nullptr,
     /*.register_context=*/nullptr,

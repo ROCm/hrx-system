@@ -81,6 +81,7 @@ static TestTargetProfile MakeTestProfile(uint32_t subgroup_size,
 }
 
 static const loom_target_provider_t kTestProvider = {
+    /*.fact_type=*/&loom_test_target_fact_type,
     /*.profile_type=*/&kTestProfileType,
 };
 

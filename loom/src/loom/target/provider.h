@@ -240,13 +240,16 @@ typedef iree_status_t (*loom_target_provider_pipeline_contribution_fn_t)(
 
 // Target-owned compiler capability contribution linked into a tool or driver.
 struct loom_target_provider_t {
+  // Target-family fact representation owned by this provider, or NULL when
+  // the provider only contributes target-independent or auxiliary machinery.
+  const loom_target_fact_type_t* fact_type;
   // Target-family profile representation owned by this provider, or NULL when
-  // the provider contributes no profile-driven semantics.
+  // the family has no external profile representation. When present, the
+  // profile must project |fact_type|.
   const loom_target_profile_type_t* profile_type;
-  // Optional exact target-definition materializer for facts projected by
-  // |profile_type|. Providers without an ordinary target-IR representation
-  // leave this NULL; only contexts with exact authored target IR can cross an
-  // artifact boundary.
+  // Optional exact target-definition materializer for derived facts owned by
+  // |fact_type|. Providers without an ordinary target-IR representation leave
+  // this NULL; exact authored contexts can reuse their existing definition.
   loom_target_materialize_definition_fn_t materialize_definition;
   // Optional function that registers target-owned dialects.
   loom_target_provider_context_registration_fn_t register_context;
@@ -433,6 +436,15 @@ const loom_pass_registry_t* loom_target_environment_pass_registry(
 const loom_target_provider_t* loom_target_environment_lookup_profile_provider(
     const loom_target_environment_t* environment,
     const loom_target_profile_type_t* profile_type);
+
+// Returns the provider owning |fact_type|, or NULL when not linked.
+//
+// This is a cold compiler identity lookup used when exact facts originate in
+// authored target IR instead of an external profile. Callers retain the
+// returned provider with the facts instead of resolving the family again.
+const loom_target_provider_t* loom_target_environment_lookup_fact_provider(
+    const loom_target_environment_t* environment,
+    const loom_target_fact_type_t* fact_type);
 
 // Invokes target-provider pass-pipeline contributions for |phase|. The caller
 // owns phase ordering, surrounding pass.for/pass.where scopes, and global

@@ -11,12 +11,14 @@
 #include "loom/target/arch/x86/lower/lower.h"
 #include "loom/target/arch/x86/math_policy.h"
 #include "loom/target/arch/x86/ops/registry.h"
+#include "loom/target/arch/x86/records/target_records.h"
 
 static const loom_target_legalizer_provider_t* kLoomX86LegalizerProviders[] = {
     &loom_x86_target_legalizer_provider_storage,
 };
 
 const loom_target_provider_t loom_x86_target_provider = {
+    .fact_type = &loom_x86_target_fact_type,
     .register_context = loom_x86_ops_register_dialect,
     .initialize_low_descriptor_registry =
         loom_x86_low_descriptor_registry_initialize,

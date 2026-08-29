@@ -35,6 +35,7 @@ loom_cc_library(
   DEPS
     iree::base
     loom::target::arch::x86::feature_bits
+    loom::target::facts
     loom::target::types
   PUBLIC
 )

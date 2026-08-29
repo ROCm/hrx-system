@@ -133,6 +133,7 @@ class TargetProviderTest : public ::testing::Test {
 
 TEST_F(TargetProviderTest, ContributesPassIrByPhase) {
   static const loom_target_provider_t materialization_provider = {
+      /*.fact_type=*/{},
       /*.profile_type=*/{},
       /*.materialize_definition=*/{},
       /*.register_context=*/{},
@@ -149,6 +150,7 @@ TEST_F(TargetProviderTest, ContributesPassIrByPhase) {
       /*.contribute_pipeline=*/ContributeMaterialization,
   };
   static const loom_target_provider_t preparation_provider = {
+      /*.fact_type=*/{},
       /*.profile_type=*/{},
       /*.materialize_definition=*/{},
       /*.register_context=*/{},
@@ -224,6 +226,7 @@ TEST_F(TargetProviderTest, ComposesTargetPassRegistries) {
       /*.descriptor_count=*/IREE_ARRAYSIZE(second_descriptors),
   };
   static const loom_target_provider_t first_provider = {
+      /*.fact_type=*/{},
       /*.profile_type=*/{},
       /*.materialize_definition=*/{},
       /*.register_context=*/{},
@@ -239,6 +242,7 @@ TEST_F(TargetProviderTest, ComposesTargetPassRegistries) {
       /*.pass_registry=*/&first_registry,
   };
   static const loom_target_provider_t second_provider = {
+      /*.fact_type=*/{},
       /*.profile_type=*/{},
       /*.materialize_definition=*/{},
       /*.register_context=*/{},
@@ -280,14 +284,25 @@ TEST_F(TargetProviderTest, ComposesTargetPassRegistries) {
   loom_target_environment_deinitialize(&environment);
 }
 
-TEST_F(TargetProviderTest, LooksUpProfileProvider) {
+TEST_F(TargetProviderTest, LooksUpFactAndProfileProvider) {
+  static const loom_target_fact_type_t kOwnedFactType = {
+      /*.name=*/IREE_SVL("owned"),
+      /*.storage_size=*/sizeof(loom_target_facts_t),
+  };
+  static const loom_target_fact_type_t kUnownedFactType = {
+      /*.name=*/IREE_SVL("unowned"),
+      /*.storage_size=*/sizeof(loom_target_facts_t),
+  };
   static const loom_target_profile_type_t kOwnedProfileType = {
       /*.name=*/IREE_SVL("owned"),
+      /*.fact_type=*/&kOwnedFactType,
   };
   static const loom_target_profile_type_t kUnownedProfileType = {
       /*.name=*/IREE_SVL("unowned"),
+      /*.fact_type=*/&kUnownedFactType,
   };
   static const loom_target_provider_t provider = {
+      /*.fact_type=*/&kOwnedFactType,
       /*.profile_type=*/&kOwnedProfileType,
   };
   static const loom_target_provider_t* const providers[] = {
@@ -305,8 +320,65 @@ TEST_F(TargetProviderTest, LooksUpProfileProvider) {
   EXPECT_EQ(loom_target_environment_lookup_profile_provider(
                 &environment, &kUnownedProfileType),
             nullptr);
+  EXPECT_EQ(loom_target_environment_lookup_fact_provider(&environment,
+                                                         &kOwnedFactType),
+            &provider);
+  EXPECT_EQ(loom_target_environment_lookup_fact_provider(&environment,
+                                                         &kUnownedFactType),
+            nullptr);
 
   loom_target_environment_deinitialize(&environment);
+}
+
+TEST_F(TargetProviderTest, RejectsAmbiguousFactFamilyOwnership) {
+  static const loom_target_fact_type_t kFactType = {
+      /*.name=*/IREE_SVL("duplicate"),
+      /*.storage_size=*/sizeof(loom_target_facts_t),
+  };
+  static const loom_target_provider_t first_provider = {
+      /*.fact_type=*/&kFactType,
+  };
+  static const loom_target_provider_t second_provider = {
+      /*.fact_type=*/&kFactType,
+  };
+  static const loom_target_provider_t* const providers[] = {
+      &first_provider,
+      &second_provider,
+  };
+  const loom_target_provider_set_t provider_set =
+      loom_target_provider_set_make(providers, IREE_ARRAYSIZE(providers));
+  loom_target_environment_t environment = {};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_target_environment_initialize(&provider_set, &environment));
+}
+
+TEST_F(TargetProviderTest, RejectsProfileFromAnotherFactFamily) {
+  static const loom_target_fact_type_t kProviderFactType = {
+      /*.name=*/IREE_SVL("provider"),
+      /*.storage_size=*/sizeof(loom_target_facts_t),
+  };
+  static const loom_target_fact_type_t kProfileFactType = {
+      /*.name=*/IREE_SVL("profile"),
+      /*.storage_size=*/sizeof(loom_target_facts_t),
+  };
+  static const loom_target_profile_type_t kProfileType = {
+      /*.name=*/IREE_SVL("profile"),
+      /*.fact_type=*/&kProfileFactType,
+  };
+  static const loom_target_provider_t provider = {
+      /*.fact_type=*/&kProviderFactType,
+      /*.profile_type=*/&kProfileType,
+  };
+  static const loom_target_provider_t* const providers[] = {
+      &provider,
+  };
+  const loom_target_provider_set_t provider_set =
+      loom_target_provider_set_make(providers, IREE_ARRAYSIZE(providers));
+  loom_target_environment_t environment = {};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_target_environment_initialize(&provider_set, &environment));
 }
 
 }  // namespace
