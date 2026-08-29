@@ -37,4 +37,31 @@ iree_py_library(
     loom::py::loom::target::arch::amd::xdna::aie::package_init
 )
 
+iree_py_library(
+  NAME
+    schedule
+  SRCS
+    "schedule.py"
+  DEPS
+    loom::py::loom::target::arch::amd::xdna::aie::package_init
+)
+
+iree_py_test(
+  NAME
+    schedule_test
+  MAIN
+    "../../../../../tools/pytest_style_runner.py"
+  SRCS
+    "schedule_test.py"
+    "../../../../../tools/pytest_style_runner.py"
+  ARGS
+    "loom.target.arch.amd.xdna.aie.schedule_test"
+  DEPS
+    loom::py::loom::target::arch::amd::xdna::aie::schedule
+  PACKAGE_DIRS
+    "${PROJECT_SOURCE_DIR}/loom/py"
+    "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

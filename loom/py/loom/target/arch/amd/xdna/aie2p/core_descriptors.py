@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Initial AIE2P target-low closure derived from the owned machine tables."""
+"""AIE2P target-low closure derived from owned machine and schedule tables."""
 
 from __future__ import annotations
 
@@ -17,8 +17,21 @@ from loom.target.arch.amd.xdna.aie.machine import (
     MachineOperandKind,
     has_property,
 )
+from loom.target.arch.amd.xdna.aie.schedule import (
+    NO_ITINERARY,
+    DependencyKind,
+    Itinerary,
+    MemoryCycles,
+    PipelineStageKind,
+    bypass_class,
+    dependency_separation,
+    itinerary_payload,
+    memory_separation,
+    pipeline_uses,
+)
 from loom.target.arch.amd.xdna.aie2p.core_encoding_data import CORE_ENCODING_TABLE
 from loom.target.arch.amd.xdna.aie2p.core_machine_data import CORE_MACHINE_TABLE
+from loom.target.arch.amd.xdna.aie2p.core_schedule_data import CORE_SCHEDULE_TABLE
 from loom.target.low_descriptors import (
     AsmForm,
     AsmImmediate,
@@ -37,6 +50,7 @@ from loom.target.low_descriptors import (
     ImmediateKind,
     InstructionClass,
     IssueUse,
+    IssueUseKind,
     LatencyKind,
     MemorySpace,
     ModelQuality,
@@ -66,125 +80,82 @@ class _DescriptorSpec:
     form_name: str
     key: str
     semantic_tag: str
-    schedule_class: str
     itinerary: str
     storage_overrides: tuple[tuple[str, str], ...] = ()
     op_kind: DescriptorOpKind = DescriptorOpKind.OP
 
-
-_RESOURCE_ALU = f"{_TARGET_KEY}.slot.alu"
-_RESOURCE_LDA = f"{_TARGET_KEY}.slot.lda"
-_RESOURCE_LDB = f"{_TARGET_KEY}.slot.ldb"
-_RESOURCE_LNG = f"{_TARGET_KEY}.slot.lng"
-_RESOURCE_MV = f"{_TARGET_KEY}.slot.mv"
-_RESOURCE_NOP = f"{_TARGET_KEY}.slot.nop"
-_RESOURCE_ST = f"{_TARGET_KEY}.slot.st"
-_RESOURCE_ER_WRITE = f"{_TARGET_KEY}.port.er.write"
-
-_SCHEDULE_ALU = f"{_TARGET_KEY}.scalar.alu"
-_SCHEDULE_MUL = f"{_TARGET_KEY}.scalar.mul"
-_SCHEDULE_CONST_LNG = f"{_TARGET_KEY}.scalar.constant.lng"
-_SCHEDULE_CONST_MV = f"{_TARGET_KEY}.scalar.constant.mv"
-_SCHEDULE_CONTROL = f"{_TARGET_KEY}.control"
-_SCHEDULE_LOAD_A = f"{_TARGET_KEY}.load.a"
-_SCHEDULE_LOAD_B = f"{_TARGET_KEY}.load.b"
-_SCHEDULE_NOP = f"{_TARGET_KEY}.nop"
-_SCHEDULE_STORE = f"{_TARGET_KEY}.store"
-_SCHEDULE_VECTOR_ALU = f"{_TARGET_KEY}.vector.alu"
-
-_TIMING_LOAD_WRITE_CYCLE_7 = f"{_TARGET_KEY}.load.write.cycle_7"
-_TIMING_MEMORY_READ_CYCLE_5 = f"{_TARGET_KEY}.memory.read.cycle_5"
-_TIMING_MEMORY_WRITE_CYCLE_5 = f"{_TARGET_KEY}.memory.write.cycle_5"
-_TIMING_SCALAR_READ_CYCLE_1 = f"{_TARGET_KEY}.scalar.read.cycle_1"
-_TIMING_SCALAR_WRITE_CYCLE_1 = f"{_TARGET_KEY}.scalar.write.cycle_1"
-_TIMING_SCALAR_WRITE_CYCLE_2 = f"{_TARGET_KEY}.scalar.write.cycle_2"
-_TIMING_STORE_READ_CYCLE_1 = f"{_TARGET_KEY}.store.read.cycle_1"
-_TIMING_VECTOR_READ_CYCLE_1 = f"{_TARGET_KEY}.vector.mv.read.cycle_1"
-_TIMING_VECTOR_WRITE_CYCLE_2 = f"{_TARGET_KEY}.vector.mv.write.cycle_2"
 
 _DESCRIPTOR_SPECS = (
     _DescriptorSpec(
         "ADD_add_r_ri",
         f"{_TARGET_KEY}.add.i32.immediate",
         "integer.add.i32",
-        _SCHEDULE_ALU,
         "II_ADD_add_r_ri",
     ),
     _DescriptorSpec(
         "LDA_dms_lda_idx_imm",
         f"{_TARGET_KEY}.load.scalar.indexed.immediate",
         "memory.load.indexed.i32",
-        _SCHEDULE_LOAD_A,
         "II_LDA_dms_lda_idx_imm",
     ),
     _DescriptorSpec(
         "NOP",
         f"{_TARGET_KEY}.nop",
         "control.nop",
-        _SCHEDULE_NOP,
         "NoItinerary",
     ),
     _DescriptorSpec(
         "RET",
         f"{_TARGET_KEY}.return",
         "control.return",
-        _SCHEDULE_CONTROL,
         "II_RET",
     ),
     _DescriptorSpec(
         "ST_dms_sts_idx_imm",
         f"{_TARGET_KEY}.store.scalar.indexed.immediate",
         "memory.store.indexed.i32",
-        _SCHEDULE_STORE,
         "II_ST_dms_sts_idx_imm",
     ),
     _DescriptorSpec(
         "VADD_8",
         f"{_TARGET_KEY}.add.i8x64",
         "integer.add.i8x64",
-        _SCHEDULE_VECTOR_ALU,
         "II_VADD_8",
     ),
     _DescriptorSpec(
         "VADD_16",
         f"{_TARGET_KEY}.add.i16x32",
         "integer.add.i16x32",
-        _SCHEDULE_VECTOR_ALU,
         "II_VADD_16",
     ),
     _DescriptorSpec(
         "VADD_32",
         f"{_TARGET_KEY}.add.i32x16",
         "integer.add.i32x16",
-        _SCHEDULE_VECTOR_ALU,
         "II_VADD_32",
     ),
     _DescriptorSpec(
         "VLDA_dmx_lda_x_idx_imm",
         f"{_TARGET_KEY}.load.a.i8x64.indexed.immediate",
         "memory.load.indexed.i8x64",
-        _SCHEDULE_LOAD_A,
         "II_VLDA_dmx_lda_x_idx_imm",
     ),
     _DescriptorSpec(
         "VLDB_dmx_ldb_x_idx_imm",
         f"{_TARGET_KEY}.load.b.i8x64.indexed.immediate",
         "memory.load.indexed.i8x64",
-        _SCHEDULE_LOAD_B,
         "II_VLDB_dmx_ldb_x_idx_imm",
     ),
     _DescriptorSpec(
         "VST_dmx_sts_x_idx_imm",
         f"{_TARGET_KEY}.store.i8x64.indexed.immediate",
         "memory.store.indexed.i8x64",
-        _SCHEDULE_STORE,
         "II_VST_dmx_sts_x_idx_imm",
     ),
     _DescriptorSpec(
         "MOV_alu_mv_mv_mv_cg",
         f"{_TARGET_KEY}.constant.i32.short",
         "integer.const.i32",
-        _SCHEDULE_CONST_MV,
         "II_MOV_alu_mv_mv_mv_cg_eR",
         (("dst", "eR"),),
         DescriptorOpKind.CONST,
@@ -193,7 +164,6 @@ _DESCRIPTOR_SPECS = (
         "MOVXM",
         f"{_TARGET_KEY}.constant.i32",
         "integer.const.i32",
-        _SCHEDULE_CONST_LNG,
         "II_MOVXM_eR",
         (("dst", "eR"),),
         DescriptorOpKind.CONST,
@@ -202,84 +172,51 @@ _DESCRIPTOR_SPECS = (
         "ADD_alu_r_rr",
         f"{_TARGET_KEY}.add.i32",
         "integer.add.i32",
-        _SCHEDULE_ALU,
         "II_ADD_alu_r_rr",
     ),
-    _DescriptorSpec(
-        "SUB",
-        f"{_TARGET_KEY}.sub.i32",
-        "integer.sub.i32",
-        _SCHEDULE_ALU,
-        "II_SUB",
-    ),
-    _DescriptorSpec(
-        "MUL",
-        f"{_TARGET_KEY}.mul.i32",
-        "integer.mul.i32",
-        _SCHEDULE_MUL,
-        "II_MUL",
-    ),
-    _DescriptorSpec(
-        "AND", f"{_TARGET_KEY}.and.i32", "integer.and.i32", _SCHEDULE_ALU, "II_AND"
-    ),
-    _DescriptorSpec(
-        "OR", f"{_TARGET_KEY}.or.i32", "integer.or.i32", _SCHEDULE_ALU, "II_OR"
-    ),
-    _DescriptorSpec(
-        "XOR", f"{_TARGET_KEY}.xor.i32", "integer.xor.i32", _SCHEDULE_ALU, "II_XOR"
-    ),
-    _DescriptorSpec(
-        "ASHL", f"{_TARGET_KEY}.ashl.i32", "integer.ashl.i32", _SCHEDULE_ALU, "II_ASHL"
-    ),
-    _DescriptorSpec(
-        "LSHL", f"{_TARGET_KEY}.lshl.i32", "integer.lshl.i32", _SCHEDULE_ALU, "II_LSHL"
-    ),
-    _DescriptorSpec(
-        "EQ", f"{_TARGET_KEY}.cmp.eq.i32", "integer.cmp.eq.i32", _SCHEDULE_ALU, "II_EQ"
-    ),
-    _DescriptorSpec(
-        "NE", f"{_TARGET_KEY}.cmp.ne.i32", "integer.cmp.ne.i32", _SCHEDULE_ALU, "II_NE"
-    ),
+    _DescriptorSpec("SUB", f"{_TARGET_KEY}.sub.i32", "integer.sub.i32", "II_SUB"),
+    _DescriptorSpec("MUL", f"{_TARGET_KEY}.mul.i32", "integer.mul.i32", "II_MUL"),
+    _DescriptorSpec("AND", f"{_TARGET_KEY}.and.i32", "integer.and.i32", "II_AND"),
+    _DescriptorSpec("OR", f"{_TARGET_KEY}.or.i32", "integer.or.i32", "II_OR"),
+    _DescriptorSpec("XOR", f"{_TARGET_KEY}.xor.i32", "integer.xor.i32", "II_XOR"),
+    _DescriptorSpec("ASHL", f"{_TARGET_KEY}.ashl.i32", "integer.ashl.i32", "II_ASHL"),
+    _DescriptorSpec("LSHL", f"{_TARGET_KEY}.lshl.i32", "integer.lshl.i32", "II_LSHL"),
+    _DescriptorSpec("EQ", f"{_TARGET_KEY}.cmp.eq.i32", "integer.cmp.eq.i32", "II_EQ"),
+    _DescriptorSpec("NE", f"{_TARGET_KEY}.cmp.ne.i32", "integer.cmp.ne.i32", "II_NE"),
     _DescriptorSpec(
         "EQZ",
         f"{_TARGET_KEY}.cmp.eqz.i32",
         "integer.cmp.eq.i32",
-        _SCHEDULE_ALU,
         "II_EQZ",
     ),
     _DescriptorSpec(
         "NEZ",
         f"{_TARGET_KEY}.cmp.nez.i32",
         "integer.cmp.ne.i32",
-        _SCHEDULE_ALU,
         "II_NEZ",
     ),
     _DescriptorSpec(
         "LT",
         f"{_TARGET_KEY}.cmp.slt.i32",
         "integer.cmp.slt.i32",
-        _SCHEDULE_ALU,
         "II_LT",
     ),
     _DescriptorSpec(
         "GE",
         f"{_TARGET_KEY}.cmp.sge.i32",
         "integer.cmp.sge.i32",
-        _SCHEDULE_ALU,
         "II_GE",
     ),
     _DescriptorSpec(
         "LTU",
         f"{_TARGET_KEY}.cmp.ult.i32",
         "integer.cmp.ult.i32",
-        _SCHEDULE_ALU,
         "II_LTU",
     ),
     _DescriptorSpec(
         "GEU",
         f"{_TARGET_KEY}.cmp.uge.i32",
         "integer.cmp.uge.i32",
-        _SCHEDULE_ALU,
         "II_GEU",
     ),
 )
@@ -513,78 +450,52 @@ def _physical_registers() -> tuple[PhysicalRegister, ...]:
     )
 
 
-_ITINERARY_OPERAND_CYCLES = {
-    "NoItinerary": (),
-    "II_ADD_add_r_ri": (1, 1, 1, 1),
-    "II_LDA_dms_lda_idx_imm": (7, 1, 1),
-    "II_RET": (1,),
-    "II_ST_dms_sts_idx_imm": (1, 1, 1),
-    "II_VADD_8": (2, 1, 1),
-    "II_VADD_16": (2, 1, 1),
-    "II_VADD_32": (2, 1, 1),
-    "II_VLDA_dmx_lda_x_idx_imm": (7, 1, 1),
-    "II_VLDB_dmx_ldb_x_idx_imm": (7, 1, 1),
-    "II_VST_dmx_sts_x_idx_imm": (1, 1, 1),
-    "II_MOV_alu_mv_mv_mv_cg_eR": (1, 1),
-    "II_MOVXM_eR": (1, 1),
-    "II_ADD_alu_r_rr": (1, 1, 1, 1),
-    "II_SUB": (1, 1, 1, 1),
-    "II_MUL": (2, 1, 1),
-    "II_AND": (1, 1, 1),
-    "II_OR": (1, 1, 1),
-    "II_XOR": (1, 1, 1),
-    "II_ASHL": (1, 1, 1),
-    "II_LSHL": (1, 1, 1),
-    "II_EQ": (1, 1, 1),
-    "II_NE": (1, 1, 1),
-    "II_EQZ": (1, 1),
-    "II_NEZ": (1, 1),
-    "II_LT": (1, 1, 1),
-    "II_GE": (1, 1, 1),
-    "II_LTU": (1, 1, 1),
-    "II_GEU": (1, 1, 1),
+_ITINERARIES = {
+    NO_ITINERARY.name: NO_ITINERARY,
+    **{itinerary.name: itinerary for itinerary in CORE_SCHEDULE_TABLE.itineraries},
 }
 
-_SCALAR_FORM_NAMES = frozenset(
-    {
-        "ADD_add_r_ri",
-        "MOV_alu_mv_mv_mv_cg",
-        "MOVXM",
-        "ADD_alu_r_rr",
-        "SUB",
-        "MUL",
-        "AND",
-        "OR",
-        "XOR",
-        "ASHL",
-        "LSHL",
-        "EQ",
-        "NE",
-        "EQZ",
-        "NEZ",
-        "LT",
-        "GE",
-        "LTU",
-        "GEU",
-    }
-)
 
-
-def _validate_itinerary_operand_cycles(spec: _DescriptorSpec) -> tuple[int, ...]:
+def _itinerary(spec: _DescriptorSpec) -> Itinerary:
     form = _MACHINE_FORMS[spec.form_name]
-    cycles = _ITINERARY_OPERAND_CYCLES[spec.itinerary]
+    itinerary = _ITINERARIES[spec.itinerary]
     expected_count = (
         len(form.outputs)
         + len(form.inputs)
         + len(form.implicit_defs)
         + len(form.implicit_uses)
     )
-    if len(cycles) != expected_count:
+    if len(itinerary.operand_cycles) != expected_count:
         raise ValueError(
-            f"{spec.form_name}: itinerary {spec.itinerary} has {len(cycles)} "
-            f"operand cycles for {expected_count} machine operands"
+            f"{spec.form_name}: itinerary {spec.itinerary} has "
+            f"{len(itinerary.operand_cycles)} operand cycles for "
+            f"{expected_count} machine operands"
         )
-    return cycles
+    return itinerary
+
+
+def _operand_ordinal(form: MachineForm, operand: MachineOperand) -> int:
+    return (*form.outputs, *form.inputs).index(operand)
+
+
+def _register_event_name(
+    access: str,
+    cycle: int,
+    bypass: str | None,
+) -> str:
+    bypass_segment = bypass.lower() if bypass is not None else "none"
+    return f"{_TARGET_KEY}.operand.{access}.c{cycle}.{bypass_segment}"
+
+
+def _register_timing_event(
+    spec: _DescriptorSpec,
+    operand_ordinal: int,
+    access: str,
+) -> str:
+    itinerary = _itinerary(spec)
+    cycle = itinerary.operand_cycles[operand_ordinal]
+    bypass = bypass_class(itinerary, operand_ordinal)
+    return _register_event_name(access, cycle, bypass)
 
 
 def _operand_stages(
@@ -592,9 +503,8 @@ def _operand_stages(
     operand: MachineOperand,
 ) -> tuple[int, int]:
     form = _MACHINE_FORMS[spec.form_name]
-    machine_operands = (*form.outputs, *form.inputs)
-    operand_ordinal = machine_operands.index(operand)
-    cycle = _validate_itinerary_operand_cycles(spec)[operand_ordinal]
+    operand_ordinal = _operand_ordinal(form, operand)
+    cycle = _itinerary(spec).operand_cycles[operand_ordinal]
     return (0, cycle) if operand_ordinal < len(form.outputs) else (cycle, 0)
 
 
@@ -618,7 +528,7 @@ def _implicit_operand_stage(
             + len(form.implicit_defs)
             + form.implicit_uses.index(register_name)
         )
-    cycle = _validate_itinerary_operand_cycles(spec)[ordinal]
+    cycle = _itinerary(spec).operand_cycles[ordinal]
     return (0, cycle) if is_definition else (cycle, 0)
 
 
@@ -628,23 +538,10 @@ def _operand_timing_events(
     role: OperandRole,
 ) -> tuple[str | None, str | None]:
     form = _MACHINE_FORMS[spec.form_name]
-    read_stage, ready_stage = _operand_stages(spec, operand)
+    operand_ordinal = _operand_ordinal(form, operand)
     if role is OperandRole.RESULT:
-        if has_property(form, "mayLoad"):
-            return None, _TIMING_LOAD_WRITE_CYCLE_7
-        if spec.form_name.startswith("VADD_"):
-            return None, _TIMING_VECTOR_WRITE_CYCLE_2
-        if spec.form_name in _SCALAR_FORM_NAMES and ready_stage == 2:
-            return None, _TIMING_SCALAR_WRITE_CYCLE_2
-        if spec.form_name in _SCALAR_FORM_NAMES:
-            return None, _TIMING_SCALAR_WRITE_CYCLE_1
-    elif spec.form_name.startswith("VADD_"):
-        return _TIMING_VECTOR_READ_CYCLE_1, None
-    elif spec.form_name in _SCALAR_FORM_NAMES and read_stage == 1:
-        return _TIMING_SCALAR_READ_CYCLE_1, None
-    elif has_property(form, "mayStore") and operand.name == "src":
-        return _TIMING_STORE_READ_CYCLE_1, None
-    return None, None
+        return None, _register_timing_event(spec, operand_ordinal, "write")
+    return _register_timing_event(spec, operand_ordinal, "read"), None
 
 
 def _low_operand(
@@ -682,6 +579,11 @@ def _implicit_operands(spec: _DescriptorSpec) -> tuple[Operand, ...]:
     form = _MACHINE_FORMS[spec.form_name]
     result: list[Operand] = []
     for register_name in form.implicit_defs:
+        operand_ordinal = (
+            len(form.outputs)
+            + len(form.inputs)
+            + form.implicit_defs.index(register_name)
+        )
         read_stage, ready_stage = _implicit_operand_stage(
             spec, register_name, is_definition=True
         )
@@ -698,14 +600,16 @@ def _implicit_operands(spec: _DescriptorSpec) -> tuple[Operand, ...]:
                 flags=(OperandFlag.IMPLICIT, OperandFlag.STATE_WRITE),
                 read_stage=read_stage,
                 ready_stage=ready_stage,
-                write_event=(
-                    _TIMING_SCALAR_WRITE_CYCLE_2
-                    if ready_stage == 2
-                    else _TIMING_SCALAR_WRITE_CYCLE_1
-                ),
+                write_event=_register_timing_event(spec, operand_ordinal, "write"),
             )
         )
     for register_name in form.implicit_uses:
+        operand_ordinal = (
+            len(form.outputs)
+            + len(form.inputs)
+            + len(form.implicit_defs)
+            + form.implicit_uses.index(register_name)
+        )
         read_stage, ready_stage = _implicit_operand_stage(
             spec, register_name, is_definition=False
         )
@@ -722,7 +626,7 @@ def _implicit_operands(spec: _DescriptorSpec) -> tuple[Operand, ...]:
                 flags=(OperandFlag.IMPLICIT, OperandFlag.STATE_READ),
                 read_stage=read_stage,
                 ready_stage=ready_stage,
-                read_event=_TIMING_SCALAR_READ_CYCLE_1,
+                read_event=_register_timing_event(spec, operand_ordinal, "read"),
             )
         )
     return tuple(result)
@@ -770,7 +674,22 @@ def _immediate(form_name: str, operand: MachineOperand) -> Immediate:
     )
 
 
-def _effects(form: MachineForm) -> tuple[Effect, ...]:
+def _memory_event_name(access: str, memory: MemoryCycles) -> str:
+    cycle_segment = "_".join(str(cycle) for cycle in memory.cycles)
+    return f"{_TARGET_KEY}.memory.{access}.c{cycle_segment}"
+
+
+def _memory_timing_event(spec: _DescriptorSpec, access: str) -> str:
+    memory = _itinerary(spec).memory
+    if memory is None:
+        raise ValueError(
+            f"{spec.form_name}: memory operation uses non-memory itinerary "
+            f"{spec.itinerary}"
+        )
+    return _memory_event_name(access, memory)
+
+
+def _effects(spec: _DescriptorSpec, form: MachineForm) -> tuple[Effect, ...]:
     result = []
     if has_property(form, "mayLoad"):
         result.append(
@@ -778,7 +697,7 @@ def _effects(form: MachineForm) -> tuple[Effect, ...]:
                 EffectKind.READ,
                 MemorySpace.WORKGROUP,
                 flags=(EffectFlag.DEPENDENCY,),
-                timing_event=_TIMING_MEMORY_READ_CYCLE_5,
+                timing_event=_memory_timing_event(spec, "read"),
             )
         )
     if has_property(form, "mayStore"):
@@ -787,7 +706,7 @@ def _effects(form: MachineForm) -> tuple[Effect, ...]:
                 EffectKind.WRITE,
                 MemorySpace.WORKGROUP,
                 flags=(EffectFlag.DEPENDENCY,),
-                timing_event=_TIMING_MEMORY_WRITE_CYCLE_5,
+                timing_event=_memory_timing_event(spec, "write"),
             )
         )
     if form.control_flow_kind is not None:
@@ -805,30 +724,44 @@ def _descriptor_flags(form: MachineForm) -> tuple[DescriptorFlag, ...]:
         result.append(DescriptorFlag.SIDE_EFFECTING)
     if form.control_flow_kind == "return" or has_property(form, "isTerminator"):
         result.append(DescriptorFlag.TERMINATOR)
-    if not _effects(form) and form.name != "RET":
+    if (
+        not has_property(form, "mayLoad")
+        and not has_property(form, "mayStore")
+        and form.control_flow_kind is None
+        and form.name != "RET"
+    ):
         result.append(DescriptorFlag.DEAD_REMOVABLE)
     return tuple(result)
 
 
-def _instruction_classes(form: MachineForm) -> tuple[InstructionClass, ...]:
+def _instruction_classes(
+    spec: _DescriptorSpec,
+    form: MachineForm,
+) -> tuple[InstructionClass, ...]:
     if has_property(form, "mayLoad"):
         return (InstructionClass.LOCAL_MEMORY,)
     if has_property(form, "mayStore"):
         return (InstructionClass.LOCAL_MEMORY,)
     if form.control_flow_kind is not None:
         return (InstructionClass.CONTROL,)
-    if form.name.startswith("VADD_"):
-        return (InstructionClass.VECTOR_ALU,)
-    if has_property(form, "isMoveImm"):
-        return (
-            InstructionClass.SCALAR_ALU,
-            InstructionClass.REGISTER_MOVE,
-        )
-    if form.name in _SCALAR_FORM_NAMES:
-        return (InstructionClass.SCALAR_ALU,)
     if form.name == "NOP":
         return (InstructionClass.CONTROL,)
-    return (InstructionClass.OTHER,)
+    register_operands = tuple(
+        operand
+        for operand in (*form.outputs, *form.inputs)
+        if operand.kind is not MachineOperandKind.IMMEDIATE
+    )
+    is_vector = any(
+        _MACHINE_CLASSES[
+            _operand_storage_machine_class(spec, operand)
+        ].layout.register_size_bits
+        >= 128
+        for operand in register_operands
+    )
+    result = [InstructionClass.VECTOR_ALU if is_vector else InstructionClass.SCALAR_ALU]
+    if has_property(form, "isMoveImm"):
+        result.append(InstructionClass.REGISTER_MOVE)
+    return tuple(result)
 
 
 def _constraints(
@@ -895,7 +828,7 @@ def _descriptor(spec: _DescriptorSpec) -> Descriptor:
         immediates=tuple(
             _immediate(spec.form_name, operand) for operand in immediate_inputs
         ),
-        schedule_class=spec.schedule_class,
+        schedule_class=_SCHEDULE_CLASS_NAMES[(spec.form_name, spec.itinerary)],
         op_kind=spec.op_kind,
         asm_forms=(
             AsmForm(
@@ -907,11 +840,11 @@ def _descriptor(spec: _DescriptorSpec) -> Descriptor:
                 ),
             ),
         ),
-        effects=_effects(form),
+        effects=_effects(spec, form),
         constraints=_constraints(form, explicit_register_operands),
         encoding_id=_INSTRUCTION_IDS[spec.form_name],
         flags=_descriptor_flags(form),
-        instruction_classes=_instruction_classes(form),
+        instruction_classes=_instruction_classes(spec, form),
     )
     expected_fields = {
         field.name for field in _INSTRUCTION_ENCODINGS[spec.form_name].fields
@@ -933,156 +866,304 @@ def _descriptor(spec: _DescriptorSpec) -> Descriptor:
     return descriptor
 
 
+_SLOT_RESOURCE_KINDS = {
+    "alu": ResourceKind.SCALAR_ALU,
+    "lda": ResourceKind.LOAD,
+    "ldb": ResourceKind.LOAD,
+    "lng": ResourceKind.SCALAR_ALU,
+    "mv": ResourceKind.VECTOR_ALU,
+    "nop": ResourceKind.CONTROL,
+    "st": ResourceKind.STORE,
+    "vec": ResourceKind.VECTOR_ALU,
+}
+
+
+def _slot_resource_name(slot: str) -> str:
+    return f"{_TARGET_KEY}.slot.{slot}"
+
+
+def _pipeline_resource_name(resource: str) -> str:
+    return f"{_TARGET_KEY}.pipeline.{resource.lower()}"
+
+
 _RESOURCES = (
-    Resource(_RESOURCE_ALU, 1, ResourceKind.SCALAR_ALU),
-    Resource(_RESOURCE_LDA, 1, ResourceKind.LOAD),
-    Resource(_RESOURCE_LDB, 1, ResourceKind.LOAD),
-    Resource(_RESOURCE_LNG, 1, ResourceKind.SCALAR_ALU),
-    Resource(_RESOURCE_MV, 1, ResourceKind.VECTOR_ALU),
-    Resource(_RESOURCE_NOP, 1, ResourceKind.CONTROL),
-    Resource(_RESOURCE_ST, 1, ResourceKind.STORE),
-    Resource(_RESOURCE_ER_WRITE, 1, ResourceKind.SCALAR_ALU),
+    *(
+        Resource(_slot_resource_name(slot), 1, kind)
+        for slot, kind in sorted(_SLOT_RESOURCE_KINDS.items())
+    ),
+    *(
+        Resource(
+            _pipeline_resource_name(resource),
+            1,
+            ResourceKind.PIPELINE,
+        )
+        for resource in CORE_SCHEDULE_TABLE.resources
+    ),
+)
+
+# The complete endpoint domains make descriptor growth table-selective: adding
+# a form cannot require another hand-authored dependency-timing case.
+_REGISTER_ENDPOINTS = tuple(
+    sorted(
+        {
+            (cycle, bypass_class(itinerary, operand_index))
+            for itinerary in CORE_SCHEDULE_TABLE.itineraries
+            for operand_index, cycle in enumerate(itinerary.operand_cycles)
+        },
+        key=lambda endpoint: (endpoint[0], endpoint[1] or ""),
+    )
+)
+_MEMORY_ENDPOINTS = tuple(
+    MemoryCycles(cycles)
+    for cycles in sorted(
+        {
+            itinerary.memory.cycles
+            for itinerary in CORE_SCHEDULE_TABLE.itineraries
+            if itinerary.memory is not None
+        }
+    )
 )
 
 _TIMING_EVENTS = tuple(
     TimingEvent(name)
-    for name in (
-        _TIMING_LOAD_WRITE_CYCLE_7,
-        _TIMING_MEMORY_READ_CYCLE_5,
-        _TIMING_MEMORY_WRITE_CYCLE_5,
-        _TIMING_SCALAR_READ_CYCLE_1,
-        _TIMING_SCALAR_WRITE_CYCLE_1,
-        _TIMING_SCALAR_WRITE_CYCLE_2,
-        _TIMING_STORE_READ_CYCLE_1,
-        _TIMING_VECTOR_READ_CYCLE_1,
-        _TIMING_VECTOR_WRITE_CYCLE_2,
+    for name in sorted(
+        {
+            *(
+                _register_event_name(access, cycle, bypass)
+                for cycle, bypass in _REGISTER_ENDPOINTS
+                for access in ("read", "write")
+            ),
+            *(
+                _memory_event_name(access, memory)
+                for memory in _MEMORY_ENDPOINTS
+                for access in ("read", "write")
+            ),
+        }
     )
 )
 
-_EVENT_SEPARATIONS = tuple(
-    EventSeparation(producer, consumer, cycles, ModelQuality.CALIBRATED)
-    for producer, consumer, cycles in (
-        (_TIMING_LOAD_WRITE_CYCLE_7, _TIMING_SCALAR_READ_CYCLE_1, 7),
-        (_TIMING_LOAD_WRITE_CYCLE_7, _TIMING_VECTOR_READ_CYCLE_1, 7),
-        (_TIMING_MEMORY_WRITE_CYCLE_5, _TIMING_MEMORY_READ_CYCLE_5, 1),
-        (_TIMING_SCALAR_READ_CYCLE_1, _TIMING_SCALAR_WRITE_CYCLE_1, 0),
-        (_TIMING_SCALAR_READ_CYCLE_1, _TIMING_SCALAR_WRITE_CYCLE_2, -1),
-        (_TIMING_SCALAR_WRITE_CYCLE_1, _TIMING_SCALAR_READ_CYCLE_1, 1),
-        (_TIMING_SCALAR_WRITE_CYCLE_1, _TIMING_SCALAR_WRITE_CYCLE_1, 1),
-        (_TIMING_SCALAR_WRITE_CYCLE_1, _TIMING_SCALAR_WRITE_CYCLE_2, 1),
-        (_TIMING_SCALAR_WRITE_CYCLE_1, _TIMING_STORE_READ_CYCLE_1, 1),
-        (_TIMING_SCALAR_WRITE_CYCLE_2, _TIMING_SCALAR_READ_CYCLE_1, 2),
-        (_TIMING_SCALAR_WRITE_CYCLE_2, _TIMING_SCALAR_WRITE_CYCLE_1, 1),
-        (_TIMING_SCALAR_WRITE_CYCLE_2, _TIMING_SCALAR_WRITE_CYCLE_2, 1),
-        (_TIMING_SCALAR_WRITE_CYCLE_2, _TIMING_STORE_READ_CYCLE_1, 2),
-        (_TIMING_VECTOR_READ_CYCLE_1, _TIMING_VECTOR_WRITE_CYCLE_2, 0),
-        (_TIMING_VECTOR_WRITE_CYCLE_2, _TIMING_STORE_READ_CYCLE_1, 2),
-        (_TIMING_VECTOR_WRITE_CYCLE_2, _TIMING_VECTOR_READ_CYCLE_1, 1),
-        (_TIMING_VECTOR_WRITE_CYCLE_2, _TIMING_VECTOR_WRITE_CYCLE_2, 1),
-    )
-)
 
-_SCHEDULE_CLASSES = (
-    ScheduleClass(
-        _SCHEDULE_ALU,
-        LatencyKind.EXACT,
-        ModelQuality.CALIBRATED,
-        latency_cycles=1,
-        issue_uses=(IssueUse(_RESOURCE_ALU, 1, 1),),
-        instruction_classes=(InstructionClass.SCALAR_ALU,),
-    ),
-    ScheduleClass(
-        _SCHEDULE_MUL,
+def _endpoint_itinerary(endpoint: tuple[int, str | None]) -> Itinerary:
+    cycle, bypass = endpoint
+    return Itinerary(
+        name="endpoint",
+        stages=(),
+        operand_cycles=(cycle,),
+        bypasses=(bypass or "NoBypass",),
+    )
+
+
+def _event_separations() -> tuple[EventSeparation, ...]:
+    result = []
+    endpoint_itineraries = {
+        endpoint: _endpoint_itinerary(endpoint) for endpoint in _REGISTER_ENDPOINTS
+    }
+    for producer in _REGISTER_ENDPOINTS:
+        producer_itinerary = endpoint_itineraries[producer]
+        for consumer in _REGISTER_ENDPOINTS:
+            consumer_itinerary = endpoint_itineraries[consumer]
+            result.extend(
+                (
+                    EventSeparation(
+                        _register_event_name("write", *producer),
+                        _register_event_name("read", *consumer),
+                        dependency_separation(
+                            producer_itinerary,
+                            0,
+                            consumer_itinerary,
+                            0,
+                            DependencyKind.RAW,
+                        ),
+                        ModelQuality.EXACT,
+                    ),
+                    EventSeparation(
+                        _register_event_name("read", *producer),
+                        _register_event_name("write", *consumer),
+                        dependency_separation(
+                            producer_itinerary,
+                            0,
+                            consumer_itinerary,
+                            0,
+                            DependencyKind.WAR,
+                        ),
+                        ModelQuality.EXACT,
+                    ),
+                    EventSeparation(
+                        _register_event_name("write", *producer),
+                        _register_event_name("write", *consumer),
+                        dependency_separation(
+                            producer_itinerary,
+                            0,
+                            consumer_itinerary,
+                            0,
+                            DependencyKind.WAW,
+                        ),
+                        ModelQuality.EXACT,
+                    ),
+                )
+            )
+    for producer in _MEMORY_ENDPOINTS:
+        producer_itinerary = Itinerary(
+            name="memory_producer",
+            stages=(),
+            operand_cycles=(),
+            bypasses=(),
+            memory=producer,
+        )
+        for consumer in _MEMORY_ENDPOINTS:
+            consumer_itinerary = Itinerary(
+                name="memory_consumer",
+                stages=(),
+                operand_cycles=(),
+                bypasses=(),
+                memory=consumer,
+            )
+            cycles = memory_separation(producer_itinerary, consumer_itinerary)
+            result.extend(
+                EventSeparation(
+                    _memory_event_name(producer_access, producer),
+                    _memory_event_name(consumer_access, consumer),
+                    cycles,
+                    ModelQuality.EXACT,
+                )
+                for producer_access in ("read", "write")
+                for consumer_access in ("read", "write")
+            )
+    return tuple(
+        sorted(
+            result,
+            key=lambda row: (row.producer_event, row.consumer_event),
+        )
+    )
+
+
+_EVENT_SEPARATIONS = _event_separations()
+
+
+def _canonical_itinerary_names() -> dict[tuple[object, ...], str]:
+    """Names each deduplicated payload by its first sorted source alias."""
+
+    result = {itinerary_payload(NO_ITINERARY): NO_ITINERARY.name}
+    for itinerary in CORE_SCHEDULE_TABLE.itineraries:
+        result.setdefault(itinerary_payload(itinerary), itinerary.name)
+    return result
+
+
+_CANONICAL_ITINERARY_NAMES = _canonical_itinerary_names()
+
+
+def _schedule_flags(form: MachineForm) -> tuple[ScheduleClassFlag, ...]:
+    result = []
+    if has_property(form, "mayLoad"):
+        result.append(ScheduleClassFlag.MAY_LOAD)
+    if has_property(form, "mayStore"):
+        result.append(ScheduleClassFlag.MAY_STORE)
+    if has_property(form, "isCall"):
+        result.append(ScheduleClassFlag.MAY_CALL)
+    if form.control_flow_kind is not None:
+        result.append(ScheduleClassFlag.CONTROL)
+    return tuple(result)
+
+
+def _schedule_issue_uses(
+    spec: _DescriptorSpec,
+    itinerary: Itinerary,
+) -> tuple[IssueUse, ...]:
+    slot = _INSTRUCTION_ENCODINGS[spec.form_name].slot
+    result = [IssueUse(_slot_resource_name(slot), 1, 1)]
+    for use in pipeline_uses(itinerary):
+        if len(use.resources) != 1:
+            raise ValueError(
+                f"{itinerary.name}: AIE2P pipeline stage must name exactly "
+                "one physical resource"
+            )
+        result.append(
+            IssueUse(
+                _pipeline_resource_name(use.resources[0]),
+                use.cycles,
+                1,
+                stage=use.start_cycle,
+                kind=(
+                    IssueUseKind.REQUIRED
+                    if use.kind is PipelineStageKind.REQUIRED
+                    else IssueUseKind.RESERVED
+                ),
+            )
+        )
+    return tuple(result)
+
+
+def _schedule_class(spec: _DescriptorSpec) -> ScheduleClass:
+    form = _MACHINE_FORMS[spec.form_name]
+    itinerary = _itinerary(spec)
+    has_memory_effect = has_property(form, "mayLoad") or has_property(form, "mayStore")
+    if has_memory_effect != (itinerary.memory is not None):
+        raise ValueError(
+            f"{form.name}: memory properties disagree with itinerary {itinerary.name}"
+        )
+    flags = _schedule_flags(form)
+    instruction_classes = _instruction_classes(spec, form)
+    slot = _INSTRUCTION_ENCODINGS[form.name].slot
+    canonical_itinerary = _CANONICAL_ITINERARY_NAMES[
+        itinerary_payload(itinerary)
+    ].lower()
+    qualifiers = (
+        slot,
+        *(flag.name.lower() for flag in flags),
+        *(instruction_class.name.lower() for instruction_class in instruction_classes),
+    )
+    name = ".".join(
+        (
+            _TARGET_KEY,
+            "schedule",
+            canonical_itinerary,
+            *qualifiers,
+        )
+    )
+    issue_uses = _schedule_issue_uses(spec, itinerary)
+    overall_cycles = [
+        1,
+        *itinerary.operand_cycles,
+        *(use.stage + use.cycles for use in issue_uses),
+    ]
+    if itinerary.memory is not None:
+        overall_cycles.extend(itinerary.memory.cycles)
+    implicit_def_start = len(form.outputs) + len(form.inputs)
+    definition_cycles = (
+        *itinerary.operand_cycles[: len(form.outputs)],
+        *itinerary.operand_cycles[
+            implicit_def_start : implicit_def_start + len(form.implicit_defs)
+        ],
+    )
+    return ScheduleClass(
+        name,
         LatencyKind.EXACT,
         ModelQuality.EXACT,
-        latency_cycles=2,
-        issue_uses=(IssueUse(_RESOURCE_ALU, 1, 1),),
-        instruction_classes=(InstructionClass.SCALAR_ALU,),
-    ),
-    ScheduleClass(
-        _SCHEDULE_CONST_LNG,
-        LatencyKind.EXACT,
-        ModelQuality.EXACT,
-        latency_cycles=1,
-        issue_uses=(
-            IssueUse(_RESOURCE_LNG, 1, 1),
-            IssueUse(_RESOURCE_ER_WRITE, 1, 1),
-        ),
-        instruction_classes=(
-            InstructionClass.SCALAR_ALU,
-            InstructionClass.REGISTER_MOVE,
-        ),
-    ),
-    ScheduleClass(
-        _SCHEDULE_CONST_MV,
-        LatencyKind.EXACT,
-        ModelQuality.EXACT,
-        latency_cycles=1,
-        issue_uses=(
-            IssueUse(_RESOURCE_MV, 1, 1),
-            IssueUse(_RESOURCE_ER_WRITE, 1, 1),
-        ),
-        instruction_classes=(
-            InstructionClass.SCALAR_ALU,
-            InstructionClass.REGISTER_MOVE,
-        ),
-    ),
-    ScheduleClass(
-        _SCHEDULE_CONTROL,
-        LatencyKind.EXACT,
-        ModelQuality.EXACT,
-        latency_cycles=1,
-        issue_uses=(IssueUse(_RESOURCE_ALU, 1, 1),),
-        flags=(ScheduleClassFlag.CONTROL,),
-        instruction_classes=(InstructionClass.CONTROL,),
-    ),
-    ScheduleClass(
-        _SCHEDULE_LOAD_A,
-        LatencyKind.EXACT,
-        ModelQuality.CALIBRATED,
-        latency_cycles=7,
-        minimum_issue_separation_cycles=7,
-        issue_uses=(IssueUse(_RESOURCE_LDA, 1, 1),),
-        flags=(ScheduleClassFlag.MAY_LOAD,),
-        instruction_classes=(InstructionClass.LOCAL_MEMORY,),
-    ),
-    ScheduleClass(
-        _SCHEDULE_LOAD_B,
-        LatencyKind.EXACT,
-        ModelQuality.CALIBRATED,
-        latency_cycles=7,
-        minimum_issue_separation_cycles=7,
-        issue_uses=(IssueUse(_RESOURCE_LDB, 1, 1),),
-        flags=(ScheduleClassFlag.MAY_LOAD,),
-        instruction_classes=(InstructionClass.LOCAL_MEMORY,),
-    ),
-    ScheduleClass(
-        _SCHEDULE_NOP,
-        LatencyKind.EXACT,
-        ModelQuality.EXACT,
-        latency_cycles=1,
-        issue_uses=(IssueUse(_RESOURCE_NOP, 1, 1),),
-        instruction_classes=(InstructionClass.CONTROL,),
-    ),
-    ScheduleClass(
-        _SCHEDULE_STORE,
-        LatencyKind.EXACT,
-        ModelQuality.CALIBRATED,
-        latency_cycles=1,
-        issue_uses=(IssueUse(_RESOURCE_ST, 1, 1),),
-        flags=(ScheduleClassFlag.MAY_STORE,),
-        instruction_classes=(InstructionClass.LOCAL_MEMORY,),
-    ),
-    ScheduleClass(
-        _SCHEDULE_VECTOR_ALU,
-        LatencyKind.EXACT,
-        ModelQuality.CALIBRATED,
-        latency_cycles=1,
-        minimum_issue_separation_cycles=2,
-        issue_uses=(IssueUse(_RESOURCE_MV, 1, 1),),
-        instruction_classes=(InstructionClass.VECTOR_ALU,),
-    ),
-)
+        latency_cycles=max(overall_cycles),
+        minimum_issue_separation_cycles=max((1, *definition_cycles)),
+        issue_uses=issue_uses,
+        flags=flags,
+        instruction_classes=instruction_classes,
+    )
+
+
+def _schedule_classes() -> tuple[
+    dict[tuple[str, str], str],
+    tuple[ScheduleClass, ...],
+]:
+    names = {}
+    classes = {}
+    for spec in _DESCRIPTOR_SPECS:
+        schedule_class = _schedule_class(spec)
+        key = (spec.form_name, spec.itinerary)
+        names[key] = schedule_class.name
+        previous = classes.setdefault(schedule_class.name, schedule_class)
+        if previous != schedule_class:
+            raise ValueError(f"{schedule_class.name}: schedule-class name collision")
+    return names, tuple(classes[name] for name in sorted(classes))
+
+
+_SCHEDULE_CLASS_NAMES, _SCHEDULE_CLASSES = _schedule_classes()
 
 
 AIE2P_CORE_DESCRIPTOR_SET = DescriptorSet(

@@ -52,14 +52,26 @@ iree_py_library(
 
 iree_py_library(
   NAME
+    schedule_data
+  SRCS
+    "core_schedule_data.py"
+  DEPS
+    loom::py::loom::target::arch::amd::xdna::aie2p::package_init
+    loom::py::loom::target::arch::amd::xdna::aie::schedule
+)
+
+iree_py_library(
+  NAME
     descriptors
   SRCS
     "core_descriptors.py"
   DEPS
     loom::py::loom::target::arch::amd::xdna::aie2p::encoding_data
     loom::py::loom::target::arch::amd::xdna::aie2p::machine_data
+    loom::py::loom::target::arch::amd::xdna::aie2p::schedule_data
     loom::py::loom::target::low_descriptors
     loom::py::loom::target::arch::amd::xdna::aie::machine
+    loom::py::loom::target::arch::amd::xdna::aie::schedule
 )
 
 iree_py_test(
@@ -93,6 +105,26 @@ iree_py_test(
   DEPS
     loom::py::loom::target::arch::amd::xdna::aie2p::machine_data
     loom::py::loom::target::arch::amd::xdna::aie::machine
+  PACKAGE_DIRS
+    "${PROJECT_SOURCE_DIR}/loom/py"
+    "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
+)
+
+iree_py_test(
+  NAME
+    schedule_test
+  MAIN
+    "../../../../../tools/pytest_style_runner.py"
+  SRCS
+    "schedule_test.py"
+    "../../../../../tools/pytest_style_runner.py"
+  ARGS
+    "loom.target.arch.amd.xdna.aie2p.schedule_test"
+  DEPS
+    loom::py::loom::target::arch::amd::xdna::aie2p::machine_data
+    loom::py::loom::target::arch::amd::xdna::aie2p::schedule_data
+    loom::py::loom::target::arch::amd::xdna::aie::schedule
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"
