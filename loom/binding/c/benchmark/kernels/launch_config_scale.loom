@@ -1,0 +1,92 @@
+// Eight identical launch configurations used to isolate fixed module costs
+// from per-function compilation, serialization, and loading costs.
+
+amdgpu.target<gfx1100> @gfx1100
+
+kernel.def target(@gfx1100) @scale_0(%element_count: index) {
+  %c1 = index.constant 1 : index
+  %rounding = index.constant 255 : index
+  %workgroup_size = index.constant 256 : index
+  %rounded_count = index.add %element_count, %rounding : index
+  %workgroup_count = index.div %rounded_count, %workgroup_size : index
+  kernel.launch.config workgroups(%workgroup_count, %c1, %c1) workgroup_size(%workgroup_size, %c1, %c1) : index
+} launch() {
+  kernel.return
+}
+
+kernel.def target(@gfx1100) @scale_1(%element_count: index) {
+  %c1 = index.constant 1 : index
+  %rounding = index.constant 255 : index
+  %workgroup_size = index.constant 256 : index
+  %rounded_count = index.add %element_count, %rounding : index
+  %workgroup_count = index.div %rounded_count, %workgroup_size : index
+  kernel.launch.config workgroups(%workgroup_count, %c1, %c1) workgroup_size(%workgroup_size, %c1, %c1) : index
+} launch() {
+  kernel.return
+}
+
+kernel.def target(@gfx1100) @scale_2(%element_count: index) {
+  %c1 = index.constant 1 : index
+  %rounding = index.constant 255 : index
+  %workgroup_size = index.constant 256 : index
+  %rounded_count = index.add %element_count, %rounding : index
+  %workgroup_count = index.div %rounded_count, %workgroup_size : index
+  kernel.launch.config workgroups(%workgroup_count, %c1, %c1) workgroup_size(%workgroup_size, %c1, %c1) : index
+} launch() {
+  kernel.return
+}
+
+kernel.def target(@gfx1100) @scale_3(%element_count: index) {
+  %c1 = index.constant 1 : index
+  %rounding = index.constant 255 : index
+  %workgroup_size = index.constant 256 : index
+  %rounded_count = index.add %element_count, %rounding : index
+  %workgroup_count = index.div %rounded_count, %workgroup_size : index
+  kernel.launch.config workgroups(%workgroup_count, %c1, %c1) workgroup_size(%workgroup_size, %c1, %c1) : index
+} launch() {
+  kernel.return
+}
+
+kernel.def target(@gfx1100) @scale_4(%element_count: index) {
+  %c1 = index.constant 1 : index
+  %rounding = index.constant 255 : index
+  %workgroup_size = index.constant 256 : index
+  %rounded_count = index.add %element_count, %rounding : index
+  %workgroup_count = index.div %rounded_count, %workgroup_size : index
+  kernel.launch.config workgroups(%workgroup_count, %c1, %c1) workgroup_size(%workgroup_size, %c1, %c1) : index
+} launch() {
+  kernel.return
+}
+
+kernel.def target(@gfx1100) @scale_5(%element_count: index) {
+  %c1 = index.constant 1 : index
+  %rounding = index.constant 255 : index
+  %workgroup_size = index.constant 256 : index
+  %rounded_count = index.add %element_count, %rounding : index
+  %workgroup_count = index.div %rounded_count, %workgroup_size : index
+  kernel.launch.config workgroups(%workgroup_count, %c1, %c1) workgroup_size(%workgroup_size, %c1, %c1) : index
+} launch() {
+  kernel.return
+}
+
+kernel.def target(@gfx1100) @scale_6(%element_count: index) {
+  %c1 = index.constant 1 : index
+  %rounding = index.constant 255 : index
+  %workgroup_size = index.constant 256 : index
+  %rounded_count = index.add %element_count, %rounding : index
+  %workgroup_count = index.div %rounded_count, %workgroup_size : index
+  kernel.launch.config workgroups(%workgroup_count, %c1, %c1) workgroup_size(%workgroup_size, %c1, %c1) : index
+} launch() {
+  kernel.return
+}
+
+kernel.def target(@gfx1100) @scale_7(%element_count: index) {
+  %c1 = index.constant 1 : index
+  %rounding = index.constant 255 : index
+  %workgroup_size = index.constant 256 : index
+  %rounded_count = index.add %element_count, %rounding : index
+  %workgroup_count = index.div %rounded_count, %workgroup_size : index
+  kernel.launch.config workgroups(%workgroup_count, %c1, %c1) workgroup_size(%workgroup_size, %c1, %c1) : index
+} launch() {
+  kernel.return
+}

@@ -35,11 +35,21 @@ loom_cc_benchmark(
     "launch_config_benchmark.cc"
   DEPS
     iree::base
+    iree::base::internal::arena
     iree::testing::benchmark_main
+    loom::analysis::kernel_launch_config
+    loom::analysis::symbol_facts
     loom::binding::c::benchmark::benchmark_support
     loom::binding::c::benchmark::compile_throughput_benchmark_harness
     loom::binding::c::loomc
     loom::binding::c::target::amdgpu
+    loom::format::text::parser
+    loom::ir
+    loom::ops::func_symbol_facts
+    loom::ops::op_registry
+    loom::target::arch::amdgpu::provider
+    loom::target::function_contract
+    loom::target::provider
   ARGS
     "--benchmark_filter=Smoke"
   TESTONLY

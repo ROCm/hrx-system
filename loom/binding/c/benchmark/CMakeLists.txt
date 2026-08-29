@@ -15,6 +15,8 @@ iree_c_embed_data(
   SRCS
     "kernels/i32_memory_chain.loom"
     "kernels/launch_config.loom"
+    "kernels/launch_config_compile.loom"
+    "kernels/launch_config_scale.loom"
   C_FILE_OUTPUT
     "benchmark_kernels.c"
   H_FILE_OUTPUT
