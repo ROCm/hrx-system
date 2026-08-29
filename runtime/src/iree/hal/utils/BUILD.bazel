@@ -28,18 +28,6 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
-    name = "collective_batch",
-    srcs = ["collective_batch.c"],
-    hdrs = ["collective_batch.h"],
-    deps = [
-        ":resource_set",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal:arena",
-        "//runtime/src/iree/hal",
-    ],
-)
-
-iree_runtime_cc_library(
     name = "caching_allocator",
     srcs = ["caching_allocator.c"],
     hdrs = ["caching_allocator.h"],

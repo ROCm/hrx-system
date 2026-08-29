@@ -52,7 +52,6 @@ EXPORT_FN("channel.split", iree_hal_module_channel_split, riiI, r)
 
 EXPORT_FN("command_buffer.advise_buffer", iree_hal_module_command_buffer_advise_buffer, rrIIIi, v)
 EXPORT_FN("command_buffer.begin_debug_group", iree_hal_module_command_buffer_begin_debug_group, rr, v)
-EXPORT_FN("command_buffer.collective", iree_hal_module_command_buffer_collective, rriiiirrIIIII, v)
 EXPORT_FN("command_buffer.copy_buffer", iree_hal_module_command_buffer_copy_buffer, riirIrIII, v)
 EXPORT_FN("command_buffer.create", iree_hal_module_command_buffer_create, riiIi, r)
 EXPORT_FN_CUSTOM("command_buffer.dispatch", iree_hal_module_command_buffer_dispatch, rrIiiiICiDCiirIID, v)
