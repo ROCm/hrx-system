@@ -702,14 +702,18 @@ def _vector_bitcast_alias_rules() -> tuple[ValueAliasRule, ...]:
     )
 
 
-def _right_shift_rule(source_op: Op, descriptor_key: str) -> DescriptorRule:
+def _right_shift_rule(
+    source_op: Op,
+    type_pattern: TypePattern,
+    descriptor_key: str,
+) -> DescriptorRule:
     zero = _descriptor("amd.xdna.aie2p.constant.i32.short")
     subtract = _descriptor("amd.xdna.aie2p.sub.i32")
     shift = _descriptor(descriptor_key)
     return DescriptorRule(
         source_op=source_op,
         descriptor=shift,
-        guards=_typed_guards(("lhs", "rhs", "result"), _I32),
+        guards=_typed_guards(("lhs", "rhs", "result"), type_pattern),
         emit=(
             _const_emit(
                 zero,
@@ -730,6 +734,49 @@ def _right_shift_rule(source_op: Op, descriptor_key: str) -> DescriptorRule:
                 shift,
                 operands={
                     "s0": ValueRef.operand("lhs"),
+                    "s1": ValueRef.temporary("negative_shift"),
+                },
+                results={"d0": ValueRef.result("result")},
+            ),
+        ),
+    )
+
+
+def _signed_right_shift_i16_rule() -> DescriptorRule:
+    sign_extend = _descriptor("amd.xdna.aie2p.extend.signed.i16")
+    zero = _descriptor("amd.xdna.aie2p.constant.i32.short")
+    subtract = _descriptor("amd.xdna.aie2p.sub.i32")
+    arithmetic_shift = _descriptor("amd.xdna.aie2p.ashl.i32")
+    return DescriptorRule(
+        source_op=scalar_bitwise.scalar_shrsi,
+        descriptor=arithmetic_shift,
+        guards=_typed_guards(("lhs", "rhs", "result"), _I16),
+        emit=(
+            _op_emit(
+                sign_extend,
+                operands={"s0": ValueRef.operand("lhs")},
+                results={"d0": ValueRef.temporary("signed_lhs")},
+                result_types={"d0": _I32},
+            ),
+            _const_emit(
+                zero,
+                ValueRef.temporary("zero"),
+                0,
+                result_type=_I32,
+            ),
+            _op_emit(
+                subtract,
+                operands={
+                    "s0": ValueRef.temporary("zero"),
+                    "s1": ValueRef.operand("rhs"),
+                },
+                results={"d0": ValueRef.temporary("negative_shift")},
+                result_types={"d0": _I32},
+            ),
+            _op_emit(
+                arithmetic_shift,
+                operands={
+                    "s0": ValueRef.temporary("signed_lhs"),
                     "s1": ValueRef.temporary("negative_shift"),
                 },
                 results={"d0": ValueRef.result("result")},
@@ -1199,10 +1246,23 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
         ),
         _right_shift_rule(
             scalar_bitwise.scalar_shrsi,
+            _I32,
             "amd.xdna.aie2p.ashl.i32",
         ),
         _right_shift_rule(
             scalar_bitwise.scalar_shrui,
+            _I32,
+            "amd.xdna.aie2p.lshl.i32",
+        ),
+        _binary_rule(
+            scalar_bitwise.scalar_shli,
+            _I16,
+            "amd.xdna.aie2p.lshl.i32",
+        ),
+        _signed_right_shift_i16_rule(),
+        _right_shift_rule(
+            scalar_bitwise.scalar_shrui,
+            _I16,
             "amd.xdna.aie2p.lshl.i32",
         ),
         _bitfield_rule(

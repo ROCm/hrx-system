@@ -24,7 +24,7 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
         for case in AIE2P_CORE_CONTRACT_FRAGMENT.cases
         if isinstance(case, DescriptorRule)
     )
-    assert len(rules) == 85
+    assert len(rules) == 88
 
     constant_rules = [
         rule for rule in rules if rule.source_op is scalar_conversion.scalar_constant
@@ -113,6 +113,34 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
     ]
     assert len(bitfield_rules) == 2
     assert all(len(rule.emit) == 4 for rule in bitfield_rules)
+
+    shift_rules = [
+        rule
+        for rule in rules
+        if rule.source_op
+        in (
+            scalar_bitwise.scalar_shli,
+            scalar_bitwise.scalar_shrsi,
+            scalar_bitwise.scalar_shrui,
+        )
+    ]
+    assert [rule.descriptor.key for rule in shift_rules] == [
+        "amd.xdna.aie2p.lshl.i32",
+        "amd.xdna.aie2p.ashl.i32",
+        "amd.xdna.aie2p.lshl.i32",
+        "amd.xdna.aie2p.lshl.i32",
+        "amd.xdna.aie2p.ashl.i32",
+        "amd.xdna.aie2p.lshl.i32",
+    ]
+    assert [len(rule.emit) for rule in shift_rules] == [1, 3, 3, 1, 4, 3]
+    signed_i16_shift = shift_rules[4]
+    assert [emit.descriptor.key for emit in signed_i16_shift.emit] == [
+        "amd.xdna.aie2p.extend.signed.i16",
+        "amd.xdna.aie2p.constant.i32.short",
+        "amd.xdna.aie2p.sub.i32",
+        "amd.xdna.aie2p.ashl.i32",
+    ]
+    assert signed_i16_shift.emit[1].immediates == {"i": 0}
 
     vector_rules = [
         rule
