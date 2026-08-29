@@ -11,33 +11,6 @@ iree_add_all_subdirs()
 
 iree_cc_library(
   NAME
-    caching_allocator
-  HDRS
-    "caching_allocator.h"
-  SRCS
-    "caching_allocator.c"
-  DEPS
-    iree::base
-    iree::base::threading
-    iree::hal
-  PUBLIC
-)
-
-iree_cc_library(
-  NAME
-    debug_allocator
-  HDRS
-    "debug_allocator.h"
-  SRCS
-    "debug_allocator.c"
-  DEPS
-    iree::base
-    iree::hal
-  PUBLIC
-)
-
-iree_cc_library(
-  NAME
     device_spec_builder
   HDRS
     "device_spec_builder.h"
