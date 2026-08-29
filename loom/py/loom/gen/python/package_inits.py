@@ -66,6 +66,26 @@ PACKAGE_INITS = (
         "x86 source-to-low contract fragments.",
     ),
     PackageInit(
+        "loom/py/loom/target/arch/amd/__init__.py",
+        "AMD target-family descriptor inputs.",
+    ),
+    PackageInit(
+        "loom/py/loom/target/arch/amd/xdna/__init__.py",
+        "AMD XDNA target descriptor inputs.",
+    ),
+    PackageInit(
+        "loom/py/loom/target/arch/amd/xdna/aie/__init__.py",
+        "Representation utilities shared by independent AMD XDNA AIE targets.",
+    ),
+    PackageInit(
+        "loom/py/loom/target/arch/amd/xdna/aie2p/__init__.py",
+        "AMD XDNA AIE2P target descriptor inputs.",
+    ),
+    PackageInit(
+        "loom/py/loom/target/arch/ireevm/contracts/__init__.py",
+        "IREE VM source-to-low contract fragments.",
+    ),
+    PackageInit(
         "loom/py/loom/target/emit/__init__.py",
         "Emission-target descriptor inputs.",
     ),

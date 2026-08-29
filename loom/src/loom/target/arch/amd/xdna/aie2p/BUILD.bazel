@@ -1,0 +1,113 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_library",
+    "loom_cc_test",
+    "loom_generated_file_family",
+)
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+loom_generated_file_family(
+    name = "core_tables_gen",
+    generator = "//loom/py/loom/gen/target/arch/amd/xdna/aie2p:encoding_tables",
+    output_flags = [
+        "--descriptor-source-output",
+        "--descriptor-header-output",
+        "--encoding-output",
+        "--machine-output",
+    ],
+    outputs = [
+        "descriptors/core_descriptors.c",
+        "descriptors/core_descriptors.h",
+        "encoding/encoding_tables.inl",
+        "machine/machine_tables.inl",
+    ],
+)
+
+loom_cc_library(
+    name = "encoding",
+    srcs = ["encoding/encoding.c"],
+    hdrs = ["encoding/encoding.h"],
+    textual_hdrs = [":encoding/encoding_tables.inl"],
+    visibility = ["//visibility:public"],
+    deps = ["//runtime/src/iree/base"],
+)
+
+loom_cc_library(
+    name = "machine",
+    srcs = ["machine/machine.c"],
+    hdrs = ["machine/machine.h"],
+    textual_hdrs = [":machine/machine_tables.inl"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+    ],
+)
+
+loom_cc_library(
+    name = "core_descriptors",
+    srcs = [":descriptors/core_descriptors.c"],
+    hdrs = [":descriptors/core_descriptors.h"],
+    visibility = ["//visibility:public"],
+    deps = ["//loom/src/loom/codegen/low:descriptors"],
+)
+
+loom_cc_library(
+    name = "descriptor_encoding",
+    srcs = ["descriptors/encoding.c"],
+    hdrs = ["descriptors/encoding.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":encoding",
+        ":machine",
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/codegen/low/allocation:assignment",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "encoding_test",
+    srcs = ["encoding/encoding_test.cc"],
+    deps = [
+        ":encoding",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "machine_test",
+    srcs = ["machine/machine_test.cc"],
+    deps = [
+        ":encoding",
+        ":machine",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "descriptor_encoding_test",
+    srcs = ["descriptors/encoding_test.cc"],
+    deps = [
+        ":core_descriptors",
+        ":descriptor_encoding",
+        ":encoding",
+        ":machine",
+        "//loom/src/loom/codegen/low:descriptors",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

@@ -1,0 +1,44 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:python.bzl", "iree_py_binary", "iree_py_test")
+
+package(
+    default_visibility = ["//visibility:private"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+iree_py_binary(
+    name = "encoding_tables",
+    srcs = [
+        "__init__.py",
+        "encoding_tables.py",
+        "machine_tables.py",
+    ],
+    main = "encoding_tables.py",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//loom/py/loom/gen/support",
+        "//loom/py/loom/gen/target/arch/amd/xdna:package",
+        "//loom/py/loom/gen/target/low:low_descriptors",
+        "//loom/py/loom/target/arch/amd/xdna/aie:encoding",
+        "//loom/py/loom/target/arch/amd/xdna/aie:machine",
+        "//loom/py/loom/target/arch/amd/xdna/aie2p:descriptors",
+        "//loom/py/loom/target/arch/amd/xdna/aie2p:encoding_data",
+        "//loom/py/loom/target/arch/amd/xdna/aie2p:machine_data",
+    ],
+)
+
+iree_py_test(
+    name = "encoding_tables_test",
+    srcs = [
+        "encoding_tables_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.gen.target.arch.amd.xdna.aie2p.encoding_tables_test"],
+    main = "pytest_style_runner.py",
+    deps = [":encoding_tables"],
+)
