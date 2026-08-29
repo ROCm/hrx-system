@@ -50,6 +50,20 @@ static iree_status_t loom_vm_legalize_vector_to_scalar(
   return iree_ok_status();
 }
 
+static iree_status_t loom_vm_legalize_dynamic_vector_insert(
+    const loom_target_legalizer_entry_t* entry,
+    loom_target_legalization_context_t* context, loom_op_t* op,
+    loom_target_legalizer_result_t* out_result) {
+  *out_result = (loom_target_legalizer_result_t){
+      .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
+  };
+  if (context->descriptor_set != loom_vm_core_descriptor_set() ||
+      loom_vector_insert_indices(op).count == 0) {
+    return iree_ok_status();
+  }
+  return loom_vm_legalize_vector_to_scalar(entry, context, op, out_result);
+}
+
 #define LOOM_VM_VECTOR_TO_SCALAR_ENTRY(op_kind)      \
   {                                                  \
       .root_kind = (op_kind),                        \
@@ -70,6 +84,10 @@ static const loom_target_legalizer_entry_t kVmLegalizerEntries[] = {
     LOOM_VM_NARROW_INTEGER_ENTRY(LOOM_OP_SCALAR_SHRSI),
     LOOM_VM_NARROW_INTEGER_ENTRY(LOOM_OP_SCALAR_SHRUI),
     LOOM_VM_VECTOR_TO_SCALAR_ENTRY(LOOM_OP_SCF_SELECT),
+    {
+        .root_kind = LOOM_OP_VECTOR_INSERT,
+        .legalize = loom_vm_legalize_dynamic_vector_insert,
+    },
     LOOM_VM_VECTOR_TO_SCALAR_ENTRY(LOOM_OP_VECTOR_TRANSPOSE),
     LOOM_VM_VECTOR_TO_SCALAR_ENTRY(LOOM_OP_VECTOR_SHUFFLE),
     LOOM_VM_VECTOR_TO_SCALAR_ENTRY(LOOM_OP_VECTOR_SELECT),
