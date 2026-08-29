@@ -83,6 +83,57 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_library(
+  NAME
+    low_registry
+  HDRS
+    "descriptors/low_registry.h"
+  SRCS
+    "descriptors/low_registry.c"
+  DEPS
+    ::core_descriptors
+    iree::base
+    loom::target::low_descriptor_registry
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    bundle_plan
+  HDRS
+    "emit/bundle_plan.h"
+  SRCS
+    "emit/bundle_plan.c"
+  DEPS
+    ::core_descriptors
+    ::descriptor_encoding
+    ::encoding
+    iree::base
+    iree::base::internal::arena
+    loom::codegen::low::frame
+    loom::codegen::low::packet
+    loom::ir
+    loom::ops::low
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    leaf_object
+  HDRS
+    "emit/leaf_object.h"
+  SRCS
+    "emit/leaf_object.c"
+  DEPS
+    ::bundle_plan
+    ::encoding
+    iree::base
+    iree::base::internal::arena
+    loom::codegen::low::diagnostics
+    loom::target::emit::native::object
+  PUBLIC
+)
+
 loom_cc_test(
   NAME
     encoding_test
@@ -119,6 +170,27 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     loom::codegen::low::descriptors
+)
+
+loom_cc_test(
+  NAME
+    leaf_object_test
+  SRCS
+    "emit/leaf_object_test.cc"
+  DEPS
+    ::bundle_plan
+    ::leaf_object
+    ::low_registry
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::codegen::low::frame
+    loom::codegen::low::text_asm
+    loom::codegen::low::verify
+    loom::format::text::parser
+    loom::ir
+    loom::ops::low
+    loom::target::emit::native::object
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

@@ -37,6 +37,15 @@ def test_core_table_is_structurally_complete() -> None:
     assert (
         len(
             {
+                tuple(sorted(field.slot for field in bundle_format.fields))
+                for bundle_format in CORE_ENCODING_TABLE.bundle_formats
+            }
+        )
+        == 77
+    )
+    assert (
+        len(
+            {
                 field.name
                 for instruction in CORE_ENCODING_TABLE.instructions
                 for field in instruction.fields

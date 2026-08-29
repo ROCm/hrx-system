@@ -253,6 +253,7 @@ def validate_encoding_table(
             instruction.fields,
         )
 
+    bundle_slot_signatures: dict[tuple[str, ...], str] = {}
     for bundle_format in table.bundle_formats:
         if bundle_format.bit_count % 8:
             raise ValueError(f"{bundle_format.name}: bundle width is not byte aligned")
@@ -274,6 +275,14 @@ def validate_encoding_table(
             bundle_format.fixed_value,
             bundle_format.fields,
         )
+        slot_signature = tuple(sorted(field.slot for field in bundle_format.fields))
+        previous_format = bundle_slot_signatures.get(slot_signature)
+        if previous_format is not None:
+            raise ValueError(
+                f"bundle slot signature {slot_signature} is shared by "
+                f"{previous_format} and {bundle_format.name}"
+            )
+        bundle_slot_signatures[slot_signature] = bundle_format.name
 
     for left_index, left in enumerate(table.bundle_formats):
         for right in table.bundle_formats[left_index + 1 :]:
