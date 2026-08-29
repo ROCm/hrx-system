@@ -29,9 +29,13 @@
 /// bindings from requirements in the parent product to those roots. Requests
 /// retain no mutable module, workspace, link plan, or compiler analysis state.
 ///
-/// The defining operations of the requested roots provide the extensible
-/// compilation route after the source is indexed. No closed target-kind value
-/// or filename convention participates in routing.
+/// Every request names the process-local product descriptor it expects a
+/// successful pipeline to produce. This is the open compilation route used by
+/// hosts: command programs, compiled modules, and future product families
+/// add descriptors without extending a central kind enumeration. Root
+/// operations remain the durable source contract and are validated by the
+/// selected product operation. Symbol strings, filenames, and target names do
+/// not participate in routing.
 
 #ifdef __cplusplus
 extern "C" {
@@ -40,8 +44,9 @@ extern "C" {
 /// Opaque process-local identity for one product representation.
 ///
 /// Descriptor pointers are stable for the lifetime of the process and may be
-/// compared by identity. They are never serialized and do not replace the
-/// defining Loom operation used to route a durable request.
+/// compared by identity. They are never serialized. A request uses the
+/// descriptor to name its required successful representation while its source
+/// roots retain the durable operation contracts compiled by that route.
 typedef struct loomc_product_descriptor_t loomc_product_descriptor_t;
 
 /// Immutable successful compiler product.
@@ -197,6 +202,18 @@ LOOMC_API_EXPORT void loomc_request_retain(loomc_request_t* request);
 ///
 /// @param request Request to release. Passing NULL is allowed.
 LOOMC_API_EXPORT void loomc_request_release(loomc_request_t* request);
+
+/// Returns the required product representation for `request`.
+///
+/// The descriptor is part of the immutable request contract. A pipeline
+/// selected for the request must produce a product with this descriptor on
+/// success. Descriptor identity is process-local and is never serialized into
+/// the request source.
+///
+/// @param request Request to inspect, or NULL.
+/// @return Required product descriptor, or NULL for a NULL request.
+LOOMC_API_EXPORT const loomc_product_descriptor_t*
+loomc_request_product_descriptor(const loomc_request_t* request);
 
 /// Returns the immutable bytecode source owned by `request`.
 ///

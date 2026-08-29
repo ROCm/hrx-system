@@ -239,7 +239,17 @@ SourcePtr SerializeModuleToBytecode(const loomc_module_t* module,
   return SourcePtr(source);
 }
 
-RequestPtr CreateSingleRootRequest(SourcePtr source) {
+void DestroyAlternateProduct(loomc_product_t* base_product) {
+  loomc_allocator_free(loomc_allocator_system(), base_product);
+}
+
+const loomc_product_descriptor_t kAlternateProductDescriptor = {
+    /*.destroy=*/DestroyAlternateProduct,
+};
+
+RequestPtr CreateSingleRootRequest(
+    SourcePtr source, const loomc_product_descriptor_t* product_descriptor =
+                          loomc_compiled_module_product_descriptor()) {
   const loomc_request_root_t root = {
       /*.module_ordinal=*/0,
       /*.symbol_ordinal=*/0,
@@ -247,7 +257,7 @@ RequestPtr CreateSingleRootRequest(SourcePtr source) {
   loomc_source_t* transferred_source = source.release();
   loomc_request_t* request = nullptr;
   loomc_status_t status = loomc_request_create_take_source(
-      &transferred_source, &root, 1, /*bindings=*/nullptr,
+      product_descriptor, &transferred_source, &root, 1, /*bindings=*/nullptr,
       /*binding_count=*/0, loomc_allocator_system(), &request);
   loomc_source_release(transferred_source);
   LOOMC_EXPECT_OK(status);
@@ -256,13 +266,11 @@ RequestPtr CreateSingleRootRequest(SourcePtr source) {
 
 RequestPtr CreateRootedRequest(loomc_source_t* source,
                                loomc_request_root_t root) {
-  loomc_source_retain(source);
-  loomc_source_t* transferred_source = source;
   loomc_request_t* request = nullptr;
-  loomc_status_t status = loomc_request_create_take_source(
-      &transferred_source, &root, 1, /*bindings=*/nullptr,
-      /*binding_count=*/0, loomc_allocator_system(), &request);
-  loomc_source_release(transferred_source);
+  loomc_status_t status = loomc_request_create(
+      loomc_compiled_module_product_descriptor(), source, &root, 1,
+      /*bindings=*/nullptr, /*binding_count=*/0, loomc_allocator_system(),
+      &request);
   LOOMC_EXPECT_OK(status);
   return RequestPtr(request);
 }
@@ -570,6 +578,27 @@ TEST(CompileTest, CompileRequestRejectsUnavailableRoots) {
     EXPECT_EQ(product, nullptr);
     EXPECT_EQ(result, nullptr);
   }
+}
+
+TEST(CompileTest, CompileRequestRejectsAnotherProductContract) {
+  ContextPtr context = CreateContext();
+  WorkspacePtr workspace = CreateWorkspace();
+  CompilerPtr compiler = CreateCompiler(context.get());
+  PassProgramPtr pass_program = CreateEmptyPassProgram(context.get());
+  ModulePtr module = CreateValidModule(context.get(), workspace.get());
+  RequestPtr request = CreateSingleRootRequest(
+      SerializeModuleToBytecode(module.get(), "wrong-contract.loombc"),
+      &kAlternateProductDescriptor);
+
+  loomc_product_t* product = nullptr;
+  loomc_result_t* result = nullptr;
+  loomc_status_t status = loomc_compile_request(
+      compiler.get(), workspace.get(), pass_program.get(), request.get(),
+      /*options=*/nullptr, loomc_allocator_system(), &product, &result);
+  EXPECT_EQ(loomc_status_code(status), LOOMC_STATUS_INVALID_ARGUMENT);
+  loomc_status_free(status);
+  EXPECT_EQ(product, nullptr);
+  EXPECT_EQ(result, nullptr);
 }
 
 TEST(CompileTest, CompileRequestReturnsFailedParseResultWithoutProduct) {

@@ -75,6 +75,9 @@ struct loomc_request_t {
   // Owned immutable Loom bytecode source.
   loomc_source_t* source;
 
+  // Required process-local successful product representation.
+  const loomc_product_descriptor_t* product_descriptor;
+
   // Canonical roots in the request source.
   struct {
     // Request-owned root table.
@@ -95,6 +98,7 @@ struct loomc_request_t {
 };
 
 loomc_status_t loomc_request_create_take_source(
+    const loomc_product_descriptor_t* product_descriptor,
     loomc_source_t** inout_source, const loomc_request_root_t* roots,
     loomc_host_size_t root_count, const loomc_request_binding_t* bindings,
     loomc_host_size_t binding_count, loomc_allocator_t allocator,
@@ -122,6 +126,7 @@ loomc_status_t loomc_request_create_take_source(
   iree_atomic_ref_count_init(&request->ref_count);
   request->allocator = allocator;
   request->source = *inout_source;
+  request->product_descriptor = product_descriptor;
   request->roots.count = root_count;
   request->bindings.count = binding_count;
 
@@ -152,6 +157,11 @@ void loomc_request_release(loomc_request_t* request) {
   loomc_allocator_t allocator = request->allocator;
   loomc_source_release(request->source);
   loomc_allocator_free(allocator, request);
+}
+
+const loomc_product_descriptor_t* loomc_request_product_descriptor(
+    const loomc_request_t* request) {
+  return request ? request->product_descriptor : NULL;
 }
 
 loomc_source_t* loomc_request_source(const loomc_request_t* request) {

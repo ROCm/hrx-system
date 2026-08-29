@@ -27,6 +27,7 @@
 #include "loom/target/arch/cmd/artifact_set.h"
 #include "loom/transforms/kernel/kernel_class_materializer.h"
 #include "loom/transforms/kernel/kernel_request_producer.h"
+#include "loomc/compile.h"
 #include "loomc/iree.h"
 
 enum {
@@ -302,9 +303,9 @@ static iree_status_t loomc_cmd_program_product_publish_kernel_request(
         .requirement_ordinal = request->entry_requirement_index,
         .root_ordinal = 0,
     };
-    status = loomc_request_create_take_source(&source, &root, 1, &binding, 1,
-                                              invocation->request.allocator,
-                                              &public_request);
+    status = loomc_request_create_take_source(
+        loomc_compiled_module_product_descriptor(), &source, &root, 1, &binding,
+        1, invocation->request.allocator, &public_request);
   }
   if (loomc_status_is_ok(status)) {
     loomc_request_t* transferred_request = public_request;

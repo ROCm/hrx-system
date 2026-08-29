@@ -261,8 +261,9 @@ LOOMC_API_EXPORT loomc_status_t loomc_compile_module(
 ///
 /// This is the synchronous leaf operation used by a composing host after a
 /// cache miss. Cache hits bypass the operation entirely. Selecting the pass
-/// program remains the host's responsibility; the defining operation of
-/// the request roots provides the route without a target-kind enum.
+/// program remains the host's responsibility. Requests requiring this operation
+/// carry `loomc_compiled_module_product_descriptor()` as their process-local
+/// product contract without a target-kind enum.
 ///
 /// @param compiler Prepared compiler.
 /// @param workspace Invocation-local scratch workspace.

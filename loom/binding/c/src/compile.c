@@ -722,6 +722,12 @@ loomc_status_t loomc_compile_request(
         LOOMC_STATUS_INVALID_ARGUMENT,
         "compiler, workspace, pass_program, and request must not be NULL");
   }
+  if (loomc_request_product_descriptor(request) !=
+      loomc_compiled_module_product_descriptor()) {
+    return loomc_make_status(
+        LOOMC_STATUS_INVALID_ARGUMENT,
+        "request does not require a compiled module product");
+  }
   if (loomc_pass_program_context(pass_program) != compiler->context) {
     return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
                              "pass program was created with another context");

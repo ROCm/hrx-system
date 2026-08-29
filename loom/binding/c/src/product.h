@@ -63,10 +63,14 @@ LOOMC_API_PRIVATE bool loomc_product_isa(
 
 // Allocates an immutable request and transfers |*inout_source| on success.
 //
+// |product_descriptor| is the required successful product representation and
+// must have process lifetime. It is retained by identity rather than ownership.
+//
 // Roots must be unique and sorted by module then symbol ordinal. Bindings must
 // be sorted by requirement ordinal and refer only to supplied roots. These are
 // trusted producer invariants rather than public validation obligations.
 LOOMC_API_PRIVATE loomc_status_t loomc_request_create_take_source(
+    const loomc_product_descriptor_t* product_descriptor,
     loomc_source_t** inout_source, const loomc_request_root_t* roots,
     loomc_host_size_t root_count, const loomc_request_binding_t* bindings,
     loomc_host_size_t binding_count, loomc_allocator_t allocator,
