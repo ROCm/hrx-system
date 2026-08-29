@@ -281,12 +281,12 @@ TEST(VMBytecodeModuleBufferTest, VerifiesBufferInstructionRecords) {
                   [](MutableFunctionImage function) {
                     function.row->value_register_count_u16 = 0;
                   });
-  expect_rejected("allocate padding", kBufferAllocateFunctionOrdinal,
+  expect_rejected("allocate alignment exponent", kBufferAllocateFunctionOrdinal,
                   [](MutableFunctionImage function) {
                     auto* record =
                         reinterpret_cast<iree_vm_isa_buffer_allocate_record_t*>(
                             function.bytecode + 4);
-                    record->zero_padding_u8 = 1;
+                    record->minimum_alignment_log2_u8 = 64;
                   });
   expect_rejected("length value register", kBufferLengthFunctionOrdinal,
                   [](MutableFunctionImage function) {
@@ -645,6 +645,7 @@ TEST(VMBytecodeModuleBufferTest, AllocatesViewsAndTransfersEveryLaneFormat) {
   const auto* root_data =
       static_cast<const uint8_t*>(iree_vm_buffer_const_data(root));
   ASSERT_NE(root_data, nullptr);
+  EXPECT_EQ(reinterpret_cast<uintptr_t>(root_data) & 63u, 0u);
   for (iree_host_size_t i = 0; i < 256; ++i) EXPECT_EQ(root_data[i], 0u);
 
   iree_vm_variant_t length_arguments[] = {

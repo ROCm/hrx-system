@@ -77,9 +77,10 @@ iree_status_t iree_vm_bytecode_verify_buffer_record(
     case IREE_VM_ISA_CORE_OPCODE_BUFFER_ALLOCATE: {
       const iree_vm_isa_buffer_allocate_record_t* record =
           (const iree_vm_isa_buffer_allocate_record_t*)record_data.data;
-      if (record->zero_padding_u8 != 0) {
-        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "buffer.allocate padding is nonzero");
+      if (record->minimum_alignment_log2_u8 > 63) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "buffer.allocate alignment exponent exceeds 63");
       }
       IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_ref_register(
           record->dst_r8, function->ref_register_count_u16));

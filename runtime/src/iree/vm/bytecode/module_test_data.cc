@@ -1332,7 +1332,7 @@ std::vector<uint8_t> BuildBufferFunctions() {
 
   uint32_t offset = begin_function();
   bytecode.Append(iree_vm_isa_buffer_allocate_record_t{
-      IREE_VM_ISA_CORE_OPCODE_BUFFER_ALLOCATE, 0, 0, 0});
+      IREE_VM_ISA_CORE_OPCODE_BUFFER_ALLOCATE, 0, 0, 6});
   end_function(offset, kBufferAllocateCallableTypeOrdinal,
                /*value_register_count=*/1, /*ref_register_count=*/1);
 

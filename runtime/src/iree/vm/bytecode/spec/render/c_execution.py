@@ -826,7 +826,13 @@ def _validate_verification_form(
             raise ValueError(f"{instruction.mnemonic}: buffer allocate is not 4 bytes")
         require_ref(1)
         require_value(2)
-        require_zero(3, 1)
+        require_field(
+            3,
+            1,
+            ALLOWED_RANGE.entity_id,
+            (InstructionFieldRole.IMMEDIATE,),
+            rule_arguments=(0, 63),
+        )
     elif verification_form == "BUFFER_LENGTH":
         if instruction.byte_length != 4:
             raise ValueError(f"{instruction.mnemonic}: buffer length is not 4 bytes")

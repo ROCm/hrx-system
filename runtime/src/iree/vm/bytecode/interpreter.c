@@ -1278,16 +1278,18 @@ static iree_status_t iree_vm_bytecode_execute(
     const iree_vm_isa_buffer_allocate_record_t* record =
         (const iree_vm_isa_buffer_allocate_record_t*)record_data;
     const uint64_t length = values[record->length_v8];
-    if (!iree_vm_bytecode_buffer_allocation_is_representable(length)) {
+    iree_host_size_t minimum_alignment = 0;
+    if (!iree_vm_bytecode_buffer_allocation_is_representable(
+            length, record->minimum_alignment_log2_u8, &minimum_alignment)) {
       status =
           iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                            "vm.buffer allocation is not host-representable");
       IREE_VM_BYTECODE_DISPATCH_TERMINATE();
     }
     iree_vm_buffer_t* buffer = NULL;
-    status = iree_vm_buffer_create(
-        (iree_host_size_t)length,
-        /*minimum_alignment=*/0, invocation->process->host_allocator, &buffer);
+    status =
+        iree_vm_buffer_create((iree_host_size_t)length, minimum_alignment,
+                              invocation->process->host_allocator, &buffer);
     if (!iree_status_is_ok(status)) {
       IREE_VM_BYTECODE_DISPATCH_TERMINATE();
     }

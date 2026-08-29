@@ -16,15 +16,27 @@
 // makes the subsequent construction call incapable of reporting a size
 // overflow after the bytecode operation has classified it as exhaustion.
 static inline bool iree_vm_bytecode_buffer_allocation_is_representable(
-    uint64_t length) {
-  if (length > IREE_HOST_SIZE_MAX) return false;
+    uint64_t length, uint8_t minimum_alignment_log2,
+    iree_host_size_t* out_minimum_alignment) {
+  if (length > IREE_HOST_SIZE_MAX ||
+      minimum_alignment_log2 >= sizeof(iree_host_size_t) * 8u) {
+    return false;
+  }
+  const iree_host_size_t minimum_alignment = (iree_host_size_t)1u
+                                             << minimum_alignment_log2;
+  const iree_host_size_t effective_alignment =
+      iree_max(minimum_alignment, iree_max_align_t);
   iree_host_size_t allocation_size = sizeof(iree_vm_buffer_t);
-  return iree_host_size_checked_add(allocation_size, (iree_host_size_t)length,
-                                    &allocation_size) &&
-         iree_host_size_checked_add(sizeof(uintptr_t), allocation_size,
-                                    &allocation_size) &&
-         iree_host_size_checked_add(allocation_size, iree_max_align_t,
-                                    &allocation_size);
+  if (!iree_host_size_checked_add(allocation_size, (iree_host_size_t)length,
+                                  &allocation_size) ||
+      !iree_host_size_checked_add(sizeof(uintptr_t), allocation_size,
+                                  &allocation_size) ||
+      !iree_host_size_checked_add(allocation_size, effective_alignment,
+                                  &allocation_size)) {
+    return false;
+  }
+  *out_minimum_alignment = minimum_alignment;
+  return true;
 }
 
 // Borrows one required ref after checking the exact module-resolved vm.buffer

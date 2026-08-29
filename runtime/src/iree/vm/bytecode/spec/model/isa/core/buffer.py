@@ -34,6 +34,7 @@ from model.isa.selectors import (
     SELECTOR_TABLES_BY_NAME,
 )
 from model.isa.validation import (
+    ALLOWED_RANGE,
     ALLOWED_VALUES,
     ANY_BITS,
     PACKED_SELECTOR_ALLOWED_PAIRS,
@@ -262,7 +263,15 @@ BUFFER_ALLOCATE = core_instruction(
             InstructionFieldRole.OPERAND,
             "Unsigned 64-bit requested byte length.",
         ),
-        zero_padding("zero_padding_u8", 3, 1),
+        _field(
+            "minimum_alignment_log2_u8",
+            3,
+            U8.entity_id,
+            InstructionFieldRole.IMMEDIATE,
+            "Base-two logarithm of the required payload-byte alignment.",
+            ALLOWED_RANGE.entity_id,
+            (0, 63),
+        ),
     ),
     state_effects=(state_allocate(StateResource.BUFFER, "dst_r8"),),
     semantics=_semantics(
@@ -272,7 +281,7 @@ BUFFER_ALLOCATE = core_instruction(
         ),
         verification=(
             "dst_r8 and length_v8 must be valid register ordinals and "
-            "zero_padding_u8 must equal zero.",
+            "minimum_alignment_log2_u8 must be in 0..63.",
         ),
         preconditions=(
             "The complete u64 length, object-plus-payload size, and alignment "
@@ -293,15 +302,19 @@ BUFFER_ALLOCATE = core_instruction(
             "The new object's initial owner transfers to dst_r8 only after "
             "complete construction; replacement releases dst_r8's prior state.",
         ),
-        assembly=("%r<dst> = buffer.allocate %v<length>",),
+        assembly=("%r<dst> = buffer.allocate %v<length> {minimum_alignment_log2}",),
         pseudocode=(
             "length_u64 = values[length_v8];\n"
+            "alignment_u64 = 1 << minimum_alignment_log2_u8;\n"
             "if (!fits_host_size(length_u64) ||\n"
-            "    !checked_buffer_allocation_size(length_u64)) {\n"
+            "    !fits_host_size(alignment_u64) ||\n"
+            "    !checked_buffer_allocation_size(\n"
+            "        length_u64, alignment_u64)) {\n"
             "  fail(resource_exhausted);\n"
             "}\n"
             "new_buffer = allocate_zeroed_rw_buffer(\n"
-            "    process.host_allocator, host_size(length_u64));\n"
+            "    process.host_allocator, host_size(length_u64),\n"
+            "    host_size(alignment_u64));\n"
             "if (new_buffer == NULL) fail(resource_exhausted);\n"
             "replace_ref(&refs[dst_r8], owned_ref(new_buffer, vm_buffer_type));\n"
             "pc = pc + 4;"
