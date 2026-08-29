@@ -4,7 +4,6 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//build_tools/bazel:cmake.bzl", "iree_cmake_extra_content")
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
 load("//runtime/build_tools/bazel:cc_benchmark.bzl", "iree_runtime_cc_benchmark")
 load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
@@ -221,17 +220,6 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_library(
-    name = "queue_emulation",
-    srcs = ["queue_emulation.c"],
-    hdrs = ["queue_emulation.h"],
-    deps = [
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal",
-        "//runtime/src/iree/hal",
-    ],
-)
-
-iree_runtime_cc_library(
     name = "resource_set",
     srcs = ["resource_set.c"],
     hdrs = ["resource_set.h"],
@@ -264,26 +252,5 @@ iree_runtime_cc_test(
         "//runtime/src/iree/hal",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
-    ],
-)
-
-iree_cmake_extra_content(
-    content = """
-if(NOT IREE_ENABLE_THREADING)
-  return()
-endif()
-""",
-    inline = True,
-)
-
-iree_runtime_cc_library(
-    name = "queue_host_call_emulation",
-    srcs = ["queue_host_call_emulation.c"],
-    hdrs = ["queue_host_call_emulation.h"],
-    deps = [
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal",
-        "//runtime/src/iree/base/threading:thread",
-        "//runtime/src/iree/hal",
     ],
 )

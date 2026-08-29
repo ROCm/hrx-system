@@ -251,20 +251,6 @@ iree_cc_test(
 
 iree_cc_library(
   NAME
-    queue_emulation
-  HDRS
-    "queue_emulation.h"
-  SRCS
-    "queue_emulation.c"
-  DEPS
-    iree::base
-    iree::base::internal
-    iree::hal
-  PUBLIC
-)
-
-iree_cc_library(
-  NAME
     resource_set
   HDRS
     "resource_set.h"
@@ -304,25 +290,6 @@ iree_cc_test(
     iree::hal
     iree::testing::gtest
     iree::testing::gtest_main
-)
-
-if(NOT IREE_ENABLE_THREADING)
-  return()
-endif()
-
-iree_cc_library(
-  NAME
-    queue_host_call_emulation
-  HDRS
-    "queue_host_call_emulation.h"
-  SRCS
-    "queue_host_call_emulation.c"
-  DEPS
-    iree::base
-    iree::base::internal
-    iree::base::threading::thread
-    iree::hal
-  PUBLIC
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
