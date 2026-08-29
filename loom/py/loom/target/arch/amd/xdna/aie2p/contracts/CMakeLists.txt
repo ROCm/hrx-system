@@ -18,6 +18,7 @@ iree_py_library(
   DEPS
     loom::py::loom::core
     loom::py::loom::dialect::scalar::scalar
+    loom::py::loom::dialect::scf::scf
     loom::py::loom::dialect::vector::vector
     loom::py::loom::target::arch::amd::xdna::aie2p::descriptors
     loom::py::loom::target::contracts::contracts
@@ -36,6 +37,7 @@ iree_py_test(
   DEPS
     loom::py::loom::target::arch::amd::xdna::aie2p::contracts::contracts
     loom::py::loom::dialect::scalar::scalar
+    loom::py::loom::dialect::scf::scf
     loom::py::loom::dialect::vector::vector
     loom::py::loom::target::contracts::contracts
   PACKAGE_DIRS

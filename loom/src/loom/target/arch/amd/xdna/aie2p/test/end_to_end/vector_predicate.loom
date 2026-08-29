@@ -1,0 +1,16 @@
+aie2p.target<core> @target
+
+func.def public target(@target) @vector_predicate(
+    %lhs: i32,
+    %rhs: i32,
+    %true_value: vector<4xi8>,
+    %false_value: vector<4xi8>,
+    %bias: vector<4xi8>
+) -> (vector<4xi8>) {
+  %condition = scalar.cmpi slt, %lhs, %rhs : i32
+  %mask = vector.splat %condition : vector<4xi1>
+  %lane_selected = vector.select %mask, %true_value, %false_value : vector<4xi8>
+  %whole_selected = scf.select %condition, %lane_selected, %false_value : vector<4xi8>
+  %result = vector.addi %whole_selected, %bias : vector<4xi8>
+  func.return %result : vector<4xi8>
+}

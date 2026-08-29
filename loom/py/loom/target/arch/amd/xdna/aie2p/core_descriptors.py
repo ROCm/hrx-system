@@ -85,6 +85,7 @@ class _DescriptorSpec:
     itinerary: str
     storage_overrides: tuple[tuple[str, str], ...] = ()
     op_kind: DescriptorOpKind = DescriptorOpKind.OP
+    asm_mnemonic: str | None = None
 
 
 _DESCRIPTOR_SPECS = (
@@ -93,6 +94,14 @@ _DESCRIPTOR_SPECS = (
         f"{_TARGET_KEY}.add.i32.immediate",
         "integer.add.i32",
         "II_ADD_add_r_ri",
+    ),
+    _DescriptorSpec(
+        "ADD_add_r_ri",
+        f"{_TARGET_KEY}.select.mask.i32",
+        "integer.select.mask.i32",
+        "II_ADD_add_r_ri",
+        (("d0", "eRS16"),),
+        asm_mnemonic="select.mask",
     ),
     _DescriptorSpec(
         "LDA_dms_lda_idx_imm",
@@ -183,6 +192,24 @@ _DESCRIPTOR_SPECS = (
         f"{_TARGET_KEY}.splat.i32x16",
         "integer.splat.i32x16",
         "II_VBCST_32",
+    ),
+    _DescriptorSpec(
+        "VEQZ_8",
+        f"{_TARGET_KEY}.cmp.eqz.i8x64",
+        "integer.cmp.eq.i8x64",
+        "II_VEQZ_8",
+    ),
+    _DescriptorSpec(
+        "VSEL_8",
+        f"{_TARGET_KEY}.select.i8x64",
+        "integer.select.i8x64",
+        "II_VSEL_8",
+    ),
+    _DescriptorSpec(
+        "VSEL_32",
+        f"{_TARGET_KEY}.select.i32x16",
+        "integer.select.i32x16",
+        "II_VSEL_32",
     ),
     _DescriptorSpec(
         "VEXTBCST_8_vec_extract_broadcast_imm",
@@ -984,7 +1011,7 @@ def _descriptor(spec: _DescriptorSpec) -> Descriptor:
         if operand.kind is MachineOperandKind.IMMEDIATE
     )
     explicit_register_operands = (*register_outputs, *register_inputs)
-    mnemonic = _ASM_MNEMONIC_BY_FORM.get(
+    mnemonic = spec.asm_mnemonic or _ASM_MNEMONIC_BY_FORM.get(
         spec.form_name, form.assembly.split("\t", 1)[0].strip()
     )
     descriptor = Descriptor(

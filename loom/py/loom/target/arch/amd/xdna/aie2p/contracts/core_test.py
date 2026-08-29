@@ -9,11 +9,12 @@
 from loom.dialect.scalar import bitwise as scalar_bitwise
 from loom.dialect.scalar import comparison as scalar_comparison
 from loom.dialect.scalar import conversion as scalar_conversion
+from loom.dialect.scf import defs as scf
 from loom.dialect.vector import defs as vector
 from loom.target.arch.amd.xdna.aie2p.contracts.core import (
     AIE2P_CORE_CONTRACT_FRAGMENT,
 )
-from loom.target.contracts import DescriptorRule, ValueAliasRule
+from loom.target.contracts import DescriptorResultType, DescriptorRule, ValueAliasRule
 
 
 def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
@@ -22,7 +23,7 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
         for case in AIE2P_CORE_CONTRACT_FRAGMENT.cases
         if isinstance(case, DescriptorRule)
     )
-    assert len(rules) == 75
+    assert len(rules) == 78
 
     constant_rules = [
         rule for rule in rules if rule.source_op is scalar_conversion.scalar_constant
@@ -161,7 +162,34 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
         "amd.xdna.aie2p.splat.i8x64",
         "amd.xdna.aie2p.splat.i16x32",
         "amd.xdna.aie2p.splat.i32x16",
+        "amd.xdna.aie2p.cmp.eqz.i8x64",
     ]
+    predicate_splat = vector_splat_rules[-1]
+    assert [emit.descriptor.key for emit in predicate_splat.emit] == [
+        "amd.xdna.aie2p.splat.i8x64",
+        "amd.xdna.aie2p.cmp.eqz.i8x64",
+    ]
+    assert all(
+        isinstance(next(iter(emit.result_types.values())), DescriptorResultType)
+        for emit in predicate_splat.emit
+    )
+
+    vector_select_rules = [
+        rule for rule in rules if rule.source_op is vector.vector_select
+    ]
+    assert [rule.descriptor.key for rule in vector_select_rules] == [
+        "amd.xdna.aie2p.select.i8x64"
+    ]
+
+    whole_select_rules = [rule for rule in rules if rule.source_op is scf.scf_select]
+    assert [rule.descriptor.key for rule in whole_select_rules] == [
+        "amd.xdna.aie2p.select.i32x16"
+    ]
+    assert [emit.descriptor.key for emit in whole_select_rules[0].emit] == [
+        "amd.xdna.aie2p.select.mask.i32",
+        "amd.xdna.aie2p.select.i32x16",
+    ]
+    assert whole_select_rules[0].emit[-1].copy_operands == ()
 
     alias_rules = [
         case
