@@ -31,7 +31,9 @@ bool loom_low_allocation_storage_assignment_uses_explicit_physical_register(
 // Returns true when |physical_register_id| is an ordered |unit_count|-unit
 // view of |descriptor_reg_class_id|. The first candidate ordinal identifies
 // the direct candidate covering logical unit zero. The pressure extent is one
-// past the highest direct candidate ordinal occupied by the view.
+// past the highest direct candidate ordinal occupied by the view. Candidate
+// ordinals define preference and pressure order, not linear-location
+// alignment; the declared view itself defines legal unit grouping.
 bool loom_low_allocation_storage_explicit_physical_register_view(
     const loom_low_descriptor_set_t* descriptor_set,
     uint16_t descriptor_reg_class_id, uint32_t physical_register_id,
