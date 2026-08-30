@@ -125,9 +125,9 @@ iree_execution_test_suite(
     "loom-compile=::loom-compile"
     "loom-format=loom::tools::loom-format"
   DATA
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-compile/command_artifacts.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-compile/command_kernel_requests.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-compile/rooted_template_provider.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-compile/testdata/command_artifacts.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-compile/testdata/command_kernel_requests.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-compile/testdata/rooted_template_provider.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-link/testdata/target_profile_template_selection.loom"
   LABELS
     "hostonly"

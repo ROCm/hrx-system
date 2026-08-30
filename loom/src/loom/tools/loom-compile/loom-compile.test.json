@@ -46,7 +46,7 @@
       "run": {
         "tool": "loom-compile",
         "args": [
-          "{srcdir}/command_artifacts.loom",
+          "{srcdir}/testdata/command_artifacts.loom",
           "--backend=command",
           "--output=-",
           "--emit-command-artifacts={tmp}/commands",
@@ -94,7 +94,7 @@
           "run": {
             "tool": "loom-compile",
             "args": [
-              "{srcdir}/command_kernel_requests.loom",
+              "{srcdir}/testdata/command_kernel_requests.loom",
               "--backend=command",
               "--output=-",
               "--emit-command-artifacts={tmp}/commands",
@@ -165,7 +165,7 @@
       "run": {
         "tool": "loom-compile",
         "args": [
-          "{srcdir}/command_artifacts.loom",
+          "{srcdir}/testdata/command_artifacts.loom",
           "--backend=command",
           "--root=@increment_then_double",
           "--output=-",
@@ -202,7 +202,7 @@
           "run": {
             "tool": "loom-format",
             "args": [
-              "{srcdir}/command_artifacts.loom",
+              "{srcdir}/testdata/command_artifacts.loom",
               "--from=text",
               "--to=bytecode",
               "--output={tmp}/command_artifacts.loombc"
@@ -242,7 +242,7 @@
       "run": {
         "tool": "loom-compile",
         "args": [
-          "{srcdir}/command_artifacts.loom",
+          "{srcdir}/testdata/command_artifacts.loom",
           "--backend=command",
           "--output={tmp}/commands.json"
         ]
@@ -261,7 +261,7 @@
       "run": {
         "tool": "loom-compile",
         "args": [
-          "{srcdir}/command_artifacts.loom",
+          "{srcdir}/testdata/command_artifacts.loom",
           "--backend=llvmir-text",
           "--emit-command-artifacts={tmp}/commands"
         ]
@@ -400,7 +400,7 @@
           "run": {
             "tool": "loom-compile",
             "args": [
-              "{srcdir}/rooted_template_provider.loom",
+              "{srcdir}/testdata/rooted_template_provider.loom",
               "--root=@entry",
               "--backend=llvmir-text",
               "--output={tmp}/rooted_template.ll",

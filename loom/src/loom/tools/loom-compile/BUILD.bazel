@@ -165,9 +165,9 @@ loom_cc_binary(
 iree_execution_test_suite(
     name = "execution_test",
     data = [
-        "command_artifacts.loom",
-        "command_kernel_requests.loom",
-        "rooted_template_provider.loom",
+        "//loom/src/loom/tools/loom-compile/testdata:command_artifacts.loom",
+        "//loom/src/loom/tools/loom-compile/testdata:command_kernel_requests.loom",
+        "//loom/src/loom/tools/loom-compile/testdata:rooted_template_provider.loom",
         "//loom/src/loom/tools/loom-link:testdata/target_profile_template_selection.loom",
     ],
     manifests = ["loom-compile.test.json"],
