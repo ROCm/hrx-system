@@ -140,6 +140,8 @@ iree::testing::TempFilePath WriteTempFile(iree_const_byte_span_t contents) {
         // IREE_PLATFORM_LINUX)
 
 struct ReplayRecordSummary {
+  // Capture-time thread identifier on the session record.
+  uint64_t session_thread_id = 0;
   iree_host_size_t session_record_count = 0;
   iree_host_size_t device_object_record_count = 0;
   iree_host_size_t allocator_object_record_count = 0;
@@ -200,6 +202,7 @@ static ReplayRecordSummary ParseReplayRecordSummary(
     EXPECT_EQ(expected_sequence_ordinal++, record.header.sequence_ordinal);
     switch (record.header.record_type) {
       case IREE_HAL_REPLAY_FILE_RECORD_TYPE_SESSION:
+        summary.session_thread_id = record.header.thread_id;
         ++summary.session_record_count;
         break;
       case IREE_HAL_REPLAY_FILE_RECORD_TYPE_OBJECT:
@@ -402,6 +405,24 @@ static iree_status_t CountHostCall(void* user_data, const uint64_t args[4],
   (void)context;
   ++*(int*)user_data;
   return iree_ok_status();
+}
+
+TEST(ReplayRecorderTest, RecordsAvailableThreadIdentifier) {
+  std::vector<uint8_t> storage(4096, 0);
+  iree_hal_replay_recorder_t* recorder = CreateHostAllocationRecorder(&storage);
+  IREE_ASSERT_OK(iree_hal_replay_recorder_close(recorder));
+  iree_hal_replay_recorder_release(recorder);
+
+  ReplayRecordSummary summary = ParseReplayRecordSummary(storage);
+  EXPECT_EQ(1u, summary.session_record_count);
+#if IREE_SYNCHRONIZATION_DISABLE_UNSAFE
+  EXPECT_EQ(0u, summary.session_thread_id);
+#elif defined(IREE_PLATFORM_ANDROID) || defined(IREE_PLATFORM_APPLE) || \
+    defined(IREE_PLATFORM_LINUX) || defined(IREE_PLATFORM_WINDOWS)
+  EXPECT_NE(0u, summary.session_thread_id);
+#else
+  EXPECT_EQ(0u, summary.session_thread_id);
+#endif  // native thread identifiers available
 }
 
 TEST(ReplayRecorderTest, RecordsNamedScopes) {

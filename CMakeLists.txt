@@ -16,6 +16,18 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Native runtime targets require thread creation. Browser WebAssembly uses its
+# host event loop, while bare-metal WebAssembly has no thread creation service.
+# Neither target links a thread library. This is a target capability, not a
+# build option.
+string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _IREE_TARGET_SYSTEM_PROCESSOR)
+if(EMSCRIPTEN OR _IREE_TARGET_SYSTEM_PROCESSOR MATCHES "^wasm(32|64)$")
+  set(IREE_TARGET_HAS_THREADS OFF)
+else()
+  set(IREE_TARGET_HAS_THREADS ON)
+endif()
+unset(_IREE_TARGET_SYSTEM_PROCESSOR)
+
 set(HRX_IDE_FOLDER HRX)
 set(IREE_IDE_FOLDER IREE)
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
@@ -141,7 +153,7 @@ hrx_configure_ipo()
 if(IREE_BUILD_TESTS)
   iree_configure_googletest()
 endif()
-if(IREE_ENABLE_THREADING AND (IREE_BUILD_TESTS OR IREE_BUILD_BENCHMARKS))
+if(IREE_TARGET_HAS_THREADS AND (IREE_BUILD_TESTS OR IREE_BUILD_BENCHMARKS))
   iree_configure_google_benchmark()
 endif()
 iree_configure_libbacktrace()

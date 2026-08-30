@@ -16,7 +16,7 @@ package(
 
 iree_cmake_extra_content(
     content = """
-if(IREE_ENABLE_THREADING)
+if(IREE_TARGET_HAS_THREADS)
 """,
     inline = True,
 )

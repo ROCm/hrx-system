@@ -9,7 +9,7 @@
 
 iree_add_all_subdirs()
 
-if(IREE_ENABLE_THREADING)
+if(IREE_TARGET_HAS_THREADS)
 
 iree_cc_binary(
   NAME

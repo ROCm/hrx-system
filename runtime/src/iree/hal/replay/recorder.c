@@ -15,6 +15,8 @@
 #elif defined(IREE_PLATFORM_LINUX)
 #include <sys/syscall.h>
 #include <unistd.h>
+#elif defined(IREE_PLATFORM_WINDOWS)
+#include <windows.h>
 #endif  // IREE_PLATFORM_*
 
 #include "iree/base/internal/atomics.h"
@@ -60,7 +62,7 @@ struct iree_hal_replay_recorder_t {
 };
 
 static uint64_t iree_hal_replay_current_thread_id(void) {
-#if defined(IREE_SYNCHRONIZATION_DISABLE_UNSAFE)
+#if IREE_SYNCHRONIZATION_DISABLE_UNSAFE
   return 0;
 #elif defined(IREE_PLATFORM_ANDROID)
   return (uint64_t)gettid();

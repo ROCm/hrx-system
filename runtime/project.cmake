@@ -28,7 +28,6 @@ set(IREE_TRACING_MODE_DEFAULT "2" CACHE STRING
 set(IREE_TRACING_MODE ${IREE_TRACING_MODE_DEFAULT} CACHE STRING
   "Tracing feature/verbosity mode. See iree/base/tracing.h for more.")
 
-option(IREE_ENABLE_THREADING "Builds IREE with thread library support." ON)
 option(IREE_SYNCHRONIZATION_DISABLE_UNSAFE
   "Disables synchronization primitives for single-threaded bare-metal targets only."
   OFF)
@@ -60,7 +59,7 @@ if(NOT DEFINED IREE_HAL_DRIVER_AMDGPU_DEFAULT)
   set(IREE_HAL_DRIVER_AMDGPU_DEFAULT ${IREE_HAL_DRIVER_DEFAULTS})
 endif()
 if(NOT DEFINED IREE_HAL_DRIVER_LOCAL_TASK_DEFAULT)
-  set(IREE_HAL_DRIVER_LOCAL_TASK_DEFAULT ON)
+  set(IREE_HAL_DRIVER_LOCAL_TASK_DEFAULT ${IREE_TARGET_HAS_THREADS})
 endif()
 if(NOT DEFINED IREE_HAL_DRIVER_VULKAN_DEFAULT)
   set(IREE_HAL_DRIVER_VULKAN_DEFAULT ${IREE_HAL_DRIVER_DEFAULTS})
@@ -74,6 +73,10 @@ option(IREE_HAL_DRIVER_AMDGPU
 option(IREE_HAL_DRIVER_LOCAL_TASK
   "Enables the local-task runtime HAL driver."
   ${IREE_HAL_DRIVER_LOCAL_TASK_DEFAULT})
+if(IREE_HAL_DRIVER_LOCAL_TASK AND NOT IREE_TARGET_HAS_THREADS)
+  message(FATAL_ERROR
+    "IREE_HAL_DRIVER_LOCAL_TASK requires native thread creation support")
+endif()
 option(IREE_HAL_DRIVER_VULKAN
   "Enables the Vulkan runtime HAL driver."
   ${IREE_HAL_DRIVER_VULKAN_DEFAULT})

@@ -7,8 +7,8 @@
 # To disable autogeneration for this file entirely, delete this header.        #
 ################################################################################
 
-# Task-based executor requires threading support.
-if(NOT IREE_ENABLE_THREADING)
+# The task executor requires native thread creation.
+if(NOT IREE_TARGET_HAS_THREADS)
   return()
 endif()
 
