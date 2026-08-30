@@ -100,8 +100,6 @@ static iree_status_t loom_format_read_bytecode_module(
     loom_module_t** out_module, iree_allocator_t allocator) {
   loom_bytecode_read_options_t read_options = {
       .diagnostic_sink = diagnostic_sink,
-      .verify_module = false,
-      .verify_max_errors = 0,
       .low_repr_environment = low_asm_environment.low_repr,
   };
   loom_bytecode_read_result_t read_result = {0};

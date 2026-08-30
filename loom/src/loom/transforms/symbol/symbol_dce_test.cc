@@ -163,8 +163,6 @@ class SymbolDCETest : public ::testing::Test {
   loom_module_t* ReadModule(const std::vector<uint8_t>& bytes) {
     loom_bytecode_read_options_t options = {
         /*.diagnostic_sink=*/{},
-        /*.verify_module=*/true,
-        /*.verify_max_errors=*/20,
     };
     loom_bytecode_read_result_t result = {0};
     loom_module_t* module = nullptr;
@@ -174,6 +172,7 @@ class SymbolDCETest : public ::testing::Test {
         &result, &module, iree_allocator_system()));
     EXPECT_EQ(result.error_count, 0u);
     EXPECT_NE(module, nullptr);
+    VerifyOk(module);
     return module;
   }
 

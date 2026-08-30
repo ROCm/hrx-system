@@ -132,8 +132,6 @@ class KernelConfigMaterializerTest : public ::testing::Test {
     const std::vector<uint8_t> bytecode = Write(module);
     loom_bytecode_read_options_t options = {};
     options.diagnostic_sink = {loom_diagnostic_stderr_sink, nullptr};
-    options.verify_module = true;
-    options.verify_max_errors = 20;
     loom_bytecode_read_result_t result = {};
     loom_module_t* roundtrip_module = nullptr;
     IREE_ASSERT_OK(loom_bytecode_read_module(
@@ -875,8 +873,6 @@ kernel.def target(@dispatch_target) @dispatch_rows(%element_count: index) {
   const std::vector<uint8_t> projected_bytecode = Write(projected_module.get());
   loom_bytecode_read_options_t read_options = {};
   read_options.diagnostic_sink = {loom_diagnostic_stderr_sink, nullptr};
-  read_options.verify_module = true;
-  read_options.verify_max_errors = 20;
   loom_bytecode_read_result_t read_result = {};
   loom_module_t* roundtrip_module = nullptr;
   IREE_ASSERT_OK(loom_bytecode_read_module(

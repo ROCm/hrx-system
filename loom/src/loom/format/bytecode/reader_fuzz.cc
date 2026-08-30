@@ -26,6 +26,7 @@
 #include "loom/target/low_descriptor_registry_core_test.h"
 #include "loom/testing/context.h"
 #include "loom/testing/gen.h"
+#include "loom/verify/verify.h"
 
 //===----------------------------------------------------------------------===//
 // Shared context
@@ -95,15 +96,13 @@ static std::vector<uint8_t> fuzz_write_module(
 }
 
 static loom_bytecode_read_options_t fuzz_read_options(
-    uint8_t control_byte, uint32_t* diagnostic_count) {
+    uint32_t* diagnostic_count) {
   loom_bytecode_read_options_t options = {
       /*.diagnostic_sink=*/
       {
           /*.fn=*/fuzz_capture_diagnostic,
           /*.user_data=*/diagnostic_count,
       },
-      /*.verify_module=*/(control_byte & 1) != 0,
-      /*.verify_max_errors=*/16,
   };
   loom_low_repr_environment_initialize(&g_low_registry.registry,
                                        &options.low_repr_environment);
@@ -114,8 +113,7 @@ static void fuzz_read_arbitrary_bytecode(const uint8_t* data, size_t size,
                                          uint8_t control_byte,
                                          iree_arena_block_pool_t* block_pool) {
   uint32_t diagnostic_count = 0;
-  loom_bytecode_read_options_t options =
-      fuzz_read_options(control_byte, &diagnostic_count);
+  loom_bytecode_read_options_t options = fuzz_read_options(&diagnostic_count);
   loom_bytecode_index_options_t index_options = {
       .diagnostic_sink = options.diagnostic_sink,
   };
@@ -129,7 +127,16 @@ static void fuzz_read_arbitrary_bytecode(const uint8_t* data, size_t size,
   fuzz_ignore_status_or_trap(loom_bytecode_read_module(
       iree_make_const_byte_span(data, size), IREE_SV("fuzz.loombc"), &g_context,
       block_pool, &options, &module_result, &module, iree_allocator_system()));
-  if (module) {
+  if (module && (control_byte & 1) != 0) {
+    const loom_verify_options_t verify_options = {
+        .sink = options.diagnostic_sink,
+        .max_errors = 16,
+    };
+    loom_verify_result_t verify_result = {0};
+    fuzz_ignore_status_or_trap(
+        loom_verify_module(module, &verify_options, &verify_result));
+  }
+  if (module != NULL) {
     loom_module_free(module);
   }
 }
@@ -154,8 +161,7 @@ static void fuzz_read_generated_module(const uint8_t* data, size_t size,
 
   std::vector<uint8_t> first = fuzz_write_module(module, block_pool);
   uint32_t diagnostic_count = 0;
-  loom_bytecode_read_options_t options =
-      fuzz_read_options(control_byte, &diagnostic_count);
+  loom_bytecode_read_options_t options = fuzz_read_options(&diagnostic_count);
   loom_bytecode_read_result_t result = {0};
   loom_module_t* read_module = NULL;
   fuzz_ignore_status_or_trap(loom_bytecode_read_module(
@@ -163,6 +169,16 @@ static void fuzz_read_generated_module(const uint8_t* data, size_t size,
       IREE_SV("generated.loombc"), &g_context, block_pool, &options, &result,
       &read_module, iree_allocator_system()));
   if (result.error_count != 0 || !read_module) __builtin_trap();
+  if ((control_byte & 1) != 0) {
+    const loom_verify_options_t verify_options = {
+        .sink = options.diagnostic_sink,
+        .max_errors = 16,
+    };
+    loom_verify_result_t verify_result = {0};
+    fuzz_ignore_status_or_trap(
+        loom_verify_module(read_module, &verify_options, &verify_result));
+    if (verify_result.error_count != 0) __builtin_trap();
+  }
   std::vector<uint8_t> second = fuzz_write_module(read_module, block_pool);
   if (first != second) __builtin_trap();
 

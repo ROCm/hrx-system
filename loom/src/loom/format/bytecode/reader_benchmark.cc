@@ -29,6 +29,7 @@
 #include "loom/ops/test/registry.h"
 #include "loom/ops/test/types.h"
 #include "loom/testing/gen.h"
+#include "loom/verify/verify.h"
 
 namespace {
 
@@ -263,16 +264,13 @@ class TypePlanBytecodeFixture final : public SerializedBytecodeFixture {
   iree_host_size_t type_count_ = 0;
 };
 
-static loom_bytecode_read_options_t ReadOptions(bool verify_module,
-                                                uint32_t* diagnostic_count) {
+static loom_bytecode_read_options_t ReadOptions(uint32_t* diagnostic_count) {
   return loom_bytecode_read_options_t{
       /*.diagnostic_sink=*/
       {
           /*.fn=*/IgnoreDiagnostic,
           /*.user_data=*/diagnostic_count,
       },
-      /*.verify_module=*/verify_module,
-      /*.verify_max_errors=*/16,
   };
 }
 
@@ -309,8 +307,7 @@ static void BenchmarkReadModule(benchmark::State& state, uint8_t preset,
   iree_arena_block_pool_t block_pool;
   iree_arena_block_pool_initialize(65536, iree_allocator_system(), &block_pool);
   uint32_t diagnostic_count = 0;
-  loom_bytecode_read_options_t options =
-      ReadOptions(verify_module, &diagnostic_count);
+  loom_bytecode_read_options_t options = ReadOptions(&diagnostic_count);
 
   for (auto _ : state) {
     loom_bytecode_read_result_t result = {0};
@@ -320,6 +317,16 @@ static void BenchmarkReadModule(benchmark::State& state, uint8_t preset,
                                   fixture.bytes().size()),
         IREE_SV("benchmark.loombc"), fixture.context(), &block_pool, &options,
         &result, &module, iree_allocator_system()));
+    if (verify_module) {
+      const loom_verify_options_t verify_options = {
+          /*.sink=*/options.diagnostic_sink,
+          /*.max_errors=*/16,
+      };
+      loom_verify_result_t verify_result = {0};
+      IgnoreStatusOrAbort(
+          loom_verify_module(module, &verify_options, &verify_result));
+      benchmark::DoNotOptimize(verify_result.error_count);
+    }
     benchmark::DoNotOptimize(module);
     if (module) {
       loom_module_free(module);
@@ -425,8 +432,7 @@ static void BM_ReadModule_Catalog(benchmark::State& state) {
   if (stats.symbol_count != symbol_count) abort();
 
   uint32_t diagnostic_count = 0;
-  loom_bytecode_read_options_t options =
-      ReadOptions(/*verify_module=*/false, &diagnostic_count);
+  loom_bytecode_read_options_t options = ReadOptions(&diagnostic_count);
   for (auto _ : state) {
     loom_bytecode_read_result_t result = {};
     loom_module_t* module = nullptr;
@@ -544,8 +550,7 @@ static void BenchmarkMaterializeSelectedCatalog(benchmark::State& state) {
                                      ordinals, &block_pool);
 
   uint32_t diagnostic_count = 0;
-  loom_bytecode_read_options_t options =
-      ReadOptions(/*verify_module=*/false, &diagnostic_count);
+  loom_bytecode_read_options_t options = ReadOptions(&diagnostic_count);
   for (auto _ : state) {
     loom_bytecode_read_result_t result = {};
     loom_module_t* module = nullptr;
@@ -668,8 +673,7 @@ static void BM_ReadModule_TypePlan(benchmark::State& state) {
   iree_arena_block_pool_t block_pool;
   iree_arena_block_pool_initialize(65536, iree_allocator_system(), &block_pool);
   uint32_t diagnostic_count = 0;
-  loom_bytecode_read_options_t options =
-      ReadOptions(/*verify_module=*/false, &diagnostic_count);
+  loom_bytecode_read_options_t options = ReadOptions(&diagnostic_count);
 
   for (auto _ : state) {
     loom_bytecode_read_result_t result = {};

@@ -99,7 +99,6 @@ class PassOpsTest : public ::testing::Test {
   loom_module_t* ReadBytecode(const std::vector<uint8_t>& bytes) {
     loom_bytecode_read_options_t options = {
         /*.diagnostic_sink=*/{loom_diagnostic_stderr_sink, NULL},
-        /*.verify_module=*/true,
     };
     loom_bytecode_read_result_t result = {};
     loom_module_t* module = NULL;
@@ -109,6 +108,7 @@ class PassOpsTest : public ::testing::Test {
         &module, iree_allocator_system()));
     EXPECT_NE(module, nullptr);
     EXPECT_EQ(result.error_count, 0u);
+    VerifyOk(module);
     return module;
   }
 

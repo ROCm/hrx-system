@@ -136,7 +136,6 @@ loom_cc_library(
     loom::format::bytecode::reader::validation
     loom::format::low_repr
     loom::ir
-    loom::verify
   PUBLIC
 )
 
@@ -153,7 +152,6 @@ loom_cc_library(
     iree::base::internal::arena
     loom::format::bytecode::reader::selected_materializer
     loom::format::bytecode::reader::validation
-    loom::verify
   PUBLIC
 )
 
@@ -201,6 +199,7 @@ loom_cc_test(
     loom::ops::template
     loom::ops::test
     loom::ops::type_registry
+    loom::verify
 )
 
 loom_cc_test(
@@ -286,6 +285,7 @@ loom_cc_fuzz(
     loom::target::low_descriptor_registry_core_test
     loom::testing::context
     loom::testing::gen
+    loom::verify
 )
 
 loom_cc_fuzz(
@@ -320,6 +320,7 @@ loom_cc_benchmark(
     loom::ir
     loom::ops::test
     loom::testing::gen
+    loom::verify
   TESTONLY
 )
 

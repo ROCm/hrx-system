@@ -123,8 +123,6 @@ class KernelClassMaterializerTest : public ::testing::Test {
         {
             /*.fn=*/loom_diagnostic_stderr_sink,
         },
-        /*.verify_module=*/true,
-        /*.verify_max_errors=*/20,
     };
     loom_bytecode_read_result_t read_result = {};
     loom_module_t* round_tripped_module = nullptr;
@@ -133,6 +131,7 @@ class KernelClassMaterializerTest : public ::testing::Test {
         IREE_SV("kernel_class.loombc"), &context_, &block_pool_, &read_options,
         &read_result, &round_tripped_module, iree_allocator_system()));
     EXPECT_EQ(read_result.error_count, 0u);
+    Verify(round_tripped_module);
     return ModulePtr(round_tripped_module);
   }
 

@@ -23,16 +23,8 @@ extern "C" {
 
 // Options controlling bytecode IR materialization.
 typedef struct loom_bytecode_read_options_t {
-  // Sink for structured malformed-bytecode and verification diagnostics.
+  // Sink for structured malformed-bytecode diagnostics.
   loom_diagnostic_sink_t diagnostic_sink;
-
-  // Runs the module verifier after successful materialization. Verification
-  // diagnostics are emitted to diagnostic_sink and counted in the read result.
-  bool verify_module;
-
-  // Maximum verifier errors to emit when verify_module is set. Zero means
-  // unlimited, matching loom_verify_options_t.
-  uint32_t verify_max_errors;
 
   // Stable-key codec required when materializing Low function bodies.
   loom_low_repr_environment_t low_repr_environment;

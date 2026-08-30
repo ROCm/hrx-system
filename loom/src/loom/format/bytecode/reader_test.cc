@@ -28,6 +28,7 @@
 #include "loom/ops/test/ops.h"
 #include "loom/ops/test/registry.h"
 #include "loom/ops/test/types.h"
+#include "loom/verify/verify.h"
 
 namespace loom {
 namespace {
@@ -75,6 +76,28 @@ static iree_status_t DeferDiagnostic(void* user_data,
   (void)user_data;
   (void)diagnostic;
   return iree_status_from_code(IREE_STATUS_DEFERRED);
+}
+
+static iree_status_t VerifyMaterializedModule(
+    bool verify_module, const loom_bytecode_read_options_t& read_options,
+    loom_bytecode_read_result_t* read_result, loom_module_t** inout_module) {
+  if (!verify_module || read_result->error_count != 0 ||
+      *inout_module == nullptr) {
+    return iree_ok_status();
+  }
+  const loom_verify_options_t verify_options = {
+      /*.sink=*/read_options.diagnostic_sink,
+  };
+  loom_verify_result_t verify_result = {0};
+  iree_status_t status =
+      loom_verify_module(*inout_module, &verify_options, &verify_result);
+  read_result->error_count += verify_result.error_count;
+  read_result->warning_count += verify_result.warning_count;
+  if (!iree_status_is_ok(status) || verify_result.error_count != 0) {
+    loom_module_free(*inout_module);
+    *inout_module = nullptr;
+  }
+  return status;
 }
 
 class ReaderTest : public ::testing::Test {
@@ -1538,12 +1561,13 @@ class ReaderTest : public ::testing::Test {
             /*.fn=*/CaptureDiagnostic,
             /*.user_data=*/error_ids,
         },
-        /*.verify_module=*/verify_module,
     };
     IREE_CHECK_OK(loom_bytecode_read_module(
         iree_make_const_byte_span(bytes.data(), bytes.size()),
         IREE_SV("test.loombc"), context, &block_pool_, &options, &result,
         out_module, iree_allocator_system()));
+    IREE_CHECK_OK(
+        VerifyMaterializedModule(verify_module, options, &result, out_module));
     return result;
   }
 
@@ -1565,12 +1589,13 @@ class ReaderTest : public ::testing::Test {
             /*.fn=*/CaptureDiagnostic,
             /*.user_data=*/error_ids,
         },
-        /*.verify_module=*/verify_module,
     };
     IREE_CHECK_OK(loom_bytecode_read_module_ordinal(
         iree_make_const_byte_span(bytes.data(), bytes.size()),
         IREE_SV("test.loombc"), &context_, &block_pool_, module_ordinal,
         &options, &result, out_module, iree_allocator_system()));
+    IREE_CHECK_OK(
+        VerifyMaterializedModule(verify_module, options, &result, out_module));
     return result;
   }
 
@@ -1586,7 +1611,6 @@ class ReaderTest : public ::testing::Test {
             /*.fn=*/CaptureDiagnostic,
             /*.user_data=*/error_ids,
         },
-        /*.verify_module=*/verify_module,
     };
     IREE_CHECK_OK(loom_bytecode_materialize_module_symbols(
         iree_make_const_byte_span(bytes.data(), bytes.size()),
@@ -1597,6 +1621,8 @@ class ReaderTest : public ::testing::Test {
             /*.ordinals=*/ordinals.data(),
         },
         &options, &result, out_module, iree_allocator_system()));
+    IREE_CHECK_OK(
+        VerifyMaterializedModule(verify_module, options, &result, out_module));
     return result;
   }
 
@@ -2572,39 +2598,6 @@ TEST_F(ReaderTest, DiagnosticSinkCannotUsePrivateDeferredMarker) {
           IREE_SV("test.loombc"), &context_, &block_pool_, &options, &result));
 
   EXPECT_EQ(result.error_count, 123u);
-}
-
-TEST_F(ReaderTest, VerifierDeferredStatusEscapesPublicBoundary) {
-  loom_module_t* module = CreateFunctionModule();
-  loom_op_t* func_op = module->symbols.entries[0].defining_op;
-  loom_block_t* entry_block = loom_region_entry_block(
-      loom_func_like_body(loom_func_like_cast(module, func_op)));
-  IREE_ASSERT_OK(loom_op_erase(module, entry_block->last_op));
-  auto bytes = WriteModule(module);
-  loom_module_free(module);
-
-  loom_bytecode_read_result_t result = {
-      /*.error_count=*/123,
-  };
-  loom_bytecode_read_options_t options = {
-      /*.diagnostic_sink=*/
-      {
-          /*.fn=*/DeferDiagnostic,
-          /*.user_data=*/nullptr,
-      },
-      /*.verify_module=*/true,
-  };
-  loom_module_t* read_module = nullptr;
-
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_DEFERRED,
-      loom_bytecode_read_module(
-          iree_make_const_byte_span(bytes.data(), bytes.size()),
-          IREE_SV("test.loombc"), &context_, &block_pool_, &options, &result,
-          &read_module, iree_allocator_system()));
-
-  EXPECT_EQ(result.error_count, 123u);
-  EXPECT_EQ(read_module, nullptr);
 }
 
 TEST_F(ReaderTest, AcceptsFunctionMetadata) {

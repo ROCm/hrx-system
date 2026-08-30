@@ -218,11 +218,6 @@ class ReaderCorpusTest : public ::testing::Test {
             /*.fn=*/CaptureDiagnostic,
             /*.user_data=*/error_ids,
         },
-        // The checked-in text corpus is a syntax/format corpus. Some entries
-        // intentionally exercise constructs without being standalone semantic
-        // programs, so this test isolates bytecode reader/writer canonicality.
-        /*.verify_module=*/false,
-        /*.verify_max_errors=*/20,
         /*.low_repr_environment=*/low_repr_environment,
     };
     loom_bytecode_read_result_t result = {0};

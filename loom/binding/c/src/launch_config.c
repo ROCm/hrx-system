@@ -24,6 +24,7 @@
 #include "loom/ops/func/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/pass/value_facts.h"
+#include "loom/verify/verify.h"
 #include "loomc/iree.h"
 
 enum {
@@ -340,10 +341,7 @@ static loomc_status_t loomc_launch_config_program_load_impl(
   loomc_status_t status = loomc_context_create(
       /*options=*/NULL, allocator, &program->context);
   if (loomc_status_is_ok(status)) {
-    loom_bytecode_read_options_t read_options = {
-        .verify_module = true,
-        .verify_max_errors = 1,
-    };
+    loom_bytecode_read_options_t read_options = {0};
     loom_bytecode_read_result_t read_result = {0};
     iree_string_view_t identifier =
         iree_string_view_from_loomc(artifact->identifier);
@@ -360,7 +358,20 @@ static loomc_status_t loomc_launch_config_program_load_impl(
         (read_result.error_count != 0 || program->module == NULL)) {
       status = loomc_make_status(
           LOOMC_STATUS_INVALID_ARGUMENT,
-          "launch config artifact is not valid verified Loom bytecode");
+          "launch config artifact is not valid Loom bytecode");
+    }
+    if (loomc_status_is_ok(status)) {
+      const loom_verify_options_t verify_options = {
+          .max_errors = 1,
+      };
+      loom_verify_result_t verify_result = {0};
+      status = loomc_status_from_iree(
+          loom_verify_module(program->module, &verify_options, &verify_result));
+      if (loomc_status_is_ok(status) && verify_result.error_count != 0) {
+        status = loomc_make_status(
+            LOOMC_STATUS_INVALID_ARGUMENT,
+            "launch config artifact contains invalid Loom IR");
+      }
     }
   }
   if (loomc_status_is_ok(status)) {
