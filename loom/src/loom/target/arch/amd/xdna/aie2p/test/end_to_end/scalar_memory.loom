@@ -1,0 +1,12 @@
+aie2p.target<core> @target
+
+func.def public target(@target) @scalar_memory(%input: buffer, %output: buffer, %element0: index) -> (i32) {
+  %element = index.assume %element0 [range(%element0, 0, 7)] : index
+  %base = index.constant 0 : offset
+  %input_aligned, %output_aligned = buffer.assume.alignment %input, %output {minimum_alignment = 4} : buffer, buffer
+  %input_view = buffer.view %input_aligned[%base] : buffer -> view<8xi32>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<8xi32>
+  %value = view.load %input_view[%element] : view<8xi32> -> i32
+  view.store %value, %output_view[%element] : i32, view<8xi32>
+  func.return %value : i32
+}

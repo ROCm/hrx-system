@@ -115,6 +115,36 @@
       ]
     },
     {
+      "name": "compiles indexed scalar memory to an AIE2P tile image",
+      "run": {
+        "tool": "loom-compile",
+        "args": [
+          "{srcdir}/scalar_memory.loom",
+          "--backend=elf-aie2p",
+          "--output={tmp}/scalar_memory.elf",
+          "--compile-report=details"
+        ]
+      },
+      "stderr": {
+        "contains": {
+          "unordered": [
+            "\"artifact_kind\":\"target-artifact\"",
+            "\"backend\":\"amd-xdna-aie2p-tile-elf\"",
+            "\"artifact_format\":\"elf\"",
+            "\"status\":{\"code\":0,\"name\":\"OK\"}",
+            "\"spill_count\":0",
+            "\"emission\":{\"instruction_count\":12,\"code_byte_count\":38,\"code_storage_byte_count\":38}"
+          ]
+        }
+      },
+      "files": [
+        {
+          "path": "{tmp}/scalar_memory.elf",
+          "non_empty": true
+        }
+      ]
+    },
+    {
       "name": "compiles integer vectors to an AIE2P tile image",
       "run": {
         "tool": "loom-compile",

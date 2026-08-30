@@ -1,0 +1,213 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/memory_scalar_addressing.loom-test
+// RUN: emit source-low output=low
+
+aie2p.target<core> @target
+func.def target(@target) @scalar_static_rank2_i32(%input: buffer, %output: buffer) -> (i32) {
+  %input_base = index.constant 8 : offset
+  %output_base = index.constant 12 : offset
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %input_view = buffer.view %input_aligned[%input_base] : buffer -> view<2x4xi32>
+  %output_view = buffer.view %output_aligned[%output_base] : buffer -> view<2x4xi32>
+  %loaded = view.load %input_view[1, 2] : view<2x4xi32> -> i32
+  view.store %loaded, %output_view[0, 3] : i32, view<2x4xi32>
+  func.return %loaded : i32
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_static_rank2_i32() -> (reg<aie2p.er>) asm {
+  %input_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %16 = mov.static-byte-offset 32
+  %17 = mov.address-index %16
+  %loaded = lda.index %input_view, %17
+  st %loaded, %output_view, 24
+  return %loaded
+}
+
+// ====
+
+aie2p.target<core> @target
+func.def target(@target) @scalar_dynamic_view_base_i32(%input: buffer, %output: buffer, %base: offset) -> (i32) {
+  %base_aligned = index.assume %base [range(%base, 0, 4092), mul(%base, 4)] : offset
+  %output_base = index.constant 0 : offset
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %input_view = buffer.view %input_aligned[%base_aligned] : buffer -> view<4xi32>
+  %output_view = buffer.view %output_aligned[%output_base] : buffer -> view<1xi32>
+  %loaded = view.load %input_view[2] : view<4xi32> -> i32
+  view.store %loaded, %output_view[0] : i32, view<1xi32>
+  func.return %loaded : i32
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_dynamic_view_base_i32(%base_aligned: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+  %input_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %15 = add %base_aligned, 8
+  %16 = mov.address-index %15
+  %loaded = lda.index %input_view, %16
+  st %loaded, %output_view, 0
+  return %loaded
+}
+
+// ====
+
+aie2p.target<core> @target
+func.def target(@target) @scalar_materialized_view_base_suffix_i32(%input: buffer, %output: buffer, %base: offset) -> (i32) {
+  %base_aligned = index.assume %base [range(%base, 0, 4056), mul(%base, 4)] : offset
+  %bias = index.constant 4 : offset
+  %biased_base = index.add %base_aligned, %bias : offset
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %input_view = buffer.view %input_aligned[%biased_base] : buffer -> view<8xi32>
+  %output_view = buffer.view %output_aligned[%biased_base] : buffer -> view<8xi32>
+  %loaded = view.load %input_view[2] : view<8xi32> -> i32
+  view.store %loaded, %output_view[3] : i32, view<8xi32>
+  func.return %loaded : i32
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_materialized_view_base_suffix_i32(%base_aligned: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+  %input_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %16 = add %base_aligned, 12
+  %17 = mov.address-index %16
+  %loaded = lda.index %input_view, %17
+  %19 = add %base_aligned, 16
+  %20 = mov.address-index %19
+  st.index %loaded, %output_view, %20
+  return %loaded
+}
+
+// ====
+
+aie2p.target<core> @target
+func.def target(@target) @scalar_dynamic_index_i32(%input: buffer, %output: buffer, %element: index) -> (i32) {
+  %buffer_base = index.constant 0 : offset
+  %element_bounded = index.assume %element [range(%element, 0, 7)] : index
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %input_view = buffer.view %input_aligned[%buffer_base] : buffer -> view<8xi32>
+  %output_view = buffer.view %output_aligned[%buffer_base] : buffer -> view<8xi32>
+  %loaded = view.load %input_view[%element_bounded] : view<8xi32> -> i32
+  view.store %loaded, %output_view[%element_bounded] : i32, view<8xi32>
+  func.return %loaded : i32
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_dynamic_index_i32(%element_bounded: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+  %input_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %15 = mov.i32 2
+  %16 = lshl %element_bounded, %15
+  %17 = mov.address-index %16
+  %loaded = lda.index %input_view, %17
+  st.index %loaded, %output_view, %17
+  return %loaded
+}
+
+// ====
+
+aie2p.target<core> @target
+func.def target(@target) @scalar_mixed_rank2_i32(%input: buffer, %output: buffer, %base: offset, %row: index, %column: index) -> (i32) {
+  %base_aligned = index.assume %base [range(%base, 0, 4092), mul(%base, 4)] : offset
+  %row_bounded = index.assume %row [range(%row, 0, 3)] : index
+  %column_bounded = index.assume %column [range(%column, 0, 7)] : index
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %input_view = buffer.view %input_aligned[%base_aligned] : buffer -> view<4x8xi32>
+  %output_view = buffer.view %output_aligned[%base_aligned] : buffer -> view<4x8xi32>
+  %loaded = view.load %input_view[%row_bounded, %column_bounded] : view<4x8xi32> -> i32
+  view.store %loaded, %output_view[%row_bounded, %column_bounded] : i32, view<4x8xi32>
+  func.return %loaded : i32
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_mixed_rank2_i32(%base_aligned: reg<aie2p.er>, %row_bounded: reg<aie2p.er>, %column_bounded: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+  %input_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %27 = mov.i32 5
+  %28 = lshl %row_bounded, %27
+  %29 = add.rr %base_aligned, %28
+  %30 = mov.i32 2
+  %31 = lshl %column_bounded, %30
+  %32 = add.rr %29, %31
+  %33 = mov.address-index %32
+  %loaded = lda.index %input_view, %33
+  %37 = add.rr %base_aligned, %28
+  %40 = add.rr %37, %31
+  %41 = mov.address-index %40
+  st.index %loaded, %output_view, %41
+  return %loaded
+}
+
+// ====
+
+aie2p.target<core> @target
+func.def target(@target) @scalar_dynamic_stride_i32(%input: buffer, %output: buffer, %columns: index, %row: index, %column: index) -> (i32) {
+  %buffer_base = index.constant 0 : offset
+  %columns_bounded = index.assume %columns [range(%columns, 1, 8)] : index
+  %row_bounded = index.assume %row [range(%row, 0, 3)] : index
+  %column_bounded = index.assume %column [range(%column, 0, 7), lt(%column, %columns_bounded)] : index
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %input_view = buffer.view %input_aligned[%buffer_base] : buffer -> view<4x[%columns_bounded]xi32>
+  %output_view = buffer.view %output_aligned[%buffer_base] : buffer -> view<4x[%columns_bounded]xi32>
+  %loaded = view.load %input_view[%row_bounded, %column_bounded] : view<4x[%columns_bounded]xi32> -> i32
+  view.store %loaded, %output_view[%row_bounded, %column_bounded] : i32, view<4x[%columns_bounded]xi32>
+  func.return %loaded : i32
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_dynamic_stride_i32(%columns_bounded: reg<aie2p.er>, %row_bounded: reg<aie2p.er>, %column_bounded: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+  %input_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %21 = mul %row_bounded, %columns_bounded
+  %22 = mov.i32 2
+  %23 = lshl %21, %22
+  %25 = lshl %column_bounded, %22
+  %26 = add.rr %23, %25
+  %27 = mov.address-index %26
+  %loaded = lda.index %input_view, %27
+  %34 = add.rr %23, %25
+  %35 = mov.address-index %34
+  st.index %loaded, %output_view, %35
+  return %loaded
+}
+
+// ====
+
+aie2p.target<core> @target
+func.def target(@target) @scalar_subview_dynamic_index_i32(%input: buffer, %output: buffer, %base: offset, %element: index) -> (i32) {
+  %base_aligned = index.assume %base [range(%base, 0, 4064), mul(%base, 4)] : offset
+  %element_bounded = index.assume %element [range(%element, 0, 3)] : index
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %input_view = buffer.view %input_aligned[%base_aligned] : buffer -> view<8xi32>
+  %output_view = buffer.view %output_aligned[%base_aligned] : buffer -> view<8xi32>
+  %input_subview = view.subview %input_view[1] : view<8xi32> -> view<4xi32>
+  %output_subview = view.subview %output_view[1] : view<8xi32> -> view<4xi32>
+  %input_refined = view.refine %input_subview : view<4xi32> -> view<4xi32>
+  %output_refined = view.refine %output_subview : view<4xi32> -> view<4xi32>
+  %loaded = view.load %input_refined[%element_bounded] : view<4xi32> -> i32
+  view.store %loaded, %output_refined[%element_bounded] : i32, view<4xi32>
+  func.return %loaded : i32
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_subview_dynamic_index_i32(%base_aligned: reg<aie2p.er>, %element_bounded: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+  %input_refined = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %output_refined = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %21 = mov.i32 2
+  %22 = lshl %element_bounded, %21
+  %23 = add.rr %base_aligned, %22
+  %24 = add %23, 4
+  %25 = mov.address-index %24
+  %loaded = lda.index %input_refined, %25
+  %29 = add.rr %base_aligned, %22
+  %30 = add %29, 4
+  %31 = mov.address-index %30
+  st.index %loaded, %output_refined, %31
+  return %loaded
+}

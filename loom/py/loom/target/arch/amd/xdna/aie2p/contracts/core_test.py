@@ -14,6 +14,7 @@ from loom.dialect.scalar import comparison as scalar_comparison
 from loom.dialect.scalar import conversion as scalar_conversion
 from loom.dialect.scf import defs as scf
 from loom.dialect.vector import defs as vector
+from loom.dialect.view import defs as view
 from loom.target.arch.amd.xdna.aie2p.contracts.core import (
     _I16_ELEMENTWISE_MULTIPLY_CONTROL,
     AIE2P_CORE_CONTRACT_FRAGMENT,
@@ -36,7 +37,7 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
         for case in AIE2P_CORE_CONTRACT_FRAGMENT.cases
         if isinstance(case, DescriptorRule)
     )
-    assert len(rules) == 221
+    assert len(rules) == 231
 
     address_constant_rules = [
         rule for rule in rules if rule.source_op is index.index_constant
@@ -187,6 +188,79 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
         immediate = emit.immediates["imm"]
         assert isinstance(immediate, SourceMemoryProject)
         assert immediate.kind is SourceMemoryProjectKind.STATIC_BYTE_OFFSET
+
+    scalar_memory_rules = [
+        rule for rule in rules if rule.source_op in (view.view_load, view.view_store)
+    ]
+    assert [rule.descriptor.key for rule in scalar_memory_rules] == [
+        "amd.xdna.aie2p.load.scalar.indexed.immediate",
+        "amd.xdna.aie2p.load.scalar.indexed.register",
+        "amd.xdna.aie2p.load.scalar.indexed.register",
+        "amd.xdna.aie2p.load.scalar.indexed.register",
+        "amd.xdna.aie2p.load.scalar.indexed.register",
+        "amd.xdna.aie2p.store.scalar.indexed.immediate",
+        "amd.xdna.aie2p.store.scalar.indexed.register",
+        "amd.xdna.aie2p.store.scalar.indexed.register",
+        "amd.xdna.aie2p.store.scalar.indexed.register",
+        "amd.xdna.aie2p.store.scalar.indexed.register",
+    ]
+    assert [len(rule.emit) for rule in scalar_memory_rules] == [
+        1,
+        3,
+        2,
+        3,
+        4,
+        1,
+        3,
+        2,
+        3,
+        4,
+    ]
+    for rule in (
+        scalar_memory_rules[1],
+        scalar_memory_rules[4],
+        scalar_memory_rules[6],
+        scalar_memory_rules[9],
+    ):
+        assert rule.emit[0].descriptor.key == (
+            "amd.xdna.aie2p.materialize.static-byte-offset.i32"
+        )
+    expected_address_constraints = (
+        (-32, 28, 0, 0, False),
+        (-(2**31), (2**31) - 1, 0, 0, False),
+        (0, 0, None, 1, True),
+        (-64, 63, None, 1, True),
+        (-(2**31), (2**31) - 1, None, 1, True),
+    ) * 2
+    for rule in scalar_memory_rules:
+        memory_emit = rule.emit[-1]
+        constraint = memory_emit.source_memory
+        assert constraint is not None
+        assert constraint.root_kind is SourceMemoryRootKind.BLOCK_ARGUMENT
+        assert constraint.address_layout is SourceMemoryAddressLayout.COMPACT_ROW_MAJOR
+        assert constraint.memory_spaces == ("unknown", "generic", "workgroup")
+        assert constraint.element_byte_count == 4
+        assert constraint.vector_lane_count == 1
+        assert constraint.vector_lane_byte_stride == 4
+        assert constraint.minimum_alignment == 4
+    assert (
+        tuple(
+            (
+                rule.emit[-1].source_memory.static_byte_offset_minimum,
+                rule.emit[-1].source_memory.static_byte_offset_maximum,
+                rule.emit[-1].source_memory.dynamic_term_count,
+                rule.emit[-1].source_memory.dynamic_term_count_minimum,
+                rule.emit[-1].source_memory.allow_dynamic_stride_values,
+            )
+            for rule in scalar_memory_rules
+        )
+        == expected_address_constraints
+    )
+    assert scalar_memory_rules[0].emit[0].immediates == {
+        "imm": SourceMemoryProject.static_byte_offset()
+    }
+    for rule in scalar_memory_rules[1:5] + scalar_memory_rules[6:]:
+        assert rule.emit[-2].descriptor.key == ("amd.xdna.aie2p.move.to.address-index")
 
     constant_rules = [
         rule for rule in rules if rule.source_op is scalar_conversion.scalar_constant
@@ -584,6 +658,12 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
     ]
     assert len(buffer_view_rules) == 1
     assert buffer_view_rules[0].guards == ()
+    assert (
+        len([rule for rule in alias_rules if rule.source_op is view.view_subview]) == 1
+    )
+    assert (
+        len([rule for rule in alias_rules if rule.source_op is view.view_refine]) == 1
+    )
     assert (
         len([rule for rule in alias_rules if rule.source_op is vector.vector_bitcast])
         == 9
