@@ -21,12 +21,10 @@ loom_cc_library(
     name = "lower",
     srcs = [
         "contraction.c",
-        "packed_dot.c",
         "registry.c",
     ],
     hdrs = [
         "contraction.h",
-        "internal.h",
         "lower.h",
     ],
     visibility = _X86_ROOT_VISIBILITY,

@@ -45,7 +45,7 @@ struct ScopedEnumPacket {
 static iree_status_t CaptureDiagnostic(void* user_data,
                                        const loom_diagnostic_t* diagnostic) {
   auto* error_ids = static_cast<std::vector<std::string>*>(user_data);
-  error_ids->push_back(diagnostic->error->error_id);
+  error_ids->push_back(loom_error_def_id(diagnostic->error));
   return loom_diagnostic_stderr_sink(nullptr, diagnostic);
 }
 

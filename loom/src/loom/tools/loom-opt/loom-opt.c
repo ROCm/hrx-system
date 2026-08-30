@@ -328,7 +328,7 @@ static iree_status_t loom_opt_diagnostic_emitter_emit(
   }
 
   loom_diagnostic_t diagnostic = {
-      .severity = emission->error->severity,
+      .severity = loom_error_def_severity(emission->error),
       .error = emission->error,
       .params = emission->params,
       .param_count = emission->param_count,

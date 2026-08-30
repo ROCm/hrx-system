@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from loom.gen.support.c import c_i64_literal as _c_i64_literal
-from loom.gen.support.c import c_string_literal as _c_string_literal
+from loom.gen.support.string_pool import CStringPool
 from loom.gen.target.contracts import lower_rule_spelling
 from loom.target.contracts import (
     LOWER_EMIT_FLAG_BIND_RESULTS_TO_REFS,
@@ -24,6 +24,7 @@ from loom.target.contracts import (
     GuardKind,
     LowerAttrCopy,
     LowerAttrCopyKind,
+    LowerDiagnostic,
     LowerDiagnosticParam,
     LowerEmit,
     LowerEmitKind,
@@ -105,6 +106,22 @@ def attr_copy_uses_value_ref(kind: LowerAttrCopyKind) -> bool:
     return kind in _ATTR_COPY_VALUE_REF_KINDS
 
 
+def diagnostic_has_implicit_target_context(row: LowerDiagnostic) -> bool:
+    """Returns whether a diagnostic carries authored target context."""
+
+    return row.target_context_param_count != 0
+
+
+def diagnostic_stored_params(
+    row: LowerDiagnostic,
+) -> tuple[LowerDiagnosticParam, ...]:
+    """Returns parameter rows that must be stored in the generated C table."""
+
+    if not diagnostic_has_implicit_target_context(row):
+        return row.params
+    return row.params[row.target_context_param_count :]
+
+
 def emit_optional_array(
     name: str,
     c_type: str,
@@ -117,6 +134,19 @@ def emit_optional_array(
         lines.append("    {")
         lines.extend(f"        {field}," for field in row)
         lines.append("    },")
+    lines.extend(["};", ""])
+    return lines
+
+
+def emit_optional_value_array(
+    name: str,
+    c_type: str,
+    values: list[str],
+) -> list[str]:
+    if not values:
+        return []
+    lines = [f"static const {c_type} {name}[] = {{"]
+    lines.extend(f"    {value}," for value in values)
     lines.extend(["};", ""])
     return lines
 
@@ -151,7 +181,14 @@ def value_ref_row(row: LowerValueRef) -> list[str]:
 def source_memory_row(
     descriptor_refs: Mapping[str, int],
     row: LowerSourceMemory,
+    *,
+    byte_offset_immediate_string_offset: str | None = None,
+    address_immediate_string_offset: str | None = None,
 ) -> list[str]:
+    if row.byte_offset_materializer is not None and byte_offset_immediate_string_offset is None:
+        raise ValueError("source-memory byte-offset materializer is missing its string offset")
+    if row.address_materializer is not None and address_immediate_string_offset is None:
+        raise ValueError("source-memory address materializer is missing its string offset")
     constraint = row.constraint
     fields: list[str] = []
     flags: list[str] = []
@@ -291,8 +328,8 @@ def source_memory_row(
         )
         _append_field(
             fields,
-            "byte_offset_const_i64_immediate",
-            f'IREE_SVL("{_c_string_literal(materializer.const_i64_immediate)}")',
+            "byte_offset_const_i64_immediate_string_offset",
+            byte_offset_immediate_string_offset,
             always=True,
         )
         _append_field(
@@ -357,8 +394,8 @@ def source_memory_row(
         )
         _append_field(
             fields,
-            "address_const_coordinate_immediate",
-            f'IREE_SVL("{_c_string_literal(materializer.const_coordinate_immediate)}")',
+            "address_const_coordinate_immediate_string_offset",
+            address_immediate_string_offset,
             always=True,
         )
         _append_field(
@@ -443,16 +480,8 @@ def descriptor_ref_keys(table: CompiledLowerRuleSet, source_contract: ContractFr
     return tuple(descriptor.key for descriptor in source_contract.descriptor_set.descriptors if descriptor.key in used_keys)
 
 
-def descriptor_ref_row(key: str) -> list[str]:
-    return [f'.key = IREE_SVL("{_c_string_literal(key)}")']
-
-
-def report_key_row(key: str) -> list[str]:
-    literal = _c_string_literal(key)
-    return [
-        f'.data = "{literal}"',
-        f'.size = IREE_ARRAYSIZE("{literal}") - 1',
-    ]
+def descriptor_ref_row(key_string_offset: str) -> list[str]:
+    return [f".key_string_offset = {key_string_offset}"]
 
 
 def _descriptor_ref_index(descriptor_refs: Mapping[str, int], descriptor: Descriptor | None) -> int:
@@ -500,7 +529,19 @@ def guard_row(descriptor_refs: Mapping[str, int], row: LowerGuard) -> list[str]:
         _append_field(fields, "attr_index", row.attr_index, always=True)
 
     if row.kind == GuardKind.VALUE_TYPE:
-        _append_field(fields, "type_pattern_index", row.type_pattern_index, always=True)
+        _append_field(
+            fields,
+            "index",
+            f"{{.type_pattern_index = {row.type_pattern_index}}}",
+            always=True,
+        )
+    elif row.kind == GuardKind.I64_ARRAY_ELEMENT_RANGE:
+        _append_field(
+            fields,
+            "index",
+            f"{{.element_index = {row.u64}}}",
+            always=True,
+        )
     if row.diagnostic_index != 0xFFFF:
         _append_field(
             fields,
@@ -510,31 +551,31 @@ def guard_row(descriptor_refs: Mapping[str, int], row: LowerGuard) -> list[str]:
         )
     if row.kind == GuardKind.ATTR_KIND:
         _append_field(fields, "attr_kind", lower_rule_spelling.attr_kind_c_name(row.attr_kind), always=True)
+    u64_payload: str | None = None
     if row.kind in (
         GuardKind.ENUM_ATTR_EQUALS,
         GuardKind.OPERAND_SEGMENT_COUNT,
         GuardKind.LOW_VALUE_REGISTER_UNIT_COUNT,
         GuardKind.VALUE_STATIC_DIM0_MULTIPLE,
         GuardKind.I64_ARRAY_COUNT,
-        GuardKind.I64_ARRAY_ELEMENT_RANGE,
         GuardKind.VALUE_SIGNED_BIT_COUNT,
         GuardKind.VALUE_UNSIGNED_BIT_COUNT,
         GuardKind.VALUE_U32_DIVISOR_MAGIC_IS_ADD,
         GuardKind.VALUE_FLOAT_EQUALS,
         GuardKind.INSTANCE_FLAGS_HAS_ALL,
-        GuardKind.VALUE_PACKED_INTEGER_PAYLOAD_FROM_LANES,
-        GuardKind.VALUE_PACKED_INTEGER_LANES_FROM_PAYLOAD,
     ):
-        _append_field(fields, "u64", lower_rule_spelling.u64_c_literal(row.u64), always=True)
-    if row.kind == GuardKind.VALUE_STORAGE_ELEMENT_FORMAT:
+        u64_payload = lower_rule_spelling.u64_c_literal(row.u64)
+    elif row.kind == GuardKind.VALUE_STORAGE_ELEMENT_FORMAT:
         if row.u64_c_expression is None:
             raise ValueError("storage element-format guard is missing expression")
-        _append_field(fields, "u64", row.u64_c_expression, always=True)
-    if row.kind == GuardKind.VALUE_MEMORY_SPACE:
+        u64_payload = row.u64_c_expression
+    elif row.kind == GuardKind.VALUE_MEMORY_SPACE:
+        u64_payload = lower_rule_spelling.memory_space_mask(row.memory_spaces)
+    if u64_payload is not None:
         _append_field(
             fields,
-            "u64",
-            lower_rule_spelling.memory_space_mask(row.memory_spaces),
+            "payload",
+            f"{{.u64 = {u64_payload}}}",
             always=True,
         )
     if row.kind == GuardKind.DESCRIPTOR_AVAILABLE:
@@ -551,38 +592,39 @@ def guard_row(descriptor_refs: Mapping[str, int], row: LowerGuard) -> list[str]:
         GuardKind.I64_ARRAY_ELEMENT_RANGE,
         GuardKind.I64_ARRAY_ELEMENTS_RANGE,
         GuardKind.VALUE_I64_RANGE,
+    ):
+        _append_field(
+            fields,
+            "payload",
+            f"{{.i64_range = {{.minimum = {_c_i64_literal(row.minimum_i64)}, .maximum = {_c_i64_literal(row.maximum_i64)}}}}}",
+            always=True,
+        )
+    elif row.kind in (
         GuardKind.VALUE_PACKED_INTEGER_PAYLOAD_FROM_LANES,
         GuardKind.VALUE_PACKED_INTEGER_LANES_FROM_PAYLOAD,
     ):
         _append_field(
             fields,
-            "minimum_i64",
-            _c_i64_literal(row.minimum_i64),
-            always=True,
-        )
-    if row.kind in (
-        GuardKind.I64_RANGE,
-        GuardKind.I64_ARRAY_ELEMENT_RANGE,
-        GuardKind.I64_ARRAY_ELEMENTS_RANGE,
-        GuardKind.VALUE_I64_RANGE,
-        GuardKind.VALUE_PACKED_INTEGER_LANES_FROM_PAYLOAD,
-    ):
-        _append_field(
-            fields,
-            "maximum_i64",
-            _c_i64_literal(row.maximum_i64),
+            "payload",
+            f"{{.packed_integer = {{.storage_payload_multiple = UINT32_C({row.u64}), .storage_unit_bit_count = UINT32_C({row.minimum_i64}), .maximum_lane_count = UINT32_C({row.maximum_i64})}}}}",
             always=True,
         )
     return fields
 
 
-def attr_copy_row(row: LowerAttrCopy) -> list[str]:
+def attr_copy_row(
+    row: LowerAttrCopy,
+    *,
+    target_name_string_offset: str | None = None,
+) -> list[str]:
+    if target_name_string_offset is None:
+        raise ValueError("attribute-copy row is missing its target-name string offset")
     fields: list[str] = []
     _append_field(fields, "kind", lower_rule_spelling.ATTR_COPY_KIND_C_NAMES[row.kind], always=True)
     _append_field(
         fields,
-        "target_name",
-        f'IREE_SVL("{_c_string_literal(row.target_name)}")',
+        "target_name_string_offset",
+        target_name_string_offset,
         always=True,
     )
     if row.kind in (
@@ -777,6 +819,8 @@ def rule_set_row(
     *,
     table: CompiledLowerRuleSet,
     source_contract: ContractFragment,
+    string_pool: CStringPool,
+    string_data_name: str,
     spans_name: str,
     rules_name: str,
     report_keys: tuple[str, ...],
@@ -797,9 +841,16 @@ def rule_set_row(
     fields: list[str] = []
     if source_contract.target_contract_query:
         fields.append(".flags = LOOM_LOW_LOWER_RULE_SET_FLAG_TARGET_CONTRACT_QUERY")
+    if string_pool.entries:
+        fields.append(f".string_table = {{.data = {string_data_name}, .data_length = sizeof({string_data_name}) - 1}}")
     _append_table_fields(fields, "spans", table.spans, spans_name)
     _append_table_fields(fields, "rules", table.rules, rules_name)
-    _append_table_fields(fields, "report_keys", report_keys, report_keys_name)
+    _append_table_fields(
+        fields,
+        "report_key_string_offsets",
+        report_keys,
+        report_keys_name,
+    )
     _append_table_fields(
         fields,
         "type_patterns",
@@ -825,7 +876,7 @@ def rule_set_row(
         descriptor_ref_keys,
         descriptor_refs_name,
     )
-    diagnostic_param_rows = tuple(param for diagnostic in table.diagnostics for param in diagnostic.params)
+    diagnostic_param_rows = tuple(param for diagnostic in table.diagnostics for param in diagnostic_stored_params(diagnostic))
     _append_table_fields(
         fields,
         "diagnostic_params",
@@ -859,10 +910,18 @@ def _table_count_field_name(field_name: str) -> str:
         return "source_memory_count"
     if field_name == "diagnostic_params":
         return "diagnostic_param_count"
+    if field_name == "report_key_string_offsets":
+        return "report_key_count"
     return f"{field_name[:-1]}_count"
 
 
-def diagnostic_param_row(row: LowerDiagnosticParam) -> list[str]:
+def diagnostic_param_row(
+    row: LowerDiagnosticParam,
+    *,
+    string_value_offset: str | None = None,
+) -> list[str]:
+    if row.kind == DiagnosticParamKind.STRING_LITERAL and string_value_offset is None:
+        raise ValueError("diagnostic string literal is missing its string offset")
     fields: list[str] = []
     _append_field(
         fields,
@@ -873,30 +932,45 @@ def diagnostic_param_row(row: LowerDiagnosticParam) -> list[str]:
     if row.kind == DiagnosticParamKind.STRING_LITERAL:
         _append_field(
             fields,
-            "string_value",
-            f'IREE_SVL("{_c_string_literal(row.string_value)}")',
+            "value",
+            f"{{.string_value_offset = {string_value_offset}}}",
             always=True,
         )
     if row.kind == DiagnosticParamKind.VALUE_TYPE:
-        _append_field(fields, "value_ref_index", row.value_ref_index, always=True)
+        _append_field(
+            fields,
+            "value",
+            f"{{.value_ref_index = {row.value_ref_index}}}",
+            always=True,
+        )
     if row.kind == DiagnosticParamKind.I64_LITERAL:
         _append_field(
             fields,
-            "i64_value",
-            _c_i64_literal(row.i64_value),
+            "value",
+            f"{{.i64_value = {_c_i64_literal(row.i64_value)}}}",
             always=True,
         )
     if row.kind == DiagnosticParamKind.U32_LITERAL:
-        _append_field(fields, "u32_value", row.u32_value, always=True)
+        _append_field(
+            fields,
+            "value",
+            f"{{.u32_value = {row.u32_value}}}",
+            always=True,
+        )
     if row.kind == DiagnosticParamKind.U64_LITERAL:
         _append_field(
             fields,
-            "u64_value",
-            lower_rule_spelling.u64_c_literal(row.u64_value),
+            "value",
+            f"{{.u64_value = {lower_rule_spelling.u64_c_literal(row.u64_value)}}}",
             always=True,
         )
     if row.kind == DiagnosticParamKind.BOOL_LITERAL:
-        _append_field(fields, "bool_value", str(row.bool_value).lower(), always=True)
+        _append_field(
+            fields,
+            "value",
+            f"{{.bool_value = {str(row.bool_value).lower()}}}",
+            always=True,
+        )
     return fields
 
 

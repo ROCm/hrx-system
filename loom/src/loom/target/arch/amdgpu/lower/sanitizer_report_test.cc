@@ -182,13 +182,14 @@ class AmdgpuSanitizerReportTest : public ::testing::Test {
     if (descriptor == nullptr) {
       return 0;
     }
-    EXPECT_LT(descriptor->canonical_asm_form_ordinal,
-              descriptor_set_->asm_form_count);
-    if (descriptor->canonical_asm_form_ordinal >=
-        descriptor_set_->asm_form_count) {
+    const uint32_t canonical_asm_form_ordinal =
+        loom_low_descriptor_set_descriptor_view(descriptor_set_, descriptor)
+            ->canonical_asm_form_ordinal;
+    EXPECT_LT(canonical_asm_form_ordinal, descriptor_set_->asm_form_count);
+    if (canonical_asm_form_ordinal >= descriptor_set_->asm_form_count) {
       return 0;
     }
-    return descriptor_set_->asm_forms[descriptor->canonical_asm_form_ordinal]
+    return descriptor_set_->asm_forms[canonical_asm_form_ordinal]
         .operand_index_count;
   }
 

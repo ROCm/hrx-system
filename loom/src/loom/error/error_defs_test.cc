@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "iree/testing/gtest.h"
+#include "loom/error/error_catalog.h"
 
 namespace {
 
@@ -16,10 +17,10 @@ TEST(ErrorDefsTest, LookupType001) {
   const loom_error_def_t* def =
       loom_error_def_lookup(LOOM_ERROR_DOMAIN_TYPE, 1);
   ASSERT_NE(def, nullptr);
-  EXPECT_EQ(def->domain, LOOM_ERROR_DOMAIN_TYPE);
-  EXPECT_EQ(def->code, 1);
-  EXPECT_EQ(def->severity, LOOM_DIAGNOSTIC_ERROR);
-  EXPECT_STREQ(def->summary, "SameType constraint violated.");
+  EXPECT_EQ(loom_error_def_domain(def), LOOM_ERROR_DOMAIN_TYPE);
+  EXPECT_EQ(loom_error_def_code(def), 1);
+  EXPECT_EQ(loom_error_def_severity(def), LOOM_DIAGNOSTIC_ERROR);
+  EXPECT_STREQ(loom_error_def_summary(def), "SameType constraint violated.");
   EXPECT_EQ(def->param_count, 4);
 }
 
@@ -27,10 +28,10 @@ TEST(ErrorDefsTest, LookupFold005) {
   const loom_error_def_t* def =
       loom_error_def_lookup(LOOM_ERROR_DOMAIN_FOLD, 5);
   ASSERT_NE(def, nullptr);
-  EXPECT_EQ(def->domain, LOOM_ERROR_DOMAIN_FOLD);
-  EXPECT_EQ(def->code, 5);
-  EXPECT_EQ(def->severity, LOOM_DIAGNOSTIC_REMARK);
-  EXPECT_NE(def->message_template, nullptr);
+  EXPECT_EQ(loom_error_def_domain(def), LOOM_ERROR_DOMAIN_FOLD);
+  EXPECT_EQ(loom_error_def_code(def), 5);
+  EXPECT_EQ(loom_error_def_severity(def), LOOM_DIAGNOSTIC_REMARK);
+  EXPECT_NE(loom_error_def_message_template(def), nullptr);
   EXPECT_EQ(def->param_count, 3);
 }
 
@@ -38,43 +39,43 @@ TEST(ErrorDefsTest, LookupBytecode007) {
   const loom_error_def_t* def =
       loom_error_def_lookup(LOOM_ERROR_DOMAIN_BYTECODE, 7);
   ASSERT_NE(def, nullptr);
-  EXPECT_EQ(def->domain, LOOM_ERROR_DOMAIN_BYTECODE);
-  EXPECT_EQ(def->code, 7);
-  EXPECT_EQ(def->severity, LOOM_DIAGNOSTIC_ERROR);
-  EXPECT_STREQ(def->summary, "Invalid bytecode range.");
+  EXPECT_EQ(loom_error_def_domain(def), LOOM_ERROR_DOMAIN_BYTECODE);
+  EXPECT_EQ(loom_error_def_code(def), 7);
+  EXPECT_EQ(loom_error_def_severity(def), LOOM_DIAGNOSTIC_ERROR);
+  EXPECT_STREQ(loom_error_def_summary(def), "Invalid bytecode range.");
   ASSERT_EQ(def->param_count, 4);
-  EXPECT_STREQ(def->param_defs[1].name, "offset");
-  EXPECT_EQ(def->param_defs[1].kind, LOOM_PARAM_U64);
+  EXPECT_STREQ(loom_error_def_param_name(def, 1), "offset");
+  EXPECT_EQ(loom_error_def_param_kind(def, 1), LOOM_PARAM_U64);
 }
 
 TEST(ErrorDefsTest, LookupBackendPressurePeakRemark) {
   const loom_error_def_t* def =
       loom_error_def_lookup(LOOM_ERROR_DOMAIN_BACKEND, 3);
   ASSERT_NE(def, nullptr);
-  EXPECT_EQ(def->domain, LOOM_ERROR_DOMAIN_BACKEND);
-  EXPECT_EQ(def->code, 3);
-  EXPECT_EQ(def->severity, LOOM_DIAGNOSTIC_REMARK);
-  EXPECT_STREQ(def->summary, "Register pressure peak observed.");
+  EXPECT_EQ(loom_error_def_domain(def), LOOM_ERROR_DOMAIN_BACKEND);
+  EXPECT_EQ(loom_error_def_code(def), 3);
+  EXPECT_EQ(loom_error_def_severity(def), LOOM_DIAGNOSTIC_REMARK);
+  EXPECT_STREQ(loom_error_def_summary(def), "Register pressure peak observed.");
   ASSERT_EQ(def->param_count, 10);
-  EXPECT_STREQ(def->param_defs[4].name, "value_class");
-  EXPECT_EQ(def->param_defs[4].kind, LOOM_PARAM_STRING);
-  EXPECT_STREQ(def->param_defs[5].name, "budget");
-  EXPECT_EQ(def->param_defs[5].kind, LOOM_PARAM_U32);
-  EXPECT_STREQ(def->param_defs[6].name, "peak");
-  EXPECT_EQ(def->param_defs[6].kind, LOOM_PARAM_U32);
-  EXPECT_STREQ(def->param_defs[9].name, "contributors");
-  EXPECT_EQ(def->param_defs[9].kind, LOOM_PARAM_STRING_LIST);
+  EXPECT_STREQ(loom_error_def_param_name(def, 4), "value_class");
+  EXPECT_EQ(loom_error_def_param_kind(def, 4), LOOM_PARAM_STRING);
+  EXPECT_STREQ(loom_error_def_param_name(def, 5), "budget");
+  EXPECT_EQ(loom_error_def_param_kind(def, 5), LOOM_PARAM_U32);
+  EXPECT_STREQ(loom_error_def_param_name(def, 6), "peak");
+  EXPECT_EQ(loom_error_def_param_kind(def, 6), LOOM_PARAM_U32);
+  EXPECT_STREQ(loom_error_def_param_name(def, 9), "contributors");
+  EXPECT_EQ(loom_error_def_param_kind(def, 9), LOOM_PARAM_STRING_LIST);
 }
 
 TEST(ErrorDefsTest, LookupBackendAllocationError) {
   const loom_error_def_t* def =
       loom_error_def_lookup(LOOM_ERROR_DOMAIN_BACKEND, 5);
   ASSERT_NE(def, nullptr);
-  EXPECT_EQ(def->domain, LOOM_ERROR_DOMAIN_BACKEND);
-  EXPECT_EQ(def->code, 5);
-  EXPECT_EQ(def->severity, LOOM_DIAGNOSTIC_ERROR);
-  EXPECT_STREQ(def->summary, "Register allocation failed.");
-  EXPECT_NE(def->fix_hint_template, nullptr);
+  EXPECT_EQ(loom_error_def_domain(def), LOOM_ERROR_DOMAIN_BACKEND);
+  EXPECT_EQ(loom_error_def_code(def), 5);
+  EXPECT_EQ(loom_error_def_severity(def), LOOM_DIAGNOSTIC_ERROR);
+  EXPECT_STREQ(loom_error_def_summary(def), "Register allocation failed.");
+  EXPECT_NE(loom_error_def_fix_hint_template(def), nullptr);
 }
 
 TEST(ErrorDefsTest, LookupNonExistentReturnsNull) {
@@ -87,31 +88,22 @@ TEST(ErrorDefsTest, LookupComposedCatalogFallsBackAndShadows) {
       loom_error_def_lookup(LOOM_ERROR_DOMAIN_TYPE, 1);
   ASSERT_NE(expected, nullptr);
 
-  const loom_error_def_t* terminal_errors[] = {nullptr, expected};
-  loom_error_domain_catalog_t terminal_domain = {};
-  terminal_domain.domain = LOOM_ERROR_DOMAIN_TYPE;
-  terminal_domain.code_count = IREE_ARRAYSIZE(terminal_errors);
-  terminal_domain.errors_by_code = terminal_errors;
-  loom_error_catalog_t terminal_catalog = {};
-  terminal_catalog.domains[LOOM_ERROR_DOMAIN_TYPE] = &terminal_domain;
-
-  const loom_error_def_t* missing_errors[] = {nullptr, nullptr};
-  loom_error_domain_catalog_t missing_domain = {};
-  missing_domain.domain = LOOM_ERROR_DOMAIN_TYPE;
-  missing_domain.code_count = IREE_ARRAYSIZE(missing_errors);
-  missing_domain.errors_by_code = missing_errors;
+  uint16_t error_indices[] = {UINT16_MAX, UINT16_MAX};
   loom_error_catalog_t catalog = {};
-  catalog.domains[LOOM_ERROR_DOMAIN_TYPE] = &missing_domain;
-  catalog.fallback_catalog = &terminal_catalog;
+  catalog.error_indices_by_code = error_indices;
+  catalog.domain_spans[LOOM_ERROR_DOMAIN_TYPE].code_count =
+      IREE_ARRAYSIZE(error_indices);
+  catalog.fallback_catalog = &loom_error_catalog_core;
 
   EXPECT_EQ(loom_error_catalog_lookup(&catalog, LOOM_ERROR_DOMAIN_TYPE, 1),
             expected);
 
   loom_error_def_t shadow = *expected;
-  const loom_error_def_t* shadow_errors[] = {nullptr, &shadow};
-  loom_error_domain_catalog_t shadow_domain = missing_domain;
-  shadow_domain.errors_by_code = shadow_errors;
-  catalog.domains[LOOM_ERROR_DOMAIN_TYPE] = &shadow_domain;
+  shadow.catalog = &catalog;
+  error_indices[1] = 0;
+  catalog.string_data = expected->catalog->string_data;
+  catalog.error_defs = &shadow;
+  catalog.param_defs = expected->catalog->param_defs;
   EXPECT_EQ(loom_error_catalog_lookup(&catalog, LOOM_ERROR_DOMAIN_TYPE, 1),
             &shadow);
 }
@@ -121,18 +113,12 @@ TEST(ErrorDefsTest, LookupDeepFallbackChain) {
       loom_error_def_lookup(LOOM_ERROR_DOMAIN_TYPE, 1);
   ASSERT_NE(expected, nullptr);
 
-  const loom_error_def_t* terminal_errors[] = {nullptr, expected};
-  loom_error_domain_catalog_t terminal_domain = {};
-  terminal_domain.domain = LOOM_ERROR_DOMAIN_TYPE;
-  terminal_domain.code_count = IREE_ARRAYSIZE(terminal_errors);
-  terminal_domain.errors_by_code = terminal_errors;
-
   constexpr size_t kCatalogCount = 16384;
   std::vector<loom_error_catalog_t> catalogs(kCatalogCount);
   for (size_t i = 0; i + 1 < catalogs.size(); ++i) {
     catalogs[i].fallback_catalog = &catalogs[i + 1];
   }
-  catalogs.back().domains[LOOM_ERROR_DOMAIN_TYPE] = &terminal_domain;
+  catalogs.back().fallback_catalog = &loom_error_catalog_core;
 
   EXPECT_EQ(
       loom_error_catalog_lookup(&catalogs.front(), LOOM_ERROR_DOMAIN_TYPE, 1),
@@ -195,19 +181,18 @@ TEST(ErrorDefsTest, ParamDefsValid) {
       loom_error_def_lookup(LOOM_ERROR_DOMAIN_TYPE, 1);
   ASSERT_NE(def, nullptr);
   ASSERT_EQ(def->param_count, 4);
-  EXPECT_STREQ(def->param_defs[0].name, "field_a");
-  EXPECT_EQ(def->param_defs[0].kind, LOOM_PARAM_STRING);
-  EXPECT_STREQ(def->param_defs[1].name, "type_a");
-  EXPECT_EQ(def->param_defs[1].kind, LOOM_PARAM_TYPE);
+  EXPECT_STREQ(loom_error_def_param_name(def, 0), "field_a");
+  EXPECT_EQ(loom_error_def_param_kind(def, 0), LOOM_PARAM_STRING);
+  EXPECT_STREQ(loom_error_def_param_name(def, 1), "type_a");
+  EXPECT_EQ(loom_error_def_param_kind(def, 1), LOOM_PARAM_TYPE);
 }
 
-TEST(ErrorDefsTest, NoParamsErrorHasNullParamDefs) {
+TEST(ErrorDefsTest, NoParamsErrorHasEmptyParamSpan) {
   // ERR_PARSE_005 has no params.
   const loom_error_def_t* def =
       loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 5);
   ASSERT_NE(def, nullptr);
   EXPECT_EQ(def->param_count, 0);
-  EXPECT_EQ(def->param_defs, nullptr);
 }
 
 TEST(ErrorDefsTest, FixHintNullWhenEmpty) {
@@ -215,7 +200,7 @@ TEST(ErrorDefsTest, FixHintNullWhenEmpty) {
   const loom_error_def_t* def =
       loom_error_def_lookup(LOOM_ERROR_DOMAIN_STRUCTURE, 1);
   ASSERT_NE(def, nullptr);
-  EXPECT_EQ(def->fix_hint_template, nullptr);
+  EXPECT_EQ(loom_error_def_fix_hint_template(def), nullptr);
 }
 
 TEST(ErrorDefsTest, FixHintPresent) {
@@ -223,8 +208,9 @@ TEST(ErrorDefsTest, FixHintPresent) {
   const loom_error_def_t* def =
       loom_error_def_lookup(LOOM_ERROR_DOMAIN_TYPE, 1);
   ASSERT_NE(def, nullptr);
-  ASSERT_NE(def->fix_hint_template, nullptr);
-  EXPECT_TRUE(strstr(def->fix_hint_template, "same type") != nullptr);
+  ASSERT_NE(loom_error_def_fix_hint_template(def), nullptr);
+  EXPECT_TRUE(strstr(loom_error_def_fix_hint_template(def), "same type") !=
+              nullptr);
 }
 
 }  // namespace

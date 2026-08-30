@@ -71,7 +71,7 @@ class CmdProgramPlanTest : public ::testing::Test {
     ModulePtr module_ptr(module);
     if (!module) {
       for (const auto& diagnostic : capture.diagnostics) {
-        ADD_FAILURE() << diagnostic.error->summary << " at line "
+        ADD_FAILURE() << loom_error_def_summary(diagnostic.error) << " at line "
                       << diagnostic.origin_line << ", column "
                       << diagnostic.origin_column;
       }
@@ -84,7 +84,7 @@ class CmdProgramPlanTest : public ::testing::Test {
     loom_verify_result_t result = {};
     IREE_CHECK_OK(loom_verify_module(module, &verify_options, &result));
     for (const auto& diagnostic : capture.diagnostics) {
-      ADD_FAILURE() << diagnostic.error->summary << " at line "
+      ADD_FAILURE() << loom_error_def_summary(diagnostic.error) << " at line "
                     << diagnostic.origin_line << ", column "
                     << diagnostic.origin_column;
     }
@@ -288,7 +288,7 @@ command.program.def public @selected_schedule() launch(%storage: buffer) {
   }
   if (!valid) {
     for (const auto& emission : diagnostic_capture.emissions) {
-      std::string detail = emission.error->summary;
+      std::string detail = loom_error_def_summary(emission.error);
       for (const std::string& parameter : emission.string_params) {
         detail.append(" [").append(parameter).append("]");
       }

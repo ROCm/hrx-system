@@ -113,7 +113,7 @@ static iree_status_t loom_check_diagnostic_collector_copy_param_values(
   *out_values = NULL;
   *out_count = 0;
   if (!diagnostic->params || !diagnostic->error ||
-      !diagnostic->error->param_defs || diagnostic->param_count == 0) {
+      diagnostic->error->param_count == 0 || diagnostic->param_count == 0) {
     return iree_ok_status();
   }
 
@@ -200,8 +200,8 @@ iree_status_t loom_check_diagnostic_collector_sink(
   collector->diagnostics[collector->count++] =
       (loom_check_collected_diagnostic_t){
           .severity = diagnostic->severity,
-          .domain = diagnostic->error->domain,
-          .code = diagnostic->error->code,
+          .domain = loom_error_def_domain(diagnostic->error),
+          .code = loom_error_def_code(diagnostic->error),
           .error = diagnostic->error,
           .origin_line = diagnostic->origin.start_line,
           .message = message,
@@ -301,7 +301,7 @@ iree_status_t loom_check_diagnostic_emitter_capture_emit(
   }
 
   loom_diagnostic_t diagnostic = {
-      .severity = emission->error->severity,
+      .severity = loom_error_def_severity(emission->error),
       .error = emission->error,
       .params = emission->params,
       .param_count = emission->param_count,
@@ -410,7 +410,7 @@ iree_status_t loom_check_diagnostic_collector_emit_case_source(
   const loom_source_range_t source_range =
       loom_check_case_source_range(filename, test_case->input);
   const loom_diagnostic_t diagnostic = {
-      .severity = error->severity,
+      .severity = loom_error_def_severity(error),
       .error = error,
       .params = params,
       .param_count = param_count,
@@ -428,7 +428,7 @@ iree_status_t loom_check_diagnostic_collector_emit_case_source(
 static int loom_check_diagnostic_find_param_index(
     const loom_check_collected_diagnostic_t* diagnostic,
     iree_string_view_t name) {
-  if (!diagnostic->error || !diagnostic->error->param_defs) {
+  if (!diagnostic->error || diagnostic->error->param_count == 0) {
     return -1;
   }
   for (iree_host_size_t i = 0; i < diagnostic->param_value_count; ++i) {
@@ -436,8 +436,8 @@ static int loom_check_diagnostic_find_param_index(
       return -1;
     }
     if (iree_string_view_equal(
-            name,
-            iree_make_cstring_view(diagnostic->error->param_defs[i].name))) {
+            name, iree_make_cstring_view(
+                      loom_error_def_param_name(diagnostic->error, i)))) {
       return (int)i;
     }
   }

@@ -12,16 +12,24 @@ from loom.gen.error.c_errors import (
 )
 
 
-def test_generate_error_catalog_exports_canonical_definitions() -> None:
+def test_generate_error_catalog_emits_compact_definition_storage() -> None:
     catalog_c = generate_error_catalog_c(
         [ERR_TYPE_001],
         catalog_symbol="loom_error_catalog_test",
         public_header="loom/error/error_catalog.h",
     )
 
-    assert "const loom_error_def_t loom_err_type_001" in catalog_c
-    assert "static const loom_error_def_t loom_err_type_001" not in catalog_c
+    assert "static const char loom_error_catalog_test_string_data[]" in catalog_c
+    assert "static const loom_error_param_def_t loom_error_catalog_test_param_defs[]" in catalog_c
+    assert "const loom_error_def_t loom_error_catalog_test_definitions[]" in catalog_c
+    assert ".ref = LOOM_ERROR_REF(LOOM_ERROR_DOMAIN_TYPE, 1)" in catalog_c
+    assert ".error_id_offset = LOOM_ERROR_CATALOG_TEST_STRING_" in catalog_c
+    assert ".message_template_offset = LOOM_ERROR_CATALOG_TEST_STRING_" in catalog_c
+    assert "LOOM_ERROR_PARAM_DEF(" in catalog_c
+    assert "static const uint16_t loom_error_catalog_test_error_indices[]" in catalog_c
     assert "const loom_error_catalog_t loom_error_catalog_test" in catalog_c
+    assert ".error_defs = loom_error_catalog_test_definitions" in catalog_c
+    assert "const loom_error_def_t loom_err_type_001" not in catalog_c
     assert "loom_error_catalog_lookup_ref" not in catalog_c
     assert "loom_diagnostic_severity_name" not in catalog_c
 
@@ -46,8 +54,8 @@ def test_generate_error_catalog_header_uses_canonical_names() -> None:
         public_header="loom/error/error_catalog.h",
     )
 
-    assert "extern const loom_error_def_t loom_err_type_001" in catalog_h
-    assert "#define LOOM_ERR_TYPE_001 (&loom_err_type_001)" in catalog_h
+    assert "extern const loom_error_def_t loom_error_catalog_test_definitions[]" in catalog_h
+    assert "#define LOOM_ERR_TYPE_001 (&loom_error_catalog_test_definitions[0])" in catalog_h
     assert "#define LOOM_ERR_TYPE_001_REF" in catalog_h
     assert "LOOM_ERROR_REF(LOOM_ERROR_DOMAIN_TYPE, 1)" in catalog_h
 
@@ -61,7 +69,7 @@ def test_generate_error_catalog_header_uses_c_linkage() -> None:
 
     linkage_begin = catalog_h.index('extern "C" {')
     catalog_declaration = catalog_h.index("extern const loom_error_catalog_t loom_error_catalog_test")
-    error_declaration = catalog_h.index("extern const loom_error_def_t loom_err_type_001")
+    error_declaration = catalog_h.index("extern const loom_error_def_t loom_error_catalog_test_definitions[]")
     linkage_end = catalog_h.index('}  // extern "C"')
     assert linkage_begin < catalog_declaration < linkage_end
     assert linkage_begin < error_declaration < linkage_end

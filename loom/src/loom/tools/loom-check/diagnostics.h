@@ -45,7 +45,7 @@ typedef struct loom_check_collected_diagnostic_t {
   // Rendered diagnostic message text, arena-allocated.
   iree_string_view_t message;
 
-  // Rendered parameter values in error->param_defs order, arena-allocated.
+  // Rendered parameter values in the error schema's order, arena-allocated.
   iree_string_view_t* param_values;
 
   // Number of populated entries in param_values.

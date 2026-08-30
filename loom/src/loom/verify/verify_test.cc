@@ -1155,8 +1155,8 @@ TEST_F(VerifyTest, StructuredDiagnosticHasErrorDef) {
   EXPECT_EQ(entry.severity, LOOM_DIAGNOSTIC_ERROR);
   EXPECT_EQ(entry.emitter, LOOM_EMITTER_VERIFIER);
   ASSERT_NE(entry.error, nullptr);
-  EXPECT_EQ(entry.error->domain, LOOM_ERROR_DOMAIN_STRUCTURE);
-  EXPECT_EQ(entry.error->code, 1);
+  EXPECT_EQ(loom_error_def_domain(entry.error), LOOM_ERROR_DOMAIN_STRUCTURE);
+  EXPECT_EQ(loom_error_def_code(entry.error), 1);
   EXPECT_GT(entry.params.size(), 0);
 }
 

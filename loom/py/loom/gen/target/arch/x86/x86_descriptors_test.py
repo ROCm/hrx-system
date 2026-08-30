@@ -100,11 +100,22 @@ def test_storage_generation_emits_current_public_views() -> None:
     assert ".descriptors = kX86Avx512CoreDescriptors," in source
     assert ".descriptors = kX86PackedDotCoreDescriptors," in source
     assert ".descriptors = kX86Avx512PackedDotCoreStorageDescriptors," in source
+    assert ".descriptor_views = kX86Avx512CoreDescriptorViews," in source
+    assert ".descriptor_views = kX86PackedDotCoreDescriptorViews," in source
+    assert ".descriptor_views = kX86Avx512PackedDotCoreStorageDescriptorViews," in source
     assert ".asm_forms = kX86AvxVnniCoreAsmForms," in source
     assert ".asm_forms = kX86Avx512PackedDotCoreStorageAsmForms," in source
     assert ".descriptor_refs = kX86Avx512CoreDescriptorRefs," in source
     assert ".descriptor_refs = kX86PackedDotCoreDescriptorRefs," in source
     assert ".descriptor_refs = kX86ScalarCoreDescriptorRefs," in source
+    assert "static const loom_low_descriptor_t kX86Simd128CoreDescriptors[]" not in source
+    assert ("static const loom_low_descriptor_view_t kX86Simd128CoreDescriptorViews[]") not in source
+    assert "static const loom_low_descriptor_ref_t kX86Simd128CoreDescriptorRefs[]" not in source
+    assert "static const loom_low_asm_form_t kX86Simd128CoreAsmForms[]" not in source
+    assert source.count(".descriptors = kX86ScalarCoreDescriptors,") == 2
+    assert source.count(".descriptor_views = kX86ScalarCoreDescriptorViews,") == 2
+    assert source.count(".descriptor_refs = kX86ScalarCoreDescriptorRefs,") == 2
+    assert source.count(".asm_forms = kX86ScalarCoreAsmForms,") == 2
     assert '"avx_vnni.vpdpbusd.ymm"' in source
     assert '"vpdpbusd.ymm"' in source
     assert "loom_x86_avx512_core_descriptor_set" in avx512_header

@@ -430,22 +430,32 @@ typedef struct iree_status_handle_t* iree_status_t;
   iree_status_t var = (expr);                 \
   if (IREE_UNLIKELY(var)) iree_status_abort(var);
 
-// We cut out all status storage code when not used.
+// We cut out all status storage code when not used. Unevaluated expressions
+// keep diagnostic arguments type-checked and visible to unused-variable
+// analysis without evaluating them; optimized builds can then remove their
+// diagnostic-only setup and strings.
 #if IREE_STATUS_FEATURES == 0
-#define IREE_STATUS_IMPL_MAKE_(code, ...) \
-  (iree_status_t)(uintptr_t)((code) & IREE_STATUS_CODE_MASK)
-#define IREE_STATUS_IMPL_MAKE_LOC_(file, line, code, ...) \
-  IREE_STATUS_IMPL_MAKE_(code)
+#define IREE_STATUS_IMPL_MAKE_(...)                                     \
+  ((void)sizeof(                                                        \
+       IREE_STATUS_IMPL_MAKE_SWITCH_(__FILE__, __LINE__, __VA_ARGS__)), \
+   iree_status_from_code(IREE_STATUS_IMPL_GET_EXPR_(__VA_ARGS__)))
+#define IREE_STATUS_IMPL_MAKE_LOC_(file, line, ...)                      \
+  ((void)sizeof(IREE_STATUS_IMPL_MAKE_SWITCH_(file, line, __VA_ARGS__)), \
+   iree_status_from_code(IREE_STATUS_IMPL_GET_EXPR_(__VA_ARGS__)))
 #undef IREE_STATUS_IMPL_RETURN_IF_API_ERROR_
 #define IREE_STATUS_IMPL_RETURN_IF_API_ERROR_(var, ...)                      \
   iree_status_t var = (IREE_STATUS_IMPL_IDENTITY_(                           \
       IREE_STATUS_IMPL_IDENTITY_(IREE_STATUS_IMPL_GET_EXPR_)(__VA_ARGS__))); \
-  if (IREE_UNLIKELY(var)) return var;
+  if (IREE_UNLIKELY(var)) {                                                  \
+    (void)sizeof(IREE_STATUS_IMPL_ANNOTATE_SWITCH_(var, __VA_ARGS__));       \
+    return var;                                                              \
+  }
 #undef IREE_STATUS_IMPL_RETURN_AND_EVAL_IF_API_ERROR_
 #define IREE_STATUS_IMPL_RETURN_AND_EVAL_IF_API_ERROR_(tail_expr, var, ...)  \
   iree_status_t var = (IREE_STATUS_IMPL_IDENTITY_(                           \
       IREE_STATUS_IMPL_IDENTITY_(IREE_STATUS_IMPL_GET_EXPR_)(__VA_ARGS__))); \
   if (IREE_UNLIKELY(var)) {                                                  \
+    (void)sizeof(IREE_STATUS_IMPL_ANNOTATE_SWITCH_(var, __VA_ARGS__));       \
     (tail_expr);                                                             \
     return var;                                                              \
   }
@@ -642,8 +652,16 @@ IREE_API_EXPORT IREE_MUST_USE_RESULT iree_status_t IREE_PRINTF_ATTRIBUTE(2, 3)
     iree_status_annotate_f(iree_status_t base_status, const char* format, ...);
 
 #else
-#define iree_status_annotate(base_status, ...) (base_status)
-#define iree_status_annotate_f(base_status, ...) (base_status)
+// Keep annotation arguments in unevaluated expressions for the same reason as
+// iree_make_status above while returning the base status exactly once.
+#define iree_status_annotate(base_status, message)                     \
+  ((void)sizeof(                                                       \
+       iree_status_allocate(IREE_STATUS_UNKNOWN, NULL, 0, (message))), \
+   (base_status))
+#define iree_status_annotate_f(base_status, ...)                           \
+  ((void)sizeof(                                                           \
+       iree_status_allocate_f(IREE_STATUS_UNKNOWN, NULL, 0, __VA_ARGS__)), \
+   (base_status))
 #endif  // has IREE_STATUS_FEATURE_ANNOTATIONS
 
 //===----------------------------------------------------------------------===//

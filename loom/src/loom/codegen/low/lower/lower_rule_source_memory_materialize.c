@@ -77,7 +77,10 @@ loom_low_lower_rule_source_memory_emit_dynamic_byte_offset_const(
   IREE_RETURN_IF_ERROR(loom_low_lower_rule_descriptor_result_type(
       context, descriptor.descriptor, 0, &result_type));
   return loom_low_lower_rule_source_memory_emit_resolved_integer_const(
-      context, &descriptor, source_memory->byte_offset_const_i64_immediate,
+      context, &descriptor,
+      loom_low_lower_rule_set_string(
+          rule_set,
+          source_memory->byte_offset_const_i64_immediate_string_offset),
       value, result_type, location, out_value_id);
 }
 
@@ -104,7 +107,10 @@ loom_low_lower_rule_source_memory_emit_address_coordinate_const(
   IREE_RETURN_IF_ERROR(loom_low_lower_map_type(
       context, source_op, loom_type_scalar(source_scalar_type), &result_type));
   return loom_low_lower_rule_source_memory_emit_resolved_integer_const(
-      context, &descriptor, source_memory->address_const_coordinate_immediate,
+      context, &descriptor,
+      loom_low_lower_rule_set_string(
+          rule_set,
+          source_memory->address_const_coordinate_immediate_string_offset),
       value, result_type, source_op->location, out_value_id);
 }
 

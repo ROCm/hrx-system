@@ -121,7 +121,9 @@ static iree_status_t loom_low_requirements_verify_descriptor_schedule(
     const loom_low_descriptor_t* descriptor,
     iree_string_view_t descriptor_key) {
   const loom_low_schedule_class_t* schedule_class =
-      &descriptor_set->schedule_classes[descriptor->schedule_class_id];
+      &descriptor_set->schedule_classes[loom_low_descriptor_set_descriptor_view(
+                                            descriptor_set, descriptor)
+                                            ->schedule_class_id];
   const bool has_effect_or_control_payload =
       descriptor->effect_count != 0 ||
       iree_any_bit_set(descriptor->flags,

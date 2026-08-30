@@ -11,8 +11,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from loom.gen.support import c_arrays
-from loom.gen.support.c import c_string_literal
 from loom.gen.support.generated_file import line_comment_header
+from loom.gen.support.string_pool import emit_c_string_table
 from loom.gen.target.low import c_spelling, validation
 from loom.gen.target.low.compiled import (
     CompiledAsmForm,
@@ -157,38 +157,11 @@ def _emit_string_table(compiled: CompiledDescriptorSet, lines: list[str]) -> Non
     spec = compiled.spec
     pool = compiled.string_pool
     lines.extend(
-        [
-            "// clang-format off",
-            f"static const uint8_t k{spec.c_table_prefix}StringData[] =",
-        ]
+        emit_c_string_table(
+            pool,
+            f"k{spec.c_table_prefix}StringData",
+        )
     )
-    for entry in pool.entries:
-        length = len(entry.value.encode())
-        escaped = c_string_literal(entry.value)
-        lines.append(f'    LOOM_BSTRING_LITERAL({length}, "{escaped}")')
-    lines[-1] += ";"
-    lines.append("// clang-format on")
-    lines.append("")
-    lines.append("enum {")
-    previous_label: str | None = None
-    entries_by_label = pool.entries_by_label
-    for entry in pool.entries:
-        enum_name = f"{pool.c_enum_prefix}_STRING_{entry.label}"
-        if previous_label is None:
-            lines.append(f"  {enum_name} = 0,")
-        else:
-            previous_entry = entries_by_label[previous_label]
-            previous_enum_name = f"{pool.c_enum_prefix}_STRING_{previous_label}"
-            lines.append(f'  {enum_name} = {previous_enum_name} + sizeof("{c_string_literal(previous_entry.value)}"),')
-        previous_label = entry.label
-    if previous_label is None:
-        lines.append(f"  {pool.c_enum_prefix}_STRING_END = 0,")
-    else:
-        previous_entry = entries_by_label[previous_label]
-        previous_enum_name = f"{pool.c_enum_prefix}_STRING_{previous_label}"
-        lines.append(f'  {pool.c_enum_prefix}_STRING_END = {previous_enum_name} + sizeof("{c_string_literal(previous_entry.value)}"),')
-    lines.append("};")
-    lines.append("")
     lines.append(f'static_assert({pool.c_enum_prefix}_STRING_END == sizeof(k{spec.c_table_prefix}StringData) - 1, "descriptor string offsets must cover the table payload");')
     lines.append("")
 
@@ -228,9 +201,7 @@ def _intern_descriptor_set_view_metadata(compiled: CompiledDescriptorSet, view_s
 def _descriptor_row_lines(
     compiled: CompiledDescriptorSet,
     descriptors: Sequence[Descriptor],
-    instruction_classes: Sequence[tuple[InstructionClass, ...]],
     descriptor_rows: Sequence[dict[str, int]],
-    canonical_asm_form_ordinals: Sequence[int | None],
 ) -> list[list[str]]:
     pool = compiled.string_pool
     return [
@@ -259,10 +230,24 @@ def _descriptor_row_lines(
             f".storage_lease_count = {descriptor_rows[i]['storage_lease_count']},",
             f".operand_form_start = {descriptor_rows[i]['operand_form_start']},",
             f".operand_form_count = {descriptor_rows[i]['operand_form_count']},",
-            f".schedule_class_id = {compiled.schedule_class_ids[descriptor.schedule_class]},",
             f".flags = {c_spelling.flag_expr(descriptor.flags)},",
             f".op_kind = {descriptor.op_kind.c_name},",
+            ".reserved = 0,",
+        ]
+        for i, descriptor in enumerate(descriptors)
+    ]
+
+
+def _descriptor_view_row_lines(
+    compiled: CompiledDescriptorSet,
+    descriptors: Sequence[Descriptor],
+    instruction_classes: Sequence[tuple[InstructionClass, ...]],
+    canonical_asm_form_ordinals: Sequence[int | None],
+) -> list[list[str]]:
+    return [
+        [
             f".instruction_class_flags = {c_spelling.flag_expr(instruction_classes[i])},",
+            f".schedule_class_id = {compiled.schedule_class_ids[descriptor.schedule_class]},",
             f".canonical_asm_form_ordinal = {c_spelling.canonical_asm_form_ordinal_expr(canonical_asm_form_ordinals[i])},",
         ]
         for i, descriptor in enumerate(descriptors)
@@ -379,6 +364,7 @@ def emit_source_for_views(
 ) -> str:
     spec = compiled.spec
     pool = compiled.string_pool
+    asm_table_storage = compiled.asm_table_storage
     for view in views:
         _intern_descriptor_set_view_metadata(compiled, view.spec)
     lines = [
@@ -691,11 +677,10 @@ def emit_source_for_views(
             for field_value in compiled.encoding_field_values
         ],
     )
-    _emit_array(
-        lines,
+    view_array_emitter = c_arrays.StaticArrayEmitter(lines)
+    storage_operand_form_table_symbol = view_array_emitter.append_struct_array(
         "loom_low_operand_form_t",
-        spec.c_table_prefix,
-        "OperandForms",
+        f"k{spec.c_table_prefix}OperandForms",
         _operand_form_row_lines(compiled.operand_forms),
     )
     _emit_array(
@@ -720,48 +705,68 @@ def emit_source_for_views(
             f"k{spec.c_table_prefix}OperandFormOperandIndices",
             [str(operand_index) for operand_index in compiled.operand_form_operand_indices],
         )
-    _emit_array(
-        lines,
+    storage_descriptor_table_symbol = view_array_emitter.append_struct_array(
         "loom_low_descriptor_t",
-        spec.c_table_prefix,
-        "Descriptors",
+        f"k{spec.c_table_prefix}Descriptors",
         _descriptor_row_lines(
             compiled,
             compiled.descriptors,
-            compiled.instruction_classes,
             compiled.descriptor_rows,
+        ),
+    )
+    storage_descriptor_view_table_symbol = view_array_emitter.append_struct_array(
+        "loom_low_descriptor_view_t",
+        f"k{spec.c_table_prefix}DescriptorViews",
+        _descriptor_view_row_lines(
+            compiled,
+            compiled.descriptors,
+            compiled.instruction_classes,
             compiled.canonical_asm_form_ordinals,
         ),
     )
+    descriptor_table_symbols: dict[str, str] = {}
+    descriptor_view_table_symbols: dict[str, str] = {}
+    operand_form_table_symbols: dict[str, str] = {}
     for view in views:
-        if not view.uses_storage_descriptor_tables:
-            _emit_array(
-                lines,
+        view_key = view.spec.key
+        if view.uses_storage_descriptor_tables:
+            descriptor_table_symbols[view_key] = storage_descriptor_table_symbol
+        else:
+            descriptor_table_symbols[view_key] = view_array_emitter.append_struct_array(
                 "loom_low_descriptor_t",
-                view.spec.c_table_prefix,
-                "Descriptors",
+                f"k{view.spec.c_table_prefix}Descriptors",
                 _descriptor_row_lines(
                     compiled,
                     view.descriptors,
-                    view.instruction_classes,
                     view.descriptor_rows,
+                ),
+            )
+        if view.uses_storage_descriptor_view_tables:
+            descriptor_view_table_symbols[view_key] = storage_descriptor_view_table_symbol
+        else:
+            descriptor_view_table_symbols[view_key] = view_array_emitter.append_struct_array(
+                "loom_low_descriptor_view_t",
+                f"k{view.spec.c_table_prefix}DescriptorViews",
+                _descriptor_view_row_lines(
+                    compiled,
+                    view.descriptors,
+                    view.instruction_classes,
                     view.canonical_asm_form_ordinals,
                 ),
             )
-        if not view.uses_storage_operand_form_tables:
-            _emit_array(
-                lines,
+        if view.uses_storage_operand_form_tables:
+            operand_form_table_symbols[view_key] = storage_operand_form_table_symbol
+        else:
+            operand_form_table_symbols[view_key] = view_array_emitter.append_struct_array(
                 "loom_low_operand_form_t",
-                view.spec.c_table_prefix,
-                "OperandForms",
+                f"k{view.spec.c_table_prefix}OperandForms",
                 _operand_form_row_lines(view.operand_forms),
             )
+    descriptor_ref_table_symbols: dict[str, str] = {}
     for view in views:
-        _emit_array(
-            lines,
+        descriptor_ref_table_symbols[view.spec.key] = view_array_emitter.append_struct_array(
             "loom_low_descriptor_ref_t",
-            view.spec.c_table_prefix,
-            "DescriptorRefs",
+            f"k{view.spec.c_table_prefix}DescriptorRefs",
             [
                 [
                     f".key_string_offset = {pool.ref(f'descriptor_{descriptor_key}')},",
@@ -770,12 +775,12 @@ def emit_source_for_views(
                 for descriptor_key, descriptor_ordinal in view.descriptor_refs
             ],
         )
-    if compiled.asm_operand_indices:
+    if asm_table_storage.operand_indices:
         c_arrays.append_value_array(
             lines,
             "uint16_t",
             f"k{spec.c_table_prefix}AsmOperandIndices",
-            [str(operand_index) for operand_index in compiled.asm_operand_indices],
+            [str(operand_index) for operand_index in asm_table_storage.operand_indices],
         )
     _emit_array(
         lines,
@@ -788,7 +793,7 @@ def emit_source_for_views(
                 f".operand_count = {segment.operand_count},",
                 f".flags = {'LOOM_LOW_ASM_OPERAND_SEGMENT_FLAG_VARIADIC' if segment.has_variadic_operand else '0'},",
             ]
-            for segment in compiled.asm_operand_segments
+            for segment in asm_table_storage.operand_segments
         ],
     )
     _emit_array(
@@ -796,7 +801,7 @@ def emit_source_for_views(
         "loom_low_asm_result_value_type_t",
         spec.c_table_prefix,
         "AsmResultValueTypes",
-        _asm_result_value_type_row_lines(compiled.asm_result_value_types),
+        _asm_result_value_type_row_lines(asm_table_storage.result_value_types),
     )
     _emit_array(
         lines,
@@ -808,14 +813,12 @@ def emit_source_for_views(
                 f".immediate_index = {immediate.immediate_index},",
                 f".name_string_offset = {c_spelling.optional_string_expr(pool, immediate.name_label)},",
             ]
-            for immediate in compiled.asm_immediates
+            for immediate in asm_table_storage.immediates
         ],
     )
-    _emit_array(
-        lines,
+    storage_asm_form_table_symbol = view_array_emitter.append_struct_array(
         "loom_low_asm_form_t",
-        spec.c_table_prefix,
-        "AsmForms",
+        f"k{spec.c_table_prefix}AsmForms",
         _asm_form_row_lines(compiled, compiled.asm_forms),
     )
     _emit_array(
@@ -823,18 +826,18 @@ def emit_source_for_views(
         "loom_low_native_asm_value_t",
         spec.c_table_prefix,
         "NativeAsmValues",
-        _native_asm_value_row_lines(compiled, compiled.native_asm_values),
+        _native_asm_value_row_lines(compiled, asm_table_storage.native_values),
     )
+    asm_form_table_symbols: dict[str, str] = {}
     for view in views:
         if view.uses_storage_asm_form_tables:
-            continue
-        _emit_array(
-            lines,
-            "loom_low_asm_form_t",
-            view.spec.c_table_prefix,
-            "AsmForms",
-            _asm_form_row_lines(compiled, view.asm_forms),
-        )
+            asm_form_table_symbols[view.spec.key] = storage_asm_form_table_symbol
+        else:
+            asm_form_table_symbols[view.spec.key] = view_array_emitter.append_struct_array(
+                "loom_low_asm_form_t",
+                f"k{view.spec.c_table_prefix}AsmForms",
+                _asm_form_row_lines(compiled, view.asm_forms),
+            )
     for view in views:
         if not view.spec.supported_target_contract_keys:
             continue
@@ -874,17 +877,23 @@ def emit_source_for_views(
         "operand_form_operand_indices": "operand_form_operand_index_count",
     }
 
-    def append_optional_table(field_name: str, table_name: str, view_lines: list[str]) -> None:
-        rows = getattr(compiled, field_name)
+    def append_optional_table(
+        field_name: str,
+        table_name: str,
+        rows: Sequence[object],
+        view_lines: list[str],
+    ) -> None:
         if rows:
             view_lines.append(f"    .{field_name} = k{spec.c_table_prefix}{table_name},")
             view_lines.append(f"    .{table_count_fields[field_name]} = IREE_ARRAYSIZE(k{spec.c_table_prefix}{table_name}),")
 
     for view in views:
         view_spec = view.spec
-        descriptor_table_prefix = spec.c_table_prefix if view.uses_storage_descriptor_tables else view_spec.c_table_prefix
-        asm_form_table_prefix = spec.c_table_prefix if view.uses_storage_asm_form_tables else view_spec.c_table_prefix
-        operand_form_table_prefix = spec.c_table_prefix if view.uses_storage_operand_form_tables else view_spec.c_table_prefix
+        descriptor_table_symbol = descriptor_table_symbols[view_spec.key]
+        descriptor_view_table_symbol = descriptor_view_table_symbols[view_spec.key]
+        descriptor_ref_table_symbol = descriptor_ref_table_symbols[view_spec.key]
+        asm_form_table_symbol = asm_form_table_symbols[view_spec.key]
+        operand_form_table_symbol = operand_form_table_symbols[view_spec.key]
         view_lines = [
             f"static const loom_low_descriptor_set_t k{view_spec.c_table_prefix}Set = {{",
             "    .abi_version = LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION,",
@@ -908,52 +917,86 @@ def emit_source_for_views(
             f"            .data = k{spec.c_table_prefix}StringData,",
             f"            .data_length = sizeof(k{spec.c_table_prefix}StringData) - 1,",
             "        },",
-            f"    .descriptors = k{descriptor_table_prefix}Descriptors,",
+            f"    .descriptors = {descriptor_table_symbol},",
+            f"    .descriptor_views = {descriptor_view_table_symbol},",
             f"    .descriptor_count = {view.descriptor_count},",
-            f"    .descriptor_refs = k{view_spec.c_table_prefix}DescriptorRefs,",
-            f"    .descriptor_ref_count = IREE_ARRAYSIZE(k{view_spec.c_table_prefix}DescriptorRefs),",
+            f"    .descriptor_refs = {descriptor_ref_table_symbol},",
+            f"    .descriptor_ref_count = IREE_ARRAYSIZE({descriptor_ref_table_symbol}),",
         ]
 
-        append_optional_table("operands", "Operands", view_lines)
-        append_optional_table("immediates", "Immediates", view_lines)
-        append_optional_table("immediate_encoding_slices", "ImmediateEncodingSlices", view_lines)
-        append_optional_table("enum_domains", "EnumDomains", view_lines)
-        append_optional_table("enum_values", "EnumValues", view_lines)
-        append_optional_table("effects", "Effects", view_lines)
-        append_optional_table("constraints", "Constraints", view_lines)
-        append_optional_table("storage_leases", "StorageLeases", view_lines)
-        append_optional_table("reg_classes", "RegClasses", view_lines)
-        append_optional_table("register_parts", "RegisterParts", view_lines)
-        append_optional_table("reg_class_alts", "RegClassAlts", view_lines)
-        append_optional_table("schedule_classes", "ScheduleClasses", view_lines)
-        append_optional_table("issue_uses", "IssueUses", view_lines)
-        append_optional_table("resources", "Resources", view_lines)
-        append_optional_table("hazards", "Hazards", view_lines)
-        append_optional_table("pressure_deltas", "PressureDeltas", view_lines)
+        append_optional_table("operands", "Operands", compiled.operands, view_lines)
+        append_optional_table("immediates", "Immediates", compiled.immediates, view_lines)
+        append_optional_table(
+            "immediate_encoding_slices",
+            "ImmediateEncodingSlices",
+            compiled.immediate_encoding_slices,
+            view_lines,
+        )
+        append_optional_table("enum_domains", "EnumDomains", compiled.enum_domains, view_lines)
+        append_optional_table("enum_values", "EnumValues", compiled.enum_values, view_lines)
+        append_optional_table("effects", "Effects", compiled.effects, view_lines)
+        append_optional_table("constraints", "Constraints", compiled.constraints, view_lines)
+        append_optional_table("storage_leases", "StorageLeases", compiled.storage_leases, view_lines)
+        append_optional_table("reg_classes", "RegClasses", compiled.reg_classes, view_lines)
+        append_optional_table("register_parts", "RegisterParts", compiled.register_parts, view_lines)
+        append_optional_table("reg_class_alts", "RegClassAlts", compiled.reg_class_alts, view_lines)
+        append_optional_table("schedule_classes", "ScheduleClasses", compiled.schedule_classes, view_lines)
+        append_optional_table("issue_uses", "IssueUses", compiled.issue_uses, view_lines)
+        append_optional_table("resources", "Resources", compiled.resources, view_lines)
+        append_optional_table("hazards", "Hazards", compiled.hazards, view_lines)
+        append_optional_table("pressure_deltas", "PressureDeltas", compiled.pressure_deltas, view_lines)
         if view.asm_forms:
-            view_lines.append(f"    .asm_forms = k{asm_form_table_prefix}AsmForms,")
-            view_lines.append(f"    .asm_form_count = IREE_ARRAYSIZE(k{asm_form_table_prefix}AsmForms),")
-            append_optional_table("asm_operand_indices", "AsmOperandIndices", view_lines)
-            append_optional_table("asm_operand_segments", "AsmOperandSegments", view_lines)
+            view_lines.append(f"    .asm_forms = {asm_form_table_symbol},")
+            view_lines.append(f"    .asm_form_count = IREE_ARRAYSIZE({asm_form_table_symbol}),")
+            append_optional_table(
+                "asm_operand_indices",
+                "AsmOperandIndices",
+                asm_table_storage.operand_indices,
+                view_lines,
+            )
+            append_optional_table(
+                "asm_operand_segments",
+                "AsmOperandSegments",
+                asm_table_storage.operand_segments,
+                view_lines,
+            )
             append_optional_table(
                 "asm_result_value_types",
                 "AsmResultValueTypes",
+                asm_table_storage.result_value_types,
                 view_lines,
             )
-            append_optional_table("asm_immediates", "AsmImmediates", view_lines)
-            append_optional_table("native_asm_values", "NativeAsmValues", view_lines)
-        append_optional_table("encoding_field_values", "EncodingFieldValues", view_lines)
+            append_optional_table(
+                "asm_immediates",
+                "AsmImmediates",
+                asm_table_storage.immediates,
+                view_lines,
+            )
+            append_optional_table(
+                "native_asm_values",
+                "NativeAsmValues",
+                asm_table_storage.native_values,
+                view_lines,
+            )
+        append_optional_table(
+            "encoding_field_values",
+            "EncodingFieldValues",
+            compiled.encoding_field_values,
+            view_lines,
+        )
         if view.operand_forms:
-            view_lines.append(f"    .operand_forms = k{operand_form_table_prefix}OperandForms,")
-            view_lines.append(f"    .operand_form_count = IREE_ARRAYSIZE(k{operand_form_table_prefix}OperandForms),")
+            view_lines.append(f"    .operand_forms = {operand_form_table_symbol},")
+            view_lines.append(f"    .operand_form_count = IREE_ARRAYSIZE({operand_form_table_symbol}),")
         append_optional_table(
             "operand_form_matches",
             "OperandFormMatches",
+            compiled.operand_form_matches,
             view_lines,
         )
         append_optional_table(
             "operand_form_operand_indices",
             "OperandFormOperandIndices",
+            compiled.operand_form_operand_indices,
             view_lines,
         )
         if compiled.feature_mask_words:
@@ -984,6 +1027,7 @@ def emit_source(compiled: CompiledDescriptorSet) -> str:
                 asm_forms=compiled.asm_forms,
                 operand_forms=compiled.operand_forms,
                 uses_storage_descriptor_tables=True,
+                uses_storage_descriptor_view_tables=True,
                 uses_storage_asm_form_tables=True,
                 uses_storage_operand_form_tables=True,
             )

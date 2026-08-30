@@ -132,7 +132,7 @@ class ParserTest : public ::testing::Test {
       for (size_t i = 0; i < capture_.diagnostics.size(); ++i) {
         const auto& d = capture_.diagnostics[i];
         msg += "  [" + std::to_string(i) + "] " +
-               (d.error ? d.error->summary : "(null)") +
+               (d.error ? loom_error_def_summary(d.error) : "(null)") +
                " line=" + std::to_string(d.origin_line) +
                " col=" + std::to_string(d.origin_column);
         for (size_t j = 0; j < d.params.size(); ++j) {
@@ -3439,8 +3439,8 @@ TEST_F(ParserTest, AllDiagnosticsAreFromParser) {
       "%s = test.addi %r, %undef : i32\n");
   for (const auto& d : diagnostics) {
     EXPECT_EQ(d.emitter, LOOM_EMITTER_PARSER)
-        << "Diagnostic with domain " << d.error->domain << " code "
-        << d.error->code << " has wrong emitter";
+        << "Diagnostic with domain " << loom_error_def_domain(d.error)
+        << " code " << loom_error_def_code(d.error) << " has wrong emitter";
   }
 }
 

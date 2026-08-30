@@ -13,6 +13,7 @@ import pytest
 from loom.dialect.scalar import analysis as scalar_analysis
 from loom.dialect.scalar import arithmetic as scalar_arithmetic
 from loom.dialect.vector import defs as vector
+from loom.error.target import ERR_TARGET_003
 from loom.target.contracts import (
     AttrProject,
     ContractFragment,
@@ -30,6 +31,7 @@ from loom.target.contracts import (
     contract_fragment_public_header,
     descriptor_by_semantic_tag,
 )
+from loom.target.contracts.diagnostics import string_param, target_diagnostic
 from loom.target.test.descriptors import (
     TEST_LOW_ADD_F32_DESCRIPTOR,
     TEST_LOW_ADD_I32_DESCRIPTOR,
@@ -40,6 +42,17 @@ from loom.target.test.descriptors import (
     TEST_LOW_FROM_ELEMENTS_V4I32_DESCRIPTOR,
     TEST_LOW_SHUFFLE_BYTES_DESCRIPTOR,
 )
+
+
+def test_target_diagnostic_records_canonical_context_prefix() -> None:
+    diagnostic = target_diagnostic(
+        ERR_TARGET_003,
+        string_param("subject_role", "operand"),
+        string_param("subject_name", "lhs"),
+        string_param("constraint_key", "type"),
+    )
+
+    assert diagnostic.target_context_param_count == 5
 
 
 def test_contract_fragment_uses_explicit_public_header() -> None:

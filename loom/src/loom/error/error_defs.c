@@ -9,6 +9,13 @@
 #include "loom/error/error_catalog.h"
 #include "loom/error/error_defs_tables.inl"
 
+static_assert(sizeof(loom_error_def_t) == 32,
+              "generated error definitions must remain compact");
+static_assert(sizeof(loom_error_param_def_t) == 4,
+              "generated error parameter definitions must remain packed");
+static_assert(sizeof(loom_error_domain_span_t) == 4,
+              "generated error domain spans must remain packed");
+
 const char* loom_diagnostic_severity_name(loom_diagnostic_severity_t severity) {
   if (severity < IREE_ARRAYSIZE(loom_diagnostic_severity_names)) {
     const char* name = loom_diagnostic_severity_names[severity];
@@ -65,14 +72,16 @@ const loom_error_def_t* loom_error_catalog_lookup(
   for (const loom_error_catalog_t* current_catalog = catalog;
        current_catalog != NULL;
        current_catalog = current_catalog->fallback_catalog) {
-    const loom_error_domain_catalog_t* domain_catalog =
-        current_catalog->domains[domain];
-    if (domain_catalog == NULL || code >= domain_catalog->code_count) {
+    const loom_error_domain_span_t domain_span =
+        current_catalog->domain_spans[domain];
+    if (code >= domain_span.code_count) {
       continue;
     }
-    const loom_error_def_t* error = domain_catalog->errors_by_code[code];
-    if (error != NULL) {
-      return error;
+    const uint16_t code_index = domain_span.code_index_start + code;
+    const uint16_t error_index =
+        current_catalog->error_indices_by_code[code_index];
+    if (error_index != UINT16_MAX) {
+      return &current_catalog->error_defs[error_index];
     }
   }
   return NULL;

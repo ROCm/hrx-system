@@ -1016,6 +1016,16 @@ def test_descriptor_set_family_emits_one_storage_table_and_ordered_headers() -> 
         descriptors=extension_view.descriptors,
     )
 
+    compiled_view = views.descriptor_set_view_for_spec(
+        compiler.compile_descriptor_set(storage_set),
+        base_view,
+    )
+    assert compiled_view.uses_storage_descriptor_tables
+    assert compiled_view.uses_storage_descriptor_view_tables
+    assert compiled_view.uses_storage_asm_form_tables
+    assert compiled_view.uses_storage_operand_form_tables
+    assert len(compiled_view.canonical_asm_form_ordinals) == 1
+
     generated = generate_descriptor_set_family(
         storage_set,
         (base_view, extension_view),
@@ -1027,6 +1037,9 @@ def test_descriptor_set_family_emits_one_storage_table_and_ordered_headers() -> 
     assert ".descriptors = kTestLowCoreDescriptors," in source
     assert ".descriptor_refs = kTestLowCoreDescriptorRefs," in source
     assert ".descriptor_refs = kTestLowExtensionCoreDescriptorRefs," in source
+    assert "kTestLowExtensionCoreAsmForms" not in source
+    assert "kTestLowExtensionCoreOperandForms" not in source
+    assert source.count(".asm_forms = kTestLowCoreAsmForms,") == 2
     assert ".descriptor_count = 1," in source
     assert ".descriptor_count = 2," in source
     assert ("const loom_low_descriptor_set_t* loom_test_low_extension_core_descriptor_set(void)") in source
@@ -1066,7 +1079,8 @@ def test_descriptor_set_view_selects_shared_schedule_class() -> None:
         view,
     )
 
-    assert not compiled_view.uses_storage_descriptor_tables
+    assert compiled_view.uses_storage_descriptor_tables
+    assert not compiled_view.uses_storage_descriptor_view_tables
     assert compiled_view.descriptors[0].schedule_class == vector_schedule.name
     assert compiled_view.instruction_classes == ((InstructionClass.VECTOR_ALU,),)
 
@@ -1101,14 +1115,16 @@ def test_descriptor_set_view_reuses_schedule_independent_storage_tables() -> Non
 
     compiled_view = views.descriptor_set_view_for_spec(compiled, view)
 
-    assert not compiled_view.uses_storage_descriptor_tables
+    assert compiled_view.uses_storage_descriptor_tables
+    assert not compiled_view.uses_storage_descriptor_view_tables
     assert compiled_view.uses_storage_asm_form_tables
     assert compiled_view.uses_storage_operand_form_tables
     assert compiled_view.asm_forms is compiled.asm_forms
     assert compiled_view.operand_forms is compiled.operand_forms
 
     source = generate_descriptor_set_family(storage_set, (view,)).source
-    assert "kTestLowScheduleViewCoreDescriptors" in source
+    assert "kTestLowScheduleViewCoreDescriptors" not in source
+    assert "kTestLowScheduleViewCoreDescriptorViews" in source
     assert "kTestLowScheduleViewCoreAsmForms" not in source
     assert "kTestLowScheduleViewCoreOperandForms" not in source
     assert ".asm_forms = kTestLowCoreAsmForms," in source
@@ -1196,13 +1212,14 @@ def test_descriptor_set_family_emits_prefix_view_local_asm_forms() -> None:
 
     assert "storage.add.i32" in source
     assert '"add.i32"' in source
-    assert "static const loom_low_descriptor_t kTestLowViewCoreDescriptors[]" in source
+    assert "static const loom_low_descriptor_t kTestLowViewCoreDescriptors[]" not in source
+    assert "kTestLowViewCoreDescriptorViews" not in source
     assert "static const loom_low_asm_form_t kTestLowViewCoreAsmForms[]" in source
-    assert ".descriptors = kTestLowViewCoreDescriptors," in source
+    assert ".descriptors = kTestLowCoreDescriptors," in source
+    assert ".descriptor_views = kTestLowCoreDescriptorViews," in source
     assert ".asm_forms = kTestLowViewCoreAsmForms," in source
-    assert source.count(".kind = LOOM_LOW_ASM_RESULT_VALUE_TYPE_KIND_SCALAR,") == 2
-    assert ".result_value_type_start = 0," in source
-    assert ".result_value_type_start = 1," in source
+    assert source.count(".kind = LOOM_LOW_ASM_RESULT_VALUE_TYPE_KIND_SCALAR,") == 1
+    assert source.count(".result_value_type_start = 0,") == 2
 
 
 def test_descriptor_set_family_compares_derived_descriptor_projections() -> None:
@@ -1299,7 +1316,8 @@ def test_descriptor_set_family_allows_view_local_non_authorable_surface() -> Non
         (view,),
     ).source
 
-    assert "static const loom_low_descriptor_t kTestLowViewCoreDescriptors[]" in source
+    assert "static const loom_low_descriptor_t kTestLowViewCoreDescriptors[]" not in source
+    assert ("static const loom_low_descriptor_view_t kTestLowViewCoreDescriptorViews[]") in source
     assert ".canonical_asm_form_ordinal = LOOM_LOW_ASM_FORM_ORDINAL_NONE" in source
 
 
@@ -1338,6 +1356,58 @@ def test_descriptor_set_family_emits_sibling_view_descriptor_surfaces() -> None:
     assert ".descriptor_count = 1," in source
     assert ".descriptor_ordinal = 0," in source
     assert "test.mul.i32" not in source
+
+
+def test_descriptor_set_family_shares_exact_sibling_view_tables() -> None:
+    storage_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(
+            TEST_LOW_CONST_I32_DESCRIPTOR,
+            TEST_LOW_STATE_ADD_I32_DESCRIPTOR,
+            TEST_LOW_STATE_ADD_I32_RHS_ZERO_DESCRIPTOR,
+        ),
+    )
+    first_view = replace(
+        storage_set,
+        key="test.low.first.core",
+        function_name="loom_test_low_first_core_descriptor_set",
+        c_table_prefix="TestLowFirstCore",
+        c_enum_prefix="TEST_LOW_FIRST_CORE",
+        descriptors=(
+            TEST_LOW_STATE_ADD_I32_DESCRIPTOR,
+            TEST_LOW_STATE_ADD_I32_RHS_ZERO_DESCRIPTOR,
+        ),
+    )
+    second_view = replace(
+        first_view,
+        key="test.low.second.core",
+        function_name="loom_test_low_second_core_descriptor_set",
+        c_table_prefix="TestLowSecondCore",
+        c_enum_prefix="TEST_LOW_SECOND_CORE",
+    )
+
+    source = generate_descriptor_set_family(
+        storage_set,
+        (first_view, second_view),
+    ).source
+
+    table_fields = (
+        ("loom_low_descriptor_t", "Descriptors", "descriptors"),
+        (
+            "loom_low_descriptor_view_t",
+            "DescriptorViews",
+            "descriptor_views",
+        ),
+        ("loom_low_operand_form_t", "OperandForms", "operand_forms"),
+        ("loom_low_descriptor_ref_t", "DescriptorRefs", "descriptor_refs"),
+        ("loom_low_asm_form_t", "AsmForms", "asm_forms"),
+    )
+    for c_type, table_suffix, field_name in table_fields:
+        first_table_symbol = f"kTestLowFirstCore{table_suffix}"
+        second_table_symbol = f"kTestLowSecondCore{table_suffix}"
+        assert source.count(f"static const {c_type} {first_table_symbol}[]") == 1
+        assert f"static const {c_type} {second_table_symbol}[]" not in source
+        assert source.count(f".{field_name} = {first_table_symbol},") == 2
 
 
 def test_generate_test_low_core_descriptor_set() -> None:
@@ -1496,8 +1566,8 @@ def test_generator_emits_trailing_variadic_operand_segment() -> None:
 
     assert compiled.asm_forms[0].operand_indices == (1, 2)
     assert compiled.asm_forms[0].operand_segment_start == 0
-    assert compiled.asm_operand_segments[0].operand_count == 2
-    assert compiled.asm_operand_segments[0].has_variadic_operand
+    assert compiled.asm_table_storage.operand_segments[0].operand_count == 2
+    assert compiled.asm_table_storage.operand_segments[0].has_variadic_operand
     assert compiled.descriptor_rows[0]["minimum_packet_operand_count"] == 1
     assert DescriptorFlag.VARIADIC_OPERANDS in compiled.descriptors[0].flags
     assert "LOOM_LOW_OPERAND_FLAG_VARIADIC" in generated.source
@@ -1562,7 +1632,7 @@ def test_generator_emits_exact_asm_result_value_type() -> None:
     generated = generate_descriptor_set(descriptor_set)
 
     assert compiled.asm_forms[0].result_value_type_start == 0
-    assert compiled.asm_result_value_types == [AsmResultValueType(ScalarTypeKind.I32, vector_lane_count=4)]
+    assert compiled.asm_table_storage.result_value_types == [AsmResultValueType(ScalarTypeKind.I32, vector_lane_count=4)]
     assert "static const loom_low_asm_result_value_type_t kTestLowCoreAsmResultValueTypes[]" in generated.source
     assert ".kind = LOOM_LOW_ASM_RESULT_VALUE_TYPE_KIND_VECTOR," in generated.source
     assert ".element_type = LOOM_SCALAR_TYPE_I32," in generated.source
@@ -1596,7 +1666,7 @@ def test_generator_emits_partial_multi_result_value_type_recipe() -> None:
     compiled = compiler.compile_descriptor_set(descriptor_set)
     generated = generate_descriptor_set(descriptor_set)
 
-    assert compiled.asm_result_value_types == [
+    assert compiled.asm_table_storage.result_value_types == [
         AsmResultValueType(ScalarTypeKind.I32),
         None,
     ]

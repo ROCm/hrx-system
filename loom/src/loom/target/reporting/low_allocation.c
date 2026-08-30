@@ -136,7 +136,9 @@ loom_target_compile_report_pressure_origin_from_node(
       node->descriptor != NULL) {
     info.kind =
         loom_target_compile_report_pressure_origin_from_instruction_classes(
-            node->descriptor->instruction_class_flags);
+            loom_low_descriptor_set_descriptor_view(descriptor_set,
+                                                    node->descriptor)
+                ->instruction_class_flags);
     if (info.kind == LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_UNKNOWN) {
       info.kind = LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_OPERATION;
     }

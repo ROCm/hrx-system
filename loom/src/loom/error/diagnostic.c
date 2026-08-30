@@ -210,8 +210,9 @@ iree_status_t loom_diagnostic_format_with_options(
 
   // Error code.
   IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-      stream, " [%s/%03u]", loom_error_domain_name(diagnostic->error->domain),
-      diagnostic->error->code));
+      stream, " [%s/%03u]",
+      loom_error_domain_name(loom_error_def_domain(diagnostic->error)),
+      loom_error_def_code(diagnostic->error)));
 
   // Render the message from the error def's template and params.
   IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ": "));
@@ -222,7 +223,8 @@ iree_status_t loom_diagnostic_format_with_options(
 
   // If we have no source, emit fix hint (if any) and stop.
   if (!has_source) {
-    if (diagnostic->error && diagnostic->error->fix_hint_template) {
+    if (diagnostic->error &&
+        loom_error_def_fix_hint_template(diagnostic->error)) {
       IREE_RETURN_IF_ERROR(
           loom_output_stream_write_cstring(stream, "  = help: "));
       IREE_RETURN_IF_ERROR(loom_diagnostic_render_fix_hint(
@@ -241,7 +243,8 @@ iree_status_t loom_diagnostic_format_with_options(
       loom_diagnostic_format_highlight_omissions(diagnostic, stream));
 
   // Fix hint line (when structured diagnostic has one).
-  if (diagnostic->error && diagnostic->error->fix_hint_template) {
+  if (diagnostic->error &&
+      loom_error_def_fix_hint_template(diagnostic->error)) {
     // Compute the width of the primary line number for alignment.
     int line_number_width =
         iree_snprintf(NULL, 0, "%" PRIu32, range->start_line);

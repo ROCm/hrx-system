@@ -459,7 +459,7 @@ def validate_u32(value: int, description: str) -> None:
 
 def validate_u16_table_count(count: int, description: str) -> None:
     if count > 0xFFFF:
-        raise ValueError(f"{description} count does not fit u16 descriptor references")
+        raise ValueError(f"{description} count does not fit a u16-indexed table")
 
 
 def validate_u64(value: int, description: str) -> None:

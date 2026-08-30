@@ -982,12 +982,14 @@ static iree_status_t loom_wasm_emit_descriptor_packet(
 
 static iree_status_t loom_wasm_record_descriptor_flags(
     loom_wasm_emit_state_t* state, const loom_low_descriptor_t* descriptor) {
-  if (descriptor->schedule_class_id == LOOM_LOW_SCHEDULE_CLASS_NONE) {
-    return iree_ok_status();
-  }
   const loom_low_descriptor_set_t* descriptor_set =
       state->allocation->target.descriptor_set;
-  const uint16_t schedule_class_id = descriptor->schedule_class_id;
+  const uint16_t schedule_class_id =
+      loom_low_descriptor_set_descriptor_view(descriptor_set, descriptor)
+          ->schedule_class_id;
+  if (schedule_class_id == LOOM_LOW_SCHEDULE_CLASS_NONE) {
+    return iree_ok_status();
+  }
   if (schedule_class_id >= descriptor_set->schedule_class_count) {
     return iree_make_status(
         IREE_STATUS_OUT_OF_RANGE,

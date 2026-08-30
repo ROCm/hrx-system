@@ -4,13 +4,13 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""C B-string pool helpers shared by Loom generators."""
+"""C string-pool helpers shared by Loom generators."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from loom.gen.support.c import CIdentifierCase, c_identifier
+from loom.gen.support.c import CIdentifierCase, c_identifier, c_string_literal
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,9 +24,10 @@ class CStringEntry:
 
 @dataclass(slots=True)
 class CStringPool:
-    """Interns byte-length-prefixed strings and emits stable enum references."""
+    """Interns strings and assigns stable byte offsets for C table emitters."""
 
     c_enum_prefix: str
+    max_payload_length: int | None = 255
     entries: list[CStringEntry] = field(default_factory=list)
     value_to_label: dict[str, str] = field(default_factory=dict)
     label_to_primary: dict[str, str] = field(default_factory=dict)
@@ -39,8 +40,8 @@ class CStringPool:
 
     def intern(self, label: str, value: str) -> str:
         """Interns |value| with |label| and returns the primary canonical label."""
-        if len(value.encode()) > 255:
-            raise ValueError(f"B-string '{value}' exceeds 255 bytes")
+        if self.max_payload_length is not None and len(value.encode()) > self.max_payload_length:
+            raise ValueError(f"string '{value}' exceeds {self.max_payload_length} bytes")
         label = self.canonical_label(label)
         if label in self.label_to_primary:
             primary_label = self.label_to_primary[label]
@@ -70,3 +71,39 @@ class CStringPool:
     def ref(self, label: str) -> str:
         """Returns a C expression naming the interned string offset enum."""
         return self.enum_name(label)
+
+
+def emit_c_string_table(pool: CStringPool, data_name: str) -> list[str]:
+    """Emits one packed B-string byte table and its offset constants."""
+    if not pool.entries:
+        return []
+    lines = [
+        "// clang-format off",
+        f"static const uint8_t {data_name}[] =",
+    ]
+    for entry in pool.entries:
+        length = len(entry.value.encode())
+        escaped = c_string_literal(entry.value)
+        lines.append(f'    LOOM_BSTRING_LITERAL({length}, "{escaped}")')
+    lines[-1] += ";"
+    lines.extend(["// clang-format on", "", "enum {"])
+    for index, entry in enumerate(pool.entries):
+        enum_name = pool.enum_name(entry.label)
+        if index == 0:
+            lines.append(f"  {enum_name} = 0,")
+        else:
+            previous_entry = pool.entries[index - 1]
+            previous_enum_name = pool.enum_name(previous_entry.label)
+            previous_value = c_string_literal(previous_entry.value)
+            lines.append(f'  {enum_name} = {previous_enum_name} + sizeof("{previous_value}"),')
+    previous_entry = pool.entries[-1]
+    previous_enum_name = pool.enum_name(previous_entry.label)
+    previous_value = c_string_literal(previous_entry.value)
+    lines.extend(
+        [
+            f'  {pool.c_enum_prefix}_STRING_END = {previous_enum_name} + sizeof("{previous_value}"),',
+            "};",
+            "",
+        ]
+    )
+    return lines

@@ -91,3 +91,91 @@ def test_append_struct_array() -> None:
             "",
         ]
     )
+
+
+def test_static_array_emitter_reuses_exact_value_initializer() -> None:
+    lines: list[str] = []
+    emitter = c_arrays.StaticArrayEmitter(lines)
+
+    first_symbol = emitter.append_value_array(
+        "uint16_t",
+        "kFirstValues",
+        ["1", "2"],
+    )
+    second_symbol = emitter.append_value_array(
+        "uint16_t",
+        "kSecondValues",
+        ["1", "2"],
+    )
+
+    assert first_symbol == "kFirstValues"
+    assert second_symbol == "kFirstValues"
+    assert "kFirstValues" in "\n".join(lines)
+    assert "kSecondValues" not in "\n".join(lines)
+
+
+def test_static_array_emitter_can_reuse_required_empty_array() -> None:
+    lines: list[str] = []
+    emitter = c_arrays.StaticArrayEmitter(lines)
+
+    first_symbol = emitter.append_value_array(
+        "uint16_t",
+        "kFirstValues",
+        [],
+        emit_empty=True,
+    )
+    second_symbol = emitter.append_value_array(
+        "uint16_t",
+        "kSecondValues",
+        [],
+        emit_empty=True,
+    )
+
+    assert first_symbol == "kFirstValues"
+    assert second_symbol == "kFirstValues"
+    assert "\n".join(lines) == "\n".join(
+        [
+            "static const uint16_t kFirstValues[] = {",
+            "};",
+            "",
+        ]
+    )
+
+
+def test_static_array_emitter_keeps_types_and_initializer_kinds_distinct() -> None:
+    lines: list[str] = []
+    emitter = c_arrays.StaticArrayEmitter(lines)
+
+    value_symbol = emitter.append_value_array("uint16_t", "kValues", ["1"])
+    other_type_symbol = emitter.append_value_array(
+        "uint32_t",
+        "kOtherTypeValues",
+        ["1"],
+    )
+    struct_symbol = emitter.append_struct_array(
+        "uint16_t",
+        "kStructValues",
+        [["1"]],
+    )
+
+    assert value_symbol == "kValues"
+    assert other_type_symbol == "kOtherTypeValues"
+    assert struct_symbol == "kStructValues"
+
+
+def test_static_array_emitter_reuses_exact_struct_initializer() -> None:
+    lines: list[str] = []
+    emitter = c_arrays.StaticArrayEmitter(lines)
+    rows = [[".x = 1,", ".y = 2,"]]
+
+    first_symbol = emitter.append_struct_array("row_t", "kFirstRows", rows)
+    second_symbol = emitter.append_struct_array(
+        "row_t",
+        "kSecondRows",
+        rows,
+    )
+
+    assert first_symbol == "kFirstRows"
+    assert second_symbol == "kFirstRows"
+    assert "kFirstRows" in "\n".join(lines)
+    assert "kSecondRows" not in "\n".join(lines)

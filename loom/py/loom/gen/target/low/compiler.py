@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 from loom.gen.support.string_pool import CStringPool
 from loom.gen.target.low import validation
@@ -17,17 +17,18 @@ from loom.gen.target.low.compiled import (
     CompiledAsmForm,
     CompiledAsmImmediate,
     CompiledAsmOperandSegment,
+    CompiledAsmTableStorage,
     CompiledDescriptorSet,
     CompiledNativeAsmValue,
     CompiledOperandForm,
     CompiledOperandFormMatch,
     DescriptorAllowlist,
+    append_interned_sequence,
 )
 from loom.target.low_descriptors import (
     LOW_DESCRIPTOR_ENCODING_ID_NONE,
     LOW_DESCRIPTOR_SET_ORDINAL_NONE,
     AsmForm,
-    AsmResultValueType,
     Constraint,
     ConstraintKind,
     Descriptor,
@@ -59,6 +60,33 @@ from loom.target.low_descriptors import (
     StorageLease,
     descriptor_stable_id,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class _CompiledOperandRow:
+    """Operand row with its derived parallel-table fields."""
+
+    # Authored operand semantics emitted into the runtime row.
+    operand: Operand
+    # Source value position derived from the descriptor operand layout.
+    source_value_index: int | None
+    # First row in the shared register-class-alternative table.
+    reg_class_alt_start: int
+    # Whether the result constraint permits rematerialization.
+    rematerializable: bool
+
+
+@dataclass(frozen=True, slots=True)
+class _CompiledImmediateRow:
+    """Immediate row with its derived parallel-table fields."""
+
+    # Authored immediate semantics emitted into the runtime row.
+    immediate: Immediate
+    # First row in the shared immediate-encoding-slice table.
+    encoding_slice_start: int
+    # Resolved enum-domain identifier, or None for non-enum immediates.
+    enum_domain_id: int | None
+
 
 _SEMANTIC_INSTRUCTION_CLASSES = (
     ("matrix.smfmac", (InstructionClass.SMFMAC,)),
@@ -845,30 +873,6 @@ def compile_asm_forms_for_descriptors(
     )
 
 
-def append_asm_form_table_spans(
-    asm_forms: Sequence[CompiledAsmForm],
-    asm_operand_indices: list[int],
-    asm_operand_segments: list[CompiledAsmOperandSegment],
-    asm_result_value_types: list[AsmResultValueType | None],
-    asm_immediates: list[CompiledAsmImmediate],
-    native_asm_values: list[CompiledNativeAsmValue],
-) -> None:
-    for asm_form in asm_forms:
-        asm_form.result_index_start = len(asm_operand_indices)
-        asm_operand_indices.extend(asm_form.result_indices)
-        if asm_form.result_value_types:
-            asm_form.result_value_type_start = len(asm_result_value_types)
-            asm_result_value_types.extend(asm_form.result_value_types)
-        asm_form.operand_index_start = len(asm_operand_indices)
-        asm_operand_indices.extend(asm_form.operand_indices)
-        asm_form.operand_segment_start = len(asm_operand_segments)
-        asm_operand_segments.extend(asm_form.operand_segments)
-        asm_form.immediate_start = len(asm_immediates)
-        asm_immediates.extend(asm_form.immediates)
-        asm_form.native_assembly_value_start = len(native_asm_values)
-        native_asm_values.extend(asm_form.native_assembly_values)
-
-
 def compile_descriptor_set(
     spec: DescriptorSet,
     allowlist: DescriptorAllowlist | None = None,
@@ -1144,6 +1148,7 @@ def compile_descriptor_set(
         selected_descriptors,
         allow_ambiguous_mnemonics=allow_ambiguous_asm_mnemonics,
     )
+    validation.validate_u16_table_count(len(asm_forms), f"descriptor set '{spec.key}' asm form")
     canonical_asm_form_ordinals: list[int | None] = [None] * len(selected_descriptors)
     asm_form_counts_by_descriptor = [0] * len(selected_descriptors)
     for asm_form_ordinal, asm_form in enumerate(asm_forms):
@@ -1154,34 +1159,23 @@ def compile_descriptor_set(
         if form_count != 1:
             canonical_asm_form_ordinals[descriptor_ordinal] = None
 
-    asm_operand_indices: list[int] = []
-    asm_operand_segments: list[CompiledAsmOperandSegment] = []
-    asm_result_value_types: list[AsmResultValueType | None] = []
-    asm_immediates: list[CompiledAsmImmediate] = []
-    native_asm_values: list[CompiledNativeAsmValue] = []
-    append_asm_form_table_spans(
-        asm_forms,
-        asm_operand_indices,
-        asm_operand_segments,
-        asm_result_value_types,
-        asm_immediates,
-        native_asm_values,
-    )
+    asm_table_storage = CompiledAsmTableStorage()
+    asm_table_storage.append_forms(asm_forms)
 
     reg_class_alts: list[tuple[int | None, tuple[RegClassAltFlag, ...]]] = []
     reg_alt_group_starts: dict[tuple[tuple[int | None, tuple[RegClassAltFlag, ...]], ...], int] = {}
     immediate_encoding_slice_group_starts: dict[tuple[ImmediateEncodingSlice, ...], int] = {}
     effect_group_starts: dict[tuple[Effect, ...], int] = {}
+    constraint_group_starts: dict[tuple[Constraint, ...], int] = {}
     storage_lease_group_starts: dict[tuple[StorageLease, ...], int] = {}
-    operands: list[Operand] = []
-    operand_source_value_indices: list[int | None] = []
-    operand_alt_starts: list[int] = []
-    operand_rematerializable: list[bool] = []
-    immediates: list[Immediate] = []
+    feature_mask_group_starts: dict[tuple[int, ...], int] = {}
+    encoding_field_value_group_starts: dict[tuple[EncodingFieldValue, ...], int] = {}
+    compiled_operand_rows: list[_CompiledOperandRow] = []
+    operand_group_starts: dict[tuple[_CompiledOperandRow, ...], int] = {}
+    compiled_immediate_rows: list[_CompiledImmediateRow] = []
+    immediate_group_starts: dict[tuple[_CompiledImmediateRow, ...], int] = {}
     immediate_encoding_slices: list[ImmediateEncodingSlice] = []
-    immediate_encoding_slice_starts: list[int] = []
     enum_values: list[EnumValue] = []
-    immediate_enum_domain_ids: list[int | None] = []
     effects: list[Effect] = []
     constraints: list[Constraint] = []
     storage_leases: list[StorageLease] = []
@@ -1228,10 +1222,15 @@ def compile_descriptor_set(
         )
 
     for descriptor in selected_descriptors:
-        operand_start = len(operands)
         rematerializable_result_set = set(rematerializable_results_by_descriptor[descriptor.key])
-        operand_source_value_indices.extend(source_value_indices_by_descriptor[descriptor.key])
-        for operand_index, operand in enumerate(descriptor.operands):
+        descriptor_operand_rows: list[_CompiledOperandRow] = []
+        for operand_index, (operand, source_value_index) in enumerate(
+            zip(
+                descriptor.operands,
+                source_value_indices_by_descriptor[descriptor.key],
+                strict=True,
+            )
+        ):
             alt_group: tuple[tuple[int | None, tuple[RegClassAltFlag, ...]], ...] = tuple(
                 (
                     None if reg_alt.reg_class is None else reg_class_ids[reg_alt.reg_class],
@@ -1239,50 +1238,71 @@ def compile_descriptor_set(
                 )
                 for reg_alt in operand.reg_alts
             )
-            alt_start = reg_alt_group_starts.get(alt_group)
-            if alt_start is None:
-                alt_start = len(reg_class_alts)
-                reg_alt_group_starts[alt_group] = alt_start
-                reg_class_alts.extend(alt_group)
-            operands.append(operand)
-            operand_alt_starts.append(alt_start)
-            operand_rematerializable.append(operand_index in rematerializable_result_set)
-        immediate_start = len(immediates)
+            reg_class_alt_start, _ = append_interned_sequence(
+                alt_group,
+                reg_class_alts,
+                reg_alt_group_starts,
+            )
+            descriptor_operand_rows.append(
+                _CompiledOperandRow(
+                    operand=operand,
+                    source_value_index=source_value_index,
+                    reg_class_alt_start=reg_class_alt_start,
+                    rematerializable=(operand_index in rematerializable_result_set),
+                )
+            )
+        operand_start, _ = append_interned_sequence(
+            descriptor_operand_rows,
+            compiled_operand_rows,
+            operand_group_starts,
+        )
+
+        descriptor_immediate_rows: list[_CompiledImmediateRow] = []
         for immediate in descriptor.immediates:
-            slice_start = 0
-            if immediate.encoding_slices:
-                group_start = immediate_encoding_slice_group_starts.get(immediate.encoding_slices)
-                if group_start is None:
-                    group_start = len(immediate_encoding_slices)
-                    immediate_encoding_slice_group_starts[immediate.encoding_slices] = group_start
-                    immediate_encoding_slices.extend(immediate.encoding_slices)
-                slice_start = group_start
-            immediate_encoding_slice_starts.append(slice_start)
-            immediates.append(immediate)
-            immediate_enum_domain_ids.append(None if immediate.enum_domain is None else enum_domain_ids[immediate.enum_domain])
-        if descriptor.effects:
-            effect_start = effect_group_starts.get(descriptor.effects)
-            if effect_start is None:
-                effect_start = len(effects)
-                effect_group_starts[descriptor.effects] = effect_start
-                effects.extend(descriptor.effects)
-        else:
-            effect_start = 0
-        constraint_start = len(constraints)
-        constraints.extend(descriptor.constraints)
-        if descriptor.storage_leases:
-            storage_lease_start = storage_lease_group_starts.get(descriptor.storage_leases)
-            if storage_lease_start is None:
-                storage_lease_start = len(storage_leases)
-                storage_lease_group_starts[descriptor.storage_leases] = storage_lease_start
-                storage_leases.extend(descriptor.storage_leases)
-                storage_lease_labels.extend((descriptor.key, i) for i in range(len(descriptor.storage_leases)))
-        else:
-            storage_lease_start = 0
-        feature_mask_word_start = len(feature_mask_words)
-        feature_mask_words.extend(descriptor.feature_mask_words)
-        encoding_field_value_start = len(encoding_field_values)
-        encoding_field_values.extend(descriptor.encoding_field_values)
+            encoding_slice_start, _ = append_interned_sequence(
+                immediate.encoding_slices,
+                immediate_encoding_slices,
+                immediate_encoding_slice_group_starts,
+            )
+            descriptor_immediate_rows.append(
+                _CompiledImmediateRow(
+                    immediate=immediate,
+                    encoding_slice_start=encoding_slice_start,
+                    enum_domain_id=(None if immediate.enum_domain is None else enum_domain_ids[immediate.enum_domain]),
+                )
+            )
+        immediate_start, _ = append_interned_sequence(
+            descriptor_immediate_rows,
+            compiled_immediate_rows,
+            immediate_group_starts,
+        )
+        effect_start, _ = append_interned_sequence(
+            descriptor.effects,
+            effects,
+            effect_group_starts,
+        )
+        constraint_start, _ = append_interned_sequence(
+            descriptor.constraints,
+            constraints,
+            constraint_group_starts,
+        )
+        storage_lease_start, inserted_storage_leases = append_interned_sequence(
+            descriptor.storage_leases,
+            storage_leases,
+            storage_lease_group_starts,
+        )
+        if inserted_storage_leases:
+            storage_lease_labels.extend((descriptor.key, i) for i in range(len(descriptor.storage_leases)))
+        feature_mask_word_start, _ = append_interned_sequence(
+            descriptor.feature_mask_words,
+            feature_mask_words,
+            feature_mask_group_starts,
+        )
+        encoding_field_value_start, _ = append_interned_sequence(
+            descriptor.encoding_field_values,
+            encoding_field_values,
+            encoding_field_value_group_starts,
+        )
         operand_form_start = len(operand_forms)
         for operand_form in descriptor.operand_forms:
             if operand_form.replacement_descriptor not in descriptor_ordinals:
@@ -1320,6 +1340,14 @@ def compile_descriptor_set(
                 "operand_form_count": len(descriptor.operand_forms),
             }
         )
+
+    operands = [row.operand for row in compiled_operand_rows]
+    operand_source_value_indices = [row.source_value_index for row in compiled_operand_rows]
+    operand_alt_starts = [row.reg_class_alt_start for row in compiled_operand_rows]
+    operand_rematerializable = [row.rematerializable for row in compiled_operand_rows]
+    immediates = [row.immediate for row in compiled_immediate_rows]
+    immediate_encoding_slice_starts = [row.encoding_slice_start for row in compiled_immediate_rows]
+    immediate_enum_domain_ids = [row.enum_domain_id for row in compiled_immediate_rows]
 
     descriptor_refs = sorted((descriptor.key, i) for i, descriptor in enumerate(selected_descriptors))
     seen_stable_ids: dict[int, str] = {}
@@ -1372,11 +1400,7 @@ def compile_descriptor_set(
         descriptor_refs=descriptor_refs,
         canonical_asm_form_ordinals=canonical_asm_form_ordinals,
         asm_forms=asm_forms,
-        asm_operand_indices=asm_operand_indices,
-        asm_operand_segments=asm_operand_segments,
-        asm_result_value_types=asm_result_value_types,
-        asm_immediates=asm_immediates,
-        native_asm_values=native_asm_values,
+        asm_table_storage=asm_table_storage,
         schedule_rows=schedule_rows,
         enum_domain_rows=enum_domain_rows,
     )

@@ -129,13 +129,13 @@ static iree_status_t loom_parser_emit_diagnostic(
     loom_token_t token,
     const loom_diagnostic_related_location_t* related_locations,
     iree_host_size_t related_location_count) {
-  if (error->severity == LOOM_DIAGNOSTIC_ERROR) {
+  if (loom_error_def_severity(error) == LOOM_DIAGNOSTIC_ERROR) {
     ++parser->error_count;
   }
   loom_source_range_t origin =
       loom_parser_token_origin(parser->filename, parser->source, token);
   loom_diagnostic_t diagnostic = {
-      .severity = error->severity,
+      .severity = loom_error_def_severity(error),
       .error = error,
       .params = params,
       .param_count = param_count,

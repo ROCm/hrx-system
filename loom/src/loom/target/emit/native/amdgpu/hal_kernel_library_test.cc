@@ -351,9 +351,10 @@ std::string DiagnosticSummary(const DiagnosticCapture& capture) {
     if (!result.empty()) {
       result += "\n";
     }
-    result += diagnostic.error ? diagnostic.error->error_id : "<unknown>";
+    result +=
+        diagnostic.error ? loom_error_def_id(diagnostic.error) : "<unknown>";
     result += ": ";
-    result += diagnostic.error ? diagnostic.error->summary : "";
+    result += diagnostic.error ? loom_error_def_summary(diagnostic.error) : "";
     for (const loom_diagnostic_param_t& param : diagnostic.params) {
       result += " [";
       switch (param.kind) {

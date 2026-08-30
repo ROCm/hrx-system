@@ -719,12 +719,15 @@ static uint16_t loom_amdgpu_wait_state_descriptor_latency_cycles(
     const loom_amdgpu_wait_state_builder_t* builder,
     const loom_low_descriptor_t* descriptor) {
   const loom_low_descriptor_set_t* descriptor_set = builder->descriptor_set;
-  if (descriptor_set == NULL || descriptor == NULL ||
-      descriptor->schedule_class_id >= descriptor_set->schedule_class_count) {
+  if (descriptor_set == NULL || descriptor == NULL) {
     return 0;
   }
+  const uint16_t schedule_class_id =
+      loom_low_descriptor_set_descriptor_view(descriptor_set, descriptor)
+          ->schedule_class_id;
+  if (schedule_class_id >= descriptor_set->schedule_class_count) return 0;
   const loom_low_schedule_class_t* schedule_class =
-      &descriptor_set->schedule_classes[descriptor->schedule_class_id];
+      &descriptor_set->schedule_classes[schedule_class_id];
   return schedule_class->latency_cycles;
 }
 

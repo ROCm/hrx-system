@@ -257,6 +257,7 @@ static iree_status_t loom_low_lower_query_target_contract_index(
   uint16_t failed_binding_index = UINT16_MAX;
   uint16_t failed_case_index = UINT16_MAX;
   uint16_t failed_rule_set_index = UINT16_MAX;
+  loom_low_lower_rule_match_context_t case_match_context = *match_context;
   for (uint16_t i = 0; i < op_entry.case_count; ++i) {
     const uint16_t case_index = (uint16_t)(op_entry.case_start + i);
     const loom_target_contract_case_t* contract_case =
@@ -287,17 +288,21 @@ static iree_status_t loom_low_lower_query_target_contract_index(
     }
     const loom_low_lower_rule_set_t* rule_set =
         options->rule_sets.values[binding->rule_set_index];
+    case_match_context.policy_rule_set_ordinal =
+        (uint16_t)(binding->rule_set_index + 1u);
     loom_low_lower_rule_selection_t selection = {0};
     IREE_RETURN_IF_ERROR(
         loom_low_lower_rule_set_select_rule_range_with_match_context(
-            match_context, rule_set, source_op, rule_index, 1, &selection));
+            &case_match_context, rule_set, source_op, rule_index, 1,
+            &selection));
     if (selection.rule != NULL) {
       const loom_low_lower_descriptor_ref_t descriptor_ref =
           loom_low_lower_rule_first_descriptor_ref(rule_set, selection.rule);
       const loom_low_descriptor_t* selected_descriptor = NULL;
       if (descriptor_ref != LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE) {
         IREE_RETURN_IF_ERROR(loom_low_lower_rule_resolve_descriptor_ref(
-            match_context, rule_set, descriptor_ref, &selected_descriptor));
+            &case_match_context, rule_set, descriptor_ref,
+            &selected_descriptor));
         IREE_ASSERT(
             selected_descriptor != NULL,
             "generated target-low contract selected a missing descriptor");

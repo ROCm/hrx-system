@@ -94,7 +94,8 @@ class LowAsmParserTest : public ::testing::Test {
       for (size_t i = 0; i < capture_.diagnostics.size(); ++i) {
         const auto& diagnostic = capture_.diagnostics[i];
         msg += "  [" + std::to_string(i) + "] " +
-               (diagnostic.error ? diagnostic.error->summary : "(null)") +
+               (diagnostic.error ? loom_error_def_summary(diagnostic.error)
+                                 : "(null)") +
                " line=" + std::to_string(diagnostic.origin_line) +
                " col=" + std::to_string(diagnostic.origin_column);
         for (size_t j = 0; j < diagnostic.params.size(); ++j) {

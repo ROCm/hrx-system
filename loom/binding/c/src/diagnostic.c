@@ -38,9 +38,10 @@ static loomc_diagnostic_severity_t loomc_diagnostic_severity_from_loom(
 
 static loomc_status_t loomc_format_loom_diagnostic_code(
     const loom_diagnostic_t* diagnostic, iree_string_builder_t* builder) {
-  const char* domain = loom_error_domain_name(diagnostic->error->domain);
+  const char* domain =
+      loom_error_domain_name(loom_error_def_domain(diagnostic->error));
   return loomc_status_from_iree(iree_string_builder_append_format(
-      builder, "%s/%03u", domain, diagnostic->error->code));
+      builder, "%s/%03u", domain, loom_error_def_code(diagnostic->error)));
 }
 
 static loomc_status_t loomc_render_loom_diagnostic_message(
@@ -114,7 +115,7 @@ loomc_status_t loomc_result_add_loom_diagnostic_emission(
                              "diagnostic emission must not be NULL");
   }
   loom_diagnostic_t diagnostic = {
-      .severity = emission->error->severity,
+      .severity = loom_error_def_severity(emission->error),
       .error = emission->error,
       .params = emission->params,
       .param_count = emission->param_count,

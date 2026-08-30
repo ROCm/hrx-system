@@ -147,11 +147,13 @@ func.def target(@target) @encoded_i8_blocked_mma(
   %k = index.constant 4 : index
   %lhs_schema = encoding.define #encoding.operand<element_format=i8, payload_elements=32, payload_registers=8> : encoding<schema>
   %rhs_schema = encoding.define #encoding.operand<element_format=i8, payload_elements=32, payload_registers=8> : encoding<schema>
-  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<16xi32>
-  %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<16xi32>
+  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<64xi8>
+  %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<64xi8>
   %output_view = buffer.view %output_buffer[%base] : buffer -> view<16xi32>
-  %lhs_words = vector.load %lhs_view[%bounded_origin] : view<16xi32> -> vector<8xi32>
-  %rhs_words = vector.load %rhs_view[%bounded_origin] : view<16xi32> -> vector<8xi32>
+  %lhs_bytes = vector.load %lhs_view[%bounded_origin] : view<64xi8> -> vector<32xi8>
+  %rhs_bytes = vector.load %rhs_view[%bounded_origin] : view<64xi8> -> vector<32xi8>
+  %lhs_words = vector.bitcast %lhs_bytes : vector<32xi8> to vector<8xi32>
+  %rhs_words = vector.bitcast %rhs_bytes : vector<32xi8> to vector<8xi32>
   %init_words = vector.load %output_view[%bounded_origin] : view<16xi32> -> vector<8xi32>
   %lhs = vector.fragment<lhs> %lhs_words shape [blocks(%blocks), %m, %k] using {schema = %lhs_schema : encoding<schema>} : vector<8xi32>
   %rhs = vector.fragment<rhs> %rhs_words shape [blocks(%blocks), %k, %n] using {schema = %rhs_schema : encoding<schema>} : vector<8xi32>
@@ -163,13 +165,29 @@ func.def target(@target) @encoded_i8_blocked_mma(
 
 // ----
 low.func.def target<x86.avx512_packed_dot.core>(@target) abi(object_function) @encoded_i8_blocked_mma(%lhs_view: reg<x86.gpr64>, %rhs_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %bounded_origin: reg<x86.gpr64>) asm {
-  %lhs = vmovdqu32.load.indexed.ymm %lhs_view, %bounded_origin {disp32 = 0, scale = 4}
-  %rhs = vmovdqu32.load.indexed.ymm %rhs_view, %bounded_origin {disp32 = 0, scale = 4}
+  %lhs = vmovdqu32.load.indexed.ymm %lhs_view, %bounded_origin {disp32 = 0, scale = 1}
+  %rhs = vmovdqu32.load.indexed.ymm %rhs_view, %bounded_origin {disp32 = 0, scale = 1}
   %init = vmovdqu32.load.indexed.ymm %output_view, %bounded_origin {disp32 = 0, scale = 4}
-  %29 = copy %init : reg<x86.ymm> -> reg<x86.ymm>
-  %dot = avx_vnni_int8.vpdpbssd.ymm %29, %lhs, %rhs
+  %31 = copy %init : reg<x86.ymm> -> reg<x86.ymm>
+  %dot = avx_vnni_int8.vpdpbssd.ymm %31, %lhs, %rhs
   vmovdqu32.store.indexed.ymm %dot, %output_view, %bounded_origin {disp32 = 0, scale = 4}
   return
+}
+
+// ====
+
+x86.target<avx512_packed_dot> @target
+
+func.def target(@target) @packed_byte_bitcast_roundtrip(
+    %bytes: vector<32xi8>) -> (vector<32xi8>) {
+  %words = vector.bitcast %bytes : vector<32xi8> to vector<8xi32>
+  %result = vector.bitcast %words : vector<8xi32> to vector<32xi8>
+  func.return %result : vector<32xi8>
+}
+
+// ----
+low.func.def target<x86.avx512_packed_dot.core>(@target) abi(object_function) @packed_byte_bitcast_roundtrip(%result: reg<x86.ymm>) -> (reg<x86.ymm>) asm {
+  return %result
 }
 
 // ====

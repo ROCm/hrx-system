@@ -180,6 +180,17 @@ typedef struct loom_target_contract_fragment_case_t {
   uint16_t row_index;
 } loom_target_contract_fragment_case_t;
 
+typedef struct loom_target_contract_fragment_op_span_t {
+  // Source operation kind owning this case span.
+  loom_op_kind_t op_kind;
+  // First fragment-local case row for |op_kind|.
+  uint16_t case_start;
+  // Number of contiguous fragment-local case rows for |op_kind|.
+  uint16_t case_count;
+} loom_target_contract_fragment_op_span_t;
+static_assert(sizeof(loom_target_contract_fragment_op_span_t) == 6,
+              "loom_target_contract_fragment_op_span_t must be 6 bytes");
+
 typedef struct loom_target_contract_descriptor_rule_t {
   // Descriptor-rule row in the target-owned rule interpreter table.
   uint16_t rule_index;
@@ -212,17 +223,17 @@ enum loom_target_contract_fragment_flag_bits_e {
 };
 
 typedef struct loom_target_contract_fragment_t {
-  // First dialect id covered by dialects.
-  uint8_t dialect_base_id;
-  // Number of dense dialect slots.
-  uint8_t dialect_count;
+  // Number of populated source-op spans.
+  uint16_t op_span_count;
   // Fragment behavior flags.
   loom_target_contract_fragment_flags_t flags;
-  // Dense dialect slots indexed by dialect id minus dialect_base_id.
-  const loom_target_contract_dialect_table_t* dialects;
+  // Reserved byte available to future fragment-wide behavior flags.
+  uint8_t reserved;
+  // Source-op spans sorted by operation kind.
+  const loom_target_contract_fragment_op_span_t* op_spans;
   // Number of generic case rows.
   uint16_t case_count;
-  // Fragment-local generic case rows referenced by dense op entries.
+  // Fragment-local generic case rows referenced by source-op spans.
   const loom_target_contract_fragment_case_t* cases;
   // Number of descriptor-rule rows.
   uint16_t descriptor_rule_count;
@@ -265,27 +276,6 @@ typedef struct loom_target_contract_index_t {
   // Active fragment bindings referenced by composed case rows.
   const loom_target_contract_binding_t* bindings;
 } loom_target_contract_index_t;
-
-// Looks up the compact case span for an op kind in a generated fragment.
-static inline loom_target_contract_op_entry_t
-loom_target_contract_fragment_lookup_kind(
-    const loom_target_contract_fragment_t* fragment, loom_op_kind_t op_kind) {
-  const uint8_t dialect_id = loom_op_dialect_id(op_kind);
-  const uint8_t op_index = loom_op_dialect_index(op_kind);
-  if (dialect_id < fragment->dialect_base_id) {
-    return loom_target_contract_op_entry_empty();
-  }
-  const uint8_t dialect_index = dialect_id - fragment->dialect_base_id;
-  if (dialect_index >= fragment->dialect_count) {
-    return loom_target_contract_op_entry_empty();
-  }
-  const loom_target_contract_dialect_table_t* dialect_table =
-      &fragment->dialects[dialect_index];
-  if (op_index >= dialect_table->op_count) {
-    return loom_target_contract_op_entry_empty();
-  }
-  return dialect_table->op_entries[op_index];
-}
 
 // Looks up the compact case span for an op kind in a composed index.
 static inline loom_target_contract_op_entry_t

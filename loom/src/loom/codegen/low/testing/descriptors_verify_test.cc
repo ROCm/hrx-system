@@ -79,6 +79,7 @@ static_assert(TEST_STRING_END == sizeof(kTestStrings) - 1,
 
 struct TestTables {
   loom_low_descriptor_t descriptors[2];
+  loom_low_descriptor_view_t descriptor_views[2];
   loom_low_descriptor_ref_t descriptor_refs[2];
   loom_low_asm_form_t asm_forms[2];
   uint16_t asm_operand_indices[4];
@@ -215,10 +216,10 @@ void InitializeTestTables(TestTables* tables) {
   tables->descriptors[0].result_count = 1;
   tables->descriptors[0].immediate_start = 0;
   tables->descriptors[0].immediate_count = 1;
-  tables->descriptors[0].schedule_class_id = 0;
+  tables->descriptor_views[0].schedule_class_id = 0;
   tables->descriptors[0].flags = LOOM_LOW_DESCRIPTOR_FLAG_DEAD_REMOVABLE;
   tables->descriptors[0].op_kind = LOOM_LOW_DESCRIPTOR_OP_KIND_CONST;
-  tables->descriptors[0].canonical_asm_form_ordinal =
+  tables->descriptor_views[0].canonical_asm_form_ordinal =
       LOOM_LOW_ASM_FORM_ORDINAL_NONE;
 
   tables->descriptors[1].key_string_offset = TEST_STRING_OFFSET(descriptor_add);
@@ -234,9 +235,9 @@ void InitializeTestTables(TestTables* tables) {
   tables->descriptors[1].operand_count = 3;
   tables->descriptors[1].result_count = 1;
   tables->descriptors[1].minimum_packet_operand_count = 2;
-  tables->descriptors[1].schedule_class_id = 1;
+  tables->descriptor_views[1].schedule_class_id = 1;
   tables->descriptors[1].flags = LOOM_LOW_DESCRIPTOR_FLAG_DEAD_REMOVABLE;
-  tables->descriptors[1].canonical_asm_form_ordinal =
+  tables->descriptor_views[1].canonical_asm_form_ordinal =
       LOOM_LOW_ASM_FORM_ORDINAL_NONE;
 
   tables->descriptor_refs[0].key_string_offset =
@@ -258,6 +259,7 @@ void InitializeTestTables(TestTables* tables) {
   tables->set.string_table.data = kTestStrings;
   tables->set.string_table.data_length = sizeof(kTestStrings) - 1;
   tables->set.descriptors = tables->descriptors;
+  tables->set.descriptor_views = tables->descriptor_views;
   tables->set.descriptor_count = IREE_ARRAYSIZE(tables->descriptors);
   tables->set.descriptor_refs = tables->descriptor_refs;
   tables->set.descriptor_ref_count = IREE_ARRAYSIZE(tables->descriptor_refs);
@@ -334,8 +336,8 @@ void AddAsmForms(TestTables* tables) {
   tables->set.asm_operand_index_count =
       IREE_ARRAYSIZE(tables->asm_operand_indices);
   tables->set.asm_immediate_count = IREE_ARRAYSIZE(tables->asm_immediates);
-  tables->descriptors[0].canonical_asm_form_ordinal = 1;
-  tables->descriptors[1].canonical_asm_form_ordinal = 0;
+  tables->descriptor_views[0].canonical_asm_form_ordinal = 1;
+  tables->descriptor_views[1].canonical_asm_form_ordinal = 0;
 }
 
 void AddAsmResultValueTypes(TestTables* tables) {
@@ -743,6 +745,15 @@ TEST(LowDescriptorsTest, RejectsMalformedSpans) {
   TestTables tables;
   InitializeTestTables(&tables);
   tables.descriptors[1].operand_count = 4;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsAsmFormCountOutsideCanonicalOrdinalRange) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.set.asm_form_count = static_cast<uint32_t>(UINT16_MAX) + 1;
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
                         loom_low_descriptor_set_verify(&tables.set));
@@ -1855,7 +1866,7 @@ TEST(LowDescriptorsTest, RejectsMismatchedCanonicalAsmForm) {
   TestTables tables;
   InitializeTestTables(&tables);
   AddAsmForms(&tables);
-  tables.descriptors[0].canonical_asm_form_ordinal = 0;
+  tables.descriptor_views[0].canonical_asm_form_ordinal = 0;
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         loom_low_descriptor_set_verify(&tables.set));
@@ -2077,7 +2088,7 @@ TEST(LowDescriptorsTest, RejectsUnsortedEnumDomainValues) {
 TEST(LowDescriptorsTest, RejectsDescriptorWithoutScheduleClass) {
   TestTables tables;
   InitializeTestTables(&tables);
-  tables.descriptors[1].schedule_class_id = LOOM_LOW_SCHEDULE_CLASS_NONE;
+  tables.descriptor_views[1].schedule_class_id = LOOM_LOW_SCHEDULE_CLASS_NONE;
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         loom_low_descriptor_set_verify(&tables.set));

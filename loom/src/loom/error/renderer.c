@@ -13,13 +13,14 @@
 // Template expansion
 //===----------------------------------------------------------------------===//
 
-// Finds the param_defs index for |name| in the error def's param schema.
+// Finds the parameter index for |name| in the error definition's schema.
 // Returns -1 if not found. Linear scan is fine for diagnostic schemas.
 static int loom_find_param_index(const loom_error_def_t* error,
                                  iree_string_view_t name) {
   for (iree_host_size_t i = 0; i < error->param_count; ++i) {
     if (iree_string_view_equal(
-            name, iree_make_cstring_view(error->param_defs[i].name))) {
+            name,
+            iree_make_cstring_view(loom_error_def_param_name(error, i)))) {
       return (int)i;
     }
   }
@@ -112,7 +113,8 @@ static iree_status_t loom_expand_template(const char* message_template,
     // Look up the param by name in the error def's param schema.
     int param_index = loom_find_param_index(error, placeholder_name);
     if (param_index >= 0 && (iree_host_size_t)param_index < param_count) {
-      if (params[param_index].kind != error->param_defs[param_index].kind) {
+      if (params[param_index].kind !=
+          loom_error_def_param_kind(error, param_index)) {
         IREE_ASSERT_UNREACHABLE("diagnostic param kind does not match schema");
         IREE_BUILTIN_UNREACHABLE();
       }
@@ -139,30 +141,30 @@ iree_status_t loom_diagnostic_render_message(
     const loom_error_def_t* error, const loom_diagnostic_param_t* params,
     iree_host_size_t param_count, loom_type_formatter_t type_formatter,
     loom_output_stream_t* stream) {
-  if (!error || !error->message_template) {
+  if (!error || !loom_error_def_message_template(error)) {
     return iree_ok_status();
   }
   if (param_count > 0 && !params) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "param_count > 0 but params is NULL");
   }
-  return loom_expand_template(error->message_template, error, params,
-                              param_count, type_formatter, stream);
+  return loom_expand_template(loom_error_def_message_template(error), error,
+                              params, param_count, type_formatter, stream);
 }
 
 iree_status_t loom_diagnostic_render_fix_hint(
     const loom_error_def_t* error, const loom_diagnostic_param_t* params,
     iree_host_size_t param_count, loom_type_formatter_t type_formatter,
     loom_output_stream_t* stream) {
-  if (!error || !error->fix_hint_template) {
+  if (!error || !loom_error_def_fix_hint_template(error)) {
     return iree_ok_status();
   }
   if (param_count > 0 && !params) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "param_count > 0 but params is NULL");
   }
-  return loom_expand_template(error->fix_hint_template, error, params,
-                              param_count, type_formatter, stream);
+  return loom_expand_template(loom_error_def_fix_hint_template(error), error,
+                              params, param_count, type_formatter, stream);
 }
 
 //===----------------------------------------------------------------------===//

@@ -35,14 +35,14 @@ namespace {
 static iree_status_t CaptureDiagnostic(void* user_data,
                                        const loom_diagnostic_t* diagnostic) {
   auto* error_ids = static_cast<std::vector<std::string>*>(user_data);
-  error_ids->push_back(diagnostic->error->error_id);
+  error_ids->push_back(loom_error_def_id(diagnostic->error));
   return iree_ok_status();
 }
 
 static iree_status_t CaptureInvalidFieldFailureCode(
     void* user_data, const loom_diagnostic_t* diagnostic) {
   auto* failure_code = static_cast<std::string*>(user_data);
-  if (strcmp(diagnostic->error->error_id, "ERR_BYTECODE_006") == 0 &&
+  if (strcmp(loom_error_def_id(diagnostic->error), "ERR_BYTECODE_006") == 0 &&
       diagnostic->param_count == 6 &&
       diagnostic->params[5].kind == LOOM_PARAM_STRING) {
     iree_string_view_t value = diagnostic->params[5].string;
@@ -54,7 +54,7 @@ static iree_status_t CaptureInvalidFieldFailureCode(
 static iree_status_t CaptureBodyFailureCode(
     void* user_data, const loom_diagnostic_t* diagnostic) {
   auto* failure_code = static_cast<std::string*>(user_data);
-  if (strcmp(diagnostic->error->error_id, "ERR_BYTECODE_016") == 0 &&
+  if (strcmp(loom_error_def_id(diagnostic->error), "ERR_BYTECODE_016") == 0 &&
       diagnostic->param_count == 3 &&
       diagnostic->params[2].kind == LOOM_PARAM_STRING) {
     const iree_string_view_t value = diagnostic->params[2].string;

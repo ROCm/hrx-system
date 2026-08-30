@@ -10,6 +10,7 @@
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/error/error_catalog.h"
 
 namespace loom {
 namespace {
@@ -302,31 +303,23 @@ TEST(Renderer, NullParamsWithNonZeroCountReturnsError) {
 }
 
 TEST(Renderer, BoolParam) {
-  // Construct a synthetic error def to test BOOL rendering.
-  static const loom_error_param_def_t bool_param_defs[] = {
-      {"flag", LOOM_PARAM_BOOL},
-  };
-  static const loom_error_def_t bool_error = {
-      /*.error_id=*/{},
-      /*.domain=*/LOOM_ERROR_DOMAIN_STRUCTURE,
-      /*.severity=*/LOOM_DIAGNOSTIC_ERROR,
-      /*.code=*/99,
-      /*.summary=*/"Test",
-      /*.message_template=*/"flag is {flag}",
-      /*.fix_hint_template=*/nullptr,
-      /*.param_defs=*/bool_param_defs,
-      /*.param_count=*/1,
-  };
-
-  loom_diagnostic_param_t params_true[1] = {
+  loom_diagnostic_param_t params_true[] = {
+      loom_param_string(IREE_SV("test.attr")),
+      loom_param_u32(3),
       loom_param_bool(true),
   };
-  EXPECT_EQ(RenderMessage(&bool_error, params_true, 1), "flag is true");
+  EXPECT_EQ(RenderMessage(LOOM_ERR_STRUCTURE_040, params_true,
+                          IREE_ARRAYSIZE(params_true)),
+            "attribute 'test.attr' has 3 elements and payload presence true");
 
-  loom_diagnostic_param_t params_false[1] = {
+  loom_diagnostic_param_t params_false[] = {
+      loom_param_string(IREE_SV("test.attr")),
+      loom_param_u32(0),
       loom_param_bool(false),
   };
-  EXPECT_EQ(RenderMessage(&bool_error, params_false, 1), "flag is false");
+  EXPECT_EQ(RenderMessage(LOOM_ERR_STRUCTURE_040, params_false,
+                          IREE_ARRAYSIZE(params_false)),
+            "attribute 'test.attr' has 0 elements and payload presence false");
 }
 
 }  // namespace

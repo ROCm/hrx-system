@@ -31,9 +31,29 @@ namespace {
 constexpr loom_op_kind_t kSourceOpKind = LOOM_OP_KIND(7, 3);
 constexpr uint64_t kDescriptorId = UINT64_C(0x123456789abcdef0);
 
+const uint8_t kRuleStringData[] = LOOM_BSTRING_LITERAL(15, "test.descriptor")
+    LOOM_BSTRING_LITERAL(11, "test.source") LOOM_BSTRING_LITERAL(5, "field")
+        LOOM_BSTRING_LITERAL(5, "value") LOOM_BSTRING_LITERAL(9, "attr_kind");
+
+enum : loom_bstring_table_offset_t {
+  kRuleStringDescriptor = 0,
+  kRuleStringSource = kRuleStringDescriptor + sizeof("test.descriptor"),
+  kRuleStringField = kRuleStringSource + sizeof("test.source"),
+  kRuleStringValue = kRuleStringField + sizeof("field"),
+  kRuleStringAttrKind = kRuleStringValue + sizeof("value"),
+  kRuleStringEnd = kRuleStringAttrKind + sizeof("attr_kind"),
+};
+
+const loom_bstring_table_t kRuleStringTable = {
+    /*.data=*/kRuleStringData,
+    /*.data_length=*/sizeof(kRuleStringData) - 1,
+};
+
+static_assert(kRuleStringEnd == sizeof(kRuleStringData) - 1);
+
 const loom_low_descriptor_t kDescriptor = {
-    /*.key_string_offset=*/0,
     /*.stable_id=*/kDescriptorId,
+    /*.key_string_offset=*/0,
 };
 
 iree_status_t ResolveTestDescriptorRef(
@@ -71,49 +91,22 @@ loom_target_facts_t MakeTargetFacts() {
   return facts;
 }
 
-loom_target_contract_fragment_t MakeContractFragment(
-    loom_target_contract_op_entry_t* op_entries,
-    loom_target_contract_dialect_table_t* dialects,
-    loom_target_contract_fragment_case_t* cases,
-    loom_target_contract_descriptor_rule_t* descriptor_rules) {
-  op_entries[loom_op_dialect_index(kSourceOpKind)].case_start = 0;
-  op_entries[loom_op_dialect_index(kSourceOpKind)].case_count = 1;
-  dialects[0].op_count = 4;
-  dialects[0].op_entries = op_entries;
-  cases[0].system = LOOM_TARGET_CONTRACT_SYSTEM_DESCRIPTOR_RULE;
-  cases[0].row_index = 0;
-  descriptor_rules[0].rule_index = 0;
-
-  loom_target_contract_fragment_t fragment = {};
-  fragment.dialect_base_id = loom_op_dialect_id(kSourceOpKind);
-  fragment.dialect_count = 1;
-  fragment.flags = LOOM_TARGET_CONTRACT_FRAGMENT_FLAG_TARGET_QUERY;
-  fragment.dialects = dialects;
-  fragment.case_count = 1;
-  fragment.cases = cases;
-  fragment.descriptor_rule_count = 1;
-  fragment.descriptor_rules = descriptor_rules;
-  return fragment;
-}
-
 loom_target_contract_fragment_t MakeContractFragmentForOp(
-    loom_op_kind_t source_op_kind, loom_target_contract_op_entry_t* op_entries,
-    uint16_t op_entry_count, loom_target_contract_dialect_table_t* dialects,
+    loom_op_kind_t source_op_kind,
+    loom_target_contract_fragment_op_span_t* op_spans,
     loom_target_contract_fragment_case_t* cases,
     loom_target_contract_descriptor_rule_t* descriptor_rules) {
-  op_entries[loom_op_dialect_index(source_op_kind)].case_start = 0;
-  op_entries[loom_op_dialect_index(source_op_kind)].case_count = 1;
-  dialects[0].op_count = op_entry_count;
-  dialects[0].op_entries = op_entries;
+  op_spans[0].op_kind = source_op_kind;
+  op_spans[0].case_start = 0;
+  op_spans[0].case_count = 1;
   cases[0].system = LOOM_TARGET_CONTRACT_SYSTEM_DESCRIPTOR_RULE;
   cases[0].row_index = 0;
   descriptor_rules[0].rule_index = 0;
 
   loom_target_contract_fragment_t fragment = {};
-  fragment.dialect_base_id = loom_op_dialect_id(source_op_kind);
-  fragment.dialect_count = 1;
+  fragment.op_span_count = 1;
   fragment.flags = LOOM_TARGET_CONTRACT_FRAGMENT_FLAG_TARGET_QUERY;
-  fragment.dialects = dialects;
+  fragment.op_spans = op_spans;
   fragment.case_count = 1;
   fragment.cases = cases;
   fragment.descriptor_rule_count = 1;
@@ -257,9 +250,63 @@ class LowContractQuerySourceMemoryTest : public ::testing::Test {
   loom_builder_t builder_;
 };
 
+TEST_F(LowContractQuerySourceMemoryTest,
+       MaterializesImplicitTargetContextDiagnosticParams) {
+  loom_op_t* source_op = nullptr;
+  IREE_ASSERT_OK(loom_index_constant_build(
+      &builder_, loom_attr_i64(0), loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET),
+      LOOM_LOCATION_UNKNOWN, &source_op));
+  const loom_low_lower_diagnostic_param_t diagnostic_params[] = {
+      {
+          /*.kind=*/LOOM_LOW_LOWER_DIAGNOSTIC_PARAM_STRING_LITERAL,
+          /*.reserved=*/{},
+          /*.value=*/{/*.string_value_offset=*/kRuleStringField},
+      },
+      {
+          /*.kind=*/LOOM_LOW_LOWER_DIAGNOSTIC_PARAM_STRING_LITERAL,
+          /*.reserved=*/{},
+          /*.value=*/{/*.string_value_offset=*/kRuleStringValue},
+      },
+      {
+          /*.kind=*/LOOM_LOW_LOWER_DIAGNOSTIC_PARAM_STRING_LITERAL,
+          /*.reserved=*/{},
+          /*.value=*/{/*.string_value_offset=*/kRuleStringAttrKind},
+      },
+  };
+  const loom_low_lower_diagnostic_t diagnostic = {
+      /*.error_ref=*/LOOM_ERR_TARGET_003_REF,
+      /*.param_start=*/0,
+      /*.param_count=*/8,
+      /*.flags=*/LOOM_LOW_LOWER_DIAGNOSTIC_FLAG_IMPLICIT_TARGET_CONTEXT,
+  };
+  loom_low_lower_rule_set_t rule_set = {};
+  rule_set.string_table = kRuleStringTable;
+  rule_set.diagnostic_params = diagnostic_params;
+  rule_set.diagnostic_param_count = IREE_ARRAYSIZE(diagnostic_params);
+  loom_low_lower_rule_match_context_t match_context = {};
+  match_context.module = module_;
+  match_context.function = function_;
+  match_context.bundle = &kTargetBundle;
+  loom_diagnostic_param_t params[8] = {};
+
+  loom_low_lower_rule_materialize_diagnostic_params(
+      &match_context, &rule_set, source_op, &diagnostic, params);
+
+  EXPECT_TRUE(iree_string_view_equal(params[0].string, IREE_SV("test-target")));
+  EXPECT_TRUE(iree_string_view_equal(params[1].string, IREE_SV("test-export")));
+  EXPECT_TRUE(iree_string_view_equal(params[2].string, IREE_SV("test-config")));
+  EXPECT_TRUE(
+      iree_string_view_equal(params[3].string, IREE_SV("source_memory")));
+  EXPECT_TRUE(
+      iree_string_view_equal(params[4].string, IREE_SV("index.constant")));
+  EXPECT_TRUE(iree_string_view_equal(params[5].string, IREE_SV("field")));
+  EXPECT_TRUE(iree_string_view_equal(params[6].string, IREE_SV("value")));
+  EXPECT_TRUE(iree_string_view_equal(params[7].string, IREE_SV("attr_kind")));
+}
+
 TEST(LowContractQueryTest, ContractIndexDescriptorRuleSelectsLegalCase) {
   loom_low_lower_rule_descriptor_ref_t descriptor_ref = {
-      /*.key=*/IREE_SV("test.descriptor"),
+      /*.key_string_offset=*/kRuleStringDescriptor,
   };
   loom_low_lower_emit_t emit = {};
   emit.kind = LOOM_LOW_LOWER_EMIT_DESCRIPTOR_OP;
@@ -268,6 +315,7 @@ TEST(LowContractQueryTest, ContractIndexDescriptorRuleSelectsLegalCase) {
   rule.source_op_kind = kSourceOpKind;
   rule.emit_count = 1;
   loom_low_lower_rule_set_t rule_set = {};
+  rule_set.string_table = kRuleStringTable;
   rule_set.rules = &rule;
   rule_set.rule_count = 1;
   rule_set.descriptor_refs = &descriptor_ref;
@@ -276,12 +324,11 @@ TEST(LowContractQueryTest, ContractIndexDescriptorRuleSelectsLegalCase) {
   rule_set.emit_count = 1;
   const loom_low_lower_rule_set_t* rule_sets[] = {&rule_set};
 
-  loom_target_contract_op_entry_t op_entries[4] = {};
-  loom_target_contract_dialect_table_t dialects[1] = {};
+  loom_target_contract_fragment_op_span_t op_spans[1] = {};
   loom_target_contract_fragment_case_t cases[1] = {};
   loom_target_contract_descriptor_rule_t descriptor_rules[1] = {};
-  loom_target_contract_fragment_t fragment =
-      MakeContractFragment(op_entries, dialects, cases, descriptor_rules);
+  loom_target_contract_fragment_t fragment = MakeContractFragmentForOp(
+      kSourceOpKind, op_spans, cases, descriptor_rules);
   const loom_target_contract_binding_t bindings[] = {
       {
           &fragment,
@@ -341,31 +388,43 @@ TEST(LowContractQueryTest, ContractIndexDescriptorRuleReportsRejectedCase) {
   loom_low_lower_diagnostic_param_t diagnostic_params[] = {
       {
           /*.kind=*/LOOM_LOW_LOWER_DIAGNOSTIC_PARAM_TARGET_KEY,
+          /*.reserved=*/{},
+          /*.value=*/{},
       },
       {
           /*.kind=*/LOOM_LOW_LOWER_DIAGNOSTIC_PARAM_EXPORT_NAME,
+          /*.reserved=*/{},
+          /*.value=*/{},
       },
       {
           /*.kind=*/LOOM_LOW_LOWER_DIAGNOSTIC_PARAM_CONFIG_KEY,
+          /*.reserved=*/{},
+          /*.value=*/{},
       },
       {
           /*.kind=*/LOOM_LOW_LOWER_DIAGNOSTIC_PARAM_FUNCTION_NAME,
+          /*.reserved=*/{},
+          /*.value=*/{},
       },
       {
           /*.kind=*/LOOM_LOW_LOWER_DIAGNOSTIC_PARAM_STRING_LITERAL,
-          /*.string_value=*/IREE_SV("test.source"),
+          /*.reserved=*/{},
+          /*.value=*/{/*.string_value_offset=*/kRuleStringSource},
       },
       {
           /*.kind=*/LOOM_LOW_LOWER_DIAGNOSTIC_PARAM_STRING_LITERAL,
-          /*.string_value=*/IREE_SV("field"),
+          /*.reserved=*/{},
+          /*.value=*/{/*.string_value_offset=*/kRuleStringField},
       },
       {
           /*.kind=*/LOOM_LOW_LOWER_DIAGNOSTIC_PARAM_STRING_LITERAL,
-          /*.string_value=*/IREE_SV("value"),
+          /*.reserved=*/{},
+          /*.value=*/{/*.string_value_offset=*/kRuleStringValue},
       },
       {
           /*.kind=*/LOOM_LOW_LOWER_DIAGNOSTIC_PARAM_STRING_LITERAL,
-          /*.string_value=*/IREE_SV("attr_kind"),
+          /*.reserved=*/{},
+          /*.value=*/{/*.string_value_offset=*/kRuleStringAttrKind},
       },
   };
   loom_low_lower_diagnostic_t diagnostic = {};
@@ -375,6 +434,7 @@ TEST(LowContractQueryTest, ContractIndexDescriptorRuleReportsRejectedCase) {
   rule.source_op_kind = kSourceOpKind;
   rule.guard_count = 1;
   loom_low_lower_rule_set_t rule_set = {};
+  rule_set.string_table = kRuleStringTable;
   rule_set.rules = &rule;
   rule_set.rule_count = 1;
   rule_set.guards = &guard;
@@ -385,12 +445,11 @@ TEST(LowContractQueryTest, ContractIndexDescriptorRuleReportsRejectedCase) {
   rule_set.diagnostic_count = 1;
   const loom_low_lower_rule_set_t* rule_sets[] = {&rule_set};
 
-  loom_target_contract_op_entry_t op_entries[4] = {};
-  loom_target_contract_dialect_table_t dialects[1] = {};
+  loom_target_contract_fragment_op_span_t op_spans[1] = {};
   loom_target_contract_fragment_case_t cases[1] = {};
   loom_target_contract_descriptor_rule_t descriptor_rules[1] = {};
-  loom_target_contract_fragment_t fragment =
-      MakeContractFragment(op_entries, dialects, cases, descriptor_rules);
+  loom_target_contract_fragment_t fragment = MakeContractFragmentForOp(
+      kSourceOpKind, op_spans, cases, descriptor_rules);
   const loom_target_contract_binding_t bindings[] = {
       {
           &fragment,
@@ -488,36 +547,25 @@ TEST_F(LowContractQuerySourceMemoryTest,
   IREE_ASSERT_OK(loom_view_region_table_initialize(
       &value_domain, &expression_context, &view_regions));
   IREE_ASSERT_OK(loom_view_region_table_analyze(&view_regions));
-  const loom_low_lower_source_memory_t source_memory = {
-      /*.flags=*/0,
-      /*.operation_kind=*/LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD,
-      /*.root_kind=*/LOOM_LOW_LOWER_SOURCE_MEMORY_ROOT_BLOCK_ARGUMENT,
-      /*.address_layout=*/LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_LAYOUT_ANY,
-      /*.memory_space_mask=*/LOOM_LOW_LOWER_MEMORY_SPACE_UNKNOWN |
-          LOOM_LOW_LOWER_MEMORY_SPACE_GENERIC |
-          LOOM_LOW_LOWER_MEMORY_SPACE_GLOBAL |
-          LOOM_LOW_LOWER_MEMORY_SPACE_WORKGROUP |
-          LOOM_LOW_LOWER_MEMORY_SPACE_PRIVATE |
-          LOOM_LOW_LOWER_MEMORY_SPACE_CONSTANT |
-          LOOM_LOW_LOWER_MEMORY_SPACE_DESCRIPTOR,
-      /*.element_byte_count=*/4,
-      /*.vector_lane_count=*/1,
-      /*.vector_lane_byte_stride=*/4,
-      /*.static_byte_offset_minimum=*/INT64_MIN,
-      /*.static_byte_offset_maximum=*/INT64_MAX,
-      /*.minimum_alignment=*/0,
-      /*.dynamic_term_count=*/1,
-      /*.dynamic_term_count_minimum=*/0,
-      /*.dynamic_view_base_term_count=*/0,
-      /*.dynamic_index_source=*/
-      LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_VALUE,
-      /*.dynamic_byte_stride=*/4,
-      /*.dynamic_offset_unsigned_bit_count=*/0,
-      /*.dynamic_offset_diagnostic_index=*/0,
-      /*.address_layout_diagnostic_index=*/0,
-      /*.cache_policy_build_flags=*/0,
-      /*.diagnostic_index=*/0,
-  };
+  loom_low_lower_source_memory_t source_memory = {};
+  source_memory.operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD;
+  source_memory.root_kind = LOOM_LOW_LOWER_SOURCE_MEMORY_ROOT_BLOCK_ARGUMENT;
+  source_memory.memory_space_mask = LOOM_LOW_LOWER_MEMORY_SPACE_UNKNOWN |
+                                    LOOM_LOW_LOWER_MEMORY_SPACE_GENERIC |
+                                    LOOM_LOW_LOWER_MEMORY_SPACE_GLOBAL |
+                                    LOOM_LOW_LOWER_MEMORY_SPACE_WORKGROUP |
+                                    LOOM_LOW_LOWER_MEMORY_SPACE_PRIVATE |
+                                    LOOM_LOW_LOWER_MEMORY_SPACE_CONSTANT |
+                                    LOOM_LOW_LOWER_MEMORY_SPACE_DESCRIPTOR;
+  source_memory.element_byte_count = 4;
+  source_memory.vector_lane_count = 1;
+  source_memory.vector_lane_byte_stride = 4;
+  source_memory.static_byte_offset_minimum = INT64_MIN;
+  source_memory.static_byte_offset_maximum = INT64_MAX;
+  source_memory.dynamic_term_count = 1;
+  source_memory.dynamic_index_source =
+      LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_VALUE;
+  source_memory.dynamic_byte_stride = 4;
   const loom_low_lower_emit_t emit = {
       /*.kind=*/LOOM_LOW_LOWER_EMIT_DESCRIPTOR_OP,
       /*.flags=*/0,
@@ -549,13 +597,11 @@ TEST_F(LowContractQuerySourceMemoryTest,
   rule_set.emit_count = 1;
   const loom_low_lower_rule_set_t* rule_sets[] = {&rule_set};
 
-  loom_target_contract_op_entry_t op_entries[LOOM_OP_VECTOR_COUNT_] = {};
-  loom_target_contract_dialect_table_t dialects[1] = {};
+  loom_target_contract_fragment_op_span_t op_spans[1] = {};
   loom_target_contract_fragment_case_t cases[1] = {};
   loom_target_contract_descriptor_rule_t descriptor_rules[1] = {};
   loom_target_contract_fragment_t fragment = MakeContractFragmentForOp(
-      LOOM_OP_VECTOR_LOAD, op_entries, IREE_ARRAYSIZE(op_entries), dialects,
-      cases, descriptor_rules);
+      LOOM_OP_VECTOR_LOAD, op_spans, cases, descriptor_rules);
   const loom_target_contract_binding_t bindings[] = {
       {
           &fragment,

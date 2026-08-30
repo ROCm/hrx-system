@@ -400,7 +400,6 @@ def _vector_memory_descriptors(
     }.get(vector_bit_width)
     if register_suffix is None:
         raise ValueError(f"unsupported x86 memory vector width {vector_bit_width}")
-    lane_count = vector_bit_width // 32
     static_load_key = f"{key_prefix}.vmovdqu32.load.{register_suffix}"
     indexed_load_key = f"{key_prefix}.vmovdqu32.load.indexed.{register_suffix}"
     static_store_key = f"{key_prefix}.vmovdqu32.store.{register_suffix}"
@@ -409,7 +408,7 @@ def _vector_memory_descriptors(
         Descriptor(
             key=static_load_key,
             mnemonic="vmovdqu32",
-            semantic_tag=f"memory.load.i32x{lane_count}",
+            semantic_tag=f"memory.load.v{vector_bit_width}",
             operands=(
                 _vector_result(vector_bit_width),
                 _gpr64_resource("base"),
@@ -430,7 +429,7 @@ def _vector_memory_descriptors(
         Descriptor(
             key=indexed_load_key,
             mnemonic="vmovdqu32",
-            semantic_tag=f"memory.load.indexed.i32x{lane_count}",
+            semantic_tag=f"memory.load.indexed.v{vector_bit_width}",
             operands=(
                 _vector_result(vector_bit_width),
                 _gpr64_resource("base"),
@@ -454,7 +453,7 @@ def _vector_memory_descriptors(
         Descriptor(
             key=static_store_key,
             mnemonic="vmovdqu32",
-            semantic_tag=f"memory.store.i32x{lane_count}",
+            semantic_tag=f"memory.store.v{vector_bit_width}",
             operands=(
                 _vector_operand(vector_bit_width, "value"),
                 _gpr64_resource("base"),
@@ -474,7 +473,7 @@ def _vector_memory_descriptors(
         Descriptor(
             key=indexed_store_key,
             mnemonic="vmovdqu32",
-            semantic_tag=f"memory.store.indexed.i32x{lane_count}",
+            semantic_tag=f"memory.store.indexed.v{vector_bit_width}",
             operands=(
                 _vector_operand(vector_bit_width, "value"),
                 _gpr64_resource("base"),

@@ -39,7 +39,7 @@ iree_status_t loom_bytecode_reader_emit_diagnostic(
   loom_source_range_t source_range =
       loom_bytecode_reader_make_source_range(context, byte_range);
   loom_diagnostic_t diagnostic = {
-      .severity = error->severity,
+      .severity = loom_error_def_severity(error),
       .error = error,
       .params = params,
       .param_count = param_count,

@@ -509,7 +509,7 @@ static iree_status_t loomc_emit_capture_diagnostic(
   loomc_emit_diagnostic_capture_t* capture =
       (loomc_emit_diagnostic_capture_t*)user_data;
   if (emission != NULL && emission->error != NULL &&
-      emission->error->severity == LOOM_DIAGNOSTIC_ERROR) {
+      loom_error_def_severity(emission->error) == LOOM_DIAGNOSTIC_ERROR) {
     ++capture->error_count;
   }
   return iree_status_from_loomc(loomc_result_add_loom_diagnostic_emission(

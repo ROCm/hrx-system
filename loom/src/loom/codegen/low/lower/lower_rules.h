@@ -20,6 +20,7 @@
 #include "loom/codegen/low/source_memory_plan.h"
 #include "loom/error/error_defs.h"
 #include "loom/ir/ir.h"
+#include "loom/util/bstring.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -197,12 +198,17 @@ struct loom_low_lower_rule_match_context_t {
   loom_symbolic_expr_context_t* symbolic_expr_context;
   // Match behavior flags.
   loom_low_lower_rule_match_flags_t flags;
+  // One-based policy rule-set ordinal supplied by composed contract selection;
+  // zero when no policy owner is known.
+  uint16_t policy_rule_set_ordinal;
 };
 
 typedef struct loom_low_lower_rule_descriptor_ref_t {
-  // Stable descriptor key resolved once against the selected descriptor set.
-  iree_string_view_t key;
+  // Rule-set B-string offset for the stable descriptor key.
+  loom_bstring_table_offset_t key_string_offset;
 } loom_low_lower_rule_descriptor_ref_t;
+static_assert(sizeof(loom_low_lower_rule_descriptor_ref_t) == 4,
+              "loom_low_lower_rule_descriptor_ref_t must be 4 bytes");
 
 typedef struct loom_low_lower_value_ref_t {
   // Source value namespace being referenced.
@@ -293,8 +299,8 @@ typedef enum loom_low_lower_attr_copy_kind_e {
 typedef struct loom_low_lower_attr_copy_t {
   // Attribute projection operation to perform.
   loom_low_lower_attr_copy_kind_t kind;
-  // Target low packet attribute name to emit.
-  iree_string_view_t target_name;
+  // Rule-set B-string offset for the target low packet attribute name.
+  loom_bstring_table_offset_t target_name_string_offset;
   // Primary source op attribute ordinal consumed by projection rows.
   uint16_t source_attr_index;
   // Second source op attribute ordinal consumed by two-attr projections.
@@ -317,12 +323,13 @@ typedef struct loom_low_lower_attr_copy_t {
   // remainder rows.
   int64_t literal_i64;
 } loom_low_lower_attr_copy_t;
-static_assert(sizeof(loom_low_lower_attr_copy_t) == 48,
-              "loom_low_lower_attr_copy_t must be 48 bytes");
+static_assert(sizeof(loom_low_lower_attr_copy_t) == 32,
+              "loom_low_lower_attr_copy_t must be 32 bytes");
 
 typedef uint8_t loom_low_lower_diagnostic_param_kind_t;
 
 #define LOOM_LOW_LOWER_MAX_DIAGNOSTIC_PARAMS 16
+#define LOOM_LOW_LOWER_TARGET_CONTEXT_PARAM_COUNT 5
 
 enum loom_low_lower_diagnostic_param_kind_e {
   // Target bundle key selected for lowering.
@@ -354,28 +361,46 @@ enum loom_low_lower_diagnostic_param_kind_e {
 typedef struct loom_low_lower_diagnostic_param_t {
   // Parameter projection operation.
   loom_low_lower_diagnostic_param_kind_t kind;
-  // String literal payload for STRING_LITERAL rows.
-  iree_string_view_t string_value;
-  // Source value-ref row consumed by VALUE_TYPE rows.
-  uint16_t value_ref_index;
-  // Signed literal payload for I64_LITERAL rows.
-  int64_t i64_value;
-  // Unsigned literal payload for U32_LITERAL rows.
-  uint32_t u32_value;
-  // Unsigned literal payload for U64_LITERAL rows.
-  uint64_t u64_value;
-  // Boolean literal payload for BOOL_LITERAL rows.
-  bool bool_value;
+  // Reserved padding available to future compact projection metadata.
+  uint8_t reserved[7];
+  // Projection payload selected by kind.
+  union {
+    // Rule-set B-string offset for STRING_LITERAL payloads.
+    loom_bstring_table_offset_t string_value_offset;
+    // Source value-ref row consumed by VALUE_TYPE rows.
+    uint16_t value_ref_index;
+    // Signed literal payload for I64_LITERAL rows.
+    int64_t i64_value;
+    // Unsigned literal payload for U32_LITERAL rows.
+    uint32_t u32_value;
+    // Unsigned literal payload for U64_LITERAL rows.
+    uint64_t u64_value;
+    // Boolean literal payload for BOOL_LITERAL rows.
+    bool bool_value;
+  } value;
 } loom_low_lower_diagnostic_param_t;
+static_assert(sizeof(loom_low_lower_diagnostic_param_t) == 16,
+              "loom_low_lower_diagnostic_param_t must be 16 bytes");
+
+enum loom_low_lower_diagnostic_flag_bits_e {
+  // Materialize the canonical five target-context parameters before stored
+  // parameter rows.
+  LOOM_LOW_LOWER_DIAGNOSTIC_FLAG_IMPLICIT_TARGET_CONTEXT = 1u << 0,
+};
+typedef uint8_t loom_low_lower_diagnostic_flags_t;
 
 typedef struct loom_low_lower_diagnostic_t {
   // Stable structured diagnostic identity.
   loom_error_ref_t error_ref;
-  // First parameter projection row.
+  // First stored parameter projection row.
   uint16_t param_start;
-  // Number of parameter projection rows.
+  // Total number of materialized parameters, including implicit context.
   uint8_t param_count;
+  // Parameter projection behavior flags.
+  loom_low_lower_diagnostic_flags_t flags;
 } loom_low_lower_diagnostic_t;
+static_assert(sizeof(loom_low_lower_diagnostic_t) == 6,
+              "loom_low_lower_diagnostic_t must be 6 bytes");
 
 #define LOOM_LOW_LOWER_DIAGNOSTIC_NONE UINT16_MAX
 
@@ -452,28 +477,12 @@ typedef uint16_t loom_low_lower_source_memory_flags_t;
   ((uint16_t)1u << 2)
 
 typedef struct loom_low_lower_source_memory_t {
-  // Bitfield of source-memory row option bits.
-  loom_low_lower_source_memory_flags_t flags;
   // Source memory operation category required by this row.
-  loom_low_source_memory_operation_kind_t operation_kind;
+  uint8_t operation_kind;
   // Source provenance required for the root memory value.
-  loom_low_lower_source_memory_root_kind_t root_kind;
+  uint8_t root_kind;
   // Target-independent address-layout classification required by this row.
-  loom_low_lower_source_memory_address_layout_t address_layout;
-  // Accepted target-independent source memory spaces.
-  loom_low_lower_memory_space_mask_t memory_space_mask;
-  // Required byte count of one addressed view element.
-  uint32_t element_byte_count;
-  // Required static number of vector lanes addressed by the operation.
-  uint32_t vector_lane_count;
-  // Required byte stride between adjacent vector lanes.
-  int64_t vector_lane_byte_stride;
-  // Minimum accepted static byte offset from the storage root.
-  int64_t static_byte_offset_minimum;
-  // Maximum accepted static byte offset from the storage root.
-  int64_t static_byte_offset_maximum;
-  // Minimum required final address byte alignment, or zero if unconstrained.
-  uint32_t minimum_alignment;
+  uint8_t address_layout;
   // Required number of dynamic address terms.
   uint8_t dynamic_term_count;
   // Minimum accepted dynamic term count when dynamic_term_count is ANY.
@@ -481,45 +490,65 @@ typedef struct loom_low_lower_source_memory_t {
   // Required number of dynamic view-base terms, or ANY if unconstrained.
   uint8_t dynamic_view_base_term_count;
   // Required provenance for each dynamic address term.
-  loom_low_source_memory_dynamic_index_source_t dynamic_index_source;
-  // Required byte stride for each dynamic address term unless ANY is set.
-  int64_t dynamic_byte_stride;
+  uint8_t dynamic_index_source;
   // Required unsigned dynamic byte offset bit width, or zero if unconstrained.
   uint8_t dynamic_offset_unsigned_bit_count;
+  // Source-memory value used as the complete-address base.
+  uint8_t address_base_kind;
+  // Semantic source type carried by materialized address coordinates.
+  uint8_t address_coordinate_type;
+  // Bitfield of source-memory row option bits.
+  loom_low_lower_source_memory_flags_t flags;
+  // Accepted target-independent source memory spaces.
+  loom_low_lower_memory_space_mask_t memory_space_mask;
+  // Reserved storage completing the compact match classifier header.
+  uint16_t reserved_classifier;
+  // Required byte count of one addressed view element.
+  uint32_t element_byte_count;
+  // Required static number of vector lanes addressed by the operation.
+  uint32_t vector_lane_count;
+  // Minimum required final address byte alignment, or zero if unconstrained.
+  uint32_t minimum_alignment;
+  // Required source cache-policy build flags.
+  uint32_t cache_policy_build_flags;
+  // Number of bytes represented by one materialized address coordinate unit.
+  uint32_t address_coordinate_unit_byte_count;
+  // Reserved storage aligning the compact 64-bit match geometry.
+  uint32_t reserved_geometry;
+  // Required byte stride between adjacent vector lanes.
+  int64_t vector_lane_byte_stride;
+  // Minimum accepted static byte offset from the storage root.
+  int64_t static_byte_offset_minimum;
+  // Maximum accepted static byte offset from the storage root.
+  int64_t static_byte_offset_maximum;
+  // Required byte stride for each dynamic address term unless ANY is set.
+  int64_t dynamic_byte_stride;
+  // Minimum accepted complete address coordinate.
+  int64_t address_coordinate_minimum;
+  // Maximum accepted complete address coordinate.
+  int64_t address_coordinate_maximum;
+  // Rule-set B-string offset for the i64 constant immediate field.
+  loom_bstring_table_offset_t byte_offset_const_i64_immediate_string_offset;
+  // Rule-set B-string offset for the coordinate constant immediate field.
+  loom_bstring_table_offset_t address_const_coordinate_immediate_string_offset;
   // Diagnostic emitted when the dynamic byte offset width check rejects.
   uint16_t dynamic_offset_diagnostic_index;
   // Diagnostic emitted when the address-layout classification rejects.
   uint16_t address_layout_diagnostic_index;
-  // Required source cache-policy build flags.
-  uint32_t cache_policy_build_flags;
   // Diagnostic table row emitted when this source-memory row rejects.
   uint16_t diagnostic_index;
   // Diagnostic table row emitted when complete address materialization rejects.
   uint16_t address_diagnostic_index;
   // Descriptor ref used to materialize i64 constants for dynamic byte offsets.
   loom_low_lower_descriptor_ref_t byte_offset_const_i64_descriptor_ref;
-  // Immediate field populated when materializing an i64 constant.
-  iree_string_view_t byte_offset_const_i64_immediate;
   // Descriptor ref used to materialize i64 additions for dynamic byte offsets.
   loom_low_lower_descriptor_ref_t byte_offset_add_i64_descriptor_ref;
   // Descriptor ref used to materialize i64 multiplies for dynamic byte offsets.
   loom_low_lower_descriptor_ref_t byte_offset_mul_i64_descriptor_ref;
   // Descriptor ref used to materialize i64 shifts for dynamic byte offsets.
   loom_low_lower_descriptor_ref_t byte_offset_shl_i64_descriptor_ref;
-  // Source-memory value used as the complete-address base.
-  loom_low_lower_source_memory_address_base_t address_base_kind;
-  // Semantic source type carried by materialized address coordinates.
-  loom_low_lower_source_memory_address_coordinate_t address_coordinate_type;
-  // Number of bytes represented by one materialized address coordinate unit.
-  uint32_t address_coordinate_unit_byte_count;
-  // Minimum accepted complete address coordinate.
-  int64_t address_coordinate_minimum;
-  // Maximum accepted complete address coordinate.
-  int64_t address_coordinate_maximum;
   // Descriptor ref used to materialize a complete address coordinate constant.
   loom_low_lower_descriptor_ref_t address_const_coordinate_descriptor_ref;
-  // Immediate field populated for a complete address coordinate constant.
-  iree_string_view_t address_const_coordinate_immediate;
   // Descriptor ref used to add complete address coordinate values.
   loom_low_lower_descriptor_ref_t address_add_coordinate_descriptor_ref;
   // Descriptor ref used to multiply complete address coordinate values.
@@ -533,7 +562,11 @@ typedef struct loom_low_lower_source_memory_t {
   loom_low_lower_descriptor_ref_t address_index_to_coordinate_descriptor_ref;
   // Descriptor ref used to materialize the final target address.
   loom_low_lower_descriptor_ref_t address_descriptor_ref;
+  // Reserved storage completing the second 64-byte row half.
+  uint16_t reserved_materialization;
 } loom_low_lower_source_memory_t;
+static_assert(sizeof(loom_low_lower_source_memory_t) == 128,
+              "loom_low_lower_source_memory_t must be 128 bytes");
 
 typedef enum loom_low_lower_guard_kind_e {
   // Invalid or uninitialized guard.
@@ -615,11 +648,21 @@ typedef enum loom_low_lower_guard_kind_e {
   LOOM_LOW_LOWER_GUARD_VALUE_STATIC_ELEMENT_COUNT_EQ = 31,
   // Source buffer/view reference facts must name a space present in u64.
   LOOM_LOW_LOWER_GUARD_VALUE_MEMORY_SPACE = 32,
+  // Maximum guard kind value plus one.
+  LOOM_LOW_LOWER_GUARD_COUNT_,
 } loom_low_lower_guard_kind_t;
 
+static_assert(LOOM_LOW_LOWER_GUARD_COUNT_ <= UINT8_MAX,
+              "lower guard kinds must fit in uint8_t storage");
+static_assert(LOOM_ATTR_COUNT_ <= UINT8_MAX,
+              "attribute kinds must fit in uint8_t guard storage");
+
 typedef struct loom_low_lower_guard_t {
-  // Guard operation to evaluate.
-  loom_low_lower_guard_kind_t kind;
+  // Guard operation to evaluate, stored as a loom_low_lower_guard_kind_t.
+  uint8_t kind;
+  // Required attribute kind for ATTR_KIND guards, stored as a
+  // loom_attr_kind_t.
+  uint8_t attr_kind;
   // Primary source value-ref table index used by value guards.
   uint16_t value_ref_index;
   // Second source value-ref table index used by pairwise value guards.
@@ -628,28 +671,47 @@ typedef struct loom_low_lower_guard_t {
   // used by operand-segment guards, or op-specific attribute ordinal used by
   // semantic guards.
   uint16_t attr_index;
-  // Type-pattern table index used by VALUE_TYPE guards.
-  uint16_t type_pattern_index;
+  // Kind-selected secondary table or source index.
+  union {
+    // Type-pattern table index used by VALUE_TYPE guards.
+    uint16_t type_pattern_index;
+    // Source i64-array element ordinal used by element-range guards.
+    uint16_t element_index;
+  } index;
   // Diagnostic table index emitted when this guard rejects.
   uint16_t diagnostic_index;
-  // Required attribute kind for ATTR_KIND guards.
-  loom_attr_kind_t attr_kind;
-  // Required enum value, divisor adjustment, expected count, element index,
-  // bit-count limit, register unit count, exact f64 bit pattern, flag mask,
-  // storage element format, memory-space mask, storage unit cap, or storage
-  // payload multiple.
-  uint64_t u64;
   // Descriptor-set register-class ID used by LOW_VALUE_REGISTER_CLASS guards.
   uint16_t register_class_id;
   // Rule-set-local descriptor ref used by DESCRIPTOR_AVAILABLE guards.
   loom_low_lower_descriptor_ref_t descriptor_ref;
-  // Inclusive lower i64 bound for range guards or storage unit bit count for
-  // packed integer storage guards.
-  int64_t minimum_i64;
-  // Inclusive upper i64 bound for range guards or maximum lane count for
-  // packed integer storage guards.
-  int64_t maximum_i64;
+  // Kind-selected immediate payload.
+  union {
+    // Required enum value, divisor adjustment, expected count, bit-count
+    // limit, register unit count, exact f64 bit pattern, flag mask, storage
+    // element format, or memory-space mask.
+    uint64_t u64;
+    // Inclusive signed range payload.
+    struct {
+      // Inclusive lower bound.
+      int64_t minimum;
+      // Inclusive upper bound.
+      int64_t maximum;
+    } i64_range;
+    // Packed integer storage-shape payload.
+    struct {
+      // Required storage payload multiple or maximum storage unit count.
+      uint32_t storage_payload_multiple;
+      // Bit count in one packed storage unit.
+      uint32_t storage_unit_bit_count;
+      // Maximum permitted lane count, or zero when not constrained.
+      uint32_t maximum_lane_count;
+      // Reserved storage available to future packed integer guards.
+      uint32_t reserved;
+    } packed_integer;
+  } payload;
 } loom_low_lower_guard_t;
+static_assert(sizeof(loom_low_lower_guard_t) == 32,
+              "loom_low_lower_guard_t must be 32 bytes");
 
 typedef enum loom_low_lower_emit_kind_e {
   // Invalid or uninitialized emit action.
@@ -809,6 +871,8 @@ typedef uint16_t loom_low_lower_rule_set_flags_t;
 typedef struct loom_low_lower_rule_set_t {
   // Rule-set behavior flags.
   loom_low_lower_rule_set_flags_t flags;
+  // Packed generated strings referenced by rule-set-local table rows.
+  loom_bstring_table_t string_table;
   // Source op kind to rule-span lookup table sorted by source_op_kind.
   const loom_low_lower_rule_span_t* spans;
   // Number of rows in spans.
@@ -817,9 +881,9 @@ typedef struct loom_low_lower_rule_set_t {
   const loom_low_lower_rule_t* rules;
   // Number of rows in rules.
   uint16_t rule_count;
-  // Structured report keys referenced by one-based rule report-key ordinals.
-  const iree_string_view_t* report_keys;
-  // Number of rows in report_keys.
+  // Rule-set B-string offsets referenced by one-based report-key ordinals.
+  const loom_bstring_table_offset_t* report_key_string_offsets;
+  // Number of rows in report_key_string_offsets.
   uint16_t report_key_count;
   // Type-pattern rows referenced by guards.
   const loom_low_lower_type_pattern_t* type_patterns;
@@ -866,6 +930,12 @@ typedef struct loom_low_lower_rule_set_t {
   // Number of rows in diagnostics.
   uint16_t diagnostic_count;
 } loom_low_lower_rule_set_t;
+
+// Returns the rule-set B-string view at |string_offset|. Generated rule sets
+// and offsets are trusted compiler-owned tables.
+iree_string_view_t loom_low_lower_rule_set_string(
+    const loom_low_lower_rule_set_t* rule_set,
+    loom_bstring_table_offset_t string_offset);
 
 typedef struct loom_low_lower_rule_selection_t {
   // Selected rule row, or NULL when no rule accepted the source op.
@@ -984,7 +1054,7 @@ iree_status_t loom_low_lower_rule_set_emit_selection_failure(
 // rows are arena-owned by |context| and remain valid for the current lowering
 // run.
 iree_status_t loom_low_lower_rule_set_resolve_emit_program(
-    loom_low_lower_context_t* context,
+    loom_low_lower_context_t* context, uint16_t rule_set_index,
     const loom_low_lower_rule_set_t* rule_set,
     const loom_low_lower_rule_t* rule,
     const loom_low_lower_resolved_emit_t** out_resolved_emits);

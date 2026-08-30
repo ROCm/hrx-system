@@ -9,8 +9,8 @@
 from __future__ import annotations
 
 import struct
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Hashable, Iterable, Mapping, Sequence
+from dataclasses import dataclass, replace
 from enum import Enum, unique
 
 from loom.dsl import ATTR_TYPE_ENUM, Op
@@ -183,6 +183,7 @@ class LowerDiagnostic:
 
     error: ErrorDef
     params: tuple[LowerDiagnosticParam, ...]
+    target_context_param_count: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -311,6 +312,26 @@ class CompiledLowerRuleSet:
     diagnostics: tuple[LowerDiagnostic, ...]
 
 
+def _intern_program_rows[ProgramRowT: Hashable](
+    rows: Sequence[ProgramRowT],
+    ranges: Iterable[tuple[int, int]],
+) -> tuple[tuple[ProgramRowT, ...], tuple[int, ...]]:
+    """Interns exact immutable row programs and returns their new starts."""
+
+    interned_rows: list[ProgramRowT] = []
+    program_starts: dict[tuple[ProgramRowT, ...], int] = {(): 0}
+    rewritten_starts: list[int] = []
+    for start, count in ranges:
+        program = tuple(rows[start : start + count])
+        interned_start = program_starts.get(program)
+        if interned_start is None:
+            interned_start = len(interned_rows)
+            program_starts[program] = interned_start
+            interned_rows.extend(program)
+        rewritten_starts.append(interned_start)
+    return tuple(interned_rows), tuple(rewritten_starts)
+
+
 def compile_lower_rule_set(
     table: ContractFragment,
     *,
@@ -377,19 +398,35 @@ class _LowerRuleSetCompiler:
             elif isinstance(contract_case, RecipeRule):
                 self._append_recipe_rule(authored_case_index, contract_case)
 
-        spans = _build_spans(self._rules, self._op_ordinals)
+        guards, guard_starts = _intern_program_rows(
+            self._guards,
+            ((rule.guard_start, rule.guard_count) for rule in self._rules),
+        )
+        emits, emit_starts = _intern_program_rows(
+            self._emits,
+            ((rule.emit_start, rule.emit_count) for rule in self._rules),
+        )
+        rules = tuple(
+            replace(
+                rule,
+                guard_start=guard_starts[index],
+                emit_start=emit_starts[index],
+            )
+            for index, rule in enumerate(self._rules)
+        )
+        spans = _build_spans(rules, self._op_ordinals)
         return CompiledLowerRuleSet(
             name=self._table.name,
             authored_case_indices=tuple(self._authored_case_indices),
-            rules=tuple(self._rules),
+            rules=rules,
             spans=spans,
             type_patterns=tuple(self._type_patterns),
             value_refs=tuple(self._value_refs),
             source_memories=tuple(self._source_memories),
-            guards=tuple(self._guards),
+            guards=guards,
             attr_copies=tuple(self._attr_copies),
             tied_results=tuple(self._tied_results),
-            emits=tuple(self._emits),
+            emits=emits,
             diagnostics=tuple(self._diagnostics),
         )
 
@@ -1847,7 +1884,11 @@ class _LowerRuleSetCompiler:
         params = [
             self._lower_diagnostic_param(source_op, param) for param in ref.params
         ]
-        return LowerDiagnostic(ref.error, tuple(params))
+        return LowerDiagnostic(
+            ref.error,
+            tuple(params),
+            target_context_param_count=ref.target_context_param_count,
+        )
 
     def _lower_diagnostic_param(
         self,

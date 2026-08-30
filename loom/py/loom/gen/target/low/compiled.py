@@ -8,7 +8,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Hashable, Sequence
+from dataclasses import dataclass, field
 
 from loom.gen.support.string_pool import CStringPool
 from loom.target.low_descriptors import (
@@ -111,11 +112,7 @@ class CompiledDescriptorSet:
     descriptor_refs: list[tuple[str, int]]
     canonical_asm_form_ordinals: list[int | None]
     asm_forms: list[CompiledAsmForm]
-    asm_operand_indices: list[int]
-    asm_operand_segments: list[CompiledAsmOperandSegment]
-    asm_result_value_types: list[AsmResultValueType | None]
-    asm_immediates: list[CompiledAsmImmediate]
-    native_asm_values: list[CompiledNativeAsmValue]
+    asm_table_storage: CompiledAsmTableStorage
     schedule_rows: list[dict[str, int]]
     enum_domain_rows: list[dict[str, int]]
 
@@ -131,7 +128,10 @@ class DescriptorSetView:
     canonical_asm_form_ordinals: list[int | None]
     asm_forms: list[CompiledAsmForm]
     operand_forms: list[CompiledOperandForm]
+    # Structural descriptor rows are a prefix of the storage table.
     uses_storage_descriptor_tables: bool
+    # View-owned descriptor rows are a prefix of the storage table.
+    uses_storage_descriptor_view_tables: bool
     uses_storage_asm_form_tables: bool
     uses_storage_operand_form_tables: bool
 
@@ -183,6 +183,99 @@ class CompiledAsmForm:
     operand_segment_start: int = 0
     immediate_start: int = 0
     native_assembly_value_start: int = 0
+
+
+def append_interned_sequence[RowT: Hashable](
+    sequence: Sequence[RowT],
+    rows: list[RowT],
+    starts: dict[tuple[RowT, ...], int],
+) -> tuple[int, bool]:
+    """Interns an exact non-empty row sequence and returns its start and novelty."""
+
+    key = tuple(sequence)
+    if not key:
+        return 0, False
+    start = starts.get(key)
+    if start is not None:
+        return start, False
+    start = len(rows)
+    starts[key] = start
+    rows.extend(key)
+    return start, True
+
+
+@dataclass(slots=True)
+class CompiledAsmTableStorage:
+    """Interned assembly-form table rows shared across storage and views."""
+
+    # Result and operand indices addressed by assembly-form spans.
+    operand_indices: list[int] = field(default_factory=list)
+    # Delimited operand groups addressed by assembly-form spans.
+    operand_segments: list[CompiledAsmOperandSegment] = field(default_factory=list)
+    # Exact semantic result types addressed by assembly-form spans.
+    result_value_types: list[AsmResultValueType | None] = field(default_factory=list)
+    # Immediate projections addressed by assembly-form spans.
+    immediates: list[CompiledAsmImmediate] = field(default_factory=list)
+    # Native assembly values addressed by assembly-form spans.
+    native_values: list[CompiledNativeAsmValue] = field(default_factory=list)
+    # Starts of exact operand-index sequences already in storage.
+    _operand_index_starts: dict[tuple[int, ...], int] = field(
+        default_factory=dict,
+        init=False,
+        repr=False,
+    )
+    # Starts of exact operand-segment sequences already in storage.
+    _operand_segment_starts: dict[tuple[CompiledAsmOperandSegment, ...], int] = field(default_factory=dict, init=False, repr=False)
+    # Starts of exact result-type sequences already in storage.
+    _result_value_type_starts: dict[tuple[AsmResultValueType | None, ...], int] = field(default_factory=dict, init=False, repr=False)
+    # Starts of exact immediate sequences already in storage.
+    _immediate_starts: dict[tuple[CompiledAsmImmediate, ...], int] = field(
+        default_factory=dict,
+        init=False,
+        repr=False,
+    )
+    # Starts of exact native-value sequences already in storage.
+    _native_value_starts: dict[tuple[CompiledNativeAsmValue, ...], int] = field(
+        default_factory=dict,
+        init=False,
+        repr=False,
+    )
+
+    def append_forms(self, asm_forms: Sequence[CompiledAsmForm]) -> None:
+        """Interns each form's exact table spans into this storage."""
+
+        for asm_form in asm_forms:
+            asm_form.result_index_start, _ = append_interned_sequence(
+                asm_form.result_indices,
+                self.operand_indices,
+                self._operand_index_starts,
+            )
+            if asm_form.result_value_types:
+                asm_form.result_value_type_start, _ = append_interned_sequence(
+                    asm_form.result_value_types,
+                    self.result_value_types,
+                    self._result_value_type_starts,
+                )
+            asm_form.operand_index_start, _ = append_interned_sequence(
+                asm_form.operand_indices,
+                self.operand_indices,
+                self._operand_index_starts,
+            )
+            asm_form.operand_segment_start, _ = append_interned_sequence(
+                asm_form.operand_segments,
+                self.operand_segments,
+                self._operand_segment_starts,
+            )
+            asm_form.immediate_start, _ = append_interned_sequence(
+                asm_form.immediates,
+                self.immediates,
+                self._immediate_starts,
+            )
+            asm_form.native_assembly_value_start, _ = append_interned_sequence(
+                asm_form.native_assembly_values,
+                self.native_values,
+                self._native_value_starts,
+            )
 
 
 @dataclass(frozen=True, slots=True)

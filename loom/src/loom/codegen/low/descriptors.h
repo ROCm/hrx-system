@@ -26,7 +26,7 @@ extern "C" {
 #endif
 
 // ABI version for descriptor sets consumed by this header.
-#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 36u
+#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 37u
 
 // Sentinel for absent string-table offsets.
 #define LOOM_LOW_STRING_OFFSET_NONE LOOM_BSTRING_TABLE_OFFSET_NONE
@@ -43,8 +43,9 @@ extern "C" {
 // Sentinel for absent descriptor ordinals.
 #define LOOM_LOW_DESCRIPTOR_ORDINAL_NONE UINT32_MAX
 
-// Sentinel for absent asm-form ordinals.
-#define LOOM_LOW_ASM_FORM_ORDINAL_NONE UINT32_MAX
+// Sentinel for absent asm-form ordinals. Descriptor sets contain at most
+// UINT16_MAX asm forms so canonical ordinals remain compact.
+#define LOOM_LOW_ASM_FORM_ORDINAL_NONE UINT16_MAX
 
 // Sentinel for asm forms without exact semantic result value types.
 #define LOOM_LOW_ASM_RESULT_VALUE_TYPE_START_NONE UINT32_MAX
@@ -838,22 +839,38 @@ typedef enum loom_low_descriptor_op_kind_e {
 } loom_low_descriptor_op_kind_t;
 
 typedef struct loom_low_descriptor_t {
-  // String-table offset for the stable descriptor key.
-  loom_bstring_table_offset_t key_string_offset;
   // Durable descriptor identity derived from the descriptor key. This is
   // stable across descriptor table reordering and unrelated descriptor
   // additions; descriptor-set ordinals are only transient row addresses.
   uint64_t stable_id;
+  // String-table offset for the stable descriptor key.
+  loom_bstring_table_offset_t key_string_offset;
   // String-table offset for the target mnemonic or packet name.
   loom_bstring_table_offset_t mnemonic_string_offset;
   // String-table offset for the primary semantic tag.
   loom_bstring_table_offset_t semantic_tag_string_offset;
   // First feature-mask word required by this descriptor.
   uint32_t feature_mask_word_start;
-  // Number of feature-mask words required by this descriptor.
-  uint16_t feature_mask_word_count;
   // First target-owned fixed encoding field value for this descriptor.
   uint32_t encoding_field_value_start;
+  // First operand/result row for this descriptor.
+  uint32_t operand_start;
+  // First immediate row for this descriptor.
+  uint32_t immediate_start;
+  // First effect row for this descriptor.
+  uint32_t effect_start;
+  // First constraint row for this descriptor.
+  uint32_t constraint_start;
+  // First storage-lease row for this descriptor.
+  uint32_t storage_lease_start;
+  // First operand-form row for descriptor-family packet selection.
+  uint32_t operand_form_start;
+  // Descriptor flags used by verifier, scheduler, and optimizer.
+  loom_low_descriptor_flags_t flags;
+  // Canonical low IR operation used to represent this descriptor packet.
+  loom_low_descriptor_op_kind_t op_kind;
+  // Number of feature-mask words required by this descriptor.
+  uint16_t feature_mask_word_count;
   // Number of target-owned fixed encoding field values for this descriptor.
   uint16_t encoding_field_value_count;
   // Target-owned encoding format identifier. Zero means no target-specific
@@ -861,8 +878,6 @@ typedef struct loom_low_descriptor_t {
   uint16_t encoding_format_id;
   // Target-owned encoding identifier.
   uint16_t encoding_id;
-  // First operand/result row for this descriptor.
-  uint32_t operand_start;
   // Total number of operand/result rows for this descriptor.
   uint16_t operand_count;
   // Number of leading operand rows that define results.
@@ -870,41 +885,39 @@ typedef struct loom_low_descriptor_t {
   // Minimum packet operand count. Fixed descriptors accept exactly this count;
   // variadic descriptors accept this count or greater.
   uint16_t minimum_packet_operand_count;
-  // First immediate row for this descriptor.
-  uint32_t immediate_start;
   // Number of immediate rows for this descriptor.
   uint16_t immediate_count;
-  // First effect row for this descriptor.
-  uint32_t effect_start;
   // Number of effect rows for this descriptor.
   uint16_t effect_count;
-  // First constraint row for this descriptor.
-  uint32_t constraint_start;
   // Number of constraint rows for this descriptor.
   uint16_t constraint_count;
-  // First storage-lease row for this descriptor.
-  uint32_t storage_lease_start;
   // Number of storage-lease rows for this descriptor.
   uint16_t storage_lease_count;
-  // First operand-form row for descriptor-family packet selection.
-  uint32_t operand_form_start;
   // Number of operand-form rows for this descriptor.
   uint16_t operand_form_count;
-  // Required schedule-class identifier for this descriptor.
-  uint16_t schedule_class_id;
-  // Descriptor flags used by verifier, scheduler, and optimizer.
-  loom_low_descriptor_flags_t flags;
-  // Canonical low IR operation used to represent this descriptor packet.
-  loom_low_descriptor_op_kind_t op_kind;
-  // Generated target-neutral semantic instruction classes.
-  loom_low_instruction_class_flags_t instruction_class_flags;
-  // Unique canonical asm form ordinal for descriptor-driven text emission, or
-  // LOOM_LOW_ASM_FORM_ORDINAL_NONE when no unambiguous form exists.
-  uint32_t canonical_asm_form_ordinal;
+  // Reserved zero padding available for future structural descriptor facts.
+  uint32_t reserved;
 } loom_low_descriptor_t;
 
-static_assert(sizeof(loom_low_descriptor_t) == 112,
-              "loom_low_descriptor_t must be 112 bytes");
+static_assert(sizeof(loom_low_descriptor_t) == 88,
+              "loom_low_descriptor_t must be 88 bytes");
+
+// Descriptor facts owned by one descriptor-set view. Rows correspond exactly
+// to the structural rows in loom_low_descriptor_set_t::descriptors. Keeping
+// these facts separate lets target variants share structural descriptor tables
+// while retaining their own scheduling and assembly contracts.
+typedef struct loom_low_descriptor_view_t {
+  // Generated target-neutral semantic instruction classes.
+  loom_low_instruction_class_flags_t instruction_class_flags;
+  // Required schedule-class identifier for this descriptor.
+  uint16_t schedule_class_id;
+  // Unique canonical asm form ordinal for descriptor-driven text emission, or
+  // LOOM_LOW_ASM_FORM_ORDINAL_NONE when no unambiguous form exists.
+  uint16_t canonical_asm_form_ordinal;
+} loom_low_descriptor_view_t;
+
+static_assert(sizeof(loom_low_descriptor_view_t) == 8,
+              "loom_low_descriptor_view_t must be 8 bytes");
 
 typedef struct loom_low_operand_form_match_t {
   // Descriptor-local operand index whose value facts select this form.
@@ -1103,8 +1116,10 @@ typedef struct loom_low_descriptor_set_t {
   loom_bstring_table_offset_t feature_key_string_offset;
   // Packed B-string table used by all string offsets.
   loom_bstring_table_t string_table;
-  // Dense descriptor rows owned by this set.
+  // Dense structural descriptor rows owned or shared by this set.
   const loom_low_descriptor_t* descriptors;
+  // Dense view-owned descriptor rows corresponding to |descriptors|.
+  const loom_low_descriptor_view_t* descriptor_views;
   // Number of descriptor rows owned by this set.
   uint32_t descriptor_count;
   // Sorted symbolic descriptor-key reference rows.
@@ -1220,6 +1235,27 @@ typedef struct loom_low_descriptor_set_t {
   // Number of fixed encoding field values owned by this set.
   uint32_t encoding_field_value_count;
 } loom_low_descriptor_set_t;
+
+// Returns the view-owned facts for |descriptor_ordinal|. The ordinal must be a
+// verified row in |descriptor_set|.
+IREE_ATTRIBUTE_ALWAYS_INLINE static inline const loom_low_descriptor_view_t*
+loom_low_descriptor_set_descriptor_view_at(
+    const loom_low_descriptor_set_t* descriptor_set,
+    uint32_t descriptor_ordinal) {
+  return &descriptor_set->descriptor_views[descriptor_ordinal];
+}
+
+// Returns the view-owned facts corresponding to |descriptor|. The descriptor
+// must be a row in |descriptor_set->descriptors|.
+IREE_ATTRIBUTE_ALWAYS_INLINE static inline const loom_low_descriptor_view_t*
+loom_low_descriptor_set_descriptor_view(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_t* descriptor) {
+  const uint32_t descriptor_ordinal =
+      (uint32_t)(descriptor - descriptor_set->descriptors);
+  return loom_low_descriptor_set_descriptor_view_at(descriptor_set,
+                                                    descriptor_ordinal);
+}
 
 // Returns the target-storage identity key for |reg_class_id|. Register classes
 // in the same non-zero alias set intentionally return the same key; all other

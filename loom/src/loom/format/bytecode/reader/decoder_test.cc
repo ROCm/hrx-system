@@ -113,8 +113,8 @@ TEST_F(BytecodeDecoderTest, TruncatedReadPreservesCursorAndAbsoluteOffset) {
   EXPECT_EQ(value, 0xCAFEu);
   EXPECT_EQ(error_count_, 1u);
   ASSERT_NE(captured_.error, nullptr);
-  EXPECT_EQ(captured_.error->domain, LOOM_ERROR_DOMAIN_BYTECODE);
-  EXPECT_EQ(captured_.error->code, 3u);
+  EXPECT_EQ(loom_error_def_domain(captured_.error), LOOM_ERROR_DOMAIN_BYTECODE);
+  EXPECT_EQ(loom_error_def_code(captured_.error), 3u);
   EXPECT_EQ(captured_.origin.start, 4096u);
   EXPECT_EQ(captured_.origin.end, 4096u);
 }
@@ -132,8 +132,8 @@ TEST_F(BytecodeDecoderTest, InvalidVarintPreservesCursorAndReportsStart) {
   EXPECT_EQ(cursor.cursor.position, 0u);
   EXPECT_EQ(error_count_, 1u);
   ASSERT_NE(captured_.error, nullptr);
-  EXPECT_EQ(captured_.error->domain, LOOM_ERROR_DOMAIN_BYTECODE);
-  EXPECT_EQ(captured_.error->code, 8u);
+  EXPECT_EQ(loom_error_def_domain(captured_.error), LOOM_ERROR_DOMAIN_BYTECODE);
+  EXPECT_EQ(loom_error_def_code(captured_.error), 8u);
   EXPECT_EQ(captured_.origin.start, 8192u);
 }
 
@@ -151,8 +151,8 @@ TEST_F(BytecodeDecoderTest, TrailingBytesReportCurrentAbsoluteOffset) {
 
   EXPECT_EQ(error_count_, 1u);
   ASSERT_NE(captured_.error, nullptr);
-  EXPECT_EQ(captured_.error->domain, LOOM_ERROR_DOMAIN_BYTECODE);
-  EXPECT_EQ(captured_.error->code, 6u);
+  EXPECT_EQ(loom_error_def_domain(captured_.error), LOOM_ERROR_DOMAIN_BYTECODE);
+  EXPECT_EQ(loom_error_def_code(captured_.error), 6u);
   EXPECT_EQ(captured_.origin.start, 12289u);
   EXPECT_EQ(captured_.origin.end, 12290u);
 }
@@ -165,8 +165,8 @@ TEST_F(BytecodeDecoderTest, RangeValidationRejectsOverflow) {
 
   EXPECT_EQ(error_count_, 1u);
   ASSERT_NE(captured_.error, nullptr);
-  EXPECT_EQ(captured_.error->domain, LOOM_ERROR_DOMAIN_BYTECODE);
-  EXPECT_EQ(captured_.error->code, 7u);
+  EXPECT_EQ(loom_error_def_domain(captured_.error), LOOM_ERROR_DOMAIN_BYTECODE);
+  EXPECT_EQ(loom_error_def_code(captured_.error), 7u);
 }
 
 TEST_F(BytecodeDecoderTest, DiagnosticSinkFailurePropagates) {

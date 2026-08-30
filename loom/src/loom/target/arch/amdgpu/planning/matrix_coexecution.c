@@ -329,13 +329,15 @@ loom_amdgpu_matrix_coexecution_append_source(
     loom_amdgpu_matrix_coexecution_t* coexecution,
     const loom_low_packet_view_t* packet) {
   IREE_ASSERT_LT(coexecution->source_count, coexecution->source_capacity);
-  const loom_low_descriptor_t* descriptor = packet->descriptor;
+  const loom_low_descriptor_view_t* descriptor_view =
+      loom_low_descriptor_set_descriptor_view_at(coexecution->descriptor_set,
+                                                 packet->descriptor_ordinal);
   loom_amdgpu_matrix_coexecution_source_kind_t source_kind =
       LOOM_AMDGPU_MATRIX_COEXECUTION_SOURCE_WMMA;
-  if (iree_any_bit_set(descriptor->instruction_class_flags,
+  if (iree_any_bit_set(descriptor_view->instruction_class_flags,
                        LOOM_LOW_INSTRUCTION_CLASS_FLAG_SWMMAC)) {
     source_kind = LOOM_AMDGPU_MATRIX_COEXECUTION_SOURCE_SWMMAC;
-  } else if (iree_any_bit_set(descriptor->instruction_class_flags,
+  } else if (iree_any_bit_set(descriptor_view->instruction_class_flags,
                               LOOM_LOW_INSTRUCTION_CLASS_FLAG_WMMA)) {
     source_kind = LOOM_AMDGPU_MATRIX_COEXECUTION_SOURCE_WMMA;
   } else {
@@ -343,8 +345,7 @@ loom_amdgpu_matrix_coexecution_append_source(
         "matrix coexecution source trait requires WMMA or SWMMAC");
   }
   const loom_low_schedule_class_t* schedule_class =
-      &coexecution->descriptor_set
-           ->schedule_classes[packet->descriptor->schedule_class_id];
+      packet->node->schedule_class;
   IREE_ASSERT_LE(schedule_class->latency_cycles, UINT8_MAX);
   const uint8_t latency_cycles = (uint8_t)schedule_class->latency_cycles;
   const loom_amdgpu_matrix_coexecution_release_t* release =
@@ -750,9 +751,12 @@ static void loom_amdgpu_matrix_coexecution_inspect_packet_impl(
           coexecution, packet, source, retain_consumers, inout_match);
       return;
     }
+    const loom_low_descriptor_view_t* descriptor_view =
+        loom_low_descriptor_set_descriptor_view_at(coexecution->descriptor_set,
+                                                   packet->descriptor_ordinal);
     const bool is_ordinary_vector =
         iree_any_bit_set(traits, LOOM_AMDGPU_DESCRIPTOR_TRAIT_VECTOR_ALU) &&
-        !iree_any_bit_set(packet->descriptor->instruction_class_flags,
+        !iree_any_bit_set(descriptor_view->instruction_class_flags,
                           LOOM_LOW_INSTRUCTION_CLASS_FLAG_WMMA |
                               LOOM_LOW_INSTRUCTION_CLASS_FLAG_SWMMAC |
                               LOOM_LOW_INSTRUCTION_CLASS_FLAG_LDSDMA);
