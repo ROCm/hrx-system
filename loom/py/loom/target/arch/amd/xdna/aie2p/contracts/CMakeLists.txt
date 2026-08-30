@@ -22,6 +22,7 @@ iree_py_library(
     loom::py::loom::dialect::scalar::scalar
     loom::py::loom::dialect::scf::scf
     loom::py::loom::dialect::vector::vector
+    loom::py::loom::dialect::view::view
     loom::py::loom::target::arch::amd::xdna::aie2p::descriptors
     loom::py::loom::target::contracts::contracts
 )
@@ -43,6 +44,7 @@ iree_py_test(
     loom::py::loom::dialect::scalar::scalar
     loom::py::loom::dialect::scf::scf
     loom::py::loom::dialect::vector::vector
+    loom::py::loom::dialect::view::view
     loom::py::loom::target::contracts::contracts
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"

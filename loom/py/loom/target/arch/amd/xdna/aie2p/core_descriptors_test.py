@@ -45,9 +45,9 @@ from loom.target.low_descriptors import (
 def test_core_descriptor_closure_is_complete() -> None:
     descriptor_set = AIE2P_CORE_DESCRIPTOR_SET
     assert len(descriptor_set.physical_registers) == 359
-    assert len(descriptor_set.reg_classes) == 23
+    assert len(descriptor_set.reg_classes) == 22
     assert len(descriptor_set.register_parts) == 2
-    assert len(descriptor_set.descriptors) == 114
+    assert len(descriptor_set.descriptors) == 118
     assert tuple(row.name for row in descriptor_set.physical_registers) == tuple(
         row.name for row in CORE_MACHINE_TABLE.physical_registers
     )
@@ -61,7 +61,7 @@ def test_complete_schedule_domain_drives_selected_low_descriptors() -> None:
     assert len(descriptor_set.resources) == 90
     assert len(descriptor_set.timing_events) == 38
     assert len(descriptor_set.event_separations) == 651
-    assert len(descriptor_set.schedule_classes) == 33
+    assert len(descriptor_set.schedule_classes) == 34
     assert {
         resource.name
         for resource in descriptor_set.resources
@@ -122,6 +122,26 @@ def test_complete_schedule_domain_drives_selected_low_descriptors() -> None:
                 if expected.kind is PipelineStageKind.REQUIRED
                 else IssueUseKind.RESERVED
             )
+
+
+def test_scalar_memory_forms_use_storage_specialized_itineraries() -> None:
+    specifications = {spec.key: spec for spec in _DESCRIPTOR_SPECS}
+    assert {
+        key: specifications[key].itinerary
+        for key in (
+            "amd.xdna.aie2p.load.scalar.indexed.immediate",
+            "amd.xdna.aie2p.load.scalar.indexed.register",
+            "amd.xdna.aie2p.store.scalar.indexed.immediate",
+            "amd.xdna.aie2p.store.scalar.indexed.register",
+            "amd.xdna.aie2p.move.to.address-index",
+        )
+    } == {
+        "amd.xdna.aie2p.load.scalar.indexed.immediate": ("II_LDA_dms_lda_idx_imm_eR"),
+        "amd.xdna.aie2p.load.scalar.indexed.register": "II_LDA_dms_lda_idx_eR",
+        "amd.xdna.aie2p.store.scalar.indexed.immediate": ("II_ST_dms_sts_idx_imm_eR"),
+        "amd.xdna.aie2p.store.scalar.indexed.register": "II_ST_dms_sts_idx_eR",
+        "amd.xdna.aie2p.move.to.address-index": "II_MOVS_eDJ_eR",
+    }
 
 
 def test_bundle_resources_exactly_model_every_extendable_physical_slot_set() -> None:
@@ -248,6 +268,26 @@ def test_descriptor_encoding_ids_and_adapters_are_materialized() -> None:
 
     scalar_store = descriptors["amd.xdna.aie2p.store.scalar.indexed.immediate"]
     assert scalar_store.effects[0].width_bits == 32
+
+    scalar_register_load = descriptors["amd.xdna.aie2p.load.scalar.indexed.register"]
+    scalar_register_store = descriptors["amd.xdna.aie2p.store.scalar.indexed.register"]
+    address_index_move = descriptors["amd.xdna.aie2p.move.to.address-index"]
+    assert [
+        operand.reg_alts[0].reg_class for operand in scalar_register_load.operands
+    ] == ["aie2p.er", "aie2p.ep", "aie2p.edj"]
+    assert [
+        operand.reg_alts[0].reg_class for operand in scalar_register_store.operands
+    ] == ["aie2p.er", "aie2p.ep", "aie2p.edj"]
+    assert scalar_register_load.asm_forms[0].mnemonic == "lda.index"
+    assert scalar_register_store.asm_forms[0].mnemonic == "st.index"
+    assert [
+        operand.reg_alts[0].reg_class for operand in address_index_move.operands
+    ] == ["aie2p.edj", "aie2p.er"]
+    assert address_index_move.asm_forms[0].mnemonic == "mov.address-index"
+
+    static_offset = descriptors["amd.xdna.aie2p.materialize.static-byte-offset.i32"]
+    assert static_offset.asm_forms[0].mnemonic == "mov.static-byte-offset"
+    assert static_offset.operands[0].reg_alts[0].reg_class == "aie2p.er"
 
     short_constant = descriptors["amd.xdna.aie2p.constant.i32.short"]
     full_constant = descriptors["amd.xdna.aie2p.constant.i32"]
