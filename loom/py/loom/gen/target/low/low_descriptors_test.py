@@ -1358,6 +1358,58 @@ def test_descriptor_set_family_emits_sibling_view_descriptor_surfaces() -> None:
     assert "test.mul.i32" not in source
 
 
+def test_descriptor_set_family_shares_exact_sibling_view_tables() -> None:
+    storage_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(
+            TEST_LOW_CONST_I32_DESCRIPTOR,
+            TEST_LOW_STATE_ADD_I32_DESCRIPTOR,
+            TEST_LOW_STATE_ADD_I32_RHS_ZERO_DESCRIPTOR,
+        ),
+    )
+    first_view = replace(
+        storage_set,
+        key="test.low.first.core",
+        function_name="loom_test_low_first_core_descriptor_set",
+        c_table_prefix="TestLowFirstCore",
+        c_enum_prefix="TEST_LOW_FIRST_CORE",
+        descriptors=(
+            TEST_LOW_STATE_ADD_I32_DESCRIPTOR,
+            TEST_LOW_STATE_ADD_I32_RHS_ZERO_DESCRIPTOR,
+        ),
+    )
+    second_view = replace(
+        first_view,
+        key="test.low.second.core",
+        function_name="loom_test_low_second_core_descriptor_set",
+        c_table_prefix="TestLowSecondCore",
+        c_enum_prefix="TEST_LOW_SECOND_CORE",
+    )
+
+    source = generate_descriptor_set_family(
+        storage_set,
+        (first_view, second_view),
+    ).source
+
+    table_fields = (
+        ("loom_low_descriptor_t", "Descriptors", "descriptors"),
+        (
+            "loom_low_descriptor_view_t",
+            "DescriptorViews",
+            "descriptor_views",
+        ),
+        ("loom_low_operand_form_t", "OperandForms", "operand_forms"),
+        ("loom_low_descriptor_ref_t", "DescriptorRefs", "descriptor_refs"),
+        ("loom_low_asm_form_t", "AsmForms", "asm_forms"),
+    )
+    for c_type, table_suffix, field_name in table_fields:
+        first_table_symbol = f"kTestLowFirstCore{table_suffix}"
+        second_table_symbol = f"kTestLowSecondCore{table_suffix}"
+        assert source.count(f"static const {c_type} {first_table_symbol}[]") == 1
+        assert f"static const {c_type} {second_table_symbol}[]" not in source
+        assert source.count(f".{field_name} = {first_table_symbol},") == 2
+
+
 def test_generate_test_low_core_descriptor_set() -> None:
     generated = generate_descriptor_set(TEST_LOW_CORE_DESCRIPTOR_SET)
 

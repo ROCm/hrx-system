@@ -677,11 +677,10 @@ def emit_source_for_views(
             for field_value in compiled.encoding_field_values
         ],
     )
-    _emit_array(
-        lines,
+    view_array_emitter = c_arrays.StaticArrayEmitter(lines)
+    storage_operand_form_table_symbol = view_array_emitter.append_struct_array(
         "loom_low_operand_form_t",
-        spec.c_table_prefix,
-        "OperandForms",
+        f"k{spec.c_table_prefix}OperandForms",
         _operand_form_row_lines(compiled.operand_forms),
     )
     _emit_array(
@@ -706,22 +705,18 @@ def emit_source_for_views(
             f"k{spec.c_table_prefix}OperandFormOperandIndices",
             [str(operand_index) for operand_index in compiled.operand_form_operand_indices],
         )
-    _emit_array(
-        lines,
+    storage_descriptor_table_symbol = view_array_emitter.append_struct_array(
         "loom_low_descriptor_t",
-        spec.c_table_prefix,
-        "Descriptors",
+        f"k{spec.c_table_prefix}Descriptors",
         _descriptor_row_lines(
             compiled,
             compiled.descriptors,
             compiled.descriptor_rows,
         ),
     )
-    _emit_array(
-        lines,
+    storage_descriptor_view_table_symbol = view_array_emitter.append_struct_array(
         "loom_low_descriptor_view_t",
-        spec.c_table_prefix,
-        "DescriptorViews",
+        f"k{spec.c_table_prefix}DescriptorViews",
         _descriptor_view_row_lines(
             compiled,
             compiled.descriptors,
@@ -729,25 +724,29 @@ def emit_source_for_views(
             compiled.canonical_asm_form_ordinals,
         ),
     )
+    descriptor_table_symbols: dict[str, str] = {}
+    descriptor_view_table_symbols: dict[str, str] = {}
+    operand_form_table_symbols: dict[str, str] = {}
     for view in views:
-        if not view.uses_storage_descriptor_tables:
-            _emit_array(
-                lines,
+        view_key = view.spec.key
+        if view.uses_storage_descriptor_tables:
+            descriptor_table_symbols[view_key] = storage_descriptor_table_symbol
+        else:
+            descriptor_table_symbols[view_key] = view_array_emitter.append_struct_array(
                 "loom_low_descriptor_t",
-                view.spec.c_table_prefix,
-                "Descriptors",
+                f"k{view.spec.c_table_prefix}Descriptors",
                 _descriptor_row_lines(
                     compiled,
                     view.descriptors,
                     view.descriptor_rows,
                 ),
             )
-        if not view.uses_storage_descriptor_view_tables:
-            _emit_array(
-                lines,
+        if view.uses_storage_descriptor_view_tables:
+            descriptor_view_table_symbols[view_key] = storage_descriptor_view_table_symbol
+        else:
+            descriptor_view_table_symbols[view_key] = view_array_emitter.append_struct_array(
                 "loom_low_descriptor_view_t",
-                view.spec.c_table_prefix,
-                "DescriptorViews",
+                f"k{view.spec.c_table_prefix}DescriptorViews",
                 _descriptor_view_row_lines(
                     compiled,
                     view.descriptors,
@@ -755,20 +754,19 @@ def emit_source_for_views(
                     view.canonical_asm_form_ordinals,
                 ),
             )
-        if not view.uses_storage_operand_form_tables:
-            _emit_array(
-                lines,
+        if view.uses_storage_operand_form_tables:
+            operand_form_table_symbols[view_key] = storage_operand_form_table_symbol
+        else:
+            operand_form_table_symbols[view_key] = view_array_emitter.append_struct_array(
                 "loom_low_operand_form_t",
-                view.spec.c_table_prefix,
-                "OperandForms",
+                f"k{view.spec.c_table_prefix}OperandForms",
                 _operand_form_row_lines(view.operand_forms),
             )
+    descriptor_ref_table_symbols: dict[str, str] = {}
     for view in views:
-        _emit_array(
-            lines,
+        descriptor_ref_table_symbols[view.spec.key] = view_array_emitter.append_struct_array(
             "loom_low_descriptor_ref_t",
-            view.spec.c_table_prefix,
-            "DescriptorRefs",
+            f"k{view.spec.c_table_prefix}DescriptorRefs",
             [
                 [
                     f".key_string_offset = {pool.ref(f'descriptor_{descriptor_key}')},",
@@ -818,11 +816,9 @@ def emit_source_for_views(
             for immediate in asm_table_storage.immediates
         ],
     )
-    _emit_array(
-        lines,
+    storage_asm_form_table_symbol = view_array_emitter.append_struct_array(
         "loom_low_asm_form_t",
-        spec.c_table_prefix,
-        "AsmForms",
+        f"k{spec.c_table_prefix}AsmForms",
         _asm_form_row_lines(compiled, compiled.asm_forms),
     )
     _emit_array(
@@ -832,16 +828,16 @@ def emit_source_for_views(
         "NativeAsmValues",
         _native_asm_value_row_lines(compiled, asm_table_storage.native_values),
     )
+    asm_form_table_symbols: dict[str, str] = {}
     for view in views:
         if view.uses_storage_asm_form_tables:
-            continue
-        _emit_array(
-            lines,
-            "loom_low_asm_form_t",
-            view.spec.c_table_prefix,
-            "AsmForms",
-            _asm_form_row_lines(compiled, view.asm_forms),
-        )
+            asm_form_table_symbols[view.spec.key] = storage_asm_form_table_symbol
+        else:
+            asm_form_table_symbols[view.spec.key] = view_array_emitter.append_struct_array(
+                "loom_low_asm_form_t",
+                f"k{view.spec.c_table_prefix}AsmForms",
+                _asm_form_row_lines(compiled, view.asm_forms),
+            )
     for view in views:
         if not view.spec.supported_target_contract_keys:
             continue
@@ -893,10 +889,11 @@ def emit_source_for_views(
 
     for view in views:
         view_spec = view.spec
-        descriptor_table_prefix = spec.c_table_prefix if view.uses_storage_descriptor_tables else view_spec.c_table_prefix
-        descriptor_view_table_prefix = spec.c_table_prefix if view.uses_storage_descriptor_view_tables else view_spec.c_table_prefix
-        asm_form_table_prefix = spec.c_table_prefix if view.uses_storage_asm_form_tables else view_spec.c_table_prefix
-        operand_form_table_prefix = spec.c_table_prefix if view.uses_storage_operand_form_tables else view_spec.c_table_prefix
+        descriptor_table_symbol = descriptor_table_symbols[view_spec.key]
+        descriptor_view_table_symbol = descriptor_view_table_symbols[view_spec.key]
+        descriptor_ref_table_symbol = descriptor_ref_table_symbols[view_spec.key]
+        asm_form_table_symbol = asm_form_table_symbols[view_spec.key]
+        operand_form_table_symbol = operand_form_table_symbols[view_spec.key]
         view_lines = [
             f"static const loom_low_descriptor_set_t k{view_spec.c_table_prefix}Set = {{",
             "    .abi_version = LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION,",
@@ -920,11 +917,11 @@ def emit_source_for_views(
             f"            .data = k{spec.c_table_prefix}StringData,",
             f"            .data_length = sizeof(k{spec.c_table_prefix}StringData) - 1,",
             "        },",
-            f"    .descriptors = k{descriptor_table_prefix}Descriptors,",
-            f"    .descriptor_views = k{descriptor_view_table_prefix}DescriptorViews,",
+            f"    .descriptors = {descriptor_table_symbol},",
+            f"    .descriptor_views = {descriptor_view_table_symbol},",
             f"    .descriptor_count = {view.descriptor_count},",
-            f"    .descriptor_refs = k{view_spec.c_table_prefix}DescriptorRefs,",
-            f"    .descriptor_ref_count = IREE_ARRAYSIZE(k{view_spec.c_table_prefix}DescriptorRefs),",
+            f"    .descriptor_refs = {descriptor_ref_table_symbol},",
+            f"    .descriptor_ref_count = IREE_ARRAYSIZE({descriptor_ref_table_symbol}),",
         ]
 
         append_optional_table("operands", "Operands", compiled.operands, view_lines)
@@ -949,8 +946,8 @@ def emit_source_for_views(
         append_optional_table("hazards", "Hazards", compiled.hazards, view_lines)
         append_optional_table("pressure_deltas", "PressureDeltas", compiled.pressure_deltas, view_lines)
         if view.asm_forms:
-            view_lines.append(f"    .asm_forms = k{asm_form_table_prefix}AsmForms,")
-            view_lines.append(f"    .asm_form_count = IREE_ARRAYSIZE(k{asm_form_table_prefix}AsmForms),")
+            view_lines.append(f"    .asm_forms = {asm_form_table_symbol},")
+            view_lines.append(f"    .asm_form_count = IREE_ARRAYSIZE({asm_form_table_symbol}),")
             append_optional_table(
                 "asm_operand_indices",
                 "AsmOperandIndices",
@@ -988,8 +985,8 @@ def emit_source_for_views(
             view_lines,
         )
         if view.operand_forms:
-            view_lines.append(f"    .operand_forms = k{operand_form_table_prefix}OperandForms,")
-            view_lines.append(f"    .operand_form_count = IREE_ARRAYSIZE(k{operand_form_table_prefix}OperandForms),")
+            view_lines.append(f"    .operand_forms = {operand_form_table_symbol},")
+            view_lines.append(f"    .operand_form_count = IREE_ARRAYSIZE({operand_form_table_symbol}),")
         append_optional_table(
             "operand_form_matches",
             "OperandFormMatches",
