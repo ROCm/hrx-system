@@ -23,6 +23,6 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
   %9 = storage {byte_alignment = 16, byte_length = 256} : low.storage<workgroup>
   %stored_value = v_mov_b32 1
   %12 = v_lshlrev_b32_src0_inline %tid, 2
-  low.op<amdgpu.ds_write_b32>(%12, %stored_value) {offset = 0} memory_access([0, 3, 5, -1, 43, 4, 0, 4, 3, 0, 252, 4, 256]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
+  ds_write_b32 %12, %stored_value
   return
 }

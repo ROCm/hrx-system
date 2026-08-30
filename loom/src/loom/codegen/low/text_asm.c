@@ -1322,44 +1322,6 @@ static iree_status_t loom_low_descriptor_text_asm_describe_packet(
         "contract");
   }
 
-  // Compact target assembly has no spelling for compiler-owned packet
-  // metadata. Preserve such packets in canonical low.op form, but only when
-  // every register type belongs to the active descriptor set. Register type
-  // spellings omit the representation-contract key, so admitting a cross-set
-  // canonical packet inside a Low assembly region would not round-trip.
-  if (!is_const && !loom_attr_is_absent(loom_low_op_memory_access(op))) {
-    bool has_register_type = false;
-    const loom_value_id_t* results = loom_op_const_results(op);
-    for (uint16_t i = 0; i < op->result_count; ++i) {
-      const loom_type_t type = loom_module_value_type(module, results[i]);
-      if (!loom_low_type_is_register(type) ||
-          loom_low_register_type_descriptor_set_stable_id(type) !=
-              descriptor_set->stable_id) {
-        return iree_ok_status();
-      }
-      has_register_type = true;
-    }
-    const loom_value_id_t* operands = loom_op_const_operands(op);
-    for (uint16_t i = 0; i < op->operand_count; ++i) {
-      const loom_type_t type = loom_module_value_type(module, operands[i]);
-      if (!loom_low_type_is_register(type) ||
-          loom_low_register_type_descriptor_set_stable_id(type) !=
-              descriptor_set->stable_id) {
-        return iree_ok_status();
-      }
-      has_register_type = true;
-    }
-    if (!has_register_type) {
-      return iree_ok_status();
-    }
-    *out_statement = (loom_text_low_asm_statement_t){
-        .kind = LOOM_TEXT_LOW_ASM_STATEMENT_CANONICAL,
-        .op = op,
-        .location = op->location,
-    };
-    return iree_ok_status();
-  }
-
   loom_text_low_asm_packet_descriptor_t packet = {0};
   IREE_RETURN_IF_ERROR(loom_low_descriptor_text_asm_lookup_packet_by_ordinal(
       descriptor_set, descriptor_ordinal, &packet));

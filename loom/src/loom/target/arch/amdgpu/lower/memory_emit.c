@@ -535,18 +535,6 @@ static iree_status_t loom_amdgpu_emit_memory_packet(
       context, &descriptor, operands, operand_count, attrs, result_types,
       result_count, /*tied_results=*/NULL, /*tied_result_count=*/0,
       source_op->location, out_op));
-  // Workgroup allocations have compiler-owned identities that remain comparable
-  // after source lowering. Preserve those summaries so final packet scheduling
-  // can distinguish disjoint LDS allocations from real async-memory hazards.
-  const bool preserve_memory_access =
-      packet->access.source.memory_space ==
-          LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP &&
-      packet->access.source.alias_scope_id !=
-          LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE;
-  const loom_low_lower_memory_access_record_flags_t record_flags =
-      preserve_memory_access ? LOOM_LOW_LOWER_MEMORY_ACCESS_RECORD_PRESERVE : 0;
-  IREE_RETURN_IF_ERROR(loom_low_lower_record_source_memory_access(
-      context, *out_op, &packet->access.source, record_flags));
   return loom_amdgpu_record_memory_packet_report(context, source_op, packet);
 }
 

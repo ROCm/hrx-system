@@ -1169,8 +1169,6 @@ static iree_status_t loom_low_select_operand_form_rewrite_packet(
       &replacement_op);
   loom_builder_restore(&rewriter->builder, saved_ip);
   IREE_RETURN_IF_ERROR(status);
-  loom_op_attrs(replacement_op)[loom_low_op_memory_access_ATTR_INDEX] =
-      loom_low_op_memory_access(op);
 
   const loom_value_id_t* replacements = loom_op_results(replacement_op);
   IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(

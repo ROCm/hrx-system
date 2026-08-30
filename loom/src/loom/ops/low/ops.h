@@ -392,7 +392,6 @@ LOOM_DEFINE_VARIADIC_OPERANDS(loom_low_op_operands, 0)
 LOOM_DEFINE_VARIADIC_RESULTS(loom_low_op_results, 0)
 LOOM_DEFINE_ATTR_SCOPED_ENUM(loom_low_op_descriptor, 0)
 LOOM_DEFINE_ATTR_DICT(loom_low_op_attrs, 1)
-LOOM_DEFINE_ATTR_I64_ARRAY(loom_low_op_memory_access, 2)
 
 // LOOM_OP_LOW_CONST: Descriptor-backed constant or immediate materialization into a register.
 // %c0 = low.const<amdgpu.s_mov_b32> {imm = 0} : reg<amdgpu.sgpr x1>

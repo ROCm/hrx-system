@@ -41,9 +41,7 @@ typedef struct loom_low_emission_frame_options_t {
   // already include the function contract and remain immutable for the build.
   // When omitted, frame construction resolves the target from authored IR.
   const loom_target_facts_t* function_target_facts;
-  // Optional source-derived memory summaries for the scheduled low function.
-  // When empty, frame construction rebuilds the table from durable low.op
-  // memory_access attributes.
+  // Optional analysis-derived memory summaries for the scheduled low function.
   loom_low_memory_access_table_t memory_access_table;
   // Optional immutable target residency policy.
   const loom_target_residency_model_t* residency_model;

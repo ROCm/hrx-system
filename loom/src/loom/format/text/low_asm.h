@@ -125,9 +125,6 @@ typedef enum loom_text_low_asm_statement_kind_e {
   LOOM_TEXT_LOW_ASM_STATEMENT_RETURN = 2,
   // Target-low structural intrinsic printed in asm syntax.
   LOOM_TEXT_LOW_ASM_STATEMENT_STRUCTURAL = 3,
-  // Canonical operation printed verbatim inside an asm region because target
-  // assembly cannot losslessly represent compiler-owned operation metadata.
-  LOOM_TEXT_LOW_ASM_STATEMENT_CANONICAL = 4,
 } loom_text_low_asm_statement_kind_t;
 
 typedef enum loom_text_low_asm_structural_kind_e {
@@ -218,8 +215,6 @@ typedef struct loom_text_low_asm_statement_t {
 // - RETURN operands and STRUCTURAL results/operands are valid module values.
 // - STRUCTURAL statements carry the result/operand/attribute shape required by
 //   their structural kind.
-// - CANONICAL operations are losslessly parseable within the selected
-//   descriptor set even though they have no compact target-assembly spelling.
 //
 // The text printer relies on this contract and only performs formatting and
 // lossless-spelling availability checks. Semantic validation belongs in the
