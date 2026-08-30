@@ -26,6 +26,35 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
+    profile
+  HDRS
+    "profile.h"
+  SRCS
+    "profile.c"
+  DEPS
+    iree::base
+    iree::base::threading
+    iree::hal
+    iree::hal::local::executable_loader
+    iree::hal::utils::profile_event_ring
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    profile_test
+  SRCS
+    "profile_test.cc"
+  DEPS
+    ::profile
+    iree::hal
+    iree::hal::local::executable_loader
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+iree_cc_library(
+  NAME
     block_builder
   HDRS
     "block_builder.h"
@@ -126,6 +155,7 @@ iree_cc_library(
     "block_processor.c"
   DEPS
     ::block_isa
+    ::profile
     iree::async
     iree::base
     iree::base::internal::cpu
@@ -133,7 +163,6 @@ iree_cc_library(
     iree::base::threading::thread
     iree::hal::local::atomic
     iree::hal::local::executable_loader
-    iree::hal::local::profile
     iree::task
   PUBLIC
 )
@@ -173,6 +202,7 @@ iree_cc_library(
     ::block_command_buffer
     ::block_command_ops
     ::block_processor
+    ::profile
     ::transient_buffer
     iree::async
     iree::async::util::proactor_pool
@@ -189,7 +219,6 @@ iree_cc_library(
     iree::hal::local::executable_environment
     iree::hal::local::executable_library
     iree::hal::local::executable_loader
-    iree::hal::local::profile
     iree::hal::memory::cpu_slab_provider
     iree::hal::memory::passthrough_pool
     iree::hal::memory::tlsf_pool

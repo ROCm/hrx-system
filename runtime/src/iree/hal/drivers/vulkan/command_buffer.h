@@ -11,8 +11,8 @@
 #include "iree/hal/api.h"
 #include "iree/hal/drivers/vulkan/builtins.h"
 #include "iree/hal/drivers/vulkan/debug_utils.h"
+#include "iree/hal/drivers/vulkan/profile.h"
 #include "iree/hal/drivers/vulkan/util/libvulkan.h"
-#include "iree/hal/local/profile.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -129,14 +129,14 @@ iree_status_t iree_hal_vulkan_command_buffer_publish_bda_replay_data(
 // Emits executable/export metadata referenced by recorded dispatch commands.
 iree_status_t iree_hal_vulkan_command_buffer_record_profile_metadata(
     iree_hal_command_buffer_t* command_buffer,
-    iree_hal_local_profile_recorder_t* profile_recorder,
-    iree_hal_local_profile_queue_scope_t scope, uint64_t command_buffer_id);
+    iree_hal_vulkan_profile_recorder_t* profile_recorder,
+    iree_hal_vulkan_profile_queue_scope_t scope, uint64_t command_buffer_id);
 
 // Counts dispatch commands that match the active profile capture filter.
 iree_status_t iree_hal_vulkan_command_buffer_count_profiled_dispatches(
     iree_hal_command_buffer_t* command_buffer,
-    iree_hal_local_profile_recorder_t* profile_recorder,
-    iree_hal_local_profile_queue_scope_t scope, uint64_t command_buffer_id,
+    iree_hal_vulkan_profile_recorder_t* profile_recorder,
+    iree_hal_vulkan_profile_queue_scope_t scope, uint64_t command_buffer_id,
     uint32_t* out_dispatch_count);
 
 // Appends dispatch profile events from timestamp pairs recorded around each
@@ -148,8 +148,8 @@ iree_status_t iree_hal_vulkan_command_buffer_count_profiled_dispatches(
 // command-buffer dispatches.
 iree_status_t iree_hal_vulkan_command_buffer_append_dispatch_profile_events(
     iree_hal_command_buffer_t* command_buffer,
-    iree_hal_local_profile_recorder_t* profile_recorder,
-    iree_hal_local_profile_queue_scope_t scope, uint64_t submission_id,
+    iree_hal_vulkan_profile_recorder_t* profile_recorder,
+    iree_hal_vulkan_profile_queue_scope_t scope, uint64_t submission_id,
     uint64_t command_buffer_id, const uint64_t* dispatch_ticks,
     iree_host_size_t dispatch_count);
 
@@ -191,10 +191,10 @@ typedef struct iree_hal_vulkan_command_buffer_profile_marker_t {
   uint32_t dispatch_query_count;
 
   // Profile recorder used to apply capture filters to dispatch timestamping.
-  iree_hal_local_profile_recorder_t* recorder;
+  iree_hal_vulkan_profile_recorder_t* recorder;
 
   // Queue metadata identity used to match profile capture filters.
-  iree_hal_local_profile_queue_scope_t scope;
+  iree_hal_vulkan_profile_queue_scope_t scope;
 
   // Session-local command-buffer id used to match profile capture filters.
   uint64_t command_buffer_id;

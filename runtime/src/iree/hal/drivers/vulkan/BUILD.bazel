@@ -204,6 +204,31 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "profile",
+    srcs = ["profile.c"],
+    hdrs = ["profile.h"],
+    visibility = ["//visibility:private"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/utils:profile_event_ring",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "profile_test",
+    srcs = ["profile_test.cc"],
+    deps = [
+        ":profile",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/cts/util:profile_test_util",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "vulkan",
     srcs = [
         "allocator.c",
@@ -251,6 +276,7 @@ iree_runtime_cc_library(
     deps = [
         ":api",
         ":device_spec_builder",
+        ":profile",
         ":transient_buffer",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",
@@ -263,7 +289,6 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/drivers/vulkan/device:library",
         "//runtime/src/iree/hal/drivers/vulkan/util:libvulkan",
-        "//runtime/src/iree/hal/local:profile",
         "//runtime/src/iree/hal/memory:passthrough_pool",
         "//runtime/src/iree/hal/memory:slab_provider",
         "//runtime/src/iree/hal/memory:tlsf_pool",

@@ -17,13 +17,13 @@
 #include "iree/base/internal/arena.h"
 #include "iree/base/internal/math.h"
 #include "iree/hal/drivers/local_task/block_command_buffer.h"
+#include "iree/hal/drivers/local_task/profile.h"
 #include "iree/hal/drivers/local_task/task_queue.h"
 #include "iree/hal/drivers/local_task/task_semaphore.h"
 #include "iree/hal/drivers/local_task/transient_buffer.h"
 #include "iree/hal/local/atomic.h"
 #include "iree/hal/local/device_spec_builder.h"
 #include "iree/hal/local/executable_environment.h"
-#include "iree/hal/local/profile.h"
 #include "iree/hal/memory/cpu_slab_provider.h"
 #include "iree/hal/memory/passthrough_pool.h"
 #include "iree/hal/memory/tlsf_pool.h"
@@ -83,7 +83,7 @@ typedef struct iree_hal_task_device_t {
   iree_hal_device_spec_t* device_spec;
 
   // Active HAL-native profiling recorder, or NULL when profiling is disabled.
-  iree_hal_local_profile_recorder_t* profile_recorder;
+  iree_hal_task_profile_recorder_t* profile_recorder;
 
   // Next process-local profiling session identifier assigned by this device.
   uint64_t next_profile_session_id;
@@ -1043,12 +1043,12 @@ static uint32_t iree_hal_task_device_profile_count(iree_host_size_t count) {
   return count > UINT32_MAX ? UINT32_MAX : (uint32_t)count;
 }
 
-static iree_hal_local_profile_queue_scope_t
+static iree_hal_task_profile_queue_scope_t
 iree_hal_task_device_profile_queue_scope(const iree_hal_task_device_t* device,
                                          uint32_t queue_ordinal) {
   const uint32_t physical_device_ordinal =
       device->topology_info.topology ? device->topology_info.topology_index : 0;
-  iree_hal_local_profile_queue_scope_t scope = {
+  iree_hal_task_profile_queue_scope_t scope = {
       .physical_device_ordinal = physical_device_ordinal,
       .queue_ordinal = queue_ordinal,
       .stream_id = ((uint64_t)physical_device_ordinal << 32) | queue_ordinal,
@@ -1079,7 +1079,7 @@ static iree_status_t iree_hal_task_device_profiling_begin(
       (void**)&queue_records));
   for (iree_host_size_t i = 0; i < device->queue_count; ++i) {
     const uint32_t queue_ordinal = iree_hal_task_device_profile_count(i);
-    const iree_hal_local_profile_queue_scope_t scope =
+    const iree_hal_task_profile_queue_scope_t scope =
         iree_hal_task_device_profile_queue_scope(device, queue_ordinal);
     queue_records[i] = iree_hal_profile_queue_record_default();
     queue_records[i].physical_device_ordinal = scope.physical_device_ordinal;
@@ -1087,7 +1087,7 @@ static iree_status_t iree_hal_task_device_profiling_begin(
     queue_records[i].stream_id = scope.stream_id;
   }
 
-  iree_hal_local_profile_recorder_options_t recorder_options = {
+  iree_hal_task_profile_recorder_options_t recorder_options = {
       .name = device->identifier,
       .session_id = ++device->next_profile_session_id,
       .device_record_count = 1,
@@ -1095,8 +1095,8 @@ static iree_status_t iree_hal_task_device_profiling_begin(
       .queue_record_count = device->queue_count,
       .queue_records = queue_records,
   };
-  iree_hal_local_profile_recorder_t* recorder = NULL;
-  iree_status_t status = iree_hal_local_profile_recorder_create(
+  iree_hal_task_profile_recorder_t* recorder = NULL;
+  iree_status_t status = iree_hal_task_profile_recorder_create(
       &recorder_options, options, device->host_allocator, &recorder);
   iree_allocator_free(device->host_allocator, queue_records);
   if (!iree_status_is_ok(status) || !recorder) return status;
@@ -1117,17 +1117,17 @@ static iree_status_t iree_hal_task_device_profiling_begin(
 static iree_status_t iree_hal_task_device_profiling_flush(
     iree_hal_device_t* base_device) {
   iree_hal_task_device_t* device = iree_hal_task_device_cast(base_device);
-  return iree_hal_local_profile_recorder_flush(device->profile_recorder);
+  return iree_hal_task_profile_recorder_flush(device->profile_recorder);
 }
 
 static iree_status_t iree_hal_task_device_profiling_end(
     iree_hal_device_t* base_device) {
   iree_hal_task_device_t* device = iree_hal_task_device_cast(base_device);
-  iree_hal_local_profile_recorder_t* recorder = device->profile_recorder;
+  iree_hal_task_profile_recorder_t* recorder = device->profile_recorder;
   if (!recorder) return iree_ok_status();
 
-  const iree_hal_local_profile_queue_scope_t empty_scope =
-      iree_hal_local_profile_queue_scope_default();
+  const iree_hal_task_profile_queue_scope_t empty_scope =
+      iree_hal_task_profile_queue_scope_default();
   for (iree_host_size_t i = 0; i < device->queue_count; ++i) {
     iree_hal_task_queue_set_profile_recorder(
         &device->queues[i], /*profile_recorder=*/NULL, empty_scope,
@@ -1137,8 +1137,8 @@ static iree_status_t iree_hal_task_device_profiling_end(
   iree_atomic_store(&device->next_profile_submission_id, 0,
                     iree_memory_order_relaxed);
 
-  iree_status_t status = iree_hal_local_profile_recorder_end(recorder);
-  iree_hal_local_profile_recorder_destroy(recorder);
+  iree_status_t status = iree_hal_task_profile_recorder_end(recorder);
+  iree_hal_task_profile_recorder_destroy(recorder);
   return status;
 }
 

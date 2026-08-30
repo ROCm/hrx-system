@@ -19,10 +19,10 @@
 #include "iree/hal/drivers/vulkan/api.h"
 #include "iree/hal/drivers/vulkan/builtins.h"
 #include "iree/hal/drivers/vulkan/debug_utils.h"
+#include "iree/hal/drivers/vulkan/profile.h"
 #include "iree/hal/drivers/vulkan/queue_stats.h"
 #include "iree/hal/drivers/vulkan/semaphore.h"
 #include "iree/hal/drivers/vulkan/util/libvulkan.h"
-#include "iree/hal/local/profile.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -391,10 +391,10 @@ typedef struct iree_hal_vulkan_queue_t {
   iree_thread_t* completion_thread;
 
   // Active HAL-native profile recorder, when profiling is enabled. Borrowed.
-  iree_hal_local_profile_recorder_t* profile_recorder;
+  iree_hal_vulkan_profile_recorder_t* profile_recorder;
 
   // Queue identity emitted with HAL-native profile records.
-  iree_hal_local_profile_queue_scope_t profile_scope;
+  iree_hal_vulkan_profile_queue_scope_t profile_scope;
 
   // Shared submission id source for HAL-native profile records. Borrowed.
   iree_atomic_int64_t* profile_submission_counter;
@@ -433,8 +433,8 @@ void iree_hal_vulkan_queue_retire_frontier(iree_hal_vulkan_queue_t* queue);
 // Assigns the active HAL-native profile recorder for this queue.
 void iree_hal_vulkan_queue_set_profile_recorder(
     iree_hal_vulkan_queue_t* queue,
-    iree_hal_local_profile_recorder_t* profile_recorder,
-    iree_hal_local_profile_queue_scope_t profile_scope,
+    iree_hal_vulkan_profile_recorder_t* profile_recorder,
+    iree_hal_vulkan_profile_queue_scope_t profile_scope,
     iree_atomic_int64_t* submission_counter,
     iree_hal_vulkan_profile_clock_alignment_t* clock_alignment);
 

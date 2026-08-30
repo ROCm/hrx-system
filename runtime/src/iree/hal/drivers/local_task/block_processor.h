@@ -40,7 +40,7 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/cpu.h"
 #include "iree/hal/drivers/local_task/block_isa.h"
-#include "iree/hal/local/profile.h"
+#include "iree/hal/drivers/local_task/profile.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -171,10 +171,10 @@ typedef struct iree_hal_cmd_block_processor_context_t {
 
   struct {
     // Optional recorder receiving command-buffer dispatch execution records.
-    iree_hal_local_profile_recorder_t* recorder;
+    iree_hal_task_profile_recorder_t* recorder;
 
     // Queue identity attached to emitted dispatch records.
-    iree_hal_local_profile_queue_scope_t scope;
+    iree_hal_task_profile_queue_scope_t scope;
 
     // Queue submission id shared by command-buffer dispatch records.
     uint64_t submission_id;
@@ -383,8 +383,8 @@ void iree_hal_cmd_block_processor_context_initialize(
 // queue-operation-level profiling record.
 void iree_hal_cmd_block_processor_context_set_profile_recorder(
     iree_hal_cmd_block_processor_context_t* context,
-    iree_hal_local_profile_recorder_t* recorder,
-    iree_hal_local_profile_queue_scope_t scope, uint64_t submission_id,
+    iree_hal_task_profile_recorder_t* recorder,
+    iree_hal_task_profile_queue_scope_t scope, uint64_t submission_id,
     uint64_t command_buffer_id,
     iree_hal_cmd_block_processor_profile_dispatch_t* dispatches,
     iree_host_size_t dispatch_capacity);

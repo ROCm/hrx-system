@@ -36,7 +36,7 @@
 #include "iree/base/internal/atomic_slist.h"
 #include "iree/hal/api.h"
 #include "iree/hal/drivers/local_task/block_processor.h"
-#include "iree/hal/local/profile.h"
+#include "iree/hal/drivers/local_task/profile.h"
 #include "iree/task/executor.h"
 #include "iree/task/process.h"
 #include "iree/task/scope.h"
@@ -472,10 +472,10 @@ struct iree_hal_task_queue_t {
   iree_hal_allocator_t* device_allocator;
 
   // Active local CPU profile recorder, or NULL when profiling is disabled.
-  iree_hal_local_profile_recorder_t* profile_recorder;
+  iree_hal_task_profile_recorder_t* profile_recorder;
 
   // Queue metadata identity used by records during the active profile session.
-  iree_hal_local_profile_queue_scope_t profile_scope;
+  iree_hal_task_profile_queue_scope_t profile_scope;
 
   // Device-owned submission id counter shared by all queues in the session.
   iree_atomic_int64_t* profile_submission_counter;
@@ -611,8 +611,8 @@ void iree_hal_task_queue_trim(iree_hal_task_queue_t* queue);
 // pointer changing underneath them.
 void iree_hal_task_queue_set_profile_recorder(
     iree_hal_task_queue_t* queue,
-    iree_hal_local_profile_recorder_t* profile_recorder,
-    iree_hal_local_profile_queue_scope_t profile_scope,
+    iree_hal_task_profile_recorder_t* profile_recorder,
+    iree_hal_task_profile_queue_scope_t profile_scope,
     iree_atomic_int64_t* submission_counter);
 
 iree_status_t iree_hal_task_queue_submit_barrier(
