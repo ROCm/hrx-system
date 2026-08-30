@@ -35,6 +35,16 @@ iree_py_library(
 )
 
 iree_py_library(
+    name = "lower_capabilities_module",
+    srcs = ["amdgpu_lower_capabilities.py"],
+    deps = [
+        ":package_init",
+        "//loom/py/loom/gen/support",
+        "//loom/py/loom/target:low_descriptors",
+    ],
+)
+
+iree_py_library(
     name = "descriptors_module",
     srcs = ["amdgpu_descriptors.py"],
     visibility = GENERATOR_VISIBILITY,
@@ -47,6 +57,20 @@ iree_py_library(
         "//loom/py/loom/target/arch/amdgpu:descriptors",
         "//loom/py/loom/target/arch/amdgpu:isa_xml",
         "//loom/py/loom/target/arch/amdgpu:target_info",
+    ],
+)
+
+iree_py_test(
+    name = "lower_capabilities_test",
+    srcs = [
+        "amdgpu_lower_capabilities_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.gen.target.arch.amdgpu.descriptors.amdgpu_lower_capabilities_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":lower_capabilities_module",
+        "//loom/py/loom/target:low_descriptors",
     ],
 )
 
@@ -105,6 +129,7 @@ iree_py_binary(
     main = "amdgpu_descriptor_tables.py",
     visibility = GENERATOR_VISIBILITY,
     deps = [
+        ":lower_capabilities_module",
         ":package_init",
         ":planning_table_inputs",
         ":vopd_component_tables_module",

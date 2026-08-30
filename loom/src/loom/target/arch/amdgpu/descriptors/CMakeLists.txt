@@ -73,11 +73,13 @@ loom_generated_file_family(
   GENERATOR
     loom::py::loom::gen::target::arch::amdgpu::descriptors::descriptor_tables
   OUTPUTS
+    "lower_capabilities.h"
     "wait_packet_data.c"
     "vopd_data.c"
     "target_refs_data.c"
     "target_refs_tables.h"
   OUTPUT_FLAGS
+    "--lower-capabilities-header"
     "--wait-packet-source"
     "--vopd-source"
     "--target-ref-source"

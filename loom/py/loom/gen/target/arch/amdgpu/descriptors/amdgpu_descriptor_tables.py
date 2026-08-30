@@ -23,6 +23,9 @@ def _ensure_runtime_py_on_path() -> None:
 
 _ensure_runtime_py_on_path()
 
+from loom.gen.target.arch.amdgpu.descriptors.amdgpu_lower_capabilities import (  # noqa: E402
+    generate_lower_capability_header,
+)
 from loom.gen.target.arch.amdgpu.descriptors.amdgpu_planning_table_inputs import (  # noqa: E402
     load_amdgpu_planning_table_inputs,
 )
@@ -61,19 +64,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--wait-packet-source", type=Path, required=True)
     parser.add_argument("--vopd-source", type=Path, required=True)
+    parser.add_argument("--lower-capabilities-header", type=Path, required=True)
     args = parser.parse_args(argv)
 
     inputs = load_amdgpu_planning_table_inputs(
         args.isa_xml,
         amdgpu_vopd_instruction_names_by_isa_key(),
     )
+    selected_descriptor_set_infos = select_target_ref_descriptor_set_infos(args.descriptor_set)
+    selected_descriptor_sets = tuple(inputs.descriptor_sets_by_key[info.key] for info in selected_descriptor_set_infos)
     generate_target_ref_outputs(
         public_header=args.target_ref_public_header,
-        descriptor_set_infos=select_target_ref_descriptor_set_infos(args.descriptor_set),
+        descriptor_set_infos=selected_descriptor_set_infos,
         descriptor_sets_by_key=inputs.descriptor_sets_by_key,
         header_path=args.target_ref_header,
         source_path=args.target_ref_source,
     )
+    generate_lower_capability_header(selected_descriptor_sets, args.lower_capabilities_header)
     generate_wait_packet_table_outputs(
         inputs,
         source_path=args.wait_packet_source,

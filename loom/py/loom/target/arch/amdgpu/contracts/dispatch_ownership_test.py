@@ -200,6 +200,50 @@ def test_validate_dispatch_rows_accepts_report_key() -> None:
     validate_dispatch_rows(rows, generated_lower_rule_op_kinds=())
 
 
+def test_validate_dispatch_rows_accepts_capability_recipe() -> None:
+    rows = (
+        DispatchRow(
+            op_kind="LOOM_OP_KERNEL_ASYNC_TENSOR_LOAD_TO_LDS",
+            role=DispatchRowRole.RECIPE,
+            macro_name="RECIPE_CAPABILITY_DATA_STORAGE_REPORT_KEY_ROW",
+            arguments=(
+                "LOOM_OP_KERNEL_ASYNC_TENSOR_LOAD_TO_LDS",
+                "loom_amdgpu_tensor_load_plan_t",
+                "select",
+                "emit",
+                "verify",
+                "LOOM_AMDGPU_STORAGE_ASYNC_TENSOR",
+                "LOOM_AMDGPU_REPORT_KEY_TENSOR_MEMORY_PACKET",
+                "LOOM_AMDGPU_LOWER_CAPABILITY_ASYNC_TENSOR_LOAD_TO_LDS",
+            ),
+        ),
+    )
+
+    validate_dispatch_rows(rows, generated_lower_rule_op_kinds=())
+
+
+def test_validate_dispatch_rows_rejects_non_capability_recipe_guard() -> None:
+    rows = (
+        DispatchRow(
+            op_kind="LOOM_OP_KERNEL_ASYNC_CLUSTER_GATHER",
+            role=DispatchRowRole.RECIPE,
+            macro_name="RECIPE_CAPABILITY_DATA_STORAGE_ROW",
+            arguments=(
+                "LOOM_OP_KERNEL_ASYNC_CLUSTER_GATHER",
+                "loom_amdgpu_cluster_gather_plan_t",
+                "select",
+                "emit",
+                "verify",
+                "LOOM_AMDGPU_STORAGE_ASYNC_CLUSTER",
+                "LOOM_AMDGPU_TARGET_KIND_GFX1250",
+            ),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="expects a generated lower capability"):
+        validate_dispatch_rows(rows, generated_lower_rule_op_kinds=())
+
+
 def test_validate_dispatch_rows_accepts_memory_report_key() -> None:
     rows = (
         DispatchRow(

@@ -50,6 +50,7 @@ class _RowMacroSignature:
     source_count_argument: int | None = None
     preselect_policy_argument: int | None = None
     report_key_argument: int | None = None
+    capability_argument: int | None = None
 
 
 _ROW_RE = re.compile(
@@ -101,6 +102,17 @@ _ROW_MACRO_SIGNATURES = {
     "RECIPE_DATA_STORAGE_REPORT_KEY_ROW": _RowMacroSignature(
         argument_count=7, storage_policy_argument=5, report_key_argument=6
     ),
+    "RECIPE_CAPABILITY_DATA_STORAGE_ROW": _RowMacroSignature(
+        argument_count=7,
+        storage_policy_argument=5,
+        capability_argument=6,
+    ),
+    "RECIPE_CAPABILITY_DATA_STORAGE_REPORT_KEY_ROW": _RowMacroSignature(
+        argument_count=8,
+        storage_policy_argument=5,
+        report_key_argument=6,
+        capability_argument=7,
+    ),
     "RECIPE_DATA_SOURCE_ROW": _RowMacroSignature(
         argument_count=6, source_count_argument=5
     ),
@@ -137,6 +149,8 @@ _STORAGE_POLICY_NAMES = frozenset(
         "LOOM_AMDGPU_STORAGE_ASYNC_TENSOR",
     }
 )
+
+_LOWER_CAPABILITY_RE = re.compile(r"LOOM_AMDGPU_LOWER_CAPABILITY_[A-Z0-9_]+\Z")
 
 _PRESELECT_POLICY_NAMES = frozenset(
     {
@@ -327,6 +341,14 @@ def _validate_dispatch_row_shape(row: DispatchRow) -> None:
             f"{signature.source_count_argument + 1}, got "
             f"{row.arguments[signature.source_count_argument]}"
         )
+    if signature.capability_argument is not None:
+        capability = row.arguments[signature.capability_argument]
+        if _LOWER_CAPABILITY_RE.fullmatch(capability) is None:
+            raise ValueError(
+                f"AMDGPU dispatch row {row.op_kind} via {row.macro_name} "
+                f"expects a generated lower capability at argument "
+                f"{signature.capability_argument + 1}, got {capability}"
+            )
 
     for argument_index, row_tag_kind in expected_row_tag_arguments.items():
         argument = row.arguments[argument_index]

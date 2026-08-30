@@ -36,6 +36,7 @@
 #include "loom/target/arch/amdgpu/contracts/sanitizer_lower_rules.h"
 #include "loom/target/arch/amdgpu/contracts/view.h"
 #include "loom/target/arch/amdgpu/contracts/view_lower_rules.h"
+#include "loom/target/arch/amdgpu/descriptors/lower_capabilities.h"
 #include "loom/target/arch/amdgpu/error_catalog.h"
 #include "loom/target/arch/amdgpu/lower/abi.h"
 #include "loom/target/arch/amdgpu/lower/arithmetic.h"
@@ -527,6 +528,7 @@ LOOM_AMDGPU_DEFINE_DATA_EMIT(loom_amdgpu_emit_kernel_async_gather_dispatch,
                              loom_amdgpu_async_gather_plan_t,
                              loom_amdgpu_lower_kernel_async_gather)
 
+#if LOOM_AMDGPU_LOWER_CAPABILITY_ASYNC_CLUSTER_GATHER
 LOOM_AMDGPU_DEFINE_DATA_SELECT(
     loom_amdgpu_select_kernel_async_cluster_gather_dispatch,
     loom_amdgpu_cluster_gather_plan_t,
@@ -536,7 +538,9 @@ LOOM_AMDGPU_DEFINE_DATA_EMIT(
     loom_amdgpu_emit_kernel_async_cluster_gather_dispatch,
     loom_amdgpu_cluster_gather_plan_t,
     loom_amdgpu_lower_kernel_async_cluster_gather)
+#endif  // LOOM_AMDGPU_LOWER_CAPABILITY_ASYNC_CLUSTER_GATHER
 
+#if LOOM_AMDGPU_LOWER_CAPABILITY_ASYNC_TENSOR_LOAD_TO_LDS
 LOOM_AMDGPU_DEFINE_DATA_SELECT(
     loom_amdgpu_select_kernel_async_tensor_load_dispatch,
     loom_amdgpu_tensor_load_plan_t,
@@ -545,6 +549,7 @@ LOOM_AMDGPU_DEFINE_DATA_SELECT(
 LOOM_AMDGPU_DEFINE_DATA_EMIT(loom_amdgpu_emit_kernel_async_tensor_load_dispatch,
                              loom_amdgpu_tensor_load_plan_t,
                              loom_amdgpu_lower_kernel_async_tensor_load)
+#endif  // LOOM_AMDGPU_LOWER_CAPABILITY_ASYNC_TENSOR_LOAD_TO_LDS
 
 LOOM_AMDGPU_DEFINE_DATA_SELECT(loom_amdgpu_select_kernel_async_wait_dispatch,
                                loom_amdgpu_async_wait_plan_t,
@@ -943,6 +948,17 @@ LOOM_AMDGPU_DEFINE_DATA_EMIT(loom_amdgpu_emit_sanitizer_race_sync_dispatch,
 #define LOOM_AMDGPU_MEMORY_DATA_STORAGE_REPORT_KEY_ROW \
   LOOM_AMDGPU_INTERNAL_DATA_STORAGE_REPORT_KEY_ROW
 
+#define LOOM_AMDGPU_CAPABILITY_SELECT_0(if_enabled, if_disabled) if_disabled
+#define LOOM_AMDGPU_CAPABILITY_SELECT_1(if_enabled, if_disabled) if_enabled
+#define LOOM_AMDGPU_CAPABILITY_CONCAT_IMPL(lhs, rhs) lhs##rhs
+#define LOOM_AMDGPU_CAPABILITY_CONCAT(lhs, rhs) \
+  LOOM_AMDGPU_CAPABILITY_CONCAT_IMPL(lhs, rhs)
+#define LOOM_AMDGPU_CAPABILITY_SELECT(capability_value, if_enabled, \
+                                      if_disabled)                  \
+  LOOM_AMDGPU_CAPABILITY_CONCAT(LOOM_AMDGPU_CAPABILITY_SELECT_,     \
+                                capability_value)                   \
+  (if_enabled, if_disabled)
+
 #define LOOM_AMDGPU_RECIPE_DIRECT_STORAGE_ROW \
   LOOM_AMDGPU_INTERNAL_DIRECT_STORAGE_ROW
 #define LOOM_AMDGPU_RECIPE_DATA_ROW LOOM_AMDGPU_INTERNAL_DATA_ROW
@@ -953,6 +969,28 @@ LOOM_AMDGPU_DEFINE_DATA_EMIT(loom_amdgpu_emit_sanitizer_race_sync_dispatch,
 #define LOOM_AMDGPU_RECIPE_DATA_SOURCE_ROW LOOM_AMDGPU_INTERNAL_DATA_SOURCE_ROW
 #define LOOM_AMDGPU_RECIPE_DATA_SOURCE_REPORT_KEY_ROW \
   LOOM_AMDGPU_INTERNAL_DATA_SOURCE_REPORT_KEY_ROW
+#define LOOM_AMDGPU_RECIPE_CAPABILITY_DATA_STORAGE_ROW(                      \
+    op_kind, plan_type, select_fn, emit_fn, verify_fn, storage_policy_value, \
+    capability_value)                                                        \
+  LOOM_AMDGPU_INTERNAL_DATA_STORAGE_ROW(                                     \
+      op_kind, plan_type,                                                    \
+      LOOM_AMDGPU_CAPABILITY_SELECT(capability_value, select_fn, NULL),      \
+      LOOM_AMDGPU_CAPABILITY_SELECT(capability_value, emit_fn, NULL),        \
+      verify_fn,                                                             \
+      LOOM_AMDGPU_CAPABILITY_SELECT(capability_value, storage_policy_value,  \
+                                    LOOM_AMDGPU_STORAGE_SOURCE_OPERANDS))
+#define LOOM_AMDGPU_RECIPE_CAPABILITY_DATA_STORAGE_REPORT_KEY_ROW(           \
+    op_kind, plan_type, select_fn, emit_fn, verify_fn, storage_policy_value, \
+    report_key_kind_value, capability_value)                                 \
+  LOOM_AMDGPU_INTERNAL_DATA_STORAGE_REPORT_KEY_ROW(                          \
+      op_kind, plan_type,                                                    \
+      LOOM_AMDGPU_CAPABILITY_SELECT(capability_value, select_fn, NULL),      \
+      LOOM_AMDGPU_CAPABILITY_SELECT(capability_value, emit_fn, NULL),        \
+      verify_fn,                                                             \
+      LOOM_AMDGPU_CAPABILITY_SELECT(capability_value, storage_policy_value,  \
+                                    LOOM_AMDGPU_STORAGE_SOURCE_OPERANDS),    \
+      LOOM_AMDGPU_CAPABILITY_SELECT(capability_value, report_key_kind_value, \
+                                    LOOM_AMDGPU_REPORT_KEY_NONE))
 
 #define LOOM_AMDGPU_GENERATED_PRESELECT_DIRECT_POLICY_ROW \
   LOOM_AMDGPU_INTERNAL_DIRECT_POLICY_ROW
@@ -1005,12 +1043,19 @@ static const loom_amdgpu_lower_dispatch_table_t
 #undef LOOM_AMDGPU_LEGALITY_ROW
 #undef LOOM_AMDGPU_RECIPE_DATA_SOURCE_REPORT_KEY_ROW
 #undef LOOM_AMDGPU_RECIPE_DATA_SOURCE_ROW
+#undef LOOM_AMDGPU_RECIPE_CAPABILITY_DATA_STORAGE_REPORT_KEY_ROW
+#undef LOOM_AMDGPU_RECIPE_CAPABILITY_DATA_STORAGE_ROW
 #undef LOOM_AMDGPU_RECIPE_DATA_STORAGE_REPORT_KEY_ROW
 #undef LOOM_AMDGPU_RECIPE_DATA_STORAGE_ROW
 #undef LOOM_AMDGPU_RECIPE_DATA_ROW
 #undef LOOM_AMDGPU_RECIPE_DIRECT_STORAGE_ROW
 #undef LOOM_AMDGPU_MEMORY_DATA_STORAGE_REPORT_KEY_ROW
 #undef LOOM_AMDGPU_MEMORY_DATA_STORAGE_ROW
+#undef LOOM_AMDGPU_CAPABILITY_SELECT
+#undef LOOM_AMDGPU_CAPABILITY_CONCAT
+#undef LOOM_AMDGPU_CAPABILITY_CONCAT_IMPL
+#undef LOOM_AMDGPU_CAPABILITY_SELECT_1
+#undef LOOM_AMDGPU_CAPABILITY_SELECT_0
 #undef LOOM_AMDGPU_VALUE_DATA_STORAGE_REPORT_KEY_ROW
 #undef LOOM_AMDGPU_VALUE_DATA_SOURCE_POLICY_ROW
 #undef LOOM_AMDGPU_VALUE_DATA_SOURCE_ROW
@@ -1323,16 +1368,20 @@ static void loom_amdgpu_mark_plan_storage_demands(
           context, source_op,
           (const loom_amdgpu_async_gather_plan_t*)plan.target_data);
       return;
+#if LOOM_AMDGPU_LOWER_CAPABILITY_ASYNC_CLUSTER_GATHER
     case LOOM_AMDGPU_STORAGE_ASYNC_CLUSTER:
       loom_amdgpu_mark_cluster_gather_plan_storage_demands(
           context, source_op,
           (const loom_amdgpu_cluster_gather_plan_t*)plan.target_data);
       return;
+#endif  // LOOM_AMDGPU_LOWER_CAPABILITY_ASYNC_CLUSTER_GATHER
+#if LOOM_AMDGPU_LOWER_CAPABILITY_ASYNC_TENSOR_LOAD_TO_LDS
     case LOOM_AMDGPU_STORAGE_ASYNC_TENSOR:
       loom_amdgpu_mark_tensor_load_plan_storage_demands(
           context, source_op,
           (const loom_amdgpu_tensor_load_plan_t*)plan.target_data);
       return;
+#endif  // LOOM_AMDGPU_LOWER_CAPABILITY_ASYNC_TENSOR_LOAD_TO_LDS
     case LOOM_AMDGPU_STORAGE_MEMORY_PLAN:
       loom_amdgpu_mark_memory_access_plan_storage_demands(
           context, source_op,
@@ -1475,6 +1524,7 @@ static iree_string_view_t loom_amdgpu_table_lookup_plan_key(
   }
 }
 
+#if LOOM_AMDGPU_LOWER_CAPABILITY_ASYNC_TENSOR_LOAD_TO_LDS
 static iree_string_view_t loom_amdgpu_tensor_memory_plan_key(
     loom_low_lower_context_t* context,
     const loom_amdgpu_tensor_load_plan_t* plan) {
@@ -1485,6 +1535,7 @@ static iree_string_view_t loom_amdgpu_tensor_memory_plan_key(
       loom_low_lower_context_descriptor_set(context),
       plan->descriptor.descriptor->key_string_offset);
 }
+#endif  // LOOM_AMDGPU_LOWER_CAPABILITY_ASYNC_TENSOR_LOAD_TO_LDS
 
 static iree_string_view_t loom_amdgpu_plan_key(
     void* user_data, loom_low_lower_context_t* context,
@@ -1544,12 +1595,14 @@ static iree_string_view_t loom_amdgpu_plan_key(
       return loom_amdgpu_vector_16bit_float_conversion_plan_key(
           context, (const loom_amdgpu_vector_16bit_float_conversion_plan_t*)
                        plan.target_data);
+#if LOOM_AMDGPU_LOWER_CAPABILITY_ASYNC_TENSOR_LOAD_TO_LDS
     case LOOM_AMDGPU_REPORT_KEY_TENSOR_MEMORY_PACKET:
       if (plan.target_data == NULL) {
         return iree_string_view_empty();
       }
       return loom_amdgpu_tensor_memory_plan_key(
           context, (const loom_amdgpu_tensor_load_plan_t*)plan.target_data);
+#endif  // LOOM_AMDGPU_LOWER_CAPABILITY_ASYNC_TENSOR_LOAD_TO_LDS
     case LOOM_AMDGPU_REPORT_KEY_VECTOR_TRANSFORM_STRATEGY:
       if (plan.target_data == NULL) {
         return iree_string_view_empty();
