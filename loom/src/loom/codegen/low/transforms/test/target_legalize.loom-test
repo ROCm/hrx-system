@@ -522,3 +522,21 @@ func.def target(@test_target) @scalarizes_vector_shifts_to_structural_lanes(%lhs
   %shru = vector.insert %19 into %23[3] : i32, vector<4xi32>
   func.return %shl, %shrs, %shru : vector<4xi32>, vector<4xi32>, vector<4xi32>
 }
+
+// ====
+// RUN: pass target-legalize{mode=eager,policy=reference-only},dce
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @preserves_multidimensional_constructor(%e0: i32, %e1: i32, %e2: i32, %e3: i32) -> (vector<2x2xi32>) {
+  %result = vector.from_elements %e0, %e1, %e2, %e3 : vector<2x2xi32>
+  func.return %result : vector<2x2xi32>
+}
+
+// ----
+test.target<low_core> @test_target
+
+func.def target(@test_target) @preserves_multidimensional_constructor(%e0: i32, %e1: i32, %e2: i32, %e3: i32) -> (vector<2x2xi32>) {
+  %result = vector.from_elements %e0, %e1, %e2, %e3 : vector<2x2xi32>
+  func.return %result : vector<2x2xi32>
+}

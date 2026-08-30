@@ -9,7 +9,7 @@ func.def target(@target) @reference_i8x3_to_u3x8_bitunpack(%packed: vector<3xi8>
 
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
-COMPILE-REPORT: source_low selected_ops=41 emitted_ops=25 rows=41
+COMPILE-REPORT: source_low selected_ops=48 emitted_ops=88 rows=48
 COMPILE-REPORT: target_legalization legal=0 rewritten=1 target_rewritten=0 reference_rewritten=1 deferred=0 invalid_ir=0 unsupported=0 unhandled=0 rows=1
 COMPILE-REPORT: source_low[0] function=reference_i8x3_to_u3x8_bitunpack source_op=vector.extract selection=plan emitted_ops=1
 COMPILE-REPORT: source_low[1] function=reference_i8x3_to_u3x8_bitunpack source_op=scalar.extui selection=plan emitted_ops=1
@@ -51,5 +51,12 @@ COMPILE-REPORT: source_low[36] function=reference_i8x3_to_u3x8_bitunpack source_
 COMPILE-REPORT: source_low[37] function=reference_i8x3_to_u3x8_bitunpack source_op=scalar.andi selection=rule descriptor_key=amdgpu.v_and_b32.lit descriptor_semantic_tag=integer.and.u32 emitted_ops=1
 COMPILE-REPORT: source_low[38] function=reference_i8x3_to_u3x8_bitunpack source_op=scalar.constant selection=plan emitted_ops=0
 COMPILE-REPORT: source_low[39] function=reference_i8x3_to_u3x8_bitunpack source_op=scalar.shrui selection=rule descriptor_key=amdgpu.v_lshrrev_b32.lit descriptor_semantic_tag=integer.shr.u32 emitted_ops=1
-COMPILE-REPORT: source_low[40] function=reference_i8x3_to_u3x8_bitunpack source_op=vector.from_elements selection=plan emitted_ops=1
+COMPILE-REPORT: source_low[40] function=reference_i8x3_to_u3x8_bitunpack source_op=vector.splat selection=plan emitted_ops=1
+COMPILE-REPORT: source_low[41] function=reference_i8x3_to_u3x8_bitunpack source_op=vector.insert selection=plan emitted_ops=9
+COMPILE-REPORT: source_low[42] function=reference_i8x3_to_u3x8_bitunpack source_op=vector.insert selection=plan emitted_ops=9
+COMPILE-REPORT: source_low[43] function=reference_i8x3_to_u3x8_bitunpack source_op=vector.insert selection=plan emitted_ops=9
+COMPILE-REPORT: source_low[44] function=reference_i8x3_to_u3x8_bitunpack source_op=vector.insert selection=plan emitted_ops=9
+COMPILE-REPORT: source_low[45] function=reference_i8x3_to_u3x8_bitunpack source_op=vector.insert selection=plan emitted_ops=9
+COMPILE-REPORT: source_low[46] function=reference_i8x3_to_u3x8_bitunpack source_op=vector.insert selection=plan emitted_ops=9
+COMPILE-REPORT: source_low[47] function=reference_i8x3_to_u3x8_bitunpack source_op=vector.insert selection=plan emitted_ops=9
 COMPILE-REPORT: target_legalization[0] function=reference_i8x3_to_u3x8_bitunpack source_op=vector.bitunpacku mode=final policy=reference-only action=rewritten outcome=reference-fallback contract=unsupported legalizer=vector strategy=reference bundle=target config=target source_rejections=0x00000000 source_rejection_detail=0 target_rejections=0x00000000 missing_features=0x00000000 missing_facts=0x00000000 created_ops=63 erased_ops=1

@@ -106,22 +106,11 @@ static iree_status_t loom_vector_legalize_descriptor(
   return iree_ok_status();
 }
 
-static void loom_vector_from_elements_static_indices(loom_type_t vector_type,
-                                                     int64_t ordinal,
-                                                     int64_t* out_indices) {
-  const uint8_t rank = loom_type_rank(vector_type);
-  for (uint8_t reverse_axis = 0; reverse_axis < rank; ++reverse_axis) {
-    const uint8_t axis = (uint8_t)(rank - reverse_axis - 1);
-    const int64_t dimension_size =
-        loom_type_dim_static_size_at(vector_type, axis);
-    out_indices[axis] = ordinal % dimension_size;
-    ordinal /= dimension_size;
-  }
-}
-
 // Expands a variadic vector constructor into the fixed-arity structural ops
-// that targets commonly select. Splatting the first lane provides a defined
-// seed without requiring a target-level poison or zero materialization.
+// that targets commonly select for linear register vectors. Splatting the first
+// lane provides a defined seed without requiring a target-level poison or zero
+// materialization. Higher-rank constructors remain intact so the target can
+// diagnose or lower their multidimensional representation directly.
 static iree_status_t loom_vector_legalize_from_elements(
     const loom_target_legalizer_entry_t* entry,
     loom_target_legalization_context_t* context, loom_op_t* op,
@@ -136,7 +125,8 @@ static iree_status_t loom_vector_legalize_from_elements(
   const loom_type_t result_type = loom_module_value_type(
       context->module, loom_vector_from_elements_result(op));
   if (!loom_type_is_vector(result_type) ||
-      !loom_type_is_all_static(result_type)) {
+      !loom_type_is_all_static(result_type) ||
+      loom_type_rank(result_type) != 1) {
     return iree_ok_status();
   }
 
@@ -150,16 +140,13 @@ static iree_status_t loom_vector_legalize_from_elements(
                                                op->location, &splat_op));
   loom_value_id_t replacement = loom_vector_splat_result(splat_op);
 
-  int64_t static_indices[LOOM_TYPE_MAX_RANK];
-  const uint8_t rank = loom_type_rank(result_type);
   for (iree_host_size_t element_index = 1; element_index < elements.count;
        ++element_index) {
-    loom_vector_from_elements_static_indices(
-        result_type, (int64_t)element_index, static_indices);
+    const int64_t static_index = (int64_t)element_index;
     loom_op_t* insert_op = NULL;
     IREE_RETURN_IF_ERROR(loom_vector_insert_build(
         &rewriter->builder, elements.values[element_index], replacement, NULL,
-        0, static_indices, rank, result_type, op->location, &insert_op));
+        0, &static_index, 1, result_type, op->location, &insert_op));
     replacement = loom_vector_insert_result(insert_op);
   }
 
