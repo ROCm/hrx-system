@@ -1120,6 +1120,24 @@ static void loom_low_schedule_note_issue_group(
       };
 }
 
+static void loom_low_schedule_apply_candidate_descriptor(
+    loom_low_schedule_build_state_t* state, loom_low_schedule_node_t* node,
+    const loom_low_schedule_candidate_score_t* score) {
+  if (state->options->strategy != LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL ||
+      node->source_descriptor == NULL ||
+      score->selected_descriptor_ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
+    return;
+  }
+  node->descriptor = &state->target.descriptor_set
+                          ->descriptors[score->selected_descriptor_ordinal];
+  const loom_low_descriptor_view_t* descriptor_view =
+      loom_low_descriptor_set_descriptor_view_at(
+          state->target.descriptor_set, score->selected_descriptor_ordinal);
+  node->schedule_class =
+      &state->target.descriptor_set
+           ->schedule_classes[descriptor_view->schedule_class_id];
+}
+
 static iree_status_t loom_low_schedule_run_list_scheduler(
     loom_low_schedule_build_state_t* state, iree_host_size_t node_count) {
   uint32_t* indegrees = NULL;
@@ -1238,6 +1256,8 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
       loom_low_schedule_ready_policy_remove(state, &ready_policy, chosen_node);
 
       loom_low_schedule_node_t* chosen = &state->nodes[chosen_node];
+      loom_low_schedule_apply_candidate_descriptor(state, chosen,
+                                                   &selection.chosen_score);
       const bool is_storage_setup = iree_any_bit_set(
           chosen->flags, LOOM_LOW_SCHEDULE_NODE_FLAG_STORAGE_SETUP);
       uint32_t issue_cycle = state->current_issue_cycle;

@@ -95,6 +95,26 @@ def _validate_view_operand_forms_closed(
             raise ValueError(f"descriptor set view '{view_spec.key}' selects descriptor '{storage_descriptor.key}' without operand-form replacement descriptor '{replacement.key}'")
 
 
+def _schedule_alternative_rows_for_view(
+    compiled: CompiledDescriptorSet,
+    view_spec: DescriptorSet,
+    descriptor_ordinals: Sequence[int],
+) -> list[tuple[int, int]]:
+    storage_to_view_ordinals = {storage_ordinal: view_ordinal for view_ordinal, storage_ordinal in enumerate(descriptor_ordinals)}
+    rows: list[tuple[int, int]] = []
+    for storage_source, storage_alternative in compiled.schedule_alternative_rows:
+        view_source = storage_to_view_ordinals.get(storage_source)
+        if view_source is None:
+            continue
+        view_alternative = storage_to_view_ordinals.get(storage_alternative)
+        if view_alternative is None:
+            source = compiled.descriptors[storage_source]
+            alternative = compiled.descriptors[storage_alternative]
+            raise ValueError(f"descriptor set view '{view_spec.key}' selects descriptor '{source.key}' without schedule alternative descriptor '{alternative.key}'")
+        rows.append((view_source, view_alternative))
+    return rows
+
+
 def _validate_view_descriptors_match_storage(
     compiled: CompiledDescriptorSet,
     view_spec: DescriptorSet,
@@ -252,6 +272,7 @@ def descriptor_set_view_for_spec(
         view_spec.descriptors,
         surface_name="descriptor set view",
     )
+    validation.validate_schedule_alternatives(view_spec)
     descriptors = _validate_view_descriptors_match_storage(
         compiled,
         view_spec,
@@ -263,7 +284,16 @@ def descriptor_set_view_for_spec(
         descriptors,
         descriptor_ordinal_tuple,
     )
+    compiler.validate_schedule_alternative_instruction_classes(
+        descriptors,
+        instruction_classes,
+    )
     _validate_view_operand_forms_closed(
+        compiled,
+        view_spec,
+        descriptor_ordinal_tuple,
+    )
+    schedule_alternative_rows = _schedule_alternative_rows_for_view(
         compiled,
         view_spec,
         descriptor_ordinal_tuple,
@@ -330,6 +360,7 @@ def descriptor_set_view_for_spec(
             compiled.descriptors,
             descriptor_ordinal_tuple,
         ),
+        schedule_alternative_rows=schedule_alternative_rows,
         descriptor_rows=descriptor_rows,
         canonical_asm_form_ordinals=canonical_asm_form_ordinals,
         asm_forms=asm_forms,
@@ -338,4 +369,5 @@ def descriptor_set_view_for_spec(
         uses_storage_descriptor_view_tables=uses_storage_descriptor_view_tables,
         uses_storage_asm_form_tables=uses_storage_asm_form_tables,
         uses_storage_operand_form_tables=uses_storage_operand_form_tables,
+        uses_storage_schedule_alternative_tables=(schedule_alternative_rows == compiled.schedule_alternative_rows[: len(schedule_alternative_rows)]),
     )

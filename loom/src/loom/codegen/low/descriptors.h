@@ -1038,6 +1038,18 @@ typedef struct loom_low_descriptor_ref_t {
   uint32_t descriptor_ordinal;
 } loom_low_descriptor_ref_t;
 
+// Encoding-equivalent physical form available to the target scheduler. Rows
+// are grouped by source descriptor ordinal and retain authored priority order.
+typedef struct loom_low_schedule_alternative_t {
+  // Semantic descriptor selected during source-to-Low lowering.
+  uint32_t source_descriptor_ordinal;
+  // Encoding-equivalent descriptor the scheduler may select instead.
+  uint32_t alternative_descriptor_ordinal;
+} loom_low_schedule_alternative_t;
+
+static_assert(sizeof(loom_low_schedule_alternative_t) == 8,
+              "loom_low_schedule_alternative_t must be 8 bytes");
+
 typedef struct loom_low_asm_immediate_t {
   // Descriptor-local immediate index printed or parsed by this asm field.
   uint16_t immediate_index;
@@ -1203,6 +1215,10 @@ typedef struct loom_low_descriptor_set_t {
   const loom_low_descriptor_ref_t* descriptor_refs;
   // Number of symbolic descriptor-key reference rows.
   uint32_t descriptor_ref_count;
+  // Sparse encoding-equivalent physical forms available during scheduling.
+  const loom_low_schedule_alternative_t* schedule_alternatives;
+  // Number of rows in |schedule_alternatives|.
+  uint32_t schedule_alternative_count;
   // Sorted asm forms keyed by unqualified mnemonic.
   const loom_low_asm_form_t* asm_forms;
   // Number of asm form rows owned by this set.

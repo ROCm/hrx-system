@@ -240,6 +240,9 @@ typedef struct loom_low_schedule_node_t {
   const loom_block_t* block;
   // Descriptor row for descriptor-backed nodes, or NULL.
   const loom_low_descriptor_t* descriptor;
+  // Semantic descriptor selected before target resource scheduling, or NULL.
+  // Encoding-equivalent schedule alternatives never change this identity.
+  const loom_low_descriptor_t* source_descriptor;
   // Schedule-class row for descriptor-backed nodes, or NULL.
   const loom_low_schedule_class_t* schedule_class;
   // Region block ordinal containing |op|.

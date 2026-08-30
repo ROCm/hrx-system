@@ -442,6 +442,15 @@ iree_status_t loom_low_schedule_format_json(
         loom_json_object_begin_field(&node_object, IREE_SV("descriptor")));
     IREE_RETURN_IF_ERROR(
         loom_low_schedule_json_write_nullable_string(&stream, descriptor_key));
+    if (node->source_descriptor != NULL &&
+        node->source_descriptor != node->descriptor) {
+      const iree_string_view_t source_descriptor_key =
+          loom_low_descriptor_set_string(
+              table->target.descriptor_set,
+              node->source_descriptor->key_string_offset);
+      IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+          &node_object, IREE_SV("source_descriptor"), source_descriptor_key));
+    }
     const loom_low_schedule_class_t* schedule_class = node->schedule_class;
     iree_string_view_t schedule_class_name = iree_string_view_empty();
     if (schedule_class != NULL) {

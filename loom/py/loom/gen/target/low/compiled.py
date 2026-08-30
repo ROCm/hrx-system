@@ -121,6 +121,7 @@ class CompiledDescriptorSet:
     operand_form_operand_indices: list[int]
     descriptor_rows: list[dict[str, int]]
     descriptor_refs: list[tuple[str, int]]
+    schedule_alternative_rows: list[tuple[int, int]]
     canonical_asm_form_ordinals: list[int | None]
     asm_forms: list[CompiledAsmForm]
     asm_table_storage: CompiledAsmTableStorage
@@ -135,6 +136,7 @@ class DescriptorSetView:
     instruction_classes: tuple[tuple[InstructionClass, ...], ...]
     descriptor_ordinals: tuple[int, ...]
     descriptor_refs: list[tuple[str, int]]
+    schedule_alternative_rows: list[tuple[int, int]]
     descriptor_rows: list[dict[str, int]]
     canonical_asm_form_ordinals: list[int | None]
     asm_forms: list[CompiledAsmForm]
@@ -145,6 +147,7 @@ class DescriptorSetView:
     uses_storage_descriptor_view_tables: bool
     uses_storage_asm_form_tables: bool
     uses_storage_operand_form_tables: bool
+    uses_storage_schedule_alternative_tables: bool
 
     @property
     def descriptor_count(self) -> int:

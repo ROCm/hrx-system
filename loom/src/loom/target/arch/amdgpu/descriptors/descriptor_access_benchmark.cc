@@ -136,7 +136,8 @@ static void BM_ScheduleFacts(benchmark::State& state,
         return static_cast<uint64_t>(descriptor_view->instruction_class_flags) +
                schedule_class->latency_cycles +
                schedule_class->schedule_distance_cycles +
-               schedule_class->minimum_issue_separation_cycles +
+               static_cast<uint64_t>(
+                   schedule_class->minimum_issue_separation_cycles) +
                schedule_class->flags;
       });
 }
