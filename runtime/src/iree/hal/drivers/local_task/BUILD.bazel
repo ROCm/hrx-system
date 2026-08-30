@@ -17,6 +17,19 @@ package(
 )
 
 iree_runtime_cc_library(
+    name = "transient_buffer",
+    srcs = ["transient_buffer.c"],
+    hdrs = ["transient_buffer.h"],
+    visibility = ["//visibility:private"],
+    deps = [
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "block_builder",
     srcs = [
         "block_builder.c",
@@ -59,6 +72,7 @@ iree_runtime_cc_library(
         ":block_builder",
         ":block_command_ops",
         ":block_isa",
+        ":transient_buffer",
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
@@ -66,7 +80,6 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal/local:atomic",
         "//runtime/src/iree/hal/local:executable_library",
         "//runtime/src/iree/hal/local:executable_loader",
-        "//runtime/src/iree/hal/local:transient_buffer",
         "//runtime/src/iree/hal/utils:resource_set",
     ],
 )
@@ -173,6 +186,7 @@ iree_runtime_cc_library(
         ":block_command_buffer",
         ":block_command_ops",
         ":block_processor",
+        ":transient_buffer",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",
@@ -189,7 +203,6 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal/local:executable_library",
         "//runtime/src/iree/hal/local:executable_loader",
         "//runtime/src/iree/hal/local:profile",
-        "//runtime/src/iree/hal/local:transient_buffer",
         "//runtime/src/iree/hal/memory:cpu_slab_provider",
         "//runtime/src/iree/hal/memory:passthrough_pool",
         "//runtime/src/iree/hal/memory:tlsf_pool",

@@ -18,7 +18,7 @@
 #include "iree/hal/drivers/vulkan/command_buffer.h"
 #include "iree/hal/drivers/vulkan/executable.h"
 #include "iree/hal/drivers/vulkan/sparse_buffer.h"
-#include "iree/hal/local/transient_buffer.h"
+#include "iree/hal/drivers/vulkan/transient_buffer.h"
 #include "iree/hal/utils/memory_file.h"
 
 #define IREE_HAL_VULKAN_QUEUE_DESCRIPTOR_SLOT_ABSENT UINT32_MAX
@@ -3093,10 +3093,10 @@ static uint64_t iree_hal_vulkan_queue_profile_allocation_id(
     const iree_hal_vulkan_queue_pending_submission_t* submission) {
   switch (submission->kind) {
     case IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_ALLOCA:
-      return iree_hal_local_transient_buffer_profile_id(
+      return iree_hal_vulkan_transient_buffer_profile_id(
           submission->alloca.buffer);
     case IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_DEALLOCA:
-      return iree_hal_local_transient_buffer_profile_id(
+      return iree_hal_vulkan_transient_buffer_profile_id(
           submission->dealloca.buffer);
     default:
       return 0;
@@ -3921,17 +3921,17 @@ static void iree_hal_vulkan_queue_execute_host_call(
 
 static bool iree_hal_vulkan_queue_buffer_has_recordable_backing(
     iree_hal_buffer_t* buffer) {
-  return !iree_hal_local_transient_buffer_isa(buffer) ||
-         iree_hal_local_transient_buffer_backing_buffer(buffer) != NULL;
+  return !iree_hal_vulkan_transient_buffer_isa(buffer) ||
+         iree_hal_vulkan_transient_buffer_backing_buffer(buffer) != NULL;
 }
 
 static iree_status_t iree_hal_vulkan_queue_validate_recordable_backing(
     iree_hal_buffer_t* buffer, iree_string_view_t usage) {
-  if (!iree_hal_local_transient_buffer_isa(buffer)) return iree_ok_status();
-  if (iree_hal_local_transient_buffer_backing_buffer(buffer)) {
+  if (!iree_hal_vulkan_transient_buffer_isa(buffer)) return iree_ok_status();
+  if (iree_hal_vulkan_transient_buffer_backing_buffer(buffer)) {
     return iree_ok_status();
   }
-  if (iree_hal_local_transient_buffer_is_dealloca_queued(buffer)) {
+  if (iree_hal_vulkan_transient_buffer_is_dealloca_queued(buffer)) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "Vulkan queue %.*s buffer has been queued for deallocation",
@@ -4321,11 +4321,11 @@ static void iree_hal_vulkan_queue_complete_alloca(
   const iree_async_frontier_t* frontier =
       iree_async_fixed_frontier_as_const_frontier(&submission->frontier);
   if (iree_status_is_ok(completion_status)) {
-    iree_hal_local_transient_buffer_commit(submission->alloca.buffer);
+    iree_hal_vulkan_transient_buffer_commit(submission->alloca.buffer);
     iree_hal_pool_t* pool = NULL;
     iree_hal_pool_reservation_t reservation;
     const bool has_reservation =
-        iree_hal_local_transient_buffer_query_reservation(
+        iree_hal_vulkan_transient_buffer_query_reservation(
             submission->alloca.buffer, &pool, &reservation);
     iree_hal_vulkan_queue_profile_record_memory_event(
         submission, IREE_HAL_PROFILE_MEMORY_EVENT_TYPE_QUEUE_ALLOCA,
@@ -4338,10 +4338,10 @@ static void iree_hal_vulkan_queue_complete_alloca(
     iree_hal_pool_t* pool = NULL;
     iree_hal_pool_reservation_t reservation;
     const bool has_reservation =
-        iree_hal_local_transient_buffer_query_reservation(
+        iree_hal_vulkan_transient_buffer_query_reservation(
             submission->alloca.buffer, &pool, &reservation);
-    iree_hal_local_transient_buffer_decommit(submission->alloca.buffer);
-    iree_hal_local_transient_buffer_release_reservation(
+    iree_hal_vulkan_transient_buffer_decommit(submission->alloca.buffer);
+    iree_hal_vulkan_transient_buffer_release_reservation(
         submission->alloca.buffer, submission->alloca.wait_frontier);
     iree_hal_vulkan_queue_profile_record_memory_event(
         submission, IREE_HAL_PROFILE_MEMORY_EVENT_TYPE_QUEUE_ALLOCA,
@@ -4380,7 +4380,7 @@ static void iree_hal_vulkan_queue_complete_dealloca(
     iree_hal_pool_t* pool = NULL;
     iree_hal_pool_reservation_t reservation;
     const bool has_reservation =
-        iree_hal_local_transient_buffer_query_reservation(
+        iree_hal_vulkan_transient_buffer_query_reservation(
             submission->dealloca.buffer, &pool, &reservation);
     const iree_hal_buffer_params_t params = {
         .type = iree_hal_buffer_memory_type(submission->dealloca.buffer),
@@ -4389,8 +4389,8 @@ static void iree_hal_vulkan_queue_complete_dealloca(
     };
     const iree_device_size_t allocation_size =
         iree_hal_buffer_allocation_size(submission->dealloca.buffer);
-    iree_hal_local_transient_buffer_decommit(submission->dealloca.buffer);
-    iree_hal_local_transient_buffer_release_reservation(
+    iree_hal_vulkan_transient_buffer_decommit(submission->dealloca.buffer);
+    iree_hal_vulkan_transient_buffer_release_reservation(
         submission->dealloca.buffer, frontier);
     iree_hal_vulkan_queue_profile_record_memory_event(
         submission, IREE_HAL_PROFILE_MEMORY_EVENT_TYPE_QUEUE_DEALLOCA,
@@ -4503,10 +4503,10 @@ static void iree_hal_vulkan_queue_fail_unsubmitted_submission(
       iree_hal_pool_t* alloca_pool = NULL;
       iree_hal_pool_reservation_t alloca_reservation;
       const bool alloca_has_reservation =
-          iree_hal_local_transient_buffer_query_reservation(
+          iree_hal_vulkan_transient_buffer_query_reservation(
               submission->alloca.buffer, &alloca_pool, &alloca_reservation);
-      iree_hal_local_transient_buffer_decommit(submission->alloca.buffer);
-      iree_hal_local_transient_buffer_release_reservation(
+      iree_hal_vulkan_transient_buffer_decommit(submission->alloca.buffer);
+      iree_hal_vulkan_transient_buffer_release_reservation(
           submission->alloca.buffer, submission->alloca.wait_frontier);
       iree_hal_vulkan_queue_profile_record_memory_event(
           submission, IREE_HAL_PROFILE_MEMORY_EVENT_TYPE_QUEUE_ALLOCA,
@@ -4535,7 +4535,7 @@ static void iree_hal_vulkan_queue_fail_unsubmitted_submission(
       break;
     }
     case IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_DEALLOCA: {
-      iree_hal_local_transient_buffer_abort_dealloca(
+      iree_hal_vulkan_transient_buffer_abort_dealloca(
           submission->dealloca.buffer);
       const iree_hal_buffer_params_t dealloca_params = {
           .type = iree_hal_buffer_memory_type(submission->dealloca.buffer),
@@ -4666,7 +4666,7 @@ static void iree_hal_vulkan_queue_alloca_pool_notification_end_observe(
 
 static bool iree_hal_vulkan_queue_alloca_has_staged_backing(
     iree_hal_vulkan_queue_pending_submission_t* submission) {
-  return iree_hal_local_transient_buffer_backing_buffer(
+  return iree_hal_vulkan_transient_buffer_backing_buffer(
              submission->alloca.buffer) != NULL;
 }
 
@@ -4698,10 +4698,10 @@ static iree_status_t iree_hal_vulkan_queue_stage_alloca_reservation(
       submission->alloca.pool, submission->alloca.params, reservation,
       IREE_HAL_POOL_MATERIALIZE_FLAG_NONE, &backing_buffer);
   if (iree_status_is_ok(status)) {
-    iree_hal_local_transient_buffer_attach_reservation(
+    iree_hal_vulkan_transient_buffer_attach_reservation(
         submission->alloca.buffer, submission->alloca.pool, reservation);
-    iree_hal_local_transient_buffer_stage_backing(submission->alloca.buffer,
-                                                  backing_buffer);
+    iree_hal_vulkan_transient_buffer_stage_backing(submission->alloca.buffer,
+                                                   backing_buffer);
     submission->alloca.wait_frontier =
         acquire_result == IREE_HAL_POOL_ACQUIRE_OK_NEEDS_WAIT ? wait_frontier
                                                               : NULL;
@@ -4769,8 +4769,8 @@ static iree_status_t iree_hal_vulkan_queue_stage_alloca_sparse_backing(
                               "queue_alloca");
   }
   if (iree_status_is_ok(status)) {
-    iree_hal_local_transient_buffer_stage_backing(submission->alloca.buffer,
-                                                  backing_buffer);
+    iree_hal_vulkan_transient_buffer_stage_backing(submission->alloca.buffer,
+                                                   backing_buffer);
     submission->sparse_bind.buffer = sparse_buffer_handle;
     submission->sparse_bind.binds = binds;
     submission->sparse_bind.bind_count = (uint32_t)bind_count;
@@ -6427,7 +6427,7 @@ static iree_status_t iree_hal_vulkan_queue_create_transient_buffer(
   if (iree_all_bits_set(flags, IREE_HAL_ALLOCA_FLAG_INDETERMINATE_LIFETIME)) {
     placement.flags |= IREE_HAL_BUFFER_PLACEMENT_FLAG_INDETERMINATE_LIFETIME;
   }
-  return iree_hal_local_transient_buffer_create(
+  return iree_hal_vulkan_transient_buffer_create(
       placement, params, allocation_size, byte_length, queue->host_allocator,
       out_buffer);
 }
@@ -6572,13 +6572,13 @@ iree_status_t iree_hal_vulkan_queue_submit_dealloca(
         "unsupported Vulkan queue dealloca flags: 0x%" PRIx64, flags);
   }
   if (iree_status_is_ok(status) &&
-      !iree_hal_local_transient_buffer_isa(buffer)) {
+      !iree_hal_vulkan_transient_buffer_isa(buffer)) {
     status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "Vulkan queue_dealloca buffer was not returned "
                               "by Vulkan queue_alloca");
   }
   if (iree_status_is_ok(status) &&
-      !iree_hal_local_transient_buffer_begin_dealloca(buffer)) {
+      !iree_hal_vulkan_transient_buffer_begin_dealloca(buffer)) {
     status = iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "Vulkan transient buffer has already been queued for deallocation");
@@ -6610,15 +6610,15 @@ iree_status_t iree_hal_vulkan_queue_submit_dealloca(
     submission = NULL;
   }
   if (submission) {
-    iree_hal_local_transient_buffer_abort_dealloca(buffer);
+    iree_hal_vulkan_transient_buffer_abort_dealloca(buffer);
     if (!iree_status_is_ok(status)) {
       iree_hal_vulkan_queue_fail_signal_list(submission->signal_semaphore_list,
                                              iree_status_clone(status));
     }
     iree_hal_vulkan_queue_pending_submission_destroy(queue, submission);
   } else if (!iree_status_is_ok(status) &&
-             iree_hal_local_transient_buffer_isa(buffer)) {
-    iree_hal_local_transient_buffer_abort_dealloca(buffer);
+             iree_hal_vulkan_transient_buffer_isa(buffer)) {
+    iree_hal_vulkan_transient_buffer_abort_dealloca(buffer);
   }
 
   IREE_TRACE_ZONE_END(z0);

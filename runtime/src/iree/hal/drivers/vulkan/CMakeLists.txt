@@ -246,6 +246,23 @@ endif()
 if(IREE_HAL_DRIVER_VULKAN)
 iree_cc_library(
   NAME
+    transient_buffer
+  HDRS
+    "transient_buffer.h"
+  SRCS
+    "transient_buffer.c"
+  DEPS
+    iree::async
+    iree::base
+    iree::base::threading
+    iree::hal
+  PUBLIC
+)
+endif()
+
+if(IREE_HAL_DRIVER_VULKAN)
+iree_cc_library(
+  NAME
     vulkan
   SRCS
     "allocator.c"
@@ -292,6 +309,7 @@ iree_cc_library(
   DEPS
     ::api
     ::device_spec_builder
+    ::transient_buffer
     iree::async
     iree::async::util::proactor_pool
     iree::base
@@ -304,7 +322,6 @@ iree_cc_library(
     iree::hal::drivers::vulkan::device::library
     iree::hal::drivers::vulkan::util::libvulkan
     iree::hal::local::profile
-    iree::hal::local::transient_buffer
     iree::hal::memory::passthrough_pool
     iree::hal::memory::slab_provider
     iree::hal::memory::tlsf_pool

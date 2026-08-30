@@ -23,9 +23,9 @@
 #include "iree/hal/drivers/local_task/block_command_buffer.h"
 #include "iree/hal/drivers/local_task/block_command_ops.h"
 #include "iree/hal/drivers/local_task/block_processor.h"
+#include "iree/hal/drivers/local_task/transient_buffer.h"
 #include "iree/hal/local/atomic.h"
 #include "iree/hal/local/local_executable.h"
-#include "iree/hal/local/transient_buffer.h"
 #include "iree/hal/utils/resource_set.h"
 
 #if !defined(NDEBUG)
@@ -339,7 +339,7 @@ static void iree_hal_task_queue_profile_set_transient_buffer(
       iree_hal_task_queue_profile_operation(operation);
   if (!profile_operation) return;
   profile_operation->allocation_id =
-      iree_hal_local_transient_buffer_profile_id(transient_buffer);
+      iree_hal_task_transient_buffer_profile_id(transient_buffer);
   profile_operation->payload_length =
       iree_hal_buffer_byte_length(transient_buffer);
 }
@@ -1750,7 +1750,7 @@ static iree_status_t iree_hal_task_queue_drain_alloca_submit_reservation(
     const iree_async_frontier_t* reservation_failure_frontier) {
   iree_hal_task_queue_profile_record_queue_event(operation, iree_time_now());
   iree_hal_task_queue_profile_start_host_execution(operation);
-  iree_hal_local_transient_buffer_attach_reservation(
+  iree_hal_task_transient_buffer_attach_reservation(
       operation->alloca.transient_buffer, operation->alloca.pool, reservation);
 
   iree_hal_buffer_t* backing_buffer = NULL;
@@ -1758,7 +1758,7 @@ static iree_status_t iree_hal_task_queue_drain_alloca_submit_reservation(
       operation->alloca.pool, operation->alloca.params, reservation,
       IREE_HAL_POOL_MATERIALIZE_FLAG_NONE, &backing_buffer);
   if (iree_status_is_ok(status)) {
-    iree_hal_local_transient_buffer_stage_backing(
+    iree_hal_task_transient_buffer_stage_backing(
         operation->alloca.transient_buffer, backing_buffer);
     iree_hal_task_queue_profile_record_memory_event(
         operation, IREE_HAL_PROFILE_MEMORY_EVENT_TYPE_POOL_MATERIALIZE,
@@ -1770,7 +1770,7 @@ static iree_status_t iree_hal_task_queue_drain_alloca_submit_reservation(
   iree_hal_buffer_release(backing_buffer);
 
   if (iree_status_is_ok(status)) {
-    iree_hal_local_transient_buffer_commit(operation->alloca.transient_buffer);
+    iree_hal_task_transient_buffer_commit(operation->alloca.transient_buffer);
     iree_hal_task_queue_profile_record_memory_event(
         operation, IREE_HAL_PROFILE_MEMORY_EVENT_TYPE_QUEUE_ALLOCA,
         IREE_HAL_PROFILE_MEMORY_EVENT_FLAG_QUEUE_OPERATION, acquire_result,
@@ -1779,7 +1779,7 @@ static iree_status_t iree_hal_task_queue_drain_alloca_submit_reservation(
                                      : 0);
     iree_hal_task_queue_op_complete(operation);
   } else {
-    iree_hal_local_transient_buffer_release_reservation(
+    iree_hal_task_transient_buffer_release_reservation(
         operation->alloca.transient_buffer, reservation_failure_frontier);
     iree_hal_task_queue_profile_record_memory_event(
         operation, IREE_HAL_PROFILE_MEMORY_EVENT_TYPE_POOL_RELEASE,
@@ -1944,9 +1944,8 @@ static void iree_hal_task_queue_drain_dealloca(
     iree_hal_task_queue_op_t* operation) {
   iree_hal_pool_t* pool = NULL;
   iree_hal_pool_reservation_t reservation;
-  const bool has_reservation =
-      iree_hal_local_transient_buffer_query_reservation(
-          operation->dealloca.transient_buffer, &pool, &reservation);
+  const bool has_reservation = iree_hal_task_transient_buffer_query_reservation(
+      operation->dealloca.transient_buffer, &pool, &reservation);
   const iree_hal_buffer_params_t params = {
       .type = iree_hal_buffer_memory_type(operation->dealloca.transient_buffer),
       .access =
@@ -1955,15 +1954,14 @@ static void iree_hal_task_queue_drain_dealloca(
           iree_hal_buffer_allowed_usage(operation->dealloca.transient_buffer),
   };
 
-  iree_hal_local_transient_buffer_decommit(
-      operation->dealloca.transient_buffer);
+  iree_hal_task_transient_buffer_decommit(operation->dealloca.transient_buffer);
 
   const uint64_t epoch =
       iree_hal_task_queue_op_reserve_completion_epoch(operation);
   iree_async_single_frontier_t death_frontier;
   iree_async_single_frontier_initialize(&death_frontier, operation->axis,
                                         epoch);
-  iree_hal_local_transient_buffer_release_reservation(
+  iree_hal_task_transient_buffer_release_reservation(
       operation->dealloca.transient_buffer,
       iree_async_single_frontier_as_const_frontier(&death_frontier));
   iree_hal_task_queue_profile_record_memory_event(

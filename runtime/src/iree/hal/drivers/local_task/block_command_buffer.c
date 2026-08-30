@@ -15,10 +15,10 @@
 #include "iree/hal/drivers/local_task/block_builder.h"
 #include "iree/hal/drivers/local_task/block_command_ops.h"
 #include "iree/hal/drivers/local_task/block_isa.h"
+#include "iree/hal/drivers/local_task/transient_buffer.h"
 #include "iree/hal/local/atomic.h"
 #include "iree/hal/local/executable_library.h"
 #include "iree/hal/local/local_executable.h"
-#include "iree/hal/local/transient_buffer.h"
 #include "iree/hal/utils/resource_set.h"
 
 //===----------------------------------------------------------------------===//
@@ -374,7 +374,7 @@ static void iree_hal_block_command_buffer_profile_append_dispatch(
 // if the backing is already committed while the command buffer records.
 static bool iree_hal_block_command_buffer_needs_late_binding(
     iree_hal_buffer_t* buffer) {
-  return iree_hal_local_transient_buffer_isa(buffer);
+  return iree_hal_task_transient_buffer_isa(buffer);
 }
 
 // Finds or appends a late direct binding for a transient buffer. Late slots are

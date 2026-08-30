@@ -10,7 +10,7 @@
 
 #include "iree/base/threading/mutex.h"
 #include "iree/hal/drivers/vulkan/sparse_buffer.h"
-#include "iree/hal/local/transient_buffer.h"
+#include "iree/hal/drivers/vulkan/transient_buffer.h"
 
 //===----------------------------------------------------------------------===//
 // iree_hal_vulkan_buffer_t
@@ -293,9 +293,9 @@ iree_status_t iree_hal_vulkan_buffer_resolve_backing(
   *out_backing_buffer = NULL;
   iree_hal_buffer_t* allocated_buffer =
       iree_hal_buffer_allocated_buffer(buffer);
-  if (iree_hal_local_transient_buffer_isa(allocated_buffer)) {
+  if (iree_hal_vulkan_transient_buffer_isa(allocated_buffer)) {
     iree_hal_buffer_t* backing_buffer =
-        iree_hal_local_transient_buffer_backing_buffer(allocated_buffer);
+        iree_hal_vulkan_transient_buffer_backing_buffer(allocated_buffer);
     if (!backing_buffer) {
       return iree_make_status(
           IREE_STATUS_FAILED_PRECONDITION,
