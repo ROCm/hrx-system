@@ -158,7 +158,9 @@
             "\"artifact_kind\":\"target-artifact\"",
             "\"backend\":\"amd-xdna-aie2p-tile-elf\"",
             "\"artifact_format\":\"elf\"",
-            "\"status\":{\"code\":0,\"name\":\"OK\"}"
+            "\"status\":{\"code\":0,\"name\":\"OK\"}",
+            "\"spill_count\":0",
+            "\"emission\":{\"instruction_count\":12,\"code_byte_count\":32,\"code_storage_byte_count\":32}"
           ]
         }
       },

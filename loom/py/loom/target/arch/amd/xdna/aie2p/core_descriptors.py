@@ -99,6 +99,7 @@ class _DescriptorSpec:
     operand_register_parts: tuple[tuple[str, str], ...] = ()
     encoding_adapter_overrides: tuple[tuple[str, str], ...] = ()
     storage_continuation_part: str | None = None
+    schedule_alternatives: tuple[str, ...] = ()
 
 
 _DESCRIPTOR_SPECS = (
@@ -468,6 +469,7 @@ _DESCRIPTOR_SPECS = (
         f"{_TARGET_KEY}.load.a.i8x64.indexed.immediate",
         "memory.load.indexed.i8x64",
         "II_VLDA_dmx_lda_x_idx_imm",
+        schedule_alternatives=(f"{_TARGET_KEY}.load.b.i8x64.indexed.immediate",),
     ),
     _DescriptorSpec(
         "VLDB_dmx_ldb_x_idx_imm",
@@ -1554,6 +1556,7 @@ def _descriptor(spec: _DescriptorSpec) -> Descriptor:
             spec, implicit_outputs
         ),
         schedule_class=_SCHEDULE_CLASS_NAMES[(spec.form_name, spec.itinerary)],
+        schedule_alternatives=spec.schedule_alternatives,
         op_kind=spec.op_kind,
         asm_forms=(
             AsmForm(
