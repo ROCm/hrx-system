@@ -143,7 +143,8 @@ static iree_status_t loom_kernel_emit_entry_related(
 static bool loom_kernel_entry_type_matches(
     const loom_module_t* module, loom_type_t actual_type,
     loom_type_t expected_type, const loom_type_value_remap_t* value_remap) {
-  if (loom_type_kind(actual_type) == LOOM_TYPE_TENSOR &&
+  const loom_type_kind_t actual_kind = loom_type_kind(actual_type);
+  if ((actual_kind == LOOM_TYPE_TENSOR || actual_kind == LOOM_TYPE_VIEW) &&
       loom_type_kind(expected_type) == LOOM_TYPE_BUFFER) {
     return true;
   }
