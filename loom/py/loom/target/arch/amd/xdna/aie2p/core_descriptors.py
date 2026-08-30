@@ -498,16 +498,38 @@ _DESCRIPTOR_SPECS = (
         schedule_alternatives=(f"{_TARGET_KEY}.load.b.i8x64.indexed.immediate",),
     ),
     _DescriptorSpec(
+        "VLDA_dmx_lda_x_idx",
+        f"{_TARGET_KEY}.load.a.i8x64.indexed.register",
+        "memory.load.indexed.i8x64",
+        "II_VLDA_dmx_lda_x_idx",
+        asm_mnemonic="vlda.index",
+        schedule_alternatives=(f"{_TARGET_KEY}.load.b.i8x64.indexed.register",),
+    ),
+    _DescriptorSpec(
         "VLDB_dmx_ldb_x_idx_imm",
         f"{_TARGET_KEY}.load.b.i8x64.indexed.immediate",
         "memory.load.indexed.i8x64",
         "II_VLDB_dmx_ldb_x_idx_imm",
     ),
     _DescriptorSpec(
+        "VLDB_dmx_ldb_x_idx",
+        f"{_TARGET_KEY}.load.b.i8x64.indexed.register",
+        "memory.load.indexed.i8x64",
+        "II_VLDB_dmx_ldb_x_idx",
+        asm_mnemonic="vldb.index",
+    ),
+    _DescriptorSpec(
         "VST_dmx_sts_x_idx_imm",
         f"{_TARGET_KEY}.store.i8x64.indexed.immediate",
         "memory.store.indexed.i8x64",
         "II_VST_dmx_sts_x_idx_imm",
+    ),
+    _DescriptorSpec(
+        "VST_dmx_sts_x_idx",
+        f"{_TARGET_KEY}.store.i8x64.indexed.register",
+        "memory.store.indexed.i8x64",
+        "II_VST_dmx_sts_x_idx",
+        asm_mnemonic="vst.index",
     ),
     _DescriptorSpec(
         "MOVA",

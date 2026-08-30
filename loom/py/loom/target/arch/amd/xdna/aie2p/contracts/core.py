@@ -9,7 +9,6 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
-from enum import Enum, unique
 
 from loom.dialect.buffer import ALL_BUFFER_OPS
 from loom.dialect.buffer import defs as buffer
@@ -30,6 +29,7 @@ from loom.dsl import Op
 from loom.target.arch.amd.xdna.aie2p.contracts.index_conversion import (
     AIE2P_INDEX_CONVERSION_RULES,
 )
+from loom.target.arch.amd.xdna.aie2p.contracts.memory import AIE2P_MEMORY_RULES
 from loom.target.arch.amd.xdna.aie2p.core_descriptors import (
     AIE2P_CORE_DESCRIPTOR_SET,
 )
@@ -44,12 +44,6 @@ from loom.target.contracts import (
     Guard,
     ResultTypeBinding,
     Scalar,
-    SourceMemoryAddressLayout,
-    SourceMemoryByteOffsetMaterializer,
-    SourceMemoryConstraint,
-    SourceMemoryOperation,
-    SourceMemoryProject,
-    SourceMemoryRootKind,
     TypePattern,
     ValueAliasRule,
     ValueProject,
@@ -68,9 +62,6 @@ _OFFSET = Scalar("offset")
 _I8_VECTOR = Vector("i8", minimum_lanes=1, maximum_lanes=64)
 _I16_VECTOR = Vector("i16", minimum_lanes=1, maximum_lanes=32)
 _I32_VECTOR = Vector("i32", minimum_lanes=1, maximum_lanes=16)
-_I8X64 = Vector("i8", lanes=64)
-_I16X32 = Vector("i16", lanes=32)
-_I32X16 = Vector("i32", lanes=16)
 _I1_VECTOR = Vector("i1", minimum_lanes=1, maximum_lanes=64)
 _INTEGER_VECTOR_TYPES = (_I8_VECTOR, _I16_VECTOR, _I32_VECTOR)
 
@@ -82,17 +73,6 @@ _I32_MIN = -(2**31)
 _I32_MAX = (2**31) - 1
 _SHORT_MIN = -1024
 _SHORT_MAX = 1023
-
-
-@unique
-class _ScalarMemoryAddressForm(Enum):
-    """AIE2P scalar-memory address realization selected by one rule."""
-
-    IMMEDIATE = "immediate"
-    MATERIALIZED_STATIC = "materialized_static"
-    DYNAMIC_ZERO_STATIC = "dynamic_zero_static"
-    DYNAMIC_SMALL_STATIC = "dynamic_small_static"
-    DYNAMIC_FULL_STATIC = "dynamic_full_static"
 
 
 def _plain_integer_multiply_control(
@@ -456,91 +436,6 @@ def _unsigned_division_rule(
         descriptor=divide_step,
         guards=_typed_guards(("lhs", "rhs", "result"), type_pattern),
         emit=tuple(emits),
-    )
-
-
-def _full_vector_memory_constraint(
-    operation: SourceMemoryOperation,
-    *,
-    element_byte_count: int,
-    vector_lane_count: int,
-) -> SourceMemoryConstraint:
-    return SourceMemoryConstraint(
-        operation=operation,
-        root_kind=SourceMemoryRootKind.BLOCK_ARGUMENT,
-        address_layout=SourceMemoryAddressLayout.COMPACT_ROW_MAJOR,
-        memory_spaces=("unknown", "generic", "workgroup"),
-        element_byte_count=element_byte_count,
-        vector_lane_count=vector_lane_count,
-        vector_lane_byte_stride=element_byte_count,
-        static_byte_offset_minimum=-512,
-        static_byte_offset_maximum=448,
-        minimum_alignment=64,
-        dynamic_term_count=0,
-    )
-
-
-def _full_vector_load_rule(
-    result_type: TypePattern,
-    *,
-    element_byte_count: int,
-    vector_lane_count: int,
-) -> DescriptorRule:
-    descriptor = _descriptor("amd.xdna.aie2p.load.a.i8x64.indexed.immediate")
-    return DescriptorRule(
-        source_op=vector.vector_load,
-        descriptor=descriptor,
-        guards=(
-            Guard.operand_segment_count("indices", 0),
-            Guard.value_type("result", result_type),
-        ),
-        emit=(
-            EmitDescriptorOp(
-                descriptor=descriptor,
-                operands={"ptr": ValueRef.operand("view")},
-                results={"dst": ValueRef.result("result")},
-                immediates={"imm": SourceMemoryProject.static_byte_offset()},
-                source_memory=_full_vector_memory_constraint(
-                    SourceMemoryOperation.LOAD,
-                    element_byte_count=element_byte_count,
-                    vector_lane_count=vector_lane_count,
-                ),
-                form=DescriptorEmitForm.OP,
-            ),
-        ),
-    )
-
-
-def _full_vector_store_rule(
-    value_type: TypePattern,
-    *,
-    element_byte_count: int,
-    vector_lane_count: int,
-) -> DescriptorRule:
-    descriptor = _descriptor("amd.xdna.aie2p.store.i8x64.indexed.immediate")
-    return DescriptorRule(
-        source_op=vector.vector_store,
-        descriptor=descriptor,
-        guards=(
-            Guard.operand_segment_count("indices", 0),
-            Guard.value_type("value", value_type),
-        ),
-        emit=(
-            EmitDescriptorOp(
-                descriptor=descriptor,
-                operands={
-                    "src": ValueRef.operand("value"),
-                    "ptr": ValueRef.operand("view"),
-                },
-                immediates={"imm": SourceMemoryProject.static_byte_offset()},
-                source_memory=_full_vector_memory_constraint(
-                    SourceMemoryOperation.STORE,
-                    element_byte_count=element_byte_count,
-                    vector_lane_count=vector_lane_count,
-                ),
-                form=DescriptorEmitForm.OP,
-            ),
-        ),
     )
 
 
@@ -983,208 +878,6 @@ def _whole_integer_vector_select_rule(
                 results={"d": ValueRef.result("result")},
             ),
         ),
-    )
-
-
-def _scalar_memory_constraint(
-    operation: SourceMemoryOperation,
-    address_form: _ScalarMemoryAddressForm,
-) -> SourceMemoryConstraint:
-    dynamic = address_form in (
-        _ScalarMemoryAddressForm.DYNAMIC_ZERO_STATIC,
-        _ScalarMemoryAddressForm.DYNAMIC_SMALL_STATIC,
-        _ScalarMemoryAddressForm.DYNAMIC_FULL_STATIC,
-    )
-    if address_form is _ScalarMemoryAddressForm.IMMEDIATE:
-        static_minimum, static_maximum = -32, 28
-    elif address_form is _ScalarMemoryAddressForm.DYNAMIC_ZERO_STATIC:
-        static_minimum = static_maximum = 0
-    elif address_form is _ScalarMemoryAddressForm.DYNAMIC_SMALL_STATIC:
-        static_minimum, static_maximum = -64, 63
-    else:
-        static_minimum, static_maximum = _I32_MIN, _I32_MAX
-    return SourceMemoryConstraint(
-        operation=operation,
-        root_kind=SourceMemoryRootKind.BLOCK_ARGUMENT,
-        address_layout=SourceMemoryAddressLayout.COMPACT_ROW_MAJOR,
-        memory_spaces=("unknown", "generic", "workgroup"),
-        element_byte_count=4,
-        vector_lane_count=1,
-        vector_lane_byte_stride=4,
-        static_byte_offset_minimum=static_minimum,
-        static_byte_offset_maximum=static_maximum,
-        minimum_alignment=4,
-        dynamic_term_count=None if dynamic else 0,
-        dynamic_term_count_minimum=1 if dynamic else 0,
-        allow_dynamic_stride_values=dynamic,
-    )
-
-
-def _scalar_memory_byte_offset_materializer() -> SourceMemoryByteOffsetMaterializer:
-    return SourceMemoryByteOffsetMaterializer(
-        const_i64=_descriptor("amd.xdna.aie2p.constant.i32"),
-        add_i64=_descriptor("amd.xdna.aie2p.add.i32"),
-        mul_i64=_descriptor("amd.xdna.aie2p.mul.i32"),
-        shl_i64=_descriptor("amd.xdna.aie2p.lshl.i32"),
-        const_i64_immediate="i",
-    )
-
-
-def _scalar_memory_rule(
-    operation: SourceMemoryOperation,
-    address_form: _ScalarMemoryAddressForm,
-) -> DescriptorRule:
-    is_load = operation is SourceMemoryOperation.LOAD
-    source_op = view.view_load if is_load else view.view_store
-    immediate_memory = address_form is _ScalarMemoryAddressForm.IMMEDIATE
-    operation_name = "load" if is_load else "store"
-    address_name = "immediate" if immediate_memory else "register"
-    memory_descriptor = _descriptor(
-        f"amd.xdna.aie2p.{operation_name}.scalar.indexed.{address_name}"
-    )
-    source_memory = _scalar_memory_constraint(operation, address_form)
-    memory_operands = (
-        {"ptr": ValueRef.operand("view")}
-        if is_load
-        else {
-            "src": ValueRef.operand("value"),
-            "ptr": ValueRef.operand("view"),
-        }
-    )
-    memory_results = {"dst": ValueRef.result("result")} if is_load else {}
-    emits: list[EmitDescriptorOp] = []
-
-    if immediate_memory:
-        emits.append(
-            EmitDescriptorOp(
-                descriptor=memory_descriptor,
-                operands=memory_operands,
-                results=memory_results,
-                immediates={"imm": SourceMemoryProject.static_byte_offset()},
-                source_memory=source_memory,
-                form=DescriptorEmitForm.OP,
-            )
-        )
-    else:
-        byte_offset = ValueRef.temporary("byte_offset")
-        if address_form is _ScalarMemoryAddressForm.MATERIALIZED_STATIC:
-            emits.append(
-                EmitDescriptorOp(
-                    descriptor=_descriptor(
-                        "amd.xdna.aie2p.materialize.static-byte-offset.i32"
-                    ),
-                    results={"dst": byte_offset},
-                    result_types={"dst": _OFFSET},
-                    immediates={"i": SourceMemoryProject.static_byte_offset()},
-                    source_memory=source_memory,
-                    form=DescriptorEmitForm.OP,
-                )
-            )
-        elif address_form is _ScalarMemoryAddressForm.DYNAMIC_ZERO_STATIC:
-            byte_offset = ValueRef.source_memory_dynamic_byte_offset()
-        elif address_form is _ScalarMemoryAddressForm.DYNAMIC_SMALL_STATIC:
-            emits.append(
-                EmitDescriptorOp(
-                    descriptor=_descriptor("amd.xdna.aie2p.add.i32.immediate"),
-                    operands={
-                        "s0": ValueRef.source_memory_dynamic_byte_offset(),
-                    },
-                    results={"d0": byte_offset},
-                    result_types={"d0": _OFFSET},
-                    immediates={"imm": SourceMemoryProject.static_byte_offset()},
-                    source_memory=source_memory,
-                    source_memory_byte_offset_materializer=(
-                        _scalar_memory_byte_offset_materializer()
-                    ),
-                    form=DescriptorEmitForm.OP,
-                )
-            )
-        else:
-            static_offset = ValueRef.temporary("static_byte_offset")
-            emits.append(
-                EmitDescriptorOp(
-                    descriptor=_descriptor(
-                        "amd.xdna.aie2p.materialize.static-byte-offset.i32"
-                    ),
-                    results={"dst": static_offset},
-                    result_types={"dst": _OFFSET},
-                    immediates={"i": SourceMemoryProject.static_byte_offset()},
-                    source_memory=source_memory,
-                    form=DescriptorEmitForm.OP,
-                )
-            )
-            emits.append(
-                EmitDescriptorOp(
-                    descriptor=_descriptor("amd.xdna.aie2p.add.i32"),
-                    operands={
-                        "s0": ValueRef.source_memory_dynamic_byte_offset(),
-                        "s1": static_offset,
-                    },
-                    results={"d0": byte_offset},
-                    result_types={"d0": _OFFSET},
-                    source_memory=source_memory,
-                    source_memory_byte_offset_materializer=(
-                        _scalar_memory_byte_offset_materializer()
-                    ),
-                    form=DescriptorEmitForm.OP,
-                )
-            )
-
-        address_index = ValueRef.temporary("address_index")
-        emits.append(
-            EmitDescriptorOp(
-                descriptor=_descriptor("amd.xdna.aie2p.move.to.address-index"),
-                operands={"src": byte_offset},
-                results={"dst": address_index},
-                result_types={"dst": DescriptorResultType()},
-                source_memory=(
-                    source_memory
-                    if address_form is _ScalarMemoryAddressForm.DYNAMIC_ZERO_STATIC
-                    else None
-                ),
-                source_memory_byte_offset_materializer=(
-                    _scalar_memory_byte_offset_materializer()
-                    if address_form is _ScalarMemoryAddressForm.DYNAMIC_ZERO_STATIC
-                    else None
-                ),
-                form=DescriptorEmitForm.OP,
-            )
-        )
-        memory_operands["dj"] = address_index
-        emits.append(
-            EmitDescriptorOp(
-                descriptor=memory_descriptor,
-                operands=memory_operands,
-                results=memory_results,
-                source_memory=source_memory,
-                form=DescriptorEmitForm.OP,
-            )
-        )
-
-    return DescriptorRule(
-        source_op=source_op,
-        descriptor=memory_descriptor,
-        guards=(
-            *(
-                (Guard.operand_segment_count("indices", 0),)
-                if address_form
-                in (
-                    _ScalarMemoryAddressForm.IMMEDIATE,
-                    _ScalarMemoryAddressForm.MATERIALIZED_STATIC,
-                )
-                else ()
-            ),
-            Guard.value_type("result" if is_load else "value", _I32),
-        ),
-        emit=tuple(emits),
-    )
-
-
-def _scalar_memory_rules() -> tuple[DescriptorRule, ...]:
-    return tuple(
-        _scalar_memory_rule(operation, address_form)
-        for operation in (SourceMemoryOperation.LOAD, SourceMemoryOperation.STORE)
-        for address_form in _ScalarMemoryAddressForm
     )
 
 
@@ -1948,27 +1641,7 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
             source=ValueRef.operand("source"),
             result=ValueRef.result("result"),
         ),
-        *_scalar_memory_rules(),
-        *(
-            rule
-            for element_byte_count, vector_lane_count, vector_type in (
-                (1, 64, _I8X64),
-                (2, 32, _I16X32),
-                (4, 16, _I32X16),
-            )
-            for rule in (
-                _full_vector_load_rule(
-                    vector_type,
-                    element_byte_count=element_byte_count,
-                    vector_lane_count=vector_lane_count,
-                ),
-                _full_vector_store_rule(
-                    vector_type,
-                    element_byte_count=element_byte_count,
-                    vector_lane_count=vector_lane_count,
-                ),
-            )
-        ),
+        *AIE2P_MEMORY_RULES,
         *(
             _address_constant_rule(
                 result_type,

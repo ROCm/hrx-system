@@ -22,11 +22,6 @@ from loom.target.arch.amd.xdna.aie2p.contracts.core import (
 from loom.target.contracts import (
     DescriptorResultType,
     DescriptorRule,
-    SourceMemoryAddressLayout,
-    SourceMemoryOperation,
-    SourceMemoryProject,
-    SourceMemoryProjectKind,
-    SourceMemoryRootKind,
     ValueAliasRule,
 )
 
@@ -37,7 +32,7 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
         for case in AIE2P_CORE_CONTRACT_FRAGMENT.cases
         if isinstance(case, DescriptorRule)
     )
-    assert len(rules) == 241
+    assert len(rules) == 265
 
     address_constant_rules = [
         rule for rule in rules if rule.source_op is index.index_constant
@@ -143,124 +138,6 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
     assert [rule.descriptor.key for rule in index_compare_rules[:10]] == [
         rule.descriptor.key for rule in index_compare_rules[10:]
     ]
-
-    vector_memory_rules = [
-        rule
-        for rule in rules
-        if rule.source_op in (vector.vector_load, vector.vector_store)
-    ]
-    assert [rule.descriptor.key for rule in vector_memory_rules] == [
-        "amd.xdna.aie2p.load.a.i8x64.indexed.immediate",
-        "amd.xdna.aie2p.store.i8x64.indexed.immediate",
-        "amd.xdna.aie2p.load.a.i8x64.indexed.immediate",
-        "amd.xdna.aie2p.store.i8x64.indexed.immediate",
-        "amd.xdna.aie2p.load.a.i8x64.indexed.immediate",
-        "amd.xdna.aie2p.store.i8x64.indexed.immediate",
-    ]
-    for rule, element_byte_count, vector_lane_count, operation in zip(
-        vector_memory_rules,
-        (1, 1, 2, 2, 4, 4),
-        (64, 64, 32, 32, 16, 16),
-        (
-            SourceMemoryOperation.LOAD,
-            SourceMemoryOperation.STORE,
-            SourceMemoryOperation.LOAD,
-            SourceMemoryOperation.STORE,
-            SourceMemoryOperation.LOAD,
-            SourceMemoryOperation.STORE,
-        ),
-        strict=True,
-    ):
-        emit = rule.emit[0]
-        constraint = emit.source_memory
-        assert constraint is not None
-        assert constraint.operation is operation
-        assert constraint.root_kind is SourceMemoryRootKind.BLOCK_ARGUMENT
-        assert constraint.address_layout is SourceMemoryAddressLayout.COMPACT_ROW_MAJOR
-        assert constraint.memory_spaces == ("unknown", "generic", "workgroup")
-        assert constraint.element_byte_count == element_byte_count
-        assert constraint.vector_lane_count == vector_lane_count
-        assert constraint.vector_lane_byte_stride == element_byte_count
-        assert constraint.static_byte_offset_minimum == -512
-        assert constraint.static_byte_offset_maximum == 448
-        assert constraint.minimum_alignment == 64
-        assert constraint.dynamic_term_count == 0
-        immediate = emit.immediates["imm"]
-        assert isinstance(immediate, SourceMemoryProject)
-        assert immediate.kind is SourceMemoryProjectKind.STATIC_BYTE_OFFSET
-
-    scalar_memory_rules = [
-        rule for rule in rules if rule.source_op in (view.view_load, view.view_store)
-    ]
-    assert [rule.descriptor.key for rule in scalar_memory_rules] == [
-        "amd.xdna.aie2p.load.scalar.indexed.immediate",
-        "amd.xdna.aie2p.load.scalar.indexed.register",
-        "amd.xdna.aie2p.load.scalar.indexed.register",
-        "amd.xdna.aie2p.load.scalar.indexed.register",
-        "amd.xdna.aie2p.load.scalar.indexed.register",
-        "amd.xdna.aie2p.store.scalar.indexed.immediate",
-        "amd.xdna.aie2p.store.scalar.indexed.register",
-        "amd.xdna.aie2p.store.scalar.indexed.register",
-        "amd.xdna.aie2p.store.scalar.indexed.register",
-        "amd.xdna.aie2p.store.scalar.indexed.register",
-    ]
-    assert [len(rule.emit) for rule in scalar_memory_rules] == [
-        1,
-        3,
-        2,
-        3,
-        4,
-        1,
-        3,
-        2,
-        3,
-        4,
-    ]
-    for rule in (
-        scalar_memory_rules[1],
-        scalar_memory_rules[4],
-        scalar_memory_rules[6],
-        scalar_memory_rules[9],
-    ):
-        assert rule.emit[0].descriptor.key == (
-            "amd.xdna.aie2p.materialize.static-byte-offset.i32"
-        )
-    expected_address_constraints = (
-        (-32, 28, 0, 0, False),
-        (-(2**31), (2**31) - 1, 0, 0, False),
-        (0, 0, None, 1, True),
-        (-64, 63, None, 1, True),
-        (-(2**31), (2**31) - 1, None, 1, True),
-    ) * 2
-    for rule in scalar_memory_rules:
-        memory_emit = rule.emit[-1]
-        constraint = memory_emit.source_memory
-        assert constraint is not None
-        assert constraint.root_kind is SourceMemoryRootKind.BLOCK_ARGUMENT
-        assert constraint.address_layout is SourceMemoryAddressLayout.COMPACT_ROW_MAJOR
-        assert constraint.memory_spaces == ("unknown", "generic", "workgroup")
-        assert constraint.element_byte_count == 4
-        assert constraint.vector_lane_count == 1
-        assert constraint.vector_lane_byte_stride == 4
-        assert constraint.minimum_alignment == 4
-    assert (
-        tuple(
-            (
-                rule.emit[-1].source_memory.static_byte_offset_minimum,
-                rule.emit[-1].source_memory.static_byte_offset_maximum,
-                rule.emit[-1].source_memory.dynamic_term_count,
-                rule.emit[-1].source_memory.dynamic_term_count_minimum,
-                rule.emit[-1].source_memory.allow_dynamic_stride_values,
-            )
-            for rule in scalar_memory_rules
-        )
-        == expected_address_constraints
-    )
-    assert scalar_memory_rules[0].emit[0].immediates == {
-        "imm": SourceMemoryProject.static_byte_offset()
-    }
-    for rule in scalar_memory_rules[1:5] + scalar_memory_rules[6:]:
-        assert rule.emit[-2].descriptor.key == ("amd.xdna.aie2p.move.to.address-index")
 
     constant_rules = [
         rule for rule in rules if rule.source_op is scalar_conversion.scalar_constant

@@ -1,14 +1,15 @@
 aie2p.target<core> @target
 
-func.def public target(@target) @vector_add_memory(%lhs: buffer, %rhs: buffer, %output: buffer) {
+func.def public target(@target) @vector_add_memory(%lhs: buffer, %rhs: buffer, %output: buffer, %element0: index) {
   %lhs_aligned, %rhs_aligned, %output_aligned = buffer.assume.alignment %lhs, %rhs, %output {minimum_alignment = 64} : buffer, buffer, buffer
+  %element = index.assume %element0 [range(%element0, 0, 48), mul(%element0, 16)] : index
   %base = index.constant 0 : offset
-  %lhs_view = buffer.view %lhs_aligned[%base] : buffer -> view<16xi32>
-  %rhs_view = buffer.view %rhs_aligned[%base] : buffer -> view<16xi32>
-  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16xi32>
-  %lhs_value = vector.load %lhs_view[0] : view<16xi32> -> vector<16xi32>
-  %rhs_value = vector.load %rhs_view[0] : view<16xi32> -> vector<16xi32>
+  %lhs_view = buffer.view %lhs_aligned[%base] : buffer -> view<64xi32>
+  %rhs_view = buffer.view %rhs_aligned[%base] : buffer -> view<64xi32>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<64xi32>
+  %lhs_value = vector.load %lhs_view[%element] : view<64xi32> -> vector<16xi32>
+  %rhs_value = vector.load %rhs_view[%element] : view<64xi32> -> vector<16xi32>
   %sum = vector.addi %lhs_value, %rhs_value : vector<16xi32>
-  vector.store %sum, %output_view[0] : vector<16xi32>, view<16xi32>
+  vector.store %sum, %output_view[%element] : vector<16xi32>, view<64xi32>
   func.return
 }

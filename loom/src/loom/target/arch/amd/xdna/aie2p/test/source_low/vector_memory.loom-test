@@ -51,6 +51,49 @@ func.def target(@target) @add_i32x16(
   func.return
 }
 
+func.def target(@target) @copy_i32x16_materialized_static(
+    %source: buffer,
+    %output: buffer
+) {
+  %source_aligned, %output_aligned = buffer.assume.alignment %source, %output {minimum_alignment = 64} : buffer, buffer
+  %base = index.constant 0 : offset
+  %source_view = buffer.view %source_aligned[%base] : buffer -> view<512xi32>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<512xi32>
+  %value = vector.load %source_view[256] : view<512xi32> -> vector<16xi32>
+  vector.store %value, %output_view[256] : vector<16xi32>, view<512xi32>
+  func.return
+}
+
+func.def target(@target) @copy_i32x16_dynamic(
+    %source: buffer,
+    %output: buffer,
+    %element0: index
+) {
+  %source_aligned, %output_aligned = buffer.assume.alignment %source, %output {minimum_alignment = 64} : buffer, buffer
+  %element = index.assume %element0 [range(%element0, 0, 48), mul(%element0, 16)] : index
+  %base = index.constant 0 : offset
+  %source_view = buffer.view %source_aligned[%base] : buffer -> view<64xi32>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<64xi32>
+  %value = vector.load %source_view[%element] : view<64xi32> -> vector<16xi32>
+  vector.store %value, %output_view[%element] : vector<16xi32>, view<64xi32>
+  func.return
+}
+
+func.def target(@target) @copy_i32x16_dynamic_static(
+    %source: buffer,
+    %output: buffer,
+    %element0: index
+) {
+  %source_aligned, %output_aligned = buffer.assume.alignment %source, %output {minimum_alignment = 64} : buffer, buffer
+  %element = index.assume %element0 [range(%element0, 0, 48), mul(%element0, 16)] : index
+  %base = index.constant 64 : offset
+  %source_view = buffer.view %source_aligned[%base] : buffer -> view<64xi32>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<64xi32>
+  %value = vector.load %source_view[%element] : view<64xi32> -> vector<16xi32>
+  vector.store %value, %output_view[%element] : vector<16xi32>, view<64xi32>
+  func.return
+}
+
 // ----
 low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @copy_i8x64() asm {
   %source_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
@@ -79,5 +122,41 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @add_i32x
   %rhs_value = vlda %rhs_view, 64
   %sum = vadd.32 %lhs_value, %rhs_value
   vst %sum, %output_view, 64
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @copy_i32x16_materialized_static() asm {
+  %source_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %85 = mov.static-byte-offset 1024
+  %86 = mov.address-index %85
+  %value = vlda.index %source_view, %86
+  vst.index %value, %output_view, %86
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @copy_i32x16_dynamic(%element: reg<aie2p.er>) asm {
+  %source_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %93 = mov.i32 2
+  %94 = lshl %element, %93
+  %95 = mov.address-index %94
+  %value = vlda.index %source_view, %95
+  vst.index %value, %output_view, %95
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @copy_i32x16_dynamic_static(%element: reg<aie2p.er>) asm {
+  %source_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %103 = mov.static-byte-offset 64
+  %104 = mov.i32 2
+  %105 = lshl %element, %104
+  %106 = add.rr %105, %103
+  %107 = mov.address-index %106
+  %value = vlda.index %source_view, %107
+  %112 = add.rr %105, %103
+  %113 = mov.address-index %112
+  vst.index %value, %output_view, %113
   return
 }

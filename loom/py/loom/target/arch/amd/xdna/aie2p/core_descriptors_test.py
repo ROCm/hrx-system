@@ -47,7 +47,7 @@ def test_core_descriptor_closure_is_complete() -> None:
     assert len(descriptor_set.physical_registers) == 359
     assert len(descriptor_set.reg_classes) == 22
     assert len(descriptor_set.register_parts) == 2
-    assert len(descriptor_set.descriptors) == 118
+    assert len(descriptor_set.descriptors) == 121
     assert tuple(row.name for row in descriptor_set.physical_registers) == tuple(
         row.name for row in CORE_MACHINE_TABLE.physical_registers
     )
@@ -262,6 +262,20 @@ def test_descriptor_encoding_ids_and_adapters_are_materialized() -> None:
 
     vector_store = descriptors["amd.xdna.aie2p.store.i8x64.indexed.immediate"]
     assert vector_store.effects[0].width_bits == 512
+
+    vector_register_load = descriptors["amd.xdna.aie2p.load.a.i8x64.indexed.register"]
+    vector_register_store = descriptors["amd.xdna.aie2p.store.i8x64.indexed.register"]
+    assert [
+        operand.reg_alts[0].reg_class for operand in vector_register_load.operands
+    ] == ["aie2p.vec512", "aie2p.ep", "aie2p.edj"]
+    assert [
+        operand.reg_alts[0].reg_class for operand in vector_register_store.operands
+    ] == ["aie2p.vec512", "aie2p.ep", "aie2p.edj"]
+    assert vector_register_load.schedule_alternatives == (
+        "amd.xdna.aie2p.load.b.i8x64.indexed.register",
+    )
+    assert vector_register_load.asm_forms[0].mnemonic == "vlda.index"
+    assert vector_register_store.asm_forms[0].mnemonic == "vst.index"
 
     scalar_load = descriptors["amd.xdna.aie2p.load.scalar.indexed.immediate"]
     assert scalar_load.effects[0].width_bits == 32
