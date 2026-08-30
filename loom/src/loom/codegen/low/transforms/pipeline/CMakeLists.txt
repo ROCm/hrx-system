@@ -97,6 +97,7 @@ loom_cc_test(
     loom::ops::target
     loom::ops::template
     loom::ops::test
+    loom::ops::vector
     loom::pass::registry
     loom::pass::tooling
     loom::pass::value_facts
@@ -104,6 +105,7 @@ loom_cc_test(
     loom::target::function_contract
     loom::target::function_version
     loom::target::provider
+    loom::target::registers
     loom::target::test::alt_descriptors
     loom::target::test::contracts::core_lower_rules
     loom::target::test::descriptors

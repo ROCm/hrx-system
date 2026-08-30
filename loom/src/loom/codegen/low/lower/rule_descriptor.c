@@ -66,8 +66,12 @@ iree_status_t loom_low_lower_rule_descriptor_copy_operand_type(
   const loom_low_operand_t* operand =
       loom_low_lower_rule_descriptor_packet_operand(descriptor_set, descriptor,
                                                     operand_index);
-  IREE_ASSERT_EQ(loom_low_register_type_unit_count(source_type),
-                 operand->unit_count);
+  const uint32_t source_unit_count =
+      loom_low_register_type_unit_count(source_type);
+  // Per-lane emissions copy an aggregate before slicing it into descriptor
+  // packet operands. The descriptor selects the register class for each lane;
+  // the copy preserves the complete aggregate carrier width.
+  IREE_ASSERT_EQ(source_unit_count % operand->unit_count, 0);
 
   const uint16_t source_reg_class_id =
       loom_low_register_type_class_id(source_type);
@@ -92,9 +96,9 @@ iree_status_t loom_low_lower_rule_descriptor_copy_operand_type(
   IREE_ASSERT_NE(target_reg_class_id, LOOM_LOW_REG_CLASS_NONE);
   if (loom_type_register_has_value_type(source_type)) {
     return loom_low_lower_make_typed_register_type(
-        context, target_reg_class_id, operand->unit_count,
+        context, target_reg_class_id, source_unit_count,
         *loom_type_register_value_type(source_type), out_type);
   }
   return loom_low_lower_make_register_type(context, target_reg_class_id,
-                                           operand->unit_count, out_type);
+                                           source_unit_count, out_type);
 }

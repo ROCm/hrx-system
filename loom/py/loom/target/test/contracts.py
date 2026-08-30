@@ -393,11 +393,25 @@ TEST_LOW_CORE_CONTRACT_FRAGMENT = ContractFragment(
             _V4F32,
             semantic_tag="float.mul.f32",
         ),
-        _binary_rule(
-            vector.vector_addi,
-            TEST_LOW_ADD_I32_DESCRIPTOR,
-            _V4I32,
-            semantic_tag="integer.add.i32",
+        DescriptorRule(
+            source_op=vector.vector_addi,
+            descriptor=TEST_LOW_ADD_I32_PHYS_RHS_DESCRIPTOR,
+            guards=(
+                Guard.value_type("lhs", _V4I32),
+                Guard.value_type("rhs", _V4I32),
+                Guard.value_type("result", _V4I32),
+            ),
+            emit=(
+                EmitDescriptorOp(
+                    descriptor=TEST_LOW_ADD_I32_PHYS_RHS_DESCRIPTOR,
+                    operands={
+                        "lhs": ValueRef.operand("lhs"),
+                        "rhs": ValueRef.operand("rhs"),
+                    },
+                    results={"dst": ValueRef.result("result")},
+                    copy_operands=("rhs",),
+                ),
+            ),
         ),
         _binary_rule(
             vector.vector_muli,

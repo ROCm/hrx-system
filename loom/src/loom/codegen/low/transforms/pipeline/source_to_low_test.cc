@@ -32,6 +32,7 @@
 #include "loom/ops/target/ops.h"
 #include "loom/ops/template/ops.h"
 #include "loom/ops/test/ops.h"
+#include "loom/ops/vector/ops.h"
 #include "loom/pass/registry.h"
 #include "loom/pass/tooling.h"
 #include "loom/pass/value_facts.h"
@@ -39,6 +40,7 @@
 #include "loom/target/function_contract.h"
 #include "loom/target/function_version.h"
 #include "loom/target/provider.h"
+#include "loom/target/registers.h"
 #include "loom/target/test/alt_descriptors.h"
 #include "loom/target/test/contracts/core_lower_rules.h"
 #include "loom/target/test/descriptors.h"
@@ -112,6 +114,7 @@ class LowLowerPassTest : public ::testing::Test {
     RegisterDialect(LOOM_DIALECT_SCALAR, loom_scalar_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_TEMPLATE, loom_template_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_TEST, loom_test_dialect_vtables);
+    RegisterDialect(LOOM_DIALECT_VECTOR, loom_vector_dialect_vtables);
     IREE_ASSERT_OK(loom_context_finalize(&context_));
     loom_test_low_descriptor_registry_initialize(&registry_);
     loom_test_low_lower_policy_registry_initialize(&policy_registry_);
@@ -534,6 +537,48 @@ TEST_F(LowLowerPassTest, CopiedOperandUsesDescriptorRegisterClass) {
       loom_low_op_operands(copy_consumer_op);
   ASSERT_EQ(consumer_operands.count, 2u);
   EXPECT_EQ(consumer_operands.values[1], copy_result);
+}
+
+TEST_F(LowLowerPassTest, CopiedPerLaneOperandPreservesAggregateWidth) {
+  ModulePtr module =
+      Parse(IREE_SV("test.target<low_core> @test_target\n"
+                    "func.def target(@test_target) @add(%lhs: vector<4xi32>, "
+                    "%rhs: vector<4xi32>) -> (vector<4xi32>) {\n"
+                    "  %result = vector.addi %lhs, %rhs : vector<4xi32>\n"
+                    "  func.return %result : vector<4xi32>\n"
+                    "}\n"));
+
+  IREE_ASSERT_OK(RunSourceToLow(&policy_registry_, module.get()));
+  const loom_symbol_ref_t function_ref =
+      FindSymbolRef(module.get(), IREE_SV("add"));
+  loom_op_t* function_op =
+      module->symbols.entries[function_ref.symbol_id].defining_op;
+  ASSERT_TRUE(loom_low_func_def_isa(function_op));
+  const loom_block_t* entry = loom_region_entry_block(
+      loom_func_like_body(loom_func_like_cast(module.get(), function_op)));
+  ASSERT_NE(entry, nullptr);
+
+  const loom_op_t* copy_op = nullptr;
+  uint32_t copied_slice_count = 0;
+  for (const loom_op_t* op = entry->first_op; op != nullptr; op = op->next_op) {
+    if (loom_low_copy_isa(op)) {
+      ASSERT_EQ(copy_op, nullptr);
+      copy_op = op;
+    } else if (copy_op != nullptr && loom_low_slice_isa(op) &&
+               loom_low_slice_source(op) == loom_low_copy_result(copy_op)) {
+      ++copied_slice_count;
+    }
+  }
+  ASSERT_NE(copy_op, nullptr);
+  const loom_type_t source_type =
+      loom_module_value_type(module.get(), loom_low_copy_source(copy_op));
+  const loom_type_t result_type =
+      loom_module_value_type(module.get(), loom_low_copy_result(copy_op));
+  EXPECT_EQ(loom_low_register_type_unit_count(source_type), 4u);
+  EXPECT_EQ(loom_low_register_type_unit_count(result_type), 4u);
+  EXPECT_NE(loom_low_register_type_class_id(source_type),
+            loom_low_register_type_class_id(result_type));
+  EXPECT_EQ(copied_slice_count, 4u);
 }
 
 TEST_F(LowLowerPassTest,
