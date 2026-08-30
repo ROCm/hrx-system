@@ -379,7 +379,8 @@ static bool loom_amdgpu_source_value_has_uses(loom_low_lower_context_t* context,
       source_value >= module->values.count) {
     return false;
   }
-  return !loom_value_has_no_uses(loom_module_value(module, source_value));
+  return !loom_value_has_no_uses(loom_module_value(module, source_value)) ||
+         loom_module_value_has_type_uses(module, source_value);
 }
 
 static bool loom_amdgpu_preamble_query_launch_facts_satisfied(

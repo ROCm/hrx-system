@@ -235,6 +235,32 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 4, 
 
 // ====
 
+amdgpu.target<gfx11-generic> @target
+
+kernel.def target(@target) @dynamic_workgroup_count_used_by_type(%workgroups_y: index) {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %workgroups_y, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%output: buffer) {
+  %count_y = kernel.workgroup.count<y> : index
+  %base = index.constant 0 : offset
+  %output_view = buffer.view %output[%base] : buffer -> view<[%count_y]xi32>
+  %value = scalar.constant 7 : i32
+  view.store %value, %output_view[0] : i32, view<[%count_y]xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 1) @dynamic_workgroup_count_used_by_type() asm {
+  %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %12 = v_mov_b32 7
+  %13 = v_mov_b32 0
+  global_store_b32_saddr %13, %12, %output_view
+  return
+}
+
+// ====
+
 amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 
 kernel.def target(@target) @target_subgroup_queries_use_wavefront_size() {
