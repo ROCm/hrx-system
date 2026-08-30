@@ -15,7 +15,6 @@
 #include "iree/base/threading/numa.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/hal/local/loaders/registration/init.h"
-#include "iree/hal/local/plugins/registration/init.h"
 #include "iree/hal/replay/recorder.h"
 #include "iree/io/file_contents.h"
 #include "iree/io/file_handle.h"
@@ -589,19 +588,12 @@ static iree_status_t iree_tooling_load_hal_loader_module(
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_hal_module_register_loader_types(instance));
 
-  // Create plugin manager for executable imports.
-  iree_hal_executable_plugin_manager_t* plugin_manager = NULL;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_executable_plugin_manager_create_from_flags(
-              host_allocator, &plugin_manager));
-
   // Create all executable loaders built into the binary.
   // We could allow users to choose the set with a flag.
   iree_host_size_t loader_count = 0;
   iree_hal_executable_loader_t* loaders[16];
   iree_status_t status = iree_hal_create_all_available_executable_loaders(
-      plugin_manager, IREE_ARRAYSIZE(loaders), &loader_count, loaders,
-      host_allocator);
+      IREE_ARRAYSIZE(loaders), &loader_count, loaders, host_allocator);
 
   // Create the module; it retains the loaders for its lifetime.
   iree_vm_module_t* module = NULL;
@@ -615,8 +607,6 @@ static iree_status_t iree_tooling_load_hal_loader_module(
   for (iree_host_size_t i = 0; i < loader_count; ++i) {
     iree_hal_executable_loader_release(loaders[i]);
   }
-  iree_hal_executable_plugin_manager_release(plugin_manager);
-
   if (iree_status_is_ok(status)) {
     *out_module = module;
   } else {

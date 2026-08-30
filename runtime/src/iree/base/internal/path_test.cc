@@ -217,7 +217,6 @@ TEST(FilePathTest, IsDynamicLibrary) {
   EXPECT_TRUE(iree_file_path_is_dynamic_library(_SV("foo.dll")));
   EXPECT_TRUE(iree_file_path_is_dynamic_library(_SV("foo.dylib")));
   EXPECT_TRUE(iree_file_path_is_dynamic_library(_SV("foo.so")));
-  EXPECT_TRUE(iree_file_path_is_dynamic_library(_SV("foo.sos")));
   EXPECT_TRUE(iree_file_path_is_dynamic_library(_SV("foo.so.1")));
   EXPECT_TRUE(iree_file_path_is_dynamic_library(_SV("foo.so.1.2.3")));
   EXPECT_TRUE(iree_file_path_is_dynamic_library(

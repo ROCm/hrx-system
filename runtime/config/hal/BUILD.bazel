@@ -36,18 +36,6 @@ SUPPORTED_EXECUTABLE_LOADERS = [
     "vmvx-module",
 ]
 
-# Executable plugins are the same host binary formats today. Keep this separate
-# from executable_loaders so plugin and loader policy can diverge deliberately.
-DEFAULT_EXECUTABLE_PLUGINS = [
-    "embedded-elf",
-    "system-library",
-]
-
-SUPPORTED_EXECUTABLE_PLUGINS = [
-    "embedded-elf",
-    "system-library",
-]
-
 string_list_flag(
     name = "drivers",
     build_setting_default = DEFAULT_DRIVERS,
@@ -76,19 +64,4 @@ string_list_flag(
         },
     )
     for loader in SUPPORTED_EXECUTABLE_LOADERS
-]
-
-string_list_flag(
-    name = "executable_plugins",
-    build_setting_default = DEFAULT_EXECUTABLE_PLUGINS,
-)
-
-[
-    config_setting(
-        name = "executable_plugin_{}".format(plugin.replace("-", "_")),
-        flag_values = {
-            ":executable_plugins": plugin,
-        },
-    )
-    for plugin in SUPPORTED_EXECUTABLE_PLUGINS
 ]

@@ -282,7 +282,6 @@ bool iree_file_path_is_dynamic_library(iree_string_view_t path) {
   return iree_string_view_equal(ext, IREE_SV("dll")) ||
          iree_string_view_equal(ext, IREE_SV("dylib")) ||
          iree_string_view_equal(ext, IREE_SV("so")) ||
-         iree_string_view_equal(ext, IREE_SV("sos")) ||
          iree_file_path_has_versioned_so_suffix(path);
 }
 
