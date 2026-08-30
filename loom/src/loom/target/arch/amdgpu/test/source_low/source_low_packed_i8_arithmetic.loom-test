@@ -146,16 +146,16 @@ func.def target(@target) @i8x4_select_addi(%lhs: i32, %rhs: i32, %true_value: ve
 
 // ----
 low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8x4_select_addi(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>, %bias: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
-  %16 = v_mov_b32_copy %lhs
-  %17 = v_mov_b32_copy %rhs
-  %condition = v_cmp_lt_i32 %16, %17
+  %17 = v_mov_b32_copy %lhs
+  %18 = v_mov_b32_copy %rhs
+  %condition = v_cmp_lt_i32 %17, %18
   %selected = v_cndmask_b32 %false_value, %true_value, %condition
-  %20 = v_and_b32_lit %selected, 2139062143
-  %21 = v_and_b32_lit %bias, 2139062143
-  %22 = v_add_u32 %20, %21
-  %23 = v_xor_b32 %selected, %bias
-  %24 = v_and_b32_lit %23, 2155905152
-  %result = v_xor_b32 %22, %24
+  %21 = v_and_b32_lit %selected, 2139062143
+  %22 = v_and_b32_lit %bias, 2139062143
+  %23 = v_add_u32 %21, %22
+  %24 = v_xor_b32 %selected, %bias
+  %25 = v_and_b32_lit %24, 2155905152
+  %result = v_xor_b32 %23, %25
   return %result
 }
 
@@ -173,17 +173,17 @@ func.def target(@target) @i8x4_select_subi(%lhs: i32, %rhs: i32, %true_value: ve
 
 // ----
 low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8x4_select_subi(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>, %bias: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
-  %16 = v_mov_b32_copy %lhs
-  %17 = v_mov_b32_copy %rhs
-  %condition = v_cmp_lt_i32 %16, %17
+  %17 = v_mov_b32_copy %lhs
+  %18 = v_mov_b32_copy %rhs
+  %condition = v_cmp_lt_i32 %17, %18
   %selected = v_cndmask_b32 %false_value, %true_value, %condition
-  %20 = v_or_b32_lit %selected, 2155905152
-  %21 = v_and_b32_lit %bias, 2139062143
-  %22 = v_sub_nc_u32 %20, %21
-  %23 = v_xor_b32 %selected, %bias
-  %24 = v_xor_b32_lit %23, 2155905152
-  %25 = v_and_b32_lit %24, 2155905152
-  %result = v_xor_b32 %22, %25
+  %21 = v_or_b32_lit %selected, 2155905152
+  %22 = v_and_b32_lit %bias, 2139062143
+  %23 = v_sub_nc_u32 %21, %22
+  %24 = v_xor_b32 %selected, %bias
+  %25 = v_xor_b32_lit %24, 2155905152
+  %26 = v_and_b32_lit %25, 2155905152
+  %result = v_xor_b32 %23, %26
   return %result
 }
 

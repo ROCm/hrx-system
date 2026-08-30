@@ -189,20 +189,20 @@ func.def target(@target) @i16x4_select_xori(%lhs: i32, %rhs: i32, %true_value: v
 
 // ----
 low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i16x4_select_xori(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.vgpr x2>, %false_value: reg<amdgpu.vgpr x2>, %mask: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
-  %16 = v_mov_b32_copy %lhs
-  %17 = v_mov_b32_copy %rhs
-  %condition = v_cmp_lt_i32 %16, %17
-  %19 = slice %true_value[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %20 = slice %false_value[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %21 = v_cndmask_b32 %20, %19, %condition
-  %22 = slice %true_value[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %23 = slice %false_value[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %24 = v_cndmask_b32 %23, %22, %condition
-  %27 = slice %mask[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %28 = v_xor_b32 %21, %27
-  %30 = slice %mask[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %31 = v_xor_b32 %24, %30
-  %result = concat(%28, %31) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %17 = v_mov_b32_copy %lhs
+  %18 = v_mov_b32_copy %rhs
+  %condition = v_cmp_lt_i32 %17, %18
+  %20 = slice %true_value[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %21 = slice %false_value[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %22 = v_cndmask_b32 %21, %20, %condition
+  %23 = slice %true_value[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %24 = slice %false_value[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %25 = v_cndmask_b32 %24, %23, %condition
+  %28 = slice %mask[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %29 = v_xor_b32 %22, %28
+  %31 = slice %mask[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %32 = v_xor_b32 %25, %31
+  %result = concat(%29, %32) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   return %result
 }
 
