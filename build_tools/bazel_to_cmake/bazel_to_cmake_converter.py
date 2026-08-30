@@ -1159,6 +1159,10 @@ class BuildFileFunctions(object):
     def package(self, **kwargs):
         pass
 
+    def package_group(self, name, packages=None, includes=None, **kwargs):
+        """Ignores a Bazel-only package visibility group."""
+        self._check_no_unhandled_kwargs("package_group", kwargs)
+
     def iree_build_test(self, **kwargs):
         pass
 

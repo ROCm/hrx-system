@@ -109,6 +109,26 @@ class ConfigTest(unittest.TestCase):
             ["root:other::thing"],
         )
 
+    def test_package_group_has_no_cmake_target(self):
+        repo_root = Path(__file__).resolve().parents[2]
+        repo_cfg = SimpleNamespace(PROJECTS=[], REPO_MAP={"@hrx": ""})
+
+        cmake = bazel_to_cmake_converter.convert_build_file(
+            """
+package_group(
+    name = "implementation_consumers",
+    packages = ["//runtime/src/iree/hal/local/..."],
+    includes = ["//runtime:other_consumers"],
+)
+""",
+            repo_cfg,
+            str(repo_root / "runtime"),
+            repo_root=str(repo_root),
+        )
+
+        self.assertEqual(cmake.count("iree_add_all_subdirs()"), 1)
+        self.assertNotIn("implementation_consumers", cmake)
+
     def test_loom_c_root_targets_strip_filesystem_staging_prefix(self):
         repo_root = Path(__file__).resolve().parents[2]
         loom = bazel_to_cmake_config.include_project(
