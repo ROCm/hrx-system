@@ -7,6 +7,7 @@
 #include "iree/hal/drivers/local_task/profile.h"
 
 #include <cstdint>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -141,23 +142,22 @@ static iree_status_t CopyExecutableFunctionProfileRecords(
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "truncated executable function record");
     }
-    const auto* record =
-        reinterpret_cast<const iree_hal_profile_executable_function_record_t*>(
-            iovec.data + offset);
-    if (record->record_length < sizeof(*record) ||
-        record->record_length > remaining_length) {
+    iree_hal_profile_executable_function_record_t record;
+    memcpy(&record, iovec.data + offset, sizeof(record));
+    if (record.record_length < sizeof(record) ||
+        record.record_length > remaining_length) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "invalid executable function record length");
     }
-    if (record->name_length > record->record_length - sizeof(*record)) {
+    if (record.name_length > record.record_length - sizeof(record)) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "invalid executable function name length");
     }
-    out_records->push_back(*record);
+    out_records->push_back(record);
     out_names->emplace_back(
-        reinterpret_cast<const char*>(iovec.data + offset + sizeof(*record)),
-        record->name_length);
-    offset += record->record_length;
+        reinterpret_cast<const char*>(iovec.data + offset + sizeof(record)),
+        record.name_length);
+    offset += record.record_length;
   }
   return iree_ok_status();
 }
