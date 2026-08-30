@@ -69,6 +69,8 @@ enum loom_low_schedule_node_flag_bits_e {
   // Structural node advances an SSA storage path into a descriptor operand.
   LOOM_LOW_SCHEDULE_NODE_FLAG_DESCRIPTOR_SETUP =
       LOOM_LOW_SCHEDULE_NODE_FLAG_PAIR_TRANSPARENT << 1u,
+  // Structural node has an issue-cycle anchor but consumes no issue width.
+  LOOM_LOW_SCHEDULE_NODE_FLAG_ZERO_ISSUE_WIDTH = 1u << 7,
 };
 typedef uint16_t loom_low_schedule_node_flags_t;
 
