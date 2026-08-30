@@ -245,8 +245,19 @@ TEST_F(Aie2pLeafObjectTest, LowFunctionsReproduceRetainedVectorLeaves) {
 }
 
 TEST_F(Aie2pLeafObjectTest, ResourceImportsAnchorRegistersWithoutEmittingCode) {
+  constexpr std::array<uint8_t, 32> kExpected = {
+      0x3c, 0x68, 0x09, 0x72, 0x83, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x18, 0x00, 0x28, 0x10, 0x00, 0x00, 0x78, 0x2d,
+      0x01, 0x18, 0x00, 0x00, 0x18, 0x13, 0x04, 0x0a, 0x00, 0x00,
+  };
   CompiledLeaf leaf;
   IREE_ASSERT_OK(CompileResourceVectorAdd(&leaf));
+
+  ASSERT_EQ(leaf.frame.schedule.issue_group_count, 4u);
+  EXPECT_EQ(leaf.frame.schedule.issue_groups[0].issue_cycle, 0u);
+  EXPECT_EQ(leaf.frame.schedule.issue_groups[1].issue_cycle, 7u);
+  EXPECT_EQ(leaf.frame.schedule.issue_groups[2].issue_cycle, 9u);
+  EXPECT_EQ(leaf.frame.schedule.issue_groups[3].issue_cycle, 10u);
 
   iree_host_size_t resource_packet_count = 0;
   for (iree_host_size_t packet_index = 0;
@@ -257,6 +268,22 @@ TEST_F(Aie2pLeafObjectTest, ResourceImportsAnchorRegistersWithoutEmittingCode) {
     if (loom_low_resource_isa(packet.node->op)) ++resource_packet_count;
   }
   EXPECT_EQ(resource_packet_count, 3u);
+  const loom_low_packet_view_t lhs_load =
+      loom_low_packet_at(&leaf.frame.schedule, 3);
+  const loom_low_packet_view_t rhs_load =
+      loom_low_packet_at(&leaf.frame.schedule, 4);
+  ASSERT_NE(lhs_load.descriptor, nullptr);
+  ASSERT_NE(rhs_load.descriptor, nullptr);
+  EXPECT_EQ(lhs_load.node->issue_cycle, 0u);
+  EXPECT_EQ(rhs_load.node->issue_cycle, 0u);
+  EXPECT_EQ(lhs_load.node->source_descriptor, lhs_load.descriptor);
+  EXPECT_EQ(rhs_load.node->source_descriptor, lhs_load.descriptor);
+  EXPECT_NE(rhs_load.descriptor, lhs_load.descriptor);
+
+  ASSERT_EQ(leaf.plan.bundle_count, 11u);
+  ASSERT_EQ(leaf.plan.slot_count, 12u);
+  ASSERT_EQ(leaf.plan.encoded_byte_length, kExpected.size());
+  EXPECT_EQ(leaf.plan.bundles[0].slot_count, 2u);
   for (iree_host_size_t slot_index = 0; slot_index < leaf.plan.slot_count;
        ++slot_index) {
     const uint32_t packet_index =
@@ -267,9 +294,14 @@ TEST_F(Aie2pLeafObjectTest, ResourceImportsAnchorRegistersWithoutEmittingCode) {
     EXPECT_FALSE(loom_low_resource_isa(packet.node->op));
   }
   ASSERT_EQ(leaf.object.section_count, 1u);
-  EXPECT_GT(leaf.object.sections[0].contents.data_length, 0u);
+  ASSERT_EQ(leaf.object.symbol_count, 1u);
+  EXPECT_EQ(leaf.object.symbols[0].size, kExpected.size());
+  const loom_native_section_contribution_t* section = &leaf.object.sections[0];
+  ASSERT_EQ(section->contents.data_length, kExpected.size());
+  EXPECT_EQ(0,
+            memcmp(section->contents.data, kExpected.data(), kExpected.size()));
 
-  loom_module_free(leaf.module);
+  ResetLeaf(&leaf);
 }
 
 TEST_F(Aie2pLeafObjectTest, ReturnFallsBackAfterAnOccupiedAluCycle) {
