@@ -393,7 +393,7 @@ loom_low_allocation_search_find_explicit_physical_register_for_release_policy(
     loom_low_allocation_search_context_t* context,
     const loom_low_allocation_assignment_t* candidate_template,
     const loom_low_allocation_search_location_preference_t* preference,
-    uint16_t maximum_pressure_extent, uint32_t alignment,
+    uint16_t maximum_pressure_extent,
     loom_low_allocation_storage_release_policy_t release_policy,
     loom_low_allocation_search_location_choice_t* out_choice) {
   *out_choice = (loom_low_allocation_search_location_choice_t){0};
@@ -407,8 +407,7 @@ loom_low_allocation_search_find_explicit_physical_register_for_release_policy(
             candidate_template->descriptor_reg_class_id, physical_register_id,
             candidate_template->location_count, &candidate_ordinal,
             &pressure_extent) ||
-        pressure_extent > maximum_pressure_extent ||
-        candidate_ordinal % alignment != 0) {
+        pressure_extent > maximum_pressure_extent) {
       continue;
     }
     loom_low_allocation_assignment_t candidate = *candidate_template;
@@ -455,7 +454,7 @@ static void loom_low_allocation_search_find_for_release_policy(
   if (uses_explicit_physical_registers) {
     loom_low_allocation_search_find_explicit_physical_register_for_release_policy(
         context, candidate_template, preference, explicit_candidate_count,
-        alignment, release_policy, out_choice);
+        release_policy, out_choice);
   } else {
     loom_low_allocation_search_find_location_for_release_policy(
         context, candidate_template, preference, last_base, alignment,
@@ -916,8 +915,7 @@ iree_status_t loom_low_allocation_search_find_active_spill_victim_set(
       if (!loom_low_allocation_storage_explicit_physical_register_view(
               context->descriptor_set, capacity->descriptor_reg_class_id, base,
               interval->unit_count, &candidate_ordinal, &pressure_extent) ||
-          pressure_extent > explicit_pressure_limit ||
-          candidate_ordinal % alignment != 0) {
+          pressure_extent > explicit_pressure_limit) {
         continue;
       }
     }

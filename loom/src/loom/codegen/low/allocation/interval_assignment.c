@@ -260,8 +260,7 @@ static iree_status_t loom_low_allocation_interval_assignment_record_failure(
               state->context->target->descriptor_set,
               capacity->descriptor_reg_class_id, base, interval->unit_count,
               &candidate_ordinal, &pressure_extent) ||
-          pressure_extent > explicit_pressure_limit ||
-          candidate_ordinal % alignment != 0) {
+          pressure_extent > explicit_pressure_limit) {
         continue;
       }
     }

@@ -165,13 +165,16 @@ TEST_F(LowAllocationIntervalAssignmentTest,
 }
 
 TEST_F(LowAllocationIntervalAssignmentTest,
-       AssignsExplicitRegistersInCandidateOrder) {
+       AssignsExplicitRegistersAndOddOrdinalAggregateView) {
   loom_module_t* module = AllocateModule();
   const loom_value_id_t first_value = DefineValue(module);
   const loom_value_id_t second_value = DefineValue(module);
+  const loom_value_id_t aggregate_value = DefineValue(module);
   loom_module_value_ordinal_scratch_acquire(module);
   loom_module_value_ordinal_scratch_set(module, first_value, /*ordinal=*/0);
   loom_module_value_ordinal_scratch_set(module, second_value, /*ordinal=*/1);
+  loom_module_value_ordinal_scratch_set(module, aggregate_value,
+                                        /*ordinal=*/2);
 
   const uint64_t descriptor_set_id = 23;
   const loom_liveness_value_class_t value_class =
@@ -180,20 +183,28 @@ TEST_F(LowAllocationIntervalAssignmentTest,
       {
           /*.value_id=*/first_value,
           /*.start_point=*/0,
-          /*.end_point=*/8,
+          /*.end_point=*/4,
           /*.value_class=*/value_class,
           /*.unit_count=*/1,
       },
       {
           /*.value_id=*/second_value,
           /*.start_point=*/0,
-          /*.end_point=*/8,
+          /*.end_point=*/4,
           /*.value_class=*/value_class,
           /*.unit_count=*/1,
       },
+      {
+          /*.value_id=*/aggregate_value,
+          /*.start_point=*/5,
+          /*.end_point=*/8,
+          /*.value_class=*/value_class,
+          /*.unit_count=*/2,
+      },
   };
-  const loom_value_id_t value_ids[] = {first_value, second_value};
-  const uint32_t interval_indices[] = {0, 1};
+  const loom_value_id_t value_ids[] = {first_value, second_value,
+                                       aggregate_value};
+  const uint32_t interval_indices[] = {0, 1, 2};
   loom_liveness_analysis_t liveness = {};
   liveness.intervals = intervals;
   liveness.interval_count = IREE_ARRAYSIZE(intervals);
@@ -201,8 +212,8 @@ TEST_F(LowAllocationIntervalAssignmentTest,
   liveness.value_count = IREE_ARRAYSIZE(value_ids);
   liveness.value_interval_indices = interval_indices;
 
-  uint32_t unit_point_starts[] = {0, 1};
-  uint32_t unit_end_points[] = {8, 8};
+  uint32_t unit_point_starts[] = {0, 1, 2};
+  uint32_t unit_end_points[] = {4, 4, 8, 8};
   uint64_t edge_handoff_words[] = {0};
   loom_low_allocation_unit_liveness_t unit_liveness = {};
   unit_liveness.point_starts_by_value_ordinal = unit_point_starts;
@@ -211,7 +222,7 @@ TEST_F(LowAllocationIntervalAssignmentTest,
   unit_liveness.values_with_incomplete_storage_segments = {liveness.value_count,
                                                            edge_handoff_words};
 
-  loom_low_placement_relation_range_t placement_ranges[2] = {};
+  loom_low_placement_relation_range_t placement_ranges[3] = {};
   loom_low_placement_table_t placement = {};
   placement.value_ids = value_ids;
   placement.value_count = IREE_ARRAYSIZE(value_ids);
@@ -237,9 +248,25 @@ TEST_F(LowAllocationIntervalAssignmentTest,
           /*.atomic_unit_count=*/2,
           /*.reserved=*/0,
       },
+      {
+          /*.name_string_offset=*/0,
+          /*.atomic_unit_start=*/4,
+          /*.atomic_unit_count=*/4,
+          /*.reserved=*/0,
+      },
   };
   const uint16_t physical_register_candidates[] = {1, 0};
-  const uint16_t physical_register_atomic_units[] = {0, 1, 2, 3};
+  const uint16_t physical_register_atomic_units[] = {0, 1, 2, 3, 0, 1, 2, 3};
+  const loom_low_physical_register_view_t physical_register_views[] = {
+      {
+          /*.physical_register_id=*/2,
+          /*.reg_class_id=*/0,
+          /*.unit_candidate_ordinal_start=*/0,
+          /*.unit_count=*/2,
+          /*.reserved=*/0,
+      },
+  };
+  const uint16_t physical_register_view_unit_candidate_ordinals[] = {1, 0};
   loom_low_descriptor_set_t descriptor_set = {};
   descriptor_set.stable_id = descriptor_set_id;
   descriptor_set.reg_classes = &reg_class;
@@ -253,6 +280,13 @@ TEST_F(LowAllocationIntervalAssignmentTest,
       physical_register_atomic_units;
   descriptor_set.physical_register_atomic_unit_count =
       IREE_ARRAYSIZE(physical_register_atomic_units);
+  descriptor_set.physical_register_views = physical_register_views;
+  descriptor_set.physical_register_view_count =
+      IREE_ARRAYSIZE(physical_register_views);
+  descriptor_set.physical_register_view_unit_candidate_ordinals =
+      physical_register_view_unit_candidate_ordinals;
+  descriptor_set.physical_register_view_unit_candidate_ordinal_count =
+      IREE_ARRAYSIZE(physical_register_view_unit_candidate_ordinals);
   loom_low_resolved_target_t target = {};
   target.descriptor_set = &descriptor_set;
   target.descriptor_set_key = IREE_SV("test");
@@ -282,14 +316,17 @@ TEST_F(LowAllocationIntervalAssignmentTest,
   IREE_ASSERT_OK(
       loom_low_allocation_interval_assignment_build(&context, &result));
 
-  ASSERT_EQ(result.assignment_count, 2u);
+  ASSERT_EQ(result.assignment_count, 3u);
   EXPECT_EQ(result.assignments[0].location_base, 1u);
   EXPECT_EQ(result.assignments[0].location_count, 1u);
   EXPECT_EQ(result.assignments[1].location_base, 0u);
   EXPECT_EQ(result.assignments[1].location_count, 1u);
+  EXPECT_EQ(result.assignments[2].location_base, 2u);
+  EXPECT_EQ(result.assignments[2].location_count, 2u);
 
   loom_module_value_ordinal_scratch_clear(module, first_value);
   loom_module_value_ordinal_scratch_clear(module, second_value);
+  loom_module_value_ordinal_scratch_clear(module, aggregate_value);
   loom_module_value_ordinal_scratch_release(module);
   loom_module_free(module);
 }
