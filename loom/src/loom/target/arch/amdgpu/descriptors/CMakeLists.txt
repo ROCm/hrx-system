@@ -447,4 +447,22 @@ loom_cc_library(
 )
 endif()
 
+if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4_GFX1250_A0_CORE AND LOOM_TARGET_ARCH_AMDGPU)
+loom_cc_benchmark(
+  NAME
+    descriptor_access_benchmark
+  SRCS
+    "descriptor_access_benchmark.cc"
+  DEPS
+    ::low_registry
+    iree::base
+    iree::testing::benchmark_main
+    loom::codegen::low::descriptors
+    loom::target::low_descriptor_registry
+  TESTONLY
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+)
+endif()
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

@@ -19,6 +19,7 @@ load(
 load("//loom/build_tools/amdgpu/isa_xml:archive.bzl", "AMDGPU_ISA_XML_ARCHIVE")
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_benchmark",
     "loom_cc_library",
     "loom_generated_file_family",
     "loom_low_descriptor_data_archive",
@@ -314,5 +315,18 @@ loom_cc_library(
         "//loom/src/loom/target:low_descriptor_registry",
         "//loom/src/loom/target:types",
         "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_benchmark(
+    name = "descriptor_access_benchmark",
+    srcs = ["descriptor_access_benchmark.cc"],
+    target_compatible_with = loom_amdgpu_descriptor_set_compatible_with(_DESCRIPTOR_SET_RDNA4_GFX1250_A0),
+    deps = [
+        ":low_registry",
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/target:low_descriptor_registry",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:benchmark_main",
     ],
 )
