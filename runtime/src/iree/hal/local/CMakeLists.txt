@@ -177,11 +177,8 @@ iree_cc_library(
   SRCS
     "executable_library_util.c"
   DEPS
-    ::executable_environment
     ::executable_library
-    ::executable_loader
     iree::base
-    iree::base::internal
     iree::hal
   PUBLIC
 )

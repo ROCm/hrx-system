@@ -57,11 +57,6 @@ static const char* dispatch_names[] = {
 
 static const iree_hal_executable_library_v0_t library = {
     .header = &library_header,
-    .imports =
-        {
-            .count = 0,
-            .symbols = NULL,
-        },
     .exports =
         {
             .count = 1,

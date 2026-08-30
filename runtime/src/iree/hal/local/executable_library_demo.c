@@ -171,11 +171,6 @@ static const char* entry_point_tags[2] = {
 
 static const iree_hal_executable_library_v0_t library = {
     .header = &header,
-    .imports =
-        {
-            .count = 0,
-            .symbols = NULL,
-        },
     .exports =
         {
             .count = 2,

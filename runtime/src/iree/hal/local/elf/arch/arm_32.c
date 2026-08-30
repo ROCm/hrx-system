@@ -128,33 +128,12 @@ void iree_elf_call_v_v(const void* symbol_ptr) {
   ((ptr_t)symbol_ptr)();
 }
 
-void* iree_elf_call_p_i(const void* symbol_ptr, int a0) {
-  typedef void* (*ptr_t)(int);
-  return ((ptr_t)symbol_ptr)(a0);
-}
-
 void* iree_elf_call_p_ip(const void* symbol_ptr, int a0, void* a1) {
   typedef void* (*ptr_t)(int, void*);
   return ((ptr_t)symbol_ptr)(a0, a1);
 }
 
-int iree_elf_call_i_p(const void* symbol_ptr, void* a0) {
-  typedef int (*ptr_t)(void*);
-  return ((ptr_t)symbol_ptr)(a0);
-}
-
 int iree_elf_call_i_ppp(const void* symbol_ptr, void* a0, void* a1, void* a2) {
-  typedef int (*ptr_t)(void*, void*, void*);
-  return ((ptr_t)symbol_ptr)(a0, a1, a2);
-}
-
-void* iree_elf_call_p_ppp(const void* symbol_ptr, void* a0, void* a1,
-                          void* a2) {
-  typedef void* (*ptr_t)(void*, void*, void*);
-  return ((ptr_t)symbol_ptr)(a0, a1, a2);
-}
-
-int iree_elf_thunk_i_ppp(const void* symbol_ptr, void* a0, void* a1, void* a2) {
   typedef int (*ptr_t)(void*, void*, void*);
   return ((ptr_t)symbol_ptr)(a0, a1, a2);
 }

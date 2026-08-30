@@ -10,7 +10,6 @@
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
 #include "iree/hal/local/executable_library.h"
-#include "iree/hal/local/executable_loader.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -25,22 +24,6 @@ iree_status_t iree_hal_executable_library_validate_query_result(
 iree_status_t iree_hal_executable_library_verify(
     const iree_hal_executable_load_params_t* load_params,
     const iree_hal_executable_library_v0_t* library);
-
-// Allocates and resolves import function and context storage on |environment|
-// using |import_provider|. All imports will be called through |import_thunk|.
-iree_status_t iree_hal_executable_library_initialize_imports(
-    iree_hal_executable_environment_v0_t* environment,
-    const iree_hal_executable_import_provider_t import_provider,
-    const iree_hal_executable_import_table_v0_t* import_table,
-    iree_hal_executable_import_thunk_v0_t import_thunk,
-    iree_allocator_t host_allocator);
-
-// Frees environment imports previously allocated with
-// iree_hal_executable_library_allocate_imports. Must only be called after all
-// existing references to the environment have been dropped.
-void iree_hal_executable_library_deinitialize_imports(
-    iree_hal_executable_environment_v0_t* environment,
-    iree_allocator_t host_allocator);
 
 // Returns the number of exports in the library.
 iree_host_size_t iree_hal_executable_library_export_count(

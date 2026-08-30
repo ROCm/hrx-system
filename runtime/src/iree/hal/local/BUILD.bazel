@@ -173,11 +173,8 @@ iree_runtime_cc_library(
     srcs = ["executable_library_util.c"],
     hdrs = ["executable_library_util.h"],
     deps = [
-        ":executable_environment",
         ":executable_library",
-        ":executable_loader",
         "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/hal",
     ],
 )

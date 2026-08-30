@@ -22,7 +22,6 @@ extern "C" {
 //===----------------------------------------------------------------------===//
 
 // Initializes |out_environment| to the default empty environment.
-// No imports will be available unless overridden during loading.
 // |temp_allocator| may be used for temporary allocations during initialization.
 void iree_hal_executable_environment_initialize(
     iree_allocator_t temp_allocator,

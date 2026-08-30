@@ -76,9 +76,8 @@ static const iree_hal_executable_loader_vtable_t test_executable_loader_vtable =
 
 TEST(LocalDeviceSpecBuilderTest, CapturesCommonLocalFacts) {
   test_executable_loader_t loader;
-  iree_hal_executable_loader_initialize(
-      &test_executable_loader_vtable,
-      iree_hal_executable_import_provider_null(), &loader.base);
+  iree_hal_executable_loader_initialize(&test_executable_loader_vtable,
+                                        &loader.base);
   iree_hal_executable_loader_t* loader_ptr = &loader.base;
 
   iree_hal_local_device_spec_params_t params = {

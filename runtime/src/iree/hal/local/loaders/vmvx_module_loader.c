@@ -729,9 +729,8 @@ iree_status_t iree_hal_vmvx_module_loader_create(
           common_module_count * sizeof(executable_loader->common_modules[0]),
       (void**)&executable_loader);
   if (iree_status_is_ok(status)) {
-    iree_hal_executable_loader_initialize(
-        &iree_hal_vmvx_module_loader_vtable,
-        iree_hal_executable_import_provider_null(), &executable_loader->base);
+    iree_hal_executable_loader_initialize(&iree_hal_vmvx_module_loader_vtable,
+                                          &executable_loader->base);
     executable_loader->host_allocator = host_allocator;
     executable_loader->instance = instance;
     iree_vm_instance_retain(executable_loader->instance);

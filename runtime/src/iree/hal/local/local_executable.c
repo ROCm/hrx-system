@@ -27,7 +27,7 @@ void iree_hal_local_executable_initialize(
   out_base_executable->profile_id = (uint64_t)iree_atomic_fetch_add(
       &iree_hal_local_executable_next_profile_id, 1, iree_memory_order_relaxed);
 
-  // Default environment with no imports assigned.
+  // Populate the default environment with host CPU data.
   iree_hal_executable_environment_initialize(host_allocator,
                                              &out_base_executable->environment);
 }
