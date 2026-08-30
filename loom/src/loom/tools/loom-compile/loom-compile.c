@@ -37,6 +37,7 @@
 #include "loom/tooling/io/source_path.h"
 #include "loom/tooling/pass/trace_cli.h"
 #include "loom/tools/loom-compile/command_backend.h"
+#include "loom/tools/loom-compile/command_manifest.h"
 
 #ifndef LOOM_COMPILE_HAVE_AMDGPU
 #define LOOM_COMPILE_HAVE_AMDGPU 0

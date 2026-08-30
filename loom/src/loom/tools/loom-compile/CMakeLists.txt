@@ -11,12 +11,28 @@ iree_add_all_subdirs()
 
 loom_cc_library(
   NAME
+    command_manifest
+  HDRS
+    "command_manifest.h"
+  SRCS
+    "command_manifest.c"
+  DEPS
+    iree::base
+    loom::target::arch::cmd::artifact_set
+    loom::util::json
+    loom::util::stream
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     command_backend
   HDRS
     "command_backend.h"
   SRCS
     "command_backend.c"
   DEPS
+    ::command_manifest
     iree::base
     iree::base::internal::arena
     iree::io::stream
@@ -34,7 +50,6 @@ loom_cc_library(
     loom::tooling::io::file
     loom::transforms::kernel::kernel_class_materializer
     loom::transforms::kernel::kernel_request_producer
-    loom::util::json
     loom::util::stream
   PUBLIC
 )
@@ -83,6 +98,7 @@ loom_cc_binary(
     ${_loom_compile_platform_copts}
   DEPS
     ::command_backend
+    ::command_manifest
     iree::base
     iree::base::tooling::flags
     iree::io::file_handle
@@ -114,6 +130,20 @@ loom_cc_binary(
     loom::tooling::io::source_path
     loom::tooling::pass::trace_cli
     ${_loom_compile_platform_deps}
+)
+
+loom_cc_test(
+  NAME
+    command_manifest_test
+  SRCS
+    "command_manifest_test.cc"
+  DEPS
+    ::command_manifest
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::target::arch::cmd::artifact_set
+    loom::util::stream
 )
 
 iree_execution_test_suite(
