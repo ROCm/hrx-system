@@ -1,0 +1,64 @@
+# Copyright 2021 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
+load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_binary")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+iree_c_embed_data(
+    name = "compat_data",
+    testonly = True,
+    srcs = [
+        "elementwise_mul_arm_32.so",
+        "elementwise_mul_arm_64.so",
+        "elementwise_mul_riscv_32.so",
+        "elementwise_mul_riscv_64.so",
+        "elementwise_mul_x86_32.so",
+        "elementwise_mul_x86_64.so",
+    ],
+    c_file_output = "compat_data.c",
+    flatten = True,
+    h_file_output = "compat_data.h",
+    identifier = "elementwise_mul_compatibility",
+)
+
+iree_runtime_cc_binary(
+    name = "elementwise_mul_library.so",
+    testonly = True,
+    srcs = ["elementwise_mul_library.c"],
+    # This is executable-library payload code, not part of the host test. Keep
+    # host sanitizer configurations from instrumenting it or introducing
+    # sanitizer runtime imports that the platform-agnostic loader cannot bind.
+    copts = ["-fno-sanitize=all"],
+    linkopts = [
+        # Executable libraries are freestanding and cannot import a host C
+        # runtime. The loader uses the SysV hash table to bound .dynsym.
+        "-nostdlib",
+        "-Wl,--hash-style=sysv",
+    ] + select({
+        # Unlike GCC, Clang links its sanitizer runtime even with -nostdlib.
+        "//build_tools/bazel:cc_compiler_clang": ["-fno-sanitize-link-runtime"],
+        "//conditions:default": [],
+    }),
+    linkshared = True,
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = ["//runtime/src/iree/hal/drivers/task/executable/library:abi"],
+)
+
+iree_c_embed_data(
+    name = "elementwise_mul_native",
+    testonly = True,
+    srcs = [":elementwise_mul_library.so"],
+    c_file_output = "elementwise_mul_native.c",
+    flatten = True,
+    h_file_output = "elementwise_mul_native.h",
+    target_compatible_with = ["@platforms//os:linux"],
+)

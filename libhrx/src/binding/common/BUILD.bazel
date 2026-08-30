@@ -132,11 +132,9 @@ hrx_cc_test(
     srcs = ["event_timestamp_pool_test.cc"],
     deps = [
         ":common",
-        "//runtime/src/iree/async",
-        "//runtime/src/iree/async:platform",
+        "//libhrx/src/libhrx:hrx_static",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/drivers/local_task:task_driver",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

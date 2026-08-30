@@ -62,9 +62,9 @@ iree_cc_library(
     iree::base::internal::arena
     iree::base::threading
     iree::hal
-    iree::hal::drivers::local_task::task_driver
+    iree::hal::drivers::task::driver
+    iree::hal::drivers::task::executable::loaders::registration
     iree::hal::executable::amdgpu::executable_target
-    iree::hal::local::loaders::registration
     iree::hal::memory::asan
     iree::hal::memory::passthrough_pool
     iree::hal::memory::slab_provider
@@ -140,9 +140,9 @@ iree_cc_library(
     iree::base::internal::arena
     iree::base::threading
     iree::hal
-    iree::hal::drivers::local_task::task_driver
+    iree::hal::drivers::task::driver
+    iree::hal::drivers::task::executable::loaders::registration
     iree::hal::executable::amdgpu::executable_target
-    iree::hal::local::loaders::registration
     iree::hal::memory::asan
     iree::hal::memory::passthrough_pool
     iree::hal::memory::slab_provider

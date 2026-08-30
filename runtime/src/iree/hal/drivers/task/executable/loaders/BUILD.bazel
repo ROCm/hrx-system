@@ -1,0 +1,82 @@
+# Copyright 2020 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:cmake.bzl", "iree_cmake_extra_content")
+load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+iree_cmake_extra_content(
+    content = """
+if(IREE_HAL_EXECUTABLE_LOADER_EMBEDDED_ELF)
+""",
+    inline = True,
+)
+
+iree_runtime_cc_library(
+    name = "embedded_elf_loader",
+    srcs = ["embedded_elf_loader.c"],
+    hdrs = ["embedded_elf_loader.h"],
+    defines = [
+        "IREE_HAVE_HAL_EXECUTABLE_LOADER_EMBEDDED_ELF=1",
+    ],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/task/executable",
+        "//runtime/src/iree/hal/drivers/task/executable:data",
+        "//runtime/src/iree/hal/drivers/task/executable:loader",
+        "//runtime/src/iree/hal/drivers/task/executable/elf:elf_module",
+        "//runtime/src/iree/hal/drivers/task/executable/library:abi",
+        "//runtime/src/iree/hal/drivers/task/executable/library:util",
+        "//runtime/src/iree/hal/utils:elf_format",
+    ],
+)
+
+iree_cmake_extra_content(
+    content = """
+endif()
+""",
+    inline = True,
+)
+
+iree_cmake_extra_content(
+    content = """
+if(IREE_HAL_EXECUTABLE_LOADER_SYSTEM_LIBRARY)
+""",
+    inline = True,
+)
+
+iree_runtime_cc_library(
+    name = "system_library_loader",
+    srcs = ["system_library_loader.c"],
+    hdrs = ["system_library_loader.h"],
+    defines = [
+        "IREE_HAVE_HAL_EXECUTABLE_LOADER_SYSTEM_LIBRARY=1",
+    ],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:dynamic_library",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/task/executable",
+        "//runtime/src/iree/hal/drivers/task/executable:data",
+        "//runtime/src/iree/hal/drivers/task/executable:loader",
+        "//runtime/src/iree/hal/drivers/task/executable/library:abi",
+        "//runtime/src/iree/hal/drivers/task/executable/library:util",
+        "//runtime/src/iree/hal/utils:elf_format",
+    ],
+)
+
+iree_cmake_extra_content(
+    content = """
+endif()
+""",
+    inline = True,
+)

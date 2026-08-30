@@ -29,7 +29,7 @@ iree_runtime_cc_library(
         }) +
         iree_select({
             "//runtime/config/hal:driver_local_task": [
-                "//runtime/src/iree/hal/drivers/local_task/registration",
+                "//runtime/src/iree/hal/drivers/task/registration",
             ],
             "//conditions:default": [],
         }) +

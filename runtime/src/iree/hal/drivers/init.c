@@ -10,9 +10,9 @@
 #include "iree/hal/drivers/amdgpu/registration/driver_module.h"
 #endif  // IREE_HAVE_HAL_AMDGPU_DRIVER_MODULE
 
-#if defined(IREE_HAVE_HAL_LOCAL_TASK_DRIVER_MODULE)
-#include "iree/hal/drivers/local_task/registration/driver_module.h"
-#endif  // IREE_HAVE_HAL_LOCAL_TASK_DRIVER_MODULE
+#if defined(IREE_HAVE_HAL_TASK_DRIVER_MODULE)
+#include "iree/hal/drivers/task/registration/driver_module.h"
+#endif  // IREE_HAVE_HAL_TASK_DRIVER_MODULE
 
 #if defined(IREE_HAVE_HAL_VULKAN_DRIVER_MODULE)
 #include "iree/hal/drivers/vulkan/registration/driver_module.h"
@@ -42,10 +42,10 @@ iree_hal_register_all_available_drivers(iree_hal_driver_registry_t* registry) {
       z0, iree_hal_amdgpu_driver_module_register(registry));
 #endif  // IREE_HAVE_HAL_AMDGPU_DRIVER_MODULE
 
-#if defined(IREE_HAVE_HAL_LOCAL_TASK_DRIVER_MODULE)
+#if defined(IREE_HAVE_HAL_TASK_DRIVER_MODULE)
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_local_task_driver_module_register(registry));
-#endif  // IREE_HAVE_HAL_LOCAL_TASK_DRIVER_MODULE
+      z0, iree_hal_task_driver_module_register(registry));
+#endif  // IREE_HAVE_HAL_TASK_DRIVER_MODULE
 
 #if defined(IREE_HAVE_HAL_VULKAN_DRIVER_MODULE)
   IREE_RETURN_AND_END_ZONE_IF_ERROR(

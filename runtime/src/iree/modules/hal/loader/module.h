@@ -11,7 +11,7 @@
 
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
-#include "iree/hal/local/executable_loader.h"
+#include "iree/hal/drivers/task/executable/loader.h"
 #include "iree/modules/hal/types.h"
 #include "iree/vm/api.h"
 

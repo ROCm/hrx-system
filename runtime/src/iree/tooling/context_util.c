@@ -14,7 +14,7 @@
 #include "iree/base/internal/path.h"
 #include "iree/base/threading/numa.h"
 #include "iree/base/tooling/flags.h"
-#include "iree/hal/local/loaders/registration/init.h"
+#include "iree/hal/drivers/task/executable/loaders/registration/init.h"
 #include "iree/hal/replay/recorder.h"
 #include "iree/io/file_contents.h"
 #include "iree/io/file_handle.h"

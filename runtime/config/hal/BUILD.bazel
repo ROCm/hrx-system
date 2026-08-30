@@ -22,9 +22,8 @@ SUPPORTED_DRIVERS = [
     "webgpu",
 ]
 
-# Executable loader registration defaults to binary formats that do not depend
-# on compiler fallback paths. The VMVX bytecode loader is explicit opt-in
-# because it depends on the compiler-oriented fallback module stack.
+# Executable loader registration defaults to both supported native library
+# containers.
 DEFAULT_EXECUTABLE_LOADERS = [
     "embedded-elf",
     "system-library",
@@ -33,7 +32,6 @@ DEFAULT_EXECUTABLE_LOADERS = [
 SUPPORTED_EXECUTABLE_LOADERS = [
     "embedded-elf",
     "system-library",
-    "vmvx-module",
 ]
 
 string_list_flag(

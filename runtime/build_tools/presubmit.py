@@ -21,7 +21,7 @@ from build_tools.devtools import project_presubmit
 PROJECT_NAME = "runtime"
 PROJECT_ROOT = "runtime/"
 CMAKE_TEST_REGEX = "^iree/"
-CMAKE_TEST_EXCLUDE_REGEX = "^iree/hal/local/elf/elf_module_test$"
+CMAKE_TEST_EXCLUDE_REGEX = "^iree/hal/drivers/task/executable/elf/elf_module_test$"
 GLOBAL_TEST_TRIGGERS = (
     "BUILD.bazel",
     "MODULE.bazel",
@@ -34,7 +34,9 @@ RESOURCE_TEST_TAG_FILTERS = (
     "-iree-run-requirement=runtime.resource.vulkan_device",
     "-iree-run-requirement=runtime.resource.webgpu_device",
 )
-BAZEL_TEST_EXCLUDES = ("-//runtime/src/iree/hal/local/elf:elf_module_test",)
+BAZEL_TEST_EXCLUDES = (
+    "-//runtime/src/iree/hal/drivers/task/executable/elf:elf_module_test",
+)
 
 
 def parse_arguments() -> argparse.Namespace:

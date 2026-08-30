@@ -140,13 +140,11 @@ iree_cc_test(
     "event_timestamp_pool_test.cc"
   DEPS
     ::common
-    iree::async
-    iree::async::platform
     iree::base
     iree::hal
-    iree::hal::drivers::local_task::task_driver
     iree::testing::gtest
     iree::testing::gtest_main
+    libhrx::src::libhrx::hrx_static
     libhrx_defs
 )
 

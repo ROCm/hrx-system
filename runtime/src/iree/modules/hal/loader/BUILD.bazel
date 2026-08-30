@@ -26,8 +26,8 @@ iree_runtime_cc_library(
     deps = [
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/local:executable_environment",
-        "//runtime/src/iree/hal/local:executable_loader",
+        "//runtime/src/iree/hal/drivers/task/executable",
+        "//runtime/src/iree/hal/drivers/task/executable:loader",
         "//runtime/src/iree/modules/hal:types",
         "//runtime/src/iree/vm",
     ],

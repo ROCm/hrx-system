@@ -12,11 +12,9 @@
 #include <thread>
 #include <vector>
 
-#include "iree/async/proactor.h"
-#include "iree/async/proactor_platform.h"
+#include "common/hrx_bridge.h"
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
-#include "iree/hal/drivers/local_task/task_semaphore.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -284,25 +282,27 @@ TEST_F(EventTimestampPoolTest, SlotsHeldByASecondReferenceAreNotRecycled) {
 // Outstanding device writes
 //===----------------------------------------------------------------------===//
 
-// Semaphores stand in for the queue timeline an enqueued timestamp op signals,
-// which is what the pool compares a released slot's retirement value against.
+// The CPU device creates the same public HAL timeline semaphore that a stream
+// uses to retire its submitted timestamp writes. The pool only depends on that
+// HAL contract; which driver implements the semaphore is deliberately hidden.
 class EventTimestampPoolPendingTest : public EventTimestampPoolTest {
  protected:
   static void SetUpTestSuite() {
-    IREE_ASSERT_OK(iree_async_proactor_create_platform(
-        iree_async_proactor_options_default(), iree_allocator_system(),
-        &proactor_));
+    IREE_ASSERT_OK(HRX_CALL(hrx_cpu_initialize(/*flags=*/0)));
+    hrx_device_t hrx_device = nullptr;
+    IREE_ASSERT_OK(HRX_CALL(hrx_cpu_device_get(/*index=*/0, &hrx_device)));
+    device_ = hrx_device_hal(hrx_device);
   }
   static void TearDownTestSuite() {
-    iree_async_proactor_release(proactor_);
-    proactor_ = nullptr;
+    device_ = nullptr;
+    IREE_EXPECT_OK(HRX_CALL(hrx_cpu_shutdown()));
   }
 
   void SetUp() override {
     EventTimestampPoolTest::SetUp();
-    IREE_ASSERT_OK(
-        iree_hal_task_semaphore_create(proactor_, /*initial_value=*/0ull,
-                                       iree_allocator_system(), &semaphore_));
+    IREE_ASSERT_OK(iree_hal_semaphore_create(
+        device_, IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0ull,
+        IREE_HAL_SEMAPHORE_FLAG_NONE, &semaphore_));
   }
   void TearDown() override {
     iree_hal_semaphore_release(semaphore_);
@@ -310,7 +310,7 @@ class EventTimestampPoolPendingTest : public EventTimestampPoolTest {
     EventTimestampPoolTest::TearDown();
   }
 
-  inline static iree_async_proactor_t* proactor_ = nullptr;
+  inline static iree_hal_device_t* device_ = nullptr;
   iree_hal_semaphore_t* semaphore_ = nullptr;
 };
 

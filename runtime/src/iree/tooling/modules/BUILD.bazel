@@ -4,7 +4,6 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//build_tools/bazel:select.bzl", "iree_select")
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
 
 package(
@@ -20,10 +19,5 @@ iree_runtime_cc_library(
     deps = [
         "//runtime/src/iree/base",
         "//runtime/src/iree/vm",
-    ] + iree_select({
-        "//runtime/config/hal:executable_loader_vmvx_module": [
-            "//runtime/src/iree/modules/vmvx",
-        ],
-        "//conditions:default": [],
-    }),
+    ],
 )

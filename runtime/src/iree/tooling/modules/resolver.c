@@ -6,10 +6,6 @@
 
 #include "iree/tooling/modules/resolver.h"
 
-#if defined(IREE_HAVE_VMVX_MODULE)
-#include "iree/modules/vmvx/module.h"
-#endif  // IREE_HAVE_VMVX_MODULE
-
 #if defined(IREE_HAVE_EXTERNAL_TOOLING_MODULES)
 // Defined in the generated registry_external.c file:
 extern iree_status_t iree_tooling_register_external_module_types(
@@ -46,21 +42,12 @@ iree_status_t iree_tooling_resolve_module_dependency(
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_TEXT(z0, dependency->name.data, dependency->name.size);
 
+  // Try to resolve the module from externally-defined modules. If the module
+  // is not found this will succeed but module will be NULL.
   iree_vm_module_t* module = NULL;
-#if defined(IREE_HAVE_VMVX_MODULE)
-  if (iree_string_view_equal(dependency->name, IREE_SV("vmvx"))) {
-    // VMVX module used on the host side for the inline HAL.
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_vmvx_module_create(instance, host_allocator, &module));
-  }
-#endif  // IREE_HAVE_VMVX_MODULE
-  if (!module) {
-    // Try to resolve the module from externally-defined modules.
-    // If the module is not found this will succeed but module will be NULL.
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_tooling_try_resolve_external_module_dependency(
-                instance, dependency, host_allocator, &module));
-  }
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_tooling_try_resolve_external_module_dependency(
+              instance, dependency, host_allocator, &module));
 
   IREE_TRACE_ZONE_END(z0);
   if (!module && iree_all_bits_set(dependency->flags,

@@ -117,7 +117,7 @@ class ConfigTest(unittest.TestCase):
             """
 package_group(
     name = "implementation_consumers",
-    packages = ["//runtime/src/iree/hal/local/..."],
+    packages = ["//runtime/src/iree/hal/drivers/task/..."],
     includes = ["//runtime:other_consumers"],
 )
 """,
@@ -496,13 +496,13 @@ loom_module(
         functions = bazel_to_cmake_converter.BuildFileFunctions(
             converter=converter,
             targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
-            build_dir="runtime/src/iree/hal/local/elf/testdata",
+            build_dir="runtime/src/iree/hal/drivers/task/executable/elf/testdata",
         )
 
         functions.cc_binary(
             name="elementwise_mul_library.so",
             srcs=["elementwise_mul_library.c"],
-            deps=["//runtime/src/iree/hal/local:executable_library"],
+            deps=["//runtime/src/iree/hal/drivers/task/executable/library:abi"],
             testonly=True,
             linkshared=True,
         )
@@ -511,7 +511,9 @@ loom_module(
         self.assertNotIn("iree_cc_binary(", converter.body)
         self.assertIn("  SHARED\n", converter.body)
         self.assertIn("  TESTONLY\n", converter.body)
-        self.assertIn("iree::hal::local::executable_library", converter.body)
+        self.assertIn(
+            "iree::hal::drivers::task::executable::library::abi", converter.body
+        )
 
     def test_cc_library_linkopts_expand_location_make_variables(self):
         converter = SimpleNamespace(body="")
@@ -548,14 +550,14 @@ loom_module(
         functions = bazel_to_cmake_converter.BuildFileFunctions(
             converter=converter,
             targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
-            build_dir="runtime/src/iree/hal/local/elf/testdata",
+            build_dir="runtime/src/iree/hal/drivers/task/executable/elf/testdata",
             repo_root=str(repo_root),
         )
 
         functions.cc_binary(
             name="elementwise_mul_library.so",
             srcs=["elementwise_mul_library.c"],
-            deps=["//runtime/src/iree/hal/local:executable_library"],
+            deps=["//runtime/src/iree/hal/drivers/task/executable/library:abi"],
             testonly=True,
             linkshared=True,
         )
@@ -571,7 +573,7 @@ loom_module(
         )
 
         self.assertIn(
-            "$<TARGET_FILE:iree::hal::local::elf::testdata::elementwise_mul_library.so>",
+            "$<TARGET_FILE:iree::hal::drivers::task::executable::elf::testdata::elementwise_mul_library.so>",
             converter.body,
         )
         self.assertNotIn('"elementwise_mul_library.so"', converter.body)
@@ -603,7 +605,7 @@ loom_module(
         functions = bazel_to_cmake_converter.BuildFileFunctions(
             converter=converter,
             targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
-            build_dir="runtime/src/iree/hal/local/elf/testdata",
+            build_dir="runtime/src/iree/hal/drivers/task/executable/elf/testdata",
             repo_root=str(repo_root),
         )
 
@@ -617,7 +619,7 @@ loom_module(
         )
 
         self.assertIn(
-            '"${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/local/elf/testdata/'
+            '"${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/drivers/task/executable/elf/testdata/'
             'elementwise_mul_library.c"',
             converter.body,
         )

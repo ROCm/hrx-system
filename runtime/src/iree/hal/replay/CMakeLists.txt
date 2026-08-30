@@ -166,7 +166,7 @@ iree_cc_test(
     iree::testing::gtest_main
 )
 
-if(TARGET iree::hal::drivers::local_task::registration)
+if(TARGET iree::hal::drivers::task::registration)
 
 iree_cc_test(
   NAME
@@ -181,7 +181,7 @@ iree_cc_test(
     iree::async::util::proactor_pool
     iree::base
     iree::hal
-    iree::hal::drivers::local_task::registration
+    iree::hal::drivers::task::registration
     iree::hal::testing::mock_device
     iree::io::file_handle
     iree::testing::gtest
@@ -203,7 +203,7 @@ iree_cc_test(
     iree::async::util::proactor_pool
     iree::base
     iree::hal
-    iree::hal::drivers::local_task::registration
+    iree::hal::drivers::task::registration
     iree::testing::gtest
     iree::testing::gtest_main
 )
@@ -222,7 +222,7 @@ iree_cc_test(
     iree::testing::gtest_main
 )
 
-if(TARGET iree::hal::drivers::local_task::registration)
+if(TARGET iree::hal::drivers::task::registration)
 
 iree_cc_test(
   NAME
@@ -237,7 +237,7 @@ iree_cc_test(
     iree::async::util::proactor_pool
     iree::base
     iree::hal
-    iree::hal::drivers::local_task::registration
+    iree::hal::drivers::task::registration
     iree::hal::testing::mock_device
     iree::io::file_handle
     iree::testing::gtest

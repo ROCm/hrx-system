@@ -12,7 +12,7 @@
 #include "iree/base/internal/arena.h"
 #include "iree/base/tracing.h"
 #include "iree/hal/api.h"
-#include "iree/hal/local/loaders/registration/init.h"
+#include "iree/hal/drivers/task/executable/loaders/registration/init.h"
 #include "iree/hal/utils/resource_set.h"
 #include "iree/modules/hal/module.h"
 #include "iree/modules/hal/types.h"
