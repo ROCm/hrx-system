@@ -45,11 +45,12 @@ typedef struct loom_bytecode_source_symbol_resolver_t {
 // are decoded into the returned ordinary standalone module.
 //
 // Selection shape is validated as an API precondition. Malformed selected
-// payloads follow the same diagnostic, result, verification, and ownership
-// contract as loom_bytecode_read_module_ordinal. Rejected symbol entries and
-// bodies are never read. Output symbol ID |i| corresponds exactly to
+// payloads follow the same diagnostic, result, and ownership contract as
+// loom_bytecode_read_module_ordinal. Rejected symbol entries and bodies are
+// never read. Output symbol ID |i| corresponds exactly to
 // |selection.ordinals[i]|, allowing later source projections to bind the
-// compact module without string lookup.
+// compact module without string lookup. Callers verify the complete
+// materialized module explicitly when required by their boundary.
 iree_status_t loom_bytecode_materialize_module_symbols(
     iree_const_byte_span_t bytecode, iree_string_view_t filename,
     loom_context_t* context, iree_arena_block_pool_t* block_pool,
@@ -66,11 +67,8 @@ iree_status_t loom_bytecode_materialize_module_symbols(
 // symbol onto its predeclared target identity. Selected symbol headers and root
 // regions are decoded directly into the module; unselected payloads are never
 // read. The caller must finish every predeclared symbol before exposing or
-// verifying the module.
-//
-// This incremental form does not run module verification. Passing read options
-// with |verify_module| set is rejected so a partial projection cannot be
-// mistaken for a complete ordinary module.
+// verifying the module. Materialization never runs semantic module
+// verification.
 iree_status_t loom_bytecode_materialize_module_symbols_into(
     iree_const_byte_span_t bytecode, iree_string_view_t filename,
     iree_arena_block_pool_t* block_pool,

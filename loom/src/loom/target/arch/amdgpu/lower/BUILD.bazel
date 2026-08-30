@@ -225,6 +225,7 @@ loom_cc_library(
     ],
     textual_hdrs = [
         "//loom/src/loom/target/arch/amdgpu:target_records_tables.inl",
+        "//loom/src/loom/target/arch/amdgpu/descriptors:lower_capabilities.h",
         "//loom/src/loom/target/arch/amdgpu:memory_cache_policy_encoding_rows.inl",
         "//loom/src/loom/target/arch/amdgpu:memory_cache_policy_temporal_th.inl",
         "//loom/src/loom/target/arch/amdgpu/lower/candidates:memory_descriptor_candidate_ranges.inl",

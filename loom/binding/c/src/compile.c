@@ -21,6 +21,7 @@
 #include "loom/util/stream.h"
 #include "loomc/iree.h"
 #include "module.h"
+#include "module_bytecode.h"
 #include "pass_program.h"
 #include "result.h"
 #include "source.h"

@@ -36,6 +36,7 @@
 #include "loom/target/arch/amdgpu/target_info.h"
 #include "loom/testing/module_ptr.h"
 #include "loom/transforms/symbol/template_selection.h"
+#include "loom/verify/verify.h"
 
 namespace loom {
 namespace {
@@ -92,8 +93,6 @@ static ModulePtr ReadModuleBytecode(const std::vector<uint8_t>& bytes,
                                     iree_arena_block_pool_t* block_pool) {
   loom_bytecode_read_options_t options = {
       /*.diagnostic_sink=*/{},
-      /*.verify_module=*/true,
-      /*.verify_max_errors=*/20,
   };
   loom_bytecode_read_result_t result = {};
   loom_module_t* module = nullptr;
@@ -103,6 +102,13 @@ static ModulePtr ReadModuleBytecode(const std::vector<uint8_t>& bytes,
       &result, &module, iree_allocator_system()));
   IREE_ASSERT(result.error_count == 0);
   IREE_ASSERT(module != nullptr);
+  const loom_verify_options_t verify_options = {
+      /*.sink=*/{},
+      /*.max_errors=*/20,
+  };
+  loom_verify_result_t verify_result = {};
+  IREE_CHECK_OK(loom_verify_module(module, &verify_options, &verify_result));
+  IREE_ASSERT(verify_result.error_count == 0);
   return ModulePtr(module);
 }
 

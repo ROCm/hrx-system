@@ -157,8 +157,6 @@ static iree_status_t loom_run_module_read_bytecode(
       options->source.data, (iree_host_size_t)options->source.size);
   loom_bytecode_read_options_t read_options = {
       .diagnostic_sink = options->diagnostic_sink,
-      .verify_module = false,
-      .verify_max_errors = options->max_errors,
   };
   loom_low_repr_environment_initialize(
       &session->low_descriptor_registry.registry,

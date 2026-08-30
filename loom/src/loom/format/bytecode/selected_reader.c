@@ -8,7 +8,6 @@
 
 #include "loom/format/bytecode/reader/selected_materializer.h"
 #include "loom/format/bytecode/reader/validation.h"
-#include "loom/verify/verify.h"
 
 static iree_status_t loom_bytecode_validate_symbol_selection(
     const loom_bytecode_file_metadata_t* metadata, uint16_t module_ordinal,
@@ -99,17 +98,6 @@ iree_status_t loom_bytecode_materialize_module_symbols(
       &materializer, selection.ordinals, selection.count, &output_module);
   status = loom_bytecode_reader_normalize_diagnosed_error(
       status, out_result->error_count);
-  if (iree_status_is_ok(status) && out_result->error_count == 0 && options &&
-      options->verify_module) {
-    loom_verify_result_t verify_result = {0};
-    const loom_verify_options_t verify_options = {
-        .sink = options->diagnostic_sink,
-        .max_errors = options->verify_max_errors,
-    };
-    status = loom_verify_module(output_module, &verify_options, &verify_result);
-    out_result->error_count += verify_result.error_count;
-    out_result->warning_count += verify_result.warning_count;
-  }
   if (iree_status_is_ok(status) && out_result->error_count == 0) {
     *out_module = output_module;
     output_module = NULL;
@@ -133,11 +121,6 @@ iree_status_t loom_bytecode_materialize_module_symbols_into(
   IREE_ASSERT_ARGUMENT(out_result);
   IREE_ASSERT_ARGUMENT(output_module);
   *out_result = (loom_bytecode_read_result_t){0};
-  if (options && options->verify_module) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "incremental selected materialization cannot verify a partial module");
-  }
   const loom_bytecode_module_metadata_t* module_metadata = NULL;
   IREE_RETURN_IF_ERROR(loom_bytecode_validate_symbol_selection(
       metadata, module_ordinal, selection, &module_metadata));

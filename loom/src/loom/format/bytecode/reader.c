@@ -8,7 +8,6 @@
 
 #include "loom/format/bytecode/reader/materializer.h"
 #include "loom/format/bytecode/reader/validation.h"
-#include "loom/verify/verify.h"
 
 static iree_status_t loom_bytecode_read_module_impl(
     iree_const_byte_span_t bytecode, iree_string_view_t filename,
@@ -67,17 +66,6 @@ static iree_status_t loom_bytecode_read_module_impl(
   }
   status = loom_bytecode_reader_normalize_diagnosed_error(
       status, reader.result.error_count);
-  if (iree_status_is_ok(status) && reader.result.error_count == 0 && options &&
-      options->verify_module) {
-    loom_verify_result_t verify_result = {0};
-    loom_verify_options_t verify_options = {
-        .sink = options->diagnostic_sink,
-        .max_errors = options->verify_max_errors,
-    };
-    status = loom_verify_module(output_module, &verify_options, &verify_result);
-    reader.result.error_count += verify_result.error_count;
-    reader.result.warning_count += verify_result.warning_count;
-  }
 
   if (iree_status_is_ok(status)) {
     *out_result = reader.result;

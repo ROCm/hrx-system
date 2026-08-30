@@ -31,6 +31,17 @@ iree_py_library(
 
 iree_py_library(
   NAME
+    lower_capabilities_module
+  SRCS
+    "amdgpu_lower_capabilities.py"
+  DEPS
+    loom::py::loom::gen::target::arch::amdgpu::descriptors::package_init
+    loom::py::loom::gen::support::support
+    loom::py::loom::target::low_descriptors
+)
+
+iree_py_library(
+  NAME
     descriptors_module
   SRCS
     "amdgpu_descriptors.py"
@@ -43,6 +54,25 @@ iree_py_library(
     loom::py::loom::target::arch::amdgpu::descriptors
     loom::py::loom::target::arch::amdgpu::isa_xml
     loom::py::loom::target::arch::amdgpu::target_info
+)
+
+iree_py_test(
+  NAME
+    lower_capabilities_test
+  MAIN
+    "../../../../../tools/pytest_style_runner.py"
+  SRCS
+    "amdgpu_lower_capabilities_test.py"
+    "../../../../../tools/pytest_style_runner.py"
+  ARGS
+    "loom.gen.target.arch.amdgpu.descriptors.amdgpu_lower_capabilities_test"
+  DEPS
+    loom::py::loom::gen::target::arch::amdgpu::descriptors::lower_capabilities_module
+    loom::py::loom::target::low_descriptors
+  PACKAGE_DIRS
+    "${PROJECT_SOURCE_DIR}/loom/py"
+    "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
 )
 
 iree_py_library(
@@ -110,6 +140,7 @@ iree_py_library(
   SRCS
     "amdgpu_descriptor_tables.py"
   DEPS
+    loom::py::loom::gen::target::arch::amdgpu::descriptors::lower_capabilities_module
     loom::py::loom::gen::target::arch::amdgpu::descriptors::package_init
     loom::py::loom::gen::target::arch::amdgpu::descriptors::planning_table_inputs
     loom::py::loom::gen::target::arch::amdgpu::descriptors::vopd_component_tables_module

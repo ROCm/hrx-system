@@ -444,6 +444,7 @@ loom_cc_test(
     loom::target::provider
     loom::testing::module_ptr
     loom::transforms::symbol::template_selection
+    loom::verify
   LABELS
     "iree-build-requirement=loom.target.arch.amdgpu"
 )

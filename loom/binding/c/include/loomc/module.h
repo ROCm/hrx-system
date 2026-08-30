@@ -715,6 +715,51 @@ LOOMC_API_EXPORT loomc_status_t loomc_module_serialize_to_source(
     const loomc_module_serialize_options_t* options,
     loomc_allocator_t allocator, loomc_source_t** out_source);
 
+/// Serializes a module as textual `.loom` into an immutable source handle.
+///
+/// This format-specific entry point bypasses generic format dispatch, allowing
+/// link-time optimization to omit the bytecode writer when no used API can
+/// select it. `options->format` may be unknown or text; specifying any other
+/// format is an invalid argument.
+///
+/// @param module Module to serialize.
+/// @param options Serialization options. `NULL` selects the default text
+/// presentation and identifier.
+/// @param allocator Host allocator used for source-owned storage.
+/// @param out_source Receives one retained text source on success.
+/// @return OK when serialization succeeded.
+///
+/// @ownership
+/// The returned source and projected-target behavior follow the ownership and
+/// lifetime contract of `loomc_module_serialize_to_source`.
+LOOMC_API_EXPORT loomc_status_t loomc_module_serialize_text_to_source(
+    const loomc_module_t* module,
+    const loomc_module_serialize_options_t* options,
+    loomc_allocator_t allocator, loomc_source_t** out_source);
+
+/// Serializes a module as `.loombc` bytecode into an immutable source handle.
+///
+/// This format-specific entry point bypasses generic format dispatch, allowing
+/// link-time optimization to omit the text printer when no used API can select
+/// it. `options->format` may be unknown or bytecode; specifying any other
+/// format is an invalid argument. Text presentation options are accepted for
+/// structure compatibility and have no effect on bytecode output.
+///
+/// @param module Module to serialize.
+/// @param options Serialization options. `NULL` selects the default bytecode
+/// identifier.
+/// @param allocator Host allocator used for source-owned storage.
+/// @param out_source Receives one retained bytecode source on success.
+/// @return OK when serialization succeeded.
+///
+/// @ownership
+/// The returned source and projected-target behavior follow the ownership and
+/// lifetime contract of `loomc_module_serialize_to_source`.
+LOOMC_API_EXPORT loomc_status_t loomc_module_serialize_bytecode_to_source(
+    const loomc_module_t* module,
+    const loomc_module_serialize_options_t* options,
+    loomc_allocator_t allocator, loomc_source_t** out_source);
+
 /// Serializes a module to an open C `FILE*`.
 ///
 /// @param module Module to serialize.
@@ -771,6 +816,64 @@ LOOMC_API_EXPORT loomc_status_t loomc_module_serialize_to_path(
 /// `workspace`; keeping it live across `loomc_workspace_trim` keeps those
 /// blocks live.
 LOOMC_API_EXPORT loomc_status_t loomc_module_deserialize_from_source(
+    loomc_context_t* context, loomc_workspace_t* workspace,
+    const loomc_source_t* source,
+    const loomc_module_deserialize_options_t* options,
+    loomc_allocator_t allocator, loomc_module_t** out_module,
+    loomc_result_t** out_result);
+
+/// Deserializes a source handle as textual `.loom` into a mutable module.
+///
+/// This format-specific entry point bypasses source-format and bytecode-magic
+/// inference, allowing link-time optimization to omit the bytecode reader when
+/// no used API can select it. `options->format` may be unknown or text;
+/// specifying any other format is an invalid argument. The format metadata
+/// carried by `source` is not consulted.
+///
+/// @param context Context used to resolve Loom dialect and assembly metadata.
+/// @param workspace Workspace used to allocate module IR storage.
+/// @param source Source bytes to parse as textual `.loom`.
+/// @param options Deserialization options. `NULL` uses the source identifier.
+/// @param allocator Host allocator used for module handle storage.
+/// @param out_module Receives a retained module when the result succeeds.
+/// Receives `NULL` when the result fails.
+/// @param out_result Receives a retained result for the operation.
+/// @return OK when deserialization ran to a result. Non-OK statuses represent
+/// API misuse or infrastructure failures before a result could be produced.
+///
+/// @ownership
+/// The returned module and result follow the ownership and lifetime contract
+/// of `loomc_module_deserialize_from_source`.
+LOOMC_API_EXPORT loomc_status_t loomc_module_deserialize_text_from_source(
+    loomc_context_t* context, loomc_workspace_t* workspace,
+    const loomc_source_t* source,
+    const loomc_module_deserialize_options_t* options,
+    loomc_allocator_t allocator, loomc_module_t** out_module,
+    loomc_result_t** out_result);
+
+/// Deserializes a source handle as `.loombc` bytecode into a mutable module.
+///
+/// This format-specific entry point bypasses source-format and bytecode-magic
+/// inference, allowing link-time optimization to omit the text parser when no
+/// used API can select it. `options->format` may be unknown or bytecode;
+/// specifying any other format is an invalid argument. The format metadata
+/// carried by `source` is not consulted.
+///
+/// @param context Context used to resolve Loom dialect and bytecode metadata.
+/// @param workspace Workspace used to allocate module IR storage.
+/// @param source Source bytes to decode as `.loombc` bytecode.
+/// @param options Deserialization options. `NULL` uses the source identifier.
+/// @param allocator Host allocator used for module handle storage.
+/// @param out_module Receives a retained module when the result succeeds.
+/// Receives `NULL` when the result fails.
+/// @param out_result Receives a retained result for the operation.
+/// @return OK when deserialization ran to a result. Non-OK statuses represent
+/// API misuse or infrastructure failures before a result could be produced.
+///
+/// @ownership
+/// The returned module and result follow the ownership and lifetime contract
+/// of `loomc_module_deserialize_from_source`.
+LOOMC_API_EXPORT loomc_status_t loomc_module_deserialize_bytecode_from_source(
     loomc_context_t* context, loomc_workspace_t* workspace,
     const loomc_source_t* source,
     const loomc_module_deserialize_options_t* options,

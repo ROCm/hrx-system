@@ -53,6 +53,28 @@ TEST(SourceTest, CopiesIdentifierAndRequestedContents) {
   loomc_source_release(source);
 }
 
+TEST(SourceTest, OwnsEmptyCopiedContentsWithoutFreeingBorrowedStorage) {
+  char contents[] = "borrowed-empty-storage";
+  loomc_source_options_t options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
+      /*.structure_size=*/sizeof(options),
+      /*.next=*/nullptr,
+      /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
+      /*.identifier=*/loomc_make_cstring_view("empty.loom"),
+      /*.contents=*/loomc_make_byte_span(contents, 0),
+      /*.storage=*/LOOMC_SOURCE_STORAGE_COPY,
+  };
+  loomc_source_t* source = nullptr;
+  LOOMC_ASSERT_OK(
+      loomc_source_create(&options, loomc_allocator_system(), &source));
+  SourcePtr source_ptr(source);
+
+  const loomc_byte_span_t copied_contents =
+      loomc_source_contents(source_ptr.get());
+  EXPECT_EQ(copied_contents.data, nullptr);
+  EXPECT_EQ(copied_contents.data_length, 0u);
+}
+
 TEST(SourceTest, BorrowsContents) {
   char contents[] = "borrowed";
   loomc_source_options_t options = {

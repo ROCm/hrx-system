@@ -12,6 +12,7 @@
 #include "loom/codegen/low/builder.h"
 #include "loom/ir/facts.h"
 #include "loom/ops/kernel/ops.h"
+#include "loom/target/arch/amdgpu/descriptors/lower_capabilities.h"
 #include "loom/target/arch/amdgpu/lower/candidates/async_gather_candidates.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
 #include "loom/target/arch/amdgpu/lower/legality.h"
@@ -1536,8 +1537,13 @@ iree_status_t loom_amdgpu_low_legality_verify_kernel_async(
 
   switch (op->kind) {
     case LOOM_OP_KERNEL_TENSOR_LDS_DESCRIPTOR:
+#if LOOM_AMDGPU_LOWER_CAPABILITY_ASYNC_TENSOR_LOAD_TO_LDS
       return loom_amdgpu_low_legality_verify_kernel_tensor_descriptor(context,
                                                                       op);
+#else
+      return loom_amdgpu_low_legality_reject(
+          context, op, IREE_SV("tensor_memory.provider_required"));
+#endif  // LOOM_AMDGPU_LOWER_CAPABILITY_ASYNC_TENSOR_LOAD_TO_LDS
     case LOOM_OP_KERNEL_ASYNC_GROUP:
       return loom_amdgpu_low_legality_verify_kernel_async_group(context, op);
     case LOOM_OP_KERNEL_ASYNC_WAIT:
@@ -1545,10 +1551,20 @@ iree_status_t loom_amdgpu_low_legality_verify_kernel_async(
     case LOOM_OP_KERNEL_ASYNC_GATHER:
       return loom_amdgpu_low_legality_verify_kernel_async_gather(context, op);
     case LOOM_OP_KERNEL_ASYNC_CLUSTER_GATHER:
+#if LOOM_AMDGPU_LOWER_CAPABILITY_ASYNC_CLUSTER_GATHER
       return loom_amdgpu_low_legality_verify_kernel_async_cluster_gather(
           context, op);
+#else
+      return loom_amdgpu_low_legality_reject(
+          context, op, IREE_SV("cluster_gather.descriptor_missing"));
+#endif  // LOOM_AMDGPU_LOWER_CAPABILITY_ASYNC_CLUSTER_GATHER
     case LOOM_OP_KERNEL_ASYNC_TENSOR_LOAD_TO_LDS:
+#if LOOM_AMDGPU_LOWER_CAPABILITY_ASYNC_TENSOR_LOAD_TO_LDS
       return loom_amdgpu_low_legality_verify_kernel_tensor_load(context, op);
+#else
+      return loom_amdgpu_low_legality_reject(
+          context, op, IREE_SV("tensor_memory.provider_required"));
+#endif  // LOOM_AMDGPU_LOWER_CAPABILITY_ASYNC_TENSOR_LOAD_TO_LDS
     case LOOM_OP_KERNEL_ASYNC_CLUSTER_GATHER_MASK:
     case LOOM_OP_KERNEL_ASYNC_COPY:
     case LOOM_OP_KERNEL_ASYNC_COPY_MASK:
