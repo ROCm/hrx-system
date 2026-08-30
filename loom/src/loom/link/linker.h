@@ -151,6 +151,11 @@ void loom_linker_free(loom_linker_t* linker);
 //   with the same authored name; compatible declaration contracts are merged
 //   into the selected definition.
 //
+// When |options->root_symbols| is non-empty, only the reachable closure is
+// added. Named anchors preserve their authored linkage until explicitly
+// finalized; reachable dependencies are internalized and cannot become
+// accidental outputs merely because their source definitions were public.
+//
 // The linker retains no pointers into |source_module| after this call returns.
 iree_status_t loom_linker_add_module(loom_linker_t* linker,
                                      const loom_module_t* source_module,
@@ -234,7 +239,9 @@ iree_status_t loom_linker_finish(loom_linker_t* linker,
 // reachable from their attributes/regions. A declaration that is superseded by
 // a reachable definition provides the structural insertion point for that
 // definition, so small harness modules can replace func.decl placeholders with
-// library definitions without concatenating the entire library.
+// library definitions without concatenating the entire library. Reachable
+// dependencies are internalized; only explicitly named roots preserve their
+// requester-facing linkage surface.
 iree_status_t loom_link_materialized_modules(
     const loom_module_t* const* source_modules,
     iree_host_size_t source_module_count, const loom_link_options_t* options,

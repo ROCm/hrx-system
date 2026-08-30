@@ -364,6 +364,32 @@ func.def @unused(%x: i32) -> (i32) {
   EXPECT_EQ(text.find("func.def @unused"), std::string::npos);
 }
 
+TEST_F(LinkerTest, LinkRootInternalizesPublicDependencies) {
+  loom_module_t* module = Parse(IREE_SV(R"(
+func.def public @dependency(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+
+func.def public @root(%x: i32) -> (i32) {
+  %y = func.call @dependency(%x) : (i32) -> (i32)
+  func.return %y : i32
+}
+
+func.def public @unreachable(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+)"));
+
+  loom_module_t* linked = LinkRoots({module}, {IREE_SV("@root")});
+  Verify(linked);
+
+  const std::string text = Print(linked);
+  EXPECT_NE(text.find("func.def public retain @root"), std::string::npos);
+  EXPECT_NE(text.find("func.def @dependency"), std::string::npos);
+  EXPECT_EQ(text.find("func.def public @dependency"), std::string::npos);
+  EXPECT_EQ(text.find("@unreachable"), std::string::npos);
+}
+
 TEST_F(LinkerTest, LinkRootMaterializesApplyContractProviders) {
   loom_module_t* module = Parse(IREE_SV(R"(
 template.decl @demo.apply(%x: i32) -> (i32)

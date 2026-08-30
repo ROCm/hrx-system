@@ -118,6 +118,13 @@ typedef struct loom_linker_exact_symbol_op_t {
   iree_host_size_t selection_ordinal;
 } loom_linker_exact_symbol_op_t;
 
+enum loom_linker_live_symbol_bits_e {
+  // Symbol belongs to the root-filtered dependency closure.
+  LOOM_LINKER_LIVE_SYMBOL_SELECTED = 1u << 0,
+  // Symbol was named as an explicit root rather than reached as a dependency.
+  LOOM_LINKER_LIVE_SYMBOL_ROOT = 1u << 1,
+};
+
 static bool loom_linker_exact_symbol_op_less(
     const loom_linker_exact_symbol_op_t* lhs,
     const loom_linker_exact_symbol_op_t* rhs) {
@@ -139,7 +146,7 @@ typedef struct loom_linker_source_t {
   loom_symbol_ref_t* target_symbols;
   // Number of symbols in the source module.
   iree_host_size_t source_symbol_count;
-  // Source symbols selected by this add operation.
+  // Source symbol selection bits from loom_linker_live_symbol_bits_e.
   uint8_t* live_symbols;
   // Source symbols whose outgoing dependency edges have been scanned.
   uint8_t* scanned_symbols;
@@ -1380,7 +1387,7 @@ static iree_status_t loom_linker_mark_source_symbol_live(
   loom_symbol_ref_t target_ref = loom_symbol_ref_null();
   IREE_RETURN_IF_ERROR(
       loom_linker_map_source_symbol(source, source_symbol_id, &target_ref));
-  source->live_symbols[source_symbol_id] = 1;
+  source->live_symbols[source_symbol_id] |= LOOM_LINKER_LIVE_SYMBOL_SELECTED;
   return iree_ok_status();
 }
 
@@ -1518,6 +1525,7 @@ static iree_status_t loom_linker_mark_root_symbols_live(
       }
       IREE_RETURN_IF_ERROR(
           loom_linker_mark_source_symbol_live(source, (uint16_t)symbol_index));
+      source->live_symbols[symbol_index] |= LOOM_LINKER_LIVE_SYMBOL_ROOT;
     }
   }
   return iree_ok_status();
@@ -1644,7 +1652,11 @@ static iree_status_t loom_linker_clone_module_body(
         source, source_ref.symbol_id, &target_ref));
     IREE_RETURN_IF_ERROR(loom_linker_clone_or_merge_symbol_op(
         source, source_ref.symbol_id, target_ref,
-        LOOM_LINKER_SYMBOL_OUTPUT_AUTHORED));
+        source->root_filtered &&
+                !iree_all_bits_set(source->live_symbols[source_ref.symbol_id],
+                                   LOOM_LINKER_LIVE_SYMBOL_ROOT)
+            ? LOOM_LINKER_SYMBOL_OUTPUT_DEPENDENCY
+            : LOOM_LINKER_SYMBOL_OUTPUT_AUTHORED));
   }
   return iree_ok_status();
 }
@@ -1790,7 +1802,19 @@ iree_status_t loom_linker_add_module(loom_linker_t* linker,
       loom_ir_remap_symbol_callback_make(loom_linker_remap_symbol, &source);
 
   iree_status_t status = iree_ok_status();
-  if (source.source_symbol_count > 0) {
+  if (source.root_filtered) {
+    iree_host_size_t required_capacity = 0;
+    if (!iree_host_size_checked_add(linker->target_module->symbols.count,
+                                    source.source_symbol_count,
+                                    &required_capacity)) {
+      status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                "linked symbol table is too large");
+    } else {
+      status =
+          loom_linker_ensure_planned_symbol_capacity(linker, required_capacity);
+    }
+  }
+  if (iree_status_is_ok(status) && source.source_symbol_count > 0) {
     status = iree_arena_allocate_array(
         &source_arena, source.source_symbol_count,
         sizeof(*source.target_symbols), (void**)&source.target_symbols);
