@@ -48,12 +48,13 @@ WorkspacePtr CreateWorkspace() {
   return WorkspacePtr(workspace);
 }
 
-SourcePtr CreateTextSource(const char* identifier, const char* contents) {
+SourcePtr CreateSource(loomc_source_format_t format, const char* identifier,
+                       const char* contents) {
   loomc_source_options_t options = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
       /*.structure_size=*/sizeof(options),
       /*.next=*/nullptr,
-      /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
+      /*.format=*/format,
       /*.identifier=*/loomc_make_cstring_view(identifier),
       /*.contents=*/loomc_make_byte_span(contents, strlen(contents)),
       /*.storage=*/LOOMC_SOURCE_STORAGE_COPY,
@@ -63,6 +64,10 @@ SourcePtr CreateTextSource(const char* identifier, const char* contents) {
       loomc_source_create(&options, loomc_allocator_system(), &source);
   LOOMC_EXPECT_OK(status);
   return SourcePtr(source);
+}
+
+SourcePtr CreateTextSource(const char* identifier, const char* contents) {
+  return CreateSource(LOOMC_SOURCE_FORMAT_TEXT, identifier, contents);
 }
 
 std::string ToString(loomc_string_view_t value) {
@@ -97,12 +102,12 @@ void ExpectFailedResultCode(const loomc_result_t* result, const char* code) {
   EXPECT_TRUE(found);
 }
 
-ModulePtr DeserializeModule(loomc_context_t* context,
-                            loomc_workspace_t* workspace,
-                            const loomc_source_t* source) {
+ModulePtr DeserializeTextModule(loomc_context_t* context,
+                                loomc_workspace_t* workspace,
+                                const loomc_source_t* source) {
   loomc_module_t* module = nullptr;
   loomc_result_t* result = nullptr;
-  loomc_status_t status = loomc_module_deserialize_from_source(
+  loomc_status_t status = loomc_module_deserialize_text_from_source(
       context, workspace, source, nullptr, loomc_allocator_system(), &module,
       &result);
   LOOMC_EXPECT_OK(status);
@@ -130,7 +135,7 @@ kernel.def export("dispatch") @entry() {
   kernel.return
 }
 )");
-  return DeserializeModule(context, workspace, source.get());
+  return DeserializeTextModule(context, workspace, source.get());
 }
 
 ModulePtr CreateMixedSymbolModule(loomc_context_t* context,
@@ -151,7 +156,157 @@ kernel.def export("dispatch") @entry() {
   kernel.return
 }
 )");
-  return DeserializeModule(context, workspace, source.get());
+  return DeserializeTextModule(context, workspace, source.get());
+}
+
+TEST(ModuleTest, ExplicitSourceFormatsBypassMetadataAndRoundTrip) {
+  ContextPtr context = CreateContext();
+  WorkspacePtr workspace = CreateWorkspace();
+  SourcePtr text_source =
+      CreateSource(LOOMC_SOURCE_FORMAT_BYTECODE, "explicit.loom", R"(
+func.def public @identity(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+)");
+  ModulePtr text_module =
+      DeserializeTextModule(context.get(), workspace.get(), text_source.get());
+  ASSERT_NE(text_module.get(), nullptr);
+
+  loomc_module_serialize_options_t text_serialize_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
+      /*.structure_size=*/sizeof(text_serialize_options),
+      /*.next=*/nullptr,
+      /*.format=*/LOOMC_SOURCE_FORMAT_UNKNOWN,
+      /*.identifier=*/loomc_make_cstring_view("roundtrip.loom"),
+  };
+  loomc_source_t* serialized_text_source = nullptr;
+  LOOMC_ASSERT_OK(loomc_module_serialize_text_to_source(
+      text_module.get(), &text_serialize_options, loomc_allocator_system(),
+      &serialized_text_source));
+  SourcePtr serialized_text_source_ptr(serialized_text_source);
+  EXPECT_EQ(loomc_source_format(serialized_text_source_ptr.get()),
+            LOOMC_SOURCE_FORMAT_TEXT);
+  EXPECT_EQ(ToString(loomc_source_identifier(serialized_text_source_ptr.get())),
+            "roundtrip.loom");
+
+  loomc_module_serialize_options_t serialize_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
+      /*.structure_size=*/sizeof(serialize_options),
+      /*.next=*/nullptr,
+      /*.format=*/LOOMC_SOURCE_FORMAT_UNKNOWN,
+      /*.identifier=*/loomc_make_cstring_view("explicit.loombc"),
+  };
+  loomc_source_t* bytecode_source = nullptr;
+  LOOMC_ASSERT_OK(loomc_module_serialize_bytecode_to_source(
+      text_module.get(), &serialize_options, loomc_allocator_system(),
+      &bytecode_source));
+  SourcePtr bytecode_source_ptr(bytecode_source);
+  EXPECT_EQ(loomc_source_format(bytecode_source_ptr.get()),
+            LOOMC_SOURCE_FORMAT_BYTECODE);
+
+  const loomc_source_options_t mislabeled_bytecode_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
+      /*.structure_size=*/sizeof(mislabeled_bytecode_options),
+      /*.next=*/nullptr,
+      /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
+      /*.identifier=*/loomc_make_cstring_view("explicit.loombc"),
+      /*.contents=*/loomc_source_contents(bytecode_source_ptr.get()),
+      /*.storage=*/LOOMC_SOURCE_STORAGE_COPY,
+  };
+  loomc_source_t* mislabeled_bytecode_source = nullptr;
+  LOOMC_ASSERT_OK(loomc_source_create(&mislabeled_bytecode_options,
+                                      loomc_allocator_system(),
+                                      &mislabeled_bytecode_source));
+  SourcePtr mislabeled_bytecode_source_ptr(mislabeled_bytecode_source);
+
+  loomc_module_t* bytecode_module = nullptr;
+  loomc_result_t* bytecode_result = nullptr;
+  LOOMC_ASSERT_OK(loomc_module_deserialize_bytecode_from_source(
+      context.get(), workspace.get(), mislabeled_bytecode_source_ptr.get(),
+      nullptr, loomc_allocator_system(), &bytecode_module, &bytecode_result));
+  ModulePtr bytecode_module_ptr(bytecode_module);
+  ResultPtr bytecode_result_ptr(bytecode_result);
+  ExpectSucceededResult(bytecode_result_ptr.get());
+}
+
+TEST(ModuleTest, RejectsContradictoryExplicitSerializeFormat) {
+  ContextPtr context = CreateContext();
+  WorkspacePtr workspace = CreateWorkspace();
+  SourcePtr source = CreateTextSource("explicit.loom", "");
+  ModulePtr module =
+      DeserializeTextModule(context.get(), workspace.get(), source.get());
+  loomc_module_serialize_options_t options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
+      /*.structure_size=*/sizeof(options),
+      /*.next=*/nullptr,
+      /*.format=*/LOOMC_SOURCE_FORMAT_BYTECODE,
+  };
+  loomc_source_t* serialized_source = reinterpret_cast<loomc_source_t*>(0x1);
+  loomc_status_t status = loomc_module_serialize_text_to_source(
+      module.get(), &options, loomc_allocator_system(), &serialized_source);
+  LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_INVALID_ARGUMENT, status);
+  EXPECT_EQ(serialized_source, nullptr);
+}
+
+TEST(ModuleTest, RejectsMalformedSerializeIdentifier) {
+  ContextPtr context = CreateContext();
+  WorkspacePtr workspace = CreateWorkspace();
+  SourcePtr source = CreateTextSource("explicit.loom", "");
+  ModulePtr module =
+      DeserializeTextModule(context.get(), workspace.get(), source.get());
+  loomc_module_serialize_options_t options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
+      /*.structure_size=*/sizeof(options),
+      /*.next=*/nullptr,
+      /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
+      /*.identifier=*/loomc_make_string_view(nullptr, 1),
+  };
+  loomc_source_t* serialized_source = reinterpret_cast<loomc_source_t*>(0x1);
+  loomc_status_t status = loomc_module_serialize_text_to_source(
+      module.get(), &options, loomc_allocator_system(), &serialized_source);
+  LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_INVALID_ARGUMENT, status);
+  EXPECT_EQ(serialized_source, nullptr);
+}
+
+TEST(ModuleTest, RejectsContradictoryExplicitSourceFormat) {
+  ContextPtr context = CreateContext();
+  WorkspacePtr workspace = CreateWorkspace();
+  SourcePtr source = CreateTextSource("explicit.loom", "module {}\n");
+  loomc_module_deserialize_options_t options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_DESERIALIZE_OPTIONS,
+      /*.structure_size=*/sizeof(options),
+      /*.next=*/nullptr,
+      /*.format=*/LOOMC_SOURCE_FORMAT_BYTECODE,
+  };
+  loomc_module_t* module = reinterpret_cast<loomc_module_t*>(0x1);
+  loomc_result_t* result = reinterpret_cast<loomc_result_t*>(0x1);
+  loomc_status_t status = loomc_module_deserialize_text_from_source(
+      context.get(), workspace.get(), source.get(), &options,
+      loomc_allocator_system(), &module, &result);
+  LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_INVALID_ARGUMENT, status);
+  EXPECT_EQ(module, nullptr);
+  EXPECT_EQ(result, nullptr);
+}
+
+TEST(ModuleTest, RejectsMalformedDeserializeIdentifier) {
+  ContextPtr context = CreateContext();
+  WorkspacePtr workspace = CreateWorkspace();
+  SourcePtr source = CreateTextSource("explicit.loom", "module {}\n");
+  loomc_module_deserialize_options_t options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_DESERIALIZE_OPTIONS,
+      /*.structure_size=*/sizeof(options),
+      /*.next=*/nullptr,
+      /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
+      /*.identifier=*/loomc_make_string_view(nullptr, 1),
+  };
+  loomc_module_t* module = reinterpret_cast<loomc_module_t*>(0x1);
+  loomc_result_t* result = reinterpret_cast<loomc_result_t*>(0x1);
+  loomc_status_t status = loomc_module_deserialize_text_from_source(
+      context.get(), workspace.get(), source.get(), &options,
+      loomc_allocator_system(), &module, &result);
+  LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_INVALID_ARGUMENT, status);
+  EXPECT_EQ(module, nullptr);
+  EXPECT_EQ(result, nullptr);
 }
 
 const loomc_module_function_t* FindFunction(
