@@ -83,6 +83,16 @@ _STRUCTURAL_VECTOR_TYPES = (
     "f32",
     "f64",
 )
+_VECTOR_SELECT_TYPES = (
+    "i8",
+    "i16",
+    "i32",
+    "i64",
+    "f16",
+    "bf16",
+    "f32",
+    "f64",
+)
 _MEMORY_VALUE_TYPES = (
     ("i8", 1),
     ("i16", 2),
@@ -679,20 +689,24 @@ def _select_descriptor(
     unit_count: int = 1,
     *,
     vector: bool = False,
+    uniform: bool = False,
 ) -> Descriptor:
+    if uniform and not vector:
+        raise ValueError("uniform selects require a vector result")
     suffix = _descriptor_suffix(type_name, unit_count, vector=vector)
+    descriptor_suffix = f"uniform.{suffix}" if uniform else suffix
     return Descriptor(
-        key=f"llvmir.select.{suffix}",
+        key=f"llvmir.select.{descriptor_suffix}",
         mnemonic="select",
-        semantic_tag=f"llvmir.select.{suffix}",
+        semantic_tag=f"llvmir.select.{descriptor_suffix}",
         operands=(
             _result(type_name, unit_count=unit_count),
-            _predicate("i1", unit_count=unit_count),
+            _predicate("i1", unit_count=1 if uniform else unit_count),
             _operand(type_name, "true_value", unit_count=unit_count),
             _operand(type_name, "false_value", unit_count=unit_count),
         ),
         asm_forms=_asm(
-            mnemonic=f"select.{suffix}",
+            mnemonic=f"select.{descriptor_suffix}",
             results=("dst",),
             operands=("condition", "true_value", "false_value"),
         ),
@@ -1079,19 +1093,32 @@ def _cast_descriptors() -> tuple[Descriptor, ...]:
 
 
 def _select_descriptors() -> tuple[Descriptor, ...]:
-    return tuple(
-        _select_descriptor(type_name, unit_count=unit_count)
-        for type_name, unit_count in (
-            ("i1", 1),
-            ("i32", 1),
-            ("i64", 1),
-            ("f32", 1),
-            ("f64", 1),
+    return (
+        tuple(
+            _select_descriptor(type_name, unit_count=unit_count)
+            for type_name, unit_count in (
+                ("i1", 1),
+                ("i32", 1),
+                ("i64", 1),
+                ("f32", 1),
+                ("f64", 1),
+            )
         )
-    ) + tuple(
-        _select_descriptor(type_name, unit_count=lane_count, vector=True)
-        for type_name in ("i8", "i16", "i32", "i64", "f16", "bf16", "f32", "f64")
-        for lane_count in _VECTOR_LANE_COUNTS
+        + tuple(
+            _select_descriptor(type_name, unit_count=lane_count, vector=True)
+            for type_name in _VECTOR_SELECT_TYPES
+            for lane_count in _VECTOR_LANE_COUNTS
+        )
+        + tuple(
+            _select_descriptor(
+                type_name,
+                unit_count=lane_count,
+                vector=True,
+                uniform=True,
+            )
+            for type_name in _VECTOR_SELECT_TYPES
+            for lane_count in _VECTOR_LANE_COUNTS
+        )
     )
 
 

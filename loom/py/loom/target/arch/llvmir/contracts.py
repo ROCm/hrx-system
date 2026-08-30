@@ -635,16 +635,19 @@ def _index_cast_alias_rule(
     )
 
 
-def _select_rule(type_pattern: TypePattern, descriptor_key: str) -> DescriptorRule:
+def _select_rule(
+    source_op: Op,
+    condition_type: TypePattern,
+    value_type: TypePattern,
+    descriptor_key: str,
+) -> DescriptorRule:
     descriptor = _descriptor(descriptor_key)
-    vector_select = type_pattern.kind == "vector"
-    condition_type = Vector("i1", lanes=type_pattern.lanes) if vector_select else _I1
     return DescriptorRule(
-        source_op=vector.vector_select if vector_select else scf.scf_select,
+        source_op=source_op,
         descriptor=descriptor,
         guards=(
             Guard.value_type("condition", condition_type),
-            *_typed_guards(("true_value", "false_value", "result"), type_pattern),
+            *_typed_guards(("true_value", "false_value", "result"), value_type),
         ),
         emit=(
             _op_emit(
@@ -2075,8 +2078,13 @@ def _index_cast_rules() -> tuple[DescriptorRule | ValueAliasRule, ...]:
 def _select_rules() -> tuple[DescriptorRule, ...]:
     return (
         tuple(
-            _select_rule(type_pattern, f"llvmir.select.{suffix}")
-            for type_pattern, suffix in (
+            _select_rule(
+                scf.scf_select,
+                _I1,
+                value_type,
+                f"llvmir.select.{suffix}",
+            )
+            for value_type, suffix in (
                 (_INDEX, "i64"),
                 (_OFFSET, "i64"),
                 (_I1, "i1"),
@@ -2088,6 +2096,8 @@ def _select_rules() -> tuple[DescriptorRule, ...]:
         )
         + tuple(
             _select_rule(
+                vector.vector_select,
+                _vector_type("i1", lane_count),
                 _vector_type(element, lane_count),
                 f"llvmir.select.{_vector_suffix(element, lane_count)}",
             )
@@ -2095,7 +2105,32 @@ def _select_rules() -> tuple[DescriptorRule, ...]:
             for lane_count in _VECTOR_LANE_COUNTS
         )
         + tuple(
-            _select_rule(_vector_type(element, 1), f"llvmir.select.{element}")
+            _select_rule(
+                vector.vector_select,
+                _vector_type("i1", 1),
+                _vector_type(element, 1),
+                f"llvmir.select.{element}",
+            )
+            for element in _VECTOR_SELECT_TYPES
+            if element in ("i32", "i64", "f32", "f64")
+        )
+        + tuple(
+            _select_rule(
+                scf.scf_select,
+                _I1,
+                _vector_type(element, lane_count),
+                f"llvmir.select.uniform.{_vector_suffix(element, lane_count)}",
+            )
+            for element in _VECTOR_SELECT_TYPES
+            for lane_count in _VECTOR_LANE_COUNTS
+        )
+        + tuple(
+            _select_rule(
+                scf.scf_select,
+                _I1,
+                _vector_type(element, 1),
+                f"llvmir.select.{element}",
+            )
             for element in _VECTOR_SELECT_TYPES
             if element in ("i32", "i64", "f32", "f64")
         )

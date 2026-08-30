@@ -193,8 +193,7 @@ func.def target(@target) @i8_scalar_mask_select(%lhs: i32, %rhs: i32, %true_valu
 // ----
 low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i8_scalar_mask_select(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>, %true_value: reg<llvmir.i8 x4>, %false_value: reg<llvmir.i8 x4>) -> (reg<llvmir.i8 x4>) asm {
   %condition = cmp.slt.i32 %lhs, %rhs
-  %mask = splat.v4i1 %condition
-  %selected = select.v4i8 %mask, %true_value, %false_value
+  %selected = select.uniform.v4i8 %condition, %true_value, %false_value
   return %selected
 }
 
@@ -212,8 +211,7 @@ func.def target(@target) @i8_repeated_element_scalar_mask_select(%lhs: i32, %rhs
 // ----
 low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i8_repeated_element_scalar_mask_select(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>, %true_value: reg<llvmir.i8 x4>, %false_value: reg<llvmir.i8 x4>) -> (reg<llvmir.i8 x4>) asm {
   %condition = cmp.slt.i32 %lhs, %rhs
-  %mask = splat.v4i1 %condition
-  %selected = select.v4i8 %mask, %true_value, %false_value
+  %selected = select.uniform.v4i8 %condition, %true_value, %false_value
   return %selected
 }
 
@@ -231,8 +229,7 @@ func.def target(@target) @i16_scalar_mask_select(%lhs: i32, %rhs: i32, %true_val
 // ----
 low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i16_scalar_mask_select(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>, %true_value: reg<llvmir.i16 x2>, %false_value: reg<llvmir.i16 x2>) -> (reg<llvmir.i16 x2>) asm {
   %condition = cmp.slt.i32 %lhs, %rhs
-  %mask = splat.v2i1 %condition
-  %selected = select.v2i16 %mask, %true_value, %false_value
+  %selected = select.uniform.v2i16 %condition, %true_value, %false_value
   return %selected
 }
 
@@ -250,8 +247,7 @@ func.def target(@target) @bf16_scalar_mask_select_v4(%lhs: i32, %rhs: i32, %true
 // ----
 low.func.def target<llvmir.generic.core>(@target) abi(object_function) @bf16_scalar_mask_select_v4(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>, %true_value: reg<llvmir.bf16 x4>, %false_value: reg<llvmir.bf16 x4>) -> (reg<llvmir.bf16 x4>) asm {
   %condition = cmp.slt.i32 %lhs, %rhs
-  %mask = splat.v4i1 %condition
-  %selected = select.v4bf16 %mask, %true_value, %false_value
+  %selected = select.uniform.v4bf16 %condition, %true_value, %false_value
   return %selected
 }
 
@@ -269,8 +265,7 @@ func.def target(@target) @bf16_scalar_mask_select_v16(%lhs: i32, %rhs: i32, %tru
 // ----
 low.func.def target<llvmir.generic.core>(@target) abi(object_function) @bf16_scalar_mask_select_v16(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>, %true_value: reg<llvmir.bf16 x16>, %false_value: reg<llvmir.bf16 x16>) -> (reg<llvmir.bf16 x16>) asm {
   %condition = cmp.slt.i32 %lhs, %rhs
-  %mask = splat.v16i1 %condition
-  %selected = select.v16bf16 %mask, %true_value, %false_value
+  %selected = select.uniform.v16bf16 %condition, %true_value, %false_value
   return %selected
 }
 
@@ -288,8 +283,7 @@ func.def target(@target) @f16_scalar_mask_select_v4(%lhs: i32, %rhs: i32, %true_
 // ----
 low.func.def target<llvmir.generic.core>(@target) abi(object_function) @f16_scalar_mask_select_v4(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>, %true_value: reg<llvmir.f16 x4>, %false_value: reg<llvmir.f16 x4>) -> (reg<llvmir.f16 x4>) asm {
   %condition = cmp.slt.i32 %lhs, %rhs
-  %mask = splat.v4i1 %condition
-  %selected = select.v4f16 %mask, %true_value, %false_value
+  %selected = select.uniform.v4f16 %condition, %true_value, %false_value
   return %selected
 }
 
