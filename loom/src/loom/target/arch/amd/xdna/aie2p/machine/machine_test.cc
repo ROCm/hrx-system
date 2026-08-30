@@ -6,6 +6,8 @@
 
 #include "loom/target/arch/amd/xdna/aie2p/machine/machine.h"
 
+#include <string>
+
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/target/arch/amd/xdna/aie2p/encoding/encoding.h"
@@ -15,8 +17,8 @@ namespace {
 TEST(MachineTest, CompleteTableCounts) {
   EXPECT_EQ(loom_aie2p_machine_atomic_unit_count(), 207);
   EXPECT_EQ(loom_aie2p_machine_physical_register_count(), 359);
-  EXPECT_EQ(loom_aie2p_machine_register_class_count(), 368);
-  EXPECT_EQ(loom_aie2p_machine_register_adapter_count(), 58);
+  EXPECT_EQ(loom_aie2p_machine_register_class_count(), 369);
+  EXPECT_EQ(loom_aie2p_machine_register_adapter_count(), 61);
   EXPECT_EQ(loom_aie2p_machine_immediate_count(), 21);
   EXPECT_EQ(loom_aie2p_machine_form_count(), 880);
 }
@@ -113,6 +115,47 @@ TEST(MachineTest, QRegisterAdaptersFollowArchitecturalDecoder) {
           loom_aie2p_machine_encode_register(adapter, register_id, &value));
       EXPECT_EQ(value, i);
     }
+  }
+}
+
+TEST(MachineTest, CrossWidthPredicateAdaptersProjectScalarHalves) {
+  const loom_aie2p_register_class_id_t predicate_class =
+      loom_aie2p_machine_find_register_class(IREE_SV("eLPredicate"));
+  ASSERT_NE(predicate_class, LOOM_AIE2P_REGISTER_CLASS_ID_INVALID);
+  loom_aie2p_register_class_info_t class_info;
+  ASSERT_TRUE(
+      loom_aie2p_machine_query_register_class(predicate_class, &class_info));
+  EXPECT_EQ(class_info.candidate_count, 8);
+
+  const loom_aie2p_register_adapter_id_t low_adapter =
+      loom_aie2p_machine_find_register_adapter(IREE_SV("LOOM_eL_low32"));
+  const loom_aie2p_register_adapter_id_t high_adapter =
+      loom_aie2p_machine_find_register_adapter(IREE_SV("LOOM_eL_high32"));
+  const loom_aie2p_register_adapter_id_t lda_high_adapter =
+      loom_aie2p_machine_find_register_adapter(
+          IREE_SV("LOOM_eL_high32_OP_mLdaCg"));
+  ASSERT_NE(low_adapter, LOOM_AIE2P_REGISTER_ADAPTER_ID_INVALID);
+  ASSERT_NE(high_adapter, LOOM_AIE2P_REGISTER_ADAPTER_ID_INVALID);
+  ASSERT_NE(lda_high_adapter, LOOM_AIE2P_REGISTER_ADAPTER_ID_INVALID);
+
+  for (uint8_t i = 0; i < class_info.candidate_count; ++i) {
+    const loom_aie2p_physical_register_id_t register_id =
+        loom_aie2p_machine_register_class_candidate(predicate_class, i);
+    const std::string register_name = "l" + std::to_string(i + 8);
+    EXPECT_EQ(register_id,
+              loom_aie2p_machine_find_physical_register(iree_make_string_view(
+                  register_name.data(), register_name.size())));
+
+    uint8_t value = UINT8_MAX;
+    ASSERT_TRUE(
+        loom_aie2p_machine_encode_register(low_adapter, register_id, &value));
+    EXPECT_EQ(value, 16 + 2 * i);
+    ASSERT_TRUE(
+        loom_aie2p_machine_encode_register(high_adapter, register_id, &value));
+    EXPECT_EQ(value, 17 + 2 * i);
+    ASSERT_TRUE(loom_aie2p_machine_encode_register(lda_high_adapter,
+                                                   register_id, &value));
+    EXPECT_EQ(value, 68 + 8 * i);
   }
 }
 

@@ -22,8 +22,8 @@ def test_core_machine_table_is_structurally_complete() -> None:
 
     assert len(CORE_MACHINE_TABLE.atomic_unit_names) == 207
     assert len(CORE_MACHINE_TABLE.physical_registers) == 359
-    assert len(CORE_MACHINE_TABLE.register_classes) == 368
-    assert len(CORE_MACHINE_TABLE.register_adapters) == 58
+    assert len(CORE_MACHINE_TABLE.register_classes) == 369
+    assert len(CORE_MACHINE_TABLE.register_adapters) == 61
     assert len(CORE_MACHINE_TABLE.immediates) == 21
     assert len(CORE_MACHINE_TABLE.forms) == 880
     assert (
@@ -38,14 +38,14 @@ def test_core_machine_table_is_structurally_complete() -> None:
             len(register_class.candidates)
             for register_class in CORE_MACHINE_TABLE.register_classes
         )
-        == 3426
+        == 3434
     )
     assert (
         sum(
             len(adapter.register_encodings)
             for adapter in CORE_MACHINE_TABLE.register_adapters
         )
-        == 1518
+        == 1542
     )
     assert (
         len(
@@ -54,7 +54,7 @@ def test_core_machine_table_is_structurally_complete() -> None:
                 for adapter in CORE_MACHINE_TABLE.register_adapters
             }
         )
-        == 25
+        == 28
     )
     assert sum(len(form.ties) for form in CORE_MACHINE_TABLE.forms) == 386
     assert sum(len(form.implicit_defs) for form in CORE_MACHINE_TABLE.forms) == 387
@@ -93,6 +93,39 @@ def test_q_register_adapters_repair_source_encoder_aliasing() -> None:
     for name in ("OP_mQQsa", "OP_mQQsm", "OP_mQQss"):
         assert dict(adapters[name].register_encodings) == source_values
         assert dict(adapters[name].effective_register_encodings) == architectural_values
+
+
+def test_el_subregister_adapters_are_derived_from_owned_register_facts() -> None:
+    registers = {
+        register.name: register for register in CORE_MACHINE_TABLE.physical_registers
+    }
+    classes = {
+        register_class.name: register_class
+        for register_class in CORE_MACHINE_TABLE.register_classes
+    }
+    adapters = {
+        adapter.name: adapter for adapter in CORE_MACHINE_TABLE.register_adapters
+    }
+    lda_values = dict(adapters["OP_mLdaCg"].effective_register_encodings)
+    low_values = dict(adapters["LOOM_eL_low32"].effective_register_encodings)
+    high_values = dict(adapters["LOOM_eL_high32"].effective_register_encodings)
+    lda_high_values = dict(
+        adapters["LOOM_eL_high32_OP_mLdaCg"].effective_register_encodings
+    )
+
+    assert classes["eLPredicate"].candidates == tuple(
+        f"l{index}" for index in range(8, 16)
+    )
+    assert tuple(low_values) == classes["eLPredicate"].candidates
+    assert tuple(high_values) == classes["eLPredicate"].candidates
+    assert tuple(lda_high_values) == classes["eLPredicate"].candidates
+    for register_name in classes["eLPredicate"].candidates:
+        register = registers[register_name]
+        low_register, high_register = register.subregisters
+        assert register.subregister_indices == ("sub_l_even", "sub_l_odd")
+        assert low_values[register_name] == registers[low_register].hardware_encoding
+        assert high_values[register_name] == registers[high_register].hardware_encoding
+        assert lda_high_values[register_name] == lda_values[high_register]
 
 
 def test_all_immediate_domains_round_trip_boundaries() -> None:
