@@ -44,13 +44,33 @@ static iree_status_t loom_aie2p_map_type(void* user_data,
       return loom_low_lower_make_register_type(
           context, AIE2P_CORE_REG_CLASS_ID_AIE2P_ELPREDICATE, 1, out_low_type);
     }
-    const bool fits_vec512 =
-        (element_type == LOOM_SCALAR_TYPE_I8 && lane_count <= 64) ||
-        (element_type == LOOM_SCALAR_TYPE_I16 && lane_count <= 32) ||
-        (element_type == LOOM_SCALAR_TYPE_I32 && lane_count <= 16);
-    if (lane_count > 0 && fits_vec512) {
+    uint32_t element_bits = 0;
+    switch (element_type) {
+      case LOOM_SCALAR_TYPE_I8:
+        element_bits = 8;
+        break;
+      case LOOM_SCALAR_TYPE_I16:
+        element_bits = 16;
+        break;
+      case LOOM_SCALAR_TYPE_I32:
+        element_bits = 32;
+        break;
+      default:
+        break;
+    }
+    if (lane_count > 0 && element_bits != 0 &&
+        lane_count <= 512 / element_bits) {
+      // Exact native W-memory shapes use one 256-bit storage unit. Smaller
+      // packed fragments retain the X carrier required by the selected vector
+      // ALU forms; logical bit width alone does not determine carrier width.
+      const bool is_native_w_shape =
+          (element_bits == 8 && (lane_count == 16 || lane_count == 32)) ||
+          (element_bits == 16 && (lane_count == 8 || lane_count == 16)) ||
+          (element_bits == 32 && (lane_count == 4 || lane_count == 8));
+      const uint32_t unit_count = is_native_w_shape ? 1 : 2;
       return loom_low_lower_make_register_type(
-          context, AIE2P_CORE_REG_CLASS_ID_AIE2P_VEC512, 1, out_low_type);
+          context, AIE2P_CORE_REG_CLASS_ID_AIE2P_VEC256, unit_count,
+          out_low_type);
     }
   }
   return loom_low_lower_emit_source_type_unsupported(

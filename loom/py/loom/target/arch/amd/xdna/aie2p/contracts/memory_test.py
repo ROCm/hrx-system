@@ -88,29 +88,35 @@ def test_scalar_memory_rules_cover_every_address_form() -> None:
         assert constraint.minimum_alignment == 4
 
 
-def test_vector_memory_rules_cover_every_full_width_address_form() -> None:
+def test_vector_memory_rules_cover_every_native_width_and_address_form() -> None:
     rules = _rules_for(vector.vector_load, vector.vector_store)
-    assert len(rules) == 30
-    expected_shapes = (
-        (1, 64),
-        (1, 64),
-        (2, 32),
-        (2, 32),
-        (4, 16),
-        (4, 16),
+    assert len(rules) == 90
+    expected_families = tuple(
+        (
+            width_bits,
+            element_byte_count,
+            width_bits // (element_byte_count * 8),
+            operation,
+        )
+        for width_bits in (128, 256, 512)
+        for element_byte_count in (1, 2, 4)
+        for operation in (
+            SourceMemoryOperation.LOAD,
+            SourceMemoryOperation.STORE,
+        )
     )
-    expected_operations = (
-        SourceMemoryOperation.LOAD,
-        SourceMemoryOperation.STORE,
-    ) * 3
-    for family_index, ((element_byte_count, vector_lane_count), operation) in enumerate(
-        zip(expected_shapes, expected_operations, strict=True)
-    ):
+    for family_index, (
+        width_bits,
+        element_byte_count,
+        vector_lane_count,
+        operation,
+    ) in enumerate(expected_families):
         operation_rules = rules[family_index * 5 : family_index * 5 + 5]
+        shape = f"i{element_byte_count * 8}x{vector_lane_count}"
         descriptor_prefix = (
-            "amd.xdna.aie2p.load.a.i8x64.indexed"
+            f"amd.xdna.aie2p.load.a.{shape}.indexed"
             if operation is SourceMemoryOperation.LOAD
-            else "amd.xdna.aie2p.store.i8x64.indexed"
+            else f"amd.xdna.aie2p.store.{shape}.indexed"
         )
         assert [rule.descriptor.key for rule in operation_rules] == [
             f"{descriptor_prefix}.immediate",
@@ -118,8 +124,8 @@ def test_vector_memory_rules_cover_every_full_width_address_form() -> None:
         ]
         _assert_address_forms(
             operation_rules,
-            immediate_minimum=-512,
-            immediate_maximum=448,
+            immediate_minimum=-width_bits,
+            immediate_maximum=width_bits - width_bits // 8,
         )
         for rule in operation_rules:
             memory_emit = rule.emit[-1]
@@ -138,4 +144,4 @@ def test_vector_memory_rules_cover_every_full_width_address_form() -> None:
             assert constraint.element_byte_count == element_byte_count
             assert constraint.vector_lane_count == vector_lane_count
             assert constraint.vector_lane_byte_stride == element_byte_count
-            assert constraint.minimum_alignment == 64
+            assert constraint.minimum_alignment == width_bits // 8

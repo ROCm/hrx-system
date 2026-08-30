@@ -38,9 +38,27 @@ from loom.target.low_descriptors import Descriptor
 
 _I32 = Scalar("i32")
 _OFFSET = Scalar("offset")
+_I8X16 = Vector("i8", lanes=16)
+_I16X8 = Vector("i16", lanes=8)
+_I32X4 = Vector("i32", lanes=4)
+_I8X32 = Vector("i8", lanes=32)
+_I16X16 = Vector("i16", lanes=16)
+_I32X8 = Vector("i32", lanes=8)
 _I8X64 = Vector("i8", lanes=64)
 _I16X32 = Vector("i16", lanes=32)
 _I32X16 = Vector("i32", lanes=16)
+
+_VECTOR_MEMORY_SHAPES = (
+    (128, 1, 16, _I8X16),
+    (128, 2, 8, _I16X8),
+    (128, 4, 4, _I32X4),
+    (256, 1, 32, _I8X32),
+    (256, 2, 16, _I16X16),
+    (256, 4, 8, _I32X8),
+    (512, 1, 64, _I8X64),
+    (512, 2, 32, _I16X32),
+    (512, 4, 16, _I32X16),
+)
 
 _I32_MIN = -(2**31)
 _I32_MAX = (2**31) - 1
@@ -324,27 +342,28 @@ def _vector_memory_rules() -> tuple[DescriptorRule, ...]:
             ),
             value_type=vector_type,
             immediate_descriptor_key=(
-                "amd.xdna.aie2p.load.a.i8x64.indexed.immediate"
-                if operation is SourceMemoryOperation.LOAD
-                else "amd.xdna.aie2p.store.i8x64.indexed.immediate"
+                f"amd.xdna.aie2p.{descriptor_family}.{shape}.indexed.immediate"
             ),
             register_descriptor_key=(
-                "amd.xdna.aie2p.load.a.i8x64.indexed.register"
-                if operation is SourceMemoryOperation.LOAD
-                else "amd.xdna.aie2p.store.i8x64.indexed.register"
+                f"amd.xdna.aie2p.{descriptor_family}.{shape}.indexed.register"
             ),
             element_byte_count=element_byte_count,
             vector_lane_count=vector_lane_count,
-            minimum_alignment=64,
-            immediate_offset_minimum=-512,
-            immediate_offset_maximum=448,
+            minimum_alignment=width_bits // 8,
+            immediate_offset_minimum=-(width_bits),
+            immediate_offset_maximum=width_bits - width_bits // 8,
         )
-        for element_byte_count, vector_lane_count, vector_type in (
-            (1, 64, _I8X64),
-            (2, 32, _I16X32),
-            (4, 16, _I32X16),
-        )
+        for (
+            width_bits,
+            element_byte_count,
+            vector_lane_count,
+            vector_type,
+        ) in _VECTOR_MEMORY_SHAPES
+        for shape in (f"i{element_byte_count * 8}x{vector_lane_count}",)
         for operation in (SourceMemoryOperation.LOAD, SourceMemoryOperation.STORE)
+        for descriptor_family in (
+            "load.a" if operation is SourceMemoryOperation.LOAD else "store",
+        )
         for address_form in _MemoryAddressForm
     )
 
