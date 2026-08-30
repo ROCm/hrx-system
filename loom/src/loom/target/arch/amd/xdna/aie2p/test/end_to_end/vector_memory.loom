@@ -1,10 +1,6 @@
 aie2p.target<core> @target
 
-func.def public target(@target) @vector_add_memory(
-    %lhs: buffer,
-    %rhs: buffer,
-    %output: buffer
-) {
+func.def public target(@target) @vector_add_memory(%lhs: buffer, %rhs: buffer, %output: buffer) {
   %lhs_aligned, %rhs_aligned, %output_aligned = buffer.assume.alignment %lhs, %rhs, %output {minimum_alignment = 64} : buffer, buffer, buffer
   %base = index.constant 0 : offset
   %lhs_view = buffer.view %lhs_aligned[%base] : buffer -> view<16xi32>

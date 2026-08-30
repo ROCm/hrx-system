@@ -99,6 +99,7 @@ DIALECT_REFERENCE_SPECS = (
     DialectReferenceSpec("pass", "testing"),
     DialectReferenceSpec("sanitizer", "testing"),
     DialectReferenceSpec("low", "target"),
+    DialectReferenceSpec("aie2p", "target"),
     DialectReferenceSpec("llvmir", "target"),
     DialectReferenceSpec("amdgpu", "target"),
     DialectReferenceSpec("spirv", "target"),

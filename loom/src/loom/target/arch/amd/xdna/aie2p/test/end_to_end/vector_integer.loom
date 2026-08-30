@@ -1,11 +1,6 @@
 aie2p.target<core> @target
 
-func.def public target(@target) @vector_integer(
-    %lhs: vector<16xi32>,
-    %rhs: vector<16xi32>,
-    %bias: vector<16xi32>,
-    %scalar: i32
-) -> (vector<16xi32>) {
+func.def public target(@target) @vector_integer(%lhs: vector<16xi32>, %rhs: vector<16xi32>, %bias: vector<16xi32>, %scalar: i32) -> (vector<16xi32>) {
   %splat = vector.splat %scalar : vector<16xi32>
   %sum = vector.addi %lhs, %rhs : vector<16xi32>
   %difference = vector.subi %sum, %bias : vector<16xi32>

@@ -1,11 +1,6 @@
 aie2p.target<core> @target
 
-func.def public target(@target) @vector_predicate(
-    %lhs: vector<64xi8>,
-    %rhs: vector<64xi8>,
-    %true_value: vector<64xi8>,
-    %false_value: vector<64xi8>
-) -> (vector<64xi8>, vector<32xi16>, vector<16xi32>) {
+func.def public target(@target) @vector_predicate(%lhs: vector<64xi8>, %rhs: vector<64xi8>, %true_value: vector<64xi8>, %false_value: vector<64xi8>) -> (vector<64xi8>, vector<32xi16>, vector<16xi32>) {
   %byte_lt = vector.cmpi slt, %lhs, %rhs : vector<64xi8> -> vector<64xi1>
   %byte_ne = vector.cmpi ne, %lhs, %rhs : vector<64xi8> -> vector<64xi1>
   %byte_and = vector.andi %byte_lt, %byte_ne : vector<64xi1>

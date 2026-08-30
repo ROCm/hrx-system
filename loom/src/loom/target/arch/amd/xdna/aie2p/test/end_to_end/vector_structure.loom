@@ -1,14 +1,6 @@
 aie2p.target<core> @target
 
-func.def public target(@target) @vector_structure(
-    %bytes: vector<64xi8>,
-    %halves: vector<32xi16>,
-    %words: vector<16xi32>,
-    %byte_singleton: vector<1xi8>,
-    %half_singleton: vector<1xi16>,
-    %word_singleton: vector<1xi32>,
-    %lane: index
-) -> (vector<64xi8>, vector<32xi16>, vector<16xi32>) {
+func.def public target(@target) @vector_structure(%bytes: vector<64xi8>, %halves: vector<32xi16>, %words: vector<16xi32>, %byte_singleton: vector<1xi8>, %half_singleton: vector<1xi16>, %word_singleton: vector<1xi32>, %lane: index) -> (vector<64xi8>, vector<32xi16>, vector<16xi32>) {
   %byte_constant = scalar.constant -73 : i8
   %half_constant = scalar.constant -20000 : i16
   %word_constant = scalar.constant -2004318072 : i32
