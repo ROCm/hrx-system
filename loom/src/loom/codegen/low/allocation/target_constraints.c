@@ -435,10 +435,12 @@ bool loom_low_allocation_target_constraints_location_range_fits_capacity(
   const loom_low_reg_class_t* reg_class =
       &descriptor_set->reg_classes[capacity->descriptor_reg_class_id];
   if (loom_low_reg_class_uses_explicit_physical_registers(reg_class)) {
-    return location_count == 1 &&
-           loom_low_descriptor_set_find_physical_register_candidate(
+    uint32_t pressure_extent = 0;
+    return loom_low_allocation_storage_explicit_physical_register_view(
                descriptor_set, capacity->descriptor_reg_class_id, location_base,
-               NULL);
+               location_count, /*out_first_candidate_ordinal=*/NULL,
+               &pressure_extent) &&
+           (!capacity->is_bounded || pressure_extent <= capacity->max_units);
   }
   return !capacity->is_bounded ||
          (uint64_t)location_base + location_count <= capacity->max_units;
@@ -535,10 +537,12 @@ loom_low_allocation_target_constraints_validate_register_location_capacity(
       loom_low_allocation_target_constraints_reg_class_at(
           constraints->target->descriptor_set, reg_class_id);
   if (loom_low_reg_class_uses_explicit_physical_registers(reg_class)) {
-    if (location_count != 1 ||
-        !loom_low_descriptor_set_find_physical_register_candidate(
+    uint32_t pressure_extent = 0;
+    if (!loom_low_allocation_storage_explicit_physical_register_view(
             constraints->target->descriptor_set, reg_class_id, location_base,
-            NULL)) {
+            location_count, /*out_first_candidate_ordinal=*/NULL,
+            &pressure_extent) ||
+        (capacity.is_bounded && pressure_extent > capacity.max_units)) {
       IREE_RETURN_IF_ERROR(
           loom_low_allocation_target_constraints_emit_capacity_failure(
               constraints, diagnostic_op, reg_class_id, subject, location_base,

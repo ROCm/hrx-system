@@ -112,10 +112,12 @@ static iree_status_t loom_low_allocation_packet_move_record_group(
            ++unit_index) {
         raw_moves[raw_move_count++] = (loom_low_move_t){
             .destination = loom_low_allocation_assignment_unit_location(
+                context->move_plan->context.descriptor_set,
                 destination_assignment,
                 relation->result_unit_offset + unit_index),
             .source = loom_low_allocation_assignment_unit_location(
-                source_assignment, relation->source_unit_offset + unit_index),
+                context->move_plan->context.descriptor_set, source_assignment,
+                relation->source_unit_offset + unit_index),
         };
       }
     }

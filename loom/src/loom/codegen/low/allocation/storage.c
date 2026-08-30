@@ -6,6 +6,200 @@
 
 #include "loom/codegen/low/allocation/storage.h"
 
+#include <string.h>
+
+typedef struct loom_low_allocation_explicit_register_view_t {
+  const uint16_t* atomic_units;
+  uint16_t atomic_unit_count;
+  uint16_t atomic_units_per_logical_unit;
+  uint16_t first_candidate_ordinal;
+  uint16_t pressure_extent;
+  uint16_t requested_unit_physical_register_id;
+} loom_low_allocation_explicit_register_view_t;
+
+static bool loom_low_allocation_storage_atomic_units_equal(const uint16_t* lhs,
+                                                           const uint16_t* rhs,
+                                                           uint16_t count) {
+  return memcmp(lhs, rhs, (iree_host_size_t)count * sizeof(*lhs)) == 0;
+}
+
+static bool loom_low_allocation_storage_resolve_explicit_register_view(
+    const loom_low_descriptor_set_t* descriptor_set,
+    uint16_t descriptor_reg_class_id, uint32_t physical_register_id,
+    uint32_t unit_count, uint32_t requested_unit_index,
+    loom_low_allocation_explicit_register_view_t* out_view) {
+  *out_view = (loom_low_allocation_explicit_register_view_t){0};
+  if (descriptor_set == NULL ||
+      descriptor_reg_class_id >= descriptor_set->reg_class_count ||
+      unit_count == 0 || unit_count > UINT16_MAX) {
+    return false;
+  }
+  const loom_low_reg_class_t* reg_class =
+      &descriptor_set->reg_classes[descriptor_reg_class_id];
+  if (!loom_low_reg_class_uses_explicit_physical_registers(reg_class) ||
+      unit_count > reg_class->allocatable_count) {
+    return false;
+  }
+  const loom_low_physical_register_t* physical_register =
+      loom_low_descriptor_set_physical_register_at(descriptor_set,
+                                                   physical_register_id);
+  if (physical_register == NULL ||
+      physical_register->atomic_unit_count % unit_count != 0) {
+    return false;
+  }
+  const uint16_t atomic_units_per_logical_unit =
+      (uint16_t)(physical_register->atomic_unit_count / unit_count);
+  if (atomic_units_per_logical_unit == 0) {
+    return false;
+  }
+  const uint16_t* physical_atomic_units =
+      &descriptor_set->physical_register_atomic_units[physical_register
+                                                          ->atomic_unit_start];
+
+  uint16_t first_candidate_ordinal = 0;
+  uint16_t pressure_extent = 0;
+  uint16_t requested_unit_physical_register_id = 0;
+  for (uint32_t unit_index = 0; unit_index < unit_count; ++unit_index) {
+    const uint16_t* unit_atomic_units =
+        &physical_atomic_units[unit_index * atomic_units_per_logical_unit];
+    bool found = false;
+    for (uint16_t candidate_ordinal = 0;
+         candidate_ordinal < reg_class->allocatable_count;
+         ++candidate_ordinal) {
+      const uint16_t candidate_physical_register_id =
+          loom_low_descriptor_set_physical_register_candidate(
+              descriptor_set, descriptor_reg_class_id, candidate_ordinal);
+      const loom_low_physical_register_t* candidate_physical_register =
+          loom_low_descriptor_set_physical_register_at(
+              descriptor_set, candidate_physical_register_id);
+      if (candidate_physical_register->atomic_unit_count !=
+          atomic_units_per_logical_unit) {
+        continue;
+      }
+      const uint16_t* candidate_atomic_units =
+          &descriptor_set->physical_register_atomic_units
+               [candidate_physical_register->atomic_unit_start];
+      if (!loom_low_allocation_storage_atomic_units_equal(
+              unit_atomic_units, candidate_atomic_units,
+              atomic_units_per_logical_unit)) {
+        continue;
+      }
+      if (unit_count == 1 &&
+          physical_register_id != candidate_physical_register_id) {
+        return false;
+      }
+      if (unit_index == 0) {
+        first_candidate_ordinal = candidate_ordinal;
+      }
+      pressure_extent =
+          iree_max(pressure_extent, (uint16_t)(candidate_ordinal + 1));
+      if (unit_index == requested_unit_index) {
+        requested_unit_physical_register_id = candidate_physical_register_id;
+      }
+      found = true;
+      break;
+    }
+    if (!found) {
+      return false;
+    }
+  }
+
+  *out_view = (loom_low_allocation_explicit_register_view_t){
+      .atomic_units = physical_atomic_units,
+      .atomic_unit_count = physical_register->atomic_unit_count,
+      .atomic_units_per_logical_unit = atomic_units_per_logical_unit,
+      .first_candidate_ordinal = first_candidate_ordinal,
+      .pressure_extent = pressure_extent,
+      .requested_unit_physical_register_id =
+          requested_unit_physical_register_id,
+  };
+  return true;
+}
+
+bool loom_low_allocation_storage_explicit_physical_register_view(
+    const loom_low_descriptor_set_t* descriptor_set,
+    uint16_t descriptor_reg_class_id, uint32_t physical_register_id,
+    uint32_t unit_count, uint32_t* out_first_candidate_ordinal,
+    uint32_t* out_pressure_extent) {
+  loom_low_allocation_explicit_register_view_t view;
+  if (!loom_low_allocation_storage_resolve_explicit_register_view(
+          descriptor_set, descriptor_reg_class_id, physical_register_id,
+          unit_count, UINT32_MAX, &view)) {
+    return false;
+  }
+  if (out_pressure_extent) {
+    *out_pressure_extent = view.pressure_extent;
+  }
+  if (out_first_candidate_ordinal) {
+    *out_first_candidate_ordinal = view.first_candidate_ordinal;
+  }
+  return true;
+}
+
+bool loom_low_allocation_storage_assignment_unit_physical_register(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_allocation_assignment_t* assignment, uint32_t unit_index,
+    uint32_t* out_physical_register_id) {
+  IREE_ASSERT_ARGUMENT(out_physical_register_id);
+  *out_physical_register_id = UINT32_MAX;
+  if (!loom_low_allocation_storage_assignment_uses_explicit_physical_register(
+          descriptor_set, assignment) ||
+      unit_index >= assignment->location_count) {
+    return false;
+  }
+  loom_low_allocation_explicit_register_view_t view;
+  if (!loom_low_allocation_storage_resolve_explicit_register_view(
+          descriptor_set, assignment->descriptor_reg_class_id,
+          assignment->location_base, assignment->location_count, unit_index,
+          &view)) {
+    return false;
+  }
+  *out_physical_register_id = view.requested_unit_physical_register_id;
+  return true;
+}
+
+static bool loom_low_allocation_storage_explicit_subrange_atomic_units(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_allocation_assignment_t* assignment, uint32_t unit_start,
+    uint32_t unit_count, const uint16_t** out_atomic_units,
+    uint32_t* out_atomic_unit_count) {
+  *out_atomic_units = NULL;
+  *out_atomic_unit_count = 0;
+  if (unit_count == 0 || unit_start > assignment->location_count ||
+      unit_count > assignment->location_count - unit_start) {
+    return false;
+  }
+  loom_low_allocation_explicit_register_view_t view;
+  if (!loom_low_allocation_storage_resolve_explicit_register_view(
+          descriptor_set, assignment->descriptor_reg_class_id,
+          assignment->location_base, assignment->location_count, UINT32_MAX,
+          &view)) {
+    return false;
+  }
+  *out_atomic_units =
+      &view.atomic_units[unit_start * view.atomic_units_per_logical_unit];
+  *out_atomic_unit_count = unit_count * view.atomic_units_per_logical_unit;
+  return true;
+}
+
+static bool loom_low_allocation_storage_sorted_atomic_units_overlap(
+    const uint16_t* lhs, uint32_t lhs_count, const uint16_t* rhs,
+    uint32_t rhs_count) {
+  uint32_t lhs_index = 0;
+  uint32_t rhs_index = 0;
+  while (lhs_index < lhs_count && rhs_index < rhs_count) {
+    if (lhs[lhs_index] == rhs[rhs_index]) {
+      return true;
+    }
+    if (lhs[lhs_index] < rhs[rhs_index]) {
+      ++lhs_index;
+    } else {
+      ++rhs_index;
+    }
+  }
+  return false;
+}
+
 loom_low_allocation_location_kind_t
 loom_low_allocation_storage_reg_class_location_kind(
     const loom_low_reg_class_t* reg_class) {
@@ -36,11 +230,14 @@ uint32_t loom_low_allocation_storage_assignment_atomic_unit_count(
           descriptor_set, assignment)) {
     return assignment->location_count;
   }
-  const loom_low_physical_register_t* physical_register =
-      loom_low_descriptor_set_physical_register_at(descriptor_set,
-                                                   assignment->location_base);
-  IREE_ASSERT(physical_register != NULL);
-  return physical_register->atomic_unit_count;
+  loom_low_allocation_explicit_register_view_t view;
+  const bool resolved =
+      loom_low_allocation_storage_resolve_explicit_register_view(
+          descriptor_set, assignment->descriptor_reg_class_id,
+          assignment->location_base, assignment->location_count, UINT32_MAX,
+          &view);
+  IREE_ASSERT_TRUE(resolved);
+  return view.atomic_unit_count;
 }
 
 void loom_low_allocation_storage_assignment_atomic_unit(
@@ -55,15 +252,16 @@ void loom_low_allocation_storage_assignment_atomic_unit(
     *out_location = assignment->location_base + atomic_unit_ordinal;
     return;
   }
-  const loom_low_physical_register_t* physical_register =
-      loom_low_descriptor_set_physical_register_at(descriptor_set,
-                                                   assignment->location_base);
-  IREE_ASSERT(physical_register != NULL);
-  IREE_ASSERT_LT(atomic_unit_ordinal, physical_register->atomic_unit_count);
+  loom_low_allocation_explicit_register_view_t view;
+  const bool resolved =
+      loom_low_allocation_storage_resolve_explicit_register_view(
+          descriptor_set, assignment->descriptor_reg_class_id,
+          assignment->location_base, assignment->location_count, UINT32_MAX,
+          &view);
+  IREE_ASSERT_TRUE(resolved);
+  IREE_ASSERT_LT(atomic_unit_ordinal, view.atomic_unit_count);
   *out_storage_key = 0;
-  *out_location =
-      descriptor_set->physical_register_atomic_units
-          [physical_register->atomic_unit_start + atomic_unit_ordinal];
+  *out_location = view.atomic_units[atomic_unit_ordinal];
 }
 
 uint32_t loom_low_allocation_storage_assignment_pressure_extent(
@@ -75,12 +273,14 @@ uint32_t loom_low_allocation_storage_assignment_pressure_extent(
         (uint64_t)assignment->location_base + assignment->location_count;
     return end > UINT32_MAX ? UINT32_MAX : (uint32_t)end;
   }
-  uint16_t candidate_ordinal = 0;
-  const bool found = loom_low_descriptor_set_find_physical_register_candidate(
-      descriptor_set, assignment->descriptor_reg_class_id,
-      assignment->location_base, &candidate_ordinal);
-  IREE_ASSERT_TRUE(found);
-  return (uint32_t)candidate_ordinal + 1;
+  uint32_t pressure_extent = 0;
+  const bool resolved =
+      loom_low_allocation_storage_explicit_physical_register_view(
+          descriptor_set, assignment->descriptor_reg_class_id,
+          assignment->location_base, assignment->location_count,
+          /*out_first_candidate_ordinal=*/NULL, &pressure_extent);
+  IREE_ASSERT_TRUE(resolved);
+  return pressure_extent;
 }
 
 bool loom_low_allocation_storage_reg_classes_share(
@@ -132,6 +332,31 @@ bool loom_low_allocation_storage_assignment_ranges_equal(
                                                             rhs)) {
     return false;
   }
+  const bool lhs_is_explicit =
+      loom_low_allocation_storage_assignment_uses_explicit_physical_register(
+          descriptor_set, lhs);
+  const bool rhs_is_explicit =
+      loom_low_allocation_storage_assignment_uses_explicit_physical_register(
+          descriptor_set, rhs);
+  if (lhs_is_explicit || rhs_is_explicit) {
+    if (!lhs_is_explicit || !rhs_is_explicit) {
+      return false;
+    }
+    const uint16_t* lhs_atomic_units = NULL;
+    uint32_t lhs_atomic_unit_count = 0;
+    const uint16_t* rhs_atomic_units = NULL;
+    uint32_t rhs_atomic_unit_count = 0;
+    return loom_low_allocation_storage_explicit_subrange_atomic_units(
+               descriptor_set, lhs, 0, lhs->location_count, &lhs_atomic_units,
+               &lhs_atomic_unit_count) &&
+           loom_low_allocation_storage_explicit_subrange_atomic_units(
+               descriptor_set, rhs, 0, rhs->location_count, &rhs_atomic_units,
+               &rhs_atomic_unit_count) &&
+           lhs_atomic_unit_count == rhs_atomic_unit_count &&
+           loom_low_allocation_storage_atomic_units_equal(
+               lhs_atomic_units, rhs_atomic_units,
+               (uint16_t)lhs_atomic_unit_count);
+  }
   return lhs->location_base == rhs->location_base &&
          lhs->location_count == rhs->location_count;
 }
@@ -143,6 +368,10 @@ bool loom_low_allocation_storage_assignment_locations_share(
   IREE_ASSERT_ARGUMENT(descriptor_set);
   IREE_ASSERT_ARGUMENT(lhs);
   IREE_ASSERT_ARGUMENT(rhs);
+  if (lhs->location_count != 0 && rhs->location_count != 0) {
+    return loom_low_allocation_storage_assignment_ranges_equal(descriptor_set,
+                                                               lhs, rhs);
+  }
   return lhs->location_base == rhs->location_base &&
          lhs->location_count == rhs->location_count &&
          loom_low_allocation_storage_assignment_classes_share(descriptor_set,
@@ -169,28 +398,19 @@ bool loom_low_allocation_storage_assignment_ranges_overlap(
           descriptor_set, rhs);
   if (lhs_is_explicit || rhs_is_explicit) {
     if (!lhs_is_explicit || !rhs_is_explicit) return false;
-    uint16_t lhs_atomic_unit_count = 0;
-    const uint16_t* lhs_atomic_units =
-        loom_low_descriptor_set_physical_register_atomic_units(
-            descriptor_set, lhs->location_base, &lhs_atomic_unit_count);
-    uint16_t rhs_atomic_unit_count = 0;
-    const uint16_t* rhs_atomic_units =
-        loom_low_descriptor_set_physical_register_atomic_units(
-            descriptor_set, rhs->location_base, &rhs_atomic_unit_count);
-    uint16_t lhs_index = 0;
-    uint16_t rhs_index = 0;
-    while (lhs_index < lhs_atomic_unit_count &&
-           rhs_index < rhs_atomic_unit_count) {
-      if (lhs_atomic_units[lhs_index] == rhs_atomic_units[rhs_index]) {
-        return true;
-      }
-      if (lhs_atomic_units[lhs_index] < rhs_atomic_units[rhs_index]) {
-        ++lhs_index;
-      } else {
-        ++rhs_index;
-      }
-    }
-    return false;
+    const uint16_t* lhs_atomic_units = NULL;
+    uint32_t lhs_atomic_unit_count = 0;
+    const uint16_t* rhs_atomic_units = NULL;
+    uint32_t rhs_atomic_unit_count = 0;
+    return loom_low_allocation_storage_explicit_subrange_atomic_units(
+               descriptor_set, lhs, 0, lhs->location_count, &lhs_atomic_units,
+               &lhs_atomic_unit_count) &&
+           loom_low_allocation_storage_explicit_subrange_atomic_units(
+               descriptor_set, rhs, 0, rhs->location_count, &rhs_atomic_units,
+               &rhs_atomic_unit_count) &&
+           loom_low_allocation_storage_sorted_atomic_units_overlap(
+               lhs_atomic_units, lhs_atomic_unit_count, rhs_atomic_units,
+               rhs_atomic_unit_count);
   }
   const uint64_t lhs_begin = lhs->location_base;
   const uint64_t rhs_begin = rhs->location_base;
@@ -211,9 +431,20 @@ bool loom_low_allocation_storage_assignment_subranges_equal(
           descriptor_set, lhs) ||
       loom_low_allocation_storage_assignment_uses_explicit_physical_register(
           descriptor_set, rhs)) {
-    return lhs_start == 0 && rhs_start == 0 && unit_count == 1 &&
-           loom_low_allocation_storage_assignment_ranges_equal(descriptor_set,
-                                                               lhs, rhs);
+    const uint16_t* lhs_atomic_units = NULL;
+    uint32_t lhs_atomic_unit_count = 0;
+    const uint16_t* rhs_atomic_units = NULL;
+    uint32_t rhs_atomic_unit_count = 0;
+    return loom_low_allocation_storage_explicit_subrange_atomic_units(
+               descriptor_set, lhs, lhs_start, unit_count, &lhs_atomic_units,
+               &lhs_atomic_unit_count) &&
+           loom_low_allocation_storage_explicit_subrange_atomic_units(
+               descriptor_set, rhs, rhs_start, unit_count, &rhs_atomic_units,
+               &rhs_atomic_unit_count) &&
+           lhs_atomic_unit_count == rhs_atomic_unit_count &&
+           loom_low_allocation_storage_atomic_units_equal(
+               lhs_atomic_units, rhs_atomic_units,
+               (uint16_t)lhs_atomic_unit_count);
   }
   return unit_count != 0 &&
          loom_low_allocation_storage_assignment_classes_share(descriptor_set,
@@ -238,9 +469,19 @@ bool loom_low_allocation_storage_assignment_subranges_overlap(
           descriptor_set, lhs) ||
       loom_low_allocation_storage_assignment_uses_explicit_physical_register(
           descriptor_set, rhs)) {
-    return lhs_start == 0 && rhs_start == 0 && unit_count == 1 &&
-           loom_low_allocation_storage_assignment_ranges_overlap(descriptor_set,
-                                                                 lhs, rhs);
+    const uint16_t* lhs_atomic_units = NULL;
+    uint32_t lhs_atomic_unit_count = 0;
+    const uint16_t* rhs_atomic_units = NULL;
+    uint32_t rhs_atomic_unit_count = 0;
+    return loom_low_allocation_storage_explicit_subrange_atomic_units(
+               descriptor_set, lhs, lhs_start, unit_count, &lhs_atomic_units,
+               &lhs_atomic_unit_count) &&
+           loom_low_allocation_storage_explicit_subrange_atomic_units(
+               descriptor_set, rhs, rhs_start, unit_count, &rhs_atomic_units,
+               &rhs_atomic_unit_count) &&
+           loom_low_allocation_storage_sorted_atomic_units_overlap(
+               lhs_atomic_units, lhs_atomic_unit_count, rhs_atomic_units,
+               rhs_atomic_unit_count);
   }
   const uint64_t lhs_begin = (uint64_t)lhs->location_base + lhs_start;
   const uint64_t rhs_begin = (uint64_t)rhs->location_base + rhs_start;
