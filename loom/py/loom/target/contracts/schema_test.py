@@ -19,6 +19,8 @@ from loom.target.contracts import (
     ContractFragment,
     DescriptorRule,
     EmitDescriptorOp,
+    EmitRegisterConcat,
+    EmitRegisterSlice,
     Guard,
     OrdinalValueAliasRule,
     RecipeRule,
@@ -124,6 +126,39 @@ def test_alias_rule_validates_source_and_result() -> None:
     )
 
     assert table.cases[0].source_op == vector.vector_fragment
+
+
+def test_structural_register_emits_validate_program_shape() -> None:
+    with pytest.raises(ValueError, match="register concat needs at least one source"):
+        EmitRegisterConcat(
+            sources=(),
+            result=ValueRef.result("result"),
+        )
+    with pytest.raises(ValueError, match="register slice unit offset must fit u16"):
+        EmitRegisterSlice(
+            source=ValueRef.operand("source"),
+            result=ValueRef.result("result"),
+            unit_offset=0x10000,
+        )
+    with pytest.raises(
+        ValueError,
+        match="temporary 'pair' needs an explicit result type binding",
+    ):
+        ContractFragment(
+            name="register.structural.invalid",
+            descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+            cases=(
+                DescriptorRule(
+                    source_op=vector.vector_from_elements,
+                    emit=(
+                        EmitRegisterConcat(
+                            sources=(ValueRef.operand("elements"),),
+                            result=ValueRef.temporary("pair"),
+                        ),
+                    ),
+                ),
+            ),
+        )
 
 
 def test_ordinal_alias_rule_validates_variadic_identity_fields() -> None:

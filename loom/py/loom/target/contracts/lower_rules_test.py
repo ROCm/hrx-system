@@ -28,6 +28,8 @@ from loom.target.contracts import (
     DescriptorRule,
     DirectDescriptorCase,
     EmitDescriptorOp,
+    EmitRegisterConcat,
+    EmitRegisterSlice,
     Guard,
     GuardDiagnostic,
     GuardKind,
@@ -89,6 +91,63 @@ def _add_f32_flags_descriptor_set():
         TEST_LOW_CORE_DESCRIPTOR_SET,
         descriptors=(*TEST_LOW_CORE_DESCRIPTOR_SET.descriptors, descriptor),
     )
+
+
+def test_compile_structural_register_emits() -> None:
+    i32 = Scalar("i32")
+    v2i32 = Vector("i32", lanes=2)
+    fragment = ContractFragment(
+        name="test.structural-register-emits",
+        descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+        cases=(
+            DescriptorRule(
+                source_op=vector.vector_from_elements,
+                guards=(
+                    Guard.operand_segment_count("elements", 2),
+                    Guard.value_type("result", v2i32),
+                ),
+                emit=(
+                    EmitRegisterConcat(
+                        sources=(
+                            ValueRef.operand("elements", element=0),
+                            ValueRef.operand("elements", element=1),
+                        ),
+                        result=ValueRef.result("result"),
+                    ),
+                ),
+            ),
+            DescriptorRule(
+                source_op=vector.vector_extract,
+                guards=(
+                    Guard.i64_array_count("static_indices", 1),
+                    Guard.i64_array_element_range("static_indices", 0, 1, 1),
+                    Guard.value_type("source", v2i32),
+                    Guard.value_type("result", i32),
+                ),
+                emit=(
+                    EmitRegisterSlice(
+                        source=ValueRef.operand("source"),
+                        result=ValueRef.result("result"),
+                        unit_offset=1,
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    compiled = compile_lower_rule_set(
+        fragment,
+        dialect_ops={"vector": ALL_VECTOR_OPS},
+    )
+
+    assert tuple(emit.kind for emit in compiled.emits) == (
+        LowerEmitKind.REGISTER_CONCAT,
+        LowerEmitKind.REGISTER_SLICE,
+    )
+    assert all(emit.descriptor is None for emit in compiled.emits)
+    assert compiled.emits[0].operand_ref_count == 2
+    assert compiled.emits[1].operand_ref_count == 1
+    assert compiled.emits[1].structural_offset == 1
 
 
 def _expect_value_error(callable_obj: Callable[[], object], message: str) -> None:

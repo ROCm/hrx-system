@@ -49,6 +49,13 @@ static bool loom_test_low_is_vector_4xi32(loom_type_t type) {
          loom_type_dim_static_size_at(type, 0) == 4;
 }
 
+static bool loom_test_low_is_vector_2xi32(loom_type_t type) {
+  return loom_type_is_vector(type) && loom_type_rank(type) == 1 &&
+         loom_type_is_all_static(type) &&
+         loom_type_element_type(type) == LOOM_SCALAR_TYPE_I32 &&
+         loom_type_dim_static_size_at(type, 0) == 2;
+}
+
 static bool loom_test_low_is_vector_4xf32(loom_type_t type) {
   return loom_type_is_vector(type) && loom_type_rank(type) == 1 &&
          loom_type_is_all_static(type) &&
@@ -101,6 +108,10 @@ iree_status_t loom_test_low_lower_map_type(void* user_data,
   if (loom_test_low_is_vector_4xi32(source_type)) {
     return loom_test_low_make_register_type(
         context, TEST_LOW_CORE_REG_CLASS_ID_TEST_I32, 4, out_low_type);
+  }
+  if (loom_test_low_is_vector_2xi32(source_type)) {
+    return loom_test_low_make_register_type(
+        context, TEST_LOW_CORE_REG_CLASS_ID_TEST_I32, 2, out_low_type);
   }
   if (loom_test_low_is_vector_4xf32(source_type)) {
     return loom_test_low_make_register_type(

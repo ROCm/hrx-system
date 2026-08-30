@@ -40,11 +40,14 @@ from loom.target.contracts.diagnostics import (
     value_type_param,
 )
 from loom.target.contracts.emits import (
+    ContractEmit,
     DescriptorAccumulatorSeed,
     DescriptorAccumulatorTree,
     DescriptorEmitForm,
     DescriptorResultType,
     EmitDescriptorOp,
+    EmitRegisterConcat,
+    EmitRegisterSlice,
     ResultTypeBinding,
 )
 from loom.target.contracts.fragments import (
@@ -141,6 +144,7 @@ __all__ = [
     "CompiledOpSpan",
     "ContractCase",
     "ContractSystem",
+    "ContractEmit",
     "ContractFragment",
     "DescriptorMatrixRule",
     "DescriptorAccumulatorSeed",
@@ -155,6 +159,8 @@ __all__ = [
     "DirectTypePatterns",
     "DotDescriptorCase",
     "EmitDescriptorOp",
+    "EmitRegisterConcat",
+    "EmitRegisterSlice",
     "ResultTypeBinding",
     "Guard",
     "GuardDiagnostic",

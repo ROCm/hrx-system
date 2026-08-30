@@ -81,3 +81,26 @@ low.func.decl import(native, "callback") target<test.low.core>(@test_target) abi
 low.func.def public target<test.low.core>(@test_target) abi(object_function) @preserved_low(%value: reg<test.i32>) -> (reg<test.i32>) {
   low.return %value : reg<test.i32>
 }
+
+// ====
+
+// RUN: pass source-to-low
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @structural_register_emits(%lo: i32, %hi: i32) -> (i32, i32) {
+  %pair = vector.from_elements %lo, %hi : vector<2xi32>
+  %result_lo = vector.extract %pair[0] : vector<2xi32> -> i32
+  %result_hi = vector.extract %pair[1] : vector<2xi32> -> i32
+  func.return %result_lo, %result_hi : i32, i32
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) abi(object_function) @structural_register_emits(%lo: reg<test.i32>, %hi: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) {
+  %pair = low.concat(%lo, %hi) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  %result_lo = low.slice %pair[0] : reg<test.i32 x2> -> reg<test.i32>
+  %result_hi = low.slice %pair[1] : reg<test.i32 x2> -> reg<test.i32>
+  low.return %result_lo, %result_hi : reg<test.i32>, reg<test.i32>
+}
