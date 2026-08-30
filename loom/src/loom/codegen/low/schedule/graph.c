@@ -1469,7 +1469,8 @@ iree_status_t loom_low_schedule_fill_nodes(
         }
       }
       if (loom_low_live_in_isa(op) || loom_low_resource_isa(op)) {
-        node->flags |= LOOM_LOW_SCHEDULE_NODE_FLAG_SOURCE_ORDER_BOUNDARY;
+        node->flags |= LOOM_LOW_SCHEDULE_NODE_FLAG_SOURCE_ORDER_BOUNDARY |
+                       LOOM_LOW_SCHEDULE_NODE_FLAG_ZERO_ISSUE_WIDTH;
       }
       if (loom_low_move_isa(op)) {
         node->flags |= LOOM_LOW_SCHEDULE_NODE_FLAG_SOURCE_ORDER_BOUNDARY;
