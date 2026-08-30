@@ -16,6 +16,7 @@ iree_py_library(
     "__init__.py"
     "core.py"
     "index_conversion.py"
+    "memory.py"
   DEPS
     loom::py::loom::core
     loom::py::loom::dialect::buffer::buffer
@@ -66,6 +67,27 @@ iree_py_test(
   DEPS
     loom::py::loom::target::arch::amd::xdna::aie2p::contracts::contracts
     loom::py::loom::dialect::index::index
+    loom::py::loom::target::contracts::contracts
+  PACKAGE_DIRS
+    "${PROJECT_SOURCE_DIR}/loom/py"
+    "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
+)
+
+iree_py_test(
+  NAME
+    memory_test
+  MAIN
+    "../../../../../../tools/pytest_style_runner.py"
+  SRCS
+    "memory_test.py"
+    "../../../../../../tools/pytest_style_runner.py"
+  ARGS
+    "loom.target.arch.amd.xdna.aie2p.contracts.memory_test"
+  DEPS
+    loom::py::loom::target::arch::amd::xdna::aie2p::contracts::contracts
+    loom::py::loom::dialect::vector::vector
+    loom::py::loom::dialect::view::view
     loom::py::loom::target::contracts::contracts
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
