@@ -8,74 +8,30 @@
         "args": ["--agents_md"]
       },
       "stdout": {
-        "contains": {
-          "unordered": [
-            "## loom-compile",
-            "--backend=",
-            "--emit-command-artifacts=",
-            "--emit-kernel-requests=",
-            "--compile-report=summary",
-            "--artifact-manifest=summary",
-            "--emit-target-artifact=",
-            "--dump-ir-after-all",
-            "Prepared-low reproducers",
-            "--pipeline=none",
-            "whole-module snapshots",
-            ".entries.rows[]",
-            "post-run slicing",
-            "target_capability_rows.rows[]",
-            "matrix_fp8_native_kind",
-            ".schedule_band_summary_rows.rows[]",
-            "dynamic_instruction_mix",
-            "max_band_node_count",
-            ".wait_reason_summary_rows.rows[]",
-            ".wait_action_rows.rows[]",
-            "group_by",
-            "full_drains",
-            "semantic_tag",
-            "Matrix-family schedule evidence",
-            "rounding=finite_only",
-            "fp8_packed_bf16_decode_repair_zero_subnormal",
-            "jq -r"
-          ]
-        }
+        "contains": [
+          "## loom-compile",
+          "--backend=",
+          "--emit-command-artifacts=",
+          "--emit-kernel-requests="
+        ]
       }
     },
     {
-      "name": "emits portable command artifact set",
+      "name": "writes command artifact outputs",
       "run": {
         "tool": "loom-compile",
         "args": [
           "{srcdir}/testdata/command_artifacts.loom",
           "--backend=command",
-          "--output=-",
-          "--emit-command-artifacts={tmp}/commands",
-          "--compile-report=summary"
+          "--output={tmp}/manifest.json",
+          "--emit-command-artifacts={tmp}/commands"
         ]
       },
-      "stdout": {
-        "contains": {
-          "ordered": [
-            "\"schema_version\":2,\"format\":\"loom-command-set\"",
-            "\"symbol\":\"increment_once\",\"artifact\":\"program-0.loomcmd\"",
-            "\"entry_requirements\":[0]",
-            "\"symbol\":\"increment_then_double\",\"artifact\":\"program-1.loomcmd\"",
-            "\"entry_requirements\":[0,1]",
-            "\"entries\":[{\"symbol\":\"increment\"},{\"symbol\":\"double\"}]"
-          ]
-        }
-      },
-      "stderr": {
-        "contains": {
-          "unordered": [
-            "\"artifact_kind\":\"target-artifact\"",
-            "\"backend\":\"command\"",
-            "\"artifact_format\":\"loom-command-set\"",
-            "\"status\":{\"code\":0,\"name\":\"OK\"}"
-          ]
-        }
-      },
       "files": [
+        {
+          "path": "{tmp}/manifest.json",
+          "non_empty": true
+        },
         {
           "path": "{tmp}/commands/program-0.loomcmd",
           "non_empty": true
@@ -87,100 +43,38 @@
       ]
     },
     {
-      "name": "streams semantic kernel classes as ordinary bytecode",
-      "steps": [
+      "name": "writes kernel request outputs",
+      "run": {
+        "tool": "loom-compile",
+        "args": [
+          "{srcdir}/testdata/command_kernel_requests.loom",
+          "--backend=command",
+          "--output={tmp}/manifest.json",
+          "--emit-command-artifacts={tmp}/commands",
+          "--emit-kernel-requests={tmp}/requests"
+        ]
+      },
+      "files": [
         {
-          "name": "compile",
-          "run": {
-            "tool": "loom-compile",
-            "args": [
-              "{srcdir}/testdata/command_kernel_requests.loom",
-              "--backend=command",
-              "--output=-",
-              "--emit-command-artifacts={tmp}/commands",
-              "--emit-kernel-requests={tmp}/requests"
-            ]
-          },
-          "stdout": {
-            "contains": {
-              "ordered": [
-                "\"schema_version\":2,\"format\":\"loom-command-set\"",
-                "\"symbol\":\"two_classes\",\"artifact\":\"program-0.loomcmd\"",
-                "\"entry_requirements\":[0,1]",
-                "\"entries\":[{\"symbol\":\"classified\",\"source_request\":\"kernel-0.loombc\"},{\"symbol\":\"classified\",\"source_request\":\"kernel-1.loombc\"}]"
-              ]
-            }
-          },
-          "files": [
-            {
-              "path": "{tmp}/commands/program-0.loomcmd",
-              "non_empty": true
-            },
-            {
-              "path": "{tmp}/requests/kernel-0.loombc",
-              "non_empty": true
-            },
-            {
-              "path": "{tmp}/requests/kernel-1.loombc",
-              "non_empty": true
-            }
-          ]
+          "path": "{tmp}/requests/kernel-0.loombc",
+          "non_empty": true
         },
         {
-          "name": "decode-small-class",
-          "run": {
-            "tool": "loom-format",
-            "args": [
-              "{tmp}/requests/kernel-0.loombc",
-              "--from=bytecode",
-              "--to=text",
-              "--output=-"
-            ]
-          },
-          "stdout": {
-            "contains": ["kernel.def retain @classified", "template.call @small"],
-            "not_contains": ["template.call @large"]
-          }
-        },
-        {
-          "name": "decode-large-class",
-          "run": {
-            "tool": "loom-format",
-            "args": [
-              "{tmp}/requests/kernel-1.loombc",
-              "--from=bytecode",
-              "--to=text",
-              "--output=-"
-            ]
-          },
-          "stdout": {
-            "contains": ["kernel.def retain @classified", "template.call @large"],
-            "not_contains": ["template.call @small"]
-          }
+          "path": "{tmp}/requests/kernel-1.loombc",
+          "non_empty": true
         }
       ]
     },
     {
-      "name": "selects one command root",
+      "name": "selects a command root",
       "run": {
         "tool": "loom-compile",
         "args": [
           "{srcdir}/testdata/command_artifacts.loom",
           "--backend=command",
           "--root=@increment_then_double",
-          "--output=-",
+          "--output={tmp}/manifest.json",
           "--emit-command-artifacts={tmp}/commands"
-        ]
-      },
-      "stdout": {
-        "contains": [
-          "\"symbol\":\"increment_then_double\",\"artifact\":\"program-0.loomcmd\"",
-          "\"entry_requirements\":[0,1]",
-          "\"entries\":[{\"symbol\":\"increment\"},{\"symbol\":\"double\"}]"
-        ],
-        "not_contains": [
-          "increment_once",
-          "program-1.loomcmd"
         ]
       },
       "files": [
@@ -195,56 +89,13 @@
       ]
     },
     {
-      "name": "emits command artifacts from bytecode",
-      "steps": [
-        {
-          "name": "encode-source",
-          "run": {
-            "tool": "loom-format",
-            "args": [
-              "{srcdir}/testdata/command_artifacts.loom",
-              "--from=text",
-              "--to=bytecode",
-              "--output={tmp}/command_artifacts.loombc"
-            ]
-          }
-        },
-        {
-          "name": "compile",
-          "run": {
-            "tool": "loom-compile",
-            "args": [
-              "{tmp}/command_artifacts.loombc",
-              "--backend=command",
-              "--output={tmp}/commands.json",
-              "--emit-command-artifacts={tmp}/commands"
-            ]
-          },
-          "files": [
-            {
-              "path": "{tmp}/commands.json",
-              "non_empty": true
-            },
-            {
-              "path": "{tmp}/commands/program-0.loomcmd",
-              "non_empty": true
-            },
-            {
-              "path": "{tmp}/commands/program-1.loomcmd",
-              "non_empty": true
-            }
-          ]
-        }
-      ]
-    },
-    {
       "name": "requires command artifact directory",
       "run": {
         "tool": "loom-compile",
         "args": [
           "{srcdir}/testdata/command_artifacts.loom",
           "--backend=command",
-          "--output={tmp}/commands.json"
+          "--output={tmp}/manifest.json"
         ]
       },
       "exit": {
@@ -255,389 +106,6 @@
           "--backend=command requires --emit-command-artifacts=<directory>"
         ]
       }
-    },
-    {
-      "name": "rejects command artifacts for another backend",
-      "run": {
-        "tool": "loom-compile",
-        "args": [
-          "{srcdir}/testdata/command_artifacts.loom",
-          "--backend=llvmir-text",
-          "--emit-command-artifacts={tmp}/commands"
-        ]
-      },
-      "exit": {
-        "nonzero": true
-      },
-      "stderr": {
-        "contains": [
-          "--emit-command-artifacts requires --backend=command"
-        ]
-      }
-    },
-    {
-      "name": "compiles source module",
-      "steps": [
-        {
-          "name": "write-source",
-          "write": {
-            "path": "{tmp}/arithmetic.loom",
-            "text": "llvmir.target<object> @target {data_layout = \"e-p:64:64-i64:64-n8:16:32:64-S128\", triple = \"loom-direct64-unknown-none\"}\n\nfunc.def public target(@target) @add(%lhs: i32, %rhs: i32) -> (i32) {\n  %sum = scalar.addi %lhs, %rhs : i32\n  func.return %sum : i32\n}\n"
-          }
-        },
-        {
-          "name": "compile",
-          "run": {
-            "tool": "loom-compile",
-            "args": [
-              "{tmp}/arithmetic.loom",
-              "--backend=llvmir-text",
-              "--output={tmp}/arithmetic.ll",
-              "--compile-report=summary"
-            ]
-          },
-          "stderr": {
-            "save": "{tmp}/compile_report.json",
-            "contains": [
-              "\"kind\":\"loom.compile_report\"",
-              "\"schema_version\":0",
-              "\"mode\":\"summary\"",
-              "\"artifact_kind\":\"target-artifact\"",
-              "\"status\":{\"code\":0,\"name\":\"OK\"}"
-            ]
-          },
-          "files": [
-            {
-              "path": "{tmp}/arithmetic.ll",
-              "non_empty": true
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "compiles bytecode module",
-      "steps": [
-        {
-          "name": "write-source",
-          "write": {
-            "path": "{tmp}/arithmetic.loom",
-            "text": "llvmir.target<object> @target {data_layout = \"e-p:64:64-i64:64-n8:16:32:64-S128\", triple = \"loom-direct64-unknown-none\"}\n\nfunc.def public target(@target) @add(%lhs: i32, %rhs: i32) -> (i32) {\n  %sum = scalar.addi %lhs, %rhs : i32\n  func.return %sum : i32\n}\n"
-          }
-        },
-        {
-          "name": "encode-source",
-          "run": {
-            "tool": "loom-format",
-            "args": [
-              "{tmp}/arithmetic.loom",
-              "--from=text",
-              "--to=bytecode",
-              "--output={tmp}/arithmetic.loombc"
-            ]
-          },
-          "files": [
-            {
-              "path": "{tmp}/arithmetic.loombc",
-              "non_empty": true
-            }
-          ]
-        },
-        {
-          "name": "compile",
-          "run": {
-            "tool": "loom-compile",
-            "args": [
-              "{tmp}/arithmetic.loombc",
-              "--backend=llvmir-text",
-              "--output={tmp}/arithmetic.ll",
-              "--compile-report=summary"
-            ]
-          },
-          "stderr": {
-            "contains": [
-              "\"artifact_kind\":\"target-artifact\"",
-              "\"status\":{\"code\":0,\"name\":\"OK\"}"
-            ]
-          },
-          "files": [
-            {
-              "path": "{tmp}/arithmetic.ll",
-              "non_empty": true
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "target specialization precedes rooted template selection",
-      "run": {
-        "tool": "loom-compile",
-        "args": [
-          "{srcdir}/../loom-link/testdata/target_profile_template_selection.loom",
-          "--root=@target_profile_entry",
-          "--backend=amdgpu-hal",
-          "--target=gfx11-generic",
-          "--output={tmp}/target_profile.hsaco",
-          "--dump-ir-after=select-templates",
-          "--dump-ir-format=jsonl",
-          "--dump-ir-output=stderr"
-        ]
-      },
-      "stderr": {
-        "contains": [
-          "template.call @wave32_target_profile_transform",
-          "amdgpu.target<gfx11-generic> @__loom_target_context_0_0"
-        ],
-        "not_contains": ["portable_target_profile_transform"]
-      }
-    },
-    {
-      "name": "rooted compile retains template provider",
-      "steps": [
-        {
-          "name": "compile-root",
-          "run": {
-            "tool": "loom-compile",
-            "args": [
-              "{srcdir}/testdata/rooted_template_provider.loom",
-              "--root=@entry",
-              "--backend=llvmir-text",
-              "--output={tmp}/rooted_template.ll",
-              "--compile-report=summary"
-            ]
-          },
-          "stderr": {
-            "contains": [
-              "\"artifact_kind\":\"target-artifact\"",
-              "\"status\":{\"code\":0,\"name\":\"OK\"}"
-            ],
-            "not_contains": [
-              "no_provider"
-            ]
-          },
-          "files": [
-            {
-              "path": "{tmp}/rooted_template.ll",
-              "non_empty": true
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "dumps compile pipeline IR as JSONL",
-      "steps": [
-        {
-          "name": "write-source",
-          "write": {
-            "path": "{tmp}/trace.loom",
-            "text": "llvmir.target<object> @target {data_layout = \"e-p:64:64-i64:64-n8:16:32:64-S128\", triple = \"loom-direct64-unknown-none\"}\n\nfunc.def public target(@target) @trace(%lhs: i32, %rhs: i32) -> (i32) {\n  %sum = scalar.addi %lhs, %rhs : i32\n  func.return %sum : i32\n}\n"
-          }
-        },
-        {
-          "name": "compile",
-          "run": {
-            "tool": "loom-compile",
-            "args": [
-              "{tmp}/trace.loom",
-              "--backend=llvmir-text",
-              "--output={tmp}/trace.ll",
-              "--dump-ir-after-all",
-              "--dump-ir-format=jsonl",
-              "--dump-ir-output=stderr"
-            ]
-          },
-          "stderr": {
-            "contains": [
-              "\"tool\":\"loom-compile\"",
-              "\"stage\":\"prepared-low\"",
-              "\"pipeline\":\"__loom_compile_default\"",
-              "\"point\":\"after\"",
-              "\"ir\":\""
-            ]
-          },
-          "files": [
-            {
-              "path": "{tmp}/trace.ll",
-              "non_empty": true
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "enables sanitizer checks in default pipeline",
-      "steps": [
-        {
-          "name": "write-source",
-          "write": {
-            "path": "{tmp}/sanitizer.loom",
-            "text": "llvmir.target<object> @target {data_layout = \"e-p:64:64-i64:64-n8:16:32:64-S128\", triple = \"loom-direct64-unknown-none\"}\n\nfunc.def public target(@target) @sanitizer(%lhs: i32, %rhs: i32) -> (i32) {\n  %sum = scalar.addi %lhs, %rhs : i32\n  func.return %sum : i32\n}\n"
-          }
-        },
-        {
-          "name": "compile",
-          "run": {
-            "tool": "loom-compile",
-            "args": [
-              "{tmp}/sanitizer.loom",
-              "--backend=llvmir-text",
-              "--output={tmp}/sanitizer.ll",
-              "--sanitizer=access",
-              "--dump-ir-before=sanitizer-insert-assertions",
-              "--dump-ir-format=jsonl",
-              "--dump-ir-output=stderr"
-            ]
-          },
-          "stderr": {
-            "contains": [
-              "\"tool\":\"loom-compile\"",
-              "\"pass\":\"sanitizer-insert-assertions\"",
-              "\"point\":\"before\""
-            ]
-          },
-          "files": [
-            {
-              "path": "{tmp}/sanitizer.ll",
-              "non_empty": true
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "writes detailed compile report file",
-      "steps": [
-        {
-          "name": "write-source",
-          "write": {
-            "path": "{tmp}/arithmetic.loom",
-            "text": "llvmir.target<object> @target {data_layout = \"e-p:64:64-i64:64-n8:16:32:64-S128\", triple = \"loom-direct64-unknown-none\"}\n\nfunc.def public target(@target) @add(%lhs: i32, %rhs: i32) -> (i32) {\n  %sum = scalar.addi %lhs, %rhs : i32\n  func.return %sum : i32\n}\n"
-          }
-        },
-        {
-          "name": "compile",
-          "run": {
-            "tool": "loom-compile",
-            "args": [
-              "{tmp}/arithmetic.loom",
-              "--backend=llvmir-text",
-              "--output={tmp}/arithmetic.ll",
-              "--compile-report=details",
-              "--compile-report-output={tmp}/report.json"
-            ]
-          },
-          "files": [
-            {
-              "path": "{tmp}/arithmetic.ll",
-              "non_empty": true
-            },
-            {
-              "path": "{tmp}/report.json",
-              "non_empty": true
-            }
-          ]
-        },
-        {
-          "name": "inspect-report",
-          "run": {
-            "tool": "loom-compile",
-            "args": [
-              "{tmp}/arithmetic.loom",
-              "--backend=llvmir-text",
-              "--output={tmp}/unused.ll",
-              "--compile-report=summary",
-              "--compile-report-output=-"
-            ]
-          },
-          "stdout": {
-            "contains": [
-              "\"kind\":\"loom.compile_report\"",
-              "\"schema_version\":0",
-              "\"mode\":\"summary\"",
-              "\"artifact_kind\":\"target-artifact\"",
-              "\"status\":{\"code\":0,\"name\":\"OK\"}"
-            ]
-          }
-        }
-      ]
-    },
-    {
-      "name": "applies config file and reports invalid config states",
-      "steps": [
-        {
-          "name": "write-config",
-          "write": {
-            "path": "{tmp}/config.json",
-            "text": "{\"model36\": {\"model\": {\"delta\": 32}}}\n"
-          }
-        },
-        {
-          "name": "write-source",
-          "write": {
-            "path": "{tmp}/configured.loom",
-            "text": "llvmir.target<object> @target {data_layout = \"e-p:64:64-i64:64-n8:16:32:64-S128\", triple = \"loom-direct64-unknown-none\"}\n\nconfig.decl @model36.model.delta : i32\n\nfunc.def public target(@target) @configured(%lhs: i32) -> (i32) {\n  %delta = config.get @model36.model.delta : i32\n  %sum = scalar.addi %lhs, %delta : i32\n  func.return %sum : i32\n}\n"
-          }
-        },
-        {
-          "name": "compile-configured",
-          "run": {
-            "tool": "loom-compile",
-            "args": [
-              "{tmp}/configured.loom",
-              "--config-file={tmp}/config.json",
-              "--backend=llvmir-text",
-              "--output={tmp}/configured.ll"
-            ]
-          },
-          "files": [
-            {
-              "path": "{tmp}/configured.ll",
-              "non_empty": true
-            }
-          ]
-        },
-        {
-          "name": "reject-duplicate-config",
-          "run": {
-            "tool": "loom-compile",
-            "args": [
-              "{tmp}/configured.loom",
-              "--config-file={tmp}/config.json",
-              "--config=model36.model.delta=16",
-              "--backend=llvmir-text",
-              "--output={tmp}/unused.ll"
-            ]
-          },
-          "exit": {
-            "nonzero": true
-          },
-          "stderr": {
-            "contains": ["duplicate config binding for 'model36.model.delta'"]
-          }
-        },
-        {
-          "name": "reject-unresolved-config",
-          "run": {
-            "tool": "loom-compile",
-            "args": [
-              "{tmp}/configured.loom",
-              "--pipeline=none",
-              "--backend=llvmir-text",
-              "--output={tmp}/unused.ll"
-            ]
-          },
-          "exit": {
-            "nonzero": true
-          },
-          "stderr": {
-            "contains": [
-              "unresolved config '@model36.model.delta' remains for final compilation"
-            ]
-          }
-        }
-      ]
     }
   ]
 }

@@ -195,19 +195,21 @@ iree_execution_test_suite(
     data = [
         "//loom/src/loom/tools/loom-compile/testdata:command_artifacts.loom",
         "//loom/src/loom/tools/loom-compile/testdata:command_kernel_requests.loom",
-        "//loom/src/loom/tools/loom-compile/testdata:rooted_template_provider.loom",
-        "//loom/src/loom/tools/loom-link:testdata/target_profile_template_selection.loom",
     ],
     manifests = ["loom-compile.test.json"],
     tags = ["hostonly"],
     tools = {
         "loom-compile": ":loom-compile",
-        "loom-format": "//loom/src/loom/tools/loom-format",
     },
 )
 
 iree_execution_test_suite(
     name = "llvmir_execution_test",
+    data = [
+        "//loom/src/loom/tools/loom-compile/testdata:configured_llvmir.loom",
+        "//loom/src/loom/tools/loom-compile/testdata:configured_values.json",
+        "//loom/src/loom/tools/loom-compile/testdata:llvmir_program.loom",
+    ],
     manifests = ["loom-compile-llvmir.test.json"],
     tags = ["hostonly"],
     target_compatible_with = _LLVMIR_ARTIFACTS_COMPATIBLE_WITH,

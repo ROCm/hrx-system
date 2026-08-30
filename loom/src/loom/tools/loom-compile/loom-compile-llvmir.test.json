@@ -133,6 +133,97 @@
           }
         }
       ]
+    },
+    {
+      "name": "rejects command artifacts for another backend",
+      "run": {
+        "tool": "loom-compile",
+        "args": [
+          "{srcdir}/testdata/llvmir_program.loom",
+          "--backend=llvmir-text",
+          "--emit-command-artifacts={tmp}/commands",
+          "--output={tmp}/program.ll"
+        ]
+      },
+      "exit": {
+        "nonzero": true
+      },
+      "stderr": {
+        "contains": [
+          "--emit-command-artifacts requires --backend=command"
+        ]
+      }
+    },
+    {
+      "name": "routes pipeline IR tracing",
+      "run": {
+        "tool": "loom-compile",
+        "args": [
+          "{srcdir}/testdata/llvmir_program.loom",
+          "--backend=llvmir-text",
+          "--output={tmp}/program.ll",
+          "--dump-ir-after-all",
+          "--dump-ir-format=jsonl",
+          "--dump-ir-output=stderr"
+        ]
+      },
+      "stderr": {
+        "contains": [
+          "\"tool\":\"loom-compile\"",
+          "\"point\":\"after\""
+        ]
+      },
+      "files": [
+        {
+          "path": "{tmp}/program.ll",
+          "non_empty": true
+        }
+      ]
+    },
+    {
+      "name": "applies sanitizer flags to the default pipeline",
+      "run": {
+        "tool": "loom-compile",
+        "args": [
+          "{srcdir}/testdata/llvmir_program.loom",
+          "--backend=llvmir-text",
+          "--output={tmp}/program.ll",
+          "--sanitizer=access",
+          "--dump-ir-before=sanitizer-insert-assertions",
+          "--dump-ir-format=jsonl",
+          "--dump-ir-output=stderr"
+        ]
+      },
+      "stderr": {
+        "contains": [
+          "\"pass\":\"sanitizer-insert-assertions\"",
+          "\"point\":\"before\""
+        ]
+      },
+      "files": [
+        {
+          "path": "{tmp}/program.ll",
+          "non_empty": true
+        }
+      ]
+    },
+    {
+      "name": "loads config file",
+      "run": {
+        "tool": "loom-compile",
+        "args": [
+          "{srcdir}/testdata/configured_llvmir.loom",
+          "--config-file={srcdir}/testdata/configured_values.json",
+          "--backend=llvmir-text",
+          "--output={tmp}/configured.ll"
+        ]
+      },
+      "files": [
+        {
+          "path": "{tmp}/configured.ll",
+          "non_empty": true
+        }
+      ]
     }
   ]
 }

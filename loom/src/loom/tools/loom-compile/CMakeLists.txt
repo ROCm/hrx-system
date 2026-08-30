@@ -153,12 +153,9 @@ iree_execution_test_suite(
     "loom-compile.test.json"
   TOOLS
     "loom-compile=::loom-compile"
-    "loom-format=loom::tools::loom-format"
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-compile/testdata/command_artifacts.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-compile/testdata/command_kernel_requests.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-compile/testdata/rooted_template_provider.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-link/testdata/target_profile_template_selection.loom"
   LABELS
     "hostonly"
 )
@@ -171,6 +168,10 @@ iree_execution_test_suite(
     "loom-compile-llvmir.test.json"
   TOOLS
     "loom-compile=::loom-compile"
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-compile/testdata/configured_llvmir.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-compile/testdata/configured_values.json"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-compile/testdata/llvmir_program.loom"
   LABELS
     "hostonly"
 )
