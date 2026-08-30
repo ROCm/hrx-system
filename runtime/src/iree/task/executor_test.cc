@@ -651,7 +651,7 @@ static void compute_release_release(iree_task_process_t* process) {
 
 // Context for a persistent wake_budget > 1 process that repeatedly goes idle
 // and is rescheduled with one more unit of work. This mirrors the executor
-// contract local-task relies on for its long-lived compute process without
+// contract the task driver relies on for its long-lived compute process without
 // involving any HAL queue state.
 struct RepeatedComputeWakeContext : public TestWaiter {
   std::atomic<int32_t> pending_work{0};
@@ -969,7 +969,8 @@ TEST(ExecutorProcessTest, ComputeSlotErrorPropagation) {
 TEST(ExecutorProcessTest, ComputeSlotRepeatedSleepWakeCycles) {
   // Exercises a non-terminal wake_budget > 1 process that repeatedly goes idle
   // and is rescheduled with one unit of new work. This is the generic
-  // process-level contract local-task's persistent compute process depends on.
+  // process-level contract the task driver's persistent compute process
+  // depends on.
   // Unlike the wake_budget == 1 path, a wake_budget > 1 process may transition
   // to IDLE after a final did_work=true drain when no additional drain was
   // requested, so this test waits on schedule_state rather than expecting a

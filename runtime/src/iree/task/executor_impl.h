@@ -219,7 +219,7 @@ struct iree_task_executor_t {
   // processor context stays alive until every worker has exited drain().
   //
   // 16 slots supports up to 16 concurrent wake_budget > 1 processes. In
-  // practice this is far more than needed — the local_task driver typically has
+  // practice this is far more than needed — the task driver typically has
   // 1-3 active command buffer processes at a time.
   //
   // Each slot is cache-line aligned (via iree_task_compute_slot_t's alignas)

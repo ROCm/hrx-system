@@ -41,7 +41,7 @@ iree_hal_driver_registry_t* iree_hal_available_driver_registry(void) {
 
 iree_string_view_t iree_hal_default_device_uri(void) {
   // TODO(benvanik): query the registry and find the first available :shrug:
-  return IREE_SV("local-task");
+  return IREE_SV("task");
 }
 
 //===----------------------------------------------------------------------===//

@@ -139,13 +139,13 @@ static iree_status_t iree_hal_executable_library_run(
       iree_make_cstring_view(FLAG_executable_loader), host_allocator,
       &executable_loader));
 
-  // Build the same target set a local HAL device would advertise for the
+  // Build the same target set the task driver would advertise for the
   // selected loader and choose its highest-priority target.
   iree_hal_task_device_spec_params_t device_spec_params = {
       .logical_device_id = IREE_SV("executable-library-benchmark"),
       .display_name = IREE_SV("Executable Library Benchmark"),
-      .driver_id = IREE_SV("local-benchmark"),
-      .backend_id = IREE_SV("local"),
+      .driver_id = IREE_SV("task-benchmark"),
+      .backend_id = IREE_SV("task"),
       .queue_count = 1,
       .default_queue_worker_count = 1,
       .loader_count = 1,

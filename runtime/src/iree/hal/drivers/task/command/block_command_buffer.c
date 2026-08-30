@@ -680,7 +680,7 @@ static iree_status_t iree_hal_block_command_buffer_execution_barrier(
   if (IREE_UNLIKELY(flags & ~supported_flags)) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "unsupported local-task execution barrier flags: 0x%016" PRIx64,
+        "unsupported task execution barrier flags: 0x%016" PRIx64,
         flags & ~supported_flags);
   }
 
@@ -703,7 +703,7 @@ static iree_status_t iree_hal_block_command_buffer_check_atomic_width(
   if (IREE_UNLIKELY(!iree_hal_task_atomic_width_is_lock_free(width))) {
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,
-        "local-task command buffers do not support lock-based %u-bit atomic "
+        "task-driver command buffers do not support lock-based %u-bit atomic "
         "operations",
         width);
   }

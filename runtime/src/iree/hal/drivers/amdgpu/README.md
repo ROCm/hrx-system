@@ -20,7 +20,7 @@ compiled for your local GPU architecture:
 
 ```sh
 iree-bazel-build //loom/src/loom/tools/iree-run-loom \
-  --//runtime/config/hal:drivers=amdgpu,local-task \
+  --//runtime/config/hal:drivers=amdgpu,task \
   --//runtime/src/iree/hal/drivers/amdgpu:targets=gfx1100
 ```
 
@@ -93,7 +93,7 @@ IREE_TRACY_CAPTURE=/path/to/tracy-capture \
   --trace \
   --trace_name=amdgpu_runtime \
   //loom/src/loom/tools/iree-run-loom \
-  --//runtime/config/hal:drivers=amdgpu,local-task \
+  --//runtime/config/hal:drivers=amdgpu,task \
   --//runtime/src/iree/hal/drivers/amdgpu:targets=gfx1100 \
   -- \
   /tmp/kernel.loom \

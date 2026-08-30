@@ -28,7 +28,7 @@
 
 namespace {
 
-static iree_hal_device_t* CreateLocalTaskDevice() {
+static iree_hal_device_t* CreateTaskDevice() {
   iree_async_proactor_pool_t* proactor_pool = nullptr;
   IREE_CHECK_OK(iree_async_proactor_pool_create(
       1, /*node_ids=*/nullptr, iree_async_proactor_pool_options_default(),
@@ -45,7 +45,7 @@ static iree_hal_device_t* CreateLocalTaskDevice() {
 
   iree_hal_device_t* device = nullptr;
   iree_status_t status =
-      iree_hal_create_device(registry, IREE_SV("local-task"), &create_params,
+      iree_hal_create_device(registry, IREE_SV("task"), &create_params,
                              iree_allocator_system(), &device);
   iree_hal_driver_registry_free(registry);
   iree_async_proactor_pool_release(proactor_pool);
@@ -74,8 +74,8 @@ static iree_hal_device_group_t* CreateDeviceGroup(
   return group;
 }
 
-static iree_hal_device_group_t* CreateLocalTaskDeviceGroup() {
-  iree_hal_device_t* device = CreateLocalTaskDevice();
+static iree_hal_device_group_t* CreateTaskDeviceGroup() {
+  iree_hal_device_t* device = CreateTaskDevice();
   iree_hal_device_t* devices[] = {device};
   iree_hal_device_group_t* group =
       CreateDeviceGroup(devices, IREE_ARRAYSIZE(devices));
@@ -371,7 +371,7 @@ TEST(ReplayExecuteTest, ObservesScopeEvents) {
   std::vector<uint8_t> storage(32768, 0);
   iree_hal_replay_recorder_t* recorder = CreateHostAllocationRecorder(&storage);
 
-  iree_hal_device_group_t* source_group = CreateLocalTaskDeviceGroup();
+  iree_hal_device_group_t* source_group = CreateTaskDeviceGroup();
   iree_hal_device_group_t* wrapped_group = nullptr;
   IREE_ASSERT_OK(iree_hal_replay_wrap_device_group(
       recorder, source_group, iree_allocator_system(), &wrapped_group));
@@ -394,7 +394,7 @@ TEST(ReplayExecuteTest, ObservesScopeEvents) {
   options.scope_event_callback.fn = RecordReplayScopeEvent;
   options.scope_event_callback.user_data = &callback_state;
 
-  iree_hal_device_group_t* replay_group = CreateLocalTaskDeviceGroup();
+  iree_hal_device_group_t* replay_group = CreateTaskDeviceGroup();
   IREE_EXPECT_OK(iree_hal_replay_execute_file(GetCapturedFileContents(storage),
                                               replay_group, &options,
                                               iree_allocator_system()));
@@ -409,7 +409,7 @@ TEST(ReplayExecuteTest, ExecutesPreparedPlanRepeatedly) {
   std::vector<uint8_t> storage(32768, 0);
   iree_hal_replay_recorder_t* recorder = CreateHostAllocationRecorder(&storage);
 
-  iree_hal_device_group_t* source_group = CreateLocalTaskDeviceGroup();
+  iree_hal_device_group_t* source_group = CreateTaskDeviceGroup();
   iree_hal_device_group_t* wrapped_group = nullptr;
   IREE_ASSERT_OK(iree_hal_replay_wrap_device_group(
       recorder, source_group, iree_allocator_system(), &wrapped_group));
@@ -436,7 +436,7 @@ TEST(ReplayExecuteTest, ExecutesPreparedPlanRepeatedly) {
   options.scope_event_callback.fn = RecordReplayScopeEvent;
   options.scope_event_callback.user_data = &callback_state;
 
-  iree_hal_device_group_t* replay_group = CreateLocalTaskDeviceGroup();
+  iree_hal_device_group_t* replay_group = CreateTaskDeviceGroup();
   IREE_EXPECT_OK(iree_hal_replay_plan_execute(plan, replay_group, &options,
                                               iree_allocator_system()));
   IREE_EXPECT_OK(iree_hal_replay_plan_execute(plan, replay_group, &options,
@@ -688,7 +688,7 @@ TEST(ReplayExecuteTest, RejectsTargetDeviceCountMismatch) {
   std::vector<uint8_t> storage(32768, 0);
   iree_hal_replay_recorder_t* recorder = CreateHostAllocationRecorder(&storage);
 
-  iree_hal_device_group_t* source_group = CreateLocalTaskDeviceGroup();
+  iree_hal_device_group_t* source_group = CreateTaskDeviceGroup();
   iree_hal_device_group_t* wrapped_group = nullptr;
   IREE_ASSERT_OK(iree_hal_replay_wrap_device_group(
       recorder, source_group, iree_allocator_system(), &wrapped_group));
@@ -697,8 +697,8 @@ TEST(ReplayExecuteTest, RejectsTargetDeviceCountMismatch) {
   iree_hal_device_group_release(wrapped_group);
   iree_hal_device_group_release(source_group);
 
-  iree_hal_device_t* replay_device_a = CreateLocalTaskDevice();
-  iree_hal_device_t* replay_device_b = CreateLocalTaskDevice();
+  iree_hal_device_t* replay_device_a = CreateTaskDevice();
+  iree_hal_device_t* replay_device_b = CreateTaskDevice();
   iree_hal_device_t* replay_devices[] = {replay_device_a, replay_device_b};
   iree_hal_device_group_t* replay_group =
       CreateDeviceGroup(replay_devices, IREE_ARRAYSIZE(replay_devices));
@@ -736,7 +736,7 @@ static void CaptureFdBackedQueueRead(
   iree_hal_replay_recorder_t* recorder =
       CreateHostAllocationRecorder(storage, recorder_options);
 
-  iree_hal_device_group_t* source_group = CreateLocalTaskDeviceGroup();
+  iree_hal_device_group_t* source_group = CreateTaskDeviceGroup();
   iree_hal_device_group_t* wrapped_group = nullptr;
   IREE_ASSERT_OK(iree_hal_replay_wrap_device_group(
       recorder, source_group, iree_allocator_system(), &wrapped_group));
@@ -801,7 +801,7 @@ TEST(ReplayExecuteTest, ExecutesRecordedMappedBufferWrite) {
   std::vector<uint8_t> storage(32768, 0);
   iree_hal_replay_recorder_t* recorder = CreateHostAllocationRecorder(&storage);
 
-  iree_hal_device_group_t* source_group = CreateLocalTaskDeviceGroup();
+  iree_hal_device_group_t* source_group = CreateTaskDeviceGroup();
   iree_hal_device_group_t* wrapped_group = nullptr;
   IREE_ASSERT_OK(iree_hal_replay_wrap_device_group(
       recorder, source_group, iree_allocator_system(), &wrapped_group));
@@ -839,7 +839,7 @@ TEST(ReplayExecuteTest, ExecutesRecordedMappedBufferWrite) {
   iree_hal_device_group_release(wrapped_group);
   iree_hal_device_group_release(source_group);
 
-  iree_hal_device_group_t* replay_group = CreateLocalTaskDeviceGroup();
+  iree_hal_device_group_t* replay_group = CreateTaskDeviceGroup();
   iree_hal_replay_execute_options_t options =
       iree_hal_replay_execute_options_default();
   IREE_EXPECT_OK(iree_hal_replay_execute_file(GetCapturedFileContents(storage),
@@ -859,7 +859,7 @@ TEST(ReplayExecuteTest, ExecutesRecordedHostAllocationFileRead) {
   std::vector<uint8_t> storage(65536, 0);
   iree_hal_replay_recorder_t* recorder = CreateHostAllocationRecorder(&storage);
 
-  iree_hal_device_group_t* source_group = CreateLocalTaskDeviceGroup();
+  iree_hal_device_group_t* source_group = CreateTaskDeviceGroup();
   iree_hal_device_group_t* wrapped_group = nullptr;
   IREE_ASSERT_OK(iree_hal_replay_wrap_device_group(
       recorder, source_group, iree_allocator_system(), &wrapped_group));
@@ -918,7 +918,7 @@ TEST(ReplayExecuteTest, ExecutesRecordedHostAllocationFileRead) {
   iree_hal_device_group_release(wrapped_group);
   iree_hal_device_group_release(source_group);
 
-  iree_hal_device_group_t* replay_group = CreateLocalTaskDeviceGroup();
+  iree_hal_device_group_t* replay_group = CreateTaskDeviceGroup();
   iree_hal_replay_execute_options_t options =
       iree_hal_replay_execute_options_default();
   IREE_EXPECT_OK(iree_hal_replay_execute_file(GetCapturedFileContents(storage),
@@ -942,7 +942,7 @@ TEST(ReplayExecuteTest, ExecutesRecordedFdBackedQueueRead) {
   std::vector<uint8_t> storage(65536, 0);
   iree_hal_replay_recorder_t* recorder = CreateHostAllocationRecorder(&storage);
 
-  iree_hal_device_group_t* source_group = CreateLocalTaskDeviceGroup();
+  iree_hal_device_group_t* source_group = CreateTaskDeviceGroup();
   iree_hal_device_group_t* wrapped_group = nullptr;
   IREE_ASSERT_OK(iree_hal_replay_wrap_device_group(
       recorder, source_group, iree_allocator_system(), &wrapped_group));
@@ -999,7 +999,7 @@ TEST(ReplayExecuteTest, ExecutesRecordedFdBackedQueueRead) {
   iree_hal_device_group_release(wrapped_group);
   iree_hal_device_group_release(source_group);
 
-  iree_hal_device_group_t* replay_group = CreateLocalTaskDeviceGroup();
+  iree_hal_device_group_t* replay_group = CreateTaskDeviceGroup();
   iree_hal_replay_execute_options_t options =
       iree_hal_replay_execute_options_default();
   IREE_EXPECT_OK(iree_hal_replay_execute_file(GetCapturedFileContents(storage),
@@ -1033,7 +1033,7 @@ TEST(ReplayExecuteTest, ExecutesCapturedFdBackedQueueReadWithoutSourceFile) {
                            &storage);
 
   RenameToUniquePath(&source_file);
-  iree_hal_device_group_t* replay_group = CreateLocalTaskDeviceGroup();
+  iree_hal_device_group_t* replay_group = CreateTaskDeviceGroup();
   iree_hal_replay_execute_options_t options =
       iree_hal_replay_execute_options_default();
   IREE_EXPECT_OK(iree_hal_replay_execute_file(GetCapturedFileContents(storage),
@@ -1067,7 +1067,7 @@ TEST(ReplayExecuteTest,
                            &storage);
 
   RenameToUniquePath(&source_file);
-  iree_hal_device_group_t* replay_group = CreateLocalTaskDeviceGroup();
+  iree_hal_device_group_t* replay_group = CreateTaskDeviceGroup();
   iree_hal_replay_execute_options_t options =
       iree_hal_replay_execute_options_default();
   IREE_EXPECT_OK(iree_hal_replay_execute_file(GetCapturedFileContents(storage),
@@ -1095,7 +1095,7 @@ TEST(ReplayExecuteTest, ExecutesRemappedFdBackedQueueRead) {
   std::vector<uint8_t> storage(65536, 0);
   iree_hal_replay_recorder_t* recorder = CreateHostAllocationRecorder(&storage);
 
-  iree_hal_device_group_t* source_group = CreateLocalTaskDeviceGroup();
+  iree_hal_device_group_t* source_group = CreateTaskDeviceGroup();
   iree_hal_device_group_t* wrapped_group = nullptr;
   IREE_ASSERT_OK(iree_hal_replay_wrap_device_group(
       recorder, source_group, iree_allocator_system(), &wrapped_group));
@@ -1157,7 +1157,7 @@ TEST(ReplayExecuteTest, ExecutesRemappedFdBackedQueueRead) {
       iree_make_string_view(captured_path.data(), captured_path.size()),
       source_file.path_view(),
   };
-  iree_hal_device_group_t* replay_group = CreateLocalTaskDeviceGroup();
+  iree_hal_device_group_t* replay_group = CreateTaskDeviceGroup();
   iree_hal_replay_execute_options_t options =
       iree_hal_replay_execute_options_default();
   options.file_path_remap_count = 1;
@@ -1194,7 +1194,7 @@ TEST(ReplayExecuteTest, CopiedFdBackedQueueReadFailsIdentityValidation) {
       source_file.path_view(),
       copied_file.path_view(),
   };
-  iree_hal_device_group_t* replay_group = CreateLocalTaskDeviceGroup();
+  iree_hal_device_group_t* replay_group = CreateTaskDeviceGroup();
   iree_hal_replay_execute_options_t options =
       iree_hal_replay_execute_options_default();
   options.file_path_remap_count = 1;
@@ -1235,7 +1235,7 @@ TEST(ReplayExecuteTest, ExecutesDigestValidatedCopiedFdBackedQueueRead) {
       source_file.path_view(),
       copied_file.path_view(),
   };
-  iree_hal_device_group_t* replay_group = CreateLocalTaskDeviceGroup();
+  iree_hal_device_group_t* replay_group = CreateTaskDeviceGroup();
   iree_hal_replay_execute_options_t options =
       iree_hal_replay_execute_options_default();
   options.file_path_remap_count = 1;
@@ -1279,7 +1279,7 @@ TEST(ReplayExecuteTest, DigestValidatedFdBackedQueueReadRejectsWrongBytes) {
       source_file.path_view(),
       wrong_file.path_view(),
   };
-  iree_hal_device_group_t* replay_group = CreateLocalTaskDeviceGroup();
+  iree_hal_device_group_t* replay_group = CreateTaskDeviceGroup();
   iree_hal_replay_execute_options_t options =
       iree_hal_replay_execute_options_default();
   options.file_path_remap_count = 1;
@@ -1299,7 +1299,7 @@ TEST(ReplayExecuteTest, ExecutesRecordedQueueAlloca) {
   std::vector<uint8_t> storage(32768, 0);
   iree_hal_replay_recorder_t* recorder = CreateHostAllocationRecorder(&storage);
 
-  iree_hal_device_group_t* source_group = CreateLocalTaskDeviceGroup();
+  iree_hal_device_group_t* source_group = CreateTaskDeviceGroup();
   iree_hal_device_group_t* wrapped_group = nullptr;
   IREE_ASSERT_OK(iree_hal_replay_wrap_device_group(
       recorder, source_group, iree_allocator_system(), &wrapped_group));
@@ -1339,7 +1339,7 @@ TEST(ReplayExecuteTest, ExecutesRecordedQueueAlloca) {
   iree_hal_device_group_release(wrapped_group);
   iree_hal_device_group_release(source_group);
 
-  iree_hal_device_group_t* replay_group = CreateLocalTaskDeviceGroup();
+  iree_hal_device_group_t* replay_group = CreateTaskDeviceGroup();
   iree_hal_replay_execute_options_t options =
       iree_hal_replay_execute_options_default();
   IREE_EXPECT_OK(iree_hal_replay_execute_file(GetCapturedFileContents(storage),
@@ -1353,7 +1353,7 @@ TEST(ReplayExecuteTest, RejectsUnsupportedHostCallRecord) {
   std::vector<uint8_t> storage(32768, 0);
   iree_hal_replay_recorder_t* recorder = CreateHostAllocationRecorder(&storage);
 
-  iree_hal_device_group_t* source_group = CreateLocalTaskDeviceGroup();
+  iree_hal_device_group_t* source_group = CreateTaskDeviceGroup();
   iree_hal_device_group_t* wrapped_group = nullptr;
   IREE_ASSERT_OK(iree_hal_replay_wrap_device_group(
       recorder, source_group, iree_allocator_system(), &wrapped_group));
@@ -1372,7 +1372,7 @@ TEST(ReplayExecuteTest, RejectsUnsupportedHostCallRecord) {
   iree_hal_device_group_release(wrapped_group);
   iree_hal_device_group_release(source_group);
 
-  iree_hal_device_group_t* replay_group = CreateLocalTaskDeviceGroup();
+  iree_hal_device_group_t* replay_group = CreateTaskDeviceGroup();
   IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED,
                         iree_hal_replay_execute_file(
                             GetCapturedFileContents(storage), replay_group,
@@ -1385,7 +1385,7 @@ TEST(ReplayExecuteTest, ExecutesHostAllocationImportedBufferRecord) {
   std::vector<uint8_t> storage(32768, 0);
   iree_hal_replay_recorder_t* recorder = CreateHostAllocationRecorder(&storage);
 
-  iree_hal_device_group_t* source_group = CreateLocalTaskDeviceGroup();
+  iree_hal_device_group_t* source_group = CreateTaskDeviceGroup();
   iree_hal_device_group_t* wrapped_group = nullptr;
   IREE_ASSERT_OK(iree_hal_replay_wrap_device_group(
       recorder, source_group, iree_allocator_system(), &wrapped_group));
@@ -1444,7 +1444,7 @@ TEST(ReplayExecuteTest, ExecutesHostAllocationImportedBufferRecord) {
   iree_hal_device_group_release(wrapped_group);
   iree_hal_device_group_release(source_group);
 
-  iree_hal_device_group_t* replay_group = CreateLocalTaskDeviceGroup();
+  iree_hal_device_group_t* replay_group = CreateTaskDeviceGroup();
   IREE_EXPECT_OK(iree_hal_replay_execute_file(GetCapturedFileContents(storage),
                                               replay_group, nullptr,
                                               iree_allocator_system()));
@@ -1456,7 +1456,7 @@ TEST(ReplayExecuteTest, SkipsFailedOperationRecords) {
   std::vector<uint8_t> storage(32768, 0);
   iree_hal_replay_recorder_t* recorder = CreateHostAllocationRecorder(&storage);
 
-  iree_hal_device_group_t* source_group = CreateLocalTaskDeviceGroup();
+  iree_hal_device_group_t* source_group = CreateTaskDeviceGroup();
   iree_hal_device_group_t* wrapped_group = nullptr;
   IREE_ASSERT_OK(iree_hal_replay_wrap_device_group(
       recorder, source_group, iree_allocator_system(), &wrapped_group));
@@ -1475,7 +1475,7 @@ TEST(ReplayExecuteTest, SkipsFailedOperationRecords) {
   iree_hal_device_group_release(wrapped_group);
   iree_hal_device_group_release(source_group);
 
-  iree_hal_device_group_t* replay_group = CreateLocalTaskDeviceGroup();
+  iree_hal_device_group_t* replay_group = CreateTaskDeviceGroup();
   IREE_EXPECT_OK(iree_hal_replay_execute_file(GetCapturedFileContents(storage),
                                               replay_group, nullptr,
                                               iree_allocator_system()));
@@ -1487,7 +1487,7 @@ TEST(ReplayExecuteTest, SkipsFailedUnsupportedImportedBufferRecord) {
   std::vector<uint8_t> storage(32768, 0);
   iree_hal_replay_recorder_t* recorder = CreateHostAllocationRecorder(&storage);
 
-  iree_hal_device_group_t* source_group = CreateLocalTaskDeviceGroup();
+  iree_hal_device_group_t* source_group = CreateTaskDeviceGroup();
   iree_hal_device_group_t* wrapped_group = nullptr;
   IREE_ASSERT_OK(iree_hal_replay_wrap_device_group(
       recorder, source_group, iree_allocator_system(), &wrapped_group));
@@ -1517,7 +1517,7 @@ TEST(ReplayExecuteTest, SkipsFailedUnsupportedImportedBufferRecord) {
   iree_hal_device_group_release(wrapped_group);
   iree_hal_device_group_release(source_group);
 
-  iree_hal_device_group_t* replay_group = CreateLocalTaskDeviceGroup();
+  iree_hal_device_group_t* replay_group = CreateTaskDeviceGroup();
   IREE_EXPECT_OK(iree_hal_replay_execute_file(GetCapturedFileContents(storage),
                                               replay_group, nullptr,
                                               iree_allocator_system()));
@@ -1529,7 +1529,7 @@ TEST(ReplayExecuteTest, ExecutesRecordedQueueTransfersAndDealloca) {
   std::vector<uint8_t> storage(65536, 0);
   iree_hal_replay_recorder_t* recorder = CreateHostAllocationRecorder(&storage);
 
-  iree_hal_device_group_t* source_group = CreateLocalTaskDeviceGroup();
+  iree_hal_device_group_t* source_group = CreateTaskDeviceGroup();
   iree_hal_device_group_t* wrapped_group = nullptr;
   IREE_ASSERT_OK(iree_hal_replay_wrap_device_group(
       recorder, source_group, iree_allocator_system(), &wrapped_group));
@@ -1626,7 +1626,7 @@ TEST(ReplayExecuteTest, ExecutesRecordedQueueTransfersAndDealloca) {
   iree_hal_device_group_release(wrapped_group);
   iree_hal_device_group_release(source_group);
 
-  iree_hal_device_group_t* replay_group = CreateLocalTaskDeviceGroup();
+  iree_hal_device_group_t* replay_group = CreateTaskDeviceGroup();
   iree_hal_replay_execute_options_t options =
       iree_hal_replay_execute_options_default();
   IREE_EXPECT_OK(iree_hal_replay_execute_file(GetCapturedFileContents(storage),
@@ -1640,7 +1640,7 @@ TEST(ReplayExecuteTest, ExecutesRecordedQueueBarrier) {
   std::vector<uint8_t> storage(32768, 0);
   iree_hal_replay_recorder_t* recorder = CreateHostAllocationRecorder(&storage);
 
-  iree_hal_device_group_t* source_group = CreateLocalTaskDeviceGroup();
+  iree_hal_device_group_t* source_group = CreateTaskDeviceGroup();
   iree_hal_device_group_t* wrapped_group = nullptr;
   IREE_ASSERT_OK(iree_hal_replay_wrap_device_group(
       recorder, source_group, iree_allocator_system(), &wrapped_group));
@@ -1675,7 +1675,7 @@ TEST(ReplayExecuteTest, ExecutesRecordedQueueBarrier) {
   iree_hal_device_group_release(wrapped_group);
   iree_hal_device_group_release(source_group);
 
-  iree_hal_device_group_t* replay_group = CreateLocalTaskDeviceGroup();
+  iree_hal_device_group_t* replay_group = CreateTaskDeviceGroup();
   iree_hal_replay_execute_options_t options =
       iree_hal_replay_execute_options_default();
   IREE_EXPECT_OK(iree_hal_replay_execute_file(GetCapturedFileContents(storage),
@@ -1689,7 +1689,7 @@ TEST(ReplayExecuteTest, ExecutesRecordedCommandBufferTransfers) {
   std::vector<uint8_t> storage(65536, 0);
   iree_hal_replay_recorder_t* recorder = CreateHostAllocationRecorder(&storage);
 
-  iree_hal_device_group_t* source_group = CreateLocalTaskDeviceGroup();
+  iree_hal_device_group_t* source_group = CreateTaskDeviceGroup();
   iree_hal_device_group_t* wrapped_group = nullptr;
   IREE_ASSERT_OK(iree_hal_replay_wrap_device_group(
       recorder, source_group, iree_allocator_system(), &wrapped_group));
@@ -1764,7 +1764,7 @@ TEST(ReplayExecuteTest, ExecutesRecordedCommandBufferTransfers) {
   iree_hal_device_group_release(wrapped_group);
   iree_hal_device_group_release(source_group);
 
-  iree_hal_device_group_t* replay_group = CreateLocalTaskDeviceGroup();
+  iree_hal_device_group_t* replay_group = CreateTaskDeviceGroup();
   iree_hal_replay_execute_options_t options =
       iree_hal_replay_execute_options_default();
   IREE_EXPECT_OK(iree_hal_replay_execute_file(GetCapturedFileContents(storage),
@@ -1778,7 +1778,7 @@ TEST(ReplayExecuteTest, ExecutesRecordedIndirectCommandBufferBindings) {
   std::vector<uint8_t> storage(65536, 0);
   iree_hal_replay_recorder_t* recorder = CreateHostAllocationRecorder(&storage);
 
-  iree_hal_device_group_t* source_group = CreateLocalTaskDeviceGroup();
+  iree_hal_device_group_t* source_group = CreateTaskDeviceGroup();
   iree_hal_device_group_t* wrapped_group = nullptr;
   IREE_ASSERT_OK(iree_hal_replay_wrap_device_group(
       recorder, source_group, iree_allocator_system(), &wrapped_group));
@@ -1851,7 +1851,7 @@ TEST(ReplayExecuteTest, ExecutesRecordedIndirectCommandBufferBindings) {
   iree_hal_device_group_release(wrapped_group);
   iree_hal_device_group_release(source_group);
 
-  iree_hal_device_group_t* replay_group = CreateLocalTaskDeviceGroup();
+  iree_hal_device_group_t* replay_group = CreateTaskDeviceGroup();
   iree_hal_replay_execute_options_t options =
       iree_hal_replay_execute_options_default();
   IREE_EXPECT_OK(iree_hal_replay_execute_file(GetCapturedFileContents(storage),

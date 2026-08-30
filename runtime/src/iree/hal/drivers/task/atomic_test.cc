@@ -13,7 +13,7 @@
 
 namespace {
 
-TEST(LocalAtomicTest, CapabilitiesFollowLockFreeWidths) {
+TEST(TaskAtomicTest, CapabilitiesFollowLockFreeWidths) {
   const iree_hal_atomic_operation_flags_t allowed_operations =
       IREE_HAL_ATOMIC_OPERATION_FLAG_STORE |
       IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_ADD;
@@ -140,7 +140,7 @@ static void TestWait(iree_hal_atomic_width_t width) {
   producer.join();
 }
 
-TEST(LocalAtomicTest, Operations32) {
+TEST(TaskAtomicTest, Operations32) {
   if (!iree_atomic_int32_is_lock_free()) {
     GTEST_SKIP();
   }
@@ -148,7 +148,7 @@ TEST(LocalAtomicTest, Operations32) {
   TestWait<iree_atomic_uint32_t, uint32_t>(IREE_HAL_ATOMIC_WIDTH_32);
 }
 
-TEST(LocalAtomicTest, Operations64) {
+TEST(TaskAtomicTest, Operations64) {
   if (!iree_atomic_int64_is_lock_free()) {
     GTEST_SKIP();
   }

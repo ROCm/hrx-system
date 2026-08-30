@@ -247,7 +247,7 @@ static iree_status_t CapturingDeviceQueueFlush(
   return iree_ok_status();
 }
 
-static iree_hal_device_t* CreateLocalTaskDevice() {
+static iree_hal_device_t* CreateTaskDevice() {
   iree_async_proactor_pool_t* proactor_pool = nullptr;
   IREE_CHECK_OK(iree_async_proactor_pool_create(
       1, /*node_ids=*/nullptr, iree_async_proactor_pool_options_default(),
@@ -264,7 +264,7 @@ static iree_hal_device_t* CreateLocalTaskDevice() {
 
   iree_hal_device_t* device = nullptr;
   iree_status_t status =
-      iree_hal_create_device(registry, IREE_SV("local-task"), &create_params,
+      iree_hal_create_device(registry, IREE_SV("task"), &create_params,
                              iree_allocator_system(), &device);
   iree_hal_driver_registry_free(registry);
   iree_async_proactor_pool_release(proactor_pool);
@@ -323,7 +323,7 @@ class OperationRecord {
 class ReplayAtomicExecutionTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    local_task_device_ = CreateLocalTaskDevice();
+    task_device_ = CreateTaskDevice();
 
     const iree_hal_buffer_params_t buffer_params = {
         /*.usage=*/IREE_HAL_BUFFER_USAGE_STORAGE,
@@ -332,13 +332,13 @@ class ReplayAtomicExecutionTest : public ::testing::Test {
             IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
     };
     IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
-        iree_hal_device_allocator(local_task_device_), buffer_params, 64,
+        iree_hal_device_allocator(task_device_), buffer_params, 64,
         &target_buffer_));
     IREE_ASSERT_OK(iree_hal_semaphore_create(
-        local_task_device_, /*queue_affinity=*/1, /*initial_value=*/7,
+        task_device_, /*queue_affinity=*/1, /*initial_value=*/7,
         IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &wait_semaphore_));
     IREE_ASSERT_OK(iree_hal_semaphore_create(
-        local_task_device_, /*queue_affinity=*/1, /*initial_value=*/0,
+        task_device_, /*queue_affinity=*/1, /*initial_value=*/0,
         IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &signal_semaphore_));
 
     const iree_host_size_t validation_state_size =
@@ -356,7 +356,7 @@ class ReplayAtomicExecutionTest : public ::testing::Test {
     command_buffer_vtable_.atomic_store = CapturingCommandBufferAtomicStore;
     command_buffer_vtable_.atomic_rmw = CapturingCommandBufferAtomicRmw;
     iree_hal_command_buffer_initialize(
-        iree_hal_device_allocator(local_task_device_), /*mode=*/0,
+        iree_hal_device_allocator(task_device_), /*mode=*/0,
         IREE_HAL_COMMAND_CATEGORY_ATOMIC, /*queue_affinity=*/1,
         /*binding_capacity=*/1, validation_state_, &command_buffer_vtable_,
         &command_buffer_.base);
@@ -395,7 +395,7 @@ class ReplayAtomicExecutionTest : public ::testing::Test {
   void TearDown() override {
     iree_hal_replay_executor_deinitialize(&executor_);
     iree_allocator_free(iree_allocator_system(), validation_state_);
-    iree_hal_device_release(local_task_device_);
+    iree_hal_device_release(task_device_);
   }
 
   void StoreObject(iree_hal_replay_object_id_t object_id,
@@ -429,8 +429,8 @@ class ReplayAtomicExecutionTest : public ::testing::Test {
     return {/*.semaphore_id=*/kSignalSemaphoreId, /*.value=*/value};
   }
 
-  // Local-task device owning the concrete test buffer and semaphores.
-  iree_hal_device_t* local_task_device_ = nullptr;
+  // Task-driver device owning the concrete test buffer and semaphores.
+  iree_hal_device_t* task_device_ = nullptr;
   // Borrowed target buffer transferred to |executor_|.
   iree_hal_buffer_t* target_buffer_ = nullptr;
   // Borrowed wait semaphore transferred to |executor_|.

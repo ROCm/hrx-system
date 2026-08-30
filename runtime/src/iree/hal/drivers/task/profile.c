@@ -330,7 +330,7 @@ static iree_status_t iree_hal_task_profile_recorder_allocate_events(
 static iree_status_t iree_hal_task_profile_recorder_copy_name(
     iree_hal_task_profile_recorder_t* recorder, iree_string_view_t name) {
   if (iree_string_view_is_empty(name)) {
-    recorder->name = IREE_SV("local-task");
+    recorder->name = IREE_SV("task");
     return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(iree_allocator_clone(

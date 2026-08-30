@@ -22,7 +22,7 @@ LOOM_EXECUTE_SUBSTRATES = ("iree_hal",)
 LOOM_IMPORTERS = ("mlir", "tilelang")
 LOOM_TARGETS = ("amdgpu", "llvmir", "spirv", "wasm", "x86")
 LOOM_EMITTERS = ("amdgpu", "llvmir", "spirv", "wasm")
-HOST_DRIVERS = ("local-task",)
+HOST_DRIVERS = ("task",)
 DEFAULT_LOOM_EXECUTE = LOOM_EXECUTE_SUBSTRATES
 DEFAULT_LOOM_TARGETS = ("amdgpu", "llvmir", "spirv", "x86")
 
@@ -56,7 +56,7 @@ SUPPORTED_ENABLE_DRIVERS = frozenset((*HOST_DRIVERS, "amdgpu", "vulkan", "webgpu
 ALL_DRIVERS = tuple(HOST_DRIVERS) + tuple(SDK_DRIVER_PACKAGES)
 DRIVER_DEFINES = {
     "IREE_HAL_DRIVER_AMDGPU": "amdgpu",
-    "IREE_HAL_DRIVER_LOCAL_TASK": "local-task",
+    "IREE_HAL_DRIVER_TASK": "task",
     "IREE_HAL_DRIVER_VULKAN": "vulkan",
     "IREE_HAL_DRIVER_WEBGPU": "webgpu",
 }
@@ -377,7 +377,7 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
   python build_tools/bazel/configure.py -DIREE_HAL_DRIVER_AMDGPU=ON
   python build_tools/bazel/configure.py -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=/opt/rocm
   python build_tools/bazel/configure.py -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_DEPENDENCY_MODE=pinned
-  python build_tools/bazel/configure.py --//runtime/config/hal:drivers=amdgpu,local-task --repo_env=IREE_ROCM_PATH=/opt/rocm
+  python build_tools/bazel/configure.py --//runtime/config/hal:drivers=amdgpu,task --repo_env=IREE_ROCM_PATH=/opt/rocm
   python build_tools/bazel/configure.py -DLOOM_TARGET_SPIRV=OFF
   python build_tools/bazel/configure.py -DLOOM_TARGET_AMDGPU=ON -DLOOM_EXECUTE_IREE_HAL=ON -DIREE_HAL_DRIVER_AMDGPU=ON -DIREE_ROCM_PATH=/opt/rocm
   python build_tools/bazel/configure.py -DLOOM_TARGET_AMDGPU=ON -DLOOM_EMIT_LLVMIR=ON
@@ -423,7 +423,7 @@ def check_removed_option(arg: str) -> None:
         "{} was removed. Use portable -DIREE_HAL_DRIVER_* options and "
         "-DIREE_ROCM_PATH=/path/to/rocm when package-mode ROCm headers are "
         "required. The native Bazel form is "
-        "{}=amdgpu,local-task "
+        "{}=amdgpu,task "
         "--repo_env=IREE_ROCM_PATH=/path/to/rocm.".format(
             removed_option, NATIVE_DRIVER_FLAG
         )

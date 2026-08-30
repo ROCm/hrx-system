@@ -113,7 +113,7 @@ hrx_status_t hrx_device_get_property(hrx_device_t device,
         return hrx_make_status(HRX_STATUS_OUT_OF_RANGE,
                                "buffer too small for uint32_t");
       }
-      *(uint32_t*)value = 0;  // Not available from local-task driver.
+      *(uint32_t*)value = 0;  // Not available from the task driver.
       return hrx_ok_status();
     }
     default:

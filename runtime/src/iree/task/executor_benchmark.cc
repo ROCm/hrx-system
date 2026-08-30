@@ -335,7 +335,7 @@ BENCHMARK(BM_ConcurrentActivation)
 
 // Measures the throughput of scheduling and completing many wake_budget == 1
 // processes sequentially (one at a time). This is the steady-state path for
-// queue management operations in the local_task driver.
+// queue management operations in the task driver.
 void BM_SequentialProcessThroughput(benchmark::State& state) {
   iree_task_executor_t* executor = CreateExecutor(1);
 

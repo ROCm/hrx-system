@@ -234,7 +234,7 @@ hrx_status_t hrx_ensure_shared_state(void) {
   }
   g_shared.host_allocator = iree_allocator_system();
 
-  // Create proactor pool for async I/O (required by local-task devices).
+  // Create the proactor pool required by task-driver devices.
   uint32_t node_id = 0;
   iree_status_t status = iree_async_proactor_pool_create(
       /*node_count=*/1, &node_id, iree_async_proactor_pool_options_default(),
@@ -298,15 +298,16 @@ static void hrx_release_shared_state(void) {
 }
 
 //===----------------------------------------------------------------------===//
-// Helper: create a local-task device via driver pattern
+// Helper: create a task-driver device
 //===----------------------------------------------------------------------===//
 
-// Creates a local-task HAL device using the driver-based creation pattern.
+// Creates a task-driver HAL device using the driver-based creation pattern.
 // This matches the proven path in PyTorch's HrxRuntime::initialize().
 // group_count controls the task executor parallelism.
-static hrx_status_t hrx_create_local_task_device(
-    int group_count, iree_task_executor_t** out_executor,
-    iree_hal_driver_t** out_driver, iree_hal_device_t** out_hal_device) {
+static hrx_status_t hrx_create_task_device(int group_count,
+                                           iree_task_executor_t** out_executor,
+                                           iree_hal_driver_t** out_driver,
+                                           iree_hal_device_t** out_hal_device) {
   iree_allocator_t alloc = g_shared.host_allocator;
 
   // Task topology + executor.
@@ -349,15 +350,15 @@ static hrx_status_t hrx_create_local_task_device(
     return hrx_status_from_iree(status);
   }
 
-  // Assemble the local-task driver.
+  // Assemble the task driver.
   iree_hal_task_device_params_t task_params;
   iree_hal_task_device_params_initialize(&task_params);
 
   iree_hal_driver_t* driver = NULL;
-  status = iree_hal_task_driver_create(
-      iree_make_cstring_view("local-task"), &task_params,
-      /*queue_count=*/1, &executor, loader_count, loaders, device_allocator,
-      alloc, &driver);
+  status =
+      iree_hal_task_driver_create(iree_make_cstring_view("task"), &task_params,
+                                  /*queue_count=*/1, &executor, loader_count,
+                                  loaders, device_allocator, alloc, &driver);
 
   // Driver takes ownership references; release ours.
   iree_task_executor_release(executor);
@@ -613,7 +614,7 @@ hrx_status_t hrx_cpu_initialize(uint32_t flags) {
   iree_hal_driver_t* driver = NULL;
   iree_hal_device_t* hal_device = NULL;
   iree_task_executor_t* executor = NULL;
-  status = hrx_create_local_task_device(4, &executor, &driver, &hal_device);
+  status = hrx_create_task_device(4, &executor, &driver, &hal_device);
   if (!hrx_status_is_ok(status)) {
     hrx_release_shared_state();
     return status;
@@ -643,7 +644,7 @@ hrx_status_t hrx_cpu_initialize(uint32_t flags) {
   hrx_buffer_table_initialize(&dev->buffer_table);
   iree_arena_block_pool_initialize(/*block_size=*/32 * 1024,
                                    iree_allocator_system(), &dev->block_pool);
-  snprintf(dev->name, sizeof(dev->name), "CPU 0 (local-task)");
+  snprintf(dev->name, sizeof(dev->name), "CPU 0 (task)");
   snprintf(dev->architecture, sizeof(dev->architecture), "host");
 
   g_cpu.driver = driver;

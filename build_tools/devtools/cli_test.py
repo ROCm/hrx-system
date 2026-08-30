@@ -222,7 +222,7 @@ class CliTest(unittest.TestCase):
             [
                 "bazel",
                 "configure",
-                "--//runtime/config/hal:drivers=amdgpu,local-task",
+                "--//runtime/config/hal:drivers=amdgpu,task",
                 "--repo_env=IREE_ROCM_PATH=/opt/rocm",
             ]
         )
