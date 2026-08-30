@@ -2,6 +2,35 @@
   "version": 1,
   "cases": [
     {
+      "name": "compiles address-boundary conversions to an AIE2P tile image",
+      "run": {
+        "tool": "loom-compile",
+        "args": [
+          "{srcdir}/index_conversion.loom",
+          "--backend=elf-aie2p",
+          "--output={tmp}/index_conversion.elf",
+          "--compile-report=details"
+        ]
+      },
+      "stderr": {
+        "contains": {
+          "unordered": [
+            "\"artifact_kind\":\"target-artifact\"",
+            "\"backend\":\"amd-xdna-aie2p-tile-elf\"",
+            "\"artifact_format\":\"elf\"",
+            "\"status\":{\"code\":0,\"name\":\"OK\"}",
+            "\"spill_count\":0"
+          ]
+        }
+      },
+      "files": [
+        {
+          "path": "{tmp}/index_conversion.elf",
+          "non_empty": true
+        }
+      ]
+    },
+    {
       "name": "compiles address integer source to an AIE2P tile image",
       "run": {
         "tool": "loom-compile",

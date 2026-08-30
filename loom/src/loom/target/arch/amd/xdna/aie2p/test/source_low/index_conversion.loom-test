@@ -1,0 +1,88 @@
+// RUN: emit source-low output=low
+
+aie2p.target<core> @target
+func.def target(@target) @boolean_address_casts(%flag: i1, %coordinate: index, %byte_offset: offset) -> (index, offset, i1, i1) {
+  %flag_index = index.cast %flag : i1 to index
+  %flag_offset = index.cast %flag : i1 to offset
+  %index_low_bit = index.cast %coordinate : index to i1
+  %offset_low_bit = index.cast %byte_offset : offset to i1
+  func.return %flag_index, %flag_offset, %index_low_bit, %offset_low_bit : index, offset, i1, i1
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @boolean_address_casts(%flag_offset: reg<aie2p.er>, %coordinate: reg<aie2p.er>, %byte_offset: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>) asm {
+  %18 = mov.short 1
+  %index_low_bit = and %coordinate, %18
+  %offset_low_bit = and %byte_offset, %18
+  return %flag_offset, %flag_offset, %index_low_bit, %offset_low_bit
+}
+
+// ====
+
+aie2p.target<core> @target
+func.def target(@target) @index_payload_casts(%i8: i8, %i16: i16, %i32: i32, %i64_raw: i64, %coordinate: index) -> (index, index, index, index, i8, i16, i32, i64) {
+  %i64 = scalar.assume %i64_raw [range(%i64_raw, -2147483648, 2147483647)] : i64
+  %from_i8 = index.cast %i8 : i8 to index
+  %from_i16 = index.cast %i16 : i16 to index
+  %from_i32 = index.cast %i32 : i32 to index
+  %from_i64 = index.cast %i64 : i64 to index
+  %to_i8 = index.cast %coordinate : index to i8
+  %to_i16 = index.cast %coordinate : index to i16
+  %to_i32 = index.cast %coordinate : index to i32
+  %to_i64 = index.cast %coordinate : index to i64
+  func.return %from_i8, %from_i16, %from_i32, %from_i64, %to_i8, %to_i16, %to_i32, %to_i64 : index, index, index, index, i8, i16, i32, i64
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @index_payload_casts(%i8: reg<aie2p.er>, %i16: reg<aie2p.er>, %from_i32: reg<aie2p.er>, %i64: reg<aie2p.er x2>, %to_i32: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er x2>) asm {
+  %from_i8 = extend.s8 %i8
+  %from_i16 = extend.s16 %i16
+  %from_i64 = slice %i64[0] : reg<aie2p.er x2> -> reg<aie2p.er>
+  %38 = mov.short -31
+  %39 = ashl %to_i32, %38
+  %to_i64 = concat(%to_i32, %39) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  return %from_i8, %from_i16, %from_i32, %from_i64, %to_i32, %to_i32, %to_i32, %to_i64
+}
+
+// ====
+
+aie2p.target<core> @target
+func.def target(@target) @offset_payload_casts(%i8: i8, %i16: i16, %i32: i32, %i64_raw: i64, %byte_offset: offset) -> (offset, offset, offset, offset, i8, i16, i32, i64) {
+  %i64 = scalar.assume %i64_raw [range(%i64_raw, 0, 4294967295)] : i64
+  %from_i8 = index.cast %i8 : i8 to offset
+  %from_i16 = index.cast %i16 : i16 to offset
+  %from_i32 = index.cast %i32 : i32 to offset
+  %from_i64 = index.cast %i64 : i64 to offset
+  %to_i8 = index.cast %byte_offset : offset to i8
+  %to_i16 = index.cast %byte_offset : offset to i16
+  %to_i32 = index.cast %byte_offset : offset to i32
+  %to_i64 = index.cast %byte_offset : offset to i64
+  func.return %from_i8, %from_i16, %from_i32, %from_i64, %to_i8, %to_i16, %to_i32, %to_i64 : offset, offset, offset, offset, i8, i16, i32, i64
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @offset_payload_casts(%i8: reg<aie2p.er>, %i16: reg<aie2p.er>, %from_i32: reg<aie2p.er>, %i64: reg<aie2p.er x2>, %to_i32: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er x2>) asm {
+  %from_i8 = extend.u8 %i8
+  %from_i16 = extend.u16 %i16
+  %from_i64 = slice %i64[0] : reg<aie2p.er x2> -> reg<aie2p.er>
+  %38 = mov.short 0
+  %to_i64 = concat(%to_i32, %38) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  return %from_i8, %from_i16, %from_i32, %from_i64, %to_i32, %to_i32, %to_i32, %to_i64
+}
+
+// ====
+
+aie2p.target<core> @target
+func.def target(@target) @address_domain_casts(%coordinate0: index, %byte_offset0: offset) -> (index, offset, offset, index) {
+  %coordinate, %byte_offset = index.assume %coordinate0, %byte_offset0 [range(%coordinate0, 0, 2147483647), range(%byte_offset0, 0, 2147483647)] : index, offset
+  %index_identity = index.cast %coordinate : index to index
+  %offset_identity = index.cast %byte_offset : offset to offset
+  %as_offset = index.cast %coordinate : index to offset
+  %as_index = index.cast %byte_offset : offset to index
+  func.return %index_identity, %offset_identity, %as_offset, %as_index : index, offset, offset, index
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @address_domain_casts(%as_offset: reg<aie2p.er>, %as_index: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>) asm {
+  return %as_offset, %as_index, %as_offset, %as_index
+}
