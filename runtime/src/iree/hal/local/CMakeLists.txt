@@ -149,7 +149,6 @@ iree_cc_binary_benchmark(
     iree::base::tooling::flags
     iree::hal
     iree::hal::local::loaders::registration
-    iree::hal::local::plugins::registration
     iree::io::file_handle
     iree::testing::benchmark
     iree::third_party::google_benchmark
@@ -214,47 +213,6 @@ iree_cc_test(
     ::executable_library_util
     iree::base
     iree::hal
-    iree::testing::gtest
-    iree::testing::gtest_main
-)
-
-iree_cc_library(
-  NAME
-    executable_plugin
-  HDRS
-    "executable_plugin.h"
-  DEPS
-
-  PUBLIC
-)
-
-iree_cc_library(
-  NAME
-    executable_plugin_manager
-  HDRS
-    "executable_plugin_manager.h"
-  SRCS
-    "executable_plugin_manager.c"
-  DEPS
-    ::executable_loader
-    ::executable_plugin
-    iree::base
-    iree::base::internal
-    iree::base::threading
-    iree::hal
-  PUBLIC
-)
-
-iree_cc_test(
-  NAME
-    executable_plugin_test
-  SRCS
-    "executable_plugin_test.cc"
-  DEPS
-    ::executable_plugin
-    ::executable_plugin_manager
-    iree::base
-    iree::hal::local::plugins::static_plugin
     iree::testing::gtest
     iree::testing::gtest_main
 )

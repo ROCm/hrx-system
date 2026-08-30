@@ -36,7 +36,6 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal/local:executable_library",
         "//runtime/src/iree/hal/local:executable_library_util",
         "//runtime/src/iree/hal/local:executable_loader",
-        "//runtime/src/iree/hal/local:executable_plugin_manager",
         "//runtime/src/iree/hal/local/elf:elf_module",
         "//runtime/src/iree/hal/utils:elf_format",
     ],
@@ -71,7 +70,6 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal/local:executable_library",
         "//runtime/src/iree/hal/local:executable_library_util",
         "//runtime/src/iree/hal/local:executable_loader",
-        "//runtime/src/iree/hal/local:executable_plugin_manager",
         "//runtime/src/iree/hal/utils:elf_format",
     ],
 )

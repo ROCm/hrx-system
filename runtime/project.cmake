@@ -56,7 +56,6 @@ set(IREE_HOST_BIN_DIR "" CACHE PATH
 
 set(IREE_EXTERNAL_HAL_DRIVERS "" CACHE STRING "")
 set(IREE_HAL_EXECUTABLE_LOADER_EXTRA_DEPS "" CACHE STRING "")
-set(IREE_HAL_EXECUTABLE_PLUGIN_EXTRA_DEPS "" CACHE STRING "")
 
 option(IREE_HAL_DRIVER_DEFAULTS
   "Default value for opt-in runtime HAL drivers." OFF)
@@ -105,15 +104,6 @@ if(IREE_HAL_EXECUTABLE_LOADER_VMVX_MODULE)
   set(IREE_MODULE_VMVX ON CACHE BOOL
     "Builds the VMVX runtime module boundary." FORCE)
 endif()
-
-option(IREE_HAL_EXECUTABLE_PLUGIN_DEFAULTS
-  "Sets the default value for all runtime HAL executable plugin mechanisms." ON)
-option(IREE_HAL_EXECUTABLE_PLUGIN_EMBEDDED_ELF
-  "Enables the embedded dynamic library plugin mechanism for local HAL drivers."
-  ${IREE_HAL_EXECUTABLE_PLUGIN_DEFAULTS})
-option(IREE_HAL_EXECUTABLE_PLUGIN_SYSTEM_LIBRARY
-  "Enables the system dynamic library plugin mechanism for local HAL drivers."
-  ${IREE_HAL_EXECUTABLE_PLUGIN_DEFAULTS})
 
 set(IREE_HAL_AMDGPU_TARGETS
   "gfx9-generic;gfx90a;gfx9-4-generic;gfx10-1-generic;gfx10-3-generic;gfx11-generic;gfx12-generic"

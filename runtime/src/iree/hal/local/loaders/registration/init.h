@@ -15,9 +15,6 @@
 extern "C" {
 #endif  // __cplusplus
 
-typedef struct iree_hal_executable_plugin_manager_t
-    iree_hal_executable_plugin_manager_t;
-
 // Queries and creates all linked in executable library loaders and retains them
 // in the |out_loaders| list. |out_count| contains the total number of loaders.
 // If there is not enough |capacity| to store all of the loaders
@@ -32,7 +29,6 @@ typedef struct iree_hal_executable_plugin_manager_t
 //  iree_host_size_t count = 0;
 //  iree_hal_executable_loader_t* loaders[8] = {NULL};
 //  IREE_RETURN_IF_ERROR(iree_hal_create_all_available_executable_loaders(
-//      plugin_manager,
 //      IREE_ARRAYSIZE(loaders), &count, loaders,
 //      host_allocator));
 //  ...
@@ -42,16 +38,13 @@ typedef struct iree_hal_executable_plugin_manager_t
 //    iree_hal_executable_loader_release(loaders[i]);
 //  }
 IREE_API_EXPORT iree_status_t iree_hal_create_all_available_executable_loaders(
-    iree_hal_executable_plugin_manager_t* plugin_manager,
     iree_host_size_t capacity, iree_host_size_t* out_count,
     iree_hal_executable_loader_t** loaders, iree_allocator_t host_allocator);
 
 // Creates an executable loader with the given |name|.
 // |out_executable_loader| must be released by the caller.
 IREE_API_EXPORT iree_status_t iree_hal_create_executable_loader_by_name(
-    iree_string_view_t name,
-    iree_hal_executable_plugin_manager_t* plugin_manager,
-    iree_allocator_t host_allocator,
+    iree_string_view_t name, iree_allocator_t host_allocator,
     iree_hal_executable_loader_t** out_executable_loader);
 
 #ifdef __cplusplus

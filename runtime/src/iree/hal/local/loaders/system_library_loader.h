@@ -17,14 +17,10 @@
 extern "C" {
 #endif  // __cplusplus
 
-typedef struct iree_hal_executable_plugin_manager_t
-    iree_hal_executable_plugin_manager_t;
-
 // Creates an executable loader for platform dynamic libraries that export the
 // IREE executable library query function. Supported containers include .dylib
 // on Darwin, .so on Linux, and .dll on Windows.
 iree_status_t iree_hal_system_library_loader_create(
-    iree_hal_executable_plugin_manager_t* plugin_manager,
     iree_allocator_t host_allocator,
     iree_hal_executable_loader_t** out_executable_loader);
 

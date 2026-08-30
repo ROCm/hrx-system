@@ -15,7 +15,6 @@
 #include "iree/hal/local/executable_data.h"
 #include "iree/hal/local/executable_library.h"
 #include "iree/hal/local/executable_library_util.h"
-#include "iree/hal/local/executable_plugin_manager.h"
 #include "iree/hal/local/local_executable.h"
 #include "iree/hal/utils/elf_format.h"
 
@@ -422,14 +421,12 @@ static const iree_hal_local_executable_vtable_t
 typedef struct iree_hal_system_library_loader_t {
   iree_hal_executable_loader_t base;
   iree_allocator_t host_allocator;
-  iree_hal_executable_plugin_manager_t* plugin_manager;
 } iree_hal_system_library_loader_t;
 
 static const iree_hal_executable_loader_vtable_t
     iree_hal_system_library_loader_vtable;
 
 iree_status_t iree_hal_system_library_loader_create(
-    iree_hal_executable_plugin_manager_t* plugin_manager,
     iree_allocator_t host_allocator,
     iree_hal_executable_loader_t** out_executable_loader) {
   IREE_ASSERT_ARGUMENT(out_executable_loader);
@@ -442,12 +439,8 @@ iree_status_t iree_hal_system_library_loader_create(
   if (iree_status_is_ok(status)) {
     iree_hal_executable_loader_initialize(
         &iree_hal_system_library_loader_vtable,
-        iree_hal_executable_plugin_manager_provider(plugin_manager),
-        &executable_loader->base);
+        iree_hal_executable_import_provider_null(), &executable_loader->base);
     executable_loader->host_allocator = host_allocator;
-    executable_loader->plugin_manager = plugin_manager;
-    iree_hal_executable_plugin_manager_retain(
-        executable_loader->plugin_manager);
     *out_executable_loader = (iree_hal_executable_loader_t*)executable_loader;
   }
 
@@ -462,7 +455,6 @@ static void iree_hal_system_library_loader_destroy(
   iree_allocator_t host_allocator = executable_loader->host_allocator;
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  iree_hal_executable_plugin_manager_release(executable_loader->plugin_manager);
   iree_allocator_free(host_allocator, executable_loader);
 
   IREE_TRACE_ZONE_END(z0);
