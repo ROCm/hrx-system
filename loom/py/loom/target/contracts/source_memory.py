@@ -350,11 +350,11 @@ class SourceMemoryConstraint:
                 "source memory dynamic view-base term count must fit in u8"
             )
         if self.allow_dynamic_stride_values and (
-            dynamic_term_count is None or dynamic_term_count == 0
+            dynamic_term_count == 0
+            or (dynamic_term_count is None and self.dynamic_term_count_minimum == 0)
         ):
             raise ValueError(
-                "dynamic source memory stride values require a fixed nonzero "
-                "dynamic term count"
+                "dynamic source memory stride values require at least one dynamic term"
             )
         if self.preserve_source_index:
             if dynamic_term_count == 0 or (

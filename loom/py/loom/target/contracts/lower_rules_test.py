@@ -780,6 +780,40 @@ def test_source_memory_constraint_rejects_dynamic_view_base_preservation() -> No
     )
 
 
+def test_source_memory_constraint_accepts_any_dynamic_stride_value_terms() -> None:
+    constraint = SourceMemoryConstraint(
+        operation=SourceMemoryOperation.LOAD,
+        memory_spaces=("global",),
+        element_byte_count=4,
+        vector_lane_count=1,
+        vector_lane_byte_stride=4,
+        static_byte_offset=0,
+        dynamic_term_count=None,
+        dynamic_term_count_minimum=1,
+        allow_dynamic_stride_values=True,
+    )
+
+    assert constraint.dynamic_term_count is None
+    assert constraint.dynamic_term_count_minimum == 1
+    assert constraint.allow_dynamic_stride_values
+
+
+def test_source_memory_constraint_rejects_stride_values_without_dynamic_terms() -> None:
+    _expect_value_error(
+        lambda: SourceMemoryConstraint(
+            operation=SourceMemoryOperation.LOAD,
+            memory_spaces=("global",),
+            element_byte_count=4,
+            vector_lane_count=1,
+            vector_lane_byte_stride=4,
+            static_byte_offset=0,
+            dynamic_term_count=None,
+            allow_dynamic_stride_values=True,
+        ),
+        "dynamic source memory stride values require at least one dynamic term",
+    )
+
+
 def test_source_memory_constraint_rejects_unknown_address_layout() -> None:
     _expect_value_error(
         lambda: SourceMemoryConstraint(
