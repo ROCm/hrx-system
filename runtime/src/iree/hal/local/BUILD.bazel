@@ -103,7 +103,6 @@ iree_runtime_cc_test(
         ":cpu_device_spec",
         ":device_spec_builder",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/local/loaders:static_library_loader",
         "//runtime/src/iree/hal/memory:cpu_slab_provider",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

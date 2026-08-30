@@ -49,23 +49,6 @@ endif()
     inline = True,
 )
 
-iree_runtime_cc_library(
-    name = "static_library_loader",
-    srcs = ["static_library_loader.c"],
-    hdrs = ["static_library_loader.h"],
-    defines = [
-        "IREE_HAVE_HAL_EXECUTABLE_LOADER_STATIC_LIBRARY=1",
-    ],
-    deps = [
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/local:executable_environment",
-        "//runtime/src/iree/hal/local:executable_library",
-        "//runtime/src/iree/hal/local:executable_library_util",
-        "//runtime/src/iree/hal/local:executable_loader",
-    ],
-)
-
 iree_cmake_extra_content(
     content = """
 if(IREE_HAL_EXECUTABLE_LOADER_SYSTEM_LIBRARY)

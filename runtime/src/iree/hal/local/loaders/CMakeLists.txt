@@ -35,25 +35,6 @@ iree_cc_library(
 
 endif()
 
-iree_cc_library(
-  NAME
-    static_library_loader
-  HDRS
-    "static_library_loader.h"
-  SRCS
-    "static_library_loader.c"
-  DEPS
-    iree::base
-    iree::hal
-    iree::hal::local::executable_environment
-    iree::hal::local::executable_library
-    iree::hal::local::executable_library_util
-    iree::hal::local::executable_loader
-  DEFINES
-    "IREE_HAVE_HAL_EXECUTABLE_LOADER_STATIC_LIBRARY=1"
-  PUBLIC
-)
-
 if(IREE_HAL_EXECUTABLE_LOADER_SYSTEM_LIBRARY)
 
 iree_cc_library(

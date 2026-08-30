@@ -92,7 +92,6 @@ iree_cc_test(
     ::cpu_device_spec
     ::device_spec_builder
     iree::hal
-    iree::hal::local::loaders::static_library_loader
     iree::hal::memory::cpu_slab_provider
     iree::testing::gtest
     iree::testing::gtest_main
