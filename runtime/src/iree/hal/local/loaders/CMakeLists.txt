@@ -27,6 +27,7 @@ iree_cc_library(
     iree::hal::local::executable_library_util
     iree::hal::local::executable_loader
     iree::hal::local::executable_plugin_manager
+    iree::hal::utils::elf_format
   DEFINES
     "IREE_HAVE_HAL_EXECUTABLE_LOADER_EMBEDDED_ELF=1"
   PUBLIC
@@ -71,6 +72,7 @@ iree_cc_library(
     iree::hal::local::executable_library_util
     iree::hal::local::executable_loader
     iree::hal::local::executable_plugin_manager
+    iree::hal::utils::elf_format
   DEFINES
     "IREE_HAVE_HAL_EXECUTABLE_LOADER_SYSTEM_LIBRARY=1"
   PUBLIC

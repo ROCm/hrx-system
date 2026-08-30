@@ -20,10 +20,8 @@ iree_cc_library(
   HDRS
     "elf_module.h"
     "elf_types.h"
-    "fatelf.h"
   SRCS
     "elf_module.c"
-    "fatelf.c"
   DEPS
     ::arch
     ::platform

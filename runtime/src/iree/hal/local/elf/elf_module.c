@@ -10,7 +10,6 @@
 #include <string.h>
 
 #include "iree/hal/local/elf/arch.h"
-#include "iree/hal/local/elf/fatelf.h"
 #include "iree/hal/local/elf/platform.h"
 
 //==============================================================================
@@ -577,12 +576,6 @@ iree_status_t iree_elf_module_initialize_from_memory(
   IREE_ASSERT_ARGUMENT(raw_data.data);
   IREE_ASSERT_ARGUMENT(out_module);
   IREE_TRACE_ZONE_BEGIN(z0);
-
-  // If the file is a FatELF then select the ELF for this architecture.
-  // Ignored of not a FatELF and otherwise errors if no compatible architecture
-  // is available.
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0,
-                                    iree_fatelf_select(raw_data, &raw_data));
 
   // Parse the ELF headers and verify that it's something we can handle.
   // Temporary state required during loading such as references to subtables

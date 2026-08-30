@@ -10,25 +10,11 @@
 
 #include "iree/hal/utils/elf_format.h"
 
-static const uint8_t iree_hal_fatelf_magic[4] = {0xFA, 0x70, 0x0E, 0x1F};
-
 static bool iree_hal_local_executable_data_starts_with(
     iree_const_byte_span_t executable_data, iree_host_size_t prefix_length,
     const uint8_t* prefix) {
   return executable_data.data && executable_data.data_length >= prefix_length &&
          memcmp(executable_data.data, prefix, prefix_length) == 0;
-}
-
-static bool iree_hal_local_executable_data_is_fatelf(
-    iree_const_byte_span_t executable_data) {
-  return iree_hal_local_executable_data_starts_with(
-      executable_data, sizeof(iree_hal_fatelf_magic), iree_hal_fatelf_magic);
-}
-
-bool iree_hal_local_executable_data_is_elf(
-    iree_const_byte_span_t executable_data) {
-  return iree_hal_elf_data_starts_with_magic(executable_data) ||
-         iree_hal_local_executable_data_is_fatelf(executable_data);
 }
 
 typedef struct iree_hal_local_elf32_header_t {

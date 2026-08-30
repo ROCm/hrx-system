@@ -13,10 +13,6 @@
 extern "C" {
 #endif  // __cplusplus
 
-// Returns true when |executable_data| begins with ELF or FatELF magic.
-bool iree_hal_local_executable_data_is_elf(
-    iree_const_byte_span_t executable_data);
-
 // Returns true when a bounded ELF uses features requiring the platform dynamic
 // loader instead of the restricted embedded ELF loader.
 //

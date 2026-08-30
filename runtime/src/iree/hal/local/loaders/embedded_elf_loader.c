@@ -17,6 +17,7 @@
 #include "iree/hal/local/executable_library_util.h"
 #include "iree/hal/local/executable_plugin_manager.h"
 #include "iree/hal/local/local_executable.h"
+#include "iree/hal/utils/elf_format.h"
 
 //===----------------------------------------------------------------------===//
 // iree_hal_elf_executable_t
@@ -371,7 +372,7 @@ static bool iree_hal_embedded_elf_loader_claims_executable(
     iree_hal_executable_loader_t* base_executable_loader,
     const iree_hal_executable_target_t* target,
     const iree_hal_executable_load_params_t* load_params) {
-  if (!iree_hal_local_executable_data_is_elf(load_params->executable_data)) {
+  if (!iree_hal_elf_data_starts_with_magic(load_params->executable_data)) {
     return false;
   }
   if (!iree_hal_local_executable_data_is_system_library(
