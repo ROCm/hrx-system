@@ -251,6 +251,196 @@ def _binary_rule(
     )
 
 
+def _unary_rule(
+    source_op: Op,
+    type_pattern: TypePattern,
+    descriptor_key: str,
+) -> DescriptorRule:
+    descriptor = _descriptor(descriptor_key)
+    return DescriptorRule(
+        source_op=source_op,
+        descriptor=descriptor,
+        guards=_typed_guards(("input", "result"), type_pattern),
+        emit=(
+            _op_emit(
+                descriptor,
+                operands={"s0": ValueRef.operand("input")},
+                results={"d0": ValueRef.result("result")},
+            ),
+        ),
+    )
+
+
+def _madd_rule(source_op: Op, type_pattern: TypePattern) -> DescriptorRule:
+    descriptor = _descriptor("amd.xdna.aie2p.madd.i32")
+    return DescriptorRule(
+        source_op=source_op,
+        descriptor=descriptor,
+        guards=_typed_guards(("a", "b", "c", "result"), type_pattern),
+        emit=(
+            _op_emit(
+                descriptor,
+                operands={
+                    "a0": ValueRef.operand("c"),
+                    "s0": ValueRef.operand("a"),
+                    "s1": ValueRef.operand("b"),
+                },
+                results={"d0": ValueRef.result("result")},
+                copy_operands=("a0",),
+            ),
+        ),
+    )
+
+
+def _index_scale_rule() -> DescriptorRule:
+    descriptor = _descriptor("amd.xdna.aie2p.mul.i32")
+    return DescriptorRule(
+        source_op=index.index_scale,
+        descriptor=descriptor,
+        guards=(
+            Guard.value_type("index", _INDEX),
+            Guard.value_type("stride", _OFFSET),
+            Guard.value_type("result", _OFFSET),
+        ),
+        emit=(
+            _op_emit(
+                descriptor,
+                operands={
+                    "s0": ValueRef.operand("index"),
+                    "s1": ValueRef.operand("stride"),
+                },
+                results={"d0": ValueRef.result("result")},
+            ),
+        ),
+    )
+
+
+def _scalar_select_rule(type_pattern: TypePattern) -> DescriptorRule:
+    descriptor = _descriptor("amd.xdna.aie2p.select.nonzero.i32")
+    return DescriptorRule(
+        source_op=scf.scf_select,
+        descriptor=descriptor,
+        guards=(
+            Guard.value_type("condition", _I1),
+            *_typed_guards(("true_value", "false_value", "result"), type_pattern),
+        ),
+        emit=(
+            _op_emit(
+                descriptor,
+                operands={
+                    "s0": ValueRef.operand("true_value"),
+                    "s1": ValueRef.operand("false_value"),
+                    "s2": ValueRef.operand("condition"),
+                },
+                results={"d0": ValueRef.result("result")},
+                copy_operands=("s2",),
+            ),
+        ),
+    )
+
+
+def _integer_minmax_rule(
+    source_op: Op,
+    type_pattern: TypePattern,
+    compare_descriptor_key: str,
+    *,
+    swap_compare_operands: bool,
+) -> DescriptorRule:
+    compare = _descriptor(compare_descriptor_key)
+    select = _descriptor("amd.xdna.aie2p.select.nonzero.i32")
+    lhs = ValueRef.operand("rhs" if swap_compare_operands else "lhs")
+    rhs = ValueRef.operand("lhs" if swap_compare_operands else "rhs")
+    return DescriptorRule(
+        source_op=source_op,
+        descriptor=select,
+        guards=_typed_guards(("lhs", "rhs", "result"), type_pattern),
+        emit=(
+            _op_emit(
+                compare,
+                operands={"s0": lhs, "s1": rhs},
+                results={"d0": ValueRef.temporary("condition")},
+                result_types={"d0": DescriptorResultType()},
+            ),
+            _op_emit(
+                select,
+                operands={
+                    "s0": ValueRef.operand("lhs"),
+                    "s1": ValueRef.operand("rhs"),
+                    "s2": ValueRef.temporary("condition"),
+                },
+                results={"d0": ValueRef.result("result")},
+            ),
+        ),
+    )
+
+
+def _unsigned_division_rule(
+    source_op: Op,
+    type_pattern: TypePattern,
+    *,
+    return_quotient: bool,
+) -> DescriptorRule:
+    move_to_state = _descriptor("amd.xdna.aie2p.move.to.division-state")
+    move_from_state = _descriptor("amd.xdna.aie2p.move.from.division-state")
+    zero = _descriptor("amd.xdna.aie2p.constant.i32.short")
+    divide_step = _descriptor("amd.xdna.aie2p.divide.step.unsigned.i32")
+
+    emits = [
+        _op_emit(
+            move_to_state,
+            operands={"src": ValueRef.operand("lhs")},
+            results={"dst": ValueRef.temporary("division_state_0")},
+            result_types={"dst": DescriptorResultType()},
+        ),
+        _const_emit(
+            zero,
+            ValueRef.temporary("division_remainder_0"),
+            0,
+            result_type=type_pattern,
+        ),
+    ]
+    for step in range(1, 33):
+        is_final_remainder = step == 32 and not return_quotient
+        remainder = (
+            ValueRef.result("result")
+            if is_final_remainder
+            else ValueRef.temporary(f"division_remainder_{step}")
+        )
+        emits.append(
+            _op_emit(
+                divide_step,
+                operands={
+                    "sd": ValueRef.temporary(f"division_state_{step - 1}"),
+                    "s0": ValueRef.temporary(f"division_remainder_{step - 1}"),
+                    "s1": ValueRef.operand("rhs"),
+                },
+                results={
+                    "d0": remainder,
+                    "sd_out": ValueRef.temporary(f"division_state_{step}"),
+                },
+                result_types={
+                    "d0": DescriptorResultType(),
+                    "sd_out": DescriptorResultType(),
+                },
+            )
+        )
+    if return_quotient:
+        emits.append(
+            _op_emit(
+                move_from_state,
+                operands={"src": ValueRef.temporary("division_state_32")},
+                results={"dst": ValueRef.result("result")},
+            )
+        )
+
+    return DescriptorRule(
+        source_op=source_op,
+        descriptor=divide_step,
+        guards=_typed_guards(("lhs", "rhs", "result"), type_pattern),
+        emit=tuple(emits),
+    )
+
+
 def _full_vector_memory_constraint(
     operation: SourceMemoryOperation,
     *,
@@ -1093,7 +1283,7 @@ def _right_shift_rule(
                 zero,
                 ValueRef.temporary("zero"),
                 0,
-                result_type=_I32,
+                result_type=type_pattern,
             ),
             _op_emit(
                 subtract,
@@ -1102,7 +1292,7 @@ def _right_shift_rule(
                     "s1": ValueRef.operand("rhs"),
                 },
                 results={"d0": ValueRef.temporary("negative_shift")},
-                result_types={"d0": _I32},
+                result_types={"d0": type_pattern},
             ),
             _op_emit(
                 shift,
@@ -1111,6 +1301,213 @@ def _right_shift_rule(
                     "s1": ValueRef.temporary("negative_shift"),
                 },
                 results={"d0": ValueRef.result("result")},
+            ),
+        ),
+    )
+
+
+def _rotate_rule(
+    source_op: Op,
+    type_pattern: TypePattern,
+    *,
+    rotate_left: bool,
+) -> DescriptorRule:
+    constant = _descriptor("amd.xdna.aie2p.constant.i32.short")
+    subtract = _descriptor("amd.xdna.aie2p.sub.i32")
+    bitwise_and = _descriptor("amd.xdna.aie2p.and.i32")
+    logical_shift = _descriptor("amd.xdna.aie2p.lshl.i32")
+    bitwise_or = _descriptor("amd.xdna.aie2p.or.i32")
+    emits = [
+        _const_emit(
+            constant,
+            ValueRef.temporary("zero"),
+            0,
+            result_type=type_pattern,
+        ),
+        _const_emit(
+            constant,
+            ValueRef.temporary("shift_mask"),
+            31,
+            result_type=type_pattern,
+        ),
+        _op_emit(
+            subtract,
+            operands={
+                "s0": ValueRef.temporary("zero"),
+                "s1": ValueRef.operand("rhs"),
+            },
+            results={"d0": ValueRef.temporary("negative_amount")},
+            result_types={"d0": type_pattern},
+        ),
+        _op_emit(
+            bitwise_and,
+            operands={
+                "s0": ValueRef.operand("rhs"),
+                "s1": ValueRef.temporary("shift_mask"),
+            },
+            results={"d0": ValueRef.temporary("masked_amount")},
+            result_types={"d0": type_pattern},
+        ),
+        _op_emit(
+            bitwise_and,
+            operands={
+                "s0": ValueRef.temporary("negative_amount"),
+                "s1": ValueRef.temporary("shift_mask"),
+            },
+            results={"d0": ValueRef.temporary("wrap_amount")},
+            result_types={"d0": type_pattern},
+        ),
+    ]
+    if rotate_left:
+        emits.extend(
+            (
+                _op_emit(
+                    logical_shift,
+                    operands={
+                        "s0": ValueRef.operand("lhs"),
+                        "s1": ValueRef.temporary("masked_amount"),
+                    },
+                    results={"d0": ValueRef.temporary("left_piece")},
+                    result_types={"d0": type_pattern},
+                ),
+                _op_emit(
+                    subtract,
+                    operands={
+                        "s0": ValueRef.temporary("zero"),
+                        "s1": ValueRef.temporary("wrap_amount"),
+                    },
+                    results={"d0": ValueRef.temporary("negative_wrap_amount")},
+                    result_types={"d0": type_pattern},
+                ),
+                _op_emit(
+                    logical_shift,
+                    operands={
+                        "s0": ValueRef.operand("lhs"),
+                        "s1": ValueRef.temporary("negative_wrap_amount"),
+                    },
+                    results={"d0": ValueRef.temporary("right_piece")},
+                    result_types={"d0": type_pattern},
+                ),
+            )
+        )
+    else:
+        emits.extend(
+            (
+                _op_emit(
+                    subtract,
+                    operands={
+                        "s0": ValueRef.temporary("zero"),
+                        "s1": ValueRef.temporary("masked_amount"),
+                    },
+                    results={"d0": ValueRef.temporary("negative_masked_amount")},
+                    result_types={"d0": type_pattern},
+                ),
+                _op_emit(
+                    logical_shift,
+                    operands={
+                        "s0": ValueRef.operand("lhs"),
+                        "s1": ValueRef.temporary("negative_masked_amount"),
+                    },
+                    results={"d0": ValueRef.temporary("right_piece")},
+                    result_types={"d0": type_pattern},
+                ),
+                _op_emit(
+                    logical_shift,
+                    operands={
+                        "s0": ValueRef.operand("lhs"),
+                        "s1": ValueRef.temporary("wrap_amount"),
+                    },
+                    results={"d0": ValueRef.temporary("left_piece")},
+                    result_types={"d0": type_pattern},
+                ),
+            )
+        )
+    emits.append(
+        _op_emit(
+            bitwise_or,
+            operands={
+                "s0": ValueRef.temporary("left_piece"),
+                "s1": ValueRef.temporary("right_piece"),
+            },
+            results={"d0": ValueRef.result("result")},
+        )
+    )
+    return DescriptorRule(
+        source_op=source_op,
+        descriptor=bitwise_or,
+        guards=_typed_guards(("lhs", "rhs", "result"), type_pattern),
+        emit=tuple(emits),
+    )
+
+
+def _count_trailing_zeros_rule(
+    source_op: Op,
+    type_pattern: TypePattern,
+) -> DescriptorRule:
+    constant = _descriptor("amd.xdna.aie2p.constant.i32.short")
+    add_immediate = _descriptor("amd.xdna.aie2p.add.i32.immediate")
+    bitwise_xor = _descriptor("amd.xdna.aie2p.xor.i32")
+    bitwise_and = _descriptor("amd.xdna.aie2p.and.i32")
+    popcount = _descriptor("amd.xdna.aie2p.popcount.i32")
+    select_zero = _descriptor("amd.xdna.aie2p.select.zero.i32")
+    return DescriptorRule(
+        source_op=source_op,
+        descriptor=select_zero,
+        guards=_typed_guards(("input", "result"), type_pattern),
+        emit=(
+            _const_emit(
+                constant,
+                ValueRef.temporary("all_ones"),
+                -1,
+                result_type=type_pattern,
+            ),
+            _op_emit(
+                bitwise_xor,
+                operands={
+                    "s0": ValueRef.operand("input"),
+                    "s1": ValueRef.temporary("all_ones"),
+                },
+                results={"d0": ValueRef.temporary("inverted")},
+                result_types={"d0": type_pattern},
+            ),
+            EmitDescriptorOp(
+                descriptor=add_immediate,
+                operands={"s0": ValueRef.operand("input")},
+                results={"d0": ValueRef.temporary("minus_one")},
+                result_types={"d0": type_pattern},
+                immediates={"imm": -1},
+                form=DescriptorEmitForm.OP,
+            ),
+            _op_emit(
+                bitwise_and,
+                operands={
+                    "s0": ValueRef.temporary("inverted"),
+                    "s1": ValueRef.temporary("minus_one"),
+                },
+                results={"d0": ValueRef.temporary("trailing_mask")},
+                result_types={"d0": type_pattern},
+            ),
+            _op_emit(
+                popcount,
+                operands={"s0": ValueRef.temporary("trailing_mask")},
+                results={"d0": ValueRef.temporary("nonzero_count")},
+                result_types={"d0": type_pattern},
+            ),
+            _const_emit(
+                constant,
+                ValueRef.temporary("bit_width"),
+                32,
+                result_type=type_pattern,
+            ),
+            _op_emit(
+                select_zero,
+                operands={
+                    "s0": ValueRef.temporary("bit_width"),
+                    "s1": ValueRef.temporary("nonzero_count"),
+                    "s2": ValueRef.operand("input"),
+                },
+                results={"d0": ValueRef.result("result")},
+                copy_operands=("s2",),
             ),
         ),
     )
@@ -1202,6 +1599,8 @@ def _narrow_right_shift_rule(
 
 
 def _compare_rule(
+    source_op: Op,
+    type_pattern: TypePattern,
     predicate: str,
     descriptor_key: str,
     *,
@@ -1213,11 +1612,11 @@ def _compare_rule(
         "s1": ValueRef.operand("lhs" if swap_operands else "rhs"),
     }
     return DescriptorRule(
-        source_op=scalar_comparison.scalar_cmpi,
+        source_op=source_op,
         descriptor=descriptor,
         guards=(
             Guard.enum_attr_equals("predicate", predicate),
-            *_typed_guards(("lhs", "rhs"), _I32),
+            *_typed_guards(("lhs", "rhs"), type_pattern),
             Guard.value_type("result", _I1),
         ),
         emit=(
@@ -1362,6 +1761,97 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
             for result_type, minimum, maximum in (
                 (_INDEX, _I32_MIN, _I32_MAX),
                 (_OFFSET, 0, _I32_MAX),
+            )
+        ),
+        *(
+            _binary_rule(source_op, type_pattern, descriptor_key)
+            for source_op, descriptor_key in (
+                (index.index_add, "amd.xdna.aie2p.add.i32"),
+                (index.index_sub, "amd.xdna.aie2p.sub.i32"),
+            )
+            for type_pattern in (_INDEX, _OFFSET)
+        ),
+        _binary_rule(
+            index.index_mul,
+            _INDEX,
+            "amd.xdna.aie2p.mul.i32",
+        ),
+        _index_scale_rule(),
+        _unsigned_division_rule(
+            index.index_div,
+            _INDEX,
+            return_quotient=True,
+        ),
+        _unsigned_division_rule(
+            index.index_rem,
+            _INDEX,
+            return_quotient=False,
+        ),
+        _integer_minmax_rule(
+            index.index_min,
+            _INDEX,
+            "amd.xdna.aie2p.cmp.slt.i32.select",
+            swap_compare_operands=False,
+        ),
+        _integer_minmax_rule(
+            index.index_max,
+            _INDEX,
+            "amd.xdna.aie2p.cmp.slt.i32.select",
+            swap_compare_operands=True,
+        ),
+        _madd_rule(index.index_madd, _INDEX),
+        *(
+            _binary_rule(source_op, _INDEX, descriptor_key)
+            for source_op, descriptor_key in (
+                (index.index_andi, "amd.xdna.aie2p.and.i32"),
+                (index.index_ori, "amd.xdna.aie2p.or.i32"),
+                (index.index_xori, "amd.xdna.aie2p.xor.i32"),
+                (index.index_shli, "amd.xdna.aie2p.lshl.i32"),
+            )
+        ),
+        _right_shift_rule(
+            index.index_shrsi,
+            _INDEX,
+            "amd.xdna.aie2p.ashl.i32",
+        ),
+        _right_shift_rule(
+            index.index_shrui,
+            _INDEX,
+            "amd.xdna.aie2p.lshl.i32",
+        ),
+        _rotate_rule(index.index_rotli, _INDEX, rotate_left=True),
+        _rotate_rule(index.index_rotri, _INDEX, rotate_left=False),
+        _unary_rule(
+            index.index_ctlzi,
+            _INDEX,
+            "amd.xdna.aie2p.clz.i32",
+        ),
+        _count_trailing_zeros_rule(index.index_cttzi, _INDEX),
+        _unary_rule(
+            index.index_ctpopi,
+            _INDEX,
+            "amd.xdna.aie2p.popcount.i32",
+        ),
+        *(
+            _compare_rule(
+                index.index_cmp,
+                type_pattern,
+                predicate,
+                descriptor_key,
+                swap_operands=swap_operands,
+            )
+            for type_pattern in (_INDEX, _OFFSET)
+            for predicate, descriptor_key, swap_operands in (
+                ("eq", "amd.xdna.aie2p.cmp.eq.i32", False),
+                ("ne", "amd.xdna.aie2p.cmp.ne.i32", False),
+                ("slt", "amd.xdna.aie2p.cmp.slt.i32", False),
+                ("sle", "amd.xdna.aie2p.cmp.sge.i32", True),
+                ("sgt", "amd.xdna.aie2p.cmp.slt.i32", True),
+                ("sge", "amd.xdna.aie2p.cmp.sge.i32", False),
+                ("ult", "amd.xdna.aie2p.cmp.ult.i32", False),
+                ("ule", "amd.xdna.aie2p.cmp.uge.i32", True),
+                ("ugt", "amd.xdna.aie2p.cmp.ult.i32", True),
+                ("uge", "amd.xdna.aie2p.cmp.uge.i32", False),
             )
         ),
         _logical_constant_rule(),
@@ -1584,6 +2074,52 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
             _I32,
             "amd.xdna.aie2p.mul.i32",
         ),
+        _unsigned_division_rule(
+            scalar_arithmetic.scalar_divui,
+            _I32,
+            return_quotient=True,
+        ),
+        _unsigned_division_rule(
+            scalar_arithmetic.scalar_remui,
+            _I32,
+            return_quotient=False,
+        ),
+        _unary_rule(
+            scalar_arithmetic.scalar_absi,
+            _I32,
+            "amd.xdna.aie2p.abs.i32",
+        ),
+        *(
+            _integer_minmax_rule(
+                source_op,
+                _I32,
+                descriptor_key,
+                swap_compare_operands=swap_compare_operands,
+            )
+            for source_op, descriptor_key, swap_compare_operands in (
+                (
+                    scalar_arithmetic.scalar_minsi,
+                    "amd.xdna.aie2p.cmp.slt.i32.select",
+                    False,
+                ),
+                (
+                    scalar_arithmetic.scalar_maxsi,
+                    "amd.xdna.aie2p.cmp.slt.i32.select",
+                    True,
+                ),
+                (
+                    scalar_arithmetic.scalar_minui,
+                    "amd.xdna.aie2p.cmp.ult.i32.select",
+                    False,
+                ),
+                (
+                    scalar_arithmetic.scalar_maxui,
+                    "amd.xdna.aie2p.cmp.ult.i32.select",
+                    True,
+                ),
+            )
+        ),
+        _madd_rule(scalar_arithmetic.scalar_fmai, _I32),
         *(
             _binary_rule(source_op, type_pattern, descriptor_key)
             for type_pattern in (_I8, _I16)
@@ -1735,6 +2271,10 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
             )
         ),
         *(
+            _scalar_select_rule(result_type)
+            for result_type in (_I1, _I8, _I16, _I32, _INDEX, _OFFSET)
+        ),
+        *(
             _whole_integer_vector_select_rule(result_type)
             for result_type in _INTEGER_VECTOR_TYPES
         ),
@@ -1797,6 +2337,27 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
             scalar_bitwise.scalar_shrui,
             _I32,
             "amd.xdna.aie2p.lshl.i32",
+        ),
+        _rotate_rule(
+            scalar_bitwise.scalar_rotli,
+            _I32,
+            rotate_left=True,
+        ),
+        _rotate_rule(
+            scalar_bitwise.scalar_rotri,
+            _I32,
+            rotate_left=False,
+        ),
+        _unary_rule(
+            scalar_bitwise.scalar_ctlzi,
+            _I32,
+            "amd.xdna.aie2p.clz.i32",
+        ),
+        _count_trailing_zeros_rule(scalar_bitwise.scalar_cttzi, _I32),
+        _unary_rule(
+            scalar_bitwise.scalar_ctpopi,
+            _I32,
+            "amd.xdna.aie2p.popcount.i32",
         ),
         _narrow_left_shift_rule(
             _I8,
@@ -1863,7 +2424,13 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
             zero_field="lhs",
         ),
         *(
-            _compare_rule(predicate, descriptor_key, swap_operands=swap_operands)
+            _compare_rule(
+                scalar_comparison.scalar_cmpi,
+                _I32,
+                predicate,
+                descriptor_key,
+                swap_operands=swap_operands,
+            )
             for predicate, descriptor_key, swap_operands in (
                 ("eq", "amd.xdna.aie2p.cmp.eq.i32", False),
                 ("ne", "amd.xdna.aie2p.cmp.ne.i32", False),

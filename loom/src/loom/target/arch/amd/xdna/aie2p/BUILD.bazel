@@ -162,6 +162,7 @@ loom_cc_binary(
 loom_check_test_suite(
     name = "loom_check_file_test",
     srcs = [
+        "test/source_low/numeric_index.loom-test",
         "test/source_low/numeric_scalar_i32.loom-test",
         "test/source_low/packed_dot_integer.loom-test",
         "test/source_low/packed_i8_arithmetic.loom-test",
@@ -170,6 +171,7 @@ loom_check_test_suite(
         "test/source_low/vector_predicate.loom-test",
     ],
     data = [
+        "//loom/src/loom/test/corpus/source_low:numeric_index.loom-test",
         "//loom/src/loom/test/corpus/source_low:numeric_scalar_i32.loom-test",
         "//loom/src/loom/test/corpus/source_low:packed_dot_integer.loom-test",
         "//loom/src/loom/test/corpus/source_low:packed_i8_arithmetic.loom-test",
@@ -182,6 +184,7 @@ loom_check_test_suite(
 iree_execution_test_suite(
     name = "loom_compile_execution_test",
     data = [
+        "test/end_to_end/index_integer.loom",
         "test/end_to_end/packed_dot_integer.loom",
         "test/end_to_end/packed_integer.loom",
         "test/end_to_end/scalar_i32.loom",

@@ -1,0 +1,243 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_index.loom-test
+// RUN: emit source-low output=low
+
+aie2p.target<core> @target
+func.def target(@target) @index_arithmetic(%lhs0: index, %rhs0: index, %stride: offset) -> (index, index, index, index, index, index, index, index, offset) {
+  %lhs, %rhs = index.assume %lhs0, %rhs0 [range(%lhs0, 0, 2147483647), range(%rhs0, 1, 1024)] : index, index
+  %add = index.add %lhs, %rhs : index
+  %sub = index.sub %lhs, %rhs : index
+  %mul = index.mul %lhs, %rhs : index
+  %div = index.div %lhs, %rhs : index
+  %rem = index.rem %lhs, %rhs : index
+  %min = index.min %lhs, %rhs : index
+  %max = index.max %lhs, %rhs : index
+  %madd = index.madd %lhs, %rhs, %sub : index
+  %scaled = index.scale %lhs, %stride : index, offset -> offset
+  func.return %add, %sub, %mul, %div, %rem, %min, %max, %madd, %scaled : index, index, index, index, index, index, index, index, offset
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @index_arithmetic(%lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>, %stride: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>) asm {
+  %add = add.rr %lhs, %rhs
+  %sub = sub %lhs, %rhs
+  %mul = mul %lhs, %rhs
+  %38 = mov.dividend %lhs
+  %39 = mov.short 0
+  %40, %41 = divs %38, %39, %rhs
+  %42, %43 = divs %41, %40, %rhs
+  %44, %45 = divs %43, %42, %rhs
+  %46, %47 = divs %45, %44, %rhs
+  %48, %49 = divs %47, %46, %rhs
+  %50, %51 = divs %49, %48, %rhs
+  %52, %53 = divs %51, %50, %rhs
+  %54, %55 = divs %53, %52, %rhs
+  %56, %57 = divs %55, %54, %rhs
+  %58, %59 = divs %57, %56, %rhs
+  %60, %61 = divs %59, %58, %rhs
+  %62, %63 = divs %61, %60, %rhs
+  %64, %65 = divs %63, %62, %rhs
+  %66, %67 = divs %65, %64, %rhs
+  %68, %69 = divs %67, %66, %rhs
+  %70, %71 = divs %69, %68, %rhs
+  %72, %73 = divs %71, %70, %rhs
+  %74, %75 = divs %73, %72, %rhs
+  %76, %77 = divs %75, %74, %rhs
+  %78, %79 = divs %77, %76, %rhs
+  %80, %81 = divs %79, %78, %rhs
+  %82, %83 = divs %81, %80, %rhs
+  %84, %85 = divs %83, %82, %rhs
+  %86, %87 = divs %85, %84, %rhs
+  %88, %89 = divs %87, %86, %rhs
+  %90, %91 = divs %89, %88, %rhs
+  %92, %93 = divs %91, %90, %rhs
+  %94, %95 = divs %93, %92, %rhs
+  %96, %97 = divs %95, %94, %rhs
+  %98, %99 = divs %97, %96, %rhs
+  %100, %101 = divs %99, %98, %rhs
+  %102, %103 = divs %101, %100, %rhs
+  %div = mov.quotient %103
+  %105 = mov.dividend %lhs
+  %107, %108 = divs %105, %39, %rhs
+  %109, %110 = divs %108, %107, %rhs
+  %111, %112 = divs %110, %109, %rhs
+  %113, %114 = divs %112, %111, %rhs
+  %115, %116 = divs %114, %113, %rhs
+  %117, %118 = divs %116, %115, %rhs
+  %119, %120 = divs %118, %117, %rhs
+  %121, %122 = divs %120, %119, %rhs
+  %123, %124 = divs %122, %121, %rhs
+  %125, %126 = divs %124, %123, %rhs
+  %127, %128 = divs %126, %125, %rhs
+  %129, %130 = divs %128, %127, %rhs
+  %131, %132 = divs %130, %129, %rhs
+  %133, %134 = divs %132, %131, %rhs
+  %135, %136 = divs %134, %133, %rhs
+  %137, %138 = divs %136, %135, %rhs
+  %139, %140 = divs %138, %137, %rhs
+  %141, %142 = divs %140, %139, %rhs
+  %143, %144 = divs %142, %141, %rhs
+  %145, %146 = divs %144, %143, %rhs
+  %147, %148 = divs %146, %145, %rhs
+  %149, %150 = divs %148, %147, %rhs
+  %151, %152 = divs %150, %149, %rhs
+  %153, %154 = divs %152, %151, %rhs
+  %155, %156 = divs %154, %153, %rhs
+  %157, %158 = divs %156, %155, %rhs
+  %159, %160 = divs %158, %157, %rhs
+  %161, %162 = divs %160, %159, %rhs
+  %163, %164 = divs %162, %161, %rhs
+  %165, %166 = divs %164, %163, %rhs
+  %167, %168 = divs %166, %165, %rhs
+  %rem, %170 = divs %168, %167, %rhs
+  %171 = lt.select %lhs, %rhs
+  %min = sel.nez %lhs, %rhs, %171
+  %173 = lt.select %rhs, %lhs
+  %max = sel.nez %lhs, %rhs, %173
+  %175 = copy %sub : reg<aie2p.er> -> reg<aie2p.er>
+  %madd = mac %175, %lhs, %rhs
+  %scaled = mul %lhs, %stride
+  return %add, %sub, %mul, %div, %rem, %min, %max, %madd, %scaled
+}
+
+// ====
+
+aie2p.target<core> @target
+func.def target(@target) @offset_arithmetic(%lhs: offset, %rhs: offset) -> (offset, offset) {
+  %add = index.add %lhs, %rhs : offset
+  %sub = index.sub %lhs, %rhs : offset
+  func.return %add, %sub : offset, offset
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @offset_arithmetic(%lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>) asm {
+  %add = add.rr %lhs, %rhs
+  %sub = sub %lhs, %rhs
+  return %add, %sub
+}
+
+// ====
+
+aie2p.target<core> @target
+func.def target(@target) @index_bitwise(%input: index, %other: index, %amount0: index) -> (index, index, index, index, index, index, index, index, index, index, index) {
+  %amount = index.assume %amount0 [range(%amount0, 1, 31)] : index
+  %and = index.andi %input, %other : index
+  %or = index.ori %input, %other : index
+  %xor = index.xori %input, %other : index
+  %shl = index.shli %input, %amount : index
+  %shrs = index.shrsi %input, %amount : index
+  %shru = index.shrui %input, %amount : index
+  %rotl = index.rotli %input, %amount : index
+  %rotr = index.rotri %input, %amount : index
+  %clz = index.ctlzi %input : index
+  %ctz = index.cttzi %input : index
+  %pop = index.ctpopi %input : index
+  func.return %and, %or, %xor, %shl, %shrs, %shru, %rotl, %rotr, %clz, %ctz, %pop : index, index, index, index, index, index, index, index, index, index, index
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @index_bitwise(%input: reg<aie2p.er>, %other: reg<aie2p.er>, %amount: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>) asm {
+  %and = and %input, %other
+  %or = or %input, %other
+  %xor = xor %input, %other
+  %shl = lshl %input, %amount
+  %44 = mov.short 0
+  %45 = sub %44, %amount
+  %shrs = ashl %input, %45
+  %48 = sub %44, %amount
+  %shru = lshl %input, %48
+  %51 = mov.short 31
+  %52 = sub %44, %amount
+  %53 = and %amount, %51
+  %54 = and %52, %51
+  %55 = lshl %input, %53
+  %56 = sub %44, %54
+  %57 = lshl %input, %56
+  %rotl = or %55, %57
+  %61 = sub %44, %amount
+  %63 = and %61, %51
+  %64 = sub %44, %53
+  %65 = lshl %input, %64
+  %66 = lshl %input, %63
+  %rotr = or %66, %65
+  %clz = clz %input
+  %69 = mov.short -1
+  %70 = xor %input, %69
+  %71 = add %input, -1
+  %72 = and %70, %71
+  %73 = popcount %72
+  %74 = mov.short 32
+  %75 = copy %input : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %ctz = sel.eqz %74, %73, %75
+  %pop = popcount %input
+  return %and, %or, %xor, %shl, %shrs, %shru, %rotl, %rotr, %clz, %ctz, %pop
+}
+
+// ====
+
+aie2p.target<core> @target
+func.def target(@target) @index_compare_select(%lhs: index, %rhs: index) -> (i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, index) {
+  %eq = index.cmp eq, %lhs, %rhs : index
+  %ne = index.cmp ne, %lhs, %rhs : index
+  %slt = index.cmp slt, %lhs, %rhs : index
+  %sle = index.cmp sle, %lhs, %rhs : index
+  %sgt = index.cmp sgt, %lhs, %rhs : index
+  %sge = index.cmp sge, %lhs, %rhs : index
+  %ult = index.cmp ult, %lhs, %rhs : index
+  %ule = index.cmp ule, %lhs, %rhs : index
+  %ugt = index.cmp ugt, %lhs, %rhs : index
+  %uge = index.cmp uge, %lhs, %rhs : index
+  %selected = scf.select %ult, %lhs, %rhs : index
+  func.return %eq, %ne, %slt, %sle, %sgt, %sge, %ult, %ule, %ugt, %uge, %selected : i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, index
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @index_compare_select(%lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>) asm {
+  %eq = eq %lhs, %rhs
+  %ne = ne %lhs, %rhs
+  %slt = lt %lhs, %rhs
+  %sle = ge %rhs, %lhs
+  %sgt = lt %rhs, %lhs
+  %sge = ge %lhs, %rhs
+  %ult = ltu %lhs, %rhs
+  %ule = geu %rhs, %lhs
+  %ugt = ltu %rhs, %lhs
+  %uge = geu %lhs, %rhs
+  %47 = copy %ult : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %selected = sel.nez %lhs, %rhs, %47
+  return %eq, %ne, %slt, %sle, %sgt, %sge, %ult, %ule, %ugt, %uge, %selected
+}
+
+// ====
+
+aie2p.target<core> @target
+func.def target(@target) @offset_compare_select(%lhs: offset, %rhs: offset) -> (i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, offset) {
+  %eq = index.cmp eq, %lhs, %rhs : offset
+  %ne = index.cmp ne, %lhs, %rhs : offset
+  %slt = index.cmp slt, %lhs, %rhs : offset
+  %sle = index.cmp sle, %lhs, %rhs : offset
+  %sgt = index.cmp sgt, %lhs, %rhs : offset
+  %sge = index.cmp sge, %lhs, %rhs : offset
+  %ult = index.cmp ult, %lhs, %rhs : offset
+  %ule = index.cmp ule, %lhs, %rhs : offset
+  %ugt = index.cmp ugt, %lhs, %rhs : offset
+  %uge = index.cmp uge, %lhs, %rhs : offset
+  %selected = scf.select %ult, %lhs, %rhs : offset
+  func.return %eq, %ne, %slt, %sle, %sgt, %sge, %ult, %ule, %ugt, %uge, %selected : i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, offset
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @offset_compare_select(%lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>) asm {
+  %eq = eq %lhs, %rhs
+  %ne = ne %lhs, %rhs
+  %slt = lt %lhs, %rhs
+  %sle = ge %rhs, %lhs
+  %sgt = lt %rhs, %lhs
+  %sge = ge %lhs, %rhs
+  %ult = ltu %lhs, %rhs
+  %ule = geu %rhs, %lhs
+  %ugt = ltu %rhs, %lhs
+  %uge = geu %lhs, %rhs
+  %47 = copy %ult : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %selected = sel.nez %lhs, %rhs, %47
+  return %eq, %ne, %slt, %sle, %sgt, %sge, %ult, %ule, %ugt, %uge, %selected
+}
