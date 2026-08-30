@@ -28,6 +28,9 @@ static iree_status_t loom_aie2p_map_type(void* user_data,
       case LOOM_SCALAR_TYPE_I32:
         return loom_low_lower_make_register_type(
             context, AIE2P_CORE_REG_CLASS_ID_AIE2P_ER, 1, out_low_type);
+      case LOOM_SCALAR_TYPE_I64:
+        return loom_low_lower_make_register_type(
+            context, AIE2P_CORE_REG_CLASS_ID_AIE2P_ER, 2, out_low_type);
       default:
         break;
     }

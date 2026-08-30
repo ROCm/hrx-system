@@ -177,6 +177,7 @@ loom_check_test_suite(
   NAME
     loom_check_file_test
   SRCS
+    "test/source_low/index_conversion.loom-test"
     "test/source_low/memory_scalar_addressing.loom-test"
     "test/source_low/numeric_index.loom-test"
     "test/source_low/numeric_scalar_i32.loom-test"

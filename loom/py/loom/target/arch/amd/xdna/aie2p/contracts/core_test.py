@@ -37,7 +37,7 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
         for case in AIE2P_CORE_CONTRACT_FRAGMENT.cases
         if isinstance(case, DescriptorRule)
     )
-    assert len(rules) == 231
+    assert len(rules) == 241
 
     address_constant_rules = [
         rule for rule in rules if rule.source_op is index.index_constant
