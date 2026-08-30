@@ -46,7 +46,7 @@ BAZEL_REPOSITORY_TEST_TARGETS = ("//...",)
 BAZEL_REPOSITORY_INTEGRATION_DYNAMIC_LIBRARY_TARGET = (
     "//build_tools/bazel/test:dynamic_library_environment_binary_fixture"
 )
-BAZEL_REPOSITORY_INTEGRATION_ALIAS_TARGET = "//tools:iree-run-module"
+BAZEL_REPOSITORY_INTEGRATION_ALIAS_TARGET = "//tools:iree-run-replay"
 IMPORTER_TILELANG_BAZEL_TEST_TARGETS = (
     "//loom/py/loom/importers/check/tilelang:tilelang_test",
     "//loom/py/loom/importers/tilelang:tilelang_test",
@@ -130,7 +130,6 @@ CPU_SANITIZERS_XFAILS = (
     bazel_xfail("//runtime/src/iree/hal/replay:execute_test"),
     bazel_xfail("//runtime/src/iree/tokenizer/..."),
     bazel_xfail("//runtime/src/iree/tooling/profile:cli_test"),
-    bazel_xfail("//runtime/src/iree/vm:list_test"),
 )
 CPU_XFAIL_TARGETS = bazel_xfail_targets(CPU_XFAILS)
 CPU_CTEST_EXCLUDE_REGEX = ctest_exclude_regex(CPU_XFAILS)

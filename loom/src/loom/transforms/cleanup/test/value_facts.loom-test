@@ -42,7 +42,7 @@ func.def @cfg_join_unknown_and_zero_is_not_exact_zero(%cond: i1, %input: buffer)
 // retains the query instead of acquiring a fabricated default.
 target.generic<reference> @wave64 {subgroup_size = 64}
 
-func.def target(@wave64) @exact_subgroup_size() -> (index) {
+func.def target(@wave64) abi(object_function) @exact_subgroup_size() -> (index) {
   %size = target.subgroup.size : index
   func.return %size : index
 }
@@ -55,7 +55,7 @@ func.def @unknown_subgroup_size() -> (index) {
 // ----
 target.generic<reference> @wave64 {subgroup_size = 64}
 
-func.def target(@wave64) @exact_subgroup_size() -> (index) {
+func.def target(@wave64) abi(object_function) @exact_subgroup_size() -> (index) {
   %size = index.constant 64 : index
   func.return %size : index
 }

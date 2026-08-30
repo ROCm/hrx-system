@@ -198,12 +198,13 @@ static void iree_dynamic_library_init_temp_dir(void) {
   // * If the environment variable is set to "1", temp files are preserved to
   //   some default temp directory. The TMPDIR environment variable is used if
   //   set, otherwise a hardcoded default path is used. Example:
-  //     $ IREE_PRESERVE_DYLIB_TEMP_FILES=1 iree-run-module ...
+  //     $ IREE_PRESERVE_DYLIB_TEMP_FILES=1 my-iree-application ...
   // * If the environment variable is set to any other string than "1", temp
   // files
   //   are preserved, and the value of the environment variable is interpreted
   //   as the path of the temporary directory to use. Example:
-  //     $ IREE_PRESERVE_DYLIB_TEMP_FILES=/tmp/iree-benchmarks iree-run-module
+  //     $ IREE_PRESERVE_DYLIB_TEMP_FILES=/tmp/iree-benchmarks \
+  //         my-iree-application ...
   //     ...
   const char* path = getenv("IREE_PRESERVE_DYLIB_TEMP_FILES");
   bool preserve = !iree_dynamic_library_path_is_null_or_empty(path);

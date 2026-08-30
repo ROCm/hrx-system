@@ -108,8 +108,6 @@ static bool loom_low_lower_resource_import_kind_is_known(
     loom_low_resource_import_kind_t kind) {
   switch (kind) {
     case LOOM_LOW_RESOURCE_IMPORT_KIND_NATIVE_POINTER:
-    case LOOM_LOW_RESOURCE_IMPORT_KIND_VM_STATE:
-    case LOOM_LOW_RESOURCE_IMPORT_KIND_VM_IMPORT:
     case LOOM_LOW_RESOURCE_IMPORT_KIND_HAL_BINDING:
     case LOOM_LOW_RESOURCE_IMPORT_KIND_COMMAND_INPUT:
       return true;

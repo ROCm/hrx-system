@@ -16,7 +16,6 @@ DEFAULT_ENABLED = []
 
 SUPPORTED_VALUES = [
     "amdgpu",
-    "iree_vm",
     "llvmir",
     "spirv",
     "wasm",
@@ -48,7 +47,6 @@ string_list_flag(
     )
     for value in [
         "amdgpu",
-        "iree_vm",
         "llvmir",
         "spirv",
         "wasm",

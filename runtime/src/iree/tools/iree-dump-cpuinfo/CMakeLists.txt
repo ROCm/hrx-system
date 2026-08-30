@@ -9,6 +9,8 @@
 
 iree_add_all_subdirs()
 
+if(IREE_ENABLE_THREADING)
+
 iree_cc_binary(
   NAME
     iree-dump-cpuinfo
@@ -17,7 +19,9 @@ iree_cc_binary(
   DEPS
     iree::base
     iree::base::internal::cpu
+    iree::base::tooling::flags
     iree::schemas::cpu_data
+    iree::task::api
 )
 
 iree_execution_test_suite(
@@ -28,5 +32,7 @@ iree_execution_test_suite(
   TOOLS
     "iree-dump-cpuinfo=iree::tools::iree-dump-cpuinfo"
 )
+
+endif()
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

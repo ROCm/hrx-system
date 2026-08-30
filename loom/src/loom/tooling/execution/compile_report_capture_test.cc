@@ -103,7 +103,8 @@ TEST(CompileReportCaptureTest, AppendsWithSeparator) {
   loom_run_compile_report_capture_t capture = {};
   IREE_ASSERT_OK(loom_run_compile_report_capture_initialize(
       &options, iree_allocator_system(), &capture));
-  capture.report.artifact_kind = LOOM_TARGET_COMPILE_ARTIFACT_KIND_VM_ARCHIVE;
+  capture.report.artifact_kind =
+      LOOM_TARGET_COMPILE_ARTIFACT_KIND_TARGET_ARTIFACT;
 
   iree_string_builder_t builder;
   iree_string_builder_initialize(iree_allocator_system(), &builder);
@@ -230,7 +231,8 @@ TEST(CompileReportCaptureTest, AppendsJsonObject) {
   loom_run_compile_report_capture_t capture = {};
   IREE_ASSERT_OK(loom_run_compile_report_capture_initialize(
       &options, iree_allocator_system(), &capture));
-  capture.report.artifact_kind = LOOM_TARGET_COMPILE_ARTIFACT_KIND_VM_ARCHIVE;
+  capture.report.artifact_kind =
+      LOOM_TARGET_COMPILE_ARTIFACT_KIND_TARGET_ARTIFACT;
 
   iree_string_builder_t builder;
   iree_string_builder_initialize(iree_allocator_system(), &builder);
@@ -241,7 +243,7 @@ TEST(CompileReportCaptureTest, AppendsJsonObject) {
 
   iree_string_view_t output = iree_string_builder_view(&builder);
   EXPECT_NE(iree_string_view_find(
-                output, IREE_SV("\"artifact_kind\":\"vm-archive\""), 0),
+                output, IREE_SV("\"artifact_kind\":\"target-artifact\""), 0),
             IREE_STRING_VIEW_NPOS);
   iree_string_builder_deinitialize(&builder);
   loom_run_compile_report_capture_deinitialize(&capture);
@@ -283,7 +285,8 @@ TEST(CompileReportCaptureTest, AppendsConfiguredJsonOutput) {
   loom_run_compile_report_capture_t capture = {};
   IREE_ASSERT_OK(loom_run_compile_report_capture_initialize(
       &options, iree_allocator_system(), &capture));
-  capture.report.artifact_kind = LOOM_TARGET_COMPILE_ARTIFACT_KIND_VM_ARCHIVE;
+  capture.report.artifact_kind =
+      LOOM_TARGET_COMPILE_ARTIFACT_KIND_TARGET_ARTIFACT;
 
   iree_string_builder_t builder;
   iree_string_builder_initialize(iree_allocator_system(), &builder);
@@ -302,7 +305,7 @@ TEST(CompileReportCaptureTest, AppendsConfiguredJsonOutput) {
           output, IREE_SV("\"schema_version\":0,\"mode\":\"summary\""), 0),
       IREE_STRING_VIEW_NPOS);
   EXPECT_NE(iree_string_view_find(
-                output, IREE_SV("\"artifact_kind\":\"vm-archive\""), 0),
+                output, IREE_SV("\"artifact_kind\":\"target-artifact\""), 0),
             IREE_STRING_VIEW_NPOS);
 
   iree_string_builder_deinitialize(&builder);

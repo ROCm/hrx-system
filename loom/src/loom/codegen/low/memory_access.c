@@ -14,7 +14,6 @@ loom_low_memory_space_t loom_low_memory_access_normalize_space(
     case LOOM_LOW_MEMORY_SPACE_GLOBAL:
     case LOOM_LOW_MEMORY_SPACE_WORKGROUP:
     case LOOM_LOW_MEMORY_SPACE_STACK:
-    case LOOM_LOW_MEMORY_SPACE_VM_REF:
     case LOOM_LOW_MEMORY_SPACE_WASM_MEMORY:
       return memory_space;
     case LOOM_LOW_MEMORY_SPACE_NONE:

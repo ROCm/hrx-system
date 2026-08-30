@@ -701,7 +701,6 @@ iree_status_t loom_run_hal_testbench_actual_provider_compile(
 
   loom_run_candidate_compile_options_t compile_options = {0};
   loom_run_candidate_compile_options_initialize(&compile_options);
-  compile_options.module_name = IREE_SV("loom");
   compile_options.function_versions =
       &provider->pipeline_result.function_versions.list;
   compile_options.target_pipeline_options =

@@ -22,7 +22,7 @@
 
 | Category | Why |
 |----------|-----|
-| `queue_dispatch` / `stream_dispatch` | Needs compiled HSACO or VMFB kernel binary |
+| `queue_dispatch` / `stream_dispatch` | Needs a compiled HAL executable binary |
 | `executable_load` / `export_count` / `export_info` | Needs kernel binary to load |
 | `executable_lookup_global` | Needs executable with global variables |
 | `queue_host_call` | Needs dispatch ordering infrastructure |

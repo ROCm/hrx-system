@@ -41,9 +41,6 @@
 #ifndef LOOM_COMPILE_HAVE_AMDGPU
 #define LOOM_COMPILE_HAVE_AMDGPU 0
 #endif  // LOOM_COMPILE_HAVE_AMDGPU
-#ifndef LOOM_COMPILE_HAVE_IREE_VM
-#define LOOM_COMPILE_HAVE_IREE_VM 0
-#endif  // LOOM_COMPILE_HAVE_IREE_VM
 #ifndef LOOM_COMPILE_HAVE_SPIRV_VULKAN
 #define LOOM_COMPILE_HAVE_SPIRV_VULKAN 0
 #endif  // LOOM_COMPILE_HAVE_SPIRV_VULKAN
@@ -113,10 +110,6 @@ static iree_status_t loom_compile_diagnostic_sink(
 #include "loom/target/arch/amdgpu/provider.h"
 #include "loom/tooling/target/amdgpu/artifact_provider.h"
 #endif  // LOOM_COMPILE_HAVE_AMDGPU
-#if LOOM_COMPILE_HAVE_IREE_VM
-#include "loom/tooling/execution/ireevm/candidate.h"
-#include "loom/tooling/execution/ireevm/provider.h"
-#endif  // LOOM_COMPILE_HAVE_IREE_VM
 #if LOOM_COMPILE_HAVE_SPIRV_VULKAN
 #include "loom/target/arch/spirv/provider.h"
 #include "loom/tooling/target/spirv/artifact_provider.h"
@@ -132,11 +125,9 @@ static iree_status_t loom_compile_diagnostic_sink(
 #endif  // LOOM_COMPILE_HAVE_LLVMIR_X86_TARGET_ENV
 #endif  // LOOM_COMPILE_HAVE_LLVMIR
 
-IREE_FLAG(string, backend, "vm",
-          "Compilation backend to emit, such as 'command', 'vm', or a "
+IREE_FLAG(string, backend, "command",
+          "Compilation backend to emit, such as 'command' or a "
           "linked native backend.");
-IREE_FLAG_NAMED(string, module_name, "module-name", "loom",
-                "Module name to store in VM bytecode archives.");
 IREE_FLAG(string, target, "",
           "Optional HAL backend target key, such as 'gfx11-generic' or "
           "'gfx1151'. When present, every materialized HAL kernel entry is "
@@ -169,10 +160,10 @@ IREE_FLAG_LIST_NAMED(
     "JSON/JSONC config object file. Repeat for multiple files. Nested object "
     "keys are flattened with '.' separators.");
 IREE_FLAG(string, output, "-",
-          "Output path for the primary runtime artifact. For VM this is the VM "
-          "bytecode archive; for command this is the command artifact-set "
-          "manifest; for HAL this is the executable artifact passed to the "
-          "selected HAL loader.");
+          "Output path for the primary runtime artifact. For command this is "
+          "the command artifact-set manifest; for HAL this is the executable "
+          "artifact passed to the selected HAL loader; target-native emitters "
+          "write their native artifact directly.");
 IREE_FLAG_NAMED(
     string, emit_target_artifact, "emit-target-artifact", "",
     "Optional output path for a target-native artifact produced beside the "
@@ -241,9 +232,6 @@ static const loom_run_execution_provider_t* const kLoomCompileProviders[] = {
 #if LOOM_COMPILE_HAVE_AMDGPU
     &kLoomCompileAmdgpuProvider,
 #endif  // LOOM_COMPILE_HAVE_AMDGPU
-#if LOOM_COMPILE_HAVE_IREE_VM
-    &loom_ireevm_execution_provider,
-#endif  // LOOM_COMPILE_HAVE_IREE_VM
 #if LOOM_COMPILE_HAVE_SPIRV_VULKAN
     &kLoomCompileSpirvProvider,
 #endif  // LOOM_COMPILE_HAVE_SPIRV_VULKAN
@@ -287,8 +275,6 @@ typedef struct loom_compile_backend_t {
   const loom_run_hal_artifact_provider_t* hal_artifact_provider;
   // Selected target-owned emitter, if |--backend| names an emitter format.
   const loom_target_emitter_t* target_emitter;
-  // True when |--backend| names the VM archive emitter.
-  bool is_vm_backend;
   // True when |--backend| names portable command artifact emission.
   bool is_command_backend;
 } loom_compile_backend_t;
@@ -818,48 +804,6 @@ static iree_status_t loom_compile_emit_hal(
   return status;
 }
 
-static iree_status_t loom_compile_emit_vm(
-    loom_run_module_t* run_module,
-    const loom_run_candidate_compile_options_t* compile_options,
-    iree_allocator_t allocator, bool* out_emitted) {
-  *out_emitted = false;
-  if (!iree_string_view_is_empty(
-          iree_make_cstring_view(FLAG_emit_target_artifact))) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "--emit-target-artifact is only valid for HAL artifact providers");
-  }
-  if (compile_options->artifact_manifest.mode !=
-      LOOM_TARGET_ARTIFACT_MANIFEST_MODE_NONE) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "--artifact-manifest is only valid for HAL artifact providers");
-  }
-#if LOOM_COMPILE_HAVE_IREE_VM
-  loom_ireevm_run_candidate_t candidate = {0};
-  iree_status_t status = loom_ireevm_run_candidate_emit(
-      run_module, compile_options, allocator, &candidate);
-  if (iree_status_is_ok(status) && candidate.emitted) {
-    status = loom_compile_write_bytes(
-        iree_make_cstring_view(FLAG_output),
-        iree_make_const_byte_span(candidate.archive.data,
-                                  candidate.archive.data_length),
-        allocator);
-  }
-  if (iree_status_is_ok(status)) {
-    *out_emitted = candidate.emitted;
-  }
-  loom_ireevm_run_candidate_deinitialize(&candidate);
-  return status;
-#else
-  (void)run_module;
-  (void)compile_options;
-  (void)allocator;
-  return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                          "loom-compile was built without VM emission");
-#endif  // LOOM_COMPILE_HAVE_IREE_VM
-}
-
 static iree_string_view_t loom_compile_target_artifact_identifier(
     iree_string_view_t output_path, const loom_target_emitter_t* emitter) {
   return loom_tooling_file_path_is_stdio(output_path)
@@ -1038,10 +982,6 @@ static iree_status_t loom_compile_make_unknown_backend_status(
   iree_status_t status = loom_compile_append_backend_name(
       &backend_names, IREE_SV("command"), &needs_separator);
   if (iree_status_is_ok(status)) {
-    status = loom_compile_append_backend_name(&backend_names, IREE_SV("vm"),
-                                              &needs_separator);
-  }
-  if (iree_status_is_ok(status)) {
     status = loom_compile_append_hal_backend_names(
         artifact_provider_registry, &backend_names, &needs_separator);
   }
@@ -1096,10 +1036,6 @@ static iree_status_t loom_compile_select_backend(
     out_backend->target_emitter = emitter;
   }
   if (out_backend->target_emitter != NULL) {
-    return iree_ok_status();
-  }
-  if (iree_string_view_equal(backend_name, IREE_SV("vm"))) {
-    out_backend->is_vm_backend = true;
     return iree_ok_status();
   }
   return loom_compile_make_unknown_backend_status(
@@ -1237,14 +1173,13 @@ static void loom_compile_print_agents_markdown(FILE* stream) {
       "\n"
       "`loom-compile` turns Loom text or bytecode into runtime artifacts. It "
       "is\n"
-      "the offline path for producing portable command programs, VM bytecode "
-      "archives,\n"
-      "and loader-ready HAL executables such as AMDGPU HSACO.\n"
+      "the offline path for producing portable command programs and "
+      "loader-ready\n"
+      "HAL executables such as AMDGPU HSACO.\n"
       "\n"
       "### Common flows\n"
       "\n"
       "```shell\n"
-      "loom-compile kernel.loom --backend=vm --output=kernel.vmfb\n"
       "loom-compile model.loom --backend=command --output=commands.json \\\n"
       "  --emit-command-artifacts=commands/\n"
       "loom-compile kernel.loom --backend=amdgpu-hal "
@@ -1257,8 +1192,9 @@ static void loom_compile_print_agents_markdown(FILE* stream) {
       "loom-compile kernel.loombc --backend=amdgpu-hal "
       "--target=gfx11-generic \\\n"
       "  --artifact-manifest=summary --emit-artifact-manifest=kernel.json\n"
-      "loom-compile kernel.loom --backend=vm --pipeline=none\n"
-      "loom-compile kernel.loom --backend=vm --pipeline=@my_pipeline\n"
+      "loom-compile kernel.loom --backend=llvmir-text --pipeline=none\n"
+      "loom-compile kernel.loom --backend=llvmir-text "
+      "--pipeline=@my_pipeline\n"
       "```\n"
       "\n"
       "### Backend and target specialization\n"
@@ -1269,8 +1205,8 @@ static void loom_compile_print_agents_markdown(FILE* stream) {
       "`--root=@symbol` values select an explicit subset; omitting roots emits "
       "all exported command programs. Kernel implementations remain separate "
       "products named by the manifest's logical entry table.\n"
-      "`--backend=vm` emits a VM bytecode archive. HAL/native backends such as "
-      "`--backend=amdgpu-hal` write the selected provider's loader-ready\n"
+      "HAL/native backends such as `--backend=amdgpu-hal` write the selected "
+      "provider's loader-ready\n"
       "executable bytes to `--output`. `--emit-target-artifact=path` "
       "additionally\n"
       "writes the provider's target-native artifact when requested. The two\n"
@@ -1640,9 +1576,10 @@ int main(int argc, char** argv) {
       "Compiles a Loom module to a runtime artifact.\n"
       "\n"
       "Usage:\n"
-      "  loom-compile [file.loom] --backend=vm --output=module.vmfb\n"
       "  loom-compile [file.loom] --backend=command "
       "--output=commands.json --emit-command-artifacts=commands/\n"
+      "  loom-compile [file.loom] --backend=amdgpu-hal "
+      "--target=gfx11-generic --output=kernel.hsaco\n"
       "  loom-compile --agents_md\n"
       "\n"
       "Repeat --config=key=value to materialize compile-time config symbols "
@@ -1687,7 +1624,6 @@ int main(int argc, char** argv) {
       0};
   iree_string_view_t artifact_manifest_output_path = iree_string_view_empty();
   char* artifact_manifest_output_path_storage = NULL;
-  bool is_vm_backend = false;
   bool is_command_backend = false;
   loom_run_hal_device_target_t explicit_hal_target = {0};
   bool explicit_hal_target_selected = false;
@@ -1733,7 +1669,6 @@ int main(int argc, char** argv) {
         allocator, &backend);
     hal_artifact_provider = backend.hal_artifact_provider;
     target_emitter = backend.target_emitter;
-    is_vm_backend = backend.is_vm_backend;
     is_command_backend = backend.is_command_backend;
     if (iree_status_is_ok(status)) {
       status = loom_compile_validate_backend_flags(&backend);
@@ -1768,7 +1703,6 @@ int main(int argc, char** argv) {
   loom_run_candidate_compile_options_t compile_options = {0};
   loom_run_candidate_compile_options_initialize(&compile_options);
   loom_compile_pipeline_result_t pipeline_result = {0};
-  compile_options.module_name = iree_make_cstring_view(FLAG_module_name);
   compile_options.artifact_manifest = artifact_manifest_options;
   if (hal_artifact_provider != NULL) {
     compile_options.target_pipeline_options =
@@ -1861,9 +1795,6 @@ int main(int argc, char** argv) {
     } else if (is_command_backend) {
       status = loom_compile_emit_command(&session, &run_module,
                                          &compile_options, allocator, &emitted);
-    } else if (is_vm_backend) {
-      status = loom_compile_emit_vm(&run_module, &compile_options, allocator,
-                                    &emitted);
     }
   }
   if (iree_status_is_ok(status) && exit_code == 0 && !emitted) {

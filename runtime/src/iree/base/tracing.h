@@ -77,7 +77,7 @@
 
 // Enables fiber support in the Tracy UI.
 // Comes with a per-event overhead (less efficient queue insertion) but is
-// required when running with asynchronous VM invocations.
+// required when running with asynchronous invocations.
 #define IREE_TRACING_FEATURE_FIBERS (1 << 8)
 
 #if !defined(IREE_TRACING_MAX_CALLSTACK_DEPTH)

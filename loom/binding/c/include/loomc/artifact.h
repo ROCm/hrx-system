@@ -31,7 +31,7 @@
 ///   const loomc_artifact_t* artifact = loomc_result_artifact_at(result, i);
 ///   if (artifact->kind != LOOMC_ARTIFACT_KIND_EXECUTABLE) continue;
 ///   return loomc_artifact_write_to_path(
-///       artifact, loomc_make_cstring_view("kernel.vmfb"),
+///       artifact, loomc_make_cstring_view("kernel.hsaco"),
 ///       loomc_allocator_system());
 /// }
 /// @endcode
@@ -76,7 +76,7 @@ typedef struct loomc_artifact_t {
   /// Artifact kind.
   loomc_artifact_kind_t kind;
 
-  /// Stable format string, such as `vmfb`, `spirv`,
+  /// Stable format string, such as `amdgpu-hsaco`, `spirv`,
   /// `LOOMC_ARTIFACT_FORMAT_LOOM_TEXT`, or `LOOMC_ARTIFACT_FORMAT_JSON`.
   loomc_string_view_t format;
 

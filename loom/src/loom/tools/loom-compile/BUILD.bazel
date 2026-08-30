@@ -34,21 +34,6 @@ _AMDGPU_COMPILE_DEPS = iree_select({
     "//conditions:default": [],
 })
 
-_IREE_VM_COMPILE_COPTS = iree_select({
-    "//loom/config/emit:iree_vm": [
-        "-DLOOM_COMPILE_HAVE_IREE_VM=1",
-    ],
-    "//conditions:default": [],
-})
-
-_IREE_VM_COMPILE_DEPS = iree_select({
-    "//loom/config/emit:iree_vm": [
-        "//loom/src/loom/tooling/execution/ireevm:candidate",
-        "//loom/src/loom/tooling/execution/ireevm:provider",
-    ],
-    "//conditions:default": [],
-})
-
 _SPIRV_VULKAN_COMPILE_COPTS = iree_select({
     "//loom/config/target:spirv_vulkan_artifacts": [
         "-DLOOM_COMPILE_HAVE_SPIRV_VULKAN=1",
@@ -134,7 +119,7 @@ loom_cc_library(
 loom_cc_binary(
     name = "loom-compile",
     srcs = ["loom-compile.c"],
-    copts = _AMDGPU_COMPILE_COPTS + _IREE_VM_COMPILE_COPTS + _SPIRV_VULKAN_COMPILE_COPTS + _LLVMIR_COMPILE_COPTS + _LLVMIR_AMDGPU_TARGET_ENV_COPTS + _LLVMIR_X86_TARGET_ENV_COPTS,
+    copts = _AMDGPU_COMPILE_COPTS + _SPIRV_VULKAN_COMPILE_COPTS + _LLVMIR_COMPILE_COPTS + _LLVMIR_AMDGPU_TARGET_ENV_COPTS + _LLVMIR_X86_TARGET_ENV_COPTS,
     deps = [
         ":command_backend",
         "//loom/src/loom/codegen/low:text_asm",
@@ -168,7 +153,7 @@ loom_cc_binary(
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/io:byte_sequence",
         "//runtime/src/iree/io:file_handle",
-    ] + _AMDGPU_COMPILE_DEPS + _IREE_VM_COMPILE_DEPS + _SPIRV_VULKAN_COMPILE_DEPS + _LLVMIR_COMPILE_DEPS + _LLVMIR_AMDGPU_TARGET_ENV_DEPS + _LLVMIR_X86_TARGET_ENV_DEPS,
+    ] + _AMDGPU_COMPILE_DEPS + _SPIRV_VULKAN_COMPILE_DEPS + _LLVMIR_COMPILE_DEPS + _LLVMIR_AMDGPU_TARGET_ENV_DEPS + _LLVMIR_X86_TARGET_ENV_DEPS,
 )
 
 iree_execution_test_suite(

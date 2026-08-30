@@ -1,4 +1,4 @@
-ireevm.target<core> @vm_target
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
 
 template.decl @demo.double(%value: i32) -> (i32)
 
@@ -13,7 +13,7 @@ template.def<@demo.unused> @unused_template(%value: i32) -> (i32) {
   template.return %value : i32
 }
 
-func.def public target(@vm_target) @entry(%value: i32) -> (i32) {
+func.def public target(@target) @entry(%value: i32) -> (i32) {
   %result = template.apply<@demo.double>(%value) : (i32) -> (i32)
   func.return %result : i32
 }

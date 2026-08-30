@@ -288,13 +288,8 @@ iree_status_t iree_task_topology_initialize_from_flags(
 // Topology diagnostics
 //===----------------------------------------------------------------------===//
 
-static void iree_task_flags_print_action_flag(iree_string_view_t flag_name,
-                                              void* storage, FILE* file) {
-  fprintf(file, "# --%.*s\n", (int)flag_name.size, flag_name.data);
-}
-
-static void iree_task_flags_dump_task_topology(
-    iree_host_size_t topology_id, const iree_task_topology_t* topology) {
+static void iree_task_topology_print(iree_host_size_t topology_id,
+                                     const iree_task_topology_t* topology) {
   fprintf(stdout,
           "# "
           "===-------------------------------------------------------------"
@@ -353,8 +348,7 @@ static void iree_task_flags_dump_task_topology(
   }
 }
 
-static iree_status_t iree_task_flags_dump_task_topologies(
-    iree_string_view_t flag_name, void* storage, iree_string_view_t value) {
+iree_status_t iree_task_topologies_print_from_flags(void) {
   const iree_flag_string_list_t cpu_ids_list =
       FLAG_task_topology_cpu_ids_list();
   if (cpu_ids_list.count == 0) {
@@ -379,7 +373,7 @@ static iree_status_t iree_task_flags_dump_task_topologies(
           iree_task_topology_initialize_from_flags(node_id, &topology));
       // Skip topologies with no worker groups.
       if (topology.group_count > 0) {
-        iree_task_flags_dump_task_topology(topology_index++, &topology);
+        iree_task_topology_print(topology_index++, &topology);
       }
       iree_task_topology_deinitialize(&topology);
     }
@@ -392,20 +386,14 @@ static iree_status_t iree_task_flags_dump_task_topologies(
               cpu_ids_list.values[i], &topology));
       // Skip topologies with no worker groups.
       if (topology.group_count > 0) {
-        iree_task_flags_dump_task_topology(topology_index++, &topology);
+        iree_task_topology_print(topology_index++, &topology);
       }
       iree_task_topology_deinitialize(&topology);
     }
   }
 
-  exit(0);
   return iree_ok_status();
 }
-
-IREE_FLAG_CALLBACK(
-    iree_task_flags_dump_task_topologies, iree_task_flags_print_action_flag,
-    NULL, dump_task_topologies,
-    "Dumps the flag-specified topology used for creating task executors.");
 
 //===----------------------------------------------------------------------===//
 // Task system factory functions

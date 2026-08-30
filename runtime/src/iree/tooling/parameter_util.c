@@ -13,9 +13,7 @@
 #include "iree/io/file_handle.h"
 #include "iree/io/formats/parser_registry.h"
 #include "iree/io/parameter_index.h"
-#include "iree/io/parameter_index_provider.h"
 #include "iree/io/scope_map.h"
-#include "iree/modules/io/parameters/module.h"
 
 //===----------------------------------------------------------------------===//
 // Parameter file I/O
@@ -284,64 +282,4 @@ iree_status_t iree_tooling_build_parameter_indices_from_flags(
 
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
-}
-
-iree_status_t iree_tooling_create_parameters_module_from_flags(
-    iree_vm_instance_t* instance, iree_host_size_t additional_provider_count,
-    iree_io_parameter_provider_t** additional_providers,
-    iree_allocator_t host_allocator, iree_vm_module_t** out_module) {
-  IREE_TRACE_ZONE_BEGIN(z0);
-
-  iree_io_scope_map_t scope_map;
-  iree_io_scope_map_initialize(host_allocator, &scope_map);
-
-  // Parse all parameter files and build out their indices.
-  iree_status_t status =
-      iree_tooling_build_parameter_indices_from_flags(&scope_map);
-
-  // Create one provider per scope from flags.
-  iree_host_size_t flag_provider_count = 0;
-  iree_io_parameter_provider_t** flag_providers =
-      (iree_io_parameter_provider_t**)iree_alloca(
-          scope_map.count * sizeof(iree_io_parameter_provider_t*));
-  if (iree_status_is_ok(status)) {
-    for (iree_host_size_t i = 0; i < scope_map.count; ++i) {
-      status = iree_io_parameter_index_provider_create(
-          scope_map.entries[i]->scope, scope_map.entries[i]->index,
-          IREE_IO_PARAMETER_INDEX_PROVIDER_DEFAULT_MAX_CONCURRENT_OPERATIONS,
-          host_allocator, &flag_providers[i]);
-      if (!iree_status_is_ok(status)) break;
-      ++flag_provider_count;
-    }
-  }
-
-  // Merge flag-created providers with additional providers.
-  iree_host_size_t total_provider_count =
-      flag_provider_count + additional_provider_count;
-  iree_io_parameter_provider_t** all_providers =
-      (iree_io_parameter_provider_t**)iree_alloca(
-          total_provider_count * sizeof(iree_io_parameter_provider_t*));
-  for (iree_host_size_t i = 0; i < flag_provider_count; ++i) {
-    all_providers[i] = flag_providers[i];
-  }
-  for (iree_host_size_t i = 0; i < additional_provider_count; ++i) {
-    all_providers[flag_provider_count + i] = additional_providers[i];
-  }
-
-  // Create the module with the merged list of providers.
-  if (iree_status_is_ok(status)) {
-    status = iree_io_parameters_module_create(instance, total_provider_count,
-                                              all_providers, host_allocator,
-                                              out_module);
-  }
-
-  // Cleanup (module owns providers which own indices/etc).
-  // Only release flag providers - additional providers are owned by caller.
-  for (iree_host_size_t i = 0; i < flag_provider_count; ++i) {
-    iree_io_parameter_provider_release(flag_providers[i]);
-  }
-  iree_io_scope_map_deinitialize(&scope_map);
-
-  IREE_TRACE_ZONE_END(z0);
-  return status;
 }

@@ -95,7 +95,7 @@ Expected failures and file checks are explicit:
   },
   "files": [
     {
-      "path": "{tmp}/module.vmfb",
+      "path": "{tmp}/artifact.bin",
       "non_empty": true
     }
   ]

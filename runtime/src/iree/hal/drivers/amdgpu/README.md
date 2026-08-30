@@ -19,7 +19,7 @@ Build tools with the AMDGPU runtime driver registered and with device artifacts
 compiled for your local GPU architecture:
 
 ```sh
-iree-bazel-build //tools:iree-run-module \
+iree-bazel-build //loom/src/loom/tools/iree-run-loom \
   --//runtime/config/hal:drivers=amdgpu,local-task \
   --//runtime/src/iree/hal/drivers/amdgpu:targets=gfx1100
 ```
@@ -52,30 +52,36 @@ Use `amdgpu` to specify devices at runtime:
 
 ```sh
 # Single logical device with all available physical devices:
-iree-run-module --device=amdgpu
+iree-run-loom --backend=amdgpu-hal --device=amdgpu --probe-hal
 # Device ordinal 0 (danger, this may change across reboots):
-iree-run-module --device=amdgpu:0
+iree-run-loom --backend=amdgpu-hal --device=amdgpu:0 --probe-hal
 # Device with a stable UUID for a device:
-iree-run-module --device=amdgpu://GPU-0e12865a3bf5b7ab
+iree-run-loom --backend=amdgpu-hal \
+  --device=amdgpu://GPU-0e12865a3bf5b7ab --probe-hal
 # Single logical device with the two devices given by their UUIDs:
-iree-run-module --device=amdgpu://GPU-0e12865a3bf5b7ab,GPU-89e8bdf59a10cf6d
+iree-run-loom --backend=amdgpu-hal \
+  --device=amdgpu://GPU-0e12865a3bf5b7ab,GPU-89e8bdf59a10cf6d --probe-hal
 # Single logical device with physical devices with ordinals 2 and 3:
-ROCR_VISIBLE_DEVICES=2,3 iree-run-module --device=amdgpu
+ROCR_VISIBLE_DEVICES=2,3 iree-run-loom \
+  --backend=amdgpu-hal --device=amdgpu --probe-hal
 # Two logical devices with two physical devices each:
-iree-run-module --device=amdgpu://0,1 --device=amdgpu://2,3
+iree-run-loom --backend=amdgpu-hal \
+  --device=amdgpu://0,1 --device=amdgpu://2,3 --probe-hal
 ```
 
-Run a VMFB containing AMDGPU-compatible executables with the AMDGPU HAL driver:
+Compile and run a Loom kernel with the AMDGPU HAL driver:
 
 ```sh
-bazel-bin/tools/iree-run-module \
+iree-run-loom /tmp/kernel.loom \
+  --backend=amdgpu-hal \
   --device=amdgpu \
-  --module=/tmp/model_amdgpu.vmfb \
-  --function=main
+  --function=main \
+  --kernel-input-buffer=1024xf32=0
 ```
 
-Add `--input=` and `--expected_output=` flags matching the entry point when
-running modules that require arguments or output validation.
+Add `--kernel-input-value=`, `--kernel-input-buffer=`, and
+`--expected-kernel-buffer=` flags matching the kernel ABI when running kernels
+that require arguments or output validation.
 
 To capture a Tracy trace of the same runtime path, use the Bazel trace wrapper.
 The wrapper requires a `tracy-capture` binary in `PATH`, or one supplied through
@@ -86,13 +92,15 @@ IREE_TRACY_CAPTURE=/path/to/tracy-capture \
   build_tools/bin/iree-bazel-run \
   --trace \
   --trace_name=amdgpu_runtime \
-  //tools:iree-run-module \
+  //loom/src/loom/tools/iree-run-loom \
   --//runtime/config/hal:drivers=amdgpu,local-task \
   --//runtime/src/iree/hal/drivers/amdgpu:targets=gfx1100 \
   -- \
+  /tmp/kernel.loom \
+  --backend=amdgpu-hal \
   --device=amdgpu \
-  --module=/tmp/model_amdgpu.vmfb \
-  --function=main
+  --function=main \
+  --kernel-input-buffer=1024xf32=0
 ```
 
 ## Driver Shape
@@ -126,9 +134,9 @@ profiling and replay tools:
   metadata and selected hardware/software counters.
 * `--device_profiling_mode=executable-traces` captures heavy ATT/SQTT artifacts
   for filtered dispatches.
-* `--device_replay_output=/tmp/model.ireereplay` records a HAL-level replay
-  stream that can be run, benchmarked, and profiled independently of the
-  original application.
+* Applications can wrap a device group with an `iree_hal_replay_recorder_t` to
+  record a HAL-level replay stream that can be run, benchmarked, and profiled
+  independently of the original application.
 
 Useful inspection commands:
 

@@ -22,7 +22,8 @@ typedef enum loom_low_allocation_location_kind_e {
   LOOM_LOW_ALLOCATION_LOCATION_UNASSIGNED = 0,
   // Interval is assigned to target-visible physical registers.
   LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER = 1,
-  // Interval is assigned to target-local IDs such as VM locals or SPIR-V IDs.
+  // Interval is assigned to target-local IDs such as SPIR-V IDs or WebAssembly
+  // locals.
   LOOM_LOW_ALLOCATION_LOCATION_TARGET_ID = 2,
   // Interval must be spilled into a stack, scratch, or private slot.
   LOOM_LOW_ALLOCATION_LOCATION_SPILL_SLOT = 3,

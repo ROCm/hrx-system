@@ -84,24 +84,6 @@ alias(
 )
 
 alias(
-    name = "flatcc",
-    actual = "@flatcc//:flatcc",
-    visibility = ["//runtime/build_tools/bazel:__pkg__"],
-)
-
-alias(
-    name = "flatcc_parsing",
-    actual = "@flatcc//:parsing",
-    visibility = ["//runtime/src/iree/base/internal/flatcc:__pkg__"],
-)
-
-alias(
-    name = "flatcc_runtime",
-    actual = "@flatcc//:runtime",
-    visibility = ["//runtime:flatcc_schema_packages"],
-)
-
-alias(
     name = "libbacktrace",
     actual = "//build_tools/third_party/libbacktrace",
     visibility = [":runtime_users"],

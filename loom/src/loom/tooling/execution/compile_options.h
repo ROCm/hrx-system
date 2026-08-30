@@ -44,8 +44,6 @@ typedef struct loom_run_candidate_artifact_manifest_options_t {
 } loom_run_candidate_artifact_manifest_options_t;
 
 typedef struct loom_run_candidate_compile_options_t {
-  // VM module name stored in VM bytecode archives. Empty uses "loom".
-  iree_string_view_t module_name;
   // Optional compiler-owned function versions participating in artifact
   // emission. The list and its version objects are borrowed for the call.
   const loom_function_version_list_t* function_versions;

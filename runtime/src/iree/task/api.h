@@ -30,6 +30,10 @@ iree_status_t iree_task_executor_options_initialize_from_flags(
 iree_status_t iree_task_topology_initialize_from_flags(
     iree_task_topology_node_id_t node_id, iree_task_topology_t* out_topology);
 
+// Prints the task topologies selected by the current command line flags to
+// stdout.
+iree_status_t iree_task_topologies_print_from_flags(void);
+
 //===----------------------------------------------------------------------===//
 // Task system factory functions
 //===----------------------------------------------------------------------===//

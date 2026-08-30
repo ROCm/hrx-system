@@ -41,7 +41,6 @@ RESOURCE_TEST_TAG_FILTERS = (
 CTEST_RESOURCE_LABEL_EXCLUDE_REGEX = "runtime-resource="
 CMAKE_SOURCE_FORMAT_TARGET_DEFINES = (
     ("amdgpu", "LOOM_TARGET_AMDGPU"),
-    ("iree_vm", "LOOM_TARGET_IREE_VM"),
     ("llvmir", "LOOM_TARGET_LLVMIR"),
     ("spirv", "LOOM_TARGET_SPIRV"),
     ("x86", "LOOM_TARGET_X86"),

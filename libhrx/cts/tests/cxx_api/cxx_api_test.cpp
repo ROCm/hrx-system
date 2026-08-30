@@ -18,9 +18,6 @@ TEST_CASE("hrx_runtime_cxx.h handle wrappers compile and default to null",
   hrx::runtime::semaphore_ptr semaphore;
   hrx::runtime::stream_ptr stream;
   hrx::runtime::buffer_ptr buffer;
-  hrx::runtime::module_ptr module;
-  hrx::runtime::function_ptr function;
-  hrx::runtime::value_list_ptr value_list;
   hrx::runtime::fence_ptr fence;
   hrx::runtime::buffer_view_ptr buffer_view;
 
@@ -29,9 +26,6 @@ TEST_CASE("hrx_runtime_cxx.h handle wrappers compile and default to null",
   CHECK(!semaphore);
   CHECK(!stream);
   CHECK(!buffer);
-  CHECK(!module);
-  CHECK(!function);
-  CHECK(!value_list);
   CHECK(!fence);
   CHECK(!buffer_view);
 

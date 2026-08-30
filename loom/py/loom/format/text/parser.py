@@ -1130,7 +1130,7 @@ def _is_type_start(token: Token, type_registry: dict[str, TypeDef]) -> bool:
             return True
         return False
     if token.kind == TokenKind.OP_NAME:
-        # Dotted type names like hal.buffer, vm.ref.
+        # Dotted type names like hal.buffer and test.ref.
         return True
     if token.kind == TokenKind.LPAREN:
         return True  # Function type.
@@ -1567,7 +1567,7 @@ def _parse_type_interior(
     """Parse the interior of a parameterized type.
 
     The type_def's format spec drives the parse for dialect types
-    such as vm.ref<T>. Built-in shaped types use
+    such as test.ref<T>. Built-in shaped types use
     _parse_compact_shape_type_from_tokens directly.
     """
     interior_tokenizer = Tokenizer(interior, filename)

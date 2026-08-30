@@ -90,7 +90,7 @@ TEST(PassBuiltinRegistryTest, ValidatesBuiltinOptionSchemas) {
   IREE_ASSERT_OK(loom_pass_descriptor_validate_options(
       allocation, IREE_SV("diagnostics=spills")));
   IREE_ASSERT_OK(loom_pass_descriptor_validate_options(
-      allocation, IREE_SV("budgets=vm.i32=2;vm.ref=1")));
+      allocation, IREE_SV("budgets=test.i32=2;test.ref=1")));
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         loom_pass_descriptor_validate_options(
                             allocation, IREE_SV("diagnostics=verbose")));

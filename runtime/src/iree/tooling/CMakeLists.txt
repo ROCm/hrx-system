@@ -40,71 +40,6 @@ iree_cc_test(
 
 iree_cc_library(
   NAME
-    comparison
-  HDRS
-    "comparison.h"
-  SRCS
-    "comparison.cc"
-  DEPS
-    ::buffer_view_matchers
-    iree::base
-    iree::base::internal::span
-    iree::base::tooling::flags
-    iree::hal
-    iree::modules::hal
-    iree::vm
-  PUBLIC
-)
-
-iree_cc_test(
-  NAME
-    comparison_test
-  SRCS
-    "comparison_test.cc"
-  DEPS
-    ::comparison
-    ::function_io
-    iree::base
-    iree::base::internal::span
-    iree::hal
-    iree::modules::hal
-    iree::testing::gtest
-    iree::testing::gtest_main
-    iree::vm
-)
-
-iree_cc_library(
-  NAME
-    context_util
-  HDRS
-    "context_util.h"
-  SRCS
-    "context_util.c"
-  DEPS
-    ::device_util
-    ::parameter_util
-    iree::async
-    iree::async::util::proactor_pool
-    iree::base
-    iree::base::internal::path
-    iree::base::threading
-    iree::base::tooling::flags
-    iree::hal
-    iree::hal::drivers::task::executable::loaders::registration
-    iree::hal::replay::recorder
-    iree::io::file_handle
-    iree::modules::hal
-    iree::modules::hal::inline
-    iree::modules::hal::loader
-    iree::tooling::modules
-    iree::vm
-    iree::vm::bytecode::module
-    iree::vm::dynamic::module
-  PUBLIC
-)
-
-iree_cc_library(
-  NAME
     device_util
   HDRS
     "device_util.h"
@@ -122,24 +57,6 @@ iree_cc_library(
     iree::hal::utils::profile_file
     iree::hal::utils::statistics_sink
     iree::io::file_handle
-  PUBLIC
-)
-
-iree_cc_library(
-  NAME
-    function_io
-  HDRS
-    "function_io.h"
-  SRCS
-    "function_io.c"
-  DEPS
-    ::numpy_io
-    ::value_io
-    iree::base
-    iree::hal
-    iree::io::stream
-    iree::modules::hal
-    iree::vm
   PUBLIC
 )
 
@@ -173,37 +90,6 @@ iree_cc_test(
     iree::testing::temp_file
   LABELS
     "requires-filesystem"
-)
-
-iree_cc_test(
-  NAME
-    function_io_test
-  SRCS
-    "function_io_test.cc"
-  DEPS
-    ::function_io
-    iree::base
-    iree::hal
-    iree::io::stream
-    iree::modules::hal
-    iree::testing::gtest
-    iree::testing::gtest_main
-    iree::vm
-)
-
-iree_cc_library(
-  NAME
-    function_util
-  HDRS
-    "function_util.h"
-  SRCS
-    "function_util.c"
-  DEPS
-    iree::base
-    iree::hal
-    iree::modules::hal
-    iree::vm
-  PUBLIC
 )
 
 iree_cc_library(
@@ -250,15 +136,10 @@ iree_cc_library(
     iree::base::internal::json
     iree::base::internal::path
     iree::base::tooling::flags
-    iree::hal
     iree::io::file_handle
     iree::io::formats::parser_registry
     iree::io::parameter_index
-    iree::io::parameter_index_provider
-    iree::io::parameter_provider
     iree::io::scope_map
-    iree::modules::io::parameters
-    iree::vm
   PUBLIC
 )
 
@@ -278,30 +159,6 @@ iree_cc_test(
     iree::testing::temp_file
   LABELS
     "requires-filesystem"
-)
-
-iree_cc_library(
-  NAME
-    run_module
-  HDRS
-    "run_module.h"
-  SRCS
-    "run_module.c"
-  DEPS
-    ::comparison
-    ::context_util
-    ::device_util
-    ::function_io
-    ::function_util
-    iree::base
-    iree::base::tooling::flags
-    iree::hal
-    iree::hal::replay::recorder
-    iree::io::stream
-    iree::modules::hal::types
-    iree::vm
-    iree::vm::bytecode::module
-  PUBLIC
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

@@ -9,8 +9,8 @@ with pluggable event notification (poll, epoll, kqueue) on all POSIX platforms,
 and IOCP on Windows.
 
 The async system depends only on `iree/base/` and serves as the foundation for
-higher-level layers -- HAL drivers, networking, task executors, and the VM
-runtime all build on these primitives.
+higher-level layers. HAL drivers, networking, task executors, and storage
+pipelines all build on these primitives.
 
 **Design principles:**
 
@@ -96,8 +96,8 @@ connectivity between platforms (Mac <-> Linux <-> Windows <-> whatever).
 +----------------------------------------------------------------+
 |                         Applications                           |
 +-------------+-------------+-------------+-------------+--------+
-|  iree/hal/  |  iree/net/  | iree/task/  |  iree/vm/   |   ..   |
-|  (drivers)  |  (network)  | (executors) |  (runtime)  |        |
+|  iree/hal/  |  iree/net/  | iree/task/  |  iree/io/   |   ..   |
+|  (drivers)  |  (network)  | (executors) |  (storage)  |        |
 +-------------+-------------+-------------+-------------+--------+
 |                          iree/async/                           |
 |                                                                |

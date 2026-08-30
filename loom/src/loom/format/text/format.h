@@ -346,10 +346,10 @@
 // interior format is declared in the TypeDef and driven by the same
 // format elements (TypeOf, Attr, etc.) used for op syntax:
 //
-//   vm.ref<hal.buffer>                 Reference-counted handle.
-//   vm.ref<vm.list<i32>>              Nested: ref to a list of i32.
-//   vm.list<f32>                       Generic container.
-//   vm.list<hal.buffer>                Container of device buffers.
+//   test.ref<hal.buffer>               Reference-counted handle.
+//   test.ref<test.list<i32>>           Nested: ref to a list of i32.
+//   test.list<f32>                     Generic container.
+//   test.list<hal.buffer>              Container of device buffers.
 //
 // The built-in shaped types (tile, tensor, vector, view), buffer, pool,
 // and group are also TypeDefs internally. Their format specs use elements

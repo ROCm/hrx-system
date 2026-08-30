@@ -16,6 +16,26 @@
       "stderr": {
         "empty": true
       }
+    },
+    {
+      "name": "dump task topology",
+      "run": {
+        "tool": "iree-dump-cpuinfo",
+        "args": [
+          "--dump_task_topologies",
+          "--task_topology_group_count=1"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          {
+            "regex": "(?m)^# topology\\[0\\]: 1 worker groups$"
+          }
+        ]
+      },
+      "stderr": {
+        "empty": true
+      }
     }
   ]
 }

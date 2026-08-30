@@ -14,7 +14,6 @@ package(default_visibility = ["//visibility:public"])
 # needed to compile for that backend.
 DEFAULT_ENABLED = [
     "amdgpu",
-    "iree_vm",
     "llvmir",
     "spirv",
     "x86",
@@ -22,7 +21,6 @@ DEFAULT_ENABLED = [
 
 SUPPORTED_VALUES = [
     "amdgpu",
-    "iree_vm",
     "llvmir",
     "spirv",
     "wasm",

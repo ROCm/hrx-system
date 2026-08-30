@@ -504,9 +504,6 @@ TEST(LowDescriptorsTest, EnumNamesAreStableDiagnosticSpellings) {
                 loom_low_memory_space_name(LOOM_LOW_MEMORY_SPACE_STACK)),
             "stack");
   EXPECT_EQ(StringViewToString(
-                loom_low_memory_space_name(LOOM_LOW_MEMORY_SPACE_VM_REF)),
-            "vm_ref");
-  EXPECT_EQ(StringViewToString(
                 loom_low_memory_space_name(LOOM_LOW_MEMORY_SPACE_WASM_MEMORY)),
             "wasm_memory");
 

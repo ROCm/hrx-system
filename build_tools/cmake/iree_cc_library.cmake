@@ -459,7 +459,7 @@ endfunction()
 # _iree_cc_library_add_object_deps()
 #
 # Helper to add deps to an iree_cc_library. This only operates on the unaliased
-# raw name (i.e. 'iree_vm_vm'), not aliased names (i.e. 'iree::vm').
+# raw name (i.e. 'iree_hal_hal'), not aliased names (i.e. 'iree::hal').
 #
 # This appends to two properties:
 #   INTERFACE_IREE_TRANSITIVE_OBJECTS: Transitive list of all objects from

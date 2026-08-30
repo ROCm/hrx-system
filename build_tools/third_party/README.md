@@ -80,8 +80,8 @@ from BCR:
 http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
 http_archive(
-    name = "flatcc",
-    build_file = "//build_tools/third_party/flatcc:flatcc.BUILD.bazel",
+    name = "spirv_headers",
+    build_file = "//build_tools/third_party/spirv_tools:spirv_headers.BUILD.bazel",
     sha256 = "...",
     strip_prefix = "...",
     url = "https://...",
@@ -177,8 +177,8 @@ single ROCm root while ordinary source dependencies such as googletest,
 benchmark, and Catch2 remain pinned.
 
 Adapters normalize upstream packages into repo-local CMake targets. Repo code
-uses `iree::third_party::*` targets; upstream targets such as `benchmark`,
-`flatcc::runtime`, or `Catch2::Catch2` are adapter implementation details.
+uses `iree::third_party::*` targets; upstream targets such as `benchmark` or
+`Catch2::Catch2` are adapter implementation details.
 
 Package discovery remains an integration mode:
 
@@ -245,12 +245,6 @@ Google benchmark: //third_party:google_benchmark
                   //third_party:google_benchmark_main
                   iree::third_party::google_benchmark
                   iree::third_party::google_benchmark_main
-Flatcc:           //third_party:flatcc
-                  //third_party:flatcc_parsing
-                  //third_party:flatcc_runtime
-                  iree-flatcc-cli
-                  iree::third_party::flatcc_parsing
-                  iree::third_party::flatcc_runtime
 Zstd:             //third_party:zstd
                   iree::third_party::zstd
 Libbacktrace:     //third_party:libbacktrace

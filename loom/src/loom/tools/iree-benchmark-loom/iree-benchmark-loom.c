@@ -16,16 +16,12 @@
 #ifndef IREE_BENCHMARK_LOOM_HAVE_AMDGPU
 #define IREE_BENCHMARK_LOOM_HAVE_AMDGPU 0
 #endif  // IREE_BENCHMARK_LOOM_HAVE_AMDGPU
-#ifndef IREE_BENCHMARK_LOOM_HAVE_IREE_VM
-#define IREE_BENCHMARK_LOOM_HAVE_IREE_VM 0
-#endif  // IREE_BENCHMARK_LOOM_HAVE_IREE_VM
 #ifndef IREE_BENCHMARK_LOOM_HAVE_SPIRV
 #define IREE_BENCHMARK_LOOM_HAVE_SPIRV 0
 #endif  // IREE_BENCHMARK_LOOM_HAVE_SPIRV
 
-#define IREE_BENCHMARK_LOOM_HAVE_ANY_PROVIDER                             \
-  (IREE_BENCHMARK_LOOM_HAVE_AMDGPU || IREE_BENCHMARK_LOOM_HAVE_IREE_VM || \
-   IREE_BENCHMARK_LOOM_HAVE_SPIRV)
+#define IREE_BENCHMARK_LOOM_HAVE_ANY_PROVIDER \
+  (IREE_BENCHMARK_LOOM_HAVE_AMDGPU || IREE_BENCHMARK_LOOM_HAVE_SPIRV)
 #define IREE_BENCHMARK_LOOM_HAVE_ANY_HAL_ARTIFACT_PROVIDER \
   (IREE_BENCHMARK_LOOM_HAVE_AMDGPU || IREE_BENCHMARK_LOOM_HAVE_SPIRV)
 
@@ -34,9 +30,6 @@
 #include "loom/tooling/target/amdgpu/artifact_provider.h"
 #include "loom/tooling/target/amdgpu/testbench_requirements.h"
 #endif  // IREE_BENCHMARK_LOOM_HAVE_AMDGPU
-#if IREE_BENCHMARK_LOOM_HAVE_IREE_VM
-#include "loom/tooling/execution/ireevm/provider.h"
-#endif  // IREE_BENCHMARK_LOOM_HAVE_IREE_VM
 #if IREE_BENCHMARK_LOOM_HAVE_SPIRV
 #include "loom/target/arch/spirv/provider.h"
 #include "loom/tooling/target/spirv/artifact_provider.h"
@@ -63,9 +56,6 @@ static const loom_run_execution_provider_t* const
 #if IREE_BENCHMARK_LOOM_HAVE_AMDGPU
         &kIreeBenchmarkLoomAmdgpuProvider,
 #endif  // IREE_BENCHMARK_LOOM_HAVE_AMDGPU
-#if IREE_BENCHMARK_LOOM_HAVE_IREE_VM
-        &loom_ireevm_execution_provider,
-#endif  // IREE_BENCHMARK_LOOM_HAVE_IREE_VM
 #if IREE_BENCHMARK_LOOM_HAVE_SPIRV
         &kIreeBenchmarkLoomSpirvProvider,
 #endif  // IREE_BENCHMARK_LOOM_HAVE_SPIRV

@@ -8,7 +8,7 @@
 //
 // The packet layer is the emitter-facing join between schedule and allocation
 // tables. It intentionally does not serialize, print types, or know about any
-// target backend. Native, VM, SPIR-V, and diagnostic emitters can all consume
+// target backend. Native, SPIR-V, WebAssembly, and diagnostic emitters consume
 // this view without copying the schedule/allocation join logic into each
 // backend or routing through JSON.
 

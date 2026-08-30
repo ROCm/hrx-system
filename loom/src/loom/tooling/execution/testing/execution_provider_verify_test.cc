@@ -24,14 +24,14 @@ iree_status_t FakeExecutionBackendRunOneShot(
 
 const loom_run_execution_backend_t kFakeExecutionBackend = {
     /*.name=*/IREE_SVL("fake-execution"),
-    /*.flags=*/LOOM_RUN_EXECUTION_BACKEND_FLAG_VM_OPTIONS,
+    /*.flags=*/0,
     /*.probe=*/{},
     /*.run_one_shot=*/FakeExecutionBackendRunOneShot,
 };
 
 const loom_run_execution_backend_t kDuplicateFakeExecutionBackend = {
     /*.name=*/IREE_SVL("fake-execution"),
-    /*.flags=*/LOOM_RUN_EXECUTION_BACKEND_FLAG_VM_OPTIONS,
+    /*.flags=*/0,
     /*.probe=*/{},
     /*.run_one_shot=*/FakeExecutionBackendRunOneShot,
 };

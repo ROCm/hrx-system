@@ -16,8 +16,6 @@ iree_string_view_t loom_target_compile_report_artifact_kind_name(
   switch (kind) {
     case LOOM_TARGET_COMPILE_ARTIFACT_KIND_NONE:
       return IREE_SV("none");
-    case LOOM_TARGET_COMPILE_ARTIFACT_KIND_VM_ARCHIVE:
-      return IREE_SV("vm-archive");
     case LOOM_TARGET_COMPILE_ARTIFACT_KIND_HAL_EXECUTABLE:
       return IREE_SV("hal-executable");
     case LOOM_TARGET_COMPILE_ARTIFACT_KIND_HAL_KERNEL_LIBRARY:

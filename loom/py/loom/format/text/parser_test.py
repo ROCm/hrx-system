@@ -515,14 +515,14 @@ class TestParseRegisterType:
 
     def test_semantic_dialect_type(self) -> None:
         type_registry = {type_def.name: type_def for type_def in ALL_BUILTIN_TYPES}
-        type_registry["vm.ref"] = TypeDef(
-            name="vm.ref",
+        type_registry["test.ref"] = TypeDef(
+            name="test.ref",
             params=[TypeParam("object", ANY)],
             format=[TypeOf("object")],
         )
-        dialect_type = DialectType("vm.ref", (I32,))
+        dialect_type = DialectType("test.ref", (I32,))
         assert _parse_type(
-            "reg<test.ptr : vm.ref<i32>>", type_registry=type_registry
+            "reg<test.ptr : test.ref<i32>>", type_registry=type_registry
         ) == _test_ptr_register_type(value_type=dialect_type)
 
     def test_semantic_type_is_required_after_colon(self) -> None:
@@ -577,8 +577,8 @@ class TestParseDialectTypes:
         # Add custom types.
         registry["hal.buffer"] = TypeDef(name="hal.buffer")
         registry["hal.fence"] = TypeDef(name="hal.fence")
-        registry["vm.ref"] = TypeDef(
-            name="vm.ref",
+        registry["test.ref"] = TypeDef(
+            name="test.ref",
             params=[TypeParam("object", ANY)],
             format=[TypeOf("object")],
         )
@@ -591,9 +591,9 @@ class TestParseDialectTypes:
         assert result.params == ()
 
     def test_parameterized_type(self) -> None:
-        result = _parse_type("vm.ref<hal.buffer>", type_registry=self._registry())
+        result = _parse_type("test.ref<hal.buffer>", type_registry=self._registry())
         assert isinstance(result, DialectType)
-        assert result.name == "vm.ref"
+        assert result.name == "test.ref"
         assert len(result.params) == 1
         assert isinstance(result.params[0], DialectType)
         assert result.params[0].name == "hal.buffer"
@@ -603,17 +603,17 @@ class TestParseDialectTypes:
         from loom.dsl import ANY, TypeDef, TypeParam
 
         registry = self._registry()
-        registry["vm.list"] = TypeDef(
-            name="vm.list",
+        registry["test.list"] = TypeDef(
+            name="test.list",
             params=[TypeParam("element", ANY)],
             format=[TypeOf("element")],
         )
-        result = _parse_type("vm.ref<vm.list<i32>>", type_registry=registry)
+        result = _parse_type("test.ref<test.list<i32>>", type_registry=registry)
         assert isinstance(result, DialectType)
-        assert result.name == "vm.ref"
+        assert result.name == "test.ref"
         inner = result.params[0]
         assert isinstance(inner, DialectType)
-        assert inner.name == "vm.list"
+        assert inner.name == "test.list"
         assert inner.params[0] == I32
 
     def test_unknown_dotted_type_is_opaque_dialect_type(self) -> None:
@@ -775,26 +775,26 @@ class TestTypeRoundTrip:
     def test_dialect_parameterized_roundtrip(self) -> None:
         registry = {td.name: td for td in ALL_BUILTIN_TYPES}
         registry["hal.buffer"] = TypeDef(name="hal.buffer")
-        registry["vm.ref"] = TypeDef(
-            name="vm.ref",
+        registry["test.ref"] = TypeDef(
+            name="test.ref",
             params=[TypeParam("object", ANY)],
             format=[TypeOf("object")],
         )
-        self._roundtrip("vm.ref<hal.buffer>", type_registry=registry)
+        self._roundtrip("test.ref<hal.buffer>", type_registry=registry)
 
     def test_dialect_nested_roundtrip(self) -> None:
         registry = {td.name: td for td in ALL_BUILTIN_TYPES}
-        registry["vm.list"] = TypeDef(
-            name="vm.list",
+        registry["test.list"] = TypeDef(
+            name="test.list",
             params=[TypeParam("element", ANY)],
             format=[TypeOf("element")],
         )
-        registry["vm.ref"] = TypeDef(
-            name="vm.ref",
+        registry["test.ref"] = TypeDef(
+            name="test.ref",
             params=[TypeParam("object", ANY)],
             format=[TypeOf("object")],
         )
-        self._roundtrip("vm.ref<vm.list<i32>>", type_registry=registry)
+        self._roundtrip("test.ref<test.list<i32>>", type_registry=registry)
 
 
 # ============================================================================

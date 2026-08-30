@@ -2,9 +2,9 @@
 
 The public Bazel rules name the artifact being built. A
 [`loom_library`](#libraries-stay-relocatable) produces reusable Loom bytecode;
-`loom_kernel_binary`, `loom_command_binary`, and `loom_vm_binary` close selected
-roots into deployment products. The same source graph can therefore stop at a
-linkable library or continue into the product required by one application.
+`loom_kernel_binary` and `loom_command_binary` close selected roots into
+deployment products. The same source graph can therefore stop at a linkable
+library or continue into the product required by one application.
 
 ## Depend on HRX
 
@@ -166,27 +166,6 @@ The command schedule and device executable remain separate deployment
 artifacts because they have different portability and caching boundaries. The
 manifest joins them through logical entry symbols; it does not force an
 embedding to reverse-engineer either binary format.
-
-## VM binaries contain authored VM functions
-
-`loom_vm_binary` links functions authored for an `ireevm.target` and emits
-`<name>.vmfb`. Its optional `module_name` is the runtime VM module name and
-defaults to the Bazel target name.
-
-```shell
-bazel build //loom/docs/examples/elementwise-transform:elementwise_vm
-
-iree-run-module \
-  --module=bazel-bin/loom/docs/examples/elementwise-transform/elementwise_vm.vmfb \
-  --function=double_i32 \
-  --input=21
-```
-
-The result is an executable VM bytecode module; the checked example returns
-`i32=42`. This product consumes targets authored on the VM functions and has no
-`target` attribute. It does not infer or bundle command-program and device
-artifacts: those are explicit `loom_command_binary` products with their own
-target profile and runtime ownership.
 
 ## Inspect the closed input and compiler evidence
 

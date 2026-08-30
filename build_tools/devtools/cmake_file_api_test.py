@@ -23,7 +23,9 @@ class CMakeFileApiTest(unittest.TestCase):
             reply_dir.mkdir(parents=True)
             self.write_json(
                 cmake_file_api.target_aliases_path(build_dir),
-                {"iree::tools::iree-run-module": "runtime_src_tools_iree-run-module"},
+                {
+                    "iree::tools::iree-dump-cpuinfo": "runtime_src_tools_iree-dump-cpuinfo"
+                },
             )
             self.write_json(
                 reply_dir / "index-1.json",
@@ -36,12 +38,12 @@ class CMakeFileApiTest(unittest.TestCase):
                         {
                             "targets": [
                                 {
-                                    "name": "iree-run-module",
-                                    "jsonFile": "target-iree-run-module.json",
+                                    "name": "iree-dump-cpuinfo",
+                                    "jsonFile": "target-iree-dump-cpuinfo.json",
                                 },
                                 {
-                                    "name": "runtime_src_tools_iree-run-module",
-                                    "jsonFile": "target-iree-run-module.json",
+                                    "name": "runtime_src_tools_iree-dump-cpuinfo",
+                                    "jsonFile": "target-iree-dump-cpuinfo.json",
                                 },
                                 {
                                     "name": "iree-base",
@@ -53,11 +55,11 @@ class CMakeFileApiTest(unittest.TestCase):
                 },
             )
             self.write_json(
-                reply_dir / "target-iree-run-module.json",
+                reply_dir / "target-iree-dump-cpuinfo.json",
                 {
-                    "name": "iree-run-module",
+                    "name": "iree-dump-cpuinfo",
                     "type": "EXECUTABLE",
-                    "artifacts": [{"path": "tools/iree-run-module"}],
+                    "artifacts": [{"path": "tools/iree-dump-cpuinfo"}],
                 },
             )
             self.write_json(
@@ -69,17 +71,17 @@ class CMakeFileApiTest(unittest.TestCase):
                 },
             )
 
-            target = cmake_file_api.resolve_executable(build_dir, "iree-run-module")
+            target = cmake_file_api.resolve_executable(build_dir, "iree-dump-cpuinfo")
 
-            self.assertEqual(target.name, "iree-run-module")
-            self.assertEqual(target.path, build_dir / "tools/iree-run-module")
+            self.assertEqual(target.name, "iree-dump-cpuinfo")
+            self.assertEqual(target.path, build_dir / "tools/iree-dump-cpuinfo")
 
             alias_target = cmake_file_api.resolve_executable(
                 build_dir,
-                "iree::tools::iree-run-module",
+                "iree::tools::iree-dump-cpuinfo",
             )
 
-            self.assertEqual(alias_target.path, build_dir / "tools/iree-run-module")
+            self.assertEqual(alias_target.path, build_dir / "tools/iree-dump-cpuinfo")
 
     def test_resolve_executable_uses_unique_artifact_name(self):
         with tempfile.TemporaryDirectory() as temporary_dir:
@@ -227,7 +229,7 @@ class CMakeFileApiTest(unittest.TestCase):
             with self.assertRaises(cmake_file_api.FileApiError):
                 cmake_file_api.resolve_executable(
                     Path(temporary_dir),
-                    "iree-run-module",
+                    "iree-dump-cpuinfo",
                 )
 
     def write_json(self, path: Path, payload: object) -> None:

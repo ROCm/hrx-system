@@ -9,7 +9,7 @@
 
 iree_add_all_subdirs()
 
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_TARGET_ARCH_IREE_VM AND LOOM_TARGET_ARCH_SPIRV AND LOOM_TARGET_ARCH_WASM AND LOOM_TARGET_ARCH_X86)
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_TARGET_ARCH_SPIRV AND LOOM_TARGET_ARCH_WASM AND LOOM_TARGET_ARCH_X86)
 loom_cc_library(
   NAME
     provider
@@ -22,7 +22,6 @@ loom_cc_library(
     iree::base::threading
     loom::target::arch::amdgpu::provider
     loom::target::arch::cmd::provider
-    loom::target::arch::ireevm::provider
     loom::target::arch::spirv::provider
     loom::target::arch::wasm::provider
     loom::target::arch::x86::provider
@@ -31,7 +30,7 @@ loom_cc_library(
 )
 endif()
 
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_TARGET_ARCH_IREE_VM AND LOOM_TARGET_ARCH_SPIRV AND LOOM_TARGET_ARCH_WASM AND LOOM_TARGET_ARCH_X86)
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_TARGET_ARCH_SPIRV AND LOOM_TARGET_ARCH_WASM AND LOOM_TARGET_ARCH_X86)
 loom_cc_library(
   NAME
     low_registry

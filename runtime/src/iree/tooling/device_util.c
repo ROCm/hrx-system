@@ -423,7 +423,7 @@ IREE_FLAG(
     "'executable-metadata',\n"
     "'executable-traces'] or empty to disable profiling. HAL implementations\n"
     "may require additional flags in order to configure profiling support on\n"
-    "their devices. Tooling may force VM-created command buffers to retain\n"
+    "their devices. Tooling may force command buffers to retain\n"
     "metadata for modes that need command/dispatch attribution; leave this\n"
     "empty for production timing runs.");
 IREE_FLAG(

@@ -19,7 +19,6 @@ set(IREE_DEPENDENCY_IDS
   "spirv_headers"
   "spirv_tools"
   "vulkan_headers"
-  "flatcc"
   "hsa_runtime_headers"
 )
 
@@ -150,26 +149,6 @@ set(IREE_DEP_VULKAN_HEADERS_STRIP_PREFIX "Vulkan-Headers-vulkan-sdk-1.4.357.0")
 set(IREE_DEP_VULKAN_HEADERS_BUILD_FILE "//build_tools/third_party/vulkan_headers:vulkan_headers.BUILD.bazel")
 set(IREE_DEP_VULKAN_HEADERS_PATCHES "")
 set(IREE_DEP_VULKAN_HEADERS_PATCH_ARGS "")
-
-set(IREE_DEP_FLATCC_KIND "http_archive")
-set(IREE_DEP_FLATCC_OWNER "shared")
-set(IREE_DEP_FLATCC_MODULE_NAME "flatcc")
-set(IREE_DEP_FLATCC_REPO_NAME "flatcc")
-set(IREE_DEP_FLATCC_VERSION "")
-set(IREE_DEP_FLATCC_DEV_DEPENDENCY "FALSE")
-set(IREE_DEP_FLATCC_SOURCE_URL "")
-set(IREE_DEP_FLATCC_URLS
-  "https://github.com/dvidelabs/flatcc/archive/9362cd00f0007d8cbee7bff86e90fb4b6b227ff3.tar.gz"
-)
-set(IREE_DEP_FLATCC_SHA256 "f77f842e996f5bbfa25305a7b38b40d1325fb44154f2bf9880c58356ece92c62")
-set(IREE_DEP_FLATCC_STRIP_PREFIX "flatcc-9362cd00f0007d8cbee7bff86e90fb4b6b227ff3")
-set(IREE_DEP_FLATCC_BUILD_FILE "//build_tools/third_party/flatcc:flatcc.BUILD.bazel")
-set(IREE_DEP_FLATCC_PATCHES
-  "//build_tools/third_party/flatcc:xxhash_msvc_restrict.patch"
-)
-set(IREE_DEP_FLATCC_PATCH_ARGS
-  "-p1"
-)
 
 set(IREE_DEP_HSA_RUNTIME_HEADERS_KIND "rocm_repository")
 set(IREE_DEP_HSA_RUNTIME_HEADERS_OWNER "shared")

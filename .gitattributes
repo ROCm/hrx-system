@@ -31,7 +31,6 @@ MODULE.bazel.lock text eol=lf merge=bazel-lockfile-merge
 *.py text eol=lf
 *.sh text eol=lf
 *.txt text eol=lf
-*.vmasm text eol=lf
 *.yaml text eol=lf
 *.yml text eol=lf
 CMakeLists.txt text eol=lf
@@ -51,5 +50,4 @@ build_tools/embed_data/testdata/crlf.bin binary -eol
 *.png binary -eol
 *.so binary -eol
 *.spv binary -eol
-*.vmfb binary -eol
 *.wasm binary -eol

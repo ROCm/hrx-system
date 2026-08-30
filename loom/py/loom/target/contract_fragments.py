@@ -116,13 +116,6 @@ CONTRACT_FRAGMENT_REGISTRATIONS = (
         aliases=("amdgpu_view",),
     ),
     ContractFragmentRegistration(
-        key="ireevm.core",
-        module_name="loom.target.arch.ireevm.contracts.core",
-        symbol_name="IREEVM_CORE_CONTRACT_FRAGMENT",
-        dialect_ops_symbol_name="IREEVM_CORE_CONTRACT_DIALECT_OPS",
-        aliases=("ireevm_core",),
-    ),
-    ContractFragmentRegistration(
         key="llvmir.generic.core",
         module_name="loom.target.arch.llvmir.contracts",
         symbol_name="LLVMIR_GENERIC_CORE_CONTRACT_FRAGMENT",

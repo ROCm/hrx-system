@@ -55,13 +55,13 @@ static iree_string_view_t LookupArrayElement(iree_string_view_t array,
 TEST(CompileReportFormatTest, FormatsCoreReport) {
   loom_target_compile_report_t report = {};
   loom_target_compile_report_initialize(&report, iree_allocator_system());
-  report.artifact_kind = LOOM_TARGET_COMPILE_ARTIFACT_KIND_VM_ARCHIVE;
+  report.artifact_kind = LOOM_TARGET_COMPILE_ARTIFACT_KIND_TARGET_ARTIFACT;
   report.backend_name = IREE_SVL("amdgpu-hal");
   report.function_name = IREE_SVL("branchy");
-  report.target_bundle_name = IREE_SVL("vm_target");
-  report.target_export_name = IREE_SVL("vm_export");
+  report.target_bundle_name = IREE_SVL("test_target");
+  report.target_export_name = IREE_SVL("test_export");
   report.target_export_symbol = IREE_SVL("branchy_export");
-  report.target_config_name = IREE_SVL("vm_o0");
+  report.target_config_name = IREE_SVL("test_o0");
   report.lowered_symbol = IREE_SVL("branchy");
   loom_target_compile_report_record_artifact_size(&report, 128);
   loom_target_compile_report_record_schedule(
@@ -171,7 +171,7 @@ TEST(CompileReportFormatTest, FormatsCoreReport) {
   IREE_ASSERT_OK(
       loom_target_compile_report_format_text(&report, &options, &builder));
   const iree_string_view_t text = iree_string_builder_view(&builder);
-  EXPECT_NE(iree_string_view_find(text, IREE_SV("artifact=vm-archive"), 0),
+  EXPECT_NE(iree_string_view_find(text, IREE_SV("artifact=target-artifact"), 0),
             IREE_STRING_VIEW_NPOS);
   EXPECT_NE(
       iree_string_view_find(text, IREE_SV("workload workgroup_size=64x2x1"), 0),
@@ -221,7 +221,7 @@ TEST(CompileReportFormatTest, FormatsCoreReport) {
   ExpectObjectUint64Equals(root, IREE_SV("schema_version"), 0);
   ExpectObjectValueEquals(root, IREE_SV("mode"), IREE_SV("details"));
   ExpectObjectValueEquals(root, IREE_SV("artifact_kind"),
-                          IREE_SV("vm-archive"));
+                          IREE_SV("target-artifact"));
   ExpectObjectValueEquals(root, IREE_SV("backend"), IREE_SV("amdgpu-hal"));
   ExpectObjectUint64Equals(root, IREE_SV("artifact_size"), 128);
   const iree_string_view_t schedule = LookupObject(root, IREE_SV("schedule"));
@@ -334,10 +334,10 @@ TEST(CompileReportFormatTest, FormatsEntryReportsAndTargetCapabilities) {
   entry.requested_detail_flags = report.requested_detail_flags;
   entry.function_name = IREE_SVL("branchy_export");
   entry.lowered_symbol = IREE_SVL("branchy");
-  entry.target_bundle_name = IREE_SVL("vm_target");
-  entry.target_export_name = IREE_SVL("vm_export");
+  entry.target_bundle_name = IREE_SVL("test_target");
+  entry.target_export_name = IREE_SVL("test_export");
   entry.target_export_symbol = IREE_SVL("branchy_export");
-  entry.target_config_name = IREE_SVL("vm_o0");
+  entry.target_config_name = IREE_SVL("test_o0");
   loom_target_compile_report_record_schedule(
       &entry, /*node_count=*/5, /*scheduled_node_count=*/5,
       /*dependency_count=*/4, /*resource_use_count=*/2,

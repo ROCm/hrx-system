@@ -29,9 +29,6 @@ class TargetConverter:
                 "//third_party:google_benchmark_main": [
                     "iree::third_party::google_benchmark_main"
                 ],
-                "//third_party:flatcc": ["iree-flatcc-cli"],
-                "//third_party:flatcc_parsing": ["iree::third_party::flatcc_parsing"],
-                "//third_party:flatcc_runtime": ["iree::third_party::flatcc_runtime"],
                 "//third_party:google_test": ["iree::third_party::google_test"],
                 "//third_party:google_test_main": [
                     "iree::third_party::google_test_main"
@@ -157,7 +154,8 @@ class TargetConverter:
         # IREE root paths map to package names based on explicit rules.
         #   * runtime/src/iree/ creates its own root path by trimming down to
         #     just "iree"
-        #   * tools/ uses an empty root, for binary target names like "iree-run-module"
+        #   * tools/ uses an empty root, for binary target names like
+        #     "iree-dump-cpuinfo"
         #   * other top level directories add back an 'iree' prefix
         # If changing these, make the corresponding change in iree_macros.cmake
         # (iree_package_ns function).
