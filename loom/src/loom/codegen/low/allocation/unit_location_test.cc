@@ -179,6 +179,11 @@ TEST(LowAllocationUnitLocationTest, WideScratchOverlapsEveryNarrowUnit) {
       {/*.name_string_offset=*/0, /*.atomic_unit_start=*/2,
        /*.atomic_unit_count=*/2},
   };
+  const uint16_t view_units[] = {0, 1};
+  const loom_low_physical_register_view_t views[] = {
+      {/*.physical_register_id=*/2, /*.reg_class_id=*/0,
+       /*.unit_candidate_ordinal_start=*/0, /*.unit_count=*/2},
+  };
   loom_low_descriptor_set_t descriptor_set =
       DescriptorSet(reg_classes, IREE_ARRAYSIZE(reg_classes));
   descriptor_set.physical_registers = registers;
@@ -188,6 +193,11 @@ TEST(LowAllocationUnitLocationTest, WideScratchOverlapsEveryNarrowUnit) {
   descriptor_set.physical_register_atomic_units = atomic_units;
   descriptor_set.physical_register_atomic_unit_count =
       IREE_ARRAYSIZE(atomic_units);
+  descriptor_set.physical_register_views = views;
+  descriptor_set.physical_register_view_count = IREE_ARRAYSIZE(views);
+  descriptor_set.physical_register_view_unit_candidate_ordinals = view_units;
+  descriptor_set.physical_register_view_unit_candidate_ordinal_count =
+      IREE_ARRAYSIZE(view_units);
 
   loom_low_allocation_assignment_t assignment = Assignment(/*reg_class_id=*/0);
   assignment.location_base = 2;

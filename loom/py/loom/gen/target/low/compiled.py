@@ -45,6 +45,14 @@ from loom.target.low_descriptors import (
 
 
 @dataclass(frozen=True, slots=True)
+class CompiledPhysicalRegisterView:
+    physical_register_id: int
+    reg_class_id: int
+    unit_candidate_ordinal_start: int
+    unit_count: int
+
+
+@dataclass(frozen=True, slots=True)
 class DescriptorAllowlist:
     keys: tuple[str, ...] = ()
     semantic_tags: tuple[str, ...] = ()
@@ -84,6 +92,8 @@ class CompiledDescriptorSet:
     physical_register_candidate_starts: list[int]
     physical_register_atomic_units: list[int]
     physical_register_atomic_unit_starts: list[int]
+    physical_register_views: list[CompiledPhysicalRegisterView]
+    physical_register_view_unit_candidate_ordinals: list[int]
     register_parts: list[RegisterPart]
     resources: list[Resource]
     schedule_classes: list[ScheduleClass]

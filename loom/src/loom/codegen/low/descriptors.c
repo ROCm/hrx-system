@@ -130,6 +130,51 @@ const uint16_t* loom_low_descriptor_set_physical_register_atomic_units(
          physical_register->atomic_unit_start;
 }
 
+const loom_low_physical_register_view_t*
+loom_low_descriptor_set_find_physical_register_view(
+    const loom_low_descriptor_set_t* descriptor_set, uint16_t reg_class_id,
+    uint32_t physical_register_id, uint32_t unit_count) {
+  if (descriptor_set == NULL || physical_register_id > UINT16_MAX ||
+      unit_count > UINT16_MAX) {
+    return NULL;
+  }
+  uint32_t begin = 0;
+  uint32_t end = descriptor_set->physical_register_view_count;
+  while (begin < end) {
+    const uint32_t mid = begin + (end - begin) / 2;
+    const loom_low_physical_register_view_t* candidate =
+        &descriptor_set->physical_register_views[mid];
+    if (candidate->physical_register_id < physical_register_id ||
+        (candidate->physical_register_id == physical_register_id &&
+         candidate->reg_class_id < reg_class_id)) {
+      begin = mid + 1;
+    } else {
+      end = mid;
+    }
+  }
+  if (begin == descriptor_set->physical_register_view_count) {
+    return NULL;
+  }
+  const loom_low_physical_register_view_t* candidate =
+      &descriptor_set->physical_register_views[begin];
+  return candidate->physical_register_id == physical_register_id &&
+                 candidate->reg_class_id == reg_class_id &&
+                 candidate->unit_count == unit_count
+             ? candidate
+             : NULL;
+}
+
+const uint16_t*
+loom_low_descriptor_set_physical_register_view_unit_candidate_ordinals(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_physical_register_view_t* view) {
+  if (descriptor_set == NULL || view == NULL) {
+    return NULL;
+  }
+  return descriptor_set->physical_register_view_unit_candidate_ordinals +
+         view->unit_candidate_ordinal_start;
+}
+
 uint64_t loom_low_descriptor_stable_id_from_key(iree_string_view_t key) {
   return loom_stable_id_from_string(key);
 }
