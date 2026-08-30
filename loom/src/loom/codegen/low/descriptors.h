@@ -26,7 +26,7 @@ extern "C" {
 #endif
 
 // ABI version for descriptor sets consumed by this header.
-#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 39u
+#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 40u
 
 // Sentinel for absent string-table offsets.
 #define LOOM_LOW_STRING_OFFSET_NONE LOOM_BSTRING_TABLE_OFFSET_NONE
@@ -560,6 +560,21 @@ typedef struct loom_low_physical_register_t {
   // Reserved for future physical-register flags.
   uint16_t reserved;
 } loom_low_physical_register_t;
+
+// Ordered decomposition of an aggregate physical register into logical units
+// of one explicit physical register class.
+typedef struct loom_low_physical_register_view_t {
+  // Aggregate physical-register row represented by this view.
+  uint16_t physical_register_id;
+  // Explicit physical register class of each logical unit.
+  uint16_t reg_class_id;
+  // First row in the packed unit candidate-ordinal table.
+  uint32_t unit_candidate_ordinal_start;
+  // Number of ordered logical units in the aggregate register.
+  uint16_t unit_count;
+  // Reserved for future physical-register-view flags.
+  uint16_t reserved;
+} loom_low_physical_register_view_t;
 
 // Returns true when the non-empty physical range is wholly contained in the
 // register class's non-allocatable ABI-fixed location window.
@@ -1282,6 +1297,14 @@ typedef struct loom_low_descriptor_set_t {
   const uint16_t* physical_register_atomic_units;
   // Number of packed atomic storage-unit IDs owned by this set.
   uint32_t physical_register_atomic_unit_count;
+  // Sorted aggregate physical-register views.
+  const loom_low_physical_register_view_t* physical_register_views;
+  // Number of aggregate physical-register view rows owned by this set.
+  uint32_t physical_register_view_count;
+  // Packed register-class candidate ordinals naming each ordered view unit.
+  const uint16_t* physical_register_view_unit_candidate_ordinals;
+  // Number of packed candidate ordinals owned by physical-register views.
+  uint32_t physical_register_view_unit_candidate_ordinal_count;
   // Dense register parts referenced by descriptor operands.
   const loom_low_register_part_t* register_parts;
   // Number of register parts owned by this set.
@@ -1403,6 +1426,19 @@ bool loom_low_descriptor_set_find_physical_register_candidate(
 const uint16_t* loom_low_descriptor_set_physical_register_atomic_units(
     const loom_low_descriptor_set_t* descriptor_set,
     uint32_t physical_register_id, uint16_t* out_atomic_unit_count);
+
+// Finds the ordered |unit_count|-unit view of |physical_register_id| as
+// |reg_class_id|. Returns NULL when no such aggregate view exists.
+const loom_low_physical_register_view_t*
+loom_low_descriptor_set_find_physical_register_view(
+    const loom_low_descriptor_set_t* descriptor_set, uint16_t reg_class_id,
+    uint32_t physical_register_id, uint32_t unit_count);
+
+// Returns the packed ordered candidate ordinals referenced by |view|.
+const uint16_t*
+loom_low_descriptor_set_physical_register_view_unit_candidate_ordinals(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_physical_register_view_t* view);
 
 // Returns the stable name of |timing_event_id|, or an empty view for NONE.
 iree_string_view_t loom_low_descriptor_set_timing_event_name(

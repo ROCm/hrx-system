@@ -86,6 +86,7 @@ def _descriptor_set(
     return replace(
         TEST_LOW_CORE_DESCRIPTOR_SET,
         reg_classes=(TEST_LOW_CORE_DESCRIPTOR_SET.reg_classes if register_classes is None else register_classes),
+        physical_register_views=(),
         register_parts=(),
         descriptors=descriptors,
     )

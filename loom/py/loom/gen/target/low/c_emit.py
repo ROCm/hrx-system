@@ -440,6 +440,28 @@ def emit_source_for_views(
     )
     _emit_array(
         lines,
+        "loom_low_physical_register_view_t",
+        spec.c_table_prefix,
+        "PhysicalRegisterViews",
+        [
+            [
+                f".physical_register_id = {view.physical_register_id},",
+                f".reg_class_id = {view.reg_class_id},",
+                ".unit_candidate_ordinal_start = " + str(view.unit_candidate_ordinal_start) + ",",
+                f".unit_count = {view.unit_count},",
+                ".reserved = 0,",
+            ]
+            for view in compiled.physical_register_views
+        ],
+    )
+    c_arrays.append_value_array(
+        lines,
+        "uint16_t",
+        f"k{spec.c_table_prefix}PhysicalRegisterViewUnitCandidateOrdinals",
+        [str(value) for value in compiled.physical_register_view_unit_candidate_ordinals],
+    )
+    _emit_array(
+        lines,
         "loom_low_register_part_t",
         spec.c_table_prefix,
         "RegisterParts",
@@ -947,6 +969,8 @@ def emit_source_for_views(
         "physical_registers": "physical_register_count",
         "physical_register_candidate_ids": "physical_register_candidate_count",
         "physical_register_atomic_units": "physical_register_atomic_unit_count",
+        "physical_register_views": "physical_register_view_count",
+        "physical_register_view_unit_candidate_ordinals": "physical_register_view_unit_candidate_ordinal_count",
         "register_parts": "register_part_count",
         "reg_class_alts": "reg_class_alt_count",
         "schedule_classes": "schedule_class_count",
@@ -1045,6 +1069,18 @@ def emit_source_for_views(
             "physical_register_atomic_units",
             "PhysicalRegisterAtomicUnits",
             compiled.physical_register_atomic_units,
+            view_lines,
+        )
+        append_optional_table(
+            "physical_register_views",
+            "PhysicalRegisterViews",
+            compiled.physical_register_views,
+            view_lines,
+        )
+        append_optional_table(
+            "physical_register_view_unit_candidate_ordinals",
+            "PhysicalRegisterViewUnitCandidateOrdinals",
+            compiled.physical_register_view_unit_candidate_ordinals,
             view_lines,
         )
         append_optional_table("register_parts", "RegisterParts", compiled.register_parts, view_lines)

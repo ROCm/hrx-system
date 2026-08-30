@@ -388,6 +388,21 @@ class PhysicalRegister:
 
 
 @dataclass(frozen=True, slots=True)
+class PhysicalRegisterView:
+    """Ordered logical-unit view of an aggregate physical register.
+
+    Atomic units describe storage aliasing and are intentionally unordered
+    semantically. A view separately names the physical register implementing
+    each logical unit so structural slices and concats preserve target-defined
+    subregister order.
+    """
+
+    physical_register: str
+    reg_class: str
+    units: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class RegisterPart:
     name: str
     reg_class: str
@@ -688,6 +703,7 @@ class DescriptorSet:
     descriptors: tuple[Descriptor, ...]
     descriptor_set_ordinal: int | None = None
     physical_registers: tuple[PhysicalRegister, ...] = ()
+    physical_register_views: tuple[PhysicalRegisterView, ...] = ()
     register_parts: tuple[RegisterPart, ...] = ()
     timing_events: tuple[TimingEvent, ...] = ()
     event_separations: tuple[EventSeparation, ...] = ()

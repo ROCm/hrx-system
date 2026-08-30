@@ -34,6 +34,7 @@ from loom.target.low_descriptors import (
     OperandFlag,
     OperandRole,
     PhysicalRegister,
+    PhysicalRegisterView,
     RegClass,
     RegClassFlag,
     RegisterPart,
@@ -128,8 +129,12 @@ def _explicit_components_admit_placement(
     descriptor: Descriptor,
     component_rows: Sequence[Sequence[tuple[int, Operand, tuple[RegClass, ...]]]],
     physical_registers: dict[str, PhysicalRegister],
+    physical_register_views: Sequence[PhysicalRegisterView],
     early_clobber_results: frozenset[int],
 ) -> bool:
+    aggregate_domains: dict[tuple[str, int], set[str]] = {}
+    for view in physical_register_views:
+        aggregate_domains.setdefault((view.reg_class, len(view.units)), set()).add(view.physical_register)
     component_domains: list[tuple[str, ...]] = []
     component_phases: list[tuple[bool, bool]] = []
     for rows in component_rows:
@@ -142,16 +147,14 @@ def _explicit_components_admit_placement(
                 continue
             if len(explicit_classes) != len(physical_classes):
                 raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' mixes linear and explicit physical register classes")
-            if operand.unit_count != 1:
-                raise ValueError(
-                    f"descriptor '{descriptor.key}' operand "
-                    f"'{operand.field_name}' uses explicit physical "
-                    f"registers with unit count {operand.unit_count}; "
-                    "whole-register candidates require one allocation unit"
-                )
             if operand.address_map_kind is not OperandAddressMapKind.DIRECT:
                 raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' uses explicit physical registers with a non-direct address map")
-            operand_domain = {physical_register_name for register_class in explicit_classes for physical_register_name in register_class.physical_registers}
+            operand_domain: set[str] = set()
+            for register_class in explicit_classes:
+                if operand.unit_count == 1:
+                    operand_domain.update(register_class.physical_registers)
+                else:
+                    operand_domain.update(aggregate_domains.get((register_class.name, operand.unit_count), ()))
             domain = operand_domain if domain is None else domain & operand_domain
             operand_reads_pre, operand_writes_post = _operand_phase_accesses(
                 operand,
@@ -494,6 +497,7 @@ def validate_physical_descriptor_set(
             descriptor,
             ordered_component_rows,
             physical_registers,
+            descriptor_set.physical_register_views,
             early_clobber_results,
         ):
             raise ValueError(f"descriptor set '{descriptor_set.key}' descriptor '{descriptor.key}' explicit physical register components do not admit a legal pre/post placement")
@@ -775,6 +779,7 @@ def validate_register_classes(
     descriptor_set_key: str,
     register_classes: Sequence[RegClass],
     physical_registers: Sequence[PhysicalRegister] = (),
+    physical_register_views: Sequence[PhysicalRegisterView] = (),
 ) -> None:
     """Validates register classes and their shared storage namespaces."""
     physical_registers_by_name: dict[str, PhysicalRegister] = {}
@@ -791,6 +796,7 @@ def validate_register_classes(
         physical_registers_by_name[physical_register.name] = physical_register
 
     alias_sets: dict[int, list[RegClass]] = {}
+    register_classes_by_name: dict[str, RegClass] = {}
     for register_class in register_classes:
         description = f"descriptor set '{descriptor_set_key}' register class '{register_class.name}'"
         if register_class.alloc_unit_bits <= 0:
@@ -864,6 +870,37 @@ def validate_register_classes(
             raise ValueError(f"{description} fixed-location range overlaps its allocatable locations")
         if register_class.alias_set_id != 0:
             alias_sets.setdefault(register_class.alias_set_id, []).append(register_class)
+        register_classes_by_name[register_class.name] = register_class
+
+    seen_view_keys: set[tuple[str, str]] = set()
+    for view in physical_register_views:
+        description = f"descriptor set '{descriptor_set_key}' physical register view '{view.physical_register}' as '{view.reg_class}'"
+        view_key = (view.physical_register, view.reg_class)
+        if view_key in seen_view_keys:
+            raise ValueError(f"{description} is duplicated")
+        seen_view_keys.add(view_key)
+        physical_register = physical_registers_by_name.get(view.physical_register)
+        if physical_register is None:
+            raise ValueError(f"{description} references unknown aggregate physical register")
+        register_class = register_classes_by_name.get(view.reg_class)
+        if register_class is None:
+            raise ValueError(f"{description} references unknown register class")
+        if RegClassFlag.EXPLICIT_PHYSICAL_REGISTERS not in register_class.flags:
+            raise ValueError(f"{description} references a register class without explicit physical registers")
+        if len(view.units) < 2:
+            raise ValueError(f"{description} must contain at least two units")
+        validate_u16(len(view.units), f"{description} unit count")
+        if view.units != tuple(dict.fromkeys(view.units)):
+            raise ValueError(f"{description} units must be unique")
+        unknown_units = tuple(unit for unit in view.units if unit not in physical_registers_by_name)
+        if unknown_units:
+            raise ValueError(f"{description} references unknown physical registers: " + ", ".join(unknown_units))
+        non_candidates = tuple(unit for unit in view.units if unit not in register_class.physical_registers)
+        if non_candidates:
+            raise ValueError(f"{description} units are not candidates of the register class: " + ", ".join(non_candidates))
+        view_atomic_units = tuple(sorted(atomic_unit for unit in view.units for atomic_unit in physical_registers_by_name[unit].atomic_units))
+        if view_atomic_units != physical_register.atomic_units:
+            raise ValueError(f"{description} units do not exactly cover aggregate atomic storage")
 
     alias_set_ids = sorted(alias_sets)
     expected_alias_set_ids = list(range(1, len(alias_set_ids) + 1))
@@ -883,6 +920,56 @@ def validate_register_classes(
                 raise ValueError(f"descriptor set '{descriptor_set_key}' alias set {alias_set_id} classes '{reference.name}' and '{member.name}' have different allocatable counts")
             if (member.fixed_location_base, member.fixed_location_count) != (reference.fixed_location_base, reference.fixed_location_count):
                 raise ValueError(f"descriptor set '{descriptor_set_key}' alias set {alias_set_id} classes '{reference.name}' and '{member.name}' have different fixed-location ranges")
+
+
+def derive_canonical_physical_register_views(
+    register_classes: Sequence[RegClass],
+    physical_registers: Sequence[PhysicalRegister],
+    explicit_views: Sequence[PhysicalRegisterView],
+) -> tuple[PhysicalRegisterView, ...]:
+    """Completes explicit views with provable canonical aggregate layouts.
+
+    A canonical aggregate is the exact union of a contiguous, naturally
+    aligned run of candidates in one explicit register class. Candidate order
+    then defines logical unit order without assigning semantics to atomic-unit
+    IDs. Targets provide an explicit view for every noncanonical layout.
+    """
+
+    physical_registers_by_name = {physical_register.name: physical_register for physical_register in physical_registers}
+    views = list(explicit_views)
+    view_keys = {(view.physical_register, view.reg_class) for view in explicit_views}
+    for register_class in register_classes:
+        if RegClassFlag.EXPLICIT_PHYSICAL_REGISTERS not in register_class.flags:
+            continue
+        candidates = tuple(physical_registers_by_name[name] for name in register_class.physical_registers)
+        candidate_atomic_unit_count = len(candidates[0].atomic_units)
+        for aggregate in physical_registers:
+            view_key = (aggregate.name, register_class.name)
+            if view_key in view_keys or aggregate.name in register_class.physical_registers:
+                continue
+            aggregate_atomic_unit_count = len(aggregate.atomic_units)
+            if aggregate_atomic_unit_count % candidate_atomic_unit_count != 0:
+                continue
+            unit_count = aggregate_atomic_unit_count // candidate_atomic_unit_count
+            if unit_count < 2 or unit_count > len(candidates):
+                continue
+            for start in range(len(candidates) - unit_count + 1):
+                if start % unit_count != 0:
+                    continue
+                units = candidates[start : start + unit_count]
+                covered_atomic_units = tuple(sorted(atomic_unit for unit in units for atomic_unit in unit.atomic_units))
+                if covered_atomic_units != aggregate.atomic_units:
+                    continue
+                views.append(
+                    PhysicalRegisterView(
+                        physical_register=aggregate.name,
+                        reg_class=register_class.name,
+                        units=tuple(unit.name for unit in units),
+                    )
+                )
+                view_keys.add(view_key)
+                break
+    return tuple(views)
 
 
 def _descriptor_asm_surface_description(

@@ -56,6 +56,7 @@ from loom.target.low_descriptors import (
     OperandRole,
     OperandSourceBinding,
     PhysicalRegister,
+    PhysicalRegisterView,
     RegClassAlt,
     RegClassAltFlag,
     RegClassFlag,
@@ -88,6 +89,7 @@ def _explicit_physical_descriptor_set():
         PhysicalRegister("test.r0", (0, 1)),
         PhysicalRegister("test.r1", (2, 3)),
         PhysicalRegister("test.r2", (4, 5)),
+        PhysicalRegister("test.pair", (0, 1, 4, 5)),
     )
     register_classes = tuple(
         replace(
@@ -109,6 +111,7 @@ def _explicit_physical_descriptor_set():
     return replace(
         TEST_LOW_CORE_DESCRIPTOR_SET,
         physical_registers=physical_registers,
+        physical_register_views=(PhysicalRegisterView("test.pair", "test.phys", ("test.r2", "test.r0")),),
         reg_classes=register_classes,
         descriptors=(TEST_LOW_ADD_PHYS_DESCRIPTOR,),
     )
@@ -617,10 +620,34 @@ def test_compiler_emits_explicit_physical_register_candidates() -> None:
     candidate_start = compiled.physical_register_candidate_starts[physical_class_index]
     candidate_count = len(compiled.reg_classes[physical_class_index].physical_registers)
     assert compiled.physical_register_candidate_ids[candidate_start : candidate_start + candidate_count] == [2, 0]
-    assert compiled.physical_register_atomic_units == [0, 1, 2, 3, 4, 5]
+    assert compiled.physical_register_atomic_units == [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        0,
+        1,
+        4,
+        5,
+    ]
     assert ".allocatable_count = 2," in generated.source
     assert "kTestLowCorePhysicalRegisterCandidates" in generated.source
     assert "kTestLowCorePhysicalRegisterAtomicUnits" in generated.source
+
+
+def test_compiler_derives_canonical_ordered_physical_register_views() -> None:
+    compiled = compiler.compile_descriptor_set(TEST_LOW_CORE_DESCRIPTOR_SET)
+    register_ids = {physical_register.name: index for index, physical_register in enumerate(compiled.physical_registers)}
+    explicit_class_id = compiled.reg_class_ids["test.explicit32"]
+
+    l0_view = next(view for view in compiled.physical_register_views if view.physical_register_id == register_ids["test.l0"] and view.reg_class_id == explicit_class_id)
+    l0_ordinals = compiled.physical_register_view_unit_candidate_ordinals[l0_view.unit_candidate_ordinal_start : l0_view.unit_candidate_ordinal_start + l0_view.unit_count]
+
+    assert l0_ordinals == [0, 1]
+    assert compiled.physical_registers[0].atomic_units == (1,)
+    assert compiled.physical_registers[1].atomic_units == (0,)
 
 
 def test_compiler_rejects_unknown_explicit_physical_register() -> None:
@@ -691,7 +718,51 @@ def test_compiler_rejects_noncanonical_physical_register_units() -> None:
         compiler.compile_descriptor_set(replace(descriptor_set, physical_registers=physical_registers))
 
 
-def test_compiler_rejects_multiunit_explicit_register_operand() -> None:
+def test_compiler_rejects_duplicate_physical_register_view() -> None:
+    descriptor_set = _explicit_physical_descriptor_set()
+    duplicate_view = descriptor_set.physical_register_views[0]
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor set 'test.low.core' physical register view 'test.pair' as 'test.phys' is duplicated"),
+    ):
+        compiler.compile_descriptor_set(
+            replace(
+                descriptor_set,
+                physical_register_views=(duplicate_view, duplicate_view),
+            )
+        )
+
+
+def test_compiler_rejects_physical_register_view_non_candidate_unit() -> None:
+    descriptor_set = _explicit_physical_descriptor_set()
+    view = replace(
+        descriptor_set.physical_register_views[0],
+        units=("test.r2", "test.r1"),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor set 'test.low.core' physical register view 'test.pair' as 'test.phys' units are not candidates of the register class: test.r1"),
+    ):
+        compiler.compile_descriptor_set(replace(descriptor_set, physical_register_views=(view,)))
+
+
+def test_compiler_rejects_inexact_physical_register_view_storage() -> None:
+    descriptor_set = _explicit_physical_descriptor_set()
+    physical_registers = (
+        *descriptor_set.physical_registers[:-1],
+        PhysicalRegister("test.pair", (0, 1, 2, 4, 5)),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor set 'test.low.core' physical register view 'test.pair' as 'test.phys' units do not exactly cover aggregate atomic storage"),
+    ):
+        compiler.compile_descriptor_set(replace(descriptor_set, physical_registers=physical_registers))
+
+
+def test_compiler_emits_ordered_multiunit_explicit_register_view() -> None:
     descriptor_set = _explicit_physical_descriptor_set()
     descriptor = replace(
         TEST_LOW_ADD_PHYS_DESCRIPTOR,
@@ -701,11 +772,17 @@ def test_compiler_rejects_multiunit_explicit_register_operand() -> None:
         ),
     )
 
-    with pytest.raises(
-        ValueError,
-        match=re.escape("descriptor 'test.add.phys' operand 'dst' uses explicit physical registers with unit count 2; whole-register candidates require one allocation unit"),
-    ):
-        compiler.compile_descriptor_set(replace(descriptor_set, descriptors=(descriptor,)))
+    compiled = compiler.compile_descriptor_set(replace(descriptor_set, descriptors=(descriptor,)))
+    generated = generate_descriptor_set(replace(descriptor_set, descriptors=(descriptor,)))
+
+    assert len(compiled.physical_register_views) == 1
+    view = compiled.physical_register_views[0]
+    assert view.physical_register_id == 3
+    assert view.reg_class_id == compiled.reg_class_ids["test.phys"]
+    assert view.unit_count == 2
+    assert compiled.physical_register_view_unit_candidate_ordinals == [0, 1]
+    assert "kTestLowCorePhysicalRegisterViews" in generated.source
+    assert "kTestLowCorePhysicalRegisterViewUnitCandidateOrdinals" in generated.source
 
 
 def test_compiler_derives_barrier_descriptor_flag() -> None:

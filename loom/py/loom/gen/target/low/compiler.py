@@ -22,6 +22,7 @@ from loom.gen.target.low.compiled import (
     CompiledNativeAsmValue,
     CompiledOperandForm,
     CompiledOperandFormMatch,
+    CompiledPhysicalRegisterView,
     DescriptorAllowlist,
     append_interned_sequence,
 )
@@ -912,7 +913,15 @@ def compile_descriptor_set(
         spec.key,
         tuple(reg_class_inputs.values()),
         tuple(physical_register_inputs.values()),
+        spec.physical_register_views,
     )
+    physical_register_views = validation.derive_canonical_physical_register_views(
+        tuple(reg_class_inputs.values()),
+        tuple(physical_register_inputs.values()),
+        spec.physical_register_views,
+    )
+    if physical_register_views != spec.physical_register_views:
+        spec = replace(spec, physical_register_views=physical_register_views)
     validation.validate_schedule_model(spec)
     validation.validate_schedule_alternatives(spec)
     register_part_inputs = _dedupe_by_name(spec.register_parts, lambda item: item.name)
@@ -1277,6 +1286,37 @@ def compile_descriptor_set(
         physical_register_candidate_starts.append(len(physical_register_candidate_ids))
         physical_register_candidate_ids.extend(physical_register_ids[name] for name in reg_class.physical_registers)
 
+    physical_register_views: list[CompiledPhysicalRegisterView] = []
+    physical_register_view_unit_candidate_ordinals: list[int] = []
+    selected_physical_register_views = sorted(
+        (view for view in spec.physical_register_views if view.reg_class in reg_class_ids),
+        key=lambda view: (
+            physical_register_ids[view.physical_register],
+            reg_class_ids[view.reg_class],
+        ),
+    )
+    for view in selected_physical_register_views:
+        reg_class = reg_class_inputs[view.reg_class]
+        candidate_ordinals = {physical_register: ordinal for ordinal, physical_register in enumerate(reg_class.physical_registers)}
+        unit_candidate_ordinal_start = len(physical_register_view_unit_candidate_ordinals)
+        physical_register_view_unit_candidate_ordinals.extend(candidate_ordinals[unit] for unit in view.units)
+        physical_register_views.append(
+            CompiledPhysicalRegisterView(
+                physical_register_id=physical_register_ids[view.physical_register],
+                reg_class_id=reg_class_ids[view.reg_class],
+                unit_candidate_ordinal_start=unit_candidate_ordinal_start,
+                unit_count=len(view.units),
+            )
+        )
+    validation.validate_u32(
+        len(physical_register_views),
+        f"descriptor set '{spec.key}' physical register view count",
+    )
+    validation.validate_u32(
+        len(physical_register_view_unit_candidate_ordinals),
+        f"descriptor set '{spec.key}' physical register view unit count",
+    )
+
     for schedule_class in schedule_classes:
         issue_use_start = len(issue_uses)
         issue_uses.extend(schedule_class.issue_uses)
@@ -1476,6 +1516,8 @@ def compile_descriptor_set(
         physical_register_candidate_starts=physical_register_candidate_starts,
         physical_register_atomic_units=physical_register_atomic_units,
         physical_register_atomic_unit_starts=physical_register_atomic_unit_starts,
+        physical_register_views=physical_register_views,
+        physical_register_view_unit_candidate_ordinals=physical_register_view_unit_candidate_ordinals,
         register_parts=register_parts,
         resources=resources,
         schedule_classes=schedule_classes,
