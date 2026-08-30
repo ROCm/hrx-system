@@ -35,11 +35,15 @@ from loom.target.contracts.diagnostics import (
     value_type_param,
 )
 from loom.target.contracts.emits import (
+    ContractEmit,
     DescriptorAccumulatorSeed,
     DescriptorAccumulatorTree,
     DescriptorEmitForm,
     DescriptorResultType,
     EmitDescriptorOp,
+    EmitRegisterConcat,
+    EmitRegisterSlice,
+    ResultTypeBinding,
 )
 from loom.target.contracts.fragments import ContractFragment
 from loom.target.contracts.guards import Guard, GuardKind
@@ -87,6 +91,8 @@ class LowerEmitKind(Enum):
     DESCRIPTOR_OP_PER_LANE = "descriptor_op_per_lane"
     DESCRIPTOR_OP_PER_LANE_SEQUENCE = "descriptor_op_per_lane_sequence"
     DESCRIPTOR_OP_ACCUMULATE_LANES = "descriptor_op_accumulate_lanes"
+    REGISTER_SLICE = "register_slice"
+    REGISTER_CONCAT = "register_concat"
 
 
 @unique
@@ -251,7 +257,7 @@ class LowerEmit:
     """Compiled emit-program row."""
 
     kind: LowerEmitKind
-    descriptor: Descriptor
+    descriptor: Descriptor | None = None
     flags: int = 0
     operand_ref_start: int = 0
     operand_ref_count: int = 0
@@ -266,6 +272,7 @@ class LowerEmit:
     tied_result_start: int = 0
     tied_result_count: int = 0
     source_memory_ordinal: int = LOWER_SOURCE_MEMORY_NONE
+    structural_offset: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -1296,6 +1303,44 @@ class _LowerRuleSetCompiler:
     def _append_emit(
         self,
         source_op: Op,
+        emit: ContractEmit,
+        type_patterns_by_field: dict[str, TypePattern],
+        temporary_ordinals: dict[str, int],
+    ) -> None:
+        if isinstance(emit, EmitDescriptorOp):
+            self._append_descriptor_emit(
+                source_op,
+                emit,
+                type_patterns_by_field,
+                temporary_ordinals,
+            )
+            return
+        if isinstance(emit, EmitRegisterSlice):
+            self._append_structural_emit(
+                source_op,
+                LowerEmitKind.REGISTER_SLICE,
+                (emit.source,),
+                emit.result,
+                emit.result_type,
+                temporary_ordinals,
+                structural_offset=emit.unit_offset,
+            )
+            return
+        if isinstance(emit, EmitRegisterConcat):
+            self._append_structural_emit(
+                source_op,
+                LowerEmitKind.REGISTER_CONCAT,
+                emit.sources,
+                emit.result,
+                emit.result_type,
+                temporary_ordinals,
+            )
+            return
+        raise TypeError(f"unsupported contract emit type: {type(emit).__name__}")
+
+    def _append_descriptor_emit(
+        self,
+        source_op: Op,
         emit: EmitDescriptorOp,
         type_patterns_by_field: dict[str, TypePattern],
         temporary_ordinals: dict[str, int],
@@ -1477,6 +1522,73 @@ class _LowerRuleSetCompiler:
                 tied_result_start=tied_result_start,
                 tied_result_count=len(tied_results),
                 source_memory_ordinal=source_memory_ordinal,
+            )
+        )
+
+    def _append_structural_emit(
+        self,
+        source_op: Op,
+        emit_kind: LowerEmitKind,
+        sources: Sequence[ValueRef],
+        result: ValueRef,
+        result_type: ResultTypeBinding | None,
+        temporary_ordinals: dict[str, int],
+        *,
+        structural_offset: int = 0,
+    ) -> None:
+        operand_refs = tuple(
+            self._lower_value_ref(source_op, source, temporary_ordinals)
+            for source in sources
+        )
+        operand_ref_start = self._append_value_ref_sequence(operand_refs)
+
+        if result.kind == SourceValueKind.TEMPORARY:
+            temporary_ordinals.setdefault(result.field, len(temporary_ordinals))
+        result_bind_ref = self._lower_value_ref(
+            source_op,
+            result,
+            temporary_ordinals,
+        )
+        result_bind_ref_start = self._append_value_ref_sequence((result_bind_ref,))
+
+        flags = 0
+        result_type_pattern_start = 0
+        type_binding = result if result_type is None else result_type
+        if isinstance(type_binding, TypePattern):
+            _require_exact_result_type_pattern(
+                source_op,
+                "result",
+                type_binding,
+            )
+            result_type_pattern_start = self._append_type_pattern(type_binding)
+            result_ref_start = result_bind_ref_start
+            flags |= LOWER_EMIT_FLAG_RESULT_TYPE_PATTERN
+        elif isinstance(type_binding, DescriptorResultType):
+            raise ValueError(
+                f"{source_op.name}: structural emits have no descriptor result type"
+            )
+        else:
+            result_type_ref = self._lower_value_ref(
+                source_op,
+                type_binding,
+                temporary_ordinals,
+            )
+            result_ref_start = self._append_value_ref_sequence((result_type_ref,))
+            if result_type_ref != result_bind_ref:
+                flags |= LOWER_EMIT_FLAG_BIND_RESULTS_TO_REFS
+
+        self._emits.append(
+            LowerEmit(
+                kind=emit_kind,
+                descriptor=None,
+                flags=flags,
+                operand_ref_start=operand_ref_start,
+                operand_ref_count=len(operand_refs),
+                result_ref_start=result_ref_start,
+                result_type_pattern_start=result_type_pattern_start,
+                result_ref_count=1,
+                result_bind_ref_start=result_bind_ref_start,
+                structural_offset=structural_offset,
             )
         )
 

@@ -28,6 +28,8 @@ from loom.target.contracts import (
     DirectDescriptorCase,
     DirectTypePatterns,
     EmitDescriptorOp,
+    EmitRegisterConcat,
+    EmitRegisterSlice,
     Guard,
     GuardDiagnostic,
     PredicateDescriptorCase,
@@ -141,6 +143,7 @@ _INDEX = Scalar("index")
 _OFFSET = Scalar("offset")
 _V4I1 = Vector("i1", lanes=4)
 _V16I8 = Vector("i8", lanes=16)
+_V2I32 = Vector("i32", lanes=2)
 _V4I32 = Vector("i32", lanes=4)
 _V4F32 = Vector("f32", lanes=4)
 
@@ -498,6 +501,46 @@ TEST_LOW_CORE_CONTRACT_FRAGMENT = ContractFragment(
                     form=DescriptorEmitForm.CONST,
                 ),
             ),
+        ),
+        DescriptorRule(
+            source_op=vector.vector_from_elements,
+            guards=(
+                Guard.operand_segment_count("elements", 2),
+                Guard.value_type("result", _V2I32),
+            ),
+            emit=(
+                EmitRegisterConcat(
+                    sources=(
+                        ValueRef.operand("elements", element=0),
+                        ValueRef.operand("elements", element=1),
+                    ),
+                    result=ValueRef.result("result"),
+                ),
+            ),
+        ),
+        *(
+            DescriptorRule(
+                source_op=vector.vector_extract,
+                guards=(
+                    Guard.i64_array_count("static_indices", 1),
+                    Guard.i64_array_element_range(
+                        "static_indices",
+                        0,
+                        unit_offset,
+                        unit_offset,
+                    ),
+                    Guard.value_type("source", _V2I32),
+                    Guard.value_type("result", _I32),
+                ),
+                emit=(
+                    EmitRegisterSlice(
+                        source=ValueRef.operand("source"),
+                        result=ValueRef.result("result"),
+                        unit_offset=unit_offset,
+                    ),
+                ),
+            )
+            for unit_offset in range(2)
         ),
         DescriptorRule(
             source_op=vector.vector_extract,

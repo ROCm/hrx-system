@@ -289,7 +289,10 @@ iree_status_t loom_low_lower_rule_set_resolve_emit_program(
     const uint16_t emit_index = (uint16_t)(rule->emit_start + i);
     const loom_low_lower_emit_t* emit = &rule_set->emits[emit_index];
     resolved_emits[i].emit = emit;
-    IREE_ASSERT_NE(emit->descriptor_ref, LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE);
+    resolved_emits[i].descriptor = (loom_low_lower_resolved_descriptor_t){0};
+    if (emit->descriptor_ref == LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE) {
+      continue;
+    }
     const loom_low_descriptor_t* descriptor = NULL;
     IREE_RETURN_IF_ERROR(loom_low_lower_rule_resolve_descriptor_ref(
         &match_context, rule_set, emit->descriptor_ref, &descriptor));
@@ -1017,6 +1020,60 @@ static iree_status_t loom_low_lower_rule_emit_descriptor_op(
                                           emit, low_results.values);
 }
 
+static iree_status_t loom_low_lower_rule_emit_register_slice(
+    loom_low_lower_context_t* context,
+    const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
+    loom_low_lower_rule_emit_state_t* state,
+    const loom_low_lower_resolved_emit_t* resolved_emit) {
+  const loom_low_lower_emit_t* emit = resolved_emit->emit;
+  IREE_ASSERT_EQ(emit->descriptor_ref, LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE);
+  IREE_ASSERT_EQ(emit->operand_ref_count, 1);
+  IREE_ASSERT_EQ(emit->result_ref_count, 1);
+
+  loom_value_id_t* low_operands = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_rule_build_low_operands(
+      context, rule_set, source_op, state, emit, NULL, NULL, &low_operands));
+  loom_type_t* result_types = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_rule_build_result_types(
+      context, rule_set, source_op, resolved_emit, &result_types));
+
+  loom_op_t* slice_op = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_low_slice_build(loom_low_lower_context_builder(context),
+                           low_operands[0], emit->structural_offset,
+                           result_types[0], source_op->location, &slice_op));
+  const loom_value_id_t low_result = loom_low_slice_result(slice_op);
+  return loom_low_lower_rule_bind_results(context, rule_set, source_op, state,
+                                          emit, &low_result);
+}
+
+static iree_status_t loom_low_lower_rule_emit_register_concat(
+    loom_low_lower_context_t* context,
+    const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
+    loom_low_lower_rule_emit_state_t* state,
+    const loom_low_lower_resolved_emit_t* resolved_emit) {
+  const loom_low_lower_emit_t* emit = resolved_emit->emit;
+  IREE_ASSERT_EQ(emit->descriptor_ref, LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE);
+  IREE_ASSERT_GT(emit->operand_ref_count, 0);
+  IREE_ASSERT_EQ(emit->result_ref_count, 1);
+
+  loom_value_id_t* low_operands = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_rule_build_low_operands(
+      context, rule_set, source_op, state, emit, NULL, NULL, &low_operands));
+  loom_type_t* result_types = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_rule_build_result_types(
+      context, rule_set, source_op, resolved_emit, &result_types));
+
+  loom_op_t* concat_op = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_low_concat_build(loom_low_lower_context_builder(context),
+                            low_operands, emit->operand_ref_count,
+                            result_types[0], source_op->location, &concat_op));
+  const loom_value_id_t low_result = loom_low_concat_result(concat_op);
+  return loom_low_lower_rule_bind_results(context, rule_set, source_op, state,
+                                          emit, &low_result);
+}
+
 static const loom_tied_result_t* loom_low_lower_rule_emit_tied_results(
     const loom_low_lower_rule_set_t* rule_set,
     const loom_low_lower_emit_t* emit) {
@@ -1742,6 +1799,16 @@ iree_status_t loom_low_lower_rule_set_emit_rule(
         IREE_RETURN_IF_ERROR(
             loom_low_lower_rule_emit_descriptor_op_accumulate_lanes(
                 context, rule_set, source_op, &state, resolved_emit));
+        break;
+      }
+      case LOOM_LOW_LOWER_EMIT_REGISTER_SLICE: {
+        IREE_RETURN_IF_ERROR(loom_low_lower_rule_emit_register_slice(
+            context, rule_set, source_op, &state, resolved_emit));
+        break;
+      }
+      case LOOM_LOW_LOWER_EMIT_REGISTER_CONCAT: {
+        IREE_RETURN_IF_ERROR(loom_low_lower_rule_emit_register_concat(
+            context, rule_set, source_op, &state, resolved_emit));
         break;
       }
       default:

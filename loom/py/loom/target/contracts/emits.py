@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Descriptor-backed contract emission forms."""
+"""Target-Low contract emission forms."""
 
 from __future__ import annotations
 
@@ -84,6 +84,88 @@ class DescriptorResultType:
 
 
 type ResultTypeBinding = ValueRef | TypePattern | DescriptorResultType
+
+
+@dataclass(frozen=True, slots=True)
+class EmitRegisterSlice:
+    """Projects consecutive register units from one source value."""
+
+    source: ValueRef
+    result: ValueRef
+    unit_offset: int = 0
+    result_type: ResultTypeBinding | None = None
+
+    def __post_init__(self) -> None:
+        if self.unit_offset < 0 or self.unit_offset > 0xFFFF:
+            raise ValueError("register slice unit offset must fit u16")
+
+    def validate(
+        self,
+        source_op: Op,
+        descriptor_set: DescriptorSet,
+        defined_temporaries: set[str],
+    ) -> tuple[str, ...]:
+        del descriptor_set
+        _validate_structural_source(
+            source_op,
+            self.source,
+            "register slice source",
+            defined_temporaries,
+        )
+        return _validate_structural_result(
+            source_op,
+            self.result,
+            self.result_type,
+            "register slice result",
+            defined_temporaries,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class EmitRegisterConcat:
+    """Concatenates register-unit sources into one aggregate value."""
+
+    sources: tuple[ValueRef, ...]
+    result: ValueRef
+    result_type: ResultTypeBinding | None = None
+
+    def __init__(
+        self,
+        *,
+        sources: Sequence[ValueRef],
+        result: ValueRef,
+        result_type: ResultTypeBinding | None = None,
+    ) -> None:
+        object.__setattr__(self, "sources", tuple(sources))
+        object.__setattr__(self, "result", result)
+        object.__setattr__(self, "result_type", result_type)
+        if not sources:
+            raise ValueError("register concat needs at least one source")
+
+    def validate(
+        self,
+        source_op: Op,
+        descriptor_set: DescriptorSet,
+        defined_temporaries: set[str],
+    ) -> tuple[str, ...]:
+        del descriptor_set
+        for source_index, source in enumerate(self.sources):
+            _validate_structural_source(
+                source_op,
+                source,
+                f"register concat source {source_index}",
+                defined_temporaries,
+            )
+        return _validate_structural_result(
+            source_op,
+            self.result,
+            self.result_type,
+            "register concat result",
+            defined_temporaries,
+        )
+
+
+type ContractEmit = EmitDescriptorOp | EmitRegisterSlice | EmitRegisterConcat
 
 
 @dataclass(frozen=True, slots=True)
@@ -482,6 +564,72 @@ class EmitDescriptorOp:
                     f"{source_op.name}: descriptor '{self.descriptor.key}' "
                     f"immediate '{immediate.field_name}' is not bound"
                 )
+
+
+def _validate_structural_source(
+    source_op: Op,
+    source: ValueRef,
+    subject: str,
+    defined_temporaries: set[str],
+) -> None:
+    if source.kind not in (SourceValueKind.OPERAND, SourceValueKind.TEMPORARY):
+        raise ValueError(
+            f"{source_op.name}: {subject} must bind an operand or temporary"
+        )
+    source.validate(
+        source_op,
+        subject,
+        defined_temporaries=defined_temporaries,
+    )
+
+
+def _validate_structural_result(
+    source_op: Op,
+    result: ValueRef,
+    result_type: ResultTypeBinding | None,
+    subject: str,
+    defined_temporaries: set[str],
+) -> tuple[str, ...]:
+    if result.kind not in (SourceValueKind.RESULT, SourceValueKind.TEMPORARY):
+        raise ValueError(
+            f"{source_op.name}: {subject} must bind a source result or temporary"
+        )
+    produced_temporaries: tuple[str, ...] = ()
+    if result.kind == SourceValueKind.TEMPORARY:
+        if result.field in defined_temporaries:
+            raise ValueError(
+                f"{source_op.name}: {subject} redefines temporary '{result.field}'"
+            )
+        if result_type is None:
+            raise ValueError(
+                f"{source_op.name}: {subject} temporary '{result.field}' "
+                "needs an explicit result type binding"
+            )
+        produced_temporaries = (result.field,)
+    else:
+        result.validate(source_op, subject)
+
+    if isinstance(result_type, DescriptorResultType):
+        raise ValueError(f"{source_op.name}: {subject} has no descriptor result type")
+    if isinstance(result_type, ValueRef):
+        if result_type.kind in (
+            SourceValueKind.SOURCE_MEMORY_DYNAMIC_TERM,
+            SourceValueKind.SOURCE_MEMORY_DYNAMIC_BYTE_OFFSET,
+            SourceValueKind.SOURCE_MEMORY_ADDRESS,
+        ):
+            raise ValueError(
+                f"{source_op.name}: {subject} type cannot bind source memory"
+            )
+        if result_type.kind == SourceValueKind.TEMPORARY:
+            raise ValueError(
+                f"{source_op.name}: {subject} type cannot bind a temporary"
+            )
+        result_type.validate(
+            source_op,
+            f"{subject} type",
+            defined_temporaries=defined_temporaries,
+        )
+    return produced_temporaries
 
 
 def _require_descriptor_result_type_operand(

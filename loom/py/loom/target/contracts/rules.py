@@ -13,7 +13,11 @@ from dataclasses import dataclass
 
 from loom.dsl import FACT_IDENTITY, MemoryAccessInterface, Op
 from loom.target.contracts.descriptors import _require_descriptor
-from loom.target.contracts.emits import DescriptorEmitForm, EmitDescriptorOp
+from loom.target.contracts.emits import (
+    ContractEmit,
+    DescriptorEmitForm,
+    EmitDescriptorOp,
+)
 from loom.target.contracts.guards import Guard
 from loom.target.contracts.kinds import ContractSystem, SourceValueKind
 from loom.target.contracts.source import ValueRef
@@ -22,12 +26,12 @@ from loom.target.low_descriptors import Descriptor, DescriptorSet, OperandRole
 
 @dataclass(frozen=True, slots=True)
 class DescriptorRule:
-    """Descriptor-rule contract case authored in Python."""
+    """Source-to-Low rule contract case authored in Python."""
 
     source_op: Op
-    descriptor: Descriptor
+    descriptor: Descriptor | None
     guards: tuple[Guard, ...] = ()
-    emit: tuple[EmitDescriptorOp, ...] = ()
+    emit: tuple[ContractEmit, ...] = ()
     priority: int = 0
     report_key: str = ""
 
@@ -35,9 +39,9 @@ class DescriptorRule:
         self,
         *,
         source_op: Op,
-        descriptor: Descriptor,
+        descriptor: Descriptor | None = None,
         guards: Sequence[Guard] = (),
-        emit: Sequence[EmitDescriptorOp] = (),
+        emit: Sequence[ContractEmit] = (),
         priority: int = 0,
         report_key: str = "",
     ) -> None:
@@ -56,12 +60,16 @@ class DescriptorRule:
         return ContractSystem.DESCRIPTOR_RULE
 
     def validate(self, descriptor_set: DescriptorSet) -> None:
-        _require_descriptor(descriptor_set, self.descriptor)
+        if self.descriptor is not None:
+            _require_descriptor(descriptor_set, self.descriptor)
         for guard in self.guards:
             guard.validate(self.source_op)
         defined_temporaries = set[str]()
         for emit in self.emit:
-            if emit.descriptor != self.descriptor:
+            if (
+                isinstance(emit, EmitDescriptorOp)
+                and emit.descriptor != self.descriptor
+            ):
                 _require_descriptor(descriptor_set, emit.descriptor)
             produced_temporaries = emit.validate(
                 self.source_op,
@@ -74,7 +82,10 @@ class DescriptorRule:
 
     def _validate_source_memory_index_preservation(self) -> None:
         source_memories = tuple(
-            emit.source_memory for emit in self.emit if emit.source_memory is not None
+            emit.source_memory
+            for emit in self.emit
+            if isinstance(emit, EmitDescriptorOp)
+            if emit.source_memory is not None
         )
         if not source_memories:
             return
@@ -92,6 +103,7 @@ class DescriptorRule:
             value_ref.kind == SourceValueKind.OPERAND
             and value_ref.field == memory_access.indices
             for emit in self.emit
+            if isinstance(emit, EmitDescriptorOp)
             for value_ref in emit.operands.values()
         )
         preserved_source_memory_count = sum(
@@ -111,7 +123,9 @@ class DescriptorRule:
 
     def _validate_per_lane_sequence(self) -> None:
         sequence_emit_count = sum(
-            emit.form == DescriptorEmitForm.PER_LANE_SEQUENCE for emit in self.emit
+            isinstance(emit, EmitDescriptorOp)
+            and emit.form == DescriptorEmitForm.PER_LANE_SEQUENCE
+            for emit in self.emit
         )
         if sequence_emit_count == 0:
             return

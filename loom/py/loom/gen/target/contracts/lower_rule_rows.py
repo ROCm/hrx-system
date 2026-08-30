@@ -450,7 +450,7 @@ def source_memory_row(
 
 def descriptor_ref_keys(table: CompiledLowerRuleSet, source_contract: ContractFragment) -> tuple[str, ...]:
     used_keys = {row.descriptor.key for row in table.guards if row.kind == GuardKind.DESCRIPTOR_AVAILABLE and row.descriptor is not None}
-    used_keys.update(row.descriptor.key for row in table.emits)
+    used_keys.update(row.descriptor.key for row in table.emits if row.descriptor is not None)
     for row in table.source_memories:
         if row.byte_offset_materializer is not None:
             materializer = row.byte_offset_materializer
@@ -775,6 +775,13 @@ def emit_row(descriptor_refs: Mapping[str, int], row: LowerEmit) -> list[str]:
             fields,
             "source_memory_ordinal",
             row.source_memory_ordinal,
+            always=True,
+        )
+    if row.kind == LowerEmitKind.REGISTER_SLICE:
+        _append_field(
+            fields,
+            "structural_offset",
+            row.structural_offset,
             always=True,
         )
     return fields
