@@ -95,3 +95,32 @@ loom_cc_benchmark(
         "//runtime/src/iree/testing:benchmark_main",
     ],
 )
+
+loom_cc_benchmark(
+    name = "link_request_benchmark",
+    srcs = ["link_request_benchmark.cc"],
+    args = [
+        "--benchmark_filter=Smoke",
+    ],
+    deps = [
+        ":benchmark_support",
+        "//loom/binding/c:loomc",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:benchmark_main",
+    ],
+)
+
+loom_cc_benchmark(
+    name = "product_throughput_benchmark",
+    srcs = ["product_throughput_benchmark.cc"],
+    args = [
+        "--benchmark_filter=Smoke",
+    ],
+    deps = [
+        ":benchmark_support",
+        "//loom/binding/c:loomc",
+        "//loom/binding/c/target/cmd",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:benchmark_main",
+    ],
+)

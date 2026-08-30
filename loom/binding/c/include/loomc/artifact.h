@@ -9,6 +9,7 @@
 
 #include <stdio.h>
 
+#include "loomc/byte_sequence.h"
 #include "loomc/source.h"
 
 /// @file
@@ -67,11 +68,13 @@ typedef enum loomc_artifact_kind_e {
   LOOMC_ARTIFACT_KIND_LAUNCH_CONFIG = 4,
 } loomc_artifact_kind_t;
 
-/// Borrowed artifact view owned by a result object.
+/// Borrowed artifact view owned by a producer-specific result or product.
 ///
 /// @lifetime
-/// Artifact strings and bytes are owned by the result that returned this view.
-/// They remain valid until that result is released.
+/// Artifact strings and the contents reference are owned by the
+/// operation-specific object that returned this view. They remain valid until
+/// that owner is released. Callers retaining contents independently use
+/// `loomc_byte_sequence_retain`.
 typedef struct loomc_artifact_t {
   /// Artifact kind.
   loomc_artifact_kind_t kind;
@@ -83,19 +86,10 @@ typedef struct loomc_artifact_t {
   /// Human-readable artifact identifier.
   loomc_string_view_t identifier;
 
-  /// Artifact bytes.
-  loomc_byte_span_t contents;
+  /// Immutable artifact bytes. Valid artifacts always provide a non-NULL
+  /// sequence, including for empty contents.
+  loomc_byte_sequence_t* contents;
 } loomc_artifact_t;
-
-/// Callback used to release artifact contents transferred to a consumer.
-///
-/// @param user_data Caller-provided value passed to the consuming operation.
-/// @param contents Original artifact contents transferred to the consumer.
-///
-/// The consuming operation documents when the callback runs. The callback is
-/// invoked exactly once after that operation accepts ownership of the bytes.
-typedef void(LOOMC_API_PTR* loomc_artifact_release_fn_t)(
-    void* user_data, loomc_byte_span_t contents);
 
 /// Creates an immutable source handle from an artifact.
 ///
@@ -108,8 +102,9 @@ typedef void(LOOMC_API_PTR* loomc_artifact_release_fn_t)(
 /// @return OK when the source was created.
 ///
 /// @ownership
-/// The returned source owns a copy of the artifact bytes and identifier. The
-/// caller releases it with `loomc_source_release`.
+/// The returned source retains contiguous artifact storage without copying.
+/// Segmented storage is coalesced once. The caller releases the source with
+/// `loomc_source_release`.
 LOOMC_API_EXPORT loomc_status_t loomc_artifact_create_source(
     const loomc_artifact_t* artifact, loomc_source_format_t format,
     loomc_allocator_t allocator, loomc_source_t** out_source);

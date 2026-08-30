@@ -9,7 +9,9 @@
 #include <string.h>
 
 #include "iree/base/api.h"
+#include "iree/base/byte_sequence.h"
 #include "iree/base/internal/atomics.h"
+#include "loomc/iree.h"
 #include "source.h"
 
 typedef struct loomc_owned_diagnostic_t {
@@ -28,17 +30,9 @@ typedef struct loomc_owned_artifact_t {
   loomc_string_view_t format_storage;
   // Storage for value.identifier.
   loomc_string_view_t identifier_storage;
-  // Storage for value.contents.
-  loomc_byte_span_t contents_storage;
+  // Retained storage for value.contents.
+  loomc_byte_sequence_t* contents_storage;
 } loomc_owned_artifact_t;
-
-typedef enum loomc_result_artifact_storage_mode_e {
-  // Copy artifact contents into result-owned storage.
-  LOOMC_RESULT_ARTIFACT_STORAGE_COPY = 0,
-
-  // Take allocator-owned artifact contents on success.
-  LOOMC_RESULT_ARTIFACT_STORAGE_TAKE = 1,
-} loomc_result_artifact_storage_mode_t;
 
 struct loomc_result_t {
   // Atomic reference count for shared immutable ownership.
@@ -98,7 +92,7 @@ static void loomc_owned_artifact_deinitialize(
     loomc_allocator_t allocator, loomc_owned_artifact_t* artifact) {
   loomc_allocator_free(allocator, (void*)artifact->format_storage.data);
   loomc_allocator_free(allocator, (void*)artifact->identifier_storage.data);
-  loomc_allocator_free(allocator, (void*)artifact->contents_storage.data);
+  loomc_byte_sequence_release(artifact->contents_storage);
   *artifact = (loomc_owned_artifact_t){0};
 }
 
@@ -190,16 +184,13 @@ loomc_status_t loomc_result_add_diagnostic(
   return status;
 }
 
-static loomc_status_t loomc_result_add_artifact_storage(
-    loomc_result_t* result, const loomc_artifact_t* artifact,
-    loomc_result_artifact_storage_mode_t storage_mode) {
-  if (result == NULL || artifact == NULL) {
+static loomc_status_t loomc_result_prepare_artifact(
+    loomc_result_t* result, loomc_string_view_t format,
+    loomc_string_view_t identifier, loomc_owned_artifact_t** out_artifact) {
+  *out_artifact = NULL;
+  if (result == NULL) {
     return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
-                             "result and artifact must not be NULL");
-  }
-  if (artifact->contents.data == NULL && artifact->contents.data_length != 0) {
-    return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
-                             "artifact contents have length but no data");
+                             "result must not be NULL");
   }
   LOOMC_RETURN_IF_ERROR(loomc_result_grow_array(
       result->allocator, sizeof(result->artifacts[0]), result->artifact_count,
@@ -207,58 +198,75 @@ static loomc_status_t loomc_result_add_artifact_storage(
       (void**)&result->artifacts));
   loomc_owned_artifact_t* target = &result->artifacts[result->artifact_count];
   *target = (loomc_owned_artifact_t){0};
-  loomc_status_t status = loomc_string_view_clone(
-      artifact->format, result->allocator, &target->format_storage);
+  loomc_status_t status = loomc_string_view_clone(format, result->allocator,
+                                                  &target->format_storage);
   if (loomc_status_is_ok(status)) {
-    status = loomc_string_view_clone(artifact->identifier, result->allocator,
+    status = loomc_string_view_clone(identifier, result->allocator,
                                      &target->identifier_storage);
   }
-  if (loomc_status_is_ok(status) &&
-      storage_mode == LOOMC_RESULT_ARTIFACT_STORAGE_COPY &&
-      artifact->contents.data_length != 0) {
-    uint8_t* contents = NULL;
-    status = loomc_allocator_malloc_uninitialized(
-        result->allocator, artifact->contents.data_length, (void**)&contents);
-    if (loomc_status_is_ok(status)) {
-      memcpy(contents, artifact->contents.data, artifact->contents.data_length);
-      target->contents_storage =
-          loomc_make_byte_span(contents, artifact->contents.data_length);
-    }
-  }
-  if (loomc_status_is_ok(status) &&
-      storage_mode == LOOMC_RESULT_ARTIFACT_STORAGE_TAKE) {
-    target->contents_storage = artifact->contents;
-  }
   if (loomc_status_is_ok(status)) {
-    target->value = *artifact;
-    target->value.format = target->format_storage;
-    target->value.identifier = target->identifier_storage;
-    target->value.contents = target->contents_storage;
-    ++result->artifact_count;
+    *out_artifact = target;
   } else {
     loomc_owned_artifact_deinitialize(result->allocator, target);
   }
   return status;
 }
 
+static void loomc_result_commit_artifact(loomc_result_t* result,
+                                         loomc_artifact_kind_t kind,
+                                         loomc_owned_artifact_t* artifact,
+                                         loomc_byte_sequence_t* contents) {
+  artifact->contents_storage = contents;
+  artifact->value = (loomc_artifact_t){
+      .kind = kind,
+      .format = artifact->format_storage,
+      .identifier = artifact->identifier_storage,
+      .contents = contents,
+  };
+  ++result->artifact_count;
+}
+
 loomc_status_t loomc_result_add_artifact(loomc_result_t* result,
                                          const loomc_artifact_t* artifact) {
-  return loomc_result_add_artifact_storage(result, artifact,
-                                           LOOMC_RESULT_ARTIFACT_STORAGE_COPY);
+  if (result == NULL || artifact == NULL || artifact->contents == NULL) {
+    return loomc_make_status(
+        LOOMC_STATUS_INVALID_ARGUMENT,
+        "result, artifact, and artifact contents must not be NULL");
+  }
+  loomc_owned_artifact_t* target = NULL;
+  LOOMC_RETURN_IF_ERROR(loomc_result_prepare_artifact(
+      result, artifact->format, artifact->identifier, &target));
+  loomc_byte_sequence_retain(artifact->contents);
+  loomc_result_commit_artifact(result, artifact->kind, target,
+                               artifact->contents);
+  return loomc_ok_status();
 }
 
 loomc_status_t loomc_result_add_artifact_take_contents(
     loomc_result_t* result, loomc_artifact_kind_t kind,
     loomc_string_view_t format, loomc_string_view_t identifier,
     loomc_byte_span_t contents) {
-  loomc_artifact_t artifact = {
-      .kind = kind,
-      .format = format,
-      .identifier = identifier,
-      .contents = contents,
-  };
-  return loomc_result_add_artifact_storage(result, &artifact,
-                                           LOOMC_RESULT_ARTIFACT_STORAGE_TAKE);
+  if (contents.data == NULL && contents.data_length != 0) {
+    return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
+                             "artifact contents have length but no data");
+  }
+  loomc_owned_artifact_t* target = NULL;
+  LOOMC_RETURN_IF_ERROR(
+      loomc_result_prepare_artifact(result, format, identifier, &target));
+
+  iree_byte_span_t storage =
+      iree_make_byte_span((uint8_t*)contents.data, contents.data_length);
+  iree_byte_sequence_t* sequence = NULL;
+  loomc_status_t status =
+      loomc_status_from_iree(iree_byte_sequence_create_from_span_move(
+          &storage, iree_allocator_from_loomc(result->allocator), &sequence));
+  if (loomc_status_is_ok(status)) {
+    loomc_result_commit_artifact(result, kind, target,
+                                 loomc_byte_sequence_from_iree(sequence));
+  } else {
+    loomc_owned_artifact_deinitialize(result->allocator, target);
+  }
+  return status;
 }
 
 void loomc_result_retain(loomc_result_t* result) {

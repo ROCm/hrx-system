@@ -186,14 +186,14 @@ static iree_status_t loom_tooling_write_byte_sequence_segment(
 }
 
 iree_status_t loom_tooling_write_output_byte_sequence(
-    iree_string_view_t path, const iree_io_byte_sequence_t* contents,
+    iree_string_view_t path, const iree_byte_sequence_t* contents,
     iree_allocator_t allocator) {
   IREE_ASSERT_ARGUMENT(contents);
   loom_tooling_output_stream_t output = {0};
   IREE_RETURN_IF_ERROR(
       loom_tooling_output_stream_open(path, allocator, &output));
-  iree_status_t status = iree_io_byte_sequence_enumerate(
-      contents, (iree_io_byte_sequence_segment_callback_t){
+  iree_status_t status = iree_byte_sequence_enumerate(
+      contents, (iree_byte_sequence_segment_callback_t){
                     .fn = loom_tooling_write_byte_sequence_segment,
                     .user_data = &output,
                 });

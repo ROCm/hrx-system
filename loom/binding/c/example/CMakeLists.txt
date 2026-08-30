@@ -43,6 +43,23 @@ iree_native_test(
     ::link_modules
 )
 
+loom_cc_binary(
+  NAME
+    product_frontier
+  SRCS
+    "product_frontier.c"
+  DEPS
+    loom::binding::c::loomc
+    loom::binding::c::target::cmd
+)
+
+iree_native_test(
+  NAME
+    "product_frontier_test"
+  SRC
+    ::product_frontier
+)
+
 if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV)
 loom_cc_binary(
   NAME

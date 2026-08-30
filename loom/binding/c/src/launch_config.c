@@ -322,24 +322,37 @@ static loomc_status_t loomc_launch_config_program_load_impl(
         "launch config artifact format '%.*s' is not supported",
         (int)artifact->format.size, artifact->format.data));
   }
-  if (artifact->contents.data == NULL && artifact->contents.data_length != 0) {
+  if (artifact->contents == NULL) {
     return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
-                             "artifact contents have length but no data");
+                             "artifact contents must not be NULL");
+  }
+
+  loomc_byte_span_t contents = loomc_byte_span_empty();
+  bool owns_contents = false;
+  loomc_status_t status = loomc_ok_status();
+  if (!loomc_byte_sequence_try_get_contiguous_span(artifact->contents,
+                                                   &contents)) {
+    status =
+        loomc_byte_sequence_clone(artifact->contents, allocator, &contents);
+    owns_contents = loomc_status_is_ok(status);
   }
 
   loomc_launch_config_program_t* program = NULL;
-  LOOMC_RETURN_IF_ERROR(
-      loomc_allocator_malloc(allocator, sizeof(*program), (void**)&program));
-  memset(program, 0, sizeof(*program));
-  iree_atomic_ref_count_init(&program->ref_count);
-  program->allocator = allocator;
-  iree_arena_block_pool_initialize(LOOMC_LAUNCH_CONFIG_BLOCK_SIZE,
-                                   iree_allocator_from_loomc(allocator),
-                                   &program->module_block_pool);
-  loomc_launch_config_evaluation_initialize(program, &program->evaluation);
-
-  loomc_status_t status = loomc_context_create(
-      /*options=*/NULL, allocator, &program->context);
+  if (loomc_status_is_ok(status)) {
+    status =
+        loomc_allocator_malloc(allocator, sizeof(*program), (void**)&program);
+  }
+  if (loomc_status_is_ok(status)) {
+    memset(program, 0, sizeof(*program));
+    iree_atomic_ref_count_init(&program->ref_count);
+    program->allocator = allocator;
+    iree_arena_block_pool_initialize(LOOMC_LAUNCH_CONFIG_BLOCK_SIZE,
+                                     iree_allocator_from_loomc(allocator),
+                                     &program->module_block_pool);
+    loomc_launch_config_evaluation_initialize(program, &program->evaluation);
+    status = loomc_context_create(
+        /*options=*/NULL, allocator, &program->context);
+  }
   if (loomc_status_is_ok(status)) {
     loom_bytecode_read_options_t read_options = {0};
     loom_bytecode_read_result_t read_result = {0};
@@ -349,8 +362,7 @@ static loomc_status_t loomc_launch_config_program_load_impl(
       identifier = IREE_SV("launch_config.loombc");
     }
     status = loomc_status_from_iree(loom_bytecode_read_module(
-        iree_make_const_byte_span(artifact->contents.data,
-                                  artifact->contents.data_length),
+        iree_make_const_byte_span(contents.data, contents.data_length),
         identifier, loomc_context_loom_context(program->context),
         &program->module_block_pool, &read_options, &read_result,
         &program->module, iree_allocator_from_loomc(allocator)));
@@ -382,24 +394,20 @@ static loomc_status_t loomc_launch_config_program_load_impl(
   }
   if (loomc_status_is_ok(status)) {
     *out_program = program;
-  } else {
+  } else if (program != NULL) {
     loomc_launch_config_program_destroy(program);
+  }
+  if (owns_contents) {
+    loomc_allocator_free(allocator, (void*)contents.data);
   }
   return status;
 }
 
 loomc_status_t loomc_launch_config_program_load(
-    const loomc_artifact_t* artifact, loomc_artifact_release_fn_t release,
-    void* release_user_data, loomc_allocator_t allocator,
+    const loomc_artifact_t* artifact, loomc_allocator_t allocator,
     loomc_launch_config_program_t** out_program) {
-  const loomc_byte_span_t contents =
-      artifact != NULL ? artifact->contents : loomc_byte_span_empty();
-  loomc_status_t status =
-      loomc_launch_config_program_load_impl(artifact, allocator, out_program);
-  if (release != NULL && artifact != NULL) {
-    release(release_user_data, contents);
-  }
-  return status;
+  return loomc_launch_config_program_load_impl(artifact, allocator,
+                                               out_program);
 }
 
 void loomc_launch_config_program_retain(

@@ -15,8 +15,7 @@
 extern "C" {
 #endif
 
-// Emit provider for prepared command programs, launch configuration, and
-// independently compilable kernel dependencies.
+// Emit provider for prepared portable command programs.
 extern const loom_check_emit_provider_t
     loom_cmd_program_plan_check_emit_provider;
 

@@ -139,6 +139,11 @@ iree_status_t ValidateArtifact(const loomc_result_t* result,
                                const char* description,
                                int64_t* out_artifact_bytes);
 
+// Copies an artifact prefix into caller-owned storage without flattening the
+// complete sequence.
+iree_status_t ReadArtifactPrefix(const loomc_artifact_t* artifact,
+                                 iree_byte_span_t prefix);
+
 iree_status_t ValidateModuleBytecodeArtifact(const loomc_result_t* result,
                                              int64_t* out_artifact_bytes);
 

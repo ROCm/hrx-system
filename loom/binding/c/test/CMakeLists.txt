@@ -52,6 +52,18 @@ loom_cc_test(
 
 loom_cc_test(
   NAME
+    byte_sequence_test
+  SRCS
+    "byte_sequence_test.cc"
+  DEPS
+    ::test_util
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::binding::c::loomc
+)
+
+loom_cc_test(
+  NAME
     iree_adapter_test
   SRCS
     "iree_adapter_test.cc"
@@ -69,6 +81,8 @@ loom_cc_test(
     "artifact_test.cc"
   DEPS
     ::test_util
+    iree::base
+    iree::io::stream
     iree::testing::gtest
     iree::testing::gtest_main
     iree::testing::temp_file
@@ -144,6 +158,21 @@ loom_cc_test(
     iree::testing::gtest_main
     loom::binding::c::loomc
     loom::link::testdata::provider_roots
+)
+
+loom_cc_test(
+  NAME
+    link_request_test
+  SRCS
+    "link_request_test.cc"
+  DEPS
+    ::test_util
+    iree::base::core_headers
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::binding::c::loomc
+    loom::format::bytecode::format
+    loom::ir
 )
 
 loom_cc_test(
@@ -256,7 +285,6 @@ loom_cc_test(
   DEPS
     ::test_util
     iree::base
-    iree::io::byte_sequence
     iree::testing::gtest
     iree::testing::gtest_main
     iree::testing::temp_file

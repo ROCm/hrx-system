@@ -1,0 +1,9 @@
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
+config.decl @model.delta : i32
+
+func.def public target(@target) @add_delta(%value: i32) -> (i32) {
+  %delta = config.get @model.delta : i32
+  %result = scalar.addi %value, %delta : i32
+  func.return %result : i32
+}

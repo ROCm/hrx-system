@@ -8,9 +8,9 @@
 
 #include <string>
 
+#include "iree/base/byte_sequence.h"
 #include "iree/base/internal/arena.h"
 #include "iree/hal/api.h"
-#include "iree/io/byte_sequence.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/codegen/low/text_asm.h"
@@ -289,7 +289,7 @@ class AmdgpuHalArtifactProviderTest : public ::testing::Test {
     EXPECT_EQ(artifact.target_artifact_format, LOOM_TARGET_ARTIFACT_FORMAT_ELF);
     EXPECT_EQ(artifact.target_artifact_data, artifact.executable_data);
     ASSERT_NE(artifact.target_artifact_data, nullptr);
-    EXPECT_GT(iree_io_byte_sequence_length(artifact.target_artifact_data), 0u);
+    EXPECT_GT(iree_byte_sequence_length(artifact.target_artifact_data), 0u);
     ASSERT_NE(artifact.target_bundle, nullptr);
     EXPECT_EQ(artifact.target_bundle->snapshot->codegen_format,
               LOOM_TARGET_CODEGEN_FORMAT_LOW_NATIVE);
@@ -721,13 +721,13 @@ TEST_F(AmdgpuHalArtifactProviderTest, RecordsDetailedReportRows) {
   EXPECT_EQ(artifact.target_artifact_data, artifact.executable_data);
   EXPECT_NE(artifact.target_artifact_data, nullptr);
   if (artifact.target_artifact_data != nullptr) {
-    EXPECT_GT(iree_io_byte_sequence_length(artifact.target_artifact_data), 0u);
+    EXPECT_GT(iree_byte_sequence_length(artifact.target_artifact_data), 0u);
   }
   EXPECT_TRUE(iree_string_view_equal(artifact.target_listing_format,
                                      IREE_SV("amdgpu-assembly")));
   EXPECT_NE(artifact.target_listing_data, nullptr);
   if (artifact.target_listing_data != nullptr) {
-    EXPECT_GT(iree_io_byte_sequence_length(artifact.target_listing_data), 0u);
+    EXPECT_GT(iree_byte_sequence_length(artifact.target_listing_data), 0u);
   }
 
   EXPECT_EQ(report.source_low_rows.count, 0u);

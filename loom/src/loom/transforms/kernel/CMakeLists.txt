@@ -156,7 +156,9 @@ loom_cc_library(
   DEPS
     ::kernel_class_materializer
     iree::base
+    iree::base::internal
     iree::base::internal::arena
+    iree::base::threading
     loom::analysis::symbol_facts
     loom::analysis::symbol_references
     loom::analysis::symbolic_expr

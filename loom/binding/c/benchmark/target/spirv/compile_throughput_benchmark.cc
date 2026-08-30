@@ -26,6 +26,7 @@ using loomc::bench::CreateWorkspace;
 using loomc::bench::DeserializeSource;
 using loomc::bench::loom_allocator;
 using loomc::bench::ModulePtr;
+using loomc::bench::ReadArtifactPrefix;
 using loomc::bench::RequireSucceededResult;
 using loomc::bench::ResultPtr;
 using loomc::bench::RunCompileBenchmark;
@@ -154,7 +155,8 @@ class SpirvScenarioBase : public TargetCompileScenario {
         result.get(), LOOMC_ARTIFACT_KIND_EXECUTABLE,
         loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV));
     uint32_t magic = 0;
-    std::memcpy(&magic, artifact->contents.data, sizeof(magic));
+    IREE_RETURN_IF_ERROR(ReadArtifactPrefix(
+        artifact, iree_make_byte_span(&magic, sizeof(magic))));
     ::benchmark::DoNotOptimize(magic);
     if (magic != kSpirvMagic) {
       return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,

@@ -781,17 +781,16 @@ static loomc_status_t summarize_and_maybe_write_artifact(
     return loomc_make_status(LOOMC_STATUS_NOT_FOUND,
                              "SPIR-V executable artifact was not produced");
   }
-  if (artifact->contents.data_length < sizeof(uint32_t)) {
+  const uint64_t artifact_length =
+      loomc_byte_sequence_length(artifact->contents);
+  if (artifact_length < sizeof(uint32_t)) {
     return loomc_make_status(LOOMC_STATUS_FAILED_PRECONDITION,
                              "SPIR-V artifact is too small");
   }
 
-  uint32_t magic = 0;
-  memcpy(&magic, artifact->contents.data, sizeof(magic));
-  printf("artifact %.*s format=%.*s bytes=%zu magic=0x%08" PRIx32 "\n",
+  printf("artifact %.*s format=%.*s bytes=%" PRIu64 "\n",
          (int)artifact->identifier.size, artifact->identifier.data,
-         (int)artifact->format.size, artifact->format.data,
-         (size_t)artifact->contents.data_length, magic);
+         (int)artifact->format.size, artifact->format.data, artifact_length);
 
   if (state->output_path == NULL) {
     return loomc_ok_status();

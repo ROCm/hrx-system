@@ -1,0 +1,19 @@
+// One source library provides both the exact kernel definition and the
+// schedule variants whose decisions create independently compilable classes.
+template.decl @frontier.schedule(%size: index)
+
+template.def<@frontier.schedule> priority(10) @large(%size: index) where [ge(%size, 128)] {
+  template.return
+}
+
+template.def<@frontier.schedule> priority(1) @small(%size: index) {
+  template.return
+}
+
+kernel.def export("classified") @classified() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%size: index, %storage: buffer) {
+  template.apply<@frontier.schedule>(%size) : (index)
+  kernel.return
+}

@@ -9,8 +9,8 @@
 #include <stdio.h>
 
 #include "iree/base/api.h"
+#include "iree/base/byte_sequence.h"
 #include "iree/base/tooling/flags.h"
-#include "iree/io/byte_sequence.h"
 #include "iree/io/file_contents.h"
 #include "loom/codegen/low/text_asm.h"
 #include "loom/error/diagnostic.h"
@@ -37,6 +37,7 @@
 #include "loom/tooling/io/source_path.h"
 #include "loom/tooling/pass/trace_cli.h"
 #include "loom/tools/loom-compile/command_backend.h"
+#include "loom/tools/loom-compile/command_manifest.h"
 
 #ifndef LOOM_COMPILE_HAVE_AMDGPU
 #define LOOM_COMPILE_HAVE_AMDGPU 0
@@ -172,6 +173,10 @@ IREE_FLAG_NAMED(
     string, emit_command_artifacts, "emit-command-artifacts", "",
     "Directory receiving portable root artifacts for --backend=command. The "
     "primary --output is the artifact-set manifest.");
+IREE_FLAG_NAMED(
+    string, emit_kernel_requests, "emit-kernel-requests", "",
+    "Optional directory receiving independently compilable Loom bytecode "
+    "kernel requests for --backend=command.");
 IREE_FLAG_NAMED(
     string, compile_report, "compile-report", "",
     "Optional compile report output. Use 'summary'/'details' for structured "
@@ -590,7 +595,7 @@ static iree_status_t loom_compile_write_optional_target_artifact(
     return iree_ok_status();
   }
   if (artifact->target_artifact_data == NULL ||
-      iree_io_byte_sequence_length(artifact->target_artifact_data) == 0) {
+      iree_byte_sequence_length(artifact->target_artifact_data) == 0) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "selected HAL artifact provider produced no "
                             "target-native artifact");
@@ -711,13 +716,15 @@ static iree_status_t loom_compile_emit_command(
         LOOM_TARGET_COMPILE_ARTIFACT_KIND_TARGET_ARTIFACT;
     compile_options->report->backend_name = IREE_SV("command");
     compile_options->report->artifact_format =
-        IREE_SV(LOOM_CMD_PROGRAM_ARTIFACT_SET_MANIFEST_FORMAT);
+        IREE_SV(LOOM_COMPILE_COMMAND_MANIFEST_FORMAT);
   }
   return loom_compile_command_backend_emit(
       session, run_module,
       &(loom_compile_command_backend_options_t){
           .artifact_directory =
               iree_make_cstring_view(FLAG_emit_command_artifacts),
+          .kernel_request_directory =
+              iree_make_cstring_view(FLAG_emit_kernel_requests),
           .manifest_path = iree_make_cstring_view(FLAG_output),
           .diagnostic_sink =
               {
@@ -919,12 +926,12 @@ static iree_status_t loom_compile_emit_target(
     if (artifact.contents != NULL) {
       loom_target_compile_report_record_artifact_size(
           compile_options->report,
-          iree_io_byte_sequence_length(artifact.contents));
+          iree_byte_sequence_length(artifact.contents));
     }
   }
   if (iree_status_is_ok(status) && diagnostic_emitter.error_count == 0 &&
       artifact.contents != NULL &&
-      iree_io_byte_sequence_length(artifact.contents) != 0) {
+      iree_byte_sequence_length(artifact.contents) != 0) {
     status = loom_tooling_write_output_byte_sequence(
         output_path, artifact.contents, allocator);
     if (iree_status_is_ok(status)) {
@@ -1046,11 +1053,18 @@ static iree_status_t loom_compile_validate_backend_flags(
     const loom_compile_backend_t* backend) {
   const iree_string_view_t command_artifact_directory =
       iree_make_cstring_view(FLAG_emit_command_artifacts);
+  const iree_string_view_t kernel_request_directory =
+      iree_make_cstring_view(FLAG_emit_kernel_requests);
   if (!backend->is_command_backend) {
     if (!iree_string_view_is_empty(command_artifact_directory)) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
           "--emit-command-artifacts requires --backend=command");
+    }
+    if (!iree_string_view_is_empty(kernel_request_directory)) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "--emit-kernel-requests requires "
+                              "--backend=command");
     }
     return iree_ok_status();
   }
@@ -1066,6 +1080,12 @@ static iree_status_t loom_compile_validate_backend_flags(
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "--emit-target-artifact is only valid for HAL artifact providers");
+  }
+  if (!iree_string_view_is_empty(kernel_request_directory) &&
+      loom_tooling_file_path_is_stdio(kernel_request_directory)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "--emit-kernel-requests requires a filesystem directory");
   }
   return iree_ok_status();
 }
@@ -1181,7 +1201,8 @@ static void loom_compile_print_agents_markdown(FILE* stream) {
       "\n"
       "```shell\n"
       "loom-compile model.loom --backend=command --output=commands.json \\\n"
-      "  --emit-command-artifacts=commands/\n"
+      "  --emit-command-artifacts=commands/ \\\n"
+      "  --emit-kernel-requests=kernel-requests/\n"
       "loom-compile kernel.loom --backend=amdgpu-hal "
       "--target=gfx11-generic \\\n"
       "  --output=kernel.hsaco\n"
@@ -1203,8 +1224,15 @@ static void loom_compile_print_agents_markdown(FILE* stream) {
       "retained command program into `--emit-command-artifacts`, and writes "
       "their shared entry-requirement manifest to `--output`. Repeated "
       "`--root=@symbol` values select an explicit subset; omitting roots emits "
-      "all exported command programs. Kernel implementations remain separate "
-      "products named by the manifest's logical entry table.\n"
+      "all exported command programs. `--emit-kernel-requests` additionally "
+      "streams one ordinary Loom bytecode module per reachable semantic kernel "
+      "class. The manifest maps source-backed entries to those files; bodyless "
+      "external entries remain binding requirements without source access.\n"
+      "Without that option command construction leaves implementation bodies "
+      "unopened. Request files are independent products rather than state "
+      "owned "
+      "by a command artifact, and become a complete set only when the parent "
+      "command compilation succeeds.\n"
       "HAL/native backends such as `--backend=amdgpu-hal` write the selected "
       "provider's loader-ready\n"
       "executable bytes to `--output`. `--emit-target-artifact=path` "
@@ -1577,7 +1605,8 @@ int main(int argc, char** argv) {
       "\n"
       "Usage:\n"
       "  loom-compile [file.loom] --backend=command "
-      "--output=commands.json --emit-command-artifacts=commands/\n"
+      "--output=commands.json --emit-command-artifacts=commands/ "
+      "[--emit-kernel-requests=kernels/]\n"
       "  loom-compile [file.loom] --backend=amdgpu-hal "
       "--target=gfx11-generic --output=kernel.hsaco\n"
       "  loom-compile --agents_md\n"
@@ -1759,12 +1788,19 @@ int main(int argc, char** argv) {
     }
   }
   if (iree_status_is_ok(status)) {
-    status = loom_compile_run_pass_pipeline(
-        &environment, &session, &run_module,
-        is_command_backend ? LOOM_COMPILE_DEFAULT_PIPELINE_EXPANDED_SOURCE
-                           : LOOM_COMPILE_DEFAULT_PIPELINE_PREPARED_LOW,
-        &compile_options, loom_tooling_pass_trace_options(&pass_trace),
-        &pipeline_result);
+    // Command compilation owns selective source preparation after indexing.
+    // Eagerly expanding the whole input here would erase unresolved kernel
+    // decisions before command planning can classify launch sites and emit
+    // independent kernel requests. Explicit user pipelines remain honored.
+    const bool run_pipeline =
+        !is_command_backend || !loom_compile_pipeline_is_default(
+                                   iree_make_cstring_view(FLAG_pipeline));
+    if (run_pipeline) {
+      status = loom_compile_run_pass_pipeline(
+          &environment, &session, &run_module,
+          LOOM_COMPILE_DEFAULT_PIPELINE_PREPARED_LOW, &compile_options,
+          loom_tooling_pass_trace_options(&pass_trace), &pipeline_result);
+    }
     status =
         iree_status_join(status, loom_tooling_pass_trace_close(&pass_trace));
     if (iree_status_is_ok(status) && pipeline_result.pass.error_count != 0) {

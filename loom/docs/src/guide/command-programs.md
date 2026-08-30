@@ -279,7 +279,9 @@ compiler operations:
    and unroll the resulting ordinary dataflow.
 5. Resolve named parameters, physical dispatch counts, storage, and explicit
    schedule waves.
-6. Assign dense slots for distinct executable-entry requirements and lower
+6. Optionally classify all reachable launch sites and stream one independent
+   source request per live semantic kernel class.
+7. Assign dense slots for distinct executable-entry requirements and lower
    each closed root to portable command Low.
 
 The dependency kernels retain their ordinary target compilation paths. A
@@ -294,13 +296,17 @@ plan-wide executable-entry requirement while retaining root-local dense slots.
 Kernel specialization and cache policy remain an independent host workflow
 rather than a nested product of command compilation.
 
-The prepared command plan owns three complementary products:
+Command preparation has two independent ownership channels:
 
-| Product | Responsibility |
+| Owner | Responsibility |
 | --- | --- |
-| Command root | Portable resource bindings, command schedule, and executable slots. |
-| Entry requirements | Atomic executable and entry bindings required by one or more command roots. |
-| Parameter and storage requirements | Fixed parameter placements, rebindable bindings, transients, and any explicit indirect-count storage. |
+| Prepared command plan | Portable roots, atomic entry requirements, parameter placements, rebindable bindings, transients, and explicit indirect-count storage. |
+| Optional request recipient | Immutable ordinary Loom bytecode requests specialized only by distinctions that change generated kernels. |
+
+The plan never retains a request, source provider, kernel body, or
+classification state. A request transfers to its recipient as it is published
+and can outlive the producer workspace; the parent operation's terminal result
+determines whether its provisional bindings are committed or cancelled.
 
 ## Emit the portable deployment artifacts
 
@@ -312,15 +318,19 @@ loom-compile model.loombc \
   --root=@two_layer \
   --backend=command \
   --output=commands.json \
-  --emit-command-artifacts=commands/
+  --emit-command-artifacts=commands/ \
+  --emit-kernel-requests=kernel-requests/
 ```
 
 The manifest maps `@two_layer` to its `.loomcmd` artifact and lists the logical
 kernel entries required by that schedule. The portable artifact contains the
 closed command topology, resource bindings, dispatch counts, and executable
-slots. Kernel implementations remain a separate target product and can be
-compiled from the same linked module or supplied by an embedding that already
-owns compatible executable entries.
+slots. Each source-backed entry names a `.loombc` request under
+`kernel-requests/`; launch sites whose facts select the same semantic class
+share one request across every selected command root. Each request is an
+ordinary rooted Loom module that can enter the normal target compilation and
+caching workflow. Bodyless entries have no source request and can be supplied
+by an embedding that already owns a compatible executable entry.
 
 In Bazel, [`loom_command_binary`](../workflows/build-with-bazel.md#command-binaries-package-schedules-with-their-kernels)
 performs one selective link and emits the command manifest, `.loomcmd` files,
@@ -344,5 +354,8 @@ schedule remain runtime responsibilities.
 [Source modules and canonical text](source-modules.md) explains declaration
 and library ownership. [Facts and specialization](facts-and-specialization.md)
 shows how configuration, assumptions, and target facts constrain the values
-used here. [Compile artifacts](../workflows/compile-artifacts.md#emit-portable-command-programs)
+used here. [Compose recursive product
+frontiers](../workflows/product-frontiers.md) follows local, linked, classified,
+and external kernels through one checked product. [Compile
+artifacts](../workflows/compile-artifacts.md#emit-portable-command-programs)
 covers the public command-line artifact workflow.

@@ -41,6 +41,9 @@ created them only after the application loads or copies them.
 - [Compose modules in memory](module-composition.md) shows both declaration-only
   and logical-provider composition over caller-owned source bytes and one
   reusable frozen link index.
+- [Embed command and kernel product frontiers](product-frontier.md) shows how a
+  portable command product publishes independently compilable kernel requests
+  while preserving external executable requirements.
 - [Embed kernel JIT compilation](jit-kernel.md) follows source through target
   specialization, launch evaluation, native artifact emission, and the runtime
   handoff using the public `loomc` API.

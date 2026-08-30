@@ -1,0 +1,8 @@
+// The stage library depends only on the declared kernel contract. Its provider
+// and provider-local templates remain separate library inputs.
+kernel.decl @classified() launch(%size: index, %storage: buffer)
+
+command.program.def public @linked_stage(%size: index) launch(%storage: buffer) {
+  kernel.launch @classified(%size, %storage) : (index, buffer)
+  command.return
+}

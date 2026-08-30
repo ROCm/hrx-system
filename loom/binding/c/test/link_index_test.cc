@@ -231,6 +231,28 @@ check.case public @kernel_case {
   EXPECT_TRUE((symbol.flags & LOOMC_LINK_SYMBOL_FLAG_TEST_ONLY) != 0);
 }
 
+TEST(LinkIndexTest, ExposesRetainedSymbolRole) {
+  ContextPtr context = CreateContext();
+  BuilderPtr builder = CreateBuilder(context.get());
+  SourcePtr source = CreateTextSource("retained.loom", R"(
+func.def retain @entry() {
+  func.return
+}
+)");
+  LOOMC_ASSERT_OK(loomc_link_index_builder_add_source(
+      builder.get(), source.get(), /*options=*/nullptr, /*out_slot=*/nullptr));
+
+  LinkIndexPtr link_index;
+  FinishSucceeded(builder.get(), &link_index);
+
+  loomc_link_index_module_t module = {};
+  ASSERT_TRUE(loomc_link_index_module_at(link_index.get(), 0, &module));
+  loomc_link_index_symbol_t symbol = {};
+  ASSERT_TRUE(loomc_link_index_lookup_private(
+      link_index.get(), &module, loomc_make_cstring_view("@entry"), &symbol));
+  EXPECT_TRUE((symbol.flags & LOOMC_LINK_SYMBOL_FLAG_RETAIN) != 0);
+}
+
 TEST(LinkIndexTest, CanonicalGlobalOrderPlacesInputBeforeLibrary) {
   ContextPtr context = CreateContext();
   BuilderPtr builder = CreateBuilder(context.get());

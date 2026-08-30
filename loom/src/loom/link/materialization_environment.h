@@ -29,9 +29,12 @@ typedef loom_diagnostic_sink_t (*loom_link_plan_diagnostic_sink_fn_t)(
 // replace it with a semantically equivalent standalone module that preserves
 // all existing symbol IDs. Replacements may append symbols. On failure the
 // callback must leave an owned module in |*inout_module| for the materializer
-// to release.
+// to release. New module storage must use |block_pool| and |allocator| so its
+// lifetime remains coupled to the materialization environment rather than to
+// callback-local scratch.
 typedef iree_status_t (*loom_link_plan_prepare_module_fn_t)(
-    void* user_data, loom_module_t** inout_module);
+    void* user_data, iree_arena_block_pool_t* block_pool,
+    iree_allocator_t allocator, loom_module_t** inout_module);
 
 // Environment shared by every source materialized for one plan.
 typedef struct loom_link_plan_materialization_environment_t {

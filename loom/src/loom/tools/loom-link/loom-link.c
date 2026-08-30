@@ -175,8 +175,6 @@ typedef struct loom_link_cli_prepare_state_t {
   const loom_target_environment_t* target_environment;
   // Homogeneous target profile applied to every kernel entry, if any.
   const loom_target_profile_t* target_profile;
-  // Block pool used by config and target materialization.
-  iree_arena_block_pool_t* block_pool;
 } loom_link_cli_prepare_state_t;
 
 typedef struct loom_link_cli_target_profile_storage_t {
@@ -378,11 +376,12 @@ static loom_diagnostic_sink_t loom_link_cli_materialization_diagnostic_sink(
 }
 
 static iree_status_t loom_link_cli_prepare_linked_module(
-    void* user_data, loom_module_t** inout_module) {
+    void* user_data, iree_arena_block_pool_t* block_pool,
+    iree_allocator_t allocator, loom_module_t** inout_module) {
   loom_link_cli_prepare_state_t* state =
       (loom_link_cli_prepare_state_t*)user_data;
   IREE_RETURN_IF_ERROR(loom_link_cli_materialize_config(
-      *inout_module, state->config_set, state->block_pool));
+      *inout_module, state->config_set, block_pool));
   if (state->target_profile == NULL) {
     return iree_ok_status();
   }
@@ -397,8 +396,8 @@ static iree_status_t loom_link_cli_prepare_linked_module(
   uint32_t error_count = 0;
   IREE_RETURN_IF_ERROR(loom_target_specialize_module_kernel_entries(
       state->target_environment, state->target_profile,
-      loom_target_entry_emitter(&diagnostic_emitter), state->block_pool,
-      (*inout_module)->allocator, inout_module, &error_count));
+      loom_target_entry_emitter(&diagnostic_emitter), block_pool, allocator,
+      inout_module, &error_count));
   if (error_count != 0) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
@@ -1130,6 +1129,11 @@ static void loom_link_cli_print_agents_markdown(FILE* stream) {
       "input order. `--mode=link` keeps explicit `--root=@symbol` values,\n"
       "exports from each `--root-library`, optional\n"
       "`--include-input-exports`, and reachable dependencies.\n"
+      "A public library definition selected only as a dependency becomes\n"
+      "private in the output; library visibility does not implicitly "
+      "re-export\n"
+      "it through the requester. Select it as a root when it is also an "
+      "output.\n"
       "`--strip-check` removes symbols marked as test/benchmark-only from\n"
       "runtime artifacts.\n"
       "\n"
@@ -1357,7 +1361,6 @@ int main(int argc, char** argv) {
         .config_set = &config_set,
         .target_environment = loom_configured_target_environment(),
         .target_profile = target_profile.profile,
-        .block_pool = &block_pool,
     };
     const loom_link_plan_materialization_environment_t environment = {
         .context = &context,

@@ -10,6 +10,7 @@ load(
     "iree_select",
     "loom_cc_binary",
     "loom_cc_library",
+    "loom_cc_test",
     "loom_config_compatible_with",
 )
 
@@ -97,22 +98,42 @@ _LLVMIR_ARTIFACTS_COMPATIBLE_WITH = loom_config_compatible_with([
 ])
 
 loom_cc_library(
+    name = "command_manifest",
+    srcs = ["command_manifest.c"],
+    hdrs = ["command_manifest.h"],
+    visibility = ["//loom/src/loom/tools/loom-compile:__pkg__"],
+    deps = [
+        "//loom/src/loom/target/arch/cmd:artifact_set",
+        "//loom/src/loom/util:json",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "command_backend",
     srcs = ["command_backend.c"],
     hdrs = ["command_backend.h"],
     deps = [
+        ":command_manifest",
+        "//loom/src/loom/codegen/low:repr",
         "//loom/src/loom/error:diagnostic",
+        "//loom/src/loom/format:low_repr",
+        "//loom/src/loom/format/bytecode:writer",
+        "//loom/src/loom/link:materialization_environment",
         "//loom/src/loom/link:module_index",
-        "//loom/src/loom/ops:op_defs",
-        "//loom/src/loom/ops/command",
         "//loom/src/loom/pass:builtin_registry",
         "//loom/src/loom/target:entry_selection",
+        "//loom/src/loom/target/arch/cmd:artifact_builder",
         "//loom/src/loom/target/arch/cmd:artifact_set",
-        "//loom/src/loom/target/arch/cmd/lower:program_plan_index",
         "//loom/src/loom/tooling/execution:session",
         "//loom/src/loom/tooling/io:file",
+        "//loom/src/loom/transforms/kernel:kernel_class_materializer",
+        "//loom/src/loom/transforms/kernel:kernel_request_producer",
+        "//loom/src/loom/util:stream",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:stream",
     ],
 )
 
@@ -122,6 +143,7 @@ loom_cc_binary(
     copts = _AMDGPU_COMPILE_COPTS + _SPIRV_VULKAN_COMPILE_COPTS + _LLVMIR_COMPILE_COPTS + _LLVMIR_AMDGPU_TARGET_ENV_COPTS + _LLVMIR_X86_TARGET_ENV_COPTS,
     deps = [
         ":command_backend",
+        ":command_manifest",
         "//loom/src/loom/codegen/low:text_asm",
         "//loom/src/loom/error:diagnostic",
         "//loom/src/loom/format/text:printer",
@@ -151,28 +173,43 @@ loom_cc_binary(
         "//loom/src/loom/tooling/pass:trace_cli",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/tooling:flags",
-        "//runtime/src/iree/io:byte_sequence",
         "//runtime/src/iree/io:file_handle",
     ] + _AMDGPU_COMPILE_DEPS + _SPIRV_VULKAN_COMPILE_DEPS + _LLVMIR_COMPILE_DEPS + _LLVMIR_AMDGPU_TARGET_ENV_DEPS + _LLVMIR_X86_TARGET_ENV_DEPS,
+)
+
+loom_cc_test(
+    name = "command_manifest_test",
+    srcs = ["command_manifest_test.cc"],
+    deps = [
+        ":command_manifest",
+        "//loom/src/loom/target/arch/cmd:artifact_set",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
 )
 
 iree_execution_test_suite(
     name = "execution_test",
     data = [
-        "command_artifacts.loom",
-        "rooted_template_provider.loom",
-        "//loom/src/loom/tools/loom-link:testdata/target_profile_template_selection.loom",
+        "//loom/src/loom/tools/loom-compile/testdata:command_artifacts.loom",
+        "//loom/src/loom/tools/loom-compile/testdata:command_kernel_requests.loom",
     ],
     manifests = ["loom-compile.test.json"],
     tags = ["hostonly"],
     tools = {
         "loom-compile": ":loom-compile",
-        "loom-format": "//loom/src/loom/tools/loom-format",
     },
 )
 
 iree_execution_test_suite(
     name = "llvmir_execution_test",
+    data = [
+        "//loom/src/loom/tools/loom-compile/testdata:configured_llvmir.loom",
+        "//loom/src/loom/tools/loom-compile/testdata:configured_values.json",
+        "//loom/src/loom/tools/loom-compile/testdata:llvmir_program.loom",
+    ],
     manifests = ["loom-compile-llvmir.test.json"],
     tags = ["hostonly"],
     target_compatible_with = _LLVMIR_ARTIFACTS_COMPATIBLE_WITH,

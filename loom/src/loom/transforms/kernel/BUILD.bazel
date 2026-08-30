@@ -158,7 +158,9 @@ loom_cc_library(
         "//loom/src/loom/transforms/symbol:template_decision_model",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/base/threading",
     ],
 )
 

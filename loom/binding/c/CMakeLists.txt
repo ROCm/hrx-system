@@ -19,6 +19,7 @@ loom_cc_library(
     "include/loomc/artifact.h"
     "include/loomc/artifact_manifest.h"
     "include/loomc/base.h"
+    "include/loomc/byte_sequence.h"
     "include/loomc/compile.h"
     "include/loomc/compile_report.h"
     "include/loomc/config.h"
@@ -33,6 +34,7 @@ loom_cc_library(
     "include/loomc/loomc.h"
     "include/loomc/module.h"
     "include/loomc/pass.h"
+    "include/loomc/product.h"
     "include/loomc/result.h"
     "include/loomc/sanitizer.h"
     "include/loomc/source.h"
@@ -43,10 +45,13 @@ loom_cc_library(
     "src/context.h"
     "src/diagnostic.h"
     "src/link_index.h"
+    "src/link_materialization.h"
     "src/module.h"
     "src/module_bytecode.h"
     "src/option_chain.h"
     "src/pass_program.h"
+    "src/product.h"
+    "src/request_index_overlay.h"
     "src/result.h"
     "src/source.h"
     "src/target.h"
@@ -57,6 +62,7 @@ loom_cc_library(
     "src/artifact_manifest.c"
     "src/base.c"
     "src/base_system.c"
+    "src/byte_sequence.c"
     "src/compile.c"
     "src/compile_report.c"
     "src/config.c"
@@ -67,6 +73,7 @@ loom_cc_library(
     "src/link.c"
     "src/link_dependency.c"
     "src/link_index.c"
+    "src/link_materialization.c"
     "src/module.c"
     "src/module_bytecode.c"
     "src/module_function.c"
@@ -75,6 +82,8 @@ loom_cc_library(
     "src/module_text.c"
     "src/option_chain.c"
     "src/pass_program.c"
+    "src/product.c"
+    "src/request_index_overlay.c"
     "src/result.c"
     "src/source.c"
     "src/status.c"
@@ -84,7 +93,6 @@ loom_cc_library(
     iree::base
     iree::base::internal
     iree::base::internal::arena
-    iree::io::byte_sequence
     iree::io::file_handle
     iree::io::stream
     loom::analysis::symbol_value_constraints
@@ -109,6 +117,7 @@ loom_cc_library(
     loom::link::dependency_report
     loom::link::index_materializer
     loom::link::linker
+    loom::link::materialization_environment
     loom::link::module_index
     loom::ops::func
     loom::ops::global
@@ -160,6 +169,7 @@ loom_cc_library(
     "include/loomc/artifact.h"
     "include/loomc/artifact_manifest.h"
     "include/loomc/base.h"
+    "include/loomc/byte_sequence.h"
     "include/loomc/compile.h"
     "include/loomc/compile_report.h"
     "include/loomc/config.h"
@@ -174,6 +184,7 @@ loom_cc_library(
     "include/loomc/loomc.h"
     "include/loomc/module.h"
     "include/loomc/pass.h"
+    "include/loomc/product.h"
     "include/loomc/result.h"
     "include/loomc/sanitizer.h"
     "include/loomc/source.h"

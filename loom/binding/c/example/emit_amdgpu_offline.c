@@ -4,6 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -354,16 +355,16 @@ static loomc_status_t summarize_and_maybe_write_manifest(
     return loomc_make_status(LOOMC_STATUS_NOT_FOUND,
                              "artifact manifest sidecar was not produced");
   }
-  if (manifest->contents.data_length == 0 ||
-      manifest->contents.data[0] != '{') {
+  const uint64_t manifest_length =
+      loomc_byte_sequence_length(manifest->contents);
+  if (manifest_length == 0) {
     return loomc_make_status(LOOMC_STATUS_FAILED_PRECONDITION,
-                             "artifact manifest sidecar is not JSON");
+                             "artifact manifest sidecar is empty");
   }
 
-  printf("manifest %.*s format=%.*s bytes=%zu magic=JSON\n",
+  printf("manifest %.*s format=%.*s bytes=%" PRIu64 "\n",
          (int)manifest->identifier.size, manifest->identifier.data,
-         (int)manifest->format.size, manifest->format.data,
-         (size_t)manifest->contents.data_length);
+         (int)manifest->format.size, manifest->format.data, manifest_length);
   loomc_status_t status = loomc_artifact_write_to_path(
       manifest, loomc_make_cstring_view(state->manifest_output_path),
       loomc_allocator_system());
@@ -382,17 +383,16 @@ static loomc_status_t summarize_and_maybe_write_artifact(
     return loomc_make_status(LOOMC_STATUS_NOT_FOUND,
                              "AMDGPU HSACO artifact was not produced");
   }
-  const uint8_t elf_magic[] = {0x7f, 'E', 'L', 'F'};
-  if (artifact->contents.data_length < sizeof(elf_magic) ||
-      memcmp(artifact->contents.data, elf_magic, sizeof(elf_magic)) != 0) {
+  const uint64_t artifact_length =
+      loomc_byte_sequence_length(artifact->contents);
+  if (artifact_length < 4) {
     return loomc_make_status(LOOMC_STATUS_FAILED_PRECONDITION,
-                             "AMDGPU HSACO artifact is not an ELF image");
+                             "AMDGPU HSACO artifact is too small");
   }
 
-  printf("artifact %.*s format=%.*s bytes=%zu magic=ELF\n",
+  printf("artifact %.*s format=%.*s bytes=%" PRIu64 "\n",
          (int)artifact->identifier.size, artifact->identifier.data,
-         (int)artifact->format.size, artifact->format.data,
-         (size_t)artifact->contents.data_length);
+         (int)artifact->format.size, artifact->format.data, artifact_length);
 
   if (state->output_path == NULL) {
     return loomc_ok_status();

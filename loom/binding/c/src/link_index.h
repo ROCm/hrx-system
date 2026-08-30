@@ -33,6 +33,15 @@ LOOMC_API_PRIVATE const loom_link_module_index_t* loomc_link_index_module_index(
 LOOMC_API_PRIVATE const loomc_source_t* loomc_link_index_source_for_provider(
     const loomc_link_index_t* link_index, loomc_host_size_t provider_ordinal);
 
+// Indexes one public source with required |options| into a mutable internal
+// module index and records source-associated diagnostics in |result|. Source
+// bytes remain borrowed.
+LOOMC_API_PRIVATE loomc_status_t loomc_link_index_add_source_to_module_index(
+    loomc_context_t* context, loom_link_module_index_t* module_index,
+    const loomc_source_t* source,
+    const loomc_link_index_source_options_t* options, loomc_result_t* result,
+    iree_host_size_t* out_provider_ordinal);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

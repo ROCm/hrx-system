@@ -41,13 +41,30 @@ struct ProducerDeleter {
 using ProducerPtr =
     std::unique_ptr<loom_kernel_request_producer_t, ProducerDeleter>;
 
+typedef struct CapturedRequest {
+  iree_host_size_t source_symbol_ordinal;
+  loom_decision_class_ordinal_t class_ordinal;
+  iree_host_size_t member_count;
+  loom_kernel_class_product_t product;
+} CapturedRequest;
+
 typedef struct RequestCapture {
-  std::vector<loom_kernel_request_t> requests;
+  iree_arena_block_pool_t* block_pool;
+  std::vector<CapturedRequest> requests;
 } RequestCapture;
 
 static iree_status_t CaptureRequest(void* user_data,
-                                    loom_kernel_request_t request) {
-  static_cast<RequestCapture*>(user_data)->requests.push_back(request);
+                                    const loom_kernel_request_t* request) {
+  RequestCapture* capture = static_cast<RequestCapture*>(user_data);
+  loom_kernel_class_product_t product = {};
+  IREE_RETURN_IF_ERROR(loom_kernel_request_materialize(
+      request, capture->block_pool, iree_allocator_system(), &product));
+  capture->requests.push_back(CapturedRequest{
+      request->source_symbol_ordinal,
+      request->class_ordinal,
+      request->member_count,
+      product,
+  });
   return iree_ok_status();
 }
 
@@ -56,10 +73,10 @@ typedef struct RejectRequestState {
 } RejectRequestState;
 
 static iree_status_t RejectRequest(void* user_data,
-                                   loom_kernel_request_t request) {
+                                   const loom_kernel_request_t* request) {
+  (void)request;
   RejectRequestState* state = static_cast<RejectRequestState*>(user_data);
   ++state->call_count;
-  loom_kernel_class_product_deinitialize(&request.product);
   return iree_make_status(IREE_STATUS_ABORTED, "request sink stopped");
 }
 
@@ -197,8 +214,8 @@ kernel.def @classified() {
            FindSymbol(source_module, IREE_SV("classified"));
   }
 
-  ProducerPtr CreateProducer(const loom_link_module_index_t* index) {
-    const loom_link_plan_materialization_environment_t environment = {
+  loom_link_plan_materialization_environment_t MaterializationEnvironment() {
+    return loom_link_plan_materialization_environment_t{
         /*.context=*/&context_,
         /*.block_pool=*/&block_pool_,
         /*.low_repr_environment=*/{},
@@ -207,6 +224,11 @@ kernel.def @classified() {
         /*.user_data=*/nullptr,
         /*.allocator=*/iree_allocator_system(),
     };
+  }
+
+  ProducerPtr CreateProducer(const loom_link_module_index_t* index) {
+    const loom_link_plan_materialization_environment_t environment =
+        MaterializationEnvironment();
     loom_kernel_request_producer_t* producer = nullptr;
     IREE_CHECK_OK(
         loom_kernel_request_producer_allocate(index, &environment, &producer));
@@ -255,13 +277,17 @@ TEST_F(KernelRequestProducerTest,
   loom_value_id_t argument_values[2] = {};
   BuildSites(&scratch_arena, &site_facts, sites, argument_values);
 
-  RequestCapture capture;
+  RequestCapture capture = {
+      /*.block_pool=*/&block_pool_,
+  };
   const loom_kernel_class_collection_options_t collection_options =
       loom_kernel_class_collection_options_default();
   loom_kernel_class_collection_t collection = {};
+  const loom_link_plan_materialization_environment_t environment =
+      MaterializationEnvironment();
   IREE_ASSERT_OK(loom_kernel_request_producer_publish(
-      producer.get(), source_symbol_ordinal, sites, IREE_ARRAYSIZE(sites),
-      &collection_options,
+      producer.get(), &environment, source_symbol_ordinal, sites,
+      IREE_ARRAYSIZE(sites), &collection_options,
       (loom_kernel_request_sink_t){
           /*.publish=*/CaptureRequest,
           /*.user_data=*/&capture,
@@ -277,7 +303,7 @@ TEST_F(KernelRequestProducerTest,
   iree_arena_deinitialize(&scratch_arena);
 
   ASSERT_EQ(capture.requests.size(), 2u);
-  for (const loom_kernel_request_t& request : capture.requests) {
+  for (const CapturedRequest& request : capture.requests) {
     EXPECT_EQ(request.source_symbol_ordinal, source_symbol_ordinal);
     EXPECT_EQ(request.member_count, 1u);
     ASSERT_NE(request.product.module, nullptr);
@@ -294,17 +320,18 @@ TEST_F(KernelRequestProducerTest,
             capture.requests[1].class_ordinal);
   EXPECT_NE(capture.requests[0].product.module,
             capture.requests[1].product.module);
-  for (loom_kernel_request_t& request : capture.requests) {
+  for (CapturedRequest& request : capture.requests) {
     loom_kernel_class_product_deinitialize(&request.product);
   }
 }
 
-TEST_F(KernelRequestProducerTest, StopsAfterSinkFailureTransfersOwnership) {
+TEST_F(KernelRequestProducerTest, StopsAfterSinkFailureBeforeMaterialization) {
   ModulePtr source_module = ParseSource();
   ASSERT_NE(source_module, nullptr);
   IndexPtr index = CreateIndex();
   const iree_host_size_t source_symbol_ordinal =
       AddMaterializedSource(index.get(), source_module.get());
+
   ProducerPtr producer = CreateProducer(index.get());
 
   iree_arena_allocator_t scratch_arena;
@@ -318,10 +345,12 @@ TEST_F(KernelRequestProducerTest, StopsAfterSinkFailureTransfersOwnership) {
   const loom_kernel_class_collection_options_t collection_options =
       loom_kernel_class_collection_options_default();
   loom_kernel_class_collection_t collection = {};
+  const loom_link_plan_materialization_environment_t environment =
+      MaterializationEnvironment();
   IREE_EXPECT_STATUS_IS(IREE_STATUS_ABORTED,
                         loom_kernel_request_producer_publish(
-                            producer.get(), source_symbol_ordinal, sites,
-                            IREE_ARRAYSIZE(sites), &collection_options,
+                            producer.get(), &environment, source_symbol_ordinal,
+                            sites, IREE_ARRAYSIZE(sites), &collection_options,
                             (loom_kernel_request_sink_t){
                                 /*.publish=*/RejectRequest,
                                 /*.user_data=*/&state,

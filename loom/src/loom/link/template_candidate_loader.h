@@ -23,10 +23,13 @@ typedef struct loom_link_template_candidate_loader_t
 
 // Allocates a lazy candidate-header loader over |index|.
 //
-// The loader borrows |index| and |environment| for its lifetime. Materialized
-// source modules are summarized once. Bytecode provider headers and the shared
-// table entries they reach are decoded at most once and implementation bodies
-// are never read.
+// The loader borrows |index|, the environment context, and its block pool for
+// its lifetime. It copies the allocator and retains no diagnostic,
+// specialization, or user-data callbacks from the invocation environment.
+// Materialized source modules are summarized once. Bytecode provider headers
+// and the shared table entries they reach are decoded at most once and
+// implementation bodies are never read. Module cache storage is allocated
+// only after a plan demands a template family.
 iree_status_t loom_link_template_candidate_loader_allocate(
     const loom_link_module_index_t* index,
     const loom_link_plan_materialization_environment_t* environment,

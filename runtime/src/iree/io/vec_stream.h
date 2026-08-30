@@ -8,7 +8,7 @@
 #define IREE_IO_VEC_STREAM_H_
 
 #include "iree/base/api.h"
-#include "iree/io/byte_sequence.h"
+#include "iree/base/byte_sequence.h"
 #include "iree/io/stream.h"
 
 #ifdef __cplusplus
@@ -52,7 +52,7 @@ IREE_API_EXPORT iree_status_t iree_io_vec_stream_enumerate_blocks(
 // unchanged. The caller must have exclusive access to the stream while the
 // contents are moved.
 IREE_API_EXPORT iree_status_t iree_io_vec_stream_move_contents(
-    iree_io_stream_t* stream, iree_io_byte_sequence_t** out_sequence);
+    iree_io_stream_t* stream, iree_byte_sequence_t** out_sequence);
 
 #ifdef __cplusplus
 }  // extern "C"

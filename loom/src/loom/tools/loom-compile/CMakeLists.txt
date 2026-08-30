@@ -11,24 +11,46 @@ iree_add_all_subdirs()
 
 loom_cc_library(
   NAME
+    command_manifest
+  HDRS
+    "command_manifest.h"
+  SRCS
+    "command_manifest.c"
+  DEPS
+    iree::base
+    loom::target::arch::cmd::artifact_set
+    loom::util::json
+    loom::util::stream
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     command_backend
   HDRS
     "command_backend.h"
   SRCS
     "command_backend.c"
   DEPS
+    ::command_manifest
     iree::base
     iree::base::internal::arena
+    iree::io::stream
+    loom::codegen::low::repr
     loom::error::diagnostic
+    loom::format::bytecode::writer
+    loom::format::low_repr
+    loom::link::materialization_environment
     loom::link::module_index
-    loom::ops::command
-    loom::ops::op_defs
     loom::pass::builtin_registry
+    loom::target::arch::cmd::artifact_builder
     loom::target::arch::cmd::artifact_set
-    loom::target::arch::cmd::lower::program_plan_index
     loom::target::entry_selection
     loom::tooling::execution::session
     loom::tooling::io::file
+    loom::transforms::kernel::kernel_class_materializer
+    loom::transforms::kernel::kernel_request_producer
+    loom::util::stream
   PUBLIC
 )
 
@@ -76,9 +98,9 @@ loom_cc_binary(
     ${_loom_compile_platform_copts}
   DEPS
     ::command_backend
+    ::command_manifest
     iree::base
     iree::base::tooling::flags
-    iree::io::byte_sequence
     iree::io::file_handle
     loom::codegen::low::text_asm
     loom::error::diagnostic
@@ -110,6 +132,20 @@ loom_cc_binary(
     ${_loom_compile_platform_deps}
 )
 
+loom_cc_test(
+  NAME
+    command_manifest_test
+  SRCS
+    "command_manifest_test.cc"
+  DEPS
+    ::command_manifest
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::target::arch::cmd::artifact_set
+    loom::util::stream
+)
+
 iree_execution_test_suite(
   NAME
     execution_test
@@ -117,11 +153,9 @@ iree_execution_test_suite(
     "loom-compile.test.json"
   TOOLS
     "loom-compile=::loom-compile"
-    "loom-format=loom::tools::loom-format"
   DATA
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-compile/command_artifacts.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-compile/rooted_template_provider.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-link/testdata/target_profile_template_selection.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-compile/testdata/command_artifacts.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-compile/testdata/command_kernel_requests.loom"
   LABELS
     "hostonly"
 )
@@ -134,6 +168,10 @@ iree_execution_test_suite(
     "loom-compile-llvmir.test.json"
   TOOLS
     "loom-compile=::loom-compile"
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-compile/testdata/configured_llvmir.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-compile/testdata/configured_values.json"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-compile/testdata/llvmir_program.loom"
   LABELS
     "hostonly"
 )

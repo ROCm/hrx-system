@@ -23,6 +23,9 @@ Four boundaries keep the feature composable:
   caller until generic inlining, canonicalization, CSE, and folding have run.
 - The serialized artifact contains logical resources and typed arguments, not
   HAL objects, process addresses, native calling conventions, or target code.
+- Optional kernel request publication transfers independently owned ordinary
+  Loom modules to its recipient. The plan retains only their atomic entry
+  requirements, not source products or classification state.
 
 ## Source Model
 
@@ -117,6 +120,8 @@ selected command implementation facets
                  |
                  v
  command artifacts + executable-entry requirements
+                 |
+                 +---- optional independent kernel source requests
 ```
 
 The plan owns:
@@ -137,9 +142,11 @@ diagnosed instead of acquiring guessed launch semantics. An authored
 `kernel.entry.decl` can be dispatched directly when the embedding application
 provides the matching executable entry.
 
-The source module may be released after preparation. The plan owns every
-module, parameter key, requirement table, and root-local entry mapping
-reachable from its roots.
+The source providers and index may be released after preparation. The plan owns
+the shared lowered root module, parameter keys, requirement tables, and
+root-local entry mappings. It owns no kernel source request: optional requests
+transfer to their recipient during preparation and remain provisional until the
+parent operation succeeds.
 
 ## Launch Counts
 
@@ -273,6 +280,7 @@ The artifact records:
 | --- | --- | --- |
 | Source module | Authored IR | Nothing |
 | Prepared plan | Root module, entry requirements, root tables, parameter keys | Compiler context and arena block pool |
+| Kernel request recipient | Independently compilable request modules | Nothing |
 | Serialized bytes | Complete portable program | Nothing |
 | Parsed program view | Nothing | Serialized bytes |
 

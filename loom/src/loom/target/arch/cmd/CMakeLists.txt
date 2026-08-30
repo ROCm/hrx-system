@@ -51,8 +51,24 @@ loom_cc_library(
     loom::ops::op_defs
     loom::target::arch::cmd::lower::program_plan
     loom::target::arch::cmd::lower::serialize
-    loom::util::json
-    loom::util::stream
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    artifact_builder
+  HDRS
+    "artifact_builder.h"
+  SRCS
+    "artifact_builder.c"
+  DEPS
+    ::artifact_set
+    iree::base
+    iree::base::internal::arena
+    loom::link::materialization_environment
+    loom::link::module_index
+    loom::pass::registry
+    loom::target::arch::cmd::lower::program_plan_index
   PUBLIC
 )
 

@@ -425,8 +425,9 @@ static iree_status_t loom_link_plan_materialize_with_scratch(
   const iree_host_size_t linked_symbol_count =
       output_module != NULL ? output_module->symbols.count : 0;
   if (iree_status_is_ok(status) && environment->prepare_module != NULL) {
-    status =
-        environment->prepare_module(environment->user_data, &output_module);
+    status = environment->prepare_module(
+        environment->user_data, environment->block_pool, environment->allocator,
+        &output_module);
   }
   loom_linker_free(linker);
 

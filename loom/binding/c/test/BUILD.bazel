@@ -61,6 +61,17 @@ loom_cc_test(
 )
 
 loom_cc_test(
+    name = "byte_sequence_test",
+    srcs = ["byte_sequence_test.cc"],
+    deps = [
+        ":test_util",
+        "//loom/binding/c:loomc",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "iree_adapter_test",
     srcs = ["iree_adapter_test.cc"],
     deps = [
@@ -77,6 +88,8 @@ loom_cc_test(
     deps = [
         ":test_util",
         "//loom/binding/c:loomc",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/io:stream",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
         "//runtime/src/iree/testing:temp_file",
@@ -144,6 +157,20 @@ loom_cc_test(
         "//loom/binding/c:loomc",
         "//loom/src/loom/link/testdata:provider_roots",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "link_request_test",
+    srcs = ["link_request_test.cc"],
+    deps = [
+        ":test_util",
+        "//loom/binding/c:loomc",
+        "//loom/src/loom/format/bytecode:format",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base:core_headers",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
@@ -257,7 +284,6 @@ loom_cc_test(
         "//loom/src/loom/target:provider",
         "//loom/src/loom/target/test:target_record_table",
         "//runtime/src/iree/base",
-        "//runtime/src/iree/io:byte_sequence",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
         "//runtime/src/iree/testing:temp_file",

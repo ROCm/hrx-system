@@ -41,6 +41,15 @@ std::string ToString(loomc_byte_span_t value) {
                     : std::string();
 }
 
+std::string ToString(const loomc_byte_sequence_t* value) {
+  loomc_byte_span_t contents = loomc_byte_span_empty();
+  LOOMC_EXPECT_OK(
+      loomc_byte_sequence_clone(value, loomc_allocator_system(), &contents));
+  std::string result = ToString(contents);
+  loomc_allocator_free(loomc_allocator_system(), (void*)contents.data);
+  return result;
+}
+
 TargetEnvironmentPtr CreateLlvmirTargetEnvironment() {
   loomc_target_environment_t* target_environment = nullptr;
   loomc_status_t status = loomc_target_environment_create_llvmir(
@@ -185,7 +194,7 @@ TEST(TargetLlvmirTest, EmitsTextAndBitcodeArtifacts) {
   EXPECT_EQ(ToString(bitcode_artifact->format),
             LOOMC_ARTIFACT_FORMAT_LLVMIR_BITCODE);
   EXPECT_EQ(ToString(bitcode_artifact->identifier), "low_add.bc");
-  EXPECT_GT(bitcode_artifact->contents.data_length, 4u);
+  EXPECT_GT(loomc_byte_sequence_length(bitcode_artifact->contents), 4u);
 }
 
 TEST(TargetLlvmirTest, MarksEmissionDiagnosticsFailed) {

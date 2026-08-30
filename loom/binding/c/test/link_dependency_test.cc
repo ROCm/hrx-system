@@ -37,6 +37,15 @@ std::string ToString(loomc_byte_span_t value) {
                      value.data_length);
 }
 
+std::string ToString(const loomc_byte_sequence_t* value) {
+  loomc_byte_span_t contents = loomc_byte_span_empty();
+  LOOMC_EXPECT_OK(
+      loomc_byte_sequence_clone(value, loomc_allocator_system(), &contents));
+  std::string result = ToString(contents);
+  loomc_allocator_free(loomc_allocator_system(), (void*)contents.data);
+  return result;
+}
+
 class LinkDependencyTest : public ::testing::Test {
  protected:
   void SetUp() override {

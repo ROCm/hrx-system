@@ -4,8 +4,9 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Benchmarks command-plan preparation after selective materialization.
+// Benchmarks command-plan preparation at materialized and indexed boundaries.
 
+#include <chrono>
 #include <cstdlib>
 #include <string>
 
@@ -20,6 +21,7 @@
 #include "loom/ops/op_registry.h"
 #include "loom/pass/builtin_registry.h"
 #include "loom/target/arch/cmd/lower/program_plan.h"
+#include "loom/target/arch/cmd/lower/program_plan_index.h"
 #include "loom/verify/verify.h"
 
 namespace {
@@ -35,6 +37,19 @@ enum class LaunchShape {
   kRepeatedWorkload,
   // Logical launches whose workloads differ after loop unrolling.
   kDistinctWorkloads,
+  // Equal launch arguments selecting one implementation class.
+  kRepeatedKernelClass,
+  // Distinct launch arguments selecting one or two implementation classes.
+  kDistinctKernelClasses,
+  // One launch of each independently defined kernel.
+  kIndependentKernels,
+};
+
+enum class KernelRequestMode {
+  // Prepare command artifacts without opening kernel implementation bodies.
+  kBodyBlind,
+  // Publish independently owned products for reachable kernel classes.
+  kPublish,
 };
 
 class ProgramPlanFixture {
@@ -102,15 +117,59 @@ class ProgramPlanFixture {
 
   iree_arena_block_pool_t* block_pool() { return &block_pool_; }
 
+  loom_context_t* context() { return &context_; }
+
+  const loom_link_module_index_t* index() const { return index_; }
+
+  iree_host_size_t root_symbol_ordinal() const { return root_symbol_->ordinal; }
+
   iree_host_size_t launch_count() const { return launch_count_; }
 
  private:
   static std::string BuildSource(LaunchShape launch_shape,
                                  iree_host_size_t launch_count) {
     std::string source;
+    if (launch_shape == LaunchShape::kIndependentKernels) {
+      for (iree_host_size_t i = 0; i < launch_count; ++i) {
+        source.append("kernel.def @kernel_");
+        source.append(std::to_string(i));
+        source.append(R"(() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch() {
+  kernel.return
+}
+
+)");
+      }
+      source.append("command.program.def public @root() launch() {\n");
+      for (iree_host_size_t i = 0; i < launch_count; ++i) {
+        source.append("  kernel.launch @kernel_");
+        source.append(std::to_string(i));
+        source.append("() : ()\n");
+      }
+      source.append("  command.return\n}\n");
+      return source;
+    }
+
     if (launch_shape == LaunchShape::kDirect) {
       source.append("kernel.entry.decl @entry()\n\n");
     } else {
+      if (launch_shape == LaunchShape::kRepeatedKernelClass ||
+          launch_shape == LaunchShape::kDistinctKernelClasses) {
+        source.append(R"(
+template.decl @request.schedule(%extent: index)
+
+template.def<@request.schedule> priority(10) @large(%extent: index) where [ge(%extent, 128)] {
+  template.return
+}
+
+template.def<@request.schedule> priority(1) @small(%extent: index) {
+  template.return
+}
+
+)");
+      }
       source.append(R"(
 kernel.def @tiles(%extent: index) {
   %c1 = index.constant 1 : index
@@ -119,7 +178,16 @@ kernel.def @tiles(%extent: index) {
   %rounded = index.add %extent, %rounding : index
   %groups = index.div %rounded, %tile_size : index
   kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%tile_size, %c1, %c1) : index
-} launch() {
+)");
+      if (launch_shape == LaunchShape::kRepeatedKernelClass ||
+          launch_shape == LaunchShape::kDistinctKernelClasses) {
+        source.append(R"(} launch(%class_extent: index) {
+  template.apply<@request.schedule>(%class_extent) : (index)
+)");
+      } else {
+        source.append("} launch() {\n");
+      }
+      source.append(R"(
   kernel.return
 }
 
@@ -132,7 +200,8 @@ kernel.def @tiles(%extent: index) {
   %cN = index.constant )");
     source.append(std::to_string(launch_count));
     source.append(" : index\n");
-    if (launch_shape == LaunchShape::kRepeatedWorkload) {
+    if (launch_shape == LaunchShape::kRepeatedWorkload ||
+        launch_shape == LaunchShape::kRepeatedKernelClass) {
       source.append("  %extent = index.constant 1024 : index\n");
     }
     source.append("  scf.for %iteration = [%c0 to %cN step %c1] unroll {\n");
@@ -147,6 +216,17 @@ kernel.def @tiles(%extent: index) {
       case LaunchShape::kDistinctWorkloads:
         source.append("    kernel.launch @tiles[%iteration]() : [index]()\n");
         break;
+      case LaunchShape::kRepeatedKernelClass:
+        source.append(
+            "    kernel.launch @tiles[%extent](%extent) : [index](index)\n");
+        break;
+      case LaunchShape::kDistinctKernelClasses:
+        source.append(
+            "    kernel.launch @tiles[%iteration](%iteration) : "
+            "[index](index)\n");
+        break;
+      case LaunchShape::kIndependentKernels:
+        std::abort();
     }
     source.append(R"(  }
   command.return
@@ -210,8 +290,9 @@ static void RunProgramPlanBenchmark(benchmark::State& state,
     loom_cmd_program_plan_t program_plan = {};
     CheckStatus(loom_cmd_program_plan_prepare_materialization(
         &materialization, &root_ref, /*program_count=*/1,
-        loom_pass_builtin_registry(), /*diagnostic_emitter=*/{},
-        fixture.block_pool(), &valid, &program_plan, iree_allocator_system()));
+        /*kernel_source=*/nullptr, loom_pass_builtin_registry(),
+        /*diagnostic_emitter=*/{}, fixture.block_pool(), &valid, &program_plan,
+        iree_allocator_system()));
     if (!valid) std::abort();
     benchmark::DoNotOptimize(program_plan.root_count);
 
@@ -236,8 +317,171 @@ static void BM_PrepareDistinctWorkloads(benchmark::State& state) {
   RunProgramPlanBenchmark(state, LaunchShape::kDistinctWorkloads);
 }
 
+struct KernelRequestCapture {
+  // Number of class probes visited by the current preparation.
+  iree_host_size_t request_count = 0;
+
+  // Timestamp immediately before the current preparation began.
+  std::chrono::steady_clock::time_point start_time;
+
+  // Time from preparation entry to the first transferred request.
+  std::chrono::nanoseconds first_request_time = {};
+};
+
+static iree_status_t CaptureKernelRequest(
+    void* user_data, const loom_cmd_program_kernel_request_t* request) {
+  (void)request;
+  KernelRequestCapture* capture = static_cast<KernelRequestCapture*>(user_data);
+  if (capture->request_count == 0) {
+    capture->first_request_time =
+        std::chrono::steady_clock::now() - capture->start_time;
+  }
+  ++capture->request_count;
+  return iree_ok_status();
+}
+
+static iree_host_size_t ExpectedKernelRequestCount(
+    LaunchShape launch_shape, iree_host_size_t launch_count) {
+  switch (launch_shape) {
+    case LaunchShape::kDirect:
+    case LaunchShape::kRepeatedWorkload:
+    case LaunchShape::kDistinctWorkloads:
+      return 0;
+    case LaunchShape::kRepeatedKernelClass:
+      return 1;
+    case LaunchShape::kDistinctKernelClasses:
+      return launch_count <= 128 ? 1 : 2;
+    case LaunchShape::kIndependentKernels:
+      return launch_count;
+  }
+  std::abort();
+}
+
+static void RunIndexedProgramPlanBenchmark(benchmark::State& state,
+                                           LaunchShape launch_shape,
+                                           KernelRequestMode request_mode) {
+  ProgramPlanFixture fixture(launch_shape,
+                             static_cast<iree_host_size_t>(state.range(0)));
+  const iree_host_size_t root_symbol_ordinal = fixture.root_symbol_ordinal();
+  const loom_link_plan_materialization_environment_t environment = {
+      /*.context=*/fixture.context(),
+      /*.block_pool=*/fixture.block_pool(),
+      /*.low_repr_environment=*/{},
+      /*.diagnostic_sink=*/nullptr,
+      /*.prepare_module=*/nullptr,
+      /*.user_data=*/nullptr,
+      /*.allocator=*/iree_allocator_system(),
+  };
+  loom_cmd_program_plan_index_options_t options;
+  loom_cmd_program_plan_index_options_initialize(&options);
+  KernelRequestCapture capture;
+  if (request_mode == KernelRequestMode::kPublish) {
+    options.kernel_request_sink = {
+        /*.publish=*/CaptureKernelRequest,
+        /*.user_data=*/&capture,
+    };
+  }
+
+  int64_t first_request_nanoseconds = 0;
+  iree_host_size_t request_count = 0;
+  iree_host_size_t root_count = 0;
+  iree_host_size_t entry_requirement_count = 0;
+  for (auto _ : state) {
+    state.PauseTiming();
+    iree_arena_allocator_t scratch_arena;
+    iree_arena_initialize(fixture.block_pool(), &scratch_arena);
+    capture.request_count = 0;
+    capture.first_request_time = {};
+    state.ResumeTiming();
+
+    capture.start_time = std::chrono::steady_clock::now();
+    bool valid = false;
+    loom_cmd_program_plan_t program_plan = {};
+    CheckStatus(loom_cmd_program_plan_prepare_index(
+        fixture.index(), &root_symbol_ordinal, /*program_count=*/1,
+        request_mode == KernelRequestMode::kPublish ? &options : nullptr,
+        loom_pass_builtin_registry(), /*diagnostic_emitter=*/{}, &environment,
+        &scratch_arena, &valid, &program_plan));
+    if (!valid) std::abort();
+    benchmark::DoNotOptimize(program_plan.root_count);
+
+    request_count = capture.request_count;
+    root_count = program_plan.root_count;
+    entry_requirement_count = program_plan.entry_requirement_count;
+    if (root_count != 1 ||
+        (request_mode == KernelRequestMode::kPublish &&
+         request_count != ExpectedKernelRequestCount(launch_shape,
+                                                     fixture.launch_count()))) {
+      std::abort();
+    }
+    if (request_count != 0) {
+      first_request_nanoseconds += capture.first_request_time.count();
+    }
+    state.PauseTiming();
+    loom_cmd_program_plan_deinitialize(&program_plan);
+    iree_arena_deinitialize(&scratch_arena);
+    state.ResumeTiming();
+  }
+  state.SetItemsProcessed(state.iterations() * fixture.launch_count());
+  state.SetComplexityN(fixture.launch_count());
+  state.counters["entry_requirements"] =
+      static_cast<double>(entry_requirement_count);
+  state.counters["requests"] = static_cast<double>(request_count);
+  state.counters["roots"] = static_cast<double>(root_count);
+  if (first_request_nanoseconds != 0) {
+    state.counters["first_request_ns"] =
+        static_cast<double>(first_request_nanoseconds) / state.iterations();
+  }
+}
+
+static void BM_PrepareIndexedExternalBodyBlind(benchmark::State& state) {
+  RunIndexedProgramPlanBenchmark(state, LaunchShape::kDirect,
+                                 KernelRequestMode::kBodyBlind);
+}
+
+static void BM_PrepareIndexedExternalRequestSink(benchmark::State& state) {
+  RunIndexedProgramPlanBenchmark(state, LaunchShape::kDirect,
+                                 KernelRequestMode::kPublish);
+}
+
+static void BM_PrepareIndexedRepeatedClassBodyBlind(benchmark::State& state) {
+  RunIndexedProgramPlanBenchmark(state, LaunchShape::kRepeatedKernelClass,
+                                 KernelRequestMode::kBodyBlind);
+}
+
+static void BM_PrepareIndexedRepeatedClassRequests(benchmark::State& state) {
+  RunIndexedProgramPlanBenchmark(state, LaunchShape::kRepeatedKernelClass,
+                                 KernelRequestMode::kPublish);
+}
+
+static void BM_PrepareIndexedDistinctClassBodyBlind(benchmark::State& state) {
+  RunIndexedProgramPlanBenchmark(state, LaunchShape::kDistinctKernelClasses,
+                                 KernelRequestMode::kBodyBlind);
+}
+
+static void BM_PrepareIndexedDistinctClassRequests(benchmark::State& state) {
+  RunIndexedProgramPlanBenchmark(state, LaunchShape::kDistinctKernelClasses,
+                                 KernelRequestMode::kPublish);
+}
+
+static void BM_PrepareIndexedIndependentKernelsBodyBlind(
+    benchmark::State& state) {
+  RunIndexedProgramPlanBenchmark(state, LaunchShape::kIndependentKernels,
+                                 KernelRequestMode::kBodyBlind);
+}
+
+static void BM_PrepareIndexedIndependentKernelRequests(
+    benchmark::State& state) {
+  RunIndexedProgramPlanBenchmark(state, LaunchShape::kIndependentKernels,
+                                 KernelRequestMode::kPublish);
+}
+
 static void LaunchScales(benchmark::Benchmark* benchmark) {
   benchmark->Arg(1)->Arg(4)->Arg(16)->Arg(64)->Arg(256)->Arg(1024);
+}
+
+static void RequestScales(benchmark::Benchmark* benchmark) {
+  benchmark->Arg(1)->Arg(16)->Arg(256)->Arg(1024);
 }
 
 BENCHMARK(BM_PrepareDirectDispatches)
@@ -248,6 +492,30 @@ BENCHMARK(BM_PrepareRepeatedWorkload)
     ->Complexity(benchmark::oN);
 BENCHMARK(BM_PrepareDistinctWorkloads)
     ->Apply(LaunchScales)
+    ->Complexity(benchmark::oN);
+BENCHMARK(BM_PrepareIndexedExternalBodyBlind)
+    ->Apply(RequestScales)
+    ->Complexity(benchmark::oN);
+BENCHMARK(BM_PrepareIndexedExternalRequestSink)
+    ->Apply(RequestScales)
+    ->Complexity(benchmark::oN);
+BENCHMARK(BM_PrepareIndexedRepeatedClassBodyBlind)
+    ->Apply(RequestScales)
+    ->Complexity(benchmark::oN);
+BENCHMARK(BM_PrepareIndexedRepeatedClassRequests)
+    ->Apply(RequestScales)
+    ->Complexity(benchmark::oN);
+BENCHMARK(BM_PrepareIndexedDistinctClassBodyBlind)
+    ->Apply(RequestScales)
+    ->Complexity(benchmark::oN);
+BENCHMARK(BM_PrepareIndexedDistinctClassRequests)
+    ->Apply(RequestScales)
+    ->Complexity(benchmark::oN);
+BENCHMARK(BM_PrepareIndexedIndependentKernelsBodyBlind)
+    ->Apply(RequestScales)
+    ->Complexity(benchmark::oN);
+BENCHMARK(BM_PrepareIndexedIndependentKernelRequests)
+    ->Apply(RequestScales)
     ->Complexity(benchmark::oN);
 
 }  // namespace

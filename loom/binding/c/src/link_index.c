@@ -290,6 +290,9 @@ static loomc_link_symbol_flags_t loomc_link_symbol_flags_from_loom(
   if (iree_all_bits_set(flags, LOOM_LINK_SYMBOL_FLAG_TEST_ONLY)) {
     result |= LOOMC_LINK_SYMBOL_FLAG_TEST_ONLY;
   }
+  if (iree_all_bits_set(flags, LOOM_LINK_SYMBOL_FLAG_RETAIN)) {
+    result |= LOOMC_LINK_SYMBOL_FLAG_RETAIN;
+  }
   return result;
 }
 
@@ -327,7 +330,7 @@ typedef struct loomc_link_index_diagnostic_capture_t {
   // Result receiving converted diagnostics.
   loomc_result_t* result;
   // Source associated with emitted diagnostics.
-  loomc_source_t* source;
+  const loomc_source_t* source;
 } loomc_link_index_diagnostic_capture_t;
 
 static iree_status_t loomc_link_index_capture_diagnostic(
@@ -342,28 +345,31 @@ static loomc_status_t loomc_link_index_mark_failed(loomc_result_t* result) {
   return loomc_result_set_state(result, LOOMC_RESULT_STATE_FAILED);
 }
 
-static loomc_status_t loomc_link_index_add_source_to_index(
-    loomc_link_index_builder_t* builder,
-    const loomc_link_index_builder_source_t* source) {
-  iree_host_size_t before_diagnostics =
-      loomc_result_diagnostic_count(builder->result);
+loomc_status_t loomc_link_index_add_source_to_module_index(
+    loomc_context_t* context, loom_link_module_index_t* module_index,
+    const loomc_source_t* source,
+    const loomc_link_index_source_options_t* source_options,
+    loomc_result_t* result, iree_host_size_t* out_provider_ordinal) {
+  const iree_host_size_t before_diagnostics =
+      loomc_result_diagnostic_count(result);
   loomc_link_index_diagnostic_capture_t capture = {
-      .result = builder->result,
-      .source = source->source,
+      .result = result,
+      .source = source,
   };
   loom_link_module_index_add_options_t options = {
-      .provider_name = iree_string_view_from_loomc(source->provider_name),
-      .role = loomc_link_provider_role_to_loom(source->role),
+      .provider_name =
+          iree_string_view_from_loomc(source_options->provider_name),
+      .role = loomc_link_provider_role_to_loom(source_options->role),
   };
   if (iree_string_view_is_empty(options.provider_name)) {
     options.provider_name =
-        iree_string_view_from_loomc(loomc_source_identifier(source->source));
+        iree_string_view_from_loomc(loomc_source_identifier(source));
   }
 
-  loomc_byte_span_t contents = loomc_source_contents(source->source);
-  loomc_string_view_t identifier = loomc_source_identifier(source->source);
+  const loomc_byte_span_t contents = loomc_source_contents(source);
+  const loomc_string_view_t identifier = loomc_source_identifier(source);
   iree_status_t status = iree_ok_status();
-  if (loomc_link_index_source_is_bytecode(source->source)) {
+  if (loomc_link_index_source_is_bytecode(source)) {
     loom_bytecode_index_options_t index_options = {
         .diagnostic_sink =
             {
@@ -372,10 +378,10 @@ static loomc_status_t loomc_link_index_add_source_to_index(
             },
     };
     status = loom_link_module_index_add_bytecode(
-        builder->index,
+        module_index,
         iree_make_const_byte_span(contents.data, contents.data_length),
         iree_string_view_from_loomc(identifier), &index_options, &options,
-        /*out_provider_ordinal=*/NULL);
+        out_provider_ordinal);
   } else {
     loom_text_parse_options_t parse_options = {
         .diagnostic_sink =
@@ -385,13 +391,13 @@ static loomc_status_t loomc_link_index_add_source_to_index(
             },
     };
     loomc_target_pass_environment_initialize_text_asm_environment(
-        loomc_context_target_pass_environment(builder->context),
+        loomc_context_target_pass_environment(context),
         &parse_options.low_asm_environment);
     status = loom_link_module_index_add_text(
-        builder->index,
+        module_index,
         iree_make_string_view((const char*)contents.data, contents.data_length),
         iree_string_view_from_loomc(identifier), &parse_options, &options,
-        /*out_provider_ordinal=*/NULL);
+        out_provider_ordinal);
   }
 
   if (iree_status_is_ok(status)) {
@@ -399,9 +405,9 @@ static loomc_status_t loomc_link_index_add_source_to_index(
   }
 
   loomc_status_t public_status = loomc_status_from_iree(status);
-  if (loomc_result_diagnostic_count(builder->result) == before_diagnostics) {
+  if (loomc_result_diagnostic_count(result) == before_diagnostics) {
     loomc_status_t add_status = loomc_result_add_status_diagnostic(
-        builder->result, source->source, LOOMC_DIAGNOSTIC_SEVERITY_ERROR,
+        result, source, LOOMC_DIAGNOSTIC_SEVERITY_ERROR,
         loomc_make_cstring_view("LINK_INDEX/SOURCE"), public_status);
     if (!loomc_status_is_ok(add_status)) {
       loomc_status_free(public_status);
@@ -409,7 +415,7 @@ static loomc_status_t loomc_link_index_add_source_to_index(
     }
   }
   loomc_status_free(public_status);
-  return loomc_link_index_mark_failed(builder->result);
+  return loomc_link_index_mark_failed(result);
 }
 
 static void loomc_link_index_destroy(loomc_link_index_t* link_index) {
@@ -648,8 +654,13 @@ loomc_status_t loomc_link_index_builder_finish(
       LOOMC_RETURN_IF_ERROR(loomc_link_index_mark_failed(builder->result));
       continue;
     }
-    LOOMC_RETURN_IF_ERROR(
-        loomc_link_index_add_source_to_index(builder, source));
+    const loomc_link_index_source_options_t source_options = {
+        .provider_name = source->provider_name,
+        .role = source->role,
+    };
+    LOOMC_RETURN_IF_ERROR(loomc_link_index_add_source_to_module_index(
+        builder->context, builder->index, source->source, &source_options,
+        builder->result, /*out_provider_ordinal=*/NULL));
   }
 
   if (!loomc_result_succeeded(builder->result)) {

@@ -22,8 +22,8 @@ typedef struct loom_kernel_launch_resolution_t {
   const loom_symbol_ref_t* configuration_functions;
   // Number of entries in |configuration_functions|.
   iree_host_size_t configuration_function_count;
-  // Dense derived entry refs by logical-kernel symbol ID.
-  loom_symbol_ref_t* entry_refs;
+  // Dense derived entry operations by logical-kernel symbol ID.
+  loom_op_t** entry_ops;
   // Diagnostic sink for authored contract failures.
   iree_diagnostic_emitter_t diagnostic_emitter;
   // Scratch storage shared by type remapping and dense tables.
@@ -184,16 +184,21 @@ static iree_status_t loom_kernel_launch_resolution_rewrite_launch(
   IREE_ASSERT(configuration_op != NULL);
   IREE_ASSERT(loom_func_def_isa(configuration_op));
 
-  loom_symbol_ref_t entry_ref = resolution->entry_refs[kernel_ref.symbol_id];
-  if (!loom_symbol_ref_is_valid(entry_ref)) {
+  loom_op_t* entry_op = resolution->entry_ops[kernel_ref.symbol_id];
+  if (entry_op == NULL) {
     loom_op_t* declaration_op =
         resolution->module->symbols.entries[kernel_ref.symbol_id].defining_op;
     IREE_ASSERT(declaration_op != NULL);
     IREE_ASSERT(loom_kernel_decl_isa(declaration_op));
+    loom_symbol_ref_t entry_ref = loom_symbol_ref_null();
     IREE_RETURN_IF_ERROR(loom_kernel_launch_resolution_build_entry(
         resolution, declaration_op, &entry_ref));
-    resolution->entry_refs[kernel_ref.symbol_id] = entry_ref;
+    entry_op =
+        resolution->module->symbols.entries[entry_ref.symbol_id].defining_op;
+    IREE_ASSERT(loom_kernel_entry_decl_isa(entry_op));
+    resolution->entry_ops[kernel_ref.symbol_id] = entry_op;
   }
+  const loom_symbol_ref_t entry_ref = loom_kernel_entry_decl_callee(entry_op);
 
   const loom_value_slice_t workloads = loom_kernel_launch_workloads(launch_op);
   const loom_type_t count_types[] = {
@@ -233,7 +238,8 @@ iree_status_t loom_kernel_resolve_launches(
     const loom_symbol_ref_t* configuration_functions,
     iree_host_size_t configuration_function_count,
     iree_diagnostic_emitter_t diagnostic_emitter,
-    iree_arena_allocator_t* scratch_arena, bool* out_valid) {
+    iree_arena_allocator_t* scratch_arena,
+    loom_kernel_launch_entry_table_t* out_entry_table, bool* out_valid) {
   IREE_ASSERT_ARGUMENT(module);
   IREE_ASSERT_ARGUMENT(references);
   IREE_ASSERT(references->module == module);
@@ -242,16 +248,20 @@ iree_status_t loom_kernel_resolve_launches(
   IREE_ASSERT(configuration_function_count == 0 ||
               configuration_function_count == module->symbols.count);
   IREE_ASSERT_ARGUMENT(scratch_arena);
+  IREE_ASSERT_ARGUMENT(out_entry_table);
   IREE_ASSERT_ARGUMENT(out_valid);
+  *out_entry_table = (loom_kernel_launch_entry_table_t){0};
   *out_valid = false;
 
-  loom_symbol_ref_t* entry_refs = NULL;
+  loom_op_t** entry_ops = NULL;
   if (references->symbol_count != 0) {
     IREE_RETURN_IF_ERROR(
         iree_arena_allocate_array(scratch_arena, references->symbol_count,
-                                  sizeof(*entry_refs), (void**)&entry_refs));
+                                  sizeof(*entry_ops), (void**)&entry_ops));
     for (iree_host_size_t i = 0; i < references->symbol_count; ++i) {
-      entry_refs[i] = loom_symbol_ref_null();
+      loom_op_t* defining_op = module->symbols.entries[i].defining_op;
+      entry_ops[i] =
+          loom_kernel_entry_decl_isa(defining_op) ? defining_op : NULL;
     }
   }
 
@@ -259,7 +269,7 @@ iree_status_t loom_kernel_resolve_launches(
       .module = module,
       .configuration_functions = configuration_functions,
       .configuration_function_count = configuration_function_count,
-      .entry_refs = entry_refs,
+      .entry_ops = entry_ops,
       .diagnostic_emitter = diagnostic_emitter,
       .scratch_arena = scratch_arena,
   };
@@ -285,6 +295,12 @@ iree_status_t loom_kernel_resolve_launches(
                                                           &valid);
   }
   loom_rewriter_deinitialize(&resolution.rewriter);
-  if (iree_status_is_ok(status)) *out_valid = valid;
+  if (iree_status_is_ok(status)) {
+    *out_entry_table = (loom_kernel_launch_entry_table_t){
+        .values = entry_ops,
+        .count = references->symbol_count,
+    };
+    *out_valid = valid;
+  }
   return status;
 }

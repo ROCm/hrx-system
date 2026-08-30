@@ -6,9 +6,14 @@
 
 #include "loom/target/arch/cmd/lower/program_plan.h"
 
+#include <algorithm>
+#include <vector>
+
+#include "iree/io/vec_stream.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/codegen/low/text_asm.h"
+#include "loom/format/bytecode/writer.h"
 #include "loom/format/text/parser.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
@@ -31,6 +36,50 @@ namespace {
 using ::loom::testing::DiagnosticCapture;
 using ::loom::testing::DiagnosticEmissionCapture;
 using ModulePtr = ::loom::testing::ModulePtr;
+
+typedef struct CapturedKernelRequest {
+  uint32_t entry_requirement_index;
+  iree_host_size_t source_symbol_ordinal;
+  loom_decision_class_ordinal_t class_ordinal;
+  iree_host_size_t member_count;
+  loom_kernel_class_product_t product;
+} CapturedKernelRequest;
+
+typedef struct KernelRequestCapture {
+  iree_arena_block_pool_t* block_pool;
+  std::vector<CapturedKernelRequest> requests;
+} KernelRequestCapture;
+
+static iree_status_t CaptureKernelRequest(
+    void* user_data, const loom_cmd_program_kernel_request_t* request) {
+  KernelRequestCapture* capture = static_cast<KernelRequestCapture*>(user_data);
+  loom_kernel_class_product_t product = {0};
+  IREE_RETURN_IF_ERROR(loom_kernel_request_materialize(
+      request->kernel_request, capture->block_pool, iree_allocator_system(),
+      &product));
+  capture->requests.push_back((CapturedKernelRequest){
+      /*.entry_requirement_index=*/request->entry_requirement_index,
+      /*.source_symbol_ordinal=*/
+      request->kernel_request->source_symbol_ordinal,
+      /*.class_ordinal=*/request->kernel_request->class_ordinal,
+      /*.member_count=*/request->kernel_request->member_count,
+      /*.product=*/product,
+  });
+  return iree_ok_status();
+}
+
+typedef struct RejectKernelRequestState {
+  iree_host_size_t publish_count;
+} RejectKernelRequestState;
+
+static iree_status_t RejectKernelRequest(
+    void* user_data, const loom_cmd_program_kernel_request_t* request) {
+  (void)request;
+  RejectKernelRequestState* state =
+      static_cast<RejectKernelRequestState*>(user_data);
+  ++state->publish_count;
+  return iree_make_status(IREE_STATUS_ABORTED, "kernel request sink stopped");
+}
 
 class CmdProgramPlanTest : public ::testing::Test {
  protected:
@@ -92,6 +141,22 @@ class CmdProgramPlanTest : public ::testing::Test {
     return module_ptr;
   }
 
+  std::vector<uint8_t> WriteBytecode(const loom_module_t* module) {
+    iree_io_stream_t* stream = nullptr;
+    IREE_CHECK_OK(iree_io_vec_stream_create(
+        IREE_IO_STREAM_MODE_WRITABLE | IREE_IO_STREAM_MODE_SEEKABLE |
+            IREE_IO_STREAM_MODE_READABLE | IREE_IO_STREAM_MODE_RESIZABLE,
+        4096, iree_allocator_system(), &stream));
+    IREE_CHECK_OK(loom_bytecode_write_module(
+        module, stream, /*options=*/nullptr, &block_pool_));
+    std::vector<uint8_t> bytes(iree_io_stream_length(stream));
+    IREE_CHECK_OK(iree_io_stream_seek(stream, IREE_IO_STREAM_SEEK_SET, 0));
+    IREE_CHECK_OK(
+        iree_io_stream_read(stream, bytes.size(), bytes.data(), nullptr));
+    iree_io_stream_release(stream);
+    return bytes;
+  }
+
   loom_op_t* FindSymbol(loom_module_t* module, iree_string_view_t name) {
     const loom_string_id_t name_id = loom_module_lookup_string(module, name);
     IREE_ASSERT_NE(name_id, LOOM_STRING_ID_INVALID);
@@ -147,7 +212,7 @@ command.program.def public @increment_twice() launch(%source: buffer, %scratch: 
   bool valid = false;
   IREE_ASSERT_OK(loom_cmd_program_plan_prepare_materialization(
       &materialization, program_refs, IREE_ARRAYSIZE(program_refs),
-      loom_pass_builtin_registry(),
+      /*kernel_source=*/nullptr, loom_pass_builtin_registry(),
       /*diagnostic_emitter=*/{}, &block_pool_, &valid, &plan,
       iree_allocator_system()));
   ASSERT_TRUE(valid);
@@ -275,10 +340,19 @@ command.program.def public @selected_schedule() launch(%storage: buffer) {
   loom_cmd_program_plan_t plan = {};
   DiagnosticEmissionCapture diagnostic_capture;
   bool valid = false;
+  const loom_link_plan_materialization_environment_t environment = {
+      /*.context=*/&context_,
+      /*.block_pool=*/&block_pool_,
+      /*.low_repr_environment=*/{},
+      /*.diagnostic_sink=*/nullptr,
+      /*.prepare_module=*/nullptr,
+      /*.user_data=*/nullptr,
+      /*.allocator=*/iree_allocator_system(),
+  };
   iree_status_t status = loom_cmd_program_plan_prepare_index(
-      index, &root_symbol_ordinal, 1, loom_pass_builtin_registry(),
-      diagnostic_capture.emitter(), &block_pool_, &scratch_arena, &valid, &plan,
-      iree_allocator_system());
+      index, &root_symbol_ordinal, 1, /*options=*/nullptr,
+      loom_pass_builtin_registry(), diagnostic_capture.emitter(), &environment,
+      &scratch_arena, &valid, &plan);
   loom_link_module_index_free(index);
   source_module.reset();
   iree_arena_deinitialize(&scratch_arena);
@@ -318,6 +392,290 @@ command.program.def public @selected_schedule() launch(%storage: buffer) {
   loom_cmd_program_plan_deinitialize(&plan);
 }
 
+TEST_F(CmdProgramPlanTest,
+       BodyBlindPreparationDoesNotReadKernelImplementationBytes) {
+  ModulePtr source_module = ParseAndVerify(R"(
+kernel.def @child() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch() {
+  kernel.return
+}
+
+command.program.def public @root() launch() {
+  kernel.launch @child() : ()
+  command.return
+}
+)");
+  ASSERT_NE(source_module, nullptr);
+  std::vector<uint8_t> bytecode = WriteBytecode(source_module.get());
+
+  loom_link_module_index_t* index = nullptr;
+  IREE_ASSERT_OK(loom_link_module_index_allocate(
+      &context_, &block_pool_, iree_allocator_system(), &index));
+  loom_bytecode_index_options_t index_options = {};
+  index_options.diagnostic_sink = {loom_diagnostic_stderr_sink, nullptr};
+  IREE_ASSERT_OK(loom_link_module_index_add_bytecode(
+      index, iree_make_const_byte_span(bytecode.data(), bytecode.size()),
+      IREE_SV("provider.loombc"), &index_options, /*options=*/nullptr,
+      /*out_provider_ordinal=*/nullptr));
+  const loom_link_module_index_symbol_t* root =
+      loom_link_module_index_lookup_name(index, IREE_SV("root"));
+  const loom_link_module_index_symbol_t* child =
+      loom_link_module_index_lookup_name(index, IREE_SV("child"));
+  ASSERT_NE(root, nullptr);
+  ASSERT_NE(child, nullptr);
+
+  const loom_link_module_index_provider_t* provider =
+      loom_link_module_index_symbol_provider(index, child);
+  const loom_link_module_index_module_t* indexed_module =
+      loom_link_module_index_symbol_module(index, child);
+  ASSERT_NE(provider, nullptr);
+  ASSERT_NE(indexed_module, nullptr);
+  const loom_bytecode_module_metadata_t* metadata =
+      &provider->bytecode.metadata
+           .modules[indexed_module->provider_module_ordinal];
+  const loom_bytecode_symbol_metadata_t* symbol =
+      &metadata->symbols[child->module_symbol_ordinal];
+  ASSERT_NE(symbol->kernel_workload_region_payload_ordinal_plus_one, 0u);
+  ASSERT_NE(symbol->body_region_payload_ordinal_plus_one, 0u);
+  const loom_bytecode_region_payload_metadata_t* body_payload =
+      &metadata
+           ->region_payloads[symbol->first_region_payload_index +
+                             symbol->body_region_payload_ordinal_plus_one - 1];
+  ASSERT_GT(body_payload->length, 0u);
+  std::fill_n(bytecode.data() + body_payload->absolute_offset,
+              body_payload->length, UINT8_C(0xFF));
+
+  const loom_link_plan_materialization_environment_t environment = {
+      /*.context=*/&context_,
+      /*.block_pool=*/&block_pool_,
+      /*.low_repr_environment=*/{},
+      /*.diagnostic_sink=*/nullptr,
+      /*.prepare_module=*/nullptr,
+      /*.user_data=*/nullptr,
+      /*.allocator=*/iree_allocator_system(),
+  };
+  iree_arena_allocator_t body_blind_arena;
+  iree_arena_initialize(&block_pool_, &body_blind_arena);
+  loom_cmd_program_plan_t body_blind_plan = {};
+  bool body_blind_valid = false;
+  IREE_ASSERT_OK(loom_cmd_program_plan_prepare_index(
+      index, &root->ordinal, /*program_count=*/1, /*options=*/nullptr,
+      loom_pass_builtin_registry(), /*diagnostic_emitter=*/{}, &environment,
+      &body_blind_arena, &body_blind_valid, &body_blind_plan));
+  ASSERT_TRUE(body_blind_valid);
+  ASSERT_EQ(body_blind_plan.root_count, 1u);
+  ASSERT_EQ(body_blind_plan.entry_requirement_count, 1u);
+  loom_cmd_program_plan_deinitialize(&body_blind_plan);
+  iree_arena_deinitialize(&body_blind_arena);
+
+  KernelRequestCapture request_capture = {
+      /*.block_pool=*/&block_pool_,
+  };
+  loom_cmd_program_plan_index_options_t request_options;
+  loom_cmd_program_plan_index_options_initialize(&request_options);
+  request_options.kernel_request_sink = {
+      /*.publish=*/CaptureKernelRequest,
+      /*.user_data=*/&request_capture,
+  };
+  iree_arena_allocator_t request_arena;
+  iree_arena_initialize(&block_pool_, &request_arena);
+  loom_cmd_program_plan_t request_plan = {};
+  bool request_valid = false;
+  IREE_EXPECT_NOT_OK(loom_cmd_program_plan_prepare_index(
+      index, &root->ordinal, /*program_count=*/1, &request_options,
+      loom_pass_builtin_registry(), /*diagnostic_emitter=*/{}, &environment,
+      &request_arena, &request_valid, &request_plan));
+  EXPECT_FALSE(request_valid);
+  EXPECT_EQ(request_plan.root_module, nullptr);
+  EXPECT_TRUE(request_capture.requests.empty());
+  loom_cmd_program_plan_deinitialize(&request_plan);
+  iree_arena_deinitialize(&request_arena);
+  loom_link_module_index_free(index);
+}
+
+TEST_F(CmdProgramPlanTest,
+       IndexedPreparationStreamsIndependentKernelsAndSharedClasses) {
+  ModulePtr source_module = ParseAndVerify(R"(
+template.decl @request.schedule(%size: index)
+
+template.def<@request.schedule> priority(10) @large(%size: index) where [ge(%size, 128)] {
+  template.return
+}
+
+template.def<@request.schedule> priority(1) @small(%size: index) {
+  template.return
+}
+
+kernel.def @classified() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%size: index, %storage: buffer) {
+  template.apply<@request.schedule>(%size) : (index)
+  kernel.return
+}
+
+kernel.def @fixed() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%storage: buffer) {
+  kernel.return
+}
+
+kernel.entry.decl @external(%storage: buffer)
+
+command.program.def public @root_a() launch(%storage: buffer) {
+  %small = index.constant 64 : index
+  %large = index.constant 256 : index
+  %unit = index.constant 1 : index
+  kernel.launch @classified(%small, %storage) : (index, buffer)
+  kernel.launch @classified(%large, %storage) : (index, buffer)
+  kernel.launch @fixed(%storage) : (buffer)
+  kernel.dispatch @external[%unit](%storage) : [index](buffer)
+  command.return
+}
+
+command.program.def public @root_b() launch(%storage: buffer) {
+  %small = index.constant 64 : index
+  %large = index.constant 256 : index
+  %unit = index.constant 1 : index
+  kernel.launch @classified(%large, %storage) : (index, buffer)
+  kernel.launch @classified(%small, %storage) : (index, buffer)
+  kernel.launch @fixed(%storage) : (buffer)
+  kernel.launch @fixed(%storage) : (buffer)
+  kernel.dispatch @external[%unit](%storage) : [index](buffer)
+  command.return
+}
+)");
+  ASSERT_NE(source_module, nullptr);
+
+  loom_link_module_index_t* index = nullptr;
+  IREE_ASSERT_OK(loom_link_module_index_allocate(
+      &context_, &block_pool_, iree_allocator_system(), &index));
+  const loom_link_module_index_add_options_t add_options = {
+      /*.provider_name=*/IREE_SV("indexed_kernel_request_test"),
+  };
+  iree_host_size_t provider_ordinal = 0;
+  IREE_ASSERT_OK(loom_link_module_index_add_materialized(
+      index, source_module.get(), &add_options, &provider_ordinal));
+  const loom_link_module_index_provider_t* provider =
+      loom_link_module_index_provider_at(index, provider_ordinal);
+  ASSERT_NE(provider, nullptr);
+  const loom_link_module_index_module_t* indexed_module =
+      loom_link_module_index_module_at(index, provider->module_start_ordinal);
+  ASSERT_NE(indexed_module, nullptr);
+  const loom_symbol_ref_t root_a_ref =
+      FindSymbolRef(source_module.get(), IREE_SV("root_a"));
+  const loom_symbol_ref_t root_b_ref =
+      FindSymbolRef(source_module.get(), IREE_SV("root_b"));
+  const iree_host_size_t root_symbol_ordinals[] = {
+      indexed_module->symbol_start_ordinal + root_a_ref.symbol_id,
+      indexed_module->symbol_start_ordinal + root_b_ref.symbol_id,
+  };
+
+  KernelRequestCapture request_capture = {
+      /*.block_pool=*/&block_pool_,
+  };
+  loom_cmd_program_plan_index_options_t plan_options;
+  loom_cmd_program_plan_index_options_initialize(&plan_options);
+  plan_options.kernel_request_sink = {
+      /*.publish=*/CaptureKernelRequest,
+      /*.user_data=*/&request_capture,
+  };
+  const loom_link_plan_materialization_environment_t environment = {
+      /*.context=*/&context_,
+      /*.block_pool=*/&block_pool_,
+      /*.low_repr_environment=*/{},
+      /*.diagnostic_sink=*/nullptr,
+      /*.prepare_module=*/nullptr,
+      /*.user_data=*/nullptr,
+      /*.allocator=*/iree_allocator_system(),
+  };
+  iree_arena_allocator_t scratch_arena;
+  iree_arena_initialize(&block_pool_, &scratch_arena);
+  loom_cmd_program_plan_t plan = {};
+  DiagnosticEmissionCapture diagnostic_capture;
+  bool valid = false;
+  IREE_ASSERT_OK(loom_cmd_program_plan_prepare_index(
+      index, root_symbol_ordinals, IREE_ARRAYSIZE(root_symbol_ordinals),
+      &plan_options, loom_pass_builtin_registry(), diagnostic_capture.emitter(),
+      &environment, &scratch_arena, &valid, &plan));
+  ASSERT_TRUE(valid);
+
+  RejectKernelRequestState reject_state = {};
+  plan_options.kernel_request_sink = {
+      /*.publish=*/RejectKernelRequest,
+      /*.user_data=*/&reject_state,
+  };
+  iree_arena_allocator_t reject_scratch_arena;
+  iree_arena_initialize(&block_pool_, &reject_scratch_arena);
+  loom_cmd_program_plan_t rejected_plan = {};
+  bool rejected_valid = false;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_ABORTED,
+      loom_cmd_program_plan_prepare_index(
+          index, root_symbol_ordinals, IREE_ARRAYSIZE(root_symbol_ordinals),
+          &plan_options, loom_pass_builtin_registry(),
+          diagnostic_capture.emitter(), &environment, &reject_scratch_arena,
+          &rejected_valid, &rejected_plan));
+  EXPECT_FALSE(rejected_valid);
+  EXPECT_EQ(rejected_plan.root_module, nullptr);
+  EXPECT_EQ(rejected_plan.roots, nullptr);
+  EXPECT_EQ(reject_state.publish_count, 1u);
+
+  loom_link_module_index_free(index);
+  source_module.reset();
+  iree_arena_deinitialize(&reject_scratch_arena);
+  iree_arena_deinitialize(&scratch_arena);
+
+  ASSERT_EQ(request_capture.requests.size(), 3u);
+  EXPECT_EQ(request_capture.requests[0].member_count, 2u);
+  EXPECT_EQ(request_capture.requests[1].member_count, 2u);
+  EXPECT_EQ(request_capture.requests[2].member_count, 3u);
+  EXPECT_NE(request_capture.requests[0].class_ordinal,
+            request_capture.requests[1].class_ordinal);
+
+  ASSERT_EQ(plan.entry_requirement_count, 4u);
+  std::vector<uint32_t> requested_requirement_indices;
+  for (const CapturedKernelRequest& request : request_capture.requests) {
+    requested_requirement_indices.push_back(request.entry_requirement_index);
+  }
+  std::sort(requested_requirement_indices.begin(),
+            requested_requirement_indices.end());
+  EXPECT_EQ(requested_requirement_indices, (std::vector<uint32_t>{0, 1, 2}));
+
+  ASSERT_EQ(plan.root_count, 2u);
+  const loom_cmd_program_root_t& root_a = plan.roots[0];
+  const loom_cmd_program_root_t& root_b = plan.roots[1];
+  ASSERT_EQ(root_a.entry_requirement_count, 4u);
+  ASSERT_EQ(root_b.entry_requirement_count, 4u);
+  EXPECT_EQ(root_a.entry_requirement_indices[0],
+            root_b.entry_requirement_indices[1]);
+  EXPECT_EQ(root_a.entry_requirement_indices[1],
+            root_b.entry_requirement_indices[0]);
+  EXPECT_EQ(root_a.entry_requirement_indices[2],
+            root_b.entry_requirement_indices[2]);
+  EXPECT_EQ(root_a.entry_requirement_indices[3],
+            root_b.entry_requirement_indices[3]);
+  EXPECT_EQ(std::find(requested_requirement_indices.begin(),
+                      requested_requirement_indices.end(),
+                      root_a.entry_requirement_indices[3]),
+            requested_requirement_indices.end());
+
+  for (CapturedKernelRequest& request : request_capture.requests) {
+    ASSERT_NE(request.product.module, nullptr);
+    loom_verify_options_t verify_options = {};
+    verify_options.sink.fn = loom_diagnostic_stderr_sink;
+    loom_verify_result_t verify_result = {};
+    IREE_ASSERT_OK(loom_verify_module(request.product.module, &verify_options,
+                                      &verify_result));
+    EXPECT_EQ(verify_result.error_count, 0u);
+    loom_kernel_class_product_deinitialize(&request.product);
+  }
+  loom_cmd_program_plan_deinitialize(&plan);
+}
+
 TEST_F(CmdProgramPlanTest, OwnsParameterRequirementTables) {
   ModulePtr source_module = ParseAndVerify(R"(
 kernel.entry.decl @combine(%lhs: view<3xi32>, %rhs: view<4xi32>, %target: buffer)
@@ -342,7 +700,7 @@ command.program.def public @parameterized() launch(%parameters: buffer, %target:
   bool valid = false;
   IREE_ASSERT_OK(loom_cmd_program_plan_prepare_materialization(
       &materialization, program_refs, IREE_ARRAYSIZE(program_refs),
-      loom_pass_builtin_registry(),
+      /*kernel_source=*/nullptr, loom_pass_builtin_registry(),
       /*diagnostic_emitter=*/{}, &block_pool_, &valid, &plan,
       iree_allocator_system()));
   ASSERT_TRUE(valid);
@@ -408,7 +766,7 @@ command.program.def public @bodyless() launch(%output: buffer) {
   bool valid = false;
   IREE_ASSERT_OK(loom_cmd_program_plan_prepare_materialization(
       &materialization, program_refs, IREE_ARRAYSIZE(program_refs),
-      loom_pass_builtin_registry(),
+      /*kernel_source=*/nullptr, loom_pass_builtin_registry(),
       /*diagnostic_emitter=*/{}, &block_pool_, &valid, &plan,
       iree_allocator_system()));
   ASSERT_TRUE(valid);
@@ -501,7 +859,7 @@ command.program.def public @dynamic_root() launch() {
   bool valid = false;
   IREE_ASSERT_OK(loom_cmd_program_plan_prepare_materialization(
       &materialization, program_refs, IREE_ARRAYSIZE(program_refs),
-      loom_pass_builtin_registry(),
+      /*kernel_source=*/nullptr, loom_pass_builtin_registry(),
       /*diagnostic_emitter=*/{}, &block_pool_, &valid, &plan,
       iree_allocator_system()));
   ASSERT_TRUE(valid);

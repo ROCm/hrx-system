@@ -66,7 +66,6 @@ loom_cc_test(
     iree::base
     iree::base::internal::arena
     iree::hal
-    iree::io::byte_sequence
     iree::testing::gtest
     iree::testing::gtest_main
     loom::codegen::low::text_asm

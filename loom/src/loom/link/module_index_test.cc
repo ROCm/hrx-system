@@ -6,8 +6,10 @@
 
 #include "loom/link/module_index.h"
 
+#include <atomic>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "iree/base/internal/arena.h"
@@ -125,6 +127,13 @@ class ModuleIndexTest : public ::testing::Test {
     loom_link_module_index_t* index = nullptr;
     IREE_CHECK_OK(loom_link_module_index_allocate(
         &context_, &block_pool_, iree_allocator_system(), &index));
+    return IndexPtr(index);
+  }
+
+  IndexPtr CreateOverlay(const loom_link_module_index_t* base_index) {
+    loom_link_module_index_t* index = nullptr;
+    IREE_CHECK_OK(loom_link_module_index_allocate_overlay(
+        base_index, &block_pool_, iree_allocator_system(), &index));
     return IndexPtr(index);
   }
 
@@ -358,6 +367,63 @@ func.def public @exported(%x: i32) -> (i32) {
   ASSERT_NE(symbol, nullptr);
   EXPECT_EQ(symbol->kind, LOOM_SYMBOL_FUNC_DEF);
   EXPECT_TRUE(iree_all_bits_set(symbol->flags, LOOM_LINK_SYMBOL_FLAG_EXPORT));
+}
+
+TEST_F(ModuleIndexTest, PreservesRetainedSymbolRoleAcrossProviderForms) {
+  const iree_string_view_t source = IREE_SV(R"(
+func.def retain @retained() {
+  func.return
+}
+
+func.def @ordinary() {
+  func.return
+}
+)");
+  loom_module_t* module = Parse(source);
+  std::vector<uint8_t> bytes = WriteModule(module);
+
+  auto verify_index = [&](const loom_link_module_index_t* index) {
+    const loom_link_module_index_module_t* indexed_module =
+        loom_link_module_index_module_at(index, 0);
+    ASSERT_NE(indexed_module, nullptr);
+    const loom_link_module_index_symbol_t* retained =
+        loom_link_module_index_lookup_private(index, indexed_module,
+                                              IREE_SV("retained"));
+    const loom_link_module_index_symbol_t* ordinary =
+        loom_link_module_index_lookup_private(index, indexed_module,
+                                              IREE_SV("ordinary"));
+    ASSERT_NE(retained, nullptr);
+    ASSERT_NE(ordinary, nullptr);
+    EXPECT_TRUE(
+        iree_all_bits_set(retained->flags, LOOM_LINK_SYMBOL_FLAG_RETAIN));
+    EXPECT_FALSE(
+        iree_any_bit_set(ordinary->flags, LOOM_LINK_SYMBOL_FLAG_RETAIN));
+  };
+
+  loom_link_module_index_add_options_t options = {
+      /*.provider_name=*/IREE_SV("input"),
+      /*.role=*/LOOM_LINK_PROVIDER_ROLE_INPUT,
+  };
+  IndexPtr materialized_index = CreateIndex();
+  IREE_ASSERT_OK(loom_link_module_index_add_materialized(
+      materialized_index.get(), module, &options,
+      /*out_provider_ordinal=*/nullptr));
+  verify_index(materialized_index.get());
+
+  IndexPtr bytecode_index = CreateIndex();
+  IREE_ASSERT_OK(loom_link_module_index_add_bytecode(
+      bytecode_index.get(),
+      iree_make_const_byte_span(bytes.data(), bytes.size()),
+      IREE_SV("input.loombc"), /*index_options=*/nullptr, &options,
+      /*out_provider_ordinal=*/nullptr));
+  verify_index(bytecode_index.get());
+
+  IndexPtr text_index = CreateIndex();
+  IREE_ASSERT_OK(loom_link_module_index_add_text(
+      text_index.get(), source, IREE_SV("input.loom"),
+      /*parse_options=*/nullptr, &options,
+      /*out_provider_ordinal=*/nullptr));
+  verify_index(text_index.get());
 }
 
 TEST_F(ModuleIndexTest, IndexesExplicitBytecodeExportWithoutPublicVisibility) {
@@ -721,6 +787,297 @@ func.def @helper(%x: i32) -> (i32) {
   EXPECT_EQ(
       loom_link_module_index_lookup_global(index.get(), IREE_SV("helper")),
       nullptr);
+}
+
+TEST_F(ModuleIndexTest, OverlayRequiresLibraryOnlyBase) {
+  loom_module_t* input = Parse(IREE_SV(R"(
+func.def public @entry() {
+  func.return
+}
+)"));
+  IndexPtr base_index = CreateIndex();
+  const loom_link_module_index_add_options_t input_options = {
+      /*.provider_name=*/IREE_SV("input"),
+      /*.role=*/LOOM_LINK_PROVIDER_ROLE_INPUT,
+  };
+  IREE_ASSERT_OK(loom_link_module_index_add_materialized(
+      base_index.get(), input, &input_options,
+      /*out_provider_ordinal=*/nullptr));
+
+  loom_link_module_index_t* overlay = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_link_module_index_allocate_overlay(
+          base_index.get(), &block_pool_, iree_allocator_system(), &overlay));
+  EXPECT_EQ(overlay, nullptr);
+}
+
+TEST_F(ModuleIndexTest, OverlayCannotUseAnotherOverlayAsBase) {
+  IndexPtr base_index = CreateIndex();
+  IndexPtr first_overlay = CreateOverlay(base_index.get());
+
+  loom_link_module_index_t* second_overlay = nullptr;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_link_module_index_allocate_overlay(
+                            first_overlay.get(), &block_pool_,
+                            iree_allocator_system(), &second_overlay));
+  EXPECT_EQ(second_overlay, nullptr);
+}
+
+TEST_F(ModuleIndexTest, OverlayAppendsInputWithoutCopyingBaseRecords) {
+  loom_module_t* library = Parse(IREE_SV(R"(
+func.def public @entry(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+)"));
+  loom_module_t* input = Parse(IREE_SV(R"(
+func.decl public @entry(%x: i32) -> (i32)
+)"));
+
+  IndexPtr base_index = CreateIndex();
+  const loom_link_module_index_add_options_t library_options = {
+      /*.provider_name=*/IREE_SV("library"),
+      /*.role=*/LOOM_LINK_PROVIDER_ROLE_LIBRARY,
+  };
+  IREE_ASSERT_OK(loom_link_module_index_add_materialized(
+      base_index.get(), library, &library_options,
+      /*out_provider_ordinal=*/nullptr));
+  const loom_link_module_index_provider_t* base_provider =
+      loom_link_module_index_provider_at(base_index.get(), 0);
+  const loom_link_module_index_module_t* base_module =
+      loom_link_module_index_module_at(base_index.get(), 0);
+  const loom_link_module_index_symbol_t* base_entry =
+      loom_link_module_index_lookup_global(base_index.get(), IREE_SV("entry"));
+  ASSERT_NE(base_provider, nullptr);
+  ASSERT_NE(base_module, nullptr);
+  ASSERT_NE(base_entry, nullptr);
+
+  IndexPtr overlay = CreateOverlay(base_index.get());
+  EXPECT_EQ(loom_link_module_index_provider_at(overlay.get(), 0),
+            base_provider);
+  EXPECT_EQ(loom_link_module_index_module_at(overlay.get(), 0), base_module);
+  EXPECT_EQ(loom_link_module_index_symbol_at(overlay.get(), 0), base_entry);
+  EXPECT_EQ(loom_link_module_index_input_provider_count(overlay.get()), 0u);
+
+  const loom_link_module_index_add_options_t input_options = {
+      /*.provider_name=*/IREE_SV("input"),
+      /*.role=*/LOOM_LINK_PROVIDER_ROLE_INPUT,
+  };
+  IREE_ASSERT_OK(loom_link_module_index_add_materialized(
+      overlay.get(), input, &input_options,
+      /*out_provider_ordinal=*/nullptr));
+  EXPECT_EQ(loom_link_module_index_provider_count(overlay.get()), 2u);
+  EXPECT_EQ(loom_link_module_index_module_count(overlay.get()), 2u);
+  EXPECT_EQ(loom_link_module_index_symbol_count(overlay.get()), 2u);
+  EXPECT_EQ(loom_link_module_index_input_provider_count(overlay.get()), 1u);
+
+  const loom_link_module_index_symbol_t* selected =
+      loom_link_module_index_lookup_global(overlay.get(), IREE_SV("entry"));
+  ASSERT_NE(selected, nullptr);
+  EXPECT_EQ(selected->ordinal, 1u);
+  const loom_link_module_index_provider_t* selected_provider =
+      loom_link_module_index_symbol_provider(overlay.get(), selected);
+  ASSERT_NE(selected_provider, nullptr);
+  EXPECT_EQ(selected_provider->role, LOOM_LINK_PROVIDER_ROLE_INPUT);
+
+  const loom_link_module_index_symbol_t* first =
+      loom_link_module_index_lookup_name(overlay.get(), IREE_SV("entry"));
+  EXPECT_EQ(first, base_entry);
+  EXPECT_EQ(loom_link_module_index_next_same_name(overlay.get(), first),
+            selected);
+  EXPECT_EQ(loom_link_module_index_next_same_name(overlay.get(), selected),
+            nullptr);
+  EXPECT_EQ(
+      loom_link_module_index_next_global_duplicate(overlay.get(), selected),
+      base_entry);
+  EXPECT_EQ(
+      loom_link_module_index_next_global_duplicate(overlay.get(), base_entry),
+      nullptr);
+
+  const loom_link_module_index_symbol_ordinal_list_t input_exports =
+      loom_link_module_index_input_exports(overlay.get());
+  ASSERT_EQ(input_exports.count, 1u);
+  EXPECT_EQ(input_exports.values[0], selected->ordinal);
+  EXPECT_EQ(loom_link_module_index_provider_count(base_index.get()), 1u);
+  EXPECT_EQ(loom_link_module_index_input_provider_count(base_index.get()), 0u);
+  EXPECT_EQ(
+      loom_link_module_index_lookup_global(base_index.get(), IREE_SV("entry")),
+      base_entry);
+}
+
+TEST_F(ModuleIndexTest, OverlayExtendsTemplateProviderEnumeration) {
+  loom_module_t* library = Parse(IREE_SV(R"(
+template.decl @demo.contract(%x: i32) -> (i32)
+
+template.def<@demo.contract> @library_provider(%x: i32) -> (i32) {
+  template.return %x : i32
+}
+
+template.decl @demo.empty(%x: i32) -> (i32)
+)"));
+  loom_module_t* input = Parse(IREE_SV(R"(
+template.decl @demo.contract(%x: i32) -> (i32)
+
+template.def<@demo.contract> @input_provider(%x: i32) -> (i32) {
+  template.return %x : i32
+}
+
+template.decl @demo.empty(%x: i32) -> (i32)
+
+template.def<@demo.empty> @first_empty_provider(%x: i32) -> (i32) {
+  template.return %x : i32
+}
+)"));
+
+  IndexPtr base_index = CreateIndex();
+  const loom_link_module_index_add_options_t library_options = {
+      /*.provider_name=*/IREE_SV("library"),
+      /*.role=*/LOOM_LINK_PROVIDER_ROLE_LIBRARY,
+  };
+  IREE_ASSERT_OK(loom_link_module_index_add_materialized(
+      base_index.get(), library, &library_options,
+      /*out_provider_ordinal=*/nullptr));
+  ASSERT_EQ(loom_link_module_index_template_family_count(base_index.get()), 2u);
+  const loom_link_module_index_template_family_t* base_family =
+      loom_link_module_index_template_family_at(base_index.get(), 0);
+  ASSERT_NE(base_family, nullptr);
+  ASSERT_EQ(base_family->providers.count, 1u);
+  const loom_link_module_index_symbol_t* library_provider =
+      loom_link_module_index_symbol_at(
+          base_index.get(), base_family->providers.first_symbol_ordinal);
+  ASSERT_NE(library_provider, nullptr);
+
+  IndexPtr overlay = CreateOverlay(base_index.get());
+  const loom_link_module_index_add_options_t input_options = {
+      /*.provider_name=*/IREE_SV("input"),
+      /*.role=*/LOOM_LINK_PROVIDER_ROLE_INPUT,
+  };
+  IREE_ASSERT_OK(loom_link_module_index_add_materialized(
+      overlay.get(), input, &input_options,
+      /*out_provider_ordinal=*/nullptr));
+
+  ASSERT_EQ(loom_link_module_index_template_family_count(overlay.get()), 2u);
+  const loom_link_module_index_template_family_t* family =
+      loom_link_module_index_template_family_at(overlay.get(), 0);
+  ASSERT_NE(family, nullptr);
+  EXPECT_NE(family, base_family);
+  EXPECT_EQ(family->providers.count, 2u);
+  EXPECT_EQ(family->providers.first_symbol_ordinal, library_provider->ordinal);
+
+  const loom_link_module_index_module_t* input_module =
+      loom_link_module_index_module_at(overlay.get(), 1);
+  ASSERT_NE(input_module, nullptr);
+  const loom_link_module_index_symbol_t* input_provider =
+      loom_link_module_index_lookup_private(overlay.get(), input_module,
+                                            IREE_SV("input_provider"));
+  ASSERT_NE(input_provider, nullptr);
+  EXPECT_EQ(family->providers.last_symbol_ordinal, input_provider->ordinal);
+  EXPECT_EQ(loom_link_module_index_next_template_provider(overlay.get(),
+                                                          library_provider),
+            input_provider);
+  EXPECT_EQ(loom_link_module_index_next_template_provider(overlay.get(),
+                                                          input_provider),
+            nullptr);
+
+  const loom_link_module_index_template_family_t* base_empty_family =
+      loom_link_module_index_template_family_at(base_index.get(), 1);
+  const loom_link_module_index_template_family_t* empty_family =
+      loom_link_module_index_template_family_at(overlay.get(), 1);
+  ASSERT_NE(base_empty_family, nullptr);
+  ASSERT_NE(empty_family, nullptr);
+  EXPECT_EQ(base_empty_family->providers.count, 0u);
+  EXPECT_EQ(empty_family->providers.count, 1u);
+  const loom_link_module_index_symbol_t* first_empty_provider =
+      loom_link_module_index_lookup_private(overlay.get(), input_module,
+                                            IREE_SV("first_empty_provider"));
+  ASSERT_NE(first_empty_provider, nullptr);
+  EXPECT_EQ(empty_family->providers.first_symbol_ordinal,
+            first_empty_provider->ordinal);
+  EXPECT_EQ(empty_family->providers.last_symbol_ordinal,
+            first_empty_provider->ordinal);
+  EXPECT_EQ(loom_link_module_index_next_template_provider(overlay.get(),
+                                                          first_empty_provider),
+            nullptr);
+
+  EXPECT_EQ(loom_link_module_index_template_family_at(base_index.get(), 0),
+            base_family);
+  EXPECT_EQ(base_family->providers.count, 1u);
+  EXPECT_EQ(base_family->providers.last_symbol_ordinal,
+            library_provider->ordinal);
+  EXPECT_EQ(base_empty_family->providers.count, 0u);
+}
+
+TEST_F(ModuleIndexTest, ImmutableBaseSupportsConcurrentRequestOverlays) {
+  loom_module_t* library = Parse(IREE_SV(R"(
+func.def public @library_entry(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+)"));
+  loom_module_t* input = Parse(IREE_SV(R"(
+func.decl public @library_entry(%x: i32) -> (i32)
+)"));
+  const std::vector<uint8_t> input_bytes = WriteModule(input);
+
+  IndexPtr base_index = CreateIndex();
+  const loom_link_module_index_add_options_t library_options = {
+      /*.provider_name=*/IREE_SV("library"),
+      /*.role=*/LOOM_LINK_PROVIDER_ROLE_LIBRARY,
+  };
+  IREE_ASSERT_OK(loom_link_module_index_add_materialized(
+      base_index.get(), library, &library_options,
+      /*out_provider_ordinal=*/nullptr));
+  const loom_link_module_index_symbol_t* base_symbol =
+      loom_link_module_index_lookup_global(base_index.get(),
+                                           IREE_SV("library_entry"));
+  ASSERT_NE(base_symbol, nullptr);
+
+  std::atomic<bool> failed = false;
+  std::vector<std::thread> threads;
+  for (int thread_ordinal = 0; thread_ordinal < 8; ++thread_ordinal) {
+    threads.emplace_back([&]() {
+      iree_arena_block_pool_t thread_block_pool;
+      iree_arena_block_pool_initialize(32 * 1024, iree_allocator_system(),
+                                       &thread_block_pool);
+      const loom_link_module_index_add_options_t input_options = {
+          /*.provider_name=*/IREE_SV("requester"),
+          /*.role=*/LOOM_LINK_PROVIDER_ROLE_INPUT,
+      };
+      for (int iteration = 0; iteration < 64 && !failed.load(); ++iteration) {
+        loom_link_module_index_t* overlay = nullptr;
+        iree_status_t status = loom_link_module_index_allocate_overlay(
+            base_index.get(), &thread_block_pool, iree_allocator_system(),
+            &overlay);
+        if (iree_status_is_ok(status)) {
+          status = loom_link_module_index_add_bytecode(
+              overlay,
+              iree_make_const_byte_span(input_bytes.data(), input_bytes.size()),
+              IREE_SV("requester.loombc"), /*index_options=*/nullptr,
+              &input_options, /*out_provider_ordinal=*/nullptr);
+        }
+        if (!iree_status_is_ok(status)) {
+          failed.store(true);
+          iree_status_free(status);
+        } else {
+          const loom_link_module_index_symbol_t* selected =
+              loom_link_module_index_lookup_global(overlay,
+                                                   IREE_SV("library_entry"));
+          if (selected == nullptr || selected == base_symbol ||
+              loom_link_module_index_next_global_duplicate(overlay, selected) !=
+                  base_symbol) {
+            failed.store(true);
+          }
+        }
+        loom_link_module_index_free(overlay);
+      }
+      iree_arena_block_pool_deinitialize(&thread_block_pool);
+    });
+  }
+  for (std::thread& thread : threads) {
+    thread.join();
+  }
+  EXPECT_FALSE(failed.load());
+  EXPECT_EQ(loom_link_module_index_provider_count(base_index.get()), 1u);
+  EXPECT_EQ(loom_link_module_index_symbol_count(base_index.get()), 1u);
 }
 
 }  // namespace

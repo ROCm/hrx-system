@@ -11,9 +11,11 @@
 #include <string>
 
 #include "iree/testing/gtest.h"
+#include "loom/binding/c/src/product.h"
 #include "loomc/context.h"
 #include "loomc/module.h"
 #include "loomc/pass.h"
+#include "loomc/product.h"
 #include "loomc/result.h"
 #include "loomc/source.h"
 #include "loomc/status.h"
@@ -33,6 +35,10 @@ using SourcePtr = HandlePtr<loomc_source_t, loomc_source_release>;
 using ModulePtr = HandlePtr<loomc_module_t, loomc_module_release>;
 
 using ResultPtr = HandlePtr<loomc_result_t, loomc_result_release>;
+
+using ProductPtr = HandlePtr<loomc_product_t, loomc_product_release>;
+
+using RequestPtr = HandlePtr<loomc_request_t, loomc_request_release>;
 
 using CompilerPtr = HandlePtr<loomc_compiler_t, loomc_compiler_release>;
 
@@ -143,6 +149,15 @@ std::string ToString(loomc_byte_span_t value) {
                     : std::string();
 }
 
+std::string ToString(const loomc_byte_sequence_t* value) {
+  loomc_byte_span_t contents = loomc_byte_span_empty();
+  LOOMC_EXPECT_OK(
+      loomc_byte_sequence_clone(value, loomc_allocator_system(), &contents));
+  std::string result = ToString(contents);
+  loomc_allocator_free(loomc_allocator_system(), (void*)contents.data);
+  return result;
+}
+
 void ExpectSucceededResult(const loomc_result_t* result) {
   ASSERT_NE(result, nullptr);
   if (!loomc_result_succeeded(result) &&
@@ -206,6 +221,56 @@ std::string SerializeModuleToText(const loomc_module_t* module) {
   }
   SourcePtr source_ptr(source);
   return ToString(loomc_source_contents(source_ptr.get()));
+}
+
+SourcePtr SerializeModuleToBytecode(const loomc_module_t* module,
+                                    const char* identifier) {
+  loomc_module_serialize_options_t options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
+      /*.structure_size=*/sizeof(options),
+      /*.next=*/nullptr,
+      /*.format=*/LOOMC_SOURCE_FORMAT_BYTECODE,
+      /*.identifier=*/loomc_make_cstring_view(identifier),
+  };
+  loomc_source_t* source = nullptr;
+  loomc_status_t status = loomc_module_serialize_to_source(
+      module, &options, loomc_allocator_system(), &source);
+  LOOMC_EXPECT_OK(status);
+  return SourcePtr(source);
+}
+
+void DestroyAlternateProduct(loomc_product_t* base_product) {
+  loomc_allocator_free(loomc_allocator_system(), base_product);
+}
+
+const loomc_product_descriptor_t kAlternateProductDescriptor = {
+    /*.destroy=*/DestroyAlternateProduct,
+};
+
+RequestPtr CreateSingleRootRequest(
+    SourcePtr source, const loomc_product_descriptor_t* product_descriptor =
+                          loomc_compiled_module_product_descriptor()) {
+  const loomc_request_root_t root = {
+      /*.module_ordinal=*/0,
+      /*.symbol_ordinal=*/0,
+  };
+  loomc_request_t* request = nullptr;
+  loomc_status_t status = loomc_request_create(
+      product_descriptor, source.get(), &root, 1, /*bindings=*/nullptr,
+      /*binding_count=*/0, loomc_allocator_system(), &request);
+  LOOMC_EXPECT_OK(status);
+  return RequestPtr(request);
+}
+
+RequestPtr CreateRootedRequest(loomc_source_t* source,
+                               loomc_request_root_t root) {
+  loomc_request_t* request = nullptr;
+  loomc_status_t status = loomc_request_create(
+      loomc_compiled_module_product_descriptor(), source, &root, 1,
+      /*bindings=*/nullptr, /*binding_count=*/0, loomc_allocator_system(),
+      &request);
+  LOOMC_EXPECT_OK(status);
+  return RequestPtr(request);
 }
 
 ModulePtr CreateValidModule(loomc_context_t* context,
@@ -418,7 +483,7 @@ TEST(CompileTest, CompileModuleEmitsRequestedArtifacts) {
                    LOOMC_ARTIFACT_FORMAT_LOOM_BYTECODE);
   ASSERT_NE(bytecode_artifact, nullptr);
   EXPECT_EQ(ToString(bytecode_artifact->identifier), "jit_kernel.loombc");
-  EXPECT_NE(bytecode_artifact->contents.data_length, 0u);
+  EXPECT_NE(loomc_byte_sequence_length(bytecode_artifact->contents), 0u);
   loomc_source_t* bytecode_source = nullptr;
   status = loomc_artifact_create_source(
       bytecode_artifact, LOOMC_SOURCE_FORMAT_UNKNOWN, loomc_allocator_system(),
@@ -441,6 +506,130 @@ TEST(CompileTest, CompileModuleEmitsRequestedArtifacts) {
   EXPECT_NE(report.find(R"("state":"succeeded")"), std::string::npos);
   EXPECT_NE(report.find(R"("artifact_count":2)"), std::string::npos);
   EXPECT_NE(report.find(R"("config_binding_count":1)"), std::string::npos);
+}
+
+TEST(CompileTest, CompileRequestReturnsOwnedProduct) {
+  ContextPtr context = CreateContext();
+  WorkspacePtr workspace = CreateWorkspace();
+  CompilerPtr compiler = CreateCompiler(context.get());
+  PassProgramPtr pass_program = CreateEmptyPassProgram(context.get());
+  ModulePtr module = CreateValidModule(context.get(), workspace.get());
+  RequestPtr request = CreateSingleRootRequest(
+      SerializeModuleToBytecode(module.get(), "request.loombc"));
+  module.reset();
+
+  loomc_compile_options_t options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
+      /*.structure_size=*/sizeof(options),
+      /*.next=*/nullptr,
+      /*.module_name=*/loomc_make_cstring_view("request-product"),
+      /*.artifact_flags=*/LOOMC_COMPILE_ARTIFACT_FLAG_MODULE_BYTECODE,
+  };
+  loomc_product_t* product = nullptr;
+  loomc_result_t* result = nullptr;
+  LOOMC_ASSERT_OK(loomc_compile_request(
+      compiler.get(), workspace.get(), pass_program.get(), request.get(),
+      &options, loomc_allocator_system(), &product, &result));
+  ProductPtr product_ptr(product);
+  ResultPtr result_ptr(result);
+  ExpectSucceededResult(result_ptr.get());
+  ASSERT_NE(product_ptr.get(), nullptr);
+  EXPECT_EQ(loomc_product_descriptor(product_ptr.get()),
+            loomc_compiled_module_product_descriptor());
+  EXPECT_EQ(loomc_product_artifact_count(product_ptr.get()), 1u);
+  EXPECT_EQ(loomc_product_export_count(product_ptr.get()), 1u);
+  EXPECT_EQ(loomc_product_requirement_count(product_ptr.get()), 0u);
+
+  request.reset();
+  result_ptr.reset();
+  const loomc_artifact_t* artifact =
+      loomc_product_artifact_at(product_ptr.get(), 0);
+  ASSERT_NE(artifact, nullptr);
+  EXPECT_EQ(artifact->kind, LOOMC_ARTIFACT_KIND_MODULE);
+  EXPECT_EQ(ToString(artifact->format), LOOMC_ARTIFACT_FORMAT_LOOM_BYTECODE);
+  EXPECT_EQ(ToString(artifact->identifier), "request-product.loombc");
+  EXPECT_NE(loomc_byte_sequence_length(artifact->contents), 0u);
+}
+
+TEST(CompileTest, CompileRequestRejectsUnavailableRoots) {
+  ContextPtr context = CreateContext();
+  WorkspacePtr workspace = CreateWorkspace();
+  CompilerPtr compiler = CreateCompiler(context.get());
+  PassProgramPtr pass_program = CreateEmptyPassProgram(context.get());
+  ModulePtr module = CreateValidModule(context.get(), workspace.get());
+  SourcePtr source = SerializeModuleToBytecode(module.get(), "roots.loombc");
+  module.reset();
+
+  const loomc_request_root_t unavailable_roots[] = {
+      {/*.module_ordinal=*/1, /*.symbol_ordinal=*/0},
+      {/*.module_ordinal=*/0, /*.symbol_ordinal=*/UINT32_MAX},
+  };
+  for (const loomc_request_root_t root : unavailable_roots) {
+    RequestPtr request = CreateRootedRequest(source.get(), root);
+    loomc_product_t* product = nullptr;
+    loomc_result_t* result = nullptr;
+    loomc_status_t status = loomc_compile_request(
+        compiler.get(), workspace.get(), pass_program.get(), request.get(),
+        /*options=*/nullptr, loomc_allocator_system(), &product, &result);
+    EXPECT_EQ(loomc_status_code(status), LOOMC_STATUS_INVALID_ARGUMENT);
+    loomc_status_free(status);
+    EXPECT_EQ(product, nullptr);
+    EXPECT_EQ(result, nullptr);
+  }
+}
+
+TEST(CompileTest, CompileRequestRejectsAnotherProductContract) {
+  ContextPtr context = CreateContext();
+  WorkspacePtr workspace = CreateWorkspace();
+  CompilerPtr compiler = CreateCompiler(context.get());
+  PassProgramPtr pass_program = CreateEmptyPassProgram(context.get());
+  ModulePtr module = CreateValidModule(context.get(), workspace.get());
+  RequestPtr request = CreateSingleRootRequest(
+      SerializeModuleToBytecode(module.get(), "wrong-contract.loombc"),
+      &kAlternateProductDescriptor);
+
+  loomc_product_t* product = nullptr;
+  loomc_result_t* result = nullptr;
+  loomc_status_t status = loomc_compile_request(
+      compiler.get(), workspace.get(), pass_program.get(), request.get(),
+      /*options=*/nullptr, loomc_allocator_system(), &product, &result);
+  EXPECT_EQ(loomc_status_code(status), LOOMC_STATUS_INVALID_ARGUMENT);
+  loomc_status_free(status);
+  EXPECT_EQ(product, nullptr);
+  EXPECT_EQ(result, nullptr);
+}
+
+TEST(CompileTest, CompileRequestReturnsFailedParseResultWithoutProduct) {
+  ContextPtr context = CreateContext();
+  WorkspacePtr workspace = CreateWorkspace();
+  CompilerPtr compiler = CreateCompiler(context.get());
+  PassProgramPtr pass_program = CreateEmptyPassProgram(context.get());
+  const char malformed_bytecode[] = "not Loom bytecode";
+  loomc_source_options_t source_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
+      /*.structure_size=*/sizeof(source_options),
+      /*.next=*/nullptr,
+      /*.format=*/LOOMC_SOURCE_FORMAT_BYTECODE,
+      /*.identifier=*/loomc_make_cstring_view("malformed.loombc"),
+      /*.contents=*/
+      loomc_make_byte_span(malformed_bytecode, sizeof(malformed_bytecode) - 1),
+      /*.storage=*/LOOMC_SOURCE_STORAGE_COPY,
+  };
+  loomc_source_t* source = nullptr;
+  LOOMC_ASSERT_OK(
+      loomc_source_create(&source_options, loomc_allocator_system(), &source));
+  RequestPtr request = CreateSingleRootRequest(SourcePtr(source));
+
+  loomc_product_t* product = nullptr;
+  loomc_result_t* result = nullptr;
+  LOOMC_ASSERT_OK(loomc_compile_request(
+      compiler.get(), workspace.get(), pass_program.get(), request.get(),
+      /*options=*/nullptr, loomc_allocator_system(), &product, &result));
+  ProductPtr product_ptr(product);
+  ResultPtr result_ptr(result);
+  EXPECT_EQ(product_ptr.get(), nullptr);
+  EXPECT_FALSE(loomc_result_succeeded(result_ptr.get()));
+  EXPECT_NE(loomc_result_diagnostic_count(result_ptr.get()), 0u);
 }
 
 TEST(CompileTest, CompileModuleIgnoresUnusedConfig) {

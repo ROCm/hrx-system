@@ -123,6 +123,15 @@ typedef struct loom_link_plan_options_t {
     // Index-wide provider ordinals in caller-defined stable order.
     const iree_host_size_t* values;
   } root_providers;
+  // Exact index symbol ordinals retained as complete roots in LINK mode.
+  // Callers that already own indexed identity use this path to preserve private
+  // symbols and duplicate global declarations without resolving names again.
+  struct {
+    // Number of index-wide symbol ordinals.
+    iree_host_size_t count;
+    // Index-wide symbol ordinals in caller-defined stable order.
+    const iree_host_size_t* values;
+  } root_symbol_ordinals;
 } loom_link_plan_options_t;
 
 // One live symbol selection in a plan.

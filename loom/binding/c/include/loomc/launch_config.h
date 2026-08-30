@@ -31,8 +31,7 @@
 /// @code{.c}
 /// loomc_launch_config_program_t* launch_program = NULL;
 /// loomc_status_t status = loomc_launch_config_program_load(
-///     launch_config_artifact, /*release=*/NULL,
-///     /*release_user_data=*/NULL, loomc_allocator_system(), &launch_program);
+///     launch_config_artifact, loomc_allocator_system(), &launch_program);
 /// if (!loomc_status_is_ok(status)) return status;
 ///
 /// loomc_launch_config_function_t launch_function =
@@ -162,13 +161,6 @@ typedef struct loomc_launch_config_t {
 ///
 /// @param artifact Launch-config artifact to load. The artifact descriptor and
 /// its strings are borrowed for the duration of the call.
-/// @param release Optional callback transferring ownership of
-/// `artifact->contents` to the loader. When `artifact` is non-NULL and the
-/// callback is provided, it is invoked exactly once before the call returns,
-/// regardless of the load status. When omitted, the contents are borrowed only
-/// for the duration of the call and the loader materializes or copies all state
-/// needed afterward.
-/// @param release_user_data Value passed to `release`.
 /// @param allocator Host allocator used for program-owned state.
 /// @param out_program Receives one retained program on success.
 /// @return OK when the artifact is valid and every exported function has a
@@ -178,8 +170,7 @@ typedef struct loomc_launch_config_t {
 /// The caller releases the returned program with
 /// `loomc_launch_config_program_release`.
 LOOMC_API_EXPORT loomc_status_t loomc_launch_config_program_load(
-    const loomc_artifact_t* artifact, loomc_artifact_release_fn_t release,
-    void* release_user_data, loomc_allocator_t allocator,
+    const loomc_artifact_t* artifact, loomc_allocator_t allocator,
     loomc_launch_config_program_t** out_program);
 
 /// Retains `program` for another owner.

@@ -20,8 +20,14 @@ extern "C" {
 #endif  // __cplusplus
 
 typedef struct loom_kernel_request_producer_t loom_kernel_request_producer_t;
+typedef struct loom_kernel_request_source_t loom_kernel_request_source_t;
 
-// One independently owned source request for a live kernel class.
+// One borrowed live-class request prepared for optional materialization.
+//
+// |source| is the callback-live source/configuration scope used for early
+// product resolution. |collection| and |class_ordinal| identify the exact
+// accepted decision trace within that scope. The record and everything it
+// references remain valid only for the duration of the publication callback.
 typedef struct loom_kernel_request_t {
   // Exact index-wide kernel definition ordinal rooted by this request.
   iree_host_size_t source_symbol_ordinal;
@@ -32,17 +38,21 @@ typedef struct loom_kernel_request_t {
   // Number of launch sites assigned to this class.
   iree_host_size_t member_count;
 
-  // Independently owned ordinary Loom source module and kernel root.
-  loom_kernel_class_product_t product;
+  // Callback-live source/configuration scope owned by the publication.
+  const loom_kernel_request_source_t* source;
+
+  // Invocation-local class collection containing the selected trace.
+  const loom_kernel_class_collection_t* collection;
 } loom_kernel_request_t;
 
-// Accepts ownership of one request at callback entry.
+// Visits one borrowed live-class request.
 //
-// The callback must release or transfer |request.product| even when returning
-// an error. A non-OK status stops publication before another class is
-// materialized.
+// A non-OK status stops publication before another class is visited. The
+// callback may resolve the process-local class without materializing it, or
+// call loom_kernel_request_materialize when an independently owned source
+// product is required.
 typedef iree_status_t (*loom_kernel_request_publish_fn_t)(
-    void* user_data, loom_kernel_request_t request);
+    void* user_data, const loom_kernel_request_t* request);
 
 // Required sink for one publication operation.
 typedef struct loom_kernel_request_sink_t {
@@ -53,36 +63,47 @@ typedef struct loom_kernel_request_sink_t {
   void* user_data;
 } loom_kernel_request_sink_t;
 
-// Allocates a reusable producer over an immutable provider index.
+// Allocates an invocation-local producer over an immutable provider index.
 //
-// The producer copies |*environment| and borrows |index| plus every resource
-// referenced by the copied environment for its lifetime. The caller may
-// discard the environment struct after this call, but its context, block pool,
-// low-representation codec, callbacks and their user data, and allocator
-// backing state must remain valid. Template provider headers are loaded lazily
-// and cached across kernel publications. Implementation bodies are
-// materialized only for the source kernel passed to publish.
+// The producer borrows |index|, the environment context, and its block pool for
+// its lifetime and copies the allocator. It lazily caches only template
+// provider headers shared by source kernels in the enclosing product build. It
+// does not retain diagnostics, specialization callbacks, or user data.
+//
+// Each source kernel is prepared once by the command planner, which groups all
+// of its launch sites before publication. Source modules and classifiers remain
+// invocation scratch and are released before the next kernel is prepared.
 iree_status_t loom_kernel_request_producer_allocate(
     const loom_link_module_index_t* index,
     const loom_link_plan_materialization_environment_t* environment,
     loom_kernel_request_producer_t** out_producer);
 
-// Frees |producer| and its persistent provider-header cache.
+// Frees |producer| and its provider-header cache.
 void loom_kernel_request_producer_free(
     loom_kernel_request_producer_t* producer);
+
+// Materializes one independently owned source product on a cache miss.
+//
+// |request| must be live in its publication callback. The returned product
+// retains no producer, collection, or request storage and must be released with
+// loom_kernel_class_product_deinitialize.
+iree_status_t loom_kernel_request_materialize(
+    const loom_kernel_request_t* request, iree_arena_block_pool_t* block_pool,
+    iree_allocator_t allocator, loom_kernel_class_product_t* out_product);
 
 // Publishes every live semantic class of one indexed kernel definition.
 //
 // |sites| is the complete launch-site set for this kernel across the enclosing
 // product. Publication begins only after the bounded class collection closes,
 // because accepting a later site may conservatively collapse prior classes.
-// Each request is transferred before the next class is materialized.
+// |environment| supplies invocation-local diagnostics and specialization.
 //
 // The returned collection is allocated from |scratch_arena| and remains valid
 // until that arena is reset. It maps the input sites to the published class
 // ordinals without retaining any product or source-module storage.
 iree_status_t loom_kernel_request_producer_publish(
     loom_kernel_request_producer_t* producer,
+    const loom_link_plan_materialization_environment_t* environment,
     iree_host_size_t source_symbol_ordinal,
     const loom_kernel_class_site_t* sites, iree_host_size_t site_count,
     const loom_kernel_class_collection_options_t* collection_options,

@@ -9,8 +9,8 @@
 #include <string.h>
 
 #include "iree/base/alignment.h"
+#include "iree/base/byte_sequence.h"
 #include "iree/base/internal/arena.h"
-#include "iree/io/byte_sequence.h"
 #include "loom/target/entry_selection.h"
 #include "loom/tooling/execution/compile_report_capture.h"
 #include "loom/tooling/execution/hal/candidate.h"
@@ -65,12 +65,12 @@ static iree_status_t loom_run_hal_execution_backend_select_entry(
 }
 
 static iree_status_t loom_run_hal_write_artifact(
-    iree_string_view_t path, const iree_io_byte_sequence_t* contents,
+    iree_string_view_t path, const iree_byte_sequence_t* contents,
     iree_string_view_t artifact_name, iree_allocator_t allocator) {
   if (iree_string_view_is_empty(path)) {
     return iree_ok_status();
   }
-  if (contents == NULL || iree_io_byte_sequence_length(contents) == 0) {
+  if (contents == NULL || iree_byte_sequence_length(contents) == 0) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "HAL %.*s artifact is empty",
                             (int)artifact_name.size, artifact_name.data);

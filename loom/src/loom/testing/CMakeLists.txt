@@ -16,7 +16,6 @@ loom_cc_library(
     "byte_sequence.h"
   DEPS
     iree::base
-    iree::io::byte_sequence
   TESTONLY
   PUBLIC
 )

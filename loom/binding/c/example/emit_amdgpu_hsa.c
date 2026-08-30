@@ -1229,14 +1229,19 @@ static loomc_status_t load_hsaco_executable(emit_amdgpu_hsa_state_t* state) {
                              "AMDGPU HSACO artifact was not produced");
   }
 
+  loomc_byte_span_t hsaco_contents = loomc_byte_span_empty();
+  loomc_status_t status = loomc_byte_sequence_clone(
+      artifact->contents, loomc_allocator_system(), &hsaco_contents);
   emit_amdgpu_hsa_api_t* api = &state->api;
   hsa_code_object_reader_t reader = {0};
   hsa_status_t hsa_status = HSA_STATUS_SUCCESS;
-  EMIT_AMDGPU_HSA_CALL_STATUS(
-      hsa_status, api, hsa_code_object_reader_create_from_memory,
-      artifact->contents.data, artifact->contents.data_length, &reader);
-  loomc_status_t status = hsa_status_to_loomc_status(
-      api, hsa_status, "hsa_code_object_reader_create_from_memory");
+  if (loomc_status_is_ok(status)) {
+    EMIT_AMDGPU_HSA_CALL_STATUS(
+        hsa_status, api, hsa_code_object_reader_create_from_memory,
+        hsaco_contents.data, hsaco_contents.data_length, &reader);
+    status = hsa_status_to_loomc_status(
+        api, hsa_status, "hsa_code_object_reader_create_from_memory");
+  }
   if (loomc_status_is_ok(status)) {
     EMIT_AMDGPU_HSA_CALL_STATUS(
         hsa_status, api, hsa_executable_create_alt, HSA_PROFILE_FULL,
@@ -1268,6 +1273,7 @@ static loomc_status_t load_hsaco_executable(emit_amdgpu_hsa_state_t* state) {
     status =
         hsa_status_to_loomc_status(api, hsa_status, "hsa_executable_freeze");
   }
+  loomc_allocator_free(loomc_allocator_system(), (void*)hsaco_contents.data);
   return status;
 }
 

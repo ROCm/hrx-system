@@ -28,6 +28,7 @@ LOOMC_PUBLIC_HDRS = [
     "include/loomc/artifact.h",
     "include/loomc/artifact_manifest.h",
     "include/loomc/base.h",
+    "include/loomc/byte_sequence.h",
     "include/loomc/compile.h",
     "include/loomc/compile_report.h",
     "include/loomc/config.h",
@@ -42,6 +43,7 @@ LOOMC_PUBLIC_HDRS = [
     "include/loomc/loomc.h",
     "include/loomc/module.h",
     "include/loomc/pass.h",
+    "include/loomc/product.h",
     "include/loomc/result.h",
     "include/loomc/sanitizer.h",
     "include/loomc/source.h",
@@ -74,6 +76,11 @@ LOOMC_TARGET_LLVMIR_PUBLIC_HDRS = [
     "include/loomc/target/llvmir/emit.h",
 ]
 
+LOOMC_TARGET_CMD_PUBLIC_HDRS = [
+    "include/loomc/target/cmd.h",
+    "include/loomc/target/cmd/program.h",
+]
+
 LOOMC_TARGET_SPIRV_VULKANINFO_PUBLIC_HDRS = [
     "include/loomc/target/spirv/vulkaninfo.h",
 ]
@@ -101,6 +108,7 @@ _LOOMC_FULL_COMPATIBLE_WITH = loom_config_compatible_with([
 exports_files(
     LOOMC_TARGET_AMDGPU_IREE_HAL_PUBLIC_HDRS +
     LOOMC_TARGET_AMDGPU_PUBLIC_HDRS +
+    LOOMC_TARGET_CMD_PUBLIC_HDRS +
     LOOMC_TARGET_IREE_HAL_PUBLIC_HDRS +
     LOOMC_TARGET_LLVMIR_PUBLIC_HDRS +
     LOOMC_TARGET_SPIRV_PUBLIC_HDRS +
@@ -117,6 +125,7 @@ loom_cc_library(
         "src/artifact_manifest.c",
         "src/base.c",
         "src/base_system.c",
+        "src/byte_sequence.c",
         "src/compile.c",
         "src/compile_report.c",
         "src/config.c",
@@ -127,6 +136,7 @@ loom_cc_library(
         "src/link.c",
         "src/link_dependency.c",
         "src/link_index.c",
+        "src/link_materialization.c",
         "src/module.c",
         "src/module_bytecode.c",
         "src/module_function.c",
@@ -135,6 +145,8 @@ loom_cc_library(
         "src/module_text.c",
         "src/option_chain.c",
         "src/pass_program.c",
+        "src/product.c",
+        "src/request_index_overlay.c",
         "src/result.c",
         "src/source.c",
         "src/status.c",
@@ -146,10 +158,13 @@ loom_cc_library(
         "src/context.h",
         "src/diagnostic.h",
         "src/link_index.h",
+        "src/link_materialization.h",
         "src/module.h",
         "src/module_bytecode.h",
         "src/option_chain.h",
         "src/pass_program.h",
+        "src/product.h",
+        "src/request_index_overlay.h",
         "src/result.h",
         "src/source.h",
         "src/target.h",
@@ -184,6 +199,7 @@ loom_cc_library(
         "//loom/src/loom/link:dependency_report",
         "//loom/src/loom/link:index_materializer",
         "//loom/src/loom/link:linker",
+        "//loom/src/loom/link:materialization_environment",
         "//loom/src/loom/link:module_index",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops:op_registry",
@@ -220,7 +236,6 @@ loom_cc_library(
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
-        "//runtime/src/iree/io:byte_sequence",
         "//runtime/src/iree/io:file_handle",
         "//runtime/src/iree/io:stream",
     ],

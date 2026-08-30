@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "iree/io/byte_sequence.h"
+#include "iree/base/byte_sequence.h"
 
 #include <array>
 #include <atomic>
@@ -25,12 +25,12 @@ using iree::testing::status::StatusIs;
 using testing::ElementsAre;
 using testing::HasSubstr;
 
-using ByteSequencePtr = std::unique_ptr<iree_io_byte_sequence_t,
-                                        void (*)(iree_io_byte_sequence_t*)>;
+using ByteSequencePtr =
+    std::unique_ptr<iree_byte_sequence_t, void (*)(iree_byte_sequence_t*)>;
 
 typedef struct test_byte_sequence_t {
   // Byte sequence interface exposed to the implementation under test.
-  iree_io_byte_sequence_t base;
+  iree_byte_sequence_t base;
   // Ordered segments returned during enumeration.
   const iree_const_byte_span_t* segments;
   // Number of entries in |segments|.
@@ -40,23 +40,23 @@ typedef struct test_byte_sequence_t {
 } test_byte_sequence_t;
 
 static const test_byte_sequence_t* test_byte_sequence_const_cast(
-    const iree_io_byte_sequence_t* base_sequence) {
+    const iree_byte_sequence_t* base_sequence) {
   return (const test_byte_sequence_t*)base_sequence;
 }
 
 static test_byte_sequence_t* test_byte_sequence_cast(
-    iree_io_byte_sequence_t* base_sequence) {
+    iree_byte_sequence_t* base_sequence) {
   return (test_byte_sequence_t*)base_sequence;
 }
 
-static void test_byte_sequence_destroy(iree_io_byte_sequence_t* base_sequence) {
+static void test_byte_sequence_destroy(iree_byte_sequence_t* base_sequence) {
   test_byte_sequence_t* sequence = test_byte_sequence_cast(base_sequence);
   if (sequence->destroy_count) ++*sequence->destroy_count;
 }
 
 static iree_status_t test_byte_sequence_enumerate(
-    const iree_io_byte_sequence_t* base_sequence,
-    iree_io_byte_sequence_segment_callback_t callback) {
+    const iree_byte_sequence_t* base_sequence,
+    iree_byte_sequence_segment_callback_t callback) {
   const test_byte_sequence_t* sequence =
       test_byte_sequence_const_cast(base_sequence);
   for (iree_host_size_t i = 0; i < sequence->segment_count; ++i) {
@@ -66,16 +66,17 @@ static iree_status_t test_byte_sequence_enumerate(
   return iree_ok_status();
 }
 
-static const iree_io_byte_sequence_vtable_t test_byte_sequence_vtable = {
-    test_byte_sequence_destroy,
-    test_byte_sequence_enumerate,
+static const iree_byte_sequence_vtable_t test_byte_sequence_vtable = {
+    /*.destroy=*/test_byte_sequence_destroy,
+    /*.enumerate=*/test_byte_sequence_enumerate,
+    /*.try_get_contiguous_span=*/NULL,
 };
 
 static void test_byte_sequence_initialize(
     const iree_const_byte_span_t* segments, iree_host_size_t segment_count,
     uint64_t length, int* destroy_count, test_byte_sequence_t* out_sequence) {
-  iree_io_byte_sequence_initialize(&test_byte_sequence_vtable, length,
-                                   &out_sequence->base);
+  iree_byte_sequence_initialize(&test_byte_sequence_vtable, length,
+                                &out_sequence->base);
   out_sequence->segments = segments;
   out_sequence->segment_count = segment_count;
   out_sequence->destroy_count = destroy_count;
@@ -89,7 +90,7 @@ static iree_status_t append_segment(void* user_data,
   return iree_ok_status();
 }
 
-static iree_io_byte_sequence_segment_callback_t make_append_callback(
+static iree_byte_sequence_segment_callback_t make_append_callback(
     std::vector<uint8_t>* contents) {
   return {
       append_segment,
@@ -105,33 +106,39 @@ TEST(ByteSequenceTest, OwnedSpanMovesStorage) {
       (void**)&source_span.data));
   const uint8_t expected[] = {1, 2, 3, 4};
   memcpy(source_span.data, expected, sizeof(expected));
+  const uint8_t* source_data = source_span.data;
 
-  iree_io_byte_sequence_t* sequence = NULL;
-  IREE_ASSERT_OK(iree_io_byte_sequence_create_from_span_move(
+  iree_byte_sequence_t* sequence = NULL;
+  IREE_ASSERT_OK(iree_byte_sequence_create_from_span_move(
       &source_span, iree_allocator_system(), &sequence));
-  ByteSequencePtr sequence_owner(sequence, iree_io_byte_sequence_release);
+  ByteSequencePtr sequence_owner(sequence, iree_byte_sequence_release);
 
   EXPECT_EQ(source_span.data, nullptr);
   EXPECT_EQ(source_span.data_length, 0u);
-  EXPECT_EQ(iree_io_byte_sequence_length(sequence), sizeof(expected));
+  EXPECT_EQ(iree_byte_sequence_length(sequence), sizeof(expected));
+  iree_const_byte_span_t contiguous_span = iree_const_byte_span_empty();
+  EXPECT_TRUE(
+      iree_byte_sequence_try_get_contiguous_span(sequence, &contiguous_span));
+  EXPECT_EQ(contiguous_span.data, source_data);
+  EXPECT_EQ(contiguous_span.data_length, sizeof(expected));
   std::vector<uint8_t> actual;
   IREE_EXPECT_OK(
-      iree_io_byte_sequence_enumerate(sequence, make_append_callback(&actual)));
+      iree_byte_sequence_enumerate(sequence, make_append_callback(&actual)));
   EXPECT_THAT(actual, ElementsAre(1, 2, 3, 4));
 }
 
 TEST(ByteSequenceTest, OwnedEmptySpanProducesRealSequence) {
   iree_byte_span_t source_span = iree_byte_span_empty();
-  iree_io_byte_sequence_t* sequence = NULL;
-  IREE_ASSERT_OK(iree_io_byte_sequence_create_from_span_move(
+  iree_byte_sequence_t* sequence = NULL;
+  IREE_ASSERT_OK(iree_byte_sequence_create_from_span_move(
       &source_span, iree_allocator_system(), &sequence));
-  ByteSequencePtr sequence_owner(sequence, iree_io_byte_sequence_release);
+  ByteSequencePtr sequence_owner(sequence, iree_byte_sequence_release);
 
   ASSERT_NE(sequence, nullptr);
-  EXPECT_EQ(iree_io_byte_sequence_length(sequence), 0u);
+  EXPECT_EQ(iree_byte_sequence_length(sequence), 0u);
   std::vector<uint8_t> actual;
   IREE_EXPECT_OK(
-      iree_io_byte_sequence_enumerate(sequence, make_append_callback(&actual)));
+      iree_byte_sequence_enumerate(sequence, make_append_callback(&actual)));
   EXPECT_TRUE(actual.empty());
 }
 
@@ -140,14 +147,14 @@ TEST(ByteSequenceTest, RetainReleaseControlsLifetime) {
   test_byte_sequence_t sequence;
   test_byte_sequence_initialize(NULL, 0, 0, &destroy_count, &sequence);
 
-  iree_io_byte_sequence_retain(&sequence.base);
-  iree_io_byte_sequence_release(&sequence.base);
+  iree_byte_sequence_retain(&sequence.base);
+  iree_byte_sequence_release(&sequence.base);
   EXPECT_EQ(destroy_count, 0);
-  iree_io_byte_sequence_release(&sequence.base);
+  iree_byte_sequence_release(&sequence.base);
   EXPECT_EQ(destroy_count, 1);
 
-  iree_io_byte_sequence_retain(NULL);
-  iree_io_byte_sequence_release(NULL);
+  iree_byte_sequence_retain(NULL);
+  iree_byte_sequence_release(NULL);
 }
 
 TEST(ByteSequenceTest, EnumeratesMultipleSegmentsInOrder) {
@@ -164,11 +171,19 @@ TEST(ByteSequenceTest, EnumeratesMultipleSegmentsInOrder) {
                                 &sequence);
 
   std::vector<uint8_t> actual;
-  IREE_EXPECT_OK(iree_io_byte_sequence_enumerate(
-      &sequence.base, make_append_callback(&actual)));
+  IREE_EXPECT_OK(iree_byte_sequence_enumerate(&sequence.base,
+                                              make_append_callback(&actual)));
   EXPECT_THAT(actual, ElementsAre(0, 1, 2, 3, 4, 5));
 
-  iree_io_byte_sequence_release(&sequence.base);
+  uint8_t sentinel = 0;
+  iree_const_byte_span_t contiguous_span =
+      iree_make_const_byte_span(&sentinel, 1);
+  EXPECT_FALSE(iree_byte_sequence_try_get_contiguous_span(&sequence.base,
+                                                          &contiguous_span));
+  EXPECT_EQ(contiguous_span.data, nullptr);
+  EXPECT_EQ(contiguous_span.data_length, 0u);
+
+  iree_byte_sequence_release(&sequence.base);
 }
 
 typedef struct failing_callback_state_t {
@@ -196,16 +211,16 @@ TEST(ByteSequenceTest, CallbackFailureStopsEnumeration) {
                                 &sequence);
 
   failing_callback_state_t state = {0};
-  iree_io_byte_sequence_segment_callback_t callback = {
+  iree_byte_sequence_segment_callback_t callback = {
       fail_on_first_segment,
       &state,
   };
-  Status status(iree_io_byte_sequence_enumerate(&sequence.base, callback));
+  Status status(iree_byte_sequence_enumerate(&sequence.base, callback));
   EXPECT_THAT(status, StatusIs(StatusCode::kAborted));
   EXPECT_THAT(status.ToString(), HasSubstr("intentional callback failure"));
   EXPECT_EQ(state.callback_count, 1);
 
-  iree_io_byte_sequence_release(&sequence.base);
+  iree_byte_sequence_release(&sequence.base);
 }
 
 TEST(ByteSequenceTest, SupportsConcurrentEnumeration) {
@@ -226,7 +241,7 @@ TEST(ByteSequenceTest, SupportsConcurrentEnumeration) {
     thread = std::thread([&]() {
       for (int i = 0; i < 100; ++i) {
         std::vector<uint8_t> actual;
-        Status status(iree_io_byte_sequence_enumerate(
+        Status status(iree_byte_sequence_enumerate(
             &sequence.base, make_append_callback(&actual)));
         if (!status.ok() || actual != expected) {
           all_match.store(false);
@@ -238,7 +253,7 @@ TEST(ByteSequenceTest, SupportsConcurrentEnumeration) {
   for (std::thread& thread : threads) thread.join();
   EXPECT_TRUE(all_match.load());
 
-  iree_io_byte_sequence_release(&sequence.base);
+  iree_byte_sequence_release(&sequence.base);
 }
 
 TEST(ByteSequenceTest, CloneCombinesSegmentsAndOwnsResult) {
@@ -256,9 +271,9 @@ TEST(ByteSequenceTest, CloneCombinesSegmentsAndOwnsResult) {
                                 &destroy_count, &sequence);
 
   iree_byte_span_t clone = iree_byte_span_empty();
-  IREE_ASSERT_OK(iree_io_byte_sequence_clone(&sequence.base,
-                                             iree_allocator_system(), &clone));
-  iree_io_byte_sequence_release(&sequence.base);
+  IREE_ASSERT_OK(iree_byte_sequence_clone(&sequence.base,
+                                          iree_allocator_system(), &clone));
+  iree_byte_sequence_release(&sequence.base);
 
   EXPECT_EQ(destroy_count, 1);
   EXPECT_THAT(std::vector<uint8_t>(clone.data, clone.data + clone.data_length),
@@ -272,12 +287,12 @@ TEST(ByteSequenceTest, CloneEmptySequenceDoesNotAllocate) {
 
   uint8_t sentinel = 0;
   iree_byte_span_t clone = iree_make_byte_span(&sentinel, 1);
-  IREE_EXPECT_OK(iree_io_byte_sequence_clone(&sequence.base,
-                                             iree_allocator_null(), &clone));
+  IREE_EXPECT_OK(
+      iree_byte_sequence_clone(&sequence.base, iree_allocator_null(), &clone));
   EXPECT_EQ(clone.data, nullptr);
   EXPECT_EQ(clone.data_length, 0u);
 
-  iree_io_byte_sequence_release(&sequence.base);
+  iree_byte_sequence_release(&sequence.base);
 }
 
 typedef struct controlled_allocator_t {
@@ -342,8 +357,7 @@ TEST(ByteSequenceTest, CloneAllocatesOneExactLengthBuffer) {
   };
 
   iree_byte_span_t clone = iree_byte_span_empty();
-  IREE_ASSERT_OK(
-      iree_io_byte_sequence_clone(&sequence.base, allocator, &clone));
+  IREE_ASSERT_OK(iree_byte_sequence_clone(&sequence.base, allocator, &clone));
   EXPECT_EQ(allocator_state.allocation_count, 1);
   EXPECT_EQ(allocator_state.allocation_bytes, 6u);
   EXPECT_THAT(std::vector<uint8_t>(clone.data, clone.data + clone.data_length),
@@ -351,7 +365,7 @@ TEST(ByteSequenceTest, CloneAllocatesOneExactLengthBuffer) {
 
   iree_allocator_free(allocator, clone.data);
   EXPECT_EQ(allocator_state.free_count, 1);
-  iree_io_byte_sequence_release(&sequence.base);
+  iree_byte_sequence_release(&sequence.base);
 }
 
 TEST(ByteSequenceTest, MoveFailurePreservesSource) {
@@ -370,8 +384,8 @@ TEST(ByteSequenceTest, MoveFailurePreservesSource) {
   allocator_state.fail_allocations = true;
 
   test_byte_sequence_t sentinel;
-  iree_io_byte_sequence_t* sequence = &sentinel.base;
-  EXPECT_THAT(Status(iree_io_byte_sequence_create_from_span_move(
+  iree_byte_sequence_t* sequence = &sentinel.base;
+  EXPECT_THAT(Status(iree_byte_sequence_create_from_span_move(
                   &source_span, allocator, &sequence)),
               StatusIs(StatusCode::kResourceExhausted));
   EXPECT_EQ(sequence, nullptr);
@@ -402,13 +416,13 @@ TEST(ByteSequenceTest, CloneAllocationFailureLeavesOutputEmpty) {
   uint8_t sentinel = 0;
   iree_byte_span_t clone = iree_make_byte_span(&sentinel, 1);
   EXPECT_THAT(
-      Status(iree_io_byte_sequence_clone(&sequence.base, allocator, &clone)),
+      Status(iree_byte_sequence_clone(&sequence.base, allocator, &clone)),
       StatusIs(StatusCode::kResourceExhausted));
   EXPECT_EQ(clone.data, nullptr);
   EXPECT_EQ(clone.data_length, 0u);
   EXPECT_EQ(allocator_state.free_count, 0);
 
-  iree_io_byte_sequence_release(&sequence.base);
+  iree_byte_sequence_release(&sequence.base);
 }
 
 TEST(ByteSequenceTest, CloneRejectsOversizedLength) {
@@ -419,13 +433,13 @@ TEST(ByteSequenceTest, CloneRejectsOversizedLength) {
 
   uint8_t sentinel = 0;
   iree_byte_span_t clone = iree_make_byte_span(&sentinel, 1);
-  EXPECT_THAT(Status(iree_io_byte_sequence_clone(
-                  &sequence.base, iree_allocator_null(), &clone)),
+  EXPECT_THAT(Status(iree_byte_sequence_clone(&sequence.base,
+                                              iree_allocator_null(), &clone)),
               StatusIs(StatusCode::kOutOfRange));
   EXPECT_EQ(clone.data, nullptr);
   EXPECT_EQ(clone.data_length, 0u);
 
-  iree_io_byte_sequence_release(&sequence.base);
+  iree_byte_sequence_release(&sequence.base);
 #else
   GTEST_SKIP() << "uint64_t sequences cannot exceed a 64-bit host size";
 #endif  // IREE_PTR_SIZE_32

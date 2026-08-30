@@ -16,8 +16,8 @@
 #define LOOM_TARGET_PROVIDER_H_
 
 #include "iree/base/api.h"
+#include "iree/base/byte_sequence.h"
 #include "iree/base/internal/arena.h"
-#include "iree/io/byte_sequence.h"
 #include "loom/codegen/low/lower/lower.h"
 #include "loom/codegen/low/verify.h"
 #include "loom/ir/context.h"
@@ -87,7 +87,7 @@ typedef struct loom_target_emit_sidecar_artifact_t {
   // Immutable sidecar artifact contents. The containing artifact owns one
   // reference; callers may retain the sequence when they need it to outlive
   // the artifact.
-  iree_io_byte_sequence_t* contents;
+  iree_byte_sequence_t* contents;
 } loom_target_emit_sidecar_artifact_t;
 
 // One target artifact produced by an emitter.
@@ -97,7 +97,7 @@ typedef struct loom_target_emit_artifact_t {
 
   // Immutable primary artifact contents. The artifact owns one reference;
   // callers may retain the sequence when they need it to outlive the artifact.
-  iree_io_byte_sequence_t* contents;
+  iree_byte_sequence_t* contents;
 
   // Optional emitter-owned sidecar artifacts.
   const loom_target_emit_sidecar_artifact_t* sidecars;

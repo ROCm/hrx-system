@@ -9,8 +9,8 @@
 #include <string>
 #include <vector>
 
+#include "iree/base/byte_sequence.h"
 #include "iree/base/internal/arena.h"
-#include "iree/io/byte_sequence.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/analysis/symbol_facts.h"
@@ -71,12 +71,12 @@ std::string StringViewToString(iree_string_view_t value) {
   return std::string(value.data, value.size);
 }
 
-iree_status_t CloneByteSequenceToString(const iree_io_byte_sequence_t* sequence,
+iree_status_t CloneByteSequenceToString(const iree_byte_sequence_t* sequence,
                                         std::string* out_value) {
   out_value->clear();
   iree_byte_span_t contents = iree_byte_span_empty();
   iree_status_t status =
-      iree_io_byte_sequence_clone(sequence, iree_allocator_system(), &contents);
+      iree_byte_sequence_clone(sequence, iree_allocator_system(), &contents);
   if (iree_status_is_ok(status)) {
     out_value->assign(reinterpret_cast<const char*>(contents.data),
                       contents.data_length);

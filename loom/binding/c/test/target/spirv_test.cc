@@ -40,6 +40,16 @@ std::string ToString(loomc_string_view_t value) {
   return value.data ? std::string(value.data, value.size) : std::string();
 }
 
+std::string ToString(const loomc_byte_sequence_t* value) {
+  loomc_byte_span_t contents = loomc_byte_span_empty();
+  LOOMC_EXPECT_OK(
+      loomc_byte_sequence_clone(value, loomc_allocator_system(), &contents));
+  std::string result(reinterpret_cast<const char*>(contents.data),
+                     contents.data_length);
+  loomc_allocator_free(loomc_allocator_system(), (void*)contents.data);
+  return result;
+}
+
 void ExpectSucceededResult(const loomc_result_t* result) {
   ASSERT_NE(result, nullptr);
   if (!loomc_result_succeeded(result) &&
@@ -157,9 +167,10 @@ void ExpectSpirvArtifact(const loomc_result_t* result,
   EXPECT_EQ(artifact->kind, LOOMC_ARTIFACT_KIND_EXECUTABLE);
   EXPECT_EQ(ToString(artifact->format), LOOMC_ARTIFACT_FORMAT_SPIRV);
   EXPECT_EQ(ToString(artifact->identifier), expected_identifier);
-  ASSERT_GE(artifact->contents.data_length, sizeof(uint32_t));
+  const std::string contents = ToString(artifact->contents);
+  ASSERT_GE(contents.size(), sizeof(uint32_t));
   uint32_t magic = 0;
-  memcpy(&magic, artifact->contents.data, sizeof(magic));
+  memcpy(&magic, contents.data(), sizeof(magic));
   EXPECT_EQ(magic, 0x07230203u);
 }
 

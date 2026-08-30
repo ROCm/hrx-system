@@ -77,7 +77,6 @@ loom_cc_library(
     iree::base::internal::path
     iree::base::tooling::flags
     iree::hal
-    iree::io::byte_sequence
     iree::io::stream
     iree::tooling::device_util
     iree::tooling::profile::counter
@@ -201,7 +200,6 @@ loom_cc_test(
     ::main
     iree::base
     iree::base::internal::json
-    iree::io::byte_sequence
     iree::testing::gtest
     iree::testing::gtest_main
     iree::testing::temp_file

@@ -4,8 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef IREE_IO_BYTE_SEQUENCE_H_
-#define IREE_IO_BYTE_SEQUENCE_H_
+#ifndef IREE_BASE_BYTE_SEQUENCE_H_
+#define IREE_BASE_BYTE_SEQUENCE_H_
 
 #include <stdint.h>
 
@@ -17,7 +17,7 @@ extern "C" {
 #endif  // __cplusplus
 
 //===----------------------------------------------------------------------===//
-// iree_io_byte_sequence_t
+// iree_byte_sequence_t
 //===----------------------------------------------------------------------===//
 
 // An immutable logical sequence of bytes stored in one or more segments.
@@ -30,31 +30,28 @@ extern "C" {
 //
 // NULL represents an absent sequence. An empty sequence is a non-NULL object
 // with zero length whose enumeration invokes no callbacks.
-typedef struct iree_io_byte_sequence_t iree_io_byte_sequence_t;
+typedef struct iree_byte_sequence_t iree_byte_sequence_t;
 
 // Callback invoked for each ordered non-empty segment in a byte sequence.
 //
 // |segment| is valid only for the duration of the callback. The callback must
 // not retain its data pointer. Returning a non-OK status immediately stops
 // enumeration and transfers the status to the caller unchanged.
-typedef iree_status_t(
-    IREE_API_PTR* iree_io_byte_sequence_segment_callback_fn_t)(
+typedef iree_status_t(IREE_API_PTR* iree_byte_sequence_segment_callback_fn_t)(
     void* user_data, iree_const_byte_span_t segment);
 
-typedef struct iree_io_byte_sequence_segment_callback_t {
+typedef struct iree_byte_sequence_segment_callback_t {
   // Function invoked for each segment.
-  iree_io_byte_sequence_segment_callback_fn_t fn;
+  iree_byte_sequence_segment_callback_fn_t fn;
   // Unowned state passed to the callback function.
   void* user_data;
-} iree_io_byte_sequence_segment_callback_t;
+} iree_byte_sequence_segment_callback_t;
 
 // Retains |sequence| for the caller. No-op if |sequence| is NULL.
-IREE_API_EXPORT void iree_io_byte_sequence_retain(
-    iree_io_byte_sequence_t* sequence);
+IREE_API_EXPORT void iree_byte_sequence_retain(iree_byte_sequence_t* sequence);
 
 // Releases |sequence| from the caller. No-op if |sequence| is NULL.
-IREE_API_EXPORT void iree_io_byte_sequence_release(
-    iree_io_byte_sequence_t* sequence);
+IREE_API_EXPORT void iree_byte_sequence_release(iree_byte_sequence_t* sequence);
 
 // Returns the logical byte length of |sequence|.
 //
@@ -62,7 +59,16 @@ IREE_API_EXPORT void iree_io_byte_sequence_release(
 // larger than the host address space. Callers requiring contiguous storage
 // must reject lengths greater than IREE_HOST_SIZE_MAX.
 IREE_API_EXPORT uint64_t
-iree_io_byte_sequence_length(const iree_io_byte_sequence_t* sequence);
+iree_byte_sequence_length(const iree_byte_sequence_t* sequence);
+
+// Attempts to expose |sequence| as one contiguous immutable span.
+//
+// Returns true and populates |out_span| when the concrete storage is already
+// contiguous. The span remains valid while |sequence| is retained. Returns
+// false and leaves |out_span| empty when the sequence is segmented. Empty
+// sequences may return true with an empty span.
+IREE_API_EXPORT bool iree_byte_sequence_try_get_contiguous_span(
+    const iree_byte_sequence_t* sequence, iree_const_byte_span_t* out_span);
 
 // Enumerates every non-empty segment in |sequence| in logical byte order.
 //
@@ -71,9 +77,9 @@ iree_io_byte_sequence_length(const iree_io_byte_sequence_t* sequence);
 // length. A callback returning OK always continues enumeration. A callback
 // returning a non-OK status stops enumeration and the status is returned
 // unchanged.
-IREE_API_EXPORT iree_status_t iree_io_byte_sequence_enumerate(
-    const iree_io_byte_sequence_t* sequence,
-    iree_io_byte_sequence_segment_callback_t callback);
+IREE_API_EXPORT iree_status_t
+iree_byte_sequence_enumerate(const iree_byte_sequence_t* sequence,
+                             iree_byte_sequence_segment_callback_t callback);
 
 // Creates a sequence by transferring ownership of |inout_span|.
 //
@@ -81,9 +87,9 @@ IREE_API_EXPORT iree_status_t iree_io_byte_sequence_enumerate(
 // success the span is reset to empty and the returned sequence owns both the
 // data and its wrapper. On failure |inout_span| is unchanged and
 // |out_sequence| is NULL. An empty span produces a real empty sequence object.
-IREE_API_EXPORT iree_status_t iree_io_byte_sequence_create_from_span_move(
+IREE_API_EXPORT iree_status_t iree_byte_sequence_create_from_span_move(
     iree_byte_span_t* inout_span, iree_allocator_t host_allocator,
-    iree_io_byte_sequence_t** out_sequence);
+    iree_byte_sequence_t** out_sequence);
 
 // Clones |sequence| into one contiguous caller-owned allocation.
 //
@@ -91,40 +97,44 @@ IREE_API_EXPORT iree_status_t iree_io_byte_sequence_create_from_span_move(
 // |host_allocator|. Empty sequences return an empty span without allocating.
 // Lengths greater than IREE_HOST_SIZE_MAX fail with IREE_STATUS_OUT_OF_RANGE.
 // On any failure |out_span| is empty.
-IREE_API_EXPORT iree_status_t iree_io_byte_sequence_clone(
-    const iree_io_byte_sequence_t* sequence, iree_allocator_t host_allocator,
+IREE_API_EXPORT iree_status_t iree_byte_sequence_clone(
+    const iree_byte_sequence_t* sequence, iree_allocator_t host_allocator,
     iree_byte_span_t* out_span);
 
 //===----------------------------------------------------------------------===//
-// iree_io_byte_sequence_t implementation details
+// iree_byte_sequence_t implementation details
 //===----------------------------------------------------------------------===//
 
 // Dispatch table implemented by immutable byte sequence storage types.
-typedef struct iree_io_byte_sequence_vtable_t {
+typedef struct iree_byte_sequence_vtable_t {
   // Destroys |sequence| after its final reference is released.
-  void(IREE_API_PTR* destroy)(iree_io_byte_sequence_t* IREE_RESTRICT sequence);
+  void(IREE_API_PTR* destroy)(iree_byte_sequence_t* IREE_RESTRICT sequence);
   // Enumerates all logical segments in order and propagates the first callback
   // failure unchanged. Implementations must uphold the public segment and
   // logical-length invariants.
   iree_status_t(IREE_API_PTR* enumerate)(
-      const iree_io_byte_sequence_t* sequence,
-      iree_io_byte_sequence_segment_callback_t callback);
-} iree_io_byte_sequence_vtable_t;
+      const iree_byte_sequence_t* sequence,
+      iree_byte_sequence_segment_callback_t callback);
+  // Attempts to expose the complete sequence as one contiguous span. NULL
+  // indicates that the representation is never directly contiguous.
+  bool(IREE_API_PTR* try_get_contiguous_span)(
+      const iree_byte_sequence_t* sequence, iree_const_byte_span_t* out_span);
+} iree_byte_sequence_vtable_t;
 
 // Base structure embedded at offset zero by byte sequence implementations.
-struct iree_io_byte_sequence_t {
+struct iree_byte_sequence_t {
   // Atomic reference count controlling the sequence lifetime.
   iree_atomic_ref_count_t ref_count;
   // Dispatch table for the concrete storage implementation.
-  const iree_io_byte_sequence_vtable_t* vtable;
+  const iree_byte_sequence_vtable_t* vtable;
   // Constant logical length of the sequence in bytes.
   uint64_t length;
 };
 
 // Initializes an implementation-provided |out_sequence| base structure.
-static inline void iree_io_byte_sequence_initialize(
-    const iree_io_byte_sequence_vtable_t* vtable, uint64_t length,
-    iree_io_byte_sequence_t* out_sequence) {
+static inline void iree_byte_sequence_initialize(
+    const iree_byte_sequence_vtable_t* vtable, uint64_t length,
+    iree_byte_sequence_t* out_sequence) {
   iree_atomic_ref_count_init(&out_sequence->ref_count);
   out_sequence->vtable = vtable;
   out_sequence->length = length;
@@ -134,4 +144,4 @@ static inline void iree_io_byte_sequence_initialize(
 }  // extern "C"
 #endif  // __cplusplus
 
-#endif  // IREE_IO_BYTE_SEQUENCE_H_
+#endif  // IREE_BASE_BYTE_SEQUENCE_H_

@@ -25,8 +25,8 @@ static iree_status_t loomc_spirv_emit_module_artifact(
   if (iree_status_is_ok(status)) {
     iree_byte_span_t contents =
         iree_make_byte_span(binary.words, binary.word_count * sizeof(uint32_t));
-    iree_io_byte_sequence_t* sequence = NULL;
-    status = iree_io_byte_sequence_create_from_span_move(
+    iree_byte_sequence_t* sequence = NULL;
+    status = iree_byte_sequence_create_from_span_move(
         &contents, request->allocator, &sequence);
     if (iree_status_is_ok(status)) {
       binary.words = NULL;

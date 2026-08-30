@@ -6,6 +6,7 @@
 
 #include "loom/binding/c/benchmark/compile_throughput_benchmark.h"
 
+#include <algorithm>
 #include <cstring>
 #include <string>
 #include <thread>
@@ -99,16 +100,66 @@ iree_status_t ValidateArtifact(const loomc_result_t* result,
     return iree_make_status(IREE_STATUS_NOT_FOUND,
                             "%s artifact was not produced", description);
   }
-  if (artifact->contents.data == nullptr ||
-      artifact->contents.data_length < minimum_data_length) {
+  loomc_byte_sequence_t* artifact_contents = artifact->contents;
+  uint64_t artifact_data_length =
+      loomc_byte_sequence_length(artifact->contents);
+  if (artifact_data_length < minimum_data_length) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "%s artifact is empty or truncated", description);
   }
-  const uint8_t* artifact_data = artifact->contents.data;
-  loomc_host_size_t artifact_data_length = artifact->contents.data_length;
-  ::benchmark::DoNotOptimize(artifact_data);
+  ::benchmark::DoNotOptimize(artifact_contents);
   ::benchmark::DoNotOptimize(artifact_data_length);
-  *out_artifact_bytes = (int64_t)artifact->contents.data_length;
+  *out_artifact_bytes = (int64_t)artifact_data_length;
+  return iree_ok_status();
+}
+
+typedef struct ArtifactPrefixCopy {
+  iree_byte_span_t prefix;
+  iree_host_size_t offset;
+} ArtifactPrefixCopy;
+
+static loomc_status_t CopyArtifactPrefixSegment(void* user_data,
+                                                loomc_byte_span_t segment) {
+  ArtifactPrefixCopy* copy = static_cast<ArtifactPrefixCopy*>(user_data);
+  const iree_host_size_t remaining = copy->prefix.data_length - copy->offset;
+  const iree_host_size_t copy_length =
+      std::min<iree_host_size_t>(remaining, segment.data_length);
+  if (copy_length != 0) {
+    std::memcpy(copy->prefix.data + copy->offset, segment.data, copy_length);
+    copy->offset += copy_length;
+  }
+  return loomc_ok_status();
+}
+
+iree_status_t ReadArtifactPrefix(const loomc_artifact_t* artifact,
+                                 iree_byte_span_t prefix) {
+  if (prefix.data == nullptr && prefix.data_length != 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "prefix has length but no storage");
+  }
+  if (artifact == nullptr || artifact->contents == nullptr ||
+      loomc_byte_sequence_length(artifact->contents) < prefix.data_length) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "artifact is empty or truncated");
+  }
+  if (prefix.data_length == 0) return iree_ok_status();
+  loomc_byte_span_t contiguous_span = loomc_byte_span_empty();
+  if (loomc_byte_sequence_try_get_contiguous_span(artifact->contents,
+                                                  &contiguous_span)) {
+    std::memcpy(prefix.data, contiguous_span.data, prefix.data_length);
+    return iree_ok_status();
+  }
+  ArtifactPrefixCopy copy = {
+      /*.prefix=*/prefix,
+      /*.offset=*/0,
+  };
+  const loomc_byte_sequence_callback_t callback = {
+      /*.fn=*/CopyArtifactPrefixSegment,
+      /*.user_data=*/&copy,
+  };
+  IREE_RETURN_IF_ERROR(to_iree_status(
+      loomc_byte_sequence_enumerate(artifact->contents, callback)));
+  IREE_ASSERT_EQ(copy.offset, prefix.data_length);
   return iree_ok_status();
 }
 

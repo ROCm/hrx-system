@@ -39,6 +39,21 @@
 extern "C" {
 #endif
 
+// Requested module-symbol to bytecode-symbol projection.
+//
+// The writer fills |wire_symbol_ordinals| only after the complete bytecode
+// module has been written successfully. The input and output arrays may alias.
+typedef struct loom_bytecode_symbol_projection_t {
+  // Module-local symbol IDs to project.
+  const loom_symbol_id_t* module_symbol_ids;
+
+  // Bytecode wire ordinals corresponding to |module_symbol_ids|.
+  loom_symbol_id_t* wire_symbol_ordinals;
+
+  // Number of entries in both arrays.
+  iree_host_size_t count;
+} loom_bytecode_symbol_projection_t;
+
 // Options controlling writer behavior.
 typedef struct loom_bytecode_write_options_t {
   // Producer string embedded in the file header for diagnostics
@@ -49,6 +64,8 @@ typedef struct loom_bytecode_write_options_t {
   loom_bytecode_location_mode_t location_mode;
   // Stable-key codec required when serializing Low function bodies.
   loom_low_repr_environment_t low_repr_environment;
+  // Optional requested symbol projection populated on successful completion.
+  loom_bytecode_symbol_projection_t symbol_projection;
 } loom_bytecode_write_options_t;
 
 // Serializes |module| to .loombc format through |stream|.

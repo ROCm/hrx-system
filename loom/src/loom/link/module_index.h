@@ -81,6 +81,8 @@ enum loom_link_symbol_flag_bits_e {
   LOOM_LINK_SYMBOL_FLAG_CONFIG = 1u << 5,
   // Symbol exists only for test or benchmark tooling.
   LOOM_LINK_SYMBOL_FLAG_TEST_ONLY = 1u << 6,
+  // Source symbol is explicitly preserved by ordinary symbol pruning.
+  LOOM_LINK_SYMBOL_FLAG_RETAIN = 1u << 7,
 };
 typedef uint32_t loom_link_symbol_flags_t;
 
@@ -241,6 +243,23 @@ iree_status_t loom_link_module_index_allocate(
     loom_context_t* context, iree_arena_block_pool_t* block_pool,
     iree_allocator_t allocator, loom_link_module_index_t** out_index);
 
+// Allocates an empty index overlay over immutable |base_index|.
+//
+// Existing provider, module, symbol, facet, and template-family ordinals retain
+// their base-index values. Providers added to the overlay occupy appended
+// ordinal domains and only their metadata is allocated. Name and template
+// provider enumeration crosses both domains without copying or mutating base
+// records.
+//
+// |base_index| must be a standalone index containing only LIBRARY providers;
+// overlays cannot be nested. The base must remain immutable and live until the
+// returned overlay is freed. The overlay shares its context but uses
+// |block_pool| and |allocator| for newly indexed providers.
+iree_status_t loom_link_module_index_allocate_overlay(
+    const loom_link_module_index_t* base_index,
+    iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
+    loom_link_module_index_t** out_index);
+
 // Frees |index| and any text-provider modules it owns.
 void loom_link_module_index_free(loom_link_module_index_t* index);
 
@@ -279,6 +298,12 @@ iree_status_t loom_link_module_index_add_text(
 
 // Returns the number of indexed providers.
 iree_host_size_t loom_link_module_index_provider_count(
+    const loom_link_module_index_t* index);
+
+// Returns the number of INPUT providers in |index|.
+//
+// The count is maintained while providers are indexed and performs no scan.
+iree_host_size_t loom_link_module_index_input_provider_count(
     const loom_link_module_index_t* index);
 
 // Returns provider |ordinal|, or NULL if out of range.
@@ -386,6 +411,16 @@ const loom_link_module_index_template_family_t*
 loom_link_module_index_template_family_at(
     const loom_link_module_index_t* index,
     loom_link_template_family_ordinal_t ordinal);
+
+// Returns the next provider in |symbol|'s template-family chain, or NULL.
+//
+// Callers begin with a family's first provider ordinal. This accessor bridges
+// immutable base and overlay-local provider chains without requiring either
+// domain to mutate the other.
+const loom_link_module_index_symbol_t*
+loom_link_module_index_next_template_provider(
+    const loom_link_module_index_t* index,
+    const loom_link_module_index_symbol_t* symbol);
 
 // Annotates |status| with the indexed provider and module locations of two
 // conflicting global definitions.

@@ -10,24 +10,12 @@
 #define LOOM_TARGET_ARCH_CMD_ARTIFACT_SET_H_
 
 #include "iree/base/api.h"
+#include "iree/base/byte_sequence.h"
 #include "loom/target/arch/cmd/lower/program_plan.h"
-#include "loom/util/stream.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-// Stable public format name for one serialized portable command program.
-#define LOOM_CMD_PROGRAM_ARTIFACT_FORMAT "loom-command"
-
-// File extension convention for a serialized portable command program.
-#define LOOM_CMD_PROGRAM_ARTIFACT_EXTENSION ".loomcmd"
-
-// Stable format name for a portable command artifact-set manifest.
-#define LOOM_CMD_PROGRAM_ARTIFACT_SET_MANIFEST_FORMAT "loom-command-set"
-
-// Maximum storage required by a canonical root artifact filename.
-#define LOOM_CMD_PROGRAM_ARTIFACT_FILENAME_CAPACITY 64
 
 // One plan-wide executable-entry requirement.
 typedef struct loom_cmd_program_artifact_entry_t {
@@ -41,7 +29,7 @@ typedef struct loom_cmd_program_artifact_t {
   iree_string_view_t symbol;
 
   // Complete portable command-program bytes.
-  iree_byte_span_t data;
+  iree_byte_sequence_t* data;
 
   // Plan-wide entry indices in root-local executable/entry slot order.
   const uint32_t* entry_requirement_indices;
@@ -91,21 +79,6 @@ iree_status_t loom_cmd_program_artifact_set_build(
 // Releases all storage owned by |artifact_set| and resets it to empty.
 void loom_cmd_program_artifact_set_deinitialize(
     loom_cmd_program_artifact_set_t* artifact_set);
-
-// Formats the canonical relative artifact filename for |program_ordinal|.
-//
-// The returned view borrows |buffer| and excludes its trailing NUL.
-iree_status_t loom_cmd_program_artifact_format_filename(
-    iree_host_size_t program_ordinal, iree_host_size_t buffer_capacity,
-    char* buffer, iree_string_view_t* out_filename);
-
-// Writes the schema-versioned artifact-set manifest as JSON.
-//
-// Program artifact filenames use loom_cmd_program_artifact_format_filename and
-// are relative to the manifest's embedding-owned artifact directory.
-iree_status_t loom_cmd_program_artifact_set_format_manifest_json(
-    const loom_cmd_program_artifact_set_t* artifact_set,
-    loom_output_stream_t* stream);
 
 #ifdef __cplusplus
 }  // extern "C"

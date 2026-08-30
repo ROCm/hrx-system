@@ -12,7 +12,6 @@
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/target/arch/cmd/lower/serialize.h"
-#include "loom/util/json.h"
 
 static iree_string_view_t loom_cmd_program_artifact_set_symbol_name(
     const loom_module_t* module, loom_symbol_ref_t symbol_ref) {
@@ -134,8 +133,14 @@ iree_status_t loom_cmd_program_artifact_set_build(
              root->entry_requirement_count * sizeof(*entry_projection_cursor));
       entry_projection_cursor += root->entry_requirement_count;
     }
-    status = loom_cmd_program_plan_serialize_root(plan, i, &artifact->data,
-                                                  host_allocator);
+    iree_byte_span_t data = iree_byte_span_empty();
+    status =
+        loom_cmd_program_plan_serialize_root(plan, i, &data, host_allocator);
+    if (iree_status_is_ok(status)) {
+      status = iree_byte_sequence_create_from_span_move(&data, host_allocator,
+                                                        &artifact->data);
+    }
+    iree_allocator_free(host_allocator, data.data);
   }
 
   if (iree_status_is_ok(status)) {
@@ -152,8 +157,7 @@ void loom_cmd_program_artifact_set_deinitialize(
     return;
   }
   for (iree_host_size_t i = 0; i < artifact_set->programs.count; ++i) {
-    iree_allocator_free(artifact_set->host_allocator,
-                        artifact_set->programs.values[i].data.data);
+    iree_byte_sequence_release(artifact_set->programs.values[i].data);
   }
   iree_allocator_free(artifact_set->host_allocator,
                       artifact_set->entry_requirement_index_storage);
@@ -164,91 +168,4 @@ void loom_cmd_program_artifact_set_deinitialize(
   iree_allocator_free(artifact_set->host_allocator,
                       artifact_set->programs.values);
   *artifact_set = (loom_cmd_program_artifact_set_t){0};
-}
-
-iree_status_t loom_cmd_program_artifact_format_filename(
-    iree_host_size_t program_ordinal, iree_host_size_t buffer_capacity,
-    char* buffer, iree_string_view_t* out_filename) {
-  if (buffer == NULL || out_filename == NULL || buffer_capacity == 0) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "command artifact filename storage is required");
-  }
-  *out_filename = iree_string_view_empty();
-  const int length = iree_snprintf(
-      buffer, buffer_capacity,
-      "program-%" PRIhsz LOOM_CMD_PROGRAM_ARTIFACT_EXTENSION, program_ordinal);
-  if (length < 0 || (iree_host_size_t)length >= buffer_capacity) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "command artifact filename is too large");
-  }
-  *out_filename = iree_make_string_view(buffer, (iree_host_size_t)length);
-  return iree_ok_status();
-}
-
-static iree_status_t loom_cmd_program_artifact_set_format_program_json(
-    const loom_cmd_program_artifact_t* program,
-    iree_host_size_t program_ordinal, loom_output_stream_t* stream) {
-  char filename_storage[LOOM_CMD_PROGRAM_ARTIFACT_FILENAME_CAPACITY];
-  iree_string_view_t filename = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(loom_cmd_program_artifact_format_filename(
-      program_ordinal, sizeof(filename_storage), filename_storage, &filename));
-
-  loom_json_object_writer_t object;
-  IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
-  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
-      &object, IREE_SV("symbol"), program->symbol));
-  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
-      &object, IREE_SV("artifact"), filename));
-  IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
-      &object, IREE_SV("byte_length"), program->data.data_length));
-  IREE_RETURN_IF_ERROR(
-      loom_json_object_begin_field(&object, IREE_SV("entry_requirements")));
-  loom_json_array_writer_t entry_requirements;
-  IREE_RETURN_IF_ERROR(loom_json_array_begin(stream, &entry_requirements));
-  for (uint32_t i = 0; i < program->entry_requirement_count; ++i) {
-    IREE_RETURN_IF_ERROR(loom_json_array_write_uint32_element(
-        &entry_requirements, program->entry_requirement_indices[i]));
-  }
-  IREE_RETURN_IF_ERROR(loom_json_array_end(&entry_requirements));
-  return loom_json_object_end(&object);
-}
-
-iree_status_t loom_cmd_program_artifact_set_format_manifest_json(
-    const loom_cmd_program_artifact_set_t* artifact_set,
-    loom_output_stream_t* stream) {
-  if (artifact_set == NULL || stream == NULL) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "command artifact set and stream are required");
-  }
-
-  loom_json_object_writer_t root;
-  IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &root));
-  IREE_RETURN_IF_ERROR(
-      loom_json_object_write_uint32_field(&root, IREE_SV("schema_version"), 1));
-  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
-      &root, IREE_SV("format"),
-      IREE_SV(LOOM_CMD_PROGRAM_ARTIFACT_SET_MANIFEST_FORMAT)));
-  IREE_RETURN_IF_ERROR(
-      loom_json_object_begin_field(&root, IREE_SV("programs")));
-  loom_json_array_writer_t programs;
-  IREE_RETURN_IF_ERROR(loom_json_array_begin(stream, &programs));
-  for (iree_host_size_t i = 0; i < artifact_set->programs.count; ++i) {
-    IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&programs));
-    IREE_RETURN_IF_ERROR(loom_cmd_program_artifact_set_format_program_json(
-        &artifact_set->programs.values[i], i, stream));
-  }
-  IREE_RETURN_IF_ERROR(loom_json_array_end(&programs));
-  IREE_RETURN_IF_ERROR(loom_json_object_begin_field(&root, IREE_SV("entries")));
-  loom_json_array_writer_t entries;
-  IREE_RETURN_IF_ERROR(loom_json_array_begin(stream, &entries));
-  for (iree_host_size_t i = 0; i < artifact_set->entries.count; ++i) {
-    IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&entries));
-    loom_json_object_writer_t entry;
-    IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &entry));
-    IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
-        &entry, IREE_SV("symbol"), artifact_set->entries.values[i].symbol));
-    IREE_RETURN_IF_ERROR(loom_json_object_end(&entry));
-  }
-  IREE_RETURN_IF_ERROR(loom_json_array_end(&entries));
-  return loom_json_object_end(&root);
 }

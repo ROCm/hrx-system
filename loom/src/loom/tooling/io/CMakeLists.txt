@@ -19,7 +19,6 @@ loom_cc_library(
   DEPS
     iree::base
     iree::base::internal::path
-    iree::io::byte_sequence
     iree::io::file_handle
     iree::io::stream
     loom::util::stream
@@ -46,7 +45,6 @@ loom_cc_test(
   DEPS
     ::file
     iree::base
-    iree::io::byte_sequence
     iree::io::file_handle
     iree::io::stream
     iree::testing::gtest

@@ -125,7 +125,6 @@ loom_cc_library(
     ::module_emitter
     ::target_presets
     iree::base
-    iree::io::byte_sequence
     iree::io::stream
     loom::target::provider
     loom::util::stream
@@ -335,8 +334,8 @@ loom_cc_test(
     ::core
     ::module_emitter
     ::target_presets
+    iree::base
     iree::base::internal::arena
-    iree::io::byte_sequence
     iree::testing::gtest
     iree::testing::gtest_main
     loom::analysis::symbol_facts

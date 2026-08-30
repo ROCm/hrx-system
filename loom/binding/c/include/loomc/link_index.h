@@ -25,6 +25,15 @@
 /// persistent storage needed for provider/module/symbol metadata. Resetting a
 /// caller workspace never invalidates a frozen link index.
 ///
+/// INPUT providers jointly own requester definitions and may contribute output
+/// roots. LIBRARY providers contribute exported resolution candidates. A
+/// public library definition selected only as a dependency becomes private in
+/// the linked product; provider visibility never implicitly re-exports it.
+///
+/// Index construction scans provider metadata once. Later selective operations
+/// share the frozen index and materialize only the selected roots, facets, and
+/// reachable dependencies instead of rebuilding the complete provider catalog.
+///
 /// @par Example
 /// Retain a frozen library index when handing it to an asynchronous worker:
 ///
@@ -143,6 +152,9 @@ typedef enum loomc_link_symbol_flag_bits_e {
 
   /// Symbol exists only for test or benchmark tooling.
   LOOMC_LINK_SYMBOL_FLAG_TEST_ONLY = 1u << 6,
+
+  /// Source symbol is explicitly preserved by ordinary symbol pruning.
+  LOOMC_LINK_SYMBOL_FLAG_RETAIN = 1u << 7,
 } loomc_link_symbol_flag_bits_t;
 
 /// Bitmask of `loomc_link_symbol_flag_bits_t` values.
@@ -436,9 +448,9 @@ LOOMC_API_EXPORT bool loomc_link_index_symbol_at(
 
 /// Looks up the first global symbol by name in canonical enumeration order.
 ///
-/// INPUT providers enumerate before LIBRARY providers and ties use source-slot
-/// order. This order does not resolve duplicate definitions; linkage validates
-/// uniqueness.
+/// INPUT providers enumerate before LIBRARY providers. Ties preserve
+/// provider-slot order. This order does not resolve duplicate definitions;
+/// linkage validates uniqueness.
 ///
 /// @param link_index Index to inspect.
 /// @param name Symbol name with or without a leading `@`.
