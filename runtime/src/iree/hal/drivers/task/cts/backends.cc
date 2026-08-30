@@ -4,9 +4,9 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// CTS backend registration for the local-task HAL driver.
+// CTS backend registration for the task HAL driver.
 //
-// Registers a single "local_task" backend that creates a multithreaded
+// Registers a single "task" backend that creates a multithreaded
 // task-system-based HAL device using the default driver configuration.
 // The factory uses the driver registry to create drivers identically to how
 // applications create them (via iree_hal_register_all_available_drivers).
@@ -17,7 +17,7 @@
 
 namespace iree::hal::cts {
 
-static iree_status_t CreateLocalTaskDevice(
+static iree_status_t CreateTaskDevice(
     const iree_hal_device_create_params_t* create_params,
     iree_hal_driver_t** out_driver, iree_hal_device_t** out_device) {
   // Register the driver module with the global registry. Subsequent calls
@@ -34,8 +34,8 @@ static iree_status_t CreateLocalTaskDevice(
   iree_hal_driver_t* driver = nullptr;
   if (iree_status_is_ok(status)) {
     status = iree_hal_driver_registry_try_create(
-        iree_hal_driver_registry_default(),
-        iree_make_cstring_view("local-task"), iree_allocator_system(), &driver);
+        iree_hal_driver_registry_default(), iree_make_cstring_view("task"),
+        iree_allocator_system(), &driver);
   }
 
   // Create the default device from the driver.
@@ -57,10 +57,10 @@ static iree_status_t CreateLocalTaskDevice(
 
 // Registration at static init time. The comma operator evaluates
 // RegisterBackend() for its side effect and yields true for the bool.
-static bool local_task_registered_ =
+static bool task_registered_ =
     (CtsRegistry::RegisterBackend({
-         "local_task",
-         {"local_task", CreateLocalTaskDevice,
+         "task",
+         {"task", CreateTaskDevice,
           /*executable_target_family=*/nullptr,
           /*executable_target_key=*/nullptr,
           /*executable_data=*/nullptr, RecordingMode::kDirect,

@@ -48,7 +48,7 @@ class Ref {
   T* value_ = nullptr;
 };
 
-static iree_hal_device_group_t* CreateLocalTaskDeviceGroup() {
+static iree_hal_device_group_t* CreateTaskDeviceGroup() {
   Ref<iree_async_proactor_pool_t, iree_async_proactor_pool_release>
       proactor_pool;
   IREE_CHECK_OK(iree_async_proactor_pool_create(
@@ -67,7 +67,7 @@ static iree_hal_device_group_t* CreateLocalTaskDeviceGroup() {
 
   iree_hal_device_t* device = nullptr;
   iree_status_t status =
-      iree_hal_create_device(registry, IREE_SV("local-task"), &create_params,
+      iree_hal_create_device(registry, IREE_SV("task"), &create_params,
                              iree_allocator_system(), &device);
   iree_hal_driver_registry_free(registry);
   IREE_CHECK_OK(status);
@@ -188,7 +188,7 @@ static void ExpectBufferBytesEqual(iree_hal_buffer_t* buffer,
 
 class ParameterIndexProviderTest : public ::testing::Test {
  protected:
-  static void SetUpTestSuite() { device_group_ = CreateLocalTaskDeviceGroup(); }
+  static void SetUpTestSuite() { device_group_ = CreateTaskDeviceGroup(); }
 
   static void TearDownTestSuite() {
     iree_hal_device_group_release(device_group_);

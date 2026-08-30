@@ -17,7 +17,7 @@
 // This is the lowest level of the system right before calling into generated
 // code.
 //
-// This shows what the local-task execution machinery ultimately does: call
+// This shows what the task execution machinery ultimately does: call
 // into the iree_hal_executable_dispatch_v0_t entry point functions with a
 // state structure and a workgroup XYZ.
 //

@@ -403,7 +403,7 @@ class TaskProfileRecorderTest : public ::testing::Test {
     RecordingProfileSinkInitialize(&sink_);
     device_record_ = MakeDeviceRecord(1);
     queue_record_ = MakeQueueRecord(0);
-    recorder_options_.name = IREE_SV("local-task-test");
+    recorder_options_.name = IREE_SV("task-test");
     recorder_options_.session_id = 42;
     recorder_options_.device_record_count = 1;
     recorder_options_.device_records = &device_record_;

@@ -32,8 +32,8 @@
 //
 // Example backend registration:
 //   CtsRegistry::RegisterBackend({
-//       "local_task",
-//       {.name = "local_task", .factory = CreateLocalTaskDevice},
+//       "task",
+//       {.name = "task", .factory = CreateTaskDevice},
 //       {"events", "indirect"},
 //       {{"native", "embedded-elf", GetNativeExecutableData}},
 //   });
@@ -247,7 +247,7 @@ inline void PrintTo(const BackendInfo& info, std::ostream* os) {
 // Identifies a backend configuration for test instantiation.
 // Extends BackendInfo with tags for filtering which test suites apply.
 struct BackendConfig {
-  const char* name;               // "local_task", etc.
+  const char* name;               // "task", etc.
   BackendInfo info;               // Factory + capabilities.
   std::vector<std::string> tags;  // {"events", "indirect", ...}
   std::vector<ExecutableTarget> executable_targets;  // Available targets.

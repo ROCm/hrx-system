@@ -1491,7 +1491,7 @@ static iree_status_t iree_hal_task_queue_drain_recording(
     } else {
       status = iree_make_status(
           IREE_STATUS_OUT_OF_RANGE,
-          "local-task profile dispatch aggregation storage is too large");
+          "task profile dispatch aggregation storage is too large");
     }
     if (iree_status_is_ok(status)) {
       memset(profile_dispatches, 0, dispatch_profile_bytes);
@@ -4018,21 +4018,21 @@ iree_status_t iree_hal_task_queue_submit_dispatch(
     if (IREE_UNLIKELY(!constants.data)) {
       status = iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
-          "local task queue dispatch constants must be non-null when length is "
+          "task queue dispatch constants must be non-null when length is "
           "non-zero");
     }
     if (iree_status_is_ok(status) &&
         IREE_UNLIKELY((constants.data_length % sizeof(uint32_t)) != 0)) {
       status = iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
-          "local task queue dispatch constants must be 4-byte aligned");
+          "task queue dispatch constants must be 4-byte aligned");
     }
     if (iree_status_is_ok(status) &&
         IREE_UNLIKELY(constants.data_length >
                       IREE_HAL_EXECUTABLE_MAX_CONSTANT_BYTE_LENGTH)) {
       status = iree_make_status(
           IREE_STATUS_OUT_OF_RANGE,
-          "local task queue dispatch constant byte length %" PRIhsz
+          "task queue dispatch constant byte length %" PRIhsz
           " exceeds maximum %" PRIhsz,
           constants.data_length,
           (iree_host_size_t)IREE_HAL_EXECUTABLE_MAX_CONSTANT_BYTE_LENGTH);

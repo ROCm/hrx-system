@@ -14,7 +14,7 @@ TEST_CASE_METHOD(HrxTestFixture, "query virtual memory support",
   REQUIRE_OK(hrx().allocator_query_virtual_memory(
       alloc, HRX_MEMORY_TYPE_DEVICE_LOCAL, &supported, &min_page, &rec_page));
 
-  // local-task does not support VM — just verify the query doesn't crash
+  // The task driver does not support VM — just verify the query doesn't crash
   // and returns consistent values.
   if (supported) {
     REQUIRE(min_page > 0);

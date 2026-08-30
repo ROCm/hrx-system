@@ -74,17 +74,17 @@ static const iree_hal_executable_loader_vtable_t test_executable_loader_vtable =
         /*.load=*/test_executable_loader_load,
 };
 
-TEST(LocalDeviceSpecBuilderTest, CapturesCommonLocalFacts) {
+TEST(TaskDeviceSpecBuilderTest, CapturesCommonTaskFacts) {
   test_executable_loader_t loader;
   iree_hal_executable_loader_initialize(&test_executable_loader_vtable,
                                         &loader.base);
   iree_hal_executable_loader_t* loader_ptr = &loader.base;
 
   iree_hal_task_device_spec_params_t params = {
-      /*.logical_device_id=*/IREE_SV("local0"),
-      /*.display_name=*/IREE_SV("Local Device"),
-      /*.driver_id=*/IREE_SV("local-test"),
-      /*.backend_id=*/IREE_SV("local"),
+      /*.logical_device_id=*/IREE_SV("task0"),
+      /*.display_name=*/IREE_SV("Task Device"),
+      /*.driver_id=*/IREE_SV("task-test"),
+      /*.backend_id=*/IREE_SV("task"),
       /*.queue_count=*/2,
       /*.default_queue_worker_count=*/8,
       /*.atomic_capabilities=*/
@@ -114,7 +114,12 @@ TEST(LocalDeviceSpecBuilderTest, CapturesCommonLocalFacts) {
       iree_hal_device_spec_identity(spec);
   ASSERT_NE(identity, nullptr);
   EXPECT_TRUE(
-      iree_string_view_equal(identity->logical_device_id, IREE_SV("local0")));
+      iree_string_view_equal(identity->logical_device_id, IREE_SV("task0")));
+  EXPECT_TRUE(
+      iree_string_view_equal(identity->display_name, IREE_SV("Task Device")));
+  EXPECT_TRUE(
+      iree_string_view_equal(identity->driver_id, IREE_SV("task-test")));
+  EXPECT_TRUE(iree_string_view_equal(identity->backend_id, IREE_SV("task")));
   ASSERT_EQ(identity->physical_device_count, 1);
 
   const iree_hal_device_memory_spec_t* memory =

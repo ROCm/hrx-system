@@ -208,7 +208,8 @@ hrx_status_t hrx_buffer_get_device_ptr(hrx_buffer_t buffer, void** device_ptr) {
                             hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                                             "buffer or device_ptr is NULL"));
   }
-  // For local-task (CPU) devices, the device pointer is available via mapping.
+  // For CPU devices using the task driver, the device pointer is available via
+  // mapping.
   // For real GPU devices, this would use iree_hal_buffer_export.
   // For now, map the buffer to get a usable pointer.
   if (buffer->mapped_ptr) {

@@ -235,8 +235,7 @@ static iree_status_t iree_hal_task_device_select_alloca_pool(
   if (!*out_pool) {
     return iree_make_status(
         IREE_STATUS_NOT_FOUND,
-        "no default local-task pool can satisfy queue_alloca of %" PRIdsz
-        " bytes",
+        "no default task pool can satisfy queue_alloca of %" PRIdsz " bytes",
         allocation_size);
   }
   return iree_ok_status();
@@ -330,8 +329,8 @@ iree_status_t iree_hal_task_device_create(
     iree_hal_task_device_spec_params_t spec_params = {
         .logical_device_id = identifier,
         .display_name = identifier,
-        .driver_id = IREE_SV("local-task"),
-        .backend_id = IREE_SV("local"),
+        .driver_id = IREE_SV("task"),
+        .backend_id = IREE_SV("task"),
         .queue_count = queue_count,
         .default_queue_worker_count =
             iree_task_executor_worker_count(queue_executors[0]),
@@ -971,7 +970,7 @@ static iree_status_t iree_hal_task_device_check_atomic_width(
     iree_hal_atomic_width_t width) {
   if (IREE_UNLIKELY(!iree_hal_task_atomic_width_is_lock_free(width))) {
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                            "local-task devices do not support lock-based "
+                            "task devices do not support lock-based "
                             "%u-bit atomic operations",
                             width);
   }
@@ -1030,7 +1029,7 @@ static iree_status_t iree_hal_task_device_queue_timestamp(
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
     iree_hal_timestamp_flags_t flags) {
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "local-task device-side timestamps not implemented");
+                          "task device-side timestamps not implemented");
 }
 
 static iree_status_t iree_hal_task_device_queue_flush(
@@ -1062,7 +1061,7 @@ static iree_status_t iree_hal_task_device_profiling_begin(
   iree_hal_task_device_t* device = iree_hal_task_device_cast(base_device);
   if (device->profile_recorder) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "cannot nest local-task profile captures");
+                            "cannot nest task profile captures");
   }
 
   const uint32_t physical_device_ordinal =

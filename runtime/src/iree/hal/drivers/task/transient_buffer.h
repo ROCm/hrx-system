@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Transient buffer: a reservation handle for queue-ordered local-task
+// Transient buffer: a reservation handle for queue-ordered task-driver
 // allocations.
 //
 // Queue allocators can return a transient buffer to the caller before the
@@ -42,7 +42,7 @@ iree_status_t iree_hal_task_transient_buffer_create(
     iree_device_size_t allocation_size, iree_device_size_t byte_length,
     iree_allocator_t host_allocator, iree_hal_buffer_t** out_buffer);
 
-// Returns true if |buffer| is a local-task transient buffer wrapper.
+// Returns true if |buffer| is a task-driver transient buffer wrapper.
 bool iree_hal_task_transient_buffer_isa(const iree_hal_buffer_t* buffer);
 
 // Returns the stable profiling id assigned to this transient buffer wrapper.

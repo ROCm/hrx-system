@@ -39,11 +39,11 @@ class NumpyIOTest : public ::testing::Test {
         iree_hal_device_create_params_default();
     create_params.proactor_pool = proactor_pool;
     iree_status_t status = iree_hal_create_device(
-        iree_hal_available_driver_registry(), IREE_SV("local-task"),
-        &create_params, iree_allocator_system(), &device_);
+        iree_hal_available_driver_registry(), IREE_SV("task"), &create_params,
+        iree_allocator_system(), &device_);
     iree_async_proactor_pool_release(proactor_pool);
     if (iree_status_is_not_found(status)) {
-      fprintf(stderr, "Skipping test as 'local-task' driver was not found:\n");
+      fprintf(stderr, "Skipping test as 'task' driver was not found:\n");
       iree_status_fprint(stderr, status);
       iree_status_free(status);
       GTEST_SKIP();

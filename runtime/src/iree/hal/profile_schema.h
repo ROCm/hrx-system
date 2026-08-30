@@ -518,7 +518,7 @@ enum iree_hal_profile_command_operation_flag_bits_t {
 // portable operation identity within |command_buffer_id| and the join key used
 // by dispatch events. The optional block fields are producer-local detail for
 // command encodings with explicit blocks or control-flow regions, such as the
-// AMDGPU AQL command-buffer program and local-task block ISA. Producers with a
+// AMDGPU AQL command-buffer program and task block ISA. Producers with a
 // linear or opaque command encoding must leave the block fields absent instead
 // of fabricating block structure.
 typedef struct iree_hal_profile_command_operation_record_t {
