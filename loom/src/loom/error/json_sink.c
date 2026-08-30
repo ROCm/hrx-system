@@ -251,7 +251,7 @@ static iree_status_t loom_json_render_highlights(
           loom_json_object_begin_field(&highlight_object, IREE_SV("field")));
       IREE_RETURN_IF_ERROR(
           loom_json_render_field_ref(object->stream, highlight->field_ref));
-      if (error && error->param_defs) {
+      if (error && error->param_count > 0) {
         if (highlight->param_index >= param_count ||
             highlight->param_index >= error->param_count) {
           IREE_ASSERT_UNREACHABLE(
@@ -261,7 +261,7 @@ static iree_status_t loom_json_render_highlights(
         IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
             &highlight_object, IREE_SV("param"),
             iree_make_cstring_view(
-                error->param_defs[highlight->param_index].name)));
+                loom_error_def_param_name(error, highlight->param_index))));
       }
     }
     IREE_RETURN_IF_ERROR(loom_json_object_end(&highlight_object));
@@ -329,7 +329,7 @@ static iree_status_t loom_json_render_highlight_omissions(
 static iree_status_t loom_json_render_param_fields(
     loom_json_object_writer_t* object, const loom_error_def_t* error,
     const loom_diagnostic_param_t* params, iree_host_size_t param_count) {
-  if (!error || !error->param_defs || !params || param_count == 0) {
+  if (!error || error->param_count == 0 || !params || param_count == 0) {
     return iree_ok_status();
   }
   bool has_field_refs = false;
@@ -348,7 +348,8 @@ static iree_status_t loom_json_render_param_fields(
   for (iree_host_size_t i = 0; i < param_count; ++i) {
     if (!loom_diagnostic_field_ref_is_set(params[i].field_ref)) continue;
     IREE_RETURN_IF_ERROR(loom_json_object_begin_field(
-        &param_fields, iree_make_cstring_view(error->param_defs[i].name)));
+        &param_fields,
+        iree_make_cstring_view(loom_error_def_param_name(error, i))));
     IREE_RETURN_IF_ERROR(
         loom_json_render_field_ref(object->stream, params[i].field_ref));
   }
@@ -371,20 +372,23 @@ iree_status_t loom_diagnostic_json_write_object(
 
   // Stable symbolic error ID.
   IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
-      &object, IREE_SV("error_id"), iree_make_cstring_view(error->error_id)));
+      &object, IREE_SV("error_id"),
+      iree_make_cstring_view(loom_error_def_id(error))));
 
   // Domain.
   IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
       &object, IREE_SV("domain"),
-      iree_make_cstring_view(loom_error_domain_name(error->domain))));
+      iree_make_cstring_view(
+          loom_error_domain_name(loom_error_def_domain(error)))));
 
   // Code.
   IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
-      &object, IREE_SV("code"), error->code));
+      &object, IREE_SV("code"), loom_error_def_code(error)));
 
   // One-line summary.
   IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
-      &object, IREE_SV("summary"), iree_make_cstring_view(error->summary)));
+      &object, IREE_SV("summary"),
+      iree_make_cstring_view(loom_error_def_summary(error))));
 
   // Emitter.
   IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
@@ -419,7 +423,7 @@ iree_status_t loom_diagnostic_json_write_object(
   }
 
   // Fix hint (when present).
-  if (error->fix_hint_template) {
+  if (loom_error_def_fix_hint_template(error)) {
     IREE_RETURN_IF_ERROR(
         loom_json_object_begin_field(&object, IREE_SV("fix_hint")));
     IREE_RETURN_IF_ERROR(loom_output_stream_write_char(stream, '"'));
@@ -433,10 +437,10 @@ iree_status_t loom_diagnostic_json_write_object(
   }
 
   // Params object (when present). Clamp to the schema length to avoid
-  // OOB reads on param_defs if a diagnostic carries more runtime params
+  // OOB reads on the schema if a diagnostic carries more runtime params
   // than the error definition declares.
   iree_host_size_t emit_param_count =
-      (diagnostic->params && error->param_defs)
+      (diagnostic->params && error->param_count > 0)
           ? iree_min(diagnostic->param_count, error->param_count)
           : 0;
   if (emit_param_count > 0) {
@@ -446,13 +450,14 @@ iree_status_t loom_diagnostic_json_write_object(
     IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &params));
     for (iree_host_size_t i = 0; i < emit_param_count; ++i) {
       // Validate that the runtime param kind matches the schema.
-      if (diagnostic->params[i].kind != error->param_defs[i].kind) {
+      if (diagnostic->params[i].kind != loom_error_def_param_kind(error, i)) {
         IREE_ASSERT_UNREACHABLE("diagnostic param kind does not match schema");
         IREE_BUILTIN_UNREACHABLE();
       }
       // Param name.
       IREE_RETURN_IF_ERROR(loom_json_object_begin_field(
-          &params, iree_make_cstring_view(error->param_defs[i].name)));
+          &params,
+          iree_make_cstring_view(loom_error_def_param_name(error, i))));
       // Param value.
       IREE_RETURN_IF_ERROR(loom_json_render_param_value(
           &diagnostic->params[i], type_formatter, stream));

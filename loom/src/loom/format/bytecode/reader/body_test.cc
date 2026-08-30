@@ -84,8 +84,8 @@ TEST_F(BytecodeRegionTest, RejectsSummaryCountLargerThanBoundedRegion) {
   EXPECT_EQ(summary.payload_offset, 0u);
   EXPECT_EQ(error_count_, 1u);
   ASSERT_NE(captured_.error, nullptr);
-  EXPECT_EQ(captured_.error->domain, LOOM_ERROR_DOMAIN_BYTECODE);
-  EXPECT_EQ(captured_.error->code, 16u);
+  EXPECT_EQ(loom_error_def_domain(captured_.error), LOOM_ERROR_DOMAIN_BYTECODE);
+  EXPECT_EQ(loom_error_def_code(captured_.error), 16u);
   EXPECT_EQ(captured_.origin.start, 4096u);
 }
 
@@ -101,8 +101,8 @@ TEST_F(BytecodeRegionTest, RejectsTruncatedSummaryPrefix) {
 
   EXPECT_EQ(error_count_, 1u);
   ASSERT_NE(captured_.error, nullptr);
-  EXPECT_EQ(captured_.error->domain, LOOM_ERROR_DOMAIN_BYTECODE);
-  EXPECT_EQ(captured_.error->code, 8u);
+  EXPECT_EQ(loom_error_def_domain(captured_.error), LOOM_ERROR_DOMAIN_BYTECODE);
+  EXPECT_EQ(loom_error_def_code(captured_.error), 8u);
   EXPECT_EQ(captured_.origin.start, 4099u);
 }
 

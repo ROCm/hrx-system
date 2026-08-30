@@ -56,6 +56,14 @@ def test_intern_rejects_bstring_payload_overflow() -> None:
         pool.intern("label", "x" * 256)
 
 
+def test_intern_can_assign_offsets_to_unbounded_c_strings() -> None:
+    pool = CStringPool("TEST", max_payload_length=None)
+
+    pool.intern("long", "x" * 1024)
+
+    assert pool.next_offset == 1025
+
+
 def test_canonical_label_matches_c_identifier_policy() -> None:
     assert CStringPool.canonical_label("...") == "empty"
     assert CStringPool.canonical_label("9-lives") == "_9_lives"

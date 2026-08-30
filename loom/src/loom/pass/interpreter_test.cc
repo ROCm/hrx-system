@@ -584,8 +584,9 @@ TEST_F(PassInterpreterTest, PropagatesDescriptorCallbackFailure) {
   EXPECT_EQ(trace.fail_invocation_count, 1);
   EXPECT_EQ(diagnostic_capture.emission_count, 1);
   ASSERT_NE(diagnostic_capture.error, nullptr);
-  EXPECT_EQ(diagnostic_capture.error->domain, LOOM_ERROR_DOMAIN_STRUCTURE);
-  EXPECT_EQ(diagnostic_capture.error->code, 28);
+  EXPECT_EQ(loom_error_def_domain(diagnostic_capture.error),
+            LOOM_ERROR_DOMAIN_STRUCTURE);
+  EXPECT_EQ(loom_error_def_code(diagnostic_capture.error), 28);
   EXPECT_EQ(diagnostic_capture.op, storage.program.instructions[0].source.op);
   ASSERT_EQ(diagnostic_capture.param_count, 4);
   EXPECT_EQ(diagnostic_capture.params[0].kind, LOOM_PARAM_STRING);

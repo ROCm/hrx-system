@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""C B-string pool helpers shared by Loom generators."""
+"""C string-pool helpers shared by Loom generators."""
 
 from __future__ import annotations
 
@@ -24,9 +24,10 @@ class CStringEntry:
 
 @dataclass(slots=True)
 class CStringPool:
-    """Interns byte-length-prefixed strings and emits stable enum references."""
+    """Interns strings and assigns stable byte offsets for C table emitters."""
 
     c_enum_prefix: str
+    max_payload_length: int | None = 255
     entries: list[CStringEntry] = field(default_factory=list)
     value_to_label: dict[str, str] = field(default_factory=dict)
     label_to_primary: dict[str, str] = field(default_factory=dict)
@@ -39,8 +40,8 @@ class CStringPool:
 
     def intern(self, label: str, value: str) -> str:
         """Interns |value| with |label| and returns the primary canonical label."""
-        if len(value.encode()) > 255:
-            raise ValueError(f"B-string '{value}' exceeds 255 bytes")
+        if self.max_payload_length is not None and len(value.encode()) > self.max_payload_length:
+            raise ValueError(f"string '{value}' exceeds {self.max_payload_length} bytes")
         label = self.canonical_label(label)
         if label in self.label_to_primary:
             primary_label = self.label_to_primary[label]

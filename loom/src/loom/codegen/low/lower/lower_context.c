@@ -84,12 +84,12 @@ static iree_status_t loom_low_lower_emit(loom_low_lower_context_t* context,
                                          const loom_error_def_t* error,
                                          const loom_diagnostic_param_t* params,
                                          iree_host_size_t param_count) {
-  if (error->severity == LOOM_DIAGNOSTIC_ERROR) {
+  if (loom_error_def_severity(error) == LOOM_DIAGNOSTIC_ERROR) {
     if (loom_low_lower_context_should_stop(context)) {
       return iree_ok_status();
     }
     ++context->result->error_count;
-  } else if (error->severity == LOOM_DIAGNOSTIC_REMARK) {
+  } else if (loom_error_def_severity(error) == LOOM_DIAGNOSTIC_REMARK) {
     ++context->result->remark_count;
   }
   loom_diagnostic_emission_t emission = {

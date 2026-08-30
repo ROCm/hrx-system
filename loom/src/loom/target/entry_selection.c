@@ -152,7 +152,7 @@ static iree_status_t loom_target_entry_emit_diagnostic(
       (loom_target_entry_diagnostic_emitter_t*)user_data;
 
   loom_diagnostic_t diagnostic = {
-      .severity = emission->error->severity,
+      .severity = loom_error_def_severity(emission->error),
       .error = emission->error,
       .params = emission->params,
       .param_count = emission->param_count,

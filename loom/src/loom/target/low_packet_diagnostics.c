@@ -34,7 +34,7 @@ static iree_status_t loom_target_low_packet_diagnostics_emit(
     loom_target_low_packet_diagnostic_context_t* context,
     const loom_low_packet_view_t* packet, const loom_error_def_t* error,
     const loom_diagnostic_param_t* params, iree_host_size_t param_count) {
-  switch (error->severity) {
+  switch (loom_error_def_severity(error)) {
     case LOOM_DIAGNOSTIC_ERROR:
       ++context->result->error_count;
       break;

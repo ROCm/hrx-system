@@ -81,8 +81,8 @@ iree_status_t CaptureDiagnostic(void* user_data,
                                 const loom_diagnostic_emission_t* emission) {
   CapturedDiagnostic* captured = static_cast<CapturedDiagnostic*>(user_data);
   ++captured->count;
-  captured->domain = emission->error->domain;
-  captured->code = emission->error->code;
+  captured->domain = loom_error_def_domain(emission->error);
+  captured->code = loom_error_def_code(emission->error);
   if (emission->param_count > 5) {
     captured->packet_index = emission->params[5].u32;
   }

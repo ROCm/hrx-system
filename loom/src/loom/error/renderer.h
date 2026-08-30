@@ -60,7 +60,7 @@ typedef struct loom_type_formatter_t {
 
 // Renders a diagnostic message by substituting params into the error
 // def's message template. Literal text is copied verbatim. Placeholders
-// ({param_name}) are looked up in the error def's param_defs array and
+// ({param_name}) are looked up in the error definition's parameter schema and
 // rendered from the corresponding runtime param value.
 //
 // Param rendering per kind:

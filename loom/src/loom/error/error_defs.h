@@ -138,51 +138,170 @@ const char* loom_emitter_name(loom_emitter_t emitter);
 // Error definition types
 //===----------------------------------------------------------------------===//
 
-// Parameter definition in .rodata. Describes one typed placeholder in
-// an error's message template.
-typedef struct loom_error_param_def_t {
-  const char* name;        // Placeholder name (e.g., "operand_name").
-  loom_param_kind_t kind;  // How to store and render the parameter.
-} loom_error_param_def_t;
+// Offset into a catalog-owned packed NUL-terminated string table.
+typedef uint32_t loom_error_string_offset_t;
 
-// Error definition in .rodata. One per error code. The (domain, code)
-// pair is the stable identity — codes are never reused within a domain.
-//
-// The message_template uses {param_name} placeholders that reference
-// the param_defs array. The rendering function expands placeholders by
-// substituting the corresponding runtime parameter value.
+// Sentinel used when an error has no optional string such as a fix hint.
+#define LOOM_ERROR_STRING_OFFSET_NONE UINT32_MAX
+
+// Parameter definitions pack a string-table offset and parameter kind into one
+// word. Generated catalogs are limited to 512 MiB of string data and eight
+// parameter kinds; both limits are verified while generating the catalog.
+typedef uint32_t loom_error_param_def_t;
+
+#define LOOM_ERROR_PARAM_DEF_KIND_BITS 3u
+#define LOOM_ERROR_PARAM_DEF_KIND_SHIFT (32u - LOOM_ERROR_PARAM_DEF_KIND_BITS)
+#define LOOM_ERROR_PARAM_DEF_NAME_OFFSET_MASK \
+  ((1u << LOOM_ERROR_PARAM_DEF_KIND_SHIFT) - 1u)
+#define LOOM_ERROR_PARAM_DEF(name_offset, kind)         \
+  ((loom_error_param_def_t)(((uint32_t)(name_offset)) | \
+                            ((uint32_t)(kind)           \
+                             << LOOM_ERROR_PARAM_DEF_KIND_SHIFT)))
+
+static inline loom_error_string_offset_t loom_error_param_def_name_offset(
+    loom_error_param_def_t param_def) {
+  return param_def & LOOM_ERROR_PARAM_DEF_NAME_OFFSET_MASK;
+}
+
+static inline loom_param_kind_t loom_error_param_def_kind(
+    loom_error_param_def_t param_def) {
+  return (loom_param_kind_t)(param_def >> LOOM_ERROR_PARAM_DEF_KIND_SHIFT);
+}
+
+typedef struct loom_error_catalog_t loom_error_catalog_t;
+
+// Compact generated error definition. The (domain, code) pair packed in |ref|
+// is the stable identity; codes are never reused within a domain. Strings and
+// parameter definitions are recovered from the owning catalog only when a
+// diagnostic is rendered or serialized.
 typedef struct loom_error_def_t {
-  const char* error_id;  // Stable symbolic ID, e.g. "ERR_TYPE_001".
-  loom_error_domain_t domain;
-  loom_diagnostic_severity_t severity;
-  uint16_t code;
-  const char* summary;            // One-line description.
-  const char* message_template;   // "{field_a} type {type_a} ..."
-  const char* fix_hint_template;  // NULL if no fix hint.
-  const loom_error_param_def_t* param_defs;
+  // Catalog owning all offsets and spans referenced by this definition.
+  const loom_error_catalog_t* catalog;
+  // Offset of the stable symbolic ID, such as "ERR_TYPE_001".
+  loom_error_string_offset_t error_id_offset;
+  // Offset of the one-line summary.
+  loom_error_string_offset_t summary_offset;
+  // Offset of the message template containing named placeholders.
+  loom_error_string_offset_t message_template_offset;
+  // Offset of the fix-hint template, or LOOM_ERROR_STRING_OFFSET_NONE.
+  loom_error_string_offset_t fix_hint_template_offset;
+  // First parameter definition in catalog->param_defs.
+  uint16_t param_start;
+  // Stable packed (domain, code) identity.
+  loom_error_ref_t ref;
+  // loom_diagnostic_severity_t stored compactly.
+  uint8_t severity;
+  // Number of consecutive parameter definitions beginning at |param_start|.
   uint8_t param_count;
+  // Reserved zero-valued bytes available for future catalog facts.
+  uint16_t reserved;
 } loom_error_def_t;
 
-// Generated domain-local catalog. Code zero is unused so diagnostic code N is a
-// direct index into errors_by_code[N].
-typedef struct loom_error_domain_catalog_t {
-  // Domain owned by this catalog.
-  loom_error_domain_t domain;
-  // Number of entries in errors_by_code, including the unused code zero slot.
+// Direct code-index span for one domain in a generated catalog. Code zero is
+// retained as the first entry so code N remains a direct index.
+typedef struct loom_error_domain_span_t {
+  // First entry in catalog->error_indices_by_code for this domain.
+  uint16_t code_index_start;
+  // Number of code-index entries, including the unused code zero slot.
   uint16_t code_count;
-  // Code-indexed error definition table. Missing codes have NULL entries.
-  const loom_error_def_t* const* errors_by_code;
-} loom_error_domain_catalog_t;
+} loom_error_domain_span_t;
 
-// Composed error catalog used to resolve compact refs carried by generated
-// tables. Composition happens at package/provider boundaries so core code can
-// resolve injected target refs without depending on optional target catalogs.
-typedef struct loom_error_catalog_t {
-  // Domain-indexed catalog shards. Absent domains have NULL entries.
-  const loom_error_domain_catalog_t* domains[LOOM_ERROR_DOMAIN_COUNT_];
-  // Optional catalog searched when this catalog does not contain a domain/code.
-  const struct loom_error_catalog_t* fallback_catalog;
-} loom_error_catalog_t;
+// Composed generated error catalog. Catalog shards own disjoint domains and may
+// fall back to another catalog, allowing optional targets to resolve core refs
+// without making core depend on target error data.
+struct loom_error_catalog_t {
+  // Packed NUL-terminated strings referenced by definition offsets.
+  const char* string_data;
+  // Compact error definitions addressable by generated public macros.
+  const loom_error_def_t* error_defs;
+  // Packed parameter definitions referenced by definition spans.
+  const loom_error_param_def_t* param_defs;
+  // Flattened domain/code map containing definition indices or UINT16_MAX.
+  const uint16_t* error_indices_by_code;
+  // Optional catalog searched when this catalog does not contain a ref.
+  const loom_error_catalog_t* fallback_catalog;
+  // Domain-indexed spans into |error_indices_by_code|.
+  loom_error_domain_span_t domain_spans[LOOM_ERROR_DOMAIN_COUNT_];
+  // Reserved zero-valued bytes occupying otherwise implicit tail padding.
+  uint32_t reserved;
+};
+
+// Returns the stable packed identity of |error|.
+static inline loom_error_ref_t loom_error_def_ref(
+    const loom_error_def_t* error) {
+  return error->ref;
+}
+
+// Returns the semantic domain of |error|.
+static inline loom_error_domain_t loom_error_def_domain(
+    const loom_error_def_t* error) {
+  return loom_error_ref_domain(error->ref);
+}
+
+// Returns the stable domain-local code of |error|.
+static inline uint16_t loom_error_def_code(const loom_error_def_t* error) {
+  return loom_error_ref_code(error->ref);
+}
+
+// Returns the diagnostic severity of |error|.
+static inline loom_diagnostic_severity_t loom_error_def_severity(
+    const loom_error_def_t* error) {
+  return (loom_diagnostic_severity_t)error->severity;
+}
+
+// Returns the catalog string at |offset|. Generated offsets are trusted.
+static inline const char* loom_error_catalog_string(
+    const loom_error_catalog_t* catalog, loom_error_string_offset_t offset) {
+  return catalog->string_data + offset;
+}
+
+// Returns the stable symbolic ID of |error|.
+static inline const char* loom_error_def_id(const loom_error_def_t* error) {
+  return loom_error_catalog_string(error->catalog, error->error_id_offset);
+}
+
+// Returns the one-line summary of |error|.
+static inline const char* loom_error_def_summary(
+    const loom_error_def_t* error) {
+  return loom_error_catalog_string(error->catalog, error->summary_offset);
+}
+
+// Returns the message template of |error|.
+static inline const char* loom_error_def_message_template(
+    const loom_error_def_t* error) {
+  return loom_error_catalog_string(error->catalog,
+                                   error->message_template_offset);
+}
+
+// Returns the fix-hint template of |error|, or NULL when absent.
+static inline const char* loom_error_def_fix_hint_template(
+    const loom_error_def_t* error) {
+  return error->fix_hint_template_offset == LOOM_ERROR_STRING_OFFSET_NONE
+             ? NULL
+             : loom_error_catalog_string(error->catalog,
+                                         error->fix_hint_template_offset);
+}
+
+// Returns the packed definition of parameter |index|. Generated spans are
+// trusted and callers pass indices below error->param_count.
+static inline loom_error_param_def_t loom_error_def_param(
+    const loom_error_def_t* error, iree_host_size_t index) {
+  return error->catalog->param_defs[error->param_start + index];
+}
+
+// Returns the name of parameter |index|.
+static inline const char* loom_error_def_param_name(
+    const loom_error_def_t* error, iree_host_size_t index) {
+  return loom_error_catalog_string(
+      error->catalog,
+      loom_error_param_def_name_offset(loom_error_def_param(error, index)));
+}
+
+// Returns the kind of parameter |index|.
+static inline loom_param_kind_t loom_error_def_param_kind(
+    const loom_error_def_t* error, iree_host_size_t index) {
+  return loom_error_param_def_kind(loom_error_def_param(error, index));
+}
 
 typedef struct loom_diagnostic_string_list_t {
   // Values in stable display and serialization order.
@@ -191,7 +310,7 @@ typedef struct loom_diagnostic_string_list_t {
   iree_host_size_t count;
 } loom_diagnostic_string_list_t;
 
-// A runtime parameter value, matching an error_def's param_defs entry.
+// A runtime parameter value matching an error definition's parameter entry.
 // The kind is redundant with the def but avoids chasing the def pointer
 // during rendering.
 typedef struct loom_diagnostic_param_t {

@@ -82,9 +82,9 @@ static iree_status_t loom_low_verify_emit(
   if (loom_low_verify_should_stop(state)) {
     return iree_ok_status();
   }
-  if (error->severity == LOOM_DIAGNOSTIC_ERROR) {
+  if (loom_error_def_severity(error) == LOOM_DIAGNOSTIC_ERROR) {
     ++state->result->error_count;
-  } else if (error->severity == LOOM_DIAGNOSTIC_WARNING) {
+  } else if (loom_error_def_severity(error) == LOOM_DIAGNOSTIC_WARNING) {
     ++state->result->warning_count;
   }
   loom_diagnostic_emission_t emission = {

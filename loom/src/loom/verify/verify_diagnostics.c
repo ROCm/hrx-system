@@ -379,16 +379,17 @@ void loom_verify_emit_diagnostic(loom_verify_state_t* state,
                                  const loom_diagnostic_emission_t* emission) {
   if (!iree_status_is_ok(state->diagnostic_status)) return;
 
-  if (emission->error->severity == LOOM_DIAGNOSTIC_ERROR) {
+  if (loom_error_def_severity(emission->error) == LOOM_DIAGNOSTIC_ERROR) {
     ++state->result->error_count;
-  } else if (emission->error->severity == LOOM_DIAGNOSTIC_WARNING) {
+  } else if (loom_error_def_severity(emission->error) ==
+             LOOM_DIAGNOSTIC_WARNING) {
     ++state->result->warning_count;
   }
 
   if (!state->sink.fn) return;
 
   loom_diagnostic_t diagnostic = {0};
-  diagnostic.severity = emission->error->severity;
+  diagnostic.severity = loom_error_def_severity(emission->error);
   diagnostic.error = emission->error;
   diagnostic.params = emission->params;
   diagnostic.param_count = emission->param_count;

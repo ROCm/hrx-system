@@ -62,13 +62,14 @@ constexpr uint32_t kFeedbackConfigByteLength = 64;
 iree_status_t PrintCompilerDiagnostic(
     void* user_data, const loom_diagnostic_emission_t* emission) {
   (void)user_data;
-  fprintf(stderr, "compiler diagnostic: %s: %s\n",
-          emission->error ? emission->error->error_id : "<unknown>",
-          emission->error ? emission->error->summary : "<unknown>");
+  fprintf(
+      stderr, "compiler diagnostic: %s: %s\n",
+      emission->error ? loom_error_def_id(emission->error) : "<unknown>",
+      emission->error ? loom_error_def_summary(emission->error) : "<unknown>");
   for (iree_host_size_t i = 0; i < emission->param_count; ++i) {
     const loom_diagnostic_param_t* param = &emission->params[i];
     const char* name = emission->error && i < emission->error->param_count
-                           ? emission->error->param_defs[i].name
+                           ? loom_error_def_param_name(emission->error, i)
                            : "<param>";
     switch (param->kind) {
       case LOOM_PARAM_STRING:

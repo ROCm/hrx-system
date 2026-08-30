@@ -143,7 +143,7 @@ static iree_status_t loom_pass_interpreter_count_diagnostic(
   loom_pass_interpreter_diagnostic_counter_t* counter =
       (loom_pass_interpreter_diagnostic_counter_t*)user_data;
   ++counter->emission_count;
-  switch (emission->error->severity) {
+  switch (loom_error_def_severity(emission->error)) {
     case LOOM_DIAGNOSTIC_ERROR:
       ++counter->error_count;
       ++counter->pass->error_diagnostic_count;

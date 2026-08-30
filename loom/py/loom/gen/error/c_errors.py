@@ -40,8 +40,10 @@ def _ensure_runtime_py_on_path() -> None:
 _ensure_runtime_py_on_path()
 
 from loom.errors import Emitter, ErrorDef, ErrorDomain, ParamKind, Severity  # noqa: E402
+from loom.gen.support.c import c_string_literal  # noqa: E402
 from loom.gen.support.files import write_text_file as _write_text  # noqa: E402
 from loom.gen.support.generated_file import line_comment_header  # noqa: E402
+from loom.gen.support.string_pool import CStringPool  # noqa: E402
 
 
 def _c_symbol(error: ErrorDef) -> str:
@@ -66,12 +68,20 @@ def _header_guard_from_public_header(public_header: str) -> str:
     return guard.strip("_") + "_"
 
 
-def _catalog_domain_symbol(catalog_symbol: str, domain: ErrorDomain) -> str:
-    return f"{catalog_symbol}_{domain.name.lower()}"
+def _catalog_definitions_symbol(catalog_symbol: str) -> str:
+    return f"{catalog_symbol}_definitions"
 
 
-def _catalog_domain_defs_symbol(catalog_symbol: str, domain: ErrorDomain) -> str:
-    return f"{_catalog_domain_symbol(catalog_symbol, domain)}_defs"
+def _catalog_param_defs_symbol(catalog_symbol: str) -> str:
+    return f"{catalog_symbol}_param_defs"
+
+
+def _catalog_error_indices_symbol(catalog_symbol: str) -> str:
+    return f"{catalog_symbol}_error_indices"
+
+
+def _catalog_string_data_symbol(catalog_symbol: str) -> str:
+    return f"{catalog_symbol}_string_data"
 
 
 def _param_kind_c_name(kind: ParamKind) -> str:
@@ -90,9 +100,48 @@ def _emitter_c_name(emitter: Emitter) -> str:
     return f"LOOM_EMITTER_{emitter.name}"
 
 
-def _escape_c_string(text: str) -> str:
-    """Escapes a string for C string literal."""
-    return text.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+def _error_string_label(error: ErrorDef, field: str) -> str:
+    return f"{_c_symbol(error)}_{field}"
+
+
+def _error_param_string_label(error: ErrorDef, index: int) -> str:
+    return f"{_c_symbol(error)}_param_{index}_{error.params[index].name}"
+
+
+def _emit_cstring_table(pool: CStringPool, data_name: str) -> list[str]:
+    """Emits one packed NUL-terminated C string table and offset constants."""
+    if not pool.entries:
+        return []
+    lines = [
+        "// clang-format off",
+        f"static const char {data_name}[] =",
+    ]
+    for entry in pool.entries:
+        if "\0" in entry.value:
+            raise ValueError(f"error catalog string {entry.label!r} contains NUL")
+        lines.append(f'    "{c_string_literal(entry.value)}\\0"')
+    lines[-1] += ";"
+    lines.extend(["// clang-format on", "", "enum {"])
+    for index, entry in enumerate(pool.entries):
+        enum_name = pool.enum_name(entry.label)
+        if index == 0:
+            lines.append(f"  {enum_name} = 0,")
+        else:
+            previous_entry = pool.entries[index - 1]
+            previous_enum_name = pool.enum_name(previous_entry.label)
+            previous_value = c_string_literal(previous_entry.value)
+            lines.append(f'  {enum_name} = {previous_enum_name} + sizeof("{previous_value}"),')
+    previous_entry = pool.entries[-1]
+    previous_enum_name = pool.enum_name(previous_entry.label)
+    previous_value = c_string_literal(previous_entry.value)
+    lines.extend(
+        [
+            f'  {pool.c_enum_prefix}_STRING_END = {previous_enum_name} + sizeof("{previous_value}"),',
+            "};",
+            "",
+        ]
+    )
+    return lines
 
 
 def _group_errors_by_domain(
@@ -119,7 +168,7 @@ def generate_error_catalog_c(
     fallback_catalog_symbol: str | None = None,
     fallback_public_header: str | None = None,
 ) -> str:
-    """Generates error_catalog.c with .rodata error definitions."""
+    """Generates a compact error catalog source file."""
     lines = [
         *line_comment_header(
             "//",
@@ -138,59 +187,104 @@ def generate_error_catalog_c(
             ]
         )
 
-    # Per-error param def arrays and error def structs.
-    for error in errors:
-        symbol = _c_symbol(error)
+    ordered_errors = sorted(errors, key=lambda error: (error.domain.value, error.code))
+    grouped_errors = _group_errors_by_domain(ordered_errors)
+    if len(ordered_errors) >= (1 << 16) - 1:
+        raise ValueError("error catalog has too many definitions for uint16 indices")
 
-        # Param defs array (only if params exist).
-        if error.params:
-            lines.append(f"static const loom_error_param_def_t {symbol}_params[] = {{")
-            for param in error.params:
-                name_escaped = _escape_c_string(param.name)
-                lines.append(f'    {{"{name_escaped}", {_param_kind_c_name(param.kind)}}},')
-            lines.append("};")
-        lines.append(f"const loom_error_def_t {symbol} = {{")
-        lines.append(f'    .error_id = "{_escape_c_string(error.error_id)}",')
-        lines.append(f"    .domain = {_domain_c_name(error.domain)},")
-        lines.append(f"    .severity = {_severity_c_name(error.severity)},")
-        lines.append(f"    .code = {error.code},")
-        lines.append(f'    .summary = "{_escape_c_string(error.summary)}",')
-        lines.append(f'    .message_template = "{_escape_c_string(error.message)}",')
+    string_prefix = catalog_symbol.upper()
+    string_pool = CStringPool(string_prefix, max_payload_length=None)
+    for error in ordered_errors:
+        string_pool.intern(_error_string_label(error, "id"), error.error_id)
+        string_pool.intern(_error_string_label(error, "summary"), error.summary)
+        string_pool.intern(_error_string_label(error, "message"), error.message)
         if error.fix_hint:
-            lines.append(f'    .fix_hint_template = "{_escape_c_string(error.fix_hint)}",')
-        else:
-            lines.append("    .fix_hint_template = NULL,")
-        if error.params:
-            lines.append(f"    .param_defs = {symbol}_params,")
-        else:
-            lines.append("    .param_defs = NULL,")
-        lines.append(f"    .param_count = {len(error.params)},")
-        lines.append("};")
-        lines.append("")
+            string_pool.intern(_error_string_label(error, "fix_hint"), error.fix_hint)
+        if len(error.params) > 255:
+            raise ValueError(f"{error.error_id}: too many diagnostic parameters")
+        for param_index, param in enumerate(error.params):
+            if param.kind.value >= (1 << 3):
+                raise ValueError(f"{error.error_id}: parameter kind exceeds compact encoding")
+            string_pool.intern(_error_param_string_label(error, param_index), param.name)
+    if string_pool.next_offset >= (1 << 29):
+        raise ValueError("error catalog string data exceeds compact parameter offset encoding")
 
-    grouped_errors = _group_errors_by_domain(errors)
+    string_data_symbol = _catalog_string_data_symbol(catalog_symbol)
+    lines.extend(_emit_cstring_table(string_pool, string_data_symbol))
+
+    param_defs_symbol = _catalog_param_defs_symbol(catalog_symbol)
+    param_starts: dict[tuple[ErrorDomain, int], int] = {}
+    param_count = 0
+    for error in ordered_errors:
+        param_starts[(error.domain, error.code)] = param_count
+        param_count += len(error.params)
+    if param_count >= (1 << 16):
+        raise ValueError("error catalog has too many parameter definitions")
+    if param_count:
+        lines.append(f"static const loom_error_param_def_t {param_defs_symbol}[] = {{")
+        for error in ordered_errors:
+            for param_index, param in enumerate(error.params):
+                lines.append(f"    LOOM_ERROR_PARAM_DEF({string_pool.ref(_error_param_string_label(error, param_index))}, {_param_kind_c_name(param.kind)}),")
+        lines.extend(["};", ""])
+
+    definitions_symbol = _catalog_definitions_symbol(catalog_symbol)
+    error_indices = {(error.domain, error.code): index for index, error in enumerate(ordered_errors)}
+    if ordered_errors:
+        lines.append(f"const loom_error_def_t {definitions_symbol}[] = {{")
+        for error_index, error in enumerate(ordered_errors):
+            lines.append(f"    [{error_index}] = {{")
+            lines.append(f"        .catalog = &{catalog_symbol},")
+            lines.append(f"        .error_id_offset = {string_pool.ref(_error_string_label(error, 'id'))},")
+            lines.append(f"        .summary_offset = {string_pool.ref(_error_string_label(error, 'summary'))},")
+            lines.append(f"        .message_template_offset = {string_pool.ref(_error_string_label(error, 'message'))},")
+            if error.fix_hint:
+                fix_hint_offset = string_pool.ref(_error_string_label(error, "fix_hint"))
+            else:
+                fix_hint_offset = "LOOM_ERROR_STRING_OFFSET_NONE"
+            lines.append(f"        .fix_hint_template_offset = {fix_hint_offset},")
+            lines.append(f"        .param_start = {param_starts[(error.domain, error.code)]},")
+            lines.append(f"        .ref = LOOM_ERROR_REF({_domain_c_name(error.domain)}, {error.code}),")
+            lines.append(f"        .severity = {_severity_c_name(error.severity)},")
+            lines.append(f"        .param_count = {len(error.params)},")
+            lines.append("    },")
+        lines.extend(["};", ""])
+
+    code_indices: list[str] = []
+    domain_spans: dict[ErrorDomain, tuple[int, int]] = {}
     for domain, domain_errors in grouped_errors.items():
         max_code = max(error.code for error in domain_errors)
-        defs_symbol = _catalog_domain_defs_symbol(catalog_symbol, domain)
-        lines.append(f"static const loom_error_def_t* const {defs_symbol}[{max_code + 1}] = {{")
-        lines.extend(f"    [{error.code}] = &{_c_symbol(error)}," for error in domain_errors)
-        lines.append("};")
-        lines.append("")
-        lines.append(f"const loom_error_domain_catalog_t {_catalog_domain_symbol(catalog_symbol, domain)} = {{")
-        lines.append(f"    .domain = {_domain_c_name(domain)},")
-        lines.append(f"    .code_count = {max_code + 1},")
-        lines.append(f"    .errors_by_code = {defs_symbol},")
-        lines.append("};")
-        lines.append("")
+        code_index_start = len(code_indices)
+        domain_indices = ["UINT16_MAX"] * (max_code + 1)
+        for error in domain_errors:
+            domain_indices[error.code] = str(error_indices[(error.domain, error.code)])
+        code_indices.extend(domain_indices)
+        domain_spans[domain] = (code_index_start, len(domain_indices))
+    if len(code_indices) >= (1 << 16):
+        raise ValueError("error catalog code index table exceeds uint16 spans")
+
+    error_indices_symbol = _catalog_error_indices_symbol(catalog_symbol)
+    if code_indices:
+        lines.append(f"static const uint16_t {error_indices_symbol}[] = {{")
+        for index, error_index in enumerate(code_indices):
+            lines.append(f"    [{index}] = {error_index},")
+        lines.extend(["};", ""])
 
     lines.append(f"const loom_error_catalog_t {catalog_symbol} = {{")
-    lines.append("    .domains = {")
-    lines.extend(f"        [{_domain_c_name(domain)}] = &{_catalog_domain_symbol(catalog_symbol, domain)}," for domain in grouped_errors)
-    lines.append("    },")
+    lines.append(f"    .string_data = {string_data_symbol if string_pool.entries else 'NULL'},")
+    lines.append(f"    .error_defs = {definitions_symbol if ordered_errors else 'NULL'},")
+    lines.append(f"    .param_defs = {param_defs_symbol if param_count else 'NULL'},")
+    lines.append(f"    .error_indices_by_code = {error_indices_symbol if code_indices else 'NULL'},")
     if fallback_catalog_symbol is not None:
         lines.append(f"    .fallback_catalog = &{fallback_catalog_symbol},")
     else:
         lines.append("    .fallback_catalog = NULL,")
+    lines.append("    .domain_spans = {")
+    for domain, (code_index_start, code_count) in domain_spans.items():
+        lines.append(f"        [{_domain_c_name(domain)}] = {{")
+        lines.append(f"            .code_index_start = {code_index_start},")
+        lines.append(f"            .code_count = {code_count},")
+        lines.append("        },")
+    lines.append("    },")
     lines.append("};")
     lines.append("")
 
@@ -202,7 +296,8 @@ def generate_error_catalog_h(errors: list[ErrorDef], *, catalog_symbol: str, pub
 
     seen_def_macros: set[str] = set()
     seen_ref_macros: set[str] = set()
-    seen_symbols: set[str] = set()
+    ordered_errors = sorted(errors, key=lambda error: (error.domain.value, error.code))
+    definitions_symbol = _catalog_definitions_symbol(catalog_symbol)
     lines = [
         *line_comment_header(
             "//",
@@ -220,27 +315,20 @@ def generate_error_catalog_h(errors: list[ErrorDef], *, catalog_symbol: str, pub
         "#endif",
         "",
         f"extern const loom_error_catalog_t {catalog_symbol};",
+        f"extern const loom_error_def_t {definitions_symbol}[];",
         "",
     ]
-    lines.extend(f"extern const loom_error_domain_catalog_t {_catalog_domain_symbol(catalog_symbol, domain)};" for domain in _group_errors_by_domain(errors))
-    if errors:
-        lines.append("")
-    for error in errors:
-        symbol = _c_symbol(error)
+    for error_index, error in enumerate(ordered_errors):
         def_macro = _error_def_macro(error)
         ref_macro = _error_ref_macro(error)
-        if symbol in seen_symbols:
-            raise ValueError(f"{error.error_id}: duplicate error symbol {symbol}")
         if def_macro in seen_def_macros:
             raise ValueError(f"{error.error_id}: duplicate error def macro {def_macro}")
         if ref_macro in seen_ref_macros:
             raise ValueError(f"{error.error_id}: duplicate error ref macro {ref_macro}")
-        seen_symbols.add(symbol)
         seen_def_macros.add(def_macro)
         seen_ref_macros.add(ref_macro)
         lines.append(f"// {error.error_id}: {error.summary}")
-        lines.append(f"extern const loom_error_def_t {symbol};")
-        lines.append(f"#define {def_macro} (&{symbol})")
+        lines.append(f"#define {def_macro} (&{definitions_symbol}[{error_index}])")
         lines.append(f"#define {ref_macro} \\")
         lines.append(f"  LOOM_ERROR_REF({_domain_c_name(error.domain)}, {error.code})")
         lines.append("")
