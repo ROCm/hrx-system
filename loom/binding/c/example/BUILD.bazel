@@ -67,6 +67,20 @@ iree_executable_test(
 )
 
 loom_cc_binary(
+    name = "product_frontier",
+    srcs = ["product_frontier.c"],
+    deps = [
+        "//loom/binding/c:loomc",
+        "//loom/binding/c/target/cmd",
+    ],
+)
+
+iree_executable_test(
+    name = "product_frontier_test",
+    src = ":product_frontier",
+)
+
+loom_cc_binary(
     name = "emit_spirv_offline",
     srcs = ["emit_spirv_offline.c"],
     target_compatible_with = LOOMC_TARGET_SPIRV_COMPATIBLE_WITH,
