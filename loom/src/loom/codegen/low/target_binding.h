@@ -105,6 +105,14 @@ typedef struct loom_low_descriptor_packet_t {
   const loom_low_descriptor_t* descriptor;
 } loom_low_descriptor_packet_t;
 
+#if defined(IREE_PTR_SIZE_64)
+static_assert(sizeof(loom_low_descriptor_packet_t) == 24,
+              "loom_low_descriptor_packet_t must be 24 bytes");
+#elif defined(IREE_PTR_SIZE_32)
+static_assert(sizeof(loom_low_descriptor_packet_t) == 16,
+              "loom_low_descriptor_packet_t must be 16 bytes");
+#endif  // IREE_PTR_SIZE_*
+
 // Returns the descriptor packet kind for |op|.
 static inline loom_low_descriptor_packet_kind_t loom_low_descriptor_packet_kind(
     const loom_op_t* op) {

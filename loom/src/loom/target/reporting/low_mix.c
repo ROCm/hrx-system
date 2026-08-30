@@ -185,6 +185,7 @@ static void loom_target_compile_report_accumulate_low_memory_effect(
 static void loom_target_compile_report_accumulate_low_memory_effects(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor,
+    loom_low_instruction_class_flags_t instruction_classes,
     loom_target_compile_report_static_instruction_mix_t* mix) {
   if (descriptor->effect_count == 0) {
     return;
@@ -195,7 +196,7 @@ static void loom_target_compile_report_accumulate_low_memory_effects(
     const uint32_t effect_index = descriptor->effect_start + i;
     const loom_low_effect_t* effect = &descriptor_set->effects[effect_index];
     loom_target_compile_report_accumulate_low_memory_effect(
-        effect, descriptor->instruction_class_flags, mix);
+        effect, instruction_classes, mix);
   }
 }
 
@@ -221,9 +222,10 @@ void loom_target_compile_report_accumulate_low_node_static_mix(
   }
   ++mix->descriptor_count;
   const loom_low_instruction_class_flags_t instruction_classes =
-      node->descriptor->instruction_class_flags;
+      loom_low_descriptor_set_descriptor_view(descriptor_set, node->descriptor)
+          ->instruction_class_flags;
   loom_target_compile_report_accumulate_low_memory_effects(
-      descriptor_set, node->descriptor, mix);
+      descriptor_set, node->descriptor, instruction_classes, mix);
 #define LOOM_ACCUMULATE_INSTRUCTION_CLASS_(field, flag)         \
   mix->field##_count +=                                         \
       iree_all_bits_set(instruction_classes,                    \

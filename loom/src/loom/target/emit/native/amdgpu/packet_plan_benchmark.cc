@@ -209,8 +209,11 @@ static FrameAnalysis AnalyzeFrame(const loom_low_emission_frame_t& frame) {
         HashValue(analysis.signature,
                   node.descriptor == nullptr ? 0 : node.descriptor->stable_id);
     if (node.descriptor != nullptr &&
-        iree_any_bit_set(node.descriptor->instruction_class_flags,
-                         LOOM_LOW_INSTRUCTION_CLASS_FLAG_MATRIX)) {
+        iree_any_bit_set(
+            loom_low_descriptor_set_descriptor_view(
+                frame.schedule.target.descriptor_set, node.descriptor)
+                ->instruction_class_flags,
+            LOOM_LOW_INSTRUCTION_CLASS_FLAG_MATRIX)) {
       ++analysis.shape.matrix_packet_count;
     }
   }

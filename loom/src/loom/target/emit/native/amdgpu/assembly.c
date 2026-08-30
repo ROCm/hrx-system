@@ -100,6 +100,13 @@ static iree_string_view_t loom_amdgpu_descriptor_key(
       context->packet->descriptor->key_string_offset);
 }
 
+static const loom_low_descriptor_view_t* loom_amdgpu_descriptor_view(
+    const loom_native_assembly_packet_context_t* context) {
+  return loom_low_descriptor_set_descriptor_view_at(
+      context->schedule->target.descriptor_set,
+      context->packet->descriptor_ordinal);
+}
+
 static iree_status_t loom_amdgpu_append_mnemonic(
     const loom_native_assembly_packet_context_t* context) {
   const iree_string_view_t mnemonic = loom_native_assembly_descriptor_string(
@@ -957,8 +964,9 @@ static iree_status_t loom_amdgpu_lookup_canonical_asm_form(
     const loom_low_asm_form_t** out_form) {
   const loom_low_descriptor_set_t* descriptor_set =
       context->schedule->target.descriptor_set;
-  const loom_low_descriptor_t* descriptor = context->packet->descriptor;
-  if (descriptor->canonical_asm_form_ordinal ==
+  const loom_low_descriptor_view_t* descriptor_view =
+      loom_amdgpu_descriptor_view(context);
+  if (descriptor_view->canonical_asm_form_ordinal ==
       LOOM_LOW_ASM_FORM_ORDINAL_NONE) {
     const iree_string_view_t key = loom_amdgpu_descriptor_key(context);
     return iree_make_status(
@@ -967,7 +975,7 @@ static iree_status_t loom_amdgpu_lookup_canonical_asm_form(
         (int)key.size, key.data);
   }
   *out_form = loom_low_descriptor_set_asm_form_at(
-      descriptor_set, descriptor->canonical_asm_form_ordinal);
+      descriptor_set, descriptor_view->canonical_asm_form_ordinal);
   if (*out_form == NULL) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "AMDGPU assembly canonical asm form is out of "
@@ -1425,8 +1433,9 @@ static iree_status_t loom_amdgpu_try_append_native_memory_packet(
   *out_matched = false;
   const loom_low_descriptor_set_t* descriptor_set =
       context->schedule->target.descriptor_set;
-  const loom_low_descriptor_t* descriptor = context->packet->descriptor;
-  if (descriptor->canonical_asm_form_ordinal ==
+  const loom_low_descriptor_view_t* descriptor_view =
+      loom_amdgpu_descriptor_view(context);
+  if (descriptor_view->canonical_asm_form_ordinal ==
       LOOM_LOW_ASM_FORM_ORDINAL_NONE) {
     return iree_ok_status();
   }
@@ -1460,7 +1469,9 @@ static iree_status_t loom_amdgpu_append_memory_packet(
     return iree_ok_status();
   }
   const loom_low_descriptor_t* descriptor = context->packet->descriptor;
-  if (descriptor->canonical_asm_form_ordinal ==
+  const loom_low_descriptor_view_t* descriptor_view =
+      loom_amdgpu_descriptor_view(context);
+  if (descriptor_view->canonical_asm_form_ordinal ==
       LOOM_LOW_ASM_FORM_ORDINAL_NONE) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_append_mnemonic(context));
     IREE_RETURN_IF_ERROR(loom_amdgpu_append_descriptor_value_list(context));
@@ -1854,6 +1865,8 @@ loom_amdgpu_descriptor_packet_route_flags(
   const loom_low_descriptor_set_t* descriptor_set =
       context->schedule->target.descriptor_set;
   const loom_low_descriptor_t* descriptor = context->packet->descriptor;
+  const loom_low_descriptor_view_t* descriptor_view =
+      loom_amdgpu_descriptor_view(context);
 
   const bool has_read_effect = loom_amdgpu_descriptor_has_effect(
       descriptor_set, descriptor, LOOM_LOW_EFFECT_KIND_READ);
@@ -1896,13 +1909,13 @@ loom_amdgpu_descriptor_packet_route_flags(
   if (descriptor->immediate_count == 2) {
     flags |= LOOM_AMDGPU_DESCRIPTOR_PACKET_ROUTE_FLAG_TWO_IMMEDIATES;
   }
-  if (descriptor->canonical_asm_form_ordinal !=
+  if (descriptor_view->canonical_asm_form_ordinal !=
       LOOM_LOW_ASM_FORM_ORDINAL_NONE) {
-    IREE_ASSERT_LT(descriptor->canonical_asm_form_ordinal,
+    IREE_ASSERT_LT(descriptor_view->canonical_asm_form_ordinal,
                    descriptor_set->asm_form_count);
     IREE_ASSERT(descriptor_set->asm_forms != NULL);
     const loom_low_asm_form_t* form =
-        &descriptor_set->asm_forms[descriptor->canonical_asm_form_ordinal];
+        &descriptor_set->asm_forms[descriptor_view->canonical_asm_form_ordinal];
     if (form->native_assembly_value_count > 0) {
       flags |= LOOM_AMDGPU_DESCRIPTOR_PACKET_ROUTE_FLAG_NATIVE_FORM;
     }
@@ -3324,8 +3337,9 @@ static iree_status_t loom_amdgpu_try_append_mnemonic_dispatch_packet(
 static iree_status_t loom_amdgpu_try_append_canonical_asm_form_dispatch_packet(
     const loom_native_assembly_packet_context_t* context, bool* out_matched) {
   *out_matched = false;
-  const loom_low_descriptor_t* descriptor = context->packet->descriptor;
-  if (descriptor->canonical_asm_form_ordinal ==
+  const loom_low_descriptor_view_t* descriptor_view =
+      loom_amdgpu_descriptor_view(context);
+  if (descriptor_view->canonical_asm_form_ordinal ==
       LOOM_LOW_ASM_FORM_ORDINAL_NONE) {
     return iree_ok_status();
   }

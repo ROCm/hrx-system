@@ -81,13 +81,15 @@ static const loom_low_asm_form_t*
 loom_amdgpu_sanitizer_access_canonical_asm_form(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor) {
-  if (descriptor->canonical_asm_form_ordinal ==
-      LOOM_LOW_ASM_FORM_ORDINAL_NONE) {
+  const uint32_t canonical_asm_form_ordinal =
+      loom_low_descriptor_set_descriptor_view(descriptor_set, descriptor)
+          ->canonical_asm_form_ordinal;
+  if (canonical_asm_form_ordinal == LOOM_LOW_ASM_FORM_ORDINAL_NONE) {
     IREE_ASSERT_UNREACHABLE(
         "validated AMDGPU sanitizer access descriptor asm form");
     IREE_BUILTIN_UNREACHABLE();
   }
-  return &descriptor_set->asm_forms[descriptor->canonical_asm_form_ordinal];
+  return &descriptor_set->asm_forms[canonical_asm_form_ordinal];
 }
 
 static iree_status_t loom_amdgpu_sanitizer_access_build_descriptor_op(

@@ -90,9 +90,12 @@ static iree_status_t loom_low_schedule_resolve_descriptor(
                        LOOM_LOW_DESCRIPTOR_FLAG_BARRIER)) {
     node->flags |= LOOM_LOW_SCHEDULE_NODE_FLAG_SOURCE_ORDER_BOUNDARY;
   }
+  const loom_low_descriptor_view_t* descriptor_view =
+      loom_low_descriptor_set_descriptor_view_at(state->target.descriptor_set,
+                                                 packet.descriptor_ordinal);
   node->schedule_class =
       &state->target.descriptor_set
-           ->schedule_classes[packet.descriptor->schedule_class_id];
+           ->schedule_classes[descriptor_view->schedule_class_id];
   *out_descriptor = packet.descriptor;
   return iree_ok_status();
 }

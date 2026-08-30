@@ -52,6 +52,7 @@ struct AddressabilityTestState {
   loom_low_reg_class_alt_t reg_class_alts[1] = {};
   loom_low_operand_t operands[2] = {};
   loom_low_descriptor_t descriptors[1] = {};
+  loom_low_descriptor_view_t descriptor_views[1] = {};
   loom_low_descriptor_set_t descriptor_set = {};
   // Complete synthetic target facts borrowed by schedule and allocation state.
   loom_target_facts_t target_facts = {};
@@ -107,6 +108,7 @@ void InitializeAddressabilityTestState(
   state->descriptor_set.operands = state->operands;
   state->descriptor_set.operand_count = IREE_ARRAYSIZE(state->operands);
   state->descriptor_set.descriptors = state->descriptors;
+  state->descriptor_set.descriptor_views = state->descriptor_views;
   state->descriptor_set.descriptor_count = IREE_ARRAYSIZE(state->descriptors);
   const loom_target_bundle_t* target_bundle = loom_target_bundle_table_lookup(
       &loom_test_target_bundles, LOOM_TEST_TARGET_KIND_LOW_CORE);
@@ -161,22 +163,12 @@ void InitializeAddressabilityTestState(
       /*.data_format_id=*/{},
       /*.register_part_id=*/LOOM_LOW_REGISTER_PART_NONE,
   };
-  state->descriptors[0] = (loom_low_descriptor_t){
-      /*.key_string_offset=*/ADDRESSABILITY_STRING_OFFSET(descriptor_packet),
-      /*.stable_id=*/{},
-      /*.mnemonic_string_offset=*/{},
-      /*.semantic_tag_string_offset=*/{},
-      /*.feature_mask_word_start=*/{},
-      /*.feature_mask_word_count=*/{},
-      /*.encoding_field_value_start=*/{},
-      /*.encoding_field_value_count=*/{},
-      /*.encoding_format_id=*/{},
-      /*.encoding_id=*/{},
-      /*.operand_start=*/0,
-      /*.operand_count=*/IREE_ARRAYSIZE(state->operands),
-      /*.result_count=*/1,
-      /*.minimum_packet_operand_count=*/1,
-  };
+  state->descriptors[0].key_string_offset =
+      ADDRESSABILITY_STRING_OFFSET(descriptor_packet);
+  state->descriptors[0].operand_start = 0;
+  state->descriptors[0].operand_count = IREE_ARRAYSIZE(state->operands);
+  state->descriptors[0].result_count = 1;
+  state->descriptors[0].minimum_packet_operand_count = 1;
 
   state->nodes[0].op = &state->packet_op;
   state->nodes[0].block = &state->block;

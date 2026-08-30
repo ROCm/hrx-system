@@ -67,6 +67,8 @@ static_assert(REQUIREMENT_STRING_END == sizeof(kRequirementStrings) - 1,
 struct RequirementTables {
   // Descriptor rows owned by the test descriptor set.
   loom_low_descriptor_t descriptors[1];
+  // View-owned descriptor rows paired with the structural rows.
+  loom_low_descriptor_view_t descriptor_views[1];
   // Sorted descriptor key map owned by the test descriptor set.
   loom_low_descriptor_ref_t descriptor_refs[1];
   // Operand/result rows referenced by the test descriptor.
@@ -150,14 +152,14 @@ void InitializeRequirementTables(RequirementTables* tables) {
       REQUIREMENT_STRING_OFFSET(mnemonic_add);
   tables->descriptors[0].semantic_tag_string_offset =
       REQUIREMENT_STRING_OFFSET(semantic_add);
-  tables->descriptors[0].canonical_asm_form_ordinal =
+  tables->descriptor_views[0].canonical_asm_form_ordinal =
       LOOM_LOW_ASM_FORM_ORDINAL_NONE;
   tables->descriptors[0].encoding_id = 1;
   tables->descriptors[0].operand_start = 0;
   tables->descriptors[0].operand_count = 3;
   tables->descriptors[0].result_count = 1;
   tables->descriptors[0].minimum_packet_operand_count = 2;
-  tables->descriptors[0].schedule_class_id = 0;
+  tables->descriptor_views[0].schedule_class_id = 0;
   tables->descriptors[0].flags = LOOM_LOW_DESCRIPTOR_FLAG_DEAD_REMOVABLE;
 
   tables->descriptor_refs[0].key_string_offset =
@@ -177,6 +179,7 @@ void InitializeRequirementTables(RequirementTables* tables) {
   tables->set.string_table.data = kRequirementStrings;
   tables->set.string_table.data_length = sizeof(kRequirementStrings) - 1;
   tables->set.descriptors = tables->descriptors;
+  tables->set.descriptor_views = tables->descriptor_views;
   tables->set.descriptor_count = IREE_ARRAYSIZE(tables->descriptors);
   tables->set.descriptor_refs = tables->descriptor_refs;
   tables->set.descriptor_ref_count = IREE_ARRAYSIZE(tables->descriptor_refs);

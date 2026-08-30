@@ -52,8 +52,8 @@ const loom_bstring_table_t kRuleStringTable = {
 static_assert(kRuleStringEnd == sizeof(kRuleStringData) - 1);
 
 const loom_low_descriptor_t kDescriptor = {
-    /*.key_string_offset=*/0,
     /*.stable_id=*/kDescriptorId,
+    /*.key_string_offset=*/0,
 };
 
 iree_status_t ResolveTestDescriptorRef(

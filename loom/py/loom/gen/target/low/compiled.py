@@ -128,7 +128,10 @@ class DescriptorSetView:
     canonical_asm_form_ordinals: list[int | None]
     asm_forms: list[CompiledAsmForm]
     operand_forms: list[CompiledOperandForm]
+    # Structural descriptor rows are a prefix of the storage table.
     uses_storage_descriptor_tables: bool
+    # View-owned descriptor rows are a prefix of the storage table.
+    uses_storage_descriptor_view_tables: bool
     uses_storage_asm_form_tables: bool
     uses_storage_operand_form_tables: bool
 

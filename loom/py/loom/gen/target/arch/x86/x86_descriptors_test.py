@@ -100,6 +100,9 @@ def test_storage_generation_emits_current_public_views() -> None:
     assert ".descriptors = kX86Avx512CoreDescriptors," in source
     assert ".descriptors = kX86PackedDotCoreDescriptors," in source
     assert ".descriptors = kX86Avx512PackedDotCoreStorageDescriptors," in source
+    assert ".descriptor_views = kX86Avx512CoreDescriptorViews," in source
+    assert ".descriptor_views = kX86PackedDotCoreDescriptorViews," in source
+    assert ".descriptor_views = kX86Avx512PackedDotCoreStorageDescriptorViews," in source
     assert ".asm_forms = kX86AvxVnniCoreAsmForms," in source
     assert ".asm_forms = kX86Avx512PackedDotCoreStorageAsmForms," in source
     assert ".descriptor_refs = kX86Avx512CoreDescriptorRefs," in source

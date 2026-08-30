@@ -325,13 +325,13 @@ uint32_t loom_low_descriptor_set_lookup_canonical_asm_form(
   if (descriptor_ordinal >= descriptor_set->descriptor_count) {
     return LOOM_LOW_ASM_FORM_ORDINAL_NONE;
   }
-  const loom_low_descriptor_t* descriptor =
-      &descriptor_set->descriptors[descriptor_ordinal];
-  if (descriptor->canonical_asm_form_ordinal ==
+  const loom_low_descriptor_view_t* descriptor_view =
+      &descriptor_set->descriptor_views[descriptor_ordinal];
+  if (descriptor_view->canonical_asm_form_ordinal ==
       LOOM_LOW_ASM_FORM_ORDINAL_NONE) {
     return LOOM_LOW_ASM_FORM_ORDINAL_NONE;
   }
-  return descriptor->canonical_asm_form_ordinal;
+  return descriptor_view->canonical_asm_form_ordinal;
 }
 
 uint32_t loom_low_descriptor_set_lookup_descriptor(

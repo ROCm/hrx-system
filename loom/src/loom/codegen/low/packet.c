@@ -76,25 +76,6 @@ static iree_status_t loom_low_packet_validate_asm_form_ordinal(
   return iree_ok_status();
 }
 
-static iree_status_t loom_low_packet_descriptor_ordinal(
-    const loom_low_schedule_table_t* schedule,
-    const loom_low_schedule_node_t* node, uint32_t* out_descriptor_ordinal) {
-  *out_descriptor_ordinal = LOOM_LOW_DESCRIPTOR_ORDINAL_NONE;
-  if (node->descriptor == NULL) {
-    return iree_ok_status();
-  }
-  const uint32_t descriptor_ordinal =
-      loom_low_descriptor_set_descriptor_ordinal(
-          schedule->target.descriptor_set, node->descriptor);
-  if (descriptor_ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "descriptor-backed packet references a descriptor "
-                            "outside the schedule descriptor set");
-  }
-  *out_descriptor_ordinal = descriptor_ordinal;
-  return iree_ok_status();
-}
-
 iree_status_t loom_low_packet_validate_asm_form_table(
     const loom_low_schedule_table_t* schedule,
     const loom_low_packet_asm_form_table_t* asm_forms) {
@@ -131,9 +112,7 @@ iree_status_t loom_low_packet_validate_asm_form_table(
     }
     const loom_low_packet_view_t packet =
         loom_low_packet_at(schedule, packet_index);
-    uint32_t descriptor_ordinal = LOOM_LOW_DESCRIPTOR_ORDINAL_NONE;
-    IREE_RETURN_IF_ERROR(loom_low_packet_descriptor_ordinal(
-        schedule, packet.node, &descriptor_ordinal));
+    const uint32_t descriptor_ordinal = packet.descriptor_ordinal;
     if (descriptor_ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "selected asm form ordinal %" PRIu32
@@ -156,9 +135,7 @@ iree_status_t loom_low_packet_lookup_asm_form(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "packet has no descriptor-backed asm form");
   }
-  uint32_t descriptor_ordinal = LOOM_LOW_DESCRIPTOR_ORDINAL_NONE;
-  IREE_RETURN_IF_ERROR(loom_low_packet_descriptor_ordinal(
-      schedule, packet->node, &descriptor_ordinal));
+  const uint32_t descriptor_ordinal = packet->descriptor_ordinal;
   if (asm_forms != NULL) {
     if (schedule->module != asm_forms->module ||
         schedule->function_op != asm_forms->function_op ||

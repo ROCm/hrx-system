@@ -16,6 +16,7 @@ namespace {
 
 struct PacketTestState {
   loom_low_descriptor_t descriptors[2] = {};
+  loom_low_descriptor_view_t descriptor_views[2] = {};
   loom_low_asm_form_t asm_forms[2] = {};
   loom_low_descriptor_set_t descriptor_set = {};
   loom_module_t module = {};
@@ -38,9 +39,9 @@ struct PacketAttrTestOp {
 };
 
 void InitializePacketTestState(PacketTestState* state) {
-  state->descriptors[0].canonical_asm_form_ordinal =
+  state->descriptor_views[0].canonical_asm_form_ordinal =
       LOOM_LOW_ASM_FORM_ORDINAL_NONE;
-  state->descriptors[1].canonical_asm_form_ordinal = 0;
+  state->descriptor_views[1].canonical_asm_form_ordinal = 0;
 
   state->asm_forms[0].descriptor_ordinal = 1;
   state->asm_forms[0].result_value_type_start =
@@ -50,6 +51,7 @@ void InitializePacketTestState(PacketTestState* state) {
       LOOM_LOW_ASM_RESULT_VALUE_TYPE_START_NONE;
 
   state->descriptor_set.descriptors = state->descriptors;
+  state->descriptor_set.descriptor_views = state->descriptor_views;
   state->descriptor_set.descriptor_count = IREE_ARRAYSIZE(state->descriptors);
   state->descriptor_set.asm_forms = state->asm_forms;
   state->descriptor_set.asm_form_count = IREE_ARRAYSIZE(state->asm_forms);

@@ -1148,6 +1148,7 @@ def compile_descriptor_set(
         selected_descriptors,
         allow_ambiguous_mnemonics=allow_ambiguous_asm_mnemonics,
     )
+    validation.validate_u16_table_count(len(asm_forms), f"descriptor set '{spec.key}' asm form")
     canonical_asm_form_ordinals: list[int | None] = [None] * len(selected_descriptors)
     asm_form_counts_by_descriptor = [0] * len(selected_descriptors)
     for asm_form_ordinal, asm_form in enumerate(asm_forms):

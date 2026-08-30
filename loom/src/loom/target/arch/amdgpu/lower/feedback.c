@@ -824,8 +824,10 @@ static iree_status_t loom_amdgpu_feedback_build_global_store(
 
   const loom_low_descriptor_t* descriptor =
       loom_amdgpu_lookup_descriptor_ref(descriptor_set, descriptor_ref);
-  IREE_ASSERT_LT(descriptor->canonical_asm_form_ordinal,
-                 descriptor_set->asm_form_count);
+  IREE_ASSERT_LT(
+      loom_low_descriptor_set_descriptor_view(descriptor_set, descriptor)
+          ->canonical_asm_form_ordinal,
+      descriptor_set->asm_form_count);
   const iree_host_size_t packet_operand_count =
       loom_amdgpu_feedback_packet_operand_count(descriptor_set, descriptor);
   IREE_ASSERT(packet_operand_count == 3 || packet_operand_count == 4,
@@ -941,8 +943,10 @@ loom_amdgpu_feedback_resolve_global_memory_descriptor(
     loom_amdgpu_descriptor_ref_t descriptor_ref) {
   const loom_low_descriptor_t* descriptor =
       loom_amdgpu_lookup_descriptor_ref(descriptor_set, descriptor_ref);
-  IREE_ASSERT_LT(descriptor->canonical_asm_form_ordinal,
-                 descriptor_set->asm_form_count);
+  IREE_ASSERT_LT(
+      loom_low_descriptor_set_descriptor_view(descriptor_set, descriptor)
+          ->canonical_asm_form_ordinal,
+      descriptor_set->asm_form_count);
   const iree_host_size_t packet_operand_count =
       loom_amdgpu_feedback_packet_operand_count(descriptor_set, descriptor);
   IREE_ASSERT(packet_operand_count == 2 || packet_operand_count == 3 ||
@@ -1119,8 +1123,10 @@ iree_status_t loom_amdgpu_build_feedback_dropped_packet_count_increment(
 
   const loom_low_descriptor_t* descriptor = loom_amdgpu_lookup_descriptor_ref(
       descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_ATOMIC_ADD_U64_SADDR);
-  IREE_ASSERT_LT(descriptor->canonical_asm_form_ordinal,
-                 descriptor_set->asm_form_count);
+  IREE_ASSERT_LT(
+      loom_low_descriptor_set_descriptor_view(descriptor_set, descriptor)
+          ->canonical_asm_form_ordinal,
+      descriptor_set->asm_form_count);
   const iree_host_size_t packet_operand_count =
       loom_amdgpu_feedback_packet_operand_count(descriptor_set, descriptor);
   IREE_ASSERT(packet_operand_count == 3 || packet_operand_count == 4,

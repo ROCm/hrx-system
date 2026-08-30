@@ -202,10 +202,12 @@ static void loom_amdgpu_system_memory_global_memory_descriptor(
   *out_asm_form = NULL;
   const loom_low_descriptor_t* descriptor =
       loom_amdgpu_lookup_descriptor_ref(descriptor_set, descriptor_ref);
-  IREE_ASSERT_LT(descriptor->canonical_asm_form_ordinal,
-                 descriptor_set->asm_form_count);
+  const uint32_t canonical_asm_form_ordinal =
+      loom_low_descriptor_set_descriptor_view(descriptor_set, descriptor)
+          ->canonical_asm_form_ordinal;
+  IREE_ASSERT_LT(canonical_asm_form_ordinal, descriptor_set->asm_form_count);
   const loom_low_asm_form_t* asm_form =
-      &descriptor_set->asm_forms[descriptor->canonical_asm_form_ordinal];
+      &descriptor_set->asm_forms[canonical_asm_form_ordinal];
   IREE_ASSERT(asm_form->operand_index_count == 2 ||
               asm_form->operand_index_count == 3);
   *out_descriptor = descriptor;

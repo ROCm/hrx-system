@@ -96,9 +96,11 @@ static iree_status_t loom_amdgpu_signal_descriptor_operand_type(
 static const loom_low_asm_form_t* loom_amdgpu_signal_asm_form(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor) {
-  IREE_ASSERT_LT(descriptor->canonical_asm_form_ordinal,
-                 descriptor_set->asm_form_count);
-  return &descriptor_set->asm_forms[descriptor->canonical_asm_form_ordinal];
+  const uint32_t canonical_asm_form_ordinal =
+      loom_low_descriptor_set_descriptor_view(descriptor_set, descriptor)
+          ->canonical_asm_form_ordinal;
+  IREE_ASSERT_LT(canonical_asm_form_ordinal, descriptor_set->asm_form_count);
+  return &descriptor_set->asm_forms[canonical_asm_form_ordinal];
 }
 
 static iree_status_t loom_amdgpu_signal_descriptor_result_type(

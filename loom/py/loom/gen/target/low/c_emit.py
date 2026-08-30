@@ -201,9 +201,7 @@ def _intern_descriptor_set_view_metadata(compiled: CompiledDescriptorSet, view_s
 def _descriptor_row_lines(
     compiled: CompiledDescriptorSet,
     descriptors: Sequence[Descriptor],
-    instruction_classes: Sequence[tuple[InstructionClass, ...]],
     descriptor_rows: Sequence[dict[str, int]],
-    canonical_asm_form_ordinals: Sequence[int | None],
 ) -> list[list[str]]:
     pool = compiled.string_pool
     return [
@@ -232,10 +230,24 @@ def _descriptor_row_lines(
             f".storage_lease_count = {descriptor_rows[i]['storage_lease_count']},",
             f".operand_form_start = {descriptor_rows[i]['operand_form_start']},",
             f".operand_form_count = {descriptor_rows[i]['operand_form_count']},",
-            f".schedule_class_id = {compiled.schedule_class_ids[descriptor.schedule_class]},",
             f".flags = {c_spelling.flag_expr(descriptor.flags)},",
             f".op_kind = {descriptor.op_kind.c_name},",
+            ".reserved = 0,",
+        ]
+        for i, descriptor in enumerate(descriptors)
+    ]
+
+
+def _descriptor_view_row_lines(
+    compiled: CompiledDescriptorSet,
+    descriptors: Sequence[Descriptor],
+    instruction_classes: Sequence[tuple[InstructionClass, ...]],
+    canonical_asm_form_ordinals: Sequence[int | None],
+) -> list[list[str]]:
+    return [
+        [
             f".instruction_class_flags = {c_spelling.flag_expr(instruction_classes[i])},",
+            f".schedule_class_id = {compiled.schedule_class_ids[descriptor.schedule_class]},",
             f".canonical_asm_form_ordinal = {c_spelling.canonical_asm_form_ordinal_expr(canonical_asm_form_ordinals[i])},",
         ]
         for i, descriptor in enumerate(descriptors)
@@ -702,8 +714,18 @@ def emit_source_for_views(
         _descriptor_row_lines(
             compiled,
             compiled.descriptors,
-            compiled.instruction_classes,
             compiled.descriptor_rows,
+        ),
+    )
+    _emit_array(
+        lines,
+        "loom_low_descriptor_view_t",
+        spec.c_table_prefix,
+        "DescriptorViews",
+        _descriptor_view_row_lines(
+            compiled,
+            compiled.descriptors,
+            compiled.instruction_classes,
             compiled.canonical_asm_form_ordinals,
         ),
     )
@@ -717,8 +739,19 @@ def emit_source_for_views(
                 _descriptor_row_lines(
                     compiled,
                     view.descriptors,
-                    view.instruction_classes,
                     view.descriptor_rows,
+                ),
+            )
+        if not view.uses_storage_descriptor_view_tables:
+            _emit_array(
+                lines,
+                "loom_low_descriptor_view_t",
+                view.spec.c_table_prefix,
+                "DescriptorViews",
+                _descriptor_view_row_lines(
+                    compiled,
+                    view.descriptors,
+                    view.instruction_classes,
                     view.canonical_asm_form_ordinals,
                 ),
             )
@@ -861,6 +894,7 @@ def emit_source_for_views(
     for view in views:
         view_spec = view.spec
         descriptor_table_prefix = spec.c_table_prefix if view.uses_storage_descriptor_tables else view_spec.c_table_prefix
+        descriptor_view_table_prefix = spec.c_table_prefix if view.uses_storage_descriptor_view_tables else view_spec.c_table_prefix
         asm_form_table_prefix = spec.c_table_prefix if view.uses_storage_asm_form_tables else view_spec.c_table_prefix
         operand_form_table_prefix = spec.c_table_prefix if view.uses_storage_operand_form_tables else view_spec.c_table_prefix
         view_lines = [
@@ -887,6 +921,7 @@ def emit_source_for_views(
             f"            .data_length = sizeof(k{spec.c_table_prefix}StringData) - 1,",
             "        },",
             f"    .descriptors = k{descriptor_table_prefix}Descriptors,",
+            f"    .descriptor_views = k{descriptor_view_table_prefix}DescriptorViews,",
             f"    .descriptor_count = {view.descriptor_count},",
             f"    .descriptor_refs = k{view_spec.c_table_prefix}DescriptorRefs,",
             f"    .descriptor_ref_count = IREE_ARRAYSIZE(k{view_spec.c_table_prefix}DescriptorRefs),",
@@ -995,6 +1030,7 @@ def emit_source(compiled: CompiledDescriptorSet) -> str:
                 asm_forms=compiled.asm_forms,
                 operand_forms=compiled.operand_forms,
                 uses_storage_descriptor_tables=True,
+                uses_storage_descriptor_view_tables=True,
                 uses_storage_asm_form_tables=True,
                 uses_storage_operand_form_tables=True,
             )

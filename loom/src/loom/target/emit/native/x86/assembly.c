@@ -40,12 +40,15 @@ static iree_string_view_t loom_x86_descriptor_mnemonic(
   const loom_low_descriptor_set_t* descriptor_set =
       context->schedule->target.descriptor_set;
   const loom_low_descriptor_t* descriptor = context->packet->descriptor;
+  const loom_low_descriptor_view_t* descriptor_view =
+      loom_low_descriptor_set_descriptor_view_at(
+          descriptor_set, context->packet->descriptor_ordinal);
   loom_bstring_table_offset_t string_offset =
       descriptor->mnemonic_string_offset;
-  if (descriptor->canonical_asm_form_ordinal !=
+  if (descriptor_view->canonical_asm_form_ordinal !=
       LOOM_LOW_ASM_FORM_ORDINAL_NONE) {
     const loom_low_asm_form_t* form = loom_low_descriptor_set_asm_form_at(
-        descriptor_set, descriptor->canonical_asm_form_ordinal);
+        descriptor_set, descriptor_view->canonical_asm_form_ordinal);
     IREE_ASSERT(form != NULL,
                 "x86 descriptor canonical asm form must be present");
     if (form->native_assembly_mnemonic_string_offset !=
@@ -581,8 +584,10 @@ static iree_status_t loom_x86_canonical_asm_form(
   *out_form = NULL;
   const loom_low_descriptor_set_t* descriptor_set =
       context->schedule->target.descriptor_set;
-  const loom_low_descriptor_t* descriptor = context->packet->descriptor;
-  if (descriptor->canonical_asm_form_ordinal ==
+  const loom_low_descriptor_view_t* descriptor_view =
+      loom_low_descriptor_set_descriptor_view_at(
+          descriptor_set, context->packet->descriptor_ordinal);
+  if (descriptor_view->canonical_asm_form_ordinal ==
       LOOM_LOW_ASM_FORM_ORDINAL_NONE) {
     const iree_string_view_t key = loom_x86_descriptor_key(context);
     return iree_make_status(
@@ -591,7 +596,7 @@ static iree_status_t loom_x86_canonical_asm_form(
         (int)key.size, key.data);
   }
   const loom_low_asm_form_t* form = loom_low_descriptor_set_asm_form_at(
-      descriptor_set, descriptor->canonical_asm_form_ordinal);
+      descriptor_set, descriptor_view->canonical_asm_form_ordinal);
   if (form == NULL) {
     return iree_make_status(
         IREE_STATUS_OUT_OF_RANGE,

@@ -70,84 +70,19 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
       "matrix.smfmac.f32"
       "\x08"
       "test.gpr";
-  loom_low_descriptor_t descriptors[] = {
-      {
-          /*.key_string_offset=*/{},
-          /*.stable_id=*/{},
-          /*.mnemonic_string_offset=*/{},
-          /*.semantic_tag_string_offset=*/kRegisterCopyTagOffset,
-      },
-      {
-          /*.key_string_offset=*/{},
-          /*.stable_id=*/{},
-          /*.mnemonic_string_offset=*/{},
-          /*.semantic_tag_string_offset=*/kMemoryGlobalTagOffset,
-      },
-      {
-          /*.key_string_offset=*/{},
-          /*.stable_id=*/{},
-          /*.mnemonic_string_offset=*/{},
-          /*.semantic_tag_string_offset=*/kMemoryStackLoadTagOffset,
-          /*.feature_mask_word_start=*/{},
-          /*.feature_mask_word_count=*/{},
-          /*.encoding_field_value_start=*/{},
-          /*.encoding_field_value_count=*/{},
-          /*.encoding_format_id=*/{},
-          /*.encoding_id=*/{},
-          /*.operand_start=*/{},
-          /*.operand_count=*/{},
-          /*.result_count=*/{},
-          /*.minimum_packet_operand_count=*/{},
-          /*.immediate_start=*/{},
-          /*.immediate_count=*/{},
-          /*.effect_start=*/0,
-          /*.effect_count=*/1,
-      },
-      {
-          /*.key_string_offset=*/{},
-          /*.stable_id=*/{},
-          /*.mnemonic_string_offset=*/{},
-          /*.semantic_tag_string_offset=*/kMemoryStackStoreTagOffset,
-          /*.feature_mask_word_start=*/{},
-          /*.feature_mask_word_count=*/{},
-          /*.encoding_field_value_start=*/{},
-          /*.encoding_field_value_count=*/{},
-          /*.encoding_format_id=*/{},
-          /*.encoding_id=*/{},
-          /*.operand_start=*/{},
-          /*.operand_count=*/{},
-          /*.result_count=*/{},
-          /*.minimum_packet_operand_count=*/{},
-          /*.immediate_start=*/{},
-          /*.immediate_count=*/{},
-          /*.effect_start=*/1,
-          /*.effect_count=*/1,
-      },
-      {
-          /*.key_string_offset=*/{},
-          /*.stable_id=*/{},
-          /*.mnemonic_string_offset=*/{},
-          /*.semantic_tag_string_offset=*/kMatrixWmmaTagOffset,
-      },
-      {
-          /*.key_string_offset=*/{},
-          /*.stable_id=*/{},
-          /*.mnemonic_string_offset=*/{},
-          /*.semantic_tag_string_offset=*/kMemoryGlobalTagOffset,
-      },
-      {
-          /*.key_string_offset=*/{},
-          /*.stable_id=*/{},
-          /*.mnemonic_string_offset=*/{},
-          /*.semantic_tag_string_offset=*/kMatrixSwmmacTagOffset,
-      },
-      {
-          /*.key_string_offset=*/{},
-          /*.stable_id=*/{},
-          /*.mnemonic_string_offset=*/{},
-          /*.semantic_tag_string_offset=*/kMatrixSmfmacTagOffset,
-      },
-  };
+  loom_low_descriptor_t descriptors[8] = {};
+  loom_low_descriptor_view_t descriptor_views[8] = {};
+  descriptors[0].semantic_tag_string_offset = kRegisterCopyTagOffset;
+  descriptors[1].semantic_tag_string_offset = kMemoryGlobalTagOffset;
+  descriptors[2].semantic_tag_string_offset = kMemoryStackLoadTagOffset;
+  descriptors[2].effect_count = 1;
+  descriptors[3].semantic_tag_string_offset = kMemoryStackStoreTagOffset;
+  descriptors[3].effect_start = 1;
+  descriptors[3].effect_count = 1;
+  descriptors[4].semantic_tag_string_offset = kMatrixWmmaTagOffset;
+  descriptors[5].semantic_tag_string_offset = kMemoryGlobalTagOffset;
+  descriptors[6].semantic_tag_string_offset = kMatrixSwmmacTagOffset;
+  descriptors[7].semantic_tag_string_offset = kMatrixSmfmacTagOffset;
   const loom_low_effect_t effects[] = {
       {
           /*.kind=*/LOOM_LOW_EFFECT_KIND_READ,
@@ -189,6 +124,7 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
       /*.data_length=*/sizeof(kDescriptorStringTable) - 1,
   };
   descriptor_set.descriptors = descriptors;
+  descriptor_set.descriptor_views = descriptor_views;
   descriptor_set.descriptor_count = IREE_ARRAYSIZE(descriptors);
   descriptor_set.effects = effects;
   descriptor_set.effect_count = IREE_ARRAYSIZE(effects);
@@ -196,35 +132,35 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   descriptor_set.reg_class_count = IREE_ARRAYSIZE(reg_classes);
   descriptor_set.schedule_classes = schedule_classes;
   descriptor_set.schedule_class_count = IREE_ARRAYSIZE(schedule_classes);
-  descriptors[0].schedule_class_id = 0;
-  descriptors[1].schedule_class_id = 1;
-  descriptors[2].schedule_class_id = 1;
-  descriptors[3].schedule_class_id = 2;
-  descriptors[4].schedule_class_id = 3;
-  descriptors[5].schedule_class_id = 1;
-  descriptors[6].schedule_class_id = 3;
-  descriptors[7].schedule_class_id = 4;
-  descriptors[0].instruction_class_flags =
+  descriptor_views[0].schedule_class_id = 0;
+  descriptor_views[1].schedule_class_id = 1;
+  descriptor_views[2].schedule_class_id = 1;
+  descriptor_views[3].schedule_class_id = 2;
+  descriptor_views[4].schedule_class_id = 3;
+  descriptor_views[5].schedule_class_id = 1;
+  descriptor_views[6].schedule_class_id = 3;
+  descriptor_views[7].schedule_class_id = 4;
+  descriptor_views[0].instruction_class_flags =
       LOOM_LOW_INSTRUCTION_CLASS_FLAG_VECTOR_ALU |
       LOOM_LOW_INSTRUCTION_CLASS_FLAG_REGISTER_MOVE;
-  descriptors[1].instruction_class_flags =
+  descriptor_views[1].instruction_class_flags =
       LOOM_LOW_INSTRUCTION_CLASS_FLAG_GLOBAL_MEMORY |
       LOOM_LOW_INSTRUCTION_CLASS_FLAG_GLOBAL_LOAD;
-  descriptors[2].instruction_class_flags =
+  descriptor_views[2].instruction_class_flags =
       LOOM_LOW_INSTRUCTION_CLASS_FLAG_PRIVATE_MEMORY;
-  descriptors[3].instruction_class_flags =
+  descriptor_views[3].instruction_class_flags =
       LOOM_LOW_INSTRUCTION_CLASS_FLAG_PRIVATE_MEMORY;
-  descriptors[4].instruction_class_flags =
+  descriptor_views[4].instruction_class_flags =
       LOOM_LOW_INSTRUCTION_CLASS_FLAG_MATRIX |
       LOOM_LOW_INSTRUCTION_CLASS_FLAG_WMMA;
-  descriptors[5].instruction_class_flags =
+  descriptor_views[5].instruction_class_flags =
       LOOM_LOW_INSTRUCTION_CLASS_FLAG_GLOBAL_MEMORY |
       LOOM_LOW_INSTRUCTION_CLASS_FLAG_BUFFER_LOAD;
-  descriptors[6].instruction_class_flags =
+  descriptor_views[6].instruction_class_flags =
       LOOM_LOW_INSTRUCTION_CLASS_FLAG_MATRIX |
       LOOM_LOW_INSTRUCTION_CLASS_FLAG_WMMA |
       LOOM_LOW_INSTRUCTION_CLASS_FLAG_SWMMAC;
-  descriptors[7].instruction_class_flags =
+  descriptor_views[7].instruction_class_flags =
       LOOM_LOW_INSTRUCTION_CLASS_FLAG_MATRIX |
       LOOM_LOW_INSTRUCTION_CLASS_FLAG_MFMA |
       LOOM_LOW_INSTRUCTION_CLASS_FLAG_SMFMAC;
@@ -522,7 +458,7 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   for (uint32_t i = 0; i < IREE_ARRAYSIZE(descriptors); ++i) {
     schedule_nodes[i].descriptor = &descriptors[i];
     schedule_nodes[i].schedule_class =
-        &schedule_classes[descriptors[i].schedule_class_id];
+        &schedule_classes[descriptor_views[i].schedule_class_id];
     schedule_nodes[i].source_ordinal = i;
     schedule_nodes[i].scheduled_ordinal = i;
     schedule_nodes[i].memory_access_record_index =

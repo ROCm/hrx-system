@@ -304,12 +304,15 @@ static iree_status_t loom_low_descriptor_text_asm_lookup_packet_by_ordinal(
                             "low descriptor ordinal is out of range");
   }
 
+  const loom_low_descriptor_view_t* descriptor_view =
+      loom_low_descriptor_set_descriptor_view_at(descriptor_set,
+                                                 descriptor_ordinal);
   uint32_t asm_form_ordinal = LOOM_LOW_ASM_FORM_ORDINAL_NONE;
-  if (descriptor->canonical_asm_form_ordinal ==
+  if (descriptor_view->canonical_asm_form_ordinal ==
       LOOM_LOW_ASM_FORM_ORDINAL_NONE) {
     return iree_ok_status();
   }
-  asm_form_ordinal = descriptor->canonical_asm_form_ordinal;
+  asm_form_ordinal = descriptor_view->canonical_asm_form_ordinal;
   const loom_low_asm_form_t* selected_form =
       loom_low_descriptor_set_asm_form_at(descriptor_set, asm_form_ordinal);
   if (selected_form == NULL) {

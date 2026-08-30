@@ -1016,6 +1016,16 @@ def test_descriptor_set_family_emits_one_storage_table_and_ordered_headers() -> 
         descriptors=extension_view.descriptors,
     )
 
+    compiled_view = views.descriptor_set_view_for_spec(
+        compiler.compile_descriptor_set(storage_set),
+        base_view,
+    )
+    assert compiled_view.uses_storage_descriptor_tables
+    assert compiled_view.uses_storage_descriptor_view_tables
+    assert compiled_view.uses_storage_asm_form_tables
+    assert compiled_view.uses_storage_operand_form_tables
+    assert len(compiled_view.canonical_asm_form_ordinals) == 1
+
     generated = generate_descriptor_set_family(
         storage_set,
         (base_view, extension_view),
@@ -1027,6 +1037,9 @@ def test_descriptor_set_family_emits_one_storage_table_and_ordered_headers() -> 
     assert ".descriptors = kTestLowCoreDescriptors," in source
     assert ".descriptor_refs = kTestLowCoreDescriptorRefs," in source
     assert ".descriptor_refs = kTestLowExtensionCoreDescriptorRefs," in source
+    assert "kTestLowExtensionCoreAsmForms" not in source
+    assert "kTestLowExtensionCoreOperandForms" not in source
+    assert source.count(".asm_forms = kTestLowCoreAsmForms,") == 2
     assert ".descriptor_count = 1," in source
     assert ".descriptor_count = 2," in source
     assert ("const loom_low_descriptor_set_t* loom_test_low_extension_core_descriptor_set(void)") in source
@@ -1066,7 +1079,8 @@ def test_descriptor_set_view_selects_shared_schedule_class() -> None:
         view,
     )
 
-    assert not compiled_view.uses_storage_descriptor_tables
+    assert compiled_view.uses_storage_descriptor_tables
+    assert not compiled_view.uses_storage_descriptor_view_tables
     assert compiled_view.descriptors[0].schedule_class == vector_schedule.name
     assert compiled_view.instruction_classes == ((InstructionClass.VECTOR_ALU,),)
 
@@ -1101,14 +1115,16 @@ def test_descriptor_set_view_reuses_schedule_independent_storage_tables() -> Non
 
     compiled_view = views.descriptor_set_view_for_spec(compiled, view)
 
-    assert not compiled_view.uses_storage_descriptor_tables
+    assert compiled_view.uses_storage_descriptor_tables
+    assert not compiled_view.uses_storage_descriptor_view_tables
     assert compiled_view.uses_storage_asm_form_tables
     assert compiled_view.uses_storage_operand_form_tables
     assert compiled_view.asm_forms is compiled.asm_forms
     assert compiled_view.operand_forms is compiled.operand_forms
 
     source = generate_descriptor_set_family(storage_set, (view,)).source
-    assert "kTestLowScheduleViewCoreDescriptors" in source
+    assert "kTestLowScheduleViewCoreDescriptors" not in source
+    assert "kTestLowScheduleViewCoreDescriptorViews" in source
     assert "kTestLowScheduleViewCoreAsmForms" not in source
     assert "kTestLowScheduleViewCoreOperandForms" not in source
     assert ".asm_forms = kTestLowCoreAsmForms," in source
@@ -1196,9 +1212,11 @@ def test_descriptor_set_family_emits_prefix_view_local_asm_forms() -> None:
 
     assert "storage.add.i32" in source
     assert '"add.i32"' in source
-    assert "static const loom_low_descriptor_t kTestLowViewCoreDescriptors[]" in source
+    assert "static const loom_low_descriptor_t kTestLowViewCoreDescriptors[]" not in source
+    assert "kTestLowViewCoreDescriptorViews" not in source
     assert "static const loom_low_asm_form_t kTestLowViewCoreAsmForms[]" in source
-    assert ".descriptors = kTestLowViewCoreDescriptors," in source
+    assert ".descriptors = kTestLowCoreDescriptors," in source
+    assert ".descriptor_views = kTestLowCoreDescriptorViews," in source
     assert ".asm_forms = kTestLowViewCoreAsmForms," in source
     assert source.count(".kind = LOOM_LOW_ASM_RESULT_VALUE_TYPE_KIND_SCALAR,") == 1
     assert source.count(".result_value_type_start = 0,") == 2
@@ -1298,7 +1316,8 @@ def test_descriptor_set_family_allows_view_local_non_authorable_surface() -> Non
         (view,),
     ).source
 
-    assert "static const loom_low_descriptor_t kTestLowViewCoreDescriptors[]" in source
+    assert "static const loom_low_descriptor_t kTestLowViewCoreDescriptors[]" not in source
+    assert ("static const loom_low_descriptor_view_t kTestLowViewCoreDescriptorViews[]") in source
     assert ".canonical_asm_form_ordinal = LOOM_LOW_ASM_FORM_ORDINAL_NONE" in source
 
 

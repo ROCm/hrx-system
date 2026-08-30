@@ -170,6 +170,9 @@ static iree_status_t loom_low_verify_tables_present(
       descriptor_set->descriptors, descriptor_set->descriptor_count,
       "descriptors"));
   IREE_RETURN_IF_ERROR(loom_low_verify_pointer_for_count(
+      descriptor_set->descriptor_views, descriptor_set->descriptor_count,
+      "descriptor_views"));
+  IREE_RETURN_IF_ERROR(loom_low_verify_pointer_for_count(
       descriptor_set->descriptor_refs, descriptor_set->descriptor_ref_count,
       "descriptor_refs"));
   IREE_RETURN_IF_ERROR(loom_low_verify_pointer_for_count(
@@ -1659,6 +1662,8 @@ static iree_status_t loom_low_verify_descriptor_operand_encoding_fields(
 static iree_status_t loom_low_verify_descriptor_effect_contract(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor, uint32_t descriptor_index) {
+  const loom_low_descriptor_view_t* descriptor_view =
+      &descriptor_set->descriptor_views[descriptor_index];
   const bool is_side_effecting = iree_all_bits_set(
       descriptor->flags, LOOM_LOW_DESCRIPTOR_FLAG_SIDE_EFFECTING);
   const bool is_terminator =
@@ -1737,10 +1742,10 @@ static iree_status_t loom_low_verify_descriptor_effect_contract(
                             " has a control effect but is not a terminator",
                             descriptor_index);
   }
-  if (descriptor->schedule_class_id != LOOM_LOW_SCHEDULE_CLASS_NONE &&
+  if (descriptor_view->schedule_class_id != LOOM_LOW_SCHEDULE_CLASS_NONE &&
       required_schedule_flags != 0) {
     const loom_low_schedule_class_t* schedule_class =
-        &descriptor_set->schedule_classes[descriptor->schedule_class_id];
+        &descriptor_set->schedule_classes[descriptor_view->schedule_class_id];
     const loom_low_schedule_class_flags_t missing_flags =
         required_schedule_flags & ~schedule_class->flags;
     if (missing_flags != 0) {
@@ -1749,7 +1754,8 @@ static iree_status_t loom_low_verify_descriptor_effect_contract(
                               " effect rows require schedule flags 0x%x but "
                               "schedule class %" PRIu16 " is missing 0x%x",
                               descriptor_index, required_schedule_flags,
-                              descriptor->schedule_class_id, missing_flags);
+                              descriptor_view->schedule_class_id,
+                              missing_flags);
     }
   }
   return iree_ok_status();
@@ -1757,28 +1763,30 @@ static iree_status_t loom_low_verify_descriptor_effect_contract(
 
 static iree_status_t loom_low_verify_descriptor_canonical_asm_form(
     const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_descriptor_t* descriptor, uint32_t descriptor_index) {
-  if (descriptor->canonical_asm_form_ordinal ==
+    uint32_t descriptor_index) {
+  const loom_low_descriptor_view_t* descriptor_view =
+      &descriptor_set->descriptor_views[descriptor_index];
+  if (descriptor_view->canonical_asm_form_ordinal ==
       LOOM_LOW_ASM_FORM_ORDINAL_NONE) {
     return iree_ok_status();
   }
-  if (descriptor->canonical_asm_form_ordinal >=
+  if (descriptor_view->canonical_asm_form_ordinal >=
       descriptor_set->asm_form_count) {
     return iree_make_status(
         IREE_STATUS_OUT_OF_RANGE,
         "low descriptor %" PRIu32 " canonical asm form ordinal %" PRIu32
         " exceeds asm form count %" PRIu32,
-        descriptor_index, descriptor->canonical_asm_form_ordinal,
+        descriptor_index, descriptor_view->canonical_asm_form_ordinal,
         descriptor_set->asm_form_count);
   }
   const loom_low_asm_form_t* asm_form =
-      &descriptor_set->asm_forms[descriptor->canonical_asm_form_ordinal];
+      &descriptor_set->asm_forms[descriptor_view->canonical_asm_form_ordinal];
   if (asm_form->descriptor_ordinal != descriptor_index) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "low descriptor %" PRIu32 " canonical asm form ordinal %" PRIu32
         " belongs to descriptor %" PRIu32,
-        descriptor_index, descriptor->canonical_asm_form_ordinal,
+        descriptor_index, descriptor_view->canonical_asm_form_ordinal,
         asm_form->descriptor_ordinal);
   }
   return iree_ok_status();
@@ -2168,6 +2176,14 @@ static iree_status_t loom_low_verify_descriptor(
     uint32_t descriptor_index) {
   const loom_low_descriptor_t* descriptor =
       &descriptor_set->descriptors[descriptor_index];
+  const loom_low_descriptor_view_t* descriptor_view =
+      &descriptor_set->descriptor_views[descriptor_index];
+  if (descriptor->reserved != 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "low descriptor %" PRIu32
+                            " has a non-zero reserved field",
+                            descriptor_index);
+  }
   IREE_RETURN_IF_ERROR(loom_low_verify_known_flags(
       descriptor->flags,
       LOOM_LOW_DESCRIPTOR_FLAG_SIDE_EFFECTING |
@@ -2232,16 +2248,17 @@ static iree_status_t loom_low_verify_descriptor(
   IREE_RETURN_IF_ERROR(loom_low_verify_span(
       descriptor->operand_form_start, descriptor->operand_form_count,
       descriptor_set->operand_form_count, "operand_forms"));
-  if (descriptor->schedule_class_id != LOOM_LOW_SCHEDULE_CLASS_NONE &&
-      descriptor->schedule_class_id >= descriptor_set->schedule_class_count) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "low descriptor %" PRIu32
-                            " references schedule class %" PRIu16
-                            " but only %" PRIu32 " classes exist",
-                            descriptor_index, descriptor->schedule_class_id,
-                            descriptor_set->schedule_class_count);
+  if (descriptor_view->schedule_class_id != LOOM_LOW_SCHEDULE_CLASS_NONE &&
+      descriptor_view->schedule_class_id >=
+          descriptor_set->schedule_class_count) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "low descriptor %" PRIu32 " references schedule class %" PRIu16
+        " but only %" PRIu32 " classes exist",
+        descriptor_index, descriptor_view->schedule_class_id,
+        descriptor_set->schedule_class_count);
   }
-  if (descriptor->schedule_class_id == LOOM_LOW_SCHEDULE_CLASS_NONE) {
+  if (descriptor_view->schedule_class_id == LOOM_LOW_SCHEDULE_CLASS_NONE) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "low descriptor %" PRIu32
                             " has no schedule class; use an explicit fallback "
@@ -2268,8 +2285,8 @@ static iree_status_t loom_low_verify_descriptor(
       descriptor_set, descriptor, descriptor_index));
   IREE_RETURN_IF_ERROR(loom_low_verify_descriptor_operand_encoding_fields(
       descriptor_set, descriptor, descriptor_index));
-  return loom_low_verify_descriptor_canonical_asm_form(
-      descriptor_set, descriptor, descriptor_index);
+  return loom_low_verify_descriptor_canonical_asm_form(descriptor_set,
+                                                       descriptor_index);
 }
 
 static iree_status_t loom_low_verify_operand(
@@ -3028,6 +3045,12 @@ iree_status_t loom_low_descriptor_set_verify(
                             " does not match supported version %u",
                             descriptor_set->abi_version,
                             LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION);
+  }
+  if (descriptor_set->asm_form_count > UINT16_MAX) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "low descriptor set asm form count %" PRIu32
+                            " exceeds the compact canonical ordinal limit %u",
+                            descriptor_set->asm_form_count, UINT16_MAX);
   }
   IREE_RETURN_IF_ERROR(loom_low_verify_tables_present(descriptor_set));
   iree_string_view_t set_key = iree_string_view_empty();

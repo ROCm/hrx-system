@@ -40,11 +40,22 @@ typedef struct loom_low_packet_view_t {
   iree_host_size_t packet_index;
   // Schedule-node index represented by this packet.
   uint32_t node_index;
+  // Dense descriptor ordinal, or LOOM_LOW_DESCRIPTOR_ORDINAL_NONE for a
+  // structural packet.
+  uint32_t descriptor_ordinal;
   // Schedule node represented by this packet.
   const loom_low_schedule_node_t* node;
   // Descriptor row for descriptor-backed packets, or NULL for structural ops.
   const loom_low_descriptor_t* descriptor;
 } loom_low_packet_view_t;
+
+#if defined(IREE_PTR_SIZE_64)
+static_assert(sizeof(loom_low_packet_view_t) == 32,
+              "loom_low_packet_view_t must be 32 bytes");
+#elif defined(IREE_PTR_SIZE_32)
+static_assert(sizeof(loom_low_packet_view_t) == 20,
+              "loom_low_packet_view_t must be 20 bytes");
+#endif  // IREE_PTR_SIZE_*
 
 // Returns true when |packet| is compile-time-only and has no emitted target
 // instruction. These packets remain in schedule and report tables so their
@@ -70,9 +81,15 @@ loom_low_packet_at(const loom_low_schedule_table_t* schedule,
   const uint32_t node_index = schedule->scheduled_node_indices[packet_index];
   IREE_ASSERT_LT(node_index, schedule->node_count);
   const loom_low_schedule_node_t* node = &schedule->nodes[node_index];
+  const uint32_t descriptor_ordinal =
+      node->descriptor == NULL
+          ? LOOM_LOW_DESCRIPTOR_ORDINAL_NONE
+          : (uint32_t)(node->descriptor -
+                       schedule->target.descriptor_set->descriptors);
   return (loom_low_packet_view_t){
       /*.packet_index=*/packet_index,
       /*.node_index=*/node_index,
+      /*.descriptor_ordinal=*/descriptor_ordinal,
       /*.node=*/node,
       /*.descriptor=*/node->descriptor,
   };
