@@ -318,7 +318,7 @@ typedef IREE_DEVICE_SIZE_T iree_device_size_t;
 
 #if !defined(IREE_VM_BYTECODE_DISPATCH_COMPUTED_GOTO_ENABLE)
 // Enables the use of compute goto for bytecode dispatch. This can have a
-// moderate performance improvement (~10-20%) on very heavy VMVX workloads but
+// moderate performance improvement (~10-20%) on very heavy VM workloads but
 // adds 20-30KB to the binary size.
 #define IREE_VM_BYTECODE_DISPATCH_COMPUTED_GOTO_ENABLE 0
 #endif  // !IREE_VM_BYTECODE_DISPATCH_COMPUTED_GOTO_ENABLE
@@ -343,7 +343,8 @@ typedef IREE_DEVICE_SIZE_T iree_device_size_t;
 #endif  // !IREE_VM_EXT_F64_ENABLE
 
 #if !defined(IREE_VM_UBSAN_CHECKABLE_ENABLE)
-// Exposes VMVX kernels to UBSAN checking, else disable UBSAN checking.
+// Exposes VM-dispatched kernels to UBSAN checking, else disables UBSAN
+// checking.
 #define IREE_VM_UBSAN_CHECKABLE_ENABLE 0
 #endif  // !IREE_VM_UBSAN_CHECKABLE_ENABLE
 

@@ -24,7 +24,7 @@ typedef struct iree_hal_local_executable_t {
   const iree_hal_executable_dispatch_attrs_v0_t* dispatch_attrs;
 
   // Per-entry point native function pointers. NULL for backends that don't
-  // support direct dispatch (e.g., VMVX which dispatches through the VM).
+  // support direct dispatch through an implementation-defined call path.
   // Enables recording-time function resolution for the block ISA command
   // buffer: the raw function pointer is baked into .text at recording time
   // so execution has zero indirection.

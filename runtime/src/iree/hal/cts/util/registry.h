@@ -35,7 +35,7 @@
 //       "local_task",
 //       {.name = "local_task", .factory = CreateLocalTaskDevice},
 //       {"events", "indirect"},
-//       {{"vmvx", "vmvx-bytecode-fb", GetVmvxExecutableData}},
+//       {{"native", "embedded-elf", GetNativeExecutableData}},
 //   });
 
 #ifndef IREE_HAL_CTS_UTIL_REGISTRY_H_

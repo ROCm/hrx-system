@@ -59,30 +59,4 @@ iree_cc_library(
 
 endif()
 
-if(IREE_HAL_EXECUTABLE_LOADER_VMVX_MODULE)
-
-if(IREE_HAL_EXECUTABLE_LOADER_VMVX_MODULE)
-iree_cc_library(
-  NAME
-    vmvx_module_loader
-  HDRS
-    "vmvx_module_loader.h"
-  SRCS
-    "vmvx_module_loader.c"
-  DEPS
-    iree::base
-    iree::hal
-    iree::hal::local::executable_loader
-    iree::modules::vmvx
-    iree::vm
-    iree::vm::bytecode::archive
-    iree::vm::bytecode::module
-  DEFINES
-    "IREE_HAVE_HAL_EXECUTABLE_LOADER_VMVX_MODULE=1"
-  PUBLIC
-)
-endif()
-
-endif()
-
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

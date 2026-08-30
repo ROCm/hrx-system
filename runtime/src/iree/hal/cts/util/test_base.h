@@ -774,7 +774,7 @@ class CtsTestBase : public BaseType {
   //
   // GTest naming for parameterized tests:
   //   test_suite_name() = "CTS/DispatchTest"     → "DispatchTest"
-  //   name()            = "DispatchAbs/local_task_vmvx" → "DispatchAbs"
+  //   name()            = "DispatchAbs/local_task_native" → "DispatchAbs"
   //   Result: "DispatchTest.DispatchAbs"
   std::string ExtractTestIdentity() {
     const ::testing::TestInfo* test_info =
@@ -788,7 +788,7 @@ class CtsTestBase : public BaseType {
       suite_name = suite_name.substr(slash_pos + 1);
     }
 
-    // Strip suffix: "DispatchAbs/local_task_vmvx" → "DispatchAbs"
+    // Strip suffix: "DispatchAbs/local_task_native" → "DispatchAbs"
     slash_pos = test_name.find('/');
     if (slash_pos != std::string::npos) {
       test_name = test_name.substr(0, slash_pos);

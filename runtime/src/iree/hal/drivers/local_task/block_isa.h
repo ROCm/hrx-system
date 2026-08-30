@@ -381,7 +381,7 @@ typedef struct iree_hal_cmd_dispatch_t {
   iree_hal_local_executable_t* executable;
 
   // Kernel entry point resolved at recording time. NULL for VM-based
-  // backends (VMVX) that dispatch through executable->vtable->issue_call.
+  // backends that dispatch through executable->vtable->issue_call.
   // When non-NULL, the processor calls:
   //   function(&executable->environment, &dispatch_state, &workgroup_state)
   iree_hal_executable_dispatch_v0_t function;

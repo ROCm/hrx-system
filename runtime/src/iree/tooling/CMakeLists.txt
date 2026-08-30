@@ -305,11 +305,3 @@ iree_cc_library(
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
-
-# We're co-opting the VMVX module loader option for this as the inline-static
-# model is essentially just an inlined loader.
-# These tooling targets are intended for iree-* tools and not end-user binaries
-# where binary size or dependency constraints matter.
-if(IREE_HAL_EXECUTABLE_LOADER_VMVX_MODULE)
-  target_link_libraries(iree_tooling_context_util INTERFACE iree_modules_vmvx_vmvx)
-endif()

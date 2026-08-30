@@ -62,7 +62,6 @@ _RUNTIME_HAL_DRIVER_CMAKE_OPTIONS = {
     "//runtime/config/hal:driver_webgpu": "IREE_HAL_DRIVER_WEBGPU",
     "//runtime/config/hal:executable_loader_embedded_elf": "IREE_HAL_EXECUTABLE_LOADER_EMBEDDED_ELF",
     "//runtime/config/hal:executable_loader_system_library": "IREE_HAL_EXECUTABLE_LOADER_SYSTEM_LIBRARY",
-    "//runtime/config/hal:executable_loader_vmvx_module": "IREE_HAL_EXECUTABLE_LOADER_VMVX_MODULE",
 }
 
 _LOOM_CONFIG_CMAKE_OPTIONS = {
