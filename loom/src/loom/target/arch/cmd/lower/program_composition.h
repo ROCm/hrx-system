@@ -22,8 +22,9 @@ extern "C" {
 // Flattens command-program calls reachable from |root_programs|.
 //
 // Calls are clone-inlined in callee-before-caller order so each selected root
-// becomes a closed command body while shared and independently selected program
-// definitions remain intact. Other call-like kinds are not changed.
+// becomes a closed command body. Reachable non-root command definitions are
+// consumed after inlining; independently selected roots remain intact. Other
+// call-like kinds are not changed.
 //
 // |references| must describe |module| immediately before any logical launches
 // were resolved. Launch resolution does not alter command-program call sites,

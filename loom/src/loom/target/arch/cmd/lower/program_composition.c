@@ -6,6 +6,8 @@
 
 #include "loom/target/arch/cmd/lower/program_composition.h"
 
+#include <string.h>
+
 #include "loom/analysis/scc.h"
 #include "loom/analysis/symbol_references.h"
 #include "loom/error/error_catalog.h"
@@ -116,6 +118,28 @@ static iree_status_t loom_cmd_program_composition_inline_component(
   return status;
 }
 
+// Erases command helpers after their complete bodies have been composed into
+// the selected roots. The SCC traversal already identifies the exact reachable
+// command subgraph, so pruning it here avoids a redundant module liveness walk
+// and prevents later function passes from processing dead generic helpers.
+static iree_status_t loom_cmd_program_composition_erase_helpers(
+    loom_cmd_program_composition_t* composition,
+    const loom_scc_list_t* components, const uint8_t* root_symbols) {
+  for (iree_host_size_t i = 0; i < components->count; ++i) {
+    const loom_scc_t* component = &components->values[i];
+    for (iree_host_size_t j = 0; j < component->node_count; ++j) {
+      const loom_symbol_id_t symbol_id = component->nodes[j];
+      if (root_symbols[symbol_id]) continue;
+      loom_op_t* defining_op =
+          composition->module->symbols.entries[symbol_id].defining_op;
+      if (defining_op != NULL) {
+        IREE_RETURN_IF_ERROR(loom_op_erase(composition->module, defining_op));
+      }
+    }
+  }
+  return iree_ok_status();
+}
+
 iree_status_t loom_cmd_program_composition_flatten(
     loom_module_t* module, const loom_symbol_reference_table_t* references,
     const loom_func_like_t* root_programs, iree_host_size_t root_program_count,
@@ -139,6 +163,11 @@ iree_status_t loom_cmd_program_composition_flatten(
   iree_host_size_t* root_nodes = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, root_program_count, sizeof(*root_nodes), (void**)&root_nodes));
+  uint8_t* root_symbols = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(arena, references->symbol_count,
+                                sizeof(*root_symbols), (void**)&root_symbols));
+  memset(root_symbols, 0, references->symbol_count * sizeof(*root_symbols));
   for (iree_host_size_t i = 0; i < root_program_count; ++i) {
     IREE_ASSERT(loom_func_like_isa(root_programs[i]));
     const loom_symbol_ref_t root_ref = loom_func_like_callee(root_programs[i]);
@@ -146,6 +175,7 @@ iree_status_t loom_cmd_program_composition_flatten(
     IREE_ASSERT_EQ(root_ref.module_id, 0u);
     IREE_ASSERT_LT(root_ref.symbol_id, module->symbols.count);
     root_nodes[i] = root_ref.symbol_id;
+    root_symbols[root_ref.symbol_id] = 1;
   }
 
   const loom_scc_graph_t graph = {
@@ -171,6 +201,10 @@ iree_status_t loom_cmd_program_composition_flatten(
        ++i) {
     status = loom_cmd_program_composition_inline_component(
         &composition, &sccs.values[i], &rewriter);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_cmd_program_composition_erase_helpers(&composition, &sccs,
+                                                        root_symbols);
   }
   loom_rewriter_deinitialize(&rewriter);
   if (iree_status_is_ok(status)) *out_valid = true;
