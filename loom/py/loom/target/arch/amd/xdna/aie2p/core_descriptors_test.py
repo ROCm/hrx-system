@@ -46,14 +46,22 @@ def test_core_descriptor_closure_is_complete() -> None:
     descriptor_set = AIE2P_CORE_DESCRIPTOR_SET
     assert len(descriptor_set.physical_registers) == 359
     assert len(descriptor_set.reg_classes) == 22
-    assert len(descriptor_set.register_parts) == 2
-    assert len(descriptor_set.descriptors) == 121
+    assert len(descriptor_set.physical_register_views) == 12
+    assert len(descriptor_set.register_parts) == 4
+    assert len(descriptor_set.descriptors) == 169
     assert tuple(row.name for row in descriptor_set.physical_registers) == tuple(
         row.name for row in CORE_MACHINE_TABLE.physical_registers
     )
     assert tuple(
         row.atomic_units for row in descriptor_set.physical_registers
     ) == tuple(row.atomic_units for row in CORE_MACHINE_TABLE.physical_registers)
+    assert {
+        (view.physical_register, view.reg_class): view.units
+        for view in descriptor_set.physical_register_views
+    } == {
+        (f"x{index}", "aie2p.vec256"): (f"wl{index}", f"wh{index}")
+        for index in range(12)
+    }
 
 
 def test_complete_schedule_domain_drives_selected_low_descriptors() -> None:
@@ -61,7 +69,7 @@ def test_complete_schedule_domain_drives_selected_low_descriptors() -> None:
     assert len(descriptor_set.resources) == 90
     assert len(descriptor_set.timing_events) == 38
     assert len(descriptor_set.event_separations) == 651
-    assert len(descriptor_set.schedule_classes) == 34
+    assert len(descriptor_set.schedule_classes) == 36
     assert {
         resource.name
         for resource in descriptor_set.resources
@@ -194,12 +202,21 @@ def test_low_register_classes_retain_machine_candidate_order() -> None:
         if register_class.name == "aie2p.elpredicate"
     )
     assert el_class.full_register_part_mask == 0x3
+    vec256_class = next(
+        register_class
+        for register_class in AIE2P_CORE_DESCRIPTOR_SET.reg_classes
+        if register_class.name == "aie2p.vec256"
+    )
+    assert vec256_class.alloc_unit_bits == 256
+    assert vec256_class.full_register_part_mask == 0x3
     assert {
         (part.name, part.reg_class, part.mask)
         for part in AIE2P_CORE_DESCRIPTOR_SET.register_parts
     } == {
         ("aie2p.elpredicate.low32", "aie2p.elpredicate", 0x1),
         ("aie2p.elpredicate.high32", "aie2p.elpredicate", 0x2),
+        ("aie2p.vec256.low128", "aie2p.vec256", 0x1),
+        ("aie2p.vec256.high128", "aie2p.vec256", 0x2),
     }
 
 
@@ -222,7 +239,13 @@ def test_vector_encoding_roles_share_one_low_storage_class() -> None:
         for alternative in operand.reg_alts
     ]
     assert vector_register_classes
-    assert set(vector_register_classes) == {"aie2p.vec512"}
+    assert set(vector_register_classes) == {"aie2p.vec256"}
+    assert {
+        operand.unit_count
+        for key in vector_keys
+        for operand in descriptors[key].operands
+        if operand.reg_alts[0].reg_class == "aie2p.vec256"
+    } == {2}
     assert (
         len(
             {
@@ -250,6 +273,7 @@ def test_descriptor_encoding_ids_and_adapters_are_materialized() -> None:
     ]
     assert all(operand.encoding_field_id != 0 for operand in vector_add.operands)
     assert all(operand.encoding_adapter_id != 0 for operand in vector_add.operands)
+    assert all(operand.unit_count == 2 for operand in vector_add.operands)
     assert vector_add.operands[0].ready_stage == 2
     assert vector_add.operands[1].read_stage == 1
 
@@ -267,15 +291,17 @@ def test_descriptor_encoding_ids_and_adapters_are_materialized() -> None:
     vector_register_store = descriptors["amd.xdna.aie2p.store.i8x64.indexed.register"]
     assert [
         operand.reg_alts[0].reg_class for operand in vector_register_load.operands
-    ] == ["aie2p.vec512", "aie2p.ep", "aie2p.edj"]
+    ] == ["aie2p.vec256", "aie2p.ep", "aie2p.edj"]
     assert [
         operand.reg_alts[0].reg_class for operand in vector_register_store.operands
-    ] == ["aie2p.vec512", "aie2p.ep", "aie2p.edj"]
+    ] == ["aie2p.vec256", "aie2p.ep", "aie2p.edj"]
+    assert vector_register_load.operands[0].unit_count == 2
+    assert vector_register_store.operands[0].unit_count == 2
     assert vector_register_load.schedule_alternatives == (
         "amd.xdna.aie2p.load.b.i8x64.indexed.register",
     )
-    assert vector_register_load.asm_forms[0].mnemonic == "vlda.index"
-    assert vector_register_store.asm_forms[0].mnemonic == "vst.index"
+    assert vector_register_load.asm_forms[0].mnemonic == "vlda.512.i8x64.index"
+    assert vector_register_store.asm_forms[0].mnemonic == "vst.512.i8x64.index"
 
     scalar_load = descriptors["amd.xdna.aie2p.load.scalar.indexed.immediate"]
     assert scalar_load.effects[0].width_bits == 32
@@ -328,7 +354,8 @@ def test_descriptor_encoding_ids_and_adapters_are_materialized() -> None:
         "s2",
     ]
     assert predicate_compare.operands[0].reg_alts[0].reg_class == "aie2p.elpredicate"
-    assert predicate_compare.operands[1].reg_alts[0].reg_class == "aie2p.vec512"
+    assert predicate_compare.operands[1].reg_alts[0].reg_class == "aie2p.vec256"
+    assert predicate_compare.operands[1].unit_count == 2
 
     byte_select = descriptors["amd.xdna.aie2p.select.i8x64"]
     word_select = descriptors["amd.xdna.aie2p.select.i32x16"]
@@ -339,11 +366,12 @@ def test_descriptor_encoding_ids_and_adapters_are_materialized() -> None:
         "sel",
     ]
     assert [operand.reg_alts[0].reg_class for operand in byte_select.operands] == [
-        "aie2p.vec512",
-        "aie2p.vec512",
-        "aie2p.vec512",
+        "aie2p.vec256",
+        "aie2p.vec256",
+        "aie2p.vec256",
         "aie2p.elpredicate",
     ]
+    assert all(operand.unit_count == 2 for operand in byte_select.operands[:3])
     assert word_select.operands[-1].reg_alts[0].reg_class == "aie2p.ers16"
 
     scalar_selector = descriptors["amd.xdna.aie2p.select.mask.i32"]
@@ -369,10 +397,11 @@ def test_descriptor_encoding_ids_and_adapters_are_materialized() -> None:
             assert [
                 operand.reg_alts[0].reg_class for operand in descriptor.operands[:3]
             ] == [
-                "aie2p.vec512",
-                "aie2p.vec512",
-                "aie2p.vec512",
+                "aie2p.vec256",
+                "aie2p.vec256",
+                "aie2p.vec256",
             ]
+            assert all(operand.unit_count == 2 for operand in descriptor.operands[:3])
             hardwired_compare = descriptor.operands[3]
             assert hardwired_compare.field_name == "implicit_output_cmp"
             assert hardwired_compare.role is OperandRole.IMPLICIT
@@ -394,6 +423,49 @@ def test_descriptor_encoding_ids_and_adapters_are_materialized() -> None:
             assert descriptor.operands[-1].reg_alts[0].reg_class == (
                 f"aie2p.state.{sign_register}"
             )
+
+
+def test_vector_memory_descriptors_cover_each_native_width_and_integer_shape() -> None:
+    descriptors = {
+        descriptor.key: descriptor
+        for descriptor in AIE2P_CORE_DESCRIPTOR_SET.descriptors
+    }
+    for width_bits in (128, 256, 512):
+        unit_count = 2 if width_bits == 512 else 1
+        immediate_step = width_bits // 8
+        for element_bits in (8, 16, 32):
+            shape = f"i{element_bits}x{width_bits // element_bits}"
+            for load_pipe in ("a", "b"):
+                for address_form in ("immediate", "register"):
+                    descriptor = descriptors[
+                        f"amd.xdna.aie2p.load.{load_pipe}.{shape}.indexed."
+                        f"{address_form}"
+                    ]
+                    payload = descriptor.operands[0]
+                    assert payload.reg_alts[0].reg_class == "aie2p.vec256"
+                    assert payload.unit_count == unit_count
+                    assert descriptor.effects[0].width_bits == width_bits
+                    if address_form == "immediate":
+                        assert descriptor.immediates[0].value_step == immediate_step
+            for address_form in ("immediate", "register"):
+                descriptor = descriptors[
+                    f"amd.xdna.aie2p.store.{shape}.indexed.{address_form}"
+                ]
+                payload = descriptor.operands[0]
+                assert payload.reg_alts[0].reg_class == "aie2p.vec256"
+                assert payload.unit_count == unit_count
+                assert descriptor.effects[0].width_bits == width_bits
+                if address_form == "immediate":
+                    assert descriptor.immediates[0].value_step == immediate_step
+
+            load = descriptors[f"amd.xdna.aie2p.load.a.{shape}.indexed.immediate"]
+            store = descriptors[f"amd.xdna.aie2p.store.{shape}.indexed.immediate"]
+            if width_bits == 128:
+                assert load.operands[0].register_part == "aie2p.vec256.low128"
+                assert store.operands[0].register_part == "aie2p.vec256.low128"
+            else:
+                assert load.operands[0].register_part is None
+                assert store.operands[0].register_part is None
 
 
 def test_scalar_address_descriptors_expose_fixed_register_state() -> None:
@@ -547,17 +619,19 @@ def test_vector_multiply_descriptors_own_configuration_state() -> None:
     ]
     assert [operand.reg_alts[0].reg_class for operand in multiply.operands] == [
         "aie2p.edm",
-        "aie2p.vec512",
-        "aie2p.vec512",
+        "aie2p.vec256",
+        "aie2p.vec256",
         "aie2p.er",
     ]
+    assert [operand.unit_count for operand in multiply.operands] == [1, 2, 2, 1]
 
     narrow = descriptors["amd.xdna.aie2p.narrow.trunc.signed.i16x32"]
     assert [operand.reg_alts[0].reg_class for operand in narrow.operands[:3]] == [
-        "aie2p.vec512",
+        "aie2p.vec256",
         "aie2p.edm",
         "aie2p.es",
     ]
+    assert narrow.operands[0].unit_count == 2
     narrow_state_classes = {
         operand.field_name: operand.reg_alts[0].reg_class
         for operand in narrow.operands[3:]

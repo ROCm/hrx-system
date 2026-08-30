@@ -98,8 +98,8 @@ func.def target(@target) @copy_i32x16_dynamic_static(
 low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @copy_i8x64() asm {
   %source_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
-  %value = vlda %source_view, 64
-  vst %value, %output_view, 64
+  %value = vlda.512.i8x64 %source_view, 64
+  vst.512.i8x64 %value, %output_view, 64
   return
 }
 
@@ -107,10 +107,10 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @add_i16x
   %lhs_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %rhs_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
   %output_view = resource<native_pointer> {index = 2, source_type = buffer} : reg<aie2p.ep>
-  %lhs_value = vlda %lhs_view, 64
-  %rhs_value = vlda %rhs_view, 64
+  %lhs_value = vlda.512.i16x32 %lhs_view, 64
+  %rhs_value = vlda.512.i16x32 %rhs_view, 64
   %sum = vadd.16 %lhs_value, %rhs_value
-  vst %sum, %output_view, 64
+  vst.512.i16x32 %sum, %output_view, 64
   return
 }
 
@@ -118,10 +118,10 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @add_i32x
   %lhs_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %rhs_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
   %output_view = resource<native_pointer> {index = 2, source_type = buffer} : reg<aie2p.ep>
-  %lhs_value = vlda %lhs_view, 64
-  %rhs_value = vlda %rhs_view, 64
+  %lhs_value = vlda.512.i32x16 %lhs_view, 64
+  %rhs_value = vlda.512.i32x16 %rhs_view, 64
   %sum = vadd.32 %lhs_value, %rhs_value
-  vst %sum, %output_view, 64
+  vst.512.i32x16 %sum, %output_view, 64
   return
 }
 
@@ -130,8 +130,8 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @copy_i32
   %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
   %85 = mov.static-byte-offset 1024
   %86 = mov.address-index %85
-  %value = vlda.index %source_view, %86
-  vst.index %value, %output_view, %86
+  %value = vlda.512.i32x16.index %source_view, %86
+  vst.512.i32x16.index %value, %output_view, %86
   return
 }
 
@@ -141,8 +141,8 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @copy_i32
   %93 = mov.i32 2
   %94 = lshl %element, %93
   %95 = mov.address-index %94
-  %value = vlda.index %source_view, %95
-  vst.index %value, %output_view, %95
+  %value = vlda.512.i32x16.index %source_view, %95
+  vst.512.i32x16.index %value, %output_view, %95
   return
 }
 
@@ -154,9 +154,9 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @copy_i32
   %105 = lshl %element, %104
   %106 = add.rr %105, %103
   %107 = mov.address-index %106
-  %value = vlda.index %source_view, %107
+  %value = vlda.512.i32x16.index %source_view, %107
   %112 = add.rr %105, %103
   %113 = mov.address-index %112
-  vst.index %value, %output_view, %113
+  vst.512.i32x16.index %value, %output_view, %113
   return
 }

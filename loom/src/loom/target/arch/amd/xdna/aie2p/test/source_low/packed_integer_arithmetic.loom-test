@@ -10,7 +10,7 @@ func.def target(@target) @i8x8_bitwise_storage_tuple(%lhs: vector<8xi8>, %rhs: v
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i8x8_bitwise_storage_tuple(%lhs: reg<aie2p.vec512>, %rhs: reg<aie2p.vec512>) -> (reg<aie2p.vec512>, reg<aie2p.vec512>, reg<aie2p.vec512>) asm {
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i8x8_bitwise_storage_tuple(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) asm {
   %and = vband %lhs, %rhs
   %or = vbor %lhs, %rhs
   %xor = vsub.8 %or, %and
@@ -28,7 +28,7 @@ func.def target(@target) @i16x4_bitwise_storage_tuple(%lhs: vector<4xi16>, %rhs:
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i16x4_bitwise_storage_tuple(%lhs: reg<aie2p.vec512>, %rhs: reg<aie2p.vec512>) -> (reg<aie2p.vec512>, reg<aie2p.vec512>, reg<aie2p.vec512>) asm {
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i16x4_bitwise_storage_tuple(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) asm {
   %and = vband %lhs, %rhs
   %or = vbor %lhs, %rhs
   %xor = vsub.16 %or, %and
@@ -45,7 +45,7 @@ func.def target(@target) @i16x4_add_sub_storage_tuple(%lhs: vector<4xi16>, %rhs:
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i16x4_add_sub_storage_tuple(%lhs: reg<aie2p.vec512>, %rhs: reg<aie2p.vec512>) -> (reg<aie2p.vec512>, reg<aie2p.vec512>) asm {
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i16x4_add_sub_storage_tuple(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) asm {
   %sum = vadd.16 %lhs, %rhs
   %diff = vsub.16 %lhs, %rhs
   return %sum, %diff
@@ -64,7 +64,7 @@ func.def target(@target) @i16x4_mul_minmax_storage_tuple(%lhs: vector<4xi16>, %r
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i16x4_mul_minmax_storage_tuple(%lhs: reg<aie2p.vec512>, %rhs: reg<aie2p.vec512>) -> (reg<aie2p.vec512>, reg<aie2p.vec512>, reg<aie2p.vec512>, reg<aie2p.vec512>, reg<aie2p.vec512>) asm {
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i16x4_mul_minmax_storage_tuple(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) asm {
   %19 = mova.i32 858
   %20 = mov.shift 0
   %21 = vmul.i16x32 %lhs, %rhs, %19
@@ -90,7 +90,7 @@ func.def target(@target) @i16x4_shift_storage_tuple(%value: vector<4xi16>, %shif
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i16x4_shift_storage_tuple(%value: reg<aie2p.vec512>, %shift: reg<aie2p.vec512>) -> (reg<aie2p.vec512>, reg<aie2p.vec512>, reg<aie2p.vec512>) asm {
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i16x4_shift_storage_tuple(%value: reg<aie2p.vec256 x2>, %shift: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) asm {
   %64 = vextract.16.imm %value, 0
   %65 = vextract.16.imm %shift, 0
   %66 = extend.u16 %65
@@ -170,7 +170,7 @@ func.def target(@target) @i16x4_bitcast_mul_maxui_chain(%packed: vector<2xi32>, 
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i16x4_bitcast_mul_maxui_chain(%lanes: reg<aie2p.vec512>, %scale: reg<aie2p.vec512>, %limit: reg<aie2p.vec512>) -> (reg<aie2p.vec512>) asm {
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i16x4_bitcast_mul_maxui_chain(%lanes: reg<aie2p.vec256 x2>, %scale: reg<aie2p.vec256 x2>, %limit: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
   %11 = mova.i32 858
   %12 = mov.shift 0
   %13 = vmul.i16x32 %lanes, %scale, %11
@@ -194,7 +194,7 @@ func.def target(@target) @i16x4_select_xori(%lhs: i32, %rhs: i32, %true_value: v
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i16x4_select_xori(%lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>, %true_value: reg<aie2p.vec512>, %false_value: reg<aie2p.vec512>, %mask: reg<aie2p.vec512>) -> (reg<aie2p.vec512>) asm {
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i16x4_select_xori(%lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>, %true_value: reg<aie2p.vec256 x2>, %false_value: reg<aie2p.vec256 x2>, %mask: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
   %condition = lt %lhs, %rhs
   %18 = select.mask %condition, -1
   %selected = vsel.32 %true_value, %false_value, %18
@@ -220,14 +220,14 @@ func.def target(@target) @i16x4_cfg_arg_andi(%lhs: i32, %rhs: i32, %true_value: 
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i16x4_cfg_arg_andi(%lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>, %true_value: reg<aie2p.vec512>, %false_value: reg<aie2p.vec512>, %mask: reg<aie2p.vec512>) -> (reg<aie2p.vec512>) asm {
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i16x4_cfg_arg_andi(%lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>, %true_value: reg<aie2p.vec256 x2>, %false_value: reg<aie2p.vec256 x2>, %mask: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
   %condition = lt %lhs, %rhs
   low.cond_br %condition, ^then, ^else : reg<aie2p.er>
 ^then:
-  low.br ^join(%true_value: reg<aie2p.vec512>)
+  low.br ^join(%true_value: reg<aie2p.vec256 x2>)
 ^else:
-  low.br ^join(%false_value: reg<aie2p.vec512>)
-^join(%selected: reg<aie2p.vec512>):
+  low.br ^join(%false_value: reg<aie2p.vec256 x2>)
+^join(%selected: reg<aie2p.vec256 x2>):
   %result = vband %selected, %mask
   return %result
 }

@@ -61,6 +61,7 @@ from loom.target.low_descriptors import (
     OperandFlag,
     OperandRole,
     PhysicalRegister,
+    PhysicalRegisterView,
     RegClass,
     RegClassAlt,
     RegClassAltFlag,
@@ -77,9 +78,13 @@ from loom.target.low_descriptors import (
 _TARGET_KEY = "amd.xdna.aie2p"
 _EL_LOW32_PART = "aie2p.elpredicate.low32"
 _EL_HIGH32_PART = "aie2p.elpredicate.high32"
+_VEC256_LOW128_PART = "aie2p.vec256.low128"
+_VEC256_HIGH128_PART = "aie2p.vec256.high128"
 _REGISTER_PARTS = (
     RegisterPart(_EL_LOW32_PART, "aie2p.elpredicate", 0x1),
     RegisterPart(_EL_HIGH32_PART, "aie2p.elpredicate", 0x2),
+    RegisterPart(_VEC256_LOW128_PART, "aie2p.vec256", 0x1),
+    RegisterPart(_VEC256_HIGH128_PART, "aie2p.vec256", 0x2),
 )
 _REGISTER_PARTS_BY_NAME = {part.name: part for part in _REGISTER_PARTS}
 
@@ -100,6 +105,143 @@ class _DescriptorSpec:
     encoding_adapter_overrides: tuple[tuple[str, str], ...] = ()
     storage_continuation_part: str | None = None
     schedule_alternatives: tuple[str, ...] = ()
+    memory_width_bits: int | None = None
+
+
+_VECTOR_MEMORY_FORM_FAMILIES = (
+    (
+        128,
+        (
+            "VLDA_128_dmv_lda_w_idx",
+            "VLDA_128_dmv_lda_w_idx_imm",
+            "OP_mWa",
+        ),
+        ("VLDB_128_idx", "VLDB_128_idx_imm", "OP_mWb"),
+        (
+            "VST_128_dmv_sts_w_idx",
+            "VST_128_dmv_sts_w_idx_imm",
+            "OP_mWs",
+        ),
+    ),
+    (
+        256,
+        ("VLDA_dmw_lda_w_idx", "VLDA_dmw_lda_w_idx_imm", "OP_mWa"),
+        ("VLDB_dmw_ldb_idx", "VLDB_dmw_ldb_idx_imm", "OP_mWb"),
+        ("VST_dmw_sts_w_idx", "VST_dmw_sts_w_idx_imm", "OP_mWs"),
+    ),
+    (
+        512,
+        ("VLDA_dmx_lda_x_idx", "VLDA_dmx_lda_x_idx_imm", None),
+        ("VLDB_dmx_ldb_x_idx", "VLDB_dmx_ldb_x_idx_imm", None),
+        ("VST_dmx_sts_x_idx", "VST_dmx_sts_x_idx_imm", None),
+    ),
+)
+
+
+def _vector_memory_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
+    """Selects every exact-width integer vector memory form."""
+
+    result = []
+    for width_bits, load_a, load_b, store in _VECTOR_MEMORY_FORM_FAMILIES:
+        for element_bits in (8, 16, 32):
+            shape = f"i{element_bits}x{width_bits // element_bits}"
+            load_a_register_key = f"{_TARGET_KEY}.load.a.{shape}.indexed.register"
+            load_a_immediate_key = f"{_TARGET_KEY}.load.a.{shape}.indexed.immediate"
+            load_b_register_key = f"{_TARGET_KEY}.load.b.{shape}.indexed.register"
+            load_b_immediate_key = f"{_TARGET_KEY}.load.b.{shape}.indexed.immediate"
+            store_register_key = f"{_TARGET_KEY}.store.{shape}.indexed.register"
+            store_immediate_key = f"{_TARGET_KEY}.store.{shape}.indexed.immediate"
+            partial_load_a = (
+                (
+                    (("dst", _VEC256_LOW128_PART),),
+                    (("dst", load_a[2]),),
+                )
+                if width_bits == 128
+                else ((), ())
+            )
+            partial_load_b = (
+                (
+                    (("dst", _VEC256_LOW128_PART),),
+                    (("dst", load_b[2]),),
+                )
+                if width_bits == 128
+                else ((), ())
+            )
+            partial_store = (
+                (
+                    (("src", _VEC256_LOW128_PART),),
+                    (("src", store[2]),),
+                )
+                if width_bits == 128
+                else ((), ())
+            )
+            result.extend(
+                (
+                    _DescriptorSpec(
+                        load_a[1],
+                        load_a_immediate_key,
+                        f"memory.load.indexed.{shape}",
+                        f"II_{load_a[1]}",
+                        asm_mnemonic=f"vlda.{width_bits}.{shape}",
+                        operand_register_parts=partial_load_a[0],
+                        encoding_adapter_overrides=partial_load_a[1],
+                        schedule_alternatives=(load_b_immediate_key,),
+                        memory_width_bits=width_bits,
+                    ),
+                    _DescriptorSpec(
+                        load_a[0],
+                        load_a_register_key,
+                        f"memory.load.indexed.{shape}",
+                        f"II_{load_a[0]}",
+                        asm_mnemonic=f"vlda.{width_bits}.{shape}.index",
+                        operand_register_parts=partial_load_a[0],
+                        encoding_adapter_overrides=partial_load_a[1],
+                        schedule_alternatives=(load_b_register_key,),
+                        memory_width_bits=width_bits,
+                    ),
+                    _DescriptorSpec(
+                        load_b[1],
+                        load_b_immediate_key,
+                        f"memory.load.indexed.{shape}",
+                        f"II_{load_b[1]}",
+                        asm_mnemonic=f"vldb.{width_bits}.{shape}",
+                        operand_register_parts=partial_load_b[0],
+                        encoding_adapter_overrides=partial_load_b[1],
+                        memory_width_bits=width_bits,
+                    ),
+                    _DescriptorSpec(
+                        load_b[0],
+                        load_b_register_key,
+                        f"memory.load.indexed.{shape}",
+                        f"II_{load_b[0]}",
+                        asm_mnemonic=f"vldb.{width_bits}.{shape}.index",
+                        operand_register_parts=partial_load_b[0],
+                        encoding_adapter_overrides=partial_load_b[1],
+                        memory_width_bits=width_bits,
+                    ),
+                    _DescriptorSpec(
+                        store[1],
+                        store_immediate_key,
+                        f"memory.store.indexed.{shape}",
+                        f"II_{store[1]}",
+                        asm_mnemonic=f"vst.{width_bits}.{shape}",
+                        operand_register_parts=partial_store[0],
+                        encoding_adapter_overrides=partial_store[1],
+                        memory_width_bits=width_bits,
+                    ),
+                    _DescriptorSpec(
+                        store[0],
+                        store_register_key,
+                        f"memory.store.indexed.{shape}",
+                        f"II_{store[0]}",
+                        asm_mnemonic=f"vst.{width_bits}.{shape}.index",
+                        operand_register_parts=partial_store[0],
+                        encoding_adapter_overrides=partial_store[1],
+                        memory_width_bits=width_bits,
+                    ),
+                )
+            )
+    return tuple(result)
 
 
 _DESCRIPTOR_SPECS = (
@@ -490,47 +632,7 @@ _DESCRIPTOR_SPECS = (
         "integer.insert.i32",
         "II_VINSERT_32_mR29_insert",
     ),
-    _DescriptorSpec(
-        "VLDA_dmx_lda_x_idx_imm",
-        f"{_TARGET_KEY}.load.a.i8x64.indexed.immediate",
-        "memory.load.indexed.i8x64",
-        "II_VLDA_dmx_lda_x_idx_imm",
-        schedule_alternatives=(f"{_TARGET_KEY}.load.b.i8x64.indexed.immediate",),
-    ),
-    _DescriptorSpec(
-        "VLDA_dmx_lda_x_idx",
-        f"{_TARGET_KEY}.load.a.i8x64.indexed.register",
-        "memory.load.indexed.i8x64",
-        "II_VLDA_dmx_lda_x_idx",
-        asm_mnemonic="vlda.index",
-        schedule_alternatives=(f"{_TARGET_KEY}.load.b.i8x64.indexed.register",),
-    ),
-    _DescriptorSpec(
-        "VLDB_dmx_ldb_x_idx_imm",
-        f"{_TARGET_KEY}.load.b.i8x64.indexed.immediate",
-        "memory.load.indexed.i8x64",
-        "II_VLDB_dmx_ldb_x_idx_imm",
-    ),
-    _DescriptorSpec(
-        "VLDB_dmx_ldb_x_idx",
-        f"{_TARGET_KEY}.load.b.i8x64.indexed.register",
-        "memory.load.indexed.i8x64",
-        "II_VLDB_dmx_ldb_x_idx",
-        asm_mnemonic="vldb.index",
-    ),
-    _DescriptorSpec(
-        "VST_dmx_sts_x_idx_imm",
-        f"{_TARGET_KEY}.store.i8x64.indexed.immediate",
-        "memory.store.indexed.i8x64",
-        "II_VST_dmx_sts_x_idx_imm",
-    ),
-    _DescriptorSpec(
-        "VST_dmx_sts_x_idx",
-        f"{_TARGET_KEY}.store.i8x64.indexed.register",
-        "memory.store.indexed.i8x64",
-        "II_VST_dmx_sts_x_idx",
-        asm_mnemonic="vst.index",
-    ),
+    *_vector_memory_descriptor_specs(),
     _DescriptorSpec(
         "MOVA",
         f"{_TARGET_KEY}.constant.i32.mova",
@@ -777,20 +879,21 @@ _MACHINE_IMMEDIATES = {
     immediate.name: immediate for immediate in CORE_MACHINE_TABLE.immediates
 }
 
-# LLVM's mXa/mXb/mXm/mXn/mXs names describe instruction-operand encoding
-# roles, not distinct storage domains. They have the same 512-bit layout and
-# ordered X-register candidates as the canonical VEC512 class. Low values use
-# that canonical storage class while each operand retains its role-specific
-# adapter below, allowing loads, arithmetic, and stores to compose without
-# erasing the encoding distinction.
+# LLVM's mW*/mX* names describe instruction-operand encoding roles, not
+# distinct storage domains. W registers are the architectural 256-bit storage
+# units. Each X register is an ordered pair of W subregisters and remains the
+# aggregate encoding domain for 512-bit instructions.
 _LOW_REGISTER_CLASS_BY_MACHINE_CLASS = {
-    "mXa": "VEC512",
-    "mXb": "VEC512",
-    "mXm": "VEC512",
-    "mXn": "VEC512",
-    "mXs": "VEC512",
-    "mXv": "VEC512",
-    "mXw": "VEC512",
+    "mWa": "VEC256",
+    "mWb": "VEC256",
+    "mWs": "VEC256",
+    "mXa": "VEC256",
+    "mXb": "VEC256",
+    "mXm": "VEC256",
+    "mXn": "VEC256",
+    "mXs": "VEC256",
+    "mXv": "VEC256",
+    "mXw": "VEC256",
 }
 _INSTRUCTION_ENCODINGS = {
     instruction.name: instruction for instruction in CORE_ENCODING_TABLE.instructions
@@ -850,16 +953,80 @@ def _operand_override_map(
     return dict(rows)
 
 
+def _operand_machine_class(operand: MachineOperand) -> str:
+    if operand.kind is MachineOperandKind.REGISTER_CLASS:
+        return operand.type_name
+    if operand.kind is MachineOperandKind.REGISTER_ADAPTER:
+        return _MACHINE_ADAPTERS[operand.type_name].register_class
+    raise ValueError(f"{operand.name}: immediate is not a register operand")
+
+
+def _storage_unit_count(source: str, target: str) -> int:
+    source_bits = _MACHINE_CLASSES[source].layout.register_size_bits
+    target_bits = _MACHINE_CLASSES[target].layout.register_size_bits
+    if source_bits < target_bits or source_bits % target_bits:
+        raise ValueError(
+            f"{source}: {source_bits}-bit native storage cannot use "
+            f"{target_bits}-bit Low units from {target}"
+        )
+    return source_bits // target_bits
+
+
+def _aggregate_register_units(
+    source_class_name: str,
+    target_class_name: str,
+    register_name: str,
+) -> tuple[str, ...]:
+    unit_count = _storage_unit_count(source_class_name, target_class_name)
+    register = _MACHINE_REGISTERS[register_name]
+    if len(register.subregisters) != unit_count:
+        raise ValueError(
+            f"{register_name}: expected {unit_count} named subregister units for "
+            f"{source_class_name} as {target_class_name}, found "
+            f"{len(register.subregisters)}"
+        )
+    target_candidates = set(_MACHINE_CLASSES[target_class_name].candidates)
+    if not set(register.subregisters) <= target_candidates:
+        raise ValueError(
+            f"{register_name}: subregisters {register.subregisters} are outside "
+            f"storage class {target_class_name}"
+        )
+    covered_units = tuple(
+        sorted(
+            atomic_unit
+            for subregister_name in register.subregisters
+            for atomic_unit in _MACHINE_REGISTERS[subregister_name].atomic_units
+        )
+    )
+    if covered_units != register.atomic_units:
+        raise ValueError(
+            f"{register_name}: named subregisters do not exactly cover aggregate "
+            "atomic storage"
+        )
+    return register.subregisters
+
+
+def _validate_aggregate_storage_domain(source: str, target: str) -> None:
+    source_class = _MACHINE_CLASSES[source]
+    target_class = _MACHINE_CLASSES[target]
+    flattened_units = tuple(
+        unit
+        for register_name in source_class.candidates
+        for unit in _aggregate_register_units(source, target, register_name)
+    )
+    if len(flattened_units) != len(set(flattened_units)):
+        raise ValueError(f"{source}: aggregate candidates reuse {target} units")
+    if set(flattened_units) != set(target_class.candidates):
+        raise ValueError(
+            f"{source}: aggregate candidates do not exactly cover {target}"
+        )
+
+
 def _operand_storage_machine_class(
     spec: _DescriptorSpec,
     operand: MachineOperand,
 ) -> str:
-    if operand.kind is MachineOperandKind.REGISTER_CLASS:
-        machine_class = operand.type_name
-    elif operand.kind is MachineOperandKind.REGISTER_ADAPTER:
-        machine_class = _MACHINE_ADAPTERS[operand.type_name].register_class
-    else:
-        raise ValueError(f"{operand.name}: immediate is not a register operand")
+    machine_class = _operand_machine_class(operand)
     storage_overrides = _operand_override_map(
         spec, spec.storage_overrides, "storage overrides"
     )
@@ -880,19 +1047,28 @@ def _operand_storage_machine_class(
     )
     source = _MACHINE_CLASSES[machine_class]
     target = _MACHINE_CLASSES[low_class]
-    selected_candidates = tuple(
-        candidate
-        for candidate in source.candidates
-        if candidate in set(target.candidates)
-    )
     has_register_projection = operand.name in register_parts
-    if (
-        source.layout != target.layout or selected_candidates != target.candidates
-    ) and not has_register_projection:
-        raise ValueError(
-            f"{spec.form_name}.{operand.name}: Low class {low_class} is not an "
-            f"ordered storage subset of {machine_class}"
+    unit_count = (
+        1 if has_register_projection else _storage_unit_count(machine_class, low_class)
+    )
+    if unit_count == 1:
+        selected_candidates = tuple(
+            candidate
+            for candidate in source.candidates
+            if candidate in set(target.candidates)
         )
+        if selected_candidates != target.candidates and not has_register_projection:
+            raise ValueError(
+                f"{spec.form_name}.{operand.name}: Low class {low_class} is not "
+                f"an ordered storage subset of {machine_class}"
+            )
+    else:
+        if has_register_projection:
+            raise ValueError(
+                f"{spec.form_name}.{operand.name}: aggregate storage cannot also "
+                "use a register-part projection"
+            )
+        _validate_aggregate_storage_domain(machine_class, low_class)
     if has_register_projection:
         part_name = register_parts[operand.name]
         part = _REGISTER_PARTS_BY_NAME.get(part_name)
@@ -912,10 +1088,11 @@ def _operand_storage_machine_class(
                 f"{spec.form_name}.{operand.name}: unknown encoding adapter "
                 f"{adapter_name}"
             )
-        if adapter.register_class != low_class:
+        adapter_class = _MACHINE_CLASSES[adapter.register_class]
+        if adapter_class.candidates != target.candidates:
             raise ValueError(
                 f"{spec.form_name}.{operand.name}: adapter {adapter_name} encodes "
-                f"{adapter.register_class}, not {low_class}"
+                f"{adapter.register_class}, not the {low_class} candidate domain"
             )
         encoded_registers = {
             register for register, _ in adapter.effective_register_encodings
@@ -953,12 +1130,27 @@ def _operand_storage_machine_class(
                 operand.type_name
             ].effective_register_encodings
         }
-        if not set(target.candidates).issubset(encoded_registers):
+        required_registers = (
+            set(target.candidates) if unit_count == 1 else set(source.candidates)
+        )
+        if not required_registers.issubset(encoded_registers):
             raise ValueError(
                 f"{spec.form_name}.{operand.name}: adapter {operand.type_name} "
-                f"does not encode Low class {low_class}"
+                f"does not encode the physical domain for {low_class} x{unit_count}"
             )
     return low_class
+
+
+def _operand_unit_count(spec: _DescriptorSpec, operand: MachineOperand) -> int:
+    register_parts = _operand_override_map(
+        spec, spec.operand_register_parts, "register-part overrides"
+    )
+    if operand.name in register_parts:
+        return 1
+    return _storage_unit_count(
+        _operand_machine_class(operand),
+        _operand_storage_machine_class(spec, operand),
+    )
 
 
 def _low_register_class_name(machine_class: str) -> str:
@@ -1060,7 +1252,9 @@ def _reg_classes() -> tuple[RegClass, ...]:
                     RegClassFlag.EXPLICIT_PHYSICAL_REGISTERS,
                 ),
                 target_bank_id=target_bank_id,
-                full_register_part_mask=(0x3 if machine_name == "eLPredicate" else 0x1),
+                full_register_part_mask=(
+                    0x3 if machine_name in ("eLPredicate", "VEC256") else 0x1
+                ),
                 physical_registers=machine_class.candidates,
             )
         )
@@ -1103,6 +1297,38 @@ def _physical_registers() -> tuple[PhysicalRegister, ...]:
         PhysicalRegister(register.name, register.atomic_units)
         for register in CORE_MACHINE_TABLE.physical_registers
     )
+
+
+def _physical_register_views() -> tuple[PhysicalRegisterView, ...]:
+    views: dict[tuple[str, str], PhysicalRegisterView] = {}
+    for spec in _DESCRIPTOR_SPECS:
+        form = _MACHINE_FORMS[spec.form_name]
+        for operand in (*form.outputs, *form.inputs):
+            if operand.kind is MachineOperandKind.IMMEDIATE:
+                continue
+            source_class_name = _operand_machine_class(operand)
+            target_class_name = _operand_storage_machine_class(spec, operand)
+            if _operand_unit_count(spec, operand) == 1:
+                continue
+            reg_class_name = _low_register_class_name(target_class_name)
+            for register_name in _MACHINE_CLASSES[source_class_name].candidates:
+                view = PhysicalRegisterView(
+                    physical_register=register_name,
+                    reg_class=reg_class_name,
+                    units=_aggregate_register_units(
+                        source_class_name,
+                        target_class_name,
+                        register_name,
+                    ),
+                )
+                key = (view.physical_register, view.reg_class)
+                previous = views.setdefault(key, view)
+                if previous != view:
+                    raise ValueError(
+                        f"{register_name}: inconsistent aggregate register views "
+                        f"{previous.units} and {view.units}"
+                    )
+    return tuple(views[key] for key in sorted(views))
 
 
 _ITINERARIES = {
@@ -1231,6 +1457,7 @@ def _low_operand(
         field_name=operand.name,
         role=role,
         reg_alts=(RegClassAlt(_operand_register_class(spec, operand)),),
+        unit_count=_operand_unit_count(spec, operand),
         encoding_field_id=encoding_field_id,
         encoding_adapter_id=encoding_adapter_id,
         register_part=register_parts.get(operand.name),
@@ -1478,16 +1705,23 @@ def _memory_timing_event(spec: _DescriptorSpec, access: str) -> str:
 
 
 def _effects(spec: _DescriptorSpec, form: MachineForm) -> tuple[Effect, ...]:
-    register_width_bits = max(
-        (
-            _MACHINE_CLASSES[
-                _operand_storage_machine_class(spec, operand)
-            ].layout.register_size_bits
-            for operand in (*form.outputs, *form.inputs)
-            if operand.kind is not MachineOperandKind.IMMEDIATE
-        ),
-        default=0,
-    )
+    register_width_bits = spec.memory_width_bits
+    if register_width_bits is None:
+        register_width_bits = max(
+            (
+                _MACHINE_CLASSES[
+                    _operand_storage_machine_class(spec, operand)
+                ].layout.register_size_bits
+                * _operand_unit_count(spec, operand)
+                for operand in (*form.outputs, *form.inputs)
+                if operand.kind is not MachineOperandKind.IMMEDIATE
+            ),
+            default=0,
+        )
+    elif not (has_property(form, "mayLoad") or has_property(form, "mayStore")):
+        raise ValueError(
+            f"{form.name}: explicit memory width requires a memory instruction"
+        )
     result = []
     if has_property(form, "mayLoad"):
         if register_width_bits == 0:
@@ -2111,6 +2345,7 @@ AIE2P_CORE_DESCRIPTOR_SET = DescriptorSet(
     reg_classes=_reg_classes(),
     register_parts=_REGISTER_PARTS,
     physical_registers=_physical_registers(),
+    physical_register_views=_physical_register_views(),
     timing_events=_TIMING_EVENTS,
     event_separations=_EVENT_SEPARATIONS,
     resources=_RESOURCES,

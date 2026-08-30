@@ -19,7 +19,7 @@ func.def target(@target) @cmp_i8_matrix(
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @cmp_i8_matrix(%lhs: reg<aie2p.vec512>, %rhs: reg<aie2p.vec512>) -> (reg<aie2p.elpredicate>, reg<aie2p.elpredicate>, reg<aie2p.elpredicate>, reg<aie2p.elpredicate>, reg<aie2p.elpredicate>, reg<aie2p.elpredicate>, reg<aie2p.elpredicate>, reg<aie2p.elpredicate>, reg<aie2p.elpredicate>, reg<aie2p.elpredicate>) asm {
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @cmp_i8_matrix(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>) -> (reg<aie2p.elpredicate>, reg<aie2p.elpredicate>, reg<aie2p.elpredicate>, reg<aie2p.elpredicate>, reg<aie2p.elpredicate>, reg<aie2p.elpredicate>, reg<aie2p.elpredicate>, reg<aie2p.elpredicate>, reg<aie2p.elpredicate>, reg<aie2p.elpredicate>) asm {
   %34 = vsub.8 %lhs, %rhs
   %eq = veqz.8 %34
   %36 = vlt.u8x64 %lhs, %rhs
@@ -56,7 +56,7 @@ func.def target(@target) @cmp_i16_matrix(
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @cmp_i16_matrix(%lhs: reg<aie2p.vec512>, %rhs: reg<aie2p.vec512>) -> (reg<aie2p.elpredicate>, reg<aie2p.elpredicate>, reg<aie2p.elpredicate>, reg<aie2p.elpredicate>, reg<aie2p.elpredicate>, reg<aie2p.elpredicate>, reg<aie2p.elpredicate>, reg<aie2p.elpredicate>, reg<aie2p.elpredicate>, reg<aie2p.elpredicate>) asm {
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @cmp_i16_matrix(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>) -> (reg<aie2p.elpredicate>, reg<aie2p.elpredicate>, reg<aie2p.elpredicate>, reg<aie2p.elpredicate>, reg<aie2p.elpredicate>, reg<aie2p.elpredicate>, reg<aie2p.elpredicate>, reg<aie2p.elpredicate>, reg<aie2p.elpredicate>, reg<aie2p.elpredicate>) asm {
   %34 = vsub.16 %lhs, %rhs
   %35 = veqz.16.el.low32 %34
   %eq = predicate.complete.zero.high32 %35, 0
@@ -104,7 +104,7 @@ func.def target(@target) @cmp_i32_matrix(
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @cmp_i32_matrix(%lhs: reg<aie2p.vec512>, %rhs: reg<aie2p.vec512>) -> (reg<aie2p.elpredicate>, reg<aie2p.elpredicate>, reg<aie2p.elpredicate>, reg<aie2p.elpredicate>, reg<aie2p.elpredicate>, reg<aie2p.elpredicate>, reg<aie2p.elpredicate>, reg<aie2p.elpredicate>, reg<aie2p.elpredicate>, reg<aie2p.elpredicate>) asm {
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @cmp_i32_matrix(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>) -> (reg<aie2p.elpredicate>, reg<aie2p.elpredicate>, reg<aie2p.elpredicate>, reg<aie2p.elpredicate>, reg<aie2p.elpredicate>, reg<aie2p.elpredicate>, reg<aie2p.elpredicate>, reg<aie2p.elpredicate>, reg<aie2p.elpredicate>, reg<aie2p.elpredicate>) asm {
   %34 = vsub.32 %lhs, %rhs
   %35 = veqz.32.el.low32 %34
   %eq = predicate.complete.zero.high32 %35, 0
@@ -169,7 +169,7 @@ func.def target(@target) @predicate_logic_and_select(
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @predicate_logic_and_select(%word_lhs: reg<aie2p.vec512>, %word_rhs: reg<aie2p.vec512>, %word_true: reg<aie2p.vec512>, %word_false: reg<aie2p.vec512>) -> (reg<aie2p.vec512>, reg<aie2p.vec512>, reg<aie2p.vec512>) asm {
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @predicate_logic_and_select(%word_lhs: reg<aie2p.vec256 x2>, %word_rhs: reg<aie2p.vec256 x2>, %word_true: reg<aie2p.vec256 x2>, %word_false: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) asm {
   %byte_lt = vlt.s8x64 %word_lhs, %word_rhs
   %37 = vlt.u8x64 %word_lhs, %word_rhs
   %38 = vlt.u8x64 %word_rhs, %word_lhs

@@ -107,21 +107,22 @@ class Aie2pLeafObjectTest : public ::testing::Test {
                                        &out_leaf->object);
   }
 
-  iree_status_t CompileVectorAdd(std::string_view add_mnemonic,
+  iree_status_t CompileVectorAdd(std::string_view vector_shape,
+                                 std::string_view add_mnemonic,
                                  CompiledLeaf* out_leaf) {
     std::string source =
         "low.func.def target<amd.xdna.aie2p.core> @vector_add(\n"
         "    %lhs_ptr: reg<aie2p.ep>, %rhs_ptr: reg<aie2p.ep>, "
         "%out_ptr: reg<aie2p.ep>) asm {\n"
-        "  %lhs = vlda %lhs_ptr, 0\n"
-        "  %rhs = vldb %rhs_ptr, 0\n"
-        "  %sum = ";
+        "  %lhs = vlda.512.";
+    source.append(vector_shape);
+    source.append(" %lhs_ptr, 0\n  %rhs = vldb.512.");
+    source.append(vector_shape);
+    source.append(" %rhs_ptr, 0\n  %sum = ");
     source.append(add_mnemonic);
-    source.append(
-        " %rhs, %lhs\n"
-        "  vst %sum, %out_ptr, 0\n"
-        "  return\n"
-        "}\n");
+    source.append(" %rhs, %lhs\n  vst.512.");
+    source.append(vector_shape);
+    source.append(" %sum, %out_ptr, 0\n  return\n}\n");
     return CompileSource(source, out_leaf);
   }
 
@@ -134,10 +135,10 @@ class Aie2pLeafObjectTest : public ::testing::Test {
         "buffer} : reg<aie2p.ep>\n"
         "  %out_ptr = resource<native_pointer> {index = 2, source_type = "
         "buffer} : reg<aie2p.ep>\n"
-        "  %lhs = vlda %lhs_ptr, 0\n"
-        "  %rhs = vlda %rhs_ptr, 0\n"
+        "  %lhs = vlda.512.i32x16 %lhs_ptr, 0\n"
+        "  %rhs = vlda.512.i32x16 %rhs_ptr, 0\n"
         "  %sum = vadd.32 %lhs, %rhs\n"
-        "  vst %sum, %out_ptr, 0\n"
+        "  vst.512.i32x16 %sum, %out_ptr, 0\n"
         "  return\n"
         "}\n",
         out_leaf);
@@ -161,23 +162,27 @@ class Aie2pLeafObjectTest : public ::testing::Test {
 
 TEST_F(Aie2pLeafObjectTest, LowFunctionsReproduceRetainedVectorLeaves) {
   struct TestCase {
+    std::string_view vector_shape;
     std::string_view mnemonic;
     std::array<uint8_t, 32> expected;
   };
   const TestCase test_cases[] = {
       {
+          "i32x16",
           "vadd.32",
           {0x3c, 0x68, 0x09, 0x72, 0x83, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
            0x00, 0x00, 0x00, 0x18, 0x00, 0x28, 0x10, 0x00, 0x00, 0x78, 0x2d,
            0x10, 0x18, 0x00, 0x00, 0x18, 0x13, 0x04, 0x0a, 0x00, 0x00},
       },
       {
+          "i16x32",
           "vadd.16",
           {0x3c, 0x68, 0x09, 0x72, 0x83, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
            0x00, 0x00, 0x00, 0x18, 0x00, 0x28, 0x10, 0x00, 0x00, 0x78, 0x1d,
            0x10, 0x18, 0x00, 0x00, 0x18, 0x13, 0x04, 0x0a, 0x00, 0x00},
       },
       {
+          "i8x64",
           "vadd.8",
           {0x3c, 0x68, 0x09, 0x72, 0x83, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
            0x00, 0x00, 0x00, 0x18, 0x00, 0x28, 0x10, 0x00, 0x00, 0x78, 0x0d,
@@ -188,7 +193,8 @@ TEST_F(Aie2pLeafObjectTest, LowFunctionsReproduceRetainedVectorLeaves) {
   for (const TestCase& test_case : test_cases) {
     SCOPED_TRACE(test_case.mnemonic);
     CompiledLeaf leaf;
-    IREE_ASSERT_OK(CompileVectorAdd(test_case.mnemonic, &leaf));
+    IREE_ASSERT_OK(
+        CompileVectorAdd(test_case.vector_shape, test_case.mnemonic, &leaf));
 
     ASSERT_EQ(leaf.frame.schedule.issue_group_count, 4u);
     EXPECT_EQ(leaf.frame.schedule.issue_groups[0].issue_cycle, 0u);
@@ -345,14 +351,12 @@ TEST_F(Aie2pLeafObjectTest, MaterializesFixedRegisterCopiesAsScalarMoves) {
   CompiledLeaf leaf;
   IREE_ASSERT_OK(CompileSource(
       "low.func.def target<amd.xdna.aie2p.core> @insert_lane(\n"
-      "    %vector: reg<aie2p.vec512>, %index: reg<aie2p.er>,\n"
-      "    %value: reg<aie2p.er>) -> (reg<aie2p.vec512>) {\n"
-      "  %fixed_index = low.copy %index {detached = true} : "
+      "    %vector: reg<aie2p.vec256 x2>, %index: reg<aie2p.er>,\n"
+      "    %value: reg<aie2p.er>) -> (reg<aie2p.vec256 x2>) asm {\n"
+      "  %fixed_index = copy %index {detached = true} : "
       "reg<aie2p.er> -> reg<aie2p.mr29_insert>\n"
-      "  %result = low.op<amd.xdna.aie2p.insert.i8.register>("
-      "%vector, %fixed_index, %value) : (reg<aie2p.vec512>, "
-      "reg<aie2p.mr29_insert>, reg<aie2p.er>) -> reg<aie2p.vec512>\n"
-      "  low.return %result : reg<aie2p.vec512>\n"
+      "  %result = vinsert.8.reg %vector, %fixed_index, %value\n"
+      "  return %result\n"
       "}\n",
       &leaf));
 
