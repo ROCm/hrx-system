@@ -88,7 +88,6 @@ static iree_status_t iree_hal_elf_executable_query_library(
 
 static iree_status_t iree_hal_elf_executable_create(
     const iree_hal_executable_load_params_t* executable_params,
-    const iree_hal_executable_import_provider_t import_provider,
     iree_allocator_t host_allocator, iree_hal_executable_t** out_executable) {
   IREE_ASSERT_ARGUMENT(executable_params);
   IREE_ASSERT_ARGUMENT(executable_params->executable_data.data &&
@@ -99,9 +98,6 @@ static iree_status_t iree_hal_elf_executable_create(
   *out_executable = NULL;
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  // TODO(benvanik): rework this so that we load and query the library before
-  // allocating so that we know the import count. Today since we allocate first
-  // we need an additional allocation once we've seen the import table.
   iree_hal_elf_executable_t* executable = NULL;
   iree_host_size_t total_size = 0;
   iree_host_size_t constants_offset = 0;
@@ -128,21 +124,11 @@ static iree_status_t iree_hal_elf_executable_create(
 
   // Attempt to load the ELF module.
   iree_status_t status = iree_elf_module_initialize_from_memory(
-      executable_params->executable_data, /*import_table=*/NULL, host_allocator,
-      &executable->module);
+      executable_params->executable_data, host_allocator, &executable->module);
 
   // Query metadata and get the entry point function pointers.
   if (iree_status_is_ok(status)) {
     status = iree_hal_elf_executable_query_library(executable);
-  }
-
-  // Resolve imports, if any.
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_executable_library_initialize_imports(
-        &executable->base.environment, import_provider,
-        &executable->library->imports,
-        (iree_hal_executable_import_thunk_v0_t)iree_elf_thunk_i_ppp,
-        host_allocator);
   }
 
   // Verify that the library matches the executable params.
@@ -173,9 +159,6 @@ static void iree_hal_elf_executable_destroy(
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_elf_module_deinitialize(&executable->module);
-
-  iree_hal_executable_library_deinitialize_imports(
-      &executable->base.environment, host_allocator);
 
   iree_hal_local_executable_deinitialize(
       (iree_hal_local_executable_t*)base_executable);
@@ -325,9 +308,8 @@ iree_status_t iree_hal_embedded_elf_loader_create(
   iree_status_t status = iree_allocator_malloc(
       host_allocator, sizeof(*executable_loader), (void**)&executable_loader);
   if (iree_status_is_ok(status)) {
-    iree_hal_executable_loader_initialize(
-        &iree_hal_embedded_elf_loader_vtable,
-        iree_hal_executable_import_provider_null(), &executable_loader->base);
+    iree_hal_executable_loader_initialize(&iree_hal_embedded_elf_loader_vtable,
+                                          &executable_loader->base);
     executable_loader->host_allocator = host_allocator;
     *out_executable_loader = (iree_hal_executable_loader_t*)executable_loader;
   }
@@ -388,8 +370,7 @@ static iree_status_t iree_hal_embedded_elf_loader_load(
 
   // Perform the load of the ELF and wrap it in an executable handle.
   iree_status_t status = iree_hal_elf_executable_create(
-      executable_params, base_executable_loader->import_provider,
-      executable_loader->host_allocator, out_executable);
+      executable_params, executable_loader->host_allocator, out_executable);
 
   IREE_TRACE_ZONE_END(z0);
   return status;

@@ -46,28 +46,13 @@ iree_status_t iree_elf_arch_apply_relocations(
 // Cross-ABI function calls
 //==============================================================================
 
-// TODO(benvanik): add thunk functions (iree_elf_thunk_*) to be used by imports
-// for marshaling from linux ABI in the ELF to host ABI.
-
 // Host -> ELF: void(*)(void)
 void iree_elf_call_v_v(const void* symbol_ptr);
-
-// Host -> ELF: void*(*)(int)
-void* iree_elf_call_p_i(const void* symbol_ptr, int a0);
 
 // Host -> ELF: void*(*)(int, void*)
 void* iree_elf_call_p_ip(const void* symbol_ptr, int a0, void* a1);
 
-// Host -> ELF: int(*)(void*)
-int iree_elf_call_i_p(const void* symbol_ptr, void* a0);
-
 // Host -> ELF: int(*)(void*, void*, void*)
 int iree_elf_call_i_ppp(const void* symbol_ptr, void* a0, void* a1, void* a2);
-
-// Host -> ELF: void*(*)(void*, void*, void*)
-void* iree_elf_call_p_ppp(const void* symbol_ptr, void* a0, void* a1, void* a2);
-
-// ELF -> Host: int(*)(void*, void*, void*)
-int iree_elf_thunk_i_ppp(const void* symbol_ptr, void* a0, void* a1, void* a2);
 
 #endif  // IREE_HAL_LOCAL_ELF_ARCH_H_

@@ -87,13 +87,12 @@ typedef struct iree_hal_executable_environment_v0_t
 // or some semantic versioning we track in whatever spec we end up having.
 typedef uint32_t iree_hal_executable_library_version_t;
 
-#define IREE_HAL_EXECUTABLE_LIBRARY_VERSION_0_6 0x00000006u
-#define IREE_HAL_EXECUTABLE_LIBRARY_VERSION_0_7 0x00000007u
+#define IREE_HAL_EXECUTABLE_LIBRARY_VERSION_0_8 0x00000008u
 
 // The latest version of the library API; can be used to populate the
 // iree_hal_executable_library_header_t::version when building libraries.
 #define IREE_HAL_EXECUTABLE_LIBRARY_VERSION_LATEST \
-  IREE_HAL_EXECUTABLE_LIBRARY_VERSION_0_7
+  IREE_HAL_EXECUTABLE_LIBRARY_VERSION_0_8
 
 // A header present at the top of all versions of the library API used by the
 // runtime to ensure version compatibility.
@@ -122,10 +121,10 @@ typedef struct iree_hal_executable_library_header_t {
 //
 // The provided |environment| field contains information about the hosting
 // execution environment that the executable may use to specialize its
-// implementation, such as using specific imports or exporting
-// architecture-specific dispatch routines. Some environmental properties may
-// change per-invocation such as the CPU info when performing dispatches on
-// heterogenous processors that may change over the lifetime of the program.
+// implementation, such as exporting architecture-specific dispatch routines.
+// Some environmental properties may change per-invocation such as the CPU info
+// when performing dispatches on heterogenous processors that may change over
+// the lifetime of the program.
 //
 // On success the function returns the address of the initial |header| member
 // in the selected versioned library structure. The header pointer must be
@@ -150,77 +149,6 @@ typedef const iree_hal_executable_library_header_t* const* (
 //===----------------------------------------------------------------------===//
 // IREE_HAL_EXECUTABLE_LIBRARY_VERSION_0_*
 //===----------------------------------------------------------------------===//
-
-// Function signature of imported functions for use in the executable.
-// Each call takes opaque parameters as defined by the imported function.
-// Both the compiler and the runtime must agree on the parameter format
-// (including struct alignment and packing) and doing so is outside the scope
-// of this API. In general one should only pass precisely what they need
-// (pointers directly into buffers being manipulated, arguments, etc) and not
-// try to replicate the dispatch structure (workgroup information and bindings)
-// so that the imported functions can be versioned independently from this
-// specification.
-//
-// Returns 0 on success and non-zero on failure. Failures will cause device loss
-// and should only be used to communicate serious issues that should abort all
-// execution within the current device. Buffer overflows are a good example of
-// a useful failure though the HAL does not mandate that all overflows are
-// caught and only that they are not harmful - clamping byte ranges and never
-// returning a failure is sufficient.
-typedef int (*iree_hal_executable_import_v0_t)(void* params, void* context,
-                                               void* reserved);
-
-// A thunk function used to call an import.
-// All imports must be called through this function by passing the import
-// function pointer as the first argument followed by the arguments of the
-// import function itself.
-typedef int (*iree_hal_executable_import_thunk_v0_t)(
-    iree_hal_executable_import_v0_t fn_ptr, void* params, void* context,
-    void* reserved);
-
-// Declares imports available to the executable library at runtime.
-// To enable linker isolation, ABI shimming, and import multi-versioning we use
-// this import table exclusively and do not allow platform-level linking. If it
-// were allowed the deployment situation gets significantly more complex as the
-// libraries containing the imported symbols will differ on all platforms, will
-// have the platform-dependent ABI (Windows, MacOS, etc), and may not be
-// available at all (bare-metal).
-//
-// Static libraries may choose to still dynamically link against external
-// symbols without using this table as in that scenario much of the above
-// concerns do not apply: all code is being linked together into the same binary
-// and symbol availability is known during build-time linking. Static linking
-// also enables LTO to strip any import not used by any executables in contrast
-// to the dynamic style elsewhere.
-//
-// Represented as a struct-of-arrays for more efficient packing and more
-// locality during lookup. Each subarray - when not omitted and NULL - is
-// indexed by import ordinal and has up to |count| entries.
-typedef struct iree_hal_executable_import_table_v0_t {
-  // Total number of imports in the table.
-  uint32_t count;
-
-  // Import symbol name encoding the name and whether it is weak.
-  // Example: `?mylib_some_fn_v2`
-  //   `?`:
-  //     Indicates when an import is optional. If the import of the specified
-  //     version is not found the table entry will be NULL. When omitted if the
-  //     import is unavailable loading will fail.
-  //   `mylib_...`:
-  //     Prefix indicating the owner of the function; symbols have a global
-  //     namespace and this is used to reduce collisions.
-  //   `some_fn...`:
-  //     Name of the function used to link to the imports available in the
-  //     hosting executable.
-  //   `..._v2`:
-  //     Function-specified version number used to allow multiple versions to
-  //     to be imported. For backward compatibility one could import both
-  //     `some_fn_v1?` and `some_fn_v2?` and use whichever is available.
-  //     Note that this is just a convention for the suffix and can be anything.
-  //
-  // The symbol table is sorted ascending alphabetical (by strcmp).
-  const char* const* symbols;
-} iree_hal_executable_import_table_v0_t;
 
 // Maximum number of data fields in iree_hal_processor_v0_t.
 #define IREE_HAL_PROCESSOR_DATA_CAPACITY_V0 8
@@ -260,14 +188,6 @@ typedef struct iree_hal_executable_environment_v0_t {
   // Specialization constants available to the executable, if any.
   // Contains as many as declared in the library header.
   const uint32_t* constants;
-
-  // Thunk function for calling imports. All calls must be made through this.
-  iree_hal_executable_import_thunk_v0_t import_thunk;
-  // Optional imported functions available for use within the executable.
-  // Contains one entry per imported function. If an import was marked as weak
-  // then the corresponding entry may be NULL.
-  const iree_hal_executable_import_v0_t* import_funcs;
-  const void** import_contexts;
 
   // Optional architecture-specific CPU information.
   // In heterogenous processors this may represent any of the subarchitecture
@@ -640,9 +560,6 @@ typedef struct iree_hal_executable_library_v0_t {
   // Version/metadata header.
   // Will have a version of IREE_HAL_EXECUTABLE_LIBRARY_VERSION_*.
   const iree_hal_executable_library_header_t* header;
-
-  // Table of imported functions available to functions in the executable.
-  iree_hal_executable_import_table_v0_t imports;
 
   // Table of exported functions from the executable.
   iree_hal_executable_export_table_v0_t exports;

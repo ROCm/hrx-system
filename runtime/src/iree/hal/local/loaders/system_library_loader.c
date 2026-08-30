@@ -198,15 +198,8 @@ static iree_status_t iree_hal_system_executable_query_library(
   return iree_ok_status();
 }
 
-static int iree_hal_system_executable_import_thunk_v0(
-    iree_hal_executable_import_v0_t fn_ptr, void* params, void* context,
-    void* reserved) {
-  return fn_ptr(params, context, reserved);
-}
-
 static iree_status_t iree_hal_system_executable_create(
     const iree_hal_executable_load_params_t* executable_params,
-    const iree_hal_executable_import_provider_t import_provider,
     iree_allocator_t host_allocator, iree_hal_executable_t** out_executable) {
   IREE_ASSERT_ARGUMENT(executable_params);
   IREE_ASSERT_ARGUMENT(executable_params->executable_data.data &&
@@ -250,14 +243,6 @@ static iree_status_t iree_hal_system_executable_create(
     status = iree_hal_system_executable_query_library(executable);
   }
 
-  // Resolve imports, if any.
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_executable_library_initialize_imports(
-        &executable->base.environment, import_provider,
-        &executable->library->imports,
-        iree_hal_system_executable_import_thunk_v0, host_allocator);
-  }
-
   // Verify that the library matches the executable params.
   if (iree_status_is_ok(status)) {
     status = iree_hal_executable_library_verify(executable_params,
@@ -286,9 +271,6 @@ static void iree_hal_system_executable_destroy(
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_dynamic_library_release(executable->handle);
-
-  iree_hal_executable_library_deinitialize_imports(
-      &executable->base.environment, host_allocator);
 
   iree_hal_local_executable_deinitialize(
       (iree_hal_local_executable_t*)base_executable);
@@ -438,8 +420,7 @@ iree_status_t iree_hal_system_library_loader_create(
       host_allocator, sizeof(*executable_loader), (void**)&executable_loader);
   if (iree_status_is_ok(status)) {
     iree_hal_executable_loader_initialize(
-        &iree_hal_system_library_loader_vtable,
-        iree_hal_executable_import_provider_null(), &executable_loader->base);
+        &iree_hal_system_library_loader_vtable, &executable_loader->base);
     executable_loader->host_allocator = host_allocator;
     *out_executable_loader = (iree_hal_executable_loader_t*)executable_loader;
   }
@@ -500,9 +481,9 @@ static iree_status_t iree_hal_system_library_loader_load(
 
   // Perform the load (and requisite disgusting hackery).
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_system_executable_create(
-              executable_params, base_executable_loader->import_provider,
-              executable_loader->host_allocator, out_executable));
+      z0, iree_hal_system_executable_create(executable_params,
+                                            executable_loader->host_allocator,
+                                            out_executable));
 
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();

@@ -181,11 +181,9 @@ static iree_status_t run_test() {
   iree_const_byte_span_t file_data;
   IREE_RETURN_IF_ERROR(query_test_file_data(&file_data));
 
-  iree_elf_import_table_t import_table;
-  memset(&import_table, 0, sizeof(import_table));
   iree_elf_module_t module;
   IREE_RETURN_IF_ERROR(iree_elf_module_initialize_from_memory(
-      file_data, &import_table, iree_allocator_system(), &module));
+      file_data, iree_allocator_system(), &module));
 
   iree_status_t status = run_module_test(&module);
   iree_elf_module_deinitialize(&module);

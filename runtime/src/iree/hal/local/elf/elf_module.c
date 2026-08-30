@@ -464,10 +464,9 @@ static iree_status_t iree_elf_module_parse_dynamic_tables(
   return iree_ok_status();
 }
 
-// Verifies that there are no dynamic imports in the module as we don't support
-// them yet.
+// Verifies that there are no dynamic imports in the module.
 static iree_status_t iree_elf_module_verify_no_imports(
-    iree_elf_module_load_state_t* load_state, iree_elf_module_t* module) {
+    iree_elf_module_t* module) {
   // NOTE: slot 0 is always the 0 placeholder.
   for (iree_host_size_t i = 1; i < module->dynsym_count; ++i) {
     const iree_elf_sym_t* sym = &module->dynsym[i];
@@ -570,9 +569,8 @@ static const iree_elf_sym_t* iree_elf_module_lookup_global_symbol(
 //==============================================================================
 
 iree_status_t iree_elf_module_initialize_from_memory(
-    iree_const_byte_span_t raw_data,
-    const iree_elf_import_table_t* import_table,
-    iree_allocator_t host_allocator, iree_elf_module_t* out_module) {
+    iree_const_byte_span_t raw_data, iree_allocator_t host_allocator,
+    iree_elf_module_t* out_module) {
   IREE_ASSERT_ARGUMENT(raw_data.data);
   IREE_ASSERT_ARGUMENT(out_module);
   IREE_TRACE_ZONE_BEGIN(z0);
@@ -598,10 +596,10 @@ iree_status_t iree_elf_module_initialize_from_memory(
     status = iree_elf_module_parse_dynamic_tables(&load_state, out_module);
   }
 
-  // TODO(benvanik): imports would happen here. For now we just ensure there are
-  // no imports as otherwise things will fail with obscure messages later on.
+  // Reject imports explicitly so they do not fail with obscure relocation
+  // messages later on.
   if (iree_status_is_ok(status)) {
-    status = iree_elf_module_verify_no_imports(&load_state, out_module);
+    status = iree_elf_module_verify_no_imports(out_module);
   }
 
   // Apply relocations to the loaded pages.

@@ -18,14 +18,12 @@ iree_status_t iree_hal_executable_library_validate_query_result(
         IREE_HAL_EXECUTABLE_LIBRARY_VERSION_LATEST);
   }
   const iree_hal_executable_library_header_t* header = *query_result;
-  if (header->version < IREE_HAL_EXECUTABLE_LIBRARY_VERSION_0_6 ||
-      header->version > IREE_HAL_EXECUTABLE_LIBRARY_VERSION_LATEST) {
+  if (header->version != IREE_HAL_EXECUTABLE_LIBRARY_VERSION_LATEST) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
-        "executable library version %u is outside the supported range "
-        "[%u, %u]",
-        header->version, IREE_HAL_EXECUTABLE_LIBRARY_VERSION_0_6,
-        IREE_HAL_EXECUTABLE_LIBRARY_VERSION_LATEST);
+        "executable library version %u does not match the supported version "
+        "%u",
+        header->version, IREE_HAL_EXECUTABLE_LIBRARY_VERSION_LATEST);
   }
   *out_library = iree_hal_executable_library_v0_from_query_result(query_result);
   return iree_ok_status();
@@ -86,66 +84,6 @@ iree_status_t iree_hal_executable_library_verify(
   }
 
   return iree_ok_status();
-}
-
-iree_status_t iree_hal_executable_library_initialize_imports(
-    iree_hal_executable_environment_v0_t* environment,
-    const iree_hal_executable_import_provider_t import_provider,
-    const iree_hal_executable_import_table_v0_t* import_table,
-    iree_hal_executable_import_thunk_v0_t import_thunk,
-    iree_allocator_t host_allocator) {
-  IREE_ASSERT_ARGUMENT(environment);
-  IREE_ASSERT_ARGUMENT(import_thunk);
-  if (!import_table || !import_table->count) return iree_ok_status();
-  IREE_TRACE_ZONE_BEGIN(z0);
-  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, import_table->count);
-
-  // The thunk is used to give the loader a chance to intercept import calls
-  // in cases where it needs to JIT, perform FFI/ABI conversion, etc.
-  environment->import_thunk = import_thunk;
-
-  // Allocate storage for the imports with overflow checking.
-  iree_host_size_t total_size = 0;
-  iree_host_size_t import_contexts_offset = 0;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, IREE_STRUCT_LAYOUT(
-              0, &total_size,
-              IREE_STRUCT_FIELD_ALIGNED(import_table->count,
-                                        iree_hal_executable_import_v0_t,
-                                        iree_max_align_t, NULL),
-              IREE_STRUCT_FIELD_ALIGNED(import_table->count, const void*,
-                                        iree_max_align_t,
-                                        &import_contexts_offset)));
-  uint8_t* base_ptr = NULL;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_allocator_malloc(host_allocator, total_size, (void**)&base_ptr));
-  environment->import_funcs = (const iree_hal_executable_import_v0_t*)base_ptr;
-  environment->import_contexts =
-      (const void**)(base_ptr + import_contexts_offset);
-
-  // Try to resolve each import.
-  // Will fail if any required import is not found.
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_executable_import_provider_try_resolve(
-              import_provider, import_table->count, import_table->symbols,
-              (void**)environment->import_funcs,
-              (void**)environment->import_contexts,
-              /*out_resolution=*/NULL));
-
-  IREE_TRACE_ZONE_END(z0);
-  return iree_ok_status();
-}
-
-void iree_hal_executable_library_deinitialize_imports(
-    iree_hal_executable_environment_v0_t* environment,
-    iree_allocator_t host_allocator) {
-  // NOTE: import_funcs and import_contexts are allocated as one block.
-  if (environment->import_funcs != NULL) {
-    iree_allocator_free(host_allocator, (void*)environment->import_funcs);
-  }
-  environment->import_funcs = NULL;
-  environment->import_contexts = NULL;
-  environment->import_thunk = NULL;
 }
 
 iree_host_size_t iree_hal_executable_library_export_count(

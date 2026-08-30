@@ -14,23 +14,6 @@
 #include "iree/hal/local/elf/elf_types.h"  // IWYU pragma: export
 
 //==============================================================================
-// ELF symbol import table
-//==============================================================================
-
-typedef struct iree_elf_import_t {
-  const char* sym_name;
-  void* thunk_ptr;
-} iree_elf_import_t;
-
-typedef struct iree_elf_import_table_t {
-  iree_host_size_t import_count;
-  const iree_elf_import_t* imports;
-} iree_elf_import_table_t;
-
-// TODO(benvanik): add import declaration macros that setup a unique thunk like
-// IREE_ELF_DEFINE_IMPORT(foo).
-
-//==============================================================================
 // Runtime ELF module loader/linker
 //==============================================================================
 
@@ -62,10 +45,7 @@ typedef struct iree_elf_module_t {
 // |raw_data| only needs to remain valid for the initialization of the module
 // and may be discarded afterward.
 //
-// An optional |import_table| may be specified to provide a set of symbols that
-// the module may import. Strong imports will not be resolved from the host
-// system and initialization will fail if any are not present in the provided
-// table.
+// Dynamic symbol imports are not supported and cause initialization to fail.
 //
 // Upon return |out_module| is initialized and ready for use with any present
 // .init initialization functions having been executed. To release memory
@@ -73,9 +53,8 @@ typedef struct iree_elf_module_t {
 // called to unload when it is safe (no more outstanding pointers into the
 // loaded module, etc).
 iree_status_t iree_elf_module_initialize_from_memory(
-    iree_const_byte_span_t raw_data,
-    const iree_elf_import_table_t* import_table,
-    iree_allocator_t host_allocator, iree_elf_module_t* out_module);
+    iree_const_byte_span_t raw_data, iree_allocator_t host_allocator,
+    iree_elf_module_t* out_module);
 
 // Deinitializes a |module|, releasing any allocated executable or data pages.
 // Invalidates all symbol pointers previous retrieved from the module and any
