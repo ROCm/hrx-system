@@ -307,6 +307,25 @@ def test_vector_extract_rules_publish_contract_only_shape_rows() -> None:
         assert GuardKind.VECTOR_EXTRACT_SHAPE in guard_kinds
 
 
+def test_vector_construct_rules_publish_contract_only_storage_rows() -> None:
+    compiled = _compiled_arithmetic_rules()
+
+    expected_rule_counts = {
+        vector.vector_from_elements: 12,
+        vector.vector_iota: 2,
+        vector.vector_insert: 6,
+        vector.vector_splat: 11,
+    }
+    for source_op, expected_rule_count in expected_rule_counts.items():
+        rules = _rules_for_source_op(compiled, source_op)
+        contract_rules = tuple(
+            rule for rule in rules if rule.flags & LOWER_RULE_FLAG_CONTRACT_ONLY
+        )
+
+        assert len(contract_rules) == expected_rule_count
+        assert all(rule.emit_count == 0 for rule in contract_rules)
+
+
 def test_vector_packed_float_conversion_rules_publish_contract_only_shape_rows() -> (
     None
 ):
