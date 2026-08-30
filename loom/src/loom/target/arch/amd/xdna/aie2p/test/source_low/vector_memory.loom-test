@@ -1,0 +1,83 @@
+// RUN: emit source-low output=low
+
+aie2p.target<core> @target
+func.def target(@target) @copy_i8x64(%source: buffer, %output: buffer) {
+  %source_aligned, %output_aligned = buffer.assume.alignment %source, %output {minimum_alignment = 64} : buffer, buffer
+  %base = index.constant 0 : offset
+  %source_view = buffer.view %source_aligned[%base] : buffer -> view<128xi8>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<128xi8>
+  %value = vector.load %source_view[64] : view<128xi8> -> vector<64xi8>
+  vector.store %value, %output_view[64] : vector<64xi8>, view<128xi8>
+  func.return
+}
+
+func.def target(@target) @add_i16x32(
+    %lhs: buffer,
+    %rhs: buffer,
+    %output: buffer
+) {
+  %lhs_generic = buffer.assume.memory_space<generic> %lhs : buffer
+  %rhs_generic = buffer.assume.memory_space<generic> %rhs : buffer
+  %output_generic = buffer.assume.memory_space<generic> %output : buffer
+  %lhs_aligned, %rhs_aligned, %output_aligned = buffer.assume.alignment %lhs_generic, %rhs_generic, %output_generic {minimum_alignment = 64} : buffer, buffer, buffer
+  %base = index.constant 0 : offset
+  %lhs_view = buffer.view %lhs_aligned[%base] : buffer -> view<64xi16>
+  %rhs_view = buffer.view %rhs_aligned[%base] : buffer -> view<64xi16>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<64xi16>
+  %lhs_value = vector.load %lhs_view[32] : view<64xi16> -> vector<32xi16>
+  %rhs_value = vector.load %rhs_view[32] : view<64xi16> -> vector<32xi16>
+  %sum = vector.addi %lhs_value, %rhs_value : vector<32xi16>
+  vector.store %sum, %output_view[32] : vector<32xi16>, view<64xi16>
+  func.return
+}
+
+func.def target(@target) @add_i32x16(
+    %lhs: buffer,
+    %rhs: buffer,
+    %output: buffer
+) {
+  %lhs_local = buffer.assume.memory_space<workgroup> %lhs : buffer
+  %rhs_local = buffer.assume.memory_space<workgroup> %rhs : buffer
+  %output_local = buffer.assume.memory_space<workgroup> %output : buffer
+  %lhs_aligned, %rhs_aligned, %output_aligned = buffer.assume.alignment %lhs_local, %rhs_local, %output_local {minimum_alignment = 64} : buffer, buffer, buffer
+  %base = index.constant 64 : offset
+  %lhs_view = buffer.view %lhs_aligned[%base] : buffer -> view<16xi32>
+  %rhs_view = buffer.view %rhs_aligned[%base] : buffer -> view<16xi32>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16xi32>
+  %lhs_value = vector.load %lhs_view[0] : view<16xi32> -> vector<16xi32>
+  %rhs_value = vector.load %rhs_view[0] : view<16xi32> -> vector<16xi32>
+  %sum = vector.addi %lhs_value, %rhs_value : vector<16xi32>
+  vector.store %sum, %output_view[0] : vector<16xi32>, view<16xi32>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @copy_i8x64() asm {
+  %source_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %value = vlda %source_view, 64
+  vst %value, %output_view, 64
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @add_i16x32() asm {
+  %lhs_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %rhs_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %output_view = resource<native_pointer> {index = 2, source_type = buffer} : reg<aie2p.ep>
+  %lhs_value = vlda %lhs_view, 64
+  %rhs_value = vlda %rhs_view, 64
+  %sum = vadd.16 %lhs_value, %rhs_value
+  vst %sum, %output_view, 64
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @add_i32x16() asm {
+  %lhs_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %rhs_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %output_view = resource<native_pointer> {index = 2, source_type = buffer} : reg<aie2p.ep>
+  %lhs_value = vlda %lhs_view, 64
+  %rhs_value = vlda %rhs_view, 64
+  %sum = vadd.32 %lhs_value, %rhs_value
+  vst %sum, %output_view, 64
+  return
+}

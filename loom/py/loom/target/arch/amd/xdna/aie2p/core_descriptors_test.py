@@ -235,6 +235,16 @@ def test_descriptor_encoding_ids_and_adapters_are_materialized() -> None:
 
     vector_load = descriptors["amd.xdna.aie2p.load.a.i8x64.indexed.immediate"]
     assert vector_load.operands[0].ready_stage == 7
+    assert vector_load.effects[0].width_bits == 512
+
+    vector_store = descriptors["amd.xdna.aie2p.store.i8x64.indexed.immediate"]
+    assert vector_store.effects[0].width_bits == 512
+
+    scalar_load = descriptors["amd.xdna.aie2p.load.scalar.indexed.immediate"]
+    assert scalar_load.effects[0].width_bits == 32
+
+    scalar_store = descriptors["amd.xdna.aie2p.store.scalar.indexed.immediate"]
+    assert scalar_store.effects[0].width_bits == 32
 
     short_constant = descriptors["amd.xdna.aie2p.constant.i32.short"]
     full_constant = descriptors["amd.xdna.aie2p.constant.i32"]

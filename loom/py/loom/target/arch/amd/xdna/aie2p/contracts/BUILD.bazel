@@ -20,6 +20,8 @@ iree_py_library(
     visibility = ["//loom/py/loom/gen/target/contracts:__pkg__"],
     deps = [
         "//loom/py/loom:core",
+        "//loom/py/loom/dialect/buffer",
+        "//loom/py/loom/dialect/index",
         "//loom/py/loom/dialect/scalar",
         "//loom/py/loom/dialect/scf",
         "//loom/py/loom/dialect/vector",
@@ -38,6 +40,8 @@ iree_py_test(
     main = "pytest_style_runner.py",
     deps = [
         ":contracts",
+        "//loom/py/loom/dialect/buffer",
+        "//loom/py/loom/dialect/index",
         "//loom/py/loom/dialect/scalar",
         "//loom/py/loom/dialect/scf",
         "//loom/py/loom/dialect/vector",

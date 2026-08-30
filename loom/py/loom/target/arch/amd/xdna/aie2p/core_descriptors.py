@@ -1361,22 +1361,38 @@ def _memory_timing_event(spec: _DescriptorSpec, access: str) -> str:
 
 
 def _effects(spec: _DescriptorSpec, form: MachineForm) -> tuple[Effect, ...]:
+    register_width_bits = max(
+        (
+            _MACHINE_CLASSES[
+                _operand_storage_machine_class(spec, operand)
+            ].layout.register_size_bits
+            for operand in (*form.outputs, *form.inputs)
+            if operand.kind is not MachineOperandKind.IMMEDIATE
+        ),
+        default=0,
+    )
     result = []
     if has_property(form, "mayLoad"):
+        if register_width_bits == 0:
+            raise ValueError(f"{form.name}: load has no register payload width")
         result.append(
             Effect(
                 EffectKind.READ,
                 MemorySpace.WORKGROUP,
                 flags=(EffectFlag.DEPENDENCY,),
+                width_bits=register_width_bits,
                 timing_event=_memory_timing_event(spec, "read"),
             )
         )
     if has_property(form, "mayStore"):
+        if register_width_bits == 0:
+            raise ValueError(f"{form.name}: store has no register payload width")
         result.append(
             Effect(
                 EffectKind.WRITE,
                 MemorySpace.WORKGROUP,
                 flags=(EffectFlag.DEPENDENCY,),
+                width_bits=register_width_bits,
                 timing_event=_memory_timing_event(spec, "write"),
             )
         )
