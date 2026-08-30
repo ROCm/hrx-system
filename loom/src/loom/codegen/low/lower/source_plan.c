@@ -705,13 +705,6 @@ static iree_status_t loom_low_lower_prepare_plan(
       context, plan_capacity,
       sizeof(*context->lowering.source_plan.selected_plans),
       (void**)&context->lowering.source_plan.selected_plans));
-  if (context->options->table_arena != NULL) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        context->options->table_arena, plan_capacity,
-        sizeof(*context->lowering.memory_access_records),
-        (void**)&context->lowering.memory_access_records));
-    context->lowering.memory_access_record_capacity = plan_capacity;
-  }
   return iree_ok_status();
 }
 

@@ -859,12 +859,6 @@ static iree_status_t loom_print_low_asm_statement(
       IREE_RETURN_IF_ERROR(loom_print_low_asm_structural(ctx, statement));
       break;
     }
-    case LOOM_TEXT_LOW_ASM_STATEMENT_CANONICAL: {
-      // The descriptor environment has proven that canonical register type
-      // spellings resolve in the selected asm descriptor set. loom_print_op
-      // owns the line terminator and optional location annotation.
-      return loom_print_op(ctx, statement->op);
-    }
     default:
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "unknown low asm statement kind %u",
@@ -932,9 +926,7 @@ static iree_status_t loom_print_low_asm_region_body(
       }
       IREE_RETURN_IF_ERROR(loom_print_indent(ctx));
       IREE_RETURN_IF_ERROR(loom_print_low_asm_statement(ctx, &statement));
-      if (statement.kind != LOOM_TEXT_LOW_ASM_STATEMENT_CANONICAL) {
-        IREE_RETURN_IF_ERROR(loom_output_stream_write_char(ctx->stream, '\n'));
-      }
+      IREE_RETURN_IF_ERROR(loom_output_stream_write_char(ctx->stream, '\n'));
     }
   }
   return iree_ok_status();

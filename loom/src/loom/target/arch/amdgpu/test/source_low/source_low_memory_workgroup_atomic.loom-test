@@ -364,7 +364,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1
   %second_view = storage_address %14 : low.storage<workgroup> -> reg<amdgpu.vgpr>
   %18 = v_mov_b32 1
   %19 = v_mov_b32 0
-  low.op<amdgpu.ds_write_b32>(%19, %18) {offset = 0} memory_access([0, 3, 5, -1, 11, 0, 0, 0, 3, 0, 0, 4, 4]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
+  ds_write_b32 %19, %18
   ds_add_u32 %second_view, %18
   %old = ds_add_rtn_u32 %second_view, %18
   return

@@ -81,7 +81,6 @@ loom_cc_library(
         "//loom/src/loom/codegen/low:descriptor_traits",
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/codegen/low:memory_access",
-        "//loom/src/loom/codegen/low:memory_access_ir",
         "//loom/src/loom/codegen/low:source_memory_plan",
         "//loom/src/loom/codegen/low:target_binding",
         "//loom/src/loom/decision:predicate",

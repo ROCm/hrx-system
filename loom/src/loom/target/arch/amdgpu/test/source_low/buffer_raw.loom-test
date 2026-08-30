@@ -50,8 +50,8 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @raw_byt
   %8 = storage {byte_alignment = 1, byte_length = 4} : low.storage<workgroup>
   %10 = v_mov_b32_copy %value
   %11 = v_mov_b32 0
-  low.op<amdgpu.ds_write_b8>(%11, %10) {offset = 1} memory_access([0, 3, 4, -1, 11, 0, 0, 0, 3, 1, 1, 2, 2]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
-  %byte = low.op<amdgpu.ds_read_u8>(%11) {offset = 1} memory_access([0, 3, 4, -1, 11, 0, 0, 0, 3, 1, 1, 2, 2]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
+  ds_write_b8 %11, %10 {offset = 1}
+  %byte = ds_read_u8 %11 {offset = 1}
   return %byte
 }
 

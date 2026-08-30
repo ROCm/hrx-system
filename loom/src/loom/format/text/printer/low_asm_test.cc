@@ -477,9 +477,7 @@ TEST_F(LowAsmPrinterTest, RequiredLowAsmUsesFunctionRepresentationContract) {
       "low.func.def target<test.low.core>(@test_target) "
       "@add(%lhs: reg<test.i32>, "
       "%rhs: reg<test.i32>) -> (reg<test.i32>) asm {\n"
-      "  %sum = low.op<test.add.i32>(%lhs, %rhs) "
-      "memory_access([0, 3, 7, -1, 35, 64, 0, 16, 0, 0, 0, 0, 0]) : "
-      "(reg<test.i32>, reg<test.i32>) -> reg<test.i32>\n"
+      "  %sum = test.add.i32 %lhs, %rhs\n"
       "  return %sum\n"
       "}\n";
   loom_module_t* module = ParseOk(source);
@@ -489,6 +487,5 @@ TEST_F(LowAsmPrinterTest, RequiredLowAsmUsesFunctionRepresentationContract) {
             source);
   loom_module_free(module);
 }
-
 }  // namespace
 }  // namespace loom

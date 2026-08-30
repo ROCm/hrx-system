@@ -944,18 +944,6 @@ static iree_status_t loom_low_lower_rule_bind_aliases(
   return iree_ok_status();
 }
 
-static iree_status_t loom_low_lower_rule_record_source_memory(
-    loom_low_lower_context_t* context, const loom_low_lower_emit_t* emit,
-    const loom_low_source_memory_access_plan_t* source_memory_access,
-    loom_op_t* low_op) {
-  if (emit->source_memory_ordinal == 0) {
-    return iree_ok_status();
-  }
-  return loom_low_lower_record_source_memory_access(context, low_op,
-                                                    source_memory_access,
-                                                    /*flags=*/0);
-}
-
 static iree_status_t loom_low_lower_rule_emit_descriptor_const(
     loom_low_lower_context_t* context,
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
@@ -1024,8 +1012,6 @@ static iree_status_t loom_low_lower_rule_emit_descriptor_op(
       context, &resolved_emit->descriptor, low_operands,
       emit->operand_ref_count, attrs, result_types, emit->result_ref_count,
       tied_results, emit->tied_result_count, source_op->location, &low_op));
-  IREE_RETURN_IF_ERROR(loom_low_lower_rule_record_source_memory(
-      context, emit, emit_source_memory_access, low_op));
   loom_value_slice_t low_results = loom_low_op_results(low_op);
   return loom_low_lower_rule_bind_results(context, rule_set, source_op, state,
                                           emit, low_results.values);

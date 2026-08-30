@@ -1095,13 +1095,6 @@ iree_status_t loom_amdgpu_lower_kernel_async_cluster_gather(
       loom_make_named_attr_slice(attrs, attr_count),
       /*result_types=*/NULL, /*result_count=*/0, /*tied_results=*/NULL,
       /*tied_result_count=*/0, source_op->location, &low_op));
-  // The packet has a global-read and a workgroup-write dependency effect.
-  // Retain the destination plan: same-packet global reads do not order one
-  // another, while exact destination byte sets determine whether successive
-  // async-to-LDS transfers may remain outstanding together.
-  IREE_RETURN_IF_ERROR(loom_low_lower_record_source_memory_access(
-      context, low_op, &plan->dest_address.source,
-      LOOM_LOW_LOWER_MEMORY_ACCESS_RECORD_PRESERVE));
   return loom_low_lower_elide_value(
       context, loom_kernel_async_cluster_gather_token(source_op));
 }

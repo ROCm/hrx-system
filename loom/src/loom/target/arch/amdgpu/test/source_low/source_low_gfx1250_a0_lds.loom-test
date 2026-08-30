@@ -47,36 +47,36 @@ low.kernel.def target<amdgpu.rdna4.gfx1250_a0.core>(@target) workgroup_size(32, 
   %25 = v_mov_b32 1
   %29 = v_mov_b32 0
   %pair_b64 = concat(%25, %29, %25, %29) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
-  low.op<amdgpu.ds_write_b32>(%29, %25) {offset = 0} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 0, 4, 4]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
-  low.op<amdgpu.ds_write_b32>(%29, %25) {offset = 8} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 8, 8, 12, 12]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
-  %38 = low.op<amdgpu.ds_read_b32>(%29) {offset = 0} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 0, 4, 4]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
-  %40 = low.op<amdgpu.ds_read_b32>(%29) {offset = 8} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 8, 8, 12, 12]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
-  low.op<amdgpu.ds_write_b32>(%29, %38) {offset = 0} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 0, 4, 4]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
-  low.op<amdgpu.ds_write_b32>(%29, %40) {offset = 8} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 8, 8, 12, 12]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
+  ds_write_b32 %29, %25
+  ds_write_b32 %29, %25 {offset = 8}
+  %38 = ds_read_b32 %29
+  %40 = ds_read_b32 %29 {offset = 8}
+  ds_write_b32 %29, %38
+  ds_write_b32 %29, %40 {offset = 8}
   %46 = slice %pair_b64[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
-  low.op<amdgpu.ds_write_b64>(%29, %46) {offset = 0} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 0, 8, 8]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>)
+  ds_write_b64 %29, %46
   %48 = slice %pair_b64[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
-  low.op<amdgpu.ds_write_b64>(%29, %48) {offset = 16} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 16, 16, 24, 24]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>)
-  %51 = low.op<amdgpu.ds_read_b64>(%29) {offset = 0} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 0, 8, 8]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %53 = low.op<amdgpu.ds_read_b64>(%29) {offset = 16} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 16, 16, 24, 24]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  low.op<amdgpu.ds_write_b64>(%29, %51) {offset = 0} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 0, 8, 8]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>)
-  low.op<amdgpu.ds_write_b64>(%29, %53) {offset = 16} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 16, 16, 24, 24]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>)
-  low.op<amdgpu.ds_write_b32>(%29, %25) {offset = 0} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 0, 4, 4]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
-  low.op<amdgpu.ds_write_b32>(%29, %25) {offset = 1024} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 1024, 1024, 1028, 1028]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
-  %64 = low.op<amdgpu.ds_read_b32>(%29) {offset = 0} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 0, 4, 4]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
-  %66 = low.op<amdgpu.ds_read_b32>(%29) {offset = 1024} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 1024, 1024, 1028, 1028]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
-  low.op<amdgpu.ds_write_b32>(%29, %64) {offset = 0} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 0, 4, 4]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
-  low.op<amdgpu.ds_write_b32>(%29, %66) {offset = 1024} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 1024, 1024, 1028, 1028]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
-  low.op<amdgpu.ds_write_b64>(%29, %46) {offset = 0} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 0, 8, 8]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>)
-  low.op<amdgpu.ds_write_b64>(%29, %48) {offset = 2048} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 2048, 2048, 2056, 2056]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>)
-  %77 = low.op<amdgpu.ds_read_b64>(%29) {offset = 0} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 0, 8, 8]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %79 = low.op<amdgpu.ds_read_b64>(%29) {offset = 2048} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 2048, 2048, 2056, 2056]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  low.op<amdgpu.ds_write_b64>(%29, %77) {offset = 0} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 0, 8, 8]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>)
-  low.op<amdgpu.ds_write_b64>(%29, %79) {offset = 2048} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 2048, 2048, 2056, 2056]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>)
+  ds_write_b64 %29, %48 {offset = 16}
+  %51 = ds_read_b64 %29
+  %53 = ds_read_b64 %29 {offset = 16}
+  ds_write_b64 %29, %51
+  ds_write_b64 %29, %53 {offset = 16}
+  ds_write_b32 %29, %25
+  ds_write_b32 %29, %25 {offset = 1024}
+  %64 = ds_read_b32 %29
+  %66 = ds_read_b32 %29 {offset = 1024}
+  ds_write_b32 %29, %64
+  ds_write_b32 %29, %66 {offset = 1024}
+  ds_write_b64 %29, %46
+  ds_write_b64 %29, %48 {offset = 2048}
+  %77 = ds_read_b64 %29
+  %79 = ds_read_b64 %29 {offset = 2048}
+  ds_write_b64 %29, %77
+  ds_write_b64 %29, %79 {offset = 2048}
   %word = v_mov_b32 16843009
-  low.op<amdgpu.ds_write_b32>(%lane, %word) {offset = 0} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 31, 4, 35]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
-  %loaded_word = low.op<amdgpu.ds_read_b32>(%lane) {offset = 0} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 31, 4, 35]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
-  low.op<amdgpu.ds_write_b32>(%lane, %loaded_word) {offset = 0} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 31, 4, 35]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
+  ds_write_b32 %lane, %word
+  %loaded_word = ds_read_b32 %lane
+  ds_write_b32 %lane, %loaded_word
   return
 }
 
@@ -130,34 +130,34 @@ low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(32, 1, 
   %25 = v_mov_b32 1
   %29 = v_mov_b32 0
   %pair_b64 = concat(%25, %29, %25, %29) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
-  low.op<amdgpu.ds_write2_b32>(%29, %25, %25) {offset0 = 0, offset1 = 2} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 0, 12, 12]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
-  %loaded_regular_b32 = low.op<amdgpu.ds_read2_b32>(%29) {offset0 = 0, offset1 = 2} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 0, 12, 12]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  ds_write2_b32 %29, %25, %25 {offset1 = 2}
+  %loaded_regular_b32 = ds_read2_b32 %29 {offset1 = 2}
   %39 = slice %loaded_regular_b32[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %40 = slice %loaded_regular_b32[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  low.op<amdgpu.ds_write2_b32>(%29, %39, %40) {offset0 = 0, offset1 = 2} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 0, 12, 12]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
+  ds_write2_b32 %29, %39, %40 {offset1 = 2}
   %42 = slice %pair_b64[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
   %43 = slice %pair_b64[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
-  low.op<amdgpu.ds_write2_b64>(%29, %42, %43) {offset0 = 0, offset1 = 2} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 0, 24, 24]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>)
-  %loaded_regular_b64 = low.op<amdgpu.ds_read2_b64>(%29) {offset0 = 0, offset1 = 2} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 0, 24, 24]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  ds_write2_b64 %29, %42, %43 {offset1 = 2}
+  %loaded_regular_b64 = ds_read2_b64 %29 {offset1 = 2}
   %47 = slice %loaded_regular_b64[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
   %48 = slice %loaded_regular_b64[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
-  low.op<amdgpu.ds_write2_b64>(%29, %47, %48) {offset0 = 0, offset1 = 2} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 0, 24, 24]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>)
-  low.op<amdgpu.ds_write2st64_b32>(%29, %25, %25) {offset0 = 0, offset1 = 4} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 0, 1028, 1028]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
-  %loaded_stride64_b32 = low.op<amdgpu.ds_read2st64_b32>(%29) {offset0 = 0, offset1 = 4} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 0, 1028, 1028]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  ds_write2_b64 %29, %47, %48 {offset1 = 2}
+  ds_write2st64_b32 %29, %25, %25 {offset1 = 4}
+  %loaded_stride64_b32 = ds_read2st64_b32 %29 {offset1 = 4}
   %55 = slice %loaded_stride64_b32[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %56 = slice %loaded_stride64_b32[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  low.op<amdgpu.ds_write2st64_b32>(%29, %55, %56) {offset0 = 0, offset1 = 4} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 0, 1028, 1028]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
-  low.op<amdgpu.ds_write2st64_b64>(%29, %42, %43) {offset0 = 0, offset1 = 4} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 0, 2056, 2056]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>)
-  %loaded_stride64_b64 = low.op<amdgpu.ds_read2st64_b64>(%29) {offset0 = 0, offset1 = 4} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 0, 2056, 2056]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  ds_write2st64_b32 %29, %55, %56 {offset1 = 4}
+  ds_write2st64_b64 %29, %42, %43 {offset1 = 4}
+  %loaded_stride64_b64 = ds_read2st64_b64 %29 {offset1 = 4}
   %63 = slice %loaded_stride64_b64[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
   %64 = slice %loaded_stride64_b64[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
-  low.op<amdgpu.ds_write2st64_b64>(%29, %63, %64) {offset0 = 0, offset1 = 4} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 0, 2056, 2056]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>)
+  ds_write2st64_b64 %29, %63, %64 {offset1 = 4}
   %word = v_mov_b32 16843009
   %66 = s_mov_b32_m0_imm 0
-  low.op<amdgpu.ds_write_addtid_b32>(%word, %66) {offset = 0} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 31, 4, 35]) : (reg<amdgpu.vgpr>, reg<amdgpu.m0>)
+  ds_write_addtid_b32 %word, %66
   %67 = s_mov_b32_m0_imm 0
-  %loaded_word = low.op<amdgpu.ds_read_addtid_b32>(%67) {offset = 0} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 31, 4, 35]) : (reg<amdgpu.m0>) -> reg<amdgpu.vgpr>
+  %loaded_word = ds_read_addtid_b32 %67
   %69 = s_mov_b32_m0_imm 0
-  low.op<amdgpu.ds_write_addtid_b32>(%loaded_word, %69) {offset = 0} memory_access([0, 3, 8, -1, 11, 0, 0, 0, 3, 0, 31, 4, 35]) : (reg<amdgpu.vgpr>, reg<amdgpu.m0>)
+  ds_write_addtid_b32 %loaded_word, %69
   return
 }

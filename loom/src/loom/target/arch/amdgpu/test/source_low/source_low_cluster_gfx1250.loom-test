@@ -27,7 +27,7 @@ low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 
   %14 = storage {byte_alignment = 16, byte_length = 256} : low.storage<workgroup>
   %16 = v_mov_b32 0
   %18 = s_mov_b32_m0_imm 3
-  low.op<amdgpu.cluster_load_async_to_lds_b32>(%16, %16, %global, %18) {offset = 0, scope = 2, th = 0} memory_access([0, 3, 9, -1, 11, 0, 0, 0, 3, 0, 0, 4, 4]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.m0>)
+  cluster_load_async_to_lds_b32 %16, %16, %global, %18 {scope = 2}
   s_wait_asynccnt {asynccnt = 0}
   return
 }
@@ -73,13 +73,13 @@ low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 
   %26 = storage {byte_alignment = 16, byte_length = 16} : low.storage<workgroup>
   %30 = v_mov_b32 0
   %32 = s_mov_b32_m0_imm 3
-  low.op<amdgpu.cluster_load_async_to_lds_b8>(%30, %30, %global, %32) {offset = 0, scope = 0, th = 0} memory_access([0, 3, 13, -1, 11, 0, 0, 0, 3, 0, 0, 1, 1]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.m0>)
+  cluster_load_async_to_lds_b8 %30, %30, %global, %32
   %33 = v_mov_b32 16
   %35 = s_mov_b32_m0_imm 3
-  low.op<amdgpu.cluster_load_async_to_lds_b64>(%33, %33, %global, %35) {offset = 0, scope = 1, th = 2} memory_access([0, 3, 14, -1, 11, 0, 0, 0, 3, 16, 16, 24, 24]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.m0>)
+  cluster_load_async_to_lds_b64 %33, %33, %global, %35 {scope = 1, th = 2}
   %36 = v_mov_b32 32
   %38 = s_mov_b32_m0_imm 3
-  low.op<amdgpu.cluster_load_async_to_lds_b128>(%36, %36, %global, %38) {offset = 0, scope = 3, th = 3} memory_access([0, 3, 15, -1, 11, 0, 0, 0, 3, 32, 32, 48, 48]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.m0>)
+  cluster_load_async_to_lds_b128 %36, %36, %global, %38 {scope = 3, th = 3}
   s_wait_asynccnt {asynccnt = 0}
   return
 }
@@ -118,7 +118,7 @@ low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 
   %21 = storage {byte_alignment = 16, byte_length = 1024} : low.storage<workgroup>
   %23 = v_lshlrev_b32_src0_inline %lane, 4
   %25 = s_mov_b32_m0_imm 3
-  low.op<amdgpu.cluster_load_async_to_lds_b32>(%23, %23, %global, %25) {offset = 0, scope = 2, th = 0} memory_access([0, 3, 13, -1, 43, 16, 0, 4, 3, 0, 1008, 4, 1012]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.m0>)
+  cluster_load_async_to_lds_b32 %23, %23, %global, %25 {scope = 2}
   s_wait_asynccnt {asynccnt = 0}
   return
 }
@@ -170,19 +170,19 @@ low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 
   %31 = storage {byte_alignment = 16, byte_length = 16} : low.storage<workgroup>
   %37 = v_mov_b32 0
   %39 = s_mov_b32_m0_imm 3
-  low.op<amdgpu.cluster_load_async_to_lds_b128>(%37, %37, %global, %39) {offset = 0, scope = 2, th = 0} memory_access([0, 3, 9, -1, 11, 0, 0, 0, 3, 0, 0, 16, 16]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.m0>)
+  cluster_load_async_to_lds_b128 %37, %37, %global, %39 {scope = 2}
   %40 = v_mov_b32 16
   %42 = s_mov_b32_m0_imm 3
-  low.op<amdgpu.cluster_load_async_to_lds_b128>(%40, %37, %global, %42) {offset = 0, scope = 2, th = 0} memory_access([0, 3, 10, -1, 11, 0, 0, 0, 3, 16, 16, 32, 32]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.m0>)
+  cluster_load_async_to_lds_b128 %40, %37, %global, %42 {scope = 2}
   %43 = v_mov_b32 32
   %45 = s_mov_b32_m0_imm 3
-  low.op<amdgpu.cluster_load_async_to_lds_b128>(%43, %37, %global, %45) {offset = 0, scope = 2, th = 0} memory_access([0, 3, 11, -1, 11, 0, 0, 0, 3, 32, 32, 48, 48]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.m0>)
+  cluster_load_async_to_lds_b128 %43, %37, %global, %45 {scope = 2}
   %46 = v_mov_b32 48
   %48 = s_mov_b32_m0_imm 3
-  low.op<amdgpu.cluster_load_async_to_lds_b128>(%46, %37, %global, %48) {offset = 0, scope = 2, th = 0} memory_access([0, 3, 12, -1, 11, 0, 0, 0, 3, 48, 48, 64, 64]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.m0>)
+  cluster_load_async_to_lds_b128 %46, %37, %global, %48 {scope = 2}
   %49 = v_mov_b32 64
   %51 = s_mov_b32_m0_imm 3
-  low.op<amdgpu.cluster_load_async_to_lds_b128>(%49, %37, %global, %51) {offset = 0, scope = 2, th = 0} memory_access([0, 3, 13, -1, 11, 0, 0, 0, 3, 64, 64, 80, 80]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.m0>)
+  cluster_load_async_to_lds_b128 %49, %37, %global, %51 {scope = 2}
   s_wait_asynccnt {asynccnt = 4}
   s_wait_asynccnt {asynccnt = 0}
   return
@@ -238,16 +238,16 @@ low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 
   %41 = v_lshlrev_b32_src0_inline %lane, 6
   %42 = v_mov_b32 0
   %43 = s_mov_b32_m0_imm 3
-  low.op<amdgpu.cluster_load_async_to_lds_b128>(%41, %42, %global, %43) {offset = 0, scope = 2, th = 0} memory_access([0, 3, 22, -1, 43, 64, 0, 16, 3, 0, 4032, 16, 4048]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.m0>)
+  cluster_load_async_to_lds_b128 %41, %42, %global, %43 {scope = 2}
   %45 = v_add_u32_src0_inline %41, 16
   %47 = s_mov_b32_m0_imm 3
-  low.op<amdgpu.cluster_load_async_to_lds_b128>(%45, %42, %global, %47) {offset = 0, scope = 2, th = 0} memory_access([0, 3, 22, -1, 43, 64, 16, 32, 3, 16, 4048, 32, 4064]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.m0>)
+  cluster_load_async_to_lds_b128 %45, %42, %global, %47 {scope = 2}
   %49 = v_add_u32_src0_inline %41, 32
   %51 = s_mov_b32_m0_imm 3
-  low.op<amdgpu.cluster_load_async_to_lds_b128>(%49, %42, %global, %51) {offset = 0, scope = 2, th = 0} memory_access([0, 3, 22, -1, 43, 64, 32, 48, 3, 32, 4064, 48, 4080]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.m0>)
+  cluster_load_async_to_lds_b128 %49, %42, %global, %51 {scope = 2}
   %53 = v_add_u32_src0_inline %41, 48
   %55 = s_mov_b32_m0_imm 3
-  low.op<amdgpu.cluster_load_async_to_lds_b128>(%53, %42, %global, %55) {offset = 0, scope = 2, th = 0} memory_access([0, 3, 22, -1, 43, 64, 48, 64, 3, 48, 4080, 64, 4096]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.m0>)
+  cluster_load_async_to_lds_b128 %53, %42, %global, %55 {scope = 2}
   s_wait_asynccnt {asynccnt = 0}
   return
 }
@@ -294,9 +294,9 @@ low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 
   %29 = storage {byte_alignment = 16, byte_length = 1024} : low.storage<workgroup>
   %33 = v_lshlrev_b32_src0_inline %lane, 4
   %35 = s_mov_b32_m0_imm 3
-  low.op<amdgpu.cluster_load_async_to_lds_b128>(%33, %33, %global_input, %35) {offset = 0, scope = 2, th = 0} memory_access([0, 3, 16, -1, 43, 16, 0, 16, 3, 0, 1008, 16, 1024]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.m0>)
+  cluster_load_async_to_lds_b128 %33, %33, %global_input, %35 {scope = 2}
   %value = global_load_b128_saddr %33, %payload_view
-  low.op<amdgpu.ds_write_b128>(%33, %value) {offset = 1024} memory_access([0, 3, 17, -1, 43, 16, 0, 16, 3, 1024, 2032, 1040, 2048]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x4>)
+  ds_write_b128 %33, %value {offset = 1024}
   s_wait_asynccnt {asynccnt = 0}
   return
 }

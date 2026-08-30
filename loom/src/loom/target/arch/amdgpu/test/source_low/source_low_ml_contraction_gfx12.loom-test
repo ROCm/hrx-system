@@ -256,8 +256,8 @@ low.kernel.def target<amdgpu.rdna4.core>(@target) workgroup_size(64, 1, 1) workg
   %49 = storage {byte_alignment = 16, byte_length = 1024} : low.storage<workgroup>
   %51 = v_lshlrev_b32_src0_inline %lane, 4
   %lhs = global_load_b128_saddr %51, %lhs_view
-  low.op<amdgpu.ds_write_b128>(%51, %lhs) {offset = 0} memory_access([0, 3, 8, -1, 43, 16, 0, 16, 3, 0, 1008, 16, 1024]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x4>)
-  %lhs_cached = low.op<amdgpu.ds_read_b128>(%51) {offset = 0} memory_access([0, 3, 8, -1, 43, 16, 0, 16, 3, 0, 1008, 16, 1024]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  ds_write_b128 %51, %lhs
+  %lhs_cached = ds_read_b128 %51
   %rhs = global_load_b128_saddr %51, %rhs_view
   %58 = v_mov_b32 0
   %63 = slice %lhs_cached[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>

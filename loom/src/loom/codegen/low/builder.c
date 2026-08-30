@@ -104,7 +104,7 @@ iree_status_t loom_low_build_resolved_descriptor_op(
 
   IREE_RETURN_IF_ERROR(loom_builder_allocate_op(
       builder, LOOM_OP_LOW_OP, (uint16_t)operand_count, (uint16_t)result_count,
-      /*region_count=*/0, (uint16_t)tied_result_count, /*attribute_count=*/3,
+      /*region_count=*/0, (uint16_t)tied_result_count, /*attribute_count=*/2,
       location, out_op));
   (*out_op)->traits =
       loom_low_descriptor_effective_traits(descriptor_set, descriptor);

@@ -872,9 +872,6 @@ typedef struct loom_low_lower_options_t {
   loom_low_control_flow_lowering_t control_flow_lowering;
   // Target failure reporting behavior for lowered sanitizer assertions.
   loom_sanitizer_reporting_mode_t sanitizer_reporting_mode;
-  // Optional arena receiving production tables that must outlive lowering,
-  // such as source-derived memory access summaries consumed by packetization.
-  iree_arena_allocator_t* table_arena;
   // Optional module-scope target state shared by all function lowerings in one
   // source-to-low module pass.
   loom_low_lower_module_state_t* module_state;
@@ -927,8 +924,6 @@ typedef struct loom_low_lower_result_t {
   loom_low_lower_report_row_list_t report_rows;
   // Owned source-memory packet report rows.
   loom_low_lower_memory_report_row_list_t memory_report_rows;
-  // Source-derived memory access summaries for emitted low memory packets.
-  loom_low_memory_access_table_t memory_access_table;
 } loom_low_lower_result_t;
 
 typedef struct loom_low_lower_resolved_descriptor_t {
@@ -1299,27 +1294,6 @@ iree_status_t loom_low_lower_emit_resolved_descriptor_const(
     const loom_low_lower_resolved_descriptor_t* descriptor,
     loom_named_attr_slice_t attrs, loom_type_t result_type,
     loom_location_id_t location, loom_op_t** out_op);
-
-typedef enum loom_low_lower_memory_access_record_bits_e {
-  // Attaches serializable precision to the low op so it remains available
-  // across pass and serialization boundaries.
-  LOOM_LOW_LOWER_MEMORY_ACCESS_RECORD_PRESERVE = 1u << 0,
-} loom_low_lower_memory_access_record_bits_t;
-typedef uint32_t loom_low_lower_memory_access_record_flags_t;
-
-// Records a source-derived memory summary for an emitted low memory packet.
-// The row is copied into options.table_arena when provided. PRESERVE also
-// attaches the summary to the low op for later scheduling.
-iree_status_t loom_low_lower_record_memory_access_summary(
-    loom_low_lower_context_t* context, loom_op_t* low_op,
-    const loom_low_memory_access_summary_t* summary,
-    loom_low_lower_memory_access_record_flags_t flags);
-
-// Records a source memory access plan for an emitted low memory packet.
-iree_status_t loom_low_lower_record_source_memory_access(
-    loom_low_lower_context_t* context, loom_op_t* low_op,
-    const loom_low_source_memory_access_plan_t* source_plan,
-    loom_low_lower_memory_access_record_flags_t flags);
 
 // Emits ERR_TARGET_033 for a source value type rejected by the active
 // target-low policy.

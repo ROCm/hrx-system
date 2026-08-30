@@ -21,7 +21,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1
   %6 = storage {byte_alignment = 4, byte_length = 4} : low.storage<workgroup>
   %stored_value = v_mov_b32 1
   %9 = v_mov_b32 0
-  low.op<amdgpu.ds_write_b32>(%9, %stored_value) {offset = 0} memory_access([0, 3, 3, -1, 11, 0, 0, 0, 3, 0, 0, 4, 4]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
+  ds_write_b32 %9, %stored_value
   return
 }
 
@@ -54,11 +54,11 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 
   %10 = storage {byte_alignment = 16, byte_length = 64} : low.storage<workgroup>
   %stored_value = v_mov_b32 16843009
   %13 = s_mov_b32_m0_imm 0
-  low.op<amdgpu.ds_write_addtid_b32>(%stored_value, %13) {offset = 0} memory_access([0, 3, 5, -1, 11, 0, 0, 0, 3, 0, 31, 4, 35]) : (reg<amdgpu.vgpr>, reg<amdgpu.m0>)
+  ds_write_addtid_b32 %stored_value, %13
   %14 = s_mov_b32_m0_imm 0
-  %loaded = low.op<amdgpu.ds_read_addtid_b32>(%14) {offset = 0} memory_access([0, 3, 5, -1, 11, 0, 0, 0, 3, 0, 31, 4, 35]) : (reg<amdgpu.m0>) -> reg<amdgpu.vgpr>
+  %loaded = ds_read_addtid_b32 %14
   %16 = s_mov_b32_m0_imm 0
-  low.op<amdgpu.ds_write_addtid_b32>(%loaded, %16) {offset = 0} memory_access([0, 3, 5, -1, 11, 0, 0, 0, 3, 0, 31, 4, 35]) : (reg<amdgpu.vgpr>, reg<amdgpu.m0>)
+  ds_write_addtid_b32 %loaded, %16
   return
 }
 
@@ -92,9 +92,9 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 
   %10 = storage {byte_alignment = 16, byte_length = 128} : low.storage<workgroup>
   %stored_value = v_mov_b32 1
   %13 = v_lshlrev_b32_src0_inline %lane, 2
-  low.op<amdgpu.ds_write_b32>(%13, %stored_value) {offset = 0} memory_access([0, 3, 5, -1, 43, 4, 0, 4, 3, 0, 124, 4, 128]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
-  %loaded = low.op<amdgpu.ds_read_b32>(%13) {offset = 0} memory_access([0, 3, 5, -1, 43, 4, 0, 4, 3, 0, 124, 4, 128]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
-  low.op<amdgpu.ds_write_b32>(%13, %loaded) {offset = 0} memory_access([0, 3, 5, -1, 43, 4, 0, 4, 3, 0, 124, 4, 128]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
+  ds_write_b32 %13, %stored_value
+  %loaded = ds_read_b32 %13
+  ds_write_b32 %13, %loaded
   return
 }
 
@@ -128,9 +128,9 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
   %10 = storage {byte_alignment = 16, byte_length = 256} : low.storage<workgroup>
   %stored_value = v_mov_b32 1
   %13 = v_lshlrev_b32_src0_inline %lane, 2
-  low.op<amdgpu.ds_write_b32>(%13, %stored_value) {offset = 0} memory_access([0, 3, 5, -1, 43, 4, 0, 4, 3, 0, 252, 4, 256]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
-  %loaded = low.op<amdgpu.ds_read_b32>(%13) {offset = 0} memory_access([0, 3, 5, -1, 43, 4, 0, 4, 3, 0, 252, 4, 256]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
-  low.op<amdgpu.ds_write_b32>(%13, %loaded) {offset = 0} memory_access([0, 3, 5, -1, 43, 4, 0, 4, 3, 0, 252, 4, 256]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
+  ds_write_b32 %13, %stored_value
+  %loaded = ds_read_b32 %13
+  ds_write_b32 %13, %loaded
   return
 }
 
@@ -170,11 +170,11 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 
   %stored_value = v_mov_b32 1
   %other = v_mov_b32 2
   %17 = v_lshlrev_b32_src0_inline %lane, 2
-  low.op<amdgpu.ds_write_b32>(%17, %stored_value) {offset = 0} memory_access([0, 3, 7, -1, 43, 4, 0, 4, 3, 0, 124, 4, 128]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
+  ds_write_b32 %17, %stored_value
   %18 = v_lshlrev_b32_src0_inline %lane, 3
-  low.op<amdgpu.ds_write_b32>(%18, %other) {offset = 0} memory_access([0, 3, 7, -1, 43, 8, 0, 4, 3, 0, 248, 4, 252]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
-  %loaded = low.op<amdgpu.ds_read_b32>(%17) {offset = 0} memory_access([0, 3, 7, -1, 43, 4, 0, 4, 3, 0, 124, 4, 128]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
-  low.op<amdgpu.ds_write_b32>(%18, %loaded) {offset = 0} memory_access([0, 3, 7, -1, 43, 8, 0, 4, 3, 0, 248, 4, 252]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
+  ds_write_b32 %18, %other
+  %loaded = ds_read_b32 %17
+  ds_write_b32 %18, %loaded
   return
 }
 
@@ -205,7 +205,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 
   %11 = v_mov_b32 1
   %stored_value = concat(%11, %11, %11, %11) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
   %16 = v_lshlrev_b32_src0_inline %lane, 4
-  low.op<amdgpu.ds_write_b128>(%16, %stored_value) {offset = 0} memory_access([0, 3, 5, -1, 43, 16, 0, 16, 3, 0, 496, 16, 512]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x4>)
+  ds_write_b128 %16, %stored_value
   return
 }
 
@@ -268,7 +268,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(8, 4, 1
   %stored_value = v_mov_b32 1
   %17 = v_lshl_add_u32_shift_imm %lane_x, %lane_y, 2
   %18 = v_lshlrev_b32_src0_inline %17, 2
-  low.op<amdgpu.ds_write_b32>(%18, %stored_value) {offset = 0} memory_access([0, 3, 7, -1, 43, 4, 0, 4, 3, 0, 124, 4, 128]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
+  ds_write_b32 %18, %stored_value
   return
 }
 
@@ -304,8 +304,8 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
   %14 = storage {byte_alignment = 16, byte_length = 2048} : low.storage<workgroup>
   %16 = v_mov_b32 1
   %19 = v_lshlrev_b32_src0_inline %tid, 5
-  low.op<amdgpu.ds_write2_b32>(%19, %16, %16) {offset0 = 0, offset1 = 2} memory_access([0, 3, 7, -1, 43, 32, 0, 12, 3, 0, 2016, 12, 2028]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
-  %loaded = low.op<amdgpu.ds_read2_b32>(%19) {offset0 = 0, offset1 = 2} memory_access([0, 3, 7, -1, 43, 32, 0, 12, 3, 0, 2016, 12, 2028]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  ds_write2_b32 %19, %16, %16 {offset1 = 2}
+  %loaded = ds_read2_b32 %19 {offset1 = 2}
   %24 = v_lshlrev_b32_src0_inline %tid, 3
   global_store_b64_saddr %24, %loaded, %output_view
   return

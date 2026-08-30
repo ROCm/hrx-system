@@ -457,7 +457,7 @@ amdgpu.target<gfx1100> @target
 low.func.def target<amdgpu.rdna3.core>(@target) @buffer_load_dword_off_zero(%resource: reg<amdgpu.sgpr x4>) -> (reg<amdgpu.vgpr>) asm {
   %vaddr = v_mov_b32 0
   %soffset = s_mov_b32 0
-  %result = low.op<amdgpu.buffer_load_dword>(%resource, %vaddr, %soffset) {offset = 32} memory_access([0, 2, 7, -1, 3, 0, 0, 0, 0, 0, 0, 0, 0]) : (reg<amdgpu.sgpr x4>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.vgpr>
+  %result = low.op<amdgpu.buffer_load_dword>(%resource, %vaddr, %soffset) {offset = 32} : (reg<amdgpu.sgpr x4>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.vgpr>
   return %result
 }
 
@@ -465,7 +465,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @buffer_load_dword_off_zero(%res
 amdgpu.target<gfx1100> @target
 
 low.func.def target<amdgpu.rdna3.core>(@target) @buffer_load_dword_off_zero(%resource: reg<amdgpu.sgpr x4>) -> (reg<amdgpu.vgpr>) {
-  %result = low.op<amdgpu.buffer_load_dword_off_zero>(%resource) {offset = 32} memory_access([0, 2, 7, -1, 3, 0, 0, 0, 0, 0, 0, 0, 0]) : (reg<amdgpu.sgpr x4>) -> reg<amdgpu.vgpr>
+  %result = low.op<amdgpu.buffer_load_dword_off_zero>(%resource) {offset = 32} : (reg<amdgpu.sgpr x4>) -> reg<amdgpu.vgpr>
   low.return %result : reg<amdgpu.vgpr>
 }
 

@@ -30,24 +30,6 @@ iree_status_t loom_amdgpu_fragment_memory_packet_type(
                                           out_type);
 }
 
-static loom_low_memory_space_t loom_amdgpu_fragment_memory_low_space(
-    loom_value_fact_memory_space_t memory_space) {
-  switch (memory_space) {
-    case LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL:
-    case LOOM_VALUE_FACT_MEMORY_SPACE_CONSTANT:
-    case LOOM_VALUE_FACT_MEMORY_SPACE_DESCRIPTOR:
-      return LOOM_LOW_MEMORY_SPACE_GLOBAL;
-    case LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP:
-      return LOOM_LOW_MEMORY_SPACE_WORKGROUP;
-    case LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN:
-    case LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE:
-    case LOOM_VALUE_FACT_MEMORY_SPACE_HOST:
-    case LOOM_VALUE_FACT_MEMORY_SPACE_GENERIC:
-    default:
-      return LOOM_LOW_MEMORY_SPACE_GENERIC;
-  }
-}
-
 static bool loom_amdgpu_fragment_memory_uses_buffer_descriptor(
     const loom_amdgpu_fragment_memory_plan_t* plan) {
   return plan->source.memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_DESCRIPTOR;
@@ -147,34 +129,11 @@ iree_status_t loom_amdgpu_fragment_memory_packet_resource(
 
 static iree_status_t loom_amdgpu_record_fragment_memory_packet(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
-    loom_op_t* low_op, const loom_amdgpu_matrix_fragment_layout_t* layout,
+    const loom_amdgpu_matrix_fragment_layout_t* layout,
     const loom_amdgpu_fragment_memory_plan_t* plan,
     const loom_amdgpu_fragment_memory_packet_plan_t* packet,
     loom_amdgpu_descriptor_ref_t descriptor_ref, uint16_t element_index,
     uint32_t vector_lane_count) {
-  loom_low_memory_access_summary_t summary = {
-      .memory_space =
-          loom_amdgpu_fragment_memory_low_space(plan->source.memory_space),
-      .alias_root_id = LOOM_LOW_MEMORY_ALIAS_ID_NONE,
-      .alias_group_id = LOOM_LOW_MEMORY_ALIAS_ID_NONE,
-  };
-  if (summary.memory_space != LOOM_LOW_MEMORY_SPACE_GENERIC) {
-    summary.precision_flags |= LOOM_LOW_MEMORY_ACCESS_PRECISION_SPACE;
-  }
-  if (plan->source.alias_scope_id != LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE) {
-    summary.alias_root_id = plan->source.alias_scope_id;
-    summary.precision_flags |= LOOM_LOW_MEMORY_ACCESS_PRECISION_ROOT;
-  }
-  // Workgroup allocations have compiler-owned identities that remain comparable
-  // after source lowering. Preserve those summaries so final packet scheduling
-  // can distinguish disjoint LDS allocations from real async-memory hazards.
-  const bool preserve_memory_access =
-      plan->source.memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP &&
-      plan->source.alias_scope_id != LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE;
-  const loom_low_lower_memory_access_record_flags_t record_flags =
-      preserve_memory_access ? LOOM_LOW_LOWER_MEMORY_ACCESS_RECORD_PRESERVE : 0;
-  IREE_RETURN_IF_ERROR(loom_low_lower_record_memory_access_summary(
-      context, low_op, &summary, record_flags));
   if (!loom_low_lower_context_wants_report_rows(context)) {
     return iree_ok_status();
   }
@@ -323,8 +282,8 @@ static iree_status_t loom_amdgpu_emit_fragment_load_packet_with_descriptor(
       loom_make_named_attr_slice(attrs, attr_count), &result_type, 1,
       tied_results, tied_result_count, source_op->location, &low_op));
   IREE_RETURN_IF_ERROR(loom_amdgpu_record_fragment_memory_packet(
-      context, source_op, low_op, layout, plan, packet, descriptor_ref,
-      element_index, vector_lane_count));
+      context, source_op, layout, plan, packet, descriptor_ref, element_index,
+      vector_lane_count));
   *out_low_packet = loom_value_slice_get(loom_low_op_results(low_op), 0);
   return iree_ok_status();
 }
@@ -429,6 +388,6 @@ iree_status_t loom_amdgpu_emit_fragment_store_packet(
       /*result_count=*/0, /*tied_results=*/NULL, /*tied_result_count=*/0,
       source_op->location, &low_op));
   return loom_amdgpu_record_fragment_memory_packet(
-      context, source_op, low_op, layout, plan, packet, packet->descriptor_ref,
+      context, source_op, layout, plan, packet, packet->descriptor_ref,
       element_index, vector_lane_count);
 }
