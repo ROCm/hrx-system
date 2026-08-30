@@ -202,29 +202,39 @@ bool loom_low_allocation_live_range_assignments_conflict(
                                               rhs->liveness_segments)) {
       return false;
     }
-    const uint32_t lhs_unit_end_point =
-        loom_low_allocation_live_range_assignment_unit_end_point(
-            unit_end_points, unit_point_count, lhs, /*unit_offset=*/0);
-    const uint32_t rhs_unit_end_point =
-        loom_low_allocation_live_range_assignment_unit_end_point(
-            unit_end_points, unit_point_count, rhs, /*unit_offset=*/0);
     const bool has_refined_unit_starts = iree_any_bit_set(
         lhs->flags | rhs->flags,
         LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_REFINED_UNIT_STARTS);
-    const uint32_t lhs_unit_start_point =
-        has_refined_unit_starts
-            ? loom_low_allocation_live_range_assignment_unit_start_point(
-                  unit_start_points, unit_point_count, lhs,
-                  /*unit_offset=*/0)
-            : lhs->start_point;
-    const uint32_t rhs_unit_start_point =
-        has_refined_unit_starts
-            ? loom_low_allocation_live_range_assignment_unit_start_point(
-                  unit_start_points, unit_point_count, rhs,
-                  /*unit_offset=*/0)
-            : rhs->start_point;
-    return lhs_unit_start_point < rhs_unit_end_point &&
-           rhs_unit_start_point < lhs_unit_end_point;
+    for (uint32_t lhs_unit = 0; lhs_unit < lhs->location_count; ++lhs_unit) {
+      for (uint32_t rhs_unit = 0; rhs_unit < rhs->location_count; ++rhs_unit) {
+        if (!loom_low_allocation_storage_assignment_subranges_overlap(
+                descriptor_set, lhs, lhs_unit, rhs, rhs_unit,
+                /*unit_count=*/1)) {
+          continue;
+        }
+        const uint32_t lhs_unit_end_point =
+            loom_low_allocation_live_range_assignment_unit_end_point(
+                unit_end_points, unit_point_count, lhs, lhs_unit);
+        const uint32_t rhs_unit_end_point =
+            loom_low_allocation_live_range_assignment_unit_end_point(
+                unit_end_points, unit_point_count, rhs, rhs_unit);
+        const uint32_t lhs_unit_start_point =
+            has_refined_unit_starts
+                ? loom_low_allocation_live_range_assignment_unit_start_point(
+                      unit_start_points, unit_point_count, lhs, lhs_unit)
+                : lhs->start_point;
+        const uint32_t rhs_unit_start_point =
+            has_refined_unit_starts
+                ? loom_low_allocation_live_range_assignment_unit_start_point(
+                      unit_start_points, unit_point_count, rhs, rhs_unit)
+                : rhs->start_point;
+        if (lhs_unit_start_point < rhs_unit_end_point &&
+            rhs_unit_start_point < lhs_unit_end_point) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
   const uint64_t lhs_end = (uint64_t)lhs->location_base + lhs->location_count;
   const uint64_t rhs_end = (uint64_t)rhs->location_base + rhs->location_count;

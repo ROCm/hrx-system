@@ -323,6 +323,7 @@ loom_cc_test(
     deps = [
         ":assignment",
         ":storage",
+        "//loom/src/loom/target/test:descriptors",
         "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

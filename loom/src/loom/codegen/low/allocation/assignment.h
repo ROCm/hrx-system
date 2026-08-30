@@ -57,10 +57,11 @@ typedef struct loom_low_allocation_assignment_t {
   // Assigned location kind.
   loom_low_allocation_location_kind_t location_kind;
   // Base physical register, target ID, or spill slot ordinal. Explicit
-  // physical-register classes store one descriptor-set register ID here.
+  // physical-register classes store one descriptor-set register-view ID here.
   uint32_t location_base;
-  // Number of contiguous units assigned at |location_base|. Explicit
-  // physical-register assignments use one aggregate allocation unit.
+  // Number of logical class units assigned at |location_base|. Linear
+  // assignments use a contiguous numeric span; explicit physical-register
+  // assignments use the ordered units represented by their register view.
   uint32_t location_count;
   // First per-unit lifetime entry in the allocation table.
   uint32_t unit_point_start;

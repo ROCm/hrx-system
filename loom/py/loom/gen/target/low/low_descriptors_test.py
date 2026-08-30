@@ -104,6 +104,7 @@ def _explicit_physical_descriptor_set():
         if register_class.name == "test.phys"
         else register_class
         for register_class in TEST_LOW_CORE_DESCRIPTOR_SET.reg_classes
+        if register_class.name != "test.explicit32"
     )
     return replace(
         TEST_LOW_CORE_DESCRIPTOR_SET,
@@ -660,6 +661,20 @@ def test_compiler_rejects_overlapping_candidates_in_one_class() -> None:
                 reg_classes=register_classes,
             )
         )
+
+
+def test_compiler_rejects_mixed_width_explicit_register_candidates() -> None:
+    descriptor_set = _explicit_physical_descriptor_set()
+    physical_registers = (
+        PhysicalRegister("test.r0", (0,)),
+        *descriptor_set.physical_registers[1:],
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor set 'test.low.core' register class 'test.phys' explicit physical register candidates must occupy the same number of atomic storage units"),
+    ):
+        compiler.compile_descriptor_set(replace(descriptor_set, physical_registers=physical_registers))
 
 
 def test_compiler_rejects_noncanonical_physical_register_units() -> None:

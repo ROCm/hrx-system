@@ -21,6 +21,7 @@ extern "C" {
 
 // Returns the concrete storage location for one in-range unit of |assignment|.
 loom_low_move_location_t loom_low_allocation_assignment_unit_location(
+    const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_allocation_assignment_t* assignment, uint32_t unit_index);
 
 // Returns true when two unit locations name the same concrete unit.

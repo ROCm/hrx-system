@@ -7,6 +7,7 @@
 #include "loom/codegen/low/allocation/storage.h"
 
 #include "iree/testing/gtest.h"
+#include "loom/target/test/descriptors.h"
 
 namespace loom {
 namespace {
@@ -40,6 +41,29 @@ loom_low_allocation_assignment_t Assignment(
   assignment.location_count = location_count;
   assignment.unit_count = location_count;
   return assignment;
+}
+
+bool FindExplicitPhysicalRegisterView(
+    const loom_low_descriptor_set_t* descriptor_set,
+    uint16_t descriptor_reg_class_id, uint32_t unit_count,
+    uint32_t first_candidate_ordinal, uint32_t maximum_pressure_extent,
+    uint32_t* out_physical_register_id) {
+  *out_physical_register_id = UINT32_MAX;
+  for (uint32_t physical_register_id = 0;
+       physical_register_id < descriptor_set->physical_register_count;
+       ++physical_register_id) {
+    uint32_t actual_first_candidate_ordinal = 0;
+    uint32_t pressure_extent = 0;
+    if (loom_low_allocation_storage_explicit_physical_register_view(
+            descriptor_set, descriptor_reg_class_id, physical_register_id,
+            unit_count, &actual_first_candidate_ordinal, &pressure_extent) &&
+        actual_first_candidate_ordinal == first_candidate_ordinal &&
+        pressure_extent <= maximum_pressure_extent) {
+      *out_physical_register_id = physical_register_id;
+      return true;
+    }
+  }
+  return false;
 }
 
 TEST(LowAllocationStorageTest, MatchesConcreteAndAliasRanges) {
@@ -252,6 +276,81 @@ TEST(LowAllocationStorageTest, MatchesExplicitRegisterAtomicStorage) {
   EXPECT_EQ(loom_low_allocation_storage_assignment_pressure_extent(
                 &descriptor_set, &wide1),
             2u);
+}
+
+TEST(LowAllocationStorageTest, ResolvesExplicitAggregateRegisterViews) {
+  const loom_low_descriptor_set_t* descriptor_set =
+      loom_test_low_core_descriptor_set();
+  uint16_t reg_class_id = LOOM_LOW_REG_CLASS_NONE;
+  ASSERT_TRUE(loom_low_descriptor_set_lookup_register_class(
+      descriptor_set, IREE_SV("test.explicit32"), &reg_class_id, nullptr));
+
+  uint32_t pair_register_id = UINT32_MAX;
+  ASSERT_TRUE(FindExplicitPhysicalRegisterView(
+      descriptor_set, reg_class_id, /*unit_count=*/2,
+      /*first_candidate_ordinal=*/0, /*maximum_pressure_extent=*/4,
+      &pair_register_id));
+  uint32_t first_candidate_ordinal = UINT32_MAX;
+  uint32_t pressure_extent = 0;
+  EXPECT_TRUE(loom_low_allocation_storage_explicit_physical_register_view(
+      descriptor_set, reg_class_id, pair_register_id, /*unit_count=*/2,
+      &first_candidate_ordinal, &pressure_extent));
+  EXPECT_EQ(first_candidate_ordinal, 0u);
+  EXPECT_EQ(pressure_extent, 2u);
+
+  uint32_t unavailable_register_id = UINT32_MAX;
+  EXPECT_FALSE(FindExplicitPhysicalRegisterView(
+      descriptor_set, reg_class_id, /*unit_count=*/2,
+      /*first_candidate_ordinal=*/0, /*maximum_pressure_extent=*/1,
+      &unavailable_register_id));
+  EXPECT_FALSE(FindExplicitPhysicalRegisterView(
+      descriptor_set, reg_class_id, /*unit_count=*/2,
+      /*first_candidate_ordinal=*/1, /*maximum_pressure_extent=*/4,
+      &unavailable_register_id));
+  EXPECT_FALSE(FindExplicitPhysicalRegisterView(
+      descriptor_set, reg_class_id, /*unit_count=*/3,
+      /*first_candidate_ordinal=*/0, /*maximum_pressure_extent=*/4,
+      &unavailable_register_id));
+
+  const uint32_t first_register_id =
+      loom_low_descriptor_set_physical_register_candidate(descriptor_set,
+                                                          reg_class_id, 0);
+  const uint32_t second_register_id =
+      loom_low_descriptor_set_physical_register_candidate(descriptor_set,
+                                                          reg_class_id, 1);
+  const loom_low_allocation_assignment_t pair =
+      Assignment(reg_class_id, LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+                 pair_register_id, /*location_count=*/2);
+  const loom_low_allocation_assignment_t first =
+      Assignment(reg_class_id, LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+                 first_register_id, /*location_count=*/1);
+  const loom_low_allocation_assignment_t second =
+      Assignment(reg_class_id, LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+                 second_register_id, /*location_count=*/1);
+  uint32_t unit_register_id = UINT32_MAX;
+  EXPECT_TRUE(loom_low_allocation_storage_assignment_unit_physical_register(
+      descriptor_set, &pair, 0, &unit_register_id));
+  EXPECT_EQ(unit_register_id, first_register_id);
+  EXPECT_TRUE(loom_low_allocation_storage_assignment_unit_physical_register(
+      descriptor_set, &pair, 1, &unit_register_id));
+  EXPECT_EQ(unit_register_id, second_register_id);
+  EXPECT_TRUE(loom_low_allocation_storage_assignment_subranges_equal(
+      descriptor_set, &pair, 0, &first, 0, /*unit_count=*/1));
+  EXPECT_TRUE(loom_low_allocation_storage_assignment_subranges_equal(
+      descriptor_set, &pair, 1, &second, 0, /*unit_count=*/1));
+  EXPECT_FALSE(loom_low_allocation_storage_assignment_subranges_overlap(
+      descriptor_set, &pair, 0, &second, 0, /*unit_count=*/1));
+
+  uint32_t quad_register_id = UINT32_MAX;
+  ASSERT_TRUE(FindExplicitPhysicalRegisterView(
+      descriptor_set, reg_class_id, /*unit_count=*/4,
+      /*first_candidate_ordinal=*/0, /*maximum_pressure_extent=*/4,
+      &quad_register_id));
+  EXPECT_TRUE(loom_low_allocation_storage_explicit_physical_register_view(
+      descriptor_set, reg_class_id, quad_register_id, /*unit_count=*/4,
+      &first_candidate_ordinal, &pressure_extent));
+  EXPECT_EQ(first_candidate_ordinal, 0u);
+  EXPECT_EQ(pressure_extent, 4u);
 }
 
 TEST(LowAllocationStorageTest, MapsRegisterClassToLocationKind) {

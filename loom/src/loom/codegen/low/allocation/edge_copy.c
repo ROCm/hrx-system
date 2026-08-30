@@ -120,9 +120,11 @@ static void loom_low_allocation_edge_copy_record_segment(
   for (uint32_t i = 0; i < unit_count; ++i) {
     raw_moves[builder->raw_move_count++] = (loom_low_move_t){
         .destination = loom_low_allocation_assignment_unit_location(
-            destination_assignment, destination_unit_offset + i),
+            context->move_plan->context.descriptor_set, destination_assignment,
+            destination_unit_offset + i),
         .source = loom_low_allocation_assignment_unit_location(
-            source_assignment, source_unit_offset + i),
+            context->move_plan->context.descriptor_set, source_assignment,
+            source_unit_offset + i),
     };
   }
 }

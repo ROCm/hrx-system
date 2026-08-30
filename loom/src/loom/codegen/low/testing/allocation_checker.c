@@ -656,19 +656,36 @@ static void loom_low_allocation_checker_storage_conflicts(
           loom_low_allocation_storage_assignment_uses_explicit_physical_register(
               checker->descriptor_set, rhs);
       if (lhs_is_explicit || rhs_is_explicit) {
-        if (!loom_low_allocation_storage_assignment_ranges_overlap(
-                checker->descriptor_set, lhs, rhs) ||
-            !loom_low_allocation_checker_unit_lifetimes_overlap(
-                allocation, lhs, /*lhs_unit=*/0, rhs, /*rhs_unit=*/0) ||
-            loom_low_allocation_checker_unit_alias_is_authorized(
-                checker, checker->assignment_ordinals[i], /*result_unit=*/0,
-                checker->assignment_ordinals[j], /*source_unit=*/0)) {
+        if (!lhs_is_explicit || !rhs_is_explicit ||
+            !loom_low_allocation_storage_assignment_ranges_overlap(
+                checker->descriptor_set, lhs, rhs)) {
           continue;
         }
-        loom_low_allocation_checker_record(
-            checker, LOOM_LOW_ALLOCATION_CHECK_VIOLATION_STORAGE_CONFLICT,
-            (uint32_t)i, (uint32_t)j, lhs->value_id, rhs->value_id,
-            iree_max(lhs->start_point, rhs->start_point));
+        bool conflict = false;
+        for (uint32_t lhs_unit = 0; lhs_unit < lhs->location_count && !conflict;
+             ++lhs_unit) {
+          for (uint32_t rhs_unit = 0; rhs_unit < rhs->location_count;
+               ++rhs_unit) {
+            if (!loom_low_allocation_storage_assignment_subranges_overlap(
+                    checker->descriptor_set, lhs, lhs_unit, rhs, rhs_unit,
+                    /*unit_count=*/1) ||
+                !loom_low_allocation_checker_unit_lifetimes_overlap(
+                    allocation, lhs, lhs_unit, rhs, rhs_unit) ||
+                loom_low_allocation_checker_unit_alias_is_authorized(
+                    checker, checker->assignment_ordinals[i], lhs_unit,
+                    checker->assignment_ordinals[j], rhs_unit)) {
+              continue;
+            }
+            conflict = true;
+            break;
+          }
+        }
+        if (conflict) {
+          loom_low_allocation_checker_record(
+              checker, LOOM_LOW_ALLOCATION_CHECK_VIOLATION_STORAGE_CONFLICT,
+              (uint32_t)i, (uint32_t)j, lhs->value_id, rhs->value_id,
+              iree_max(lhs->start_point, rhs->start_point));
+        }
         continue;
       }
       if (lhs->location_kind != rhs->location_kind ||

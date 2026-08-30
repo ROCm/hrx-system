@@ -10,12 +10,22 @@
 #include "loom/codegen/low/allocation/storage.h"
 
 loom_low_move_location_t loom_low_allocation_assignment_unit_location(
+    const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_allocation_assignment_t* assignment, uint32_t unit_index) {
+  IREE_ASSERT_LT(unit_index, assignment->location_count);
+  uint32_t location = assignment->location_base + unit_index;
+  if (loom_low_allocation_storage_assignment_uses_explicit_physical_register(
+          descriptor_set, assignment)) {
+    const bool resolved =
+        loom_low_allocation_storage_assignment_unit_physical_register(
+            descriptor_set, assignment, unit_index, &location);
+    IREE_ASSERT_TRUE(resolved);
+  }
   return (loom_low_move_location_t){
       .location_kind = assignment->location_kind,
       .value_class = assignment->value_class,
       .descriptor_reg_class_id = assignment->descriptor_reg_class_id,
-      .location = assignment->location_base + unit_index,
+      .location = location,
   };
 }
 
@@ -74,11 +84,23 @@ bool loom_low_allocation_unit_location_is_live_at_point(
             descriptor_set, assignment, &location_assignment)) {
       continue;
     }
-    const uint32_t unit_offset =
-        loom_low_allocation_storage_assignment_uses_explicit_physical_register(
-            descriptor_set, assignment)
-            ? 0
-            : (uint32_t)(location->location - assignment->location_base);
+    uint32_t unit_offset = UINT32_MAX;
+    if (loom_low_allocation_storage_assignment_uses_explicit_physical_register(
+            descriptor_set, assignment)) {
+      for (uint32_t i = 0; i < assignment->location_count; ++i) {
+        if (loom_low_allocation_storage_assignment_subranges_overlap(
+                descriptor_set, assignment, i, &location_assignment, 0,
+                /*unit_count=*/1)) {
+          unit_offset = i;
+          break;
+        }
+      }
+      if (unit_offset == UINT32_MAX) {
+        continue;
+      }
+    } else {
+      unit_offset = (uint32_t)(location->location - assignment->location_base);
+    }
     const uint32_t unit_start_point =
         loom_low_allocation_live_range_assignment_unit_start_point(
             unit_liveness->start_points, unit_liveness->point_count, assignment,

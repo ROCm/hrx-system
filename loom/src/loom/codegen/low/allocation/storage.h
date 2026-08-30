@@ -23,15 +23,31 @@ loom_low_allocation_location_kind_t
 loom_low_allocation_storage_reg_class_location_kind(
     const loom_low_reg_class_t* reg_class);
 
-// Returns true when |assignment| names one whole physical register selected
-// from an explicit descriptor-set candidate list.
+// Returns true when |assignment| uses an explicit physical-register class.
 bool loom_low_allocation_storage_assignment_uses_explicit_physical_register(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_allocation_assignment_t* assignment);
 
+// Returns true when |physical_register_id| is an ordered |unit_count|-unit
+// view of |descriptor_reg_class_id|. The first candidate ordinal identifies
+// the direct candidate covering logical unit zero. The pressure extent is one
+// past the highest direct candidate ordinal occupied by the view.
+bool loom_low_allocation_storage_explicit_physical_register_view(
+    const loom_low_descriptor_set_t* descriptor_set,
+    uint16_t descriptor_reg_class_id, uint32_t physical_register_id,
+    uint32_t unit_count, uint32_t* out_first_candidate_ordinal,
+    uint32_t* out_pressure_extent);
+
+// Resolves one logical unit of an explicit physical-register assignment to
+// the direct class-candidate register that names it.
+bool loom_low_allocation_storage_assignment_unit_physical_register(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_allocation_assignment_t* assignment, uint32_t unit_index,
+    uint32_t* out_physical_register_id);
+
 // Returns the number of atomic storage units used to index |assignment|.
-// Linear assignments return |location_count|; explicit physical registers
-// return their arbitrary atomic-unit set size.
+// Linear assignments return |location_count|; explicit physical-register
+// views return their arbitrary atomic-unit set size.
 uint32_t loom_low_allocation_storage_assignment_atomic_unit_count(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_allocation_assignment_t* assignment);
@@ -45,8 +61,8 @@ void loom_low_allocation_storage_assignment_atomic_unit(
     uint32_t* out_location);
 
 // Returns the class-local pressure extent of |assignment|. Linear assignments
-// use their exclusive numeric end; explicit physical registers use one past
-// their candidate preference ordinal.
+// use their exclusive numeric end; explicit physical-register views use one
+// past their highest occupied direct-candidate preference ordinal.
 uint32_t loom_low_allocation_storage_assignment_pressure_extent(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_allocation_assignment_t* assignment);

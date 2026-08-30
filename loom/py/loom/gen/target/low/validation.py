@@ -832,6 +832,9 @@ def validate_register_classes(
             unknown_physical_registers = tuple(name for name in register_class.physical_registers if name not in physical_registers_by_name)
             if unknown_physical_registers:
                 raise ValueError(f"{description} references unknown physical registers: " + ", ".join(unknown_physical_registers))
+            candidate_atomic_unit_counts = {len(physical_registers_by_name[name].atomic_units) for name in register_class.physical_registers}
+            if len(candidate_atomic_unit_counts) != 1:
+                raise ValueError(f"{description} explicit physical register candidates must occupy the same number of atomic storage units")
             occupied_atomic_units: dict[int, str] = {}
             for physical_register_name in register_class.physical_registers:
                 physical_register = physical_registers_by_name[physical_register_name]

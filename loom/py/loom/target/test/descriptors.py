@@ -42,6 +42,7 @@ from loom.target.low_descriptors import (
     OperandFormMatch,
     OperandFormMatchKind,
     OperandRole,
+    PhysicalRegister,
     RegClass,
     RegClassAlt,
     RegClassFlag,
@@ -66,6 +67,7 @@ _REG_ALIAS32 = "test.alias32"
 _REG_ALIAS64 = "test.alias64"
 _REG_PRESSURE_ALIAS32 = "test.pressure.alias32"
 _REG_PRESSURE_ALIAS64 = "test.pressure.alias64"
+_REG_EXPLICIT32 = "test.explicit32"
 
 _REG_PART_I32_LOW16 = "test.i32.low16"
 _REG_PART_I32_HIGH16 = "test.i32.high16"
@@ -1514,6 +1516,31 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
             SpillSlotSpace.PRIVATE,
             flags=(RegClassFlag.VIRTUAL_ONLY,),
         ),
+        RegClass(
+            _REG_EXPLICIT32,
+            32,
+            SpillSlotSpace.PRIVATE,
+            flags=(
+                RegClassFlag.PHYSICAL,
+                RegClassFlag.UNSPILLABLE,
+                RegClassFlag.EXPLICIT_PHYSICAL_REGISTERS,
+            ),
+            physical_registers=(
+                "test.r0",
+                "test.r1",
+                "test.r2",
+                "test.r3",
+            ),
+        ),
+    ),
+    physical_registers=(
+        PhysicalRegister("test.r0", (0,)),
+        PhysicalRegister("test.r1", (1,)),
+        PhysicalRegister("test.r2", (2,)),
+        PhysicalRegister("test.r3", (3,)),
+        PhysicalRegister("test.l0", (0, 1)),
+        PhysicalRegister("test.l1", (2, 3)),
+        PhysicalRegister("test.q0", (0, 1, 2, 3)),
     ),
     register_parts=(
         RegisterPart(_REG_PART_I32_LOW16, _REG_I32, 0x1),

@@ -61,9 +61,12 @@ loom_low_descriptor_set_t DescriptorSet(const loom_low_reg_class_t* reg_classes,
 TEST(LowAllocationUnitLocationTest, MapsAssignmentUnitLocations) {
   const loom_low_allocation_assignment_t assignment =
       Assignment(/*reg_class_id=*/3);
+  const loom_low_reg_class_t reg_classes[4] = {};
+  const loom_low_descriptor_set_t descriptor_set =
+      DescriptorSet(reg_classes, IREE_ARRAYSIZE(reg_classes));
 
   const loom_low_move_location_t unit_location =
-      loom_low_allocation_assignment_unit_location(&assignment,
+      loom_low_allocation_assignment_unit_location(&descriptor_set, &assignment,
                                                    /*unit_index=*/1);
 
   EXPECT_EQ(unit_location.location_kind,
