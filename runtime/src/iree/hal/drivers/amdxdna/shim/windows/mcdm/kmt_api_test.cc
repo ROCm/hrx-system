@@ -436,7 +436,7 @@ TEST(KmtApiTest, CompactAbiMatchesXrt221SubmitLayout) {
 }
 
 TEST(KmtApiTest, SharedResourceDestroyFlagsMatchNegotiatedAbi) {
-  for (const auto [mcdm_abi, expected_buffer_flags,
+  for (const auto& [mcdm_abi, expected_buffer_flags,
                    expected_aperture_flags] :
        {std::tuple{McdmAbi::legacy, 0x1u, 0x2u},
         std::tuple{McdmAbi::compact, 0x3u, 0x3u}}) {
@@ -1901,7 +1901,7 @@ TEST(KmtApiTest, BoTableRejectsEntriesBeyondNegotiatedCapacity) {
   const D3DGPU_VIRTUAL_ADDRESS real_vas[] = {
       0x1000, 0x2000, 0x3000, 0x4000, 0x5000, 0x6000, 0x7000};
   std::array<uint32_t, 25> words = {};
-  for (const auto [abi, count] :
+  for (const auto& [abi, count] :
        {std::pair{McdmAbi::legacy, size_t{6}},
         std::pair{McdmAbi::compact, size_t{7}}}) {
     Device device = {};

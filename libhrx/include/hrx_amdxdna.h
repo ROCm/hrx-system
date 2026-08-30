@@ -14,6 +14,14 @@ extern "C" {
 #define HRX_AMDXDNA_EXECUTABLE_ENTRY_POINT_ABI_VERSION_0 0u
 #define HRX_AMDXDNA_EXECUTABLE_CREATE_PARAMS_ABI_VERSION_0 0u
 
+// `{0}` is valid C but GCC C++ -Wmissing-field-initializers rejects it when
+// later members are omitted. Value-init with `{}` zeroes every field in C++.
+#ifdef __cplusplus
+#define HRX_AMDXDNA_STRUCT_ZERO_INIT {}
+#else
+#define HRX_AMDXDNA_STRUCT_ZERO_INIT {0}
+#endif
+
 // HAL executable target advertised by amdxdna devices. Pass these to
 // hrx_executable_load_data / hrx_executable_load_file. This is the device
 // target identity, not the XADX/PDI container format string.
@@ -39,7 +47,7 @@ typedef struct hrx_amdxdna_executable_run_t {
 // Returns an initialized v0 run record.
 static inline hrx_amdxdna_executable_run_t hrx_amdxdna_executable_run_default(
     void) {
-  hrx_amdxdna_executable_run_t run = {0};
+  hrx_amdxdna_executable_run_t run = HRX_AMDXDNA_STRUCT_ZERO_INIT;
   run.record_length = (uint32_t)sizeof(run);
   run.abi_version = HRX_AMDXDNA_EXECUTABLE_RUN_ABI_VERSION_0;
   return run;
@@ -63,7 +71,8 @@ typedef struct hrx_amdxdna_executable_entry_point_t {
 // Returns an initialized v0 entry-point record.
 static inline hrx_amdxdna_executable_entry_point_t
 hrx_amdxdna_executable_entry_point_default(void) {
-  hrx_amdxdna_executable_entry_point_t entry_point = {0};
+  hrx_amdxdna_executable_entry_point_t entry_point =
+      HRX_AMDXDNA_STRUCT_ZERO_INIT;
   entry_point.record_length = (uint32_t)sizeof(entry_point);
   entry_point.abi_version = HRX_AMDXDNA_EXECUTABLE_ENTRY_POINT_ABI_VERSION_0;
   entry_point.context_mode = HRX_AMDXDNA_CONTEXT_MODE_CREATE;
@@ -87,7 +96,7 @@ typedef struct hrx_amdxdna_executable_create_params_t {
 // Returns initialized v0 executable creation parameters.
 static inline hrx_amdxdna_executable_create_params_t
 hrx_amdxdna_executable_create_params_default(void) {
-  hrx_amdxdna_executable_create_params_t params = {0};
+  hrx_amdxdna_executable_create_params_t params = HRX_AMDXDNA_STRUCT_ZERO_INIT;
   params.record_length = (uint32_t)sizeof(params);
   params.abi_version = HRX_AMDXDNA_EXECUTABLE_CREATE_PARAMS_ABI_VERSION_0;
   return params;
@@ -117,5 +126,7 @@ HRX_API hrx_status_t hrx_amdxdna_executable_create(
 #ifdef __cplusplus
 }
 #endif
+
+#undef HRX_AMDXDNA_STRUCT_ZERO_INIT
 
 #endif  // HRX_AMDXDNA_H_
