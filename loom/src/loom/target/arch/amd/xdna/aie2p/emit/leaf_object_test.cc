@@ -125,6 +125,24 @@ class Aie2pLeafObjectTest : public ::testing::Test {
     return CompileSource(source, out_leaf);
   }
 
+  iree_status_t CompileResourceVectorAdd(CompiledLeaf* out_leaf) {
+    return CompileSource(
+        "low.func.def target<amd.xdna.aie2p.core> @vector_add_memory() asm {\n"
+        "  %lhs_ptr = resource<native_pointer> {index = 0, source_type = "
+        "buffer} : reg<aie2p.ep>\n"
+        "  %rhs_ptr = resource<native_pointer> {index = 1, source_type = "
+        "buffer} : reg<aie2p.ep>\n"
+        "  %out_ptr = resource<native_pointer> {index = 2, source_type = "
+        "buffer} : reg<aie2p.ep>\n"
+        "  %lhs = vlda %lhs_ptr, 0\n"
+        "  %rhs = vlda %rhs_ptr, 0\n"
+        "  %sum = vadd.32 %lhs, %rhs\n"
+        "  vst %sum, %out_ptr, 0\n"
+        "  return\n"
+        "}\n",
+        out_leaf);
+  }
+
   void ResetLeaf(CompiledLeaf* leaf) {
     if (leaf->module != nullptr) {
       loom_module_free(leaf->module);
@@ -224,6 +242,34 @@ TEST_F(Aie2pLeafObjectTest, LowFunctionsReproduceRetainedVectorLeaves) {
                         test_case.expected.size()));
     ResetLeaf(&leaf);
   }
+}
+
+TEST_F(Aie2pLeafObjectTest, ResourceImportsAnchorRegistersWithoutEmittingCode) {
+  CompiledLeaf leaf;
+  IREE_ASSERT_OK(CompileResourceVectorAdd(&leaf));
+
+  iree_host_size_t resource_packet_count = 0;
+  for (iree_host_size_t packet_index = 0;
+       packet_index < loom_low_packet_count(&leaf.frame.schedule);
+       ++packet_index) {
+    const loom_low_packet_view_t packet =
+        loom_low_packet_at(&leaf.frame.schedule, packet_index);
+    if (loom_low_resource_isa(packet.node->op)) ++resource_packet_count;
+  }
+  EXPECT_EQ(resource_packet_count, 3u);
+  for (iree_host_size_t slot_index = 0; slot_index < leaf.plan.slot_count;
+       ++slot_index) {
+    const uint32_t packet_index =
+        leaf.plan.slots[slot_index].scheduled_packet_index;
+    if (packet_index == LOOM_AIE2P_BUNDLE_PLAN_PACKET_NONE) continue;
+    const loom_low_packet_view_t packet =
+        loom_low_packet_at(&leaf.frame.schedule, packet_index);
+    EXPECT_FALSE(loom_low_resource_isa(packet.node->op));
+  }
+  ASSERT_EQ(leaf.object.section_count, 1u);
+  EXPECT_GT(leaf.object.sections[0].contents.data_length, 0u);
+
+  loom_module_free(leaf.module);
 }
 
 TEST_F(Aie2pLeafObjectTest, ReturnFallsBackAfterAnOccupiedAluCycle) {

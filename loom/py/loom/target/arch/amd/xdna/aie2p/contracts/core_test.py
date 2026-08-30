@@ -6,6 +6,8 @@
 
 """Tests for the AMD XDNA AIE2P core source-to-Low contract."""
 
+from loom.dialect.buffer import defs as buffer
+from loom.dialect.index import defs as index
 from loom.dialect.scalar import bitwise as scalar_bitwise
 from loom.dialect.scalar import comparison as scalar_comparison
 from loom.dialect.scalar import conversion as scalar_conversion
@@ -15,7 +17,16 @@ from loom.target.arch.amd.xdna.aie2p.contracts.core import (
     _I16_ELEMENTWISE_MULTIPLY_CONTROL,
     AIE2P_CORE_CONTRACT_FRAGMENT,
 )
-from loom.target.contracts import DescriptorResultType, DescriptorRule, ValueAliasRule
+from loom.target.contracts import (
+    DescriptorResultType,
+    DescriptorRule,
+    SourceMemoryAddressLayout,
+    SourceMemoryOperation,
+    SourceMemoryProject,
+    SourceMemoryProjectKind,
+    SourceMemoryRootKind,
+    ValueAliasRule,
+)
 
 
 def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
@@ -24,7 +35,62 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
         for case in AIE2P_CORE_CONTRACT_FRAGMENT.cases
         if isinstance(case, DescriptorRule)
     )
-    assert len(rules) == 150
+    assert len(rules) == 160
+
+    address_constant_rules = [
+        rule for rule in rules if rule.source_op is index.index_constant
+    ]
+    assert [rule.descriptor.key for rule in address_constant_rules] == [
+        "amd.xdna.aie2p.constant.i32.short",
+        "amd.xdna.aie2p.constant.i32.short",
+        "amd.xdna.aie2p.constant.i32",
+        "amd.xdna.aie2p.constant.i32",
+    ]
+
+    vector_memory_rules = [
+        rule
+        for rule in rules
+        if rule.source_op in (vector.vector_load, vector.vector_store)
+    ]
+    assert [rule.descriptor.key for rule in vector_memory_rules] == [
+        "amd.xdna.aie2p.load.a.i8x64.indexed.immediate",
+        "amd.xdna.aie2p.store.i8x64.indexed.immediate",
+        "amd.xdna.aie2p.load.a.i8x64.indexed.immediate",
+        "amd.xdna.aie2p.store.i8x64.indexed.immediate",
+        "amd.xdna.aie2p.load.a.i8x64.indexed.immediate",
+        "amd.xdna.aie2p.store.i8x64.indexed.immediate",
+    ]
+    for rule, element_byte_count, vector_lane_count, operation in zip(
+        vector_memory_rules,
+        (1, 1, 2, 2, 4, 4),
+        (64, 64, 32, 32, 16, 16),
+        (
+            SourceMemoryOperation.LOAD,
+            SourceMemoryOperation.STORE,
+            SourceMemoryOperation.LOAD,
+            SourceMemoryOperation.STORE,
+            SourceMemoryOperation.LOAD,
+            SourceMemoryOperation.STORE,
+        ),
+        strict=True,
+    ):
+        emit = rule.emit[0]
+        constraint = emit.source_memory
+        assert constraint is not None
+        assert constraint.operation is operation
+        assert constraint.root_kind is SourceMemoryRootKind.BLOCK_ARGUMENT
+        assert constraint.address_layout is SourceMemoryAddressLayout.COMPACT_ROW_MAJOR
+        assert constraint.memory_spaces == ("unknown", "generic", "workgroup")
+        assert constraint.element_byte_count == element_byte_count
+        assert constraint.vector_lane_count == vector_lane_count
+        assert constraint.vector_lane_byte_stride == element_byte_count
+        assert constraint.static_byte_offset_minimum == -512
+        assert constraint.static_byte_offset_maximum == 448
+        assert constraint.minimum_alignment == 64
+        assert constraint.dynamic_term_count == 0
+        immediate = emit.immediates["imm"]
+        assert isinstance(immediate, SourceMemoryProject)
+        assert immediate.kind is SourceMemoryProjectKind.STATIC_BYTE_OFFSET
 
     constant_rules = [
         rule for rule in rules if rule.source_op is scalar_conversion.scalar_constant
@@ -368,6 +434,11 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
         for case in AIE2P_CORE_CONTRACT_FRAGMENT.cases
         if isinstance(case, ValueAliasRule)
     ]
+    buffer_view_rules = [
+        rule for rule in alias_rules if rule.source_op is buffer.buffer_view
+    ]
+    assert len(buffer_view_rules) == 1
+    assert buffer_view_rules[0].guards == ()
     assert (
         len([rule for rule in alias_rules if rule.source_op is vector.vector_bitcast])
         == 9

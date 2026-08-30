@@ -83,7 +83,9 @@ typedef struct loom_aie2p_bundle_plan_t {
 // bundle formats because AIE2P's format domain is not downward closed.
 // Allocation-planned structural moves split a logical schedule cycle into
 // ordered physical bundles; later logical cycles retain or increase every
-// scheduled separation. Empty issue cycles are materialized as NOP bundles.
+// scheduled separation. Prebound live-ins and resource imports anchor physical
+// assignments without occupying an instruction slot. Empty issue cycles are
+// materialized as NOP bundles.
 // The returned plan borrows |frame| and owns its tables in |arena|.
 iree_status_t loom_aie2p_bundle_plan_build(
     const loom_low_emission_frame_t* frame, iree_arena_allocator_t* arena,

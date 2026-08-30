@@ -22,9 +22,12 @@ loom_target_contract_table_cc_libraries(
     generator = "//loom/py/loom/gen/target/contracts:aie2p_contract_table_family",
     lower_rule_deps = [
         "//loom/src/loom/codegen/low/lower",
+        "//loom/src/loom/ops/buffer",
+        "//loom/src/loom/ops/index",
         "//loom/src/loom/ops/scalar",
         "//loom/src/loom/ops/scf",
         "//loom/src/loom/ops/vector",
+        "//loom/src/loom/ops/view",
     ],
     visibility = ["//loom/src/loom/target/arch/amd/xdna/aie2p:__pkg__"],
 )

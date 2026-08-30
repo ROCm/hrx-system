@@ -20,9 +20,12 @@ loom_target_contract_table_cc_libraries(
     loom::target::contract
   LOWER_RULE_DEPS
     loom::codegen::low::lower
+    loom::ops::buffer
+    loom::ops::index
     loom::ops::scalar
     loom::ops::scf
     loom::ops::vector
+    loom::ops::view
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

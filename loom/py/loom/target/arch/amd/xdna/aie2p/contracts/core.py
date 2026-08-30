@@ -10,6 +10,10 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 
+from loom.dialect.buffer import ALL_BUFFER_OPS
+from loom.dialect.buffer import defs as buffer
+from loom.dialect.index import ALL_INDEX_OPS
+from loom.dialect.index import defs as index
 from loom.dialect.scalar import ALL_SCALAR_OPS
 from loom.dialect.scalar import arithmetic as scalar_arithmetic
 from loom.dialect.scalar import bitwise as scalar_bitwise
@@ -34,6 +38,11 @@ from loom.target.contracts import (
     Guard,
     ResultTypeBinding,
     Scalar,
+    SourceMemoryAddressLayout,
+    SourceMemoryConstraint,
+    SourceMemoryOperation,
+    SourceMemoryProject,
+    SourceMemoryRootKind,
     TypePattern,
     ValueAliasRule,
     ValueProject,
@@ -48,9 +57,13 @@ _I8 = Scalar("i8")
 _I16 = Scalar("i16")
 _I32 = Scalar("i32")
 _INDEX = Scalar("index")
+_OFFSET = Scalar("offset")
 _I8_VECTOR = Vector("i8", minimum_lanes=1, maximum_lanes=64)
 _I16_VECTOR = Vector("i16", minimum_lanes=1, maximum_lanes=32)
 _I32_VECTOR = Vector("i32", minimum_lanes=1, maximum_lanes=16)
+_I8X64 = Vector("i8", lanes=64)
+_I16X32 = Vector("i16", lanes=32)
+_I32X16 = Vector("i32", lanes=16)
 _I1_VECTOR = Vector("i1", minimum_lanes=1, maximum_lanes=64)
 _INTEGER_VECTOR_TYPES = (_I8_VECTOR, _I16_VECTOR, _I32_VECTOR)
 
@@ -189,6 +202,32 @@ def _logical_constant_rule() -> DescriptorRule:
     )
 
 
+def _address_constant_rule(
+    result_type: TypePattern,
+    descriptor_key: str,
+    minimum: int,
+    maximum: int,
+) -> DescriptorRule:
+    descriptor = _descriptor(descriptor_key)
+    return DescriptorRule(
+        source_op=index.index_constant,
+        descriptor=descriptor,
+        guards=(
+            Guard.attr_kind("value", "i64"),
+            Guard.value_type("result", result_type),
+            Guard.i64_range("value", minimum, maximum),
+        ),
+        emit=(
+            EmitDescriptorOp(
+                descriptor=descriptor,
+                results={"dst": ValueRef.result("result")},
+                immediates={"i": AttrProject.direct("value")},
+                form=DescriptorEmitForm.CONST,
+            ),
+        ),
+    )
+
+
 def _binary_rule(
     source_op: Op,
     type_pattern: TypePattern,
@@ -207,6 +246,91 @@ def _binary_rule(
                     "s1": ValueRef.operand("rhs"),
                 },
                 results={"d0": ValueRef.result("result")},
+            ),
+        ),
+    )
+
+
+def _full_vector_memory_constraint(
+    operation: SourceMemoryOperation,
+    *,
+    element_byte_count: int,
+    vector_lane_count: int,
+) -> SourceMemoryConstraint:
+    return SourceMemoryConstraint(
+        operation=operation,
+        root_kind=SourceMemoryRootKind.BLOCK_ARGUMENT,
+        address_layout=SourceMemoryAddressLayout.COMPACT_ROW_MAJOR,
+        memory_spaces=("unknown", "generic", "workgroup"),
+        element_byte_count=element_byte_count,
+        vector_lane_count=vector_lane_count,
+        vector_lane_byte_stride=element_byte_count,
+        static_byte_offset_minimum=-512,
+        static_byte_offset_maximum=448,
+        minimum_alignment=64,
+        dynamic_term_count=0,
+    )
+
+
+def _full_vector_load_rule(
+    result_type: TypePattern,
+    *,
+    element_byte_count: int,
+    vector_lane_count: int,
+) -> DescriptorRule:
+    descriptor = _descriptor("amd.xdna.aie2p.load.a.i8x64.indexed.immediate")
+    return DescriptorRule(
+        source_op=vector.vector_load,
+        descriptor=descriptor,
+        guards=(
+            Guard.operand_segment_count("indices", 0),
+            Guard.value_type("result", result_type),
+        ),
+        emit=(
+            EmitDescriptorOp(
+                descriptor=descriptor,
+                operands={"ptr": ValueRef.operand("view")},
+                results={"dst": ValueRef.result("result")},
+                immediates={"imm": SourceMemoryProject.static_byte_offset()},
+                source_memory=_full_vector_memory_constraint(
+                    SourceMemoryOperation.LOAD,
+                    element_byte_count=element_byte_count,
+                    vector_lane_count=vector_lane_count,
+                ),
+                form=DescriptorEmitForm.OP,
+            ),
+        ),
+    )
+
+
+def _full_vector_store_rule(
+    value_type: TypePattern,
+    *,
+    element_byte_count: int,
+    vector_lane_count: int,
+) -> DescriptorRule:
+    descriptor = _descriptor("amd.xdna.aie2p.store.i8x64.indexed.immediate")
+    return DescriptorRule(
+        source_op=vector.vector_store,
+        descriptor=descriptor,
+        guards=(
+            Guard.operand_segment_count("indices", 0),
+            Guard.value_type("value", value_type),
+        ),
+        emit=(
+            EmitDescriptorOp(
+                descriptor=descriptor,
+                operands={
+                    "src": ValueRef.operand("value"),
+                    "ptr": ValueRef.operand("view"),
+                },
+                immediates={"imm": SourceMemoryProject.static_byte_offset()},
+                source_memory=_full_vector_memory_constraint(
+                    SourceMemoryOperation.STORE,
+                    element_byte_count=element_byte_count,
+                    vector_lane_count=vector_lane_count,
+                ),
+                form=DescriptorEmitForm.OP,
             ),
         ),
     )
@@ -1190,6 +1314,56 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
     # Specialized cases precede general cases because the compact runtime table
     # is queried in authored order.
     return (
+        ValueAliasRule(
+            source_op=buffer.buffer_view,
+            source=ValueRef.operand("buffer"),
+            result=ValueRef.result("result"),
+        ),
+        *(
+            rule
+            for element_byte_count, vector_lane_count, vector_type in (
+                (1, 64, _I8X64),
+                (2, 32, _I16X32),
+                (4, 16, _I32X16),
+            )
+            for rule in (
+                _full_vector_load_rule(
+                    vector_type,
+                    element_byte_count=element_byte_count,
+                    vector_lane_count=vector_lane_count,
+                ),
+                _full_vector_store_rule(
+                    vector_type,
+                    element_byte_count=element_byte_count,
+                    vector_lane_count=vector_lane_count,
+                ),
+            )
+        ),
+        *(
+            _address_constant_rule(
+                result_type,
+                descriptor_key,
+                minimum,
+                maximum,
+            )
+            for result_type, minimum, maximum in (
+                (_INDEX, _SHORT_MIN, _SHORT_MAX),
+                (_OFFSET, 0, _SHORT_MAX),
+            )
+            for descriptor_key in ("amd.xdna.aie2p.constant.i32.short",)
+        ),
+        *(
+            _address_constant_rule(
+                result_type,
+                "amd.xdna.aie2p.constant.i32",
+                minimum,
+                maximum,
+            )
+            for result_type, minimum, maximum in (
+                (_INDEX, _I32_MIN, _I32_MAX),
+                (_OFFSET, 0, _I32_MAX),
+            )
+        ),
         _logical_constant_rule(),
         _constant_rule(
             _I8,
@@ -1707,6 +1881,8 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
 
 
 AIE2P_CORE_CONTRACT_DIALECT_OPS = {
+    "buffer": ALL_BUFFER_OPS,
+    "index": ALL_INDEX_OPS,
     "scalar": ALL_SCALAR_OPS,
     "scf": ALL_SCF_OPS,
     "vector": ALL_VECTOR_OPS,
