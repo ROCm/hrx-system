@@ -192,16 +192,19 @@ loomc_status_t loomc_source_create(const loomc_source_options_t* options,
   loomc_status_t status = loomc_string_view_clone(
       options->identifier, allocator, &source->identifier);
   if (loomc_status_is_ok(status)) {
-    if (options->storage == LOOMC_SOURCE_STORAGE_COPY &&
-        options->contents.data_length != 0) {
-      uint8_t* contents = NULL;
-      status = loomc_allocator_malloc_uninitialized(
-          allocator, options->contents.data_length, (void**)&contents);
-      if (loomc_status_is_ok(status)) {
-        memcpy(contents, options->contents.data, options->contents.data_length);
-        source->contents =
-            loomc_make_byte_span(contents, options->contents.data_length);
-        source->storage = LOOMC_SOURCE_STORAGE_COPY;
+    if (options->storage == LOOMC_SOURCE_STORAGE_COPY) {
+      source->contents = loomc_byte_span_empty();
+      source->storage = LOOMC_SOURCE_STORAGE_COPY;
+      if (options->contents.data_length != 0) {
+        uint8_t* contents = NULL;
+        status = loomc_allocator_malloc_uninitialized(
+            allocator, options->contents.data_length, (void**)&contents);
+        if (loomc_status_is_ok(status)) {
+          memcpy(contents, options->contents.data,
+                 options->contents.data_length);
+          source->contents =
+              loomc_make_byte_span(contents, options->contents.data_length);
+        }
       }
     } else {
       source->contents = options->contents;
