@@ -25,6 +25,7 @@ def _ensure_runtime_py_on_path() -> None:
 
 _ensure_runtime_py_on_path()
 
+from loom.gen.support import c_arrays  # noqa: E402
 from loom.gen.support.files import write_text_file  # noqa: E402
 from loom.gen.support.generated_file import line_comment_header  # noqa: E402
 from loom.target.arch.amdgpu.descriptors import (  # noqa: E402
@@ -218,6 +219,16 @@ class _DescriptorSetRefTable:
     literal_immediate_slots: list[int | None]
     address_offset_immediate_slots: list[int | None]
     reg_class_traits: list[tuple[str, ...]]
+
+
+@dataclass(frozen=True, slots=True)
+class _DescriptorSetRefTableSymbols:
+    descriptor_ordinals: str
+    descriptor_refs: str
+    descriptor_traits: str
+    vmem_result_order_classes: str
+    immediate_slots: str
+    reg_class_traits: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -732,102 +743,110 @@ def _emit_source(
         f'#include "{public_header}"',
         "",
     ]
+    array_emitter = c_arrays.StaticArrayEmitter(lines)
+    symbols_by_descriptor_set_key: dict[str, _DescriptorSetRefTableSymbols] = {}
     for descriptor_set_table in descriptor_set_tables:
         table_name = _descriptor_set_table_name(descriptor_set_table.descriptor_set_key)
-        lines.append(f"static const uint32_t {table_name}[] = {{")
-        for descriptor_ordinal in descriptor_set_table.descriptor_ordinals:
-            if descriptor_ordinal is None:
-                lines.append("    LOOM_LOW_DESCRIPTOR_ORDINAL_NONE,")
-            else:
-                lines.append(f"    {descriptor_ordinal}u,")
-        lines.append("};")
-        lines.append("")
+        descriptor_ordinal_table_symbol = array_emitter.append_value_array(
+            "uint32_t",
+            table_name,
+            ["LOOM_LOW_DESCRIPTOR_ORDINAL_NONE" if descriptor_ordinal is None else f"{descriptor_ordinal}u" for descriptor_ordinal in descriptor_set_table.descriptor_ordinals],
+            emit_empty=True,
+        )
         descriptor_ref_table_name = _descriptor_ref_table_name(descriptor_set_table.descriptor_set_key)
-        lines.append(f"static const uint16_t {descriptor_ref_table_name}[] = {{")
-        for descriptor_ref in descriptor_set_table.descriptor_refs:
-            if descriptor_ref is None:
-                lines.append("    LOOM_AMDGPU_DESCRIPTOR_REF_NONE,")
-            else:
-                lines.append(f"    {descriptor_ref},")
-        lines.append("};")
-        lines.append("")
+        descriptor_ref_table_symbol = array_emitter.append_value_array(
+            "uint16_t",
+            descriptor_ref_table_name,
+            ["LOOM_AMDGPU_DESCRIPTOR_REF_NONE" if descriptor_ref is None else descriptor_ref for descriptor_ref in descriptor_set_table.descriptor_refs],
+            emit_empty=True,
+        )
         trait_table_name = _descriptor_set_trait_table_name(descriptor_set_table.descriptor_set_key)
-        lines.append(f"static const loom_amdgpu_descriptor_traits_t {trait_table_name}[] = {{")
-        for trait_names in descriptor_set_table.descriptor_traits:
-            if trait_names:
-                lines.append(f"    {' | '.join(trait_names)},")
-            else:
-                lines.append("    0,")
-        lines.append("};")
-        lines.append("")
+        descriptor_trait_table_symbol = array_emitter.append_value_array(
+            "loom_amdgpu_descriptor_traits_t",
+            trait_table_name,
+            [" | ".join(trait_names) if trait_names else "0" for trait_names in descriptor_set_table.descriptor_traits],
+            emit_empty=True,
+        )
         vmem_result_order_class_table_name = _descriptor_set_vmem_result_order_class_table_name(descriptor_set_table.descriptor_set_key)
-        lines.append(f"static const uint8_t {vmem_result_order_class_table_name}[] = {{")
-        lines.extend(f"    {order_class}," for order_class in descriptor_set_table.vmem_result_order_classes)
-        lines.append("};")
-        lines.append("")
+        vmem_result_order_class_table_symbol = array_emitter.append_value_array(
+            "uint8_t",
+            vmem_result_order_class_table_name,
+            descriptor_set_table.vmem_result_order_classes,
+            emit_empty=True,
+        )
         immediate_slot_table_name = _descriptor_set_immediate_slot_table_name(descriptor_set_table.descriptor_set_key)
-        lines.append(f"static const loom_amdgpu_descriptor_immediate_slots_t {immediate_slot_table_name}[] = {{")
-        for (
-            sdwa_dst_sel_slot,
-            literal_slot,
-            address_offset_slot,
-        ) in zip(
-            descriptor_set_table.sdwa_dst_sel_immediate_slots,
-            descriptor_set_table.literal_immediate_slots,
-            descriptor_set_table.address_offset_immediate_slots,
-            strict=True,
-        ):
-            sdwa_dst_sel_expr = "LOOM_LOW_ID_NONE" if sdwa_dst_sel_slot is None else f"UINT16_C({sdwa_dst_sel_slot})"
-            literal_expr = "LOOM_LOW_ID_NONE" if literal_slot is None else f"UINT16_C({literal_slot})"
-            address_offset_expr = "LOOM_LOW_ID_NONE" if address_offset_slot is None else f"UINT16_C({address_offset_slot})"
-            lines.append(f"    {{.sdwa_dst_sel = {sdwa_dst_sel_expr}, .literal = {literal_expr}, .address_offset = {address_offset_expr}}},")
-        lines.append("};")
-        lines.append("")
+        immediate_slot_table_symbol = array_emitter.append_struct_array(
+            "loom_amdgpu_descriptor_immediate_slots_t",
+            immediate_slot_table_name,
+            [
+                [
+                    f".sdwa_dst_sel = {'LOOM_LOW_ID_NONE' if sdwa_dst_sel_slot is None else f'UINT16_C({sdwa_dst_sel_slot})'},",
+                    f".literal = {'LOOM_LOW_ID_NONE' if literal_slot is None else f'UINT16_C({literal_slot})'},",
+                    f".address_offset = {'LOOM_LOW_ID_NONE' if address_offset_slot is None else f'UINT16_C({address_offset_slot})'},",
+                ]
+                for (
+                    sdwa_dst_sel_slot,
+                    literal_slot,
+                    address_offset_slot,
+                ) in zip(
+                    descriptor_set_table.sdwa_dst_sel_immediate_slots,
+                    descriptor_set_table.literal_immediate_slots,
+                    descriptor_set_table.address_offset_immediate_slots,
+                    strict=True,
+                )
+            ],
+            emit_empty=True,
+        )
         reg_class_trait_table_name = _reg_class_trait_table_name(descriptor_set_table.descriptor_set_key)
-        lines.append(f"static const loom_amdgpu_reg_class_traits_t {reg_class_trait_table_name}[] = {{")
-        for trait_names in descriptor_set_table.reg_class_traits:
-            if trait_names:
-                lines.append(f"    {' | '.join(trait_names)},")
-            else:
-                lines.append("    0,")
-        lines.append("};")
-        lines.append("")
+        reg_class_trait_table_symbol = array_emitter.append_value_array(
+            "loom_amdgpu_reg_class_traits_t",
+            reg_class_trait_table_name,
+            [" | ".join(trait_names) if trait_names else "0" for trait_names in descriptor_set_table.reg_class_traits],
+            emit_empty=True,
+        )
+        symbols_by_descriptor_set_key[descriptor_set_table.descriptor_set_key] = _DescriptorSetRefTableSymbols(
+            descriptor_ordinals=descriptor_ordinal_table_symbol,
+            descriptor_refs=descriptor_ref_table_symbol,
+            descriptor_traits=descriptor_trait_table_symbol,
+            vmem_result_order_classes=vmem_result_order_class_table_symbol,
+            immediate_slots=immediate_slot_table_symbol,
+            reg_class_traits=reg_class_trait_table_symbol,
+        )
 
-    tables_by_ordinal = {table.descriptor_set_ordinal: table.descriptor_set_key for table in descriptor_set_tables}
     lines.append("const uint32_t* const kLoomAmdgpuDescriptorRefOrdinalTables[LOOM_AMDGPU_TARGET_REF_DESCRIPTOR_SET_ORDINAL_COUNT] = {")
-    for descriptor_set_ordinal, descriptor_set_key in tables_by_ordinal.items():
-        table_expr = _descriptor_set_table_name(descriptor_set_key)
-        lines.append(f"    [{_u16_literal(descriptor_set_ordinal)}] = {table_expr},")
+    for descriptor_set_table in descriptor_set_tables:
+        symbols = symbols_by_descriptor_set_key[descriptor_set_table.descriptor_set_key]
+        lines.append(f"    [{_u16_literal(descriptor_set_table.descriptor_set_ordinal)}] = {symbols.descriptor_ordinals},")
     lines.append("};")
     lines.append("")
     lines.append("const uint16_t* const kLoomAmdgpuDescriptorRefByOrdinalTables[LOOM_AMDGPU_TARGET_REF_DESCRIPTOR_SET_ORDINAL_COUNT] = {")
-    for descriptor_set_ordinal, descriptor_set_key in tables_by_ordinal.items():
-        table_expr = _descriptor_ref_table_name(descriptor_set_key)
-        lines.append(f"    [{_u16_literal(descriptor_set_ordinal)}] = {table_expr},")
+    for descriptor_set_table in descriptor_set_tables:
+        symbols = symbols_by_descriptor_set_key[descriptor_set_table.descriptor_set_key]
+        lines.append(f"    [{_u16_literal(descriptor_set_table.descriptor_set_ordinal)}] = {symbols.descriptor_refs},")
     lines.append("};")
     lines.append("")
     lines.append("const loom_amdgpu_descriptor_traits_t* const kLoomAmdgpuDescriptorTraitTables[LOOM_AMDGPU_TARGET_REF_DESCRIPTOR_SET_ORDINAL_COUNT] = {")
-    for descriptor_set_ordinal, descriptor_set_key in tables_by_ordinal.items():
-        table_expr = _descriptor_set_trait_table_name(descriptor_set_key)
-        lines.append(f"    [{_u16_literal(descriptor_set_ordinal)}] = {table_expr},")
+    for descriptor_set_table in descriptor_set_tables:
+        symbols = symbols_by_descriptor_set_key[descriptor_set_table.descriptor_set_key]
+        lines.append(f"    [{_u16_literal(descriptor_set_table.descriptor_set_ordinal)}] = {symbols.descriptor_traits},")
     lines.append("};")
     lines.append("")
     lines.append("const uint8_t* const kLoomAmdgpuDescriptorVmemResultOrderClassTables[LOOM_AMDGPU_TARGET_REF_DESCRIPTOR_SET_ORDINAL_COUNT] = {")
-    for descriptor_set_ordinal, descriptor_set_key in tables_by_ordinal.items():
-        table_expr = _descriptor_set_vmem_result_order_class_table_name(descriptor_set_key)
-        lines.append(f"    [{_u16_literal(descriptor_set_ordinal)}] = {table_expr},")
+    for descriptor_set_table in descriptor_set_tables:
+        symbols = symbols_by_descriptor_set_key[descriptor_set_table.descriptor_set_key]
+        lines.append(f"    [{_u16_literal(descriptor_set_table.descriptor_set_ordinal)}] = {symbols.vmem_result_order_classes},")
     lines.append("};")
     lines.append("")
     lines.append("const loom_amdgpu_descriptor_immediate_slots_t* const kLoomAmdgpuDescriptorImmediateSlotTables[LOOM_AMDGPU_TARGET_REF_DESCRIPTOR_SET_ORDINAL_COUNT] = {")
-    for descriptor_set_ordinal, descriptor_set_key in tables_by_ordinal.items():
-        table_expr = _descriptor_set_immediate_slot_table_name(descriptor_set_key)
-        lines.append(f"    [{_u16_literal(descriptor_set_ordinal)}] = {table_expr},")
+    for descriptor_set_table in descriptor_set_tables:
+        symbols = symbols_by_descriptor_set_key[descriptor_set_table.descriptor_set_key]
+        lines.append(f"    [{_u16_literal(descriptor_set_table.descriptor_set_ordinal)}] = {symbols.immediate_slots},")
     lines.append("};")
     lines.append("")
     lines.append("const loom_amdgpu_reg_class_traits_t* const kLoomAmdgpuRegClassTraitTables[LOOM_AMDGPU_TARGET_REF_DESCRIPTOR_SET_ORDINAL_COUNT] = {")
-    for descriptor_set_ordinal, descriptor_set_key in tables_by_ordinal.items():
-        table_expr = _reg_class_trait_table_name(descriptor_set_key)
-        lines.append(f"    [{_u16_literal(descriptor_set_ordinal)}] = {table_expr},")
+    for descriptor_set_table in descriptor_set_tables:
+        symbols = symbols_by_descriptor_set_key[descriptor_set_table.descriptor_set_key]
+        lines.append(f"    [{_u16_literal(descriptor_set_table.descriptor_set_ordinal)}] = {symbols.reg_class_traits},")
     lines.append("};")
     return "\n".join(lines) + "\n"
 

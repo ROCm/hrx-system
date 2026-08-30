@@ -283,6 +283,47 @@ def test_target_ref_tables_use_prebuilt_descriptor_sets() -> None:
     assert tables[0].descriptor_set_ordinal == amdgpu_descriptor_set_ordinal(descriptor_set_info.key)
 
 
+def test_target_ref_source_shares_exact_tables() -> None:
+    descriptor_set_infos = sorted_descriptor_set_infos()[:2]
+    descriptor_set = _descriptor_set(*_valid_contract_descriptors())
+    descriptor_sets_by_key = {
+        descriptor_set_info.key: replace(
+            descriptor_set,
+            key=descriptor_set_info.key,
+        )
+        for descriptor_set_info in descriptor_set_infos
+    }
+
+    source = amdgpu_target_refs._emit_source(
+        public_header="target_refs.h",
+        descriptor_set_infos=descriptor_set_infos,
+        descriptor_sets_by_key=descriptor_sets_by_key,
+    )
+
+    first_info, second_info = sorted(
+        descriptor_set_infos,
+        key=lambda info: amdgpu_descriptor_set_ordinal(info.key),
+    )
+    table_name_functions = (
+        amdgpu_target_refs._descriptor_set_table_name,
+        amdgpu_target_refs._descriptor_ref_table_name,
+        amdgpu_target_refs._descriptor_set_trait_table_name,
+        amdgpu_target_refs._descriptor_set_vmem_result_order_class_table_name,
+        amdgpu_target_refs._descriptor_set_immediate_slot_table_name,
+        amdgpu_target_refs._reg_class_trait_table_name,
+    )
+    for table_name_function in table_name_functions:
+        first_table_name = table_name_function(first_info.key)
+        second_table_name = table_name_function(second_info.key)
+        assert source.count(f" {first_table_name}[] = {{") == 1, (
+            table_name_function.__name__,
+            first_table_name,
+            second_table_name,
+        )
+        assert f" {second_table_name}[] = {{" not in source
+        assert (f"[{amdgpu_target_refs._u16_literal(amdgpu_descriptor_set_ordinal(second_info.key))}] = {first_table_name},") in source
+
+
 def test_descriptor_trait_names_include_resource_and_encoding_facts() -> None:
     descriptor_set = _descriptor_set(
         _descriptor(
