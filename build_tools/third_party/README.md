@@ -196,7 +196,7 @@ dependency. The top-level project configuration owns enablement policy:
 if(IREE_BUILD_TESTS)
   iree_configure_googletest()
 endif()
-if(IREE_ENABLE_THREADING AND IREE_BUILD_BENCHMARKS)
+if(IREE_TARGET_HAS_THREADS AND IREE_BUILD_BENCHMARKS)
   iree_configure_google_benchmark()
 endif()
 if(IREE_HAL_DRIVER_AMDGPU)

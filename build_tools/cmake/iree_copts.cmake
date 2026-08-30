@@ -357,13 +357,6 @@ if(CMAKE_CXX_FLAGS AND "${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
   string(REPLACE "/GR" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
 endif()
 
-if(IREE_ENABLE_THREADING)
-  iree_select_compiler_opts(IREE_DEFAULT_COPTS
-    ALL
-      "-DIREE_THREADING_ENABLE=1"
-  )
-endif()
-
 if(IREE_SYNCHRONIZATION_DISABLE_UNSAFE)
   iree_select_compiler_opts(IREE_DEFAULT_COPTS
     ALL
@@ -372,28 +365,14 @@ if(IREE_SYNCHRONIZATION_DISABLE_UNSAFE)
 endif()
 
 # Find and add threads as dependency.
-if(NOT ANDROID AND IREE_ENABLE_THREADING)
+if(IREE_TARGET_HAS_THREADS AND NOT ANDROID)
   set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
   set(THREADS_PREFER_PTHREAD_FLAG TRUE)
-  find_package(Threads)
+  find_package(Threads REQUIRED)
   set(IREE_THREADS_DEPS Threads::Threads)
 else()
-  # Android provides its own pthreads support with no linking required.
-endif()
-
-# Emscripten needs -pthread specified in link _and_ compile options when using
-# atomics, shared memory, or pthreads. If we bring our own threading impl and
-# try to omit this, we get this error:
-#   `--shared-memory is disallowed because it was not compiled with 'atomics'
-#    or 'bulk-memory' features`
-# TODO(scotttodd): Figure out how to use atomics and/or shared memory without
-#                  Specifying this flag
-# https://emscripten.org/docs/porting/pthreads.html#compiling-with-pthreads-enabled
-if(EMSCRIPTEN AND IREE_ENABLE_THREADING)
-  iree_select_compiler_opts(IREE_DEFAULT_COPTS
-    ALL
-      "-pthread"
-  )
+  # Android provides pthreads through its platform libc. WebAssembly targets
+  # have no native thread services and must not link pthread support.
 endif()
 
 if(ANDROID)
