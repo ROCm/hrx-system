@@ -15,7 +15,9 @@ load(
 )
 
 package(
-    default_visibility = ["//visibility:public"],
+    default_visibility = [
+        "//runtime/src/iree/hal/local:implementation_consumers",
+    ],
     features = ["layering_check"],
     licenses = ["notice"],  # Apache 2.0
 )

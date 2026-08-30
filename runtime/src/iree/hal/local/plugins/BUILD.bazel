@@ -8,7 +8,9 @@ load("//build_tools/bazel:cmake.bzl", "iree_cmake_extra_content")
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
 
 package(
-    default_visibility = ["//visibility:public"],
+    default_visibility = [
+        "//runtime/src/iree/hal/local:implementation_consumers",
+    ],
     features = ["layering_check"],
     licenses = ["notice"],  # Apache 2.0
 )
