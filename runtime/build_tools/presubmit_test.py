@@ -37,7 +37,10 @@ class RuntimePresubmitTest(unittest.TestCase):
             arg for arg in command if arg.startswith("--test_tag_filters=")
         )
         self.assertIn("-iree-run-requirement=runtime.resource.amd_gpu", tag_filter)
-        self.assertIn("-//runtime/src/iree/hal/local/elf:elf_module_test", command)
+        self.assertIn(
+            "-//runtime/src/iree/hal/drivers/task/executable/elf:elf_module_test",
+            command,
+        )
 
 
 if __name__ == "__main__":

@@ -1,0 +1,182 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
+load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+iree_runtime_cc_library(
+    name = "atomic",
+    srcs = ["atomic.c"],
+    hdrs = ["atomic.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "atomic_test",
+    srcs = ["atomic_test.cc"],
+    deps = [
+        ":atomic",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "device_spec",
+    srcs = ["device_spec.c"],
+    hdrs = ["device_spec.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/base:cpu_data",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "device_spec_test",
+    srcs = ["device_spec_test.cc"],
+    deps = [
+        ":device_spec",
+        "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "device_spec_builder",
+    srcs = ["device_spec_builder.c"],
+    hdrs = ["device_spec_builder.h"],
+    deps = [
+        ":atomic",
+        ":device_spec",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:cpu",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/task/executable:loader",
+        "//runtime/src/iree/hal/memory:cpu_slab_provider",
+        "//runtime/src/iree/hal/utils:device_spec_builder",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "device_spec_builder_test",
+    srcs = ["device_spec_builder_test.cc"],
+    deps = [
+        ":atomic",
+        ":device_spec",
+        ":device_spec_builder",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/memory:cpu_slab_provider",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "transient_buffer",
+    srcs = ["transient_buffer.c"],
+    hdrs = ["transient_buffer.h"],
+    deps = [
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "semaphore",
+    srcs = ["semaphore.c"],
+    hdrs = ["semaphore.h"],
+    deps = [
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "profile",
+    srcs = ["profile.c"],
+    hdrs = ["profile.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/task/executable",
+        "//runtime/src/iree/hal/utils:profile_event_ring",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "profile_test",
+    srcs = ["profile_test.cc"],
+    deps = [
+        ":profile",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/task/executable",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "device",
+    srcs = ["device.c"],
+    hdrs = ["device.h"],
+    deps = [
+        ":atomic",
+        ":device_spec_builder",
+        ":profile",
+        ":semaphore",
+        ":transient_buffer",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/base/internal:cpu",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/task/command:block_command_buffer",
+        "//runtime/src/iree/hal/drivers/task/executable:environment",
+        "//runtime/src/iree/hal/drivers/task/executable:loader",
+        "//runtime/src/iree/hal/drivers/task/queue",
+        "//runtime/src/iree/hal/memory:cpu_slab_provider",
+        "//runtime/src/iree/hal/memory:passthrough_pool",
+        "//runtime/src/iree/hal/memory:tlsf_pool",
+        "//runtime/src/iree/hal/utils:files",
+        "//runtime/src/iree/task",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "driver",
+    srcs = ["driver.c"],
+    hdrs = ["driver.h"],
+    deps = [
+        ":device",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/task/executable:loader",
+        "//runtime/src/iree/task",
+    ],
+)

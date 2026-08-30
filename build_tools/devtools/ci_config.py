@@ -120,11 +120,13 @@ def ctest_exclude_regex(xfails: tuple[TestXfail, ...]) -> str:
     )
 
 
-CPU_XFAILS = (bazel_xfail("//runtime/src/iree/hal/local/elf:elf_module_test"),)
+CPU_XFAILS = (
+    bazel_xfail("//runtime/src/iree/hal/drivers/task/executable/elf:elf_module_test"),
+)
 CPU_SANITIZERS_XFAILS = (
     bazel_xfail("//runtime/src/iree/async/platform/io_uring/cts/..."),
     bazel_xfail("//runtime/src/iree/hal:string_util_test"),
-    bazel_xfail("//runtime/src/iree/hal/local/elf/..."),
+    bazel_xfail("//runtime/src/iree/hal/drivers/task/executable/elf/..."),
     bazel_xfail("//runtime/src/iree/hal/replay:execute_test"),
     bazel_xfail("//runtime/src/iree/tokenizer/..."),
     bazel_xfail("//runtime/src/iree/tooling/profile:cli_test"),

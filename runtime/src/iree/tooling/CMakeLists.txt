@@ -90,7 +90,7 @@ iree_cc_library(
     iree::base::threading
     iree::base::tooling::flags
     iree::hal
-    iree::hal::local::loaders::registration
+    iree::hal::drivers::task::executable::loaders::registration
     iree::hal::replay::recorder
     iree::io::file_handle
     iree::modules::hal

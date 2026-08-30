@@ -8,7 +8,7 @@
 
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
-#include "iree/hal/local/local_executable.h"
+#include "iree/hal/drivers/task/executable/executable.h"
 #include "iree/vm/api.h"
 
 #define IREE_HAL_LOADER_MODULE_VERSION_0_0 0x00000000u
@@ -182,16 +182,16 @@ static iree_status_t iree_hal_loader_module_executable_dispatch(
   iree_hal_executable_t* executable = NULL;
   IREE_RETURN_IF_ERROR(
       iree_hal_executable_check_deref(args->executable, &executable));
-  iree_hal_local_executable_t* local_executable =
-      iree_hal_local_executable_cast(executable);
+  iree_hal_task_executable_t* task_executable =
+      iree_hal_task_executable_cast(executable);
   const iree_hal_executable_function_t function =
       iree_hal_executable_function_from_value((uint64_t)args->function_id);
   if (IREE_UNLIKELY(!iree_hal_executable_function_is_index_in_range(
-          function, local_executable->export_count))) {
+          function, task_executable->export_count))) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "function id %" PRIu64
                             " out of range (count: %" PRIhsz ")",
-                            function.value, local_executable->export_count);
+                            function.value, task_executable->export_count);
   }
   const uint32_t function_index = iree_hal_executable_function_index(function);
 
@@ -238,8 +238,8 @@ static iree_status_t iree_hal_loader_module_executable_dispatch(
   uint32_t processor_id = 0;
   iree_byte_span_t local_memory = iree_byte_span_empty();
 
-  return iree_hal_local_executable_issue_dispatch_inline(
-      local_executable, function_index, &dispatch_state, processor_id,
+  return iree_hal_task_executable_issue_dispatch_inline(
+      task_executable, function_index, &dispatch_state, processor_id,
       local_memory);
 }
 

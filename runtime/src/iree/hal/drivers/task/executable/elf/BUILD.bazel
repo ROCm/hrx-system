@@ -1,0 +1,148 @@
+# Copyright 2021 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:cmake.bzl", "iree_cmake_extra_content")
+load("//build_tools/bazel:executable.bzl", "iree_executable_test")
+load("//build_tools/bazel:msvc.bzl", "iree_msvc_masm_library")
+load("//build_tools/bazel:select.bzl", "defaulting_select")
+load(
+    "//runtime/build_tools/bazel:cc.bzl",
+    "iree_runtime_cc_binary",
+    "iree_runtime_cc_library",
+)
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+config_setting(
+    name = "windows_x86_64",
+    constraint_values = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:windows",
+    ],
+)
+
+iree_cmake_extra_content(
+    content = """
+# Disable on platforms/architectures where ELF is not supported.
+if(EMSCRIPTEN)
+  return()
+endif()
+""",
+)
+
+#===------------------------------------------------------------------------===#
+# Runtime ELF module loader/linker
+#===------------------------------------------------------------------------===#
+
+iree_runtime_cc_library(
+    name = "elf_module",
+    srcs = [
+        "elf_module.c",
+    ],
+    hdrs = [
+        "elf_module.h",
+        "elf_types.h",
+    ],
+    deps = [
+        ":arch",
+        ":platform",
+        "//runtime/src/iree/base",
+    ],
+)
+
+iree_runtime_cc_binary(
+    name = "elf_module_test_binary",
+    testonly = True,
+    srcs = ["elf_module_test_main.c"],
+    deps = [
+        ":elf_module",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:cpu",
+        "//runtime/src/iree/hal/drivers/task/executable:environment",
+        "//runtime/src/iree/hal/drivers/task/executable/elf/testdata:compat_data",
+        "//runtime/src/iree/hal/drivers/task/executable/library:abi",
+    ],
+)
+
+iree_executable_test(
+    name = "elf_module_test",
+    src = ":elf_module_test_binary",
+)
+
+iree_runtime_cc_binary(
+    name = "elf_module_native_test_binary",
+    testonly = True,
+    srcs = ["elf_module_test_main.c"],
+    defines = ["IREE_HAL_TASK_ELF_TEST_NATIVE_FIXTURE=1"],
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [
+        ":elf_module",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:cpu",
+        "//runtime/src/iree/hal/drivers/task/executable:environment",
+        "//runtime/src/iree/hal/drivers/task/executable/elf/testdata:elementwise_mul_native",
+        "//runtime/src/iree/hal/drivers/task/executable/library:abi",
+    ],
+)
+
+iree_executable_test(
+    name = "elf_module_native_test",
+    src = ":elf_module_native_test_binary",
+    target_compatible_with = ["@platforms//os:linux"],
+)
+
+#===------------------------------------------------------------------------===#
+# Architecture and platform support
+#===------------------------------------------------------------------------===#
+
+iree_msvc_masm_library(
+    name = "x86_64_msvc_abi_bridge",
+    src = "arch/x86_64_msvc.asm",
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:windows",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "arch",
+    srcs = [
+        "arch/arm_32.c",
+        "arch/arm_64.c",
+        "arch/riscv.c",
+        "arch/x86_32.c",
+        "arch/x86_64.c",
+        "elf_types.h",
+    ],
+    hdrs = [
+        "arch.h",
+    ],
+    deps = ["//runtime/src/iree/base"] + defaulting_select({
+        ":windows_x86_64": [":x86_64_msvc_abi_bridge"],
+        "//conditions:default": [],
+    }),
+)
+
+iree_runtime_cc_library(
+    name = "platform",
+    srcs = [
+        "platform/apple.c",
+        "platform/generic.c",
+        "platform/linux.c",
+        "platform/windows.c",
+    ],
+    hdrs = [
+        "platform.h",
+    ],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:memory",
+    ],
+)

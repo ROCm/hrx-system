@@ -15,7 +15,7 @@
 #include "hrx_internal.h"
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
-#include "iree/hal/drivers/local_task/task_driver.h"
+#include "iree/hal/drivers/task/driver.h"
 #include "iree/hal/utils/profile_file.h"
 #include "iree/io/file_handle.h"
 #include "iree/modules/hal/types.h"

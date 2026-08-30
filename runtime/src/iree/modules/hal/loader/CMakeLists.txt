@@ -21,8 +21,8 @@ iree_cc_library(
   DEPS
     iree::base
     iree::hal
-    iree::hal::local::executable_environment
-    iree::hal::local::executable_loader
+    iree::hal::drivers::task::executable
+    iree::hal::drivers::task::executable::loader
     iree::modules::hal::types
     iree::vm
   PUBLIC

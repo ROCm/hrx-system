@@ -12,7 +12,7 @@
 #include "execute_operation.h"
 #include "execute_state.h"
 #include "iree/async/util/proactor_pool.h"
-#include "iree/hal/drivers/local_task/registration/driver_module.h"
+#include "iree/hal/drivers/task/registration/driver_module.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -256,7 +256,7 @@ static iree_hal_device_t* CreateLocalTaskDevice() {
   iree_hal_driver_registry_t* registry = nullptr;
   IREE_CHECK_OK(
       iree_hal_driver_registry_allocate(iree_allocator_system(), &registry));
-  IREE_CHECK_OK(iree_hal_local_task_driver_module_register(registry));
+  IREE_CHECK_OK(iree_hal_task_driver_module_register(registry));
 
   iree_hal_device_create_params_t create_params =
       iree_hal_device_create_params_default();

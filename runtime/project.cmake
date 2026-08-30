@@ -88,11 +88,12 @@ set(IREE_HAL_EXECUTABLE_LOADER_EMBEDDED_ELF_DEFAULT
 set(IREE_HAL_EXECUTABLE_LOADER_SYSTEM_LIBRARY_DEFAULT
   ${IREE_HAL_EXECUTABLE_LOADER_DEFAULTS})
 option(IREE_HAL_EXECUTABLE_LOADER_EMBEDDED_ELF
-  "Enables the embedded dynamic library loader for local HAL drivers."
+  "Enables the embedded dynamic library loader for the task HAL driver."
   ${IREE_HAL_EXECUTABLE_LOADER_EMBEDDED_ELF_DEFAULT})
 option(IREE_HAL_EXECUTABLE_LOADER_SYSTEM_LIBRARY
-  "Enables the system dynamic library loader for local HAL drivers."
+  "Enables the system dynamic library loader for the task HAL driver."
   ${IREE_HAL_EXECUTABLE_LOADER_SYSTEM_LIBRARY_DEFAULT})
+
 set(IREE_HAL_AMDGPU_TARGETS
   "gfx9-generic;gfx90a;gfx9-4-generic;gfx10-1-generic;gfx10-3-generic;gfx11-generic;gfx12-generic"
   CACHE STRING
