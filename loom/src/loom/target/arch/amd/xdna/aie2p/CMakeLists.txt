@@ -181,6 +181,7 @@ loom_check_test_suite(
     "test/source_low/packed_dot_integer.loom-test"
     "test/source_low/packed_i8_arithmetic.loom-test"
     "test/source_low/packed_integer_arithmetic.loom-test"
+    "test/source_low/vector_predicate.loom-test"
   RUNNER
     ::loom-check
   DATA

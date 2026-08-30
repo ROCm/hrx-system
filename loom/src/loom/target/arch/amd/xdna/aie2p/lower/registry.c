@@ -35,6 +35,11 @@ static iree_status_t loom_aie2p_map_type(void* user_data,
       loom_type_is_all_static(source_type)) {
     const int64_t lane_count = loom_type_dim_static_size_at(source_type, 0);
     const loom_scalar_type_t element_type = loom_type_element_type(source_type);
+    if (lane_count > 0 && lane_count <= 64 &&
+        element_type == LOOM_SCALAR_TYPE_I1) {
+      return loom_low_lower_make_register_type(
+          context, AIE2P_CORE_REG_CLASS_ID_AIE2P_ELPREDICATE, 1, out_low_type);
+    }
     const bool fits_vec512 =
         (element_type == LOOM_SCALAR_TYPE_I8 && lane_count <= 64) ||
         (element_type == LOOM_SCALAR_TYPE_I16 && lane_count <= 32) ||

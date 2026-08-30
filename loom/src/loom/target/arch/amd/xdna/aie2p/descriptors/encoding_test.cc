@@ -87,6 +87,21 @@ iree_status_t AppendBundle(loom_aie2p_bundle_format_id_t format,
   return iree_ok_status();
 }
 
+iree_status_t EncodeSingleDescriptor(
+    std::string_view descriptor_key,
+    const std::vector<std::string_view>& register_names,
+    const std::vector<int64_t>& immediate_values,
+    std::string_view bundle_format, std::vector<uint8_t>* out_program) {
+  loom_aie2p_encoded_slot_t slot;
+  IREE_RETURN_IF_ERROR(EncodeDescriptor(loom_aie2p_core_descriptor_set(),
+                                        descriptor_key, register_names,
+                                        immediate_values, &slot));
+  return AppendBundle(
+      loom_aie2p_encoding_find_bundle_format(
+          iree_make_string_view(bundle_format.data(), bundle_format.size())),
+      {slot}, out_program);
+}
+
 iree_status_t BuildVectorAddLeaf(std::string_view vector_add_key,
                                  std::vector<uint8_t>* out_program) {
   const loom_low_descriptor_set_t* descriptor_set =
@@ -260,6 +275,110 @@ TEST(DescriptorEncodingTest, NarrowExtendsMatchOracleInstructionEncodings) {
     EXPECT_EQ(program, std::vector<uint8_t>(test_case.expected.begin(),
                                             test_case.expected.end()));
   }
+}
+
+TEST(DescriptorEncodingTest, IntegerMinMaxMatchOracleInstructionEncodings) {
+  struct TestCase {
+    std::string_view descriptor_key;
+    std::array<uint8_t, 4> expected;
+  };
+  const TestCase test_cases[] = {
+      {"amd.xdna.aie2p.min.signed.i8x64", {0x58, 0x4E, 0x12, 0x18}},
+      {"amd.xdna.aie2p.min.unsigned.i8x64", {0x58, 0x4C, 0x12, 0x18}},
+      {"amd.xdna.aie2p.max.signed.i8x64", {0x58, 0x52, 0x12, 0x18}},
+      {"amd.xdna.aie2p.max.unsigned.i8x64", {0x58, 0x50, 0x12, 0x18}},
+      {"amd.xdna.aie2p.min.signed.i16x32", {0x58, 0x2E, 0x12, 0x18}},
+      {"amd.xdna.aie2p.min.unsigned.i16x32", {0x58, 0x2C, 0x12, 0x18}},
+      {"amd.xdna.aie2p.max.signed.i16x32", {0x58, 0x32, 0x12, 0x18}},
+      {"amd.xdna.aie2p.max.unsigned.i16x32", {0x58, 0x30, 0x12, 0x18}},
+      {"amd.xdna.aie2p.min.signed.i32x16", {0x58, 0x0E, 0x12, 0x18}},
+      {"amd.xdna.aie2p.min.unsigned.i32x16", {0x58, 0x0C, 0x12, 0x18}},
+      {"amd.xdna.aie2p.max.signed.i32x16", {0x58, 0x12, 0x12, 0x18}},
+      {"amd.xdna.aie2p.max.unsigned.i32x16", {0x58, 0x10, 0x12, 0x18}},
+  };
+
+  for (const TestCase& test_case : test_cases) {
+    std::vector<uint8_t> program;
+    IREE_ASSERT_OK(EncodeSingleDescriptor(
+        test_case.descriptor_key, {"x0", "x2", "x4"}, {}, "I32_MV", &program));
+    EXPECT_EQ(program, std::vector<uint8_t>(test_case.expected.begin(),
+                                            test_case.expected.end()));
+  }
+}
+
+TEST(DescriptorEncodingTest, VectorPredicatesMatchOracleInstructionEncodings) {
+  struct TestCase {
+    std::string_view descriptor_key;
+    std::vector<std::string_view> registers;
+    std::array<uint8_t, 4> expected;
+  };
+  const TestCase test_cases[] = {
+      {"amd.xdna.aie2p.cmp.lt.signed.i8x64",
+       {"l8", "x0", "x2"},
+       {0x78, 0x22, 0x01, 0x1C}},
+      {"amd.xdna.aie2p.cmp.ge.unsigned.i8x64",
+       {"l8", "x0", "x2"},
+       {0x78, 0x42, 0x01, 0x1C}},
+      {"amd.xdna.aie2p.cmp.lt.signed.i16x32.el.low32",
+       {"l8", "x0", "x2"},
+       {0x78, 0x2A, 0x01, 0x18}},
+      {"amd.xdna.aie2p.cmp.ge.unsigned.i16x32.el.low32",
+       {"l8", "x0", "x2"},
+       {0x78, 0x4A, 0x01, 0x18}},
+      {"amd.xdna.aie2p.cmp.lt.signed.i32x16.el.low32",
+       {"l8", "x0", "x2"},
+       {0x78, 0x32, 0x01, 0x18}},
+      {"amd.xdna.aie2p.cmp.ge.unsigned.i32x16.el.low32",
+       {"l8", "x0", "x2"},
+       {0x78, 0x52, 0x01, 0x18}},
+      {"amd.xdna.aie2p.select.i8x64",
+       {"x0", "x2", "x4", "l8"},
+       {0x38, 0x44, 0x12, 0x18}},
+      {"amd.xdna.aie2p.select.i16x32.mask64",
+       {"x0", "x2", "x4", "l8"},
+       {0x38, 0x02, 0x12, 0x18}},
+      {"amd.xdna.aie2p.select.i32x16.mask64",
+       {"x0", "x2", "x4", "l8"},
+       {0x38, 0x00, 0x12, 0x18}},
+  };
+
+  for (const TestCase& test_case : test_cases) {
+    std::vector<uint8_t> program;
+    IREE_ASSERT_OK(EncodeSingleDescriptor(
+        test_case.descriptor_key, test_case.registers, {}, "I32_MV", &program));
+    EXPECT_EQ(program, std::vector<uint8_t>(test_case.expected.begin(),
+                                            test_case.expected.end()));
+  }
+}
+
+TEST(DescriptorEncodingTest, PredicatePartsMatchOracleInstructionEncodings) {
+  struct TestCase {
+    std::string_view descriptor_key;
+    std::array<uint8_t, 4> expected;
+  };
+  const TestCase test_cases[] = {
+      {"amd.xdna.aie2p.predicate.and.low32", {0x98, 0x24, 0x21, 0x15}},
+      {"amd.xdna.aie2p.predicate.and.high32", {0x98, 0x34, 0x63, 0x15}},
+      {"amd.xdna.aie2p.predicate.or.low32", {0x98, 0x25, 0x21, 0x15}},
+      {"amd.xdna.aie2p.predicate.or.high32", {0x98, 0x35, 0x63, 0x15}},
+      {"amd.xdna.aie2p.predicate.xor.low32", {0x98, 0x26, 0x21, 0x15}},
+      {"amd.xdna.aie2p.predicate.xor.high32", {0x98, 0x36, 0x63, 0x15}},
+  };
+
+  for (const TestCase& test_case : test_cases) {
+    std::vector<uint8_t> program;
+    IREE_ASSERT_OK(EncodeSingleDescriptor(test_case.descriptor_key,
+                                          {"l8", "l10", "l9"}, {}, "I32_ALU",
+                                          &program));
+    EXPECT_EQ(program, std::vector<uint8_t>(test_case.expected.begin(),
+                                            test_case.expected.end()));
+  }
+
+  std::vector<uint8_t> complete_program;
+  IREE_ASSERT_OK(
+      EncodeSingleDescriptor("amd.xdna.aie2p.predicate.complete.zero.high32",
+                             {"l8"}, {0}, "I32_LDA", &complete_program));
+  EXPECT_EQ(complete_program, (std::vector<uint8_t>{0x18, 0x88, 0x00, 0x00}));
 }
 
 TEST(DescriptorEncodingTest, PhysicalRegisterRowsAlignWithMachineTable) {

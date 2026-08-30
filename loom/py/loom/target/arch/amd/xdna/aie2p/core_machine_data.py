@@ -2060,6 +2060,38 @@ def _parse_register_classes() -> tuple[RegisterClass, ...]:
     return tuple(result)
 
 
+def _derive_register_classes(
+    source_classes: tuple[RegisterClass, ...],
+    physical_registers: tuple[PhysicalRegister, ...],
+) -> tuple[RegisterClass, ...]:
+    """Derives Loom storage domains that intersect native operand classes."""
+
+    classes = {register_class.name: register_class for register_class in source_classes}
+    registers = {register.name: register for register in physical_registers}
+    el_class = classes["eL"]
+    native_short_predicates = set(classes["eRS16"].candidates)
+    predicate_candidates = tuple(
+        register_name
+        for register_name in el_class.candidates
+        if registers[register_name].subregisters[0] in native_short_predicates
+    )
+    if predicate_candidates != tuple(f"l{index}" for index in range(8, 16)):
+        raise ValueError(
+            "AIE2P cross-width predicate intersection is not l8 through l15"
+        )
+    return (
+        RegisterClass(
+            name="eLPredicate",
+            layout=el_class.layout,
+            value_types=el_class.value_types,
+            candidates=predicate_candidates,
+            is_allocatable=el_class.is_allocatable,
+            consider_in_pre_ra_scheduling=el_class.consider_in_pre_ra_scheduling,
+            generate_pressure_set=el_class.generate_pressure_set,
+        ),
+    )
+
+
 _REGISTER_ENCODING_MAPS = tuple(
     tuple(
         (register, int(value))
@@ -2087,6 +2119,62 @@ def _parse_register_adapters() -> tuple[RegisterAdapter, ...]:
     )
 
 
+def _derive_el_subregister_adapters(
+    source_adapters: tuple[RegisterAdapter, ...],
+    register_classes: tuple[RegisterClass, ...],
+    physical_registers: tuple[PhysicalRegister, ...],
+) -> tuple[RegisterAdapter, ...]:
+    """Projects each cross-width predicate register onto its scalar halves.
+
+    These adapters are Loom-owned derivatives of the physical subregister table
+    above, not additional llvm-aie source records. The direct pair encodes
+    scalar-register fields by architectural register number. The mLdaCg variant
+    composes the high-half projection with that operand's source adapter. This
+    lets descriptors use one allocatable predicate value with either encoding
+    domain.
+    """
+
+    registers = {register.name: register for register in physical_registers}
+    adapters = {adapter.name: adapter for adapter in source_adapters}
+    el_class = next(row for row in register_classes if row.name == "eLPredicate")
+    expected_subregister_indices = ("sub_l_even", "sub_l_odd")
+    projected_maps: list[list[tuple[str, int]]] = [[], []]
+    lda_values = dict(adapters["OP_mLdaCg"].effective_register_encodings)
+    lda_high_map: list[tuple[str, int]] = []
+    for register_name in el_class.candidates:
+        register = registers[register_name]
+        if register.subregister_indices != expected_subregister_indices:
+            raise ValueError(
+                f"{register_name}: eL scalar subregister order is "
+                f"{register.subregister_indices}, expected "
+                f"{expected_subregister_indices}"
+            )
+        for projected_map, subregister_name in zip(
+            projected_maps, register.subregisters, strict=True
+        ):
+            projected_map.append(
+                (register_name, registers[subregister_name].hardware_encoding)
+            )
+        lda_high_map.append((register_name, lda_values[register.subregisters[1]]))
+    return (
+        RegisterAdapter(
+            name="LOOM_eL_low32",
+            register_class="eLPredicate",
+            register_encodings=tuple(projected_maps[0]),
+        ),
+        RegisterAdapter(
+            name="LOOM_eL_high32",
+            register_class="eLPredicate",
+            register_encodings=tuple(projected_maps[1]),
+        ),
+        RegisterAdapter(
+            name="LOOM_eL_high32_OP_mLdaCg",
+            register_class="eLPredicate",
+            register_encodings=tuple(lda_high_map),
+        ),
+    )
+
+
 def _parse_immediates() -> tuple[ImmediateEncoding, ...]:
     result = []
     for record in _IMMEDIATE_ENCODING_RECORDS.splitlines():
@@ -2106,8 +2194,21 @@ def _parse_immediates() -> tuple[ImmediateEncoding, ...]:
     return tuple(result)
 
 
-_REGISTER_CLASSES = _parse_register_classes()
-_REGISTER_ADAPTERS = _parse_register_adapters()
+_PHYSICAL_REGISTERS = _parse_physical_registers()
+_SOURCE_REGISTER_CLASSES = _parse_register_classes()
+_REGISTER_CLASSES = (
+    *_SOURCE_REGISTER_CLASSES,
+    *_derive_register_classes(_SOURCE_REGISTER_CLASSES, _PHYSICAL_REGISTERS),
+)
+_SOURCE_REGISTER_ADAPTERS = _parse_register_adapters()
+_REGISTER_ADAPTERS = (
+    *_SOURCE_REGISTER_ADAPTERS,
+    *_derive_el_subregister_adapters(
+        _SOURCE_REGISTER_ADAPTERS,
+        _REGISTER_CLASSES,
+        _PHYSICAL_REGISTERS,
+    ),
+)
 _IMMEDIATES = _parse_immediates()
 _REGISTER_CLASS_NAMES = {row.name for row in _REGISTER_CLASSES}
 _REGISTER_ADAPTER_NAMES = {row.name for row in _REGISTER_ADAPTERS}
@@ -2165,7 +2266,7 @@ def _parse_forms() -> tuple[MachineForm, ...]:
 
 CORE_MACHINE_TABLE = MachineTable(
     atomic_unit_names=tuple(_ATOMIC_UNIT_NAME_RECORDS.splitlines()),
-    physical_registers=_parse_physical_registers(),
+    physical_registers=_PHYSICAL_REGISTERS,
     register_classes=_REGISTER_CLASSES,
     register_adapters=_REGISTER_ADAPTERS,
     immediates=_IMMEDIATES,

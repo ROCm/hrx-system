@@ -362,7 +362,8 @@ def _vector_splat_rule(
 
 def _vector_predicate_splat_rule() -> DescriptorRule:
     broadcast = _descriptor("amd.xdna.aie2p.splat.i8x64")
-    compare = _descriptor("amd.xdna.aie2p.cmp.eqz.i8x64")
+    subtract = _descriptor("amd.xdna.aie2p.sub.i8x64")
+    compare = _descriptor("amd.xdna.aie2p.cmp.lt.unsigned.i8x64")
     return DescriptorRule(
         source_op=vector.vector_splat,
         descriptor=compare,
@@ -378,35 +379,244 @@ def _vector_predicate_splat_rule() -> DescriptorRule:
                 result_types={"dst": DescriptorResultType()},
             ),
             _op_emit(
+                subtract,
+                operands={
+                    "s1": ValueRef.temporary("broadcast_condition"),
+                    "s2": ValueRef.temporary("broadcast_condition"),
+                },
+                results={"d": ValueRef.temporary("zero")},
+                result_types={"d": DescriptorResultType()},
+            ),
+            _op_emit(
                 compare,
-                operands={"s2": ValueRef.temporary("broadcast_condition")},
+                operands={
+                    "s1": ValueRef.temporary("zero"),
+                    "s2": ValueRef.temporary("broadcast_condition"),
+                },
                 results={"cmp": ValueRef.result("result")},
-                result_types={"cmp": DescriptorResultType()},
             ),
         ),
     )
 
 
-def _vector_select_rule() -> DescriptorRule:
-    descriptor = _descriptor("amd.xdna.aie2p.select.i8x64")
+def _vector_select_rule(
+    value_type: TypePattern,
+    descriptor_key: str,
+) -> DescriptorRule:
+    descriptor = _descriptor(descriptor_key)
     return DescriptorRule(
         source_op=vector.vector_select,
         descriptor=descriptor,
         guards=(
             Guard.value_type("condition", _I1_VECTOR),
-            *_typed_guards(("true_value", "false_value", "result"), _I8_VECTOR),
+            *_typed_guards(("true_value", "false_value", "result"), value_type),
         ),
         emit=(
             _op_emit(
                 descriptor,
                 operands={
-                    "s1": ValueRef.operand("true_value"),
-                    "s2": ValueRef.operand("false_value"),
+                    # AIE2P VSEL chooses s1 for a zero mask bit and s2 for a
+                    # one bit. Loom vector.select uses one for true.
+                    "s1": ValueRef.operand("false_value"),
+                    "s2": ValueRef.operand("true_value"),
                     "sel": ValueRef.operand("condition"),
                 },
                 results={"d": ValueRef.result("result")},
             ),
         ),
+    )
+
+
+def _predicate_complete_emit(
+    source: ValueRef,
+    result: ValueRef,
+) -> EmitDescriptorOp:
+    descriptor = _descriptor("amd.xdna.aie2p.predicate.complete.zero.high32")
+    return EmitDescriptorOp(
+        descriptor=descriptor,
+        operands={"storage": source},
+        results={"dst": result},
+        immediates={"i": 0},
+        form=DescriptorEmitForm.OP,
+    )
+
+
+def _predicate_binary_emits(
+    operation: str,
+    lhs: ValueRef,
+    rhs: ValueRef,
+    result: ValueRef,
+    *,
+    temporary_prefix: str,
+) -> tuple[EmitDescriptorOp, ...]:
+    low = _descriptor(f"amd.xdna.aie2p.predicate.{operation}.low32")
+    high = _descriptor(f"amd.xdna.aie2p.predicate.{operation}.high32")
+    low_result = ValueRef.temporary(f"{temporary_prefix}_low32")
+    return (
+        _op_emit(
+            low,
+            operands={"s0": lhs, "s1": rhs},
+            results={"d0": low_result},
+            result_types={"d0": DescriptorResultType()},
+        ),
+        _op_emit(
+            high,
+            operands={
+                "s0": lhs,
+                "s1": rhs,
+                "storage": low_result,
+            },
+            results={"d0": result},
+        ),
+    )
+
+
+def _vector_predicate_binary_rule(
+    source_op: Op,
+    operation: str,
+) -> DescriptorRule:
+    descriptor = _descriptor(f"amd.xdna.aie2p.predicate.{operation}.high32")
+    return DescriptorRule(
+        source_op=source_op,
+        descriptor=descriptor,
+        guards=_typed_guards(("lhs", "rhs", "result"), _I1_VECTOR),
+        emit=_predicate_binary_emits(
+            operation,
+            ValueRef.operand("lhs"),
+            ValueRef.operand("rhs"),
+            ValueRef.result("result"),
+            temporary_prefix="predicate",
+        ),
+    )
+
+
+def _vector_compare_rule(
+    predicate: str,
+    operand_type: TypePattern,
+    width: int,
+) -> DescriptorRule:
+    relation: str
+    signedness: str
+    swap_operands = predicate in ("sle", "sgt", "ule", "ugt")
+    if predicate in ("slt", "sgt"):
+        relation, signedness = "lt", "signed"
+    elif predicate in ("sle", "sge"):
+        relation, signedness = "ge", "signed"
+    elif predicate in ("ult", "ugt"):
+        relation, signedness = "lt", "unsigned"
+    elif predicate in ("ule", "uge"):
+        relation, signedness = "ge", "unsigned"
+    elif predicate in ("eq", "ne"):
+        relation, signedness = "eq", "unsigned"
+    else:
+        raise ValueError(f"unsupported AIE2P vector comparison predicate {predicate}")
+
+    lane_count = 512 // width
+    suffix = ".el.low32" if width != 8 else ""
+    lhs = ValueRef.operand("rhs" if swap_operands else "lhs")
+    rhs = ValueRef.operand("lhs" if swap_operands else "rhs")
+    result = ValueRef.result("result")
+    emits: tuple[EmitDescriptorOp, ...]
+    if predicate == "eq":
+        subtract = _descriptor(f"amd.xdna.aie2p.sub.i{width}x{lane_count}")
+        compare = _descriptor(f"amd.xdna.aie2p.cmp.eqz.i{width}x{lane_count}{suffix}")
+        difference = ValueRef.temporary("comparison_difference")
+        comparison = result if width == 8 else ValueRef.temporary("comparison_low32")
+        emits = (
+            _op_emit(
+                subtract,
+                operands={"s1": lhs, "s2": rhs},
+                results={"d": difference},
+                result_types={"d": DescriptorResultType()},
+            ),
+            _op_emit(
+                compare,
+                operands={"s2": difference},
+                results={"cmp": comparison},
+                result_types=({"cmp": DescriptorResultType()} if width != 8 else None),
+            ),
+            *((_predicate_complete_emit(comparison, result),) if width != 8 else ()),
+        )
+        descriptor = (
+            compare
+            if width == 8
+            else _descriptor("amd.xdna.aie2p.predicate.complete.zero.high32")
+        )
+    elif predicate == "ne":
+        compare = _descriptor(
+            f"amd.xdna.aie2p.cmp.lt.unsigned.i{width}x{lane_count}{suffix}"
+        )
+        forward = ValueRef.temporary("comparison_forward")
+        reverse = ValueRef.temporary("comparison_reverse")
+        low = _descriptor("amd.xdna.aie2p.predicate.or.low32")
+        emits = (
+            _op_emit(
+                compare,
+                operands={"s1": ValueRef.operand("lhs"), "s2": ValueRef.operand("rhs")},
+                results={"cmp": forward},
+                result_types={"cmp": DescriptorResultType()},
+            ),
+            _op_emit(
+                compare,
+                operands={"s1": ValueRef.operand("rhs"), "s2": ValueRef.operand("lhs")},
+                results={"cmp": reverse},
+                result_types={"cmp": DescriptorResultType()},
+            ),
+        )
+        if width == 8:
+            emits = (
+                *emits,
+                *_predicate_binary_emits(
+                    "or",
+                    forward,
+                    reverse,
+                    result,
+                    temporary_prefix="comparison",
+                ),
+            )
+            descriptor = _descriptor("amd.xdna.aie2p.predicate.or.high32")
+        else:
+            comparison = ValueRef.temporary("comparison_low32")
+            emits = (
+                *emits,
+                _op_emit(
+                    low,
+                    operands={"s0": forward, "s1": reverse},
+                    results={"d0": comparison},
+                    result_types={"d0": DescriptorResultType()},
+                ),
+                _predicate_complete_emit(comparison, result),
+            )
+            descriptor = _descriptor("amd.xdna.aie2p.predicate.complete.zero.high32")
+    else:
+        compare = _descriptor(
+            f"amd.xdna.aie2p.cmp.{relation}.{signedness}.i{width}x{lane_count}{suffix}"
+        )
+        comparison = result if width == 8 else ValueRef.temporary("comparison_low32")
+        emits = (
+            _op_emit(
+                compare,
+                operands={"s1": lhs, "s2": rhs},
+                results={"cmp": comparison},
+                result_types=({"cmp": DescriptorResultType()} if width != 8 else None),
+            ),
+            *((_predicate_complete_emit(comparison, result),) if width != 8 else ()),
+        )
+        descriptor = (
+            compare
+            if width == 8
+            else _descriptor("amd.xdna.aie2p.predicate.complete.zero.high32")
+        )
+
+    return DescriptorRule(
+        source_op=vector.vector_cmpi,
+        descriptor=descriptor,
+        guards=(
+            Guard.enum_attr_equals("predicate", predicate),
+            *_typed_guards(("lhs", "rhs"), operand_type),
+            Guard.value_type("result", _I1_VECTOR),
+        ),
+        emit=emits,
     )
 
 
@@ -1245,28 +1455,20 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
             )
         ),
         *(
-            _vector_binary_rule(
-                source_op,
-                _I16_VECTOR,
-                descriptor_key,
+            _vector_binary_rule(source_op, vector_type, descriptor_key)
+            for width, vector_type in (
+                (8, _I8_VECTOR),
+                (16, _I16_VECTOR),
+                (32, _I32_VECTOR),
             )
-            for source_op, descriptor_key in (
-                (
-                    vector.vector_minsi,
-                    "amd.xdna.aie2p.min.signed.i16x32",
-                ),
-                (
-                    vector.vector_maxsi,
-                    "amd.xdna.aie2p.max.signed.i16x32",
-                ),
-                (
-                    vector.vector_minui,
-                    "amd.xdna.aie2p.min.unsigned.i16x32",
-                ),
-                (
-                    vector.vector_maxui,
-                    "amd.xdna.aie2p.max.unsigned.i16x32",
-                ),
+            for source_op, operation, signedness in (
+                (vector.vector_minsi, "min", "signed"),
+                (vector.vector_maxsi, "max", "signed"),
+                (vector.vector_minui, "min", "unsigned"),
+                (vector.vector_maxui, "max", "unsigned"),
+            )
+            for descriptor_key in (
+                f"amd.xdna.aie2p.{operation}.{signedness}.i{width}x{512 // width}",
             )
         ),
         _vector_multiply_i16_rule(),
@@ -1322,7 +1524,42 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
             )
         ),
         _vector_predicate_splat_rule(),
-        _vector_select_rule(),
+        *(
+            _vector_select_rule(value_type, descriptor_key)
+            for value_type, descriptor_key in (
+                (_I8_VECTOR, "amd.xdna.aie2p.select.i8x64"),
+                (_I16_VECTOR, "amd.xdna.aie2p.select.i16x32.mask64"),
+                (_I32_VECTOR, "amd.xdna.aie2p.select.i32x16.mask64"),
+            )
+        ),
+        *(
+            _vector_predicate_binary_rule(source_op, operation)
+            for source_op, operation in (
+                (vector.vector_andi, "and"),
+                (vector.vector_ori, "or"),
+                (vector.vector_xori, "xor"),
+            )
+        ),
+        *(
+            _vector_compare_rule(predicate, operand_type, width)
+            for width, operand_type in (
+                (8, _I8_VECTOR),
+                (16, _I16_VECTOR),
+                (32, _I32_VECTOR),
+            )
+            for predicate in (
+                "eq",
+                "ne",
+                "slt",
+                "sle",
+                "sgt",
+                "sge",
+                "ult",
+                "ule",
+                "ugt",
+                "uge",
+            )
+        ),
         *(
             _whole_integer_vector_select_rule(result_type)
             for result_type in _INTEGER_VECTOR_TYPES

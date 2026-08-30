@@ -24,7 +24,7 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
         for case in AIE2P_CORE_CONTRACT_FRAGMENT.cases
         if isinstance(case, DescriptorRule)
     )
-    assert len(rules) == 107
+    assert len(rules) == 150
 
     constant_rules = [
         rule for rule in rules if rule.source_op is scalar_conversion.scalar_constant
@@ -185,10 +185,18 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
         )
     ]
     assert [rule.descriptor.key for rule in vector_minmax_rules] == [
+        "amd.xdna.aie2p.min.signed.i8x64",
+        "amd.xdna.aie2p.max.signed.i8x64",
+        "amd.xdna.aie2p.min.unsigned.i8x64",
+        "amd.xdna.aie2p.max.unsigned.i8x64",
         "amd.xdna.aie2p.min.signed.i16x32",
         "amd.xdna.aie2p.max.signed.i16x32",
         "amd.xdna.aie2p.min.unsigned.i16x32",
         "amd.xdna.aie2p.max.unsigned.i16x32",
+        "amd.xdna.aie2p.min.signed.i32x16",
+        "amd.xdna.aie2p.max.signed.i32x16",
+        "amd.xdna.aie2p.min.unsigned.i32x16",
+        "amd.xdna.aie2p.max.unsigned.i32x16",
     ]
     assert all(
         tuple(rule.emit[0].results) == ("d",)
@@ -237,6 +245,9 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
         "amd.xdna.aie2p.sub.i8x64",
         "amd.xdna.aie2p.sub.i16x32",
         "amd.xdna.aie2p.sub.i32x16",
+        "amd.xdna.aie2p.predicate.and.high32",
+        "amd.xdna.aie2p.predicate.or.high32",
+        "amd.xdna.aie2p.predicate.xor.high32",
     ]
     assert [len(rule.emit) for rule in vector_bitwise_rules] == [
         1,
@@ -248,6 +259,9 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
         3,
         3,
         3,
+        2,
+        2,
+        2,
     ]
 
     vector_splat_rules = [
@@ -257,24 +271,84 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
         "amd.xdna.aie2p.splat.i8x64",
         "amd.xdna.aie2p.splat.i16x32",
         "amd.xdna.aie2p.splat.i32x16",
-        "amd.xdna.aie2p.cmp.eqz.i8x64",
+        "amd.xdna.aie2p.cmp.lt.unsigned.i8x64",
     ]
     predicate_splat = vector_splat_rules[-1]
     assert [emit.descriptor.key for emit in predicate_splat.emit] == [
         "amd.xdna.aie2p.splat.i8x64",
-        "amd.xdna.aie2p.cmp.eqz.i8x64",
+        "amd.xdna.aie2p.sub.i8x64",
+        "amd.xdna.aie2p.cmp.lt.unsigned.i8x64",
     ]
     assert all(
         isinstance(next(iter(emit.result_types.values())), DescriptorResultType)
-        for emit in predicate_splat.emit
+        for emit in predicate_splat.emit[:2]
     )
+    assert predicate_splat.emit[-1].result_types is None
 
     vector_select_rules = [
         rule for rule in rules if rule.source_op is vector.vector_select
     ]
     assert [rule.descriptor.key for rule in vector_select_rules] == [
-        "amd.xdna.aie2p.select.i8x64"
+        "amd.xdna.aie2p.select.i8x64",
+        "amd.xdna.aie2p.select.i16x32.mask64",
+        "amd.xdna.aie2p.select.i32x16.mask64",
     ]
+    for rule in vector_select_rules:
+        select = rule.emit[0]
+        assert select.operands["s1"].field == "false_value"
+        assert select.operands["s2"].field == "true_value"
+        assert select.operands["sel"].field == "condition"
+
+    vector_compare_rules = [
+        rule for rule in rules if rule.source_op is vector.vector_cmpi
+    ]
+    assert len(vector_compare_rules) == 30
+    assert [len(rule.emit) for rule in vector_compare_rules] == [
+        2,
+        4,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        3,
+        4,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        3,
+        4,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+    ]
+    assert [emit.descriptor.key for emit in vector_compare_rules[10].emit] == [
+        "amd.xdna.aie2p.sub.i16x32",
+        "amd.xdna.aie2p.cmp.eqz.i16x32.el.low32",
+        "amd.xdna.aie2p.predicate.complete.zero.high32",
+    ]
+    assert [emit.descriptor.key for emit in vector_compare_rules[11].emit] == [
+        "amd.xdna.aie2p.cmp.lt.unsigned.i16x32.el.low32",
+        "amd.xdna.aie2p.cmp.lt.unsigned.i16x32.el.low32",
+        "amd.xdna.aie2p.predicate.or.low32",
+        "amd.xdna.aie2p.predicate.complete.zero.high32",
+    ]
+    swapped_signed_less_equal = vector_compare_rules[13].emit[0]
+    assert swapped_signed_less_equal.operands["s1"].field == "rhs"
+    assert swapped_signed_less_equal.operands["s2"].field == "lhs"
 
     whole_select_rules = [rule for rule in rules if rule.source_op is scf.scf_select]
     assert [rule.descriptor.key for rule in whole_select_rules] == [

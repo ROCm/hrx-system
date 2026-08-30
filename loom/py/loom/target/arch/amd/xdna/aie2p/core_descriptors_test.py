@@ -45,8 +45,9 @@ from loom.target.low_descriptors import (
 def test_core_descriptor_closure_is_complete() -> None:
     descriptor_set = AIE2P_CORE_DESCRIPTOR_SET
     assert len(descriptor_set.physical_registers) == 359
-    assert len(descriptor_set.reg_classes) == 20
-    assert len(descriptor_set.descriptors) == 72
+    assert len(descriptor_set.reg_classes) == 21
+    assert len(descriptor_set.register_parts) == 2
+    assert len(descriptor_set.descriptors) == 103
     assert tuple(row.name for row in descriptor_set.physical_registers) == tuple(
         row.name for row in CORE_MACHINE_TABLE.physical_registers
     )
@@ -60,12 +61,13 @@ def test_complete_schedule_domain_drives_selected_low_descriptors() -> None:
     assert len(descriptor_set.resources) == 90
     assert len(descriptor_set.timing_events) == 38
     assert len(descriptor_set.event_separations) == 651
-    assert len(descriptor_set.schedule_classes) == 28
+    assert len(descriptor_set.schedule_classes) == 29
     assert {
         resource.name
         for resource in descriptor_set.resources
         if resource.kind is ResourceKind.PIPELINE
     } == {
+        *(_slot_resource_name(slot) for slot in _SLOT_RESOURCE_KINDS),
         *(
             _pipeline_resource_name(resource)
             for resource in CORE_SCHEDULE_TABLE.resources
@@ -166,6 +168,20 @@ def test_low_register_classes_retain_machine_candidate_order() -> None:
         assert RegClassFlag.EXPLICIT_PHYSICAL_REGISTERS in register_class.flags
         assert RegClassFlag.UNSPILLABLE in register_class.flags
 
+    el_class = next(
+        register_class
+        for register_class in AIE2P_CORE_DESCRIPTOR_SET.reg_classes
+        if register_class.name == "aie2p.elpredicate"
+    )
+    assert el_class.full_register_part_mask == 0x3
+    assert {
+        (part.name, part.reg_class, part.mask)
+        for part in AIE2P_CORE_DESCRIPTOR_SET.register_parts
+    } == {
+        ("aie2p.elpredicate.low32", "aie2p.elpredicate", 0x1),
+        ("aie2p.elpredicate.high32", "aie2p.elpredicate", 0x2),
+    }
+
 
 def test_vector_encoding_roles_share_one_low_storage_class() -> None:
     descriptors = {
@@ -244,7 +260,7 @@ def test_descriptor_encoding_ids_and_adapters_are_materialized() -> None:
         "cmp",
         "s2",
     ]
-    assert predicate_compare.operands[0].reg_alts[0].reg_class == "aie2p.el"
+    assert predicate_compare.operands[0].reg_alts[0].reg_class == "aie2p.elpredicate"
     assert predicate_compare.operands[1].reg_alts[0].reg_class == "aie2p.vec512"
 
     byte_select = descriptors["amd.xdna.aie2p.select.i8x64"]
@@ -259,7 +275,7 @@ def test_descriptor_encoding_ids_and_adapters_are_materialized() -> None:
         "aie2p.vec512",
         "aie2p.vec512",
         "aie2p.vec512",
-        "aie2p.el",
+        "aie2p.elpredicate",
     ]
     assert word_select.operands[-1].reg_alts[0].reg_class == "aie2p.ers16"
 
@@ -269,40 +285,101 @@ def test_descriptor_encoding_ids_and_adapters_are_materialized() -> None:
     assert scalar_selector.operands[1].field_name == "s0"
     assert scalar_selector.operands[1].reg_alts[0].reg_class == "aie2p.er"
 
-    for key, sign_register in (
-        ("amd.xdna.aie2p.min.signed.i16x32", "vaddsign1"),
-        ("amd.xdna.aie2p.max.signed.i16x32", "vaddsign1"),
-        ("amd.xdna.aie2p.min.unsigned.i16x32", "vaddsign0"),
-        ("amd.xdna.aie2p.max.unsigned.i16x32", "vaddsign0"),
-    ):
-        descriptor = descriptors[key]
-        assert [operand.field_name for operand in descriptor.operands[:3]] == [
-            "d",
-            "s1",
-            "s2",
+    for width in (8, 16, 32):
+        for operation, signedness, sign_register in (
+            ("min", "signed", "vaddsign1"),
+            ("max", "signed", "vaddsign1"),
+            ("min", "unsigned", "vaddsign0"),
+            ("max", "unsigned", "vaddsign0"),
+        ):
+            key = f"amd.xdna.aie2p.{operation}.{signedness}.i{width}x{512 // width}"
+            descriptor = descriptors[key]
+            assert [operand.field_name for operand in descriptor.operands[:3]] == [
+                "d",
+                "s1",
+                "s2",
+            ]
+            assert [
+                operand.reg_alts[0].reg_class for operand in descriptor.operands[:3]
+            ] == [
+                "aie2p.vec512",
+                "aie2p.vec512",
+                "aie2p.vec512",
+            ]
+            hardwired_compare = descriptor.operands[3]
+            assert hardwired_compare.field_name == "implicit_output_cmp"
+            assert hardwired_compare.role is OperandRole.IMPLICIT
+            assert hardwired_compare.reg_alts[0].reg_class == (
+                "aie2p.ml8m" if width == 8 else "aie2p.mr16_vcompare"
+            )
+            assert hardwired_compare.reg_alts[0].flags == (
+                RegClassAltFlag.PHYSICAL_ONLY,
+            )
+            assert set(hardwired_compare.flags) == {
+                OperandFlag.IMPLICIT,
+                OperandFlag.STATE_WRITE,
+            }
+            assert hardwired_compare.encoding_field_id == 0
+            assert descriptor.asm_forms[0].results == ("d",)
+            assert descriptor.operands[-1].field_name == (
+                f"implicit_use_{sign_register}"
+            )
+            assert descriptor.operands[-1].reg_alts[0].reg_class == (
+                f"aie2p.state.{sign_register}"
+            )
+
+
+def test_vector_predicates_use_one_partially_addressable_el_value() -> None:
+    descriptors = {
+        descriptor.key: descriptor
+        for descriptor in AIE2P_CORE_DESCRIPTOR_SET.descriptors
+    }
+    for width in (16, 32):
+        compare = descriptors[
+            f"amd.xdna.aie2p.cmp.lt.signed.i{width}x{512 // width}.el.low32"
         ]
-        assert [
-            operand.reg_alts[0].reg_class for operand in descriptor.operands[:3]
-        ] == [
-            "aie2p.vec512",
-            "aie2p.vec512",
-            "aie2p.vec512",
-        ]
-        hardwired_compare = descriptor.operands[3]
-        assert hardwired_compare.field_name == "implicit_output_cmp"
-        assert hardwired_compare.role is OperandRole.IMPLICIT
-        assert hardwired_compare.reg_alts[0].reg_class == "aie2p.mr16_vcompare"
-        assert hardwired_compare.reg_alts[0].flags == (RegClassAltFlag.PHYSICAL_ONLY,)
-        assert set(hardwired_compare.flags) == {
-            OperandFlag.IMPLICIT,
-            OperandFlag.STATE_WRITE,
-        }
-        assert hardwired_compare.encoding_field_id == 0
-        assert descriptor.asm_forms[0].results == ("d",)
-        assert descriptor.operands[-1].field_name == f"implicit_use_{sign_register}"
-        assert descriptor.operands[-1].reg_alts[0].reg_class == (
-            f"aie2p.state.{sign_register}"
+        assert compare.operands[0].reg_alts[0].reg_class == "aie2p.elpredicate"
+        assert compare.operands[0].register_part == "aie2p.elpredicate.low32"
+        assert compare.operands[0].encoding_adapter_id != 0
+
+        select = descriptors[f"amd.xdna.aie2p.select.i{width}x{512 // width}.mask64"]
+        assert select.operands[-1].field_name == "sel"
+        assert select.operands[-1].reg_alts[0].reg_class == "aie2p.elpredicate"
+        assert select.operands[-1].register_part == "aie2p.elpredicate.low32"
+        assert select.operands[-1].encoding_adapter_id != 0
+
+    for operation in ("and", "or", "xor"):
+        low = descriptors[f"amd.xdna.aie2p.predicate.{operation}.low32"]
+        high = descriptors[f"amd.xdna.aie2p.predicate.{operation}.high32"]
+        assert all(
+            operand.register_part == "aie2p.elpredicate.low32"
+            for operand in low.operands
         )
+        assert all(
+            operand.register_part == "aie2p.elpredicate.high32"
+            for operand in high.operands[:3]
+        )
+        continuation = high.operands[3]
+        assert continuation.field_name == "storage"
+        assert continuation.register_part == "aie2p.elpredicate.low32"
+        assert set(continuation.flags) == {
+            OperandFlag.IMPLICIT,
+            OperandFlag.STORAGE_CONTINUATION,
+        }
+        assert len(high.constraints) == 1
+        assert high.constraints[0].kind is ConstraintKind.TIED
+        assert high.constraints[0].lhs_operand_index == 0
+        assert high.constraints[0].rhs_operand_index == 3
+        assert high.asm_forms[0].operands == ("s0", "s1", "storage")
+
+    complete = descriptors["amd.xdna.aie2p.predicate.complete.zero.high32"]
+    assert complete.operands[0].register_part == "aie2p.elpredicate.high32"
+    assert complete.operands[1].register_part == "aie2p.elpredicate.low32"
+    assert OperandFlag.STORAGE_CONTINUATION in complete.operands[1].flags
+    assert complete.constraints[0].kind is ConstraintKind.TIED
+    assert complete.constraints[0].lhs_operand_index == 0
+    assert complete.constraints[0].rhs_operand_index == 1
+    assert complete.asm_forms[0].operands == ("storage",)
 
 
 def test_vector_multiply_descriptors_own_configuration_state() -> None:

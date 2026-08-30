@@ -65,6 +65,7 @@ from loom.target.low_descriptors import (
     RegClassAlt,
     RegClassAltFlag,
     RegClassFlag,
+    RegisterPart,
     Resource,
     ResourceKind,
     ScheduleClass,
@@ -74,6 +75,13 @@ from loom.target.low_descriptors import (
 )
 
 _TARGET_KEY = "amd.xdna.aie2p"
+_EL_LOW32_PART = "aie2p.elpredicate.low32"
+_EL_HIGH32_PART = "aie2p.elpredicate.high32"
+_REGISTER_PARTS = (
+    RegisterPart(_EL_LOW32_PART, "aie2p.elpredicate", 0x1),
+    RegisterPart(_EL_HIGH32_PART, "aie2p.elpredicate", 0x2),
+)
+_REGISTER_PARTS_BY_NAME = {part.name: part for part in _REGISTER_PARTS}
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,6 +96,9 @@ class _DescriptorSpec:
     op_kind: DescriptorOpKind = DescriptorOpKind.OP
     implicit_outputs: tuple[str, ...] = ()
     asm_mnemonic: str | None = None
+    operand_register_parts: tuple[tuple[str, str], ...] = ()
+    encoding_adapter_overrides: tuple[tuple[str, str], ...] = ()
+    storage_continuation_part: str | None = None
 
 
 _DESCRIPTOR_SPECS = (
@@ -165,37 +176,21 @@ _DESCRIPTOR_SPECS = (
         "integer.sub.i32x16",
         "II_VSUB_32",
     ),
-    _DescriptorSpec(
-        "VMIN_GE_16_vaddSign1",
-        f"{_TARGET_KEY}.min.signed.i16x32",
-        "integer.min.signed.i16x32",
-        "II_VMIN_GE_16_vaddSign1",
-        implicit_outputs=("cmp",),
-        asm_mnemonic="min.s16x32",
-    ),
-    _DescriptorSpec(
-        "VMAX_LT_16_vaddSign1",
-        f"{_TARGET_KEY}.max.signed.i16x32",
-        "integer.max.signed.i16x32",
-        "II_VMAX_LT_16_vaddSign1",
-        implicit_outputs=("cmp",),
-        asm_mnemonic="max.s16x32",
-    ),
-    _DescriptorSpec(
-        "VMIN_GE_16_vaddSign0",
-        f"{_TARGET_KEY}.min.unsigned.i16x32",
-        "integer.min.unsigned.i16x32",
-        "II_VMIN_GE_16_vaddSign0",
-        implicit_outputs=("cmp",),
-        asm_mnemonic="min.u16x32",
-    ),
-    _DescriptorSpec(
-        "VMAX_LT_16_vaddSign0",
-        f"{_TARGET_KEY}.max.unsigned.i16x32",
-        "integer.max.unsigned.i16x32",
-        "II_VMAX_LT_16_vaddSign0",
-        implicit_outputs=("cmp",),
-        asm_mnemonic="max.u16x32",
+    *(
+        _DescriptorSpec(
+            f"V{operation.upper()}_{comparison}_{width}_vaddSign{sign_bit}",
+            f"{_TARGET_KEY}.{operation}.{signedness}.i{width}x{512 // width}",
+            f"integer.{operation}.{signedness}.i{width}x{512 // width}",
+            f"II_V{operation.upper()}_{comparison}_{width}_vaddSign{sign_bit}",
+            implicit_outputs=("cmp",),
+            asm_mnemonic=(
+                f"{operation}.{'s' if signedness == 'signed' else 'u'}"
+                f"{width}x{512 // width}"
+            ),
+        )
+        for width in (8, 16, 32)
+        for operation, comparison in (("min", "GE"), ("max", "LT"))
+        for signedness, sign_bit in (("signed", 1), ("unsigned", 0))
     ),
     _DescriptorSpec(
         "VMUL_vmul_cm_core_X_X",
@@ -246,18 +241,137 @@ _DESCRIPTOR_SPECS = (
         f"{_TARGET_KEY}.cmp.eqz.i8x64",
         "integer.cmp.eq.i8x64",
         "II_VEQZ_8",
+        storage_overrides=(("cmp", "eLPredicate"),),
+    ),
+    *(
+        _DescriptorSpec(
+            f"VEQZ_{width}",
+            f"{_TARGET_KEY}.cmp.eqz.i{width}x{512 // width}.el.low32",
+            f"integer.cmp.eq.i{width}x{512 // width}.low32",
+            f"II_VEQZ_{width}",
+            storage_overrides=(("cmp", "eLPredicate"),),
+            asm_mnemonic=f"veqz.{width}.el.low32",
+            operand_register_parts=(("cmp", _EL_LOW32_PART),),
+            encoding_adapter_overrides=(("cmp", "LOOM_eL_low32"),),
+        )
+        for width in (16, 32)
+    ),
+    *(
+        _DescriptorSpec(
+            f"V{relation.upper()}_{width}_vaddSign{sign_bit}",
+            (
+                f"{_TARGET_KEY}.cmp.{relation}.{signedness}."
+                f"i{width}x{512 // width}"
+                f"{'.el.low32' if width != 8 else ''}"
+            ),
+            (
+                f"integer.cmp.{relation}.{signedness}."
+                f"i{width}x{512 // width}"
+                f"{'.low32' if width != 8 else ''}"
+            ),
+            f"II_V{relation.upper()}_{width}_vaddSign{sign_bit}",
+            storage_overrides=(("cmp", "eLPredicate"),),
+            asm_mnemonic=(
+                f"v{relation}.{'s' if signedness == 'signed' else 'u'}"
+                f"{width}x{512 // width}"
+                f"{'.el.low32' if width != 8 else ''}"
+            ),
+            operand_register_parts=((("cmp", _EL_LOW32_PART),) if width != 8 else ()),
+            encoding_adapter_overrides=(
+                (("cmp", "LOOM_eL_low32"),) if width != 8 else ()
+            ),
+        )
+        for width in (8, 16, 32)
+        for relation in ("lt", "ge")
+        for signedness, sign_bit in (("signed", 1), ("unsigned", 0))
     ),
     _DescriptorSpec(
         "VSEL_8",
         f"{_TARGET_KEY}.select.i8x64",
         "integer.select.i8x64",
         "II_VSEL_8",
+        storage_overrides=(("sel", "eLPredicate"),),
     ),
     _DescriptorSpec(
         "VSEL_32",
         f"{_TARGET_KEY}.select.i32x16",
         "integer.select.i32x16",
         "II_VSEL_32",
+    ),
+    *(
+        _DescriptorSpec(
+            f"VSEL_{width}",
+            f"{_TARGET_KEY}.select.i{width}x{512 // width}.mask64",
+            f"integer.select.i{width}x{512 // width}.mask64",
+            f"II_VSEL_{width}",
+            storage_overrides=(("sel", "eLPredicate"),),
+            asm_mnemonic=f"vsel.{width}.mask64",
+            operand_register_parts=(("sel", _EL_LOW32_PART),),
+            encoding_adapter_overrides=(("sel", "LOOM_eL_low32"),),
+        )
+        for width in (16, 32)
+    ),
+    *(
+        _DescriptorSpec(
+            operation.upper(),
+            f"{_TARGET_KEY}.predicate.{operation}.low32",
+            f"integer.predicate.{operation}.low32",
+            f"II_{operation.upper()}",
+            storage_overrides=(
+                ("d0", "eLPredicate"),
+                ("s0", "eLPredicate"),
+                ("s1", "eLPredicate"),
+            ),
+            asm_mnemonic=f"predicate.{operation}.low32",
+            operand_register_parts=(
+                ("d0", _EL_LOW32_PART),
+                ("s0", _EL_LOW32_PART),
+                ("s1", _EL_LOW32_PART),
+            ),
+            encoding_adapter_overrides=(
+                ("d0", "LOOM_eL_low32"),
+                ("s0", "LOOM_eL_low32"),
+                ("s1", "LOOM_eL_low32"),
+            ),
+        )
+        for operation in ("and", "or", "xor")
+    ),
+    *(
+        _DescriptorSpec(
+            operation.upper(),
+            f"{_TARGET_KEY}.predicate.{operation}.high32",
+            f"integer.predicate.{operation}.high32",
+            f"II_{operation.upper()}",
+            storage_overrides=(
+                ("d0", "eLPredicate"),
+                ("s0", "eLPredicate"),
+                ("s1", "eLPredicate"),
+            ),
+            asm_mnemonic=f"predicate.{operation}.high32",
+            operand_register_parts=(
+                ("d0", _EL_HIGH32_PART),
+                ("s0", _EL_HIGH32_PART),
+                ("s1", _EL_HIGH32_PART),
+            ),
+            encoding_adapter_overrides=(
+                ("d0", "LOOM_eL_high32"),
+                ("s0", "LOOM_eL_high32"),
+                ("s1", "LOOM_eL_high32"),
+            ),
+            storage_continuation_part=_EL_LOW32_PART,
+        )
+        for operation in ("and", "or", "xor")
+    ),
+    _DescriptorSpec(
+        "MOVA",
+        f"{_TARGET_KEY}.predicate.complete.zero.high32",
+        "integer.predicate.complete.zero.high32",
+        "II_MOVA_eR",
+        storage_overrides=(("dst", "eLPredicate"),),
+        asm_mnemonic="predicate.complete.zero.high32",
+        operand_register_parts=(("dst", _EL_HIGH32_PART),),
+        encoding_adapter_overrides=(("dst", "LOOM_eL_high32_OP_mLdaCg"),),
+        storage_continuation_part=_EL_LOW32_PART,
     ),
     _DescriptorSpec(
         "VEXTBCST_8_vec_extract_broadcast_imm",
@@ -532,6 +646,9 @@ _ASM_MNEMONIC_BY_FORM = {
 }
 
 _MACHINE_FORMS = {form.name: form for form in CORE_MACHINE_TABLE.forms}
+_MACHINE_REGISTERS = {
+    register.name: register for register in CORE_MACHINE_TABLE.physical_registers
+}
 _MACHINE_CLASSES = {
     register_class.name: register_class
     for register_class in CORE_MACHINE_TABLE.register_classes
@@ -597,6 +714,25 @@ _IMMEDIATE_IDS = {
 }
 
 
+def _operand_override_map(
+    spec: _DescriptorSpec,
+    rows: tuple[tuple[str, str], ...],
+    description: str,
+) -> dict[str, str]:
+    names = [name for name, _ in rows]
+    if len(names) != len(set(names)):
+        raise ValueError(f"{spec.form_name}: {description} names must be unique")
+    form = _MACHINE_FORMS[spec.form_name]
+    explicit_names = {operand.name for operand in (*form.outputs, *form.inputs)}
+    unknown_names = set(names) - explicit_names
+    if unknown_names:
+        raise ValueError(
+            f"{spec.form_name}: {description} name unknown operands "
+            f"{sorted(unknown_names)}"
+        )
+    return dict(rows)
+
+
 def _operand_storage_machine_class(
     spec: _DescriptorSpec,
     operand: MachineOperand,
@@ -607,18 +743,19 @@ def _operand_storage_machine_class(
         machine_class = _MACHINE_ADAPTERS[operand.type_name].register_class
     else:
         raise ValueError(f"{operand.name}: immediate is not a register operand")
-    storage_overrides = dict(spec.storage_overrides)
-    unknown_overrides = storage_overrides.keys() - {
-        row.name
-        for row in (
-            *_MACHINE_FORMS[spec.form_name].outputs,
-            *_MACHINE_FORMS[spec.form_name].inputs,
-        )
-    }
-    if unknown_overrides:
+    storage_overrides = _operand_override_map(
+        spec, spec.storage_overrides, "storage overrides"
+    )
+    register_parts = _operand_override_map(
+        spec, spec.operand_register_parts, "register-part overrides"
+    )
+    adapter_overrides = _operand_override_map(
+        spec, spec.encoding_adapter_overrides, "encoding-adapter overrides"
+    )
+    if set(register_parts) != set(adapter_overrides):
         raise ValueError(
-            f"{spec.form_name}: storage overrides name unknown operands "
-            f"{sorted(unknown_overrides)}"
+            f"{spec.form_name}: register-part and encoding-adapter overrides "
+            "must specialize the same operands"
         )
     low_class = storage_overrides.get(
         operand.name,
@@ -631,12 +768,68 @@ def _operand_storage_machine_class(
         for candidate in source.candidates
         if candidate in set(target.candidates)
     )
-    if source.layout != target.layout or selected_candidates != target.candidates:
+    has_register_projection = operand.name in register_parts
+    if (
+        source.layout != target.layout or selected_candidates != target.candidates
+    ) and not has_register_projection:
         raise ValueError(
             f"{spec.form_name}.{operand.name}: Low class {low_class} is not an "
             f"ordered storage subset of {machine_class}"
         )
-    if operand.kind is MachineOperandKind.REGISTER_ADAPTER:
+    if has_register_projection:
+        part_name = register_parts[operand.name]
+        part = _REGISTER_PARTS_BY_NAME.get(part_name)
+        if part is None:
+            raise ValueError(
+                f"{spec.form_name}.{operand.name}: unknown register part {part_name}"
+            )
+        if part.reg_class != _low_register_class_name(low_class):
+            raise ValueError(
+                f"{spec.form_name}.{operand.name}: register part {part_name} does "
+                f"not belong to Low class {low_class}"
+            )
+        adapter_name = adapter_overrides[operand.name]
+        adapter = _MACHINE_ADAPTERS.get(adapter_name)
+        if adapter is None:
+            raise ValueError(
+                f"{spec.form_name}.{operand.name}: unknown encoding adapter "
+                f"{adapter_name}"
+            )
+        if adapter.register_class != low_class:
+            raise ValueError(
+                f"{spec.form_name}.{operand.name}: adapter {adapter_name} encodes "
+                f"{adapter.register_class}, not {low_class}"
+            )
+        encoded_registers = {
+            register for register, _ in adapter.effective_register_encodings
+        }
+        if set(target.candidates) != encoded_registers:
+            raise ValueError(
+                f"{spec.form_name}.{operand.name}: adapter {adapter_name} does not "
+                f"exactly encode Low class {low_class}"
+            )
+        source_encoding_values = (
+            {
+                value
+                for _, value in _MACHINE_ADAPTERS[
+                    operand.type_name
+                ].effective_register_encodings
+            }
+            if operand.kind is MachineOperandKind.REGISTER_ADAPTER
+            else {
+                _MACHINE_REGISTERS[register].hardware_encoding
+                for register in source.candidates
+            }
+        )
+        projected_encoding_values = {
+            value for _, value in adapter.effective_register_encodings
+        }
+        if not projected_encoding_values <= source_encoding_values:
+            raise ValueError(
+                f"{spec.form_name}.{operand.name}: adapter {adapter_name} emits "
+                f"values outside the native {operand.type_name} encoding domain"
+            )
+    elif operand.kind is MachineOperandKind.REGISTER_ADAPTER:
         encoded_registers = {
             register
             for register, _ in _MACHINE_ADAPTERS[
@@ -750,6 +943,7 @@ def _reg_classes() -> tuple[RegClass, ...]:
                     RegClassFlag.EXPLICIT_PHYSICAL_REGISTERS,
                 ),
                 target_bank_id=target_bank_id,
+                full_register_part_mask=(0x3 if machine_name == "eLPredicate" else 0x1),
                 physical_registers=machine_class.candidates,
             )
         )
@@ -901,10 +1095,20 @@ def _low_operand(
     encoding_field_id = (
         _ENCODING_FIELD_IDS[operand.name] if operand.name in encoded_field_names else 0
     )
+    adapter_overrides = _operand_override_map(
+        spec, spec.encoding_adapter_overrides, "encoding-adapter overrides"
+    )
+    adapter_name = adapter_overrides.get(
+        operand.name,
+        operand.type_name
+        if operand.kind is MachineOperandKind.REGISTER_ADAPTER
+        else None,
+    )
     encoding_adapter_id = (
-        _ADAPTER_IDS[operand.type_name]
-        if encoding_field_id and operand.kind is MachineOperandKind.REGISTER_ADAPTER
-        else 0
+        _ADAPTER_IDS[adapter_name] if encoding_field_id and adapter_name else 0
+    )
+    register_parts = _operand_override_map(
+        spec, spec.operand_register_parts, "register-part overrides"
     )
     return Operand(
         field_name=operand.name,
@@ -912,10 +1116,49 @@ def _low_operand(
         reg_alts=(RegClassAlt(_operand_register_class(spec, operand)),),
         encoding_field_id=encoding_field_id,
         encoding_adapter_id=encoding_adapter_id,
+        register_part=register_parts.get(operand.name),
         read_stage=read_stage,
         ready_stage=ready_stage,
         read_event=read_event,
         write_event=write_event,
+    )
+
+
+def _storage_continuation_operand(
+    spec: _DescriptorSpec,
+    register_outputs: tuple[MachineOperand, ...],
+) -> Operand | None:
+    part_name = spec.storage_continuation_part
+    if part_name is None:
+        return None
+    if len(register_outputs) != 1:
+        raise ValueError(
+            f"{spec.form_name}: storage continuation requires exactly one result"
+        )
+    part = _REGISTER_PARTS_BY_NAME.get(part_name)
+    if part is None:
+        raise ValueError(
+            f"{spec.form_name}: unknown storage-continuation part {part_name}"
+        )
+    result_part_name = _operand_override_map(
+        spec, spec.operand_register_parts, "register-part overrides"
+    ).get(register_outputs[0].name)
+    if result_part_name is None:
+        raise ValueError(
+            f"{spec.form_name}: storage continuation requires a partial result"
+        )
+    result_part = _REGISTER_PARTS_BY_NAME[result_part_name]
+    if result_part.reg_class != part.reg_class or result_part.mask & part.mask:
+        raise ValueError(
+            f"{spec.form_name}: storage continuation must preserve a disjoint "
+            "part of the result register"
+        )
+    return Operand(
+        field_name="storage",
+        role=OperandRole.OPERAND,
+        reg_alts=(RegClassAlt(part.reg_class),),
+        flags=(OperandFlag.IMPLICIT, OperandFlag.STORAGE_CONTINUATION),
+        register_part=part.name,
     )
 
 
@@ -1256,6 +1499,7 @@ def _descriptor(spec: _DescriptorSpec) -> Descriptor:
         if operand.kind is MachineOperandKind.IMMEDIATE
     )
     explicit_register_operands = (*register_outputs, *register_inputs)
+    storage_continuation = _storage_continuation_operand(spec, register_outputs)
     tied_implicit_outputs = {
         name
         for tie in form.ties
@@ -1283,6 +1527,7 @@ def _descriptor(spec: _DescriptorSpec) -> Descriptor:
                 _low_operand(spec, operand, OperandRole.OPERAND)
                 for operand in register_inputs
             ),
+            *((storage_continuation,) if storage_continuation is not None else ()),
             *(_implicit_output_operand(spec, operand) for operand in implicit_outputs),
             *_implicit_operands(spec),
         ),
@@ -1298,14 +1543,34 @@ def _descriptor(spec: _DescriptorSpec) -> Descriptor:
             AsmForm(
                 mnemonic=mnemonic,
                 results=tuple(operand.name for operand in register_outputs),
-                operands=tuple(operand.name for operand in register_inputs),
+                operands=(
+                    *(operand.name for operand in register_inputs),
+                    *(
+                        (storage_continuation.field_name,)
+                        if storage_continuation
+                        else ()
+                    ),
+                ),
                 immediates=tuple(
                     AsmImmediate(operand.name) for operand in immediate_inputs
                 ),
             ),
         ),
         effects=_effects(spec, form),
-        constraints=_constraints(form, explicit_register_operands),
+        constraints=(
+            *_constraints(form, explicit_register_operands),
+            *(
+                (
+                    Constraint(
+                        ConstraintKind.TIED,
+                        0,
+                        len(explicit_register_operands),
+                    ),
+                )
+                if storage_continuation is not None
+                else ()
+            ),
+        ),
         encoding_id=_INSTRUCTION_IDS[spec.form_name],
         flags=_descriptor_flags(
             form,
@@ -1344,15 +1609,13 @@ def _descriptor(spec: _DescriptorSpec) -> Descriptor:
     return descriptor
 
 
+# Physical bundle slots constrain issue but do not classify instructions. For
+# example, the lda slot also carries MOVA register-immediate instructions.
 _SLOT_RESOURCE_KINDS = {
-    "alu": ResourceKind.SCALAR_ALU,
-    "lda": ResourceKind.LOAD,
-    "ldb": ResourceKind.LOAD,
-    "lng": ResourceKind.SCALAR_ALU,
-    "mv": ResourceKind.VECTOR_ALU,
-    "nop": ResourceKind.CONTROL,
-    "st": ResourceKind.STORE,
-    "vec": ResourceKind.VECTOR_ALU,
+    slot: ResourceKind.PIPELINE
+    for slot in sorted(
+        {instruction.slot for instruction in CORE_ENCODING_TABLE.instructions}
+    )
 }
 
 
@@ -1371,14 +1634,6 @@ def _bundle_exclusion_resource_name(slots: tuple[str, ...]) -> str:
 def _bundle_slot_exclusions() -> tuple[tuple[str, ...], ...]:
     """Derives minimal slot sets no physical bundle can contain."""
 
-    encoding_slots = {
-        instruction.slot for instruction in CORE_ENCODING_TABLE.instructions
-    }
-    if encoding_slots != _SLOT_RESOURCE_KINDS.keys():
-        raise ValueError(
-            "AIE2P schedule slot resources disagree with the encoding table: "
-            f"{sorted(encoding_slots)} != {sorted(_SLOT_RESOURCE_KINDS)}"
-        )
     legal_signatures = {
         frozenset(field.slot for field in bundle_format.fields)
         for bundle_format in CORE_ENCODING_TABLE.bundle_formats
@@ -1390,7 +1645,7 @@ def _bundle_slot_exclusions() -> tuple[tuple[str, ...], ...]:
             for subset in combinations(ordered_signature, subset_count):
                 extendable_signatures.add(frozenset(subset))
 
-    slots = tuple(sorted(encoding_slots))
+    slots = tuple(_SLOT_RESOURCE_KINDS)
     result = []
     for slot_count in range(2, len(slots) + 1):
         for candidate in combinations(slots, slot_count):
@@ -1720,6 +1975,7 @@ AIE2P_CORE_DESCRIPTOR_SET = DescriptorSet(
     c_enum_prefix="AIE2P_CORE",
     generator_version=1,
     reg_classes=_reg_classes(),
+    register_parts=_REGISTER_PARTS,
     physical_registers=_physical_registers(),
     timing_events=_TIMING_EVENTS,
     event_separations=_EVENT_SEPARATIONS,
