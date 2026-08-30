@@ -8,6 +8,7 @@
 
 from loom.dialect.buffer import defs as buffer
 from loom.dialect.index import defs as index
+from loom.dialect.scalar import arithmetic as scalar_arithmetic
 from loom.dialect.scalar import bitwise as scalar_bitwise
 from loom.dialect.scalar import comparison as scalar_comparison
 from loom.dialect.scalar import conversion as scalar_conversion
@@ -35,7 +36,7 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
         for case in AIE2P_CORE_CONTRACT_FRAGMENT.cases
         if isinstance(case, DescriptorRule)
     )
-    assert len(rules) == 160
+    assert len(rules) == 221
 
     address_constant_rules = [
         rule for rule in rules if rule.source_op is index.index_constant
@@ -45,6 +46,101 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
         "amd.xdna.aie2p.constant.i32.short",
         "amd.xdna.aie2p.constant.i32",
         "amd.xdna.aie2p.constant.i32",
+    ]
+
+    index_binary_rules = [
+        rule
+        for rule in rules
+        if rule.source_op
+        in (
+            index.index_add,
+            index.index_sub,
+            index.index_mul,
+            index.index_andi,
+            index.index_ori,
+            index.index_xori,
+            index.index_shli,
+        )
+    ]
+    assert [rule.descriptor.key for rule in index_binary_rules] == [
+        "amd.xdna.aie2p.add.i32",
+        "amd.xdna.aie2p.add.i32",
+        "amd.xdna.aie2p.sub.i32",
+        "amd.xdna.aie2p.sub.i32",
+        "amd.xdna.aie2p.mul.i32",
+        "amd.xdna.aie2p.and.i32",
+        "amd.xdna.aie2p.or.i32",
+        "amd.xdna.aie2p.xor.i32",
+        "amd.xdna.aie2p.lshl.i32",
+    ]
+
+    index_divide_rules = [
+        rule for rule in rules if rule.source_op in (index.index_div, index.index_rem)
+    ]
+    assert [len(rule.emit) for rule in index_divide_rules] == [35, 34]
+    for rule in index_divide_rules:
+        assert rule.emit[0].descriptor.key == ("amd.xdna.aie2p.move.to.division-state")
+        assert [emit.descriptor.key for emit in rule.emit[2:34]] == [
+            "amd.xdna.aie2p.divide.step.unsigned.i32"
+        ] * 32
+        for step, emit in enumerate(rule.emit[2:34], start=1):
+            assert emit.operands["sd"].field == f"division_state_{step - 1}"
+            assert emit.results["sd_out"].field == f"division_state_{step}"
+    assert index_divide_rules[0].emit[-1].descriptor.key == (
+        "amd.xdna.aie2p.move.from.division-state"
+    )
+    assert index_divide_rules[1].emit[-1].results["d0"].field == "result"
+
+    index_minmax_rules = [
+        rule for rule in rules if rule.source_op in (index.index_min, index.index_max)
+    ]
+    assert [
+        [emit.descriptor.key for emit in rule.emit] for rule in index_minmax_rules
+    ] == [
+        [
+            "amd.xdna.aie2p.cmp.slt.i32.select",
+            "amd.xdna.aie2p.select.nonzero.i32",
+        ],
+        [
+            "amd.xdna.aie2p.cmp.slt.i32.select",
+            "amd.xdna.aie2p.select.nonzero.i32",
+        ],
+    ]
+    assert index_minmax_rules[0].emit[0].operands["s0"].field == "lhs"
+    assert index_minmax_rules[1].emit[0].operands["s0"].field == "rhs"
+    assert all(rule.emit[-1].copy_operands == () for rule in index_minmax_rules)
+
+    index_madd_rule = next(rule for rule in rules if rule.source_op is index.index_madd)
+    assert index_madd_rule.descriptor.key == "amd.xdna.aie2p.madd.i32"
+    assert index_madd_rule.emit[0].copy_operands == ("a0",)
+
+    index_rotate_rules = [
+        rule
+        for rule in rules
+        if rule.source_op in (index.index_rotli, index.index_rotri)
+    ]
+    assert [len(rule.emit) for rule in index_rotate_rules] == [9, 9]
+    assert all(
+        rule.emit[-1].descriptor.key == "amd.xdna.aie2p.or.i32"
+        for rule in index_rotate_rules
+    )
+
+    index_count_rules = [
+        rule
+        for rule in rules
+        if rule.source_op in (index.index_ctlzi, index.index_cttzi, index.index_ctpopi)
+    ]
+    assert [rule.descriptor.key for rule in index_count_rules] == [
+        "amd.xdna.aie2p.clz.i32",
+        "amd.xdna.aie2p.select.zero.i32",
+        "amd.xdna.aie2p.popcount.i32",
+    ]
+    assert [len(rule.emit) for rule in index_count_rules] == [1, 7, 1]
+
+    index_compare_rules = [rule for rule in rules if rule.source_op is index.index_cmp]
+    assert len(index_compare_rules) == 20
+    assert [rule.descriptor.key for rule in index_compare_rules[:10]] == [
+        rule.descriptor.key for rule in index_compare_rules[10:]
     ]
 
     vector_memory_rules = [
@@ -224,6 +320,43 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
         "amd.xdna.aie2p.ashl.i32",
     ]
     assert signed_i16_shift.emit[2].immediates == {"i": 0}
+
+    scalar_address_alu_rules = [
+        rule
+        for rule in rules
+        if rule.source_op
+        in (
+            scalar_arithmetic.scalar_divui,
+            scalar_arithmetic.scalar_remui,
+            scalar_arithmetic.scalar_absi,
+            scalar_arithmetic.scalar_minsi,
+            scalar_arithmetic.scalar_maxsi,
+            scalar_arithmetic.scalar_minui,
+            scalar_arithmetic.scalar_maxui,
+            scalar_arithmetic.scalar_fmai,
+            scalar_bitwise.scalar_rotli,
+            scalar_bitwise.scalar_rotri,
+            scalar_bitwise.scalar_ctlzi,
+            scalar_bitwise.scalar_cttzi,
+            scalar_bitwise.scalar_ctpopi,
+        )
+    ]
+    assert [rule.descriptor.key for rule in scalar_address_alu_rules] == [
+        "amd.xdna.aie2p.divide.step.unsigned.i32",
+        "amd.xdna.aie2p.divide.step.unsigned.i32",
+        "amd.xdna.aie2p.abs.i32",
+        "amd.xdna.aie2p.select.nonzero.i32",
+        "amd.xdna.aie2p.select.nonzero.i32",
+        "amd.xdna.aie2p.select.nonzero.i32",
+        "amd.xdna.aie2p.select.nonzero.i32",
+        "amd.xdna.aie2p.madd.i32",
+        "amd.xdna.aie2p.or.i32",
+        "amd.xdna.aie2p.or.i32",
+        "amd.xdna.aie2p.clz.i32",
+        "amd.xdna.aie2p.select.zero.i32",
+        "amd.xdna.aie2p.popcount.i32",
+    ]
+    assert scalar_address_alu_rules[7].emit[0].copy_operands == ("a0",)
 
     vector_rules = [
         rule
@@ -418,11 +551,23 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
 
     whole_select_rules = [rule for rule in rules if rule.source_op is scf.scf_select]
     assert [rule.descriptor.key for rule in whole_select_rules] == [
+        "amd.xdna.aie2p.select.nonzero.i32",
+        "amd.xdna.aie2p.select.nonzero.i32",
+        "amd.xdna.aie2p.select.nonzero.i32",
+        "amd.xdna.aie2p.select.nonzero.i32",
+        "amd.xdna.aie2p.select.nonzero.i32",
+        "amd.xdna.aie2p.select.nonzero.i32",
         "amd.xdna.aie2p.select.i32x16",
         "amd.xdna.aie2p.select.i32x16",
         "amd.xdna.aie2p.select.i32x16",
     ]
-    for rule in whole_select_rules:
+    for rule in whole_select_rules[:6]:
+        assert len(rule.emit) == 1
+        assert rule.emit[0].copy_operands == ("s2",)
+        assert rule.emit[0].operands["s0"].field == "true_value"
+        assert rule.emit[0].operands["s1"].field == "false_value"
+        assert rule.emit[0].operands["s2"].field == "condition"
+    for rule in whole_select_rules[6:]:
         assert [emit.descriptor.key for emit in rule.emit] == [
             "amd.xdna.aie2p.select.mask.i32",
             "amd.xdna.aie2p.select.i32x16",

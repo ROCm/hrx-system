@@ -45,9 +45,9 @@ from loom.target.low_descriptors import (
 def test_core_descriptor_closure_is_complete() -> None:
     descriptor_set = AIE2P_CORE_DESCRIPTOR_SET
     assert len(descriptor_set.physical_registers) == 359
-    assert len(descriptor_set.reg_classes) == 21
+    assert len(descriptor_set.reg_classes) == 23
     assert len(descriptor_set.register_parts) == 2
-    assert len(descriptor_set.descriptors) == 103
+    assert len(descriptor_set.descriptors) == 114
     assert tuple(row.name for row in descriptor_set.physical_registers) == tuple(
         row.name for row in CORE_MACHINE_TABLE.physical_registers
     )
@@ -61,7 +61,7 @@ def test_complete_schedule_domain_drives_selected_low_descriptors() -> None:
     assert len(descriptor_set.resources) == 90
     assert len(descriptor_set.timing_events) == 38
     assert len(descriptor_set.event_separations) == 651
-    assert len(descriptor_set.schedule_classes) == 29
+    assert len(descriptor_set.schedule_classes) == 33
     assert {
         resource.name
         for resource in descriptor_set.resources
@@ -340,6 +340,84 @@ def test_descriptor_encoding_ids_and_adapters_are_materialized() -> None:
             assert descriptor.operands[-1].reg_alts[0].reg_class == (
                 f"aie2p.state.{sign_register}"
             )
+
+
+def test_scalar_address_descriptors_expose_fixed_register_state() -> None:
+    descriptors = {
+        descriptor.key: descriptor
+        for descriptor in AIE2P_CORE_DESCRIPTOR_SET.descriptors
+    }
+
+    move_to_state = descriptors["amd.xdna.aie2p.move.to.division-state"]
+    move_from_state = descriptors["amd.xdna.aie2p.move.from.division-state"]
+    assert [operand.reg_alts[0].reg_class for operand in move_to_state.operands] == [
+        "aie2p.mr31_divs",
+        "aie2p.er",
+    ]
+    assert [operand.reg_alts[0].reg_class for operand in move_from_state.operands] == [
+        "aie2p.er",
+        "aie2p.mr31_divs",
+    ]
+    assert move_to_state.asm_forms[0].mnemonic == "mov.dividend"
+    assert move_from_state.asm_forms[0].mnemonic == "mov.quotient"
+
+    divide_step = descriptors["amd.xdna.aie2p.divide.step.unsigned.i32"]
+    assert [operand.field_name for operand in divide_step.operands] == [
+        "d0",
+        "sd_out",
+        "sd",
+        "s0",
+        "s1",
+    ]
+    assert [operand.reg_alts[0].reg_class for operand in divide_step.operands] == [
+        "aie2p.er",
+        "aie2p.mr31_divs",
+        "aie2p.mr31_divs",
+        "aie2p.er",
+        "aie2p.er",
+    ]
+    assert len(divide_step.constraints) == 1
+    assert divide_step.constraints[0].kind is ConstraintKind.TIED
+    assert divide_step.constraints[0].lhs_operand_index == 1
+    assert divide_step.constraints[0].rhs_operand_index == 2
+    assert divide_step.asm_forms[0].results == ("d0", "sd_out")
+    assert divide_step.asm_forms[0].operands == ("sd", "s0", "s1")
+
+    multiply_add = descriptors["amd.xdna.aie2p.madd.i32"]
+    assert [operand.field_name for operand in multiply_add.operands] == [
+        "d0",
+        "a0",
+        "s0",
+        "s1",
+    ]
+    assert len(multiply_add.constraints) == 1
+    assert multiply_add.constraints[0].kind is ConstraintKind.TIED
+    assert multiply_add.constraints[0].lhs_operand_index == 0
+    assert multiply_add.constraints[0].rhs_operand_index == 1
+
+    for key in (
+        "amd.xdna.aie2p.select.zero.i32",
+        "amd.xdna.aie2p.select.nonzero.i32",
+    ):
+        select = descriptors[key]
+        assert select.operands[-1].field_name == "s2"
+        assert select.operands[-1].reg_alts[0].reg_class == "aie2p.mr27_select"
+        assert select.operands[-1].encoding_field_id == 0
+
+    for key in (
+        "amd.xdna.aie2p.cmp.slt.i32.select",
+        "amd.xdna.aie2p.cmp.ult.i32.select",
+    ):
+        compare = descriptors[key]
+        assert compare.operands[0].reg_alts[0].reg_class == "aie2p.mr27_select"
+
+    fixed_classes = {
+        register_class.name: register_class
+        for register_class in AIE2P_CORE_DESCRIPTOR_SET.reg_classes
+        if register_class.name in ("aie2p.mr27_select", "aie2p.mr31_divs")
+    }
+    assert fixed_classes["aie2p.mr27_select"].physical_registers == ("r27",)
+    assert fixed_classes["aie2p.mr31_divs"].physical_registers == ("r31",)
 
 
 def test_vector_predicates_use_one_partially_addressable_el_value() -> None:
