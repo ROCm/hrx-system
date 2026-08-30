@@ -93,6 +93,7 @@ _SCHEDULE_EVENT_SLOW = "test.event.slow"
 _SCHEDULE_EVENT_CONSUMER = "test.event.consumer"
 _SCHEDULE_RESOURCE_REQUIRED = "test.resource.required"
 _SCHEDULE_RESOURCE_RESERVED = "test.resource.reserved"
+_SCHEDULE_ALTERNATIVE_B = "test.schedule.alternative_b"
 
 _EVENT_FAST_WRITE = "test.write.fast"
 _EVENT_SLOW_WRITE = "test.write.slow"
@@ -547,6 +548,27 @@ TEST_LOW_RESOURCE_RESERVED_I32_DESCRIPTOR = Descriptor(
     operands=(_i32_result(), _i32_operand("lhs"), _i32_operand("rhs")),
     asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
     schedule_class=_SCHEDULE_RESOURCE_RESERVED,
+    flags=(DescriptorFlag.DEAD_REMOVABLE,),
+)
+
+TEST_LOW_SCHEDULE_ALTERNATIVE_B_I32_DESCRIPTOR = Descriptor(
+    key="test.schedule.alternative.b.i32",
+    mnemonic="test.schedule.alternative.b.i32",
+    semantic_tag="test.schedule.alternative.i32",
+    operands=(_i32_result(), _i32_operand("lhs"), _i32_operand("rhs")),
+    asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
+    schedule_class=_SCHEDULE_ALTERNATIVE_B,
+    flags=(DescriptorFlag.DEAD_REMOVABLE,),
+)
+
+TEST_LOW_SCHEDULE_ALTERNATIVE_A_I32_DESCRIPTOR = Descriptor(
+    key="test.schedule.alternative.a.i32",
+    mnemonic="test.schedule.alternative.a.i32",
+    semantic_tag="test.schedule.alternative.i32",
+    operands=(_i32_result(), _i32_operand("lhs"), _i32_operand("rhs")),
+    asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
+    schedule_class=_SCHEDULE_SCALAR_ALU,
+    schedule_alternatives=(TEST_LOW_SCHEDULE_ALTERNATIVE_B_I32_DESCRIPTOR.key,),
     flags=(DescriptorFlag.DEAD_REMOVABLE,),
 )
 
@@ -1234,6 +1256,37 @@ TEST_LOW_STORE_V4I32_DESCRIPTOR = Descriptor(
     flags=(DescriptorFlag.SIDE_EFFECTING,),
 )
 
+TEST_LOW_SCHEDULE_ALTERNATIVE_STORE_B_V4I32_DESCRIPTOR = Descriptor(
+    key="test.schedule.alternative.store.b.v4i32",
+    mnemonic="test.schedule.alternative.store.b.v4i32",
+    semantic_tag="memory.schedule_alternative.store.v128",
+    operands=(
+        _ptr_resource("address"),
+        Operand("value", OperandRole.OPERAND, _I32_ALT, unit_count=4),
+    ),
+    asm_forms=_asm(operands=("address", "value")),
+    effects=(_STORE_EFFECT,),
+    schedule_class=_SCHEDULE_STORE,
+    flags=(DescriptorFlag.SIDE_EFFECTING,),
+)
+
+TEST_LOW_SCHEDULE_ALTERNATIVE_STORE_A_V4I32_DESCRIPTOR = Descriptor(
+    key="test.schedule.alternative.store.a.v4i32",
+    mnemonic="test.schedule.alternative.store.a.v4i32",
+    semantic_tag="memory.schedule_alternative.store.v128",
+    operands=(
+        _ptr_resource("address"),
+        Operand("value", OperandRole.OPERAND, _I32_ALT, unit_count=4),
+    ),
+    asm_forms=_asm(operands=("address", "value")),
+    effects=(_STORE_EFFECT,),
+    schedule_class=_SCHEDULE_STORE,
+    schedule_alternatives=(
+        TEST_LOW_SCHEDULE_ALTERNATIVE_STORE_B_V4I32_DESCRIPTOR.key,
+    ),
+    flags=(DescriptorFlag.SIDE_EFFECTING,),
+)
+
 TEST_LOW_STORE_V4F32_DESCRIPTOR = Descriptor(
     key="test.store.v4f32",
     mnemonic="test.store.v4f32",
@@ -1693,6 +1746,13 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
             ),
             model_quality=ModelQuality.EXACT,
         ),
+        ScheduleClass(
+            _SCHEDULE_ALTERNATIVE_B,
+            latency_kind=LatencyKind.EXACT,
+            latency_cycles=1,
+            issue_uses=(IssueUse(_RESOURCE_SHARED_A, cycles=1, units=1),),
+            model_quality=ModelQuality.EXACT,
+        ),
     ),
     descriptors=(
         TEST_LOW_CONST_I32_DESCRIPTOR,
@@ -1751,6 +1811,8 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_LOAD_INDEX_V4I32_DESCRIPTOR,
         TEST_LOW_LOAD_INDEX_V4F32_DESCRIPTOR,
         TEST_LOW_STORE_V4I32_DESCRIPTOR,
+        TEST_LOW_SCHEDULE_ALTERNATIVE_STORE_A_V4I32_DESCRIPTOR,
+        TEST_LOW_SCHEDULE_ALTERNATIVE_STORE_B_V4I32_DESCRIPTOR,
         TEST_LOW_STORE_V4F32_DESCRIPTOR,
         TEST_LOW_STORE_INDEX_V4I32_DESCRIPTOR,
         TEST_LOW_STORE_INDEX_V4F32_DESCRIPTOR,
@@ -1761,6 +1823,8 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_RETURN_I32_DESCRIPTOR,
         TEST_LOW_RETURN_VOID_DESCRIPTOR,
         TEST_LOW_PROJECTABLE_EFFECT_I32_DESCRIPTOR,
+        TEST_LOW_SCHEDULE_ALTERNATIVE_A_I32_DESCRIPTOR,
+        TEST_LOW_SCHEDULE_ALTERNATIVE_B_I32_DESCRIPTOR,
     ),
 )
 

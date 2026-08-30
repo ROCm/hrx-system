@@ -651,6 +651,7 @@ class Descriptor:
     operands: tuple[Operand, ...]
     schedule_class: str
     op_kind: DescriptorOpKind = DescriptorOpKind.OP
+    schedule_alternatives: tuple[str, ...] = ()
     immediates: tuple[Immediate, ...] = ()
     encoding_field_values: tuple[EncodingFieldValue, ...] = ()
     asm_forms: tuple[AsmForm, ...] = ()

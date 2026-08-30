@@ -236,6 +236,25 @@ def derive_instruction_classes(
     return tuple(instruction_class for instruction_class in InstructionClass if instruction_class in classes)
 
 
+def validate_schedule_alternative_instruction_classes(
+    descriptors: Sequence[Descriptor],
+    instruction_classes: Sequence[tuple[InstructionClass, ...]],
+) -> None:
+    instruction_classes_by_key = {
+        descriptor.key: classes
+        for descriptor, classes in zip(
+            descriptors,
+            instruction_classes,
+            strict=True,
+        )
+    }
+    for descriptor in descriptors:
+        source_classes = instruction_classes_by_key[descriptor.key]
+        for alternative_key in descriptor.schedule_alternatives:
+            if instruction_classes_by_key[alternative_key] != source_classes:
+                raise ValueError(f"descriptor '{descriptor.key}' schedule alternative '{alternative_key}' changes derived instruction classes")
+
+
 def derive_descriptor_projections(
     descriptor: Descriptor,
     operand_layout: validation.DescriptorOperandLayout,
@@ -356,6 +375,11 @@ def _select_descriptors(spec: DescriptorSet, allowlist: DescriptorAllowlist | No
     while changed:
         changed = False
         for descriptor in tuple(selected.values()):
+            for alternative_key in descriptor.schedule_alternatives:
+                alternative = key_map[alternative_key]
+                if alternative.key not in selected:
+                    selected[alternative.key] = alternative
+                    changed = True
             for operand_form in descriptor.operand_forms:
                 replacement = key_map.get(operand_form.replacement_descriptor)
                 if replacement is None:
@@ -890,6 +914,7 @@ def compile_descriptor_set(
         tuple(physical_register_inputs.values()),
     )
     validation.validate_schedule_model(spec)
+    validation.validate_schedule_alternatives(spec)
     register_part_inputs = _dedupe_by_name(spec.register_parts, lambda item: item.name)
     resource_inputs = _dedupe_by_name(spec.resources, lambda item: item.name)
     schedule_inputs = _dedupe_by_name(spec.schedule_classes, lambda item: item.name)
@@ -1089,6 +1114,10 @@ def compile_descriptor_set(
         )
         for descriptor in selected_descriptors
     ]
+    validate_schedule_alternative_instruction_classes(
+        selected_descriptors,
+        instruction_classes,
+    )
 
     changed = True
     while changed:
@@ -1425,6 +1454,9 @@ def compile_descriptor_set(
         validation.validate_u16_table_count(len(rows), f"descriptor set '{spec.key}' {table_name}")
 
     descriptor_refs = sorted((descriptor.key, i) for i, descriptor in enumerate(selected_descriptors))
+    schedule_alternative_rows = [
+        (source_ordinal, descriptor_ordinals[alternative_key]) for source_ordinal, descriptor in enumerate(source_descriptors) for alternative_key in descriptor.schedule_alternatives
+    ]
     seen_stable_ids: dict[int, str] = {}
     for descriptor in selected_descriptors:
         stable_id = descriptor_stable_id(descriptor.key)
@@ -1481,6 +1513,7 @@ def compile_descriptor_set(
         operand_form_operand_indices=operand_form_operand_indices,
         descriptor_rows=descriptor_rows,
         descriptor_refs=descriptor_refs,
+        schedule_alternative_rows=schedule_alternative_rows,
         canonical_asm_form_ordinals=canonical_asm_form_ordinals,
         asm_forms=asm_forms,
         asm_table_storage=asm_table_storage,

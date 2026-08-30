@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from itertools import pairwise, permutations
 
 from loom.target.low_descriptors import (
@@ -683,6 +683,92 @@ def validate_schedule_model(descriptor_set: DescriptorSet) -> None:
         for effect_index, effect in enumerate(descriptor.effects):
             if effect.timing_event is not None and effect.timing_event not in timing_event_names:
                 raise ValueError(f"descriptor '{descriptor.key}' effect {effect_index} references unknown timing event '{effect.timing_event}'")
+
+
+def _schedule_alternative_semantics(descriptor: Descriptor) -> Descriptor:
+    """Projects a descriptor to facts that must survive physical selection."""
+
+    return replace(
+        descriptor,
+        key="",
+        mnemonic=None,
+        schedule_class="",
+        schedule_alternatives=(),
+        operands=tuple(
+            replace(
+                operand,
+                encoding_field_id=0,
+                encoding_adapter_id=0,
+            )
+            for operand in descriptor.operands
+        ),
+        immediates=tuple(
+            replace(
+                immediate,
+                encoding_field_id=0,
+                encoding_slices=(),
+                encoding_id=0,
+            )
+            for immediate in descriptor.immediates
+        ),
+        encoding_field_values=(),
+        asm_forms=(),
+        asm_surface=DescriptorAsmSurface.AUTHORABLE,
+        asm_surface_reason="",
+        encoding_format_id=0,
+        encoding_id=0,
+    )
+
+
+def validate_schedule_alternatives(descriptor_set: DescriptorSet) -> None:
+    """Proves schedule alternatives preserve every pre-scheduling contract."""
+
+    descriptors = {descriptor.key: descriptor for descriptor in descriptor_set.descriptors}
+    schedule_classes = {schedule_class.name: schedule_class for schedule_class in descriptor_set.schedule_classes}
+    alternative_count = 0
+    for source in descriptor_set.descriptors:
+        if not source.schedule_alternatives:
+            continue
+        if len(source.schedule_alternatives) != len(set(source.schedule_alternatives)):
+            raise ValueError(f"descriptor '{source.key}' schedule alternatives must be unique")
+        if source.schedule_class is None:
+            raise ValueError(f"descriptor '{source.key}' has no schedule class")
+        source_schedule_class = schedule_classes.get(source.schedule_class)
+        if source_schedule_class is None:
+            raise ValueError(f"descriptor '{source.key}' references unknown schedule class '{source.schedule_class}'")
+        source_schedule_semantics = replace(
+            source_schedule_class,
+            name="",
+            issue_uses=(),
+            hazards=(),
+        )
+        source_semantics = _schedule_alternative_semantics(source)
+        for alternative_key in source.schedule_alternatives:
+            alternative_count += 1
+            if alternative_key == source.key:
+                raise ValueError(f"descriptor '{source.key}' names itself as a schedule alternative")
+            alternative = descriptors.get(alternative_key)
+            if alternative is None:
+                raise ValueError(f"descriptor '{source.key}' references unknown schedule alternative '{alternative_key}'")
+            if _schedule_alternative_semantics(alternative) != source_semantics:
+                raise ValueError(f"descriptor '{source.key}' schedule alternative '{alternative_key}' changes semantic, allocation, or timing facts")
+            if alternative.schedule_class is None:
+                raise ValueError(f"descriptor '{alternative.key}' has no schedule class")
+            alternative_schedule_class = schedule_classes.get(alternative.schedule_class)
+            if alternative_schedule_class is None:
+                raise ValueError(f"descriptor '{alternative.key}' references unknown schedule class '{alternative.schedule_class}'")
+            alternative_schedule_semantics = replace(
+                alternative_schedule_class,
+                name="",
+                issue_uses=(),
+                hazards=(),
+            )
+            if alternative_schedule_semantics != source_schedule_semantics:
+                raise ValueError(f"descriptor '{source.key}' schedule alternative '{alternative_key}' changes latency, pressure, or instruction-class facts")
+    validate_u32(
+        alternative_count,
+        f"descriptor set '{descriptor_set.key}' schedule alternative count",
+    )
 
 
 def validate_register_classes(

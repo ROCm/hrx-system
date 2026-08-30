@@ -810,11 +810,11 @@ void loom_low_schedule_pressure_initialize_block(
 
 static void loom_low_schedule_score_candidate_resources(
     const loom_low_schedule_build_state_t* state,
-    const loom_low_schedule_node_t* node, uint32_t prerequisite_stall_cycles,
+    const loom_low_schedule_class_t* schedule_class,
+    uint32_t prerequisite_stall_cycles,
     loom_low_schedule_candidate_score_t* score) {
   score->resource_stall_cycles = 0;
   score->bottleneck_resource_id = LOOM_LOW_RESOURCE_NONE;
-  const loom_low_schedule_class_t* schedule_class = node->schedule_class;
   if (state->options->strategy != LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL ||
       schedule_class == NULL) {
     return;
@@ -862,19 +862,13 @@ static uint32_t loom_low_schedule_min_distance_hazard_stall(
 
 static void loom_low_schedule_score_candidate_hazards(
     const loom_low_schedule_build_state_t* state,
-    const loom_low_schedule_node_t* node, uint32_t node_index,
+    const loom_low_schedule_class_t* schedule_class,
     loom_low_schedule_candidate_score_t* score) {
-  score->completion_wait_cycles = 0;
   score->hazard_stall_cycles = 0;
-  if (state->options->strategy != LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL) {
+  if (state->options->strategy != LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL ||
+      schedule_class == NULL) {
     return;
   }
-  if (state->node_completion_wait_cycles != NULL) {
-    score->completion_wait_cycles =
-        state->node_completion_wait_cycles[node_index];
-  }
-  const loom_low_schedule_class_t* schedule_class = node->schedule_class;
-  if (schedule_class == NULL) return;
   for (uint16_t i = 0; i < schedule_class->hazard_count; ++i) {
     const loom_low_hazard_t* hazard =
         &state->target.descriptor_set
@@ -885,6 +879,107 @@ static void loom_low_schedule_score_candidate_hazards(
     score->hazard_stall_cycles =
         iree_max(score->hazard_stall_cycles,
                  loom_low_schedule_min_distance_hazard_stall(state, hazard));
+  }
+}
+
+static void loom_low_schedule_score_candidate_schedule_class(
+    const loom_low_schedule_build_state_t* state,
+    const loom_low_schedule_class_t* schedule_class,
+    loom_low_schedule_candidate_score_t* score) {
+  loom_low_schedule_score_candidate_hazards(state, schedule_class, score);
+  const uint32_t prerequisite_stall_cycles =
+      iree_max(score->data_ready_stall_cycles,
+               iree_max(score->hazard_stall_cycles,
+                        score->completion_wait_cycles));
+  loom_low_schedule_score_candidate_resources(state, schedule_class,
+                                              prerequisite_stall_cycles, score);
+  score->effective_stall_cycles = iree_math_saturating_add_u32(
+      prerequisite_stall_cycles, score->resource_stall_cycles);
+}
+
+static bool loom_low_schedule_alternative_score_is_better(
+    const loom_low_schedule_candidate_score_t* alternative,
+    const loom_low_schedule_candidate_score_t* selected) {
+  if (alternative->effective_stall_cycles != selected->effective_stall_cycles) {
+    return alternative->effective_stall_cycles <
+           selected->effective_stall_cycles;
+  }
+  if (alternative->hazard_stall_cycles != selected->hazard_stall_cycles) {
+    return alternative->hazard_stall_cycles < selected->hazard_stall_cycles;
+  }
+  return alternative->resource_stall_cycles < selected->resource_stall_cycles;
+}
+
+static uint32_t loom_low_schedule_first_alternative_row(
+    const loom_low_descriptor_set_t* descriptor_set,
+    uint32_t source_descriptor_ordinal) {
+  uint32_t low = 0;
+  uint32_t high = descriptor_set->schedule_alternative_count;
+  while (low < high) {
+    const uint32_t mid = low + (high - low) / 2;
+    if (descriptor_set->schedule_alternatives[mid].source_descriptor_ordinal <
+        source_descriptor_ordinal) {
+      low = mid + 1;
+    } else {
+      high = mid;
+    }
+  }
+  return low;
+}
+
+static void loom_low_schedule_select_candidate_schedule_class(
+    const loom_low_schedule_build_state_t* state,
+    const loom_low_schedule_node_t* node, uint32_t node_index,
+    loom_low_schedule_candidate_score_t* score) {
+  const loom_low_descriptor_set_t* descriptor_set =
+      state->target.descriptor_set;
+  // Completion waits are fixed by the node's incoming effect dependencies.
+  // Alternative schedule classes may change only hazard and resource pricing.
+  score->completion_wait_cycles = 0;
+  if (state->options->strategy == LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL &&
+      state->node_completion_wait_cycles != NULL) {
+    score->completion_wait_cycles =
+        state->node_completion_wait_cycles[node_index];
+  }
+  const uint32_t source_descriptor_ordinal =
+      loom_low_descriptor_set_descriptor_ordinal(descriptor_set,
+                                                 node->source_descriptor);
+  score->selected_descriptor_ordinal = source_descriptor_ordinal;
+  loom_low_schedule_score_candidate_schedule_class(state, node->schedule_class,
+                                                   score);
+  if (state->options->strategy != LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL ||
+      source_descriptor_ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
+    return;
+  }
+
+  const uint32_t row_start = loom_low_schedule_first_alternative_row(
+      descriptor_set, source_descriptor_ordinal);
+  for (uint32_t row_index = row_start;
+       row_index < descriptor_set->schedule_alternative_count; ++row_index) {
+    const loom_low_schedule_alternative_t* alternative =
+        &descriptor_set->schedule_alternatives[row_index];
+    if (alternative->source_descriptor_ordinal != source_descriptor_ordinal) {
+      break;
+    }
+    const loom_low_descriptor_view_t* alternative_descriptor_view =
+        loom_low_descriptor_set_descriptor_view_at(
+            descriptor_set, alternative->alternative_descriptor_ordinal);
+    const loom_low_schedule_class_t* alternative_schedule_class =
+        &descriptor_set
+             ->schedule_classes[alternative_descriptor_view->schedule_class_id];
+    loom_low_schedule_candidate_score_t alternative_score = *score;
+    loom_low_schedule_score_candidate_schedule_class(
+        state, alternative_schedule_class, &alternative_score);
+    if (!loom_low_schedule_alternative_score_is_better(&alternative_score,
+                                                       score)) {
+      continue;
+    }
+    score->hazard_stall_cycles = alternative_score.hazard_stall_cycles;
+    score->resource_stall_cycles = alternative_score.resource_stall_cycles;
+    score->effective_stall_cycles = alternative_score.effective_stall_cycles;
+    score->bottleneck_resource_id = alternative_score.bottleneck_resource_id;
+    score->selected_descriptor_ordinal =
+        alternative->alternative_descriptor_ordinal;
   }
 }
 
@@ -1442,15 +1537,8 @@ void loom_low_schedule_pressure_score_candidate(
         loom_low_schedule_classify_candidate_pressure_risk(
             out_score, pressure_state->current_persistent_pressure_penalty);
   }
-  loom_low_schedule_score_candidate_hazards(state, node, node_index, out_score);
-  const uint32_t prerequisite_stall_cycles =
-      iree_max(out_score->data_ready_stall_cycles,
-               iree_max(out_score->hazard_stall_cycles,
-                        out_score->completion_wait_cycles));
-  loom_low_schedule_score_candidate_resources(
-      state, node, prerequisite_stall_cycles, out_score);
-  out_score->effective_stall_cycles = iree_math_saturating_add_u32(
-      prerequisite_stall_cycles, out_score->resource_stall_cycles);
+  loom_low_schedule_select_candidate_schedule_class(state, node, node_index,
+                                                     out_score);
 }
 
 void loom_low_schedule_pressure_note_node_scheduled(

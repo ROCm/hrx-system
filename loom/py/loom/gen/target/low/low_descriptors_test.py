@@ -1077,6 +1077,86 @@ def test_allowlist_closes_over_operand_form_replacements() -> None:
     assert ".match_kind = LOOM_LOW_OPERAND_FORM_MATCH_ALL_EQUAL_I64" in generated.source
 
 
+def test_schedule_alternatives_are_validated_closed_and_remapped() -> None:
+    base_descriptor = TEST_LOW_ADD_I32_DESCRIPTOR
+    alternative_descriptor = replace(
+        base_descriptor,
+        key="test.add.i32.pipeline_b",
+        mnemonic="test.add.i32.pipeline_b",
+        encoding_id=2,
+    )
+    source_descriptor = replace(
+        base_descriptor,
+        schedule_alternatives=(alternative_descriptor.key,),
+        encoding_id=1,
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(source_descriptor, alternative_descriptor),
+    )
+
+    compiled = compiler.compile_descriptor_set(
+        descriptor_set,
+        DescriptorAllowlist(keys=(source_descriptor.key,)),
+    )
+
+    assert [descriptor.key for descriptor in compiled.descriptors] == [
+        source_descriptor.key,
+        alternative_descriptor.key,
+    ]
+    assert compiled.schedule_alternative_rows == [(0, 1)]
+
+    view_spec = replace(
+        descriptor_set,
+        key="test.low.schedule_alternative_view",
+        c_table_prefix="TestLowScheduleAlternativeView",
+        descriptors=(alternative_descriptor, source_descriptor),
+    )
+    compiled_view = views.descriptor_set_view_for_spec(compiled, view_spec)
+    assert compiled_view.schedule_alternative_rows == [(1, 0)]
+    assert not compiled_view.uses_storage_schedule_alternative_tables
+
+    generated_family = generate_descriptor_set_family(
+        descriptor_set,
+        (view_spec,),
+    )
+    assert "kTestLowScheduleAlternativeViewScheduleAlternatives" in (generated_family.source)
+    assert ".source_descriptor_ordinal = 1" in generated_family.source
+    assert ".alternative_descriptor_ordinal = 0" in generated_family.source
+
+    generated = generate_descriptor_set(
+        descriptor_set,
+        DescriptorAllowlist(keys=(source_descriptor.key,)),
+    )
+    assert "loom_low_schedule_alternative_t" in generated.source
+    assert ".source_descriptor_ordinal = 0" in generated.source
+    assert ".alternative_descriptor_ordinal = 1" in generated.source
+
+
+def test_schedule_alternative_rejects_semantic_changes() -> None:
+    base_descriptor = TEST_LOW_ADD_I32_DESCRIPTOR
+    alternative_descriptor = replace(
+        base_descriptor,
+        key="test.sub.i32.pipeline_b",
+        mnemonic="test.sub.i32.pipeline_b",
+        semantic_tag="integer.sub.i32",
+    )
+    source_descriptor = replace(
+        base_descriptor,
+        schedule_alternatives=(alternative_descriptor.key,),
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(source_descriptor, alternative_descriptor),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor 'test.add.i32' schedule alternative 'test.sub.i32.pipeline_b' changes semantic, allocation, or timing facts"),
+    ):
+        compiler.compile_descriptor_set(descriptor_set)
+
+
 def test_operand_forms_preserve_assembly_implicit_packet_sources() -> None:
     base_descriptor = TEST_LOW_ADD_I32_DESCRIPTOR
     hidden_lhs = replace(base_descriptor.operands[1], flags=(OperandFlag.IMPLICIT,))

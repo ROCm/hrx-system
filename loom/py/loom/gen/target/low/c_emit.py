@@ -784,9 +784,21 @@ def emit_source_for_views(
             compiled.canonical_asm_form_ordinals,
         ),
     )
+    storage_schedule_alternative_table_symbol = view_array_emitter.append_struct_array(
+        "loom_low_schedule_alternative_t",
+        f"k{spec.c_table_prefix}ScheduleAlternatives",
+        [
+            [
+                f".source_descriptor_ordinal = {source_ordinal},",
+                f".alternative_descriptor_ordinal = {alternative_ordinal},",
+            ]
+            for source_ordinal, alternative_ordinal in compiled.schedule_alternative_rows
+        ],
+    )
     descriptor_table_symbols: dict[str, str] = {}
     descriptor_view_table_symbols: dict[str, str] = {}
     operand_form_table_symbols: dict[str, str] = {}
+    schedule_alternative_table_symbols: dict[str, str] = {}
     for view in views:
         view_key = view.spec.key
         if view.uses_storage_descriptor_tables:
@@ -821,6 +833,20 @@ def emit_source_for_views(
                 "loom_low_operand_form_t",
                 f"k{view.spec.c_table_prefix}OperandForms",
                 _operand_form_row_lines(view.operand_forms),
+            )
+        if view.uses_storage_schedule_alternative_tables:
+            schedule_alternative_table_symbols[view_key] = storage_schedule_alternative_table_symbol
+        else:
+            schedule_alternative_table_symbols[view_key] = view_array_emitter.append_struct_array(
+                "loom_low_schedule_alternative_t",
+                f"k{view.spec.c_table_prefix}ScheduleAlternatives",
+                [
+                    [
+                        f".source_descriptor_ordinal = {source_ordinal},",
+                        f".alternative_descriptor_ordinal = {alternative_ordinal},",
+                    ]
+                    for source_ordinal, alternative_ordinal in view.schedule_alternative_rows
+                ],
             )
     descriptor_ref_table_symbols: dict[str, str] = {}
     for view in views:
@@ -959,6 +985,7 @@ def emit_source_for_views(
         descriptor_ref_table_symbol = descriptor_ref_table_symbols[view_spec.key]
         asm_form_table_symbol = asm_form_table_symbols[view_spec.key]
         operand_form_table_symbol = operand_form_table_symbols[view_spec.key]
+        schedule_alternative_table_symbol = schedule_alternative_table_symbols[view_spec.key]
         view_lines = [
             f"static const loom_low_descriptor_set_t k{view_spec.c_table_prefix}Set = {{",
             "    .abi_version = LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION,",
@@ -988,6 +1015,10 @@ def emit_source_for_views(
             f"    .descriptor_refs = {descriptor_ref_table_symbol},",
             f"    .descriptor_ref_count = IREE_ARRAYSIZE({descriptor_ref_table_symbol}),",
         ]
+
+        if view.schedule_alternative_rows:
+            view_lines.append(f"    .schedule_alternatives = {schedule_alternative_table_symbol},")
+            view_lines.append(f"    .schedule_alternative_count = {len(view.schedule_alternative_rows)},")
 
         append_optional_table("operands", "Operands", compiled.operands, view_lines)
         append_optional_table("immediates", "Immediates", compiled.immediates, view_lines)
@@ -1102,6 +1133,7 @@ def emit_source(compiled: CompiledDescriptorSet) -> str:
                 instruction_classes=tuple(compiled.instruction_classes),
                 descriptor_ordinals=tuple(range(len(compiled.descriptors))),
                 descriptor_refs=compiled.descriptor_refs,
+                schedule_alternative_rows=compiled.schedule_alternative_rows,
                 descriptor_rows=compiled.descriptor_rows,
                 canonical_asm_form_ordinals=compiled.canonical_asm_form_ordinals,
                 asm_forms=compiled.asm_forms,
@@ -1110,6 +1142,7 @@ def emit_source(compiled: CompiledDescriptorSet) -> str:
                 uses_storage_descriptor_view_tables=True,
                 uses_storage_asm_form_tables=True,
                 uses_storage_operand_form_tables=True,
+                uses_storage_schedule_alternative_tables=True,
             )
         ],
     )

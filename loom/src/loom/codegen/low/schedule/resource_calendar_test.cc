@@ -32,12 +32,10 @@ class ScheduleResourceCalendarTest : public ::testing::Test {
   }
 
   const loom_low_schedule_class_t* ScheduleClass(uint32_t descriptor_ref) {
-    const loom_low_descriptor_t* descriptor =
-        &descriptor_set_->descriptors[descriptor_ref];
     const loom_low_descriptor_view_t* descriptor_view =
-        loom_low_descriptor_set_descriptor_view(descriptor_set_, descriptor);
-    const uint16_t schedule_class_id = descriptor_view->schedule_class_id;
-    return &descriptor_set_->schedule_classes[schedule_class_id];
+        loom_low_descriptor_set_descriptor_view_at(descriptor_set_,
+                                                   descriptor_ref);
+    return &descriptor_set_->schedule_classes[descriptor_view->schedule_class_id];
   }
 
   uint32_t FindEarliest(const loom_low_schedule_class_t* schedule_class,

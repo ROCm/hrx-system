@@ -182,6 +182,9 @@ typedef struct loom_low_schedule_candidate_score_t {
   uint32_t units_until_pressure_cliff;
   // Source-order tie breaker.
   uint32_t source_ordinal;
+  // Physical descriptor selected for this candidate, or
+  // LOOM_LOW_DESCRIPTOR_ORDINAL_NONE for structural nodes.
+  uint32_t selected_descriptor_ordinal;
   // Maximum latency of same-block SSA producers consumed by the candidate.
   uint16_t dependency_latency_cycles;
   // Descriptor latency for the candidate itself.
