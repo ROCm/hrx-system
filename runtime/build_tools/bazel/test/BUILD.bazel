@@ -6,12 +6,9 @@
 
 # bazel-to-cmake: skip
 
-load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
-load("//runtime/build_tools/bazel:flatcc.bzl", "iree_runtime_flatbuffer_c_library")
 load(":cc_benchmark_rules_test.bzl", "cc_benchmark_rules_test_suite")
 load(":cc_fuzz_rules_test.bzl", "cc_fuzz_rules_test_suite")
 load(":cc_rules_test.bzl", "cc_rules_test_suite")
-load(":flatcc_rules_test.bzl", "flatcc_rules_test_suite")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -20,45 +17,6 @@ cc_benchmark_rules_test_suite(name = "cc_benchmark_tests")
 cc_fuzz_rules_test_suite(name = "cc_fuzz_tests")
 
 cc_rules_test_suite(name = "cc_tests")
-
-iree_runtime_flatbuffer_c_library(
-    name = "flatcc_test_include_schema",
-    srcs = ["flatcc_test_include.fbs"],
-    flatcc_args = [
-        "--reader",
-        "--builder",
-        "--verifier",
-    ],
-    includes = ["."],
-)
-
-iree_runtime_flatbuffer_c_library(
-    name = "flatcc_test_schema",
-    srcs = ["flatcc_test_library_schema.fbs"],
-    flatcc_args = [
-        "--reader",
-        "--builder",
-        "--verifier",
-    ],
-    flatcc_includes = ["flatcc_test_include.fbs"],
-    includes = ["."],
-    deps = [
-        ":flatcc_test_include_schema",
-    ],
-)
-
-iree_runtime_cc_test(
-    name = "flatcc_compile_test",
-    srcs = ["flatcc_compile_test.cc"],
-    deps = [
-        ":flatcc_test_schema",
-        "//runtime/src/iree/base/internal/flatcc:parsing",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-    ],
-)
-
-flatcc_rules_test_suite(name = "flatcc_tests")
 
 test_suite(
     name = "hal_cts_tests",

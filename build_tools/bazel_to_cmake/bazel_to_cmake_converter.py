@@ -2575,37 +2575,6 @@ class BuildFileFunctions(object):
         )
         self._emit_platform_guard_end(target_compatible_with)
 
-    def iree_flatbuffer_c_library(
-        self,
-        name,
-        srcs,
-        flatcc_args=None,
-        includes=None,
-        deps=None,
-        tags=None,
-        target_compatible_with=None,
-        **kwargs,
-    ):
-        if self._should_skip_target(tags=tags, **kwargs):
-            return
-        name_block = self._convert_string_arg_block("NAME", name, quote=False)
-        srcs_block = self._convert_srcs_block(srcs)
-        flatcc_args_block = self._convert_string_list_block("FLATCC_ARGS", flatcc_args)
-        includes_block = self._convert_srcs_block(includes, block_name="INCLUDES")
-        deps_block = self._convert_target_list_block("DEPS", deps)
-
-        self._emit_platform_guard_begin(target_compatible_with)
-        self._converter.body += (
-            f"flatbuffer_c_library(\n"
-            f"{name_block}"
-            f"{srcs_block}"
-            f"{flatcc_args_block}"
-            f"{includes_block}"
-            f"{deps_block}"
-            f"  PUBLIC\n)\n\n"
-        )
-        self._emit_platform_guard_end(target_compatible_with)
-
     def iree_execution_test_suite(
         self,
         name,

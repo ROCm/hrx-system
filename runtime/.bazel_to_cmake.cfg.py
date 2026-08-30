@@ -97,14 +97,6 @@ class RuntimeBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
     def iree_executable_test(self, src, **kwargs):
         self.native_test(src=src, **kwargs)
 
-    def iree_runtime_flatbuffer_c_library(
-        self, flatcc_includes=None, deps=None, **kwargs
-    ):
-        kwargs = self._apply_runtime_cmake_policy(kwargs)
-        if deps:
-            kwargs["deps"] = deps
-        self.iree_flatbuffer_c_library(includes=flatcc_includes, **kwargs)
-
     def iree_checked_glob(self, files, **kwargs):
         return files
 

@@ -219,7 +219,6 @@ foreach(_hrx_object_target
     $<TARGET_PROPERTY:iree_base_base,INTERFACE_COMPILE_DEFINITIONS>
   )
   foreach(_hrx_generated_header_target
-      iree_base_internal_flatcc_dummy_gen
       op_table_gen
       encoding_table_gen)
     if(TARGET ${_hrx_generated_header_target})

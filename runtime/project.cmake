@@ -99,7 +99,6 @@ set(IREE_HAL_AMDGPU_TARGETS
   CACHE STRING
   "AMDGPU target selectors supported by this runtime build.")
 
-include(flatbuffer_c_library)
 include(binary)
 include(selectors)
 include(cts)

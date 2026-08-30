@@ -29,9 +29,6 @@ class TargetConverter:
                 "//third_party:google_benchmark_main": [
                     "iree::third_party::google_benchmark_main"
                 ],
-                "//third_party:flatcc": ["iree-flatcc-cli"],
-                "//third_party:flatcc_parsing": ["iree::third_party::flatcc_parsing"],
-                "//third_party:flatcc_runtime": ["iree::third_party::flatcc_runtime"],
                 "//third_party:google_test": ["iree::third_party::google_test"],
                 "//third_party:google_test_main": [
                     "iree::third_party::google_test_main"
