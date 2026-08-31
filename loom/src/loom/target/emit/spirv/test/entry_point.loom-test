@@ -2,6 +2,11 @@
 // REQUIRES: spirv-dis, spirv-val
 
 spirv.target<vulkan1_3> @target
+vm.target<core> @vm_target
+
+func.def public target(@vm_target) @vm_identity(%value: i32) -> (i32) {
+  func.return %value : i32
+}
 
 low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @empty_entry() {
   low.schedule.fence
