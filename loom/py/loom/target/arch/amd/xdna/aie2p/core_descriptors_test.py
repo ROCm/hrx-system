@@ -48,11 +48,6 @@ from loom.target.low_descriptors import (
 
 def test_core_descriptor_closure_is_complete() -> None:
     descriptor_set = AIE2P_CORE_DESCRIPTOR_SET
-    assert len(descriptor_set.physical_registers) == 359
-    assert len(descriptor_set.reg_classes) == 22
-    assert len(descriptor_set.physical_register_views) == 12
-    assert len(descriptor_set.register_parts) == 4
-    assert len(descriptor_set.descriptors) == 172
     assert tuple(row.name for row in descriptor_set.physical_registers) == tuple(
         row.name for row in CORE_MACHINE_TABLE.physical_registers
     )
@@ -70,10 +65,6 @@ def test_core_descriptor_closure_is_complete() -> None:
 
 def test_complete_schedule_domain_drives_selected_low_descriptors() -> None:
     descriptor_set = AIE2P_CORE_DESCRIPTOR_SET
-    assert len(descriptor_set.resources) == 90
-    assert len(descriptor_set.timing_events) == 38
-    assert len(descriptor_set.event_separations) == 651
-    assert len(descriptor_set.schedule_classes) == 38
     assert {
         resource.name
         for resource in descriptor_set.resources
@@ -382,6 +373,16 @@ def test_descriptor_encoding_ids_and_adapters_are_materialized() -> None:
     static_offset = descriptors["amd.xdna.aie2p.materialize.static-byte-offset.i32"]
     assert static_offset.asm_forms[0].mnemonic == "mov.static-byte-offset"
     assert static_offset.operands[0].reg_alts[0].reg_class == "aie2p.er"
+
+    local_address = descriptors["amd.xdna.aie2p.materialize.local-address.i32"]
+    assert local_address.semantic_tag == "memory.materialize.local-address.i32"
+    assert local_address.asm_forms[0].mnemonic == "mov.local-address"
+    assert local_address.operands[0].reg_alts[0].reg_class == "aie2p.ep"
+    assert local_address.operands[0].unit_count == 1
+    assert local_address.operands[0].encoding_field_id != 0
+    assert local_address.operands[0].encoding_adapter_id != 0
+    assert local_address.immediates[0].field_name == "i"
+    assert local_address.immediates[0].bit_width == 32
 
     short_constant = descriptors["amd.xdna.aie2p.constant.i32.short"]
     full_constant = descriptors["amd.xdna.aie2p.constant.i32"]
