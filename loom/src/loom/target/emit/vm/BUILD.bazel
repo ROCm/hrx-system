@@ -21,7 +21,7 @@ loom_cc_library(
     name = "launch_config_abi",
     hdrs = ["launch_config_abi.h"],
     visibility = [
-        "//loom/binding/c:__pkg__",
+        "//loom/binding/c/target/vm:__pkg__",
         "//loom/src/loom/target/arch/vm:__pkg__",
     ],
     deps = ["//runtime/src/iree/base"],

@@ -35,8 +35,8 @@
 #include "loom/target/function_version.h"
 #include "loom/target/provider.h"
 #include "loom/tooling/compile/pipeline.h"
-#include "loomc/launch_config.h"
 #include "loomc/target/amdgpu.h"
+#include "loomc/target/vm.h"
 
 namespace {
 
@@ -60,8 +60,8 @@ using loomc::bench::ValidateArtifact;
 using loomc::bench::WorkspacePtr;
 
 using LaunchConfigProgramPtr =
-    loomc::bench::HandlePtr<loomc_launch_config_program_t,
-                            loomc_launch_config_program_release>;
+    loomc::bench::HandlePtr<loomc_vm_launch_config_program_t,
+                            loomc_vm_launch_config_program_release>;
 
 static iree_status_t CreateAmdgpuTargetEnvironment(
     TargetEnvironmentPtr* out_target_environment) {
@@ -177,8 +177,8 @@ class LaunchConfigBenchmarkFixture {
   iree_status_t LoadProgram(const loomc_artifact_t* artifact,
                             LaunchConfigProgramPtr* out_program) const {
     out_program->reset();
-    loomc_launch_config_program_t* program = nullptr;
-    IREE_RETURN_IF_ERROR(to_iree_status(loomc_launch_config_program_load(
+    loomc_vm_launch_config_program_t* program = nullptr;
+    IREE_RETURN_IF_ERROR(to_iree_status(loomc_vm_launch_config_program_load(
         artifact, loom_allocator(), &program)));
     out_program->reset(program);
     return iree_ok_status();
@@ -207,15 +207,15 @@ class LaunchConfigBenchmarkFixture {
 
   iree_status_t LookupFunction(
       iree_string_view_t function_name,
-      loomc_launch_config_function_t* out_function) const {
-    return to_iree_status(loomc_launch_config_program_lookup_function(
+      loomc_vm_launch_config_function_t* out_function) const {
+    return to_iree_status(loomc_vm_launch_config_program_lookup_function(
         program_.get(), loomc_string_view_from_iree(function_name),
         out_function));
   }
 
   iree_status_t Invoke(uint64_t element_count,
                        loomc_launch_config_t* out_config) {
-    return to_iree_status(loomc_launch_config_program_invoke(
+    return to_iree_status(loomc_vm_launch_config_program_invoke(
         program_.get(), function_, &element_count, /*argument_count=*/1,
         out_config));
   }
@@ -320,8 +320,8 @@ class LaunchConfigBenchmarkFixture {
   LaunchConfigProgramPtr program_;
 
   // Resolved exported function used by warm invocation benchmarks.
-  loomc_launch_config_function_t function_ =
-      loomc_launch_config_function_invalid();
+  loomc_vm_launch_config_function_t function_ =
+      loomc_vm_launch_config_function_invalid();
 
   // Result storage used to validate setup before timing begins.
   loomc_launch_config_t warm_config_ = {
@@ -757,8 +757,8 @@ static void BM_VmLaunchConfigFunctionLookupSmoke(benchmark::State& state) {
 
   for (auto _ : state) {
     (void)_;
-    loomc_launch_config_function_t function =
-        loomc_launch_config_function_invalid();
+    loomc_vm_launch_config_function_t function =
+        loomc_vm_launch_config_function_invalid();
     iree_status_t status =
         fixture.LookupFunction(IREE_SV("unchecked_1d"), &function);
     if (IREE_UNLIKELY(!iree_status_is_ok(status))) {
@@ -928,10 +928,10 @@ static void BM_VmLaunchConfigReadinessSmoke(benchmark::State& state) {
   if (iree_status_is_ok(warm_status)) {
     warm_status = fixture.LoadProgram(warm_artifact, &warm_program);
   }
-  loomc_launch_config_function_t warm_function =
-      loomc_launch_config_function_invalid();
+  loomc_vm_launch_config_function_t warm_function =
+      loomc_vm_launch_config_function_invalid();
   if (iree_status_is_ok(warm_status)) {
-    warm_status = to_iree_status(loomc_launch_config_program_lookup_function(
+    warm_status = to_iree_status(loomc_vm_launch_config_program_lookup_function(
         warm_program.get(), loomc_make_cstring_view("unchecked_1d"),
         &warm_function));
   }
@@ -947,8 +947,8 @@ static void BM_VmLaunchConfigReadinessSmoke(benchmark::State& state) {
     (void)_;
     ResultPtr result;
     LaunchConfigProgramPtr program;
-    loomc_launch_config_function_t function =
-        loomc_launch_config_function_invalid();
+    loomc_vm_launch_config_function_t function =
+        loomc_vm_launch_config_function_invalid();
     iree_status_t status =
         fixture.Compile(LOOMC_COMPILE_ARTIFACT_FLAG_LAUNCH_CONFIG, &result);
     const loomc_artifact_t* artifact = nullptr;
@@ -965,7 +965,7 @@ static void BM_VmLaunchConfigReadinessSmoke(benchmark::State& state) {
       status = fixture.LoadProgram(artifact, &program);
     }
     if (iree_status_is_ok(status)) {
-      status = to_iree_status(loomc_launch_config_program_lookup_function(
+      status = to_iree_status(loomc_vm_launch_config_program_lookup_function(
           program.get(), loomc_make_cstring_view("unchecked_1d"), &function));
     }
     if (IREE_UNLIKELY(!iree_status_is_ok(status))) {

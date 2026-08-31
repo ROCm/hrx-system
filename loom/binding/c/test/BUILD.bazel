@@ -18,11 +18,6 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
-LOOMC_TARGET_SPIRV_COMPATIBLE_WITH = loom_config_compatible_with([
-    "//loom/config/target/arch:spirv",
-    "//loom/config/emit:spirv",
-])
-
 LOOMC_TARGET_SPIRV_VULKAN_COMPATIBLE_WITH = loom_config_compatible_with([
     "//loom/config/execute:spirv_vulkan_hal",
 ])
@@ -201,17 +196,6 @@ loom_cc_test(
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
         "//runtime/src/iree/testing:temp_file",
-    ],
-)
-
-loom_cc_test(
-    name = "launch_config_test",
-    srcs = ["launch_config_test.cc"],
-    deps = [
-        ":test_util",
-        "//loom/binding/c:loomc",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

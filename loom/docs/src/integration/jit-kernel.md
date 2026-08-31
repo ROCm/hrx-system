@@ -116,6 +116,10 @@ racing or attempting to restore the transformed module.
 
 ## Load and evaluate the host companion
 
+The loader is supplied by the optional `loomc/target/vm` package. Core
+`loomc` defines the target-independent launch result and can compile other
+products without linking the VM runtime.
+
 The compile result owns the launch-config artifact bytes. Loading them produces
 an independently retained program, so the compile result can be released as
 soon as loading completes:
@@ -181,7 +185,7 @@ submission, synchronization, and teardown.
 One cached kernel version therefore retains:
 
 1. the runtime's loaded executable and function token;
-2. the loaded `loomc_launch_config_program_t` and matching function token; and
+2. the loaded `loomc_vm_launch_config_program_t` and matching function token; and
 3. the stable public export name used to bind those two independently loaded
    products.
 
@@ -211,7 +215,7 @@ not belong in a target-independent `loomc` helper.
 | `loomc_workspace_t` | Mutable scratch owned by one active worker. |
 | `loomc_module_t` | Mutable during compile and emit; one active invocation owns it. |
 | `loomc_result_t` | Lifetime root for borrowed diagnostics and artifacts. |
-| `loomc_launch_config_program_t` | Retained cached program; invocations on one handle do not overlap without external synchronization. |
+| `loomc_vm_launch_config_program_t` | Retained cached program; invocations on one handle do not overlap without external synchronization. |
 | Runtime executable | Owned and synchronized by the target runtime integration. |
 
 The status/result split is equally important. A non-OK `loomc_status_t` means

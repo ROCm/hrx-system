@@ -82,6 +82,12 @@ LOOMC_TARGET_CMD_PUBLIC_HDRS = [
     "include/loomc/target/cmd/program.h",
 ]
 
+LOOMC_TARGET_VM_PUBLIC_HDRS = [
+    "include/loomc/target/vm.h",
+    "include/loomc/target/vm/base.h",
+    "include/loomc/target/vm/launch_config.h",
+]
+
 LOOMC_TARGET_SPIRV_VULKANINFO_PUBLIC_HDRS = [
     "include/loomc/target/spirv/vulkaninfo.h",
 ]
@@ -115,7 +121,8 @@ exports_files(
     LOOMC_TARGET_SPIRV_PUBLIC_HDRS +
     LOOMC_TARGET_SPIRV_IREE_HAL_PUBLIC_HDRS +
     LOOMC_TARGET_SPIRV_VULKANINFO_PUBLIC_HDRS +
-    LOOMC_TARGET_SPIRV_VULKAN_PUBLIC_HDRS,
+    LOOMC_TARGET_SPIRV_VULKAN_PUBLIC_HDRS +
+    LOOMC_TARGET_VM_PUBLIC_HDRS,
     visibility = _TARGET_EXTENSION_VISIBILITY,
 )
 
@@ -134,7 +141,6 @@ loom_cc_library(
         "src/context.c",
         "src/diagnostic.c",
         "src/emit.c",
-        "src/launch_config.c",
         "src/link.c",
         "src/link_dependency.c",
         "src/link_index.c",
@@ -228,7 +234,6 @@ loom_cc_library(
         "//loom/src/loom/target:provider",
         "//loom/src/loom/target:specialization",
         "//loom/src/loom/target:types",
-        "//loom/src/loom/target/emit/vm:launch_config_abi",
         "//loom/src/loom/target/reporting:artifact_manifest",
         "//loom/src/loom/target/reporting:format",
         "//loom/src/loom/target/reporting:report",
@@ -242,8 +247,6 @@ loom_cc_library(
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/io:file_handle",
         "//runtime/src/iree/io:stream",
-        "//runtime/src/iree/vm",
-        "//runtime/src/iree/vm/bytecode",
     ],
 )
 

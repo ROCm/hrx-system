@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loomc/launch_config.h"
+#include "loomc/target/vm/launch_config.h"
 
 #include <inttypes.h>
 #include <stdint.h>
@@ -22,10 +22,10 @@
 enum {
   // Reusable storage for synchronous launch configuration execution. The
   // compiled functions are deliberately small and may not yield.
-  LOOMC_LAUNCH_CONFIG_INVOCATION_STORAGE_SIZE = 16 * 1024,
+  LOOMC_VM_LAUNCH_CONFIG_INVOCATION_STORAGE_SIZE = 16 * 1024,
 };
 
-typedef struct loomc_launch_config_function_storage_t {
+typedef struct loomc_vm_launch_config_function_storage_t {
   // Process-bound function invoked without a lookup on the hot path.
   iree_vm_function_t function;
 
@@ -43,9 +43,9 @@ typedef struct loomc_launch_config_function_storage_t {
     // Number of entries in |types|.
     iree_host_size_t count;
   } arguments;
-} loomc_launch_config_function_storage_t;
+} loomc_vm_launch_config_function_storage_t;
 
-typedef struct loomc_launch_config_function_declaration_t {
+typedef struct loomc_vm_launch_config_function_declaration_t {
   // Public kernel export name with the private prefix removed.
   iree_string_view_t name;
 
@@ -54,9 +54,9 @@ typedef struct loomc_launch_config_function_declaration_t {
 
   // Final workgroup-local storage requirement in bytes.
   uint64_t workgroup_storage_bytes;
-} loomc_launch_config_function_declaration_t;
+} loomc_vm_launch_config_function_declaration_t;
 
-struct loomc_launch_config_program_t {
+struct loomc_vm_launch_config_program_t {
   // Atomic reference count for retained handle ownership.
   iree_atomic_ref_count_t ref_count;
 
@@ -72,7 +72,7 @@ struct loomc_launch_config_program_t {
   // Name-sorted export-ordinal functions.
   struct {
     // Function table in program-owned slab storage.
-    loomc_launch_config_function_storage_t* data;
+    loomc_vm_launch_config_function_storage_t* data;
 
     // Number of entries in |data|.
     iree_host_size_t count;
@@ -82,12 +82,12 @@ struct loomc_launch_config_program_t {
   iree_vm_variant_t* argument_variants;
 };
 
-static bool loomc_launch_config_string_view_is_well_formed(
+static bool loomc_vm_launch_config_string_view_is_well_formed(
     loomc_string_view_t value) {
   return value.data != NULL || value.size == 0;
 }
 
-static loomc_status_t loomc_launch_config_validate_result(
+static loomc_status_t loomc_vm_launch_config_validate_result(
     const loomc_launch_config_t* config) {
   if (config == NULL) {
     return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
@@ -110,8 +110,8 @@ static loomc_status_t loomc_launch_config_validate_result(
   return loomc_ok_status();
 }
 
-static bool loomc_launch_config_scalar_type_is_supported(uint16_t kind,
-                                                         uint16_t ordinal) {
+static bool loomc_vm_launch_config_scalar_type_is_supported(uint16_t kind,
+                                                            uint16_t ordinal) {
   if (ordinal != 0) return false;
   switch ((iree_vm_scalar_type_t)kind) {
     case IREE_VM_SCALAR_TYPE_I8:
@@ -130,10 +130,10 @@ static bool loomc_launch_config_scalar_type_is_supported(uint16_t kind,
   }
 }
 
-static iree_status_t loomc_launch_config_query_function(
+static iree_status_t loomc_vm_launch_config_query_function(
     const iree_vm_module_t* module, iree_host_size_t export_ordinal,
-    loomc_launch_config_function_declaration_t* out_declaration) {
-  *out_declaration = (loomc_launch_config_function_declaration_t){0};
+    loomc_vm_launch_config_function_declaration_t* out_declaration) {
+  *out_declaration = (loomc_vm_launch_config_function_declaration_t){0};
   iree_vm_module_export_declaration_t export_declaration = {0};
   IREE_RETURN_IF_ERROR(
       iree_vm_module_query_export(module, export_ordinal, &export_declaration));
@@ -159,7 +159,7 @@ static iree_status_t loomc_launch_config_query_function(
   const iree_vm_module_signature_type_span_t arguments =
       callable.signature.arguments;
   for (iree_host_size_t i = 0; i < arguments.count; ++i) {
-    if (!loomc_launch_config_scalar_type_is_supported(
+    if (!loomc_vm_launch_config_scalar_type_is_supported(
             arguments.data[i].kind, arguments.data[i].type_ordinal)) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "launch config export '%.*s' argument %" PRIhsz
@@ -204,7 +204,7 @@ static iree_status_t loomc_launch_config_query_function(
   IREE_RETURN_IF_ERROR(iree_vm_u64_from_metadata_value(
       metadata_value, &workgroup_storage_bytes));
 
-  *out_declaration = (loomc_launch_config_function_declaration_t){
+  *out_declaration = (loomc_vm_launch_config_function_declaration_t){
       .name = name,
       .callable = callable,
       .workgroup_storage_bytes = workgroup_storage_bytes,
@@ -212,7 +212,7 @@ static iree_status_t loomc_launch_config_query_function(
   return iree_ok_status();
 }
 
-static iree_status_t loomc_launch_config_measure_functions(
+static iree_status_t loomc_vm_launch_config_measure_functions(
     const iree_vm_module_t* module, iree_host_size_t* out_argument_type_count,
     iree_host_size_t* out_max_argument_count) {
   *out_argument_type_count = 0;
@@ -224,9 +224,9 @@ static iree_status_t loomc_launch_config_measure_functions(
         "launch config artifact contains no exported functions");
   }
   for (iree_host_size_t i = 0; i < function_count; ++i) {
-    loomc_launch_config_function_declaration_t declaration = {0};
+    loomc_vm_launch_config_function_declaration_t declaration = {0};
     IREE_RETURN_IF_ERROR(
-        loomc_launch_config_query_function(module, i, &declaration));
+        loomc_vm_launch_config_query_function(module, i, &declaration));
     if (!iree_host_size_checked_add(
             *out_argument_type_count,
             declaration.callable.signature.arguments.count,
@@ -242,10 +242,10 @@ static iree_status_t loomc_launch_config_measure_functions(
   return iree_ok_status();
 }
 
-static iree_status_t loomc_launch_config_program_create_slab(
+static iree_status_t loomc_vm_launch_config_program_create_slab(
     iree_vm_module_t* module, iree_host_size_t argument_type_count,
     iree_host_size_t max_argument_count, loomc_allocator_t allocator,
-    loomc_launch_config_program_t** out_program) {
+    loomc_vm_launch_config_program_t** out_program) {
   *out_program = NULL;
   const iree_host_size_t function_count = iree_vm_module_export_count(module);
   iree_host_size_t total_size = 0;
@@ -254,10 +254,10 @@ static iree_status_t loomc_launch_config_program_create_slab(
   iree_host_size_t argument_variants_offset = 0;
   iree_host_size_t invocation_storage_offset = 0;
   IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
-      sizeof(loomc_launch_config_program_t), &total_size,
+      sizeof(loomc_vm_launch_config_program_t), &total_size,
       IREE_STRUCT_FIELD_ALIGNED(
-          function_count, loomc_launch_config_function_storage_t,
-          iree_alignof(loomc_launch_config_function_storage_t),
+          function_count, loomc_vm_launch_config_function_storage_t,
+          iree_alignof(loomc_vm_launch_config_function_storage_t),
           &functions_offset),
       IREE_STRUCT_FIELD_ALIGNED(argument_type_count, iree_vm_scalar_type_t,
                                 iree_alignof(iree_vm_scalar_type_t),
@@ -265,19 +265,19 @@ static iree_status_t loomc_launch_config_program_create_slab(
       IREE_STRUCT_FIELD_ALIGNED(max_argument_count, iree_vm_variant_t,
                                 iree_alignof(iree_vm_variant_t),
                                 &argument_variants_offset),
-      IREE_STRUCT_FIELD_ALIGNED(LOOMC_LAUNCH_CONFIG_INVOCATION_STORAGE_SIZE,
+      IREE_STRUCT_FIELD_ALIGNED(LOOMC_VM_LAUNCH_CONFIG_INVOCATION_STORAGE_SIZE,
                                 uint8_t, iree_max_align_t,
                                 &invocation_storage_offset)));
 
-  loomc_launch_config_program_t* program = NULL;
+  loomc_vm_launch_config_program_t* program = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(
       iree_allocator_from_loomc(allocator), total_size, (void**)&program));
   memset(program, 0, total_size);
   iree_atomic_ref_count_init(&program->ref_count);
   program->allocator = allocator;
   program->functions.data =
-      (loomc_launch_config_function_storage_t*)((uint8_t*)program +
-                                                functions_offset);
+      (loomc_vm_launch_config_function_storage_t*)((uint8_t*)program +
+                                                   functions_offset);
   program->functions.count = function_count;
   program->argument_variants =
       max_argument_count != 0
@@ -290,14 +290,14 @@ static iree_status_t loomc_launch_config_program_create_slab(
           : NULL;
   iree_host_size_t argument_type_offset = 0;
   for (iree_host_size_t i = 0; i < function_count; ++i) {
-    loomc_launch_config_function_declaration_t declaration = {0};
+    loomc_vm_launch_config_function_declaration_t declaration = {0};
     iree_status_t status =
-        loomc_launch_config_query_function(module, i, &declaration);
+        loomc_vm_launch_config_query_function(module, i, &declaration);
     if (!iree_status_is_ok(status)) {
       iree_allocator_free(iree_allocator_from_loomc(allocator), program);
       return status;
     }
-    loomc_launch_config_function_storage_t* function =
+    loomc_vm_launch_config_function_storage_t* function =
         &program->functions.data[i];
     function->name = declaration.name;
     function->workgroup_storage_bytes = declaration.workgroup_storage_bytes;
@@ -315,7 +315,7 @@ static iree_status_t loomc_launch_config_program_create_slab(
   }
   iree_status_t status = iree_vm_invocation_initialize(
       iree_make_byte_span((uint8_t*)program + invocation_storage_offset,
-                          LOOMC_LAUNCH_CONFIG_INVOCATION_STORAGE_SIZE),
+                          LOOMC_VM_LAUNCH_CONFIG_INVOCATION_STORAGE_SIZE),
       &program->invocation);
   if (!iree_status_is_ok(status)) {
     iree_allocator_free(iree_allocator_from_loomc(allocator), program);
@@ -325,8 +325,8 @@ static iree_status_t loomc_launch_config_program_create_slab(
   return iree_ok_status();
 }
 
-static void loomc_launch_config_program_destroy(
-    loomc_launch_config_program_t* program) {
+static void loomc_vm_launch_config_program_destroy(
+    loomc_vm_launch_config_program_t* program) {
   if (program == NULL) return;
   loomc_allocator_t allocator = program->allocator;
   iree_vm_invocation_deinitialize(program->invocation);
@@ -334,9 +334,9 @@ static void loomc_launch_config_program_destroy(
   loomc_allocator_free(allocator, program);
 }
 
-static iree_status_t loomc_launch_config_bind_functions(
+static iree_status_t loomc_vm_launch_config_bind_functions(
     const iree_vm_module_t* module, iree_vm_process_t* process,
-    loomc_launch_config_program_t* program) {
+    loomc_vm_launch_config_program_t* program) {
   for (iree_host_size_t i = 0; i < program->functions.count; ++i) {
     iree_vm_export_t export_value = {0};
     IREE_RETURN_IF_ERROR(
@@ -347,9 +347,9 @@ static iree_status_t loomc_launch_config_bind_functions(
   return iree_ok_status();
 }
 
-static loomc_status_t loomc_launch_config_program_load_impl(
+static loomc_status_t loomc_vm_launch_config_program_load_impl(
     const loomc_artifact_t* artifact, loomc_allocator_t allocator,
-    loomc_launch_config_program_t** out_program) {
+    loomc_vm_launch_config_program_t** out_program) {
   if (out_program == NULL) {
     return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
                              "out_program must not be NULL");
@@ -364,8 +364,9 @@ static loomc_status_t loomc_launch_config_program_load_impl(
         LOOMC_STATUS_INVALID_ARGUMENT,
         "artifact kind is not LOOMC_ARTIFACT_KIND_LAUNCH_CONFIG");
   }
-  if (!loomc_launch_config_string_view_is_well_formed(artifact->format) ||
-      !loomc_launch_config_string_view_is_well_formed(artifact->identifier)) {
+  if (!loomc_vm_launch_config_string_view_is_well_formed(artifact->format) ||
+      !loomc_vm_launch_config_string_view_is_well_formed(
+          artifact->identifier)) {
     return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
                              "artifact string view is malformed");
   }
@@ -392,7 +393,7 @@ static loomc_status_t loomc_launch_config_program_load_impl(
   iree_vm_environment_t* environment = NULL;
   iree_vm_module_t* module = NULL;
   iree_vm_program_t* vm_program = NULL;
-  loomc_launch_config_program_t* program = NULL;
+  loomc_vm_launch_config_program_t* program = NULL;
 
   iree_status_t status = iree_byte_sequence_clone(
       iree_byte_sequence_from_loomc(artifact->contents), host_allocator,
@@ -418,11 +419,11 @@ static loomc_status_t loomc_launch_config_program_load_impl(
   iree_host_size_t argument_type_count = 0;
   iree_host_size_t max_argument_count = 0;
   if (iree_status_is_ok(status)) {
-    status = loomc_launch_config_measure_functions(module, &argument_type_count,
-                                                   &max_argument_count);
+    status = loomc_vm_launch_config_measure_functions(
+        module, &argument_type_count, &max_argument_count);
   }
   if (iree_status_is_ok(status)) {
-    status = loomc_launch_config_program_create_slab(
+    status = loomc_vm_launch_config_program_create_slab(
         module, argument_type_count, max_argument_count, allocator, &program);
   }
   if (iree_status_is_ok(status)) {
@@ -439,56 +440,56 @@ static loomc_status_t loomc_launch_config_program_load_impl(
                                     host_allocator, &program->process);
   }
   if (iree_status_is_ok(status)) {
-    status =
-        loomc_launch_config_bind_functions(module, program->process, program);
+    status = loomc_vm_launch_config_bind_functions(module, program->process,
+                                                   program);
   }
   if (iree_status_is_ok(status)) {
     *out_program = program;
     program = NULL;
   }
 
-  loomc_launch_config_program_destroy(program);
+  loomc_vm_launch_config_program_destroy(program);
   iree_vm_program_release(vm_program);
   iree_vm_module_release(module);
   iree_allocator_free(host_allocator, image_contents.data);
   return loomc_status_from_iree(status);
 }
 
-loomc_status_t loomc_launch_config_program_load(
+loomc_status_t loomc_vm_launch_config_program_load(
     const loomc_artifact_t* artifact, loomc_allocator_t allocator,
-    loomc_launch_config_program_t** out_program) {
-  return loomc_launch_config_program_load_impl(artifact, allocator,
-                                               out_program);
+    loomc_vm_launch_config_program_t** out_program) {
+  return loomc_vm_launch_config_program_load_impl(artifact, allocator,
+                                                  out_program);
 }
 
-void loomc_launch_config_program_retain(
-    loomc_launch_config_program_t* program) {
+void loomc_vm_launch_config_program_retain(
+    loomc_vm_launch_config_program_t* program) {
   if (program == NULL) return;
   iree_atomic_ref_count_inc(&program->ref_count);
 }
 
-void loomc_launch_config_program_release(
-    loomc_launch_config_program_t* program) {
+void loomc_vm_launch_config_program_release(
+    loomc_vm_launch_config_program_t* program) {
   if (program == NULL) return;
   if (iree_atomic_ref_count_dec(&program->ref_count) == 1) {
-    loomc_launch_config_program_destroy(program);
+    loomc_vm_launch_config_program_destroy(program);
   }
 }
 
-loomc_status_t loomc_launch_config_program_lookup_function(
-    const loomc_launch_config_program_t* program,
+loomc_status_t loomc_vm_launch_config_program_lookup_function(
+    const loomc_vm_launch_config_program_t* program,
     loomc_string_view_t export_name,
-    loomc_launch_config_function_t* out_function) {
+    loomc_vm_launch_config_function_t* out_function) {
   if (out_function == NULL) {
     return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
                              "out_function must not be NULL");
   }
-  *out_function = loomc_launch_config_function_invalid();
+  *out_function = loomc_vm_launch_config_function_invalid();
   if (program == NULL) {
     return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
                              "launch config program must not be NULL");
   }
-  if (!loomc_launch_config_string_view_is_well_formed(export_name) ||
+  if (!loomc_vm_launch_config_string_view_is_well_formed(export_name) ||
       loomc_string_view_is_empty(export_name) || export_name.data[0] == '@') {
     return loomc_make_status(
         LOOMC_STATUS_INVALID_ARGUMENT,
@@ -509,7 +510,7 @@ loomc_status_t loomc_launch_config_program_lookup_function(
   }
   if (low < program->functions.count &&
       iree_string_view_equal(program->functions.data[low].name, name)) {
-    *out_function = (loomc_launch_config_function_t){
+    *out_function = (loomc_vm_launch_config_function_t){
         .value = low,
     };
     return loomc_ok_status();
@@ -519,8 +520,8 @@ loomc_status_t loomc_launch_config_program_lookup_function(
       (int)iree_min(name.size, 128), name.data));
 }
 
-static iree_status_t loomc_launch_config_extract_u32(
-    const loomc_launch_config_function_storage_t* function,
+static iree_status_t loomc_vm_launch_config_extract_u32(
+    const loomc_vm_launch_config_function_storage_t* function,
     const iree_vm_variant_t* results, iree_host_size_t result_ordinal,
     const char* field_name, bool require_nonzero, uint32_t* out_value) {
   const uint64_t value = results[result_ordinal].payload;
@@ -535,15 +536,15 @@ static iree_status_t loomc_launch_config_extract_u32(
   return iree_ok_status();
 }
 
-static iree_status_t loomc_launch_config_unpack_results(
-    const loomc_launch_config_function_storage_t* function,
+static iree_status_t loomc_vm_launch_config_unpack_results(
+    const loomc_vm_launch_config_function_storage_t* function,
     const iree_vm_variant_t* results, loomc_launch_config_t* out_config) {
   loomc_launch_config_t config = {
       .type = LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG,
       .structure_size = sizeof(config),
   };
-#define LOOMC_EXTRACT_U32(field, result, nonzero)       \
-  IREE_RETURN_IF_ERROR(loomc_launch_config_extract_u32( \
+#define LOOMC_EXTRACT_U32(field, result, nonzero)          \
+  IREE_RETURN_IF_ERROR(loomc_vm_launch_config_extract_u32( \
       function, results, result, #field, nonzero, &config.field))
   LOOMC_EXTRACT_U32(workgroup_count.x,
                     LOOM_VM_LAUNCH_CONFIG_RESULT_WORKGROUP_COUNT_X, false);
@@ -574,13 +575,13 @@ static iree_status_t loomc_launch_config_unpack_results(
   return iree_ok_status();
 }
 
-loomc_status_t loomc_launch_config_program_invoke(
-    loomc_launch_config_program_t* program,
-    loomc_launch_config_function_t function,
+loomc_status_t loomc_vm_launch_config_program_invoke(
+    loomc_vm_launch_config_program_t* program,
+    loomc_vm_launch_config_function_t function,
     const uint64_t* workload_argument_bits,
     loomc_host_size_t workload_argument_count,
     loomc_launch_config_t* out_config) {
-  LOOMC_RETURN_IF_ERROR(loomc_launch_config_validate_result(out_config));
+  LOOMC_RETURN_IF_ERROR(loomc_vm_launch_config_validate_result(out_config));
   if (program == NULL) {
     return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
                              "launch config program must not be NULL");
@@ -596,7 +597,7 @@ loomc_status_t loomc_launch_config_program_invoke(
         "NULL");
   }
 
-  const loomc_launch_config_function_storage_t* function_storage =
+  const loomc_vm_launch_config_function_storage_t* function_storage =
       &program->functions.data[function.value];
   if (workload_argument_count != function_storage->arguments.count) {
     return loomc_status_from_iree(iree_make_status(
@@ -620,8 +621,8 @@ loomc_status_t loomc_launch_config_program_invoke(
                                                    workload_argument_count),
                      iree_vm_variant_span_from_array(results));
   if (iree_status_is_ok(status)) {
-    status = loomc_launch_config_unpack_results(function_storage, results,
-                                                out_config);
+    status = loomc_vm_launch_config_unpack_results(function_storage, results,
+                                                   out_config);
   }
   return loomc_status_from_iree(status);
 }

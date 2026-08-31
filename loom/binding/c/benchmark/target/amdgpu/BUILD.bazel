@@ -48,6 +48,7 @@ loom_cc_benchmark(
         "//loom/binding/c/benchmark:benchmark_support",
         "//loom/binding/c/benchmark:compile_throughput_benchmark_harness",
         "//loom/binding/c/target/amdgpu",
+        "//loom/binding/c/target/vm",
         "//loom/src/loom/analysis:kernel_launch_config",
         "//loom/src/loom/analysis:symbol_facts",
         "//loom/src/loom/format/text:parser",

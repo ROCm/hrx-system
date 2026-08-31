@@ -15,6 +15,7 @@
 #include "iree/base/threading/numa.h"
 #include "iree/hal/drivers/init.h"
 #include "iree/testing/gtest.h"
+#include "loomc/target/vm.h"
 #include "test/util.h"
 
 namespace loomc::testing::target {
@@ -32,8 +33,9 @@ using HalBufferPtr = HandlePtr<iree_hal_buffer_t, iree_hal_buffer_release>;
 using HalDevicePtr = HandlePtr<iree_hal_device_t, iree_hal_device_release>;
 using HalDeviceGroupPtr =
     HandlePtr<iree_hal_device_group_t, iree_hal_device_group_release>;
-using LaunchConfigProgramPtr = HandlePtr<loomc_launch_config_program_t,
-                                         loomc_launch_config_program_release>;
+using LaunchConfigProgramPtr =
+    HandlePtr<loomc_vm_launch_config_program_t,
+              loomc_vm_launch_config_program_release>;
 using ModulePtr = HandlePtr<loomc_module_t, loomc_module_release>;
 using PassProgramPtr =
     HandlePtr<loomc_pass_program_t, loomc_pass_program_release>;
@@ -533,20 +535,20 @@ void RunIreeHalKernelExecutionTest(const IreeHalKernelExecutionTarget& target) {
       FindArtifact(result.get(), LOOMC_ARTIFACT_KIND_LAUNCH_CONFIG,
                    loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_VM_BYTECODE));
   ASSERT_NE(launch_config_artifact, nullptr);
-  loomc_launch_config_program_t* launch_program = nullptr;
-  LOOMC_ASSERT_OK(loomc_launch_config_program_load(
+  loomc_vm_launch_config_program_t* launch_program = nullptr;
+  LOOMC_ASSERT_OK(loomc_vm_launch_config_program_load(
       launch_config_artifact, loomc_allocator_system(), &launch_program));
   LaunchConfigProgramPtr launch_program_ptr(launch_program);
 
-  loomc_launch_config_function_t launch_function =
-      loomc_launch_config_function_invalid();
-  LOOMC_ASSERT_OK(loomc_launch_config_program_lookup_function(
+  loomc_vm_launch_config_function_t launch_function =
+      loomc_vm_launch_config_function_invalid();
+  LOOMC_ASSERT_OK(loomc_vm_launch_config_program_lookup_function(
       launch_program_ptr.get(), target.kernel_export_name, &launch_function));
   loomc_launch_config_t launch_config = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG,
       /*.structure_size=*/sizeof(launch_config),
   };
-  LOOMC_ASSERT_OK(loomc_launch_config_program_invoke(
+  LOOMC_ASSERT_OK(loomc_vm_launch_config_program_invoke(
       launch_program_ptr.get(), launch_function,
       /*workload_argument_bits=*/nullptr,
       /*workload_argument_count=*/0, &launch_config));

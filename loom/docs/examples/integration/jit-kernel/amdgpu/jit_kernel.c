@@ -10,6 +10,7 @@
 
 #include "loomc/loomc.h"
 #include "loomc/target/amdgpu.h"
+#include "loomc/target/vm.h"
 
 static const char kKernelExportName[] = "workload_grid";
 static const uint64_t kElementCount = 1009;
@@ -40,7 +41,7 @@ typedef struct jit_kernel_state_t {
   loomc_pass_program_t* pass_program;
 
   // Loaded host companion for repeated launch evaluation.
-  loomc_launch_config_program_t* launch_program;
+  loomc_vm_launch_config_program_t* launch_program;
 
   // Last compiler operation result.
   loomc_result_t* result;
@@ -102,7 +103,7 @@ static void jit_kernel_state_reset_result(jit_kernel_state_t* state) {
 
 static void jit_kernel_state_deinitialize(jit_kernel_state_t* state) {
   loomc_result_release(state->result);
-  loomc_launch_config_program_release(state->launch_program);
+  loomc_vm_launch_config_program_release(state->launch_program);
   loomc_pass_program_release(state->pass_program);
   loomc_compiler_release(state->compiler);
   loomc_target_profile_release(state->target_profile);
@@ -254,24 +255,24 @@ static loomc_status_t prepare_and_evaluate_launch(
                              "launch-config artifact was not produced");
   }
 
-  loomc_status_t status = loomc_launch_config_program_load(
+  loomc_status_t status = loomc_vm_launch_config_program_load(
       artifact, loomc_allocator_system(), &state->launch_program);
   if (loomc_status_is_ok(status)) {
     jit_kernel_state_reset_result(state);
   }
-  loomc_launch_config_function_t function =
-      loomc_launch_config_function_invalid();
+  loomc_vm_launch_config_function_t function =
+      loomc_vm_launch_config_function_invalid();
   if (loomc_status_is_ok(status)) {
-    status = loomc_launch_config_program_lookup_function(
+    status = loomc_vm_launch_config_program_lookup_function(
         state->launch_program, loomc_make_cstring_view(kKernelExportName),
         &function);
   }
 
   const uint64_t workload_argument_bits[] = {kElementCount};
   if (loomc_status_is_ok(status)) {
-    status = loomc_launch_config_program_invoke(state->launch_program, function,
-                                                workload_argument_bits, 1,
-                                                out_launch_config);
+    status = loomc_vm_launch_config_program_invoke(
+        state->launch_program, function, workload_argument_bits, 1,
+        out_launch_config);
   }
   return status;
 }

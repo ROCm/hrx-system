@@ -43,6 +43,7 @@ loom_cc_benchmark(
     loom::binding::c::benchmark::compile_throughput_benchmark_harness
     loom::binding::c::loomc
     loom::binding::c::target::amdgpu
+    loom::binding::c::target::vm
     loom::format::text::parser
     loom::ir
     loom::link::linker

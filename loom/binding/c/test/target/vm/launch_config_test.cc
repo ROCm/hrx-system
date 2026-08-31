@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loomc/launch_config.h"
+#include "loomc/target/vm/launch_config.h"
 
 #include <cstdint>
 
@@ -25,17 +25,17 @@ ByteSequencePtr CreateSequence(loomc_byte_span_t contents) {
   return ByteSequencePtr(sequence);
 }
 
-TEST(LaunchConfigProgramTest, RejectsNullArtifactAndClearsOutput) {
-  loomc_launch_config_program_t* program =
-      reinterpret_cast<loomc_launch_config_program_t*>(UINTPTR_MAX);
+TEST(VmLaunchConfigProgramTest, RejectsNullArtifactAndClearsOutput) {
+  loomc_vm_launch_config_program_t* program =
+      reinterpret_cast<loomc_vm_launch_config_program_t*>(UINTPTR_MAX);
   LOOMC_EXPECT_STATUS_IS(
       LOOMC_STATUS_INVALID_ARGUMENT,
-      loomc_launch_config_program_load(
+      loomc_vm_launch_config_program_load(
           /*artifact=*/nullptr, loomc_allocator_system(), &program));
   EXPECT_EQ(program, nullptr);
 }
 
-TEST(LaunchConfigProgramTest, RejectsUnsupportedArtifactFormat) {
+TEST(VmLaunchConfigProgramTest, RejectsUnsupportedArtifactFormat) {
   uint8_t contents[] = {0};
   ByteSequencePtr sequence =
       CreateSequence(loomc_make_byte_span(contents, sizeof(contents)));
@@ -45,16 +45,15 @@ TEST(LaunchConfigProgramTest, RejectsUnsupportedArtifactFormat) {
       /*.identifier=*/loomc_make_cstring_view("launch_config.loombc"),
       /*.contents=*/sequence.get(),
   };
-  loomc_launch_config_program_t* program =
-      reinterpret_cast<loomc_launch_config_program_t*>(UINTPTR_MAX);
-  LOOMC_EXPECT_STATUS_IS(
-      LOOMC_STATUS_UNIMPLEMENTED,
-      loomc_launch_config_program_load(&artifact, loomc_allocator_system(),
-                                       &program));
+  loomc_vm_launch_config_program_t* program =
+      reinterpret_cast<loomc_vm_launch_config_program_t*>(UINTPTR_MAX);
+  LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_UNIMPLEMENTED,
+                         loomc_vm_launch_config_program_load(
+                             &artifact, loomc_allocator_system(), &program));
   EXPECT_EQ(program, nullptr);
 }
 
-TEST(LaunchConfigProgramTest, RejectsInvalidAllocator) {
+TEST(VmLaunchConfigProgramTest, RejectsInvalidAllocator) {
   ByteSequencePtr sequence = CreateSequence(loomc_byte_span_empty());
   const loomc_artifact_t artifact = {
       /*.kind=*/LOOMC_ARTIFACT_KIND_LAUNCH_CONFIG,
@@ -62,24 +61,24 @@ TEST(LaunchConfigProgramTest, RejectsInvalidAllocator) {
       /*.identifier=*/loomc_make_cstring_view("launch_config.vm"),
       /*.contents=*/sequence.get(),
   };
-  loomc_launch_config_program_t* program =
-      reinterpret_cast<loomc_launch_config_program_t*>(UINTPTR_MAX);
-  LOOMC_EXPECT_STATUS_IS(
-      LOOMC_STATUS_INVALID_ARGUMENT,
-      loomc_launch_config_program_load(&artifact, /*allocator=*/{}, &program));
+  loomc_vm_launch_config_program_t* program =
+      reinterpret_cast<loomc_vm_launch_config_program_t*>(UINTPTR_MAX);
+  LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_INVALID_ARGUMENT,
+                         loomc_vm_launch_config_program_load(
+                             &artifact, /*allocator=*/{}, &program));
   EXPECT_EQ(program, nullptr);
 }
 
-TEST(LaunchConfigProgramTest, RejectsLookupWithoutProgramAndClearsToken) {
-  loomc_launch_config_function_t function = {/*.value=*/0};
+TEST(VmLaunchConfigProgramTest, RejectsLookupWithoutProgramAndClearsToken) {
+  loomc_vm_launch_config_function_t function = {/*.value=*/0};
   LOOMC_EXPECT_STATUS_IS(
       LOOMC_STATUS_INVALID_ARGUMENT,
-      loomc_launch_config_program_lookup_function(
+      loomc_vm_launch_config_program_lookup_function(
           /*program=*/nullptr, loomc_make_cstring_view("missing"), &function));
-  EXPECT_FALSE(loomc_launch_config_function_is_valid(function));
+  EXPECT_FALSE(loomc_vm_launch_config_function_is_valid(function));
 }
 
-TEST(LaunchConfigProgramTest, FailedInvocationLeavesOutputUntouched) {
+TEST(VmLaunchConfigProgramTest, FailedInvocationLeavesOutputUntouched) {
   loomc_launch_config_t config = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG,
       /*.structure_size=*/sizeof(config),
@@ -87,7 +86,7 @@ TEST(LaunchConfigProgramTest, FailedInvocationLeavesOutputUntouched) {
       /*.workgroup_count=*/{777, 778, 779},
   };
   LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_INVALID_ARGUMENT,
-                         loomc_launch_config_program_invoke(
+                         loomc_vm_launch_config_program_invoke(
                              /*program=*/nullptr, /*function=*/{0},
                              /*workload_argument_bits=*/nullptr,
                              /*workload_argument_count=*/0, &config));

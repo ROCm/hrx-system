@@ -210,16 +210,16 @@ closed product.
 
 ## Evaluate the compiled launch contract
 
-When requested through the compiler API, compilation emits a launch-config
-companion for every exported kernel. An embedding uses the public `loomc` API
-in four steps:
+When requested through the compiler API, compilation emits a VM launch-config
+companion for every exported kernel. An embedding links the optional
+`loomc/target/vm` package and uses its API in four steps:
 
 1. Load the launch-config artifact with
-   `loomc_launch_config_program_load`.
+   `loomc_vm_launch_config_program_load`.
 2. Resolve the kernel's public export name with
-   `loomc_launch_config_program_lookup_function`.
+   `loomc_vm_launch_config_program_lookup_function`.
 3. Pass the workload scalar bit patterns to
-   `loomc_launch_config_program_invoke`.
+   `loomc_vm_launch_config_program_invoke`.
 4. Issue the matching executable entry with the returned workgroup count,
    workgroup size, optional cluster size, subgroup size, and workgroup-storage
    requirement.
@@ -229,7 +229,7 @@ code. Those decisions happened when the executable and companion artifact were
 produced. Lookup resolves a public export name to a program-local token once;
 repeated invocations use that token without another string lookup.
 
-The generated [`loomc` launch-configuration API](../reference/c-api/generated/launch__config_8h.html)
+The generated [`loomc` VM launch-configuration API](../reference/c-api/generated/target_2vm_2launch__config_8h.html)
 defines the exact ownership, thread-safety, argument representation, and result
 contracts. [Embed kernel JIT compilation](../integration/jit-kernel.md) follows
 the complete source, specialization, launch-evaluation, emission, and runtime

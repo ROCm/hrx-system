@@ -71,7 +71,6 @@ loom_cc_library(
     "src/context.c"
     "src/diagnostic.c"
     "src/emit.c"
-    "src/launch_config.c"
     "src/link.c"
     "src/link_dependency.c"
     "src/link_index.c"
@@ -98,8 +97,6 @@ loom_cc_library(
     iree::base::internal::arena
     iree::io::file_handle
     iree::io::stream
-    iree::vm
-    iree::vm::bytecode
     loom::analysis::symbol_value_constraints
     loom::codegen::low::pipeline::legalizer_registry
     loom::codegen::low::pipeline::pass_environment
@@ -139,7 +136,6 @@ loom_cc_library(
     loom::pass::tooling
     loom::pass::value_facts
     loom::sanitizer::options
-    loom::target::emit::vm::launch_config_abi
     loom::target::function_version
     loom::target::function_version_projection
     loom::target::module_specialization
