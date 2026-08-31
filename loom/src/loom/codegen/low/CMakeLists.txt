@@ -738,6 +738,25 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_test(
+  NAME
+    frame_test
+  SRCS
+    "frame_test.cc"
+  DEPS
+    ::frame
+    ::text_asm
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::format::text::parser
+    loom::ir
+    loom::ops::low
+    loom::target::test::descriptors
+    loom::target::test::low_registry
+    loom::testing::module_ptr
+)
+
 loom_cc_library(
   NAME
     packet_json

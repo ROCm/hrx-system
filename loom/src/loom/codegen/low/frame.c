@@ -230,6 +230,7 @@ static iree_status_t loom_low_emission_frame_build_with_diagnostic_emitter(
       .pair_affinities = options->schedule_pair_affinities,
       .preferred_pair_uses = preferred_pair_uses,
       .structural_state_reads = options->schedule_structural_state_reads,
+      .structural_models = options->schedule_structural_models,
       .emitter = diagnostic_emitter,
       .diagnostic_flags = options->schedule_diagnostic_flags,
       .strategy = options->schedule_strategy,

@@ -234,6 +234,41 @@ static inline bool loom_low_schedule_structural_state_read_list_is_empty(
   return list.count == 0;
 }
 
+// Target schedule model for a structural operation realized as a native
+// packet. The referenced descriptor supplies only its schedule class; its
+// operands, effects, and semantic identity are not attached to the structural
+// operation.
+typedef struct loom_low_schedule_structural_model_t {
+  // Structural operation kind receiving the schedule model.
+  loom_op_kind_t op_kind;
+  // Optional result register class selecting a target realization when any op
+  // result uses the class, or LOOM_LOW_REG_CLASS_NONE when the model applies
+  // independently of result shape.
+  uint16_t result_reg_class_id;
+  // Descriptor ordinal whose schedule class models the native packet.
+  uint32_t schedule_descriptor_ordinal;
+} loom_low_schedule_structural_model_t;
+
+// List of target-provided structural operation schedule models. At most one
+// row may match an operation. Rows for one op kind may select disjoint result
+// classes, while an unconditional row is exclusive for that op kind.
+typedef struct loom_low_schedule_structural_model_list_t {
+  // Borrowed structural schedule model rows.
+  const loom_low_schedule_structural_model_t* values;
+  // Number of entries in |values|.
+  iree_host_size_t count;
+} loom_low_schedule_structural_model_list_t;
+
+static inline loom_low_schedule_structural_model_list_t
+loom_low_schedule_structural_model_list_empty(void) {
+  return (loom_low_schedule_structural_model_list_t){0};
+}
+
+static inline bool loom_low_schedule_structural_model_list_is_empty(
+    loom_low_schedule_structural_model_list_t list) {
+  return list.count == 0;
+}
+
 // One scheduled operation in a low function body.
 typedef struct loom_low_schedule_node_t {
   // Operation represented by this node.
@@ -245,7 +280,7 @@ typedef struct loom_low_schedule_node_t {
   // Semantic descriptor selected before target resource scheduling, or NULL.
   // Encoding-equivalent schedule alternatives never change this identity.
   const loom_low_descriptor_t* source_descriptor;
-  // Schedule-class row for descriptor-backed nodes, or NULL.
+  // Schedule-class row for the target packet model, or NULL.
   const loom_low_schedule_class_t* schedule_class;
   // Region block ordinal containing |op|.
   uint32_t block_index;
@@ -271,6 +306,8 @@ typedef struct loom_low_schedule_node_t {
   uint16_t storage_relation_count;
   // Per-node storage flags.
   loom_low_schedule_node_flags_t flags;
+  // Dense schedule-class identifier, or LOOM_LOW_SCHEDULE_CLASS_NONE.
+  uint16_t schedule_class_id;
   // Operand ordinals followed by result ordinals. Small nodes store ordinals
   // inline to avoid an extra pointer chase; large nodes store one contiguous
   // arena allocation through overflow_value_ordinals.
@@ -647,6 +684,9 @@ typedef struct loom_low_schedule_options_t {
   // Optional target-provided implicit state reads for structural low
   // materializations that emit target packets without descriptor rows.
   loom_low_schedule_structural_state_read_list_t structural_state_reads;
+  // Optional target-provided schedule models for structural low operations
+  // that emit native packets without descriptor rows.
+  loom_low_schedule_structural_model_list_t structural_models;
   // Structured diagnostic emitter for user IR failures.
   iree_diagnostic_emitter_t emitter;
   // Optional backend feedback diagnostics to emit after scheduling analysis.

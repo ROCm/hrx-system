@@ -496,6 +496,57 @@ static iree_status_t loom_low_schedule_verify_structural_state_reads(
   return iree_ok_status();
 }
 
+static iree_status_t loom_low_schedule_verify_structural_models(
+    const loom_low_schedule_build_state_t* state) {
+  const loom_low_schedule_structural_model_list_t models =
+      state->options->structural_models;
+  if (loom_low_schedule_structural_model_list_is_empty(models)) {
+    return iree_ok_status();
+  }
+  if (models.values == NULL) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "low schedule structural models require table rows");
+  }
+
+  const loom_low_descriptor_set_t* descriptor_set =
+      state->target.descriptor_set;
+  for (iree_host_size_t i = 0; i < models.count; ++i) {
+    const loom_low_schedule_structural_model_t* model = &models.values[i];
+    if (model->schedule_descriptor_ordinal >=
+        descriptor_set->descriptor_count) {
+      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "low schedule structural model %" PRIhsz
+                              " references invalid descriptor ordinal %" PRIu32,
+                              i, model->schedule_descriptor_ordinal);
+    }
+    if (model->result_reg_class_id != LOOM_LOW_REG_CLASS_NONE &&
+        model->result_reg_class_id >= descriptor_set->reg_class_count) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "low schedule structural model %" PRIhsz
+          " references invalid result register class %" PRIu16,
+          i, model->result_reg_class_id);
+    }
+    for (iree_host_size_t j = 0; j < i; ++j) {
+      const loom_low_schedule_structural_model_t* previous = &models.values[j];
+      if (previous->op_kind != model->op_kind) continue;
+      const bool has_unconditional_model =
+          previous->result_reg_class_id == LOOM_LOW_REG_CLASS_NONE ||
+          model->result_reg_class_id == LOOM_LOW_REG_CLASS_NONE;
+      if (has_unconditional_model ||
+          previous->result_reg_class_id == model->result_reg_class_id) {
+        return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                                "low schedule structural models %" PRIhsz
+                                " and %" PRIhsz
+                                " overlap for operation kind %" PRIu16,
+                                j, i, model->op_kind);
+      }
+    }
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_low_schedule_initialize_descriptor_tables(
     loom_low_schedule_build_state_t* state, iree_host_size_t node_count) {
   iree_host_size_t effect_use_capacity = 0;
@@ -1139,9 +1190,9 @@ static void loom_low_schedule_apply_candidate_descriptor(
   const loom_low_descriptor_view_t* descriptor_view =
       loom_low_descriptor_set_descriptor_view_at(
           state->target.descriptor_set, score->selected_descriptor_ordinal);
+  node->schedule_class_id = descriptor_view->schedule_class_id;
   node->schedule_class =
-      &state->target.descriptor_set
-           ->schedule_classes[descriptor_view->schedule_class_id];
+      &state->target.descriptor_set->schedule_classes[node->schedule_class_id];
 }
 
 static iree_status_t loom_low_schedule_run_list_scheduler(
@@ -1511,6 +1562,7 @@ iree_status_t loom_low_schedule_function(
           state.target.descriptor_set);
   IREE_RETURN_IF_ERROR(
       loom_low_schedule_initialize_pair_affinity_index(&state));
+  IREE_RETURN_IF_ERROR(loom_low_schedule_verify_structural_models(&state));
 
   const iree_host_size_t node_count = model->node_count;
   const bool needs_liveness =

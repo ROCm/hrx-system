@@ -680,6 +680,24 @@ loom_cc_library(
     ],
 )
 
+loom_cc_test(
+    name = "frame_test",
+    srcs = ["frame_test.cc"],
+    deps = [
+        ":frame",
+        ":text_asm",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target/test:descriptors",
+        "//loom/src/loom/target/test:low_registry",
+        "//loom/src/loom/testing:module_ptr",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 loom_cc_library(
     name = "packet_json",
     srcs = ["packet_json.c"],
