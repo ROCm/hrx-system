@@ -768,8 +768,8 @@ IREE_API_EXPORT iree_status_t iree_hal_replay_plan_execute(
         iree_hal_device_group_device_count(executor.device_group));
   }
 
-  iree_hal_replay_executor_deinitialize(&executor);
-  return status;
+  return iree_status_join(status,
+                          iree_hal_replay_executor_deinitialize(&executor));
 }
 
 IREE_API_EXPORT iree_status_t iree_hal_replay_execute_file(

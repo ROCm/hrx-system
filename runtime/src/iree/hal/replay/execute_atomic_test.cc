@@ -393,7 +393,7 @@ class ReplayAtomicExecutionTest : public ::testing::Test {
   }
 
   void TearDown() override {
-    iree_hal_replay_executor_deinitialize(&executor_);
+    IREE_EXPECT_OK(iree_hal_replay_executor_deinitialize(&executor_));
     iree_allocator_free(iree_allocator_system(), validation_state_);
     iree_hal_device_release(task_device_);
   }

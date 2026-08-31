@@ -60,6 +60,19 @@ iree_status_t iree_hal_amdgpu_access_agent_list_resolve_memory_agents(
     iree_hal_queue_affinity_t queue_affinity,
     iree_hal_amdgpu_access_agent_list_t* out_agent_list);
 
+// Resolves the HSA agents selected by virtual-memory |access_scope|.
+//
+// DEVICE selects the GPU agents represented by |queue_affinity|, HOST selects
+// their nearest CPU agents, and ALL selects the union of both sets. The result
+// is deduplicated so topologies where several GPUs share one CPU contain that
+// CPU agent once.
+iree_status_t iree_hal_amdgpu_access_agent_list_resolve_scope_agents(
+    const iree_hal_amdgpu_topology_t* topology,
+    iree_hal_amdgpu_queue_affinity_domain_t queue_affinity_domain,
+    iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_virtual_memory_access_scope_t access_scope,
+    iree_hal_amdgpu_access_agent_list_t* out_agent_list);
+
 // Grants |agent_list| access to an HSA memory pool allocation.
 iree_status_t iree_hal_amdgpu_access_allow_agent_list(
     const iree_hal_amdgpu_libhsa_t* libhsa,

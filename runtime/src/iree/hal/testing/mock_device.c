@@ -312,6 +312,9 @@ typedef struct iree_hal_mock_device_t {
   // True when metadata-only mock executable loading is enabled.
   bool executable_loading_enabled;
 
+  // Optional retained allocator exposed by the device.
+  iree_hal_allocator_t* device_allocator;
+
   // Immutable device facts captured at creation time.
   iree_hal_device_spec_t* device_spec;
 
@@ -395,6 +398,8 @@ iree_status_t iree_hal_mock_device_create(
   device->assign_topology_info_status_code =
       options->assign_topology_info_status_code;
   device->executable_loading_enabled = options->executable_loading_enabled;
+  device->device_allocator = options->device_allocator;
+  iree_hal_allocator_retain(device->device_allocator);
 
   // Copy identifier into trailing storage.
   iree_string_view_append_to_buffer(
@@ -425,6 +430,7 @@ iree_status_t iree_hal_mock_device_create(
 static void iree_hal_mock_device_destroy(iree_hal_device_t* base_device) {
   iree_hal_mock_device_t* device = iree_hal_mock_device_cast(base_device);
   iree_allocator_t host_allocator = device->host_allocator;
+  iree_hal_allocator_release(device->device_allocator);
   iree_hal_device_spec_release(device->device_spec);
   iree_allocator_free(host_allocator, device);
 }
@@ -496,7 +502,8 @@ static iree_status_t iree_hal_mock_device_assign_topology_info(
 
 static iree_hal_allocator_t* iree_hal_mock_device_allocator(
     iree_hal_device_t* base_device) {
-  return NULL;
+  iree_hal_mock_device_t* device = iree_hal_mock_device_cast(base_device);
+  return device->device_allocator;
 }
 
 static void iree_hal_mock_device_replace_channel_provider(

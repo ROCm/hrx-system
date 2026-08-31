@@ -284,5 +284,6 @@ hrx_status_t hrx_allocator_virtual_memory_protect(
       allocator->hal_allocator, virtual_buffer->hal_buffer,
       (iree_device_size_t)virtual_offset, (iree_device_size_t)size,
       /*queue_affinity=*/IREE_HAL_QUEUE_AFFINITY_ANY,
+      IREE_HAL_VIRTUAL_MEMORY_ACCESS_SCOPE_DEVICE,
       (iree_hal_memory_protection_t)protection));
 }

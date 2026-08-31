@@ -208,6 +208,24 @@ iree_cc_test(
     iree::testing::gtest_main
 )
 
+iree_cc_test(
+  NAME
+    execute_vmm_test
+  SRCS
+    "execute_vmm_test.cc"
+  DEPS
+    ::execute
+    ::file_reader
+    ::recorder
+    iree::async
+    iree::base
+    iree::hal
+    iree::hal::testing::mock_device
+    iree::io::file_handle
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
 endif()
 
 iree_cc_test(

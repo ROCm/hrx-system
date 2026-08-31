@@ -50,6 +50,10 @@ typedef struct iree_hal_mock_device_options_t {
 
   // Enables metadata-only mock executable target advertisement and loading.
   bool executable_loading_enabled;
+
+  // Optional allocator exposed by iree_hal_device_allocator().
+  // Retained by the mock device when provided.
+  iree_hal_allocator_t* device_allocator;
 } iree_hal_mock_device_options_t;
 
 // Initializes |out_options| with safe defaults and an empty identifier.

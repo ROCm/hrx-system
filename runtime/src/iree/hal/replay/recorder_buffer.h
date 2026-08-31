@@ -36,6 +36,11 @@ iree_status_t iree_hal_replay_recorder_buffer_create_proxy(
 iree_hal_buffer_t* iree_hal_replay_recorder_buffer_base_or_self(
     iree_hal_buffer_t* buffer);
 
+// Detaches a base reservation consumed by a successful
+// virtual_memory_release call and releases the recording proxy.
+void iree_hal_replay_recorder_buffer_consume_virtual_memory(
+    iree_hal_buffer_t* buffer);
+
 iree_status_t iree_hal_replay_recorder_buffer_unwrap_for_call(
     iree_hal_buffer_t* buffer, iree_allocator_t host_allocator,
     iree_hal_buffer_t** out_base_buffer,
