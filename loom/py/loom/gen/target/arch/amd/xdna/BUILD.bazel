@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//build_tools/bazel:python.bzl", "iree_py_library")
+load("//build_tools/bazel:python.bzl", "iree_py_binary", "iree_py_library", "iree_py_test")
 
 package(
     default_visibility = ["//visibility:private"],
@@ -16,4 +16,30 @@ iree_py_library(
     srcs = ["__init__.py"],
     visibility = ["//visibility:public"],
     deps = ["//loom/py/loom/gen/target/arch/amd:package"],
+)
+
+iree_py_binary(
+    name = "hardware_tables",
+    srcs = ["hardware_tables.py"],
+    main = "hardware_tables.py",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":package",
+        "//loom/py/loom/gen/support",
+        "//loom/py/loom/target/arch/amd/xdna/array:model",
+        "//loom/py/loom/target/arch/amd/xdna/array:npu2",
+        "//loom/py/loom/target/arch/amd/xdna/device:model",
+        "//loom/py/loom/target/arch/amd/xdna/device:strix_halo",
+    ],
+)
+
+iree_py_test(
+    name = "hardware_tables_test",
+    srcs = [
+        "hardware_tables_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.gen.target.arch.amd.xdna.hardware_tables_test"],
+    main = "pytest_style_runner.py",
+    deps = [":hardware_tables"],
 )

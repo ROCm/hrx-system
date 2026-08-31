@@ -1,0 +1,49 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:python.bzl", "iree_py_library", "iree_py_test")
+
+package(
+    default_visibility = ["//visibility:private"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+iree_py_library(
+    name = "model",
+    srcs = [
+        "__init__.py",
+        "model.py",
+    ],
+    visibility = [
+        "//loom/py/loom/gen/target/arch/amd/xdna:__subpackages__",
+        "//loom/py/loom/target/arch/amd/xdna:__subpackages__",
+    ],
+    deps = ["//loom/py/loom/target/arch/amd/xdna:package_init"],
+)
+
+iree_py_library(
+    name = "npu2",
+    srcs = ["npu2.py"],
+    visibility = [
+        "//loom/py/loom/gen/target/arch/amd/xdna:__subpackages__",
+        "//loom/py/loom/target/arch/amd/xdna:__subpackages__",
+    ],
+    deps = [":model"],
+)
+
+iree_py_test(
+    name = "npu2_test",
+    srcs = [
+        "npu2_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.target.arch.amd.xdna.array.npu2_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":model",
+        ":npu2",
+    ],
+)
