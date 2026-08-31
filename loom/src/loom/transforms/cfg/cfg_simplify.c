@@ -1907,14 +1907,14 @@ static bool loom_cfg_simplify_pred_branches_to_block(
 
 static bool loom_cfg_simplify_incoming_slots_match(
     loom_op_t* const* pred_branches, iree_host_size_t predecessor_count,
-    uint16_t lhs_index, uint16_t rhs_index) {
+    uint16_t lhs_slot, uint16_t rhs_slot) {
   for (iree_host_size_t i = 0; i < predecessor_count; ++i) {
     loom_block_t* dest = NULL;
     loom_value_slice_t args = {0};
     if (!loom_cfg_simplify_direct_branch(pred_branches[i], &dest, &args)) {
       return false;
     }
-    if (args.values[lhs_index] != args.values[rhs_index]) return false;
+    if (args.values[lhs_slot] != args.values[rhs_slot]) return false;
   }
   return true;
 }
@@ -1922,13 +1922,15 @@ static bool loom_cfg_simplify_incoming_slots_match(
 static bool loom_cfg_simplify_find_duplicate_arg_replacement(
     const loom_cfg_simplify_state_t* state, const loom_block_t* block,
     loom_op_t* const* pred_branches, iree_host_size_t predecessor_count,
-    uint16_t arg_index, loom_value_id_t* out_replacement) {
+    const uint16_t* incoming_slot_by_arg, uint16_t arg_index,
+    loom_value_id_t* out_replacement) {
   loom_value_id_t old_arg = loom_block_arg_id(block, arg_index);
   for (uint16_t candidate_index = 0; candidate_index < arg_index;
        ++candidate_index) {
     loom_value_id_t candidate = loom_block_arg_id(block, candidate_index);
     if (!loom_cfg_simplify_incoming_slots_match(
-            pred_branches, predecessor_count, arg_index, candidate_index)) {
+            pred_branches, predecessor_count, incoming_slot_by_arg[arg_index],
+            incoming_slot_by_arg[candidate_index])) {
       continue;
     }
     if (!loom_cfg_simplify_type_allows_replacement(state->module, old_arg,
@@ -1944,7 +1946,8 @@ static bool loom_cfg_simplify_find_duplicate_arg_replacement(
 static bool loom_cfg_simplify_find_forwarded_arg_replacement(
     const loom_cfg_simplify_state_t* state, const loom_block_t* block,
     loom_op_t* const* pred_branches, iree_host_size_t predecessor_count,
-    uint16_t arg_index, loom_value_id_t* out_replacement) {
+    const uint16_t* incoming_slot_by_arg, uint16_t arg_index,
+    loom_value_id_t* out_replacement) {
   if (predecessor_count == 0) return false;
   loom_value_id_t old_arg = loom_block_arg_id(block, arg_index);
   loom_value_id_t replacement = LOOM_VALUE_ID_INVALID;
@@ -1954,7 +1957,7 @@ static bool loom_cfg_simplify_find_forwarded_arg_replacement(
     if (!loom_cfg_simplify_direct_branch(pred_branches[i], &dest, &args)) {
       return false;
     }
-    loom_value_id_t incoming = args.values[arg_index];
+    loom_value_id_t incoming = args.values[incoming_slot_by_arg[arg_index]];
     if (incoming == old_arg) continue;
     if (replacement == LOOM_VALUE_ID_INVALID) {
       replacement = incoming;
@@ -1982,8 +1985,10 @@ static bool loom_cfg_simplify_find_forwarded_arg_replacement(
   return true;
 }
 
-static iree_status_t loom_cfg_simplify_rebuild_br_without_arg(
-    loom_cfg_simplify_state_t* state, loom_op_t* br, uint16_t removed_index) {
+static iree_status_t loom_cfg_simplify_rebuild_br_for_block_args(
+    loom_cfg_simplify_state_t* state, loom_op_t* br,
+    const uint16_t* incoming_slot_by_arg, uint16_t arg_count,
+    loom_value_id_t* rebuilt_args) {
   loom_block_t* dest = NULL;
   loom_value_slice_t args = {0};
   if (!loom_cfg_simplify_direct_branch(br, &dest, &args)) {
@@ -1991,33 +1996,19 @@ static iree_status_t loom_cfg_simplify_rebuild_br_without_arg(
                             "cfg-simplify block argument removal expected a "
                             "cfg.br or low.br predecessor");
   }
-  loom_value_id_t* kept_args = NULL;
-  iree_host_size_t kept_count = args.count - 1;
-  if (kept_count > 0) {
-    IREE_RETURN_IF_ERROR(
-        iree_arena_allocate_array(state->analysis_arena, kept_count,
-                                  sizeof(*kept_args), (void**)&kept_args));
+  for (uint16_t arg_index = 0; arg_index < arg_count; ++arg_index) {
+    rebuilt_args[arg_index] = args.values[incoming_slot_by_arg[arg_index]];
   }
-  iree_host_size_t kept_index = 0;
-  for (uint16_t i = 0; i < args.count; ++i) {
-    if (i == removed_index) continue;
-    kept_args[kept_index++] = args.values[i];
-  }
-  return loom_cfg_simplify_replace_direct_br(state, br, dest, kept_args,
-                                             kept_count);
+  return loom_cfg_simplify_replace_direct_br(state, br, dest, rebuilt_args,
+                                             arg_count);
 }
 
 static iree_status_t loom_cfg_simplify_remove_block_arg(
-    loom_cfg_simplify_state_t* state, loom_block_t* block,
-    loom_op_t** pred_branches, iree_host_size_t predecessor_count,
-    uint16_t arg_index, loom_value_id_t replacement) {
+    loom_cfg_simplify_state_t* state, loom_block_t* block, uint16_t arg_index,
+    loom_value_id_t replacement) {
   loom_value_id_t old_arg = loom_block_arg_id(block, arg_index);
   IREE_RETURN_IF_ERROR(loom_rewriter_replace_all_uses_with(
       state->rewriter, old_arg, replacement));
-  for (iree_host_size_t i = 0; i < predecessor_count; ++i) {
-    IREE_RETURN_IF_ERROR(loom_cfg_simplify_rebuild_br_without_arg(
-        state, pred_branches[i], arg_index));
-  }
   IREE_RETURN_IF_ERROR(loom_block_remove_arg(state->module, block, arg_index));
   ++state->statistics->block_args_removed;
   state->rewriter->flags |= LOOM_REWRITER_FLAG_CHANGED;
@@ -2038,17 +2029,20 @@ static bool loom_cfg_simplify_block_arg_unused(
 }
 
 static iree_status_t loom_cfg_simplify_remove_unused_block_arg(
-    loom_cfg_simplify_state_t* state, loom_block_t* block,
-    loom_op_t** pred_branches, iree_host_size_t predecessor_count,
-    uint16_t arg_index) {
-  for (iree_host_size_t i = 0; i < predecessor_count; ++i) {
-    IREE_RETURN_IF_ERROR(loom_cfg_simplify_rebuild_br_without_arg(
-        state, pred_branches[i], arg_index));
-  }
+    loom_cfg_simplify_state_t* state, loom_block_t* block, uint16_t arg_index) {
   IREE_RETURN_IF_ERROR(loom_block_remove_arg(state->module, block, arg_index));
   ++state->statistics->block_args_removed;
   state->rewriter->flags |= LOOM_REWRITER_FLAG_CHANGED;
   return iree_ok_status();
+}
+
+static void loom_cfg_simplify_remove_incoming_slot_for_arg(
+    uint16_t* incoming_slot_by_arg, uint16_t arg_count,
+    uint16_t removed_arg_index) {
+  for (uint16_t arg_index = (uint16_t)(removed_arg_index + 1);
+       arg_index < arg_count; ++arg_index) {
+    incoming_slot_by_arg[arg_index - 1] = incoming_slot_by_arg[arg_index];
+  }
 }
 
 static iree_status_t loom_cfg_simplify_remove_redundant_block_args(
@@ -2073,29 +2067,76 @@ static iree_status_t loom_cfg_simplify_remove_redundant_block_args(
       continue;
     }
 
-    for (uint16_t arg_index = 0; arg_index < block->arg_count; ++arg_index) {
+    const uint16_t initial_arg_count = block->arg_count;
+    uint16_t* incoming_slot_by_arg = NULL;
+    loom_value_id_t* rebuilt_args = NULL;
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        state->analysis_arena, initial_arg_count, sizeof(*incoming_slot_by_arg),
+        (void**)&incoming_slot_by_arg));
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        state->analysis_arena, initial_arg_count, sizeof(*rebuilt_args),
+        (void**)&rebuilt_args));
+    for (uint16_t arg_index = 0; arg_index < initial_arg_count; ++arg_index) {
+      incoming_slot_by_arg[arg_index] = arg_index;
+    }
+
+    bool block_changed = false;
+    uint16_t arg_index = 0;
+    while (arg_index < block->arg_count) {
       if (loom_cfg_simplify_block_arg_unused(state, block, arg_index)) {
-        IREE_RETURN_IF_ERROR(loom_cfg_simplify_remove_unused_block_arg(
-            state, block, pred_branches, predecessors.count, arg_index));
-        *out_changed = true;
-        return iree_ok_status();
+        const uint16_t previous_arg_count = block->arg_count;
+        IREE_RETURN_IF_ERROR(
+            loom_cfg_simplify_remove_unused_block_arg(state, block, arg_index));
+        loom_cfg_simplify_remove_incoming_slot_for_arg(
+            incoming_slot_by_arg, previous_arg_count, arg_index);
+        block_changed = true;
+        continue;
       }
 
       loom_value_id_t replacement = LOOM_VALUE_ID_INVALID;
       bool found_replacement =
           loom_cfg_simplify_find_duplicate_arg_replacement(
-              state, block, pred_branches, predecessors.count, arg_index,
-              &replacement) ||
+              state, block, pred_branches, predecessors.count,
+              incoming_slot_by_arg, arg_index, &replacement) ||
           loom_cfg_simplify_find_forwarded_arg_replacement(
-              state, block, pred_branches, predecessors.count, arg_index,
-              &replacement);
-      if (!found_replacement) continue;
+              state, block, pred_branches, predecessors.count,
+              incoming_slot_by_arg, arg_index, &replacement);
+      if (!found_replacement) {
+        ++arg_index;
+        continue;
+      }
+      const uint16_t previous_arg_count = block->arg_count;
       IREE_RETURN_IF_ERROR(loom_cfg_simplify_remove_block_arg(
-          state, block, pred_branches, predecessors.count, arg_index,
-          replacement));
-      *out_changed = true;
-      return iree_ok_status();
+          state, block, arg_index, replacement));
+      loom_cfg_simplify_remove_incoming_slot_for_arg(
+          incoming_slot_by_arg, previous_arg_count, arg_index);
+      block_changed = true;
     }
+
+    // Removing a later argument may release the final type use of an earlier
+    // argument. References between block argument types can only point to
+    // earlier arguments, so one reverse sweep removes the newly unused
+    // dependency chain without rebuilding function-scoped facts.
+    for (arg_index = block->arg_count; arg_index > 0;) {
+      --arg_index;
+      if (!loom_cfg_simplify_block_arg_unused(state, block, arg_index)) {
+        continue;
+      }
+      const uint16_t previous_arg_count = block->arg_count;
+      IREE_RETURN_IF_ERROR(
+          loom_cfg_simplify_remove_unused_block_arg(state, block, arg_index));
+      loom_cfg_simplify_remove_incoming_slot_for_arg(
+          incoming_slot_by_arg, previous_arg_count, arg_index);
+      block_changed = true;
+    }
+
+    if (!block_changed) continue;
+    for (iree_host_size_t i = 0; i < predecessors.count; ++i) {
+      IREE_RETURN_IF_ERROR(loom_cfg_simplify_rebuild_br_for_block_args(
+          state, pred_branches[i], incoming_slot_by_arg, block->arg_count,
+          rebuilt_args));
+    }
+    *out_changed = true;
   }
   return iree_ok_status();
 }
