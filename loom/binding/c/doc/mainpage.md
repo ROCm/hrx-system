@@ -120,7 +120,8 @@ embedding programs:
 - `compile_text.c` compiles in-memory Loom text and consumes diagnostics.
 - `link_modules.c` links multiple sources and turns module artifacts back into
   source handles.
-- `emit_amdgpu_offline.c` emits AMDGPU artifacts without a runtime loader.
+- `emit_amdgpu_offline.c` compiles packaged Loom bytecode and emits AMDGPU
+  artifacts without a runtime loader.
 - `emit_amdgpu_hsa.c` queries HSA directly and launches a Loom-produced HSACO
   without IREE HAL. It can start from its embedded source or from a `.loom` or
   `.loombc` path supplied on the command line.
