@@ -290,8 +290,12 @@ bool iree_task_executor_try_place_in_compute_slot(
     if (iree_atomic_compare_exchange_strong(
             &slot->process, &expected, IREE_TASK_COMPUTE_SLOT_RESERVED,
             iree_memory_order_acq_rel, iree_memory_order_relaxed)) {
+      iree_task_process_acquire_compute_placement(process);
       int32_t placement_epoch =
           iree_task_process_advance_placement_epoch(process);
+      iree_atomic_store(&slot->wake_budget,
+                        iree_task_process_wake_budget(process),
+                        iree_memory_order_release);
       iree_atomic_store(&slot->placement_epoch, placement_epoch,
                         iree_memory_order_release);
       iree_atomic_store(&slot->process, (intptr_t)process,

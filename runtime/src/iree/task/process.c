@@ -10,6 +10,12 @@
 
 #include "iree/base/api.h"
 
+// Marks compute_placement_state as awaiting terminal release. The remaining
+// bits hold the number of slot placements that may still access process
+// storage during release.
+#define IREE_TASK_PROCESS_COMPUTE_RELEASE_PENDING INT32_MIN
+#define IREE_TASK_PROCESS_COMPUTE_PLACEMENT_COUNT_MASK INT32_MAX
+
 //===----------------------------------------------------------------------===//
 // Process lifecycle
 //===----------------------------------------------------------------------===//
@@ -49,6 +55,8 @@ void iree_task_process_initialize(iree_task_process_drain_fn_t drain_fn,
                     iree_memory_order_relaxed);
   iree_atomic_store(&out_process->placement_epoch, 0,
                     iree_memory_order_relaxed);
+  iree_atomic_store(&out_process->compute_placement_state, 0,
+                    iree_memory_order_relaxed);
   iree_atomic_store(&out_process->schedule_state, 0, iree_memory_order_relaxed);
   iree_atomic_store(&out_process->needs_drain, 0, iree_memory_order_relaxed);
   iree_atomic_store(&out_process->retain_drain, 0, iree_memory_order_relaxed);
@@ -66,6 +74,43 @@ void iree_task_process_initialize(iree_task_process_drain_fn_t drain_fn,
 void iree_task_process_set_flags(iree_task_process_t* process,
                                  iree_task_process_flags_t flags) {
   process->flags = flags;
+}
+
+void iree_task_process_acquire_compute_placement(iree_task_process_t* process) {
+  const int32_t previous = iree_atomic_fetch_add(
+      &process->compute_placement_state, 1, iree_memory_order_acq_rel);
+  IREE_ASSERT(
+      !iree_any_bit_set(previous, IREE_TASK_PROCESS_COMPUTE_RELEASE_PENDING),
+      "cannot place a process after terminal release");
+  IREE_ASSERT((previous & IREE_TASK_PROCESS_COMPUTE_PLACEMENT_COUNT_MASK) <
+                  IREE_TASK_PROCESS_COMPUTE_PLACEMENT_COUNT_MASK,
+              "compute placement count overflow");
+}
+
+void iree_task_process_release_compute_placement(iree_task_process_t* process,
+                                                 bool terminal) {
+  // Snapshot the callback before dropping the final process-storage claim.
+  // Once the CAS publishes a pending state with no placements, this function
+  // owns the only valid reference and may invoke a callback that frees it.
+  iree_task_process_release_fn_t release_fn = process->release_fn;
+  int32_t current = iree_atomic_load(&process->compute_placement_state,
+                                     iree_memory_order_acquire);
+  while (true) {
+    const int32_t placement_count =
+        current & IREE_TASK_PROCESS_COMPUTE_PLACEMENT_COUNT_MASK;
+    IREE_ASSERT(placement_count > 0, "compute placement count underflow");
+    int32_t desired = (current & IREE_TASK_PROCESS_COMPUTE_RELEASE_PENDING) |
+                      (placement_count - 1);
+    if (terminal) desired |= IREE_TASK_PROCESS_COMPUTE_RELEASE_PENDING;
+    if (iree_atomic_compare_exchange_weak(
+            &process->compute_placement_state, &current, desired,
+            iree_memory_order_acq_rel, iree_memory_order_acquire)) {
+      if (desired == IREE_TASK_PROCESS_COMPUTE_RELEASE_PENDING && release_fn) {
+        release_fn(process);
+      }
+      return;
+    }
+  }
 }
 
 bool iree_task_process_wake(iree_task_process_t* process) {

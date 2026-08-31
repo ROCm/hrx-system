@@ -313,18 +313,18 @@ static void iree_task_worker_eager_complete_compute_process(
 
 // Releases a compute slot's current process ownership. Clears the slot, resets
 // the slot generation for reuse, optionally reclaims a non-terminal process if
-// new work arrived during the sleep transition, and frees drain-accessed
-// resources only for terminal processes. Called by a worker holding exclusive
-// release-sentinel ownership after transferring either the final active
-// drainer claim or the final warm-retainer claim.
+// new work arrived during the sleep transition, and requests final process
+// release for terminal processes. Called by a worker holding exclusive
+// release-sentinel ownership after transferring either the final active drainer
+// claim or the final warm-retainer claim.
 //
 // |tagged_sentinel| is the full 64-bit value (gen|SENTINEL) currently in
 // active_drainers. The generation bits are preserved and incremented when
 // the slot is reset, preventing ABA races on subsequent slot lifetimes.
 //
-// Ordering: clear process pointer, reset active_drainers, promote from
-// overflow, re-wake, then either put the process to sleep or run its terminal
-// release callback. Each phase has ordering constraints documented inline.
+// Ordering: clear slot metadata and process pointer, reset active_drainers,
+// promote from overflow, re-wake, then either put the process to sleep or drop
+// its placement claim. Each phase has ordering constraints documented inline.
 static void iree_task_worker_release_compute_process(
     iree_task_worker_t* worker, iree_task_compute_slot_t* slot,
     iree_task_process_t* process, bool process_is_terminal,
@@ -343,6 +343,11 @@ static void iree_task_worker_release_compute_process(
   // pointer in the quick check; the placement epoch lets it reject that stale
   // observation after registering in the next empty slot generation.
   iree_atomic_store(&slot->placement_epoch, 0, iree_memory_order_release);
+
+  // Clear the slot-owned wake demand before making the slot available. A new
+  // placement publishes its wake demand while the process pointer is reserved,
+  // so it cannot be overwritten by this release after the pointer becomes 0.
+  iree_atomic_store(&slot->wake_budget, 0, iree_memory_order_release);
 
   // Clear the process pointer. After this store (release), no new worker will
   // pass the quick check for this slot — except via stale reads that are
@@ -403,8 +408,8 @@ static void iree_task_worker_release_compute_process(
   intptr_t new_process =
       iree_atomic_load(&slot->process, iree_memory_order_acquire);
   if (new_process && new_process != IREE_TASK_COMPUTE_SLOT_RESERVED) {
-    iree_task_process_t* p = (iree_task_process_t*)new_process;
-    int32_t budget = iree_task_process_wake_budget(p);
+    int32_t budget =
+        iree_atomic_load(&slot->wake_budget, iree_memory_order_acquire);
     iree_task_executor_wake_workers(executor, budget);
   }
 
@@ -414,6 +419,7 @@ static void iree_task_worker_release_compute_process(
   // responsible for sleeping or releasing the process.
   if (IREE_UNLIKELY(release_placement_epoch !=
                     iree_task_process_placement_epoch(process))) {
+    iree_task_process_release_compute_placement(process, process_is_terminal);
     return;
   }
 
@@ -434,6 +440,7 @@ static void iree_task_worker_release_compute_process(
     // re-drain decision against that newer lifetime.
     if (IREE_UNLIKELY(release_placement_epoch !=
                       iree_task_process_placement_epoch(process))) {
+      iree_task_process_release_compute_placement(process, process_is_terminal);
       return;
     }
 
@@ -455,19 +462,10 @@ static void iree_task_worker_release_compute_process(
     }
   }
 
-  // Free drain-accessed resources. The slot is fully clean and may
-  // be reused by a new process placed by a concurrent schedule_process call.
-  // release_fn operates on the old process via its pointer argument, which
-  // is independent of whatever new process may now occupy the slot.
-  //
-  // Non-terminal processes are merely going idle here and must keep their
-  // process-owned state live for the next activation.
-  if (process_is_terminal) {
-    iree_task_process_release_fn_t release_fn = process->release_fn;
-    if (release_fn) {
-      release_fn(process);
-    }
-  }
+  // Drop this slot lifetime's process-storage claim. A terminal placement
+  // requests release, but release_fn waits for any overlapping stale slot
+  // releases to exit before it may reclaim process storage.
+  iree_task_process_release_compute_placement(process, process_is_terminal);
 }
 
 // Attempts to transfer an empty active-drainer generation into exclusive
@@ -750,10 +748,10 @@ static bool iree_task_worker_try_rejoin_warm_compute_process(
 //
 // Two-phase active-drainer protocol:
 //   Before accessing a slot's process, the worker increments active_drainers.
-//   This prevents the release callback (which frees the processor context)
-//   from firing while any worker is still inside drain(). The completion
-//   callback (semaphore signaling, dependent activation) fires eagerly —
-//   only the resource release is deferred until the last drainer exits.
+//   This prevents the release callback (which may free the process and its
+//   context) from firing while any worker is still inside drain(). The
+//   completion callback (semaphore signaling, dependent activation) fires
+//   eagerly — final process release waits for every placement to exit.
 //
 // Returns true if any useful work was performed or a cooperative process asked
 // this worker to remain active. The caller should loop back to check the
