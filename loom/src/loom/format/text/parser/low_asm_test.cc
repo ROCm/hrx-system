@@ -482,6 +482,38 @@ TEST_F(LowAsmParserTest, BuildsCanonicalHintAmongTargetPackets) {
   loom_module_free(module);
 }
 
+TEST_F(LowAsmParserTest, BuildsCanonicalSpillReloadAmongTargetPackets) {
+  loom_module_t* module = ParseOk(
+      "low.func.def target<test.low.core> @spill("
+      "%value: reg<test.i32>) -> (reg<test.i32>) asm {\n"
+      "  %slot = storage {byte_alignment = 4, byte_length = 4} : "
+      "low.storage<private>\n"
+      "  low.spill %value, %slot : reg<test.i32>, "
+      "low.storage<private>\n"
+      "  %reloaded = low.reload %slot : low.storage<private> -> "
+      "reg<test.i32>\n"
+      "  return %reloaded\n"
+      "}\n");
+  ASSERT_NE(module, nullptr);
+
+  loom_block_t* module_block = loom_module_block(module);
+  ASSERT_EQ(module_block->op_count, 1u);
+  loom_op_t* function_op = loom_block_op(module_block, 0);
+  ASSERT_TRUE(loom_low_func_def_isa(function_op));
+
+  loom_region_t* region = loom_low_func_def_body(function_op);
+  ASSERT_NE(region, nullptr);
+  loom_block_t* entry = GetEntryBlock(region);
+  ASSERT_NE(entry, nullptr);
+  ASSERT_EQ(entry->op_count, 4u);
+  EXPECT_TRUE(loom_low_storage_reserve_isa(loom_block_op(entry, 0)));
+  EXPECT_TRUE(loom_low_spill_isa(loom_block_op(entry, 1)));
+  EXPECT_TRUE(loom_low_reload_isa(loom_block_op(entry, 2)));
+  EXPECT_TRUE(loom_low_return_isa(loom_block_op(entry, 3)));
+
+  loom_module_free(module);
+}
+
 TEST_F(LowAsmParserTest, SelectsDescriptorSet) {
   loom_module_t* module = ParseOk(
       "low.func.def target<test.low.alt> @negate() -> "

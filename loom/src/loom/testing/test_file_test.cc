@@ -118,6 +118,17 @@ TEST_F(TestFileParseTest, PassWithLocations) {
                                      iree_make_cstring_view("dce,cse")));
 }
 
+TEST_F(TestFileParseTest, PassWithLowAsm) {
+  IREE_ASSERT_OK(
+      Parse("// RUN: with-low-asm pass dce,cse\nfunc.def @f() {}\n"));
+  ASSERT_EQ(file_.case_count, 1);
+  EXPECT_EQ(file_.cases[0].mode, LOOM_TEST_MODE_PASS);
+  EXPECT_TRUE(iree_all_bits_set(file_.cases[0].output_flags,
+                                LOOM_TEST_OUTPUT_LOW_ASM));
+  EXPECT_TRUE(iree_string_view_equal(file_.cases[0].pipeline,
+                                     iree_make_cstring_view("dce,cse")));
+}
+
 TEST_F(TestFileParseTest, PassReportMode) {
   IREE_ASSERT_OK(Parse("// RUN: pass-report dce,cse\nfunc.def @f() {}\n"));
   ASSERT_EQ(file_.case_count, 1);
@@ -144,6 +155,12 @@ TEST_F(TestFileParseTest, DuplicateRunModifierRejected) {
 TEST_F(TestFileParseTest, RunModifierRequiresSupportedMode) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Parse("// RUN: with-locations verify\n"
+                              "func.def @f() {}\n"));
+}
+
+TEST_F(TestFileParseTest, LowAsmModifierRequiresPassMode) {
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        Parse("// RUN: with-low-asm roundtrip\n"
                               "func.def @f() {}\n"));
 }
 

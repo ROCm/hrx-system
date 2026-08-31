@@ -144,14 +144,20 @@ static iree_status_t loom_test_file_parse_run_modifiers(
     iree_string_view_t token;
     iree_string_view_t rest;
     iree_string_view_split(*value, ' ', &token, &rest);
-    if (!iree_string_view_equal(token, IREE_SV("with-locations"))) {
+    loom_test_output_flags_t flag = 0;
+    if (iree_string_view_equal(token, IREE_SV("with-locations"))) {
+      flag = LOOM_TEST_OUTPUT_LOCATIONS;
+    } else if (iree_string_view_equal(token, IREE_SV("with-low-asm"))) {
+      flag = LOOM_TEST_OUTPUT_LOW_ASM;
+    } else {
       break;
     }
-    if (iree_all_bits_set(*out_output_flags, LOOM_TEST_OUTPUT_LOCATIONS)) {
+    if (iree_all_bits_set(*out_output_flags, flag)) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "duplicate RUN modifier: 'with-locations'");
+                              "duplicate RUN modifier: '%.*s'", (int)token.size,
+                              token.data);
     }
-    *out_output_flags |= LOOM_TEST_OUTPUT_LOCATIONS;
+    *out_output_flags |= flag;
     *value = iree_string_view_trim(rest);
   }
   return iree_ok_status();
@@ -165,6 +171,12 @@ static iree_status_t loom_test_file_verify_run_modifiers(
         IREE_STATUS_INVALID_ARGUMENT,
         "RUN modifier 'with-locations' only applies to roundtrip and pass "
         "modes");
+  }
+  if (iree_all_bits_set(output_flags, LOOM_TEST_OUTPUT_LOW_ASM) &&
+      mode != LOOM_TEST_MODE_PASS) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "RUN modifier 'with-low-asm' only applies to pass mode");
   }
   return iree_ok_status();
 }
