@@ -478,7 +478,6 @@ void InitializeSingleCopySymbol(uint16_t direct_arg_bytes,
       /*.source_ordinal=*/0,
       /*.constant_destination_offset=*/0,
   };
-  *out_symbol = {};
   out_symbol->type = IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION;
   out_symbol->parameters.buffer_size = sizeof(uint32_t);
   out_symbol->parameters.constant_bytes = sizeof(uint32_t);
