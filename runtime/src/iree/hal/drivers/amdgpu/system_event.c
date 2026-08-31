@@ -31,10 +31,13 @@ struct iree_hal_amdgpu_system_event_agent_target_t {
   // pointer into the physical device's inline queue array, which lives inside
   // the logical device allocation and outlives this target.
   iree_hal_amdgpu_host_queue_t* host_queues;
-  // Number of leading entries in |host_queues| eligible for failure delivery.
-  // Zero before publication and after retirement. Written only under the
-  // registry mutex, by frontier assignment and deassignment.
-  iree_host_size_t live_queue_count;
+  // Number of entries addressable by |live_queue_mask| in |host_queues|.
+  // Written only under the registry mutex.
+  iree_host_size_t queue_capacity;
+  // Bit i selects |host_queues[i]| for failure delivery. Zero before
+  // publication and after retirement. Written only under the registry mutex,
+  // by frontier assignment, sparse queue materialization, and deassignment.
+  uint64_t live_queue_mask;
 };
 
 struct iree_hal_amdgpu_system_event_registration_t {
@@ -182,7 +185,10 @@ static bool iree_hal_amdgpu_system_event_deliver(const hsa_amd_event_t* event,
     for (iree_host_size_t i = 0; i < registration->agent_count; ++i) {
       iree_hal_amdgpu_system_event_agent_target_t* target =
           &registration->agent_targets[i];
-      for (iree_host_size_t j = 0; j < target->live_queue_count; ++j) {
+      for (iree_host_size_t j = 0; j < target->queue_capacity; ++j) {
+        if ((target->live_queue_mask & (UINT64_C(1) << j)) == 0) {
+          continue;
+        }
         iree_hal_amdgpu_host_queue_record_failure(
             &target->host_queues[j],
             iree_hal_amdgpu_system_event_make_status(event));
@@ -468,11 +474,32 @@ void iree_hal_amdgpu_system_event_publish_queue_targets(
     iree_hal_amdgpu_system_event_agent_target_t* target,
     iree_hal_amdgpu_host_queue_t* host_queues,
     iree_host_size_t live_queue_count) {
+  IREE_ASSERT_TRUE(live_queue_count <= IREE_HAL_MAX_QUEUES);
+  live_queue_count =
+      iree_min(live_queue_count, (iree_host_size_t)IREE_HAL_MAX_QUEUES);
+  const uint64_t live_queue_mask = live_queue_count == IREE_HAL_MAX_QUEUES
+                                       ? UINT64_MAX
+                                       : (UINT64_C(1) << live_queue_count) - 1u;
+  iree_hal_amdgpu_system_event_publish_queue_target_mask(
+      target, host_queues, live_queue_count, live_queue_mask);
+}
+
+void iree_hal_amdgpu_system_event_publish_queue_target_mask(
+    iree_hal_amdgpu_system_event_agent_target_t* target,
+    iree_hal_amdgpu_host_queue_t* host_queues, iree_host_size_t queue_capacity,
+    uint64_t live_queue_mask) {
   if (!target) return;
+  IREE_ASSERT_TRUE(queue_capacity <= IREE_HAL_MAX_QUEUES);
+  queue_capacity =
+      iree_min(queue_capacity, (iree_host_size_t)IREE_HAL_MAX_QUEUES);
+  const uint64_t capacity_mask = queue_capacity == IREE_HAL_MAX_QUEUES
+                                     ? UINT64_MAX
+                                     : (UINT64_C(1) << queue_capacity) - 1u;
 
   iree_mutex_lock(&iree_hal_amdgpu_system_event_registry.mutex);
   target->host_queues = host_queues;
-  target->live_queue_count = live_queue_count;
+  target->queue_capacity = queue_capacity;
+  target->live_queue_mask = live_queue_mask & capacity_mask;
   iree_mutex_unlock(&iree_hal_amdgpu_system_event_registry.mutex);
 }
 
@@ -485,6 +512,7 @@ void iree_hal_amdgpu_system_event_retire_queue_targets(
   // every device's teardown against every other device's fault delivery.
   iree_mutex_lock(&iree_hal_amdgpu_system_event_registry.mutex);
   target->host_queues = NULL;
-  target->live_queue_count = 0;
+  target->queue_capacity = 0;
+  target->live_queue_mask = 0;
   iree_mutex_unlock(&iree_hal_amdgpu_system_event_registry.mutex);
 }

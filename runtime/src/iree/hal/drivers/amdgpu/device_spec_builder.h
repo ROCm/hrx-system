@@ -78,6 +78,9 @@ typedef struct iree_hal_amdgpu_device_spec_params_t {
   iree_host_size_t physical_device_count;
   // Physical devices covered by the logical device.
   const iree_hal_amdgpu_device_spec_physical_device_params_t* physical_devices;
+  // Number of queue-affinity lanes reserved for each physical device. Must be
+  // at least each physical device's exposed queue count.
+  uint32_t queue_affinity_stride;
   // Total logical device-local memory capacity in bytes, if known.
   uint64_t device_memory_capacity_bytes;
   // Device allocator used to query stable allocation classes.

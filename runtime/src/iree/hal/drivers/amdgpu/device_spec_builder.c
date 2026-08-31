@@ -32,18 +32,21 @@ static iree_status_t iree_hal_amdgpu_device_spec_verify_params(
                             "AMDGPU device spec allocator is NULL");
   }
   const iree_host_size_t queue_count = params->physical_devices[0].queue_count;
-  iree_host_size_t total_queue_count = 0;
+  iree_host_size_t queue_affinity_span = 0;
   if (IREE_UNLIKELY(queue_count == 0 ||
+                    params->queue_affinity_stride < queue_count ||
                     !iree_host_size_checked_mul(params->physical_device_count,
-                                                queue_count,
-                                                &total_queue_count) ||
-                    total_queue_count > IREE_HAL_MAX_QUEUES)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "AMDGPU logical queue count must be in [1, %" PRIhsz
-                            "] (physical_devices=%" PRIhsz
-                            ", queues_per_device=%" PRIhsz ")",
-                            (iree_host_size_t)IREE_HAL_MAX_QUEUES,
-                            params->physical_device_count, queue_count);
+                                                params->queue_affinity_stride,
+                                                &queue_affinity_span) ||
+                    queue_affinity_span > IREE_HAL_MAX_QUEUES)) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "AMDGPU queue-affinity layout exceeds its %" PRIhsz
+        "-bit domain or exposes queues outside each physical-device stride "
+        "(physical_devices=%" PRIhsz ", queues_per_device=%" PRIhsz
+        ", queue_affinity_stride=%u)",
+        (iree_host_size_t)IREE_HAL_MAX_QUEUES, params->physical_device_count,
+        queue_count, params->queue_affinity_stride);
   }
   for (iree_host_size_t i = 0; i < params->physical_device_count; ++i) {
     if (IREE_UNLIKELY(params->physical_devices[i].queue_count != queue_count)) {
@@ -93,9 +96,10 @@ iree_hal_amdgpu_device_spec_all_physical_device_affinity(
 static iree_hal_queue_affinity_t
 iree_hal_amdgpu_device_spec_queue_affinity_for_physical_device(
     iree_host_size_t physical_device_ordinal,
-    iree_host_size_t queue_count_per_physical_device) {
+    iree_host_size_t queue_count_per_physical_device,
+    iree_host_size_t queue_affinity_stride) {
   const iree_host_size_t first_queue_ordinal =
-      physical_device_ordinal * queue_count_per_physical_device;
+      physical_device_ordinal * queue_affinity_stride;
   if (queue_count_per_physical_device == IREE_HAL_MAX_QUEUES) {
     return IREE_HAL_QUEUE_AFFINITY_ANY;
   }
@@ -371,7 +375,7 @@ static iree_status_t iree_hal_amdgpu_device_spec_populate_queues(
         .physical_device_affinity = 1ull << i,
         .queue_affinity =
             iree_hal_amdgpu_device_spec_queue_affinity_for_physical_device(
-                i, physical_device->queue_count),
+                i, physical_device->queue_count, params->queue_affinity_stride),
         .role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH |
                       IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER |
                       IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_HOST_CALL |

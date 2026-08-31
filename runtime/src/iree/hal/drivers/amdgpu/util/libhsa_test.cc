@@ -6,12 +6,32 @@
 
 #include "iree/hal/drivers/amdgpu/util/libhsa.h"
 
+#include <string>
+
 #include "iree/base/api.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
 namespace iree::hal::amdgpu {
 namespace {
+
+TEST(LibHSATest, MapsReducedComputeUnitMaskStatus) {
+  iree_status_t status = iree_status_from_hsa_status(
+      __FILE__, __LINE__, (hsa_status_t)HSA_STATUS_CU_MASK_REDUCED,
+      "hsa_amd_queue_cu_set_mask", nullptr);
+  EXPECT_EQ(iree_status_code(status), IREE_STATUS_FAILED_PRECONDITION);
+
+  iree_allocator_t host_allocator = iree_allocator_system();
+  char* status_buffer = nullptr;
+  iree_host_size_t status_buffer_length = 0;
+  ASSERT_TRUE(iree_status_to_string(status, &host_allocator, &status_buffer,
+                                    &status_buffer_length));
+  const std::string status_text(status_buffer, status_buffer_length);
+  EXPECT_NE(status_text.find("HSA_STATUS_CU_MASK_REDUCED"), std::string::npos);
+  EXPECT_NE(status_text.find("process-wide policy"), std::string::npos);
+  iree_allocator_free(host_allocator, status_buffer);
+  iree_status_free(status);
+}
 
 // Tests that we can find, load, and unload HSA.
 // In ASAN builds it tests that we don't leak the library (though ROCR itself

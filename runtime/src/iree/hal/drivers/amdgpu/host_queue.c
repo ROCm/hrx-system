@@ -802,10 +802,52 @@ static void iree_hal_amdgpu_host_queue_error_callback(hsa_status_t status,
   iree_hal_amdgpu_host_queue_record_failure(queue, error);
 }
 
+static iree_status_t iree_hal_amdgpu_host_queue_create_hardware_queue(
+    const iree_hal_amdgpu_libhsa_t* libhsa, hsa_agent_t gpu_agent,
+    const iree_hal_amdgpu_host_queue_create_options_t* create_options,
+    uint32_t aql_queue_capacity, iree_hal_amdgpu_host_queue_t* callback_data,
+    hsa_queue_t** out_hardware_queue) {
+  *out_hardware_queue = NULL;
+  const uint32_t mask_bit_count = create_options->compute_unit_mask_bit_count;
+  const uint32_t* mask = create_options->compute_unit_mask;
+  if (IREE_UNLIKELY((mask_bit_count == 0) != (mask == NULL))) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "host queue CU mask and bit count must both be empty or non-empty");
+  }
+  if (IREE_UNLIKELY(mask_bit_count != 0 && mask_bit_count % 32 != 0)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "host queue CU mask must be a multiple of 32 bits");
+  }
+
+  hsa_queue_t* hardware_queue = NULL;
+  iree_status_t status = iree_hsa_queue_create(
+      IREE_LIBHSA(libhsa), gpu_agent, aql_queue_capacity, HSA_QUEUE_TYPE_MULTI,
+      iree_hal_amdgpu_host_queue_error_callback, callback_data,
+      /*private_segment_size=*/UINT32_MAX,
+      /*group_segment_size=*/UINT32_MAX, &hardware_queue);
+  if (iree_status_is_ok(status) && mask_bit_count != 0) {
+    status = iree_status_annotate(
+        iree_hsa_amd_queue_cu_set_mask(IREE_LIBHSA(libhsa), hardware_queue,
+                                       mask_bit_count, mask),
+        IREE_SV("applying immutable AMDGPU execution queue CU mask"));
+  }
+  if (!iree_status_is_ok(status)) {
+    if (hardware_queue) {
+      iree_hal_amdgpu_hsa_cleanup_assert_success(
+          iree_hsa_queue_destroy_raw(libhsa, hardware_queue));
+    }
+    return status;
+  }
+  *out_hardware_queue = hardware_queue;
+  return iree_ok_status();
+}
+
 iree_status_t iree_hal_amdgpu_host_queue_initialize(
     const iree_hal_amdgpu_libhsa_t* libhsa, iree_hal_device_t* logical_device,
     void* hostcall_buffer, iree_async_proactor_t* proactor,
     hsa_agent_t gpu_agent,
+    const iree_hal_amdgpu_host_queue_create_options_t* create_options,
     const iree_hal_amdgpu_kernarg_ring_memory_t* kernarg_memory,
     hsa_amd_memory_pool_t pm4_ib_pool,
     iree_async_frontier_tracker_t* frontier_tracker, iree_async_axis_t axis,
@@ -831,6 +873,7 @@ iree_status_t iree_hal_amdgpu_host_queue_initialize(
   IREE_ASSERT_ARGUMENT(libhsa);
   IREE_ASSERT_ARGUMENT(logical_device);
   IREE_ASSERT_ARGUMENT(proactor);
+  IREE_ASSERT_ARGUMENT(create_options);
   IREE_ASSERT_ARGUMENT(kernarg_memory);
   IREE_ASSERT_ARGUMENT(frontier_tracker);
   IREE_ASSERT_ARGUMENT(epoch_table);
@@ -902,8 +945,11 @@ iree_status_t iree_hal_amdgpu_host_queue_initialize(
   // The optional tracker semaphore is an iree_async_semaphore_t bridge for
   // CPU-side wait integration. The queue's GPU-visible HSA epoch signal is
   // created by the notification ring below and registered in the epoch table.
-  iree_status_t status = iree_async_frontier_tracker_register_axis(
-      frontier_tracker, axis, /*semaphore=*/NULL);
+  // The owning physical device registers every reserved queue axis during
+  // topology setup. Keeping that table immutable is required by the frontier
+  // tracker's lock-free lookup contract and leaves failed lazy queue creation
+  // retryable on the same permanently reserved axis.
+  iree_status_t status = iree_ok_status();
 
   // Create the host-only stop signal before the hardware queue so the HSA error
   // callback always has a valid signal to wake if queue creation races with an
@@ -925,12 +971,9 @@ iree_status_t iree_hal_amdgpu_host_queue_initialize(
   // MULTI queues.
   hsa_queue_t* hardware_queue = NULL;
   if (iree_status_is_ok(status)) {
-    status = iree_hsa_queue_create(
-        IREE_LIBHSA(libhsa), gpu_agent, aql_queue_capacity,
-        HSA_QUEUE_TYPE_MULTI, iree_hal_amdgpu_host_queue_error_callback,
-        /*data=*/out_queue,
-        /*private_segment_size=*/UINT32_MAX,
-        /*group_segment_size=*/UINT32_MAX, &hardware_queue);
+    status = iree_hal_amdgpu_host_queue_create_hardware_queue(
+        libhsa, gpu_agent, create_options, aql_queue_capacity, out_queue,
+        &hardware_queue);
   }
 
   // Initialize the AQL ring from the hardware queue.
@@ -982,17 +1025,6 @@ iree_status_t iree_hal_amdgpu_host_queue_initialize(
         &out_queue->notification_ring);
   }
 
-  // Register this queue's epoch signal in the shared table for cross-queue
-  // barrier emission lookups. Must happen after notification ring init (which
-  // creates the epoch signal) and before any submissions.
-  if (iree_status_is_ok(status)) {
-    iree_hal_amdgpu_epoch_signal_table_register(
-        epoch_table, iree_async_axis_queue_index(axis),
-        iree_hal_amdgpu_notification_ring_epoch_signal(
-            &out_queue->notification_ring));
-    out_queue->epoch_table = epoch_table;
-  }
-
   if (iree_status_is_ok(status)) {
     iree_thread_create_params_t thread_params;
     memset(&thread_params, 0, sizeof(thread_params));
@@ -1005,6 +1037,17 @@ iree_status_t iree_hal_amdgpu_host_queue_initialize(
     status = iree_thread_create(
         iree_hal_amdgpu_host_queue_completion_thread_main, out_queue,
         thread_params, host_allocator, &out_queue->completion.thread);
+  }
+  // Publish the epoch signal only after every queue-owned resource and the
+  // completion service are live. Lazy private-queue lookups pair this release
+  // with an acquire; ordinary queues predate device publication. The physical
+  // device publishes queue routability in a later step.
+  if (iree_status_is_ok(status)) {
+    iree_hal_amdgpu_epoch_signal_table_register(
+        epoch_table, iree_async_axis_queue_index(axis),
+        iree_hal_amdgpu_notification_ring_epoch_signal(
+            &out_queue->notification_ring));
+    out_queue->epoch_table = epoch_table;
   }
   if (!iree_status_is_ok(status)) {
     iree_hal_amdgpu_host_queue_deinitialize(out_queue);
@@ -1102,13 +1145,10 @@ void iree_hal_amdgpu_host_queue_finish_deinitialize(
     queue->epoch_table = NULL;
   }
 
-  if (queue->frontier_tracker) {
-    iree_async_frontier_tracker_retire_axis(
-        queue->frontier_tracker, queue->axis,
-        iree_status_from_code(IREE_STATUS_CANCELLED));
-    queue->frontier_tracker = NULL;
-    queue->axis = 0;
-  }
+  // The physical device owns the permanently reserved frontier axis and
+  // retires it only after every queue sharing its assignment is quiescent.
+  queue->frontier_tracker = NULL;
+  queue->axis = 0;
 
   iree_hal_amdgpu_notification_ring_deinitialize(&queue->notification_ring);
 

@@ -11,6 +11,7 @@
 
 #include "iree/async/frontier.h"
 #include "iree/base/api.h"
+#include "iree/base/internal/atomics.h"
 #include "iree/hal/drivers/amdgpu/util/libhsa.h"
 
 #ifdef __cplusplus
@@ -22,8 +23,9 @@ extern "C" {
 //===----------------------------------------------------------------------===//
 
 // Flat lookup table mapping one logical HAL device's queue indices to their
-// hsa_signal_t epoch signals. Shared read-only across all queues in the logical
-// device during normal operation; mutated only during queue init/deinit.
+// hsa_signal_t epoch signals. Ordinary queue signals are immutable after device
+// publication and use plain hot-path loads. Reserved private slots use a shared
+// release/acquire publication mask as they are materialized.
 //
 // The epoch signal is the single hsa_signal_t that the CP decrements on each
 // AQL packet completion. It is the mechanism by which tier 2 (device-side)
@@ -60,9 +62,14 @@ typedef struct iree_hal_amdgpu_epoch_signal_table_t {
   uint16_t queue_count;
   // Reserved for future table flags.
   uint8_t reserved[2];
+  // Queue bits whose signals were published with release semantics. Private
+  // queue lookups acquire this mask before reading |signals|. Ordinary queue
+  // lookups skip it because those signals predate device publication.
+  iree_atomic_uint64_t registered_queue_mask;
+  // Immutable set of ordinary queue bits that skip dynamic publication loads.
+  uint64_t ordinary_queue_mask;
   // Epoch signals indexed by flattened logical queue index. Unregistered slots
-  // have handle == 0 (null signal). Registered slots contain the epoch signal
-  // from the queue's notification ring.
+  // have handle == 0.
   hsa_signal_t signals[];
 } iree_hal_amdgpu_epoch_signal_table_t;
 
@@ -78,13 +85,22 @@ static inline iree_host_size_t iree_hal_amdgpu_epoch_signal_table_size(
 // bytes. All signal slots are zeroed (unregistered).
 static inline void iree_hal_amdgpu_epoch_signal_table_initialize(
     iree_hal_amdgpu_epoch_signal_table_t* table, uint8_t session_epoch,
-    uint8_t machine_index, uint8_t device_index, uint16_t queue_count) {
+    uint8_t machine_index, uint8_t device_index, uint16_t queue_count,
+    uint64_t ordinary_queue_mask) {
+  IREE_ASSERT(queue_count <= 64, "queue_count out of range");
+  const uint64_t valid_queue_mask =
+      queue_count >= 64 ? UINT64_MAX : (UINT64_C(1) << queue_count) - 1;
+  IREE_ASSERT((ordinary_queue_mask & ~valid_queue_mask) == 0,
+              "ordinary_queue_mask contains out-of-range queues");
   table->session_epoch = session_epoch;
   table->machine_index = machine_index;
   table->device_index = device_index;
   table->reserved0 = 0;
   table->queue_count = queue_count;
   memset(table->reserved, 0, sizeof(table->reserved));
+  iree_atomic_store(&table->registered_queue_mask, 0,
+                    iree_memory_order_relaxed);
+  table->ordinary_queue_mask = ordinary_queue_mask;
   memset(table->signals, 0,
          (iree_host_size_t)queue_count * sizeof(hsa_signal_t));
 }
@@ -97,10 +113,15 @@ static inline void iree_hal_amdgpu_epoch_signal_table_register(
     iree_hal_amdgpu_epoch_signal_table_t* table, uint8_t queue_index,
     hsa_signal_t epoch_signal) {
   IREE_ASSERT(queue_index < table->queue_count, "queue_index out of range");
-  IREE_ASSERT(table->signals[queue_index].handle == 0,
+  const uint64_t queue_bit = UINT64_C(1) << queue_index;
+  IREE_ASSERT(((uint64_t)iree_atomic_load(&table->registered_queue_mask,
+                                          iree_memory_order_relaxed) &
+               queue_bit) == 0,
               "epoch signal slot already registered");
   IREE_ASSERT(epoch_signal.handle != 0, "cannot register null epoch signal");
   table->signals[queue_index] = epoch_signal;
+  iree_atomic_fetch_or(&table->registered_queue_mask, queue_bit,
+                       iree_memory_order_release);
 }
 
 // Deregisters a queue's epoch signal from the table. Called during queue
@@ -109,9 +130,20 @@ static inline void iree_hal_amdgpu_epoch_signal_table_register(
 static inline void iree_hal_amdgpu_epoch_signal_table_deregister(
     iree_hal_amdgpu_epoch_signal_table_t* table, uint8_t queue_index) {
   IREE_ASSERT(queue_index < table->queue_count, "queue_index out of range");
-  IREE_ASSERT(table->signals[queue_index].handle != 0,
+  const uint64_t queue_bit = UINT64_C(1) << queue_index;
+  IREE_ASSERT(((uint64_t)iree_atomic_load(&table->registered_queue_mask,
+                                          iree_memory_order_relaxed) &
+               queue_bit) != 0,
               "epoch signal slot not registered");
-  table->signals[queue_index].handle = 0;
+  iree_atomic_fetch_and(&table->registered_queue_mask, ~queue_bit,
+                        iree_memory_order_release);
+  // Private slots retain their stale value after withdrawal so a reader that
+  // acquired the prior publication bit cannot race a plain handle write. The
+  // cleared bit excludes all later private lookups. Ordinary slots are only
+  // withdrawn after the device has excluded lookup readers.
+  if (iree_any_bit_set(table->ordinary_queue_mask, queue_bit)) {
+    table->signals[queue_index].handle = 0;
+  }
 }
 
 // Looks up the epoch signal for the queue identified by |axis|. Returns true
@@ -120,9 +152,9 @@ static inline void iree_hal_amdgpu_epoch_signal_table_deregister(
 // and the slot is registered. Returns false otherwise (caller should fall back
 // to tier 3).
 //
-// This is the hot-path lookup for tier 2 barrier emission. Three byte
-// comparisons (session + machine + device), one domain check, one bounds
-// check, and one array index.
+// This is the hot-path lookup for tier 2 barrier emission. Ordinary queues use
+// only identity checks, one queue-class bit test, and one plain array load.
+// Private queues additionally acquire their dynamic publication bit.
 static inline bool iree_hal_amdgpu_epoch_signal_table_lookup(
     const iree_hal_amdgpu_epoch_signal_table_t* table, iree_async_axis_t axis,
     hsa_signal_t* out_signal) {
@@ -138,7 +170,14 @@ static inline bool iree_hal_amdgpu_epoch_signal_table_lookup(
   }
   uint8_t queue_index = iree_async_axis_queue_index(axis);
   if (queue_index >= table->queue_count) return false;
-  hsa_signal_t signal = table->signals[queue_index];
+  const uint64_t queue_bit = UINT64_C(1) << queue_index;
+  if ((table->ordinary_queue_mask & queue_bit) == 0 &&
+      (((uint64_t)iree_atomic_load(&table->registered_queue_mask,
+                                   iree_memory_order_acquire) &
+        queue_bit) == 0)) {
+    return false;
+  }
+  const hsa_signal_t signal = table->signals[queue_index];
   if (signal.handle == 0) return false;  // Slot not registered.
   *out_signal = signal;
   return true;

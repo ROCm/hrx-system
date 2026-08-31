@@ -6,6 +6,8 @@
 
 #include "iree/hal/drivers/amdgpu/util/libhsa.h"
 
+#include <stdlib.h>
+
 #include "iree/base/internal/debugging.h"
 #include "iree/base/internal/dynamic_library.h"
 #include "iree/base/internal/path.h"
@@ -16,6 +18,9 @@
 
 // Maps an HSA status to an IREE status as best we can.
 static iree_status_code_t iree_hsa_status_code(hsa_status_t status) {
+  if (status == (hsa_status_t)HSA_STATUS_CU_MASK_REDUCED) {
+    return IREE_STATUS_FAILED_PRECONDITION;
+  }
   switch (status) {
     default:
       return IREE_STATUS_UNKNOWN;
@@ -70,6 +75,9 @@ static iree_status_code_t iree_hsa_status_code(hsa_status_t status) {
 
 // Returns the stringified form of the HSA status enum value.
 static const char* iree_hsa_status_string(hsa_status_t status) {
+  if (status == (hsa_status_t)HSA_STATUS_CU_MASK_REDUCED) {
+    return "HSA_STATUS_CU_MASK_REDUCED";
+  }
   switch (status) {
     default:
       return "?";
@@ -151,6 +159,9 @@ static const char* iree_hsa_status_string(hsa_status_t status) {
 // that we can customize the error messages to our uses (and avoid the need for
 // carrying the libhsa pointer to resolve statuses).
 static const char* iree_hsa_status_description(hsa_status_t status) {
+  if (status == (hsa_status_t)HSA_STATUS_CU_MASK_REDUCED) {
+    return "The requested queue CU mask was reduced by process-wide policy.";
+  }
   switch (status) {
     default:
       return "Unknown.";
@@ -488,6 +499,21 @@ IREE_API_EXPORT iree_status_t iree_hal_amdgpu_libhsa_initialize(
   memset(out_libhsa, 0, sizeof(*out_libhsa));
   iree_status_t status = iree_hal_amdgpu_libhsa_load_library(
       flags, search_paths, host_allocator, out_libhsa);
+
+  // ROCr snapshots HSA_CU_MASK during its first initialization. Per-queue
+  // callers cannot later query whether an already initialized process runtime
+  // captured a global mask, and current ROCr releases do not reliably report a
+  // reduced mask from hsa_amd_queue_cu_set_mask. Record the only state in which
+  // exact per-queue confinement is provable: IREE owns first initialization and
+  // no process-wide mask is present at that boundary.
+  if (iree_status_is_ok(status)) {
+    uint16_t version_major = 0;
+    const hsa_status_t preinitialize_status = iree_hsa_system_get_info_raw(
+        out_libhsa, HSA_SYSTEM_INFO_VERSION_MAJOR, &version_major);
+    out_libhsa->exact_queue_cu_mask_supported =
+        preinitialize_status == HSA_STATUS_ERROR_NOT_INITIALIZED &&
+        getenv("HSA_CU_MASK") == NULL;
+  }
 
   // Initialize HSA. If already loaded this increments the refcount to be paired
   // with the hsa_shut_down we call in deinitialize.

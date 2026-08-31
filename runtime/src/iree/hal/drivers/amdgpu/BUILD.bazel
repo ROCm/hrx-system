@@ -159,11 +159,49 @@ iree_runtime_cc_library(
     ],
 )
 
+# CMake has no target visibility equivalent. Define an in-tree interface target
+# directly because iree_cc_library installs every non-test header target.
+iree_cmake_extra_content(
+    content = """
+if(IREE_HAL_DRIVER_AMDGPU)
+add_library(iree_hal_drivers_amdgpu_api_experimental INTERFACE)
+target_sources(iree_hal_drivers_amdgpu_api_experimental
+  INTERFACE
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/api_experimental.h>"
+)
+target_link_libraries(iree_hal_drivers_amdgpu_api_experimental
+  INTERFACE
+    iree::base
+    iree::hal
+)
+iree_add_alias_library(
+  iree::hal::drivers::amdgpu::api_experimental
+  iree_hal_drivers_amdgpu_api_experimental
+)
+endif()
+""",
+    inline = True,
+)
+
+# Restricted experimental declarations are exposed only to in-tree libhrx
+# consumers and remain outside the installed AMDGPU API surface.
+iree_runtime_cc_library(
+    name = "api_experimental",
+    hdrs = ["api_experimental.h"],
+    tags = ["skip-bazel_to_cmake"],
+    visibility = ["//libhrx:__subpackages__"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
 iree_runtime_cc_library(
     name = "amdgpu",
     srcs = [
         "allocator.c",
         "allocator.h",
+        "api_experimental.h",
         "aql_atomic.c",
         "aql_atomic.h",
         "aql_block_processor.c",
@@ -629,6 +667,24 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
+    name = "api_experimental_test",
+    srcs = ["api_experimental_test.cc"],
+    deps = [
+        ":amdgpu",
+        ":api_experimental",
+        ":headers",
+        ":queue_affinity",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/cts/util:profile_test_util",
+        "//runtime/src/iree/hal/cts/util:test_base",
+        "//runtime/src/iree/hal/testing:mock_device",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "driver_options_test",
     srcs = ["driver_options_test.cc"],
     deps = [
@@ -714,6 +770,7 @@ iree_runtime_cc_test(
     ],
     deps = [
         ":amdgpu",
+        ":api_experimental",
         ":headers",
         ":queue_affinity",
         "//runtime/src/iree/base",
