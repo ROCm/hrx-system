@@ -394,7 +394,13 @@ static iree_status_t loom_native_elf_segment_range(
                             "ELF segment file range overflow");
   }
   *out_file_size = end_offset - first_section->file_offset;
-  *out_memory_size = *out_file_size;
+  *out_memory_size =
+      segment->memory_size == 0 ? *out_file_size : segment->memory_size;
+  if (*out_memory_size < *out_file_size) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "ELF section-backed segment memory size is "
+                            "smaller than its file size");
+  }
   return iree_ok_status();
 }
 
