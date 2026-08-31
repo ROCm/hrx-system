@@ -175,6 +175,41 @@ static void loom_pass_interpreter_accumulate_diagnostics(
   state->result->remark_count += counter->remark_count;
 }
 
+static bool loom_pass_interpreter_has_value_fact_lifecycle_counts(
+    const loom_pass_value_fact_lifecycle_counts_t* counts) {
+  return counts->acquisition_count != 0 || counts->cache_hit_count != 0 ||
+         counts->recomputation_count != 0 || counts->preparation_count != 0 ||
+         counts->invalidation_count != 0 || counts->scope_clear_count != 0 ||
+         counts->computed_value_count != 0 || counts->cleared_value_count != 0;
+}
+
+static iree_status_t loom_pass_interpreter_append_value_fact_lifecycle_detail(
+    loom_pass_t* pass, const loom_pass_value_fact_lifecycle_counts_t* counts) {
+  if (!loom_pass_interpreter_has_value_fact_lifecycle_counts(counts)) {
+    return iree_ok_status();
+  }
+  const loom_pass_report_detail_field_t fields[] = {
+      loom_pass_report_detail_uint64_field(IREE_SV("acquisition_count"),
+                                           counts->acquisition_count),
+      loom_pass_report_detail_uint64_field(IREE_SV("cache_hit_count"),
+                                           counts->cache_hit_count),
+      loom_pass_report_detail_uint64_field(IREE_SV("recomputation_count"),
+                                           counts->recomputation_count),
+      loom_pass_report_detail_uint64_field(IREE_SV("preparation_count"),
+                                           counts->preparation_count),
+      loom_pass_report_detail_uint64_field(IREE_SV("invalidation_count"),
+                                           counts->invalidation_count),
+      loom_pass_report_detail_uint64_field(IREE_SV("scope_clear_count"),
+                                           counts->scope_clear_count),
+      loom_pass_report_detail_uint64_field(IREE_SV("computed_value_count"),
+                                           counts->computed_value_count),
+      loom_pass_report_detail_uint64_field(IREE_SV("cleared_value_count"),
+                                           counts->cleared_value_count),
+  };
+  return loom_pass_report_append_detail(pass, IREE_SV("value-facts"), fields,
+                                        IREE_ARRAYSIZE(fields));
+}
+
 static iree_status_code_t loom_pass_interpreter_invocation_status_code(
     iree_status_code_t status_code,
     const loom_pass_interpreter_diagnostic_counter_t* counter) {
@@ -342,6 +377,7 @@ static iree_status_t loom_pass_interpreter_invoke(
   };
 
   loom_pass_t pass = {0};
+  loom_pass_value_fact_lifecycle_counts_t value_fact_lifecycle_counts = {0};
   iree_status_t trace_status = loom_pass_trace_emit(
       state->options->trace, &(loom_pass_trace_event_t){
                                  .module = state->module,
@@ -357,6 +393,9 @@ static iree_status_t loom_pass_interpreter_invoke(
                              });
   iree_status_t status = iree_ok_status();
   bool pass_execution_allowed = iree_status_is_ok(trace_status);
+  if (state->options->report && pass_execution_allowed) {
+    state->value_facts.lifecycle_counts = &value_fact_lifecycle_counts;
+  }
   if (pass_execution_allowed) {
     status = loom_pass_interpreter_make_pass(
         state, instruction, pass_diagnostic_emitter, &instance_arena, &pass);
@@ -393,6 +432,7 @@ static iree_status_t loom_pass_interpreter_invoke(
   if (created && invoke->descriptor->destroy) {
     invoke->descriptor->destroy(&pass);
   }
+  state->value_facts.lifecycle_counts = NULL;
 
   iree_status_code_t status_code = loom_pass_interpreter_invocation_status_code(
       iree_status_code(status), &diagnostic_counter);
@@ -421,21 +461,25 @@ static iree_status_t loom_pass_interpreter_invoke(
 
   if (state->options->report && pass_execution_allowed) {
     iree_duration_t duration_nanoseconds = iree_time_now() - start_time;
-    report_status = loom_pass_report_append_invocation(
-        state->options->report,
-        &(loom_pass_report_invocation_options_t){
-            .instruction = instruction,
-            .instruction_index = instruction_index,
-            .anchor_kind = frame->kind,
-            .pipeline_symbol = pipeline_symbol,
-            .symbol_name = symbol_name,
-            .duration_nanoseconds = duration_nanoseconds,
-            .changed = invocation_changed,
-            .status_code = status_code,
-            .statistic_storage = pass.statistic_storage,
-            .detail_head = pass.report_detail_head,
-            .detail_count = pass.report_detail_count,
-        });
+    report_status = loom_pass_interpreter_append_value_fact_lifecycle_detail(
+        &pass, &value_fact_lifecycle_counts);
+    if (iree_status_is_ok(report_status)) {
+      report_status = loom_pass_report_append_invocation(
+          state->options->report,
+          &(loom_pass_report_invocation_options_t){
+              .instruction = instruction,
+              .instruction_index = instruction_index,
+              .anchor_kind = frame->kind,
+              .pipeline_symbol = pipeline_symbol,
+              .symbol_name = symbol_name,
+              .duration_nanoseconds = duration_nanoseconds,
+              .changed = invocation_changed,
+              .status_code = status_code,
+              .statistic_storage = pass.statistic_storage,
+              .detail_head = pass.report_detail_head,
+              .detail_count = pass.report_detail_count,
+          });
+    }
     if (iree_status_is_ok(report_status)) {
       pass.report_detail_head = NULL;
       pass.report_detail_tail = NULL;

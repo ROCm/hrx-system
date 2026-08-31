@@ -358,5 +358,55 @@ TEST_F(PassValueFactsTest, InvalidateClearsActiveScopeWithoutLosingStorage) {
   loom_pass_value_fact_owner_deinitialize(&owner);
 }
 
+TEST_F(PassValueFactsTest,
+       LifecycleCountsDistinguishReuseAndRedundantInvalidation) {
+  loom_module_t* module =
+      Parse(IREE_SV("test.func @main() {\n"
+                    "  %value = test.constant 99 : i32\n"
+                    "  test.yield\n"
+                    "}\n"));
+  ASSERT_NE(module, nullptr);
+  loom_func_like_t function = Function(module, 0);
+
+  loom_pass_value_fact_owner_t owner = {};
+  loom_pass_value_fact_owner_initialize(block_pool(), &owner);
+  loom_pass_value_fact_lifecycle_counts_t counts = {};
+  owner.lifecycle_counts = &counts;
+
+  loom_value_fact_table_t* facts = nullptr;
+  IREE_ASSERT_OK(loom_pass_value_fact_owner_acquire(
+      &owner, module, loom_pass_value_fact_scope_function(function), &facts));
+  ASSERT_NE(facts, nullptr);
+  const iree_host_size_t populated_value_count = facts->touched_count;
+  EXPECT_GT(populated_value_count, 0u);
+
+  loom_value_fact_table_t* reused_facts = nullptr;
+  IREE_ASSERT_OK(loom_pass_value_fact_owner_acquire(
+      &owner, module, loom_pass_value_fact_scope_function(function),
+      &reused_facts));
+  EXPECT_EQ(reused_facts, facts);
+  EXPECT_EQ(counts.acquisition_count, 2u);
+  EXPECT_EQ(counts.cache_hit_count, 1u);
+  EXPECT_EQ(counts.recomputation_count, 1u);
+  EXPECT_EQ(counts.computed_value_count, populated_value_count);
+
+  loom_pass_value_fact_owner_invalidate(&owner);
+  loom_pass_value_fact_owner_invalidate(&owner);
+  EXPECT_EQ(counts.invalidation_count, 2u);
+  EXPECT_EQ(counts.scope_clear_count, 1u);
+  EXPECT_EQ(counts.cleared_value_count, populated_value_count);
+
+  loom_value_fact_table_t* prepared_facts = nullptr;
+  IREE_ASSERT_OK(loom_pass_value_fact_owner_prepare(
+      &owner, module, loom_pass_value_fact_scope_function(function),
+      &prepared_facts));
+  EXPECT_EQ(prepared_facts, facts);
+  EXPECT_EQ(counts.preparation_count, 1u);
+  EXPECT_EQ(counts.scope_clear_count, 1u);
+
+  owner.lifecycle_counts = nullptr;
+  loom_pass_value_fact_owner_deinitialize(&owner);
+}
+
 }  // namespace
 }  // namespace loom

@@ -30,6 +30,7 @@ loom_cc_library(
         "//loom/src/loom/pass:registry",
         "//loom/src/loom/pass:report",
         "//loom/src/loom/pass:types",
+        "//loom/src/loom/pass:value_facts",
         "//runtime/src/iree/base",
     ],
 )

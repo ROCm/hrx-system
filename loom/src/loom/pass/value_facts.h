@@ -36,6 +36,29 @@ typedef enum loom_pass_value_fact_owner_flag_bits_e {
 } loom_pass_value_fact_owner_flag_bits_t;
 typedef uint32_t loom_pass_value_fact_owner_flags_t;
 
+// Optional deterministic counts for one observed value-fact owner interval.
+// The owner checks for and updates these only at lifecycle transitions while
+// lifecycle_counts is non-NULL; ordinary pass execution performs no counter
+// updates.
+typedef struct loom_pass_value_fact_lifecycle_counts_t {
+  // Number of computed-fact acquisition requests.
+  uint64_t acquisition_count;
+  // Number of acquisitions served by the already-active scope.
+  uint64_t cache_hit_count;
+  // Number of complete scope computations attempted after cache misses.
+  uint64_t recomputation_count;
+  // Number of empty scopes prepared for caller-maintained facts.
+  uint64_t preparation_count;
+  // Number of explicit invalidation requests against an initialized table.
+  uint64_t invalidation_count;
+  // Number of populated scopes actually cleared for any lifecycle reason.
+  uint64_t scope_clear_count;
+  // Total number of SSA value entries produced by complete computations.
+  uint64_t computed_value_count;
+  // Total number of populated SSA value entries discarded by scope clears.
+  uint64_t cleared_value_count;
+} loom_pass_value_fact_lifecycle_counts_t;
+
 typedef struct loom_pass_value_fact_scope_t {
   // Requested fact population scope.
   loom_pass_value_fact_scope_kind_t kind;
@@ -125,6 +148,8 @@ struct loom_pass_value_fact_owner_t {
   loom_pass_value_fact_scope_t active_scope;
   // Owner state flags.
   loom_pass_value_fact_owner_flags_t flags;
+  // Optional borrowed counters updated at owner lifecycle transitions.
+  loom_pass_value_fact_lifecycle_counts_t* lifecycle_counts;
 };
 
 // Initializes a dormant owner. This performs no fact-table allocation and no
