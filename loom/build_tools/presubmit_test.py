@@ -11,6 +11,7 @@ import importlib.util
 import io
 import subprocess
 import sys
+import tempfile
 import types
 import unittest
 from pathlib import Path
@@ -51,6 +52,66 @@ class LoomPresubmitTest(unittest.TestCase):
             "-iree-run-requirement=runtime.resource.vulkan_device", tag_filter
         )
         self.assertNotIn("loom.resource", tag_filter)
+
+    def test_bazel_test_command_accepts_affected_targets(self):
+        command = self.presubmit.bazel_test_command(
+            ["//loom/a:a_test", "//loom/b:b_test"]
+        )
+
+        self.assertEqual(command[-2:], ["//loom/a:a_test", "//loom/b:b_test"])
+        self.assertNotIn("//loom/...", command)
+
+    def test_bazel_package_target_uses_nearest_build_package(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            repository_root = Path(temporary_dir)
+            package_root = repository_root / "loom/src/loom/example"
+            package_root.mkdir(parents=True)
+            (package_root / "BUILD.bazel").touch()
+            nested_source = package_root / "test/example.loom-test"
+            nested_source.parent.mkdir()
+            nested_source.touch()
+            with mock.patch.object(self.presubmit, "REPO_ROOT", repository_root):
+                self.assertEqual(
+                    self.presubmit.bazel_package_test_target(
+                        "loom/src/loom/example/test/example.loom-test"
+                    ),
+                    "//loom/src/loom/example:all",
+                )
+
+    def test_global_trigger_selects_full_bazel_suite(self):
+        self.assertIsNone(
+            self.presubmit.selected_bazel_test_targets(
+                ["loom/build_tools/presubmit.py"]
+            )
+        )
+
+    def test_starlark_change_selects_full_bazel_suite(self):
+        self.assertIsNone(
+            self.presubmit.selected_bazel_test_targets(
+                ["loom/src/loom/example/rules.bzl"]
+            )
+        )
+
+    def test_leaf_changes_select_each_owning_package_once(self):
+        with mock.patch.object(
+            self.presubmit,
+            "bazel_package_test_target",
+            side_effect=[
+                "//loom/src/loom/a:all",
+                "//loom/src/loom/a:all",
+                "//loom/src/loom/b:all",
+            ],
+        ):
+            self.assertEqual(
+                self.presubmit.selected_bazel_test_targets(
+                    [
+                        "loom/src/loom/a/a.c",
+                        "loom/src/loom/a/a_test.cc",
+                        "loom/src/loom/b/b.c",
+                    ]
+                ),
+                ["//loom/src/loom/a:all", "//loom/src/loom/b:all"],
+            )
 
     def test_cmake_tests_exclude_runtime_resource_labels(self):
         self.assertEqual(
@@ -752,7 +813,7 @@ class LoomPresubmitTest(unittest.TestCase):
             lane="bazel", files_from=None, fix=False
         )
         source_lint.assert_called_once_with(lane="bazel", files_from=None)
-        bazel_tests.assert_called_once_with()
+        bazel_tests.assert_called_once_with(None)
 
     def test_source_lint_failure_fails_project_hygiene(self):
         args = types.SimpleNamespace(
@@ -814,7 +875,7 @@ class LoomPresubmitTest(unittest.TestCase):
         generated_artifact_maintenance.assert_not_called()
         source_format_maintenance.assert_not_called()
         source_lint.assert_not_called()
-        bazel_tests.assert_called_once_with()
+        bazel_tests.assert_called_once_with(None)
 
     def test_main_rechecks_package_initializers_after_bazel_tests(self):
         args = types.SimpleNamespace(

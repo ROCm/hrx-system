@@ -54,6 +54,7 @@ BAZEL_SOURCE_TOOL_ARGS = (
     "--config=locked",
     f"--//loom/config/target:enable={CI_LOOM_TARGETS}",
 )
+BAZEL_FULL_TEST_TARGET = "//loom/..."
 LOOM_FORMAT_BAZEL_TARGET = "//loom/src/loom/tools/loom-format:loom-format"
 LOOM_FORMAT_CMAKE_TARGET = "loom::tools::loom-format"
 LOOM_LINT_BAZEL_TARGET = "//loom/py/loom/tools:loom-lint"
@@ -392,20 +393,81 @@ def run_source_lint(*, lane: str, files_from: str | None) -> bool:
     return public_lint_ok and repository_lint_ok
 
 
-def bazel_test_command() -> list[str]:
+def bazel_test_command(targets: list[str] | None = None) -> list[str]:
     return [
         "bazel",
         "test",
         "--config=presubmit",
         f"--//loom/config/target:enable={CI_LOOM_TARGETS}",
         "--test_tag_filters=" + ",".join(RESOURCE_TEST_TAG_FILTERS),
-        "//loom/...",
+        *(targets or [BAZEL_FULL_TEST_TARGET]),
     ]
 
 
-def run_bazel_tests() -> bool:
+def bazel_package_test_target(path: str) -> str | None:
+    source_path = PurePosixPath(path)
+    if (
+        "\\" in path
+        or source_path.as_posix() != path
+        or ".." in source_path.parts
+        or not path.startswith(PROJECT_ROOT)
+    ):
+        return None
+
+    directory = (REPO_ROOT / source_path).parent
+    while directory != REPO_ROOT:
+        if (directory / "BUILD.bazel").is_file() or (directory / "BUILD").is_file():
+            package_path = directory.relative_to(REPO_ROOT).as_posix()
+            return f"//{package_path}:all"
+        directory = directory.parent
+    return None
+
+
+def selected_bazel_test_targets(paths: list[str]) -> list[str] | None:
+    # Enabled target providers are linked through shared Loom registries, which
+    # makes nearly every test a graph-level reverse dependency of a leaf target
+    # package. Package ownership is therefore the useful local proof boundary;
+    # repository-wide validation remains the CI and explicit --all contract.
+    # Starlark load edges are not ordinary target dependencies, so package-local
+    # selection cannot represent their impact. The same is true of repository
+    # configuration and presubmit machinery covered by is_global_trigger.
+    if any(is_global_trigger(path) or path.endswith(".bzl") for path in paths):
+        return None
+    targets = set()
+    for path in paths:
+        if not path.startswith(PROJECT_ROOT):
+            continue
+        target = bazel_package_test_target(path)
+        if target is None:
+            # A Loom path outside a Bazel package has no safe local ownership
+            # boundary. Retain the full-suite proof instead of skipping it.
+            return None
+        targets.add(target)
+    return sorted(targets)
+
+
+def run_bazel_tests(files_from: str | None = None) -> bool:
+    if files_from is None:
+        targets = [BAZEL_FULL_TEST_TARGET]
+    else:
+        selected_targets = selected_bazel_test_targets(selected_files(files_from))
+        if selected_targets is None:
+            targets = [BAZEL_FULL_TEST_TARGET]
+        elif not selected_targets:
+            print("loom presubmit: no Bazel packages affected")
+            return True
+        else:
+            targets = selected_targets
+
+    command = bazel_test_command(targets)
+    if command_line_utf16_units(command) > MAX_PORTABLE_COMMAND_LINE_UTF16_UNITS:
+        print(
+            "loom presubmit: affected test command exceeds the portable "
+            "command-line limit; running the full Loom suite"
+        )
+        command = bazel_test_command()
     return run_command(
-        bazel_test_command(),
+        command,
         "Bazel tests",
     )
 
@@ -454,7 +516,7 @@ def run_presubmit(args: argparse.Namespace) -> int:
         ok = run_source_lint(lane=args.lane, files_from=args.files_from) and ok
     if args.tests:
         if args.lane == "bazel":
-            ok = run_bazel_tests() and ok
+            ok = run_bazel_tests(args.files_from) and ok
         elif args.lane == "cmake":
             ok = run_cmake_tests() and ok
         else:
