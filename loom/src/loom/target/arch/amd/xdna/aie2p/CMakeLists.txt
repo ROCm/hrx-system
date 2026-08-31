@@ -270,6 +270,11 @@ loom_cc_library(
     iree::base
     iree::base::internal::arena
     loom::codegen::low::diagnostics
+    loom::codegen::low::packet
+    loom::ir
+    loom::ops::low
+    loom::ops::op_defs
+    loom::target::arch::amd::xdna::elf_format
     loom::target::emit::native::object
   PUBLIC
 )
@@ -283,12 +288,12 @@ loom_cc_library(
     "emit/tile_image.c"
   DEPS
     ::bundle_plan
+    ::leaf_object
     iree::base
     iree::base::internal::arena
     iree::io::stream
     loom::target::emit::native::contribution
     loom::target::emit::native::elf
-    loom::target::emit::native::object
   PUBLIC
 )
 
@@ -311,7 +316,6 @@ loom_cc_library(
     loom::codegen::low::function
     loom::ir
     loom::ops::op_defs
-    loom::target::emit::native::object
     loom::target::function_version
     loom::target::provider
     loom::target::reporting::low
@@ -363,6 +367,7 @@ loom_cc_test(
     "emit/leaf_object_test.cc"
   DEPS
     ::bundle_plan
+    ::core_descriptors
     ::leaf_object
     ::low_registry
     iree::base::internal::arena
