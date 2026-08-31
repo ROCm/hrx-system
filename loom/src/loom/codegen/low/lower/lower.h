@@ -1301,6 +1301,11 @@ iree_status_t loom_low_lower_emit_source_type_unsupported(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     iree_string_view_t field_name, loom_type_t actual_type);
 
+// Emits ERR_TARGET_073 when function storage has no finite positive maximum.
+iree_status_t loom_low_lower_emit_function_storage_extent_unsupported(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_storage_space_t storage_space, loom_value_id_t byte_length_value);
+
 // Emits ERR_TARGET_066 when generic lowering would need to change the carrier
 // width of a typed register without a target-defined semantic relation.
 iree_status_t loom_low_lower_emit_register_width_relation_unsupported(

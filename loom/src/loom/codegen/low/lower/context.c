@@ -8,12 +8,14 @@
 
 #include <string.h>
 
+#include "loom/codegen/low/diagnostics.h"
 #include "loom/codegen/low/source_memory_plan.h"
 #include "loom/error/error_catalog.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/cfg/ops.h"
 #include "loom/ops/low/ops.h"
+#include "loom/ops/type_registry.h"
 #include "loom/target/registers.h"
 
 static iree_string_view_t loom_low_lower_nonempty(
@@ -110,6 +112,19 @@ iree_status_t loom_low_lower_emit_source_type_unsupported(
   };
   return loom_low_lower_emit_target_context_error(
       context, source_op, LOOM_ERR_TARGET_033, params, IREE_ARRAYSIZE(params));
+}
+
+iree_status_t loom_low_lower_emit_function_storage_extent_unsupported(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_storage_space_t storage_space, loom_value_id_t byte_length_value) {
+  const loom_module_t* module = loom_low_lower_context_module(context);
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(loom_low_storage_type_space_name(storage_space)),
+      loom_param_string(
+          loom_low_diagnostic_value_name(module, byte_length_value)),
+  };
+  return loom_low_lower_emit_target_context_error(
+      context, source_op, LOOM_ERR_TARGET_080, params, IREE_ARRAYSIZE(params));
 }
 
 iree_status_t loom_low_lower_emit_register_width_relation_unsupported(
