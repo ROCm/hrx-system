@@ -652,7 +652,10 @@ class LoomPresubmitTest(unittest.TestCase):
             lane="bazel",
             bazel_target="//loom/py/loom/tools:loom-lint",
             cmake_target="loom::py::loom::tools::loom-lint",
-            bazel_args=("--config=locked",),
+            bazel_args=(
+                "--config=locked",
+                "--//loom/config/target:enable=amdgpu,llvmir,spirv,xdna,x86",
+            ),
         )
         self.assertEqual(
             run_command.call_args_list,

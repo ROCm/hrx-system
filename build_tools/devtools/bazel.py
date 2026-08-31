@@ -619,7 +619,12 @@ def resolve_bazel_launch_metadata_for_targets(
         )
         return 1, None
 
-    execution_root = bazel_execution_root(bazel=bazel, cwd=cwd, env=env)
+    execution_root = bazel_execution_root(
+        bazel=bazel,
+        bazel_args=bazel_args,
+        cwd=cwd,
+        env=env,
+    )
     if execution_root is None or not execution_root.is_absolute():
         print("dev.py: failed to resolve the Bazel execution root", file=sys.stderr)
         return 1, None
@@ -910,9 +915,15 @@ def resolve_bazel_output_path(
 
 
 def bazel_execution_root(
-    *, bazel: str, cwd: Path, env: dict[str, str] | None
+    *,
+    bazel: str,
+    bazel_args: list[str],
+    cwd: Path,
+    env: dict[str, str] | None,
 ) -> Path | None:
-    completed = run_captured([bazel, "info", "execution_root"], cwd=cwd, env=env)
+    completed = run_captured(
+        [bazel, "info", *bazel_args, "execution_root"], cwd=cwd, env=env
+    )
     if completed.returncode != 0:
         return None
     for line in completed.stdout.splitlines():
@@ -1323,6 +1334,7 @@ class BazelCompileCommandsStep:
                 return build_result
             command_directory = bazel_execution_root(
                 bazel=self.bazel,
+                bazel_args=self.command.bazel_args,
                 cwd=REPO_ROOT,
                 env=self.env,
             )
