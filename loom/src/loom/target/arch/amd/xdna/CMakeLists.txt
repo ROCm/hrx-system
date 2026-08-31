@@ -9,6 +9,65 @@
 
 iree_add_all_subdirs()
 
+loom_generated_file_family(
+  NAME
+    hardware_tables_gen
+  GENERATOR
+    loom::py::loom::gen::target::arch::amd::xdna::hardware_tables
+  OUTPUTS
+    "array/facts_tables.inl"
+    "array/register_tables.inl"
+    "device/profile_tables.inl"
+  OUTPUT_FLAGS
+    "--array-output"
+    "--register-output"
+    "--profile-output"
+)
+
+loom_cc_library(
+  NAME
+    array_facts
+  HDRS
+    "array/facts.h"
+  TEXTUAL_HDRS
+    "array/facts_tables.inl"
+  SRCS
+    "array/facts.c"
+  DEPS
+    iree::base
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    array_registers
+  HDRS
+    "array/registers.h"
+  TEXTUAL_HDRS
+    "array/register_tables.inl"
+  SRCS
+    "array/registers.c"
+  DEPS
+    ::array_facts
+    iree::base
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    device_profile
+  HDRS
+    "device/profile.h"
+  TEXTUAL_HDRS
+    "device/profile_tables.inl"
+  SRCS
+    "device/profile.c"
+  DEPS
+    ::array_facts
+    iree::base
+  PUBLIC
+)
+
 loom_cc_library(
   NAME
     elf_format
@@ -33,4 +92,38 @@ loom_cc_test(
     iree::testing::gtest_main
 )
 
+loom_cc_test(
+  NAME
+    array_facts_test
+  SRCS
+    "array/facts_test.cc"
+  DEPS
+    ::array_facts
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+loom_cc_test(
+  NAME
+    array_registers_test
+  SRCS
+    "array/registers_test.cc"
+  DEPS
+    ::array_facts
+    ::array_registers
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+loom_cc_test(
+  NAME
+    device_profile_test
+  SRCS
+    "device/profile_test.cc"
+  DEPS
+    ::array_facts
+    ::device_profile
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

@@ -8,12 +8,58 @@ load(
     "//loom/build_tools/bazel:build_defs.bzl",
     "loom_cc_library",
     "loom_cc_test",
+    "loom_generated_file_family",
 )
 
 package(
     default_visibility = ["//visibility:private"],
     features = ["layering_check"],
     licenses = ["notice"],  # Apache 2.0
+)
+
+loom_generated_file_family(
+    name = "hardware_tables_gen",
+    generator = "//loom/py/loom/gen/target/arch/amd/xdna:hardware_tables",
+    output_flags = [
+        "--array-output",
+        "--register-output",
+        "--profile-output",
+    ],
+    outputs = [
+        "array/facts_tables.inl",
+        "array/register_tables.inl",
+        "device/profile_tables.inl",
+    ],
+)
+
+loom_cc_library(
+    name = "array_facts",
+    srcs = ["array/facts.c"],
+    hdrs = ["array/facts.h"],
+    textual_hdrs = [":array/facts_tables.inl"],
+    deps = ["//runtime/src/iree/base"],
+)
+
+loom_cc_library(
+    name = "array_registers",
+    srcs = ["array/registers.c"],
+    hdrs = ["array/registers.h"],
+    textual_hdrs = [":array/register_tables.inl"],
+    deps = [
+        ":array_facts",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "device_profile",
+    srcs = ["device/profile.c"],
+    hdrs = ["device/profile.h"],
+    textual_hdrs = [":device/profile_tables.inl"],
+    deps = [
+        ":array_facts",
+        "//runtime/src/iree/base",
+    ],
 )
 
 loom_cc_library(
@@ -30,6 +76,37 @@ loom_cc_test(
     deps = [
         ":elf_format",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+loom_cc_test(
+    name = "array_facts_test",
+    srcs = ["array/facts_test.cc"],
+    deps = [
+        ":array_facts",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "array_registers_test",
+    srcs = ["array/registers_test.cc"],
+    deps = [
+        ":array_facts",
+        ":array_registers",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "device_profile_test",
+    srcs = ["device/profile_test.cc"],
+    deps = [
+        ":array_facts",
+        ":device_profile",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

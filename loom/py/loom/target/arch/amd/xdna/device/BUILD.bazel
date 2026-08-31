@@ -1,0 +1,53 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:python.bzl", "iree_py_library", "iree_py_test")
+
+package(
+    default_visibility = ["//visibility:private"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+iree_py_library(
+    name = "model",
+    srcs = [
+        "__init__.py",
+        "model.py",
+    ],
+    visibility = [
+        "//loom/py/loom/gen/target/arch/amd/xdna:__subpackages__",
+        "//loom/py/loom/target/arch/amd/xdna:__subpackages__",
+    ],
+    deps = ["//loom/py/loom/target/arch/amd/xdna/array:model"],
+)
+
+iree_py_library(
+    name = "strix_halo",
+    srcs = ["strix_halo.py"],
+    visibility = [
+        "//loom/py/loom/gen/target/arch/amd/xdna:__subpackages__",
+        "//loom/py/loom/target/arch/amd/xdna:__subpackages__",
+    ],
+    deps = [
+        ":model",
+        "//loom/py/loom/target/arch/amd/xdna/array:model",
+        "//loom/py/loom/target/arch/amd/xdna/array:npu2",
+    ],
+)
+
+iree_py_test(
+    name = "strix_halo_test",
+    srcs = [
+        "strix_halo_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.target.arch.amd.xdna.device.strix_halo_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":model",
+        ":strix_halo",
+    ],
+)
