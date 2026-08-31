@@ -570,10 +570,13 @@ loomc_status_t loomc_link_request(loomc_linker_t* linker,
         &projection, allocator, &output_source);
   }
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
+    const loomc_request_root_t* input_roots =
+        loomc_request_roots(input_request);
     for (iree_host_size_t i = 0; i < root_count; ++i) {
       output_roots[i] = (loomc_request_root_t){
           .module_ordinal = 0,
           .symbol_ordinal = bytecode_root_symbol_ordinals[i],
+          .goal = input_roots[i].goal,
       };
     }
     status = loomc_request_create_take_source(

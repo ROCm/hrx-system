@@ -134,16 +134,34 @@ typedef uint32_t loomc_request_root_ordinal_t;
 /// Invalid request-local root ordinal.
 #define LOOMC_REQUEST_ROOT_ORDINAL_INVALID UINT32_MAX
 
-/// Durable address of one root in a request's bytecode source.
+/// Product-descriptor-local semantic goal for one request root.
 ///
-/// Ordinals are source-local and are never compared across different bytecode
-/// contents.
+/// Goal values are interpreted only by the product operation named by the
+/// request descriptor. Zero is the default goal for every descriptor. Product
+/// packages define any additional values in their own public headers.
+typedef uint32_t loomc_request_root_goal_t;
+
+/// Default root goal defined by every product descriptor.
+#define LOOMC_REQUEST_ROOT_GOAL_DEFAULT 0u
+
+/// Durable identity of one root in a request's bytecode source.
+///
+/// The source ordinals address the defining operation while `goal` identifies
+/// the semantic value requested from the selected product operation. Ordinals
+/// are source-local and are never compared across different bytecode contents.
+/// Goal values are meaningful only with the request's product descriptor.
 typedef struct loomc_request_root_t {
   /// Bytecode module ordinal containing the root.
   uint32_t module_ordinal;
 
   /// Bytecode SYMBOLS ordinal naming the root.
   uint32_t symbol_ordinal;
+
+  /// Product-descriptor-local semantic goal for the root.
+  loomc_request_root_goal_t goal;
+
+  /// Reserved for future use and must be zero.
+  uint32_t reserved;
 } loomc_request_root_t;
 
 /// Provisional association between a parent requirement and a request root.
@@ -171,7 +189,9 @@ typedef struct loomc_request_t loomc_request_t;
 /// @param product_descriptor Process-lifetime descriptor for the required
 /// successful product representation.
 /// @param source Bytecode source retained by the request.
-/// @param roots Source-local roots copied in product export order.
+/// @param roots Source-local roots copied in product export order. Reserved
+/// fields must be zero. Goal values are validated by the selected product
+/// operation.
 /// @param root_count Number of entries in `roots`; must be nonzero.
 /// @param bindings Optional parent-requirement bindings copied into the
 /// request. Entries must have strictly increasing requirement ordinals and

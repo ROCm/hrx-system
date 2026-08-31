@@ -186,6 +186,13 @@ static loomc_status_t loomc_cmd_program_product_validate_request_options(
     return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
                              "command request must contain at least one root");
   }
+  const loomc_request_root_t* roots = loomc_request_roots(request);
+  for (loomc_host_size_t i = 0; i < loomc_request_root_count(request); ++i) {
+    if (roots[i].goal != LOOMC_REQUEST_ROOT_GOAL_DEFAULT) {
+      return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
+                               "command request root has an unsupported goal");
+    }
+  }
   if (options == NULL) {
     return loomc_ok_status();
   }

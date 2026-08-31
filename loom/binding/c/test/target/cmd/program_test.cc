@@ -417,6 +417,7 @@ template.def<@request.schedule> priority(1) @small(%size: index) {
   for (const RequestPtr& request : capture.requests) {
     loomc_request_root_t root = {};
     ASSERT_TRUE(loomc_request_root_at(request.get(), 0, &root));
+    EXPECT_EQ(root.goal, LOOMC_REQUEST_ROOT_GOAL_DEFAULT);
     BuilderPtr restored_builder = CreateIndexBuilder(restored_context.get());
     loomc_link_index_source_options_t options = {
         /*.provider_name=*/loomc_make_cstring_view("restored_request"),

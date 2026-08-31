@@ -818,6 +818,20 @@ loomc_status_t loomc_compile_module(loomc_compiler_t* compiler,
   return status;
 }
 
+static loomc_status_t loomc_compile_validate_request_goals(
+    const loomc_request_t* request) {
+  const loomc_request_root_t* roots = loomc_request_roots(request);
+  const loomc_host_size_t root_count = loomc_request_root_count(request);
+  for (loomc_host_size_t i = 0; i < root_count; ++i) {
+    if (roots[i].goal != LOOMC_REQUEST_ROOT_GOAL_DEFAULT) {
+      return loomc_make_status(
+          LOOMC_STATUS_INVALID_ARGUMENT,
+          "compiled module request root has an unsupported goal");
+    }
+  }
+  return loomc_ok_status();
+}
+
 static loomc_status_t loomc_compile_validate_request_roots(
     const loomc_module_t* module, const loomc_request_t* request) {
   const loom_module_t* internal_module = loomc_module_const_loom_module(module);
@@ -859,6 +873,7 @@ loomc_status_t loomc_compile_request(
         LOOMC_STATUS_INVALID_ARGUMENT,
         "request does not require a compiled module product");
   }
+  LOOMC_RETURN_IF_ERROR(loomc_compile_validate_request_goals(request));
   if (loomc_pass_program_context(pass_program) != compiler->context) {
     return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
                              "pass program was created with another context");
