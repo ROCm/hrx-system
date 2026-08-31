@@ -1460,6 +1460,29 @@ ERR_TARGET_079 = ErrorDef(
     ),
 )
 
+# ERR_TARGET_080: Function storage byte length has no finite positive bound.
+ERR_TARGET_080 = ErrorDef(
+    domain=ErrorDomain.TARGET,
+    code=80,
+    severity=Severity.ERROR,
+    summary="Function storage byte length has no finite positive bound.",
+    message=(
+        "target '{target_key}' export '{export_name}' config '{config_key}' "
+        "rejected '{op_name}' in '@{function_name}': {storage_space} function "
+        "storage byte length '{byte_length_value}' must have a finite positive "
+        "compile-time maximum"
+    ),
+    params=(
+        *_TARGET_CONTEXT_PARAMS,
+        ErrorParam("storage_space", ParamKind.STRING),
+        ErrorParam("byte_length_value", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Constrain '{byte_length_value}' with a finite positive range or "
+        "specialize it before target-low lowering."
+    ),
+)
+
 ALL_TARGET_ERRORS = (
     ERR_TARGET_001,
     ERR_TARGET_002,
@@ -1530,4 +1553,5 @@ ALL_TARGET_ERRORS = (
     ERR_TARGET_076,
     ERR_TARGET_078,
     ERR_TARGET_079,
+    ERR_TARGET_080,
 )

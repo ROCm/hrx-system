@@ -64,6 +64,7 @@ loom_cc_library(
     loom::codegen::low::builder
     loom::codegen::low::descriptor_traits
     loom::codegen::low::descriptors
+    loom::codegen::low::diagnostics
     loom::codegen::low::memory_access
     loom::codegen::low::source_memory_plan
     loom::codegen::low::target_binding
@@ -82,6 +83,7 @@ loom_cc_library(
     loom::ops::low
     loom::ops::op_defs
     loom::ops::scf
+    loom::ops::type_registry
     loom::ops::vector
     loom::rewrite::materialize
     loom::rewrite::remap

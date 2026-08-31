@@ -423,8 +423,14 @@ static iree_status_t loom_spirv_select_workgroup_alloca(
           loom_value_fact_table_lookup(
               fact_table, loom_buffer_alloca_byte_length(source_op)),
           &plan.byte_length) ||
-      plan.byte_length <= 0 ||
-      !loom_spirv_workgroup_i64_is_power_of_two(
+      plan.byte_length <= 0) {
+    *out_plan =
+        loom_low_lower_plan_make(LOOM_SPIRV_WORKGROUP_PLAN_ALLOCA, NULL);
+    return loom_low_lower_emit_function_storage_extent_unsupported(
+        context, source_op, LOOM_STORAGE_SPACE_WORKGROUP,
+        loom_buffer_alloca_byte_length(source_op));
+  }
+  if (!loom_spirv_workgroup_i64_is_power_of_two(
           loom_buffer_alloca_base_alignment(source_op))) {
     return loom_spirv_workgroup_emit_rejected(
         context, source_op, IREE_SV("workgroup_storage"),
