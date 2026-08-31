@@ -160,7 +160,6 @@ loom_cc_library(
     iree::vm::bytecode
     iree::vm::bytecode::dump
     loom::tools::loom-check::execute
-  TESTONLY
   PUBLIC
 )
 
