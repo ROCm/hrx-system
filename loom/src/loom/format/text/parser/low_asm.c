@@ -874,11 +874,13 @@ static bool loom_low_asm_token_is_canonical_op(loom_parser_t* parser,
       iree_string_view_equal(token.text, IREE_SV("low.cond_br")) ||
       iree_string_view_equal(token.text, IREE_SV("low.func.call")) ||
       iree_string_view_equal(token.text, IREE_SV("low.op")) ||
+      iree_string_view_equal(token.text, IREE_SV("low.reload")) ||
       iree_string_view_equal(token.text, IREE_SV("low.scf.condition")) ||
       iree_string_view_equal(token.text, IREE_SV("low.scf.yield")) ||
       iree_string_view_equal(token.text, IREE_SV("low.scf.if")) ||
       iree_string_view_equal(token.text, IREE_SV("low.scf.for")) ||
-      iree_string_view_equal(token.text, IREE_SV("low.scf.while"))) {
+      iree_string_view_equal(token.text, IREE_SV("low.scf.while")) ||
+      iree_string_view_equal(token.text, IREE_SV("low.spill"))) {
     return true;
   }
 

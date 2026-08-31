@@ -3,3 +3,38 @@
 func.def @pass_mode_smoke(%value: i32) -> (i32) {
   func.return %value : i32
 }
+
+// ====
+// RUN: pass @cleanup
+
+pass.pipeline<module> @cleanup pipeline {
+  for func {
+    canonicalize
+    dce
+  }
+}
+
+func.def @named_pipeline(%value: i32) {
+  %dead = func.call @pure_identity(%value) : (i32) -> (i32)
+  func.return
+}
+
+func.def @pure_identity(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+// ----
+pass.pipeline<module> @cleanup pipeline {
+  for func {
+    canonicalize
+    dce
+  }
+}
+
+func.def @named_pipeline(%value: i32) {
+  func.return
+}
+
+func.def @pure_identity(%value: i32) -> (i32) {
+  func.return %value : i32
+}

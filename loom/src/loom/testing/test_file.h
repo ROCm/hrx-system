@@ -27,9 +27,13 @@
 //   // RUN: with-locations roundtrip
 //                           Parse -> print with loc() annotations -> compare.
 //   // RUN: verify          Parse -> verify -> match annotations.
-//   // RUN: pass <pipeline> Parse -> run pipeline -> print -> compare.
+//   // RUN: pass <pipeline> Parse -> run flat pipeline -> print -> compare.
+//   // RUN: pass @pipeline  Parse -> run named pass.pipeline -> print ->
+//   compare.
 //   // RUN: with-locations pass <pipeline>
 //                           Run pipeline and print loc() annotations.
+//   // RUN: with-low-asm pass <pipeline>
+//                           Run pipeline and preserve authored Low assembly.
 //   // RUN: pass-report <pipeline>
 //                           Parse -> run pipeline -> pass report -> compare.
 //   // RUN: compile-report <pipeline>
@@ -150,6 +154,8 @@ typedef enum loom_test_mode_e {
 enum loom_test_output_flag_bits_e {
   // Emit trailing loc() annotations in canonical IR output.
   LOOM_TEST_OUTPUT_LOCATIONS = 1u << 0,
+  // Preserve explicitly authored Low assembly in pass output.
+  LOOM_TEST_OUTPUT_LOW_ASM = 1u << 1,
 };
 typedef uint32_t loom_test_output_flags_t;
 
