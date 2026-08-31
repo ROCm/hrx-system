@@ -286,16 +286,17 @@ def validate_encoding_table(
 
     for left_index, left in enumerate(table.bundle_formats):
         for right in table.bundle_formats[left_index + 1 :]:
-            if left.bit_count != right.bit_count:
-                continue
+            common_bit_count = min(left.bit_count, right.bit_count)
+            common_mask = (1 << common_bit_count) - 1
             if fixed_patterns_overlap(
-                left.fixed_mask,
-                left.fixed_value,
-                right.fixed_mask,
-                right.fixed_value,
+                left.fixed_mask & common_mask,
+                left.fixed_value & common_mask,
+                right.fixed_mask & common_mask,
+                right.fixed_value & common_mask,
             ):
                 raise ValueError(
-                    f"bundle decode is ambiguous between {left.name} and {right.name}"
+                    f"bundle prefix decode is ambiguous between "
+                    f"{left.name} and {right.name}"
                 )
 
 

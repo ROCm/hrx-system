@@ -290,6 +290,17 @@ iree_status_t loom_xdna_array_resolve_load_memory(
     uint32_t address, uint32_t byte_length,
     loom_xdna_memory_placement_t* out_placement);
 
+// Forms a tile-relative load address for canonical physical storage.
+//
+// |owner_offset| is relative to the owner's program or local-data allocation,
+// matching loom_xdna_memory_placement_t. The owner must be visible through one
+// of the accessor's architectural load windows.
+iree_status_t loom_xdna_array_form_load_address(
+    const loom_xdna_array_family_t* family,
+    loom_xdna_tile_coordinate_t accessor, loom_xdna_memory_space_t memory_space,
+    loom_xdna_tile_coordinate_t owner, uint32_t owner_offset,
+    uint32_t byte_length, uint32_t* out_address);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

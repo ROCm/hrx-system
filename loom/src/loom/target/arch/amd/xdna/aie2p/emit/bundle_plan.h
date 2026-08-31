@@ -31,6 +31,8 @@ enum loom_aie2p_planned_slot_flag_bits_e {
   LOOM_AIE2P_PLANNED_SLOT_FLAG_STRUCTURAL_CONTROL = 1u << 1,
   // Slot materializes one allocation-planned structural register move.
   LOOM_AIE2P_PLANNED_SLOT_FLAG_STRUCTURAL_MOVE = 1u << 2,
+  // Slot materializes one symbolic function-local storage address.
+  LOOM_AIE2P_PLANNED_SLOT_FLAG_STRUCTURAL_STORAGE_ADDRESS = 1u << 3,
 };
 typedef uint16_t loom_aie2p_planned_slot_flags_t;
 
@@ -70,6 +72,16 @@ typedef struct loom_aie2p_planned_branch_fixup_t {
   uint32_t target_block_index;
 } loom_aie2p_planned_branch_fixup_t;
 
+// One contribution-relative local-storage address requiring final placement.
+typedef struct loom_aie2p_planned_storage_fixup_t {
+  // Bundle containing the address-materialization instruction.
+  uint32_t bundle_index;
+  // Function-local storage space referenced by the instruction.
+  loom_storage_space_t storage_space;
+  // Byte offset from the placed storage-space base.
+  uint64_t byte_offset;
+} loom_aie2p_planned_storage_fixup_t;
+
 // Immutable AIE2P physical packet plan for one Low function.
 typedef struct loom_aie2p_bundle_plan_t {
   // Emission frame from which this plan was built.
@@ -90,6 +102,10 @@ typedef struct loom_aie2p_bundle_plan_t {
   const loom_aie2p_planned_branch_fixup_t* branch_fixups;
   // Number of records in |branch_fixups|.
   iree_host_size_t branch_fixup_count;
+  // Storage-address sites whose domains require final contribution placement.
+  const loom_aie2p_planned_storage_fixup_t* storage_fixups;
+  // Number of records in |storage_fixups|.
+  iree_host_size_t storage_fixup_count;
   // Exact byte length after variable-width bundle packing.
   iree_host_size_t encoded_byte_length;
 } loom_aie2p_bundle_plan_t;

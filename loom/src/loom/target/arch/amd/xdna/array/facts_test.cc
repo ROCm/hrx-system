@@ -51,6 +51,30 @@ TEST(XdnaArrayFactsTest, CanonicalizesComputeNeighborAliases) {
   EXPECT_EQ(owner_self.owner_offset, west.owner_offset);
 }
 
+TEST(XdnaArrayFactsTest, FormsLoadAddressesFromCanonicalStorage) {
+  const loom_xdna_array_family_t* family = loom_xdna_npu2_array_family();
+  uint32_t address = 0;
+  IREE_ASSERT_OK(loom_xdna_array_form_load_address(
+      family, {1, 3}, LOOM_XDNA_MEMORY_SPACE_DATA, {0, 3}, 0x40, 64, &address));
+  EXPECT_EQ(address, 0x50040u);
+  IREE_ASSERT_OK(loom_xdna_array_form_load_address(
+      family, {0, 3}, LOOM_XDNA_MEMORY_SPACE_DATA, {0, 3}, 0x40, 64, &address));
+  EXPECT_EQ(address, 0x70040u);
+  IREE_ASSERT_OK(loom_xdna_array_form_load_address(
+      family, {4, 2}, LOOM_XDNA_MEMORY_SPACE_PROGRAM, {4, 2}, 0x80, 64,
+      &address));
+  EXPECT_EQ(address, 0x80u);
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                        loom_xdna_array_form_load_address(
+                            family, {0, 3}, LOOM_XDNA_MEMORY_SPACE_DATA, {1, 3},
+                            0, 64, &address));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_xdna_array_form_load_address(
+                            family, {4, 2}, LOOM_XDNA_MEMORY_SPACE_PROGRAM,
+                            {4, 3}, 0, 64, &address));
+}
+
 TEST(XdnaArrayFactsTest, RejectsMissingOrCrossKindNeighbors) {
   const loom_xdna_array_family_t* family = loom_xdna_npu2_array_family();
   loom_xdna_memory_placement_t placement = {};

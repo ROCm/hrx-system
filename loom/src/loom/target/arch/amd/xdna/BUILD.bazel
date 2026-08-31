@@ -37,6 +37,7 @@ loom_cc_library(
     srcs = ["array/facts.c"],
     hdrs = ["array/facts.h"],
     textual_hdrs = [":array/facts_tables.inl"],
+    visibility = ["//visibility:public"],
     deps = ["//runtime/src/iree/base"],
 )
 

@@ -163,6 +163,81 @@ TEST_F(Aie2pArtifactEmitterTest,
   loom_module_free(module);
 }
 
+TEST_F(Aie2pArtifactEmitterTest,
+       EmitsPlacedFunctionStorageAndRelocatedAddress) {
+  const std::string source =
+      "aie2p.target<core> @target\n"
+      "low.func.def target<amd.xdna.aie2p.core>(@target) "
+      "@local_address() asm {\n"
+      "  %padding = storage {byte_alignment = 16, byte_length = 32} : "
+      "low.storage<workgroup>\n"
+      "  %storage = storage {byte_alignment = 64, byte_length = 256} : "
+      "low.storage<workgroup>\n"
+      "  %view = storage_view %storage {offset = 64, byte_length = 128} : "
+      "low.storage<workgroup> -> low.storage<workgroup>\n"
+      "  %address = storage_address %view {offset = 16} : "
+      "low.storage<workgroup> -> reg<aie2p.ep>\n"
+      "  %value = vlda.512.i32x16 %address, 0\n"
+      "  return\n"
+      "}\n";
+  loom_module_t* module = Parse(source);
+  ASSERT_NE(module, nullptr);
+
+  loom_low_verify_options_t verify_options = {};
+  verify_options.descriptor_registry = &registry_.registry;
+  verify_options.provider_list = loom_low_verify_provider_list_empty();
+  verify_options.max_errors = 20;
+  loom_low_verify_scratch_t verify_scratch =
+      loom_low_verify_scratch_for_module(module);
+  loom_low_verify_result_t verify_result = {};
+  IREE_ASSERT_OK(loom_low_verify_module(module, &verify_options,
+                                        &verify_scratch, &verify_result));
+  ASSERT_EQ(verify_result.error_count, 0u);
+
+  iree_arena_allocator_t scratch_arena;
+  iree_arena_initialize(&block_pool_, &scratch_arena);
+  const loom_target_emit_request_t request = {
+      /*.target_environment=*/nullptr,
+      /*.low_descriptor_registry=*/&registry_.registry,
+      /*.module=*/module,
+      /*.function_versions=*/nullptr,
+      /*.option_chain=*/nullptr,
+      /*.identifier=*/IREE_SV("local_address.elf"),
+      /*.artifact_manifest=*/{},
+      /*.compile_report=*/nullptr,
+      /*.diagnostic_emitter=*/{DiscardDiagnostic, nullptr},
+      /*.scratch_arena=*/&scratch_arena,
+      /*.allocator=*/iree_allocator_system(),
+  };
+  loom_target_emit_artifact_t artifact = {};
+  IREE_ASSERT_OK(loom_aie2p_tile_elf_emitter.emit(&request, &artifact));
+
+  iree_byte_span_t storage = iree_byte_span_empty();
+  IREE_ASSERT_OK(iree_byte_sequence_clone(artifact.contents,
+                                          iree_allocator_system(), &storage));
+  const iree_const_byte_span_t bytes =
+      iree_make_const_byte_span(storage.data, storage.data_length);
+  ASSERT_GT(bytes.data_length, 84u);
+  EXPECT_EQ(LoadLeU16(bytes, 44), 2u);
+  constexpr size_t kProgramHeaderOffset = 52;
+  const uint32_t code_offset = LoadLeU32(bytes, kProgramHeaderOffset + 4);
+  constexpr size_t kStorageProgramHeaderOffset = kProgramHeaderOffset + 32;
+  EXPECT_EQ(LoadLeU32(bytes, kStorageProgramHeaderOffset + 8), 0x70000u);
+  EXPECT_EQ(LoadLeU32(bytes, kStorageProgramHeaderOffset + 16), 0u);
+  EXPECT_EQ(LoadLeU32(bytes, kStorageProgramHeaderOffset + 20), 320u);
+  const uint8_t expected_movxm[] = {0x44, 0x20, 0xc1, 0x00, 0x07, 0x00};
+  ASSERT_LE((iree_host_size_t)code_offset + IREE_ARRAYSIZE(expected_movxm),
+            bytes.data_length);
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(expected_movxm); ++i) {
+    EXPECT_EQ(bytes.data[code_offset + i], expected_movxm[i]) << i;
+  }
+
+  iree_allocator_free(iree_allocator_system(), storage.data);
+  loom_target_emit_artifact_release(&artifact);
+  iree_arena_deinitialize(&scratch_arena);
+  loom_module_free(module);
+}
+
 TEST_F(Aie2pArtifactEmitterTest, RejectsArrayProgramRepresentation) {
   const std::string source =
       "aie2p.target<array> @target\n"

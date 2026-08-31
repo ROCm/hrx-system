@@ -216,3 +216,64 @@ iree_status_t loom_xdna_array_resolve_load_memory(
                           " does not fit a load window",
                           address);
 }
+
+iree_status_t loom_xdna_array_form_load_address(
+    const loom_xdna_array_family_t* family,
+    loom_xdna_tile_coordinate_t accessor, loom_xdna_memory_space_t memory_space,
+    loom_xdna_tile_coordinate_t owner, uint32_t owner_offset,
+    uint32_t byte_length, uint32_t* out_address) {
+  IREE_ASSERT_ARGUMENT(family);
+  IREE_ASSERT_ARGUMENT(out_address);
+  *out_address = 0;
+  if (byte_length == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "XDNA memory placement must not be empty");
+  }
+
+  const loom_xdna_tile_facts_t* accessor_tile = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_xdna_array_tile_facts(family, accessor, &accessor_tile));
+  const loom_xdna_tile_facts_t* owner_tile = NULL;
+  IREE_RETURN_IF_ERROR(loom_xdna_array_tile_facts(family, owner, &owner_tile));
+  const uint64_t owner_end = (uint64_t)owner_offset + byte_length;
+  if (memory_space == LOOM_XDNA_MEMORY_SPACE_PROGRAM) {
+    if (accessor.column != owner.column || accessor.row != owner.row) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "XDNA program memory is only visible to its owning tile");
+    }
+    if (owner_end > owner_tile->memory.program_capacity) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "XDNA program-memory placement exceeds the tile");
+    }
+    *out_address = owner_tile->memory.program_base + owner_offset;
+    return iree_ok_status();
+  }
+  if (memory_space != LOOM_XDNA_MEMORY_SPACE_DATA) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unknown XDNA memory space %u", memory_space);
+  }
+  if (owner_end > owner_tile->memory.local_capacity) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "XDNA local-memory placement exceeds the tile");
+  }
+
+  for (uint8_t i = 0; i < accessor_tile->memory.window_count; ++i) {
+    const loom_xdna_address_window_t* window =
+        &family->address_windows[accessor_tile->memory.window_start + i];
+    const int32_t window_owner_column =
+        (int32_t)accessor.column + window->owner_column_delta;
+    const int32_t window_owner_row =
+        (int32_t)accessor.row + window->owner_row_delta;
+    if (window_owner_column != owner.column || window_owner_row != owner.row ||
+        window->owner_kind != owner_tile->kind ||
+        owner_end > window->capacity) {
+      continue;
+    }
+    *out_address = window->base + owner_offset;
+    return iree_ok_status();
+  }
+  return iree_make_status(
+      IREE_STATUS_OUT_OF_RANGE,
+      "XDNA owner storage is not visible through an accessor load window");
+}

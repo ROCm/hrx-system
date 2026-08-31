@@ -9,6 +9,7 @@
 #ifndef LOOM_TARGET_ARCH_AMD_XDNA_AIE2P_DESCRIPTORS_LOW_REGISTRY_H_
 #define LOOM_TARGET_ARCH_AMD_XDNA_AIE2P_DESCRIPTORS_LOW_REGISTRY_H_
 
+#include "loom/codegen/low/schedule/types.h"
 #include "loom/target/low_descriptor_registry.h"
 
 #ifdef __cplusplus
@@ -18,6 +19,10 @@ extern "C" {
 // Initializes the AIE2P-only Low descriptor registry.
 void loom_aie2p_low_descriptor_registry_initialize(
     loom_target_low_descriptor_registry_t* out_registry);
+
+// Returns the AIE2P native schedule models for structural Low operations.
+loom_low_schedule_structural_model_list_t
+loom_aie2p_low_structural_schedule_models(void);
 
 #ifdef __cplusplus
 }  // extern "C"

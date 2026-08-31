@@ -99,6 +99,8 @@ class Aie2pLeafObjectTest : public ::testing::Test {
     loom_op_t* function_op = loom_block_op(module_block, 0);
     loom_low_emission_frame_options_t frame_options = {};
     frame_options.descriptor_registry = &registry_.registry;
+    frame_options.schedule_structural_models =
+        loom_aie2p_low_structural_schedule_models();
     frame_options.schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL;
     IREE_RETURN_IF_ERROR(loom_low_emission_frame_build(
         out_leaf->module, function_op, &frame_options, &planning_arena_,
@@ -418,6 +420,145 @@ TEST_F(Aie2pLeafObjectTest, RetainsExactFunctionStorageRequirements) {
   EXPECT_EQ(realization.workgroup_storage.minimum_alignment, 32u);
   EXPECT_EQ(realization.spill.byte_length, 0u);
   EXPECT_EQ(realization.spill.minimum_alignment, 0u);
+  ASSERT_EQ(realization.storage_domain_count, 4u);
+  ASSERT_EQ(leaf.contribution.object.section_count, 5u);
+  ASSERT_EQ(leaf.contribution.object.symbol_count, 5u);
+  for (iree_host_size_t i = 0; i < realization.storage_domain_count; ++i) {
+    const loom_aie2p_leaf_storage_domain_t& domain =
+        realization.storage_domains[i];
+    EXPECT_EQ(domain.storage_space, i);
+    EXPECT_EQ(domain.section_contribution_index, i + 1u);
+    EXPECT_EQ(domain.symbol_index, i + 1u);
+    const loom_native_section_contribution_t& section =
+        leaf.contribution.object.sections[i + 1u];
+    EXPECT_EQ(section.section_type, LOOM_NATIVE_ELF_SECTION_TYPE_NOBITS);
+    EXPECT_EQ(section.section_flags, LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC |
+                                         LOOM_NATIVE_ELF_SECTION_FLAG_WRITE);
+    EXPECT_EQ(section.contents.data_length, 0u);
+    EXPECT_GT(section.zero_fill_length, 0u);
+    const loom_native_object_symbol_t& symbol =
+        leaf.contribution.object.symbols[i + 1u];
+    EXPECT_EQ(symbol.binding, LOOM_NATIVE_OBJECT_SYMBOL_BINDING_LOCAL);
+    EXPECT_EQ(symbol.visibility, LOOM_NATIVE_OBJECT_SYMBOL_VISIBILITY_HIDDEN);
+    EXPECT_EQ(symbol.kind, LOOM_NATIVE_OBJECT_SYMBOL_KIND_DATA);
+  }
+
+  ResetLeaf(&leaf);
+}
+
+TEST_F(Aie2pLeafObjectTest,
+       RetainsAndRelocatesStructuralLocalStorageAddresses) {
+  CompiledLeaf leaf;
+  IREE_ASSERT_OK(CompileSource(
+      "low.func.def target<amd.xdna.aie2p.core> @local_address() asm {\n"
+      "  %padding = storage {byte_alignment = 16, byte_length = 32} : "
+      "low.storage<workgroup>\n"
+      "  %storage = storage {byte_alignment = 64, byte_length = 256} : "
+      "low.storage<workgroup>\n"
+      "  %view = storage_view %storage {offset = 64, byte_length = 128} : "
+      "low.storage<workgroup> -> low.storage<workgroup>\n"
+      "  %address = storage_address %view {offset = 16} : "
+      "low.storage<workgroup> -> reg<aie2p.ep>\n"
+      "  %value = vlda.512.i32x16 %address, 0\n"
+      "  return\n"
+      "}\n",
+      &leaf));
+
+  const loom_low_packet_view_t* address_packet = nullptr;
+  loom_low_packet_view_t address_packet_storage = {};
+  loom_low_packet_view_t load_packet = {};
+  for (iree_host_size_t i = 0; i < loom_low_packet_count(&leaf.frame.schedule);
+       ++i) {
+    const loom_low_packet_view_t packet =
+        loom_low_packet_at(&leaf.frame.schedule, i);
+    if (loom_low_storage_address_isa(packet.node->op)) {
+      address_packet_storage = packet;
+      address_packet = &address_packet_storage;
+    } else if (loom_low_op_isa(packet.node->op)) {
+      load_packet = packet;
+    }
+  }
+  ASSERT_NE(address_packet, nullptr);
+  EXPECT_EQ(address_packet->node->descriptor, nullptr);
+  EXPECT_EQ(address_packet->node->source_descriptor, nullptr);
+  const loom_low_descriptor_set_t* descriptor_set =
+      loom_aie2p_core_descriptor_set();
+  const loom_low_descriptor_t* materialize_descriptor =
+      &descriptor_set->descriptors
+           [AIE2P_CORE_DESCRIPTOR_REF_MATERIALIZE_LOCAL_ADDRESS_I32];
+  const loom_low_descriptor_view_t* materialize_view =
+      loom_low_descriptor_set_descriptor_view(descriptor_set,
+                                              materialize_descriptor);
+  ASSERT_NE(address_packet->node->schedule_class, nullptr);
+  EXPECT_EQ(
+      address_packet->node->schedule_class,
+      &descriptor_set->schedule_classes[materialize_view->schedule_class_id]);
+  ASSERT_NE(load_packet.node, nullptr);
+  EXPECT_GT(load_packet.node->issue_cycle, address_packet->node->issue_cycle);
+
+  ASSERT_EQ(leaf.plan.storage_fixup_count, 1u);
+  const loom_aie2p_planned_storage_fixup_t& planned_fixup =
+      leaf.plan.storage_fixups[0];
+  EXPECT_EQ(planned_fixup.storage_space, LOOM_STORAGE_SPACE_WORKGROUP);
+  EXPECT_EQ(planned_fixup.byte_offset, 144u);
+  ASSERT_LT(planned_fixup.bundle_index, leaf.plan.bundle_count);
+  const loom_aie2p_planned_bundle_t& address_bundle =
+      leaf.plan.bundles[planned_fixup.bundle_index];
+  iree_host_size_t storage_address_slot_count = 0;
+  for (uint8_t i = 0; i < address_bundle.slot_count; ++i) {
+    const loom_aie2p_planned_slot_t& slot =
+        leaf.plan.slots[address_bundle.slot_start + i];
+    if (iree_any_bit_set(
+            slot.flags,
+            LOOM_AIE2P_PLANNED_SLOT_FLAG_STRUCTURAL_STORAGE_ADDRESS)) {
+      ++storage_address_slot_count;
+      EXPECT_EQ(slot.scheduled_packet_index, address_packet->packet_index);
+    }
+  }
+  EXPECT_EQ(storage_address_slot_count, 1u);
+
+  const loom_native_object_contribution_t& object = leaf.contribution.object;
+  ASSERT_EQ(object.section_count, 2u);
+  ASSERT_EQ(object.symbol_count, 2u);
+  ASSERT_EQ(object.fixup_count, 1u);
+  EXPECT_TRUE(
+      iree_string_view_equal(object.sections[1].section_name,
+                             IREE_SV(".storage.local_address.workgroup")));
+  EXPECT_EQ(object.sections[1].section_type,
+            LOOM_NATIVE_ELF_SECTION_TYPE_NOBITS);
+  EXPECT_EQ(object.sections[1].zero_fill_length, 320u);
+  EXPECT_EQ(object.sections[1].contribution_alignment, 64u);
+  EXPECT_EQ(object.symbols[1].size, 320u);
+  EXPECT_EQ(object.fixups[0].section_contribution_index, 0u);
+  EXPECT_EQ(object.fixups[0].section_offset, address_bundle.byte_offset);
+  EXPECT_EQ(object.fixups[0].relocation_kind,
+            LOOM_AIE2P_NATIVE_RELOCATION_KIND_LOCAL_ADDRESS_ABSOLUTE);
+  EXPECT_EQ(object.fixups[0].target_symbol_index, 1u);
+  EXPECT_EQ(object.fixups[0].addend, 144);
+  EXPECT_EQ(leaf.contribution.realization.capability_flags,
+            LOOM_AIE2P_LEAF_CAPABILITY_FLAG_NATIVE_FIXUPS |
+                LOOM_AIE2P_LEAF_CAPABILITY_FLAG_FUNCTION_STORAGE);
+
+  loom_native_section_contribution_assembly_t assembly = {};
+  IREE_ASSERT_OK(loom_native_assemble_section_contributions(
+      object.sections, object.section_count, &assembly, &object_arena_));
+  ASSERT_EQ(assembly.section_count, 2u);
+  assembly.sections[0].address = 0;
+  assembly.sections[1].address = 0x70000;
+  IREE_ASSERT_OK(loom_aie2p_native_object_apply_fixups(&object, &assembly,
+                                                       &object_arena_));
+  ASSERT_LE(address_bundle.byte_offset + 6u,
+            assembly.sections[0].contents.data_length);
+  // Pinned Peano independently encodes `movxm p0, #458896` to these bytes.
+  constexpr std::array<uint8_t, 6> kMovxmLocalAddress = {
+      0x44, 0x20, 0xc1, 0x00, 0x07, 0x00,
+  };
+  for (iree_host_size_t i = 0; i < kMovxmLocalAddress.size(); ++i) {
+    EXPECT_EQ(
+        assembly.sections[0].contents.data[address_bundle.byte_offset + i],
+        kMovxmLocalAddress[i])
+        << i;
+  }
 
   ResetLeaf(&leaf);
 }

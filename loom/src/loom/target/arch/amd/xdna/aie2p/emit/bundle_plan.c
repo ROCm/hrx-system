@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "loom/codegen/low/packet.h"
+#include "loom/codegen/low/storage_layout.h"
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/core_descriptors.h"
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/encoding.h"
@@ -41,6 +42,8 @@ typedef struct loom_aie2p_bundle_plan_analysis_t {
   iree_host_size_t edge_move_count;
   // Conservative branch, return, and delay-bundle capacity.
   iree_host_size_t control_bundle_capacity;
+  // Structural local-storage addresses requiring placement fixups.
+  iree_host_size_t storage_fixup_count;
 } loom_aie2p_bundle_plan_analysis_t;
 
 typedef struct loom_aie2p_bundle_plan_builder_t {
@@ -66,6 +69,14 @@ typedef struct loom_aie2p_bundle_plan_builder_t {
   iree_host_size_t branch_fixup_capacity;
   // Number of populated records in |branch_fixups|.
   iree_host_size_t branch_fixup_count;
+  // Arena-backed local-storage fixups owned by the final plan.
+  loom_aie2p_planned_storage_fixup_t* storage_fixups;
+  // Fixup index for each scheduled packet, or UINT32_MAX when absent.
+  uint32_t* storage_fixup_indices_by_packet;
+  // Maximum number of records available in |storage_fixups|.
+  iree_host_size_t storage_fixup_capacity;
+  // Number of populated records in |storage_fixups|.
+  iree_host_size_t storage_fixup_count;
   // Arena-backed contribution offsets in source block order.
   uint32_t* block_byte_offsets;
   // Number of source blocks represented by |block_byte_offsets|.
@@ -132,7 +143,7 @@ static bool loom_aie2p_bundle_plan_structural_move_isa(const loom_op_t* op) {
 static bool loom_aie2p_bundle_plan_non_emitting_structural_isa(
     const loom_op_t* op) {
   return loom_low_live_in_isa(op) || loom_low_resource_isa(op) ||
-         loom_low_storage_reserve_isa(op);
+         loom_low_storage_reserve_isa(op) || loom_low_storage_view_isa(op);
 }
 
 static const loom_low_allocation_packet_move_group_t*
@@ -234,6 +245,15 @@ static iree_status_t loom_aie2p_bundle_plan_analyze(
             IREE_STATUS_INVALID_ARGUMENT,
             "AIE2P physical control is materialized from structural Low CFG; "
             "descriptor-backed control packets are not accepted");
+      }
+      if (loom_low_storage_address_isa(packet.node->op)) {
+        if (out_analysis->storage_fixup_count == IREE_HOST_SIZE_MAX) {
+          return iree_make_status(
+              IREE_STATUS_OUT_OF_RANGE,
+              "AIE2P local-storage fixup count exceeds host size");
+        }
+        ++out_analysis->storage_fixup_count;
+        continue;
       }
       if (loom_aie2p_bundle_plan_structural_move_isa(packet.node->op) ||
           loom_aie2p_bundle_plan_non_emitting_structural_isa(packet.node->op)) {
@@ -431,6 +451,67 @@ static iree_status_t loom_aie2p_bundle_plan_encode_packet(
   return iree_ok_status();
 }
 
+static iree_status_t loom_aie2p_bundle_plan_encode_storage_address(
+    const loom_aie2p_bundle_plan_builder_t* builder,
+    const loom_low_packet_view_t* packet,
+    loom_aie2p_encoded_slot_t* out_encoded_slot,
+    loom_storage_space_t* out_storage_space, uint64_t* out_byte_offset) {
+  const loom_low_schedule_node_t* node = packet->node;
+  IREE_ASSERT(loom_low_storage_address_isa(node->op));
+  IREE_ASSERT_EQ(node->result_count, 1u);
+  const loom_value_ordinal_t result_ordinal =
+      loom_low_schedule_node_const_result_ordinals(node)[0];
+  const loom_low_allocation_assignment_t* result_assignment =
+      loom_low_allocation_assignment_for_value_ordinal(
+          &builder->frame->allocation, result_ordinal, NULL);
+  if (result_assignment == NULL ||
+      result_assignment->location_kind !=
+          LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER ||
+      result_assignment->descriptor_reg_class_id !=
+          AIE2P_CORE_REG_CLASS_ID_AIE2P_EP ||
+      result_assignment->unit_count != 1 ||
+      result_assignment->location_count != 1) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "AIE2P local-storage address requires one physical aie2p.ep register");
+  }
+
+  const loom_low_descriptor_t* descriptor =
+      &builder->descriptor_set->descriptors
+           [AIE2P_CORE_DESCRIPTOR_REF_MATERIALIZE_LOCAL_ADDRESS_I32];
+  IREE_ASSERT_EQ(descriptor->operand_count, 1u);
+  IREE_ASSERT_EQ(descriptor->result_count, 1u);
+  IREE_ASSERT_EQ(descriptor->immediate_count, 1u);
+  const loom_low_allocation_assignment_t* operand_assignments[] = {
+      result_assignment,
+  };
+  const int64_t immediate_values[] = {0};
+  *out_encoded_slot = loom_aie2p_descriptor_encode(
+      builder->descriptor_set,
+      AIE2P_CORE_DESCRIPTOR_REF_MATERIALIZE_LOCAL_ADDRESS_I32,
+      operand_assignments, immediate_values);
+
+  loom_low_storage_layout_reference_t reference;
+  loom_low_storage_layout_lookup_reference(
+      &builder->frame->schedule.storage_layout, builder->frame->module,
+      loom_low_storage_address_storage(node->op), &reference);
+  const int64_t operation_offset = loom_low_storage_address_offset(node->op);
+  IREE_ASSERT_GE(operation_offset, 0);
+  uint64_t byte_offset = 0;
+  if (!iree_checked_add_u64(reference.reservation.byte_offset,
+                            reference.byte_offset, &byte_offset) ||
+      !iree_checked_add_u64(byte_offset, (uint64_t)operation_offset,
+                            &byte_offset) ||
+      byte_offset > INT64_MAX) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "AIE2P local-storage address exceeds native fixup range");
+  }
+  *out_storage_space = reference.reservation.space;
+  *out_byte_offset = byte_offset;
+  return iree_ok_status();
+}
+
 static loom_aie2p_encoded_slot_t
 loom_aie2p_bundle_plan_encode_structural_descriptor(
     const loom_low_descriptor_set_t* descriptor_set,
@@ -517,6 +598,75 @@ static iree_status_t loom_aie2p_bundle_plan_append_slot(
   const iree_host_size_t slot_index = builder->slot_count++;
   builder->slots[slot_index] = slot;
   if (out_slot_index != NULL) *out_slot_index = slot_index;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_aie2p_bundle_plan_append_storage_fixup(
+    loom_aie2p_bundle_plan_builder_t* builder, uint32_t scheduled_packet_index,
+    loom_storage_space_t storage_space, uint64_t byte_offset) {
+  if (builder->storage_fixup_count >= builder->storage_fixup_capacity) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "AIE2P storage-fixup capacity exhausted");
+  }
+  const iree_host_size_t fixup_index = builder->storage_fixup_count++;
+  builder->storage_fixups[fixup_index] = (loom_aie2p_planned_storage_fixup_t){
+      .bundle_index = LOOM_AIE2P_BUNDLE_PLAN_PACKET_NONE,
+      .storage_space = storage_space,
+      .byte_offset = byte_offset,
+  };
+  IREE_ASSERT_LT(scheduled_packet_index,
+                 builder->frame->schedule.scheduled_node_count);
+  IREE_ASSERT_EQ(
+      builder->storage_fixup_indices_by_packet[scheduled_packet_index],
+      UINT32_MAX);
+  builder->storage_fixup_indices_by_packet[scheduled_packet_index] =
+      (uint32_t)fixup_index;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_aie2p_bundle_plan_resolve_storage_fixups(
+    loom_aie2p_bundle_plan_builder_t* builder) {
+  for (iree_host_size_t bundle_index = 0; bundle_index < builder->bundle_count;
+       ++bundle_index) {
+    const loom_aie2p_planned_bundle_t* bundle = &builder->bundles[bundle_index];
+    for (uint8_t slot_ordinal = 0; slot_ordinal < bundle->slot_count;
+         ++slot_ordinal) {
+      const loom_aie2p_planned_slot_t* slot =
+          &builder->slots[bundle->slot_start + slot_ordinal];
+      if (!iree_any_bit_set(
+              slot->flags,
+              LOOM_AIE2P_PLANNED_SLOT_FLAG_STRUCTURAL_STORAGE_ADDRESS)) {
+        continue;
+      }
+      if (slot->scheduled_packet_index >=
+          builder->frame->schedule.scheduled_node_count) {
+        return iree_make_status(
+            IREE_STATUS_INTERNAL,
+            "AIE2P storage-address slot has no scheduled packet");
+      }
+      const uint32_t matched_fixup_index =
+          builder
+              ->storage_fixup_indices_by_packet[slot->scheduled_packet_index];
+      if (matched_fixup_index == UINT32_MAX ||
+          matched_fixup_index >= builder->storage_fixup_count ||
+          builder->storage_fixups[matched_fixup_index].bundle_index !=
+              LOOM_AIE2P_BUNDLE_PLAN_PACKET_NONE) {
+        return iree_make_status(
+            IREE_STATUS_INTERNAL,
+            "AIE2P storage-address slot has no unique planned fixup");
+      }
+      builder->storage_fixups[matched_fixup_index].bundle_index =
+          (uint32_t)bundle_index;
+    }
+  }
+  for (iree_host_size_t i = 0; i < builder->storage_fixup_count; ++i) {
+    if (builder->storage_fixups[i].bundle_index ==
+        LOOM_AIE2P_BUNDLE_PLAN_PACKET_NONE) {
+      return iree_make_status(
+          IREE_STATUS_INTERNAL,
+          "AIE2P planned storage fixup has no emitted instruction");
+    }
+  }
   return iree_ok_status();
 }
 
@@ -1073,6 +1223,7 @@ iree_status_t loom_aie2p_bundle_plan_build(
       .bundle_capacity = bundle_capacity,
       .slot_capacity = slot_capacity,
       .branch_fixup_capacity = branch_fixup_capacity,
+      .storage_fixup_capacity = analysis.storage_fixup_count,
       .block_count = frame->schedule.block_count,
   };
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, builder.bundle_capacity,
@@ -1084,6 +1235,19 @@ iree_status_t loom_aie2p_bundle_plan_build(
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, builder.branch_fixup_capacity, sizeof(*builder.branch_fixups),
       (void**)&builder.branch_fixups));
+  if (builder.storage_fixup_capacity != 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        arena, builder.storage_fixup_capacity, sizeof(*builder.storage_fixups),
+        (void**)&builder.storage_fixups));
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        arena, frame->schedule.scheduled_node_count,
+        sizeof(*builder.storage_fixup_indices_by_packet),
+        (void**)&builder.storage_fixup_indices_by_packet));
+    for (iree_host_size_t i = 0; i < frame->schedule.scheduled_node_count;
+         ++i) {
+      builder.storage_fixup_indices_by_packet[i] = UINT32_MAX;
+    }
+  }
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, builder.block_count, sizeof(*builder.block_byte_offsets),
       (void**)&builder.block_byte_offsets));
@@ -1139,6 +1303,26 @@ iree_status_t loom_aie2p_bundle_plan_build(
                 NULL));
             continue;
           }
+          if (loom_low_storage_address_isa(packet.node->op)) {
+            loom_aie2p_encoded_slot_t encoded_slot;
+            loom_storage_space_t storage_space = LOOM_STORAGE_SPACE_STACK;
+            uint64_t storage_byte_offset = 0;
+            IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_encode_storage_address(
+                &builder, &packet, &encoded_slot, &storage_space,
+                &storage_byte_offset));
+            IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_append_slot(
+                &builder,
+                (loom_aie2p_planned_slot_t){
+                    .encoded_slot = encoded_slot,
+                    .scheduled_packet_index = packet_index,
+                    .flags =
+                        LOOM_AIE2P_PLANNED_SLOT_FLAG_STRUCTURAL_STORAGE_ADDRESS,
+                },
+                NULL));
+            IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_append_storage_fixup(
+                &builder, packet_index, storage_space, storage_byte_offset));
+            continue;
+          }
           if (loom_aie2p_bundle_plan_non_emitting_structural_isa(
                   packet.node->op)) {
             continue;
@@ -1190,6 +1374,7 @@ iree_status_t loom_aie2p_bundle_plan_build(
     IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_append_terminator(
         &builder, block_analysis, block_bundle_start));
   }
+  IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_resolve_storage_fixups(&builder));
 
   *out_plan = (loom_aie2p_bundle_plan_t){
       .frame = frame,
@@ -1201,6 +1386,8 @@ iree_status_t loom_aie2p_bundle_plan_build(
       .slot_count = builder.slot_count,
       .branch_fixups = builder.branch_fixups,
       .branch_fixup_count = builder.branch_fixup_count,
+      .storage_fixups = builder.storage_fixups,
+      .storage_fixup_count = builder.storage_fixup_count,
       .encoded_byte_length = builder.encoded_byte_length,
   };
   return iree_ok_status();

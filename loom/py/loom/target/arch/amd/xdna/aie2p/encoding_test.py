@@ -142,6 +142,41 @@ def test_bundle_slot_mappings_must_be_invertible() -> None:
         validate_encoding_table(table, {"SLOT": 7})
 
 
+def test_bundle_prefixes_must_be_unambiguous() -> None:
+    table = EncodingTable(
+        instructions=(),
+        bundle_formats=(
+            BundleFormatEncoding(
+                name="short",
+                bit_count=8,
+                fixed_mask=0x0F,
+                fixed_value=0x0A,
+                fields=(
+                    BundleFieldEncoding(
+                        "SHORT_SLOT",
+                        tuple(BitMapping(bit + 4, bit) for bit in range(4)),
+                    ),
+                ),
+            ),
+            BundleFormatEncoding(
+                name="long",
+                bit_count=16,
+                fixed_mask=0xF00F,
+                fixed_value=0xA00A,
+                fields=(
+                    BundleFieldEncoding(
+                        "LONG_SLOT",
+                        tuple(BitMapping(bit + 4, bit) for bit in range(8)),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="bundle prefix decode is ambiguous"):
+        validate_encoding_table(table, {"SHORT_SLOT": 4, "LONG_SLOT": 8})
+
+
 def test_core_table_reproduces_retained_vector_leaves() -> None:
     for witness in CORE_ENCODING_WITNESSES:
         assert encode_witness(CORE_ENCODING_TABLE, witness) == witness.expected_bytes
