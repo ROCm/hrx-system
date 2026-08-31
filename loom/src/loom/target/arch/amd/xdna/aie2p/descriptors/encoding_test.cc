@@ -187,6 +187,44 @@ TEST(DescriptorEncodingTest, PhysicalAssignmentsReproduceVectorLeaves) {
   }
 }
 
+TEST(DescriptorEncodingTest, DirectBranchesMatchOracleInstructionEncodings) {
+  struct TestCase {
+    std::string_view descriptor_key;
+    std::vector<std::string_view> registers;
+    int64_t target;
+    std::array<uint8_t, 6> expected;
+  };
+  const TestCase test_cases[] = {
+      {
+          "amd.xdna.aie2p.branch.direct",
+          {},
+          0x12345,
+          {0x84, 0x00, 0x80, 0xA2, 0x91, 0x00},  // j #0x12345
+      },
+      {
+          "amd.xdna.aie2p.branch.nonzero",
+          {"r3"},
+          0x23456,
+          {0x84, 0x01, 0x40, 0x2B, 0x1A, 0x19},  // jnz r3, #0x23456
+      },
+      {
+          "amd.xdna.aie2p.branch.zero",
+          {"r17"},
+          0x34567,
+          {0x84, 0x01, 0x80, 0xB3, 0xA2, 0x89},  // jz r17, #0x34567
+      },
+  };
+
+  for (const TestCase& test_case : test_cases) {
+    std::vector<uint8_t> program;
+    IREE_ASSERT_OK(
+        EncodeSingleDescriptor(test_case.descriptor_key, test_case.registers,
+                               {test_case.target}, "I48_LNG", &program));
+    EXPECT_EQ(program, std::vector<uint8_t>(test_case.expected.begin(),
+                                            test_case.expected.end()));
+  }
+}
+
 TEST(DescriptorEncodingTest, I16MultiplyMatchesOracleInstructionEncodings) {
   const loom_low_descriptor_set_t* descriptor_set =
       loom_aie2p_core_descriptor_set();
