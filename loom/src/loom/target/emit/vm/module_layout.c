@@ -64,6 +64,29 @@ static bool loom_vm_module_layout_imports_equal(
          lhs->callable_type_ordinal == rhs->callable_type_ordinal;
 }
 
+// Returns true when |function_op| carries the Core VM Low representation.
+// Mixed-target modules retain every target product until artifact emission;
+// the representation contract is the artifact-local ownership boundary.
+static bool loom_vm_module_layout_selects_function(
+    const loom_module_t* module, const loom_op_t* function_op) {
+  if (function_op == NULL || (!loom_low_function_def_isa(function_op) &&
+                              !loom_low_func_decl_isa(function_op))) {
+    return false;
+  }
+  const loom_string_id_t descriptor_set_id = loom_func_like_repr_contract(
+      loom_func_like_const_cast(module, function_op));
+  if (descriptor_set_id == LOOM_STRING_ID_INVALID ||
+      descriptor_set_id >= module->strings.count) {
+    return false;
+  }
+  const loom_low_descriptor_set_t* descriptor_set =
+      loom_vm_core_descriptor_set();
+  const iree_string_view_t expected_key = loom_low_descriptor_set_string(
+      descriptor_set, descriptor_set->key_string_offset);
+  return iree_string_view_equal(module->strings.entries[descriptor_set_id],
+                                expected_key);
+}
+
 typedef struct loom_vm_module_function_summary_t {
   // Derived wire function flags.
   uint16_t flags;
@@ -125,7 +148,9 @@ static iree_status_t loom_vm_module_layout_count(
   *out_import_count = 0;
   for (iree_host_size_t i = 0; i < module->symbols.count; ++i) {
     const loom_op_t* defining_op = module->symbols.entries[i].defining_op;
-    if (defining_op == NULL) continue;
+    if (!loom_vm_module_layout_selects_function(module, defining_op)) {
+      continue;
+    }
     if (loom_low_func_decl_isa(defining_op)) {
       if (loom_low_func_decl_import_kind(defining_op) != 0) {
         return iree_make_status(
@@ -203,7 +228,8 @@ static iree_status_t loom_vm_module_layout_populate_functions(
        ++symbol_index) {
     const loom_symbol_t* symbol = &module->symbols.entries[symbol_index];
     loom_op_t* function_op = symbol->defining_op;
-    if (function_op == NULL || !loom_low_function_def_isa(function_op)) {
+    if (!loom_vm_module_layout_selects_function(module, function_op) ||
+        !loom_low_function_def_isa(function_op)) {
       continue;
     }
 
@@ -249,7 +275,8 @@ static iree_status_t loom_vm_module_layout_populate_imports(
        ++symbol_index) {
     const loom_symbol_t* symbol = &module->symbols.entries[symbol_index];
     loom_op_t* declaration_op = symbol->defining_op;
-    if (declaration_op == NULL || !loom_low_func_decl_isa(declaration_op)) {
+    if (!loom_vm_module_layout_selects_function(module, declaration_op) ||
+        !loom_low_func_decl_isa(declaration_op)) {
       continue;
     }
 

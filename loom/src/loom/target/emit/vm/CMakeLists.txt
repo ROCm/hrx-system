@@ -109,6 +109,7 @@ loom_check_test_suite(
     "test/imports.loom-test"
     "test/kernel.loom-test"
     "test/metadata.loom-test"
+    "test/mixed_module.loom-test"
     "test/module.loom-test"
     "test/spills.loom-test"
     "test/suspension.loom-test"
