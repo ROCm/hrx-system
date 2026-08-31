@@ -4,6 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//build_tools/bazel:glob.bzl", "iree_checked_glob")
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
     "loom_cc_library",
@@ -13,6 +14,10 @@ load(
 load(
     "//loom/build_tools/bazel:loom_check.bzl",
     "loom_check_test_suite",
+)
+load(
+    "//loom/src/loom/test/corpus/source_low:cases.bzl",
+    "SOURCE_LOW_TARGET_CASES",
 )
 
 package(
@@ -32,6 +37,28 @@ _VM_PROVIDER_VISIBILITY = [
 
 _VM_CHECK_PROVIDER_VISIBILITY = [
     "//loom/src/loom/tools/loom-check:__pkg__",
+]
+
+# Distributed fragment programs require the multi-workitem VM kernel execution
+# profile rather than the single-invocation Core profile.
+_VM_KERNEL_EXECUTION_PROFILE_CASES = [
+    "ml_attention.loom-test",
+]
+
+_VM_CORE_CORPUS_CASES = [
+    case
+    for case in SOURCE_LOW_TARGET_CASES
+    if case not in _VM_KERNEL_EXECUTION_PROFILE_CASES
+]
+
+_VM_CORE_CORPUS_SRCS = iree_checked_glob(
+    ["test/source_low/corpus/" + case for case in _VM_CORE_CORPUS_CASES],
+    include = ["test/source_low/corpus/*.loom-test"],
+)
+
+_VM_CORE_CORPUS_DATA = [
+    "//loom/src/loom/test/corpus/source_low:" + case
+    for case in _VM_CORE_CORPUS_CASES
 ]
 
 loom_cc_library(
@@ -366,58 +393,7 @@ loom_check_test_suite(
         "test/source_low/buffer_copy.loom-test",
         "test/source_low/constant_pool.loom-test",
         "test/source_low/control_switch.loom-test",
-        "test/source_low/corpus/async_empty.loom-test",
-        "test/source_low/corpus/async_gather.loom-test",
-        "test/source_low/corpus/index_addressing.loom-test",
-        "test/source_low/corpus/lookup_table.loom-test",
-        "test/source_low/corpus/memory_cache_policy_non_temporal.loom-test",
-        "test/source_low/corpus/memory_cache_policy_scopes.loom-test",
-        "test/source_low/corpus/memory_generic_atomic.loom-test",
-        "test/source_low/corpus/memory_global.loom-test",
-        "test/source_low/corpus/memory_global_atomic.loom-test",
-        "test/source_low/corpus/memory_global_atomic_ordering.loom-test",
-        "test/source_low/corpus/memory_prefetch.loom-test",
-        "test/source_low/corpus/memory_scalar_addressing.loom-test",
-        "test/source_low/corpus/memory_vector_baseline.loom-test",
-        "test/source_low/corpus/memory_workgroup_atomic.loom-test",
-        "test/source_low/corpus/memory_workgroup_b128.loom-test",
-        "test/source_low/corpus/memory_workgroup_indexed.loom-test",
-        "test/source_low/corpus/memory_workgroup_packed16.loom-test",
-        "test/source_low/corpus/memory_workgroup_scalar_addressing.loom-test",
-        "test/source_low/corpus/ml_contraction.loom-test",
-        "test/source_low/corpus/numeric_conversion.loom-test",
-        "test/source_low/corpus/numeric_conversion_baseline.loom-test",
-        "test/source_low/corpus/numeric_f32_memory.loom-test",
-        "test/source_low/corpus/numeric_i32_memory.loom-test",
-        "test/source_low/corpus/numeric_index.loom-test",
-        "test/source_low/corpus/numeric_index_conversion.loom-test",
-        "test/source_low/corpus/numeric_minmax.loom-test",
-        "test/source_low/corpus/numeric_reduce.loom-test",
-        "test/source_low/corpus/numeric_scalar_baseline.loom-test",
-        "test/source_low/corpus/numeric_scalar_f32.loom-test",
-        "test/source_low/corpus/numeric_scalar_i32.loom-test",
-        "test/source_low/corpus/numeric_scalar_i64.loom-test",
-        "test/source_low/corpus/numeric_scalar_literals.loom-test",
-        "test/source_low/corpus/ordinary_vector_structure.loom-test",
-        "test/source_low/corpus/packed_bitfield.loom-test",
-        "test/source_low/corpus/packed_bitpack.loom-test",
-        "test/source_low/corpus/packed_bitunpack.loom-test",
-        "test/source_low/corpus/packed_dot_float8.loom-test",
-        "test/source_low/corpus/packed_dot_i4_mixed.loom-test",
-        "test/source_low/corpus/packed_dot_integer.loom-test",
-        "test/source_low/corpus/packed_dot_wide.loom-test",
-        "test/source_low/corpus/packed_i8_arithmetic.loom-test",
-        "test/source_low/corpus/packed_integer_arithmetic.loom-test",
-        "test/source_low/corpus/packed_payload_offsets.loom-test",
-        "test/source_low/corpus/packed_q8_dequant_dot.loom-test",
-        "test/source_low/corpus/sync_barrier.loom-test",
-        "test/source_low/corpus/vector_bitcast.loom-test",
-        "test/source_low/corpus/vector_carrier_structure.loom-test",
-        "test/source_low/corpus/vector_dot.loom-test",
-        "test/source_low/corpus/vector_mask_select.loom-test",
-        "test/source_low/corpus/vector_slice.loom-test",
-        "test/source_low/corpus/vector_v16.loom-test",
-        "test/source_low/corpus/vector_v4.loom-test",
+    ] + _VM_CORE_CORPUS_SRCS + [
         "test/source_low/function_abi.loom-test",
         "test/source_low/function_contracts.loom-test",
         "test/source_low/function_values.loom-test",
@@ -431,59 +407,6 @@ loom_check_test_suite(
         "test/source_low/selector_assembly.loom-test",
         "test/source_low/vector_construction.loom-test",
     ],
-    data = [
-        "//loom/src/loom/test/corpus/source_low:async_empty.loom-test",
-        "//loom/src/loom/test/corpus/source_low:async_gather.loom-test",
-        "//loom/src/loom/test/corpus/source_low:index_addressing.loom-test",
-        "//loom/src/loom/test/corpus/source_low:lookup_table.loom-test",
-        "//loom/src/loom/test/corpus/source_low:memory_cache_policy_non_temporal.loom-test",
-        "//loom/src/loom/test/corpus/source_low:memory_cache_policy_scopes.loom-test",
-        "//loom/src/loom/test/corpus/source_low:memory_generic_atomic.loom-test",
-        "//loom/src/loom/test/corpus/source_low:memory_global.loom-test",
-        "//loom/src/loom/test/corpus/source_low:memory_global_atomic.loom-test",
-        "//loom/src/loom/test/corpus/source_low:memory_global_atomic_ordering.loom-test",
-        "//loom/src/loom/test/corpus/source_low:memory_prefetch.loom-test",
-        "//loom/src/loom/test/corpus/source_low:memory_scalar_addressing.loom-test",
-        "//loom/src/loom/test/corpus/source_low:memory_vector_baseline.loom-test",
-        "//loom/src/loom/test/corpus/source_low:memory_workgroup_atomic.loom-test",
-        "//loom/src/loom/test/corpus/source_low:memory_workgroup_b128.loom-test",
-        "//loom/src/loom/test/corpus/source_low:memory_workgroup_indexed.loom-test",
-        "//loom/src/loom/test/corpus/source_low:memory_workgroup_packed16.loom-test",
-        "//loom/src/loom/test/corpus/source_low:memory_workgroup_scalar_addressing.loom-test",
-        "//loom/src/loom/test/corpus/source_low:ml_contraction.loom-test",
-        "//loom/src/loom/test/corpus/source_low:numeric_conversion.loom-test",
-        "//loom/src/loom/test/corpus/source_low:numeric_conversion_baseline.loom-test",
-        "//loom/src/loom/test/corpus/source_low:numeric_f32_memory.loom-test",
-        "//loom/src/loom/test/corpus/source_low:numeric_i32_memory.loom-test",
-        "//loom/src/loom/test/corpus/source_low:numeric_index.loom-test",
-        "//loom/src/loom/test/corpus/source_low:numeric_index_conversion.loom-test",
-        "//loom/src/loom/test/corpus/source_low:numeric_minmax.loom-test",
-        "//loom/src/loom/test/corpus/source_low:numeric_reduce.loom-test",
-        "//loom/src/loom/test/corpus/source_low:numeric_scalar_baseline.loom-test",
-        "//loom/src/loom/test/corpus/source_low:numeric_scalar_f32.loom-test",
-        "//loom/src/loom/test/corpus/source_low:numeric_scalar_i32.loom-test",
-        "//loom/src/loom/test/corpus/source_low:numeric_scalar_i64.loom-test",
-        "//loom/src/loom/test/corpus/source_low:numeric_scalar_literals.loom-test",
-        "//loom/src/loom/test/corpus/source_low:ordinary_vector_structure.loom-test",
-        "//loom/src/loom/test/corpus/source_low:packed_bitfield.loom-test",
-        "//loom/src/loom/test/corpus/source_low:packed_bitpack.loom-test",
-        "//loom/src/loom/test/corpus/source_low:packed_bitunpack.loom-test",
-        "//loom/src/loom/test/corpus/source_low:packed_dot_float8.loom-test",
-        "//loom/src/loom/test/corpus/source_low:packed_dot_i4_mixed.loom-test",
-        "//loom/src/loom/test/corpus/source_low:packed_dot_integer.loom-test",
-        "//loom/src/loom/test/corpus/source_low:packed_dot_wide.loom-test",
-        "//loom/src/loom/test/corpus/source_low:packed_i8_arithmetic.loom-test",
-        "//loom/src/loom/test/corpus/source_low:packed_integer_arithmetic.loom-test",
-        "//loom/src/loom/test/corpus/source_low:packed_payload_offsets.loom-test",
-        "//loom/src/loom/test/corpus/source_low:packed_q8_dequant_dot.loom-test",
-        "//loom/src/loom/test/corpus/source_low:sync_barrier.loom-test",
-        "//loom/src/loom/test/corpus/source_low:vector_bitcast.loom-test",
-        "//loom/src/loom/test/corpus/source_low:vector_carrier_structure.loom-test",
-        "//loom/src/loom/test/corpus/source_low:vector_dot.loom-test",
-        "//loom/src/loom/test/corpus/source_low:vector_mask_select.loom-test",
-        "//loom/src/loom/test/corpus/source_low:vector_slice.loom-test",
-        "//loom/src/loom/test/corpus/source_low:vector_v16.loom-test",
-        "//loom/src/loom/test/corpus/source_low:vector_v4.loom-test",
-    ],
+    data = _VM_CORE_CORPUS_DATA,
     test_name_prefix_to_strip = "test/source_low/",
 )

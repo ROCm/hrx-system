@@ -1147,8 +1147,8 @@ class BuildFileFunctions(object):
                 if name in namespace and hasattr(self, "_exec_namespace"):
                     # Only bind names not already provided by converter
                     # handlers. This avoids overwriting converter methods
-                    # (like enforce_glob) with Starlark implementations that
-                    # reference native.glob() and other unavailable builtins.
+                    # (like iree_checked_glob) with Starlark implementations
+                    # that reference native.glob() and other unavailable builtins.
                     if name not in self._exec_namespace:
                         self._exec_namespace[name] = namespace[name]
         except Exception:
@@ -1584,7 +1584,7 @@ class BuildFileFunctions(object):
         """Direct handler for iree_wasm_cc_test (loaded from .bzl)."""
         self.wasm_cc_test(**kwargs)
 
-    def enforce_glob(self, files, **kwargs):
+    def iree_checked_glob(self, files, **kwargs):
         return files
 
     def glob(self, include, exclude=None, exclude_directories=1):

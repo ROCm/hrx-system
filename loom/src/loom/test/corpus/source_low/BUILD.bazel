@@ -4,7 +4,9 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//build_tools/bazel:glob.bzl", "iree_checked_glob")
 load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test_suite")
+load(":cases.bzl", "SOURCE_LOW_CORPUS_CASES")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -12,7 +14,10 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
-_CASES = glob(["*.loom-test"])
+_CASES = iree_checked_glob(
+    SOURCE_LOW_CORPUS_CASES,
+    include = ["*.loom-test"],
+)
 
 exports_files(_CASES)
 
