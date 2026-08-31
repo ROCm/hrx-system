@@ -281,6 +281,24 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    relocation
+  HDRS
+    "emit/relocation.h"
+  SRCS
+    "emit/relocation.c"
+  DEPS
+    ::core_descriptors
+    ::encoding
+    ::machine
+    iree::base
+    iree::base::internal::arena
+    loom::target::emit::native::contribution
+    loom::target::emit::native::object
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     leaf_object
   HDRS
     "emit/leaf_object.h"
@@ -289,6 +307,7 @@ loom_cc_library(
   DEPS
     ::bundle_plan
     ::encoding
+    ::relocation
     iree::base
     iree::base::internal::arena
     loom::codegen::low::diagnostics
@@ -311,6 +330,7 @@ loom_cc_library(
   DEPS
     ::bundle_plan
     ::leaf_object
+    ::relocation
     iree::base
     iree::base::internal::arena
     iree::io::stream
@@ -390,6 +410,7 @@ loom_cc_test(
     ::bundle_plan
     ::leaf_object
     ::low_registry
+    ::relocation
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
@@ -409,6 +430,7 @@ loom_cc_test(
   SRCS
     "emit/tile_image_test.cc"
   DEPS
+    ::relocation
     ::tile_image
     iree::base::internal::arena
     iree::io::stream

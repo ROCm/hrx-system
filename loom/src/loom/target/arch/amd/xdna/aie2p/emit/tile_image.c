@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "loom/target/arch/amd/xdna/aie2p/emit/bundle_plan.h"
+#include "loom/target/arch/amd/xdna/aie2p/emit/relocation.h"
 #include "loom/target/emit/native/elf.h"
 
 enum {
@@ -239,12 +240,6 @@ iree_status_t loom_aie2p_tile_image_write(
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "AIE2P tile image requires an entry symbol");
   }
-  if (object->fixup_count != 0) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AIE2P tile image cannot contain unresolved native fixups");
-  }
-
   loom_native_section_contribution_assembly_t assembly = {0};
   IREE_RETURN_IF_ERROR(loom_native_assemble_section_contributions(
       object->sections, object->section_count, &assembly, scratch_arena));
@@ -271,6 +266,8 @@ iree_status_t loom_aie2p_tile_image_write(
                             LOOM_AIE2P_CORE_PROGRAM_MEMORY_SIZE);
   }
   code_section->address = 0;
+  IREE_RETURN_IF_ERROR(
+      loom_aie2p_native_object_apply_fixups(object, &assembly, scratch_arena));
 
   iree_const_byte_span_t string_table = iree_const_byte_span_empty();
   iree_const_byte_span_t symbol_table = iree_const_byte_span_empty();

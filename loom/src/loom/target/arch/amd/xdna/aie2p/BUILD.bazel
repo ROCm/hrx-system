@@ -253,12 +253,28 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "relocation",
+    srcs = ["emit/relocation.c"],
+    hdrs = ["emit/relocation.h"],
+    deps = [
+        ":core_descriptors",
+        ":encoding",
+        ":machine",
+        "//loom/src/loom/target/emit/native:contribution",
+        "//loom/src/loom/target/emit/native:object",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "leaf_object",
     srcs = ["emit/leaf_object.c"],
     hdrs = ["emit/leaf_object.h"],
     deps = [
         ":bundle_plan",
         ":encoding",
+        ":relocation",
         "//loom/src/loom/codegen/low:diagnostics",
         "//loom/src/loom/codegen/low:packet",
         "//loom/src/loom/ir",
@@ -278,6 +294,7 @@ loom_cc_library(
     deps = [
         ":bundle_plan",
         ":leaf_object",
+        ":relocation",
         "//loom/src/loom/target/emit/native:contribution",
         "//loom/src/loom/target/emit/native:elf",
         "//runtime/src/iree/base",
@@ -349,6 +366,7 @@ loom_cc_test(
         ":bundle_plan",
         ":leaf_object",
         ":low_registry",
+        ":relocation",
         "//loom/src/loom/codegen/low:frame",
         "//loom/src/loom/codegen/low:packet",
         "//loom/src/loom/codegen/low:text_asm",
@@ -367,6 +385,7 @@ loom_cc_test(
     name = "tile_image_test",
     srcs = ["emit/tile_image_test.cc"],
     deps = [
+        ":relocation",
         ":tile_image",
         "//loom/src/loom/target/emit/native:object",
         "//runtime/src/iree/base/internal:arena",

@@ -6,6 +6,7 @@
 
 #include "loom/target/arch/amd/xdna/aie2p/emit/tile_image.h"
 
+#include <array>
 #include <cstring>
 #include <memory>
 #include <string>
@@ -14,6 +15,7 @@
 #include "iree/io/vec_stream.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/target/arch/amd/xdna/aie2p/emit/relocation.h"
 
 namespace loom {
 namespace {
@@ -153,6 +155,117 @@ TEST(Aie2pTileImageTest, WritesExecutableElfFromLeafContribution) {
   EXPECT_EQ((uint8_t)bytes[kernel_symbol + 12], 0x12u);
   EXPECT_EQ((uint8_t)bytes[kernel_symbol + 13], 0u);
   EXPECT_EQ(LoadLeU16(bytes, kernel_symbol + 14), 1u);
+
+  iree_arena_deinitialize(&arena);
+  iree_arena_block_pool_deinitialize(&block_pool);
+}
+
+TEST(Aie2pTileImageTest, AppliesBranchFixupAfterContributionPlacement) {
+  const std::array<uint8_t, 16> prefix_code = {
+      0x5a, 0x5a, 0x5a, 0x5a, 0x5a, 0x5a, 0x5a, 0x5a,
+      0x5a, 0x5a, 0x5a, 0x5a, 0x5a, 0x5a, 0x5a, 0x5a,
+  };
+  std::array<uint8_t, 32> function_code = {};
+  function_code[0] = 0x84;
+  const loom_native_section_contribution_t sections[] = {
+      {
+          /*.section_name=*/IREE_SV(".text.kernel"),
+          /*.section_type=*/LOOM_NATIVE_ELF_SECTION_TYPE_PROGBITS,
+          /*.section_flags=*/LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC |
+              LOOM_NATIVE_ELF_SECTION_FLAG_EXECINSTR,
+          /*.contribution_alignment=*/16,
+          /*.entry_size=*/0,
+          /*.link=*/0,
+          /*.info=*/0,
+          /*.contents=*/
+          iree_make_const_byte_span(prefix_code.data(), prefix_code.size()),
+      },
+      {
+          /*.section_name=*/IREE_SV(".text.kernel"),
+          /*.section_type=*/LOOM_NATIVE_ELF_SECTION_TYPE_PROGBITS,
+          /*.section_flags=*/LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC |
+              LOOM_NATIVE_ELF_SECTION_FLAG_EXECINSTR,
+          /*.contribution_alignment=*/16,
+          /*.entry_size=*/0,
+          /*.link=*/0,
+          /*.info=*/0,
+          /*.contents=*/
+          iree_make_const_byte_span(function_code.data(), function_code.size()),
+      },
+  };
+  const loom_native_object_symbol_t symbol = {
+      /*.name=*/IREE_SV("kernel"),
+      /*.section_contribution_index=*/1,
+      /*.section_offset=*/0,
+      /*.size=*/function_code.size(),
+      /*.binding=*/LOOM_NATIVE_OBJECT_SYMBOL_BINDING_GLOBAL,
+      /*.visibility=*/LOOM_NATIVE_OBJECT_SYMBOL_VISIBILITY_DEFAULT,
+      /*.kind=*/LOOM_NATIVE_OBJECT_SYMBOL_KIND_FUNCTION,
+  };
+  const loom_native_object_fixup_t fixup = {
+      /*.section_contribution_index=*/1,
+      /*.section_offset=*/0,
+      /*.relocation_kind=*/
+      LOOM_AIE2P_NATIVE_RELOCATION_KIND_CORE_BRANCH_ABSOLUTE,
+      /*.target_symbol_index=*/0,
+      /*.addend=*/16,
+  };
+  const loom_aie2p_leaf_contribution_t contribution = {
+      /*.object=*/
+      {
+          /*.sections=*/sections,
+          /*.section_count=*/IREE_ARRAYSIZE(sections),
+          /*.symbols=*/&symbol,
+          /*.symbol_count=*/1,
+          /*.fixups=*/&fixup,
+          /*.fixup_count=*/1,
+      },
+      /*.realization=*/
+      {
+          /*.target_identity=*/LOOM_AIE2P_LEAF_TARGET_IDENTITY,
+          /*.abi_identity=*/LOOM_AIE2P_LEAF_ABI_IDENTITY,
+          /*.entry_symbol_index=*/0,
+          /*.elf_machine=*/LOOM_XDNA_ELF_MACHINE_AIE,
+          /*.target_generation=*/LOOM_XDNA_TARGET_GENERATION_AIE2P,
+          /*.elf_flags=*/LOOM_XDNA_ELF_AIE2P_FLAGS,
+          /*.capability_flags=*/LOOM_AIE2P_LEAF_CAPABILITY_FLAG_NATIVE_FIXUPS,
+          /*.code=*/{48, 16},
+      },
+  };
+
+  iree_arena_block_pool_t block_pool;
+  iree_arena_block_pool_initialize(4096, iree_allocator_system(), &block_pool);
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&block_pool, &arena);
+  iree_io_stream_t* stream = nullptr;
+  IREE_ASSERT_OK(iree_io_vec_stream_create(
+      IREE_IO_STREAM_MODE_READABLE | IREE_IO_STREAM_MODE_WRITABLE |
+          IREE_IO_STREAM_MODE_SEEKABLE | IREE_IO_STREAM_MODE_RESIZABLE,
+      1024, iree_allocator_system(), &stream));
+  StreamPtr stream_owner(stream, iree_io_stream_release);
+
+  IREE_ASSERT_OK(loom_aie2p_tile_image_write(&contribution, stream, &arena));
+  const iree_io_stream_pos_t length = iree_io_stream_length(stream);
+  std::string bytes((size_t)length, '\0');
+  IREE_ASSERT_OK(iree_io_stream_seek(stream, IREE_IO_STREAM_SEEK_SET, 0));
+  IREE_ASSERT_OK(
+      iree_io_stream_read(stream, bytes.size(), bytes.data(), nullptr));
+
+  EXPECT_EQ(LoadLeU32(bytes, 24), 16u);
+  constexpr size_t kProgramHeaderOffset = 52;
+  const uint32_t code_offset = LoadLeU32(bytes, kProgramHeaderOffset + 4);
+  EXPECT_EQ(LoadLeU32(bytes, kProgramHeaderOffset + 16), 48u);
+  ASSERT_LE((size_t)code_offset + 48u, bytes.size());
+  EXPECT_EQ(0, std::memcmp(bytes.data() + code_offset, prefix_code.data(),
+                           prefix_code.size()));
+  constexpr std::array<uint8_t, 6> kBranchToAddress32 = {
+      0x84, 0x00, 0x00, 0x10, 0x00, 0x00,
+  };
+  EXPECT_EQ(
+      0, std::memcmp(bytes.data() + code_offset + 16, kBranchToAddress32.data(),
+                     kBranchToAddress32.size()));
+  EXPECT_EQ(function_code[0], 0x84u);
+  for (size_t i = 1; i < 6; ++i) EXPECT_EQ(function_code[i], 0u);
 
   iree_arena_deinitialize(&arena);
   iree_arena_block_pool_deinitialize(&block_pool);

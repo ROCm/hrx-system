@@ -162,7 +162,7 @@
             "\"artifact_format\":\"elf\"",
             "\"status\":{\"code\":0,\"name\":\"OK\"}",
             "\"spill_count\":0",
-            "\"emission\":{\"instruction_count\":12,\"code_byte_count\":38,\"code_storage_byte_count\":38}"
+            "\"emission\":{\"instruction_count\":11,\"code_byte_count\":36,\"code_storage_byte_count\":36}"
           ]
         }
       },
@@ -248,7 +248,7 @@
             "\"artifact_format\":\"elf\"",
             "\"status\":{\"code\":0,\"name\":\"OK\"}",
             "\"spill_count\":0",
-            "\"emission\":{\"instruction_count\":15,\"code_byte_count\":46,\"code_storage_byte_count\":46}"
+            "\"emission\":{\"instruction_count\":14,\"code_byte_count\":44,\"code_storage_byte_count\":44}"
           ]
         }
       },
