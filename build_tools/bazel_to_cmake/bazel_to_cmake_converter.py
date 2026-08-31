@@ -1103,6 +1103,9 @@ class BuildFileFunctions(object):
     def bool_flag(self, *args, **kwargs):
         pass
 
+    def label_flag(self, *args, **kwargs):
+        pass
+
     def string_list_flag(self, *args, **kwargs):
         pass
 

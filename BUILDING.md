@@ -226,6 +226,85 @@ The portable spelling is shorter for common cases:
 python dev.py bazel configure -DIREE_HAL_DRIVER_AMDGPU=ON
 ```
 
+### External HAL drivers
+
+External HAL drivers remain ordinary static C/C++ libraries. Each driver
+publishes one C header and registration function:
+
+```c
+iree_status_t acme_hal_driver_module_register(
+    iree_hal_driver_registry_t* registry);
+```
+
+The root module resolves HRX and any independently distributed driver modules
+through normal Bzlmod dependencies or overrides:
+
+```starlark
+# MODULE.bazel
+bazel_dep(name = "hrx", version = "<version>")
+bazel_dep(name = "acme_hal", version = "<version>")
+```
+
+The driver module packages its library with registration metadata:
+
+```starlark
+load("@hrx//runtime/build_tools/bazel:hal_driver.bzl", "iree_hal_driver_module")
+
+iree_hal_driver_module(
+    name = "module",
+    registration = ":registration",
+    registration_header = "acme/hal/registration.h",
+    registration_function = "acme_hal_driver_module_register",
+    visibility = ["//visibility:public"],
+)
+```
+
+The root application explicitly composes the modules it wants. Dependencies do
+not register drivers merely because they appear in the transitive Bzlmod graph:
+
+```starlark
+load("@hrx//runtime/build_tools/bazel:hal_driver.bzl", "iree_hal_driver_registry")
+
+iree_hal_driver_registry(
+    name = "external_drivers",
+    modules = [
+        "@acme_hal//:module",
+    ],
+)
+```
+
+Select that aggregate for every binary using HRX's available-driver registry:
+
+```text
+build --@hrx//runtime/config/hal:external_driver_registry=//hal:external_drivers
+```
+
+The generated registry directly references each registration function, keeping
+the selected static libraries live without constructors, linker sections, or
+`alwayslink`. Modules register in list order after the built-in drivers. Since
+the HAL registry resolves factories in most-recently-added order, later external
+modules may deliberately override earlier modules or built-in driver names.
+
+CMake projects declare the same target, header, and function contract before
+adding HRX. A source directory is evaluated only when its name appears in
+`IREE_EXTERNAL_HAL_DRIVERS`:
+
+```cmake
+include("${HRX_SOURCE_DIR}/runtime/build_tools/cmake/iree_external_hal_driver.cmake")
+iree_register_external_hal_driver(
+  NAME acme
+  TARGET acme_hal_registration
+  HEADER acme/hal/registration.h
+  REGISTER acme_hal_driver_module_register
+  SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/acme_hal"
+)
+set(IREE_EXTERNAL_HAL_DRIVERS acme CACHE STRING "")
+add_subdirectory("${HRX_SOURCE_DIR}" hrx)
+```
+
+Selecting an unknown driver, omitting its target, or failing to configure its
+dependencies is a configuration error rather than an optional fallback.
+
 Pinned mode is the default. It lets AMDGPU host-side code compile without a
 ROCm/TheRock root; Bazel writes `IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=none` when no
 ROCm path is configured:

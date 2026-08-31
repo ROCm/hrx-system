@@ -6,11 +6,26 @@
 
 load("//build_tools/bazel:select.bzl", "iree_select")
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
+load("//runtime/build_tools/bazel:hal_driver.bzl", "iree_hal_driver_registry")
 
 package(
     default_visibility = ["//visibility:public"],
     features = ["layering_check"],
     licenses = ["notice"],  # Apache 2.0
+)
+
+iree_runtime_cc_library(
+    name = "external_registry_api",
+    hdrs = ["external_registry.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_hal_driver_registry(
+    name = "empty_external_driver_registry",
+    modules = [],
 )
 
 iree_runtime_cc_library(
@@ -21,6 +36,8 @@ iree_runtime_cc_library(
         [
             "//runtime/src/iree/base",
             "//runtime/src/iree/hal",
+            "//runtime/config/hal:external_driver_registry",
+            ":external_registry_api",
         ] + iree_select({
             "//runtime/config/hal:driver_amdgpu": [
                 "//runtime/src/iree/hal/drivers/amdgpu/registration",

@@ -6,6 +6,8 @@
 
 #include "iree/hal/drivers/init.h"
 
+#include "iree/hal/drivers/external_registry.h"
+
 #if defined(IREE_HAVE_HAL_AMDGPU_DRIVER_MODULE)
 #include "iree/hal/drivers/amdgpu/registration/driver_module.h"
 #endif  // IREE_HAVE_HAL_AMDGPU_DRIVER_MODULE
@@ -21,17 +23,6 @@
 #if defined(IREE_HAVE_HAL_WEBGPU_DRIVER_MODULE)
 #include "iree/hal/drivers/webgpu/registration/driver_module.h"
 #endif  // IREE_HAVE_HAL_WEBGPU_DRIVER_MODULE
-
-#if defined(IREE_HAVE_HAL_EXTERNAL_DRIVERS)
-// Defined in the generated init_external.c file:
-extern iree_status_t iree_hal_register_external_drivers(
-    iree_hal_driver_registry_t* registry);
-#else
-static iree_status_t iree_hal_register_external_drivers(
-    iree_hal_driver_registry_t* registry) {
-  return iree_ok_status();
-}
-#endif  // IREE_HAVE_HAL_EXTERNAL_DRIVERS
 
 IREE_API_EXPORT iree_status_t
 iree_hal_register_all_available_drivers(iree_hal_driver_registry_t* registry) {

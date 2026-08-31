@@ -50,7 +50,8 @@ set_property(GLOBAL PROPERTY IREE_RUNTIME_COVERAGE_TARGETS "")
 set(IREE_HOST_BIN_DIR "" CACHE PATH
   "Path to directory containing IREE host tools to use instead of building them.")
 
-set(IREE_EXTERNAL_HAL_DRIVERS "" CACHE STRING "")
+set(IREE_EXTERNAL_HAL_DRIVERS "" CACHE STRING
+  "Semicolon-separated external HAL driver modules to compose into the runtime.")
 set(IREE_HAL_EXECUTABLE_LOADER_EXTRA_DEPS "" CACHE STRING "")
 
 option(IREE_HAL_DRIVER_DEFAULTS
@@ -106,6 +107,7 @@ include(binary)
 include(selectors)
 include(cts)
 include(iree_execution_test_suite)
+include(iree_external_hal_driver)
 include(iree_runtime_amdgpu_toolchain)
 include(iree_runtime_hal_cts_test_suite)
 include(iree_wasm_library)
