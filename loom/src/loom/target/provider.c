@@ -51,6 +51,19 @@ static iree_status_t loom_target_environment_validate_provider(
         " materializes definitions without owning a fact family",
         provider_index);
   }
+  if (provider->launch_config_compiler != NULL) {
+    const loom_target_launch_config_compiler_t* compiler =
+        provider->launch_config_compiler;
+    if (iree_string_view_is_empty(compiler->public_artifact_format) ||
+        iree_string_view_is_empty(compiler->file_extension) ||
+        iree_string_view_is_empty(compiler->default_identifier) ||
+        compiler->prepare == NULL || compiler->emit == NULL) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "target provider %" PRIhsz
+                              " has an incomplete launch-config compiler facet",
+                              provider_index);
+    }
+  }
   for (iree_host_size_t i = 0; i < provider_index; ++i) {
     const loom_target_provider_t* existing = provider_set->providers[i];
     if (existing == provider) {
@@ -64,6 +77,12 @@ static iree_status_t loom_target_environment_validate_provider(
           IREE_STATUS_INVALID_ARGUMENT,
           "target fact family '%.*s' has more than one provider",
           (int)provider->fact_type->name.size, provider->fact_type->name.data);
+    }
+    if (provider->launch_config_compiler != NULL &&
+        existing->launch_config_compiler != NULL) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "target environment has more than one launch-config compiler");
     }
   }
   return iree_ok_status();
@@ -394,6 +413,19 @@ loom_target_emitter_list_t loom_target_environment_emitter_list(
   IREE_ASSERT_ARGUMENT(environment);
   return loom_target_emitter_list_make(environment->emitters,
                                        environment->emitter_count);
+}
+
+const loom_target_launch_config_compiler_t*
+loom_target_environment_launch_config_compiler(
+    const loom_target_environment_t* environment) {
+  IREE_ASSERT_ARGUMENT(environment);
+  for (iree_host_size_t i = 0; i < environment->provider_set->provider_count;
+       ++i) {
+    const loom_target_launch_config_compiler_t* compiler =
+        environment->provider_set->providers[i]->launch_config_compiler;
+    if (compiler != NULL) return compiler;
+  }
+  return NULL;
 }
 
 const loom_pass_registry_t* loom_target_environment_pass_registry(

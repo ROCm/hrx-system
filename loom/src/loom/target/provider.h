@@ -226,6 +226,45 @@ typedef struct loom_target_emitter_list_t {
   iree_host_size_t count;
 } loom_target_emitter_list_t;
 
+typedef struct loom_target_launch_config_compiler_t
+    loom_target_launch_config_compiler_t;
+
+// Prepares target-owned state for one requested launch-config compilation.
+//
+// The returned capability is owned by |arena| and remains valid until the
+// arena is deinitialized. The compile driver appends it to the ordinary pass
+// environment for exactly one pass-program execution.
+typedef iree_status_t (*loom_target_launch_config_prepare_fn_t)(
+    iree_arena_allocator_t* arena,
+    const loom_pass_environment_capability_t** out_capability);
+
+// Emits one launch-config artifact from a completed pass invocation.
+//
+// |capability| is the exact value returned by |prepare|. The implementation
+// validates that its target-owned passes completed before emitting.
+typedef iree_status_t (*loom_target_launch_config_emit_fn_t)(
+    const loom_pass_environment_capability_t* capability,
+    const loom_target_emit_request_t* request,
+    loom_target_emit_artifact_t* out_artifact);
+
+// Optional target-owned launch-configuration compiler facet.
+struct loom_target_launch_config_compiler_t {
+  // Public format string reported on the resulting artifact.
+  iree_string_view_t public_artifact_format;
+
+  // File extension appended to caller-supplied artifact identifiers.
+  iree_string_view_t file_extension;
+
+  // Artifact identifier used when the caller supplies no module name.
+  iree_string_view_t default_identifier;
+
+  // Prepares target-owned per-compilation state and pass capability.
+  loom_target_launch_config_prepare_fn_t prepare;
+
+  // Emits the finalized launch-config artifact.
+  loom_target_launch_config_emit_fn_t emit;
+};
+
 // Creates a borrowed emitter list.
 static inline loom_target_emitter_list_t loom_target_emitter_list_make(
     const loom_target_emitter_t* const* values, iree_host_size_t count) {
@@ -240,17 +279,23 @@ static inline loom_target_emitter_list_t loom_target_emitter_list_make(
 typedef enum loom_target_pipeline_phase_e {
   // Source/kernel normalization before source-to-low lowering.
   LOOM_TARGET_PIPELINE_PHASE_SOURCE_NORMALIZATION = 0,
+  // Target-owned source roots materialized after authoring expansion and
+  // before target callgraph specialization.
+  LOOM_TARGET_PIPELINE_PHASE_SOURCE_ROOT_MATERIALIZATION = 1,
   // Source-to-target-low lowering.
-  LOOM_TARGET_PIPELINE_PHASE_SOURCE_TO_LOW = 1,
+  LOOM_TARGET_PIPELINE_PHASE_SOURCE_TO_LOW = 2,
   // Target-owned cleanup for human-facing source-low asm artifacts.
-  LOOM_TARGET_PIPELINE_PHASE_SOURCE_LOW_ARTIFACT_PREPARATION = 2,
+  LOOM_TARGET_PIPELINE_PHASE_SOURCE_LOW_ARTIFACT_PREPARATION = 3,
   // Module-wide target ABI and linkage materialization after source-to-low.
-  LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_MODULE_MATERIALIZATION = 3,
+  LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_MODULE_MATERIALIZATION = 4,
   // Function-local target ABI/resource materialization after source-to-low.
-  LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_FUNCTION_MATERIALIZATION = 4,
+  LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_FUNCTION_MATERIALIZATION = 5,
   // Function-local target-low cleanup and operand-form preparation before
   // emission.
-  LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_FUNCTION_PREPARATION = 5,
+  LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_FUNCTION_PREPARATION = 6,
+  // Module-wide target finalization after all target-low functions have been
+  // prepared for emission.
+  LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_MODULE_FINALIZATION = 7,
   LOOM_TARGET_PIPELINE_PHASE_COUNT_,
 } loom_target_pipeline_phase_t;
 
@@ -311,6 +356,8 @@ struct loom_target_provider_t {
   const loom_pass_registry_t* pass_registry;
   // Optional pass-pipeline contribution callback.
   loom_target_provider_pipeline_contribution_fn_t contribute_pipeline;
+  // Optional launch-configuration compiler facet contributed by this target.
+  const loom_target_launch_config_compiler_t* launch_config_compiler;
 };
 
 // Static target provider table linked into a binary or embedding.
@@ -453,6 +500,12 @@ loom_target_environment_low_verify_provider_list(
 
 // Returns target-owned emitters linked into |environment|.
 loom_target_emitter_list_t loom_target_environment_emitter_list(
+    const loom_target_environment_t* environment);
+
+// Returns the launch-configuration compiler linked into |environment|, or
+// NULL when the environment cannot produce launch-config artifacts.
+const loom_target_launch_config_compiler_t*
+loom_target_environment_launch_config_compiler(
     const loom_target_environment_t* environment);
 
 // Returns target-owned pass descriptors linked into |environment|.

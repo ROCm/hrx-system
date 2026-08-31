@@ -76,6 +76,32 @@ static iree_status_t ContributePreparation(
                                 loom_named_attr_slice_empty(), &run_op);
 }
 
+static iree_status_t PrepareLaunchConfigCompiler(
+    iree_arena_allocator_t* arena,
+    const loom_pass_environment_capability_t** out_capability) {
+  (void)arena;
+  *out_capability = nullptr;
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED);
+}
+
+static iree_status_t EmitLaunchConfigCompiler(
+    const loom_pass_environment_capability_t* capability,
+    const loom_target_emit_request_t* request,
+    loom_target_emit_artifact_t* out_artifact) {
+  (void)capability;
+  (void)request;
+  *out_artifact = {};
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED);
+}
+
+static const loom_target_launch_config_compiler_t kLaunchConfigCompiler = {
+    /*.public_artifact_format=*/IREE_SVL("test"),
+    /*.file_extension=*/IREE_SVL(".launch-config.test"),
+    /*.default_identifier=*/IREE_SVL("launch-config.test"),
+    /*.prepare=*/PrepareLaunchConfigCompiler,
+    /*.emit=*/EmitLaunchConfigCompiler,
+};
+
 struct PipelineBuildData {
   const loom_target_environment_t* environment;
 };
@@ -372,6 +398,61 @@ TEST_F(TargetProviderTest, RejectsProfileFromAnotherFactFamily) {
   };
   static const loom_target_provider_t* const providers[] = {
       &provider,
+  };
+  const loom_target_provider_set_t provider_set =
+      loom_target_provider_set_make(providers, IREE_ARRAYSIZE(providers));
+  loom_target_environment_t environment = {};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_target_environment_initialize(&provider_set, &environment));
+}
+
+TEST_F(TargetProviderTest, LooksUpLaunchConfigCompiler) {
+  loom_target_provider_t provider = {};
+  provider.launch_config_compiler = &kLaunchConfigCompiler;
+  const loom_target_provider_t* const providers[] = {
+      &provider,
+  };
+  const loom_target_provider_set_t provider_set =
+      loom_target_provider_set_make(providers, IREE_ARRAYSIZE(providers));
+  loom_target_environment_t environment = {};
+  IREE_ASSERT_OK(
+      loom_target_environment_initialize(&provider_set, &environment));
+
+  EXPECT_EQ(loom_target_environment_launch_config_compiler(&environment),
+            &kLaunchConfigCompiler);
+
+  loom_target_environment_deinitialize(&environment);
+}
+
+TEST_F(TargetProviderTest, RejectsIncompleteLaunchConfigCompiler) {
+  static const loom_target_launch_config_compiler_t incomplete_compiler = {
+      /*.public_artifact_format=*/IREE_SVL("test"),
+      /*.file_extension=*/IREE_SVL(".launch-config.test"),
+      /*.default_identifier=*/IREE_SVL("launch-config.test"),
+      /*.prepare=*/PrepareLaunchConfigCompiler,
+  };
+  loom_target_provider_t provider = {};
+  provider.launch_config_compiler = &incomplete_compiler;
+  const loom_target_provider_t* const providers[] = {
+      &provider,
+  };
+  const loom_target_provider_set_t provider_set =
+      loom_target_provider_set_make(providers, IREE_ARRAYSIZE(providers));
+  loom_target_environment_t environment = {};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_target_environment_initialize(&provider_set, &environment));
+}
+
+TEST_F(TargetProviderTest, RejectsAmbiguousLaunchConfigCompilers) {
+  loom_target_provider_t first_provider = {};
+  first_provider.launch_config_compiler = &kLaunchConfigCompiler;
+  loom_target_provider_t second_provider = {};
+  second_provider.launch_config_compiler = &kLaunchConfigCompiler;
+  const loom_target_provider_t* const providers[] = {
+      &first_provider,
+      &second_provider,
   };
   const loom_target_provider_set_t provider_set =
       loom_target_provider_set_make(providers, IREE_ARRAYSIZE(providers));

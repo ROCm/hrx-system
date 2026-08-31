@@ -429,6 +429,9 @@ static iree_status_t loom_target_pipeline_build_source_low_body(
   loom_op_t* for_op = NULL;
   IREE_RETURN_IF_ERROR(
       loom_target_pipeline_build_expanded_source_body(builder, user_data));
+  IREE_RETURN_IF_ERROR(loom_target_pipeline_contribute_phase(
+      builder, context,
+      LOOM_TARGET_PIPELINE_PHASE_SOURCE_ROOT_MATERIALIZATION));
   // Authoring expansion has selected every resolvable provider and exposed
   // its retained callees. Specialize the complete semantic call graph before
   // any target-aware function pass observes those callees.
@@ -525,8 +528,11 @@ static iree_status_t loom_target_pipeline_build_prepared_low_body(
   IREE_RETURN_IF_ERROR(loom_target_pipeline_contribute_phase(
       builder, context,
       LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_MODULE_MATERIALIZATION));
-  return loom_target_pipeline_build_for_target_functions(
-      builder, loom_target_pipeline_build_low_preparation, user_data, &for_op);
+  IREE_RETURN_IF_ERROR(loom_target_pipeline_build_for_target_functions(
+      builder, loom_target_pipeline_build_low_preparation, user_data, &for_op));
+  return loom_target_pipeline_contribute_phase(
+      builder, context,
+      LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_MODULE_FINALIZATION);
 }
 
 iree_status_t loom_target_pipeline_build_to_expanded_source(
