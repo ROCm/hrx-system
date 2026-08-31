@@ -245,8 +245,7 @@ iree_status_t loom_kernel_resolve_launches(
   IREE_ASSERT(references->module == module);
   IREE_ASSERT_EQ(references->symbol_count, module->symbols.count);
   IREE_ASSERT(configuration_function_count == 0 || configuration_functions);
-  IREE_ASSERT(configuration_function_count == 0 ||
-              configuration_function_count == module->symbols.count);
+  IREE_ASSERT_LE(configuration_function_count, module->symbols.count);
   IREE_ASSERT_ARGUMENT(scratch_arena);
   IREE_ASSERT_ARGUMENT(out_entry_table);
   IREE_ASSERT_ARGUMENT(out_valid);

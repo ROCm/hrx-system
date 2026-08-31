@@ -6,6 +6,7 @@
 
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
+    "iree_cmake_extra_content",
     "loom_cc_library",
     "loom_cc_test",
     "loom_config_compatible_with",
@@ -288,6 +289,54 @@ loom_cc_test(
         "//runtime/src/iree/testing:gtest_main",
         "//runtime/src/iree/testing:temp_file",
     ],
+)
+
+loom_cc_test(
+    name = "task_test",
+    srcs = ["task_test.cc"],
+    deps = [
+        ":test_util",
+        "//loom/binding/c:loomc",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_cmake_extra_content(
+    content = """
+if(IREE_TARGET_HAS_THREADS)
+""",
+    inline = True,
+)
+
+loom_cc_test(
+    name = "task_pool_test",
+    srcs = ["task_pool_test.cc"],
+    deps = [
+        ":test_util",
+        "//loom/binding/c:task_pool",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "task_queue_test",
+    srcs = ["task_queue_test.cc"],
+    deps = [
+        ":test_util",
+        "//loom/binding/c:task_pool",
+        "//loom/binding/c:task_queue",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_cmake_extra_content(
+    content = """
+endif()
+""",
+    inline = True,
 )
 
 loom_cc_test(

@@ -69,12 +69,13 @@ typedef struct loom_cmd_program_kernel_source_t {
   // Invocation environment providing diagnostics and specialization.
   const loom_link_plan_materialization_environment_t* environment;
 
-  // Exact indexed source-definition ordinal by preparation-module symbol ID.
+  // Exact indexed source-definition ordinal by linked-module symbol ID.
+  // Caller preparation may append symbols while preserving this stable prefix.
   struct {
     // Borrowed dense projection storage.
     const iree_host_size_t* values;
 
-    // Number of preparation-module symbol slots.
+    // Number of linked-module symbol slots before caller preparation.
     iree_host_size_t count;
   } source_definitions;
 

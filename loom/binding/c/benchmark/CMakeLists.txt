@@ -134,4 +134,25 @@ loom_cc_benchmark(
   TESTONLY
 )
 
+if(IREE_TARGET_HAS_THREADS)
+
+loom_cc_benchmark(
+  NAME
+    task_queue_benchmark
+  SRCS
+    "task_queue_benchmark.cc"
+  DEPS
+    iree::base
+    iree::base::threading
+    iree::testing::benchmark_main
+    loom::binding::c::loomc
+    loom::binding::c::task_pool
+    loom::binding::c::task_queue
+  ARGS
+    "--benchmark_filter=BM_TaskQueueSubmitOnly/4/64"
+  TESTONLY
+)
+
+endif()
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

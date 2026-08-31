@@ -141,14 +141,16 @@ typedef iree_status_t (*iree_task_process_drain_fn_t)(
 typedef void (*iree_task_process_completion_fn_t)(iree_task_process_t* process,
                                                   iree_status_t status);
 
-// Called when it is safe to free resources accessed by drain(). For
+// Called when it is safe to free the process and resources accessed by
+// drain(). For
 // wake_budget > 1 processes with cooperative multi-worker draining, this may
 // fire after completion_fn when the last active drainer exits. For
 // wake_budget == 1 processes with a single exclusive drainer, this fires
 // immediately after completion_fn.
 //
-// Typical use: freeing the processor context, issue context wrapper, and
-// other allocations that workers touch during drain().
+// This is the executor's final process access. The callback may free the
+// process itself, processor context, issue context wrapper, and other
+// allocations that workers touch during drain().
 //
 // If NULL, no deferred release is needed (the completion callback handles
 // everything, or the process's resources are externally managed).
@@ -208,7 +210,8 @@ struct iree_task_process_t {
   // completion work is needed.
   iree_task_process_completion_fn_t completion_fn;
 
-  // Called when it is safe to free drain-accessed resources. For
+  // Called on the executor's final process access, when it is safe to free the
+  // process and drain-accessed resources. For
   // wake_budget > 1 processes, this fires when the last active drainer exits
   // after completion_fn. For wake_budget == 1 processes, this fires
   // immediately after completion_fn. May be NULL if no deferred release is
@@ -273,6 +276,12 @@ struct iree_task_process_t {
   // release paths so stale releases cannot mutate process-global schedule
   // state after a newer slot lifetime has begun.
   iree_atomic_int32_t placement_epoch;
+
+  // Active compute-slot placement count with terminal release in the high bit.
+  // A placement retains process storage from publication until its complete
+  // slot-release path exits. The final placement invokes release_fn after a
+  // terminal placement has requested release.
+  iree_atomic_int32_t compute_placement_state;
 
   // Executor-managed scheduling state (iree_task_process_schedule_state_t).
   // Tracks whether this process is idle, queued on a run list, or being
@@ -368,6 +377,17 @@ void iree_task_process_initialize(iree_task_process_drain_fn_t drain_fn,
 // Sets immutable scheduler/lifecycle flags before the process is activated.
 void iree_task_process_set_flags(iree_task_process_t* process,
                                  iree_task_process_flags_t flags);
+
+// Retains process storage for one compute-slot placement. Called after a slot
+// is reserved and before its process pointer is published.
+void iree_task_process_acquire_compute_placement(iree_task_process_t* process);
+
+// Releases one compute-slot placement and optionally requests terminal
+// process release. The final placement invokes release_fn exactly once after a
+// terminal placement requests it. Callers must not access |process| after this
+// function because release_fn may free its storage.
+void iree_task_process_release_compute_placement(iree_task_process_t* process,
+                                                 bool terminal);
 
 // Decrements the process's suspend count by one. If the count reaches zero,
 // returns true — the caller is responsible for pushing the process to the

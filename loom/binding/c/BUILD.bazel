@@ -48,6 +48,7 @@ LOOMC_PUBLIC_HDRS = [
     "include/loomc/sanitizer.h",
     "include/loomc/source.h",
     "include/loomc/status.h",
+    "include/loomc/task.h",
     "include/loomc/target.h",
     "include/loomc/workspace.h",
 ]
@@ -152,6 +153,7 @@ loom_cc_library(
         "src/source.c",
         "src/status.c",
         "src/target.c",
+        "src/task.c",
         "src/workspace.c",
     ],
     hdrs = LOOMC_PUBLIC_HDRS + [
@@ -265,4 +267,47 @@ loom_cc_library(
         "//loom/binding/c/target/spirv/vulkan",
         "//loom/binding/c/target/spirv/vulkaninfo",
     ],
+)
+
+iree_cmake_extra_content(
+    content = """
+if(IREE_TARGET_HAS_THREADS)
+""",
+    inline = True,
+)
+
+loom_cc_library(
+    name = "task_pool",
+    srcs = ["src/task_pool.c"],
+    hdrs = [
+        "include/loomc/iree/task_pool.h",
+        "include/loomc/task_pool.h",
+    ],
+    includes = ["include"],
+    deps = [
+        ":loomc",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/task",
+    ],
+)
+
+loom_cc_library(
+    name = "task_queue",
+    srcs = ["src/task_queue.c"],
+    hdrs = ["include/loomc/task_queue.h"],
+    includes = ["include"],
+    deps = [
+        ":loomc",
+        ":task_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/task",
+    ],
+)
+
+iree_cmake_extra_content(
+    content = """
+endif()
+""",
+    inline = True,
 )

@@ -34,8 +34,8 @@ extern "C" {
 // other.
 //
 // Active-drainer claims and their handoff to warm-retainer or release-sentinel
-// ownership prevent the release callback (which frees the processor context)
-// from firing while another worker may access it. The completion_claimed flag
+// ownership prevent the release callback (which may free the process) from
+// firing while another worker may access it. The completion_claimed flag
 // ensures exactly one worker runs the eager completion callback (semaphore
 // signaling, dependent activation).
 typedef struct iree_alignas(iree_hardware_destructive_interference_size)
@@ -48,6 +48,11 @@ typedef struct iree_alignas(iree_hardware_destructive_interference_size)
   // snapshot this before clearing the slot so they can detect if the same
   // persistent process was republished before the old release callback runs.
   iree_atomic_int32_t placement_epoch;
+
+  // Wake demand captured before the process pointer is published. Releasing
+  // workers use this slot-owned copy to re-wake a replacement placement
+  // without dereferencing process storage they do not own.
+  iree_atomic_int32_t wake_budget;
 
   // Tagged drainer counter: {generation(32) | count(32)}.
   //

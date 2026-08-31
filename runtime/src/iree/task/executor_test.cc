@@ -546,6 +546,7 @@ struct ComputeProcessContext : public TestWaiter {
   std::atomic<int32_t> tiles_completed{0};
   std::atomic<int32_t> active_drainers{0};
   std::atomic<bool> completed{false};
+  std::atomic<bool> released{false};
   iree_status_code_t completion_status_code = IREE_STATUS_OK;
   // Track which workers participated. Atomic because the completion callback
   // fires eagerly (first worker to observe terminal state) — other workers
@@ -600,6 +601,13 @@ static void compute_completion(iree_task_process_t* process,
   context->Notify();
 }
 
+static void compute_release_and_free_process(iree_task_process_t* process) {
+  auto* context = reinterpret_cast<ComputeProcessContext*>(process->user_data);
+  context->released.store(true, std::memory_order_release);
+  context->Notify();
+  delete process;
+}
+
 // Context for repeatedly reusing process storage as soon as release_fn
 // publishes that all scheduler access has ended.
 struct ComputeReleaseContext : public TestWaiter {
@@ -643,10 +651,11 @@ static void compute_release_completion(iree_task_process_t* process,
   IREE_EXPECT_OK(status);
 }
 
-static void compute_release_release(iree_task_process_t* process) {
+static void compute_release_and_free(iree_task_process_t* process) {
   auto* context = reinterpret_cast<ComputeReleaseContext*>(process->user_data);
   context->released.store(true, std::memory_order_release);
   context->Notify();
+  delete process;
 }
 
 // Context for a persistent wake_budget > 1 process that repeatedly goes idle
@@ -659,6 +668,7 @@ struct RepeatedComputeWakeContext : public TestWaiter {
   std::atomic<int32_t> active_drainers{0};
   std::atomic<bool> shutdown{false};
   std::atomic<bool> completed{false};
+  std::atomic<bool> released{false};
 };
 
 static iree_status_t repeated_compute_wake_drain(
@@ -702,6 +712,15 @@ static void repeated_compute_wake_completion(iree_task_process_t* process,
   iree_status_free(status);
   context->completed.store(true, std::memory_order_release);
   context->Notify();
+}
+
+static void repeated_compute_wake_release_and_free(
+    iree_task_process_t* process) {
+  auto* context =
+      reinterpret_cast<RepeatedComputeWakeContext*>(process->user_data);
+  context->released.store(true, std::memory_order_release);
+  context->Notify();
+  delete process;
 }
 
 // Context for a compute process that first publishes a shared keep-active
@@ -851,18 +870,18 @@ TEST(ExecutorProcessTest, ComputeSlotReleasePublishesProcessQuiescence) {
 
   ComputeReleaseContext context;
   context.job_count = kJobCount;
-  iree_task_process_t process;
   for (int batch = 0; batch < kBatchCount; ++batch) {
     context.next_job_ordinal.store(0, std::memory_order_relaxed);
     context.completed_job_count.store(0, std::memory_order_relaxed);
     context.released.store(false, std::memory_order_relaxed);
 
+    auto* process = new iree_task_process_t;
     iree_task_process_initialize(compute_release_drain, /*suspend_count=*/0,
-                                 /*wake_budget=*/kWorkerCount, &process);
-    process.completion_fn = compute_release_completion;
-    process.release_fn = compute_release_release;
-    process.user_data = &context;
-    iree_task_executor_schedule_process(executor, &process);
+                                 /*wake_budget=*/kWorkerCount, process);
+    process->completion_fn = compute_release_completion;
+    process->release_fn = compute_release_and_free;
+    process->user_data = &context;
+    iree_task_executor_schedule_process(executor, process);
 
     context.WaitUntil(
         [&] { return context.released.load(std::memory_order_acquire); });
@@ -876,24 +895,29 @@ TEST(ExecutorProcessTest, ComputeSlotReleasePublishesProcessQuiescence) {
 TEST(ExecutorProcessTest, ComputeSlotMultipleConcurrentProcesses) {
   iree_task_executor_t* executor = CreateExecutor(4);
 
-  static constexpr int kProcessCount = 8;
+  static constexpr int kProcessCount = 64;
   ComputeProcessContext contexts[kProcessCount];
-  iree_task_process_t processes[kProcessCount];
+  iree_task_process_t* processes[kProcessCount];
 
   for (int i = 0; i < kProcessCount; ++i) {
     contexts[i].tiles_remaining.store(50);
+    processes[i] = new iree_task_process_t;
     iree_task_process_initialize(compute_drain, 0, /*wake_budget=*/2,
-                                 &processes[i]);
-    processes[i].completion_fn = compute_completion;
-    processes[i].user_data = &contexts[i];
+                                 processes[i]);
+    processes[i]->completion_fn = compute_completion;
+    processes[i]->release_fn = compute_release_and_free_process;
+    processes[i]->user_data = &contexts[i];
   }
 
   for (int i = 0; i < kProcessCount; ++i) {
-    iree_task_executor_schedule_process(executor, &processes[i]);
+    iree_task_executor_schedule_process(executor, processes[i]);
   }
 
   for (int i = 0; i < kProcessCount; ++i) {
-    contexts[i].WaitUntil([&, i] { return contexts[i].completed.load(); });
+    contexts[i].WaitUntil([&, i] {
+      return contexts[i].completed.load(std::memory_order_acquire) &&
+             contexts[i].released.load(std::memory_order_acquire);
+    });
   }
 
   for (int i = 0; i < kProcessCount; ++i) {
@@ -978,25 +1002,25 @@ TEST(ExecutorProcessTest, ComputeSlotRepeatedSleepWakeCycles) {
   iree_task_executor_t* executor = CreateExecutor(4);
 
   RepeatedComputeWakeContext context;
-  iree_task_process_t process;
+  auto* process = new iree_task_process_t;
   iree_task_process_initialize(repeated_compute_wake_drain,
-                               /*suspend_count=*/0, /*wake_budget=*/4,
-                               &process);
-  process.completion_fn = repeated_compute_wake_completion;
-  process.user_data = &context;
+                               /*suspend_count=*/0, /*wake_budget=*/4, process);
+  process->completion_fn = repeated_compute_wake_completion;
+  process->release_fn = repeated_compute_wake_release_and_free;
+  process->user_data = &context;
 
-  iree_task_executor_schedule_process(executor, &process);
+  iree_task_executor_schedule_process(executor, process);
 
   static constexpr int kCycles = 500;
   for (int cycle = 0; cycle < kCycles; ++cycle) {
     SpinUntilInternalState([&] {
-      return iree_atomic_load(&process.schedule_state,
+      return iree_atomic_load(&process->schedule_state,
                               iree_memory_order_acquire) ==
              IREE_TASK_PROCESS_SCHEDULE_IDLE;
     });
 
     context.pending_work.fetch_add(1, std::memory_order_release);
-    iree_task_executor_schedule_process(executor, &process);
+    iree_task_executor_schedule_process(executor, process);
 
     context.WaitUntil([&] {
       return context.processed_work.load(std::memory_order_acquire) > cycle;
@@ -1004,16 +1028,18 @@ TEST(ExecutorProcessTest, ComputeSlotRepeatedSleepWakeCycles) {
   }
 
   SpinUntilInternalState([&] {
-    return iree_atomic_load(&process.schedule_state,
+    return iree_atomic_load(&process->schedule_state,
                             iree_memory_order_acquire) ==
            IREE_TASK_PROCESS_SCHEDULE_IDLE;
   });
 
   context.shutdown.store(true, std::memory_order_release);
-  iree_task_executor_schedule_process(executor, &process);
+  iree_task_executor_schedule_process(executor, process);
 
-  context.WaitUntil(
-      [&] { return context.completed.load(std::memory_order_acquire); });
+  context.WaitUntil([&] {
+    return context.completed.load(std::memory_order_acquire) &&
+           context.released.load(std::memory_order_acquire);
+  });
   EXPECT_EQ(context.processed_work.load(std::memory_order_acquire), kCycles);
 
   iree_task_executor_release(executor);

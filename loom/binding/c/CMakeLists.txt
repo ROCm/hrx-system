@@ -40,6 +40,7 @@ loom_cc_library(
     "include/loomc/source.h"
     "include/loomc/status.h"
     "include/loomc/target.h"
+    "include/loomc/task.h"
     "include/loomc/workspace.h"
     "src/config.h"
     "src/context.h"
@@ -89,6 +90,7 @@ loom_cc_library(
     "src/source.c"
     "src/status.c"
     "src/target.c"
+    "src/task.c"
     "src/workspace.c"
   DEPS
     iree::base
@@ -199,6 +201,7 @@ loom_cc_library(
     "include/loomc/target/spirv/profile.h"
     "include/loomc/target/spirv/vulkan.h"
     "include/loomc/target/spirv/vulkaninfo.h"
+    "include/loomc/task.h"
     "include/loomc/workspace.h"
   DEPS
     ::loomc
@@ -214,6 +217,47 @@ loom_cc_library(
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>"
   PUBLIC
 )
+endif()
+
+if(IREE_TARGET_HAS_THREADS)
+
+loom_cc_library(
+  NAME
+    task_pool
+  HDRS
+    "include/loomc/iree/task_pool.h"
+    "include/loomc/task_pool.h"
+  SRCS
+    "src/task_pool.c"
+  DEPS
+    ::loomc
+    iree::base
+    iree::task
+  INCLUDES
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>"
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    task_queue
+  HDRS
+    "include/loomc/task_queue.h"
+  SRCS
+    "src/task_queue.c"
+  DEPS
+    ::loomc
+    ::task_pool
+    iree::base
+    iree::base::threading
+    iree::task
+  INCLUDES
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>"
+  PUBLIC
+)
+
 endif()
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
