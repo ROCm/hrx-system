@@ -6,11 +6,78 @@
 
 # bazel-to-cmake: skip
 
+load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
+load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
+load("//runtime/build_tools/bazel:hal_driver.bzl", "iree_hal_driver_module", "iree_hal_driver_registry")
 load(":cc_benchmark_rules_test.bzl", "cc_benchmark_rules_test_suite")
 load(":cc_fuzz_rules_test.bzl", "cc_fuzz_rules_test_suite")
 load(":cc_rules_test.bzl", "cc_rules_test_suite")
 
 package(default_visibility = ["//visibility:public"])
+
+iree_runtime_cc_library(
+    name = "hal_driver_registration_fixture",
+    testonly = True,
+    srcs = ["hal_driver_registration_fixture.c"],
+    hdrs = ["hal_driver_registration_fixture.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_hal_driver_module(
+    name = "hal_driver_alpha_module",
+    testonly = True,
+    registration = ":hal_driver_registration_fixture",
+    registration_function = "iree_hal_driver_registration_fixture_alpha",
+    registration_header = "runtime/build_tools/bazel/test/hal_driver_registration_fixture.h",
+)
+
+iree_hal_driver_module(
+    name = "hal_driver_beta_module",
+    testonly = True,
+    registration = ":hal_driver_registration_fixture",
+    registration_function = "iree_hal_driver_registration_fixture_beta",
+    registration_header = "runtime/build_tools/bazel/test/hal_driver_registration_fixture.h",
+)
+
+iree_hal_driver_module(
+    name = "hal_driver_gamma_module",
+    testonly = True,
+    registration = ":hal_driver_registration_fixture",
+    registration_function = "iree_hal_driver_registration_fixture_gamma",
+    registration_header = "runtime/build_tools/bazel/test/hal_driver_registration_fixture.h",
+)
+
+iree_hal_driver_registry(
+    name = "hal_driver_registry_fixture",
+    testonly = True,
+    modules = [
+        ":hal_driver_alpha_module",
+        ":hal_driver_beta_module",
+        ":hal_driver_gamma_module",
+    ],
+)
+
+label_flag(
+    name = "selected_hal_driver_registry_fixture",
+    testonly = True,
+    build_setting_default = ":hal_driver_registry_fixture",
+)
+
+iree_runtime_cc_test(
+    name = "hal_driver_test",
+    srcs = ["hal_driver_test.cc"],
+    deps = [
+        ":hal_driver_registration_fixture",
+        ":selected_hal_driver_registry_fixture",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers:external_registry_api",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
 
 cc_benchmark_rules_test_suite(name = "cc_benchmark_tests")
 

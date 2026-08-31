@@ -397,7 +397,7 @@ iree_select_compiler_opts(IREE_DEFAULT_LINKOPTS
     ${_IREE_LOGGING_LINKOPTS}
 )
 
-if(EMSCRIPTEN AND IREE_EXTERNAL_WEBGPU_HAL_DRIVER_FOUND)
+if(EMSCRIPTEN AND IREE_HAL_DRIVER_WEBGPU)
   iree_select_compiler_opts(IREE_DEFAULT_LINKOPTS
     ALL
       # TODO(scotttodd): Only add when using WebGPU in a library/binary?

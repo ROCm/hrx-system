@@ -39,6 +39,13 @@ string_list_flag(
     build_setting_default = DEFAULT_DRIVERS,
 )
 
+# External applications replace this empty registry with a generated aggregate
+# containing the driver modules they explicitly compose into their binary.
+label_flag(
+    name = "external_driver_registry",
+    build_setting_default = "//runtime/src/iree/hal/drivers:empty_external_driver_registry",
+)
+
 [
     config_setting(
         name = "driver_{}".format(driver.replace("-", "_")),
