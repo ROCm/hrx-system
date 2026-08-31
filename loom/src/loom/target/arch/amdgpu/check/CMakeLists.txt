@@ -21,7 +21,6 @@ loom_cc_library(
     iree::base
     loom::target::reporting::report
     loom::tools::loom-check::execute
-  TESTONLY
   PUBLIC
 )
 endif()
@@ -40,7 +39,6 @@ loom_cc_library(
     loom::target::arch::amdgpu::planning::occupancy
     loom::target::arch::amdgpu::planning::storage_lease
     loom::tools::loom-check::execute
-  TESTONLY
   PUBLIC
 )
 endif()
@@ -60,7 +58,6 @@ loom_cc_library(
     loom::target::arch::amdgpu::provider
     loom::target::emit::native::amdgpu::loom_check
     loom::tools::loom-check::provider
-  TESTONLY
   PUBLIC
 )
 endif()

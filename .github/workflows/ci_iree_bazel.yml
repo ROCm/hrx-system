@@ -444,3 +444,111 @@ jobs:
           path: ${{ runner.temp }}/bazel-profiles/*.profile.gz
           if-no-files-found: error
           compression-level: 0
+
+  linux_bazel_amdgpu_binary_analysis:
+    name: Linux / AMDGPU / Binary Analysis
+    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
+    runs-on: azure-linux-scale-rocm
+    timeout-minutes: 30
+    container:
+      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:702a5133851e6d1daf1207d2c9fbb01c2667914a5b6dc5a01faeb3ce66ea6421
+    concurrency:
+      group: iree-bazel-binary-analysis-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    permissions:
+      actions: read
+      contents: read
+    env:
+      AR: ${{ github.workspace }}/build/iree-bazel-binary-analysis/rocm-root/lib/llvm/bin/llvm-ar
+      BINARY_ANALYSIS_ENVIRONMENT_ID: therock-manylinux-x86_64-sha256-702a5133851e6d1daf1207d2c9fbb01c2667914a5b6dc5a01faeb3ce66ea6421
+      CC: ${{ github.workspace }}/build/iree-bazel-binary-analysis/rocm-root/lib/llvm/bin/clang
+      CXX: ${{ github.workspace }}/build/iree-bazel-binary-analysis/rocm-root/lib/llvm/bin/clang++
+      HRX_ARTIFACT_SET: core-with-llvm-dev
+      HRX_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}/build/iree-bazel-binary-analysis/downloads
+      HRX_OUTPUT_DIR: ${{ github.workspace }}/build/iree-bazel-binary-analysis
+      HRX_PYTHON: ${{ github.workspace }}/build/iree-bazel-binary-analysis/python/bin/python3
+      HRX_RELEASE_TYPE: nightly
+      HRX_ROCM_ROOT: ${{ github.workspace }}/build/iree-bazel-binary-analysis/rocm-root
+      PIP_CACHE_DIR: ${{ github.workspace }}/build/iree-bazel-binary-analysis/caches/pip
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Adjust git config
+        run: git config --global --add safe.directory "$PWD"
+
+      - name: Fetch ROCm LLVM toolchain
+        run: bash .github/scripts/fetch_rocm_toolchain.sh
+
+      - name: Install developer tools
+        run: |
+          python3 --version
+          python3 dev.py bazel setup --venv
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Check toolchain
+        run: |
+          python3 dev.py bazel doctor
+          bash .github/scripts/check_host_toolchain.sh --expect-rocm
+          "${HRX_ROCM_ROOT}/lib/llvm/bin/llvm-readobj" --version
+          "${HRX_ROCM_ROOT}/lib/llvm/bin/llvm-strip" --version
+
+      - name: Recover Loom product-size history
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
+          CURRENT_MAIN_SHA: ${{ github.ref == 'refs/heads/main' && github.sha || '' }}
+          GITHUB_TOKEN: ${{ github.token }}
+          SIZE_WORK_DIR: build/iree-bazel-binary-analysis/loom-size/work
+        run: |
+          args=(
+            --repo-root "$PWD"
+            --repository "${GITHUB_REPOSITORY}"
+            --anchor "${BASE_SHA}"
+            --output "${SIZE_WORK_DIR}/baseline.json"
+          )
+          if [[ -n "${CURRENT_MAIN_SHA}" ]]; then
+            args+=(--exclude-commit "${CURRENT_MAIN_SHA}")
+          fi
+          python3 build_tools/ci/loom_binary_size.py fetch-history "${args[@]}"
+
+      - name: Build and measure Loom products
+        env:
+          SIZE_WORK_DIR: build/iree-bazel-binary-analysis/loom-size/work
+        run: |
+          python3 build_tools/ci/loom_binary_size.py collect \
+            --repo-root "$PWD" \
+            --output-dir "${SIZE_WORK_DIR}" \
+            --llvm-bin "${HRX_ROCM_ROOT}/lib/llvm/bin" \
+            --environment-id "${BINARY_ANALYSIS_ENVIRONMENT_ID}" \
+            --commit "${GITHUB_SHA}" \
+            --repository "${GITHUB_REPOSITORY}" \
+            --ref "${GITHUB_REF_NAME}" \
+            --run-id "${GITHUB_RUN_ID}"
+
+      - name: Render Loom product-size history
+        env:
+          SIZE_RECORD_DIR: build/iree-bazel-binary-analysis/loom-size/record
+          SIZE_WORK_DIR: build/iree-bazel-binary-analysis/loom-size/work
+          UPDATE_MAIN: ${{ github.ref == 'refs/heads/main' && '1' || '' }}
+        run: |
+          args=(
+            --current "${SIZE_WORK_DIR}/current.json"
+            --baseline "${SIZE_WORK_DIR}/baseline.json"
+            --output-dir "${SIZE_RECORD_DIR}"
+          )
+          if [[ -n "${UPDATE_MAIN}" ]]; then
+            args+=(--update-main)
+          fi
+          python3 build_tools/ci/loom_binary_size.py report "${args[@]}"
+          cat "${SIZE_RECORD_DIR}/summary.md" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload Loom product-size record
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ github.ref == 'refs/heads/main' && 'loom-binary-size-history-main-v1' || format('loom-binary-size-candidate-{0}', github.run_id) }}
+          path: build/iree-bazel-binary-analysis/loom-size/record/
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 45

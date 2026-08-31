@@ -196,7 +196,6 @@ loom_cc_library(
     loom::target::tool::llvm
     loom::tools::loom-check::execute
     loom::util::stream
-  TESTONLY
   PUBLIC
 )
 endif()

@@ -49,7 +49,6 @@ loom_cc_library(
     ::assembly
     iree::base
     loom::tools::loom-check::execute
-  TESTONLY
   PUBLIC
 )
 endif()

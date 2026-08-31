@@ -14,7 +14,6 @@ package(
 
 loom_cc_library(
     name = "program_plan",
-    testonly = True,
     srcs = ["program_plan.c"],
     hdrs = ["program_plan.h"],
     deps = [
@@ -37,7 +36,6 @@ loom_cc_library(
 
 loom_cc_library(
     name = "check_provider",
-    testonly = True,
     srcs = ["provider.c"],
     hdrs = ["provider.h"],
     visibility = ["//loom/src/loom/tools/loom-check:__pkg__"],

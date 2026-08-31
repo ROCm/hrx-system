@@ -227,7 +227,7 @@ TEST_F(JsonOutputTest, SinglePassingCase) {
 TEST_F(JsonOutputTest, SkippedCase) {
   auto file = Parse(
       "// RUN: roundtrip\n"
-      "// REQUIRES: loom-check-test-unavailable\n"
+      "// REQUIRES: fake-target\n"
       "func.def @f() {\n"
       "}\n");
 
@@ -246,7 +246,7 @@ TEST_F(JsonOutputTest, SkippedCase) {
       LookupObject(test_case, IREE_SV("requirements"));
   ExpectArrayLength(requirements, 1);
   EXPECT_TRUE(iree_string_view_equal(LookupArrayElement(requirements, 0),
-                                     IREE_SV("loom-check-test-unavailable")));
+                                     IREE_SV("fake-target")));
   ExpectObjectValueEquals(test_case, IREE_SV("raw_outcome"), IREE_SV("skip"));
   ExpectObjectValueEquals(test_case, IREE_SV("final_outcome"), IREE_SV("skip"));
   ExpectObjectUint64Equals(LookupObject(root, IREE_SV("summary")),

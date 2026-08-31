@@ -72,6 +72,34 @@ loom_cc_binary(
 )
 endif()
 
+loom_module(
+  NAME
+    targetless_store_i32_bytecode
+  SRCS
+    "targetless_store_i32.loom"
+  MODE
+    "merge"
+  OUTPUT
+    "targetless_store_i32_bytecode.loombc"
+  OUTPUT_FORMAT
+    "bc"
+)
+
+iree_c_embed_data(
+  NAME
+    targetless_store_i32_bytecode_data
+  SRCS
+    "${CMAKE_CURRENT_BINARY_DIR}/targetless_store_i32_bytecode.loombc"
+  C_FILE_OUTPUT
+    "targetless_store_i32_bytecode.c"
+  H_FILE_OUTPUT
+    "targetless_store_i32_bytecode.h"
+  IDENTIFIER
+    "loomc_example_targetless_store_i32_bytecode"
+  FLATTEN
+  PUBLIC
+)
+
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
 loom_cc_binary(
   NAME
@@ -79,6 +107,7 @@ loom_cc_binary(
   SRCS
     "emit_amdgpu_offline.c"
   DEPS
+    ::targetless_store_i32_bytecode_data
     loom::binding::c::loomc
     loom::binding::c::target::amdgpu
 )
@@ -145,14 +174,11 @@ loom_cc_binary(
 endif()
 
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
-loom_cc_test(
+iree_native_test(
   NAME
-    emit_amdgpu_offline_test
-  SRCS
-    "emit_amdgpu_offline.c"
-  DEPS
-    loom::binding::c::loomc
-    loom::binding::c::target::amdgpu
+    "emit_amdgpu_offline_test"
+  SRC
+    ::emit_amdgpu_offline
 )
 endif()
 

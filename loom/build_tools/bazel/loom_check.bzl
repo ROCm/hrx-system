@@ -103,7 +103,7 @@ _loom_check_executable = rule(
         "runner": attr.label(
             allow_files = True,
             cfg = "target",
-            default = "//loom/src/loom/tools/loom-check:loom-check",
+            default = "//loom/src/loom/tools/loom-check:loom-check-test",
             doc = "loom-check compatible runner binary.",
             executable = True,
         ),
@@ -124,7 +124,7 @@ def loom_check_test(
         tags = [],
         data = [],
         env = {},
-        runner = "//loom/src/loom/tools/loom-check:loom-check",
+        runner = "//loom/src/loom/tools/loom-check:loom-check-test",
         **kwargs):
     """Creates a test that runs a single .loom-test file through loom-check.
 
@@ -174,7 +174,7 @@ def loom_check_test_suite(
         tags = [],
         data = [],
         env = {},
-        runner = "//loom/src/loom/tools/loom-check:loom-check",
+        runner = "//loom/src/loom/tools/loom-check:loom-check-test",
         test_name_prefix_to_strip = "",
         **kwargs):
     """Creates one test per .loom-test file, bundled into a test suite.

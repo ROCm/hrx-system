@@ -22,7 +22,6 @@ loom_cc_library(
     loom::target::arch::x86::provider
     loom::target::emit::native::x86::loom_check
     loom::tools::loom-check::provider
-  TESTONLY
   PUBLIC
 )
 endif()

@@ -20,7 +20,6 @@ loom_cc_library(
     iree::base
     iree::base::internal::arena
     loom::error::error_defs
-  TESTONLY
   PUBLIC
 )
 
@@ -37,7 +36,6 @@ loom_cc_library(
     loom::target::low_descriptor_registry
     loom::util::json
     loom::util::stream
-  TESTONLY
   PUBLIC
 )
 
@@ -117,7 +115,6 @@ loom_cc_library(
     loom::util::json
     loom::util::stream
     loom::verify
-  TESTONLY
   PUBLIC
 )
 
@@ -150,7 +147,6 @@ loom_cc_library(
     ::check
     iree::base
     iree::base::internal::arena
-  TESTONLY
   PUBLIC
 )
 
@@ -199,7 +195,6 @@ loom_cc_library(
   DEPS
     ::check
     iree::base
-  TESTONLY
   PUBLIC
 )
 
@@ -218,7 +213,6 @@ loom_cc_library(
     loom::ir
     loom::link::linker
     loom::ops::op_defs
-  TESTONLY
   PUBLIC
 )
 
@@ -271,7 +265,6 @@ loom_cc_library(
     iree::base
     loom::util::json
     loom::util::stream
-  TESTONLY
   PUBLIC
 )
 
@@ -287,7 +280,6 @@ loom_cc_library(
     ::execute
     iree::base
     iree::base::core_headers
-  TESTONLY
   PUBLIC
 )
 
@@ -313,7 +305,6 @@ loom_cc_library(
     loom::tooling::io::file
     loom::tooling::io::source_path
     loom::util::stream
-  TESTONLY
   PUBLIC
 )
 
@@ -350,7 +341,6 @@ loom_cc_library(
     iree::base::internal::arena
     iree::base::tooling::flags
     loom::tooling::cli::help
-  TESTONLY
   PUBLIC
 )
 
@@ -366,7 +356,6 @@ loom_cc_library(
     iree::base
     loom::target::provider
     loom::tooling::context
-  TESTONLY
   PUBLIC
 )
 
@@ -398,7 +387,6 @@ loom_cc_library(
     iree::base
     loom::target::emit::llvmir::loom_check
     ${_llvmir_provider_platform_deps}
-  TESTONLY
   PUBLIC
 )
 
@@ -500,10 +488,75 @@ loom_cc_binary(
     ${_loom_check_platform_copts}
   DEPS
     ::provider
-    ::test_provider
     iree::base
     loom::target::arch::cmd::check::check_provider
     ${_loom_check_platform_deps}
+)
+
+set(_loom_check_test_platform_copts "")
+if(LOOM_EMIT_AMDGPU)
+  list(APPEND _loom_check_test_platform_copts "-DLOOM_CHECK_HAVE_EMIT_AMDGPU=1")
+endif()
+if(LOOM_TARGET_ARCH_LLVMIR)
+  list(APPEND _loom_check_test_platform_copts "-DLOOM_CHECK_HAVE_TARGET_LLVMIR=1")
+endif()
+if(LOOM_EMIT_LLVMIR)
+  list(APPEND _loom_check_test_platform_copts "-DLOOM_CHECK_HAVE_EMIT_LLVMIR=1")
+endif()
+if(LOOM_TARGET_ARCH_SPIRV)
+  list(APPEND _loom_check_test_platform_copts "-DLOOM_CHECK_HAVE_TARGET_SPIRV=1")
+endif()
+if(LOOM_EMIT_SPIRV)
+  list(APPEND _loom_check_test_platform_copts "-DLOOM_CHECK_HAVE_EMIT_SPIRV=1")
+endif()
+if(LOOM_TARGET_ARCH_WASM)
+  list(APPEND _loom_check_test_platform_copts "-DLOOM_CHECK_HAVE_TARGET_WASM=1")
+endif()
+if(LOOM_EMIT_WASM)
+  list(APPEND _loom_check_test_platform_copts "-DLOOM_CHECK_HAVE_EMIT_WASM=1")
+endif()
+if(LOOM_TARGET_ARCH_X86)
+  list(APPEND _loom_check_test_platform_copts "-DLOOM_CHECK_HAVE_TARGET_X86=1")
+endif()
+set(_loom_check_test_platform_deps "")
+if(LOOM_EMIT_AMDGPU)
+  list(APPEND _loom_check_test_platform_deps loom::target::arch::amdgpu::check::provider)
+endif()
+if(LOOM_TARGET_ARCH_LLVMIR)
+  list(APPEND _loom_check_test_platform_deps loom::target::arch::llvmir::check::check_provider)
+endif()
+if(LOOM_EMIT_LLVMIR)
+  list(APPEND _loom_check_test_platform_deps ::llvmir_provider)
+endif()
+if(LOOM_TARGET_ARCH_SPIRV)
+  list(APPEND _loom_check_test_platform_deps loom::target::arch::spirv::check::check_provider)
+endif()
+if(LOOM_EMIT_SPIRV)
+  list(APPEND _loom_check_test_platform_deps loom::target::emit::spirv::check_provider)
+endif()
+if(LOOM_TARGET_ARCH_WASM)
+  list(APPEND _loom_check_test_platform_deps loom::target::arch::wasm::check::check_provider)
+endif()
+if(LOOM_EMIT_WASM)
+  list(APPEND _loom_check_test_platform_deps loom::target::emit::wasm::check_provider)
+endif()
+if(LOOM_TARGET_ARCH_X86)
+  list(APPEND _loom_check_test_platform_deps loom::target::arch::x86::check::check_provider)
+endif()
+loom_cc_binary(
+  NAME
+    loom-check-test
+  SRCS
+    "loom-check.c"
+  COPTS
+    "-DLOOM_CHECK_HAVE_TEST_PROVIDER=1"
+    ${_loom_check_test_platform_copts}
+  DEPS
+    ::provider
+    ::test_provider
+    iree::base
+    loom::target::arch::cmd::check::check_provider
+    ${_loom_check_test_platform_deps}
   TESTONLY
 )
 

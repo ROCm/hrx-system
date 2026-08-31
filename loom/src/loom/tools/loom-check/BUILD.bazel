@@ -176,7 +176,6 @@ _LOOM_CHECK_PROVIDER_DEPS = (
 
 loom_cc_library(
     name = "check",
-    testonly = True,
     srcs = ["check.c"],
     hdrs = ["check.h"],
     deps = [
@@ -188,7 +187,6 @@ loom_cc_library(
 
 loom_cc_library(
     name = "target_low_registry_manifest",
-    testonly = True,
     srcs = ["target_low_registry_manifest.c"],
     hdrs = ["target_low_registry_manifest.h"],
     deps = [
@@ -202,7 +200,6 @@ loom_cc_library(
 
 loom_cc_library(
     name = "execute",
-    testonly = True,
     srcs = [
         "diagnostics.c",
         "emit.c",
@@ -298,7 +295,6 @@ loom_cc_library(
 
 loom_cc_library(
     name = "report",
-    testonly = True,
     srcs = ["report.c"],
     hdrs = ["report.h"],
     deps = [
@@ -343,7 +339,6 @@ loom_cc_test(
 
 loom_cc_library(
     name = "update",
-    testonly = True,
     srcs = ["update.c"],
     hdrs = ["update.h"],
     deps = [
@@ -354,7 +349,6 @@ loom_cc_library(
 
 loom_cc_library(
     name = "template_sync",
-    testonly = True,
     srcs = ["template_sync.c"],
     hdrs = ["template_sync.h"],
     deps = [
@@ -402,7 +396,6 @@ loom_cc_test(
 
 loom_cc_library(
     name = "json_output",
-    testonly = True,
     srcs = ["json_output.c"],
     hdrs = ["json_output.h"],
     deps = [
@@ -418,7 +411,6 @@ loom_cc_library(
 
 loom_cc_library(
     name = "output",
-    testonly = True,
     srcs = ["output.c"],
     hdrs = ["output.h"],
     deps = [
@@ -431,7 +423,6 @@ loom_cc_library(
 
 loom_cc_library(
     name = "file",
-    testonly = True,
     srcs = ["file.c"],
     hdrs = ["file.h"],
     deps = [
@@ -470,7 +461,6 @@ loom_cc_test(
 
 loom_cc_library(
     name = "main",
-    testonly = True,
     srcs = ["main.c"],
     hdrs = ["main.h"],
     deps = [
@@ -487,7 +477,6 @@ loom_cc_library(
 
 loom_cc_library(
     name = "provider",
-    testonly = True,
     srcs = ["provider.c"],
     hdrs = ["provider.h"],
     deps = [
@@ -500,7 +489,6 @@ loom_cc_library(
 
 loom_cc_library(
     name = "llvmir_provider",
-    testonly = True,
     srcs = ["llvmir_provider.c"],
     hdrs = ["llvmir_provider.h"],
     copts = _LLVMIR_AMDGPU_TARGET_ENV_COPTS + _LLVMIR_X86_TARGET_ENV_COPTS,
@@ -548,9 +536,20 @@ loom_cc_test(
 
 loom_cc_binary(
     name = "loom-check",
-    testonly = True,
     srcs = ["loom-check.c"],
     copts = _LOOM_CHECK_PROVIDER_COPTS,
+    deps = [
+        ":provider",
+        "//loom/src/loom/target/arch/cmd/check:check_provider",
+        "//runtime/src/iree/base",
+    ] + _LOOM_CHECK_PROVIDER_DEPS,
+)
+
+loom_cc_binary(
+    name = "loom-check-test",
+    testonly = True,
+    srcs = ["loom-check.c"],
+    copts = ["-DLOOM_CHECK_HAVE_TEST_PROVIDER=1"] + _LOOM_CHECK_PROVIDER_COPTS,
     deps = [
         ":provider",
         ":test_provider",

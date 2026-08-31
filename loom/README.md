@@ -200,7 +200,7 @@ need different compositions:
 The AMDGPU examples show the target-profile and HSACO emission side of the C
 API.
 
-Offline synthetic AMDGPU processor profile:
+Offline synthetic AMDGPU processor profile compiling packaged Loom bytecode:
 
 ```bash
 python dev.py bazel run //loom/binding/c/example:emit_amdgpu_offline -- \
@@ -209,7 +209,10 @@ python dev.py bazel run //loom/binding/c/example:emit_amdgpu_offline -- \
 ```
 
 The generic target emits a portable GFX11 code object. Pass `gfx1151` instead
-when the artifact should be specialized for that exact processor.
+when the artifact should be specialized for that exact processor. The example
+build packages `targetless_store_i32.loom` as bytecode and invokes LoomC's
+bytecode-specific deserializer, matching a kernel library that ships
+precompiled Loom modules instead of source text.
 
 Raw HSA probing, HSACO emission, code-object loading, and one kernel dispatch
 without the IREE HAL:

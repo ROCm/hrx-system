@@ -16,7 +16,6 @@ _LOOM_CHECK_FULL_VISIBILITY = ["//loom/src/loom/tools/loom-check:__pkg__"]
 
 loom_cc_library(
     name = "check_provider",
-    testonly = True,
     srcs = ["provider.c"],
     hdrs = ["provider.h"],
     visibility = _LOOM_CHECK_FULL_VISIBILITY,

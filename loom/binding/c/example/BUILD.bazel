@@ -5,6 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//build_tools/bazel:executable.bzl", "iree_executable_test")
+load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
 load("//build_tools/sanitizer:suppressions.bzl", "vulkan_suppressions")
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
@@ -12,6 +13,7 @@ load(
     "loom_cc_test",
     "loom_config_compatible_with",
 )
+load("//loom/build_tools/bazel:defs.bzl", "loom_module")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -90,11 +92,29 @@ loom_cc_binary(
     ],
 )
 
+loom_module(
+    name = "targetless_store_i32_bytecode",
+    srcs = ["targetless_store_i32.loom"],
+    output_format = "bc",
+    visibility = ["//visibility:private"],
+)
+
+iree_c_embed_data(
+    name = "targetless_store_i32_bytecode_data",
+    srcs = [":targetless_store_i32_bytecode"],
+    c_file_output = "targetless_store_i32_bytecode.c",
+    flatten = True,
+    h_file_output = "targetless_store_i32_bytecode.h",
+    identifier = "loomc_example_targetless_store_i32_bytecode",
+    visibility = ["//visibility:private"],
+)
+
 loom_cc_binary(
     name = "emit_amdgpu_offline",
     srcs = ["emit_amdgpu_offline.c"],
     target_compatible_with = LOOMC_TARGET_AMDGPU_COMPATIBLE_WITH,
     deps = [
+        ":targetless_store_i32_bytecode_data",
         "//loom/binding/c:loomc",
         "//loom/binding/c/target/amdgpu",
     ],
@@ -152,14 +172,10 @@ loom_cc_binary(
     ],
 )
 
-loom_cc_test(
+iree_executable_test(
     name = "emit_amdgpu_offline_test",
-    srcs = ["emit_amdgpu_offline.c"],
+    src = ":emit_amdgpu_offline",
     target_compatible_with = LOOMC_TARGET_AMDGPU_COMPATIBLE_WITH,
-    deps = [
-        "//loom/binding/c:loomc",
-        "//loom/binding/c/target/amdgpu",
-    ],
 )
 
 loom_cc_test(

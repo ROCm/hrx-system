@@ -9,23 +9,9 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "loom/binding/c/example/targetless_store_i32_bytecode.h"
 #include "loomc/loomc.h"
 #include "loomc/target/amdgpu.h"
-
-static const char kSourceText[] =
-    "kernel.def export(\"targetless_store_i32\") @targetless_store_i32() {\n"
-    "  %unit = index.constant 1 : index\n"
-    "  kernel.launch.config workgroups(%unit, %unit, %unit) "
-    "workgroup_size(%unit, %unit, %unit) : index\n"
-    "} launch(%output: buffer) {\n"
-    "  %zero_offset = index.constant 0 : offset\n"
-    "  %zero_index = index.constant 0 : index\n"
-    "  %value = scalar.constant 42 : i32\n"
-    "  %global = buffer.assume.memory_space<global> %output : buffer\n"
-    "  %view = buffer.view %global[%zero_offset] : buffer -> view<1xi32>\n"
-    "  view.store %value, %view[%zero_index] : i32, view<1xi32>\n"
-    "  kernel.return\n"
-    "}\n";
 
 typedef struct emit_amdgpu_offline_state_t {
   // AMDGPU target selector, such as `gfx11-generic`, `gfx1250-a0`, or
@@ -183,12 +169,15 @@ static loomc_status_t create_workspace_and_source(
     emit_amdgpu_offline_state_t* state) {
   loomc_status_t status =
       loomc_workspace_create(NULL, loomc_allocator_system(), &state->workspace);
+  const iree_file_toc_t* bytecode_file =
+      loomc_example_targetless_store_i32_bytecode_create();
   loomc_source_options_t source_options = {
       .type = LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
       .structure_size = sizeof(source_options),
-      .format = LOOMC_SOURCE_FORMAT_TEXT,
-      .identifier = loomc_make_cstring_view("targetless_store_i32.loom"),
-      .contents = loomc_make_byte_span(kSourceText, sizeof(kSourceText) - 1),
+      .format = LOOMC_SOURCE_FORMAT_BYTECODE,
+      .identifier = loomc_make_cstring_view(bytecode_file->name),
+      .contents =
+          loomc_make_byte_span(bytecode_file->data, bytecode_file->size),
       .storage = LOOMC_SOURCE_STORAGE_BORROWED,
   };
   if (loomc_status_is_ok(status)) {
@@ -257,7 +246,7 @@ static loomc_status_t create_resources(emit_amdgpu_offline_state_t* state) {
 }
 
 static loomc_status_t deserialize_source(emit_amdgpu_offline_state_t* state) {
-  loomc_status_t status = loomc_module_deserialize_from_source(
+  loomc_status_t status = loomc_module_deserialize_bytecode_from_source(
       state->context, state->workspace, state->source, NULL,
       loomc_allocator_system(), &state->module, &state->result);
   if (loomc_status_is_ok(status)) {
