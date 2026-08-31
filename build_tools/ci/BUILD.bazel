@@ -29,3 +29,12 @@ py_test(
     ],
     main = "ci_core_windows_test.py",
 )
+
+py_test(
+    name = "loom_binary_size_test",
+    srcs = [
+        "loom_binary_size.py",
+        "loom_binary_size_test.py",
+    ],
+    main = "loom_binary_size_test.py",
+)
