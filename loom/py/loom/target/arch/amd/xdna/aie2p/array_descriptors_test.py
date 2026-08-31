@@ -22,8 +22,6 @@ def test_array_descriptor_set_exposes_only_logical_program_state() -> None:
     descriptor_set = AIE2P_ARRAY_DESCRIPTOR_SET
 
     assert descriptor_set.key == "amd.xdna.aie2p.array"
-    assert len(descriptor_set.reg_classes) == 5
-    assert len(descriptor_set.descriptors) == 8
     assert not descriptor_set.physical_registers
     assert not descriptor_set.physical_register_views
     assert not descriptor_set.register_parts

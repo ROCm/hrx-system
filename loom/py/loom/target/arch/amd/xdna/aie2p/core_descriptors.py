@@ -724,6 +724,14 @@ _DESCRIPTOR_SPECS = (
         asm_mnemonic="mov.static-byte-offset",
     ),
     _DescriptorSpec(
+        "MOVXM",
+        f"{_TARGET_KEY}.materialize.local-address.i32",
+        "memory.materialize.local-address.i32",
+        "II_MOVXM_eP",
+        (("dst", "eP"),),
+        asm_mnemonic="mov.local-address",
+    ),
+    _DescriptorSpec(
         "MOV_alu_mv_mv_mv_scl",
         f"{_TARGET_KEY}.move.scalar",
         "register.move.scalar",
@@ -993,6 +1001,17 @@ def _storage_unit_count(source: str, target: str) -> int:
     return source_bits // target_bits
 
 
+def _is_ordered_candidate_subset(source: str, target: str) -> bool:
+    source_candidates = _MACHINE_CLASSES[source].candidates
+    target_candidates = _MACHINE_CLASSES[target].candidates
+    selected_candidates = tuple(
+        candidate
+        for candidate in source_candidates
+        if candidate in set(target_candidates)
+    )
+    return selected_candidates == target_candidates
+
+
 def _aggregate_register_units(
     source_class_name: str,
     target_class_name: str,
@@ -1070,7 +1089,13 @@ def _operand_storage_machine_class(
     target = _MACHINE_CLASSES[low_class]
     has_register_projection = operand.name in register_parts
     unit_count = (
-        1 if has_register_projection else _storage_unit_count(machine_class, low_class)
+        1
+        if has_register_projection
+        or (
+            operand.name in storage_overrides
+            and _is_ordered_candidate_subset(machine_class, low_class)
+        )
+        else _storage_unit_count(machine_class, low_class)
     )
     if unit_count == 1:
         selected_candidates = tuple(
@@ -1168,10 +1193,16 @@ def _operand_unit_count(spec: _DescriptorSpec, operand: MachineOperand) -> int:
     )
     if operand.name in register_parts:
         return 1
-    return _storage_unit_count(
-        _operand_machine_class(operand),
-        _operand_storage_machine_class(spec, operand),
+    machine_class = _operand_machine_class(operand)
+    storage_class = _operand_storage_machine_class(spec, operand)
+    storage_overrides = _operand_override_map(
+        spec, spec.storage_overrides, "storage overrides"
     )
+    if operand.name in storage_overrides and _is_ordered_candidate_subset(
+        machine_class, storage_class
+    ):
+        return 1
+    return _storage_unit_count(machine_class, storage_class)
 
 
 def _low_register_class_name(machine_class: str) -> str:
