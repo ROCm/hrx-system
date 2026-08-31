@@ -40,6 +40,7 @@ loom_cc_library(
     "include/loomc/source.h"
     "include/loomc/status.h"
     "include/loomc/target.h"
+    "include/loomc/task.h"
     "include/loomc/workspace.h"
     "src/config.h"
     "src/context.h"
@@ -89,6 +90,7 @@ loom_cc_library(
     "src/source.c"
     "src/status.c"
     "src/target.c"
+    "src/task.c"
     "src/workspace.c"
   DEPS
     iree::base
@@ -199,6 +201,7 @@ loom_cc_library(
     "include/loomc/target/spirv/profile.h"
     "include/loomc/target/spirv/vulkan.h"
     "include/loomc/target/spirv/vulkaninfo.h"
+    "include/loomc/task.h"
     "include/loomc/workspace.h"
   DEPS
     ::loomc

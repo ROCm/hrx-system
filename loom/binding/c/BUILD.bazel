@@ -48,6 +48,7 @@ LOOMC_PUBLIC_HDRS = [
     "include/loomc/sanitizer.h",
     "include/loomc/source.h",
     "include/loomc/status.h",
+    "include/loomc/task.h",
     "include/loomc/target.h",
     "include/loomc/workspace.h",
 ]
@@ -152,6 +153,7 @@ loom_cc_library(
         "src/source.c",
         "src/status.c",
         "src/target.c",
+        "src/task.c",
         "src/workspace.c",
     ],
     hdrs = LOOMC_PUBLIC_HDRS + [

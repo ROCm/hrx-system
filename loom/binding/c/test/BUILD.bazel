@@ -291,6 +291,17 @@ loom_cc_test(
 )
 
 loom_cc_test(
+    name = "task_test",
+    srcs = ["task_test.cc"],
+    deps = [
+        ":test_util",
+        "//loom/binding/c:loomc",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "workspace_test",
     srcs = ["workspace_test.cc"],
     deps = [
