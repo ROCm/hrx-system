@@ -309,6 +309,22 @@ loom_cc_test(
     loom::binding::c::loomc
 )
 
+if(IREE_TARGET_HAS_THREADS)
+
+loom_cc_test(
+  NAME
+    task_pool_test
+  SRCS
+    "task_pool_test.cc"
+  DEPS
+    ::test_util
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::binding::c::task_pool
+)
+
+endif()
+
 loom_cc_test(
   NAME
     workspace_test

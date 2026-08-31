@@ -292,6 +292,9 @@ typedef enum loomc_structure_type_e {
 
   /// `loomc_cmd_program_request_options_t`.
   LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_REQUEST_OPTIONS = 39,
+
+  /// `loomc_task_pool_options_t`.
+  LOOMC_STRUCTURE_TYPE_TASK_POOL_OPTIONS = 40,
 } loomc_structure_type_t;
 
 /// One loose string option entry.

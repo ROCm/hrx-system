@@ -219,6 +219,28 @@ loom_cc_library(
 )
 endif()
 
+if(IREE_TARGET_HAS_THREADS)
+
+loom_cc_library(
+  NAME
+    task_pool
+  HDRS
+    "include/loomc/task_pool.h"
+  SRCS
+    "src/task_pool.c"
+  DEPS
+    ::loomc
+    iree::base
+    iree::base::threading
+    iree::task
+  INCLUDES
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>"
+  PUBLIC
+)
+
+endif()
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
 
 include(CMakePackageConfigHelpers)

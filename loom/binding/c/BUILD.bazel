@@ -268,3 +268,30 @@ loom_cc_library(
         "//loom/binding/c/target/spirv/vulkaninfo",
     ],
 )
+
+iree_cmake_extra_content(
+    content = """
+if(IREE_TARGET_HAS_THREADS)
+""",
+    inline = True,
+)
+
+loom_cc_library(
+    name = "task_pool",
+    srcs = ["src/task_pool.c"],
+    hdrs = ["include/loomc/task_pool.h"],
+    includes = ["include"],
+    deps = [
+        ":loomc",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/task",
+    ],
+)
+
+iree_cmake_extra_content(
+    content = """
+endif()
+""",
+    inline = True,
+)
