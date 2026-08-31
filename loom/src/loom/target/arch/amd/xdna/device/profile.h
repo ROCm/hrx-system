@@ -54,10 +54,10 @@ typedef struct loom_xdna_device_profile_t {
   uint16_t pci_vendor_id;
   // PCI device identifier.
   uint16_t pci_device_id;
+  // Physical column represented by profile-relative column zero.
+  uint16_t physical_column_origin;
   // Exact PCI revision selecting this profile.
   uint8_t pci_revision;
-  // Physical column represented by profile-relative column zero.
-  uint8_t physical_column_origin;
   // Minimum legal contiguous partition width.
   uint8_t minimum_partition_column_count;
   // Minimum supported firmware protocol major version.

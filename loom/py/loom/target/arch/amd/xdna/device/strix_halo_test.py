@@ -6,9 +6,14 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
-from loom.target.arch.amd.xdna.device.model import resolve_pci_profile
+from loom.target.arch.amd.xdna.device.model import (
+    resolve_pci_profile,
+    validate_device_profile,
+)
 from loom.target.arch.amd.xdna.device.strix_halo import (
     DEVICE_PROFILES,
     NPU2_FIRMWARE_ABI_ID,
@@ -53,3 +58,9 @@ def test_pci_resolution_is_exact_and_has_no_revision_fallback() -> None:
 
     with pytest.raises(ValueError, match="unsupported XDNA PCI identity"):
         resolve_pci_profile(DEVICE_PROFILES, 0x1022, 0x17F0, 0x10)
+
+
+def test_physical_array_coordinates_must_fit_the_profile_encoding() -> None:
+    invalid_profile = replace(STRIX_HALO_PROFILE, physical_column_origin=0xFFFF)
+    with pytest.raises(ValueError, match="physical columns overflow coordinates"):
+        validate_device_profile(invalid_profile)

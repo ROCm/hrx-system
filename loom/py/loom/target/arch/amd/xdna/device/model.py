@@ -98,6 +98,8 @@ def validate_device_profile(profile: DeviceProfile) -> None:
     if profile.physical_column_origin < 0 or profile.physical_column_origin > 0xFFFF:
         raise ValueError(f"{profile.key}: invalid physical column origin")
     column_count = profile.array_family.column_count
+    if profile.physical_column_origin + column_count > 1 << 16:
+        raise ValueError(f"{profile.key}: physical columns overflow coordinates")
     if column_count > 64:
         raise ValueError(f"{profile.key}: column mask exceeds 64 bits")
     known_column_mask = (1 << column_count) - 1
