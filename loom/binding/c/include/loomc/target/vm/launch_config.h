@@ -146,7 +146,25 @@ LOOMC_API_EXPORT void loomc_vm_launch_config_program_retain(
 LOOMC_API_EXPORT void loomc_vm_launch_config_program_release(
     loomc_vm_launch_config_program_t* program);
 
+/// Returns a function token for an artifact-local export ordinal.
+///
+/// This is the direct binding path for compiler products that project an
+/// executable root into the launch-config artifact emitted by the same
+/// compilation. It performs no string lookup.
+///
+/// @param program Program containing the projected export.
+/// @param ordinal Artifact-local launch-config function ordinal.
+/// @param out_function Receives a program-local token when found.
+/// @return True when `ordinal` was valid and `out_function` was populated.
+LOOMC_API_EXPORT bool loomc_vm_launch_config_program_function_at(
+    const loomc_vm_launch_config_program_t* program, loomc_host_size_t ordinal,
+    loomc_vm_launch_config_function_t* out_function);
+
 /// Resolves a compiled kernel export name to a program-local function token.
+///
+/// Name lookup supports discovery and independently authored artifact binding.
+/// Compiler products that already carry an artifact-local ordinal use
+/// `loomc_vm_launch_config_program_function_at` instead.
 ///
 /// @param program Program to search.
 /// @param export_name Exact public name of the matching executable entry.

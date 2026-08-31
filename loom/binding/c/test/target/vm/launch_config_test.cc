@@ -78,6 +78,14 @@ TEST(VmLaunchConfigProgramTest, RejectsLookupWithoutProgramAndClearsToken) {
   EXPECT_FALSE(loomc_vm_launch_config_function_is_valid(function));
 }
 
+TEST(VmLaunchConfigProgramTest,
+     RejectsOrdinalLookupWithoutProgramAndClearsToken) {
+  loomc_vm_launch_config_function_t function = {/*.value=*/0};
+  EXPECT_FALSE(loomc_vm_launch_config_program_function_at(
+      /*program=*/nullptr, /*ordinal=*/0, &function));
+  EXPECT_FALSE(loomc_vm_launch_config_function_is_valid(function));
+}
+
 TEST(VmLaunchConfigProgramTest, FailedInvocationLeavesOutputUntouched) {
   loomc_launch_config_t config = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG,

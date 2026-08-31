@@ -476,6 +476,18 @@ void loomc_vm_launch_config_program_release(
   }
 }
 
+bool loomc_vm_launch_config_program_function_at(
+    const loomc_vm_launch_config_program_t* program, loomc_host_size_t ordinal,
+    loomc_vm_launch_config_function_t* out_function) {
+  if (out_function == NULL) return false;
+  *out_function = loomc_vm_launch_config_function_invalid();
+  if (program == NULL || ordinal >= program->functions.count) return false;
+  *out_function = (loomc_vm_launch_config_function_t){
+      .value = ordinal,
+  };
+  return true;
+}
+
 loomc_status_t loomc_vm_launch_config_program_lookup_function(
     const loomc_vm_launch_config_program_t* program,
     loomc_string_view_t export_name,
