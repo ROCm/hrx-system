@@ -12,6 +12,7 @@
 #include "loom/codegen/low/packet.h"
 #include "loom/ir/module.h"
 #include "loom/ops/op_defs.h"
+#include "loom/target/arch/amd/xdna/aie2p/emit/relocation.h"
 
 static void loom_aie2p_leaf_object_measure_function_storage(
     const loom_low_storage_layout_t* layout,
@@ -263,11 +264,33 @@ iree_status_t loom_aie2p_leaf_object_emit(
       .kind = LOOM_NATIVE_OBJECT_SYMBOL_KIND_FUNCTION,
   };
 
+  loom_native_object_fixup_t* fixups = NULL;
+  if (plan->branch_fixup_count != 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        arena, plan->branch_fixup_count, sizeof(*fixups), (void**)&fixups));
+  }
+  for (iree_host_size_t i = 0; i < plan->branch_fixup_count; ++i) {
+    const loom_aie2p_planned_branch_fixup_t* branch_fixup =
+        &plan->branch_fixups[i];
+    IREE_ASSERT_LT(branch_fixup->bundle_index, plan->bundle_count);
+    IREE_ASSERT_LT(branch_fixup->target_block_index, plan->block_count);
+    fixups[i] = (loom_native_object_fixup_t){
+        .section_contribution_index = 0,
+        .section_offset = plan->bundles[branch_fixup->bundle_index].byte_offset,
+        .relocation_kind =
+            LOOM_AIE2P_NATIVE_RELOCATION_KIND_CORE_BRANCH_ABSOLUTE,
+        .target_symbol_index = 0,
+        .addend = plan->block_byte_offsets[branch_fixup->target_block_index],
+    };
+  }
+
   out_contribution->object = (loom_native_object_contribution_t){
       .sections = section,
       .section_count = 1,
       .symbols = symbol,
       .symbol_count = 1,
+      .fixups = fixups,
+      .fixup_count = plan->branch_fixup_count,
   };
   loom_aie2p_leaf_realization_t* realization = &out_contribution->realization;
   *realization = (loom_aie2p_leaf_realization_t){
@@ -299,6 +322,10 @@ iree_status_t loom_aie2p_leaf_object_emit(
   if (realization->spill.byte_length != 0) {
     realization->capability_flags |=
         LOOM_AIE2P_LEAF_CAPABILITY_FLAG_MATERIALIZED_SPILLS;
+  }
+  if (out_contribution->object.fixup_count != 0) {
+    realization->capability_flags |=
+        LOOM_AIE2P_LEAF_CAPABILITY_FLAG_NATIVE_FIXUPS;
   }
   return iree_ok_status();
 }

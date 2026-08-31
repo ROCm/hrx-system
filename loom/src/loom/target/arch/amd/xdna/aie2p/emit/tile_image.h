@@ -18,13 +18,14 @@
 extern "C" {
 #endif
 
-// Writes one fully resolved leaf contribution as an executable AIE2P tile ELF.
+// Writes one leaf contribution as an executable AIE2P tile ELF.
 //
 // The image starts its executable load segment at AIE program address zero,
 // uses the contribution entry symbol and retained target identity, and keeps
-// an ordinary ELF32 symbol table outside of the load segment. The contribution
-// must contain one executable section and no unresolved fixups. Temporary
-// section, symbol, and ELF layout storage is allocated from |scratch_arena|.
+// an ordinary ELF32 symbol table outside of the load segment. Native fixups are
+// applied after section assembly establishes final program addresses. The
+// contribution must contain one executable section. Temporary section, symbol,
+// fixup, and ELF layout storage is allocated from |scratch_arena|.
 iree_status_t loom_aie2p_tile_image_write(
     const loom_aie2p_leaf_contribution_t* contribution,
     iree_io_stream_t* stream, iree_arena_allocator_t* scratch_arena);

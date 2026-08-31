@@ -48,8 +48,12 @@ typedef struct loom_aie2p_planned_slot_t {
 typedef struct loom_aie2p_planned_bundle_t {
   // Physical issue cycle in the contiguous core program.
   uint32_t issue_cycle;
+  // Source-order Low block containing this bundle.
+  uint32_t block_index;
   // Logical Low schedule cycle expanded into this physical bundle.
   uint32_t logical_issue_cycle;
+  // Byte offset of this bundle in the contribution code section.
+  uint32_t byte_offset;
   // First slot record in the owning plan.
   uint32_t slot_start;
   // Physical bundle format selected from the owned target table.
@@ -58,10 +62,22 @@ typedef struct loom_aie2p_planned_bundle_t {
   uint8_t slot_count;
 } loom_aie2p_planned_bundle_t;
 
+// One contribution-relative branch target requiring final placement.
+typedef struct loom_aie2p_planned_branch_fixup_t {
+  // Bundle containing the branch instruction.
+  uint32_t bundle_index;
+  // Source-order Low block targeted by the branch.
+  uint32_t target_block_index;
+} loom_aie2p_planned_branch_fixup_t;
+
 // Immutable AIE2P physical packet plan for one Low function.
 typedef struct loom_aie2p_bundle_plan_t {
   // Emission frame from which this plan was built.
   const loom_low_emission_frame_t* frame;
+  // Contribution-relative byte offsets in source block order.
+  const uint32_t* block_byte_offsets;
+  // Number of records in |block_byte_offsets|.
+  iree_host_size_t block_count;
   // Physical bundles in increasing issue-cycle order.
   const loom_aie2p_planned_bundle_t* bundles;
   // Number of physical bundles.
@@ -70,22 +86,29 @@ typedef struct loom_aie2p_bundle_plan_t {
   const loom_aie2p_planned_slot_t* slots;
   // Number of encoded physical slots.
   iree_host_size_t slot_count;
+  // Branch sites whose absolute targets require final contribution placement.
+  const loom_aie2p_planned_branch_fixup_t* branch_fixups;
+  // Number of records in |branch_fixups|.
+  iree_host_size_t branch_fixup_count;
   // Exact byte length after variable-width bundle packing.
   iree_host_size_t encoded_byte_length;
 } loom_aie2p_bundle_plan_t;
 
 // Plans physical bundles for one successful, spill-free AIE2P Low frame.
 //
-// The current core program representation accepts one basic block. Structural
-// low.return is materialized as the architectural RET instruction and hoisted
-// over useful delay-slot work when the physical bundle table permits it.
+// Blocks retain source order and begin at 16-byte program addresses. Structural
+// branches select fallthrough, J, JZ, or JNZ from the following block and emit
+// explicit architectural delay bundles. Their contribution-relative targets
+// remain fixups until final code placement. Structural low.return is
+// materialized as RET and hoisted over useful work in the same block when the
+// physical bundle table permits it.
 // Descriptor runs use the minimum contiguous partition of exact physical
 // bundle formats because AIE2P's format domain is not downward closed.
 // Allocation-planned structural moves split a logical schedule cycle into
 // ordered physical bundles; later logical cycles retain or increase every
 // scheduled separation. Prebound live-ins and resource imports anchor physical
-// assignments without occupying an instruction slot. Empty issue cycles are
-// materialized as NOP bundles.
+// assignments without occupying an instruction slot. Empty non-terminator
+// issue cycles are materialized as NOP bundles.
 // The returned plan borrows |frame| and owns its tables in |arena|.
 iree_status_t loom_aie2p_bundle_plan_build(
     const loom_low_emission_frame_t* frame, iree_arena_allocator_t* arena,
