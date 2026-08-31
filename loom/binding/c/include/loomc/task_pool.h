@@ -7,17 +7,20 @@
 #ifndef LOOMC_TASK_POOL_H_
 #define LOOMC_TASK_POOL_H_
 
-#include "loomc/task.h"
+#include "loomc/status.h"
 
 /// @file
-/// Optional standard worker pool for generic LoomC tasks.
+/// Optional standard worker population for concurrent application work.
 ///
-/// The pool implements `loomc_task_sink_t` and can run arbitrary application
-/// and compiler work in one persistent worker population. It owns scheduling
-/// policy only: caches, compilers, workspaces, requests, products, and
-/// application state remain separately composed by the caller. Applications
-/// with an existing scheduler use the same task sink protocol without linking
-/// this package or the IREE task runtime.
+/// A pool retains one worker executor but no work queue or scheduling policy.
+/// Callers attach one `loomc_task_queue_t` for each independent Loom task
+/// domain, while IREE-hosted applications may attach other cooperative
+/// processes such as HAL executable or command-buffer materializers. This lets
+/// compilation and materialization overlap without creating competing worker
+/// populations or forcing unrelated work through one FIFO.
+///
+/// Applications with an existing scheduler use `loomc_task_sink_t` without
+/// linking this package or the IREE task runtime.
 
 #ifdef __cplusplus
 extern "C" {
@@ -69,57 +72,27 @@ typedef struct loomc_task_pool_options_t {
 /// @return OK when the pool and all worker threads were created.
 ///
 /// @ownership
-/// The caller owns `out_pool` and frees it with `loomc_task_pool_free` after
-/// every object that may submit through its sink has completed.
+/// The caller owns `out_pool` and frees it with `loomc_task_pool_free`. Task
+/// queues and native cooperative processes attached to the pool retain the
+/// underlying worker executor independently and may outlive the pool handle.
 LOOMC_API_EXPORT loomc_status_t loomc_task_pool_allocate(
     const loomc_task_pool_options_t* options, loomc_allocator_t allocator,
     loomc_task_pool_t** out_pool);
 
-/// Returns the number of worker threads owned by `pool`.
+/// Returns the number of worker threads represented by `pool`.
 ///
 /// @param pool Pool to inspect, or NULL.
 /// @return Worker count, or zero for a NULL pool.
 LOOMC_API_EXPORT loomc_host_size_t
 loomc_task_pool_worker_count(const loomc_task_pool_t* pool);
 
-/// Returns a borrowed generic task sink backed by `pool`.
-///
-/// @param pool Pool accepting submitted work, or NULL.
-/// @return Borrowed sink, or an empty sink for a NULL pool.
-///
-/// The sink remains valid until shutdown begins. Rejected submission leaves
-/// task ownership with the caller according to the generic sink contract.
-LOOMC_API_EXPORT loomc_task_sink_t
-loomc_task_pool_sink(loomc_task_pool_t* pool);
-
-/// Stops accepting new tasks and begins draining accepted work.
-///
-/// @param pool Pool to shut down.
-/// @return OK after shutdown begins.
-///
-/// This operation is thread safe and idempotent. Tasks already executing
-/// finish normally. Their attempts to submit additional work are rejected, so
-/// owners of recursively expanding work await that work before shutting down
-/// its sink.
-LOOMC_API_EXPORT loomc_status_t
-loomc_task_pool_shutdown(loomc_task_pool_t* pool);
-
-/// Waits until every accepted task and every pool worker has released `pool`.
-///
-/// @param pool Pool whose shutdown has already begun.
-/// @return OK after every worker releases the pool.
-///
-/// Shutdown must have begun before this call. The calling thread must not be a
-/// task executing on `pool`, because a worker cannot wait for its own release.
-LOOMC_API_EXPORT loomc_status_t
-loomc_task_pool_await_shutdown(loomc_task_pool_t* pool);
-
-/// Drains, awaits, and frees `pool`.
+/// Releases the pool's worker-executor reference and frees `pool`.
 ///
 /// @param pool Pool to free. Passing NULL is allowed.
 ///
-/// The calling thread must not be a task executing on `pool`, and no owner may
-/// retain or submit through the pool sink after this call begins.
+/// Attached task queues and native processes retain the worker executor until
+/// their own teardown completes. Freeing the final executor owner joins the
+/// worker threads before returning.
 LOOMC_API_EXPORT void loomc_task_pool_free(loomc_task_pool_t* pool);
 
 #ifdef __cplusplus

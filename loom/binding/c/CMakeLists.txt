@@ -225,11 +225,30 @@ loom_cc_library(
   NAME
     task_pool
   HDRS
+    "include/loomc/iree/task_pool.h"
     "include/loomc/task_pool.h"
   SRCS
     "src/task_pool.c"
   DEPS
     ::loomc
+    iree::base
+    iree::task
+  INCLUDES
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>"
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    task_queue
+  HDRS
+    "include/loomc/task_queue.h"
+  SRCS
+    "src/task_queue.c"
+  DEPS
+    ::loomc
+    ::task_pool
     iree::base
     iree::base::threading
     iree::task

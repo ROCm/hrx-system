@@ -9,6 +9,7 @@
 
 #include "loomc/loomc.h"
 #include "loomc/task_pool.h"
+#include "loomc/task_queue.h"
 
 static const char kSourceText[] =
     "config.decl @variant : %value: index where [range(%value, 1, 9)]\n"
@@ -45,8 +46,11 @@ typedef struct jit_service_t {
   // Immutable prepared pass program shared by every worker.
   loomc_pass_program_t* pass_program;
 
-  // Optional standard scheduler accepting generic tasks.
+  // Optional standard worker population shared by attached work sources.
   loomc_task_pool_t* task_pool;
+
+  // Compiler task scheduling domain attached to `task_pool`.
+  loomc_task_queue_t* compile_queue;
 
   // Mutable compiler scratch indexed by dense worker ordinal.
   loomc_workspace_t** workspaces;
@@ -151,6 +155,7 @@ static void jit_service_initialize(jit_service_t* service) {
 }
 
 static void jit_service_deinitialize(jit_service_t* service) {
+  loomc_task_queue_free(service->compile_queue);
   loomc_task_pool_free(service->task_pool);
   for (loomc_host_size_t i = 0; i < JIT_VARIANT_COUNT; ++i) {
     loomc_module_release(service->config_modules[i]);
@@ -216,6 +221,10 @@ static loomc_status_t configure_jit_service(jit_service_t* service) {
   if (loomc_status_is_ok(status)) {
     status = loomc_task_pool_allocate(&pool_options, service->allocator,
                                       &service->task_pool);
+  }
+  if (loomc_status_is_ok(status)) {
+    status = loomc_task_queue_allocate(service->task_pool, service->allocator,
+                                       &service->compile_queue);
   }
   if (loomc_status_is_ok(status)) {
     const loomc_host_size_t worker_count =
@@ -286,7 +295,7 @@ static loomc_status_t allocate_jit_task(jit_service_t* service,
 static loomc_status_t submit_jit_tasks(jit_service_t* service,
                                        jit_output_t* outputs,
                                        loomc_host_size_t output_count) {
-  loomc_task_sink_t sink = loomc_task_pool_sink(service->task_pool);
+  loomc_task_sink_t sink = loomc_task_queue_sink(service->compile_queue);
   loomc_status_t status = loomc_ok_status();
   for (loomc_host_size_t i = 0; loomc_status_is_ok(status) && i < output_count;
        ++i) {
@@ -303,19 +312,20 @@ static loomc_status_t submit_jit_tasks(jit_service_t* service,
   }
 
   // This short-lived example uses shutdown as its batch join. A persistent
-  // compiler service tracks request completion separately and shuts its one
-  // process-wide pool down only during service teardown.
+  // compiler service tracks request completion separately and shuts its
+  // compiler queue down only during service teardown. Other queues and native
+  // processes attached to the same pool remain independently runnable.
   if (loomc_status_is_ok(status)) {
-    status = loomc_task_pool_shutdown(service->task_pool);
+    status = loomc_task_queue_shutdown(service->compile_queue);
   }
   if (loomc_status_is_ok(status)) {
-    status = loomc_task_pool_await_shutdown(service->task_pool);
+    status = loomc_task_queue_await_shutdown(service->compile_queue);
   }
   if (!loomc_status_is_ok(status)) {
     // Drain accepted work before caller-owned output storage is inspected or
     // released. The void teardown path preserves the earlier operation error.
-    loomc_task_pool_free(service->task_pool);
-    service->task_pool = NULL;
+    loomc_task_queue_free(service->compile_queue);
+    service->compile_queue = NULL;
   }
   return status;
 }

@@ -12,6 +12,7 @@
 #include "iree/base/threading/notification.h"
 #include "loomc/iree.h"
 #include "loomc/task_pool.h"
+#include "loomc/task_queue.h"
 
 namespace {
 
@@ -23,6 +24,9 @@ struct HandleDeleter {
 using TaskPoolPtr =
     std::unique_ptr<loomc_task_pool_t,
                     HandleDeleter<loomc_task_pool_t, loomc_task_pool_free>>;
+using TaskQueuePtr =
+    std::unique_ptr<loomc_task_queue_t,
+                    HandleDeleter<loomc_task_queue_t, loomc_task_queue_free>>;
 
 typedef struct task_batch_t {
   // Number of tasks that have not completed execution.
@@ -69,10 +73,10 @@ static bool TaskBatchComplete(void* user_data) {
          0;
 }
 
-class TaskPoolBenchmarkFixture {
+class TaskQueueBenchmarkFixture {
  public:
-  TaskPoolBenchmarkFixture(loomc_host_size_t worker_count,
-                           loomc_host_size_t task_count)
+  TaskQueueBenchmarkFixture(loomc_host_size_t worker_count,
+                            loomc_host_size_t task_count)
       : tasks_(task_count) {
     loomc_task_pool_options_t options = {
         /*.type=*/LOOMC_STRUCTURE_TYPE_TASK_POOL_OPTIONS,
@@ -85,14 +89,18 @@ class TaskPoolBenchmarkFixture {
     IREE_CHECK_OK(iree_status_from_loomc(
         loomc_task_pool_allocate(&options, loomc_allocator_system(), &pool)));
     pool_.reset(pool);
-    sink_ = loomc_task_pool_sink(pool_.get());
+    loomc_task_queue_t* queue = nullptr;
+    IREE_CHECK_OK(iree_status_from_loomc(loomc_task_queue_allocate(
+        pool_.get(), loomc_allocator_system(), &queue)));
+    queue_.reset(queue);
+    sink_ = loomc_task_queue_sink(queue_.get());
     iree_atomic_store(&batch_.remaining_count, 0, iree_memory_order_relaxed);
     iree_notification_initialize(&batch_.notification);
     for (benchmark_task_t& task : tasks_) task.batch = &batch_;
   }
 
-  ~TaskPoolBenchmarkFixture() {
-    pool_.reset();
+  ~TaskQueueBenchmarkFixture() {
+    queue_.reset();
     iree_notification_deinitialize(&batch_.notification);
   }
 
@@ -114,10 +122,13 @@ class TaskPoolBenchmarkFixture {
   }
 
  private:
-  // Standard worker pool under measurement.
+  // Shared worker population under measurement.
   TaskPoolPtr pool_;
 
-  // Borrowed sink backed by |pool_|.
+  // Task scheduling domain attached to `pool_`.
+  TaskQueuePtr queue_;
+
+  // Borrowed sink backed by `queue_`.
   loomc_task_sink_t sink_ = {0};
 
   // Completion state shared by every task in one iteration.
@@ -129,9 +140,9 @@ class TaskPoolBenchmarkFixture {
 
 // Measures caller time spent initializing and submitting already-allocated
 // tasks. Final task completion is kept outside of the timed region.
-static void BM_TaskPoolSubmitOnly(benchmark::State& state) {
-  TaskPoolBenchmarkFixture fixture((loomc_host_size_t)state.range(0),
-                                   (loomc_host_size_t)state.range(1));
+static void BM_TaskQueueSubmitOnly(benchmark::State& state) {
+  TaskQueueBenchmarkFixture fixture((loomc_host_size_t)state.range(0),
+                                    (loomc_host_size_t)state.range(1));
   for (auto _ : state) {
     fixture.SubmitBatch();
     state.PauseTiming();
@@ -140,7 +151,7 @@ static void BM_TaskPoolSubmitOnly(benchmark::State& state) {
   }
   state.SetItemsProcessed(state.iterations() * fixture.task_count());
 }
-BENCHMARK(BM_TaskPoolSubmitOnly)
+BENCHMARK(BM_TaskQueueSubmitOnly)
     ->Args({1, 1})
     ->Args({1, 64})
     ->Args({4, 1})
@@ -153,16 +164,16 @@ BENCHMARK(BM_TaskPoolSubmitOnly)
 
 // Measures the user-visible round trip from task initialization and submission
 // through completion of the entire batch.
-static void BM_TaskPoolEndToEnd(benchmark::State& state) {
-  TaskPoolBenchmarkFixture fixture((loomc_host_size_t)state.range(0),
-                                   (loomc_host_size_t)state.range(1));
+static void BM_TaskQueueEndToEnd(benchmark::State& state) {
+  TaskQueueBenchmarkFixture fixture((loomc_host_size_t)state.range(0),
+                                    (loomc_host_size_t)state.range(1));
   for (auto _ : state) {
     fixture.SubmitBatch();
     fixture.AwaitBatch();
   }
   state.SetItemsProcessed(state.iterations() * fixture.task_count());
 }
-BENCHMARK(BM_TaskPoolEndToEnd)
+BENCHMARK(BM_TaskQueueEndToEnd)
     ->Args({1, 1})
     ->Args({1, 64})
     ->Args({4, 1})

@@ -320,6 +320,18 @@ loom_cc_test(
     ],
 )
 
+loom_cc_test(
+    name = "task_queue_test",
+    srcs = ["task_queue_test.cc"],
+    deps = [
+        ":test_util",
+        "//loom/binding/c:task_pool",
+        "//loom/binding/c:task_queue",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 iree_cmake_extra_content(
     content = """
 endif()

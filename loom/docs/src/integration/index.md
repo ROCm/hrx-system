@@ -45,8 +45,9 @@ created them only after the application loads or copies them.
   portable command product publishes independently compilable kernel requests
   while preserving external executable requirements.
 - [Schedule concurrent JIT work](jit-task-pool.md) shows how generic tasks,
-  cache-before-submit policy, worker-local workspaces, and an optional standard
-  pool compose without making scheduling part of the compiler API.
+  cache-before-submit policy, worker-local workspaces, and independent queues
+  on one optional shared pool compose without making scheduling part of the
+  compiler API.
 - [Embed kernel JIT compilation](jit-kernel.md) follows source through target
   specialization, launch evaluation, native artifact emission, and the runtime
   handoff using the public `loomc` API.

@@ -96,6 +96,7 @@ loom_cc_binary(
     deps = [
         "//loom/binding/c:loomc",
         "//loom/binding/c:task_pool",
+        "//loom/binding/c:task_queue",
     ],
 )
 

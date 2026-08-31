@@ -70,6 +70,7 @@ loom_cc_binary(
   DEPS
     loom::binding::c::loomc
     loom::binding::c::task_pool
+    loom::binding::c::task_queue
 )
 
 iree_native_test(

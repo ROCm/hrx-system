@@ -279,10 +279,26 @@ if(IREE_TARGET_HAS_THREADS)
 loom_cc_library(
     name = "task_pool",
     srcs = ["src/task_pool.c"],
-    hdrs = ["include/loomc/task_pool.h"],
+    hdrs = [
+        "include/loomc/iree/task_pool.h",
+        "include/loomc/task_pool.h",
+    ],
     includes = ["include"],
     deps = [
         ":loomc",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/task",
+    ],
+)
+
+loom_cc_library(
+    name = "task_queue",
+    srcs = ["src/task_queue.c"],
+    hdrs = ["include/loomc/task_queue.h"],
+    includes = ["include"],
+    deps = [
+        ":loomc",
+        ":task_pool",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/task",

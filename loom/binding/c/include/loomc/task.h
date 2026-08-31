@@ -15,8 +15,8 @@
 /// A task is a queueable base embedded in application or LoomC work records.
 /// Task sinks provide the ownership boundary needed to compose LoomC with a
 /// caller's event loop, deterministic queue, custom scheduler, or the optional
-/// standard task pool. The protocol carries no compiler, product, cache,
-/// thread-pool, or IREE task state.
+/// standard task queue attached to a shared pool. The protocol carries no
+/// compiler, product, cache, thread-pool, or IREE task state.
 
 #ifdef __cplusplus
 extern "C" {

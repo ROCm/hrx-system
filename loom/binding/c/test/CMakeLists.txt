@@ -323,6 +323,19 @@ loom_cc_test(
     loom::binding::c::task_pool
 )
 
+loom_cc_test(
+  NAME
+    task_queue_test
+  SRCS
+    "task_queue_test.cc"
+  DEPS
+    ::test_util
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::binding::c::task_pool
+    loom::binding::c::task_queue
+)
+
 endif()
 
 loom_cc_test(
