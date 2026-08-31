@@ -289,6 +289,27 @@ _DESCRIPTOR_SPECS = (
         "NoItinerary",
     ),
     _DescriptorSpec(
+        "J_lng",
+        f"{_TARGET_KEY}.branch.direct",
+        "control.branch.direct",
+        "II_J_lng",
+        asm_mnemonic="j",
+    ),
+    _DescriptorSpec(
+        "JNZ",
+        f"{_TARGET_KEY}.branch.nonzero",
+        "control.branch.nonzero",
+        "II_JNZ",
+        asm_mnemonic="jnz",
+    ),
+    _DescriptorSpec(
+        "JZ",
+        f"{_TARGET_KEY}.branch.zero",
+        "control.branch.zero",
+        "II_JZ",
+        asm_mnemonic="jz",
+    ),
+    _DescriptorSpec(
         "RET",
         f"{_TARGET_KEY}.return",
         "control.return",
@@ -1765,7 +1786,11 @@ def _descriptor_flags(
         or owns_implicit_state
     ):
         result.append(DescriptorFlag.SIDE_EFFECTING)
-    if form.control_flow_kind == "return" or has_property(form, "isTerminator"):
+    if (
+        form.control_flow_kind == "return"
+        or (form.control_flow_kind or "").startswith("branch_")
+        or has_property(form, "isTerminator")
+    ):
         result.append(DescriptorFlag.TERMINATOR)
     if (
         not has_property(form, "mayLoad")

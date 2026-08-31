@@ -33,12 +33,16 @@ from loom.target.low_descriptors import (
     ConstraintKind,
     DescriptorFlag,
     EffectKind,
+    ImmediateFlag,
+    ImmediateKind,
+    InstructionClass,
     IssueUseKind,
     OperandFlag,
     OperandRole,
     RegClassAltFlag,
     RegClassFlag,
     ResourceKind,
+    ScheduleClassFlag,
 )
 
 
@@ -48,7 +52,7 @@ def test_core_descriptor_closure_is_complete() -> None:
     assert len(descriptor_set.reg_classes) == 22
     assert len(descriptor_set.physical_register_views) == 12
     assert len(descriptor_set.register_parts) == 4
-    assert len(descriptor_set.descriptors) == 169
+    assert len(descriptor_set.descriptors) == 172
     assert tuple(row.name for row in descriptor_set.physical_registers) == tuple(
         row.name for row in CORE_MACHINE_TABLE.physical_registers
     )
@@ -69,7 +73,7 @@ def test_complete_schedule_domain_drives_selected_low_descriptors() -> None:
     assert len(descriptor_set.resources) == 90
     assert len(descriptor_set.timing_events) == 38
     assert len(descriptor_set.event_separations) == 651
-    assert len(descriptor_set.schedule_classes) == 36
+    assert len(descriptor_set.schedule_classes) == 38
     assert {
         resource.name
         for resource in descriptor_set.resources
@@ -150,6 +154,56 @@ def test_scalar_memory_forms_use_storage_specialized_itineraries() -> None:
         "amd.xdna.aie2p.store.scalar.indexed.register": "II_ST_dms_sts_idx_eR",
         "amd.xdna.aie2p.move.to.address-index": "II_MOVS_eDJ_eR",
     }
+
+
+def test_direct_branch_forms_retain_exact_control_contracts() -> None:
+    descriptors = {
+        descriptor.key: descriptor
+        for descriptor in AIE2P_CORE_DESCRIPTOR_SET.descriptors
+    }
+    specifications = {spec.key: spec for spec in _DESCRIPTOR_SPECS}
+    schedule_classes = {
+        schedule_class.name: schedule_class
+        for schedule_class in AIE2P_CORE_DESCRIPTOR_SET.schedule_classes
+    }
+    expected = {
+        "amd.xdna.aie2p.branch.direct": ("J_lng", "II_J_lng", "j", 0),
+        "amd.xdna.aie2p.branch.nonzero": ("JNZ", "II_JNZ", "jnz", 1),
+        "amd.xdna.aie2p.branch.zero": ("JZ", "II_JZ", "jz", 1),
+    }
+    for key, (form_name, itinerary, mnemonic, operand_count) in expected.items():
+        specification = specifications[key]
+        descriptor = descriptors[key]
+        assert specification.form_name == form_name
+        assert specification.itinerary == itinerary
+        assert descriptor.mnemonic == mnemonic
+        assert descriptor.asm_forms[0].mnemonic == mnemonic
+        assert len(descriptor.operands) == operand_count
+        assert descriptor.asm_forms[0].results == ()
+        assert descriptor.asm_forms[0].operands == tuple(
+            operand.field_name for operand in descriptor.operands
+        )
+        assert len(descriptor.immediates) == 1
+        immediate = descriptor.immediates[0]
+        assert immediate.field_name == "i"
+        assert immediate.kind is ImmediateKind.ORDINAL
+        assert immediate.flags == (ImmediateFlag.SYMBOLIC,)
+        assert immediate.bit_width == 20
+        assert immediate.value_step == 1
+        assert immediate.signed_min == 0
+        assert immediate.unsigned_max == (1 << 20) - 1
+        assert immediate.encoding_field_id != 0
+        assert immediate.encoding_id != 0
+        assert descriptor.asm_forms[0].immediates[0].field_name == "i"
+        assert descriptor.effects[0].kind is EffectKind.CONTROL
+        assert descriptor.instruction_classes == (InstructionClass.CONTROL,)
+        assert DescriptorFlag.SIDE_EFFECTING in descriptor.flags
+        assert DescriptorFlag.TERMINATOR in descriptor.flags
+        assert DescriptorFlag.DEAD_REMOVABLE not in descriptor.flags
+        schedule_class = schedule_classes[descriptor.schedule_class]
+        assert schedule_class.flags == (ScheduleClassFlag.CONTROL,)
+        assert schedule_class.instruction_classes == (InstructionClass.CONTROL,)
+        assert _INSTRUCTION_ENCODINGS[form_name].delay_slot_count == 5
 
 
 def test_bundle_resources_exactly_model_every_extendable_physical_slot_set() -> None:
