@@ -1448,7 +1448,8 @@ TEST(TargetTest, RejectsSerializationWithoutATargetMaterializer) {
       /*.next=*/&target_options,
       /*.module_name=*/loomc_make_cstring_view("jit_kernel"),
       /*.artifact_flags=*/0,
-      /*.config=*/{},
+      /*.config_flags=*/0,
+      /*.config_module=*/nullptr,
   };
 
   for (int i = 0; i < 2; ++i) {
@@ -1574,7 +1575,8 @@ TEST(TargetTest, CompileRejectsAnUnrepresentableModuleArtifact) {
       /*.next=*/&target_options,
       /*.module_name=*/loomc_make_cstring_view("jit_kernel"),
       /*.artifact_flags=*/LOOMC_COMPILE_ARTIFACT_FLAG_MODULE_TEXT,
-      /*.config=*/{},
+      /*.config_flags=*/0,
+      /*.config_module=*/nullptr,
   };
 
   WorkspacePtr workspace = CreateWorkspace();

@@ -8,11 +8,11 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <cstdio>
 #include <cstring>
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "benchmark/benchmark.h"
 #include "loomc/target/spirv.h"
@@ -22,6 +22,7 @@ namespace {
 using loomc::bench::CloneModule;
 using loomc::bench::CompileScenario;
 using loomc::bench::CreateBenchmarkKernelSource;
+using loomc::bench::CreateTextModule;
 using loomc::bench::CreateWorkspace;
 using loomc::bench::DeserializeSource;
 using loomc::bench::loom_allocator;
@@ -178,6 +179,20 @@ class SpirvTunerFlowScenario final : public SpirvScenarioBase {
     IREE_RETURN_IF_ERROR(SetUpSpirv(worker_count));
     IREE_RETURN_IF_ERROR(CreateBenchmarkKernelSource(
         loomc_make_cstring_view("i32_memory_chain.loom"), &source_));
+    IREE_RETURN_IF_ERROR(CreateWorkspace(/*block_size=*/0, &config_workspace_));
+    config_modules_.reserve(64);
+    for (iree_host_size_t workgroup_size = 1; workgroup_size <= 64;
+         ++workgroup_size) {
+      std::string config_text =
+          "config.def @benchmark.workgroup_size = " +
+          std::to_string(workgroup_size) +
+          " : index\nconfig.def @benchmark.operation_count = 1 : index\n";
+      ModulePtr config_module;
+      IREE_RETURN_IF_ERROR(
+          CreateTextModule(context_.get(), config_workspace_.get(),
+                           "tuner_config.loom", config_text, &config_module));
+      config_modules_.push_back(std::move(config_module));
+    }
     if (materialization_mode_ == ModuleMaterializationMode::kCloneTemplate) {
       IREE_RETURN_IF_ERROR(
           CreateWorkspace(/*block_size=*/0, &template_workspace_));
@@ -203,29 +218,11 @@ class SpirvTunerFlowScenario final : public SpirvScenarioBase {
                                              source_.get(), &module));
     }
 
-    char workgroup_size_value[16] = {0};
-    std::snprintf(workgroup_size_value, sizeof(workgroup_size_value), "%d",
-                  1 + (int)(job_ordinal % 64));
-    loomc_config_binding_t bindings[] = {
-        {
-            /*.key=*/loomc_make_cstring_view("@benchmark.workgroup_size"),
-            /*.value=*/loomc_make_cstring_view(workgroup_size_value),
-        },
-        {
-            /*.key=*/loomc_make_cstring_view("@benchmark.operation_count"),
-            /*.value=*/loomc_make_cstring_view("1"),
-        },
-    };
-    loomc_config_options_t config_options = {
-        /*.bindings=*/bindings,
-        /*.binding_count=*/IREE_ARRAYSIZE(bindings),
-        /*.json_object=*/loomc_string_view_empty(),
-        /*.flags=*/LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
-    };
-
     IREE_RETURN_IF_ERROR(CompileModuleToPreparedLow(
         workspace, module, loomc_make_cstring_view("i32_memory_chain"),
-        loomc_make_cstring_view("spirv_tuner_kernel"), config_options));
+        loomc_make_cstring_view("spirv_tuner_kernel"),
+        config_modules_[job_ordinal % config_modules_.size()].get(),
+        LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED));
     return EmitSpirvArtifact(workspace, module,
                              loomc_make_cstring_view("i32_memory_chain.spv"));
   }
@@ -234,6 +231,8 @@ class SpirvTunerFlowScenario final : public SpirvScenarioBase {
   iree_host_size_t job_count_ = 0;
   ModuleMaterializationMode materialization_mode_;
   SourcePtr source_;
+  WorkspacePtr config_workspace_;
+  std::vector<ModulePtr> config_modules_;
   WorkspacePtr template_workspace_;
   ModulePtr template_module_;
 };
@@ -247,13 +246,20 @@ class SpirvI32ChainScenario final : public SpirvScenarioBase {
       : SpirvScenarioBase(workspace_block_size),
         job_count_(job_count),
         operation_count_(std::max<iree_host_size_t>(operation_count, 1)),
-        operation_count_value_(std::to_string(operation_count_)),
         materialization_mode_(materialization_mode) {}
 
   iree_status_t SetUp(iree_host_size_t worker_count) override {
     IREE_RETURN_IF_ERROR(SetUpSpirv(worker_count));
     IREE_RETURN_IF_ERROR(CreateBenchmarkKernelSource(
         loomc_make_cstring_view("i32_memory_chain.loom"), &source_));
+    IREE_RETURN_IF_ERROR(CreateWorkspace(/*block_size=*/0, &config_workspace_));
+    const std::string config_text =
+        "config.def @benchmark.workgroup_size = 64 : index\n"
+        "config.def @benchmark.operation_count = " +
+        std::to_string(operation_count_) + " : index\n";
+    IREE_RETURN_IF_ERROR(CreateTextModule(
+        context_.get(), config_workspace_.get(), "i32_chain_config.loom",
+        config_text, &config_module_));
     if (materialization_mode_ == ModuleMaterializationMode::kCloneTemplate) {
       IREE_RETURN_IF_ERROR(
           CreateWorkspace(/*block_size=*/0, &template_workspace_));
@@ -280,28 +286,10 @@ class SpirvI32ChainScenario final : public SpirvScenarioBase {
     }
 
     (void)job_ordinal;
-    loomc_config_binding_t bindings[] = {
-        {
-            /*.key=*/loomc_make_cstring_view("@benchmark.workgroup_size"),
-            /*.value=*/loomc_make_cstring_view("64"),
-        },
-        {
-            /*.key=*/loomc_make_cstring_view("@benchmark.operation_count"),
-            /*.value=*/
-            loomc_make_string_view(operation_count_value_.data(),
-                                   operation_count_value_.size()),
-        },
-    };
-    loomc_config_options_t config_options = {
-        /*.bindings=*/bindings,
-        /*.binding_count=*/IREE_ARRAYSIZE(bindings),
-        /*.json_object=*/loomc_string_view_empty(),
-        /*.flags=*/LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
-    };
-
     IREE_RETURN_IF_ERROR(CompileModuleToPreparedLow(
         workspace, module, loomc_make_cstring_view("i32_memory_chain"),
-        loomc_make_cstring_view("spirv_i32_chain"), config_options));
+        loomc_make_cstring_view("spirv_i32_chain"), config_module_.get(),
+        LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED));
     return EmitSpirvArtifact(workspace, module,
                              loomc_make_cstring_view("i32_chain.spv"));
   }
@@ -313,9 +301,10 @@ class SpirvI32ChainScenario final : public SpirvScenarioBase {
  private:
   iree_host_size_t job_count_ = 0;
   iree_host_size_t operation_count_ = 0;
-  std::string operation_count_value_;
   ModuleMaterializationMode materialization_mode_;
   SourcePtr source_;
+  WorkspacePtr config_workspace_;
+  ModulePtr config_module_;
   WorkspacePtr template_workspace_;
   ModulePtr template_module_;
 };

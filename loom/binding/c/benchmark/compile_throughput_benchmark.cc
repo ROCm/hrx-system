@@ -230,6 +230,15 @@ iree_status_t DeserializeSource(loomc_context_t* context,
   return iree_ok_status();
 }
 
+iree_status_t CreateTextModule(loomc_context_t* context,
+                               loomc_workspace_t* workspace,
+                               const std::string& identifier,
+                               const std::string& text, ModulePtr* out_module) {
+  SourcePtr source;
+  IREE_RETURN_IF_ERROR(CreateTextSource(identifier, text, &source));
+  return DeserializeSource(context, workspace, source.get(), out_module);
+}
+
 iree_status_t CloneModule(const loomc_module_t* source_module,
                           loomc_workspace_t* workspace, ModulePtr* out_module) {
   out_module->reset();
@@ -445,7 +454,8 @@ iree_status_t TargetCompileScenario::SetUpTarget(
 iree_status_t TargetCompileScenario::CompileModuleToPreparedLow(
     WorkspacePtr& workspace, ModulePtr& module,
     loomc_string_view_t function_symbol, loomc_string_view_t module_name,
-    loomc_config_options_t config) {
+    const loomc_module_t* config_module,
+    loomc_config_policy_flags_t config_flags) {
   const loomc_target_specialization_t specialization = {
       /*.function_symbol=*/function_symbol,
       /*.target_profile=*/target_profile_.get(),
@@ -463,7 +473,8 @@ iree_status_t TargetCompileScenario::CompileModuleToPreparedLow(
       /*.next=*/&target_options,
       /*.module_name=*/module_name,
       /*.artifact_flags=*/0,
-      /*.config=*/config,
+      /*.config_flags=*/config_flags,
+      /*.config_module=*/config_module,
   };
 
   loomc_result_t* raw_result = nullptr;

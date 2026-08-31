@@ -236,6 +236,12 @@ static loomc_status_t link_module(link_modules_state_t* state) {
   const loomc_string_view_t roots[] = {
       loomc_make_cstring_view("@caller"),
   };
+  loomc_config_binding_t bindings[] = {
+      {
+          .key = loomc_make_cstring_view("@model.hidden_size"),
+          .value = loomc_make_cstring_view("4096"),
+      },
+  };
   loomc_link_options_t link_options = {
       .type = LOOMC_STRUCTURE_TYPE_LINK_OPTIONS,
       .structure_size = sizeof(link_options),
@@ -243,6 +249,14 @@ static loomc_status_t link_module(link_modules_state_t* state) {
       .mode = LOOMC_LINK_MODE_LINK,
       .root_symbols = roots,
       .root_symbol_count = 1,
+      .config =
+          {
+              .bindings = bindings,
+              .binding_count = 1,
+              .json_object =
+                  loomc_make_cstring_view("{\"model\":{\"hidden_size\":2048}}"),
+              .flags = LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
+          },
   };
 
   loomc_status_t status =
@@ -258,26 +272,12 @@ static loomc_status_t link_module(link_modules_state_t* state) {
 }
 
 static loomc_status_t compile_linked_module(link_modules_state_t* state) {
-  loomc_config_binding_t bindings[] = {
-      {
-          .key = loomc_make_cstring_view("@model.hidden_size"),
-          .value = loomc_make_cstring_view("4096"),
-      },
-  };
   loomc_compile_options_t compile_options = {
       .type = LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
       .structure_size = sizeof(compile_options),
       .module_name = loomc_make_cstring_view("jit_kernel"),
       .artifact_flags = LOOMC_COMPILE_ARTIFACT_FLAG_MODULE_TEXT |
                         LOOMC_COMPILE_ARTIFACT_FLAG_REPORT_JSON,
-      .config =
-          {
-              .bindings = bindings,
-              .binding_count = 1,
-              .json_object =
-                  loomc_make_cstring_view("{\"model\":{\"hidden_size\":2048}}"),
-              .flags = LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
-          },
   };
 
   loomc_status_t status = loomc_compile_module(

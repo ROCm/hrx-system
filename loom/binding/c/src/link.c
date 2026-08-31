@@ -139,7 +139,7 @@ static loomc_status_t loomc_link_validate_options(
       loomc_target_specialization_options_validate_environment(
           *out_target_specialization,
           loomc_context_target_environment(linker->context)));
-  return loomc_config_validate_options(&options->config);
+  return loomc_config_validate_text_options(&options->config);
 }
 
 static loomc_status_t loomc_link_validate_request_options(
@@ -196,7 +196,7 @@ static loomc_status_t loomc_link_validate_request_options(
       loomc_target_specialization_options_validate_environment(
           *out_target_specialization,
           loomc_context_target_environment(linker->context)));
-  return loomc_config_validate_options(&options->config);
+  return loomc_config_validate_text_options(&options->config);
 }
 
 static loomc_status_t loomc_link_result_set_failed(loomc_result_t* result) {

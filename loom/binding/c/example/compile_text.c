@@ -17,6 +17,9 @@ static const char kSourceText[] =
     "  func.return %hidden : index\n"
     "}\n";
 
+static const char kConfigText[] =
+    "config.def @model.hidden_size = 4096 : index\n";
+
 typedef struct compile_text_state_t {
   // Shared API context retained by sources, modules, and prepared tools.
   loomc_context_t* context;
@@ -27,8 +30,14 @@ typedef struct compile_text_state_t {
   // Immutable source containing the input text.
   loomc_source_t* source;
 
+  // Immutable source containing exact textual config definitions.
+  loomc_source_t* config_source;
+
   // Mutable module produced from source and consumed by compile.
   loomc_module_t* module;
+
+  // Immutable typed config module borrowed by compile.
+  loomc_module_t* config_module;
 
   // Immutable prepared compiler handle.
   loomc_compiler_t* compiler;
@@ -69,7 +78,9 @@ static void compile_text_state_deinitialize(compile_text_state_t* state) {
   loomc_result_release(state->result);
   loomc_pass_program_release(state->pass_program);
   loomc_compiler_release(state->compiler);
+  loomc_module_release(state->config_module);
   loomc_module_release(state->module);
+  loomc_source_release(state->config_source);
   loomc_source_release(state->source);
   loomc_workspace_release(state->workspace);
   loomc_context_release(state->context);
@@ -129,6 +140,18 @@ static loomc_status_t create_resources(compile_text_state_t* state) {
     status = create_source(state);
   }
   if (loomc_status_is_ok(status)) {
+    loomc_source_options_t options = {
+        .type = LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
+        .structure_size = sizeof(options),
+        .format = LOOMC_SOURCE_FORMAT_TEXT,
+        .identifier = loomc_make_cstring_view("config.loom"),
+        .contents = loomc_make_byte_span(kConfigText, sizeof(kConfigText) - 1),
+        .storage = LOOMC_SOURCE_STORAGE_BORROWED,
+    };
+    status = loomc_source_create(&options, loomc_allocator_system(),
+                                 &state->config_source);
+  }
+  if (loomc_status_is_ok(status)) {
     status = loomc_compiler_create(state->context, NULL,
                                    loomc_allocator_system(), &state->compiler);
   }
@@ -158,28 +181,30 @@ static loomc_status_t deserialize_source(compile_text_state_t* state) {
   if (loomc_status_is_ok(status)) {
     compile_text_state_reset_result(state);
   }
+  if (loomc_status_is_ok(status)) {
+    status = loomc_module_deserialize_text_from_source(
+        state->context, state->workspace, state->config_source, NULL,
+        loomc_allocator_system(), &state->config_module, &state->result);
+  }
+  if (loomc_status_is_ok(status)) {
+    status = require_successful_result(state->result,
+                                       "config deserialization failed");
+  }
+  if (loomc_status_is_ok(status)) {
+    compile_text_state_reset_result(state);
+  }
   return status;
 }
 
 static loomc_status_t compile_module(compile_text_state_t* state) {
-  loomc_config_binding_t bindings[] = {
-      {
-          .key = loomc_make_cstring_view("@model.hidden_size"),
-          .value = loomc_make_cstring_view("4096"),
-      },
-  };
   loomc_compile_options_t options = {
       .type = LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
       .structure_size = sizeof(options),
       .module_name = loomc_make_cstring_view("jit_kernel"),
       .artifact_flags = LOOMC_COMPILE_ARTIFACT_FLAG_MODULE_TEXT |
                         LOOMC_COMPILE_ARTIFACT_FLAG_REPORT_JSON,
-      .config =
-          {
-              .bindings = bindings,
-              .binding_count = 1,
-              .flags = LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
-          },
+      .config_flags = LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
+      .config_module = state->config_module,
   };
   loomc_status_t status = loomc_compile_module(
       state->compiler, state->workspace, state->pass_program, state->module,

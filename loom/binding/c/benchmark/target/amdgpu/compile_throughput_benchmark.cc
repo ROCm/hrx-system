@@ -24,6 +24,7 @@ namespace {
 using loomc::bench::CloneModule;
 using loomc::bench::CompileScenario;
 using loomc::bench::CreateBenchmarkKernelSource;
+using loomc::bench::CreateTextModule;
 using loomc::bench::CreateTextSource;
 using loomc::bench::CreateWorkspace;
 using loomc::bench::DeserializeSource;
@@ -153,8 +154,7 @@ class AmdgpuI32ChainScenario final : public AmdgpuTargetCompileScenario {
     operation_counts_.reserve(operation_counts.size());
     for (iree_host_size_t operation_count : operation_counts) {
       operation_count = std::max<iree_host_size_t>(operation_count, 1);
-      operation_counts_.push_back(
-          {operation_count, std::to_string(operation_count)});
+      operation_counts_.push_back({operation_count, {}});
     }
   }
 
@@ -164,8 +164,19 @@ class AmdgpuI32ChainScenario final : public AmdgpuTargetCompileScenario {
         loomc_make_cstring_view("i32_memory_chain.loom"), &source_));
     IREE_RETURN_IF_ERROR(
         CreateWorkspace(/*block_size=*/0, &template_workspace_));
-    return DeserializeSource(context_.get(), template_workspace_.get(),
-                             source_.get(), &template_module_);
+    IREE_RETURN_IF_ERROR(DeserializeSource(context_.get(),
+                                           template_workspace_.get(),
+                                           source_.get(), &template_module_));
+    for (OperationCount& operation_count : operation_counts_) {
+      std::ostringstream config_text;
+      config_text << "config.def @benchmark.workgroup_size = 64 : index\n"
+                  << "config.def @benchmark.operation_count = "
+                  << operation_count.value << " : index\n";
+      IREE_RETURN_IF_ERROR(CreateTextModule(
+          context_.get(), template_workspace_.get(), "i32_chain_config.loom",
+          config_text.str(), &operation_count.config_module));
+    }
+    return iree_ok_status();
   }
 
   iree_host_size_t job_count() const override { return job_count_; }
@@ -190,27 +201,11 @@ class AmdgpuI32ChainScenario final : public AmdgpuTargetCompileScenario {
     ModulePtr module;
     IREE_RETURN_IF_ERROR(
         CloneModule(template_module_.get(), workspace.get(), &module));
-    loomc_config_binding_t bindings[] = {
-        {
-            /*.key=*/loomc_make_cstring_view("@benchmark.workgroup_size"),
-            /*.value=*/loomc_make_cstring_view("64"),
-        },
-        {
-            /*.key=*/loomc_make_cstring_view("@benchmark.operation_count"),
-            /*.value=*/
-            loomc_make_string_view(operation_count.text.data(),
-                                   operation_count.text.size()),
-        },
-    };
-    const loomc_config_options_t config_options = {
-        /*.bindings=*/bindings,
-        /*.binding_count=*/IREE_ARRAYSIZE(bindings),
-        /*.json_object=*/loomc_string_view_empty(),
-        /*.flags=*/LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
-    };
     IREE_RETURN_IF_ERROR(CompileModuleToPreparedLow(
         workspace, module, loomc_make_cstring_view("i32_memory_chain"),
-        loomc_make_cstring_view("amdgpu_i32_chain"), config_options));
+        loomc_make_cstring_view("amdgpu_i32_chain"),
+        operation_count.config_module.get(),
+        LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED));
     return EmitAmdgpuArtifact(
         workspace, module, loomc_make_cstring_view("i32_memory_chain.hsaco"));
   }
@@ -231,8 +226,8 @@ class AmdgpuI32ChainScenario final : public AmdgpuTargetCompileScenario {
     // Numeric operation count reported by the benchmark.
     iree_host_size_t value;
 
-    // Stable config spelling borrowed by each invocation.
-    std::string text;
+    // Immutable typed config module shared by compile invocations.
+    ModulePtr config_module;
   };
 
   // Number of kernels compiled by each benchmark iteration.
@@ -345,11 +340,10 @@ class AmdgpuClusterAsyncDisjointScenario final
     ModulePtr module;
     IREE_RETURN_IF_ERROR(
         CloneModule(template_module_.get(), workspace.get(), &module));
-    const loomc_config_options_t config_options = {};
     IREE_RETURN_IF_ERROR(CompileModuleToPreparedLow(
         workspace, module, loomc_make_cstring_view("cluster_async_disjoint"),
         loomc_make_cstring_view("amdgpu_cluster_async_disjoint"),
-        config_options));
+        /*config_module=*/nullptr, /*config_flags=*/0));
     return EmitAmdgpuArtifact(
         workspace, module,
         loomc_make_cstring_view("cluster_async_disjoint.hsaco"));

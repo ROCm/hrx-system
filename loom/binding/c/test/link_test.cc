@@ -1443,7 +1443,8 @@ template.def<@demo.capi_selected> priority(1) @fallback_provider(%value: i32) ->
       /*.next=*/&target_options,
       /*.module_name=*/loomc_make_cstring_view("selected_provider_module"),
       /*.artifact_flags=*/0,
-      /*.config=*/{},
+      /*.config_flags=*/0,
+      /*.config_module=*/nullptr,
   };
   loomc_result_t* raw_compile_result = nullptr;
   loomc_status_t status = loomc_compile_module(

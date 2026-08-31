@@ -316,7 +316,8 @@ loomc_status_t CompileModule(const IreeHalKernelExecutionTarget& target,
       /*.next=*/&target_options,
       /*.module_name=*/target.module_name,
       /*.artifact_flags=*/LOOMC_COMPILE_ARTIFACT_FLAG_LAUNCH_CONFIG,
-      /*.config=*/{},
+      /*.config_flags=*/0,
+      /*.config_module=*/nullptr,
   };
   loomc_result_t* result = nullptr;
   loomc_status_t status =

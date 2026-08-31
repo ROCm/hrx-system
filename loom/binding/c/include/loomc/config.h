@@ -10,13 +10,14 @@
 #include "loomc/base.h"
 
 /// @file
-/// Per-invocation configuration bindings.
+/// Text and JSON configuration bindings.
 ///
-/// Configuration is intentionally represented as plain borrowed key/value data
+/// Link and command-product operations accept plain borrowed key/value data
 /// plus one optional JSON/JSONC object string. Bindings without a matching
 /// config declaration are ignored so one stable config bag can serve modules
-/// that consume different subsets. Operation descriptors decide whether
-/// unresolved configuration may remain in the produced result.
+/// that consume different subsets. Compile operations instead accept an
+/// ordinary typed module containing `config.def` operations; callers load that
+/// module through the normal text or bytecode module APIs.
 ///
 /// @par Example
 /// Use JSON for a framework-provided configuration file and explicit bindings
@@ -64,7 +65,7 @@ typedef enum loomc_config_policy_flag_bits_e {
 /// Bitmask of `loomc_config_policy_flag_bits_t` values.
 typedef uint32_t loomc_config_policy_flags_t;
 
-/// Configuration options attached to a link or compile invocation.
+/// Text configuration options attached to a link or command-product operation.
 ///
 /// The plain binding array and optional JSON/JSONC object string normalize into
 /// the same key/value binding set. When both spellings define the same key, the

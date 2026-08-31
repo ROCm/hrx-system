@@ -18,6 +18,7 @@ namespace {
 
 using loomc::bench::AddSourceToIndex;
 using loomc::bench::CompileScenario;
+using loomc::bench::CreateTextModule;
 using loomc::bench::CreateTextSource;
 using loomc::bench::DeserializeSource;
 using loomc::bench::LinkerPtr;
@@ -41,7 +42,28 @@ class TunerFlowScenario final : public CompileScenario {
 
   iree_status_t SetUp(iree_host_size_t worker_count) override {
     IREE_RETURN_IF_ERROR(CompileScenario::SetUp(worker_count));
-    return CreateTextSource("tuner_kernel.loom", source_text_, &source_);
+    IREE_RETURN_IF_ERROR(
+        CreateTextSource("tuner_kernel.loom", source_text_, &source_));
+    IREE_RETURN_IF_ERROR(
+        loomc::bench::CreateWorkspace(/*block_size=*/0, &config_workspace_));
+    config_modules_.reserve(256);
+    for (iree_host_size_t config_ordinal = 0; config_ordinal < 256;
+         ++config_ordinal) {
+      const int tile_m = 16 + (int)(config_ordinal % 16) * 16;
+      const int tile_n = 16 + (int)((config_ordinal / 16) % 16) * 16;
+      const int unroll = 1 + (int)(config_ordinal % 8);
+      std::ostringstream config_text;
+      config_text << "config.def @tuner.model.hidden_size = 4096 : index\n"
+                  << "config.def @tuner.tile_m = " << tile_m << " : index\n"
+                  << "config.def @tuner.tile_n = " << tile_n << " : index\n"
+                  << "config.def @tuner.unroll = " << unroll << " : index\n";
+      ModulePtr config_module;
+      IREE_RETURN_IF_ERROR(CreateTextModule(
+          context_.get(), config_workspace_.get(), "tuner_config.loom",
+          config_text.str(), &config_module));
+      config_modules_.push_back(std::move(config_module));
+    }
+    return iree_ok_status();
   }
 
   iree_host_size_t job_count() const override { return job_count_; }
@@ -54,43 +76,15 @@ class TunerFlowScenario final : public CompileScenario {
     IREE_RETURN_IF_ERROR(DeserializeSource(context_.get(), workspace.get(),
                                            source_.get(), &module));
 
-    char tile_m_value[16] = {0};
-    char tile_n_value[16] = {0};
-    char unroll_value[16] = {0};
-    std::snprintf(tile_m_value, sizeof(tile_m_value), "%d",
-                  16 + (int)(job_ordinal % 16) * 16);
-    std::snprintf(tile_n_value, sizeof(tile_n_value), "%d",
-                  16 + (int)((job_ordinal / 16) % 16) * 16);
-    std::snprintf(unroll_value, sizeof(unroll_value), "%d",
-                  1 + (int)(job_ordinal % 8));
-    loomc_config_binding_t bindings[] = {
-        {
-            /*.key=*/loomc_make_cstring_view("@tuner.tile_m"),
-            /*.value=*/loomc_make_cstring_view(tile_m_value),
-        },
-        {
-            /*.key=*/loomc_make_cstring_view("@tuner.tile_n"),
-            /*.value=*/loomc_make_cstring_view(tile_n_value),
-        },
-        {
-            /*.key=*/loomc_make_cstring_view("@tuner.unroll"),
-            /*.value=*/loomc_make_cstring_view(unroll_value),
-        },
-    };
     loomc_compile_options_t options = {
         /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
         /*.structure_size=*/sizeof(options),
         /*.next=*/nullptr,
         /*.module_name=*/loomc_make_cstring_view("tuner_kernel"),
         /*.artifact_flags=*/LOOMC_COMPILE_ARTIFACT_FLAG_MODULE_BYTECODE,
-        /*.config=*/
-        {
-            /*.bindings=*/bindings,
-            /*.binding_count=*/IREE_ARRAYSIZE(bindings),
-            /*.json_object=*/
-            loomc_make_cstring_view("{\"@tuner.model.hidden_size\":\"4096\"}"),
-            /*.flags=*/LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
-        },
+        /*.config_flags=*/LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
+        /*.config_module=*/
+        config_modules_[job_ordinal % config_modules_.size()].get(),
     };
 
     loomc_result_t* raw_result = nullptr;
@@ -113,6 +107,8 @@ class TunerFlowScenario final : public CompileScenario {
 
   iree_host_size_t job_count_ = 0;
   SourcePtr source_;
+  WorkspacePtr config_workspace_;
+  std::vector<ModulePtr> config_modules_;
 };
 
 const char* TunerFlowScenario::source_text_ =
@@ -223,13 +219,8 @@ class ModelFlowScenario final : public CompileScenario {
         /*.next=*/nullptr,
         /*.module_name=*/loomc_make_cstring_view("model_kernel"),
         /*.artifact_flags=*/LOOMC_COMPILE_ARTIFACT_FLAG_MODULE_BYTECODE,
-        /*.config=*/
-        {
-            /*.bindings=*/nullptr,
-            /*.binding_count=*/0,
-            /*.json_object=*/loomc_string_view_empty(),
-            /*.flags=*/0,
-        },
+        /*.config_flags=*/0,
+        /*.config_module=*/nullptr,
     };
 
     loomc_result_t* raw_compile_result = nullptr;
