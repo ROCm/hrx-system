@@ -179,8 +179,8 @@ typedef struct loom_xdna_elf_abi_note_t {
   uint16_t abi_minor;
   // Target-generation identity.
   loom_xdna_target_generation_t target_generation;
-  // Device revision selected by the resolved device profile.
-  uint32_t target_revision;
+  // Incompatible revision of the resolved device profile.
+  uint32_t device_profile_revision;
   // Stable complete device-profile identity.
   uint64_t device_profile_id;
   // Stable firmware/configuration ABI identity.

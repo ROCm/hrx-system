@@ -118,7 +118,7 @@ iree_status_t loom_xdna_elf_encode_abi_note(
   iree_unaligned_store_le_u16(description + 8, note->abi_minor);
   iree_unaligned_store_le_u16(description + 10,
                               (uint16_t)note->target_generation);
-  iree_unaligned_store_le_u32(description + 12, note->target_revision);
+  iree_unaligned_store_le_u32(description + 12, note->device_profile_revision);
   iree_unaligned_store_le_u64(description + 16, note->device_profile_id);
   iree_unaligned_store_le_u64(description + 24, note->firmware_abi_id);
   iree_unaligned_store_le_u64(description + 32, note->policy_id);
