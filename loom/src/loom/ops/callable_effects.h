@@ -17,6 +17,11 @@
 extern "C" {
 #endif
 
+// Returns true when |function| has pure callable semantics. Definitions are
+// classified from their current body effects while declarations use their
+// explicit purity attribute.
+bool loom_callable_effects_is_pure(loom_func_like_t function);
+
 // Propagates a resolved callee's purity to |op| when the operation has no
 // explicit purity. Unresolved symbols and impure callees leave |op| unchanged.
 iree_status_t loom_callable_effects_propagate_purity(loom_op_t* op,

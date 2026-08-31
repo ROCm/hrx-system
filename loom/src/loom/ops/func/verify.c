@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include "loom/error/error_catalog.h"
+#include "loom/ops/callable_effects.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/func/reference.h"
 #include "loom/ops/function_contract_verify.h"
@@ -20,6 +21,45 @@ static iree_status_t loom_func_emit(iree_diagnostic_emitter_t emitter,
       .error = error,
       .params = params,
       .param_count = param_count,
+  };
+  return iree_diagnostic_emit(emitter, &emission);
+}
+
+static iree_status_t loom_func_verify_call_purity(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter) {
+  if (loom_func_call_purity(op) == 0) return iree_ok_status();
+  const loom_symbol_ref_t callee = loom_func_call_callee(op);
+  if (!loom_symbol_ref_is_valid(callee) || callee.module_id != 0 ||
+      callee.symbol_id >= module->symbols.count) {
+    return iree_ok_status();
+  }
+  const loom_symbol_t* symbol = &module->symbols.entries[callee.symbol_id];
+  if (!symbol->definition || !symbol->defining_op) return iree_ok_status();
+  const loom_func_like_t function =
+      loom_func_like_const_cast(module, symbol->defining_op);
+  if (!loom_func_like_isa(function) ||
+      loom_callable_effects_is_pure(function)) {
+    return iree_ok_status();
+  }
+
+  const iree_string_view_t callee_name =
+      module->strings.entries[symbol->name_id];
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(callee_name),
+      loom_param_string(callee_name),
+  };
+  const loom_diagnostic_related_op_t related_ops[] = {{
+      .label = IREE_SV("contract defined here"),
+      .op = symbol->defining_op,
+  }};
+  const loom_diagnostic_emission_t emission = {
+      .op = op,
+      .error = LOOM_ERR_STRUCTURE_034,
+      .params = params,
+      .param_count = IREE_ARRAYSIZE(params),
+      .related_ops = related_ops,
+      .related_op_count = IREE_ARRAYSIZE(related_ops),
   };
   return iree_diagnostic_emit(emitter, &emission);
 }
@@ -184,9 +224,10 @@ iree_status_t loom_func_import_resolved_verify(
 iree_status_t loom_func_call_verify(const loom_module_t* module,
                                     const loom_op_t* op,
                                     iree_diagnostic_emitter_t emitter) {
-  return loom_function_call_contract_verify(
+  IREE_RETURN_IF_ERROR(loom_function_call_contract_verify(
       module, op, loom_func_call_callee(op), loom_func_call_operands(op),
-      loom_func_call_results(op), emitter);
+      loom_func_call_results(op), emitter));
+  return loom_func_verify_call_purity(module, op, emitter);
 }
 
 static iree_status_t loom_func_emit_indirect_call_count_mismatch(

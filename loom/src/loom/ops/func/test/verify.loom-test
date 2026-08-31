@@ -178,6 +178,21 @@ func.def @template_families_are_not_runtime_callable(%value: i32) -> (i32) {
 
 // ====
 
+func.decl @observable_effect()
+
+func.def @impure_helper() {
+  func.call @observable_effect() : ()
+  func.return
+}
+
+func.def @pure_calls_require_pure_callees() {
+  // ERROR@+1: STRUCTURE/034 {callee_name="impure_helper", boundary_name="impure_helper"}
+  func.call pure @impure_helper() : ()
+  func.return
+}
+
+// ====
+
 // ABI contracts can remain target-independent until invocation selection.
 func.def abi(object_function) @targetless_abi() {
   func.return
