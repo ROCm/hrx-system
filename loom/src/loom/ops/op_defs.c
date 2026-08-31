@@ -626,6 +626,11 @@ loom_func_like_t loom_func_like_cast(const loom_module_t* module,
   return (loom_func_like_t){.op = op, .vtable = vtable->func_like};
 }
 
+loom_func_like_t loom_func_like_const_cast(const loom_module_t* module,
+                                           const loom_op_t* op) {
+  return loom_func_like_cast(module, (loom_op_t*)op);
+}
+
 loom_region_t* loom_func_like_body(loom_func_like_t func) {
   return loom_func_like_region(func, loom_func_like_body_region_index(func));
 }

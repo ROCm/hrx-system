@@ -208,7 +208,7 @@ static loom_region_t* loom_low_verify_function_body(
 static const loom_target_facts_t* loom_low_verify_function_target_facts(
     const loom_low_verify_state_t* state, const loom_op_t* low_func_op) {
   const loom_func_like_t function =
-      loom_func_like_cast(state->module, (loom_op_t*)low_func_op);
+      loom_func_like_const_cast(state->module, low_func_op);
   if (!loom_func_like_isa(function)) {
     return NULL;
   }

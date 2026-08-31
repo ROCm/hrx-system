@@ -695,7 +695,7 @@ static iree_string_view_t loom_low_actual_ancestor_name(
     if (loom_low_executable_def_isa(parent)) {
       return loom_low_op_name(module, parent);
     }
-    loom_func_like_t func = loom_func_like_cast(module, (loom_op_t*)parent);
+    loom_func_like_t func = loom_func_like_const_cast(module, parent);
     if (loom_func_like_isa(func) && loom_func_like_body(func)) {
       return loom_low_op_name(module, parent);
     }
@@ -1038,7 +1038,7 @@ static const loom_op_t* loom_low_find_enclosing_low_executable_def(
     if (loom_low_executable_def_isa(parent)) {
       return parent;
     }
-    loom_func_like_t func = loom_func_like_cast(module, (loom_op_t*)parent);
+    loom_func_like_t func = loom_func_like_const_cast(module, parent);
     if (loom_func_like_isa(func) && loom_func_like_body(func)) {
       return NULL;
     }
@@ -1500,7 +1500,7 @@ static iree_status_t loom_low_emit_call_impure_callee_error(
 
 static bool loom_low_func_like_is_pure(const loom_module_t* module,
                                        const loom_op_t* op) {
-  loom_func_like_t func = loom_func_like_cast(module, (loom_op_t*)op);
+  loom_func_like_t func = loom_func_like_const_cast(module, op);
   if (!loom_func_like_isa(func)) {
     return false;
   }
