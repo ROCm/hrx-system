@@ -18,6 +18,16 @@ package(
 )
 
 loom_cc_library(
+    name = "launch_config_abi",
+    hdrs = ["launch_config_abi.h"],
+    visibility = [
+        "//loom/binding/c:__pkg__",
+        "//loom/src/loom/target/arch/vm:__pkg__",
+    ],
+    deps = ["//runtime/src/iree/base"],
+)
+
+loom_cc_library(
     name = "vm",
     srcs = [
         "artifact_emitter.c",
@@ -43,15 +53,18 @@ loom_cc_library(
         "module_metadata.h",
         "module_presentation.h",
         "module_resources.h",
+        "module_selection.h",
         "module_types.h",
     ],
     visibility = [
         "//loom/binding/c:__pkg__",
+        "//loom/binding/c/target:__subpackages__",
         "//loom/src/loom/target/arch/vm:__pkg__",
         "//loom/src/loom/tools/iree-test-loom:__pkg__",
         "//loom/src/loom/tools/loom-compile:__pkg__",
     ],
     deps = [
+        "//loom/src/loom/analysis:symbol_liveness",
         "//loom/src/loom/codegen/low:allocation",
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/codegen/low:frame",
@@ -86,6 +99,20 @@ loom_cc_library(
         "//runtime/src/iree/io:stream",
         "//runtime/src/iree/vm",
         "//runtime/src/iree/vm/bytecode/wire",
+    ],
+)
+
+loom_cc_library(
+    name = "launch_config_compiler",
+    srcs = ["launch_config_compiler.c"],
+    hdrs = ["launch_config_compiler.h"],
+    visibility = ["//loom/binding/c/target:__subpackages__"],
+    deps = [
+        ":vm",
+        "//loom/src/loom/pass:builder",
+        "//loom/src/loom/target:provider",
+        "//loom/src/loom/target/arch/vm:launch_config_program",
+        "//runtime/src/iree/base",
     ],
 )
 

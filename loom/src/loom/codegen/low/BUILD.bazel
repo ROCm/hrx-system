@@ -267,36 +267,6 @@ loom_cc_library(
     ],
 )
 
-loom_cc_library(
-    name = "launch_config_program",
-    srcs = ["launch_config_program.c"],
-    hdrs = [
-        "launch_config_abi.h",
-        "launch_config_program.h",
-    ],
-    deps = [
-        ":storage_layout",
-        "//loom/src/loom/ir",
-        "//loom/src/loom/link:symbol_policy",
-        "//loom/src/loom/ops:op_defs",
-        "//loom/src/loom/ops:special_values",
-        "//loom/src/loom/ops:type_registry",
-        "//loom/src/loom/ops/func",
-        "//loom/src/loom/ops/kernel",
-        "//loom/src/loom/ops/low",
-        "//loom/src/loom/pass:environment",
-        "//loom/src/loom/pass:types",
-        "//loom/src/loom/pass:value_facts",
-        "//loom/src/loom/rewrite:materialize",
-        "//loom/src/loom/rewrite:remap",
-        "//loom/src/loom/rewrite:rewriter",
-        "//loom/src/loom/target:facts",
-        "//loom/src/loom/transforms/cleanup:dce",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal:arena",
-    ],
-)
-
 loom_cc_test(
     name = "storage_layout_test",
     srcs = ["storage_layout_test.cc"],

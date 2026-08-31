@@ -181,7 +181,6 @@ loom_cc_library(
     ],
     deps = [
         "//loom/src/loom/analysis:symbol_value_constraints",
-        "//loom/src/loom/codegen/low:launch_config_program",
         "//loom/src/loom/codegen/low:repr",
         "//loom/src/loom/codegen/low:target_binding",
         "//loom/src/loom/codegen/low:text_asm",
@@ -229,9 +228,7 @@ loom_cc_library(
         "//loom/src/loom/target:provider",
         "//loom/src/loom/target:specialization",
         "//loom/src/loom/target:types",
-        "//loom/src/loom/target/arch/vm:ops",
-        "//loom/src/loom/target/arch/vm:provider",
-        "//loom/src/loom/target/emit/vm",
+        "//loom/src/loom/target/emit/vm:launch_config_abi",
         "//loom/src/loom/target/reporting:artifact_manifest",
         "//loom/src/loom/target/reporting:format",
         "//loom/src/loom/target/reporting:report",

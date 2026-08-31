@@ -1,8 +1,30 @@
 amdgpu.target<gfx1151> @gfx1151
 
+vm.target<core> @vm
+
+global.variable @ordinary_vm_state : hal.buffer
+
+func.decl import("unavailable", "identity") target(@vm) @ordinary_vm_import(%value: i32) -> (i32)
+
+func.def initializer target(@vm) @ordinary_vm_initialize(%value: hal.buffer) {
+  global.store %value, @ordinary_vm_state : hal.buffer
+  func.return
+}
+
+func.def public target(@vm) @ordinary_vm_export(%value: i32) -> (i32) {
+  %result = func.call @ordinary_vm_import(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
 func.def public pure noinline @shared_double(%value: index) -> (index) {
   %c2 = index.constant 2 : index
   %result = index.mul %value, %c2 : index
+  func.return %result : index
+}
+
+func.def pure noinline @scale_by_subgroup(%value: index) -> (index) {
+  %subgroup_size = target.subgroup.size : index
+  %result = index.mul %value, %subgroup_size : index
   func.return %result : index
 }
 
@@ -60,6 +82,15 @@ kernel.def target(@gfx1151) @call_shared_and_recursive(%value: index) {
   %doubled = func.call pure @shared_double(%value) : (index) -> (index)
   %identity = func.call pure @recursive_identity(%value) : (index) -> (index)
   %workgroup_count = index.add %doubled, %identity : index
+  kernel.launch.config workgroups(%workgroup_count, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch() {
+  kernel.return
+}
+
+kernel.def target(@gfx1151) @call_target_query_helper(%value: index) {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  %workgroup_count = func.call pure @scale_by_subgroup(%value) : (index) -> (index)
   kernel.launch.config workgroups(%workgroup_count, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
 } launch() {
   kernel.return

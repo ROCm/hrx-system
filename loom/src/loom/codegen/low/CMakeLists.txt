@@ -260,37 +260,6 @@ loom_cc_library(
   PUBLIC
 )
 
-loom_cc_library(
-  NAME
-    launch_config_program
-  HDRS
-    "launch_config_abi.h"
-    "launch_config_program.h"
-  SRCS
-    "launch_config_program.c"
-  DEPS
-    ::storage_layout
-    iree::base
-    iree::base::internal::arena
-    loom::ir
-    loom::link::symbol_policy
-    loom::ops::func
-    loom::ops::kernel
-    loom::ops::low
-    loom::ops::op_defs
-    loom::ops::special_values
-    loom::ops::type_registry
-    loom::pass::environment
-    loom::pass::types
-    loom::pass::value_facts
-    loom::rewrite::materialize
-    loom::rewrite::remap
-    loom::rewrite::rewriter
-    loom::target::facts
-    loom::transforms::cleanup::dce
-  PUBLIC
-)
-
 loom_cc_test(
   NAME
     storage_layout_test

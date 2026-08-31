@@ -293,8 +293,10 @@ typedef enum loom_target_pipeline_phase_e {
   // Function-local target-low cleanup and operand-form preparation before
   // emission.
   LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_FUNCTION_PREPARATION = 6,
-  // Module-wide target finalization after all target-low functions have been
-  // prepared for emission.
+  // Module-wide target finalization after all target-low functions and
+  // caller-visible resource requirements have been prepared for emission.
+  // Emitters may materialize target-private state afterward but must not
+  // change externally observable resource requirements.
   LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_MODULE_FINALIZATION = 7,
   LOOM_TARGET_PIPELINE_PHASE_COUNT_,
 } loom_target_pipeline_phase_t;

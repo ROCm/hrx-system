@@ -1554,8 +1554,8 @@ iree_status_t loom_check_prepare_source_low_module(
       loom_low_verify_scratch_t low_verify_scratch =
           loom_low_verify_scratch_for_module(module);
       status = loom_target_entry_verify_low_module(
-          module, low_registry, &entry_options, &verifier_emitter, 20,
-          environment->low_verify_provider_list, &low_verify_scratch,
+          module, &low_registry->registry, &entry_options, &verifier_emitter,
+          20, environment->low_verify_provider_list, &low_verify_scratch,
           &low_verify_result);
     }
   }
@@ -1732,7 +1732,7 @@ static iree_status_t loom_check_emit_verify_provider_module(
   loom_low_verify_scratch_t low_verify_scratch =
       loom_low_verify_scratch_for_module(module);
   IREE_RETURN_IF_ERROR(loom_target_entry_verify_low_module(
-      module, low_registry, &entry_options, &verifier_emitter, 20,
+      module, &low_registry->registry, &entry_options, &verifier_emitter, 20,
       low_verify_provider_list, &low_verify_scratch, &low_verify_result));
   return iree_ok_status();
 }

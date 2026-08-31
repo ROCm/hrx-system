@@ -8,6 +8,10 @@
 
 #include <string.h>
 
+#ifndef LOOMC_TARGET_HAVE_VM_LAUNCH_CONFIG
+#define LOOMC_TARGET_HAVE_VM_LAUNCH_CONFIG 0
+#endif  // LOOMC_TARGET_HAVE_VM_LAUNCH_CONFIG
+
 #include "iree/base/api.h"
 #include "loom/error/emitter.h"
 #include "loom/target/arch/amdgpu/amdhsa_target_id.h"
@@ -16,7 +20,13 @@
 #include "loom/target/arch/amdgpu/provider.h"
 #include "loom/target/arch/amdgpu/records/target_records.h"
 #include "loom/target/arch/amdgpu/target_info.h"
+#if LOOMC_TARGET_HAVE_VM_LAUNCH_CONFIG
+#include "loom/target/arch/vm/provider.h"
+#endif  // LOOMC_TARGET_HAVE_VM_LAUNCH_CONFIG
 #include "loom/target/emit/native/amdgpu/hal_kernel_library.h"
+#if LOOMC_TARGET_HAVE_VM_LAUNCH_CONFIG
+#include "loom/target/emit/vm/launch_config_compiler.h"
+#endif  // LOOMC_TARGET_HAVE_VM_LAUNCH_CONFIG
 #include "loomc/iree.h"
 #include "target.h"
 
@@ -296,6 +306,13 @@ static iree_status_t loomc_amdgpu_emit_module_artifact(
       .capacity = export_projection_capacity,
   };
   const loom_amdgpu_hal_kernel_library_options_t library_options = {
+      .low_environment =
+          {
+              .descriptor_registry = request->low_descriptor_registry,
+              .verify_providers =
+                  loom_target_environment_low_verify_provider_list(
+                      request->target_environment),
+          },
       .function_versions = request->function_versions,
       .export_projection = &export_projection,
       .runtime_globals = runtime_globals,
@@ -378,6 +395,10 @@ static const loom_target_provider_t loomc_amdgpu_emit_target_provider = {
 
 static const loom_target_provider_t* const kLoomcAmdgpuTargetProviders[] = {
     &loom_amdgpu_target_provider,
+#if LOOMC_TARGET_HAVE_VM_LAUNCH_CONFIG
+    &loom_vm_target_provider,
+    &loom_vm_launch_config_compiler_provider,
+#endif  // LOOMC_TARGET_HAVE_VM_LAUNCH_CONFIG
     &loomc_amdgpu_emit_target_provider,
 };
 

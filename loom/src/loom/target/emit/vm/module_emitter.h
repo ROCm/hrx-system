@@ -15,6 +15,7 @@
 #include "loom/codegen/low/allocation/target_constraints.h"
 #include "loom/error/emitter.h"
 #include "loom/ir/ir.h"
+#include "loom/target/emit/vm/module_selection.h"
 #include "loom/target/low_descriptor_registry.h"
 #include "loom/target/provider.h"
 
@@ -37,6 +38,8 @@ typedef struct loom_vm_module_emitter_options_t {
   // Optional caller-owned buffer receiving public export ordinals for
   // functions with stable compiler versions.
   loom_target_emit_export_projection_buffer_t* export_projection;
+  // Optional artifact-local callable and module-state selection.
+  const loom_vm_module_emission_selection_t* selection;
 } loom_vm_module_emitter_options_t;
 
 // Emits one immutable segmented VM bytecode image from prepared target-low IR.

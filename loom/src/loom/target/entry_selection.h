@@ -135,7 +135,7 @@ iree_status_t loom_target_entry_verify_module(
 // verification errors are reported through |out_result|.
 iree_status_t loom_target_entry_verify_low_module(
     const loom_module_t* module,
-    const loom_target_low_descriptor_registry_t* low_registry,
+    const loom_low_descriptor_registry_t* low_registry,
     const loom_target_entry_options_t* options,
     loom_target_entry_diagnostic_emitter_t* diagnostic_emitter,
     uint32_t default_max_errors,

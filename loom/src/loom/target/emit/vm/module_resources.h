@@ -13,6 +13,7 @@
 #include "iree/base/internal/arena.h"
 #include "iree/vm/bytecode/wire/module_format.h"
 #include "loom/ir/ir.h"
+#include "loom/target/emit/vm/module_selection.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -68,7 +69,9 @@ typedef struct loom_vm_module_resource_layout_t {
 // prefix of each global domain. Returned arrays are owned by |arena|;
 // referenced contents continue to borrow source module storage.
 iree_status_t loom_vm_module_resource_layout_build(
-    const loom_module_t* module, iree_arena_allocator_t* arena,
+    const loom_module_t* module,
+    const loom_vm_module_emission_selection_t* selection,
+    iree_arena_allocator_t* arena,
     loom_vm_module_resource_layout_t* out_layout);
 
 #ifdef __cplusplus

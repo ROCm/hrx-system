@@ -20,6 +20,7 @@ _LOW_PASS_ENVIRONMENT_VISIBILITY = [
     "//loom/src/loom/pass:__pkg__",
     "//loom/src/loom/target/arch/amdgpu:__pkg__",
     "//loom/src/loom/target/arch/amdgpu/hal:__pkg__",
+    "//loom/src/loom/target/arch/vm:__pkg__",
     "//loom/src/loom/transforms/cleanup:__pkg__",
     "//loom/src/loom/transforms/kernel:__pkg__",
     "//loom/src/loom/tooling/compile:__pkg__",

@@ -50,6 +50,13 @@ typedef struct loom_vm_module_resource_presence_t {
   uint8_t* value_globals;
 } loom_vm_module_resource_presence_t;
 
+static bool loom_vm_module_resource_layout_includes_state(
+    const loom_vm_module_emission_selection_t* selection) {
+  return selection == NULL ||
+         !iree_any_bit_set(selection->flags,
+                           LOOM_VM_MODULE_EMISSION_SELECTION_FLAG_STATELESS);
+}
+
 static iree_status_t loom_vm_module_resource_resolve_source(
     const loom_module_t* module, loom_symbol_ref_t source_ref,
     const loom_op_t** out_source_op) {
@@ -161,8 +168,12 @@ static iree_status_t loom_vm_module_rodata_layout_resolve(
 }
 
 static iree_status_t loom_vm_module_resource_layout_count(
-    const loom_module_t* module, loom_vm_module_resource_counts_t* out_counts) {
+    const loom_module_t* module,
+    const loom_vm_module_emission_selection_t* selection,
+    loom_vm_module_resource_counts_t* out_counts) {
   *out_counts = (loom_vm_module_resource_counts_t){0};
+  const bool include_state =
+      loom_vm_module_resource_layout_includes_state(selection);
   const loom_op_t* op = NULL;
   loom_block_for_each_op(loom_region_const_entry_block(module->body), op) {
     if (loom_vm_constant_isa(op)) {
@@ -178,7 +189,7 @@ static iree_status_t loom_vm_module_resource_layout_count(
             "VM constant-pool count exceeds the u16 ordinal domain");
       }
       ++out_counts->constants;
-    } else if (loom_vm_global_isa(op)) {
+    } else if (include_state && loom_vm_global_isa(op)) {
       loom_vm_module_global_record_t record;
       IREE_RETURN_IF_ERROR(
           loom_vm_module_global_record_resolve(module, op, &record));
@@ -191,7 +202,7 @@ static iree_status_t loom_vm_module_resource_layout_count(
       if (record.is_immutable) {
         ++out_counts->immutable_globals[record.bank];
       }
-    } else if (loom_vm_rodata_isa(op)) {
+    } else if (include_state && loom_vm_rodata_isa(op)) {
       uint16_t ordinal = 0;
       loom_vm_module_rodata_layout_t rodata;
       IREE_RETURN_IF_ERROR(
@@ -339,14 +350,19 @@ static iree_status_t loom_vm_module_resource_layout_insert_global(
 }
 
 iree_status_t loom_vm_module_resource_layout_build(
-    const loom_module_t* module, iree_arena_allocator_t* arena,
+    const loom_module_t* module,
+    const loom_vm_module_emission_selection_t* selection,
+    iree_arena_allocator_t* arena,
     loom_vm_module_resource_layout_t* out_layout) {
   loom_vm_module_resource_counts_t counts;
-  IREE_RETURN_IF_ERROR(loom_vm_module_resource_layout_count(module, &counts));
+  IREE_RETURN_IF_ERROR(
+      loom_vm_module_resource_layout_count(module, selection, &counts));
   loom_vm_module_resource_presence_t presence;
   IREE_RETURN_IF_ERROR(loom_vm_module_resource_layout_allocate(
       &counts, arena, &presence, out_layout));
 
+  const bool include_state =
+      loom_vm_module_resource_layout_includes_state(selection);
   const loom_op_t* op = NULL;
   loom_block_for_each_op(loom_region_const_entry_block(module->body), op) {
     if (loom_vm_constant_isa(op)) {
@@ -362,13 +378,13 @@ iree_status_t loom_vm_module_resource_layout_build(
       }
       presence.constants[ordinal] = 1;
       out_layout->constant_cells[ordinal] = (uint64_t)loom_vm_constant_bits(op);
-    } else if (loom_vm_global_isa(op)) {
+    } else if (include_state && loom_vm_global_isa(op)) {
       loom_vm_module_global_record_t record;
       IREE_RETURN_IF_ERROR(
           loom_vm_module_global_record_resolve(module, op, &record));
       IREE_RETURN_IF_ERROR(loom_vm_module_resource_layout_insert_global(
           &record, presence.value_globals, out_layout));
-    } else if (loom_vm_rodata_isa(op)) {
+    } else if (include_state && loom_vm_rodata_isa(op)) {
       uint16_t ordinal = 0;
       loom_vm_module_rodata_layout_t rodata;
       IREE_RETURN_IF_ERROR(

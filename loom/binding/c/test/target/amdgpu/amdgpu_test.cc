@@ -12,7 +12,7 @@
 
 #include "iree/base/api.h"
 #include "iree/testing/gtest.h"
-#include "loom/binding/c/test/target/amdgpu/testdata/launch_config_callable_closure_testdata.h"
+#include "loom/binding/c/test/target/amdgpu/testdata/launch_config_sources_testdata.h"
 #include "loomc/artifact.h"
 #include "loomc/artifact_manifest.h"
 #include "loomc/compile.h"
@@ -166,12 +166,10 @@ SourcePtr CreateTextSource(const char* identifier, const char* contents) {
                       strlen(contents));
 }
 
-const iree_file_toc_t* FindLaunchConfigCallableClosureSource(
-    const char* filename) {
-  const iree_file_toc_t* files =
-      loomc_launch_config_callable_closure_testdata_create();
-  for (iree_host_size_t i = 0;
-       i < loomc_launch_config_callable_closure_testdata_size(); ++i) {
+const iree_file_toc_t* FindLaunchConfigSource(const char* filename) {
+  const iree_file_toc_t* files = loomc_launch_config_sources_testdata_create();
+  for (iree_host_size_t i = 0; i < loomc_launch_config_sources_testdata_size();
+       ++i) {
     if (strcmp(files[i].name, filename) == 0) return &files[i];
   }
   return nullptr;
@@ -881,14 +879,51 @@ kernel.def target(@gfx1151) @decode(%row_count: i32, %scale: bf16) {
   EXPECT_EQ(decode_config.workgroup_count.x, 64u);
 }
 
+TEST(AmdgpuTargetTest,
+     LaunchConfigArtifactRejectsNonScalarWorkloadWithDiagnostic) {
+  TargetEnvironmentPtr target_environment = CreateAmdgpuTargetEnvironment();
+  ContextPtr context = CreateAmdgpuContext(target_environment.get());
+  WorkspacePtr workspace = CreateWorkspace();
+  CompilerPtr compiler = CreateCompiler(context.get());
+  PassProgramPtr pass_program = CreatePreparedLowPassProgram(context.get());
+  const iree_file_toc_t* source_file =
+      FindLaunchConfigSource("launch_config_non_scalar_workload.loom");
+  ASSERT_NE(source_file, nullptr);
+  SourcePtr source = CreateSource(LOOMC_SOURCE_FORMAT_TEXT, source_file->name,
+                                  source_file->data, source_file->size);
+  ModulePtr module =
+      DeserializeModule(context.get(), workspace.get(), source.get());
+  const loomc_compile_options_t options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
+      /*.structure_size=*/sizeof(options),
+      /*.next=*/nullptr,
+      /*.module_name=*/loomc_make_cstring_view("non_scalar_workload"),
+      /*.artifact_flags=*/LOOMC_COMPILE_ARTIFACT_FLAG_LAUNCH_CONFIG,
+  };
+  loomc_result_t* result = nullptr;
+  LOOMC_ASSERT_OK(loomc_compile_module(
+      compiler.get(), workspace.get(), pass_program.get(), module.get(),
+      &options, loomc_allocator_system(), &result));
+  ResultPtr result_ptr(result);
+  ASSERT_NE(result_ptr.get(), nullptr);
+  EXPECT_FALSE(loomc_result_succeeded(result_ptr.get()));
+  ASSERT_EQ(loomc_result_diagnostic_count(result_ptr.get()), 1u);
+  const loomc_diagnostic_t* diagnostic =
+      loomc_result_diagnostic_at(result_ptr.get(), 0);
+  ASSERT_NE(diagnostic, nullptr);
+  EXPECT_EQ(ToString(diagnostic->code), "TYPE/014");
+  EXPECT_NE(ToString(diagnostic->message).find("scalar VM launch-config ABI"),
+            std::string::npos);
+}
+
 TEST(AmdgpuTargetTest, LaunchConfigArtifactPreservesCallableClosure) {
   TargetEnvironmentPtr target_environment = CreateAmdgpuTargetEnvironment();
   ContextPtr context = CreateAmdgpuContext(target_environment.get());
   WorkspacePtr workspace = CreateWorkspace();
   CompilerPtr compiler = CreateCompiler(context.get());
   PassProgramPtr pass_program = CreatePreparedLowPassProgram(context.get());
-  const iree_file_toc_t* source_file = FindLaunchConfigCallableClosureSource(
-      "launch_config_callable_closure.loom");
+  const iree_file_toc_t* source_file =
+      FindLaunchConfigSource("launch_config_callable_closure.loom");
   ASSERT_NE(source_file, nullptr);
   SourcePtr source = CreateSource(LOOMC_SOURCE_FORMAT_TEXT, source_file->name,
                                   source_file->data, source_file->size);
@@ -925,6 +960,7 @@ TEST(AmdgpuTargetTest, LaunchConfigArtifactPreservesCallableClosure) {
   const TestCase test_cases[] = {
       {"call_chain", 5, 18},
       {"call_shared_and_recursive", 7, 21},
+      {"call_target_query_helper", 3, 96},
   };
   for (const TestCase& test_case : test_cases) {
     loomc_launch_config_function_t launch_function =

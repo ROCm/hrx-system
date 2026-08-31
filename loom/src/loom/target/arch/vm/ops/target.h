@@ -11,6 +11,7 @@
 
 #include "iree/base/api.h"
 #include "loom/ir/ir.h"
+#include "loom/target/types.h"
 
 typedef struct loom_builder_t loom_builder_t;
 
@@ -23,6 +24,14 @@ iree_status_t loom_vm_target_build_core(loom_builder_t* builder,
                                         loom_symbol_ref_t symbol,
                                         loom_location_id_t location,
                                         loom_op_t** out_target_op);
+
+// Builds a Core VM target definition with the common execution limits from
+// |source_snapshot|. Device-specific identity, ABI, address-space, and
+// representation fields are intentionally not projected.
+iree_status_t loom_vm_target_build_core_with_execution_limits(
+    loom_builder_t* builder, loom_symbol_ref_t symbol,
+    const loom_target_snapshot_t* source_snapshot, loom_location_id_t location,
+    loom_op_t** out_target_op);
 
 #ifdef __cplusplus
 }  // extern "C"

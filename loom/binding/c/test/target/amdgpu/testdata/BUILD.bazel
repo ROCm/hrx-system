@@ -13,11 +13,14 @@ package(
 )
 
 iree_c_embed_data(
-    name = "launch_config_callable_closure",
+    name = "launch_config_sources",
     testonly = True,
-    srcs = ["launch_config_callable_closure.loom"],
-    c_file_output = "launch_config_callable_closure_testdata.c",
+    srcs = [
+        "launch_config_callable_closure.loom",
+        "launch_config_non_scalar_workload.loom",
+    ],
+    c_file_output = "launch_config_sources_testdata.c",
     flatten = True,
-    h_file_output = "launch_config_callable_closure_testdata.h",
-    identifier = "loomc_launch_config_callable_closure_testdata",
+    h_file_output = "launch_config_sources_testdata.h",
+    identifier = "loomc_launch_config_sources_testdata",
 )

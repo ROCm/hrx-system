@@ -68,9 +68,15 @@ static bool loom_vm_module_layout_imports_equal(
 // Mixed-target modules retain every target product until artifact emission;
 // the representation contract is the artifact-local ownership boundary.
 static bool loom_vm_module_layout_selects_function(
-    const loom_module_t* module, const loom_op_t* function_op) {
+    const loom_module_t* module,
+    const loom_vm_module_emission_selection_t* selection,
+    loom_symbol_id_t symbol_id, const loom_op_t* function_op) {
   if (function_op == NULL || (!loom_low_function_def_isa(function_op) &&
                               !loom_low_func_decl_isa(function_op))) {
+    return false;
+  }
+  if (selection != NULL && selection->symbol_liveness != NULL &&
+      !loom_symbol_liveness_is_live(selection->symbol_liveness, symbol_id)) {
     return false;
   }
   const loom_string_id_t descriptor_set_id = loom_func_like_repr_contract(
@@ -142,13 +148,15 @@ static iree_status_t loom_vm_module_layout_summarize_function(
 }
 
 static iree_status_t loom_vm_module_layout_count(
-    const loom_module_t* module, iree_host_size_t* out_function_count,
-    iree_host_size_t* out_import_count) {
+    const loom_module_t* module,
+    const loom_vm_module_emission_selection_t* selection,
+    iree_host_size_t* out_function_count, iree_host_size_t* out_import_count) {
   *out_function_count = 0;
   *out_import_count = 0;
   for (iree_host_size_t i = 0; i < module->symbols.count; ++i) {
     const loom_op_t* defining_op = module->symbols.entries[i].defining_op;
-    if (!loom_vm_module_layout_selects_function(module, defining_op)) {
+    if (!loom_vm_module_layout_selects_function(
+            module, selection, (loom_symbol_id_t)i, defining_op)) {
       continue;
     }
     if (loom_low_func_decl_isa(defining_op)) {
@@ -221,14 +229,15 @@ static iree_status_t loom_vm_module_layout_resolve_signatures(
 }
 
 static iree_status_t loom_vm_module_layout_populate_functions(
-    loom_module_t* module, iree_arena_allocator_t* arena,
-    loom_vm_module_layout_t* layout) {
+    loom_module_t* module, const loom_vm_module_emission_selection_t* selection,
+    iree_arena_allocator_t* arena, loom_vm_module_layout_t* layout) {
   iree_host_size_t function_index = 0;
   for (iree_host_size_t symbol_index = 0; symbol_index < module->symbols.count;
        ++symbol_index) {
     const loom_symbol_t* symbol = &module->symbols.entries[symbol_index];
     loom_op_t* function_op = symbol->defining_op;
-    if (!loom_vm_module_layout_selects_function(module, function_op) ||
+    if (!loom_vm_module_layout_selects_function(
+            module, selection, (loom_symbol_id_t)symbol_index, function_op) ||
         !loom_low_function_def_isa(function_op)) {
       continue;
     }
@@ -244,6 +253,10 @@ static iree_status_t loom_vm_module_layout_populate_functions(
         };
     function->export_name = loom_func_like_export_name(
         module, symbol, loom_func_like_cast(module, function_op));
+    if (selection != NULL && selection->export_symbols != NULL &&
+        !selection->export_symbols[symbol_index]) {
+      function->export_name = iree_string_view_empty();
+    }
     if (!iree_string_view_is_empty(function->export_name)) {
       ++layout->export_count;
     }
@@ -268,14 +281,16 @@ static iree_status_t loom_vm_module_layout_populate_functions(
 }
 
 static iree_status_t loom_vm_module_layout_populate_imports(
-    loom_module_t* module, iree_arena_allocator_t* arena,
-    loom_vm_module_layout_t* layout) {
+    loom_module_t* module, const loom_vm_module_emission_selection_t* selection,
+    iree_arena_allocator_t* arena, loom_vm_module_layout_t* layout) {
   iree_host_size_t import_index = 0;
   for (iree_host_size_t symbol_index = 0; symbol_index < module->symbols.count;
        ++symbol_index) {
     const loom_symbol_t* symbol = &module->symbols.entries[symbol_index];
     loom_op_t* declaration_op = symbol->defining_op;
-    if (!loom_vm_module_layout_selects_function(module, declaration_op) ||
+    if (!loom_vm_module_layout_selects_function(module, selection,
+                                                (loom_symbol_id_t)symbol_index,
+                                                declaration_op) ||
         !loom_low_func_decl_isa(declaration_op)) {
       continue;
     }
@@ -529,15 +544,15 @@ static iree_status_t loom_vm_module_layout_assign_imports(
   return iree_ok_status();
 }
 
-iree_status_t loom_vm_module_layout_build(loom_module_t* module,
-                                          iree_arena_allocator_t* arena,
-                                          loom_vm_module_layout_t* out_layout) {
+iree_status_t loom_vm_module_layout_build(
+    loom_module_t* module, const loom_vm_module_emission_selection_t* selection,
+    iree_arena_allocator_t* arena, loom_vm_module_layout_t* out_layout) {
   *out_layout = (loom_vm_module_layout_t){
       .module = module,
   };
-  IREE_RETURN_IF_ERROR(
-      loom_vm_module_layout_count(module, &out_layout->function_count,
-                                  &out_layout->import_declaration_count));
+  IREE_RETURN_IF_ERROR(loom_vm_module_layout_count(
+      module, selection, &out_layout->function_count,
+      &out_layout->import_declaration_count));
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, out_layout->function_count, sizeof(*out_layout->functions),
       (void**)&out_layout->functions));
@@ -560,12 +575,12 @@ iree_status_t loom_vm_module_layout_build(loom_module_t* module,
           (loom_vm_module_call_target_t){.ordinal = UINT16_MAX};
     }
   }
-  IREE_RETURN_IF_ERROR(
-      loom_vm_module_layout_populate_functions(module, arena, out_layout));
-  IREE_RETURN_IF_ERROR(
-      loom_vm_module_layout_populate_imports(module, arena, out_layout));
+  IREE_RETURN_IF_ERROR(loom_vm_module_layout_populate_functions(
+      module, selection, arena, out_layout));
+  IREE_RETURN_IF_ERROR(loom_vm_module_layout_populate_imports(
+      module, selection, arena, out_layout));
   IREE_RETURN_IF_ERROR(loom_vm_module_resource_layout_build(
-      module, arena, &out_layout->resources));
+      module, selection, arena, &out_layout->resources));
   IREE_RETURN_IF_ERROR(
       loom_vm_module_layout_derive_function_yieldability(arena, out_layout));
   IREE_RETURN_IF_ERROR(loom_vm_module_layout_assign_exports(arena, out_layout));

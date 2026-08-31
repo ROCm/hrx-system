@@ -8,7 +8,6 @@
 
 #include <string.h>
 
-#include "loom/codegen/low/launch_config_program.h"
 #include "loom/codegen/low/lower/lower.h"
 #include "loom/codegen/low/lower/source_selection.h"
 #include "loom/codegen/low/pipeline/pass_environment.h"
@@ -304,8 +303,6 @@ iree_status_t loom_low_source_to_low_run(loom_pass_t* pass,
       loom_target_pass_capability_from_pass(pass);
   loom_target_compile_report_t* compile_report =
       loom_low_pass_capability_compile_report(low_capability);
-  loom_kernel_launch_config_program_t* launch_config_program =
-      loom_kernel_launch_config_program_from_pass(pass);
   const iree_allocator_t source_low_report_allocator =
       loom_target_compile_report_wants_details(
           compile_report, LOOM_TARGET_COMPILE_REPORT_DETAIL_SOURCE_LOW_ROWS)
@@ -361,28 +358,6 @@ iree_status_t loom_low_source_to_low_run(loom_pass_t* pass,
   if (control_flow_changed) {
     loom_pass_value_fact_owner_invalidate(pass->value_facts);
     loom_pass_mark_changed(pass);
-  }
-  if (launch_config_program != NULL) {
-    for (iree_host_size_t i = 0;
-         i < selection_list.count && iree_status_is_ok(status); ++i) {
-      const loom_low_source_selection_t* selection = &selection_list.values[i];
-      if (selection->kind != LOOM_LOW_SOURCE_SELECTION_FUNCTION ||
-          !loom_kernel_def_isa(selection->func.op)) {
-        continue;
-      }
-      loom_value_fact_table_t* fact_table = NULL;
-      status = loom_pass_value_facts_acquire(
-          pass, module,
-          loom_pass_value_fact_scope_function_for_target(
-              selection->func, selection->target_facts),
-          &fact_table);
-      if (iree_status_is_ok(status)) {
-        status = loom_kernel_launch_config_program_capture(
-            launch_config_program, module, selection->func,
-            selection->function_name, selection->version_handle,
-            selection->target_facts, fact_table);
-      }
-    }
   }
   if (iree_status_is_ok(status)) {
     status =

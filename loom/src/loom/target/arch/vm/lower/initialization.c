@@ -6,6 +6,8 @@
 
 #include "loom/target/arch/vm/lower/initialization.h"
 
+#include <string.h>
+
 #include "loom/error/error_catalog.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
@@ -126,7 +128,7 @@ static iree_status_t loom_vm_initialization_reserve_function_symbol(
                         "__vm_initialize$%u", (unsigned)suffix_ordinal);
       if (name_length < 0 ||
           (iree_host_size_t)name_length >= IREE_ARRAYSIZE(name_storage)) {
-        return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+        return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                                 "VM initializer symbol name overflow");
       }
       name = iree_make_string_view(name_storage, (iree_host_size_t)name_length);
@@ -148,7 +150,7 @@ static iree_status_t loom_vm_initialization_reserve_function_symbol(
     };
     return iree_ok_status();
   }
-  return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+  return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                           "no unique VM initializer symbol is available");
 }
 
@@ -200,6 +202,13 @@ iree_status_t loom_vm_materialize_initializer(
   };
   loom_symbol_ref_t vm_target_ref = loom_symbol_ref_null();
   iree_host_size_t vm_target_count = 0;
+  uint8_t* vm_target_seen = NULL;
+  if (module->symbols.count != 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        scratch_arena, module->symbols.count, sizeof(*vm_target_seen),
+        (void**)&vm_target_seen));
+    memset(vm_target_seen, 0, module->symbols.count * sizeof(*vm_target_seen));
+  }
   loom_func_like_t initializer = {0};
   const loom_op_t* inline_global = NULL;
   for (iree_host_size_t i = 0; i < module->symbols.count; ++i) {
@@ -213,23 +222,23 @@ iree_status_t loom_vm_materialize_initializer(
           !loom_attr_is_absent(loom_global_variable_initializer(op))))) {
       inline_global = op;
     }
-    if (loom_vm_target_isa(op)) {
-      if (vm_target_count == 0) {
-        vm_target_ref = (loom_symbol_ref_t){
-            .module_id = 0,
-            .symbol_id = (loom_symbol_id_t)i,
-        };
-      }
-      ++vm_target_count;
-      continue;
-    }
-
     loom_func_like_t function = loom_func_like_cast(module, op);
     if (!loom_func_like_isa(function) ||
         loom_func_like_body(function) == NULL ||
         !loom_vm_initialization_target_is_vm(module,
                                              loom_func_like_target(function))) {
       continue;
+    }
+    const loom_symbol_ref_t target_ref = loom_func_like_target(function);
+    // Pure projection functions cannot observe module state and therefore do
+    // not establish ownership of the module initializer. This keeps stateless
+    // companion targets from making an otherwise unambiguous stateful program
+    // appear to have multiple initializer targets.
+    if (loom_func_like_purity(function) == 0 &&
+        !vm_target_seen[target_ref.symbol_id]) {
+      vm_target_seen[target_ref.symbol_id] = 1;
+      if (vm_target_count == 0) vm_target_ref = target_ref;
+      ++vm_target_count;
     }
     const iree_string_view_t effective_export_name =
         loom_func_like_export_name(module, symbol, function);
@@ -249,7 +258,6 @@ iree_status_t loom_vm_materialize_initializer(
     }
     initializer = function;
   }
-  if (vm_target_count == 0) return iree_ok_status();
   if (initializer.op != NULL && initializer.op->result_count != 0) {
     out_result->valid = false;
     return loom_vm_initialization_emit_result_count(diagnostic_emitter, module,
@@ -282,6 +290,7 @@ iree_status_t loom_vm_materialize_initializer(
     return iree_ok_status();
   }
 
+  if (vm_target_count == 0) return iree_ok_status();
   if (inline_global == NULL) return iree_ok_status();
   if (vm_target_count != 1) {
     out_result->valid = false;

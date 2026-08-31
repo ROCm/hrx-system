@@ -10,9 +10,20 @@
 iree_add_all_subdirs()
 
 if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR)
+set(_llvmir_platform_copts "")
+if(LOOM_TARGET_ARCH_VM)
+  list(APPEND _llvmir_platform_copts "-DLOOMC_TARGET_HAVE_VM_LAUNCH_CONFIG=1")
+endif()
+set(_llvmir_platform_deps "")
+if(LOOM_TARGET_ARCH_VM)
+  list(APPEND _llvmir_platform_deps loom::target::arch::vm::provider)
+  list(APPEND _llvmir_platform_deps loom::target::emit::vm::launch_config_compiler)
+endif()
 loom_cc_library(
   NAME
     llvmir
+  COPTS
+    ${_llvmir_platform_copts}
   HDRS
     "${PROJECT_SOURCE_DIR}/loom/binding/c/include/loomc/target/llvmir.h"
     "${PROJECT_SOURCE_DIR}/loom/binding/c/include/loomc/target/llvmir/base.h"
@@ -23,6 +34,7 @@ loom_cc_library(
     loom::binding::c::loomc
     loom::target::arch::llvmir::provider
     loom::target::emit::llvmir::artifact_emitter
+    ${_llvmir_platform_deps}
   ALWAYSLINK
   PUBLIC
 )

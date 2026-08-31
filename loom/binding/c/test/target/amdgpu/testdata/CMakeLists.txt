@@ -11,15 +11,16 @@ iree_add_all_subdirs()
 
 iree_c_embed_data(
   NAME
-    launch_config_callable_closure
+    launch_config_sources
   SRCS
     "launch_config_callable_closure.loom"
+    "launch_config_non_scalar_workload.loom"
   C_FILE_OUTPUT
-    "launch_config_callable_closure_testdata.c"
+    "launch_config_sources_testdata.c"
   H_FILE_OUTPUT
-    "launch_config_callable_closure_testdata.h"
+    "launch_config_sources_testdata.h"
   IDENTIFIER
-    "loomc_launch_config_callable_closure_testdata"
+    "loomc_launch_config_sources_testdata"
   TESTONLY
   FLATTEN
   PUBLIC

@@ -495,7 +495,7 @@ static const loom_target_artifact_manifest_target_projection_t
 
 static iree_status_t loom_amdgpu_hal_kernel_library_prepare_kernel_plan(
     loom_module_t* module, loom_target_entry_t* entry,
-    const loom_target_low_descriptor_registry_t* low_registry,
+    const loom_low_descriptor_registry_t* low_registry,
     loom_target_entry_diagnostic_emitter_t* diagnostic_emitter,
     iree_arena_allocator_t* table_arena, loom_target_compile_report_t* report,
     loom_amdgpu_hal_kernel_library_kernel_plan_t* out_plan) {
@@ -504,9 +504,8 @@ static iree_status_t loom_amdgpu_hal_kernel_library_prepare_kernel_plan(
   loom_symbol_fact_table_t symbol_facts = {0};
   loom_symbol_fact_table_initialize(&symbol_facts, table_arena);
   IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
-      module, &symbol_facts, entry->func.op, entry->target_facts,
-      &low_registry->registry, loom_target_entry_emitter(diagnostic_emitter),
-      &out_plan->target));
+      module, &symbol_facts, entry->func.op, entry->target_facts, low_registry,
+      loom_target_entry_emitter(diagnostic_emitter), &out_plan->target));
   if (out_plan->target.descriptor_set == NULL) {
     return iree_ok_status();
   }
@@ -623,8 +622,7 @@ loom_amdgpu_hal_kernel_library_validate_final_workgroup_storage(
 }
 
 static iree_status_t loom_amdgpu_hal_kernel_library_build_kernel_contribution(
-    loom_module_t* module,
-    const loom_target_low_descriptor_registry_t* low_registry,
+    loom_module_t* module, const loom_low_descriptor_registry_t* low_registry,
     const loom_amdgpu_hal_kernel_library_kernel_plan_t* plan,
     loom_target_entry_diagnostic_emitter_t* diagnostic_emitter,
     iree_arena_allocator_t* table_arena, iree_string_builder_t* target_listing,
@@ -646,7 +644,7 @@ static iree_status_t loom_amdgpu_hal_kernel_library_build_kernel_contribution(
   loom_low_storage_lease_provider_t storage_lease_provider = {0};
   loom_amdgpu_storage_lease_provider(&storage_lease_provider);
   const loom_low_emission_frame_options_t frame_options = {
-      .descriptor_registry = &low_registry->registry,
+      .descriptor_registry = low_registry,
       .function_target_facts = plan->target.target_facts,
       .residency_model = residency_model,
       .schedule_pair_affinities = schedule_pair_affinities,
@@ -852,7 +850,7 @@ static iree_status_t loom_amdgpu_hal_kernel_library_compose_data_symbols(
 
 static iree_status_t loom_amdgpu_hal_kernel_library_entries(
     loom_module_t* module, const loom_target_entry_options_t* target_options,
-    const loom_target_low_descriptor_registry_t* low_registry,
+    const loom_low_descriptor_registry_t* low_registry,
     loom_low_verify_provider_list_t low_verify_provider_list,
     loom_target_entry_list_t entries,
     loom_target_entry_diagnostic_emitter_t* diagnostic_emitter,
@@ -1140,13 +1138,26 @@ iree_status_t loom_amdgpu_emit_hal_kernel_library(
           options ? options->source_resolver : (loom_source_resolver_t){0},
       .max_errors = options ? options->max_errors : 0,
   };
+  const loom_low_descriptor_registry_t* low_registry =
+      options ? options->low_environment.descriptor_registry : NULL;
+  loom_low_verify_provider_list_t low_verify_provider_list =
+      options ? options->low_environment.verify_providers
+              : loom_low_verify_provider_list_empty();
   loom_target_environment_t target_environment = {0};
-  iree_status_t status = loom_target_environment_initialize(
-      &loom_amdgpu_target_provider_set, &target_environment);
-  loom_target_low_descriptor_registry_t low_registry = {0};
-  if (iree_status_is_ok(status)) {
-    status = loom_target_environment_initialize_low_descriptor_registry(
-        &target_environment, &low_registry);
+  loom_target_low_descriptor_registry_t standalone_low_registry = {0};
+  iree_status_t status = iree_ok_status();
+  if (low_registry == NULL) {
+    status = loom_target_environment_initialize(
+        &loom_amdgpu_target_provider_set, &target_environment);
+    if (iree_status_is_ok(status)) {
+      status = loom_target_environment_initialize_low_descriptor_registry(
+          &target_environment, &standalone_low_registry);
+    }
+    if (iree_status_is_ok(status)) {
+      low_registry = &standalone_low_registry.registry;
+      low_verify_provider_list =
+          loom_target_environment_low_verify_provider_list(&target_environment);
+    }
   }
   loom_target_entry_diagnostic_emitter_t diagnostic_emitter = {0};
   loom_target_entry_diagnostic_emitter_initialize(
@@ -1197,8 +1208,7 @@ iree_status_t loom_amdgpu_emit_hal_kernel_library(
   if (iree_status_is_ok(status) && selected &&
       diagnostic_emitter.error_count == 0) {
     status = loom_amdgpu_hal_kernel_library_entries(
-        module, &target_options, &low_registry,
-        loom_target_environment_low_verify_provider_list(&target_environment),
+        module, &target_options, low_registry, low_verify_provider_list,
         entries, &diagnostic_emitter, &table_arena, report, options,
         out_emitted, out_library, allocator);
   }

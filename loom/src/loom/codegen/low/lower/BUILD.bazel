@@ -101,6 +101,7 @@ loom_cc_library(
     visibility = [
         "//loom/src/loom/codegen/low/testing:__pkg__",
         "//loom/src/loom/codegen/low/transforms/pipeline:__pkg__",
+        "//loom/src/loom/target/arch/vm:__pkg__",
     ],
     deps = [
         ":lower",

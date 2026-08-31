@@ -11,6 +11,16 @@ iree_add_all_subdirs()
 
 loom_cc_library(
   NAME
+    launch_config_abi
+  HDRS
+    "launch_config_abi.h"
+  DEPS
+    iree::base
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     vm
   HDRS
     "artifact_emitter.h"
@@ -23,6 +33,7 @@ loom_cc_library(
     "module_metadata.h"
     "module_presentation.h"
     "module_resources.h"
+    "module_selection.h"
     "module_types.h"
   SRCS
     "artifact_emitter.c"
@@ -42,6 +53,7 @@ loom_cc_library(
     iree::io::stream
     iree::vm
     iree::vm::bytecode::wire
+    loom::analysis::symbol_liveness
     loom::codegen::low::allocation
     loom::codegen::low::allocation::target_constraints
     loom::codegen::low::descriptors
@@ -71,6 +83,22 @@ loom_cc_library(
     loom::target::registers
     loom::util::call_graph
     loom::util::stream
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    launch_config_compiler
+  HDRS
+    "launch_config_compiler.h"
+  SRCS
+    "launch_config_compiler.c"
+  DEPS
+    ::vm
+    iree::base
+    loom::pass::builder
+    loom::target::arch::vm::launch_config_program
+    loom::target::provider
   PUBLIC
 )
 

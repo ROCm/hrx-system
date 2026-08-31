@@ -10,9 +10,20 @@
 iree_add_all_subdirs()
 
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
+set(_amdgpu_platform_copts "")
+if(LOOM_TARGET_ARCH_VM)
+  list(APPEND _amdgpu_platform_copts "-DLOOMC_TARGET_HAVE_VM_LAUNCH_CONFIG=1")
+endif()
+set(_amdgpu_platform_deps "")
+if(LOOM_TARGET_ARCH_VM)
+  list(APPEND _amdgpu_platform_deps loom::target::arch::vm::provider)
+  list(APPEND _amdgpu_platform_deps loom::target::emit::vm::launch_config_compiler)
+endif()
 loom_cc_library(
   NAME
     amdgpu
+  COPTS
+    ${_amdgpu_platform_copts}
   HDRS
     "${PROJECT_SOURCE_DIR}/loom/binding/c/include/loomc/target/amdgpu.h"
     "${PROJECT_SOURCE_DIR}/loom/binding/c/include/loomc/target/amdgpu/base.h"
@@ -38,6 +49,7 @@ loom_cc_library(
     loom::target::emit::native::amdgpu::hal_kernel_library
     loom::target::provider
     loom::target::types
+    ${_amdgpu_platform_deps}
   ALWAYSLINK
   PUBLIC
 )

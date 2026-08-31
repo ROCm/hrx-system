@@ -101,7 +101,6 @@ loom_cc_library(
     iree::vm
     iree::vm::bytecode
     loom::analysis::symbol_value_constraints
-    loom::codegen::low::launch_config_program
     loom::codegen::low::pipeline::legalizer_registry
     loom::codegen::low::pipeline::pass_environment
     loom::codegen::low::repr
@@ -140,9 +139,7 @@ loom_cc_library(
     loom::pass::tooling
     loom::pass::value_facts
     loom::sanitizer::options
-    loom::target::arch::vm::ops
-    loom::target::arch::vm::provider
-    loom::target::emit::vm
+    loom::target::emit::vm::launch_config_abi
     loom::target::function_version
     loom::target::function_version_projection
     loom::target::module_specialization

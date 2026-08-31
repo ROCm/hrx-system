@@ -207,8 +207,54 @@ func.def public target(@target) @initialize() {
 
 // RUN: pass vm-materialize-initializer
 
+vm.target<core> @program_target
+vm.target<core> @projection_target
+
+global.variable @count : i64 = 0
+
+func.def target(@program_target) @read_count() -> (i64) {
+  %count = global.load @count : i64
+  func.return %count : i64
+}
+
+func.def pure target(@projection_target) @projection(%value: i64) -> (i64) {
+  func.return %value : i64
+}
+
+// ----
+vm.target<core> @program_target
+
+vm.target<core> @projection_target
+
+global.variable @count : i64 = 0
+
+func.def target(@program_target) @read_count() -> (i64) {
+  %count = global.load @count : i64
+  func.return %count : i64
+}
+
+func.def pure target(@projection_target) @projection(%value: i64) -> (i64) {
+  func.return %value : i64
+}
+
+func.def initializer target(@program_target) export("initialize") @__vm_initialize() {
+  func.return
+}
+
+// ====
+
+// RUN: pass vm-materialize-initializer
+
 vm.target<core> @first_target
 vm.target<core> @second_target
 
 // ERROR@+1: TARGET/072 {target_count="2"}
 global.variable @count : i64 = 0
+
+func.def target(@first_target) @first() {
+  func.return
+}
+
+func.def target(@second_target) @second() {
+  func.return
+}

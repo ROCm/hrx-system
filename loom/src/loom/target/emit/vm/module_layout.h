@@ -15,6 +15,7 @@
 #include "loom/target/emit/vm/module_metadata.h"
 #include "loom/target/emit/vm/module_presentation.h"
 #include "loom/target/emit/vm/module_resources.h"
+#include "loom/target/emit/vm/module_selection.h"
 #include "loom/target/emit/vm/module_types.h"
 
 #ifdef __cplusplus
@@ -133,9 +134,9 @@ struct loom_vm_module_layout_t {
 // The returned arrays borrow module strings and are owned by |arena|. The
 // prepared low.func.decl operations with runtime link names become canonical
 // module imports. Plain declarations are rejected.
-iree_status_t loom_vm_module_layout_build(loom_module_t* module,
-                                          iree_arena_allocator_t* arena,
-                                          loom_vm_module_layout_t* out_layout);
+iree_status_t loom_vm_module_layout_build(
+    loom_module_t* module, const loom_vm_module_emission_selection_t* selection,
+    iree_arena_allocator_t* arena, loom_vm_module_layout_t* out_layout);
 
 // Resolves one module-local symbol reference to its direct-call target.
 //

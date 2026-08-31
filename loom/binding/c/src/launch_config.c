@@ -16,7 +16,7 @@
 #include "iree/vm/environment.h"
 #include "iree/vm/process.h"
 #include "iree/vm/variant.h"
-#include "loom/codegen/low/launch_config_abi.h"
+#include "loom/target/emit/vm/launch_config_abi.h"
 #include "loomc/iree.h"
 
 enum {
@@ -32,6 +32,9 @@ typedef struct loomc_launch_config_function_storage_t {
   // Stable public kernel export name borrowed from the loaded VM module.
   iree_string_view_t name;
 
+  // Final workgroup-local storage requirement in bytes.
+  uint64_t workgroup_storage_bytes;
+
   // Source-ordered scalar argument signature.
   struct {
     // Scalar types in program-owned slab storage.
@@ -41,6 +44,17 @@ typedef struct loomc_launch_config_function_storage_t {
     iree_host_size_t count;
   } arguments;
 } loomc_launch_config_function_storage_t;
+
+typedef struct loomc_launch_config_function_declaration_t {
+  // Public kernel export name with the private prefix removed.
+  iree_string_view_t name;
+
+  // Complete callable declaration borrowed from the loaded VM module.
+  iree_vm_module_callable_type_declaration_t callable;
+
+  // Final workgroup-local storage requirement in bytes.
+  uint64_t workgroup_storage_bytes;
+} loomc_launch_config_function_declaration_t;
 
 struct loomc_launch_config_program_t {
   // Atomic reference count for retained handle ownership.
@@ -118,51 +132,49 @@ static bool loomc_launch_config_scalar_type_is_supported(uint16_t kind,
 
 static iree_status_t loomc_launch_config_query_function(
     const iree_vm_module_t* module, iree_host_size_t export_ordinal,
-    iree_string_view_t* out_name,
-    iree_vm_module_callable_type_declaration_t* out_callable) {
-  *out_name = iree_string_view_empty();
-  *out_callable = (iree_vm_module_callable_type_declaration_t){0};
+    loomc_launch_config_function_declaration_t* out_declaration) {
+  *out_declaration = (loomc_launch_config_function_declaration_t){0};
   iree_vm_module_export_declaration_t export_declaration = {0};
   IREE_RETURN_IF_ERROR(
       iree_vm_module_query_export(module, export_ordinal, &export_declaration));
   const iree_string_view_t private_name = export_declaration.export_name;
-  if (private_name.size <= LOOM_KERNEL_LAUNCH_CONFIG_EXPORT_PREFIX_LENGTH ||
-      private_name.data[0] != LOOM_KERNEL_LAUNCH_CONFIG_EXPORT_PREFIX) {
+  if (private_name.size <= LOOM_VM_LAUNCH_CONFIG_EXPORT_PREFIX_LENGTH ||
+      private_name.data[0] != LOOM_VM_LAUNCH_CONFIG_EXPORT_PREFIX) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "launch config artifact export '%.*s' has no private name prefix",
         (int)private_name.size, private_name.data);
   }
-  *out_name = iree_string_view_remove_prefix(
-      private_name, LOOM_KERNEL_LAUNCH_CONFIG_EXPORT_PREFIX_LENGTH);
+  const iree_string_view_t name = iree_string_view_remove_prefix(
+      private_name, LOOM_VM_LAUNCH_CONFIG_EXPORT_PREFIX_LENGTH);
+  iree_vm_module_callable_type_declaration_t callable = {0};
   IREE_RETURN_IF_ERROR(iree_vm_module_query_callable_type(
-      module, export_declaration.callable_type_ordinal, out_callable));
-  if (iree_any_bit_set(out_callable->flags,
-                       IREE_VM_CALLABLE_TYPE_FLAG_MAY_YIELD)) {
+      module, export_declaration.callable_type_ordinal, &callable));
+  if (iree_any_bit_set(callable.flags, IREE_VM_CALLABLE_TYPE_FLAG_MAY_YIELD)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "launch config export '%.*s' must not be yieldable",
-                            (int)out_name->size, out_name->data);
+                            (int)name.size, name.data);
   }
 
   const iree_vm_module_signature_type_span_t arguments =
-      out_callable->signature.arguments;
+      callable.signature.arguments;
   for (iree_host_size_t i = 0; i < arguments.count; ++i) {
     if (!loomc_launch_config_scalar_type_is_supported(
             arguments.data[i].kind, arguments.data[i].type_ordinal)) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "launch config export '%.*s' argument %" PRIhsz
                               " is not a supported scalar",
-                              (int)out_name->size, out_name->data, i);
+                              (int)name.size, name.data, i);
     }
   }
 
   const iree_vm_module_signature_type_span_t results =
-      out_callable->signature.results;
-  if (results.count != LOOM_KERNEL_LAUNCH_CONFIG_RESULT_COUNT) {
+      callable.signature.results;
+  if (results.count != LOOM_VM_LAUNCH_CONFIG_RESULT_COUNT) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "launch config export '%.*s' must return %u values",
-                            (int)out_name->size, out_name->data,
-                            (unsigned)LOOM_KERNEL_LAUNCH_CONFIG_RESULT_COUNT);
+                            (int)name.size, name.data,
+                            (unsigned)LOOM_VM_LAUNCH_CONFIG_RESULT_COUNT);
   }
   for (iree_host_size_t i = 0; i < results.count; ++i) {
     if (results.data[i].kind != IREE_VM_SCALAR_TYPE_I64 ||
@@ -170,9 +182,33 @@ static iree_status_t loomc_launch_config_query_function(
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "launch config export '%.*s' result %" PRIhsz
                               " must be i64",
-                              (int)out_name->size, out_name->data, i);
+                              (int)name.size, name.data, i);
     }
   }
+
+  iree_vm_export_t export_value = {0};
+  IREE_RETURN_IF_ERROR(
+      iree_vm_module_export_by_ordinal(module, export_ordinal, &export_value));
+  bool metadata_found = false;
+  iree_vm_metadata_value_t metadata_value = {0};
+  IREE_RETURN_IF_ERROR(iree_vm_export_try_lookup_metadata(
+      export_value, loom_vm_launch_config_workgroup_storage_metadata_key(),
+      &metadata_found, &metadata_value));
+  if (!metadata_found) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "launch config export '%.*s' has no workgroup storage metadata",
+        (int)name.size, name.data);
+  }
+  uint64_t workgroup_storage_bytes = 0;
+  IREE_RETURN_IF_ERROR(iree_vm_u64_from_metadata_value(
+      metadata_value, &workgroup_storage_bytes));
+
+  *out_declaration = (loomc_launch_config_function_declaration_t){
+      .name = name,
+      .callable = callable,
+      .workgroup_storage_bytes = workgroup_storage_bytes,
+  };
   return iree_ok_status();
 }
 
@@ -188,19 +224,20 @@ static iree_status_t loomc_launch_config_measure_functions(
         "launch config artifact contains no exported functions");
   }
   for (iree_host_size_t i = 0; i < function_count; ++i) {
-    iree_string_view_t name = iree_string_view_empty();
-    iree_vm_module_callable_type_declaration_t callable = {0};
+    loomc_launch_config_function_declaration_t declaration = {0};
     IREE_RETURN_IF_ERROR(
-        loomc_launch_config_query_function(module, i, &name, &callable));
-    if (!iree_host_size_checked_add(*out_argument_type_count,
-                                    callable.signature.arguments.count,
-                                    out_argument_type_count)) {
+        loomc_launch_config_query_function(module, i, &declaration));
+    if (!iree_host_size_checked_add(
+            *out_argument_type_count,
+            declaration.callable.signature.arguments.count,
+            out_argument_type_count)) {
       return iree_make_status(
-          IREE_STATUS_RESOURCE_EXHAUSTED,
+          IREE_STATUS_OUT_OF_RANGE,
           "launch config argument type count exceeds the host size domain");
     }
     *out_max_argument_count =
-        iree_max(*out_max_argument_count, callable.signature.arguments.count);
+        iree_max(*out_max_argument_count,
+                 declaration.callable.signature.arguments.count);
   }
   return iree_ok_status();
 }
@@ -253,24 +290,27 @@ static iree_status_t loomc_launch_config_program_create_slab(
           : NULL;
   iree_host_size_t argument_type_offset = 0;
   for (iree_host_size_t i = 0; i < function_count; ++i) {
-    iree_string_view_t name = iree_string_view_empty();
-    iree_vm_module_callable_type_declaration_t callable = {0};
+    loomc_launch_config_function_declaration_t declaration = {0};
     iree_status_t status =
-        loomc_launch_config_query_function(module, i, &name, &callable);
+        loomc_launch_config_query_function(module, i, &declaration);
     if (!iree_status_is_ok(status)) {
       iree_allocator_free(iree_allocator_from_loomc(allocator), program);
       return status;
     }
     loomc_launch_config_function_storage_t* function =
         &program->functions.data[i];
-    function->name = name;
-    function->arguments.types = callable.signature.arguments.count != 0
-                                    ? argument_types + argument_type_offset
-                                    : NULL;
-    function->arguments.count = callable.signature.arguments.count;
+    function->name = declaration.name;
+    function->workgroup_storage_bytes = declaration.workgroup_storage_bytes;
+    function->arguments.types =
+        declaration.callable.signature.arguments.count != 0
+            ? argument_types + argument_type_offset
+            : NULL;
+    function->arguments.count = declaration.callable.signature.arguments.count;
     for (iree_host_size_t j = 0; j < function->arguments.count; ++j) {
       argument_types[argument_type_offset++] =
-          (iree_vm_scalar_type_t)callable.signature.arguments.data[j].kind;
+          (iree_vm_scalar_type_t)declaration.callable.signature.arguments
+              .data[j]
+              .kind;
     }
   }
   iree_status_t status = iree_vm_invocation_initialize(
@@ -506,39 +546,30 @@ static iree_status_t loomc_launch_config_unpack_results(
   IREE_RETURN_IF_ERROR(loomc_launch_config_extract_u32( \
       function, results, result, #field, nonzero, &config.field))
   LOOMC_EXTRACT_U32(workgroup_count.x,
-                    LOOM_KERNEL_LAUNCH_CONFIG_RESULT_WORKGROUP_COUNT_X, false);
+                    LOOM_VM_LAUNCH_CONFIG_RESULT_WORKGROUP_COUNT_X, false);
   LOOMC_EXTRACT_U32(workgroup_count.y,
-                    LOOM_KERNEL_LAUNCH_CONFIG_RESULT_WORKGROUP_COUNT_Y, false);
+                    LOOM_VM_LAUNCH_CONFIG_RESULT_WORKGROUP_COUNT_Y, false);
   LOOMC_EXTRACT_U32(workgroup_count.z,
-                    LOOM_KERNEL_LAUNCH_CONFIG_RESULT_WORKGROUP_COUNT_Z, false);
+                    LOOM_VM_LAUNCH_CONFIG_RESULT_WORKGROUP_COUNT_Z, false);
   LOOMC_EXTRACT_U32(workgroup_size.x,
-                    LOOM_KERNEL_LAUNCH_CONFIG_RESULT_WORKGROUP_SIZE_X, true);
+                    LOOM_VM_LAUNCH_CONFIG_RESULT_WORKGROUP_SIZE_X, true);
   LOOMC_EXTRACT_U32(workgroup_size.y,
-                    LOOM_KERNEL_LAUNCH_CONFIG_RESULT_WORKGROUP_SIZE_Y, true);
+                    LOOM_VM_LAUNCH_CONFIG_RESULT_WORKGROUP_SIZE_Y, true);
   LOOMC_EXTRACT_U32(workgroup_size.z,
-                    LOOM_KERNEL_LAUNCH_CONFIG_RESULT_WORKGROUP_SIZE_Z, true);
+                    LOOM_VM_LAUNCH_CONFIG_RESULT_WORKGROUP_SIZE_Z, true);
   LOOMC_EXTRACT_U32(workgroup_cluster_size.x,
-                    LOOM_KERNEL_LAUNCH_CONFIG_RESULT_WORKGROUP_CLUSTER_SIZE_X,
+                    LOOM_VM_LAUNCH_CONFIG_RESULT_WORKGROUP_CLUSTER_SIZE_X,
                     true);
   LOOMC_EXTRACT_U32(workgroup_cluster_size.y,
-                    LOOM_KERNEL_LAUNCH_CONFIG_RESULT_WORKGROUP_CLUSTER_SIZE_Y,
+                    LOOM_VM_LAUNCH_CONFIG_RESULT_WORKGROUP_CLUSTER_SIZE_Y,
                     true);
   LOOMC_EXTRACT_U32(workgroup_cluster_size.z,
-                    LOOM_KERNEL_LAUNCH_CONFIG_RESULT_WORKGROUP_CLUSTER_SIZE_Z,
+                    LOOM_VM_LAUNCH_CONFIG_RESULT_WORKGROUP_CLUSTER_SIZE_Z,
                     true);
-  LOOMC_EXTRACT_U32(subgroup_size,
-                    LOOM_KERNEL_LAUNCH_CONFIG_RESULT_SUBGROUP_SIZE, false);
+  LOOMC_EXTRACT_U32(subgroup_size, LOOM_VM_LAUNCH_CONFIG_RESULT_SUBGROUP_SIZE,
+                    false);
 #undef LOOMC_EXTRACT_U32
-  const uint64_t workgroup_storage_bytes =
-      results[LOOM_KERNEL_LAUNCH_CONFIG_RESULT_WORKGROUP_STORAGE_BYTES].payload;
-  if (workgroup_storage_bytes > INT64_MAX) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "launch config function '%.*s' workgroup_storage_bytes value %" PRIu64
-        " is outside its nonnegative i64 domain",
-        (int)function->name.size, function->name.data, workgroup_storage_bytes);
-  }
-  config.workgroup_storage_bytes = workgroup_storage_bytes;
+  config.workgroup_storage_bytes = function->workgroup_storage_bytes;
   *out_config = config;
   return iree_ok_status();
 }
@@ -582,7 +613,7 @@ loomc_status_t loomc_launch_config_program_invoke(
             &program->argument_variants[i])));
   }
 
-  iree_vm_variant_t results[LOOM_KERNEL_LAUNCH_CONFIG_RESULT_COUNT];
+  iree_vm_variant_t results[LOOM_VM_LAUNCH_CONFIG_RESULT_COUNT];
   iree_status_t status =
       iree_vm_invoke(program->invocation, function_storage->function,
                      iree_vm_variant_span_from_ptr(program->argument_variants,

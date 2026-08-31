@@ -23,6 +23,7 @@ package(
 
 _VM_PROVIDER_VISIBILITY = [
     "//loom/binding/c:__pkg__",
+    "//loom/binding/c/target:__subpackages__",
     "//loom/src/loom/target/all:__pkg__",
     "//loom/src/loom/target/configured:__pkg__",
     "//loom/src/loom/tools/loom-compile:__pkg__",
@@ -238,6 +239,43 @@ loom_cc_library(
     deps = [
         "//loom/src/loom/ops/low",
         "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "launch_config_program",
+    srcs = ["launch_config_program.c"],
+    hdrs = ["launch_config_program.h"],
+    visibility = ["//loom/src/loom/target/emit/vm:__pkg__"],
+    deps = [
+        ":facts",
+        ":ops",
+        "//loom/src/loom/analysis:symbol_liveness",
+        "//loom/src/loom/analysis:symbol_references",
+        "//loom/src/loom/codegen/low:storage_layout",
+        "//loom/src/loom/codegen/low/lower:source_selection",
+        "//loom/src/loom/codegen/low/pipeline:pass_environment",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops:special_values",
+        "//loom/src/loom/ops:type_registry",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/pass:environment",
+        "//loom/src/loom/pass:registry",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/pass:value_facts",
+        "//loom/src/loom/rewrite:materialize",
+        "//loom/src/loom/rewrite:remap",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/target:pass_environment",
+        "//loom/src/loom/target:provider",
+        "//loom/src/loom/target/emit/vm:launch_config_abi",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
     ],
 )
 

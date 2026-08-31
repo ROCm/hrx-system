@@ -245,6 +245,47 @@ endif()
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
+    launch_config_program
+  HDRS
+    "launch_config_program.h"
+  SRCS
+    "launch_config_program.c"
+  DEPS
+    ::facts
+    ::ops
+    iree::base
+    iree::base::internal::arena
+    loom::analysis::symbol_liveness
+    loom::analysis::symbol_references
+    loom::codegen::low::lower::source_selection
+    loom::codegen::low::pipeline::pass_environment
+    loom::codegen::low::storage_layout
+    loom::error::emitter
+    loom::error::error_defs
+    loom::ir
+    loom::ops::func
+    loom::ops::kernel
+    loom::ops::low
+    loom::ops::op_defs
+    loom::ops::special_values
+    loom::ops::type_registry
+    loom::pass::environment
+    loom::pass::registry
+    loom::pass::types
+    loom::pass::value_facts
+    loom::rewrite::materialize
+    loom::rewrite::remap
+    loom::rewrite::rewriter
+    loom::target::emit::vm::launch_config_abi
+    loom::target::pass_environment
+    loom::target::provider
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
     provider
   HDRS
     "abi/materialization.h"
