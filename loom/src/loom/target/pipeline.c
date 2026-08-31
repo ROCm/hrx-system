@@ -271,6 +271,21 @@ static iree_status_t loom_target_pipeline_build_cleanup_body(
   return loom_target_pipeline_build_cleanup(builder);
 }
 
+static iree_status_t loom_target_pipeline_build_cleanup_if_changed(
+    loom_builder_t* builder) {
+  loom_op_t* if_changed_op = NULL;
+  return loom_pass_ir_build_if_changed(
+      builder, loom_target_pipeline_build_cleanup_body, NULL, &if_changed_op);
+}
+
+static iree_status_t loom_target_pipeline_build_cleanup_target_functions(
+    loom_builder_t* builder, void* user_data) {
+  (void)user_data;
+  loom_op_t* for_op = NULL;
+  return loom_target_pipeline_build_for_target_functions(
+      builder, loom_target_pipeline_build_cleanup_body, NULL, &for_op);
+}
+
 static iree_status_t
 loom_target_pipeline_build_source_normalization_before_authoring_expansion(
     loom_builder_t* builder, void* user_data) {
@@ -318,21 +333,23 @@ loom_target_pipeline_build_cfg_source_finalization_after_legalize(
   (void)user_data;
   IREE_RETURN_IF_ERROR(
       loom_target_pipeline_build_run(builder, IREE_SV("unroll-scf-for")));
-  IREE_RETURN_IF_ERROR(loom_target_pipeline_build_cleanup(builder));
+  IREE_RETURN_IF_ERROR(loom_target_pipeline_build_cleanup_if_changed(builder));
   IREE_RETURN_IF_ERROR(
       loom_target_pipeline_build_run(builder, IREE_SV("sroa-vector-banks")));
-  loom_op_t* if_changed_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_pass_ir_build_if_changed(
-      builder, loom_target_pipeline_build_cleanup_body, NULL, &if_changed_op));
+  IREE_RETURN_IF_ERROR(loom_target_pipeline_build_cleanup_if_changed(builder));
   IREE_RETURN_IF_ERROR(loom_target_pipeline_build_run(
       builder, IREE_SV("sink-single-use-reads")));
+  IREE_RETURN_IF_ERROR(loom_target_pipeline_build_cleanup_if_changed(builder));
   IREE_RETURN_IF_ERROR(loom_target_pipeline_build_run(
       builder, IREE_SV("promote-private-fragments")));
-  IREE_RETURN_IF_ERROR(loom_target_pipeline_build_cleanup(builder));
+  IREE_RETURN_IF_ERROR(loom_target_pipeline_build_cleanup_if_changed(builder));
   IREE_RETURN_IF_ERROR(
       loom_target_pipeline_build_run(builder, IREE_SV("scf-to-cfg")));
   IREE_RETURN_IF_ERROR(
       loom_target_pipeline_build_run(builder, IREE_SV("cfg-simplify")));
+  // This is the final source canonicalization boundary before lowering. Run it
+  // even when CFG simplification made no change because canonicalization may
+  // have independent pending work, such as propagating callee purity.
   IREE_RETURN_IF_ERROR(loom_target_pipeline_build_cleanup(builder));
   return loom_target_pipeline_build_run(builder, IREE_SV("branch-sink"));
 }
@@ -376,7 +393,6 @@ static iree_status_t loom_target_pipeline_build_low_preparation(
     IREE_RETURN_IF_ERROR(loom_target_pipeline_build_run(
         builder, IREE_SV("sanitizer-materialize-assertions")));
   }
-  IREE_RETURN_IF_ERROR(loom_target_pipeline_build_cleanup(builder));
   IREE_RETURN_IF_ERROR(loom_target_pipeline_contribute_phase(
       builder, context, LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_PREPARATION));
   return loom_low_pipeline_build_packetization_preparation(builder);
@@ -422,6 +438,12 @@ static iree_status_t loom_target_pipeline_build_source_low_body(
       user_data, &for_op));
   IREE_RETURN_IF_ERROR(
       loom_target_pipeline_build_target_legalize(builder, IREE_SV("eager")));
+  // Module legalization may mutate any target function. Normalize the full
+  // target set only when it did so before function-local CFG finalization.
+  loom_op_t* if_changed_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_pass_ir_build_if_changed(
+      builder, loom_target_pipeline_build_cleanup_target_functions, NULL,
+      &if_changed_op));
   if (control_flow_lowering == LOOM_TARGET_CONTROL_FLOW_LOWERING_CFG) {
     IREE_RETURN_IF_ERROR(loom_target_pipeline_build_for_target_functions(
         builder,

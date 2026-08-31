@@ -47,20 +47,36 @@ pass.pipeline<module> @__loom_check_source_low pipeline {
     }
   }
   target-legalize(mode = "eager")
+  if changed {
+    for func {
+      where target {
+        canonicalize
+        cse
+      }
+    }
+  }
   for func {
     where target {
       unroll-scf-for
-      canonicalize
-      cse
+      if changed {
+        canonicalize
+        cse
+      }
       sroa-vector-banks
       if changed {
         canonicalize
         cse
       }
       sink-single-use-reads
+      if changed {
+        canonicalize
+        cse
+      }
       promote-private-fragments
-      canonicalize
-      cse
+      if changed {
+        canonicalize
+        cse
+      }
       scf-to-cfg
       cfg-simplify
       canonicalize
@@ -130,20 +146,36 @@ pass.pipeline<module> @__loom_check_source_low pipeline {
     }
   }
   target-legalize(mode = "eager")
+  if changed {
+    for func {
+      where target {
+        canonicalize
+        cse
+      }
+    }
+  }
   for func {
     where target {
       unroll-scf-for
-      canonicalize
-      cse
+      if changed {
+        canonicalize
+        cse
+      }
       sroa-vector-banks
       if changed {
         canonicalize
         cse
       }
       sink-single-use-reads
+      if changed {
+        canonicalize
+        cse
+      }
       promote-private-fragments
-      canonicalize
-      cse
+      if changed {
+        canonicalize
+        cse
+      }
       scf-to-cfg
       cfg-simplify
       canonicalize
@@ -261,20 +293,36 @@ pass.pipeline<module> @__loom_check_prepared_low pipeline {
     }
   }
   target-legalize(mode = "eager")
+  if changed {
+    for func {
+      where target {
+        canonicalize
+        cse
+      }
+    }
+  }
   for func {
     where target {
       unroll-scf-for
-      canonicalize
-      cse
+      if changed {
+        canonicalize
+        cse
+      }
       sroa-vector-banks
       if changed {
         canonicalize
         cse
       }
       sink-single-use-reads
+      if changed {
+        canonicalize
+        cse
+      }
       promote-private-fragments
-      canonicalize
-      cse
+      if changed {
+        canonicalize
+        cse
+      }
       scf-to-cfg
       cfg-simplify
       canonicalize
@@ -298,7 +346,6 @@ pass.pipeline<module> @__loom_check_prepared_low pipeline {
         amdgpu-materialize-hal-kernel-abi
       }
       canonicalize
-      cse
       cse
       low-select-operand-forms
       low-dce
