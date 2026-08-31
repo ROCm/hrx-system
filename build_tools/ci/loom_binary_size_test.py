@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+import urllib.request
 import zipfile
 from io import BytesIO
 from pathlib import Path
@@ -299,6 +300,35 @@ class LoomBinarySizeTest(unittest.TestCase):
             loom_binary_size.BinarySizeError, "head does not match"
         ):
             loom_binary_size.history_from_zip(payload.getvalue(), COMMIT_B)
+
+    def test_github_authorization_does_not_cross_redirect_origins(self):
+        handler = loom_binary_size._GitHubRedirectHandler()
+        request = urllib.request.Request(
+            "https://api.github.com/repos/ROCm/hrx-system/actions/artifacts/1/zip",
+            headers={"Authorization": "Bearer secret"},
+        )
+
+        cross_origin_request = handler.redirect_request(
+            request,
+            None,
+            302,
+            "Found",
+            {},
+            "https://results.example.com/artifact.zip",
+        )
+        same_origin_request = handler.redirect_request(
+            request,
+            None,
+            302,
+            "Found",
+            {},
+            "https://API.GITHUB.COM:443/artifact.zip",
+        )
+
+        self.assertIsNotNone(cross_origin_request)
+        self.assertFalse(cross_origin_request.has_header("Authorization"))
+        self.assertIsNotNone(same_origin_request)
+        self.assertTrue(same_origin_request.has_header("Authorization"))
 
     def test_report_writes_rolling_state_and_summary(self):
         with tempfile.TemporaryDirectory() as temp_dir:
