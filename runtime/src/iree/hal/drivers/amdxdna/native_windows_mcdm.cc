@@ -794,7 +794,8 @@ void reset_command_packet_for_start(
 }
 
 iree_status_t close_pathb_single_code_ranges(
-    iree_hal_amdxdna_native_queue_t* queue) {
+    iree_hal_amdxdna_native_queue_t* queue,
+    bool queue_ordered_release = false) {
   if (!queue || !queue->context) {
     return iree_ok_status();
   }
@@ -802,10 +803,19 @@ iree_status_t close_pathb_single_code_ranges(
   while (!ranges.empty()) {
     const PathBActiveCodeRange range = ranges.back();
     mcdm::Error error;
-    if (!mcdm::ReleasePathBCodeRange(
-            queue->context->device->api, queue->context->device->device,
-            &queue->context->context, queue->context->command_aperture,
-            range.offset, range.size, &error)) {
+    const bool released =
+        queue_ordered_release
+            ? mcdm::QueuePathBCodeRangeRelease(
+                  queue->context->device->api,
+                  queue->context->device->device, &queue->context->context,
+                  queue->context->command_aperture, range.offset, range.size,
+                  &error)
+            : mcdm::ReleasePathBCodeRange(
+                  queue->context->device->api,
+                  queue->context->device->device, &queue->context->context,
+                  queue->context->command_aperture, range.offset, range.size,
+                  &error);
+    if (!released) {
       return status_from_mcdm_error(
           "amdxdna Windows MCDM pathb single-session code release failed",
           error);
@@ -855,9 +865,14 @@ iree_status_t retire_pathb_active_context_locked(
   IREE_ASSERT_ARGUMENT(device);
   iree_hal_amdxdna_native_context_t* active = device->pathb_active_context;
   if (!active || active == next_context) return iree_ok_status();
-  IREE_RETURN_IF_ERROR(close_pathb_single_code_ranges(&active->queue));
-  reset_pathb_context_cached_aperture_state(active);
-  if (active->has_command_aperture) {
+  const mcdm::McdmAbiInfo abi =
+      mcdm::GetMcdmAbiInfo(active->device->device.mcdm_abi);
+  if (!abi.retain_command_aperture_session_across_contexts) {
+    IREE_RETURN_IF_ERROR(close_pathb_single_code_ranges(&active->queue));
+    reset_pathb_context_cached_aperture_state(active);
+  }
+  if (active->has_command_aperture &&
+      !abi.retain_command_aperture_mapping_across_contexts) {
     mcdm::Error error;
     if (!mcdm::ReleaseCommandApertureGpuMapping(
             active->device->api, active->device->device,
@@ -877,7 +892,11 @@ iree_status_t activate_pathb_context_for_submit_locked(
   iree_hal_amdxdna_native_device_t* device = context->device;
   if (device->pathb_active_context == context) return iree_ok_status();
   IREE_RETURN_IF_ERROR(retire_pathb_active_context_locked(device, context));
-  reset_pathb_context_cached_aperture_state(context);
+  const mcdm::McdmAbiInfo abi =
+      mcdm::GetMcdmAbiInfo(context->device->device.mcdm_abi);
+  if (!abi.retain_command_aperture_session_across_contexts) {
+    reset_pathb_context_cached_aperture_state(context);
+  }
   if (context->has_command_aperture) {
     mcdm::Error error;
     if (!mcdm::EnsureCommandApertureGpuMapping(
@@ -943,6 +962,22 @@ iree_status_t publish_pathb_code_write(iree_hal_amdxdna_native_queue_t* queue,
                                    mapping_offset, code_size, &error)) {
     return status_from_mcdm_error(
         "amdxdna Windows MCDM pathb code write publish failed", error);
+  }
+  return iree_ok_status();
+}
+
+iree_status_t publish_pathb_code_end_marker(
+    iree_hal_amdxdna_native_queue_t* queue, uint64_t mapping_offset,
+    uint64_t code_size) {
+  if (!queue || !queue->context || code_size == 0) return iree_ok_status();
+  mcdm::CommandAperture& aperture = queue->context->command_aperture;
+  mcdm::Error error;
+  if (!mcdm::PublishPathBCodeEndMarker(
+          queue->context->device->api, queue->context->device->device,
+          &queue->context->context, aperture, mapping_offset, code_size,
+          &error)) {
+    return status_from_mcdm_error(
+        "amdxdna Windows MCDM pathb code end-marker publish failed", error);
   }
   return iree_ok_status();
 }
@@ -1114,8 +1149,12 @@ iree_status_t stage_windows_dpu_code_buffer(
           "amdxdna Windows MCDM path-B single aperture remap failed", error);
     }
   }
-  IREE_RETURN_IF_ERROR(publish_pathb_code_write(queue, code_offset,
-                                                command->control_buffer_size));
+  // The command occupies one contiguous aperture stream and the complete
+  // range is device-visible above. A single final opcode-9 boundary orders
+  // every preceding slot before the consumer, just as it does for each
+  // contiguous parent in a chain batch.
+  IREE_RETURN_IF_ERROR(publish_pathb_code_end_marker(
+      queue, code_offset, command->control_buffer_size));
   // Keep the freshly staged control code resident in its command-owned slot.
   // Cached commands can reuse non-overlapping slots until a runlist or context
   // transition releases the active set.
@@ -3759,16 +3798,19 @@ static iree_status_t iree_hal_amdxdna_native_submit_issue(
         command->exec_buffer->buffer.cpu_ptr);
     packet = command_packet(command);
   }
-  bool partial_elf_bo_table_changed = false;
-  IREE_RETURN_IF_ERROR(maybe_write_partial_elf_bo_table(
-      command, &partial_elf_bo_table_changed));
-  if (is_pathb_partial_elf && partial_elf_bo_table_changed &&
-      !mcdm::SyncBuffer(command->device->api, command->device->device,
-                        command->exec_buffer->buffer,
-                        mcdm::kPathBBoTableOffset, mcdm::kPathBBoTableSize,
-                        &error)) {
-    return status_from_mcdm_error(
-        "amdxdna Windows MCDM PARTIAL_ELF BO table publication failed", error);
+  {
+    bool partial_elf_bo_table_changed = false;
+    IREE_RETURN_IF_ERROR(maybe_write_partial_elf_bo_table(
+        command, &partial_elf_bo_table_changed));
+    if (is_pathb_partial_elf && partial_elf_bo_table_changed &&
+        !mcdm::SyncBuffer(command->device->api, command->device->device,
+                          command->exec_buffer->buffer,
+                          mcdm::kPathBBoTableOffset, mcdm::kPathBBoTableSize,
+                          &error)) {
+      return status_from_mcdm_error(
+          "amdxdna Windows MCDM PARTIAL_ELF BO table publication failed",
+          error);
+    }
   }
   // The state-3 packet lives in a normal command BO. Keep its CPU writes
   // ordered before the KMT submit. PARTIAL_ELF packets are copied inline, but
@@ -3828,7 +3870,12 @@ static iree_status_t iree_hal_amdxdna_native_submit_all_issue(
         " parents, exceeding the %zu-slot completion ring capacity",
         command_count, completion_capacity);
   }
-  IREE_RETURN_IF_ERROR(close_pathb_single_code_ranges(queue));
+  // The prior single submission has retired before this batch acquires the
+  // device gate. Release markers, chain publication, and chain consumers are
+  // all submitted to this context's in-order HW queue, so no CPU wait is
+  // required between those queue-ordered lifecycle operations.
+  IREE_RETURN_IF_ERROR(close_pathb_single_code_ranges(
+      queue, /*queue_ordered_release=*/true));
   mcdm::CommandAperture& aperture = pathb_chain_aperture(queue);
   std::vector<size_t> code_sizes(command_count);
   std::vector<size_t> code_capacities(command_count);
@@ -4059,20 +4106,18 @@ static iree_status_t iree_hal_amdxdna_native_submit_all_issue(
           ? 0
           : dirty_descriptor_end - dirty_descriptor_begin;
 
-  // code_bytes=0: child instruction bytes were CopyAndCommit'd above.
-  // Opcode-9 is the following per-command loop, which publishes the exact
-  // consumed range after the device image is reinstalled.
+  // code_bytes=0: child instruction bytes were CopyAndCommit'd and made
+  // device-visible per parent above. Queue-ordered opcode-9 markers follow.
   IREE_RETURN_IF_ERROR(sync_prepared_pathb_chain_batch(
       queue, command_count, /*code_offset=*/0, /*code_bytes=*/0,
       descriptor_sync_offset, descriptor_sync_bytes));
-  // Opcode-9 publishes aperture slots in HW-queue order. It does not copy
-  // bytes; CopyAndCommit above reinstalled the device image first.
+  // Each parent occupies one contiguous code stream. Its final opcode-9
+  // boundary publishes the preceding slots after the batch visibility edge.
   for (iree_host_size_t command_index = 0; command_index < command_count;
        ++command_index) {
     iree_hal_amdxdna_native_command_t* command = commands[command_index];
-    IREE_RETURN_IF_ERROR(publish_pathb_code_write(
-        queue,
-        aperture.code_offset + command->pathb_chain_code_aperture_offset,
+    IREE_RETURN_IF_ERROR(publish_pathb_code_end_marker(
+        queue, aperture.code_offset + command->pathb_chain_code_aperture_offset,
         command->pathb_chain_code_used_size));
     command->pathb_chain_code_dirty = false;
     command->pathb_chain_descriptor_dirty = false;

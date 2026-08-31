@@ -181,6 +181,13 @@ struct McdmAbiInfo {
   uint64_t command_aperture_code_publish_granularity;
   bool command_aperture_residency_after_bootstrap;
   bool command_aperture_remap_after_write;
+  // Whether independently mapped command-aperture allocations may remain
+  // mapped while another hardware context is active.
+  bool retain_command_aperture_mapping_across_contexts;
+  // Whether queue-local aperture range sessions remain valid while another
+  // independently mapped hardware context is active. Consumers still restage
+  // and publish code before every submit.
+  bool retain_command_aperture_session_across_contexts;
   // Exact D3DDDICB_DESTROYALLOCATION2FLAGS::Value required when destroying a
   // shared resource. Zero retains the legacy per-object teardown behavior.
   uint32_t shared_resource_destroy_flags;
@@ -562,10 +569,27 @@ bool PublishPathBCodeWrite(const KmtApi& api, const Device& device,
                            const CommandAperture& aperture, uint64_t offset,
                            uint64_t length, Error* out_error);
 
+// Queue-ordered publication of a contiguous code stream using only its final
+// opcode-9 boundary. The caller must have made the entire range device-visible
+// before submitting the marker.
+bool PublishPathBCodeEndMarker(const KmtApi& api, const Device& device,
+                               Context* context,
+                               const CommandAperture& aperture, uint64_t offset,
+                               uint64_t length, Error* out_error);
+
 bool ReleasePathBCodeRange(const KmtApi& api, const Device& device,
                            Context* context,
                            const CommandAperture& aperture, uint64_t offset,
                            uint64_t length, Error* out_error);
+
+// Queues the same start-boundary release markers without a CPU wait. A caller
+// may use this only when every later aperture write/publication/consumer is
+// ordered behind the release on the same HW queue.
+bool QueuePathBCodeRangeRelease(const KmtApi& api, const Device& device,
+                                Context* context,
+                                const CommandAperture& aperture,
+                                uint64_t offset, uint64_t length,
+                                Error* out_error);
 
 // Path B: per-dispatch hwqueue_aie4-style submit. Reserve an 8-byte completion
 // slot, build the driver-negotiated private packet with the ERT packet inline,

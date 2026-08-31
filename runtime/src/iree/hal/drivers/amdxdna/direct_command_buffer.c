@@ -553,6 +553,55 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_copy_buffer(
 // passes as its opcode arg).
 static const uint64_t kAie2ExecBufferKernelOpTxn = 3;
 
+static iree_status_t iree_hal_amdxdna_prepare_npu_control_words(
+    const iree_hal_amdxdna_u32_list_t* txn,
+    const iree_hal_amdxdna_u32_list_t* patches, const uint64_t* args,
+    size_t arg_count, iree_const_byte_span_t constants,
+    const iree_hal_amdxdna_write32_constant_patch_list_t* constant_patches,
+    uint32_t* out_words) {
+  memcpy(out_words, txn->data, txn->count * sizeof(*out_words));
+  if (constant_patches) {
+    IREE_RETURN_IF_ERROR(iree_hal_amdxdna_patch_write32_constants_with_list(
+        out_words, txn->count, constant_patches, constants));
+  } else {
+    IREE_RETURN_IF_ERROR(iree_hal_amdxdna_patch_write32_constants(
+        out_words, txn->count, constants));
+  }
+  if (!iree_hal_amdxdna_apply_patch_table(out_words, txn->count, patches->data,
+                                          patches->count, args, arg_count)) {
+    return iree_make_status(
+        IREE_STATUS_INTERNAL,
+        "amdxdna cmd-chain: invalid host patch table for control code");
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_amdxdna_prepare_npu_cmd_signature(
+    iree_allocator_t host_allocator,
+    const iree_hal_amdxdna_u32_list_t* txn,
+    const iree_hal_amdxdna_u32_list_t* patches, const uint64_t* args,
+    iree_hal_amdxdna_native_buffer_t* const* arg_buffers,
+    const iree_device_size_t* arg_offsets,
+    const iree_device_size_t* arg_lengths, size_t arg_count,
+    iree_const_byte_span_t constants,
+    const iree_hal_amdxdna_write32_constant_patch_list_t* constant_patches,
+    iree_hal_amdxdna_chain_cmd_t* out_cmd) {
+  uint32_t* prepared_words = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+      host_allocator, txn->count, sizeof(*prepared_words),
+      (void**)&prepared_words));
+  iree_status_t status = iree_hal_amdxdna_prepare_npu_control_words(
+      txn, patches, args, arg_count, constants, constant_patches,
+      prepared_words);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_amdxdna_chain_cmd_set_signature(
+        host_allocator, out_cmd, prepared_words, txn->count, arg_buffers, args,
+        arg_offsets, arg_lengths, arg_count);
+  }
+  iree_allocator_free(host_allocator, prepared_words);
+  return status;
+}
+
 iree_status_t iree_hal_amdxdna_make_npu_cmd(
     iree_hal_amdxdna_direct_command_buffer* command_buffer,
     iree_hal_amdxdna_native_c_cu_index_t cu_idx,
@@ -575,22 +624,8 @@ iree_status_t iree_hal_amdxdna_make_npu_cmd(
       iree_hal_amdxdna_native_buffer_c_map(out_cmd->ctrl_code, &mapped_ptr));
   out_cmd->ctrl_code_mapped_ptr = mapped_ptr;
   uint32_t* dst = (uint32_t*)mapped_ptr;
-  memcpy(dst, txn->data, bytes);
-
-  if (constant_patches) {
-    IREE_RETURN_IF_ERROR(iree_hal_amdxdna_patch_write32_constants_with_list(
-        dst, txn->count, constant_patches, constants));
-  } else {
-    IREE_RETURN_IF_ERROR(
-        iree_hal_amdxdna_patch_write32_constants(dst, txn->count, constants));
-  }
-
-  if (!iree_hal_amdxdna_apply_patch_table(dst, txn->count, patches->data,
-                                          patches->count, args, arg_count)) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "amdxdna cmd-chain: invalid host patch table for control code");
-  }
+  IREE_RETURN_IF_ERROR(iree_hal_amdxdna_prepare_npu_control_words(
+      txn, patches, args, arg_count, constants, constant_patches, dst));
 
   if (retain_signature) {
     iree_status_t status = iree_hal_amdxdna_chain_cmd_set_signature(
@@ -2078,9 +2113,9 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_flush_chains(
             }
           }
         }
-        // Not an exact hit: realize any late-bound children now so the
-        // ctrl_words-based device/shape/miss logic below can match, update,
-        // or cache them.
+        // Prepare host signatures before allocating native command resources.
+        // Cache hits can update retained children directly from these
+        // signatures and avoid constructing throwaway BOs and commands.
         if (!chain_cache) {
           fallback_uncached =
               !iree_hal_amdxdna_chain_command_cache_trim_for_group(
@@ -2088,16 +2123,15 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_flush_chains(
           for (iree_host_size_t i = 0;
                i < group->cmd_count && iree_status_is_ok(status); ++i) {
             iree_hal_amdxdna_chain_cmd_t* cmd = &group->cmds[i];
-            if (cmd->built) continue;
-            status = iree_hal_amdxdna_make_npu_cmd(
-                command_buffer, cmd->src_cu_idx, cmd->src_asm_inst,
+            if (cmd->ctrl_words) continue;
+            status = iree_hal_amdxdna_prepare_npu_cmd_signature(
+                command_buffer->host_allocator, cmd->src_asm_inst,
                 cmd->src_patches, cmd->binding_device_addrs,
                 cmd->binding_buffers, cmd->binding_offsets,
                 cmd->binding_lengths, cmd->binding_count,
                 iree_make_const_byte_span(cmd->src_constants,
                                           cmd->src_constant_count),
-                cmd->src_constant_patches, cmd->src_use_native_partial_elf,
-                /*retain_signature=*/!fallback_uncached, cmd);
+                cmd->src_constant_patches, cmd);
           }
         }
         if (chain_cache) {
@@ -2132,6 +2166,24 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_flush_chains(
               chain_cache = entry;
               break;
             }
+          }
+        }
+        // Only a genuine cache miss requires native children for a new
+        // retained entry or an uncached fallback submission.
+        if (iree_status_is_ok(status) && !chain_cache) {
+          for (iree_host_size_t i = 0;
+               i < group->cmd_count && iree_status_is_ok(status); ++i) {
+            iree_hal_amdxdna_chain_cmd_t* cmd = &group->cmds[i];
+            if (cmd->built) continue;
+            status = iree_hal_amdxdna_make_npu_cmd(
+                command_buffer, cmd->src_cu_idx, cmd->src_asm_inst,
+                cmd->src_patches, cmd->binding_device_addrs,
+                cmd->binding_buffers, cmd->binding_offsets,
+                cmd->binding_lengths, cmd->binding_count,
+                iree_make_const_byte_span(cmd->src_constants,
+                                          cmd->src_constant_count),
+                cmd->src_constant_patches, cmd->src_use_native_partial_elf,
+                /*retain_signature=*/!fallback_uncached, cmd);
           }
         }
         if (chain_cache && !exact_cache_hit && !device_cache_hit &&

@@ -408,6 +408,8 @@ TEST(KmtApiTest, LegacyAbiMatchesOriginalSubmitLayout) {
   EXPECT_EQ(abi.command_aperture_code_publish_granularity, 0u);
   EXPECT_FALSE(abi.command_aperture_residency_after_bootstrap);
   EXPECT_TRUE(abi.command_aperture_remap_after_write);
+  EXPECT_FALSE(abi.retain_command_aperture_mapping_across_contexts);
+  EXPECT_FALSE(abi.retain_command_aperture_session_across_contexts);
   EXPECT_EQ(abi.shared_resource_destroy_flags, 0u);
   EXPECT_TRUE(abi.explicit_gpu_va_free_on_destroy);
 }
@@ -431,6 +433,8 @@ TEST(KmtApiTest, CompactAbiMatchesXrt221SubmitLayout) {
   EXPECT_EQ(abi.command_aperture_code_publish_granularity, 0x8000u);
   EXPECT_TRUE(abi.command_aperture_residency_after_bootstrap);
   EXPECT_FALSE(abi.command_aperture_remap_after_write);
+  EXPECT_TRUE(abi.retain_command_aperture_mapping_across_contexts);
+  EXPECT_TRUE(abi.retain_command_aperture_session_across_contexts);
   EXPECT_EQ(abi.shared_resource_destroy_flags, 0x3u);
   EXPECT_FALSE(abi.explicit_gpu_va_free_on_destroy);
 }
@@ -1340,7 +1344,7 @@ TEST(KmtApiTest, CompletedPathBSubmitStillRetiresParentFence) {
   };
 
   EXPECT_EQ(run(/*completed_fence=*/7), 1u);
-  EXPECT_EQ(run(/*completed_fence=*/6), 2u);
+  EXPECT_EQ(run(/*completed_fence=*/6), 1u);
 }
 
 TEST(KmtApiTest, PathBBatchRetirementMatchesXrtRunlistWaitOrder) {
@@ -1373,10 +1377,8 @@ TEST(KmtApiTest, PathBBatchRetirementMatchesXrtRunlistWaitOrder) {
   ASSERT_TRUE(WaitForPathBSubmits(api, device, &context, pending.data(),
                                   pending.size(), &error))
       << ErrorMessage(&error);
-  ASSERT_EQ(g_wait_count, 3u);
+  ASSERT_EQ(g_wait_count, 1u);
   EXPECT_EQ(g_wait_fences[0], 12u);
-  EXPECT_EQ(g_wait_fences[1], 11u);
-  EXPECT_EQ(g_wait_fences[2], 12u);
   EXPECT_EQ(packet_headers[0] & 0xFu, 4u);
   EXPECT_EQ(packet_headers[1] & 0xFu, 4u);
 }
@@ -1764,6 +1766,44 @@ TEST(KmtApiTest, CodeRangeLifecycleMatchesNegotiatedAbi) {
   EXPECT_EQ(g_wait_fences[0], 9u);
 }
 
+TEST(KmtApiTest, QueueCodeRangeReleasePreservesMarkersWithoutCpuWait) {
+  auto run = [](McdmAbi mcdm_abi, size_t setup_payload_size,
+                size_t expected_submits) {
+    ResetFakes();
+    KmtApi api = {};
+    api.submit_command_to_hw_queue = FakeSubmitCommandToHwQueue;
+    api.wait_from_cpu = FakeWaitFromCpu;
+    Device device = {};
+    device.device = 0x10;
+    device.mcdm_abi = mcdm_abi;
+    Context context = {};
+    context.hw_queue = 0x20;
+    context.progress_fence = 0x21;
+    context.next_fence_id = 7;
+    CommandAperture aperture = {};
+    aperture.gpu_allocation = 0x30;
+    alignas(64) static std::array<uint8_t, 0x100000> aperture_storage = {};
+    aperture.gpu_cpu_ptr = aperture_storage.data();
+    aperture.gpu_va_size = aperture_storage.size();
+    Error error = {};
+    ASSERT_TRUE(ConfigurePathBCodeRangeForSetupPayload(
+        mcdm_abi, setup_payload_size, &aperture, &error));
+
+    ASSERT_TRUE(QueuePathBCodeRangeRelease(
+        api, device, &context, aperture, aperture.code_offset, 0x10000,
+        &error))
+        << ErrorMessage(&error);
+    EXPECT_EQ(g_submit_count, expected_submits);
+    EXPECT_EQ(g_wait_count, 0u);
+    for (size_t i = 0; i < g_submit_count; ++i) {
+      EXPECT_EQ(g_submit_opcodes[i], 9u);
+    }
+  };
+
+  run(McdmAbi::compact, 9952, 2u);
+  run(McdmAbi::legacy, 107600, 1u);
+}
+
 TEST(KmtApiTest, PublishPathBCodeWriteRepeatsOpcode9WithoutRewrite) {
   // Opcode-9 is a queue-ordered happens-before, not a copy. Repeating
   // PublishPathBCodeWrite must emit the same end-marker sequence without
@@ -1824,6 +1864,43 @@ TEST(KmtApiTest, PublishPathBCodeWriteRepeatsOpcode9WithoutRewrite) {
 
   run(McdmAbi::compact);
   run(McdmAbi::legacy);
+}
+
+TEST(KmtApiTest, PublishPathBCodeEndMarkerSkipsInternalSlotBoundaries) {
+  auto run = [](McdmAbi mcdm_abi, size_t setup_payload_size) {
+    ResetFakes();
+    KmtApi api = {};
+    api.submit_command_to_hw_queue = FakeSubmitCommandToHwQueue;
+    Device device = {};
+    device.device = 0x10;
+    device.mcdm_abi = mcdm_abi;
+    Context context = {};
+    context.hw_queue = 0x20;
+    context.progress_fence = 0x21;
+    context.next_fence_id = 7;
+    CommandAperture aperture = {};
+    aperture.gpu_allocation = 0x30;
+    alignas(64) static std::array<uint8_t, 0x100000> aperture_storage = {};
+    aperture.gpu_cpu_ptr = aperture_storage.data();
+    aperture.gpu_va_size = aperture_storage.size();
+    Error error = {};
+    ASSERT_TRUE(ConfigurePathBCodeRangeForSetupPayload(
+        device.mcdm_abi, setup_payload_size, &aperture, &error));
+
+    const uint64_t offset = aperture.code_offset + 0x123;
+    const uint64_t length = 0x10000;
+    ASSERT_TRUE(PublishPathBCodeEndMarker(api, device, &context, aperture,
+                                          offset, length, &error));
+    ASSERT_EQ(g_submit_count, 1u);
+    EXPECT_EQ(g_submit_opcodes[0], 9u);
+    const uint64_t slot_size =
+        GetMcdmAbiInfo(mcdm_abi).command_aperture_code_slot_size;
+    EXPECT_EQ(g_submit_offsets[0],
+              (offset + length + slot_size - 1) & ~(slot_size - 1));
+  };
+
+  run(McdmAbi::compact, 9952);
+  run(McdmAbi::legacy, 107600);
 }
 
 TEST(KmtApiTest, CodeWriteRemapMatchesNegotiatedAbi) {

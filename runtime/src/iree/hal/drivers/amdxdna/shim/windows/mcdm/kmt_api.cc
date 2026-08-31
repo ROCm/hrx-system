@@ -1098,6 +1098,8 @@ McdmAbiInfo GetMcdmAbiInfo(McdmAbi abi) {
         CommandApertureWritePublishMode::cpu_cache_flush;
     info.command_aperture_code_publish_granularity = 0x8000;
     info.command_aperture_residency_after_bootstrap = true;
+    info.retain_command_aperture_mapping_across_contexts = true;
+    info.retain_command_aperture_session_across_contexts = true;
     // XRT 2.21 waits for compact shared-resource destruction to finish and
     // leaves mapped VA ownership with the allocation.
     info.shared_resource_destroy_flags = 0x3;
@@ -2704,17 +2706,34 @@ bool PublishPathBCodeWrite(const KmtApi& api, const Device& device,
                                         length, out_error);
 }
 
-bool ReleasePathBCodeRange(const KmtApi& api, const Device& device,
-                           Context* context,
-                           const CommandAperture& aperture, uint64_t offset,
-                           uint64_t length, Error* out_error) {
+bool PublishPathBCodeEndMarker(const KmtApi& api, const Device& device,
+                               Context* context,
+                               const CommandAperture& aperture, uint64_t offset,
+                               uint64_t length, Error* out_error) {
+  const McdmAbiInfo abi = GetMcdmAbiInfo(device.mcdm_abi);
+  if (!ValidatePathBCodeRange(abi, aperture, offset, length, out_error)) {
+    return false;
+  }
+  const uint64_t slot_size = abi.command_aperture_code_slot_size;
+  const uint64_t range_end = offset + length;
+  const uint64_t final_boundary =
+      (range_end + slot_size - 1) & ~(slot_size - 1);
+  return SubmitPathBApertureSync(api, device, context, aperture,
+                                 final_boundary,
+                                 /*wait_for_cpu=*/false, out_error);
+}
+
+static bool ReleasePathBCodeRangeImpl(
+    const KmtApi& api, const Device& device, Context* context,
+    const CommandAperture& aperture, uint64_t offset, uint64_t length,
+    bool wait_for_cpu, Error* out_error) {
   const McdmAbiInfo abi = GetMcdmAbiInfo(device.mcdm_abi);
   if (!ValidatePathBCodeRange(abi, aperture, offset, length, out_error)) {
     return false;
   }
   if (UsesLegacyCpuBufferHandles(device.mcdm_abi)) {
     return SubmitPathBApertureSync(api, device, context, aperture, offset,
-                                   /*wait_for_cpu=*/true, out_error);
+                                   wait_for_cpu, out_error);
   }
 
   const uint64_t slot_size = abi.command_aperture_code_slot_size;
@@ -2725,7 +2744,8 @@ bool ReleasePathBCodeRange(const KmtApi& api, const Device& device,
                         ((relative_begin + length - 1) & ~(slot_size - 1));
   for (;;) {
     if (!SubmitPathBApertureSync(api, device, context, aperture, slot_start,
-                                 /*wait_for_cpu=*/slot_start <= first_slot,
+                                 /*wait_for_cpu=*/
+                                     wait_for_cpu && slot_start <= first_slot,
                                  out_error)) {
       return false;
     }
@@ -2733,6 +2753,23 @@ bool ReleasePathBCodeRange(const KmtApi& api, const Device& device,
     slot_start -= slot_size;
   }
   return true;
+}
+
+bool ReleasePathBCodeRange(const KmtApi& api, const Device& device,
+                           Context* context,
+                           const CommandAperture& aperture, uint64_t offset,
+                           uint64_t length, Error* out_error) {
+  return ReleasePathBCodeRangeImpl(api, device, context, aperture, offset,
+                                   length, /*wait_for_cpu=*/true, out_error);
+}
+
+bool QueuePathBCodeRangeRelease(const KmtApi& api, const Device& device,
+                                Context* context,
+                                const CommandAperture& aperture,
+                                uint64_t offset, uint64_t length,
+                                Error* out_error) {
+  return ReleasePathBCodeRangeImpl(api, device, context, aperture, offset,
+                                   length, /*wait_for_cpu=*/false, out_error);
 }
 
 // Allocate the firmware completion ring using the status object selected by
@@ -3010,31 +3047,16 @@ bool WaitForPathBSubmits(const KmtApi& api, const Device& device,
     SetError(out_error, "WaitForPathBSubmits called without commands");
     return false;
   }
-  // Match XRT runlist semantics: wait for the final parent chunk. In-order HWQ
-  // execution means earlier parent chunks have retired when the last fence is
-  // reached. Completion state for each parent is still checked below.
+  // Retire the final parent through KMT even when the CPU-visible progress
+  // fence already reports completion. The HW queue is in order, so reaching
+  // the final timeline value also retires every earlier parent in the batch.
+  // Completion state for every parent is still checked below.
   PathBPendingSubmit& last = pending[pending_count - 1];
-  if (!IsPathBSubmitComplete(*context, last)) {
-    if (!WaitForHwQueueFenceCpu(
-            api, device, *context, last.fence_id,
-            "D3DKMTWaitForSynchronizationObjectFromCpu(pathb batch)",
-            out_error)) {
-      return false;
-    }
-  }
-  // Retire each parent through the queue fence interface before consuming its
-  // completion slot. The final fence establishes in-order device completion;
-  // the per-parent waits mirror the command-specific retirement performed by
-  // XRT's runlist wait path and keep miniport completion ownership explicit.
-  // These waits observe already-reached fence values and do not serialize
-  // parent submission.
-  for (size_t i = 0; i < pending_count; ++i) {
-    if (!WaitForHwQueueFenceCpu(
-            api, device, *context, pending[i].fence_id,
-            "D3DKMTWaitForSynchronizationObjectFromCpu(pathb parent retire)",
-            out_error)) {
-      return false;
-    }
+  if (!WaitForHwQueueFenceCpu(
+          api, device, *context, last.fence_id,
+          "D3DKMTWaitForSynchronizationObjectFromCpu(pathb batch retire)",
+          out_error)) {
+    return false;
   }
   // Every pending parent in a context reports through the same completion
   // ring. The final HWQ fence makes all preceding slots complete; invalidate
