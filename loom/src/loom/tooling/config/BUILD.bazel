@@ -14,7 +14,11 @@ package(
 
 loom_cc_library(
     name = "config",
-    srcs = ["config.c"],
+    srcs = [
+        "config.c",
+        "config_application.h",
+        "config_text.c",
+    ],
     hdrs = ["config.h"],
     deps = [
         "//loom/src/loom/analysis:symbol_value_constraints",
@@ -23,6 +27,7 @@ loom_cc_library(
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/config",
         "//loom/src/loom/ops/encoding",
+        "//loom/src/loom/rewrite:remap",
         "//loom/src/loom/tooling/io:file",
         "//loom/src/loom/util:json",
         "//loom/src/loom/util:stream",

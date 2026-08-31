@@ -45,22 +45,16 @@
 ///     return;
 ///   }
 ///
-///   loomc_config_binding_t bindings[] = {
-///       {
-///           .key = loomc_make_cstring_view("tile_m"),
-///           .value = loomc_make_cstring_view("128"),
-///       },
-///   };
+///   // `config_module` is an ordinary module containing exact config.def
+///   // values. It may be deserialized from text or bytecode once and shared by
+///   // concurrent invocations.
 ///   loomc_compile_options_t compile_options = {
 ///       .type = LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
 ///       .structure_size = sizeof(loomc_compile_options_t),
 ///       .artifact_flags = LOOMC_COMPILE_ARTIFACT_FLAG_MODULE_BYTECODE |
 ///                         LOOMC_COMPILE_ARTIFACT_FLAG_REPORT_JSON,
-///       .config =
-///           {
-///               .bindings = bindings,
-///               .binding_count = 1,
-///           },
+///       .config_flags = LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
+///       .config_module = config_module,
 ///   };
 ///
 ///   // `module` is produced by deserialization, linking, or another module
@@ -143,11 +137,12 @@ typedef struct loomc_compiler_options_t {
 /// Compile invocation options.
 ///
 /// A compile invocation borrows a mutable module and returns a result with
-/// diagnostics and artifacts. Per-kernel configuration values materialize into
-/// the module before the selected pass program runs. These values live here
-/// rather than on the prepared compiler so autotuning and JIT sweeps can vary
-/// config without constructing many compiler handles. Per-function target
-/// specializations and target-declaration bindings are supplied through
+/// diagnostics and artifacts. Exact values from an optional config module
+/// materialize into the program module before the selected pass program runs.
+/// Configuration lives here rather than on the prepared compiler so autotuning
+/// and JIT sweeps can vary config without constructing many compiler handles.
+/// Per-function target specializations and target-declaration bindings are
+/// supplied through
 /// `loomc_target_specialization_options_t` on `next`, so one invocation can
 /// compile several function versions for different exact targets.
 typedef struct loomc_compile_options_t {
@@ -170,8 +165,17 @@ typedef struct loomc_compile_options_t {
   /// the hot path focused on diagnostics and in-place module transformation.
   loomc_compile_artifact_flags_t artifact_flags;
 
-  /// Per-invocation config dialect bindings and optional JSON object.
-  loomc_config_options_t config;
+  /// Config validation and final-resolution policy.
+  loomc_config_policy_flags_t config_flags;
+
+  /// Optional module containing only exact `config.def` operations.
+  ///
+  /// The module is borrowed, remains immutable, must use the compiler context,
+  /// and must be distinct from the mutable program module. Definitions without
+  /// matching program config symbols are ignored so one config module can serve
+  /// several related programs. Load text or bytecode config modules through the
+  /// normal format-specific module deserialization APIs.
+  const loomc_module_t* config_module;
 } loomc_compile_options_t;
 
 /// Creates a prepared immutable compiler.
@@ -223,7 +227,9 @@ LOOMC_API_EXPORT loomc_status_t loomc_compiler_create(
 ///
 /// @lifetime
 /// Returned results and artifacts do not borrow from `workspace` and remain
-/// valid after `loomc_workspace_trim`.
+/// valid after `loomc_workspace_trim`. The invocation borrows
+/// `options->config_module` only for the duration of the call and does not
+/// mutate or retain it.
 ///
 /// @par Artifact Requests
 /// Artifact emission is opt-in through `loomc_compile_options_t`. Requesting

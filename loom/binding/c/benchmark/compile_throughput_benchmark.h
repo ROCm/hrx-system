@@ -94,11 +94,11 @@ class TargetCompileScenario : public CompileScenario {
                             TargetProfilePtr target_profile,
                             loomc_string_view_t pipeline_identifier);
 
-  iree_status_t CompileModuleToPreparedLow(WorkspacePtr& workspace,
-                                           ModulePtr& module,
-                                           loomc_string_view_t function_symbol,
-                                           loomc_string_view_t module_name,
-                                           loomc_config_options_t config);
+  iree_status_t CompileModuleToPreparedLow(
+      WorkspacePtr& workspace, ModulePtr& module,
+      loomc_string_view_t function_symbol, loomc_string_view_t module_name,
+      const loomc_module_t* config_module,
+      loomc_config_policy_flags_t config_flags);
 
   loomc_target_environment_t* target_environment() const {
     return target_environment_.get();
@@ -160,6 +160,11 @@ iree_status_t DeserializeSource(loomc_context_t* context,
                                 loomc_workspace_t* workspace,
                                 const loomc_source_t* source,
                                 ModulePtr* out_module);
+
+iree_status_t CreateTextModule(loomc_context_t* context,
+                               loomc_workspace_t* workspace,
+                               const std::string& identifier,
+                               const std::string& text, ModulePtr* out_module);
 
 iree_status_t CloneModule(const loomc_module_t* source_module,
                           loomc_workspace_t* workspace, ModulePtr* out_module);

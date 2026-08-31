@@ -686,7 +686,8 @@ kernel.def target(@gfx11_wave64) @target_specialized_launch(%expert_count: index
         /*.module_name=*/
         loomc_make_cstring_view("target_specialized_launch"),
         /*.artifact_flags=*/LOOMC_COMPILE_ARTIFACT_FLAG_LAUNCH_CONFIG,
-        /*.config=*/{},
+        /*.config_flags=*/0,
+        /*.config_module=*/nullptr,
     };
 
     loomc_result_t* result = nullptr;
@@ -774,7 +775,8 @@ kernel.def target(@gfx1151) @decode(%row_count: i32, %scale: bf16) {
       /*.next=*/nullptr,
       /*.module_name=*/loomc_make_cstring_view("multi_launch_config"),
       /*.artifact_flags=*/LOOMC_COMPILE_ARTIFACT_FLAG_LAUNCH_CONFIG,
-      /*.config=*/{},
+      /*.config_flags=*/0,
+      /*.config_module=*/nullptr,
   };
   loomc_result_t* result = nullptr;
   LOOMC_EXPECT_OK(loomc_compile_module(
@@ -858,16 +860,12 @@ kernel.def target(@gfx11_generic) @configured_store() {
 )");
   ModulePtr module =
       DeserializeModule(context.get(), workspace.get(), source.get());
-  loomc_config_binding_t bindings[] = {
-      {
-          /*.key=*/loomc_make_cstring_view("test.workgroups_x"),
-          /*.value=*/loomc_make_cstring_view("2"),
-      },
-      {
-          /*.key=*/loomc_make_cstring_view("test.workgroup_size_x"),
-          /*.value=*/loomc_make_cstring_view("64"),
-      },
-  };
+  SourcePtr config_source = CreateTextSource("configured_store_config.loom", R"(
+config.def @test.workgroups_x = 2 : index
+config.def @test.workgroup_size_x = 64 : index
+)");
+  ModulePtr config_module =
+      DeserializeModule(context.get(), workspace.get(), config_source.get());
   const loomc_target_specialization_t specialization = {
       /*.function_symbol=*/loomc_make_cstring_view("configured_store"),
       /*.target_profile=*/profile.get(),
@@ -885,13 +883,8 @@ kernel.def target(@gfx11_generic) @configured_store() {
       /*.next=*/&target_options,
       /*.module_name=*/loomc_make_cstring_view("configured_store"),
       /*.artifact_flags=*/LOOMC_COMPILE_ARTIFACT_FLAG_MODULE_TEXT,
-      /*.config=*/
-      {
-          /*.bindings=*/bindings,
-          /*.binding_count=*/IREE_ARRAYSIZE(bindings),
-          /*.json_object=*/loomc_string_view_empty(),
-          /*.flags=*/LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
-      },
+      /*.config_flags=*/LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
+      /*.config_module=*/config_module.get(),
   };
 
   loomc_result_t* result = nullptr;

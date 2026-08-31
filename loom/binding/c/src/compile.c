@@ -130,7 +130,30 @@ static loomc_status_t loomc_compile_validate_options(
     return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
                              "compile options contain unknown artifact flags");
   }
-  return loomc_config_validate_options(&options->config);
+  return loomc_config_validate_policy_flags(options->config_flags);
+}
+
+static loomc_status_t loomc_compile_validate_config_module(
+    const loomc_compiler_t* compiler, const loomc_module_t* program_module,
+    const loomc_compile_options_t* options) {
+  const loomc_module_t* config_module = options ? options->config_module : NULL;
+  if (config_module == NULL) {
+    return loomc_ok_status();
+  }
+  if (config_module == program_module) {
+    return loomc_make_status(
+        LOOMC_STATUS_INVALID_ARGUMENT,
+        "config module must be distinct from the program module");
+  }
+  if (loomc_module_context(config_module) != compiler->context) {
+    return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
+                             "config module was created with another context");
+  }
+  if (loomc_module_const_loom_module(config_module) == NULL) {
+    return loomc_make_status(LOOMC_STATUS_FAILED_PRECONDITION,
+                             "config module does not contain internal IR");
+  }
+  return loomc_ok_status();
 }
 
 static iree_status_t loomc_compile_capture_diagnostic_emission(
@@ -341,12 +364,16 @@ static iree_status_t loomc_compile_write_json_string_field(
 static iree_status_t loomc_compile_write_report_json(
     const loomc_compile_options_t* options, const loomc_result_t* result,
     const loomc_target_specialization_options_t* target_options,
+    const loomc_config_application_result_t* config_application,
     loomc_host_size_t artifact_count, loom_output_stream_t* stream) {
-  const loomc_config_options_t empty_config_options = {0};
-  const loomc_config_options_t* config_options =
-      options ? &options->config : &empty_config_options;
   const loomc_string_view_t module_name =
       options ? options->module_name : loomc_string_view_empty();
+  const loomc_config_policy_flags_t config_flags =
+      options ? options->config_flags : 0;
+  const loomc_host_size_t config_materialized_count =
+      config_application ? config_application->materialized_count : 0;
+  const loomc_host_size_t config_ignored_count =
+      config_application ? config_application->ignored_count : 0;
 
   IREE_RETURN_IF_ERROR(loom_output_stream_write_char(stream, '{'));
   IREE_RETURN_IF_ERROR(loomc_compile_write_json_string_field(
@@ -364,15 +391,19 @@ static iree_status_t loomc_compile_write_report_json(
   IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ","));
   IREE_RETURN_IF_ERROR(loomc_compile_write_json_string_field(
       stream, "module_name", module_name));
-  IREE_RETURN_IF_ERROR(
-      loom_output_stream_write_format(stream, ",\"config_binding_count\":%zu",
-                                      (size_t)config_options->binding_count));
   IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-      stream, ",\"has_config_json\":%s",
-      loomc_string_view_is_empty(config_options->json_object) ? "false"
-                                                              : "true"));
+      stream, ",\"has_config_module\":%s",
+      options != NULL && options->config_module != NULL ? "true" : "false"));
   IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
-      stream, ",\"config_flags\":%u", (unsigned)config_options->flags));
+      stream, ",\"config_definition_count\":%zu",
+      (size_t)(config_materialized_count + config_ignored_count)));
+  IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
+      stream, ",\"config_materialized_count\":%zu",
+      (size_t)config_materialized_count));
+  IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
+      stream, ",\"config_ignored_count\":%zu", (size_t)config_ignored_count));
+  IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
+      stream, ",\"config_flags\":%u", (unsigned)config_flags));
   IREE_RETURN_IF_ERROR(loom_output_stream_write_format(
       stream, ",\"target_specialization_count\":%zu",
       target_options ? (size_t)target_options->specialization_count : 0));
@@ -385,6 +416,7 @@ static iree_status_t loomc_compile_write_report_json(
 static loomc_status_t loomc_compile_add_report_json_artifact(
     loomc_result_t* result, const loomc_compile_options_t* options,
     const loomc_target_specialization_options_t* target_options,
+    const loomc_config_application_result_t* config_application,
     loomc_host_size_t artifact_count) {
   loomc_allocator_t allocator = loomc_result_allocator(result);
 
@@ -395,7 +427,8 @@ static loomc_status_t loomc_compile_add_report_json_artifact(
   loom_output_stream_for_builder(&builder, &stream);
   loomc_status_t status =
       loomc_status_from_iree(loomc_compile_write_report_json(
-          options, result, target_options, artifact_count, &stream));
+          options, result, target_options, config_application, artifact_count,
+          &stream));
 
   char* report_storage = NULL;
   iree_host_size_t report_length = 0;
@@ -429,6 +462,7 @@ static loomc_status_t loomc_compile_add_report_json_artifact(
 static loomc_status_t loomc_compile_emit_requested_artifacts(
     loomc_result_t* result, const loomc_compile_options_t* options,
     const loomc_target_specialization_options_t* target_options,
+    const loomc_config_application_result_t* config_application,
     const loomc_module_t* module, const loom_module_t* launch_config_module) {
   const loomc_compile_artifact_flags_t artifact_flags =
       options ? options->artifact_flags : 0;
@@ -465,7 +499,8 @@ static loomc_status_t loomc_compile_emit_requested_artifacts(
       iree_any_bit_set(artifact_flags,
                        LOOMC_COMPILE_ARTIFACT_FLAG_REPORT_JSON)) {
     status = loomc_compile_add_report_json_artifact(
-        result, options, target_options, loomc_result_artifact_count(result));
+        result, options, target_options, config_application,
+        loomc_result_artifact_count(result));
   }
   return status;
 }
@@ -548,22 +583,23 @@ static loomc_status_t loomc_compile_module_into_result(
       iree_any_bit_set(options->artifact_flags,
                        LOOMC_COMPILE_ARTIFACT_FLAG_LAUNCH_CONFIG);
   const loom_module_t* launch_config_module = NULL;
+  loomc_config_application_result_t config_application = {0};
 
   loomc_status_t status =
       loomc_result_verify_loom_module(internal_module, /*source=*/NULL, result);
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
-    const loomc_config_options_t empty_config_options = {0};
-    const loomc_config_options_t* config_options =
-        options ? &options->config : &empty_config_options;
-    loomc_config_apply_to_module_options_t config_apply_options = {
-        .config = config_options,
-        .module = internal_module,
+    const loomc_module_t* config_module =
+        options ? options->config_module : NULL;
+    loomc_config_apply_module_options_t config_apply_options = {
+        .config_module = loomc_module_const_loom_module(config_module),
+        .target_module = internal_module,
+        .policy_flags = options ? options->config_flags : 0,
         .result = result,
         .diagnostic_code = loomc_make_cstring_view("CONFIG/INVALID"),
         .block_pool = loomc_workspace_block_pool(workspace),
-        .allocator = loomc_result_allocator(result),
     };
-    status = loomc_config_apply_to_module(&config_apply_options);
+    status =
+        loomc_config_apply_module(&config_apply_options, &config_application);
   }
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
     status = loomc_compile_specialize_functions(
@@ -600,7 +636,8 @@ static loomc_status_t loomc_compile_module_into_result(
   }
   if (loomc_status_is_ok(status)) {
     status = loomc_compile_emit_requested_artifacts(
-        result, options, target_specialization, module, launch_config_module);
+        result, options, target_specialization, &config_application, module,
+        launch_config_module);
   }
   if (!loomc_status_is_ok(status) || !loomc_result_succeeded(result)) {
     loomc_module_prepare_function_versions(module);
@@ -664,14 +701,16 @@ loomc_status_t loomc_compile_module(loomc_compiler_t* compiler,
     return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
                              "pass program was created with another context");
   }
+  const loomc_target_specialization_options_t* target_specialization = NULL;
+  LOOMC_RETURN_IF_ERROR(loomc_compile_resolve_target_specialization(
+      compiler, options, &target_specialization));
   loom_module_t* internal_module = loomc_module_loom_module(module);
   if (internal_module == NULL) {
     return loomc_make_status(LOOMC_STATUS_FAILED_PRECONDITION,
                              "module does not contain internal IR");
   }
-  const loomc_target_specialization_options_t* target_specialization = NULL;
-  LOOMC_RETURN_IF_ERROR(loomc_compile_resolve_target_specialization(
-      compiler, options, &target_specialization));
+  LOOMC_RETURN_IF_ERROR(
+      loomc_compile_validate_config_module(compiler, module, options));
 
   loomc_result_t* result = NULL;
   LOOMC_RETURN_IF_ERROR(
@@ -735,6 +774,8 @@ loomc_status_t loomc_compile_request(
   const loomc_target_specialization_options_t* target_specialization = NULL;
   LOOMC_RETURN_IF_ERROR(loomc_compile_resolve_target_specialization(
       compiler, options, &target_specialization));
+  LOOMC_RETURN_IF_ERROR(
+      loomc_compile_validate_config_module(compiler, NULL, options));
 
   loomc_module_t* module = NULL;
   loomc_result_t* result = NULL;

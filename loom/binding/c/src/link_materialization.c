@@ -57,7 +57,7 @@ static iree_status_t loomc_link_materialization_prepare_module(
     iree_allocator_t allocator, loom_module_t** inout_module) {
   loomc_link_materialization_state_t* state =
       (loomc_link_materialization_state_t*)user_data;
-  const loomc_config_apply_to_module_options_t apply_options = {
+  const loomc_config_apply_text_to_module_options_t apply_options = {
       .config = state->specialization.config,
       .module = *inout_module,
       .result = state->diagnostics.result,
@@ -65,7 +65,7 @@ static iree_status_t loomc_link_materialization_prepare_module(
       .block_pool = block_pool,
       .allocator = loomc_allocator_from_iree(allocator),
   };
-  loomc_status_t status = loomc_config_apply_to_module(&apply_options);
+  loomc_status_t status = loomc_config_apply_text_to_module(&apply_options);
   if (!loomc_status_is_ok(status)) {
     return iree_status_from_loomc(status);
   }

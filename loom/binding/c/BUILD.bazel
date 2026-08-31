@@ -129,6 +129,7 @@ loom_cc_library(
         "src/compile.c",
         "src/compile_report.c",
         "src/config.c",
+        "src/config_text.c",
         "src/context.c",
         "src/diagnostic.c",
         "src/emit.c",
