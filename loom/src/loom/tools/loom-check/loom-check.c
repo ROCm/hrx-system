@@ -4,14 +4,20 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// loom-check binary with synthetic test support and all build-enabled check
-// providers linked in.
+// loom-check binary with all build-enabled product providers linked in.
+// Test builds may additionally enable the synthetic test provider.
 
 #include <stddef.h>
 
 #include "loom/target/arch/cmd/check/provider.h"
 #include "loom/tools/loom-check/provider.h"
+#ifndef LOOM_CHECK_HAVE_TEST_PROVIDER
+#define LOOM_CHECK_HAVE_TEST_PROVIDER 0
+#endif  // LOOM_CHECK_HAVE_TEST_PROVIDER
+
+#if LOOM_CHECK_HAVE_TEST_PROVIDER
 #include "loom/tools/loom-check/test_provider.h"
+#endif  // LOOM_CHECK_HAVE_TEST_PROVIDER
 
 #ifndef LOOM_CHECK_HAVE_EMIT_AMDGPU
 #define LOOM_CHECK_HAVE_EMIT_AMDGPU 0
@@ -61,7 +67,10 @@
 #endif  // LOOM_CHECK_HAVE_TARGET_X86
 
 static const loom_check_provider_t* const kLoomCheckProviders[] = {
-    &loom_check_test_provider,          &loom_cmd_check_provider,
+#if LOOM_CHECK_HAVE_TEST_PROVIDER
+    &loom_check_test_provider,
+#endif  // LOOM_CHECK_HAVE_TEST_PROVIDER
+    &loom_cmd_check_provider,
 #if LOOM_CHECK_HAVE_EMIT_AMDGPU
     &loom_amdgpu_check_provider,
 #endif  // LOOM_CHECK_HAVE_EMIT_AMDGPU

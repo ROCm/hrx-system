@@ -57,7 +57,7 @@ function(loom_check_test_suite)
     message(FATAL_ERROR "loom_check_test_suite requires SRCS")
   endif()
   if(NOT _RULE_RUNNER)
-    set(_RULE_RUNNER loom::tools::loom-check::loom-check)
+    set(_RULE_RUNNER loom::tools::loom-check::loom-check-test)
   endif()
 
   list(FIND _RULE_LABELS "loom-check" _LOOM_CHECK_LABEL_INDEX)

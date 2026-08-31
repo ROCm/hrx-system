@@ -110,7 +110,6 @@ loom_cc_library(
     loom::target::arch::amdgpu::planning::storage_lease
     loom::target::arch::amdgpu::planning::vopd_plan
     loom::tools::loom-check::execute
-  TESTONLY
   PUBLIC
 )
 endif()

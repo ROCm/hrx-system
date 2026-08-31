@@ -6,57 +6,10 @@
 
 #include "loom/tools/loom-check/requirements.h"
 
-static bool loom_check_builtin_requirement_provider_matches(
-    const loom_check_requirement_provider_t* provider,
-    iree_string_view_t requirement) {
-  (void)provider;
-  return iree_string_view_equal(requirement,
-                                IREE_SV("loom-check-test-unavailable"));
-}
-
-static iree_status_t loom_check_builtin_requirement_provider_query(
-    const loom_check_requirement_provider_t* provider,
-    const loom_check_environment_t* environment, iree_string_view_t requirement,
-    iree_allocator_t allocator) {
-  (void)provider;
-  (void)environment;
-  (void)allocator;
-  if (iree_string_view_equal(requirement,
-                             IREE_SV("loom-check-test-unavailable"))) {
-    return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                            "deterministic unavailable test requirement");
-  }
-  return iree_ok_status();
-}
-
-static iree_status_t loom_check_builtin_requirement_provider_append_names(
-    const loom_check_requirement_provider_t* provider,
-    iree_string_builder_t* builder) {
-  (void)provider;
-  return iree_string_builder_append_cstring(builder,
-                                            "loom-check-test-unavailable");
-}
-
-static const loom_check_requirement_provider_t*
-loom_check_builtin_requirement_provider(void) {
-  static const loom_check_requirement_provider_t provider = {
-      .name = IREE_SVL("loom-check.builtin"),
-      .match = loom_check_builtin_requirement_provider_matches,
-      .query = loom_check_builtin_requirement_provider_query,
-      .append_names = loom_check_builtin_requirement_provider_append_names,
-  };
-  return &provider;
-}
-
 static const loom_check_requirement_provider_t*
 loom_check_lookup_requirement_provider(
     const loom_check_environment_t* environment,
     iree_string_view_t requirement) {
-  const loom_check_requirement_provider_t* builtin_provider =
-      loom_check_builtin_requirement_provider();
-  if (builtin_provider->match(builtin_provider, requirement)) {
-    return builtin_provider;
-  }
   if (environment == NULL) {
     return NULL;
   }
@@ -86,23 +39,27 @@ static bool loom_check_requirement_name_is_known(
 
 static iree_status_t loom_check_append_supported_requirement_names(
     const loom_check_environment_t* environment, loom_check_result_t* result) {
-  const loom_check_requirement_provider_t* builtin_provider =
-      loom_check_builtin_requirement_provider();
-  IREE_RETURN_IF_ERROR(
-      builtin_provider->append_names(builtin_provider, &result->detail));
-  if (environment != NULL &&
-      environment->requirement_providers.providers != NULL) {
-    for (iree_host_size_t i = 0;
-         i < environment->requirement_providers.provider_count; ++i) {
-      const loom_check_requirement_provider_t* provider =
-          environment->requirement_providers.providers[i];
-      if (provider == NULL || provider->append_names == NULL) {
-        continue;
-      }
+  if (environment == NULL ||
+      environment->requirement_providers.providers == NULL ||
+      environment->requirement_providers.provider_count == 0) {
+    return iree_string_builder_append_cstring(
+        &result->detail,
+        "no requirement providers are linked into this runner\n");
+  }
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
+      &result->detail, "supported requirements are "));
+  for (iree_host_size_t i = 0;
+       i < environment->requirement_providers.provider_count; ++i) {
+    const loom_check_requirement_provider_t* provider =
+        environment->requirement_providers.providers[i];
+    if (provider == NULL || provider->append_names == NULL) {
+      continue;
+    }
+    if (i != 0) {
       IREE_RETURN_IF_ERROR(
           iree_string_builder_append_cstring(&result->detail, ", "));
-      IREE_RETURN_IF_ERROR(provider->append_names(provider, &result->detail));
     }
+    IREE_RETURN_IF_ERROR(provider->append_names(provider, &result->detail));
   }
   return iree_string_builder_append_cstring(&result->detail, "\n");
 }
@@ -113,9 +70,7 @@ static iree_status_t loom_check_fail_unknown_requirement(
   result->raw_outcome = LOOM_CHECK_FAIL;
   result->final_outcome = LOOM_CHECK_FAIL;
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-      &result->detail,
-      "unknown REQUIRES requirement '%.*s'; supported external requirements "
-      "are ",
+      &result->detail, "unknown REQUIRES requirement '%.*s'; ",
       (int)requirement.size, requirement.data));
   return loom_check_append_supported_requirement_names(environment, result);
 }

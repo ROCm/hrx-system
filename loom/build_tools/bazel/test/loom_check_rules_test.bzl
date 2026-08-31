@@ -57,10 +57,29 @@ def _test_loom_check_wrapper_declares_fixture_impl(env, target):
     )
     env.expect.that_str(action.mnemonic).equals("FileWrite")
 
+def _test_loom_check_wrapper_uses_test_runner(name, **kwargs):
+    loom_check_test(
+        name = name + "_subject",
+        src = "roundtrip.loom-test",
+        tags = ["manual"],
+    )
+    analysis_test(
+        name = name,
+        impl = _test_loom_check_wrapper_uses_test_runner_impl,
+        target = name + "_subject_launcher",
+        **kwargs
+    )
+
+def _test_loom_check_wrapper_uses_test_runner_impl(env, target):
+    info = target[LoomCheckTestInfo]
+    if not str(info.runner).endswith("//loom/src/loom/tools/loom-check:loom-check-test"):
+        env.fail("unexpected default runner %s" % info.runner)
+
 def loom_check_rules_test_suite(name):
     test_suite(
         name = name,
         tests = [
             _test_loom_check_wrapper_declares_fixture,
+            _test_loom_check_wrapper_uses_test_runner,
         ],
     )

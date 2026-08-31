@@ -1133,18 +1133,32 @@ TEST_F(ExecuteTest, PassModeRejectsMalformedOptions) {
 TEST_F(ExecuteTest, RequiresUnavailableSkipsCaseBeforeParsingIr) {
   loom_check_result_t result;
   IREE_ASSERT_OK(
-      ExecuteFirst("// RUN: roundtrip\n"
-                   "// REQUIRES: loom-check-test-unavailable\n"
-                   "this.is.not.valid.ir\n",
-                   &result));
+      ExecuteFirstWithEnvironment("// RUN: roundtrip\n"
+                                  "// REQUIRES: fake-target\n"
+                                  "this.is.not.valid.ir\n",
+                                  &provider_environment_, &result));
   EXPECT_EQ(result.raw_outcome, LOOM_CHECK_SKIP);
   EXPECT_EQ(result.final_outcome, LOOM_CHECK_SKIP);
-  EXPECT_NE(DetailString(result).find("loom-check-test-unavailable"),
-            std::string::npos);
+  EXPECT_NE(DetailString(result).find("fake-target"), std::string::npos);
   loom_check_result_deinitialize(&result);
 }
 
-TEST_F(ExecuteTest, UnknownRequiresRequirementFailsLoudly) {
+TEST_F(ExecuteTest, UnknownRequiresWithProviderListsSupportedNames) {
+  loom_check_result_t result;
+  IREE_ASSERT_OK(
+      ExecuteFirstWithEnvironment("// RUN: roundtrip\n"
+                                  "// REQUIRES: definitely-not-real\n"
+                                  "func.def @f() {}\n",
+                                  &provider_environment_, &result));
+  EXPECT_EQ(result.raw_outcome, LOOM_CHECK_FAIL);
+  EXPECT_EQ(result.final_outcome, LOOM_CHECK_FAIL);
+  EXPECT_NE(DetailString(result).find("unknown REQUIRES requirement"),
+            std::string::npos);
+  EXPECT_NE(DetailString(result).find("fake-target"), std::string::npos);
+  loom_check_result_deinitialize(&result);
+}
+
+TEST_F(ExecuteTest, UnknownRequiresWithoutProvidersExplainsRunner) {
   loom_check_result_t result;
   IREE_ASSERT_OK(
       ExecuteFirst("// RUN: roundtrip\n"
@@ -1153,9 +1167,8 @@ TEST_F(ExecuteTest, UnknownRequiresRequirementFailsLoudly) {
                    &result));
   EXPECT_EQ(result.raw_outcome, LOOM_CHECK_FAIL);
   EXPECT_EQ(result.final_outcome, LOOM_CHECK_FAIL);
-  EXPECT_NE(DetailString(result).find("unknown REQUIRES requirement"),
-            std::string::npos);
-  EXPECT_NE(DetailString(result).find("loom-check-test-unavailable"),
+  EXPECT_NE(DetailString(result).find(
+                "no requirement providers are linked into this runner"),
             std::string::npos);
   loom_check_result_deinitialize(&result);
 }

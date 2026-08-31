@@ -1179,7 +1179,7 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
         data=None,
         env=None,
         tags=None,
-        runner="//loom/src/loom/tools/loom-check:loom-check",
+        runner="//loom/src/loom/tools/loom-check:loom-check-test",
         target_compatible_with=None,
         **kwargs,
     ):
@@ -1221,7 +1221,7 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
         data=None,
         env=None,
         tags=None,
-        runner="//loom/src/loom/tools/loom-check:loom-check",
+        runner="//loom/src/loom/tools/loom-check:loom-check-test",
         test_name_prefix_to_strip="",
         resource_group=None,
         timeout=None,
@@ -1240,7 +1240,7 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
         srcs_block = self._convert_string_list_block(
             "SRCS", [self._normalize_label(src) for src in srcs], sort=False
         )
-        default_runner = "//loom/src/loom/tools/loom-check:loom-check"
+        default_runner = "//loom/src/loom/tools/loom-check:loom-check-test"
         runner_block = (
             ""
             if runner == default_runner

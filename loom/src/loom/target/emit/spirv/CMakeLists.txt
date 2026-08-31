@@ -216,7 +216,6 @@ loom_cc_library(
     loom::target::tool::spirv
     loom::tooling::compile::pipeline
     loom::tools::loom-check::execute
-  TESTONLY
   PUBLIC
 )
 endif()
@@ -233,7 +232,6 @@ loom_cc_library(
     ::loom_check
     iree::base
     loom::tools::loom-check::provider
-  TESTONLY
   PUBLIC
 )
 endif()

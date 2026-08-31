@@ -21,7 +21,6 @@ loom_cc_library(
     iree::base
     loom::target::arch::spirv::provider
     loom::tools::loom-check::provider
-  TESTONLY
   PUBLIC
 )
 endif()

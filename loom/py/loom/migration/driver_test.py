@@ -198,12 +198,7 @@ def test_loom_test_fragment_input_is_left_to_loom_check() -> None:
 
 
 def test_loom_test_requires_input_is_left_to_loom_check() -> None:
-    text = (
-        "// RUN: roundtrip\n"
-        "// REQUIRES: loom-check-test-unavailable\n"
-        "\n"
-        "this.is.invalid.ir\n"
-    )
+    text = "// RUN: roundtrip\n// REQUIRES: fake-target\n\nthis.is.invalid.ir\n"
 
     result = migrate_loom_test_text(text, filename=Path("requires.loom-test"))
 

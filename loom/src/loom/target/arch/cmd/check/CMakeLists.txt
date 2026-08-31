@@ -31,7 +31,6 @@ loom_cc_library(
     loom::target::arch::cmd::program
     loom::tooling::compile::pipeline
     loom::tools::loom-check::execute
-  TESTONLY
   PUBLIC
 )
 
@@ -47,7 +46,6 @@ loom_cc_library(
     iree::base
     loom::target::arch::cmd::provider
     loom::tools::loom-check::provider
-  TESTONLY
   PUBLIC
 )
 

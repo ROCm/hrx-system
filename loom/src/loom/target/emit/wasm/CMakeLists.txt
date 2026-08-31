@@ -126,7 +126,6 @@ loom_cc_library(
     iree::base
     loom::target::tool::wasm
     loom::tools::loom-check::execute
-  TESTONLY
   PUBLIC
 )
 endif()
@@ -143,7 +142,6 @@ loom_cc_library(
     ::loom_check
     iree::base
     loom::tools::loom-check::provider
-  TESTONLY
   PUBLIC
 )
 endif()
