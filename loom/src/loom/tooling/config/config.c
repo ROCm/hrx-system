@@ -18,6 +18,7 @@
 #include "loom/ir/encoding.h"
 #include "loom/ops/config/ops.h"
 #include "loom/ops/encoding/roles.h"
+#include "loom/rewrite/remap.h"
 #include "loom/tooling/io/file.h"
 #include "loom/util/json.h"
 #include "loom/util/stream.h"
@@ -395,193 +396,28 @@ static bool loom_tooling_config_symbol_is_config(const loom_symbol_t* symbol) {
          loom_symbol_implements(symbol, LOOM_SYMBOL_INTERFACE_CONFIG);
 }
 
-static iree_status_t loom_tooling_config_copy_attr(
+static iree_status_t loom_tooling_config_remap_type_and_value(
     const loom_module_t* source_module, loom_module_t* target_module,
-    loom_attribute_t source_attr, uint8_t depth, loom_attribute_t* out_attr);
+    loom_type_t source_type, loom_attribute_t source_value,
+    iree_arena_block_pool_t* block_pool, loom_type_t* out_target_type,
+    loom_attribute_t* out_target_value) {
+  *out_target_type = (loom_type_t){0};
+  *out_target_value = loom_attr_absent();
 
-static iree_status_t loom_tooling_config_copy_string_id(
-    const loom_module_t* source_module, loom_module_t* target_module,
-    loom_string_id_t source_string_id, loom_string_id_t* out_target_string_id) {
-  if (source_string_id == LOOM_STRING_ID_INVALID) {
-    *out_target_string_id = LOOM_STRING_ID_INVALID;
-    return iree_ok_status();
+  iree_arena_allocator_t remap_arena;
+  iree_arena_initialize(block_pool, &remap_arena);
+  loom_ir_remap_t remap = {0};
+  const loom_ir_remap_options_t remap_options = {0};
+  iree_status_t status = loom_ir_remap_initialize(
+      source_module, target_module, &remap_arena, &remap_options, &remap);
+  if (iree_status_is_ok(status)) {
+    status = loom_ir_remap_type(&remap, source_type, out_target_type);
   }
-  if (source_string_id >= source_module->strings.count) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "config value references invalid string id %u",
-                            (unsigned)source_string_id);
+  if (iree_status_is_ok(status)) {
+    status = loom_ir_remap_attribute(&remap, source_value, out_target_value);
   }
-  return loom_module_intern_string(
-      target_module, source_module->strings.entries[source_string_id],
-      out_target_string_id);
-}
-
-static iree_status_t loom_tooling_config_copy_named_attrs(
-    const loom_module_t* source_module, loom_module_t* target_module,
-    const loom_named_attr_t* source_entries, iree_host_size_t count,
-    uint8_t depth, loom_named_attr_t** out_target_entries) {
-  if (count == 0) {
-    *out_target_entries = NULL;
-    return iree_ok_status();
-  }
-  if (depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "config value attribute nesting exceeds max %u",
-                            (unsigned)LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH);
-  }
-  loom_named_attr_t* target_entries = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(&target_module->arena, count,
-                                                 sizeof(*target_entries),
-                                                 (void**)&target_entries));
-  for (iree_host_size_t i = 0; i < count; ++i) {
-    IREE_RETURN_IF_ERROR(loom_tooling_config_copy_string_id(
-        source_module, target_module, source_entries[i].name_id,
-        &target_entries[i].name_id));
-    IREE_RETURN_IF_ERROR(loom_tooling_config_copy_attr(
-        source_module, target_module, source_entries[i].value,
-        (uint8_t)(depth + 1), &target_entries[i].value));
-    target_entries[i].reserved = 0;
-  }
-  *out_target_entries = target_entries;
-  return iree_ok_status();
-}
-
-static iree_status_t loom_tooling_config_copy_encoding(
-    const loom_module_t* source_module, loom_module_t* target_module,
-    uint16_t source_encoding_id, uint8_t depth,
-    uint16_t* out_target_encoding_id) {
-  if (depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "config encoding nesting exceeds max %u",
-                            (unsigned)LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH);
-  }
-  const loom_encoding_t* source_encoding =
-      loom_module_encoding(source_module, source_encoding_id);
-  if (!source_encoding) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "config value references invalid encoding id %u",
-                            (unsigned)source_encoding_id);
-  }
-
-  loom_encoding_t target_encoding = {0};
-  IREE_RETURN_IF_ERROR(loom_tooling_config_copy_string_id(
-      source_module, target_module, source_encoding->name_id,
-      &target_encoding.name_id));
-  IREE_RETURN_IF_ERROR(loom_tooling_config_copy_string_id(
-      source_module, target_module, source_encoding->alias_id,
-      &target_encoding.alias_id));
-  target_encoding.attribute_count = source_encoding->attribute_count;
-  loom_named_attr_t* target_entries = NULL;
-  IREE_RETURN_IF_ERROR(loom_tooling_config_copy_named_attrs(
-      source_module, target_module, source_encoding->attributes,
-      source_encoding->attribute_count, (uint8_t)(depth + 1), &target_entries));
-  target_encoding.attributes = target_entries;
-  return loom_module_add_encoding(target_module, &target_encoding,
-                                  out_target_encoding_id);
-}
-
-static iree_status_t loom_tooling_config_copy_attr(
-    const loom_module_t* source_module, loom_module_t* target_module,
-    loom_attribute_t source_attr, uint8_t depth, loom_attribute_t* out_attr) {
-  *out_attr = source_attr;
-  switch ((loom_attr_kind_t)source_attr.kind) {
-    case LOOM_ATTR_ABSENT:
-    case LOOM_ATTR_I64:
-    case LOOM_ATTR_F64:
-    case LOOM_ATTR_BOOL:
-    case LOOM_ATTR_ENUM:
-      return iree_ok_status();
-    case LOOM_ATTR_STRING: {
-      loom_string_id_t target_string_id = LOOM_STRING_ID_INVALID;
-      IREE_RETURN_IF_ERROR(loom_tooling_config_copy_string_id(
-          source_module, target_module, source_attr.string_id,
-          &target_string_id));
-      *out_attr = loom_attr_string(target_string_id);
-      return iree_ok_status();
-    }
-    case LOOM_ATTR_I64_ARRAY: {
-      if (source_attr.count == 0) {
-        *out_attr = loom_attr_i64_array(NULL, 0);
-        return iree_ok_status();
-      }
-      int64_t* target_values = NULL;
-      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-          &target_module->arena, source_attr.count, sizeof(*target_values),
-          (void**)&target_values));
-      memcpy(target_values, source_attr.i64_array,
-             (iree_host_size_t)source_attr.count * sizeof(*target_values));
-      *out_attr = loom_attr_i64_array(target_values, source_attr.count);
-      return iree_ok_status();
-    }
-    case LOOM_ATTR_DICT: {
-      if (source_attr.count == 0) {
-        *out_attr = loom_make_canonical_attr_dict(NULL, 0);
-        return iree_ok_status();
-      }
-      loom_named_attr_t* target_entries = NULL;
-      IREE_RETURN_IF_ERROR(loom_tooling_config_copy_named_attrs(
-          source_module, target_module, source_attr.dict_entries,
-          source_attr.count, depth, &target_entries));
-      return loom_module_make_canonical_attr_dict(
-          target_module,
-          loom_make_named_attr_slice(target_entries, source_attr.count),
-          out_attr);
-    }
-    case LOOM_ATTR_PARAMETERIZED: {
-      loom_attribute_t target_slots[UINT8_MAX];
-      for (uint16_t i = 0; i < source_attr.count; ++i) {
-        IREE_RETURN_IF_ERROR(loom_tooling_config_copy_attr(
-            source_module, target_module, source_attr.parameterized_slots[i],
-            (uint8_t)(depth + 1), &target_slots[i]));
-      }
-      return loom_module_make_parameterized_attr(
-          target_module, (loom_parameterized_attr_kind_t)source_attr.reserved_1,
-          target_slots, source_attr.count, out_attr);
-    }
-    case LOOM_ATTR_PARAMETERIZED_ARRAY: {
-      loom_attribute_t* target_attributes = NULL;
-      if (source_attr.count > 0) {
-        IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-            &target_module->arena, source_attr.count,
-            sizeof(*target_attributes), (void**)&target_attributes));
-        for (uint16_t i = 0; i < source_attr.count; ++i) {
-          IREE_RETURN_IF_ERROR(loom_tooling_config_copy_attr(
-              source_module, target_module, source_attr.parameterized_array[i],
-              (uint8_t)(depth + 1), &target_attributes[i]));
-        }
-      }
-      *out_attr =
-          loom_attr_parameterized_array(target_attributes, source_attr.count);
-      return iree_ok_status();
-    }
-    case LOOM_ATTR_ENCODING: {
-      uint16_t target_encoding_id = 0;
-      IREE_RETURN_IF_ERROR(loom_tooling_config_copy_encoding(
-          source_module, target_module,
-          (uint16_t)loom_attr_as_encoding_id(source_attr), (uint8_t)(depth + 1),
-          &target_encoding_id));
-      *out_attr = loom_attr_encoding(target_encoding_id);
-      return iree_ok_status();
-    }
-    case LOOM_ATTR_SYMBOL:
-    case LOOM_ATTR_SYMBOL_ARRAY:
-    case LOOM_ATTR_SYMBOL_SET:
-    case LOOM_ATTR_TYPE:
-    case LOOM_ATTR_PREDICATE_LIST:
-    case LOOM_ATTR_SCOPED_ENUM:
-    case LOOM_ATTR_ENUM_ARRAY:
-    case LOOM_ATTR_SIGNED_ENUM_SET:
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "config encoding value contains unsupported attribute kind %u",
-          (unsigned)source_attr.kind);
-    case LOOM_ATTR_ANY:
-    case LOOM_ATTR_COUNT_:
-    default:
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "unknown config attribute kind %u",
-                              (unsigned)source_attr.kind);
-  }
+  iree_arena_deinitialize(&remap_arena);
+  return status;
 }
 
 static iree_status_t loom_tooling_config_parse_encoding_value(
@@ -628,9 +464,16 @@ static iree_status_t loom_tooling_config_parse_encoding_value(
       status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                 "failed to parse config encoding value");
     } else {
-      status = loom_tooling_config_copy_attr(parsed_module, module,
-                                             loom_config_def_value(op),
-                                             /*depth=*/0, out_attr);
+      loom_type_t remapped_type = {0};
+      status = loom_tooling_config_remap_type_and_value(
+          parsed_module, module,
+          loom_module_value_type(parsed_module, loom_config_def_type(op)),
+          loom_config_def_value(op), block_pool, &remapped_type, out_attr);
+      if (iree_status_is_ok(status) && !loom_type_equal(remapped_type, type)) {
+        status = iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "parsed config encoding value has an incompatible type");
+      }
     }
   }
 
@@ -776,6 +619,112 @@ static iree_status_t loom_tooling_config_replace_with_def(
   return iree_ok_status();
 }
 
+static iree_status_t loom_tooling_config_apply_exact_value(
+    loom_module_t* module, iree_string_view_t key, loom_op_t* old_op,
+    loom_type_t type, loom_attribute_t value) {
+  if (loom_config_decl_isa(old_op)) {
+    IREE_RETURN_IF_ERROR(loom_symbol_value_constraints_check_exact(
+        key, type, loom_config_decl_type(old_op), value,
+        loom_config_decl_predicates(old_op)));
+  }
+  const loom_symbol_ref_t symbol = loom_config_decl_isa(old_op)
+                                       ? loom_config_decl_symbol(old_op)
+                                       : loom_config_def_symbol(old_op);
+  return loom_tooling_config_replace_with_def(module, old_op, symbol, value,
+                                              type);
+}
+
+iree_status_t loom_tooling_config_overlay_module(
+    loom_module_t* module, const loom_module_t* config_module,
+    iree_arena_block_pool_t* block_pool,
+    loom_tooling_config_materialize_result_t* out_result) {
+  IREE_ASSERT_ARGUMENT(module);
+  IREE_ASSERT_ARGUMENT(config_module);
+  IREE_ASSERT_ARGUMENT(block_pool);
+  if (module == config_module) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "config module must be distinct from target module");
+  }
+  if (module->context != config_module->context) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "config and target modules use different contexts");
+  }
+
+  loom_tooling_config_materialize_result_t result = {0};
+  const loom_block_t* config_block =
+      loom_region_const_entry_block(config_module->body);
+  for (const loom_op_t* config_op = config_block->first_op; config_op != NULL;
+       config_op = config_op->next_op) {
+    if (!loom_config_def_isa(config_op)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "config module contains non-config.def operation kind %u",
+          (unsigned)config_op->kind);
+    }
+    const loom_symbol_ref_t source_ref = loom_config_def_symbol(config_op);
+    if (!loom_symbol_ref_is_valid(source_ref) || source_ref.module_id != 0 ||
+        source_ref.symbol_id >= config_module->symbols.count) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "config.def has an invalid symbol reference");
+    }
+    const loom_symbol_t* source_symbol =
+        &config_module->symbols.entries[source_ref.symbol_id];
+    const iree_string_view_t key =
+        loom_tooling_config_symbol_name(config_module, source_symbol);
+
+    uint16_t target_symbol_id = LOOM_SYMBOL_ID_INVALID;
+    IREE_RETURN_IF_ERROR(
+        loom_tooling_config_lookup_symbol(module, key, &target_symbol_id));
+    if (target_symbol_id == LOOM_SYMBOL_ID_INVALID) {
+      ++result.ignored_count;
+      continue;
+    }
+    loom_symbol_t* target_symbol = &module->symbols.entries[target_symbol_id];
+    if (!loom_tooling_config_symbol_is_config(target_symbol)) {
+      ++result.ignored_count;
+      continue;
+    }
+    loom_op_t* target_op = target_symbol->defining_op;
+    const loom_value_id_t target_value =
+        loom_tooling_config_symbol_result_value(target_op);
+    if (target_value == LOOM_VALUE_ID_INVALID ||
+        target_value >= module->values.count) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "config '%.*s' has no result value",
+                              (int)key.size, key.data);
+    }
+    const loom_type_t target_type =
+        loom_module_value_type(module, target_value);
+    const loom_value_id_t source_value = loom_config_def_type(config_op);
+    if (source_value >= config_module->values.count) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "config definition '%.*s' has no result value",
+                              (int)key.size, key.data);
+    }
+
+    loom_type_t remapped_type = {0};
+    loom_attribute_t remapped_value = loom_attr_absent();
+    IREE_RETURN_IF_ERROR(loom_tooling_config_remap_type_and_value(
+        config_module, module,
+        loom_module_value_type(config_module, source_value),
+        loom_config_def_value(config_op), block_pool, &remapped_type,
+        &remapped_value));
+    if (!loom_type_equal(remapped_type, target_type)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "config definition '%.*s' type does not match the target declaration",
+          (int)key.size, key.data);
+    }
+    IREE_RETURN_IF_ERROR(loom_tooling_config_apply_exact_value(
+        module, key, target_op, target_type, remapped_value));
+    ++result.materialized_count;
+  }
+
+  if (out_result) *out_result = result;
+  return iree_ok_status();
+}
+
 iree_status_t loom_tooling_config_materialize_module(
     loom_module_t* module,
     const loom_tooling_config_materialize_options_t* options,
@@ -829,14 +778,9 @@ iree_status_t loom_tooling_config_materialize_module(
     loom_attribute_t value = {0};
     IREE_RETURN_IF_ERROR(loom_tooling_config_parse_value(
         module, key, config_type, value_text, block_pool, &value));
-    if (loom_config_decl_isa(old_op)) {
-      IREE_RETURN_IF_ERROR(loom_symbol_value_constraints_check_exact(
-          loom_tooling_config_symbol_name(module, symbol), config_type,
-          loom_config_decl_type(old_op), value,
-          loom_config_decl_predicates(old_op)));
-    }
-    IREE_RETURN_IF_ERROR(loom_tooling_config_replace_with_def(
-        module, old_op, (loom_symbol_ref_t){0, symbol_id}, value, config_type));
+    IREE_RETURN_IF_ERROR(loom_tooling_config_apply_exact_value(
+        module, loom_tooling_config_symbol_name(module, symbol), old_op,
+        config_type, value));
     ++result.materialized_count;
   }
 

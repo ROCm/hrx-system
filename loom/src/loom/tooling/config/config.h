@@ -150,6 +150,20 @@ iree_status_t loom_tooling_config_materialize_module(
     iree_arena_block_pool_t* block_pool,
     loom_tooling_config_materialize_result_t* out_result);
 
+// Overlays exact config.def values from |config_module| onto matching config
+// symbols in |module|.
+//
+// Both modules must belong to the same context and be distinct. The config
+// module is borrowed and remains unchanged. It must contain only top-level
+// config.def operations; unresolved declarations and unrelated program
+// operations are rejected. Definitions without matching config symbols in the
+// target module are ignored so one reusable config module can serve several
+// related programs.
+iree_status_t loom_tooling_config_overlay_module(
+    loom_module_t* module, const loom_module_t* config_module,
+    iree_arena_block_pool_t* block_pool,
+    loom_tooling_config_materialize_result_t* out_result);
+
 // Requires that |module| contains no remaining config.decl symbols.
 //
 // Linkable/library outputs should not call this: unresolved declarations are

@@ -97,6 +97,13 @@ class ConfigMaterializeTest : public ::testing::Test {
     return status;
   }
 
+  iree_status_t Overlay(loom_module_t* module,
+                        const loom_module_t* config_module,
+                        loom_tooling_config_materialize_result_t* out_result) {
+    return loom_tooling_config_overlay_module(module, config_module,
+                                              &block_pool_, out_result);
+  }
+
   iree_arena_block_pool_t block_pool_;
   loom_context_t context_;
 };
@@ -114,10 +121,10 @@ TEST_F(ConfigMaterializeTest, ConfigSetOwnsAssignmentsAndRejectsDuplicates) {
   EXPECT_TRUE(iree_string_view_equal(config_set.bindings[0].value,
                                      iree_make_cstring_view("4096")));
 
-  iree_status_t status = loom_tooling_config_set_append_assignment(
-      &config_set, IREE_SV("model36.model.hidden_size=8192"));
-  EXPECT_EQ(iree_status_code(status), IREE_STATUS_INVALID_ARGUMENT);
-  iree_status_free(status);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_tooling_config_set_append_assignment(
+          &config_set, IREE_SV("model36.model.hidden_size=8192")));
 
   loom_tooling_config_set_deinitialize(&config_set);
 }
@@ -185,10 +192,10 @@ TEST_F(ConfigMaterializeTest, ConfigSetAppendsJsonFileBindings) {
   EXPECT_TRUE(iree_string_view_equal(config_set.bindings[0].value,
                                      iree_make_cstring_view("4096")));
 
-  iree_status_t status = loom_tooling_config_set_append_json_file(
-      &config_set, IREE_SV("-"), iree_allocator_system());
-  EXPECT_EQ(iree_status_code(status), IREE_STATUS_INVALID_ARGUMENT);
-  iree_status_free(status);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_tooling_config_set_append_json_file(&config_set, IREE_SV("-"),
+                                               iree_allocator_system()));
 
   loom_tooling_config_set_deinitialize(&config_set);
 }
@@ -250,9 +257,8 @@ config.decl @model36.model.hidden_size : %value: index where [range(%value, 0, 8
       /*.key=*/IREE_SV("model36.model.hidden_size"),
       /*.value=*/IREE_SV("4103"),
   };
-  iree_status_t status = Materialize(module.get(), &binding, 1, nullptr);
-  EXPECT_EQ(iree_status_code(status), IREE_STATUS_INVALID_ARGUMENT);
-  iree_status_free(status);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        Materialize(module.get(), &binding, 1, nullptr));
 }
 
 TEST_F(ConfigMaterializeTest, MaterializesEncodingValue) {
@@ -284,9 +290,78 @@ config.decl @model36.layout : encoding<layout>
       /*.key=*/IREE_SV("model36.layout"),
       /*.value=*/IREE_SV("#ggml.q4_0"),
   };
-  iree_status_t status = Materialize(module.get(), &binding, 1, nullptr);
-  EXPECT_EQ(iree_status_code(status), IREE_STATUS_INVALID_ARGUMENT);
-  iree_status_free(status);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        Materialize(module.get(), &binding, 1, nullptr));
+}
+
+TEST_F(ConfigMaterializeTest, OverlaysExactDefinitionsFromConfigModule) {
+  ModulePtr module = Parse(R"(
+config.decl @model36.model.hidden_size : %value: index where [range(%value, 0, 8192), mul(%value, 16)]
+config.decl @model36.layout : encoding<layout>
+)");
+  ModulePtr config_module = Parse(R"(
+config.def @model36.model.hidden_size = 4096 : index
+config.def @model36.layout = #encoding.layout.dense : encoding<layout>
+config.def @model36.unused = true : i1
+)");
+
+  loom_tooling_config_materialize_result_t result = {0};
+  IREE_ASSERT_OK(Overlay(module.get(), config_module.get(), &result));
+  EXPECT_EQ(result.materialized_count, 2u);
+  EXPECT_EQ(result.ignored_count, 1u);
+
+  std::string config_printed = Print(config_module.get());
+  EXPECT_NE(config_printed.find("config.def @model36.unused = true : i1"),
+            std::string::npos);
+  config_module.reset();
+
+  std::string printed = Print(module.get());
+  EXPECT_NE(
+      printed.find("config.def @model36.model.hidden_size = 4096 : index"),
+      std::string::npos);
+  EXPECT_NE(
+      printed.find("config.def @model36.layout = #encoding.layout.dense : "
+                   "encoding<layout>"),
+      std::string::npos);
+  EXPECT_EQ(printed.find("model36.unused"), std::string::npos);
+}
+
+TEST_F(ConfigMaterializeTest, ConfigModuleMustSatisfyTargetContract) {
+  ModulePtr module = Parse(R"(
+config.decl @model36.model.hidden_size : %value: index where [range(%value, 0, 8192), mul(%value, 16)]
+)");
+  ModulePtr config_module = Parse(R"(
+config.def @model36.model.hidden_size = 4103 : index
+)");
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        Overlay(module.get(), config_module.get(), nullptr));
+}
+
+TEST_F(ConfigMaterializeTest, ConfigModuleDefinitionTypesMustMatch) {
+  ModulePtr module = Parse(R"(
+config.decl @model36.model.hidden_size : index
+)");
+  ModulePtr config_module = Parse(R"(
+config.def @model36.model.hidden_size = 4096.0 : f32
+)");
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        Overlay(module.get(), config_module.get(), nullptr));
+}
+
+TEST_F(ConfigMaterializeTest, ConfigModuleRejectsProgramOperations) {
+  ModulePtr module = Parse(R"(
+config.decl @model36.model.hidden_size : index
+)");
+  ModulePtr config_module = Parse(R"(
+func.def @not_config() {
+  func.return
+}
+)");
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        Overlay(module.get(), config_module.get(), nullptr));
 }
 
 TEST_F(ConfigMaterializeTest, RequireResolvedRejectsRemainingDecls) {
@@ -295,11 +370,10 @@ config.decl @model36.model.hidden_size : index
 )");
 
   loom_tooling_config_resolution_result_t result = {0};
-  iree_status_t status =
-      loom_tooling_config_require_resolved_module(module.get(), &result);
-  EXPECT_EQ(iree_status_code(status), IREE_STATUS_FAILED_PRECONDITION);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      loom_tooling_config_require_resolved_module(module.get(), &result));
   EXPECT_EQ(result.unresolved_count, 1u);
-  iree_status_free(status);
 }
 
 TEST_F(ConfigMaterializeTest, RequireResolvedAcceptsDefs) {

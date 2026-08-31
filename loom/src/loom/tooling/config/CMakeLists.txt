@@ -26,6 +26,7 @@ loom_cc_library(
     loom::ir
     loom::ops::config
     loom::ops::encoding
+    loom::rewrite::remap
     loom::tooling::io::file
     loom::util::json
     loom::util::stream
