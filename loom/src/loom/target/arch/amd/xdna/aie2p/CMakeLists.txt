@@ -153,16 +153,22 @@ loom_cc_library(
     lower
   HDRS
     "lower/lower.h"
+    "lower/storage.h"
   SRCS
     "lower/registry.c"
+    "lower/storage.c"
   DEPS
     ::core_descriptors
     iree::base
     loom::codegen::low::lower
     loom::error::error_defs
     loom::ir
+    loom::ir::facts
+    loom::ops::buffer
+    loom::ops::low
     loom::target::arch::amd::xdna::aie2p::contracts::core
     loom::target::arch::amd::xdna::aie2p::contracts::core_lower_rules
+    loom::util::fact_table
   PUBLIC
 )
 
@@ -217,6 +223,7 @@ loom_check_test_suite(
     loom_check_file_test
   SRCS
     "test/module_contracts.loom-test"
+    "test/source_low/function_storage.loom-test"
     "test/source_low/index_conversion.loom-test"
     "test/source_low/memory_scalar_addressing.loom-test"
     "test/source_low/numeric_index.loom-test"
