@@ -14,7 +14,11 @@ package(
 
 loom_cc_library(
     name = "config",
-    srcs = ["config.c"],
+    srcs = [
+        "config.c",
+        "config_application.h",
+        "config_text.c",
+    ],
     hdrs = ["config.h"],
     deps = [
         "//loom/src/loom/analysis:symbol_value_constraints",

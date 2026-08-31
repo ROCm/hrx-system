@@ -16,6 +16,8 @@ loom_cc_library(
     "config.h"
   SRCS
     "config.c"
+    "config_application.h"
+    "config_text.c"
   DEPS
     iree::base
     iree::base::internal::arena
