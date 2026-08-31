@@ -51,6 +51,9 @@ typedef struct loom_low_emission_frame_options_t {
   // materializations that emit target packets without descriptor rows.
   loom_low_schedule_structural_state_read_list_t
       schedule_structural_state_reads;
+  // Optional target-provided schedule models for structural low operations
+  // that emit native packets without descriptor rows.
+  loom_low_schedule_structural_model_list_t schedule_structural_models;
   // Candidate selection strategy used by the scheduler.
   loom_low_schedule_strategy_t schedule_strategy;
   // Optional structured scheduler feedback to emit.

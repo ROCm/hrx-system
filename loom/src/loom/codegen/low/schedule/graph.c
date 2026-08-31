@@ -158,10 +158,61 @@ static iree_status_t loom_low_schedule_resolve_descriptor(
   const loom_low_descriptor_view_t* descriptor_view =
       loom_low_descriptor_set_descriptor_view_at(state->target.descriptor_set,
                                                  packet.descriptor_ordinal);
+  node->schedule_class_id = descriptor_view->schedule_class_id;
   node->schedule_class =
-      &state->target.descriptor_set
-           ->schedule_classes[descriptor_view->schedule_class_id];
+      &state->target.descriptor_set->schedule_classes[node->schedule_class_id];
   *out_descriptor = packet.descriptor;
+  return iree_ok_status();
+}
+
+static bool loom_low_schedule_node_has_result_reg_class(
+    const loom_low_schedule_build_state_t* state,
+    const loom_low_schedule_node_t* node, uint16_t reg_class_id) {
+  const loom_value_ordinal_t* result_ordinals =
+      loom_low_schedule_node_const_result_ordinals(node);
+  for (uint16_t i = 0; i < node->result_count; ++i) {
+    if (state->values[result_ordinals[i]].register_class_id == reg_class_id) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static iree_status_t loom_low_schedule_apply_structural_model(
+    loom_low_schedule_build_state_t* state, loom_low_schedule_node_t* node) {
+  const loom_low_schedule_structural_model_list_t models =
+      state->options->structural_models;
+  if (node->descriptor != NULL ||
+      loom_low_schedule_structural_model_list_is_empty(models)) {
+    return iree_ok_status();
+  }
+
+  const loom_low_schedule_structural_model_t* selected_model = NULL;
+  for (iree_host_size_t i = 0; i < models.count; ++i) {
+    const loom_low_schedule_structural_model_t* model = &models.values[i];
+    if (model->op_kind != node->op->kind) continue;
+    if (model->result_reg_class_id != LOOM_LOW_REG_CLASS_NONE &&
+        !loom_low_schedule_node_has_result_reg_class(
+            state, node, model->result_reg_class_id)) {
+      continue;
+    }
+    if (selected_model != NULL) {
+      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "low schedule structural operation kind %" PRIu16
+                              " matches multiple target schedule models",
+                              node->op->kind);
+    }
+    selected_model = model;
+  }
+  if (selected_model == NULL) return iree_ok_status();
+
+  const loom_low_descriptor_view_t* descriptor_view =
+      loom_low_descriptor_set_descriptor_view_at(
+          state->target.descriptor_set,
+          selected_model->schedule_descriptor_ordinal);
+  node->schedule_class_id = descriptor_view->schedule_class_id;
+  node->schedule_class =
+      &state->target.descriptor_set->schedule_classes[node->schedule_class_id];
   return iree_ok_status();
 }
 
@@ -1453,6 +1504,7 @@ iree_status_t loom_low_schedule_fill_nodes(
           .traits = loom_op_effective_traits(state->module, op),
           .descriptor = NULL,
           .schedule_class = NULL,
+          .schedule_class_id = LOOM_LOW_SCHEDULE_CLASS_NONE,
           .memory_access_record_index =
               LOOM_LOW_SCHEDULE_MEMORY_ACCESS_RECORD_NONE,
       };
@@ -1495,6 +1547,8 @@ iree_status_t loom_low_schedule_fill_nodes(
           loom_low_schedule_resolve_descriptor(state, op, node, &descriptor));
       IREE_RETURN_IF_ERROR(
           loom_low_schedule_initialize_node_value_ordinals(state, node));
+      IREE_RETURN_IF_ERROR(
+          loom_low_schedule_apply_structural_model(state, node));
       node->storage_relation_count =
           loom_low_storage_relation_count(state->module, op);
       state->storage_relation_count += node->storage_relation_count;

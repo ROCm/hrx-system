@@ -237,11 +237,7 @@ iree_status_t loom_low_schedule_note_descriptor_rows_for_node(
     return iree_ok_status();
   }
   const loom_low_descriptor_t* descriptor = node->descriptor;
-  IREE_ASSERT(descriptor != NULL);
-  const uint16_t schedule_class_id =
-      loom_low_descriptor_set_descriptor_view(state->target.descriptor_set,
-                                              descriptor)
-          ->schedule_class_id;
+  const uint16_t schedule_class_id = node->schedule_class_id;
   IREE_ASSERT(schedule_class_id <
               state->target.descriptor_set->schedule_class_count);
   if (state->model_summaries) {
