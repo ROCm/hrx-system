@@ -13,7 +13,6 @@
 #include "loom/target/emit/native/elf.h"
 
 enum {
-  LOOM_AIE2P_TILE_IMAGE_GENERATION_FLAGS = 3,
   LOOM_AIE2P_ELF32_SYMBOL_SIZE = 16,
 };
 
@@ -112,12 +111,14 @@ static iree_status_t loom_aie2p_tile_image_elf_symbol_kind(uint32_t kind,
 static iree_status_t loom_aie2p_tile_image_build_symbol_tables(
     const loom_native_object_contribution_t* object,
     const loom_native_section_contribution_assembly_t* assembly,
-    iree_arena_allocator_t* arena, iree_const_byte_span_t* out_string_table,
+    uint32_t entry_symbol_index, iree_arena_allocator_t* arena,
+    iree_const_byte_span_t* out_string_table,
     iree_const_byte_span_t* out_symbol_table,
-    iree_host_size_t* out_local_symbol_count) {
+    iree_host_size_t* out_local_symbol_count, uint32_t* out_entry_address) {
   *out_string_table = iree_const_byte_span_empty();
   *out_symbol_table = iree_const_byte_span_empty();
   *out_local_symbol_count = 0;
+  *out_entry_address = 0;
 
   loom_native_object_symbol_layout_t* symbol_layouts = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, object->symbol_count,
@@ -126,6 +127,15 @@ static iree_status_t loom_aie2p_tile_image_build_symbol_tables(
   IREE_RETURN_IF_ERROR(loom_native_object_resolve_symbol_layouts(
       object->symbols, object->symbol_count, assembly->contribution_layouts,
       assembly->contribution_layout_count, symbol_layouts));
+  if (entry_symbol_index >= object->symbol_count ||
+      object->symbols[entry_symbol_index].kind !=
+          LOOM_NATIVE_OBJECT_SYMBOL_KIND_FUNCTION ||
+      symbol_layouts[entry_symbol_index].section_offset > UINT32_MAX) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "AIE2P tile entry symbol is invalid");
+  }
+  *out_entry_address =
+      (uint32_t)symbol_layouts[entry_symbol_index].section_offset;
 
   iree_host_size_t* symbol_order = NULL;
   IREE_RETURN_IF_ERROR(loom_aie2p_tile_image_build_symbol_order(
@@ -217,8 +227,10 @@ static iree_status_t loom_aie2p_tile_image_build_symbol_tables(
 }
 
 iree_status_t loom_aie2p_tile_image_write(
-    const loom_native_object_contribution_t* object, iree_io_stream_t* stream,
-    iree_arena_allocator_t* scratch_arena) {
+    const loom_aie2p_leaf_contribution_t* contribution,
+    iree_io_stream_t* stream, iree_arena_allocator_t* scratch_arena) {
+  const loom_native_object_contribution_t* object = &contribution->object;
+  const loom_aie2p_leaf_realization_t* realization = &contribution->realization;
   if (object->section_count == 0 || object->sections == NULL) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "AIE2P tile image requires executable code");
@@ -263,9 +275,10 @@ iree_status_t loom_aie2p_tile_image_write(
   iree_const_byte_span_t string_table = iree_const_byte_span_empty();
   iree_const_byte_span_t symbol_table = iree_const_byte_span_empty();
   iree_host_size_t local_symbol_count = 0;
+  uint32_t entry_address = 0;
   IREE_RETURN_IF_ERROR(loom_aie2p_tile_image_build_symbol_tables(
-      object, &assembly, scratch_arena, &string_table, &symbol_table,
-      &local_symbol_count));
+      object, &assembly, realization->entry_symbol_index, scratch_arena,
+      &string_table, &symbol_table, &local_symbol_count, &entry_address));
   if (local_symbol_count >= UINT32_MAX) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "AIE2P tile has too many local symbols");
@@ -299,11 +312,11 @@ iree_status_t loom_aie2p_tile_image_write(
   };
   const loom_native_elf32le_file_t file = {
       .type = LOOM_NATIVE_ELF_FILE_TYPE_EXEC,
-      .machine = LOOM_NATIVE_ELF_MACHINE_AIE,
+      .machine = realization->elf_machine,
       .os_abi = LOOM_NATIVE_ELF_OS_ABI_NONE,
       .abi_version = LOOM_NATIVE_ELF_ABI_VERSION_NONE,
-      .flags = LOOM_AIE2P_TILE_IMAGE_GENERATION_FLAGS,
-      .entry = 0,
+      .flags = realization->elf_flags,
+      .entry = entry_address,
       .sections = sections,
       .section_count = IREE_ARRAYSIZE(sections),
       .segments = &load_segment,

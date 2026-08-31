@@ -21,6 +21,7 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
+#include "loom/target/arch/amd/xdna/aie2p/descriptors/core_descriptors.h"
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/low_registry.h"
 
 namespace loom {
@@ -30,7 +31,7 @@ struct CompiledLeaf {
   loom_module_t* module = nullptr;
   loom_low_emission_frame_t frame = {};
   loom_aie2p_bundle_plan_t plan = {};
-  loom_native_object_contribution_t object = {};
+  loom_aie2p_leaf_contribution_t contribution = {};
 };
 
 class Aie2pLeafObjectTest : public ::testing::Test {
@@ -104,7 +105,7 @@ class Aie2pLeafObjectTest : public ::testing::Test {
     IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_build(
         &out_leaf->frame, &planning_arena_, &out_leaf->plan));
     return loom_aie2p_leaf_object_emit(&out_leaf->plan, &object_arena_,
-                                       &out_leaf->object);
+                                       &out_leaf->contribution);
   }
 
   iree_status_t CompileVectorAdd(std::string_view vector_shape,
@@ -128,11 +129,12 @@ class Aie2pLeafObjectTest : public ::testing::Test {
 
   iree_status_t CompileResourceVectorAdd(CompiledLeaf* out_leaf) {
     return CompileSource(
-        "low.func.def target<amd.xdna.aie2p.core> @vector_add_memory() asm {\n"
-        "  %lhs_ptr = resource<native_pointer> {index = 0, source_type = "
-        "buffer} : reg<aie2p.ep>\n"
+        "low.func.def target<amd.xdna.aie2p.core> @vector_add_memory("
+        "%extent: reg<aie2p.er>) asm {\n"
+        "  %lhs_ptr = resource<native_pointer> extent(%extent) {index = 0, "
+        "source_type = buffer} : reg<aie2p.ep>\n"
         "  %rhs_ptr = resource<native_pointer> {index = 1, source_type = "
-        "buffer} : reg<aie2p.ep>\n"
+        "buffer, extent = 1024, cache_swizzle_stride = 64} : reg<aie2p.ep>\n"
         "  %out_ptr = resource<native_pointer> {index = 2, source_type = "
         "buffer} : reg<aie2p.ep>\n"
         "  %lhs = vlda.512.i32x16 %lhs_ptr, 0\n"
@@ -225,11 +227,11 @@ TEST_F(Aie2pLeafObjectTest, LowFunctionsReproduceRetainedVectorLeaves) {
     EXPECT_EQ(synthetic_nop_count, 7u);
     EXPECT_EQ(structural_control_count, 1u);
 
-    ASSERT_EQ(leaf.object.section_count, 1u);
-    ASSERT_EQ(leaf.object.symbol_count, 1u);
-    ASSERT_EQ(leaf.object.fixup_count, 0u);
+    ASSERT_EQ(leaf.contribution.object.section_count, 1u);
+    ASSERT_EQ(leaf.contribution.object.symbol_count, 1u);
+    ASSERT_EQ(leaf.contribution.object.fixup_count, 0u);
     const loom_native_section_contribution_t* section =
-        &leaf.object.sections[0];
+        &leaf.contribution.object.sections[0];
     EXPECT_TRUE(iree_string_view_equal(section->section_name,
                                        IREE_SV(".text.vector_add")));
     EXPECT_EQ(section->contribution_alignment, 16u);
@@ -237,9 +239,32 @@ TEST_F(Aie2pLeafObjectTest, LowFunctionsReproduceRetainedVectorLeaves) {
     EXPECT_EQ(section->section_flags,
               LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC |
                   LOOM_NATIVE_ELF_SECTION_FLAG_EXECINSTR);
-    EXPECT_TRUE(iree_string_view_equal(leaf.object.symbols[0].name,
+    EXPECT_TRUE(iree_string_view_equal(leaf.contribution.object.symbols[0].name,
                                        IREE_SV("vector_add")));
-    EXPECT_EQ(leaf.object.symbols[0].size, 32u);
+    EXPECT_EQ(leaf.contribution.object.symbols[0].size, 32u);
+
+    const loom_aie2p_leaf_realization_t& realization =
+        leaf.contribution.realization;
+    EXPECT_TRUE(iree_string_view_equal(realization.target_identity,
+                                       LOOM_AIE2P_LEAF_TARGET_IDENTITY));
+    EXPECT_TRUE(iree_string_view_equal(realization.abi_identity,
+                                       LOOM_AIE2P_LEAF_ABI_IDENTITY));
+    EXPECT_EQ(realization.entry_symbol_index, 0u);
+    EXPECT_EQ(realization.elf_machine, LOOM_XDNA_ELF_MACHINE_AIE);
+    EXPECT_EQ(realization.target_generation, LOOM_XDNA_TARGET_GENERATION_AIE2P);
+    EXPECT_EQ(realization.elf_flags, LOOM_XDNA_ELF_AIE2P_FLAGS);
+    EXPECT_EQ(realization.capability_flags, 0u);
+    EXPECT_EQ(realization.code.byte_length, 32u);
+    EXPECT_EQ(realization.code.minimum_alignment, 16u);
+    EXPECT_EQ(realization.read_only_data.byte_length, 0u);
+    EXPECT_EQ(realization.initialized_data.byte_length, 0u);
+    EXPECT_EQ(realization.zero_fill.byte_length, 0u);
+    EXPECT_EQ(realization.stack.byte_length, 0u);
+    EXPECT_EQ(realization.scratch.byte_length, 0u);
+    EXPECT_EQ(realization.private_storage.byte_length, 0u);
+    EXPECT_EQ(realization.workgroup_storage.byte_length, 0u);
+    EXPECT_EQ(realization.spill.byte_length, 0u);
+    EXPECT_EQ(realization.resource_import_count, 0u);
 
     loom_module_free(leaf.module);
     leaf.module = nullptr;
@@ -299,13 +324,94 @@ TEST_F(Aie2pLeafObjectTest, ResourceImportsAnchorRegistersWithoutEmittingCode) {
         loom_low_packet_at(&leaf.frame.schedule, packet_index);
     EXPECT_FALSE(loom_low_resource_isa(packet.node->op));
   }
-  ASSERT_EQ(leaf.object.section_count, 1u);
-  ASSERT_EQ(leaf.object.symbol_count, 1u);
-  EXPECT_EQ(leaf.object.symbols[0].size, kExpected.size());
-  const loom_native_section_contribution_t* section = &leaf.object.sections[0];
+  ASSERT_EQ(leaf.contribution.object.section_count, 1u);
+  ASSERT_EQ(leaf.contribution.object.symbol_count, 1u);
+  EXPECT_EQ(leaf.contribution.object.symbols[0].size, kExpected.size());
+  const loom_native_section_contribution_t* section =
+      &leaf.contribution.object.sections[0];
   ASSERT_EQ(section->contents.data_length, kExpected.size());
   EXPECT_EQ(0,
             memcmp(section->contents.data, kExpected.data(), kExpected.size()));
+
+  const loom_aie2p_leaf_realization_t& realization =
+      leaf.contribution.realization;
+  EXPECT_EQ(realization.capability_flags,
+            LOOM_AIE2P_LEAF_CAPABILITY_FLAG_RESOURCE_IMPORTS);
+  ASSERT_EQ(realization.resource_import_count, 3u);
+  for (iree_host_size_t i = 0; i < realization.resource_import_count; ++i) {
+    const loom_aie2p_leaf_resource_import_t& resource =
+        realization.resource_imports[i];
+    EXPECT_EQ(resource.index, i);
+    EXPECT_EQ(resource.import_kind,
+              LOOM_LOW_RESOURCE_IMPORT_KIND_NATIVE_POINTER);
+    EXPECT_EQ(resource.source_type_kind, LOOM_TYPE_BUFFER);
+    EXPECT_EQ(resource.descriptor_register_class_id,
+              AIE2P_CORE_REG_CLASS_ID_AIE2P_EP);
+    EXPECT_EQ(resource.physical_register_count, 1u);
+    if (i == 0) {
+      EXPECT_NE(resource.extent_physical_register, UINT32_MAX);
+      EXPECT_EQ(resource.extent_descriptor_register_class_id,
+                AIE2P_CORE_REG_CLASS_ID_AIE2P_ER);
+      EXPECT_EQ(resource.extent_physical_register_count, 1u);
+      EXPECT_EQ(resource.flags, LOOM_AIE2P_LEAF_RESOURCE_FLAG_DYNAMIC_EXTENT);
+    } else {
+      EXPECT_EQ(resource.extent_physical_register, UINT32_MAX);
+      EXPECT_EQ(resource.extent_descriptor_register_class_id, 0u);
+      EXPECT_EQ(resource.extent_physical_register_count, 0u);
+    }
+    if (i == 1) {
+      EXPECT_EQ(resource.flags,
+                LOOM_AIE2P_LEAF_RESOURCE_FLAG_STATIC_EXTENT |
+                    LOOM_AIE2P_LEAF_RESOURCE_FLAG_CACHE_SWIZZLE_STRIDE);
+      EXPECT_EQ(resource.extent, 1024u);
+      EXPECT_EQ(resource.cache_swizzle_stride, 64u);
+    } else {
+      EXPECT_EQ(resource.extent, 0u);
+      EXPECT_EQ(resource.cache_swizzle_stride, 0u);
+    }
+  }
+  EXPECT_NE(realization.resource_imports[0].physical_register,
+            realization.resource_imports[1].physical_register);
+  EXPECT_NE(realization.resource_imports[0].physical_register,
+            realization.resource_imports[2].physical_register);
+  EXPECT_NE(realization.resource_imports[1].physical_register,
+            realization.resource_imports[2].physical_register);
+
+  ResetLeaf(&leaf);
+}
+
+TEST_F(Aie2pLeafObjectTest, RetainsExactFunctionStorageRequirements) {
+  CompiledLeaf leaf;
+  IREE_ASSERT_OK(CompileSource(
+      "low.func.def target<amd.xdna.aie2p.core> @local_storage() asm {\n"
+      "  %stack = storage {byte_alignment = 4, byte_length = 8} "
+      ": low.storage<stack>\n"
+      "  %scratch = storage {byte_alignment = 16, byte_length = "
+      "17} : low.storage<scratch>\n"
+      "  %private0 = storage {byte_alignment = 4, byte_length = "
+      "4} : low.storage<private>\n"
+      "  %private1 = storage {byte_alignment = 16, byte_length = "
+      "8} : low.storage<private>\n"
+      "  %workgroup = storage {byte_alignment = 32, byte_length "
+      "= 64} : low.storage<workgroup>\n"
+      "  return\n"
+      "}\n",
+      &leaf));
+
+  const loom_aie2p_leaf_realization_t& realization =
+      leaf.contribution.realization;
+  EXPECT_EQ(realization.capability_flags,
+            LOOM_AIE2P_LEAF_CAPABILITY_FLAG_FUNCTION_STORAGE);
+  EXPECT_EQ(realization.stack.byte_length, 8u);
+  EXPECT_EQ(realization.stack.minimum_alignment, 4u);
+  EXPECT_EQ(realization.scratch.byte_length, 17u);
+  EXPECT_EQ(realization.scratch.minimum_alignment, 16u);
+  EXPECT_EQ(realization.private_storage.byte_length, 24u);
+  EXPECT_EQ(realization.private_storage.minimum_alignment, 16u);
+  EXPECT_EQ(realization.workgroup_storage.byte_length, 64u);
+  EXPECT_EQ(realization.workgroup_storage.minimum_alignment, 32u);
+  EXPECT_EQ(realization.spill.byte_length, 0u);
+  EXPECT_EQ(realization.spill.minimum_alignment, 0u);
 
   ResetLeaf(&leaf);
 }
@@ -341,8 +447,8 @@ TEST_F(Aie2pLeafObjectTest, ReturnFallsBackAfterAnOccupiedAluCycle) {
   }
   EXPECT_EQ(synthetic_nop_count, 6u);
   EXPECT_EQ(structural_control_count, 1u);
-  EXPECT_EQ(leaf.object.section_count, 1u);
-  EXPECT_EQ(leaf.object.symbol_count, 1u);
+  EXPECT_EQ(leaf.contribution.object.section_count, 1u);
+  EXPECT_EQ(leaf.contribution.object.symbol_count, 1u);
 
   ResetLeaf(&leaf);
 }

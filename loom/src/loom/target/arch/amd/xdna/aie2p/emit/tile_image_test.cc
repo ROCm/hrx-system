@@ -52,17 +52,31 @@ TEST(Aie2pTileImageTest, WritesExecutableElfFromLeafContribution) {
   const loom_native_object_symbol_t symbol = {
       /*.name=*/IREE_SV("kernel"),
       /*.section_contribution_index=*/0,
-      /*.section_offset=*/0,
-      /*.size=*/sizeof(code),
+      /*.section_offset=*/4,
+      /*.size=*/sizeof(code) - 4,
       /*.binding=*/LOOM_NATIVE_OBJECT_SYMBOL_BINDING_GLOBAL,
       /*.visibility=*/LOOM_NATIVE_OBJECT_SYMBOL_VISIBILITY_DEFAULT,
       /*.kind=*/LOOM_NATIVE_OBJECT_SYMBOL_KIND_FUNCTION,
   };
-  const loom_native_object_contribution_t object = {
-      /*.sections=*/&section,
-      /*.section_count=*/1,
-      /*.symbols=*/&symbol,
-      /*.symbol_count=*/1,
+  const loom_aie2p_leaf_contribution_t contribution = {
+      /*.object=*/
+      {
+          /*.sections=*/&section,
+          /*.section_count=*/1,
+          /*.symbols=*/&symbol,
+          /*.symbol_count=*/1,
+      },
+      /*.realization=*/
+      {
+          /*.target_identity=*/LOOM_AIE2P_LEAF_TARGET_IDENTITY,
+          /*.abi_identity=*/LOOM_AIE2P_LEAF_ABI_IDENTITY,
+          /*.entry_symbol_index=*/0,
+          /*.elf_machine=*/LOOM_XDNA_ELF_MACHINE_AIE,
+          /*.target_generation=*/LOOM_XDNA_TARGET_GENERATION_AIE2P,
+          /*.elf_flags=*/LOOM_XDNA_ELF_AIE2P_FLAGS,
+          /*.capability_flags=*/0,
+          /*.code=*/{sizeof(code), 16},
+      },
   };
 
   iree_arena_block_pool_t block_pool;
@@ -76,7 +90,7 @@ TEST(Aie2pTileImageTest, WritesExecutableElfFromLeafContribution) {
       1024, iree_allocator_system(), &stream));
   StreamPtr stream_owner(stream, iree_io_stream_release);
 
-  IREE_ASSERT_OK(loom_aie2p_tile_image_write(&object, stream, &arena));
+  IREE_ASSERT_OK(loom_aie2p_tile_image_write(&contribution, stream, &arena));
   const iree_io_stream_pos_t length = iree_io_stream_length(stream);
   ASSERT_GT(length, 0);
   std::string bytes((size_t)length, '\0');
@@ -90,7 +104,7 @@ TEST(Aie2pTileImageTest, WritesExecutableElfFromLeafContribution) {
   EXPECT_EQ((uint8_t)bytes[4], 1u);
   EXPECT_EQ(LoadLeU16(bytes, 16), LOOM_NATIVE_ELF_FILE_TYPE_EXEC);
   EXPECT_EQ(LoadLeU16(bytes, 18), LOOM_NATIVE_ELF_MACHINE_AIE);
-  EXPECT_EQ(LoadLeU32(bytes, 24), 0u);
+  EXPECT_EQ(LoadLeU32(bytes, 24), 4u);
   EXPECT_EQ(LoadLeU32(bytes, 28), 52u);
   EXPECT_EQ(LoadLeU32(bytes, 36), 3u);
   EXPECT_EQ(LoadLeU16(bytes, 42), 32u);
@@ -134,8 +148,8 @@ TEST(Aie2pTileImageTest, WritesExecutableElfFromLeafContribution) {
   ASSERT_LE((size_t)symbol_table_offset + symbol_table_size, bytes.size());
   const size_t kernel_symbol = symbol_table_offset + 16;
   EXPECT_EQ(LoadLeU32(bytes, kernel_symbol + 0), 1u);
-  EXPECT_EQ(LoadLeU32(bytes, kernel_symbol + 4), 0u);
-  EXPECT_EQ(LoadLeU32(bytes, kernel_symbol + 8), sizeof(code));
+  EXPECT_EQ(LoadLeU32(bytes, kernel_symbol + 4), 4u);
+  EXPECT_EQ(LoadLeU32(bytes, kernel_symbol + 8), sizeof(code) - 4);
   EXPECT_EQ((uint8_t)bytes[kernel_symbol + 12], 0x12u);
   EXPECT_EQ((uint8_t)bytes[kernel_symbol + 13], 0u);
   EXPECT_EQ(LoadLeU16(bytes, kernel_symbol + 14), 1u);

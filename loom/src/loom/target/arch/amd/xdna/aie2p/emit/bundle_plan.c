@@ -45,8 +45,10 @@ static bool loom_aie2p_bundle_plan_structural_move_isa(const loom_op_t* op) {
          loom_low_slice_isa(op) || loom_low_concat_isa(op);
 }
 
-static bool loom_aie2p_bundle_plan_prebound_value_isa(const loom_op_t* op) {
-  return loom_low_live_in_isa(op) || loom_low_resource_isa(op);
+static bool loom_aie2p_bundle_plan_non_emitting_structural_isa(
+    const loom_op_t* op) {
+  return loom_low_live_in_isa(op) || loom_low_resource_isa(op) ||
+         loom_low_storage_reserve_isa(op);
 }
 
 static const loom_low_allocation_packet_move_group_t*
@@ -119,7 +121,9 @@ static iree_status_t loom_aie2p_bundle_plan_analyze(
     if (loom_aie2p_bundle_plan_structural_move_isa(packet.node->op)) {
       continue;
     }
-    if (loom_aie2p_bundle_plan_prebound_value_isa(packet.node->op)) continue;
+    if (loom_aie2p_bundle_plan_non_emitting_structural_isa(packet.node->op)) {
+      continue;
+    }
     if (!loom_low_return_isa(packet.node->op)) {
       return iree_make_status(
           IREE_STATUS_UNIMPLEMENTED,
@@ -606,7 +610,8 @@ iree_status_t loom_aie2p_bundle_plan_build(
           };
           continue;
         }
-        if (loom_aie2p_bundle_plan_prebound_value_isa(packet.node->op)) {
+        if (loom_aie2p_bundle_plan_non_emitting_structural_isa(
+                packet.node->op)) {
           continue;
         }
 

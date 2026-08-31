@@ -120,9 +120,7 @@ static iree_status_t loom_aie2p_tile_elf_emit(
           {
               .has_supported_storage_spaces = true,
               .supported_storage_spaces = LOOM_LOW_STORAGE_SPACE_SET_NONE,
-              .record_materialized_spills =
-                  loom_target_compile_report_wants_details(
-                      report, LOOM_TARGET_COMPILE_REPORT_DETAIL_SPILL_ROWS),
+              .record_materialized_spills = true,
               .emitter = request->diagnostic_emitter,
           },
   };
@@ -149,10 +147,10 @@ static iree_status_t loom_aie2p_tile_elf_emit(
     status = loom_aie2p_bundle_plan_build(&frame, request->scratch_arena,
                                           &bundle_plan);
   }
-  loom_native_object_contribution_t object = {0};
+  loom_aie2p_leaf_contribution_t contribution = {0};
   if (iree_status_is_ok(status)) {
     status = loom_aie2p_leaf_object_emit(&bundle_plan, request->scratch_arena,
-                                         &object);
+                                         &contribution);
   }
 
   iree_io_stream_t* stream = NULL;
@@ -163,8 +161,8 @@ static iree_status_t loom_aie2p_tile_elf_emit(
                                        4096, request->allocator, &stream);
   }
   if (iree_status_is_ok(status)) {
-    status =
-        loom_aie2p_tile_image_write(&object, stream, request->scratch_arena);
+    status = loom_aie2p_tile_image_write(&contribution, stream,
+                                         request->scratch_arena);
   }
   const iree_io_stream_pos_t stream_length =
       stream != NULL ? iree_io_stream_length(stream) : 0;
