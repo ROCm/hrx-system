@@ -44,22 +44,49 @@ iree_status_t DiscardDiagnostic(void* user_data,
   return iree_ok_status();
 }
 
-TEST(Aie2pArtifactEmitterTest,
-     EmitsAuthoredPreparedLowThroughTargetEmitterApi) {
-  iree_arena_block_pool_t block_pool;
-  iree_arena_block_pool_initialize(4096, iree_allocator_system(), &block_pool);
-  loom_context_t context;
-  loom_context_initialize(iree_allocator_system(), &context);
-  iree_host_size_t vtable_count = 0;
-  const loom_op_vtable_t* const* vtables =
-      loom_low_dialect_vtables(&vtable_count);
-  IREE_ASSERT_OK(loom_context_register_dialect(
-      &context, LOOM_DIALECT_LOW, vtables, (uint16_t)vtable_count));
-  IREE_ASSERT_OK(loom_aie2p_ops_register_dialect(&context));
-  IREE_ASSERT_OK(loom_context_finalize(&context));
+class Aie2pArtifactEmitterTest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    iree_arena_block_pool_initialize(4096, iree_allocator_system(),
+                                     &block_pool_);
+    loom_context_initialize(iree_allocator_system(), &context_);
+    iree_host_size_t vtable_count = 0;
+    const loom_op_vtable_t* const* vtables =
+        loom_low_dialect_vtables(&vtable_count);
+    IREE_ASSERT_OK(loom_context_register_dialect(
+        &context_, LOOM_DIALECT_LOW, vtables, (uint16_t)vtable_count));
+    IREE_ASSERT_OK(loom_aie2p_ops_register_dialect(&context_));
+    IREE_ASSERT_OK(loom_context_finalize(&context_));
+    loom_aie2p_low_descriptor_registry_initialize(&registry_);
+  }
 
-  loom_target_low_descriptor_registry_t registry = {};
-  loom_aie2p_low_descriptor_registry_initialize(&registry);
+  void TearDown() override {
+    loom_context_deinitialize(&context_);
+    iree_arena_block_pool_deinitialize(&block_pool_);
+  }
+
+  loom_module_t* Parse(const std::string& source) {
+    loom_text_parse_options_t parse_options = {
+        /*.diagnostic_sink=*/{loom_diagnostic_stderr_sink, nullptr},
+        /*.max_errors=*/20,
+    };
+    loom_low_descriptor_text_asm_environment_initialize(
+        &registry_.registry, &parse_options.low_asm_environment);
+    loom_module_t* module = nullptr;
+    IREE_EXPECT_OK(
+        loom_text_parse(iree_make_string_view(source.data(), source.size()),
+                        IREE_SV("artifact.loom"), &context_, &block_pool_,
+                        &parse_options, &module));
+    return module;
+  }
+
+  iree_arena_block_pool_t block_pool_;
+  loom_context_t context_;
+  loom_target_low_descriptor_registry_t registry_ = {};
+};
+
+TEST_F(Aie2pArtifactEmitterTest,
+       EmitsAuthoredPreparedLowThroughTargetEmitterApi) {
   const std::string source =
       "aie2p.target<core> @target\n"
       "low.func.def target<amd.xdna.aie2p.core>(@target) @kernel() "
@@ -67,21 +94,11 @@ TEST(Aie2pArtifactEmitterTest,
       "  %value = mov.short 1\n"
       "  return %value\n"
       "}\n";
-  loom_text_parse_options_t parse_options = {
-      /*.diagnostic_sink=*/{loom_diagnostic_stderr_sink, nullptr},
-      /*.max_errors=*/20,
-  };
-  loom_low_descriptor_text_asm_environment_initialize(
-      &registry.registry, &parse_options.low_asm_environment);
-  loom_module_t* module = nullptr;
-  IREE_ASSERT_OK(
-      loom_text_parse(iree_make_string_view(source.data(), source.size()),
-                      IREE_SV("artifact.loom"), &context, &block_pool,
-                      &parse_options, &module));
+  loom_module_t* module = Parse(source);
   ASSERT_NE(module, nullptr);
 
   loom_low_verify_options_t verify_options = {};
-  verify_options.descriptor_registry = &registry.registry;
+  verify_options.descriptor_registry = &registry_.registry;
   verify_options.provider_list = loom_low_verify_provider_list_empty();
   verify_options.max_errors = 20;
   loom_low_verify_scratch_t verify_scratch =
@@ -92,7 +109,7 @@ TEST(Aie2pArtifactEmitterTest,
   ASSERT_EQ(verify_result.error_count, 0u);
 
   iree_arena_allocator_t scratch_arena;
-  iree_arena_initialize(&block_pool, &scratch_arena);
+  iree_arena_initialize(&block_pool_, &scratch_arena);
   loom_target_compile_report_t report;
   loom_target_compile_report_initialize(&report, iree_allocator_system());
   report.requested_detail_flags =
@@ -102,7 +119,7 @@ TEST(Aie2pArtifactEmitterTest,
       LOOM_TARGET_COMPILE_REPORT_DETAIL_EMISSION;
   const loom_target_emit_request_t request = {
       /*.target_environment=*/nullptr,
-      /*.low_descriptor_registry=*/&registry.registry,
+      /*.low_descriptor_registry=*/&registry_.registry,
       /*.module=*/module,
       /*.function_versions=*/nullptr,
       /*.option_chain=*/nullptr,
@@ -144,8 +161,40 @@ TEST(Aie2pArtifactEmitterTest,
   loom_target_compile_report_deinitialize(&report);
   iree_arena_deinitialize(&scratch_arena);
   loom_module_free(module);
-  loom_context_deinitialize(&context);
-  iree_arena_block_pool_deinitialize(&block_pool);
+}
+
+TEST_F(Aie2pArtifactEmitterTest, RejectsArrayProgramRepresentation) {
+  const std::string source =
+      "aie2p.target<array> @target\n"
+      "low.func.def target<amd.xdna.aie2p.array>(@target) "
+      "@array_program() asm {\n"
+      "  return\n"
+      "}\n";
+  loom_module_t* module = Parse(source);
+  ASSERT_NE(module, nullptr);
+
+  iree_arena_allocator_t scratch_arena;
+  iree_arena_initialize(&block_pool_, &scratch_arena);
+  const loom_target_emit_request_t request = {
+      /*.target_environment=*/nullptr,
+      /*.low_descriptor_registry=*/&registry_.registry,
+      /*.module=*/module,
+      /*.function_versions=*/nullptr,
+      /*.option_chain=*/nullptr,
+      /*.identifier=*/IREE_SV("array.elf"),
+      /*.artifact_manifest=*/{},
+      /*.compile_report=*/nullptr,
+      /*.diagnostic_emitter=*/{DiscardDiagnostic, nullptr},
+      /*.scratch_arena=*/&scratch_arena,
+      /*.allocator=*/iree_allocator_system(),
+  };
+  loom_target_emit_artifact_t artifact = {};
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        loom_aie2p_tile_elf_emitter.emit(&request, &artifact));
+  EXPECT_EQ(artifact.contents, nullptr);
+
+  iree_arena_deinitialize(&scratch_arena);
+  loom_module_free(module);
 }
 
 }  // namespace

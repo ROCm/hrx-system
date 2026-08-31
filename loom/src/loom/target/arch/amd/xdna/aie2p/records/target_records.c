@@ -46,9 +46,48 @@ static const loom_target_bundle_t kAie2pCoreBundle = {
     .config = &kAie2pCoreConfig,
 };
 
+static const loom_target_snapshot_t kAie2pArraySnapshot = {
+    .name = IREE_SVL("amd-xdna-aie2p-array"),
+    .codegen_format = LOOM_TARGET_CODEGEN_FORMAT_LOW_NATIVE,
+    .artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_ELF,
+    .default_pointer_bitwidth = 32,
+    .index_bitwidth = 32,
+    .offset_bitwidth = 32,
+    .memory_spaces =
+        {
+            .generic = 0,
+            .global = 0,
+            .workgroup = 0,
+            .constant = 0,
+            .private_memory = 0,
+            .host = 0,
+            .descriptor = UINT32_MAX,
+        },
+};
+
+static const loom_target_export_plan_t kAie2pArrayExportPlan = {
+    .name = IREE_SVL("aie2p-array-program"),
+    .abi_kind = LOOM_TARGET_ABI_ARRAY_PROGRAM,
+    .linkage = LOOM_TARGET_LINKAGE_DSO_LOCAL,
+};
+
+static const loom_target_config_t kAie2pArrayConfig = {
+    .name = IREE_SVL("amd.xdna.aie2p.array"),
+    .contract_set_key = IREE_SVL("amd.xdna.aie2p.array"),
+    .contract_feature_bits = 0,
+};
+
+static const loom_target_bundle_t kAie2pArrayBundle = {
+    .name = IREE_SVL("aie2p-array"),
+    .snapshot = &kAie2pArraySnapshot,
+    .export_plan = &kAie2pArrayExportPlan,
+    .config = &kAie2pArrayConfig,
+};
+
 static const loom_target_bundle_t* const kAie2pTargetBundleValues[] = {
     NULL,
     &kAie2pCoreBundle,
+    &kAie2pArrayBundle,
 };
 
 const loom_target_bundle_table_t loom_aie2p_target_bundles = {

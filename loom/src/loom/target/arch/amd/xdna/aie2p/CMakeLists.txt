@@ -11,19 +11,35 @@ iree_add_all_subdirs()
 
 loom_generated_file_family(
   NAME
-    core_tables_gen
+    target_tables_gen
   GENERATOR
     loom::py::loom::gen::target::arch::amd::xdna::aie2p::encoding_tables
   OUTPUTS
+    "descriptors/array_descriptors.c"
+    "descriptors/array_descriptors.h"
     "descriptors/core_descriptors.c"
     "descriptors/core_descriptors.h"
     "encoding/encoding_tables.inl"
     "machine/machine_tables.inl"
   OUTPUT_FLAGS
+    "--array-descriptor-source-output"
+    "--array-descriptor-header-output"
     "--descriptor-source-output"
     "--descriptor-header-output"
     "--encoding-output"
     "--machine-output"
+)
+
+loom_cc_library(
+  NAME
+    array_descriptors
+  HDRS
+    "descriptors/array_descriptors.h"
+  SRCS
+    "descriptors/array_descriptors.c"
+  DEPS
+    loom::codegen::low::descriptors
+  PUBLIC
 )
 
 loom_cc_library(
@@ -91,9 +107,29 @@ loom_cc_library(
   SRCS
     "descriptors/low_registry.c"
   DEPS
+    ::array_descriptors
     ::core_descriptors
     iree::base
     loom::target::low_descriptor_registry
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    low_verify
+  HDRS
+    "low_verify.h"
+  SRCS
+    "low_verify.c"
+  DEPS
+    ::array_descriptors
+    iree::base
+    loom::codegen::low::diagnostics
+    loom::codegen::low::packet
+    loom::codegen::low::verify
+    loom::error::error_defs
+    loom::ir
+    loom::ops::op_defs
   PUBLIC
 )
 
@@ -138,6 +174,7 @@ loom_cc_library(
   DEPS
     ::artifact_emitter
     ::low_registry
+    ::low_verify
     ::lower
     iree::base
     loom::target::arch::amd::xdna::aie2p::ops
@@ -177,6 +214,7 @@ loom_check_test_suite(
   NAME
     loom_check_file_test
   SRCS
+    "test/module_contracts.loom-test"
     "test/source_low/index_conversion.loom-test"
     "test/source_low/memory_scalar_addressing.loom-test"
     "test/source_low/numeric_index.loom-test"
@@ -285,12 +323,15 @@ loom_cc_library(
     "emit/artifact_emitter.c"
   DEPS
     ::bundle_plan
+    ::core_descriptors
     ::leaf_object
     ::tile_image
     iree::base
     iree::io::stream
+    loom::codegen::low::descriptors
     loom::codegen::low::frame
     loom::codegen::low::function
+    loom::ops::op_defs
     loom::target::emit::native::object
     loom::target::function_version
     loom::target::provider

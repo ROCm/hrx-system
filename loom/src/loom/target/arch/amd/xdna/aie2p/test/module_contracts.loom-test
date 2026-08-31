@@ -1,0 +1,155 @@
+// RUN: emit source-low output=module
+
+aie2p.target<array> @array_target
+aie2p.target<core> @core_target
+
+low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @vector_add_array() asm {
+  %lhs_binding = binding 0, read
+  %rhs_binding = binding 1, read
+  %output_binding = binding 2, write
+  %worker = worker 0, @vector_add_core
+  %lhs_buffer = buffer %worker, 0, 4096, 32
+  %rhs_buffer = buffer %worker, 1, 4096, 32
+  %output_buffer = buffer %worker, 2, 4096, 32
+  %lhs_flow = flow %lhs_binding, %lhs_buffer
+  %rhs_flow = flow %rhs_binding, %rhs_buffer
+  %output_flow = flow %output_buffer, %output_binding
+  constrain.location %worker, 0, 2
+  %lhs_ready = transfer %lhs_flow
+  %rhs_ready = transfer %rhs_flow
+  await(%lhs_ready, %rhs_ready)
+  %computed = invoke<%worker>(%lhs_buffer, %rhs_buffer, %output_buffer)
+  await(%computed)
+  %output_ready = transfer %output_flow
+  await(%output_ready)
+  return
+}
+
+func.def target(@core_target) @vector_add_core() {
+  func.return
+}
+
+func.def target(@core_target) @unused_core() {
+  func.return
+}
+
+// ----
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @vector_add_array() asm {
+  %lhs_binding = binding 0, "read"
+  %rhs_binding = binding 1, "read"
+  %output_binding = binding 2, "write"
+  %worker = worker 0, @vector_add_core
+  %lhs_buffer = buffer %worker, 0, 4096, 32
+  %rhs_buffer = buffer %worker, 1, 4096, 32
+  %output_buffer = buffer %worker, 2, 4096, 32
+  %lhs_flow = flow %lhs_binding, %lhs_buffer
+  %rhs_flow = flow %rhs_binding, %rhs_buffer
+  %output_flow = flow %output_buffer, %output_binding
+  constrain.location %worker, 0, 2
+  %lhs_ready = transfer %lhs_flow
+  %rhs_ready = transfer %rhs_flow
+  await(%lhs_ready, %rhs_ready)
+  %computed = invoke<%worker>(%lhs_buffer, %rhs_buffer, %output_buffer)
+  await(%computed)
+  %output_ready = transfer %output_flow
+  await(%output_ready)
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @vector_add_core() asm {
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @unused_core() asm {
+  return
+}
+
+// ====
+// RUN: verify
+
+aie2p.target<array> @array_target
+
+low.func.def target<amd.xdna.aie2p.array>(@array_target) @wrong_entry() asm {
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.array>(@array_target) @bad_worker_entry() asm {
+  // ERROR@+1: TARGET/079 {function_name="bad_worker_entry", descriptor_key="amd.xdna.aie2p.array.worker", immediate_name="entry", symbol_name="wrong_entry", actual_contract="amd.xdna.aie2p.array", expected_contract="amd.xdna.aie2p.core"}
+  %worker = worker 0, @wrong_entry
+  return
+}
+
+// ====
+// RUN: verify
+
+aie2p.target<array> @array_target
+
+low.func.def target<amd.xdna.aie2p.array>(@array_target) @unresolved_worker_entry() asm {
+  // ERROR@+1: SYMBOL/002 {symbol_name="missing_core"}
+  %worker = worker 0, @missing_core
+  return
+}
+
+// ====
+// RUN: verify
+
+aie2p.target<array> @array_target
+aie2p.target<core> @core_target
+
+low.func.decl target<amd.xdna.aie2p.core>(@core_target) @core_entry()
+
+low.func.def target<amd.xdna.aie2p.array>(@array_target) @cross_target_call() asm {
+  // ERROR@+1: TARGET/040 {op_name="low.func.call", field_name="callee", callee_target_name="core_target", caller_target_name="array_target"}
+  low.func.call @core_entry() : ()
+  return
+}
+
+// ====
+// RUN: pass @array_cleanup_pipeline
+
+aie2p.target<array> @array_target
+aie2p.target<core> @core_target
+
+low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @array_cleanup() asm {
+  %unused = binding 7, read
+  return
+}
+
+low.func.def public retain target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @core_untouched() asm {
+  %unused = mov.short 7
+  return
+}
+
+pass.pipeline<module> @array_cleanup_pipeline pipeline {
+  for func {
+    where target(contract = "amd.xdna.aie2p.array") {
+      low-dce
+    }
+  }
+}
+
+// ----
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @array_cleanup() asm {
+  return
+}
+
+low.func.def public retain target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @core_untouched() asm {
+  %unused = mov.short 7
+  return
+}
+
+pass.pipeline<module> @array_cleanup_pipeline pipeline {
+  for func {
+    where target(contract = "amd.xdna.aie2p.array") {
+      low-dce
+    }
+  }
+}

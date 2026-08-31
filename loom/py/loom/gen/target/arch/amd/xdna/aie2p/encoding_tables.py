@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Generates one coherent family of native AIE2P core tables."""
+"""Generates one coherent family of AIE2P target tables."""
 
 from __future__ import annotations
 
@@ -25,6 +25,9 @@ from loom.target.arch.amd.xdna.aie.encoding import (
     encode_witness,
     instruction_fixed_pattern_overlaps,
     validate_encoding_table,
+)
+from loom.target.arch.amd.xdna.aie2p.array_descriptors import (
+    AIE2P_ARRAY_DESCRIPTOR_SET,
 )
 from loom.target.arch.amd.xdna.aie2p.core_descriptors import (
     AIE2P_CORE_DESCRIPTOR_SET,
@@ -350,7 +353,7 @@ def _emit_encoding_tables() -> str:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Generate AIE2P core tables.")
+    parser = argparse.ArgumentParser(description="Generate AIE2P target tables.")
     parser.add_argument(
         "--encoding-output",
         type=Path,
@@ -372,6 +375,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Path to write the AIE2P core Low descriptor source.",
     )
     parser.add_argument(
+        "--array-descriptor-header-output",
+        type=Path,
+        help="Path to write the AIE2P array Low descriptor header.",
+    )
+    parser.add_argument(
+        "--array-descriptor-source-output",
+        type=Path,
+        help="Path to write the AIE2P array Low descriptor source.",
+    )
+    parser.add_argument(
         "--check",
         action="store_true",
         help="Validate generation inputs without writing an output file.",
@@ -382,11 +395,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.machine_output,
         args.descriptor_header_output,
         args.descriptor_source_output,
+        args.array_descriptor_header_output,
+        args.array_descriptor_source_output,
     )
     if args.check and any(path is not None for path in output_paths):
         parser.error("--check cannot be combined with output paths")
     if not args.check and any(path is None for path in output_paths):
-        parser.error("all AIE2P core output paths are required")
+        parser.error("all AIE2P target output paths are required")
 
     encoding_contents = _emit_encoding_tables()
     machine_contents = machine_tables.emit_tables(
@@ -394,11 +409,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         CORE_ENCODING_TABLE,
     )
     generated_descriptors = generate_descriptor_set(AIE2P_CORE_DESCRIPTOR_SET)
+    generated_array_descriptors = generate_descriptor_set(AIE2P_ARRAY_DESCRIPTOR_SET)
     if args.encoding_output is not None:
         write_text_file(args.encoding_output, encoding_contents)
         write_text_file(args.machine_output, machine_contents)
         write_text_file(args.descriptor_header_output, generated_descriptors.header)
         write_text_file(args.descriptor_source_output, generated_descriptors.source)
+        write_text_file(
+            args.array_descriptor_header_output,
+            generated_array_descriptors.header,
+        )
+        write_text_file(
+            args.array_descriptor_source_output,
+            generated_array_descriptors.source,
+        )
     return 0
 
 
