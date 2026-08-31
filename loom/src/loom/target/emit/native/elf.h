@@ -130,7 +130,8 @@ typedef struct loom_native_elf_segment_t {
   uint64_t file_offset;
   // Explicit output file byte length for sectionless segments.
   uint64_t file_size;
-  // Explicit runtime memory byte length for sectionless segments.
+  // Runtime memory byte length. Section-backed segments normalize zero to the
+  // file range and may specify a larger value for a zero-filled tail.
   uint64_t memory_size;
   // First caller-provided section covered by the file image.
   iree_host_size_t first_section;
