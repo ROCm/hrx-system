@@ -182,6 +182,52 @@ TEST(NativeContributionTest, AssemblesAlignedSectionsAndWritesElf) {
             std::string("\xa0\xa1", 2));
 }
 
+TEST(NativeContributionTest, AssemblesAlignedNobitsWithoutPayloadBytes) {
+  const loom_native_section_contribution_t contributions[] = {
+      {
+          /*.section_name=*/IREE_SV(".bss"),
+          /*.section_type=*/LOOM_NATIVE_ELF_SECTION_TYPE_NOBITS,
+          /*.section_flags=*/LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC |
+              LOOM_NATIVE_ELF_SECTION_FLAG_WRITE,
+          /*.contribution_alignment=*/4,
+          /*.entry_size=*/{},
+          /*.link=*/{},
+          /*.info=*/{},
+          /*.contents=*/{},
+          /*.zero_fill_length=*/12,
+      },
+      {
+          /*.section_name=*/IREE_SV(".bss"),
+          /*.section_type=*/LOOM_NATIVE_ELF_SECTION_TYPE_NOBITS,
+          /*.section_flags=*/LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC |
+              LOOM_NATIVE_ELF_SECTION_FLAG_WRITE,
+          /*.contribution_alignment=*/16,
+          /*.entry_size=*/{},
+          /*.link=*/{},
+          /*.info=*/{},
+          /*.contents=*/{},
+          /*.zero_fill_length=*/8,
+      },
+  };
+
+  TestArena arena;
+  loom_native_section_contribution_assembly_t assembly = {0};
+  IREE_ASSERT_OK(loom_native_assemble_section_contributions(
+      contributions, IREE_ARRAYSIZE(contributions), &assembly, arena.arena()));
+
+  ASSERT_EQ(assembly.section_count, 1u);
+  EXPECT_EQ(assembly.sections[0].type, LOOM_NATIVE_ELF_SECTION_TYPE_NOBITS);
+  EXPECT_EQ(assembly.sections[0].alignment, 16u);
+  EXPECT_EQ(assembly.sections[0].contents.data, nullptr);
+  EXPECT_EQ(assembly.sections[0].contents.data_length, 0u);
+  EXPECT_EQ(assembly.sections[0].zero_fill_length, 24u);
+  ASSERT_EQ(assembly.contribution_layout_count, 2u);
+  EXPECT_EQ(assembly.contribution_layouts[0].section_index, 0u);
+  EXPECT_EQ(assembly.contribution_layouts[0].section_offset, 0u);
+  EXPECT_EQ(assembly.contribution_layouts[1].section_index, 0u);
+  EXPECT_EQ(assembly.contribution_layouts[1].section_offset, 16u);
+}
+
 TEST(NativeContributionTest, RejectsConflictingSectionMetadata) {
   const uint8_t byte = 0;
   const loom_native_section_contribution_t contributions[] = {

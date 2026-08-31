@@ -87,6 +87,8 @@ typedef struct loom_native_elf_section_layout_t {
   uint64_t file_offset;
   // Byte length of the section contents in the output file.
   uint64_t file_size;
+  // Logical section byte length recorded in sh_size.
+  uint64_t section_size;
   // Normalized power-of-two section alignment in bytes.
   uint64_t alignment;
 } loom_native_elf_section_layout_t;
@@ -182,6 +184,18 @@ static iree_status_t loom_native_elf_validate_file(
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
           "ELF section %" PRIhsz " has a size but no contents", i);
+    }
+    if (section->type == LOOM_NATIVE_ELF_SECTION_TYPE_NOBITS) {
+      if (section->contents.data_length != 0) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "ELF SHT_NOBITS section %" PRIhsz " must not have contents", i);
+      }
+    } else if (section->zero_fill_length != 0) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "ELF content-backed section %" PRIhsz
+                              " must not have a zero-fill length",
+                              i);
     }
   }
 
@@ -331,7 +345,11 @@ static iree_status_t loom_native_elf_build_layout(
                               "ELF file layout overflow");
     }
     section_layout->file_offset = offset;
-    section_layout->file_size = (uint64_t)section->contents.data_length;
+    section_layout->file_size =
+        section->type == LOOM_NATIVE_ELF_SECTION_TYPE_NOBITS
+            ? 0u
+            : (uint64_t)section->contents.data_length;
+    section_layout->section_size = loom_native_elf_section_byte_length(section);
     if (!iree_checked_add_u64(offset, section_layout->file_size, &offset)) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "ELF file layout overflow");
@@ -343,6 +361,7 @@ static iree_status_t loom_native_elf_build_layout(
   string_table_layout->alignment = 1u;
   string_table_layout->file_offset = offset;
   string_table_layout->file_size = string_table.data_length;
+  string_table_layout->section_size = string_table.data_length;
   if (!iree_checked_add_u64(offset, string_table_layout->file_size, &offset) ||
       !iree_checked_align_u64(offset, format->section_header_alignment,
                               &offset)) {
@@ -438,7 +457,7 @@ static iree_status_t loom_native_elf32le_validate_layout(
     IREE_RETURN_IF_ERROR(loom_native_elf32le_validate_u32(
         section_layout->file_offset, IREE_SV("section file offset"), i));
     IREE_RETURN_IF_ERROR(loom_native_elf32le_validate_u32(
-        section_layout->file_size, IREE_SV("section file size"), i));
+        section_layout->section_size, IREE_SV("section size"), i));
     IREE_RETURN_IF_ERROR(loom_native_elf32le_validate_u32(
         section_layout->alignment, IREE_SV("section alignment"), i));
   }
@@ -732,7 +751,7 @@ static iree_status_t loom_native_elf32le_write_section_headers(
     IREE_RETURN_IF_ERROR(loom_native_elf32le_write_section_header(
         stream, section_layout->name_offset, section->type, section->flags,
         section->address, section_layout->file_offset,
-        section_layout->file_size, section->link, section->info,
+        section_layout->section_size, section->link, section->info,
         section_layout->alignment, section->entry_size));
   }
 
@@ -760,7 +779,7 @@ static iree_status_t loom_native_elf64le_write_section_headers(
     IREE_RETURN_IF_ERROR(loom_native_elf64le_write_section_header(
         stream, section_layout->name_offset, section->type, section->flags,
         section->address, section_layout->file_offset,
-        section_layout->file_size, section->link, section->info,
+        section_layout->section_size, section->link, section->info,
         section_layout->alignment, section->entry_size));
   }
 
