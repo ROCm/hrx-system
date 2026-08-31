@@ -184,11 +184,18 @@ static iree_status_t loom_low_descriptor_text_asm_required_attr(
 
 static iree_status_t loom_low_descriptor_text_asm_build_resource(
     loom_builder_t* builder, iree_string_view_t key,
+    const loom_value_id_t* operands, iree_host_size_t operand_count,
     loom_named_attr_slice_t attrs, loom_type_t result_type,
     loom_location_id_t location, loom_op_t** out_op) {
   uint8_t import_kind = 0;
   IREE_RETURN_IF_ERROR(
       loom_low_descriptor_text_asm_resource_key_to_kind(key, &import_kind));
+
+  if (operand_count > 1) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "low asm resource takes at most one extent operand");
+  }
 
   const loom_named_attr_t* index_attr = NULL;
   IREE_RETURN_IF_ERROR(loom_low_descriptor_text_asm_required_attr(
@@ -207,6 +214,11 @@ static iree_status_t loom_low_descriptor_text_asm_build_resource(
   }
 
   loom_low_resource_build_flags_t flags = 0;
+  loom_value_id_t extent_value = LOOM_VALUE_ID_INVALID;
+  if (operand_count == 1) {
+    flags |= LOOM_LOW_RESOURCE_BUILD_FLAG_HAS_EXTENT_VALUE;
+    extent_value = operands[0];
+  }
   int64_t extent = 0;
   const loom_named_attr_t* extent_attr = NULL;
   IREE_RETURN_IF_ERROR(loom_low_descriptor_text_asm_lookup_attr(
@@ -237,7 +249,7 @@ static iree_status_t loom_low_descriptor_text_asm_build_resource(
   }
 
   return loom_low_resource_build(
-      builder, flags, import_kind, LOOM_VALUE_ID_INVALID, index_attr->value.i64,
+      builder, flags, import_kind, extent_value, index_attr->value.i64,
       source_type_attr->value.type_id, extent, cache_swizzle_stride,
       result_type, location, out_op);
 }
@@ -345,12 +357,9 @@ iree_status_t loom_low_descriptor_text_asm_build_structural(
   (void)state;
   switch (kind) {
     case LOOM_TEXT_LOW_ASM_STRUCTURAL_RESOURCE:
-      if (operand_count != 0) {
-        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "low asm resource takes no operands");
-      }
       return loom_low_descriptor_text_asm_build_resource(
-          builder, key, attributes, result_type, location, out_op);
+          builder, key, operands, operand_count, attributes, result_type,
+          location, out_op);
     case LOOM_TEXT_LOW_ASM_STRUCTURAL_LIVE_IN: {
       if (operand_count != 0) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -456,6 +465,8 @@ static iree_status_t loom_low_descriptor_text_asm_describe_resource(
       .structural_key = key,
       .results = loom_op_const_results(op),
       .result_count = 1,
+      .operands = loom_op_const_operands(op),
+      .operand_count = op->operand_count,
       .location = op->location,
   };
   IREE_RETURN_IF_ERROR(loom_low_descriptor_text_asm_set_structural_attr(

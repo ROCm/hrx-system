@@ -288,6 +288,24 @@ static iree_status_t loom_parse_low_asm_structural_resource_or_live_in(
     return iree_ok_status();
   }
 
+  loom_value_id_t extent_value = LOOM_VALUE_ID_INVALID;
+  iree_host_size_t operand_count = 0;
+  if (kind == LOOM_TEXT_LOW_ASM_STRUCTURAL_RESOURCE) {
+    loom_token_t peek = loom_tokenizer_peek(&parser->tokenizer);
+    if (peek.kind == LOOM_TOKEN_BARE_IDENT &&
+        iree_string_view_equal(peek.text, IREE_SV("extent"))) {
+      loom_tokenizer_next(&parser->tokenizer);
+      LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_LPAREN, NULL);
+      IREE_RETURN_IF_ERROR(loom_parse_low_asm_value_ref(
+          parser, mnemonic_token, parsed_spans, 0, &extent_value));
+      LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_RPAREN, NULL);
+      operand_count = 1;
+    }
+  }
+  if (parser->error_count > errors_before) {
+    return iree_ok_status();
+  }
+
   loom_named_attr_slice_t attrs = loom_named_attr_slice_empty();
   loom_text_low_asm_structural_build_flags_t build_flags = 0;
   if (kind == LOOM_TEXT_LOW_ASM_STRUCTURAL_RESOURCE) {
@@ -313,8 +331,8 @@ static iree_status_t loom_parse_low_asm_structural_resource_or_live_in(
 
   return loom_parse_low_asm_structural_location_and_build(
       parser, kind, build_flags, result_names, start_token, mnemonic_token,
-      comments, comment_count, NULL, 0, attrs, key_token.text, 0, result_type,
-      parsed_spans);
+      comments, comment_count, operand_count ? &extent_value : NULL,
+      operand_count, attrs, key_token.text, 0, result_type, parsed_spans);
 }
 
 static iree_status_t loom_parse_low_asm_structural_concat(

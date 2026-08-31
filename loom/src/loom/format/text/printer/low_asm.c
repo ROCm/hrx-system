@@ -689,6 +689,14 @@ static iree_status_t loom_print_low_asm_structural_resource(
   IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, "<", true));
   IREE_RETURN_IF_ERROR(loom_print_emit(ctx, statement->structural_key, true));
   IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, ">", true));
+  if (statement->operand_count != 0) {
+    IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, "extent", false));
+    IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, "(", true));
+    IREE_RETURN_IF_ERROR(loom_print_low_asm_value_list(
+        ctx, statement->operands, statement->operand_count,
+        LOOM_PRINT_FIELD_OPERAND));
+    IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, ")", true));
+  }
   IREE_RETURN_IF_ERROR(loom_print_low_asm_structural_attr_dict(ctx, statement));
   return loom_print_low_asm_structural_result_type(ctx, statement);
 }
