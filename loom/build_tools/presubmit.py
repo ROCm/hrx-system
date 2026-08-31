@@ -50,6 +50,10 @@ CMAKE_SOURCE_FORMAT_TARGET_DEFINES = (
 CI_LOOM_TARGETS = ",".join(
     target for target, _define in CMAKE_SOURCE_FORMAT_TARGET_DEFINES
 )
+BAZEL_SOURCE_TOOL_ARGS = (
+    "--config=locked",
+    f"--//loom/config/target:enable={CI_LOOM_TARGETS}",
+)
 LOOM_FORMAT_BAZEL_TARGET = "//loom/src/loom/tools/loom-format:loom-format"
 LOOM_FORMAT_CMAKE_TARGET = "loom::tools::loom-format"
 LOOM_LINT_BAZEL_TARGET = "//loom/py/loom/tools:loom-lint"
@@ -318,10 +322,7 @@ def run_source_format_maintenance(
         lane=lane,
         bazel_target=LOOM_FORMAT_BAZEL_TARGET,
         cmake_target=LOOM_FORMAT_CMAKE_TARGET,
-        bazel_args=(
-            "--config=locked",
-            f"--//loom/config/target:enable={CI_LOOM_TARGETS}",
-        ),
+        bazel_args=BAZEL_SOURCE_TOOL_ARGS,
     )
     if formatter_path is None:
         return False
@@ -367,7 +368,7 @@ def run_source_lint(*, lane: str, files_from: str | None) -> bool:
                 lane=lane,
                 bazel_target=LOOM_LINT_BAZEL_TARGET,
                 cmake_target=LOOM_LINT_CMAKE_TARGET,
-                bazel_args=("--config=locked",),
+                bazel_args=BAZEL_SOURCE_TOOL_ARGS,
             )
             linter_command = [] if linter_path is None else [str(linter_path)]
         elif lane == "cmake":
