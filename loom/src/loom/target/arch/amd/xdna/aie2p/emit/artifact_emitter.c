@@ -13,9 +13,11 @@
 #include "loom/ir/module.h"
 #include "loom/ops/op_defs.h"
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/core_descriptors.h"
+#include "loom/target/arch/amd/xdna/aie2p/descriptors/low_registry.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/bundle_plan.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/leaf_object.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/tile_image.h"
+#include "loom/target/arch/amd/xdna/array/facts.h"
 #include "loom/target/function_version.h"
 #include "loom/target/reporting/low.h"
 
@@ -82,6 +84,64 @@ static iree_status_t loom_aie2p_tile_elf_require_core_representation(
       "function");
 }
 
+static iree_status_t loom_aie2p_tile_elf_plan_standalone_layout(
+    const loom_aie2p_leaf_realization_t* realization,
+    loom_aie2p_tile_storage_placement_t* storage_placements,
+    loom_aie2p_tile_image_layout_t* out_layout) {
+  if (realization->storage_domain_count > LOOM_STORAGE_SPACE_COUNT_) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "AIE2P leaf has too many storage domains");
+  }
+  const loom_xdna_array_family_t* family = loom_xdna_npu2_array_family();
+  const loom_xdna_tile_facts_t* compute_tile = NULL;
+  for (uint8_t i = 0; i < family->tile_count; ++i) {
+    if (family->tiles[i].kind == LOOM_XDNA_TILE_KIND_COMPUTE) {
+      compute_tile = &family->tiles[i];
+      break;
+    }
+  }
+  IREE_ASSERT(compute_tile != NULL &&
+              "NPU2 generated facts must contain compute tiles");
+  const loom_xdna_tile_coordinate_t coordinate = {
+      .column = 0,
+      .row = compute_tile->first_row,
+  };
+
+  uint64_t owner_offset = 0;
+  for (iree_host_size_t i = 0; i < realization->storage_domain_count; ++i) {
+    const loom_storage_space_t storage_space =
+        realization->storage_domains[i].storage_space;
+    const loom_aie2p_leaf_storage_requirement_t* requirement =
+        loom_aie2p_leaf_storage_requirement(realization, storage_space);
+    if (!iree_checked_align_u64(owner_offset, requirement->minimum_alignment,
+                                &owner_offset) ||
+        owner_offset > UINT32_MAX || requirement->byte_length > UINT32_MAX ||
+        owner_offset + requirement->byte_length >
+            compute_tile->memory.local_capacity) {
+      return iree_make_status(
+          IREE_STATUS_RESOURCE_EXHAUSTED,
+          "AIE2P leaf storage does not fit one NPU2 compute tile");
+    }
+    uint32_t load_address = 0;
+    IREE_RETURN_IF_ERROR(loom_xdna_array_form_load_address(
+        family, coordinate, LOOM_XDNA_MEMORY_SPACE_DATA, coordinate,
+        (uint32_t)owner_offset, (uint32_t)requirement->byte_length,
+        &load_address));
+    storage_placements[i] = (loom_aie2p_tile_storage_placement_t){
+        .storage_space = storage_space,
+        .load_address = load_address,
+    };
+    owner_offset += requirement->byte_length;
+  }
+  *out_layout = (loom_aie2p_tile_image_layout_t){
+      .program_address = compute_tile->memory.program_base,
+      .program_byte_capacity = compute_tile->memory.program_capacity,
+      .storage_placements = storage_placements,
+      .storage_placement_count = realization->storage_domain_count,
+  };
+  return iree_ok_status();
+}
+
 static iree_status_t loom_aie2p_tile_elf_emit(
     const loom_target_emit_request_t* request,
     loom_target_emit_artifact_t* out_artifact) {
@@ -111,6 +171,7 @@ static iree_status_t loom_aie2p_tile_elf_emit(
       .descriptor_registry = request->low_descriptor_registry,
       .function_target_facts = function_target_facts,
       .memory_access_table = loom_low_memory_access_table_empty(),
+      .schedule_structural_models = loom_aie2p_low_structural_schedule_models(),
       .schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL,
       .emitter = request->diagnostic_emitter,
       .statistics = report != NULL ? &planning_statistics : NULL,
@@ -153,6 +214,14 @@ static iree_status_t loom_aie2p_tile_elf_emit(
                                          &contribution);
   }
 
+  loom_aie2p_tile_storage_placement_t
+      storage_placements[LOOM_STORAGE_SPACE_COUNT_];
+  loom_aie2p_tile_image_layout_t tile_layout = {0};
+  if (iree_status_is_ok(status)) {
+    status = loom_aie2p_tile_elf_plan_standalone_layout(
+        &contribution.realization, storage_placements, &tile_layout);
+  }
+
   iree_io_stream_t* stream = NULL;
   if (iree_status_is_ok(status)) {
     status = iree_io_vec_stream_create(IREE_IO_STREAM_MODE_READABLE |
@@ -161,7 +230,7 @@ static iree_status_t loom_aie2p_tile_elf_emit(
                                        4096, request->allocator, &stream);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_aie2p_tile_image_write(&contribution, stream,
+    status = loom_aie2p_tile_image_write(&contribution, &tile_layout, stream,
                                          request->scratch_arena);
   }
   const iree_io_stream_pos_t stream_length =

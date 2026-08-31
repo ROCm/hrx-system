@@ -110,6 +110,8 @@ loom_cc_library(
     ::array_descriptors
     ::core_descriptors
     iree::base
+    loom::codegen::low::schedule
+    loom::ops::op_defs
     loom::target::low_descriptor_registry
   PUBLIC
 )
@@ -274,6 +276,7 @@ loom_cc_library(
     iree::base::internal::arena
     loom::codegen::low::frame
     loom::codegen::low::packet
+    loom::codegen::low::storage_layout
     loom::ir
     loom::ops::low
   PUBLIC
@@ -328,7 +331,6 @@ loom_cc_library(
   SRCS
     "emit/tile_image.c"
   DEPS
-    ::bundle_plan
     ::leaf_object
     ::relocation
     iree::base
@@ -350,6 +352,7 @@ loom_cc_library(
     ::bundle_plan
     ::core_descriptors
     ::leaf_object
+    ::low_registry
     ::tile_image
     iree::base
     iree::io::stream
@@ -357,6 +360,7 @@ loom_cc_library(
     loom::codegen::low::frame
     loom::codegen::low::function
     loom::ops::op_defs
+    loom::target::arch::amd::xdna::array_facts
     loom::target::function_version
     loom::target::provider
     loom::target::reporting::low
@@ -430,6 +434,7 @@ loom_cc_test(
   SRCS
     "emit/tile_image_test.cc"
   DEPS
+    ::encoding
     ::relocation
     ::tile_image
     iree::base::internal::arena

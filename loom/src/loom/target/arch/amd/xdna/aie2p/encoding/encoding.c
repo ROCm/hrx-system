@@ -713,6 +713,37 @@ iree_status_t loom_aie2p_encoding_pack_bundle(
   return iree_ok_status();
 }
 
+static bool loom_aie2p_encoding_bundle_layout_matches(
+    const loom_aie2p_bundle_layout_t* layout, iree_const_byte_span_t packet) {
+  const iree_host_size_t packet_length = layout->bit_count / 8u;
+  if (packet_length > packet.data_length) return false;
+  for (iree_host_size_t i = 0; i < packet_length; ++i) {
+    if ((packet.data[i] & layout->fixed_mask[i]) != layout->fixed_value[i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static void loom_aie2p_encoding_decode_bundle_layout(
+    const loom_aie2p_bundle_layout_t* layout,
+    loom_aie2p_bundle_format_id_t format, const uint8_t* packet_data,
+    loom_aie2p_decoded_bundle_t* out_bundle) {
+  *out_bundle = (loom_aie2p_decoded_bundle_t){
+      .format = format,
+      .slot_count = layout->field_count,
+  };
+  for (uint8_t i = 0; i < layout->field_count; ++i) {
+    const loom_aie2p_bundle_field_layout_t* field =
+        &kLoomAie2pBundleFields[layout->field_offset + i];
+    out_bundle->slots[i] = (loom_aie2p_encoded_slot_t){
+        .slot = (loom_aie2p_slot_t)field->slot_id,
+        .value = loom_aie2p_encoding_gather_bytes(packet_data,
+                                                  field->mapping_pattern_id),
+    };
+  }
+}
+
 iree_status_t loom_aie2p_encoding_decode_bundle(
     iree_const_byte_span_t packet, loom_aie2p_decoded_bundle_t* out_bundle) {
   if (out_bundle == NULL || packet.data == NULL || packet.data_length == 0 ||
@@ -722,42 +753,46 @@ iree_status_t loom_aie2p_encoding_decode_bundle(
                             "valid output storage");
   }
   *out_bundle = (loom_aie2p_decoded_bundle_t){0};
-
-  const loom_aie2p_bundle_layout_t* matching_layout = NULL;
-  loom_aie2p_bundle_format_id_t matching_format =
-      LOOM_AIE2P_BUNDLE_FORMAT_ID_INVALID;
   for (iree_host_size_t format = 1;
        format < IREE_ARRAYSIZE(kLoomAie2pBundleLayouts); ++format) {
     const loom_aie2p_bundle_layout_t* layout = &kLoomAie2pBundleLayouts[format];
-    if (layout->bit_count / 8 != packet.data_length) continue;
-    bool matches = true;
-    for (iree_host_size_t i = 0; i < packet.data_length; ++i) {
-      if ((packet.data[i] & layout->fixed_mask[i]) != layout->fixed_value[i]) {
-        matches = false;
-        break;
-      }
+    if (layout->bit_count / 8u != packet.data_length ||
+        !loom_aie2p_encoding_bundle_layout_matches(layout, packet)) {
+      continue;
     }
-    if (!matches) continue;
-    matching_layout = layout;
-    matching_format = (loom_aie2p_bundle_format_id_t)format;
-    break;
+    loom_aie2p_encoding_decode_bundle_layout(
+        layout, (loom_aie2p_bundle_format_id_t)format, packet.data, out_bundle);
+    return iree_ok_status();
   }
-  if (matching_layout == NULL) {
-    return iree_make_status(IREE_STATUS_NOT_FOUND,
-                            "no AIE2P bundle format matches %" PRIhsz " bytes",
-                            packet.data_length);
-  }
+  return iree_make_status(IREE_STATUS_NOT_FOUND,
+                          "no AIE2P bundle format matches %" PRIhsz " bytes",
+                          packet.data_length);
+}
 
-  out_bundle->format = matching_format;
-  out_bundle->slot_count = matching_layout->field_count;
-  for (uint8_t i = 0; i < matching_layout->field_count; ++i) {
-    const loom_aie2p_bundle_field_layout_t* field =
-        &kLoomAie2pBundleFields[matching_layout->field_offset + i];
-    out_bundle->slots[i] = (loom_aie2p_encoded_slot_t){
-        .slot = (loom_aie2p_slot_t)field->slot_id,
-        .value = loom_aie2p_encoding_gather_bytes(packet.data,
-                                                  field->mapping_pattern_id),
-    };
+iree_status_t loom_aie2p_encoding_decode_bundle_prefix(
+    iree_const_byte_span_t packet, loom_aie2p_decoded_bundle_t* out_bundle,
+    iree_host_size_t* out_packet_length) {
+  if (out_bundle == NULL || out_packet_length == NULL || packet.data == NULL ||
+      packet.data_length == 0 ||
+      packet.data_length > LOOM_AIE2P_ENCODING_MAX_PACKET_SIZE) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "AIE2P bundle prefix decode requires 1-16 input bytes and valid "
+        "output storage");
   }
-  return iree_ok_status();
+  *out_bundle = (loom_aie2p_decoded_bundle_t){0};
+  *out_packet_length = 0;
+  for (iree_host_size_t format = 1;
+       format < IREE_ARRAYSIZE(kLoomAie2pBundleLayouts); ++format) {
+    const loom_aie2p_bundle_layout_t* layout = &kLoomAie2pBundleLayouts[format];
+    if (!loom_aie2p_encoding_bundle_layout_matches(layout, packet)) continue;
+    loom_aie2p_encoding_decode_bundle_layout(
+        layout, (loom_aie2p_bundle_format_id_t)format, packet.data, out_bundle);
+    *out_packet_length = layout->bit_count / 8u;
+    return iree_ok_status();
+  }
+  return iree_make_status(IREE_STATUS_NOT_FOUND,
+                          "no AIE2P bundle format matches a %" PRIhsz
+                          "-byte prefix",
+                          packet.data_length);
 }

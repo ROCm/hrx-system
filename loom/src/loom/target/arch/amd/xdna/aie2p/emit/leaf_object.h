@@ -91,6 +91,16 @@ typedef struct loom_aie2p_leaf_resource_import_t {
   loom_type_kind_t source_type_kind;
 } loom_aie2p_leaf_resource_import_t;
 
+// One function-local storage domain retained for final array placement.
+typedef struct loom_aie2p_leaf_storage_domain_t {
+  // Structural Low storage space represented by this domain.
+  loom_storage_space_t storage_space;
+  // Index of the domain's native section contribution.
+  uint32_t section_contribution_index;
+  // Index of the domain base symbol in the native object.
+  uint32_t symbol_index;
+} loom_aie2p_leaf_storage_domain_t;
+
 // Exact physical facts retained after all expensive leaf compilation work.
 //
 // The record owns no compiler IR. Array planning and final linking may retain,
@@ -129,11 +139,21 @@ typedef struct loom_aie2p_leaf_realization_t {
   // Materialized spill payload footprint, already included in the applicable
   // function-storage domain above.
   loom_aie2p_leaf_storage_requirement_t spill;
+  // Function-local storage domains requiring final array placement.
+  const loom_aie2p_leaf_storage_domain_t* storage_domains;
+  // Number of records in |storage_domains|.
+  iree_host_size_t storage_domain_count;
   // Detached resource imports in Low entry-block order.
   const loom_aie2p_leaf_resource_import_t* resource_imports;
   // Number of records in resource_imports.
   iree_host_size_t resource_import_count;
 } loom_aie2p_leaf_realization_t;
+
+// Returns the retained requirement for one verified function-storage space.
+const loom_aie2p_leaf_storage_requirement_t*
+loom_aie2p_leaf_storage_requirement(
+    const loom_aie2p_leaf_realization_t* realization,
+    loom_storage_space_t storage_space);
 
 // Complete detached product of one AIE2P core compilation.
 typedef struct loom_aie2p_leaf_contribution_t {

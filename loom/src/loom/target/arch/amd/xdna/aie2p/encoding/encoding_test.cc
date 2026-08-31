@@ -314,6 +314,27 @@ TEST(EncodingTest, DecodesBundleSlotsAndInstructionFields) {
   EXPECT_EQ(fields[2].value, 0);
 }
 
+TEST(EncodingTest, DecodesOneBundleFromAProgramPrefix) {
+  const EncodingIds ids = ResolveEncodingIds();
+  const uint8_t program_prefix[] = {
+      0x3c, 0x68, 0x09, 0x72, 0x83, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  };
+  loom_aie2p_decoded_bundle_t bundle;
+  iree_host_size_t packet_length = 0;
+  IREE_ASSERT_OK(loom_aie2p_encoding_decode_bundle_prefix(
+      iree_make_const_byte_span(program_prefix, sizeof(program_prefix)),
+      &bundle, &packet_length));
+
+  EXPECT_EQ(packet_length, 6u);
+  EXPECT_EQ(bundle.format, ids.i48_lda_ldb);
+  ASSERT_EQ(bundle.slot_count, 2u);
+  EXPECT_EQ(bundle.slots[0].slot, LOOM_AIE2P_SLOT_LDA);
+  EXPECT_EQ(bundle.slots[0].value, 2103u);
+  EXPECT_EQ(bundle.slots[1].slot, LOOM_AIE2P_SLOT_LDB);
+  EXPECT_EQ(bundle.slots[1].value, 16685u);
+}
+
 TEST(EncodingTest, RejectsIncompleteOrOutOfRangeInputs) {
   const EncodingIds ids = ResolveEncodingIds();
   const loom_aie2p_encoding_field_value_t missing_field[] = {

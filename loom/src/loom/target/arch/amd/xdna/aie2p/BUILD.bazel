@@ -101,6 +101,8 @@ loom_cc_library(
     deps = [
         ":array_descriptors",
         ":core_descriptors",
+        "//loom/src/loom/codegen/low/schedule",
+        "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/target:low_descriptor_registry",
         "//runtime/src/iree/base",
     ],
@@ -245,6 +247,7 @@ loom_cc_library(
         ":encoding",
         "//loom/src/loom/codegen/low:frame",
         "//loom/src/loom/codegen/low:packet",
+        "//loom/src/loom/codegen/low:storage_layout",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
         "//runtime/src/iree/base",
@@ -292,7 +295,6 @@ loom_cc_library(
     srcs = ["emit/tile_image.c"],
     hdrs = ["emit/tile_image.h"],
     deps = [
-        ":bundle_plan",
         ":leaf_object",
         ":relocation",
         "//loom/src/loom/target/emit/native:contribution",
@@ -311,6 +313,7 @@ loom_cc_library(
         ":bundle_plan",
         ":core_descriptors",
         ":leaf_object",
+        ":low_registry",
         ":tile_image",
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/codegen/low:frame",
@@ -318,6 +321,7 @@ loom_cc_library(
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/target:function_version",
         "//loom/src/loom/target:provider",
+        "//loom/src/loom/target/arch/amd/xdna:array_facts",
         "//loom/src/loom/target/reporting:low",
         "//runtime/src/iree/base",
         "//runtime/src/iree/io:stream",
@@ -385,6 +389,7 @@ loom_cc_test(
     name = "tile_image_test",
     srcs = ["emit/tile_image_test.cc"],
     deps = [
+        ":encoding",
         ":relocation",
         ":tile_image",
         "//loom/src/loom/target/emit/native:object",

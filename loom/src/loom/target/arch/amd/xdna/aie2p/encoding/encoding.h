@@ -197,6 +197,13 @@ iree_status_t loom_aie2p_encoding_pack_bundle(
 iree_status_t loom_aie2p_encoding_decode_bundle(
     iree_const_byte_span_t packet, loom_aie2p_decoded_bundle_t* out_bundle);
 
+// Decodes the first complete bundle in |packet| and returns its byte length.
+// Generated table validation proves that no shorter bundle prefix can alias a
+// longer format.
+iree_status_t loom_aie2p_encoding_decode_bundle_prefix(
+    iree_const_byte_span_t packet, loom_aie2p_decoded_bundle_t* out_bundle,
+    iree_host_size_t* out_packet_length);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif
