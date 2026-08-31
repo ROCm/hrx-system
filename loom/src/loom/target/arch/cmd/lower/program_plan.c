@@ -703,9 +703,10 @@ iree_status_t loom_cmd_program_plan_prepare_materialization(
       for (iree_host_size_t i = 0; i < preparation_module->symbols.count; ++i) {
         prepared_source_definitions[i] = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL;
       }
-      IREE_ASSERT_EQ(kernel_entry_table.count,
-                     kernel_source->source_definitions.count);
-      const iree_host_size_t source_symbol_count = kernel_entry_table.count;
+      IREE_ASSERT_LE(kernel_source->source_definitions.count,
+                     kernel_entry_table.count);
+      const iree_host_size_t source_symbol_count =
+          kernel_source->source_definitions.count;
       for (iree_host_size_t source_symbol_id = 0;
            source_symbol_id < source_symbol_count; ++source_symbol_id) {
         loom_op_t* entry_op = kernel_entry_table.values[source_symbol_id];

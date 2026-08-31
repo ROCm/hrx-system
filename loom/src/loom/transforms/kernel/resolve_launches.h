@@ -35,12 +35,15 @@ typedef struct loom_kernel_launch_entry_table_t {
 
 // Resolves every logical kernel launch recorded in |references|.
 //
-// |configuration_functions| is a dense projection indexed by module-local
-// logical-kernel symbol ID. Each valid entry names a private pure function
-// accepting the kernel workload signature and returning exact XYZ workgroup
-// counts. The transform inserts ordinary pure calls at their caller-owned CFG
-// sites, derives one executable-entry declaration per logical kernel, and
-// replaces each kernel.launch with a kernel.dispatch targeting that entry.
+// |configuration_functions| is a dense prefix projection indexed by the
+// module-local logical-kernel symbol IDs present when linking completed. Each
+// valid entry names a private pure function accepting the kernel workload
+// signature and returning exact XYZ workgroup counts. Caller-owned target
+// specialization may append symbols while preserving every linked symbol ID;
+// those appended symbols intentionally lie outside the projection. The
+// transform inserts ordinary pure calls at their caller-owned CFG sites,
+// derives one executable-entry declaration per logical kernel, and replaces
+// each kernel.launch with a kernel.dispatch targeting that entry.
 //
 // Calls for launches nested only in kernel launch-schedule regions are placed
 // immediately before the outermost schedule. Schedule regions describe command

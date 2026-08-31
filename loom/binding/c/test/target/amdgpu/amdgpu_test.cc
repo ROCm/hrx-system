@@ -37,7 +37,7 @@ using loomc::testing::HandlePtr;
 
 using CompilerPtr = HandlePtr<loomc_compiler_t, loomc_compiler_release>;
 using ContextPtr = HandlePtr<loomc_context_t, loomc_context_release>;
-using CmdProgramProductPtr = HandlePtr<loomc_product_t, loomc_product_release>;
+using ProductPtr = HandlePtr<loomc_product_t, loomc_product_release>;
 using LaunchConfigProgramPtr = HandlePtr<loomc_launch_config_program_t,
                                          loomc_launch_config_program_release>;
 using LinkIndexBuilderPtr =
@@ -952,6 +952,99 @@ config.def @test.workgroup_size_x = 64 : index
 }
 
 TEST(AmdgpuTargetTest,
+     CommandProductTargetBindingPreservesLaunchConfigurationProjection) {
+  TargetEnvironmentPtr target_environment = CreateAmdgpuTargetEnvironment();
+  ContextPtr context = CreateAmdgpuContext(target_environment.get());
+  WorkspacePtr workspace = CreateWorkspace();
+  TargetProfilePtr profile =
+      CreateTargetProfile(target_environment.get(), "gfx1151");
+  SourcePtr source = CreateTextSource("specialized_command_request.loom", R"(
+target.decl @device
+
+kernel.def target(@device) @record_subgroup_size() {
+  %one = index.constant 1 : index
+  %size = target.subgroup.size : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%size, %one, %one) : index
+} launch() {
+  kernel.return
+}
+
+command.program.def public target(@device) @dispatch() launch() {
+  kernel.launch @record_subgroup_size() : ()
+  command.return
+}
+)");
+  LinkIndexPtr index = CreateLinkIndex(context.get(), source.get());
+
+  const loomc_target_binding_t target_binding = {
+      /*.target_symbol=*/loomc_make_cstring_view("device"),
+      /*.target_profile=*/profile.get(),
+  };
+  const loomc_target_specialization_options_t target_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
+      /*.structure_size=*/sizeof(target_options),
+      /*.next=*/nullptr,
+      /*.specializations=*/nullptr,
+      /*.specialization_count=*/0,
+      /*.target_bindings=*/&target_binding,
+      /*.target_binding_count=*/1,
+  };
+  KernelRequestCapture request_capture;
+  const loomc_cmd_program_product_options_t product_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_PRODUCT_OPTIONS,
+      /*.structure_size=*/sizeof(product_options),
+      /*.next=*/&target_options,
+      /*.link_index=*/index.get(),
+      /*.root_symbol_ordinals=*/nullptr,
+      /*.root_symbol_count=*/0,
+      /*.flags=*/LOOMC_CMD_PROGRAM_PRODUCT_FLAG_INCLUDE_INPUT_EXPORTS,
+      /*.config=*/{},
+      /*.request_sink=*/
+      {
+          /*.publish=*/CaptureKernelRequest,
+          /*.user_data=*/&request_capture,
+      },
+  };
+  loomc_product_t* product = nullptr;
+  loomc_result_t* product_result = nullptr;
+  LOOMC_ASSERT_OK(loomc_cmd_program_product_build(
+      workspace.get(), &product_options, loomc_allocator_system(), &product,
+      &product_result));
+  ProductPtr product_ptr(product);
+  ResultPtr product_result_ptr(product_result);
+  ExpectSucceededResult(product_result_ptr.get());
+  ASSERT_EQ(loomc_cmd_program_product_program_count(product_ptr.get()), 1u);
+  ASSERT_EQ(request_capture.requests.size(), 1u);
+
+  CompilerPtr compiler = CreateCompiler(context.get());
+  PassProgramPtr pass_program = CreatePreparedLowPassProgram(context.get());
+  const loomc_compile_options_t compile_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
+      /*.structure_size=*/sizeof(compile_options),
+      /*.next=*/nullptr,
+      /*.module_name=*/loomc_make_cstring_view("specialized_command_request"),
+      /*.artifact_flags=*/LOOMC_COMPILE_ARTIFACT_FLAG_MODULE_TEXT,
+  };
+  loomc_product_t* kernel_product = nullptr;
+  loomc_result_t* compile_result = nullptr;
+  LOOMC_ASSERT_OK(loomc_compile_request(
+      compiler.get(), workspace.get(), pass_program.get(),
+      request_capture.requests[0].get(), &compile_options,
+      loomc_allocator_system(), &kernel_product, &compile_result));
+  ProductPtr kernel_product_ptr(kernel_product);
+  ResultPtr compile_result_ptr(compile_result);
+  ExpectSucceededResult(compile_result_ptr.get());
+  const loomc_artifact_t* text_artifact =
+      loomc_product_artifact_at(kernel_product_ptr.get(), 0);
+  ASSERT_NE(text_artifact, nullptr);
+  const std::string module_text = ToString(text_artifact->contents);
+  EXPECT_NE(module_text.find("target<amdgpu.rdna3_5.core>"), std::string::npos)
+      << module_text;
+  EXPECT_NE(module_text.find("workgroup_size(32, 1, 1)"), std::string::npos)
+      << module_text;
+}
+
+TEST(AmdgpuTargetTest,
      CommandKernelRequestCompilesForIndependentTargetProfiles) {
   TargetEnvironmentPtr target_environment = CreateAmdgpuTargetEnvironment();
   ContextPtr context = CreateAmdgpuContext(target_environment.get());
@@ -999,7 +1092,7 @@ command.program.def public @dispatch() launch() {
   LOOMC_ASSERT_OK(loomc_cmd_program_product_build(
       workspace.get(), &product_options, loomc_allocator_system(), &product,
       &product_result));
-  CmdProgramProductPtr product_ptr(product);
+  ProductPtr product_ptr(product);
   ResultPtr product_result_ptr(product_result);
   ExpectSucceededResult(product_result_ptr.get());
   ASSERT_EQ(loomc_cmd_program_product_program_count(product_ptr.get()), 1u);

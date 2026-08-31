@@ -31,14 +31,16 @@ typedef struct loom_link_plan_materialization_t {
     iree_host_size_t count;
   } target_symbols;
   // Dense concrete source-definition ordinals indexed by target module symbol
-  // ID. A target assembled from a declaration and definition names the
-  // definition selected by the plan. Declarations without an indexed provider
-  // and synthetic symbols contain LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL.
-  // Storage belongs to the caller's arena.
+  // ID at the end of linking. A target assembled from a declaration and
+  // definition names the definition selected by the plan. Declarations
+  // without an indexed provider and synthetic symbols contain
+  // LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL. Caller-owned preparation may
+  // append symbols while preserving this stable linked prefix. Storage belongs
+  // to the caller's arena.
   struct {
     // Arena-owned target-to-source definition projection.
     iree_host_size_t* values;
-    // Number of target module symbol slots.
+    // Number of target module symbol slots present before caller preparation.
     iree_host_size_t count;
   } target_source_definitions;
   // Dense target refs indexed by template-family ordinal. Each demanded family
@@ -50,15 +52,16 @@ typedef struct loom_link_plan_materialization_t {
     // Number of index-wide template-family slots.
     iree_host_size_t count;
   } target_template_families;
-  // Dense configuration-function refs indexed by target module symbol ID.
-  // Only partially projected logical kernels contain valid refs. This direct
-  // target-domain projection lets downstream consumers resolve a linked
-  // kernel callee without rebuilding an inverse source-symbol map. Storage
-  // belongs to the caller's arena.
+  // Dense configuration-function refs indexed by target module symbol ID at
+  // the end of linking. Only partially projected logical kernels contain valid
+  // refs. Caller-owned preparation may append symbols while preserving this
+  // stable linked prefix. This direct target-domain projection lets downstream
+  // consumers resolve a linked kernel callee without rebuilding an inverse
+  // source-symbol map. Storage belongs to the caller's arena.
   struct {
     // Arena-owned target-kernel-to-configuration-function projection.
     loom_symbol_ref_t* values;
-    // Number of target module symbol slots.
+    // Number of target module symbol slots present before caller preparation.
     iree_host_size_t count;
   } target_kernel_configurations;
 } loom_link_plan_materialization_t;
