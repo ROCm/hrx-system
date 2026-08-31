@@ -1,0 +1,77 @@
+// RUN: emit source-low output=low
+
+aie2p.target<core> @target
+
+func.def target(@target) @resident_vector_add() {
+  %bytes = index.constant 64 : offset
+  %base = index.constant 0 : offset
+  %lhs = buffer.alloca<workgroup> align(64) %bytes : buffer
+  %rhs = buffer.alloca<workgroup> align(64) %bytes : buffer
+  %output = buffer.alloca<workgroup> align(64) %bytes : buffer
+  %lhs_view = buffer.view %lhs[%base] : buffer -> view<16xi32>
+  %rhs_view = buffer.view %rhs[%base] : buffer -> view<16xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<16xi32>
+  %lhs_value = vector.load %lhs_view[0] : view<16xi32> -> vector<16xi32>
+  %rhs_value = vector.load %rhs_view[0] : view<16xi32> -> vector<16xi32>
+  %sum = vector.addi %lhs_value, %rhs_value : vector<16xi32>
+  vector.store %sum, %output_view[0] : vector<16xi32>, view<16xi32>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @resident_vector_add() asm {
+  %11 = storage {byte_alignment = 64, byte_length = 64} : low.storage<workgroup>
+  %lhs_view = storage_address %11 : low.storage<workgroup> -> reg<aie2p.ep>
+  %13 = storage {byte_alignment = 64, byte_length = 64} : low.storage<workgroup>
+  %rhs_view = storage_address %13 : low.storage<workgroup> -> reg<aie2p.ep>
+  %15 = storage {byte_alignment = 64, byte_length = 64} : low.storage<workgroup>
+  %output_view = storage_address %15 : low.storage<workgroup> -> reg<aie2p.ep>
+  %lhs_value = vlda.512.i32x16 %lhs_view, 0
+  %rhs_value = vlda.512.i32x16 %rhs_view, 0
+  %sum = vadd.32 %lhs_value, %rhs_value
+  vst.512.i32x16 %sum, %output_view, 0
+  return
+}
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @bounded_private_scalar_copy(%byte_length0: offset) {
+  %byte_length = index.assume %byte_length0 [range(%byte_length0, 64, 128)] : offset
+  %base = index.constant 0 : offset
+  %source = buffer.alloca<private> align(64) %byte_length : buffer
+  %output = buffer.alloca<private> align(64) %byte_length : buffer
+  %source_view = buffer.view %source[%base] : buffer -> view<1xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi32>
+  %value = view.load %source_view[0] : view<1xi32> -> i32
+  view.store %value, %output_view[0] : i32, view<1xi32>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @bounded_private_scalar_copy(%byte_length: reg<aie2p.er>) asm {
+  %9 = storage {byte_alignment = 64, byte_length = 128} : low.storage<private>
+  %source_view = storage_address %9 : low.storage<private> -> reg<aie2p.ep>
+  %11 = storage {byte_alignment = 64, byte_length = 128} : low.storage<private>
+  %output_view = storage_address %11 : low.storage<private> -> reg<aie2p.ep>
+  %value = lda %source_view, 0
+  st %value, %output_view, 0
+  return
+}
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @unbounded_function_storage(
+    %value: vector<16xi32>,
+    %byte_length: offset
+) {
+  %base = index.constant 0 : offset
+  // ERROR@+1: TARGET/080 {storage_space="workgroup", byte_length_value="byte_length"}
+  %scratch = buffer.alloca<workgroup> align(64) %byte_length : buffer
+  %view = buffer.view %scratch[%base] : buffer -> view<16xi32>
+  vector.store %value, %view[0] : vector<16xi32>, view<16xi32>
+  func.return
+}

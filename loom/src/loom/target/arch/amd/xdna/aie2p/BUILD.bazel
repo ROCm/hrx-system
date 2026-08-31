@@ -137,15 +137,25 @@ loom_cc_library(
 
 loom_cc_library(
     name = "lower",
-    srcs = ["lower/registry.c"],
-    hdrs = ["lower/lower.h"],
+    srcs = [
+        "lower/registry.c",
+        "lower/storage.c",
+    ],
+    hdrs = [
+        "lower/lower.h",
+        "lower/storage.h",
+    ],
     deps = [
         ":core_descriptors",
         "//loom/src/loom/codegen/low/lower",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ir:facts",
+        "//loom/src/loom/ops/buffer",
+        "//loom/src/loom/ops/low",
         "//loom/src/loom/target/arch/amd/xdna/aie2p/contracts:core",
         "//loom/src/loom/target/arch/amd/xdna/aie2p/contracts:core_lower_rules",
+        "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
     ],
 )
@@ -194,6 +204,7 @@ loom_check_test_suite(
     name = "loom_check_file_test",
     srcs = [
         "test/module_contracts.loom-test",
+        "test/source_low/function_storage.loom-test",
         "test/source_low/index_conversion.loom-test",
         "test/source_low/memory_scalar_addressing.loom-test",
         "test/source_low/numeric_index.loom-test",
@@ -223,6 +234,7 @@ iree_execution_test_suite(
         "test/end_to_end/index_integer.loom",
         "test/end_to_end/packed_dot_integer.loom",
         "test/end_to_end/packed_integer.loom",
+        "test/end_to_end/resident_vector_add.loom",
         "test/end_to_end/scalar_i32.loom",
         "test/end_to_end/scalar_memory.loom",
         "test/end_to_end/vector_integer.loom",

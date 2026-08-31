@@ -22,8 +22,25 @@ _I32_MIN = -(2**31)
 _I32_MAX = (2**31) - 1
 
 
-def _rules_for(*source_ops):
-    return [rule for rule in AIE2P_MEMORY_RULES if rule.source_op in source_ops]
+_MEMORY_ROOTS = (
+    (
+        SourceMemoryRootKind.BLOCK_ARGUMENT,
+        ("unknown", "generic", "workgroup"),
+    ),
+    (
+        SourceMemoryRootKind.ALLOCA,
+        ("private", "workgroup"),
+    ),
+)
+
+
+def _rules_for(root_kind, *source_ops):
+    return [
+        rule
+        for rule in AIE2P_MEMORY_RULES
+        if rule.source_op in source_ops
+        and rule.emit[-1].source_memory.root_kind is root_kind
+    ]
 
 
 def _assert_address_forms(
@@ -61,36 +78,36 @@ def _assert_address_forms(
 
 
 def test_scalar_memory_rules_cover_every_address_form() -> None:
-    rules = _rules_for(view.view_load, view.view_store)
-    assert len(rules) == 10
-    assert [rule.descriptor.key for rule in rules] == [
-        "amd.xdna.aie2p.load.scalar.indexed.immediate",
-        *("amd.xdna.aie2p.load.scalar.indexed.register",) * 4,
-        "amd.xdna.aie2p.store.scalar.indexed.immediate",
-        *("amd.xdna.aie2p.store.scalar.indexed.register",) * 4,
-    ]
-    for operation_rules in (rules[:5], rules[5:]):
-        _assert_address_forms(
-            operation_rules,
-            immediate_minimum=-32,
-            immediate_maximum=28,
-        )
-    for rule in rules:
-        memory_emit = rule.emit[-1]
-        constraint = memory_emit.source_memory
-        assert constraint is not None
-        assert constraint.root_kind is SourceMemoryRootKind.BLOCK_ARGUMENT
-        assert constraint.address_layout is SourceMemoryAddressLayout.COMPACT_ROW_MAJOR
-        assert constraint.memory_spaces == ("unknown", "generic", "workgroup")
-        assert constraint.element_byte_count == 4
-        assert constraint.vector_lane_count == 1
-        assert constraint.vector_lane_byte_stride == 4
-        assert constraint.minimum_alignment == 4
+    for root_kind, memory_spaces in _MEMORY_ROOTS:
+        rules = _rules_for(root_kind, view.view_load, view.view_store)
+        assert [rule.descriptor.key for rule in rules] == [
+            "amd.xdna.aie2p.load.scalar.indexed.immediate",
+            *("amd.xdna.aie2p.load.scalar.indexed.register",) * 4,
+            "amd.xdna.aie2p.store.scalar.indexed.immediate",
+            *("amd.xdna.aie2p.store.scalar.indexed.register",) * 4,
+        ]
+        for operation_rules in (rules[:5], rules[5:]):
+            _assert_address_forms(
+                operation_rules,
+                immediate_minimum=-32,
+                immediate_maximum=28,
+            )
+        for rule in rules:
+            memory_emit = rule.emit[-1]
+            constraint = memory_emit.source_memory
+            assert constraint is not None
+            assert constraint.root_kind is root_kind
+            assert (
+                constraint.address_layout is SourceMemoryAddressLayout.COMPACT_ROW_MAJOR
+            )
+            assert constraint.memory_spaces == memory_spaces
+            assert constraint.element_byte_count == 4
+            assert constraint.vector_lane_count == 1
+            assert constraint.vector_lane_byte_stride == 4
+            assert constraint.minimum_alignment == 4
 
 
 def test_vector_memory_rules_cover_every_native_width_and_address_form() -> None:
-    rules = _rules_for(vector.vector_load, vector.vector_store)
-    assert len(rules) == 90
     expected_families = tuple(
         (
             width_bits,
@@ -105,43 +122,57 @@ def test_vector_memory_rules_cover_every_native_width_and_address_form() -> None
             SourceMemoryOperation.STORE,
         )
     )
-    for family_index, (
-        width_bits,
-        element_byte_count,
-        vector_lane_count,
-        operation,
-    ) in enumerate(expected_families):
-        operation_rules = rules[family_index * 5 : family_index * 5 + 5]
-        shape = f"i{element_byte_count * 8}x{vector_lane_count}"
-        descriptor_prefix = (
-            f"amd.xdna.aie2p.load.a.{shape}.indexed"
-            if operation is SourceMemoryOperation.LOAD
-            else f"amd.xdna.aie2p.store.{shape}.indexed"
-        )
-        assert [rule.descriptor.key for rule in operation_rules] == [
-            f"{descriptor_prefix}.immediate",
-            *(f"{descriptor_prefix}.register",) * 4,
-        ]
-        _assert_address_forms(
-            operation_rules,
-            immediate_minimum=-width_bits,
-            immediate_maximum=width_bits - width_bits // 8,
-        )
-        for rule in operation_rules:
-            memory_emit = rule.emit[-1]
-            constraint = memory_emit.source_memory
-            assert constraint is not None
-            assert constraint.operation is operation
-            assert constraint.root_kind is SourceMemoryRootKind.BLOCK_ARGUMENT
-            assert (
-                constraint.address_layout is SourceMemoryAddressLayout.COMPACT_ROW_MAJOR
+    for root_kind, memory_spaces in _MEMORY_ROOTS:
+        rules = _rules_for(root_kind, vector.vector_load, vector.vector_store)
+        expected_descriptor_keys = []
+        for _, element_byte_count, vector_lane_count, operation in expected_families:
+            shape = f"i{element_byte_count * 8}x{vector_lane_count}"
+            descriptor_prefix = (
+                f"amd.xdna.aie2p.load.a.{shape}.indexed"
+                if operation is SourceMemoryOperation.LOAD
+                else f"amd.xdna.aie2p.store.{shape}.indexed"
             )
-            assert constraint.memory_spaces == (
-                "unknown",
-                "generic",
-                "workgroup",
+            expected_descriptor_keys.extend(
+                [
+                    f"{descriptor_prefix}.immediate",
+                    *(f"{descriptor_prefix}.register",) * 4,
+                ]
             )
-            assert constraint.element_byte_count == element_byte_count
-            assert constraint.vector_lane_count == vector_lane_count
-            assert constraint.vector_lane_byte_stride == element_byte_count
-            assert constraint.minimum_alignment == width_bits // 8
+        assert [rule.descriptor.key for rule in rules] == expected_descriptor_keys
+        for family_index, (
+            width_bits,
+            element_byte_count,
+            vector_lane_count,
+            operation,
+        ) in enumerate(expected_families):
+            operation_rules = rules[family_index * 5 : family_index * 5 + 5]
+            shape = f"i{element_byte_count * 8}x{vector_lane_count}"
+            descriptor_prefix = (
+                f"amd.xdna.aie2p.load.a.{shape}.indexed"
+                if operation is SourceMemoryOperation.LOAD
+                else f"amd.xdna.aie2p.store.{shape}.indexed"
+            )
+            assert [rule.descriptor.key for rule in operation_rules] == [
+                f"{descriptor_prefix}.immediate",
+                *(f"{descriptor_prefix}.register",) * 4,
+            ]
+            _assert_address_forms(
+                operation_rules,
+                immediate_minimum=-width_bits,
+                immediate_maximum=width_bits - width_bits // 8,
+            )
+            for rule in operation_rules:
+                memory_emit = rule.emit[-1]
+                constraint = memory_emit.source_memory
+                assert constraint is not None
+                assert constraint.operation is operation
+                assert constraint.root_kind is root_kind
+                assert (
+                    constraint.address_layout
+                    is SourceMemoryAddressLayout.COMPACT_ROW_MAJOR
+                )
+                assert constraint.memory_spaces == memory_spaces
+                assert constraint.element_byte_count == element_byte_count
+                assert constraint.vector_lane_count == vector_lane_count
+                assert constraint.vector_lane_byte_stride == element_byte_count
+                assert constraint.minimum_alignment == width_bits // 8

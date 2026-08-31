@@ -63,6 +63,17 @@ _VECTOR_MEMORY_SHAPES = (
 _I32_MIN = -(2**31)
 _I32_MAX = (2**31) - 1
 
+_MEMORY_ROOTS = (
+    (
+        SourceMemoryRootKind.BLOCK_ARGUMENT,
+        ("unknown", "generic", "workgroup"),
+    ),
+    (
+        SourceMemoryRootKind.ALLOCA,
+        ("private", "workgroup"),
+    ),
+)
+
 
 @unique
 class _MemoryAddressForm(Enum):
@@ -83,6 +94,8 @@ def _memory_constraint(
     operation: SourceMemoryOperation,
     address_form: _MemoryAddressForm,
     *,
+    root_kind: SourceMemoryRootKind,
+    memory_spaces: tuple[str, ...],
     element_byte_count: int,
     vector_lane_count: int,
     minimum_alignment: int,
@@ -105,9 +118,9 @@ def _memory_constraint(
         static_minimum, static_maximum = _I32_MIN, _I32_MAX
     return SourceMemoryConstraint(
         operation=operation,
-        root_kind=SourceMemoryRootKind.BLOCK_ARGUMENT,
+        root_kind=root_kind,
         address_layout=SourceMemoryAddressLayout.COMPACT_ROW_MAJOR,
-        memory_spaces=("unknown", "generic", "workgroup"),
+        memory_spaces=memory_spaces,
         element_byte_count=element_byte_count,
         vector_lane_count=vector_lane_count,
         vector_lane_byte_stride=element_byte_count,
@@ -217,6 +230,8 @@ def _memory_rule(
     operation: SourceMemoryOperation,
     address_form: _MemoryAddressForm,
     *,
+    root_kind: SourceMemoryRootKind,
+    memory_spaces: tuple[str, ...],
     source_op: Op,
     value_type: TypePattern,
     immediate_descriptor_key: str,
@@ -235,6 +250,8 @@ def _memory_rule(
     source_memory = _memory_constraint(
         operation,
         address_form,
+        root_kind=root_kind,
+        memory_spaces=memory_spaces,
         element_byte_count=element_byte_count,
         vector_lane_count=vector_lane_count,
         minimum_alignment=minimum_alignment,
@@ -302,6 +319,8 @@ def _scalar_memory_rules() -> tuple[DescriptorRule, ...]:
         _memory_rule(
             operation,
             address_form,
+            root_kind=root_kind,
+            memory_spaces=memory_spaces,
             source_op=source_op,
             value_type=_I32,
             immediate_descriptor_key=immediate_descriptor_key,
@@ -312,6 +331,7 @@ def _scalar_memory_rules() -> tuple[DescriptorRule, ...]:
             immediate_offset_minimum=-32,
             immediate_offset_maximum=28,
         )
+        for root_kind, memory_spaces in _MEMORY_ROOTS
         for operation, source_op, immediate_descriptor_key, register_descriptor_key in (
             (
                 SourceMemoryOperation.LOAD,
@@ -335,6 +355,8 @@ def _vector_memory_rules() -> tuple[DescriptorRule, ...]:
         _memory_rule(
             operation,
             address_form,
+            root_kind=root_kind,
+            memory_spaces=memory_spaces,
             source_op=(
                 vector.vector_load
                 if operation is SourceMemoryOperation.LOAD
@@ -353,6 +375,7 @@ def _vector_memory_rules() -> tuple[DescriptorRule, ...]:
             immediate_offset_minimum=-(width_bits),
             immediate_offset_maximum=width_bits - width_bits // 8,
         )
+        for root_kind, memory_spaces in _MEMORY_ROOTS
         for (
             width_bits,
             element_byte_count,

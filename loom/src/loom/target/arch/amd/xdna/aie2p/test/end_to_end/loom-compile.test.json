@@ -116,6 +116,38 @@
       ]
     },
     {
+      "name": "compiles resident vector arithmetic to an AIE2P tile image",
+      "run": {
+        "tool": "loom-compile",
+        "args": [
+          "{srcdir}/resident_vector_add.loom",
+          "--backend=elf-aie2p",
+          "--output={tmp}/resident_vector_add.elf",
+          "--compile-report=details"
+        ]
+      },
+      "stderr": {
+        "contains": {
+          "unordered": [
+            "\"artifact_kind\":\"target-artifact\"",
+            "\"backend\":\"amd-xdna-aie2p-tile-elf\"",
+            "\"artifact_format\":\"elf\"",
+            "\"status\":{\"code\":0,\"name\":\"OK\"}",
+            "\"spill_count\":0",
+            "\"emission\":{\"instruction_count\":14,\"code_byte_count\":50,\"code_storage_byte_count\":50}",
+            "\"plan_key\":\"function-storage.alloca\"",
+            "\"selected_op_count\":3,\"emitted_low_op_count\":6"
+          ]
+        }
+      },
+      "files": [
+        {
+          "path": "{tmp}/resident_vector_add.elf",
+          "non_empty": true
+        }
+      ]
+    },
+    {
       "name": "compiles scalar source to an AIE2P tile image",
       "run": {
         "tool": "loom-compile",
