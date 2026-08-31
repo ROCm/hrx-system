@@ -60,6 +60,27 @@ iree_native_test(
     ::product_frontier
 )
 
+if(IREE_TARGET_HAS_THREADS)
+
+loom_cc_binary(
+  NAME
+    jit_task_pool
+  SRCS
+    "jit_task_pool.c"
+  DEPS
+    loom::binding::c::loomc
+    loom::binding::c::task_pool
+)
+
+iree_native_test(
+  NAME
+    "jit_task_pool_test"
+  SRC
+    ::jit_task_pool
+)
+
+endif()
+
 if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV)
 loom_cc_binary(
   NAME

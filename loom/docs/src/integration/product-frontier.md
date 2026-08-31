@@ -118,4 +118,6 @@ single-threaded application can run the example literally. A concurrent host
 retains each request, checks its cache before leasing a workspace, and schedules
 only misses. Product artifacts are immutable byte sequences, so successful
 results can pass directly to executable loaders or packaging code without a
-filesystem round trip.
+filesystem round trip. [Schedule concurrent JIT work](jit-task-pool.md) shows
+that composition with caller-owned completion and the optional standard task
+pool.

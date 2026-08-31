@@ -9,6 +9,7 @@ load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
 load("//build_tools/sanitizer:suppressions.bzl", "vulkan_suppressions")
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
+    "iree_cmake_extra_content",
     "loom_cc_binary",
     "loom_cc_test",
     "loom_config_compatible_with",
@@ -80,6 +81,34 @@ loom_cc_binary(
 iree_executable_test(
     name = "product_frontier_test",
     src = ":product_frontier",
+)
+
+iree_cmake_extra_content(
+    content = """
+if(IREE_TARGET_HAS_THREADS)
+""",
+    inline = True,
+)
+
+loom_cc_binary(
+    name = "jit_task_pool",
+    srcs = ["jit_task_pool.c"],
+    deps = [
+        "//loom/binding/c:loomc",
+        "//loom/binding/c:task_pool",
+    ],
+)
+
+iree_executable_test(
+    name = "jit_task_pool_test",
+    src = ":jit_task_pool",
+)
+
+iree_cmake_extra_content(
+    content = """
+endif()
+""",
+    inline = True,
 )
 
 loom_cc_binary(

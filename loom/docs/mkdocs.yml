@@ -95,6 +95,7 @@ nav:
       - Integration map: integration/index.md
       - Compose modules in memory: integration/module-composition.md
       - Embed product frontiers: integration/product-frontier.md
+      - Schedule concurrent JIT work: integration/jit-task-pool.md
       - Embed kernel JIT compilation: integration/jit-kernel.md
   - Reference:
       - Reference map: reference/index.md
