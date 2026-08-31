@@ -148,6 +148,25 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "root_function_versions",
+    srcs = ["root_function_versions.c"],
+    hdrs = ["root_function_versions.h"],
+    deps = [
+        ":facts_builder",
+        ":function_contract",
+        ":function_version",
+        ":provider",
+        "//loom/src/loom/analysis:symbol_facts",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:func_symbol_facts",
+        "//loom/src/loom/ops/target",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "function_version_projection",
     srcs = ["function_version_projection.c"],
     hdrs = ["function_version_projection.h"],

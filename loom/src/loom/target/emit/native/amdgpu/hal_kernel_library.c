@@ -1102,7 +1102,8 @@ static iree_status_t loom_amdgpu_hal_kernel_library_prepare_export_projection(
     }
     projection->values[projection_count++] =
         (loom_target_emit_export_projection_t){
-            .function_version = &function_version->base,
+            .function_version_ordinal =
+                entries.values[i].function_version_ordinal,
             .ordinal = i,
         };
   }

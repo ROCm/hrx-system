@@ -77,8 +77,10 @@ static iree_status_t ContributePreparation(
 }
 
 static iree_status_t PrepareLaunchConfigCompiler(
+    const loom_target_launch_config_root_set_t* root_set,
     iree_arena_allocator_t* arena,
     const loom_pass_environment_capability_t** out_capability) {
+  (void)root_set;
   (void)arena;
   *out_capability = nullptr;
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED);

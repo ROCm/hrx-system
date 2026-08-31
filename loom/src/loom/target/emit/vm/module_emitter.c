@@ -657,11 +657,12 @@ static iree_status_t loom_vm_module_prepare_export_projection(
         "VM export projection capacity requires caller-owned row storage");
   }
 
-  const loom_function_version_t* const* selected_function_versions =
-      options->selection != NULL ? options->selection->export_function_versions
-                                 : NULL;
+  const loom_function_version_ordinal_t* selected_function_version_ordinals =
+      options->selection != NULL
+          ? options->selection->export_function_version_ordinals
+          : NULL;
   loom_target_function_version_snapshot_t version_snapshot = {0};
-  if (selected_function_versions == NULL) {
+  if (selected_function_version_ordinals == NULL) {
     IREE_RETURN_IF_ERROR(loom_target_function_version_snapshot_build(
         layout->module, options->function_versions, scratch_arena,
         &version_snapshot));
@@ -669,12 +670,14 @@ static iree_status_t loom_vm_module_prepare_export_projection(
   iree_host_size_t projection_count = 0;
   for (iree_host_size_t i = 0; i < layout->export_count; ++i) {
     const loom_vm_module_function_layout_t* export = layout->exports[i];
-    const loom_function_version_t* function_version =
-        selected_function_versions != NULL
-            ? selected_function_versions[export->symbol_id]
-            : loom_target_function_version_snapshot_handle_at(
+    const loom_function_version_ordinal_t function_version_ordinal =
+        selected_function_version_ordinals != NULL
+            ? selected_function_version_ordinals[export->symbol_id]
+            : loom_target_function_version_snapshot_ordinal_at(
                   &version_snapshot, export->symbol_id);
-    if (function_version == NULL) continue;
+    if (function_version_ordinal == LOOM_FUNCTION_VERSION_ORDINAL_INVALID) {
+      continue;
+    }
     if (projection_count >= projection->capacity) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "VM export projection capacity %" PRIhsz
@@ -683,7 +686,7 @@ static iree_status_t loom_vm_module_prepare_export_projection(
     }
     projection->values[projection_count++] =
         (loom_target_emit_export_projection_t){
-            .function_version = function_version,
+            .function_version_ordinal = function_version_ordinal,
             .ordinal = (uint32_t)i,
         };
   }

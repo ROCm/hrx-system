@@ -39,10 +39,10 @@ typedef struct loom_vm_module_emission_selection_t {
   // symbols with a non-zero entry are public in the emitted image.
   const uint8_t* export_symbols;
 
-  // Optional compiler function-version handles indexed by module symbol. When
-  // present, export projection uses these identities instead of identities on
-  // the selected functions themselves.
-  const loom_function_version_t* const* export_function_versions;
+  // Optional compiler function-version ordinals indexed by module symbol.
+  // When present, export projection uses these identities instead of
+  // identities on the selected functions themselves.
+  const loom_function_version_ordinal_t* export_function_version_ordinals;
 
   // Additional artifact-local selection guarantees.
   loom_vm_module_emission_selection_flags_t flags;

@@ -10,6 +10,7 @@
 #define LOOM_TARGET_ARCH_VM_LAUNCH_CONFIG_PROGRAM_H_
 
 #include "iree/base/api.h"
+#include "iree/base/bitmap.h"
 #include "loom/analysis/symbol_liveness.h"
 #include "loom/ir/function_version.h"
 #include "loom/ir/module.h"
@@ -25,6 +26,8 @@ typedef struct loom_vm_launch_config_program_entry_t
     loom_vm_launch_config_program_entry_t;
 typedef struct loom_vm_launch_config_program_target_t
     loom_vm_launch_config_program_target_t;
+typedef struct loom_target_launch_config_root_set_t
+    loom_target_launch_config_root_set_t;
 
 // Artifact-local symbol closure of a finalized launch-config program.
 typedef struct loom_vm_launch_config_program_closure_t {
@@ -34,9 +37,8 @@ typedef struct loom_vm_launch_config_program_closure_t {
   // One byte per module symbol: non-zero identifies a launch entry root.
   const uint8_t* root_symbols;
 
-  // Device function-version handle projected by launch-root symbol. Entries
-  // are NULL when the originating device function has no stable version.
-  const loom_function_version_t* const* root_function_versions;
+  // Device function-version ordinal projected by launch-root symbol.
+  const loom_function_version_ordinal_t* root_function_version_ordinals;
 } loom_vm_launch_config_program_closure_t;
 
 typedef uint8_t loom_vm_launch_config_program_state_t;
@@ -67,6 +69,10 @@ typedef struct loom_vm_launch_config_program_t {
   // Current construction state.
   loom_vm_launch_config_program_state_t state;
 
+  // Selected device function-version ordinals. NULL storage selects all
+  // compatible exported kernels.
+  iree_bitmap_t selected_device_versions;
+
   // Deduplicated VM execution-target projections.
   struct {
     // First target in materialization order.
@@ -92,8 +98,9 @@ typedef struct loom_vm_launch_config_program_t {
   } entries;
 } loom_vm_launch_config_program_t;
 
-// Initializes an empty launch-config product.
-void loom_vm_launch_config_program_initialize(
+// Initializes an empty launch-config product for |root_set|.
+iree_status_t loom_vm_launch_config_program_initialize(
+    const loom_target_launch_config_root_set_t* root_set,
     iree_arena_allocator_t* arena,
     loom_vm_launch_config_program_t* out_program);
 
@@ -118,6 +125,7 @@ iree_status_t loom_vm_launch_config_program_require_finalized(
 // lifetime.
 iree_status_t loom_vm_launch_config_program_build_closure(
     const loom_vm_launch_config_program_t* program, const loom_module_t* module,
+    const loom_function_version_list_t* function_versions,
     iree_arena_allocator_t* arena,
     loom_vm_launch_config_program_closure_t* out_closure);
 

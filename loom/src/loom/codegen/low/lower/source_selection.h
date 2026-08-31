@@ -68,6 +68,9 @@ typedef struct loom_low_source_selection_t {
   // unrefined. The target facts reachable through this selection are immutable.
   loom_function_version_t* version_handle;
 
+  // Position of |version_handle| in the lowering function-version list.
+  loom_function_version_ordinal_t version_ordinal;
+
   // Whether target facts came from authorship alone or specialization.
   loom_target_binding_source_t target_source;
 

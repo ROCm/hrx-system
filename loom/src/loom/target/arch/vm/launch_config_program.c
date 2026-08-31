@@ -9,6 +9,7 @@
 #include <inttypes.h>
 #include <string.h>
 
+#include "iree/base/bitmap.h"
 #include "loom/analysis/symbol_references.h"
 #include "loom/codegen/low/lower/source_selection.h"
 #include "loom/codegen/low/pipeline/pass_environment.h"
@@ -74,7 +75,7 @@ struct loom_vm_launch_config_program_entry_t {
   // Stable identity following a specialized device kernel through lowering.
   loom_function_version_t* device_version_handle;
 
-  // Device kernel symbol spelling used when no version handle exists.
+  // Device kernel symbol spelling used until finalization binds its version.
   loom_string_id_t device_function_name_id;
 
   // Launch function symbol spelling interned in the shared module.
@@ -120,12 +121,43 @@ const loom_pass_registry_t loom_vm_launch_config_pass_registry = {
     .descriptor_count = IREE_ARRAYSIZE(kVmLaunchConfigPassDescriptors),
 };
 
-void loom_vm_launch_config_program_initialize(
+iree_status_t loom_vm_launch_config_program_initialize(
+    const loom_target_launch_config_root_set_t* root_set,
     iree_arena_allocator_t* arena,
     loom_vm_launch_config_program_t* out_program) {
   *out_program = (loom_vm_launch_config_program_t){0};
   out_program->capability.type = &loom_vm_launch_config_program_capability_type;
   out_program->arena = arena;
+  if (root_set == NULL) return iree_ok_status();
+  if (root_set->count == 0 || root_set->values == NULL) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "launch-config root set must contain at least one function version");
+  }
+
+  loom_function_version_ordinal_t maximum_ordinal = 0;
+  for (iree_host_size_t i = 0; i < root_set->count; ++i) {
+    const loom_function_version_ordinal_t ordinal = root_set->values[i];
+    if (ordinal == LOOM_FUNCTION_VERSION_ORDINAL_INVALID) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "launch-config root set contains an invalid "
+                              "function-version ordinal");
+    }
+    maximum_ordinal = iree_max(maximum_ordinal, ordinal);
+  }
+  out_program->selected_device_versions.bit_count =
+      (iree_host_size_t)maximum_ordinal + 1;
+  const iree_host_size_t word_count = iree_bitmap_calculate_words(
+      out_program->selected_device_versions.bit_count);
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, word_count, sizeof(*out_program->selected_device_versions.words),
+      (void**)&out_program->selected_device_versions.words));
+  memset(out_program->selected_device_versions.words, 0,
+         word_count * sizeof(*out_program->selected_device_versions.words));
+  for (iree_host_size_t i = 0; i < root_set->count; ++i) {
+    iree_bitmap_set(out_program->selected_device_versions, root_set->values[i]);
+  }
+  return iree_ok_status();
 }
 
 loom_vm_launch_config_program_t* loom_vm_launch_config_program_from_pass(
@@ -436,7 +468,6 @@ static iree_status_t loom_vm_launch_config_build_function(
       program, module, &launch_function_ref));
   const loom_string_id_t launch_function_name_id =
       module->symbols.entries[launch_function_ref.symbol_id].name_id;
-
   loom_ir_remap_t remap;
   IREE_RETURN_IF_ERROR(loom_ir_remap_initialize(module, module, scratch_arena,
                                                 /*options=*/NULL, &remap));
@@ -631,6 +662,14 @@ iree_status_t loom_vm_launch_config_materialize_run(loom_pass_t* pass,
        ++i) {
     const loom_low_source_selection_t* selection = &selection_list.values[i];
     if (!loom_kernel_def_isa(selection->func.op)) continue;
+    if (program->selected_device_versions.words != NULL &&
+        (selection->version_ordinal == LOOM_FUNCTION_VERSION_ORDINAL_INVALID ||
+         selection->version_ordinal >=
+             program->selected_device_versions.bit_count ||
+         !iree_bitmap_test(program->selected_device_versions,
+                           selection->version_ordinal))) {
+      continue;
+    }
     loom_value_fact_table_t* source_facts = NULL;
     status = loom_pass_value_facts_acquire(
         pass, module,
@@ -688,8 +727,9 @@ static iree_status_t loom_vm_launch_config_resolve_function(
                             (int)function_kind.size, function_kind.data,
                             (int)function_name.size, function_name.data);
   }
-  const loom_func_like_t function = loom_func_like_cast(
-      module, module->symbols.entries[symbol_id].defining_op);
+  const loom_symbol_t* symbol = &module->symbols.entries[symbol_id];
+  const loom_func_like_t function =
+      loom_func_like_cast(module, symbol->defining_op);
   if (!loom_func_like_isa(function)) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "%.*s '@%.*s' is not function-like",
@@ -705,6 +745,7 @@ static iree_status_t loom_vm_launch_config_resolve_function(
 
 iree_status_t loom_vm_launch_config_program_build_closure(
     const loom_vm_launch_config_program_t* program, const loom_module_t* module,
+    const loom_function_version_list_t* function_versions,
     iree_arena_allocator_t* arena,
     loom_vm_launch_config_program_closure_t* out_closure) {
   *out_closure = (loom_vm_launch_config_program_closure_t){0};
@@ -716,12 +757,16 @@ iree_status_t loom_vm_launch_config_program_build_closure(
                                                  sizeof(*root_symbols),
                                                  (void**)&root_symbols));
   memset(root_symbols, 0, module->symbols.count * sizeof(*root_symbols));
-  const loom_function_version_t** root_function_versions = NULL;
+  loom_function_version_ordinal_t* root_function_version_ordinals = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, module->symbols.count, sizeof(*root_function_versions),
-      (void**)&root_function_versions));
-  memset(root_function_versions, 0,
-         module->symbols.count * sizeof(*root_function_versions));
+      arena, module->symbols.count, sizeof(*root_function_version_ordinals),
+      (void**)&root_function_version_ordinals));
+  memset(root_function_version_ordinals, 0xFF,
+         module->symbols.count * sizeof(*root_function_version_ordinals));
+
+  loom_target_function_version_snapshot_t version_snapshot = {0};
+  IREE_RETURN_IF_ERROR(loom_target_function_version_snapshot_build(
+      module, function_versions, arena, &version_snapshot));
 
   loom_symbol_id_t* root_symbol_ids = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, program->entries.count,
@@ -735,8 +780,27 @@ iree_status_t loom_vm_launch_config_program_build_closure(
     IREE_RETURN_IF_ERROR(loom_vm_launch_config_resolve_function(
         module, entry->launch_function_name_id, IREE_SV("launch function"),
         &resolved));
+    if (entry->device_version_handle == NULL) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "launch entry has no finalized device function version");
+    }
+    const loom_symbol_ref_t device_function_ref =
+        loom_func_like_callee(entry->device_version_handle->function);
+    if (!loom_symbol_ref_is_valid(device_function_ref) ||
+        device_function_ref.module_id != 0 ||
+        device_function_ref.symbol_id >= module->symbols.count ||
+        loom_target_function_version_snapshot_handle_at(
+            &version_snapshot, device_function_ref.symbol_id) !=
+            entry->device_version_handle) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "launch entry device function version is not live in the module");
+    }
     root_symbols[resolved.symbol_id] = 1;
-    root_function_versions[resolved.symbol_id] = entry->device_version_handle;
+    root_function_version_ordinals[resolved.symbol_id] =
+        loom_target_function_version_snapshot_ordinal_at(
+            &version_snapshot, device_function_ref.symbol_id);
     root_symbol_ids[root_index++] = resolved.symbol_id;
   }
 
@@ -755,28 +819,36 @@ iree_status_t loom_vm_launch_config_program_build_closure(
   IREE_RETURN_IF_ERROR(loom_symbol_liveness_compute(
       module, references, &options, arena, &out_closure->symbol_liveness));
   out_closure->root_symbols = root_symbols;
-  out_closure->root_function_versions = root_function_versions;
+  out_closure->root_function_version_ordinals = root_function_version_ordinals;
   return iree_ok_status();
 }
 
 static iree_status_t loom_vm_launch_config_resolve_device_function(
-    const loom_module_t* module,
-    const loom_vm_launch_config_program_entry_t* entry,
+    const loom_pass_t* pass, const loom_module_t* module,
+    loom_vm_launch_config_program_entry_t* entry,
     loom_func_like_t* out_function) {
-  if (entry->device_version_handle != NULL) {
-    *out_function = entry->device_version_handle->function;
-    if (!loom_func_like_isa(*out_function)) {
+  if (entry->device_version_handle == NULL) {
+    loom_vm_launch_config_resolved_function_t resolved = {0};
+    IREE_RETURN_IF_ERROR(loom_vm_launch_config_resolve_function(
+        module, entry->device_function_name_id, IREE_SV("device kernel"),
+        &resolved));
+    const loom_target_pass_capability_t* target_capability =
+        loom_target_pass_capability_from_pass(pass);
+    entry->device_version_handle = loom_function_version_list_find(
+        loom_target_pass_capability_function_versions(target_capability),
+        resolved.function);
+    if (entry->device_version_handle == NULL) {
       return iree_make_status(
           IREE_STATUS_FAILED_PRECONDITION,
-          "device kernel version does not reference a live function");
+          "device kernel has no stable version after callgraph specialization");
     }
-    return iree_ok_status();
   }
-  loom_vm_launch_config_resolved_function_t resolved = {0};
-  IREE_RETURN_IF_ERROR(loom_vm_launch_config_resolve_function(
-      module, entry->device_function_name_id, IREE_SV("device kernel"),
-      &resolved));
-  *out_function = resolved.function;
+  *out_function = entry->device_version_handle->function;
+  if (!loom_func_like_isa(*out_function)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "device kernel version does not reference a live function");
+  }
   return iree_ok_status();
 }
 
@@ -852,7 +924,7 @@ iree_status_t loom_vm_launch_config_finalize_run(loom_pass_t* pass,
   for (loom_vm_launch_config_program_entry_t* entry = program->entries.head;
        entry != NULL && iree_status_is_ok(status); entry = entry->next) {
     loom_func_like_t device_function = {0};
-    status = loom_vm_launch_config_resolve_device_function(module, entry,
+    status = loom_vm_launch_config_resolve_device_function(pass, module, entry,
                                                            &device_function);
     uint64_t workgroup_storage_bytes = 0;
     if (iree_status_is_ok(status)) {

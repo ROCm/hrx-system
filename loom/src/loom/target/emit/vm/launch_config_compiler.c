@@ -28,13 +28,15 @@ static iree_status_t loom_vm_launch_config_contribute_pipeline(
 }
 
 static iree_status_t loom_vm_launch_config_prepare(
+    const loom_target_launch_config_root_set_t* root_set,
     iree_arena_allocator_t* arena,
     const loom_pass_environment_capability_t** out_capability) {
   *out_capability = NULL;
   loom_vm_launch_config_program_t* program = NULL;
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate(arena, sizeof(*program), (void**)&program));
-  loom_vm_launch_config_program_initialize(arena, program);
+  IREE_RETURN_IF_ERROR(
+      loom_vm_launch_config_program_initialize(root_set, arena, program));
   *out_capability = loom_vm_launch_config_program_capability(program);
   return iree_ok_status();
 }
@@ -46,11 +48,12 @@ static iree_status_t loom_vm_launch_config_emit_program(
     iree_byte_sequence_t** out_contents) {
   loom_vm_launch_config_program_closure_t closure = {0};
   IREE_RETURN_IF_ERROR(loom_vm_launch_config_program_build_closure(
-      program, module, scratch_arena, &closure));
+      program, module, options->function_versions, scratch_arena, &closure));
   const loom_vm_module_emission_selection_t selection = {
       .symbol_liveness = &closure.symbol_liveness,
       .export_symbols = closure.root_symbols,
-      .export_function_versions = closure.root_function_versions,
+      .export_function_version_ordinals =
+          closure.root_function_version_ordinals,
       .flags = LOOM_VM_MODULE_EMISSION_SELECTION_FLAG_STATELESS,
   };
   loom_vm_module_emitter_options_t launch_options = *options;

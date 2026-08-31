@@ -246,6 +246,9 @@ static iree_status_t loom_low_source_selection_try_symbol(
   loom_function_version_t* version_handle =
       loom_target_function_version_snapshot_handle_at(target_versions,
                                                       symbol_id);
+  const loom_function_version_ordinal_t version_ordinal =
+      loom_target_function_version_snapshot_ordinal_at(target_versions,
+                                                       symbol_id);
   const loom_target_function_version_t* target_version =
       loom_target_function_version_const_cast(version_handle);
   const loom_symbol_ref_t target_ref = func_facts->target_symbol;
@@ -286,6 +289,7 @@ static iree_status_t loom_low_source_selection_try_symbol(
   out_selection->func = function;
   out_selection->function_name = func_facts->name;
   out_selection->version_handle = version_handle;
+  out_selection->version_ordinal = version_ordinal;
   out_selection->target_source = target_source;
   out_selection->target_ref = target_ref;
   out_selection->target_facts = target_facts;

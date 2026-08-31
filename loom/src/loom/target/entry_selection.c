@@ -370,6 +370,9 @@ static iree_status_t loom_target_entry_try_entry(
   }
   const loom_target_function_version_t* function_version =
       loom_target_function_version_snapshot_at(function_versions, symbol_id);
+  const loom_function_version_ordinal_t function_version_ordinal =
+      loom_target_function_version_snapshot_ordinal_at(function_versions,
+                                                       symbol_id);
   if (function_version == NULL &&
       !loom_symbol_ref_is_valid(func_facts->target_symbol)) {
     if (!require_compatible) {
@@ -384,6 +387,7 @@ static iree_status_t loom_target_entry_try_entry(
   loom_target_entry_t entry = {0};
   loom_target_entry_from_facts(module, symbol_id, func_facts, &entry);
   entry.function_version = function_version;
+  entry.function_version_ordinal = function_version_ordinal;
   bool contract_valid = false;
   if (function_version != NULL) {
     entry.target_facts = function_version->function_target_facts;

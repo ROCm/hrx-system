@@ -163,6 +163,28 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    root_function_versions
+  HDRS
+    "root_function_versions.h"
+  SRCS
+    "root_function_versions.c"
+  DEPS
+    ::facts_builder
+    ::function_contract
+    ::function_version
+    ::provider
+    iree::base
+    iree::base::internal::arena
+    loom::analysis::symbol_facts
+    loom::error::emitter
+    loom::ir
+    loom::ops::func_symbol_facts
+    loom::ops::target
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     function_version_projection
   HDRS
     "function_version_projection.h"

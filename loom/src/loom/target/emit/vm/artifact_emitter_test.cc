@@ -143,9 +143,9 @@ low.func.def target<vm.core>(@target) abi(vm_function) @private_helper() asm {
   ASSERT_NE(artifact.contents, nullptr);
   ASSERT_EQ(artifact.export_projection_count, 2u);
   ASSERT_NE(artifact.export_projections, nullptr);
-  EXPECT_EQ(artifact.export_projections[0].function_version, &a_version.base);
+  EXPECT_EQ(artifact.export_projections[0].function_version_ordinal, 2u);
   EXPECT_EQ(artifact.export_projections[0].ordinal, 0u);
-  EXPECT_EQ(artifact.export_projections[1].function_version, &z_version.base);
+  EXPECT_EQ(artifact.export_projections[1].function_version_ordinal, 1u);
   EXPECT_EQ(artifact.export_projections[1].ordinal, 1u);
 
   loom_target_emit_artifact_release(&artifact);

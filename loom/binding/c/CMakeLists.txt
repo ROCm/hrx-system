@@ -42,9 +42,11 @@ loom_cc_library(
     "include/loomc/target.h"
     "include/loomc/task.h"
     "include/loomc/workspace.h"
+    "src/compile.h"
     "src/config.h"
     "src/context.h"
     "src/diagnostic.h"
+    "src/emit.h"
     "src/link_index.h"
     "src/link_materialization.h"
     "src/module.h"
@@ -146,6 +148,7 @@ loom_cc_library(
     loom::target::reporting::artifact_manifest
     loom::target::reporting::format
     loom::target::reporting::report
+    loom::target::root_function_versions
     loom::target::specialization
     loom::target::types
     loom::tooling::compile::pipeline

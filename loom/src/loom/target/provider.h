@@ -92,8 +92,8 @@ typedef struct loom_target_emit_sidecar_artifact_t {
 
 // Transient compiler identity for one public callable in an emitted artifact.
 typedef struct loom_target_emit_export_projection_t {
-  // Stable function-version handle borrowed from the emission request.
-  const loom_function_version_t* function_version;
+  // Stable position in the emission request's function-version list.
+  loom_function_version_ordinal_t function_version_ordinal;
 
   // Artifact-local public callable ordinal used by the artifact consumer.
   uint32_t ordinal;
@@ -127,9 +127,8 @@ typedef struct loom_target_emit_artifact_t {
   iree_host_size_t sidecar_count;
 
   // Transient export projections in artifact-local ordinal order. Row storage
-  // is borrowed from the emission scratch arena and function-version handles
-  // are borrowed from the emission request. Consumers must copy the dense
-  // ordinals they need before either compiler-owned lifetime ends.
+  // is borrowed from the emission scratch arena. Consumers must copy the dense
+  // ordinals they need before the compiler-owned lifetime ends.
   const loom_target_emit_export_projection_t* export_projections;
 
   // Number of entries in |export_projections|. This may be smaller than the
@@ -229,12 +228,25 @@ typedef struct loom_target_emitter_list_t {
 typedef struct loom_target_launch_config_compiler_t
     loom_target_launch_config_compiler_t;
 
+// Function versions selected for launch-config materialization.
+typedef struct loom_target_launch_config_root_set_t {
+  // Function-version ordinals selected from the compile invocation.
+  const loom_function_version_ordinal_t* values;
+
+  // Number of entries in |values|.
+  iree_host_size_t count;
+} loom_target_launch_config_root_set_t;
+
 // Prepares target-owned state for one requested launch-config compilation.
+//
+// A NULL |root_set| selects all compatible exported functions. A non-NULL set
+// selects exactly the listed function versions; duplicates have no effect.
 //
 // The returned capability is owned by |arena| and remains valid until the
 // arena is deinitialized. The compile driver appends it to the ordinary pass
 // environment for exactly one pass-program execution.
 typedef iree_status_t (*loom_target_launch_config_prepare_fn_t)(
+    const loom_target_launch_config_root_set_t* root_set,
     iree_arena_allocator_t* arena,
     const loom_pass_environment_capability_t** out_capability);
 

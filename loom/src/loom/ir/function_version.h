@@ -23,6 +23,15 @@ extern "C" {
 
 typedef struct loom_function_version_t loom_function_version_t;
 
+// Compilation-local position in a function-version list.
+//
+// List order is append-only for an owning compilation. Existing ordinals
+// therefore remain stable while later passes append newly discovered callable
+// versions. The ordinal has no IR or serialization representation.
+typedef uint32_t loom_function_version_ordinal_t;
+#define LOOM_FUNCTION_VERSION_ORDINAL_INVALID \
+  ((loom_function_version_ordinal_t)UINT32_MAX)
+
 // Static identity for one compiler-owned function-version representation.
 typedef struct loom_function_version_type_t {
   // Stable diagnostic name for the representation.
