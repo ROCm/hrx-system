@@ -8,6 +8,7 @@
 
 #include <string>
 
+#include "iree/base/byte_sequence.h"
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"

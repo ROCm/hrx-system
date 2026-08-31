@@ -6,6 +6,7 @@
 
 #include "loom/target/arch/amd/xdna/aie2p/emit/artifact_emitter.h"
 
+#include "iree/base/byte_sequence.h"
 #include "iree/io/vec_stream.h"
 #include "loom/codegen/low/frame.h"
 #include "loom/codegen/low/function.h"
