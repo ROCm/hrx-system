@@ -43,6 +43,7 @@ iree_cc_library(
     "kernel_arguments.h"
     "kpack.h"
     "memory.h"
+    "module.h"
     "stream.h"
     "tls.h"
   TEXTUAL_HDRS
@@ -171,6 +172,34 @@ iree_cc_test(
   DEPS
     ::common
     iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+)
+
+iree_cc_test(
+  NAME
+    kernel_arguments_test
+  SRCS
+    "kernel_arguments_test.cc"
+  DEPS
+    ::common
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+)
+
+iree_cc_test(
+  NAME
+    module_test
+  SRCS
+    "module_test.cc"
+  DEPS
+    ::common
+    iree::base
+    iree::hal
+    iree::hal::testing::mock_device
     iree::testing::gtest
     iree::testing::gtest_main
     libhrx_defs

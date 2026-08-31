@@ -4,16 +4,29 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "common/module.h"
+
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "common/fat_binary.h"
-#include "common/internal.h"
 #include "iree/io/file_handle.h"
 
 //===----------------------------------------------------------------------===//
 // Module management
 //===----------------------------------------------------------------------===//
+
+static int iree_hal_streaming_compare_resolve_op_source_ordinals(
+    const void* lhs, const void* rhs) {
+  const iree_hal_streaming_parameter_resolve_op_t* lhs_op =
+      &((const iree_hal_streaming_parameter_op_t*)lhs)->resolve;
+  const iree_hal_streaming_parameter_resolve_op_t* rhs_op =
+      &((const iree_hal_streaming_parameter_op_t*)rhs)->resolve;
+  if (lhs_op->source_ordinal < rhs_op->source_ordinal) return -1;
+  if (lhs_op->source_ordinal > rhs_op->source_ordinal) return 1;
+  return 0;
+}
 
 static iree_status_t iree_hal_streaming_fat_binary_target_append_unique(
     iree_hal_streaming_fat_binary_target_t* targets,
@@ -88,7 +101,7 @@ static iree_status_t iree_hal_streaming_fat_binary_targets_from_device(
   return iree_ok_status();
 }
 
-static iree_status_t iree_hal_streaming_module_extract_metadata(
+iree_status_t iree_hal_streaming_module_extract_metadata(
     iree_hal_streaming_module_t* module) {
   IREE_ASSERT_ARGUMENT(module);
   IREE_TRACE_ZONE_BEGIN(z0);
@@ -96,13 +109,30 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
   // Query the number of exported functions.
   const iree_host_size_t executable_count =
       module->executable_count ? module->executable_count : 1;
+  iree_status_t status = iree_ok_status();
   module->symbol_count = 0;
   for (iree_host_size_t executable_ordinal = 0;
-       executable_ordinal < executable_count; ++executable_ordinal) {
+       iree_status_is_ok(status) && executable_ordinal < executable_count;
+       ++executable_ordinal) {
     iree_hal_executable_t* executable =
         module->executables ? module->executables[executable_ordinal]
                             : module->executable;
-    module->symbol_count += iree_hal_executable_export_count(executable);
+    const iree_host_size_t export_count =
+        iree_hal_executable_export_count(executable);
+    if (IREE_UNLIKELY(export_count > UINT32_MAX)) {
+      status = iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "executable export count exceeds the ordinal representation");
+    } else if (IREE_UNLIKELY(!iree_host_size_checked_add(
+                   module->symbol_count, export_count,
+                   &module->symbol_count))) {
+      status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                "module export count overflow");
+    }
+  }
+  if (!iree_status_is_ok(status)) {
+    IREE_TRACE_ZONE_END(z0);
+    return status;
   }
   if (module->symbol_count == 0) {
     IREE_TRACE_ZONE_END(z0);
@@ -115,26 +145,42 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
   // required number of unpack operations. Once we do that we avoid
   // recalculating later by caching the results.
   typedef struct op_counts_t {
-    uint16_t copy_count;
-    uint16_t resolve_count;
+    uint32_t copy_count;
+    uint32_t resolve_count;
   } op_counts_t;
-  const iree_host_size_t export_infos_size =
-      module->symbol_count * sizeof(iree_hal_executable_export_info_t);
-  const iree_host_size_t export_executables_size =
-      module->symbol_count * sizeof(iree_hal_executable_t*);
-  const iree_host_size_t export_ordinals_size =
-      module->symbol_count * sizeof(iree_hal_executable_export_ordinal_t);
-  const iree_host_size_t op_counts_size =
-      module->symbol_count * sizeof(op_counts_t);
+  iree_host_size_t export_infos_size = 0;
+  iree_host_size_t export_executables_size = 0;
+  iree_host_size_t export_ordinals_size = 0;
+  iree_host_size_t op_counts_size = 0;
+  iree_host_size_t temp_buffer_size = 0;
+  if (IREE_UNLIKELY(
+          !iree_host_size_checked_mul(module->symbol_count,
+                                      sizeof(iree_hal_executable_export_info_t),
+                                      &export_infos_size) ||
+          !iree_host_size_checked_mul(module->symbol_count,
+                                      sizeof(iree_hal_executable_t*),
+                                      &export_executables_size) ||
+          !iree_host_size_checked_mul(
+              module->symbol_count,
+              sizeof(iree_hal_executable_export_ordinal_t),
+              &export_ordinals_size) ||
+          !iree_host_size_checked_mul(module->symbol_count, sizeof(op_counts_t),
+                                      &op_counts_size) ||
+          !iree_host_size_checked_add(
+              export_infos_size, export_executables_size, &temp_buffer_size) ||
+          !iree_host_size_checked_add(temp_buffer_size, export_ordinals_size,
+                                      &temp_buffer_size) ||
+          !iree_host_size_checked_add(temp_buffer_size, op_counts_size,
+                                      &temp_buffer_size))) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "module metadata scratch size overflow");
+  }
   uint8_t* temp_buffer = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_allocator_malloc(module->host_allocator,
-                                export_infos_size + export_executables_size +
-                                    export_ordinals_size + op_counts_size,
+      z0, iree_allocator_malloc(module->host_allocator, temp_buffer_size,
                                 (void**)&temp_buffer));
-  memset(temp_buffer, 0,
-         export_infos_size + export_executables_size + export_ordinals_size +
-             op_counts_size);
+  memset(temp_buffer, 0, temp_buffer_size);
   iree_hal_executable_export_info_t* export_infos =
       (iree_hal_executable_export_info_t*)temp_buffer;
   iree_hal_executable_t** export_executables =
@@ -149,7 +195,6 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
   // Count all parameters in all exports so we can allocate one buffer to
   // fetch them all. This is somewhat wasteful as we'll be allocating quite a
   // bit but is easier to see in traces.
-  iree_status_t status = iree_ok_status();
   iree_host_size_t total_parameter_count = 0;
   iree_host_size_t symbol_index = 0;
   for (iree_host_size_t executable_ordinal = 0;
@@ -161,23 +206,46 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
     const iree_host_size_t export_count =
         iree_hal_executable_export_count(executable);
     for (iree_host_size_t i = 0; i < export_count; ++i) {
+      if (IREE_UNLIKELY(symbol_index >= module->symbol_count)) {
+        status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                                  "executable export count changed while "
+                                  "extracting module metadata");
+        break;
+      }
       export_executables[symbol_index] = executable;
       export_ordinals[symbol_index] = (iree_hal_executable_export_ordinal_t)i;
       status = iree_hal_executable_export_info(executable,
                                                export_ordinals[symbol_index],
                                                &export_infos[symbol_index]);
       if (!iree_status_is_ok(status)) break;
-      total_parameter_count += export_infos[symbol_index].parameter_count;
+      if (IREE_UNLIKELY(!iree_host_size_checked_add(
+              total_parameter_count, export_infos[symbol_index].parameter_count,
+              &total_parameter_count))) {
+        status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                  "module parameter count overflow");
+        break;
+      }
       ++symbol_index;
     }
+  }
+  if (iree_status_is_ok(status) && symbol_index != module->symbol_count) {
+    status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "executable export count changed while "
+                              "extracting module metadata");
   }
 
   // Allocate the scratch space for querying parameter info.
   iree_hal_executable_export_parameter_t* parameters = NULL;
   if (iree_status_is_ok(status) && total_parameter_count > 0) {
-    status = iree_allocator_malloc(module->host_allocator,
-                                   total_parameter_count * sizeof(*parameters),
-                                   (void**)&parameters);
+    iree_host_size_t parameters_size = 0;
+    if (IREE_UNLIKELY(!iree_host_size_checked_mul(
+            total_parameter_count, sizeof(*parameters), &parameters_size))) {
+      status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                "module parameter storage size overflow");
+    } else {
+      status = iree_allocator_malloc(module->host_allocator, parameters_size,
+                                     (void**)&parameters);
+    }
   }
 
   // Analyze each export to determine operation counts.
@@ -185,44 +253,100 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
   for (iree_host_size_t i = 0, parameter_base = 0;
        iree_status_is_ok(status) && i < module->symbol_count; ++i) {
     const iree_host_size_t parameter_count = export_infos[i].parameter_count;
-    if (!parameter_count) continue;
+    iree_host_size_t next_parameter_base = 0;
+    if (IREE_UNLIKELY(!iree_host_size_checked_add(parameter_base,
+                                                  parameter_count,
+                                                  &next_parameter_base) ||
+                      next_parameter_base > total_parameter_count)) {
+      status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                "module parameter count overflow");
+      break;
+    }
     // Query parameters before allocating symbol-owned operation storage.
-    status = iree_hal_executable_export_parameters(
-        export_executables[i], export_ordinals[i], parameter_count,
-        &parameters[parameter_base]);
-    if (!iree_status_is_ok(status)) break;
-    for (uint16_t j = 0; j < parameter_count; ++j) {
+    if (parameter_count > 0) {
+      status = iree_hal_executable_export_parameters(
+          export_executables[i], export_ordinals[i], parameter_count,
+          &parameters[parameter_base]);
+      if (!iree_status_is_ok(status)) break;
+    }
+    for (iree_host_size_t j = 0;
+         iree_status_is_ok(status) && j < parameter_count; ++j) {
       const iree_hal_executable_export_parameter_t* parameter =
           &parameters[parameter_base + j];
       const bool is_binding_parameter =
           parameter->type == IREE_HAL_EXECUTABLE_EXPORT_PARAMETER_TYPE_BINDING;
+      if (IREE_UNLIKELY(
+              parameter->type !=
+                  IREE_HAL_EXECUTABLE_EXPORT_PARAMETER_TYPE_CONSTANT &&
+              parameter->type !=
+                  IREE_HAL_EXECUTABLE_EXPORT_PARAMETER_TYPE_BINDING &&
+              parameter->type !=
+                  IREE_HAL_EXECUTABLE_EXPORT_PARAMETER_TYPE_BUFFER_PTR)) {
+        status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "kernel parameter has an unknown type");
+        break;
+      }
       if (is_binding_parameter) {
+        if (IREE_UNLIKELY(parameter->size !=
+                          sizeof(iree_hal_streaming_deviceptr_t))) {
+          status = iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "kernel binding parameter size does not match a device pointer");
+          break;
+        }
         ++symbol_op_counts[i].resolve_count;
-        ++total_ops;
       } else {
         ++symbol_op_counts[i].copy_count;
-        ++total_ops;
+      }
+      if (IREE_UNLIKELY(
+              symbol_op_counts[i].copy_count > UINT16_MAX ||
+              symbol_op_counts[i].resolve_count > UINT16_MAX ||
+              !iree_host_size_checked_add(total_ops, 1, &total_ops))) {
+        status = iree_make_status(
+            IREE_STATUS_OUT_OF_RANGE,
+            "kernel parameter operation count exceeds supported width");
+        break;
       }
     }
-    parameter_base += parameter_count;
+    if (iree_status_is_ok(status) &&
+        symbol_op_counts[i].resolve_count != export_infos[i].binding_count) {
+      status = iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "kernel binding parameter count does not match reflected bindings");
+    }
+    parameter_base = next_parameter_base;
   }
 
   // Allocate all permanent storage in a single block.
-  // Memory layout: [Symbol Array][Symbol0 ops][Symbol1 ops]...
-  const iree_host_size_t symbols_size =
-      module->symbol_count * sizeof(iree_hal_streaming_symbol_t);
-  const iree_host_size_t ops_size =
-      total_ops * sizeof(iree_hal_streaming_parameter_op_t);
-  const iree_host_size_t total_size = symbols_size + ops_size;
+  // Memory layout: [Symbol Array][alignment padding][all Symbol ops].
+  iree_host_size_t symbols_size = 0;
+  iree_host_size_t ops_offset = 0;
+  iree_host_size_t ops_size = 0;
+  iree_host_size_t total_size = 0;
+  if (iree_status_is_ok(status) &&
+      IREE_UNLIKELY(
+          !iree_host_size_checked_mul(module->symbol_count,
+                                      sizeof(iree_hal_streaming_symbol_t),
+                                      &symbols_size) ||
+          !iree_host_size_checked_align(
+              symbols_size, iree_alignof(iree_hal_streaming_parameter_op_t),
+              &ops_offset) ||
+          !iree_host_size_checked_mul(total_ops,
+                                      sizeof(iree_hal_streaming_parameter_op_t),
+                                      &ops_size) ||
+          !iree_host_size_checked_add(ops_offset, ops_size, &total_size))) {
+    status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "module metadata storage size overflow");
+  }
   uint8_t* buffer = NULL;
   if (iree_status_is_ok(status)) {
     status = iree_allocator_malloc(module->host_allocator, total_size,
                                    (void**)&buffer);
   }
+  if (iree_status_is_ok(status)) memset(buffer, 0, total_size);
   module->symbols = (iree_hal_streaming_symbol_t*)buffer;
   iree_hal_streaming_parameter_op_t* ops_base =
-      buffer ? (iree_hal_streaming_parameter_op_t*)(buffer + symbols_size)
-             : NULL;
+      buffer ? (iree_hal_streaming_parameter_op_t*)(buffer + ops_offset) : NULL;
 
   const iree_hal_device_spec_t* device_spec =
       iree_hal_device_spec(module->context->device);
@@ -250,7 +374,7 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
       status = iree_make_status(
           IREE_STATUS_OUT_OF_RANGE,
           "function constant metadata exceeds supported parameter size");
-      continue;
+      break;
     }
     // Executable binding_count describes normal HAL dispatch bindings. Native
     // HIP packing uses the same reflected BINDING parameters and only consults
@@ -258,34 +382,29 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
     parameter_info->buffer_size = 0;
     parameter_info->constant_bytes = 0;
     parameter_info->direct_arg_bytes = 0;
-    parameter_info->binding_count = symbol_op_counts[i].resolve_count;
-    parameter_info->copy_count = symbol_op_counts[i].copy_count;
+    parameter_info->binding_count = (uint16_t)symbol_op_counts[i].resolve_count;
+    parameter_info->copy_count = (uint16_t)symbol_op_counts[i].copy_count;
     parameter_info->ops = current_ops;
-    const uint16_t parameter_count = export_infos[i].parameter_count;
-    if (parameter_count == 0) {
-      // No parameters.
-      continue;
-    }
+    const iree_host_size_t parameter_count = export_infos[i].parameter_count;
 
     // Build one operation per reflected parameter. Copy ops go first, then
     // resolve ops.
-    uint16_t source_offset = 0;
+    iree_host_size_t source_offset = 0;
     iree_host_size_t direct_arg_offset = 0;
-    uint16_t buffer_size = 0;
-    iree_host_size_t this_kernel_direct_arg_size = 0;
+    iree_host_size_t native_abi_written_end = 0;
     iree_hal_streaming_parameter_op_t* copy_ops_start = current_ops;
     iree_hal_streaming_parameter_op_t* resolve_ops_start =
         current_ops + symbol_op_counts[i].copy_count;
-    for (uint16_t j = 0; j < symbol_op_counts[i].resolve_count; ++j) {
+    for (iree_host_size_t j = 0; j < symbol_op_counts[i].resolve_count; ++j) {
       // This sentinel is replaced when its dense HAL binding ordinal is
       // reflected below. It detects duplicate metadata before the operation
       // table becomes visible to dispatch.
       resolve_ops_start[j].resolve.destination_ordinal = UINT16_MAX;
     }
-    uint16_t copy_count = 0;
-    uint16_t resolve_count = 0;
-    for (uint16_t j = 0; iree_status_is_ok(status) && j < parameter_count;
-         ++j) {
+    iree_host_size_t copy_count = 0;
+    iree_host_size_t resolve_count = 0;
+    for (iree_host_size_t j = 0;
+         iree_status_is_ok(status) && j < parameter_count; ++j) {
       const iree_hal_executable_export_parameter_t* parameter =
           &parameters[parameter_base + j];
       const bool is_binding_parameter =
@@ -297,20 +416,24 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
       }
       iree_host_size_t source_extent = 0;
       iree_host_size_t native_extent = 0;
-      iree_host_size_t next_direct_arg_offset = 0;
       if (IREE_UNLIKELY(
               native_abi_destination_offset > UINT16_MAX ||
-              !iree_host_size_checked_add((iree_host_size_t)source_offset,
-                                          parameter->size, &source_extent) ||
+              !iree_host_size_checked_add(source_offset, parameter->size,
+                                          &source_extent) ||
               source_extent > UINT16_MAX ||
               !iree_host_size_checked_add(native_abi_destination_offset,
                                           parameter->size, &native_extent) ||
-              native_extent > UINT16_MAX ||
-              !iree_host_size_checked_add(direct_arg_offset, parameter->size,
-                                          &next_direct_arg_offset))) {
+              native_extent > UINT16_MAX || j > UINT16_MAX)) {
         status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                                   "kernel parameter layout exceeds metadata "
                                   "field width");
+        break;
+      }
+      if (IREE_UNLIKELY(native_abi_destination_offset <
+                        native_abi_written_end)) {
+        status = iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "kernel native parameter layout overlaps or is out of order");
         break;
       }
       if (!is_binding_parameter) {
@@ -327,7 +450,6 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
           break;
         }
       }
-      const uint16_t next_source_offset = (uint16_t)source_extent;
       if (is_binding_parameter) {
         if (IREE_UNLIKELY(parameter->offset >=
                           symbol_op_counts[i].resolve_count)) {
@@ -347,54 +469,90 @@ static iree_status_t iree_hal_streaming_module_extract_metadata(
           break;
         }
         op->reserved = 0;
-        op->source_offset = source_offset;
+        op->source_offset = (uint16_t)source_offset;
         op->destination_ordinal = parameter->offset;
-        op->source_ordinal = j;
+        op->source_ordinal = (uint16_t)j;
         // Native launches place raw device pointers at target ABI offsets.
         op->native_abi_destination_offset =
             (uint16_t)native_abi_destination_offset;
-        source_offset = next_source_offset;
-        buffer_size = source_offset;
         ++resolve_count;
-
-        if (native_extent > this_kernel_direct_arg_size) {
-          this_kernel_direct_arg_size = native_extent;
-        }
-        direct_arg_offset = iree_max(native_extent, next_direct_arg_offset);
       } else {
         // Constants use two layouts: a dense HAL constants buffer in source
         // order, and the target ABI byte image used by native HIP launches.
         iree_hal_streaming_parameter_copy_op_t* op =
             &copy_ops_start[copy_count].copy;
         op->size = parameter->size;
-        op->source_offset = source_offset;
-        op->source_ordinal = j;
+        op->source_offset = (uint16_t)source_offset;
+        op->source_ordinal = (uint16_t)j;
         op->native_abi_destination_offset =
             (uint16_t)native_abi_destination_offset;
         op->constant_destination_offset = parameter->offset;
         ++copy_count;
-        source_offset = next_source_offset;
-        buffer_size = source_offset;
-
-        if (native_extent > this_kernel_direct_arg_size) {
-          this_kernel_direct_arg_size = native_extent;
-        }
-        direct_arg_offset = iree_max(native_extent, next_direct_arg_offset);
       }
+      source_offset = source_extent;
+      direct_arg_offset = native_extent;
+      native_abi_written_end = native_extent;
     }
     if (!iree_status_is_ok(status)) break;
-    parameter_info->buffer_size = buffer_size;
-    if (IREE_UNLIKELY(export_infos[i].constant_byte_length > UINT16_MAX)) {
-      status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                                "kernel constant layout exceeds metadata "
-                                "field width");
+    if (IREE_UNLIKELY(copy_count != symbol_op_counts[i].copy_count ||
+                      resolve_count != symbol_op_counts[i].resolve_count)) {
+      status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                                "kernel parameter operation count changed "
+                                "while extracting metadata");
       break;
     }
+
+    // Binding ordinals describe the dense HAL binding table and need not match
+    // source argument order. Establish resolve source order once while loading
+    // metadata so every launch can perform one linear merged walk.
+    if (resolve_count > 1) {
+      qsort(resolve_ops_start, resolve_count, sizeof(resolve_ops_start[0]),
+            iree_hal_streaming_compare_resolve_op_source_ordinals);
+    }
+
+    // Prove that both operation partitions form one globally unique source
+    // sequence before the module is published.
+    iree_host_size_t copy_index = 0;
+    iree_host_size_t resolve_index = 0;
+    bool has_previous_source_ordinal = false;
+    uint16_t previous_source_ordinal = 0;
+    while (copy_index < copy_count || resolve_index < resolve_count) {
+      bool use_copy = resolve_index == resolve_count;
+      if (copy_index < copy_count && resolve_index < resolve_count) {
+        const uint16_t copy_source_ordinal =
+            copy_ops_start[copy_index].copy.source_ordinal;
+        const uint16_t resolve_source_ordinal =
+            resolve_ops_start[resolve_index].resolve.source_ordinal;
+        if (IREE_UNLIKELY(copy_source_ordinal == resolve_source_ordinal)) {
+          status = iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "kernel metadata assigns source ordinal %u more than once",
+              copy_source_ordinal);
+          break;
+        }
+        use_copy = copy_source_ordinal < resolve_source_ordinal;
+      }
+      const uint16_t source_ordinal =
+          use_copy ? copy_ops_start[copy_index++].copy.source_ordinal
+                   : resolve_ops_start[resolve_index++].resolve.source_ordinal;
+      if (IREE_UNLIKELY((has_previous_source_ordinal &&
+                         source_ordinal <= previous_source_ordinal) ||
+                        source_ordinal >= parameter_count)) {
+        status = iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "kernel parameter source ordinals are not strictly ordered");
+        break;
+      }
+      has_previous_source_ordinal = true;
+      previous_source_ordinal = source_ordinal;
+    }
+    if (!iree_status_is_ok(status)) break;
+
+    parameter_info->buffer_size = (uint16_t)source_offset;
     parameter_info->constant_bytes =
         (uint16_t)export_infos[i].constant_byte_length;
-    if (buffer_size > this_kernel_direct_arg_size) {
-      this_kernel_direct_arg_size = buffer_size;
-    }
+    const iree_host_size_t this_kernel_direct_arg_size =
+        iree_max(source_offset, native_abi_written_end);
     if (IREE_UNLIKELY(this_kernel_direct_arg_size > UINT16_MAX)) {
       status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                                 "kernel direct argument layout exceeds "
@@ -491,12 +649,18 @@ iree_status_t iree_hal_streaming_module_create_from_memory(
   // may live in a later matching code object.
   if (iree_status_is_ok(status) && fat_extract.match_count > 1) {
     module->executable_count = fat_extract.match_count;
-    status = iree_allocator_malloc(
-        host_allocator, module->executable_count * sizeof(*module->executables),
-        (void**)&module->executables);
+    iree_host_size_t executables_size = 0;
+    if (IREE_UNLIKELY(!iree_host_size_checked_mul(module->executable_count,
+                                                  sizeof(*module->executables),
+                                                  &executables_size))) {
+      status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                "module executable table size overflow");
+    } else {
+      status = iree_allocator_malloc(host_allocator, executables_size,
+                                     (void**)&module->executables);
+    }
     if (iree_status_is_ok(status)) {
-      memset(module->executables, 0,
-             module->executable_count * sizeof(*module->executables));
+      memset(module->executables, 0, executables_size);
       module->executables[0] = module->executable;
     }
     for (iree_host_size_t i = 1;
@@ -635,7 +799,7 @@ iree_status_t iree_hal_streaming_module_symbol(
 
   iree_string_view_t name_view =
       iree_string_view_trim(iree_make_cstring_view(name));
-  for (uint32_t i = 0; i < module->symbol_count; ++i) {
+  for (iree_host_size_t i = 0; i < module->symbol_count; ++i) {
     if (iree_hal_streaming_module_symbol_name_matches(module->symbols[i].name,
                                                       name_view)) {
       // Check if the symbol type matches expected type.
