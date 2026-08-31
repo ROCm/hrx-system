@@ -21,6 +21,13 @@ static uint64_t loom_native_contribution_normalize_alignment(
   return alignment == 0 ? 1u : alignment;
 }
 
+static uint64_t loom_native_contribution_byte_length(
+    const loom_native_section_contribution_t* contribution) {
+  return contribution->section_type == LOOM_NATIVE_ELF_SECTION_TYPE_NOBITS
+             ? contribution->zero_fill_length
+             : (uint64_t)contribution->contents.data_length;
+}
+
 static iree_status_t loom_native_contribution_validate_name(
     iree_string_view_t name, iree_host_size_t index) {
   if (iree_string_view_is_empty(name)) {
@@ -62,6 +69,19 @@ static iree_status_t loom_native_contribution_validate(
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "native contribution %" PRIhsz " has a size but no contents", index);
+  }
+  if (contribution->section_type == LOOM_NATIVE_ELF_SECTION_TYPE_NOBITS) {
+    if (contribution->contents.data_length != 0) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "native SHT_NOBITS contribution %" PRIhsz
+                              " must not have contents",
+                              index);
+    }
+  } else if (contribution->zero_fill_length != 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "native content-backed contribution %" PRIhsz
+                            " must not have a zero-fill length",
+                            index);
   }
   return iree_ok_status();
 }
@@ -117,6 +137,7 @@ static iree_status_t loom_native_contribution_find_or_add_section(
               .link = contribution->link,
               .info = contribution->info,
               .contents = iree_const_byte_span_empty(),
+              .zero_fill_length = 0,
           },
       .next_offset = 0,
   };
@@ -155,9 +176,9 @@ static iree_status_t loom_native_contribution_plan_layout(
                               "native contribution section layout overflow");
     }
     uint64_t next_offset = 0;
-    if (!iree_checked_add_u64(section_offset,
-                              (uint64_t)contribution->contents.data_length,
-                              &next_offset)) {
+    if (!iree_checked_add_u64(
+            section_offset, loom_native_contribution_byte_length(contribution),
+            &next_offset)) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "native contribution section layout overflow");
     }
@@ -218,6 +239,11 @@ static iree_status_t loom_native_contribution_allocate_output(
       sections[i].contents = iree_const_byte_span_empty();
       continue;
     }
+    if (accumulator->section.type == LOOM_NATIVE_ELF_SECTION_TYPE_NOBITS) {
+      sections[i].contents = iree_const_byte_span_empty();
+      sections[i].zero_fill_length = accumulator->next_offset;
+      continue;
+    }
     if (accumulator->next_offset > IREE_HOST_SIZE_MAX) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "native assembled section `%.*s` is too large",
@@ -243,6 +269,9 @@ static iree_status_t loom_native_contribution_copy_contents(
     uint8_t** section_contents) {
   for (iree_host_size_t i = 0; i < contribution_count; ++i) {
     const loom_native_section_contribution_t* contribution = &contributions[i];
+    if (contribution->section_type == LOOM_NATIVE_ELF_SECTION_TYPE_NOBITS) {
+      continue;
+    }
     if (contribution->contents.data_length == 0) {
       continue;
     }

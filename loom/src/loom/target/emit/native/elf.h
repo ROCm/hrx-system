@@ -73,6 +73,7 @@ typedef enum loom_native_elf_section_type_e {
   LOOM_NATIVE_ELF_SECTION_TYPE_HASH = 5,
   LOOM_NATIVE_ELF_SECTION_TYPE_DYNAMIC = 6,
   LOOM_NATIVE_ELF_SECTION_TYPE_NOTE = 7,
+  LOOM_NATIVE_ELF_SECTION_TYPE_NOBITS = 8,
   LOOM_NATIVE_ELF_SECTION_TYPE_DYNSYM = 11,
 } loom_native_elf_section_type_t;
 
@@ -119,7 +120,18 @@ typedef struct loom_native_elf_section_t {
   uint32_t info;
   // Section bytes written into the file.
   iree_const_byte_span_t contents;
+  // Logical zero-filled byte length for SHT_NOBITS sections. This must be
+  // zero for every content-backed section.
+  uint64_t zero_fill_length;
 } loom_native_elf_section_t;
+
+// Returns the logical size recorded in the section header.
+static inline uint64_t loom_native_elf_section_byte_length(
+    const loom_native_elf_section_t* section) {
+  return section->type == LOOM_NATIVE_ELF_SECTION_TYPE_NOBITS
+             ? section->zero_fill_length
+             : (uint64_t)section->contents.data_length;
+}
 
 typedef struct loom_native_elf_segment_t {
   // ELF PT_* program header type.
