@@ -62,7 +62,10 @@ iree_py_library(
 
 iree_py_library(
     name = "descriptors",
-    srcs = ["core_descriptors.py"],
+    srcs = [
+        "array_descriptors.py",
+        "core_descriptors.py",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         ":encoding_data",
@@ -72,6 +75,17 @@ iree_py_library(
         "//loom/py/loom/target/arch/amd/xdna/aie:machine",
         "//loom/py/loom/target/arch/amd/xdna/aie:schedule",
     ],
+)
+
+iree_py_test(
+    name = "array_descriptors_test",
+    srcs = [
+        "array_descriptors_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.target.arch.amd.xdna.aie2p.array_descriptors_test"],
+    main = "pytest_style_runner.py",
+    deps = [":descriptors"],
 )
 
 iree_py_test(

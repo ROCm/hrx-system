@@ -444,6 +444,7 @@ static bool loom_target_low_legality_abi_is_low(
     case LOOM_TARGET_ABI_SHADER_ENTRY_POINT:
     case LOOM_TARGET_ABI_WASM_FUNCTION:
     case LOOM_TARGET_ABI_COMMAND_PROGRAM:
+    case LOOM_TARGET_ABI_ARRAY_PROGRAM:
       return true;
     default:
       return false;

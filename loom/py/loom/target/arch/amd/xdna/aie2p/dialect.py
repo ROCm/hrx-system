@@ -32,7 +32,10 @@ aie2p_ops = Dialect(
 
 Aie2pTargetKind = EnumDef(
     "Aie2pTargetKind",
-    [EnumCase("core", 1, doc="One AIE2P compute-tile core target row.")],
+    [
+        EnumCase("core", 1, doc="One AIE2P compute-tile core target row."),
+        EnumCase("array", 2, doc="One AIE2P logical-array program target row."),
+    ],
     doc="AIE2P target row selected by aie2p.target.",
 )
 
@@ -40,8 +43,8 @@ aie2p_target = Op(
     "aie2p.target",
     group=aie2p_ops,
     doc=(
-        "AMD XDNA AIE2P compute-tile target record. The selector chooses the "
-        "owned core ISA, scheduling, allocation, and object-emission contract."
+        "AMD XDNA AIE2P target record. The selector chooses either the owned "
+        "core ISA contract or the logical-array program contract."
     ),
     traits=[SYMBOL_DEFINE],
     interfaces=[
@@ -62,7 +65,7 @@ aie2p_target = Op(
     attrs=target_record_attrs(Aie2pTargetKind),
     verify="loom_target_record_verify",
     format=[TemplateParam("kind"), SymbolRef("symbol"), AttrDict()],
-    examples=["aie2p.target<core> @tile"],
+    examples=["aie2p.target<core> @tile", "aie2p.target<array> @array"],
 )
 
 ALL_AIE2P_OPS: tuple[Op, ...] = (aie2p_target,)

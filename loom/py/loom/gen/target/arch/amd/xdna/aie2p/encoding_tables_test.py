@@ -18,6 +18,8 @@ def test_outputs_contain_owned_tables() -> None:
         machine_path = Path(temp_dir) / "machine_tables.inl"
         descriptor_header_path = Path(temp_dir) / "core_descriptors.h"
         descriptor_source_path = Path(temp_dir) / "core_descriptors.c"
+        array_descriptor_header_path = Path(temp_dir) / "array_descriptors.h"
+        array_descriptor_source_path = Path(temp_dir) / "array_descriptors.c"
         assert (
             encoding_tables.main(
                 [
@@ -29,6 +31,10 @@ def test_outputs_contain_owned_tables() -> None:
                     str(descriptor_header_path),
                     "--descriptor-source-output",
                     str(descriptor_source_path),
+                    "--array-descriptor-header-output",
+                    str(array_descriptor_header_path),
+                    "--array-descriptor-source-output",
+                    str(array_descriptor_source_path),
                 ]
             )
             == 0
@@ -37,6 +43,8 @@ def test_outputs_contain_owned_tables() -> None:
         machine_contents = machine_path.read_text(encoding="utf-8")
         descriptor_header_contents = descriptor_header_path.read_text(encoding="utf-8")
         descriptor_source_contents = descriptor_source_path.read_text(encoding="utf-8")
+        array_descriptor_header_contents = array_descriptor_header_path.read_text(encoding="utf-8")
+        array_descriptor_source_contents = array_descriptor_source_path.read_text(encoding="utf-8")
 
     assert "kLoomAie2pInstructionLayouts" in encoding_contents
     assert "kLoomAie2pEncodingFieldNames" in encoding_contents
@@ -51,6 +59,9 @@ def test_outputs_contain_owned_tables() -> None:
     assert "loom_aie2p_core_descriptor_set" in descriptor_header_contents
     assert ".encoding_adapter_id = " in descriptor_source_contents
     assert ".physical_register_count = IREE_ARRAYSIZE(kAie2pCorePhysicalRegisters)" in descriptor_source_contents
+    assert "loom_aie2p_array_descriptor_set" in array_descriptor_header_contents
+    assert "amd.xdna.aie2p.array.worker" in array_descriptor_source_contents
+    assert "aie2p.array.binding_access" in array_descriptor_source_contents
 
 
 def test_check_validates_without_output() -> None:

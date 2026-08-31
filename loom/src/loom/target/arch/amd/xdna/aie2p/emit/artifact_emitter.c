@@ -11,6 +11,8 @@
 #include "loom/codegen/low/frame.h"
 #include "loom/codegen/low/function.h"
 #include "loom/ir/module.h"
+#include "loom/ops/op_defs.h"
+#include "loom/target/arch/amd/xdna/aie2p/descriptors/core_descriptors.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/bundle_plan.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/leaf_object.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/tile_image.h"
@@ -59,6 +61,27 @@ static iree_status_t loom_aie2p_tile_elf_select_function(
   return iree_ok_status();
 }
 
+static iree_status_t loom_aie2p_tile_elf_require_core_representation(
+    const loom_target_emit_request_t* request, loom_op_t* function_op) {
+  const loom_func_like_t function =
+      loom_func_like_cast(request->module, function_op);
+  const loom_string_id_t contract_id = loom_func_like_repr_contract(function);
+  const loom_low_descriptor_set_t* descriptor_set = NULL;
+  if (contract_id < request->module->strings.count) {
+    descriptor_set = loom_low_descriptor_registry_lookup(
+        request->low_descriptor_registry,
+        request->module->strings.entries[contract_id]);
+  }
+  if (descriptor_set != NULL &&
+      descriptor_set->stable_id == AIE2P_CORE_DESCRIPTOR_SET_ID) {
+    return iree_ok_status();
+  }
+  return iree_make_status(
+      IREE_STATUS_FAILED_PRECONDITION,
+      "AIE2P tile ELF emission requires an amd.xdna.aie2p.core Low "
+      "function");
+}
+
 static iree_status_t loom_aie2p_tile_elf_emit(
     const loom_target_emit_request_t* request,
     loom_target_emit_artifact_t* out_artifact) {
@@ -73,6 +96,8 @@ static iree_status_t loom_aie2p_tile_elf_emit(
   const loom_target_facts_t* function_target_facts = NULL;
   IREE_RETURN_IF_ERROR(loom_aie2p_tile_elf_select_function(
       request, &function_op, &function_target_facts));
+  IREE_RETURN_IF_ERROR(
+      loom_aie2p_tile_elf_require_core_representation(request, function_op));
 
   loom_target_compile_report_t* report = request->compile_report;
   if (report != NULL) {

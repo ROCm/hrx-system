@@ -112,6 +112,11 @@ ExportAbiKind = EnumDef(
             6,
             doc="Reusable command-program materialization ABI.",
         ),
+        EnumCase(
+            "array_program",
+            7,
+            doc="Spatial-array program materialization ABI.",
+        ),
     ],
     doc="Callable or package ABI used by an export plan.",
     c_type="loom_target_abi_kind_t",

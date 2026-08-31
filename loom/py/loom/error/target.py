@@ -1435,6 +1435,31 @@ ERR_TARGET_078 = ErrorDef(
     ),
 )
 
+# ERR_TARGET_079: Symbolic descriptor reference uses the wrong representation.
+ERR_TARGET_079 = ErrorDef(
+    domain=ErrorDomain.TARGET,
+    code=79,
+    severity=Severity.ERROR,
+    summary="Symbolic descriptor reference uses the wrong representation.",
+    message=(
+        "low function '@{function_name}' descriptor '{descriptor_key}' field "
+        "'{immediate_name}' must reference a function using representation "
+        "'{expected_contract}', but '@{symbol_name}' uses "
+        "'{actual_contract}'"
+    ),
+    params=(
+        ErrorParam("function_name", ParamKind.STRING),
+        ErrorParam("descriptor_key", ParamKind.STRING),
+        ErrorParam("immediate_name", ParamKind.STRING),
+        ErrorParam("symbol_name", ParamKind.STRING),
+        ErrorParam("actual_contract", ParamKind.STRING),
+        ErrorParam("expected_contract", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Reference a function with the representation required by the descriptor field."
+    ),
+)
+
 ALL_TARGET_ERRORS = (
     ERR_TARGET_001,
     ERR_TARGET_002,
@@ -1504,4 +1529,5 @@ ALL_TARGET_ERRORS = (
     ERR_TARGET_075,
     ERR_TARGET_076,
     ERR_TARGET_078,
+    ERR_TARGET_079,
 )
