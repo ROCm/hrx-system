@@ -10,12 +10,18 @@
 
 void loom_greedy_rewrite_driver_initialize(
     loom_module_t* module, iree_arena_allocator_t* scratch_arena,
-    loom_pass_value_fact_owner_t* value_facts,
+    loom_value_fact_table_t* fact_table,
     loom_greedy_rewrite_driver_t* out_driver) {
   memset(out_driver, 0, sizeof(*out_driver));
   out_driver->module = module;
   out_driver->scratch_arena = scratch_arena;
-  out_driver->value_facts = value_facts;
+  out_driver->fact_table = fact_table;
+}
+
+void loom_greedy_rewrite_driver_set_fact_table(
+    loom_greedy_rewrite_driver_t* driver, loom_value_fact_table_t* fact_table) {
+  IREE_ASSERT(!driver->rewriter_initialized);
+  driver->fact_table = fact_table;
 }
 
 void loom_greedy_rewrite_driver_reset(loom_greedy_rewrite_driver_t* driver) {
@@ -24,10 +30,6 @@ void loom_greedy_rewrite_driver_reset(loom_greedy_rewrite_driver_t* driver) {
     loom_rewriter_deinitialize(&driver->rewriter);
     driver->rewriter_initialized = false;
   }
-  if (driver->value_facts) {
-    loom_pass_value_fact_owner_invalidate(driver->value_facts);
-  }
-  driver->latest_facts = NULL;
   if (driver->scratch_arena) {
     iree_arena_reset(driver->scratch_arena);
   }
@@ -42,7 +44,7 @@ void loom_greedy_rewrite_driver_deinitialize(
 
 const loom_value_fact_table_t* loom_greedy_rewrite_driver_fact_table(
     const loom_greedy_rewrite_driver_t* driver) {
-  return driver ? driver->latest_facts : NULL;
+  return driver ? driver->fact_table : NULL;
 }
 
 void loom_greedy_rewrite_result_record_rewriter_flags(
@@ -68,33 +70,6 @@ void loom_greedy_rewrite_result_record_change(
   }
 }
 
-static iree_status_t loom_greedy_rewrite_enable_region_facts(
-    loom_greedy_rewrite_driver_t* driver, loom_func_like_t function,
-    loom_region_t* region, loom_op_t* parent_op,
-    const loom_greedy_rewrite_options_t* options) {
-  if (!driver->value_facts) {
-    if (options && (options->target_facts || options->seed_facts)) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "target and seed facts require a greedy rewrite value-fact owner");
-    }
-    return iree_ok_status();
-  }
-
-  loom_value_fact_table_t* facts = NULL;
-  const loom_target_facts_t* target_facts =
-      options ? options->target_facts : NULL;
-  IREE_RETURN_IF_ERROR(loom_pass_value_fact_owner_prepare(
-      driver->value_facts, driver->module,
-      loom_pass_value_fact_scope_region_for_target(function, region, parent_op,
-                                                   target_facts),
-      &facts));
-  driver->latest_facts = facts;
-  return loom_rewriter_enable_region_analysis_with_seed_facts(
-      &driver->rewriter, function, region, parent_op, facts,
-      options ? options->seed_facts : NULL);
-}
-
 iree_status_t loom_greedy_rewrite_run_region(
     loom_greedy_rewrite_driver_t* driver, loom_func_like_t function,
     loom_region_t* region, loom_op_t* parent_op,
@@ -113,13 +88,10 @@ iree_status_t loom_greedy_rewrite_run_region(
       &driver->rewriter, driver->module, driver->scratch_arena);
   if (iree_status_is_ok(status)) {
     driver->rewriter_initialized = true;
+    loom_rewriter_attach_value_facts(&driver->rewriter, driver->fact_table);
     if (options) {
       driver->rewriter.materialize_constant = options->materialize_constant;
     }
-  }
-  if (iree_status_is_ok(status)) {
-    status = loom_greedy_rewrite_enable_region_facts(driver, function, region,
-                                                     parent_op, options);
   }
   bool prepare_region_called = false;
   if (iree_status_is_ok(status) && callbacks && callbacks->prepare_region) {
@@ -244,7 +216,8 @@ iree_status_t loom_greedy_rewrite(iree_arena_allocator_t* arena,
                                   iree_host_size_t pattern_count,
                                   const loom_rewrite_config_t* config) {
   loom_greedy_rewrite_driver_t driver;
-  loom_greedy_rewrite_driver_initialize(module, arena, NULL, &driver);
+  loom_greedy_rewrite_driver_initialize(module, arena, /*fact_table=*/NULL,
+                                        &driver);
   loom_greedy_rewrite_options_t options = {
       .max_iterations = config ? config->max_iterations : 0,
   };

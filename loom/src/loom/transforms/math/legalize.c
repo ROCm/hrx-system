@@ -17,6 +17,7 @@
 #include "loom/ops/vector/ops.h"
 #include "loom/pass/pipeline.h"
 #include "loom/pass/registry.h"
+#include "loom/pass/value_facts.h"
 #include "loom/rewrite/greedy.h"
 #include "loom/target/math_policy.h"
 #include "loom/target/pass_environment.h"
@@ -591,12 +592,16 @@ iree_status_t loom_math_legalize_run(loom_pass_t* pass, loom_module_t* module,
       .policy = policy,
       .compile_report = compile_report,
   };
+  loom_value_fact_table_t* fact_table = NULL;
+  IREE_RETURN_IF_ERROR(loom_pass_value_facts_acquire(
+      pass, module,
+      loom_pass_value_fact_scope_function_for_target(function, target_facts),
+      &fact_table));
   loom_greedy_rewrite_driver_t driver;
-  loom_greedy_rewrite_driver_initialize(module, pass->arena, pass->value_facts,
+  loom_greedy_rewrite_driver_initialize(module, pass->arena, fact_table,
                                         &driver);
   loom_greedy_rewrite_options_t rewrite_options = {
       .max_iterations = options ? options->max_iterations : 0,
-      .target_facts = target_facts,
   };
   loom_greedy_rewrite_callbacks_t callbacks = {
       .user_data = &state,
@@ -608,6 +613,7 @@ iree_status_t loom_math_legalize_run(loom_pass_t* pass, loom_module_t* module,
       &rewrite_options, &callbacks, &result);
   loom_greedy_rewrite_driver_deinitialize(&driver);
   if (!iree_status_is_ok(status)) {
+    loom_pass_value_fact_owner_invalidate(pass->value_facts);
     return status;
   }
 

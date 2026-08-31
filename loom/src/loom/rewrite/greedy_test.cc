@@ -15,6 +15,7 @@
 #include "loom/ir/module.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/test/ops.h"
+#include "loom/pass/value_facts.h"
 #include "loom/target/facts.h"
 #include "loom/target/types.h"
 
@@ -221,22 +222,25 @@ TEST_F(GreedyRewriteTest, ExplicitTargetFactsSetAnalysisScope) {
   iree_arena_initialize(&block_pool_, &arena);
   loom_pass_value_fact_owner_t fact_owner;
   loom_pass_value_fact_owner_initialize(&block_pool_, &fact_owner);
+  loom_value_fact_table_t* fact_table = nullptr;
+  IREE_ASSERT_OK(loom_pass_value_fact_owner_acquire(
+      &fact_owner, module_,
+      loom_pass_value_fact_scope_function_for_target(function_, &target_facts),
+      &fact_table));
   loom_greedy_rewrite_driver_t driver;
-  loom_greedy_rewrite_driver_initialize(module_, &arena, &fact_owner, &driver);
+  loom_greedy_rewrite_driver_initialize(module_, &arena, fact_table, &driver);
 
   const loom_greedy_rewrite_options_t options = {
       /*.max_iterations=*/{},
-      /*.target_facts=*/&target_facts,
-      /*.seed_facts=*/NULL,
   };
   IREE_ASSERT_OK(loom_greedy_rewrite_run_region(
       &driver, function_, loom_func_like_body(function_), function_.op,
       &options, /*callbacks=*/NULL, /*out_result=*/NULL));
 
-  const loom_value_fact_table_t* latest_facts =
+  const loom_value_fact_table_t* maintained_facts =
       loom_greedy_rewrite_driver_fact_table(&driver);
-  ASSERT_NE(latest_facts, nullptr);
-  EXPECT_EQ(latest_facts->context.target_facts, &target_facts);
+  ASSERT_NE(maintained_facts, nullptr);
+  EXPECT_EQ(maintained_facts->context.target_facts, &target_facts);
 
   loom_greedy_rewrite_driver_deinitialize(&driver);
   loom_pass_value_fact_owner_deinitialize(&fact_owner);

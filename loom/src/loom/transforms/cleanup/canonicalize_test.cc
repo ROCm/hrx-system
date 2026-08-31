@@ -547,6 +547,121 @@ TEST_F(CanonicalizeTest, FixedPointConvergence) {
   EXPECT_EQ(constant_value(loom_op_operands(use)[0]), 42);
 }
 
+TEST_F(CanonicalizeTest, DriverReusesFactsAcrossNoopRuns) {
+  loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  loom_op_t* constant = NULL;
+  IREE_ASSERT_OK(loom_test_constant_build(&builder_, loom_attr_i64(42), i32,
+                                          LOOM_LOCATION_UNKNOWN, &constant));
+  loom_value_id_t value = loom_test_constant_result(constant);
+  loom_op_t* use = NULL;
+  IREE_ASSERT_OK(
+      loom_test_use_build(&builder_, &value, 1, LOOM_LOCATION_UNKNOWN, &use));
+
+  iree_arena_allocator_t pass_arena;
+  iree_arena_initialize(&block_pool_, &pass_arena);
+  loom_pass_value_fact_owner_t value_facts = {};
+  loom_pass_value_fact_owner_initialize(&block_pool_, &value_facts);
+  loom_pass_value_fact_lifecycle_counts_t counts = {};
+  value_facts.lifecycle_counts = &counts;
+  loom_canonicalizer_t canonicalizer;
+  IREE_ASSERT_OK(loom_canonicalizer_initialize(module_, &pass_arena,
+                                               &value_facts, &canonicalizer));
+
+  loom_canonicalizer_result_t result;
+  IREE_ASSERT_OK(loom_canonicalizer_run_function(&canonicalizer, func_like_,
+                                                 NULL, &result));
+  EXPECT_FALSE(result.changed);
+  IREE_ASSERT_OK(loom_canonicalizer_run_function(&canonicalizer, func_like_,
+                                                 NULL, &result));
+  EXPECT_FALSE(result.changed);
+
+  EXPECT_EQ(counts.acquisition_count, 2u);
+  EXPECT_EQ(counts.cache_hit_count, 1u);
+  EXPECT_EQ(counts.recomputation_count, 1u);
+  EXPECT_EQ(counts.preparation_count, 0u);
+  EXPECT_EQ(counts.invalidation_count, 0u);
+  EXPECT_EQ(counts.scope_clear_count, 0u);
+  EXPECT_GT(counts.computed_value_count, 0u);
+  EXPECT_EQ(value_facts.active_scope.kind, LOOM_PASS_VALUE_FACT_SCOPE_FUNCTION);
+
+  loom_canonicalizer_deinitialize(&canonicalizer);
+  EXPECT_EQ(value_facts.active_scope.kind, LOOM_PASS_VALUE_FACT_SCOPE_FUNCTION);
+  value_facts.lifecycle_counts = nullptr;
+  loom_pass_value_fact_owner_deinitialize(&value_facts);
+  iree_arena_deinitialize(&pass_arena);
+}
+
+TEST_F(CanonicalizeTest, DriverFactsMatchFreshRecomputationAfterChanges) {
+  loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+
+  loom_op_t* const_forty = NULL;
+  IREE_ASSERT_OK(loom_test_constant_build(&builder_, loom_attr_i64(40), i32,
+                                          LOOM_LOCATION_UNKNOWN, &const_forty));
+  loom_value_id_t forty = loom_test_constant_result(const_forty);
+  loom_op_t* keep_forty = NULL;
+  IREE_ASSERT_OK(loom_test_use_build(&builder_, &forty, 1,
+                                     LOOM_LOCATION_UNKNOWN, &keep_forty));
+
+  loom_op_t* const_two = NULL;
+  IREE_ASSERT_OK(loom_test_constant_build(&builder_, loom_attr_i64(2), i32,
+                                          LOOM_LOCATION_UNKNOWN, &const_two));
+  loom_value_id_t two = loom_test_constant_result(const_two);
+  loom_op_t* keep_two = NULL;
+  IREE_ASSERT_OK(loom_test_use_build(&builder_, &two, 1, LOOM_LOCATION_UNKNOWN,
+                                     &keep_two));
+
+  loom_op_t* addi = NULL;
+  IREE_ASSERT_OK(loom_test_addi_build(&builder_, forty, two, i32,
+                                      LOOM_LOCATION_UNKNOWN, &addi));
+  loom_value_id_t sum = loom_test_addi_result(addi);
+  loom_op_t* use_sum = NULL;
+  IREE_ASSERT_OK(
+      loom_test_use_build(&builder_, &sum, 1, LOOM_LOCATION_UNKNOWN, &use_sum));
+
+  iree_arena_allocator_t pass_arena;
+  iree_arena_initialize(&block_pool_, &pass_arena);
+  loom_pass_value_fact_owner_t value_facts = {};
+  loom_pass_value_fact_owner_initialize(&block_pool_, &value_facts);
+  loom_canonicalizer_t canonicalizer;
+  IREE_ASSERT_OK(loom_canonicalizer_initialize(module_, &pass_arena,
+                                               &value_facts, &canonicalizer));
+  loom_canonicalizer_result_t result;
+  IREE_ASSERT_OK(loom_canonicalizer_run_function(&canonicalizer, func_like_,
+                                                 NULL, &result));
+  EXPECT_TRUE(result.changed);
+
+  const loom_value_fact_table_t* incremental_facts =
+      loom_canonicalizer_fact_table(&canonicalizer);
+  ASSERT_NE(incremental_facts, nullptr);
+  loom_value_id_t folded_sum = loom_op_operands(use_sum)[0];
+  EXPECT_NE(folded_sum, sum);
+  loom_value_facts_t incremental_sum_facts =
+      loom_value_fact_table_lookup(incremental_facts, folded_sum);
+  EXPECT_TRUE(loom_value_facts_is_exact(incremental_sum_facts));
+  EXPECT_EQ(incremental_sum_facts.range_lo, 42);
+
+  loom_pass_value_fact_owner_t fresh_owner = {};
+  loom_pass_value_fact_owner_initialize(&block_pool_, &fresh_owner);
+  loom_value_fact_table_t* fresh_facts = nullptr;
+  IREE_ASSERT_OK(loom_pass_value_fact_owner_acquire(
+      &fresh_owner, module_, loom_pass_value_fact_scope_function(func_like_),
+      &fresh_facts));
+  ASSERT_NE(fresh_facts, nullptr);
+  const loom_value_id_t live_values[] = {forty, two, folded_sum};
+  for (loom_value_id_t live_value : live_values) {
+    loom_type_t type = loom_module_value_type(module_, live_value);
+    EXPECT_TRUE(loom_value_fact_table_facts_equal_for_type(
+        module_, type, incremental_facts,
+        loom_value_fact_table_lookup(incremental_facts, live_value),
+        fresh_facts, loom_value_fact_table_lookup(fresh_facts, live_value)));
+  }
+
+  loom_pass_value_fact_owner_deinitialize(&fresh_owner);
+  loom_canonicalizer_deinitialize(&canonicalizer);
+  loom_pass_value_fact_owner_deinitialize(&value_facts);
+  iree_arena_deinitialize(&pass_arena);
+}
+
 TEST_F(CanonicalizeTest, DriverAcceptsSeedFacts) {
   loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
 
@@ -663,6 +778,8 @@ TEST_F(CanonicalizeTest, DriverPreservesExplicitTargetFactsAcrossSideRegions) {
   iree_arena_initialize(&block_pool_, &pass_arena);
   loom_pass_value_fact_owner_t value_facts = {};
   loom_pass_value_fact_owner_initialize(&block_pool_, &value_facts);
+  loom_pass_value_fact_lifecycle_counts_t counts = {};
+  value_facts.lifecycle_counts = &counts;
   loom_canonicalizer_t canonicalizer;
   IREE_ASSERT_OK(loom_canonicalizer_initialize(module_, &pass_arena,
                                                &value_facts, &canonicalizer));
@@ -679,8 +796,14 @@ TEST_F(CanonicalizeTest, DriverPreservesExplicitTargetFactsAcrossSideRegions) {
       loom_canonicalizer_fact_table(&canonicalizer);
   ASSERT_NE(final_facts, nullptr);
   EXPECT_EQ(final_facts->context.target_facts, &target_facts);
+  EXPECT_EQ(counts.acquisition_count, 0u);
+  EXPECT_EQ(counts.recomputation_count, 0u);
+  EXPECT_EQ(counts.preparation_count, 1u);
+  EXPECT_EQ(counts.invalidation_count, 0u);
+  EXPECT_EQ(counts.scope_clear_count, 0u);
 
   loom_canonicalizer_deinitialize(&canonicalizer);
+  value_facts.lifecycle_counts = nullptr;
   loom_pass_value_fact_owner_deinitialize(&value_facts);
   iree_arena_deinitialize(&pass_arena);
   iree_arena_deinitialize(&seed_arena);

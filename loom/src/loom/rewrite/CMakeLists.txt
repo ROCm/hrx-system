@@ -38,7 +38,6 @@ loom_cc_library(
     iree::base
     iree::base::internal::arena
     loom::ir
-    loom::pass::value_facts
     loom::util::fact_table
   PUBLIC
 )
@@ -56,6 +55,7 @@ loom_cc_test(
     loom::ir
     loom::ops::op_defs
     loom::ops::test
+    loom::pass::value_facts
     loom::target::facts
     loom::target::types
 )

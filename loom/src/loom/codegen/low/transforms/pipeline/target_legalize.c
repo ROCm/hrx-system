@@ -1279,7 +1279,7 @@ static iree_status_t loom_low_target_legalize_rewrite_op(
     return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(loom_low_target_legalize_check_assume_predicates(
-      state, op, driver->latest_facts));
+      state, op, driver->fact_table));
   if (state->preflight_error_count != 0) {
     return iree_ok_status();
   }
@@ -1299,7 +1299,7 @@ static iree_status_t loom_low_target_legalize_rewrite_op(
                         : iree_string_view_empty();
   const uint32_t source_op_kind = op->kind;
 
-  state->legalization_context.fact_table = driver->latest_facts;
+  state->legalization_context.fact_table = driver->fact_table;
   state->legalization_context.rewriter = &driver->rewriter;
   state->legalization_context.arena = driver->scratch_arena;
   loom_target_contract_query_result_t query_result =
@@ -1509,6 +1509,29 @@ static iree_status_t loom_low_target_legalize_acquire_final_facts(
   return iree_ok_status();
 }
 
+static iree_status_t loom_low_target_legalize_prepare_rewrite_facts(
+    loom_module_t* module, const loom_low_source_selection_t* selection,
+    const loom_value_fact_table_t* seed_facts,
+    loom_pass_value_fact_owner_t* rewrite_value_facts,
+    loom_value_fact_table_t** out_rewrite_fact_table) {
+  iree_status_t status = loom_pass_value_fact_owner_prepare(
+      rewrite_value_facts, module,
+      loom_pass_value_fact_scope_region_for_target(
+          selection->func, loom_func_like_body(selection->func),
+          selection->func.op, selection->target_facts),
+      out_rewrite_fact_table);
+  if (iree_status_is_ok(status) && seed_facts) {
+    status = loom_value_fact_table_clone_defined_facts(*out_rewrite_fact_table,
+                                                       seed_facts, module);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_value_fact_table_compute_region(
+        *out_rewrite_fact_table, module, selection->func,
+        loom_func_like_body(selection->func), selection->func.op);
+  }
+  return status;
+}
+
 static iree_status_t loom_low_target_legalize_function(
     loom_pass_t* pass, loom_module_t* module,
     const loom_low_target_legalize_pass_state_t* pass_state,
@@ -1563,11 +1586,18 @@ static iree_status_t loom_low_target_legalize_function(
   loom_pass_value_fact_owner_t rewrite_value_facts = {0};
   loom_pass_value_fact_owner_initialize(module->arena.block_pool,
                                         &rewrite_value_facts);
+  loom_value_fact_table_t* rewrite_fact_table = NULL;
+  iree_status_t status = loom_low_target_legalize_prepare_rewrite_facts(
+      module, selection, seed_facts, &rewrite_value_facts, &rewrite_fact_table);
+  if (!iree_status_is_ok(status)) {
+    loom_pass_value_fact_owner_deinitialize(&rewrite_value_facts);
+    return status;
+  }
   iree_arena_allocator_t rewrite_arena;
   iree_arena_initialize(module->arena.block_pool, &rewrite_arena);
   loom_greedy_rewrite_driver_t rewrite_driver;
   loom_greedy_rewrite_driver_initialize(module, &rewrite_arena,
-                                        &rewrite_value_facts, &rewrite_driver);
+                                        rewrite_fact_table, &rewrite_driver);
 
   state.legalization_context = (loom_target_legalization_context_t){
       .pass = pass,
@@ -1585,8 +1615,6 @@ static iree_status_t loom_low_target_legalize_function(
   };
   const loom_greedy_rewrite_options_t rewrite_options = {
       .max_iterations = pass_state->max_iterations,
-      .target_facts = selection->target_facts,
-      .seed_facts = seed_facts,
   };
   const loom_greedy_rewrite_callbacks_t rewrite_callbacks = {
       .user_data = &state,
@@ -1594,10 +1622,10 @@ static iree_status_t loom_low_target_legalize_function(
       .changed = loom_low_target_legalize_changed,
   };
   loom_greedy_rewrite_result_t rewrite_result = {0};
-  iree_status_t status = loom_greedy_rewrite_run_region(
-      &rewrite_driver, selection->func, loom_func_like_body(selection->func),
-      selection->func.op, &rewrite_options, &rewrite_callbacks,
-      &rewrite_result);
+  status = loom_greedy_rewrite_run_region(&rewrite_driver, selection->func,
+                                          loom_func_like_body(selection->func),
+                                          selection->func.op, &rewrite_options,
+                                          &rewrite_callbacks, &rewrite_result);
   if (iree_status_is_ok(status) && rewrite_result.changed) {
     loom_pass_mark_changed(pass);
     if (pass->value_facts != NULL) {
