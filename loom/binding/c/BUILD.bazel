@@ -82,6 +82,10 @@ LOOMC_TARGET_CMD_PUBLIC_HDRS = [
     "include/loomc/target/cmd/program.h",
 ]
 
+LOOMC_TARGET_KERNEL_PUBLIC_HDRS = [
+    "include/loomc/target/kernel.h",
+]
+
 LOOMC_TARGET_VM_PUBLIC_HDRS = [
     "include/loomc/target/vm.h",
     "include/loomc/target/vm/base.h",
@@ -117,6 +121,7 @@ exports_files(
     LOOMC_TARGET_AMDGPU_PUBLIC_HDRS +
     LOOMC_TARGET_CMD_PUBLIC_HDRS +
     LOOMC_TARGET_IREE_HAL_PUBLIC_HDRS +
+    LOOMC_TARGET_KERNEL_PUBLIC_HDRS +
     LOOMC_TARGET_LLVMIR_PUBLIC_HDRS +
     LOOMC_TARGET_SPIRV_PUBLIC_HDRS +
     LOOMC_TARGET_SPIRV_IREE_HAL_PUBLIC_HDRS +

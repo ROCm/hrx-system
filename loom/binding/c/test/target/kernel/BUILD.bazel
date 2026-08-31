@@ -1,0 +1,49 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_test",
+    "loom_config_compatible_with",
+)
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+_AMDGPU_ARTIFACTS_COMPATIBLE_WITH = loom_config_compatible_with([
+    "//loom/config/target:amdgpu_artifacts",
+])
+
+iree_c_embed_data(
+    name = "kernel_product_source",
+    testonly = True,
+    srcs = ["kernel_product.loom"],
+    c_file_output = "kernel_product_testdata.c",
+    flatten = True,
+    h_file_output = "kernel_product_testdata.h",
+    identifier = "loomc_kernel_product_testdata",
+)
+
+loom_cc_test(
+    name = "kernel_test",
+    srcs = ["kernel_test.cc"],
+    target_compatible_with = _AMDGPU_ARTIFACTS_COMPATIBLE_WITH,
+    deps = [
+        ":kernel_product_source",
+        "//loom/binding/c:loomc",
+        "//loom/binding/c/target/amdgpu",
+        "//loom/binding/c/target/kernel",
+        "//loom/binding/c/target/vm",
+        "//loom/binding/c/test:test_util",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
