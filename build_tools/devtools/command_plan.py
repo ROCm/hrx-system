@@ -56,6 +56,7 @@ class CommandStep:
     cwd: Path
     env: dict[str, str] | None = None
     label: str | None = None
+    announce: bool = False
 
     def describe(self) -> str:
         pieces = []
@@ -97,9 +98,11 @@ class CommandStep:
 
     def run(self, verbose: bool = False) -> int:
         argv = _resolve_subprocess_argv(self.argv, self.env)
-        if verbose:
+        if verbose or self.announce:
             print(f"dev.py: {self.label or quote_command(argv)}")
+        if verbose:
             print("  " + quote_command(argv))
+        if verbose or self.announce:
             sys.stdout.flush()
         return subprocess.run(argv, cwd=self.cwd, env=self.env).returncode
 

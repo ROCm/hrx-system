@@ -624,21 +624,40 @@ def build_plan(
     backend_args: list[str],
     env: dict[str, str] | None = None,
 ) -> CommandPlan:
+    requested_build_dir = build_dir(configured_build_dir)
+    cmake_args = build_args(
+        backend_args,
+        configured_build_dir=configured_build_dir,
+    )
+    target_names = [
+        cmake_args[index + 1]
+        for index, argument in enumerate(cmake_args[:-1])
+        if argument == "--target"
+    ]
+    target_description = ", ".join(target_names) if target_names else "default"
+    configured_generator = _configured_cmake_generator(requested_build_dir)
+    generator_description = (
+        configured_generator.describe()
+        if configured_generator is not None
+        else "unconfigured"
+    )
     return CommandPlan(
         [
             CommandStep(
                 [
                     tool_env.tool("cmake"),
                     "--build",
-                    str(build_dir(configured_build_dir)),
-                    *build_args(
-                        backend_args,
-                        configured_build_dir=configured_build_dir,
-                    ),
+                    str(requested_build_dir),
+                    *cmake_args,
                 ],
                 cwd=REPO_ROOT,
                 env=tool_env.path_env() if env is None else env,
-                label="cmake build",
+                label=(
+                    f"cmake build: targets={target_description}; "
+                    f"generator={generator_description}; "
+                    f"tree={requested_build_dir}"
+                ),
+                announce=True,
             )
         ]
     )
