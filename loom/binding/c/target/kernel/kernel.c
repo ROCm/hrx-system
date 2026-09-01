@@ -128,9 +128,11 @@ static loomc_status_t loomc_kernel_product_prepare_compile_roots(
   iree_host_size_t storage_size = 0;
   LOOMC_RETURN_IF_ERROR(loomc_status_from_iree(IREE_STRUCT_LAYOUT(
       0, &storage_size,
-      IREE_STRUCT_FIELD(root_count, loom_symbol_id_t, &symbol_offset),
-      IREE_STRUCT_FIELD(root_count, loomc_request_root_ordinal_t,
-                        &launch_offset))));
+      IREE_STRUCT_FIELD_ALIGNED(root_count, loom_symbol_id_t,
+                                iree_alignof(loom_symbol_id_t), &symbol_offset),
+      IREE_STRUCT_FIELD_ALIGNED(root_count, loomc_request_root_ordinal_t,
+                                iree_alignof(loomc_request_root_ordinal_t),
+                                &launch_offset))));
   uint8_t* storage = NULL;
   LOOMC_RETURN_IF_ERROR(loomc_status_from_iree(
       iree_arena_allocate(arena, storage_size, (void**)&storage)));
