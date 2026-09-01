@@ -80,7 +80,23 @@ class LoomBinarySizeTest(unittest.TestCase):
         self.assertIn("//loom/src/loom/tools/loom-compile:loom-compile", commands[0])
         self.assertIn("//loom/src/loom/tools/loom-check:loom-check", commands[0])
         self.assertEqual(
+            [
+                arg
+                for arg in commands[0]
+                if arg.startswith("--//runtime/config/hal:drivers=")
+            ][-1],
+            "--//runtime/config/hal:drivers=task,vulkan",
+        )
+        self.assertEqual(
             commands[1].count("//loom/binding/c/example:emit_amdgpu_offline"), 1
+        )
+        self.assertEqual(
+            [
+                arg
+                for arg in commands[1]
+                if arg.startswith("--//runtime/config/hal:drivers=")
+            ][-1],
+            "--//runtime/config/hal:drivers=task",
         )
         self.assertIn("--//loom/config/target/amdgpu:targets=gfx1151", commands[1])
 
