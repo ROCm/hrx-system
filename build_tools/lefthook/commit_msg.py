@@ -5,13 +5,12 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Validates Git commit message text."""
+"""Formats and validates Git commit message text."""
 
 from __future__ import annotations
 
 import argparse
 import re
-import shlex
 import subprocess
 import sys
 import textwrap
@@ -35,6 +34,7 @@ SUBJECT_TAG_PATTERN = re.compile(
 )
 AUTOSQUASH_SUBJECT_PREFIX_PATTERN = re.compile(r"^(?P<prefix>fixup|squash|amend)!\s+")
 CODE_FENCE_PATTERN = re.compile(r"^\s*(```|~~~)")
+INLINE_CODE_SPAN_PATTERN = re.compile(r"(?P<delimiter>`+)(?P<body>.*?)(?P=delimiter)")
 INDENTED_CODE_PATTERN = re.compile(r"^(?: {4,}|\t)")
 LIST_ITEM_PATTERN = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
 MARKDOWN_TABLE_PATTERN = re.compile(r"^\s*\|.*\|\s*$")
@@ -133,7 +133,6 @@ class CommitMessageDiagnostic:
     text: str
     hint: str = ""
     kind: str = "policy"
-    autofixable: bool = False
 
 
 def staged_commit_paths() -> list[str]:
@@ -247,6 +246,21 @@ def is_markdown_table_line(line: str) -> bool:
     return stripped.startswith("|") and stripped.endswith("|")
 
 
+def has_overlong_inline_code_token(line: str) -> bool:
+    """Returns whether an inline code span makes a word unwrappable."""
+
+    for match in INLINE_CODE_SPAN_PATTERN.finditer(line):
+        token_start = match.start()
+        while token_start > 0 and not line[token_start - 1].isspace():
+            token_start -= 1
+        token_end = match.end()
+        while token_end < len(line) and not line[token_end].isspace():
+            token_end += 1
+        if token_end - token_start > LINE_LENGTH_LIMIT:
+            return True
+    return False
+
+
 def is_line_length_exempt(line_number: int, line: str, trailer_lines: set[int]) -> bool:
     """Returns whether line length should be preserved instead of checked."""
 
@@ -255,6 +269,7 @@ def is_line_length_exempt(line_number: int, line: str, trailer_lines: set[int]) 
         or INDENTED_CODE_PATTERN.match(line) is not None
         or is_markdown_table_line(line)
         or URL_PATTERN.search(line) is not None
+        or has_overlong_inline_code_token(line)
     )
 
 
@@ -269,11 +284,73 @@ def is_reflowable_body_line(
         return False
     if is_line_length_exempt(line_number, line, trailer_lines):
         return False
+    if line[0].isspace():
+        return False
     if LIST_ITEM_PATTERN.match(line):
         return False
     if line.lstrip().startswith(">"):
         return False
     return True
+
+
+def protect_inline_code_whitespace(text: str) -> tuple[str, dict[str, str]]:
+    """Makes whitespace inside inline code spans indivisible while wrapping."""
+
+    used_characters = set(text)
+    whitespace_sentinels: dict[str, str] = {}
+    sentinel_replacements: dict[str, str] = {}
+    next_sentinel_codepoint = 0xE000
+
+    def sentinel_for(whitespace: str) -> str:
+        nonlocal next_sentinel_codepoint
+        sentinel = whitespace_sentinels.get(whitespace)
+        if sentinel is not None:
+            return sentinel
+        while (
+            next_sentinel_codepoint <= 0xF8FF
+            and chr(next_sentinel_codepoint) in used_characters
+        ):
+            next_sentinel_codepoint += 1
+        if next_sentinel_codepoint > 0xF8FF:
+            raise ValueError("commit message exhausts inline-code sentinels")
+        sentinel = chr(next_sentinel_codepoint)
+        next_sentinel_codepoint += 1
+        whitespace_sentinels[whitespace] = sentinel
+        sentinel_replacements[sentinel] = whitespace
+        return sentinel
+
+    protected_parts: list[str] = []
+    previous_end = 0
+    for match in INLINE_CODE_SPAN_PATTERN.finditer(text):
+        protected_parts.append(text[previous_end : match.start()])
+        protected_parts.append(
+            "".join(
+                sentinel_for(character) if character.isspace() else character
+                for character in match.group(0)
+            )
+        )
+        previous_end = match.end()
+    protected_parts.append(text[previous_end:])
+    return "".join(protected_parts), sentinel_replacements
+
+
+def wrap_prose_paragraph(paragraph_lines: Sequence[str]) -> list[str]:
+    """Wraps one prose paragraph without splitting inline code spans."""
+
+    paragraph_text = " ".join(line.strip() for line in paragraph_lines)
+    protected_text, sentinel_replacements = protect_inline_code_whitespace(
+        paragraph_text
+    )
+    wrapped_lines = textwrap.wrap(
+        protected_text,
+        width=LINE_LENGTH_LIMIT,
+        break_long_words=False,
+        break_on_hyphens=False,
+    ) or [""]
+    if not sentinel_replacements:
+        return wrapped_lines
+    translation = str.maketrans(sentinel_replacements)
+    return [line.translate(translation) for line in wrapped_lines]
 
 
 def reflow_commit_message_text(message_text: str) -> str:
@@ -292,16 +369,7 @@ def reflow_commit_message_text(message_text: str) -> str:
     def flush_paragraph() -> None:
         if not paragraph_lines:
             return
-        paragraph_text = " ".join(line.strip() for line in paragraph_lines)
-        output_lines.extend(
-            textwrap.wrap(
-                paragraph_text,
-                width=LINE_LENGTH_LIMIT,
-                break_long_words=False,
-                break_on_hyphens=False,
-            )
-            or [""]
-        )
+        output_lines.extend(wrap_prose_paragraph(paragraph_lines))
         paragraph_lines.clear()
 
     for line_number, line in text_lines:
@@ -411,17 +479,6 @@ def validate_line_lengths(
         ):
             continue
         if len(line) > LINE_LENGTH_LIMIT:
-            is_autofixable = is_reflowable_body_line(line_number, line, trailer_lines)
-            hint = (
-                "Preserve the message content and reflow prose instead of "
-                "shortening, fragmenting, or rewriting it."
-            )
-            if not is_autofixable:
-                hint = (
-                    "Wrap this line manually. The prose reflow suggestion "
-                    "preserves structured lines such as lists, examples, and "
-                    "tables."
-                )
             diagnostics.append(
                 CommitMessageDiagnostic(
                     line_number=line_number,
@@ -430,9 +487,11 @@ def validate_line_lengths(
                         f"wrap prose to {LINE_LENGTH_LIMIT} columns"
                     ),
                     text=line,
-                    hint=hint,
+                    hint=(
+                        "Wrap this structured or unbreakable line manually; "
+                        "ordinary prose is reflowed automatically."
+                    ),
                     kind="line-length",
-                    autofixable=is_autofixable,
                 )
             )
     return diagnostics
@@ -502,18 +561,15 @@ def validate_commit_message_file(
     )
 
 
-def write_reflow_suggestion(message_file: Path, message_text: str) -> Path | None:
-    """Writes a reflowed message suggestion when it changes the user text."""
+def format_commit_message_file(message_file: Path) -> bool:
+    """Canonicalizes reflowable prose in a commit message file."""
 
+    message_text = message_file.read_text(encoding="utf-8")
     reflowed_text = reflow_commit_message_text(message_text)
     if reflowed_text == commit_message_user_text(message_text):
-        return None
-
-    suggestion_directory = REPO_ROOT / ".tmp" / "commit-msg"
-    suggestion_directory.mkdir(parents=True, exist_ok=True)
-    suggestion_path = suggestion_directory / f"{message_file.name}.reflowed"
-    suggestion_path.write_text(reflowed_text, encoding="utf-8")
-    return suggestion_path
+        return False
+    message_file.write_text(reflowed_text, encoding="utf-8")
+    return True
 
 
 def parse_arguments(argv: list[str]) -> argparse.Namespace:
@@ -541,6 +597,12 @@ def main(argv: list[str]) -> int:
         print(reflow_commit_message_text(message_text), end="")
         return 0
 
+    if format_commit_message_file(args.message_file):
+        print(
+            f"[fix] Reflowed commit-message prose to {LINE_LENGTH_LIMIT} columns.",
+            file=sys.stderr,
+        )
+
     diagnostics = validate_commit_message_file(
         args.message_file,
         changed_paths=staged_commit_paths(),
@@ -552,26 +614,10 @@ def main(argv: list[str]) -> int:
     if any(diagnostic.kind == "line-length" for diagnostic in diagnostics):
         print("", file=sys.stderr)
         print(
-            f"commit message body lines must be wrapped to {LINE_LENGTH_LIMIT} columns.",
+            "Structured and unbreakable commit-message body lines must be "
+            f"wrapped to {LINE_LENGTH_LIMIT} columns.",
             file=sys.stderr,
         )
-        print(
-            "Preserve the message content and reflow the prose instead of "
-            "shortening, fragmenting, or rewriting it.",
-            file=sys.stderr,
-        )
-        print("", file=sys.stderr)
-        print("Example:", file=sys.stderr)
-        print(
-            "  Before: This is a useful commit-message paragraph that is too "
-            "long for the Git log body width.",
-            file=sys.stderr,
-        )
-        print(
-            "  After:  This is a useful commit-message paragraph that is too",
-            file=sys.stderr,
-        )
-        print("          long for the Git log body width.", file=sys.stderr)
         print("", file=sys.stderr)
 
     for diagnostic in diagnostics:
@@ -582,37 +628,6 @@ def main(argv: list[str]) -> int:
         )
         if diagnostic.hint:
             print(f"    hint: {diagnostic.hint}", file=sys.stderr)
-
-    if any(diagnostic.kind == "line-length" for diagnostic in diagnostics):
-        suggestion_path = write_reflow_suggestion(args.message_file, message_text)
-        if suggestion_path is not None:
-            relative_suggestion_path = suggestion_path.relative_to(REPO_ROOT)
-            print("", file=sys.stderr)
-            print(
-                f"Suggested prose-only reflow written to {relative_suggestion_path}.",
-                file=sys.stderr,
-            )
-            print("Retry a normal commit with:", file=sys.stderr)
-            print(
-                f"  git commit -F {shlex.quote(str(relative_suggestion_path))}",
-                file=sys.stderr,
-            )
-            if any(
-                diagnostic.kind == "line-length" and not diagnostic.autofixable
-                for diagnostic in diagnostics
-            ):
-                print(
-                    "Some long lines were preserved because they look "
-                    "structured; wrap those diagnostics manually before "
-                    "retrying.",
-                    file=sys.stderr,
-                )
-            print(
-                "For amend, squash, or fixup commits, rerun the same git "
-                "commit command and replace the message source with that -F "
-                "argument.",
-                file=sys.stderr,
-            )
     return 1
 
 

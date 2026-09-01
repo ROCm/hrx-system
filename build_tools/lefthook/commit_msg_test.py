@@ -7,10 +7,12 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 COMMIT_MSG_PATH = Path(__file__).with_name("commit_msg.py")
 COMMIT_MSG_SPEC = importlib.util.spec_from_file_location("commit_msg", COMMIT_MSG_PATH)
@@ -182,7 +184,6 @@ class CommitMessageTest(unittest.TestCase):
                 "wrap prose to 72 columns"
             ],
         )
-        self.assertEqual([diagnostic.autofixable for diagnostic in diagnostics], [True])
 
     def test_allows_long_lines_inside_code_blocks(self):
         long_line = "x" * 120
@@ -229,9 +230,6 @@ class CommitMessageTest(unittest.TestCase):
                 "wrap prose to 72 columns"
             ],
         )
-        self.assertEqual(
-            [diagnostic.autofixable for diagnostic in diagnostics], [False]
-        )
 
     def test_reflows_ordinary_body_paragraphs(self):
         self.assertEqual(
@@ -254,6 +252,7 @@ class CommitMessageTest(unittest.TestCase):
         )
         long_url = "See https://example.com/" + "x" * 90
         long_code = "    git commit -m " + "x" * 90
+        indented_continuation = "  " + "continued list detail " * 5
         long_trailer = "Change-Id: " + "x" * 90
         message = (
             "[Infra] Subject\n"
@@ -264,39 +263,87 @@ class CommitMessageTest(unittest.TestCase):
             f"{'x' * 90}\n"
             "```\n"
             f"{long_code}\n"
+            f"{indented_continuation}\n"
             "\n"
             f"{long_trailer}\n"
         )
 
         self.assertEqual(commit_msg.reflow_commit_message_text(message), message)
 
-    def test_writes_reflow_suggestion(self):
+    def test_reflow_keeps_inline_code_spans_indivisible(self):
+        inline_code = "`dev.py cmake setup --venv`"
         message = (
             "[Infra] Subject\n"
             "\n"
-            "This body paragraph is intentionally long enough to require "
+            "Use the configured developer environment before invoking "
+            f"{inline_code} on every host.\n"
+        )
+
+        reflowed_message = commit_msg.reflow_commit_message_text(message)
+
+        self.assertIn(inline_code, reflowed_message)
+        self.assertTrue(
+            all(
+                len(line) <= commit_msg.LINE_LENGTH_LIMIT
+                for line in reflowed_message.splitlines()
+            )
+        )
+
+    def test_allows_unbreakable_inline_code_tokens(self):
+        inline_code = "`" + "command " + "--argument " * 8 + "value`"
+        message = f"[Infra] Subject\n\nRun {inline_code} exactly.\n"
+
+        reflowed_message = commit_msg.reflow_commit_message_text(message)
+
+        self.assertIn(inline_code, reflowed_message)
+        self.assertEqual(commit_msg.validate_commit_message_text(reflowed_message), [])
+
+    def test_main_reflows_commit_message_before_validation(self):
+        message = (
+            "[Infra] Subject\n"
+            "\n"
+            "This body paragraph is intentionally long enough to require\n"
             "wrapping while preserving all words in the original order.\n"
         )
         with tempfile.TemporaryDirectory() as temporary_directory:
-            old_repo_root = commit_msg.REPO_ROOT
-            commit_msg.REPO_ROOT = Path(temporary_directory)
-            try:
-                suggestion_path = commit_msg.write_reflow_suggestion(
-                    Path("COMMIT_EDITMSG"),
-                    message,
-                )
-            finally:
-                commit_msg.REPO_ROOT = old_repo_root
+            message_path = Path(temporary_directory) / "COMMIT_EDITMSG"
+            message_path.write_text(message, encoding="utf-8")
+            stderr = io.StringIO()
+            with (
+                mock.patch.object(commit_msg, "staged_commit_paths", return_value=[]),
+                mock.patch.object(commit_msg.sys, "stderr", stderr),
+            ):
+                returncode = commit_msg.main([str(message_path)])
 
-            self.assertIsNotNone(suggestion_path)
-            assert suggestion_path is not None
+            self.assertEqual(returncode, 0)
+            self.assertIn("[fix] Reflowed commit-message prose", stderr.getvalue())
             self.assertEqual(
-                suggestion_path.read_text(encoding="utf-8"),
+                message_path.read_text(encoding="utf-8"),
                 "[Infra] Subject\n"
                 "\n"
                 "This body paragraph is intentionally long enough to require wrapping\n"
                 "while preserving all words in the original order.\n",
             )
+
+    def test_main_preserves_and_rejects_overlong_structured_lines(self):
+        long_bullet = (
+            "- This bullet list item is intentionally too long for the commit "
+            "message body width."
+        )
+        message = f"[Infra] Subject\n\n{long_bullet}\n"
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            message_path = Path(temporary_directory) / "COMMIT_EDITMSG"
+            message_path.write_text(message, encoding="utf-8")
+            stderr = io.StringIO()
+            with (
+                mock.patch.object(commit_msg, "staged_commit_paths", return_value=[]),
+                mock.patch.object(commit_msg.sys, "stderr", stderr),
+            ):
+                returncode = commit_msg.main([str(message_path)])
+
+            self.assertEqual(returncode, 1)
+            self.assertEqual(message_path.read_text(encoding="utf-8"), message)
+            self.assertIn("structured or unbreakable line", stderr.getvalue())
 
     def test_ranks_tag_suggestions_from_paths(self):
         self.assertEqual(
