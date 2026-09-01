@@ -25,6 +25,8 @@
 #include "loom/ops/global/ops.h"
 #include "loom/ops/low/kernel.h"
 #include "loom/ops/low/ops.h"
+#include "loom/target/arch/amdgpu/amdhsa_target_id.h"
+#include "loom/target/arch/amdgpu/artifact_key.h"
 #include "loom/target/arch/amdgpu/facts.h"
 #include "loom/target/arch/amdgpu/hal/kernel_abi.h"
 #include "loom/target/arch/amdgpu/matrix/contract.h"
@@ -34,7 +36,6 @@
 #include "loom/target/arch/amdgpu/planning/vopd_plan.h"
 #include "loom/target/arch/amdgpu/provider.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
-#include "loom/target/arch/amdgpu/target_id/target_id.h"
 #include "loom/target/arch/amdgpu/target_info.h"
 #include "loom/target/emit/native/amdgpu/kernel_emission.h"
 #include "loom/target/emit/native/amdgpu/kernel_hsaco.h"
@@ -463,7 +464,7 @@ static iree_status_t loom_amdgpu_hal_kernel_library_project_manifest_target(
   inout_target->family = IREE_SV("amdgpu");
   inout_target->selector = target_facts->identity.target->name;
   inout_target->processor = processor->name;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_amdhsa_code_object_target_id_format(
+  IREE_RETURN_IF_ERROR(loom_amdgpu_amdhsa_target_id_format(
       &target_facts->identity, arena, &inout_target->code_object_target));
 
   iree_string_view_t feature_names[2] = {0};

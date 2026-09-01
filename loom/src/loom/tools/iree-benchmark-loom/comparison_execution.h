@@ -11,8 +11,8 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
-#include "loom/tooling/execution/compile_options.h"
-#include "loom/tooling/execution/compile_report_capture.h"
+#include "loom/tooling/compile/options.h"
+#include "loom/tooling/compile/report_capture.h"
 #include "loom/tooling/execution/session.h"
 #include "loom/tooling/testbench/executor.h"
 #include "loom/tools/iree-benchmark-loom/context.h"
@@ -41,10 +41,9 @@ typedef struct iree_benchmark_loom_comparison_execution_options_t {
   // Canonical parsed module used for candidate compilation.
   const loom_run_module_t* run_module;
   // Structured compile-report capture policy.
-  const loom_run_compile_report_capture_options_t* compile_report_options;
+  const loom_compile_report_capture_options_t* compile_report_options;
   // Structured artifact-manifest sidecar policy.
-  const loom_run_candidate_artifact_manifest_options_t*
-      artifact_manifest_options;
+  const loom_compile_artifact_manifest_options_t* artifact_manifest_options;
   // Base case execution options for correctness checks.
   const loom_testbench_case_execution_options_t* case_execution_options;
   // Arena reused for prepared correctness executors.

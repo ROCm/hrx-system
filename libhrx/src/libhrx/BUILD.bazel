@@ -66,7 +66,6 @@ HRX_DEPS = [
     "//runtime/src/iree/base/threading",
     "//runtime/src/iree/async/util:proactor_pool",
     "//runtime/src/iree/hal",
-    "//runtime/src/iree/hal/executable/amdgpu:executable_target",
     "//runtime/src/iree/hal/memory:asan",
     "//runtime/src/iree/hal/memory:passthrough_pool",
     "//runtime/src/iree/hal/memory:slab_provider",
@@ -80,6 +79,7 @@ HRX_DEPS = [
 ] + iree_select({
     "//runtime/config/hal:driver_amdgpu": [
         "//runtime/src/iree/hal/drivers/amdgpu/registration",
+        "//runtime/src/iree/hal/drivers/amdgpu/target:selection",
     ],
     "//conditions:default": [],
 })

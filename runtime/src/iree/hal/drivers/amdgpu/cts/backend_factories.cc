@@ -10,7 +10,7 @@
 
 #include "iree/hal/api.h"
 #include "iree/hal/drivers/amdgpu/api.h"
-#include "iree/hal/executable/amdgpu/executable_target.h"
+#include "iree/hal/drivers/amdgpu/target/selection.h"
 
 namespace iree::hal::cts {
 namespace {

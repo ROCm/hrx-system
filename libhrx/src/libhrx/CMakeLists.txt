@@ -16,6 +16,7 @@ endif()
 set(_hrx_static_platform_deps "")
 if(IREE_HAL_DRIVER_AMDGPU)
   list(APPEND _hrx_static_platform_deps iree::hal::drivers::amdgpu::registration)
+  list(APPEND _hrx_static_platform_deps iree::hal::drivers::amdgpu::target::selection)
 endif()
 iree_cc_library(
   NAME
@@ -62,7 +63,6 @@ iree_cc_library(
     iree::hal
     iree::hal::drivers::task::driver
     iree::hal::drivers::task::executable::loaders::registration
-    iree::hal::executable::amdgpu::executable_target
     iree::hal::memory::asan
     iree::hal::memory::passthrough_pool
     iree::hal::memory::slab_provider
@@ -88,6 +88,7 @@ iree_cc_library(
 set(_hrx_platform_deps "")
 if(IREE_HAL_DRIVER_AMDGPU)
   list(APPEND _hrx_platform_deps iree::hal::drivers::amdgpu::registration)
+  list(APPEND _hrx_platform_deps iree::hal::drivers::amdgpu::target::selection)
 endif()
 iree_cc_library(
   NAME
@@ -134,7 +135,6 @@ iree_cc_library(
     iree::hal
     iree::hal::drivers::task::driver
     iree::hal::drivers::task::executable::loaders::registration
-    iree::hal::executable::amdgpu::executable_target
     iree::hal::memory::asan
     iree::hal::memory::passthrough_pool
     iree::hal::memory::slab_provider

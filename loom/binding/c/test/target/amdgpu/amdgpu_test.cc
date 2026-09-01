@@ -324,6 +324,28 @@ TargetProfilePtr CreateTargetProfile(
   return TargetProfilePtr(profile);
 }
 
+TEST(AmdgpuTargetTest, ParsesArtifactKeyIdentity) {
+  loomc_amdgpu_target_identity_t identity = {};
+  LOOMC_EXPECT_OK(loomc_amdgpu_target_identity_parse_artifact_key(
+      loomc_make_cstring_view("gfx942:sramecc+:xnack-"), &identity));
+  EXPECT_EQ(ToString(identity.target), "gfx942");
+  EXPECT_EQ(identity.amdhsa_features.sramecc, LOOMC_AMDGPU_TARGET_FEATURE_ON);
+  EXPECT_EQ(identity.amdhsa_features.xnack, LOOMC_AMDGPU_TARGET_FEATURE_OFF);
+
+  LOOMC_EXPECT_OK(loomc_amdgpu_target_identity_parse_artifact_key(
+      loomc_make_cstring_view("gfx1250-a0"), &identity));
+  EXPECT_EQ(ToString(identity.target), "gfx1250-a0");
+  EXPECT_EQ(identity.amdhsa_features.sramecc,
+            LOOMC_AMDGPU_TARGET_FEATURE_UNSUPPORTED);
+  EXPECT_EQ(identity.amdhsa_features.xnack,
+            LOOMC_AMDGPU_TARGET_FEATURE_UNSUPPORTED);
+
+  LOOMC_EXPECT_STATUS_IS(
+      LOOMC_STATUS_INVALID_ARGUMENT,
+      loomc_amdgpu_target_identity_parse_artifact_key(
+          loomc_make_cstring_view("gfx1250:xnack+"), &identity));
+}
+
 TEST(AmdgpuTargetTest, TargetProfilePreservesCanonicalTarget) {
   TargetEnvironmentPtr target_environment = CreateAmdgpuTargetEnvironment();
   const char* target_names[] = {

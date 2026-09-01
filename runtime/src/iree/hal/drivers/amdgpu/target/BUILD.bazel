@@ -1,0 +1,82 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
+load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+iree_runtime_cc_library(
+    name = "identity",
+    srcs = ["identity.c"],
+    hdrs = ["identity.h"],
+    textual_hdrs = ["identity_catalog.inl"],
+    deps = [
+        "//runtime/src/iree/base",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "code_object",
+    srcs = ["code_object.c"],
+    hdrs = ["code_object.h"],
+    textual_hdrs = ["//build_tools/amdgpu:elf_machine_map.inl"],
+    deps = [
+        ":identity",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/hal/utils:elf_format",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "code_object_test",
+    srcs = ["code_object_test.cc"],
+    deps = [
+        ":code_object",
+        ":identity",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "identity_test",
+    srcs = ["identity_test.cc"],
+    deps = [
+        ":identity",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "selection",
+    srcs = ["selection.c"],
+    hdrs = ["selection.h"],
+    deps = [
+        ":identity",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/utils:device_spec_builder",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "selection_test",
+    srcs = ["selection_test.cc"],
+    deps = [
+        ":selection",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

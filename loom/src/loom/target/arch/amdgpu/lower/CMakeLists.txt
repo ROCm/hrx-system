@@ -265,7 +265,6 @@ loom_cc_library(
     loom::target::arch::amdgpu::planning::wait_plan
     loom::target::arch::amdgpu::records::target_records_tables
     loom::target::arch::amdgpu::refs::target_refs
-    loom::target::arch::amdgpu::target_id
     loom::target::arch::amdgpu::target_info
     loom::target::arch::amdgpu::target_info_defs
     loom::target::low_legality

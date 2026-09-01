@@ -290,7 +290,6 @@ loom_cc_library(
         "//loom/src/loom/target/arch/amdgpu/planning:wait_plan",
         "//loom/src/loom/target/arch/amdgpu/records:target_records_tables",
         "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
-        "//loom/src/loom/target/arch/amdgpu/target_id",
         "//loom/src/loom/util:cfg_graph",
         "//loom/src/loom/util:fact_table",
         "//loom/src/loom/util:numeric_format",

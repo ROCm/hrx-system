@@ -20,9 +20,9 @@ iree_cc_library(
   DEPS
     iree::base
     iree::hal
+    iree::hal::drivers::amdgpu::target::identity
+    iree::hal::drivers::amdgpu::target::selection
     iree::hal::drivers::amdgpu::util::packet
-    iree::hal::executable::amdgpu::executable_target
-    iree::hal::executable::amdgpu::target_id
     iree::hal::utils::device_spec_builder
   PUBLIC
 )
@@ -365,6 +365,8 @@ iree_cc_library(
     iree::hal::drivers::amdgpu::device::headers
     iree::hal::drivers::amdgpu::device::timestamp
     iree::hal::drivers::amdgpu::device::tsan
+    iree::hal::drivers::amdgpu::target::code_object
+    iree::hal::drivers::amdgpu::target::identity
     iree::hal::drivers::amdgpu::util::agent_target
     iree::hal::drivers::amdgpu::util::block_pool
     iree::hal::drivers::amdgpu::util::device_clock
@@ -385,8 +387,6 @@ iree_cc_library(
     iree::hal::drivers::amdgpu::util::shadow_map
     iree::hal::drivers::amdgpu::util::topology
     iree::hal::drivers::amdgpu::util::vmem
-    iree::hal::executable::amdgpu::code_object_target
-    iree::hal::executable::amdgpu::target_id
     iree::hal::memory::passthrough_pool
     iree::hal::memory::slab_provider
     iree::hal::memory::tlsf_pool
@@ -472,6 +472,7 @@ iree_cc_library(
     iree::hal::drivers::amdgpu::device::binaries::toc
     iree::hal::drivers::amdgpu::device::dispatch
     iree::hal::drivers::amdgpu::device::headers
+    iree::hal::drivers::amdgpu::target::identity
     iree::hal::drivers::amdgpu::util::agent_target
     iree::hal::drivers::amdgpu::util::block_pool
     iree::hal::drivers::amdgpu::util::device_library
@@ -486,7 +487,6 @@ iree_cc_library(
     iree::hal::drivers::amdgpu::util::shadow_map
     iree::hal::drivers::amdgpu::util::topology
     iree::hal::drivers::amdgpu::util::vmem
-    iree::hal::executable::amdgpu::target_id
     iree::hal::memory::slab_provider
     iree::hal::memory::tracing
   PUBLIC
@@ -546,7 +546,7 @@ iree_cc_test(
     ::device_spec_builder
     iree::base
     iree::hal
-    iree::hal::executable::amdgpu::target_id
+    iree::hal::drivers::amdgpu::target::identity
     iree::hal::utils::device_spec_builder
     iree::testing::gtest
     iree::testing::gtest_main
@@ -763,9 +763,9 @@ iree_cc_test(
     iree::hal
     iree::hal::cts::util::registry
     iree::hal::cts::util::test_base
+    iree::hal::drivers::amdgpu::target::selection
     iree::hal::drivers::amdgpu::util::packet
     iree::hal::drivers::amdgpu::util::pm4_atomic
-    iree::hal::executable::amdgpu::executable_target
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS
@@ -911,8 +911,8 @@ iree_cc_test(
     iree::hal::cts::util::registry
     iree::hal::cts::util::test_base
     iree::hal::drivers::amdgpu::cts::testdata_amdgpu
+    iree::hal::drivers::amdgpu::target::selection
     iree::hal::drivers::amdgpu::util::packet
-    iree::hal::executable::amdgpu::executable_target
     iree::io::file_handle
     iree::testing::gtest
     iree::testing::gtest_main
@@ -943,8 +943,8 @@ iree_cc_test(
     iree::hal::cts::util::test_base
     iree::hal::drivers::amdgpu::cts::testdata_amdgpu
     iree::hal::drivers::amdgpu::cts::tsan_executable_testdata_amdgpu
+    iree::hal::drivers::amdgpu::target::selection
     iree::hal::drivers::amdgpu::util::packet
-    iree::hal::executable::amdgpu::executable_target
     iree::io::file_handle
     iree::testing::gtest
     iree::testing::gtest_main
@@ -976,8 +976,8 @@ iree_cc_test(
     iree::hal::cts::util::registry
     iree::hal::cts::util::test_base
     iree::hal::drivers::amdgpu::cts::testdata_amdgpu
+    iree::hal::drivers::amdgpu::target::selection
     iree::hal::drivers::amdgpu::util::packet
-    iree::hal::executable::amdgpu::executable_target
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS
@@ -1007,8 +1007,8 @@ iree_cc_test(
     iree::hal::cts::util::registry
     iree::hal::cts::util::test_base
     iree::hal::drivers::amdgpu::cts::testdata_amdgpu
+    iree::hal::drivers::amdgpu::target::selection
     iree::hal::drivers::amdgpu::util::packet
-    iree::hal::executable::amdgpu::executable_target
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS
@@ -1063,9 +1063,9 @@ iree_cc_binary_benchmark(
     iree::hal
     iree::hal::cts::util::registry
     iree::hal::drivers::amdgpu::abi
+    iree::hal::drivers::amdgpu::target::selection
     iree::hal::drivers::amdgpu::util::benchmark_flags
     iree::hal::drivers::amdgpu::util::benchmark_profile
-    iree::hal::executable::amdgpu::executable_target
     iree::third_party::google_benchmark
   TESTONLY
   LABELS

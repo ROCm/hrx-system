@@ -671,15 +671,6 @@ typedef struct loom_amdgpu_physical_target_info_t {
   uint32_t target_kind;
 } loom_amdgpu_physical_target_info_t;
 
-typedef struct loom_amdgpu_amdhsa_target_id_t {
-  // Processor row selected by the target-id processor component.
-  const loom_amdgpu_processor_info_t* processor;
-  // Target-id feature suffix after ':', or empty when no suffix is present.
-  iree_string_view_t feature_suffix;
-  // Structured feature states parsed from the target-ID suffix.
-  loom_amdgpu_amdhsa_feature_states_t features;
-} loom_amdgpu_amdhsa_target_id_t;
-
 // Returns true when |processor| supports every requested non-empty target-ID
 // feature.
 static inline bool loom_amdgpu_processor_supports_target_id_features(
@@ -768,9 +759,6 @@ static inline bool loom_amdgpu_processor_properties_support_hsaco(
       properties, LOOM_AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION);
 }
 
-// Canonical AMDHSA target-ID prefix provided by the generated target tables.
-extern const iree_string_view_t loom_amdgpu_target_info_amdhsa_target_id_prefix;
-
 // Returns the number of known AMDGPU processor fact rows.
 iree_host_size_t loom_amdgpu_target_info_processor_count(void);
 
@@ -821,6 +809,10 @@ const loom_amdgpu_target_info_t* loom_amdgpu_target_info_find_target_by_kind(
 
 // Returns the backend processor selected by |target|, or NULL.
 const loom_amdgpu_processor_info_t* loom_amdgpu_target_info_target_processor(
+    const loom_amdgpu_target_info_t* target);
+
+// Returns true when |target| selects a generic code-object processor.
+bool loom_amdgpu_target_info_is_generic(
     const loom_amdgpu_target_info_t* target);
 
 // Looks up a compiler target by canonical selector.
@@ -880,16 +872,6 @@ iree_status_t loom_amdgpu_target_info_lookup_descriptor_set_by_ordinal(
 void loom_amdgpu_amdhsa_feature_states_initialize(
     const loom_amdgpu_processor_info_t* processor,
     loom_amdgpu_amdhsa_feature_states_t* out_features);
-
-// Parses an AMDHSA target ID such as
-// `amdgcn-amd-amdhsa--gfx11-generic`.
-iree_status_t loom_amdgpu_target_info_parse_amdhsa_target_id(
-    iree_string_view_t target_id,
-    loom_amdgpu_amdhsa_target_id_t* out_target_id);
-
-// Resolves the AMDGPU ELF e_flags implied by |target_id|.
-iree_status_t loom_amdgpu_target_info_amdhsa_target_id_elf_flags(
-    const loom_amdgpu_amdhsa_target_id_t* target_id, uint32_t* out_elf_flags);
 
 #ifdef __cplusplus
 }  // extern "C"

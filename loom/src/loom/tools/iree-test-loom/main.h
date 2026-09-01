@@ -11,7 +11,7 @@
 
 #include "iree/base/api.h"
 #include "loom/target/provider.h"
-#include "loom/tooling/execution/hal/artifact.h"
+#include "loom/tooling/execution/hal/device_provider.h"
 #include "loom/tooling/execution/session.h"
 #include "loom/tooling/testbench/requirements.h"
 
@@ -43,9 +43,8 @@ typedef struct iree_test_loom_configuration_t {
   loom_run_register_context_callback_t register_context;
   // Target environment composed from linked execution providers.
   const loom_target_environment_t* target_environment;
-  // Linked HAL artifact providers available to kernel launches.
-  const loom_run_hal_artifact_provider_registry_t*
-      hal_artifact_provider_registry;
+  // Linked device providers available to kernel launches.
+  const loom_device_provider_registry_t* device_provider_registry;
   // Appends target-specific requirement providers linked into this runner.
   iree_test_loom_populate_requirement_providers_callback_t
       populate_requirement_providers;

@@ -82,6 +82,8 @@ BUILD_CONFIGURATIONS = (
     BuildConfiguration(
         id="shipping-defaults",
         bazel_args=(
+            # SPIR-V is budgeted with Vulkan; opt into both for this full witness.
+            "--//runtime/config/hal:drivers=task,vulkan",
             "--//loom/config/target:enable=amdgpu,llvmir,spirv,x86",
             "--//loom/config/target/amdgpu:targets=loom_defaults",
         ),

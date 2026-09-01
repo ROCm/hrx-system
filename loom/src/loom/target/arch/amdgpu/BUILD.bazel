@@ -43,8 +43,6 @@ _AMDGPU_PLANNING_VISIBILITY = ["//loom/src/loom/target/arch/amdgpu/planning:__pk
 
 _AMDGPU_RECORDS_VISIBILITY = ["//loom/src/loom/target/arch/amdgpu/records:__pkg__"]
 
-_AMDGPU_TARGET_ID_VISIBILITY = ["//loom/src/loom/target/arch/amdgpu/target_id:__pkg__"]
-
 _AMDGPU_TOOLING_VISIBILITY = ["//loom/src/loom/tooling/target/amdgpu:__pkg__"]
 
 _AMDGPU_BINDING_VISIBILITY = ["//loom/binding/c/target/amdgpu:__pkg__"]
@@ -56,7 +54,7 @@ _AMDGPU_PROVIDER_VISIBILITY = [
     "//loom/src/loom/tools/iree-benchmark-loom:__pkg__",
     "//loom/src/loom/tools/iree-test-loom:__pkg__",
     "//loom/src/loom/tools/loom-compile:__pkg__",
-    "//loom/src/loom/tooling/target/amdgpu/execution:__pkg__",
+    "//loom/src/loom/tooling/target/amdgpu:__pkg__",
 ] + _AMDGPU_BINDING_VISIBILITY + _AMDGPU_CHECK_VISIBILITY
 
 #===------------------------------------------------------------------------===#
@@ -162,7 +160,6 @@ loom_generated_cc_library(
         _AMDGPU_OPS_VISIBILITY +
         _AMDGPU_PLANNING_VISIBILITY +
         _AMDGPU_RECORDS_VISIBILITY +
-        _AMDGPU_TARGET_ID_VISIBILITY +
         _AMDGPU_TOOLING_VISIBILITY +
         _AMDGPU_BINDING_VISIBILITY
     ),
@@ -191,14 +188,78 @@ loom_cc_library(
         _AMDGPU_LOWER_VISIBILITY +
         _AMDGPU_NATIVE_VISIBILITY +
         _AMDGPU_OPS_VISIBILITY +
-        _AMDGPU_TARGET_ID_VISIBILITY +
+        _AMDGPU_PLANNING_VISIBILITY +
         _AMDGPU_TOOLING_VISIBILITY
     ),
     deps = [
         ":target_info",
         ":target_info_defs",
+        "//loom/src/loom/codegen/low:target_binding",
         "//loom/src/loom/target:facts",
         "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "amdhsa_target_id",
+    srcs = ["amdhsa_target_id.c"],
+    hdrs = ["amdhsa_target_id.h"],
+    visibility = (
+        _AMDGPU_BINDING_VISIBILITY +
+        _AMDGPU_NATIVE_VISIBILITY +
+        _AMDGPU_TOOLING_VISIBILITY
+    ),
+    deps = [
+        ":facts",
+        ":target_info",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "amdhsa_target_id_test",
+    srcs = ["amdhsa_target_id_test.cc"],
+    deps = [
+        ":amdhsa_target_id",
+        ":target_info",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "artifact_key",
+    srcs = ["artifact_key.c"],
+    hdrs = ["artifact_key.h"],
+    visibility = (
+        _AMDGPU_BINDING_VISIBILITY +
+        _AMDGPU_NATIVE_VISIBILITY +
+        _AMDGPU_TOOLING_VISIBILITY + [
+            "//loom/src/loom/tools/loom-link:__pkg__",
+        ]
+    ),
+    deps = [
+        ":amdhsa_target_id",
+        ":facts",
+        ":target_info",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "artifact_key_test",
+    srcs = ["artifact_key_test.cc"],
+    deps = [
+        ":artifact_key",
+        ":target_info",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
@@ -210,8 +271,9 @@ loom_cc_library(
         _AMDGPU_BINDING_VISIBILITY +
         _AMDGPU_OPS_VISIBILITY +
         _AMDGPU_PROVIDER_VISIBILITY +
-        _AMDGPU_TARGET_ID_VISIBILITY +
-        _AMDGPU_TOOLING_VISIBILITY
+        _AMDGPU_TOOLING_VISIBILITY + [
+            "//loom/src/loom/tools/loom-link:__pkg__",
+        ]
     ),
     deps = [
         ":facts",
@@ -232,21 +294,6 @@ loom_cc_test(
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
-    ],
-)
-
-loom_cc_library(
-    name = "artifact_profile",
-    srcs = ["artifact_profile.c"],
-    hdrs = ["artifact_profile.h"],
-    visibility = _AMDGPU_TOOLING_VISIBILITY + [
-        "//loom/src/loom/tools/loom-link:__pkg__",
-    ],
-    deps = [
-        ":profile",
-        ":target_info",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/hal/executable/amdgpu:target_id",
     ],
 )
 

@@ -9,7 +9,7 @@
 
 iree_add_all_subdirs()
 
-if(IREE_HAL_DRIVER_VULKAN AND LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV)
+if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV)
 loom_cc_library(
   NAME
     artifact_provider
@@ -18,10 +18,8 @@ loom_cc_library(
   SRCS
     "artifact_provider.c"
   DEPS
-    ::vulkan_profile
     iree::base
     loom::target::arch::spirv::descriptors::low_registry
-    loom::target::arch::spirv::facts
     loom::target::arch::spirv::low_verify
     loom::target::emit::spirv::module_builder
     loom::target::emit::spirv::module_emitter
@@ -31,9 +29,44 @@ loom_cc_library(
     loom::target::reporting::artifact_manifest_collect
     loom::target::reporting::report
     loom::target::types
-    loom::tooling::execution::compile_options
-    loom::tooling::execution::hal::artifact
+    loom::tooling::compile::artifact
+  PUBLIC
+)
+endif()
+
+if(LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_VULKAN AND LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV)
+loom_cc_library(
+  NAME
+    device_provider
+  HDRS
+    "device_provider.h"
+  SRCS
+    "device_provider.c"
+  DEPS
+    ::artifact_provider
+    ::vulkan_profile
+    iree::base
+    loom::target::arch::spirv::facts
+    loom::tooling::execution::hal::device_provider
     loom::tooling::execution::hal::runtime
+  PUBLIC
+)
+endif()
+
+if(LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_VULKAN AND LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV)
+loom_cc_library(
+  NAME
+    execution_provider
+  HDRS
+    "execution_provider.h"
+  SRCS
+    "execution_provider.c"
+  DEPS
+    ::device_provider
+    iree::base
+    loom::target::arch::spirv::provider
+    loom::tooling::execution::execution_provider
+    loom::tooling::execution::hal::execution_backend
   PUBLIC
 )
 endif()
@@ -79,7 +112,7 @@ loom_cc_library(
 )
 endif()
 
-if(IREE_HAL_DRIVER_VULKAN AND LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV)
+if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV)
 loom_cc_test(
   NAME
     artifact_provider_test
@@ -87,14 +120,8 @@ loom_cc_test(
     "artifact_provider_test.cc"
   DEPS
     ::artifact_provider
-    ::vulkan_profile
     iree::base
     iree::base::internal::arena
-    iree::hal
-    iree::hal::drivers::vulkan
-    iree::hal::drivers::vulkan::device_spec
-    iree::hal::drivers::vulkan::headers
-    iree::hal::utils::device_spec_builder
     iree::testing::gtest
     iree::testing::gtest_main
     loom::codegen::low::text_asm
@@ -103,11 +130,30 @@ loom_cc_test(
     loom::ops::op_registry
     loom::target::arch::spirv::descriptors::low_registry
     loom::target::arch::spirv::ops
-    loom::target::arch::spirv::profile
-    loom::target::types
     loom::testing::byte_sequence
     loom::testing::module_ptr
-    loom::tooling::execution::hal::artifact
+  LABELS
+    "iree-build-requirement=loom.target.arch.spirv"
+    "iree-build-requirement=loom.emit.spirv"
+)
+endif()
+
+if(LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_VULKAN AND LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV)
+loom_cc_test(
+  NAME
+    device_provider_test
+  SRCS
+    "device_provider_test.cc"
+  DEPS
+    ::device_provider
+    ::vulkan_profile
+    iree::base
+    iree::hal
+    iree::hal::drivers::vulkan::device_spec
+    iree::hal::utils::device_spec_builder
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::target::arch::spirv::profile
     loom::tooling::execution::hal::runtime
   LABELS
     "iree-build-requirement=loom.target.arch.spirv"
@@ -176,7 +222,7 @@ loom_cc_test(
 )
 endif()
 
-if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_VULKAN)
+if(LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_VULKAN)
 iree_execution_test_suite(
   NAME
     iree_test_loom_execution_test
@@ -205,7 +251,7 @@ iree_execution_test_suite(
 )
 endif()
 
-if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_VULKAN)
+if(LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_VULKAN)
 iree_execution_test_suite(
   NAME
     iree_benchmark_loom_execution_test

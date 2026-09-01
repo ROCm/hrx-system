@@ -29,7 +29,7 @@ loom_cc_library(
     loom::tooling::cli::help
     loom::tooling::config
     loom::tooling::context
-    loom::tooling::execution::hal::artifact
+    loom::tooling::execution::hal::device_provider
     loom::tooling::execution::hal::testbench_actual
     loom::tooling::execution::session
     loom::tooling::io::file
@@ -45,21 +45,21 @@ loom_cc_library(
 )
 
 set(_iree_test_loom_platform_copts "")
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
   list(APPEND _iree_test_loom_platform_copts "-DIREE_TEST_LOOM_HAVE_AMDGPU=1")
 endif()
-if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND IREE_HAL_DRIVER_VULKAN)
+if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_VULKAN)
   list(APPEND _iree_test_loom_platform_copts "-DIREE_TEST_LOOM_HAVE_SPIRV=1")
 endif()
 set(_iree_test_loom_platform_deps "")
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
   list(APPEND _iree_test_loom_platform_deps loom::target::arch::amdgpu::provider)
-  list(APPEND _iree_test_loom_platform_deps loom::tooling::target::amdgpu::artifact_provider)
+  list(APPEND _iree_test_loom_platform_deps loom::tooling::target::amdgpu::device_provider)
   list(APPEND _iree_test_loom_platform_deps loom::tooling::target::amdgpu::testbench_requirements)
 endif()
-if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND IREE_HAL_DRIVER_VULKAN)
+if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_VULKAN)
   list(APPEND _iree_test_loom_platform_deps loom::target::arch::spirv::provider)
-  list(APPEND _iree_test_loom_platform_deps loom::tooling::target::spirv::artifact_provider)
+  list(APPEND _iree_test_loom_platform_deps loom::tooling::target::spirv::device_provider)
   list(APPEND _iree_test_loom_platform_deps loom::tooling::target::spirv::testbench_requirements)
 endif()
 loom_cc_binary(

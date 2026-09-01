@@ -8,6 +8,8 @@
 
 #include <inttypes.h>
 
+#include "loom/target/arch/amdgpu/amdhsa_target_id.h"
+
 //===----------------------------------------------------------------------===//
 // Validation and shared fields
 //===----------------------------------------------------------------------===//
@@ -153,8 +155,8 @@ static iree_status_t loom_amdgpu_metadata_validate(
   IREE_RETURN_IF_ERROR(loom_amdgpu_metadata_validate_string(
       metadata->target, IREE_SV("amdhsa.target"), /*required=*/true));
   loom_amdgpu_amdhsa_target_id_t target_id = {0};
-  IREE_RETURN_IF_ERROR(loom_amdgpu_target_info_parse_amdhsa_target_id(
-      metadata->target, &target_id));
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_amdhsa_target_id_parse(metadata->target, &target_id));
   if (metadata->kernel_count == 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "AMDGPU metadata requires at least one kernel");

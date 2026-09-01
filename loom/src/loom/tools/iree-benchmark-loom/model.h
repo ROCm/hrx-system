@@ -11,7 +11,7 @@
 
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
-#include "loom/tooling/execution/compile_report_capture.h"
+#include "loom/tooling/compile/report_capture.h"
 #include "loom/tooling/execution/hal/benchmark.h"
 #include "loom/tooling/execution/hal/testbench_actual.h"
 #include "loom/tooling/testbench/executor.h"
@@ -164,7 +164,7 @@ typedef struct iree_benchmark_loom_benchmark_result_t {
   // JSON array entries for structured diagnostics associated with the failure.
   iree_string_view_t diagnostic_json;
   // Captured structured compile report for the benchmark candidate.
-  const loom_run_compile_report_capture_t* compile_report_capture;
+  const loom_compile_report_capture_t* compile_report_capture;
   // Sidecar compile report artifact path for debug/full bundles, if any.
   iree_string_view_t compile_report_artifact_path;
   // Sidecar artifact manifest path for debug/full bundles, if any.
@@ -221,7 +221,7 @@ typedef struct iree_benchmark_loom_hal_actual_provider_t {
   // Structured diagnostics emitted while compiling this candidate.
   iree_benchmark_loom_diagnostic_capture_t diagnostics;
   // Structured compile report populated while emitting this candidate.
-  loom_run_compile_report_capture_t compile_report_capture;
+  loom_compile_report_capture_t compile_report_capture;
   // Borrowed view into |compile_report_artifact_path_storage|.
   iree_string_view_t compile_report_artifact_path;
   // Owned debug/full bundle compile-report artifact path.

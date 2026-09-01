@@ -117,7 +117,7 @@ iree_cc_library(
   DEPS
     ::libhsa
     iree::base
-    iree::hal::executable::amdgpu::target_id
+    iree::hal::drivers::amdgpu::target::identity
   PUBLIC
 )
 endif()
@@ -409,7 +409,7 @@ iree_cc_library(
     ::packet
     iree::base
     iree::hal::drivers::amdgpu::abi
-    iree::hal::executable::amdgpu::target_id
+    iree::hal::drivers::amdgpu::target::identity
   PUBLIC
 )
 endif()
@@ -566,7 +566,7 @@ iree_cc_library(
     "device_library_target.c"
   DEPS
     iree::base
-    iree::hal::executable::amdgpu::target_id
+    iree::hal::drivers::amdgpu::target::identity
   PUBLIC
 )
 endif()
@@ -591,7 +591,7 @@ iree_cc_library(
     ::pm4_program
     ::queue_primitives
     ::vmem
-    iree::hal::executable::amdgpu::target_id
+    iree::hal::drivers::amdgpu::target::identity
   PUBLIC
 )
 endif()
@@ -1011,7 +1011,7 @@ iree_cc_test(
     iree::base
     iree::base::threading
     iree::hal::drivers::amdgpu::abi
-    iree::hal::executable::amdgpu::target_id
+    iree::hal::drivers::amdgpu::target::identity
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS
@@ -1094,7 +1094,7 @@ iree_cc_binary_benchmark(
     iree::hal::drivers::amdgpu::headers
     iree::hal::drivers::amdgpu::queue_affinity
     iree::hal::drivers::amdgpu::registration
-    iree::hal::executable::amdgpu::executable_target
+    iree::hal::drivers::amdgpu::target::selection
     iree::hal::memory::tlsf_pool
     iree::io::file_handle
     iree::third_party::google_benchmark
@@ -1241,7 +1241,7 @@ iree_cc_test(
     ::topology
     iree::base
     iree::hal::drivers::amdgpu::abi
-    iree::hal::executable::amdgpu::target_id
+    iree::hal::drivers::amdgpu::target::identity
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS

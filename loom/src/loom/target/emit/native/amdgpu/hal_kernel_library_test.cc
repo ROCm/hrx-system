@@ -24,13 +24,14 @@
 #include "loom/ops/sanitizer/ops.h"
 #include "loom/ops/target/facts.h"
 #include "loom/sanitizer/site_table.h"
+#include "loom/target/arch/amdgpu/amdhsa_target_id.h"
+#include "loom/target/arch/amdgpu/artifact_key.h"
 #include "loom/target/arch/amdgpu/descriptors/low_registry.h"
 #include "loom/target/arch/amdgpu/matrix/contract.h"
 #include "loom/target/arch/amdgpu/planning/wait_counters.h"
 #include "loom/target/arch/amdgpu/profile.h"
 #include "loom/target/arch/amdgpu/provider.h"
 #include "loom/target/arch/amdgpu/records/target_records.h"
-#include "loom/target/arch/amdgpu/target_id/target_id.h"
 #include "loom/target/arch/amdgpu/target_info.h"
 #include "loom/target/emit/native/amdgpu/runtime_globals.h"
 #include "loom/target/emit/native/elf.h"
@@ -799,7 +800,7 @@ TEST_F(AmdgpuHalKernelLibraryTest,
   EXPECT_TRUE(capture.diagnostics.empty()) << DiagnosticSummary(capture);
   char expected_target_key_storage[128] = {};
   iree_string_view_t expected_target_key = iree_string_view_empty();
-  IREE_ASSERT_OK(loom_amdgpu_artifact_target_key_format(
+  IREE_ASSERT_OK(loom_amdgpu_artifact_key_format(
       &identity, sizeof(expected_target_key_storage),
       expected_target_key_storage, &expected_target_key));
   EXPECT_TRUE(iree_string_view_equal(library.target_key, expected_target_key))
@@ -1120,7 +1121,7 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsEveryLinkedCanonicalTarget) {
     iree_arena_allocator_t target_id_arena;
     iree_arena_initialize(&block_pool_, &target_id_arena);
     iree_string_view_t expected_target_id = iree_string_view_empty();
-    IREE_ASSERT_OK(loom_amdgpu_artifact_target_key_format_arena(
+    IREE_ASSERT_OK(loom_amdgpu_artifact_key_format_arena(
         &identity, &target_id_arena, &expected_target_id));
     EXPECT_TRUE(iree_string_view_equal(library.target_key, expected_target_id))
         << StringViewToString(target->name);
@@ -1202,13 +1203,13 @@ TEST_F(AmdgpuHalKernelLibraryTest,
     }
     char artifact_target_key_storage[128] = {};
     iree_string_view_t artifact_target_key = iree_string_view_empty();
-    IREE_ASSERT_OK(loom_amdgpu_artifact_target_key_format(
+    IREE_ASSERT_OK(loom_amdgpu_artifact_key_format(
         &identity, sizeof(artifact_target_key_storage),
         artifact_target_key_storage, &artifact_target_key));
     iree_arena_allocator_t target_id_arena;
     iree_arena_initialize(&block_pool_, &target_id_arena);
     iree_string_view_t code_object_target_view = iree_string_view_empty();
-    IREE_ASSERT_OK(loom_amdgpu_amdhsa_code_object_target_id_format(
+    IREE_ASSERT_OK(loom_amdgpu_amdhsa_target_id_format(
         &identity, &target_id_arena, &code_object_target_view));
     const std::string code_object_target =
         StringViewToString(code_object_target_view);
@@ -1240,11 +1241,11 @@ TEST_F(AmdgpuHalKernelLibraryTest,
     IREE_ASSERT_OK(CloneByteSequenceToString(library.hsaco_data, &hsaco));
     ASSERT_GE(hsaco.size(), 64u);
     loom_amdgpu_amdhsa_target_id_t parsed_target_id = {};
-    IREE_ASSERT_OK(loom_amdgpu_target_info_parse_amdhsa_target_id(
-        code_object_target_view, &parsed_target_id));
+    IREE_ASSERT_OK(loom_amdgpu_amdhsa_target_id_parse(code_object_target_view,
+                                                      &parsed_target_id));
     uint32_t expected_elf_flags = 0;
-    IREE_ASSERT_OK(loom_amdgpu_target_info_amdhsa_target_id_elf_flags(
-        &parsed_target_id, &expected_elf_flags));
+    IREE_ASSERT_OK(loom_amdgpu_amdhsa_target_id_elf_flags(&parsed_target_id,
+                                                          &expected_elf_flags));
     EXPECT_EQ(LoadLeU32(hsaco, 48), expected_elf_flags);
     EXPECT_NE(hsaco.find(code_object_target), std::string::npos);
 

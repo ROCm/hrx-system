@@ -9,6 +9,7 @@
 #include <inttypes.h>
 #include <string.h>
 
+#include "loom/target/arch/amdgpu/amdhsa_target_id.h"
 #include "loom/target/arch/amdgpu/target_info.h"
 #include "loom/target/emit/native/amdgpu/descriptor.h"
 #include "loom/target/emit/native/elf.h"
@@ -345,8 +346,7 @@ static iree_status_t loom_amdgpu_hsaco_validate_target_id(
                             "AMDGPU HSACO processor is required");
   }
   loom_amdgpu_amdhsa_target_id_t target_id = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_target_info_parse_amdhsa_target_id(target, &target_id));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_amdhsa_target_id_parse(target, &target_id));
   if (!iree_string_view_equal(target_id.processor->name, processor_name)) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
@@ -1551,10 +1551,10 @@ iree_status_t loom_amdgpu_hsaco_write_file(
 
   loom_amdgpu_amdhsa_target_id_t target_id = {0};
   IREE_RETURN_IF_ERROR(
-      loom_amdgpu_target_info_parse_amdhsa_target_id(file->target, &target_id));
+      loom_amdgpu_amdhsa_target_id_parse(file->target, &target_id));
   uint32_t elf_flags = 0;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_target_info_amdhsa_target_id_elf_flags(
-      &target_id, &elf_flags));
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_amdhsa_target_id_elf_flags(&target_id, &elf_flags));
 
   loom_amdgpu_hsaco_payloads_t payloads = {0};
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(

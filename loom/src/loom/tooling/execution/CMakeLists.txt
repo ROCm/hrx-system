@@ -23,45 +23,6 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
-    compile_options
-  HDRS
-    "compile_options.h"
-  SRCS
-    "compile_options.c"
-  DEPS
-    iree::base
-    loom::error::diagnostic
-    loom::ir
-    loom::target::pipeline_options
-    loom::target::reporting::artifact_manifest
-    loom::target::reporting::report
-    loom::verify
-  PUBLIC
-)
-
-loom_cc_library(
-  NAME
-    compile_report_capture
-  HDRS
-    "compile_report_capture.h"
-  SRCS
-    "compile_report_capture.c"
-  DEPS
-    ::compile_options
-    iree::base
-    loom::error::diagnostic
-    loom::error::json_sink
-    loom::error::renderer
-    loom::ops::config
-    loom::target::reporting::format
-    loom::target::reporting::report
-    loom::tooling::config
-    loom::util::json
-  PUBLIC
-)
-
-loom_cc_library(
-  NAME
     execution_provider
   HDRS
     "execution_provider.h"
@@ -107,11 +68,11 @@ loom_cc_library(
   SRCS
     "one_shot.c"
   DEPS
-    ::compile_options
     ::session
     iree::base
     loom::ir
     loom::ops::kernel
+    loom::tooling::compile::options
   PUBLIC
 )
 
@@ -148,21 +109,6 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     loom::util::stream
-)
-
-loom_cc_test(
-  NAME
-    compile_report_capture_test
-  SRCS
-    "compile_report_capture_test.cc"
-  DEPS
-    ::compile_options
-    ::compile_report_capture
-    iree::base
-    iree::testing::gtest
-    iree::testing::gtest_main
-    loom::error::error_defs
-    loom::error::json_sink
 )
 
 loom_cc_test(

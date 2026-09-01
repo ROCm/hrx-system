@@ -5,6 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//build_tools/bazel:python.bzl", "iree_py_library", "iree_py_test")
+load("//build_tools/bazel:query.bzl", "iree_assert_dependency_boundary")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -12,9 +13,20 @@ package(
 )
 
 iree_py_library(
-    name = "target_map_data",
-    srcs = ["//build_tools/amdgpu:target_map_data.py"],
-    imports = ["../../../../../.."],
+    name = "target_catalog",
+    srcs = ["target_catalog.py"],
+    deps = ["//loom/py/loom/target/arch:package_init"],
+)
+
+iree_py_test(
+    name = "target_catalog_test",
+    srcs = [
+        "target_catalog_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.target.arch.amdgpu.target_catalog_test"],
+    main = "pytest_style_runner.py",
+    deps = [":target_catalog"],
 )
 
 iree_py_library(
@@ -26,19 +38,25 @@ iree_py_library(
         "target_info.py",
     ],
     deps = [
-        ":target_map_data",
+        ":target_catalog",
         "//loom/py/loom/dialect:shared",
         "//loom/py/loom/target:low_descriptors",
         "//loom/py/loom/target/arch:package_init",
     ],
 )
 
+iree_assert_dependency_boundary(
+    name = "catalog_boundary_test",
+    forbidden_subtrees = ["//build_tools/amdgpu/..."],
+    target = ":target_info",
+)
+
 iree_py_library(
     name = "target_identity",
     srcs = ["target_identity.py"],
     deps = [
+        ":target_catalog",
         ":target_info",
-        ":target_map_data",
     ],
 )
 
@@ -51,9 +69,9 @@ iree_py_test(
     args = ["loom.target.arch.amdgpu.target_identity_test"],
     main = "pytest_style_runner.py",
     deps = [
+        ":target_catalog",
         ":target_identity",
         ":target_info",
-        ":target_map_data",
     ],
 )
 
@@ -94,6 +112,7 @@ iree_py_library(
         "dialect.py",
     ],
     deps = [
+        ":target_catalog",
         "//loom/py/loom:core",
         "//loom/py/loom/dialect/target",
         "//loom/py/loom/target/arch/amdgpu:target_info",
@@ -203,8 +222,8 @@ iree_py_test(
     main = "pytest_style_runner.py",
     deps = [
         ":isa_xml",
+        ":target_catalog",
         ":target_info",
-        ":target_map_data",
     ],
 )
 

@@ -68,7 +68,7 @@ Running `target_map.py` emits generated fragments consumed by multiple layers:
 | `build_tools/amdgpu/target_map.cmake` | CMake selector helpers. |
 | `build_tools/amdgpu/elf_machine_map.inl` | C/C++ ELF machine decode tables for runtime, libhrx, and Loom. |
 | `build_tools/amdgpu/target_map.h` | C/C++ tests that need exact-to-code-object lookup. |
-| `runtime/src/iree/hal/executable/amdgpu/target_id_map.inl` | Runtime target-ID mappings and processor facts. |
+| `runtime/src/iree/hal/drivers/amdgpu/target/identity_catalog.inl` | Runtime target-ID mappings and processor facts. |
 | `runtime/src/iree/hal/drivers/amdgpu/util/device_library_target_map.inl` | Runtime qualified device-library artifact lookup. |
 
 The generated files are checked in. The presubmit check runs:
@@ -92,8 +92,8 @@ python3 build_tools/amdgpu/target_map.py
 buildifier build_tools/amdgpu/BUILD.bazel build_tools/amdgpu/*.bzl
 ```
 
-The runtime `target_id_map.inl` is generated from the same map so the loader and
-build rules agree about exact-to-code-object compatibility. The
+The runtime `identity_catalog.inl` is generated from the same map so the loader
+and build rules agree about exact-to-code-object compatibility. The
 `elf_machine_map.inl` fragment is generated from a separate ELF decode table:
 it may recognize legacy AMDGPU machine values that are not exposed as build
 selectors.

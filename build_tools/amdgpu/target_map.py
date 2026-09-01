@@ -657,8 +657,8 @@ def render_cmake():
     return "\n".join(lines)
 
 
-def render_target_id_inl(repo_root):
-    output_path = "runtime/src/iree/hal/executable/amdgpu/target_id_map.inl"
+def render_runtime_identity_catalog_inl(repo_root):
+    output_path = "runtime/src/iree/hal/drivers/amdgpu/target/identity_catalog.inl"
     lines = [
         generated_header("//", output_path),
         "//",
@@ -865,14 +865,15 @@ def render_header():
 
 def generated_outputs(repo_root):
     build_tools_output_dir = repo_root / "build_tools/amdgpu"
-    target_output_dir = repo_root / "runtime/src/iree/hal/executable/amdgpu"
+    runtime_target_output_dir = repo_root / "runtime/src/iree/hal/drivers/amdgpu/target"
     driver_util_output_dir = repo_root / "runtime/src/iree/hal/drivers/amdgpu/util"
     return {
         build_tools_output_dir / "target_map.bzl": render_bzl(),
         build_tools_output_dir / "target_map.cmake": render_cmake(),
         build_tools_output_dir / "elf_machine_map.inl": render_elf_machine_map_inl(),
         build_tools_output_dir / "target_map.h": render_header(),
-        target_output_dir / "target_id_map.inl": render_target_id_inl(repo_root),
+        runtime_target_output_dir
+        / "identity_catalog.inl": render_runtime_identity_catalog_inl(repo_root),
         driver_util_output_dir
         / "device_library_target_map.inl": render_device_library_target_map_inl(),
     }

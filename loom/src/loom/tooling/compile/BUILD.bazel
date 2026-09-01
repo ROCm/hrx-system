@@ -4,15 +4,78 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//build_tools/bazel:query.bzl", "iree_assert_dependency_boundary")
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
     "loom_cc_library",
+    "loom_cc_test",
 )
 
 package(
     default_visibility = ["//visibility:public"],
     features = ["layering_check"],
     licenses = ["notice"],  # Apache 2.0
+)
+
+loom_cc_library(
+    name = "options",
+    srcs = ["options.c"],
+    hdrs = ["options.h"],
+    deps = [
+        "//loom/src/loom/error:diagnostic",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/target:pipeline_options",
+        "//loom/src/loom/target/reporting:artifact_manifest",
+        "//loom/src/loom/target/reporting:report",
+        "//loom/src/loom/verify",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "artifact",
+    srcs = ["artifact.c"],
+    hdrs = ["artifact.h"],
+    deps = [
+        ":options",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/target:pipeline_options",
+        "//loom/src/loom/target:profile",
+        "//loom/src/loom/target:provider",
+        "//loom/src/loom/target:types",
+        "//loom/src/loom/target/reporting:report",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "report_capture",
+    srcs = ["report_capture.c"],
+    hdrs = ["report_capture.h"],
+    deps = [
+        ":options",
+        "//loom/src/loom/error:diagnostic",
+        "//loom/src/loom/error:json_sink",
+        "//loom/src/loom/error:renderer",
+        "//loom/src/loom/ops/config",
+        "//loom/src/loom/target/reporting:format",
+        "//loom/src/loom/target/reporting:report",
+        "//loom/src/loom/tooling/config",
+        "//loom/src/loom/util:json",
+        "//runtime/src/iree/base",
+    ],
+)
+
+iree_assert_dependency_boundary(
+    name = "artifact_boundary",
+    forbidden_subtrees = ["//loom/src/loom/tooling/execution/..."],
+    target = ":artifact",
+)
+
+iree_assert_dependency_boundary(
+    name = "report_boundary",
+    forbidden_subtrees = ["//loom/src/loom/tooling/execution/..."],
+    target = ":report_capture",
 )
 
 loom_cc_library(
@@ -41,5 +104,19 @@ loom_cc_library(
         "//loom/src/loom/verify",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "report_capture_test",
+    srcs = ["report_capture_test.cc"],
+    deps = [
+        ":options",
+        ":report_capture",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/error:json_sink",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )

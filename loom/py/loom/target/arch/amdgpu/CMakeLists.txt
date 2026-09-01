@@ -11,11 +11,29 @@ iree_add_all_subdirs()
 
 iree_py_library(
   NAME
-    target_map_data
+    target_catalog
   SRCS
-    "${PROJECT_SOURCE_DIR}/build_tools/amdgpu/target_map_data.py"
-  IMPORTS
-    "../../../../../.."
+    "target_catalog.py"
+  DEPS
+    loom::py::loom::target::arch::package_init
+)
+
+iree_py_test(
+  NAME
+    target_catalog_test
+  MAIN
+    "../../../tools/pytest_style_runner.py"
+  SRCS
+    "target_catalog_test.py"
+    "../../../tools/pytest_style_runner.py"
+  ARGS
+    "loom.target.arch.amdgpu.target_catalog_test"
+  DEPS
+    loom::py::loom::target::arch::amdgpu::target_catalog
+  PACKAGE_DIRS
+    "${PROJECT_SOURCE_DIR}/loom/py"
+    "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
 )
 
 iree_py_library(
@@ -27,7 +45,7 @@ iree_py_library(
     "names.py"
     "target_info.py"
   DEPS
-    loom::py::loom::target::arch::amdgpu::target_map_data
+    loom::py::loom::target::arch::amdgpu::target_catalog
     loom::py::loom::dialect::shared
     loom::py::loom::target::low_descriptors
     loom::py::loom::target::arch::package_init
@@ -39,8 +57,8 @@ iree_py_library(
   SRCS
     "target_identity.py"
   DEPS
+    loom::py::loom::target::arch::amdgpu::target_catalog
     loom::py::loom::target::arch::amdgpu::target_info
-    loom::py::loom::target::arch::amdgpu::target_map_data
 )
 
 iree_py_test(
@@ -54,9 +72,9 @@ iree_py_test(
   ARGS
     "loom.target.arch.amdgpu.target_identity_test"
   DEPS
+    loom::py::loom::target::arch::amdgpu::target_catalog
     loom::py::loom::target::arch::amdgpu::target_identity
     loom::py::loom::target::arch::amdgpu::target_info
-    loom::py::loom::target::arch::amdgpu::target_map_data
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"
@@ -112,6 +130,7 @@ iree_py_library(
   SRCS
     "dialect.py"
   DEPS
+    loom::py::loom::target::arch::amdgpu::target_catalog
     loom::py::loom::core
     loom::py::loom::dialect::target::target
     loom::py::loom::target::arch::amdgpu::target_info
@@ -229,8 +248,8 @@ iree_py_test(
     "loom.target.arch.amdgpu.target_info_test"
   DEPS
     loom::py::loom::target::arch::amdgpu::isa_xml
+    loom::py::loom::target::arch::amdgpu::target_catalog
     loom::py::loom::target::arch::amdgpu::target_info
-    loom::py::loom::target::arch::amdgpu::target_map_data
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"

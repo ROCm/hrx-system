@@ -18,12 +18,12 @@
 #include "loom/codegen/low/packet_hazard_plan_json.h"
 #include "loom/ir/ir.h"
 #include "loom/ops/low/ops.h"
+#include "loom/target/arch/amdgpu/facts.h"
 #include "loom/target/arch/amdgpu/planning/structural_packet.h"
 #include "loom/target/arch/amdgpu/planning/wait_frontier.h"
 #include "loom/target/arch/amdgpu/planning/wait_loop.h"
 #include "loom/target/arch/amdgpu/planning/wait_packet_tables.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
-#include "loom/target/arch/amdgpu/target_id/target_id.h"
 #include "loom/util/segmented_storage.h"
 
 // Target payload size for lazily appended wait-action segments. Segments stay

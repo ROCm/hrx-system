@@ -128,8 +128,8 @@ static iree_status_t loom_spirv_vulkan_testbench_require_vulkan_device(
     loom_run_hal_testbench_context_t* context,
     loom_testbench_requirement_provider_result_t* out_result) {
   IREE_RETURN_IF_ERROR(loom_run_hal_testbench_context_ensure_runtime(context));
-  if (context->artifact_provider != NULL &&
-      iree_string_view_equal(context->artifact_provider->hal_driver_name,
+  if (context->device_provider != NULL &&
+      iree_string_view_equal(context->device_provider->driver_name,
                              IREE_SV("vulkan"))) {
     return iree_ok_status();
   }

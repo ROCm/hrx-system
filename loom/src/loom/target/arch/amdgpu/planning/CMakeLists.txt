@@ -265,8 +265,8 @@ loom_cc_library(
     loom::codegen::low::schedule
     loom::ir
     loom::ops::low
+    loom::target::arch::amdgpu::facts
     loom::target::arch::amdgpu::refs::target_refs
-    loom::target::arch::amdgpu::target_id
     loom::util::segmented_storage
   PUBLIC
 )
@@ -391,7 +391,7 @@ loom_cc_library(
     iree::base::internal::arena
     loom::codegen::low::allocation
     loom::codegen::low::schedule
-    loom::target::arch::amdgpu::target_id
+    loom::target::arch::amdgpu::facts
   PUBLIC
 )
 endif()
@@ -445,8 +445,8 @@ loom_cc_library(
     loom::codegen::low::diagnostics
     loom::error::error_defs
     loom::ir
+    loom::target::arch::amdgpu::facts
     loom::target::arch::amdgpu::refs::target_refs
-    loom::target::arch::amdgpu::target_id
     loom::target::arch::amdgpu::target_info_defs
     loom::target::launch
     loom::target::residency

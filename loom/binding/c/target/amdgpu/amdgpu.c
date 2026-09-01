@@ -10,6 +10,8 @@
 
 #include "iree/base/api.h"
 #include "loom/error/emitter.h"
+#include "loom/target/arch/amdgpu/amdhsa_target_id.h"
+#include "loom/target/arch/amdgpu/artifact_key.h"
 #include "loom/target/arch/amdgpu/profile.h"
 #include "loom/target/arch/amdgpu/provider.h"
 #include "loom/target/arch/amdgpu/records/target_records.h"
@@ -144,6 +146,23 @@ static void loomc_amdgpu_target_identity_from_internal(
                   identity->amdhsa_features.xnack),
           },
   };
+}
+
+loomc_status_t loomc_amdgpu_target_identity_parse_artifact_key(
+    loomc_string_view_t artifact_key,
+    loomc_amdgpu_target_identity_t* out_identity) {
+  if (out_identity == NULL) {
+    return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
+                             "out_identity must not be NULL");
+  }
+  *out_identity = (loomc_amdgpu_target_identity_t){0};
+  LOOMC_RETURN_IF_ERROR(loomc_amdgpu_validate_string_view(artifact_key));
+
+  loom_amdgpu_target_identity_t identity = {0};
+  LOOMC_RETURN_IF_ERROR(loomc_status_from_iree(loom_amdgpu_artifact_key_parse(
+      iree_string_view_from_loomc(artifact_key), &identity)));
+  loomc_amdgpu_target_identity_from_internal(&identity, out_identity);
+  return loomc_ok_status();
 }
 
 typedef struct loomc_amdgpu_emit_artifact_storage_t {
@@ -440,7 +459,7 @@ loomc_status_t loomc_amdgpu_target_identity_from_hsa_isa_name(
 
   loom_amdgpu_amdhsa_target_id_t target_id = {0};
   LOOMC_RETURN_IF_ERROR(
-      loomc_status_from_iree(loom_amdgpu_target_info_parse_amdhsa_target_id(
+      loomc_status_from_iree(loom_amdgpu_amdhsa_target_id_parse(
           iree_string_view_from_loomc(hsa_isa_name), &target_id)));
   const loom_amdgpu_target_info_t* target = NULL;
   LOOMC_RETURN_IF_ERROR(

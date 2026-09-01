@@ -30,6 +30,7 @@ load(
 load(":executable_rules_test.bzl", "executable_rules_test_suite")
 load(":generate_rules_test.bzl", "generate_rules_test_suite")
 load(":glob_rules_test.bzl", "glob_rules_test_suite")
+load(":package_policy_test.bzl", "package_policy_test_suite")
 load(":query_rules_test.bzl", "query_rules_test_suite")
 
 package(default_visibility = ["//visibility:public"])
@@ -123,6 +124,8 @@ filegroup(
 )
 
 glob_rules_test_suite(name = "glob_tests")
+
+package_policy_test_suite(name = "package_policy_tests")
 
 query_rules_test_suite(name = "query_tests")
 

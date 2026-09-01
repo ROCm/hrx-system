@@ -17,7 +17,13 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
-from build_tools.amdgpu.target_map_data import (
+from loom.dialect.cache import CacheScope, CacheTemporal
+from loom.target.arch.amdgpu.lds_bank_service import (
+    AMDGPU_LDS_BANK_SERVICE_MODELS_WAVE32_B128_QUAD_PHASES,
+    amdgpu_lds_bank_service_model_info_by_key,
+    validate_amdgpu_lds_bank_service_model_selection,
+)
+from loom.target.arch.amdgpu.target_catalog import (
     AMDGPU_EXACT_TARGET_INFOS,
     AMDGPU_GENERIC_CODE_OBJECT_INFOS,
     AMDGPU_PHYSICAL_TARGET_INFOS,
@@ -31,14 +37,6 @@ from build_tools.amdgpu.target_map_data import (
     target_processor,
 )
 
-from loom.dialect.cache import CacheScope, CacheTemporal
-from loom.target.arch.amdgpu.lds_bank_service import (
-    AMDGPU_LDS_BANK_SERVICE_MODELS_WAVE32_B128_QUAD_PHASES,
-    amdgpu_lds_bank_service_model_info_by_key,
-    validate_amdgpu_lds_bank_service_model_selection,
-)
-
-AMDGPU_AMDHSA_TARGET_TRIPLE = "amdgcn-amd-amdhsa"
 AMDGPU_PROCESSOR_ORDINAL_NONE = (2**16) - 1
 AMDGPU_DESCRIPTOR_SET_ORDINAL_NONE = (2**16) - 1
 AMDGPU_LDS_BANK_SERVICE_MODEL_SET_ORDINAL_NONE = (2**16) - 1

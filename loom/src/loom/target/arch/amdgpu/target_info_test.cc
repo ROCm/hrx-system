@@ -11,12 +11,6 @@
 
 namespace {
 
-TEST(AmdgpuTargetInfoTest, GeneratedTargetIdPrefixHasCLinkage) {
-  EXPECT_TRUE(
-      iree_string_view_equal(loom_amdgpu_target_info_amdhsa_target_id_prefix,
-                             IREE_SV("amdgcn-amd-amdhsa--")));
-}
-
 TEST(AmdgpuTargetInfoTest, IteratesProcessors) {
   const iree_host_size_t count = loom_amdgpu_target_info_processor_count();
   ASSERT_GT(count, 0u);
@@ -277,37 +271,6 @@ TEST(AmdgpuTargetInfoTest, MatchesAmdhsaGfx9PlusProcessorElfFlags) {
   }
 }
 
-TEST(AmdgpuTargetInfoTest, ParsesAmdhsaTargetIdWithFeatureSuffix) {
-  loom_amdgpu_amdhsa_target_id_t target_id = {};
-  IREE_ASSERT_OK(loom_amdgpu_target_info_parse_amdhsa_target_id(
-      IREE_SV("amdgcn-amd-amdhsa--gfx942:sramecc+:xnack-"), &target_id));
-  ASSERT_NE(target_id.processor, nullptr);
-  EXPECT_TRUE(
-      iree_string_view_equal(target_id.processor->name, IREE_SV("gfx942")));
-  EXPECT_TRUE(iree_string_view_equal(target_id.feature_suffix,
-                                     IREE_SV("sramecc+:xnack-")));
-  EXPECT_EQ(target_id.features.sramecc, LOOM_AMDGPU_TARGET_FEATURE_ON);
-  EXPECT_EQ(target_id.features.xnack, LOOM_AMDGPU_TARGET_FEATURE_OFF);
-}
-
-TEST(AmdgpuTargetInfoTest, DistinguishesUnconstrainedAndUnsupportedFeatures) {
-  loom_amdgpu_amdhsa_target_id_t target_id = {};
-  IREE_ASSERT_OK(loom_amdgpu_target_info_parse_amdhsa_target_id(
-      IREE_SV("amdgcn-amd-amdhsa--gfx942"), &target_id));
-  EXPECT_EQ(target_id.features.sramecc, LOOM_AMDGPU_TARGET_FEATURE_ANY);
-  EXPECT_EQ(target_id.features.xnack, LOOM_AMDGPU_TARGET_FEATURE_ANY);
-
-  IREE_ASSERT_OK(loom_amdgpu_target_info_parse_amdhsa_target_id(
-      IREE_SV("amdgcn-amd-amdhsa--gfx1151"), &target_id));
-  EXPECT_EQ(target_id.features.sramecc, LOOM_AMDGPU_TARGET_FEATURE_UNSUPPORTED);
-  EXPECT_EQ(target_id.features.xnack, LOOM_AMDGPU_TARGET_FEATURE_UNSUPPORTED);
-
-  IREE_ASSERT_OK(loom_amdgpu_target_info_parse_amdhsa_target_id(
-      IREE_SV("amdgcn-amd-amdhsa--gfx1250"), &target_id));
-  EXPECT_EQ(target_id.features.sramecc, LOOM_AMDGPU_TARGET_FEATURE_UNSUPPORTED);
-  EXPECT_EQ(target_id.features.xnack, LOOM_AMDGPU_TARGET_FEATURE_UNSUPPORTED);
-}
-
 TEST(AmdgpuTargetInfoTest, ResolvesPhysicalObservationsToCanonicalTargets) {
   const loom_amdgpu_processor_info_t* processor =
       loom_amdgpu_target_info_find_processor(IREE_SV("gfx1250"));
@@ -375,75 +338,12 @@ TEST(AmdgpuTargetInfoTest, ResolvesOverlayTargetSemantics) {
       b0->kernel_metadata_extensions.entries[0].value, IREE_SV("B0")));
 }
 
-TEST(AmdgpuTargetInfoTest, EncodesAmdhsaTargetIdFeatureSuffixElfFlags) {
-  loom_amdgpu_amdhsa_target_id_t target_id = {};
-  IREE_ASSERT_OK(loom_amdgpu_target_info_parse_amdhsa_target_id(
-      IREE_SV("amdgcn-amd-amdhsa--gfx942:sramecc+:xnack-"), &target_id));
-  uint32_t elf_flags = 0;
-  IREE_ASSERT_OK(loom_amdgpu_target_info_amdhsa_target_id_elf_flags(
-      &target_id, &elf_flags));
-  EXPECT_EQ(elf_flags, target_id.processor->properties.elf.machine_flags |
-                           LOOM_AMDGPU_ELF_FEATURE_SRAMECC_ON_V4 |
-                           LOOM_AMDGPU_ELF_FEATURE_XNACK_OFF_V4);
-}
-
 TEST(AmdgpuTargetInfoTest, RejectsUnknownProcessor) {
   const loom_amdgpu_processor_info_t* processor = nullptr;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       loom_amdgpu_target_info_lookup_processor(IREE_SV("gfx9999"), &processor));
   EXPECT_EQ(processor, nullptr);
-}
-
-TEST(AmdgpuTargetInfoTest, RejectsNonAmdhsaTargetId) {
-  loom_amdgpu_amdhsa_target_id_t target_id = {};
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        loom_amdgpu_target_info_parse_amdhsa_target_id(
-                            IREE_SV("amdgcn-amd-amdpal--gfx1100"), &target_id));
-}
-
-TEST(AmdgpuTargetInfoTest, RejectsEmptyFeatureSuffix) {
-  loom_amdgpu_amdhsa_target_id_t target_id = {};
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      loom_amdgpu_target_info_parse_amdhsa_target_id(
-          IREE_SV("amdgcn-amd-amdhsa--gfx1100:"), &target_id));
-}
-
-TEST(AmdgpuTargetInfoTest, RejectsUnsupportedFeatureSuffix) {
-  loom_amdgpu_amdhsa_target_id_t target_id = {};
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      loom_amdgpu_target_info_parse_amdhsa_target_id(
-          IREE_SV("amdgcn-amd-amdhsa--gfx1100:wavefrontsize32+"), &target_id));
-}
-
-TEST(AmdgpuTargetInfoTest, RejectsFeatureUnsupportedByProcessor) {
-  loom_amdgpu_amdhsa_target_id_t target_id = {};
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      loom_amdgpu_target_info_parse_amdhsa_target_id(
-          IREE_SV("amdgcn-amd-amdhsa--gfx1100:sramecc+"), &target_id));
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      loom_amdgpu_target_info_parse_amdhsa_target_id(
-          IREE_SV("amdgcn-amd-amdhsa--gfx1250:xnack+"), &target_id));
-}
-
-TEST(AmdgpuTargetInfoTest, RejectsDuplicateFeatureSuffix) {
-  loom_amdgpu_amdhsa_target_id_t target_id = {};
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      loom_amdgpu_target_info_parse_amdhsa_target_id(
-          IREE_SV("amdgcn-amd-amdhsa--gfx942:xnack+:xnack-"), &target_id));
-}
-
-TEST(AmdgpuTargetInfoTest, RejectsUnsupportedTargetIdCharacters) {
-  loom_amdgpu_amdhsa_target_id_t target_id = {};
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      loom_amdgpu_target_info_parse_amdhsa_target_id(
-          IREE_SV("amdgcn-amd-amdhsa--gfx1100\\bad"), &target_id));
 }
 
 }  // namespace

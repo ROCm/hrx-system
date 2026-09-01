@@ -59,6 +59,23 @@ typedef struct loomc_amdgpu_target_identity_t {
   loomc_amdgpu_amdhsa_feature_states_t amdhsa_features;
 } loomc_amdgpu_target_identity_t;
 
+/// Parses a canonical AMDGPU artifact key into a target identity.
+///
+/// The key begins with an exact, generic, or overlay target selector and may
+/// carry AMDHSA feature coordinates such as `:sramecc+:xnack-`.
+///
+/// @param artifact_key Canonical compiler artifact-selection key.
+/// @param out_identity Receives the structured AMDGPU target identity.
+/// @return OK when the key names a supported compiler target and all feature
+/// coordinates are valid for its processor.
+///
+/// @lifetime
+/// `out_identity->target` is owned by Loom's static AMDGPU target tables and
+/// remains valid for the lifetime of the process.
+LOOMC_API_EXPORT loomc_status_t loomc_amdgpu_target_identity_parse_artifact_key(
+    loomc_string_view_t artifact_key,
+    loomc_amdgpu_target_identity_t* out_identity);
+
 /// AMDGPU target profile creation options.
 typedef struct loomc_amdgpu_profile_options_t {
   /// Structure type. Must be `LOOMC_STRUCTURE_TYPE_AMDGPU_PROFILE_OPTIONS`

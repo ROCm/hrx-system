@@ -12,8 +12,9 @@
 #include "loom/codegen/low/packet.h"
 #include "loom/ops/low/kernel.h"
 #include "loom/ops/low/ops.h"
+#include "loom/target/arch/amdgpu/amdhsa_target_id.h"
+#include "loom/target/arch/amdgpu/artifact_key.h"
 #include "loom/target/arch/amdgpu/facts.h"
-#include "loom/target/arch/amdgpu/target_id/target_id.h"
 #include "loom/target/emit/native/amdgpu/kernel_entry.h"
 #include "loom/target/emit/native/amdgpu/preflight.h"
 #include "loom/target/emit/native/amdgpu/storage_layout.h"
@@ -458,10 +459,10 @@ iree_status_t loom_amdgpu_kernel_record_build(
   }
 
   iree_string_view_t artifact_target_key = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(loom_amdgpu_artifact_target_key_format_arena(
+  IREE_RETURN_IF_ERROR(loom_amdgpu_artifact_key_format_arena(
       &target_facts->identity, scratch_arena, &artifact_target_key));
   iree_string_view_t code_object_target_id = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(loom_amdgpu_amdhsa_code_object_target_id_format(
+  IREE_RETURN_IF_ERROR(loom_amdgpu_amdhsa_target_id_format(
       &target_facts->identity, scratch_arena, &code_object_target_id));
   iree_string_view_t descriptor_symbol = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_record_concat3(

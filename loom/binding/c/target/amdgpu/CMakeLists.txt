@@ -28,6 +28,8 @@ loom_cc_library(
     loom::ops::kernel
     loom::ops::op_defs
     loom::rewrite::rewriter
+    loom::target::arch::amdgpu::amdhsa_target_id
+    loom::target::arch::amdgpu::artifact_key
     loom::target::arch::amdgpu::ops
     loom::target::arch::amdgpu::profile
     loom::target::arch::amdgpu::provider
@@ -36,6 +38,26 @@ loom_cc_library(
     loom::target::emit::native::amdgpu::hal_kernel_library
     loom::target::provider
     loom::target::types
+  ALWAYSLINK
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
+loom_cc_library(
+  NAME
+    iree_hal
+  HDRS
+    "${PROJECT_SOURCE_DIR}/loom/binding/c/include/loomc/target/amdgpu/iree_hal.h"
+  SRCS
+    "iree_hal.c"
+  DEPS
+    ::amdgpu
+    iree::hal
+    loom::binding::c::loomc
+    loom::binding::c::target::iree_hal
+    loom::target::arch::amdgpu::artifact_key
+    loom::target::arch::amdgpu::target_info
   ALWAYSLINK
   PUBLIC
 )

@@ -22,7 +22,6 @@ _SPIRV_TARGET_RECORDS_VISIBILITY = [
     "//loom/src/loom/target/arch/spirv/ops:__pkg__",
     "//loom/src/loom/target/emit/spirv:__pkg__",
     "//loom/src/loom/tooling/target/spirv:__pkg__",
-    "//loom/src/loom/tooling/target/spirv/execution:__pkg__",
 ]
 
 loom_cc_library(

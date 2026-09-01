@@ -29,6 +29,7 @@ class Requirement:
 class PackagePolicy:
     packages: list[str]
     build_requirements: list[Requirement]
+    excluded_packages: list[str]
     run_requirements: list[Requirement]
     resource_group: str | None = None
 
@@ -80,6 +81,10 @@ class ProjectRequirementPolicy:
                 if _matches(pattern, package_name)
             ]
             if not matching_patterns:
+                continue
+            if any(
+                _matches(pattern, package_name) for pattern in policy.excluded_packages
+            ):
                 continue
             _append_unique_requirements(build_requirements, policy.build_requirements)
             _append_unique_requirements(run_requirements, policy.run_requirements)
@@ -133,6 +138,7 @@ def _requirement_defs_env() -> dict:
 def package_policy(
     packages,
     build_requirements=None,
+    excluded_packages=None,
     forbidden_deps=None,
     run_requirements=None,
     resource_group=None,
@@ -141,6 +147,7 @@ def package_policy(
     return PackagePolicy(
         packages=list(packages),
         build_requirements=list(build_requirements or []),
+        excluded_packages=list(excluded_packages or []),
         run_requirements=list(run_requirements or []),
         resource_group=resource_group,
     )

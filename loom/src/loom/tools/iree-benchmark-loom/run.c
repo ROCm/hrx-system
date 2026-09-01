@@ -13,9 +13,9 @@
 #include "iree/base/internal/arena.h"
 #include "loom/ir/module.h"
 #include "loom/target/reporting/artifact_manifest.h"
+#include "loom/tooling/compile/options.h"
+#include "loom/tooling/compile/report_capture.h"
 #include "loom/tooling/config/config.h"
-#include "loom/tooling/execution/compile_options.h"
-#include "loom/tooling/execution/compile_report_capture.h"
 #include "loom/tooling/io/file.h"
 #include "loom/tooling/testbench/executor.h"
 #include "loom/tools/iree-benchmark-loom/comparison_execution.h"
@@ -33,11 +33,11 @@
 
 static iree_status_t iree_benchmark_loom_compile_report_options_initialize(
     const iree_benchmark_loom_options_t* options,
-    loom_run_compile_report_capture_options_t* out_options) {
-  loom_run_compile_report_capture_options_initialize(out_options);
-  IREE_RETURN_IF_ERROR(loom_run_compile_report_capture_options_parse_request(
+    loom_compile_report_capture_options_t* out_options) {
+  loom_compile_report_capture_options_initialize(out_options);
+  IREE_RETURN_IF_ERROR(loom_compile_report_capture_options_parse_request(
       options->compile_report, out_options));
-  if (out_options->sink_format == LOOM_RUN_COMPILE_REPORT_SINK_FORMAT_TEXT) {
+  if (out_options->sink_format == LOOM_COMPILE_REPORT_SINK_FORMAT_TEXT) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "iree-benchmark-loom emits structured JSON reports; use "
@@ -48,8 +48,8 @@ static iree_status_t iree_benchmark_loom_compile_report_options_initialize(
 
 static iree_status_t iree_benchmark_loom_artifact_manifest_options_initialize(
     const iree_benchmark_loom_options_t* options,
-    loom_run_candidate_artifact_manifest_options_t* out_options) {
-  *out_options = (loom_run_candidate_artifact_manifest_options_t){0};
+    loom_compile_artifact_manifest_options_t* out_options) {
+  *out_options = (loom_compile_artifact_manifest_options_t){0};
   IREE_RETURN_IF_ERROR(loom_target_artifact_manifest_mode_parse(
       options->artifact_manifest, &out_options->mode));
   if (out_options->mode != LOOM_TARGET_ARTIFACT_MANIFEST_MODE_NONE &&
@@ -240,13 +240,12 @@ iree_status_t iree_benchmark_loom_run_file(
     status = iree_benchmark_loom_append_config_files(
         &config_set, benchmark_options->config_files, allocator);
   }
-  loom_run_compile_report_capture_options_t compile_report_options = {0};
+  loom_compile_report_capture_options_t compile_report_options = {0};
   if (iree_status_is_ok(status)) {
     status = iree_benchmark_loom_compile_report_options_initialize(
         benchmark_options, &compile_report_options);
   }
-  loom_run_candidate_artifact_manifest_options_t artifact_manifest_options = {
-      0};
+  loom_compile_artifact_manifest_options_t artifact_manifest_options = {0};
   if (iree_status_is_ok(status)) {
     status = iree_benchmark_loom_artifact_manifest_options_initialize(
         benchmark_options, &artifact_manifest_options);

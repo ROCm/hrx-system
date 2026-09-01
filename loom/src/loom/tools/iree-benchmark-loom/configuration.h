@@ -17,8 +17,7 @@
 extern "C" {
 #endif
 
-typedef struct loom_run_hal_artifact_provider_registry_t
-    loom_run_hal_artifact_provider_registry_t;
+typedef struct loom_device_provider_registry_t loom_device_provider_registry_t;
 typedef struct loom_run_hal_testbench_context_t
     loom_run_hal_testbench_context_t;
 typedef struct loom_target_environment_t loom_target_environment_t;
@@ -45,9 +44,8 @@ typedef struct iree_benchmark_loom_configuration_t {
   loom_run_register_context_callback_t register_context;
   // Target environment linked into this runner.
   const loom_target_environment_t* target_environment;
-  // HAL artifact provider registry linked into this runner.
-  const loom_run_hal_artifact_provider_registry_t*
-      hal_artifact_provider_registry;
+  // Device provider registry linked into this runner.
+  const loom_device_provider_registry_t* device_provider_registry;
   // Appends target-specific requirement providers linked into this runner.
   iree_benchmark_loom_populate_requirement_providers_callback_t
       populate_requirement_providers;

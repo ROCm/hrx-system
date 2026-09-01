@@ -6,7 +6,26 @@
 
 #include "loom/target/arch/amdgpu/facts.h"
 
+#include "loom/codegen/low/target_binding.h"
 #include "loom/target/arch/amdgpu/target_info.h"
+
+const loom_amdgpu_processor_info_t*
+loom_amdgpu_target_processor_from_resolved_target(
+    const loom_low_resolved_target_t* target) {
+  const loom_amdgpu_target_facts_t* target_facts =
+      loom_amdgpu_target_facts_cast(target->target_facts);
+  return target_facts != NULL ? loom_amdgpu_target_info_target_processor(
+                                    target_facts->identity.target)
+                              : NULL;
+}
+
+const loom_amdgpu_processor_properties_t*
+loom_amdgpu_target_processor_properties_from_resolved_target(
+    const loom_low_resolved_target_t* target) {
+  const loom_amdgpu_target_facts_t* target_facts =
+      loom_amdgpu_target_facts_cast(target->target_facts);
+  return target_facts != NULL ? target_facts->properties.processor : NULL;
+}
 
 void loom_amdgpu_target_identity_initialize(
     const loom_amdgpu_target_info_t* target,

@@ -15,6 +15,7 @@ load(
 def package_policy(
         packages,
         build_requirements = [],
+        excluded_packages = [],
         forbidden_deps = [],
         run_requirements = [],
         resource_group = None):
@@ -23,6 +24,8 @@ def package_policy(
     Args:
       packages: Exact package names or package prefixes ending in "/...".
       build_requirements: Build requirements applied to matching packages.
+      excluded_packages: Exact package names or package prefixes omitted from
+        this policy even when they match |packages|.
       forbidden_deps: Direct dependency labels or package prefixes ending in
         "/..." that matching packages must not reference.
       run_requirements: Run requirements applied to matching packages.
@@ -33,6 +36,7 @@ def package_policy(
     """
     return struct(
         build_requirements = build_requirements,
+        excluded_packages = excluded_packages,
         forbidden_deps = forbidden_deps,
         packages = packages,
         resource_group = resource_group,
@@ -87,6 +91,11 @@ def collect_package_policy(package_name, policies):
             if _matches(pattern, package_name)
         ]
         if not matching_patterns:
+            continue
+        if any([
+            _matches(pattern, package_name)
+            for pattern in policy.excluded_packages
+        ]):
             continue
         _append_unique_requirements(build_requirements, policy.build_requirements)
         _append_unique_strings(forbidden_deps, policy.forbidden_deps)

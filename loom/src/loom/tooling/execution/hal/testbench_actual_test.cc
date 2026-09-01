@@ -128,25 +128,28 @@ static const loom_target_profile_t kFakeTargetProfile = {
 };
 
 static iree_status_t FakeHalSelectDeviceTarget(
-    const loom_run_hal_artifact_provider_t* provider,
+    const loom_device_provider_t* provider,
     const loom_run_hal_runtime_t* runtime, iree_allocator_t allocator,
-    loom_run_hal_device_target_t* out_target) {
+    loom_device_target_t* out_target) {
   (void)provider;
   (void)runtime;
   (void)allocator;
-  *out_target = (loom_run_hal_device_target_t){
-      /*.hal_target=*/nullptr,
-      /*.target_profile=*/&kFakeTargetProfile,
-      /*.target_key=*/IREE_SVL("fake"),
+  *out_target = (loom_device_target_t){
+      /*.executable_target=*/nullptr,
+      /*.artifact_target=*/
+      {
+          /*.target_profile=*/&kFakeTargetProfile,
+          /*.target_key=*/IREE_SVL("fake"),
+      },
   };
   return iree_ok_status();
 }
 
 static iree_status_t FakeHalSelectCompatibleDeviceTarget(
-    const loom_run_hal_artifact_provider_t* provider,
+    const loom_device_provider_t* provider,
     const loom_run_hal_runtime_t* runtime,
     const loom_target_facts_t* target_requirement, iree_allocator_t allocator,
-    loom_run_hal_device_target_t* out_target) {
+    loom_device_target_t* out_target) {
   if (target_requirement != nullptr) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "fake HAL provider requires targetless input");
@@ -154,13 +157,18 @@ static iree_status_t FakeHalSelectCompatibleDeviceTarget(
   return FakeHalSelectDeviceTarget(provider, runtime, allocator, out_target);
 }
 
-static const loom_run_hal_artifact_provider_t kFakeHalArtifactProvider = {
+static const loom_artifact_provider_t kFakeArtifactProvider = {
     /*.name=*/IREE_SVL("fake-hal"),
-    /*.hal_driver_name=*/IREE_SVL("fake"),
     /*.target_family_name=*/IREE_SVL("fake-target"),
+    /*.artifact_kind=*/LOOM_TARGET_COMPILE_ARTIFACT_KIND_HAL_EXECUTABLE,
     /*.default_pipeline_options=*/{},
-    /*.select_device_target=*/FakeHalSelectDeviceTarget,
-    /*.select_compatible_device_target=*/FakeHalSelectCompatibleDeviceTarget,
+};
+
+static const loom_device_provider_t kFakeDeviceProvider = {
+    /*.artifact_provider=*/&kFakeArtifactProvider,
+    /*.driver_name=*/IREE_SVL("fake"),
+    /*.select_target=*/FakeHalSelectDeviceTarget,
+    /*.select_compatible_target=*/FakeHalSelectCompatibleDeviceTarget,
 };
 
 static bool ModuleHasSymbol(const loom_module_t* module,
@@ -180,12 +188,12 @@ static bool ModuleSymbolIsFuncDef(const loom_module_t* module,
 }
 
 TEST_F(HalTestbenchActualTest, RequiresExplicitDeviceWhenHalProviderExists) {
-  const loom_run_hal_artifact_provider_t* artifact_providers[] = {
-      &kFakeHalArtifactProvider,
+  const loom_device_provider_t* device_providers[] = {
+      &kFakeDeviceProvider,
   };
-  loom_run_hal_artifact_provider_registry_t registry = {};
-  loom_run_hal_artifact_provider_registry_initialize_from_entries(
-      artifact_providers, IREE_ARRAYSIZE(artifact_providers), &registry);
+  loom_device_provider_registry_t registry = {};
+  loom_device_provider_registry_initialize_from_entries(
+      device_providers, IREE_ARRAYSIZE(device_providers), &registry);
 
   loom_run_hal_testbench_context_t context = {};
   loom_run_hal_testbench_context_initialize(&registry, iree_allocator_system(),
@@ -458,7 +466,7 @@ func.def inline @linked_identity(%value: index) -> (index) {
       loom_run_hal_testbench_select_kernel_launch(case_plan, &kernel_launch));
 
   loom_run_hal_testbench_context_t context = {};
-  context.artifact_provider = &kFakeHalArtifactProvider;
+  context.device_provider = &kFakeDeviceProvider;
   // Provider compile only needs target selection before the fake artifact
   // provider rejects this source; avoid requiring a real HAL device for a
   // rooted-link contract test.

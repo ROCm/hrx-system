@@ -26,8 +26,8 @@ static iree_status_t loom_amdgpu_hal_testbench_query_descriptor_set_requirement(
   IREE_RETURN_IF_ERROR(loom_testbench_requirement_read_string_attr(
       module, attrs, IREE_SV("descriptor_set"), &required_descriptor_set));
   IREE_RETURN_IF_ERROR(loom_run_hal_testbench_context_ensure_runtime(context));
-  if (context->artifact_provider == NULL ||
-      !iree_string_view_equal(context->artifact_provider->hal_driver_name,
+  if (context->device_provider == NULL ||
+      !iree_string_view_equal(context->device_provider->driver_name,
                               IREE_SV("amdgpu"))) {
     *out_result = (loom_testbench_requirement_provider_result_t){
         .state = LOOM_TESTBENCH_REQUIREMENT_PROVIDER_STATE_UNAVAILABLE,
@@ -37,18 +37,18 @@ static iree_status_t loom_amdgpu_hal_testbench_query_descriptor_set_requirement(
     };
     return iree_ok_status();
   }
-  if (context->artifact_provider->select_device_target == NULL) {
+  if (context->device_provider->select_target == NULL) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "AMDGPU requirement provider is missing a device "
                             "target selection hook");
   }
 
-  loom_run_hal_device_target_t target = {0};
-  IREE_RETURN_IF_ERROR(context->artifact_provider->select_device_target(
-      context->artifact_provider, &context->runtime, context->host_allocator,
+  loom_device_target_t target = {0};
+  IREE_RETURN_IF_ERROR(context->device_provider->select_target(
+      context->device_provider, &context->runtime, context->host_allocator,
       &target));
   const loom_amdgpu_target_profile_t* target_profile =
-      loom_amdgpu_target_profile_cast(target.target_profile);
+      loom_amdgpu_target_profile_cast(target.artifact_target.target_profile);
   const bool satisfied =
       target_profile != NULL &&
       iree_string_view_equal(
@@ -61,9 +61,9 @@ static iree_status_t loom_amdgpu_hal_testbench_query_descriptor_set_requirement(
     out_result->provider_code = iree_string_view_empty();
     out_result->display_message = iree_string_view_empty();
   }
-  if (context->artifact_provider->deinitialize_device_target != NULL) {
-    context->artifact_provider->deinitialize_device_target(
-        context->artifact_provider, &target, context->host_allocator);
+  if (context->device_provider->deinitialize_target != NULL) {
+    context->device_provider->deinitialize_target(
+        context->device_provider, &target, context->host_allocator);
   }
   return iree_ok_status();
 }

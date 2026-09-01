@@ -6,8 +6,6 @@
 
 """AMDGPU target-family record dialect."""
 
-from build_tools.amdgpu.target_map_data import AMDGPU_TARGET_ID_FEATURE_ORDER
-
 from loom.assembly import AttrDict, SymbolRef, TemplateParam
 from loom.dialect.target import target_record_attrs
 from loom.dsl import (
@@ -22,6 +20,7 @@ from loom.dsl import (
     SymbolDefinition,
     TargetLikeInterface,
 )
+from loom.target.arch.amdgpu.target_catalog import AMDGPU_TARGET_ID_FEATURE_ORDER
 from loom.target.arch.amdgpu.target_info import sorted_target_infos
 
 amdgpu_ops = Dialect(

@@ -21,7 +21,6 @@ _SPIRV_LOWER_VISIBILITY = ["//loom/src/loom/target/arch/spirv/lower:__pkg__"]
 
 _SPIRV_TOOLING_VISIBILITY = [
     "//loom/src/loom/tooling/target/spirv:__pkg__",
-    "//loom/src/loom/tooling/target/spirv/execution:__pkg__",
 ]
 
 loom_generated_cc_library(

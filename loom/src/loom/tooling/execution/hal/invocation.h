@@ -161,7 +161,7 @@ typedef struct loom_run_hal_invocation_request_t {
   // Initialized HAL runtime that owns the device used for dispatch.
   const loom_run_hal_runtime_t* runtime;
   // Provider-produced artifact bytes to prepare and dispatch.
-  const loom_run_hal_artifact_t* artifact;
+  const loom_device_artifact_t* artifact;
   // HAL dispatch function symbol and workgroup count.
   loom_run_hal_invocation_options_t options;
   // Textual input/output binding specs parsed before dispatch.
@@ -280,14 +280,14 @@ iree_status_t loom_run_hal_binding_list_total_byte_length(
 // storage for the synchronous HAL loader and released before returning.
 iree_status_t loom_run_hal_artifact_prepare(
     const loom_run_hal_runtime_t* runtime,
-    const loom_run_hal_artifact_t* artifact, iree_allocator_t host_allocator,
+    const loom_device_artifact_t* artifact, iree_allocator_t host_allocator,
     iree_hal_executable_t** out_hal_executable);
 
 // Prepares |artifact| once for repeated dispatches. The transient contiguous
 // loader clone is released before the prepared candidate is returned.
 iree_status_t loom_run_hal_prepared_candidate_prepare(
     const loom_run_hal_runtime_t* runtime,
-    const loom_run_hal_artifact_t* artifact, iree_allocator_t host_allocator,
+    const loom_device_artifact_t* artifact, iree_allocator_t host_allocator,
     loom_run_hal_prepared_candidate_t* out_candidate);
 
 // Dispatches a prepared HAL executable with |binding_list|.
@@ -398,7 +398,7 @@ iree_status_t loom_run_hal_dispatch_batch_collect_results(
 // Prepares and dispatches |artifact| through |runtime|.
 iree_status_t loom_run_hal_invocation_execute(
     const loom_run_hal_runtime_t* runtime,
-    const loom_run_hal_artifact_t* artifact,
+    const loom_device_artifact_t* artifact,
     const loom_run_hal_binding_list_t* binding_list,
     const loom_run_hal_invocation_options_t* options,
     iree_allocator_t host_allocator);
@@ -451,7 +451,7 @@ iree_status_t loom_run_hal_invocation_run_prepared(
 // container.
 iree_status_t loom_run_hal_invocation_run_plan(
     const loom_run_hal_runtime_t* runtime,
-    const loom_run_hal_artifact_t* artifact,
+    const loom_device_artifact_t* artifact,
     const loom_run_hal_invocation_plan_t* plan, iree_allocator_t allocator,
     loom_run_hal_invocation_result_t* result);
 

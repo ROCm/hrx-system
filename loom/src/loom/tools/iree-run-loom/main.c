@@ -19,8 +19,8 @@
 #include "loom/sanitizer/options.h"
 #include "loom/tooling/cli/help.h"
 #include "loom/tooling/compile/pipeline.h"
+#include "loom/tooling/compile/report_capture.h"
 #include "loom/tooling/context/context.h"
-#include "loom/tooling/execution/compile_report_capture.h"
 #include "loom/tooling/execution/execution_backend.h"
 #include "loom/tooling/execution/one_shot.h"
 #include "loom/tooling/execution/session.h"
@@ -304,9 +304,9 @@ static iree_status_t iree_run_loom_one_shot_options_initialize(
 }
 
 static iree_status_t iree_run_loom_compile_report_options_initialize(
-    loom_run_compile_report_capture_options_t* out_options) {
-  loom_run_compile_report_capture_options_initialize(out_options);
-  IREE_RETURN_IF_ERROR(loom_run_compile_report_capture_options_parse_request(
+    loom_compile_report_capture_options_t* out_options) {
+  loom_compile_report_capture_options_initialize(out_options);
+  IREE_RETURN_IF_ERROR(loom_compile_report_capture_options_parse_request(
       iree_make_cstring_view(FLAG_compile_report), out_options));
   return iree_ok_status();
 }
@@ -321,7 +321,7 @@ static iree_status_t iree_run_loom_sanitizer_options_initialize(
 static iree_status_t iree_run_loom_run_pass_pipeline(
     const iree_run_loom_configuration_t* configuration,
     loom_run_session_t* session, loom_run_module_t* run_module,
-    const loom_run_candidate_compile_options_t* compile_options,
+    const loom_compile_options_t* compile_options,
     loom_compile_pipeline_result_t* out_result) {
   loom_compile_pipeline_options_t pipeline_options = {0};
   loom_compile_pipeline_options_initialize(&pipeline_options);
@@ -486,7 +486,7 @@ int iree_run_loom_main(int argc, char** argv,
   iree_io_file_contents_t* contents = NULL;
   loom_run_session_t session = {0};
   loom_run_module_t run_module = {0};
-  loom_run_compile_report_capture_t compile_report_capture = {0};
+  loom_compile_report_capture_t compile_report_capture = {0};
   loom_run_one_shot_result_t run_result = {0};
   loom_run_one_shot_result_initialize(allocator, &run_result);
   int exit_code = 0;
@@ -530,24 +530,24 @@ int iree_run_loom_main(int argc, char** argv,
       source = loom_tooling_file_contents_string_view(contents);
     }
   }
-  loom_run_candidate_compile_options_t compile_options = {0};
-  loom_run_candidate_compile_options_initialize(&compile_options);
+  loom_compile_options_t compile_options = {0};
+  loom_compile_options_initialize(&compile_options);
   loom_compile_pipeline_result_t pipeline_result = {0};
   if (iree_status_is_ok(status)) {
     status = iree_run_loom_sanitizer_options_initialize(
         &compile_options.target_pipeline_options.sanitizer);
   }
-  loom_run_compile_report_capture_options_t compile_report_options = {0};
+  loom_compile_report_capture_options_t compile_report_options = {0};
   if (iree_status_is_ok(status)) {
     status = iree_run_loom_compile_report_options_initialize(
         &compile_report_options);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_run_compile_report_capture_initialize(
+    status = loom_compile_report_capture_initialize(
         &compile_report_options, allocator, &compile_report_capture);
   }
   if (iree_status_is_ok(status)) {
-    loom_run_compile_report_capture_configure_compile_options(
+    loom_compile_report_capture_configure_compile_options(
         &compile_report_capture, &compile_options);
   }
   loom_run_one_shot_options_t one_shot_options = {0};
@@ -608,7 +608,7 @@ int iree_run_loom_main(int argc, char** argv,
     exit_code = 1;
   }
 
-  loom_run_compile_report_capture_deinitialize(&compile_report_capture);
+  loom_compile_report_capture_deinitialize(&compile_report_capture);
   loom_run_one_shot_result_deinitialize(&run_result);
   loom_compile_pipeline_result_deinitialize(&pipeline_result);
   loom_run_module_deinitialize(&run_module);

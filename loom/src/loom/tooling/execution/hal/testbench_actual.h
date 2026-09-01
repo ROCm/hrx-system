@@ -7,7 +7,7 @@
 // HAL kernel-launch bridge for Loom check testbench actual-candidate execution.
 //
 // This layer is target-neutral: tools inject a composed target environment and
-// linked HAL artifact providers, while this bridge owns HAL runtime selection,
+// linked device providers, while this bridge owns HAL runtime selection,
 // candidate compilation, dispatch input conversion, and the callback shape used
 // by the testbench executor.
 
@@ -19,10 +19,11 @@
 #include "loom/analysis/kernel_launch_config.h"
 #include "loom/sanitizer/options.h"
 #include "loom/target/provider.h"
+#include "loom/tooling/compile/options.h"
 #include "loom/tooling/compile/pipeline.h"
-#include "loom/tooling/execution/compile_options.h"
 #include "loom/tooling/execution/hal/artifact.h"
 #include "loom/tooling/execution/hal/candidate.h"
+#include "loom/tooling/execution/hal/device_provider.h"
 #include "loom/tooling/execution/hal/invocation.h"
 #include "loom/tooling/execution/hal/runtime.h"
 #include "loom/tooling/execution/session.h"
@@ -38,16 +39,16 @@ extern "C" {
 typedef struct loom_tooling_config_set_t loom_tooling_config_set_t;
 
 typedef struct loom_run_hal_testbench_context_t {
-  // Linked artifact-provider registry selected by the tool binary.
-  const loom_run_hal_artifact_provider_registry_t* artifact_provider_registry;
+  // Linked device-provider registry selected by the tool binary.
+  const loom_device_provider_registry_t* device_provider_registry;
   // Host allocator used for runtime and candidate storage.
   iree_allocator_t host_allocator;
   // Device event sink used when initializing |runtime|.
   iree_hal_device_event_sink_t device_event_sink;
   // Sanitizer options used when deriving HAL runtime requirements.
   loom_sanitizer_options_t runtime_sanitizer_options;
-  // Selected HAL artifact provider for the active device.
-  const loom_run_hal_artifact_provider_t* artifact_provider;
+  // Selected provider for the active device.
+  const loom_device_provider_t* device_provider;
   // Shared HAL runtime used by kernel launches.
   loom_run_hal_runtime_t runtime;
   // True when |runtime_sanitizer_options| has been set by the tool.
@@ -56,9 +57,9 @@ typedef struct loom_run_hal_testbench_context_t {
   bool runtime_initialized;
 } loom_run_hal_testbench_context_t;
 
-// Initializes a HAL testbench context with a linked artifact-provider registry.
+// Initializes a HAL testbench context with a linked device-provider registry.
 void loom_run_hal_testbench_context_initialize(
-    const loom_run_hal_artifact_provider_registry_t* artifact_provider_registry,
+    const loom_device_provider_registry_t* device_provider_registry,
     iree_allocator_t host_allocator,
     loom_run_hal_testbench_context_t* out_context);
 
@@ -76,7 +77,7 @@ void loom_run_hal_testbench_context_set_runtime_sanitizer_options(
 void loom_run_hal_testbench_context_deinitialize(
     loom_run_hal_testbench_context_t* context);
 
-// Selects a linked artifact provider and initializes the HAL runtime on demand.
+// Selects a linked device provider and initializes the HAL runtime on demand.
 iree_status_t loom_run_hal_testbench_context_ensure_runtime(
     loom_run_hal_testbench_context_t* context);
 
@@ -123,9 +124,9 @@ typedef struct loom_run_hal_testbench_actual_provider_options_t {
   // Optional caller-owned structured compile report to populate.
   loom_target_compile_report_t* report;
   // Optional debug artifacts requested from the selected backend.
-  loom_run_candidate_artifact_flags_t artifact_flags;
+  loom_compile_artifact_flags_t artifact_flags;
   // Optional artifact manifest requested from the selected backend.
-  loom_run_candidate_artifact_manifest_options_t artifact_manifest;
+  loom_compile_artifact_manifest_options_t artifact_manifest;
 } loom_run_hal_testbench_actual_provider_options_t;
 
 typedef struct loom_run_hal_testbench_actual_provider_t {
@@ -153,9 +154,9 @@ typedef struct loom_run_hal_testbench_actual_provider_t {
   // Optional caller-owned structured compile report to populate.
   loom_target_compile_report_t* report;
   // Optional debug artifacts requested from the selected backend.
-  loom_run_candidate_artifact_flags_t artifact_flags;
+  loom_compile_artifact_flags_t artifact_flags;
   // Optional artifact manifest requested from the selected backend.
-  loom_run_candidate_artifact_manifest_options_t artifact_manifest;
+  loom_compile_artifact_manifest_options_t artifact_manifest;
   // Private compile module owned by this provider.
   loom_run_module_t compile_module;
   // Config-materialized source kernel retained for launch evaluation.
@@ -167,7 +168,7 @@ typedef struct loom_run_hal_testbench_actual_provider_t {
   // Backend-produced HAL executable candidate.
   loom_run_hal_candidate_t candidate;
   // Target selected before the compile pipeline runs.
-  loom_run_hal_device_target_t compile_device_target;
+  loom_device_target_t compile_device_target;
   // Prepared executable retained for correctness and benchmark dispatches.
   loom_run_hal_prepared_candidate_t prepared_candidate;
   // Dispatch options derived from the compiled source entry.
@@ -232,9 +233,9 @@ typedef struct loom_run_hal_testbench_actual_sequence_options_t {
   // Maximum diagnostics to emit before stopping. Zero uses the default.
   uint32_t max_errors;
   // Optional debug artifacts requested from the selected backend.
-  loom_run_candidate_artifact_flags_t artifact_flags;
+  loom_compile_artifact_flags_t artifact_flags;
   // Optional artifact manifest requested from the selected backend.
-  loom_run_candidate_artifact_manifest_options_t artifact_manifest;
+  loom_compile_artifact_manifest_options_t artifact_manifest;
 } loom_run_hal_testbench_actual_sequence_options_t;
 
 typedef struct loom_run_hal_testbench_actual_sequence_t {

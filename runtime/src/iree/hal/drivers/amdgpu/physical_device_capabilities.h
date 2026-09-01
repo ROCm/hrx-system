@@ -10,12 +10,12 @@
 #include "iree/base/api.h"
 #include "iree/hal/device.h"
 #include "iree/hal/drivers/amdgpu/aql_prepublished_kernarg_storage.h"
+#include "iree/hal/drivers/amdgpu/target/identity.h"
 #include "iree/hal/drivers/amdgpu/util/aql_ring.h"
 #include "iree/hal/drivers/amdgpu/util/kernarg_ring.h"
 #include "iree/hal/drivers/amdgpu/util/libhsa.h"
 #include "iree/hal/drivers/amdgpu/util/pm4_capabilities.h"
 #include "iree/hal/drivers/amdgpu/util/topology.h"
-#include "iree/hal/executable/amdgpu/target_id.h"
 
 #ifdef __cplusplus
 extern "C" {

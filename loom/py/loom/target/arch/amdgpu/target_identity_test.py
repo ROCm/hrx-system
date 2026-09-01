@@ -7,11 +7,11 @@
 from __future__ import annotations
 
 import pytest
-from build_tools.amdgpu.target_map_data import (
+
+from loom.target.arch.amdgpu.target_catalog import (
     AMDGPU_TARGET_ID_FEATURE_ORDER,
     target_id_features_for_processor,
 )
-
 from loom.target.arch.amdgpu.target_identity import (
     AmdgpuArtifactTargetKeyError,
     AmdgpuTargetFeatureState,

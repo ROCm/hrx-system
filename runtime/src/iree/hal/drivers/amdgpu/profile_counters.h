@@ -8,10 +8,10 @@
 #define IREE_HAL_DRIVERS_AMDGPU_PROFILE_COUNTERS_H_
 
 #include "iree/hal/device.h"
+#include "iree/hal/drivers/amdgpu/target/identity.h"
 #include "iree/hal/drivers/amdgpu/util/aql_emitter.h"
 #include "iree/hal/drivers/amdgpu/util/aql_ring.h"
 #include "iree/hal/drivers/amdgpu/util/libaqlprofile.h"
-#include "iree/hal/executable/amdgpu/target_id.h"
 #include "iree/hal/profile_schema.h"
 #include "iree/hal/profile_sink.h"
 

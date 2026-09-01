@@ -28,7 +28,8 @@ _AMDGPU_LINK_COPTS = iree_select({
 
 _AMDGPU_LINK_DEPS = iree_select({
     "//loom/config/target/arch:amdgpu": [
-        "//loom/src/loom/target/arch/amdgpu:artifact_profile",
+        "//loom/src/loom/target/arch/amdgpu:artifact_key",
+        "//loom/src/loom/target/arch/amdgpu:profile",
     ],
     "//conditions:default": [],
 })

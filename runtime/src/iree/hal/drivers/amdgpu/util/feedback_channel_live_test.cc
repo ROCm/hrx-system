@@ -13,13 +13,13 @@
 
 #include "iree/base/api.h"
 #include "iree/hal/drivers/amdgpu/abi/kernel_descriptor.h"
+#include "iree/hal/drivers/amdgpu/target/identity.h"
 #include "iree/hal/drivers/amdgpu/util/aql_emitter.h"
 #include "iree/hal/drivers/amdgpu/util/aql_ring.h"
 #include "iree/hal/drivers/amdgpu/util/feedback_channel.h"
 #include "iree/hal/drivers/amdgpu/util/feedback_channel_test_kernels.h"
 #include "iree/hal/drivers/amdgpu/util/libhsa.h"
 #include "iree/hal/drivers/amdgpu/util/topology.h"
-#include "iree/hal/executable/amdgpu/target_id.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 

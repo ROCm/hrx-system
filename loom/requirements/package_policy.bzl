@@ -19,7 +19,6 @@ load(
     "EMIT_LLVMIR",
     "EMIT_SPIRV",
     "EMIT_WASM",
-    "EXECUTE_IREE_HAL",
     "IMPORT_MLIR",
     "IMPORT_TILELANG",
     "TARGET_ARCH_AMDGPU",
@@ -27,13 +26,6 @@ load(
     "TARGET_ARCH_SPIRV",
     "TARGET_ARCH_WASM",
     "TARGET_ARCH_X86",
-)
-load(
-    "//runtime/requirements:defs.bzl",
-    "AMDGPU_RESOURCE",
-    "HAL_AMDGPU",
-    "HAL_VULKAN",
-    "VULKAN_DEVICE_RESOURCE",
 )
 
 PACKAGE_POLICIES = [
@@ -98,39 +90,11 @@ PACKAGE_POLICIES = [
         ],
     ),
     package_policy(
-        packages = ["loom/src/loom/tooling/target/amdgpu/execution/..."],
-        build_requirements = [
-            TARGET_ARCH_AMDGPU,
-            EMIT_AMDGPU,
-            EXECUTE_IREE_HAL,
-            HAL_AMDGPU,
-        ],
-    ),
-    package_policy(
-        packages = ["loom/src/loom/tooling/target/amdgpu/execution/..."],
-        run_requirements = [AMDGPU_RESOURCE],
-        resource_group = "loom-amdgpu-tests",
-    ),
-    package_policy(
         packages = ["loom/src/loom/tooling/target/spirv/..."],
         build_requirements = [
             TARGET_ARCH_SPIRV,
             EMIT_SPIRV,
         ],
-    ),
-    package_policy(
-        packages = ["loom/src/loom/tooling/target/spirv/execution/..."],
-        build_requirements = [
-            TARGET_ARCH_SPIRV,
-            EMIT_SPIRV,
-            EXECUTE_IREE_HAL,
-            HAL_VULKAN,
-        ],
-    ),
-    package_policy(
-        packages = ["loom/src/loom/tooling/target/spirv/execution/..."],
-        run_requirements = [VULKAN_DEVICE_RESOURCE],
-        resource_group = "loom-vulkan-tests",
     ),
     package_policy(
         packages = ["loom/py/loom/importers/mlir/..."],

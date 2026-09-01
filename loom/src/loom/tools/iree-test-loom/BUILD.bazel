@@ -19,32 +19,32 @@ package(
 )
 
 _AMDGPU_TARGET_COPTS = iree_select({
-    "//loom/config/target:amdgpu_artifacts": [
+    "//loom/config/execute:amdgpu_hal": [
         "-DIREE_TEST_LOOM_HAVE_AMDGPU=1",
     ],
     "//conditions:default": [],
 })
 
 _AMDGPU_TARGET_DEPS = iree_select({
-    "//loom/config/target:amdgpu_artifacts": [
+    "//loom/config/execute:amdgpu_hal": [
         "//loom/src/loom/target/arch/amdgpu:provider",
-        "//loom/src/loom/tooling/target/amdgpu:artifact_provider",
+        "//loom/src/loom/tooling/target/amdgpu:device_provider",
         "//loom/src/loom/tooling/target/amdgpu:testbench_requirements",
     ],
     "//conditions:default": [],
 })
 
 _SPIRV_VULKAN_TARGET_COPTS = iree_select({
-    "//loom/config/target:spirv_vulkan_artifacts": [
+    "//loom/config/execute:spirv_vulkan_hal": [
         "-DIREE_TEST_LOOM_HAVE_SPIRV=1",
     ],
     "//conditions:default": [],
 })
 
 _SPIRV_VULKAN_TARGET_DEPS = iree_select({
-    "//loom/config/target:spirv_vulkan_artifacts": [
+    "//loom/config/execute:spirv_vulkan_hal": [
         "//loom/src/loom/target/arch/spirv:provider",
-        "//loom/src/loom/tooling/target/spirv:artifact_provider",
+        "//loom/src/loom/tooling/target/spirv:device_provider",
         "//loom/src/loom/tooling/target/spirv:testbench_requirements",
     ],
     "//conditions:default": [],
@@ -76,7 +76,7 @@ loom_cc_library(
         "//loom/src/loom/tooling/config",
         "//loom/src/loom/tooling/context",
         "//loom/src/loom/tooling/execution:session",
-        "//loom/src/loom/tooling/execution/hal:artifact",
+        "//loom/src/loom/tooling/execution/hal:device_provider",
         "//loom/src/loom/tooling/execution/hal:testbench_actual",
         "//loom/src/loom/tooling/io:file",
         "//loom/src/loom/tooling/testbench:device_event",

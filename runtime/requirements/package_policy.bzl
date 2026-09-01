@@ -30,6 +30,9 @@ PACKAGE_POLICIES = [
     ),
     package_policy(
         packages = ["runtime/src/iree/hal/drivers/amdgpu/..."],
+        excluded_packages = [
+            "runtime/src/iree/hal/drivers/amdgpu/target/...",
+        ],
         run_requirements = [AMDGPU_RESOURCE],
         resource_group = "iree-hal-drivers-amdgpu-tests",
     ),

@@ -415,7 +415,7 @@
           },
           "stderr": {
             "contains": [
-              "HAL backend 'amdgpu-hal' requires --target= when 1 kernel.def root omit target(...) attrs"
+              "artifact backend 'amdgpu-hal' requires --target= when 1 kernel.def root omit target(...) attrs"
             ]
           }
         }
