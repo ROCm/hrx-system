@@ -187,7 +187,8 @@ static iree_async_socket_flags_t iree_async_iocp_socket_flags_from_options(
 static iree_status_t iree_async_iocp_socket_associate(
     iree_async_proactor_iocp_t* proactor, SOCKET sock) {
   HANDLE result = CreateIoCompletionPort(
-      (HANDLE)sock, (HANDLE)proactor->completion_port, /*CompletionKey=*/0,
+      (HANDLE)sock, (HANDLE)proactor->completion_port.handle,
+      /*CompletionKey=*/0,
       /*NumberOfConcurrentThreads=*/0);
   if (result == NULL) {
     DWORD error = GetLastError();
@@ -383,7 +384,7 @@ void iree_async_iocp_socket_destroy(iree_async_proactor_iocp_t* proactor,
 
   iree_status_t failure = (iree_status_t)iree_atomic_load(
       &socket->failure_status, iree_memory_order_acquire);
-  iree_status_ignore(failure);
+  iree_status_free(failure);
 
   iree_allocator_free(proactor->base.allocator, socket);
 

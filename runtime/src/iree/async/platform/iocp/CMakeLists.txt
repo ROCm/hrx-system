@@ -12,6 +12,21 @@ iree_add_all_subdirs()
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
 iree_cc_library(
   NAME
+    completion_port
+  HDRS
+    "completion_port.h"
+  SRCS
+    "completion_port.c"
+  DEPS
+    iree::base
+    iree::base::internal
+  PUBLIC
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+iree_cc_library(
+  NAME
     iocp
   HDRS
     "api.h"
@@ -24,6 +39,7 @@ iree_cc_library(
     "timer_list.c"
     "timer_list.h"
   DEPS
+    ::completion_port
     iree::async
     iree::async::types
     iree::async::util::continuation
@@ -38,6 +54,21 @@ iree_cc_library(
     iree::base::internal::memory
     iree::base::internal::path
   PUBLIC
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+iree_cc_test(
+  NAME
+    proactor_test
+  SRCS
+    "proactor_test.cc"
+  DEPS
+    ::completion_port
+    ::iocp
+    iree::async
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 endif()
 

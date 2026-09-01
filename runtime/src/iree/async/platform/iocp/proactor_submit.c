@@ -79,7 +79,7 @@ static iree_status_t iree_async_proactor_iocp_allocate_carrier(
   }
   memset(carrier, 0, sizeof(*carrier));
   carrier->type = carrier_type;
-  carrier->completion_port = proactor->completion_port;
+  carrier->proactor = proactor;
   carrier->operation = operation;
   carrier->io_handle = io_handle;
   iree_atomic_fetch_add(&proactor->outstanding_carrier_count, 1,
@@ -112,29 +112,58 @@ static DWORD iree_async_proactor_iocp_build_wsabuf(
   return count;
 }
 
+// Posts a direct completion after ownership of the operation's resource
+// release has transferred to the completion path. If posting fails, performs
+// that release locally and returns the transport error to submit(). This also
+// covers consuming operations such as close: their caller reference is the
+// release owned by the completion rather than a matching submit-time retain.
+static iree_status_t iree_async_proactor_iocp_post_owned_completion(
+    iree_async_proactor_iocp_t* proactor, iree_async_operation_t* operation,
+    DWORD bytes_transferred) {
+  iree_status_t post_status = iree_async_iocp_completion_port_post(
+      &proactor->completion_port, bytes_transferred, (ULONG_PTR)operation,
+      NULL);
+  if (!iree_status_is_ok(post_status)) {
+    iree_async_operation_release_resources(operation);
+    if (bytes_transferred != 0) {
+      iree_status_t operation_status = iree_make_status(
+          iree_status_code_from_win32_error(bytes_transferred),
+          "operation completed with Win32 error %lu before its IOCP "
+          "completion could be posted",
+          (unsigned long)bytes_transferred);
+      return iree_status_join(post_status, operation_status);
+    }
+  }
+  return post_status;
+}
+
 // Posts a synthetic failure completion for an operation whose overlapped I/O
 // call failed synchronously (error != ERROR_IO_PENDING / WSA_IO_PENDING). The
-// proactor API contract requires submit() to succeed and deliver errors through
-// the completion callback on the poll thread. This posts the operation as a
-// "direct completion" with the Win32 error code encoded in
-// dwNumberOfBytesTransferred for the poll thread to convert to iree_status_t.
-static void iree_async_proactor_iocp_post_submit_failure(
+// Win32 error code is encoded in dwNumberOfBytesTransferred for conversion by
+// the poll thread.
+static iree_status_t iree_async_proactor_iocp_post_submit_failure(
     iree_async_proactor_iocp_t* proactor, iree_async_operation_t* operation,
     int error_code) {
-  PostQueuedCompletionStatus((HANDLE)proactor->completion_port,
-                             (DWORD)error_code, (ULONG_PTR)operation, NULL);
+  return iree_async_proactor_iocp_post_owned_completion(proactor, operation,
+                                                        (DWORD)error_code);
 }
 
 // Posts a direct completion with a pre-computed iree_status_t. The status is
 // stashed in operation->next (available as scratch for non-carrier operations)
 // and retrieved by the poll thread via the sentinel in bytes_transferred.
-static void iree_async_proactor_iocp_post_stashed_status(
+static iree_status_t iree_async_proactor_iocp_post_stashed_status(
     iree_async_proactor_iocp_t* proactor, iree_async_operation_t* operation,
     iree_status_t op_status) {
   operation->next = (iree_async_operation_t*)(uintptr_t)op_status;
-  PostQueuedCompletionStatus((HANDLE)proactor->completion_port,
-                             IREE_ASYNC_IOCP_STASHED_STATUS_SENTINEL,
-                             (ULONG_PTR)operation, NULL);
+  iree_status_t post_status = iree_async_iocp_completion_port_post(
+      &proactor->completion_port, IREE_ASYNC_IOCP_STASHED_STATUS_SENTINEL,
+      (ULONG_PTR)operation, NULL);
+  if (!iree_status_is_ok(post_status)) {
+    operation->next = NULL;
+    iree_async_operation_release_resources(operation);
+    return iree_status_join(post_status, op_status);
+  }
+  return iree_ok_status();
 }
 
 //===----------------------------------------------------------------------===//
@@ -217,7 +246,7 @@ static iree_status_t iree_async_proactor_iocp_submit_socket_accept(
 
   // Associate accept socket with IOCP port.
   HANDLE result = CreateIoCompletionPort(
-      (HANDLE)accept_sock, (HANDLE)proactor->completion_port, 0, 0);
+      (HANDLE)accept_sock, (HANDLE)proactor->completion_port.handle, 0, 0);
   if (result == NULL) {
     DWORD error = GetLastError();
     closesocket(accept_sock);
@@ -263,9 +292,8 @@ static iree_status_t iree_async_proactor_iocp_submit_socket_accept(
     if (wsa_error != WSA_IO_PENDING) {
       closesocket(accept_sock);
       iree_async_proactor_iocp_release_carrier(proactor, carrier);
-      iree_async_proactor_iocp_post_submit_failure(proactor, &accept_op->base,
-                                                   wsa_error);
-      return iree_ok_status();
+      return iree_async_proactor_iocp_post_submit_failure(
+          proactor, &accept_op->base, wsa_error);
     }
     // WSA_IO_PENDING: I/O is pending, completion will arrive via GQCS.
   }
@@ -360,18 +388,16 @@ static iree_status_t iree_async_proactor_iocp_submit_socket_connect(
     int result = connect(sock, target_addr, addr_length);
     if (result == SOCKET_ERROR) {
       int wsa_error = WSAGetLastError();
-      iree_async_proactor_iocp_post_submit_failure(proactor, &connect_op->base,
-                                                   wsa_error);
-      return iree_ok_status();
+      return iree_async_proactor_iocp_post_submit_failure(
+          proactor, &connect_op->base, wsa_error);
     }
 
     socket->state = IREE_ASYNC_SOCKET_STATE_CONNECTED;
 
     // Post a direct completion (NULL overlapped, operation as CompletionKey,
     // bytes=0 for success).
-    PostQueuedCompletionStatus((HANDLE)proactor->completion_port, 0,
-                               (ULONG_PTR)&connect_op->base, NULL);
-    return iree_ok_status();
+    return iree_async_proactor_iocp_post_owned_completion(proactor,
+                                                          &connect_op->base, 0);
   }
 
   // TCP: use ConnectEx for overlapped (asynchronous) connection.
@@ -402,9 +428,8 @@ static iree_status_t iree_async_proactor_iocp_submit_socket_connect(
     int wsa_error = WSAGetLastError();
     if (wsa_error != WSA_IO_PENDING) {
       iree_async_proactor_iocp_release_carrier(proactor, carrier);
-      iree_async_proactor_iocp_post_submit_failure(proactor, &connect_op->base,
-                                                   wsa_error);
-      return iree_ok_status();
+      return iree_async_proactor_iocp_post_submit_failure(
+          proactor, &connect_op->base, wsa_error);
     }
   }
 
@@ -442,9 +467,8 @@ static iree_status_t iree_async_proactor_iocp_submit_socket_recv(
     int wsa_error = WSAGetLastError();
     if (wsa_error != WSA_IO_PENDING) {
       iree_async_proactor_iocp_release_carrier(proactor, carrier);
-      iree_async_proactor_iocp_post_submit_failure(proactor, &recv_op->base,
-                                                   wsa_error);
-      return iree_ok_status();
+      return iree_async_proactor_iocp_post_submit_failure(
+          proactor, &recv_op->base, wsa_error);
     }
   }
 
@@ -482,9 +506,8 @@ static iree_status_t iree_async_proactor_iocp_submit_socket_send(
     int wsa_error = WSAGetLastError();
     if (wsa_error != WSA_IO_PENDING) {
       iree_async_proactor_iocp_release_carrier(proactor, carrier);
-      iree_async_proactor_iocp_post_submit_failure(proactor, &send_op->base,
-                                                   wsa_error);
-      return iree_ok_status();
+      return iree_async_proactor_iocp_post_submit_failure(
+          proactor, &send_op->base, wsa_error);
     }
   }
 
@@ -523,9 +546,8 @@ static iree_status_t iree_async_proactor_iocp_submit_socket_sendto(
     int wsa_error = WSAGetLastError();
     if (wsa_error != WSA_IO_PENDING) {
       iree_async_proactor_iocp_release_carrier(proactor, carrier);
-      iree_async_proactor_iocp_post_submit_failure(proactor, &sendto_op->base,
-                                                   wsa_error);
-      return iree_ok_status();
+      return iree_async_proactor_iocp_post_submit_failure(
+          proactor, &sendto_op->base, wsa_error);
     }
   }
 
@@ -570,9 +592,8 @@ static iree_status_t iree_async_proactor_iocp_submit_socket_recvfrom(
     int wsa_error = WSAGetLastError();
     if (wsa_error != WSA_IO_PENDING) {
       iree_async_proactor_iocp_release_carrier(proactor, carrier);
-      iree_async_proactor_iocp_post_submit_failure(proactor, &recvfrom_op->base,
-                                                   wsa_error);
-      return iree_ok_status();
+      return iree_async_proactor_iocp_post_submit_failure(
+          proactor, &recvfrom_op->base, wsa_error);
     }
   }
 
@@ -641,9 +662,8 @@ static iree_status_t iree_async_proactor_iocp_submit_socket_recv_pool(
       // carrier-type-specific handling to do it.
       iree_async_buffer_lease_release(&recv_pool_op->lease);
       iree_async_proactor_iocp_release_carrier(proactor, carrier);
-      iree_async_proactor_iocp_post_submit_failure(
+      return iree_async_proactor_iocp_post_submit_failure(
           proactor, &recv_pool_op->base, wsa_error);
-      return iree_ok_status();
     }
   }
 
@@ -657,20 +677,22 @@ static iree_status_t iree_async_proactor_iocp_submit_socket_close(
   iree_async_socket_t* socket = close_op->socket;
   SOCKET sock = (SOCKET)socket->primitive.value.win32_handle;
 
-  // Close is synchronous, no carrier needed. Close the underlying socket,
-  // then post an immediate completion.
+  // Close is synchronous, no carrier needed. Preserve the socket handle on
+  // failure so its eventual destroy can retry instead of leaking it.
+  int close_error = 0;
   if (sock != INVALID_SOCKET) {
-    closesocket(sock);
+    if (closesocket(sock) == SOCKET_ERROR) {
+      close_error = WSAGetLastError();
+    }
   }
-  // Invalidate the socket primitive so destroy doesn't double-close.
-  socket->primitive = iree_async_primitive_none();
-  socket->state = IREE_ASYNC_SOCKET_STATE_CLOSED;
+  if (close_error == 0) {
+    socket->primitive = iree_async_primitive_none();
+    socket->state = IREE_ASYNC_SOCKET_STATE_CLOSED;
+  }
 
-  // Post immediate completion. Resources are not retained (close consumes
-  // the caller's reference via release_operation_resources).
-  PostQueuedCompletionStatus((HANDLE)proactor->completion_port, 0,
-                             (ULONG_PTR)&close_op->base, NULL);
-  return iree_ok_status();
+  // Close consumes the caller's reference when the completion is accepted.
+  return iree_async_proactor_iocp_post_owned_completion(
+      proactor, &close_op->base, (DWORD)close_error);
 }
 
 //===----------------------------------------------------------------------===//
@@ -703,16 +725,14 @@ static iree_status_t iree_async_proactor_iocp_submit_semaphore_signal(
   iree_async_operation_retain_resources(&signal_op->base);
 
   if (iree_status_is_ok(op_status)) {
-    PostQueuedCompletionStatus((HANDLE)proactor->completion_port, 0,
-                               (ULONG_PTR)&signal_op->base, NULL);
-  } else {
-    // Stash the error status for the poll thread. Cannot use bytes_transferred
-    // encoding (WSA error code) because the status from semaphore_signal
-    // carries a rich message that would be lost in the conversion.
-    iree_async_proactor_iocp_post_stashed_status(proactor, &signal_op->base,
-                                                 op_status);
+    return iree_async_proactor_iocp_post_owned_completion(proactor,
+                                                          &signal_op->base, 0);
   }
-  return iree_ok_status();
+  // Stash the error status for the poll thread. Cannot use bytes_transferred
+  // encoding (WSA error code) because the status from semaphore_signal carries
+  // a rich message that would be lost in the conversion.
+  return iree_async_proactor_iocp_post_stashed_status(
+      proactor, &signal_op->base, op_status);
 }
 
 // Submits a SEMAPHORE_WAIT by checking for immediate satisfaction, then
@@ -747,9 +767,8 @@ static iree_status_t iree_async_proactor_iocp_submit_semaphore_wait(
     IREE_TRACE_ZONE_END(z0);
     // Retain, post direct completion for poll-thread dispatch.
     iree_async_operation_retain_resources(&wait_op->base);
-    PostQueuedCompletionStatus((HANDLE)proactor->completion_port, 0,
-                               (ULONG_PTR)&wait_op->base, NULL);
-    return iree_ok_status();
+    return iree_async_proactor_iocp_post_owned_completion(proactor,
+                                                          &wait_op->base, 0);
   }
 
   iree_async_semaphore_wait_enqueue_callback_t enqueue_callback = {
@@ -802,9 +821,8 @@ static iree_status_t iree_async_proactor_iocp_submit_notification_signal(
 
   // Retain and post direct completion for poll-thread dispatch.
   iree_async_operation_retain_resources(&signal_op->base);
-  PostQueuedCompletionStatus((HANDLE)proactor->completion_port, 0,
-                             (ULONG_PTR)&signal_op->base, NULL);
-  return iree_ok_status();
+  return iree_async_proactor_iocp_post_owned_completion(proactor,
+                                                        &signal_op->base, 0);
 }
 
 //===----------------------------------------------------------------------===//
@@ -846,13 +864,11 @@ static iree_status_t iree_async_proactor_iocp_submit_message(
   // dispatch (consistent with all other operation types).
   iree_async_operation_retain_resources(&message->base);
   if (iree_status_is_ok(send_status)) {
-    PostQueuedCompletionStatus((HANDLE)proactor->completion_port, 0,
-                               (ULONG_PTR)&message->base, NULL);
-  } else {
-    iree_async_proactor_iocp_post_stashed_status(proactor, &message->base,
-                                                 send_status);
+    return iree_async_proactor_iocp_post_owned_completion(proactor,
+                                                          &message->base, 0);
   }
-  return iree_ok_status();
+  return iree_async_proactor_iocp_post_stashed_status(proactor, &message->base,
+                                                      send_status);
 }
 
 //===----------------------------------------------------------------------===//
@@ -917,9 +933,8 @@ static iree_status_t iree_async_proactor_iocp_submit_file_open(
   if (file_handle == INVALID_HANDLE_VALUE) {
     IREE_TRACE_ZONE_END(z0);
     // Post failure as direct completion for poll-thread delivery.
-    iree_async_proactor_iocp_post_submit_failure(proactor, &open_op->base,
-                                                 (int)open_error);
-    return iree_ok_status();
+    return iree_async_proactor_iocp_post_submit_failure(
+        proactor, &open_op->base, (int)open_error);
   }
 
   // Import the file handle (associates with IOCP port).
@@ -933,11 +948,17 @@ static iree_status_t iree_async_proactor_iocp_submit_file_open(
     return status;
   }
 
-  // Post immediate completion (open is synchronous).
-  PostQueuedCompletionStatus((HANDLE)proactor->completion_port, 0,
-                             (ULONG_PTR)&open_op->base, NULL);
+  // Post immediate completion (open is synchronous). If the packet cannot be
+  // accepted, the result reference never transfers to a callback and must be
+  // released here.
+  status = iree_async_iocp_completion_port_post(
+      &proactor->completion_port, 0, (ULONG_PTR)&open_op->base, NULL);
+  if (!iree_status_is_ok(status)) {
+    iree_async_file_release(open_op->opened_file);
+    open_op->opened_file = NULL;
+  }
   IREE_TRACE_ZONE_END(z0);
-  return iree_ok_status();
+  return status;
 }
 
 static iree_status_t iree_async_proactor_iocp_submit_file_read(
@@ -970,9 +991,8 @@ static iree_status_t iree_async_proactor_iocp_submit_file_read(
     DWORD error = GetLastError();
     if (error != ERROR_IO_PENDING) {
       iree_async_proactor_iocp_release_carrier(proactor, carrier);
-      iree_async_proactor_iocp_post_submit_failure(proactor, &read_op->base,
-                                                   (int)error);
-      return iree_ok_status();
+      return iree_async_proactor_iocp_post_submit_failure(
+          proactor, &read_op->base, (int)error);
     }
   }
 
@@ -1013,9 +1033,8 @@ static iree_status_t iree_async_proactor_iocp_submit_file_write(
     DWORD error = GetLastError();
     if (error != ERROR_IO_PENDING) {
       iree_async_proactor_iocp_release_carrier(proactor, carrier);
-      iree_async_proactor_iocp_post_submit_failure(proactor, &write_op->base,
-                                                   (int)error);
-      return iree_ok_status();
+      return iree_async_proactor_iocp_post_submit_failure(
+          proactor, &write_op->base, (int)error);
     }
   }
 
@@ -1029,26 +1048,21 @@ static iree_status_t iree_async_proactor_iocp_submit_file_close(
   iree_async_file_t* file = close_op->file;
   HANDLE file_handle = (HANDLE)file->primitive.value.win32_handle;
 
-  // Close is synchronous, no carrier needed.
-  BOOL close_ok = TRUE;
+  // Close is synchronous, no carrier needed. Preserve a handle that failed to
+  // close so the resource destructor can retry instead of losing ownership.
+  DWORD close_error = ERROR_SUCCESS;
   if (file_handle != NULL && file_handle != INVALID_HANDLE_VALUE) {
-    close_ok = CloseHandle(file_handle);
+    if (!CloseHandle(file_handle)) {
+      close_error = GetLastError();
+    }
   }
-  // Invalidate the handle to prevent double-close in destroy.
-  file->primitive.value.win32_handle = 0;
-
-  // Post completion. The caller's file reference is consumed by
-  // release_operation_resources during completion dispatch (no prior retain).
-  if (!close_ok) {
-    DWORD error = GetLastError();
-    iree_async_proactor_iocp_post_submit_failure(proactor, &close_op->base,
-                                                 (int)error);
-    return iree_ok_status();
+  if (close_error == ERROR_SUCCESS) {
+    file->primitive.value.win32_handle = 0;
   }
 
-  PostQueuedCompletionStatus((HANDLE)proactor->completion_port, 0,
-                             (ULONG_PTR)&close_op->base, NULL);
-  return iree_ok_status();
+  // The completion owns consumption of the caller's file reference.
+  return iree_async_proactor_iocp_post_owned_completion(
+      proactor, &close_op->base, close_error);
 }
 
 //===----------------------------------------------------------------------===//
