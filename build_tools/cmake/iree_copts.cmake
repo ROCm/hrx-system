@@ -377,25 +377,19 @@ endif()
 
 if(ANDROID)
   # logging.h on Android needs llog to link in Android logging.
-  iree_select_compiler_opts(_IREE_LOGGING_LINKOPTS
+  iree_select_compiler_opts(IREE_DEFAULT_LINK_LIBRARIES
     CLANG_OR_GCC
-      "-llog"
+      "log"
   )
 endif()
 
 if(NOT IREE_ARCH STREQUAL "wasm_32")
-  iree_select_compiler_opts(_IREE_MATH_LINKOPTS
+  iree_select_compiler_opts(IREE_DEFAULT_LINK_LIBRARIES
     CLANG_OR_GCC
       # Required by all modern software, effectively:
-      "-lm"
+      "m"
   )
 endif()
-
-iree_select_compiler_opts(IREE_DEFAULT_LINKOPTS
-  CLANG_OR_GCC
-    ${_IREE_MATH_LINKOPTS}
-    ${_IREE_LOGGING_LINKOPTS}
-)
 
 if(EMSCRIPTEN AND IREE_HAL_DRIVER_WEBGPU)
   iree_select_compiler_opts(IREE_DEFAULT_LINKOPTS

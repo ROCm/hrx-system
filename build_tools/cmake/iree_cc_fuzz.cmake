@@ -101,6 +101,7 @@ function(iree_cc_fuzz)
   target_link_libraries(${_NAME}
     PUBLIC
       ${_RULE_DEPS}
+      ${IREE_DEFAULT_LINK_LIBRARIES}
   )
   iree_add_data_dependencies(NAME ${_NAME} DATA ${_RULE_DATA})
 
