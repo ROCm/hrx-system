@@ -14,20 +14,24 @@ loom_cc_library(
     artifact
   HDRS
     "artifact.h"
+  DEPS
+    iree::hal
+    loom::tooling::compile::artifact
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    device_provider
+  HDRS
+    "device_provider.h"
   SRCS
-    "artifact.c"
+    "device_provider.c"
   DEPS
     iree::base
     iree::hal
-    loom::error::diagnostic
-    loom::ir
-    loom::target::pipeline_options
     loom::target::profile
-    loom::target::provider
-    loom::target::reporting::report
-    loom::target::types
-    loom::tooling::execution::compile_options
-    loom::verify
+    loom::tooling::compile::artifact
   PUBLIC
 )
 
@@ -58,12 +62,11 @@ loom_cc_library(
     "candidate.c"
   DEPS
     ::artifact
+    ::device_provider
     ::runtime
     iree::base
-    loom::target::reporting::report
     loom::tooling::execution::compile_options
     loom::tooling::execution::session
-    loom::verify
   PUBLIC
 )
 
@@ -95,6 +98,7 @@ loom_cc_library(
   DEPS
     ::artifact
     ::candidate
+    ::device_provider
     ::invocation
     ::runtime
     iree::base
@@ -157,6 +161,7 @@ loom_cc_library(
   DEPS
     ::artifact
     ::candidate
+    ::device_provider
     ::invocation
     ::runtime
     iree::base

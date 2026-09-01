@@ -117,14 +117,13 @@ loom_cc_binary(
     loom::target::module_specialization
     loom::target::reporting::artifact_manifest
     loom::tooling::cli::help
+    loom::tooling::compile::artifact
     loom::tooling::compile::pipeline
     loom::tooling::config
     loom::tooling::context
     loom::tooling::execution::compile_options
     loom::tooling::execution::compile_report_capture
     loom::tooling::execution::execution_provider
-    loom::tooling::execution::hal::artifact
-    loom::tooling::execution::hal::candidate
     loom::tooling::execution::session
     loom::tooling::io::file
     loom::tooling::io::source_path

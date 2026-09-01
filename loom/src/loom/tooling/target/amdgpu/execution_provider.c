@@ -4,11 +4,11 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/tooling/target/amdgpu/execution/provider.h"
+#include "loom/tooling/target/amdgpu/execution_provider.h"
 
 #include "loom/target/arch/amdgpu/provider.h"
 #include "loom/tooling/execution/hal/execution_backend.h"
-#include "loom/tooling/target/amdgpu/artifact_provider.h"
+#include "loom/tooling/target/amdgpu/device_provider.h"
 
 static const loom_run_hal_execution_backend_t kLoomAmdgpuHalExecutionBackend = {
     .base =
@@ -18,7 +18,7 @@ static const loom_run_hal_execution_backend_t kLoomAmdgpuHalExecutionBackend = {
             .probe = loom_run_hal_execution_backend_probe,
             .run_one_shot = loom_run_hal_execution_backend_run_one_shot,
         },
-    .artifact_provider = &loom_amdgpu_hal_artifact_provider,
+    .device_provider = &loom_amdgpu_device_provider,
 };
 
 static const loom_run_execution_backend_t* const
@@ -26,7 +26,7 @@ static const loom_run_execution_backend_t* const
         &kLoomAmdgpuHalExecutionBackend.base,
 };
 
-const loom_run_execution_provider_t loom_amdgpu_hal_execution_provider = {
+const loom_run_execution_provider_t loom_amdgpu_execution_provider = {
     .name = IREE_SVL("amdgpu"),
     .target_provider = &loom_amdgpu_target_provider,
     .execution_backends = kLoomAmdgpuExecutionBackends,

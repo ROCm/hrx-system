@@ -16,7 +16,7 @@ void iree_benchmark_loom_hal_context_initialize(
       .configuration = configuration,
   };
   loom_run_hal_testbench_context_initialize(
-      configuration->hal_artifact_provider_registry, host_allocator,
+      configuration->device_provider_registry, host_allocator,
       &out_context->execution);
 }
 

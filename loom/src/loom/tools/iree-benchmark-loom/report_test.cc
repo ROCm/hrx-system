@@ -788,9 +788,9 @@ TEST(BenchmarkReportTest, WritesArtifactManifestSidecarPath) {
   iree_benchmark_loom_hal_actual_provider_t provider = {};
   provider.context = &context;
   provider.execution.candidate_initialized = true;
-  provider.execution.candidate.compiled = true;
-  provider.execution.candidate.artifact.sidecars = &sidecar;
-  provider.execution.candidate.artifact.sidecar_count = 1;
+  provider.execution.candidate.artifact_candidate.compiled = true;
+  provider.execution.candidate.artifact_candidate.artifact.sidecars = &sidecar;
+  provider.execution.candidate.artifact_candidate.artifact.sidecar_count = 1;
 
   iree_benchmark_loom_run_identity_t run = {};
   run.run_id = IREE_SV("run");

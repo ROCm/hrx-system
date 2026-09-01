@@ -15,8 +15,8 @@
 extern "C" {
 #endif
 
-// Provider contribution for tools that compile and run AMDGPU HAL artifacts.
-extern const loom_run_execution_provider_t loom_amdgpu_hal_execution_provider;
+// Provider contribution for tools that compile and run AMDGPU artifacts.
+extern const loom_run_execution_provider_t loom_amdgpu_execution_provider;
 
 #ifdef __cplusplus
 }  // extern "C"

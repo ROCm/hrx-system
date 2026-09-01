@@ -4,6 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//build_tools/bazel:query.bzl", "iree_assert_dependency_boundary")
 load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
@@ -159,6 +160,7 @@ loom_cc_binary(
         "//loom/src/loom/target/arch/cmd:provider",
         "//loom/src/loom/target/reporting:artifact_manifest",
         "//loom/src/loom/tooling/cli:help",
+        "//loom/src/loom/tooling/compile:artifact",
         "//loom/src/loom/tooling/compile:pipeline",
         "//loom/src/loom/tooling/config",
         "//loom/src/loom/tooling/context",
@@ -166,8 +168,6 @@ loom_cc_binary(
         "//loom/src/loom/tooling/execution:compile_report_capture",
         "//loom/src/loom/tooling/execution:execution_provider",
         "//loom/src/loom/tooling/execution:session",
-        "//loom/src/loom/tooling/execution/hal:artifact",
-        "//loom/src/loom/tooling/execution/hal:candidate",
         "//loom/src/loom/tooling/io:file",
         "//loom/src/loom/tooling/io:source_path",
         "//loom/src/loom/tooling/pass:trace_cli",
@@ -175,6 +175,12 @@ loom_cc_binary(
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/io:file_handle",
     ] + _AMDGPU_COMPILE_DEPS + _SPIRV_VULKAN_COMPILE_DEPS + _LLVMIR_COMPILE_DEPS + _LLVMIR_AMDGPU_TARGET_ENV_DEPS + _LLVMIR_X86_TARGET_ENV_DEPS,
+)
+
+iree_assert_dependency_boundary(
+    name = "loom_compile_no_hal_dependencies",
+    forbidden_subtrees = ["//runtime/src/iree/hal/..."],
+    target = ":loom-compile",
 )
 
 loom_cc_test(

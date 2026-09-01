@@ -45,10 +45,10 @@ if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND LOOM_EXECUTE_IREE_HAL AND IREE
 endif()
 set(_iree_run_loom_platform_deps "")
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
-  list(APPEND _iree_run_loom_platform_deps loom::tooling::target::amdgpu::execution::provider)
+  list(APPEND _iree_run_loom_platform_deps loom::tooling::target::amdgpu::execution_provider)
 endif()
 if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_VULKAN)
-  list(APPEND _iree_run_loom_platform_deps loom::tooling::target::spirv::execution::provider)
+  list(APPEND _iree_run_loom_platform_deps loom::tooling::target::spirv::execution_provider)
 endif()
 loom_cc_binary(
   NAME

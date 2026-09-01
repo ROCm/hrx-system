@@ -16,6 +16,22 @@ package(
 )
 
 loom_cc_library(
+    name = "artifact",
+    srcs = ["artifact.c"],
+    hdrs = ["artifact.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/target:pipeline_options",
+        "//loom/src/loom/target:profile",
+        "//loom/src/loom/target:provider",
+        "//loom/src/loom/target:types",
+        "//loom/src/loom/target/reporting:report",
+        "//loom/src/loom/tooling/execution:compile_options",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "pipeline",
     srcs = ["pipeline.c"],
     hdrs = ["pipeline.h"],

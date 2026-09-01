@@ -26,7 +26,6 @@ _SPIRV_DESCRIPTOR_VISIBILITY = [
 
 _SPIRV_LOW_REGISTRY_VISIBILITY = [
     "//loom/src/loom/tooling/target/spirv:__pkg__",
-    "//loom/src/loom/tooling/target/spirv/execution:__pkg__",
 ] + _SPIRV_ROOT_VISIBILITY
 
 loom_low_descriptor_cc_library(

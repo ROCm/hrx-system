@@ -54,7 +54,7 @@ _AMDGPU_PROVIDER_VISIBILITY = [
     "//loom/src/loom/tools/iree-benchmark-loom:__pkg__",
     "//loom/src/loom/tools/iree-test-loom:__pkg__",
     "//loom/src/loom/tools/loom-compile:__pkg__",
-    "//loom/src/loom/tooling/target/amdgpu/execution:__pkg__",
+    "//loom/src/loom/tooling/target/amdgpu:__pkg__",
 ] + _AMDGPU_BINDING_VISIBILITY + _AMDGPU_CHECK_VISIBILITY
 
 #===------------------------------------------------------------------------===#

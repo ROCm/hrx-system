@@ -25,12 +25,12 @@ loom_run_hal_execution_backend_from_base(
   return iree_containerof(backend, loom_run_hal_execution_backend_t, base);
 }
 
-static const loom_run_hal_artifact_provider_t*
-loom_run_hal_execution_backend_artifact_provider(
+static const loom_device_provider_t*
+loom_run_hal_execution_backend_device_provider(
     const loom_run_execution_backend_t* backend) {
   const loom_run_hal_execution_backend_t* hal_execution_backend =
       loom_run_hal_execution_backend_from_base(backend);
-  return hal_execution_backend->artifact_provider;
+  return hal_execution_backend->device_provider;
 }
 
 static bool loom_run_hal_execution_backend_accept_entry(
@@ -83,58 +83,60 @@ static iree_status_t loom_run_hal_write_candidate_artifacts(
     const loom_run_hal_candidate_t* candidate) {
   IREE_RETURN_IF_ERROR(loom_run_hal_write_artifact(
       request->options->hal_target_artifact_output_path,
-      candidate->artifact.target_artifact_data, IREE_SV("target-native"),
-      request->host_allocator));
+      candidate->artifact_candidate.artifact.target_artifact_data,
+      IREE_SV("target-native"), request->host_allocator));
   return loom_run_hal_write_artifact(
       request->options->hal_executable_output_path,
-      candidate->artifact.executable_data, IREE_SV("executable"),
-      request->host_allocator);
+      candidate->artifact_candidate.artifact.executable_data,
+      IREE_SV("executable"), request->host_allocator);
 }
 
 iree_status_t loom_run_hal_execution_backend_probe(
     const loom_run_execution_backend_t* backend,
     const loom_run_one_shot_probe_request_t* request) {
-  const loom_run_hal_artifact_provider_t* artifact_provider =
-      loom_run_hal_execution_backend_artifact_provider(backend);
-  if (artifact_provider->select_device_target == NULL) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "HAL artifact provider '%.*s' is missing required device target "
-        "selection hook",
-        (int)artifact_provider->name.size, artifact_provider->name.data);
+  const loom_device_provider_t* device_provider =
+      loom_run_hal_execution_backend_device_provider(backend);
+  if (device_provider->select_target == NULL) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "device provider '%.*s' is missing required target "
+                            "selection hook",
+                            (int)device_provider->artifact_provider->name.size,
+                            device_provider->artifact_provider->name.data);
   }
 
   loom_run_hal_runtime_t runtime = {0};
-  loom_run_hal_device_target_t target = {0};
+  loom_device_target_t target = {0};
 
   loom_run_hal_runtime_options_t runtime_options;
-  loom_run_hal_runtime_options_initialize(artifact_provider->hal_driver_name,
+  loom_run_hal_runtime_options_initialize(device_provider->driver_name,
                                           &runtime_options);
   iree_status_t status = loom_run_hal_runtime_initialize(
       &runtime_options, request->host_allocator, &runtime);
   if (iree_status_is_ok(status)) {
-    status = artifact_provider->select_device_target(
-        artifact_provider, &runtime, request->host_allocator, &target);
+    status = device_provider->select_target(device_provider, &runtime,
+                                            request->host_allocator, &target);
   }
   if (iree_status_is_ok(status)) {
     status = iree_string_builder_append_format(
         &request->result->output,
-        "backend: %.*s\nhal provider: %.*s\nhal driver: %.*s\n",
+        "backend: %.*s\ndevice provider: %.*s\nhal driver: %.*s\n",
         (int)backend->name.size, backend->name.data,
-        (int)artifact_provider->name.size, artifact_provider->name.data,
-        (int)artifact_provider->hal_driver_name.size,
-        artifact_provider->hal_driver_name.data);
+        (int)device_provider->artifact_provider->name.size,
+        device_provider->artifact_provider->name.data,
+        (int)device_provider->driver_name.size,
+        device_provider->driver_name.data);
   }
   if (iree_status_is_ok(status) &&
-      !iree_string_view_is_empty(target.target_key)) {
+      !iree_string_view_is_empty(target.artifact_target.target_key)) {
     status = iree_string_builder_append_format(
-        &request->result->output, "hal target key: %.*s\n",
-        (int)target.target_key.size, target.target_key.data);
+        &request->result->output, "device target key: %.*s\n",
+        (int)target.artifact_target.target_key.size,
+        target.artifact_target.target_key.data);
   }
 
-  if (artifact_provider->deinitialize_device_target != NULL) {
-    artifact_provider->deinitialize_device_target(artifact_provider, &target,
-                                                  request->host_allocator);
+  if (device_provider->deinitialize_target != NULL) {
+    device_provider->deinitialize_target(device_provider, &target,
+                                         request->host_allocator);
   }
   loom_run_hal_runtime_deinitialize(&runtime);
   return status;
@@ -143,8 +145,8 @@ iree_status_t loom_run_hal_execution_backend_probe(
 iree_status_t loom_run_hal_execution_backend_run_one_shot(
     const loom_run_execution_backend_t* backend,
     const loom_run_one_shot_request_t* request) {
-  const loom_run_hal_artifact_provider_t* artifact_provider =
-      loom_run_hal_execution_backend_artifact_provider(backend);
+  const loom_device_provider_t* device_provider =
+      loom_run_hal_execution_backend_device_provider(backend);
 
   loom_run_hal_runtime_t runtime = {0};
   loom_run_hal_candidate_t candidate = {0};
@@ -166,7 +168,7 @@ iree_status_t loom_run_hal_execution_backend_run_one_shot(
   }
 
   loom_run_hal_runtime_options_t runtime_options;
-  loom_run_hal_runtime_options_initialize(artifact_provider->hal_driver_name,
+  loom_run_hal_runtime_options_initialize(device_provider->driver_name,
                                           &runtime_options);
   runtime_options.runtime_features |=
       loom_run_hal_runtime_features_from_sanitizer_options(
@@ -177,21 +179,21 @@ iree_status_t loom_run_hal_execution_backend_run_one_shot(
   }
   if (iree_status_is_ok(status) && entry_selected) {
     status = loom_run_hal_candidate_compile(
-        artifact_provider, &runtime, request->run_module, entry.target_facts,
+        device_provider, &runtime, request->run_module, entry.target_facts,
         request->compile_options, request->host_allocator, &candidate);
   }
-  if (iree_status_is_ok(status) && !candidate.compiled) {
+  if (iree_status_is_ok(status) && !candidate.artifact_candidate.compiled) {
     request->result->exit_code = 1;
   }
-  if (iree_status_is_ok(status) && candidate.compiled) {
+  if (iree_status_is_ok(status) && candidate.artifact_candidate.compiled) {
     status = loom_run_hal_write_candidate_artifacts(request, &candidate);
   }
-  if (iree_status_is_ok(status) && candidate.compiled &&
+  if (iree_status_is_ok(status) && candidate.artifact_candidate.compiled &&
       !request->options->hal_emit_only) {
     loom_run_hal_invocation_request_t invocation_request = {0};
     loom_run_hal_invocation_request_initialize(&invocation_request);
     invocation_request.runtime = &runtime;
-    invocation_request.artifact = &candidate.artifact;
+    invocation_request.artifact = &candidate.device_artifact;
     invocation_request.options.function_name =
         request->options->hal_function_name;
     invocation_request.options.workgroup_count[0] =
@@ -229,7 +231,7 @@ iree_status_t loom_run_hal_execution_backend_run_one_shot(
           &invocation_request, request->host_allocator, &invocation_result);
     }
   }
-  if (iree_status_is_ok(status) && candidate.compiled &&
+  if (iree_status_is_ok(status) && candidate.artifact_candidate.compiled &&
       !request->options->hal_emit_only) {
     request->result->exit_code = invocation_result.exit_code;
     status = iree_string_builder_append_string(

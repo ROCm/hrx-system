@@ -695,7 +695,7 @@ int iree_test_loom_main(int argc, char** argv,
   }
   if (iree_status_is_ok(status)) {
     loom_run_hal_testbench_context_initialize(
-        configuration->hal_artifact_provider_registry, allocator, &hal_context);
+        configuration->device_provider_registry, allocator, &hal_context);
     loom_run_hal_testbench_context_set_runtime_sanitizer_options(
         &hal_context, &sanitizer_options);
   }

@@ -24,18 +24,20 @@ exports_files([
 
 loom_cc_library(
     name = "artifact",
-    srcs = ["artifact.c"],
     hdrs = ["artifact.h"],
     deps = [
-        "//loom/src/loom/error:diagnostic",
-        "//loom/src/loom/ir",
-        "//loom/src/loom/target:pipeline_options",
+        "//loom/src/loom/tooling/compile:artifact",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+loom_cc_library(
+    name = "device_provider",
+    srcs = ["device_provider.c"],
+    hdrs = ["device_provider.h"],
+    deps = [
         "//loom/src/loom/target:profile",
-        "//loom/src/loom/target:provider",
-        "//loom/src/loom/target:types",
-        "//loom/src/loom/target/reporting:report",
-        "//loom/src/loom/tooling/execution:compile_options",
-        "//loom/src/loom/verify",
+        "//loom/src/loom/tooling/compile:artifact",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
     ],
@@ -62,11 +64,10 @@ loom_cc_library(
     hdrs = ["candidate.h"],
     deps = [
         ":artifact",
+        ":device_provider",
         ":runtime",
-        "//loom/src/loom/target/reporting:report",
         "//loom/src/loom/tooling/execution:compile_options",
         "//loom/src/loom/tooling/execution:session",
-        "//loom/src/loom/verify",
         "//runtime/src/iree/base",
     ],
 )
@@ -93,6 +94,7 @@ loom_cc_library(
     deps = [
         ":artifact",
         ":candidate",
+        ":device_provider",
         ":invocation",
         ":runtime",
         "//loom/src/loom/analysis:kernel_launch_config",
@@ -149,6 +151,7 @@ loom_cc_library(
     deps = [
         ":artifact",
         ":candidate",
+        ":device_provider",
         ":invocation",
         ":runtime",
         "//loom/src/loom/target:entry_selection",

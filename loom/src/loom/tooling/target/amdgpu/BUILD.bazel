@@ -8,6 +8,7 @@ load(
     "//loom/build_tools/bazel:build_defs.bzl",
     "loom_cc_library",
     "loom_cc_test",
+    "loom_config_compatible_with",
 )
 
 package(
@@ -16,26 +17,56 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
+_AMDGPU_HAL_COMPATIBLE_WITH = loom_config_compatible_with([
+    "//loom/config/execute:iree_hal_amdgpu",
+])
+
 loom_cc_library(
     name = "artifact_provider",
     srcs = ["artifact_provider.c"],
     hdrs = ["artifact_provider.h"],
     deps = [
         "//loom/src/loom/ir",
-        "//loom/src/loom/target:types",
         "//loom/src/loom/target/arch/amdgpu:artifact_key",
-        "//loom/src/loom/target/arch/amdgpu:facts",
         "//loom/src/loom/target/arch/amdgpu:profile",
         "//loom/src/loom/target/arch/amdgpu:runtime_requirements",
         "//loom/src/loom/target/arch/amdgpu:target_info",
         "//loom/src/loom/target/emit/native/amdgpu:hal_kernel_library",
         "//loom/src/loom/target/emit/native/amdgpu:runtime_globals",
-        "//loom/src/loom/target/reporting:report",
-        "//loom/src/loom/tooling/execution:compile_options",
-        "//loom/src/loom/tooling/execution/hal:artifact",
+        "//loom/src/loom/tooling/compile:artifact",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "device_provider",
+    srcs = ["device_provider.c"],
+    hdrs = ["device_provider.h"],
+    target_compatible_with = _AMDGPU_HAL_COMPATIBLE_WITH,
+    deps = [
+        ":artifact_provider",
+        "//loom/src/loom/target/arch/amdgpu:artifact_key",
+        "//loom/src/loom/target/arch/amdgpu:facts",
+        "//loom/src/loom/target/arch/amdgpu:profile",
+        "//loom/src/loom/target/arch/amdgpu:target_info",
+        "//loom/src/loom/tooling/execution/hal:device_provider",
         "//loom/src/loom/tooling/execution/hal:runtime",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
+    ],
+)
+
+loom_cc_library(
+    name = "execution_provider",
+    srcs = ["execution_provider.c"],
+    hdrs = ["execution_provider.h"],
+    target_compatible_with = _AMDGPU_HAL_COMPATIBLE_WITH,
+    deps = [
+        ":device_provider",
+        "//loom/src/loom/target/arch/amdgpu:provider",
+        "//loom/src/loom/tooling/execution:execution_provider",
+        "//loom/src/loom/tooling/execution/hal:execution_backend",
+        "//runtime/src/iree/base",
     ],
 )
 
@@ -62,7 +93,6 @@ loom_cc_test(
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_registry",
         "//loom/src/loom/sanitizer:options",
-        "//loom/src/loom/target:entry_selection",
         "//loom/src/loom/target/arch/amdgpu:artifact_key",
         "//loom/src/loom/target/arch/amdgpu:profile",
         "//loom/src/loom/target/arch/amdgpu:target_info",
@@ -72,9 +102,25 @@ loom_cc_test(
         "//loom/src/loom/target/reporting:report",
         "//loom/src/loom/testing:byte_sequence",
         "//loom/src/loom/testing:module_ptr",
-        "//loom/src/loom/tooling/execution/hal:runtime",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "device_provider_test",
+    srcs = ["device_provider_test.cc"],
+    target_compatible_with = _AMDGPU_HAL_COMPATIBLE_WITH,
+    deps = [
+        ":device_provider",
+        "//loom/src/loom/target/arch/amdgpu:artifact_key",
+        "//loom/src/loom/target/arch/amdgpu:facts",
+        "//loom/src/loom/target/arch/amdgpu:profile",
+        "//loom/src/loom/target/arch/amdgpu:target_info",
+        "//loom/src/loom/tooling/execution/hal:runtime",
+        "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

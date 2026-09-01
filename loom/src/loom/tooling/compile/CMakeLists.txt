@@ -11,6 +11,25 @@ iree_add_all_subdirs()
 
 loom_cc_library(
   NAME
+    artifact
+  HDRS
+    "artifact.h"
+  SRCS
+    "artifact.c"
+  DEPS
+    iree::base
+    loom::ir
+    loom::target::pipeline_options
+    loom::target::profile
+    loom::target::provider
+    loom::target::reporting::report
+    loom::target::types
+    loom::tooling::execution::compile_options
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     pipeline
   HDRS
     "pipeline.h"

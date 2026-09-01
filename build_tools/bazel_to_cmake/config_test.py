@@ -7,6 +7,7 @@
 
 import re
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -780,12 +781,36 @@ loom_module(
 
     def test_requirement_policy_loads_cross_project_requirement_defs(self):
         repo_root = Path(__file__).resolve().parents[2]
-        policy = bazel_to_cmake_requirements.load_project_policy(
-            str(repo_root),
-            "loom",
+        source = """
+load(
+    "//loom/requirements:defs.bzl",
+    "EXECUTE_IREE_HAL",
+    "TARGET_ARCH_AMDGPU",
+)
+load("//runtime/requirements:defs.bzl", "HAL_AMDGPU")
+
+PACKAGE_POLICIES = [
+    package_policy(
+        packages = ["synthetic/cross_project/..."],
+        build_requirements = [
+            TARGET_ARCH_AMDGPU,
+            EXECUTE_IREE_HAL,
+            HAL_AMDGPU,
+        ],
+    ),
+]
+"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            policy_path = Path(temp_dir) / "package_policy.bzl"
+            policy_path.write_text(source, encoding="utf-8")
+            env = bazel_to_cmake_requirements._requirement_defs_env()
+            env["package_policy"] = bazel_to_cmake_requirements.package_policy
+            bazel_to_cmake_requirements._exec_bzl(policy_path, env, repo_root)
+        policy = bazel_to_cmake_requirements.ProjectRequirementPolicy(
+            package_policies=list(env["PACKAGE_POLICIES"]),
         )
 
-        collected = policy.collect("loom/src/loom/tooling/target/amdgpu/execution")
+        collected = policy.collect("synthetic/cross_project/child")
         conditions = [
             condition.cmake_condition for condition in collected.cmake_conditions()
         ]

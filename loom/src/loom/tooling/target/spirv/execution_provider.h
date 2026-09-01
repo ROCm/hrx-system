@@ -15,10 +15,9 @@
 extern "C" {
 #endif
 
-// Provider contribution for tools that compile and run Vulkan SPIR-V HAL
+// Provider contribution for tools that compile and run Vulkan SPIR-V
 // artifacts.
-extern const loom_run_execution_provider_t
-    loom_spirv_vulkan_hal_execution_provider;
+extern const loom_run_execution_provider_t loom_spirv_vulkan_execution_provider;
 
 #ifdef __cplusplus
 }  // extern "C"

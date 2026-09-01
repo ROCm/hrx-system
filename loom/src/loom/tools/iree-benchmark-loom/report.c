@@ -32,8 +32,8 @@ static iree_string_view_t iree_benchmark_loom_selected_device_uri(
   if (device_uris.count == 1) {
     return device_uris.values[0];
   }
-  if (context->execution.artifact_provider != NULL) {
-    return context->execution.artifact_provider->hal_driver_name;
+  if (context->execution.device_provider != NULL) {
+    return context->execution.device_provider->driver_name;
   }
   return iree_string_view_empty();
 }
@@ -365,12 +365,14 @@ iree_status_t iree_benchmark_loom_write_hal_context_identity_fields_json(
       iree_benchmark_loom_selected_device_uri(context)));
   IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
       object, IREE_SV("driver"),
-      context->execution.artifact_provider->hal_driver_name));
+      context->execution.device_provider->driver_name));
   IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
-      object, IREE_SV("provider"), context->execution.artifact_provider->name));
+      object, IREE_SV("provider"),
+      context->execution.device_provider->artifact_provider->name));
   IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
       object, IREE_SV("target_family"),
-      context->execution.artifact_provider->target_family_name));
+      context->execution.device_provider->artifact_provider
+          ->target_family_name));
   if (context->execution.runtime_initialized &&
       context->execution.runtime.device != NULL) {
     IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
@@ -1657,7 +1659,7 @@ static iree_status_t iree_benchmark_loom_write_candidate_byte_artifact(
 }
 
 static iree_status_t iree_benchmark_loom_find_artifact_manifest_sidecar(
-    const loom_run_hal_artifact_t* artifact,
+    const loom_artifact_t* artifact,
     const loom_target_emit_sidecar_artifact_t** out_sidecar) {
   *out_sidecar = NULL;
   for (iree_host_size_t i = 0; i < artifact->sidecar_count; ++i) {
@@ -1685,14 +1687,14 @@ iree_status_t iree_benchmark_loom_write_compiled_artifacts(
       provider->context->artifact_bundle;
   if (!iree_benchmark_loom_artifact_bundle_wants_debug_artifacts(bundle) ||
       !provider->execution.candidate_initialized ||
-      !provider->execution.candidate.compiled) {
+      !provider->execution.candidate.artifact_candidate.compiled) {
     return iree_ok_status();
   }
 
   iree_string_builder_t leaf;
   iree_string_builder_initialize(allocator, &leaf);
-  const loom_run_hal_artifact_t* artifact =
-      &provider->execution.candidate.artifact;
+  const loom_artifact_t* artifact =
+      &provider->execution.candidate.artifact_candidate.artifact;
   iree_status_t status = iree_benchmark_loom_append_candidate_artifact_stem(
       run, candidate, provider, &leaf);
   if (iree_status_is_ok(status)) {

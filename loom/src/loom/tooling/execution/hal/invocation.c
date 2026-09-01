@@ -207,34 +207,35 @@ iree_status_t loom_run_hal_binding_list_clone(
 
 iree_status_t loom_run_hal_artifact_prepare(
     const loom_run_hal_runtime_t* runtime,
-    const loom_run_hal_artifact_t* artifact, iree_allocator_t host_allocator,
+    const loom_device_artifact_t* artifact, iree_allocator_t host_allocator,
     iree_hal_executable_t** out_hal_executable) {
   *out_hal_executable = NULL;
   if (runtime->device == NULL) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "HAL runtime is not initialized");
   }
-  if (artifact->hal_target == NULL) {
+  if (artifact->executable_target == NULL) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "HAL artifact was not emitted for the active device target");
   }
-  if (artifact->executable_data == NULL ||
-      iree_byte_sequence_length(artifact->executable_data) == 0) {
+  if (artifact->artifact == NULL ||
+      artifact->artifact->executable_data == NULL ||
+      iree_byte_sequence_length(artifact->artifact->executable_data) == 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "HAL artifact has no executable contents");
   }
 
   iree_byte_span_t executable_data = iree_byte_span_empty();
   iree_status_t status = iree_byte_sequence_clone(
-      artifact->executable_data, host_allocator, &executable_data);
+      artifact->artifact->executable_data, host_allocator, &executable_data);
   if (iree_status_is_ok(status)) {
     iree_hal_executable_load_params_t load_params;
     iree_hal_executable_load_params_initialize(&load_params);
     load_params.executable_data = iree_const_cast_byte_span(executable_data);
     status = iree_hal_device_load_executable(
-        runtime->device, IREE_HAL_QUEUE_AFFINITY_ANY, artifact->hal_target,
-        &load_params, out_hal_executable);
+        runtime->device, IREE_HAL_QUEUE_AFFINITY_ANY,
+        artifact->executable_target, &load_params, out_hal_executable);
   }
   iree_allocator_free(host_allocator, executable_data.data);
   return status;
@@ -242,13 +243,13 @@ iree_status_t loom_run_hal_artifact_prepare(
 
 iree_status_t loom_run_hal_prepared_candidate_prepare(
     const loom_run_hal_runtime_t* runtime,
-    const loom_run_hal_artifact_t* artifact, iree_allocator_t host_allocator,
+    const loom_device_artifact_t* artifact, iree_allocator_t host_allocator,
     loom_run_hal_prepared_candidate_t* out_candidate) {
   loom_run_hal_prepared_candidate_initialize(out_candidate);
   iree_status_t status = loom_run_hal_artifact_prepare(
       runtime, artifact, host_allocator, &out_candidate->executable);
   if (iree_status_is_ok(status)) {
-    out_candidate->target_bundle = artifact->target_bundle;
+    out_candidate->target_bundle = artifact->artifact->target_bundle;
   }
   if (!iree_status_is_ok(status)) {
     loom_run_hal_prepared_candidate_deinitialize(out_candidate);
@@ -693,7 +694,7 @@ iree_status_t loom_run_hal_dispatch(
 
 iree_status_t loom_run_hal_invocation_execute(
     const loom_run_hal_runtime_t* runtime,
-    const loom_run_hal_artifact_t* artifact,
+    const loom_device_artifact_t* artifact,
     const loom_run_hal_binding_list_t* binding_list,
     const loom_run_hal_invocation_options_t* options,
     iree_allocator_t host_allocator) {
@@ -1590,7 +1591,7 @@ iree_status_t loom_run_hal_invocation_run_prepared(
 
 iree_status_t loom_run_hal_invocation_run_plan(
     const loom_run_hal_runtime_t* runtime,
-    const loom_run_hal_artifact_t* artifact,
+    const loom_device_artifact_t* artifact,
     const loom_run_hal_invocation_plan_t* plan, iree_allocator_t allocator,
     loom_run_hal_invocation_result_t* result) {
   iree_string_builder_reset(&result->output);

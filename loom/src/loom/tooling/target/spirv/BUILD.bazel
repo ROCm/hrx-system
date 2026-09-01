@@ -23,8 +23,12 @@ LOOM_SPIRV_VULKAN_COMPATIBLE_WITH = loom_config_compatible_with([
     "//runtime/config/hal:driver_vulkan",
 ])
 
+_SPIRV_COMPILE_COMPATIBLE_WITH = loom_config_compatible_with([
+    "//loom/config/target:spirv_artifacts",
+])
+
 _SPIRV_VULKAN_HAL_COMPATIBLE_WITH = loom_config_compatible_with([
-    "//loom/config/execute:spirv_vulkan_hal",
+    "//loom/config/execute:iree_hal_vulkan",
 ])
 
 _SPIRV_VULKAN_EXECUTION_TEST_TAGS = [
@@ -37,23 +41,48 @@ loom_cc_library(
     name = "artifact_provider",
     srcs = ["artifact_provider.c"],
     hdrs = ["artifact_provider.h"],
-    target_compatible_with = LOOM_SPIRV_VULKAN_COMPATIBLE_WITH,
+    target_compatible_with = _SPIRV_COMPILE_COMPATIBLE_WITH,
     deps = [
-        ":vulkan_profile",
         "//loom/src/loom/target:entry_selection",
         "//loom/src/loom/target:function_contract",
         "//loom/src/loom/target:low_descriptor_registry",
         "//loom/src/loom/target:types",
-        "//loom/src/loom/target/arch/spirv:facts",
         "//loom/src/loom/target/arch/spirv:low_verify",
         "//loom/src/loom/target/arch/spirv/descriptors:low_registry",
         "//loom/src/loom/target/emit/spirv:module_builder",
         "//loom/src/loom/target/emit/spirv:module_emitter",
         "//loom/src/loom/target/reporting:artifact_manifest_collect",
         "//loom/src/loom/target/reporting:report",
-        "//loom/src/loom/tooling/execution:compile_options",
-        "//loom/src/loom/tooling/execution/hal:artifact",
+        "//loom/src/loom/tooling/compile:artifact",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "device_provider",
+    srcs = ["device_provider.c"],
+    hdrs = ["device_provider.h"],
+    target_compatible_with = _SPIRV_VULKAN_HAL_COMPATIBLE_WITH,
+    deps = [
+        ":artifact_provider",
+        ":vulkan_profile",
+        "//loom/src/loom/target/arch/spirv:facts",
+        "//loom/src/loom/tooling/execution/hal:device_provider",
         "//loom/src/loom/tooling/execution/hal:runtime",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "execution_provider",
+    srcs = ["execution_provider.c"],
+    hdrs = ["execution_provider.h"],
+    target_compatible_with = _SPIRV_VULKAN_HAL_COMPATIBLE_WITH,
+    deps = [
+        ":device_provider",
+        "//loom/src/loom/target/arch/spirv:provider",
+        "//loom/src/loom/tooling/execution:execution_provider",
+        "//loom/src/loom/tooling/execution/hal:execution_backend",
         "//runtime/src/iree/base",
     ],
 )
@@ -94,28 +123,36 @@ loom_cc_library(
 loom_cc_test(
     name = "artifact_provider_test",
     srcs = ["artifact_provider_test.cc"],
-    target_compatible_with = LOOM_SPIRV_VULKAN_COMPATIBLE_WITH,
+    target_compatible_with = _SPIRV_COMPILE_COMPATIBLE_WITH,
     deps = [
         ":artifact_provider",
-        ":vulkan_profile",
         "//loom/src/loom/codegen/low:text_asm",
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_registry",
-        "//loom/src/loom/target:types",
-        "//loom/src/loom/target/arch/spirv:profile",
         "//loom/src/loom/target/arch/spirv/descriptors:low_registry",
         "//loom/src/loom/target/arch/spirv/ops",
         "//loom/src/loom/testing:byte_sequence",
         "//loom/src/loom/testing:module_ptr",
-        "//loom/src/loom/tooling/execution/hal:artifact",
-        "//loom/src/loom/tooling/execution/hal:runtime",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "device_provider_test",
+    srcs = ["device_provider_test.cc"],
+    target_compatible_with = _SPIRV_VULKAN_HAL_COMPATIBLE_WITH,
+    deps = [
+        ":device_provider",
+        ":vulkan_profile",
+        "//loom/src/loom/target/arch/spirv:profile",
+        "//loom/src/loom/tooling/execution/hal:runtime",
+        "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/drivers/vulkan",
         "//runtime/src/iree/hal/drivers/vulkan:device_spec",
-        "//runtime/src/iree/hal/drivers/vulkan:headers",
         "//runtime/src/iree/hal/utils:device_spec_builder",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

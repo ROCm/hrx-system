@@ -10,7 +10,7 @@
 #include <stdio.h>
 
 #include "loom/tooling/execution/execution_provider.h"
-#include "loom/tooling/execution/hal/artifact.h"
+#include "loom/tooling/execution/hal/device_provider.h"
 #include "loom/tools/iree-benchmark-loom/main.h"
 
 #ifndef IREE_BENCHMARK_LOOM_HAVE_AMDGPU
@@ -22,17 +22,17 @@
 
 #define IREE_BENCHMARK_LOOM_HAVE_ANY_PROVIDER \
   (IREE_BENCHMARK_LOOM_HAVE_AMDGPU || IREE_BENCHMARK_LOOM_HAVE_SPIRV)
-#define IREE_BENCHMARK_LOOM_HAVE_ANY_HAL_ARTIFACT_PROVIDER \
+#define IREE_BENCHMARK_LOOM_HAVE_ANY_DEVICE_PROVIDER \
   (IREE_BENCHMARK_LOOM_HAVE_AMDGPU || IREE_BENCHMARK_LOOM_HAVE_SPIRV)
 
 #if IREE_BENCHMARK_LOOM_HAVE_AMDGPU
 #include "loom/target/arch/amdgpu/provider.h"
-#include "loom/tooling/target/amdgpu/artifact_provider.h"
+#include "loom/tooling/target/amdgpu/device_provider.h"
 #include "loom/tooling/target/amdgpu/testbench_requirements.h"
 #endif  // IREE_BENCHMARK_LOOM_HAVE_AMDGPU
 #if IREE_BENCHMARK_LOOM_HAVE_SPIRV
 #include "loom/target/arch/spirv/provider.h"
-#include "loom/tooling/target/spirv/artifact_provider.h"
+#include "loom/tooling/target/spirv/device_provider.h"
 #include "loom/tooling/target/spirv/testbench_requirements.h"
 #endif  // IREE_BENCHMARK_LOOM_HAVE_SPIRV
 
@@ -72,28 +72,27 @@ static const loom_run_execution_provider_set_t kIreeBenchmarkLoomProviderSet = {
 #endif  // IREE_BENCHMARK_LOOM_HAVE_ANY_PROVIDER
 };
 
-#if IREE_BENCHMARK_LOOM_HAVE_ANY_HAL_ARTIFACT_PROVIDER
-static const loom_run_hal_artifact_provider_t* const
-    kIreeBenchmarkLoomHalArtifactProviders[] = {
+#if IREE_BENCHMARK_LOOM_HAVE_ANY_DEVICE_PROVIDER
+static const loom_device_provider_t* const kIreeBenchmarkLoomDeviceProviders[] =
+    {
 #if IREE_BENCHMARK_LOOM_HAVE_AMDGPU
-        &loom_amdgpu_hal_artifact_provider,
+        &loom_amdgpu_device_provider,
 #endif  // IREE_BENCHMARK_LOOM_HAVE_AMDGPU
 #if IREE_BENCHMARK_LOOM_HAVE_SPIRV
-        &loom_spirv_vulkan_hal_artifact_provider,
+        &loom_spirv_vulkan_device_provider,
 #endif  // IREE_BENCHMARK_LOOM_HAVE_SPIRV
 };
-#endif  // IREE_BENCHMARK_LOOM_HAVE_ANY_HAL_ARTIFACT_PROVIDER
+#endif  // IREE_BENCHMARK_LOOM_HAVE_ANY_DEVICE_PROVIDER
 
-static const loom_run_hal_artifact_provider_registry_t
-    kIreeBenchmarkLoomHalArtifactProviderRegistry = {
-#if IREE_BENCHMARK_LOOM_HAVE_ANY_HAL_ARTIFACT_PROVIDER
-        .providers = kIreeBenchmarkLoomHalArtifactProviders,
-        .provider_count =
-            IREE_ARRAYSIZE(kIreeBenchmarkLoomHalArtifactProviders),
+static const loom_device_provider_registry_t
+    kIreeBenchmarkLoomDeviceProviderRegistry = {
+#if IREE_BENCHMARK_LOOM_HAVE_ANY_DEVICE_PROVIDER
+        .providers = kIreeBenchmarkLoomDeviceProviders,
+        .provider_count = IREE_ARRAYSIZE(kIreeBenchmarkLoomDeviceProviders),
 #else
         .providers = NULL,
         .provider_count = 0,
-#endif  // IREE_BENCHMARK_LOOM_HAVE_ANY_HAL_ARTIFACT_PROVIDER
+#endif  // IREE_BENCHMARK_LOOM_HAVE_ANY_DEVICE_PROVIDER
 };
 
 #if IREE_BENCHMARK_LOOM_HAVE_AMDGPU || IREE_BENCHMARK_LOOM_HAVE_SPIRV
@@ -165,8 +164,7 @@ int main(int argc, char** argv) {
               &environment),
       .target_environment =
           loom_run_execution_environment_target_environment(&environment),
-      .hal_artifact_provider_registry =
-          &kIreeBenchmarkLoomHalArtifactProviderRegistry,
+      .device_provider_registry = &kIreeBenchmarkLoomDeviceProviderRegistry,
       .populate_requirement_providers =
           {
               .fn = iree_benchmark_loom_populate_requirement_providers,

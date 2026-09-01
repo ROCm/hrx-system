@@ -27,7 +27,7 @@ _AMDGPU_EXECUTE_COPTS = iree_select({
 
 _AMDGPU_EXECUTE_DEPS = iree_select({
     "//loom/config/execute:amdgpu_hal": [
-        "//loom/src/loom/tooling/target/amdgpu/execution:provider",
+        "//loom/src/loom/tooling/target/amdgpu:execution_provider",
     ],
     "//conditions:default": [],
 })
@@ -41,7 +41,7 @@ _SPIRV_VULKAN_EXECUTE_COPTS = iree_select({
 
 _SPIRV_VULKAN_EXECUTE_DEPS = iree_select({
     "//loom/config/execute:spirv_vulkan_hal": [
-        "//loom/src/loom/tooling/target/spirv/execution:provider",
+        "//loom/src/loom/tooling/target/spirv:execution_provider",
     ],
     "//conditions:default": [],
 })
