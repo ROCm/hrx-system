@@ -123,6 +123,7 @@ if(WIN32 AND IREE_ARCH STREQUAL "x86_64")
   add_custom_command(
     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/arch/x86_64_msvc.obj
     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/arch/x86_64_msvc.asm
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/arch
     COMMAND ml64 /nologo /Zi /c /Fo ${CMAKE_CURRENT_BINARY_DIR}/arch/x86_64_msvc.obj ${CMAKE_CURRENT_SOURCE_DIR}/arch/x86_64_msvc.asm
     VERBATIM
   )
