@@ -74,6 +74,8 @@ iree_cc_library(
     "interpreter_call.h"
     "interpreter_conversion.c"
     "interpreter_conversion.h"
+    "interpreter_dispatch.c"
+    "interpreter_dispatch.h"
     "interpreter_float.h"
     "interpreter_float_math.c"
     "interpreter_float_math.h"

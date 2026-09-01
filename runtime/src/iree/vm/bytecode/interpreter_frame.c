@@ -7,6 +7,49 @@
 #include "iree/vm/bytecode/interpreter_frame.h"
 
 #include "iree/base/allocator.h"
+#include "iree/vm/bytecode/module_reader.h"
+
+void iree_vm_bytecode_frame_initialize(
+    const iree_vm_bytecode_v0_function_row_t* function,
+    const iree_vm_bytecode_v0_signature_row_t* signature,
+    iree_vm_bytecode_execution_state_t* state) {
+  const iree_vm_call_packet_t* call = state->call;
+  const uint32_t ref_count =
+      function->ref_register_count_u16 + function->local_ref_count_u32;
+  state->ref_count = ref_count;
+  for (uint32_t i = 0; i < ref_count; ++i) {
+    state->refs[i] = iree_vm_ref_null();
+  }
+  const uint32_t function_count = function->function_register_count_u16 +
+                                  function->local_function_count_u32;
+  if (function_count != 0) {
+    memset(state->functions, 0, function_count * sizeof(*state->functions));
+  }
+
+  const uint16_t direct_value_count = iree_min(
+      IREE_VM_CALL_DIRECT_REGISTER_COUNT, signature->argument_value_count_u16);
+  iree_vm_bytecode_frame_copy_direct_values(
+      state->values, call->value_arguments.direct, direct_value_count);
+  const uint16_t direct_ref_count = iree_min(IREE_VM_CALL_DIRECT_REGISTER_COUNT,
+                                             signature->argument_ref_count_u16);
+  for (uint16_t i = 0; i < direct_ref_count; ++i) {
+    iree_vm_call_ref_argument_load_move(call, i, &state->refs[i]);
+  }
+  const uint16_t direct_function_count =
+      iree_min(IREE_VM_CALL_DIRECT_REGISTER_COUNT,
+               signature->argument_function_count_u16);
+  if (direct_function_count != 0) {
+    memcpy(state->functions, call->function_arguments.direct,
+           direct_function_count * sizeof(*state->functions));
+  }
+}
+
+void iree_vm_bytecode_frame_reset_refs(iree_vm_ref_t* refs,
+                                       uint32_t ref_count) {
+  for (uint32_t i = 0; i < ref_count; ++i) {
+    iree_vm_ref_reset(&refs[i]);
+  }
+}
 
 iree_status_t iree_vm_bytecode_query_frame_layout(
     const iree_vm_bytecode_v0_function_row_t* function,
@@ -46,7 +89,5 @@ iree_status_t iree_vm_bytecode_query_frame_layout(
 void iree_vm_bytecode_frame_cleanup(iree_vm_frame_t* frame) {
   iree_vm_bytecode_execution_state_t* state =
       (iree_vm_bytecode_execution_state_t*)iree_vm_frame_storage(frame);
-  for (uint32_t i = 0; i < state->ref_count; ++i) {
-    iree_vm_ref_reset(&state->refs[i]);
-  }
+  iree_vm_bytecode_frame_reset_refs(state->refs, state->ref_count);
 }

@@ -7,6 +7,8 @@
 #ifndef IREE_VM_BYTECODE_INTERPRETER_FRAME_H_
 #define IREE_VM_BYTECODE_INTERPRETER_FRAME_H_
 
+#include <string.h>
+
 #include "iree/vm/bytecode/module_storage.h"
 
 // Caller-owned ref packet regions kept live across one suspended child call.
@@ -65,6 +67,37 @@ typedef struct iree_vm_bytecode_frame_layout_t {
   // Byte offset of the local byte storage.
   iree_host_size_t local_bytes_offset;
 } iree_vm_bytecode_frame_layout_t;
+
+// Copies one direct physical value bank in fixed native-vector-sized chunks.
+// Direct banks have a fixed small bound, so this remains a bounded sequence
+// with no variable-length memcpy call or per-cell bounds branch.
+static inline void iree_vm_bytecode_frame_copy_direct_values(
+    uint64_t* target, const uint64_t* source, uint16_t count) {
+  while (count >= 4) {
+    memcpy(target, source, 4 * sizeof(uint64_t));
+    target += 4;
+    source += 4;
+    count -= 4;
+  }
+  if (count >= 2) {
+    memcpy(target, source, 2 * sizeof(uint64_t));
+    target += 2;
+    source += 2;
+    count -= 2;
+  }
+  if (count) {
+    *target = *source;
+  }
+}
+
+// Initializes the exact register and local banks for one function entry.
+void iree_vm_bytecode_frame_initialize(
+    const iree_vm_bytecode_v0_function_row_t* function,
+    const iree_vm_bytecode_v0_signature_row_t* signature,
+    iree_vm_bytecode_execution_state_t* state);
+
+// Releases and clears the first |ref_count| states in |refs|.
+void iree_vm_bytecode_frame_reset_refs(iree_vm_ref_t* refs, uint32_t ref_count);
 
 // Calculates the exact durable payload layout for |function|.
 iree_status_t iree_vm_bytecode_query_frame_layout(
