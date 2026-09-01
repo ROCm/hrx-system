@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <initializer_list>
 #include <utility>
 #include <vector>
 
@@ -59,6 +60,22 @@ const iree_vm_ref_type_table_t kFuzzRefTypeTable = {
 
 void RequireOk(iree_status_t status) {
   if (!iree_status_is_ok(status)) iree_status_abort(status);
+}
+
+// Returns true for success and false for an explicitly modeled rejection of
+// malformed fuzz input. Any other failure is an implementation or
+// infrastructure defect and remains visible to the fuzzing engine.
+bool IsSuccessfulOrExpectedFailure(
+    iree_status_t status,
+    std::initializer_list<iree_status_code_t> expected_codes) {
+  iree::Status owned_status(std::move(status));
+  if (owned_status.ok()) return true;
+  const iree_status_code_t actual_code =
+      static_cast<iree_status_code_t>(owned_status.code());
+  for (const iree_status_code_t expected_code : expected_codes) {
+    if (actual_code == expected_code) return false;
+  }
+  iree_status_abort(owned_status.release());
 }
 
 std::vector<uint8_t> BuildSeed(uint8_t selector) {
@@ -171,10 +188,12 @@ bool SummariesMatch(const ModuleSummary& lhs, const ModuleSummary& rhs) {
 bool TryLoadInspection(iree_const_byte_span_t image,
                        ModuleSummary* out_summary) {
   iree_vm_module_t* module = reinterpret_cast<iree_vm_module_t*>(uintptr_t{1});
-  iree::Status status(iree_vm_bytecode_module_create_for_inspection(
-      IREE_SV("module_factory_fuzz"), {image, iree_allocator_null()},
-      iree_allocator_system(), &module));
-  if (!status.ok()) {
+  const bool loaded = IsSuccessfulOrExpectedFailure(
+      iree_vm_bytecode_module_create_for_inspection(
+          IREE_SV("module_factory_fuzz"), {image, iree_allocator_null()},
+          iree_allocator_system(), &module),
+      {IREE_STATUS_INVALID_ARGUMENT, IREE_STATUS_INCOMPATIBLE});
+  if (!loaded) {
     if (module != nullptr) std::abort();
     return false;
   }
@@ -200,10 +219,13 @@ bool TryLoadExecutable(iree_const_byte_span_t image,
   static Environment environment;
 
   iree_vm_module_t* module = reinterpret_cast<iree_vm_module_t*>(uintptr_t{1});
-  iree::Status status(iree_vm_bytecode_module_create(
-      environment.value, IREE_SV("module_factory_fuzz"),
-      {image, iree_allocator_null()}, iree_allocator_system(), &module));
-  if (!status.ok()) {
+  const bool loaded = IsSuccessfulOrExpectedFailure(
+      iree_vm_bytecode_module_create(
+          environment.value, IREE_SV("module_factory_fuzz"),
+          {image, iree_allocator_null()}, iree_allocator_system(), &module),
+      {IREE_STATUS_INVALID_ARGUMENT, IREE_STATUS_INCOMPATIBLE,
+       IREE_STATUS_NOT_FOUND});
+  if (!loaded) {
     if (module != nullptr) std::abort();
     return false;
   }
@@ -233,10 +255,11 @@ iree_status_t HashDumpBytes(void* user_data, iree_string_view_t text) {
 
 bool TryDump(iree_const_byte_span_t image, DumpSink* out_sink) {
   *out_sink = {0, UINT64_C(14695981039346656037)};
-  iree::Status status(iree_vm_bytecode_module_dump(
-      IREE_SV("module_factory_fuzz"), image, {HashDumpBytes, out_sink},
-      iree_allocator_system()));
-  return status.ok();
+  return IsSuccessfulOrExpectedFailure(
+      iree_vm_bytecode_module_dump(IREE_SV("module_factory_fuzz"), image,
+                                   {HashDumpBytes, out_sink},
+                                   iree_allocator_system()),
+      {IREE_STATUS_INVALID_ARGUMENT, IREE_STATUS_INCOMPATIBLE});
 }
 
 void ExerciseModuleFactories(iree_const_byte_span_t image) {

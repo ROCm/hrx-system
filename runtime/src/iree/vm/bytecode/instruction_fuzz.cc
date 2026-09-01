@@ -72,8 +72,8 @@ void RequireOk(iree_status_t status) {
 }
 
 // Returns true for success and false for an explicitly modeled failure caused
-// by malformed fuzz input. Any other failure is an infrastructure defect and
-// remains visible to the fuzzing engine.
+// by malformed fuzz input. Any other failure is an implementation or
+// infrastructure defect and remains visible to the fuzzing engine.
 bool IsSuccessfulOrExpectedFailure(
     iree_status_t status,
     std::initializer_list<iree_status_code_t> expected_codes) {
