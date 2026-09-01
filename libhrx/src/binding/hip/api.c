@@ -2403,6 +2403,11 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
   const bool is_gfx1100 = strncmp(device_obj->gcn_arch_name, "gfx1100", 7) == 0;
   const bool is_gfx942 = strncmp(device_obj->gcn_arch_name, "gfx942", 6) == 0;
   switch (attr) {
+    case hipDeviceAttributeAccessPolicyMaxWindowSize:
+      // A zero maximum advertises that persisting access-policy windows are
+      // disabled.
+      *value = 0;
+      break;
     case hipDeviceAttributeMaxThreadsPerBlock:
       *value = device_obj->max_threads_per_block;
       break;
@@ -2558,9 +2563,7 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
       *value = IREE_HIP_ARRAY_MAX_3D_DEPTH;
       break;
     default:
-      // Return sensible defaults for other attributes.
-      *value = 0;
-      break;
+      HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
   return hipSuccess;
