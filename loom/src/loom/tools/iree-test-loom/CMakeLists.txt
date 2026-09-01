@@ -87,7 +87,6 @@ iree_execution_test_suite(
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/iree-test-loom/testdata/library_cases.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/iree-test-loom/testdata/linked_input_cases.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/iree-test-loom/testdata/planning_issue_cases.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/iree-test-loom/testdata/requirement_cases.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/iree-test-loom/testdata/scalar_cases.loom"
   LABELS

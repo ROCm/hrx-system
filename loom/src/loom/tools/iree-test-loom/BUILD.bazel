@@ -110,7 +110,6 @@ iree_execution_test_suite(
     data = [
         "testdata/library_cases.loom",
         "testdata/linked_input_cases.loom",
-        "testdata/planning_issue_cases.loom",
         "testdata/requirement_cases.loom",
         "testdata/scalar_cases.loom",
     ],

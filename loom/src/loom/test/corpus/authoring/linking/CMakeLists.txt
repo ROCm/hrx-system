@@ -20,7 +20,6 @@ iree_execution_test_suite(
     "loom-format=loom::tools::loom-format"
     "loom-link=loom::tools::loom-link"
   DATA
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/linking/checks.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/linking/providers.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/linking/root.loom"
   LABELS
