@@ -14,6 +14,7 @@ import pytest
 from loom.gen.target.arch.spirv.spirv_packet_rows import (
     _PACKETLESS_DESCRIPTOR_KEYS,
     _descriptor_ref_constant_name,
+    _interned_value_types,
     _packet_rows,
     _PacketRow,
     _validate_rows,
@@ -65,6 +66,15 @@ def _row_index(rows: tuple[_PacketRow, ...], descriptor_key: str) -> int:
         if row.descriptor_key == descriptor_key:
             return index
     raise AssertionError(f"missing packet-row fixture '{descriptor_key}'")
+
+
+def _packet_row(descriptor_key: str) -> _PacketRow:
+    rows = _packet_rows()
+    return rows[_row_index(rows, descriptor_key)]
+
+
+def _packet_value_types(row: _PacketRow) -> tuple[str, ...]:
+    return ((row.result_type,) if row.result_type is not None else ()) + row.operand_types
 
 
 def test_validation_rejects_duplicate_packet_descriptor_keys() -> None:
@@ -200,41 +210,32 @@ def test_generation_emits_scalar_memory_packet_rows() -> None:
 
 def test_generation_emits_raw_storage_byte_bridge_rows() -> None:
     suffix = RAW_STORAGE_BUFFER_BYTE.suffix
-    tables = generate_tables()
-    load_row = _generated_row(
-        tables,
-        f"spirv.op_load.storage_buffer.{suffix}",
-    )
-    assert "LOOM_SPIRV_SCALAR_TYPE_U8" in load_row
-    assert ".memory_alignment = 1" in load_row
+    load_row = _packet_row(f"spirv.op_load.storage_buffer.{suffix}")
+    assert "LOOM_SPIRV_SCALAR_TYPE_U8" in load_row.result_type
+    assert load_row.memory_alignment == 1
 
-    extend_row = _generated_row(tables, f"spirv.op_uconvert.{suffix}.u32")
-    assert "LOOM_SPIRV_SCALAR_TYPE_U8" in extend_row
-    assert "LOOM_SPIRV_SCALAR_TYPE_U32" in extend_row
+    extend_row = _packet_row(f"spirv.op_uconvert.{suffix}.u32")
+    assert "LOOM_SPIRV_SCALAR_TYPE_U32" in extend_row.result_type
+    assert "LOOM_SPIRV_SCALAR_TYPE_U8" in extend_row.operand_types[0]
 
-    narrow_row = _generated_row(tables, f"spirv.op_uconvert.u32.{suffix}")
-    assert "LOOM_SPIRV_SCALAR_TYPE_U32" in narrow_row
-    assert "LOOM_SPIRV_SCALAR_TYPE_U8" in narrow_row
+    narrow_row = _packet_row(f"spirv.op_uconvert.u32.{suffix}")
+    assert "LOOM_SPIRV_SCALAR_TYPE_U8" in narrow_row.result_type
+    assert "LOOM_SPIRV_SCALAR_TYPE_U32" in narrow_row.operand_types[0]
 
 
 def test_generation_emits_complete_float_constant_packet_rows() -> None:
-    tables = generate_tables()
-
     for scalar in FLOAT_CONSTANT_TYPES:
-        row = _generated_row(tables, f"spirv.op_constant.{scalar.suffix}")
-        assert "LOOM_SPIRV_PACKET_FORM_SCALAR_CONSTANT" in row
-        assert scalar.scalar_enum in row
-        assert f".literal_word_count = {scalar.literal_word_count}" in row
+        row = _packet_row(f"spirv.op_constant.{scalar.suffix}")
+        assert row.form == "LOOM_SPIRV_PACKET_FORM_SCALAR_CONSTANT"
+        assert scalar.scalar_enum in row.result_type
+        assert row.literal_word_count == scalar.literal_word_count
 
         descriptor = _descriptor(f"spirv.op_constant.{scalar.suffix}")
         assert descriptor.feature_mask_words == ((scalar.feature_bits,) if scalar.feature_bits else ())
 
 
 def test_generation_uses_byte_strides_for_cooperative_matrix_rows() -> None:
-    tables = generate_tables()
-
-    f16_lhs = _generated_row(
-        tables,
+    f16_lhs = _packet_row(
         _cooperative_matrix_descriptor(
             "op_cooperative_matrix_load_khr",
             role="lhs",
@@ -244,8 +245,7 @@ def test_generation_uses_byte_strides_for_cooperative_matrix_rows() -> None:
             layout="row_major",
         ),
     )
-    f16_init = _generated_row(
-        tables,
+    f16_init = _packet_row(
         _cooperative_matrix_descriptor(
             "op_cooperative_matrix_load_khr",
             role="init",
@@ -255,8 +255,7 @@ def test_generation_uses_byte_strides_for_cooperative_matrix_rows() -> None:
             layout="row_major",
         ),
     )
-    f16_store = _generated_row(
-        tables,
+    f16_store = _packet_row(
         _cooperative_matrix_descriptor(
             "op_cooperative_matrix_store_khr",
             role="result",
@@ -266,12 +265,11 @@ def test_generation_uses_byte_strides_for_cooperative_matrix_rows() -> None:
             layout="row_major",
         ),
     )
-    assert ".cooperative_matrix_stride = 32" in f16_lhs
-    assert ".cooperative_matrix_stride = 64" in f16_init
-    assert ".cooperative_matrix_stride = 64" in f16_store
+    assert f16_lhs.cooperative_matrix_stride == 32
+    assert f16_init.cooperative_matrix_stride == 64
+    assert f16_store.cooperative_matrix_stride == 64
 
-    bf16_rhs = _generated_row(
-        tables,
+    bf16_rhs = _packet_row(
         _cooperative_matrix_descriptor(
             "op_cooperative_matrix_load_khr",
             role="rhs",
@@ -281,10 +279,9 @@ def test_generation_uses_byte_strides_for_cooperative_matrix_rows() -> None:
             layout="row_major",
         ),
     )
-    assert ".cooperative_matrix_stride = 32" in bf16_rhs
+    assert bf16_rhs.cooperative_matrix_stride == 32
 
-    s8_lhs = _generated_row(
-        tables,
+    s8_lhs = _packet_row(
         _cooperative_matrix_descriptor(
             "op_cooperative_matrix_load_khr",
             role="lhs",
@@ -294,8 +291,7 @@ def test_generation_uses_byte_strides_for_cooperative_matrix_rows() -> None:
             layout="row_major",
         ),
     )
-    s8_rhs = _generated_row(
-        tables,
+    s8_rhs = _packet_row(
         _cooperative_matrix_descriptor(
             "op_cooperative_matrix_load_khr",
             role="rhs",
@@ -305,8 +301,7 @@ def test_generation_uses_byte_strides_for_cooperative_matrix_rows() -> None:
             layout="row_major",
         ),
     )
-    s8_store = _generated_row(
-        tables,
+    s8_store = _packet_row(
         _cooperative_matrix_descriptor(
             "op_cooperative_matrix_store_khr",
             role="result",
@@ -316,12 +311,11 @@ def test_generation_uses_byte_strides_for_cooperative_matrix_rows() -> None:
             layout="row_major",
         ),
     )
-    assert ".cooperative_matrix_stride = 32" in s8_lhs
-    assert ".cooperative_matrix_stride = 16" in s8_rhs
-    assert ".cooperative_matrix_stride = 64" in s8_store
+    assert s8_lhs.cooperative_matrix_stride == 32
+    assert s8_rhs.cooperative_matrix_stride == 16
+    assert s8_store.cooperative_matrix_stride == 64
 
-    u8_lhs = _generated_row(
-        tables,
+    u8_lhs = _packet_row(
         _cooperative_matrix_descriptor(
             "op_cooperative_matrix_load_khr",
             role="lhs",
@@ -331,8 +325,7 @@ def test_generation_uses_byte_strides_for_cooperative_matrix_rows() -> None:
             layout="row_major",
         ),
     )
-    u8_store = _generated_row(
-        tables,
+    u8_store = _packet_row(
         _cooperative_matrix_descriptor(
             "op_cooperative_matrix_store_khr",
             role="result",
@@ -342,20 +335,17 @@ def test_generation_uses_byte_strides_for_cooperative_matrix_rows() -> None:
             layout="row_major",
         ),
     )
-    assert "LOOM_SPIRV_SCALAR_TYPE_U8" in u8_lhs
-    assert "LOOM_SPIRV_SCALAR_TYPE_U32" in u8_store
-    assert ".cooperative_matrix_stride = 32" in u8_lhs
-    assert ".cooperative_matrix_stride = 64" in u8_store
+    assert "LOOM_SPIRV_SCALAR_TYPE_U8" in u8_lhs.result_type
+    assert "LOOM_SPIRV_SCALAR_TYPE_U32" in u8_store.operand_types[1]
+    assert u8_lhs.cooperative_matrix_stride == 32
+    assert u8_store.cooperative_matrix_stride == 64
 
 
 def test_generation_keeps_storage_buffer_address_untyped_until_access_chain() -> None:
-    tables = generate_tables()
-
-    access_row_start = tables.index("SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_PTR_ACCESS_CHAIN_STORAGE_BUFFER_F32_BYTE_OFFSET")
-    access_row = tables[access_row_start : access_row_start + 800]
-    assert "LOOM_SPIRV_VALUE_CLASS_STORAGE_BUFFER_ADDRESS" in access_row
-    assert "LOOM_SPIRV_VALUE_CLASS_PTR_PHYSICAL_STORAGE_BUFFER" in access_row
-    assert "LOOM_SPIRV_SCALAR_TYPE_F32" in access_row
+    access_row = _packet_row("spirv.op_ptr_access_chain.storage_buffer.f32.byte_offset")
+    assert "LOOM_SPIRV_VALUE_CLASS_PTR_PHYSICAL_STORAGE_BUFFER" in access_row.result_type
+    assert "LOOM_SPIRV_SCALAR_TYPE_F32" in access_row.result_type
+    assert "LOOM_SPIRV_VALUE_CLASS_STORAGE_BUFFER_ADDRESS" in access_row.operand_types[0]
 
 
 def test_generation_emits_coordinate_arithmetic_packet_rows() -> None:
@@ -376,7 +366,6 @@ def test_generation_emits_coordinate_arithmetic_packet_rows() -> None:
 
 
 def test_generation_emits_complete_integer_boolean_packet_matrix() -> None:
-    tables = generate_tables()
     assert tuple(
         (
             row.source_type,
@@ -431,25 +420,19 @@ def test_generation_emits_complete_integer_boolean_packet_matrix() -> None:
 
     for constant in BOOLEAN_CONSTANTS:
         descriptor_key = f"spirv.op_constant_{constant.descriptor_suffix}.bool"
-        row = _generated_row(
-            tables,
-            descriptor_key,
-        )
-        assert constant.opcode in row
-        assert "LOOM_SPIRV_PACKET_FORM_BOOLEAN_CONSTANT" in row
-        assert "LOOM_SPIRV_VALUE_CLASS_BOOL" in row
+        row = _packet_row(descriptor_key)
+        assert row.opcode == constant.opcode
+        assert row.form == "LOOM_SPIRV_PACKET_FORM_BOOLEAN_CONSTANT"
+        assert "LOOM_SPIRV_VALUE_CLASS_BOOL" in row.result_type
         descriptor = _descriptor(descriptor_key)
         assert descriptor.mnemonic == f"{constant.mnemonic}.bool"
         assert descriptor.feature_mask_words == ()
 
     for operation in BOOLEAN_BINARY_OPERATIONS:
         descriptor_key = f"spirv.op_{operation.descriptor_suffix}.bool"
-        row = _generated_row(
-            tables,
-            descriptor_key,
-        )
-        assert operation.opcode in row
-        assert row.count("LOOM_SPIRV_VALUE_CLASS_BOOL") == 3
+        row = _packet_row(descriptor_key)
+        assert row.opcode == operation.opcode
+        assert sum("LOOM_SPIRV_VALUE_CLASS_BOOL" in value_type for value_type in _packet_value_types(row)) == 3
         descriptor = _descriptor(descriptor_key)
         assert descriptor.mnemonic == f"{operation.mnemonic}.bool"
         assert descriptor.feature_mask_words == ()
@@ -458,12 +441,9 @@ def test_generation_emits_complete_integer_boolean_packet_matrix() -> None:
         signed = scalar_pair.signed
         expected_feature_mask = (signed.feature_bits,) if signed.feature_bits else ()
         constant_descriptor_key = f"spirv.op_constant.{signed.suffix}"
-        constant_row = _generated_row(
-            tables,
-            constant_descriptor_key,
-        )
-        assert signed.scalar_enum in constant_row
-        assert f".literal_word_count = {scalar_pair.literal_word_count}" in constant_row
+        constant_row = _packet_row(constant_descriptor_key)
+        assert signed.scalar_enum in constant_row.result_type
+        assert constant_row.literal_word_count == scalar_pair.literal_word_count
         constant_descriptor = _descriptor(constant_descriptor_key)
         assert constant_descriptor.mnemonic == f"OpConstant.{signed.suffix}"
         assert constant_descriptor.feature_mask_words == expected_feature_mask
@@ -476,12 +456,9 @@ def test_generation_emits_complete_integer_boolean_packet_matrix() -> None:
 
         for operation in INTEGER_BITWISE_BINARY_OPERATIONS:
             descriptor_key = f"spirv.op_{operation.descriptor_suffix}.{signed.suffix}"
-            operation_row = _generated_row(
-                tables,
-                descriptor_key,
-            )
-            assert operation.opcode in operation_row
-            assert operation_row.count(signed.scalar_enum) == 3
+            operation_row = _packet_row(descriptor_key)
+            assert operation_row.opcode == operation.opcode
+            assert sum(signed.scalar_enum in value_type for value_type in _packet_value_types(operation_row)) == 3
             descriptor = _descriptor(descriptor_key)
             expected_mnemonic = operation.mnemonic if signed.suffix == "i32" else f"{operation.mnemonic}.{signed.suffix}"
             assert descriptor.mnemonic == expected_mnemonic
@@ -489,37 +466,28 @@ def test_generation_emits_complete_integer_boolean_packet_matrix() -> None:
 
         for predicate in SIGNED_INTEGER_COMPARE_PREDICATES:
             descriptor_key = f"spirv.op_{predicate.descriptor_suffix}.{signed.suffix}"
-            compare_row = _generated_row(
-                tables,
-                descriptor_key,
-            )
-            assert predicate.opcode in compare_row
-            assert compare_row.count(signed.scalar_enum) == 2
+            compare_row = _packet_row(descriptor_key)
+            assert compare_row.opcode == predicate.opcode
+            assert sum(signed.scalar_enum in value_type for value_type in _packet_value_types(compare_row)) == 2
             descriptor = _descriptor(descriptor_key)
             assert descriptor.feature_mask_words == expected_feature_mask
 
         for predicate in UNSIGNED_ORDERED_INTEGER_COMPARE_PREDICATES:
             descriptor_key = f"spirv.op_{predicate.descriptor_suffix}.{scalar_pair.unsigned.suffix}"
-            compare_row = _generated_row(
-                tables,
-                descriptor_key,
-            )
-            assert predicate.opcode in compare_row
-            assert compare_row.count(scalar_pair.unsigned.scalar_enum) == 2
+            compare_row = _packet_row(descriptor_key)
+            assert compare_row.opcode == predicate.opcode
+            assert sum(scalar_pair.unsigned.scalar_enum in value_type for value_type in _packet_value_types(compare_row)) == 2
             descriptor = _descriptor(descriptor_key)
             assert descriptor.feature_mask_words == expected_feature_mask
 
         select_descriptor_key = f"spirv.op_select.{signed.suffix}"
-        select_row = _generated_row(
-            tables,
-            select_descriptor_key,
-        )
-        assert select_row.count(signed.scalar_enum) == 3
+        select_row = _packet_row(select_descriptor_key)
+        assert sum(signed.scalar_enum in value_type for value_type in _packet_value_types(select_row)) == 3
         select_descriptor = _descriptor(select_descriptor_key)
         assert select_descriptor.feature_mask_words == expected_feature_mask
 
-    bool_select_row = _generated_row(tables, "spirv.op_select.bool")
-    assert bool_select_row.count("LOOM_SPIRV_VALUE_CLASS_BOOL") == 4
+    bool_select_row = _packet_row("spirv.op_select.bool")
+    assert sum("LOOM_SPIRV_VALUE_CLASS_BOOL" in value_type for value_type in _packet_value_types(bool_select_row)) == 4
     assert _descriptor("spirv.op_select.bool").feature_mask_words == ()
 
 
@@ -540,19 +508,17 @@ def test_generation_emits_integer_compare_and_select_rows() -> None:
 
 
 def test_generation_emits_complete_index_numeric_primitives() -> None:
-    tables = generate_tables()
+    coordinate_copy = _packet_row("spirv.op_copy_object.i32")
+    assert coordinate_copy.opcode == "LOOM_SPIRV_OP_COPY_OBJECT"
+    assert sum("LOOM_SPIRV_SCALAR_TYPE_S32" in value_type for value_type in _packet_value_types(coordinate_copy)) == 2
 
-    coordinate_copy = _generated_row(tables, "spirv.op_copy_object.i32")
-    assert "LOOM_SPIRV_OP_COPY_OBJECT" in coordinate_copy
-    assert coordinate_copy.count("LOOM_SPIRV_SCALAR_TYPE_S32") == 2
+    offset_multiply = _packet_row("spirv.op_imul.offset64")
+    assert offset_multiply.opcode == "LOOM_SPIRV_OP_I_MUL"
+    assert sum("LOOM_SPIRV_SCALAR_TYPE_U64" in value_type for value_type in _packet_value_types(offset_multiply)) == 3
 
-    offset_multiply = _generated_row(tables, "spirv.op_imul.offset64")
-    assert "LOOM_SPIRV_OP_I_MUL" in offset_multiply
-    assert offset_multiply.count("LOOM_SPIRV_SCALAR_TYPE_U64") == 3
-
-    bit_count = _generated_row(tables, "spirv.op_bit_count.i32")
-    assert "LOOM_SPIRV_OP_BIT_COUNT" in bit_count
-    assert bit_count.count("LOOM_SPIRV_SCALAR_TYPE_S32") == 2
+    bit_count = _packet_row("spirv.op_bit_count.i32")
+    assert bit_count.opcode == "LOOM_SPIRV_OP_BIT_COUNT"
+    assert sum("LOOM_SPIRV_SCALAR_TYPE_S32" in value_type for value_type in _packet_value_types(bit_count)) == 2
 
 
 def test_generation_emits_scalar_conversion_rows() -> None:
@@ -591,13 +557,13 @@ def test_generation_emits_complete_ordinary_vector_structural_matrix() -> None:
         insert_key = f"spirv.op_composite_insert.{component_type.suffix}.{vector_type.suffix}"
         select_key = f"spirv.op_select.{vector_type.suffix}"
 
-        construct = _generated_row(tables, construct_key)
-        assert "LOOM_SPIRV_OP_COMPOSITE_CONSTRUCT" in construct
-        assert "LOOM_SPIRV_PACKET_FORM_COMPOSITE_CONSTRUCT" in construct
-        assert component_type.vector_value_class in construct
-        assert component_type.scalar_value_class in construct
-        assert f".lane_count = {vector_type.lane_count}" in construct
-        assert f".operand_count = {vector_type.lane_count}" in construct
+        construct = packet_rows_by_key[construct_key]
+        assert construct.opcode == "LOOM_SPIRV_OP_COMPOSITE_CONSTRUCT"
+        assert construct.form == "LOOM_SPIRV_PACKET_FORM_COMPOSITE_CONSTRUCT"
+        assert component_type.vector_value_class in construct.result_type
+        assert component_type.scalar_value_class in construct.operand_types[0]
+        assert f".lane_count = {vector_type.lane_count}" in construct.result_type
+        assert len(construct.operand_types) == vector_type.lane_count
 
         extract = _generated_row(tables, extract_key)
         assert "LOOM_SPIRV_OP_COMPOSITE_EXTRACT" in extract
@@ -611,11 +577,11 @@ def test_generation_emits_complete_ordinary_vector_structural_matrix() -> None:
         assert ".operand_count = 2" in insert
         assert ".immediate_index = 0" in insert
 
-        select = _generated_row(tables, select_key)
-        assert "LOOM_SPIRV_OP_SELECT" in select
-        assert "LOOM_SPIRV_PACKET_FORM_SELECT" in select
-        assert "LOOM_SPIRV_VALUE_CLASS_BOOL_VECTOR" in select
-        assert ".operand_count = 3" in select
+        select = packet_rows_by_key[select_key]
+        assert select.opcode == "LOOM_SPIRV_OP_SELECT"
+        assert select.form == "LOOM_SPIRV_PACKET_FORM_SELECT"
+        assert "LOOM_SPIRV_VALUE_CLASS_BOOL_VECTOR" in select.operand_types[0]
+        assert len(select.operand_types) == 3
 
         expected_features = (component_type.feature_bits,) if component_type.feature_bits else ()
         for descriptor_key in (construct_key, extract_key, insert_key, select_key):
@@ -706,6 +672,23 @@ def test_generation_compacts_only_repeated_four_operand_types() -> None:
             assert construct.encoded_operand_types() == construct.operand_types
 
 
+def test_generation_interns_packet_value_types() -> None:
+    rows = _packet_rows()
+    value_types, value_type_refs = _interned_value_types(rows)
+
+    assert "LOOM_SPIRV_VALUE_CLASS_UNKNOWN" in value_types[0]
+    assert len(value_types) < len(rows)
+    for row in rows:
+        assert value_type_refs[row.result_type or value_types[0]] < len(value_types)
+        for operand_type in row.encoded_operand_types():
+            assert value_type_refs[operand_type] < len(value_types)
+
+    tables = generate_tables()
+    assert "const loom_spirv_value_type_t loom_spirv_packet_value_types[]" in tables
+    assert ".result_type_ref = " in tables
+    assert ".operand_type_refs =" in tables
+
+
 def test_generation_emits_complete_address_conversion_rows() -> None:
     tables = generate_tables()
 
@@ -718,11 +701,11 @@ def test_generation_emits_complete_address_conversion_rows() -> None:
             f"spirv.op_{operation}.{scalar.suffix}.offset64",
             f"spirv.op_{operation}.offset64.{scalar.suffix}",
         ):
-            row = _generated_row(tables, descriptor_key)
-            assert opcode in row
-            assert "LOOM_SPIRV_PACKET_FORM_UNARY_TYPED" in row
-            assert scalar.scalar_enum in row
-            assert "LOOM_SPIRV_VALUE_CLASS_OFFSET64" in row
+            row = _packet_row(descriptor_key)
+            assert row.opcode == opcode
+            assert row.form == "LOOM_SPIRV_PACKET_FORM_UNARY_TYPED"
+            assert any(scalar.scalar_enum in value_type for value_type in _packet_value_types(row))
+            assert any("LOOM_SPIRV_VALUE_CLASS_OFFSET64" in value_type for value_type in _packet_value_types(row))
             assert _descriptor(descriptor_key).feature_mask_words == expected_feature_mask
 
     for query in BUILTIN_INDEX_QUERIES:
@@ -730,6 +713,6 @@ def test_generation_emits_complete_address_conversion_rows() -> None:
             suffix = f"{query.descriptor_suffix}_{dimension.source_keyword}".upper()
             assert f"SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_LOAD_BUILTIN_{suffix}" in tables
             assert query.builtin_enum in tables
-            assert f".component_index = {dimension.component_index}" in tables
+            assert f".payload.builtin_load.component_index = {dimension.component_index}" in tables
 
     assert "LOOM_SPIRV_PACKET_FORM_LOAD_BUILTIN" in tables

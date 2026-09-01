@@ -211,19 +211,19 @@ class _PacketRow:
             return self.operand_types[:1]
         raise ValueError(f"{self.descriptor_key}: packet operand types do not fit")
 
-    def render(self) -> str:
+    def render(self, value_type_refs: dict[str, int]) -> str:
         encoded_operand_types = self.encoded_operand_types()
         lines = [
             f"    [{_descriptor_ref_constant_name(self.descriptor_key)}] =",
             "        {",
             f"            .opcode = {self.opcode},",
             f"            .form = {self.form},",
-            f"            .result_type = {self.result_type or _unknown_value()},",
+            f"            .result_type_ref = {value_type_refs[self.result_type or _unknown_value()]},",
         ]
         if encoded_operand_types:
-            lines.append("            .operand_types =")
+            lines.append("            .operand_type_refs =")
             lines.append("                {")
-            lines.extend(f"                    {operand_type}," for operand_type in encoded_operand_types)
+            lines.extend(f"                    {value_type_refs[operand_type]}," for operand_type in encoded_operand_types)
             lines.append("                },")
         lines.extend(
             [
@@ -233,25 +233,25 @@ class _PacketRow:
             ]
         )
         if self.literal_word_count:
-            lines.append(f"            .literal_word_count = {self.literal_word_count},")
+            lines.append(f"            .payload.scalar_constant.literal_word_count = {self.literal_word_count},")
         if self.memory_alignment:
             lines.append(f"            .memory_alignment = {self.memory_alignment},")
         if self.builtin is not None:
-            lines.append(f"            .builtin = {self.builtin},")
+            lines.append(f"            .payload.builtin_load.builtin = {self.builtin},")
         if self.component_index is not None:
-            lines.append(f"            .component_index = {self.component_index},")
+            lines.append(f"            .payload.builtin_load.component_index = {self.component_index},")
         if self.execution_scope is not None:
-            lines.append(f"            .execution_scope = {self.execution_scope},")
+            lines.append(f"            .payload.barrier.execution_scope = {self.execution_scope},")
         if self.memory_scope is not None:
-            lines.append(f"            .memory_scope = {self.memory_scope},")
+            lines.append(f"            .payload.barrier.memory_scope = {self.memory_scope},")
         if self.memory_semantics is not None:
-            lines.append(f"            .memory_semantics = {self.memory_semantics},")
+            lines.append(f"            .payload.barrier.memory_semantics = {self.memory_semantics},")
         if self.cooperative_matrix_layout is not None:
-            lines.append(f"            .cooperative_matrix_layout = {self.cooperative_matrix_layout},")
+            lines.append(f"            .payload.cooperative_matrix.layout = {self.cooperative_matrix_layout},")
         if self.cooperative_matrix_stride:
-            lines.append(f"            .cooperative_matrix_stride = {self.cooperative_matrix_stride},")
+            lines.append(f"            .payload.cooperative_matrix.stride = {self.cooperative_matrix_stride},")
         if self.cooperative_matrix_operands is not None:
-            lines.append(f"            .cooperative_matrix_operands = {self.cooperative_matrix_operands},")
+            lines.append(f"            .payload.cooperative_matrix.operands = {self.cooperative_matrix_operands},")
         lines.append("        },")
         return "\n".join(lines)
 
@@ -925,9 +925,32 @@ def _validate_rows(rows: tuple[_PacketRow, ...]) -> None:
         raise ValueError("SPIR-V storage-buffer scalar suffixes must be unique")
 
 
+def _interned_value_types(
+    rows: tuple[_PacketRow, ...],
+) -> tuple[tuple[str, ...], dict[str, int]]:
+    value_types: list[str] = []
+    value_type_refs: dict[str, int] = {}
+
+    def intern(value_type: str) -> None:
+        if value_type in value_type_refs:
+            return
+        value_type_refs[value_type] = len(value_types)
+        value_types.append(value_type)
+
+    intern(_unknown_value())
+    for row in rows:
+        intern(row.result_type or _unknown_value())
+        for operand_type in row.encoded_operand_types():
+            intern(operand_type)
+    if len(value_types) > 0xFFFF:
+        raise ValueError("SPIR-V packet value-type refs exceed uint16_t storage")
+    return tuple(value_types), value_type_refs
+
+
 def generate_tables() -> str:
     rows = _packet_rows()
     _validate_rows(rows)
+    value_types, value_type_refs = _interned_value_types(rows)
     lines = [
         "// Copyright 2026 The IREE Authors",
         "//",
@@ -940,8 +963,12 @@ def generate_tables() -> str:
         f'static_assert(LOOM_SPIRV_PACKET_MAX_OPERAND_COUNT == {_PACKET_MAX_OPERAND_COUNT}, "generated packet operand maximum");',
         f'static_assert(LOOM_SPIRV_PACKET_OPERAND_TYPE_CAPACITY == {_PACKET_OPERAND_TYPE_CAPACITY}, "generated packet operand-type capacity");',
         "",
+        "const loom_spirv_value_type_t loom_spirv_packet_value_types[] = {",
+        *(f"    {value_type}," for value_type in value_types),
+        "};",
+        "",
         "static const loom_spirv_packet_row_t kSpirvLogicalCorePacketRows[] = {",
-        *(row.render() for row in rows),
+        *(row.render(value_type_refs) for row in rows),
         "};",
         "",
     ]

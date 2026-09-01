@@ -273,6 +273,8 @@ TEST_F(LowContractQuerySourceMemoryTest,
           /*.value=*/{/*.string_value_offset=*/kRuleStringAttrKind},
       },
   };
+  const loom_low_lower_diagnostic_param_ref_t diagnostic_param_refs[] = {0, 1,
+                                                                         2};
   const loom_low_lower_diagnostic_t diagnostic = {
       /*.error_ref=*/LOOM_ERR_TARGET_003_REF,
       /*.param_start=*/0,
@@ -283,6 +285,8 @@ TEST_F(LowContractQuerySourceMemoryTest,
   rule_set.string_table = kRuleStringTable;
   rule_set.diagnostic_params = diagnostic_params;
   rule_set.diagnostic_param_count = IREE_ARRAYSIZE(diagnostic_params);
+  rule_set.diagnostic_param_refs = diagnostic_param_refs;
+  rule_set.diagnostic_param_ref_count = IREE_ARRAYSIZE(diagnostic_param_refs);
   loom_low_lower_rule_match_context_t match_context = {};
   match_context.module = module_;
   match_context.function = function_;
@@ -427,6 +431,9 @@ TEST(LowContractQueryTest, ContractIndexDescriptorRuleReportsRejectedCase) {
           /*.value=*/{/*.string_value_offset=*/kRuleStringAttrKind},
       },
   };
+  const loom_low_lower_diagnostic_param_ref_t diagnostic_param_refs[] = {
+      0, 1, 2, 3, 4, 5, 6, 7};
+  const loom_low_lower_guard_ref_t guard_refs[] = {0};
   loom_low_lower_diagnostic_t diagnostic = {};
   diagnostic.error_ref = LOOM_ERR_TARGET_003_REF;
   diagnostic.param_count = IREE_ARRAYSIZE(diagnostic_params);
@@ -439,8 +446,12 @@ TEST(LowContractQueryTest, ContractIndexDescriptorRuleReportsRejectedCase) {
   rule_set.rule_count = 1;
   rule_set.guards = &guard;
   rule_set.guard_count = 1;
+  rule_set.guard_refs = guard_refs;
+  rule_set.guard_ref_count = IREE_ARRAYSIZE(guard_refs);
   rule_set.diagnostic_params = diagnostic_params;
   rule_set.diagnostic_param_count = IREE_ARRAYSIZE(diagnostic_params);
+  rule_set.diagnostic_param_refs = diagnostic_param_refs;
+  rule_set.diagnostic_param_ref_count = IREE_ARRAYSIZE(diagnostic_param_refs);
   rule_set.diagnostics = &diagnostic;
   rule_set.diagnostic_count = 1;
   const loom_low_lower_rule_set_t* rule_sets[] = {&rule_set};

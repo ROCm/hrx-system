@@ -744,8 +744,9 @@ static iree_status_t loom_spirv_low_define_packet_results(
     return iree_ok_status();
   }
   const loom_value_id_t* results = loom_op_const_results(packet->op);
-  return loom_spirv_low_value_type_table_define(&state->value_types, results[0],
-                                                row->result_type, state->arena);
+  return loom_spirv_low_value_type_table_define(
+      &state->value_types, results[0], loom_spirv_packet_row_result_type(row),
+      state->arena);
 }
 
 static iree_status_t loom_spirv_low_verify_packet(

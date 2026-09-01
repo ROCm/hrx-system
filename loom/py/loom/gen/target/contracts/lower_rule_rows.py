@@ -831,8 +831,14 @@ def rule_set_row(
     source_memories_name: str,
     descriptor_ref_keys: tuple[str, ...],
     descriptor_refs_name: str,
+    diagnostic_param_rows: tuple[tuple[LowerDiagnosticParam, int], ...],
     diagnostic_params_name: str,
+    diagnostic_param_refs: tuple[int, ...],
+    diagnostic_param_refs_name: str,
+    guard_rows: tuple[LowerGuard, ...],
     guards_name: str,
+    guard_refs: tuple[int, ...],
+    guard_refs_name: str,
     attr_copies_name: str,
     tied_results_name: str,
     emits_name: str,
@@ -876,14 +882,20 @@ def rule_set_row(
         descriptor_ref_keys,
         descriptor_refs_name,
     )
-    diagnostic_param_rows = tuple(param for diagnostic in table.diagnostics for param in diagnostic_stored_params(diagnostic))
     _append_table_fields(
         fields,
         "diagnostic_params",
         diagnostic_param_rows,
         diagnostic_params_name,
     )
-    _append_table_fields(fields, "guards", table.guards, guards_name)
+    _append_table_fields(
+        fields,
+        "diagnostic_param_refs",
+        diagnostic_param_refs,
+        diagnostic_param_refs_name,
+    )
+    _append_table_fields(fields, "guards", guard_rows, guards_name)
+    _append_table_fields(fields, "guard_refs", guard_refs, guard_refs_name)
     _append_table_fields(fields, "attr_copies", table.attr_copies, attr_copies_name)
     _append_table_fields(fields, "tied_results", table.tied_results, tied_results_name)
     _append_table_fields(fields, "emits", table.emits, emits_name)
@@ -910,6 +922,10 @@ def _table_count_field_name(field_name: str) -> str:
         return "source_memory_count"
     if field_name == "diagnostic_params":
         return "diagnostic_param_count"
+    if field_name == "diagnostic_param_refs":
+        return "diagnostic_param_ref_count"
+    if field_name == "guard_refs":
+        return "guard_ref_count"
     if field_name == "report_key_string_offsets":
         return "report_key_count"
     return f"{field_name[:-1]}_count"

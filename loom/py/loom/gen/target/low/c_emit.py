@@ -232,7 +232,6 @@ def _descriptor_row_lines(
             f".operand_form_count = {descriptor_rows[i]['operand_form_count']},",
             f".flags = {c_spelling.flag_expr(descriptor.flags)},",
             f".op_kind = {descriptor.op_kind.c_name},",
-            ".reserved = 0,",
         ]
         for i, descriptor in enumerate(descriptors)
     ]

@@ -26,7 +26,7 @@ extern "C" {
 #endif
 
 // ABI version for descriptor sets consumed by this header.
-#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 37u
+#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 38u
 
 // Sentinel for absent string-table offsets.
 #define LOOM_LOW_STRING_OFFSET_NONE LOOM_BSTRING_TABLE_OFFSET_NONE
@@ -48,7 +48,7 @@ extern "C" {
 #define LOOM_LOW_ASM_FORM_ORDINAL_NONE UINT16_MAX
 
 // Sentinel for asm forms without exact semantic result value types.
-#define LOOM_LOW_ASM_RESULT_VALUE_TYPE_START_NONE UINT32_MAX
+#define LOOM_LOW_ASM_RESULT_VALUE_TYPE_START_NONE UINT16_MAX
 
 // Sentinel used before verification; verified descriptors must name a class.
 #define LOOM_LOW_SCHEDULE_CLASS_NONE UINT16_MAX
@@ -829,12 +829,13 @@ static inline uint16_t loom_low_schedule_class_schedule_distance_cycles(
              : schedule_class->latency_cycles;
 }
 
-typedef enum loom_low_descriptor_op_kind_e {
+enum loom_low_descriptor_op_kind_e {
   // Descriptor packets use the general low.op representation.
   LOOM_LOW_DESCRIPTOR_OP_KIND_OP = 0,
   // Descriptor packets use the operandless, single-result low.const form.
   LOOM_LOW_DESCRIPTOR_OP_KIND_CONST = 1,
-} loom_low_descriptor_op_kind_t;
+};
+typedef uint8_t loom_low_descriptor_op_kind_t;
 
 typedef struct loom_low_descriptor_t {
   // Durable descriptor identity derived from the descriptor key. This is
@@ -848,21 +849,21 @@ typedef struct loom_low_descriptor_t {
   // String-table offset for the primary semantic tag.
   loom_bstring_table_offset_t semantic_tag_string_offset;
   // First feature-mask word required by this descriptor.
-  uint32_t feature_mask_word_start;
+  uint16_t feature_mask_word_start;
   // First target-owned fixed encoding field value for this descriptor.
-  uint32_t encoding_field_value_start;
+  uint16_t encoding_field_value_start;
   // First operand/result row for this descriptor.
-  uint32_t operand_start;
+  uint16_t operand_start;
   // First immediate row for this descriptor.
-  uint32_t immediate_start;
+  uint16_t immediate_start;
   // First effect row for this descriptor.
-  uint32_t effect_start;
+  uint16_t effect_start;
   // First constraint row for this descriptor.
-  uint32_t constraint_start;
+  uint16_t constraint_start;
   // First storage-lease row for this descriptor.
-  uint32_t storage_lease_start;
+  uint16_t storage_lease_start;
   // First operand-form row for descriptor-family packet selection.
-  uint32_t operand_form_start;
+  uint16_t operand_form_start;
   // Descriptor flags used by verifier, scheduler, and optimizer.
   loom_low_descriptor_flags_t flags;
   // Canonical low IR operation used to represent this descriptor packet.
@@ -893,12 +894,10 @@ typedef struct loom_low_descriptor_t {
   uint16_t storage_lease_count;
   // Number of operand-form rows for this descriptor.
   uint16_t operand_form_count;
-  // Reserved zero padding available for future structural descriptor facts.
-  uint32_t reserved;
 } loom_low_descriptor_t;
 
-static_assert(sizeof(loom_low_descriptor_t) == 88,
-              "loom_low_descriptor_t must be 88 bytes");
+static_assert(sizeof(loom_low_descriptor_t) == 64,
+              "loom_low_descriptor_t must be 64 bytes");
 
 // Descriptor facts owned by one descriptor-set view. Rows correspond exactly
 // to the structural rows in loom_low_descriptor_set_t::descriptors. Keeping
@@ -1061,19 +1060,19 @@ typedef struct loom_low_asm_form_t {
   // Optional string-table offset for the native assembly mnemonic.
   loom_bstring_table_offset_t native_assembly_mnemonic_string_offset;
   // Descriptor ordinal selected by this asm form.
-  uint32_t descriptor_ordinal;
+  uint16_t descriptor_ordinal;
   // First descriptor-local result operand index in asm_operand_indices.
-  uint32_t result_operand_index_start;
+  uint16_t result_operand_index_start;
   // First exact semantic result row, or START_NONE when none are declared.
-  uint32_t result_value_type_start;
+  uint16_t result_value_type_start;
   // First descriptor-local input operand index in asm_operand_indices.
-  uint32_t operand_index_start;
+  uint16_t operand_index_start;
   // First delimited input operand segment row.
-  uint32_t operand_segment_start;
+  uint16_t operand_segment_start;
   // First immediate spelling row for this asm form.
-  uint32_t immediate_start;
+  uint16_t immediate_start;
   // First native assembly value row for this asm form.
-  uint32_t native_assembly_value_start;
+  uint16_t native_assembly_value_start;
   // Number of result operand indices for this asm form.
   uint16_t result_operand_index_count;
   // Number of input operand indices for this asm form.
@@ -1086,8 +1085,8 @@ typedef struct loom_low_asm_form_t {
   uint16_t native_assembly_value_count;
 } loom_low_asm_form_t;
 
-static_assert(sizeof(loom_low_asm_form_t) == 48,
-              "loom_low_asm_form_t must be 48 bytes");
+static_assert(sizeof(loom_low_asm_form_t) == 32,
+              "loom_low_asm_form_t must be 32 bytes");
 
 typedef struct loom_low_descriptor_set_t {
   // Descriptor table ABI version.
