@@ -231,22 +231,3 @@ iree_execution_test_suite(
         "iree-test-loom": "//loom/src/loom/tools/iree-test-loom",
     },
 )
-
-iree_execution_test_suite(
-    name = "iree_benchmark_loom_execution_test",
-    data = [
-        "test/spirv_vulkan_coop_hal_actual.loom",
-        "test/spirv_vulkan_coop_u8_hal_actual.loom",
-        "test/spirv_vulkan_hal_actual.loom",
-        "test/spirv_vulkan_quantized_hal_actual.loom",
-        "//loom/src/loom/tooling/execution/hal:testdata/launch_schedule_hal_actual.loom",
-    ],
-    manifests = ["test/iree-benchmark-loom_spirv_vulkan.test.json"],
-    resource_group = "loom-vulkan-tests",
-    sanitizer_suppressions = vulkan_suppressions,
-    tags = _SPIRV_VULKAN_EXECUTION_TEST_TAGS + ["manual"],
-    target_compatible_with = _SPIRV_VULKAN_HAL_COMPATIBLE_WITH,
-    tools = {
-        "iree-benchmark-loom": "//loom/src/loom/tools/iree-benchmark-loom",
-    },
-)

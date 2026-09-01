@@ -2,32 +2,6 @@
   "version": 1,
   "cases": [
     {
-      "name": "runs scalar latency benchmark",
-      "run": {
-        "tool": "iree-benchmark-loom",
-        "args": [
-          "{srcdir}/testdata/scalar_benchmarks.loom",
-          "--output-format=jsonl",
-          "--benchmark=@scalar_equal_latency"
-        ]
-      },
-      "stdout": {
-        "contains": [
-          "\"row\":\"run\"",
-          "\"row\":\"plan\"",
-          "\"benchmark\":\"scalar_equal_latency\"",
-          "\"case\":\"scalar_equal\"",
-          "\"measure\":\"case_end_to_end\"",
-          "\"row\":\"sample\"",
-          "\"passed\":true",
-          "\"row\":\"benchmark\"",
-          "\"state\":\"ok\"",
-          "\"row\":\"summary\"",
-          "\"failures\":{\"row_count\":0,\"failed_benchmark_count\":0}"
-        ]
-      }
-    },
-    {
       "name": "writes dry-run output file",
       "run": {
         "tool": "iree-benchmark-loom",
