@@ -835,6 +835,44 @@ PACKAGE_POLICIES = [
             "//runtime/requirements:hal_amdgpu",
         )
 
+    def test_requirement_policy_excludes_matching_subtree(self):
+        broad_requirement = bazel_to_cmake_requirements.build_requirement(
+            id="synthetic.broad",
+            label="//synthetic:requires_broad",
+            enabled_by="//synthetic:enable_broad",
+            cmake_condition="SYNTHETIC_BROAD",
+        )
+        host_requirement = bazel_to_cmake_requirements.build_requirement(
+            id="synthetic.host",
+            label="//synthetic:requires_host",
+            enabled_by="//synthetic:enable_host",
+            cmake_condition="SYNTHETIC_HOST",
+        )
+        policy = bazel_to_cmake_requirements.ProjectRequirementPolicy(
+            package_policies=[
+                bazel_to_cmake_requirements.package_policy(
+                    packages=["synthetic/..."],
+                    excluded_packages=["synthetic/host/..."],
+                    build_requirements=[broad_requirement],
+                ),
+                bazel_to_cmake_requirements.package_policy(
+                    packages=["synthetic/host/..."],
+                    build_requirements=[host_requirement],
+                ),
+            ],
+        )
+
+        device_policy = policy.collect("synthetic/device")
+        self.assertEqual(
+            [requirement.id for requirement in device_policy.build_requirements],
+            ["synthetic.broad"],
+        )
+        host_policy = policy.collect("synthetic/host/child")
+        self.assertEqual(
+            [requirement.id for requirement in host_policy.build_requirements],
+            ["synthetic.host"],
+        )
+
     def test_native_test_emits_target_compatible_guard(self):
         converter = SimpleNamespace(body="")
         functions = bazel_to_cmake_converter.BuildFileFunctions(
