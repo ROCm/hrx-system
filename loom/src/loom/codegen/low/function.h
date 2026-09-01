@@ -36,6 +36,19 @@ uint8_t loom_low_function_allocation(const loom_op_t* function_op);
 // Returns the low schedule mode attr value, or 0 when absent.
 uint8_t loom_low_function_schedule(const loom_op_t* function_op);
 
+// Returns the result values declared by |function_op| and stores their count in
+// |out_count|. Kernel entries have no result values.
+const loom_value_id_t* loom_low_function_result_ids(
+    const loom_op_t* function_op, uint16_t* out_count);
+
+// Returns the structured ABI layout carried by |function_op|.
+loom_named_attr_slice_t loom_low_function_abi_layout(
+    const loom_op_t* function_op);
+
+// Returns the ABI layout attribute index of |function_op|, or
+// LOOM_ATTR_INDEX_NONE when |function_op| is not a low definition.
+uint16_t loom_low_function_abi_layout_attr_index(const loom_op_t* function_op);
+
 // Returns the executable body region of |function_op|, or NULL when absent.
 loom_region_t* loom_low_function_body(loom_op_t* function_op);
 

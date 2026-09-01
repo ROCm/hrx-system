@@ -33,6 +33,7 @@ loom_cc_library(
     hdrs = ["facts.h"],
     deps = [
         ":types",
+        "//loom/src/loom/error:emitter",
         "//runtime/src/iree/base",
     ],
 )
@@ -91,6 +92,7 @@ loom_cc_library(
         ":function_contract",
         ":function_version",
         ":pass_environment",
+        ":provider",
         "//loom/src/loom/analysis:symbol_facts",
         "//loom/src/loom/analysis:symbol_references",
         "//loom/src/loom/error:error_defs",
@@ -140,6 +142,25 @@ loom_cc_library(
         ":resolved_target",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "root_function_versions",
+    srcs = ["root_function_versions.c"],
+    hdrs = ["root_function_versions.h"],
+    deps = [
+        ":facts_builder",
+        ":function_contract",
+        ":function_version",
+        ":provider",
+        "//loom/src/loom/analysis:symbol_facts",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:func_symbol_facts",
+        "//loom/src/loom/ops/target",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],
@@ -473,7 +494,6 @@ loom_cc_library(
         "//loom/src/loom/ops/func",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal:arena",
     ],
 )
 
@@ -495,6 +515,17 @@ loom_cc_library(
 )
 
 loom_cc_test(
+    name = "legalization_test",
+    srcs = ["legalization_test.cc"],
+    deps = [
+        ":legalization",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "contract_test",
     srcs = ["contract_test.cc"],
     deps = [
@@ -502,7 +533,6 @@ loom_cc_test(
         "//loom/src/loom/ir",
         "//loom/src/loom/util:stream",
         "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

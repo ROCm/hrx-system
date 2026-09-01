@@ -7,8 +7,7 @@
 #include "loom/ir/module.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/vector/fragment.h"
-#include "loom/target/arch/spirv/contracts/logical_core.h"
-#include "loom/target/arch/spirv/contracts/logical_core_lower_rules.h"
+#include "loom/target/arch/spirv/contracts/sets.h"
 #include "loom/target/arch/spirv/descriptors/descriptors.h"
 #include "loom/target/arch/spirv/error_catalog.h"
 #include "loom/target/arch/spirv/lower/lower.h"
@@ -289,14 +288,6 @@ static iree_status_t loom_spirv_map_argument(
                              source_type, &out_argument->abi_type);
 }
 
-static const loom_low_lower_rule_set_t* const kSpirvRuleSets[] = {
-    &loom_spirv_logical_core_lower_rule_set,
-};
-
-static const loom_target_contract_binding_t kSpirvContractBindings[] = {
-    {&loom_spirv_logical_core_contract_fragment, 0},
-};
-
 static iree_status_t loom_spirv_preselect_op(void* user_data,
                                              loom_low_lower_context_t* context,
                                              const loom_op_t* source_op,
@@ -328,13 +319,7 @@ static const loom_low_lower_policy_t kSpirvLowLowerPolicy = {
     .map_argument = {.fn = loom_spirv_map_argument, .user_data = NULL},
     .source_type_supported = {.fn = loom_spirv_source_type_supported,
                               .user_data = NULL},
-    .rule_sets =
-        {
-            .count = IREE_ARRAYSIZE(kSpirvRuleSets),
-            .values = kSpirvRuleSets,
-        },
-    .contract_bindings = kSpirvContractBindings,
-    .contract_binding_count = IREE_ARRAYSIZE(kSpirvContractBindings),
+    .contract_set = &loom_spirv_contract_set,
     .descriptor_matrix =
         {
             .options = loom_spirv_descriptor_matrix_options,

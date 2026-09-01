@@ -14,8 +14,8 @@ from loom.target.low_descriptors import (
     Constraint,
     ConstraintKind,
     Descriptor,
+    DescriptorCarrier,
     DescriptorFlag,
-    DescriptorOpKind,
     DescriptorSet,
     EnumDomain,
     EnumValue,
@@ -447,7 +447,7 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
         mnemonic="mov",
         semantic_tag="integer.const.i32",
         operands=(_gpr32_result(),),
-        op_kind=DescriptorOpKind.CONST,
+        carrier=DescriptorCarrier.CONST,
         immediates=(_IMM32_IMMEDIATE,),
         asm_forms=_asm(
             mnemonic="mov.imm32",
@@ -672,7 +672,7 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
         mnemonic="mov",
         semantic_tag="integer.const.i64",
         operands=(_gpr64_result(),),
-        op_kind=DescriptorOpKind.CONST,
+        carrier=DescriptorCarrier.CONST,
         immediates=(_IMM64_IMMEDIATE,),
         asm_forms=_asm(
             mnemonic="mov.imm64",

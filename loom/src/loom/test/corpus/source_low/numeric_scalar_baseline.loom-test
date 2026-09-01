@@ -1,0 +1,167 @@
+// RUN: roundtrip
+
+func.def @scalar_i32_add_multiply(%lhs: i32, %rhs: i32) -> (i32) {
+  %sum = scalar.addi %lhs, %rhs : i32
+  %result = scalar.muli %sum, %rhs : i32
+  func.return %result : i32
+}
+
+// ====
+
+func.def @scalar_i32_subtract(%lhs: i32, %rhs: i32) -> (i32) {
+  %result = scalar.subi %lhs, %rhs : i32
+  func.return %result : i32
+}
+
+// ====
+
+func.def @scalar_i64_subtract(%lhs: i64, %rhs: i64) -> (i64) {
+  %result = scalar.subi %lhs, %rhs : i64
+  func.return %result : i64
+}
+
+// ====
+
+func.def @scalar_i32_compare_predicates(%lhs: i32, %rhs: i32) -> (i1, i1, i1, i1, i1, i1, i1, i1, i1, i1) {
+  %eq = scalar.cmpi eq, %lhs, %rhs : i32
+  %ne = scalar.cmpi ne, %lhs, %rhs : i32
+  %slt = scalar.cmpi slt, %lhs, %rhs : i32
+  %sle = scalar.cmpi sle, %lhs, %rhs : i32
+  %sgt = scalar.cmpi sgt, %lhs, %rhs : i32
+  %sge = scalar.cmpi sge, %lhs, %rhs : i32
+  %ult = scalar.cmpi ult, %lhs, %rhs : i32
+  %ule = scalar.cmpi ule, %lhs, %rhs : i32
+  %ugt = scalar.cmpi ugt, %lhs, %rhs : i32
+  %uge = scalar.cmpi uge, %lhs, %rhs : i32
+  func.return %eq, %ne, %slt, %sle, %sgt, %sge, %ult, %ule, %ugt, %uge : i1, i1, i1, i1, i1, i1, i1, i1, i1, i1
+}
+
+// ====
+
+func.def @scalar_i64_compare_predicates(%lhs: i64, %rhs: i64) -> (i1, i1, i1, i1, i1, i1, i1, i1, i1, i1) {
+  %eq = scalar.cmpi eq, %lhs, %rhs : i64
+  %ne = scalar.cmpi ne, %lhs, %rhs : i64
+  %slt = scalar.cmpi slt, %lhs, %rhs : i64
+  %sle = scalar.cmpi sle, %lhs, %rhs : i64
+  %sgt = scalar.cmpi sgt, %lhs, %rhs : i64
+  %sge = scalar.cmpi sge, %lhs, %rhs : i64
+  %ult = scalar.cmpi ult, %lhs, %rhs : i64
+  %ule = scalar.cmpi ule, %lhs, %rhs : i64
+  %ugt = scalar.cmpi ugt, %lhs, %rhs : i64
+  %uge = scalar.cmpi uge, %lhs, %rhs : i64
+  func.return %eq, %ne, %slt, %sle, %sgt, %sge, %ult, %ule, %ugt, %uge : i1, i1, i1, i1, i1, i1, i1, i1, i1, i1
+}
+
+// ====
+
+func.def @scalar_bf16_extend(%source: bf16) -> (f32) {
+  %result = scalar.extf %source : bf16 to f32
+  func.return %result : f32
+}
+
+// ====
+
+func.def @index_i32_cast(%source: i32) -> (index) {
+  %result = index.cast %source : i32 to index
+  func.return %result : index
+}
+
+// ====
+
+func.def @index_divide_remainder(%lhs: index, %rhs: index) -> (index, index) where [range(%rhs, 1, 65535)] {
+  %quotient = index.div %lhs, %rhs : index
+  %remainder = index.rem %lhs, %rhs : index
+  func.return %quotient, %remainder : index, index
+}
+
+// ====
+
+func.def @index_shifts(%value: index, %amount: index) -> (index, index, index) {
+  %left = index.shli %value, %amount : index
+  %signed_right = index.shrsi %value, %amount : index
+  %unsigned_right = index.shrui %value, %amount : index
+  func.return %left, %signed_right, %unsigned_right : index, index, index
+}
+
+// ====
+
+func.def @scalar_native_integer_ops(%lhs: i32, %rhs: i32) -> (i32, i32, i32, i32, i32) {
+  %quotient = scalar.divsi %lhs, %rhs : i32
+  %minimum = scalar.minui %lhs, %rhs : i32
+  %bits = scalar.ori %lhs, %rhs : i32
+  %rotated = scalar.rotli %bits, %rhs : i32
+  %leading_zeros = scalar.ctlzi %rotated : i32
+  func.return %quotient, %minimum, %bits, %rotated, %leading_zeros : i32, i32, i32, i32, i32
+}
+
+// ====
+
+func.def @scalar_boolean_logic(%lhs: i1, %rhs: i1) -> (i1, i1, i1) {
+  %both = scalar.andi %lhs, %rhs : i1
+  %either = scalar.ori %lhs, %rhs : i1
+  %different = scalar.xori %lhs, %rhs : i1
+  func.return %both, %either, %different : i1, i1, i1
+}
+
+// ====
+
+func.def @index_native_integer_ops(%lhs: index, %rhs: index, %stride: offset) -> (index, index, index, index, i1, offset) {
+  %difference = index.sub %lhs, %rhs : index
+  %bits = index.andi %difference, %rhs : index
+  %rotated = index.rotri %bits, %rhs : index
+  %population = index.ctpopi %rotated : index
+  %ordered = index.cmp ult, %population, %lhs : index
+  %byte_offset = index.scale %population, %stride : index, offset -> offset
+  func.return %difference, %bits, %rotated, %population, %ordered, %byte_offset : index, index, index, index, i1, offset
+}
+
+// ====
+
+func.def @scalar_f32_core_records(%value: f32, %rhs: f32, %lower: f32, %upper: f32) -> (f32, f32, f32, i1, i1, f32, f32, f32) {
+  %sum = scalar.addf %value, %rhs : f32
+  %minimum = scalar.minimumf %value, %rhs : f32
+  %clamped = scalar.clampf<ieee> %value, %lower, %upper : f32
+  %ordered = scalar.cmpf olt, %value, %rhs : f32
+  %finite = scalar.isfinitef %value : f32
+  %root = scalar.sqrtf %value : f32
+  %power = scalar.powf %value, %rhs : f32
+  %fused = scalar.fmaf %value, %rhs, %sum : f32
+  func.return %sum, %minimum, %clamped, %ordered, %finite, %root, %power, %fused : f32, f32, f32, i1, i1, f32, f32, f32
+}
+
+// ====
+
+func.def @scalar_f64_core_records(%value: f64, %rhs: f64) -> (f64, f64, f64, f64, f64) {
+  %negated = scalar.negf %value : f64
+  %maximum = scalar.maxnumf %value, %rhs : f64
+  %cosine = scalar.cosf %value : f64
+  %angle = scalar.atan2f %value, %rhs : f64
+  %sign = scalar.signf %value : f64
+  func.return %negated, %maximum, %cosine, %angle, %sign : f64, f64, f64, f64, f64
+}
+
+// ====
+
+func.def @scalar_core_conversions(%i32_value: i32, %i64_value: i64, %f16_value: f16, %f32_value: f32, %f64_value: f64) -> (f32, f64, f16, bf16, f64, i64, i32, i8, i64, i32) {
+  %extended_f16 = scalar.extf %f16_value : f16 to f32
+  %extended_f32 = scalar.extf %f32_value : f32 to f64
+  %truncated_f64 = scalar.fptrunc %f64_value : f64 to f16
+  %signed_float = scalar.sitofp %i32_value : i32 to bf16
+  %unsigned_float = scalar.uitofp %i64_value : i64 to f64
+  %signed_integer = scalar.fptosi %f32_value : f32 to i64
+  %unsigned_integer = scalar.fptoui %f64_value : f64 to i32
+  %truncated_integer = scalar.trunci %i32_value : i32 to i8
+  %extended_integer = scalar.extsi %i32_value : i32 to i64
+  %raw_bits = scalar.bitcast %f32_value : f32 to i32
+  func.return %extended_f16, %extended_f32, %truncated_f64, %signed_float, %unsigned_float, %signed_integer, %unsigned_integer, %truncated_integer, %extended_integer, %raw_bits : f32, f64, f16, bf16, f64, i64, i32, i8, i64, i32
+}
+
+// ====
+
+func.def @index_core_casts(%raw: i64, %index_value: index, %offset_value: offset) -> (index, offset, i64, i32) {
+  %index_from_raw = index.cast %raw : i64 to index
+  %offset_from_index = index.cast %index_value : index to offset
+  %raw_from_offset = index.cast %offset_value : offset to i64
+  %narrow_offset = index.cast %offset_value : offset to i32
+  func.return %index_from_raw, %offset_from_index, %raw_from_offset, %narrow_offset : index, offset, i64, i32
+}

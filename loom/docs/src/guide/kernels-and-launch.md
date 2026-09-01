@@ -210,26 +210,29 @@ closed product.
 
 ## Evaluate the compiled launch contract
 
-When requested through the compiler API, compilation emits a launch-config
-companion for every exported kernel. An embedding uses the public `loomc` API
-in four steps:
+When a kernel-product request marks a root host-launchable, compilation emits a
+VM launch-config companion beside the target-native executable. The immutable
+product root carries both artifact ordinals and both artifact-local function
+ordinals. An embedding links the optional `loomc/target/vm` package and uses
+that projection in four steps:
 
-1. Load the launch-config artifact with
-   `loomc_launch_config_program_load`.
-2. Resolve the kernel's public export name with
-   `loomc_launch_config_program_lookup_function`.
+1. Load the root's launch-config artifact with
+   `loomc_vm_launch_config_program_load`.
+2. Bind `root.launch_config_function_ordinal` with
+   `loomc_vm_launch_config_program_function_at`.
 3. Pass the workload scalar bit patterns to
-   `loomc_launch_config_program_invoke`.
-4. Issue the matching executable entry with the returned workgroup count,
-   workgroup size, optional cluster size, subgroup size, and workgroup-storage
-   requirement.
+   `loomc_vm_launch_config_program_invoke`.
+4. Issue `root.executable_function_ordinal` from the matching executable with
+   the returned workgroup count, workgroup size, optional cluster size,
+   subgroup size, and workgroup-storage requirement.
 
 Loading and invocation do not parse source, select a target, or compile device
 code. Those decisions happened when the executable and companion artifact were
-produced. Lookup resolves a public export name to a program-local token once;
-repeated invocations use that token without another string lookup.
+produced. The product builder establishes the cross-artifact relationship once
+from compiler-owned function identity. Loading performs no artifact scan or
+name join, and repeated invocations use the bound token without another lookup.
 
-The generated [`loomc` launch-configuration API](../reference/c-api/generated/launch__config_8h.html)
+The generated [`loomc` VM launch-configuration API](../reference/c-api/generated/target_2vm_2launch__config_8h.html)
 defines the exact ownership, thread-safety, argument representation, and result
 contracts. [Embed kernel JIT compilation](../integration/jit-kernel.md) follows
 the complete source, specialization, launch-evaluation, emission, and runtime

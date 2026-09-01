@@ -1,0 +1,45 @@
+// RUN: emit vm-dis
+
+vm.target<core> @target
+
+func.def pure target(@target) @result_postconditions(%condition: i1, %minimum: i32, %alternate: i32) -> (%result: i32) where [ge(%minimum, 0), ge(%result, %minimum)] {
+  cfg.cond_br %condition, ^minimum, ^alternate
+^minimum:
+  func.return %minimum : i32
+^alternate:
+  func.return %alternate : i32
+}
+
+// ----
+vm.module "module" core=0.0 bytes=248
+requirements:
+sections:
+  [0] signatures type=0x0004 flags=0x0000 bytes=[64, +36)
+  [1] callable_types type=0x0005 flags=0x0000 bytes=[104, +12)
+  [2] functions type=0x0008 flags=0x0000 bytes=[120, +128)
+resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
+module_metadata:
+ref_types:
+callable_types:
+  [0] (i8, i32, i32) -> (i32)
+imports:
+exports:
+functions:
+  [0] callable[0] signature[0] bytecode=[0, +76) registers=(4, 1, 0) locals=(0, 0, 0) switch_targets=0
+    type = (i8, i32, i32) -> (i32)
+    +0000  control.block
+    +0004  constant.zero dst_v8=3
+    +0008  integer.compare.i32 dst_v8=3 lhs_v8=1 rhs_v8=3 predicate_u8=5
+    +0016  ref.null dst_r8=0
+    +0020  control.assert condition_v8=3 message_r8_nullable=0
+    +0024  control.branch.unless.s16 condition_v8=0 target_rel16=6
+    +0028  control.block
+    +0032  integer.compare.i32 dst_v8=0 lhs_v8=1 rhs_v8=1 predicate_u8=5
+    +0040  control.assert condition_v8=0 message_r8_nullable=0
+    +0044  value.copy dst_v8=0 src_v8=1
+    +0048  control.return
+    +0052  control.block
+    +0056  integer.compare.i32 dst_v8=0 lhs_v8=2 rhs_v8=1 predicate_u8=5
+    +0064  control.assert condition_v8=0 message_r8_nullable=0
+    +0068  value.copy dst_v8=0 src_v8=2
+    +0072  control.return

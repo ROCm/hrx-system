@@ -1,0 +1,297 @@
+// RUN: emit vm-dis input=low vm.value=2
+
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i32>, reg<vm.value : i32>) -> (reg<vm.value : i32>)>}) @spill_value_branch(%row: reg<vm.value : i32>, %carry: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+  low.br ^late
+^join(%state: reg<vm.value : i32>):
+  %sum = integer.add.i32 %row, %carry : reg<vm.value : i32>
+  %out = integer.add.i32 %sum, %state : reg<vm.value : i32>
+  return %out
+^late:
+  %late_state = constant.s16 7 : reg<vm.value : i32>
+  low.br ^join(%late_state: reg<vm.value : i32>)
+}
+
+// ----
+vm.module "module" core=0.0 bytes=256
+requirements:
+sections:
+  [0] signatures type=0x0004 flags=0x0000 bytes=[64, +32)
+  [1] callable_types type=0x0005 flags=0x0000 bytes=[96, +12)
+  [2] functions type=0x0008 flags=0x0000 bytes=[112, +144)
+resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
+module_metadata:
+ref_types:
+callable_types:
+  [0] (i32, i32) -> (i32)
+imports:
+exports:
+functions:
+  [0] callable[0] signature[0] bytecode=[0, +92) registers=(2, 0, 0) locals=(24, 0, 0) switch_targets=0
+    type = (i32, i32) -> (i32)
+    +0000  control.block
+    +0004  stack.store base_u16=8 src_v8=1 format_u8=12
+    +0012  value.copy dst_v8=1 src_v8=0
+    +0016  stack.store base_u16=0 src_v8=1 format_u8=12
+    +0024  control.branch.s16 target_rel16=11
+    +0028  control.block
+    +0032  stack.load dst_v8=0 base_u16=0 format_u8=12
+    +0040  stack.load dst_v8=1 base_u16=8 format_u8=12
+    +0048  integer.add.i32 dst_v8=0 lhs_v8=0 rhs_v8=1
+    +0052  stack.load dst_v8=1 base_u16=16 format_u8=12
+    +0060  integer.add.i32 dst_v8=0 lhs_v8=0 rhs_v8=1
+    +0064  value.copy dst_v8=1 src_v8=0
+    +0068  control.return
+    +0072  control.block
+    +0076  constant.s16 dst_v8=0 immediate_i16=7
+    +0080  stack.store base_u16=16 src_v8=0 format_u8=12
+    +0088  control.branch.s16 target_rel16=-16
+
+// ====
+
+// RUN: emit vm-dis input=low vm.value=4
+
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>) -> (reg<vm.value : i32>)>}) @spill_value_loop(%seed: reg<vm.value : i32>, %iterations: reg<vm.value : i32>, %addend: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+  %zero = constant.zero : reg<vm.value : i32>
+  %one = constant.s16 1 : reg<vm.value : i32>
+  low.br ^loop(%seed: reg<vm.value : i32>, %iterations: reg<vm.value : i32>)
+^loop(%state: reg<vm.value : i32>, %remaining: reg<vm.value : i32>):
+  %done = integer.compare.i32 %remaining, %zero, eq : reg<vm.value : i1>
+  low.cond_br %done, ^exit, ^body : reg<vm.value : i1>
+^body:
+  %twice = integer.add.i32 %state, %addend : reg<vm.value : i32>
+  %next = integer.add.i32 %twice, %state : reg<vm.value : i32>
+  %rest = integer.sub.i32 %remaining, %one : reg<vm.value : i32>
+  low.br ^loop(%next: reg<vm.value : i32>, %rest: reg<vm.value : i32>)
+^exit:
+  return %state
+}
+
+// ----
+vm.module "module" core=0.0 bytes=268
+requirements:
+sections:
+  [0] signatures type=0x0004 flags=0x0000 bytes=[64, +36)
+  [1] callable_types type=0x0005 flags=0x0000 bytes=[104, +12)
+  [2] functions type=0x0008 flags=0x0000 bytes=[120, +148)
+resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
+module_metadata:
+ref_types:
+callable_types:
+  [0] (i32, i32, i32) -> (i32)
+imports:
+exports:
+functions:
+  [0] callable[0] signature[0] bytecode=[0, +96) registers=(4, 0, 0) locals=(16, 0, 0) switch_targets=0
+    type = (i32, i32, i32) -> (i32)
+    +0000  control.block
+    +0004  value.copy dst_v8=3 src_v8=0
+    +0008  constant.zero dst_v8=0
+    +0012  stack.store base_u16=0 src_v8=0 format_u8=12
+    +0020  constant.s16 dst_v8=0 immediate_i16=1
+    +0024  stack.store base_u16=8 src_v8=0 format_u8=12
+    +0032  value.copy dst_v8=0 src_v8=3
+    +0036  control.block
+    +0040  stack.load dst_v8=3 base_u16=0 format_u8=12
+    +0048  integer.compare.i32 dst_v8=3 lhs_v8=1 rhs_v8=3 predicate_u8=0
+    +0056  control.branch.if.s16 condition_v8=3 target_rel16=7
+    +0060  control.block
+    +0064  integer.add.i32 dst_v8=3 lhs_v8=0 rhs_v8=2
+    +0068  integer.add.i32 dst_v8=0 lhs_v8=3 rhs_v8=0
+    +0072  stack.load dst_v8=3 base_u16=8 format_u8=12
+    +0080  integer.sub.i32 dst_v8=1 lhs_v8=1 rhs_v8=3
+    +0084  control.branch.s16 target_rel16=-13
+    +0088  control.block
+    +0092  control.return
+
+// ====
+
+// RUN: emit vm-dis input=low vm.ref=2 vm.function=2
+
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i1>, reg<vm.ref : hal.buffer>) -> (reg<vm.value : i1>)>}) @spill_ref_branch(%condition: reg<vm.value : i1>, %input: reg<vm.ref : hal.buffer>) -> (reg<vm.value : i1>) asm {
+  %r0 = ref.retain %input : reg<vm.ref : hal.buffer>
+  %r1 = ref.retain %input : reg<vm.ref : hal.buffer>
+  %r2 = ref.retain %input : reg<vm.ref : hal.buffer>
+  low.cond_br %condition, ^left, ^right : reg<vm.value : i1>
+^left:
+  %left_result = ref.compare.eq %r0, %r1 : reg<vm.value : i1>
+  ref.discard %r0
+  ref.discard %r1
+  ref.discard %r2
+  return %left_result
+^right:
+  %right_result = ref.compare.eq %r1, %r2 : reg<vm.value : i1>
+  ref.discard %r0
+  ref.discard %r1
+  ref.discard %r2
+  return %right_result
+}
+
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i1>, reg<vm.function : func.ref<(i32) -> (i32)>>) -> (reg<vm.value : i1>)>}) @spill_function_branch(%condition: reg<vm.value : i1>, %input: reg<vm.function : func.ref<(i32) -> (i32)>>) -> (reg<vm.value : i1>) asm {
+  %f0 = func.copy %input : reg<vm.function : func.ref<(i32) -> (i32)>>
+  %f1 = func.copy %input : reg<vm.function : func.ref<(i32) -> (i32)>>
+  %f2 = func.copy %input : reg<vm.function : func.ref<(i32) -> (i32)>>
+  low.cond_br %condition, ^left, ^right : reg<vm.value : i1>
+^left:
+  %left_result = func.compare.null %f0 : reg<vm.value : i1>
+  return %left_result
+^right:
+  %middle_result = func.compare.null %f1 : reg<vm.value : i1>
+  low.cond_br %middle_result, ^return_middle, ^compare_last : reg<vm.value : i1>
+^return_middle:
+  return %middle_result
+^compare_last:
+  %last_result = func.compare.null %f2 : reg<vm.value : i1>
+  return %last_result
+}
+
+// ----
+vm.module "module" core=0.0 bytes=572
+requirements:
+sections:
+  [0] strings type=0x0002 flags=0x0000 bytes=[96, +25)
+  [1] ref_types type=0x0003 flags=0x0000 bytes=[128, +16)
+  [2] signatures type=0x0004 flags=0x0000 bytes=[144, +84)
+  [3] callable_types type=0x0005 flags=0x0000 bytes=[232, +28)
+  [4] functions type=0x0008 flags=0x0000 bytes=[264, +308)
+resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
+module_metadata:
+ref_types:
+  [0] ref<hal, buffer>
+callable_types:
+  [0] (i32) -> (i32)
+  [1] (i8, ref<hal, buffer>) -> (i8)
+  [2] (i8, func<module:0>) -> (i8)
+imports:
+exports:
+functions:
+  [0] callable[1] signature[1] bytecode=[0, +124) registers=(1, 2, 0) locals=(0, 3, 0) switch_targets=0
+    type = (i8, ref<hal, buffer>) -> (i8)
+    +0000  control.block
+    +0004  ref.move dst_r8=1 src_r8=0
+    +0008  ref.retain dst_r8=0 src_r8=1
+    +0012  ref.stack.store.retain src_r8=0 slot_u16=1
+    +0016  ref.retain dst_r8=0 src_r8=1
+    +0020  ref.stack.store.retain src_r8=0 slot_u16=0
+    +0024  ref.retain dst_r8=0 src_r8=1
+    +0028  ref.stack.store.retain src_r8=0 slot_u16=2
+    +0032  control.branch.unless.s16 condition_v8=0 target_rel16=11
+    +0036  control.block
+    +0040  ref.stack.load.retain dst_r8=0 slot_u16=0
+    +0044  ref.stack.load.retain dst_r8=1 slot_u16=1
+    +0048  ref.compare.eq dst_v8=0 lhs_r8=1 rhs_r8=0
+    +0052  ref.stack.load.retain dst_r8=0 slot_u16=1
+    +0056  ref.discard src_r8=0
+    +0060  ref.stack.load.retain dst_r8=0 slot_u16=0
+    +0064  ref.discard src_r8=0
+    +0068  ref.stack.load.retain dst_r8=0 slot_u16=2
+    +0072  ref.discard src_r8=0
+    +0076  control.return
+    +0080  control.block
+    +0084  ref.stack.load.retain dst_r8=0 slot_u16=0
+    +0088  ref.stack.load.retain dst_r8=1 slot_u16=2
+    +0092  ref.compare.eq dst_v8=0 lhs_r8=0 rhs_r8=1
+    +0096  ref.stack.load.retain dst_r8=0 slot_u16=1
+    +0100  ref.discard src_r8=0
+    +0104  ref.stack.load.retain dst_r8=0 slot_u16=0
+    +0108  ref.discard src_r8=0
+    +0112  ref.stack.load.retain dst_r8=0 slot_u16=2
+    +0116  ref.discard src_r8=0
+    +0120  control.return
+  [1] callable[2] signature[2] bytecode=[124, +84) registers=(1, 0, 2) locals=(0, 0, 2) switch_targets=0
+    type = (i8, func<module:0>) -> (i8)
+    +0000  control.block
+    +0004  func.copy dst_f8=1 src_f8=0
+    +0008  func.copy dst_f8=0 src_f8=1
+    +0012  func.stack.store src_f8=0 local_ordinal_u16=1
+    +0016  func.copy dst_f8=0 src_f8=1
+    +0020  func.stack.store src_f8=0 local_ordinal_u16=0
+    +0024  func.copy dst_f8=0 src_f8=1
+    +0028  control.branch.unless.s16 condition_v8=0 target_rel16=4
+    +0032  control.block
+    +0036  func.stack.load dst_f8=0 local_ordinal_u16=1
+    +0040  func.compare.null dst_v8=0 src_f8=0
+    +0044  control.return
+    +0048  control.block
+    +0052  func.stack.load dst_f8=1 local_ordinal_u16=0
+    +0056  func.compare.null dst_v8=0 src_f8=1
+    +0060  control.branch.unless.s16 condition_v8=0 target_rel16=2
+    +0064  control.block
+    +0068  control.return
+    +0072  control.block
+    +0076  func.compare.null dst_v8=0 src_f8=0
+    +0080  control.return
+
+// ====
+
+// RUN: emit vm-dis vm.value=17
+
+vm.target<core> @target
+
+func.def noinline target(@target) @wide_sink(%v0: i32, %v1: i32, %v2: i32, %v3: i32, %v4: i32, %v5: i32, %v6: i32, %v7: i32, %v8: i32, %v9: i32, %v10: i32, %v11: i32, %v12: i32, %v13: i32, %v14: i32, %v15: i32, %v16: i32) {
+  func.return
+}
+
+func.def public target(@target) @call_with_spill(%keep: i32, %value: i32) -> (i32) {
+  func.call @wide_sink(%value, %value, %value, %value, %value, %value, %value, %value, %value, %value, %value, %value, %value, %value, %value, %value, %value) : (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32)
+  func.return %keep : i32
+}
+
+// ----
+vm.module "module" core=0.0 bytes=596
+requirements:
+sections:
+  [0] strings type=0x0002 flags=0x0000 bytes=[112, +74)
+  [1] signatures type=0x0004 flags=0x0000 bytes=[192, +116)
+  [2] callable_types type=0x0005 flags=0x0000 bytes=[312, +20)
+  [3] exports type=0x0007 flags=0x0000 bytes=[336, +12)
+  [4] functions type=0x0008 flags=0x0000 bytes=[352, +216)
+  [5] presentation type=0x000C flags=0x0001 bytes=[568, +28)
+resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
+module_metadata:
+ref_types:
+callable_types:
+  [0] (i32, i32) -> (i32)
+  [1] (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) -> ()
+imports:
+exports:
+  [0] @call_with_spill -> function[1] : (keep: i32, value: i32) -> (i32)
+    authored_type = "(i32, i32) -> (i32)"
+    argument[0].authored_type = "i32"
+    argument[1].authored_type = "i32"
+    result[0].authored_type = "i32"
+functions:
+  [0] callable[1] signature[1] bytecode=[0, +8) registers=(17, 0, 0) locals=(0, 0, 0) switch_targets=0
+    type = (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) -> ()
+    +0000  control.block
+    +0004  control.return
+  [1] callable[0] signature[0] bytecode=[8, +108) registers=(17, 0, 0) locals=(16, 0, 0) switch_targets=0 has_call
+    type = (i32, i32) -> (i32)
+    +0000  control.block
+    +0004  stack.store base_u16=8 src_v8=0 format_u8=12
+    +0012  value.copy dst_v8=16 src_v8=1
+    +0016  value.copy dst_v8=0 src_v8=16
+    +0020  value.copy dst_v8=1 src_v8=16
+    +0024  value.copy dst_v8=2 src_v8=16
+    +0028  value.copy dst_v8=3 src_v8=16
+    +0032  value.copy dst_v8=4 src_v8=16
+    +0036  value.copy dst_v8=5 src_v8=16
+    +0040  value.copy dst_v8=6 src_v8=16
+    +0044  value.copy dst_v8=7 src_v8=16
+    +0048  value.copy dst_v8=8 src_v8=16
+    +0052  value.copy dst_v8=9 src_v8=16
+    +0056  value.copy dst_v8=10 src_v8=16
+    +0060  value.copy dst_v8=11 src_v8=16
+    +0064  value.copy dst_v8=12 src_v8=16
+    +0068  value.copy dst_v8=13 src_v8=16
+    +0072  value.copy dst_v8=14 src_v8=16
+    +0076  value.copy dst_v8=15 src_v8=16
+    +0080  stack.store base_u16=0 src_v8=16 format_u8=12
+    +0088  control.call target_kind_u8=0 target_ordinal_u16=0 direct_ref_move_mask_u16=0
+    +0096  stack.load dst_v8=0 base_u16=8 format_u8=12
+    +0104  control.return

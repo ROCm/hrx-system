@@ -63,7 +63,7 @@ typedef struct loom_region_slice_t {
 // accessors on CFG terminators.
 typedef struct loom_successor_slice_t {
   loom_block_t** blocks;
-  uint8_t count;
+  uint16_t count;
 } loom_successor_slice_t;
 
 // Returns the value ID at |index| in the slice. |index| must be less than
@@ -264,12 +264,23 @@ enum loom_format_kind_e {
   // [align(16) %a, align(256) %b]. field_index references the variadic
   // operand field and data references its i64 array alignment attribute.
   LOOM_FORMAT_KIND_ALIGNED_REFS = 32,
+
+  // Variadic CFG successor block references: ^case0, ^case1, ^case2.
+  // field_index is the first successor in the trailing variadic span.
+  LOOM_FORMAT_KIND_SUCCESSOR_REFS = 33,
 };
 typedef uint8_t loom_format_kind_t;
 
 // Individual flag bits packed into INDEX_LIST format element data.
 enum loom_format_index_list_data_bits_e {
   LOOM_FORMAT_INDEX_LIST_DATA_NO_LEADING_GLUE = 1u << 15,
+};
+
+// Individual flag bits packed into BLOCK_ARGS format element data.
+enum loom_format_block_args_data_bits_e {
+  // Defines entry arguments in the surrounding declaration Scope so adjacent
+  // signature metadata can reference them before the region is parsed.
+  LOOM_FORMAT_BLOCK_ARGS_DATA_DEFINITION_SCOPE = 1u << 0,
 };
 
 // Mask for the static attribute field index packed into INDEX_LIST data.
@@ -333,6 +344,7 @@ typedef enum loom_region_syntax_e {
 //   REGION_TABLE:   packed keys attr index and fixed default region index.
 //   REGION:         loom_region_syntax_t parser/printer selector.
 //   BINDING_LIST:   binding kind (CAPTURE=0, ELEMENT=1).
+//   BLOCK_ARGS:     loom_format_block_args_data_bits_e flags.
 //   FUNC_ARGS:      packed optional start/end i64 attribute indices.
 //   OPTIONAL_GROUP: (skip_count << 2) | anchor_category.
 typedef struct loom_format_element_t {
@@ -1256,6 +1268,13 @@ static inline bool loom_func_like_isa(loom_func_like_t func) {
 loom_func_like_t loom_func_like_cast(const loom_module_t* module,
                                      loom_op_t* op);
 
+// Casts const |op| to loom_func_like_t if it implements the FuncLike
+// interface. Returns {NULL, NULL} if |op| is NULL or does not implement it.
+// The returned interface view does not encode transitive constness; callers
+// must preserve the access discipline of the input operation.
+loom_func_like_t loom_func_like_const_cast(const loom_module_t* module,
+                                           const loom_op_t* op);
+
 // Returns the body region of a func-like op, or NULL for bodyless ops
 // (func.decl, template.ukernel) or if |func| is not valid.
 loom_region_t* loom_func_like_body(loom_func_like_t func);
@@ -1307,6 +1326,13 @@ loom_string_id_t loom_func_like_import_module(loom_func_like_t func);
 // LOOM_STRING_ID_INVALID if absent.
 loom_string_id_t loom_func_like_import_symbol(loom_func_like_t func);
 
+// Returns the import policy enum value, or zero when absent.
+uint8_t loom_func_like_import_policy(loom_func_like_t func);
+
+// Returns metadata owned by the import declaration, or an empty slice if
+// absent.
+loom_named_attr_slice_t loom_func_like_import_metadata(loom_func_like_t func);
+
 // Returns the target record symbol ref for a func-like op, or null if
 // |func| has no target contract.
 loom_symbol_ref_t loom_func_like_target(loom_func_like_t func);
@@ -1339,8 +1365,19 @@ loom_named_attr_slice_t loom_func_like_abi_attrs(loom_func_like_t func);
 // Returns the export symbol string ID, or LOOM_STRING_ID_INVALID if absent.
 loom_string_id_t loom_func_like_export_symbol(loom_func_like_t func);
 
+// Returns the effective exported name of |func|, or an empty view when the
+// function is module-internal. An explicit export name takes precedence over
+// the symbol name used by public functions.
+iree_string_view_t loom_func_like_export_name(const loom_module_t* module,
+                                              const loom_symbol_t* symbol,
+                                              loom_func_like_t func);
+
 // Returns the export payload attrs, or an empty slice if absent.
 loom_named_attr_slice_t loom_func_like_export_attrs(loom_func_like_t func);
+
+// Returns metadata owned by the export declaration, or an empty slice if
+// absent.
+loom_named_attr_slice_t loom_func_like_export_metadata(loom_func_like_t func);
 
 // Returns true when |func| is a source-level or target-low kernel entry.
 // Kernel entries are exported by symbol name even without an explicit export
@@ -1747,7 +1784,7 @@ loom_attribute_t loom_memory_access_atomic_scope(loom_memory_access_t access);
   static inline loom_successor_slice_t func_name(const loom_op_t* op) { \
     loom_successor_slice_t slice;                                       \
     slice.blocks = loom_op_successors(op) + (fixed_count);              \
-    slice.count = (uint8_t)(op->successor_count - (fixed_count));       \
+    slice.count = (uint16_t)(op->successor_count - (fixed_count));      \
     return slice;                                                       \
   }
 
@@ -1806,6 +1843,19 @@ loom_attribute_t loom_memory_access_atomic_scope(loom_memory_access_t access);
   enum { func_name##_ATTR_INDEX = (index) };                     \
   static inline uint32_t func_name(const loom_op_t* op) {        \
     return loom_attr_as_scoped_enum(loom_op_attrs(op)[(index)]); \
+  }
+
+// Defines functions that query and read an optional representation-scoped
+// enum by index.
+#define LOOM_DEFINE_OPTIONAL_ATTR_SCOPED_ENUM(func_name, index)       \
+  enum { func_name##_ATTR_INDEX = (index) };                          \
+  static inline bool func_name##_is_present(const loom_op_t* op) {    \
+    return !loom_attr_is_absent(loom_op_attrs(op)[(index)]);          \
+  }                                                                   \
+  static inline uint32_t func_name(const loom_op_t* op) {             \
+    return func_name##_is_present(op)                                 \
+               ? loom_attr_as_scoped_enum(loom_op_attrs(op)[(index)]) \
+               : UINT32_MAX;                                          \
   }
 
 // Defines a function that reads a symbol attribute by index.
@@ -2152,7 +2202,7 @@ iree_status_t loom_builder_allocate_op(
 // fills the ordinary trailing fields through their accessors.
 iree_status_t loom_builder_allocate_op_with_successors(
     loom_builder_t* builder, loom_op_kind_t kind, uint16_t operand_count,
-    uint16_t result_count, uint8_t successor_count, uint8_t region_count,
+    uint16_t result_count, uint16_t successor_count, uint8_t region_count,
     uint16_t tied_result_count, uint8_t attribute_count,
     loom_location_id_t location, loom_op_t** out_op);
 
@@ -2169,7 +2219,7 @@ iree_status_t loom_builder_allocate_segmented_op(
 iree_status_t loom_builder_allocate_segmented_op_with_successors(
     loom_builder_t* builder, loom_op_kind_t kind, uint16_t operand_count,
     const uint16_t* operand_segment_counts, uint8_t operand_segment_count,
-    uint16_t result_count, uint8_t successor_count, uint8_t region_count,
+    uint16_t result_count, uint16_t successor_count, uint8_t region_count,
     uint16_t tied_result_count, uint8_t attribute_count,
     loom_location_id_t location, loom_op_t** out_op);
 

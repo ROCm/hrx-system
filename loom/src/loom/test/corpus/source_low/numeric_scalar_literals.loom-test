@@ -1,0 +1,90 @@
+// RUN: roundtrip
+
+func.def @scalar_i1_literals() -> (i1, i1) {
+  %true = scalar.constant true : i1
+  %false = scalar.constant false : i1
+  func.return %true, %false : i1, i1
+}
+
+// ====
+
+func.def @scalar_i8_literals() -> (i8) {
+  %negative = scalar.constant -128 : i8
+  func.return %negative : i8
+}
+
+// ====
+
+func.def @scalar_i16_literals() -> (i16) {
+  %negative = scalar.constant -1 : i16
+  func.return %negative : i16
+}
+
+// ====
+
+func.def @scalar_i32_literals() -> (i32) {
+  %value = scalar.constant 0 : i32
+  func.return %value : i32
+}
+
+// ====
+
+func.def @scalar_i64_literals() -> (i64, i64) {
+  %s16_min = scalar.constant -32768 : i64
+  %below_s16 = scalar.constant -32769 : i64
+  func.return %s16_min, %below_s16 : i64, i64
+}
+
+// ====
+
+func.def @index_literals() -> (index, index, index) {
+  %negative = index.constant -1 : index
+  %u32_max = index.constant 4294967295 : index
+  %above_u32 = index.constant 4294967296 : index
+  func.return %negative, %u32_max, %above_u32 : index, index, index
+}
+
+// ====
+
+func.def @scalar_f8e4m3_literals() -> (f8E4M3) {
+  %value = scalar.constant -1.0 : f8E4M3
+  func.return %value : f8E4M3
+}
+
+// ====
+
+func.def @scalar_f8e5m2_literals() -> (f8E5M2) {
+  %value = scalar.constant -1.0 : f8E5M2
+  func.return %value : f8E5M2
+}
+
+// ====
+
+func.def @scalar_f16_literals() -> (f16, f16) {
+  %positive_value = scalar.constant 1.0 : f16
+  %signed_value = scalar.constant -0.0 : f16
+  func.return %positive_value, %signed_value : f16, f16
+}
+
+// ====
+
+func.def @scalar_bf16_literals() -> (bf16) {
+  %value = scalar.constant -1.0 : bf16
+  func.return %value : bf16
+}
+
+// ====
+
+func.def @scalar_f32_literals() -> (f32, f32) {
+  %positive_value = scalar.constant 1.0 : f32
+  %signed_value = scalar.constant -0.0 : f32
+  func.return %positive_value, %signed_value : f32, f32
+}
+
+// ====
+
+func.def @scalar_f64_literals() -> (f64, f64) {
+  %positive_value = scalar.constant 1.0 : f64
+  %signed_value = scalar.constant -0.0 : f64
+  func.return %positive_value, %signed_value : f64, f64
+}

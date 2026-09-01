@@ -272,7 +272,7 @@ static iree_status_t loom_wasm_loom_check_emit_provider_execute(
   };
   const loom_low_emission_frame_options_t frame_options = {
       .descriptor_registry = &request->low_registry->registry,
-      .schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY,
+      .schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_PRESERVE_SOURCE_ORDER,
       .allocation_budgets = emit_request.allocation_budgets,
       .allocation_budget_count = emit_request.allocation_budget_count,
       .emitter = diagnostic_emitter,

@@ -196,6 +196,7 @@ loom_cc_library(
     loom::target::arch::spirv::packet_rows
     loom::target::function_version
     loom::target::low_descriptor_registry
+    loom::target::provider
     loom::target::types
   PUBLIC
 )

@@ -75,6 +75,7 @@ loom_cc_library(
     loom::codegen::low::function_model
     loom::codegen::low::lower
     loom::codegen::low::packet_json
+    loom::codegen::low::pipeline::legalizer_registry
     loom::codegen::low::pipeline::pass_environment
     loom::codegen::low::schedule
     loom::codegen::low::target_binding
@@ -183,6 +184,7 @@ loom_cc_test(
     loom::target::low_descriptor_registry_core_test
     loom::target::provider
     loom::target::test::lower
+    loom::target::test::target_record_table
     loom::testing::context
 )
 
@@ -443,6 +445,9 @@ endif()
 if(LOOM_TARGET_ARCH_SPIRV)
   list(APPEND _loom_check_platform_copts "-DLOOM_CHECK_HAVE_TARGET_SPIRV=1")
 endif()
+if(LOOM_TARGET_ARCH_VM)
+  list(APPEND _loom_check_platform_copts "-DLOOM_CHECK_HAVE_TARGET_VM=1")
+endif()
 if(LOOM_EMIT_SPIRV)
   list(APPEND _loom_check_platform_copts "-DLOOM_CHECK_HAVE_EMIT_SPIRV=1")
 endif()
@@ -467,6 +472,9 @@ if(LOOM_EMIT_LLVMIR)
 endif()
 if(LOOM_TARGET_ARCH_SPIRV)
   list(APPEND _loom_check_platform_deps loom::target::arch::spirv::check::check_provider)
+endif()
+if(LOOM_TARGET_ARCH_VM)
+  list(APPEND _loom_check_platform_deps loom::target::arch::vm::check_provider)
 endif()
 if(LOOM_EMIT_SPIRV)
   list(APPEND _loom_check_platform_deps loom::target::emit::spirv::check_provider)
@@ -507,6 +515,9 @@ endif()
 if(LOOM_TARGET_ARCH_SPIRV)
   list(APPEND _loom_check_test_platform_copts "-DLOOM_CHECK_HAVE_TARGET_SPIRV=1")
 endif()
+if(LOOM_TARGET_ARCH_VM)
+  list(APPEND _loom_check_test_platform_copts "-DLOOM_CHECK_HAVE_TARGET_VM=1")
+endif()
 if(LOOM_EMIT_SPIRV)
   list(APPEND _loom_check_test_platform_copts "-DLOOM_CHECK_HAVE_EMIT_SPIRV=1")
 endif()
@@ -531,6 +542,9 @@ if(LOOM_EMIT_LLVMIR)
 endif()
 if(LOOM_TARGET_ARCH_SPIRV)
   list(APPEND _loom_check_test_platform_deps loom::target::arch::spirv::check::check_provider)
+endif()
+if(LOOM_TARGET_ARCH_VM)
+  list(APPEND _loom_check_test_platform_deps loom::target::arch::vm::check_provider)
 endif()
 if(LOOM_EMIT_SPIRV)
   list(APPEND _loom_check_test_platform_deps loom::target::emit::spirv::check_provider)

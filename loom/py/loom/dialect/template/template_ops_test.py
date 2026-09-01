@@ -9,7 +9,7 @@
 import pytest
 
 from loom.builtin_types import ALL_BUILTIN_TYPES
-from loom.dialect.func import ALL_FUNC_OPS
+from loom.dialect.func import ALL_FUNC_OPS, ALL_FUNC_TYPES
 from loom.dialect.target import ALL_TARGET_OPS, ALL_TARGET_PARAMETERIZED_ATTRS
 from loom.dialect.template import ALL_TEMPLATE_OPS
 from loom.format.bytecode.reader import read_module
@@ -25,7 +25,7 @@ def _parse(source: str) -> Module:
     ops = [*ALL_FUNC_OPS, *ALL_TARGET_OPS, *ALL_TEMPLATE_OPS]
     parser = Parser()
     parser.register_ops(ops)
-    parser.register_types(ALL_BUILTIN_TYPES)
+    parser.register_types((*ALL_BUILTIN_TYPES, *ALL_FUNC_TYPES))
     parser.register_parameterized_attrs(ALL_TARGET_PARAMETERIZED_ATTRS)
     module = parser.parse(source)
     assert not verify_module(module, ops=ops).has_errors
@@ -36,7 +36,7 @@ def _print(module: Module) -> str:
     ops = [*ALL_FUNC_OPS, *ALL_TARGET_OPS, *ALL_TEMPLATE_OPS]
     printer = Printer()
     printer.register_ops(ops)
-    printer.register_types(ALL_BUILTIN_TYPES)
+    printer.register_types((*ALL_BUILTIN_TYPES, *ALL_FUNC_TYPES))
     return printer.print_module(module)
 
 

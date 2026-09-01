@@ -177,6 +177,12 @@ def _load_low_generation() -> DialectGeneration:
     return DialectGeneration(low_ops, list(ALL_LOW_OPS), None)
 
 
+def _load_metadata_generation() -> DialectGeneration:
+    from loom.dialect.metadata import ALL_METADATA_OPS, metadata_ops
+
+    return DialectGeneration(metadata_ops, list(ALL_METADATA_OPS), None)
+
+
 def _load_template_generation() -> DialectGeneration:
     from loom.dialect.template import ALL_TEMPLATE_OPS, template_ops
 
@@ -225,6 +231,12 @@ def _load_wasm_generation() -> DialectGeneration:
     return DialectGeneration(wasm_ops, list(ALL_WASM_OPS), None)
 
 
+def _load_vm_generation() -> DialectGeneration:
+    from loom.target.arch.vm.dialect import ALL_VM_OPS, vm_ops
+
+    return DialectGeneration(vm_ops, list(ALL_VM_OPS), None)
+
+
 _DIALECT_GENERATION_LOADERS: tuple[tuple[str, DialectGenerationLoader], ...] = (
     ("test", _load_test_generation),
     ("scalar", _load_scalar_generation),
@@ -244,6 +256,7 @@ _DIALECT_GENERATION_LOADERS: tuple[tuple[str, DialectGenerationLoader], ...] = (
     ("llvmir", _load_llvmir_generation),
     ("target", _load_target_generation),
     ("low", _load_low_generation),
+    ("metadata", _load_metadata_generation),
     ("template", _load_template_generation),
     ("pass", _load_pass_generation),
     ("config", _load_config_generation),
@@ -252,6 +265,7 @@ _DIALECT_GENERATION_LOADERS: tuple[tuple[str, DialectGenerationLoader], ...] = (
     ("x86", _load_x86_generation),
     ("spirv", _load_spirv_generation),
     ("wasm", _load_wasm_generation),
+    ("vm", _load_vm_generation),
 )
 
 
@@ -262,11 +276,13 @@ def dialect_names() -> tuple[str, ...]:
 
 def _load_core_types() -> list[Any]:
     from loom.builtin_types import ALL_BUILTIN_TYPES
+    from loom.dialect.func import ALL_FUNC_TYPES
     from loom.dialect.hal import ALL_HAL_TYPES
     from loom.dialect.kernel import ALL_KERNEL_TYPES
 
     return [
         *ALL_BUILTIN_TYPES,
+        *ALL_FUNC_TYPES,
         *ALL_HAL_TYPES,
         *ALL_KERNEL_TYPES,
     ]

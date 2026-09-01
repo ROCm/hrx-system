@@ -88,6 +88,30 @@ class BytecodeAttributeTest : public ::testing::Test {
   loom_module_t* module_ = nullptr;
 };
 
+TEST_F(BytecodeAttributeTest, U64MaxValidatesAndMaterializesExactly) {
+  const uint8_t data[] = {
+      0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01,
+  };
+  loom_bytecode_attribute_validator_t validator = MakeValidator();
+  loom_bytecode_reader_cursor_t validation_cursor =
+      MakeCursor(data, sizeof(data));
+  IREE_ASSERT_OK(loom_bytecode_attribute_validate_named(
+      &validator, &validation_cursor, /*descriptor=*/nullptr,
+      LOOM_BYTECODE_ATTR_U64, /*available_type_count=*/0));
+  EXPECT_EQ(validation_cursor.cursor.position, sizeof(data));
+
+  loom_bytecode_attribute_materializer_t materializer = MakeMaterializer();
+  loom_bytecode_reader_cursor_t materialization_cursor =
+      MakeCursor(data, sizeof(data));
+  loom_attribute_t attr = loom_attr_absent();
+  IREE_ASSERT_OK(loom_bytecode_attribute_materialize_named(
+      &materializer, &materialization_cursor, /*descriptor=*/nullptr,
+      LOOM_BYTECODE_ATTR_U64, &attr, /*available_type_count=*/0));
+  EXPECT_EQ(materialization_cursor.cursor.position, sizeof(data));
+  EXPECT_EQ(attr.kind, LOOM_ATTR_U64);
+  EXPECT_EQ(loom_attr_as_u64(attr), UINT64_MAX);
+}
+
 TEST_F(BytecodeAttributeTest, NamedPredicatesValidateAndMaterialize) {
   const uint8_t data[] = {
       0x01, LOOM_PREDICATE_MUL,  0x02, LOOM_PRED_ARG_VALUE,

@@ -6,6 +6,8 @@
 
 #include "loom/target/provider.h"
 
+#include <inttypes.h>
+
 void loom_target_emit_artifact_release(loom_target_emit_artifact_t* artifact) {
   if (artifact == NULL) {
     return;
@@ -22,6 +24,68 @@ void loom_target_emit_artifact_release(loom_target_emit_artifact_t* artifact) {
     artifact->release_storage(artifact->storage);
   }
   *artifact = (loom_target_emit_artifact_t){0};
+}
+
+static iree_status_t loom_target_environment_validate_provider(
+    const loom_target_provider_set_t* provider_set,
+    iree_host_size_t provider_index) {
+  const loom_target_provider_t* provider =
+      provider_set->providers[provider_index];
+  if (provider == NULL) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "target provider %" PRIhsz " is NULL",
+                            provider_index);
+  }
+  if (provider->profile_type != NULL &&
+      (provider->fact_type == NULL ||
+       provider->profile_type->fact_type != provider->fact_type)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "target provider %" PRIhsz
+                            " profile does not project its owned fact family",
+                            provider_index);
+  }
+  if (provider->materialize_definition != NULL && provider->fact_type == NULL) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "target provider %" PRIhsz
+        " materializes definitions without owning a fact family",
+        provider_index);
+  }
+  if (provider->launch_config_compiler != NULL) {
+    const loom_target_launch_config_compiler_t* compiler =
+        provider->launch_config_compiler;
+    if (iree_string_view_is_empty(compiler->public_artifact_format) ||
+        iree_string_view_is_empty(compiler->file_extension) ||
+        iree_string_view_is_empty(compiler->default_identifier) ||
+        compiler->prepare == NULL || compiler->emit == NULL) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "target provider %" PRIhsz
+                              " has an incomplete launch-config compiler facet",
+                              provider_index);
+    }
+  }
+  for (iree_host_size_t i = 0; i < provider_index; ++i) {
+    const loom_target_provider_t* existing = provider_set->providers[i];
+    if (existing == provider) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "target provider %" PRIhsz " is duplicated",
+                              provider_index);
+    }
+    if (provider->fact_type != NULL &&
+        existing->fact_type == provider->fact_type) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "target fact family '%.*s' has more than one provider",
+          (int)provider->fact_type->name.size, provider->fact_type->name.data);
+    }
+    if (provider->launch_config_compiler != NULL &&
+        existing->launch_config_compiler != NULL) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "target environment has more than one launch-config compiler");
+    }
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t loom_target_environment_append_low_descriptor_registry(
@@ -193,9 +257,16 @@ iree_status_t loom_target_environment_initialize(
     loom_target_environment_t* out_environment) {
   IREE_ASSERT_ARGUMENT(provider_set);
   IREE_ASSERT_ARGUMENT(out_environment);
-  *out_environment = (loom_target_environment_t){
-      .provider_set = provider_set,
-  };
+  *out_environment = (loom_target_environment_t){0};
+  if (provider_set->provider_count != 0 && provider_set->providers == NULL) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "target provider table is NULL");
+  }
+  for (iree_host_size_t i = 0; i < provider_set->provider_count; ++i) {
+    IREE_RETURN_IF_ERROR(
+        loom_target_environment_validate_provider(provider_set, i));
+  }
+  out_environment->provider_set = provider_set;
 
   const loom_pass_registry_t*
       pass_registries[LOOM_TARGET_PROVIDER_PASS_REGISTRY_CAPACITY] = {0};
@@ -344,6 +415,19 @@ loom_target_emitter_list_t loom_target_environment_emitter_list(
                                        environment->emitter_count);
 }
 
+const loom_target_launch_config_compiler_t*
+loom_target_environment_launch_config_compiler(
+    const loom_target_environment_t* environment) {
+  IREE_ASSERT_ARGUMENT(environment);
+  for (iree_host_size_t i = 0; i < environment->provider_set->provider_count;
+       ++i) {
+    const loom_target_launch_config_compiler_t* compiler =
+        environment->provider_set->providers[i]->launch_config_compiler;
+    if (compiler != NULL) return compiler;
+  }
+  return NULL;
+}
+
 const loom_pass_registry_t* loom_target_environment_pass_registry(
     const loom_target_environment_t* environment) {
   IREE_ASSERT_ARGUMENT(environment);
@@ -359,6 +443,20 @@ const loom_target_provider_t* loom_target_environment_lookup_profile_provider(
   for (iree_host_size_t i = 0; i < environment->provider_set->provider_count;
        ++i) {
     if (environment->provider_set->providers[i]->profile_type == profile_type) {
+      return environment->provider_set->providers[i];
+    }
+  }
+  return NULL;
+}
+
+const loom_target_provider_t* loom_target_environment_lookup_fact_provider(
+    const loom_target_environment_t* environment,
+    const loom_target_fact_type_t* fact_type) {
+  IREE_ASSERT_ARGUMENT(environment);
+  IREE_ASSERT_ARGUMENT(fact_type);
+  for (iree_host_size_t i = 0; i < environment->provider_set->provider_count;
+       ++i) {
+    if (environment->provider_set->providers[i]->fact_type == fact_type) {
       return environment->provider_set->providers[i];
     }
   }

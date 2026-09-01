@@ -142,11 +142,17 @@ TEST(LowAllocationLiveRangeTest, ComputesIntervalAlignment) {
   loom_liveness_interval_t odd_interval = {};
   odd_interval.unit_count = 3;
 
-  EXPECT_EQ(loom_low_allocation_live_range_interval_alignment(&scalar_interval),
+  EXPECT_EQ(loom_low_allocation_live_range_interval_alignment(
+                &scalar_interval, /*reg_class_flags=*/0),
             1u);
-  EXPECT_EQ(loom_low_allocation_live_range_interval_alignment(&vector_interval),
+  EXPECT_EQ(loom_low_allocation_live_range_interval_alignment(
+                &vector_interval, /*reg_class_flags=*/0),
             4u);
-  EXPECT_EQ(loom_low_allocation_live_range_interval_alignment(&odd_interval),
+  EXPECT_EQ(loom_low_allocation_live_range_interval_alignment(
+                &odd_interval, /*reg_class_flags=*/0),
+            1u);
+  EXPECT_EQ(loom_low_allocation_live_range_interval_alignment(
+                &vector_interval, LOOM_LOW_REG_CLASS_FLAG_UNALIGNED_RANGES),
             1u);
 }
 

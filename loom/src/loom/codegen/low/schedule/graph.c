@@ -73,30 +73,28 @@ static iree_status_t loom_low_schedule_resolve_descriptor(
     loom_low_schedule_node_t* node,
     const loom_low_descriptor_t** out_descriptor) {
   *out_descriptor = NULL;
-  if (!loom_low_schedule_op_is_descriptor_packet(op)) {
+  const uint32_t descriptor_ordinal = loom_low_descriptor_ordinal_for_op(op);
+  if (descriptor_ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
     return iree_ok_status();
   }
 
-  loom_low_descriptor_packet_t packet = {0};
-  loom_low_descriptor_packet_initialize(state->target.descriptor_set, op,
-                                        &packet);
-
-  node->descriptor = packet.descriptor;
-  if (iree_any_bit_set(packet.descriptor->flags,
+  const loom_low_descriptor_t* descriptor =
+      &state->target.descriptor_set->descriptors[descriptor_ordinal];
+  node->descriptor = descriptor;
+  if (iree_any_bit_set(descriptor->flags,
                        LOOM_LOW_DESCRIPTOR_FLAG_EARLY_CLOBBER)) {
     node->flags |= LOOM_LOW_SCHEDULE_NODE_FLAG_EARLY_CLOBBER;
   }
-  if (iree_any_bit_set(packet.descriptor->flags,
-                       LOOM_LOW_DESCRIPTOR_FLAG_BARRIER)) {
+  if (iree_any_bit_set(descriptor->flags, LOOM_LOW_DESCRIPTOR_FLAG_BARRIER)) {
     node->flags |= LOOM_LOW_SCHEDULE_NODE_FLAG_SOURCE_ORDER_BOUNDARY;
   }
   const loom_low_descriptor_view_t* descriptor_view =
       loom_low_descriptor_set_descriptor_view_at(state->target.descriptor_set,
-                                                 packet.descriptor_ordinal);
+                                                 descriptor_ordinal);
   node->schedule_class =
       &state->target.descriptor_set
            ->schedule_classes[descriptor_view->schedule_class_id];
-  *out_descriptor = packet.descriptor;
+  *out_descriptor = descriptor;
   return iree_ok_status();
 }
 
@@ -1620,8 +1618,13 @@ iree_status_t loom_low_schedule_build_dependencies(
           loom_low_schedule_note_edge_storage_writes(state, node_index));
 
       const loom_low_descriptor_t* descriptor = node->descriptor;
+      const loom_low_descriptor_t* operand_descriptor = descriptor;
+      if (descriptor != NULL &&
+          descriptor->carrier == LOOM_LOW_DESCRIPTOR_CARRIER_BRANCH) {
+        operand_descriptor = NULL;
+      }
       const uint16_t* descriptor_operand_indices =
-          loom_low_schedule_index_descriptor_operands(state, descriptor,
+          loom_low_schedule_index_descriptor_operands(state, operand_descriptor,
                                                       node->operand_count);
       const loom_value_ordinal_t* operand_ordinals =
           loom_low_schedule_node_const_operand_ordinals(node);
@@ -1641,22 +1644,22 @@ iree_status_t loom_low_schedule_build_dependencies(
                   state, producer_node, node_index));
         }
         bool reads_descriptor_state = false;
-        if (descriptor != NULL) {
+        if (operand_descriptor != NULL) {
           const loom_low_operand_t* operand =
               &state->target.descriptor_set
-                   ->operands[descriptor->operand_start +
+                   ->operands[operand_descriptor->operand_start +
                               descriptor_operand_indices[operand_index]];
           reads_descriptor_state = iree_any_bit_set(
               operand->flags, LOOM_LOW_OPERAND_FLAG_STATE_READ);
         }
-        if (descriptor == NULL || reads_descriptor_state) {
+        if (operand_descriptor == NULL || reads_descriptor_state) {
           IREE_RETURN_IF_ERROR(loom_low_schedule_note_state_value_read(
               state, node_index, operand_index, operand_ordinal));
         }
       }
 
       IREE_RETURN_IF_ERROR(loom_low_schedule_note_storage_reads(
-          state, node_index, descriptor, descriptor_operand_indices));
+          state, node_index, operand_descriptor, descriptor_operand_indices));
       IREE_RETURN_IF_ERROR(loom_low_schedule_note_descriptor_state_accesses(
           state, node_index, descriptor));
       IREE_RETURN_IF_ERROR(

@@ -24,3 +24,19 @@ class CfgBuilder(DialectBuilder):
         false_dest: Block,
         location_id: int | None = ...,
     ) -> None: ...
+    def switch(
+        self,
+        *,
+        selector: ValueRef,
+        case_keys: list[int],
+        case_dests: list[Block] = ...,
+        default_dest: Block,
+        location_id: int | None = ...,
+    ) -> None: ...
+    def assert_(
+        self,
+        *,
+        condition: ValueRef,
+        message: ValueRef,
+        location_id: int | None = ...,
+    ) -> None: ...

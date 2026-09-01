@@ -112,6 +112,7 @@ static iree_status_t MaterializeFakeTargetDefinition(
 }
 
 static const loom_target_provider_t kFakeTargetProvider = {
+    /*.fact_type=*/&loom_test_target_fact_type,
     /*.profile_type=*/&kFakeTargetProfileType,
     /*.materialize_definition=*/MaterializeFakeTargetDefinition,
     /*.register_context=*/RegisterFakeTargetContext,

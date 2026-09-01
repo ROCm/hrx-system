@@ -19,6 +19,7 @@ loom_cc_library(
     "target_records.c"
   DEPS
     iree::base
+    loom::target::facts
     loom::target::types
   PUBLIC
 )

@@ -25,6 +25,7 @@ from loom.assembly import (
     AttrTable,
     BindingList,
     BlockArgs,
+    BlockRefs,
     Clause,
     FuncArgs,
     IndexList,
@@ -65,6 +66,12 @@ class TestRefs:
 
     def test_distinct_from_ref(self) -> None:
         assert Ref("x") != Refs("x")  # type: ignore[comparison-overlap]
+
+
+class TestBlockRefs:
+    def test_construct(self) -> None:
+        refs = BlockRefs("cases")
+        assert refs.field == "cases"
 
 
 class TestAlignedRefs:

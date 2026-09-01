@@ -107,15 +107,15 @@ low.func.def target<test.low.core>(@test_target) @asm_nested_if(%condition: reg<
 // ----
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @asm_nested_if(%condition: reg<test.i32>, %lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @asm_nested_if(%condition: reg<test.i32>, %lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {
   %result = low.scf.if %condition -> (reg<test.i32>) {
-    %then_sum = low.op<test.add.i32>(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+    %then_sum = test.add.i32 %lhs, %rhs
     low.scf.yield %then_sum : reg<test.i32>
   } else {
-    %else_sum = low.op<test.add.i32>(%rhs, %lhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+    %else_sum = test.add.i32 %rhs, %lhs
     low.scf.yield %else_sum : reg<test.i32>
   }
-  low.return %result : reg<test.i32>
+  return %result
 }
 
 // ====
@@ -133,12 +133,12 @@ low.func.def target<test.low.core>(@test_target) @asm_nested_for(%lower: reg<tes
 // ----
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @asm_nested_for(%lower: reg<test.i32>, %upper: reg<test.i32>, %step: reg<test.i32>, %init: reg<test.i32>) -> (reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @asm_nested_for(%lower: reg<test.i32>, %upper: reg<test.i32>, %step: reg<test.i32>, %init: reg<test.i32>) -> (reg<test.i32>) asm {
   %result = low.scf.for [%lower to %upper step %step] iter_args(%init: reg<test.i32>) -> (reg<test.i32>) do(%iv: reg<test.i32>, %acc: reg<test.i32>) {
-    %next = low.op<test.add.i32>(%acc, %iv) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+    %next = test.add.i32 %acc, %iv
     low.scf.yield %next : reg<test.i32>
   }
-  low.return %result : reg<test.i32>
+  return %result
 }
 
 // ====
@@ -158,12 +158,12 @@ low.func.def target<test.low.core>(@test_target) @asm_nested_while(%condition: r
 // ----
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @asm_nested_while(%condition: reg<test.i32>, %init: reg<test.i32>, %bias: reg<test.i32>) -> (reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @asm_nested_while(%condition: reg<test.i32>, %init: reg<test.i32>, %bias: reg<test.i32>) -> (reg<test.i32>) asm {
   %result = low.scf.while(%before = %init : reg<test.i32>) -> (reg<test.i32>) {
-    %forwarded = low.op<test.add.i32>(%before, %bias) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+    %forwarded = test.add.i32 %before, %bias
     low.scf.condition %condition, %forwarded : reg<test.i32>, reg<test.i32>
   } do(%body: reg<test.i32>) {
     low.scf.yield %body : reg<test.i32>
   }
-  low.return %result : reg<test.i32>
+  return %result
 }

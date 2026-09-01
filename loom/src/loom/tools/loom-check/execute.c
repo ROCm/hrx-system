@@ -7,6 +7,7 @@
 #include "loom/tools/loom-check/execute.h"
 
 #include "loom/codegen/low/lower/lower.h"
+#include "loom/codegen/low/pipeline/legalizer_registry.h"
 #include "loom/codegen/low/pipeline/pass_environment.h"
 #include "loom/codegen/low/text_asm.h"
 #include "loom/codegen/low/verify.h"
@@ -355,10 +356,8 @@ static iree_status_t loom_check_verify_pass_output(
       .max_errors = 100,
   };
   loom_low_verify_result_t low_verify_result = {0};
-  loom_low_verify_scratch_t low_verify_scratch =
-      loom_low_verify_scratch_for_module(module);
-  IREE_RETURN_IF_ERROR(loom_low_verify_module(
-      module, &low_verify_options, &low_verify_scratch, &low_verify_result));
+  IREE_RETURN_IF_ERROR(
+      loom_low_verify_module(module, &low_verify_options, &low_verify_result));
   *out_failed_verification = low_verify_result.error_count > 0;
   return iree_ok_status();
 }
@@ -408,7 +407,8 @@ typedef enum loom_check_pass_output_kind_e {
 
 static loom_text_print_flags_t loom_check_pass_print_flags(
     const loom_check_case_t* test_case) {
-  loom_text_print_flags_t flags = LOOM_TEXT_PRINT_DEFAULT;
+  loom_text_print_flags_t flags =
+      LOOM_TEXT_PRINT_DEFAULT | LOOM_TEXT_PRINT_PRESERVE_LOW_ASM;
   if (iree_all_bits_set(test_case->output_flags, LOOM_CHECK_OUTPUT_LOCATIONS)) {
     flags |= LOOM_TEXT_PRINT_LOCATIONS;
   }
@@ -560,12 +560,22 @@ static iree_status_t loom_check_execute_pass_with_output(
             loom_pass_registry_storage_registry(&pass_registry_storage);
       }
     }
+    loom_target_legalizer_registry_storage_t legalizer_registry_storage = {0};
+    if (iree_status_is_ok(status)) {
+      const loom_target_legalizer_provider_list_t legalizer_provider_list =
+          environment ? environment->legalizer_provider_list
+                      : loom_target_legalizer_provider_list_empty();
+      status = loom_low_legalizer_registry_storage_initialize(
+          legalizer_provider_list, iree_arena_allocator(&diagnostic_arena),
+          &legalizer_registry_storage);
+    }
     loom_pass_tool_run_options_t run_options = {
         .registry = pass_registry,
         .environment = loom_low_pass_environment_storage_initialize(
             &low_registry.registry, low_lower_policy_registry_ref,
             environment ? &environment->low_legality_provider_list : NULL,
-            environment ? &environment->legalizer_provider_list : NULL,
+            loom_target_legalizer_registry_storage_registry(
+                &legalizer_registry_storage),
             math_policy_registry_ref, compile_report_ref,
             environment ? environment->target_environment : NULL,
             /*function_versions=*/NULL, &low_pass_environment_storage),
@@ -579,6 +589,8 @@ static iree_status_t loom_check_execute_pass_with_output(
       status = loom_pass_tool_run_flat_pipeline(module, test_case->pipeline,
                                                 &run_options, &run_result);
     }
+    loom_target_legalizer_registry_storage_deinitialize(
+        &legalizer_registry_storage);
   }
   if (!iree_status_is_ok(status)) {
     status = loom_check_execute_finish_status_failure(

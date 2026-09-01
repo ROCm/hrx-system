@@ -399,6 +399,32 @@ static iree_status_t loom_low_verify_asm_immediates(
                               descriptor_index, asm_immediate->immediate_index,
                               descriptor->immediate_count);
     }
+    const loom_low_asm_immediate_flags_t known_flags =
+        LOOM_LOW_ASM_IMMEDIATE_FLAG_ENUM_TOKEN;
+    if (asm_immediate->flags & ~known_flags) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "low asm form for descriptor %" PRIu32
+                              " immediate %" PRIu16 " has unknown flags 0x%04X",
+                              descriptor_index, asm_immediate->immediate_index,
+                              asm_immediate->flags & ~known_flags);
+    }
+    if (iree_any_bit_set(asm_immediate->flags,
+                         LOOM_LOW_ASM_IMMEDIATE_FLAG_ENUM_TOKEN)) {
+      const uint32_t immediate_row =
+          descriptor->immediate_start + asm_immediate->immediate_index;
+      if (immediate_row >= descriptor_set->immediate_count) {
+        return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "low asm immediate field is out of range");
+      }
+      if (descriptor_set->immediates[immediate_row].kind !=
+          LOOM_LOW_IMMEDIATE_KIND_ENUM) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "low asm form for descriptor %" PRIu32 " immediate %" PRIu16
+            " requests enum-token spelling for a non-enum field",
+            descriptor_index, asm_immediate->immediate_index);
+      }
+    }
     for (uint16_t j = 0; j < i; ++j) {
       const loom_low_asm_immediate_t* previous =
           &descriptor_set->asm_immediates[asm_form->immediate_start + j];
@@ -711,7 +737,7 @@ static iree_status_t loom_low_verify_asm_form(
   }
   const loom_low_descriptor_t* descriptor =
       &descriptor_set->descriptors[asm_form->descriptor_ordinal];
-  if (descriptor->op_kind == LOOM_LOW_DESCRIPTOR_OP_KIND_CONST &&
+  if (descriptor->carrier == LOOM_LOW_DESCRIPTOR_CARRIER_CONST &&
       (asm_form->result_operand_index_count != 1 ||
        asm_form->operand_index_count != 0)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -869,7 +895,8 @@ static iree_status_t loom_low_verify_asm_result_value_type(
     uint32_t value_type_index) {
   switch (value_type->kind) {
     case LOOM_LOW_ASM_RESULT_VALUE_TYPE_KIND_NONE:
-      if (value_type->element_type != 0 || value_type->vector_lane_count != 0) {
+      if (value_type->element_type != LOOM_SCALAR_TYPE_NONE ||
+          value_type->vector_lane_count != 0) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                 "absent low asm result value type %" PRIu32
                                 " must have zero element type and lane count",
@@ -877,7 +904,7 @@ static iree_status_t loom_low_verify_asm_result_value_type(
       }
       return iree_ok_status();
     case LOOM_LOW_ASM_RESULT_VALUE_TYPE_KIND_SCALAR:
-      if (value_type->element_type >= LOOM_SCALAR_TYPE_COUNT_ ||
+      if (!loom_scalar_type_is_valid(value_type->element_type) ||
           value_type->vector_lane_count != 0) {
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
@@ -887,7 +914,7 @@ static iree_status_t loom_low_verify_asm_result_value_type(
       }
       return iree_ok_status();
     case LOOM_LOW_ASM_RESULT_VALUE_TYPE_KIND_VECTOR:
-      if (value_type->element_type >= LOOM_SCALAR_TYPE_COUNT_ ||
+      if (!loom_scalar_type_is_valid(value_type->element_type) ||
           value_type->vector_lane_count == 0) {
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
@@ -1667,6 +1694,10 @@ static iree_status_t loom_low_verify_descriptor_effect_contract(
       descriptor->flags, LOOM_LOW_DESCRIPTOR_FLAG_SIDE_EFFECTING);
   const bool is_terminator =
       iree_all_bits_set(descriptor->flags, LOOM_LOW_DESCRIPTOR_FLAG_TERMINATOR);
+  const bool is_no_return =
+      iree_all_bits_set(descriptor->flags, LOOM_LOW_DESCRIPTOR_FLAG_NO_RETURN);
+  const bool may_yield =
+      iree_all_bits_set(descriptor->flags, LOOM_LOW_DESCRIPTOR_FLAG_MAY_YIELD);
   const bool is_dead_removable = iree_all_bits_set(
       descriptor->flags, LOOM_LOW_DESCRIPTOR_FLAG_DEAD_REMOVABLE);
   if (is_side_effecting && is_dead_removable) {
@@ -1679,6 +1710,18 @@ static iree_status_t loom_low_verify_descriptor_effect_contract(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "low descriptor %" PRIu32
                             " is a terminator but is not side-effecting",
+                            descriptor_index);
+  }
+  if (is_no_return && !is_terminator) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "low descriptor %" PRIu32
+                            " is no-return but is not a terminator",
+                            descriptor_index);
+  }
+  if (may_yield && !is_side_effecting) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "low descriptor %" PRIu32
+                            " may yield but is not side-effecting",
                             descriptor_index);
   }
   if (descriptor->effect_count == 0 && is_side_effecting) {
@@ -1916,43 +1959,80 @@ static iree_status_t loom_low_verify_descriptor_operand_roles(
   return iree_ok_status();
 }
 
-static iree_status_t loom_low_verify_descriptor_op_kind(
+static iree_status_t loom_low_verify_descriptor_carrier(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor, uint32_t descriptor_index) {
-  switch (descriptor->op_kind) {
-    case LOOM_LOW_DESCRIPTOR_OP_KIND_OP:
-      return iree_ok_status();
-    case LOOM_LOW_DESCRIPTOR_OP_KIND_CONST:
-      if (descriptor->result_count != 1) {
-        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "low descriptor %" PRIu32
-                                " uses low.const but has %" PRIu16 " results",
-                                descriptor_index, descriptor->result_count);
-      }
-      for (uint16_t i = 0; i < descriptor->operand_count; ++i) {
-        const loom_low_operand_t* operand =
-            &descriptor_set->operands[descriptor->operand_start + i];
-        if (loom_low_operand_role_is_packet_operand(operand->role)) {
-          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                  "low descriptor %" PRIu32
-                                  " uses low.const but has packet operands",
-                                  descriptor_index);
-        }
-      }
-      if (descriptor->effect_count != 0) {
-        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "low descriptor %" PRIu32
-                                " uses low.const but has %" PRIu16
-                                " effect rows",
-                                descriptor_index, descriptor->effect_count);
-      }
-      return iree_ok_status();
-    default:
+  if (descriptor->carrier == LOOM_LOW_DESCRIPTOR_CARRIER_BRANCH ||
+      descriptor->carrier == LOOM_LOW_DESCRIPTOR_CARRIER_SWITCH) {
+    if (descriptor->result_count != 0) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "low descriptor %" PRIu32
-                              " has invalid operation kind %u",
-                              descriptor_index, (unsigned)descriptor->op_kind);
+                              " structural carrier has %" PRIu16 " results",
+                              descriptor_index, descriptor->result_count);
+    }
+    if (descriptor->immediate_count != 0) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "low descriptor %" PRIu32
+                              " structural carrier has %" PRIu16
+                              " ordinary immediates",
+                              descriptor_index, descriptor->immediate_count);
+    }
+    const uint16_t required_operand_count =
+        descriptor->carrier == LOOM_LOW_DESCRIPTOR_CARRIER_SWITCH ? 1 : 0;
+    if (descriptor->operand_count != required_operand_count) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "low descriptor %" PRIu32 " structural carrier has %" PRIu16
+          " operands instead of %" PRIu16,
+          descriptor_index, descriptor->operand_count, required_operand_count);
+    }
+    if (descriptor->carrier == LOOM_LOW_DESCRIPTOR_CARRIER_SWITCH) {
+      const loom_low_operand_t* selector =
+          &descriptor_set->operands[descriptor->operand_start];
+      if (!loom_low_operand_role_is_packet_operand(selector->role) ||
+          iree_any_bit_set(selector->flags,
+                           LOOM_LOW_OPERAND_FLAG_OPTIONAL |
+                               LOOM_LOW_OPERAND_FLAG_VARIADIC)) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "low descriptor %" PRIu32
+            " switch carrier requires one non-optional selector operand",
+            descriptor_index);
+      }
+    }
+    return iree_ok_status();
   }
+  if (descriptor->carrier == LOOM_LOW_DESCRIPTOR_CARRIER_OP) {
+    return iree_ok_status();
+  }
+  if (descriptor->carrier != LOOM_LOW_DESCRIPTOR_CARRIER_CONST) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "low descriptor %" PRIu32 " has invalid carrier %u",
+                            descriptor_index, (unsigned)descriptor->carrier);
+  }
+  if (descriptor->result_count != 1) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "low descriptor %" PRIu32
+                            " uses low.const but has %" PRIu16 " results",
+                            descriptor_index, descriptor->result_count);
+  }
+  for (uint16_t i = 0; i < descriptor->operand_count; ++i) {
+    const loom_low_operand_t* operand =
+        &descriptor_set->operands[descriptor->operand_start + i];
+    if (loom_low_operand_role_is_packet_operand(operand->role)) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "low descriptor %" PRIu32
+                              " uses low.const but has packet operands",
+                              descriptor_index);
+    }
+  }
+  if (descriptor->effect_count != 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "low descriptor %" PRIu32
+                            " uses low.const but has %" PRIu16 " effect rows",
+                            descriptor_index, descriptor->effect_count);
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t loom_low_verify_descriptor_state_operands(
@@ -2184,7 +2264,10 @@ static iree_status_t loom_low_verify_descriptor(
           LOOM_LOW_DESCRIPTOR_FLAG_DEAD_REMOVABLE |
           LOOM_LOW_DESCRIPTOR_FLAG_PSEUDO | LOOM_LOW_DESCRIPTOR_FLAG_BARRIER |
           LOOM_LOW_DESCRIPTOR_FLAG_EARLY_CLOBBER |
-          LOOM_LOW_DESCRIPTOR_FLAG_VARIADIC_OPERANDS,
+          LOOM_LOW_DESCRIPTOR_FLAG_VARIADIC_OPERANDS |
+          LOOM_LOW_DESCRIPTOR_FLAG_UNIQUE_IDENTITY |
+          LOOM_LOW_DESCRIPTOR_FLAG_NO_RETURN |
+          LOOM_LOW_DESCRIPTOR_FLAG_MAY_YIELD,
       "descriptor", descriptor_index));
   iree_string_view_t descriptor_key = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(loom_low_verify_non_empty_required_string(
@@ -2260,7 +2343,7 @@ static iree_status_t loom_low_verify_descriptor(
   }
   IREE_RETURN_IF_ERROR(loom_low_verify_descriptor_operand_roles(
       descriptor_set, descriptor, descriptor_index));
-  IREE_RETURN_IF_ERROR(loom_low_verify_descriptor_op_kind(
+  IREE_RETURN_IF_ERROR(loom_low_verify_descriptor_carrier(
       descriptor_set, descriptor, descriptor_index));
   IREE_RETURN_IF_ERROR(loom_low_verify_descriptor_state_operands(
       descriptor_set, descriptor, descriptor_index));
@@ -2293,7 +2376,8 @@ static iree_status_t loom_low_verify_operand(
           LOOM_LOW_OPERAND_FLAG_SCHEDULE_ONLY_STATE |
           LOOM_LOW_OPERAND_FLAG_REMATERIALIZABLE |
           LOOM_LOW_OPERAND_FLAG_STORAGE_CONTINUATION |
-          LOOM_LOW_OPERAND_FLAG_VARIADIC,
+          LOOM_LOW_OPERAND_FLAG_VARIADIC |
+          LOOM_LOW_OPERAND_FLAG_VARIABLE_UNIT_COUNT,
       "operand", operand_index));
   IREE_RETURN_IF_ERROR(loom_low_verify_required_string(
       descriptor_set, operand->field_name_string_offset, "operand.field_name"));
@@ -2326,6 +2410,28 @@ static iree_status_t loom_low_verify_operand(
                             "low operand %" PRIu32
                             " has invalid address map %u",
                             operand_index, (unsigned)operand->address_map_kind);
+  }
+  if (operand->unit_count == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "low operand %" PRIu32 " has zero unit count",
+                            operand_index);
+  }
+  if (iree_any_bit_set(operand->flags,
+                       LOOM_LOW_OPERAND_FLAG_VARIABLE_UNIT_COUNT) &&
+      operand->role != LOOM_LOW_OPERAND_ROLE_RESULT &&
+      operand->role != LOOM_LOW_OPERAND_ROLE_OPERAND) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "low variable-unit operand %" PRIu32
+                            " is not a result or ordinary operand",
+                            operand_index);
+  }
+  if (iree_all_bits_set(operand->flags,
+                        LOOM_LOW_OPERAND_FLAG_VARIABLE_UNIT_COUNT |
+                            LOOM_LOW_OPERAND_FLAG_VARIADIC)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "low variable-unit operand %" PRIu32
+                            " is also variadic",
+                            operand_index);
   }
   if (operand->address_map_kind == LOOM_LOW_OPERAND_ADDRESS_MAP_DIRECT &&
       operand->addressable_unit_count != 0) {
@@ -2655,7 +2761,8 @@ static iree_status_t loom_low_verify_reg_class(
       reg_class->flags,
       LOOM_LOW_REG_CLASS_FLAG_VIRTUAL_ONLY | LOOM_LOW_REG_CLASS_FLAG_PHYSICAL |
           LOOM_LOW_REG_CLASS_FLAG_REFERENCE |
-          LOOM_LOW_REG_CLASS_FLAG_UNSPILLABLE,
+          LOOM_LOW_REG_CLASS_FLAG_UNSPILLABLE |
+          LOOM_LOW_REG_CLASS_FLAG_UNALIGNED_RANGES,
       "register class", reg_class_index));
   IREE_RETURN_IF_ERROR(loom_low_verify_required_string(
       descriptor_set, reg_class->name_string_offset, "reg_class.name"));

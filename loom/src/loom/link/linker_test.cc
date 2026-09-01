@@ -634,10 +634,10 @@ TEST_F(LinkerTest, MergesDeclarationTargetContractIntoDefinition) {
   loom_module_t* harness = Parse(IREE_SV(R"(
 test.target<low_core> @test_target
 
-func.decl target(@test_target) abi(object_function) export("identity_export") @identity(%x: i32) -> (i32)
+func.decl import_metadata({source = "declaration"}) target(@test_target) abi(object_function) export("identity_export") export_metadata({summary = "root export"}) @identity(%x: i32) -> (i32)
 )"));
   loom_module_t* corpus = Parse(IREE_SV(R"(
-func.def @identity(%x: i32) -> (i32) {
+func.def public export_metadata({summary = "library export"}) @identity(%x: i32) -> (i32) {
   func.return %x : i32
 }
 )"));
@@ -647,9 +647,14 @@ func.def @identity(%x: i32) -> (i32) {
 
   std::string text = Print(linked);
   EXPECT_EQ(text.find("func.decl @identity"), std::string::npos);
-  EXPECT_NE(text.find("func.def target(@test_target) abi(object_function) "
-                      "export(\"identity_export\") @identity"),
+  EXPECT_NE(text.find("func.def public target(@test_target) "
+                      "abi(object_function) "
+                      "export(\"identity_export\") "
+                      "export_metadata({summary = \"root export\"}) "
+                      "@identity"),
             std::string::npos);
+  EXPECT_EQ(text.find("import_metadata"), std::string::npos);
+  EXPECT_EQ(text.find("library export"), std::string::npos);
 }
 
 TEST_F(LinkerTest, MergesDeclarationPredicatesIntoDefinition) {

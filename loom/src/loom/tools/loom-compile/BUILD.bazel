@@ -138,10 +138,29 @@ loom_cc_library(
     ],
 )
 
+_VM_COMPILE_COPTS = iree_select({
+    "//loom/config/target/arch:vm": [
+        "-DLOOM_COMPILE_HAVE_VM=1",
+    ],
+    "//conditions:default": [],
+})
+
+_VM_COMPILE_DEPS = iree_select({
+    "//loom/config/target/arch:vm": [
+        "//loom/src/loom/target/arch/vm:provider",
+        "//loom/src/loom/target/emit/vm",
+    ],
+    "//conditions:default": [],
+})
+
+_VM_COMPILE_COMPATIBLE_WITH = loom_config_compatible_with([
+    "//loom/config/target/arch:vm",
+])
+
 loom_cc_binary(
     name = "loom-compile",
     srcs = ["loom-compile.c"],
-    copts = _AMDGPU_COMPILE_COPTS + _SPIRV_VULKAN_COMPILE_COPTS + _LLVMIR_COMPILE_COPTS + _LLVMIR_AMDGPU_TARGET_ENV_COPTS + _LLVMIR_X86_TARGET_ENV_COPTS,
+    copts = _AMDGPU_COMPILE_COPTS + _SPIRV_VULKAN_COMPILE_COPTS + _LLVMIR_COMPILE_COPTS + _LLVMIR_AMDGPU_TARGET_ENV_COPTS + _LLVMIR_X86_TARGET_ENV_COPTS + _VM_COMPILE_COPTS,
     deps = [
         ":command_backend",
         ":command_manifest",
@@ -174,7 +193,7 @@ loom_cc_binary(
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/io:file_handle",
-    ] + _AMDGPU_COMPILE_DEPS + _SPIRV_VULKAN_COMPILE_DEPS + _LLVMIR_COMPILE_DEPS + _LLVMIR_AMDGPU_TARGET_ENV_DEPS + _LLVMIR_X86_TARGET_ENV_DEPS,
+    ] + _AMDGPU_COMPILE_DEPS + _SPIRV_VULKAN_COMPILE_DEPS + _LLVMIR_COMPILE_DEPS + _LLVMIR_AMDGPU_TARGET_ENV_DEPS + _LLVMIR_X86_TARGET_ENV_DEPS + _VM_COMPILE_DEPS,
 )
 
 iree_assert_dependency_boundary(
@@ -220,6 +239,18 @@ iree_execution_test_suite(
     tags = ["hostonly"],
     target_compatible_with = _LLVMIR_ARTIFACTS_COMPATIBLE_WITH,
     tools = {
+        "loom-compile": ":loom-compile",
+    },
+)
+
+iree_execution_test_suite(
+    name = "vm_execution_test",
+    data = ["vm_arithmetic.loom"],
+    manifests = ["loom-compile-vm.test.json"],
+    tags = ["hostonly"],
+    target_compatible_with = _VM_COMPILE_COMPATIBLE_WITH,
+    tools = {
+        "iree-dump-module": "//tools:iree-dump-module",
         "loom-compile": ":loom-compile",
     },
 )

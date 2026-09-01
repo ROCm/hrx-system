@@ -70,6 +70,9 @@ endif()
 if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR AND LOOM_TARGET_ARCH_X86)
   list(APPEND _loom_compile_platform_copts "-DLOOM_COMPILE_HAVE_LLVMIR_X86_TARGET_ENV=1")
 endif()
+if(LOOM_TARGET_ARCH_VM)
+  list(APPEND _loom_compile_platform_copts "-DLOOM_COMPILE_HAVE_VM=1")
+endif()
 set(_loom_compile_platform_deps "")
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
   list(APPEND _loom_compile_platform_deps loom::target::arch::amdgpu::provider)
@@ -88,6 +91,10 @@ if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR AND LOOM_TARGET_ARCH_AMDGPU)
 endif()
 if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR AND LOOM_TARGET_ARCH_X86)
   list(APPEND _loom_compile_platform_deps loom::target::emit::llvmir::x86::target_env)
+endif()
+if(LOOM_TARGET_ARCH_VM)
+  list(APPEND _loom_compile_platform_deps loom::target::arch::vm::provider)
+  list(APPEND _loom_compile_platform_deps loom::target::emit::vm)
 endif()
 loom_cc_binary(
   NAME
@@ -171,6 +178,22 @@ iree_execution_test_suite(
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-compile/testdata/configured_llvmir.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-compile/testdata/configured_values.json"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-compile/testdata/llvmir_program.loom"
+  LABELS
+    "hostonly"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+iree_execution_test_suite(
+  NAME
+    vm_execution_test
+  MANIFESTS
+    "loom-compile-vm.test.json"
+  TOOLS
+    "iree-dump-module=iree::tools::iree-dump-module"
+    "loom-compile=::loom-compile"
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-compile/vm_arithmetic.loom"
   LABELS
     "hostonly"
 )

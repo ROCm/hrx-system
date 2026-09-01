@@ -1217,6 +1217,11 @@ static iree_status_t loom_linker_apply_root_symbol_output(
             .field_name = IREE_SV("export_attrs"),
         },
         {
+            .source_attr_index = root_func.vtable->export_metadata_attr_index,
+            .target_attr_index = target_func.vtable->export_metadata_attr_index,
+            .field_name = IREE_SV("export_metadata"),
+        },
+        {
             .source_attr_index = root_func.vtable->export_linkage_attr_index,
             .target_attr_index = target_func.vtable->export_linkage_attr_index,
             .field_name = IREE_SV("export_linkage"),
@@ -1239,6 +1244,11 @@ static iree_status_t loom_linker_apply_root_symbol_output(
             .target_attr_index = target_func.vtable->import_symbol_attr_index,
             .field_name = IREE_SV("import_symbol"),
         },
+        {
+            .source_attr_index = root_func.vtable->import_metadata_attr_index,
+            .target_attr_index = target_func.vtable->import_metadata_attr_index,
+            .field_name = IREE_SV("import_metadata"),
+        },
     };
     for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(import_attrs); ++i) {
       IREE_RETURN_IF_ERROR(loom_linker_replace_output_attr(
@@ -1256,6 +1266,31 @@ static iree_status_t loom_linker_apply_root_symbol_output(
   loom_module_link_symbol_defining_op(linker->target_module, target_op,
                                       target_vtable);
   return iree_ok_status();
+}
+
+// Replaces implementation metadata with the metadata authored on the selected
+// declaration boundary. Reflection metadata describes the public import/export
+// name, not the concrete implementation satisfying it, and therefore is not a
+// function contract compatibility constraint.
+static iree_status_t loom_linker_apply_declared_func_metadata(
+    loom_linker_t* linker, loom_symbol_ref_t target_ref,
+    loom_op_t* declaration_op, loom_op_t* definition_op) {
+  const loom_func_like_t declaration =
+      loom_func_like_cast(linker->target_module, declaration_op);
+  const loom_func_like_t definition =
+      loom_func_like_cast(linker->target_module, definition_op);
+  if (!loom_func_like_isa(declaration) && !loom_func_like_isa(definition)) {
+    return iree_ok_status();
+  }
+  if (!loom_func_like_isa(declaration) || !loom_func_like_isa(definition)) {
+    return loom_link_incompatible_contract_status(linker, target_ref,
+                                                  IREE_SV("func_like"));
+  }
+  return loom_linker_replace_output_attr(
+      linker, target_ref, /*remap=*/NULL, declaration_op,
+      declaration.vtable->export_metadata_attr_index, definition_op,
+      definition.vtable->export_metadata_attr_index,
+      IREE_SV("export_metadata"));
 }
 
 static iree_status_t loom_linker_apply_symbol_output(
@@ -1343,6 +1378,8 @@ static iree_status_t loom_linker_clone_or_merge_symbol_op(
     IREE_RETURN_IF_ERROR(loom_link_merge_symbol_contract(
         linker, source, linker->target_module, target_op, source->arena,
         target_ref, cloned_op, output == LOOM_LINKER_SYMBOL_OUTPUT_AUTHORED));
+    IREE_RETURN_IF_ERROR(loom_linker_apply_declared_func_metadata(
+        linker, target_ref, target_op, cloned_op));
     IREE_RETURN_IF_ERROR(loom_linker_apply_symbol_output(
         source, root_module, root_op, target_ref, cloned_op, output));
     IREE_RETURN_IF_ERROR(loom_op_erase(linker->target_module, target_op));

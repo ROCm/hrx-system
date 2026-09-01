@@ -24,7 +24,7 @@ LoomBinaryInfo = provider(
     doc = "One closed Loom deployment product and its evidence artifacts.",
     fields = {
         "artifacts": "Depset of runtime artifacts produced by this binary.",
-        "kind": "Deployment product kind: kernel or command.",
+        "kind": "Deployment product kind: kernel, command, or VM.",
         "linked_module": "Closed Loom bytecode module used for emission.",
         "primary_artifact": "Primary runtime artifact produced by this binary.",
         "reports": "Depset of compile reports for emitted artifacts.",
@@ -146,6 +146,30 @@ def _declare_command_product(ctx, linked_module):
         artifacts = artifacts,
         compile_report = compile_report,
         manifest = manifest,
+    )
+
+def _declare_vm_product(ctx, linked_module):
+    artifact = ctx.actions.declare_file(ctx.label.name + ".vmfb")
+    compile_report = ctx.actions.declare_file(ctx.label.name + ".compile.json")
+    args = ctx.actions.args()
+    args.add(linked_module)
+    args.add("--backend=vm")
+    args.add("--output=%s" % artifact.path)
+    args.add("--compile-report=details")
+    args.add("--compile-report-output=%s" % compile_report.path)
+
+    tool = ctx.toolchains[_LOOM_COMPILE_TOOLCHAIN_TYPE].tool
+    ctx.actions.run(
+        arguments = [args],
+        executable = tool.files_to_run,
+        inputs = depset(direct = [linked_module]),
+        mnemonic = "LoomVmBinary",
+        outputs = [artifact, compile_report],
+        progress_message = "Compiling VM binary %s" % ctx.label,
+    )
+    return struct(
+        artifact = artifact,
+        compile_report = compile_report,
     )
 
 def _loom_kernel_binary_impl(ctx):
@@ -290,6 +314,40 @@ loom_command_binary = rule(
         "Immutable target profile used for every emitted kernel entry.",
     ),
     doc = "Links and emits portable command programs with their kernel executable.",
+    toolchains = [
+        _LOOM_COMPILE_TOOLCHAIN_TYPE,
+        _LOOM_LINK_TOOLCHAIN_TYPE,
+    ],
+)
+
+def _loom_vm_binary_impl(ctx):
+    _require_binary_inputs(ctx)
+    linked = _declare_binary_linked_module(ctx, "VM")
+    product = _declare_vm_product(ctx, linked.linked_module)
+
+    return [
+        DefaultInfo(files = depset([product.artifact])),
+        OutputGroupInfo(
+            compile_reports = depset([product.compile_report]),
+            dependency_reports = depset(linked.dependency_reports),
+            linked_modules = depset([linked.linked_module]),
+        ),
+        LoomBinaryInfo(
+            artifacts = depset([product.artifact]),
+            kind = "vm",
+            linked_module = linked.linked_module,
+            primary_artifact = product.artifact,
+            reports = depset([product.compile_report]),
+            target_profiles = [],
+        ),
+    ]
+
+_vm_binary_attrs = _binary_link_attrs()
+
+loom_vm_binary = rule(
+    implementation = _loom_vm_binary_impl,
+    attrs = _vm_binary_attrs,
+    doc = "Links and emits one IREE VM bytecode module from authored VM targets.",
     toolchains = [
         _LOOM_COMPILE_TOOLCHAIN_TYPE,
         _LOOM_LINK_TOOLCHAIN_TYPE,

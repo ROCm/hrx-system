@@ -50,6 +50,11 @@ typedef struct loom_target_function_version_t {
   // Dense compilation-local identity of |resolved_target|.
   loom_target_context_ordinal_t target_context_ordinal;
 
+  // Origin of the effective target binding carried by this version. This is
+  // independent of |authored_target_is_exact|: a specialization may resolve
+  // exactly to the authored target.
+  loom_target_binding_source_t target_binding_source;
+
   // True when the live function's authored target definition is an exact IR
   // witness for |resolved_target|.
   bool authored_target_is_exact;
@@ -104,6 +109,9 @@ typedef struct loom_target_function_version_snapshot_t {
   // symbol ID.
   loom_function_version_t** version_handles_by_symbol;
 
+  // Function-version list ordinal indexed by module symbol ID.
+  loom_function_version_ordinal_t* version_ordinals_by_symbol;
+
   // Number of module symbols represented by |version_handles_by_symbol|.
   iree_host_size_t symbol_count;
 } loom_target_function_version_snapshot_t;
@@ -132,6 +140,16 @@ loom_target_function_version_snapshot_handle_at(
   return snapshot->version_handles_by_symbol != NULL
              ? snapshot->version_handles_by_symbol[symbol_id]
              : NULL;
+}
+
+// Returns the stable list ordinal observed at |symbol_id|, or INVALID.
+static inline loom_function_version_ordinal_t
+loom_target_function_version_snapshot_ordinal_at(
+    const loom_target_function_version_snapshot_t* snapshot,
+    loom_symbol_id_t symbol_id) {
+  return snapshot->version_ordinals_by_symbol != NULL
+             ? snapshot->version_ordinals_by_symbol[symbol_id]
+             : LOOM_FUNCTION_VERSION_ORDINAL_INVALID;
 }
 
 // Returns an immutable target-refined view observed at |symbol_id|, or NULL.

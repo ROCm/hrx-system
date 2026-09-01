@@ -257,7 +257,15 @@ _ENTRY_EXPORT_FORMAT: list[FormatElement] = [
 
 _ENTRY_CONFIG_FORMAT: list[FormatElement] = [
     SymbolRef("callee"),
-    BlockArgs("config"),
+    Scope(
+        [
+            BlockArgs("config", definition_scope=True),
+            OptionalGroup(
+                [kw("where"), PredicateList("workload_predicates")],
+                anchor="workload_predicates",
+            ),
+        ]
+    ),
 ]
 
 _ENTRY_LAUNCH_FORMAT: list[FormatElement] = [
@@ -285,6 +293,12 @@ _ENTRY_ATTRS = [
     AttrDef("export_linkage", "enum", enum_def=ExportLinkage, optional=True),
     AttrDef("predicates", "predicate_list", optional=True),
     AttrDef("retain", "enum", enum_def=Retain, optional=True),
+    AttrDef(
+        "workload_predicates",
+        "predicate_list",
+        optional=True,
+        doc="Constraints on launch-configuration workload arguments.",
+    ),
 ]
 
 
@@ -1852,7 +1866,15 @@ kernel_decl = Op(
         *_ENTRY_TARGET_FORMAT,
         *_ENTRY_EXPORT_FORMAT,
         SymbolRef("callee"),
-        Scope([FuncArgs("workloads")]),
+        Scope(
+            [
+                FuncArgs("workloads"),
+                OptionalGroup(
+                    [kw("where"), PredicateList("workload_predicates")],
+                    anchor="workload_predicates",
+                ),
+            ]
+        ),
         kw("launch"),
         Scope(
             [

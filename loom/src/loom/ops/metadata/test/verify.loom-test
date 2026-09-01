@@ -1,0 +1,14 @@
+// RUN: verify
+
+metadata.module "model.revision" = u64(3)
+
+// ====
+
+metadata.module "model.revision" = u64(3)
+// ERROR@+1: STRUCTURE/051 {op_name="metadata.module", record_key="model.revision"}
+metadata.module "model.revision" = u64(4)
+
+// ====
+
+// ERROR@+1: STRUCTURE/027 {attr_name="key", actual_value="", expected_constraint="a non-empty string"}
+metadata.module "" = true

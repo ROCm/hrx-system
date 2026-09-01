@@ -138,12 +138,14 @@ TEST(NumericFormatTest, MapsDirectScalarTypesToNumericFormats) {
             LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE);
   EXPECT_EQ(loom_numeric_format_from_scalar_type(LOOM_SCALAR_TYPE_I64),
             LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE);
+  EXPECT_EQ(loom_numeric_format_from_scalar_type(LOOM_SCALAR_TYPE_NONE),
+            LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE);
   EXPECT_EQ(loom_numeric_format_from_scalar_type(LOOM_SCALAR_TYPE_COUNT_),
             LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE);
 }
 
 TEST(NumericFormatTest, MapsNumericFormatsToDirectScalarTypes) {
-  loom_scalar_type_t type = LOOM_SCALAR_TYPE_COUNT_;
+  loom_scalar_type_t type = LOOM_SCALAR_TYPE_NONE;
   EXPECT_TRUE(loom_numeric_format_direct_scalar_type(
       LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FN, &type));
   EXPECT_EQ(type, LOOM_SCALAR_TYPE_F8E4M3);

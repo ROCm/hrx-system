@@ -626,6 +626,11 @@ loom_func_like_t loom_func_like_cast(const loom_module_t* module,
   return (loom_func_like_t){.op = op, .vtable = vtable->func_like};
 }
 
+loom_func_like_t loom_func_like_const_cast(const loom_module_t* module,
+                                           const loom_op_t* op) {
+  return loom_func_like_cast(module, (loom_op_t*)op);
+}
+
 loom_region_t* loom_func_like_body(loom_func_like_t func) {
   return loom_func_like_region(func, loom_func_like_body_region_index(func));
 }
@@ -734,6 +739,25 @@ loom_string_id_t loom_func_like_import_symbol(loom_func_like_t func) {
   return loom_attr_as_string_id(attr);
 }
 
+uint8_t loom_func_like_import_policy(loom_func_like_t func) {
+  if (!func.vtable ||
+      func.vtable->import_policy_attr_index == LOOM_ATTR_INDEX_NONE) {
+    return 0;
+  }
+  const loom_attribute_t attr =
+      loom_op_attrs(func.op)[func.vtable->import_policy_attr_index];
+  return loom_attr_is_absent(attr) ? 0 : loom_attr_as_enum(attr);
+}
+
+loom_named_attr_slice_t loom_func_like_import_metadata(loom_func_like_t func) {
+  if (!func.vtable ||
+      func.vtable->import_metadata_attr_index == LOOM_ATTR_INDEX_NONE) {
+    return loom_named_attr_slice_empty();
+  }
+  return loom_attr_as_dict(
+      loom_op_attrs(func.op)[func.vtable->import_metadata_attr_index]);
+}
+
 loom_symbol_ref_t loom_func_like_target(loom_func_like_t func) {
   if (!func.vtable || func.vtable->target_attr_index == LOOM_ATTR_INDEX_NONE) {
     return loom_symbol_ref_null();
@@ -823,6 +847,27 @@ loom_string_id_t loom_func_like_export_symbol(loom_func_like_t func) {
   return loom_attr_as_string_id(attr);
 }
 
+iree_string_view_t loom_func_like_export_name(const loom_module_t* module,
+                                              const loom_symbol_t* symbol,
+                                              loom_func_like_t func) {
+  if (!module || !symbol || !loom_func_like_isa(func)) {
+    return iree_string_view_empty();
+  }
+  const loom_string_id_t export_name_id = loom_func_like_export_symbol(func);
+  if (export_name_id != LOOM_STRING_ID_INVALID &&
+      export_name_id < module->strings.count) {
+    const iree_string_view_t export_name =
+        module->strings.entries[export_name_id];
+    if (!iree_string_view_is_empty(export_name)) return export_name;
+  }
+  if ((loom_func_like_visibility(func) != 0 ||
+       iree_any_bit_set(symbol->flags, LOOM_SYMBOL_FLAG_PUBLIC)) &&
+      symbol->name_id < module->strings.count) {
+    return module->strings.entries[symbol->name_id];
+  }
+  return iree_string_view_empty();
+}
+
 loom_named_attr_slice_t loom_func_like_export_attrs(loom_func_like_t func) {
   if (!func.vtable ||
       func.vtable->export_attrs_attr_index == LOOM_ATTR_INDEX_NONE) {
@@ -830,6 +875,15 @@ loom_named_attr_slice_t loom_func_like_export_attrs(loom_func_like_t func) {
   }
   return loom_attr_as_dict(
       loom_op_attrs(func.op)[func.vtable->export_attrs_attr_index]);
+}
+
+loom_named_attr_slice_t loom_func_like_export_metadata(loom_func_like_t func) {
+  if (!func.vtable ||
+      func.vtable->export_metadata_attr_index == LOOM_ATTR_INDEX_NONE) {
+    return loom_named_attr_slice_empty();
+  }
+  return loom_attr_as_dict(
+      loom_op_attrs(func.op)[func.vtable->export_metadata_attr_index]);
 }
 
 bool loom_func_like_is_kernel_entry(loom_func_like_t func) {
@@ -1632,7 +1686,7 @@ iree_status_t loom_builder_create_region(loom_builder_t* builder, loom_op_t* op,
   loom_region_t* region = NULL;
   IREE_RETURN_IF_ERROR(
       loom_module_allocate_region(builder->module, 1, &region));
-  loom_op_regions(op)[region_index] = region;
+  IREE_RETURN_IF_ERROR(loom_op_attach_region(op, region_index, region));
   if (out_entry_block) {
     *out_entry_block = loom_region_entry_block(region);
   }
@@ -2051,7 +2105,7 @@ static iree_status_t loom_builder_validate_operand_segments(
 static iree_status_t loom_builder_allocate_op_storage(
     loom_builder_t* builder, loom_op_kind_t kind, uint16_t operand_count,
     const uint16_t* operand_segment_counts, uint8_t operand_segment_count,
-    uint16_t result_count, uint8_t successor_count, uint8_t region_count,
+    uint16_t result_count, uint16_t successor_count, uint8_t region_count,
     uint16_t tied_result_count, uint8_t attribute_count,
     loom_location_id_t location, loom_op_t** out_op) {
   *out_op = NULL;
@@ -2140,7 +2194,7 @@ iree_status_t loom_builder_allocate_op(
 
 iree_status_t loom_builder_allocate_op_with_successors(
     loom_builder_t* builder, loom_op_kind_t kind, uint16_t operand_count,
-    uint16_t result_count, uint8_t successor_count, uint8_t region_count,
+    uint16_t result_count, uint16_t successor_count, uint8_t region_count,
     uint16_t tied_result_count, uint8_t attribute_count,
     loom_location_id_t location, loom_op_t** out_op) {
   return loom_builder_allocate_op_storage(
@@ -2163,7 +2217,7 @@ iree_status_t loom_builder_allocate_segmented_op(
 iree_status_t loom_builder_allocate_segmented_op_with_successors(
     loom_builder_t* builder, loom_op_kind_t kind, uint16_t operand_count,
     const uint16_t* operand_segment_counts, uint8_t operand_segment_count,
-    uint16_t result_count, uint8_t successor_count, uint8_t region_count,
+    uint16_t result_count, uint16_t successor_count, uint8_t region_count,
     uint16_t tied_result_count, uint8_t attribute_count,
     loom_location_id_t location, loom_op_t** out_op) {
   return loom_builder_allocate_op_storage(
@@ -2265,6 +2319,10 @@ iree_status_t loom_op_remove_results(loom_module_t* module, loom_op_t* op,
         loom_value_def_make_op(op, new_index);
   }
 
+  if (op->parent_block) {
+    loom_region_adjust_value_definition_count(op->parent_block->parent_region,
+                                              -(int64_t)*out_removed_count);
+  }
   op->result_count = kept_count;
   op->tied_result_count = kept_tied_count;
 
@@ -2316,6 +2374,8 @@ static iree_status_t loom_op_verify_erase_preconditions(loom_module_t* module,
 
 static void loom_block_drop_arg_type_uses(loom_module_t* module,
                                           loom_block_t* block) {
+  loom_region_adjust_value_definition_count(block->parent_region,
+                                            -(int64_t)block->arg_count);
   for (uint16_t i = 0; i < block->arg_count; ++i) {
     loom_value_id_t arg_id = loom_block_arg_id(block, i);
     if (arg_id == LOOM_VALUE_ID_INVALID || arg_id >= module->values.count) {
@@ -2587,7 +2647,7 @@ static iree_status_t loom_region_remove_verify_kept_op_successors(
     const loom_region_t* region, const bool* remove_blocks,
     const loom_op_t* op) {
   loom_block_t* const* successors = loom_op_const_successors(op);
-  for (uint8_t successor_index = 0; successor_index < op->successor_count;
+  for (uint16_t successor_index = 0; successor_index < op->successor_count;
        ++successor_index) {
     if (loom_region_remove_block_is_removed(region, remove_blocks,
                                             successors[successor_index])) {
@@ -3206,6 +3266,7 @@ static void loom_region_reset_summaries(loom_region_t* region) {
   region->read_effect_count = 0;
   region->write_effect_count = 0;
   region->convergent_effect_count = 0;
+  region->value_definition_count = 0;
   loom_block_t* block = NULL;
   loom_region_for_each_block(region, block) {
     block->parent_region = region;
@@ -3227,9 +3288,12 @@ static iree_status_t loom_region_compute_uses(loom_module_t* module,
                                               loom_region_t* region,
                                               loom_op_t* parent_op) {
   if (!region) return iree_ok_status();
+  region->owner_op = parent_op;
+  uint64_t value_definition_count = 0;
   loom_block_t* block = NULL;
   loom_region_for_each_block(region, block) {
     block->parent_region = region;
+    value_definition_count += block->arg_count;
     // Set def pointers for block arguments.
     for (uint16_t a = 0; a < block->arg_count; ++a) {
       loom_value_id_t arg_id = loom_block_arg_id(block, a);
@@ -3240,6 +3304,7 @@ static iree_status_t loom_region_compute_uses(loom_module_t* module,
     }
     loom_op_t* op = NULL;
     loom_block_for_each_op(block, op) {
+      value_definition_count += op->result_count;
       // Set parent pointers.
       op->parent_op = parent_op;
       op->parent_block = block;
@@ -3274,9 +3339,17 @@ static iree_status_t loom_region_compute_uses(loom_module_t* module,
       for (uint8_t r = 0; r < op->region_count; ++r) {
         loom_region_t* nested = loom_op_regions(op)[r];
         IREE_RETURN_IF_ERROR(loom_region_compute_uses(module, nested, op));
+        if (nested) {
+          value_definition_count += nested->value_definition_count;
+        }
       }
     }
   }
+  if (value_definition_count > UINT32_MAX) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "region defines too many SSA values");
+  }
+  region->value_definition_count = (uint32_t)value_definition_count;
   return iree_ok_status();
 }
 

@@ -1332,7 +1332,7 @@ TEST_F(PrintOpTest, AttrsOpTypeAttrUsesNamedDynamicDimension) {
       LOOM_LOCATION_UNKNOWN, &op));
 
   EXPECT_EQ(print_op(op, LOOM_TEXT_PRINT_DEFAULT),
-            "%2 = test.attrs %1 {shape = tensor<[%M]xf32>} : f32\n");
+            "%2 = test.attrs %1 {shape = type<tensor<[%M]xf32>>} : f32\n");
 }
 
 TEST_F(PrintOpTest, AttrsOpStringAttrsUseCanonicalEscapes) {
@@ -1920,14 +1920,12 @@ TEST_F(PrintOpTest, BlockLabel) {
   IREE_ASSERT_OK(loom_test_branch_build(&builder_, condition, NULL, 0, NULL, 0,
                                         LOOM_LOCATION_UNKNOWN, &op));
 
-  // Replace the auto-created then_region with a 2-block region.
-  loom_region_t* then_region = NULL;
-  IREE_ASSERT_OK(loom_module_allocate_region(module_, 2, &then_region));
-  loom_block_t* second_block = loom_region_block(then_region, 1);
+  loom_region_t* then_region = loom_test_branch_then_region(op);
+  loom_block_t* second_block = NULL;
+  IREE_ASSERT_OK(loom_region_append_block(module_, then_region, &second_block));
   IREE_ASSERT_OK(loom_module_intern_string(module_, IREE_SV("next"),
                                            &second_block->label_id));
   IREE_ASSERT_OK(loom_block_add_arg(module_, second_block, def(f32)));
-  loom_op_regions(op)[0] = then_region;
 
   std::string output = print_op(op, LOOM_TEXT_PRINT_DEFAULT);
   EXPECT_EQ(output,

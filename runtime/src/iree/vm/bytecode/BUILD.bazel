@@ -1,0 +1,471 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:cmake.bzl", "iree_cmake_extra_content")
+load("//build_tools/bazel:generate.bzl", "iree_generated_files")
+load("//build_tools/bazel:query.bzl", "iree_assert_no_dependency")
+load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
+load("//runtime/build_tools/bazel:cc_benchmark.bzl", "iree_runtime_cc_benchmark")
+load("//runtime/build_tools/bazel:cc_fuzz.bzl", "iree_runtime_cc_fuzz")
+load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],
+)
+
+#===------------------------------------------------------------------------===#
+# Layering checks
+#===------------------------------------------------------------------------===#
+
+# Inspection and dump must remain usable without linking the executable
+# bytecode module, verifier, or interpreter.
+iree_assert_no_dependency(
+    name = "inspection_no_bytecode_executor_dep",
+    dependency = "//runtime/src/iree/vm/bytecode:bytecode",
+    target = "//runtime/src/iree/vm/bytecode:inspection",
+)
+
+iree_assert_no_dependency(
+    name = "dump_no_bytecode_executor_dep",
+    dependency = "//runtime/src/iree/vm/bytecode:bytecode",
+    target = "//runtime/src/iree/vm/bytecode:dump",
+)
+
+iree_generated_files(
+    name = "tables_gen",
+    outs = [
+        "execution_tables.inl",
+        "module_validation_obligations.inl",
+        "tooling/isa_tables.c.inc",
+        "tooling/module_tables.c.inc",
+    ],
+    args = ["--output-kind=tables"],
+    output_args = {
+        "execution_tables.inl": "--output-file=execution_tables.inl={path}",
+        "isa_tables.c.inc": "--output-file=isa_tables.c.inc={path}",
+        "module_tables.c.inc": "--output-file=module_tables.c.inc={path}",
+        "module_validation_obligations.inl": "--output-file=module_validation_obligations.inl={path}",
+    },
+    tags = ["skip-bazel_to_cmake"],
+    tool = "//runtime/src/iree/vm/bytecode/spec:generate",
+)
+
+iree_generated_files(
+    name = "conversion_test_vectors_gen",
+    outs = ["conversion_test_vectors.inl"],
+    output_args = {
+        "conversion_test_vectors.inl": "--output-file={path}",
+    },
+    tags = ["skip-bazel_to_cmake"],
+    tool = "//runtime/src/iree/vm/bytecode/spec:generate_conversion_test_vectors",
+)
+
+iree_cmake_extra_content(
+    content = """
+iree_py_generated_files(
+  NAME tables_gen
+  GENERATOR iree::vm::bytecode::spec::generate
+  OUTPUTS
+    execution_tables.inl
+    module_validation_obligations.inl
+    tooling/isa_tables.c.inc
+    tooling/module_tables.c.inc
+  OUTPUT_FLAGS
+    --output-file=execution_tables.inl
+    --output-file=module_validation_obligations.inl
+    --output-file=isa_tables.c.inc
+    --output-file=module_tables.c.inc
+  ARGS --output-kind=tables
+)
+""",
+    inline = True,
+)
+
+iree_cmake_extra_content(
+    content = """
+iree_py_generated_files(
+  NAME conversion_test_vectors_gen
+  GENERATOR iree::vm::bytecode::spec::generate_conversion_test_vectors
+  OUTPUTS
+    conversion_test_vectors.inl
+  OUTPUT_FLAGS
+    --output-file
+)
+""",
+    inline = True,
+)
+
+iree_runtime_cc_library(
+    name = "module",
+    srcs = [
+        "image.c",
+        "module_reflection.c",
+        "verification.c",
+    ],
+    hdrs = [
+        "image.h",
+        "module_reader.h",
+        "module_reflection.h",
+        "module_storage.h",
+        "storage.h",
+        "verification.h",
+    ],
+    visibility = ["//visibility:private"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:unicode",
+        "//runtime/src/iree/vm",
+        "//runtime/src/iree/vm/bytecode/wire",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "bytecode",
+    srcs = [
+        "interpreter.c",
+        "interpreter.h",
+        "interpreter_atomic.c",
+        "interpreter_atomic.h",
+        "interpreter_buffer.h",
+        "interpreter_call.c",
+        "interpreter_call.h",
+        "interpreter_conversion.c",
+        "interpreter_conversion.h",
+        "interpreter_dispatch.c",
+        "interpreter_dispatch.h",
+        "interpreter_float.h",
+        "interpreter_float_math.c",
+        "interpreter_float_math.h",
+        "interpreter_frame.c",
+        "interpreter_frame.h",
+        "interpreter_integer.h",
+        "interpreter_integer_dispatch.c.inc",
+        "interpreter_stack.h",
+        "module.c",
+        "verification_isa.c",
+        "verification_isa_buffer.c",
+        "verification_isa_buffer.h",
+        "verification_isa_registers.c",
+        "verification_isa_registers.h",
+        "verification_isa_stack.c",
+        "verification_isa_stack.h",
+    ],
+    hdrs = ["module.h"],
+    textual_hdrs = ["execution_tables.inl"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":module",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:unicode",
+        "//runtime/src/iree/vm",
+        "//runtime/src/iree/vm/bytecode/wire",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "inspection",
+    srcs = ["inspection.c"],
+    hdrs = ["inspection.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":module",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:unicode",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "dump",
+    srcs = [
+        "tooling/disassembler.c",
+        "tooling/disassembler.h",
+        "tooling/dump.c",
+    ],
+    hdrs = ["tooling/dump.h"],
+    textual_hdrs = [
+        "tooling/isa_tables.c.inc",
+        "tooling/module_tables.c.inc",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":inspection",
+        ":module",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/vm",
+        "//runtime/src/iree/vm/bytecode/wire",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "interpreter_atomic_test",
+    srcs = [
+        "interpreter_atomic.h",
+        "interpreter_atomic_test.cc",
+        "interpreter_buffer.h",
+    ],
+    deps = [
+        ":bytecode",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm",
+        "//runtime/src/iree/vm/bytecode/wire",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "interpreter_conversion_test",
+    srcs = [
+        "conversion_test_vectors.inl",
+        "interpreter_conversion.h",
+        "interpreter_conversion_test.cc",
+    ],
+    deps = [
+        ":bytecode",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm/bytecode/wire",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "interpreter_float_test",
+    srcs = [
+        "interpreter_float.h",
+        "interpreter_float_test.cc",
+    ],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm/bytecode/wire",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "interpreter_float_math_test",
+    srcs = [
+        "interpreter_float_math.h",
+        "interpreter_float_math_test.cc",
+    ],
+    deps = [
+        ":bytecode",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:fpu_state",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm/bytecode/wire",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "interpreter_integer_test",
+    srcs = [
+        "interpreter_integer.h",
+        "interpreter_integer_test.cc",
+    ],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm/bytecode/wire",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "interpreter_stack_test",
+    srcs = [
+        "interpreter_stack.h",
+        "interpreter_stack_test.cc",
+    ],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm/bytecode/wire",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "module_test",
+    srcs = [
+        "module_execution_test.cc",
+        "module_test.cc",
+        "module_test_data.cc",
+        "module_test_data.h",
+        "module_test_types.cc",
+        "module_test_types.h",
+        "module_verification_test.cc",
+    ],
+    deps = [
+        ":bytecode",
+        ":inspection",
+        "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm",
+        "//runtime/src/iree/vm/bytecode/wire",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "verification_test",
+    srcs = [
+        "module_test_data.cc",
+        "module_test_data.h",
+        "module_validation_obligations.inl",
+        "verification_test.cc",
+    ],
+    deps = [
+        ":bytecode",
+        ":inspection",
+        ":module",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm",
+        "//runtime/src/iree/vm/bytecode/wire",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "module_call_test",
+    srcs = [
+        "module_call_test.cc",
+        "module_test_data.cc",
+        "module_test_data.h",
+    ],
+    deps = [
+        ":bytecode",
+        "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm",
+        "//runtime/src/iree/vm/bytecode/wire",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "module_buffer_test",
+    srcs = [
+        "interpreter_atomic.h",
+        "module_buffer_test.cc",
+        "module_test_data.cc",
+        "module_test_data.h",
+    ],
+    deps = [
+        ":bytecode",
+        "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm",
+        "//runtime/src/iree/vm/bytecode/wire",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "dump_test",
+    srcs = [
+        "module_test_data.cc",
+        "module_test_data.h",
+        "tooling/dump_test.cc",
+    ],
+    deps = [
+        ":dump",
+        "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm/bytecode/wire",
+    ],
+)
+
+iree_runtime_cc_fuzz(
+    name = "instruction_fuzz",
+    srcs = [
+        "instruction_fuzz.cc",
+        "module_test_data.cc",
+        "module_test_data.h",
+    ],
+    deps = [
+        ":bytecode",
+        ":dump",
+        ":inspection",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/vm",
+        "//runtime/src/iree/vm/bytecode/wire",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "instruction_fuzz_test",
+    srcs = [
+        "instruction_fuzz.cc",
+        "instruction_fuzz_test.cc",
+        "module_test_data.cc",
+        "module_test_data.h",
+    ],
+    deps = [
+        ":bytecode",
+        ":dump",
+        ":inspection",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm",
+        "//runtime/src/iree/vm/bytecode/wire",
+    ],
+)
+
+iree_runtime_cc_fuzz(
+    name = "module_factory_fuzz",
+    srcs = [
+        "module_factory_fuzz.cc",
+        "module_test_data.cc",
+        "module_test_data.h",
+    ],
+    deps = [
+        ":bytecode",
+        ":dump",
+        ":inspection",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/vm",
+        "//runtime/src/iree/vm/bytecode/wire",
+    ],
+)
+
+iree_runtime_cc_benchmark(
+    name = "module_benchmark",
+    srcs = [
+        "module_benchmark.cc",
+        "module_test_data.cc",
+        "module_test_data.h",
+    ],
+    deps = [
+        ":bytecode",
+        "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/testing:benchmark",
+        "//runtime/src/iree/testing:benchmark_main",
+        "//runtime/src/iree/vm",
+        "//runtime/src/iree/vm/bytecode/wire",
+    ],
+)

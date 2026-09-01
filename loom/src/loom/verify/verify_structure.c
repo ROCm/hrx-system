@@ -533,7 +533,7 @@ void loom_verify_successor_targets(loom_verify_state_t* state,
       op->parent_block ? op->parent_block->parent_region : NULL;
   iree_string_view_t op_name = loom_op_vtable_name(vtable);
   loom_block_t* const* successors = loom_op_const_successors(op);
-  for (uint8_t i = 0; i < op->successor_count; ++i) {
+  for (uint16_t i = 0; i < op->successor_count; ++i) {
     loom_diagnostic_field_ref_t successor_ref =
         loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_SUCCESSOR, i);
     if (!successors[i]) {
@@ -1351,6 +1351,7 @@ static iree_string_view_t loom_verify_encoding_attr_kind_name(
   static const iree_string_view_t kNames[LOOM_ATTR_COUNT_] = {
       [LOOM_ATTR_ABSENT] = IREE_SVL("absent"),
       [LOOM_ATTR_I64] = IREE_SVL("integer"),
+      [LOOM_ATTR_U64] = IREE_SVL("unsigned integer"),
       [LOOM_ATTR_F64] = IREE_SVL("float"),
       [LOOM_ATTR_STRING] = IREE_SVL("string"),
       [LOOM_ATTR_BOOL] = IREE_SVL("boolean"),
@@ -2076,7 +2077,8 @@ static const loom_op_t* loom_verify_block_last_live_op(
 static bool loom_verify_op_is_terminator(loom_verify_state_t* state,
                                          const loom_op_t* op) {
   const loom_op_vtable_t* vtable = loom_verify_lookup_vtable(state, op->kind);
-  return vtable && iree_any_bit_set(vtable->traits, LOOM_TRAIT_TERMINATOR);
+  return vtable && iree_any_bit_set(loom_op_effective_traits(state->module, op),
+                                    LOOM_TRAIT_TERMINATOR);
 }
 
 static bool loom_verify_region_terminator_matches(

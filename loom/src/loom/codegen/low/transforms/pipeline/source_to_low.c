@@ -8,9 +8,10 @@
 
 #include <string.h>
 
-#include "loom/codegen/low/launch_config_program.h"
+#include "loom/codegen/low/lower/lower.h"
 #include "loom/codegen/low/lower/source_selection.h"
 #include "loom/codegen/low/pipeline/pass_environment.h"
+#include "loom/ops/kernel/ops.h"
 #include "loom/pass/pipeline.h"
 #include "loom/pass/registry.h"
 #include "loom/pass/value_facts.h"
@@ -302,8 +303,6 @@ iree_status_t loom_low_source_to_low_run(loom_pass_t* pass,
       loom_target_pass_capability_from_pass(pass);
   loom_target_compile_report_t* compile_report =
       loom_low_pass_capability_compile_report(low_capability);
-  loom_kernel_launch_config_program_t* launch_config_program =
-      loom_kernel_launch_config_program_from_pass(pass);
   const iree_allocator_t source_low_report_allocator =
       loom_target_compile_report_wants_details(
           compile_report, LOOM_TARGET_COMPILE_REPORT_DETAIL_SOURCE_LOW_ROWS)
@@ -325,12 +324,40 @@ iree_status_t loom_low_source_to_low_run(loom_pass_t* pass,
           loom_target_pass_capability_function_versions(target_capability),
       .collect_target_candidates = record_source_low_targets,
   };
-  iree_status_t status = loom_low_select_source_symbols(
-      module, &selection_options, &selection_arena, &selection_list);
+  loom_low_lower_prepare_module_result_t preparation_result = {0};
+  iree_status_t status = loom_low_prepare_source_module(
+      module, &selection_options, &selection_arena, &preparation_result);
+  if (preparation_result.changed) {
+    loom_pass_value_fact_owner_invalidate(pass->value_facts);
+    loom_pass_mark_changed(pass);
+  }
+  if (iree_status_is_ok(status) && !preparation_result.valid) {
+    iree_arena_deinitialize(&selection_arena);
+    return iree_ok_status();
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_low_select_source_symbols(module, &selection_options,
+                                            &selection_arena, &selection_list);
+  }
   for (iree_host_size_t i = 0;
        i < selection_list.count && iree_status_is_ok(status); ++i) {
     status = loom_low_source_to_low_record_target_specialization(
         compile_report, &selection_list.values[i]);
+  }
+  bool control_flow_changed = false;
+  for (iree_host_size_t i = 0;
+       i < selection_list.count && iree_status_is_ok(status); ++i) {
+    const loom_low_source_selection_t* selection = &selection_list.values[i];
+    if (selection->kind != LOOM_LOW_SOURCE_SELECTION_FUNCTION) continue;
+    bool function_control_flow_changed = false;
+    status = loom_low_lower_prepare_cfg_switches(
+        module, selection->func, selection->target_facts, selection->policy,
+        &function_control_flow_changed);
+    control_flow_changed |= function_control_flow_changed;
+  }
+  if (control_flow_changed) {
+    loom_pass_value_fact_owner_invalidate(pass->value_facts);
+    loom_pass_mark_changed(pass);
   }
   if (iree_status_is_ok(status)) {
     status =
@@ -422,16 +449,8 @@ iree_status_t loom_low_source_to_low_run(loom_pass_t* pass,
         .report_allocator = source_low_report_allocator,
     };
     loom_low_lower_result_t lower_result = {0};
-    if (launch_config_program != NULL) {
-      status = loom_kernel_launch_config_program_capture(
-          launch_config_program, module, selection->func,
-          selection->function_name, selection->version_handle,
-          selection->target_facts, fact_table);
-    }
-    if (iree_status_is_ok(status)) {
-      status = loom_low_lower_function(module, selection->func, &lower_options,
-                                       &lower_result);
-    }
+    status = loom_low_lower_function(module, selection->func, &lower_options,
+                                     &lower_result);
     loom_pass_value_fact_owner_invalidate(pass->value_facts);
     if (iree_status_is_ok(status) && compile_report != NULL) {
       status = loom_target_compile_report_record_low_lowering(compile_report,

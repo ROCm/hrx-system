@@ -39,6 +39,33 @@ iree_status_t loom_low_build_descriptor_implicit_resource_type(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor, loom_type_t* out_type);
 
+// Emits a descriptor-backed one-successor low.br from a row resolved earlier
+// in the pipeline. Descriptor-backed branches are target operations and are
+// not eligible for transparent branch rewrites.
+iree_status_t loom_low_build_resolved_descriptor_br(
+    loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_t* descriptor, loom_block_t* dest,
+    const loom_value_id_t* args, iree_host_size_t arg_count,
+    loom_location_id_t location, loom_op_t** out_op);
+
+// Rebuilds |source_br| with a replacement argument list while preserving its
+// successor, optional descriptor binding, effective traits, and location.
+iree_status_t loom_low_rebuild_br(loom_builder_t* builder,
+                                  const loom_op_t* source_br,
+                                  const loom_value_id_t* args,
+                                  iree_host_size_t arg_count,
+                                  loom_op_t** out_op);
+
+// Emits a descriptor-backed dense low.switch from a row resolved earlier in
+// the pipeline. |target_dests| is the zero-based dense table and may repeat
+// destinations to represent holes.
+iree_status_t loom_low_build_resolved_descriptor_switch(
+    loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_t* descriptor, loom_value_id_t selector,
+    loom_block_t* default_dest, loom_block_t* const* target_dests,
+    iree_host_size_t target_count, loom_location_id_t location,
+    loom_op_t** out_op);
+
 // Emits a descriptor-backed low.op from a descriptor row resolved earlier in
 // the pipeline.
 //

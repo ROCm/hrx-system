@@ -31,16 +31,6 @@ iree_py_library(
 
 iree_py_library(
   NAME
-    contract_fragment
-  SRCS
-    "contract_fragment.py"
-  DEPS
-    loom::py::loom::gen::target::contracts::contract_fragments
-    loom::py::loom::target::contract_fragments
-)
-
-iree_py_library(
-  NAME
     lower_rules
   SRCS
     "lower_rule_rows.py"
@@ -57,25 +47,28 @@ iree_py_library(
 
 iree_py_library(
   NAME
-    contract_table_family
+    contract_sets
   SRCS
-    "contract_table_family.py"
+    "contract_sets.py"
   DEPS
     loom::py::loom::gen::target::contracts::contract_fragments
     loom::py::loom::gen::target::contracts::lower_rules
     loom::py::loom::gen::support::support
-    loom::py::loom::target::contract_fragments
     loom::py::loom::target::contracts::contracts
 )
 
 iree_py_library(
   NAME
-    amdgpu_contract_fragment
-  MAIN_MODULE
-    "loom.gen.target.contracts.contract_fragment"
+    contract_table_family
+  SRCS
+    "contract_table_family.py"
   DEPS
-    loom::py::loom::gen::target::contracts::contract_fragment
-    loom::py::loom::target::arch::amdgpu::contracts::contracts
+    loom::py::loom::gen::target::contracts::contract_fragments
+    loom::py::loom::gen::target::contracts::contract_sets
+    loom::py::loom::gen::target::contracts::lower_rules
+    loom::py::loom::gen::support::support
+    loom::py::loom::target::contract_fragments
+    loom::py::loom::target::contracts::contracts
 )
 
 iree_py_library(
@@ -136,6 +129,26 @@ iree_py_library(
   DEPS
     loom::py::loom::gen::target::contracts::contract_table_family
     loom::py::loom::target::arch::x86::contracts::contracts
+)
+
+iree_py_test(
+  NAME
+    contract_sets_test
+  MAIN
+    "../../../tools/pytest_style_runner.py"
+  SRCS
+    "contract_sets_test.py"
+    "../../../tools/pytest_style_runner.py"
+  ARGS
+    "loom.gen.target.contracts.contract_sets_test"
+  DEPS
+    loom::py::loom::gen::target::contracts::contract_sets
+    loom::py::loom::target::contracts::contracts
+    loom::py::loom::target::test::descriptors
+  PACKAGE_DIRS
+    "${PROJECT_SOURCE_DIR}/loom/py"
+    "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
 )
 
 iree_py_test(

@@ -11,6 +11,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
+#include "loom/format/bytecode/module_summary.h"
 #include "loom/format/bytecode/reader/attribute.h"
 #include "loom/format/bytecode/reader/decoder.h"
 #include "loom/format/low_repr.h"
@@ -124,6 +125,13 @@ iree_status_t loom_bytecode_body_materialize_region(
     loom_bytecode_region_materialization_flags_t flags,
     const loom_value_id_t* predefined_values, uint16_t predefined_value_count,
     const loom_low_repr_descriptor_set_t* low_descriptor_set);
+
+// Materializes the complete non-symbol module operation forest.
+iree_status_t loom_bytecode_body_materialize_module_ops(
+    loom_bytecode_body_materializer_t* materializer,
+    iree_string_view_t module_name, iree_const_byte_span_t payload_bytes,
+    uint64_t payload_absolute_offset,
+    const loom_bytecode_module_ops_summary_t* summary);
 
 #ifdef __cplusplus
 }  // extern "C"

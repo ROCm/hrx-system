@@ -9,11 +9,14 @@
 #ifndef LOOM_TARGET_ARCH_WASM_RECORDS_TARGET_RECORDS_H_
 #define LOOM_TARGET_ARCH_WASM_RECORDS_TARGET_RECORDS_H_
 
-#include "loom/target/types.h"
+#include "loom/target/facts.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+// Static fact type shared by authored Wasm target records and their provider.
+extern const loom_target_fact_type_t loom_wasm_target_fact_type;
 
 extern const loom_target_bundle_t loom_wasm_low_target_bundle_core_simd128;
 

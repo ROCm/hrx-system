@@ -106,6 +106,15 @@ static bool loom_vector_to_scalar_descriptor_is_empty(
 
 bool loom_vector_to_scalar_resolve_descriptor(
     loom_op_kind_t kind, loom_vector_to_scalar_descriptor_t* out_descriptor) {
+  if (kind == LOOM_OP_SCF_SELECT) {
+    *out_descriptor = (loom_vector_to_scalar_descriptor_t){
+        .lane_op_kind = LOOM_OP_SCF_SELECT,
+        .lane_kind = LOOM_VECTOR_TO_SCALAR_LANE_GENERIC,
+        .seed_operand_index = 1,
+    };
+    return true;
+  }
+
   const loom_vector_scalarization_t* scalarization =
       loom_vector_scalarization_lookup(kind);
   if (scalarization != NULL &&

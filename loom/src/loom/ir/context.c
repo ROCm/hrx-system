@@ -774,8 +774,6 @@ loom_op_semantics_t loom_op_semantics(const loom_module_t* module,
 
 bool loom_op_has_trait(const loom_module_t* module, const loom_op_t* op,
                        loom_trait_flags_t trait) {
-  const loom_op_vtable_t* vtable =
-      loom_context_resolve_op(module->context, op->kind);
-  if (vtable) return (vtable->traits & trait) != 0;
-  return false;
+  (void)module;
+  return iree_any_bit_set(op->traits, trait);
 }

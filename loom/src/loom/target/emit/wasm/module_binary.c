@@ -148,8 +148,7 @@ static iree_string_view_t loom_wasm_module_symbol_name(
 static iree_string_view_t loom_wasm_module_function_export_name(
     const loom_module_t* module, const loom_symbol_t* symbol,
     const loom_op_t* function_op) {
-  loom_func_like_t function =
-      loom_func_like_cast(module, (loom_op_t*)function_op);
+  loom_func_like_t function = loom_func_like_const_cast(module, function_op);
   if (!loom_func_like_isa(function)) {
     return iree_string_view_empty();
   }
@@ -222,7 +221,7 @@ static iree_status_t loom_wasm_module_build_function_type(
     loom_wasm_function_type_t* out_type) {
   *out_type = (loom_wasm_function_type_t){0};
   loom_func_like_t function =
-      loom_func_like_cast(frame->module, (loom_op_t*)frame->function_op);
+      loom_func_like_const_cast(frame->module, frame->function_op);
   if (!loom_func_like_isa(function)) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "Wasm module emission requires a func-like op");
@@ -288,10 +287,10 @@ static iree_status_t loom_wasm_module_build_function_frame(
     const loom_low_emission_frame_options_t* options,
     iree_arena_allocator_t* arena, loom_low_emission_frame_t* out_frame) {
   if (options->schedule_strategy !=
-      LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY) {
+      LOOM_LOW_SCHEDULE_STRATEGY_PRESERVE_SOURCE_ORDER) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
-        "Wasm module emission requires source-order low scheduling");
+        "Wasm module emission requires source-order frame construction");
   }
   IREE_RETURN_IF_ERROR(loom_low_emission_frame_build(
       module, function_op, options, arena, out_frame));

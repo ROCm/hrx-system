@@ -17,6 +17,7 @@ from loom.assembly import (
     BindingList,
     BlockArgs,
     BlockRef,
+    BlockRefs,
     Clause,
     Flags,
     FormatElement,
@@ -134,6 +135,15 @@ def translate_format_elements(op: Op) -> list[tuple[str, int, str]]:
                     if kind != FieldKind.SUCCESSOR:
                         raise ValueError(f"Op '{op.name}': BlockRef('{name}') references {kind.name}, expected SUCCESSOR")
                     elements.append(("LOOM_FORMAT_KIND_SUCCESSOR_REF", index, "0"))
+
+                case BlockRefs(field=name):
+                    kind, index = resolve_field(name)
+                    if kind != FieldKind.SUCCESSOR:
+                        raise ValueError(f"Op '{op.name}': BlockRefs('{name}') references {kind.name}, expected SUCCESSOR")
+                    descriptor = layout.fields[name]
+                    if not descriptor.variadic:
+                        raise ValueError(f"Op '{op.name}': BlockRefs('{name}') requires a variadic successor field")
+                    elements.append(("LOOM_FORMAT_KIND_SUCCESSOR_REFS", index, "0"))
 
                 case Attr(field=name):
                     kind, index = resolve_field(name)
@@ -280,11 +290,12 @@ def translate_format_elements(op: Op) -> list[tuple[str, int, str]]:
                     binding_kind_name = "LOOM_BINDING_ELEMENT" if binding_kind == "element" else "LOOM_BINDING_CAPTURE"
                     elements.append(("LOOM_FORMAT_KIND_BINDING_LIST", index, binding_kind_name))
 
-                case BlockArgs(region=name):
+                case BlockArgs(region=name, definition_scope=definition_scope):
                     kind, index = resolve_field(name)
                     if kind != FieldKind.REGION:
                         raise ValueError(f"Op '{op.name}': BlockArgs region field '{name}' is not a region field")
-                    elements.append(("LOOM_FORMAT_KIND_BLOCK_ARGS", index, "0"))
+                    data = "LOOM_FORMAT_BLOCK_ARGS_DATA_DEFINITION_SCOPE" if definition_scope else "0"
+                    elements.append(("LOOM_FORMAT_KIND_BLOCK_ARGS", index, data))
 
                 case FuncArgs(
                     field=name,

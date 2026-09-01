@@ -139,6 +139,17 @@ class ValueMaterializerTest : public ::testing::Test {
     return buffer_view;
   }
 
+  void ExpectRawU32Scalar(const loom_testbench_value_table_t* table,
+                          loom_value_id_t value_id, uint32_t expected_bits) {
+    loom_testbench_value_t value = {};
+    IREE_ASSERT_OK(
+        loom_testbench_value_table_lookup_retain(table, value_id, &value));
+    ASSERT_TRUE(loom_testbench_value_is_scalar(&value));
+    EXPECT_EQ(value.scalar.kind, IREE_TOOLING_VALUE_KIND_RAW_U32);
+    EXPECT_EQ(value.scalar.storage.u32, expected_bits);
+    loom_testbench_value_deinitialize(&value);
+  }
+
   template <typename T>
   void ExpectBufferViewContents(iree_hal_buffer_view_t* buffer_view,
                                 std::vector<iree_hal_dim_t> shape,
@@ -188,6 +199,10 @@ check.case @generated {
   %fill = check.generate.fill value(1.5) : tensor<3xf32>
   %bf16 = check.generate.fill value(0.25) : tensor<2xbf16>
   %uniform = check.generate.random.uniform seed(%seed) range(-1.0 to 1.0) : tensor<4xf32>
+  %f8e4_scalar = check.literal value(1.625) : f8E4M3
+  %f8e5_scalar = check.literal value(-3.5) : f8E5M2
+  %f16_scalar = check.literal value(0.5) : f16
+  %bf16_scalar = check.literal value(-2.0) : bf16
   check.return
 }
 )");
@@ -205,7 +220,7 @@ check.case @generated {
       &options, &case_plan, /*sample_ordinal=*/1, &table));
 
   ASSERT_EQ(case_plan.parameter_count, 2u);
-  ASSERT_EQ(case_plan.value_source_count, 10u);
+  ASSERT_EQ(case_plan.value_source_count, 14u);
   loom_testbench_value_t scalar = {};
   IREE_ASSERT_OK(loom_testbench_value_table_lookup_retain(
       &table, case_plan.value_sources[0].value_id, &scalar));
@@ -290,6 +305,15 @@ check.case @generated {
     EXPECT_LE(value, 1.0f);
   }
   loom_testbench_value_deinitialize(&uniform);
+
+  ExpectRawU32Scalar(&table, case_plan.value_sources[10].value_id,
+                     iree_math_f32_to_f8e4m3fn(1.625f));
+  ExpectRawU32Scalar(&table, case_plan.value_sources[11].value_id,
+                     iree_math_f32_to_f8e5m2(-3.5f));
+  ExpectRawU32Scalar(&table, case_plan.value_sources[12].value_id,
+                     iree_math_f32_to_f16(0.5f));
+  ExpectRawU32Scalar(&table, case_plan.value_sources[13].value_id,
+                     iree_math_f32_to_bf16(-2.0f));
 
   loom_testbench_value_table_deinitialize(&table);
   loom_module_free(module);

@@ -242,6 +242,12 @@ static const loom_pass_option_schema_t kLowTargetLegalizeOptionSchema[] = {
 static const loom_pass_requirement_def_t kLowTargetLegalizeRequirements[] = {
     {
         .capability_type = &loom_low_pass_capability_type,
+        .key = IREE_SVL(LOOM_LOW_PASS_REQUIREMENT_TARGET_LEGALIZER_REGISTRY),
+        .description =
+            IREE_SVL("Requires a pass environment source legalizer registry."),
+    },
+    {
+        .capability_type = &loom_low_pass_capability_type,
         .key =
             IREE_SVL(LOOM_LOW_PASS_REQUIREMENT_TARGET_LOW_DESCRIPTOR_REGISTRY),
         .description =

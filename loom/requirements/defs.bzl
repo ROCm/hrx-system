@@ -81,6 +81,13 @@ TARGET_ARCH_SPIRV = build_requirement(
     cmake_condition = "LOOM_TARGET_ARCH_SPIRV",
 )
 
+TARGET_ARCH_VM = build_requirement(
+    id = "loom.target.arch.vm",
+    label = Label("//loom/requirements:target_arch_vm"),
+    enabled_by = Label("//loom/config/target/arch:vm"),
+    cmake_condition = "LOOM_TARGET_ARCH_VM",
+)
+
 TARGET_ARCH_WASM = build_requirement(
     id = "loom.target.arch.wasm",
     label = Label("//loom/requirements:target_arch_wasm"),
@@ -106,6 +113,7 @@ REQUIREMENTS = [
     TARGET_ARCH_AMDGPU,
     TARGET_ARCH_LLVMIR,
     TARGET_ARCH_SPIRV,
+    TARGET_ARCH_VM,
     TARGET_ARCH_WASM,
     TARGET_ARCH_X86,
 ]

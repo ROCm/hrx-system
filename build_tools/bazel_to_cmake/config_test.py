@@ -246,6 +246,37 @@ loom_check_test_suite(
         self.assertNotIn('"test/source_low/a.loom-test"', cmake)
         self.assertNotIn("iree_native_test(", cmake)
 
+    def test_loom_check_test_suite_preserves_checked_glob_srcs(self):
+        repo_root = Path(__file__).resolve().parents[2]
+        loom = bazel_to_cmake_config.include_project(
+            str(repo_root / ".bazel_to_cmake.cfg.py"),
+            "loom/.bazel_to_cmake.cfg.py",
+        )
+        repo_cfg = SimpleNamespace(PROJECTS=[loom], REPO_MAP={"@hrx": ""})
+
+        cmake = bazel_to_cmake_converter.convert_build_file(
+            """
+load("//build_tools/bazel:glob.bzl", "iree_checked_glob")
+load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test_suite")
+
+loom_check_test_suite(
+    name = "loom_check_file_test",
+    srcs = iree_checked_glob(
+        ["test/source_low/a.loom-test"],
+        include = ["test/source_low/*.loom-test"],
+    ),
+    test_name_prefix_to_strip = "test/source_low/",
+)
+""",
+            repo_cfg,
+            str(repo_root / "loom/src/loom/target/arch/amdgpu"),
+            repo_root=str(repo_root),
+        )
+
+        self.assertIn('    "test/source_low/a.loom-test"', cmake)
+        self.assertNotIn("file(GLOB", cmake)
+        self.assertNotIn("iree_native_test(", cmake)
+
     def test_glob_exclusions_have_distinct_cmake_storage(self):
         repo_root = Path(__file__).resolve().parents[2]
         loom = bazel_to_cmake_config.include_project(
@@ -778,6 +809,22 @@ loom_module(
                 main="config_test.py",
                 deps=[],
             )
+
+    def test_generated_files_requires_explicit_cmake_projection(self):
+        functions = bazel_to_cmake_converter.BuildFileFunctions(
+            converter=SimpleNamespace(body=""),
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            build_dir="runtime/src/iree/vm/bytecode/tooling",
+        )
+
+        functions.iree_generated_files(
+            name="tables_gen",
+            tags=["skip-bazel_to_cmake"],
+        )
+        with self.assertRaisesRegex(
+            NotImplementedError, "requires an explicit CMake projection"
+        ):
+            functions.iree_generated_files(name="tables_gen")
 
     def test_requirement_policy_loads_cross_project_requirement_defs(self):
         repo_root = Path(__file__).resolve().parents[2]

@@ -375,87 +375,18 @@ def loom_target_contract_cc_libraries(
         **kwargs
     )
 
-def loom_target_contract_table_cc_libraries(
-        name,
-        generator,
-        args = [],
-        inputs = [],
-        contract_deps = [],
-        lower_rule_deps = [],
-        tags = [],
-        testonly = False,
-        visibility = None,
-        **kwargs):
-    """Generates one contract fragment and its lower rules in one action.
-
-    The contract and lower-rule tables share one materialized Python fragment
-    but remain separate C libraries with independent runtime dependencies.
-
-    Args:
-      name: Contract C library name and generated file stem. The lower-rule
-        library and files use the same stem with a _lower_rules suffix.
-      generator: Python executable that writes both C/H output pairs.
-      args: Generator arguments before the four output flags.
-      inputs: Source data labels consumed by the generator.
-      contract_deps: Runtime dependencies of the contract C library.
-      lower_rule_deps: Runtime dependencies of the lower-rule C library.
-      tags: Additional Bazel tags for the generator action.
-      testonly: Passed through to both runtime C libraries.
-      visibility: Passed through to the generator and runtime C libraries.
-      **kwargs: Additional arguments passed through to both C libraries.
-    """
-    rule_kwargs = {}
-    if visibility != None:
-        rule_kwargs["visibility"] = visibility
-    rule_kwargs["tags"] = tags + ["skip-bazel_to_cmake"]
-    rule_kwargs = apply_loom_target_policy(rule_kwargs)
-
-    contract_source = name + ".c"
-    contract_header = name + ".h"
-    lower_rule_source = name + "_lower_rules.c"
-    lower_rule_header = name + "_lower_rules.h"
-    outputs = [
-        contract_source,
-        contract_header,
-        lower_rule_source,
-        lower_rule_header,
-    ]
-    output_flags = [
-        "--contract-source",
-        "--contract-header",
-        "--lower-rule-source",
-        "--lower-rule-header",
-    ]
-    iree_generated_files(
-        name = name + "_gen",
-        srcs = inputs,
-        outs = outputs,
-        args = _loom_bazel_generator_args(args),
-        output_args = _loom_output_args(output_flags, outputs),
-        tool = generator,
-        **rule_kwargs
-    )
-
-    loom_target_contract_cc_libraries(
-        name = name,
-        contract_deps = contract_deps,
-        lower_rule_deps = lower_rule_deps,
-        testonly = testonly,
-        visibility = visibility,
-        **kwargs
-    )
-
 def loom_target_contract_file_family(
         name,
         generator,
         fragments,
+        contract_sets,
         args = [],
         inputs = [],
         tags = [],
         target_compatible_with = None,
         visibility = None,
         comment = None):
-    """Generates several contract and lower-rule table pairs in one action.
+    """Generates contract fragments, lower rules, and policy sets in one action.
 
     Every fragment must belong to the same generator source and invalidation
     domain. Runtime C libraries remain separate so consumers retain precise
@@ -465,6 +396,7 @@ def loom_target_contract_file_family(
       name: Generator action target name.
       generator: Python executable that writes every contract table family.
       fragments: Mapping from output file stem to contract fragment key.
+      contract_sets: Mapping from contract-set name to ordered fragment stems.
       args: Common generator arguments before fragment and output arguments.
       inputs: Source data labels consumed by the generator.
       tags: Additional Bazel tags for the generator action.
@@ -472,8 +404,10 @@ def loom_target_contract_file_family(
       visibility: Passed through to the generator action.
       comment: Optional progress message for the generator action.
     """
-    if len(fragments) < 2:
-        fail("contract file families require at least two fragments")
+    if not fragments:
+        fail("contract file families require at least one fragment")
+    if not contract_sets:
+        fail("contract file families require at least one contract set")
 
     generator_args = list(args)
     outputs = []
@@ -481,6 +415,7 @@ def loom_target_contract_file_family(
     for stem in sorted(fragments.keys()):
         fragment_key = fragments[stem]
         generator_args.append("--contract-fragment=" + fragment_key)
+        generator_args.append("--contract-fragment-stem=" + stem)
         outputs.extend([
             stem + ".c",
             stem + ".h",
@@ -493,6 +428,20 @@ def loom_target_contract_file_family(
             "--lower-rule-source",
             "--lower-rule-header",
         ])
+
+    for contract_set_name in sorted(contract_sets.keys()):
+        fragment_stems = contract_sets[contract_set_name]
+        if not fragment_stems:
+            fail("contract set %s must not be empty" % contract_set_name)
+        for stem in fragment_stems:
+            if stem not in fragments:
+                fail("contract set %s references unknown fragment %s" % (contract_set_name, stem))
+        generator_args.append(
+            "--contract-set=" + contract_set_name + "=" + ",".join(fragment_stems),
+        )
+
+    outputs.extend(["sets.c", "sets.h"])
+    output_flags.extend(["--contract-set-source", "--contract-set-header"])
 
     _loom_generated_files(
         name = name,

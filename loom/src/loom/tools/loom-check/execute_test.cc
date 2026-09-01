@@ -17,6 +17,7 @@
 #include "loom/target/low_descriptor_registry_core_test.h"
 #include "loom/target/provider.h"
 #include "loom/target/test/lower.h"
+#include "loom/target/test/target_records.h"
 #include "loom/testing/context.h"
 #include "loom/tools/loom-check/check.h"
 #include "loom/tools/loom-check/diagnostics.h"
@@ -80,6 +81,7 @@ void InitializeTestLowLowerPolicyRegistryForProvider(
 }
 
 const loom_target_provider_t kTestTargetProvider = {
+    /*.fact_type=*/&loom_test_target_fact_type,
     /*.profile_type=*/{},
     /*.materialize_definition=*/{},
     /*.register_context=*/{},

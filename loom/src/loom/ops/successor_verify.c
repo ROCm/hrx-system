@@ -37,7 +37,7 @@ static bool loom_ops_successor_value_is_defined(const loom_module_t* module,
 
 static iree_status_t loom_ops_successor_emit_arg_count_mismatch(
     iree_diagnostic_emitter_t emitter, const loom_op_t* op,
-    iree_string_view_t op_name, uint8_t successor_index,
+    iree_string_view_t op_name, uint16_t successor_index,
     iree_host_size_t actual_count, iree_host_size_t expected_count) {
   loom_diagnostic_field_ref_t successor_ref = loom_diagnostic_field_ref(
       LOOM_DIAGNOSTIC_FIELD_SUCCESSOR, successor_index);
@@ -53,7 +53,7 @@ static iree_status_t loom_ops_successor_emit_arg_count_mismatch(
 
 static iree_status_t loom_ops_successor_emit_arg_type_mismatch(
     iree_diagnostic_emitter_t emitter, const loom_op_t* op,
-    iree_string_view_t op_name, uint8_t successor_index,
+    iree_string_view_t op_name, uint16_t successor_index,
     uint16_t argument_index, loom_type_t actual_type,
     loom_type_t expected_type) {
   loom_diagnostic_field_ref_t successor_ref = loom_diagnostic_field_ref(
@@ -71,7 +71,7 @@ static iree_status_t loom_ops_successor_emit_arg_type_mismatch(
 
 iree_status_t loom_ops_verify_successor_args(
     const loom_module_t* module, iree_diagnostic_emitter_t emitter,
-    const loom_op_t* op, iree_string_view_t op_name, uint8_t successor_index,
+    const loom_op_t* op, iree_string_view_t op_name, uint16_t successor_index,
     const loom_block_t* target, const loom_value_id_t* args,
     iree_host_size_t arg_count) {
   if (!target) return iree_ok_status();

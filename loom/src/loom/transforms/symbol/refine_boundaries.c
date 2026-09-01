@@ -2096,7 +2096,7 @@ static iree_status_t loom_refine_boundaries_clone_function_specialization(
       loom_ir_clone_region(&builder, source_body, &remap, &target_body);
   loom_builder_restore(&builder, saved_ip);
   IREE_RETURN_IF_ERROR(status);
-  loom_op_regions(target_op)[0] = target_body;
+  IREE_RETURN_IF_ERROR(loom_op_attach_region(target_op, 0, target_body));
 
   uint16_t predicate_count = 0;
   const loom_predicate_t* predicates =

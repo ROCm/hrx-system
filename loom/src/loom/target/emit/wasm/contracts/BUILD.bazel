@@ -7,7 +7,8 @@
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
     "loom_cc_library",
-    "loom_target_contract_table_cc_libraries",
+    "loom_target_contract_cc_libraries",
+    "loom_target_contract_file_family",
 )
 
 package(
@@ -16,11 +17,16 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
-loom_target_contract_table_cc_libraries(
-    name = "core_simd128",
-    args = ["--contract-fragment=wasm.core.simd128"],
-    contract_deps = ["//loom/src/loom/target:contract"],
+loom_target_contract_file_family(
+    name = "contract_tables_gen",
+    contract_sets = {"wasm": ["core_simd128"]},
+    fragments = {"core_simd128": "wasm.core.simd128"},
     generator = "//loom/py/loom/gen/target/contracts:wasm_contract_table_family",
+)
+
+loom_target_contract_cc_libraries(
+    name = "core_simd128",
+    contract_deps = ["//loom/src/loom/target:contract"],
     lower_rule_deps = [
         "//loom/src/loom/codegen/low/lower",
         "//loom/src/loom/ops/buffer",
@@ -33,13 +39,26 @@ loom_target_contract_table_cc_libraries(
 )
 
 loom_cc_library(
+    name = "sets",
+    srcs = ["sets.c"],
+    hdrs = ["sets.h"],
+    deps = [
+        ":core_simd128",
+        ":core_simd128_lower_rules",
+        "//loom/src/loom/codegen/low/lower",
+    ],
+)
+
+loom_cc_library(
     name = "contracts",
     hdrs = [
         "core_simd128.h",
         "core_simd128_lower_rules.h",
+        "sets.h",
     ],
     deps = [
         ":core_simd128",
         ":core_simd128_lower_rules",
+        ":sets",
     ],
 )

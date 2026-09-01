@@ -10,12 +10,10 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from pathlib import Path
 
 from loom.dsl import Op
 from loom.gen.support.c import c_identifier as _c_identifier
 from loom.gen.support.c import c_pascal_identifier as _pascal_identifier
-from loom.gen.support.files import write_text_file
 from loom.gen.support.generated_file import line_comment_header
 from loom.target.contracts import (
     CONTRACT_ROW_NONE,
@@ -26,7 +24,6 @@ from loom.target.contracts import (
     ContractFragment,
     ContractSystem,
     compile_contract_fragment,
-    compile_lower_rule_set,
     contract_fragment_public_header,
 )
 
@@ -55,28 +52,13 @@ class GeneratedContractFragment:
     source: str
 
 
-def generate_contract_fragment(
-    table: ContractFragment,
-    *,
-    dialect_ops: Mapping[str, Sequence[Op]],
-) -> GeneratedContractFragment:
-    """Generates C/H text for a compact target contract fragment."""
-
-    lower_rules = compile_lower_rule_set(table, dialect_ops=dialect_ops)
-    return generate_contract_fragment_from_lower_rules(
-        table,
-        dialect_ops=dialect_ops,
-        lower_rules=lower_rules,
-    )
-
-
-def generate_contract_fragment_from_lower_rules(
+def compile_contract_fragment_from_lower_rules(
     table: ContractFragment,
     *,
     dialect_ops: Mapping[str, Sequence[Op]],
     lower_rules: CompiledLowerRuleSet,
-) -> GeneratedContractFragment:
-    """Generates C/H text using the fragment's compiled lower-rule rows."""
+) -> CompiledContractFragment:
+    """Compiles one fragment using its already-compiled lower-rule rows."""
 
     lower_rule_indices = {authored_case_index: rule_index for rule_index, authored_case_index in enumerate(lower_rules.authored_case_indices)}
     descriptor_rule_rows = {
@@ -84,21 +66,29 @@ def generate_contract_fragment_from_lower_rules(
         for authored_case_index, rule_index in lower_rule_indices.items()
         if table.cases[authored_case_index].system == ContractSystem.DESCRIPTOR_RULE
     }
-    compiled = compile_contract_fragment(
+    return compile_contract_fragment(
         table,
         dialect_ops=dialect_ops,
         descriptor_rule_rows=descriptor_rule_rows,
         lower_rule_indices=lower_rule_indices,
     )
+
+
+def generate_contract_fragment_from_compiled(
+    table: ContractFragment,
+    *,
+    compiled: CompiledContractFragment,
+) -> GeneratedContractFragment:
+    """Generates C/H text from one compiled target contract fragment."""
+
     _validate_c_shard_shape(compiled)
     public_header = _generated_public_header(table)
-    symbol_name = _generated_symbol_name(table)
+    symbol_name = generated_contract_fragment_symbol_name(table)
     c_table_prefix = _generated_table_prefix(table)
     header_guard = _header_guard_from_public_header(public_header)
     return GeneratedContractFragment(
         header=_generate_header(
             header_guard=header_guard,
-            table=compiled,
             symbol_name=symbol_name,
         ),
         source=_generate_source(
@@ -110,24 +100,9 @@ def generate_contract_fragment_from_lower_rules(
     )
 
 
-def write_contract_fragment_to_paths(
-    table: ContractFragment,
-    *,
-    dialect_ops: Mapping[str, Sequence[Op]],
-    header_path: Path,
-    source_path: Path,
-) -> None:
-    """Writes generated C/H contents for one target contract fragment."""
-
-    generated = generate_contract_fragment(table, dialect_ops=dialect_ops)
-    write_text_file(header_path, generated.header)
-    write_text_file(source_path, generated.source)
-
-
 def _generate_header(
     *,
     header_guard: str,
-    table: CompiledContractFragment,
     symbol_name: str,
 ) -> str:
     lines: list[str] = []
@@ -153,6 +128,10 @@ def _generate_header(
     lines.extend(
         [
             f"extern const loom_target_contract_fragment_t {symbol_name};",
+        ]
+    )
+    lines.extend(
+        [
             "",
             "#ifdef __cplusplus",
             '}  // extern "C"',
@@ -203,7 +182,7 @@ def _generate_source(
 
     cases_name = f"k{c_table_prefix}Cases"
     if table.cases:
-        lines.append(f"static const loom_target_contract_fragment_case_t {cases_name}[] = {{")
+        lines.append(f"static const loom_target_contract_case_t {cases_name}[] = {{")
         for contract_case in table.cases:
             system_name = _CONTRACT_SYSTEM_C_NAMES[contract_case.system]
             row_index = "LOOM_TARGET_CONTRACT_ROW_NONE" if contract_case.row_index == CONTRACT_ROW_NONE else str(contract_case.row_index)
@@ -236,14 +215,13 @@ def _generate_source(
         [
             f"const loom_target_contract_fragment_t {symbol_name} = {{",
             f"    {len(table.op_spans)},",
-            f"    {flags_value},",
-            "    0,",
-            f"    {op_spans_value},",
             f"    {len(table.cases)},",
-            f"    {cases_value},",
             f"    {len(table.descriptor_rules)},",
-            f"    {descriptor_rules_value},",
             f"    {len(table.descriptor_matrices)},",
+            f"    {flags_value},",
+            f"    {op_spans_value},",
+            f"    {cases_value},",
+            f"    {descriptor_rules_value},",
             f"    {descriptor_matrices_value},",
             "};",
             "",
@@ -281,7 +259,9 @@ def _generated_public_header(table: ContractFragment) -> str:
     return contract_fragment_public_header(table)
 
 
-def _generated_symbol_name(table: ContractFragment) -> str:
+def generated_contract_fragment_symbol_name(table: ContractFragment) -> str:
+    """Returns the public C symbol for a generated contract fragment."""
+
     return f"loom_{_c_identifier(table.name).lower()}_contract_fragment"
 
 

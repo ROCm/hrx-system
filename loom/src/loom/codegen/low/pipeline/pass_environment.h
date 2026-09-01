@@ -34,8 +34,8 @@ typedef struct loom_low_lower_policy_registry_t
     loom_low_lower_policy_registry_t;
 typedef struct loom_target_low_legality_provider_list_t
     loom_target_low_legality_provider_list_t;
-typedef struct loom_target_legalizer_provider_list_t
-    loom_target_legalizer_provider_list_t;
+typedef struct loom_target_legalizer_registry_t
+    loom_target_legalizer_registry_t;
 typedef struct loom_target_compile_report_t loom_target_compile_report_t;
 
 typedef struct loom_low_pass_capability_t {
@@ -48,9 +48,8 @@ typedef struct loom_low_pass_capability_t {
   // Optional target-specific source legality providers linked into this
   // compiler.
   const loom_target_low_legality_provider_list_t* legality_provider_list;
-  // Optional target-specific source legalizer providers linked into this
-  // compiler.
-  const loom_target_legalizer_provider_list_t* legalizer_provider_list;
+  // Dense source legalizer registry prepared for this compiler environment.
+  const loom_target_legalizer_registry_t* legalizer_registry;
   // Optional caller-owned compile report receiving pass-level target feedback.
   loom_target_compile_report_t* compile_report;
 } loom_low_pass_capability_t;
@@ -73,7 +72,7 @@ loom_low_pass_capability_t loom_low_pass_capability_make(
     const loom_low_descriptor_registry_t* descriptor_registry,
     const loom_low_lower_policy_registry_t* lower_policy_registry,
     const loom_target_low_legality_provider_list_t* legality_provider_list,
-    const loom_target_legalizer_provider_list_t* legalizer_provider_list,
+    const loom_target_legalizer_registry_t* legalizer_registry,
     loom_target_compile_report_t* compile_report);
 
 // Initializes stack storage for a composed target/low/math pass environment.
@@ -82,7 +81,7 @@ loom_pass_environment_t loom_low_pass_environment_storage_initialize(
     const loom_low_descriptor_registry_t* descriptor_registry,
     const loom_low_lower_policy_registry_t* lower_policy_registry,
     const loom_target_low_legality_provider_list_t* legality_provider_list,
-    const loom_target_legalizer_provider_list_t* legalizer_provider_list,
+    const loom_target_legalizer_registry_t* legalizer_registry,
     const loom_target_math_policy_registry_t* math_policy_registry,
     loom_target_compile_report_t* compile_report,
     const loom_target_environment_t* target_environment,
@@ -96,7 +95,7 @@ loom_pass_environment_t loom_low_pass_environment_storage_initialize_mutable(
     const loom_low_descriptor_registry_t* descriptor_registry,
     const loom_low_lower_policy_registry_t* lower_policy_registry,
     const loom_target_low_legality_provider_list_t* legality_provider_list,
-    const loom_target_legalizer_provider_list_t* legalizer_provider_list,
+    const loom_target_legalizer_registry_t* legalizer_registry,
     const loom_target_math_policy_registry_t* math_policy_registry,
     loom_target_compile_report_t* compile_report,
     const loom_target_environment_t* target_environment,
@@ -127,9 +126,9 @@ const loom_target_low_legality_provider_list_t*
 loom_low_pass_capability_legality_provider_list(
     const loom_low_pass_capability_t* capability);
 
-// Returns the legalizer provider list selected by |capability|, or NULL.
-const loom_target_legalizer_provider_list_t*
-loom_low_pass_capability_legalizer_provider_list(
+// Returns the legalizer registry selected by |capability|, or NULL.
+const loom_target_legalizer_registry_t*
+loom_low_pass_capability_legalizer_registry(
     const loom_low_pass_capability_t* capability);
 
 // Returns the optional compile report selected by |capability|, or NULL.

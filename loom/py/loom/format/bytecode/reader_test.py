@@ -95,6 +95,7 @@ from loom.ir import (
     TiedResult,
     Type,
     TypeKind,
+    U64Attr,
     Use,
     Value,
 )
@@ -1330,6 +1331,18 @@ class TestAttributeRoundTrips:
     def test_i64_max(self) -> None:
         assert self._roundtrip_attr("v", 2**62) == 2**62
 
+    def test_u64_max(self) -> None:
+        value = U64Attr(2**64 - 1)
+        assert self._roundtrip_attr("v", value) == value
+
+    def test_plain_integer_outside_i64_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match="use U64Attr"):
+            self._roundtrip_attr("v", 2**63)
+
+    def test_mixed_generic_array_is_rejected(self) -> None:
+        with pytest.raises(TypeError, match="signed 64-bit integer elements"):
+            self._roundtrip_attr("v", [1, "two"])
+
     # Floats.
     def test_f64_positive(self) -> None:
         result = self._roundtrip_attr("v", 3.14)
@@ -1726,14 +1739,18 @@ class TestCrossFormat:
         from loom.format.text.parser import Parser
 
         text = (
-            "kernel.def @dynamic(%grid: index) {\n"
+            "kernel.def @dynamic(%grid: index) "
+            "where [range(%grid, 1, 65535)] {\n"
             "  kernel.launch.config workgroups(%grid, %grid, %grid) "
             "workgroup_size(%grid, %grid, %grid) : index\n"
-            "} launch(%count: index, %output: buffer) {\n"
+            "} launch(%count: index, %output: buffer) "
+            "where [mul(%count, 4)] {\n"
             "  kernel.return\n"
             "}\n"
             "kernel.decl @external(%workload: index) "
-            "launch(%abi_count: index, %output: buffer)\n"
+            "where [range(%workload, 1, 65535)] "
+            "launch(%abi_count: index, %output: buffer) "
+            "where [mul(%abi_count, 4)]\n"
         )
         parser = Parser()
         parser.register_ops(ALL_KERNEL_OPS)
@@ -1746,12 +1763,16 @@ class TestCrossFormat:
 
         definition = loaded.symbols[0].op
         assert definition is not None
+        assert "workload_predicates" in definition.attributes
+        assert "predicates" in definition.attributes
         assert [len(region.blocks[0].arg_ids) for region in definition.regions] == [
             1,
             2,
         ]
         declaration = loaded.symbols[1].op
         assert declaration is not None
+        assert "workload_predicates" in declaration.attributes
+        assert "predicates" in declaration.attributes
         assert declaration.operand_segment_counts == (1, 2)
         assert len(declaration.operands) == 3
 

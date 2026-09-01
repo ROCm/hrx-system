@@ -81,6 +81,7 @@ REFERENCE_SECTIONS = (
 DIALECT_REFERENCE_SPECS = (
     DialectReferenceSpec("scalar", "program"),
     DialectReferenceSpec("func", "program"),
+    DialectReferenceSpec("metadata", "program"),
     DialectReferenceSpec("template", "program"),
     DialectReferenceSpec("encoding", "program"),
     DialectReferenceSpec("pool", "program"),
@@ -104,6 +105,7 @@ DIALECT_REFERENCE_SPECS = (
     DialectReferenceSpec("spirv", "target"),
     DialectReferenceSpec("x86", "target"),
     DialectReferenceSpec("wasm", "target"),
+    DialectReferenceSpec("vm", "target"),
     DialectReferenceSpec("test", None),
 )
 

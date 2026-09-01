@@ -18,9 +18,13 @@
 #ifndef IREE_TEST_LOOM_HAVE_SPIRV
 #define IREE_TEST_LOOM_HAVE_SPIRV 0
 #endif  // IREE_TEST_LOOM_HAVE_SPIRV
+#ifndef IREE_TEST_LOOM_HAVE_VM
+#define IREE_TEST_LOOM_HAVE_VM 0
+#endif  // IREE_TEST_LOOM_HAVE_VM
 
-#define IREE_TEST_LOOM_HAVE_ANY_PROVIDER \
-  (IREE_TEST_LOOM_HAVE_AMDGPU || IREE_TEST_LOOM_HAVE_SPIRV)
+#define IREE_TEST_LOOM_HAVE_ANY_PROVIDER                      \
+  (IREE_TEST_LOOM_HAVE_AMDGPU || IREE_TEST_LOOM_HAVE_SPIRV || \
+   IREE_TEST_LOOM_HAVE_VM)
 #define IREE_TEST_LOOM_HAVE_ANY_DEVICE_PROVIDER \
   (IREE_TEST_LOOM_HAVE_AMDGPU || IREE_TEST_LOOM_HAVE_SPIRV)
 
@@ -34,6 +38,12 @@
 #include "loom/tooling/target/spirv/device_provider.h"
 #include "loom/tooling/target/spirv/testbench_requirements.h"
 #endif  // IREE_TEST_LOOM_HAVE_SPIRV
+#if IREE_TEST_LOOM_HAVE_VM
+#include "iree/vm/execution_test_provider.h"
+#include "loom/target/arch/vm/provider.h"
+#include "loom/target/emit/vm/artifact_emitter.h"
+#include "loom/tooling/target/vm/testbench_actual.h"
+#endif  // IREE_TEST_LOOM_HAVE_VM
 
 #if IREE_TEST_LOOM_HAVE_AMDGPU
 static const loom_run_execution_provider_t kIreeTestLoomAmdgpuProvider = {
@@ -49,6 +59,18 @@ static const loom_run_execution_provider_t kIreeTestLoomSpirvProvider = {
 };
 #endif  // IREE_TEST_LOOM_HAVE_SPIRV
 
+#if IREE_TEST_LOOM_HAVE_VM
+static const loom_run_execution_provider_t kIreeTestLoomVmTargetProvider = {
+    .name = IREE_SVL("vm"),
+    .target_provider = &loom_vm_target_provider,
+};
+
+static const loom_run_execution_provider_t kIreeTestLoomVmEmitterProvider = {
+    .name = IREE_SVL("vm-emitter"),
+    .target_provider = &loom_vm_artifact_emitter_provider,
+};
+#endif  // IREE_TEST_LOOM_HAVE_VM
+
 #if IREE_TEST_LOOM_HAVE_ANY_PROVIDER
 static const loom_run_execution_provider_t* const kIreeTestLoomProviders[] = {
 #if IREE_TEST_LOOM_HAVE_AMDGPU
@@ -57,6 +79,10 @@ static const loom_run_execution_provider_t* const kIreeTestLoomProviders[] = {
 #if IREE_TEST_LOOM_HAVE_SPIRV
     &kIreeTestLoomSpirvProvider,
 #endif  // IREE_TEST_LOOM_HAVE_SPIRV
+#if IREE_TEST_LOOM_HAVE_VM
+    &kIreeTestLoomVmTargetProvider,
+    &kIreeTestLoomVmEmitterProvider,
+#endif  // IREE_TEST_LOOM_HAVE_VM
 };
 #endif  // IREE_TEST_LOOM_HAVE_ANY_PROVIDER
 
@@ -144,6 +170,59 @@ static iree_status_t iree_test_loom_populate_requirement_providers(
   return iree_ok_status();
 }
 
+#if IREE_TEST_LOOM_HAVE_VM
+typedef struct iree_test_loom_vm_function_call_provider_t {
+  // VM compiler/runtime bridge shared by every planned call.
+  loom_vm_testbench_actual_t actual;
+  // Observations borrowed by the native math module through deinitialization.
+  iree_vm_execution_test_counters_t native_math_counters;
+} iree_test_loom_vm_function_call_provider_t;
+
+static iree_status_t iree_test_loom_prepare_vm_function_call_provider(
+    void* user_data, loom_run_session_t* session,
+    const loom_target_environment_t* target_environment,
+    const loom_run_module_t* run_module,
+    const loom_testbench_module_plan_t* module_plan,
+    iree_string_view_t pipeline, const loom_tooling_config_set_t* config_set,
+    iree_allocator_t host_allocator,
+    loom_testbench_invocation_provider_t* out_provider) {
+  *out_provider = (loom_testbench_invocation_provider_t){0};
+  iree_test_loom_vm_function_call_provider_t* provider =
+      (iree_test_loom_vm_function_call_provider_t*)user_data;
+  iree_vm_module_t* native_math_module = NULL;
+  iree_status_t status = iree_vm_execution_test_module_create(
+      IREE_VM_EXECUTION_TEST_MODULE_KIND_MATH,
+      (iree_vm_execution_test_options_t){0}, &provider->native_math_counters,
+      host_allocator, &native_math_module);
+  iree_vm_module_t* runtime_libraries[] = {native_math_module};
+  const loom_vm_testbench_actual_options_t options = {
+      .session = session,
+      .target_environment = target_environment,
+      .run_module = run_module,
+      .module_plan = module_plan,
+      .runtime_libraries = iree_vm_module_span_from_array(runtime_libraries),
+      .pipeline = pipeline,
+      .config_set = config_set,
+      .host_allocator = host_allocator,
+  };
+  if (iree_status_is_ok(status)) {
+    status = loom_vm_testbench_actual_initialize(&options, &provider->actual);
+  }
+  iree_vm_module_release(native_math_module);
+  if (iree_status_is_ok(status)) {
+    *out_provider = loom_vm_testbench_actual_provider(&provider->actual);
+  }
+  return status;
+}
+
+static void iree_test_loom_deinitialize_vm_function_call_provider(
+    void* user_data) {
+  iree_test_loom_vm_function_call_provider_t* provider =
+      (iree_test_loom_vm_function_call_provider_t*)user_data;
+  loom_vm_testbench_actual_deinitialize(&provider->actual);
+}
+#endif  // IREE_TEST_LOOM_HAVE_VM
+
 int main(int argc, char** argv) {
   loom_run_execution_environment_t environment;
   iree_status_t status = loom_run_execution_environment_initialize(
@@ -154,6 +233,9 @@ int main(int argc, char** argv) {
     return 1;
   }
 
+#if IREE_TEST_LOOM_HAVE_VM
+  iree_test_loom_vm_function_call_provider_t vm_function_call_provider = {0};
+#endif  // IREE_TEST_LOOM_HAVE_VM
   const iree_test_loom_configuration_t configuration = {
       .tool_name = "iree-test-loom",
       .register_context =
@@ -166,6 +248,15 @@ int main(int argc, char** argv) {
           {
               .fn = iree_test_loom_populate_requirement_providers,
           },
+#if IREE_TEST_LOOM_HAVE_VM
+      .function_call_provider =
+          {
+              .prepare = iree_test_loom_prepare_vm_function_call_provider,
+              .deinitialize =
+                  iree_test_loom_deinitialize_vm_function_call_provider,
+              .user_data = &vm_function_call_provider,
+          },
+#endif  // IREE_TEST_LOOM_HAVE_VM
       .initialize_low_descriptor_registry =
           loom_run_execution_environment_low_descriptor_registry_callback(
               &environment),

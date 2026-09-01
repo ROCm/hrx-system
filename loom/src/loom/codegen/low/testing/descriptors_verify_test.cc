@@ -218,7 +218,7 @@ void InitializeTestTables(TestTables* tables) {
   tables->descriptors[0].immediate_count = 1;
   tables->descriptor_views[0].schedule_class_id = 0;
   tables->descriptors[0].flags = LOOM_LOW_DESCRIPTOR_FLAG_DEAD_REMOVABLE;
-  tables->descriptors[0].op_kind = LOOM_LOW_DESCRIPTOR_OP_KIND_CONST;
+  tables->descriptors[0].carrier = LOOM_LOW_DESCRIPTOR_CARRIER_CONST;
   tables->descriptor_views[0].canonical_asm_form_ordinal =
       LOOM_LOW_ASM_FORM_ORDINAL_NONE;
 
@@ -809,6 +809,45 @@ TEST(LowDescriptorsTest, AcceptsAssemblyImplicitPacketOperand) {
   IREE_ASSERT_OK(loom_low_descriptor_set_verify(&tables.set));
 }
 
+TEST(LowDescriptorsTest, AcceptsVariableUnitCountOperand) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.operands[1].flags = LOOM_LOW_OPERAND_FLAG_VARIABLE_UNIT_COUNT;
+  tables.operands[1].unit_count = 64;
+  tables.operands[2].flags = LOOM_LOW_OPERAND_FLAG_VARIABLE_UNIT_COUNT;
+  tables.operands[2].unit_count = 64;
+
+  IREE_ASSERT_OK(loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsZeroUnitCountOperand) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.operands[2].unit_count = 0;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsVariableUnitCountPredicate) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.operands[2].role = LOOM_LOW_OPERAND_ROLE_PREDICATE;
+  tables.operands[2].flags = LOOM_LOW_OPERAND_FLAG_VARIABLE_UNIT_COUNT;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, AcceptsVariableUnitCountCompactAssembly) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  AddAsmForms(&tables);
+  tables.operands[1].flags = LOOM_LOW_OPERAND_FLAG_VARIABLE_UNIT_COUNT;
+
+  IREE_EXPECT_OK(loom_low_descriptor_set_verify(&tables.set));
+}
+
 TEST(LowDescriptorsTest, RejectsImplicitRowsWithoutImplicitFlag) {
   TestTables tables;
   InitializeTestTables(&tables);
@@ -1166,6 +1205,14 @@ TEST(LowDescriptorsTest, RejectsUnknownDescriptorFlagBits) {
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, AcceptsUniqueIdentityDescriptorFlag) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.descriptors[1].flags |= LOOM_LOW_DESCRIPTOR_FLAG_UNIQUE_IDENTITY;
+
+  IREE_ASSERT_OK(loom_low_descriptor_set_verify(&tables.set));
 }
 
 TEST(LowDescriptorsTest, RejectsUnknownOperandFlagBits) {
@@ -1552,6 +1599,54 @@ TEST(LowDescriptorsTest, RejectsTerminatorWithoutControlEffect) {
                         loom_low_descriptor_set_verify(&tables.set));
 }
 
+TEST(LowDescriptorsTest, RejectsNoReturnWithoutTerminator) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  AddAddDescriptorEffect(&tables, LOOM_LOW_EFFECT_KIND_CONTROL,
+                         LOOM_LOW_MEMORY_SPACE_NONE);
+  tables.descriptors[1].flags = LOOM_LOW_DESCRIPTOR_FLAG_SIDE_EFFECTING |
+                                LOOM_LOW_DESCRIPTOR_FLAG_NO_RETURN;
+  tables.schedule_classes[1].flags = LOOM_LOW_SCHEDULE_CLASS_FLAG_CONTROL;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, AcceptsNoReturnTerminator) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  AddAddDescriptorEffect(&tables, LOOM_LOW_EFFECT_KIND_CONTROL,
+                         LOOM_LOW_MEMORY_SPACE_NONE);
+  tables.descriptors[1].flags = LOOM_LOW_DESCRIPTOR_FLAG_SIDE_EFFECTING |
+                                LOOM_LOW_DESCRIPTOR_FLAG_TERMINATOR |
+                                LOOM_LOW_DESCRIPTOR_FLAG_NO_RETURN;
+  tables.schedule_classes[1].flags = LOOM_LOW_SCHEDULE_CLASS_FLAG_CONTROL;
+
+  IREE_ASSERT_OK(loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, AcceptsMayYieldTerminator) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  AddAddDescriptorEffect(&tables, LOOM_LOW_EFFECT_KIND_CONTROL,
+                         LOOM_LOW_MEMORY_SPACE_NONE);
+  tables.descriptors[1].flags = LOOM_LOW_DESCRIPTOR_FLAG_SIDE_EFFECTING |
+                                LOOM_LOW_DESCRIPTOR_FLAG_TERMINATOR |
+                                LOOM_LOW_DESCRIPTOR_FLAG_MAY_YIELD;
+  tables.schedule_classes[1].flags = LOOM_LOW_SCHEDULE_CLASS_FLAG_CONTROL;
+
+  IREE_ASSERT_OK(loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsMayYieldWithoutSideEffecting) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.descriptors[1].flags = LOOM_LOW_DESCRIPTOR_FLAG_MAY_YIELD;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
 TEST(LowDescriptorsTest, RejectsControlEffectWithoutTerminator) {
   TestTables tables;
   InitializeTestTables(&tables);
@@ -1608,10 +1703,10 @@ TEST(LowDescriptorsTest, RejectsIncompleteDescriptorReferences) {
                         loom_low_descriptor_set_verify(&tables.set));
 }
 
-TEST(LowDescriptorsTest, RejectsInvalidDescriptorOperationKind) {
+TEST(LowDescriptorsTest, RejectsInvalidDescriptorCarrier) {
   TestTables tables;
   InitializeTestTables(&tables);
-  tables.descriptors[0].op_kind = static_cast<loom_low_descriptor_op_kind_t>(2);
+  tables.descriptors[0].carrier = static_cast<loom_low_descriptor_carrier_t>(4);
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         loom_low_descriptor_set_verify(&tables.set));
@@ -1886,6 +1981,26 @@ TEST(LowDescriptorsTest, RejectsAsmFormImmediateOutOfRange) {
   tables.asm_immediates[0].immediate_index = 1;
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsUnknownAsmImmediateFlags) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  AddAsmForms(&tables);
+  tables.asm_immediates[0].flags = UINT16_MAX;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsEnumTokenSpellingForNonEnumImmediate) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  AddAsmForms(&tables);
+  tables.asm_immediates[0].flags = LOOM_LOW_ASM_IMMEDIATE_FLAG_ENUM_TOKEN;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         loom_low_descriptor_set_verify(&tables.set));
 }
 

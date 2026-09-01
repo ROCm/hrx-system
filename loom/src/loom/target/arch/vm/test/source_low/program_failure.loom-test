@@ -1,0 +1,14 @@
+// RUN: emit source-low output=low
+
+vm.target<core> @target
+
+func.def target(@target) @assert_then_fail(%condition: i1, %message: buffer) {
+  cfg.assert %condition, %message : buffer
+  func.fail invalid_argument, %message : buffer
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i1>, reg<vm.ref : buffer>) -> ()>}) @assert_then_fail(%condition: reg<vm.value : i1>, %message: reg<vm.ref : buffer>) asm {
+  control.assert %condition, %message
+  control.fail %message, invalid_argument
+}

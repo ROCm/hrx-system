@@ -1,0 +1,411 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:glob.bzl", "iree_checked_glob")
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_library",
+    "loom_cc_test",
+    "loom_generated_cc_library",
+)
+load(
+    "//loom/build_tools/bazel:loom_check.bzl",
+    "loom_check_test_suite",
+)
+load(
+    "//loom/src/loom/test/corpus/source_low:cases.bzl",
+    "SOURCE_LOW_TARGET_CASES",
+)
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],
+)
+
+_VM_PROVIDER_VISIBILITY = [
+    "//loom/binding/c:__pkg__",
+    "//loom/binding/c/target:__subpackages__",
+    "//loom/src/loom/target/all:__pkg__",
+    "//loom/src/loom/target/configured:__pkg__",
+    "//loom/src/loom/tools/loom-compile:__pkg__",
+    "//loom/src/loom/tools/iree-test-loom:__pkg__",
+]
+
+_VM_CHECK_PROVIDER_VISIBILITY = [
+    "//loom/src/loom/tools/loom-check:__pkg__",
+]
+
+# Distributed fragment programs require the multi-workitem VM kernel execution
+# profile rather than the single-invocation Core profile.
+_VM_KERNEL_EXECUTION_PROFILE_CASES = [
+    "ml_attention.loom-test",
+]
+
+_VM_CORE_CORPUS_CASES = [
+    case
+    for case in SOURCE_LOW_TARGET_CASES
+    if case not in _VM_KERNEL_EXECUTION_PROFILE_CASES
+]
+
+_VM_CORE_CORPUS_SRCS = iree_checked_glob(
+    ["test/source_low/corpus/" + case for case in _VM_CORE_CORPUS_CASES],
+    include = ["test/source_low/corpus/*.loom-test"],
+)
+
+_VM_CORE_CORPUS_DATA = [
+    "//loom/src/loom/test/corpus/source_low:" + case
+    for case in _VM_CORE_CORPUS_CASES
+]
+
+loom_cc_library(
+    name = "facts",
+    srcs = ["facts.c"],
+    hdrs = ["facts.h"],
+    visibility = ["//loom/src/loom/target/emit/vm:__pkg__"],
+    deps = [
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:func_symbol_facts",
+        "//loom/src/loom/target:facts",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "target_records",
+    srcs = ["records/target_records.c"],
+    hdrs = ["records/target_records.h"],
+    deps = [
+        "//loom/src/loom/target:types",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_generated_cc_library(
+    name = "ops",
+    srcs = [
+        "ops/registry.c",
+        "ops/resources.c",
+        "ops/target.c",
+    ],
+    hdrs = [
+        "ops/ops.h",
+        "ops/registry.h",
+        "ops/target.h",
+    ],
+    args = ["--dialect=vm"],
+    generated_src_flags = [
+        "--builders",
+        "--tables",
+    ],
+    generated_srcs = [
+        "ops/builders.c",
+        "ops/tables.c",
+    ],
+    generator = "//loom/py/loom/gen/ops:c_tables_vm_generator",
+    visibility = [
+        "//loom/binding/c:__pkg__",
+        "//loom/src/loom/target/emit/vm:__pkg__",
+    ],
+    deps = [
+        ":facts",
+        ":target_records",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/target",
+        "//loom/src/loom/target:types",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_generated_cc_library(
+    name = "descriptors",
+    extra_output_flags = [
+        "--encoding-rows",
+        "--lowering-rows",
+        "--verification-rows",
+    ],
+    extra_outputs = [
+        "encoding_rows.inl",
+        "lowering_rows.inl",
+        "verification_rows.inl",
+    ],
+    generated_hdr_flags = ["--header"],
+    generated_hdrs = ["descriptors.h"],
+    generator = "//loom/py/loom/gen/target/arch/vm:tables",
+    source = "descriptors.c",
+    textual_hdrs = [
+        ":encoding_rows.inl",
+        ":lowering_rows.inl",
+        ":verification_rows.inl",
+    ],
+    visibility = ["//loom/src/loom/target/emit/vm:__pkg__"],
+    deps = ["//loom/src/loom/codegen/low:descriptors"],
+)
+
+loom_cc_test(
+    name = "descriptors_test",
+    srcs = ["descriptors_test.cc"],
+    deps = [
+        ":descriptors",
+        "//loom/src/loom/codegen/low/testing:descriptors_verify",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "abi_layout",
+    srcs = ["abi/layout.c"],
+    hdrs = ["abi/layout.h"],
+    visibility = [
+        "//loom/src/loom/target/emit/vm:__pkg__",
+        "//loom/src/loom/tooling/target/vm:__pkg__",
+    ],
+    deps = [
+        ":descriptors",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:type_registry",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/target:registers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_library(
+    name = "lower",
+    srcs = [
+        "lower/arithmetic.c",
+        "lower/constants.c",
+        "lower/control.c",
+        "lower/conversion.c",
+        "lower/initialization.c",
+        "lower/kernel.c",
+        "lower/lower.c",
+        "lower/memory.c",
+        "lower/resources.c",
+        "lower/vector.c",
+    ],
+    hdrs = [
+        "lower/arithmetic.h",
+        "lower/constants.h",
+        "lower/control.h",
+        "lower/conversion.h",
+        "lower/initialization.h",
+        "lower/kernel.h",
+        "lower/lower.h",
+        "lower/memory.h",
+        "lower/resources.h",
+        "lower/types.h",
+        "lower/vector.h",
+    ],
+    deps = [
+        ":abi_layout",
+        ":descriptors",
+        ":ops",
+        ":target_records",
+        "//loom/src/loom/codegen/low:builder",
+        "//loom/src/loom/codegen/low:function",
+        "//loom/src/loom/codegen/low:source_memory_plan",
+        "//loom/src/loom/codegen/low/lower",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops:type_registry",
+        "//loom/src/loom/ops/buffer",
+        "//loom/src/loom/ops/cfg",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/global",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/ops/scf",
+        "//loom/src/loom/ops/vector",
+        "//loom/src/loom/ops/view",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/target:low_legality",
+        "//loom/src/loom/target:registers",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/vm/bytecode/wire",
+    ],
+)
+
+loom_cc_library(
+    name = "low_verify",
+    srcs = ["low_verify.c"],
+    hdrs = ["low_verify.h"],
+    deps = [
+        ":descriptors",
+        ":structural_ops",
+        "//loom/src/loom/codegen/low:diagnostics",
+        "//loom/src/loom/codegen/low:packet",
+        "//loom/src/loom/codegen/low:verify",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/target:registers",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "structural_ops",
+    srcs = ["structural_ops.c"],
+    hdrs = ["structural_ops.h"],
+    visibility = ["//loom/src/loom/target/emit/vm:__pkg__"],
+    deps = [
+        "//loom/src/loom/ops/low",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "launch_config_program",
+    srcs = ["launch_config_program.c"],
+    hdrs = ["launch_config_program.h"],
+    visibility = ["//loom/src/loom/target/emit/vm:__pkg__"],
+    deps = [
+        ":facts",
+        ":ops",
+        "//loom/src/loom/analysis:symbol_liveness",
+        "//loom/src/loom/analysis:symbol_references",
+        "//loom/src/loom/codegen/low:storage_layout",
+        "//loom/src/loom/codegen/low/lower:source_selection",
+        "//loom/src/loom/codegen/low/pipeline:pass_environment",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops:special_values",
+        "//loom/src/loom/ops:type_registry",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/pass:environment",
+        "//loom/src/loom/pass:registry",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/pass:value_facts",
+        "//loom/src/loom/rewrite:materialize",
+        "//loom/src/loom/rewrite:remap",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/target:pass_environment",
+        "//loom/src/loom/target:provider",
+        "//loom/src/loom/target/emit/vm:launch_config_abi",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "provider",
+    srcs = [
+        "abi/materialization.c",
+        "constants/materialization.c",
+        "contracts/materialization.c",
+        "initialization.c",
+        "legalization.c",
+        "math_policy.c",
+        "pass_registry.c",
+        "provider.c",
+    ],
+    hdrs = [
+        "abi/materialization.h",
+        "constants/materialization.h",
+        "contracts/materialization.h",
+        "initialization.h",
+        "legalization.h",
+        "math_policy.h",
+        "pass_registry.h",
+        "provider.h",
+    ],
+    visibility = _VM_PROVIDER_VISIBILITY,
+    deps = [
+        ":abi_layout",
+        ":descriptors",
+        ":facts",
+        ":low_verify",
+        ":lower",
+        ":ops",
+        "//loom/src/loom/codegen/low:builder",
+        "//loom/src/loom/codegen/low:function",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/buffer",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/global",
+        "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/ops/scf",
+        "//loom/src/loom/ops/vector",
+        "//loom/src/loom/pass:builder",
+        "//loom/src/loom/pass:registry",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/target:legalization",
+        "//loom/src/loom/target:low_descriptor_registry",
+        "//loom/src/loom/target:math_policy",
+        "//loom/src/loom/target:provider",
+        "//loom/src/loom/target:types",
+        "//loom/src/loom/transforms/scalar:target_legalization",
+        "//loom/src/loom/transforms/vector:to_scalar",
+        "//loom/src/loom/util:adaptive_sort",
+        "//loom/src/loom/util:walk",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/vm",
+        "//runtime/src/iree/vm/bytecode/wire",
+    ],
+)
+
+loom_cc_library(
+    name = "check_provider",
+    srcs = ["check/provider.c"],
+    hdrs = ["check/provider.h"],
+    visibility = _VM_CHECK_PROVIDER_VISIBILITY,
+    deps = [
+        ":provider",
+        "//loom/src/loom/target/emit/vm:loom_check",
+        "//loom/src/loom/tools/loom-check:provider",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_check_test_suite(
+    name = "loom_check_file_test",
+    srcs = [
+        "test/ops/resources.loom-test",
+        "test/source_low/abi_materialization.loom-test",
+        "test/source_low/abi_types.loom-test",
+        "test/source_low/async_gather.loom-test",
+        "test/source_low/buffer_allocation.loom-test",
+        "test/source_low/buffer_copy.loom-test",
+        "test/source_low/constant_pool.loom-test",
+        "test/source_low/control_switch.loom-test",
+    ] + _VM_CORE_CORPUS_SRCS + [
+        "test/source_low/function_abi.loom-test",
+        "test/source_low/function_contracts.loom-test",
+        "test/source_low/function_values.loom-test",
+        "test/source_low/kernel_profile.loom-test",
+        "test/source_low/low_verification.loom-test",
+        "test/source_low/module_initialization.loom-test",
+        "test/source_low/module_resources.loom-test",
+        "test/source_low/narrow_integer.loom-test",
+        "test/source_low/program_failure.loom-test",
+        "test/source_low/scalar_diagnostics.loom-test",
+        "test/source_low/selector_assembly.loom-test",
+        "test/source_low/vector_construction.loom-test",
+    ],
+    data = _VM_CORE_CORPUS_DATA,
+    test_name_prefix_to_strip = "test/source_low/",
+)

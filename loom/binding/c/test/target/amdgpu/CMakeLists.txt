@@ -16,11 +16,15 @@ loom_cc_test(
   SRCS
     "amdgpu_test.cc"
   DEPS
+    iree::base
     iree::testing::gtest
     iree::testing::gtest_main
     loom::binding::c::loomc
     loom::binding::c::target::amdgpu
     loom::binding::c::target::cmd
+    loom::binding::c::target::kernel
+    loom::binding::c::target::vm
+    loom::binding::c::test::target::amdgpu::testdata::launch_config_sources
     loom::binding::c::test::test_util
 )
 endif()

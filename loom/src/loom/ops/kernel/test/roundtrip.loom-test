@@ -38,6 +38,25 @@ kernel.def @empty_kernel() {
 
 // ====
 
+kernel.def @contracted_kernel(%grid: index) where [range(%grid, 1, 65535)] {
+  kernel.launch.config workgroups(%grid, %grid, %grid) workgroup_size(%grid, %grid, %grid) : index
+} launch(%abi_count: index) where [mul(%abi_count, 4)] {
+  kernel.return
+}
+
+// ----
+kernel.def @contracted_kernel(%grid: index) where [range(%grid, 1, 65535)] {
+  kernel.launch.config workgroups(%grid, %grid, %grid) workgroup_size(%grid, %grid, %grid) : index
+} launch(%abi_count: index) where [mul(%abi_count, 4)] {
+  kernel.return
+}
+
+// ====
+
+kernel.decl @contracted_external(%grid: index) where [range(%grid, 1, 65535)] launch(%abi_count: index) where [mul(%abi_count, 4)]
+
+// ====
+
 kernel.def @clustered_kernel() {
   %c1 = index.constant 1 : index
   %c2 = index.constant 2 : index

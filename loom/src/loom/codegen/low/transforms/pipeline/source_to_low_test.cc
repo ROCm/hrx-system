@@ -21,7 +21,9 @@
 #include "loom/format/text/parser.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/ops/cfg/ops.h"
 #include "loom/ops/func/ops.h"
+#include "loom/ops/index/ops.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/pass/ops.h"
 #include "loom/ops/scalar/ops.h"
@@ -82,7 +84,9 @@ class LowLowerPassTest : public ::testing::Test {
     loom_context_initialize(iree_allocator_system(), &context_);
     RegisterDialect(LOOM_DIALECT_PASS, loom_pass_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_TARGET, loom_target_dialect_vtables);
+    RegisterDialect(LOOM_DIALECT_CFG, loom_cfg_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_FUNC, loom_func_dialect_vtables);
+    RegisterDialect(LOOM_DIALECT_INDEX, loom_index_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_LOW, loom_low_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_SCALAR, loom_scalar_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_TEMPLATE, loom_template_dialect_vtables);
@@ -325,6 +329,8 @@ TEST_F(LowLowerPassTest, SourceSelectionUsesPerFunctionTargetFacts) {
   function_version.authored_target_name = target_requirement_symbol_facts->name;
   function_version.target_requirement_facts =
       target_requirement_symbol_facts->projection;
+  function_version.target_binding_source =
+      LOOM_TARGET_BINDING_SOURCE_SPECIALIZATION;
   function_version.function_target_facts = function_target_facts;
   loom_function_version_t* function_version_values[] = {
       &function_version.base,
@@ -433,6 +439,84 @@ TEST_F(LowLowerPassTest, ModuleInternalVersionLowersWithoutArtifactAbi) {
             LOOM_TARGET_ABI_UNKNOWN);
   EXPECT_FALSE(loom_symbol_ref_is_valid(
       loom_low_func_def_target(function_version.base.function.op)));
+  iree_arena_deinitialize(&arena);
+}
+
+TEST_F(LowLowerPassTest, ExplicitAbiTransfersSeparateCallBoundaries) {
+  ModulePtr module = Parse(
+      IREE_SV("test.target<low_core> @test_target\n"
+              "func.def target(@test_target) @swap(%lhs: i32, %rhs: i32) -> "
+              "(i32, i32) {\n"
+              "  func.return %rhs, %lhs : i32, i32\n"
+              "}\n"
+              "func.def target(@test_target) @caller(%lhs: i32, %rhs: i32) -> "
+              "(i32, i32) {\n"
+              "  %first, %second = func.call @swap(%lhs, %rhs) : (i32, i32) -> "
+              "(i32, i32)\n"
+              "  func.return %first, %second : i32, i32\n"
+              "}\n"));
+
+  loom_low_lower_policy_t policy = *loom_test_low_lower_policy();
+  policy.flags |= LOOM_LOW_LOWER_POLICY_FLAG_EXPLICIT_ABI_TRANSFERS;
+  const loom_low_lower_policy_registry_entry_t entries[] = {
+      {
+          /*.contract_set_key=*/IREE_SVL("test.low.core"),
+          /*.policy=*/&policy,
+      },
+  };
+  loom_low_lower_policy_registry_t policy_registry = {};
+  loom_low_lower_policy_registry_initialize_from_entries(
+      &policy_registry, entries, IREE_ARRAYSIZE(entries));
+
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&block_pool_, &arena);
+  loom_symbol_fact_table_t symbol_facts = {};
+  loom_symbol_fact_table_initialize(&symbol_facts, &arena);
+  const loom_symbol_ref_t target_ref =
+      FindSymbolRef(module.get(), IREE_SV("test_target"));
+  const loom_symbol_facts_base_t* base_target_facts = nullptr;
+  IREE_ASSERT_OK(loom_symbol_fact_table_lookup_ref(
+      &symbol_facts, module.get(), target_ref, &base_target_facts));
+  const loom_target_symbol_facts_t* target_facts =
+      loom_target_symbol_facts_cast(base_target_facts);
+  ASSERT_NE(target_facts, nullptr);
+  const loom_symbol_ref_t function_ref =
+      FindSymbolRef(module.get(), IREE_SV("caller"));
+  loom_target_function_version_t function_version = {};
+  function_version.base.type = &loom_target_function_version_type;
+  function_version.base.function = loom_func_like_cast(
+      module.get(),
+      module->symbols.entries[function_ref.symbol_id].defining_op);
+  function_version.function_target_facts = target_facts->projection;
+  loom_function_version_t* function_version_values[] = {
+      &function_version.base,
+  };
+  const loom_function_version_list_t function_versions = {
+      /*.values=*/function_version_values,
+      /*.count=*/IREE_ARRAYSIZE(function_version_values),
+  };
+  DiagnosticEmissionCollector collector;
+  IREE_ASSERT_OK(RunSourceToLow(&policy_registry, module.get(), &collector,
+                                &function_versions));
+  ASSERT_EQ(collector.count, 0)
+      << (collector.last_error ? loom_error_def_id(collector.last_error) : "");
+
+  const loom_func_like_t function = function_version.base.function;
+  ASSERT_TRUE(loom_low_func_def_isa(function.op));
+  const loom_region_t* body = loom_func_like_body(function);
+  ASSERT_NE(body, nullptr);
+  iree_host_size_t copy_count = 0;
+  iree_host_size_t move_count = 0;
+  for (uint16_t block_index = 0; block_index < body->block_count;
+       ++block_index) {
+    const loom_op_t* op = nullptr;
+    loom_block_for_each_op(body->blocks[block_index], op) {
+      copy_count += loom_low_copy_isa(op) ? 1 : 0;
+      move_count += loom_low_move_isa(op) ? 1 : 0;
+    }
+  }
+  EXPECT_EQ(copy_count, 0u);
+  EXPECT_EQ(move_count, 4u);
   iree_arena_deinitialize(&arena);
 }
 
@@ -601,11 +685,14 @@ TEST_F(LowLowerPassTest,
   const loom_low_lower_rule_set_t* rule_sets[] = {
       &no_span_rule_set,
   };
-  loom_low_lower_policy_t policy = *loom_test_low_lower_policy();
-  policy.rule_sets = {
+  loom_low_lower_contract_set_t contract_set =
+      *loom_test_low_lower_policy()->contract_set;
+  contract_set.rule_sets = {
       /*.count=*/IREE_ARRAYSIZE(rule_sets),
       /*.values=*/rule_sets,
   };
+  loom_low_lower_policy_t policy = *loom_test_low_lower_policy();
+  policy.contract_set = &contract_set;
   const loom_low_lower_policy_registry_entry_t entries[] = {
       {
           /*.contract_set_key=*/IREE_SVL("test.low.core"),
@@ -621,6 +708,86 @@ TEST_F(LowLowerPassTest,
       RunSourceToLow(&policy_registry, module.get(), &collector);
   EXPECT_EQ(collector.count, 0);
   IREE_ASSERT_OK(status);
+}
+
+TEST_F(LowLowerPassTest, DenseSwitchLowersToDescriptorBackedTargetTable) {
+  ModulePtr module = Parse(
+      IREE_SV("test.target<low_core> @test_target\n"
+              "func.def target(@test_target) @dispatch(%selector: index) {\n"
+              "  cfg.switch %selector cases [0, 2] -> [^case0, ^case2] default "
+              "^fallback\n"
+              "^case0:\n"
+              "  func.return\n"
+              "^case2:\n"
+              "  func.return\n"
+              "^fallback:\n"
+              "  func.return\n"
+              "}\n"));
+
+  IREE_ASSERT_OK(RunSourceToLow(&policy_registry_, module.get()));
+  const loom_symbol_ref_t function_ref =
+      FindSymbolRef(module.get(), IREE_SV("dispatch"));
+  const loom_func_like_t function = loom_func_like_cast(
+      module.get(),
+      module->symbols.entries[function_ref.symbol_id].defining_op);
+  const loom_region_t* body = loom_func_like_body(function);
+  ASSERT_NE(body, nullptr);
+
+  const loom_op_t* switch_op = nullptr;
+  for (uint16_t block_index = 0; block_index < body->block_count;
+       ++block_index) {
+    const loom_op_t* op = nullptr;
+    loom_block_for_each_op(body->blocks[block_index], op) {
+      if (loom_low_switch_isa(op)) {
+        ASSERT_EQ(switch_op, nullptr);
+        switch_op = op;
+      }
+    }
+  }
+  ASSERT_NE(switch_op, nullptr);
+  const loom_successor_slice_t targets =
+      loom_low_switch_target_dests(switch_op);
+  ASSERT_EQ(targets.count, 3u);
+  EXPECT_NE(targets.blocks[0], loom_low_switch_default_dest(switch_op));
+  EXPECT_EQ(targets.blocks[1], loom_low_switch_default_dest(switch_op));
+  EXPECT_NE(targets.blocks[2], loom_low_switch_default_dest(switch_op));
+}
+
+TEST_F(LowLowerPassTest, UnsupportedSwitchExpandsBeforeLowLowering) {
+  ModulePtr module = Parse(
+      IREE_SV("test.target<low_core> @test_target\n"
+              "func.def target(@test_target) @dispatch(%selector: index) {\n"
+              "  cfg.switch %selector cases [-1, 2] -> [^negative, ^positive] "
+              "default ^fallback\n"
+              "^negative:\n"
+              "  func.return\n"
+              "^positive:\n"
+              "  func.return\n"
+              "^fallback:\n"
+              "  func.return\n"
+              "}\n"));
+
+  IREE_ASSERT_OK(RunSourceToLow(&policy_registry_, module.get()));
+  const loom_symbol_ref_t function_ref =
+      FindSymbolRef(module.get(), IREE_SV("dispatch"));
+  const loom_func_like_t function = loom_func_like_cast(
+      module.get(),
+      module->symbols.entries[function_ref.symbol_id].defining_op);
+  const loom_region_t* body = loom_func_like_body(function);
+  ASSERT_NE(body, nullptr);
+
+  iree_host_size_t switch_count = 0;
+  iree_host_size_t conditional_branch_count = 0;
+  for (uint16_t block_index = 0; block_index < body->block_count;
+       ++block_index) {
+    const loom_op_t* op = nullptr;
+    loom_block_for_each_op(body->blocks[block_index], op) {
+      switch_count += loom_low_switch_isa(op) ? 1 : 0;
+      conditional_branch_count += loom_low_cond_br_isa(op) ? 1 : 0;
+    }
+  }
+  EXPECT_EQ(switch_count, 0u);
+  EXPECT_EQ(conditional_branch_count, 2u);
 }
 
 }  // namespace

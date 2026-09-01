@@ -426,6 +426,7 @@ static bool loom_target_low_legality_codegen_format_is_low(
     case LOOM_TARGET_CODEGEN_FORMAT_LLVMIR:
     case LOOM_TARGET_CODEGEN_FORMAT_LOW_NATIVE:
     case LOOM_TARGET_CODEGEN_FORMAT_SPIRV:
+    case LOOM_TARGET_CODEGEN_FORMAT_VM:
     case LOOM_TARGET_CODEGEN_FORMAT_WASM:
       return true;
     default:
@@ -441,6 +442,7 @@ static bool loom_target_low_legality_abi_is_low(
     case LOOM_TARGET_ABI_OBJECT_FUNCTION:
     case LOOM_TARGET_ABI_HAL_KERNEL:
     case LOOM_TARGET_ABI_SHADER_ENTRY_POINT:
+    case LOOM_TARGET_ABI_VM_FUNCTION:
     case LOOM_TARGET_ABI_WASM_FUNCTION:
     case LOOM_TARGET_ABI_COMMAND_PROGRAM:
       return true;
@@ -518,31 +520,11 @@ static iree_status_t loom_target_low_legality_verify_scalar_type(
       }
       return loom_target_low_legality_emit_type_constraint(
           context, op, type, IREE_SV("scalar.fp8_decode_or_contract"));
-    case LOOM_SCALAR_TYPE_COUNT_:
+    case LOOM_SCALAR_TYPE_NONE:
       break;
   }
   return loom_target_low_legality_emit_type_constraint(context, op, type,
                                                        IREE_SV("scalar.known"));
-}
-
-static const loom_type_descriptor_t*
-loom_target_low_legality_resolve_dialect_type(const loom_module_t* module,
-                                              loom_type_t type) {
-  if (!loom_type_is_dialect(type)) {
-    return NULL;
-  }
-  loom_string_id_t name_id = loom_type_dialect_name_id(type);
-  if (name_id == LOOM_STRING_ID_INVALID || name_id >= module->strings.count) {
-    return NULL;
-  }
-  iree_string_view_t name = module->strings.entries[name_id];
-  const loom_type_descriptor_t* descriptor =
-      loom_type_registry_lookup(module->context, name);
-  if (descriptor == NULL ||
-      descriptor->param_count != loom_type_dialect_param_count(type)) {
-    return NULL;
-  }
-  return descriptor;
 }
 
 static bool loom_target_low_legality_op_accepts_type_contract(
@@ -558,7 +540,7 @@ static iree_status_t loom_target_low_legality_verify_registered_type(
     loom_type_t type, bool* out_handled) {
   *out_handled = false;
   const loom_type_descriptor_t* descriptor =
-      loom_target_low_legality_resolve_dialect_type(context->module, type);
+      loom_type_registry_resolve(context->module, type);
   if (descriptor == NULL ||
       descriptor->semantics.semantic == LOOM_TYPE_SEMANTIC_ORDINARY) {
     return iree_ok_status();
@@ -834,6 +816,9 @@ static iree_status_t loom_target_low_legality_verify_op_class(
     case LOOM_OP_BUFFER_ASSUME_SAME_ROOT:
     case LOOM_OP_CFG_BR:
     case LOOM_OP_CFG_COND_BR:
+    case LOOM_OP_CFG_SWITCH:
+    case LOOM_OP_FUNC_CALL:
+    case LOOM_OP_FUNC_CALL_INDIRECT:
     case LOOM_OP_FUNC_RETURN:
     case LOOM_OP_KERNEL_RETURN:
       return iree_ok_status();

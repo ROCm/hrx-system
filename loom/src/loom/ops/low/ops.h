@@ -25,30 +25,37 @@ enum {
   LOOM_OP_LOW_FUNC_DECL = LOOM_OP_KIND(LOOM_DIALECT_LOW, 2),
   LOOM_OP_LOW_RETURN = LOOM_OP_KIND(LOOM_DIALECT_LOW, 3),
   LOOM_OP_LOW_FUNC_CALL = LOOM_OP_KIND(LOOM_DIALECT_LOW, 4),
-  LOOM_OP_LOW_OP = LOOM_OP_KIND(LOOM_DIALECT_LOW, 5),
-  LOOM_OP_LOW_CONST = LOOM_OP_KIND(LOOM_DIALECT_LOW, 6),
-  LOOM_OP_LOW_COPY = LOOM_OP_KIND(LOOM_DIALECT_LOW, 7),
-  LOOM_OP_LOW_MOVE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 8),
-  LOOM_OP_LOW_SLICE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 9),
-  LOOM_OP_LOW_CONCAT = LOOM_OP_KIND(LOOM_DIALECT_LOW, 10),
-  LOOM_OP_LOW_INVOKE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 11),
-  LOOM_OP_LOW_STORAGE_RESERVE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 12),
-  LOOM_OP_LOW_STORAGE_VIEW = LOOM_OP_KIND(LOOM_DIALECT_LOW, 13),
-  LOOM_OP_LOW_SPILL = LOOM_OP_KIND(LOOM_DIALECT_LOW, 14),
-  LOOM_OP_LOW_RELOAD = LOOM_OP_KIND(LOOM_DIALECT_LOW, 15),
-  LOOM_OP_LOW_STORAGE_ADDRESS = LOOM_OP_KIND(LOOM_DIALECT_LOW, 16),
-  LOOM_OP_LOW_BR = LOOM_OP_KIND(LOOM_DIALECT_LOW, 17),
-  LOOM_OP_LOW_COND_BR = LOOM_OP_KIND(LOOM_DIALECT_LOW, 18),
-  LOOM_OP_LOW_RESOURCE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 19),
-  LOOM_OP_LOW_LIVE_IN = LOOM_OP_KIND(LOOM_DIALECT_LOW, 20),
-  LOOM_OP_LOW_SCF_YIELD = LOOM_OP_KIND(LOOM_DIALECT_LOW, 21),
-  LOOM_OP_LOW_SCF_CONDITION = LOOM_OP_KIND(LOOM_DIALECT_LOW, 22),
-  LOOM_OP_LOW_SCF_IF = LOOM_OP_KIND(LOOM_DIALECT_LOW, 23),
-  LOOM_OP_LOW_SCF_FOR = LOOM_OP_KIND(LOOM_DIALECT_LOW, 24),
-  LOOM_OP_LOW_SCF_WHILE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 25),
-  LOOM_OP_LOW_SCHEDULE_FENCE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 26),
-  LOOM_OP_LOW_ASSUME = LOOM_OP_KIND(LOOM_DIALECT_LOW, 27),
-  LOOM_OP_LOW_COUNT_ = 28,
+  LOOM_OP_LOW_FUNC_CALL_INDIRECT = LOOM_OP_KIND(LOOM_DIALECT_LOW, 5),
+  LOOM_OP_LOW_FUNC_NULL = LOOM_OP_KIND(LOOM_DIALECT_LOW, 6),
+  LOOM_OP_LOW_FUNC_COMPARE_NULL = LOOM_OP_KIND(LOOM_DIALECT_LOW, 7),
+  LOOM_OP_LOW_FUNC_ADDRESS = LOOM_OP_KIND(LOOM_DIALECT_LOW, 8),
+  LOOM_OP_LOW_FUNC_REF_CAST = LOOM_OP_KIND(LOOM_DIALECT_LOW, 9),
+  LOOM_OP_LOW_FUNC_IMPORT_RESOLVED = LOOM_OP_KIND(LOOM_DIALECT_LOW, 10),
+  LOOM_OP_LOW_OP = LOOM_OP_KIND(LOOM_DIALECT_LOW, 11),
+  LOOM_OP_LOW_CONST = LOOM_OP_KIND(LOOM_DIALECT_LOW, 12),
+  LOOM_OP_LOW_COPY = LOOM_OP_KIND(LOOM_DIALECT_LOW, 13),
+  LOOM_OP_LOW_MOVE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 14),
+  LOOM_OP_LOW_SLICE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 15),
+  LOOM_OP_LOW_CONCAT = LOOM_OP_KIND(LOOM_DIALECT_LOW, 16),
+  LOOM_OP_LOW_INVOKE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 17),
+  LOOM_OP_LOW_STORAGE_RESERVE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 18),
+  LOOM_OP_LOW_STORAGE_VIEW = LOOM_OP_KIND(LOOM_DIALECT_LOW, 19),
+  LOOM_OP_LOW_SPILL = LOOM_OP_KIND(LOOM_DIALECT_LOW, 20),
+  LOOM_OP_LOW_RELOAD = LOOM_OP_KIND(LOOM_DIALECT_LOW, 21),
+  LOOM_OP_LOW_STORAGE_ADDRESS = LOOM_OP_KIND(LOOM_DIALECT_LOW, 22),
+  LOOM_OP_LOW_BR = LOOM_OP_KIND(LOOM_DIALECT_LOW, 23),
+  LOOM_OP_LOW_COND_BR = LOOM_OP_KIND(LOOM_DIALECT_LOW, 24),
+  LOOM_OP_LOW_RESOURCE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 25),
+  LOOM_OP_LOW_LIVE_IN = LOOM_OP_KIND(LOOM_DIALECT_LOW, 26),
+  LOOM_OP_LOW_SCF_YIELD = LOOM_OP_KIND(LOOM_DIALECT_LOW, 27),
+  LOOM_OP_LOW_SCF_CONDITION = LOOM_OP_KIND(LOOM_DIALECT_LOW, 28),
+  LOOM_OP_LOW_SCF_IF = LOOM_OP_KIND(LOOM_DIALECT_LOW, 29),
+  LOOM_OP_LOW_SCF_FOR = LOOM_OP_KIND(LOOM_DIALECT_LOW, 30),
+  LOOM_OP_LOW_SCF_WHILE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 31),
+  LOOM_OP_LOW_SCHEDULE_FENCE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 32),
+  LOOM_OP_LOW_ASSUME = LOOM_OP_KIND(LOOM_DIALECT_LOW, 33),
+  LOOM_OP_LOW_SWITCH = LOOM_OP_KIND(LOOM_DIALECT_LOW, 34),
+  LOOM_OP_LOW_COUNT_ = 35,
 };
 
 // Function visibility. Absent (0) means private (module-internal).
@@ -94,6 +101,12 @@ typedef enum loom_low_retain_e {
   LOOM_LOW_RETAIN_COUNT_ = 2,
 } loom_low_retain_t;
 
+// Import resolution policy. Absent (0) means required.
+typedef enum loom_low_func_decl_import_policy_e {
+  LOOM_LOW_FUNC_DECL_IMPORT_POLICY_OPTIONAL = 1,
+  LOOM_LOW_FUNC_DECL_IMPORT_POLICY_COUNT_ = 2,
+} loom_low_func_decl_import_policy_t;
+
 // External code source kind for an imported low function declaration.
 typedef enum loom_low_func_decl_import_kind_e {
   LOOM_LOW_FUNC_DECL_IMPORT_KIND_NATIVE = 2,
@@ -117,9 +130,9 @@ typedef enum loom_low_scf_for_unroll_policy_e {
 } loom_low_scf_for_unroll_policy_t;
 
 // LOOM_OP_LOW_FUNC_DEF: Target-bound low function definition with register-typed signature values.
-// low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_generic) @add(%lhs: reg<amdgpu.vgpr x1>, %rhs: reg<amdgpu.vgpr x1>) -> (reg<amdgpu.vgpr x1>) {
-//   %sum = low.op<amdgpu.v_add_u32>(%lhs, %rhs) : (reg<amdgpu.vgpr x1>, reg<amdgpu.vgpr x1>) -> reg<amdgpu.vgpr x1>
-//   low.return %sum : reg<amdgpu.vgpr x1>
+// low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_generic) @add(%lhs: reg<amdgpu.vgpr x1>, %rhs: reg<amdgpu.vgpr x1>) -> (reg<amdgpu.vgpr x1>) asm {
+//   %sum = v_add_u32 %lhs, %rhs
+//   return %sum
 // }
 LOOM_DEFINE_ISA(loom_low_func_def_isa, LOOM_OP_LOW_FUNC_DEF)
 LOOM_DEFINE_VARIADIC_RESULTS(loom_low_func_def_results, 0)
@@ -131,13 +144,14 @@ LOOM_DEFINE_ATTR_DICT(loom_low_func_def_abi_attrs, 4)
 LOOM_DEFINE_ATTR_DICT(loom_low_func_def_abi_layout, 5)
 LOOM_DEFINE_ATTR_STRING(loom_low_func_def_export_symbol, 6)
 LOOM_DEFINE_ATTR_DICT(loom_low_func_def_export_attrs, 7)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_def_visibility, 8, loom_low_visibility_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_def_cc, 9, loom_low_cc_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_def_purity, 10, loom_low_purity_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_def_allocation, 11, loom_low_allocation_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_def_schedule, 12, loom_low_schedule_t)
-LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_low_func_def_predicates, 13)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_def_retain, 14, loom_low_retain_t)
+LOOM_DEFINE_ATTR_DICT(loom_low_func_def_export_metadata, 8)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_def_visibility, 9, loom_low_visibility_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_def_cc, 10, loom_low_cc_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_def_purity, 11, loom_low_purity_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_def_allocation, 12, loom_low_allocation_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_def_schedule, 13, loom_low_schedule_t)
+LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_low_func_def_predicates, 14)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_def_retain, 15, loom_low_retain_t)
 LOOM_DEFINE_REGION(loom_low_func_def_body, 0)
 enum loom_low_func_def_build_flag_bits_e {
   LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_VISIBILITY = 1u << 0,
@@ -152,7 +166,8 @@ enum loom_low_func_def_build_flag_bits_e {
   LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_ABI_ATTRS = 1u << 9,
   LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_ABI_LAYOUT = 1u << 10,
   LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_EXPORT_ATTRS = 1u << 11,
-  LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_PREDICATES = 1u << 12,
+  LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_EXPORT_METADATA = 1u << 12,
+  LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_PREDICATES = 1u << 13,
 };
 typedef uint32_t loom_low_func_def_build_flags_t;
 iree_status_t loom_low_func_def_build(
@@ -171,6 +186,7 @@ iree_status_t loom_low_func_def_build(
     loom_optional loom_named_attr_slice_t abi_layout,
     loom_optional loom_string_id_t export_symbol,
     loom_optional loom_named_attr_slice_t export_attrs,
+    loom_optional loom_named_attr_slice_t export_metadata,
     loom_symbol_ref_t callee,
     const loom_type_t* arg_types,
     iree_host_size_t arg_types_count,
@@ -275,15 +291,20 @@ LOOM_DEFINE_ATTR_DICT(loom_low_func_decl_abi_attrs, 4)
 LOOM_DEFINE_ATTR_DICT(loom_low_func_decl_abi_layout, 5)
 LOOM_DEFINE_ATTR_STRING(loom_low_func_decl_export_symbol, 6)
 LOOM_DEFINE_ATTR_DICT(loom_low_func_decl_export_attrs, 7)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_visibility, 8, loom_low_visibility_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_cc, 9, loom_low_cc_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_purity, 10, loom_low_purity_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_allocation, 11, loom_low_allocation_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_schedule, 12, loom_low_schedule_t)
-LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_low_func_decl_predicates, 13)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_retain, 14, loom_low_retain_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_import_kind, 15, loom_low_func_decl_import_kind_t)
-LOOM_DEFINE_ATTR_STRING(loom_low_func_decl_code_symbol, 16)
+LOOM_DEFINE_ATTR_DICT(loom_low_func_decl_export_metadata, 8)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_visibility, 9, loom_low_visibility_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_cc, 10, loom_low_cc_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_purity, 11, loom_low_purity_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_allocation, 12, loom_low_allocation_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_schedule, 13, loom_low_schedule_t)
+LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_low_func_decl_predicates, 14)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_retain, 15, loom_low_retain_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_import_policy, 16, loom_low_func_decl_import_policy_t)
+LOOM_DEFINE_ATTR_STRING(loom_low_func_decl_import_module, 17)
+LOOM_DEFINE_ATTR_STRING(loom_low_func_decl_import_symbol, 18)
+LOOM_DEFINE_ATTR_DICT(loom_low_func_decl_import_metadata, 19)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_import_kind, 20, loom_low_func_decl_import_kind_t)
+LOOM_DEFINE_ATTR_STRING(loom_low_func_decl_code_symbol, 21)
 enum loom_low_func_decl_build_flag_bits_e {
   LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_VISIBILITY = 1u << 0,
   LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_RETAIN = 1u << 1,
@@ -291,15 +312,20 @@ enum loom_low_func_decl_build_flag_bits_e {
   LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_PURITY = 1u << 3,
   LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_ALLOCATION = 1u << 4,
   LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_SCHEDULE = 1u << 5,
-  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_IMPORT_KIND = 1u << 6,
-  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_CODE_SYMBOL = 1u << 7,
-  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_TARGET = 1u << 8,
-  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_ABI = 1u << 9,
-  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_EXPORT_SYMBOL = 1u << 10,
-  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_ABI_ATTRS = 1u << 11,
-  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_ABI_LAYOUT = 1u << 12,
-  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_EXPORT_ATTRS = 1u << 13,
-  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_PREDICATES = 1u << 14,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_IMPORT_POLICY = 1u << 6,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_IMPORT_MODULE = 1u << 7,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_IMPORT_SYMBOL = 1u << 8,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_IMPORT_KIND = 1u << 9,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_CODE_SYMBOL = 1u << 10,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_TARGET = 1u << 11,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_ABI = 1u << 12,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_EXPORT_SYMBOL = 1u << 13,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_IMPORT_METADATA = 1u << 14,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_ABI_ATTRS = 1u << 15,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_ABI_LAYOUT = 1u << 16,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_EXPORT_ATTRS = 1u << 17,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_EXPORT_METADATA = 1u << 18,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_PREDICATES = 1u << 19,
 };
 typedef uint32_t loom_low_func_decl_build_flags_t;
 iree_status_t loom_low_func_decl_build(
@@ -311,6 +337,10 @@ iree_status_t loom_low_func_decl_build(
     loom_optional uint8_t purity,
     loom_optional uint8_t allocation,
     loom_optional uint8_t schedule,
+    loom_optional uint8_t import_policy,
+    loom_optional loom_string_id_t import_module,
+    loom_optional loom_string_id_t import_symbol,
+    loom_optional loom_named_attr_slice_t import_metadata,
     loom_optional uint8_t import_kind,
     loom_optional loom_string_id_t code_symbol,
     loom_string_id_t descriptor_set,
@@ -320,6 +350,7 @@ iree_status_t loom_low_func_decl_build(
     loom_optional loom_named_attr_slice_t abi_layout,
     loom_optional loom_string_id_t export_symbol,
     loom_optional loom_named_attr_slice_t export_attrs,
+    loom_optional loom_named_attr_slice_t export_metadata,
     loom_symbol_ref_t callee,
     const loom_type_t* arg_types,
     iree_host_size_t arg_types_count,
@@ -372,6 +403,100 @@ iree_status_t loom_low_func_call_build(
     loom_op_t** out_op);
 loom_trait_flags_t loom_low_func_call_effective_traits(const loom_op_t* op);
 iree_status_t loom_low_func_call_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_LOW_FUNC_CALL_INDIRECT: Indirect call through a low function register with an exact structural signature.
+// %result = low.func.call.indirect %target(%value) : (reg<test.i32>) -> (reg<test.i32>)
+LOOM_DEFINE_ISA(loom_low_func_call_indirect_isa, LOOM_OP_LOW_FUNC_CALL_INDIRECT)
+LOOM_DEFINE_OPERAND(loom_low_func_call_indirect_target, 0)
+LOOM_DEFINE_VARIADIC_OPERANDS(loom_low_func_call_indirect_operands, 1)
+LOOM_DEFINE_VARIADIC_RESULTS(loom_low_func_call_indirect_results, 0)
+iree_status_t loom_low_func_call_indirect_build(
+    loom_builder_t* builder,
+    loom_may_consume loom_value_id_t target,
+    loom_may_consume const loom_value_id_t* operands,
+    iree_host_size_t operands_count,
+    const loom_type_t* result_types,
+    iree_host_size_t result_count,
+    const loom_tied_result_t* tied_results,
+    iree_host_size_t tied_result_count,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_low_func_call_indirect_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_LOW_FUNC_NULL: Produce a null first-class function value in a low function register.
+// %null = low.func.null : reg<test.ptr : func.ref<(i32) -> (i32)>>
+LOOM_DEFINE_ISA(loom_low_func_null_isa, LOOM_OP_LOW_FUNC_NULL)
+LOOM_DEFINE_RESULT(loom_low_func_null_result, 0)
+iree_status_t loom_low_func_null_build(
+    loom_builder_t* builder,
+    loom_type_t result_type,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_low_func_null_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_LOW_FUNC_COMPARE_NULL: Return true when a low function-register value is null.
+// %is_null = low.func.compare.null %function : reg<test.ptr : func.ref<(i32) -> (i32)>> -> reg<test.i32 : i1>
+LOOM_DEFINE_ISA(loom_low_func_compare_null_isa, LOOM_OP_LOW_FUNC_COMPARE_NULL)
+LOOM_DEFINE_OPERAND(loom_low_func_compare_null_function, 0)
+LOOM_DEFINE_RESULT(loom_low_func_compare_null_result, 0)
+iree_status_t loom_low_func_compare_null_build(
+    loom_builder_t* builder,
+    loom_may_consume loom_value_id_t function,
+    loom_type_t result_type,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_low_func_compare_null_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_LOW_FUNC_ADDRESS: Produce a low function-register value addressing a callable symbol.
+// %function = low.func.address @callee : reg<test.ptr : func.ref<(i32) -> (i32)>>
+LOOM_DEFINE_ISA(loom_low_func_address_isa, LOOM_OP_LOW_FUNC_ADDRESS)
+LOOM_DEFINE_RESULT(loom_low_func_address_result, 0)
+LOOM_DEFINE_ATTR_SYMBOL(loom_low_func_address_callee, 0)
+iree_status_t loom_low_func_address_build(
+    loom_builder_t* builder,
+    loom_symbol_ref_t callee,
+    loom_type_t result_type,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_low_func_address_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_LOW_FUNC_REF_CAST: Widen a synchronous function-reference register to a yieldable reference with the same structural signature. The result aliases the source's exact physical storage and emits no target instruction.
+// %yieldable = low.func.ref.cast %sync : reg<test.ptr : func.ref<(i32) -> (i32)>> to reg<test.ptr : func.ref<yieldable (i32) -> (i32)>>
+LOOM_DEFINE_ISA(loom_low_func_ref_cast_isa, LOOM_OP_LOW_FUNC_REF_CAST)
+LOOM_DEFINE_OPERAND(loom_low_func_ref_cast_source, 0)
+LOOM_DEFINE_RESULT(loom_low_func_ref_cast_result, 0)
+iree_status_t loom_low_func_ref_cast_build(
+    loom_builder_t* builder,
+    loom_may_consume loom_value_id_t source,
+    loom_type_t result_type,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_low_func_ref_cast_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_LOW_FUNC_IMPORT_RESOLVED: Return true when an optional linked low function resolved.
+// %available = low.func.import.resolved @optional_feature : reg<test.i32 : i1>
+LOOM_DEFINE_ISA(loom_low_func_import_resolved_isa, LOOM_OP_LOW_FUNC_IMPORT_RESOLVED)
+LOOM_DEFINE_RESULT(loom_low_func_import_resolved_result, 0)
+LOOM_DEFINE_ATTR_SYMBOL(loom_low_func_import_resolved_callee, 0)
+iree_status_t loom_low_func_import_resolved_build(
+    loom_builder_t* builder,
+    loom_symbol_ref_t callee,
+    loom_type_t result_type,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_low_func_import_resolved_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
@@ -615,6 +740,7 @@ iree_status_t loom_low_storage_address_verify(
 LOOM_DEFINE_ISA(loom_low_br_isa, LOOM_OP_LOW_BR)
 LOOM_DEFINE_VARIADIC_OPERANDS(loom_low_br_args, 0)
 LOOM_DEFINE_SUCCESSOR(loom_low_br_dest, 0)
+LOOM_DEFINE_OPTIONAL_ATTR_SCOPED_ENUM(loom_low_br_descriptor, 0)
 iree_status_t loom_low_br_build(
     loom_builder_t* builder,
     loom_block_t* dest,
@@ -837,6 +963,17 @@ iree_status_t loom_low_assume_facts(
     const loom_module_t* module, const loom_op_t* op,
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
+
+// LOOM_OP_LOW_SWITCH: Descriptor-backed dense switch with one default and an ordered target table.
+// low.switch<test.switch> %selector targets [^case0, ^case1] default ^fallback : reg<test.i32>
+LOOM_DEFINE_ISA(loom_low_switch_isa, LOOM_OP_LOW_SWITCH)
+LOOM_DEFINE_OPERAND(loom_low_switch_selector, 0)
+LOOM_DEFINE_SUCCESSOR(loom_low_switch_default_dest, 0)
+LOOM_DEFINE_VARIADIC_SUCCESSORS(loom_low_switch_target_dests, 1)
+LOOM_DEFINE_ATTR_SCOPED_ENUM(loom_low_switch_descriptor, 0)
+iree_status_t loom_low_switch_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
 
 // Returns the vtable array for the low dialect.
 const loom_op_vtable_t* const* loom_low_dialect_vtables(

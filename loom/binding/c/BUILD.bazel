@@ -82,6 +82,16 @@ LOOMC_TARGET_CMD_PUBLIC_HDRS = [
     "include/loomc/target/cmd/program.h",
 ]
 
+LOOMC_TARGET_KERNEL_PUBLIC_HDRS = [
+    "include/loomc/target/kernel.h",
+]
+
+LOOMC_TARGET_VM_PUBLIC_HDRS = [
+    "include/loomc/target/vm.h",
+    "include/loomc/target/vm/base.h",
+    "include/loomc/target/vm/launch_config.h",
+]
+
 LOOMC_TARGET_SPIRV_VULKANINFO_PUBLIC_HDRS = [
     "include/loomc/target/spirv/vulkaninfo.h",
 ]
@@ -111,11 +121,13 @@ exports_files(
     LOOMC_TARGET_AMDGPU_PUBLIC_HDRS +
     LOOMC_TARGET_CMD_PUBLIC_HDRS +
     LOOMC_TARGET_IREE_HAL_PUBLIC_HDRS +
+    LOOMC_TARGET_KERNEL_PUBLIC_HDRS +
     LOOMC_TARGET_LLVMIR_PUBLIC_HDRS +
     LOOMC_TARGET_SPIRV_PUBLIC_HDRS +
     LOOMC_TARGET_SPIRV_IREE_HAL_PUBLIC_HDRS +
     LOOMC_TARGET_SPIRV_VULKANINFO_PUBLIC_HDRS +
-    LOOMC_TARGET_SPIRV_VULKAN_PUBLIC_HDRS,
+    LOOMC_TARGET_SPIRV_VULKAN_PUBLIC_HDRS +
+    LOOMC_TARGET_VM_PUBLIC_HDRS,
     visibility = _TARGET_EXTENSION_VISIBILITY,
 )
 
@@ -134,7 +146,6 @@ loom_cc_library(
         "src/context.c",
         "src/diagnostic.c",
         "src/emit.c",
-        "src/launch_config.c",
         "src/link.c",
         "src/link_dependency.c",
         "src/link_index.c",
@@ -157,9 +168,11 @@ loom_cc_library(
         "src/workspace.c",
     ],
     hdrs = LOOMC_PUBLIC_HDRS + [
+        "src/compile.h",
         "src/config.h",
         "src/context.h",
         "src/diagnostic.h",
+        "src/emit.h",
         "src/link_index.h",
         "src/link_materialization.h",
         "src/module.h",
@@ -181,10 +194,10 @@ loom_cc_library(
     ],
     deps = [
         "//loom/src/loom/analysis:symbol_value_constraints",
-        "//loom/src/loom/codegen/low:launch_config_program",
         "//loom/src/loom/codegen/low:repr",
         "//loom/src/loom/codegen/low:target_binding",
         "//loom/src/loom/codegen/low:text_asm",
+        "//loom/src/loom/codegen/low/pipeline:legalizer_registry",
         "//loom/src/loom/codegen/low/pipeline:pass_environment",
         "//loom/src/loom/error:diagnostic",
         "//loom/src/loom/error:error_defs",
@@ -226,6 +239,7 @@ loom_cc_library(
         "//loom/src/loom/target:predicate",
         "//loom/src/loom/target:profile",
         "//loom/src/loom/target:provider",
+        "//loom/src/loom/target:root_function_versions",
         "//loom/src/loom/target:specialization",
         "//loom/src/loom/target:types",
         "//loom/src/loom/target/reporting:artifact_manifest",

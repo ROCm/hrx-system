@@ -6,8 +6,7 @@
 
 #include "loom/ir/module.h"
 #include "loom/target/arch/wasm/descriptors/descriptors.h"
-#include "loom/target/emit/wasm/contracts/core_simd128.h"
-#include "loom/target/emit/wasm/contracts/core_simd128_lower_rules.h"
+#include "loom/target/emit/wasm/contracts/sets.h"
 #include "loom/target/emit/wasm/error_catalog.h"
 #include "loom/target/emit/wasm/lower/lower.h"
 
@@ -171,14 +170,6 @@ static iree_status_t loom_wasm_map_argument(
                             &out_argument->abi_type);
 }
 
-static const loom_low_lower_rule_set_t* const kWasmRuleSets[] = {
-    &loom_wasm_core_simd128_lower_rule_set,
-};
-
-static const loom_target_contract_binding_t kWasmContractBindings[] = {
-    {&loom_wasm_core_simd128_contract_fragment, 0},
-};
-
 static const loom_low_lower_policy_t kWasmLowLowerPolicy = {
     .name = IREE_SVL("wasm-lower"),
     .error_catalog = &loom_wasm_error_catalog,
@@ -186,13 +177,7 @@ static const loom_low_lower_policy_t kWasmLowLowerPolicy = {
     .map_argument = {.fn = loom_wasm_map_argument, .user_data = NULL},
     .source_type_supported = {.fn = loom_wasm_source_type_supported,
                               .user_data = NULL},
-    .rule_sets =
-        {
-            .count = IREE_ARRAYSIZE(kWasmRuleSets),
-            .values = kWasmRuleSets,
-        },
-    .contract_bindings = kWasmContractBindings,
-    .contract_binding_count = IREE_ARRAYSIZE(kWasmContractBindings),
+    .contract_set = &loom_wasm_contract_set,
 };
 
 const loom_low_lower_policy_t* loom_wasm_low_lower_policy(void) {

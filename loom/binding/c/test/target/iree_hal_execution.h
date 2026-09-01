@@ -27,13 +27,6 @@ using IreeHalTargetEnvironmentCreateFn =
 using IreeHalTargetProfileValidateFn = loomc_status_t (*)(
     loomc_target_profile_t* target_profile, const char** out_skip_reason);
 
-// Emits a target-specific executable artifact from the compiled module.
-using IreeHalTargetModuleEmitFn = loomc_status_t (*)(
-    loomc_target_environment_t* target_environment,
-    loomc_workspace_t* workspace, loomc_module_t* module,
-    loomc_string_view_t artifact_format,
-    loomc_string_view_t artifact_identifier, loomc_result_t** out_result);
-
 // Target-specific inputs for the shared kernel-to-HAL execution test.
 struct IreeHalKernelExecutionTarget {
   // Human-readable target name used in skip and failure messages.
@@ -69,11 +62,8 @@ struct IreeHalKernelExecutionTarget {
   // Maximum source-to-low errors accepted before pipeline creation fails.
   uint32_t source_to_low_max_errors;
 
-  // Artifact format expected from the target-specific emitter.
-  loomc_string_view_t artifact_format;
-
-  // Artifact identifier reported by emission diagnostics.
-  loomc_string_view_t artifact_identifier;
+  // Target-specific options used to emit the executable artifact.
+  const loomc_emit_options_t* emit_options;
 
   // HAL executable target selected for direct loading.
   iree_hal_executable_target_selection_t executable_target_selection;
@@ -89,9 +79,6 @@ struct IreeHalKernelExecutionTarget {
 
   // Target-specific profile validation callback.
   IreeHalTargetProfileValidateFn validate_target_profile;
-
-  // Target-specific module emission callback.
-  IreeHalTargetModuleEmitFn emit_module;
 };
 
 // Runs the shared public Loom C API to live IREE HAL kernel execution flow.

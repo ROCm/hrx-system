@@ -727,6 +727,9 @@ static bool loom_pass_interpreter_attr_value_equal(
     case LOOM_ATTR_I64:
       return actual_attr.kind == LOOM_ATTR_I64 &&
              loom_attr_as_i64(actual_attr) == expected_value->i64_value;
+    case LOOM_ATTR_U64:
+      return actual_attr.kind == LOOM_ATTR_U64 &&
+             loom_attr_as_u64(actual_attr) == expected_value->u64_value;
     case LOOM_ATTR_F64:
       return actual_attr.kind == LOOM_ATTR_F64 &&
              loom_attr_as_f64(actual_attr) == expected_value->f64_value;

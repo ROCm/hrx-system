@@ -59,6 +59,16 @@ loom_cc_library(
     ],
 )
 
+loom_cc_test(
+    name = "descriptors_test",
+    srcs = ["descriptors_test.cc"],
+    deps = [
+        ":descriptors",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 loom_cc_library(
     name = "descriptor_traits",
     srcs = ["descriptor_traits.c"],
@@ -67,6 +77,16 @@ loom_cc_library(
         ":descriptors",
         "//loom/src/loom/ir",
         "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "descriptor_traits_test",
+    srcs = ["descriptor_traits_test.cc"],
+    deps = [
+        ":descriptor_traits",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
@@ -242,32 +262,6 @@ loom_cc_library(
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:type_registry",
         "//loom/src/loom/ops/low",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal:arena",
-    ],
-)
-
-loom_cc_library(
-    name = "launch_config_program",
-    srcs = ["launch_config_program.c"],
-    hdrs = ["launch_config_program.h"],
-    deps = [
-        ":storage_layout",
-        "//loom/src/loom/ir",
-        "//loom/src/loom/ops:op_defs",
-        "//loom/src/loom/ops:special_values",
-        "//loom/src/loom/ops:type_registry",
-        "//loom/src/loom/ops/func",
-        "//loom/src/loom/ops/kernel",
-        "//loom/src/loom/ops/low",
-        "//loom/src/loom/pass:environment",
-        "//loom/src/loom/pass:types",
-        "//loom/src/loom/pass:value_facts",
-        "//loom/src/loom/rewrite:materialize",
-        "//loom/src/loom/rewrite:remap",
-        "//loom/src/loom/rewrite:rewriter",
-        "//loom/src/loom/target:facts",
-        "//loom/src/loom/transforms/cleanup:dce",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],
@@ -453,6 +447,7 @@ loom_cc_library(
     hdrs = ["allocation_materialization.h"],
     deps = [
         ":allocation",
+        ":builder",
         ":descriptors",
         ":diagnostics",
         ":function",

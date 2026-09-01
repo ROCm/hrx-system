@@ -41,16 +41,17 @@ lifecycle, while the programming guide's [kernel
 chapter](../guide/kernels-and-launch.md) develops real device computation and
 the independent launch ABI.
 
-The compiler path produces two coupled objects from this definition:
+The compiler path produces one immutable kernel product from this definition:
 
-| Product | Role |
+| Product field | Role |
 | --- | --- |
-| Prepared target module | Retains the specialized device program and concrete target facts consumed by emission. |
-| Launch-config artifact | Contains a pure host function that maps authored workload arguments to the complete physical launch. |
+| Target-native artifact | Contains the specialized executable kernel entry. |
+| VM launch-config artifact | Contains a pure host function that maps authored workload arguments to the complete physical launch. |
+| Root projection | Carries the exact artifact and function ordinals joining those two facets. |
 
-Emission then turns the prepared module into the target runtime's executable
-format. The public kernel export name joins that independently loaded
-executable entry to its launch-config function.
+The product builder compiles and emits both artifacts from one closed function
+version. Loading code follows the root ordinals directly; it does not scan
+artifact lists, compare export names, or run a second target emission.
 
 ## Prepare immutable state once
 
@@ -62,10 +63,10 @@ A target package creates the target environment registered with the context:
 --8<-- "examples/integration/jit-kernel/amdgpu/jit_kernel.c:target-context"
 ```
 
-The target environment and context are immutable after creation. The
-example also creates one compiler, one target profile, and one prepared target
+The target environment and context are immutable after creation. The example
+also creates one compiler, one target profile, and one prepared target
 pipeline. Those objects can be shared across independent workers. Each worker
-uses its own `loomc_workspace_t` and mutable `loomc_module_t`:
+uses its own `loomc_workspace_t`:
 
 **Source:** [`loom/docs/examples/integration/jit-kernel/amdgpu/jit_kernel.c`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/integration/jit-kernel/amdgpu/jit_kernel.c)
 
@@ -73,20 +74,38 @@ uses its own `loomc_workspace_t` and mutable `loomc_module_t`:
 --8<-- "examples/integration/jit-kernel/amdgpu/jit_kernel.c:profile-pipeline"
 ```
 
-The example loads a path so the `.loom` file remains the single source
-shown above. A model loader normally calls `loomc_source_create` with borrowed,
-copied, or externally owned `.loom` or `.loombc` bytes instead. The rest of the
-lifecycle is identical and remains filesystem-free.
+The example's build rule assembles the checked-in `.loom` file into ordinary
+`.loombc`, then passes that bytecode path to the executable. A model loader
+normally calls `loomc_source_create` with borrowed, copied, or externally owned
+`.loombc` bytes instead. The request, compiler, and product lifecycle remains
+filesystem-free.
 
 Target profiles are ordinary prepared objects, not process-global compiler
 flags. A runtime adapter may derive an exact profile from a live HSA, Vulkan, or
 HAL device; an offline builder may construct a generic profile such as
 `gfx11-generic` explicitly.
 
-## Specialize the exported function
+## Name the immutable product request
 
-Compilation receives the mutable module, the selected pass program, and a
-per-function target specialization:
+Product requests use exact source ordinals, not symbol strings. The example
+indexes its bytecode once, resolves the public kernel name at that external
+discovery boundary, and creates one host-launchable root:
+
+**Source:** [`loom/docs/examples/integration/jit-kernel/amdgpu/jit_kernel.c`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/integration/jit-kernel/amdgpu/jit_kernel.c)
+
+```c
+--8<-- "examples/integration/jit-kernel/amdgpu/jit_kernel.c:request"
+```
+
+`LOOMC_KERNEL_ROOT_GOAL_HOST_LAUNCHABLE` requests both the physical executable
+entry and its authored host launch policy. A parent command program that
+already owns physical launch geometry instead requests an executable-entry root
+and does not pull the VM launch artifact into that product.
+
+## Build the coupled kernel product
+
+Product construction receives the immutable request, selected pass program,
+per-function target specialization, and target-native emission options:
 
 **Source:** [`loom/docs/examples/integration/jit-kernel/amdgpu/jit_kernel.c`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/integration/jit-kernel/amdgpu/jit_kernel.c)
 
@@ -95,8 +114,8 @@ per-function target specialization:
 ```
 
 `loomc_target_specialization_t` binds one function version to one complete
-target profile for this invocation. Other materialized roots can select other
-profiles in the same compile operation. Configuration bindings use the same
+target profile for this invocation. Other requested roots can select other
+profiles in the same product operation. Configuration bindings use the same
 per-invocation boundary, so a compiler and pass program remain reusable across
 model configurations and autotuning candidates.
 
@@ -107,18 +126,22 @@ the context during callgraph specialization. Direct function rows remain useful
 for default host roots; the two forms can share one invocation as long as they
 do not assign the same function.
 
-The launch companion is opt-in through
-`LOOMC_COMPILE_ARTIFACT_FLAG_LAUNCH_CONFIG`. `loomc_compile_module` may rewrite
-the invocation's module and retains the concrete function-version facts needed
-by the following `loomc_emit_module` call. A caller that needs another
-independent specialization starts from another module handle rather than
-racing or attempting to restore the transformed module.
+`loomc_kernel_product_build_request` deserializes the immutable request into
+worker-local IR, specializes and lowers its complete closure, emits the native
+artifact, and emits one shared launch companion when any root is
+host-launchable. The returned product retains only immutable artifacts and root
+rows; it retains no request, workspace, mutable IR, or compiler analysis state.
 
 ## Load and evaluate the host companion
 
-The compile result owns the launch-config artifact bytes. Loading them produces
-an independently retained program, so the compile result can be released as
-soon as loading completes:
+The loader is supplied by the optional `loomc/target/vm` package. Core
+`loomc` defines the target-independent launch result and can compile other
+products without linking the VM runtime.
+
+The kernel root names the launch artifact and function by exact ordinal.
+Loading the artifact produces an independently retained program, and
+`loomc_vm_launch_config_program_function_at` binds the function without a
+string lookup:
 
 **Source:** [`loom/docs/examples/integration/jit-kernel/amdgpu/jit_kernel.c`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/integration/jit-kernel/amdgpu/jit_kernel.c)
 
@@ -126,9 +149,11 @@ soon as loading completes:
 --8<-- "examples/integration/jit-kernel/amdgpu/jit_kernel.c:launch-config"
 ```
 
-Lookup by public export name happens once when a cached kernel version is
-prepared. Repeated invocations use the returned program-local token and avoid
-repeated string lookup.
+The product and program use separate ordinal spaces. The root row is the
+one-time compiler-owned join between them; the returned program-local token is
+the hot-path callable. Name lookup remains available for discovery of
+independently authored VM artifacts, but a kernel-product consumer does not
+need it.
 
 Workload arguments are positional raw scalar bits. `index` and `offset` consume
 all 64 bits; narrower integers and floating-point values use the least
@@ -145,20 +170,13 @@ The application consumes this result. It does not duplicate ceiling division,
 guess subgroup width, or recover shared-memory use from a kernel-name
 convention.
 
-## Emit the runtime executable
+## Consume the target-native artifact
 
-Emission is a separate operation over the prepared module:
-
-**Source:** [`loom/docs/examples/integration/jit-kernel/amdgpu/jit_kernel.c`](https://github.com/ROCm/hrx-system/blob/main/loom/docs/examples/integration/jit-kernel/amdgpu/jit_kernel.c)
-
-```c
---8<-- "examples/integration/jit-kernel/amdgpu/jit_kernel.c:emit"
-```
-
-The artifact remains in memory and is owned by the emission result. A JIT loads
-or copies `artifact->contents` into its runtime or cache before releasing that
-result. An offline packager can write the same artifact object to a file without
-changing the compile and emission path.
+The same root row names the target-native artifact and its artifact-local
+function ordinal. A JIT passes `artifact->contents` and that ordinal to the
+selected runtime loader before releasing the product. An offline packager can
+write the same immutable artifact to a file without changing product
+construction.
 
 The example prints the two facts an embedding carries into runtime
 loading:
@@ -181,9 +199,12 @@ submission, synchronization, and teardown.
 One cached kernel version therefore retains:
 
 1. the runtime's loaded executable and function token;
-2. the loaded `loomc_launch_config_program_t` and matching function token; and
-3. the stable public export name used to bind those two independently loaded
-   products.
+2. the loaded `loomc_vm_launch_config_program_t` and matching function token;
+   and
+3. any application metadata needed to identify the cached logical kernel.
+
+Artifact and function ordinals are consumed while preparing that cached
+version. They are not looked up again for each dispatch.
 
 At issue time, the application evaluates workload arguments, serializes the
 separate device launch arguments according to the selected ABI, binds device
@@ -209,9 +230,10 @@ not belong in a target-independent `loomc` helper.
 | `loomc_source_t` | Immutable and shareable after creation. |
 | Target environment, context, profile, compiler, pass program, frozen link index | Prepared state shared across independent invocations according to each header's contract. |
 | `loomc_workspace_t` | Mutable scratch owned by one active worker. |
-| `loomc_module_t` | Mutable during compile and emit; one active invocation owns it. |
-| `loomc_result_t` | Lifetime root for borrowed diagnostics and artifacts. |
-| `loomc_launch_config_program_t` | Retained cached program; invocations on one handle do not overlap without external synchronization. |
+| `loomc_request_t` | Immutable source-root selection shared independently of compiler workers. |
+| `loomc_product_t` | Immutable successful result owning coupled artifacts and root projections. |
+| `loomc_result_t` | Operation diagnostics; independent of the successful product lifetime. |
+| `loomc_vm_launch_config_program_t` | Retained cached program; invocations on one handle do not overlap without external synchronization. |
 | Runtime executable | Owned and synchronized by the target runtime integration. |
 
 The status/result split is equally important. A non-OK `loomc_status_t` means

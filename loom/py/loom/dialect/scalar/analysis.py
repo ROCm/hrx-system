@@ -14,7 +14,16 @@ identity (the output equals the input).
 
 from loom.assembly import COLON, PredicateList, Refs, TypesOf
 from loom.dialect.scalar.defs import scalar_ops
-from loom.dsl import FACT_IDENTITY, PURE, SCALAR, AttrDef, Op, Operand, Result
+from loom.dsl import (
+    FACT_IDENTITY,
+    PAYLOAD_SCALAR,
+    PURE,
+    AttrDef,
+    Op,
+    Operand,
+    Result,
+    VariadicValuesMatch,
+)
 
 __all__ = [
     "scalar_assume",
@@ -29,12 +38,12 @@ scalar_assume = Op(
     "scalar.assume",
     group=scalar_ops,
     doc="Identity with predicate constraints on scalar payload results. Use index.assume for index or offset values.",
-    operands=[Operand("values", SCALAR, variadic=True)],
-    results=[Result("results", SCALAR, variadic=True)],
+    operands=[Operand("values", PAYLOAD_SCALAR, variadic=True)],
+    results=[Result("results", PAYLOAD_SCALAR, variadic=True)],
     attrs=[AttrDef("predicates", "predicate_list")],
+    constraints=[VariadicValuesMatch("values", "results")],
     traits=[PURE, FACT_IDENTITY],
     facts="loom_scalar_assume_facts",
-    verify="loom_scalar_assume_verify",
     format=[
         Refs("values"),
         PredicateList("predicates"),

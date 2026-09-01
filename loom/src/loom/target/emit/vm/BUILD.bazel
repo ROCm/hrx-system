@@ -1,0 +1,174 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_library",
+    "loom_cc_test",
+)
+load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test_suite")
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],
+)
+
+loom_cc_library(
+    name = "launch_config_abi",
+    hdrs = ["launch_config_abi.h"],
+    visibility = [
+        "//loom/binding/c/target/vm:__pkg__",
+        "//loom/src/loom/target/arch/vm:__pkg__",
+    ],
+    deps = ["//runtime/src/iree/base"],
+)
+
+loom_cc_library(
+    name = "vm",
+    srcs = [
+        "artifact_emitter.c",
+        "function_call.c",
+        "function_encoder.c",
+        "function_layout.c",
+        "function_locals.c",
+        "module_emitter.c",
+        "module_layout.c",
+        "module_metadata.c",
+        "module_presentation.c",
+        "module_resources.c",
+        "module_types.c",
+    ],
+    hdrs = [
+        "artifact_emitter.h",
+        "function_call.h",
+        "function_encoder.h",
+        "function_layout.h",
+        "function_locals.h",
+        "module_emitter.h",
+        "module_layout.h",
+        "module_metadata.h",
+        "module_presentation.h",
+        "module_resources.h",
+        "module_selection.h",
+        "module_types.h",
+    ],
+    visibility = [
+        "//loom/binding/c:__pkg__",
+        "//loom/binding/c/target:__subpackages__",
+        "//loom/src/loom/target/arch/vm:__pkg__",
+        "//loom/src/loom/tools/iree-test-loom:__pkg__",
+        "//loom/src/loom/tools/loom-compile:__pkg__",
+    ],
+    deps = [
+        "//loom/src/loom/analysis:symbol_liveness",
+        "//loom/src/loom/codegen/low:allocation",
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/codegen/low:frame",
+        "//loom/src/loom/codegen/low:function",
+        "//loom/src/loom/codegen/low:packet",
+        "//loom/src/loom/codegen/low:storage_layout",
+        "//loom/src/loom/codegen/low:target_binding",
+        "//loom/src/loom/codegen/low/allocation:target_constraints",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/format/bytecode/writer:encoder",
+        "//loom/src/loom/format/text:printer",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops:type_registry",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/global",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/ops/metadata",
+        "//loom/src/loom/target:function_version",
+        "//loom/src/loom/target:low_descriptor_registry",
+        "//loom/src/loom/target:provider",
+        "//loom/src/loom/target:registers",
+        "//loom/src/loom/target/arch/vm:abi_layout",
+        "//loom/src/loom/target/arch/vm:descriptors",
+        "//loom/src/loom/target/arch/vm:facts",
+        "//loom/src/loom/target/arch/vm:ops",
+        "//loom/src/loom/target/arch/vm:structural_ops",
+        "//loom/src/loom/util:call_graph",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:stream",
+        "//runtime/src/iree/vm",
+        "//runtime/src/iree/vm/bytecode/wire",
+    ],
+)
+
+loom_cc_library(
+    name = "launch_config_compiler",
+    srcs = ["launch_config_compiler.c"],
+    hdrs = ["launch_config_compiler.h"],
+    visibility = ["//loom/binding/c/target:__subpackages__"],
+    deps = [
+        ":vm",
+        "//loom/src/loom/pass:builder",
+        "//loom/src/loom/target:provider",
+        "//loom/src/loom/target/arch/vm:launch_config_program",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "artifact_emitter_test",
+    srcs = ["artifact_emitter_test.cc"],
+    deps = [
+        ":vm",
+        "//loom/src/loom/codegen/low:text_asm",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/target:function_version",
+        "//loom/src/loom/target:low_descriptor_registry",
+        "//loom/src/loom/target/arch/vm:descriptors",
+        "//loom/src/loom/target/arch/vm:ops",
+        "//loom/src/loom/testing:diagnostic_matchers",
+        "//loom/src/loom/testing:module_ptr",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_check_test_suite(
+    name = "loom_check_file_test",
+    srcs = [
+        "test/abi.loom-test",
+        "test/constants.loom-test",
+        "test/contracts.loom-test",
+        "test/control_flow.loom-test",
+        "test/function_values.loom-test",
+        "test/imports.loom-test",
+        "test/kernel.loom-test",
+        "test/metadata.loom-test",
+        "test/mixed_module.loom-test",
+        "test/module.loom-test",
+        "test/spills.loom-test",
+        "test/suspension.loom-test",
+        "test/vector_tuples.loom-test",
+    ],
+    test_name_prefix_to_strip = "test/",
+)
+
+loom_cc_library(
+    name = "loom_check",
+    srcs = ["check/loom_check.c"],
+    hdrs = ["check/loom_check.h"],
+    visibility = ["//loom/src/loom/target/arch/vm:__pkg__"],
+    deps = [
+        ":vm",
+        "//loom/src/loom/tools/loom-check:execute",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/vm",
+        "//runtime/src/iree/vm/bytecode",
+        "//runtime/src/iree/vm/bytecode:dump",
+    ],
+)

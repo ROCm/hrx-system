@@ -1,0 +1,73 @@
+// RUN: verify
+
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) @valid_relational_constraints(%index: reg<vm.value>, %packed_source: reg<vm.value x2>, %unpacked_source: reg<vm.value>, %buffer: reg<vm.ref>, %offset: reg<vm.value>, %operand: reg<vm.value>) asm {
+  %indexed = stack.load.indexed %index, 0, 1, i8.x1 : reg<vm.value>
+  %loaded = stack.load 0, i8.x2 : reg<vm.value x2>
+  %packed = integer.bitstream.pack %packed_source, 8, 2, 1, 16, 16 : reg<vm.value>
+  %unpacked = integer.bitstream.unpack.u %unpacked_source, 8, 1, 2, 16, 8 : reg<vm.value x2>
+  buffer.atomic.reduce %buffer, %offset, %operand, 2, 0
+  return
+}
+
+// ====
+
+// RUN: verify
+
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) @indexed_scale_must_be_nonzero(%index: reg<vm.value : i64>) asm {
+  // ERROR@+1: TARGET/032 {op_name="low.op", op_constraint="immediate_nonzero"}
+  %value = stack.load.indexed %index, 0, 0, i8.x1 : reg<vm.value : i8>
+  return
+}
+
+// ====
+
+// RUN: verify
+
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) @memory_format_must_match_register_range() asm {
+  // ERROR@+1: TARGET/032 {op_name="low.op", op_constraint="memory_format_unit_count"}
+  %value = stack.load 0, i8.x1 : reg<vm.value x2>
+  return
+}
+
+// ====
+
+// RUN: verify
+
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) @bitstream_shape_must_balance(%source: reg<vm.value x2>) asm {
+  // ERROR@+1: TARGET/032 {op_name="low.op", op_constraint="integer_bitstream_shape"}
+  %result = integer.bitstream.pack %source, 8, 2, 1, 8, 8 : reg<vm.value>
+  return
+}
+
+// ====
+
+// RUN: verify
+
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) @packed_selector_must_be_assigned(%buffer: reg<vm.ref>, %offset: reg<vm.value>, %operand: reg<vm.value>) asm {
+  // ERROR@+1: TARGET/032 {op_name="low.op", op_constraint="packed_selector"}
+  buffer.atomic.reduce %buffer, %offset, %operand, 0, 0
+  return
+}
+
+// ====
+
+// RUN: verify
+
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) @structural_op_must_have_vm_encoding() {
+  %storage = low.storage.reserve {byte_alignment = 8, byte_length = 8} : low.storage<private>
+  // ERROR@+1: TARGET/032 {op_name="low.storage.address", op_constraint="structural_encoding"}
+  %address = low.storage.address %storage : low.storage<private> -> reg<vm.value : i64>
+  low.return
+}

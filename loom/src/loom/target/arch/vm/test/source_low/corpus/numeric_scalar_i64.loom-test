@@ -1,0 +1,230 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_scalar_i64.loom-test
+// RUN: emit source-low output=low
+
+vm.target<core> @target
+func.def target(@target) @scalar_i64_bitwise_sgpr(%lhs: i64, %rhs: i64) -> (i64, i64, i64) {
+  %and = scalar.andi %lhs, %rhs : i64
+  %or = scalar.ori %and, %lhs : i64
+  %xor = scalar.xori %or, %rhs : i64
+  func.return %and, %or, %xor : i64, i64, i64
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i64>, reg<vm.value : i64>) -> (reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>)>}) @scalar_i64_bitwise_sgpr(%lhs: reg<vm.value : i64>, %rhs: reg<vm.value : i64>) -> (reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>) asm {
+  %and = integer.and.i64 %lhs, %rhs : reg<vm.value : i64>
+  %or = integer.or.i64 %and, %lhs : reg<vm.value : i64>
+  %xor = integer.xor.i64 %or, %rhs : reg<vm.value : i64>
+  return %and, %or, %xor
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_i64_addi_vgpr(%lhs_values: vector<2xi64>, %rhs_values: vector<2xi64>) -> (i64) {
+  %lhs = vector.extract %lhs_values[0] : vector<2xi64> -> i64
+  %rhs = vector.extract %rhs_values[0] : vector<2xi64> -> i64
+  %sum = scalar.addi %lhs, %rhs : i64
+  func.return %sum : i64
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x2 : vector<2xi64>>, reg<vm.value x2 : vector<2xi64>>) -> (reg<vm.value : i64>)>}) @scalar_i64_addi_vgpr(%lhs_values: reg<vm.value x2 : vector<2xi64>>, %rhs_values: reg<vm.value x2 : vector<2xi64>>) -> (reg<vm.value : i64>) asm {
+  %lhs = slice %lhs_values[0] : reg<vm.value x2 : vector<2xi64>> -> reg<vm.value : i64>
+  %rhs = slice %rhs_values[0] : reg<vm.value x2 : vector<2xi64>> -> reg<vm.value : i64>
+  %sum = integer.add.i64 %lhs, %rhs : reg<vm.value : i64>
+  return %sum
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_i64_subi_vgpr(%lhs_values: vector<2xi64>, %rhs_values: vector<2xi64>) -> (i64) {
+  %lhs = vector.extract %lhs_values[0] : vector<2xi64> -> i64
+  %rhs = vector.extract %rhs_values[0] : vector<2xi64> -> i64
+  %difference = scalar.subi %lhs, %rhs : i64
+  func.return %difference : i64
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x2 : vector<2xi64>>, reg<vm.value x2 : vector<2xi64>>) -> (reg<vm.value : i64>)>}) @scalar_i64_subi_vgpr(%lhs_values: reg<vm.value x2 : vector<2xi64>>, %rhs_values: reg<vm.value x2 : vector<2xi64>>) -> (reg<vm.value : i64>) asm {
+  %lhs = slice %lhs_values[0] : reg<vm.value x2 : vector<2xi64>> -> reg<vm.value : i64>
+  %rhs = slice %rhs_values[0] : reg<vm.value x2 : vector<2xi64>> -> reg<vm.value : i64>
+  %difference = integer.sub.i64 %lhs, %rhs : reg<vm.value : i64>
+  return %difference
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_i64_shli_vgpr(%value_values: vector<2xi64>, %shift_values: vector<2xi64>) -> (i64) {
+  %value = vector.extract %value_values[0] : vector<2xi64> -> i64
+  %shift = vector.extract %shift_values[0] : vector<2xi64> -> i64
+  %shifted = scalar.shli %value, %shift : i64
+  func.return %shifted : i64
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x2 : vector<2xi64>>, reg<vm.value x2 : vector<2xi64>>) -> (reg<vm.value : i64>)>}) @scalar_i64_shli_vgpr(%value_values: reg<vm.value x2 : vector<2xi64>>, %shift_values: reg<vm.value x2 : vector<2xi64>>) -> (reg<vm.value : i64>) asm {
+  %value = slice %value_values[0] : reg<vm.value x2 : vector<2xi64>> -> reg<vm.value : i64>
+  %shift = slice %shift_values[0] : reg<vm.value x2 : vector<2xi64>> -> reg<vm.value : i64>
+  %shifted = integer.shift.left.i64 %value, %shift : reg<vm.value : i64>
+  return %shifted
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_i64_muli_bitwise_vgpr(%lhs_values: vector<2xi64>, %rhs_values: vector<2xi64>, %mask_values: vector<2xi64>) -> (i64) {
+  %lhs = vector.extract %lhs_values[0] : vector<2xi64> -> i64
+  %rhs = vector.extract %rhs_values[0] : vector<2xi64> -> i64
+  %mask = vector.extract %mask_values[0] : vector<2xi64> -> i64
+  %product = scalar.muli %lhs, %rhs : i64
+  %mixed = scalar.xori %product, %mask : i64
+  func.return %mixed : i64
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x2 : vector<2xi64>>, reg<vm.value x2 : vector<2xi64>>, reg<vm.value x2 : vector<2xi64>>) -> (reg<vm.value : i64>)>}) @scalar_i64_muli_bitwise_vgpr(%lhs_values: reg<vm.value x2 : vector<2xi64>>, %rhs_values: reg<vm.value x2 : vector<2xi64>>, %mask_values: reg<vm.value x2 : vector<2xi64>>) -> (reg<vm.value : i64>) asm {
+  %lhs = slice %lhs_values[0] : reg<vm.value x2 : vector<2xi64>> -> reg<vm.value : i64>
+  %rhs = slice %rhs_values[0] : reg<vm.value x2 : vector<2xi64>> -> reg<vm.value : i64>
+  %mask = slice %mask_values[0] : reg<vm.value x2 : vector<2xi64>> -> reg<vm.value : i64>
+  %product = integer.mul.i64 %lhs, %rhs : reg<vm.value : i64>
+  %mixed = integer.xor.i64 %product, %mask : reg<vm.value : i64>
+  return %mixed
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_i64_compare_eq_scc(%lhs: i64, %rhs: i64) -> (i1) {
+  %cmp = scalar.cmpi eq, %lhs, %rhs : i64
+  func.return %cmp : i1
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i64>, reg<vm.value : i64>) -> (reg<vm.value : i1>)>}) @scalar_i64_compare_eq_scc(%lhs: reg<vm.value : i64>, %rhs: reg<vm.value : i64>) -> (reg<vm.value : i1>) asm {
+  %cmp = integer.compare.i64 %lhs, %rhs, eq : reg<vm.value : i1>
+  return %cmp
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_i64_compare_ne_scc(%lhs: i64, %rhs: i64) -> (i1) {
+  %cmp = scalar.cmpi ne, %lhs, %rhs : i64
+  func.return %cmp : i1
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i64>, reg<vm.value : i64>) -> (reg<vm.value : i1>)>}) @scalar_i64_compare_ne_scc(%lhs: reg<vm.value : i64>, %rhs: reg<vm.value : i64>) -> (reg<vm.value : i1>) asm {
+  %cmp = integer.compare.i64 %lhs, %rhs, ne : reg<vm.value : i1>
+  return %cmp
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_i64_compare_slt_return(%lhs: i64, %rhs: i64) -> (i1) {
+  %cmp = scalar.cmpi slt, %lhs, %rhs : i64
+  func.return %cmp : i1
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i64>, reg<vm.value : i64>) -> (reg<vm.value : i1>)>}) @scalar_i64_compare_slt_return(%lhs: reg<vm.value : i64>, %rhs: reg<vm.value : i64>) -> (reg<vm.value : i1>) asm {
+  %cmp = integer.compare.i64 %lhs, %rhs, slt : reg<vm.value : i1>
+  return %cmp
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_i64_compare_slt_if(%lhs: i64, %rhs: i64, %then_value: i32, %else_value: i32) -> (i32) {
+  %cmp = scalar.cmpi slt, %lhs, %rhs : i64
+  %result = scf.if %cmp -> (i32) {
+    scf.yield %then_value : i32
+  } else {
+    scf.yield %else_value : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i32>, reg<vm.value : i32>) -> (reg<vm.value : i32>)>}) @scalar_i64_compare_slt_if(%lhs: reg<vm.value : i64>, %rhs: reg<vm.value : i64>, %then_value: reg<vm.value : i32>, %else_value: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+  %cmp = integer.compare.i64 %lhs, %rhs, slt : reg<vm.value : i1>
+  %result = value.select %cmp, %then_value, %else_value : reg<vm.value : i32>
+  return %result
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_i64_compare_constant_select(%lhs: i64, %true_value: f32, %false_value: f32) -> (f32) {
+  %limit = scalar.constant 4294967296 : i64
+  %cmp = scalar.cmpi ult, %lhs, %limit : i64
+  %result = scf.select %cmp, %true_value, %false_value : f32
+  func.return %result : f32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i64>, reg<vm.value : f32>, reg<vm.value : f32>) -> (reg<vm.value : f32>)>}) @scalar_i64_compare_constant_select(%lhs: reg<vm.value : i64>, %true_value: reg<vm.value : f32>, %false_value: reg<vm.value : f32>) -> (reg<vm.value : f32>) asm {
+  %limit = constant.i64 0, 1 : reg<vm.value : i64>
+  %cmp = integer.compare.i64 %lhs, %limit, ult : reg<vm.value : i1>
+  %result = value.select %cmp, %true_value, %false_value : reg<vm.value : f32>
+  return %result
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_i64_compare_all_predicates_vgpr_select(%lhs_values: vector<2xi64>, %rhs_values: vector<2xi64>, %true_value: f32, %false_value: f32) -> (f32, f32, f32, f32, f32, f32, f32, f32, f32, f32) {
+  %lhs = vector.extract %lhs_values[0] : vector<2xi64> -> i64
+  %rhs = vector.extract %rhs_values[0] : vector<2xi64> -> i64
+  %eq = scalar.cmpi eq, %lhs, %rhs : i64
+  %ne = scalar.cmpi ne, %lhs, %rhs : i64
+  %slt = scalar.cmpi slt, %lhs, %rhs : i64
+  %sle = scalar.cmpi sle, %lhs, %rhs : i64
+  %sgt = scalar.cmpi sgt, %lhs, %rhs : i64
+  %sge = scalar.cmpi sge, %lhs, %rhs : i64
+  %ult = scalar.cmpi ult, %lhs, %rhs : i64
+  %ule = scalar.cmpi ule, %lhs, %rhs : i64
+  %ugt = scalar.cmpi ugt, %lhs, %rhs : i64
+  %uge = scalar.cmpi uge, %lhs, %rhs : i64
+  %eq_result = scf.select %eq, %true_value, %false_value : f32
+  %ne_result = scf.select %ne, %true_value, %false_value : f32
+  %slt_result = scf.select %slt, %true_value, %false_value : f32
+  %sle_result = scf.select %sle, %true_value, %false_value : f32
+  %sgt_result = scf.select %sgt, %true_value, %false_value : f32
+  %sge_result = scf.select %sge, %true_value, %false_value : f32
+  %ult_result = scf.select %ult, %true_value, %false_value : f32
+  %ule_result = scf.select %ule, %true_value, %false_value : f32
+  %ugt_result = scf.select %ugt, %true_value, %false_value : f32
+  %uge_result = scf.select %uge, %true_value, %false_value : f32
+  func.return %eq_result, %ne_result, %slt_result, %sle_result, %sgt_result, %sge_result, %ult_result, %ule_result, %ugt_result, %uge_result : f32, f32, f32, f32, f32, f32, f32, f32, f32, f32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x2 : vector<2xi64>>, reg<vm.value x2 : vector<2xi64>>, reg<vm.value : f32>, reg<vm.value : f32>) -> (reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>)>}) @scalar_i64_compare_all_predicates_vgpr_select(%lhs_values: reg<vm.value x2 : vector<2xi64>>, %rhs_values: reg<vm.value x2 : vector<2xi64>>, %true_value: reg<vm.value : f32>, %false_value: reg<vm.value : f32>) -> (reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>) asm {
+  %lhs = slice %lhs_values[0] : reg<vm.value x2 : vector<2xi64>> -> reg<vm.value : i64>
+  %rhs = slice %rhs_values[0] : reg<vm.value x2 : vector<2xi64>> -> reg<vm.value : i64>
+  %eq = integer.compare.i64 %lhs, %rhs, eq : reg<vm.value : i1>
+  %ne = integer.compare.i64 %lhs, %rhs, ne : reg<vm.value : i1>
+  %slt = integer.compare.i64 %lhs, %rhs, slt : reg<vm.value : i1>
+  %sle = integer.compare.i64 %lhs, %rhs, sle : reg<vm.value : i1>
+  %sgt = integer.compare.i64 %lhs, %rhs, sgt : reg<vm.value : i1>
+  %sge = integer.compare.i64 %lhs, %rhs, sge : reg<vm.value : i1>
+  %ult = integer.compare.i64 %lhs, %rhs, ult : reg<vm.value : i1>
+  %ule = integer.compare.i64 %lhs, %rhs, ule : reg<vm.value : i1>
+  %ugt = integer.compare.i64 %lhs, %rhs, ugt : reg<vm.value : i1>
+  %uge = integer.compare.i64 %lhs, %rhs, uge : reg<vm.value : i1>
+  %eq_result = value.select %eq, %true_value, %false_value : reg<vm.value : f32>
+  %ne_result = value.select %ne, %true_value, %false_value : reg<vm.value : f32>
+  %slt_result = value.select %slt, %true_value, %false_value : reg<vm.value : f32>
+  %sle_result = value.select %sle, %true_value, %false_value : reg<vm.value : f32>
+  %sgt_result = value.select %sgt, %true_value, %false_value : reg<vm.value : f32>
+  %sge_result = value.select %sge, %true_value, %false_value : reg<vm.value : f32>
+  %ult_result = value.select %ult, %true_value, %false_value : reg<vm.value : f32>
+  %ule_result = value.select %ule, %true_value, %false_value : reg<vm.value : f32>
+  %ugt_result = value.select %ugt, %true_value, %false_value : reg<vm.value : f32>
+  %uge_result = value.select %uge, %true_value, %false_value : reg<vm.value : f32>
+  return %eq_result, %ne_result, %slt_result, %sle_result, %sgt_result, %sge_result, %ult_result, %ule_result, %ugt_result, %uge_result
+}

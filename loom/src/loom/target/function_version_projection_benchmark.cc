@@ -96,6 +96,7 @@ static const loom_target_profile_type_t kTestProfileType = {
 };
 
 static const loom_target_provider_t kTestProvider = {
+    /*.fact_type=*/&loom_test_target_fact_type,
     /*.profile_type=*/&kTestProfileType,
     /*.materialize_definition=*/MaterializeTestTargetDefinition,
 };
@@ -127,7 +128,8 @@ static loom_func_like_t AddFunction(loom_module_t* module,
       /*cc=*/0, /*purity=*/0, /*temperature=*/0, /*inline_policy=*/0,
       target_ref, /*abi=*/0, loom_named_attr_slice_empty(),
       /*export_symbol=*/LOOM_STRING_ID_INVALID, loom_named_attr_slice_empty(),
-      symbol, &value_type, /*arg_types_count=*/1, &value_type,
+      loom_named_attr_slice_empty(), symbol, &value_type,
+      /*arg_types_count=*/1, &value_type,
       /*result_count=*/1, /*tied_results=*/nullptr,
       /*tied_result_count=*/0, /*predicates=*/nullptr,
       /*predicates_count=*/0, LOOM_LOCATION_UNKNOWN, &function_op));
@@ -255,6 +257,11 @@ class FunctionVersionProjectionFixture {
             },
             /*.target_context_ordinal=*/
             static_cast<loom_target_context_ordinal_t>(context_ordinal),
+            /*.target_binding_source=*/
+            static_cast<loom_target_binding_source_t>(
+                authored_target_is_exact
+                    ? LOOM_TARGET_BINDING_SOURCE_AUTHORED
+                    : LOOM_TARGET_BINDING_SOURCE_SPECIALIZATION),
             /*.authored_target_is_exact=*/authored_target_is_exact,
             /*.function_target_facts=*/&facts_[context_ordinal],
         };

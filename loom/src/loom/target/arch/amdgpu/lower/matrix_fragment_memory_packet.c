@@ -190,7 +190,7 @@ loom_scalar_type_t loom_amdgpu_fragment_memory_store_narrow_result_element_type(
     case LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_NARROW_F32_TO_F16:
       return LOOM_SCALAR_TYPE_F16;
     default:
-      return LOOM_SCALAR_TYPE_COUNT_;
+      return LOOM_SCALAR_TYPE_NONE;
   }
 }
 
@@ -202,7 +202,7 @@ loom_scalar_type_t loom_amdgpu_fragment_memory_load_fp8_result_element_type(
     case LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_LOAD_FP8_TO_F16:
       return LOOM_SCALAR_TYPE_F16;
     default:
-      return LOOM_SCALAR_TYPE_COUNT_;
+      return LOOM_SCALAR_TYPE_NONE;
   }
 }
 

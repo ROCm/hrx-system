@@ -1,0 +1,74 @@
+// RUN: pass vm-materialize-constant-pool
+
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) @profitable() -> (reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>) asm {
+  %a = constant.i64 2596069104, 305419896 : reg<vm.value : i64>
+  %b = constant.i64 2596069104, 305419896 : reg<vm.value : i64>
+  %c = constant.i64 2596069104, 305419896 : reg<vm.value : i64>
+  %d = constant.i64 2596069104, 305419896 : reg<vm.value : i64>
+  return %a, %b, %c, %d
+}
+
+// ----
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) @profitable() -> (reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>) asm {
+  %a = constant.pool.load.i64 0 : reg<vm.value : i64>
+  %b = constant.pool.load.i64 0 : reg<vm.value : i64>
+  %c = constant.pool.load.i64 0 : reg<vm.value : i64>
+  %d = constant.pool.load.i64 0 : reg<vm.value : i64>
+  return %a, %b, %c, %d
+}
+vm.constant 0 = 1311768467463790320
+
+// ====
+
+// RUN: pass vm-materialize-constant-pool
+
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) @not_profitable() -> (reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>) asm {
+  %a = constant.i64 2596069104, 305419896 : reg<vm.value : i64>
+  %b = constant.i64 2596069104, 305419896 : reg<vm.value : i64>
+  %c = constant.i64 2596069104, 305419896 : reg<vm.value : i64>
+  return %a, %b, %c
+}
+
+// ----
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) @not_profitable() -> (reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>) asm {
+  %a = constant.i64 2596069104, 305419896 : reg<vm.value : i64>
+  %b = constant.i64 2596069104, 305419896 : reg<vm.value : i64>
+  %c = constant.i64 2596069104, 305419896 : reg<vm.value : i64>
+  return %a, %b, %c
+}
+
+// ====
+
+// RUN: pass vm-materialize-constant-pool
+
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) @mixed_inline_widths() -> (reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>) asm {
+  %a = constant.i32 305419896 : reg<vm.value : i64>
+  %b = constant.i64 305419896, 0 : reg<vm.value : i64>
+  %c = constant.i64 305419896, 0 : reg<vm.value : i64>
+  %d = constant.i64 305419896, 0 : reg<vm.value : i64>
+  %e = constant.i64 305419896, 0 : reg<vm.value : i64>
+  return %a, %b, %c, %d, %e
+}
+
+// ----
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) @mixed_inline_widths() -> (reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>) asm {
+  %a = constant.pool.load.i32 0 : reg<vm.value : i64>
+  %b = constant.pool.load.i64 0 : reg<vm.value : i64>
+  %c = constant.pool.load.i64 0 : reg<vm.value : i64>
+  %d = constant.pool.load.i64 0 : reg<vm.value : i64>
+  %e = constant.pool.load.i64 0 : reg<vm.value : i64>
+  return %a, %b, %c, %d, %e
+}
+vm.constant 0 = 305419896

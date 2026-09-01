@@ -29,6 +29,7 @@ from loom.target.low_descriptors import (
     LOW_DESCRIPTOR_ENCODING_ID_NONE,
     LOW_DESCRIPTOR_SET_ORDINAL_NONE,
     AsmForm,
+    AsmImmediateFlag,
     Constraint,
     ConstraintKind,
     Descriptor,
@@ -106,6 +107,7 @@ _SEMANTIC_INSTRUCTION_CLASSES = (
     ("memory.hal", (InstructionClass.GENERIC_MEMORY,)),
     ("control.branch", (InstructionClass.BRANCH,)),
     ("control.cond_branch", (InstructionClass.BRANCH,)),
+    ("control.switch", (InstructionClass.BRANCH,)),
     ("control.return", (InstructionClass.BRANCH,)),
     ("control.call", (InstructionClass.BRANCH,)),
     ("control.barrier", (InstructionClass.BARRIER,)),
@@ -619,6 +621,8 @@ def _compile_asm_form(
         immediate_index = immediate_indices.get(immediate.field_name)
         if immediate_index is None:
             raise ValueError(f"descriptor '{descriptor.key}' asm form '{mnemonic}' immediate references unknown immediate field '{immediate.field_name}'")
+        if AsmImmediateFlag.ENUM_TOKEN in immediate.flags and descriptor.immediates[immediate_index].kind is not ImmediateKind.ENUM:
+            raise ValueError(f"descriptor '{descriptor.key}' asm form '{mnemonic}' immediate '{immediate.field_name}' requests enum-token spelling for a non-enum field")
         name_label = None
         if immediate.name is not None:
             if immediate.name == "":
@@ -637,6 +641,7 @@ def _compile_asm_form(
                 immediate_index=immediate_index,
                 name_label=name_label,
                 name=immediate.name,
+                flags=immediate.flags,
             )
         )
 
@@ -903,7 +908,7 @@ def compile_descriptor_set(
             result_count,
         )
         rematerializable_results_by_descriptor[descriptor.key] = validation.validate_descriptor_constraints(descriptor)
-        validation.validate_descriptor_op_kind(descriptor, result_count)
+        validation.validate_descriptor_carrier(descriptor, result_count)
         validation.validate_descriptor_storage_continuations(
             descriptor,
             register_part_inputs,

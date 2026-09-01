@@ -88,6 +88,50 @@ class PrepareTest(unittest.TestCase):
                 self.assertEqual(call.kwargs["cwd"], prepare.REPO_ROOT)
                 self.assertTrue(call.kwargs["check"])
 
+    def test_vm_reference_is_generated_into_isolated_build_tree(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            work_root = Path(temporary_directory) / "work"
+            output_root = work_root / "vm-reference"
+            stale_output = output_root / "stale.md"
+            stale_output.parent.mkdir(parents=True)
+            stale_output.touch()
+
+            def generate_documents(*args, **kwargs) -> None:
+                del args, kwargs
+                for path in prepare.VM_SPEC_REQUIRED_DOCUMENTS:
+                    output_path = output_root / path
+                    output_path.parent.mkdir(parents=True, exist_ok=True)
+                    output_path.touch()
+
+            with mock.patch.object(
+                prepare.subprocess,
+                "run",
+                side_effect=generate_documents,
+            ) as run:
+                result = prepare._generate_vm_reference(work_root)
+
+            self.assertEqual(result, output_root)
+            self.assertFalse(stale_output.exists())
+            run.assert_called_once_with(
+                [
+                    prepare.sys.executable,
+                    str(prepare.VM_SPEC_GENERATOR),
+                    "--output-kind=documentation",
+                    f"--output-directory={output_root}",
+                ],
+                cwd=prepare.REPO_ROOT,
+                check=True,
+            )
+
+    def test_vm_reference_requires_the_complete_navigation_surface(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            work_root = Path(temporary_directory) / "work"
+            with (
+                mock.patch.object(prepare.subprocess, "run"),
+                self.assertRaisesRegex(FileNotFoundError, "module-format.md"),
+            ):
+                prepare._generate_vm_reference(work_root)
+
     def test_live_reload_does_not_watch_generated_source(self) -> None:
         server = _FakeServer()
 
@@ -102,6 +146,16 @@ class PrepareTest(unittest.TestCase):
             server.unwatched_paths,
             ["/generated/loom-docs/mkdocs-source"],
         )
+
+    def test_generated_vm_reference_has_no_source_edit_link(self) -> None:
+        page = mock.Mock()
+        page.file.src_path = "reference/vm/isa/core/control.md"
+        page.edit_url = "https://example.invalid/edit"
+
+        context = prepare.on_page_context({}, page, {}, None)
+
+        self.assertEqual(context, {})
+        self.assertIsNone(page.edit_url)
 
 
 if __name__ == "__main__":

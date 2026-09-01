@@ -56,6 +56,10 @@ typedef struct loom_target_entry_t {
   loom_symbol_ref_t func_ref;
   // Concrete target-refined function version, or NULL when unrefined.
   const loom_target_function_version_t* function_version;
+
+  // Position of |function_version| in the emission function-version list.
+  loom_function_version_ordinal_t function_version_ordinal;
+
   // Immutable function target facts selected for this function.
   const loom_target_facts_t* target_facts;
 } loom_target_entry_t;
@@ -134,13 +138,12 @@ iree_status_t loom_target_entry_verify_module(
 // policy from |options|. Status is reserved for infrastructure failures;
 // verification errors are reported through |out_result|.
 iree_status_t loom_target_entry_verify_low_module(
-    const loom_module_t* module,
-    const loom_target_low_descriptor_registry_t* low_registry,
+    loom_module_t* module, const loom_low_descriptor_registry_t* low_registry,
     const loom_target_entry_options_t* options,
     loom_target_entry_diagnostic_emitter_t* diagnostic_emitter,
     uint32_t default_max_errors,
     loom_low_verify_provider_list_t low_verify_provider_list,
-    loom_low_verify_scratch_t* scratch, loom_low_verify_result_t* out_result);
+    loom_low_verify_result_t* out_result);
 
 // Selects either the named func entry or the only compatible func entry
 // according to |predicate|.

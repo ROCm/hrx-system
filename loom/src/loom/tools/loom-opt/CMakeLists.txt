@@ -18,6 +18,7 @@ loom_cc_binary(
     iree::base
     iree::base::tooling::flags
     iree::io::file_handle
+    loom::codegen::low::pipeline::legalizer_registry
     loom::codegen::low::pipeline::pass_environment
     loom::codegen::low::text_asm
     loom::codegen::low::verify
@@ -53,6 +54,8 @@ iree_execution_test_suite(
     "loom-opt.test.json"
   TOOLS
     "loom-opt=::loom-opt"
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-opt/testdata/function_source_presentation.loom"
   LABELS
     "hostonly"
 )

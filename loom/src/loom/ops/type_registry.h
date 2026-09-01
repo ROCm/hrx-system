@@ -54,6 +54,39 @@ static inline bool loom_low_storage_type_space_parse(iree_string_view_t name, lo
   return true;
 }
 
+// Function-reference yieldability. Absent (0) guarantees synchronous execution.
+typedef enum loom_func_ref_type_yieldability_e {
+  LOOM_FUNC_REF_TYPE_YIELDABILITY_YIELDABLE = 1,
+  LOOM_FUNC_REF_TYPE_YIELDABILITY_COUNT_ = 2,
+} loom_func_ref_type_yieldability_t;
+
+extern const loom_parameterized_type_descriptor_t loom_func_ref_type_parameterized_descriptor;
+enum loom_func_ref_type_build_flag_bits_e {
+  LOOM_FUNC_REF_TYPE_BUILD_FLAG_HAS_YIELDABILITY = 1u << 0,
+};
+typedef uint32_t loom_func_ref_type_build_flags_t;
+
+static inline bool loom_func_ref_type_isa(loom_type_t type) {
+  return loom_type_is_parameterized(type) && loom_type_parameterized_descriptor(type) == &loom_func_ref_type_parameterized_descriptor;
+}
+enum { LOOM_FUNC_REF_TYPE_YIELDABILITY_PARAMETER_INDEX = 0 };
+static inline bool loom_func_ref_type_has_yieldability(loom_type_t type) {
+  return !loom_attr_is_absent(loom_type_parameterized_parameters(type)[LOOM_FUNC_REF_TYPE_YIELDABILITY_PARAMETER_INDEX]);
+}
+static inline loom_func_ref_type_yieldability_t loom_func_ref_type_yieldability(loom_type_t type) {
+  return (loom_func_ref_type_yieldability_t)loom_attr_as_enum(loom_type_parameterized_parameters(type)[LOOM_FUNC_REF_TYPE_YIELDABILITY_PARAMETER_INDEX]);
+}
+enum { LOOM_FUNC_REF_TYPE_SIGNATURE_PARAMETER_INDEX = 1 };
+static inline loom_type_id_t loom_func_ref_type_signature(loom_type_t type) {
+  return loom_attr_as_type_id(loom_type_parameterized_parameters(type)[LOOM_FUNC_REF_TYPE_SIGNATURE_PARAMETER_INDEX]);
+}
+iree_status_t loom_func_ref_type_make(
+    loom_module_t* module,
+    loom_func_ref_type_build_flags_t build_flags,
+    loom_func_ref_type_yieldability_t yieldability,
+    loom_type_id_t signature,
+    loom_type_t* out_type);
+
 // Returns the number of entries in the common type registry.
 iree_host_size_t loom_type_registry_count(void);
 
@@ -75,6 +108,11 @@ const loom_type_descriptor_t* loom_type_registry_lookup(
 // Returns NULL for dialect, generic parameterized, or invalid kinds.
 const loom_type_descriptor_t* loom_type_registry_lookup_builtin(
     loom_type_kind_t kind);
+
+// Resolves the registered descriptor for |type|.
+// Returns NULL when the type is malformed or is not registered.
+const loom_type_descriptor_t* loom_type_registry_resolve(
+    const loom_module_t* module, loom_type_t type);
 
 // Resolves the type-owned value fact domain for |type|, or NULL if the
 // registered type has no extension fact domain.

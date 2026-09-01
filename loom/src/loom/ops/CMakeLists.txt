@@ -225,6 +225,7 @@ loom_cc_library(
     loom::ops::index
     loom::ops::kernel
     loom::ops::low
+    loom::ops::metadata
     loom::ops::pass
     loom::ops::pool
     loom::ops::sanitizer
@@ -300,6 +301,7 @@ loom_cc_test(
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::ir
     loom::ops::buffer
     loom::ops::func
     loom::ops::index

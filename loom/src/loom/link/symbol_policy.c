@@ -63,6 +63,7 @@ void loom_link_symbol_internalize(loom_module_t* module, loom_op_t* op) {
     const uint8_t export_attr_indices[] = {
         function.vtable->export_symbol_attr_index,
         function.vtable->export_attrs_attr_index,
+        function.vtable->export_metadata_attr_index,
         function.vtable->export_linkage_attr_index,
     };
     for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(export_attr_indices); ++i) {

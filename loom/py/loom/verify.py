@@ -195,6 +195,12 @@ class ModuleVerifier:
             if declaration is None or declaration.keyed_module_record_attr is None:
                 continue
             key = operation.attributes[declaration.keyed_module_record_attr]
+            if not key:
+                self.diagnostics.error(
+                    "keyed module record key must be non-empty",
+                    source=f"module operation[{operation_index}] {operation.name}",
+                )
+                continue
             identity = (operation.name, key)
             previous_index = seen.get(identity)
             if previous_index is not None:
@@ -1124,6 +1130,8 @@ def _scalar_satisfies_constraint(
         return scalar_kind in _INTEGER_SCALAR_KINDS
     if constraint == TypeConstraint.FLOAT:
         return scalar_kind in _FLOAT_SCALAR_KINDS
+    if constraint == TypeConstraint.PAYLOAD_SCALAR:
+        return scalar_kind in _PAYLOAD_SCALAR_KINDS
     if constraint == TypeConstraint.BITWISE_SCALAR:
         return scalar_kind in _BITWISE_SCALAR_KINDS
     if constraint == TypeConstraint.BYTE_PATTERN_SCALAR:
@@ -1199,6 +1207,8 @@ _FLOAT_SCALAR_KINDS = frozenset(
         ScalarTypeKind.F64,
     }
 )
+
+_PAYLOAD_SCALAR_KINDS = _INTEGER_SCALAR_KINDS | _FLOAT_SCALAR_KINDS
 
 _BYTE_PATTERN_SCALAR_KINDS = frozenset(
     {

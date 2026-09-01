@@ -1,0 +1,279 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/vector_dot.loom-test
+// RUN: emit source-low output=low
+
+vm.target<core> @target
+func.def target(@target) @f32_dotf(%lhs: vector<4xf32>, %rhs: vector<4xf32>, %acc: f32) -> (f32) {
+  %dot = vector.dotf %lhs, %rhs, %acc : vector<4xf32>, vector<4xf32>, f32
+  func.return %dot : f32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x4 : vector<4xf32>>, reg<vm.value x4 : vector<4xf32>>, reg<vm.value : f32>) -> (reg<vm.value : f32>)>}) @f32_dotf(%lhs: reg<vm.value x4 : vector<4xf32>>, %rhs: reg<vm.value x4 : vector<4xf32>>, %acc: reg<vm.value : f32>) -> (reg<vm.value : f32>) asm {
+  %21 = slice %lhs[0] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %22 = slice %rhs[0] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %23 = float.math.ternary.f32 %21, %22, %acc, fma : reg<vm.value : f32>
+  %24 = slice %lhs[1] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %25 = slice %rhs[1] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %26 = float.math.ternary.f32 %24, %25, %23, fma : reg<vm.value : f32>
+  %27 = slice %lhs[2] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %28 = slice %rhs[2] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %29 = float.math.ternary.f32 %27, %28, %26, fma : reg<vm.value : f32>
+  %30 = slice %lhs[3] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %31 = slice %rhs[3] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %dot = float.math.ternary.f32 %30, %31, %29, fma : reg<vm.value : f32>
+  return %dot
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @f32_dotf_zero_seed(%lhs: vector<4xf32>, %rhs: vector<4xf32>) -> (f32) {
+  %initial_accumulator = scalar.constant 0.0 : f32
+  %dot = vector.dotf %lhs, %rhs, %initial_accumulator : vector<4xf32>, vector<4xf32>, f32
+  func.return %dot : f32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x4 : vector<4xf32>>, reg<vm.value x4 : vector<4xf32>>) -> (reg<vm.value : f32>)>}) @f32_dotf_zero_seed(%lhs: reg<vm.value x4 : vector<4xf32>>, %rhs: reg<vm.value x4 : vector<4xf32>>) -> (reg<vm.value : f32>) asm {
+  %initial_accumulator = constant.zero : reg<vm.value : f32>
+  %21 = slice %lhs[0] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %22 = slice %rhs[0] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %23 = float.math.ternary.f32 %21, %22, %initial_accumulator, fma : reg<vm.value : f32>
+  %24 = slice %lhs[1] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %25 = slice %rhs[1] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %26 = float.math.ternary.f32 %24, %25, %23, fma : reg<vm.value : f32>
+  %27 = slice %lhs[2] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %28 = slice %rhs[2] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %29 = float.math.ternary.f32 %27, %28, %26, fma : reg<vm.value : f32>
+  %30 = slice %lhs[3] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %31 = slice %rhs[3] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %dot = float.math.ternary.f32 %30, %31, %29, fma : reg<vm.value : f32>
+  return %dot
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @f32_contract_product_reduce(%lhs: vector<8xf32>, %rhs: vector<8xf32>, %acc: f32) -> (f32) {
+  %product = vector.mulf<reassoc|nnan|ninf|nsz|contract> %lhs, %rhs : vector<8xf32>
+  %dot = vector.reduce<addf, reassoc|nnan|ninf|nsz|contract> %product, %acc : vector<8xf32>, f32
+  func.return %dot : f32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x8 : vector<8xf32>>, reg<vm.value x8 : vector<8xf32>>, reg<vm.value : f32>) -> (reg<vm.value : f32>)>}) @f32_contract_product_reduce(%lhs: reg<vm.value x8 : vector<8xf32>>, %rhs: reg<vm.value x8 : vector<8xf32>>, %acc: reg<vm.value : f32>) -> (reg<vm.value : f32>) asm {
+  %35 = slice %lhs[0] : reg<vm.value x8 : vector<8xf32>> -> reg<vm.value : f32>
+  %36 = slice %rhs[0] : reg<vm.value x8 : vector<8xf32>> -> reg<vm.value : f32>
+  %37 = float.math.ternary.f32 %35, %36, %acc, fma : reg<vm.value : f32>
+  %38 = slice %lhs[1] : reg<vm.value x8 : vector<8xf32>> -> reg<vm.value : f32>
+  %39 = slice %rhs[1] : reg<vm.value x8 : vector<8xf32>> -> reg<vm.value : f32>
+  %40 = float.math.ternary.f32 %38, %39, %37, fma : reg<vm.value : f32>
+  %41 = slice %lhs[2] : reg<vm.value x8 : vector<8xf32>> -> reg<vm.value : f32>
+  %42 = slice %rhs[2] : reg<vm.value x8 : vector<8xf32>> -> reg<vm.value : f32>
+  %43 = float.math.ternary.f32 %41, %42, %40, fma : reg<vm.value : f32>
+  %44 = slice %lhs[3] : reg<vm.value x8 : vector<8xf32>> -> reg<vm.value : f32>
+  %45 = slice %rhs[3] : reg<vm.value x8 : vector<8xf32>> -> reg<vm.value : f32>
+  %46 = float.math.ternary.f32 %44, %45, %43, fma : reg<vm.value : f32>
+  %47 = slice %lhs[4] : reg<vm.value x8 : vector<8xf32>> -> reg<vm.value : f32>
+  %48 = slice %rhs[4] : reg<vm.value x8 : vector<8xf32>> -> reg<vm.value : f32>
+  %49 = float.math.ternary.f32 %47, %48, %46, fma : reg<vm.value : f32>
+  %50 = slice %lhs[5] : reg<vm.value x8 : vector<8xf32>> -> reg<vm.value : f32>
+  %51 = slice %rhs[5] : reg<vm.value x8 : vector<8xf32>> -> reg<vm.value : f32>
+  %52 = float.math.ternary.f32 %50, %51, %49, fma : reg<vm.value : f32>
+  %53 = slice %lhs[6] : reg<vm.value x8 : vector<8xf32>> -> reg<vm.value : f32>
+  %54 = slice %rhs[6] : reg<vm.value x8 : vector<8xf32>> -> reg<vm.value : f32>
+  %55 = float.math.ternary.f32 %53, %54, %52, fma : reg<vm.value : f32>
+  %56 = slice %lhs[7] : reg<vm.value x8 : vector<8xf32>> -> reg<vm.value : f32>
+  %57 = slice %rhs[7] : reg<vm.value x8 : vector<8xf32>> -> reg<vm.value : f32>
+  %dot = float.math.ternary.f32 %56, %57, %55, fma : reg<vm.value : f32>
+  return %dot
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @f32_exact_product_reduce(%lhs: vector<4xf32>, %rhs: vector<4xf32>, %acc: f32) -> (f32) {
+  %product = vector.mulf %lhs, %rhs : vector<4xf32>
+  %dot = vector.reduce<addf> %product, %acc : vector<4xf32>, f32
+  func.return %dot : f32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x4 : vector<4xf32>>, reg<vm.value x4 : vector<4xf32>>, reg<vm.value : f32>) -> (reg<vm.value : f32>)>}) @f32_exact_product_reduce(%lhs: reg<vm.value x4 : vector<4xf32>>, %rhs: reg<vm.value x4 : vector<4xf32>>, %acc: reg<vm.value : f32>) -> (reg<vm.value : f32>) asm {
+  %26 = slice %lhs[0] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %27 = slice %rhs[0] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %28 = float.mul.f32 %26, %27 : reg<vm.value : f32>
+  %29 = float.add.f32 %acc, %28 : reg<vm.value : f32>
+  %30 = slice %lhs[1] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %31 = slice %rhs[1] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %32 = float.mul.f32 %30, %31 : reg<vm.value : f32>
+  %33 = float.add.f32 %29, %32 : reg<vm.value : f32>
+  %34 = slice %lhs[2] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %35 = slice %rhs[2] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %36 = float.mul.f32 %34, %35 : reg<vm.value : f32>
+  %37 = float.add.f32 %33, %36 : reg<vm.value : f32>
+  %38 = slice %lhs[3] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %39 = slice %rhs[3] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %40 = float.mul.f32 %38, %39 : reg<vm.value : f32>
+  %dot = float.add.f32 %37, %40 : reg<vm.value : f32>
+  return %dot
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @f16_dot2f(%lhs: vector<8xf16>, %rhs: vector<8xf16>, %acc: vector<4xf32>) -> (vector<4xf32>) {
+  %dot = vector.dot2f %lhs, %rhs, %acc : vector<8xf16>, vector<8xf16>, vector<4xf32>
+  func.return %dot : vector<4xf32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x8 : vector<8xf16>>, reg<vm.value x8 : vector<8xf16>>, reg<vm.value x4 : vector<4xf32>>) -> (reg<vm.value x4 : vector<4xf32>>)>}) @f16_dot2f(%lhs: reg<vm.value x8 : vector<8xf16>>, %rhs: reg<vm.value x8 : vector<8xf16>>, %acc: reg<vm.value x4 : vector<4xf32>>) -> (reg<vm.value x4 : vector<4xf32>>) asm {
+  %54 = slice %acc[0] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %55 = slice %lhs[0] : reg<vm.value x8 : vector<8xf16>> -> reg<vm.value : f16>
+  %56 = slice %rhs[0] : reg<vm.value x8 : vector<8xf16>> -> reg<vm.value : f16>
+  %57 = conversion.float.extend %55, f16.to.f32 : reg<vm.value : f32>
+  %58 = conversion.float.extend %56, f16.to.f32 : reg<vm.value : f32>
+  %59 = float.math.ternary.f32 %57, %58, %54, fma : reg<vm.value : f32>
+  %60 = slice %lhs[1] : reg<vm.value x8 : vector<8xf16>> -> reg<vm.value : f16>
+  %61 = slice %rhs[1] : reg<vm.value x8 : vector<8xf16>> -> reg<vm.value : f16>
+  %62 = conversion.float.extend %60, f16.to.f32 : reg<vm.value : f32>
+  %63 = conversion.float.extend %61, f16.to.f32 : reg<vm.value : f32>
+  %64 = float.math.ternary.f32 %62, %63, %59, fma : reg<vm.value : f32>
+  %65 = slice %acc[1] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %66 = slice %lhs[2] : reg<vm.value x8 : vector<8xf16>> -> reg<vm.value : f16>
+  %67 = slice %rhs[2] : reg<vm.value x8 : vector<8xf16>> -> reg<vm.value : f16>
+  %68 = conversion.float.extend %66, f16.to.f32 : reg<vm.value : f32>
+  %69 = conversion.float.extend %67, f16.to.f32 : reg<vm.value : f32>
+  %70 = float.math.ternary.f32 %68, %69, %65, fma : reg<vm.value : f32>
+  %71 = slice %lhs[3] : reg<vm.value x8 : vector<8xf16>> -> reg<vm.value : f16>
+  %72 = slice %rhs[3] : reg<vm.value x8 : vector<8xf16>> -> reg<vm.value : f16>
+  %73 = conversion.float.extend %71, f16.to.f32 : reg<vm.value : f32>
+  %74 = conversion.float.extend %72, f16.to.f32 : reg<vm.value : f32>
+  %75 = float.math.ternary.f32 %73, %74, %70, fma : reg<vm.value : f32>
+  %76 = slice %acc[2] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %77 = slice %lhs[4] : reg<vm.value x8 : vector<8xf16>> -> reg<vm.value : f16>
+  %78 = slice %rhs[4] : reg<vm.value x8 : vector<8xf16>> -> reg<vm.value : f16>
+  %79 = conversion.float.extend %77, f16.to.f32 : reg<vm.value : f32>
+  %80 = conversion.float.extend %78, f16.to.f32 : reg<vm.value : f32>
+  %81 = float.math.ternary.f32 %79, %80, %76, fma : reg<vm.value : f32>
+  %82 = slice %lhs[5] : reg<vm.value x8 : vector<8xf16>> -> reg<vm.value : f16>
+  %83 = slice %rhs[5] : reg<vm.value x8 : vector<8xf16>> -> reg<vm.value : f16>
+  %84 = conversion.float.extend %82, f16.to.f32 : reg<vm.value : f32>
+  %85 = conversion.float.extend %83, f16.to.f32 : reg<vm.value : f32>
+  %86 = float.math.ternary.f32 %84, %85, %81, fma : reg<vm.value : f32>
+  %87 = slice %acc[3] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %88 = slice %lhs[6] : reg<vm.value x8 : vector<8xf16>> -> reg<vm.value : f16>
+  %89 = slice %rhs[6] : reg<vm.value x8 : vector<8xf16>> -> reg<vm.value : f16>
+  %90 = conversion.float.extend %88, f16.to.f32 : reg<vm.value : f32>
+  %91 = conversion.float.extend %89, f16.to.f32 : reg<vm.value : f32>
+  %92 = float.math.ternary.f32 %90, %91, %87, fma : reg<vm.value : f32>
+  %93 = slice %lhs[7] : reg<vm.value x8 : vector<8xf16>> -> reg<vm.value : f16>
+  %94 = slice %rhs[7] : reg<vm.value x8 : vector<8xf16>> -> reg<vm.value : f16>
+  %95 = conversion.float.extend %93, f16.to.f32 : reg<vm.value : f32>
+  %96 = conversion.float.extend %94, f16.to.f32 : reg<vm.value : f32>
+  %97 = float.math.ternary.f32 %95, %96, %92, fma : reg<vm.value : f32>
+  %dot = concat(%64, %75, %86, %97) : (reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>) -> reg<vm.value x4 : vector<4xf32>>
+  return %dot
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @bf16_dot2f(%lhs: vector<8xbf16>, %rhs: vector<8xbf16>, %acc: vector<4xf32>) -> (vector<4xf32>) {
+  %dot = vector.dot2f %lhs, %rhs, %acc : vector<8xbf16>, vector<8xbf16>, vector<4xf32>
+  func.return %dot : vector<4xf32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x8 : vector<8xbf16>>, reg<vm.value x8 : vector<8xbf16>>, reg<vm.value x4 : vector<4xf32>>) -> (reg<vm.value x4 : vector<4xf32>>)>}) @bf16_dot2f(%lhs: reg<vm.value x8 : vector<8xbf16>>, %rhs: reg<vm.value x8 : vector<8xbf16>>, %acc: reg<vm.value x4 : vector<4xf32>>) -> (reg<vm.value x4 : vector<4xf32>>) asm {
+  %54 = slice %acc[0] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %55 = slice %lhs[0] : reg<vm.value x8 : vector<8xbf16>> -> reg<vm.value : bf16>
+  %56 = slice %rhs[0] : reg<vm.value x8 : vector<8xbf16>> -> reg<vm.value : bf16>
+  %57 = conversion.float.extend %55, bf16.to.f32 : reg<vm.value : f32>
+  %58 = conversion.float.extend %56, bf16.to.f32 : reg<vm.value : f32>
+  %59 = float.math.ternary.f32 %57, %58, %54, fma : reg<vm.value : f32>
+  %60 = slice %lhs[1] : reg<vm.value x8 : vector<8xbf16>> -> reg<vm.value : bf16>
+  %61 = slice %rhs[1] : reg<vm.value x8 : vector<8xbf16>> -> reg<vm.value : bf16>
+  %62 = conversion.float.extend %60, bf16.to.f32 : reg<vm.value : f32>
+  %63 = conversion.float.extend %61, bf16.to.f32 : reg<vm.value : f32>
+  %64 = float.math.ternary.f32 %62, %63, %59, fma : reg<vm.value : f32>
+  %65 = slice %acc[1] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %66 = slice %lhs[2] : reg<vm.value x8 : vector<8xbf16>> -> reg<vm.value : bf16>
+  %67 = slice %rhs[2] : reg<vm.value x8 : vector<8xbf16>> -> reg<vm.value : bf16>
+  %68 = conversion.float.extend %66, bf16.to.f32 : reg<vm.value : f32>
+  %69 = conversion.float.extend %67, bf16.to.f32 : reg<vm.value : f32>
+  %70 = float.math.ternary.f32 %68, %69, %65, fma : reg<vm.value : f32>
+  %71 = slice %lhs[3] : reg<vm.value x8 : vector<8xbf16>> -> reg<vm.value : bf16>
+  %72 = slice %rhs[3] : reg<vm.value x8 : vector<8xbf16>> -> reg<vm.value : bf16>
+  %73 = conversion.float.extend %71, bf16.to.f32 : reg<vm.value : f32>
+  %74 = conversion.float.extend %72, bf16.to.f32 : reg<vm.value : f32>
+  %75 = float.math.ternary.f32 %73, %74, %70, fma : reg<vm.value : f32>
+  %76 = slice %acc[2] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %77 = slice %lhs[4] : reg<vm.value x8 : vector<8xbf16>> -> reg<vm.value : bf16>
+  %78 = slice %rhs[4] : reg<vm.value x8 : vector<8xbf16>> -> reg<vm.value : bf16>
+  %79 = conversion.float.extend %77, bf16.to.f32 : reg<vm.value : f32>
+  %80 = conversion.float.extend %78, bf16.to.f32 : reg<vm.value : f32>
+  %81 = float.math.ternary.f32 %79, %80, %76, fma : reg<vm.value : f32>
+  %82 = slice %lhs[5] : reg<vm.value x8 : vector<8xbf16>> -> reg<vm.value : bf16>
+  %83 = slice %rhs[5] : reg<vm.value x8 : vector<8xbf16>> -> reg<vm.value : bf16>
+  %84 = conversion.float.extend %82, bf16.to.f32 : reg<vm.value : f32>
+  %85 = conversion.float.extend %83, bf16.to.f32 : reg<vm.value : f32>
+  %86 = float.math.ternary.f32 %84, %85, %81, fma : reg<vm.value : f32>
+  %87 = slice %acc[3] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %88 = slice %lhs[6] : reg<vm.value x8 : vector<8xbf16>> -> reg<vm.value : bf16>
+  %89 = slice %rhs[6] : reg<vm.value x8 : vector<8xbf16>> -> reg<vm.value : bf16>
+  %90 = conversion.float.extend %88, bf16.to.f32 : reg<vm.value : f32>
+  %91 = conversion.float.extend %89, bf16.to.f32 : reg<vm.value : f32>
+  %92 = float.math.ternary.f32 %90, %91, %87, fma : reg<vm.value : f32>
+  %93 = slice %lhs[7] : reg<vm.value x8 : vector<8xbf16>> -> reg<vm.value : bf16>
+  %94 = slice %rhs[7] : reg<vm.value x8 : vector<8xbf16>> -> reg<vm.value : bf16>
+  %95 = conversion.float.extend %93, bf16.to.f32 : reg<vm.value : f32>
+  %96 = conversion.float.extend %94, bf16.to.f32 : reg<vm.value : f32>
+  %97 = float.math.ternary.f32 %95, %96, %92, fma : reg<vm.value : f32>
+  %dot = concat(%64, %75, %86, %97) : (reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>) -> reg<vm.value x4 : vector<4xf32>>
+  return %dot
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @f32_uniform_smem_vector_operands(%lhs: vector<4xf32>, %weights: buffer) -> (f32) {
+  %base = index.constant 0 : offset
+  %weights_global = buffer.assume.memory_space<global> %weights : buffer
+  %weights_noalias = buffer.assume.noalias %weights_global : buffer
+  %weights_view = buffer.view %weights_noalias[%base] : buffer -> view<2x4xf32>
+  %rhs = vector.load %weights_view[0, 0] : view<2x4xf32> -> vector<4xf32>
+  %bias_vector = vector.load %weights_view[1, 0] : view<2x4xf32> -> vector<4xf32>
+  %bias = vector.extract %bias_vector[0] : vector<4xf32> -> f32
+  %scaled = vector.mulf %lhs, %rhs : vector<4xf32>
+  %dot = vector.dotf %scaled, %rhs, %bias : vector<4xf32>, vector<4xf32>, f32
+  func.return %dot : f32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x4 : vector<4xf32>>, reg<vm.ref : buffer>) -> (reg<vm.value : f32>)>}) @f32_uniform_smem_vector_operands(%lhs: reg<vm.value x4 : vector<4xf32>>, %weights_noalias: reg<vm.ref : buffer>) -> (reg<vm.value : f32>) asm {
+  %46 = constant.zero : reg<vm.value : offset>
+  %47 = constant.s16 16 : reg<vm.value : offset>
+  %bias = buffer.load %weights_noalias, %47, %46, 0, i32.x1 : reg<vm.value : f32>
+  %49 = slice %lhs[0] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %51 = buffer.load %weights_noalias, %46, %46, 0, i32.x1 : reg<vm.value : f32>
+  %52 = float.mul.f32 %49, %51 : reg<vm.value : f32>
+  %53 = float.math.ternary.f32 %52, %51, %bias, fma : reg<vm.value : f32>
+  %54 = slice %lhs[1] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %56 = constant.s16 4 : reg<vm.value : offset>
+  %57 = buffer.load %weights_noalias, %56, %46, 0, i32.x1 : reg<vm.value : f32>
+  %58 = float.mul.f32 %54, %57 : reg<vm.value : f32>
+  %59 = float.math.ternary.f32 %58, %57, %53, fma : reg<vm.value : f32>
+  %60 = slice %lhs[2] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %62 = constant.s16 8 : reg<vm.value : offset>
+  %63 = buffer.load %weights_noalias, %62, %46, 0, i32.x1 : reg<vm.value : f32>
+  %64 = float.mul.f32 %60, %63 : reg<vm.value : f32>
+  %65 = float.math.ternary.f32 %64, %63, %59, fma : reg<vm.value : f32>
+  %66 = slice %lhs[3] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %68 = constant.s16 12 : reg<vm.value : offset>
+  %69 = buffer.load %weights_noalias, %68, %46, 0, i32.x1 : reg<vm.value : f32>
+  %70 = float.mul.f32 %66, %69 : reg<vm.value : f32>
+  %dot = float.math.ternary.f32 %70, %69, %65, fma : reg<vm.value : f32>
+  return %dot
+}

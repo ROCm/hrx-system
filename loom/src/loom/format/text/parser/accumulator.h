@@ -38,18 +38,31 @@ typedef struct loom_parser_pending_block_args_t {
 // A successor edge whose textual target label is resolved after the enclosing
 // region has parsed all of its block labels.
 typedef struct loom_parser_pending_successor_ref_t {
+  // Region whose block labels provide the successor namespace.
   loom_region_t* region;
+  // Operation whose successor slot is awaiting resolution.
   loom_op_t* op;
+  // Source label naming the eventual successor block.
   loom_token_t label_token;
-  uint8_t successor_index;
+  // Successor slot on |op| to populate.
+  uint16_t successor_index;
 } loom_parser_pending_successor_ref_t;
 
 // Growable scratch list of unresolved CFG successor labels.
 typedef struct loom_parser_pending_successor_refs_t {
+  // Pending successor records in source order.
   loom_parser_pending_successor_ref_t* entries;
+  // Number of populated records in |entries|.
   iree_host_size_t count;
+  // Number of records that fit in |entries|.
   iree_host_size_t capacity;
 } loom_parser_pending_successor_refs_t;
+
+// Appends one unresolved successor label for resolution when |region| closes.
+iree_status_t loom_parser_pending_successor_refs_add(
+    loom_parser_pending_successor_refs_t* pending,
+    iree_arena_allocator_t* arena, loom_region_t* region, loom_op_t* op,
+    uint16_t successor_index, loom_token_t label_token);
 
 // The first textual occurrence that created a module symbol table entry.
 typedef struct loom_parser_symbol_origin_t {
@@ -96,8 +109,8 @@ struct loom_parsed_op_t {
 
   uint16_t operand_count;
   uint16_t operand_capacity;
-  uint8_t successor_count;
-  uint8_t successor_capacity;
+  uint16_t successor_count;
+  uint16_t successor_capacity;
   uint16_t result_count;
   uint16_t result_capacity;
   uint16_t tied_result_count;
@@ -154,7 +167,7 @@ iree_status_t loom_parsed_op_add_segmented_operand(
     uint16_t* out_operand_index);
 iree_status_t loom_parsed_op_set_successor(loom_parsed_op_t* parsed,
                                            iree_arena_allocator_t* arena,
-                                           uint8_t index, loom_block_t* block,
+                                           uint16_t index, loom_block_t* block,
                                            loom_token_t label_token);
 iree_status_t loom_parsed_op_add_result(loom_parsed_op_t* parsed,
                                         iree_arena_allocator_t* arena,

@@ -36,6 +36,10 @@ typedef struct loom_spirv_emit_module_state_t {
   loom_symbol_fact_table_t symbol_facts;
   // Compiler function versions observed against this module symbol snapshot.
   loom_target_function_version_snapshot_t function_versions;
+  // Optional caller-owned export projection buffer.
+  loom_target_emit_export_projection_buffer_t* export_projection;
+  // Number of export projection rows prepared during emission.
+  iree_host_size_t export_projection_count;
   // Sectioned SPIR-V module builder shared by every emitted function.
   loom_spirv_module_builder_t builder;
   // SPIR-V type and constant emission cache shared by the module.
@@ -51,6 +55,15 @@ typedef struct loom_spirv_emit_module_state_t {
   // Number of functions emitted into the current module.
   iree_host_size_t function_count;
 } loom_spirv_emit_module_state_t;
+
+static bool loom_spirv_emit_selects_target(
+    const loom_low_resolved_target_t* target) {
+  const loom_target_bundle_t* bundle = loom_low_resolved_target_bundle(target);
+  // Targetless Low assembly is selected by its representation contract below;
+  // concrete targets participate only in their declared codegen format.
+  return bundle == NULL || bundle->snapshot == NULL ||
+         bundle->snapshot->codegen_format == LOOM_TARGET_CODEGEN_FORMAT_SPIRV;
+}
 
 static iree_status_t loom_spirv_emit_validate_target(
     const loom_low_resolved_target_t* target) {
@@ -119,9 +132,28 @@ static iree_status_t loom_spirv_emit_low_function_into_module(
       state->module, &state->symbol_facts, low_function_op,
       function_version ? function_version->function_target_facts : NULL,
       state->descriptor_registry, state->diagnostic_emitter, &target));
+  if (!loom_spirv_emit_selects_target(&target)) return iree_ok_status();
   IREE_RETURN_IF_ERROR(loom_spirv_emit_validate_target(&target));
   IREE_RETURN_IF_ERROR(
       loom_spirv_emit_module_prepare_contract(state, &target, allocator));
+
+  const loom_function_version_ordinal_t function_version_ordinal =
+      loom_target_function_version_snapshot_ordinal_at(
+          &state->function_versions, function_ref.symbol_id);
+  if (state->export_projection != NULL &&
+      function_version_ordinal != LOOM_FUNCTION_VERSION_ORDINAL_INVALID) {
+    if (state->export_projection_count >= state->export_projection->capacity) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "SPIR-V export projection capacity %" PRIhsz
+                              " is too small for mapped entry points",
+                              state->export_projection->capacity);
+    }
+    if (state->function_count >= UINT32_MAX) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "SPIR-V entry-point projection exceeds its "
+                              "ordinal domain");
+    }
+  }
 
   loom_spirv_function_emission_context_t function_context = {
       .module = state->module,
@@ -133,6 +165,14 @@ static iree_status_t loom_spirv_emit_low_function_into_module(
   };
   IREE_RETURN_IF_ERROR(loom_spirv_emit_low_function(&function_context,
                                                     low_function_op, &target));
+  if (state->export_projection != NULL &&
+      function_version_ordinal != LOOM_FUNCTION_VERSION_ORDINAL_INVALID) {
+    state->export_projection->values[state->export_projection_count++] =
+        (loom_target_emit_export_projection_t){
+            .function_version_ordinal = function_version_ordinal,
+            .ordinal = (uint32_t)state->function_count,
+        };
+  }
   ++state->function_count;
   return iree_ok_status();
 }
@@ -198,6 +238,7 @@ static iree_status_t loom_spirv_emit_low_module_initialize(
   loom_spirv_emit_module_state_initialize(module, descriptor_registry,
                                           diagnostic_emitter, scratch_arena,
                                           out_state);
+  out_state->export_projection = options ? options->export_projection : NULL;
   return loom_target_function_version_snapshot_build(
       module, options ? options->function_versions : NULL, scratch_arena,
       &out_state->function_versions);
@@ -211,9 +252,15 @@ void loom_spirv_emit_low_module_options_initialize(
 
 static iree_status_t loom_spirv_emit_low_module_options_validate(
     const loom_spirv_emit_low_module_options_t* options) {
-  if (options == NULL || options->entry_count == 0) {
-    return iree_ok_status();
+  if (options == NULL) return iree_ok_status();
+  if (options->export_projection != NULL &&
+      options->export_projection->capacity != 0 &&
+      options->export_projection->values == NULL) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "SPIR-V export projection capacity requires caller-owned row storage");
   }
+  if (options->entry_count == 0) return iree_ok_status();
   if (options->entry_ops == NULL) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
@@ -251,6 +298,9 @@ iree_status_t loom_spirv_emit_low_module(
     const loom_spirv_emit_low_module_options_t* options,
     loom_spirv_module_binary_t* out_module, iree_allocator_t allocator) {
   loom_spirv_emit_module_state_t state = {0};
+  if (options != NULL && options->export_projection != NULL) {
+    options->export_projection->count = 0;
+  }
   IREE_RETURN_IF_ERROR(loom_spirv_emit_low_module_options_validate(options));
   IREE_RETURN_IF_ERROR(loom_spirv_emit_low_module_initialize(
       module, descriptor_registry, diagnostic_emitter, scratch_arena, options,
@@ -270,6 +320,9 @@ iree_status_t loom_spirv_emit_low_module(
   }
   if (iree_status_is_ok(status)) {
     status = loom_spirv_emit_module_state_finalize(&state, out_module);
+  }
+  if (iree_status_is_ok(status) && state.export_projection != NULL) {
+    state.export_projection->count = state.export_projection_count;
   }
   loom_spirv_emit_module_state_deinitialize(&state);
   if (!iree_status_is_ok(status)) {

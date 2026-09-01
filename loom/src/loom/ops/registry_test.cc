@@ -9,6 +9,7 @@
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/ir/module.h"
 #include "loom/ops/buffer/ops.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/index/ops.h"
@@ -562,6 +563,58 @@ TEST(TypeRegistry, DialectOwnedTypesRequireDialectRegistration) {
             loom_type_registry_lookup_builtin(LOOM_TYPE_TILE));
 
   loom_context_deinitialize(&context);
+}
+
+TEST(TypeRegistry, ResolvesConcreteTypes) {
+  iree_arena_block_pool_t block_pool;
+  iree_arena_block_pool_initialize(4096, iree_allocator_system(), &block_pool);
+  loom_context_t context;
+  loom_context_initialize(iree_allocator_system(), &context);
+  IREE_ASSERT_OK(loom_context_finalize(&context));
+  loom_module_t* module = nullptr;
+  IREE_ASSERT_OK(loom_module_allocate(&context, IREE_SV("type_registry"),
+                                      &block_pool, /*hints=*/nullptr,
+                                      iree_allocator_system(), &module));
+
+  const loom_type_descriptor_t* buffer =
+      loom_type_registry_resolve(module, loom_type_buffer());
+  EXPECT_EQ(buffer, loom_type_registry_lookup_builtin(LOOM_TYPE_BUFFER));
+
+  loom_string_id_t hal_buffer_name = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_intern_string(module, IREE_SV("hal.buffer"),
+                                           &hal_buffer_name));
+  const loom_type_descriptor_t* hal_buffer = loom_type_registry_resolve(
+      module, loom_type_dialect_opaque(hal_buffer_name));
+  EXPECT_EQ(hal_buffer,
+            loom_type_registry_lookup(nullptr, IREE_SV("hal.buffer")));
+
+  loom_type_t unexpected_parameter = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  EXPECT_EQ(
+      loom_type_registry_resolve(
+          module, loom_type_dialect(hal_buffer_name, 1, &unexpected_parameter)),
+      nullptr);
+  EXPECT_EQ(loom_type_registry_resolve(
+                nullptr, loom_type_dialect_opaque(hal_buffer_name)),
+            nullptr);
+
+  const loom_type_t i32_type = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  loom_type_t signature_type = loom_type_none();
+  IREE_ASSERT_OK(loom_module_intern_function_type(
+      module, &i32_type, 1, &i32_type, 1, &signature_type));
+  loom_type_id_t signature_type_id = LOOM_TYPE_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_intern_type_id(module, signature_type, &signature_type_id));
+  loom_type_t function_reference_type = loom_type_none();
+  IREE_ASSERT_OK(loom_func_ref_type_make(
+      module, /*build_flags=*/0,
+      /*yieldability=*/(loom_func_ref_type_yieldability_t)0, signature_type_id,
+      &function_reference_type));
+  EXPECT_EQ(loom_type_registry_resolve(module, function_reference_type),
+            loom_type_registry_lookup(nullptr, IREE_SV("func.ref")));
+
+  loom_module_free(module);
+  loom_context_deinitialize(&context);
+  iree_arena_block_pool_deinitialize(&block_pool);
 }
 
 TEST(TypeRegistry, ConfiguresFactContextResolver) {

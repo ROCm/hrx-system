@@ -377,6 +377,16 @@ low.kernel.def target<test.low.core>(@test_target) @duplicates_low_return_after_
 
 test.target<low_core> @test_target
 
+low.func.def target<test.low.core>(@test_target) @preserves_descriptor_backed_branch(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  test.br ^return(%value)
+^return(%result: reg<test.i32>):
+  return %result
+}
+
+// ====
+
+test.target<low_core> @test_target
+
 low.func.def target<test.low.core>(@test_target) @deduplicates_low_block_args(%cond: reg<test.i32>, %a: reg<test.i32>, %b: reg<test.i32>) -> (reg<test.i32>) asm {
   low.cond_br %cond, ^then, ^else : reg<test.i32>
 ^then:
@@ -391,15 +401,15 @@ low.func.def target<test.low.core>(@test_target) @deduplicates_low_block_args(%c
 // ----
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @deduplicates_low_block_args(%cond: reg<test.i32>, %a: reg<test.i32>, %b: reg<test.i32>) -> (reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @deduplicates_low_block_args(%cond: reg<test.i32>, %a: reg<test.i32>, %b: reg<test.i32>) -> (reg<test.i32>) asm {
   low.cond_br %cond, ^then, ^else : reg<test.i32>
 ^then:
   low.br ^join(%a: reg<test.i32>)
 ^else:
   low.br ^join(%b: reg<test.i32>)
 ^join(%x: reg<test.i32>):
-  %sum = low.op<test.add.i32>(%x, %x) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  low.return %sum : reg<test.i32>
+  %sum = test.add.i32 %x, %x
+  return %sum
 }
 
 // ====

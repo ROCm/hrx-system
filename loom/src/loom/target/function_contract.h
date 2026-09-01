@@ -58,18 +58,6 @@ iree_status_t loom_target_function_contract_resolve(
     const loom_target_facts_t** out_target_facts,
     loom_target_bundle_storage_t* out_bundle_storage);
 
-// Materializes the function target bundle by overlaying |func_facts|'s
-// function-owned ABI/export attrs onto |base_bundle|.
-//
-// |target_name| is used only for diagnostics. Returns status only for
-// infrastructure failures; invalid user IR emits diagnostics and sets
-// |out_valid| false.
-iree_status_t loom_target_function_contract_resolve_from_bundle(
-    const loom_module_t* module, const loom_func_symbol_facts_t* func_facts,
-    iree_string_view_t target_name, const loom_target_bundle_t* base_bundle,
-    iree_diagnostic_emitter_t diagnostic_emitter, bool* out_valid,
-    loom_target_bundle_storage_t* out_bundle_storage);
-
 // Resolves |func_facts|'s authored target and function-local contract into one
 // immutable function target facts allocated from |arena|.
 //

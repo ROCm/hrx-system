@@ -1,0 +1,10 @@
+vm.target<core> @target
+
+// Multiplies the inputs and adds the left operand.
+//
+// Returns the combined i32 value.
+func.def public target(@target) @multiply_add(%lhs: i32, %rhs: i32) -> (i32) {
+  %product = scalar.muli %lhs, %rhs : i32
+  %result = scalar.addi %product, %lhs : i32
+  func.return %result : i32
+}

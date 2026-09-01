@@ -19,6 +19,7 @@
 #include "loomc/source.h"
 #include "loomc/status.h"
 #include "loomc/target/cmd.h"
+#include "loomc/target/kernel.h"
 #include "loomc/workspace.h"
 #include "test/util.h"
 
@@ -323,6 +324,8 @@ template.def<@request.schedule> priority(1) @small(%size: index) {
   std::vector<loomc_requirement_ordinal_t> request_requirement_ordinals;
   for (const RequestPtr& request : capture.requests) {
     ASSERT_NE(request, nullptr);
+    EXPECT_EQ(loomc_request_product_descriptor(request.get()),
+              loomc_kernel_product_descriptor());
     EXPECT_EQ(loomc_request_root_count(request.get()), 1u);
     EXPECT_EQ(loomc_request_binding_count(request.get()), 1u);
     loomc_request_binding_t binding = {};
@@ -417,6 +420,7 @@ template.def<@request.schedule> priority(1) @small(%size: index) {
   for (const RequestPtr& request : capture.requests) {
     loomc_request_root_t root = {};
     ASSERT_TRUE(loomc_request_root_at(request.get(), 0, &root));
+    EXPECT_EQ(root.goal, LOOMC_KERNEL_ROOT_GOAL_EXECUTABLE_ENTRY);
     BuilderPtr restored_builder = CreateIndexBuilder(restored_context.get());
     loomc_link_index_source_options_t options = {
         /*.provider_name=*/loomc_make_cstring_view("restored_request"),

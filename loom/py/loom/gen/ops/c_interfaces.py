@@ -136,6 +136,8 @@ INTERFACES: tuple[InterfaceSpec, ...] = (
             InterfaceFieldSpec("callee", "callee_attr_index", "attr"),
             InterfaceFieldSpec("import_module", "import_module_attr_index", "attr"),
             InterfaceFieldSpec("import_symbol", "import_symbol_attr_index", "attr"),
+            InterfaceFieldSpec("import_policy", "import_policy_attr_index", "attr"),
+            InterfaceFieldSpec("import_metadata", "import_metadata_attr_index", "attr"),
             InterfaceFieldSpec("target", "target_attr_index", "attr"),
             InterfaceFieldSpec(
                 "repr_contract",
@@ -147,6 +149,7 @@ INTERFACES: tuple[InterfaceSpec, ...] = (
             InterfaceFieldSpec("abi_attrs", "abi_attrs_attr_index", "attr"),
             InterfaceFieldSpec("export_symbol", "export_symbol_attr_index", "attr"),
             InterfaceFieldSpec("export_attrs", "export_attrs_attr_index", "attr"),
+            InterfaceFieldSpec("export_metadata", "export_metadata_attr_index", "attr"),
             InterfaceFieldSpec("export_linkage", "export_linkage_attr_index", "attr"),
             InterfaceFieldSpec("visibility", "visibility_attr_index", "attr"),
             InterfaceFieldSpec("cc", "cc_attr_index", "attr"),

@@ -214,8 +214,11 @@ static loomc_status_t loomc_target_pass_environment_initialize(
           internal_environment, &out_environment->math_policy_registry)));
   out_environment->low_legality_provider_list =
       loom_target_environment_low_legality_provider_list(internal_environment);
-  out_environment->legalizer_provider_list =
-      loom_target_environment_legalizer_provider_list(internal_environment);
+  LOOMC_RETURN_IF_ERROR(
+      loomc_status_from_iree(loom_low_legalizer_registry_storage_initialize(
+          loom_target_environment_legalizer_provider_list(internal_environment),
+          iree_allocator_from_loomc(target_environment->allocator),
+          &out_environment->legalizer_registry_storage)));
   return loomc_ok_status();
 }
 
@@ -224,6 +227,8 @@ static void loomc_target_pass_environment_deinitialize(
   if (environment == NULL) {
     return;
   }
+  loom_target_legalizer_registry_storage_deinitialize(
+      &environment->legalizer_registry_storage);
   *environment = (loomc_target_pass_environment_t){0};
 }
 
@@ -466,9 +471,10 @@ loomc_target_pass_environment_make_loom_pass_environment(
       &environment->low_descriptor_registry.registry,
       &environment->low_lower_policy_registry,
       &environment->low_legality_provider_list,
-      &environment->legalizer_provider_list, &environment->math_policy_registry,
-      /*compile_report=*/NULL, environment->target_environment,
-      function_version_owner, out_storage);
+      loom_target_legalizer_registry_storage_registry(
+          &environment->legalizer_registry_storage),
+      &environment->math_policy_registry, /*compile_report=*/NULL,
+      environment->target_environment, function_version_owner, out_storage);
 }
 
 void loomc_target_pass_environment_initialize_text_asm_environment(

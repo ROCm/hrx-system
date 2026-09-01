@@ -7,7 +7,9 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "loom/codegen/low/lower/lower_internal.h"
+#include "loom/codegen/low/lower/context.h"
+#include "loom/codegen/low/lower/report.h"
+#include "loom/ir/context.h"
 #include "loom/ops/cfg/ops.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/index/ops.h"
@@ -15,8 +17,32 @@
 #include "loom/util/cfg_loop.h"
 
 enum {
+  // Default allocation block size for source-to-low report rows.
+  LOOM_LOW_LOWER_REPORT_ROW_VEC_DEFAULT_BYTE_LENGTH = 4096,
   // Default allocation block size for source-memory report rows.
   LOOM_LOW_LOWER_MEMORY_REPORT_ROW_VEC_DEFAULT_BYTE_LENGTH = 4096,
+};
+
+typedef struct loom_low_lower_memory_expr_term_t {
+  // Source SSA value multiplied into this symbolic byte expression.
+  loom_value_id_t value_id;
+  // Signed byte coefficient applied to |value_id|.
+  int64_t coefficient;
+} loom_low_lower_memory_expr_term_t;
+
+typedef struct loom_low_lower_memory_expr_key_t {
+  // Static byte constant added to all dynamic terms.
+  int64_t constant;
+  // Number of populated entries in |terms|.
+  uint8_t term_count;
+  // Sorted symbolic byte terms.
+  loom_low_lower_memory_expr_term_t
+      terms[LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_CAPACITY];
+} loom_low_lower_memory_expr_key_t;
+
+struct loom_low_lower_memory_expr_entry_t {
+  // Comparable symbolic expression key interned for report-only accounting.
+  loom_low_lower_memory_expr_key_t key;
 };
 
 static iree_status_t loom_low_lower_memory_report_row_list_append(
@@ -639,4 +665,167 @@ iree_status_t loom_low_lower_record_memory_report_row(
   return loom_low_lower_memory_report_row_list_append(
       &context->result->memory_report_rows,
       context->result->memory_report_row_allocator, &counted_row);
+}
+
+static iree_string_view_t loom_low_lower_descriptor_string(
+    const loom_low_lower_context_t* context,
+    const loom_low_descriptor_t* descriptor,
+    loom_bstring_table_offset_t string_offset) {
+  if (descriptor == NULL || string_offset == LOOM_LOW_STRING_OFFSET_NONE) {
+    return iree_string_view_empty();
+  }
+  return loom_low_descriptor_set_string(context->descriptor_set, string_offset);
+}
+
+static void loom_low_lower_populate_report_descriptor(
+    const loom_low_lower_context_t* context,
+    const loom_low_descriptor_t* descriptor, loom_low_lower_report_row_t* row) {
+  if (descriptor == NULL) {
+    return;
+  }
+  row->descriptor_key = loom_low_lower_descriptor_string(
+      context, descriptor, descriptor->key_string_offset);
+  row->descriptor_semantic_tag = loom_low_lower_descriptor_string(
+      context, descriptor, descriptor->semantic_tag_string_offset);
+}
+
+static void loom_low_lower_report_row_list_deinitialize(
+    iree_allocator_t allocator, loom_low_lower_report_row_list_t* list) {
+  loom_low_lower_report_row_vec_t* vec = list->head;
+  while (vec != NULL) {
+    loom_low_lower_report_row_vec_t* next = vec->next;
+    iree_allocator_free(allocator, vec);
+    vec = next;
+  }
+  *list = (loom_low_lower_report_row_list_t){0};
+}
+
+static void loom_low_lower_memory_report_row_list_deinitialize(
+    iree_allocator_t allocator, loom_low_lower_memory_report_row_list_t* list) {
+  iree_allocator_free(allocator, list->rows);
+  *list = (loom_low_lower_memory_report_row_list_t){0};
+}
+
+void loom_low_lower_result_deinitialize(loom_low_lower_result_t* result) {
+  if (result == NULL) {
+    return;
+  }
+  loom_low_lower_report_row_list_deinitialize(result->report_allocator,
+                                              &result->report_rows);
+  loom_low_lower_memory_report_row_list_deinitialize(
+      result->memory_report_row_allocator, &result->memory_report_rows);
+  result->report_allocator = iree_allocator_null();
+  result->memory_report_row_allocator = iree_allocator_null();
+}
+
+static iree_status_t loom_low_lower_report_row_list_append(
+    loom_low_lower_report_row_list_t* list, iree_allocator_t allocator,
+    const loom_low_lower_report_row_t* row) {
+  if (iree_allocator_is_null(allocator)) {
+    return iree_ok_status();
+  }
+  if (list->tail == NULL || list->tail->count == list->tail->capacity) {
+    iree_host_size_t capacity =
+        (LOOM_LOW_LOWER_REPORT_ROW_VEC_DEFAULT_BYTE_LENGTH -
+         sizeof(loom_low_lower_report_row_vec_t)) /
+        sizeof(*row);
+    capacity = iree_max((iree_host_size_t)1, capacity);
+    loom_low_lower_report_row_vec_t* vec = NULL;
+    IREE_RETURN_IF_ERROR(iree_allocator_malloc_struct_array(
+        allocator, sizeof(*vec), capacity, sizeof(*row), (void**)&vec));
+    *vec = (loom_low_lower_report_row_vec_t){
+        .capacity = capacity,
+    };
+    if (list->tail != NULL) {
+      list->tail->next = vec;
+    } else {
+      list->head = vec;
+    }
+    list->tail = vec;
+  }
+  loom_low_lower_report_row_t* rows =
+      loom_low_lower_report_row_vec_rows(list->tail);
+  rows[list->tail->count++] = *row;
+  ++list->count;
+  return iree_ok_status();
+}
+
+iree_status_t loom_low_lower_record_report_row(
+    loom_low_lower_context_t* context,
+    const loom_low_lower_selected_plan_t* selected_plan,
+    uint32_t emitted_low_op_count) {
+  loom_low_lower_result_t* result = context->result;
+  if (iree_allocator_is_null(context->options->report_allocator)) {
+    return iree_ok_status();
+  }
+  ++result->selected_source_op_count;
+  result->emitted_low_op_count += emitted_low_op_count;
+
+  loom_low_lower_report_row_t row = {
+      .function_name = loom_low_lower_context_function_name(context),
+      .source_op_name = loom_op_name(context->module, selected_plan->source_op),
+      .source_op_kind = selected_plan->source_op->kind,
+      .selection_kind = LOOM_LOW_LOWER_REPORT_SELECTION_PLAN,
+      .rule_set_index = UINT16_MAX,
+      .rule_index = UINT16_MAX,
+      .plan_id = selected_plan->plan.id,
+      .plan_key = iree_string_view_empty(),
+      .native_contraction_facts = NULL,
+      .native_transition_facts = NULL,
+      .descriptor_key = iree_string_view_empty(),
+      .descriptor_semantic_tag = iree_string_view_empty(),
+      .emitted_low_op_count = emitted_low_op_count,
+      .execution_count_plus_one =
+          LOOM_LOW_LOWER_REPORT_EXECUTION_COUNT_PLUS_ONE_UNKNOWN,
+  };
+  if (selected_plan->rule != NULL) {
+    row.selection_kind = LOOM_LOW_LOWER_REPORT_SELECTION_RULE;
+    row.rule_set_index = selected_plan->rule_set_index;
+    row.rule_index = selected_plan->rule_index;
+    row.plan_id = LOOM_LOW_LOWER_PLAN_ID_NONE;
+    if (selected_plan->rule->report_key_ordinal !=
+        LOOM_LOW_LOWER_RULE_REPORT_KEY_NONE) {
+      const uint16_t report_key_index =
+          selected_plan->rule->report_key_ordinal - 1u;
+      IREE_ASSERT_LT(report_key_index,
+                     selected_plan->rule_set->report_key_count);
+      row.plan_key = loom_low_lower_rule_set_string(
+          selected_plan->rule_set,
+          selected_plan->rule_set->report_key_string_offsets[report_key_index]);
+    }
+    if (selected_plan->rule->emit_count != 0 &&
+        selected_plan->resolved_emits != NULL) {
+      loom_low_lower_populate_report_descriptor(
+          context, selected_plan->resolved_emits[0].descriptor.descriptor,
+          &row);
+    }
+  } else if (selected_plan->kind ==
+             LOOM_LOW_LOWER_SELECTED_PLAN_DESCRIPTOR_MATRIX) {
+    const loom_low_lower_descriptor_matrix_plan_t* plan =
+        (const loom_low_lower_descriptor_matrix_plan_t*)
+            selected_plan->plan.target_data;
+    loom_low_lower_populate_report_descriptor(
+        context, plan->descriptor.descriptor, &row);
+    row.native_contraction_facts = plan->native_contraction_facts;
+  }
+  if (selected_plan->rule == NULL &&
+      context->policy->describe_plan.fn != NULL) {
+    loom_low_lower_plan_report_t plan_report = {0};
+    context->policy->describe_plan.fn(context->policy->describe_plan.user_data,
+                                      context, selected_plan->source_op,
+                                      selected_plan->plan, &plan_report);
+    row.plan_key = plan_report.plan_key;
+    if (plan_report.native_contraction_facts != NULL) {
+      row.native_contraction_facts = plan_report.native_contraction_facts;
+    }
+    row.native_transition_facts = plan_report.native_transition_facts;
+    row.native_transition_source_type =
+        plan_report.native_transition_source_type;
+    row.native_transition_destination_type =
+        plan_report.native_transition_destination_type;
+  }
+  IREE_RETURN_IF_ERROR(loom_low_lower_source_op_execution_count_plus_one(
+      context, selected_plan->source_op, &row.execution_count_plus_one));
+  return loom_low_lower_report_row_list_append(&result->report_rows,
+                                               result->report_allocator, &row);
 }

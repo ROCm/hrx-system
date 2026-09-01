@@ -19,11 +19,11 @@ loom_cc_library(
   DEPS
     iree::base
     loom::codegen::low::descriptors
-    loom::codegen::low::launch_config_program
     loom::codegen::low::lower
     loom::codegen::low::lower::source_selection
     loom::codegen::low::pipeline::pass_environment
     loom::ir
+    loom::ops::kernel
     loom::pass::pipeline
     loom::pass::registry
     loom::pass::types
@@ -64,10 +64,6 @@ loom_cc_library(
     loom::target::low_descriptor_registry
     loom::target::low_legality
     loom::target::reporting::report
-    loom::transforms::buffer::target_legalization
-    loom::transforms::scalar::target_legalization
-    loom::transforms::vector::target_legalization
-    loom::transforms::view::target_legalization
     loom::util::walk
   PUBLIC
 )
@@ -91,7 +87,9 @@ loom_cc_test(
     loom::error::error_defs
     loom::format::text::parser
     loom::ir
+    loom::ops::cfg
     loom::ops::func
+    loom::ops::index
     loom::ops::low
     loom::ops::pass
     loom::ops::scalar

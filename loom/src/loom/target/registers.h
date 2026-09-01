@@ -85,14 +85,6 @@ static inline bool loom_low_register_type_same_unit_count(loom_type_t lhs,
              loom_low_register_type_unit_count(rhs);
 }
 
-// Returns the preferred base-unit alignment for a contiguous register value.
-// Power-of-two widths align to their width so packet-sized values naturally
-// occupy encodable register groups; other widths have no extra alignment.
-static inline uint32_t loom_low_register_unit_alignment(uint32_t unit_count) {
-  return unit_count > 1 && (unit_count & (unit_count - 1u)) == 0 ? unit_count
-                                                                 : 1u;
-}
-
 // Projects the carrier identity from |type| and returns an untyped register
 // range with |unit_count| units. This deliberately discards any semantic value
 // type and is only valid for code operating on physical carrier bits.

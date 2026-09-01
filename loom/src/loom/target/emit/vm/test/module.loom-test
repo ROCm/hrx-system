@@ -1,0 +1,381 @@
+// RUN: emit vm-dis
+
+vm.target<core> @target
+
+func.def public target(@target) @multiply_add(%lhs: i32, %rhs: i32) -> (i32) {
+  %product = scalar.muli %lhs, %rhs : i32
+  %result = scalar.addi %product, %lhs : i32
+  func.return %result : i32
+}
+
+// ----
+vm.module "module" core=0.0 bytes=348
+requirements:
+sections:
+  [0] strings type=0x0002 flags=0x0000 bytes=[112, +68)
+  [1] signatures type=0x0004 flags=0x0000 bytes=[184, +32)
+  [2] callable_types type=0x0005 flags=0x0000 bytes=[216, +12)
+  [3] exports type=0x0007 flags=0x0000 bytes=[232, +12)
+  [4] functions type=0x0008 flags=0x0000 bytes=[248, +68)
+  [5] presentation type=0x000C flags=0x0001 bytes=[320, +28)
+resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
+module_metadata:
+ref_types:
+callable_types:
+  [0] (i32, i32) -> (i32)
+imports:
+exports:
+  [0] @multiply_add -> function[0] : (lhs: i32, rhs: i32) -> (i32)
+    authored_type = "(i32, i32) -> (i32)"
+    argument[0].authored_type = "i32"
+    argument[1].authored_type = "i32"
+    result[0].authored_type = "i32"
+functions:
+  [0] callable[0] signature[0] bytecode=[0, +16) registers=(2, 0, 0) locals=(0, 0, 0) switch_targets=0
+    type = (i32, i32) -> (i32)
+    +0000  control.block
+    +0004  integer.mul.i32 dst_v8=1 lhs_v8=0 rhs_v8=1
+    +0008  integer.add.i32 dst_v8=0 lhs_v8=1 rhs_v8=0
+    +0012  control.return
+
+// ====
+
+// RUN: emit vm-dis
+
+vm.target<core> @target
+
+func.def public target(@target) @function_type_order(%sync: func.ref<(i32) -> (i32)>, %yieldable: func.ref<yieldable (i32) -> (i32)>) -> (func.ref<yieldable (i32) -> (i32)>, func.ref<(i32) -> (i32)>) {
+  func.return %yieldable, %sync : func.ref<yieldable (i32) -> (i32)>, func.ref<(i32) -> (i32)>
+}
+
+func.def public target(@target) @nested_type_identity(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+// ----
+vm.module "module" core=0.0 bytes=748
+requirements:
+sections:
+  [0] strings type=0x0002 flags=0x0000 bytes=[112, +308)
+  [1] signatures type=0x0004 flags=0x0000 bytes=[424, +84)
+  [2] callable_types type=0x0005 flags=0x0000 bytes=[512, +28)
+  [3] exports type=0x0007 flags=0x0000 bytes=[544, +20)
+  [4] functions type=0x0008 flags=0x0000 bytes=[568, +128)
+  [5] presentation type=0x000C flags=0x0001 bytes=[696, +52)
+resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
+module_metadata:
+ref_types:
+callable_types:
+  [0] (i32) -> (i32)
+  [1] (i32) -> (i32) may_yield
+  [2] (func<module:0>, func<module:1>) -> (func<module:1>, func<module:0>)
+imports:
+exports:
+  [0] @function_type_order -> function[0] : (sync: func<module:0>, yieldable: func<module:1>) -> (func<module:1>, func<module:0>)
+    authored_type = "(func.ref<(i32) -> (i32)>, func.ref<yieldable (i32) -> (i32)>) -> (func.ref<yieldable (i32) -> (i32)>, func.ref<(i32) -> (i32)>)"
+    argument[0].authored_type = "func.ref<(i32) -> (i32)>"
+    argument[1].authored_type = "func.ref<yieldable (i32) -> (i32)>"
+    result[0].authored_type = "func.ref<yieldable (i32) -> (i32)>"
+    result[1].authored_type = "func.ref<(i32) -> (i32)>"
+  [1] @nested_type_identity -> function[1] : (value: i32) -> (i32)
+    authored_type = "(i32) -> (i32)"
+    argument[0].authored_type = "i32"
+    result[0].authored_type = "i32"
+functions:
+  [0] callable[2] signature[2] bytecode=[0, +20) registers=(0, 0, 3) locals=(0, 0, 0) switch_targets=0
+    type = (func<module:0>, func<module:1>) -> (func<module:1>, func<module:0>)
+    +0000  control.block
+    +0004  func.copy dst_f8=2 src_f8=0
+    +0008  func.copy dst_f8=0 src_f8=1
+    +0012  func.copy dst_f8=1 src_f8=2
+    +0016  control.return
+  [1] callable[0] signature[0] bytecode=[20, +8) registers=(1, 0, 0) locals=(0, 0, 0) switch_targets=0
+    type = (i32) -> (i32)
+    +0000  control.block
+    +0004  control.return
+
+// ====
+
+// RUN: emit vm-dis
+
+vm.target<core> @target
+
+func.def public target(@target) @identity(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+// ----
+vm.module "module" core=0.0 bytes=320
+requirements:
+sections:
+  [0] strings type=0x0002 flags=0x0000 bytes=[112, +54)
+  [1] signatures type=0x0004 flags=0x0000 bytes=[168, +28)
+  [2] callable_types type=0x0005 flags=0x0000 bytes=[200, +12)
+  [3] exports type=0x0007 flags=0x0000 bytes=[216, +12)
+  [4] functions type=0x0008 flags=0x0000 bytes=[232, +60)
+  [5] presentation type=0x000C flags=0x0001 bytes=[296, +24)
+resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
+module_metadata:
+ref_types:
+callable_types:
+  [0] (i32) -> (i32)
+imports:
+exports:
+  [0] @identity -> function[0] : (value: i32) -> (i32)
+    authored_type = "(i32) -> (i32)"
+    argument[0].authored_type = "i32"
+    result[0].authored_type = "i32"
+functions:
+  [0] callable[0] signature[0] bytecode=[0, +8) registers=(1, 0, 0) locals=(0, 0, 0) switch_targets=0
+    type = (i32) -> (i32)
+    +0000  control.block
+    +0004  control.return
+
+// ====
+
+// RUN: emit vm-dis
+
+vm.target<core> @target
+
+func.def public target(@target) @z_i64(%value: i64) -> (i64) {
+  func.return %value : i64
+}
+
+func.def public target(@target) @m_i32(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.def public target(@target) @a_i32(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+// ----
+vm.module "module" core=0.0 bytes=560
+requirements:
+sections:
+  [0] strings type=0x0002 flags=0x0000 bytes=[112, +94)
+  [1] signatures type=0x0004 flags=0x0000 bytes=[208, +52)
+  [2] callable_types type=0x0005 flags=0x0000 bytes=[264, +20)
+  [3] exports type=0x0007 flags=0x0000 bytes=[288, +28)
+  [4] functions type=0x0008 flags=0x0000 bytes=[320, +172)
+  [5] presentation type=0x000C flags=0x0001 bytes=[496, +64)
+resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
+module_metadata:
+ref_types:
+callable_types:
+  [0] (i32) -> (i32)
+  [1] (i64) -> (i64)
+imports:
+exports:
+  [0] @a_i32 -> function[2] : (value: i32) -> (i32)
+    authored_type = "(i32) -> (i32)"
+    argument[0].authored_type = "i32"
+    result[0].authored_type = "i32"
+  [1] @m_i32 -> function[1] : (value: i32) -> (i32)
+    authored_type = "(i32) -> (i32)"
+    argument[0].authored_type = "i32"
+    result[0].authored_type = "i32"
+  [2] @z_i64 -> function[0] : (value: i64) -> (i64)
+    authored_type = "(i64) -> (i64)"
+    argument[0].authored_type = "i64"
+    result[0].authored_type = "i64"
+functions:
+  [0] callable[1] signature[1] bytecode=[0, +8) registers=(1, 0, 0) locals=(0, 0, 0) switch_targets=0
+    type = (i64) -> (i64)
+    +0000  control.block
+    +0004  control.return
+  [1] callable[0] signature[0] bytecode=[8, +8) registers=(1, 0, 0) locals=(0, 0, 0) switch_targets=0
+    type = (i32) -> (i32)
+    +0000  control.block
+    +0004  control.return
+  [2] callable[0] signature[0] bytecode=[16, +8) registers=(1, 0, 0) locals=(0, 0, 0) switch_targets=0
+    type = (i32) -> (i32)
+    +0000  control.block
+    +0004  control.return
+
+// ====
+
+// RUN: emit vm-dis
+
+vm.target<core> @target
+
+func.def target(@target) @nop() {
+  func.return
+}
+
+// ----
+vm.module "module" core=0.0 bytes=164
+requirements:
+sections:
+  [0] signatures type=0x0004 flags=0x0000 bytes=[64, +20)
+  [1] callable_types type=0x0005 flags=0x0000 bytes=[88, +12)
+  [2] functions type=0x0008 flags=0x0000 bytes=[104, +60)
+resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
+module_metadata:
+ref_types:
+callable_types:
+  [0] () -> ()
+imports:
+exports:
+functions:
+  [0] callable[0] signature[0] bytecode=[0, +8) registers=(0, 0, 0) locals=(0, 0, 0) switch_targets=0
+    type = () -> ()
+    +0000  control.block
+    +0004  control.return
+
+// ====
+
+// RUN: emit vm-dis
+
+vm.target<core> @target
+
+func.def public target(@target) @enum_immediate(%narrow: bf16) -> (f32) {
+  %extended = scalar.extf %narrow : bf16 to f32
+  func.return %extended : f32
+}
+
+// ----
+vm.module "module" core=0.0 bytes=336
+requirements:
+sections:
+  [0] strings type=0x0002 flags=0x0000 bytes=[112, +70)
+  [1] signatures type=0x0004 flags=0x0000 bytes=[184, +28)
+  [2] callable_types type=0x0005 flags=0x0000 bytes=[216, +12)
+  [3] exports type=0x0007 flags=0x0000 bytes=[232, +12)
+  [4] functions type=0x0008 flags=0x0000 bytes=[248, +64)
+  [5] presentation type=0x000C flags=0x0001 bytes=[312, +24)
+resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
+module_metadata:
+ref_types:
+callable_types:
+  [0] (bf16) -> (f32)
+imports:
+exports:
+  [0] @enum_immediate -> function[0] : (narrow: bf16) -> (f32)
+    authored_type = "(bf16) -> (f32)"
+    argument[0].authored_type = "bf16"
+    result[0].authored_type = "f32"
+functions:
+  [0] callable[0] signature[0] bytecode=[0, +12) registers=(1, 0, 0) locals=(0, 0, 0) switch_targets=0
+    type = (bf16) -> (f32)
+    +0000  control.block
+    +0004  conversion.float.extend dst_v8=0 src_v8=0 selector_u8=3
+    +0008  control.return
+
+// ====
+
+// RUN: emit vm-dis input=low
+
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) abi(vm_function) @register_banks() asm {
+  %function = func.null : reg<vm.function>
+  %ref = ref.null : reg<vm.ref>
+  ref.discard %ref
+  return
+}
+
+// ----
+vm.module "module" core=0.0 bytes=176
+requirements:
+sections:
+  [0] signatures type=0x0004 flags=0x0000 bytes=[64, +20)
+  [1] callable_types type=0x0005 flags=0x0000 bytes=[88, +12)
+  [2] functions type=0x0008 flags=0x0000 bytes=[104, +72)
+resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
+module_metadata:
+ref_types:
+callable_types:
+  [0] () -> ()
+imports:
+exports:
+functions:
+  [0] callable[0] signature[0] bytecode=[0, +20) registers=(0, 1, 1) locals=(0, 0, 0) switch_targets=0
+    type = () -> ()
+    +0000  control.block
+    +0004  func.null dst_f8=0
+    +0008  ref.null dst_r8=0
+    +0012  ref.discard src_r8=0
+    +0016  control.return
+
+// ====
+
+// RUN: emit vm-dis input=low
+
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) abi(vm_function) @variable_register_range() asm {
+  %lane0 = constant.zero : reg<vm.value>
+  %lane1 = constant.s16 1 : reg<vm.value>
+  %source = concat(%lane0, %lane1) : (reg<vm.value>, reg<vm.value>) -> reg<vm.value x2>
+  %packed = integer.bitstream.pack %source, 8, 2, 1, 16, 16 : reg<vm.value>
+  return
+}
+
+// ----
+vm.module "module" core=0.0 bytes=180
+requirements:
+sections:
+  [0] signatures type=0x0004 flags=0x0000 bytes=[64, +20)
+  [1] callable_types type=0x0005 flags=0x0000 bytes=[88, +12)
+  [2] functions type=0x0008 flags=0x0000 bytes=[104, +76)
+resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
+module_metadata:
+ref_types:
+callable_types:
+  [0] () -> ()
+imports:
+exports:
+functions:
+  [0] callable[0] signature[0] bytecode=[0, +24) registers=(2, 0, 0) locals=(0, 0, 0) switch_targets=0
+    type = () -> ()
+    +0000  control.block
+    +0004  constant.zero dst_v8=0
+    +0008  constant.s16 dst_v8=1 immediate_i16=1
+    +0012  integer.bitstream.pack result_base_v8=0 source_base_v8=0 field_width_u8=8 source_count_u8=2 result_count_u8=1 source_width_u8=16 result_width_u8=16
+    +0020  control.return
+
+// ====
+
+// RUN: emit vm-dis
+
+vm.target<core> @target
+
+global.variable @mutable_value : i64
+global.constant @immutable_value : i32
+global.variable @mutable_ref : hal.buffer
+global.constant @immutable_ref : hal.buffer
+global.variable @mutable_function : func.ref<(i32) -> (i32)>
+global.constant @immutable_function : func.ref<(i32) -> (i32)>
+global.rodata.def @small = bytes("010203")
+global.rodata.def @aligned = align(32) bytes("6c6f6f6d")
+
+func.def target(@target) @resource_owner() {
+  func.return
+}
+
+// ----
+vm.module "module" core=0.0 bytes=452
+requirements:
+sections:
+  [0] strings type=0x0002 flags=0x0000 bytes=[128, +25)
+  [1] ref_types type=0x0003 flags=0x0000 bytes=[160, +16)
+  [2] signatures type=0x0004 flags=0x0000 bytes=[176, +44)
+  [3] callable_types type=0x0005 flags=0x0000 bytes=[224, +20)
+  [4] functions type=0x0008 flags=0x0000 bytes=[248, +60)
+  [5] globals type=0x000A flags=0x0000 bytes=[312, +48)
+  [6] rodata type=0x000B flags=0x0000 alignment=32 bytes=[384, +68)
+resources: constants=0 globals=(values=2, refs=2, functions=2) rodata=2
+module_metadata:
+ref_types:
+  [0] ref<hal, buffer>
+callable_types:
+  [0] () -> ()
+  [1] (i32) -> (i32)
+imports:
+exports:
+functions:
+  [0] callable[0] signature[0] bytecode=[0, +8) registers=(0, 0, 0) locals=(0, 0, 0) switch_targets=0
+    type = () -> ()
+    +0000  control.block
+    +0004  control.return

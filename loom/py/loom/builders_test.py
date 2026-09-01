@@ -15,7 +15,7 @@ import pytest
 # dialect imports belong in dialect-specific importer/builder coverage, not here.
 import loom
 import loom.dialect as dialect
-from loom.assembly import Attr
+from loom.assembly import Attr, BlockRef, BlockRefs
 from loom.builder import ValueRef, tied
 from loom.builders import LoomBuilder, module_builder
 from loom.builtin_types import ALL_BUILTIN_TYPES
@@ -28,7 +28,16 @@ from loom.dialect.test import (
     test_options_attr,
     test_tile_attr,
 )
-from loom.dsl import AttrDef, Dialect, EnumCase, EnumDef, Op, Result, TypeConstraint
+from loom.dsl import (
+    AttrDef,
+    Dialect,
+    EnumCase,
+    EnumDef,
+    Op,
+    Result,
+    Successor,
+    TypeConstraint,
+)
 from loom.format.text.printer import Printer
 from loom.ir import (
     F32,
@@ -110,6 +119,27 @@ def test_dynamic_builder_synthesizes_exact_result_type() -> None:
     assert isinstance(result, ValueRef)
     assert result.name == "order"
     assert result.type == I32
+
+
+def test_dynamic_builder_stores_successors_in_declaration_order() -> None:
+    switch_op = Op(
+        "test.switch",
+        group=Dialect("test"),
+        successors=[
+            Successor("default_dest"),
+            Successor("case_dests", variadic=True),
+        ],
+        format=[BlockRefs("case_dests"), BlockRef("default_dest")],
+    )
+    source = Block()
+    default_dest = Block()
+    case0 = Block()
+    case1 = Block()
+    _module, builder = module_builder(insertion_block=source, ops=[switch_op])
+
+    builder.test.switch(case_dests=[case0, case1], default_dest=default_dest)
+
+    assert source.ops[0].successors == [default_dest, case0, case1]
 
 
 def test_dynamic_builder_inserts_module_scope_operation_without_block() -> None:

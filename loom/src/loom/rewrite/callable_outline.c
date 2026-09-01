@@ -67,48 +67,14 @@ static bool loom_callable_outline_op_is_inside_range(
   return false;
 }
 
-static bool loom_callable_outline_region_contains_block(
-    const loom_region_t* region, const loom_block_t* target_block) {
-  if (!region || !target_block) return false;
-  for (uint16_t block_index = 0; block_index < region->block_count;
-       ++block_index) {
-    const loom_block_t* block = loom_region_const_block(region, block_index);
-    if (block == target_block) return true;
-    const loom_op_t* op = block->first_op;
-    while (op) {
-      loom_region_t** regions = loom_op_regions(op);
-      for (uint8_t i = 0; i < op->region_count; ++i) {
-        if (loom_callable_outline_region_contains_block(regions[i],
-                                                        target_block)) {
-          return true;
-        }
-      }
-      op = op->next_op;
-    }
-  }
-  return false;
-}
-
 static bool loom_callable_outline_block_is_inside_range(
     const loom_callable_outline_range_state_t* state,
     const loom_block_t* block) {
   if (!block) return false;
   if (block == state->block) return false;
-  if (block->first_op) {
-    return loom_callable_outline_op_is_inside_range(state,
-                                                    block->first_op->parent_op);
-  }
-  for (const loom_op_t* root_op = state->first_op; root_op;
-       root_op = root_op->next_op) {
-    if (root_op == state->after_last_op) break;
-    loom_region_t** regions = loom_op_regions(root_op);
-    for (uint8_t i = 0; i < root_op->region_count; ++i) {
-      if (loom_callable_outline_region_contains_block(regions[i], block)) {
-        return true;
-      }
-    }
-  }
-  return false;
+  const loom_op_t* owner_op =
+      block->parent_region ? block->parent_region->owner_op : NULL;
+  return loom_callable_outline_op_is_inside_range(state, owner_op);
 }
 
 static bool loom_callable_outline_value_is_defined_inside_range(
@@ -592,9 +558,9 @@ static iree_status_t loom_callable_outline_build_function(
   iree_status_t status = loom_func_def_build(
       &rewriter->builder, 0, 0, 0, 0, 0, 0, 0, loom_symbol_ref_null(), 0,
       loom_named_attr_slice_empty(), LOOM_STRING_ID_INVALID,
-      loom_named_attr_slice_empty(), outlined_ref, arg_types, captures->count,
-      result_types, live_outs->count, NULL, 0, NULL, 0,
-      state->first_op->location, &func_op);
+      loom_named_attr_slice_empty(), loom_named_attr_slice_empty(),
+      outlined_ref, arg_types, captures->count, result_types, live_outs->count,
+      NULL, 0, NULL, 0, state->first_op->location, &func_op);
   loom_builder_restore(&rewriter->builder, saved_ip);
   IREE_RETURN_IF_ERROR(status);
 

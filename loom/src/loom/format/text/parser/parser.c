@@ -198,19 +198,6 @@ iree_status_t loom_parse_keyword(loom_parser_t* parser, uint16_t keyword_id) {
 // Op finalization from accumulator to loom_op_t.
 //===----------------------------------------------------------------------===//
 
-static void loom_parser_set_region_parent_op(loom_region_t* region,
-                                             loom_op_t* parent_op) {
-  if (!region) {
-    return;
-  }
-  for (uint16_t block_index = 0; block_index < region->block_count;
-       ++block_index) {
-    loom_block_t* block = loom_region_block(region, block_index);
-    loom_op_t* op = NULL;
-    loom_block_for_each_op(block, op) { op->parent_op = parent_op; }
-  }
-}
-
 static loom_block_t* loom_parser_find_block_by_label(
     const loom_parser_t* parser, loom_region_t* region,
     iree_string_view_t label) {
@@ -230,28 +217,6 @@ static loom_block_t* loom_parser_find_block_by_label(
     }
   }
   return NULL;
-}
-
-static iree_status_t loom_parser_add_pending_successor_ref(
-    loom_parser_t* parser, loom_region_t* region, loom_op_t* op,
-    uint8_t successor_index, loom_token_t label_token) {
-  loom_parser_pending_successor_refs_t* pending =
-      &parser->pending_successor_refs;
-  if (pending->count >= pending->capacity) {
-    iree_host_size_t capacity = pending->capacity;
-    IREE_RETURN_IF_ERROR(iree_arena_grow_array(
-        &parser->parser_arena, pending->count, pending->count + 1,
-        sizeof(loom_parser_pending_successor_ref_t), &capacity,
-        (void**)&pending->entries));
-    pending->capacity = capacity;
-  }
-  pending->entries[pending->count++] = (loom_parser_pending_successor_ref_t){
-      .region = region,
-      .op = op,
-      .label_token = label_token,
-      .successor_index = successor_index,
-  };
-  return iree_ok_status();
 }
 
 static iree_status_t loom_parser_resolve_pending_successor_refs(
@@ -479,11 +444,11 @@ static iree_status_t loom_finalize_op(
            parsed->successor_count * sizeof(loom_block_t*));
     loom_region_t* successor_region =
         op->parent_block ? op->parent_block->parent_region : NULL;
-    for (uint8_t i = 0; i < parsed->successor_count; ++i) {
+    for (uint16_t i = 0; i < parsed->successor_count; ++i) {
       if (parsed->successor_label_tokens[i].kind == LOOM_TOKEN_BLOCK_LABEL) {
-        IREE_RETURN_IF_ERROR(loom_parser_add_pending_successor_ref(
-            parser, successor_region, op, i,
-            parsed->successor_label_tokens[i]));
+        IREE_RETURN_IF_ERROR(loom_parser_pending_successor_refs_add(
+            &parser->pending_successor_refs, &parser->parser_arena,
+            successor_region, op, i, parsed->successor_label_tokens[i]));
       }
     }
   }
@@ -506,7 +471,7 @@ static iree_status_t loom_finalize_op(
       if (value->type.header != 0) {
         continue;
       }
-      loom_scalar_type_t fixed_scalar_type = LOOM_SCALAR_TYPE_COUNT_;
+      loom_scalar_type_t fixed_scalar_type = LOOM_SCALAR_TYPE_NONE;
       switch (vtable->result_descriptors[i].type_constraint) {
         case LOOM_TYPE_CONSTRAINT_I1:
           fixed_scalar_type = LOOM_SCALAR_TYPE_I1;
@@ -523,7 +488,7 @@ static iree_status_t loom_finalize_op(
         default:
           break;
       }
-      if (fixed_scalar_type != LOOM_SCALAR_TYPE_COUNT_) {
+      if (fixed_scalar_type != LOOM_SCALAR_TYPE_NONE) {
         IREE_RETURN_IF_ERROR(
             loom_module_set_value_type(parser->module, parsed->result_ids[i],
                                        loom_type_scalar(fixed_scalar_type)));
@@ -559,10 +524,10 @@ static iree_status_t loom_finalize_op(
 
   // Copy regions.
   if (parsed->region_count > 0) {
-    memcpy(loom_op_regions(op), parsed->regions,
-           parsed->region_count * sizeof(loom_region_t*));
     for (uint8_t i = 0; i < parsed->region_count; ++i) {
-      loom_parser_set_region_parent_op(parsed->regions[i], op);
+      if (parsed->regions[i]) {
+        IREE_RETURN_IF_ERROR(loom_op_attach_region(op, i, parsed->regions[i]));
+      }
     }
   }
 

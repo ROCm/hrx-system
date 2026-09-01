@@ -132,6 +132,21 @@ iree_status_t loom_low_storage_layout_accumulate_reservation(
                                                   &reservation);
 }
 
+static const loom_low_storage_layout_record_t*
+loom_low_storage_layout_lookup_record(const loom_low_storage_layout_t* layout,
+                                      loom_value_id_t storage_value_id,
+                                      iree_host_size_t* out_ordinal) {
+  for (iree_host_size_t i = 0; i < layout->record_count; ++i) {
+    const loom_low_storage_layout_record_t* record = &layout->records[i];
+    if (record->storage_value_id != storage_value_id) continue;
+    if (out_ordinal != NULL) *out_ordinal = i;
+    return record;
+  }
+  IREE_ASSERT_UNREACHABLE(
+      "storage layout and reference must belong to the same function");
+  IREE_BUILTIN_UNREACHABLE();
+}
+
 void loom_low_storage_layout_lookup_reference(
     const loom_low_storage_layout_t* layout, const loom_module_t* module,
     loom_value_id_t storage_value_id,
@@ -144,13 +159,15 @@ void loom_low_storage_layout_lookup_reference(
         loom_module_value(module, storage_value_id);
     const loom_op_t* defining_op = loom_value_def_op(storage_value);
     if (loom_low_storage_reserve_isa(defining_op)) {
-      loom_low_storage_layout_reservation_t reservation;
-      loom_low_storage_layout_lookup_reservation(layout, storage_value_id,
-                                                 &reservation);
+      iree_host_size_t reservation_ordinal = 0;
+      const loom_low_storage_layout_record_t* record =
+          loom_low_storage_layout_lookup_record(layout, storage_value_id,
+                                                &reservation_ordinal);
       *out_reference = (loom_low_storage_layout_reference_t){
-          .reservation = reservation,
+          .reservation_ordinal = reservation_ordinal,
+          .reservation = record->reservation,
           .byte_offset = byte_offset,
-          .byte_length = has_view ? byte_length : reservation.byte_size,
+          .byte_length = has_view ? byte_length : record->reservation.byte_size,
       };
       return;
     }
@@ -169,15 +186,7 @@ void loom_low_storage_layout_lookup_reference(
 void loom_low_storage_layout_lookup_reservation(
     const loom_low_storage_layout_t* layout, loom_value_id_t storage_value_id,
     loom_low_storage_layout_reservation_t* out_reservation) {
-  for (iree_host_size_t i = 0; i < layout->record_count; ++i) {
-    const loom_low_storage_layout_record_t* record = &layout->records[i];
-    if (record->storage_value_id != storage_value_id) {
-      continue;
-    }
-    *out_reservation = record->reservation;
-    return;
-  }
-  IREE_ASSERT_UNREACHABLE(
-      "storage layout and reference must belong to the same function");
-  IREE_BUILTIN_UNREACHABLE();
+  *out_reservation =
+      loom_low_storage_layout_lookup_record(layout, storage_value_id, NULL)
+          ->reservation;
 }

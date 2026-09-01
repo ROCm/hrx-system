@@ -26,7 +26,7 @@ static iree_status_t loom_cfg_graph_count_edges(const loom_region_t* region,
           graph->malformed = true;
         }
         loom_block_t* const* successors = loom_op_const_successors(op);
-        for (uint8_t i = 0; i < op->successor_count; ++i) {
+        for (uint16_t i = 0; i < op->successor_count; ++i) {
           uint16_t target_index = 0;
           if (!loom_region_try_block_index(region, successors[i],
                                            &target_index)) {
@@ -130,7 +130,7 @@ static void loom_cfg_graph_write_edges(
     while (op) {
       if (op->successor_count > 0) {
         loom_block_t* const* successors = loom_op_const_successors(op);
-        for (uint8_t i = 0; i < op->successor_count; ++i) {
+        for (uint16_t i = 0; i < op->successor_count; ++i) {
           uint16_t target_index = 0;
           if (!loom_region_try_block_index(region, successors[i],
                                            &target_index)) {

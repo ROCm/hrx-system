@@ -29,20 +29,39 @@ iree_status_t loom_target_function_version_snapshot_build(
   *out_snapshot = (loom_target_function_version_snapshot_t){
       .symbol_count = module->symbols.count,
   };
-  if (function_versions == NULL || function_versions->count == 0) {
-    return iree_ok_status();
+  const iree_host_size_t function_version_count =
+      function_versions != NULL ? function_versions->count : 0;
+  if (function_version_count > LOOM_FUNCTION_VERSION_ORDINAL_INVALID) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "target function-version count exceeds the "
+                            "ordinal domain");
   }
 
   if (module->symbols.count > 0) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        arena, module->symbols.count,
-        sizeof(*out_snapshot->version_handles_by_symbol),
-        (void**)&out_snapshot->version_handles_by_symbol));
+    iree_host_size_t handle_offset = 0;
+    iree_host_size_t ordinal_offset = 0;
+    iree_host_size_t storage_size = 0;
+    IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
+        0, &storage_size,
+        IREE_STRUCT_FIELD(module->symbols.count, loom_function_version_t*,
+                          &handle_offset),
+        IREE_STRUCT_FIELD(module->symbols.count,
+                          loom_function_version_ordinal_t, &ordinal_offset)));
+    uint8_t* storage = NULL;
+    IREE_RETURN_IF_ERROR(
+        iree_arena_allocate(arena, storage_size, (void**)&storage));
+    out_snapshot->version_handles_by_symbol =
+        (loom_function_version_t**)(storage + handle_offset);
+    out_snapshot->version_ordinals_by_symbol =
+        (loom_function_version_ordinal_t*)(storage + ordinal_offset);
     memset(out_snapshot->version_handles_by_symbol, 0,
            module->symbols.count *
                sizeof(*out_snapshot->version_handles_by_symbol));
+    memset(out_snapshot->version_ordinals_by_symbol, 0xFF,
+           module->symbols.count *
+               sizeof(*out_snapshot->version_ordinals_by_symbol));
   }
-  for (iree_host_size_t i = 0; i < function_versions->count; ++i) {
+  for (iree_host_size_t i = 0; i < function_version_count; ++i) {
     loom_function_version_t* version_handle = function_versions->values[i];
     const loom_target_function_version_t* function_version =
         loom_target_function_version_const_cast(version_handle);
@@ -81,6 +100,8 @@ iree_status_t loom_target_function_version_snapshot_build(
     }
     out_snapshot->version_handles_by_symbol[function_ref.symbol_id] =
         version_handle;
+    out_snapshot->version_ordinals_by_symbol[function_ref.symbol_id] =
+        (loom_function_version_ordinal_t)i;
   }
   return iree_ok_status();
 }

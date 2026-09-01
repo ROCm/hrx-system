@@ -1,0 +1,248 @@
+// RUN: pass vm-materialize-call-abi
+
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) @return_input(%input: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+  return %input
+}
+
+// ----
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) abi_layout({signature = type<(reg<vm.value : i32>) -> (reg<vm.value : i32>)>}) @return_input(%input: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+  %2 = copy %input : reg<vm.value : i32> -> reg<vm.value : i32>
+  %3 = copy %2 : reg<vm.value : i32> -> reg<vm.value : i32>
+  return %3
+}
+
+// ====
+
+// RUN: pass vm-materialize-call-abi
+
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) abi(vm_function) @callee(%input: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+  %one = constant.s16 1 : reg<vm.value : i32>
+  %result = integer.add.i32 %input, %one : reg<vm.value : i32>
+  return %result
+}
+
+low.func.def target<vm.core>(@target) abi(vm_function) @caller(%input: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+  %result = low.func.call @callee(%input) : (reg<vm.value : i32>) -> (reg<vm.value : i32>)
+  %sum = integer.add.i32 %result, %input : reg<vm.value : i32>
+  return %sum
+}
+
+// ----
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i32>) -> (reg<vm.value : i32>)>}) @callee(%input: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+  %8 = copy %input : reg<vm.value : i32> -> reg<vm.value : i32>
+  %one = constant.s16 1 : reg<vm.value : i32>
+  %result = integer.add.i32 %8, %one : reg<vm.value : i32>
+  %9 = copy %result : reg<vm.value : i32> -> reg<vm.value : i32>
+  return %9
+}
+
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i32>) -> (reg<vm.value : i32>)>}) @caller(%input: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+  %10 = copy %input : reg<vm.value : i32> -> reg<vm.value : i32>
+  %11 = copy %10 : reg<vm.value : i32> -> reg<vm.value : i32>
+  %result = low.func.call @callee(%11) : (reg<vm.value : i32>) -> (reg<vm.value : i32>)
+  %12 = copy %result : reg<vm.value : i32> -> reg<vm.value : i32>
+  %sum = integer.add.i32 %12, %10 : reg<vm.value : i32>
+  %13 = copy %sum : reg<vm.value : i32> -> reg<vm.value : i32>
+  return %13
+}
+
+// ====
+
+// RUN: pass vm-materialize-call-abi
+
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) abi(vm_function) @empty() asm {
+  return
+}
+
+// ----
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<() -> ()>}) @empty() asm {
+  return
+}
+
+// ====
+
+// RUN: pass vm-materialize-call-abi
+
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) abi(vm_function) @mixed_banks(%value: reg<vm.value : i32>, %buffer: reg<vm.ref : hal.buffer>, %callback: reg<vm.function : func.ref<(i32) -> (i32)>>) -> (reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.value : i32>, reg<vm.ref : hal.buffer>) asm {
+  return %callback, %value, %buffer
+}
+
+// ----
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i32>, reg<vm.ref : hal.buffer>, reg<vm.function : func.ref<(i32) -> (i32)>>) -> (reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.value : i32>, reg<vm.ref : hal.buffer>)>}) @mixed_banks(%value: reg<vm.value : i32>, %buffer: reg<vm.ref : hal.buffer>, %callback: reg<vm.function : func.ref<(i32) -> (i32)>>) -> (reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.value : i32>, reg<vm.ref : hal.buffer>) asm {
+  %6 = copy %value : reg<vm.value : i32> -> reg<vm.value : i32>
+  %7 = move %buffer : reg<vm.ref : hal.buffer> -> reg<vm.ref : hal.buffer>
+  %8 = copy %callback : reg<vm.function : func.ref<(i32) -> (i32)>> -> reg<vm.function : func.ref<(i32) -> (i32)>>
+  %9 = copy %8 : reg<vm.function : func.ref<(i32) -> (i32)>> -> reg<vm.function : func.ref<(i32) -> (i32)>>
+  %10 = copy %6 : reg<vm.value : i32> -> reg<vm.value : i32>
+  %11 = move %7 : reg<vm.ref : hal.buffer> -> reg<vm.ref : hal.buffer>
+  return %9, %10, %11
+}
+
+// ====
+
+// RUN: pass vm-materialize-call-abi
+
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) abi(vm_function) export("value_overflow") @value_overflow(%v0: reg<vm.value : i32>, %v1: reg<vm.value : i32>, %v2: reg<vm.value : i32>, %v3: reg<vm.value : i32>, %v4: reg<vm.value : i32>, %v5: reg<vm.value : i32>, %v6: reg<vm.value : i32>, %v7: reg<vm.value : i32>, %v8: reg<vm.value : i32>, %v9: reg<vm.value : i32>, %v10: reg<vm.value : i32>, %v11: reg<vm.value : i32>, %v12: reg<vm.value : i32>, %v13: reg<vm.value : i32>, %v14: reg<vm.value : i32>, %v15: reg<vm.value : i32>, %v16: reg<vm.value : i32>) -> (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>) asm {
+  return %v0, %v1, %v2, %v3, %v4, %v5, %v6, %v7, %v8, %v9, %v10, %v11, %v12, %v13, %v14, %v15, %v16
+}
+
+// ----
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({argument_names = {f00000 = "v0", f00001 = "v1", f00002 = "v2", f00003 = "v3", f00004 = "v4", f00005 = "v5", f00006 = "v6", f00007 = "v7", f00008 = "v8", f00009 = "v9", f00010 = "v10", f00011 = "v11", f00012 = "v12", f00013 = "v13", f00014 = "v14", f00015 = "v15", f00016 = "v16"}, signature = type<(reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>) -> (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>)>}) export("value_overflow") @value_overflow(%v0: reg<vm.value : i32>, %v1: reg<vm.value : i32>, %v2: reg<vm.value : i32>, %v3: reg<vm.value : i32>, %v4: reg<vm.value : i32>, %v5: reg<vm.value : i32>, %v6: reg<vm.value : i32>, %v7: reg<vm.value : i32>, %v8: reg<vm.value : i32>, %v9: reg<vm.value : i32>, %v10: reg<vm.value : i32>, %v11: reg<vm.value : i32>, %v12: reg<vm.value : i32>, %v13: reg<vm.value : i32>, %v14: reg<vm.value : i32>, %v15: reg<vm.value : i32>, %16: reg<vm.value : i32>) -> (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>) asm {
+  %34 = copy %v0 : reg<vm.value : i32> -> reg<vm.value : i32>
+  %35 = copy %v1 : reg<vm.value : i32> -> reg<vm.value : i32>
+  %36 = copy %v2 : reg<vm.value : i32> -> reg<vm.value : i32>
+  %37 = copy %v3 : reg<vm.value : i32> -> reg<vm.value : i32>
+  %38 = copy %v4 : reg<vm.value : i32> -> reg<vm.value : i32>
+  %39 = copy %v5 : reg<vm.value : i32> -> reg<vm.value : i32>
+  %40 = copy %v6 : reg<vm.value : i32> -> reg<vm.value : i32>
+  %41 = copy %v7 : reg<vm.value : i32> -> reg<vm.value : i32>
+  %42 = copy %v8 : reg<vm.value : i32> -> reg<vm.value : i32>
+  %43 = copy %v9 : reg<vm.value : i32> -> reg<vm.value : i32>
+  %44 = copy %v10 : reg<vm.value : i32> -> reg<vm.value : i32>
+  %45 = copy %v11 : reg<vm.value : i32> -> reg<vm.value : i32>
+  %46 = copy %v12 : reg<vm.value : i32> -> reg<vm.value : i32>
+  %47 = copy %v13 : reg<vm.value : i32> -> reg<vm.value : i32>
+  %48 = copy %v14 : reg<vm.value : i32> -> reg<vm.value : i32>
+  %49 = copy %v15 : reg<vm.value : i32> -> reg<vm.value : i32>
+  %v16 = value.abi.argument.load 0 : reg<vm.value : i32>
+  %51 = copy %34 : reg<vm.value : i32> -> reg<vm.value : i32>
+  %52 = copy %35 : reg<vm.value : i32> -> reg<vm.value : i32>
+  %53 = copy %36 : reg<vm.value : i32> -> reg<vm.value : i32>
+  %54 = copy %37 : reg<vm.value : i32> -> reg<vm.value : i32>
+  %55 = copy %38 : reg<vm.value : i32> -> reg<vm.value : i32>
+  %56 = copy %39 : reg<vm.value : i32> -> reg<vm.value : i32>
+  %57 = copy %40 : reg<vm.value : i32> -> reg<vm.value : i32>
+  %58 = copy %41 : reg<vm.value : i32> -> reg<vm.value : i32>
+  %59 = copy %42 : reg<vm.value : i32> -> reg<vm.value : i32>
+  %60 = copy %43 : reg<vm.value : i32> -> reg<vm.value : i32>
+  %61 = copy %44 : reg<vm.value : i32> -> reg<vm.value : i32>
+  %62 = copy %45 : reg<vm.value : i32> -> reg<vm.value : i32>
+  %63 = copy %46 : reg<vm.value : i32> -> reg<vm.value : i32>
+  %64 = copy %47 : reg<vm.value : i32> -> reg<vm.value : i32>
+  %65 = copy %48 : reg<vm.value : i32> -> reg<vm.value : i32>
+  %66 = copy %49 : reg<vm.value : i32> -> reg<vm.value : i32>
+  value.abi.result.store %v16, 0
+  return %51, %52, %53, %54, %55, %56, %57, %58, %59, %60, %61, %62, %63, %64, %65, %66, %v16
+}
+
+// ====
+
+// RUN: pass vm-materialize-call-abi
+
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) abi(vm_function) @ref_overflow(%r0: reg<vm.ref : hal.buffer>, %r1: reg<vm.ref : hal.buffer>, %r2: reg<vm.ref : hal.buffer>, %r3: reg<vm.ref : hal.buffer>, %r4: reg<vm.ref : hal.buffer>, %r5: reg<vm.ref : hal.buffer>, %r6: reg<vm.ref : hal.buffer>, %r7: reg<vm.ref : hal.buffer>, %r8: reg<vm.ref : hal.buffer>, %r9: reg<vm.ref : hal.buffer>, %r10: reg<vm.ref : hal.buffer>, %r11: reg<vm.ref : hal.buffer>, %r12: reg<vm.ref : hal.buffer>, %r13: reg<vm.ref : hal.buffer>, %r14: reg<vm.ref : hal.buffer>, %r15: reg<vm.ref : hal.buffer>, %r16: reg<vm.ref : hal.buffer>) -> (reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>) asm {
+  return %r0, %r1, %r2, %r3, %r4, %r5, %r6, %r7, %r8, %r9, %r10, %r11, %r12, %r13, %r14, %r15, %r16
+}
+
+// ----
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>) -> (reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>)>}) @ref_overflow(%r0: reg<vm.ref : hal.buffer>, %r1: reg<vm.ref : hal.buffer>, %r2: reg<vm.ref : hal.buffer>, %r3: reg<vm.ref : hal.buffer>, %r4: reg<vm.ref : hal.buffer>, %r5: reg<vm.ref : hal.buffer>, %r6: reg<vm.ref : hal.buffer>, %r7: reg<vm.ref : hal.buffer>, %r8: reg<vm.ref : hal.buffer>, %r9: reg<vm.ref : hal.buffer>, %r10: reg<vm.ref : hal.buffer>, %r11: reg<vm.ref : hal.buffer>, %r12: reg<vm.ref : hal.buffer>, %r13: reg<vm.ref : hal.buffer>, %r14: reg<vm.ref : hal.buffer>, %r15: reg<vm.ref : hal.buffer>, %16: reg<vm.ref : hal.buffer>) -> (reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>, reg<vm.ref : hal.buffer>) asm {
+  %34 = move %r0 : reg<vm.ref : hal.buffer> -> reg<vm.ref : hal.buffer>
+  %35 = move %r1 : reg<vm.ref : hal.buffer> -> reg<vm.ref : hal.buffer>
+  %36 = move %r2 : reg<vm.ref : hal.buffer> -> reg<vm.ref : hal.buffer>
+  %37 = move %r3 : reg<vm.ref : hal.buffer> -> reg<vm.ref : hal.buffer>
+  %38 = move %r4 : reg<vm.ref : hal.buffer> -> reg<vm.ref : hal.buffer>
+  %39 = move %r5 : reg<vm.ref : hal.buffer> -> reg<vm.ref : hal.buffer>
+  %40 = move %r6 : reg<vm.ref : hal.buffer> -> reg<vm.ref : hal.buffer>
+  %41 = move %r7 : reg<vm.ref : hal.buffer> -> reg<vm.ref : hal.buffer>
+  %42 = move %r8 : reg<vm.ref : hal.buffer> -> reg<vm.ref : hal.buffer>
+  %43 = move %r9 : reg<vm.ref : hal.buffer> -> reg<vm.ref : hal.buffer>
+  %44 = move %r10 : reg<vm.ref : hal.buffer> -> reg<vm.ref : hal.buffer>
+  %45 = move %r11 : reg<vm.ref : hal.buffer> -> reg<vm.ref : hal.buffer>
+  %46 = move %r12 : reg<vm.ref : hal.buffer> -> reg<vm.ref : hal.buffer>
+  %47 = move %r13 : reg<vm.ref : hal.buffer> -> reg<vm.ref : hal.buffer>
+  %48 = move %r14 : reg<vm.ref : hal.buffer> -> reg<vm.ref : hal.buffer>
+  %49 = move %r15 : reg<vm.ref : hal.buffer> -> reg<vm.ref : hal.buffer>
+  %r16 = ref.abi.argument.load.move 0 : reg<vm.ref : hal.buffer>
+  %51 = move %34 : reg<vm.ref : hal.buffer> -> reg<vm.ref : hal.buffer>
+  %52 = move %35 : reg<vm.ref : hal.buffer> -> reg<vm.ref : hal.buffer>
+  %53 = move %36 : reg<vm.ref : hal.buffer> -> reg<vm.ref : hal.buffer>
+  %54 = move %37 : reg<vm.ref : hal.buffer> -> reg<vm.ref : hal.buffer>
+  %55 = move %38 : reg<vm.ref : hal.buffer> -> reg<vm.ref : hal.buffer>
+  %56 = move %39 : reg<vm.ref : hal.buffer> -> reg<vm.ref : hal.buffer>
+  %57 = move %40 : reg<vm.ref : hal.buffer> -> reg<vm.ref : hal.buffer>
+  %58 = move %41 : reg<vm.ref : hal.buffer> -> reg<vm.ref : hal.buffer>
+  %59 = move %42 : reg<vm.ref : hal.buffer> -> reg<vm.ref : hal.buffer>
+  %60 = move %43 : reg<vm.ref : hal.buffer> -> reg<vm.ref : hal.buffer>
+  %61 = move %44 : reg<vm.ref : hal.buffer> -> reg<vm.ref : hal.buffer>
+  %62 = move %45 : reg<vm.ref : hal.buffer> -> reg<vm.ref : hal.buffer>
+  %63 = move %46 : reg<vm.ref : hal.buffer> -> reg<vm.ref : hal.buffer>
+  %64 = move %47 : reg<vm.ref : hal.buffer> -> reg<vm.ref : hal.buffer>
+  %65 = move %48 : reg<vm.ref : hal.buffer> -> reg<vm.ref : hal.buffer>
+  %66 = move %49 : reg<vm.ref : hal.buffer> -> reg<vm.ref : hal.buffer>
+  ref.abi.result.store.move %r16, 0
+  return %51, %52, %53, %54, %55, %56, %57, %58, %59, %60, %61, %62, %63, %64, %65, %66, %r16
+}
+
+// ====
+
+// RUN: pass vm-materialize-call-abi
+
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) abi(vm_function) @function_overflow(%f0: reg<vm.function : func.ref<(i32) -> (i32)>>, %f1: reg<vm.function : func.ref<(i32) -> (i32)>>, %f2: reg<vm.function : func.ref<(i32) -> (i32)>>, %f3: reg<vm.function : func.ref<(i32) -> (i32)>>, %f4: reg<vm.function : func.ref<(i32) -> (i32)>>, %f5: reg<vm.function : func.ref<(i32) -> (i32)>>, %f6: reg<vm.function : func.ref<(i32) -> (i32)>>, %f7: reg<vm.function : func.ref<(i32) -> (i32)>>, %f8: reg<vm.function : func.ref<(i32) -> (i32)>>, %f9: reg<vm.function : func.ref<(i32) -> (i32)>>, %f10: reg<vm.function : func.ref<(i32) -> (i32)>>, %f11: reg<vm.function : func.ref<(i32) -> (i32)>>, %f12: reg<vm.function : func.ref<(i32) -> (i32)>>, %f13: reg<vm.function : func.ref<(i32) -> (i32)>>, %f14: reg<vm.function : func.ref<(i32) -> (i32)>>, %f15: reg<vm.function : func.ref<(i32) -> (i32)>>, %f16: reg<vm.function : func.ref<(i32) -> (i32)>>) -> (reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>) asm {
+  return %f0, %f1, %f2, %f3, %f4, %f5, %f6, %f7, %f8, %f9, %f10, %f11, %f12, %f13, %f14, %f15, %f16
+}
+
+// ----
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>) -> (reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>)>}) @function_overflow(%f0: reg<vm.function : func.ref<(i32) -> (i32)>>, %f1: reg<vm.function : func.ref<(i32) -> (i32)>>, %f2: reg<vm.function : func.ref<(i32) -> (i32)>>, %f3: reg<vm.function : func.ref<(i32) -> (i32)>>, %f4: reg<vm.function : func.ref<(i32) -> (i32)>>, %f5: reg<vm.function : func.ref<(i32) -> (i32)>>, %f6: reg<vm.function : func.ref<(i32) -> (i32)>>, %f7: reg<vm.function : func.ref<(i32) -> (i32)>>, %f8: reg<vm.function : func.ref<(i32) -> (i32)>>, %f9: reg<vm.function : func.ref<(i32) -> (i32)>>, %f10: reg<vm.function : func.ref<(i32) -> (i32)>>, %f11: reg<vm.function : func.ref<(i32) -> (i32)>>, %f12: reg<vm.function : func.ref<(i32) -> (i32)>>, %f13: reg<vm.function : func.ref<(i32) -> (i32)>>, %f14: reg<vm.function : func.ref<(i32) -> (i32)>>, %f15: reg<vm.function : func.ref<(i32) -> (i32)>>, %16: reg<vm.function : func.ref<(i32) -> (i32)>>) -> (reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>, reg<vm.function : func.ref<(i32) -> (i32)>>) asm {
+  %34 = copy %f0 : reg<vm.function : func.ref<(i32) -> (i32)>> -> reg<vm.function : func.ref<(i32) -> (i32)>>
+  %35 = copy %f1 : reg<vm.function : func.ref<(i32) -> (i32)>> -> reg<vm.function : func.ref<(i32) -> (i32)>>
+  %36 = copy %f2 : reg<vm.function : func.ref<(i32) -> (i32)>> -> reg<vm.function : func.ref<(i32) -> (i32)>>
+  %37 = copy %f3 : reg<vm.function : func.ref<(i32) -> (i32)>> -> reg<vm.function : func.ref<(i32) -> (i32)>>
+  %38 = copy %f4 : reg<vm.function : func.ref<(i32) -> (i32)>> -> reg<vm.function : func.ref<(i32) -> (i32)>>
+  %39 = copy %f5 : reg<vm.function : func.ref<(i32) -> (i32)>> -> reg<vm.function : func.ref<(i32) -> (i32)>>
+  %40 = copy %f6 : reg<vm.function : func.ref<(i32) -> (i32)>> -> reg<vm.function : func.ref<(i32) -> (i32)>>
+  %41 = copy %f7 : reg<vm.function : func.ref<(i32) -> (i32)>> -> reg<vm.function : func.ref<(i32) -> (i32)>>
+  %42 = copy %f8 : reg<vm.function : func.ref<(i32) -> (i32)>> -> reg<vm.function : func.ref<(i32) -> (i32)>>
+  %43 = copy %f9 : reg<vm.function : func.ref<(i32) -> (i32)>> -> reg<vm.function : func.ref<(i32) -> (i32)>>
+  %44 = copy %f10 : reg<vm.function : func.ref<(i32) -> (i32)>> -> reg<vm.function : func.ref<(i32) -> (i32)>>
+  %45 = copy %f11 : reg<vm.function : func.ref<(i32) -> (i32)>> -> reg<vm.function : func.ref<(i32) -> (i32)>>
+  %46 = copy %f12 : reg<vm.function : func.ref<(i32) -> (i32)>> -> reg<vm.function : func.ref<(i32) -> (i32)>>
+  %47 = copy %f13 : reg<vm.function : func.ref<(i32) -> (i32)>> -> reg<vm.function : func.ref<(i32) -> (i32)>>
+  %48 = copy %f14 : reg<vm.function : func.ref<(i32) -> (i32)>> -> reg<vm.function : func.ref<(i32) -> (i32)>>
+  %49 = copy %f15 : reg<vm.function : func.ref<(i32) -> (i32)>> -> reg<vm.function : func.ref<(i32) -> (i32)>>
+  %f16 = func.abi.argument.load 0 : reg<vm.function : func.ref<(i32) -> (i32)>>
+  %51 = copy %34 : reg<vm.function : func.ref<(i32) -> (i32)>> -> reg<vm.function : func.ref<(i32) -> (i32)>>
+  %52 = copy %35 : reg<vm.function : func.ref<(i32) -> (i32)>> -> reg<vm.function : func.ref<(i32) -> (i32)>>
+  %53 = copy %36 : reg<vm.function : func.ref<(i32) -> (i32)>> -> reg<vm.function : func.ref<(i32) -> (i32)>>
+  %54 = copy %37 : reg<vm.function : func.ref<(i32) -> (i32)>> -> reg<vm.function : func.ref<(i32) -> (i32)>>
+  %55 = copy %38 : reg<vm.function : func.ref<(i32) -> (i32)>> -> reg<vm.function : func.ref<(i32) -> (i32)>>
+  %56 = copy %39 : reg<vm.function : func.ref<(i32) -> (i32)>> -> reg<vm.function : func.ref<(i32) -> (i32)>>
+  %57 = copy %40 : reg<vm.function : func.ref<(i32) -> (i32)>> -> reg<vm.function : func.ref<(i32) -> (i32)>>
+  %58 = copy %41 : reg<vm.function : func.ref<(i32) -> (i32)>> -> reg<vm.function : func.ref<(i32) -> (i32)>>
+  %59 = copy %42 : reg<vm.function : func.ref<(i32) -> (i32)>> -> reg<vm.function : func.ref<(i32) -> (i32)>>
+  %60 = copy %43 : reg<vm.function : func.ref<(i32) -> (i32)>> -> reg<vm.function : func.ref<(i32) -> (i32)>>
+  %61 = copy %44 : reg<vm.function : func.ref<(i32) -> (i32)>> -> reg<vm.function : func.ref<(i32) -> (i32)>>
+  %62 = copy %45 : reg<vm.function : func.ref<(i32) -> (i32)>> -> reg<vm.function : func.ref<(i32) -> (i32)>>
+  %63 = copy %46 : reg<vm.function : func.ref<(i32) -> (i32)>> -> reg<vm.function : func.ref<(i32) -> (i32)>>
+  %64 = copy %47 : reg<vm.function : func.ref<(i32) -> (i32)>> -> reg<vm.function : func.ref<(i32) -> (i32)>>
+  %65 = copy %48 : reg<vm.function : func.ref<(i32) -> (i32)>> -> reg<vm.function : func.ref<(i32) -> (i32)>>
+  %66 = copy %49 : reg<vm.function : func.ref<(i32) -> (i32)>> -> reg<vm.function : func.ref<(i32) -> (i32)>>
+  func.abi.result.store %f16, 0
+  return %51, %52, %53, %54, %55, %56, %57, %58, %59, %60, %61, %62, %63, %64, %65, %66, %f16
+}

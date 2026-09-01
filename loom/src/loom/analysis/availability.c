@@ -55,63 +55,11 @@ static bool loom_availability_query_is_valid(
   return analysis && analysis->module && before_op;
 }
 
-static const loom_op_t* loom_availability_region_owner_op(
-    const loom_region_t* region) {
-  if (!region) {
-    return NULL;
-  }
-  const loom_block_t* block = NULL;
-  loom_region_for_each_block(region, block) {
-    const loom_op_t* first_op = block->first_op;
-    if (first_op) {
-      return first_op->parent_op;
-    }
-  }
-  return NULL;
-}
-
-static bool loom_availability_region_contains_block_slow(
-    const loom_region_t* region, const loom_block_t* target) {
-  if (!region || !target) {
-    return false;
-  }
-  for (uint16_t block_index = 0; block_index < region->block_count;
-       ++block_index) {
-    const loom_block_t* block = loom_region_const_block(region, block_index);
-    if (block == target) {
-      return true;
-    }
-    const loom_op_t* op = NULL;
-    loom_block_for_each_op(block, op) {
-      loom_region_t** regions = loom_op_regions(op);
-      for (uint8_t i = 0; i < op->region_count; ++i) {
-        if (loom_availability_region_contains_block_slow(regions[i], target)) {
-          return true;
-        }
-      }
-    }
-  }
-  return false;
-}
-
 static bool loom_availability_block_is_nested_under(const loom_op_t* root,
                                                     const loom_block_t* block) {
-  if (!root || !block) {
-    return false;
-  }
-  const loom_op_t* owner_op =
-      loom_availability_region_owner_op(block->parent_region);
-  if (owner_op) {
-    return loom_availability_op_is_nested_under(root, owner_op);
-  }
-
-  loom_region_t** regions = loom_op_regions(root);
-  for (uint8_t i = 0; i < root->region_count; ++i) {
-    if (loom_availability_region_contains_block_slow(regions[i], block)) {
-      return true;
-    }
-  }
-  return false;
+  if (!root || !block || !block->parent_region) return false;
+  const loom_op_t* owner_op = block->parent_region->owner_op;
+  return loom_availability_op_is_nested_under(root, owner_op);
 }
 
 static bool loom_availability_value_moves_with_subtree(
@@ -240,6 +188,7 @@ static iree_status_t loom_availability_attr_is_available_before_op_impl(
   switch (attr->kind) {
     case LOOM_ATTR_ABSENT:
     case LOOM_ATTR_I64:
+    case LOOM_ATTR_U64:
     case LOOM_ATTR_F64:
     case LOOM_ATTR_STRING:
     case LOOM_ATTR_BOOL:

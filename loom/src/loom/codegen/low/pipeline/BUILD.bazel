@@ -20,6 +20,7 @@ _LOW_PASS_ENVIRONMENT_VISIBILITY = [
     "//loom/src/loom/pass:__pkg__",
     "//loom/src/loom/target/arch/amdgpu:__pkg__",
     "//loom/src/loom/target/arch/amdgpu/hal:__pkg__",
+    "//loom/src/loom/target/arch/vm:__pkg__",
     "//loom/src/loom/transforms/cleanup:__pkg__",
     "//loom/src/loom/transforms/kernel:__pkg__",
     "//loom/src/loom/tooling/compile:__pkg__",
@@ -41,6 +42,21 @@ loom_cc_library(
     name = "pass_requirements",
     hdrs = ["pass_requirements.h"],
     visibility = _LOW_PASS_REQUIREMENTS_VISIBILITY,
+)
+
+loom_cc_library(
+    name = "legalizer_registry",
+    srcs = ["legalizer_registry.c"],
+    hdrs = ["legalizer_registry.h"],
+    visibility = _LOW_PASS_ENVIRONMENT_VISIBILITY,
+    deps = [
+        "//loom/src/loom/target:legalization",
+        "//loom/src/loom/transforms/buffer:target_legalization",
+        "//loom/src/loom/transforms/scalar:target_legalization",
+        "//loom/src/loom/transforms/vector:target_legalization",
+        "//loom/src/loom/transforms/view:target_legalization",
+        "//runtime/src/iree/base",
+    ],
 )
 
 loom_cc_library(

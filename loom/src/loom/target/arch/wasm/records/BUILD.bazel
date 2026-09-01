@@ -27,6 +27,7 @@ loom_cc_library(
     hdrs = ["target_records.h"],
     visibility = _WASM_TARGET_RECORDS_VISIBILITY,
     deps = [
+        "//loom/src/loom/target:facts",
         "//loom/src/loom/target:types",
         "//runtime/src/iree/base",
     ],

@@ -51,7 +51,7 @@ bool loom_amdgpu_fp8_format(
     loom_value_fact_numeric_format_flags_t numeric_format,
     loom_scalar_type_t* out_element_type,
     loom_scalar_type_fp8_format_t* out_format) {
-  *out_element_type = LOOM_SCALAR_TYPE_COUNT_;
+  *out_element_type = LOOM_SCALAR_TYPE_NONE;
   *out_format = (loom_scalar_type_fp8_format_t){0};
   uint32_t format_index = 0;
   if (!loom_amdgpu_fp8_format_index(numeric_format, &format_index)) {
@@ -71,7 +71,7 @@ static bool loom_amdgpu_fp8_descriptor_row_index(
   *out_row_index = 0;
   uint32_t source_format_index = 0;
   if (!loom_amdgpu_fp8_format_index(source_format, &source_format_index) ||
-      result_element_type >= LOOM_SCALAR_TYPE_COUNT_) {
+      !loom_scalar_type_is_valid(result_element_type)) {
     return false;
   }
   const uint8_t encoded_row_index =

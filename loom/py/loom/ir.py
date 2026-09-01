@@ -100,9 +100,10 @@ __all__ = [
     # Encoding instances.
     "DynamicEncoding",
     "EncodingInstance",
-    # Predicates.
+    # Attributes and predicates.
     "CanonicalAttrDict",
     "ATTR_AGGREGATE_MAX_NESTING_DEPTH",
+    "U64Attr",
     "EnumArrayAttr",
     "SignedEnumSetAttr",
     "ParameterizedAttr",
@@ -1030,6 +1031,20 @@ class TiedResult:
 
 
 ATTR_AGGREGATE_MAX_NESTING_DEPTH = 8
+
+
+@dataclass(frozen=True, slots=True)
+class U64Attr:
+    """Exact unsigned 64-bit generic attribute value."""
+
+    value: int
+
+    def __post_init__(self) -> None:
+        if type(self.value) is not int or not 0 <= self.value < 2**64:
+            raise ValueError(
+                "unsigned 64-bit attribute value must be an integer in "
+                f"[0, 2^64), got {self.value!r}"
+            )
 
 
 class _AbsentParameterizedValue:

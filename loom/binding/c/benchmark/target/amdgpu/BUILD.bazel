@@ -35,3 +35,36 @@ loom_cc_benchmark(
         "//runtime/src/iree/testing:benchmark_main",
     ],
 )
+
+loom_cc_benchmark(
+    name = "launch_config_benchmark",
+    srcs = ["launch_config_benchmark.cc"],
+    args = [
+        "--benchmark_filter=Smoke",
+    ],
+    target_compatible_with = _AMDGPU_COMPATIBLE_WITH,
+    deps = [
+        "//loom/binding/c:loomc",
+        "//loom/binding/c/benchmark:benchmark_support",
+        "//loom/binding/c/benchmark:compile_throughput_benchmark_harness",
+        "//loom/binding/c/target/amdgpu",
+        "//loom/binding/c/target/vm",
+        "//loom/src/loom/analysis:kernel_launch_config",
+        "//loom/src/loom/analysis:symbol_facts",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/link:linker",
+        "//loom/src/loom/ops:func_symbol_facts",
+        "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/target:function_contract",
+        "//loom/src/loom/target:function_version",
+        "//loom/src/loom/target:provider",
+        "//loom/src/loom/target/arch/amdgpu:artifact_key",
+        "//loom/src/loom/target/arch/amdgpu:profile",
+        "//loom/src/loom/target/arch/amdgpu:provider",
+        "//loom/src/loom/tooling/compile:pipeline",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:benchmark_main",
+    ],
+)

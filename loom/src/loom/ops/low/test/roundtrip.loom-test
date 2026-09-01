@@ -53,6 +53,49 @@ low.func.def target<test.low.core>(@test_target) @typed_call_and_branch(%value: 
   low.return %result : reg<test.i32 : i32>
 }
 
+low.func.def target<test.low.core>(@test_target) @typed_indirect_call(%target: reg<test.ptr : func.ref<yieldable (i32) -> (i32)>>, %value: reg<test.i32 : i32>) -> (reg<test.i32 : i32>) {
+  %called = low.func.call.indirect %target(%value) : (reg<test.i32 : i32>) -> (reg<test.i32 : i32>)
+  low.return %called : reg<test.i32 : i32>
+}
+
+low.func.def target<test.low.core>(@test_target) @widen_function_ref(%sync: reg<test.ptr : func.ref<(i32) -> (i32)>>) -> (reg<test.ptr : func.ref<yieldable (i32) -> (i32)>>) {
+  %yieldable = low.func.ref.cast %sync : reg<test.ptr : func.ref<(i32) -> (i32)>> to reg<test.ptr : func.ref<yieldable (i32) -> (i32)>>
+  low.return %yieldable : reg<test.ptr : func.ref<yieldable (i32) -> (i32)>>
+}
+
+low.func.decl optional link("runtime", "callback") target<test.low.core>(@test_target) @callback(%value: reg<test.i32 : i32>) -> (reg<test.i32 : i32>)
+
+low.func.decl public optional link("runtime", "callback_v2") import_metadata({"runtime.optional" = true, "runtime.revision" = u64(2)}) target<test.low.core>(@test_target) export_metadata({"help.summary" = "Callback", "wire.payload" = bytes("00feff")}) @callback_v2(%value: reg<test.i32 : i32>) -> (reg<test.i32 : i32>)
+
+low.func.def public target<test.low.core>(@test_target) export_metadata({"help.summary" = "Identity", "model.revision" = u64(7)}) @documented_identity(%value: reg<test.i32 : i32>) -> (reg<test.i32 : i32>) {
+  low.return %value : reg<test.i32 : i32>
+}
+
+low.func.def target<test.low.core>(@test_target) @function_values() -> (reg<test.ptr : func.ref<(i32) -> (i32)>>, reg<test.i32 : i1>, reg<test.i32 : i1>) asm {
+  %null = low.func.null : reg<test.ptr : func.ref<(i32) -> (i32)>>
+  %is_null = low.func.compare.null %null : reg<test.ptr : func.ref<(i32) -> (i32)>> -> reg<test.i32 : i1>
+  %function = low.func.address @callback : reg<test.ptr : func.ref<(i32) -> (i32)>>
+  %available = low.func.import.resolved @callback : reg<test.i32 : i1>
+  return %function, %is_null, %available
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @asm_indirect_call(%target: reg<test.ptr : func.ref<yieldable (i32) -> (i32)>>, %value: reg<test.i32 : i32>) -> (reg<test.i32 : i32>) asm {
+  %called = low.func.call.indirect %target(%value) : (reg<test.i32 : i32>) -> (reg<test.i32 : i32>)
+  return %called
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @asm_indirect_call(%target: reg<test.ptr : func.ref<yieldable (i32) -> (i32)>>, %value: reg<test.i32 : i32>) -> (reg<test.i32 : i32>) asm {
+  %called = low.func.call.indirect %target(%value) : (reg<test.i32 : i32>) -> (reg<test.i32 : i32>)
+  return %called
+}
+
 // ====
 
 test.target<low_core> @test_target
@@ -78,9 +121,9 @@ low.func.def target<test.low.core>(@test_target) @detached_copy(%value: reg<test
 // ----
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @detached_copy(%value: reg<test.i32>) {
-  %copy = low.copy %value {detached = true} : reg<test.i32> -> reg<test.i32>
-  low.return
+low.func.def target<test.low.core>(@test_target) @detached_copy(%value: reg<test.i32>) asm {
+  %copy = copy %value {detached = true} : reg<test.i32> -> reg<test.i32>
+  return
 }
 
 // ====
@@ -95,7 +138,7 @@ low.func.def target<test.low.core>(@test_target) @detached_move(%value: reg<test
 // ----
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @detached_move(%value: reg<test.i32>) -> (reg<test.i32>) {
-  %moved = low.move %value {detached = true} : reg<test.i32> -> reg<test.i32>
-  low.return %moved : reg<test.i32>
+low.func.def target<test.low.core>(@test_target) @detached_move(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %moved = move %value {detached = true} : reg<test.i32> -> reg<test.i32>
+  return %moved
 }

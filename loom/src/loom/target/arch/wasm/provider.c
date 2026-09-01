@@ -10,6 +10,7 @@
 #include "loom/target/arch/wasm/low_verify.h"
 #include "loom/target/arch/wasm/math_policy.h"
 #include "loom/target/arch/wasm/ops/registry.h"
+#include "loom/target/arch/wasm/records/target_records.h"
 #include "loom/target/emit/wasm/lower/lower.h"
 
 static const loom_low_verify_provider_t* const kLoomWasmLowVerifyProviders[] = {
@@ -17,6 +18,7 @@ static const loom_low_verify_provider_t* const kLoomWasmLowVerifyProviders[] = {
 };
 
 const loom_target_provider_t loom_wasm_target_provider = {
+    .fact_type = &loom_wasm_target_fact_type,
     .register_context = loom_wasm_ops_register_dialect,
     .initialize_low_descriptor_registry =
         loom_wasm_low_descriptor_registry_initialize,

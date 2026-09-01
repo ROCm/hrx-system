@@ -963,6 +963,36 @@ iree_status_t loom_parser_walk_format(loom_parser_t* parser,
         break;
       }
 
+      case LOOM_FORMAT_KIND_SUCCESSOR_REFS: {
+        uint32_t successor_index = element->field_index;
+        bool first = true;
+        while (loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_BLOCK_LABEL) ||
+               (!first &&
+                loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_COMMA))) {
+          if (!first) {
+            loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_COMMA);
+          }
+          if (!loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_BLOCK_LABEL)) {
+            break;
+          }
+          loom_token_t token = loom_tokenizer_next(&parser->tokenizer);
+          if (successor_index == UINT16_MAX) {
+            return iree_make_status(
+                IREE_STATUS_RESOURCE_EXHAUSTED,
+                "parsed op successor count exceeds storage limit");
+          }
+          IREE_RETURN_IF_ERROR(loom_parsed_op_set_successor(
+              parsed, &parser->parser_arena, (uint16_t)successor_index,
+              /*block=*/NULL, token));
+          IREE_RETURN_IF_ERROR(loom_parsed_op_add_field_span(
+              parsed, &parser->parser_arena, LOOM_LOCATION_FIELD_SUCCESSOR,
+              (uint16_t)successor_index, token, token.line, token.end_column));
+          ++successor_index;
+          first = false;
+        }
+        break;
+      }
+
       case LOOM_FORMAT_KIND_ATTR_VALUE: {
         loom_token_t start_token = loom_tokenizer_peek(&parser->tokenizer);
         const loom_attr_descriptor_t* descriptor =
@@ -1114,7 +1144,7 @@ iree_status_t loom_parser_walk_format(loom_parser_t* parser,
       }
 
       case LOOM_FORMAT_KIND_BLOCK_ARGS: {
-        IREE_RETURN_IF_ERROR(loom_parse_format_block_args(parser));
+        IREE_RETURN_IF_ERROR(loom_parse_format_block_args(parser, element));
         break;
       }
 

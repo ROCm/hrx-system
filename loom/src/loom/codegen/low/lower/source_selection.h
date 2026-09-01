@@ -68,6 +68,9 @@ typedef struct loom_low_source_selection_t {
   // unrefined. The target facts reachable through this selection are immutable.
   loom_function_version_t* version_handle;
 
+  // Position of |version_handle| in the lowering function-version list.
+  loom_function_version_ordinal_t version_ordinal;
+
   // Whether target facts came from authorship alone or specialization.
   loom_target_binding_source_t target_source;
 
@@ -118,6 +121,18 @@ typedef struct loom_low_source_selection_list_t {
   iree_host_size_t count;
 } loom_low_source_selection_list_t;
 
+// Invokes each distinct target-selected policy's source module preparation
+// callback once in target-record order.
+//
+// Preparation occurs before source symbol selection because callbacks may add
+// ordinary source functions that must participate in lowering. The returned
+// result is valid and unchanged when no target record selects a policy with a
+// preparation callback.
+iree_status_t loom_low_prepare_source_module(
+    loom_module_t* module, const loom_low_source_selection_options_t* options,
+    iree_arena_allocator_t* arena,
+    loom_low_lower_prepare_module_result_t* out_result);
+
 // Selects all source funcs and import declarations compatible with the injected
 // target-low registries.
 //
@@ -136,6 +151,18 @@ iree_status_t loom_low_select_source_symbols(
 // the arena lifetime. A module with no compatible funcs succeeds with an empty
 // list so module passes can be no-ops.
 iree_status_t loom_low_select_source_funcs(
+    const loom_module_t* module,
+    const loom_low_source_selection_options_t* options,
+    iree_arena_allocator_t* arena,
+    loom_low_source_selection_list_t* out_selection_list);
+
+// Selects all target-bound func bodies compatible with the injected target-low
+// registries, including bodies already authored or lowered in Low IR.
+//
+// The returned selection array is allocated from |arena| and remains valid for
+// the arena lifetime. A module with no compatible funcs succeeds with an empty
+// list so module passes can be no-ops.
+iree_status_t loom_low_select_target_bound_funcs(
     const loom_module_t* module,
     const loom_low_source_selection_options_t* options,
     iree_arena_allocator_t* arena,

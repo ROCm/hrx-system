@@ -54,6 +54,8 @@ typedef struct loom_pass_program_attr_value_t {
   union {
     // Signed integer payload for LOOM_ATTR_I64.
     int64_t i64_value;
+    // Unsigned integer payload for LOOM_ATTR_U64.
+    uint64_t u64_value;
     // Floating-point payload for LOOM_ATTR_F64.
     double f64_value;
     // Program-owned string payload for LOOM_ATTR_STRING.

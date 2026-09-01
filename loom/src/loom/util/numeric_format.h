@@ -178,7 +178,7 @@ typedef struct loom_numeric_format_info_t {
   // Encoded mantissa bit count for floating-point formats.
   uint8_t mantissa_bit_count;
 
-  // Direct Loom scalar carrier, or LOOM_SCALAR_TYPE_COUNT_ when none exists.
+  // Direct Loom scalar carrier, or LOOM_SCALAR_TYPE_NONE when none exists.
   loom_scalar_type_t direct_scalar_type;
 
   // Special-value and contract behavior flags.

@@ -1,0 +1,31 @@
+amdgpu.target<gfx1151> @gfx1151
+
+kernel.def @gamma(%workload: index) {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  %c300 = index.constant 300 : index
+  %workgroup_count = index.add %workload, %c300 : index
+  kernel.launch.config workgroups(%workgroup_count, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch() {
+  kernel.return
+}
+
+kernel.def target(@gfx1151) @alpha(%workload: index) {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  %c100 = index.constant 100 : index
+  %workgroup_count = index.add %workload, %c100 : index
+  kernel.launch.config workgroups(%workgroup_count, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch() {
+  kernel.return
+}
+
+kernel.def target(@gfx1151) @beta(%workload: index) {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  %c200 = index.constant 200 : index
+  %workgroup_count = index.add %workload, %c200 : index
+  kernel.launch.config workgroups(%workgroup_count, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch() {
+  kernel.return
+}

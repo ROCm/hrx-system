@@ -21,6 +21,7 @@
 #include "loom/ir/ir.h"
 #include "loom/target/emit/spirv/module_builder.h"
 #include "loom/target/low_descriptor_registry.h"
+#include "loom/target/provider.h"
 #include "loom/target/types.h"
 
 #ifdef __cplusplus
@@ -31,6 +32,9 @@ typedef struct loom_spirv_emit_low_module_options_t {
   // Optional compiler-owned function versions participating in emission. The
   // list and its version objects are borrowed for the call.
   const loom_function_version_list_t* function_versions;
+  // Optional caller-owned buffer receiving public entry-point ordinals in
+  // emitted OpEntryPoint order for functions with stable compiler versions.
+  loom_target_emit_export_projection_buffer_t* export_projection;
   // Selected target-low function ops to emit. NULL emits every target-low
   // function definition in the module.
   loom_op_t* const* entry_ops;

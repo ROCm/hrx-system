@@ -60,6 +60,7 @@ __all__ = [
     "AlignedRefs",
     "TypedRefs",
     "BlockRef",
+    "BlockRefs",
     "Attr",
     "SymbolRef",
     "TypeOf",
@@ -203,6 +204,22 @@ class BlockRef:
     so CFG analyses and rewrites do not depend on display names.
 
     For builders: maps to a single Block parameter.
+    """
+
+    field: str
+
+
+@dataclass(frozen=True, slots=True)
+class BlockRefs:
+    """Variadic CFG successor block references, comma-separated.
+
+    Prints/parses: ^case0, ^case1, ^case2
+
+    The field names a trailing variadic successor on the op declaration. The
+    caller supplies delimiters so the same element can be embedded in brackets,
+    parentheses, or another declarative form.
+
+    For builders: maps to a list[Block] parameter.
     """
 
     field: str
@@ -533,9 +550,14 @@ class BlockArgs:
     arguments of the referenced region. The op verifier owns the semantic
     relationship between those block arguments and any operands, terminator
     operands, or result fields.
+
+    When ``definition_scope`` is true, the argument names are also visible to
+    later elements in the surrounding Scope. This is used by split signatures
+    whose metadata refers to the entry arguments of a non-body region.
     """
 
     region: str
+    definition_scope: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -899,6 +921,7 @@ type FormatElement = (
     | AlignedRefs
     | TypedRefs
     | BlockRef
+    | BlockRefs
     | Attr
     | SymbolRef
     | TypeOf

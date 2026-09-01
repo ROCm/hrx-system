@@ -1,0 +1,105 @@
+// RUN: emit source-low output=low
+
+vm.target<core> @target
+
+global.variable @sink : index
+
+kernel.def target(@target) @scalar_kernel_profile(%workgroup_count_x: index, %workgroup_count_y: index, %workgroup_count_z: index) {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%workgroup_count_x, %workgroup_count_y, %workgroup_count_z) workgroup_size(%c64, %c1, %c1) : index
+} launch(%bias: index) {
+  %workgroup_id_x = kernel.workgroup.id<x> : index
+  %logical_workgroup_size_x = kernel.workgroup.size<x> : index
+  %workgroup_count_y = kernel.workgroup.count<y> : index
+  %cluster_id_z = kernel.cluster.id<z> : index
+  %cluster_count_x = kernel.cluster.count<x> : index
+  %workitem_id_x = kernel.workitem.id<x> : index
+  %dispatch_id_x = kernel.workitem.dispatch.id<x> : index
+  %subgroup_id = kernel.subgroup.id : index
+  %subgroup_count = kernel.subgroup.count : index
+  %subgroup_size = kernel.subgroup.size : index
+  %subgroup_lane_id = kernel.subgroup.lane.id : index
+  %sum0 = index.add %bias, %workgroup_id_x : index
+  %sum1 = index.add %sum0, %logical_workgroup_size_x : index
+  %sum2 = index.add %sum1, %workgroup_count_y : index
+  %sum3 = index.add %sum2, %cluster_id_z : index
+  %sum4 = index.add %sum3, %cluster_count_x : index
+  %sum5 = index.add %sum4, %workitem_id_x : index
+  %sum6 = index.add %sum5, %dispatch_id_x : index
+  %sum7 = index.add %sum6, %subgroup_id : index
+  %sum8 = index.add %sum7, %subgroup_count : index
+  %sum9 = index.add %sum8, %subgroup_size : index
+  %sum10 = index.add %sum9, %subgroup_lane_id : index
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  global.store %sum10, @sink : index
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.value : index>) -> ()>, signature = type<(reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(64, 1, 1) @scalar_kernel_profile(%bias: reg<vm.value : index>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %47 = integer.mul.i64 %workgroup_id_x, %workgroup_size_x : reg<vm.value : index>
+  %dispatch_id_x = integer.add.i64 %47, %workitem_id_x : reg<vm.value : index>
+  %49 = integer.mul.i64 %workgroup_size_y, %workitem_id_z : reg<vm.value : index>
+  %50 = integer.add.i64 %49, %workitem_id_y : reg<vm.value : index>
+  %51 = integer.mul.i64 %workgroup_size_x, %50 : reg<vm.value : index>
+  %subgroup_id = integer.add.i64 %51, %workitem_id_x : reg<vm.value : index>
+  %logical_workgroup_size_x = constant.s16 64 : reg<vm.value : index>
+  %subgroup_size = constant.s16 1 : reg<vm.value : index>
+  %sum0 = integer.add.i64 %bias, %workgroup_id_x : reg<vm.value : index>
+  %sum1 = integer.add.i64 %sum0, %logical_workgroup_size_x : reg<vm.value : index>
+  %sum2 = integer.add.i64 %sum1, %workgroup_count_y : reg<vm.value : index>
+  %sum3 = integer.add.i64 %sum2, %workgroup_id_z : reg<vm.value : index>
+  %sum4 = integer.add.i64 %sum3, %workgroup_count_x : reg<vm.value : index>
+  %sum5 = integer.add.i64 %sum4, %workitem_id_x : reg<vm.value : index>
+  %sum6 = integer.add.i64 %sum5, %dispatch_id_x : reg<vm.value : index>
+  %sum7 = integer.add.i64 %sum6, %subgroup_id : reg<vm.value : index>
+  %sum8 = integer.add.i64 %sum7, %logical_workgroup_size_x : reg<vm.value : index>
+  %sum9 = integer.add.i64 %sum8, %subgroup_size : reg<vm.value : index>
+  global.value.mutable.store %sum9, 0
+  return
+}
+
+// ====
+
+vm.target<core> @target
+
+global.variable @sink : index
+
+kernel.def target(@target) @dynamic_kernel_profile(%workgroup_count_x: index, %workgroup_size_x: index) {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%workgroup_count_x, %c1, %c1) workgroup_size(%workgroup_size_x, %c1, %c1) : index
+} launch() {
+  %workgroup_id_x = kernel.workgroup.id<x> : index
+  %workgroup_size_x = kernel.workgroup.size<x> : index
+  %workitem_id_x = kernel.workitem.id<x> : index
+  %dispatch_id_x = kernel.workitem.dispatch.id<x> : index
+  %subgroup_id = kernel.subgroup.id : index
+  %subgroup_count = kernel.subgroup.count : index
+  %sum0 = index.add %workgroup_id_x, %workgroup_size_x : index
+  %sum1 = index.add %sum0, %workitem_id_x : index
+  %sum2 = index.add %sum1, %dispatch_id_x : index
+  %sum3 = index.add %sum2, %subgroup_id : index
+  %sum4 = index.add %sum3, %subgroup_count : index
+  global.store %sum4, @sink : index
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<() -> ()>, signature = type<(reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) @dynamic_kernel_profile(%workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %27 = integer.mul.i64 %workgroup_id_x, %workgroup_size_x : reg<vm.value : index>
+  %dispatch_id_x = integer.add.i64 %27, %workitem_id_x : reg<vm.value : index>
+  %29 = integer.mul.i64 %workgroup_size_y, %workitem_id_z : reg<vm.value : index>
+  %30 = integer.add.i64 %29, %workitem_id_y : reg<vm.value : index>
+  %31 = integer.mul.i64 %workgroup_size_x, %30 : reg<vm.value : index>
+  %subgroup_id = integer.add.i64 %31, %workitem_id_x : reg<vm.value : index>
+  %33 = integer.mul.i64 %workgroup_size_x, %workgroup_size_y : reg<vm.value : index>
+  %subgroup_count = integer.mul.i64 %33, %workgroup_size_z : reg<vm.value : index>
+  %sum0 = integer.add.i64 %workgroup_id_x, %workgroup_size_x : reg<vm.value : index>
+  %sum1 = integer.add.i64 %sum0, %workitem_id_x : reg<vm.value : index>
+  %sum2 = integer.add.i64 %sum1, %dispatch_id_x : reg<vm.value : index>
+  %sum3 = integer.add.i64 %sum2, %subgroup_id : reg<vm.value : index>
+  %sum4 = integer.add.i64 %sum3, %subgroup_count : reg<vm.value : index>
+  global.value.mutable.store %sum4, 0
+  return
+}

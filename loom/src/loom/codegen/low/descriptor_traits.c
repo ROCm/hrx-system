@@ -28,6 +28,14 @@ loom_trait_flags_t loom_low_descriptor_effective_traits(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor) {
   loom_trait_flags_t traits = 0;
+  switch (descriptor->carrier) {
+    case LOOM_LOW_DESCRIPTOR_CARRIER_BRANCH:
+      traits |= LOOM_TRAIT_TERMINATOR | LOOM_TRAIT_STORAGE_RELATION;
+      break;
+    case LOOM_LOW_DESCRIPTOR_CARRIER_SWITCH:
+      traits |= LOOM_TRAIT_TERMINATOR;
+      break;
+  }
   for (uint16_t i = 0; i < descriptor->effect_count; ++i) {
     const uint32_t effect_index = descriptor->effect_start + i;
     IREE_ASSERT(effect_index < descriptor_set->effect_count);
@@ -43,9 +51,11 @@ loom_trait_flags_t loom_low_descriptor_effective_traits(
         traits |= LOOM_TRAIT_TERMINATOR;
         break;
       case LOOM_LOW_EFFECT_KIND_CALL:
-      case LOOM_LOW_EFFECT_KIND_BARRIER:
       case LOOM_LOW_EFFECT_KIND_COUNTER:
         traits |= LOOM_TRAIT_UNKNOWN_EFFECTS;
+        break;
+      case LOOM_LOW_EFFECT_KIND_BARRIER:
+        traits |= LOOM_TRAIT_MEMORY_FENCE;
         break;
       case LOOM_LOW_EFFECT_KIND_CONVERGENT:
         traits |= LOOM_TRAIT_CONVERGENT;
@@ -60,6 +70,13 @@ loom_trait_flags_t loom_low_descriptor_effective_traits(
                        LOOM_LOW_DESCRIPTOR_FLAG_TERMINATOR)) {
     traits |= LOOM_TRAIT_TERMINATOR;
   }
+  if (iree_any_bit_set(descriptor->flags, LOOM_LOW_DESCRIPTOR_FLAG_NO_RETURN)) {
+    traits |= LOOM_TRAIT_NO_RETURN;
+  }
+  if (iree_any_bit_set(descriptor->flags,
+                       LOOM_LOW_DESCRIPTOR_FLAG_UNIQUE_IDENTITY)) {
+    traits |= LOOM_TRAIT_UNIQUE_IDENTITY;
+  }
   if (loom_low_descriptor_defines_implicit_state_result(descriptor_set,
                                                         descriptor)) {
     // Implicit state results define target-owned architectural state outside
@@ -70,9 +87,10 @@ loom_trait_flags_t loom_low_descriptor_effective_traits(
   }
   if (iree_any_bit_set(traits, LOOM_TRAIT_UNKNOWN_EFFECTS)) return traits;
 
-  if (!iree_any_bit_set(traits, LOOM_TRAIT_READS_MEMORY |
-                                    LOOM_TRAIT_WRITES_MEMORY |
-                                    LOOM_TRAIT_NON_DETERMINISTIC)) {
+  if (!iree_any_bit_set(
+          traits, LOOM_TRAIT_READS_MEMORY | LOOM_TRAIT_WRITES_MEMORY |
+                      LOOM_TRAIT_NON_DETERMINISTIC | LOOM_TRAIT_MEMORY_FENCE |
+                      LOOM_TRAIT_UNIQUE_IDENTITY)) {
     if (descriptor->effect_count == 0 &&
         iree_any_bit_set(descriptor->flags,
                          LOOM_LOW_DESCRIPTOR_FLAG_SIDE_EFFECTING)) {

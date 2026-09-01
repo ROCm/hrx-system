@@ -1,0 +1,675 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_minmax.loom-test
+// RUN: emit source-low output=low
+
+vm.target<core> @target
+func.def target(@target) @scalar_f32_minnum_maxnum(%lhs: f32, %rhs: f32) -> (f32) {
+  %min = scalar.minnumf %lhs, %rhs : f32
+  %max = scalar.maxnumf %lhs, %rhs : f32
+  %sum = scalar.addf %min, %max : f32
+  func.return %sum : f32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : f32>, reg<vm.value : f32>) -> (reg<vm.value : f32>)>}) @scalar_f32_minnum_maxnum(%lhs: reg<vm.value : f32>, %rhs: reg<vm.value : f32>) -> (reg<vm.value : f32>) asm {
+  %min = float.minmax.f32 %lhs, %rhs, minnum : reg<vm.value : f32>
+  %max = float.minmax.f32 %lhs, %rhs, maxnum : reg<vm.value : f32>
+  %sum = float.add.f32 %min, %max : reg<vm.value : f32>
+  return %sum
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @vector_f32_minnum_maxnum(%lhs: vector<2xf32>, %rhs: vector<2xf32>) -> (vector<2xf32>) {
+  %min = vector.minnumf %lhs, %rhs : vector<2xf32>
+  %max = vector.maxnumf %lhs, %rhs : vector<2xf32>
+  %sum = vector.addf %min, %max : vector<2xf32>
+  func.return %sum : vector<2xf32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x2 : vector<2xf32>>, reg<vm.value x2 : vector<2xf32>>) -> (reg<vm.value x2 : vector<2xf32>>)>}) @vector_f32_minnum_maxnum(%lhs: reg<vm.value x2 : vector<2xf32>>, %rhs: reg<vm.value x2 : vector<2xf32>>) -> (reg<vm.value x2 : vector<2xf32>>) asm {
+  %24 = slice %lhs[0] : reg<vm.value x2 : vector<2xf32>> -> reg<vm.value : f32>
+  %25 = slice %rhs[0] : reg<vm.value x2 : vector<2xf32>> -> reg<vm.value : f32>
+  %26 = float.minmax.f32 %24, %25, minnum : reg<vm.value : f32>
+  %27 = float.minmax.f32 %24, %25, maxnum : reg<vm.value : f32>
+  %28 = float.add.f32 %26, %27 : reg<vm.value : f32>
+  %29 = slice %lhs[1] : reg<vm.value x2 : vector<2xf32>> -> reg<vm.value : f32>
+  %30 = slice %rhs[1] : reg<vm.value x2 : vector<2xf32>> -> reg<vm.value : f32>
+  %31 = float.minmax.f32 %29, %30, minnum : reg<vm.value : f32>
+  %32 = float.minmax.f32 %29, %30, maxnum : reg<vm.value : f32>
+  %33 = float.add.f32 %31, %32 : reg<vm.value : f32>
+  %sum = concat(%28, %33) : (reg<vm.value : f32>, reg<vm.value : f32>) -> reg<vm.value x2 : vector<2xf32>>
+  return %sum
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_f32_clampf_number(%input: f32) -> (f32) {
+  %lower = scalar.constant -1.0 : f32
+  %upper = scalar.constant 1.0 : f32
+  %result = scalar.clampf<number, nnan|nsz> %input, %lower, %upper : f32
+  func.return %result : f32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : f32>) -> (reg<vm.value : f32>)>}) @scalar_f32_clampf_number(%input: reg<vm.value : f32>) -> (reg<vm.value : f32>) asm {
+  %lower = constant.i32 3212836864 : reg<vm.value : f32>
+  %upper = constant.i32 1065353216 : reg<vm.value : f32>
+  %result = float.clamp.f32 %input, %lower, %upper, number : reg<vm.value : f32>
+  return %result
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @vector_f32_clampf_number(%input: vector<2xf32>) -> (vector<2xf32>) {
+  %lower = vector.constant -1.0 : vector<2xf32>
+  %upper = vector.constant 1.0 : vector<2xf32>
+  %result = vector.clampf<number, nnan|nsz> %input, %lower, %upper : vector<2xf32>
+  func.return %result : vector<2xf32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x2 : vector<2xf32>>) -> (reg<vm.value x2 : vector<2xf32>>)>}) @vector_f32_clampf_number(%input: reg<vm.value x2 : vector<2xf32>>) -> (reg<vm.value x2 : vector<2xf32>>) asm {
+  %16 = slice %input[0] : reg<vm.value x2 : vector<2xf32>> -> reg<vm.value : f32>
+  %17 = constant.i32 3212836864 : reg<vm.value : f32>
+  %18 = constant.i32 1065353216 : reg<vm.value : f32>
+  %19 = float.clamp.f32 %16, %17, %18, number : reg<vm.value : f32>
+  %20 = slice %input[1] : reg<vm.value x2 : vector<2xf32>> -> reg<vm.value : f32>
+  %21 = float.clamp.f32 %20, %17, %18, number : reg<vm.value : f32>
+  %result = concat(%19, %21) : (reg<vm.value : f32>, reg<vm.value : f32>) -> reg<vm.value x2 : vector<2xf32>>
+  return %result
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_f32_clampf_ordered(%input: f32, %lower: f32, %upper: f32) -> (f32) {
+  %result = scalar.clampf<ordered> %input, %lower, %upper : f32
+  func.return %result : f32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>) -> (reg<vm.value : f32>)>}) @scalar_f32_clampf_ordered(%input: reg<vm.value : f32>, %lower: reg<vm.value : f32>, %upper: reg<vm.value : f32>) -> (reg<vm.value : f32>) asm {
+  %result = float.clamp.f32 %input, %lower, %upper, ordered : reg<vm.value : f32>
+  return %result
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @vector_f32_clampf_ordered(%input: vector<2xf32>, %lower: vector<2xf32>, %upper: vector<2xf32>) -> (vector<2xf32>) {
+  %result = vector.clampf<ordered> %input, %lower, %upper : vector<2xf32>
+  func.return %result : vector<2xf32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x2 : vector<2xf32>>, reg<vm.value x2 : vector<2xf32>>, reg<vm.value x2 : vector<2xf32>>) -> (reg<vm.value x2 : vector<2xf32>>)>}) @vector_f32_clampf_ordered(%input: reg<vm.value x2 : vector<2xf32>>, %lower: reg<vm.value x2 : vector<2xf32>>, %upper: reg<vm.value x2 : vector<2xf32>>) -> (reg<vm.value x2 : vector<2xf32>>) asm {
+  %18 = slice %input[0] : reg<vm.value x2 : vector<2xf32>> -> reg<vm.value : f32>
+  %19 = slice %lower[0] : reg<vm.value x2 : vector<2xf32>> -> reg<vm.value : f32>
+  %20 = slice %upper[0] : reg<vm.value x2 : vector<2xf32>> -> reg<vm.value : f32>
+  %21 = float.clamp.f32 %18, %19, %20, ordered : reg<vm.value : f32>
+  %22 = slice %input[1] : reg<vm.value x2 : vector<2xf32>> -> reg<vm.value : f32>
+  %23 = slice %lower[1] : reg<vm.value x2 : vector<2xf32>> -> reg<vm.value : f32>
+  %24 = slice %upper[1] : reg<vm.value x2 : vector<2xf32>> -> reg<vm.value : f32>
+  %25 = float.clamp.f32 %22, %23, %24, ordered : reg<vm.value : f32>
+  %result = concat(%21, %25) : (reg<vm.value : f32>, reg<vm.value : f32>) -> reg<vm.value x2 : vector<2xf32>>
+  return %result
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @index_minmax_sgpr(%lhs0: index, %rhs0: index) -> (index) {
+  %lhs = index.assume %lhs0 [range(%lhs0, -1024, 1024)] : index
+  %rhs = index.assume %rhs0 [range(%rhs0, -1024, 1024)] : index
+  %min = index.min %lhs, %rhs : index
+  %max = index.max %lhs, %rhs : index
+  %sum = index.add %min, %max : index
+  func.return %sum : index
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : index>, reg<vm.value : index>) -> (reg<vm.value : index>)>}) @index_minmax_sgpr(%lhs: reg<vm.value : index>, %rhs: reg<vm.value : index>) -> (reg<vm.value : index>) asm {
+  %min = integer.min.s64 %lhs, %rhs : reg<vm.value : index>
+  %max = integer.max.s64 %lhs, %rhs : reg<vm.value : index>
+  %sum = integer.add.i64 %min, %max : reg<vm.value : index>
+  return %sum
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scf_select_sgpr(%lhs: i32, %rhs: i32, %a: i32, %b: i32) -> (i32) {
+  %cond = scalar.cmpi slt, %lhs, %rhs : i32
+  %selected = scf.select %cond, %a, %b : i32
+  func.return %selected : i32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>) -> (reg<vm.value : i32>)>}) @scf_select_sgpr(%lhs: reg<vm.value : i32>, %rhs: reg<vm.value : i32>, %a: reg<vm.value : i32>, %b: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+  %cond = integer.compare.i32 %lhs, %rhs, slt : reg<vm.value : i1>
+  %selected = value.select %cond, %a, %b : reg<vm.value : i32>
+  return %selected
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scf_select_i64_sgpr(%lhs: i32, %rhs: i32, %a: i64, %b: i64) -> (i64) {
+  %cond = scalar.cmpi slt, %lhs, %rhs : i32
+  %selected = scf.select %cond, %a, %b : i64
+  func.return %selected : i64
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i64>, reg<vm.value : i64>) -> (reg<vm.value : i64>)>}) @scf_select_i64_sgpr(%lhs: reg<vm.value : i32>, %rhs: reg<vm.value : i32>, %a: reg<vm.value : i64>, %b: reg<vm.value : i64>) -> (reg<vm.value : i64>) asm {
+  %cond = integer.compare.i32 %lhs, %rhs, slt : reg<vm.value : i1>
+  %selected = value.select %cond, %a, %b : reg<vm.value : i64>
+  return %selected
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scf_select_q6_nibble_i8(%code: i32, %use_high: i32) -> (i8) {
+  %low_selector = scalar.constant 0 : i32
+  %nibble_shift = scalar.constant 4 : i32
+  %mask = scalar.constant 15 : i32
+  %high_shifted = scalar.shrui %code, %nibble_shift : i32
+  %low_i32 = scalar.andi %code, %mask : i32
+  %high_i32 = scalar.andi %high_shifted, %mask : i32
+  %low = scalar.trunci %low_i32 : i32 to i8
+  %high = scalar.trunci %high_i32 : i32 to i8
+  %cond = scalar.cmpi ne, %use_high, %low_selector : i32
+  %selected = scf.select %cond, %high, %low : i8
+  func.return %selected : i8
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i32>, reg<vm.value : i32>) -> (reg<vm.value : i8>)>}) @scf_select_q6_nibble_i8(%code: reg<vm.value : i32>, %use_high: reg<vm.value : i32>) -> (reg<vm.value : i8>) asm {
+  %low_selector = constant.zero : reg<vm.value : i32>
+  %nibble_shift = constant.s16 4 : reg<vm.value : i32>
+  %mask = constant.s16 15 : reg<vm.value : i32>
+  %high_shifted = integer.shift.right.u32 %code, %nibble_shift : reg<vm.value : i32>
+  %low_i32 = integer.and.i32 %code, %mask : reg<vm.value : i32>
+  %high_i32 = integer.and.i32 %high_shifted, %mask : reg<vm.value : i32>
+  %low = conversion.integer %low_i32, i32.to.i8 : reg<vm.value : i8>
+  %high = conversion.integer %high_i32, i32.to.i8 : reg<vm.value : i8>
+  %cond = integer.compare.i32 %use_high, %low_selector, ne : reg<vm.value : i1>
+  %selected = value.select %cond, %high, %low : reg<vm.value : i8>
+  return %selected
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scf_select_scale_piece_i16(%packed: i32, %use_high: i32) -> (i16) {
+  %low_selector = scalar.constant 0 : i32
+  %halfword_shift = scalar.constant 16 : i32
+  %low = scalar.trunci %packed : i32 to i16
+  %high_shifted = scalar.shrui %packed, %halfword_shift : i32
+  %high = scalar.trunci %high_shifted : i32 to i16
+  %cond = scalar.cmpi ne, %use_high, %low_selector : i32
+  %selected = scf.select %cond, %high, %low : i16
+  func.return %selected : i16
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i32>, reg<vm.value : i32>) -> (reg<vm.value : i16>)>}) @scf_select_scale_piece_i16(%packed: reg<vm.value : i32>, %use_high: reg<vm.value : i32>) -> (reg<vm.value : i16>) asm {
+  %low_selector = constant.zero : reg<vm.value : i32>
+  %halfword_shift = constant.s16 16 : reg<vm.value : i32>
+  %low = conversion.integer %packed, i32.to.i16 : reg<vm.value : i16>
+  %high_shifted = integer.shift.right.u32 %packed, %halfword_shift : reg<vm.value : i32>
+  %high = conversion.integer %high_shifted, i32.to.i16 : reg<vm.value : i16>
+  %cond = integer.compare.i32 %use_high, %low_selector, ne : reg<vm.value : i1>
+  %selected = value.select %cond, %high, %low : reg<vm.value : i16>
+  return %selected
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scf_select_vgpr(%lhs: f32, %rhs: f32, %a: f32, %b: f32) -> (f32) {
+  %cond = scalar.cmpf olt, %lhs, %rhs : f32
+  %selected = scf.select %cond, %a, %b : f32
+  func.return %selected : f32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>) -> (reg<vm.value : f32>)>}) @scf_select_vgpr(%lhs: reg<vm.value : f32>, %rhs: reg<vm.value : f32>, %a: reg<vm.value : f32>, %b: reg<vm.value : f32>) -> (reg<vm.value : f32>) asm {
+  %cond = float.compare.f32 %lhs, %rhs, olt : reg<vm.value : i1>
+  %selected = value.select %cond, %a, %b : reg<vm.value : f32>
+  return %selected
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scf_select_chained_vgpr_i32(%values: vector<2xi32>, %limit: i32, %fallback: i32) -> (i32) {
+  %lane = vector.extract %values[0] : vector<2xi32> -> i32
+  %is_lane = scalar.cmpi slt, %lane, %limit : i32
+  %selected = scf.select %is_lane, %lane, %fallback : i32
+  %is_selected = scalar.cmpi ne, %selected, %fallback : i32
+  %result = scf.select %is_selected, %selected, %fallback : i32
+  func.return %result : i32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x2 : vector<2xi32>>, reg<vm.value : i32>, reg<vm.value : i32>) -> (reg<vm.value : i32>)>}) @scf_select_chained_vgpr_i32(%values: reg<vm.value x2 : vector<2xi32>>, %limit: reg<vm.value : i32>, %fallback: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+  %lane = slice %values[0] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %is_lane = integer.compare.i32 %lane, %limit, slt : reg<vm.value : i1>
+  %selected = value.select %is_lane, %lane, %fallback : reg<vm.value : i32>
+  %is_selected = integer.compare.i32 %selected, %fallback, ne : reg<vm.value : i1>
+  %result = value.select %is_selected, %selected, %fallback : reg<vm.value : i32>
+  return %result
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scf_select_tail_zero_i32(%values: vector<2xi32>, %limit: i32) -> (i32) {
+  %lane = vector.extract %values[0] : vector<2xi32> -> i32
+  %tail_fill = scalar.constant 0 : i32
+  %cond = scalar.cmpi slt, %lane, %limit : i32
+  %selected = scf.select %cond, %lane, %tail_fill : i32
+  func.return %selected : i32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x2 : vector<2xi32>>, reg<vm.value : i32>) -> (reg<vm.value : i32>)>}) @scf_select_tail_zero_i32(%values: reg<vm.value x2 : vector<2xi32>>, %limit: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+  %lane = slice %values[0] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %tail_fill = constant.zero : reg<vm.value : i32>
+  %cond = integer.compare.i32 %lane, %limit, slt : reg<vm.value : i1>
+  %selected = value.select %cond, %lane, %tail_fill : reg<vm.value : i32>
+  return %selected
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scf_select_vgpr_i64(%values: vector<2xi32>, %limit: i32, %fallback: i32) -> (i64) {
+  %lane = vector.extract %values[0] : vector<2xi32> -> i32
+  %wide_lane = scalar.extsi %lane : i32 to i64
+  %wide_fallback = scalar.extsi %fallback : i32 to i64
+  %cond = scalar.cmpi slt, %lane, %limit : i32
+  %selected = scf.select %cond, %wide_lane, %wide_fallback : i64
+  func.return %selected : i64
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x2 : vector<2xi32>>, reg<vm.value : i32>, reg<vm.value : i32>) -> (reg<vm.value : i64>)>}) @scf_select_vgpr_i64(%values: reg<vm.value x2 : vector<2xi32>>, %limit: reg<vm.value : i32>, %fallback: reg<vm.value : i32>) -> (reg<vm.value : i64>) asm {
+  %lane = slice %values[0] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %wide_lane = conversion.integer %lane, s32.to.i64 : reg<vm.value : i64>
+  %wide_fallback = conversion.integer %fallback, s32.to.i64 : reg<vm.value : i64>
+  %cond = integer.compare.i32 %lane, %limit, slt : reg<vm.value : i1>
+  %selected = value.select %cond, %wide_lane, %wide_fallback : reg<vm.value : i64>
+  return %selected
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scf_select_vgpr_extui_i64(%values: vector<2xi32>, %limit: i32, %fallback: i32) -> (i64) {
+  %lane = vector.extract %values[0] : vector<2xi32> -> i32
+  %wide_lane = scalar.extui %lane : i32 to i64
+  %wide_fallback = scalar.extui %fallback : i32 to i64
+  %cond = scalar.cmpi slt, %lane, %limit : i32
+  %selected = scf.select %cond, %wide_lane, %wide_fallback : i64
+  func.return %selected : i64
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x2 : vector<2xi32>>, reg<vm.value : i32>, reg<vm.value : i32>) -> (reg<vm.value : i64>)>}) @scf_select_vgpr_extui_i64(%values: reg<vm.value x2 : vector<2xi32>>, %limit: reg<vm.value : i32>, %fallback: reg<vm.value : i32>) -> (reg<vm.value : i64>) asm {
+  %lane = slice %values[0] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %wide_lane = conversion.integer %lane, u32.to.i64 : reg<vm.value : i64>
+  %wide_fallback = conversion.integer %fallback, u32.to.i64 : reg<vm.value : i64>
+  %cond = integer.compare.i32 %lane, %limit, slt : reg<vm.value : i1>
+  %selected = value.select %cond, %wide_lane, %wide_fallback : reg<vm.value : i64>
+  return %selected
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scf_select_vector_extract_i64(%values: vector<2xi64>, %guards: vector<2xi32>, %limit: i32, %fallback: i64) -> (i64) {
+  %lane = vector.extract %guards[0] : vector<2xi32> -> i32
+  %extracted = vector.extract %values[0] : vector<2xi64> -> i64
+  %cond = scalar.cmpi slt, %lane, %limit : i32
+  %selected = scf.select %cond, %extracted, %fallback : i64
+  func.return %selected : i64
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x2 : vector<2xi64>>, reg<vm.value x2 : vector<2xi32>>, reg<vm.value : i32>, reg<vm.value : i64>) -> (reg<vm.value : i64>)>}) @scf_select_vector_extract_i64(%values: reg<vm.value x2 : vector<2xi64>>, %guards: reg<vm.value x2 : vector<2xi32>>, %limit: reg<vm.value : i32>, %fallback: reg<vm.value : i64>) -> (reg<vm.value : i64>) asm {
+  %lane = slice %guards[0] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %extracted = slice %values[0] : reg<vm.value x2 : vector<2xi64>> -> reg<vm.value : i64>
+  %cond = integer.compare.i32 %lane, %limit, slt : reg<vm.value : i1>
+  %selected = value.select %cond, %extracted, %fallback : reg<vm.value : i64>
+  return %selected
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scf_select_i1_mask_condition(%values: vector<2xi32>, %limit: i32, %fallback_condition: i1, %true_value: f32, %false_value: f32) -> (f32) {
+  %lane = vector.extract %values[0] : vector<2xi32> -> i32
+  %lane_condition = scalar.cmpi slt, %lane, %limit : i32
+  %selected_condition = scf.select %lane_condition, %lane_condition, %fallback_condition : i1
+  %result = scf.select %selected_condition, %true_value, %false_value : f32
+  func.return %result : f32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x2 : vector<2xi32>>, reg<vm.value : i32>, reg<vm.value : i1>, reg<vm.value : f32>, reg<vm.value : f32>) -> (reg<vm.value : f32>)>}) @scf_select_i1_mask_condition(%values: reg<vm.value x2 : vector<2xi32>>, %limit: reg<vm.value : i32>, %fallback_condition: reg<vm.value : i1>, %true_value: reg<vm.value : f32>, %false_value: reg<vm.value : f32>) -> (reg<vm.value : f32>) asm {
+  %lane = slice %values[0] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %lane_condition = integer.compare.i32 %lane, %limit, slt : reg<vm.value : i1>
+  %selected_condition = value.select %lane_condition, %lane_condition, %fallback_condition : reg<vm.value : i1>
+  %result = value.select %selected_condition, %true_value, %false_value : reg<vm.value : f32>
+  return %result
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scf_select_i1_false_condition(%values: vector<2xi32>, %limit: i32, %upper: i32, %true_value: f32, %false_value: f32) -> (f32) {
+  %lane = vector.extract %values[0] : vector<2xi32> -> i32
+  %lane_condition = scalar.cmpi slt, %lane, %limit : i32
+  %inside_upper = scalar.cmpi slt, %lane, %upper : i32
+  %selected_condition = scf.select %lane_condition, %inside_upper, %lane_condition : i1
+  %result = scf.select %selected_condition, %true_value, %false_value : f32
+  func.return %result : f32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x2 : vector<2xi32>>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : f32>, reg<vm.value : f32>) -> (reg<vm.value : f32>)>}) @scf_select_i1_false_condition(%values: reg<vm.value x2 : vector<2xi32>>, %limit: reg<vm.value : i32>, %upper: reg<vm.value : i32>, %true_value: reg<vm.value : f32>, %false_value: reg<vm.value : f32>) -> (reg<vm.value : f32>) asm {
+  %lane = slice %values[0] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %lane_condition = integer.compare.i32 %lane, %limit, slt : reg<vm.value : i1>
+  %inside_upper = integer.compare.i32 %lane, %upper, slt : reg<vm.value : i1>
+  %selected_condition = value.select %lane_condition, %inside_upper, %lane_condition : reg<vm.value : i1>
+  %result = value.select %selected_condition, %true_value, %false_value : reg<vm.value : f32>
+  return %result
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scf_select_i1_assume_second_condition(%values: vector<2xi32>, %limit: i32, %upper: i32, %true_value: f32, %false_value: f32) -> (f32) {
+  %lane = vector.extract %values[0] : vector<2xi32> -> i32
+  %lane_condition = scalar.cmpi slt, %lane, %limit : i32
+  %scalar_condition = scalar.cmpi slt, %limit, %upper : i32
+  %checked_lane_condition, %checked_scalar_condition = scalar.assume %lane_condition, %scalar_condition [] : i1, i1
+  %result = scf.select %checked_scalar_condition, %true_value, %false_value : f32
+  func.return %result : f32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x2 : vector<2xi32>>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : f32>, reg<vm.value : f32>) -> (reg<vm.value : f32>)>}) @scf_select_i1_assume_second_condition(%values: reg<vm.value x2 : vector<2xi32>>, %limit: reg<vm.value : i32>, %upper: reg<vm.value : i32>, %true_value: reg<vm.value : f32>, %false_value: reg<vm.value : f32>) -> (reg<vm.value : f32>) asm {
+  %checked_scalar_condition = integer.compare.i32 %limit, %upper, slt : reg<vm.value : i1>
+  %result = value.select %checked_scalar_condition, %true_value, %false_value : reg<vm.value : f32>
+  return %result
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scf_select_i1_true_false_constants(%values: vector<2xi32>, %limit: i32, %true_value: f32, %false_value: f32) -> (f32) {
+  %lane = vector.extract %values[0] : vector<2xi32> -> i32
+  %lane_condition = scalar.cmpi slt, %lane, %limit : i32
+  %true = scalar.constant true : i1
+  %false = scalar.constant false : i1
+  %selected_condition = scf.select %lane_condition, %true, %false : i1
+  %result = scf.select %selected_condition, %true_value, %false_value : f32
+  func.return %result : f32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x2 : vector<2xi32>>, reg<vm.value : i32>, reg<vm.value : f32>, reg<vm.value : f32>) -> (reg<vm.value : f32>)>}) @scf_select_i1_true_false_constants(%values: reg<vm.value x2 : vector<2xi32>>, %limit: reg<vm.value : i32>, %true_value: reg<vm.value : f32>, %false_value: reg<vm.value : f32>) -> (reg<vm.value : f32>) asm {
+  %lane = slice %values[0] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %lane_condition = integer.compare.i32 %lane, %limit, slt : reg<vm.value : i1>
+  %result = value.select %lane_condition, %true_value, %false_value : reg<vm.value : f32>
+  return %result
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scf_select_i1_false_true_constants(%values: vector<2xi32>, %limit: i32, %true_value: f32, %false_value: f32) -> (f32) {
+  %lane = vector.extract %values[0] : vector<2xi32> -> i32
+  %lane_condition = scalar.cmpi slt, %lane, %limit : i32
+  %false = scalar.constant false : i1
+  %true = scalar.constant true : i1
+  %selected_condition = scf.select %lane_condition, %false, %true : i1
+  %result = scf.select %selected_condition, %true_value, %false_value : f32
+  func.return %result : f32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x2 : vector<2xi32>>, reg<vm.value : i32>, reg<vm.value : f32>, reg<vm.value : f32>) -> (reg<vm.value : f32>)>}) @scf_select_i1_false_true_constants(%values: reg<vm.value x2 : vector<2xi32>>, %limit: reg<vm.value : i32>, %true_value: reg<vm.value : f32>, %false_value: reg<vm.value : f32>) -> (reg<vm.value : f32>) asm {
+  %lane = slice %values[0] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %lane_condition = integer.compare.i32 %lane, %limit, slt : reg<vm.value : i1>
+  %false = constant.zero : reg<vm.value : i1>
+  %true = constant.s16 1 : reg<vm.value : i1>
+  %selected_condition = value.select %lane_condition, %false, %true : reg<vm.value : i1>
+  %result = value.select %selected_condition, %true_value, %false_value : reg<vm.value : f32>
+  return %result
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scf_select_i1_true_payload(%values: vector<2xi32>, %limit: i32, %fallback_condition: i1, %true_value: f32, %false_value: f32) -> (f32) {
+  %lane = vector.extract %values[0] : vector<2xi32> -> i32
+  %lane_condition = scalar.cmpi slt, %lane, %limit : i32
+  %true = scalar.constant true : i1
+  %selected_condition = scf.select %lane_condition, %true, %fallback_condition : i1
+  %result = scf.select %selected_condition, %true_value, %false_value : f32
+  func.return %result : f32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x2 : vector<2xi32>>, reg<vm.value : i32>, reg<vm.value : i1>, reg<vm.value : f32>, reg<vm.value : f32>) -> (reg<vm.value : f32>)>}) @scf_select_i1_true_payload(%values: reg<vm.value x2 : vector<2xi32>>, %limit: reg<vm.value : i32>, %fallback_condition: reg<vm.value : i1>, %true_value: reg<vm.value : f32>, %false_value: reg<vm.value : f32>) -> (reg<vm.value : f32>) asm {
+  %lane = slice %values[0] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %lane_condition = integer.compare.i32 %lane, %limit, slt : reg<vm.value : i1>
+  %true = constant.s16 1 : reg<vm.value : i1>
+  %selected_condition = value.select %lane_condition, %true, %fallback_condition : reg<vm.value : i1>
+  %result = value.select %selected_condition, %true_value, %false_value : reg<vm.value : f32>
+  return %result
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scf_select_i1_false_payload(%values: vector<2xi32>, %limit: i32, %fallback_condition: i1, %true_value: f32, %false_value: f32) -> (f32) {
+  %lane = vector.extract %values[0] : vector<2xi32> -> i32
+  %lane_condition = scalar.cmpi slt, %lane, %limit : i32
+  %false = scalar.constant false : i1
+  %selected_condition = scf.select %lane_condition, %false, %fallback_condition : i1
+  %result = scf.select %selected_condition, %true_value, %false_value : f32
+  func.return %result : f32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x2 : vector<2xi32>>, reg<vm.value : i32>, reg<vm.value : i1>, reg<vm.value : f32>, reg<vm.value : f32>) -> (reg<vm.value : f32>)>}) @scf_select_i1_false_payload(%values: reg<vm.value x2 : vector<2xi32>>, %limit: reg<vm.value : i32>, %fallback_condition: reg<vm.value : i1>, %true_value: reg<vm.value : f32>, %false_value: reg<vm.value : f32>) -> (reg<vm.value : f32>) asm {
+  %lane = slice %values[0] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %lane_condition = integer.compare.i32 %lane, %limit, slt : reg<vm.value : i1>
+  %false = constant.zero : reg<vm.value : i1>
+  %selected_condition = value.select %lane_condition, %false, %fallback_condition : reg<vm.value : i1>
+  %result = value.select %selected_condition, %true_value, %false_value : reg<vm.value : f32>
+  return %result
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scf_select_i1_true_fallback(%values: vector<2xi32>, %limit: i32, %fallback_condition: i1, %true_value: f32, %false_value: f32) -> (f32) {
+  %lane = vector.extract %values[0] : vector<2xi32> -> i32
+  %lane_condition = scalar.cmpi slt, %lane, %limit : i32
+  %true = scalar.constant true : i1
+  %selected_condition = scf.select %lane_condition, %fallback_condition, %true : i1
+  %result = scf.select %selected_condition, %true_value, %false_value : f32
+  func.return %result : f32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x2 : vector<2xi32>>, reg<vm.value : i32>, reg<vm.value : i1>, reg<vm.value : f32>, reg<vm.value : f32>) -> (reg<vm.value : f32>)>}) @scf_select_i1_true_fallback(%values: reg<vm.value x2 : vector<2xi32>>, %limit: reg<vm.value : i32>, %fallback_condition: reg<vm.value : i1>, %true_value: reg<vm.value : f32>, %false_value: reg<vm.value : f32>) -> (reg<vm.value : f32>) asm {
+  %lane = slice %values[0] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %lane_condition = integer.compare.i32 %lane, %limit, slt : reg<vm.value : i1>
+  %true = constant.s16 1 : reg<vm.value : i1>
+  %selected_condition = value.select %lane_condition, %fallback_condition, %true : reg<vm.value : i1>
+  %result = value.select %selected_condition, %true_value, %false_value : reg<vm.value : f32>
+  return %result
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scf_select_i1_false_fallback(%values: vector<2xi32>, %limit: i32, %fallback_condition: i1, %true_value: f32, %false_value: f32) -> (f32) {
+  %lane = vector.extract %values[0] : vector<2xi32> -> i32
+  %lane_condition = scalar.cmpi slt, %lane, %limit : i32
+  %false = scalar.constant false : i1
+  %selected_condition = scf.select %lane_condition, %fallback_condition, %false : i1
+  %result = scf.select %selected_condition, %true_value, %false_value : f32
+  func.return %result : f32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x2 : vector<2xi32>>, reg<vm.value : i32>, reg<vm.value : i1>, reg<vm.value : f32>, reg<vm.value : f32>) -> (reg<vm.value : f32>)>}) @scf_select_i1_false_fallback(%values: reg<vm.value x2 : vector<2xi32>>, %limit: reg<vm.value : i32>, %fallback_condition: reg<vm.value : i1>, %true_value: reg<vm.value : f32>, %false_value: reg<vm.value : f32>) -> (reg<vm.value : f32>) asm {
+  %lane = slice %values[0] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %lane_condition = integer.compare.i32 %lane, %limit, slt : reg<vm.value : i1>
+  %false = constant.zero : reg<vm.value : i1>
+  %selected_condition = value.select %lane_condition, %fallback_condition, %false : reg<vm.value : i1>
+  %result = value.select %selected_condition, %true_value, %false_value : reg<vm.value : f32>
+  return %result
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scf_select_i1_true_condition(%true_value: f32, %false_value: f32) -> (f32) {
+  %condition = scalar.constant true : i1
+  %result = scf.select %condition, %true_value, %false_value : f32
+  func.return %result : f32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : f32>, reg<vm.value : f32>) -> (reg<vm.value : f32>)>}) @scf_select_i1_true_condition(%true_value: reg<vm.value : f32>, %false_value: reg<vm.value : f32>) -> (reg<vm.value : f32>) asm {
+  return %true_value
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scf_select_i1_false_condition_constant(%true_value: f32, %false_value: f32) -> (f32) {
+  %condition = scalar.constant false : i1
+  %result = scf.select %condition, %true_value, %false_value : f32
+  func.return %result : f32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : f32>, reg<vm.value : f32>) -> (reg<vm.value : f32>)>}) @scf_select_i1_false_condition_constant(%true_value: reg<vm.value : f32>, %false_value: reg<vm.value : f32>) -> (reg<vm.value : f32>) asm {
+  return %false_value
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scf_select_i1_scc_condition(%lhs: i32, %rhs: i32, %alt: i32, %true_value: f32, %false_value: f32) -> (f32) {
+  %inactive_condition = scalar.constant 0 : i32
+  %condition = scalar.cmpi slt, %lhs, %rhs : i32
+  %lhs_nonzero = scalar.cmpi ne, %lhs, %inactive_condition : i32
+  %alt_nonzero = scalar.cmpi ne, %alt, %inactive_condition : i32
+  %selected_condition = scf.select %condition, %lhs_nonzero, %alt_nonzero : i1
+  %result = scf.select %selected_condition, %true_value, %false_value : f32
+  func.return %result : f32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : f32>, reg<vm.value : f32>) -> (reg<vm.value : f32>)>}) @scf_select_i1_scc_condition(%lhs: reg<vm.value : i32>, %rhs: reg<vm.value : i32>, %alt: reg<vm.value : i32>, %true_value: reg<vm.value : f32>, %false_value: reg<vm.value : f32>) -> (reg<vm.value : f32>) asm {
+  %inactive_condition = constant.zero : reg<vm.value : i32>
+  %condition = integer.compare.i32 %lhs, %rhs, slt : reg<vm.value : i1>
+  %lhs_nonzero = integer.compare.i32 %lhs, %inactive_condition, ne : reg<vm.value : i1>
+  %alt_nonzero = integer.compare.i32 %alt, %inactive_condition, ne : reg<vm.value : i1>
+  %selected_condition = value.select %condition, %lhs_nonzero, %alt_nonzero : reg<vm.value : i1>
+  %result = value.select %selected_condition, %true_value, %false_value : reg<vm.value : f32>
+  return %result
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @index_minmax_vgpr_select() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %limit = index.constant 31 : index
+  %min = index.min %lane, %limit : index
+  %max = index.max %lane, %limit : index
+  %cond = index.cmp slt, %lane, %limit : index
+  %selected = scf.select %cond, %min, %max : index
+  %output_base = index.constant 0 : offset
+  %output_view = buffer.view %output[%output_base] : buffer -> view<64xi32>
+  %stored = vector.constant 1 : vector<1xi32>
+  vector.store %stored, %output_view[%selected] : vector<1xi32>, view<64xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @index_minmax_vgpr_select(%output: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %limit = constant.s16 31 : reg<vm.value : index>
+  %min = integer.min.s64 %workitem_id_x, %limit : reg<vm.value : index>
+  %max = integer.max.s64 %workitem_id_x, %limit : reg<vm.value : index>
+  %cond = integer.compare.i64 %workitem_id_x, %limit, slt : reg<vm.value : i1>
+  %selected = value.select %cond, %min, %max : reg<vm.value : index>
+  %30 = constant.s16 1 : reg<vm.value : i32>
+  %stored = concat(%30) : (reg<vm.value : i32>) -> reg<vm.value : vector<1xi32>>
+  %32 = constant.zero : reg<vm.value : offset>
+  buffer.store %output, %32, %selected, %stored, 4, i32.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @f32_reduce_minnum_maxnum(%input: buffer, %output: buffer) {
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<4xf32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<2xf32>
+  %loaded = vector.load %input_view[0] : view<4xf32> -> vector<4xf32>
+  %min_init = scalar.constant 1000.0 : f32
+  %min = vector.reduce<minnumf, reassoc|nnan|nsz> %loaded, %min_init : vector<4xf32>, f32
+  %max_init = scalar.constant -1000.0 : f32
+  %max = vector.reduce<maxnumf, reassoc|nnan|nsz> %loaded, %max_init : vector<4xf32>, f32
+  %stored = vector.from_elements %min, %max : vector<2xf32>
+  vector.store %stored, %output_view[0] : vector<2xf32>, view<2xf32>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>}) @f32_reduce_minnum_maxnum(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>) asm {
+  %min_init = constant.i32 1148846080 : reg<vm.value : f32>
+  %30 = constant.zero : reg<vm.value : offset>
+  %31 = buffer.load %input, %30, %30, 0, i32.x1 : reg<vm.value : f32>
+  %33 = constant.s16 4 : reg<vm.value : offset>
+  %34 = buffer.load %input, %33, %30, 0, i32.x1 : reg<vm.value : f32>
+  %35 = float.minmax.f32 %31, %34, minnum : reg<vm.value : f32>
+  %37 = constant.s16 8 : reg<vm.value : offset>
+  %38 = buffer.load %input, %37, %30, 0, i32.x1 : reg<vm.value : f32>
+  %40 = constant.s16 12 : reg<vm.value : offset>
+  %41 = buffer.load %input, %40, %30, 0, i32.x1 : reg<vm.value : f32>
+  %42 = float.minmax.f32 %38, %41, minnum : reg<vm.value : f32>
+  %43 = float.minmax.f32 %35, %42, minnum : reg<vm.value : f32>
+  %min = float.minmax.f32 %min_init, %43, minnum : reg<vm.value : f32>
+  %max_init = constant.i32 3296329728 : reg<vm.value : f32>
+  %46 = float.minmax.f32 %31, %34, maxnum : reg<vm.value : f32>
+  %47 = float.minmax.f32 %38, %41, maxnum : reg<vm.value : f32>
+  %48 = float.minmax.f32 %46, %47, maxnum : reg<vm.value : f32>
+  %max = float.minmax.f32 %max_init, %48, maxnum : reg<vm.value : f32>
+  %stored = concat(%min, %max) : (reg<vm.value : f32>, reg<vm.value : f32>) -> reg<vm.value x2 : vector<2xf32>>
+  buffer.store %output, %30, %30, %stored, 0, i32.x2
+  return
+}

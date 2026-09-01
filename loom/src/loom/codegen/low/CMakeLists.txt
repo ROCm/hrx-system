@@ -26,6 +26,17 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_test(
+  NAME
+    descriptors_test
+  SRCS
+    "descriptors_test.cc"
+  DEPS
+    ::descriptors
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
 loom_cc_library(
   NAME
     descriptor_traits
@@ -38,6 +49,17 @@ loom_cc_library(
     iree::base
     loom::ir
   PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    descriptor_traits_test
+  SRCS
+    "descriptor_traits_test.cc"
+  DEPS
+    ::descriptor_traits
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 
 loom_cc_library(
@@ -235,35 +257,6 @@ loom_cc_library(
     loom::ir
     loom::ops::low
     loom::ops::type_registry
-  PUBLIC
-)
-
-loom_cc_library(
-  NAME
-    launch_config_program
-  HDRS
-    "launch_config_program.h"
-  SRCS
-    "launch_config_program.c"
-  DEPS
-    ::storage_layout
-    iree::base
-    iree::base::internal::arena
-    loom::ir
-    loom::ops::func
-    loom::ops::kernel
-    loom::ops::low
-    loom::ops::op_defs
-    loom::ops::special_values
-    loom::ops::type_registry
-    loom::pass::environment
-    loom::pass::types
-    loom::pass::value_facts
-    loom::rewrite::materialize
-    loom::rewrite::remap
-    loom::rewrite::rewriter
-    loom::target::facts
-    loom::transforms::cleanup::dce
   PUBLIC
 )
 
@@ -476,6 +469,7 @@ loom_cc_library(
     "allocation_materialization.c"
   DEPS
     ::allocation
+    ::builder
     ::descriptors
     ::diagnostics
     ::function

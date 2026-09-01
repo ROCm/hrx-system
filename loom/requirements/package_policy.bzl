@@ -24,6 +24,7 @@ load(
     "TARGET_ARCH_AMDGPU",
     "TARGET_ARCH_LLVMIR",
     "TARGET_ARCH_SPIRV",
+    "TARGET_ARCH_VM",
     "TARGET_ARCH_WASM",
     "TARGET_ARCH_X86",
 )
@@ -44,6 +45,10 @@ PACKAGE_POLICIES = [
     package_policy(
         packages = ["loom/src/loom/target/arch/spirv/..."],
         build_requirements = [TARGET_ARCH_SPIRV],
+    ),
+    package_policy(
+        packages = ["loom/src/loom/target/arch/vm/..."],
+        build_requirements = [TARGET_ARCH_VM],
     ),
     package_policy(
         packages = ["loom/src/loom/target/arch/wasm/..."],

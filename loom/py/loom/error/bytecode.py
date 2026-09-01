@@ -228,11 +228,9 @@ ERR_BYTECODE_016 = ErrorDef(
     code=16,
     severity=Severity.ERROR,
     summary="Invalid IR body.",
-    message=(
-        "invalid IR body for symbol '{symbol_name}' at offset {offset}: {failure_code}"
-    ),
+    message="invalid IR body '{body_name}' at offset {offset}: {failure_code}",
     params=(
-        ErrorParam("symbol_name", ParamKind.STRING),
+        ErrorParam("body_name", ParamKind.STRING),
         ErrorParam("offset", ParamKind.U64),
         ErrorParam("failure_code", ParamKind.STRING),
     ),

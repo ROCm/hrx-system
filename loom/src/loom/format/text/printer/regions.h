@@ -39,7 +39,7 @@ iree_status_t loom_print_block_label_line(loom_print_context_t* ctx,
 // Prints a successor reference and reports its emitted field range.
 iree_status_t loom_print_successor_ref(loom_print_context_t* ctx,
                                        const loom_op_t* op,
-                                       uint8_t successor_index);
+                                       uint16_t successor_index);
 
 // Prints one ordinary operation at the current indentation level.
 iree_status_t loom_print_op(loom_print_context_t* ctx, const loom_op_t* op);

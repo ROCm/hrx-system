@@ -11,6 +11,7 @@
 
 #include "iree/base/internal/arena.h"
 #include "loom/codegen/low/function.h"
+#include "loom/codegen/low/lower/lower.h"
 #include "loom/codegen/low/lower/source_selection.h"
 #include "loom/codegen/low/pipeline/pass_environment.h"
 #include "loom/codegen/low/pipeline/pipeline.h"
@@ -63,10 +64,8 @@ static iree_status_t loom_low_source_workload_verify_low_module(
       .max_errors = 20,
   };
   loom_low_verify_result_t result = {0};
-  loom_low_verify_scratch_t scratch =
-      loom_low_verify_scratch_for_module(module);
   IREE_RETURN_IF_ERROR(
-      loom_low_verify_module(module, &verify_options, &scratch, &result));
+      loom_low_verify_module(module, &verify_options, &result));
   if (result.error_count != 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "generated low function failed verification");
@@ -124,7 +123,7 @@ static iree_status_t loom_low_source_workload_prepare_low_functions(
   loom_pass_environment_t environment =
       loom_low_pass_environment_storage_initialize(
           options->descriptor_registry, /*lower_policy_registry=*/NULL,
-          /*legality_provider_list=*/NULL, /*legalizer_provider_list=*/NULL,
+          /*legality_provider_list=*/NULL, /*legalizer_registry=*/NULL,
           /*math_policy_registry=*/NULL, /*compile_report=*/NULL,
           /*target_environment=*/NULL, /*function_versions=*/NULL,
           &environment_storage);
@@ -208,6 +207,16 @@ iree_status_t loom_low_source_workload_run_pipeline(
     for (iree_host_size_t i = 0;
          i < selection_list.count && iree_status_is_ok(status); ++i) {
       const loom_low_source_selection_t* selection = &selection_list.values[i];
+      bool control_flow_changed = false;
+      status = loom_low_lower_prepare_cfg_switches(
+          module, selection->func, selection->target_facts, selection->policy,
+          &control_flow_changed);
+      if (!iree_status_is_ok(status)) {
+        break;
+      }
+      if (control_flow_changed) {
+        loom_pass_value_fact_owner_invalidate(&value_facts);
+      }
       loom_value_fact_table_t* fact_table = NULL;
       status = loom_pass_value_fact_owner_acquire(
           &value_facts, module,

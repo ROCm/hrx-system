@@ -623,6 +623,58 @@ TEST(CompileTest, CompileRequestRejectsUnavailableRoots) {
   }
 }
 
+TEST(CompileTest, CompileRequestRejectsUnsupportedRootGoal) {
+  ContextPtr context = CreateContext();
+  WorkspacePtr workspace = CreateWorkspace();
+  CompilerPtr compiler = CreateCompiler(context.get());
+  PassProgramPtr pass_program = CreateEmptyPassProgram(context.get());
+  ModulePtr module = CreateValidModule(context.get(), workspace.get());
+  SourcePtr source = SerializeModuleToBytecode(module.get(), "goal.loombc");
+  module.reset();
+
+  const loomc_request_root_t requested_root = {
+      /*.module_ordinal=*/0,
+      /*.symbol_ordinal=*/0,
+      /*.goal=*/17,
+  };
+  RequestPtr request = CreateRootedRequest(source.get(), requested_root);
+  loomc_request_root_t retained_root = {};
+  ASSERT_TRUE(loomc_request_root_at(request.get(), 0, &retained_root));
+  EXPECT_EQ(retained_root.goal, requested_root.goal);
+
+  loomc_product_t* product = nullptr;
+  loomc_result_t* result = nullptr;
+  LOOMC_EXPECT_STATUS_IS(
+      LOOMC_STATUS_INVALID_ARGUMENT,
+      loomc_compile_request(compiler.get(), workspace.get(), pass_program.get(),
+                            request.get(), /*options=*/nullptr,
+                            loomc_allocator_system(), &product, &result));
+  EXPECT_EQ(product, nullptr);
+  EXPECT_EQ(result, nullptr);
+}
+
+TEST(CompileTest, RequestCreationRejectsNonzeroReservedRootFields) {
+  ContextPtr context = CreateContext();
+  WorkspacePtr workspace = CreateWorkspace();
+  ModulePtr module = CreateValidModule(context.get(), workspace.get());
+  SourcePtr source =
+      SerializeModuleToBytecode(module.get(), "reserved-root.loombc");
+  const loomc_request_root_t root = {
+      /*.module_ordinal=*/0,
+      /*.symbol_ordinal=*/0,
+      /*.goal=*/LOOMC_REQUEST_ROOT_GOAL_DEFAULT,
+      /*.reserved=*/1,
+  };
+  loomc_request_t* request = reinterpret_cast<loomc_request_t*>(0x1);
+  LOOMC_EXPECT_STATUS_IS(
+      LOOMC_STATUS_INVALID_ARGUMENT,
+      loomc_request_create(loomc_compiled_module_product_descriptor(),
+                           source.get(), &root, 1, /*bindings=*/nullptr,
+                           /*binding_count=*/0, loomc_allocator_system(),
+                           &request));
+  EXPECT_EQ(request, nullptr);
+}
+
 TEST(CompileTest, CompileRequestRejectsAnotherProductContract) {
   ContextPtr context = CreateContext();
   WorkspacePtr workspace = CreateWorkspace();
@@ -865,6 +917,30 @@ TEST(CompileTest, CompileModuleRejectsUnknownConfigPolicy) {
       compiler.get(), workspace.get(), pass_program.get(), module.get(),
       &options, loomc_allocator_system(), &result);
   LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_INVALID_ARGUMENT, status);
+  EXPECT_EQ(result, nullptr);
+}
+
+TEST(CompileTest, CompileModuleRejectsArtifactIdentifierLengthOverflow) {
+  ContextPtr context = CreateContext();
+  WorkspacePtr workspace = CreateWorkspace();
+  CompilerPtr compiler = CreateCompiler(context.get());
+  PassProgramPtr pass_program = CreateEmptyPassProgram(context.get());
+  ModulePtr module = CreateValidModule(context.get(), workspace.get());
+
+  const char module_name_storage = 'x';
+  loomc_compile_options_t options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
+      /*.structure_size=*/sizeof(options),
+      /*.next=*/nullptr,
+      /*.module_name=*/
+      loomc_make_string_view(&module_name_storage, LOOMC_HOST_SIZE_MAX),
+      /*.artifact_flags=*/LOOMC_COMPILE_ARTIFACT_FLAG_MODULE_TEXT,
+  };
+  loomc_result_t* result = nullptr;
+  loomc_status_t status = loomc_compile_module(
+      compiler.get(), workspace.get(), pass_program.get(), module.get(),
+      &options, loomc_allocator_system(), &result);
+  LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_RESOURCE_EXHAUSTED, status);
   EXPECT_EQ(result, nullptr);
 }
 

@@ -146,6 +146,9 @@ typedef uint16_t loom_low_operand_flags_t;
 // Operand row describes zero or more trailing packet operands. Variadic rows
 // are explicit packet operands and must terminate the descriptor operand list.
 #define LOOM_LOW_OPERAND_FLAG_VARIADIC ((uint16_t)1u << 9)
+// Operand accepts a nonzero allocation-unit count no greater than
+// |unit_count|. The actual count is carried by the Low SSA register type.
+#define LOOM_LOW_OPERAND_FLAG_VARIABLE_UNIT_COUNT ((uint16_t)1u << 10)
 
 // Bitset of register-class alternative flags.
 typedef uint16_t loom_low_reg_class_alt_flags_t;
@@ -171,6 +174,19 @@ typedef uint32_t loom_low_register_part_mask_t;
 #define LOOM_LOW_REG_CLASS_FLAG_REFERENCE ((uint16_t)1u << 2)
 // Register class cannot be represented in spill storage.
 #define LOOM_LOW_REG_CLASS_FLAG_UNSPILLABLE ((uint16_t)1u << 3)
+// Contiguous multi-unit values may begin at any allocation-unit location.
+// Without this flag power-of-two widths require their natural unit alignment.
+#define LOOM_LOW_REG_CLASS_FLAG_UNALIGNED_RANGES ((uint16_t)1u << 4)
+
+// Returns the required base-unit alignment for a contiguous register range.
+static inline uint32_t loom_low_reg_class_range_alignment(
+    loom_low_reg_class_flags_t flags, uint32_t unit_count) {
+  if (iree_any_bit_set(flags, LOOM_LOW_REG_CLASS_FLAG_UNALIGNED_RANGES)) {
+    return 1;
+  }
+  return unit_count > 1 && (unit_count & (unit_count - 1u)) == 0 ? unit_count
+                                                                 : 1u;
+}
 
 typedef enum loom_low_spill_slot_space_e {
   // Unknown or uninitialized spill storage space.
@@ -435,6 +451,12 @@ typedef uint16_t loom_low_descriptor_flags_t;
 #define LOOM_LOW_DESCRIPTOR_FLAG_EARLY_CLOBBER ((uint16_t)1u << 5)
 // Descriptor ends in a variadic packet operand row.
 #define LOOM_LOW_DESCRIPTOR_FLAG_VARIADIC_OPERANDS ((uint16_t)1u << 6)
+// Descriptor results carry a distinct semantic identity per execution.
+#define LOOM_LOW_DESCRIPTOR_FLAG_UNIQUE_IDENTITY ((uint16_t)1u << 7)
+// Descriptor terminates the current control path without returning values.
+#define LOOM_LOW_DESCRIPTOR_FLAG_NO_RETURN ((uint16_t)1u << 8)
+// Descriptor execution may suspend and later resume the current function.
+#define LOOM_LOW_DESCRIPTOR_FLAG_MAY_YIELD ((uint16_t)1u << 9)
 
 // Target-neutral semantic classes attached to generated low descriptors.
 // Multiple classes may be present when a packet contributes to several
@@ -576,7 +598,8 @@ typedef struct loom_low_operand_t {
   uint16_t reg_class_alt_start;
   // Number of register-class alternatives accepted by this operand.
   uint16_t reg_class_alt_count;
-  // Number of allocation units consumed or produced.
+  // Exact allocation-unit count, or inclusive maximum when the variable-unit
+  // flag is set.
   uint16_t unit_count;
   // Operand register-address mapping.
   loom_low_operand_address_map_kind_t address_map_kind;
@@ -608,6 +631,16 @@ static_assert(offsetof(loom_low_operand_t, source_binding) == 9,
               "source binding must occupy operand role padding");
 static_assert(offsetof(loom_low_operand_t, flags) == 12,
               "source binding must not move operand flags");
+
+// Returns true when |actual_unit_count| satisfies the operand width contract.
+static inline bool loom_low_operand_accepts_unit_count(
+    const loom_low_operand_t* operand, uint32_t actual_unit_count) {
+  if (actual_unit_count == 0) return false;
+  return iree_any_bit_set(operand->flags,
+                          LOOM_LOW_OPERAND_FLAG_VARIABLE_UNIT_COUNT)
+             ? actual_unit_count <= operand->unit_count
+             : actual_unit_count == operand->unit_count;
+}
 
 typedef struct loom_low_immediate_t {
   // String-table offset for the immediate field name.
@@ -829,13 +862,17 @@ static inline uint16_t loom_low_schedule_class_schedule_distance_cycles(
              : schedule_class->latency_cycles;
 }
 
-enum loom_low_descriptor_op_kind_e {
-  // Descriptor packets use the general low.op representation.
-  LOOM_LOW_DESCRIPTOR_OP_KIND_OP = 0,
-  // Descriptor packets use the operandless, single-result low.const form.
-  LOOM_LOW_DESCRIPTOR_OP_KIND_CONST = 1,
+enum loom_low_descriptor_carrier_e {
+  // Descriptor uses the general low.op carrier.
+  LOOM_LOW_DESCRIPTOR_CARRIER_OP = 0,
+  // Descriptor uses the operandless, single-result low.const carrier.
+  LOOM_LOW_DESCRIPTOR_CARRIER_CONST = 1,
+  // Descriptor uses the one-successor low.br structural carrier.
+  LOOM_LOW_DESCRIPTOR_CARRIER_BRANCH = 2,
+  // Descriptor uses the multi-successor low.switch structural carrier.
+  LOOM_LOW_DESCRIPTOR_CARRIER_SWITCH = 3,
 };
-typedef uint8_t loom_low_descriptor_op_kind_t;
+typedef uint8_t loom_low_descriptor_carrier_t;
 
 typedef struct loom_low_descriptor_t {
   // Durable descriptor identity derived from the descriptor key. This is
@@ -866,8 +903,8 @@ typedef struct loom_low_descriptor_t {
   uint16_t operand_form_start;
   // Descriptor flags used by verifier, scheduler, and optimizer.
   loom_low_descriptor_flags_t flags;
-  // Canonical low IR operation used to represent this descriptor packet.
-  loom_low_descriptor_op_kind_t op_kind;
+  // Canonical Low IR operation used to carry this descriptor.
+  loom_low_descriptor_carrier_t carrier;
   // Number of feature-mask words required by this descriptor.
   uint16_t feature_mask_word_count;
   // Number of target-owned fixed encoding field values for this descriptor.
@@ -898,6 +935,13 @@ typedef struct loom_low_descriptor_t {
 
 static_assert(sizeof(loom_low_descriptor_t) == 64,
               "loom_low_descriptor_t must be 64 bytes");
+
+// Returns true when |descriptor| uses an ordinary low.op or low.const packet.
+static inline bool loom_low_descriptor_is_packet(
+    const loom_low_descriptor_t* descriptor) {
+  return descriptor->carrier == LOOM_LOW_DESCRIPTOR_CARRIER_OP ||
+         descriptor->carrier == LOOM_LOW_DESCRIPTOR_CARRIER_CONST;
+}
 
 // Descriptor facts owned by one descriptor-set view. Rows correspond exactly
 // to the structural rows in loom_low_descriptor_set_t::descriptors. Keeping
@@ -958,9 +1002,17 @@ typedef struct loom_low_descriptor_ref_t {
   uint32_t descriptor_ordinal;
 } loom_low_descriptor_ref_t;
 
+enum loom_low_asm_immediate_flag_bits_e {
+  // Prints enum values using their stable symbolic token.
+  LOOM_LOW_ASM_IMMEDIATE_FLAG_ENUM_TOKEN = 1u << 0,
+};
+typedef uint16_t loom_low_asm_immediate_flags_t;
+
 typedef struct loom_low_asm_immediate_t {
   // Descriptor-local immediate index printed or parsed by this asm field.
   uint16_t immediate_index;
+  // Presentation flags controlling compact assembly spelling.
+  loom_low_asm_immediate_flags_t flags;
   // Optional string-table offset for a named immediate spelling.
   loom_bstring_table_offset_t name_string_offset;
 } loom_low_asm_immediate_t;
@@ -1319,6 +1371,18 @@ const loom_low_descriptor_set_t* loom_low_descriptor_registry_lookup_by_id(
 iree_string_view_t loom_low_descriptor_set_string(
     const loom_low_descriptor_set_t* descriptor_set,
     loom_bstring_table_offset_t string_offset);
+
+// Looks up the numeric value assigned to |token| in |enum_domain_id|. Returns
+// false when the domain or token is not present.
+bool loom_low_descriptor_set_lookup_enum_value_by_token(
+    const loom_low_descriptor_set_t* descriptor_set, uint16_t enum_domain_id,
+    iree_string_view_t token, int64_t* out_value);
+
+// Looks up the stable token assigned to |value| in |enum_domain_id|. Returns
+// false when the domain or value is not present.
+bool loom_low_descriptor_set_lookup_enum_token_by_value(
+    const loom_low_descriptor_set_t* descriptor_set, uint16_t enum_domain_id,
+    int64_t value, iree_string_view_t* out_token);
 
 // Looks up a descriptor-set-local register class by stable register-class name.
 // |out_descriptor_register_class| may be NULL when only the dense descriptor ID

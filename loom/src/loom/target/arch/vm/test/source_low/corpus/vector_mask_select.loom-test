@@ -1,0 +1,471 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/vector_mask_select.loom-test
+// RUN: emit source-low output=low
+
+vm.target<core> @target
+func.def target(@target) @i32_cmpi_select(%lhs: vector<2xi32>, %rhs: vector<2xi32>, %true_value: vector<2xi32>, %false_value: vector<2xi32>) -> (vector<2xi32>) {
+  %mask = vector.cmpi slt, %lhs, %rhs : vector<2xi32> -> vector<2xi1>
+  %selected = vector.select %mask, %true_value, %false_value : vector<2xi32>
+  func.return %selected : vector<2xi32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x2 : vector<2xi32>>, reg<vm.value x2 : vector<2xi32>>, reg<vm.value x2 : vector<2xi32>>, reg<vm.value x2 : vector<2xi32>>) -> (reg<vm.value x2 : vector<2xi32>>)>}) @i32_cmpi_select(%lhs: reg<vm.value x2 : vector<2xi32>>, %rhs: reg<vm.value x2 : vector<2xi32>>, %true_value: reg<vm.value x2 : vector<2xi32>>, %false_value: reg<vm.value x2 : vector<2xi32>>) -> (reg<vm.value x2 : vector<2xi32>>) asm {
+  %25 = slice %lhs[0] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %26 = slice %rhs[0] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %27 = integer.compare.i32 %25, %26, slt : reg<vm.value : i1>
+  %28 = slice %true_value[0] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %29 = slice %false_value[0] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %30 = value.select %27, %28, %29 : reg<vm.value : i32>
+  %31 = slice %lhs[1] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %32 = slice %rhs[1] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %33 = integer.compare.i32 %31, %32, slt : reg<vm.value : i1>
+  %34 = slice %true_value[1] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %35 = slice %false_value[1] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %36 = value.select %33, %34, %35 : reg<vm.value : i32>
+  %selected = concat(%30, %36) : (reg<vm.value : i32>, reg<vm.value : i32>) -> reg<vm.value x2 : vector<2xi32>>
+  return %selected
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @f32_cmpf_select(%lhs: vector<1xf32>, %rhs: vector<1xf32>, %true_value: vector<1xf32>, %false_value: vector<1xf32>) -> (vector<1xf32>) {
+  %mask = vector.cmpf olt, %lhs, %rhs : vector<1xf32> -> vector<1xi1>
+  %selected = vector.select %mask, %true_value, %false_value : vector<1xf32>
+  func.return %selected : vector<1xf32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : vector<1xf32>>, reg<vm.value : vector<1xf32>>, reg<vm.value : vector<1xf32>>, reg<vm.value : vector<1xf32>>) -> (reg<vm.value : vector<1xf32>>)>}) @f32_cmpf_select(%lhs: reg<vm.value : vector<1xf32>>, %rhs: reg<vm.value : vector<1xf32>>, %true_value: reg<vm.value : vector<1xf32>>, %false_value: reg<vm.value : vector<1xf32>>) -> (reg<vm.value : vector<1xf32>>) asm {
+  %20 = slice %lhs[0] : reg<vm.value : vector<1xf32>> -> reg<vm.value : f32>
+  %21 = slice %rhs[0] : reg<vm.value : vector<1xf32>> -> reg<vm.value : f32>
+  %22 = float.compare.f32 %20, %21, olt : reg<vm.value : i1>
+  %23 = slice %true_value[0] : reg<vm.value : vector<1xf32>> -> reg<vm.value : f32>
+  %24 = slice %false_value[0] : reg<vm.value : vector<1xf32>> -> reg<vm.value : f32>
+  %25 = value.select %22, %23, %24 : reg<vm.value : f32>
+  %selected = concat(%25) : (reg<vm.value : f32>) -> reg<vm.value : vector<1xf32>>
+  return %selected
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_cmpf_rhs_zero_inline(%value: f32) -> (i1) {
+  %comparison_rhs = scalar.constant 0.0 : f32
+  %mask = scalar.cmpf one, %value, %comparison_rhs : f32
+  func.return %mask : i1
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : f32>) -> (reg<vm.value : i1>)>}) @scalar_cmpf_rhs_zero_inline(%value: reg<vm.value : f32>) -> (reg<vm.value : i1>) asm {
+  %comparison_rhs = constant.zero : reg<vm.value : f32>
+  %mask = float.compare.f32 %value, %comparison_rhs, one : reg<vm.value : i1>
+  return %mask
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_cmpf_lhs_one_inline(%value: f32) -> (i1) {
+  %comparison_lhs = scalar.constant 1.0 : f32
+  %mask = scalar.cmpf olt, %comparison_lhs, %value : f32
+  func.return %mask : i1
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : f32>) -> (reg<vm.value : i1>)>}) @scalar_cmpf_lhs_one_inline(%value: reg<vm.value : f32>) -> (reg<vm.value : i1>) asm {
+  %comparison_lhs = constant.i32 1065353216 : reg<vm.value : f32>
+  %mask = float.compare.f32 %comparison_lhs, %value, olt : reg<vm.value : i1>
+  return %mask
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @vector_cmpf_rhs_zero_inline(%value: vector<2xf32>) -> (vector<2xi1>) {
+  %comparison_rhs_element = scalar.constant 0.0 : f32
+  %comparison_rhs = vector.splat %comparison_rhs_element : vector<2xf32>
+  %mask = vector.cmpf one, %value, %comparison_rhs : vector<2xf32> -> vector<2xi1>
+  func.return %mask : vector<2xi1>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x2 : vector<2xf32>>) -> (reg<vm.value x2 : vector<2xi1>>)>}) @vector_cmpf_rhs_zero_inline(%value: reg<vm.value x2 : vector<2xf32>>) -> (reg<vm.value x2 : vector<2xi1>>) asm {
+  %15 = slice %value[0] : reg<vm.value x2 : vector<2xf32>> -> reg<vm.value : f32>
+  %16 = constant.zero : reg<vm.value : f32>
+  %17 = float.compare.f32 %15, %16, one : reg<vm.value : i1>
+  %18 = slice %value[1] : reg<vm.value x2 : vector<2xf32>> -> reg<vm.value : f32>
+  %19 = float.compare.f32 %18, %16, one : reg<vm.value : i1>
+  %mask = concat(%17, %19) : (reg<vm.value : i1>, reg<vm.value : i1>) -> reg<vm.value x2 : vector<2xi1>>
+  return %mask
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @i32_cmpi_select_zero_inline(%lhs: vector<2xi32>, %rhs: vector<2xi32>, %false_value: vector<2xi32>) -> (vector<2xi32>) {
+  %mask = vector.cmpi slt, %lhs, %rhs : vector<2xi32> -> vector<2xi1>
+  %true_element = scalar.constant 0 : i32
+  %true_value = vector.splat %true_element : vector<2xi32>
+  %selected = vector.select %mask, %true_value, %false_value : vector<2xi32>
+  func.return %selected : vector<2xi32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x2 : vector<2xi32>>, reg<vm.value x2 : vector<2xi32>>, reg<vm.value x2 : vector<2xi32>>) -> (reg<vm.value x2 : vector<2xi32>>)>}) @i32_cmpi_select_zero_inline(%lhs: reg<vm.value x2 : vector<2xi32>>, %rhs: reg<vm.value x2 : vector<2xi32>>, %false_value: reg<vm.value x2 : vector<2xi32>>) -> (reg<vm.value x2 : vector<2xi32>>) asm {
+  %26 = slice %lhs[0] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %27 = slice %rhs[0] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %28 = integer.compare.i32 %26, %27, slt : reg<vm.value : i1>
+  %29 = constant.zero : reg<vm.value : i32>
+  %30 = slice %false_value[0] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %31 = value.select %28, %29, %30 : reg<vm.value : i32>
+  %32 = slice %lhs[1] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %33 = slice %rhs[1] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %34 = integer.compare.i32 %32, %33, slt : reg<vm.value : i1>
+  %35 = slice %false_value[1] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %36 = value.select %34, %29, %35 : reg<vm.value : i32>
+  %selected = concat(%31, %36) : (reg<vm.value : i32>, reg<vm.value : i32>) -> reg<vm.value x2 : vector<2xi32>>
+  return %selected
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @i32_cmpi_select_small_inline(%lhs: vector<2xi32>, %rhs: vector<2xi32>, %false_value: vector<2xi32>) -> (vector<2xi32>) {
+  %small = scalar.constant 3 : i32
+  %mask = vector.cmpi slt, %lhs, %rhs : vector<2xi32> -> vector<2xi1>
+  %true_value = vector.splat %small : vector<2xi32>
+  %selected = vector.select %mask, %true_value, %false_value : vector<2xi32>
+  func.return %selected : vector<2xi32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x2 : vector<2xi32>>, reg<vm.value x2 : vector<2xi32>>, reg<vm.value x2 : vector<2xi32>>) -> (reg<vm.value x2 : vector<2xi32>>)>}) @i32_cmpi_select_small_inline(%lhs: reg<vm.value x2 : vector<2xi32>>, %rhs: reg<vm.value x2 : vector<2xi32>>, %false_value: reg<vm.value x2 : vector<2xi32>>) -> (reg<vm.value x2 : vector<2xi32>>) asm {
+  %26 = slice %lhs[0] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %27 = slice %rhs[0] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %28 = integer.compare.i32 %26, %27, slt : reg<vm.value : i1>
+  %29 = constant.s16 3 : reg<vm.value : i32>
+  %30 = slice %false_value[0] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %31 = value.select %28, %29, %30 : reg<vm.value : i32>
+  %32 = slice %lhs[1] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %33 = slice %rhs[1] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %34 = integer.compare.i32 %32, %33, slt : reg<vm.value : i1>
+  %35 = slice %false_value[1] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %36 = value.select %34, %29, %35 : reg<vm.value : i32>
+  %selected = concat(%31, %36) : (reg<vm.value : i32>, reg<vm.value : i32>) -> reg<vm.value x2 : vector<2xi32>>
+  return %selected
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @i32_cmpi_select_noninline_constant(%lhs: vector<2xi32>, %rhs: vector<2xi32>, %false_value: vector<2xi32>) -> (vector<2xi32>) {
+  %constant = scalar.constant 65 : i32
+  %mask = vector.cmpi slt, %lhs, %rhs : vector<2xi32> -> vector<2xi1>
+  %true_value = vector.splat %constant : vector<2xi32>
+  %selected = vector.select %mask, %true_value, %false_value : vector<2xi32>
+  func.return %selected : vector<2xi32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x2 : vector<2xi32>>, reg<vm.value x2 : vector<2xi32>>, reg<vm.value x2 : vector<2xi32>>) -> (reg<vm.value x2 : vector<2xi32>>)>}) @i32_cmpi_select_noninline_constant(%lhs: reg<vm.value x2 : vector<2xi32>>, %rhs: reg<vm.value x2 : vector<2xi32>>, %false_value: reg<vm.value x2 : vector<2xi32>>) -> (reg<vm.value x2 : vector<2xi32>>) asm {
+  %26 = slice %lhs[0] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %27 = slice %rhs[0] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %28 = integer.compare.i32 %26, %27, slt : reg<vm.value : i1>
+  %29 = constant.s16 65 : reg<vm.value : i32>
+  %30 = slice %false_value[0] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %31 = value.select %28, %29, %30 : reg<vm.value : i32>
+  %32 = slice %lhs[1] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %33 = slice %rhs[1] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %34 = integer.compare.i32 %32, %33, slt : reg<vm.value : i1>
+  %35 = slice %false_value[1] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %36 = value.select %34, %29, %35 : reg<vm.value : i32>
+  %selected = concat(%31, %36) : (reg<vm.value : i32>, reg<vm.value : i32>) -> reg<vm.value x2 : vector<2xi32>>
+  return %selected
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @i64_vector_mask_select(%lhs: vector<2xi32>, %rhs: vector<2xi32>, %true_value: vector<2xi64>, %false_value: vector<2xi64>) -> (vector<2xi64>) {
+  %mask = vector.cmpi slt, %lhs, %rhs : vector<2xi32> -> vector<2xi1>
+  %selected = vector.select %mask, %true_value, %false_value : vector<2xi64>
+  func.return %selected : vector<2xi64>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x2 : vector<2xi32>>, reg<vm.value x2 : vector<2xi32>>, reg<vm.value x2 : vector<2xi64>>, reg<vm.value x2 : vector<2xi64>>) -> (reg<vm.value x2 : vector<2xi64>>)>}) @i64_vector_mask_select(%lhs: reg<vm.value x2 : vector<2xi32>>, %rhs: reg<vm.value x2 : vector<2xi32>>, %true_value: reg<vm.value x2 : vector<2xi64>>, %false_value: reg<vm.value x2 : vector<2xi64>>) -> (reg<vm.value x2 : vector<2xi64>>) asm {
+  %25 = slice %lhs[0] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %26 = slice %rhs[0] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %27 = integer.compare.i32 %25, %26, slt : reg<vm.value : i1>
+  %28 = slice %true_value[0] : reg<vm.value x2 : vector<2xi64>> -> reg<vm.value : i64>
+  %29 = slice %false_value[0] : reg<vm.value x2 : vector<2xi64>> -> reg<vm.value : i64>
+  %30 = value.select %27, %28, %29 : reg<vm.value : i64>
+  %31 = slice %lhs[1] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %32 = slice %rhs[1] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %33 = integer.compare.i32 %31, %32, slt : reg<vm.value : i1>
+  %34 = slice %true_value[1] : reg<vm.value x2 : vector<2xi64>> -> reg<vm.value : i64>
+  %35 = slice %false_value[1] : reg<vm.value x2 : vector<2xi64>> -> reg<vm.value : i64>
+  %36 = value.select %33, %34, %35 : reg<vm.value : i64>
+  %selected = concat(%30, %36) : (reg<vm.value : i64>, reg<vm.value : i64>) -> reg<vm.value x2 : vector<2xi64>>
+  return %selected
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @f64_vector_mask_select(%lhs: vector<2xi32>, %rhs: vector<2xi32>, %true_value: vector<2xf64>, %false_value: vector<2xf64>) -> (vector<2xf64>) {
+  %mask = vector.cmpi slt, %lhs, %rhs : vector<2xi32> -> vector<2xi1>
+  %selected = vector.select %mask, %true_value, %false_value : vector<2xf64>
+  func.return %selected : vector<2xf64>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x2 : vector<2xi32>>, reg<vm.value x2 : vector<2xi32>>, reg<vm.value x2 : vector<2xf64>>, reg<vm.value x2 : vector<2xf64>>) -> (reg<vm.value x2 : vector<2xf64>>)>}) @f64_vector_mask_select(%lhs: reg<vm.value x2 : vector<2xi32>>, %rhs: reg<vm.value x2 : vector<2xi32>>, %true_value: reg<vm.value x2 : vector<2xf64>>, %false_value: reg<vm.value x2 : vector<2xf64>>) -> (reg<vm.value x2 : vector<2xf64>>) asm {
+  %25 = slice %lhs[0] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %26 = slice %rhs[0] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %27 = integer.compare.i32 %25, %26, slt : reg<vm.value : i1>
+  %28 = slice %true_value[0] : reg<vm.value x2 : vector<2xf64>> -> reg<vm.value : f64>
+  %29 = slice %false_value[0] : reg<vm.value x2 : vector<2xf64>> -> reg<vm.value : f64>
+  %30 = value.select %27, %28, %29 : reg<vm.value : f64>
+  %31 = slice %lhs[1] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %32 = slice %rhs[1] : reg<vm.value x2 : vector<2xi32>> -> reg<vm.value : i32>
+  %33 = integer.compare.i32 %31, %32, slt : reg<vm.value : i1>
+  %34 = slice %true_value[1] : reg<vm.value x2 : vector<2xf64>> -> reg<vm.value : f64>
+  %35 = slice %false_value[1] : reg<vm.value x2 : vector<2xf64>> -> reg<vm.value : f64>
+  %36 = value.select %33, %34, %35 : reg<vm.value : f64>
+  %selected = concat(%30, %36) : (reg<vm.value : f64>, reg<vm.value : f64>) -> reg<vm.value x2 : vector<2xf64>>
+  return %selected
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @i8_scalar_mask_select(%lhs: i32, %rhs: i32, %true_value: vector<4xi8>, %false_value: vector<4xi8>) -> (vector<4xi8>) {
+  %condition = scalar.cmpi slt, %lhs, %rhs : i32
+  %mask = vector.splat %condition : vector<4xi1>
+  %selected = vector.select %mask, %true_value, %false_value : vector<4xi8>
+  func.return %selected : vector<4xi8>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value x4 : vector<4xi8>>, reg<vm.value x4 : vector<4xi8>>) -> (reg<vm.value x4 : vector<4xi8>>)>}) @i8_scalar_mask_select(%lhs: reg<vm.value : i32>, %rhs: reg<vm.value : i32>, %true_value: reg<vm.value x4 : vector<4xi8>>, %false_value: reg<vm.value x4 : vector<4xi8>>) -> (reg<vm.value x4 : vector<4xi8>>) asm {
+  %condition = integer.compare.i32 %lhs, %rhs, slt : reg<vm.value : i1>
+  %27 = slice %true_value[0] : reg<vm.value x4 : vector<4xi8>> -> reg<vm.value : i8>
+  %28 = slice %false_value[0] : reg<vm.value x4 : vector<4xi8>> -> reg<vm.value : i8>
+  %29 = value.select %condition, %27, %28 : reg<vm.value : i8>
+  %30 = slice %true_value[1] : reg<vm.value x4 : vector<4xi8>> -> reg<vm.value : i8>
+  %31 = slice %false_value[1] : reg<vm.value x4 : vector<4xi8>> -> reg<vm.value : i8>
+  %32 = value.select %condition, %30, %31 : reg<vm.value : i8>
+  %33 = slice %true_value[2] : reg<vm.value x4 : vector<4xi8>> -> reg<vm.value : i8>
+  %34 = slice %false_value[2] : reg<vm.value x4 : vector<4xi8>> -> reg<vm.value : i8>
+  %35 = value.select %condition, %33, %34 : reg<vm.value : i8>
+  %36 = slice %true_value[3] : reg<vm.value x4 : vector<4xi8>> -> reg<vm.value : i8>
+  %37 = slice %false_value[3] : reg<vm.value x4 : vector<4xi8>> -> reg<vm.value : i8>
+  %38 = value.select %condition, %36, %37 : reg<vm.value : i8>
+  %selected = concat(%29, %32, %35, %38) : (reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>) -> reg<vm.value x4 : vector<4xi8>>
+  return %selected
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @i8_repeated_element_scalar_mask_select(%lhs: i32, %rhs: i32, %true_value: vector<4xi8>, %false_value: vector<4xi8>) -> (vector<4xi8>) {
+  %condition = scalar.cmpi slt, %lhs, %rhs : i32
+  %mask = vector.from_elements %condition, %condition, %condition, %condition : vector<4xi1>
+  %selected = vector.select %mask, %true_value, %false_value : vector<4xi8>
+  func.return %selected : vector<4xi8>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value x4 : vector<4xi8>>, reg<vm.value x4 : vector<4xi8>>) -> (reg<vm.value x4 : vector<4xi8>>)>}) @i8_repeated_element_scalar_mask_select(%lhs: reg<vm.value : i32>, %rhs: reg<vm.value : i32>, %true_value: reg<vm.value x4 : vector<4xi8>>, %false_value: reg<vm.value x4 : vector<4xi8>>) -> (reg<vm.value x4 : vector<4xi8>>) asm {
+  %condition = integer.compare.i32 %lhs, %rhs, slt : reg<vm.value : i1>
+  %28 = slice %true_value[0] : reg<vm.value x4 : vector<4xi8>> -> reg<vm.value : i8>
+  %29 = slice %false_value[0] : reg<vm.value x4 : vector<4xi8>> -> reg<vm.value : i8>
+  %30 = value.select %condition, %28, %29 : reg<vm.value : i8>
+  %31 = slice %true_value[1] : reg<vm.value x4 : vector<4xi8>> -> reg<vm.value : i8>
+  %32 = slice %false_value[1] : reg<vm.value x4 : vector<4xi8>> -> reg<vm.value : i8>
+  %33 = value.select %condition, %31, %32 : reg<vm.value : i8>
+  %34 = slice %true_value[2] : reg<vm.value x4 : vector<4xi8>> -> reg<vm.value : i8>
+  %35 = slice %false_value[2] : reg<vm.value x4 : vector<4xi8>> -> reg<vm.value : i8>
+  %36 = value.select %condition, %34, %35 : reg<vm.value : i8>
+  %37 = slice %true_value[3] : reg<vm.value x4 : vector<4xi8>> -> reg<vm.value : i8>
+  %38 = slice %false_value[3] : reg<vm.value x4 : vector<4xi8>> -> reg<vm.value : i8>
+  %39 = value.select %condition, %37, %38 : reg<vm.value : i8>
+  %selected = concat(%30, %33, %36, %39) : (reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>) -> reg<vm.value x4 : vector<4xi8>>
+  return %selected
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @i16_scalar_mask_select(%lhs: i32, %rhs: i32, %true_value: vector<2xi16>, %false_value: vector<2xi16>) -> (vector<2xi16>) {
+  %condition = scalar.cmpi slt, %lhs, %rhs : i32
+  %mask = vector.splat %condition : vector<2xi1>
+  %selected = vector.select %mask, %true_value, %false_value : vector<2xi16>
+  func.return %selected : vector<2xi16>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value x2 : vector<2xi16>>, reg<vm.value x2 : vector<2xi16>>) -> (reg<vm.value x2 : vector<2xi16>>)>}) @i16_scalar_mask_select(%lhs: reg<vm.value : i32>, %rhs: reg<vm.value : i32>, %true_value: reg<vm.value x2 : vector<2xi16>>, %false_value: reg<vm.value x2 : vector<2xi16>>) -> (reg<vm.value x2 : vector<2xi16>>) asm {
+  %condition = integer.compare.i32 %lhs, %rhs, slt : reg<vm.value : i1>
+  %21 = slice %true_value[0] : reg<vm.value x2 : vector<2xi16>> -> reg<vm.value : i16>
+  %22 = slice %false_value[0] : reg<vm.value x2 : vector<2xi16>> -> reg<vm.value : i16>
+  %23 = value.select %condition, %21, %22 : reg<vm.value : i16>
+  %24 = slice %true_value[1] : reg<vm.value x2 : vector<2xi16>> -> reg<vm.value : i16>
+  %25 = slice %false_value[1] : reg<vm.value x2 : vector<2xi16>> -> reg<vm.value : i16>
+  %26 = value.select %condition, %24, %25 : reg<vm.value : i16>
+  %selected = concat(%23, %26) : (reg<vm.value : i16>, reg<vm.value : i16>) -> reg<vm.value x2 : vector<2xi16>>
+  return %selected
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @bf16_scalar_mask_select_v4(%lhs: i32, %rhs: i32, %true_value: vector<4xbf16>, %false_value: vector<4xbf16>) -> (vector<4xbf16>) {
+  %condition = scalar.cmpi slt, %lhs, %rhs : i32
+  %mask = vector.splat %condition : vector<4xi1>
+  %selected = vector.select %mask, %true_value, %false_value : vector<4xbf16>
+  func.return %selected : vector<4xbf16>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value x4 : vector<4xbf16>>, reg<vm.value x4 : vector<4xbf16>>) -> (reg<vm.value x4 : vector<4xbf16>>)>}) @bf16_scalar_mask_select_v4(%lhs: reg<vm.value : i32>, %rhs: reg<vm.value : i32>, %true_value: reg<vm.value x4 : vector<4xbf16>>, %false_value: reg<vm.value x4 : vector<4xbf16>>) -> (reg<vm.value x4 : vector<4xbf16>>) asm {
+  %condition = integer.compare.i32 %lhs, %rhs, slt : reg<vm.value : i1>
+  %27 = slice %true_value[0] : reg<vm.value x4 : vector<4xbf16>> -> reg<vm.value : bf16>
+  %28 = slice %false_value[0] : reg<vm.value x4 : vector<4xbf16>> -> reg<vm.value : bf16>
+  %29 = value.select %condition, %27, %28 : reg<vm.value : bf16>
+  %30 = slice %true_value[1] : reg<vm.value x4 : vector<4xbf16>> -> reg<vm.value : bf16>
+  %31 = slice %false_value[1] : reg<vm.value x4 : vector<4xbf16>> -> reg<vm.value : bf16>
+  %32 = value.select %condition, %30, %31 : reg<vm.value : bf16>
+  %33 = slice %true_value[2] : reg<vm.value x4 : vector<4xbf16>> -> reg<vm.value : bf16>
+  %34 = slice %false_value[2] : reg<vm.value x4 : vector<4xbf16>> -> reg<vm.value : bf16>
+  %35 = value.select %condition, %33, %34 : reg<vm.value : bf16>
+  %36 = slice %true_value[3] : reg<vm.value x4 : vector<4xbf16>> -> reg<vm.value : bf16>
+  %37 = slice %false_value[3] : reg<vm.value x4 : vector<4xbf16>> -> reg<vm.value : bf16>
+  %38 = value.select %condition, %36, %37 : reg<vm.value : bf16>
+  %selected = concat(%29, %32, %35, %38) : (reg<vm.value : bf16>, reg<vm.value : bf16>, reg<vm.value : bf16>, reg<vm.value : bf16>) -> reg<vm.value x4 : vector<4xbf16>>
+  return %selected
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @bf16_scalar_mask_select_v16(%lhs: i32, %rhs: i32, %true_value: vector<16xbf16>, %false_value: vector<16xbf16>) -> (vector<16xbf16>) {
+  %condition = scalar.cmpi slt, %lhs, %rhs : i32
+  %mask = vector.splat %condition : vector<16xi1>
+  %selected = vector.select %mask, %true_value, %false_value : vector<16xbf16>
+  func.return %selected : vector<16xbf16>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value x16 : vector<16xbf16>>, reg<vm.value x16 : vector<16xbf16>>) -> (reg<vm.value x16 : vector<16xbf16>>)>}) @bf16_scalar_mask_select_v16(%lhs: reg<vm.value : i32>, %rhs: reg<vm.value : i32>, %true_value: reg<vm.value x16 : vector<16xbf16>>, %false_value: reg<vm.value x16 : vector<16xbf16>>) -> (reg<vm.value x16 : vector<16xbf16>>) asm {
+  %condition = integer.compare.i32 %lhs, %rhs, slt : reg<vm.value : i1>
+  %63 = slice %true_value[0] : reg<vm.value x16 : vector<16xbf16>> -> reg<vm.value : bf16>
+  %64 = slice %false_value[0] : reg<vm.value x16 : vector<16xbf16>> -> reg<vm.value : bf16>
+  %65 = value.select %condition, %63, %64 : reg<vm.value : bf16>
+  %66 = slice %true_value[1] : reg<vm.value x16 : vector<16xbf16>> -> reg<vm.value : bf16>
+  %67 = slice %false_value[1] : reg<vm.value x16 : vector<16xbf16>> -> reg<vm.value : bf16>
+  %68 = value.select %condition, %66, %67 : reg<vm.value : bf16>
+  %69 = slice %true_value[2] : reg<vm.value x16 : vector<16xbf16>> -> reg<vm.value : bf16>
+  %70 = slice %false_value[2] : reg<vm.value x16 : vector<16xbf16>> -> reg<vm.value : bf16>
+  %71 = value.select %condition, %69, %70 : reg<vm.value : bf16>
+  %72 = slice %true_value[3] : reg<vm.value x16 : vector<16xbf16>> -> reg<vm.value : bf16>
+  %73 = slice %false_value[3] : reg<vm.value x16 : vector<16xbf16>> -> reg<vm.value : bf16>
+  %74 = value.select %condition, %72, %73 : reg<vm.value : bf16>
+  %75 = slice %true_value[4] : reg<vm.value x16 : vector<16xbf16>> -> reg<vm.value : bf16>
+  %76 = slice %false_value[4] : reg<vm.value x16 : vector<16xbf16>> -> reg<vm.value : bf16>
+  %77 = value.select %condition, %75, %76 : reg<vm.value : bf16>
+  %78 = slice %true_value[5] : reg<vm.value x16 : vector<16xbf16>> -> reg<vm.value : bf16>
+  %79 = slice %false_value[5] : reg<vm.value x16 : vector<16xbf16>> -> reg<vm.value : bf16>
+  %80 = value.select %condition, %78, %79 : reg<vm.value : bf16>
+  %81 = slice %true_value[6] : reg<vm.value x16 : vector<16xbf16>> -> reg<vm.value : bf16>
+  %82 = slice %false_value[6] : reg<vm.value x16 : vector<16xbf16>> -> reg<vm.value : bf16>
+  %83 = value.select %condition, %81, %82 : reg<vm.value : bf16>
+  %84 = slice %true_value[7] : reg<vm.value x16 : vector<16xbf16>> -> reg<vm.value : bf16>
+  %85 = slice %false_value[7] : reg<vm.value x16 : vector<16xbf16>> -> reg<vm.value : bf16>
+  %86 = value.select %condition, %84, %85 : reg<vm.value : bf16>
+  %87 = slice %true_value[8] : reg<vm.value x16 : vector<16xbf16>> -> reg<vm.value : bf16>
+  %88 = slice %false_value[8] : reg<vm.value x16 : vector<16xbf16>> -> reg<vm.value : bf16>
+  %89 = value.select %condition, %87, %88 : reg<vm.value : bf16>
+  %90 = slice %true_value[9] : reg<vm.value x16 : vector<16xbf16>> -> reg<vm.value : bf16>
+  %91 = slice %false_value[9] : reg<vm.value x16 : vector<16xbf16>> -> reg<vm.value : bf16>
+  %92 = value.select %condition, %90, %91 : reg<vm.value : bf16>
+  %93 = slice %true_value[10] : reg<vm.value x16 : vector<16xbf16>> -> reg<vm.value : bf16>
+  %94 = slice %false_value[10] : reg<vm.value x16 : vector<16xbf16>> -> reg<vm.value : bf16>
+  %95 = value.select %condition, %93, %94 : reg<vm.value : bf16>
+  %96 = slice %true_value[11] : reg<vm.value x16 : vector<16xbf16>> -> reg<vm.value : bf16>
+  %97 = slice %false_value[11] : reg<vm.value x16 : vector<16xbf16>> -> reg<vm.value : bf16>
+  %98 = value.select %condition, %96, %97 : reg<vm.value : bf16>
+  %99 = slice %true_value[12] : reg<vm.value x16 : vector<16xbf16>> -> reg<vm.value : bf16>
+  %100 = slice %false_value[12] : reg<vm.value x16 : vector<16xbf16>> -> reg<vm.value : bf16>
+  %101 = value.select %condition, %99, %100 : reg<vm.value : bf16>
+  %102 = slice %true_value[13] : reg<vm.value x16 : vector<16xbf16>> -> reg<vm.value : bf16>
+  %103 = slice %false_value[13] : reg<vm.value x16 : vector<16xbf16>> -> reg<vm.value : bf16>
+  %104 = value.select %condition, %102, %103 : reg<vm.value : bf16>
+  %105 = slice %true_value[14] : reg<vm.value x16 : vector<16xbf16>> -> reg<vm.value : bf16>
+  %106 = slice %false_value[14] : reg<vm.value x16 : vector<16xbf16>> -> reg<vm.value : bf16>
+  %107 = value.select %condition, %105, %106 : reg<vm.value : bf16>
+  %108 = slice %true_value[15] : reg<vm.value x16 : vector<16xbf16>> -> reg<vm.value : bf16>
+  %109 = slice %false_value[15] : reg<vm.value x16 : vector<16xbf16>> -> reg<vm.value : bf16>
+  %110 = value.select %condition, %108, %109 : reg<vm.value : bf16>
+  %selected = concat(%65, %68, %71, %74, %77, %80, %83, %86, %89, %92, %95, %98, %101, %104, %107, %110) : (reg<vm.value : bf16>, reg<vm.value : bf16>, reg<vm.value : bf16>, reg<vm.value : bf16>, reg<vm.value : bf16>, reg<vm.value : bf16>, reg<vm.value : bf16>, reg<vm.value : bf16>, reg<vm.value : bf16>, reg<vm.value : bf16>, reg<vm.value : bf16>, reg<vm.value : bf16>, reg<vm.value : bf16>, reg<vm.value : bf16>, reg<vm.value : bf16>, reg<vm.value : bf16>) -> reg<vm.value x16 : vector<16xbf16>>
+  return %selected
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @f16_scalar_mask_select_v4(%lhs: i32, %rhs: i32, %true_value: vector<4xf16>, %false_value: vector<4xf16>) -> (vector<4xf16>) {
+  %condition = scalar.cmpi slt, %lhs, %rhs : i32
+  %mask = vector.splat %condition : vector<4xi1>
+  %selected = vector.select %mask, %true_value, %false_value : vector<4xf16>
+  func.return %selected : vector<4xf16>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value x4 : vector<4xf16>>, reg<vm.value x4 : vector<4xf16>>) -> (reg<vm.value x4 : vector<4xf16>>)>}) @f16_scalar_mask_select_v4(%lhs: reg<vm.value : i32>, %rhs: reg<vm.value : i32>, %true_value: reg<vm.value x4 : vector<4xf16>>, %false_value: reg<vm.value x4 : vector<4xf16>>) -> (reg<vm.value x4 : vector<4xf16>>) asm {
+  %condition = integer.compare.i32 %lhs, %rhs, slt : reg<vm.value : i1>
+  %27 = slice %true_value[0] : reg<vm.value x4 : vector<4xf16>> -> reg<vm.value : f16>
+  %28 = slice %false_value[0] : reg<vm.value x4 : vector<4xf16>> -> reg<vm.value : f16>
+  %29 = value.select %condition, %27, %28 : reg<vm.value : f16>
+  %30 = slice %true_value[1] : reg<vm.value x4 : vector<4xf16>> -> reg<vm.value : f16>
+  %31 = slice %false_value[1] : reg<vm.value x4 : vector<4xf16>> -> reg<vm.value : f16>
+  %32 = value.select %condition, %30, %31 : reg<vm.value : f16>
+  %33 = slice %true_value[2] : reg<vm.value x4 : vector<4xf16>> -> reg<vm.value : f16>
+  %34 = slice %false_value[2] : reg<vm.value x4 : vector<4xf16>> -> reg<vm.value : f16>
+  %35 = value.select %condition, %33, %34 : reg<vm.value : f16>
+  %36 = slice %true_value[3] : reg<vm.value x4 : vector<4xf16>> -> reg<vm.value : f16>
+  %37 = slice %false_value[3] : reg<vm.value x4 : vector<4xf16>> -> reg<vm.value : f16>
+  %38 = value.select %condition, %36, %37 : reg<vm.value : f16>
+  %selected = concat(%29, %32, %35, %38) : (reg<vm.value : f16>, reg<vm.value : f16>, reg<vm.value : f16>, reg<vm.value : f16>) -> reg<vm.value x4 : vector<4xf16>>
+  return %selected
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @i64_splat(%value: i64) -> (vector<2xi64>) {
+  %splat = vector.splat %value : vector<2xi64>
+  func.return %splat : vector<2xi64>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i64>) -> (reg<vm.value x2 : vector<2xi64>>)>}) @i64_splat(%value: reg<vm.value : i64>) -> (reg<vm.value x2 : vector<2xi64>>) asm {
+  %splat = concat(%value, %value) : (reg<vm.value : i64>, reg<vm.value : i64>) -> reg<vm.value x2 : vector<2xi64>>
+  return %splat
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @f64_splat(%value: f64) -> (vector<2xf64>) {
+  %splat = vector.splat %value : vector<2xf64>
+  func.return %splat : vector<2xf64>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : f64>) -> (reg<vm.value x2 : vector<2xf64>>)>}) @f64_splat(%value: reg<vm.value : f64>) -> (reg<vm.value x2 : vector<2xf64>>) asm {
+  %splat = concat(%value, %value) : (reg<vm.value : f64>, reg<vm.value : f64>) -> reg<vm.value x2 : vector<2xf64>>
+  return %splat
+}

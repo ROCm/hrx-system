@@ -44,9 +44,13 @@ loom_generated_cc_library(
     name = "func",
     srcs = [
         "canonicalize.c",
+        "reference.c",
         "verify.c",
     ],
-    hdrs = ["ops.h"],
+    hdrs = [
+        "ops.h",
+        "reference.h",
+    ],
     args = ["--dialect=func"],
     generated_src_flags = [
         "--builders",
@@ -65,6 +69,7 @@ loom_generated_cc_library(
         "//loom/src/loom/ops:func_symbol_facts",
         "//loom/src/loom/ops:function_contract_verify",
         "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops:type_registry",
         "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/target:types",
     ],

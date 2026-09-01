@@ -24,6 +24,7 @@
 #include "loom/ops/func/ops.h"
 #include "loom/ops/global/ops.h"
 #include "loom/ops/kernel/ops.h"
+#include "loom/ops/metadata/ops.h"
 #include "loom/ops/template/ops.h"
 #include "loom/ops/test/ops.h"
 #include "loom/ops/test/registry.h"
@@ -192,6 +193,9 @@ class ReaderTest : public ::testing::Test {
                     loom_global_dialect_op_semantics);
     RegisterDialect(context, LOOM_DIALECT_KERNEL, loom_kernel_dialect_vtables,
                     loom_kernel_dialect_op_semantics);
+    RegisterDialect(context, LOOM_DIALECT_METADATA,
+                    loom_metadata_dialect_vtables,
+                    loom_metadata_dialect_op_semantics);
     RegisterDialect(context, LOOM_DIALECT_TEMPLATE,
                     loom_template_dialect_vtables,
                     loom_template_dialect_op_semantics);
@@ -387,7 +391,8 @@ class ReaderTest : public ::testing::Test {
     IREE_CHECK_OK(loom_kernel_def_build(
         &module_builder, /*build_flags=*/0, /*retain=*/0,
         loom_symbol_ref_null(), LOOM_STRING_ID_INVALID, /*export_linkage=*/0,
-        callee, &index_type, 1, /*arg_types=*/nullptr,
+        callee, &index_type, 1, /*workload_predicates=*/nullptr,
+        /*workload_predicates_count=*/0, /*arg_types=*/nullptr,
         /*arg_types_count=*/0, /*predicates=*/nullptr,
         /*predicates_count=*/0, LOOM_LOCATION_UNKNOWN, &kernel_op));
     module->symbols.entries[symbol_id].flags = LOOM_SYMBOL_FLAG_PUBLIC;
@@ -445,9 +450,10 @@ class ReaderTest : public ::testing::Test {
         LOOM_FUNC_RETAIN_RETAIN, /*cc=*/0, /*purity=*/0, /*temperature=*/0,
         /*inline_policy=*/0, loom_symbol_ref_null(), /*abi=*/0,
         loom_named_attr_slice_empty(), /*export_symbol=*/LOOM_STRING_ID_INVALID,
-        loom_named_attr_slice_empty(), callee, arg_types,
-        IREE_ARRAYSIZE(arg_types), result_types, IREE_ARRAYSIZE(result_types),
-        nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &func_op));
+        loom_named_attr_slice_empty(), loom_named_attr_slice_empty(), callee,
+        arg_types, IREE_ARRAYSIZE(arg_types), result_types,
+        IREE_ARRAYSIZE(result_types), nullptr, 0, nullptr, 0,
+        LOOM_LOCATION_UNKNOWN, &func_op));
 
     loom_func_like_t func_like = loom_func_like_cast(module, func_op);
     uint16_t arg_count = 0;
@@ -494,13 +500,14 @@ class ReaderTest : public ::testing::Test {
         &builder,
         LOOM_FUNC_DECL_BUILD_FLAG_HAS_IMPORT_MODULE |
             LOOM_FUNC_DECL_BUILD_FLAG_HAS_IMPORT_SYMBOL,
-        /*visibility=*/0, /*retain=*/0, import_module_id, import_symbol_id,
-        /*cc=*/0, /*purity=*/0, /*temperature=*/0, /*inline_policy=*/0,
+        /*visibility=*/0, /*retain=*/0, /*import_policy=*/0, import_module_id,
+        import_symbol_id, loom_named_attr_slice_empty(), /*cc=*/0,
+        /*purity=*/0, /*temperature=*/0, /*inline_policy=*/0,
         loom_symbol_ref_null(), /*abi=*/0, loom_named_attr_slice_empty(),
-        LOOM_STRING_ID_INVALID, loom_named_attr_slice_empty(), callee,
-        arg_types, IREE_ARRAYSIZE(arg_types), result_types,
-        IREE_ARRAYSIZE(result_types), nullptr, 0, nullptr, 0,
-        LOOM_LOCATION_UNKNOWN, &decl_op));
+        LOOM_STRING_ID_INVALID, loom_named_attr_slice_empty(),
+        loom_named_attr_slice_empty(), callee, arg_types,
+        IREE_ARRAYSIZE(arg_types), result_types, IREE_ARRAYSIZE(result_types),
+        nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &decl_op));
     return module;
   }
 
@@ -2780,6 +2787,83 @@ TEST_F(ReaderTest, MaterializesExactIndexedSymbolSelection) {
   EXPECT_NE(loom_region_entry_block(body)->first_op, nullptr);
 
   loom_module_free(selected_module);
+  iree_arena_deinitialize(&metadata_arena);
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, MaterializesModuleOperationsWithSelectedSymbols) {
+  loom_module_t* module = CreateFunctionModule();
+  loom_builder_t builder;
+  loom_builder_initialize(module, &module->arena, loom_module_block(module),
+                          &builder);
+  loom_string_id_t key_id = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_builder_intern_string(&builder, IREE_SV("test.symbol"), &key_id));
+  loom_op_t* metadata_record = nullptr;
+  IREE_ASSERT_OK(loom_metadata_module_build(
+      &builder, key_id,
+      loom_attr_symbol((loom_symbol_ref_t){/*module_id=*/0, /*symbol_id=*/0}),
+      LOOM_LOCATION_UNKNOWN, &metadata_record));
+  loom_op_t* metadata_op = nullptr;
+  IREE_ASSERT_OK(loom_test_module_metadata_build(
+      &builder, LOOM_LOCATION_UNKNOWN, &metadata_op));
+  auto bytes = WriteModule(module);
+
+  iree_arena_allocator_t metadata_arena;
+  iree_arena_initialize(&block_pool_, &metadata_arena);
+  loom_bytecode_file_metadata_t metadata = {0};
+  std::vector<std::string> error_ids;
+  loom_bytecode_read_result_t index_result =
+      ReadIndex(bytes, &metadata_arena, &metadata, &error_ids);
+  ASSERT_EQ(index_result.error_count, 0u);
+  ASSERT_TRUE(error_ids.empty());
+  ASSERT_EQ(metadata.module_count, 1u);
+  const loom_bytecode_module_metadata_t& module_metadata = metadata.modules[0];
+  const bool has_module_ops_section =
+      std::any_of(module_metadata.sections,
+                  module_metadata.sections + module_metadata.section_count,
+                  [](const loom_bytecode_section_metadata_t& section) {
+                    return section.kind == LOOM_BYTECODE_SECTION_MODULE_OPS;
+                  });
+  EXPECT_TRUE(has_module_ops_section);
+
+  auto expect_module_metadata = [](const loom_module_t* materialized_module) {
+    iree_host_size_t record_count = 0;
+    iree_host_size_t ordinary_count = 0;
+    const loom_op_t* op = nullptr;
+    loom_block_for_each_op(
+        loom_region_const_entry_block(materialized_module->body), op) {
+      if (loom_metadata_module_isa(op)) {
+        ++record_count;
+        const loom_symbol_ref_t ref =
+            loom_attr_as_symbol(loom_metadata_module_value(op));
+        EXPECT_EQ(ref.module_id, 0u);
+        EXPECT_EQ(ref.symbol_id, 0u);
+      }
+      ordinary_count += loom_test_module_metadata_isa(op) ? 1 : 0;
+    }
+    EXPECT_EQ(record_count, 1u);
+    EXPECT_EQ(ordinary_count, 1u);
+  };
+
+  loom_module_t* full_module = nullptr;
+  loom_bytecode_read_result_t full_result =
+      ReadModule(bytes, &full_module, &error_ids, /*verify_module=*/true);
+  EXPECT_EQ(full_result.error_count, 0u) << ::testing::PrintToString(error_ids);
+  ASSERT_NE(full_module, nullptr);
+  expect_module_metadata(full_module);
+
+  loom_module_t* selected_module = nullptr;
+  loom_bytecode_read_result_t selected_result = MaterializeModuleSymbols(
+      bytes, &metadata, {0}, &selected_module, &error_ids,
+      /*verify_module=*/true);
+  EXPECT_EQ(selected_result.error_count, 0u)
+      << ::testing::PrintToString(error_ids);
+  ASSERT_NE(selected_module, nullptr);
+  expect_module_metadata(selected_module);
+
+  loom_module_free(selected_module);
+  loom_module_free(full_module);
   iree_arena_deinitialize(&metadata_arena);
   loom_module_free(module);
 }

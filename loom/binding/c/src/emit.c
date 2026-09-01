@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "diagnostic.h"
+#include "emit.h"
 #include "iree/base/internal/arena.h"
 #include "loom/error/error_defs.h"
 #include "loom/target/provider.h"
@@ -704,35 +705,29 @@ static loomc_status_t loomc_emit_add_artifact(
   return status;
 }
 
-loomc_status_t loomc_emit_module(loomc_target_environment_t* target_environment,
-                                 loomc_workspace_t* workspace,
-                                 loomc_module_t* module,
-                                 const loomc_emit_options_t* options,
-                                 loomc_allocator_t allocator,
-                                 loomc_result_t** out_result) {
-  if (out_result == NULL) {
-    return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
-                             "out_result must not be NULL");
+void loomc_emit_operation_deinitialize(loomc_emit_operation_t* operation) {
+  if (operation == NULL) return;
+  loom_target_emit_artifact_release(&operation->target_artifact);
+  if (operation->scratch_arena_initialized) {
+    iree_arena_deinitialize(&operation->scratch_arena);
   }
-  *out_result = NULL;
-  if (target_environment == NULL || workspace == NULL || module == NULL) {
-    return loomc_make_status(
-        LOOMC_STATUS_INVALID_ARGUMENT,
-        "target_environment, workspace, and module must not be NULL");
-  }
-  loom_module_t* internal_module = loomc_module_loom_module(module);
-  if (internal_module == NULL) {
-    return loomc_make_status(LOOMC_STATUS_FAILED_PRECONDITION,
-                             "module does not contain internal IR");
-  }
+  *operation = (loomc_emit_operation_t){0};
+}
 
-  iree_allocator_t host_allocator = {0};
-  loomc_result_t* result = NULL;
-  loomc_status_t status =
-      loomc_result_create(LOOMC_RESULT_STATE_SUCCEEDED, allocator, &result);
-  if (loomc_status_is_ok(status)) {
-    host_allocator = iree_allocator_from_loomc(allocator);
-  }
+loomc_status_t loomc_emit_module_into_result(
+    loomc_target_environment_t* target_environment,
+    loomc_workspace_t* workspace, loomc_module_t* module,
+    const loomc_emit_options_t* options, loomc_result_t* result,
+    loomc_emit_operation_t* out_operation) {
+  IREE_ASSERT(loomc_result_succeeded(result));
+  *out_operation = (loomc_emit_operation_t){
+      .primary_artifact_ordinal = IREE_HOST_SIZE_MAX,
+  };
+  loom_module_t* internal_module = loomc_module_loom_module(module);
+
+  const loomc_allocator_t allocator = loomc_result_allocator(result);
+  const iree_allocator_t host_allocator = iree_allocator_from_loomc(allocator);
+  loomc_status_t status = loomc_ok_status();
 
   loomc_emit_resolved_options_t resolved_options = {0};
   if (loomc_status_is_ok(status)) {
@@ -748,13 +743,10 @@ loomc_status_t loomc_emit_module(loomc_target_environment_t* target_environment,
                                        allocator, &emitter);
   }
 
-  loom_target_emit_artifact_t target_artifact = {0};
   loomc_string_view_t manifest_identifier = loomc_string_view_empty();
   loomc_string_view_t compile_report_identifier = loomc_string_view_empty();
   loom_target_compile_report_t compile_report = {0};
   bool compile_report_initialized = false;
-  iree_arena_allocator_t scratch_arena;
-  bool scratch_arena_initialized = false;
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result) &&
       emitter != NULL) {
     if (emitter->emit == NULL) {
@@ -762,8 +754,8 @@ loomc_status_t loomc_emit_module(loomc_target_environment_t* target_environment,
                                  "target emitter has no emit function");
     } else {
       iree_arena_initialize(loomc_workspace_block_pool(workspace),
-                            &scratch_arena);
-      scratch_arena_initialized = true;
+                            &out_operation->scratch_arena);
+      out_operation->scratch_arena_initialized = true;
       const loomc_target_pass_environment_t* pass_environment =
           loomc_target_environment_pass_environment(target_environment);
       loomc_emit_diagnostic_capture_t capture = {
@@ -814,18 +806,19 @@ loomc_status_t loomc_emit_module(loomc_target_environment_t* target_environment,
                   .fn = loomc_emit_capture_diagnostic,
                   .user_data = &capture,
               },
-          .scratch_arena = &scratch_arena,
+          .scratch_arena = &out_operation->scratch_arena,
           .allocator = host_allocator,
       };
       if (loomc_status_is_ok(status)) {
-        iree_status_t emit_status = emitter->emit(&request, &target_artifact);
+        iree_status_t emit_status =
+            emitter->emit(&request, &out_operation->target_artifact);
         if (compile_report_initialized) {
           loom_target_compile_report_record_status(
               &compile_report, iree_status_code(emit_status));
-          if (target_artifact.contents != NULL) {
+          if (out_operation->target_artifact.contents != NULL) {
             loom_target_compile_report_record_artifact_size(
-                &compile_report,
-                iree_byte_sequence_length(target_artifact.contents));
+                &compile_report, iree_byte_sequence_length(
+                                     out_operation->target_artifact.contents));
           }
         }
         status = loomc_status_from_iree(emit_status);
@@ -843,8 +836,13 @@ loomc_status_t loomc_emit_module(loomc_target_environment_t* target_environment,
   }
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result) &&
       emitter != NULL) {
+    const loomc_host_size_t primary_artifact_ordinal =
+        loomc_result_artifact_count(result);
     status = loomc_emit_add_artifact(result, &resolved_options, emitter,
-                                     &target_artifact);
+                                     &out_operation->target_artifact);
+    if (loomc_status_is_ok(status)) {
+      out_operation->primary_artifact_ordinal = primary_artifact_ordinal;
+    }
   }
   if (loomc_status_is_ok(status) && compile_report_initialized) {
     status = loomc_emit_add_compile_report_artifact(
@@ -853,11 +851,38 @@ loomc_status_t loomc_emit_module(loomc_target_environment_t* target_environment,
 
   loomc_allocator_free(allocator, (void*)manifest_identifier.data);
   loomc_allocator_free(allocator, (void*)compile_report_identifier.data);
-  loom_target_emit_artifact_release(&target_artifact);
   loom_target_compile_report_deinitialize(&compile_report);
-  if (scratch_arena_initialized) {
-    iree_arena_deinitialize(&scratch_arena);
+  return status;
+}
+
+loomc_status_t loomc_emit_module(loomc_target_environment_t* target_environment,
+                                 loomc_workspace_t* workspace,
+                                 loomc_module_t* module,
+                                 const loomc_emit_options_t* options,
+                                 loomc_allocator_t allocator,
+                                 loomc_result_t** out_result) {
+  if (out_result == NULL) {
+    return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
+                             "out_result must not be NULL");
   }
+  *out_result = NULL;
+  if (target_environment == NULL || workspace == NULL || module == NULL) {
+    return loomc_make_status(
+        LOOMC_STATUS_INVALID_ARGUMENT,
+        "target_environment, workspace, and module must not be NULL");
+  }
+  if (loomc_module_loom_module(module) == NULL) {
+    return loomc_make_status(LOOMC_STATUS_FAILED_PRECONDITION,
+                             "module does not contain internal IR");
+  }
+
+  loomc_result_t* result = NULL;
+  LOOMC_RETURN_IF_ERROR(
+      loomc_result_create(LOOMC_RESULT_STATE_SUCCEEDED, allocator, &result));
+  loomc_emit_operation_t operation = {0};
+  loomc_status_t status = loomc_emit_module_into_result(
+      target_environment, workspace, module, options, result, &operation);
+  loomc_emit_operation_deinitialize(&operation);
   if (loomc_status_is_ok(status)) {
     *out_result = result;
     result = NULL;

@@ -10,6 +10,16 @@ func.def @call_identity(%x: f32) -> (f32) {
   func.return %r : f32
 }
 
+func.def @call_indirect(%target: func.ref<yieldable (i32) -> (i32)>, %value: i32) -> (i32) {
+  %result = func.call.indirect %target(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+func.def @widen_ref(%target: func.ref<(i32) -> (i32)>) -> (func.ref<yieldable (i32) -> (i32)>) {
+  %yieldable = func.ref.cast %target : func.ref<(i32) -> (i32)> to func.ref<yieldable (i32) -> (i32)>
+  func.return %yieldable : func.ref<yieldable (i32) -> (i32)>
+}
+
 // ====
 
 // Inline policy and temperature modifiers on function definitions and calls.
@@ -59,6 +69,15 @@ func.decl import("math_lib", "matmul_v2") @my_matmul(%a: f32) -> (f32)
 
 // Public re-exported import declaration.
 func.decl public import("upstream") @relu(%x: f32) -> (f32)
+
+// ====
+
+// Import and export declarations own independent typed metadata scopes.
+func.decl public import("upstream", "relu_v2") import_metadata({"runtime.optional" = true, "runtime.revision" = u64(2)}) export_metadata({"help.summary" = "Public ReLU", "wire.payload" = bytes("00feff")}) @relu_v2(%x: f32) -> (f32)
+
+func.def public export_metadata({"help.summary" = "Identity", "model.revision" = u64(7)}) @documented_identity(%x: f32) -> (f32) {
+  func.return %x : f32
+}
 
 // ====
 

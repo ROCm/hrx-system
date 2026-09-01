@@ -231,7 +231,8 @@ static iree_status_t loom_low_allocation_loop_edge_relocation_collect_candidate(
     return iree_ok_status();
   }
   const uint32_t required_alignment =
-      loom_low_allocation_live_range_interval_alignment(destination_interval);
+      loom_low_allocation_live_range_interval_alignment(
+          destination_interval, destination_capacity.reg_class_flags);
   if (required_alignment == 0 ||
       source_assignment->location_base % required_alignment != 0) {
     return iree_ok_status();
@@ -424,7 +425,8 @@ static bool loom_low_allocation_loop_edge_relocation_eviction_location_is_legal(
     return false;
   }
   const uint32_t required_alignment =
-      loom_low_allocation_live_range_interval_alignment(eviction->interval);
+      loom_low_allocation_live_range_interval_alignment(
+          eviction->interval, eviction->capacity.reg_class_flags);
   if (required_alignment == 0 ||
       assignment.location_base % required_alignment != 0) {
     return false;

@@ -53,6 +53,9 @@
 #ifndef LOOM_COMPILE_HAVE_LLVMIR_X86_TARGET_ENV
 #define LOOM_COMPILE_HAVE_LLVMIR_X86_TARGET_ENV 0
 #endif  // LOOM_COMPILE_HAVE_LLVMIR_X86_TARGET_ENV
+#ifndef LOOM_COMPILE_HAVE_VM
+#define LOOM_COMPILE_HAVE_VM 0
+#endif  // LOOM_COMPILE_HAVE_VM
 
 typedef struct loom_compile_diagnostic_sink_t {
   // Parsed module used for full type rendering.
@@ -124,6 +127,10 @@ static iree_status_t loom_compile_diagnostic_sink(
 #include "loom/target/emit/llvmir/x86/target_env.h"
 #endif  // LOOM_COMPILE_HAVE_LLVMIR_X86_TARGET_ENV
 #endif  // LOOM_COMPILE_HAVE_LLVMIR
+#if LOOM_COMPILE_HAVE_VM
+#include "loom/target/arch/vm/provider.h"
+#include "loom/target/emit/vm/artifact_emitter.h"
+#endif  // LOOM_COMPILE_HAVE_VM
 
 IREE_FLAG(string, backend, "command",
           "Compilation backend to emit, such as 'command' or a "
@@ -231,6 +238,19 @@ static const loom_run_execution_provider_t
 };
 #endif  // LOOM_COMPILE_HAVE_LLVMIR
 
+#if LOOM_COMPILE_HAVE_VM
+static const loom_run_execution_provider_t kLoomCompileVmProvider = {
+    .name = IREE_SVL("vm"),
+    .target_provider = &loom_vm_target_provider,
+};
+
+static const loom_run_execution_provider_t
+    kLoomCompileVmArtifactEmitterProvider = {
+        .name = IREE_SVL("vm-artifacts"),
+        .target_provider = &loom_vm_artifact_emitter_provider,
+};
+#endif  // LOOM_COMPILE_HAVE_VM
+
 static const loom_run_execution_provider_t* const kLoomCompileProviders[] = {
     &kLoomCompileCommandProvider,
 #if LOOM_COMPILE_HAVE_AMDGPU
@@ -244,6 +264,10 @@ static const loom_run_execution_provider_t* const kLoomCompileProviders[] = {
     &kLoomCompileLlvmirProvider,
     &kLoomCompileLlvmirArtifactEmitterProvider,
 #endif  // LOOM_COMPILE_HAVE_LLVMIR
+#if LOOM_COMPILE_HAVE_VM
+    &kLoomCompileVmProvider,
+    &kLoomCompileVmArtifactEmitterProvider,
+#endif  // LOOM_COMPILE_HAVE_VM
 };
 
 static const loom_run_execution_provider_set_t kLoomCompileProviderSet = {

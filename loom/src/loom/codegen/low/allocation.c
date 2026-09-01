@@ -151,7 +151,8 @@ iree_status_t loom_low_allocate_function(
   if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
     status = loom_low_allocation_target_constraints_resolve_fixed_values(
         &state.target_constraints, &state.liveness, value_domain,
-        options->fixed_values, options->fixed_value_count, arena);
+        &state.unit_liveness, options->fixed_values, options->fixed_value_count,
+        arena);
   }
   if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
     status = loom_low_allocation_storage_lease_state_initialize(
@@ -302,6 +303,7 @@ iree_status_t loom_low_allocate_function(
         .packet_move_groups = state.packet_move_plan.groups,
         .packet_move_group_count = state.packet_move_plan.group_count,
         .moves = state.move_plan.moves,
+        .move_count = state.move_plan.move_count,
         .scratch_move_indices = state.move_plan.scratch_move_indices,
         .packet_move_count = state.packet_move_plan.move_count,
         .storage_leases = options->storage_leases,

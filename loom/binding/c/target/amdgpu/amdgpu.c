@@ -8,6 +8,10 @@
 
 #include <string.h>
 
+#ifndef LOOMC_TARGET_HAVE_VM_LAUNCH_CONFIG
+#define LOOMC_TARGET_HAVE_VM_LAUNCH_CONFIG 0
+#endif  // LOOMC_TARGET_HAVE_VM_LAUNCH_CONFIG
+
 #include "iree/base/api.h"
 #include "loom/error/emitter.h"
 #include "loom/target/arch/amdgpu/amdhsa_target_id.h"
@@ -16,7 +20,13 @@
 #include "loom/target/arch/amdgpu/provider.h"
 #include "loom/target/arch/amdgpu/records/target_records.h"
 #include "loom/target/arch/amdgpu/target_info.h"
+#if LOOMC_TARGET_HAVE_VM_LAUNCH_CONFIG
+#include "loom/target/arch/vm/provider.h"
+#endif  // LOOMC_TARGET_HAVE_VM_LAUNCH_CONFIG
 #include "loom/target/emit/native/amdgpu/hal_kernel_library.h"
+#if LOOMC_TARGET_HAVE_VM_LAUNCH_CONFIG
+#include "loom/target/emit/vm/launch_config_compiler.h"
+#endif  // LOOMC_TARGET_HAVE_VM_LAUNCH_CONFIG
 #include "loomc/iree.h"
 #include "target.h"
 
@@ -282,8 +292,29 @@ static iree_status_t loomc_amdgpu_emit_module_artifact(
   IREE_RETURN_IF_ERROR(loomc_amdgpu_emit_resolve_runtime_globals(
       request->option_chain, &runtime_globals));
   iree_diagnostic_emitter_t diagnostic_emitter = request->diagnostic_emitter;
+  loom_target_emit_export_projection_t* export_projections = NULL;
+  const iree_host_size_t export_projection_capacity =
+      request->function_versions != NULL ? request->function_versions->count
+                                         : 0;
+  if (export_projection_capacity != 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        request->scratch_arena, export_projection_capacity,
+        sizeof(*export_projections), (void**)&export_projections));
+  }
+  loom_target_emit_export_projection_buffer_t export_projection = {
+      .values = export_projections,
+      .capacity = export_projection_capacity,
+  };
   const loom_amdgpu_hal_kernel_library_options_t library_options = {
+      .low_environment =
+          {
+              .descriptor_registry = request->low_descriptor_registry,
+              .verify_providers =
+                  loom_target_environment_low_verify_provider_list(
+                      request->target_environment),
+          },
       .function_versions = request->function_versions,
+      .export_projection = &export_projection,
       .runtime_globals = runtime_globals,
       .diagnostic_sink =
           {
@@ -312,6 +343,8 @@ static iree_status_t loomc_amdgpu_emit_module_artifact(
   if (iree_status_is_ok(status) && library.artifact_manifest.contents == NULL) {
     out_artifact->target_artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_ELF;
     out_artifact->contents = library.hsaco_data;
+    out_artifact->export_projections = export_projection.values;
+    out_artifact->export_projection_count = export_projection.count;
     library.hsaco_data = NULL;
   } else if (iree_status_is_ok(status)) {
     loomc_amdgpu_emit_artifact_storage_t* storage = NULL;
@@ -324,6 +357,8 @@ static iree_status_t loomc_amdgpu_emit_module_artifact(
       };
       out_artifact->target_artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_ELF;
       out_artifact->contents = library.hsaco_data;
+      out_artifact->export_projections = export_projection.values;
+      out_artifact->export_projection_count = export_projection.count;
       out_artifact->sidecars = &storage->artifact_manifest;
       out_artifact->sidecar_count = 1;
       out_artifact->storage = storage;
@@ -360,6 +395,10 @@ static const loom_target_provider_t loomc_amdgpu_emit_target_provider = {
 
 static const loom_target_provider_t* const kLoomcAmdgpuTargetProviders[] = {
     &loom_amdgpu_target_provider,
+#if LOOMC_TARGET_HAVE_VM_LAUNCH_CONFIG
+    &loom_vm_target_provider,
+    &loom_vm_launch_config_compiler_provider,
+#endif  // LOOMC_TARGET_HAVE_VM_LAUNCH_CONFIG
     &loomc_amdgpu_emit_target_provider,
 };
 

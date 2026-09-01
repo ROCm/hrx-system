@@ -1,0 +1,114 @@
+// RUN: emit vm-dis
+
+vm.target<core> @target
+
+metadata.module "model.summary" = "typed metadata"
+metadata.module "model.revision" = u64(18446744073709551615)
+metadata.module "model.payload" = bytes("00feff")
+metadata.module "model.empty_text" = ""
+metadata.module "model.ratio" = 1.5
+metadata.module "model.offset" = -7
+metadata.module "model.empty_bytes" = bytes("")
+metadata.module "model.enabled" = true
+
+func.decl import("runtime", "callback") import_metadata({"runtime.optional" = true, "runtime.revision" = u64(3)}) target(@target) @callback(%value: i32) -> (i32)
+
+func.def public target(@target) export_metadata({"help.summary" = "Identity", "wire.payload" = bytes("01fe")}) @identity(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+// ----
+vm.module "module" core=0.0 bytes=885
+requirements:
+sections:
+  [0] strings type=0x0002 flags=0x0000 bytes=[144, +290)
+  [1] signatures type=0x0004 flags=0x0000 bytes=[440, +28)
+  [2] callable_types type=0x0005 flags=0x0000 bytes=[472, +12)
+  [3] imports type=0x0006 flags=0x0000 bytes=[488, +20)
+  [4] exports type=0x0007 flags=0x0000 bytes=[512, +12)
+  [5] functions type=0x0008 flags=0x0000 bytes=[528, +60)
+  [6] presentation type=0x000C flags=0x0001 bytes=[592, +44)
+  [7] metadata type=0x000D flags=0x0001 bytes=[640, +245)
+resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
+module_metadata:
+  "model.empty_bytes" = bytes(0x)
+  "model.empty_text" = utf8("")
+  "model.enabled" = bool(true)
+  "model.offset" = i64(-7)
+  "model.payload" = bytes(0x00FEFF)
+  "model.ratio" = f64(bits=0x3FF8000000000000)
+  "model.revision" = u64(18446744073709551615)
+  "model.summary" = utf8("typed metadata")
+ref_types:
+callable_types:
+  [0] (i32) -> (i32)
+imports:
+  [0] @runtime::callback : (value: i32) -> (i32)
+    authored_type = "(i32) -> (i32)"
+    argument[0].authored_type = "i32"
+    result[0].authored_type = "i32"
+    metadata "runtime.optional" = bool(true)
+    metadata "runtime.revision" = u64(3)
+exports:
+  [0] @identity -> function[0] : (value: i32) -> (i32)
+    authored_type = "(i32) -> (i32)"
+    argument[0].authored_type = "i32"
+    result[0].authored_type = "i32"
+    metadata "help.summary" = utf8("Identity")
+    metadata "wire.payload" = bytes(0x01FE)
+functions:
+  [0] callable[0] signature[0] bytecode=[0, +8) registers=(1, 0, 0) locals=(0, 0, 0) switch_targets=0
+    type = (i32) -> (i32)
+    +0000  control.block
+    +0004  control.return
+
+// ====
+
+// RUN: emit vm-dis
+
+vm.target<core> @target
+
+func.decl import("runtime", "identity") import_metadata({"declaration.name" = "first"}) target(@target) @first(%value: i32) -> (i32)
+func.decl import("runtime", "identity") import_metadata({"declaration.name" = "second"}) target(@target) @second(%value: i32) -> (i32)
+
+func.def public target(@target) @call_both(%value: i32) -> (i32) {
+  %first_result = func.call @first(%value) : (i32) -> (i32)
+  %second_result = func.call @second(%first_result) : (i32) -> (i32)
+  func.return %second_result : i32
+}
+
+// ----
+vm.module "module" core=0.0 bytes=517
+requirements:
+sections:
+  [0] strings type=0x0002 flags=0x0000 bytes=[144, +98)
+  [1] signatures type=0x0004 flags=0x0000 bytes=[248, +28)
+  [2] callable_types type=0x0005 flags=0x0000 bytes=[280, +12)
+  [3] imports type=0x0006 flags=0x0000 bytes=[296, +20)
+  [4] exports type=0x0007 flags=0x0000 bytes=[320, +12)
+  [5] functions type=0x0008 flags=0x0000 bytes=[336, +76)
+  [6] presentation type=0x000C flags=0x0001 bytes=[416, +44)
+  [7] metadata type=0x000D flags=0x0001 bytes=[464, +53)
+resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
+module_metadata:
+ref_types:
+callable_types:
+  [0] (i32) -> (i32)
+imports:
+  [0] @runtime::identity : (value: i32) -> (i32)
+    authored_type = "(i32) -> (i32)"
+    argument[0].authored_type = "i32"
+    result[0].authored_type = "i32"
+    metadata "declaration.name" = utf8("first")
+exports:
+  [0] @call_both -> function[0] : (value: i32) -> (i32)
+    authored_type = "(i32) -> (i32)"
+    argument[0].authored_type = "i32"
+    result[0].authored_type = "i32"
+functions:
+  [0] callable[0] signature[0] bytecode=[0, +24) registers=(1, 0, 0) locals=(0, 0, 0) switch_targets=0 has_call
+    type = (i32) -> (i32)
+    +0000  control.block
+    +0004  control.call target_kind_u8=1 target_ordinal_u16=0 direct_ref_move_mask_u16=0
+    +0012  control.call target_kind_u8=1 target_ordinal_u16=0 direct_ref_move_mask_u16=0
+    +0020  control.return

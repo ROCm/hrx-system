@@ -573,29 +573,31 @@ IREE_API_EXPORT const char* iree_status_code_string(iree_status_code_t code);
 //
 // The status will be allocated using the default system allocator and must be
 // freed using either iree_status_free or iree_status_ignore.
-IREE_API_EXPORT IREE_MUST_USE_RESULT iree_status_t
-iree_status_allocate(iree_status_code_t code, const char* file, uint32_t line,
-                     iree_string_view_t message);
+IREE_API_EXPORT IREE_MUST_USE_RESULT iree_status_t iree_status_allocate(
+    iree_status_code_t code, const char* file, uint32_t line,
+    iree_string_view_t message) IREE_ATTRIBUTE_COLD IREE_ATTRIBUTE_NOINLINE;
 
 // Allocates a new status instance for a failing error |code| and annotates it
 // with a printf-style format string. Roughly equivalent (though more efficient)
 // than iree_status_allocate + iree_status_annotate_f.
 IREE_API_EXPORT IREE_MUST_USE_RESULT iree_status_t IREE_PRINTF_ATTRIBUTE(4, 5)
     iree_status_allocate_f(iree_status_code_t code, const char* file,
-                           uint32_t line, const char* format, ...);
+                           uint32_t line, const char* format,
+                           ...) IREE_ATTRIBUTE_COLD IREE_ATTRIBUTE_NOINLINE;
 
-IREE_API_EXPORT IREE_MUST_USE_RESULT iree_status_t
-iree_status_allocate_vf(iree_status_code_t code, const char* file,
-                        uint32_t line, const char* format, va_list varargs);
+IREE_API_EXPORT IREE_MUST_USE_RESULT iree_status_t iree_status_allocate_vf(
+    iree_status_code_t code, const char* file, uint32_t line,
+    const char* format,
+    va_list varargs) IREE_ATTRIBUTE_COLD IREE_ATTRIBUTE_NOINLINE;
 
 // Like iree_status_allocate but copies both |file| and |message| into the
 // status storage, making the status self-contained. Normal status allocation
 // stores |file| as a borrowed pointer (expected to be a __FILE__ string literal
 // with static lifetime); this variant is for cases where that assumption does
 // not hold, such as deserializing a status from a wire format.
-IREE_API_EXPORT IREE_MUST_USE_RESULT iree_status_t
-iree_status_allocate_copy(iree_status_code_t code, iree_string_view_t file,
-                          uint32_t line, iree_string_view_t message);
+IREE_API_EXPORT IREE_MUST_USE_RESULT iree_status_t iree_status_allocate_copy(
+    iree_status_code_t code, iree_string_view_t file, uint32_t line,
+    iree_string_view_t message) IREE_ATTRIBUTE_COLD IREE_ATTRIBUTE_NOINLINE;
 
 // Clones |status| into a new status instance.
 // No payloads, if present, will be cloned.

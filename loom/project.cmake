@@ -64,6 +64,9 @@ option(LOOM_TARGET_ARCH_LLVMIR
 option(LOOM_TARGET_ARCH_SPIRV
   "Enables the SPIR-V Loom target architecture slice."
   OFF)
+option(LOOM_TARGET_ARCH_VM
+  "Enables the VM Loom target architecture slice."
+  ON)
 option(LOOM_TARGET_ARCH_WASM
   "Enables the WebAssembly Loom target architecture slice."
   OFF)
@@ -74,6 +77,7 @@ mark_as_advanced(
   LOOM_TARGET_ARCH_AMDGPU
   LOOM_TARGET_ARCH_LLVMIR
   LOOM_TARGET_ARCH_SPIRV
+  LOOM_TARGET_ARCH_VM
   LOOM_TARGET_ARCH_WASM
   LOOM_TARGET_ARCH_X86
 )

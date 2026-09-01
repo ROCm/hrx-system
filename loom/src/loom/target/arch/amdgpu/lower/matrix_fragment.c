@@ -118,7 +118,7 @@ bool loom_amdgpu_matrix_fragment_payload_matches_role_storage(
 static bool loom_amdgpu_fragment_memory_scalar_type_from_numeric(
     loom_amdgpu_matrix_numeric_type_t numeric_type,
     loom_scalar_type_t* out_element_type) {
-  *out_element_type = LOOM_SCALAR_TYPE_COUNT_;
+  *out_element_type = LOOM_SCALAR_TYPE_NONE;
   switch (numeric_type) {
     case LOOM_AMDGPU_MATRIX_NUMERIC_F64:
       *out_element_type = LOOM_SCALAR_TYPE_F64;
@@ -180,7 +180,7 @@ bool loom_amdgpu_matrix_fragment_descriptor_role_storage(
     loom_contract_operand_role_t role,
     loom_amdgpu_matrix_fragment_role_storage_t* out_storage) {
   *out_storage = (loom_amdgpu_matrix_fragment_role_storage_t){0};
-  out_storage->element_type = LOOM_SCALAR_TYPE_COUNT_;
+  out_storage->element_type = LOOM_SCALAR_TYPE_NONE;
   return loom_amdgpu_fragment_memory_descriptor_payload(
              descriptor, role, &out_storage->payload) &&
          loom_amdgpu_fragment_memory_scalar_type_from_numeric(

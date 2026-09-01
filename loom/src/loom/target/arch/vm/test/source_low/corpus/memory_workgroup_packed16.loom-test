@@ -1,0 +1,381 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/memory_workgroup_packed16.loom-test
+// RUN: emit source-low output=low
+
+vm.target<core> @target
+kernel.def target(@target) @lds_f16x4_b64_roundtrip() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %buffer_base = index.constant 0 : offset
+  %bytes = index.constant 512 : offset
+  %scratch = buffer.alloca<workgroup> align(8) %bytes : buffer
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x4xf16>
+  %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<64x4xf16>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x4xf16>
+  %loaded = vector.load %input_view[%lane, 0] : view<64x4xf16> -> vector<4xf16>
+  vector.store %loaded, %scratch_view[%lane, 0] : vector<4xf16>, view<64x4xf16>
+  %roundtrip = vector.load %scratch_view[%lane, 0] : view<64x4xf16> -> vector<4xf16>
+  vector.store %roundtrip, %output_view[%lane, 0] : vector<4xf16>, view<64x4xf16>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @lds_f16x4_b64_roundtrip(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %bytes = constant.s16 512 : reg<vm.value : offset>
+  %scratch = buffer.allocate %bytes, 3 : reg<vm.ref : buffer>
+  %50 = constant.zero : reg<vm.value : offset>
+  %loaded = buffer.load %input, %50, %workitem_id_x, 8, i16.x4 : reg<vm.value x4 : vector<4xf16>>
+  buffer.store %scratch, %50, %workitem_id_x, %loaded, 8, i16.x4
+  %roundtrip = buffer.load %scratch, %50, %workitem_id_x, 8, i16.x4 : reg<vm.value x4 : vector<4xf16>>
+  buffer.store %output, %50, %workitem_id_x, %roundtrip, 8, i16.x4
+  return
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @lds_f16x8_b128_roundtrip() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %buffer_base = index.constant 0 : offset
+  %bytes = index.constant 1024 : offset
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x8xf16>
+  %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<64x8xf16>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x8xf16>
+  %loaded = vector.load %input_view[%lane, 0] : view<64x8xf16> -> vector<8xf16>
+  vector.store %loaded, %scratch_view[%lane, 0] : vector<8xf16>, view<64x8xf16>
+  %roundtrip = vector.load %scratch_view[%lane, 0] : view<64x8xf16> -> vector<8xf16>
+  vector.store %roundtrip, %output_view[%lane, 0] : vector<8xf16>, view<64x8xf16>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @lds_f16x8_b128_roundtrip(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %bytes = constant.s16 1024 : reg<vm.value : offset>
+  %scratch = buffer.allocate %bytes, 4 : reg<vm.ref : buffer>
+  %50 = constant.zero : reg<vm.value : offset>
+  %loaded = buffer.load %input, %50, %workitem_id_x, 16, i16.x8 : reg<vm.value x8 : vector<8xf16>>
+  buffer.store %scratch, %50, %workitem_id_x, %loaded, 16, i16.x8
+  %roundtrip = buffer.load %scratch, %50, %workitem_id_x, 16, i16.x8 : reg<vm.value x8 : vector<8xf16>>
+  buffer.store %output, %50, %workitem_id_x, %roundtrip, 16, i16.x8
+  return
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @lds_f16x8_b128_extract_scalar_stores() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %bytes = index.constant 16 : offset
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %input_view = buffer.view %input[%base] : buffer -> view<8xf16>
+  %scratch_view = buffer.view %scratch[%base] : buffer -> view<8xf16>
+  %output_view = buffer.view %output[%base] : buffer -> view<8xf16>
+  %loaded = vector.load %input_view[0] : view<8xf16> -> vector<8xf16>
+  %lane0 = vector.extract %loaded[0] : vector<8xf16> -> f16
+  view.store %lane0, %scratch_view[0] : f16, view<8xf16>
+  %lane1 = vector.extract %loaded[1] : vector<8xf16> -> f16
+  view.store %lane1, %scratch_view[1] : f16, view<8xf16>
+  %lane2 = vector.extract %loaded[2] : vector<8xf16> -> f16
+  view.store %lane2, %scratch_view[2] : f16, view<8xf16>
+  %lane3 = vector.extract %loaded[3] : vector<8xf16> -> f16
+  view.store %lane3, %scratch_view[3] : f16, view<8xf16>
+  %lane4 = vector.extract %loaded[4] : vector<8xf16> -> f16
+  view.store %lane4, %scratch_view[4] : f16, view<8xf16>
+  %lane5 = vector.extract %loaded[5] : vector<8xf16> -> f16
+  view.store %lane5, %scratch_view[5] : f16, view<8xf16>
+  %lane6 = vector.extract %loaded[6] : vector<8xf16> -> f16
+  view.store %lane6, %scratch_view[6] : f16, view<8xf16>
+  %lane7 = vector.extract %loaded[7] : vector<8xf16> -> f16
+  view.store %lane7, %scratch_view[7] : f16, view<8xf16>
+  %roundtrip = vector.load %scratch_view[0] : view<8xf16> -> vector<8xf16>
+  vector.store %roundtrip, %output_view[0] : vector<8xf16>, view<8xf16>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_f16x8_b128_extract_scalar_stores(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %bytes = constant.s16 16 : reg<vm.value : offset>
+  %scratch = buffer.allocate %bytes, 4 : reg<vm.ref : buffer>
+  %35 = constant.zero : reg<vm.value : offset>
+  %loaded = buffer.load %input, %35, %35, 0, i16.x8 : reg<vm.value x8 : vector<8xf16>>
+  %lane0 = slice %loaded[0] : reg<vm.value x8 : vector<8xf16>> -> reg<vm.value : f16>
+  buffer.store %scratch, %35, %35, %lane0, 0, i16.x1
+  %lane1 = slice %loaded[1] : reg<vm.value x8 : vector<8xf16>> -> reg<vm.value : f16>
+  %41 = constant.s16 2 : reg<vm.value : offset>
+  buffer.store %scratch, %41, %35, %lane1, 0, i16.x1
+  %lane2 = slice %loaded[2] : reg<vm.value x8 : vector<8xf16>> -> reg<vm.value : f16>
+  %44 = constant.s16 4 : reg<vm.value : offset>
+  buffer.store %scratch, %44, %35, %lane2, 0, i16.x1
+  %lane3 = slice %loaded[3] : reg<vm.value x8 : vector<8xf16>> -> reg<vm.value : f16>
+  %47 = constant.s16 6 : reg<vm.value : offset>
+  buffer.store %scratch, %47, %35, %lane3, 0, i16.x1
+  %lane4 = slice %loaded[4] : reg<vm.value x8 : vector<8xf16>> -> reg<vm.value : f16>
+  %50 = constant.s16 8 : reg<vm.value : offset>
+  buffer.store %scratch, %50, %35, %lane4, 0, i16.x1
+  %lane5 = slice %loaded[5] : reg<vm.value x8 : vector<8xf16>> -> reg<vm.value : f16>
+  %53 = constant.s16 10 : reg<vm.value : offset>
+  buffer.store %scratch, %53, %35, %lane5, 0, i16.x1
+  %lane6 = slice %loaded[6] : reg<vm.value x8 : vector<8xf16>> -> reg<vm.value : f16>
+  %56 = constant.s16 12 : reg<vm.value : offset>
+  buffer.store %scratch, %56, %35, %lane6, 0, i16.x1
+  %lane7 = slice %loaded[7] : reg<vm.value x8 : vector<8xf16>> -> reg<vm.value : f16>
+  %59 = constant.s16 14 : reg<vm.value : offset>
+  buffer.store %scratch, %59, %35, %lane7, 0, i16.x1
+  %roundtrip = buffer.load %scratch, %35, %35, 0, i16.x8 : reg<vm.value x8 : vector<8xf16>>
+  buffer.store %output, %35, %35, %roundtrip, 0, i16.x8
+  return
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @lds_bf16x4_b64_roundtrip() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %buffer_base = index.constant 0 : offset
+  %bytes = index.constant 512 : offset
+  %scratch = buffer.alloca<workgroup> align(8) %bytes : buffer
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x4xbf16>
+  %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<64x4xbf16>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x4xbf16>
+  %loaded = vector.load %input_view[%lane, 0] : view<64x4xbf16> -> vector<4xbf16>
+  vector.store %loaded, %scratch_view[%lane, 0] : vector<4xbf16>, view<64x4xbf16>
+  %roundtrip = vector.load %scratch_view[%lane, 0] : view<64x4xbf16> -> vector<4xbf16>
+  vector.store %roundtrip, %output_view[%lane, 0] : vector<4xbf16>, view<64x4xbf16>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @lds_bf16x4_b64_roundtrip(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %bytes = constant.s16 512 : reg<vm.value : offset>
+  %scratch = buffer.allocate %bytes, 3 : reg<vm.ref : buffer>
+  %50 = constant.zero : reg<vm.value : offset>
+  %loaded = buffer.load %input, %50, %workitem_id_x, 8, i16.x4 : reg<vm.value x4 : vector<4xbf16>>
+  buffer.store %scratch, %50, %workitem_id_x, %loaded, 8, i16.x4
+  %roundtrip = buffer.load %scratch, %50, %workitem_id_x, 8, i16.x4 : reg<vm.value x4 : vector<4xbf16>>
+  buffer.store %output, %50, %workitem_id_x, %roundtrip, 8, i16.x4
+  return
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @lds_bf16x8_b128_roundtrip() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %buffer_base = index.constant 0 : offset
+  %bytes = index.constant 1024 : offset
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x8xbf16>
+  %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<64x8xbf16>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x8xbf16>
+  %loaded = vector.load %input_view[%lane, 0] : view<64x8xbf16> -> vector<8xbf16>
+  vector.store %loaded, %scratch_view[%lane, 0] : vector<8xbf16>, view<64x8xbf16>
+  %roundtrip = vector.load %scratch_view[%lane, 0] : view<64x8xbf16> -> vector<8xbf16>
+  vector.store %roundtrip, %output_view[%lane, 0] : vector<8xbf16>, view<64x8xbf16>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @lds_bf16x8_b128_roundtrip(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %bytes = constant.s16 1024 : reg<vm.value : offset>
+  %scratch = buffer.allocate %bytes, 4 : reg<vm.ref : buffer>
+  %50 = constant.zero : reg<vm.value : offset>
+  %loaded = buffer.load %input, %50, %workitem_id_x, 16, i16.x8 : reg<vm.value x8 : vector<8xbf16>>
+  buffer.store %scratch, %50, %workitem_id_x, %loaded, 16, i16.x8
+  %roundtrip = buffer.load %scratch, %50, %workitem_id_x, 16, i16.x8 : reg<vm.value x8 : vector<8xbf16>>
+  buffer.store %output, %50, %workitem_id_x, %roundtrip, 16, i16.x8
+  return
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @lds_f16_scalar_roundtrip() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %bytes = index.constant 128 : offset
+  %scratch = buffer.alloca<workgroup> align(2) %bytes : buffer
+  %input_view = buffer.view %input[%base] : buffer -> view<64xf16>
+  %scratch_view = buffer.view %scratch[%base] : buffer -> view<64xf16>
+  %output_view = buffer.view %output[%base] : buffer -> view<64xf16>
+  %loaded = view.load %input_view[%lane] : view<64xf16> -> f16
+  view.store %loaded, %scratch_view[%lane] : f16, view<64xf16>
+  %roundtrip = view.load %scratch_view[%lane] : view<64xf16> -> f16
+  view.store %roundtrip, %output_view[%lane] : f16, view<64xf16>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @lds_f16_scalar_roundtrip(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %bytes = constant.s16 128 : reg<vm.value : offset>
+  %scratch = buffer.allocate %bytes, 1 : reg<vm.ref : buffer>
+  %29 = constant.zero : reg<vm.value : offset>
+  %loaded = buffer.load %input, %29, %workitem_id_x, 2, i16.x1 : reg<vm.value : f16>
+  buffer.store %scratch, %29, %workitem_id_x, %loaded, 2, i16.x1
+  %roundtrip = buffer.load %scratch, %29, %workitem_id_x, 2, i16.x1 : reg<vm.value : f16>
+  buffer.store %output, %29, %workitem_id_x, %roundtrip, 2, i16.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @lds_i8x2_b16_roundtrip() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %bytes = index.constant 2 : offset
+  %scratch = buffer.alloca<workgroup> align(2) %bytes : buffer
+  %input_view = buffer.view %input[%base] : buffer -> view<2xi8>
+  %scratch_view = buffer.view %scratch[%base] : buffer -> view<2xi8>
+  %output_view = buffer.view %output[%base] : buffer -> view<2xi8>
+  %loaded = vector.load %input_view[0] : view<2xi8> -> vector<2xi8>
+  vector.store %loaded, %scratch_view[0] : vector<2xi8>, view<2xi8>
+  %roundtrip = vector.load %scratch_view[0] : view<2xi8> -> vector<2xi8>
+  vector.store %roundtrip, %output_view[0] : vector<2xi8>, view<2xi8>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_i8x2_b16_roundtrip(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %bytes = constant.s16 2 : reg<vm.value : offset>
+  %scratch = buffer.allocate %bytes, 1 : reg<vm.ref : buffer>
+  %27 = constant.zero : reg<vm.value : offset>
+  %loaded = buffer.load %input, %27, %27, 0, i8.x2 : reg<vm.value x2 : vector<2xi8>>
+  buffer.store %scratch, %27, %27, %loaded, 0, i8.x2
+  %roundtrip = buffer.load %scratch, %27, %27, 0, i8.x2 : reg<vm.value x2 : vector<2xi8>>
+  buffer.store %output, %27, %27, %roundtrip, 0, i8.x2
+  return
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @lds_i16_scalar_roundtrip() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %bytes = index.constant 2 : offset
+  %scratch = buffer.alloca<workgroup> align(2) %bytes : buffer
+  %input_view = buffer.view %input[%base] : buffer -> view<1xi16>
+  %scratch_view = buffer.view %scratch[%base] : buffer -> view<1xi16>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi16>
+  %loaded = view.load %input_view[0] : view<1xi16> -> i16
+  view.store %loaded, %scratch_view[0] : i16, view<1xi16>
+  %roundtrip = view.load %scratch_view[0] : view<1xi16> -> i16
+  view.store %roundtrip, %output_view[0] : i16, view<1xi16>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_i16_scalar_roundtrip(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %bytes = constant.s16 2 : reg<vm.value : offset>
+  %scratch = buffer.allocate %bytes, 1 : reg<vm.ref : buffer>
+  %27 = constant.zero : reg<vm.value : offset>
+  %loaded = buffer.load %input, %27, %27, 0, i16.x1 : reg<vm.value : i16>
+  buffer.store %scratch, %27, %27, %loaded, 0, i16.x1
+  %roundtrip = buffer.load %scratch, %27, %27, 0, i16.x1 : reg<vm.value : i16>
+  buffer.store %output, %27, %27, %roundtrip, 0, i16.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @lds_bf16_scalar_roundtrip() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %bytes = index.constant 128 : offset
+  %scratch = buffer.alloca<workgroup> align(2) %bytes : buffer
+  %input_view = buffer.view %input[%base] : buffer -> view<64xbf16>
+  %scratch_view = buffer.view %scratch[%base] : buffer -> view<64xbf16>
+  %output_view = buffer.view %output[%base] : buffer -> view<64xbf16>
+  %loaded = view.load %input_view[%lane] : view<64xbf16> -> bf16
+  view.store %loaded, %scratch_view[%lane] : bf16, view<64xbf16>
+  %roundtrip = view.load %scratch_view[%lane] : view<64xbf16> -> bf16
+  view.store %roundtrip, %output_view[%lane] : bf16, view<64xbf16>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @lds_bf16_scalar_roundtrip(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %bytes = constant.s16 128 : reg<vm.value : offset>
+  %scratch = buffer.allocate %bytes, 1 : reg<vm.ref : buffer>
+  %29 = constant.zero : reg<vm.value : offset>
+  %loaded = buffer.load %input, %29, %workitem_id_x, 2, i16.x1 : reg<vm.value : bf16>
+  buffer.store %scratch, %29, %workitem_id_x, %loaded, 2, i16.x1
+  %roundtrip = buffer.load %scratch, %29, %workitem_id_x, 2, i16.x1 : reg<vm.value : bf16>
+  buffer.store %output, %29, %workitem_id_x, %roundtrip, 2, i16.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @lds_f16_strided_scalar_roundtrip() {
+  %unit = index.constant 1 : index
+  %tile = index.constant 16 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%tile, %tile, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %row = kernel.workitem.id<x> : index
+  %column = kernel.workitem.id<y> : index
+  %base = index.constant 0 : offset
+  %bytes = index.constant 512 : offset
+  %rhs_layout = encoding.layout.strided [1, 16] : encoding<layout>
+  %scratch = buffer.alloca<workgroup> align(2) %bytes : buffer
+  %input_view = buffer.view %input[%base] : buffer -> view<16x16xf16>
+  %scratch_view = buffer.view %scratch[%base] : buffer -> view<16x16xf16, %rhs_layout>
+  %output_view = buffer.view %output[%base] : buffer -> view<16x16xf16>
+  %loaded = view.load %input_view[%row, %column] : view<16x16xf16> -> f16
+  view.store %loaded, %scratch_view[%row, %column] : f16, view<16x16xf16, %rhs_layout>
+  %roundtrip = view.load %scratch_view[%row, %column] : view<16x16xf16, %rhs_layout> -> f16
+  view.store %roundtrip, %output_view[%row, %column] : f16, view<16x16xf16>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(16, 16, 1) workgroup_count(1, 1, 1) @lds_f16_strided_scalar_roundtrip(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %bytes = constant.s16 512 : reg<vm.value : offset>
+  %scratch = buffer.allocate %bytes, 1 : reg<vm.ref : buffer>
+  %38 = constant.s16 5 : reg<vm.value : offset>
+  %39 = integer.shift.left.i64 %workitem_id_x, %38 : reg<vm.value : offset>
+  %40 = constant.s16 1 : reg<vm.value : offset>
+  %41 = integer.shift.left.i64 %workitem_id_y, %40 : reg<vm.value : offset>
+  %42 = integer.add.i64 %39, %41 : reg<vm.value : offset>
+  %43 = constant.zero : reg<vm.value : offset>
+  %loaded = buffer.load %input, %42, %43, 0, i16.x1 : reg<vm.value : f16>
+  %46 = integer.shift.left.i64 %workitem_id_x, %40 : reg<vm.value : offset>
+  %48 = integer.shift.left.i64 %workitem_id_y, %38 : reg<vm.value : offset>
+  %49 = integer.add.i64 %46, %48 : reg<vm.value : offset>
+  buffer.store %scratch, %49, %43, %loaded, 0, i16.x1
+  %roundtrip = buffer.load %scratch, %49, %43, 0, i16.x1 : reg<vm.value : f16>
+  buffer.store %output, %42, %43, %roundtrip, 0, i16.x1
+  return
+}

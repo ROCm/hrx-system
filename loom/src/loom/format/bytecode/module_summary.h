@@ -45,6 +45,22 @@ typedef struct loom_bytecode_module_metadata_summary_t {
   uint64_t template_demand_count;
 } loom_bytecode_module_metadata_summary_t;
 
+// Allocation summary decoded from the MODULE_OPS section prefix.
+typedef struct loom_bytecode_module_ops_summary_t {
+  // SSA values defined by root module operations and nested regions.
+  uint32_t value_count;
+  // Regions nested under root module operations.
+  uint32_t region_count;
+  // Blocks nested under root module operations.
+  uint32_t block_count;
+  // Root and nested operations in the section.
+  uint32_t op_count;
+  // Root non-symbol operations owned directly by the module body.
+  uint32_t root_op_count;
+  // Byte offset of the first root operation after the five bounded varints.
+  uint8_t payload_offset;
+} loom_bytecode_module_ops_summary_t;
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

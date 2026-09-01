@@ -28,6 +28,7 @@ class LowBuilder(DialectBuilder):
         abi_layout: Mapping[str, Any] | None = ...,
         export_symbol: str | None = ...,
         export_attrs: Mapping[str, Any] | None = ...,
+        export_metadata: Mapping[str, Any] | None = ...,
         callee: str,
         args: list[ValueRef] = ...,
         results: list[Type | TiedResultSpec],
@@ -73,6 +74,10 @@ class LowBuilder(DialectBuilder):
         purity: str | None = ...,
         allocation: str | None = ...,
         schedule: str | None = ...,
+        import_policy: str | None = ...,
+        import_module: str | None = ...,
+        import_symbol: str | None = ...,
+        import_metadata: Mapping[str, Any] | None = ...,
         import_kind: str | None = ...,
         code_symbol: str | None = ...,
         descriptor_set: str,
@@ -82,6 +87,7 @@ class LowBuilder(DialectBuilder):
         abi_layout: Mapping[str, Any] | None = ...,
         export_symbol: str | None = ...,
         export_attrs: Mapping[str, Any] | None = ...,
+        export_metadata: Mapping[str, Any] | None = ...,
         callee: str,
         args: list[ValueRef] = ...,
         results: list[Type | TiedResultSpec],
@@ -109,6 +115,66 @@ class LowBuilder(DialectBuilder):
         result_names: Sequence[str] | None = ...,
         location_id: int | None = ...,
     ) -> list[ValueRef]: ...
+    def func_call_indirect(
+        self,
+        *,
+        target: ValueRef,
+        operands: list[ValueRef] = ...,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> list[ValueRef]: ...
+    def func_null(
+        self,
+        *,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...
+    def func_compare_null(
+        self,
+        *,
+        function: ValueRef,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...
+    def func_address(
+        self,
+        *,
+        callee: str,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...
+    def func_ref_cast(
+        self,
+        *,
+        source: ValueRef,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...
+    def func_import_resolved(
+        self,
+        *,
+        callee: str,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...
     def op(
         self,
         *,
@@ -244,6 +310,7 @@ class LowBuilder(DialectBuilder):
     def br(
         self,
         *,
+        descriptor: str | None = ...,
         dest: Block,
         args: list[ValueRef] = ...,
         location_id: int | None = ...,
@@ -351,3 +418,12 @@ class LowBuilder(DialectBuilder):
         result_names: Sequence[str] | None = ...,
         location_id: int | None = ...,
     ) -> list[ValueRef]: ...
+    def switch(
+        self,
+        *,
+        descriptor: str,
+        selector: ValueRef,
+        target_dests: list[Block] = ...,
+        default_dest: Block,
+        location_id: int | None = ...,
+    ) -> None: ...

@@ -7,7 +7,8 @@
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
     "loom_cc_library",
-    "loom_target_contract_table_cc_libraries",
+    "loom_target_contract_cc_libraries",
+    "loom_target_contract_file_family",
 )
 
 package(
@@ -16,11 +17,16 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
-loom_target_contract_table_cc_libraries(
-    name = "logical_core",
-    args = ["--contract-fragment=spirv.logical.core"],
-    contract_deps = ["//loom/src/loom/target:contract"],
+loom_target_contract_file_family(
+    name = "contract_tables_gen",
+    contract_sets = {"spirv": ["logical_core"]},
+    fragments = {"logical_core": "spirv.logical.core"},
     generator = "//loom/py/loom/gen/target/contracts:spirv_contract_table_family",
+)
+
+loom_target_contract_cc_libraries(
+    name = "logical_core",
+    contract_deps = ["//loom/src/loom/target:contract"],
     lower_rule_deps = [
         "//loom/src/loom/codegen/low/lower",
         "//loom/src/loom/ops/buffer",
@@ -35,13 +41,26 @@ loom_target_contract_table_cc_libraries(
 )
 
 loom_cc_library(
+    name = "sets",
+    srcs = ["sets.c"],
+    hdrs = ["sets.h"],
+    deps = [
+        ":logical_core",
+        ":logical_core_lower_rules",
+        "//loom/src/loom/codegen/low/lower",
+    ],
+)
+
+loom_cc_library(
     name = "contracts",
     hdrs = [
         "logical_core.h",
         "logical_core_lower_rules.h",
+        "sets.h",
     ],
     deps = [
         ":logical_core",
         ":logical_core_lower_rules",
+        ":sets",
     ],
 )

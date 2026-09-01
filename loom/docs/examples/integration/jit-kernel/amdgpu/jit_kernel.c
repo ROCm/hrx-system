@@ -10,6 +10,8 @@
 
 #include "loomc/loomc.h"
 #include "loomc/target/amdgpu.h"
+#include "loomc/target/kernel.h"
+#include "loomc/target/vm.h"
 
 static const char kKernelExportName[] = "workload_grid";
 static const uint64_t kElementCount = 1009;
@@ -24,11 +26,11 @@ typedef struct jit_kernel_state_t {
   // Per-worker scratch reused across compiler operations.
   loomc_workspace_t* workspace;
 
-  // Immutable input source.
+  // Immutable ordinary Loom bytecode source.
   loomc_source_t* source;
 
-  // Mutable module deserialized for this invocation.
-  loomc_module_t* module;
+  // Immutable request naming one host-launchable kernel root.
+  loomc_request_t* request;
 
   // Reusable target profile selected for this example.
   loomc_target_profile_t* target_profile;
@@ -39,8 +41,17 @@ typedef struct jit_kernel_state_t {
   // Reusable prepared target pipeline.
   loomc_pass_program_t* pass_program;
 
+  // Immutable coupled executable and launch-configuration product.
+  loomc_product_t* product;
+
+  // Product projection for the requested kernel root.
+  loomc_kernel_product_root_t root;
+
   // Loaded host companion for repeated launch evaluation.
-  loomc_launch_config_program_t* launch_program;
+  loomc_vm_launch_config_program_t* launch_program;
+
+  // Program-local launch function bound by product ordinal.
+  loomc_vm_launch_config_function_t launch_function;
 
   // Last compiler operation result.
   loomc_result_t* result;
@@ -78,21 +89,9 @@ static loomc_status_t require_successful_result(const loomc_result_t* result,
   return loomc_make_status(LOOMC_STATUS_FAILED_PRECONDITION, failure_message);
 }
 
-static const loomc_artifact_t* find_result_artifact(
-    const loomc_result_t* result, loomc_artifact_kind_t kind,
-    loomc_string_view_t format) {
-  for (loomc_host_size_t i = 0; i < loomc_result_artifact_count(result); ++i) {
-    const loomc_artifact_t* artifact = loomc_result_artifact_at(result, i);
-    if (artifact != NULL && artifact->kind == kind &&
-        loomc_string_view_equal(artifact->format, format)) {
-      return artifact;
-    }
-  }
-  return NULL;
-}
-
 static void jit_kernel_state_initialize(jit_kernel_state_t* state) {
   memset(state, 0, sizeof(*state));
+  state->launch_function = loomc_vm_launch_config_function_invalid();
 }
 
 static void jit_kernel_state_reset_result(jit_kernel_state_t* state) {
@@ -102,11 +101,12 @@ static void jit_kernel_state_reset_result(jit_kernel_state_t* state) {
 
 static void jit_kernel_state_deinitialize(jit_kernel_state_t* state) {
   loomc_result_release(state->result);
-  loomc_launch_config_program_release(state->launch_program);
+  loomc_vm_launch_config_program_release(state->launch_program);
+  loomc_product_release(state->product);
   loomc_pass_program_release(state->pass_program);
   loomc_compiler_release(state->compiler);
   loomc_target_profile_release(state->target_profile);
-  loomc_module_release(state->module);
+  loomc_request_release(state->request);
   loomc_source_release(state->source);
   loomc_workspace_release(state->workspace);
   loomc_context_release(state->context);
@@ -146,7 +146,7 @@ static loomc_status_t prepare_compiler(jit_kernel_state_t* state,
   loomc_source_load_options_t source_options = {
       .type = LOOMC_STRUCTURE_TYPE_SOURCE_LOAD_OPTIONS,
       .structure_size = sizeof(source_options),
-      .format = LOOMC_SOURCE_FORMAT_TEXT,
+      .format = LOOMC_SOURCE_FORMAT_BYTECODE,
   };
   if (loomc_status_is_ok(status)) {
     status = loomc_source_create_from_path(
@@ -199,22 +199,65 @@ static loomc_status_t prepare_compiler(jit_kernel_state_t* state,
 }
 // --8<-- [end:prepare]
 
-static loomc_status_t deserialize_source(jit_kernel_state_t* state) {
-  loomc_status_t status = loomc_module_deserialize_from_source(
-      state->context, state->workspace, state->source, NULL,
-      loomc_allocator_system(), &state->module, &state->result);
+// --8<-- [start:request]
+static loomc_status_t prepare_kernel_request(jit_kernel_state_t* state) {
+  loomc_link_index_builder_t* index_builder = NULL;
+  loomc_link_index_t* link_index = NULL;
+  loomc_status_t status = loomc_link_index_builder_create(
+      state->context, NULL, loomc_allocator_system(), &index_builder);
+
+  const loomc_link_index_source_options_t source_options = {
+      .provider_name = loomc_make_cstring_view("guide-jit-kernel"),
+      .role = LOOMC_LINK_PROVIDER_ROLE_INPUT,
+  };
   if (loomc_status_is_ok(status)) {
-    status = require_successful_result(state->result,
-                                       "source deserialization failed");
+    status = loomc_link_index_builder_add_source(index_builder, state->source,
+                                                 &source_options, NULL);
+  }
+  if (loomc_status_is_ok(status)) {
+    status = loomc_link_index_builder_finish(index_builder, &link_index,
+                                             &state->result);
+  }
+  if (loomc_status_is_ok(status)) {
+    status = require_successful_result(state->result, "source indexing failed");
+  }
+
+  loomc_link_index_symbol_t symbol = {0};
+  if (loomc_status_is_ok(status) &&
+      !loomc_link_index_lookup_global(
+          link_index, loomc_make_cstring_view(kKernelExportName), &symbol)) {
+    status = loomc_make_status(LOOMC_STATUS_NOT_FOUND,
+                               "kernel export was not found");
+  }
+  if (loomc_status_is_ok(status) &&
+      (symbol.provider_module_ordinal > UINT32_MAX ||
+       symbol.module_symbol_ordinal > UINT32_MAX)) {
+    status = loomc_make_status(LOOMC_STATUS_RESOURCE_EXHAUSTED,
+                               "kernel root exceeds the request domain");
+  }
+
+  const loomc_request_root_t root = {
+      .module_ordinal = (uint32_t)symbol.provider_module_ordinal,
+      .symbol_ordinal = (uint32_t)symbol.module_symbol_ordinal,
+      .goal = LOOMC_KERNEL_ROOT_GOAL_HOST_LAUNCHABLE,
+  };
+  if (loomc_status_is_ok(status)) {
+    status = loomc_request_create(loomc_kernel_product_descriptor(),
+                                  state->source, &root, 1, NULL, 0,
+                                  loomc_allocator_system(), &state->request);
   }
   if (loomc_status_is_ok(status)) {
     jit_kernel_state_reset_result(state);
   }
+
+  loomc_link_index_release(link_index);
+  loomc_link_index_builder_release(index_builder);
   return status;
 }
+// --8<-- [end:request]
 
 // --8<-- [start:compile]
-static loomc_status_t compile_kernel(jit_kernel_state_t* state) {
+static loomc_status_t build_kernel_product(jit_kernel_state_t* state) {
   const loomc_target_specialization_t specialization = {
       .function_symbol = loomc_make_cstring_view(kKernelExportName),
       .target_profile = state->target_profile,
@@ -230,55 +273,7 @@ static loomc_status_t compile_kernel(jit_kernel_state_t* state) {
       .structure_size = sizeof(compile_options),
       .next = &target_options,
       .module_name = loomc_make_cstring_view("guide_jit_kernel"),
-      .artifact_flags = LOOMC_COMPILE_ARTIFACT_FLAG_LAUNCH_CONFIG,
   };
-  loomc_status_t status = loomc_compile_module(
-      state->compiler, state->workspace, state->pass_program, state->module,
-      &compile_options, loomc_allocator_system(), &state->result);
-  if (loomc_status_is_ok(status)) {
-    status =
-        require_successful_result(state->result, "kernel compilation failed");
-  }
-  return status;
-}
-// --8<-- [end:compile]
-
-// --8<-- [start:launch-config]
-static loomc_status_t prepare_and_evaluate_launch(
-    jit_kernel_state_t* state, loomc_launch_config_t* out_launch_config) {
-  const loomc_artifact_t* artifact = find_result_artifact(
-      state->result, LOOMC_ARTIFACT_KIND_LAUNCH_CONFIG,
-      loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_LOOM_BYTECODE));
-  if (artifact == NULL) {
-    return loomc_make_status(LOOMC_STATUS_NOT_FOUND,
-                             "launch-config artifact was not produced");
-  }
-
-  loomc_status_t status = loomc_launch_config_program_load(
-      artifact, loomc_allocator_system(), &state->launch_program);
-  if (loomc_status_is_ok(status)) {
-    jit_kernel_state_reset_result(state);
-  }
-  loomc_launch_config_function_t function =
-      loomc_launch_config_function_invalid();
-  if (loomc_status_is_ok(status)) {
-    status = loomc_launch_config_program_lookup_function(
-        state->launch_program, loomc_make_cstring_view(kKernelExportName),
-        &function);
-  }
-
-  const uint64_t workload_argument_bits[] = {kElementCount};
-  if (loomc_status_is_ok(status)) {
-    status = loomc_launch_config_program_invoke(state->launch_program, function,
-                                                workload_argument_bits, 1,
-                                                out_launch_config);
-  }
-  return status;
-}
-// --8<-- [end:launch-config]
-
-// --8<-- [start:emit]
-static loomc_status_t emit_executable(jit_kernel_state_t* state) {
   loomc_amdgpu_emit_options_t amdgpu_options = {
       .type = LOOMC_STRUCTURE_TYPE_AMDGPU_EMIT_OPTIONS,
       .structure_size = sizeof(amdgpu_options),
@@ -292,16 +287,56 @@ static loomc_status_t emit_executable(jit_kernel_state_t* state) {
       .identifier = loomc_make_cstring_view("guide_jit_kernel.hsaco"),
       .artifact_flags = LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY,
   };
-  loomc_status_t status = loomc_emit_module(
-      state->target_environment, state->workspace, state->module, &emit_options,
-      loomc_allocator_system(), &state->result);
+  loomc_status_t status = loomc_kernel_product_build_request(
+      state->compiler, state->workspace, state->pass_program, state->request,
+      &compile_options, &emit_options, loomc_allocator_system(),
+      &state->product, &state->result);
   if (loomc_status_is_ok(status)) {
     status =
-        require_successful_result(state->result, "executable emission failed");
+        require_successful_result(state->result, "kernel compilation failed");
+  }
+  if (loomc_status_is_ok(status) &&
+      !loomc_kernel_product_root_at(state->product, 0, &state->root)) {
+    status = loomc_make_status(LOOMC_STATUS_FAILED_PRECONDITION,
+                               "kernel product has no requested root");
+  }
+  if (loomc_status_is_ok(status)) {
+    jit_kernel_state_reset_result(state);
   }
   return status;
 }
-// --8<-- [end:emit]
+// --8<-- [end:compile]
+
+// --8<-- [start:launch-config]
+static loomc_status_t prepare_and_evaluate_launch(
+    jit_kernel_state_t* state, loomc_launch_config_t* out_launch_config) {
+  const loomc_artifact_t* artifact = loomc_product_artifact_at(
+      state->product, state->root.launch_config_artifact_ordinal);
+  if (artifact == NULL) {
+    return loomc_make_status(LOOMC_STATUS_NOT_FOUND,
+                             "kernel product has no launch-config artifact");
+  }
+
+  loomc_status_t status = loomc_vm_launch_config_program_load(
+      artifact, loomc_allocator_system(), &state->launch_program);
+  if (loomc_status_is_ok(status)) {
+    if (!loomc_vm_launch_config_program_function_at(
+            state->launch_program, state->root.launch_config_function_ordinal,
+            &state->launch_function)) {
+      status = loomc_make_status(LOOMC_STATUS_FAILED_PRECONDITION,
+                                 "launch function ordinal is invalid");
+    }
+  }
+
+  const uint64_t workload_argument_bits[] = {kElementCount};
+  if (loomc_status_is_ok(status)) {
+    status = loomc_vm_launch_config_program_invoke(
+        state->launch_program, state->launch_function, workload_argument_bits,
+        1, out_launch_config);
+  }
+  return status;
+}
+// --8<-- [end:launch-config]
 
 static loomc_status_t inspect_products(
     jit_kernel_state_t* state, const loomc_launch_config_t* launch_config) {
@@ -315,9 +350,8 @@ static loomc_status_t inspect_products(
                              "unexpected launch configuration");
   }
 
-  const loomc_artifact_t* executable = find_result_artifact(
-      state->result, LOOMC_ARTIFACT_KIND_EXECUTABLE,
-      loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_AMDGPU_HSACO));
+  const loomc_artifact_t* executable = loomc_product_artifact_at(
+      state->product, state->root.executable_artifact_ordinal);
   if (executable == NULL) {
     return loomc_make_status(LOOMC_STATUS_NOT_FOUND,
                              "AMDGPU executable artifact was not produced");
@@ -348,10 +382,10 @@ static loomc_status_t run_jit_kernel(const char* source_path,
 
   loomc_status_t status = prepare_compiler(&state, source_path, target);
   if (loomc_status_is_ok(status)) {
-    status = deserialize_source(&state);
+    status = prepare_kernel_request(&state);
   }
   if (loomc_status_is_ok(status)) {
-    status = compile_kernel(&state);
+    status = build_kernel_product(&state);
   }
 
   loomc_launch_config_t launch_config = {
@@ -360,9 +394,6 @@ static loomc_status_t run_jit_kernel(const char* source_path,
   };
   if (loomc_status_is_ok(status)) {
     status = prepare_and_evaluate_launch(&state, &launch_config);
-  }
-  if (loomc_status_is_ok(status)) {
-    status = emit_executable(&state);
   }
   if (loomc_status_is_ok(status)) {
     status = inspect_products(&state, &launch_config);
@@ -374,7 +405,7 @@ static loomc_status_t run_jit_kernel(const char* source_path,
 
 int main(int argc, char** argv) {
   if (argc < 2 || argc > 3) {
-    fprintf(stderr, "usage: jit_kernel <kernel.loom> [target]\n");
+    fprintf(stderr, "usage: jit_kernel <kernel.loombc> [target]\n");
     return 64;
   }
   const char* target = argc == 3 ? argv[2] : "gfx11-generic";

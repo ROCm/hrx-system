@@ -63,6 +63,7 @@ __all__ = [
     "VIEW",
     "BUFFER",
     "INTEGER",
+    "PAYLOAD_SCALAR",
     "BYTE_PATTERN_SCALAR",
     "INDEX_OR_NON_I1_INTEGER_SCALAR",
     "INTEGER_ELEMENT",
@@ -136,6 +137,7 @@ __all__ = [
     "IDEMPOTENT",
     "INVOLUTION",
     "TERMINATOR",
+    "NO_RETURN",
     "CONSTANT_LIKE",
     "POISON",
     "ELEMENTWISE",
@@ -309,6 +311,7 @@ class TypeConstraint(Enum):
       BUFFER   → BufferType
       INTEGER  → ScalarType with kind in {I1, I8, I16, I32, I64}
       FLOAT    → ScalarType with kind in {F8*, F16, BF16, F32, F64}
+      PAYLOAD_SCALAR → ScalarType with integer or floating-point kind
       BITWISE_SCALAR → ScalarType index, non-i1 integer, or floating-point
       BYTE_PATTERN_SCALAR → 8/16/32/64-bit integer or floating-point scalar
       INDEX_OR_NON_I1_INTEGER_SCALAR → ScalarType index or non-i1 integer
@@ -355,6 +358,7 @@ class TypeConstraint(Enum):
     BUFFER = "buffer"
     INTEGER = "integer"
     FLOAT = "float"
+    PAYLOAD_SCALAR = "payload_scalar"
     BITWISE_SCALAR = "bitwise_scalar"
     BYTE_PATTERN_SCALAR = "byte_pattern_scalar"
     INDEX_OR_NON_I1_INTEGER_SCALAR = "index_or_non_i1_integer_scalar"
@@ -395,6 +399,7 @@ VIEW = TypeConstraint.VIEW
 BUFFER = TypeConstraint.BUFFER
 INTEGER = TypeConstraint.INTEGER
 FLOAT = TypeConstraint.FLOAT
+PAYLOAD_SCALAR = TypeConstraint.PAYLOAD_SCALAR
 BITWISE_SCALAR = TypeConstraint.BITWISE_SCALAR
 BYTE_PATTERN_SCALAR = TypeConstraint.BYTE_PATTERN_SCALAR
 INDEX_OR_NON_I1_INTEGER_SCALAR = TypeConstraint.INDEX_OR_NON_I1_INTEGER_SCALAR
@@ -908,16 +913,10 @@ class AttrDef:
             raise ValueError(
                 f"AttrDef '{self.name}': open_enum requires an enum attribute"
             )
-        if self.attr_type == ATTR_TYPE_SCOPED_ENUM:
-            if self.optional:
-                raise ValueError(
-                    f"AttrDef '{self.name}': scoped_enum attributes are required"
-                )
-            if self.default is not None:
-                raise ValueError(
-                    f"AttrDef '{self.name}': scoped_enum attributes cannot "
-                    "have defaults"
-                )
+        if self.attr_type == ATTR_TYPE_SCOPED_ENUM and self.default is not None:
+            raise ValueError(
+                f"AttrDef '{self.name}': scoped_enum attributes cannot have defaults"
+            )
         if self.symbol_ref is not None and self.attr_type not in (
             ATTR_TYPE_SYMBOL,
             ATTR_TYPE_SYMBOL_ARRAY,
@@ -1171,6 +1170,10 @@ COMMUTATIVE = Trait("Commutative")
 IDEMPOTENT = Trait("Idempotent")
 INVOLUTION = Trait("Involution")
 TERMINATOR = Trait("Terminator")
+# Terminator that exits the enclosing callable instead of yielding to its
+# immediate parent region. Such a path need not use the region's ordinary
+# yield-style terminator because it has no continuation in that region.
+NO_RETURN = Trait("NoReturn")
 CONSTANT_LIKE = Trait("ConstantLike")
 POISON = Trait("Poison")
 ELEMENTWISE = Trait("Elementwise")
@@ -2046,6 +2049,22 @@ def _type_satisfies_field_constraint(
             return False
         scalar_kind = value_type.kind
         return scalar_kind == ScalarTypeKind.INDEX or scalar_kind in {
+            ScalarTypeKind.I8,
+            ScalarTypeKind.I16,
+            ScalarTypeKind.I32,
+            ScalarTypeKind.I64,
+            ScalarTypeKind.F8E4M3,
+            ScalarTypeKind.F8E5M2,
+            ScalarTypeKind.F16,
+            ScalarTypeKind.BF16,
+            ScalarTypeKind.F32,
+            ScalarTypeKind.F64,
+        }
+    if constraint == PAYLOAD_SCALAR:
+        if not isinstance(value_type, ScalarType):
+            return False
+        return value_type.kind in {
+            ScalarTypeKind.I1,
             ScalarTypeKind.I8,
             ScalarTypeKind.I16,
             ScalarTypeKind.I32,
@@ -3970,6 +3989,17 @@ class TypeDef:
                 f"TypeDef '{name}': Python value types are only supported for "
                 "compact descriptor-backed types"
             )
+        if semantic is TypeSemantic.MANAGED_REFERENCE:
+            if "." not in name:
+                raise ValueError(
+                    f"TypeDef '{name}': managed references require a "
+                    "namespace-qualified name"
+                )
+            if frozen_params or frozen_format or ir_kind != "dialect":
+                raise ValueError(
+                    f"TypeDef '{name}': managed references must be opaque "
+                    "dialect types without parameters"
+                )
         parameter_names = [parameter.name for parameter in frozen_params]
         if len(set(parameter_names)) != len(parameter_names):
             raise ValueError(f"TypeDef '{name}': duplicate parameter name")
@@ -4155,6 +4185,7 @@ def _collect_format_fields(elements: tuple[FormatElement, ...]) -> set[str]:
         BindingList,
         BlockArgs,
         BlockRef,
+        BlockRefs,
         Clause,
         EncodingOf,
         Flags,
@@ -4188,7 +4219,13 @@ def _collect_format_fields(elements: tuple[FormatElement, ...]) -> set[str]:
     fields: set[str] = set()
     for elem in elements:
         match elem:
-            case Ref(field=f) | Refs(field=f) | TypedRefs(field=f) | BlockRef(field=f):
+            case (
+                Ref(field=f)
+                | Refs(field=f)
+                | TypedRefs(field=f)
+                | BlockRef(field=f)
+                | BlockRefs(field=f)
+            ):
                 fields.add(f)
             case AlignedRefs(refs=refs, alignments=alignments):
                 fields.add(refs)
@@ -4448,8 +4485,8 @@ def _validate_scoped_enum_fields(
     format_elements: tuple[FormatElement, ...],
     attrs: tuple[AttrDef, ...],
 ) -> None:
-    """Validates required representation-scoped enum syntax."""
-    from loom.assembly import ScopedEnumRef
+    """Validates representation-scoped enum syntax and optionality."""
+    from loom.assembly import Clause, OptionalGroup, Scope, ScopedEnumRef
 
     scoped_attrs = [attr for attr in attrs if attr.attr_type == ATTR_TYPE_SCOPED_ENUM]
     if len(scoped_attrs) > 1:
@@ -4457,13 +4494,24 @@ def _validate_scoped_enum_fields(
             f"Op '{op_name}': at most one scoped_enum attr may define its "
             "representation-scoped identity"
         )
-    direct_refs = [
-        element.field
-        for element in format_elements
-        if isinstance(element, ScopedEnumRef)
-    ]
+    refs: list[tuple[str, str | None, bool]] = []
+
+    def collect_refs(
+        elements: tuple[FormatElement, ...],
+        optional_anchor: str | None = None,
+        nested: bool = False,
+    ) -> None:
+        for element in elements:
+            if isinstance(element, ScopedEnumRef):
+                refs.append((element.field, optional_anchor, nested))
+            elif isinstance(element, OptionalGroup):
+                collect_refs(element.elements, element.anchor, True)
+            elif isinstance(element, Clause | Scope):
+                collect_refs(element.elements, optional_anchor, True)
+
+    collect_refs(format_elements)
     attrs_by_name = {attr.name: attr for attr in attrs}
-    for field in direct_refs:
+    for field, _optional_anchor, _nested in refs:
         attr = attrs_by_name.get(field)
         if attr is None or attr.attr_type != ATTR_TYPE_SCOPED_ENUM:
             raise ValueError(
@@ -4471,11 +4519,22 @@ def _validate_scoped_enum_fields(
                 "scoped_enum attr"
             )
     for attr in scoped_attrs:
-        ref_count = direct_refs.count(attr.name)
-        if ref_count != 1:
+        attr_refs = [ref for ref in refs if ref[0] == attr.name]
+        if len(attr_refs) != 1:
             raise ValueError(
                 f"Op '{op_name}': scoped_enum attr '{attr.name}' requires "
-                "exactly one top-level ScopedEnumRef"
+                "exactly one ScopedEnumRef"
+            )
+        _field, optional_anchor, nested = attr_refs[0]
+        if attr.optional and optional_anchor != attr.name:
+            raise ValueError(
+                f"Op '{op_name}': optional scoped_enum attr '{attr.name}' "
+                "requires a containing OptionalGroup anchored to itself"
+            )
+        if not attr.optional and nested:
+            raise ValueError(
+                f"Op '{op_name}': required scoped_enum attr '{attr.name}' "
+                "requires a top-level ScopedEnumRef"
             )
 
 
@@ -4803,11 +4862,21 @@ def _validate_ownership_effects(
         )
 
 
+def _validate_trait_requirements(
+    op_name: str,
+    traits: tuple[Trait, ...],
+) -> None:
+    """Validate requirements that apply to every trait combination."""
+    trait_names = {t.name for t in traits}
+    if "NoReturn" in trait_names and "Terminator" not in trait_names:
+        raise ValueError(f"Op '{op_name}': NO_RETURN requires the TERMINATOR trait.")
+
+
 def _validate_no_effect_conflicts(
     op_name: str,
     traits: tuple[Trait, ...],
 ) -> None:
-    """Validate trait-only ops for effect-related conflicts."""
+    """Validate effect-related conflicts on ops without explicit effects."""
     trait_names = {t.name for t in traits}
     if "CommandEffect" in trait_names and not trait_names.intersection(
         {"UnknownEffects", "MemoryFence", "NonDeterministic", "Convergent"}
@@ -5026,6 +5095,10 @@ class FuncLikeInterface(NamedTuple):
     import_module: str | None = None
     # Optional import symbol string attr for external declarations.
     import_symbol: str | None = None
+    # Optional import policy enum attr for external declarations.
+    import_policy: str | None = None
+    # Optional typed metadata dictionary owned by the import declaration.
+    import_metadata: str | None = None
     # Optional symbol ref attr naming the resolved target record.
     target: str | None = None
     # Optional string attr naming the intrinsic contract under which the
@@ -5040,6 +5113,8 @@ class FuncLikeInterface(NamedTuple):
     export_symbol: str | None = None
     # Optional export payload dictionary attr.
     export_attrs: str | None = None
+    # Optional typed metadata dictionary owned by the export declaration.
+    export_metadata: str | None = None
     # Optional export linkage attr for entry-style exports.
     export_linkage: str | None = None
     # Visibility enum attr (e.g., public). None if not applicable.
@@ -5814,6 +5889,7 @@ class Op:
                     f"Op '{name}': successor_selector field "
                     f"'{successor_selector}' must not be variadic"
                 )
+        _validate_trait_requirements(name, tuple(traits))
         # Validate memory effect declarations.
         if frozen_effects:
             _validate_effects(name, frozen_effects, frozen_operands, tuple(traits))

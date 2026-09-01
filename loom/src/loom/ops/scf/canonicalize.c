@@ -581,10 +581,11 @@ static iree_status_t loom_scf_region_branch_build_empty_clone(
                sizeof(loom_attribute_t));
   }
 
-  loom_region_t** new_regions = loom_op_regions(*out_new_branch);
   for (uint8_t i = 0; i < branch_op->region_count; ++i) {
+    loom_region_t* new_region = NULL;
     IREE_RETURN_IF_ERROR(
-        loom_module_allocate_region(rewriter->module, 1, &new_regions[i]));
+        loom_module_allocate_region(rewriter->module, 1, &new_region));
+    IREE_RETURN_IF_ERROR(loom_op_attach_region(*out_new_branch, i, new_region));
   }
 
   loom_value_id_t* new_results = loom_op_results(*out_new_branch);

@@ -37,6 +37,7 @@ loom_cc_library(
     textual_hdrs = [":target_profiles.inl"],
     visibility = _X86_TARGET_RECORDS_VISIBILITY,
     deps = [
+        "//loom/src/loom/target:facts",
         "//loom/src/loom/target:types",
         "//loom/src/loom/target/arch/x86:feature_bits",
         "//runtime/src/iree/base",

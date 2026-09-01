@@ -1,0 +1,20 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_scalar_f32.loom-test
+// RUN: emit source-low output=low
+
+vm.target<core> @target
+func.def target(@target) @scalar_f32_arith(%lhs: f32, %rhs: f32, %bias: f32) -> (f32) {
+  %sum = scalar.addf %lhs, %rhs : f32
+  %difference = scalar.subf %sum, %bias : f32
+  %product = scalar.mulf %difference, %rhs : f32
+  %result = scalar.fmaf %product, %rhs, %bias : f32
+  func.return %result : f32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>) -> (reg<vm.value : f32>)>}) @scalar_f32_arith(%lhs: reg<vm.value : f32>, %rhs: reg<vm.value : f32>, %bias: reg<vm.value : f32>) -> (reg<vm.value : f32>) asm {
+  %sum = float.add.f32 %lhs, %rhs : reg<vm.value : f32>
+  %difference = float.sub.f32 %sum, %bias : reg<vm.value : f32>
+  %product = float.mul.f32 %difference, %rhs : reg<vm.value : f32>
+  %result = float.math.ternary.f32 %product, %rhs, %bias, fma : reg<vm.value : f32>
+  return %result
+}

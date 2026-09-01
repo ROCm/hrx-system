@@ -48,6 +48,7 @@ loom_cc_library(
   SRCS
     "provider.c"
   DEPS
+    ::facts
     ::math_policy
     iree::base
     loom::ops::llvmir

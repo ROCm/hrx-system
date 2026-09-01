@@ -12,7 +12,8 @@
 
 static loom_text_print_flags_t loom_check_roundtrip_print_flags(
     const loom_check_case_t* test_case) {
-  loom_text_print_flags_t flags = LOOM_TEXT_PRINT_DEFAULT;
+  loom_text_print_flags_t flags =
+      LOOM_TEXT_PRINT_DEFAULT | LOOM_TEXT_PRINT_PRESERVE_LOW_ASM;
   if (iree_all_bits_set(test_case->output_flags, LOOM_CHECK_OUTPUT_LOCATIONS)) {
     flags |= LOOM_TEXT_PRINT_LOCATIONS;
   }

@@ -127,6 +127,7 @@ from loom.ir import (
     TaggedLocation,
     Type,
     TypeKind,
+    U64Attr,
     Value,
     binding_element_type,
     parse_scalar_type_kind,
@@ -186,6 +187,47 @@ def _parse_float_literal(text: str) -> float:
     return float(text)
 
 
+def _parse_integer_literal(text: str) -> int:
+    """Parses the decimal or hexadecimal spelling accepted by INTEGER."""
+    unsigned_text = text[1:] if text.startswith("-") else text
+    return int(text, 16 if unsigned_text.startswith(("0x", "0X")) else 10)
+
+
+def _parse_attr_dict_key(tokenizer: Tokenizer) -> Token:
+    """Parse a generic dictionary key in bare or quoted form."""
+    if tokenizer.at(TokenKind.BARE_IDENT) or tokenizer.at(TokenKind.STRING):
+        return tokenizer.next()
+    return tokenizer.expect(TokenKind.BARE_IDENT)
+
+
+def _parse_i64_attr_value(token: Token, filename: str) -> int:
+    """Parses a signed 64-bit generic integer attribute value."""
+    value = _parse_integer_literal(token.text)
+    if not -(2**63) <= value < 2**63:
+        raise ParseError(
+            "integer attribute value must be in [-2^63, 2^63)",
+            token.location,
+            filename,
+        )
+    return value
+
+
+def _parse_u64_attr_value_from_tokens(tokenizer: Tokenizer, filename: str) -> U64Attr:
+    """Parse an exact ``u64(INTEGER)`` generic attribute value."""
+    tokenizer.expect(TokenKind.BARE_IDENT, "u64")
+    tokenizer.expect(TokenKind.LPAREN)
+    value_token = tokenizer.expect(TokenKind.INTEGER)
+    value = _parse_integer_literal(value_token.text)
+    if not 0 <= value < 2**64:
+        raise ParseError(
+            "u64 attribute value must be in [0, 2^64)",
+            value_token.location,
+            filename,
+        )
+    tokenizer.expect(TokenKind.RPAREN)
+    return U64Attr(value)
+
+
 def _concrete_type_for_constraint(constraint: TypeConstraint) -> Type | None:
     """Returns the concrete type implied by a singleton type constraint."""
     match constraint:
@@ -228,11 +270,16 @@ def _parse_generic_attr_value_from_tokens(
 ) -> Any:
     """Parse an untyped attr value from the current token stream."""
     if tokenizer.at(TokenKind.INTEGER):
-        return int(tokenizer.next().text)
+        return _parse_i64_attr_value(tokenizer.next(), filename)
     if tokenizer.at(TokenKind.FLOAT):
         return _parse_float_literal(tokenizer.next().text)
     if tokenizer.at(TokenKind.STRING):
         return tokenizer.next().text
+    if (
+        tokenizer.at(TokenKind.BARE_IDENT, "u64")
+        and tokenizer.peek_n(1).kind == TokenKind.LPAREN
+    ):
+        return _parse_u64_attr_value_from_tokens(tokenizer, filename)
     if (
         tokenizer.at(TokenKind.BARE_IDENT, "bytes")
         and tokenizer.peek_n(1).kind == TokenKind.LPAREN
@@ -248,6 +295,8 @@ def _parse_generic_attr_value_from_tokens(
         if text == "false":
             return False
         return text
+    if tokenizer.at(TokenKind.OP_NAME):
+        return tokenizer.next().text
     if tokenizer.at(TokenKind.SYMBOL):
         return SymbolName(tokenizer.next().text)
     if tokenizer.at(TokenKind.HASH_ATTR):
@@ -286,9 +335,13 @@ def _parse_generic_attr_value_from_tokens(
         tokenizer.next()
         values: list[int] = []
         if not tokenizer.at(TokenKind.RBRACKET):
-            values.append(int(tokenizer.expect(TokenKind.INTEGER).text))
+            values.append(
+                _parse_i64_attr_value(tokenizer.expect(TokenKind.INTEGER), filename)
+            )
             while tokenizer.try_consume(TokenKind.COMMA):
-                values.append(int(tokenizer.expect(TokenKind.INTEGER).text))
+                values.append(
+                    _parse_i64_attr_value(tokenizer.expect(TokenKind.INTEGER), filename)
+                )
         tokenizer.expect(TokenKind.RBRACKET)
         return values
     if tokenizer.at(TokenKind.LBRACE):
@@ -303,7 +356,7 @@ def _parse_generic_attr_value_from_tokens(
         entries: list[tuple[str, Any]] = []
         seen_keys: set[str] = set()
         while not tokenizer.at(TokenKind.RBRACE):
-            key_token = tokenizer.expect(TokenKind.BARE_IDENT)
+            key_token = _parse_attr_dict_key(tokenizer)
             if key_token.text in seen_keys:
                 raise ParseError(
                     f"duplicate attribute dict key '{key_token.text}'",
@@ -1813,6 +1866,10 @@ class ParsedFields:
 
     implicit_values holds parser-created region block args such as loop IVs.
     RegionFmt defines those names in the child scope when the region starts.
+
+    definition_scope_block_args holds region entry args that remain visible to
+    adjacent signature metadata inside a Scope until its matching region is
+    parsed.
     """
 
     __slots__ = (
@@ -1824,6 +1881,7 @@ class ParsedFields:
         "regions",
         "tied_results",
         "implicit_values",
+        "definition_scope_block_args",
         "func_arg_ids",
         "func_args_consumed",
         "operand_fields",
@@ -1838,6 +1896,7 @@ class ParsedFields:
         self.regions: list[Region] = []
         self.tied_results: list[IRTiedResult] = []
         self.implicit_values: dict[str, int] = {}
+        self.definition_scope_block_args: dict[str, list[int]] = {}
         self.func_arg_ids: list[int] = []
         self.func_args_consumed = False
         self.operand_fields: dict[str, list[int]] = {}
@@ -3038,7 +3097,19 @@ class Parser:
                     pre_arg_ids = None
                     region_def = _region_def(op_decl, name)
                     func_args_field = _func_args_field(op_decl)
-                    if (
+                    definition_scope_arg_ids = parsed.definition_scope_block_args.pop(
+                        name, None
+                    )
+                    if definition_scope_arg_ids is not None:
+                        if binding_names or binding_types:
+                            raise ParseError(
+                                f"region '{name}' cannot combine definition-"
+                                "scope block args with explicit binding args",
+                                tok.peek().location,
+                                tok._filename,
+                            )
+                        pre_arg_ids = definition_scope_arg_ids
+                    elif (
                         parsed.func_arg_ids
                         and func_args_field is not None
                         and region_def is not None
@@ -3084,8 +3155,8 @@ class Parser:
                 case BindingList(field=name, kind=binding_kind):
                     self._parse_binding_list(parsed, op_decl, name, binding_kind)
 
-                case BlockArgs(region=name):
-                    self._parse_block_args(parsed, name)
+                case BlockArgs(region=name, definition_scope=definition_scope):
+                    self._parse_block_args(parsed, name, definition_scope)
 
                 case FuncArgs(field=name, end_attr=end_attr):
                     tok.expect(TokenKind.LPAREN)
@@ -3636,10 +3707,31 @@ class Parser:
         parsed.attributes["_binding_arg_names"] = block_arg_names
         parsed.attributes["_binding_arg_types"] = block_arg_types
 
-    def _parse_block_args(self, parsed: ParsedFields, _region_name: str) -> None:
+    def _parse_block_args(
+        self,
+        parsed: ParsedFields,
+        region_name: str,
+        definition_scope: bool,
+    ) -> None:
         """Parse BlockArgs into pending entry block argument metadata."""
         tok = self._tokenizer
         tok.expect(TokenKind.LPAREN)
+        if definition_scope:
+            if not self._definition_scope_active:
+                raise RuntimeError(
+                    "definition-scope BlockArgs must be nested in Scope(...)"
+                )
+            block_arg_ids: list[int] = []
+            if not tok.at(TokenKind.RPAREN):
+                while True:
+                    _name, _arg_type, value_id = self._parse_func_arg()
+                    block_arg_ids.append(value_id)
+                    if not tok.try_consume(TokenKind.COMMA):
+                        break
+            tok.expect(TokenKind.RPAREN)
+            parsed.definition_scope_block_args[region_name] = block_arg_ids
+            return
+
         block_arg_names: list[str] = []
         block_arg_types: list[Type] = []
 
@@ -4213,7 +4305,9 @@ class Parser:
         entries: list[tuple[str, Any]] = []
         seen_keys: set[str] = set()
         while not tok.at(TokenKind.RBRACE):
-            key_tok = tok.expect(TokenKind.BARE_IDENT)
+            key_tok = (
+                _parse_attr_dict_key(tok) if field else tok.expect(TokenKind.BARE_IDENT)
+            )
             key = key_tok.text
             if key in seen_keys:
                 raise ParseError(

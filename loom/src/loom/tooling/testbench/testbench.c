@@ -70,9 +70,9 @@ static iree_string_view_t loom_testbench_string_from_id(
 
 static loom_scalar_type_t loom_testbench_value_scalar_type(
     const loom_module_t* module, loom_value_id_t value_id) {
-  if (value_id >= module->values.count) return LOOM_SCALAR_TYPE_COUNT_;
+  if (value_id >= module->values.count) return LOOM_SCALAR_TYPE_NONE;
   loom_type_t type = loom_module_value_type(module, value_id);
-  if (!loom_type_is_scalar(type)) return LOOM_SCALAR_TYPE_COUNT_;
+  if (!loom_type_is_scalar(type)) return LOOM_SCALAR_TYPE_NONE;
   return loom_type_element_type(type);
 }
 
@@ -179,7 +179,7 @@ static bool loom_testbench_plan_range_parameter(
   loom_value_id_t value_id = loom_check_param_range_result(op);
   loom_scalar_type_t scalar_type =
       loom_testbench_value_scalar_type(module, value_id);
-  if (scalar_type == LOOM_SCALAR_TYPE_COUNT_) return false;
+  if (scalar_type == LOOM_SCALAR_TYPE_NONE) return false;
 
   loom_attribute_t lower = loom_check_param_range_lower(op);
   loom_attribute_t upper = loom_check_param_range_upper(op);

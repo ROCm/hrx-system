@@ -1,0 +1,248 @@
+vm.target<core> @vm
+
+global.constant @bias : i32
+
+global.variable @counter : i32
+
+global.rodata.def @message = align(1) bytes("6c6f6f6d2d766d")
+
+global.rodata.def @numbers = align(4) bytes("01000000feffffff785634122a000000")
+
+func.def initializer target(@vm) @initialize() {
+  %bias_value = scalar.constant 5 : i32
+  %counter_value = scalar.constant 0 : i32
+  global.store %bias_value, @bias : i32
+  global.store %counter_value, @counter : i32
+  func.return
+}
+
+func.def public target(@vm) export("sum_export") @sum(%lhs: i32, %rhs: i32) -> (i32) {
+  %bias_value = global.load @bias : i32
+  %partial = scalar.addi %lhs, %rhs : i32
+  %result = scalar.addi %partial, %bias_value : i32
+  func.return %result : i32
+}
+
+func.decl import("execution.math", "add") target(@vm) @native_add(%lhs: i32, %rhs: i32) -> (i32)
+
+func.decl import("execution.math", "suspend_add") target(@vm) abi(vm_function, {suspending = true}) @native_suspend_add(%value: i32) -> (i32)
+
+func.def public target(@vm) @call_native_add(%lhs: i32, %rhs: i32) -> (i32) {
+  %result = func.call @native_add(%lhs, %rhs) : (i32, i32) -> (i32)
+  func.return %result : i32
+}
+
+check.case @native_module_execution {
+  %lhs = check.literal value(20) : i32
+  %rhs = check.literal value(22) : i32
+  %actual = func.call @call_native_add(%lhs, %rhs) : (i32, i32) -> (i32)
+  %expected = check.literal value(42) : i32
+  check.expect.equal actual(%actual) expected(%expected) : i32
+  check.return
+}
+
+func.def public target(@vm) @call_native_suspend_add(%value: i32) -> (i32) {
+  %result = func.call @native_suspend_add(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+check.case @native_module_suspension {
+  %value = check.literal value(41) : i32
+  %actual = func.call @call_native_suspend_add(%value) : (i32) -> (i32)
+  %expected = check.literal value(42) : i32
+  check.expect.equal actual(%actual) expected(%expected) : i32
+  check.return
+}
+
+check.case @initializer_and_export_alias {
+  %lhs = check.literal value(7) : i32
+  %rhs = check.literal value(11) : i32
+  %actual = func.call @sum(%lhs, %rhs) : (i32, i32) -> (i32)
+  %expected = check.literal value(23) : i32
+  check.expect.equal actual(%actual) expected(%expected) : i32
+  check.return
+}
+
+func.def public target(@vm) @assert_message(%condition: i1) {
+  %message = global.load @message : buffer
+  cfg.assert %condition, %message : buffer
+  func.return
+}
+
+check.case @rodata_execution {
+  %condition = check.literal value(1) : i1
+  func.call @assert_message(%condition) : (i1)
+  check.return
+}
+
+func.def public target(@vm) @load_rodata_element(%element: index) -> (i32) {
+  %element_bounded = index.assume %element [range(%element, 0, 3)] : index
+  %buffer = global.load @numbers : buffer
+  %base = index.constant 0 : offset
+  %view = buffer.view %buffer[%base] : buffer -> view<4xi32>
+  %value = view.load %view[%element_bounded] : view<4xi32> -> i32
+  func.return %value : i32
+}
+
+check.case @buffer_memory_execution {
+  %element = check.literal value(2) : index
+  %actual = func.call @load_rodata_element(%element) : (index) -> (i32)
+  %expected = check.literal value(305419896) : i32
+  check.expect.equal actual(%actual) expected(%expected) : i32
+  check.return
+}
+
+func.def public target(@vm) @accumulate(%delta: i32) -> (i32) {
+  %counter_value = global.load @counter : i32
+  %result = scalar.addi %counter_value, %delta : i32
+  global.store %result, @counter : i32
+  func.return %result : i32
+}
+
+check.case @shared_process_sequence {
+  %first_delta = check.literal value(3) : i32
+  %first_actual = func.call @accumulate(%first_delta) : (i32) -> (i32)
+  %second_delta = check.literal value(4) : i32
+  %second_actual = func.call @accumulate(%second_delta) : (i32) -> (i32)
+  %first_expected = check.literal value(3) : i32
+  %second_expected = check.literal value(7) : i32
+  check.expect.equal actual(%first_actual) expected(%first_expected) : i32
+  check.expect.equal actual(%second_actual) expected(%second_expected) : i32
+  check.return
+}
+
+func.def public target(@vm) @select_inputs(%condition: i1, %first: i32, %second: i32) -> (i32, i32) {
+  cfg.cond_br %condition, ^first_path, ^second_path
+^first_path:
+  func.return %first, %second : i32, i32
+^second_path:
+  func.return %second, %first : i32, i32
+}
+
+check.case @direct_control_flow {
+  %condition = check.literal value(0) : i1
+  %first = check.literal value(17) : i32
+  %second = check.literal value(29) : i32
+  %actual_first, %actual_second = func.call @select_inputs(%condition, %first, %second) : (i1, i32, i32) -> (i32, i32)
+  check.expect.equal actual(%actual_first) expected(%second) : i32
+  check.expect.equal actual(%actual_second) expected(%first) : i32
+  check.return
+}
+
+func.def public target(@vm) @compute_i32(%base: i32, %index: i32, %limit: i32) -> (i32, i1) {
+  %scale = scalar.constant 255 : i32
+  %scaled_index = scalar.muli %index, %scale : i32
+  %address = scalar.addi %scaled_index, %base : i32
+  %in_bounds = scalar.cmpi ule, %address, %limit : i32
+  func.return %address, %in_bounds : i32, i1
+}
+
+check.case @integer_execution {
+  %base = check.literal value(5) : i32
+  %index = check.literal value(3) : i32
+  %limit = check.literal value(770) : i32
+  %actual_address, %actual_in_bounds = func.call @compute_i32(%base, %index, %limit) : (i32, i32, i32) -> (i32, i1)
+  %expected_address = check.literal value(770) : i32
+  %expected_in_bounds = check.literal value(1) : i1
+  check.expect.equal actual(%actual_address) expected(%expected_address) : i32
+  check.expect.equal actual(%actual_in_bounds) expected(%expected_in_bounds) : i1
+  check.return
+}
+
+func.def public target(@vm) @overflow_identity(%v00: i64, %v01: i64, %v02: i64, %v03: i64, %v04: i64, %v05: i64, %v06: i64, %v07: i64, %v08: i64, %v09: i64, %v10: i64, %v11: i64, %v12: i64, %v13: i64, %v14: i64, %v15: i64, %v16: i64, %v17: i64) -> (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64) {
+  func.return %v00, %v01, %v02, %v03, %v04, %v05, %v06, %v07, %v08, %v09, %v10, %v11, %v12, %v13, %v14, %v15, %v16, %v17 : i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64
+}
+
+check.case @overflow_execution {
+  %v00 = check.literal value(0) : i64
+  %v01 = check.literal value(1) : i64
+  %v02 = check.literal value(2) : i64
+  %v03 = check.literal value(3) : i64
+  %v04 = check.literal value(4) : i64
+  %v05 = check.literal value(5) : i64
+  %v06 = check.literal value(6) : i64
+  %v07 = check.literal value(7) : i64
+  %v08 = check.literal value(8) : i64
+  %v09 = check.literal value(9) : i64
+  %v10 = check.literal value(10) : i64
+  %v11 = check.literal value(11) : i64
+  %v12 = check.literal value(12) : i64
+  %v13 = check.literal value(13) : i64
+  %v14 = check.literal value(14) : i64
+  %v15 = check.literal value(15) : i64
+  %v16 = check.literal value(16) : i64
+  %v17 = check.literal value(17) : i64
+  %r00, %r01, %r02, %r03, %r04, %r05, %r06, %r07, %r08, %r09, %r10, %r11, %r12, %r13, %r14, %r15, %r16, %r17 = func.call @overflow_identity(%v00, %v01, %v02, %v03, %v04, %v05, %v06, %v07, %v08, %v09, %v10, %v11, %v12, %v13, %v14, %v15, %v16, %v17) : (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64) -> (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64)
+  check.expect.equal actual(%r00) expected(%v00) : i64
+  check.expect.equal actual(%r15) expected(%v15) : i64
+  check.expect.equal actual(%r16) expected(%v16) : i64
+  check.expect.equal actual(%r17) expected(%v17) : i64
+  check.return
+}
+
+func.def public target(@vm) @scalar_boundary_identity(%i8_value: i8, %i16_value: i16, %index_value: index, %offset_value: offset, %f8e4m3_value: f8E4M3, %f8e5m2_value: f8E5M2, %f16_value: f16, %bf16_value: bf16, %f32_value: f32, %f64_value: f64) -> (i8, i16, index, offset, f8E4M3, f8E5M2, f16, bf16, f32, f64) {
+  func.return %i8_value, %i16_value, %index_value, %offset_value, %f8e4m3_value, %f8e5m2_value, %f16_value, %bf16_value, %f32_value, %f64_value : i8, i16, index, offset, f8E4M3, f8E5M2, f16, bf16, f32, f64
+}
+
+check.case @scalar_boundary_execution {
+  %i8_value = check.literal value(-7) : i8
+  %i16_value = check.literal value(-300) : i16
+  %index_value = check.literal value(12345) : index
+  %offset_value = check.literal value(67890) : offset
+  %f8e4m3_value = check.literal value(1.5) : f8E4M3
+  %f8e5m2_value = check.literal value(-2.0) : f8E5M2
+  %f16_value = check.literal value(3.25) : f16
+  %bf16_value = check.literal value(-4.5) : bf16
+  %f32_value = check.literal value(5.25) : f32
+  %f64_value = check.literal value(-6.5) : f64
+  %actual_i8, %actual_i16, %actual_index, %actual_offset, %actual_f8e4m3, %actual_f8e5m2, %actual_f16, %actual_bf16, %actual_f32, %actual_f64 = func.call @scalar_boundary_identity(%i8_value, %i16_value, %index_value, %offset_value, %f8e4m3_value, %f8e5m2_value, %f16_value, %bf16_value, %f32_value, %f64_value) : (i8, i16, index, offset, f8E4M3, f8E5M2, f16, bf16, f32, f64) -> (i8, i16, index, offset, f8E4M3, f8E5M2, f16, bf16, f32, f64)
+  check.expect.equal actual(%actual_i8) expected(%i8_value) : i8
+  check.expect.equal actual(%actual_i16) expected(%i16_value) : i16
+  check.expect.equal actual(%actual_index) expected(%index_value) : index
+  check.expect.equal actual(%actual_offset) expected(%offset_value) : offset
+  check.expect.bitwise actual(%actual_f8e4m3) expected(%f8e4m3_value) : f8E4M3
+  check.expect.bitwise actual(%actual_f8e5m2) expected(%f8e5m2_value) : f8E5M2
+  check.expect.bitwise actual(%actual_f16) expected(%f16_value) : f16
+  check.expect.bitwise actual(%actual_bf16) expected(%bf16_value) : bf16
+  check.expect.bitwise actual(%actual_f32) expected(%f32_value) : f32
+  check.expect.bitwise actual(%actual_f64) expected(%f64_value) : f64
+  check.return
+}
+
+func.def noinline target(@vm) @constant_pool_a() -> (i64) {
+  %value = scalar.constant 1311768467463790320 : i64
+  func.return %value : i64
+}
+
+func.def noinline target(@vm) @constant_pool_b() -> (i64) {
+  %value = scalar.constant 1311768467463790320 : i64
+  func.return %value : i64
+}
+
+func.def noinline target(@vm) @constant_pool_c() -> (i64) {
+  %value = scalar.constant 1311768467463790320 : i64
+  func.return %value : i64
+}
+
+func.def noinline target(@vm) @constant_pool_d() -> (i64) {
+  %value = scalar.constant 1311768467463790320 : i64
+  func.return %value : i64
+}
+
+func.def public target(@vm) @sum_pooled_constants() -> (i64) {
+  %a = func.call @constant_pool_a() : () -> (i64)
+  %b = func.call @constant_pool_b() : () -> (i64)
+  %c = func.call @constant_pool_c() : () -> (i64)
+  %d = func.call @constant_pool_d() : () -> (i64)
+  %ab = scalar.addi %a, %b : i64
+  %cd = scalar.addi %c, %d : i64
+  %sum = scalar.addi %ab, %cd : i64
+  func.return %sum : i64
+}
+
+check.case @constant_pool_execution {
+  %actual = func.call @sum_pooled_constants() : () -> (i64)
+  %expected = check.literal value(5247073869855161280) : i64
+  check.expect.equal actual(%actual) expected(%expected) : i64
+  check.return
+}

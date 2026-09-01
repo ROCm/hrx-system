@@ -106,13 +106,14 @@ static iree_status_t loom_local_value_domain_for_each_value_type_ref(
   return iree_ok_status();
 }
 
-static bool loom_local_value_domain_region_is_nested_in_op(
-    const loom_op_t* owner_op, const loom_region_t* region);
-
 static bool loom_local_value_domain_block_is_nested_in_op(
     const loom_op_t* owner_op, const loom_block_t* block) {
-  return block && loom_local_value_domain_region_is_nested_in_op(
-                      owner_op, block->parent_region);
+  const loom_op_t* current =
+      block && block->parent_region ? block->parent_region->owner_op : NULL;
+  for (; current; current = current->parent_op) {
+    if (current == owner_op) return true;
+  }
+  return false;
 }
 
 static bool loom_local_value_domain_value_is_defined_inside_op(
@@ -132,29 +133,6 @@ static bool loom_local_value_domain_value_is_defined_inside_op(
       return true;
     }
     def_op = def_op->parent_op;
-  }
-  return false;
-}
-
-static bool loom_local_value_domain_region_is_nested_in_op(
-    const loom_op_t* owner_op, const loom_region_t* region) {
-  if (!owner_op || !region) {
-    return false;
-  }
-  loom_region_t* const* regions = loom_op_regions(owner_op);
-  for (uint8_t i = 0; i < owner_op->region_count; ++i) {
-    if (regions[i] == region) {
-      return true;
-    }
-    const loom_block_t* block = NULL;
-    loom_region_for_each_block(regions[i], block) {
-      const loom_op_t* op = NULL;
-      loom_block_for_each_op(block, op) {
-        if (loom_local_value_domain_region_is_nested_in_op(op, region)) {
-          return true;
-        }
-      }
-    }
   }
   return false;
 }
@@ -345,10 +323,25 @@ static iree_status_t loom_local_value_domain_acquire(
     loom_module_t* module, const loom_region_t* region,
     loom_local_value_domain_flags_t flags, iree_arena_allocator_t* arena,
     loom_local_value_domain_t* out_domain) {
+  if (!region) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "local value domain requires a region");
+  }
   *out_domain = (loom_local_value_domain_t){
       .module = module,
       .region = region,
   };
+  const iree_host_size_t initial_capacity = region->value_definition_count;
+  if (initial_capacity >= LOOM_VALUE_ORDINAL_INVALID) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "local value domain exceeds value ordinal range");
+  }
+  if (initial_capacity > 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        arena, initial_capacity, sizeof(*out_domain->value_ids),
+        (void**)&out_domain->value_ids));
+    out_domain->value_capacity = initial_capacity;
+  }
   loom_module_value_ordinal_scratch_acquire(module);
   out_domain->flags |= LOOM_LOCAL_VALUE_DOMAIN_FLAG_ACQUIRED | flags;
   iree_status_t status =

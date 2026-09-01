@@ -18,8 +18,8 @@ from loom.target.low_descriptors import (
     Constraint,
     ConstraintKind,
     Descriptor,
+    DescriptorCarrier,
     DescriptorFlag,
-    DescriptorOpKind,
     DescriptorSet,
     Effect,
     EffectFlag,
@@ -302,14 +302,6 @@ _SHUFFLE_BYTE_IMMEDIATES = tuple(
     for i in range(16)
 )
 
-_TARGET_BLOCK_IMMEDIATE = Immediate(
-    "target_block",
-    ImmediateKind.ORDINAL,
-    flags=(ImmediateFlag.SYMBOLIC,),
-    bit_width=32,
-    unsigned_max=(2**32) - 1,
-)
-
 _TRUE_BLOCK_IMMEDIATE = Immediate(
     "true_block",
     ImmediateKind.ORDINAL,
@@ -379,7 +371,7 @@ TEST_LOW_CONST_I32_DESCRIPTOR = Descriptor(
     mnemonic="test.const.i32",
     semantic_tag="integer.const.i32",
     operands=(_i32_result(),),
-    op_kind=DescriptorOpKind.CONST,
+    carrier=DescriptorCarrier.CONST,
     immediates=(_I32_VALUE_IMMEDIATE,),
     constraints=(Constraint(ConstraintKind.REMATERIALIZABLE, 0),),
     asm_forms=_asm(results=("dst",), immediates=("i32_value",)),
@@ -393,7 +385,7 @@ TEST_LOW_CONST_ZERO_I32_DESCRIPTOR = Descriptor(
     mnemonic="test.const.zero.i32",
     semantic_tag="integer.const.zero.i32",
     operands=(_i32_result(),),
-    op_kind=DescriptorOpKind.CONST,
+    carrier=DescriptorCarrier.CONST,
     asm_forms=_asm(results=("dst",)),
     schedule_class=_SCHEDULE_CONST,
     flags=(DescriptorFlag.DEAD_REMOVABLE,),
@@ -427,6 +419,31 @@ TEST_LOW_MUL_I32_DESCRIPTOR = Descriptor(
     semantic_tag="integer.mul.i32",
     operands=(_i32_result(), _i32_operand("lhs"), _i32_operand("rhs")),
     asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
+    schedule_class=_SCHEDULE_SCALAR_ALU,
+    flags=(DescriptorFlag.DEAD_REMOVABLE,),
+)
+
+TEST_LOW_VARIABLE_I32_DESCRIPTOR = Descriptor(
+    key="test.variable.i32",
+    mnemonic="test.variable.i32",
+    semantic_tag="test.variable.i32",
+    operands=(
+        Operand(
+            "dst",
+            OperandRole.RESULT,
+            _I32_ALT,
+            flags=(OperandFlag.VARIABLE_UNIT_COUNT,),
+            unit_count=64,
+        ),
+        Operand(
+            "src",
+            OperandRole.OPERAND,
+            _I32_ALT,
+            flags=(OperandFlag.VARIABLE_UNIT_COUNT,),
+            unit_count=64,
+        ),
+    ),
+    asm_forms=_asm(results=("dst",), operands=("src",)),
     schedule_class=_SCHEDULE_SCALAR_ALU,
     flags=(DescriptorFlag.DEAD_REMOVABLE,),
 )
@@ -476,6 +493,16 @@ TEST_LOW_CMP_EQ_I32_DESCRIPTOR = Descriptor(
     key="test.cmp.eq.i32",
     mnemonic="test.cmp.eq.i32",
     semantic_tag="integer.cmp.eq.i32",
+    operands=(_i32_result(), _i32_operand("lhs"), _i32_operand("rhs")),
+    asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
+    schedule_class=_SCHEDULE_SCALAR_ALU,
+    flags=(DescriptorFlag.DEAD_REMOVABLE,),
+)
+
+TEST_LOW_CMP_ULT_I32_DESCRIPTOR = Descriptor(
+    key="test.cmp.ult.i32",
+    mnemonic="test.cmp.ult.i32",
+    semantic_tag="integer.cmp.ult.i32",
     operands=(_i32_result(), _i32_operand("lhs"), _i32_operand("rhs")),
     asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
     schedule_class=_SCHEDULE_SCALAR_ALU,
@@ -1067,8 +1094,20 @@ TEST_LOW_BR_DESCRIPTOR = Descriptor(
     mnemonic="test.br",
     semantic_tag="control.branch",
     operands=(),
-    immediates=(_TARGET_BLOCK_IMMEDIATE,),
-    asm_forms=_asm(immediates=("target_block",)),
+    carrier=DescriptorCarrier.BRANCH,
+    asm_forms=_asm(),
+    effects=(_CONTROL_EFFECT,),
+    schedule_class=_SCHEDULE_CONTROL,
+    flags=(DescriptorFlag.SIDE_EFFECTING, DescriptorFlag.TERMINATOR),
+)
+
+TEST_LOW_SWITCH_DESCRIPTOR = Descriptor(
+    key="test.switch",
+    mnemonic="test.switch",
+    semantic_tag="control.switch",
+    operands=(_i32_operand("selector"),),
+    carrier=DescriptorCarrier.SWITCH,
+    asm_forms=_asm(operands=("selector",)),
     effects=(_CONTROL_EFFECT,),
     schedule_class=_SCHEDULE_CONTROL,
     flags=(DescriptorFlag.SIDE_EFFECTING, DescriptorFlag.TERMINATOR),
@@ -1113,7 +1152,7 @@ TEST_LOW_ALT_CONST_I32_DESCRIPTOR = Descriptor(
     mnemonic="test.alt.const.i32",
     semantic_tag="test.alt.integer.const.i32",
     operands=(_i32_result(),),
-    op_kind=DescriptorOpKind.CONST,
+    carrier=DescriptorCarrier.CONST,
     immediates=(_I32_VALUE_IMMEDIATE,),
     asm_forms=_asm(results=("dst",), immediates=("i32_value",)),
     schedule_class=_SCHEDULE_CONST,
@@ -1162,7 +1201,10 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
             _REG_I64, 64, SpillSlotSpace.PRIVATE, flags=(RegClassFlag.VIRTUAL_ONLY,)
         ),
         RegClass(
-            _REG_PTR, 64, SpillSlotSpace.PRIVATE, flags=(RegClassFlag.VIRTUAL_ONLY,)
+            _REG_PTR,
+            64,
+            SpillSlotSpace.PRIVATE,
+            flags=(RegClassFlag.VIRTUAL_ONLY, RegClassFlag.UNALIGNED_RANGES),
         ),
         RegClass(
             _REG_PHYS,
@@ -1307,6 +1349,7 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_ADD_I32_DESCRIPTOR,
         TEST_LOW_CONVERGENT_I32_DESCRIPTOR,
         TEST_LOW_MUL_I32_DESCRIPTOR,
+        TEST_LOW_VARIABLE_I32_DESCRIPTOR,
         TEST_LOW_ADD_F32_DESCRIPTOR,
         TEST_LOW_SUB_F32_DESCRIPTOR,
         TEST_LOW_MUL_F32_DESCRIPTOR,
@@ -1320,6 +1363,7 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_WRITE_HIGH16_I32_DESCRIPTOR,
         TEST_LOW_SPV_OP_IADD_I32_DESCRIPTOR,
         TEST_LOW_CMP_EQ_I32_DESCRIPTOR,
+        TEST_LOW_CMP_ULT_I32_DESCRIPTOR,
         TEST_LOW_SELECT_I32_DESCRIPTOR,
         TEST_LOW_ADD_V4I32_DESCRIPTOR,
         TEST_LOW_EARLY_CLOBBER_V4I32_DESCRIPTOR,
@@ -1352,6 +1396,7 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_CALL_I32_DESCRIPTOR,
         TEST_LOW_BARRIER_DESCRIPTOR,
         TEST_LOW_BR_DESCRIPTOR,
+        TEST_LOW_SWITCH_DESCRIPTOR,
         TEST_LOW_COND_BR_I32_DESCRIPTOR,
         TEST_LOW_RETURN_I32_DESCRIPTOR,
         TEST_LOW_RETURN_VOID_DESCRIPTOR,

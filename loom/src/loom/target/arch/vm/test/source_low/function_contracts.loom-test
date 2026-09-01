@@ -1,0 +1,249 @@
+// RUN: pass vm-materialize-function-contracts
+
+vm.target<core> @target
+
+low.func.def pure target<vm.core>(@target) abi(vm_function) @integer_contracts(%value: reg<vm.value : index>, %limit: reg<vm.value : index>) -> (reg<vm.value : index>) where [range(%value, 4, 4096), le(%value, %limit), mul(%value, 4), pow2(%value)] asm {
+  return %value
+}
+
+// ----
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) abi(vm_function) @integer_contracts(%value: reg<vm.value : index>, %limit: reg<vm.value : index>) -> (reg<vm.value : index>) asm {
+  %3 = constant.s16 4 : reg<vm.value : i64>
+  %4 = constant.s16 4096 : reg<vm.value : i64>
+  %5 = integer.compare.i64 %value, %3, sge : reg<vm.value : i1>
+  %6 = ref.null : reg<vm.ref : buffer>
+  control.assert %5, %6
+  %7 = integer.compare.i64 %value, %4, sle : reg<vm.value : i1>
+  control.assert %7, %6
+  %8 = integer.compare.i64 %value, %limit, sle : reg<vm.value : i1>
+  control.assert %8, %6
+  %9 = constant.s16 4 : reg<vm.value : i64>
+  %10 = constant.zero : reg<vm.value : i64>
+  %11 = integer.compare.i64 %9, %10, ne : reg<vm.value : i1>
+  control.assert %11, %6
+  %12 = integer.rem.s64 %value, %9 : reg<vm.value : i64>
+  %13 = integer.compare.i64 %12, %10, eq : reg<vm.value : i1>
+  control.assert %13, %6
+  %14 = constant.zero : reg<vm.value : i64>
+  %15 = constant.s16 1 : reg<vm.value : i64>
+  %16 = integer.compare.i64 %value, %14, sgt : reg<vm.value : i1>
+  control.assert %16, %6
+  %17 = integer.sub.i64 %value, %15 : reg<vm.value : i64>
+  %18 = integer.and.i64 %value, %17 : reg<vm.value : i64>
+  %19 = integer.compare.i64 %18, %14, eq : reg<vm.value : i1>
+  control.assert %19, %6
+  return %value
+}
+
+// ====
+
+// RUN: pass vm-materialize-function-contracts
+
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) abi(vm_function) @narrow_integer_contract(%value: reg<vm.value : i8>) -> (reg<vm.value : i8>) where [ge(%value, -7)] asm {
+  return %value
+}
+
+// ----
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) abi(vm_function) @narrow_integer_contract(%value: reg<vm.value : i8>) -> (reg<vm.value : i8>) asm {
+  %2 = conversion.integer %value, s8.to.i32 : reg<vm.value : i32>
+  %3 = constant.i32 4294967289 : reg<vm.value : i32>
+  %4 = integer.compare.i32 %2, %3, sge : reg<vm.value : i1>
+  %5 = ref.null : reg<vm.ref : buffer>
+  control.assert %4, %5
+  return %value
+}
+
+// ====
+
+// RUN: pass vm-materialize-function-contracts
+
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) abi(vm_function) @integer_relations(%lhs: reg<vm.value : i32>, %rhs: reg<vm.value : i32>) -> (reg<vm.value : i32>) where [eq(%lhs, %rhs), ne(%lhs, %rhs), lt(%lhs, %rhs), le(%lhs, %rhs), gt(%lhs, %rhs), ge(%lhs, %rhs), min(%lhs, -4), max(%lhs, 1024)] asm {
+  return %lhs
+}
+
+// ----
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) abi(vm_function) @integer_relations(%lhs: reg<vm.value : i32>, %rhs: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+  %3 = integer.compare.i32 %lhs, %rhs, eq : reg<vm.value : i1>
+  %4 = ref.null : reg<vm.ref : buffer>
+  control.assert %3, %4
+  %5 = integer.compare.i32 %lhs, %rhs, ne : reg<vm.value : i1>
+  control.assert %5, %4
+  %6 = integer.compare.i32 %lhs, %rhs, slt : reg<vm.value : i1>
+  control.assert %6, %4
+  %7 = integer.compare.i32 %lhs, %rhs, sle : reg<vm.value : i1>
+  control.assert %7, %4
+  %8 = integer.compare.i32 %lhs, %rhs, sgt : reg<vm.value : i1>
+  control.assert %8, %4
+  %9 = integer.compare.i32 %lhs, %rhs, sge : reg<vm.value : i1>
+  control.assert %9, %4
+  %10 = constant.i32 4294967292 : reg<vm.value : i32>
+  %11 = integer.compare.i32 %lhs, %10, sge : reg<vm.value : i1>
+  control.assert %11, %4
+  %12 = constant.s16 1024 : reg<vm.value : i32>
+  %13 = integer.compare.i32 %lhs, %12, sle : reg<vm.value : i1>
+  control.assert %13, %4
+  return %lhs
+}
+
+// ====
+
+// RUN: pass vm-materialize-function-contracts
+
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) abi(vm_function) @narrow_integer_wide_contract(%value: reg<vm.value : i16>) -> (reg<vm.value : i16>) where [lt(%value, 2147483648)] asm {
+  return %value
+}
+
+// ----
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) abi(vm_function) @narrow_integer_wide_contract(%value: reg<vm.value : i16>) -> (reg<vm.value : i16>) asm {
+  %2 = conversion.integer %value, s16.to.i32 : reg<vm.value : i32>
+  %3 = conversion.integer %2, s32.to.i64 : reg<vm.value : i64>
+  %4 = constant.i32 2147483648 : reg<vm.value : i64>
+  %5 = integer.compare.i64 %3, %4, slt : reg<vm.value : i1>
+  %6 = ref.null : reg<vm.ref : buffer>
+  control.assert %5, %6
+  return %value
+}
+
+// ====
+
+// RUN: pass vm-materialize-function-contracts
+
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) abi(vm_function) @float_contracts(%narrow: reg<vm.value : bf16>, %wide: reg<vm.value : f64>) -> (%result: reg<vm.value : bf16>) where [not_nan(%narrow), not_inf(%narrow), finite(%wide), finite(%result)] asm {
+  return %narrow
+}
+
+// ----
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) abi(vm_function) @float_contracts(%narrow: reg<vm.value : bf16>, %wide: reg<vm.value : f64>) -> (%result: reg<vm.value : bf16>) asm {
+  %3 = conversion.float.extend %narrow, bf16.to.f32 : reg<vm.value : f32>
+  %4 = float.classify.f32 %3, isnan : reg<vm.value : i1>
+  %5 = constant.zero : reg<vm.value : i32>
+  %6 = integer.compare.i32 %4, %5, eq : reg<vm.value : i1>
+  %7 = ref.null : reg<vm.ref : buffer>
+  control.assert %6, %7
+  %8 = conversion.float.extend %narrow, bf16.to.f32 : reg<vm.value : f32>
+  %9 = float.classify.f32 %8, isinf : reg<vm.value : i1>
+  %10 = constant.zero : reg<vm.value : i32>
+  %11 = integer.compare.i32 %9, %10, eq : reg<vm.value : i1>
+  control.assert %11, %7
+  %12 = float.classify.f64 %wide, isfinite : reg<vm.value : i1>
+  control.assert %12, %7
+  %13 = conversion.float.extend %narrow, bf16.to.f32 : reg<vm.value : f32>
+  %14 = float.classify.f32 %13, isfinite : reg<vm.value : i1>
+  %15 = ref.null : reg<vm.ref : buffer>
+  control.assert %14, %15
+  return %narrow
+}
+
+// ====
+
+// RUN: pass vm-materialize-function-contracts
+
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) abi(vm_function) @narrow_float_contracts(%e4m3: reg<vm.value : f8E4M3>, %e5m2: reg<vm.value : f8E5M2>, %half: reg<vm.value : f16>) -> (reg<vm.value : f16>) where [finite(%e4m3), finite(%e5m2), finite(%half)] asm {
+  return %half
+}
+
+// ----
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) abi(vm_function) @narrow_float_contracts(%e4m3: reg<vm.value : f8E4M3>, %e5m2: reg<vm.value : f8E5M2>, %half: reg<vm.value : f16>) -> (reg<vm.value : f16>) asm {
+  %4 = conversion.float.extend %e4m3, f8e4m3.to.f32 : reg<vm.value : f32>
+  %5 = float.classify.f32 %4, isfinite : reg<vm.value : i1>
+  %6 = ref.null : reg<vm.ref : buffer>
+  control.assert %5, %6
+  %7 = conversion.float.extend %e5m2, f8e5m2.to.f32 : reg<vm.value : f32>
+  %8 = float.classify.f32 %7, isfinite : reg<vm.value : i1>
+  control.assert %8, %6
+  %9 = conversion.float.extend %half, f16.to.f32 : reg<vm.value : f32>
+  %10 = float.classify.f32 %9, isfinite : reg<vm.value : i1>
+  control.assert %10, %6
+  return %half
+}
+
+// ====
+
+// RUN: pass vm-materialize-function-contracts,vm-materialize-call-abi,low-dce
+
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) abi(vm_function) @contract_precedes_call_abi(%value: reg<vm.value : index>) -> (reg<vm.value : index>) where [range(%value, 1, 64)] asm {
+  return %value
+}
+
+// ----
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : index>) -> (reg<vm.value : index>)>}) @contract_precedes_call_abi(%value: reg<vm.value : index>) -> (reg<vm.value : index>) asm {
+  %7 = copy %value : reg<vm.value : index> -> reg<vm.value : index>
+  %2 = constant.s16 1 : reg<vm.value : i64>
+  %3 = constant.s16 64 : reg<vm.value : i64>
+  %4 = integer.compare.i64 %7, %2, sge : reg<vm.value : i1>
+  %5 = ref.null : reg<vm.ref : buffer>
+  control.assert %4, %5
+  %6 = integer.compare.i64 %7, %3, sle : reg<vm.value : i1>
+  control.assert %6, %5
+  %8 = copy %7 : reg<vm.value : index> -> reg<vm.value : index>
+  return %8
+}
+
+// ====
+
+// RUN: pass vm-materialize-function-contracts
+
+vm.target<core> @target
+
+low.func.def pure target<vm.core>(@target) abi(vm_function) @result_postcondition(%minimum: reg<vm.value : i32>) -> (%result: reg<vm.value : i32>) where [ge(%result, %minimum)] asm {
+  return %minimum
+}
+
+// ----
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) abi(vm_function) @result_postcondition(%minimum: reg<vm.value : i32>) -> (%result: reg<vm.value : i32>) asm {
+  %2 = integer.compare.i32 %minimum, %minimum, sge : reg<vm.value : i1>
+  %3 = ref.null : reg<vm.ref : buffer>
+  control.assert %2, %3
+  return %minimum
+}
+
+// ====
+
+// RUN: emit source-low output=low
+
+vm.target<core> @target
+
+func.def pure target(@target) @result_postconditions(%condition: i1, %minimum: i32, %alternate: i32) -> (%result: i32) where [ge(%minimum, 0), ge(%result, %minimum)] {
+  cfg.cond_br %condition, ^minimum, ^alternate
+^minimum:
+  func.return %minimum : i32
+^alternate:
+  func.return %alternate : i32
+}
+
+// ----
+low.func.def pure target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i1>, reg<vm.value : i32>, reg<vm.value : i32>) -> (reg<vm.value : i32>)>}) @result_postconditions(%condition: reg<vm.value : i1>, %minimum: reg<vm.value : i32>, %alternate: reg<vm.value : i32>) -> (%result: reg<vm.value : i32>) where [ge(%minimum, 0), ge(%result, %minimum)] asm {
+  low.cond_br %condition, ^minimum, ^alternate : reg<vm.value : i1>
+^minimum:
+  return %minimum
+^alternate:
+  return %alternate
+}

@@ -25,12 +25,14 @@ LOOMC_TARGET_AMDGPU_COMPATIBLE_WITH = loom_config_compatible_with([
 loom_cc_test(
     name = "jit_kernel_test",
     srcs = ["jit_kernel.c"],
-    args = ["$(location //loom/docs/examples/integration/jit-kernel:kernel.loom)"],
-    data = ["//loom/docs/examples/integration/jit-kernel:kernel.loom"],
+    args = ["$(location //loom/docs/examples/integration/jit-kernel:kernel_bytecode)"],
+    data = ["//loom/docs/examples/integration/jit-kernel:kernel_bytecode"],
     tags = ["hostonly"],
     target_compatible_with = LOOMC_TARGET_AMDGPU_COMPATIBLE_WITH,
     deps = [
         "//loom/binding/c:loomc",
         "//loom/binding/c/target/amdgpu",
+        "//loom/binding/c/target/kernel",
+        "//loom/binding/c/target/vm",
     ],
 )

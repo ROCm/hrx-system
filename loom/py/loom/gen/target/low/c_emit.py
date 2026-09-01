@@ -212,6 +212,7 @@ def _descriptor_row_lines(
             f".semantic_tag_string_offset = {c_spelling.optional_string_expr(pool, f'semantic_{descriptor.key}' if descriptor.semantic_tag is not None else None)},",
             f".feature_mask_word_start = {descriptor_rows[i]['feature_mask_word_start']},",
             f".feature_mask_word_count = {descriptor_rows[i]['feature_mask_word_count']},",
+            f".carrier = {descriptor.carrier.c_name},",
             f".encoding_field_value_start = {descriptor_rows[i]['encoding_field_value_start']},",
             f".encoding_field_value_count = {descriptor_rows[i]['encoding_field_value_count']},",
             f".encoding_format_id = {descriptor.encoding_format_id},",
@@ -231,7 +232,6 @@ def _descriptor_row_lines(
             f".operand_form_start = {descriptor_rows[i]['operand_form_start']},",
             f".operand_form_count = {descriptor_rows[i]['operand_form_count']},",
             f".flags = {c_spelling.flag_expr(descriptor.flags)},",
-            f".op_kind = {descriptor.op_kind.c_name},",
         ]
         for i, descriptor in enumerate(descriptors)
     ]
@@ -810,6 +810,7 @@ def emit_source_for_views(
         [
             [
                 f".immediate_index = {immediate.immediate_index},",
+                f".flags = {c_spelling.flag_expr(immediate.flags)},",
                 f".name_string_offset = {c_spelling.optional_string_expr(pool, immediate.name_label)},",
             ]
             for immediate in asm_table_storage.immediates

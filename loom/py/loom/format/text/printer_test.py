@@ -66,6 +66,7 @@ from loom.ir import (
     TaggedLocation,
     Type,
     TypeKind,
+    U64Attr,
     Value,
 )
 from loom.ir import (
@@ -767,6 +768,21 @@ class TestPrintAttrDict:
         assert (
             text == '%r = test.attrs %x {axis = 0, label = "foo", '
             'payload = bytes("0011feff")} : f32'
+        )
+
+    def test_quoted_key_and_unsigned_integer(self) -> None:
+        module, [x, r] = _module_with(("x", F32), ("r", F32))
+        op = Operation(
+            name="test.attrs",
+            operands=[x],
+            results=[r],
+            attributes={
+                "dict": {"model.revision": U64Attr(2**64 - 1)},
+            },
+        )
+        text = _printer().print_operation(op, module)
+        assert text == (
+            '%r = test.attrs %x {"model.revision" = u64(18446744073709551615)} : f32'
         )
 
     def test_empty_dict(self) -> None:

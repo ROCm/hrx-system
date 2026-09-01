@@ -55,7 +55,7 @@ static loom_pass_descriptor_t MakeFunctionPassDescriptor(
 static iree_status_t ContributeMaterialization(
     const loom_target_pipeline_contribution_t* contribution) {
   if (contribution->phase !=
-      LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_MATERIALIZATION) {
+      LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_FUNCTION_MATERIALIZATION) {
     return iree_ok_status();
   }
   loom_op_t* run_op = nullptr;
@@ -67,7 +67,7 @@ static iree_status_t ContributeMaterialization(
 static iree_status_t ContributePreparation(
     const loom_target_pipeline_contribution_t* contribution) {
   if (contribution->phase !=
-      LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_PREPARATION) {
+      LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_FUNCTION_PREPARATION) {
     return iree_ok_status();
   }
   loom_op_t* run_op = nullptr;
@@ -75,6 +75,34 @@ static iree_status_t ContributePreparation(
                                 IREE_SV("target-prepare"),
                                 loom_named_attr_slice_empty(), &run_op);
 }
+
+static iree_status_t PrepareLaunchConfigCompiler(
+    const loom_target_launch_config_root_set_t* root_set,
+    iree_arena_allocator_t* arena,
+    const loom_pass_environment_capability_t** out_capability) {
+  (void)root_set;
+  (void)arena;
+  *out_capability = nullptr;
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED);
+}
+
+static iree_status_t EmitLaunchConfigCompiler(
+    const loom_pass_environment_capability_t* capability,
+    const loom_target_emit_request_t* request,
+    loom_target_emit_artifact_t* out_artifact) {
+  (void)capability;
+  (void)request;
+  *out_artifact = {};
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED);
+}
+
+static const loom_target_launch_config_compiler_t kLaunchConfigCompiler = {
+    /*.public_artifact_format=*/IREE_SVL("test"),
+    /*.file_extension=*/IREE_SVL(".launch-config.test"),
+    /*.default_identifier=*/IREE_SVL("launch-config.test"),
+    /*.prepare=*/PrepareLaunchConfigCompiler,
+    /*.emit=*/EmitLaunchConfigCompiler,
+};
 
 struct PipelineBuildData {
   const loom_target_environment_t* environment;
@@ -85,14 +113,16 @@ static iree_status_t BuildContributedPipeline(loom_builder_t* builder,
   const PipelineBuildData* data =
       static_cast<const PipelineBuildData*>(user_data);
   IREE_RETURN_IF_ERROR(loom_target_environment_contribute_pipeline(
-      data->environment, LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_MATERIALIZATION,
+      data->environment,
+      LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_FUNCTION_MATERIALIZATION,
       loom_pass_environment_empty(), builder));
   loom_op_t* run_op = nullptr;
   IREE_RETURN_IF_ERROR(
       loom_pass_ir_build_run(builder, 0, IREE_SV("driver-cleanup"),
                              loom_named_attr_slice_empty(), &run_op));
   return loom_target_environment_contribute_pipeline(
-      data->environment, LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_PREPARATION,
+      data->environment,
+      LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_FUNCTION_PREPARATION,
       loom_pass_environment_empty(), builder);
 }
 
@@ -131,6 +161,7 @@ class TargetProviderTest : public ::testing::Test {
 
 TEST_F(TargetProviderTest, ContributesPassIrByPhase) {
   static const loom_target_provider_t materialization_provider = {
+      /*.fact_type=*/{},
       /*.profile_type=*/{},
       /*.materialize_definition=*/{},
       /*.register_context=*/{},
@@ -147,6 +178,7 @@ TEST_F(TargetProviderTest, ContributesPassIrByPhase) {
       /*.contribute_pipeline=*/ContributeMaterialization,
   };
   static const loom_target_provider_t preparation_provider = {
+      /*.fact_type=*/{},
       /*.profile_type=*/{},
       /*.materialize_definition=*/{},
       /*.register_context=*/{},
@@ -222,6 +254,7 @@ TEST_F(TargetProviderTest, ComposesTargetPassRegistries) {
       /*.descriptor_count=*/IREE_ARRAYSIZE(second_descriptors),
   };
   static const loom_target_provider_t first_provider = {
+      /*.fact_type=*/{},
       /*.profile_type=*/{},
       /*.materialize_definition=*/{},
       /*.register_context=*/{},
@@ -237,6 +270,7 @@ TEST_F(TargetProviderTest, ComposesTargetPassRegistries) {
       /*.pass_registry=*/&first_registry,
   };
   static const loom_target_provider_t second_provider = {
+      /*.fact_type=*/{},
       /*.profile_type=*/{},
       /*.materialize_definition=*/{},
       /*.register_context=*/{},
@@ -278,14 +312,25 @@ TEST_F(TargetProviderTest, ComposesTargetPassRegistries) {
   loom_target_environment_deinitialize(&environment);
 }
 
-TEST_F(TargetProviderTest, LooksUpProfileProvider) {
+TEST_F(TargetProviderTest, LooksUpFactAndProfileProvider) {
+  static const loom_target_fact_type_t kOwnedFactType = {
+      /*.name=*/IREE_SVL("owned"),
+      /*.storage_size=*/sizeof(loom_target_facts_t),
+  };
+  static const loom_target_fact_type_t kUnownedFactType = {
+      /*.name=*/IREE_SVL("unowned"),
+      /*.storage_size=*/sizeof(loom_target_facts_t),
+  };
   static const loom_target_profile_type_t kOwnedProfileType = {
       /*.name=*/IREE_SVL("owned"),
+      /*.fact_type=*/&kOwnedFactType,
   };
   static const loom_target_profile_type_t kUnownedProfileType = {
       /*.name=*/IREE_SVL("unowned"),
+      /*.fact_type=*/&kUnownedFactType,
   };
   static const loom_target_provider_t provider = {
+      /*.fact_type=*/&kOwnedFactType,
       /*.profile_type=*/&kOwnedProfileType,
   };
   static const loom_target_provider_t* const providers[] = {
@@ -303,8 +348,120 @@ TEST_F(TargetProviderTest, LooksUpProfileProvider) {
   EXPECT_EQ(loom_target_environment_lookup_profile_provider(
                 &environment, &kUnownedProfileType),
             nullptr);
+  EXPECT_EQ(loom_target_environment_lookup_fact_provider(&environment,
+                                                         &kOwnedFactType),
+            &provider);
+  EXPECT_EQ(loom_target_environment_lookup_fact_provider(&environment,
+                                                         &kUnownedFactType),
+            nullptr);
 
   loom_target_environment_deinitialize(&environment);
+}
+
+TEST_F(TargetProviderTest, RejectsAmbiguousFactFamilyOwnership) {
+  static const loom_target_fact_type_t kFactType = {
+      /*.name=*/IREE_SVL("duplicate"),
+      /*.storage_size=*/sizeof(loom_target_facts_t),
+  };
+  static const loom_target_provider_t first_provider = {
+      /*.fact_type=*/&kFactType,
+  };
+  static const loom_target_provider_t second_provider = {
+      /*.fact_type=*/&kFactType,
+  };
+  static const loom_target_provider_t* const providers[] = {
+      &first_provider,
+      &second_provider,
+  };
+  const loom_target_provider_set_t provider_set =
+      loom_target_provider_set_make(providers, IREE_ARRAYSIZE(providers));
+  loom_target_environment_t environment = {};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_target_environment_initialize(&provider_set, &environment));
+}
+
+TEST_F(TargetProviderTest, RejectsProfileFromAnotherFactFamily) {
+  static const loom_target_fact_type_t kProviderFactType = {
+      /*.name=*/IREE_SVL("provider"),
+      /*.storage_size=*/sizeof(loom_target_facts_t),
+  };
+  static const loom_target_fact_type_t kProfileFactType = {
+      /*.name=*/IREE_SVL("profile"),
+      /*.storage_size=*/sizeof(loom_target_facts_t),
+  };
+  static const loom_target_profile_type_t kProfileType = {
+      /*.name=*/IREE_SVL("profile"),
+      /*.fact_type=*/&kProfileFactType,
+  };
+  static const loom_target_provider_t provider = {
+      /*.fact_type=*/&kProviderFactType,
+      /*.profile_type=*/&kProfileType,
+  };
+  static const loom_target_provider_t* const providers[] = {
+      &provider,
+  };
+  const loom_target_provider_set_t provider_set =
+      loom_target_provider_set_make(providers, IREE_ARRAYSIZE(providers));
+  loom_target_environment_t environment = {};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_target_environment_initialize(&provider_set, &environment));
+}
+
+TEST_F(TargetProviderTest, LooksUpLaunchConfigCompiler) {
+  loom_target_provider_t provider = {};
+  provider.launch_config_compiler = &kLaunchConfigCompiler;
+  const loom_target_provider_t* const providers[] = {
+      &provider,
+  };
+  const loom_target_provider_set_t provider_set =
+      loom_target_provider_set_make(providers, IREE_ARRAYSIZE(providers));
+  loom_target_environment_t environment = {};
+  IREE_ASSERT_OK(
+      loom_target_environment_initialize(&provider_set, &environment));
+
+  EXPECT_EQ(loom_target_environment_launch_config_compiler(&environment),
+            &kLaunchConfigCompiler);
+
+  loom_target_environment_deinitialize(&environment);
+}
+
+TEST_F(TargetProviderTest, RejectsIncompleteLaunchConfigCompiler) {
+  static const loom_target_launch_config_compiler_t incomplete_compiler = {
+      /*.public_artifact_format=*/IREE_SVL("test"),
+      /*.file_extension=*/IREE_SVL(".launch-config.test"),
+      /*.default_identifier=*/IREE_SVL("launch-config.test"),
+      /*.prepare=*/PrepareLaunchConfigCompiler,
+  };
+  loom_target_provider_t provider = {};
+  provider.launch_config_compiler = &incomplete_compiler;
+  const loom_target_provider_t* const providers[] = {
+      &provider,
+  };
+  const loom_target_provider_set_t provider_set =
+      loom_target_provider_set_make(providers, IREE_ARRAYSIZE(providers));
+  loom_target_environment_t environment = {};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_target_environment_initialize(&provider_set, &environment));
+}
+
+TEST_F(TargetProviderTest, RejectsAmbiguousLaunchConfigCompilers) {
+  loom_target_provider_t first_provider = {};
+  first_provider.launch_config_compiler = &kLaunchConfigCompiler;
+  loom_target_provider_t second_provider = {};
+  second_provider.launch_config_compiler = &kLaunchConfigCompiler;
+  const loom_target_provider_t* const providers[] = {
+      &first_provider,
+      &second_provider,
+  };
+  const loom_target_provider_set_t provider_set =
+      loom_target_provider_set_make(providers, IREE_ARRAYSIZE(providers));
+  loom_target_environment_t environment = {};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_target_environment_initialize(&provider_set, &environment));
 }
 
 }  // namespace

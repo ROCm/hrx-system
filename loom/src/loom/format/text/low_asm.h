@@ -32,6 +32,15 @@ typedef struct loom_text_low_asm_form_t loom_text_low_asm_form_t;
 typedef struct loom_text_low_asm_descriptor_handle_t
     loom_text_low_asm_descriptor_handle_t;
 
+typedef enum loom_text_low_asm_carrier_e {
+  // Ordinary low.op or low.const packet.
+  LOOM_TEXT_LOW_ASM_CARRIER_PACKET = 0,
+  // Descriptor-backed low.br control transfer.
+  LOOM_TEXT_LOW_ASM_CARRIER_BRANCH = 1,
+  // Descriptor-backed low.switch control transfer.
+  LOOM_TEXT_LOW_ASM_CARRIER_SWITCH = 2,
+} loom_text_low_asm_carrier_t;
+
 typedef enum loom_text_low_asm_operand_segment_delimiter_e {
   // Angle brackets: `<...>`.
   LOOM_TEXT_LOW_ASM_OPERAND_SEGMENT_DELIMITER_ANGLE = 1,
@@ -70,6 +79,8 @@ typedef struct loom_text_low_asm_packet_descriptor_t {
   iree_string_view_t descriptor_key;
   // Surface mnemonic emitted or parsed for this asm packet.
   iree_string_view_t mnemonic;
+  // Canonical Low operation carrying the descriptor.
+  loom_text_low_asm_carrier_t carrier;
   // Number of SSA results produced by this asm packet.
   uint16_t result_count;
   // Minimum number of SSA operands consumed by this asm packet.
@@ -187,7 +198,7 @@ typedef struct loom_text_low_asm_statement_t {
   const loom_value_id_t* results;
   // Number of SSA results in |results|.
   uint16_t result_count;
-  // SSA operands consumed by a packet statement, or return values for returns.
+  // SSA packet operands, branch edge arguments, or return values.
   const loom_value_id_t* operands;
   // Number of SSA values in |operands|.
   uint16_t operand_count;
@@ -211,8 +222,11 @@ typedef struct loom_text_low_asm_statement_t {
 // owning low dialect/descriptor registry. It either returns UNKNOWN for a valid
 // operation that has no lossless low asm spelling, or returns a fully
 // well-formed statement:
-// - PACKET result/operand counts match |packet| and all result/operand IDs are
-//   valid in the module value table.
+// - Ordinary PACKET result/operand counts match |packet|. Branch PACKET
+//   operands are edge arguments and switch PACKET operands contain the single
+//   selector. All result/operand IDs are valid in the module value table.
+// - Branch and switch PACKET operations carry their successors directly on
+//   |op|, with switch successor zero reserved for the default destination.
 // - PACKET immediate attributes are canonical for |packet|; missing optional
 //   immediates are represented by descriptor defaults.
 // - RETURN operands and STRUCTURAL results/operands are valid module values.
@@ -269,6 +283,16 @@ typedef iree_status_t (*loom_text_low_asm_immediate_descriptor_fn_t)(
     uint16_t immediate_index,
     loom_text_low_asm_immediate_descriptor_t* out_immediate);
 
+// Queries a target-owned compact spelling for an immediate attribute value.
+// Returns an empty |out_spelling| when the generic attribute spelling should be
+// used. Non-empty spellings must be directly parseable as generic attribute
+// values and remain valid for the duration of the call.
+typedef iree_status_t (*loom_text_low_asm_query_immediate_spelling_fn_t)(
+    const loom_text_low_asm_environment_state_t* state,
+    const loom_text_low_asm_packet_descriptor_t* packet,
+    uint16_t immediate_index, const loom_module_t* module,
+    const loom_attribute_t* value, iree_string_view_t* out_spelling);
+
 typedef iree_status_t (*loom_text_low_asm_operand_segment_descriptor_fn_t)(
     const loom_text_low_asm_environment_state_t* state,
     const loom_text_low_asm_packet_descriptor_t* packet, uint16_t segment_index,
@@ -281,6 +305,17 @@ typedef iree_status_t (*loom_text_low_asm_build_packet_fn_t)(
     loom_named_attr_slice_t attributes, const loom_type_t* result_types,
     iree_host_size_t result_count, loom_location_id_t location,
     loom_op_t** out_op);
+
+// Builds a control operation from compact target assembly. Branch |operands|
+// are edge arguments and |successors| contains its sole destination. Switch
+// |operands| contains its selector and |successors| contains the default
+// destination followed by the dense target table.
+typedef iree_status_t (*loom_text_low_asm_build_control_fn_t)(
+    const loom_text_low_asm_environment_state_t* state, loom_builder_t* builder,
+    const loom_text_low_asm_packet_descriptor_t* packet,
+    const loom_value_id_t* operands, iree_host_size_t operand_count,
+    loom_block_t* const* successors, iree_host_size_t successor_count,
+    loom_location_id_t location, loom_op_t** out_op);
 
 typedef iree_status_t (*loom_text_low_asm_build_return_fn_t)(
     const loom_text_low_asm_environment_state_t* state, loom_builder_t* builder,
@@ -348,10 +383,14 @@ typedef struct loom_text_low_asm_vtable_t {
       result_type_annotation_required;
   // Returns canonical field and surface spelling metadata for one immediate.
   loom_text_low_asm_immediate_descriptor_fn_t immediate_descriptor;
+  // Queries a compact target-owned spelling for an immediate attribute value.
+  loom_text_low_asm_query_immediate_spelling_fn_t query_immediate_spelling;
   // Returns delimiter and cardinality metadata for one operand segment.
   loom_text_low_asm_operand_segment_descriptor_fn_t operand_segment_descriptor;
   // Builds the canonical low operation for a parsed non-return asm packet.
   loom_text_low_asm_build_packet_fn_t build_packet;
+  // Builds a descriptor-backed low.br or low.switch control operation.
+  loom_text_low_asm_build_control_fn_t build_control;
   // Builds the canonical low return operation for an asm `return` packet.
   loom_text_low_asm_build_return_fn_t build_return;
   // Looks up a typed structural intrinsic attribute descriptor by name.
@@ -392,6 +431,7 @@ static inline bool loom_text_low_asm_environment_is_configured(
          environment->vtable->immediate_descriptor &&
          environment->vtable->operand_segment_descriptor &&
          environment->vtable->build_packet &&
+         environment->vtable->build_control &&
          environment->vtable->build_return &&
          environment->vtable->structural_attr_descriptor &&
          environment->vtable->build_structural;
@@ -403,6 +443,7 @@ static inline bool loom_text_low_asm_environment_supports_printing(
          environment->low_repr.vtable && environment->low_repr.state &&
          environment->vtable->result_type_annotation_required &&
          environment->vtable->immediate_descriptor &&
+         environment->vtable->query_immediate_spelling &&
          environment->vtable->operand_segment_descriptor &&
          environment->vtable->describe_operation &&
          environment->vtable->lookup_register_descriptor_set &&

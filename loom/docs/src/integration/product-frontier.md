@@ -4,33 +4,30 @@
 
 A command product can finish before the executable kernels it references. The
 parent owns portable command bytes and an explicit requirement table; each
-source-backed child crosses the boundary as an independently owned ordinary
-Loom bytecode request. A host can compile those requests locally, send their
-ordinary bytecode and durable roots through its own compiler-service protocol,
-or satisfy the same requirements from prebuilt executables. The product
-descriptor that selects a local pipeline is deliberately process-local and is
-not part of the serialized source.
+source-backed child crosses the boundary as an independently owned executable
+kernel request over ordinary Loom bytecode. A host can compile those requests
+locally, send their bytecode and durable roots through its own compiler-service
+protocol, or satisfy the same requirements from prebuilt executables. The
+product descriptor that selects the kernel-product operation is deliberately
+process-local and is not part of the serialized source.
 
-The checked C example uses only the public `loomc` API. It deliberately runs
-the parent and child synchronously so the ownership boundary remains visible;
-an application worker pool uses the same callback to enqueue transferred
-requests without changing the compiler operations.
+The checked C example uses only the public `loomc` API. It deliberately accepts
+the child synchronously so the ownership boundary remains visible; an
+application worker pool uses the same callback to enqueue transferred requests
+without changing command-product construction.
 
 ## Prepare immutable process state
 
 The example creates one context, one worker-local workspace, and one frozen
 link index over the source universe. It resolves the human-readable command
-root once and keeps the index-wide ordinal for the hot path. A compiler and
-prepared pass program are also created once for child requests:
+root once and keeps the index-wide ordinal for the hot path:
 
 ```c
 --8<-- "generated/examples/integration/product-frontier/product_frontier.c:prepare"
 ```
 
-Frozen indexes, compilers, pass programs, and immutable sources can be shared
-by workers. A workspace is mutable invocation scratch and belongs to one active
-worker. The example reuses one workspace only because its parent and child
-operations run sequentially.
+Frozen indexes and immutable sources can be shared by workers. A workspace is
+mutable invocation scratch and belongs to one active worker.
 
 ## Publish only source-backed child work
 
@@ -62,30 +59,32 @@ Leaving `request_sink.publish` null is the body-blind path. It returns the same
 command programs and entry requirements without opening, classifying, cloning,
 or serializing implementation bodies.
 
-## Compile children as ordinary requests
+## Route typed child requests
 
 Every published child carries a normal `.loombc` source, exact source-local
-root ordinals, the required process-local product descriptor, and provisional
-bindings to its parent requirements. It retains no mutable module, workspace,
-link plan, or analysis state.
+root ordinals, the kernel-product descriptor, and provisional bindings to its
+parent requirements. The executable-entry goal says the command program
+already owns physical launch geometry, so the kernel product must not produce a
+second host launch configuration. The request retains no mutable module,
+workspace, link plan, or analysis state.
 
-The example compiles its child through the generic prepared compiler and asks
-for a bytecode module product:
+The example validates the request identity and parent binding before handing it
+to target-specific scheduling:
 
 ```c
---8<-- "generated/examples/integration/product-frontier/product_frontier.c:compile-request"
+--8<-- "generated/examples/integration/product-frontier/product_frontier.c:inspect-request"
 ```
 
-This target-independent pipeline keeps the example available in builds that
-disable AMDGPU, SPIR-V, and LLVM emission. A target integration selects its
-normal target pipeline and executable emitter for the same exact request. The
-[kernel JIT guide](jit-kernel.md) shows target specialization, native artifact
-emission, and runtime loading for AMDGPU and SPIR-V.
+Keeping the example at the request boundary makes it available in builds that
+disable AMDGPU, SPIR-V, and LLVM emission. A target integration passes the same
+request to `loomc_kernel_product_build_request` with its prepared compiler,
+target pipeline, and executable emitter. The [kernel JIT guide](jit-kernel.md)
+shows target specialization, native artifact emission, and runtime loading for
+AMDGPU and SPIR-V.
 
-The child product preserves request-root order as export order and has no
-unresolved requirements. Its parent binding is separate from compilation
-identity, so two parents can reuse one compiled product while binding its
-exports into different requirement ordinals.
+The parent binding is separate from compilation identity, so two parents can
+reuse one compiled product while binding its exports into different
+requirement ordinals.
 
 ## Run the checked example
 
@@ -99,7 +98,7 @@ The output summarizes the mixed frontier:
 --8<-- "generated/examples/integration/product-frontier/summary.txt"
 ```
 
-The one local kernel produces one child product. The external kernel accounts
+The one local kernel produces one child request. The external kernel accounts
 for the second parent requirement without producing a fake source request.
 
 ## Place caching and concurrency outside compilation

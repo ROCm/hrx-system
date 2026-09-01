@@ -1,0 +1,97 @@
+amdgpu.target<gfx1151> @gfx1151
+
+vm.target<core> @vm
+
+global.variable @ordinary_vm_state : hal.buffer
+
+func.decl import("unavailable", "identity") target(@vm) @ordinary_vm_import(%value: i32) -> (i32)
+
+func.def initializer target(@vm) @ordinary_vm_initialize(%value: hal.buffer) {
+  global.store %value, @ordinary_vm_state : hal.buffer
+  func.return
+}
+
+func.def public target(@vm) @ordinary_vm_export(%value: i32) -> (i32) {
+  %result = func.call @ordinary_vm_import(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+func.def public pure noinline @shared_double(%value: index) -> (index) {
+  %c2 = index.constant 2 : index
+  %result = index.mul %value, %c2 : index
+  func.return %result : index
+}
+
+func.def pure noinline @scale_by_subgroup(%value: index) -> (index) {
+  %subgroup_size = target.subgroup.size : index
+  %result = index.mul %value, %subgroup_size : index
+  func.return %result : index
+}
+
+func.def pure noinline @recursive_identity(%value: index) -> (index) {
+  %c0 = index.constant 0 : index
+  %is_zero = index.cmp eq, %value, %c0 : index
+  %result = scf.if %is_zero -> (index) {
+    scf.yield %c0 : index
+  } else {
+    %c1 = index.constant 1 : index
+    %before = index.sub %value, %c1 : index
+    %recursive = func.call pure @recursive_identity(%before) : (index) -> (index)
+    %after = index.add %recursive, %c1 : index
+    scf.yield %after : index
+  }
+  func.return %result : index
+}
+
+func.def pure noinline @$call_chain(%value: index) -> (index) {
+  func.return %value : index
+}
+
+func.def pure noinline @__loom_launch_config_vm_target(%value: index) -> (index) {
+  %result = func.call pure @shared_double(%value) : (index) -> (index)
+  func.return %result : index
+}
+
+func.def pure noinline @chained_extent(%value: index) -> (index) {
+  %identity = func.call pure @$call_chain(%value) : (index) -> (index)
+  %doubled = func.call pure @__loom_launch_config_vm_target(%value) : (index) -> (index)
+  %sum = index.add %identity, %doubled : index
+  %c3 = index.constant 3 : index
+  %result = index.add %sum, %c3 : index
+  func.return %result : index
+}
+
+func.def public pure noinline @unrelated_extent(%value: index) -> (index) {
+  %c99 = index.constant 99 : index
+  %result = index.add %value, %c99 : index
+  func.return %result : index
+}
+
+kernel.def target(@gfx1151) @call_chain(%value: index) {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  %workgroup_count = func.call pure @chained_extent(%value) : (index) -> (index)
+  kernel.launch.config workgroups(%workgroup_count, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch() {
+  kernel.return
+}
+
+kernel.def target(@gfx1151) @call_shared_and_recursive(%value: index) {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  %doubled = func.call pure @shared_double(%value) : (index) -> (index)
+  %identity = func.call pure @recursive_identity(%value) : (index) -> (index)
+  %workgroup_count = index.add %doubled, %identity : index
+  kernel.launch.config workgroups(%workgroup_count, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch() {
+  kernel.return
+}
+
+kernel.def target(@gfx1151) @call_target_query_helper(%value: index) {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  %workgroup_count = func.call pure @scale_by_subgroup(%value) : (index) -> (index)
+  kernel.launch.config workgroups(%workgroup_count, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch() {
+  kernel.return
+}

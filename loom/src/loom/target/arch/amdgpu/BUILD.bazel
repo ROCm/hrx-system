@@ -48,6 +48,7 @@ _AMDGPU_TOOLING_VISIBILITY = ["//loom/src/loom/tooling/target/amdgpu:__pkg__"]
 _AMDGPU_BINDING_VISIBILITY = ["//loom/binding/c/target/amdgpu:__pkg__"]
 
 _AMDGPU_PROVIDER_VISIBILITY = [
+    "//loom/binding/c/benchmark/target/amdgpu:__pkg__",
     "//loom/src/loom/target/all:__pkg__",
     "//loom/src/loom/target/configured:__pkg__",
     "//loom/src/loom/target/emit/native/amdgpu:__pkg__",
@@ -238,6 +239,7 @@ loom_cc_library(
         _AMDGPU_BINDING_VISIBILITY +
         _AMDGPU_NATIVE_VISIBILITY +
         _AMDGPU_TOOLING_VISIBILITY + [
+            "//loom/binding/c/benchmark/target/amdgpu:__pkg__",
             "//loom/src/loom/tools/loom-link:__pkg__",
         ]
     ),
@@ -453,6 +455,7 @@ loom_cc_library(
     hdrs = ["provider.h"],
     visibility = _AMDGPU_PROVIDER_VISIBILITY,
     deps = [
+        ":facts",
         ":legalization",
         ":low_asm_diagnostics",
         ":low_verify",

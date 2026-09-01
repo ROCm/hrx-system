@@ -118,7 +118,7 @@ static iree_status_t loom_command_verify_program_contract(
     iree_diagnostic_emitter_t emitter) {
   IREE_RETURN_IF_ERROR(loom_function_contract_verify(module, op, emitter));
 
-  loom_func_like_t program = loom_func_like_cast(module, (loom_op_t*)op);
+  loom_func_like_t program = loom_func_like_const_cast(module, op);
   uint16_t argument_count = 0;
   const loom_value_id_t* argument_ids =
       loom_func_like_arg_ids(program, &argument_count);
@@ -171,8 +171,7 @@ iree_status_t loom_command_program_launch_verify(
   const loom_symbol_ref_t callee = loom_command_program_launch_callee(op);
   const loom_op_t* definition_op =
       module->symbols.entries[callee.symbol_id].defining_op;
-  loom_func_like_t program =
-      loom_func_like_cast(module, (loom_op_t*)definition_op);
+  loom_func_like_t program = loom_func_like_const_cast(module, definition_op);
 
   uint16_t argument_count = 0;
   const loom_value_id_t* argument_ids =

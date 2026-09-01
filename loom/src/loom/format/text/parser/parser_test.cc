@@ -337,7 +337,7 @@ TEST_F(ParserTest, ParsedOpScratchFrameRejectsStorageOverflow) {
   loom_parsed_op_reset(scratch);
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_RESOURCE_EXHAUSTED,
-      loom_parsed_op_set_successor(scratch, &parser.parser_arena, UINT8_MAX,
+      loom_parsed_op_set_successor(scratch, &parser.parser_arena, UINT16_MAX,
                                    nullptr, loom_token_none()));
 
   loom_parsed_op_reset(scratch);
@@ -1417,6 +1417,28 @@ TEST_F(ParserTest, AttrDictUnsortedKeysRoundTripInCanonicalOrder) {
       << "attribute dictionary keys should print in canonical order: " << text;
 }
 
+TEST_F(ParserTest, AttrDictQuotedKeyAndUnsignedIntegerRoundTrip) {
+  std::string text = RoundTrip(
+      "%c = test.constant 0.0 : f32\n"
+      "%s = test.attrs %c {\"model.revision\" = "
+      "u64(18446744073709551615)} : f32\n");
+  EXPECT_NE(text.find("{\"model.revision\" = "
+                      "u64(18446744073709551615)}"),
+            std::string::npos)
+      << "quoted dictionary keys and unsigned integers should round-trip: "
+      << text;
+}
+
+TEST_F(ParserTest, UnsignedIntegerRejectsValuesOutsideItsDomain) {
+  EXPECT_FALSE(ParseExpectErrors("%c = test.constant 0.0 : f32\n"
+                                 "%s = test.attrs %c {value = u64(-1)} : f32\n")
+                   .empty());
+  EXPECT_FALSE(ParseExpectErrors("%c = test.constant 0.0 : f32\n"
+                                 "%s = test.attrs %c {value = "
+                                 "u64(18446744073709551616)} : f32\n")
+                   .empty());
+}
+
 TEST_F(ParserTest, AttrDictSymbolRefRoundTrip) {
   std::string text = RoundTrip(
       "test.record @target {}\n"
@@ -1426,6 +1448,23 @@ TEST_F(ParserTest, AttrDictSymbolRefRoundTrip) {
             std::string::npos)
       << "symbol references in generic dictionaries should round-trip: "
       << text;
+}
+
+TEST_F(ParserTest, AttrDictTypeRoundTrip) {
+  std::string text = RoundTrip(
+      "%c = test.constant 0 : f32\n"
+      "%s = test.attrs %c {signature = type<(i32) -> (i64)>} : f32\n");
+  EXPECT_NE(text.find("{signature = type<(i32) -> (i64)>}"), std::string::npos)
+      << "type references in generic dictionaries should round-trip: " << text;
+}
+
+TEST_F(ParserTest, AttrDictQualifiedIdentifierParsesAsString) {
+  std::string text = RoundTrip(
+      "%c = test.constant 0 : f32\n"
+      "%s = test.attrs %c {mode = bf16.to.f32} : f32\n");
+  EXPECT_NE(text.find("test.attrs %c {mode = \"bf16.to.f32\"} : f32"),
+            std::string::npos)
+      << "qualified generic identifiers should parse as strings: " << text;
 }
 
 TEST_F(ParserTest, SymbolForwardReferenceResolvesToLaterDefinition) {
@@ -1948,6 +1987,13 @@ TEST_F(ParserTest, DescriptorBackedTypesRoundTripAndPreserveParameters) {
       loom_test_variant_set_type_has_alternatives(variants_absent_type));
 
   loom_module_free(module);
+}
+
+TEST_F(ParserTest, DescriptorBackedTypesRetainNestedParserScratch) {
+  const char* source =
+      "%first = test.constant 0 : test.array<(i32) -> (i32)>\n"
+      "%second = test.constant 0 : test.array<(i64) -> (i64)>\n";
+  EXPECT_EQ(RoundTrip(source), source);
 }
 
 TEST_F(ParserTest, DescriptorBackedTypeRoundTripsCompactShape) {

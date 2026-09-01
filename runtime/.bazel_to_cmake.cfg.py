@@ -26,6 +26,15 @@ class RuntimeBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
     def _runtime_package_policy(self):
         return self._runtime_requirement_policy.collect(self._package_name())
 
+    def _should_emit_python_target(self):
+        return self._current_package().startswith("runtime/src/iree/vm/bytecode/spec")
+
+    def _python_package_dirs(self):
+        return [
+            "${PROJECT_SOURCE_DIR}/runtime/src/iree/vm/bytecode/spec",
+            "${PROJECT_BINARY_DIR}/runtime/src/iree/vm/bytecode/spec",
+        ]
+
     def _apply_runtime_cmake_policy(self, kwargs, include_run_requirements=False):
         policy = self._runtime_package_policy()
         kwargs = dict(kwargs)

@@ -886,19 +886,6 @@ static iree_status_t loom_low_select_operand_form_rematerialize_operands(
   return iree_ok_status();
 }
 
-static bool loom_low_enum_domain_contains_i64(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_enum_domain_t* domain, int64_t value) {
-  for (uint16_t i = 0; i < domain->value_count; ++i) {
-    const loom_low_enum_value_t* enum_value =
-        &descriptor_set->enum_values[domain->value_start + i];
-    if (enum_value->value == value) {
-      return true;
-    }
-  }
-  return false;
-}
-
 static bool loom_low_immediate_accepts_i64(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_immediate_t* immediate, int64_t value) {
@@ -912,13 +899,11 @@ static bool loom_low_immediate_accepts_i64(
     case LOOM_LOW_IMMEDIATE_KIND_UNSIGNED:
     case LOOM_LOW_IMMEDIATE_KIND_ORDINAL:
       return value >= 0 && (uint64_t)value <= immediate->unsigned_max;
-    case LOOM_LOW_IMMEDIATE_KIND_ENUM:
-      if (immediate->enum_domain_id >= descriptor_set->enum_domain_count) {
-        return false;
-      }
-      return loom_low_enum_domain_contains_i64(
-          descriptor_set,
-          &descriptor_set->enum_domains[immediate->enum_domain_id], value);
+    case LOOM_LOW_IMMEDIATE_KIND_ENUM: {
+      iree_string_view_t token = iree_string_view_empty();
+      return loom_low_descriptor_set_lookup_enum_token_by_value(
+          descriptor_set, immediate->enum_domain_id, value, &token);
+    }
     default:
       return false;
   }

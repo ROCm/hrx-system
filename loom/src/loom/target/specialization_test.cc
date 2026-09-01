@@ -76,6 +76,7 @@ static TestTargetProfile MakeTestProfile(loom_test_target_kind_t kind) {
 }
 
 static const loom_target_provider_t kTestProvider = {
+    /*.fact_type=*/&loom_test_target_fact_type,
     /*.profile_type=*/&kTestProfileType,
     /*.materialize_definition=*/nullptr,
     /*.register_context=*/nullptr,
@@ -284,6 +285,8 @@ func.def public target(@unrequested_family) @unrequested() {
   EXPECT_EQ(generic_version->target_requirement_facts->selector,
             LOOM_TEST_TARGET_KIND_LOW_CORE);
   EXPECT_TRUE(generic_version->authored_target_is_exact);
+  EXPECT_EQ(generic_version->target_binding_source,
+            LOOM_TARGET_BINDING_SOURCE_SPECIALIZATION);
   ASSERT_NE(generic_version->function_target_facts, nullptr);
   EXPECT_EQ(generic_version->function_target_facts->selector,
             LOOM_TEST_TARGET_KIND_LOW_CORE);

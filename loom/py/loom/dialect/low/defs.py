@@ -29,6 +29,7 @@ from loom.assembly import (
     BindingList,
     BlockArgs,
     BlockRef,
+    BlockRefs,
     Clause,
     FormatElement,
     FuncArgs,
@@ -50,7 +51,13 @@ from loom.assembly import (
     TypesOf,
     kw,
 )
-from loom.dialect.func.defs import CallingConv, Purity, Retain, Visibility
+from loom.dialect.func.defs import (
+    CallingConv,
+    ImportPolicy,
+    Purity,
+    Retain,
+    Visibility,
+)
 from loom.dialect.target.defs import ExportAbiKind, ExportLinkage
 from loom.dsl import (
     ANY,
@@ -231,6 +238,12 @@ _FUNC_COMMON_ATTRS = [
     AttrDef("abi_layout", "dict", optional=True),
     AttrDef("export_symbol", "string", optional=True),
     AttrDef("export_attrs", "dict", optional=True),
+    AttrDef(
+        "export_metadata",
+        "dict",
+        optional=True,
+        doc="Stable typed metadata owned by this export declaration.",
+    ),
     AttrDef("visibility", "enum", enum_def=Visibility, optional=True),
     AttrDef("cc", "enum", enum_def=CallingConv, optional=True),
     AttrDef("purity", "enum", enum_def=Purity, optional=True),
@@ -272,6 +285,15 @@ _KERNEL_COMMON_ATTRS = [
 ]
 
 _FUNC_DECL_IMPORT_ATTRS = [
+    AttrDef("import_policy", "enum", enum_def=ImportPolicy, optional=True),
+    AttrDef("import_module", "string", optional=True),
+    AttrDef("import_symbol", "string", optional=True),
+    AttrDef(
+        "import_metadata",
+        "dict",
+        optional=True,
+        doc="Stable typed metadata owned by this import declaration.",
+    ),
     AttrDef("import_kind", "enum", enum_def=LowCodeImportKind, optional=True),
     AttrDef("code_symbol", "string", optional=True),
 ]
@@ -339,6 +361,20 @@ _FUNC_EXPORT_FORMAT: list[FormatElement] = [
             RPAREN,
         ],
         anchor="export_symbol",
+    ),
+]
+
+_FUNC_EXPORT_METADATA_FORMAT: list[FormatElement] = [
+    OptionalGroup(
+        [
+            kw("export_metadata"),
+            GLUE,
+            LPAREN,
+            AttrDict("export_metadata"),
+            GLUE,
+            RPAREN,
+        ],
+        anchor="export_metadata",
     ),
 ]
 
@@ -430,6 +466,36 @@ _FUNC_IMPORT_FORMAT: list[FormatElement] = [
     ),
 ]
 
+_FUNC_LINK_FORMAT: list[FormatElement] = [
+    OptionalGroup([Attr("import_policy")], anchor="import_policy"),
+    OptionalGroup(
+        [
+            kw("link"),
+            GLUE,
+            LPAREN,
+            Attr("import_module"),
+            OptionalGroup([COMMA, Attr("import_symbol")], anchor="import_symbol"),
+            GLUE,
+            RPAREN,
+        ],
+        anchor="import_module",
+    ),
+]
+
+_FUNC_IMPORT_METADATA_FORMAT: list[FormatElement] = [
+    OptionalGroup(
+        [
+            kw("import_metadata"),
+            GLUE,
+            LPAREN,
+            AttrDict("import_metadata"),
+            GLUE,
+            RPAREN,
+        ],
+        anchor="import_metadata",
+    ),
+]
+
 _FUNC_SIGNATURE_FORMAT: list[FormatElement] = [
     SymbolRef("callee"),
     Scope(
@@ -468,10 +534,19 @@ _FUNC_LIKE_COMMON: dict[str, Any] = dict(
     abi_attrs="abi_attrs",
     export_symbol="export_symbol",
     export_attrs="export_attrs",
+    export_metadata="export_metadata",
     visibility="visibility",
     cc="cc",
     purity="purity",
     predicates="predicates",
+)
+
+_FUNC_LIKE_DECL: dict[str, Any] = dict(
+    **_FUNC_LIKE_COMMON,
+    import_policy="import_policy",
+    import_module="import_module",
+    import_symbol="import_symbol",
+    import_metadata="import_metadata",
 )
 
 _KERNEL_FUNC_LIKE_COMMON: dict[str, Any] = dict(
@@ -517,11 +592,12 @@ low_func_def = Op(
         *_FUNC_ABI_FORMAT,
         *_KERNEL_ABI_LAYOUT_FORMAT,
         *_FUNC_EXPORT_FORMAT,
+        *_FUNC_EXPORT_METADATA_FORMAT,
         *_FUNC_SIGNATURE_FORMAT,
         Region("body", syntax="low.asm.optional"),
     ],
     examples=[
-        "low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_generic) @add(%lhs: reg<amdgpu.vgpr x1>, %rhs: reg<amdgpu.vgpr x1>) -> (reg<amdgpu.vgpr x1>) {\n  %sum = low.op<amdgpu.v_add_u32>(%lhs, %rhs) : (reg<amdgpu.vgpr x1>, reg<amdgpu.vgpr x1>) -> reg<amdgpu.vgpr x1>\n  low.return %sum : reg<amdgpu.vgpr x1>\n}",
+        "low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_generic) @add(%lhs: reg<amdgpu.vgpr x1>, %rhs: reg<amdgpu.vgpr x1>) -> (reg<amdgpu.vgpr x1>) asm {\n  %sum = v_add_u32 %lhs, %rhs\n  return %sum\n}",
         "low.func.def target<amdgpu.rdna3_5.core> @invocation_bound() {\n  low.return\n}",
         "low.func.def allocation(fixed) schedule(locked) target<amdgpu.gfx11.generic.core>(@gfx11_generic) @agent_authored(%lhs: reg<amdgpu.vgpr x1>) {\n  low.return\n}",
     ],
@@ -590,15 +666,18 @@ low_func_decl = Op(
         flags=[SymbolDefinitionFlag.DECLARATION],
     ),
     results=[Result("results", REGISTER, variadic=True)],
-    interfaces=[FuncLikeInterface(**_FUNC_LIKE_COMMON, args="args")],
+    interfaces=[FuncLikeInterface(**_FUNC_LIKE_DECL, args="args")],
     verify="loom_low_func_decl_verify",
     format=[
         *_FUNC_MODIFIER_FORMAT,
+        *_FUNC_LINK_FORMAT,
+        *_FUNC_IMPORT_METADATA_FORMAT,
         *_FUNC_IMPORT_FORMAT,
         *_LOW_TARGET_FORMAT,
         *_FUNC_ABI_FORMAT,
         *_KERNEL_ABI_LAYOUT_FORMAT,
         *_FUNC_EXPORT_FORMAT,
+        *_FUNC_EXPORT_METADATA_FORMAT,
         *_FUNC_SIGNATURE_FORMAT,
     ],
     examples=[
@@ -683,6 +762,155 @@ low_func_call = Op(
 )
 
 # ============================================================================
+# low.func.call.indirect — indirect low function call
+# ============================================================================
+
+low_func_call_indirect = Op(
+    "low.func.call.indirect",
+    group=low_ops,
+    builder_name="func_call_indirect",
+    doc="Indirect call through a low function register with an exact structural signature.",
+    operands=[
+        Operand("target", REGISTER),
+        Operand("operands", REGISTER, variadic=True),
+    ],
+    results=[Result("results", REGISTER, variadic=True)],
+    traits=[UNKNOWN_EFFECTS],
+    verify="loom_low_func_call_indirect_verify",
+    format=[
+        Ref("target"),
+        GLUE,
+        LPAREN,
+        Refs("operands"),
+        RPAREN,
+        COLON,
+        LPAREN,
+        TypesOf("operands"),
+        RPAREN,
+        OptionalGroup(
+            [ARROW, ResultTypeList("results")],
+            anchor="results",
+        ),
+    ],
+    examples=[
+        "%result = low.func.call.indirect %target(%value) : (reg<test.i32>) -> (reg<test.i32>)",
+    ],
+)
+
+# ============================================================================
+# low.func.null — typed null function reference
+# ============================================================================
+
+low_func_null = Op(
+    "low.func.null",
+    group=low_ops,
+    builder_name="func_null",
+    doc="Produce a null first-class function value in a low function register.",
+    results=[Result("result", REGISTER)],
+    traits=[PURE],
+    verify="loom_low_func_null_verify",
+    format=[COLON, ResultType("result")],
+    examples=["%null = low.func.null : reg<test.ptr : func.ref<(i32) -> (i32)>>"],
+)
+
+# ============================================================================
+# low.func.compare.null — null function-reference test
+# ============================================================================
+
+low_func_compare_null = Op(
+    "low.func.compare.null",
+    group=low_ops,
+    builder_name="func_compare_null",
+    doc="Return true when a low function-register value is null.",
+    operands=[Operand("function", REGISTER)],
+    results=[Result("result", REGISTER)],
+    traits=[PURE],
+    verify="loom_low_func_compare_null_verify",
+    format=[
+        Ref("function"),
+        COLON,
+        TypeOf("function"),
+        ARROW,
+        ResultType("result"),
+    ],
+    examples=["%is_null = low.func.compare.null %function : reg<test.ptr : func.ref<(i32) -> (i32)>> -> reg<test.i32 : i1>"],
+)
+
+# ============================================================================
+# low.func.address — symbolic function address
+# ============================================================================
+
+low_func_address = Op(
+    "low.func.address",
+    group=low_ops,
+    builder_name="func_address",
+    doc="Produce a low function-register value addressing a callable symbol.",
+    attrs=[
+        AttrDef(
+            "callee",
+            "symbol",
+            symbol_ref=SymbolReference("function", ["callable"]),
+        ),
+    ],
+    results=[Result("result", REGISTER)],
+    traits=[PURE],
+    verify="loom_low_func_address_verify",
+    format=[SymbolRef("callee"), COLON, ResultType("result")],
+    examples=["%function = low.func.address @callee : reg<test.ptr : func.ref<(i32) -> (i32)>>"],
+)
+
+# ============================================================================
+# low.func.ref.cast — zero-cost function-reference permission widening
+# ============================================================================
+
+low_func_ref_cast = Op(
+    "low.func.ref.cast",
+    group=low_ops,
+    builder_name="func_ref_cast",
+    doc=(
+        "Widen a synchronous function-reference register to a yieldable "
+        "reference with the same structural signature. The result aliases "
+        "the source's exact physical storage and emits no target instruction."
+    ),
+    operands=[Operand("source", REGISTER)],
+    results=[Result("result", REGISTER)],
+    constraints=[SameRegisterClass("source", "result")],
+    traits=[PURE, FACT_IDENTITY, STORAGE_RELATION, COMPILE_TIME_ONLY],
+    verify="loom_low_func_ref_cast_verify",
+    format=[
+        Ref("source"),
+        COLON,
+        TypeOf("source"),
+        kw("to"),
+        ResultType("result"),
+    ],
+    examples=["%yieldable = low.func.ref.cast %sync : reg<test.ptr : func.ref<(i32) -> (i32)>> to reg<test.ptr : func.ref<yieldable (i32) -> (i32)>>"],
+)
+
+# ============================================================================
+# low.func.import.resolved — optional import availability query
+# ============================================================================
+
+low_func_import_resolved = Op(
+    "low.func.import.resolved",
+    group=low_ops,
+    builder_name="func_import_resolved",
+    doc="Return true when an optional linked low function resolved.",
+    attrs=[
+        AttrDef(
+            "callee",
+            "symbol",
+            symbol_ref=SymbolReference("function", ["callable"]),
+        ),
+    ],
+    results=[Result("result", REGISTER)],
+    traits=[PURE],
+    verify="loom_low_func_import_resolved_verify",
+    format=[SymbolRef("callee"), COLON, ResultType("result")],
+    examples=["%available = low.func.import.resolved @optional_feature : reg<test.i32 : i1>"],
+)
+
+# ============================================================================
 # low.br — low unconditional branch
 # ============================================================================
 
@@ -699,10 +927,19 @@ low_br = Op(
             doc="Register values forwarded to the destination block arguments.",
         )
     ],
+    attrs=[
+        AttrDef(
+            "descriptor",
+            "scoped_enum",
+            optional=True,
+            doc="Optional target operation selected for this structural edge.",
+        )
+    ],
     successors=[Successor("dest", doc="Destination low block.")],
     traits=[TERMINATOR, STORAGE_RELATION],
     verify="loom_low_br_verify",
     format=[
+        OptionalGroup([ScopedEnumRef("descriptor")], anchor="descriptor"),
         BlockRef("dest"),
         OptionalGroup(
             [GLUE, LPAREN, TypedRefs("args"), RPAREN],
@@ -711,6 +948,7 @@ low_br = Op(
     ],
     examples=[
         "low.br ^done",
+        "low.br<test.br> ^done",
         "low.br ^join(%value: reg<test.i32>)",
     ],
 )
@@ -743,6 +981,46 @@ low_cond_br = Op(
     ],
     examples=[
         "low.cond_br %condition, ^then, ^else : reg<test.i32>",
+    ],
+)
+
+# ============================================================================
+# low.switch — descriptor-backed dense target switch
+# ============================================================================
+
+low_switch = Op(
+    "low.switch",
+    group=low_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc="Descriptor-backed dense switch with one default and an ordered target table.",
+    operands=[Operand("selector", REGISTER, doc="Zero-based selector for the target table.")],
+    attrs=[AttrDef("descriptor", "scoped_enum")],
+    successors=[
+        Successor("default_dest", doc="Sequential destination for out-of-range selectors."),
+        Successor(
+            "target_dests",
+            variadic=True,
+            doc="Ordered dense target table; repeated destinations represent holes.",
+        ),
+    ],
+    successor_selector="selector",
+    traits=[TERMINATOR],
+    verify="loom_low_switch_verify",
+    generate_c_builder=False,
+    format=[
+        ScopedEnumRef("descriptor"),
+        Ref("selector"),
+        kw("targets"),
+        LBRACKET,
+        BlockRefs("target_dests"),
+        RBRACKET,
+        kw("default"),
+        BlockRef("default_dest"),
+        COLON,
+        TypeOf("selector"),
+    ],
+    examples=[
+        "low.switch<test.switch> %selector targets [^case0, ^case1] default ^fallback : reg<test.i32>",
     ],
 )
 
@@ -1461,6 +1739,7 @@ low_reload = Op(
 low_storage_address = Op(
     "low.storage.address",
     group=low_ops,
+    builder_name="address",
     phase=OpPhase.EXECUTABLE,
     doc="Materialize a target address for function-local storage.",
     operands=[Operand("storage", STORAGE)],
@@ -1617,6 +1896,12 @@ ALL_LOW_OPS: tuple[Op, ...] = (
     low_func_decl,
     low_return,
     low_func_call,
+    low_func_call_indirect,
+    low_func_null,
+    low_func_compare_null,
+    low_func_address,
+    low_func_ref_cast,
+    low_func_import_resolved,
     low_op,
     low_const,
     low_copy,
@@ -1640,4 +1925,5 @@ ALL_LOW_OPS: tuple[Op, ...] = (
     low_scf_while,
     low_schedule_fence,
     low_assume,
+    low_switch,
 )

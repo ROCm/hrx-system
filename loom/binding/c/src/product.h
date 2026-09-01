@@ -67,9 +67,10 @@ LOOMC_API_PRIVATE bool loomc_product_isa(
 // must have process lifetime. It is retained by identity rather than ownership.
 //
 // Root order defines product export order and may contain duplicate source
-// addresses when linking coalesces distinct logical roots. Bindings must be
-// sorted by requirement ordinal and refer only to supplied roots. These are
-// trusted producer invariants rather than public validation obligations.
+// addresses with equal or distinct descriptor-local goals. Reserved fields are
+// zero. Bindings must be sorted by requirement ordinal and refer only to
+// supplied roots. These are trusted producer invariants rather than public
+// validation obligations.
 LOOMC_API_PRIVATE loomc_status_t loomc_request_create_take_source(
     const loomc_product_descriptor_t* product_descriptor,
     loomc_source_t** inout_source, const loomc_request_root_t* roots,

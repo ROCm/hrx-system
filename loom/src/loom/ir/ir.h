@@ -577,12 +577,14 @@ typedef enum loom_dialect_id_e {
   LOOM_DIALECT_AMDGPU = 0x17,
   LOOM_DIALECT_X86 = 0x18,
   LOOM_DIALECT_WASM = 0x19,
+  LOOM_DIALECT_VM = 0x1A,
   LOOM_DIALECT_SPIRV = 0x1B,
   LOOM_DIALECT_CONFIG = 0x1C,
   LOOM_DIALECT_SANITIZER = 0x1D,
   LOOM_DIALECT_COMMAND = 0x1E,
   // 0x1F was the removed module dialect and remains reserved.
   LOOM_DIALECT_TEMPLATE = 0x20,
+  LOOM_DIALECT_METADATA = 0x21,
   LOOM_DIALECT_RESERVED = 0xFF,
 } loom_dialect_id_t;
 #define LOOM_OP_KIND_UNKNOWN ((loom_op_kind_t)0)
@@ -594,7 +596,7 @@ typedef enum loom_dialect_id_e {
 
 // Maximum number of built-in dialects. Dialect IDs must be less than
 // this value. Matches the size of the dialect vtable registry array.
-#define LOOM_DIALECT_BUILTIN_COUNT_ 33
+#define LOOM_DIALECT_BUILTIN_COUNT_ 34
 
 // Extracts the dialect ID (high byte) from an op kind.
 static inline uint8_t loom_op_dialect_id(loom_op_kind_t kind) {
@@ -742,6 +744,10 @@ enum loom_trait_bits_e {
   // sentinel that propagates through ordinary pure computation until erased
   // or rejected at an observation boundary.
   LOOM_TRAIT_POISON = 1u << 28,
+  // Terminator exits the enclosing callable without yielding to its immediate
+  // parent region. It may replace a region's ordinary yield-style terminator
+  // because execution has no continuation in that region.
+  LOOM_TRAIT_NO_RETURN = 1u << 29,
 };
 typedef uint32_t loom_trait_flags_t;
 
@@ -1067,6 +1073,14 @@ typedef struct loom_func_like_vtable_t {
   // absent.
   uint8_t import_symbol_attr_index;
 
+  // Index of the optional import policy enum attr. LOOM_ATTR_INDEX_NONE if
+  // absent.
+  uint8_t import_policy_attr_index;
+
+  // Index of the optional import metadata dictionary. LOOM_ATTR_INDEX_NONE if
+  // absent.
+  uint8_t import_metadata_attr_index;
+
   // Index of the optional target record attr. LOOM_ATTR_INDEX_NONE if absent.
   uint8_t target_attr_index;
 
@@ -1087,6 +1101,10 @@ typedef struct loom_func_like_vtable_t {
 
   // Index of the optional export payload dict. LOOM_ATTR_INDEX_NONE if absent.
   uint8_t export_attrs_attr_index;
+
+  // Index of the optional export metadata dictionary. LOOM_ATTR_INDEX_NONE if
+  // absent.
+  uint8_t export_metadata_attr_index;
 
   // Index of the optional export linkage attr. LOOM_ATTR_INDEX_NONE if absent.
   uint8_t export_linkage_attr_index;
@@ -1553,18 +1571,18 @@ typedef struct loom_op_t {
   uint16_t result_count;
   // Number of in-place result/operand ties in trailing storage.
   uint16_t tied_result_count;
+  // Number of successor block pointers in trailing storage.
+  uint16_t successor_count;
+  // Number of child region pointers in trailing storage.
+  uint8_t region_count;
+  // Number of attributes in trailing storage.
+  uint8_t attribute_count;
   // Effective generic semantic traits for this op instance.
   loom_trait_flags_t traits;
   // Source location (index into module's location table).
   // Carries the full source range for diagnostics and debug info.
   // Value locations are derived: value -> def -> op -> location.
   loom_location_id_t location;
-  // Number of child region pointers in trailing storage.
-  uint8_t region_count;
-  // Number of successor block pointers in trailing storage.
-  uint8_t successor_count;
-  // Number of attributes in trailing storage.
-  uint8_t attribute_count;
   // Per-op lifecycle, worklist, and source-presentation flags.
   loom_op_flags_t flags;
   // Per-op-instance flags: fast-math flags for float ops, overflow
@@ -1841,6 +1859,12 @@ typedef struct loom_region_t {
   // region. Convergent ops cannot be removed or moved across control structure
   // even when they are otherwise memory-pure.
   uint32_t convergent_effect_count;
+  // Transitive number of SSA values defined by block arguments and operation
+  // results in this region and all regions nested below it.
+  uint32_t value_definition_count;
+  // Operation owning this region, or NULL for the module body and detached
+  // regions that have not been attached to an operation.
+  loom_op_t* owner_op;
   // Inline storage for the entry block.
   loom_block_t entry_block;
   // Ordered block pointer table. Points at inline_blocks for one-block regions.
@@ -1848,8 +1872,6 @@ typedef struct loom_region_t {
   // Inline block pointer table for the common single-block case.
   loom_block_t* inline_blocks[1];
 } loom_region_t;
-
-static_assert(sizeof(loom_region_t) == 88, "loom_region_t must be 88 bytes");
 
 // Returns true and writes |out_block_index| when |block| is owned by |region|.
 static inline bool loom_region_try_block_index(const loom_region_t* region,
@@ -2061,15 +2083,16 @@ static_assert((1u << LOOM_VALUE_SEGMENT_SHIFT) == LOOM_VALUE_SEGMENT_CAPACITY,
 
 // Stable storage for one range of module value IDs.
 //
-// Semantic values, reusable u32 scratch, and type-use adjacency heads share
-// one segment because they have the same value-ID lifetime and cardinality.
-// The structure-of-arrays layout keeps hot value iteration contiguous while
-// fitting the complete segment in a 32 KiB compiler workspace block.
+// Semantic values, function-local ordinal rows, and type-use adjacency heads
+// share one segment because they have the same value-ID lifetime and
+// cardinality. The structure-of-arrays layout keeps hot value iteration
+// contiguous while fitting the complete segment in a 32 KiB compiler
+// workspace block.
 typedef iree_alignas(64) struct loom_value_segment_t {
   // Cache-line-aligned semantic value rows.
   loom_value_t values[LOOM_VALUE_SEGMENT_CAPACITY];
-  // Reusable compiler scratch indexed by the same value rows.
-  uint32_t u32_scratch[LOOM_VALUE_SEGMENT_CAPACITY];
+  // Active function-local ordinals indexed by module value ID.
+  loom_value_ordinal_t local_ordinals[LOOM_VALUE_SEGMENT_CAPACITY];
   // Type-use adjacency heads indexed by the same value rows.
   loom_value_type_use_heads_t type_use_heads[LOOM_VALUE_SEGMENT_CAPACITY];
 } loom_value_segment_t;
@@ -2125,20 +2148,20 @@ static inline const loom_value_t* loom_value_table_const_value(
   return &segment->values[value_id & LOOM_VALUE_SEGMENT_MASK];
 }
 
-// Returns the mutable u32 scratch row for |value_id|.
-static inline uint32_t* loom_value_table_u32_scratch(loom_value_table_t* table,
-                                                     loom_value_id_t value_id) {
+// Returns the mutable local ordinal row for |value_id|.
+static inline loom_value_ordinal_t* loom_value_table_local_ordinal(
+    loom_value_table_t* table, loom_value_id_t value_id) {
   loom_value_segment_t* segment =
       loom_value_table_segment_for_id(table, value_id);
-  return &segment->u32_scratch[value_id & LOOM_VALUE_SEGMENT_MASK];
+  return &segment->local_ordinals[value_id & LOOM_VALUE_SEGMENT_MASK];
 }
 
-// Returns the const u32 scratch row for |value_id|.
-static inline const uint32_t* loom_value_table_const_u32_scratch(
+// Returns the const local ordinal row for |value_id|.
+static inline const loom_value_ordinal_t* loom_value_table_const_local_ordinal(
     const loom_value_table_t* table, loom_value_id_t value_id) {
   const loom_value_segment_t* segment =
       loom_value_table_const_segment_for_id(table, value_id);
-  return &segment->u32_scratch[value_id & LOOM_VALUE_SEGMENT_MASK];
+  return &segment->local_ordinals[value_id & LOOM_VALUE_SEGMENT_MASK];
 }
 
 // Returns the mutable type-use adjacency heads for |value_id|.
@@ -2158,39 +2181,14 @@ loom_value_table_const_type_use_heads(const loom_value_table_t* table,
   return &segment->type_use_heads[value_id & LOOM_VALUE_SEGMENT_MASK];
 }
 
-// Active state for module value-id indexed u32 scratch storage.
-typedef enum loom_value_u32_scratch_state_e {
-  // Scratch contents are not initialized for a specific typed user.
-  LOOM_VALUE_U32_SCRATCH_STATE_UNACQUIRED_UNKNOWN = 0,
-  // Scratch contents are initialized as value ordinals and not acquired.
-  LOOM_VALUE_U32_SCRATCH_STATE_UNACQUIRED_ORDINALS = 1,
-  // Scratch contents were last used as zero-initialized payloads and are not
-  // acquired.
-  LOOM_VALUE_U32_SCRATCH_STATE_UNACQUIRED_ZEROED = 2,
-  // Scratch is acquired as value ordinals by one compiler frame.
-  LOOM_VALUE_U32_SCRATCH_STATE_ACQUIRED_ORDINALS = 3,
-  // Scratch is acquired as zero-initialized u32 payloads by one frame.
-  LOOM_VALUE_U32_SCRATCH_STATE_ACQUIRED_ZEROED = 4,
-} loom_value_u32_scratch_state_t;
-
-// Compiler scratch mapping module value IDs to one active u32 payload.
-//
-// Scratch rows share the stable value segments and are reused by phase frames
-// that need value-id keyed storage. They do not describe semantic IR state:
-// value IDs remain the durable identity, while payloads are transient facts
-// assigned by the active frame. Only one typed frame may acquire the rows at a
-// time.
-typedef struct loom_value_u32_scratch_t {
-  // Value table whose segments own the u32 payload rows.
-  loom_value_table_t* value_table;
-  // Active ownership and payload interpretation state.
-  loom_value_u32_scratch_state_t state;
-} loom_value_u32_scratch_t;
-
 // Reusable non-semantic compiler scratch owned by a module.
+//
+// Each active compiler frame assigns ordinals only to the values in its local
+// domain. Pass-specific facts live in separate dense arrays indexed by those
+// ordinals; the module map never changes interpretation or stores pass data.
 typedef struct loom_module_scratch_t {
-  // Exclusive value-id indexed u32 scratch storage.
-  loom_value_u32_scratch_t values;
+  // True while one compiler frame owns the module-to-local value ordinal map.
+  bool value_ordinals_acquired;
 } loom_module_scratch_t;
 
 // Symbol table. Flat (no nesting), one per module.

@@ -13,19 +13,33 @@ blocks when a selected arm needs values.
 """
 
 from loom.assembly import (
+    ARROW,
+    COLON,
     COMMA,
     GLUE,
+    LBRACKET,
     LPAREN,
+    RBRACKET,
     RPAREN,
+    Attr,
     BlockRef,
+    BlockRefs,
     OptionalGroup,
     Ref,
     TypedRefs,
+    TypeOf,
+    kw,
 )
 from loom.dsl import (
     ANY,
+    ATTR_TYPE_I64_ARRAY,
+    BUFFER,
     I1,
+    INDEX,
+    POISON_BOUNDARY,
     TERMINATOR,
+    UNKNOWN_EFFECTS,
+    AttrDef,
     Dialect,
     Op,
     Operand,
@@ -103,7 +117,91 @@ cfg_cond_br = Op(
     examples=["cfg.cond_br %condition, ^then, ^else"],
 )
 
+# ============================================================================
+# cfg.switch — multiway branch
+# ============================================================================
+
+cfg_switch = Op(
+    "cfg.switch",
+    group=cfg_ops,
+    doc="Branch to one of a sorted set of case destinations or a default destination.",
+    operands=[
+        Operand(
+            "selector",
+            INDEX,
+            doc="Index value selecting an explicit case or the default destination.",
+            role=OperandRole.CONTROL_CONDITION,
+        ),
+    ],
+    attrs=[
+        AttrDef(
+            "case_keys",
+            ATTR_TYPE_I64_ARRAY,
+            doc="Strictly increasing case keys paired with case destinations.",
+        ),
+    ],
+    successors=[
+        Successor("default_dest", doc="Destination when no case key matches."),
+        Successor(
+            "case_dests",
+            doc="Destinations paired by ordinal with case keys.",
+            variadic=True,
+        ),
+    ],
+    successor_selector="selector",
+    traits=[TERMINATOR],
+    verify="loom_cfg_switch_verify",
+    format=[
+        Ref("selector"),
+        kw("cases"),
+        Attr("case_keys"),
+        ARROW,
+        LBRACKET,
+        BlockRefs("case_dests"),
+        RBRACKET,
+        kw("default"),
+        BlockRef("default_dest"),
+    ],
+    examples=[
+        "cfg.switch %selector cases [0, 2] -> [^case0, ^case2] default ^fallback",
+    ],
+)
+
+# ============================================================================
+# cfg.assert — conditional program failure
+# ============================================================================
+
+cfg_assert = Op(
+    "cfg.assert",
+    group=cfg_ops,
+    doc="Continue when the condition is true or fail with the diagnostic message when false.",
+    operands=[
+        Operand(
+            "condition",
+            I1,
+            doc="Scalar i1 condition that must be true.",
+            role=OperandRole.CONTROL_CONDITION,
+        ),
+        Operand(
+            "message",
+            BUFFER,
+            doc="Diagnostic message captured on failure.",
+        ),
+    ],
+    traits=[UNKNOWN_EFFECTS, POISON_BOUNDARY],
+    format=[
+        Ref("condition"),
+        COMMA,
+        Ref("message"),
+        COLON,
+        TypeOf("message"),
+    ],
+    examples=["cfg.assert %condition, %message : buffer"],
+)
+
 ALL_CFG_OPS: tuple[Op, ...] = (
     cfg_br,
     cfg_cond_br,
+    cfg_switch,
+    cfg_assert,
 )

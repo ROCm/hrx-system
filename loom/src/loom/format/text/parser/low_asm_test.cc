@@ -718,6 +718,42 @@ TEST_F(LowAsmParserTest, AcceptsExplicitAmbiguousResultType) {
   loom_module_free(module);
 }
 
+TEST_F(LowAsmParserTest, RequiresVariableUnitResultType) {
+  const auto& diagnostics = ParseExpectErrors(
+      "low.func.def target<test.low.core> @variable("
+      "%source: reg<test.i32 x3>) asm {\n"
+      "  %result = test.variable.i32 %source\n"
+      "}\n");
+  const CapturedDiagnostic* diagnostic = FindDiagnostic(
+      capture_, loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 34));
+  ASSERT_NE(diagnostic, nullptr);
+  EXPECT_EQ(GetStringParam(*diagnostic, 0),
+            "result type annotation is required for variable-unit result");
+  (void)diagnostics;
+}
+
+TEST_F(LowAsmParserTest, AcceptsExplicitVariableUnitResultType) {
+  loom_module_t* module = ParseOk(
+      "low.func.def target<test.low.core> @variable("
+      "%source: reg<test.i32 x3>) -> (reg<test.i32 x5>) asm {\n"
+      "  %result = test.variable.i32 %source : reg<test.i32 x5>\n"
+      "  return %result\n"
+      "}\n");
+  ASSERT_NE(module, nullptr);
+
+  loom_op_t* function_op = loom_block_op(loom_module_block(module), 0);
+  loom_block_t* entry = GetEntryBlock(loom_low_func_def_body(function_op));
+  ASSERT_NE(entry, nullptr);
+  loom_op_t* variable_op = loom_block_op(entry, 0);
+  ASSERT_TRUE(loom_low_op_isa(variable_op));
+  loom_type_t result_type = loom_module_value_type(
+      module, loom_low_op_results(variable_op).values[0]);
+  ExpectTestLowCoreRegisterType(result_type,
+                                TEST_LOW_CORE_REG_CLASS_ID_TEST_I32, 5);
+
+  loom_module_free(module);
+}
+
 TEST_F(LowAsmParserTest, DistinguishesZeroImmediateConstFromOperandlessOp) {
   loom_module_t* module = ParseOk(
       "low.func.def target<test.low.core> @zero_immediate() -> "

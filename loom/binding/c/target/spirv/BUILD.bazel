@@ -6,6 +6,7 @@
 
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
+    "iree_select",
     "loom_cc_library",
     "loom_config_compatible_with",
 )
@@ -21,6 +22,21 @@ _SPIRV_COMPATIBLE_WITH = loom_config_compatible_with([
     "//loom/config/emit:spirv",
 ])
 
+_VM_LAUNCH_CONFIG_COPTS = iree_select({
+    "//loom/config/target/arch:vm": [
+        "-DLOOMC_TARGET_HAVE_VM_LAUNCH_CONFIG=1",
+    ],
+    "//conditions:default": [],
+})
+
+_VM_LAUNCH_CONFIG_DEPS = iree_select({
+    "//loom/config/target/arch:vm": [
+        "//loom/src/loom/target/arch/vm:provider",
+        "//loom/src/loom/target/emit/vm:launch_config_compiler",
+    ],
+    "//conditions:default": [],
+})
+
 loom_cc_library(
     name = "spirv",
     srcs = [
@@ -35,6 +51,7 @@ loom_cc_library(
         "//loom/binding/c:include/loomc/target/spirv/emit.h",
         "//loom/binding/c:include/loomc/target/spirv/profile.h",
     ],
+    copts = _VM_LAUNCH_CONFIG_COPTS,
     linkstatic = True,
     target_compatible_with = _SPIRV_COMPATIBLE_WITH,
     deps = [
@@ -48,6 +65,6 @@ loom_cc_library(
         "//loom/src/loom/target/arch/spirv/records:target_records",
         "//loom/src/loom/target/emit/spirv:module_emitter",
         "//runtime/src/iree/base",
-    ],
+    ] + _VM_LAUNCH_CONFIG_DEPS,
     alwayslink = True,
 )

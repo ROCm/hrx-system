@@ -10,13 +10,22 @@
 iree_add_all_subdirs()
 
 if(LOOM_TARGET_ARCH_SPIRV)
-loom_target_contract_table_cc_libraries(
+loom_target_contract_file_family(
   NAME
-    logical_core
+    contract_tables_gen
   GENERATOR
     loom::py::loom::gen::target::contracts::spirv_contract_table_family
-  ARGS
-    "--contract-fragment=spirv.logical.core"
+  FRAGMENTS
+    "logical_core=spirv.logical.core"
+  CONTRACT_SETS
+    "spirv=logical_core"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_SPIRV)
+loom_target_contract_cc_libraries(
+  NAME
+    logical_core
   CONTRACT_DEPS
     loom::target::contract
   LOWER_RULE_DEPS
@@ -35,13 +44,31 @@ endif()
 if(LOOM_TARGET_ARCH_SPIRV)
 loom_cc_library(
   NAME
+    sets
+  HDRS
+    "sets.h"
+  SRCS
+    "sets.c"
+  DEPS
+    ::logical_core
+    ::logical_core_lower_rules
+    loom::codegen::low::lower
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_SPIRV)
+loom_cc_library(
+  NAME
     contracts
   HDRS
     "logical_core.h"
     "logical_core_lower_rules.h"
+    "sets.h"
   DEPS
     ::logical_core
     ::logical_core_lower_rules
+    ::sets
   PUBLIC
 )
 endif()

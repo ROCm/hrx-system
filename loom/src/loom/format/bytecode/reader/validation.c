@@ -13,6 +13,7 @@
 #include "loom/format/bytecode/reader/decoder.h"
 #include "loom/format/bytecode/reader/encoding.h"
 #include "loom/format/bytecode/reader/location.h"
+#include "loom/format/bytecode/reader/module_ops.h"
 #include "loom/format/bytecode/reader/module_view.h"
 #include "loom/format/bytecode/reader/operation.h"
 #include "loom/format/bytecode/reader/source_trivia.h"
@@ -64,6 +65,8 @@ static const char* loom_bytecode_section_name(uint16_t kind) {
       return "RESOURCES";
     case LOOM_BYTECODE_SECTION_SYMBOL_REFERENCES:
       return "SYMBOL_REFERENCES";
+    case LOOM_BYTECODE_SECTION_MODULE_OPS:
+      return "MODULE_OPS";
     default:
       return "UNKNOWN";
   }
@@ -782,6 +785,15 @@ static iree_status_t loom_bytecode_reader_prepare_module(
   reader->view.sections.source_trivia = loom_bytecode_reader_find_section(
       reader->view.sections.values, reader->view.sections.count,
       LOOM_BYTECODE_SECTION_SOURCE_TRIVIA);
+  reader->view.sections.module_ops = loom_bytecode_reader_find_section(
+      reader->view.sections.values, reader->view.sections.count,
+      LOOM_BYTECODE_SECTION_MODULE_OPS);
+  if (reader->view.sections.module_ops) {
+    IREE_RETURN_IF_ERROR(loom_bytecode_module_ops_summary_read(
+        &reader->decoder, reader->view.sections.module_ops->bytes,
+        reader->view.sections.module_ops->absolute_offset,
+        &reader->view.module_ops_summary));
+  }
   if (reader->location_mode == LOOM_BYTECODE_LOCATION_MODE_NO_LOCATIONS) {
     if (reader->view.sections.locations) {
       return loom_bytecode_reader_emit_invalid_field(

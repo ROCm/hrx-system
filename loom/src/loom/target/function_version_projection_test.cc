@@ -111,11 +111,13 @@ static iree_status_t MaterializeTestTargetDefinition(
 }
 
 static const loom_target_provider_t kTestProvider = {
+    /*.fact_type=*/&loom_test_target_fact_type,
     /*.profile_type=*/&kTestProfileType,
     /*.materialize_definition=*/MaterializeTestTargetDefinition,
 };
 
 static const loom_target_provider_t kMissingMaterializerProvider = {
+    /*.fact_type=*/&loom_test_target_fact_type,
     /*.profile_type=*/&kTestProfileType,
 };
 
@@ -317,6 +319,7 @@ class TargetFunctionVersionProjectionTest : public ::testing::Test {
             /*.facts=*/facts,
         },
         /*.target_context_ordinal=*/0,
+        /*.target_binding_source=*/LOOM_TARGET_BINDING_SOURCE_SPECIALIZATION,
         /*.authored_target_is_exact=*/false,
         /*.function_target_facts=*/facts,
     };

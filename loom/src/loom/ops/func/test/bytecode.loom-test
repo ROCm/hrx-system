@@ -1,0 +1,15 @@
+// RUN: format bytecode
+
+test.target<low_core> @test_target
+
+func.decl public import("runtime", "callback") import_metadata({"runtime.optional" = true, "runtime.revision" = u64(3)}) export_metadata({"help.summary" = "Source callback", "wire.payload" = bytes("00feff")}) @source_callback(%value: i32) -> (i32)
+
+func.def public export_metadata({"help.summary" = "Source identity", "model.revision" = u64(7)}) @source_identity(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+low.func.decl public optional link("runtime", "callback") import_metadata({"runtime.optional" = true, "runtime.revision" = u64(3)}) target<test.low.core>(@test_target) export_metadata({"help.summary" = "Low callback", "wire.payload" = bytes("00feff")}) @low_callback(%value: reg<test.i32 : i32>) -> (reg<test.i32 : i32>)
+
+low.func.def public target<test.low.core>(@test_target) export_metadata({"help.summary" = "Low identity", "model.revision" = u64(7)}) @low_identity(%value: reg<test.i32 : i32>) -> (reg<test.i32 : i32>) {
+  low.return %value : reg<test.i32 : i32>
+}

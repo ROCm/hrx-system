@@ -34,12 +34,14 @@ loom_generated_cc_library(
     loom::error::emitter
     loom::error::error_defs
     loom::ir
+    loom::ops::func
     loom::ops::func_symbol_facts
     loom::ops::function_contract_verify
     loom::ops::op_defs
     loom::ops::storage_facts
     loom::ops::successor_verify
     loom::ops::target
+    loom::ops::type_registry
     loom::rewrite::rewriter
     loom::target::registers
     loom::target::types

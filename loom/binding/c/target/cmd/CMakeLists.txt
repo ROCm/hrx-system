@@ -22,6 +22,7 @@ loom_cc_library(
     iree::base::internal
     iree::base::internal::arena
     loom::binding::c::loomc
+    loom::binding::c::target::kernel
     loom::ir
     loom::link::module_index
     loom::pass::builtin_registry

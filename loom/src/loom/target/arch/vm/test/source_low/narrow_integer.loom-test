@@ -1,0 +1,93 @@
+// RUN: emit source-low output=low
+
+vm.target<core> @target
+
+func.def target(@target) @narrow_integer_bitwise(%lhs: i8, %rhs: i8) -> (i8, i8, i8) {
+  %and = scalar.andi %lhs, %rhs : i8
+  %or = scalar.ori %lhs, %rhs : i8
+  %xor = scalar.xori %lhs, %rhs : i8
+  func.return %and, %or, %xor : i8, i8, i8
+}
+
+func.def target(@target) @narrow_integer_shifts(%lhs: i16, %rhs: i16) -> (i16, i16, i16) {
+  %left = scalar.shli %lhs, %rhs : i16
+  %signed_right = scalar.shrsi %lhs, %rhs : i16
+  %unsigned_right = scalar.shrui %lhs, %rhs : i16
+  func.return %left, %signed_right, %unsigned_right : i16, i16, i16
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i8>, reg<vm.value : i8>) -> (reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>)>}) @narrow_integer_bitwise(%lhs: reg<vm.value : i8>, %rhs: reg<vm.value : i8>) -> (reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>) asm {
+  %45 = conversion.integer %lhs, u8.to.i32 : reg<vm.value : i32>
+  %46 = conversion.integer %rhs, u8.to.i32 : reg<vm.value : i32>
+  %47 = integer.and.i32 %45, %46 : reg<vm.value : i32>
+  %and = conversion.integer %47, i32.to.i8 : reg<vm.value : i8>
+  %49 = integer.or.i32 %45, %46 : reg<vm.value : i32>
+  %or = conversion.integer %49, i32.to.i8 : reg<vm.value : i8>
+  %51 = integer.xor.i32 %45, %46 : reg<vm.value : i32>
+  %xor = conversion.integer %51, i32.to.i8 : reg<vm.value : i8>
+  return %and, %or, %xor
+}
+
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i16>, reg<vm.value : i16>) -> (reg<vm.value : i16>, reg<vm.value : i16>, reg<vm.value : i16>)>}) @narrow_integer_shifts(%lhs: reg<vm.value : i16>, %rhs: reg<vm.value : i16>) -> (reg<vm.value : i16>, reg<vm.value : i16>, reg<vm.value : i16>) asm {
+  %58 = conversion.integer %lhs, u16.to.i32 : reg<vm.value : i32>
+  %59 = conversion.integer %rhs, u16.to.i32 : reg<vm.value : i32>
+  %60 = integer.shift.left.i32 %58, %59 : reg<vm.value : i32>
+  %left = conversion.integer %60, i32.to.i16 : reg<vm.value : i16>
+  %62 = conversion.integer %lhs, s16.to.i32 : reg<vm.value : i32>
+  %63 = integer.shift.right.s32 %62, %59 : reg<vm.value : i32>
+  %signed_right = conversion.integer %63, i32.to.i16 : reg<vm.value : i16>
+  %65 = integer.shift.right.u32 %58, %59 : reg<vm.value : i32>
+  %unsigned_right = conversion.integer %65, i32.to.i16 : reg<vm.value : i16>
+  return %left, %signed_right, %unsigned_right
+}
+
+// ====
+
+// RUN: emit source-low output=low
+
+vm.target<core> @target
+
+func.def target(@target) @narrow_integer_arithmetic(%lhs: i8, %rhs: i8) -> (i8, i8, i8) {
+  %sum = scalar.addi %lhs, %rhs : i8
+  %difference = scalar.subi %lhs, %rhs : i8
+  %product = scalar.muli %lhs, %rhs : i8
+  func.return %sum, %difference, %product : i8, i8, i8
+}
+
+func.def target(@target) @narrow_integer_minmax(%lhs: i16, %rhs: i16) -> (i16, i16, i16, i16) {
+  %signed_min = scalar.minsi %lhs, %rhs : i16
+  %signed_max = scalar.maxsi %lhs, %rhs : i16
+  %unsigned_min = scalar.minui %lhs, %rhs : i16
+  %unsigned_max = scalar.maxui %lhs, %rhs : i16
+  func.return %signed_min, %signed_max, %unsigned_min, %unsigned_max : i16, i16, i16, i16
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i8>, reg<vm.value : i8>) -> (reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>)>}) @narrow_integer_arithmetic(%lhs: reg<vm.value : i8>, %rhs: reg<vm.value : i8>) -> (reg<vm.value : i8>, reg<vm.value : i8>, reg<vm.value : i8>) asm {
+  %51 = conversion.integer %lhs, u8.to.i32 : reg<vm.value : i32>
+  %52 = conversion.integer %rhs, u8.to.i32 : reg<vm.value : i32>
+  %53 = integer.add.i32 %51, %52 : reg<vm.value : i32>
+  %sum = conversion.integer %53, i32.to.i8 : reg<vm.value : i8>
+  %55 = integer.sub.i32 %51, %52 : reg<vm.value : i32>
+  %difference = conversion.integer %55, i32.to.i8 : reg<vm.value : i8>
+  %57 = integer.mul.i32 %51, %52 : reg<vm.value : i32>
+  %product = conversion.integer %57, i32.to.i8 : reg<vm.value : i8>
+  return %sum, %difference, %product
+}
+
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i16>, reg<vm.value : i16>) -> (reg<vm.value : i16>, reg<vm.value : i16>, reg<vm.value : i16>, reg<vm.value : i16>)>}) @narrow_integer_minmax(%lhs: reg<vm.value : i16>, %rhs: reg<vm.value : i16>) -> (reg<vm.value : i16>, reg<vm.value : i16>, reg<vm.value : i16>, reg<vm.value : i16>) asm {
+  %65 = conversion.integer %lhs, s16.to.i32 : reg<vm.value : i32>
+  %66 = conversion.integer %rhs, s16.to.i32 : reg<vm.value : i32>
+  %67 = integer.min.s32 %65, %66 : reg<vm.value : i32>
+  %signed_min = conversion.integer %67, i32.to.i16 : reg<vm.value : i16>
+  %69 = integer.max.s32 %65, %66 : reg<vm.value : i32>
+  %signed_max = conversion.integer %69, i32.to.i16 : reg<vm.value : i16>
+  %71 = conversion.integer %lhs, u16.to.i32 : reg<vm.value : i32>
+  %72 = conversion.integer %rhs, u16.to.i32 : reg<vm.value : i32>
+  %73 = integer.min.u32 %71, %72 : reg<vm.value : i32>
+  %unsigned_min = conversion.integer %73, i32.to.i16 : reg<vm.value : i16>
+  %75 = integer.max.u32 %71, %72 : reg<vm.value : i32>
+  %unsigned_max = conversion.integer %75, i32.to.i16 : reg<vm.value : i16>
+  return %signed_min, %signed_max, %unsigned_min, %unsigned_max
+}

@@ -613,8 +613,8 @@ func.def public @second(%x: i32) -> (i32) {
       CreateSource(LOOMC_SOURCE_FORMAT_BYTECODE, "request-archive.loombc",
                    archive.data(), archive.size()),
       {
-          {/*.module_ordinal=*/1, /*.symbol_ordinal=*/0},
-          {/*.module_ordinal=*/0, /*.symbol_ordinal=*/0},
+          {/*.module_ordinal=*/1, /*.symbol_ordinal=*/0, /*.goal=*/7},
+          {/*.module_ordinal=*/0, /*.symbol_ordinal=*/0, /*.goal=*/11},
       });
 
   ResultPtr result;
@@ -624,6 +624,12 @@ func.def public @second(%x: i32) -> (i32) {
   ASSERT_NE(output_request, nullptr);
   EXPECT_EQ(ResolveRequestRootNames(context_.get(), output_request.get()),
             (std::vector<std::string>{"second", "first"}));
+  const loomc_request_root_goal_t expected_goals[] = {7, 11};
+  for (loomc_host_size_t i = 0; i < IREE_ARRAYSIZE(expected_goals); ++i) {
+    loomc_request_root_t root = {};
+    ASSERT_TRUE(loomc_request_root_at(output_request.get(), i, &root));
+    EXPECT_EQ(root.goal, expected_goals[i]);
+  }
   const std::string text = SerializeRequestToText(output_request.get());
   EXPECT_THAT(text, ::testing::HasSubstr("@first"));
   EXPECT_THAT(text, ::testing::HasSubstr("@second"));

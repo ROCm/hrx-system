@@ -78,7 +78,12 @@ typedef struct loom_bytecode_reader_module_view_t {
     const loom_bytecode_reader_section_t* symbol_references;
     // Required IR section.
     const loom_bytecode_reader_section_t* ir;
+    // Optional non-symbol module operation section.
+    const loom_bytecode_reader_section_t* module_ops;
   } sections;
+
+  // Validated MODULE_OPS allocation summary when the section is present.
+  loom_bytecode_module_ops_summary_t module_ops_summary;
 
   // Validated module string table.
   struct {

@@ -22,6 +22,22 @@ EXAMPLE_SOURCE_ROOT = DOCS_ROOT / "examples"
 PYTHON_SOURCE_ROOT = REPO_ROOT / "loom" / "py"
 DEFAULT_WORK_ROOT = REPO_ROOT / "build" / "loom-docs"
 C_API_GENERATOR = REPO_ROOT / "loom" / "binding" / "c" / "doc" / "generate.sh"
+VM_SPEC_GENERATOR = (
+    REPO_ROOT
+    / "runtime"
+    / "src"
+    / "iree"
+    / "vm"
+    / "bytecode"
+    / "spec"
+    / "generate_main.py"
+)
+VM_SPEC_REQUIRED_DOCUMENTS = (
+    "index.md",
+    "module-format.md",
+    "isa/core/index.md",
+    "isa/hal/index.md",
+)
 DOC_GENERATOR_NAME = ".doc-generate.sh"
 
 if str(PYTHON_SOURCE_ROOT) not in sys.path:
@@ -105,10 +121,37 @@ def _generate_example_outputs(work_root: Path) -> Path:
     return output_root
 
 
+def _generate_vm_reference(work_root: Path) -> Path:
+    output_root = work_root / "vm-reference"
+    _remove_generated_directory(output_root)
+    subprocess.run(
+        [
+            sys.executable,
+            str(VM_SPEC_GENERATOR),
+            "--output-kind=documentation",
+            f"--output-directory={output_root}",
+        ],
+        cwd=REPO_ROOT,
+        check=True,
+    )
+    missing_documents = [
+        path
+        for path in VM_SPEC_REQUIRED_DOCUMENTS
+        if not (output_root / path).is_file()
+    ]
+    if missing_documents:
+        raise FileNotFoundError(
+            "VM specification generator did not produce required documents: "
+            f"{missing_documents}"
+        )
+    return output_root
+
+
 def _prepare_staged_source(
     staged_source_root: Path,
     c_api_html_root: Path,
     generated_example_root: Path,
+    vm_reference_root: Path,
 ) -> None:
     _remove_generated_directory(staged_source_root)
     shutil.copytree(AUTHORED_SOURCE_ROOT, staged_source_root)
@@ -121,6 +164,10 @@ def _prepare_staged_source(
     shutil.copytree(
         generated_example_root,
         staged_source_root / "generated" / "examples",
+    )
+    shutil.copytree(
+        vm_reference_root,
+        staged_source_root / "reference" / "vm",
     )
 
 
@@ -143,8 +190,12 @@ def on_pre_build(config: Any) -> None:
     work_root = _work_root()
     c_api_html_root = _generate_c_api(work_root)
     generated_example_root = _generate_example_outputs(work_root)
+    vm_reference_root = _generate_vm_reference(work_root)
     _prepare_staged_source(
-        Path(config["docs_dir"]), c_api_html_root, generated_example_root
+        Path(config["docs_dir"]),
+        c_api_html_root,
+        generated_example_root,
+        vm_reference_root,
     )
 
 
@@ -166,6 +217,7 @@ def on_page_context(context: Any, page: Any, config: Any, nav: Any) -> Any:
             "reference/dialects/",
             "reference/encodings/",
             "reference/types/",
+            "reference/vm/",
         )
     ):
         page.edit_url = None

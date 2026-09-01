@@ -7,6 +7,7 @@
 #include "loom/target/arch/spirv/provider.h"
 
 #include "loom/target/arch/spirv/descriptors/low_registry.h"
+#include "loom/target/arch/spirv/facts.h"
 #include "loom/target/arch/spirv/low_verify.h"
 #include "loom/target/arch/spirv/lower/lower.h"
 #include "loom/target/arch/spirv/math_policy.h"
@@ -19,6 +20,7 @@ static const loom_low_verify_provider_t* const kLoomSpirvLowVerifyProviders[] =
 };
 
 const loom_target_provider_t loom_spirv_target_provider = {
+    .fact_type = &loom_spirv_target_fact_type,
     .profile_type = &loom_spirv_target_profile_type,
     .register_context = loom_spirv_ops_register_dialect,
     .initialize_low_descriptor_registry =

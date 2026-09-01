@@ -1,0 +1,175 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/async_gather.loom-test
+// RUN: emit source-low output=low
+
+vm.target<core> @target
+kernel.def target(@target) @async_gather_dword() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%input: buffer) {
+  %tid = kernel.workitem.id<x> : index
+  %buffer_base = index.constant 0 : offset
+  %bytes = index.constant 256 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source_base = buffer.view %global[%buffer_base] : buffer -> view<64x4xi8>
+  %source = view.subview %source_base[%tid, 0] : view<64x4xi8> -> view<1x4xi8>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %dest = buffer.view %scratch[%buffer_base] : buffer -> view<64x1x4xi8>
+  %copy = kernel.async.gather %source to %dest {cache_scope = device, cache_temporal = regular} : view<1x4xi8> to view<64x1x4xi8> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @async_gather_dword(%global: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %bytes = constant.s16 256 : reg<vm.value : offset>
+  %scratch = buffer.allocate %bytes, 4 : reg<vm.ref : buffer>
+  %28 = constant.zero : reg<vm.value : offset>
+  %30 = constant.s16 4 : reg<vm.value : offset>
+  buffer.copy %scratch, %28, %global, %28, %30
+  return
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @async_gather_b128() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%input: buffer) {
+  %tid = kernel.workitem.id<x> : index
+  %buffer_base = index.constant 0 : offset
+  %bytes = index.constant 1024 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source_base = buffer.view %global[%buffer_base] : buffer -> view<64x16xi8>
+  %source = view.subview %source_base[%tid, 0] : view<64x16xi8> -> view<1x16xi8>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %dest = buffer.view %scratch[%buffer_base] : buffer -> view<64x1x16xi8>
+  %copy = kernel.async.gather %source to %dest {cache_scope = device, cache_temporal = regular} : view<1x16xi8> to view<64x1x16xi8> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @async_gather_b128(%global: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %bytes = constant.s16 1024 : reg<vm.value : offset>
+  %scratch = buffer.allocate %bytes, 4 : reg<vm.ref : buffer>
+  %28 = constant.zero : reg<vm.value : offset>
+  %30 = constant.s16 16 : reg<vm.value : offset>
+  buffer.copy %scratch, %28, %global, %28, %30
+  return
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @async_gather_two_stage() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%input: buffer) {
+  %tid = kernel.workitem.id<x> : index
+  %buffer_base = index.constant 0 : offset
+  %bytes = index.constant 2048 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source_base = buffer.view %global[%buffer_base] : buffer -> view<64x1x16xi8>
+  %source = view.subview %source_base[%tid, 0, 0] : view<64x1x16xi8> -> view<1x1x16xi8>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %dest_base = buffer.view %scratch[%buffer_base] : buffer -> view<2x64x1x16xi8>
+  %dest0 = view.subview %dest_base[0, 0, 0, 0] : view<2x64x1x16xi8> -> view<1x64x1x16xi8>
+  %dest1 = view.subview %dest_base[1, 0, 0, 0] : view<2x64x1x16xi8> -> view<1x64x1x16xi8>
+  %copy0 = kernel.async.gather %source to %dest0 {cache_scope = device, cache_temporal = regular} : view<1x1x16xi8> to view<1x64x1x16xi8> -> kernel.async.token
+  %load0 = kernel.async.group %copy0 : kernel.async.token -> kernel.async.group
+  %copy1 = kernel.async.gather %source to %dest1 {cache_scope = device, cache_temporal = regular} : view<1x1x16xi8> to view<1x64x1x16xi8> -> kernel.async.token
+  %load1 = kernel.async.group %copy1 : kernel.async.token -> kernel.async.group
+  kernel.async.wait %load0 {newer_groups = 1} : kernel.async.group
+  kernel.async.wait %load1 {newer_groups = 0} : kernel.async.group
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @async_gather_two_stage(%global: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %bytes = constant.s16 2048 : reg<vm.value : offset>
+  %scratch = buffer.allocate %bytes, 4 : reg<vm.ref : buffer>
+  %32 = constant.zero : reg<vm.value : offset>
+  %34 = constant.s16 16 : reg<vm.value : offset>
+  buffer.copy %scratch, %32, %global, %32, %34
+  %36 = constant.s16 1024 : reg<vm.value : offset>
+  buffer.copy %scratch, %36, %global, %32, %34
+  return
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @async_gather_multi_packet_newer_group() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%input: buffer) {
+  %tid = kernel.workitem.id<x> : index
+  %buffer_base = index.constant 0 : offset
+  %bytes = index.constant 3072 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source_base = buffer.view %global[%buffer_base] : buffer -> view<64x1x16xi8>
+  %source = view.subview %source_base[%tid, 0, 0] : view<64x1x16xi8> -> view<1x1x16xi8>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %dest_base = buffer.view %scratch[%buffer_base] : buffer -> view<3x64x1x16xi8>
+  %dest0 = view.subview %dest_base[0, 0, 0, 0] : view<3x64x1x16xi8> -> view<1x64x1x16xi8>
+  %dest1a = view.subview %dest_base[1, 0, 0, 0] : view<3x64x1x16xi8> -> view<1x64x1x16xi8>
+  %dest1b = view.subview %dest_base[2, 0, 0, 0] : view<3x64x1x16xi8> -> view<1x64x1x16xi8>
+  %copy0 = kernel.async.gather %source to %dest0 {cache_scope = device, cache_temporal = regular} : view<1x1x16xi8> to view<1x64x1x16xi8> -> kernel.async.token
+  %load0 = kernel.async.group %copy0 : kernel.async.token -> kernel.async.group
+  %copy1a = kernel.async.gather %source to %dest1a {cache_scope = device, cache_temporal = regular} : view<1x1x16xi8> to view<1x64x1x16xi8> -> kernel.async.token
+  %copy1b = kernel.async.gather %source to %dest1b {cache_scope = device, cache_temporal = regular} : view<1x1x16xi8> to view<1x64x1x16xi8> -> kernel.async.token
+  %load1 = kernel.async.group %copy1a, %copy1b : kernel.async.token, kernel.async.token -> kernel.async.group
+  kernel.async.wait %load0 {newer_groups = 1} : kernel.async.group
+  kernel.async.wait %load1 {newer_groups = 0} : kernel.async.group
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @async_gather_multi_packet_newer_group(%global: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %bytes = constant.s16 3072 : reg<vm.value : offset>
+  %scratch = buffer.allocate %bytes, 4 : reg<vm.ref : buffer>
+  %34 = constant.zero : reg<vm.value : offset>
+  %36 = constant.s16 16 : reg<vm.value : offset>
+  buffer.copy %scratch, %34, %global, %34, %36
+  %38 = constant.s16 1024 : reg<vm.value : offset>
+  buffer.copy %scratch, %38, %global, %34, %36
+  %41 = constant.s16 2048 : reg<vm.value : offset>
+  buffer.copy %scratch, %41, %global, %34, %36
+  return
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @async_gather_second_lds_slot() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%input: buffer) {
+  %tid = kernel.workitem.id<x> : index
+  %buffer_base = index.constant 0 : offset
+  %pad_bytes = index.constant 256 : offset
+  %scratch_bytes = index.constant 1024 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source_base = buffer.view %global[%buffer_base] : buffer -> view<64x16xi8>
+  %source = view.subview %source_base[%tid, 0] : view<64x16xi8> -> view<1x16xi8>
+  %pad = buffer.alloca<workgroup> align(16) %pad_bytes : buffer
+  %scratch = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
+  %dest = buffer.view %scratch[%buffer_base] : buffer -> view<64x1x16xi8>
+  %copy = kernel.async.gather %source to %dest {cache_scope = device, cache_temporal = regular} : view<1x16xi8> to view<64x1x16xi8> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @async_gather_second_lds_slot(%global: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %scratch_bytes = constant.s16 1024 : reg<vm.value : offset>
+  %scratch = buffer.allocate %scratch_bytes, 4 : reg<vm.ref : buffer>
+  %30 = constant.zero : reg<vm.value : offset>
+  %32 = constant.s16 16 : reg<vm.value : offset>
+  buffer.copy %scratch, %30, %global, %30, %32
+  return
+}

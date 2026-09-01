@@ -947,6 +947,7 @@ static iree_status_t loom_ir_remap_attribute_impl(
   switch ((loom_attr_kind_t)source_attr.kind) {
     case LOOM_ATTR_ABSENT:
     case LOOM_ATTR_I64:
+    case LOOM_ATTR_U64:
     case LOOM_ATTR_F64:
     case LOOM_ATTR_BOOL:
     case LOOM_ATTR_ENUM:

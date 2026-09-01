@@ -141,12 +141,18 @@ test.func @second() {
   EXPECT_EQ(loom_target_function_version_snapshot_handle_at(
                 &snapshot, FindSymbol(module.get(), IREE_SV("first"))),
             &first_version.base);
+  EXPECT_EQ(loom_target_function_version_snapshot_ordinal_at(
+                &snapshot, FindSymbol(module.get(), IREE_SV("first"))),
+            2u);
   EXPECT_EQ(loom_target_function_version_snapshot_at(
                 &snapshot, FindSymbol(module.get(), IREE_SV("unversioned"))),
             nullptr);
   EXPECT_EQ(loom_target_function_version_snapshot_handle_at(
                 &snapshot, FindSymbol(module.get(), IREE_SV("unversioned"))),
             nullptr);
+  EXPECT_EQ(loom_target_function_version_snapshot_ordinal_at(
+                &snapshot, FindSymbol(module.get(), IREE_SV("unversioned"))),
+            LOOM_FUNCTION_VERSION_ORDINAL_INVALID);
   EXPECT_EQ(
       loom_target_function_version_snapshot_at(
           &snapshot, FindSymbol(module.get(), IREE_SV("other_version_type"))),
@@ -154,6 +160,9 @@ test.func @second() {
   EXPECT_EQ(loom_target_function_version_snapshot_at(
                 &snapshot, FindSymbol(module.get(), IREE_SV("second"))),
             &second_version);
+  EXPECT_EQ(loom_target_function_version_snapshot_ordinal_at(
+                &snapshot, FindSymbol(module.get(), IREE_SV("second"))),
+            0u);
   iree_arena_deinitialize(&arena);
 }
 
@@ -171,6 +180,8 @@ test.func @only() {
       module.get(), /*function_versions=*/nullptr, &arena, &snapshot));
 
   EXPECT_EQ(snapshot.symbol_count, module->symbols.count);
+  EXPECT_NE(snapshot.version_handles_by_symbol, nullptr);
+  EXPECT_NE(snapshot.version_ordinals_by_symbol, nullptr);
   EXPECT_EQ(loom_target_function_version_snapshot_at(
                 &snapshot, FindSymbol(module.get(), IREE_SV("only"))),
             nullptr);

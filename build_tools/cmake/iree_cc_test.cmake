@@ -98,6 +98,9 @@ function(iree_cc_test)
     PRIVATE
       ${_RULE_SRCS}
   )
+  foreach(_SOURCE IN LISTS _RULE_SRCS)
+    iree_generated_output_add_consumer("${_SOURCE}" "${_NAME}")
+  endforeach()
   target_include_directories(${_NAME} SYSTEM
     PUBLIC
       "$<BUILD_INTERFACE:${IREE_SOURCE_DIR}>"

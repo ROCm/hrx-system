@@ -8,14 +8,17 @@
 
 #include <string.h>
 
+#include "compile.h"
 #include "config.h"
 #include "context.h"
 #include "diagnostic.h"
+#include "iree/base/byte_sequence.h"
 #include "iree/base/internal/atomics.h"
-#include "loom/codegen/low/launch_config_program.h"
+#include "loom/ops/op_defs.h"
 #include "loom/pass/environment.h"
 #include "loom/pass/interpreter.h"
 #include "loom/target/predicate.h"
+#include "loom/target/root_function_versions.h"
 #include "loom/target/specialization.h"
 #include "loom/util/json.h"
 #include "loom/util/stream.h"
@@ -68,6 +71,12 @@ static const loomc_product_descriptor_t
 typedef struct loomc_compile_diagnostic_capture_t {
   // Result receiving converted diagnostics.
   loomc_result_t* result;
+
+  // Diagnostic subsystem attributed to captured emissions.
+  loom_emitter_t emitter;
+
+  // Number of error diagnostics captured.
+  uint32_t error_count;
 } loomc_compile_diagnostic_capture_t;
 
 static loomc_status_t loomc_compile_validate_string_view(
@@ -133,7 +142,7 @@ static loomc_status_t loomc_compile_validate_options(
   return loomc_config_validate_policy_flags(options->config_flags);
 }
 
-static loomc_status_t loomc_compile_validate_config_module(
+loomc_status_t loomc_compile_validate_config_module(
     const loomc_compiler_t* compiler, const loomc_module_t* program_module,
     const loomc_compile_options_t* options) {
   const loomc_module_t* config_module = options ? options->config_module : NULL;
@@ -160,25 +169,31 @@ static iree_status_t loomc_compile_capture_diagnostic_emission(
     void* user_data, const loom_diagnostic_emission_t* emission) {
   loomc_compile_diagnostic_capture_t* capture =
       (loomc_compile_diagnostic_capture_t*)user_data;
+  if (emission != NULL && emission->error != NULL &&
+      emission->error->severity == LOOM_DIAGNOSTIC_ERROR) {
+    ++capture->error_count;
+  }
   return iree_status_from_loomc(loomc_result_add_loom_diagnostic_emission(
-      capture->result, /*source=*/NULL, LOOM_EMITTER_PASS, emission));
+      capture->result, /*source=*/NULL, capture->emitter, emission));
 }
 
 static loomc_status_t loomc_compile_run_pass_program(
-    loomc_compiler_t* compiler, loomc_workspace_t* workspace,
-    const loomc_pass_program_t* pass_program, loom_module_t* internal_module,
+    loomc_workspace_t* workspace, const loomc_pass_program_t* pass_program,
+    loom_module_t* internal_module,
     loom_function_version_owner_t* function_version_owner,
-    loom_kernel_launch_config_program_t* launch_config_program,
+    const loom_pass_environment_capability_t* additional_capability,
     loomc_result_t* result) {
   loomc_compile_diagnostic_capture_t capture = {
       .result = result,
+      .emitter = LOOM_EMITTER_PASS,
   };
   loom_low_pass_environment_storage_t low_environment_storage = {0};
   loom_pass_environment_t pass_environment = loom_pass_environment_empty();
   loom_target_pass_predicate_provider_storage_t predicate_storage = {0};
   loom_pass_predicate_provider_t predicate_provider = {0};
   const loomc_target_pass_environment_t* target_environment =
-      loomc_context_target_pass_environment(compiler->context);
+      loomc_context_target_pass_environment(
+          loomc_pass_program_context(pass_program));
   if (target_environment != NULL) {
     pass_environment = loomc_target_pass_environment_make_loom_pass_environment(
         target_environment, function_version_owner, &low_environment_storage);
@@ -189,12 +204,12 @@ static loomc_status_t loomc_compile_run_pass_program(
   }
   const loom_pass_environment_capability_t* extended_capabilities
       [IREE_ARRAYSIZE(low_environment_storage.capabilities) + 1];
-  if (launch_config_program != NULL) {
+  if (additional_capability != NULL) {
     for (iree_host_size_t i = 0; i < pass_environment.capability_count; ++i) {
       extended_capabilities[i] = pass_environment.capabilities[i];
     }
     extended_capabilities[pass_environment.capability_count] =
-        loom_kernel_launch_config_program_capability(launch_config_program);
+        additional_capability;
     pass_environment = loom_pass_environment_make(
         extended_capabilities, pass_environment.capability_count + 1);
   }
@@ -219,6 +234,55 @@ static loomc_status_t loomc_compile_run_pass_program(
   return loomc_ok_status();
 }
 
+static loomc_status_t loomc_compile_emit_launch_config_program(
+    const loomc_target_pass_environment_t* pass_environment,
+    const loom_target_launch_config_compiler_t* launch_config_compiler,
+    const loom_pass_environment_capability_t* launch_config_capability,
+    const loom_function_version_list_t* function_versions,
+    loom_module_t* module, loomc_result_t* result,
+    iree_arena_allocator_t* scratch_arena,
+    loom_target_emit_artifact_t* out_artifact) {
+  *out_artifact = (loom_target_emit_artifact_t){0};
+  loomc_compile_diagnostic_capture_t capture = {
+      .result = result,
+      .emitter = LOOM_EMITTER_VERIFIER,
+  };
+  const loom_target_emit_request_t request = {
+      .target_environment = pass_environment->target_environment,
+      .low_descriptor_registry =
+          &pass_environment->low_descriptor_registry.registry,
+      .module = module,
+      .function_versions = function_versions,
+      .identifier = launch_config_compiler->default_identifier,
+      .diagnostic_emitter =
+          {
+              .fn = loomc_compile_capture_diagnostic_emission,
+              .user_data = &capture,
+          },
+      .scratch_arena = scratch_arena,
+      .allocator = iree_allocator_from_loomc(loomc_result_allocator(result)),
+  };
+  iree_status_t emit_status = launch_config_compiler->emit(
+      launch_config_capability, &request, out_artifact);
+  loomc_status_t status = loomc_status_from_iree(emit_status);
+  if (!loomc_status_is_ok(status) &&
+      loomc_status_is_result_diagnostic(status)) {
+    status = loomc_result_fail_status_diagnostic_consume(
+        result, NULL, LOOMC_DIAGNOSTIC_SEVERITY_ERROR,
+        loomc_make_cstring_view("COMPILE/LAUNCH_CONFIG"), status);
+  }
+  if (loomc_status_is_ok(status) && capture.error_count != 0) {
+    status = loomc_result_set_state(result, LOOMC_RESULT_STATE_FAILED);
+  }
+  if (loomc_status_is_ok(status) && loomc_result_succeeded(result) &&
+      out_artifact->contents == NULL) {
+    status = loomc_make_status(
+        LOOMC_STATUS_INTERNAL,
+        "launch-config compiler returned no artifact contents");
+  }
+  return status;
+}
+
 static loomc_status_t loomc_compile_specialize_functions(
     const loomc_target_environment_t* target_environment,
     const loomc_target_specialization_options_t* options, loom_module_t* module,
@@ -237,6 +301,7 @@ static loomc_status_t loomc_compile_specialize_functions(
 
   loomc_compile_diagnostic_capture_t capture = {
       .result = result,
+      .emitter = LOOM_EMITTER_PASS,
   };
   loom_target_specialization_result_t specialization_result = {0};
   LOOMC_RETURN_IF_ERROR(loomc_status_from_iree(loom_target_specialize_functions(
@@ -266,8 +331,13 @@ static loomc_status_t loomc_compile_make_artifact_identifier(
                                    out_identifier);
   }
 
-  const loomc_host_size_t identifier_length =
-      module_name.size + file_extension.size;
+  loomc_host_size_t identifier_length = 0;
+  if (!iree_host_size_checked_add(module_name.size, file_extension.size,
+                                  &identifier_length)) {
+    return loomc_make_status(
+        LOOMC_STATUS_RESOURCE_EXHAUSTED,
+        "artifact identifier length exceeds the host size domain");
+  }
   char* identifier = NULL;
   LOOMC_RETURN_IF_ERROR(loomc_allocator_malloc_uninitialized(
       allocator, identifier_length, (void**)&identifier));
@@ -325,29 +395,53 @@ static loomc_status_t loomc_compile_add_module_artifact(
   return status;
 }
 
-static loomc_status_t loomc_compile_add_launch_config_artifact(
+static loomc_status_t loomc_compile_add_launch_config_artifact_to_result(
     loomc_result_t* result, const loomc_compile_options_t* options,
-    const loomc_module_t* module, const loom_module_t* launch_config_module) {
+    const loom_target_launch_config_compiler_t* launch_config_compiler,
+    const loom_target_emit_artifact_t* target_artifact) {
   loomc_allocator_t allocator = loomc_result_allocator(result);
   loomc_string_view_t identifier = loomc_string_view_empty();
   loomc_status_t status = loomc_compile_make_artifact_identifier(
-      options, loomc_make_cstring_view(".launch-config.loombc"),
-      loomc_make_cstring_view("launch-config.loombc"), allocator, &identifier);
+      options,
+      loomc_string_view_from_iree(launch_config_compiler->file_extension),
+      loomc_string_view_from_iree(launch_config_compiler->default_identifier),
+      allocator, &identifier);
 
-  loomc_source_t* source = NULL;
   if (loomc_status_is_ok(status)) {
-    status = loomc_module_serialize_internal_bytecode_to_source(
-        loomc_module_context(module), launch_config_module, identifier,
-        /*projection=*/NULL, allocator, &source);
-  }
-  if (loomc_status_is_ok(status)) {
-    status = loomc_compile_result_take_source_artifact(
-        result, LOOMC_ARTIFACT_KIND_LAUNCH_CONFIG,
-        loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_LOOM_BYTECODE), source);
+    const loomc_artifact_t artifact = {
+        .kind = LOOMC_ARTIFACT_KIND_LAUNCH_CONFIG,
+        .format = loomc_string_view_from_iree(
+            launch_config_compiler->public_artifact_format),
+        .identifier = identifier,
+        .contents = loomc_byte_sequence_from_iree(target_artifact->contents),
+    };
+    status = loomc_result_add_artifact(result, &artifact);
   }
 
-  loomc_source_release(source);
   loomc_allocator_free(allocator, (void*)identifier.data);
+  return status;
+}
+
+loomc_status_t loomc_compile_add_launch_config_artifact(
+    loomc_result_t* result, const loomc_compile_options_t* options,
+    loomc_compile_operation_t* operation) {
+  if (operation->launch_config_artifact_ordinal != IREE_HOST_SIZE_MAX) {
+    return loomc_make_status(LOOMC_STATUS_FAILED_PRECONDITION,
+                             "launch-config artifact was already added");
+  }
+  if (operation->launch_config_compiler == NULL ||
+      operation->launch_config_artifact.contents == NULL) {
+    return loomc_make_status(LOOMC_STATUS_FAILED_PRECONDITION,
+                             "compilation produced no launch-config artifact");
+  }
+  const loomc_host_size_t artifact_ordinal =
+      loomc_result_artifact_count(result);
+  loomc_status_t status = loomc_compile_add_launch_config_artifact_to_result(
+      result, options, operation->launch_config_compiler,
+      &operation->launch_config_artifact);
+  if (loomc_status_is_ok(status)) {
+    operation->launch_config_artifact_ordinal = artifact_ordinal;
+  }
   return status;
 }
 
@@ -463,7 +557,7 @@ static loomc_status_t loomc_compile_emit_requested_artifacts(
     loomc_result_t* result, const loomc_compile_options_t* options,
     const loomc_target_specialization_options_t* target_options,
     const loomc_config_application_result_t* config_application,
-    const loomc_module_t* module, const loom_module_t* launch_config_module) {
+    const loomc_module_t* module, loomc_compile_operation_t* operation) {
   const loomc_compile_artifact_flags_t artifact_flags =
       options ? options->artifact_flags : 0;
   if (artifact_flags == 0) {
@@ -492,8 +586,8 @@ static loomc_status_t loomc_compile_emit_requested_artifacts(
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result) &&
       iree_any_bit_set(artifact_flags,
                        LOOMC_COMPILE_ARTIFACT_FLAG_LAUNCH_CONFIG)) {
-    status = loomc_compile_add_launch_config_artifact(result, options, module,
-                                                      launch_config_module);
+    status =
+        loomc_compile_add_launch_config_artifact(result, options, operation);
   }
   if (loomc_status_is_ok(status) &&
       iree_any_bit_set(artifact_flags,
@@ -539,7 +633,7 @@ static loomc_status_t loomc_compiled_module_product_allocate(
   return loomc_ok_status();
 }
 
-static loomc_status_t loomc_compile_resolve_target_specialization(
+loomc_status_t loomc_compile_resolve_target_specialization(
     const loomc_compiler_t* compiler, const loomc_compile_options_t* options,
     const loomc_target_specialization_options_t** out_target_specialization) {
   *out_target_specialization = NULL;
@@ -551,39 +645,60 @@ static loomc_status_t loomc_compile_resolve_target_specialization(
       loomc_context_target_environment(compiler->context));
 }
 
-// Compiles a validated mutable module into an existing succeeded result.
-//
-// Deserialization-backed callers reuse their parse result so diagnostics keep
-// one stable operation order and no merge or second result allocation is
-// required.
-static loomc_status_t loomc_compile_module_into_result(
+void loomc_compile_operation_deinitialize(
+    loomc_compile_operation_t* operation) {
+  if (operation == NULL) return;
+  loom_target_emit_artifact_release(&operation->launch_config_artifact);
+  if (operation->scratch_arena_initialized) {
+    iree_arena_deinitialize(&operation->scratch_arena);
+  }
+  *operation = (loomc_compile_operation_t){0};
+}
+
+loomc_context_t* loomc_compiler_context(const loomc_compiler_t* compiler) {
+  return compiler ? compiler->context : NULL;
+}
+
+loomc_status_t loomc_compile_module_into_result(
     loomc_compiler_t* compiler, loomc_workspace_t* workspace,
     const loomc_pass_program_t* pass_program, loomc_module_t* module,
     const loomc_compile_options_t* options,
     const loomc_target_specialization_options_t* target_specialization,
-    loomc_result_t* result) {
-  IREE_ASSERT_ARGUMENT(compiler);
-  IREE_ASSERT_ARGUMENT(workspace);
-  IREE_ASSERT_ARGUMENT(pass_program);
-  IREE_ASSERT_ARGUMENT(module);
-  IREE_ASSERT_ARGUMENT(result);
+    const loomc_compile_root_set_t* root_set, loomc_result_t* result,
+    loomc_compile_operation_t* out_operation) {
   IREE_ASSERT(loomc_result_succeeded(result));
+  IREE_ASSERT(root_set == NULL || root_set->count == 0 ||
+              root_set->symbol_ids != NULL);
+  IREE_ASSERT(root_set == NULL || root_set->launch_root_count == 0 ||
+              root_set->launch_root_ordinals != NULL);
+  IREE_ASSERT(root_set == NULL ||
+              root_set->launch_root_count <= root_set->count);
+  *out_operation = (loomc_compile_operation_t){
+      .launch_config_artifact_ordinal = IREE_HOST_SIZE_MAX,
+  };
   loom_module_t* internal_module = loomc_module_loom_module(module);
-  IREE_ASSERT_ARGUMENT(internal_module);
 
   const loomc_target_environment_t* context_target_environment =
       loomc_context_target_environment(compiler->context);
+  const loomc_target_pass_environment_t* target_pass_environment =
+      loomc_context_target_pass_environment(compiler->context);
   iree_arena_allocator_t* function_version_arena =
       loomc_module_prepare_function_versions(module);
   loom_function_version_owner_t function_versions = {0};
-  loom_kernel_launch_config_program_t launch_config_program = {0};
-  bool launch_config_program_initialized = false;
   const bool launch_config_requested =
-      options != NULL &&
-      iree_any_bit_set(options->artifact_flags,
-                       LOOMC_COMPILE_ARTIFACT_FLAG_LAUNCH_CONFIG);
-  const loom_module_t* launch_config_module = NULL;
+      root_set != NULL
+          ? root_set->launch_root_count != 0
+          : options != NULL &&
+                iree_any_bit_set(options->artifact_flags,
+                                 LOOMC_COMPILE_ARTIFACT_FLAG_LAUNCH_CONFIG);
+  const loom_pass_environment_capability_t* launch_config_capability = NULL;
   loomc_config_application_result_t config_application = {0};
+
+  if (root_set != NULL || launch_config_requested) {
+    iree_arena_initialize(loomc_workspace_block_pool(workspace),
+                          &out_operation->scratch_arena);
+    out_operation->scratch_arena_initialized = true;
+  }
 
   loomc_status_t status =
       loomc_result_verify_loom_module(internal_module, /*source=*/NULL, result);
@@ -607,43 +722,129 @@ static loomc_status_t loomc_compile_module_into_result(
         result, function_version_arena, &function_versions);
   }
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result) &&
-      launch_config_requested) {
-    status =
-        loomc_status_from_iree(loom_kernel_launch_config_program_initialize(
-            internal_module->context, loomc_workspace_block_pool(workspace),
-            iree_allocator_from_loomc(loomc_result_allocator(result)),
-            &launch_config_program));
-    launch_config_program_initialized = loomc_status_is_ok(status);
-  }
-  if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
-    status = loomc_compile_run_pass_program(
-        compiler, workspace, pass_program, internal_module, &function_versions,
-        launch_config_requested ? &launch_config_program : NULL, result);
+      root_set != NULL && root_set->count != 0) {
+    if (context_target_environment == NULL) {
+      status = loomc_make_status(
+          LOOMC_STATUS_FAILED_PRECONDITION,
+          "target root compilation requires a target environment");
+    } else {
+      loom_function_version_ordinal_t* root_version_ordinals = NULL;
+      status = loomc_status_from_iree(iree_arena_allocate_array(
+          &out_operation->scratch_arena, root_set->count,
+          sizeof(*root_version_ordinals), (void**)&root_version_ordinals));
+      if (loomc_status_is_ok(status)) {
+        out_operation->root_function_version_ordinals = root_version_ordinals;
+        out_operation->root_count = root_set->count;
+        loomc_compile_diagnostic_capture_t capture = {
+            .result = result,
+            .emitter = LOOM_EMITTER_PASS,
+        };
+        uint32_t error_count = 0;
+        status =
+            loomc_status_from_iree(loom_target_root_function_versions_prepare(
+                loomc_target_environment_loom_target_environment(
+                    context_target_environment),
+                internal_module, root_set->symbol_ids, root_set->count,
+                (iree_diagnostic_emitter_t){
+                    .fn = loomc_compile_capture_diagnostic_emission,
+                    .user_data = &capture,
+                },
+                &out_operation->scratch_arena, &function_versions,
+                root_version_ordinals, &error_count));
+        if (loomc_status_is_ok(status) && error_count != 0) {
+          status = loomc_result_set_state(result, LOOMC_RESULT_STATE_FAILED);
+        }
+      }
+    }
   }
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result) &&
       launch_config_requested) {
-    status = loomc_status_from_iree(loom_kernel_launch_config_program_finalize(
-        &launch_config_program, internal_module,
-        loomc_workspace_block_pool(workspace), &launch_config_module));
+    if (target_pass_environment == NULL) {
+      status = loomc_make_status(
+          LOOMC_STATUS_FAILED_PRECONDITION,
+          "launch configuration compilation requires a target environment");
+    } else {
+      out_operation->launch_config_compiler =
+          loom_target_environment_launch_config_compiler(
+              target_pass_environment->target_environment);
+      if (out_operation->launch_config_compiler == NULL) {
+        status = loomc_make_status(
+            LOOMC_STATUS_FAILED_PRECONDITION,
+            "target environment cannot compile launch configurations");
+      }
+    }
   }
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result) &&
-      launch_config_module != NULL) {
-    status = loomc_result_verify_loom_module(launch_config_module,
-                                             /*source=*/NULL, result);
+      launch_config_requested) {
+    loom_target_launch_config_root_set_t launch_root_set = {0};
+    const loom_target_launch_config_root_set_t* launch_root_set_ptr = NULL;
+    if (root_set != NULL) {
+      loom_function_version_ordinal_t* launch_version_ordinals = NULL;
+      status = loomc_status_from_iree(iree_arena_allocate_array(
+          &out_operation->scratch_arena, root_set->launch_root_count,
+          sizeof(*launch_version_ordinals), (void**)&launch_version_ordinals));
+      for (iree_host_size_t i = 0;
+           i < root_set->launch_root_count && loomc_status_is_ok(status); ++i) {
+        const loomc_request_root_ordinal_t root_ordinal =
+            root_set->launch_root_ordinals[i];
+        if (root_ordinal >= root_set->count) {
+          status = loomc_make_status(
+              LOOMC_STATUS_INTERNAL,
+              "launch root ordinal exceeds the compilation root set");
+          break;
+        }
+        const loom_function_version_ordinal_t version_ordinal =
+            out_operation->root_function_version_ordinals[root_ordinal];
+        if (version_ordinal == LOOM_FUNCTION_VERSION_ORDINAL_INVALID) {
+          status = loomc_make_status(
+              LOOMC_STATUS_INTERNAL,
+              "launch root has no stable compiler function version");
+          break;
+        }
+        launch_version_ordinals[i] = version_ordinal;
+      }
+      launch_root_set = (loom_target_launch_config_root_set_t){
+          .values = launch_version_ordinals,
+          .count = root_set->launch_root_count,
+      };
+      launch_root_set_ptr = &launch_root_set;
+    }
+    if (loomc_status_is_ok(status)) {
+      status =
+          loomc_status_from_iree(out_operation->launch_config_compiler->prepare(
+              launch_root_set_ptr, &out_operation->scratch_arena,
+              &launch_config_capability));
+    }
+    if (loomc_status_is_ok(status) && launch_config_capability == NULL) {
+      status = loomc_make_status(
+          LOOMC_STATUS_INTERNAL,
+          "launch-config compiler returned no pass capability");
+    }
   }
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
+    status = loomc_compile_run_pass_program(workspace, pass_program,
+                                            internal_module, &function_versions,
+                                            launch_config_capability, result);
+  }
+  if (loomc_status_is_ok(status) && loomc_result_succeeded(result) &&
+      launch_config_requested) {
+    status = loomc_compile_emit_launch_config_program(
+        target_pass_environment, out_operation->launch_config_compiler,
+        launch_config_capability, &function_versions.list, internal_module,
+        result, &out_operation->scratch_arena,
+        &out_operation->launch_config_artifact);
+  }
+  if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
+    out_operation->function_version_count = function_versions.list.count;
     loomc_module_publish_function_versions(module, function_versions);
   }
   if (loomc_status_is_ok(status)) {
     status = loomc_compile_emit_requested_artifacts(
         result, options, target_specialization, &config_application, module,
-        launch_config_module);
+        out_operation);
   }
   if (!loomc_status_is_ok(status) || !loomc_result_succeeded(result)) {
     loomc_module_prepare_function_versions(module);
-  }
-  if (launch_config_program_initialized) {
-    loom_kernel_launch_config_program_deinitialize(&launch_config_program);
   }
   return status;
 }
@@ -715,9 +916,11 @@ loomc_status_t loomc_compile_module(loomc_compiler_t* compiler,
   loomc_result_t* result = NULL;
   LOOMC_RETURN_IF_ERROR(
       loomc_result_create(LOOMC_RESULT_STATE_SUCCEEDED, allocator, &result));
+  loomc_compile_operation_t operation = {0};
   loomc_status_t status = loomc_compile_module_into_result(
       compiler, workspace, pass_program, module, options, target_specialization,
-      result);
+      /*root_set=*/NULL, result, &operation);
+  loomc_compile_operation_deinitialize(&operation);
   if (loomc_status_is_ok(status)) {
     *out_result = result;
     result = NULL;
@@ -726,7 +929,21 @@ loomc_status_t loomc_compile_module(loomc_compiler_t* compiler,
   return status;
 }
 
-static loomc_status_t loomc_compile_validate_request_roots(
+static loomc_status_t loomc_compile_validate_request_goals(
+    const loomc_request_t* request) {
+  const loomc_request_root_t* roots = loomc_request_roots(request);
+  const loomc_host_size_t root_count = loomc_request_root_count(request);
+  for (loomc_host_size_t i = 0; i < root_count; ++i) {
+    if (roots[i].goal != LOOMC_REQUEST_ROOT_GOAL_DEFAULT) {
+      return loomc_make_status(
+          LOOMC_STATUS_INVALID_ARGUMENT,
+          "compiled module request root has an unsupported goal");
+    }
+  }
+  return loomc_ok_status();
+}
+
+loomc_status_t loomc_compile_validate_request_roots(
     const loomc_module_t* module, const loomc_request_t* request) {
   const loom_module_t* internal_module = loomc_module_const_loom_module(module);
   const loomc_request_root_t* roots = loomc_request_roots(request);
@@ -767,6 +984,7 @@ loomc_status_t loomc_compile_request(
         LOOMC_STATUS_INVALID_ARGUMENT,
         "request does not require a compiled module product");
   }
+  LOOMC_RETURN_IF_ERROR(loomc_compile_validate_request_goals(request));
   if (loomc_pass_program_context(pass_program) != compiler->context) {
     return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
                              "pass program was created with another context");
@@ -780,6 +998,7 @@ loomc_status_t loomc_compile_request(
   loomc_module_t* module = NULL;
   loomc_result_t* result = NULL;
   loomc_product_t* product = NULL;
+  loomc_compile_operation_t operation = {0};
   loomc_status_t status = loomc_module_deserialize_from_source(
       compiler->context, workspace, loomc_request_source(request),
       /*options=*/NULL, allocator, &module, &result);
@@ -787,9 +1006,10 @@ loomc_status_t loomc_compile_request(
     status = loomc_compile_validate_request_roots(module, request);
   }
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
-    status = loomc_compile_module_into_result(compiler, workspace, pass_program,
-                                              module, options,
-                                              target_specialization, result);
+    status =
+        loomc_compile_module_into_result(compiler, workspace, pass_program,
+                                         module, options, target_specialization,
+                                         /*root_set=*/NULL, result, &operation);
   }
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
     status = loomc_compiled_module_product_allocate(
@@ -805,6 +1025,7 @@ loomc_status_t loomc_compile_request(
   }
 
   loomc_product_release(product);
+  loomc_compile_operation_deinitialize(&operation);
   loomc_result_release(result);
   loomc_module_release(module);
   return status;

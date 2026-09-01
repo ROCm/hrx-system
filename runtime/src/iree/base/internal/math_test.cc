@@ -21,28 +21,50 @@ namespace {
 // Bitwise rotation (aka circular shifts)
 //==============================================================================
 
+TEST(BitwiseRotationTest, ROTL32) {
+  EXPECT_EQ(0u, iree_math_rotl_u32(0u, 0u));
+  EXPECT_EQ(1u, iree_math_rotl_u32(1u, 0u));
+  EXPECT_EQ(2u, iree_math_rotl_u32(1u, 1u));
+  EXPECT_EQ(UINT32_C(0x80000000), iree_math_rotl_u32(1u, 31u));
+  EXPECT_EQ(1u, iree_math_rotl_u32(1u, 32u));
+  EXPECT_EQ(2u, iree_math_rotl_u32(1u, 33u));
+  EXPECT_EQ(UINT32_C(0x34567812), iree_math_rotl_u32(UINT32_C(0x12345678), 8u));
+  EXPECT_EQ(UINT32_MAX, iree_math_rotl_u32(UINT32_MAX, 17u));
+}
+
+TEST(BitwiseRotationTest, ROTR32) {
+  EXPECT_EQ(0u, iree_math_rotr_u32(0u, 0u));
+  EXPECT_EQ(1u, iree_math_rotr_u32(1u, 0u));
+  EXPECT_EQ(UINT32_C(0x80000000), iree_math_rotr_u32(1u, 1u));
+  EXPECT_EQ(2u, iree_math_rotr_u32(1u, 31u));
+  EXPECT_EQ(1u, iree_math_rotr_u32(1u, 32u));
+  EXPECT_EQ(UINT32_C(0x80000000), iree_math_rotr_u32(1u, 33u));
+  EXPECT_EQ(UINT32_C(0x78123456), iree_math_rotr_u32(UINT32_C(0x12345678), 8u));
+  EXPECT_EQ(UINT32_MAX, iree_math_rotr_u32(UINT32_MAX, 17u));
+}
+
 TEST(BitwiseRotationTest, ROTL64) {
   EXPECT_EQ(0ull, iree_math_rotl_u64(0ull, 0u));
-  EXPECT_EQ(0ull, iree_math_rotl_u64(0ull, 0u));
   EXPECT_EQ(1ull, iree_math_rotl_u64(1ull, 0u));
-  EXPECT_EQ(1ull, iree_math_rotl_u64(1ull, 0u));
-
   EXPECT_EQ(2ull, iree_math_rotl_u64(1ull, 1u));
-  EXPECT_EQ(2ull, iree_math_rotl_u64(1ull, 1u));
-  EXPECT_EQ(UINT64_MAX, iree_math_rotl_u64(UINT64_MAX, 63u));
-  EXPECT_EQ(UINT64_MAX, iree_math_rotl_u64(UINT64_MAX, 64u));
+  EXPECT_EQ(UINT64_C(0x8000000000000000), iree_math_rotl_u64(1ull, 63u));
+  EXPECT_EQ(1ull, iree_math_rotl_u64(1ull, 64u));
+  EXPECT_EQ(2ull, iree_math_rotl_u64(1ull, 65u));
+  EXPECT_EQ(UINT64_C(0x23456789ABCDEF01),
+            iree_math_rotl_u64(UINT64_C(0x0123456789ABCDEF), 8u));
+  EXPECT_EQ(UINT64_MAX, iree_math_rotl_u64(UINT64_MAX, 17u));
 }
 
 TEST(BitwiseRotationTest, ROTR64) {
   EXPECT_EQ(0ull, iree_math_rotr_u64(0ull, 0u));
-  EXPECT_EQ(0ull, iree_math_rotr_u64(0ull, 0u));
   EXPECT_EQ(1ull, iree_math_rotr_u64(1ull, 0u));
-  EXPECT_EQ(1ull, iree_math_rotr_u64(1ull, 0u));
-
-  EXPECT_EQ(1ull, iree_math_rotr_u64(2ull, 1u));
-  EXPECT_EQ(0x8000000000000000ull, iree_math_rotr_u64(2ull, 2u));
-  EXPECT_EQ(0x8000000000000000ull, iree_math_rotr_u64(1ull, 1u));
-  EXPECT_EQ(0x4000000000000000ull, iree_math_rotr_u64(1ull, 2u));
+  EXPECT_EQ(UINT64_C(0x8000000000000000), iree_math_rotr_u64(1ull, 1u));
+  EXPECT_EQ(2ull, iree_math_rotr_u64(1ull, 63u));
+  EXPECT_EQ(1ull, iree_math_rotr_u64(1ull, 64u));
+  EXPECT_EQ(UINT64_C(0x8000000000000000), iree_math_rotr_u64(1ull, 65u));
+  EXPECT_EQ(UINT64_C(0xEF0123456789ABCD),
+            iree_math_rotr_u64(UINT64_C(0x0123456789ABCDEF), 8u));
+  EXPECT_EQ(UINT64_MAX, iree_math_rotr_u64(UINT64_MAX, 17u));
 }
 
 //==============================================================================

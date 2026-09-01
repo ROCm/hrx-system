@@ -97,6 +97,7 @@ class OperandFlag(CEnum):
     SCHEDULE_ONLY_STATE = "LOOM_LOW_OPERAND_FLAG_SCHEDULE_ONLY_STATE"
     STORAGE_CONTINUATION = "LOOM_LOW_OPERAND_FLAG_STORAGE_CONTINUATION"
     VARIADIC = "LOOM_LOW_OPERAND_FLAG_VARIADIC"
+    VARIABLE_UNIT_COUNT = "LOOM_LOW_OPERAND_FLAG_VARIABLE_UNIT_COUNT"
 
 
 class RegClassAltFlag(CEnum):
@@ -110,6 +111,7 @@ class RegClassFlag(CEnum):
     PHYSICAL = "LOOM_LOW_REG_CLASS_FLAG_PHYSICAL"
     REFERENCE = "LOOM_LOW_REG_CLASS_FLAG_REFERENCE"
     UNSPILLABLE = "LOOM_LOW_REG_CLASS_FLAG_UNSPILLABLE"
+    UNALIGNED_RANGES = "LOOM_LOW_REG_CLASS_FLAG_UNALIGNED_RANGES"
 
 
 class SpillSlotSpace(CEnum):
@@ -130,6 +132,10 @@ class ImmediateFlag(CEnum):
     SYMBOLIC = "LOOM_LOW_IMMEDIATE_FLAG_SYMBOLIC"
     RELATIVE = "LOOM_LOW_IMMEDIATE_FLAG_RELATIVE"
     DEFAULT_VALUE = "LOOM_LOW_IMMEDIATE_FLAG_DEFAULT_VALUE"
+
+
+class AsmImmediateFlag(CEnum):
+    ENUM_TOKEN = "LOOM_LOW_ASM_IMMEDIATE_FLAG_ENUM_TOKEN"
 
 
 class EffectKind(CEnum):
@@ -242,13 +248,18 @@ class DescriptorFlag(CEnum):
     BARRIER = "LOOM_LOW_DESCRIPTOR_FLAG_BARRIER"
     EARLY_CLOBBER = "LOOM_LOW_DESCRIPTOR_FLAG_EARLY_CLOBBER"
     VARIADIC_OPERANDS = "LOOM_LOW_DESCRIPTOR_FLAG_VARIADIC_OPERANDS"
+    UNIQUE_IDENTITY = "LOOM_LOW_DESCRIPTOR_FLAG_UNIQUE_IDENTITY"
+    NO_RETURN = "LOOM_LOW_DESCRIPTOR_FLAG_NO_RETURN"
+    MAY_YIELD = "LOOM_LOW_DESCRIPTOR_FLAG_MAY_YIELD"
 
 
-class DescriptorOpKind(CEnum):
-    """Canonical low IR operation used to represent a descriptor packet."""
+class DescriptorCarrier(CEnum):
+    """Canonical Low IR operation used to carry a descriptor."""
 
-    OP = "LOOM_LOW_DESCRIPTOR_OP_KIND_OP"
-    CONST = "LOOM_LOW_DESCRIPTOR_OP_KIND_CONST"
+    OP = "LOOM_LOW_DESCRIPTOR_CARRIER_OP"
+    CONST = "LOOM_LOW_DESCRIPTOR_CARRIER_CONST"
+    BRANCH = "LOOM_LOW_DESCRIPTOR_CARRIER_BRANCH"
+    SWITCH = "LOOM_LOW_DESCRIPTOR_CARRIER_SWITCH"
 
 
 class InstructionClass(CEnum):
@@ -418,6 +429,7 @@ class EncodingFieldValue:
 class AsmImmediate:
     field_name: str
     name: str | None = None
+    flags: tuple[AsmImmediateFlag, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -613,7 +625,7 @@ class Descriptor:
     semantic_tag: str | None
     operands: tuple[Operand, ...]
     schedule_class: str
-    op_kind: DescriptorOpKind = DescriptorOpKind.OP
+    carrier: DescriptorCarrier = DescriptorCarrier.OP
     immediates: tuple[Immediate, ...] = ()
     encoding_field_values: tuple[EncodingFieldValue, ...] = ()
     asm_forms: tuple[AsmForm, ...] = ()

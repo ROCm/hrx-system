@@ -230,6 +230,26 @@ TEST_F(LowAsmPrinterTest, PrintsCanonicalHintAmongTargetPackets) {
   loom_module_free(module);
 }
 
+TEST_F(LowAsmPrinterTest, PrintsCanonicalSpillAndReloadAmongTargetPackets) {
+  const char* source =
+      "test.target<low_core> @test_target\n"
+      "\n"
+      "low.func.def target<test.low.core>(@test_target) @spill("
+      "%value: reg<test.i32>) -> (reg<test.i32>) asm {\n"
+      "  %storage = storage {byte_alignment = 4, byte_length = 4} : "
+      "low.storage<private>\n"
+      "  low.spill %value, %storage : reg<test.i32>, "
+      "low.storage<private>\n"
+      "  %reloaded = low.reload %storage : low.storage<private> -> "
+      "reg<test.i32>\n"
+      "  return %reloaded\n"
+      "}\n";
+  loom_module_t* module = ParseOk(source);
+  ASSERT_NE(module, nullptr);
+  EXPECT_EQ(PrintModule(module), source);
+  loom_module_free(module);
+}
+
 TEST_F(LowAsmPrinterTest, PrintsExplicitAmbiguousResultType) {
   const char* source =
       "low.func.def target<test.low.core> @ambiguous() -> "
@@ -238,6 +258,19 @@ TEST_F(LowAsmPrinterTest, PrintsExplicitAmbiguousResultType) {
       "  %amb = test.ambiguous : reg<test.i64>\n"
       "  %tied = test.tied.any %c0\n"
       "  return %amb, %tied\n"
+      "}\n";
+  loom_module_t* module = ParseOk(source);
+  ASSERT_NE(module, nullptr);
+  EXPECT_EQ(PrintModule(module), source);
+  loom_module_free(module);
+}
+
+TEST_F(LowAsmPrinterTest, PrintsExplicitVariableUnitResultType) {
+  const char* source =
+      "low.func.def target<test.low.core> @variable("
+      "%source: reg<test.i32 x3>) -> (reg<test.i32 x5>) asm {\n"
+      "  %result = test.variable.i32 %source : reg<test.i32 x5>\n"
+      "  return %result\n"
       "}\n";
   loom_module_t* module = ParseOk(source);
   ASSERT_NE(module, nullptr);
@@ -313,6 +346,57 @@ TEST_F(LowAsmPrinterTest, PrintsStructuralIntrinsics) {
   loom_module_t* module = ParseOk(source);
   ASSERT_NE(module, nullptr);
   EXPECT_EQ(PrintModule(module), source);
+  loom_module_free(module);
+}
+
+TEST_F(LowAsmPrinterTest, PrintsDescriptorBackedControlFlow) {
+  const char* source =
+      "low.func.def target<test.low.core> @control("
+      "%selector: reg<test.i32>, %value: reg<test.i32>) -> "
+      "(reg<test.i32>) asm {\n"
+      "  test.switch %selector targets [^case0, ^fallback] "
+      "default ^fallback\n"
+      "^case0:\n"
+      "  test.br ^done(%value)\n"
+      "^fallback:\n"
+      "  low.br ^done(%value: reg<test.i32>)\n"
+      "^done(%result: reg<test.i32>):\n"
+      "  return %result\n"
+      "}\n";
+  loom_module_t* module = ParseOk(source);
+  ASSERT_NE(module, nullptr);
+  EXPECT_EQ(PrintModule(module), source);
+  loom_module_free(module);
+}
+
+TEST_F(LowAsmPrinterTest, CanonicalizesDescriptorBackedControlFlow) {
+  const char* source =
+      "low.func.def target<test.low.core> @control("
+      "%selector: reg<test.i32>) asm {\n"
+      "  low.switch<test.switch> %selector targets [^case0, ^fallback] "
+      "default ^fallback : reg<test.i32>\n"
+      "^case0:\n"
+      "  low.br<test.br> ^done\n"
+      "^fallback:\n"
+      "  low.br ^done\n"
+      "^done:\n"
+      "  return\n"
+      "}\n";
+  const char* expected =
+      "low.func.def target<test.low.core> @control("
+      "%selector: reg<test.i32>) asm {\n"
+      "  test.switch %selector targets [^case0, ^fallback] "
+      "default ^fallback\n"
+      "^case0:\n"
+      "  test.br ^done\n"
+      "^fallback:\n"
+      "  low.br ^done\n"
+      "^done:\n"
+      "  return\n"
+      "}\n";
+  loom_module_t* module = ParseOk(source);
+  ASSERT_NE(module, nullptr);
+  EXPECT_EQ(PrintModule(module), expected);
   loom_module_free(module);
 }
 
@@ -422,28 +506,6 @@ TEST_F(LowAsmPrinterTest, RejectsMissingPrintEnvironment) {
       IREE_STATUS_FAILED_PRECONDITION,
       PrintModuleStatus(
           module, /*configure_environment=*/false,
-          LOOM_TEXT_PRINT_DEFAULT | LOOM_TEXT_PRINT_REQUIRE_LOW_ASM));
-  loom_module_free(module);
-}
-
-TEST_F(LowAsmPrinterTest, RequiredOptionalLowAsmRejectsCanonicalFallback) {
-  const char* source =
-      "test.target<low_core> @test_target\n"
-      "\n"
-      "low.func.def target<test.low.core>(@test_target) "
-      "@spill(%value: reg<test.i32>) -> (reg<test.i32>) {\n"
-      "  %slot = low.storage.reserve "
-      "{byte_alignment = 4, byte_length = 4} : low.storage<private>\n"
-      "  low.spill %value, %slot : reg<test.i32>, low.storage<private>\n"
-      "  low.return %value : reg<test.i32>\n"
-      "}\n";
-  loom_module_t* module = ParseOk(source);
-  ASSERT_NE(module, nullptr);
-  EXPECT_EQ(PrintModule(module), source);
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_UNIMPLEMENTED,
-      PrintModuleStatus(
-          module, /*configure_environment=*/true,
           LOOM_TEXT_PRINT_DEFAULT | LOOM_TEXT_PRINT_REQUIRE_LOW_ASM));
   loom_module_free(module);
 }

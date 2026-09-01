@@ -45,19 +45,19 @@ low.func.def target<test.low.core>(@test_target) @live_in_spill_storage_prefix()
 // ----
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @live_in_spill_storage_prefix() -> (reg<test.i32>) {
-  %live = low.live_in<test.arg0> : reg<test.i32>
-  %live_in_spill_storage_prefix_spill_storage_0 = low.storage.reserve {byte_alignment = 4, byte_length = 4} : low.storage<private>
+low.func.def target<test.low.core>(@test_target) @live_in_spill_storage_prefix() -> (reg<test.i32>) asm {
+  %live = live_in<test.arg0> : reg<test.i32>
+  %live_in_spill_storage_prefix_spill_storage_0 = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
   low.spill %live, %live_in_spill_storage_prefix_spill_storage_0 : reg<test.i32>, low.storage<private>
-  %seed0 = low.const<test.const.i32> {i32_value = 1} : reg<test.i32>
-  %seed1 = low.const<test.const.i32> {i32_value = 2} : reg<test.i32>
-  %pair = low.op<test.add.i32>(%seed0, %seed1) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %seed0 = test.const.i32 1
+  %seed1 = test.const.i32 2
+  %pair = test.add.i32 %seed0, %seed1
   %9 = low.reload %live_in_spill_storage_prefix_spill_storage_0 : low.storage<private> -> reg<test.i32>
-  %sum0 = low.op<test.add.i32>(%pair, %9) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %sum1 = low.op<test.add.i32>(%sum0, %pair) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %sum0 = test.add.i32 %pair, %9
+  %sum1 = test.add.i32 %sum0, %pair
   %10 = low.reload %live_in_spill_storage_prefix_spill_storage_0 : low.storage<private> -> reg<test.i32>
-  %out = low.op<test.add.i32>(%sum1, %10) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  low.return %out : reg<test.i32>
+  %out = test.add.i32 %sum1, %10
+  return %out
 }
 
 // ====
@@ -94,30 +94,30 @@ low.func.def target<test.low.core>(@test_target) @block_arg_spill(%row: reg<test
   return %out
 ^late:
   %late_state = test.const.i32 7
-  low.br ^join(%late_state: reg<test.i32>)
+  test.br ^join(%late_state)
 }
 
 // ----
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @block_arg_spill(%row: reg<test.i32>, %carry: reg<test.i32>) -> (reg<test.i32>) {
-  %block_arg_spill_spill_storage_0 = low.storage.reserve {byte_alignment = 4, byte_length = 4} : low.storage<private>
-  %block_arg_spill_spill_storage_1 = low.storage.reserve {byte_alignment = 4, byte_length = 4} : low.storage<private>
-  %block_arg_spill_spill_storage_2 = low.storage.reserve {byte_alignment = 4, byte_length = 4} : low.storage<private>
+low.func.def target<test.low.core>(@test_target) @block_arg_spill(%row: reg<test.i32>, %carry: reg<test.i32>) -> (reg<test.i32>) asm {
+  %block_arg_spill_spill_storage_0 = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %block_arg_spill_spill_storage_1 = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %block_arg_spill_spill_storage_2 = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
   low.spill %row, %block_arg_spill_spill_storage_0 : reg<test.i32>, low.storage<private>
   low.spill %carry, %block_arg_spill_spill_storage_1 : reg<test.i32>, low.storage<private>
   low.br ^late
 ^join:
   %8 = low.reload %block_arg_spill_spill_storage_0 : low.storage<private> -> reg<test.i32>
   %10 = low.reload %block_arg_spill_spill_storage_1 : low.storage<private> -> reg<test.i32>
-  %sum = low.op<test.add.i32>(%8, %10) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %sum = test.add.i32 %8, %10
   %12 = low.reload %block_arg_spill_spill_storage_2 : low.storage<private> -> reg<test.i32>
-  %out = low.op<test.add.i32>(%sum, %12) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  low.return %out : reg<test.i32>
+  %out = test.add.i32 %sum, %12
+  return %out
 ^late:
-  %late_state = low.const<test.const.i32> {i32_value = 7} : reg<test.i32>
+  %late_state = test.const.i32 7
   low.spill %late_state, %block_arg_spill_spill_storage_2 : reg<test.i32>, low.storage<private>
-  low.br ^join
+  test.br ^join
 }
 
 // ====
@@ -142,19 +142,19 @@ low.func.def target<test.low.core>(@test_target) @wide_slice_reload_cluster(%blo
 // ----
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @wide_slice_reload_cluster(%blocker: reg<test.i32>, %wide: reg<test.i32 x4>) -> (reg<test.i32>) {
-  %wide_slice_reload_cluster_spill_storage_0 = low.storage.reserve {byte_alignment = 16, byte_length = 16} : low.storage<private>
+low.func.def target<test.low.core>(@test_target) @wide_slice_reload_cluster(%blocker: reg<test.i32>, %wide: reg<test.i32 x4>) -> (reg<test.i32>) asm {
+  %wide_slice_reload_cluster_spill_storage_0 = storage {byte_alignment = 16, byte_length = 16} : low.storage<private>
   low.spill %wide, %wide_slice_reload_cluster_spill_storage_0 : reg<test.i32 x4>, low.storage<private>
-  %blocker_use = low.op<test.add.i32>(%blocker, %blocker) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %blocker_use = test.add.i32 %blocker, %blocker
   %13 = low.reload %wide_slice_reload_cluster_spill_storage_0 : low.storage<private> -> reg<test.i32>
   %14 = low.reload %wide_slice_reload_cluster_spill_storage_0 {offset = 4} : low.storage<private> -> reg<test.i32>
-  %sum0 = low.op<test.add.i32>(%13, %14) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %sum0 = test.add.i32 %13, %14
   %15 = low.reload %wide_slice_reload_cluster_spill_storage_0 {offset = 8} : low.storage<private> -> reg<test.i32>
-  %sum1 = low.op<test.add.i32>(%sum0, %15) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %sum1 = test.add.i32 %sum0, %15
   %16 = low.reload %wide_slice_reload_cluster_spill_storage_0 {offset = 12} : low.storage<private> -> reg<test.i32>
-  %sum2 = low.op<test.add.i32>(%sum1, %16) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %out = low.op<test.add.i32>(%sum2, %blocker_use) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  low.return %out : reg<test.i32>
+  %sum2 = test.add.i32 %sum1, %16
+  %out = test.add.i32 %sum2, %blocker_use
+  return %out
 }
 
 // ====
@@ -186,27 +186,27 @@ low.func.def target<test.low.core>(@test_target) @dense_slice_reload_cluster(%bl
 // ----
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @dense_slice_reload_cluster(%blocker: reg<test.i32>, %wide: reg<test.i32 x8>) -> (reg<test.i32>) {
-  %dense_slice_reload_cluster_spill_storage_0 = low.storage.reserve {byte_alignment = 16, byte_length = 32} : low.storage<private>
+low.func.def target<test.low.core>(@test_target) @dense_slice_reload_cluster(%blocker: reg<test.i32>, %wide: reg<test.i32 x8>) -> (reg<test.i32>) asm {
+  %dense_slice_reload_cluster_spill_storage_0 = storage {byte_alignment = 16, byte_length = 32} : low.storage<private>
   low.spill %wide, %dense_slice_reload_cluster_spill_storage_0 : reg<test.i32 x8>, low.storage<private>
-  %pressure = low.op<test.add.i32>(%blocker, %blocker) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  %pressure = test.add.i32 %blocker, %blocker
   %20 = low.reload %dense_slice_reload_cluster_spill_storage_0 : low.storage<private> -> reg<test.i32 x8>
-  %wide0 = low.slice %20[0] : reg<test.i32 x8> -> reg<test.i32>
-  %wide1 = low.slice %20[1] : reg<test.i32 x8> -> reg<test.i32>
-  %sum0 = low.op<test.add.i32>(%wide0, %wide1) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %wide2 = low.slice %20[2] : reg<test.i32 x8> -> reg<test.i32>
-  %sum1 = low.op<test.add.i32>(%sum0, %wide2) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %wide3 = low.slice %20[3] : reg<test.i32 x8> -> reg<test.i32>
-  %sum2 = low.op<test.add.i32>(%sum1, %wide3) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %wide4 = low.slice %20[4] : reg<test.i32 x8> -> reg<test.i32>
-  %sum3 = low.op<test.add.i32>(%sum2, %wide4) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %wide5 = low.slice %20[5] : reg<test.i32 x8> -> reg<test.i32>
-  %sum4 = low.op<test.add.i32>(%sum3, %wide5) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %wide6 = low.slice %20[6] : reg<test.i32 x8> -> reg<test.i32>
-  %sum5 = low.op<test.add.i32>(%sum4, %wide6) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  %wide7 = low.slice %20[7] : reg<test.i32 x8> -> reg<test.i32>
-  %sum6 = low.op<test.add.i32>(%sum5, %wide7) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  low.return %sum6 : reg<test.i32>
+  %wide0 = slice %20[0] : reg<test.i32 x8> -> reg<test.i32>
+  %wide1 = slice %20[1] : reg<test.i32 x8> -> reg<test.i32>
+  %sum0 = test.add.i32 %wide0, %wide1
+  %wide2 = slice %20[2] : reg<test.i32 x8> -> reg<test.i32>
+  %sum1 = test.add.i32 %sum0, %wide2
+  %wide3 = slice %20[3] : reg<test.i32 x8> -> reg<test.i32>
+  %sum2 = test.add.i32 %sum1, %wide3
+  %wide4 = slice %20[4] : reg<test.i32 x8> -> reg<test.i32>
+  %sum3 = test.add.i32 %sum2, %wide4
+  %wide5 = slice %20[5] : reg<test.i32 x8> -> reg<test.i32>
+  %sum4 = test.add.i32 %sum3, %wide5
+  %wide6 = slice %20[6] : reg<test.i32 x8> -> reg<test.i32>
+  %sum5 = test.add.i32 %sum4, %wide6
+  %wide7 = slice %20[7] : reg<test.i32 x8> -> reg<test.i32>
+  %sum6 = test.add.i32 %sum5, %wide7
+  return %sum6
 }
 
 // ====

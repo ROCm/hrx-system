@@ -40,7 +40,7 @@ from loom.target.contracts.source_memory import (
 )
 from loom.target.low_descriptors import (
     Descriptor,
-    DescriptorOpKind,
+    DescriptorCarrier,
     DescriptorSet,
     ImmediateKind,
     Operand,
@@ -143,7 +143,7 @@ class EmitDescriptorOp:
         _require_descriptor(descriptor_set, self.descriptor)
         if (
             self.form == DescriptorEmitForm.CONST
-            and self.descriptor.op_kind is not DescriptorOpKind.CONST
+            and self.descriptor.carrier is not DescriptorCarrier.CONST
         ):
             raise ValueError(
                 f"{source_op.name}: descriptor '{self.descriptor.key}' uses "
@@ -158,7 +158,7 @@ class EmitDescriptorOp:
                 DescriptorEmitForm.PER_LANE_SEQUENCE,
                 DescriptorEmitForm.ACCUMULATE_LANES,
             )
-            and self.descriptor.op_kind is not DescriptorOpKind.OP
+            and self.descriptor.carrier is not DescriptorCarrier.OP
         ):
             raise ValueError(
                 f"{source_op.name}: descriptor '{self.descriptor.key}' uses "
@@ -514,13 +514,13 @@ def _validate_materializer_descriptor(
     descriptor: Descriptor,
     *,
     subject: str,
-    op_kind: DescriptorOpKind,
+    carrier: DescriptorCarrier,
     input_carriers: tuple[_MaterializerCarrier | None, ...],
     result_carrier: _MaterializerCarrier | None = None,
     bound_immediate: str | None = None,
 ) -> _MaterializerCarrier:
-    if descriptor.op_kind is not op_kind:
-        expected_kind = "low.const" if op_kind is DescriptorOpKind.CONST else "low.op"
+    if descriptor.carrier is not carrier:
+        expected_kind = "low.const" if carrier is DescriptorCarrier.CONST else "low.op"
         raise ValueError(
             f"{source_op.name}: {subject} descriptor '{descriptor.key}' must use "
             f"{expected_kind}"
@@ -622,7 +622,7 @@ def _validate_byte_offset_materializer(
         source_op,
         materializer.const_i64,
         subject="source-memory byte-offset constant",
-        op_kind=DescriptorOpKind.CONST,
+        carrier=DescriptorCarrier.CONST,
         input_carriers=(),
         bound_immediate=materializer.const_i64_immediate,
     )
@@ -636,7 +636,7 @@ def _validate_byte_offset_materializer(
                 source_op,
                 descriptor,
                 subject=subject,
-                op_kind=DescriptorOpKind.OP,
+                carrier=DescriptorCarrier.OP,
                 input_carriers=(carrier, carrier),
                 result_carrier=carrier,
             )
@@ -650,7 +650,7 @@ def _validate_address_materializer(
         source_op,
         materializer.const_coordinate,
         subject="source-memory address-coordinate constant",
-        op_kind=DescriptorOpKind.CONST,
+        carrier=DescriptorCarrier.CONST,
         input_carriers=(),
         bound_immediate=materializer.const_coordinate_immediate,
     )
@@ -667,7 +667,7 @@ def _validate_address_materializer(
                 source_op,
                 descriptor,
                 subject=subject,
-                op_kind=DescriptorOpKind.OP,
+                carrier=DescriptorCarrier.OP,
                 input_carriers=(carrier, carrier),
                 result_carrier=carrier,
             )
@@ -678,7 +678,7 @@ def _validate_address_materializer(
             source_op,
             materializer.index_to_coordinate_input,
             subject="source-memory address-coordinate index-input conversion",
-            op_kind=DescriptorOpKind.OP,
+            carrier=DescriptorCarrier.OP,
             input_carriers=(None,),
         )
     if materializer.index_to_coordinate is not None:
@@ -686,7 +686,7 @@ def _validate_address_materializer(
             source_op,
             materializer.index_to_coordinate,
             subject="source-memory address-coordinate index conversion",
-            op_kind=DescriptorOpKind.OP,
+            carrier=DescriptorCarrier.OP,
             input_carriers=(index_input_carrier,),
             result_carrier=carrier,
         )
@@ -699,6 +699,6 @@ def _validate_address_materializer(
         source_op,
         materializer.address,
         subject="source-memory address",
-        op_kind=DescriptorOpKind.OP,
+        carrier=DescriptorCarrier.OP,
         input_carriers=(None, carrier),
     )

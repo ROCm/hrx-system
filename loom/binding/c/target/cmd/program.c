@@ -30,6 +30,7 @@
 #include "loom/transforms/kernel/kernel_request_producer.h"
 #include "loomc/compile.h"
 #include "loomc/iree.h"
+#include "loomc/target/kernel.h"
 
 enum {
   LOOMC_CMD_PROGRAM_PRODUCT_KNOWN_FLAGS =
@@ -185,6 +186,13 @@ static loomc_status_t loomc_cmd_program_product_validate_request_options(
   if (loomc_request_root_count(request) == 0) {
     return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
                              "command request must contain at least one root");
+  }
+  const loomc_request_root_t* roots = loomc_request_roots(request);
+  for (loomc_host_size_t i = 0; i < loomc_request_root_count(request); ++i) {
+    if (roots[i].goal != LOOMC_REQUEST_ROOT_GOAL_DEFAULT) {
+      return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
+                               "command request root has an unsupported goal");
+    }
   }
   if (options == NULL) {
     return loomc_ok_status();
@@ -367,14 +375,15 @@ static iree_status_t loomc_cmd_program_product_publish_kernel_request(
     const loomc_request_root_t root = {
         .module_ordinal = 0,
         .symbol_ordinal = bytecode_symbol_ordinal,
+        .goal = LOOMC_KERNEL_ROOT_GOAL_EXECUTABLE_ENTRY,
     };
     const loomc_request_binding_t binding = {
         .requirement_ordinal = request->entry_requirement_index,
         .root_ordinal = 0,
     };
     status = loomc_request_create_take_source(
-        loomc_compiled_module_product_descriptor(), &source, &root, 1, &binding,
-        1, invocation->request.allocator, &public_request);
+        loomc_kernel_product_descriptor(), &source, &root, 1, &binding, 1,
+        invocation->request.allocator, &public_request);
   }
   if (loomc_status_is_ok(status)) {
     loomc_request_t* transferred_request = public_request;

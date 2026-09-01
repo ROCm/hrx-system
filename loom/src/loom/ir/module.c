@@ -193,7 +193,7 @@ static void loom_type_use_heads_initialize(loom_value_type_use_heads_t* heads,
 
 static void loom_value_segment_initialize(loom_value_segment_t* segment) {
   memset(segment, 0, sizeof(*segment));
-  memset(segment->u32_scratch, 0xFF, sizeof(segment->u32_scratch));
+  memset(segment->local_ordinals, 0xFF, sizeof(segment->local_ordinals));
   loom_type_use_heads_initialize(segment->type_use_heads,
                                  LOOM_VALUE_SEGMENT_CAPACITY);
 }
@@ -223,23 +223,6 @@ static iree_status_t loom_value_table_reserve(loom_module_t* module,
     available_capacity += LOOM_VALUE_SEGMENT_CAPACITY;
   }
   return iree_ok_status();
-}
-
-static void loom_value_u32_scratch_fill(loom_value_u32_scratch_t* scratch,
-                                        iree_host_size_t value_count,
-                                        int byte_value) {
-  IREE_ASSERT(value_count <= scratch->value_table->count);
-  iree_host_size_t remaining_count = value_count;
-  for (uint32_t segment_index = 0; remaining_count > 0; ++segment_index) {
-    loom_value_segment_t* segment =
-        (loom_value_segment_t*)loom_segmented_storage_segment(
-            &scratch->value_table->segments, segment_index);
-    const iree_host_size_t segment_value_count = iree_min(
-        remaining_count, (iree_host_size_t)LOOM_VALUE_SEGMENT_CAPACITY);
-    memset(segment->u32_scratch, byte_value,
-           segment_value_count * sizeof(segment->u32_scratch[0]));
-    remaining_count -= segment_value_count;
-  }
 }
 
 static iree_status_t loom_string_table_ensure_capacity(
@@ -399,6 +382,39 @@ static void loom_region_adjust_summary_count(uint32_t* count, int32_t delta) {
   } else {
     *count += (uint32_t)delta;
   }
+}
+
+void loom_region_adjust_value_definition_count(loom_region_t* region,
+                                               int64_t delta) {
+  if (delta == 0) return;
+  while (region) {
+    if (delta < 0) {
+      const uint64_t decrement = (uint64_t)(-(delta + 1)) + 1;
+      IREE_ASSERT_LE(decrement, region->value_definition_count);
+      region->value_definition_count -= (uint32_t)decrement;
+    } else {
+      const uint64_t increment = (uint64_t)delta;
+      IREE_ASSERT_LE(increment,
+                     (uint64_t)UINT32_MAX - region->value_definition_count);
+      region->value_definition_count += (uint32_t)increment;
+    }
+    const loom_op_t* owner_op = region->owner_op;
+    region = owner_op && owner_op->parent_block
+                 ? owner_op->parent_block->parent_region
+                 : NULL;
+  }
+}
+
+static uint32_t loom_op_value_definition_count(const loom_op_t* op) {
+  uint64_t value_definition_count = op->result_count;
+  loom_region_t* const* regions = loom_op_regions(op);
+  for (uint8_t i = 0; i < op->region_count; ++i) {
+    if (regions[i]) {
+      value_definition_count += regions[i]->value_definition_count;
+    }
+  }
+  IREE_ASSERT_LE(value_definition_count, UINT32_MAX);
+  return (uint32_t)value_definition_count;
 }
 
 static void loom_region_adjust_summary_counts(loom_region_t* region,
@@ -584,9 +600,6 @@ static iree_status_t loom_module_initialize_tables(
   loom_segmented_storage_initialize(sizeof(loom_value_segment_t),
                                     iree_alignof(loom_value_segment_t),
                                     &module->values.segments);
-  module->scratch.values.value_table = &module->values;
-  module->scratch.values.state =
-      LOOM_VALUE_U32_SCRATCH_STATE_UNACQUIRED_ORDINALS;
   module->type_uses.value_table = &module->values;
   module->type_uses.first_free_use_id = LOOM_TYPE_USE_ID_INVALID;
 
@@ -695,36 +708,13 @@ void loom_module_free(loom_module_t* module) {
 }
 
 void loom_module_value_ordinal_scratch_acquire(loom_module_t* module) {
-  loom_value_u32_scratch_t* scratch = &module->scratch.values;
-  IREE_ASSERT(scratch->state != LOOM_VALUE_U32_SCRATCH_STATE_ACQUIRED_ORDINALS);
-  IREE_ASSERT(scratch->state != LOOM_VALUE_U32_SCRATCH_STATE_ACQUIRED_ZEROED);
-  if (scratch->state != LOOM_VALUE_U32_SCRATCH_STATE_UNACQUIRED_ORDINALS) {
-    loom_value_u32_scratch_fill(scratch, module->values.count, 0xFF);
-  }
-  scratch->state = LOOM_VALUE_U32_SCRATCH_STATE_ACQUIRED_ORDINALS;
+  IREE_ASSERT(!module->scratch.value_ordinals_acquired);
+  module->scratch.value_ordinals_acquired = true;
 }
 
 void loom_module_value_ordinal_scratch_release(loom_module_t* module) {
-  loom_value_u32_scratch_t* scratch = &module->scratch.values;
-  IREE_ASSERT_EQ(scratch->state,
-                 LOOM_VALUE_U32_SCRATCH_STATE_ACQUIRED_ORDINALS);
-  scratch->state = LOOM_VALUE_U32_SCRATCH_STATE_UNACQUIRED_ORDINALS;
-}
-
-void loom_value_u32_scratch_acquire_zeroed(loom_value_u32_scratch_t* scratch,
-                                           iree_host_size_t value_count) {
-  IREE_ASSERT(scratch != NULL);
-  IREE_ASSERT(value_count <= scratch->value_table->count);
-  IREE_ASSERT(scratch->state != LOOM_VALUE_U32_SCRATCH_STATE_ACQUIRED_ORDINALS);
-  IREE_ASSERT(scratch->state != LOOM_VALUE_U32_SCRATCH_STATE_ACQUIRED_ZEROED);
-  loom_value_u32_scratch_fill(scratch, value_count, 0);
-  scratch->state = LOOM_VALUE_U32_SCRATCH_STATE_ACQUIRED_ZEROED;
-}
-
-void loom_value_u32_scratch_release_zeroed(loom_value_u32_scratch_t* scratch) {
-  IREE_ASSERT(scratch != NULL);
-  IREE_ASSERT_EQ(scratch->state, LOOM_VALUE_U32_SCRATCH_STATE_ACQUIRED_ZEROED);
-  scratch->state = LOOM_VALUE_U32_SCRATCH_STATE_UNACQUIRED_ZEROED;
+  IREE_ASSERT(module->scratch.value_ordinals_acquired);
+  module->scratch.value_ordinals_acquired = false;
 }
 
 //===----------------------------------------------------------------------===//
@@ -2056,12 +2046,6 @@ iree_status_t loom_module_define_value(loom_module_t* module, loom_type_t type,
   value->type = canonical_type;
   value->name_id = LOOM_STRING_ID_INVALID;
   value->def = loom_value_def_make_none();
-  loom_value_u32_scratch_t* scratch = &module->scratch.values;
-  if (scratch->state == LOOM_VALUE_U32_SCRATCH_STATE_ACQUIRED_ZEROED ||
-      scratch->state == LOOM_VALUE_U32_SCRATCH_STATE_UNACQUIRED_ZEROED) {
-    loom_value_u32_scratch_store(scratch, id, 0);
-  }
-
   if (reference_count > 0) {
     IREE_RETURN_IF_ERROR(
         loom_type_use_table_add_outgoing_for_value(module, id, canonical_type));
@@ -2085,10 +2069,6 @@ iree_status_t loom_module_define_untyped_values(
 
   IREE_RETURN_IF_ERROR(loom_value_table_reserve(module, count));
   const loom_value_id_t base_value_id = (loom_value_id_t)module->values.count;
-  const bool zero_scratch = module->scratch.values.state ==
-                                LOOM_VALUE_U32_SCRATCH_STATE_ACQUIRED_ZEROED ||
-                            module->scratch.values.state ==
-                                LOOM_VALUE_U32_SCRATCH_STATE_UNACQUIRED_ZEROED;
   iree_host_size_t remaining_count = count;
   iree_host_size_t value_ordinal = module->values.count;
   module->values.count += count;
@@ -2101,10 +2081,6 @@ iree_status_t loom_module_define_untyped_values(
         iree_min(remaining_count, LOOM_VALUE_SEGMENT_CAPACITY - segment_offset);
     for (iree_host_size_t i = 0; i < segment_count; ++i) {
       segment->values[segment_offset + i].name_id = LOOM_STRING_ID_INVALID;
-    }
-    if (zero_scratch) {
-      memset(&segment->u32_scratch[segment_offset], 0,
-             segment_count * sizeof(segment->u32_scratch[0]));
     }
     value_ordinal += segment_count;
     remaining_count -= segment_count;
@@ -2885,6 +2861,9 @@ static iree_status_t loom_module_canonicalize_attr_value(
     case LOOM_ATTR_I64:
       *out_value = loom_attr_i64(value.i64);
       return iree_ok_status();
+    case LOOM_ATTR_U64:
+      *out_value = loom_attr_u64(value.u64);
+      return iree_ok_status();
     case LOOM_ATTR_F64:
       *out_value = loom_attr_f64(value.f64);
       return iree_ok_status();
@@ -3318,6 +3297,7 @@ static iree_status_t loom_module_verify_canonical_attr_value(
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "attribute value is absent");
     case LOOM_ATTR_I64:
+    case LOOM_ATTR_U64:
     case LOOM_ATTR_F64:
     case LOOM_ATTR_SYMBOL:
       return loom_module_verify_canonical_attr_header(
@@ -4767,6 +4747,7 @@ static iree_status_t loom_module_replace_attribute_value_refs_impl(
   switch ((loom_attr_kind_t)attr.kind) {
     case LOOM_ATTR_ABSENT:
     case LOOM_ATTR_I64:
+    case LOOM_ATTR_U64:
     case LOOM_ATTR_F64:
     case LOOM_ATTR_STRING:
     case LOOM_ATTR_BOOL:
@@ -5240,6 +5221,43 @@ iree_status_t loom_module_allocate_region(loom_module_t* module,
   return status;
 }
 
+iree_status_t loom_op_attach_region(loom_op_t* op, uint8_t region_index,
+                                    loom_region_t* region) {
+  if (!op || !region) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "region attachment requires an op and region");
+  }
+  if (region_index >= op->region_count) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "region index %u is out of range for op with %u region(s)",
+        (unsigned)region_index, (unsigned)op->region_count);
+  }
+  loom_region_t** regions = loom_op_regions(op);
+  if (regions[region_index]) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "operation region %u is already attached",
+                            (unsigned)region_index);
+  }
+  if (region->owner_op) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "region is already attached to an operation");
+  }
+
+  regions[region_index] = region;
+  region->owner_op = op;
+  loom_block_t* block = NULL;
+  loom_region_for_each_block(region, block) {
+    loom_op_t* child_op = NULL;
+    loom_block_for_each_op(block, child_op) { child_op->parent_op = op; }
+  }
+  if (op->parent_block) {
+    loom_region_adjust_value_definition_count(op->parent_block->parent_region,
+                                              region->value_definition_count);
+  }
+  return iree_ok_status();
+}
+
 iree_status_t loom_region_append_block(loom_module_t* module,
                                        loom_region_t* region,
                                        loom_block_t** out_block) {
@@ -5370,6 +5388,7 @@ iree_status_t loom_block_insert_arg(loom_module_t* module, loom_block_t* block,
   loom_value_t* value = loom_module_value(module, value_id);
   value->flags |= LOOM_VALUE_FLAG_BLOCK_ARG;
   value->def = loom_value_def_make_block(block, arg_index);
+  loom_region_adjust_value_definition_count(block->parent_region, 1);
   return iree_ok_status();
 }
 
@@ -5436,6 +5455,7 @@ iree_status_t loom_block_remove_arg(loom_module_t* module, loom_block_t* block,
 
   --block->arg_count;
   block->arg_ids[block->arg_count] = LOOM_VALUE_ID_INVALID;
+  loom_region_adjust_value_definition_count(block->parent_region, -1);
   return iree_ok_status();
 }
 
@@ -5549,6 +5569,8 @@ static iree_status_t loom_block_link_op_between(loom_module_t* module,
     block->last_op = op;
   }
   ++block->op_count;
+  loom_region_adjust_value_definition_count(block->parent_region,
+                                            loom_op_value_definition_count(op));
   return iree_ok_status();
 }
 
@@ -5586,6 +5608,8 @@ iree_status_t loom_block_insert_op(loom_module_t* module, loom_block_t* block,
 void loom_block_unlink_op(loom_module_t* module, loom_op_t* op) {
   loom_block_t* block = op->parent_block;
   if (!block || iree_any_bit_set(op->flags, LOOM_OP_FLAG_DEAD)) return;
+  loom_region_adjust_value_definition_count(
+      block->parent_region, -(int64_t)loom_op_value_definition_count(op));
   loom_module_drop_op_summaries(module, op);
 
   if (op->prev_op) {

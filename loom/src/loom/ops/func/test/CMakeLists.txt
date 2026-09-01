@@ -13,6 +13,7 @@ loom_check_test_suite(
   NAME
     test
   SRCS
+    "bytecode.loom-test"
     "roundtrip.loom-test"
     "verify.loom-test"
 )

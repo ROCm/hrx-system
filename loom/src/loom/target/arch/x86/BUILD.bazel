@@ -104,6 +104,7 @@ loom_cc_library(
         "//loom/src/loom/target/arch/x86/descriptors:low_registry",
         "//loom/src/loom/target/arch/x86/lower",
         "//loom/src/loom/target/arch/x86/ops",
+        "//loom/src/loom/target/arch/x86/records:target_records",
         "//runtime/src/iree/base",
     ],
 )

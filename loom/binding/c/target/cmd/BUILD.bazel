@@ -25,6 +25,7 @@ loom_cc_library(
     linkstatic = True,
     deps = [
         "//loom/binding/c:loomc",
+        "//loom/binding/c/target/kernel",
         "//loom/src/loom/ir",
         "//loom/src/loom/link:module_index",
         "//loom/src/loom/pass:builtin_registry",

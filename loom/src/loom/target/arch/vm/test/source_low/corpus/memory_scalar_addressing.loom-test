@@ -1,0 +1,189 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/memory_scalar_addressing.loom-test
+// RUN: emit source-low output=low
+
+vm.target<core> @target
+func.def target(@target) @scalar_static_rank2_i32(%input: buffer, %output: buffer) -> (i32) {
+  %input_base = index.constant 8 : offset
+  %output_base = index.constant 12 : offset
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %input_view = buffer.view %input_aligned[%input_base] : buffer -> view<2x4xi32>
+  %output_view = buffer.view %output_aligned[%output_base] : buffer -> view<2x4xi32>
+  %loaded = view.load %input_view[1, 2] : view<2x4xi32> -> i32
+  view.store %loaded, %output_view[0, 3] : i32, view<2x4xi32>
+  func.return %loaded : i32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> (reg<vm.value : i32>)>}) @scalar_static_rank2_i32(%input_aligned: reg<vm.ref : buffer>, %output_aligned: reg<vm.ref : buffer>) -> (reg<vm.value : i32>) asm {
+  %16 = constant.zero : reg<vm.value : offset>
+  %17 = constant.s16 32 : reg<vm.value : offset>
+  %loaded = buffer.load %input_aligned, %17, %16, 0, i32.x1 : reg<vm.value : i32>
+  %20 = constant.s16 24 : reg<vm.value : offset>
+  buffer.store %output_aligned, %20, %16, %loaded, 0, i32.x1
+  return %loaded
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_dynamic_view_base_i32(%input: buffer, %output: buffer, %base: offset) -> (i32) {
+  %base_aligned = index.assume %base [range(%base, 0, 4092), mul(%base, 4)] : offset
+  %output_base = index.constant 0 : offset
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %input_view = buffer.view %input_aligned[%base_aligned] : buffer -> view<4xi32>
+  %output_view = buffer.view %output_aligned[%output_base] : buffer -> view<1xi32>
+  %loaded = view.load %input_view[2] : view<4xi32> -> i32
+  view.store %loaded, %output_view[0] : i32, view<1xi32>
+  func.return %loaded : i32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : offset>) -> (reg<vm.value : i32>)>}) @scalar_dynamic_view_base_i32(%input_aligned: reg<vm.ref : buffer>, %output_aligned: reg<vm.ref : buffer>, %base_aligned: reg<vm.value : offset>) -> (reg<vm.value : i32>) asm {
+  %15 = constant.s16 8 : reg<vm.value : offset>
+  %loaded = buffer.load %input_aligned, %15, %base_aligned, 1, i32.x1 : reg<vm.value : i32>
+  %17 = constant.zero : reg<vm.value : offset>
+  buffer.store %output_aligned, %17, %17, %loaded, 0, i32.x1
+  return %loaded
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_materialized_view_base_suffix_i32(%input: buffer, %output: buffer, %base: offset) -> (i32) {
+  %base_aligned = index.assume %base [range(%base, 0, 4056), mul(%base, 4)] : offset
+  %bias = index.constant 4 : offset
+  %biased_base = index.add %base_aligned, %bias : offset
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %input_view = buffer.view %input_aligned[%biased_base] : buffer -> view<8xi32>
+  %output_view = buffer.view %output_aligned[%biased_base] : buffer -> view<8xi32>
+  %loaded = view.load %input_view[2] : view<8xi32> -> i32
+  view.store %loaded, %output_view[3] : i32, view<8xi32>
+  func.return %loaded : i32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : offset>) -> (reg<vm.value : i32>)>}) @scalar_materialized_view_base_suffix_i32(%input_aligned: reg<vm.ref : buffer>, %output_aligned: reg<vm.ref : buffer>, %base_aligned: reg<vm.value : offset>) -> (reg<vm.value : i32>) asm {
+  %16 = constant.s16 12 : reg<vm.value : offset>
+  %loaded = buffer.load %input_aligned, %16, %base_aligned, 1, i32.x1 : reg<vm.value : i32>
+  %18 = constant.s16 16 : reg<vm.value : offset>
+  buffer.store %output_aligned, %18, %base_aligned, %loaded, 1, i32.x1
+  return %loaded
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_dynamic_index_i32(%input: buffer, %output: buffer, %element: index) -> (i32) {
+  %buffer_base = index.constant 0 : offset
+  %element_bounded = index.assume %element [range(%element, 0, 7)] : index
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %input_view = buffer.view %input_aligned[%buffer_base] : buffer -> view<8xi32>
+  %output_view = buffer.view %output_aligned[%buffer_base] : buffer -> view<8xi32>
+  %loaded = view.load %input_view[%element_bounded] : view<8xi32> -> i32
+  view.store %loaded, %output_view[%element_bounded] : i32, view<8xi32>
+  func.return %loaded : i32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>) -> (reg<vm.value : i32>)>}) @scalar_dynamic_index_i32(%input_aligned: reg<vm.ref : buffer>, %output_aligned: reg<vm.ref : buffer>, %element_bounded: reg<vm.value : index>) -> (reg<vm.value : i32>) asm {
+  %15 = constant.zero : reg<vm.value : offset>
+  %loaded = buffer.load %input_aligned, %15, %element_bounded, 4, i32.x1 : reg<vm.value : i32>
+  buffer.store %output_aligned, %15, %element_bounded, %loaded, 4, i32.x1
+  return %loaded
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_mixed_rank2_i32(%input: buffer, %output: buffer, %base: offset, %row: index, %column: index) -> (i32) {
+  %base_aligned = index.assume %base [range(%base, 0, 4092), mul(%base, 4)] : offset
+  %row_bounded = index.assume %row [range(%row, 0, 3)] : index
+  %column_bounded = index.assume %column [range(%column, 0, 7)] : index
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %input_view = buffer.view %input_aligned[%base_aligned] : buffer -> view<4x8xi32>
+  %output_view = buffer.view %output_aligned[%base_aligned] : buffer -> view<4x8xi32>
+  %loaded = view.load %input_view[%row_bounded, %column_bounded] : view<4x8xi32> -> i32
+  view.store %loaded, %output_view[%row_bounded, %column_bounded] : i32, view<4x8xi32>
+  func.return %loaded : i32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : offset>, reg<vm.value : index>, reg<vm.value : index>) -> (reg<vm.value : i32>)>}) @scalar_mixed_rank2_i32(%input_aligned: reg<vm.ref : buffer>, %output_aligned: reg<vm.ref : buffer>, %base_aligned: reg<vm.value : offset>, %row_bounded: reg<vm.value : index>, %column_bounded: reg<vm.value : index>) -> (reg<vm.value : i32>) asm {
+  %27 = constant.s16 5 : reg<vm.value : offset>
+  %28 = integer.shift.left.i64 %row_bounded, %27 : reg<vm.value : offset>
+  %29 = integer.add.i64 %base_aligned, %28 : reg<vm.value : offset>
+  %30 = constant.s16 2 : reg<vm.value : offset>
+  %31 = integer.shift.left.i64 %column_bounded, %30 : reg<vm.value : offset>
+  %32 = integer.add.i64 %29, %31 : reg<vm.value : offset>
+  %33 = constant.zero : reg<vm.value : offset>
+  %loaded = buffer.load %input_aligned, %32, %33, 0, i32.x1 : reg<vm.value : i32>
+  buffer.store %output_aligned, %32, %33, %loaded, 0, i32.x1
+  return %loaded
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_dynamic_stride_i32(%input: buffer, %output: buffer, %columns: index, %row: index, %column: index) -> (i32) {
+  %buffer_base = index.constant 0 : offset
+  %columns_bounded = index.assume %columns [range(%columns, 1, 8)] : index
+  %row_bounded = index.assume %row [range(%row, 0, 3)] : index
+  %column_bounded = index.assume %column [range(%column, 0, 7), lt(%column, %columns_bounded)] : index
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %input_view = buffer.view %input_aligned[%buffer_base] : buffer -> view<4x[%columns_bounded]xi32>
+  %output_view = buffer.view %output_aligned[%buffer_base] : buffer -> view<4x[%columns_bounded]xi32>
+  %loaded = view.load %input_view[%row_bounded, %column_bounded] : view<4x[%columns_bounded]xi32> -> i32
+  view.store %loaded, %output_view[%row_bounded, %column_bounded] : i32, view<4x[%columns_bounded]xi32>
+  func.return %loaded : i32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> (reg<vm.value : i32>)>}) @scalar_dynamic_stride_i32(%input_aligned: reg<vm.ref : buffer>, %output_aligned: reg<vm.ref : buffer>, %columns_bounded: reg<vm.value : index>, %row_bounded: reg<vm.value : index>, %column_bounded: reg<vm.value : index>) -> (reg<vm.value : i32>) asm {
+  %21 = integer.mul.i64 %row_bounded, %columns_bounded : reg<vm.value : offset>
+  %22 = constant.s16 2 : reg<vm.value : offset>
+  %23 = integer.shift.left.i64 %21, %22 : reg<vm.value : offset>
+  %25 = integer.shift.left.i64 %column_bounded, %22 : reg<vm.value : offset>
+  %26 = integer.add.i64 %23, %25 : reg<vm.value : offset>
+  %27 = constant.zero : reg<vm.value : offset>
+  %loaded = buffer.load %input_aligned, %26, %27, 0, i32.x1 : reg<vm.value : i32>
+  buffer.store %output_aligned, %26, %27, %loaded, 0, i32.x1
+  return %loaded
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @scalar_subview_dynamic_index_i32(%input: buffer, %output: buffer, %base: offset, %element: index) -> (i32) {
+  %base_aligned = index.assume %base [range(%base, 0, 4064), mul(%base, 4)] : offset
+  %element_bounded = index.assume %element [range(%element, 0, 3)] : index
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %input_view = buffer.view %input_aligned[%base_aligned] : buffer -> view<8xi32>
+  %output_view = buffer.view %output_aligned[%base_aligned] : buffer -> view<8xi32>
+  %input_subview = view.subview %input_view[1] : view<8xi32> -> view<4xi32>
+  %output_subview = view.subview %output_view[1] : view<8xi32> -> view<4xi32>
+  %input_refined = view.refine %input_subview : view<4xi32> -> view<4xi32>
+  %output_refined = view.refine %output_subview : view<4xi32> -> view<4xi32>
+  %loaded = view.load %input_refined[%element_bounded] : view<4xi32> -> i32
+  view.store %loaded, %output_refined[%element_bounded] : i32, view<4xi32>
+  func.return %loaded : i32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : offset>, reg<vm.value : index>) -> (reg<vm.value : i32>)>}) @scalar_subview_dynamic_index_i32(%input_refined: reg<vm.ref : buffer>, %output_refined: reg<vm.ref : buffer>, %base_aligned: reg<vm.value : offset>, %element_bounded: reg<vm.value : index>) -> (reg<vm.value : i32>) asm {
+  %21 = constant.s16 2 : reg<vm.value : offset>
+  %22 = integer.shift.left.i64 %element_bounded, %21 : reg<vm.value : offset>
+  %23 = integer.add.i64 %base_aligned, %22 : reg<vm.value : offset>
+  %24 = constant.zero : reg<vm.value : offset>
+  %25 = constant.s16 4 : reg<vm.value : offset>
+  %26 = integer.add.i64 %23, %25 : reg<vm.value : offset>
+  %loaded = buffer.load %input_refined, %26, %24, 0, i32.x1 : reg<vm.value : i32>
+  buffer.store %output_refined, %26, %24, %loaded, 0, i32.x1
+  return %loaded
+}

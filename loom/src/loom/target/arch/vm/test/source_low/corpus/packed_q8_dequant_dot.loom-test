@@ -1,0 +1,264 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/packed_q8_dequant_dot.loom-test
+// RUN: emit source-low output=low
+
+vm.target<core> @target
+func.def target(@target) @q8_packed_word_dequant_dot4(%packed: vector<1xi32>, %scale: f16, %rhs: vector<4xf32>, %acc: f32) -> (f32) {
+  %q_i32 = vector.bitunpacks<8> %packed : vector<1xi32> -> vector<4xi32>
+  %q_f32 = vector.sitofp %q_i32 : vector<4xi32> to vector<4xf32>
+  %scale_f32 = scalar.extf %scale : f16 to f32
+  %scale_vector = vector.splat %scale_f32 : vector<4xf32>
+  %scaled_q = vector.mulf<reassoc|nnan|ninf|nsz|contract> %q_f32, %scale_vector : vector<4xf32>
+  %dot = vector.dotf %scaled_q, %rhs, %acc : vector<4xf32>, vector<4xf32>, f32
+  func.return %dot : f32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : vector<1xi32>>, reg<vm.value : f16>, reg<vm.value x4 : vector<4xf32>>, reg<vm.value : f32>) -> (reg<vm.value : f32>)>}) @q8_packed_word_dequant_dot4(%packed: reg<vm.value : vector<1xi32>>, %scale: reg<vm.value : f16>, %rhs: reg<vm.value x4 : vector<4xf32>>, %acc: reg<vm.value : f32>) -> (reg<vm.value : f32>) asm {
+  %scale_f32 = conversion.float.extend %scale, f16.to.f32 : reg<vm.value : f32>
+  %75 = slice %packed[0] : reg<vm.value : vector<1xi32>> -> reg<vm.value : i32>
+  %76 = constant.s16 255 : reg<vm.value : i32>
+  %77 = integer.and.i32 %75, %76 : reg<vm.value : i32>
+  %78 = constant.s16 24 : reg<vm.value : i32>
+  %79 = integer.shift.left.i32 %77, %78 : reg<vm.value : i32>
+  %80 = integer.shift.right.s32 %79, %78 : reg<vm.value : i32>
+  %81 = conversion.integer.to.float %80, s32.to.f32 : reg<vm.value : f32>
+  %82 = float.mul.f32 %81, %scale_f32 : reg<vm.value : f32>
+  %83 = slice %rhs[0] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %84 = float.math.ternary.f32 %82, %83, %acc, fma : reg<vm.value : f32>
+  %85 = constant.s16 8 : reg<vm.value : i32>
+  %86 = integer.shift.right.u32 %75, %85 : reg<vm.value : i32>
+  %87 = integer.and.i32 %86, %76 : reg<vm.value : i32>
+  %88 = integer.shift.left.i32 %87, %78 : reg<vm.value : i32>
+  %89 = integer.shift.right.s32 %88, %78 : reg<vm.value : i32>
+  %90 = conversion.integer.to.float %89, s32.to.f32 : reg<vm.value : f32>
+  %91 = float.mul.f32 %90, %scale_f32 : reg<vm.value : f32>
+  %92 = slice %rhs[1] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %93 = float.math.ternary.f32 %91, %92, %84, fma : reg<vm.value : f32>
+  %94 = constant.s16 16 : reg<vm.value : i32>
+  %95 = integer.shift.right.u32 %75, %94 : reg<vm.value : i32>
+  %96 = integer.and.i32 %95, %76 : reg<vm.value : i32>
+  %97 = integer.shift.left.i32 %96, %78 : reg<vm.value : i32>
+  %98 = integer.shift.right.s32 %97, %78 : reg<vm.value : i32>
+  %99 = conversion.integer.to.float %98, s32.to.f32 : reg<vm.value : f32>
+  %100 = float.mul.f32 %99, %scale_f32 : reg<vm.value : f32>
+  %101 = slice %rhs[2] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %102 = float.math.ternary.f32 %100, %101, %93, fma : reg<vm.value : f32>
+  %103 = integer.shift.right.u32 %75, %78 : reg<vm.value : i32>
+  %104 = integer.and.i32 %103, %76 : reg<vm.value : i32>
+  %105 = integer.shift.left.i32 %104, %78 : reg<vm.value : i32>
+  %106 = integer.shift.right.s32 %105, %78 : reg<vm.value : i32>
+  %107 = conversion.integer.to.float %106, s32.to.f32 : reg<vm.value : f32>
+  %108 = float.mul.f32 %107, %scale_f32 : reg<vm.value : f32>
+  %109 = slice %rhs[3] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %dot = float.math.ternary.f32 %108, %109, %102, fma : reg<vm.value : f32>
+  return %dot
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @q8_packed_word_global_dequant_dot4_kernel() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%weights: buffer, %rhs_buffer: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %packed_word_index = index.constant 0 : index
+  %rhs_elements_per_lane = index.constant 4 : index
+  %packed_word_bytes = index.constant 4 : offset
+  %lanes_per_scale = index.constant 8 : index
+  %lane = kernel.workitem.id<x> : index
+  %weights_global = buffer.assume.memory_space<global> %weights : buffer
+  %rhs_global = buffer.assume.memory_space<global> %rhs_buffer : buffer
+  %output_global = buffer.assume.memory_space<global> %output : buffer
+  %weights_noalias, %rhs_noalias, %output_noalias = buffer.assume.noalias %weights_global, %rhs_global, %output_global : buffer, buffer, buffer
+  %q_byte_offset = index.scale %lane, %packed_word_bytes : index, offset -> offset
+  %scale_index = index.div %lane, %lanes_per_scale : index
+  %rhs_index = index.mul %lane, %rhs_elements_per_lane : index
+  %q_word_view = buffer.view %weights_noalias[%q_byte_offset] : buffer -> view<1xi32>
+  %scale_view = buffer.view %weights_noalias[%base] : buffer -> view<1024xf16>
+  %rhs_view = buffer.view %rhs_noalias[%base] : buffer -> view<1024xf32>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<64xf32>
+  %packed = vector.load %q_word_view[%packed_word_index] : view<1xi32> -> vector<1xi32>
+  %scale = view.load %scale_view[%scale_index] : view<1024xf16> -> f16
+  %rhs = vector.load %rhs_view[%rhs_index] : view<1024xf32> -> vector<4xf32>
+  %q_i32 = vector.bitunpacks<8> %packed : vector<1xi32> -> vector<4xi32>
+  %q_f32 = vector.sitofp %q_i32 : vector<4xi32> to vector<4xf32>
+  %scale_f32 = scalar.extf %scale : f16 to f32
+  %scale_vector = vector.splat %scale_f32 : vector<4xf32>
+  %scaled_q = vector.mulf<reassoc|nnan|ninf|nsz|contract> %q_f32, %scale_vector : vector<4xf32>
+  %acc = scalar.constant 0.0 : f32
+  %dot = vector.dotf %scaled_q, %rhs, %acc : vector<4xf32>, vector<4xf32>, f32
+  view.store %dot, %output_view[%lane] : f32, view<64xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @q8_packed_word_global_dequant_dot4_kernel(%weights_noalias: reg<vm.ref : buffer>, %rhs_noalias: reg<vm.ref : buffer>, %output_noalias: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %packed_word_bytes = constant.s16 4 : reg<vm.value : offset>
+  %q_byte_offset = integer.mul.i64 %workitem_id_x, %packed_word_bytes : reg<vm.value : offset>
+  %125 = constant.s16 3 : reg<vm.value : index>
+  %scale_index = integer.shift.right.u64 %workitem_id_x, %125 : reg<vm.value : index>
+  %127 = constant.zero : reg<vm.value : offset>
+  %scale = buffer.load %weights_noalias, %127, %scale_index, 2, i16.x1 : reg<vm.value : f16>
+  %scale_f32 = conversion.float.extend %scale, f16.to.f32 : reg<vm.value : f32>
+  %acc = constant.zero : reg<vm.value : f32>
+  %132 = buffer.load %weights_noalias, %127, %q_byte_offset, 1, i32.x1 : reg<vm.value : i32>
+  %133 = constant.s16 255 : reg<vm.value : i32>
+  %134 = integer.and.i32 %132, %133 : reg<vm.value : i32>
+  %135 = constant.s16 24 : reg<vm.value : i32>
+  %136 = integer.shift.left.i32 %134, %135 : reg<vm.value : i32>
+  %137 = integer.shift.right.s32 %136, %135 : reg<vm.value : i32>
+  %138 = conversion.integer.to.float %137, s32.to.f32 : reg<vm.value : f32>
+  %139 = float.mul.f32 %138, %scale_f32 : reg<vm.value : f32>
+  %141 = buffer.load %rhs_noalias, %127, %workitem_id_x, 16, i32.x1 : reg<vm.value : f32>
+  %142 = float.math.ternary.f32 %139, %141, %acc, fma : reg<vm.value : f32>
+  %143 = constant.s16 8 : reg<vm.value : i32>
+  %144 = integer.shift.right.u32 %132, %143 : reg<vm.value : i32>
+  %145 = integer.and.i32 %144, %133 : reg<vm.value : i32>
+  %146 = integer.shift.left.i32 %145, %135 : reg<vm.value : i32>
+  %147 = integer.shift.right.s32 %146, %135 : reg<vm.value : i32>
+  %148 = conversion.integer.to.float %147, s32.to.f32 : reg<vm.value : f32>
+  %149 = float.mul.f32 %148, %scale_f32 : reg<vm.value : f32>
+  %151 = buffer.load %rhs_noalias, %packed_word_bytes, %workitem_id_x, 16, i32.x1 : reg<vm.value : f32>
+  %152 = float.math.ternary.f32 %149, %151, %142, fma : reg<vm.value : f32>
+  %153 = constant.s16 16 : reg<vm.value : i32>
+  %154 = integer.shift.right.u32 %132, %153 : reg<vm.value : i32>
+  %155 = integer.and.i32 %154, %133 : reg<vm.value : i32>
+  %156 = integer.shift.left.i32 %155, %135 : reg<vm.value : i32>
+  %157 = integer.shift.right.s32 %156, %135 : reg<vm.value : i32>
+  %158 = conversion.integer.to.float %157, s32.to.f32 : reg<vm.value : f32>
+  %159 = float.mul.f32 %158, %scale_f32 : reg<vm.value : f32>
+  %160 = constant.s16 8 : reg<vm.value : offset>
+  %161 = buffer.load %rhs_noalias, %160, %workitem_id_x, 16, i32.x1 : reg<vm.value : f32>
+  %162 = float.math.ternary.f32 %159, %161, %152, fma : reg<vm.value : f32>
+  %163 = integer.shift.right.u32 %132, %135 : reg<vm.value : i32>
+  %164 = integer.and.i32 %163, %133 : reg<vm.value : i32>
+  %165 = integer.shift.left.i32 %164, %135 : reg<vm.value : i32>
+  %166 = integer.shift.right.s32 %165, %135 : reg<vm.value : i32>
+  %167 = conversion.integer.to.float %166, s32.to.f32 : reg<vm.value : f32>
+  %168 = float.mul.f32 %167, %scale_f32 : reg<vm.value : f32>
+  %169 = constant.s16 12 : reg<vm.value : offset>
+  %170 = buffer.load %rhs_noalias, %169, %workitem_id_x, 16, i32.x1 : reg<vm.value : f32>
+  %dot = float.math.ternary.f32 %168, %170, %162, fma : reg<vm.value : f32>
+  buffer.store %output_noalias, %127, %workitem_id_x, %dot, 4, i32.x1
+  return
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @q8_packed_word_two_rhs_dequant_dot4(%packed: vector<1xi32>, %scale: f16, %rhs0: vector<4xf32>, %rhs1: vector<4xf32>, %acc0: f32, %acc1: f32) -> (f32, f32) {
+  %q_i32 = vector.bitunpacks<8> %packed : vector<1xi32> -> vector<4xi32>
+  %q_f32 = vector.sitofp %q_i32 : vector<4xi32> to vector<4xf32>
+  %scale_f32 = scalar.extf %scale : f16 to f32
+  %scale_vector = vector.splat %scale_f32 : vector<4xf32>
+  %scaled_q = vector.mulf<reassoc|nnan|ninf|nsz|contract> %q_f32, %scale_vector : vector<4xf32>
+  %dot0 = vector.dotf %scaled_q, %rhs0, %acc0 : vector<4xf32>, vector<4xf32>, f32
+  %dot1 = vector.dotf %scaled_q, %rhs1, %acc1 : vector<4xf32>, vector<4xf32>, f32
+  func.return %dot0, %dot1 : f32, f32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : vector<1xi32>>, reg<vm.value : f16>, reg<vm.value x4 : vector<4xf32>>, reg<vm.value x4 : vector<4xf32>>, reg<vm.value : f32>, reg<vm.value : f32>) -> (reg<vm.value : f32>, reg<vm.value : f32>)>}) @q8_packed_word_two_rhs_dequant_dot4(%packed: reg<vm.value : vector<1xi32>>, %scale: reg<vm.value : f16>, %rhs0: reg<vm.value x4 : vector<4xf32>>, %rhs1: reg<vm.value x4 : vector<4xf32>>, %acc0: reg<vm.value : f32>, %acc1: reg<vm.value : f32>) -> (reg<vm.value : f32>, reg<vm.value : f32>) asm {
+  %scale_f32 = conversion.float.extend %scale, f16.to.f32 : reg<vm.value : f32>
+  %140 = slice %packed[0] : reg<vm.value : vector<1xi32>> -> reg<vm.value : i32>
+  %141 = constant.s16 255 : reg<vm.value : i32>
+  %142 = integer.and.i32 %140, %141 : reg<vm.value : i32>
+  %143 = constant.s16 24 : reg<vm.value : i32>
+  %144 = integer.shift.left.i32 %142, %143 : reg<vm.value : i32>
+  %145 = integer.shift.right.s32 %144, %143 : reg<vm.value : i32>
+  %146 = conversion.integer.to.float %145, s32.to.f32 : reg<vm.value : f32>
+  %147 = float.mul.f32 %146, %scale_f32 : reg<vm.value : f32>
+  %148 = slice %rhs0[0] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %149 = float.math.ternary.f32 %147, %148, %acc0, fma : reg<vm.value : f32>
+  %150 = constant.s16 8 : reg<vm.value : i32>
+  %151 = integer.shift.right.u32 %140, %150 : reg<vm.value : i32>
+  %152 = integer.and.i32 %151, %141 : reg<vm.value : i32>
+  %153 = integer.shift.left.i32 %152, %143 : reg<vm.value : i32>
+  %154 = integer.shift.right.s32 %153, %143 : reg<vm.value : i32>
+  %155 = conversion.integer.to.float %154, s32.to.f32 : reg<vm.value : f32>
+  %156 = float.mul.f32 %155, %scale_f32 : reg<vm.value : f32>
+  %157 = slice %rhs0[1] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %158 = float.math.ternary.f32 %156, %157, %149, fma : reg<vm.value : f32>
+  %159 = constant.s16 16 : reg<vm.value : i32>
+  %160 = integer.shift.right.u32 %140, %159 : reg<vm.value : i32>
+  %161 = integer.and.i32 %160, %141 : reg<vm.value : i32>
+  %162 = integer.shift.left.i32 %161, %143 : reg<vm.value : i32>
+  %163 = integer.shift.right.s32 %162, %143 : reg<vm.value : i32>
+  %164 = conversion.integer.to.float %163, s32.to.f32 : reg<vm.value : f32>
+  %165 = float.mul.f32 %164, %scale_f32 : reg<vm.value : f32>
+  %166 = slice %rhs0[2] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %167 = float.math.ternary.f32 %165, %166, %158, fma : reg<vm.value : f32>
+  %168 = integer.shift.right.u32 %140, %143 : reg<vm.value : i32>
+  %169 = integer.and.i32 %168, %141 : reg<vm.value : i32>
+  %170 = integer.shift.left.i32 %169, %143 : reg<vm.value : i32>
+  %171 = integer.shift.right.s32 %170, %143 : reg<vm.value : i32>
+  %172 = conversion.integer.to.float %171, s32.to.f32 : reg<vm.value : f32>
+  %173 = float.mul.f32 %172, %scale_f32 : reg<vm.value : f32>
+  %174 = slice %rhs0[3] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %dot0 = float.math.ternary.f32 %173, %174, %167, fma : reg<vm.value : f32>
+  %176 = slice %rhs1[0] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %177 = float.math.ternary.f32 %147, %176, %acc1, fma : reg<vm.value : f32>
+  %178 = slice %rhs1[1] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %179 = float.math.ternary.f32 %156, %178, %177, fma : reg<vm.value : f32>
+  %180 = slice %rhs1[2] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %181 = float.math.ternary.f32 %165, %180, %179, fma : reg<vm.value : f32>
+  %182 = slice %rhs1[3] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %dot1 = float.math.ternary.f32 %173, %182, %181, fma : reg<vm.value : f32>
+  return %dot0, %dot1
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @q8_packed_word_scalar_extract_dequant_dot4(%packed: i32, %scale: f16, %rhs: vector<4xf32>, %acc: f32) -> (f32) {
+  %q0_i32 = scalar.bitfield.extracts %packed {offset = 0, width = 8} : i32 -> i32
+  %q1_i32 = scalar.bitfield.extracts %packed {offset = 8, width = 8} : i32 -> i32
+  %q2_i32 = scalar.bitfield.extracts %packed {offset = 16, width = 8} : i32 -> i32
+  %q3_i32 = scalar.bitfield.extracts %packed {offset = 24, width = 8} : i32 -> i32
+  %q0_f32 = scalar.sitofp %q0_i32 : i32 to f32
+  %q1_f32 = scalar.sitofp %q1_i32 : i32 to f32
+  %q2_f32 = scalar.sitofp %q2_i32 : i32 to f32
+  %q3_f32 = scalar.sitofp %q3_i32 : i32 to f32
+  %scale_f32 = scalar.extf %scale : f16 to f32
+  %s0 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %q0_f32, %scale_f32 : f32
+  %s1 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %q1_f32, %scale_f32 : f32
+  %s2 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %q2_f32, %scale_f32 : f32
+  %s3 = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %q3_f32, %scale_f32 : f32
+  %scaled_q = vector.from_elements %s0, %s1, %s2, %s3 : vector<4xf32>
+  %dot = vector.dotf %scaled_q, %rhs, %acc : vector<4xf32>, vector<4xf32>, f32
+  func.return %dot : f32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i32>, reg<vm.value : f16>, reg<vm.value x4 : vector<4xf32>>, reg<vm.value : f32>) -> (reg<vm.value : f32>)>}) @q8_packed_word_scalar_extract_dequant_dot4(%packed: reg<vm.value : i32>, %scale: reg<vm.value : f16>, %rhs: reg<vm.value x4 : vector<4xf32>>, %acc: reg<vm.value : f32>) -> (reg<vm.value : f32>) asm {
+  %49 = constant.s16 24 : reg<vm.value : i32>
+  %50 = integer.shift.left.i32 %packed, %49 : reg<vm.value : i32>
+  %q0_i32 = integer.shift.right.s32 %50, %49 : reg<vm.value : i32>
+  %52 = constant.s16 16 : reg<vm.value : i32>
+  %53 = integer.shift.left.i32 %packed, %52 : reg<vm.value : i32>
+  %q1_i32 = integer.shift.right.s32 %53, %49 : reg<vm.value : i32>
+  %55 = constant.s16 8 : reg<vm.value : i32>
+  %56 = integer.shift.left.i32 %packed, %55 : reg<vm.value : i32>
+  %q2_i32 = integer.shift.right.s32 %56, %49 : reg<vm.value : i32>
+  %q3_i32 = integer.shift.right.s32 %packed, %49 : reg<vm.value : i32>
+  %q0_f32 = conversion.integer.to.float %q0_i32, s32.to.f32 : reg<vm.value : f32>
+  %q1_f32 = conversion.integer.to.float %q1_i32, s32.to.f32 : reg<vm.value : f32>
+  %q2_f32 = conversion.integer.to.float %q2_i32, s32.to.f32 : reg<vm.value : f32>
+  %q3_f32 = conversion.integer.to.float %q3_i32, s32.to.f32 : reg<vm.value : f32>
+  %scale_f32 = conversion.float.extend %scale, f16.to.f32 : reg<vm.value : f32>
+  %s0 = float.mul.f32 %q0_f32, %scale_f32 : reg<vm.value : f32>
+  %s1 = float.mul.f32 %q1_f32, %scale_f32 : reg<vm.value : f32>
+  %s2 = float.mul.f32 %q2_f32, %scale_f32 : reg<vm.value : f32>
+  %s3 = float.mul.f32 %q3_f32, %scale_f32 : reg<vm.value : f32>
+  %68 = slice %rhs[0] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %69 = float.math.ternary.f32 %s0, %68, %acc, fma : reg<vm.value : f32>
+  %70 = slice %rhs[1] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %71 = float.math.ternary.f32 %s1, %70, %69, fma : reg<vm.value : f32>
+  %72 = slice %rhs[2] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %73 = float.math.ternary.f32 %s2, %72, %71, fma : reg<vm.value : f32>
+  %74 = slice %rhs[3] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : f32>
+  %dot = float.math.ternary.f32 %s3, %74, %73, fma : reg<vm.value : f32>
+  return %dot
+}

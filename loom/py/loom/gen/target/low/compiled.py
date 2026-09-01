@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 
 from loom.gen.support.string_pool import CStringPool
 from loom.target.low_descriptors import (
+    AsmImmediateFlag,
     AsmOperandSegmentDelimiter,
     AsmResultValueType,
     Constraint,
@@ -145,6 +146,7 @@ class CompiledAsmImmediate:
     immediate_index: int
     name_label: str | None
     name: str | None
+    flags: tuple[AsmImmediateFlag, ...]
 
 
 @dataclass(frozen=True, slots=True)

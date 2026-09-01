@@ -1,0 +1,93 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/vector_carrier_structure.loom-test
+// RUN: emit source-low output=low
+
+vm.target<core> @target
+func.def target(@target) @vector_from_elements_extract(%a: i32, %b: i32, %c: i32, %d: i32) -> (vector<4xi32>, i32) {
+  %vector = vector.from_elements %a, %b, %c, %d : vector<4xi32>
+  %selected = vector.extract %vector[2] : vector<4xi32> -> i32
+  func.return %vector, %selected : vector<4xi32>, i32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>) -> (reg<vm.value x4 : vector<4xi32>>, reg<vm.value : i32>)>}) @vector_from_elements_extract(%a: reg<vm.value : i32>, %b: reg<vm.value : i32>, %c: reg<vm.value : i32>, %d: reg<vm.value : i32>) -> (reg<vm.value x4 : vector<4xi32>>, reg<vm.value : i32>) asm {
+  %vector = concat(%a, %b, %c, %d) : (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>) -> reg<vm.value x4 : vector<4xi32>>
+  return %vector, %c
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @vector_extract_tail(%vector: vector<2x3xi32>) -> (vector<3xi32>) {
+  %result = vector.extract %vector[1] : vector<2x3xi32> -> vector<3xi32>
+  func.return %result : vector<3xi32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x6 : vector<2x3xi32>>) -> (reg<vm.value x3 : vector<3xi32>>)>}) @vector_extract_tail(%vector: reg<vm.value x6 : vector<2x3xi32>>) -> (reg<vm.value x3 : vector<3xi32>>) asm {
+  %result = slice %vector[3] : reg<vm.value x6 : vector<2x3xi32>> -> reg<vm.value x3 : vector<3xi32>>
+  return %result
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @vector_insert_static(%vector: vector<4xf32>, %value: f32) -> (vector<4xf32>) {
+  %result = vector.insert %value into %vector[2] : f32, vector<4xf32>
+  func.return %result : vector<4xf32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x4 : vector<4xf32>>, reg<vm.value : f32>) -> (reg<vm.value x4 : vector<4xf32>>)>}) @vector_insert_static(%vector: reg<vm.value x4 : vector<4xf32>>, %value: reg<vm.value : f32>) -> (reg<vm.value x4 : vector<4xf32>>) asm {
+  %7 = slice %vector[0] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value x2 : vector<2xf32>>
+  %8 = slice %vector[3] : reg<vm.value x4 : vector<4xf32>> -> reg<vm.value : vector<1xf32>>
+  %result = concat(%7, %value, %8) : (reg<vm.value x2 : vector<2xf32>>, reg<vm.value : f32>, reg<vm.value : vector<1xf32>>) -> reg<vm.value x4 : vector<4xf32>>
+  return %result
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @vector_slice_tile(%vector: vector<3x4xi16>) -> (vector<2x2xi16>) {
+  %result = vector.slice %vector[1, 1] : vector<3x4xi16> -> vector<2x2xi16>
+  func.return %result : vector<2x2xi16>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x12 : vector<3x4xi16>>) -> (reg<vm.value x4 : vector<2x2xi16>>)>}) @vector_slice_tile(%vector: reg<vm.value x12 : vector<3x4xi16>>) -> (reg<vm.value x4 : vector<2x2xi16>>) asm {
+  %5 = slice %vector[5] : reg<vm.value x12 : vector<3x4xi16>> -> reg<vm.value x2 : vector<2xi16>>
+  %6 = slice %vector[9] : reg<vm.value x12 : vector<3x4xi16>> -> reg<vm.value x2 : vector<2xi16>>
+  %result = concat(%5, %6) : (reg<vm.value x2 : vector<2xi16>>, reg<vm.value x2 : vector<2xi16>>) -> reg<vm.value x4 : vector<2x2xi16>>
+  return %result
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @vector_concat_outer(%lhs: vector<1x2xi8>, %rhs: vector<2x2xi8>) -> (vector<3x2xi8>) {
+  %result = vector.concat<0> %lhs, %rhs : vector<1x2xi8>, vector<2x2xi8> -> vector<3x2xi8>
+  func.return %result : vector<3x2xi8>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x2 : vector<1x2xi8>>, reg<vm.value x4 : vector<2x2xi8>>) -> (reg<vm.value x6 : vector<3x2xi8>>)>}) @vector_concat_outer(%lhs: reg<vm.value x2 : vector<1x2xi8>>, %rhs: reg<vm.value x4 : vector<2x2xi8>>) -> (reg<vm.value x6 : vector<3x2xi8>>) asm {
+  %result = concat(%lhs, %rhs) : (reg<vm.value x2 : vector<1x2xi8>>, reg<vm.value x4 : vector<2x2xi8>>) -> reg<vm.value x6 : vector<3x2xi8>>
+  return %result
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @vector_concat_inner(%lhs: vector<2x1xi8>, %rhs: vector<2x2xi8>) -> (vector<2x3xi8>) {
+  %result = vector.concat<1> %lhs, %rhs : vector<2x1xi8>, vector<2x2xi8> -> vector<2x3xi8>
+  func.return %result : vector<2x3xi8>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x2 : vector<2x1xi8>>, reg<vm.value x4 : vector<2x2xi8>>) -> (reg<vm.value x6 : vector<2x3xi8>>)>}) @vector_concat_inner(%lhs: reg<vm.value x2 : vector<2x1xi8>>, %rhs: reg<vm.value x4 : vector<2x2xi8>>) -> (reg<vm.value x6 : vector<2x3xi8>>) asm {
+  %7 = slice %lhs[0] : reg<vm.value x2 : vector<2x1xi8>> -> reg<vm.value : vector<1xi8>>
+  %8 = slice %rhs[0] : reg<vm.value x4 : vector<2x2xi8>> -> reg<vm.value x2 : vector<2xi8>>
+  %9 = slice %lhs[1] : reg<vm.value x2 : vector<2x1xi8>> -> reg<vm.value : vector<1xi8>>
+  %10 = slice %rhs[2] : reg<vm.value x4 : vector<2x2xi8>> -> reg<vm.value x2 : vector<2xi8>>
+  %result = concat(%7, %8, %9, %10) : (reg<vm.value : vector<1xi8>>, reg<vm.value x2 : vector<2xi8>>, reg<vm.value : vector<1xi8>>, reg<vm.value x2 : vector<2xi8>>) -> reg<vm.value x6 : vector<2x3xi8>>
+  return %result
+}

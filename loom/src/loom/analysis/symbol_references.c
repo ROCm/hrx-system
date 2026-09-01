@@ -358,7 +358,7 @@ static bool loom_symbol_reference_type_may_contain_ref(loom_type_t type) {
   }
 }
 
-static_assert(LOOM_ATTR_COUNT_ == 21,
+static_assert(LOOM_ATTR_COUNT_ == 22,
               "update symbol-bearing attr classification for new kinds");
 
 static bool loom_symbol_reference_attr_may_contain_ref(loom_attribute_t attr) {

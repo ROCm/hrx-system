@@ -1,0 +1,205 @@
+// RUN: emit vm-dis
+
+vm.target<core> @target
+
+func.decl optional import("runtime", "callback") target(@target) @callback(%value: i32) -> (i32)
+
+func.def noinline target(@target) @identity(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.def public target(@target) @function_values(%value: i32) -> (i32) {
+  %local = func.address @identity : func.ref<(i32) -> (i32)>
+  %yieldable = func.ref.cast %local : func.ref<(i32) -> (i32)> to func.ref<yieldable (i32) -> (i32)>
+  %yieldable_is_null = func.compare.null %yieldable : func.ref<yieldable (i32) -> (i32)>
+  %called = func.call.indirect %local(%value) : (i32) -> (i32)
+  %optional = func.address @callback : func.ref<(i32) -> (i32)>
+  %optional_is_null = func.compare.null %optional : func.ref<(i32) -> (i32)>
+  %available = func.import.resolved @callback
+  %null = func.null : func.ref<(i32) -> (i32)>
+  %null_is_null = func.compare.null %null : func.ref<(i32) -> (i32)>
+  cfg.cond_br %yieldable_is_null, ^return_value, ^check_optional
+^check_optional:
+  cfg.cond_br %optional_is_null, ^check_available, ^return_called
+^check_available:
+  cfg.cond_br %available, ^check_null, ^return_value
+^check_null:
+  cfg.cond_br %null_is_null, ^return_called, ^return_value
+^return_called:
+  func.return %called : i32
+^return_value:
+  func.return %value : i32
+}
+
+// ----
+vm.module "module" core=0.0 bytes=564
+requirements:
+sections:
+  [0] strings type=0x0002 flags=0x0000 bytes=[128, +84)
+  [1] signatures type=0x0004 flags=0x0000 bytes=[216, +28)
+  [2] callable_types type=0x0005 flags=0x0000 bytes=[248, +12)
+  [3] imports type=0x0006 flags=0x0000 bytes=[264, +20)
+  [4] exports type=0x0007 flags=0x0000 bytes=[288, +12)
+  [5] functions type=0x0008 flags=0x0000 bytes=[304, +212)
+  [6] presentation type=0x000C flags=0x0001 bytes=[520, +44)
+resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
+module_metadata:
+ref_types:
+callable_types:
+  [0] (i32) -> (i32)
+imports:
+  [0] @runtime::callback : (value: i32) -> (i32) optional
+    authored_type = "(i32) -> (i32)"
+    argument[0].authored_type = "i32"
+    result[0].authored_type = "i32"
+exports:
+  [0] @function_values -> function[1] : (value: i32) -> (i32)
+    authored_type = "(i32) -> (i32)"
+    argument[0].authored_type = "i32"
+    result[0].authored_type = "i32"
+functions:
+  [0] callable[0] signature[0] bytecode=[0, +8) registers=(1, 0, 0) locals=(0, 0, 0) switch_targets=0
+    type = (i32) -> (i32)
+    +0000  control.block
+    +0004  control.return
+  [1] callable[0] signature[0] bytecode=[8, +104) registers=(3, 0, 3) locals=(0, 0, 0) switch_targets=0 has_call
+    type = (i32) -> (i32)
+    +0000  control.block
+    +0004  value.copy dst_v8=1 src_v8=0
+    +0008  func.address dst_f8=0 target_kind_u8=0 target_ordinal_u16=0 callable_type_ordinal_u16=0
+    +0016  value.copy dst_v8=0 src_v8=1
+    +0020  control.call.indirect target_f8=0 callable_type_ordinal_u16=0 direct_ref_move_mask_u16=0
+    +0028  func.address dst_f8=1 target_kind_u8=2 target_ordinal_u16=0 callable_type_ordinal_u16=0
+    +0036  func.null dst_f8=2
+    +0040  func.compare.null dst_v8=2 src_f8=0
+    +0044  control.branch.if.s16 condition_v8=2 target_rel16=11
+    +0048  control.block
+    +0052  func.compare.null dst_v8=2 src_f8=1
+    +0056  control.branch.unless.s16 condition_v8=2 target_rel16=6
+    +0060  control.block
+    +0064  func.import.resolved dst_v8=2 import_ordinal_u16=0
+    +0068  control.branch.unless.s16 condition_v8=2 target_rel16=5
+    +0072  control.block
+    +0076  func.compare.null dst_v8=2 src_f8=2
+    +0080  control.branch.unless.s16 condition_v8=2 target_rel16=2
+    +0084  control.block
+    +0088  control.return
+    +0092  control.block
+    +0096  value.copy dst_v8=0 src_v8=1
+    +0100  control.return
+
+// ====
+
+// RUN: emit vm-dis
+
+vm.target<core> @target
+
+func.decl optional import("runtime", "feature") target(@target) @optional_feature(%value: i32) -> (i32)
+func.decl import("runtime", "feature") target(@target) @required_feature(%value: i32) -> (i32)
+
+func.def public target(@target) @query_required_alias() -> (i1) {
+  %available = func.import.resolved @optional_feature
+  func.return %available : i1
+}
+
+// ----
+vm.module "module" core=0.0 bytes=456
+requirements:
+sections:
+  [0] strings type=0x0002 flags=0x0000 bytes=[128, +108)
+  [1] signatures type=0x0004 flags=0x0000 bytes=[240, +48)
+  [2] callable_types type=0x0005 flags=0x0000 bytes=[288, +20)
+  [3] imports type=0x0006 flags=0x0000 bytes=[312, +20)
+  [4] exports type=0x0007 flags=0x0000 bytes=[336, +12)
+  [5] functions type=0x0008 flags=0x0000 bytes=[352, +64)
+  [6] presentation type=0x000C flags=0x0001 bytes=[416, +40)
+resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
+module_metadata:
+ref_types:
+callable_types:
+  [0] () -> (i8)
+  [1] (i32) -> (i32)
+imports:
+  [0] @runtime::feature : (value: i32) -> (i32)
+    authored_type = "(i32) -> (i32)"
+    argument[0].authored_type = "i32"
+    result[0].authored_type = "i32"
+exports:
+  [0] @query_required_alias -> function[0] : () -> (i8)
+    authored_type = "() -> (i1)"
+    result[0].authored_type = "i1"
+functions:
+  [0] callable[0] signature[0] bytecode=[0, +12) registers=(1, 0, 0) locals=(0, 0, 0) switch_targets=0
+    type = () -> (i8)
+    +0000  control.block
+    +0004  constant.s16 dst_v8=0 immediate_i16=1
+    +0008  control.return
+
+// ====
+
+// RUN: emit vm-dis
+
+vm.target<core> @target
+
+func.def noinline target(@target) @wide_sink(%v0: i32, %v1: i32, %v2: i32, %v3: i32, %v4: i32, %v5: i32, %v6: i32, %v7: i32, %v8: i32, %v9: i32, %v10: i32, %v11: i32, %v12: i32, %v13: i32, %v14: i32, %v15: i32, %v16: i32) {
+  func.return
+}
+
+func.def public target(@target) @call_wide_indirect(%value: i32) -> (i32) {
+  %target = func.address @wide_sink : func.ref<(i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) -> ()>
+  func.call.indirect %target(%value, %value, %value, %value, %value, %value, %value, %value, %value, %value, %value, %value, %value, %value, %value, %value, %value) : (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32)
+  func.return %value : i32
+}
+
+// ----
+vm.module "module" core=0.0 bytes=568
+requirements:
+sections:
+  [0] strings type=0x0002 flags=0x0000 bytes=[112, +64)
+  [1] signatures type=0x0004 flags=0x0000 bytes=[176, +112)
+  [2] callable_types type=0x0005 flags=0x0000 bytes=[288, +20)
+  [3] exports type=0x0007 flags=0x0000 bytes=[312, +12)
+  [4] functions type=0x0008 flags=0x0000 bytes=[328, +212)
+  [5] presentation type=0x000C flags=0x0001 bytes=[544, +24)
+resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
+module_metadata:
+ref_types:
+callable_types:
+  [0] (i32) -> (i32)
+  [1] (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) -> ()
+imports:
+exports:
+  [0] @call_wide_indirect -> function[1] : (value: i32) -> (i32)
+    authored_type = "(i32) -> (i32)"
+    argument[0].authored_type = "i32"
+    result[0].authored_type = "i32"
+functions:
+  [0] callable[1] signature[1] bytecode=[0, +8) registers=(17, 0, 0) locals=(0, 0, 0) switch_targets=0
+    type = (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) -> ()
+    +0000  control.block
+    +0004  control.return
+  [1] callable[0] signature[0] bytecode=[8, +104) registers=(17, 0, 1) locals=(8, 0, 0) switch_targets=0 has_call
+    type = (i32) -> (i32)
+    +0000  control.block
+    +0004  value.copy dst_v8=16 src_v8=0
+    +0008  func.address dst_f8=0 target_kind_u8=0 target_ordinal_u16=0 callable_type_ordinal_u16=1
+    +0016  value.copy dst_v8=0 src_v8=16
+    +0020  value.copy dst_v8=1 src_v8=16
+    +0024  value.copy dst_v8=2 src_v8=16
+    +0028  value.copy dst_v8=3 src_v8=16
+    +0032  value.copy dst_v8=4 src_v8=16
+    +0036  value.copy dst_v8=5 src_v8=16
+    +0040  value.copy dst_v8=6 src_v8=16
+    +0044  value.copy dst_v8=7 src_v8=16
+    +0048  value.copy dst_v8=8 src_v8=16
+    +0052  value.copy dst_v8=9 src_v8=16
+    +0056  value.copy dst_v8=10 src_v8=16
+    +0060  value.copy dst_v8=11 src_v8=16
+    +0064  value.copy dst_v8=12 src_v8=16
+    +0068  value.copy dst_v8=13 src_v8=16
+    +0072  value.copy dst_v8=14 src_v8=16
+    +0076  value.copy dst_v8=15 src_v8=16
+    +0080  stack.store base_u16=0 src_v8=16 format_u8=12
+    +0088  control.call.indirect target_f8=0 callable_type_ordinal_u16=1 direct_ref_move_mask_u16=0
+    +0096  value.copy dst_v8=0 src_v8=16
+    +0100  control.return

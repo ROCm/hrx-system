@@ -406,6 +406,8 @@ def generate_ops_h(
             if attr_def.attr_type == "enum" and attr_def.enum_def:
                 enum_type = _enum_c_type(op, attr_def, shared_enums)
                 lines.append(f"LOOM_DEFINE_ATTR_ENUM_TYPED({prefix}_{attr_def.name}, {desc_index}, {enum_type})")
+            elif attr_def.attr_type == "scoped_enum" and attr_def.optional:
+                lines.append(f"LOOM_DEFINE_OPTIONAL_ATTR_SCOPED_ENUM({prefix}_{attr_def.name}, {desc_index})")
             elif macro:
                 lines.append(f"{macro}({prefix}_{attr_def.name}, {desc_index})")
 

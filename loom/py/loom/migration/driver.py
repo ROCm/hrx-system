@@ -471,12 +471,14 @@ def default_migration_ops() -> tuple[Any, ...]:
 def default_migration_types() -> tuple[Any, ...]:
     """Returns the broad current type registry used by migration validation."""
     from loom.builtin_types import ALL_BUILTIN_TYPES
+    from loom.dialect.func import ALL_FUNC_TYPES
     from loom.dialect.hal import ALL_HAL_TYPES
     from loom.dialect.kernel import ALL_KERNEL_TYPES
     from loom.target.arch.spirv.dialect import ALL_SPIRV_TYPES
 
     return (
         *ALL_BUILTIN_TYPES,
+        *ALL_FUNC_TYPES,
         *ALL_HAL_TYPES,
         *ALL_KERNEL_TYPES,
         *ALL_SPIRV_TYPES,

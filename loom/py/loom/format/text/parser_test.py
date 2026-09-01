@@ -92,6 +92,7 @@ from loom.ir import (
     SymbolNameArray,
     Type,
     TypeKind,
+    U64Attr,
     Use,
     Value,
 )
@@ -1133,6 +1134,27 @@ class TestParseAttrDictOp:
         assert d["label"] == "foo"
         assert d["payload"] == b"\x00\x11\xfe\xff"
 
+    def test_quoted_key_and_unsigned_integer(self) -> None:
+        module, scope = _setup_scope(("x", F32))
+        op = _parse_op(
+            '%r = test.attrs %x {"model.revision" = u64(0xFFFFFFFFFFFFFFFF)} : f32',
+            module=module,
+            scope=scope,
+        )
+        dictionary = op.attributes["dict"]
+        assert isinstance(dictionary, CanonicalAttrDict)
+        assert dictionary["model.revision"] == U64Attr(2**64 - 1)
+
+    @pytest.mark.parametrize("value", ["-1", "18446744073709551616"])
+    def test_unsigned_integer_outside_domain_is_rejected(self, value: str) -> None:
+        module, scope = _setup_scope(("x", F32))
+        with pytest.raises(ParseError, match="u64 attribute value"):
+            _parse_op(
+                f"%r = test.attrs %x {{value = u64({value})}} : f32",
+                module=module,
+                scope=scope,
+            )
+
     def test_empty_dict(self) -> None:
         module, scope = _setup_scope(("x", F32))
         op = _parse_op(
@@ -1165,6 +1187,15 @@ class TestParseAttrDictOp:
         d = op.attributes["dict"]
         assert d["enabled"] is True
         assert d["debug"] is False
+
+    def test_qualified_identifier_value(self) -> None:
+        module, scope = _setup_scope(("x", F32))
+        op = _parse_op(
+            "%r = test.attrs %x {mode = bf16.to.f32} : f32",
+            module=module,
+            scope=scope,
+        )
+        assert op.attributes["dict"]["mode"] == "bf16.to.f32"
 
     def test_string_value_escapes_are_decoded(self) -> None:
         module, scope = _setup_scope(("x", F32))

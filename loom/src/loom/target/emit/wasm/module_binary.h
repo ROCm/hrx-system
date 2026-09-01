@@ -53,9 +53,9 @@ void loom_wasm_module_binary_deinitialize(loom_wasm_module_binary_t* module,
 //
 // Imports, kernel entries, and non-wasm low functions currently fail loud. The
 // body emitter walks structured regions in source order, so module emission
-// requires source-priority frame scheduling. The caller owns source-to-low
-// lowering, target verification, and the remaining frame options used by the
-// scheduler/allocator.
+// requires source-order frame construction. The caller owns source-to-low
+// lowering, target verification, and the remaining frame options used by frame
+// construction.
 iree_status_t loom_wasm_emit_module(
     loom_module_t* module, const loom_low_emission_frame_options_t* options,
     iree_arena_allocator_t* arena, iree_allocator_t allocator,

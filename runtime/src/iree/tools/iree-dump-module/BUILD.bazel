@@ -1,0 +1,33 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:query.bzl", "iree_assert_no_dependency")
+load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_binary")
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+iree_runtime_cc_binary(
+    name = "iree-dump-module",
+    srcs = ["iree-dump-module.c"],
+    visibility = ["//tools:__pkg__"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/io:file_handle",
+        "//runtime/src/iree/vm/bytecode:dump",
+    ],
+)
+
+# Module inspection must not pull in bytecode execution or providers.
+iree_assert_no_dependency(
+    name = "iree_dump_module_no_bytecode_executor_dep",
+    dependency = "//runtime/src/iree/vm/bytecode:bytecode",
+    target = ":iree-dump-module",
+)

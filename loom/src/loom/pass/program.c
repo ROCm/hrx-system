@@ -197,6 +197,9 @@ static iree_status_t loom_pass_program_copy_attr_value(
     case LOOM_ATTR_I64:
       out_value->i64_value = source_attr.i64;
       return iree_ok_status();
+    case LOOM_ATTR_U64:
+      out_value->u64_value = source_attr.u64;
+      return iree_ok_status();
     case LOOM_ATTR_F64:
       out_value->f64_value = source_attr.f64;
       return iree_ok_status();

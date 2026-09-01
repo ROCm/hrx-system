@@ -18,7 +18,8 @@ extern "C" {
 // Returns the target callgraph specialization pass metadata.
 const loom_pass_info_t* loom_target_callgraph_specialization_pass_info(void);
 
-// Extends invocation-local target versions through retained semantic callees.
+// Materializes stable versions for exact authored target roots and extends all
+// target versions through retained semantic callees.
 iree_status_t loom_target_callgraph_specialization_run(loom_pass_t* pass,
                                                        loom_module_t* module);
 

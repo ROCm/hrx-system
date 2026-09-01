@@ -1,0 +1,227 @@
+// RUN: emit vm-dis input=low
+
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i32>) -> (reg<vm.value : i32>)>}) @yield_once(%value: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+  control.yield.s32 ^resume(%value)
+^resume(%result: reg<vm.value : i32>):
+  return %result
+}
+
+// ----
+vm.module "module" core=0.0 bytes=184
+requirements:
+sections:
+  [0] signatures type=0x0004 flags=0x0000 bytes=[64, +28)
+  [1] callable_types type=0x0005 flags=0x0000 bytes=[96, +12)
+  [2] functions type=0x0008 flags=0x0000 bytes=[112, +72)
+resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
+module_metadata:
+ref_types:
+callable_types:
+  [0] (i32) -> (i32) may_yield
+imports:
+exports:
+functions:
+  [0] callable[0] signature[0] bytecode=[0, +20) registers=(1, 0, 0) locals=(0, 0, 0) switch_targets=0 may_yield
+    type = (i32) -> (i32)
+    +0000  control.block
+    +0004  control.yield.s32 target_rel32=0
+    +0012  control.block
+    +0016  control.return
+
+// ====
+
+// RUN: emit vm-dis
+
+vm.target<core> @target
+
+func.decl import("runtime", "wait") target(@target) abi(vm_function, {suspending = true}) @wait()
+func.decl import("runtime", "immediate") target(@target) abi(vm_function, {suspending = false}) @immediate()
+
+func.def noinline target(@target) @yield_leaf() {
+  func.call @wait() : ()
+  func.return
+}
+
+func.def noinline target(@target) @yield_middle() {
+  func.call @yield_leaf() : ()
+  func.return
+}
+
+func.def public target(@target) @yield_root() {
+  func.call @yield_middle() : ()
+  func.return
+}
+
+func.def public target(@target) @sync_root() {
+  func.call @immediate() : ()
+  func.return
+}
+
+// ----
+vm.module "module" core=0.0 bytes=644
+requirements:
+sections:
+  [0] strings type=0x0002 flags=0x0000 bytes=[128, +79)
+  [1] signatures type=0x0004 flags=0x0000 bytes=[208, +36)
+  [2] callable_types type=0x0005 flags=0x0000 bytes=[248, +20)
+  [3] imports type=0x0006 flags=0x0000 bytes=[272, +28)
+  [4] exports type=0x0007 flags=0x0000 bytes=[304, +20)
+  [5] functions type=0x0008 flags=0x0000 bytes=[328, +260)
+  [6] presentation type=0x000C flags=0x0001 bytes=[592, +52)
+resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
+module_metadata:
+ref_types:
+callable_types:
+  [0] () -> ()
+  [1] () -> () may_yield
+imports:
+  [0] @runtime::immediate : () -> ()
+    authored_type = "() -> ()"
+  [1] @runtime::wait : () -> () may_yield
+    authored_type = "() -> ()"
+exports:
+  [0] @sync_root -> function[3] : () -> ()
+    authored_type = "() -> ()"
+  [1] @yield_root -> function[2] : () -> () may_yield
+    authored_type = "() -> ()"
+functions:
+  [0] callable[1] signature[1] bytecode=[0, +16) registers=(0, 0, 0) locals=(0, 0, 0) switch_targets=0 may_yield has_call
+    type = () -> ()
+    +0000  control.block
+    +0004  control.call target_kind_u8=1 target_ordinal_u16=1 direct_ref_move_mask_u16=0
+    +0012  control.return
+  [1] callable[1] signature[1] bytecode=[16, +16) registers=(0, 0, 0) locals=(0, 0, 0) switch_targets=0 may_yield has_call
+    type = () -> ()
+    +0000  control.block
+    +0004  control.call target_kind_u8=0 target_ordinal_u16=0 direct_ref_move_mask_u16=0
+    +0012  control.return
+  [2] callable[1] signature[1] bytecode=[32, +16) registers=(0, 0, 0) locals=(0, 0, 0) switch_targets=0 may_yield has_call
+    type = () -> ()
+    +0000  control.block
+    +0004  control.call target_kind_u8=0 target_ordinal_u16=1 direct_ref_move_mask_u16=0
+    +0012  control.return
+  [3] callable[0] signature[0] bytecode=[48, +16) registers=(0, 0, 0) locals=(0, 0, 0) switch_targets=0 has_call
+    type = () -> ()
+    +0000  control.block
+    +0004  control.call target_kind_u8=1 target_ordinal_u16=0 direct_ref_move_mask_u16=0
+    +0012  control.return
+
+// ====
+
+// RUN: emit vm-dis
+
+vm.target<core> @target
+
+func.decl import("runtime", "wait") target(@target) abi(vm_function, {suspending = true}) @wait()
+
+func.def noinline target(@target) @recursive_a() {
+  func.call @recursive_b() : ()
+  func.return
+}
+
+func.def noinline target(@target) @recursive_b() {
+  func.call @recursive_a() : ()
+  func.call @wait() : ()
+  func.return
+}
+
+func.def public target(@target) @recursive_root() {
+  func.call @recursive_a() : ()
+  func.return
+}
+
+// ----
+vm.module "module" core=0.0 bytes=508
+requirements:
+sections:
+  [0] strings type=0x0002 flags=0x0000 bytes=[128, +57)
+  [1] signatures type=0x0004 flags=0x0000 bytes=[192, +20)
+  [2] callable_types type=0x0005 flags=0x0000 bytes=[216, +12)
+  [3] imports type=0x0006 flags=0x0000 bytes=[232, +20)
+  [4] exports type=0x0007 flags=0x0000 bytes=[256, +12)
+  [5] functions type=0x0008 flags=0x0000 bytes=[272, +204)
+  [6] presentation type=0x000C flags=0x0001 bytes=[480, +28)
+resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
+module_metadata:
+ref_types:
+callable_types:
+  [0] () -> () may_yield
+imports:
+  [0] @runtime::wait : () -> () may_yield
+    authored_type = "() -> ()"
+exports:
+  [0] @recursive_root -> function[2] : () -> () may_yield
+    authored_type = "() -> ()"
+functions:
+  [0] callable[0] signature[0] bytecode=[0, +16) registers=(0, 0, 0) locals=(0, 0, 0) switch_targets=0 may_yield has_call
+    type = () -> ()
+    +0000  control.block
+    +0004  control.call target_kind_u8=0 target_ordinal_u16=1 direct_ref_move_mask_u16=0
+    +0012  control.return
+  [1] callable[0] signature[0] bytecode=[16, +24) registers=(0, 0, 0) locals=(0, 0, 0) switch_targets=0 may_yield has_call
+    type = () -> ()
+    +0000  control.block
+    +0004  control.call target_kind_u8=0 target_ordinal_u16=0 direct_ref_move_mask_u16=0
+    +0012  control.call target_kind_u8=1 target_ordinal_u16=0 direct_ref_move_mask_u16=0
+    +0020  control.return
+  [2] callable[0] signature[0] bytecode=[40, +16) registers=(0, 0, 0) locals=(0, 0, 0) switch_targets=0 may_yield has_call
+    type = () -> ()
+    +0000  control.block
+    +0004  control.call target_kind_u8=0 target_ordinal_u16=0 direct_ref_move_mask_u16=0
+    +0012  control.return
+
+// ====
+
+// RUN: emit vm-dis
+
+vm.target<core> @target
+
+func.def public target(@target) @call_yieldable(%target: func.ref<yieldable () -> ()>) {
+  func.call.indirect %target() : ()
+  func.return
+}
+
+func.def public target(@target) @call_sync(%target: func.ref<() -> ()>) {
+  func.call.indirect %target() : ()
+  func.return
+}
+
+// ----
+vm.module "module" core=0.0 bytes=604
+requirements:
+sections:
+  [0] strings type=0x0002 flags=0x0000 bytes=[112, +173)
+  [1] signatures type=0x0004 flags=0x0000 bytes=[288, +76)
+  [2] callable_types type=0x0005 flags=0x0000 bytes=[368, +36)
+  [3] exports type=0x0007 flags=0x0000 bytes=[408, +20)
+  [4] functions type=0x0008 flags=0x0000 bytes=[432, +132)
+  [5] presentation type=0x000C flags=0x0001 bytes=[568, +36)
+resources: constants=0 globals=(values=0, refs=0, functions=0) rodata=0
+module_metadata:
+ref_types:
+callable_types:
+  [0] () -> ()
+  [1] () -> () may_yield
+  [2] (func<module:0>) -> ()
+  [3] (func<module:1>) -> () may_yield
+imports:
+exports:
+  [0] @call_sync -> function[1] : (target: func<module:0>) -> ()
+    authored_type = "(func.ref<() -> ()>) -> ()"
+    argument[0].authored_type = "func.ref<() -> ()>"
+  [1] @call_yieldable -> function[0] : (target: func<module:1>) -> () may_yield
+    authored_type = "(func.ref<yieldable () -> ()>) -> ()"
+    argument[0].authored_type = "func.ref<yieldable () -> ()>"
+functions:
+  [0] callable[3] signature[3] bytecode=[0, +16) registers=(0, 0, 1) locals=(0, 0, 0) switch_targets=0 may_yield has_call
+    type = (func<module:1>) -> ()
+    +0000  control.block
+    +0004  control.call.indirect target_f8=0 callable_type_ordinal_u16=1 direct_ref_move_mask_u16=0
+    +0012  control.return
+  [1] callable[2] signature[2] bytecode=[16, +16) registers=(0, 0, 1) locals=(0, 0, 0) switch_targets=0 has_call
+    type = (func<module:0>) -> ()
+    +0000  control.block
+    +0004  control.call.indirect target_f8=0 callable_type_ordinal_u16=0 direct_ref_move_mask_u16=0
+    +0012  control.return

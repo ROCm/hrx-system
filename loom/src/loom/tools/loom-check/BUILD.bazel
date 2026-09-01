@@ -96,6 +96,20 @@ _TARGET_SPIRV_CHECK_DEPS = iree_select({
     "//conditions:default": [],
 })
 
+_TARGET_VM_CHECK_COPTS = iree_select({
+    "//loom/config/target/arch:vm": [
+        "-DLOOM_CHECK_HAVE_TARGET_VM=1",
+    ],
+    "//conditions:default": [],
+})
+
+_TARGET_VM_CHECK_DEPS = iree_select({
+    "//loom/config/target/arch:vm": [
+        "//loom/src/loom/target/arch/vm:check_provider",
+    ],
+    "//conditions:default": [],
+})
+
 _EMIT_SPIRV_CHECK_COPTS = iree_select({
     "//loom/config/emit:spirv": [
         "-DLOOM_CHECK_HAVE_EMIT_SPIRV=1",
@@ -157,6 +171,7 @@ _LOOM_CHECK_PROVIDER_COPTS = (
     _TARGET_LLVMIR_CHECK_COPTS +
     _EMIT_LLVMIR_CHECK_COPTS +
     _TARGET_SPIRV_CHECK_COPTS +
+    _TARGET_VM_CHECK_COPTS +
     _EMIT_SPIRV_CHECK_COPTS +
     _TARGET_WASM_CHECK_COPTS +
     _EMIT_WASM_CHECK_COPTS +
@@ -168,6 +183,7 @@ _LOOM_CHECK_PROVIDER_DEPS = (
     _TARGET_LLVMIR_CHECK_DEPS +
     _EMIT_LLVMIR_CHECK_DEPS +
     _TARGET_SPIRV_CHECK_DEPS +
+    _TARGET_VM_CHECK_DEPS +
     _EMIT_SPIRV_CHECK_DEPS +
     _TARGET_WASM_CHECK_DEPS +
     _EMIT_WASM_CHECK_DEPS +
@@ -234,6 +250,7 @@ loom_cc_library(
         "//loom/src/loom/codegen/low:text_asm",
         "//loom/src/loom/codegen/low:verify",
         "//loom/src/loom/codegen/low/lower",
+        "//loom/src/loom/codegen/low/pipeline:legalizer_registry",
         "//loom/src/loom/codegen/low/pipeline:pass_environment",
         "//loom/src/loom/codegen/low/schedule",
         "//loom/src/loom/error:diagnostic",
@@ -329,6 +346,7 @@ loom_cc_test(
         "//loom/src/loom/target:low_descriptor_registry_core_test",
         "//loom/src/loom/target:provider",
         "//loom/src/loom/target/test:lower",
+        "//loom/src/loom/target/test:target_record_table",
         "//loom/src/loom/testing:context",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",

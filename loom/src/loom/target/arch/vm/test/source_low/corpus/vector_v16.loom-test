@@ -1,0 +1,1057 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/vector_v16.loom-test
+// RUN: emit source-low output=low
+
+vm.target<core> @target
+func.def target(@target) @i32x16_arith(%lhs: vector<16xi32>, %rhs: vector<16xi32>) -> (vector<16xi32>) {
+  %sum = vector.addi %lhs, %rhs : vector<16xi32>
+  %diff = vector.subi %sum, %rhs : vector<16xi32>
+  func.return %diff : vector<16xi32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x16 : vector<16xi32>>, reg<vm.value x16 : vector<16xi32>>) -> (reg<vm.value x16 : vector<16xi32>>)>}) @i32x16_arith(%lhs: reg<vm.value x16 : vector<16xi32>>, %rhs: reg<vm.value x16 : vector<16xi32>>) -> (reg<vm.value x16 : vector<16xi32>>) asm {
+  return %lhs
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @i32x16_minmax_logic(%lhs: vector<16xi32>, %rhs: vector<16xi32>) -> (vector<16xi32>) {
+  %min_s = vector.minsi %lhs, %rhs : vector<16xi32>
+  %max_s = vector.maxsi %lhs, %rhs : vector<16xi32>
+  %min_u = vector.minui %lhs, %rhs : vector<16xi32>
+  %max_u = vector.maxui %lhs, %rhs : vector<16xi32>
+  %mask = vector.andi %min_s, %max_s : vector<16xi32>
+  %mixed = vector.xori %mask, %min_u : vector<16xi32>
+  %result = vector.ori %mixed, %max_u : vector<16xi32>
+  func.return %result : vector<16xi32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x16 : vector<16xi32>>, reg<vm.value x16 : vector<16xi32>>) -> (reg<vm.value x16 : vector<16xi32>>)>}) @i32x16_minmax_logic(%lhs: reg<vm.value x16 : vector<16xi32>>, %rhs: reg<vm.value x16 : vector<16xi32>>) -> (reg<vm.value x16 : vector<16xi32>>) asm {
+  %254 = slice %lhs[0] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %255 = slice %rhs[0] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %256 = integer.min.s32 %254, %255 : reg<vm.value : i32>
+  %257 = integer.max.s32 %254, %255 : reg<vm.value : i32>
+  %258 = integer.and.i32 %256, %257 : reg<vm.value : i32>
+  %259 = integer.min.u32 %254, %255 : reg<vm.value : i32>
+  %260 = integer.xor.i32 %258, %259 : reg<vm.value : i32>
+  %261 = integer.max.u32 %254, %255 : reg<vm.value : i32>
+  %262 = integer.or.i32 %260, %261 : reg<vm.value : i32>
+  %263 = slice %lhs[1] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %264 = slice %rhs[1] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %265 = integer.min.s32 %263, %264 : reg<vm.value : i32>
+  %266 = integer.max.s32 %263, %264 : reg<vm.value : i32>
+  %267 = integer.and.i32 %265, %266 : reg<vm.value : i32>
+  %268 = integer.min.u32 %263, %264 : reg<vm.value : i32>
+  %269 = integer.xor.i32 %267, %268 : reg<vm.value : i32>
+  %270 = integer.max.u32 %263, %264 : reg<vm.value : i32>
+  %271 = integer.or.i32 %269, %270 : reg<vm.value : i32>
+  %272 = slice %lhs[2] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %273 = slice %rhs[2] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %274 = integer.min.s32 %272, %273 : reg<vm.value : i32>
+  %275 = integer.max.s32 %272, %273 : reg<vm.value : i32>
+  %276 = integer.and.i32 %274, %275 : reg<vm.value : i32>
+  %277 = integer.min.u32 %272, %273 : reg<vm.value : i32>
+  %278 = integer.xor.i32 %276, %277 : reg<vm.value : i32>
+  %279 = integer.max.u32 %272, %273 : reg<vm.value : i32>
+  %280 = integer.or.i32 %278, %279 : reg<vm.value : i32>
+  %281 = slice %lhs[3] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %282 = slice %rhs[3] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %283 = integer.min.s32 %281, %282 : reg<vm.value : i32>
+  %284 = integer.max.s32 %281, %282 : reg<vm.value : i32>
+  %285 = integer.and.i32 %283, %284 : reg<vm.value : i32>
+  %286 = integer.min.u32 %281, %282 : reg<vm.value : i32>
+  %287 = integer.xor.i32 %285, %286 : reg<vm.value : i32>
+  %288 = integer.max.u32 %281, %282 : reg<vm.value : i32>
+  %289 = integer.or.i32 %287, %288 : reg<vm.value : i32>
+  %290 = slice %lhs[4] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %291 = slice %rhs[4] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %292 = integer.min.s32 %290, %291 : reg<vm.value : i32>
+  %293 = integer.max.s32 %290, %291 : reg<vm.value : i32>
+  %294 = integer.and.i32 %292, %293 : reg<vm.value : i32>
+  %295 = integer.min.u32 %290, %291 : reg<vm.value : i32>
+  %296 = integer.xor.i32 %294, %295 : reg<vm.value : i32>
+  %297 = integer.max.u32 %290, %291 : reg<vm.value : i32>
+  %298 = integer.or.i32 %296, %297 : reg<vm.value : i32>
+  %299 = slice %lhs[5] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %300 = slice %rhs[5] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %301 = integer.min.s32 %299, %300 : reg<vm.value : i32>
+  %302 = integer.max.s32 %299, %300 : reg<vm.value : i32>
+  %303 = integer.and.i32 %301, %302 : reg<vm.value : i32>
+  %304 = integer.min.u32 %299, %300 : reg<vm.value : i32>
+  %305 = integer.xor.i32 %303, %304 : reg<vm.value : i32>
+  %306 = integer.max.u32 %299, %300 : reg<vm.value : i32>
+  %307 = integer.or.i32 %305, %306 : reg<vm.value : i32>
+  %308 = slice %lhs[6] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %309 = slice %rhs[6] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %310 = integer.min.s32 %308, %309 : reg<vm.value : i32>
+  %311 = integer.max.s32 %308, %309 : reg<vm.value : i32>
+  %312 = integer.and.i32 %310, %311 : reg<vm.value : i32>
+  %313 = integer.min.u32 %308, %309 : reg<vm.value : i32>
+  %314 = integer.xor.i32 %312, %313 : reg<vm.value : i32>
+  %315 = integer.max.u32 %308, %309 : reg<vm.value : i32>
+  %316 = integer.or.i32 %314, %315 : reg<vm.value : i32>
+  %317 = slice %lhs[7] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %318 = slice %rhs[7] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %319 = integer.min.s32 %317, %318 : reg<vm.value : i32>
+  %320 = integer.max.s32 %317, %318 : reg<vm.value : i32>
+  %321 = integer.and.i32 %319, %320 : reg<vm.value : i32>
+  %322 = integer.min.u32 %317, %318 : reg<vm.value : i32>
+  %323 = integer.xor.i32 %321, %322 : reg<vm.value : i32>
+  %324 = integer.max.u32 %317, %318 : reg<vm.value : i32>
+  %325 = integer.or.i32 %323, %324 : reg<vm.value : i32>
+  %326 = slice %lhs[8] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %327 = slice %rhs[8] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %328 = integer.min.s32 %326, %327 : reg<vm.value : i32>
+  %329 = integer.max.s32 %326, %327 : reg<vm.value : i32>
+  %330 = integer.and.i32 %328, %329 : reg<vm.value : i32>
+  %331 = integer.min.u32 %326, %327 : reg<vm.value : i32>
+  %332 = integer.xor.i32 %330, %331 : reg<vm.value : i32>
+  %333 = integer.max.u32 %326, %327 : reg<vm.value : i32>
+  %334 = integer.or.i32 %332, %333 : reg<vm.value : i32>
+  %335 = slice %lhs[9] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %336 = slice %rhs[9] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %337 = integer.min.s32 %335, %336 : reg<vm.value : i32>
+  %338 = integer.max.s32 %335, %336 : reg<vm.value : i32>
+  %339 = integer.and.i32 %337, %338 : reg<vm.value : i32>
+  %340 = integer.min.u32 %335, %336 : reg<vm.value : i32>
+  %341 = integer.xor.i32 %339, %340 : reg<vm.value : i32>
+  %342 = integer.max.u32 %335, %336 : reg<vm.value : i32>
+  %343 = integer.or.i32 %341, %342 : reg<vm.value : i32>
+  %344 = slice %lhs[10] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %345 = slice %rhs[10] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %346 = integer.min.s32 %344, %345 : reg<vm.value : i32>
+  %347 = integer.max.s32 %344, %345 : reg<vm.value : i32>
+  %348 = integer.and.i32 %346, %347 : reg<vm.value : i32>
+  %349 = integer.min.u32 %344, %345 : reg<vm.value : i32>
+  %350 = integer.xor.i32 %348, %349 : reg<vm.value : i32>
+  %351 = integer.max.u32 %344, %345 : reg<vm.value : i32>
+  %352 = integer.or.i32 %350, %351 : reg<vm.value : i32>
+  %353 = slice %lhs[11] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %354 = slice %rhs[11] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %355 = integer.min.s32 %353, %354 : reg<vm.value : i32>
+  %356 = integer.max.s32 %353, %354 : reg<vm.value : i32>
+  %357 = integer.and.i32 %355, %356 : reg<vm.value : i32>
+  %358 = integer.min.u32 %353, %354 : reg<vm.value : i32>
+  %359 = integer.xor.i32 %357, %358 : reg<vm.value : i32>
+  %360 = integer.max.u32 %353, %354 : reg<vm.value : i32>
+  %361 = integer.or.i32 %359, %360 : reg<vm.value : i32>
+  %362 = slice %lhs[12] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %363 = slice %rhs[12] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %364 = integer.min.s32 %362, %363 : reg<vm.value : i32>
+  %365 = integer.max.s32 %362, %363 : reg<vm.value : i32>
+  %366 = integer.and.i32 %364, %365 : reg<vm.value : i32>
+  %367 = integer.min.u32 %362, %363 : reg<vm.value : i32>
+  %368 = integer.xor.i32 %366, %367 : reg<vm.value : i32>
+  %369 = integer.max.u32 %362, %363 : reg<vm.value : i32>
+  %370 = integer.or.i32 %368, %369 : reg<vm.value : i32>
+  %371 = slice %lhs[13] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %372 = slice %rhs[13] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %373 = integer.min.s32 %371, %372 : reg<vm.value : i32>
+  %374 = integer.max.s32 %371, %372 : reg<vm.value : i32>
+  %375 = integer.and.i32 %373, %374 : reg<vm.value : i32>
+  %376 = integer.min.u32 %371, %372 : reg<vm.value : i32>
+  %377 = integer.xor.i32 %375, %376 : reg<vm.value : i32>
+  %378 = integer.max.u32 %371, %372 : reg<vm.value : i32>
+  %379 = integer.or.i32 %377, %378 : reg<vm.value : i32>
+  %380 = slice %lhs[14] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %381 = slice %rhs[14] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %382 = integer.min.s32 %380, %381 : reg<vm.value : i32>
+  %383 = integer.max.s32 %380, %381 : reg<vm.value : i32>
+  %384 = integer.and.i32 %382, %383 : reg<vm.value : i32>
+  %385 = integer.min.u32 %380, %381 : reg<vm.value : i32>
+  %386 = integer.xor.i32 %384, %385 : reg<vm.value : i32>
+  %387 = integer.max.u32 %380, %381 : reg<vm.value : i32>
+  %388 = integer.or.i32 %386, %387 : reg<vm.value : i32>
+  %389 = slice %lhs[15] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %390 = slice %rhs[15] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %391 = integer.min.s32 %389, %390 : reg<vm.value : i32>
+  %392 = integer.max.s32 %389, %390 : reg<vm.value : i32>
+  %393 = integer.and.i32 %391, %392 : reg<vm.value : i32>
+  %394 = integer.min.u32 %389, %390 : reg<vm.value : i32>
+  %395 = integer.xor.i32 %393, %394 : reg<vm.value : i32>
+  %396 = integer.max.u32 %389, %390 : reg<vm.value : i32>
+  %397 = integer.or.i32 %395, %396 : reg<vm.value : i32>
+  %result = concat(%262, %271, %280, %289, %298, %307, %316, %325, %334, %343, %352, %361, %370, %379, %388, %397) : (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>) -> reg<vm.value x16 : vector<16xi32>>
+  return %result
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @i32x16_variable_shift(%value: vector<16xi32>, %amount: vector<16xi32>) -> (vector<16xi32>) {
+  %left = vector.shli %value, %amount : vector<16xi32>
+  %signed = vector.shrsi %left, %amount : vector<16xi32>
+  %result = vector.shrui %signed, %amount : vector<16xi32>
+  func.return %result : vector<16xi32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x16 : vector<16xi32>>, reg<vm.value x16 : vector<16xi32>>) -> (reg<vm.value x16 : vector<16xi32>>)>}) @i32x16_variable_shift(%value: reg<vm.value x16 : vector<16xi32>>, %amount: reg<vm.value x16 : vector<16xi32>>) -> (reg<vm.value x16 : vector<16xi32>>) asm {
+  %122 = slice %value[0] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %123 = slice %amount[0] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %124 = integer.shift.left.i32 %122, %123 : reg<vm.value : i32>
+  %125 = integer.shift.right.s32 %124, %123 : reg<vm.value : i32>
+  %126 = integer.shift.right.u32 %125, %123 : reg<vm.value : i32>
+  %127 = slice %value[1] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %128 = slice %amount[1] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %129 = integer.shift.left.i32 %127, %128 : reg<vm.value : i32>
+  %130 = integer.shift.right.s32 %129, %128 : reg<vm.value : i32>
+  %131 = integer.shift.right.u32 %130, %128 : reg<vm.value : i32>
+  %132 = slice %value[2] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %133 = slice %amount[2] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %134 = integer.shift.left.i32 %132, %133 : reg<vm.value : i32>
+  %135 = integer.shift.right.s32 %134, %133 : reg<vm.value : i32>
+  %136 = integer.shift.right.u32 %135, %133 : reg<vm.value : i32>
+  %137 = slice %value[3] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %138 = slice %amount[3] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %139 = integer.shift.left.i32 %137, %138 : reg<vm.value : i32>
+  %140 = integer.shift.right.s32 %139, %138 : reg<vm.value : i32>
+  %141 = integer.shift.right.u32 %140, %138 : reg<vm.value : i32>
+  %142 = slice %value[4] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %143 = slice %amount[4] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %144 = integer.shift.left.i32 %142, %143 : reg<vm.value : i32>
+  %145 = integer.shift.right.s32 %144, %143 : reg<vm.value : i32>
+  %146 = integer.shift.right.u32 %145, %143 : reg<vm.value : i32>
+  %147 = slice %value[5] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %148 = slice %amount[5] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %149 = integer.shift.left.i32 %147, %148 : reg<vm.value : i32>
+  %150 = integer.shift.right.s32 %149, %148 : reg<vm.value : i32>
+  %151 = integer.shift.right.u32 %150, %148 : reg<vm.value : i32>
+  %152 = slice %value[6] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %153 = slice %amount[6] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %154 = integer.shift.left.i32 %152, %153 : reg<vm.value : i32>
+  %155 = integer.shift.right.s32 %154, %153 : reg<vm.value : i32>
+  %156 = integer.shift.right.u32 %155, %153 : reg<vm.value : i32>
+  %157 = slice %value[7] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %158 = slice %amount[7] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %159 = integer.shift.left.i32 %157, %158 : reg<vm.value : i32>
+  %160 = integer.shift.right.s32 %159, %158 : reg<vm.value : i32>
+  %161 = integer.shift.right.u32 %160, %158 : reg<vm.value : i32>
+  %162 = slice %value[8] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %163 = slice %amount[8] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %164 = integer.shift.left.i32 %162, %163 : reg<vm.value : i32>
+  %165 = integer.shift.right.s32 %164, %163 : reg<vm.value : i32>
+  %166 = integer.shift.right.u32 %165, %163 : reg<vm.value : i32>
+  %167 = slice %value[9] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %168 = slice %amount[9] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %169 = integer.shift.left.i32 %167, %168 : reg<vm.value : i32>
+  %170 = integer.shift.right.s32 %169, %168 : reg<vm.value : i32>
+  %171 = integer.shift.right.u32 %170, %168 : reg<vm.value : i32>
+  %172 = slice %value[10] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %173 = slice %amount[10] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %174 = integer.shift.left.i32 %172, %173 : reg<vm.value : i32>
+  %175 = integer.shift.right.s32 %174, %173 : reg<vm.value : i32>
+  %176 = integer.shift.right.u32 %175, %173 : reg<vm.value : i32>
+  %177 = slice %value[11] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %178 = slice %amount[11] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %179 = integer.shift.left.i32 %177, %178 : reg<vm.value : i32>
+  %180 = integer.shift.right.s32 %179, %178 : reg<vm.value : i32>
+  %181 = integer.shift.right.u32 %180, %178 : reg<vm.value : i32>
+  %182 = slice %value[12] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %183 = slice %amount[12] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %184 = integer.shift.left.i32 %182, %183 : reg<vm.value : i32>
+  %185 = integer.shift.right.s32 %184, %183 : reg<vm.value : i32>
+  %186 = integer.shift.right.u32 %185, %183 : reg<vm.value : i32>
+  %187 = slice %value[13] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %188 = slice %amount[13] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %189 = integer.shift.left.i32 %187, %188 : reg<vm.value : i32>
+  %190 = integer.shift.right.s32 %189, %188 : reg<vm.value : i32>
+  %191 = integer.shift.right.u32 %190, %188 : reg<vm.value : i32>
+  %192 = slice %value[14] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %193 = slice %amount[14] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %194 = integer.shift.left.i32 %192, %193 : reg<vm.value : i32>
+  %195 = integer.shift.right.s32 %194, %193 : reg<vm.value : i32>
+  %196 = integer.shift.right.u32 %195, %193 : reg<vm.value : i32>
+  %197 = slice %value[15] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %198 = slice %amount[15] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %199 = integer.shift.left.i32 %197, %198 : reg<vm.value : i32>
+  %200 = integer.shift.right.s32 %199, %198 : reg<vm.value : i32>
+  %201 = integer.shift.right.u32 %200, %198 : reg<vm.value : i32>
+  %result = concat(%126, %131, %136, %141, %146, %151, %156, %161, %166, %171, %176, %181, %186, %191, %196, %201) : (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>) -> reg<vm.value x16 : vector<16xi32>>
+  return %result
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @i32x16_splat_add(%value: i32, %rhs: vector<16xi32>) -> (vector<16xi32>) {
+  %splat = vector.splat %value : vector<16xi32>
+  %sum = vector.addi %splat, %rhs : vector<16xi32>
+  func.return %sum : vector<16xi32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : i32>, reg<vm.value x16 : vector<16xi32>>) -> (reg<vm.value x16 : vector<16xi32>>)>}) @i32x16_splat_add(%value: reg<vm.value : i32>, %rhs: reg<vm.value x16 : vector<16xi32>>) -> (reg<vm.value x16 : vector<16xi32>>) asm {
+  %41 = slice %rhs[0] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %42 = integer.add.i32 %value, %41 : reg<vm.value : i32>
+  %43 = slice %rhs[1] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %44 = integer.add.i32 %value, %43 : reg<vm.value : i32>
+  %45 = slice %rhs[2] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %46 = integer.add.i32 %value, %45 : reg<vm.value : i32>
+  %47 = slice %rhs[3] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %48 = integer.add.i32 %value, %47 : reg<vm.value : i32>
+  %49 = slice %rhs[4] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %50 = integer.add.i32 %value, %49 : reg<vm.value : i32>
+  %51 = slice %rhs[5] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %52 = integer.add.i32 %value, %51 : reg<vm.value : i32>
+  %53 = slice %rhs[6] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %54 = integer.add.i32 %value, %53 : reg<vm.value : i32>
+  %55 = slice %rhs[7] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %56 = integer.add.i32 %value, %55 : reg<vm.value : i32>
+  %57 = slice %rhs[8] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %58 = integer.add.i32 %value, %57 : reg<vm.value : i32>
+  %59 = slice %rhs[9] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %60 = integer.add.i32 %value, %59 : reg<vm.value : i32>
+  %61 = slice %rhs[10] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %62 = integer.add.i32 %value, %61 : reg<vm.value : i32>
+  %63 = slice %rhs[11] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %64 = integer.add.i32 %value, %63 : reg<vm.value : i32>
+  %65 = slice %rhs[12] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %66 = integer.add.i32 %value, %65 : reg<vm.value : i32>
+  %67 = slice %rhs[13] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %68 = integer.add.i32 %value, %67 : reg<vm.value : i32>
+  %69 = slice %rhs[14] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %70 = integer.add.i32 %value, %69 : reg<vm.value : i32>
+  %71 = slice %rhs[15] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %72 = integer.add.i32 %value, %71 : reg<vm.value : i32>
+  %sum = concat(%42, %44, %46, %48, %50, %52, %54, %56, %58, %60, %62, %64, %66, %68, %70, %72) : (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>) -> reg<vm.value x16 : vector<16xi32>>
+  return %sum
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @i32x16_compare_select(%lhs: vector<16xi32>, %rhs: vector<16xi32>, %fallback: vector<16xi32>) -> (vector<16xi32>) {
+  %signed = vector.cmpi sgt, %lhs, %rhs : vector<16xi32> -> vector<16xi1>
+  %unsigned = vector.cmpi ugt, %lhs, %rhs : vector<16xi32> -> vector<16xi1>
+  %selected = vector.select %signed, %lhs, %rhs : vector<16xi32>
+  %result = vector.select %unsigned, %selected, %fallback : vector<16xi32>
+  func.return %result : vector<16xi32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x16 : vector<16xi32>>, reg<vm.value x16 : vector<16xi32>>, reg<vm.value x16 : vector<16xi32>>) -> (reg<vm.value x16 : vector<16xi32>>)>}) @i32x16_compare_select(%lhs: reg<vm.value x16 : vector<16xi32>>, %rhs: reg<vm.value x16 : vector<16xi32>>, %fallback: reg<vm.value x16 : vector<16xi32>>) -> (reg<vm.value x16 : vector<16xi32>>) asm {
+  %189 = slice %lhs[0] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %190 = slice %rhs[0] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %191 = integer.compare.i32 %189, %190, ugt : reg<vm.value : i1>
+  %192 = integer.compare.i32 %189, %190, sgt : reg<vm.value : i1>
+  %193 = value.select %192, %189, %190 : reg<vm.value : i32>
+  %194 = slice %fallback[0] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %195 = value.select %191, %193, %194 : reg<vm.value : i32>
+  %196 = slice %lhs[1] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %197 = slice %rhs[1] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %198 = integer.compare.i32 %196, %197, ugt : reg<vm.value : i1>
+  %199 = integer.compare.i32 %196, %197, sgt : reg<vm.value : i1>
+  %200 = value.select %199, %196, %197 : reg<vm.value : i32>
+  %201 = slice %fallback[1] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %202 = value.select %198, %200, %201 : reg<vm.value : i32>
+  %203 = slice %lhs[2] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %204 = slice %rhs[2] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %205 = integer.compare.i32 %203, %204, ugt : reg<vm.value : i1>
+  %206 = integer.compare.i32 %203, %204, sgt : reg<vm.value : i1>
+  %207 = value.select %206, %203, %204 : reg<vm.value : i32>
+  %208 = slice %fallback[2] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %209 = value.select %205, %207, %208 : reg<vm.value : i32>
+  %210 = slice %lhs[3] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %211 = slice %rhs[3] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %212 = integer.compare.i32 %210, %211, ugt : reg<vm.value : i1>
+  %213 = integer.compare.i32 %210, %211, sgt : reg<vm.value : i1>
+  %214 = value.select %213, %210, %211 : reg<vm.value : i32>
+  %215 = slice %fallback[3] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %216 = value.select %212, %214, %215 : reg<vm.value : i32>
+  %217 = slice %lhs[4] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %218 = slice %rhs[4] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %219 = integer.compare.i32 %217, %218, ugt : reg<vm.value : i1>
+  %220 = integer.compare.i32 %217, %218, sgt : reg<vm.value : i1>
+  %221 = value.select %220, %217, %218 : reg<vm.value : i32>
+  %222 = slice %fallback[4] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %223 = value.select %219, %221, %222 : reg<vm.value : i32>
+  %224 = slice %lhs[5] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %225 = slice %rhs[5] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %226 = integer.compare.i32 %224, %225, ugt : reg<vm.value : i1>
+  %227 = integer.compare.i32 %224, %225, sgt : reg<vm.value : i1>
+  %228 = value.select %227, %224, %225 : reg<vm.value : i32>
+  %229 = slice %fallback[5] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %230 = value.select %226, %228, %229 : reg<vm.value : i32>
+  %231 = slice %lhs[6] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %232 = slice %rhs[6] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %233 = integer.compare.i32 %231, %232, ugt : reg<vm.value : i1>
+  %234 = integer.compare.i32 %231, %232, sgt : reg<vm.value : i1>
+  %235 = value.select %234, %231, %232 : reg<vm.value : i32>
+  %236 = slice %fallback[6] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %237 = value.select %233, %235, %236 : reg<vm.value : i32>
+  %238 = slice %lhs[7] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %239 = slice %rhs[7] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %240 = integer.compare.i32 %238, %239, ugt : reg<vm.value : i1>
+  %241 = integer.compare.i32 %238, %239, sgt : reg<vm.value : i1>
+  %242 = value.select %241, %238, %239 : reg<vm.value : i32>
+  %243 = slice %fallback[7] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %244 = value.select %240, %242, %243 : reg<vm.value : i32>
+  %245 = slice %lhs[8] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %246 = slice %rhs[8] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %247 = integer.compare.i32 %245, %246, ugt : reg<vm.value : i1>
+  %248 = integer.compare.i32 %245, %246, sgt : reg<vm.value : i1>
+  %249 = value.select %248, %245, %246 : reg<vm.value : i32>
+  %250 = slice %fallback[8] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %251 = value.select %247, %249, %250 : reg<vm.value : i32>
+  %252 = slice %lhs[9] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %253 = slice %rhs[9] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %254 = integer.compare.i32 %252, %253, ugt : reg<vm.value : i1>
+  %255 = integer.compare.i32 %252, %253, sgt : reg<vm.value : i1>
+  %256 = value.select %255, %252, %253 : reg<vm.value : i32>
+  %257 = slice %fallback[9] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %258 = value.select %254, %256, %257 : reg<vm.value : i32>
+  %259 = slice %lhs[10] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %260 = slice %rhs[10] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %261 = integer.compare.i32 %259, %260, ugt : reg<vm.value : i1>
+  %262 = integer.compare.i32 %259, %260, sgt : reg<vm.value : i1>
+  %263 = value.select %262, %259, %260 : reg<vm.value : i32>
+  %264 = slice %fallback[10] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %265 = value.select %261, %263, %264 : reg<vm.value : i32>
+  %266 = slice %lhs[11] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %267 = slice %rhs[11] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %268 = integer.compare.i32 %266, %267, ugt : reg<vm.value : i1>
+  %269 = integer.compare.i32 %266, %267, sgt : reg<vm.value : i1>
+  %270 = value.select %269, %266, %267 : reg<vm.value : i32>
+  %271 = slice %fallback[11] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %272 = value.select %268, %270, %271 : reg<vm.value : i32>
+  %273 = slice %lhs[12] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %274 = slice %rhs[12] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %275 = integer.compare.i32 %273, %274, ugt : reg<vm.value : i1>
+  %276 = integer.compare.i32 %273, %274, sgt : reg<vm.value : i1>
+  %277 = value.select %276, %273, %274 : reg<vm.value : i32>
+  %278 = slice %fallback[12] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %279 = value.select %275, %277, %278 : reg<vm.value : i32>
+  %280 = slice %lhs[13] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %281 = slice %rhs[13] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %282 = integer.compare.i32 %280, %281, ugt : reg<vm.value : i1>
+  %283 = integer.compare.i32 %280, %281, sgt : reg<vm.value : i1>
+  %284 = value.select %283, %280, %281 : reg<vm.value : i32>
+  %285 = slice %fallback[13] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %286 = value.select %282, %284, %285 : reg<vm.value : i32>
+  %287 = slice %lhs[14] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %288 = slice %rhs[14] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %289 = integer.compare.i32 %287, %288, ugt : reg<vm.value : i1>
+  %290 = integer.compare.i32 %287, %288, sgt : reg<vm.value : i1>
+  %291 = value.select %290, %287, %288 : reg<vm.value : i32>
+  %292 = slice %fallback[14] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %293 = value.select %289, %291, %292 : reg<vm.value : i32>
+  %294 = slice %lhs[15] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %295 = slice %rhs[15] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %296 = integer.compare.i32 %294, %295, ugt : reg<vm.value : i1>
+  %297 = integer.compare.i32 %294, %295, sgt : reg<vm.value : i1>
+  %298 = value.select %297, %294, %295 : reg<vm.value : i32>
+  %299 = slice %fallback[15] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %300 = value.select %296, %298, %299 : reg<vm.value : i32>
+  %result = concat(%195, %202, %209, %216, %223, %230, %237, %244, %251, %258, %265, %272, %279, %286, %293, %300) : (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>) -> reg<vm.value x16 : vector<16xi32>>
+  return %result
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @i32x16_mask_and_select(%lhs: vector<16xi32>, %rhs: vector<16xi32>, %fallback: vector<16xi32>) -> (vector<16xi32>) {
+  %greater = vector.cmpi sgt, %lhs, %rhs : vector<16xi32> -> vector<16xi1>
+  %less = vector.cmpi slt, %lhs, %rhs : vector<16xi32> -> vector<16xi1>
+  %either = vector.ori %greater, %less : vector<16xi1>
+  %greater_again = vector.andi %either, %greater : vector<16xi1>
+  %condition = vector.xori %greater_again, %less : vector<16xi1>
+  %result = vector.select %condition, %lhs, %fallback : vector<16xi32>
+  func.return %result : vector<16xi32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x16 : vector<16xi32>>, reg<vm.value x16 : vector<16xi32>>, reg<vm.value x16 : vector<16xi32>>) -> (reg<vm.value x16 : vector<16xi32>>)>}) @i32x16_mask_and_select(%lhs: reg<vm.value x16 : vector<16xi32>>, %rhs: reg<vm.value x16 : vector<16xi32>>, %fallback: reg<vm.value x16 : vector<16xi32>>) -> (reg<vm.value x16 : vector<16xi32>>) asm {
+  %303 = slice %lhs[0] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %304 = slice %rhs[0] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %305 = integer.compare.i32 %303, %304, sgt : reg<vm.value : i1>
+  %306 = integer.compare.i32 %303, %304, slt : reg<vm.value : i1>
+  %307 = integer.or.i32 %305, %306 : reg<vm.value : i1>
+  %308 = integer.and.i32 %307, %305 : reg<vm.value : i1>
+  %309 = integer.xor.i32 %308, %306 : reg<vm.value : i1>
+  %310 = slice %fallback[0] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %311 = value.select %309, %303, %310 : reg<vm.value : i32>
+  %312 = slice %lhs[1] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %313 = slice %rhs[1] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %314 = integer.compare.i32 %312, %313, sgt : reg<vm.value : i1>
+  %315 = integer.compare.i32 %312, %313, slt : reg<vm.value : i1>
+  %316 = integer.or.i32 %314, %315 : reg<vm.value : i1>
+  %317 = integer.and.i32 %316, %314 : reg<vm.value : i1>
+  %318 = integer.xor.i32 %317, %315 : reg<vm.value : i1>
+  %319 = slice %fallback[1] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %320 = value.select %318, %312, %319 : reg<vm.value : i32>
+  %321 = slice %lhs[2] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %322 = slice %rhs[2] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %323 = integer.compare.i32 %321, %322, sgt : reg<vm.value : i1>
+  %324 = integer.compare.i32 %321, %322, slt : reg<vm.value : i1>
+  %325 = integer.or.i32 %323, %324 : reg<vm.value : i1>
+  %326 = integer.and.i32 %325, %323 : reg<vm.value : i1>
+  %327 = integer.xor.i32 %326, %324 : reg<vm.value : i1>
+  %328 = slice %fallback[2] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %329 = value.select %327, %321, %328 : reg<vm.value : i32>
+  %330 = slice %lhs[3] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %331 = slice %rhs[3] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %332 = integer.compare.i32 %330, %331, sgt : reg<vm.value : i1>
+  %333 = integer.compare.i32 %330, %331, slt : reg<vm.value : i1>
+  %334 = integer.or.i32 %332, %333 : reg<vm.value : i1>
+  %335 = integer.and.i32 %334, %332 : reg<vm.value : i1>
+  %336 = integer.xor.i32 %335, %333 : reg<vm.value : i1>
+  %337 = slice %fallback[3] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %338 = value.select %336, %330, %337 : reg<vm.value : i32>
+  %339 = slice %lhs[4] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %340 = slice %rhs[4] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %341 = integer.compare.i32 %339, %340, sgt : reg<vm.value : i1>
+  %342 = integer.compare.i32 %339, %340, slt : reg<vm.value : i1>
+  %343 = integer.or.i32 %341, %342 : reg<vm.value : i1>
+  %344 = integer.and.i32 %343, %341 : reg<vm.value : i1>
+  %345 = integer.xor.i32 %344, %342 : reg<vm.value : i1>
+  %346 = slice %fallback[4] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %347 = value.select %345, %339, %346 : reg<vm.value : i32>
+  %348 = slice %lhs[5] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %349 = slice %rhs[5] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %350 = integer.compare.i32 %348, %349, sgt : reg<vm.value : i1>
+  %351 = integer.compare.i32 %348, %349, slt : reg<vm.value : i1>
+  %352 = integer.or.i32 %350, %351 : reg<vm.value : i1>
+  %353 = integer.and.i32 %352, %350 : reg<vm.value : i1>
+  %354 = integer.xor.i32 %353, %351 : reg<vm.value : i1>
+  %355 = slice %fallback[5] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %356 = value.select %354, %348, %355 : reg<vm.value : i32>
+  %357 = slice %lhs[6] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %358 = slice %rhs[6] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %359 = integer.compare.i32 %357, %358, sgt : reg<vm.value : i1>
+  %360 = integer.compare.i32 %357, %358, slt : reg<vm.value : i1>
+  %361 = integer.or.i32 %359, %360 : reg<vm.value : i1>
+  %362 = integer.and.i32 %361, %359 : reg<vm.value : i1>
+  %363 = integer.xor.i32 %362, %360 : reg<vm.value : i1>
+  %364 = slice %fallback[6] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %365 = value.select %363, %357, %364 : reg<vm.value : i32>
+  %366 = slice %lhs[7] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %367 = slice %rhs[7] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %368 = integer.compare.i32 %366, %367, sgt : reg<vm.value : i1>
+  %369 = integer.compare.i32 %366, %367, slt : reg<vm.value : i1>
+  %370 = integer.or.i32 %368, %369 : reg<vm.value : i1>
+  %371 = integer.and.i32 %370, %368 : reg<vm.value : i1>
+  %372 = integer.xor.i32 %371, %369 : reg<vm.value : i1>
+  %373 = slice %fallback[7] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %374 = value.select %372, %366, %373 : reg<vm.value : i32>
+  %375 = slice %lhs[8] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %376 = slice %rhs[8] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %377 = integer.compare.i32 %375, %376, sgt : reg<vm.value : i1>
+  %378 = integer.compare.i32 %375, %376, slt : reg<vm.value : i1>
+  %379 = integer.or.i32 %377, %378 : reg<vm.value : i1>
+  %380 = integer.and.i32 %379, %377 : reg<vm.value : i1>
+  %381 = integer.xor.i32 %380, %378 : reg<vm.value : i1>
+  %382 = slice %fallback[8] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %383 = value.select %381, %375, %382 : reg<vm.value : i32>
+  %384 = slice %lhs[9] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %385 = slice %rhs[9] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %386 = integer.compare.i32 %384, %385, sgt : reg<vm.value : i1>
+  %387 = integer.compare.i32 %384, %385, slt : reg<vm.value : i1>
+  %388 = integer.or.i32 %386, %387 : reg<vm.value : i1>
+  %389 = integer.and.i32 %388, %386 : reg<vm.value : i1>
+  %390 = integer.xor.i32 %389, %387 : reg<vm.value : i1>
+  %391 = slice %fallback[9] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %392 = value.select %390, %384, %391 : reg<vm.value : i32>
+  %393 = slice %lhs[10] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %394 = slice %rhs[10] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %395 = integer.compare.i32 %393, %394, sgt : reg<vm.value : i1>
+  %396 = integer.compare.i32 %393, %394, slt : reg<vm.value : i1>
+  %397 = integer.or.i32 %395, %396 : reg<vm.value : i1>
+  %398 = integer.and.i32 %397, %395 : reg<vm.value : i1>
+  %399 = integer.xor.i32 %398, %396 : reg<vm.value : i1>
+  %400 = slice %fallback[10] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %401 = value.select %399, %393, %400 : reg<vm.value : i32>
+  %402 = slice %lhs[11] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %403 = slice %rhs[11] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %404 = integer.compare.i32 %402, %403, sgt : reg<vm.value : i1>
+  %405 = integer.compare.i32 %402, %403, slt : reg<vm.value : i1>
+  %406 = integer.or.i32 %404, %405 : reg<vm.value : i1>
+  %407 = integer.and.i32 %406, %404 : reg<vm.value : i1>
+  %408 = integer.xor.i32 %407, %405 : reg<vm.value : i1>
+  %409 = slice %fallback[11] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %410 = value.select %408, %402, %409 : reg<vm.value : i32>
+  %411 = slice %lhs[12] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %412 = slice %rhs[12] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %413 = integer.compare.i32 %411, %412, sgt : reg<vm.value : i1>
+  %414 = integer.compare.i32 %411, %412, slt : reg<vm.value : i1>
+  %415 = integer.or.i32 %413, %414 : reg<vm.value : i1>
+  %416 = integer.and.i32 %415, %413 : reg<vm.value : i1>
+  %417 = integer.xor.i32 %416, %414 : reg<vm.value : i1>
+  %418 = slice %fallback[12] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %419 = value.select %417, %411, %418 : reg<vm.value : i32>
+  %420 = slice %lhs[13] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %421 = slice %rhs[13] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %422 = integer.compare.i32 %420, %421, sgt : reg<vm.value : i1>
+  %423 = integer.compare.i32 %420, %421, slt : reg<vm.value : i1>
+  %424 = integer.or.i32 %422, %423 : reg<vm.value : i1>
+  %425 = integer.and.i32 %424, %422 : reg<vm.value : i1>
+  %426 = integer.xor.i32 %425, %423 : reg<vm.value : i1>
+  %427 = slice %fallback[13] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %428 = value.select %426, %420, %427 : reg<vm.value : i32>
+  %429 = slice %lhs[14] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %430 = slice %rhs[14] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %431 = integer.compare.i32 %429, %430, sgt : reg<vm.value : i1>
+  %432 = integer.compare.i32 %429, %430, slt : reg<vm.value : i1>
+  %433 = integer.or.i32 %431, %432 : reg<vm.value : i1>
+  %434 = integer.and.i32 %433, %431 : reg<vm.value : i1>
+  %435 = integer.xor.i32 %434, %432 : reg<vm.value : i1>
+  %436 = slice %fallback[14] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %437 = value.select %435, %429, %436 : reg<vm.value : i32>
+  %438 = slice %lhs[15] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %439 = slice %rhs[15] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %440 = integer.compare.i32 %438, %439, sgt : reg<vm.value : i1>
+  %441 = integer.compare.i32 %438, %439, slt : reg<vm.value : i1>
+  %442 = integer.or.i32 %440, %441 : reg<vm.value : i1>
+  %443 = integer.and.i32 %442, %440 : reg<vm.value : i1>
+  %444 = integer.xor.i32 %443, %441 : reg<vm.value : i1>
+  %445 = slice %fallback[15] : reg<vm.value x16 : vector<16xi32>> -> reg<vm.value : i32>
+  %446 = value.select %444, %438, %445 : reg<vm.value : i32>
+  %result = concat(%311, %320, %329, %338, %347, %356, %365, %374, %383, %392, %401, %410, %419, %428, %437, %446) : (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>) -> reg<vm.value x16 : vector<16xi32>>
+  return %result
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @f32x16_arith(%lhs: vector<16xf32>, %rhs: vector<16xf32>) -> (vector<16xf32>) {
+  %sum = vector.addf %lhs, %rhs : vector<16xf32>
+  %difference = vector.subf %sum, %lhs : vector<16xf32>
+  %product = vector.mulf %difference, %rhs : vector<16xf32>
+  %fma = vector.fmaf %lhs, %rhs, %product : vector<16xf32>
+  func.return %fma : vector<16xf32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x16 : vector<16xf32>>, reg<vm.value x16 : vector<16xf32>>) -> (reg<vm.value x16 : vector<16xf32>>)>}) @f32x16_arith(%lhs: reg<vm.value x16 : vector<16xf32>>, %rhs: reg<vm.value x16 : vector<16xf32>>) -> (reg<vm.value x16 : vector<16xf32>>) asm {
+  %171 = slice %lhs[0] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %172 = slice %rhs[0] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %173 = float.add.f32 %171, %172 : reg<vm.value : f32>
+  %174 = float.sub.f32 %173, %171 : reg<vm.value : f32>
+  %175 = float.mul.f32 %174, %172 : reg<vm.value : f32>
+  %176 = float.math.ternary.f32 %171, %172, %175, fma : reg<vm.value : f32>
+  %177 = slice %lhs[1] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %178 = slice %rhs[1] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %179 = float.add.f32 %177, %178 : reg<vm.value : f32>
+  %180 = float.sub.f32 %179, %177 : reg<vm.value : f32>
+  %181 = float.mul.f32 %180, %178 : reg<vm.value : f32>
+  %182 = float.math.ternary.f32 %177, %178, %181, fma : reg<vm.value : f32>
+  %183 = slice %lhs[2] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %184 = slice %rhs[2] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %185 = float.add.f32 %183, %184 : reg<vm.value : f32>
+  %186 = float.sub.f32 %185, %183 : reg<vm.value : f32>
+  %187 = float.mul.f32 %186, %184 : reg<vm.value : f32>
+  %188 = float.math.ternary.f32 %183, %184, %187, fma : reg<vm.value : f32>
+  %189 = slice %lhs[3] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %190 = slice %rhs[3] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %191 = float.add.f32 %189, %190 : reg<vm.value : f32>
+  %192 = float.sub.f32 %191, %189 : reg<vm.value : f32>
+  %193 = float.mul.f32 %192, %190 : reg<vm.value : f32>
+  %194 = float.math.ternary.f32 %189, %190, %193, fma : reg<vm.value : f32>
+  %195 = slice %lhs[4] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %196 = slice %rhs[4] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %197 = float.add.f32 %195, %196 : reg<vm.value : f32>
+  %198 = float.sub.f32 %197, %195 : reg<vm.value : f32>
+  %199 = float.mul.f32 %198, %196 : reg<vm.value : f32>
+  %200 = float.math.ternary.f32 %195, %196, %199, fma : reg<vm.value : f32>
+  %201 = slice %lhs[5] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %202 = slice %rhs[5] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %203 = float.add.f32 %201, %202 : reg<vm.value : f32>
+  %204 = float.sub.f32 %203, %201 : reg<vm.value : f32>
+  %205 = float.mul.f32 %204, %202 : reg<vm.value : f32>
+  %206 = float.math.ternary.f32 %201, %202, %205, fma : reg<vm.value : f32>
+  %207 = slice %lhs[6] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %208 = slice %rhs[6] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %209 = float.add.f32 %207, %208 : reg<vm.value : f32>
+  %210 = float.sub.f32 %209, %207 : reg<vm.value : f32>
+  %211 = float.mul.f32 %210, %208 : reg<vm.value : f32>
+  %212 = float.math.ternary.f32 %207, %208, %211, fma : reg<vm.value : f32>
+  %213 = slice %lhs[7] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %214 = slice %rhs[7] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %215 = float.add.f32 %213, %214 : reg<vm.value : f32>
+  %216 = float.sub.f32 %215, %213 : reg<vm.value : f32>
+  %217 = float.mul.f32 %216, %214 : reg<vm.value : f32>
+  %218 = float.math.ternary.f32 %213, %214, %217, fma : reg<vm.value : f32>
+  %219 = slice %lhs[8] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %220 = slice %rhs[8] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %221 = float.add.f32 %219, %220 : reg<vm.value : f32>
+  %222 = float.sub.f32 %221, %219 : reg<vm.value : f32>
+  %223 = float.mul.f32 %222, %220 : reg<vm.value : f32>
+  %224 = float.math.ternary.f32 %219, %220, %223, fma : reg<vm.value : f32>
+  %225 = slice %lhs[9] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %226 = slice %rhs[9] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %227 = float.add.f32 %225, %226 : reg<vm.value : f32>
+  %228 = float.sub.f32 %227, %225 : reg<vm.value : f32>
+  %229 = float.mul.f32 %228, %226 : reg<vm.value : f32>
+  %230 = float.math.ternary.f32 %225, %226, %229, fma : reg<vm.value : f32>
+  %231 = slice %lhs[10] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %232 = slice %rhs[10] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %233 = float.add.f32 %231, %232 : reg<vm.value : f32>
+  %234 = float.sub.f32 %233, %231 : reg<vm.value : f32>
+  %235 = float.mul.f32 %234, %232 : reg<vm.value : f32>
+  %236 = float.math.ternary.f32 %231, %232, %235, fma : reg<vm.value : f32>
+  %237 = slice %lhs[11] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %238 = slice %rhs[11] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %239 = float.add.f32 %237, %238 : reg<vm.value : f32>
+  %240 = float.sub.f32 %239, %237 : reg<vm.value : f32>
+  %241 = float.mul.f32 %240, %238 : reg<vm.value : f32>
+  %242 = float.math.ternary.f32 %237, %238, %241, fma : reg<vm.value : f32>
+  %243 = slice %lhs[12] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %244 = slice %rhs[12] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %245 = float.add.f32 %243, %244 : reg<vm.value : f32>
+  %246 = float.sub.f32 %245, %243 : reg<vm.value : f32>
+  %247 = float.mul.f32 %246, %244 : reg<vm.value : f32>
+  %248 = float.math.ternary.f32 %243, %244, %247, fma : reg<vm.value : f32>
+  %249 = slice %lhs[13] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %250 = slice %rhs[13] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %251 = float.add.f32 %249, %250 : reg<vm.value : f32>
+  %252 = float.sub.f32 %251, %249 : reg<vm.value : f32>
+  %253 = float.mul.f32 %252, %250 : reg<vm.value : f32>
+  %254 = float.math.ternary.f32 %249, %250, %253, fma : reg<vm.value : f32>
+  %255 = slice %lhs[14] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %256 = slice %rhs[14] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %257 = float.add.f32 %255, %256 : reg<vm.value : f32>
+  %258 = float.sub.f32 %257, %255 : reg<vm.value : f32>
+  %259 = float.mul.f32 %258, %256 : reg<vm.value : f32>
+  %260 = float.math.ternary.f32 %255, %256, %259, fma : reg<vm.value : f32>
+  %261 = slice %lhs[15] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %262 = slice %rhs[15] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %263 = float.add.f32 %261, %262 : reg<vm.value : f32>
+  %264 = float.sub.f32 %263, %261 : reg<vm.value : f32>
+  %265 = float.mul.f32 %264, %262 : reg<vm.value : f32>
+  %266 = float.math.ternary.f32 %261, %262, %265, fma : reg<vm.value : f32>
+  %fma = concat(%176, %182, %188, %194, %200, %206, %212, %218, %224, %230, %236, %242, %248, %254, %260, %266) : (reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>) -> reg<vm.value x16 : vector<16xf32>>
+  return %fma
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @f32x16_splat_add(%value: f32, %rhs: vector<16xf32>) -> (vector<16xf32>) {
+  %splat = vector.splat %value : vector<16xf32>
+  %sum = vector.addf %splat, %rhs : vector<16xf32>
+  func.return %sum : vector<16xf32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value : f32>, reg<vm.value x16 : vector<16xf32>>) -> (reg<vm.value x16 : vector<16xf32>>)>}) @f32x16_splat_add(%value: reg<vm.value : f32>, %rhs: reg<vm.value x16 : vector<16xf32>>) -> (reg<vm.value x16 : vector<16xf32>>) asm {
+  %41 = slice %rhs[0] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %42 = float.add.f32 %value, %41 : reg<vm.value : f32>
+  %43 = slice %rhs[1] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %44 = float.add.f32 %value, %43 : reg<vm.value : f32>
+  %45 = slice %rhs[2] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %46 = float.add.f32 %value, %45 : reg<vm.value : f32>
+  %47 = slice %rhs[3] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %48 = float.add.f32 %value, %47 : reg<vm.value : f32>
+  %49 = slice %rhs[4] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %50 = float.add.f32 %value, %49 : reg<vm.value : f32>
+  %51 = slice %rhs[5] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %52 = float.add.f32 %value, %51 : reg<vm.value : f32>
+  %53 = slice %rhs[6] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %54 = float.add.f32 %value, %53 : reg<vm.value : f32>
+  %55 = slice %rhs[7] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %56 = float.add.f32 %value, %55 : reg<vm.value : f32>
+  %57 = slice %rhs[8] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %58 = float.add.f32 %value, %57 : reg<vm.value : f32>
+  %59 = slice %rhs[9] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %60 = float.add.f32 %value, %59 : reg<vm.value : f32>
+  %61 = slice %rhs[10] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %62 = float.add.f32 %value, %61 : reg<vm.value : f32>
+  %63 = slice %rhs[11] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %64 = float.add.f32 %value, %63 : reg<vm.value : f32>
+  %65 = slice %rhs[12] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %66 = float.add.f32 %value, %65 : reg<vm.value : f32>
+  %67 = slice %rhs[13] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %68 = float.add.f32 %value, %67 : reg<vm.value : f32>
+  %69 = slice %rhs[14] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %70 = float.add.f32 %value, %69 : reg<vm.value : f32>
+  %71 = slice %rhs[15] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %72 = float.add.f32 %value, %71 : reg<vm.value : f32>
+  %sum = concat(%42, %44, %46, %48, %50, %52, %54, %56, %58, %60, %62, %64, %66, %68, %70, %72) : (reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>) -> reg<vm.value x16 : vector<16xf32>>
+  return %sum
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @f32x16_reduce_add(%v: vector<16xf32>, %init: f32) -> (f32) {
+  %sum = vector.reduce<addf> %v, %init : vector<16xf32>, f32
+  func.return %sum : f32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x16 : vector<16xf32>>, reg<vm.value : f32>) -> (reg<vm.value : f32>)>}) @f32x16_reduce_add(%v: reg<vm.value x16 : vector<16xf32>>, %init: reg<vm.value : f32>) -> (reg<vm.value : f32>) asm {
+  %39 = slice %v[0] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %40 = float.add.f32 %init, %39 : reg<vm.value : f32>
+  %41 = slice %v[1] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %42 = float.add.f32 %40, %41 : reg<vm.value : f32>
+  %43 = slice %v[2] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %44 = float.add.f32 %42, %43 : reg<vm.value : f32>
+  %45 = slice %v[3] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %46 = float.add.f32 %44, %45 : reg<vm.value : f32>
+  %47 = slice %v[4] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %48 = float.add.f32 %46, %47 : reg<vm.value : f32>
+  %49 = slice %v[5] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %50 = float.add.f32 %48, %49 : reg<vm.value : f32>
+  %51 = slice %v[6] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %52 = float.add.f32 %50, %51 : reg<vm.value : f32>
+  %53 = slice %v[7] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %54 = float.add.f32 %52, %53 : reg<vm.value : f32>
+  %55 = slice %v[8] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %56 = float.add.f32 %54, %55 : reg<vm.value : f32>
+  %57 = slice %v[9] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %58 = float.add.f32 %56, %57 : reg<vm.value : f32>
+  %59 = slice %v[10] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %60 = float.add.f32 %58, %59 : reg<vm.value : f32>
+  %61 = slice %v[11] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %62 = float.add.f32 %60, %61 : reg<vm.value : f32>
+  %63 = slice %v[12] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %64 = float.add.f32 %62, %63 : reg<vm.value : f32>
+  %65 = slice %v[13] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %66 = float.add.f32 %64, %65 : reg<vm.value : f32>
+  %67 = slice %v[14] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %68 = float.add.f32 %66, %67 : reg<vm.value : f32>
+  %69 = slice %v[15] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %sum = float.add.f32 %68, %69 : reg<vm.value : f32>
+  return %sum
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @f32x16_compare_select(%lhs: vector<16xf32>, %rhs: vector<16xf32>, %fallback: vector<16xf32>) -> (vector<16xf32>) {
+  %ordered_lt = vector.cmpf olt, %lhs, %rhs : vector<16xf32> -> vector<16xi1>
+  %unordered_ne = vector.cmpf une, %lhs, %rhs : vector<16xf32> -> vector<16xi1>
+  %selected = vector.select %ordered_lt, %lhs, %rhs : vector<16xf32>
+  %result = vector.select %unordered_ne, %selected, %fallback : vector<16xf32>
+  func.return %result : vector<16xf32>
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.value x16 : vector<16xf32>>, reg<vm.value x16 : vector<16xf32>>, reg<vm.value x16 : vector<16xf32>>) -> (reg<vm.value x16 : vector<16xf32>>)>}) @f32x16_compare_select(%lhs: reg<vm.value x16 : vector<16xf32>>, %rhs: reg<vm.value x16 : vector<16xf32>>, %fallback: reg<vm.value x16 : vector<16xf32>>) -> (reg<vm.value x16 : vector<16xf32>>) asm {
+  %189 = slice %lhs[0] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %190 = slice %rhs[0] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %191 = float.compare.f32 %189, %190, une : reg<vm.value : i1>
+  %192 = float.compare.f32 %189, %190, olt : reg<vm.value : i1>
+  %193 = value.select %192, %189, %190 : reg<vm.value : f32>
+  %194 = slice %fallback[0] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %195 = value.select %191, %193, %194 : reg<vm.value : f32>
+  %196 = slice %lhs[1] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %197 = slice %rhs[1] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %198 = float.compare.f32 %196, %197, une : reg<vm.value : i1>
+  %199 = float.compare.f32 %196, %197, olt : reg<vm.value : i1>
+  %200 = value.select %199, %196, %197 : reg<vm.value : f32>
+  %201 = slice %fallback[1] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %202 = value.select %198, %200, %201 : reg<vm.value : f32>
+  %203 = slice %lhs[2] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %204 = slice %rhs[2] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %205 = float.compare.f32 %203, %204, une : reg<vm.value : i1>
+  %206 = float.compare.f32 %203, %204, olt : reg<vm.value : i1>
+  %207 = value.select %206, %203, %204 : reg<vm.value : f32>
+  %208 = slice %fallback[2] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %209 = value.select %205, %207, %208 : reg<vm.value : f32>
+  %210 = slice %lhs[3] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %211 = slice %rhs[3] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %212 = float.compare.f32 %210, %211, une : reg<vm.value : i1>
+  %213 = float.compare.f32 %210, %211, olt : reg<vm.value : i1>
+  %214 = value.select %213, %210, %211 : reg<vm.value : f32>
+  %215 = slice %fallback[3] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %216 = value.select %212, %214, %215 : reg<vm.value : f32>
+  %217 = slice %lhs[4] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %218 = slice %rhs[4] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %219 = float.compare.f32 %217, %218, une : reg<vm.value : i1>
+  %220 = float.compare.f32 %217, %218, olt : reg<vm.value : i1>
+  %221 = value.select %220, %217, %218 : reg<vm.value : f32>
+  %222 = slice %fallback[4] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %223 = value.select %219, %221, %222 : reg<vm.value : f32>
+  %224 = slice %lhs[5] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %225 = slice %rhs[5] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %226 = float.compare.f32 %224, %225, une : reg<vm.value : i1>
+  %227 = float.compare.f32 %224, %225, olt : reg<vm.value : i1>
+  %228 = value.select %227, %224, %225 : reg<vm.value : f32>
+  %229 = slice %fallback[5] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %230 = value.select %226, %228, %229 : reg<vm.value : f32>
+  %231 = slice %lhs[6] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %232 = slice %rhs[6] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %233 = float.compare.f32 %231, %232, une : reg<vm.value : i1>
+  %234 = float.compare.f32 %231, %232, olt : reg<vm.value : i1>
+  %235 = value.select %234, %231, %232 : reg<vm.value : f32>
+  %236 = slice %fallback[6] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %237 = value.select %233, %235, %236 : reg<vm.value : f32>
+  %238 = slice %lhs[7] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %239 = slice %rhs[7] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %240 = float.compare.f32 %238, %239, une : reg<vm.value : i1>
+  %241 = float.compare.f32 %238, %239, olt : reg<vm.value : i1>
+  %242 = value.select %241, %238, %239 : reg<vm.value : f32>
+  %243 = slice %fallback[7] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %244 = value.select %240, %242, %243 : reg<vm.value : f32>
+  %245 = slice %lhs[8] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %246 = slice %rhs[8] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %247 = float.compare.f32 %245, %246, une : reg<vm.value : i1>
+  %248 = float.compare.f32 %245, %246, olt : reg<vm.value : i1>
+  %249 = value.select %248, %245, %246 : reg<vm.value : f32>
+  %250 = slice %fallback[8] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %251 = value.select %247, %249, %250 : reg<vm.value : f32>
+  %252 = slice %lhs[9] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %253 = slice %rhs[9] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %254 = float.compare.f32 %252, %253, une : reg<vm.value : i1>
+  %255 = float.compare.f32 %252, %253, olt : reg<vm.value : i1>
+  %256 = value.select %255, %252, %253 : reg<vm.value : f32>
+  %257 = slice %fallback[9] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %258 = value.select %254, %256, %257 : reg<vm.value : f32>
+  %259 = slice %lhs[10] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %260 = slice %rhs[10] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %261 = float.compare.f32 %259, %260, une : reg<vm.value : i1>
+  %262 = float.compare.f32 %259, %260, olt : reg<vm.value : i1>
+  %263 = value.select %262, %259, %260 : reg<vm.value : f32>
+  %264 = slice %fallback[10] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %265 = value.select %261, %263, %264 : reg<vm.value : f32>
+  %266 = slice %lhs[11] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %267 = slice %rhs[11] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %268 = float.compare.f32 %266, %267, une : reg<vm.value : i1>
+  %269 = float.compare.f32 %266, %267, olt : reg<vm.value : i1>
+  %270 = value.select %269, %266, %267 : reg<vm.value : f32>
+  %271 = slice %fallback[11] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %272 = value.select %268, %270, %271 : reg<vm.value : f32>
+  %273 = slice %lhs[12] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %274 = slice %rhs[12] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %275 = float.compare.f32 %273, %274, une : reg<vm.value : i1>
+  %276 = float.compare.f32 %273, %274, olt : reg<vm.value : i1>
+  %277 = value.select %276, %273, %274 : reg<vm.value : f32>
+  %278 = slice %fallback[12] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %279 = value.select %275, %277, %278 : reg<vm.value : f32>
+  %280 = slice %lhs[13] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %281 = slice %rhs[13] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %282 = float.compare.f32 %280, %281, une : reg<vm.value : i1>
+  %283 = float.compare.f32 %280, %281, olt : reg<vm.value : i1>
+  %284 = value.select %283, %280, %281 : reg<vm.value : f32>
+  %285 = slice %fallback[13] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %286 = value.select %282, %284, %285 : reg<vm.value : f32>
+  %287 = slice %lhs[14] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %288 = slice %rhs[14] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %289 = float.compare.f32 %287, %288, une : reg<vm.value : i1>
+  %290 = float.compare.f32 %287, %288, olt : reg<vm.value : i1>
+  %291 = value.select %290, %287, %288 : reg<vm.value : f32>
+  %292 = slice %fallback[14] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %293 = value.select %289, %291, %292 : reg<vm.value : f32>
+  %294 = slice %lhs[15] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %295 = slice %rhs[15] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %296 = float.compare.f32 %294, %295, une : reg<vm.value : i1>
+  %297 = float.compare.f32 %294, %295, olt : reg<vm.value : i1>
+  %298 = value.select %297, %294, %295 : reg<vm.value : f32>
+  %299 = slice %fallback[15] : reg<vm.value x16 : vector<16xf32>> -> reg<vm.value : f32>
+  %300 = value.select %296, %298, %299 : reg<vm.value : f32>
+  %result = concat(%195, %202, %209, %216, %223, %230, %237, %244, %251, %258, %265, %272, %279, %286, %293, %300) : (reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>) -> reg<vm.value x16 : vector<16xf32>>
+  return %result
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @f32x16_static_memory(%input: buffer, %output: buffer) {
+  %input_base = index.constant 16 : offset
+  %output_base = index.constant 32 : offset
+  %input_view = buffer.view %input[%input_base] : buffer -> view<32xf32>
+  %output_view = buffer.view %output[%output_base] : buffer -> view<32xf32>
+  %loaded = vector.load %input_view[4] : view<32xf32> -> vector<16xf32>
+  vector.store %loaded, %output_view[8] : vector<16xf32>, view<32xf32>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>}) @f32x16_static_memory(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>) asm {
+  %9 = constant.zero : reg<vm.value : offset>
+  %10 = constant.s16 32 : reg<vm.value : offset>
+  %11 = buffer.load %input, %10, %9, 0, i32.x8 : reg<vm.value x8 : vector<8xf32>>
+  %12 = constant.s16 64 : reg<vm.value : offset>
+  %13 = buffer.load %input, %12, %9, 0, i32.x8 : reg<vm.value x8 : vector<8xf32>>
+  buffer.store %output, %12, %9, %11, 0, i32.x8
+  %18 = constant.s16 96 : reg<vm.value : offset>
+  buffer.store %output, %18, %9, %13, 0, i32.x8
+  return
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @f32x16_dynamic_memory(%input: buffer, %output: buffer, %i: index) {
+  %input_base = index.constant 16 : offset
+  %output_base = index.constant 32 : offset
+  %bounded_i = index.assume %i [range(%i, 0, 16)] : index
+  %input_view = buffer.view %input[%input_base] : buffer -> view<32xf32>
+  %output_view = buffer.view %output[%output_base] : buffer -> view<32xf32>
+  %loaded = vector.load %input_view[%bounded_i] : view<32xf32> -> vector<16xf32>
+  vector.store %loaded, %output_view[%bounded_i] : vector<16xf32>, view<32xf32>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>) -> ()>}) @f32x16_dynamic_memory(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %bounded_i: reg<vm.value : index>) asm {
+  %12 = constant.s16 16 : reg<vm.value : offset>
+  %13 = buffer.load %input, %12, %bounded_i, 4, i32.x8 : reg<vm.value x8 : vector<8xf32>>
+  %14 = constant.s16 48 : reg<vm.value : offset>
+  %15 = buffer.load %input, %14, %bounded_i, 4, i32.x8 : reg<vm.value x8 : vector<8xf32>>
+  %17 = constant.s16 32 : reg<vm.value : offset>
+  buffer.store %output, %17, %bounded_i, %13, 4, i32.x8
+  %19 = constant.s16 64 : reg<vm.value : offset>
+  buffer.store %output, %19, %bounded_i, %15, 4, i32.x8
+  return
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @f32x16_index_add_memory(%input: buffer, %output: buffer, %i: index, %j: index) {
+  %buffer_base = index.constant 0 : offset
+  %sum = index.add %i, %j : index
+  %bounded_sum = index.assume %sum [range(%sum, 0, 16)] : index
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<32xf32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<32xf32>
+  %loaded = vector.load %input_view[%bounded_sum] : view<32xf32> -> vector<16xf32>
+  vector.store %loaded, %output_view[%bounded_sum] : vector<16xf32>, view<32xf32>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) @f32x16_index_add_memory(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %i: reg<vm.value : index>, %j: reg<vm.value : index>) asm {
+  %15 = constant.s16 2 : reg<vm.value : offset>
+  %16 = integer.shift.left.i64 %i, %15 : reg<vm.value : offset>
+  %18 = integer.shift.left.i64 %j, %15 : reg<vm.value : offset>
+  %19 = integer.add.i64 %16, %18 : reg<vm.value : offset>
+  %20 = constant.zero : reg<vm.value : offset>
+  %21 = buffer.load %input, %19, %20, 0, i32.x8 : reg<vm.value x8 : vector<8xf32>>
+  %22 = constant.s16 32 : reg<vm.value : offset>
+  %23 = integer.add.i64 %19, %22 : reg<vm.value : offset>
+  %24 = buffer.load %input, %23, %20, 0, i32.x8 : reg<vm.value x8 : vector<8xf32>>
+  buffer.store %output, %19, %20, %21, 0, i32.x8
+  buffer.store %output, %23, %20, %24, 0, i32.x8
+  return
+}
+
+// ====
+
+vm.target<core> @target
+func.def target(@target) @f32x16_index_madd_memory(%input: buffer, %output: buffer, %row: index, %stride: index, %col: index) {
+  %buffer_base = index.constant 0 : offset
+  %linear = index.madd %row, %stride, %col : index
+  %bounded_linear = index.assume %linear [range(%linear, 0, 16)] : index
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<32xf32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<32xf32>
+  %loaded = vector.load %input_view[%bounded_linear] : view<32xf32> -> vector<16xf32>
+  vector.store %loaded, %output_view[%bounded_linear] : vector<16xf32>, view<32xf32>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) @f32x16_index_madd_memory(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %row: reg<vm.value : index>, %stride: reg<vm.value : index>, %col: reg<vm.value : index>) asm {
+  %16 = integer.mul.i64 %row, %stride : reg<vm.value : index>
+  %bounded_linear = integer.add.i64 %16, %col : reg<vm.value : index>
+  %18 = constant.zero : reg<vm.value : offset>
+  %19 = buffer.load %input, %18, %bounded_linear, 4, i32.x8 : reg<vm.value x8 : vector<8xf32>>
+  %20 = constant.s16 32 : reg<vm.value : offset>
+  %21 = buffer.load %input, %20, %bounded_linear, 4, i32.x8 : reg<vm.value x8 : vector<8xf32>>
+  buffer.store %output, %18, %bounded_linear, %19, 4, i32.x8
+  buffer.store %output, %20, %bounded_linear, %21, 4, i32.x8
+  return
+}

@@ -29,6 +29,7 @@ loom_cc_library(
   DEPS
     ::types
     iree::base
+    loom::error::emitter
   PUBLIC
 )
 
@@ -101,6 +102,7 @@ loom_cc_library(
     ::function_contract
     ::function_version
     ::pass_environment
+    ::provider
     iree::base
     iree::base::internal::arena
     loom::analysis::symbol_facts
@@ -156,6 +158,28 @@ loom_cc_library(
     iree::base::internal::arena
     loom::ir
     loom::ops::op_defs
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    root_function_versions
+  HDRS
+    "root_function_versions.h"
+  SRCS
+    "root_function_versions.c"
+  DEPS
+    ::facts_builder
+    ::function_contract
+    ::function_version
+    ::provider
+    iree::base
+    iree::base::internal::arena
+    loom::analysis::symbol_facts
+    loom::error::emitter
+    loom::ir
+    loom::ops::func_symbol_facts
+    loom::ops::target
   PUBLIC
 )
 
@@ -520,7 +544,6 @@ loom_cc_library(
     ::facts
     ::types
     iree::base
-    iree::base::internal::arena
     loom::codegen::low::descriptors
     loom::error::error_defs
     loom::ir
@@ -551,13 +574,24 @@ loom_cc_library(
 
 loom_cc_test(
   NAME
+    legalization_test
+  SRCS
+    "legalization_test.cc"
+  DEPS
+    ::legalization
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+loom_cc_test(
+  NAME
     contract_test
   SRCS
     "contract_test.cc"
   DEPS
     ::contract
     iree::base
-    iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
     loom::ir

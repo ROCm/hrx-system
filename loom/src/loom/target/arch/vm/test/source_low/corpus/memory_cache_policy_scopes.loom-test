@@ -1,0 +1,50 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/memory_cache_policy_scopes.loom-test
+// RUN: emit source-low output=low
+
+vm.target<core> @target
+kernel.def target(@target) @cache_system_bypass_load_device_writeback_store() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x4xi32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x4xi32>
+  %loaded = vector.load %input_view[%lane, 0] {cache_scope = system, cache_temporal = bypass} : view<64x4xi32> -> vector<4xi32>
+  vector.store %loaded, %output_view[%lane, 0] {cache_scope = device, cache_temporal = non_temporal_writeback} : vector<4xi32>, view<64x4xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @cache_system_bypass_load_device_writeback_store(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %34 = constant.zero : reg<vm.value : offset>
+  %loaded = buffer.load %input, %34, %workitem_id_x, 16, i32.x4 : reg<vm.value x4 : vector<4xi32>>
+  buffer.store %output, %34, %workitem_id_x, %loaded, 16, i32.x4
+  return
+}
+
+// ====
+
+vm.target<core> @target
+kernel.def target(@target) @cache_system_bypass_scalar_load() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xi32>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xi32>
+  %loaded = view.load %input_view[%lane] {cache_scope = system, cache_temporal = bypass} : view<64xi32> -> i32
+  view.store %loaded, %output_view[%lane] : i32, view<64xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<vm.core>(@target) abi_layout({authored_signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>) -> ()>, signature = type<(reg<vm.ref : buffer>, reg<vm.ref : buffer>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>, reg<vm.value : index>) -> ()>}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @cache_system_bypass_scalar_load(%input: reg<vm.ref : buffer>, %output: reg<vm.ref : buffer>, %workgroup_id_x: reg<vm.value : index>, %workgroup_id_y: reg<vm.value : index>, %workgroup_id_z: reg<vm.value : index>, %workgroup_size_x: reg<vm.value : index>, %workgroup_size_y: reg<vm.value : index>, %workgroup_size_z: reg<vm.value : index>, %workgroup_count_x: reg<vm.value : index>, %workgroup_count_y: reg<vm.value : index>, %workgroup_count_z: reg<vm.value : index>, %workitem_id_x: reg<vm.value : index>, %workitem_id_y: reg<vm.value : index>, %workitem_id_z: reg<vm.value : index>) asm {
+  %23 = constant.zero : reg<vm.value : offset>
+  %loaded = buffer.load %input, %23, %workitem_id_x, 4, i32.x1 : reg<vm.value : i32>
+  buffer.store %output, %23, %workitem_id_x, %loaded, 4, i32.x1
+  return
+}

@@ -12,10 +12,9 @@
 // bundle and descriptor set. Unsupported program forms are reported as compact
 // query results; non-OK status is reserved for infrastructure failures.
 //
-// Target packages provide generated contract fragments in rodata. A lowering
-// run composes the active fragment set into a small dense root index so hot
-// queries use direct dialect/op lookup without linking or scanning unrelated
-// targets.
+// Target packages provide generated contract fragments and complete policy
+// indices in read-only data. Hot queries use direct dialect/op lookup without
+// allocation, linking, or scanning unrelated targets.
 
 #ifndef LOOM_TARGET_CONTRACT_H_
 #define LOOM_TARGET_CONTRACT_H_
@@ -23,7 +22,6 @@
 #include <stdint.h>
 
 #include "iree/base/api.h"
-#include "iree/base/internal/arena.h"
 #include "loom/codegen/low/descriptors.h"
 #include "loom/error/error_defs.h"
 #include "loom/ir/ir.h"
@@ -67,7 +65,7 @@ typedef struct loom_target_contract_query_result_t {
   loom_target_contract_query_outcome_t outcome;
   // Active binding ordinal selected or rejected by the query.
   uint16_t binding_index;
-  // Composed case ordinal selected or rejected by the query.
+  // Policy case ordinal selected or rejected by the query.
   uint16_t case_index;
   // Policy rule-set ordinal selected or rejected by the query.
   uint16_t rule_set_index;
@@ -165,20 +163,12 @@ typedef struct loom_target_contract_dialect_table_t {
 typedef struct loom_target_contract_case_t {
   // Contract system that owns the selected row.
   loom_target_contract_system_t system;
-  // Active binding ordinal that owns the selected row.
+  // Active binding ordinal that owns the selected row. Fragment-local rows use
+  // zero so their storage can back a single-fragment index directly.
   uint8_t binding_index;
   // System-specific row index, or LOOM_TARGET_CONTRACT_ROW_NONE.
   uint16_t row_index;
 } loom_target_contract_case_t;
-
-typedef struct loom_target_contract_fragment_case_t {
-  // Contract system that owns the selected row.
-  loom_target_contract_system_t system;
-  // Reserved byte for future row flags while keeping the case 4 bytes.
-  uint8_t reserved;
-  // Fragment-local system-specific row index, or LOOM_TARGET_CONTRACT_ROW_NONE.
-  uint16_t row_index;
-} loom_target_contract_fragment_case_t;
 
 typedef struct loom_target_contract_fragment_op_span_t {
   // Source operation kind owning this case span.
@@ -222,25 +212,25 @@ enum loom_target_contract_fragment_flag_bits_e {
       (loom_target_contract_fragment_flags_t)1u << 0,
 };
 
+// Groups scalar counts before pointers so generated table rows do not carry
+// alignment padding between every count/pointer pair.
 typedef struct loom_target_contract_fragment_t {
   // Number of populated source-op spans.
   uint16_t op_span_count;
-  // Fragment behavior flags.
-  loom_target_contract_fragment_flags_t flags;
-  // Reserved byte available to future fragment-wide behavior flags.
-  uint8_t reserved;
-  // Source-op spans sorted by operation kind.
-  const loom_target_contract_fragment_op_span_t* op_spans;
   // Number of generic case rows.
   uint16_t case_count;
-  // Fragment-local generic case rows referenced by source-op spans.
-  const loom_target_contract_fragment_case_t* cases;
   // Number of descriptor-rule rows.
   uint16_t descriptor_rule_count;
-  // Descriptor-rule row pool.
-  const loom_target_contract_descriptor_rule_t* descriptor_rules;
   // Number of descriptor-matrix rows.
   uint16_t descriptor_matrix_count;
+  // Fragment behavior flags.
+  loom_target_contract_fragment_flags_t flags;
+  // Source-op spans sorted by operation kind.
+  const loom_target_contract_fragment_op_span_t* op_spans;
+  // Fragment-local generic case rows referenced by source-op spans.
+  const loom_target_contract_case_t* cases;
+  // Descriptor-rule row pool.
+  const loom_target_contract_descriptor_rule_t* descriptor_rules;
   // Descriptor-matrix row pool.
   const loom_target_contract_descriptor_matrix_rule_t* descriptor_matrices;
 } loom_target_contract_fragment_t;
@@ -260,24 +250,26 @@ typedef struct loom_target_contract_binding_t {
   uint16_t rule_set_index;
 } loom_target_contract_binding_t;
 
+// Groups scalar counts before pointers so generated table rows do not carry
+// alignment padding between every count/pointer pair.
 typedef struct loom_target_contract_index_t {
   // First dialect id covered by dialects.
   uint8_t dialect_base_id;
   // Number of dense dialect slots.
   uint8_t dialect_count;
-  // Dense dialect slots indexed by dialect id minus dialect_base_id.
-  const loom_target_contract_dialect_table_t* dialects;
-  // Number of composed case rows.
+  // Number of policy case rows.
   uint16_t case_count;
-  // Composed case rows referenced by dense op entries.
-  const loom_target_contract_case_t* cases;
   // Number of active fragment bindings.
   uint8_t binding_count;
-  // Active fragment bindings referenced by composed case rows.
+  // Dense dialect slots indexed by dialect id minus dialect_base_id.
+  const loom_target_contract_dialect_table_t* dialects;
+  // Policy case rows referenced by dense op entries.
+  const loom_target_contract_case_t* cases;
+  // Active fragment bindings referenced by policy case rows.
   const loom_target_contract_binding_t* bindings;
 } loom_target_contract_index_t;
 
-// Looks up the compact case span for an op kind in a composed index.
+// Looks up the compact case span for an op kind in a generated policy index.
 static inline loom_target_contract_op_entry_t
 loom_target_contract_index_lookup_kind(
     const loom_target_contract_index_t* index, loom_op_kind_t op_kind) {
@@ -297,11 +289,6 @@ loom_target_contract_index_lookup_kind(
   }
   return dialect_table->op_entries[op_index];
 }
-
-// Composes |bindings| into a dense root index allocated from |arena|.
-iree_status_t loom_target_contract_index_compose(
-    const loom_target_contract_binding_t* bindings, uint16_t binding_count,
-    loom_target_contract_index_t* out_index, iree_arena_allocator_t* arena);
 
 // Returns an empty target contract query result.
 static inline loom_target_contract_query_result_t

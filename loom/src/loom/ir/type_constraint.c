@@ -16,6 +16,8 @@ const char* loom_type_constraint_name(loom_type_constraint_t constraint) {
       [LOOM_TYPE_CONSTRAINT_TENSOR] = "tensor",
       [LOOM_TYPE_CONSTRAINT_INTEGER] = "integer",
       [LOOM_TYPE_CONSTRAINT_FLOAT] = "float",
+      [LOOM_TYPE_CONSTRAINT_PAYLOAD_SCALAR] =
+          "integer or floating-point scalar",
       [LOOM_TYPE_CONSTRAINT_BITWISE_SCALAR] = "non-i1 bitwise scalar",
       [LOOM_TYPE_CONSTRAINT_SCALAR] = "scalar",
       [LOOM_TYPE_CONSTRAINT_INDEX] = "index",
@@ -104,6 +106,10 @@ bool loom_type_satisfies_constraint(loom_type_t type,
     case LOOM_TYPE_CONSTRAINT_FLOAT:
       return loom_type_is_scalar(type) &&
              loom_scalar_type_is_float(loom_type_element_type(type));
+    case LOOM_TYPE_CONSTRAINT_PAYLOAD_SCALAR:
+      return loom_type_is_scalar(type) &&
+             (loom_scalar_type_is_integer(loom_type_element_type(type)) ||
+              loom_scalar_type_is_float(loom_type_element_type(type)));
     case LOOM_TYPE_CONSTRAINT_BITWISE_SCALAR: {
       if (!loom_type_is_scalar(type)) return false;
       const loom_scalar_type_t scalar_type = loom_type_element_type(type);

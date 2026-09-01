@@ -23,6 +23,9 @@ iree_c_embed_data(
     testonly = True,
     srcs = [
         "kernels/i32_memory_chain.loom",
+        "kernels/launch_config.loom",
+        "kernels/launch_config_closure.loom",
+        "kernels/launch_config_compile.loom",
     ],
     c_file_output = "benchmark_kernels.c",
     flatten = True,

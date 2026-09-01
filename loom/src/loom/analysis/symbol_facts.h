@@ -123,8 +123,9 @@ typedef struct loom_symbol_fact_table_t {
   // Arena used for table storage and domain-owned fact payloads.
   iree_arena_allocator_t* arena;
 
-  // Cached fact pointers indexed by loom_symbol_id_t. NULL means either
-  // uncomputed or a symbol with no fact domain; state disambiguates them.
+  // Cached fact pointers indexed by loom_symbol_id_t. An entry is meaningful
+  // only when its state is COMPUTED and may then be NULL for a symbol without
+  // a fact domain.
   const loom_symbol_facts_base_t** entries;
 
   // Per-symbol computation state indexed by loom_symbol_id_t.

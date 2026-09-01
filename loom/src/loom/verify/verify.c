@@ -217,8 +217,9 @@ static iree_status_t loom_verify_region(
           status = loom_verify_emit_op_after_terminator(state, current, vtable,
                                                         terminator_op);
           if (!iree_status_is_ok(status)) break;
-        } else if (vtable &&
-                   iree_any_bit_set(vtable->traits, LOOM_TRAIT_TERMINATOR)) {
+        } else if (vtable && iree_any_bit_set(loom_op_effective_traits(
+                                                  state->module, current),
+                                              LOOM_TRAIT_TERMINATOR)) {
           terminator_op = current;
         }
       }
@@ -232,7 +233,9 @@ static iree_status_t loom_verify_region(
         status = loom_verify_emit_missing_terminator(state, contract);
       } else if (terminator_op && !is_cfg &&
                  contract->descriptor->terminator != LOOM_OP_KIND_UNKNOWN &&
-                 terminator_op->kind != contract->descriptor->terminator) {
+                 terminator_op->kind != contract->descriptor->terminator &&
+                 !loom_op_has_trait(state->module, terminator_op,
+                                    LOOM_TRAIT_NO_RETURN)) {
         status =
             loom_verify_emit_wrong_terminator(state, contract, terminator_op);
       }
@@ -559,10 +562,25 @@ static iree_status_t loom_verify_keyed_module_records(
   IREE_RETURN_IF_ERROR(
       loom_module_record_plan_initialize(state->module, &plan));
   iree_status_t status = iree_ok_status();
-  for (iree_host_size_t i = 1;
+  for (iree_host_size_t i = 0;
        iree_status_is_ok(status) && i < plan.record_count; ++i) {
-    const loom_module_record_t* previous = &plan.records[i - 1];
     const loom_module_record_t* current = &plan.records[i];
+    if (iree_string_view_is_empty(current->key)) {
+      const loom_attr_descriptor_t* key_descriptor =
+          &current->vtable->attr_descriptors
+               [current->vtable->module_record_key_attr_index];
+      loom_diagnostic_param_t params[] = {
+          loom_param_string(loom_attr_descriptor_name(key_descriptor)),
+          loom_param_string(current->key),
+          loom_param_string(IREE_SV("a non-empty string")),
+      };
+      loom_verify_emit_structured(state, current->op, LOOM_ERR_STRUCTURE_027,
+                                  params, IREE_ARRAYSIZE(params));
+      status = loom_verify_pending_diagnostic_status(state);
+      continue;
+    }
+    if (i == 0) continue;
+    const loom_module_record_t* previous = &plan.records[i - 1];
     if (!loom_module_record_identity_equal(previous, current)) continue;
     loom_diagnostic_param_t params[] = {
         loom_param_string(loom_op_vtable_name(current->vtable)),

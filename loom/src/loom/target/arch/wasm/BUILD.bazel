@@ -69,6 +69,7 @@ loom_cc_library(
         "//loom/src/loom/target:provider",
         "//loom/src/loom/target/arch/wasm/descriptors:low_registry",
         "//loom/src/loom/target/arch/wasm/ops",
+        "//loom/src/loom/target/arch/wasm/records:target_records",
         "//loom/src/loom/target/emit/wasm/lower",
         "//runtime/src/iree/base",
     ],

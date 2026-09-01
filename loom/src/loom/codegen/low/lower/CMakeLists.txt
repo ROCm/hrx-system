@@ -13,22 +13,42 @@ loom_cc_library(
   NAME
     lower
   HDRS
+    "context.h"
     "contract_query.h"
+    "emission.h"
+    "function.h"
     "lower.h"
-    "lower_internal.h"
     "lower_rule_descriptor.h"
+    "lower_rule_facts.h"
     "lower_rule_source_memory.h"
+    "lower_rule_value.h"
     "lower_rules.h"
+    "plan.h"
+    "report.h"
+    "source_query.h"
+    "storage.h"
+    "structural.h"
   SRCS
     "contract_query.c"
+    "emission.c"
+    "function.c"
     "lower.c"
     "lower_context.c"
+    "lower_control.c"
     "lower_policy.c"
     "lower_report.c"
     "lower_rule_descriptor.c"
+    "lower_rule_emit.c"
+    "lower_rule_facts.c"
+    "lower_rule_match.c"
     "lower_rule_source_memory_match.c"
     "lower_rule_source_memory_materialize.c"
+    "lower_rule_value.c"
     "lower_rules.c"
+    "plan.c"
+    "source_query.c"
+    "storage.c"
+    "structural.c"
   DEPS
     iree::base
     iree::base::internal
@@ -90,7 +110,10 @@ loom_cc_library(
     loom::error::emitter
     loom::error::error_defs
     loom::ir
+    loom::ops::func
     loom::ops::func_symbol_facts
+    loom::ops::kernel
+    loom::ops::op_defs
     loom::ops::target
     loom::target::function_contract
     loom::target::function_version

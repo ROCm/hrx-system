@@ -178,6 +178,8 @@ TEST_F(CallGraphTest, LinearChain) {
   // All in different SCCs.
   EXPECT_NE(na->scc_id, nb->scc_id);
   EXPECT_NE(nb->scc_id, nc->scc_id);
+  EXPECT_LT(nc->scc_id, nb->scc_id);
+  EXPECT_LT(nb->scc_id, na->scc_id);
 }
 
 TEST_F(CallGraphTest, SelfRecursion) {

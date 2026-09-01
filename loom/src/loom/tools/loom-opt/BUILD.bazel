@@ -19,6 +19,7 @@ loom_cc_binary(
     deps = [
         "//loom/src/loom/codegen/low:text_asm",
         "//loom/src/loom/codegen/low:verify",
+        "//loom/src/loom/codegen/low/pipeline:legalizer_registry",
         "//loom/src/loom/codegen/low/pipeline:pass_environment",
         "//loom/src/loom/error:diagnostic",
         "//loom/src/loom/error:json_sink",
@@ -51,6 +52,7 @@ loom_cc_binary(
 
 iree_execution_test_suite(
     name = "execution_test",
+    data = ["testdata/function_source_presentation.loom"],
     manifests = ["loom-opt.test.json"],
     tags = ["hostonly"],
     tools = {

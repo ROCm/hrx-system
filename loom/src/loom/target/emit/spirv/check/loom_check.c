@@ -306,11 +306,9 @@ static iree_status_t loom_spirv_loom_check_verify_low_module(
       request->module, &entry_options, LOOM_EMITTER_VERIFIER,
       &verifier_emitter);
   loom_low_verify_result_t low_verify_result = {0};
-  loom_low_verify_scratch_t low_verify_scratch =
-      loom_low_verify_scratch_for_module(request->module);
   IREE_RETURN_IF_ERROR(loom_target_entry_verify_low_module(
-      request->module, request->low_registry, &entry_options, &verifier_emitter,
-      20, request->environment->low_verify_provider_list, &low_verify_scratch,
+      request->module, &request->low_registry->registry, &entry_options,
+      &verifier_emitter, 20, request->environment->low_verify_provider_list,
       &low_verify_result));
   if (low_verify_result.error_count != 0 &&
       request->diagnostic_collector->count == 0) {

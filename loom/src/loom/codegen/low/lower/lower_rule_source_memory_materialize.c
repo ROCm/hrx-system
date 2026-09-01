@@ -5,7 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include "iree/base/internal/math.h"
-#include "loom/codegen/low/lower/lower_internal.h"
+#include "loom/codegen/low/lower/context.h"
 #include "loom/codegen/low/lower/lower_rule_descriptor.h"
 #include "loom/codegen/low/lower/lower_rule_source_memory.h"
 #include "loom/ir/module.h"

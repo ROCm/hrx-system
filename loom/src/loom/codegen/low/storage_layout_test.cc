@@ -94,8 +94,8 @@ class LowStorageLayoutTest : public ::testing::Test {
         /*allocation=*/0, /*schedule=*/0,
         /*descriptor_set=*/representation_contract, target_ref, /*abi=*/0,
         loom_named_attr_slice_t{}, loom_named_attr_slice_t{},
-        LOOM_STRING_ID_INVALID, loom_named_attr_slice_t{}, callee_ref,
-        /*arg_types=*/nullptr,
+        LOOM_STRING_ID_INVALID, loom_named_attr_slice_t{},
+        loom_named_attr_slice_t{}, callee_ref, /*arg_types=*/nullptr,
         /*arg_types_count=*/0, /*result_types=*/nullptr, /*result_count=*/0,
         /*tied_results=*/nullptr, /*tied_result_count=*/0,
         /*predicates=*/nullptr, /*predicates_count=*/0, LOOM_LOCATION_UNKNOWN,
@@ -184,6 +184,7 @@ TEST_F(LowStorageLayoutTest, ResolvesNestedStorageViews) {
   loom_low_storage_layout_reference_t reference = {};
   loom_low_storage_layout_lookup_reference(&layout, module_, nested_view,
                                            &reference);
+  EXPECT_EQ(reference.reservation_ordinal, 0u);
   EXPECT_EQ(reference.reservation.space, LOOM_STORAGE_SPACE_STACK);
   EXPECT_EQ(reference.reservation.byte_offset, 0u);
   EXPECT_EQ(reference.reservation.byte_size, 16u);

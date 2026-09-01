@@ -20,6 +20,25 @@ package(
 loom_target_contract_file_family(
     name = "contract_tables_gen",
     comment = "Generating x86 contract table families",
+    contract_sets = {
+        "x86_avx2": [
+            "scalar",
+            "avx2",
+        ],
+        "x86_avx512": [
+            "scalar",
+            "avx2",
+            "avx512",
+        ],
+        "x86_avx512_packed_dot": [
+            "scalar",
+            "avx2",
+            "avx512",
+            "packed_dot",
+        ],
+        "x86_packed_dot": ["packed_dot"],
+        "x86_scalar": ["scalar"],
+    },
     fragments = {
         "avx2": "x86.avx2",
         "avx512": "x86.avx512",
@@ -71,6 +90,23 @@ loom_target_contract_cc_libraries(
 )
 
 loom_cc_library(
+    name = "sets",
+    srcs = ["sets.c"],
+    hdrs = ["sets.h"],
+    deps = [
+        ":avx2",
+        ":avx2_lower_rules",
+        ":avx512",
+        ":avx512_lower_rules",
+        ":packed_dot",
+        ":packed_dot_lower_rules",
+        ":scalar",
+        ":scalar_lower_rules",
+        "//loom/src/loom/codegen/low/lower",
+    ],
+)
+
+loom_cc_library(
     name = "contracts",
     hdrs = [
         "avx2.h",
@@ -81,6 +117,7 @@ loom_cc_library(
         "packed_dot_lower_rules.h",
         "scalar.h",
         "scalar_lower_rules.h",
+        "sets.h",
     ],
     deps = [
         ":avx2",
@@ -91,5 +128,6 @@ loom_cc_library(
         ":packed_dot_lower_rules",
         ":scalar",
         ":scalar_lower_rules",
+        ":sets",
     ],
 )

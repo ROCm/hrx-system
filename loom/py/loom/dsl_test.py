@@ -71,8 +71,10 @@ from loom.dsl import (
     INVOLUTION,
     MEMORY_FENCE,
     MODULE_SCOPE,
+    NO_RETURN,
     NON_DETERMINISTIC,
     OFFSET,
+    PAYLOAD_SCALAR,
     POISON,
     POOL,
     PURE,
@@ -259,6 +261,7 @@ class TestTypeConstraints:
         assert ADDRESS == TypeConstraint.ADDRESS
         assert BUFFER == TypeConstraint.BUFFER
         assert BYTE_PATTERN_SCALAR == TypeConstraint.BYTE_PATTERN_SCALAR
+        assert PAYLOAD_SCALAR == TypeConstraint.PAYLOAD_SCALAR
         assert dsl.I32 == TypeConstraint.I32
         assert STORAGE == TypeConstraint.STORAGE
         assert ANY_ENCODING == TypeConstraint.ANY_ENCODING
@@ -269,6 +272,7 @@ class TestTypeConstraints:
     def test_values(self) -> None:
         assert TILE.value == "tile"
         assert FLOAT.value == "float"
+        assert PAYLOAD_SCALAR.value == "payload_scalar"
         assert ANY_ENCODING.value == "encoding"
         assert ENCODING_LAYOUT.value == "encoding<layout>"
         assert ENCODING_SCHEMA.value == "encoding<schema>"
@@ -449,9 +453,8 @@ class TestAttrDef:
                 open_enum=True,
             )
 
-    def test_scoped_enum_is_never_optional_or_defaulted(self) -> None:
-        with _raises(ValueError, match="scoped_enum attributes are required"):
-            AttrDef("descriptor", "scoped_enum", optional=True)
+    def test_scoped_enum_may_be_optional_but_never_defaulted(self) -> None:
+        assert AttrDef("descriptor", "scoped_enum", optional=True).optional
         with _raises(ValueError, match="scoped_enum attributes cannot have defaults"):
             AttrDef("descriptor", "scoped_enum", default=0)
 
@@ -1920,6 +1923,23 @@ class TestTypeDef:
 
         assert type_def.semantic == TypeSemantic.MANAGED_REFERENCE
 
+    def test_managed_reference_requires_qualified_opaque_dialect_type(self) -> None:
+        with _raises(ValueError, match="namespace-qualified"):
+            TypeDef("handle", semantic=TypeSemantic.MANAGED_REFERENCE)
+        with _raises(ValueError, match="opaque dialect types"):
+            TypeDef(
+                "test.ref",
+                params=[AttrDef("element_type", "type")],
+                format=[Param("element_type")],
+                semantic=TypeSemantic.MANAGED_REFERENCE,
+            )
+        with _raises(ValueError, match="opaque dialect types"):
+            TypeDef(
+                "test.ref",
+                ir_kind="buffer",
+                semantic=TypeSemantic.MANAGED_REFERENCE,
+            )
+
     def test_descriptor_parameters_support_positional_and_keyed_formats(self) -> None:
         type_def = TypeDef(
             "test.matrix",
@@ -2718,6 +2738,19 @@ class TestEffects:
                 traits=[PURE, POISON],
             )
 
+    def test_no_return_requires_terminator_with_or_without_effects(self) -> None:
+        with _raises(ValueError, match="NO_RETURN requires the TERMINATOR trait"):
+            Op("test.bad", traits=[NO_RETURN])
+        with _raises(ValueError, match="NO_RETURN requires the TERMINATOR trait"):
+            Op(
+                "test.bad_effect",
+                operands=[Operand("pool", POOL)],
+                traits=[NO_RETURN],
+                effects=[Reads("pool")],
+            )
+
+        Op("test.no_return", traits=[TERMINATOR, NO_RETURN, UNKNOWN_EFFECTS])
+
     def test_allocating_result(self) -> None:
         op = Op(
             "test.alloc",
@@ -3102,12 +3135,26 @@ class TestComparisonOp:
 
 class TestScopedEnumOp:
     def test_scoped_enum_requires_one_top_level_reference(self) -> None:
-        with _raises(ValueError, match="exactly one top-level ScopedEnumRef"):
+        with _raises(ValueError, match="exactly one ScopedEnumRef"):
             Op("test.packet", attrs=[AttrDef("descriptor", "scoped_enum")])
         op = Op(
             "test.packet",
             attrs=[AttrDef("descriptor", "scoped_enum")],
             format=[ScopedEnumRef("descriptor")],
+        )
+        assert op.attr("descriptor") is not None
+
+    def test_optional_scoped_enum_requires_matching_optional_group(self) -> None:
+        with _raises(ValueError, match="anchored to itself"):
+            Op(
+                "test.packet",
+                attrs=[AttrDef("descriptor", "scoped_enum", optional=True)],
+                format=[ScopedEnumRef("descriptor")],
+            )
+        op = Op(
+            "test.packet",
+            attrs=[AttrDef("descriptor", "scoped_enum", optional=True)],
+            format=[OptionalGroup([ScopedEnumRef("descriptor")], anchor="descriptor")],
         )
         assert op.attr("descriptor") is not None
 

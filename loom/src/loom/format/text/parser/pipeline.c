@@ -275,7 +275,7 @@ static iree_status_t loom_pipeline_alloc_op(
     loom_region_t* region = NULL;
     IREE_RETURN_IF_ERROR(
         loom_module_allocate_region(parser->module, 1, &region));
-    loom_op_regions(op)[i] = region;
+    IREE_RETURN_IF_ERROR(loom_op_attach_region(op, i, region));
   }
 
   *out_op = op;

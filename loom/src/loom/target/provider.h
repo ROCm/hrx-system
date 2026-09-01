@@ -90,6 +90,27 @@ typedef struct loom_target_emit_sidecar_artifact_t {
   iree_byte_sequence_t* contents;
 } loom_target_emit_sidecar_artifact_t;
 
+// Transient compiler identity for one public callable in an emitted artifact.
+typedef struct loom_target_emit_export_projection_t {
+  // Stable position in the emission request's function-version list.
+  loom_function_version_ordinal_t function_version_ordinal;
+
+  // Artifact-local public callable ordinal used by the artifact consumer.
+  uint32_t ordinal;
+} loom_target_emit_export_projection_t;
+
+// Caller-owned storage populated with transient artifact export projections.
+typedef struct loom_target_emit_export_projection_buffer_t {
+  // Writable caller-owned row storage, or NULL when |capacity| is zero.
+  loom_target_emit_export_projection_t* values;
+
+  // Number of rows available in |values|.
+  iree_host_size_t capacity;
+
+  // Number of valid rows published in |values| after successful emission.
+  iree_host_size_t count;
+} loom_target_emit_export_projection_buffer_t;
+
 // One target artifact produced by an emitter.
 typedef struct loom_target_emit_artifact_t {
   // Target-neutral artifact format produced by the emitter.
@@ -104,6 +125,15 @@ typedef struct loom_target_emit_artifact_t {
 
   // Number of entries in |sidecars|.
   iree_host_size_t sidecar_count;
+
+  // Transient export projections in artifact-local ordinal order. Row storage
+  // is borrowed from the emission scratch arena. Consumers must copy the dense
+  // ordinals they need before the compiler-owned lifetime ends.
+  const loom_target_emit_export_projection_t* export_projections;
+
+  // Number of entries in |export_projections|. This may be smaller than the
+  // artifact's public export count when some exports have no compiler version.
+  iree_host_size_t export_projection_count;
 
   // Optional emitter-owned storage that keeps sidecar descriptors, identifier
   // strings, or other provider-specific metadata alive until released.
@@ -195,6 +225,58 @@ typedef struct loom_target_emitter_list_t {
   iree_host_size_t count;
 } loom_target_emitter_list_t;
 
+typedef struct loom_target_launch_config_compiler_t
+    loom_target_launch_config_compiler_t;
+
+// Function versions selected for launch-config materialization.
+typedef struct loom_target_launch_config_root_set_t {
+  // Function-version ordinals selected from the compile invocation.
+  const loom_function_version_ordinal_t* values;
+
+  // Number of entries in |values|.
+  iree_host_size_t count;
+} loom_target_launch_config_root_set_t;
+
+// Prepares target-owned state for one requested launch-config compilation.
+//
+// A NULL |root_set| selects all compatible exported functions. A non-NULL set
+// selects exactly the listed function versions; duplicates have no effect.
+//
+// The returned capability is owned by |arena| and remains valid until the
+// arena is deinitialized. The compile driver appends it to the ordinary pass
+// environment for exactly one pass-program execution.
+typedef iree_status_t (*loom_target_launch_config_prepare_fn_t)(
+    const loom_target_launch_config_root_set_t* root_set,
+    iree_arena_allocator_t* arena,
+    const loom_pass_environment_capability_t** out_capability);
+
+// Emits one launch-config artifact from a completed pass invocation.
+//
+// |capability| is the exact value returned by |prepare|. The implementation
+// validates that its target-owned passes completed before emitting.
+typedef iree_status_t (*loom_target_launch_config_emit_fn_t)(
+    const loom_pass_environment_capability_t* capability,
+    const loom_target_emit_request_t* request,
+    loom_target_emit_artifact_t* out_artifact);
+
+// Optional target-owned launch-configuration compiler facet.
+struct loom_target_launch_config_compiler_t {
+  // Public format string reported on the resulting artifact.
+  iree_string_view_t public_artifact_format;
+
+  // File extension appended to caller-supplied artifact identifiers.
+  iree_string_view_t file_extension;
+
+  // Artifact identifier used when the caller supplies no module name.
+  iree_string_view_t default_identifier;
+
+  // Prepares target-owned per-compilation state and pass capability.
+  loom_target_launch_config_prepare_fn_t prepare;
+
+  // Emits the finalized launch-config artifact.
+  loom_target_launch_config_emit_fn_t emit;
+};
+
 // Creates a borrowed emitter list.
 static inline loom_target_emitter_list_t loom_target_emitter_list_make(
     const loom_target_emitter_t* const* values, iree_host_size_t count) {
@@ -209,15 +291,25 @@ static inline loom_target_emitter_list_t loom_target_emitter_list_make(
 typedef enum loom_target_pipeline_phase_e {
   // Source/kernel normalization before source-to-low lowering.
   LOOM_TARGET_PIPELINE_PHASE_SOURCE_NORMALIZATION = 0,
+  // Target-owned source roots materialized after authoring expansion and
+  // before target callgraph specialization.
+  LOOM_TARGET_PIPELINE_PHASE_SOURCE_ROOT_MATERIALIZATION = 1,
   // Source-to-target-low lowering.
-  LOOM_TARGET_PIPELINE_PHASE_SOURCE_TO_LOW = 1,
+  LOOM_TARGET_PIPELINE_PHASE_SOURCE_TO_LOW = 2,
   // Target-owned cleanup for human-facing source-low asm artifacts.
-  LOOM_TARGET_PIPELINE_PHASE_SOURCE_LOW_ARTIFACT_PREPARATION = 2,
-  // Target ABI/resource materialization after source-to-low.
-  LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_MATERIALIZATION = 3,
-  // Target-low preparation before the common cleanup and operand-form
-  // selection immediately preceding emission.
-  LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_PREPARATION = 4,
+  LOOM_TARGET_PIPELINE_PHASE_SOURCE_LOW_ARTIFACT_PREPARATION = 3,
+  // Module-wide target ABI and linkage materialization after source-to-low.
+  LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_MODULE_MATERIALIZATION = 4,
+  // Function-local target ABI/resource materialization after source-to-low.
+  LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_FUNCTION_MATERIALIZATION = 5,
+  // Function-local target-low cleanup and operand-form preparation before
+  // emission.
+  LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_FUNCTION_PREPARATION = 6,
+  // Module-wide target finalization after all target-low functions and
+  // caller-visible resource requirements have been prepared for emission.
+  // Emitters may materialize target-private state afterward but must not
+  // change externally observable resource requirements.
+  LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_MODULE_FINALIZATION = 7,
   LOOM_TARGET_PIPELINE_PHASE_COUNT_,
 } loom_target_pipeline_phase_t;
 
@@ -238,13 +330,16 @@ typedef iree_status_t (*loom_target_provider_pipeline_contribution_fn_t)(
 
 // Target-owned compiler capability contribution linked into a tool or driver.
 struct loom_target_provider_t {
+  // Target-family fact representation owned by this provider, or NULL when
+  // the provider only contributes target-independent or auxiliary machinery.
+  const loom_target_fact_type_t* fact_type;
   // Target-family profile representation owned by this provider, or NULL when
-  // the provider contributes no profile-driven semantics.
+  // the family has no external profile representation. When present, the
+  // profile must project |fact_type|.
   const loom_target_profile_type_t* profile_type;
-  // Optional exact target-definition materializer for facts projected by
-  // |profile_type|. Providers without an ordinary target-IR representation
-  // leave this NULL; only contexts with exact authored target IR can cross an
-  // artifact boundary.
+  // Optional exact target-definition materializer for derived facts owned by
+  // |fact_type|. Providers without an ordinary target-IR representation leave
+  // this NULL; exact authored contexts can reuse their existing definition.
   loom_target_materialize_definition_fn_t materialize_definition;
   // Optional function that registers target-owned dialects.
   loom_target_provider_context_registration_fn_t register_context;
@@ -275,6 +370,8 @@ struct loom_target_provider_t {
   const loom_pass_registry_t* pass_registry;
   // Optional pass-pipeline contribution callback.
   loom_target_provider_pipeline_contribution_fn_t contribute_pipeline;
+  // Optional launch-configuration compiler facet contributed by this target.
+  const loom_target_launch_config_compiler_t* launch_config_compiler;
 };
 
 // Static target provider table linked into a binary or embedding.
@@ -419,6 +516,12 @@ loom_target_environment_low_verify_provider_list(
 loom_target_emitter_list_t loom_target_environment_emitter_list(
     const loom_target_environment_t* environment);
 
+// Returns the launch-configuration compiler linked into |environment|, or
+// NULL when the environment cannot produce launch-config artifacts.
+const loom_target_launch_config_compiler_t*
+loom_target_environment_launch_config_compiler(
+    const loom_target_environment_t* environment);
+
 // Returns target-owned pass descriptors linked into |environment|.
 const loom_pass_registry_t* loom_target_environment_pass_registry(
     const loom_target_environment_t* environment);
@@ -431,6 +534,15 @@ const loom_pass_registry_t* loom_target_environment_pass_registry(
 const loom_target_provider_t* loom_target_environment_lookup_profile_provider(
     const loom_target_environment_t* environment,
     const loom_target_profile_type_t* profile_type);
+
+// Returns the provider owning |fact_type|, or NULL when not linked.
+//
+// This is a cold compiler identity lookup used when exact facts originate in
+// authored target IR instead of an external profile. Callers retain the
+// returned provider with the facts instead of resolving the family again.
+const loom_target_provider_t* loom_target_environment_lookup_fact_provider(
+    const loom_target_environment_t* environment,
+    const loom_target_fact_type_t* fact_type);
 
 // Invokes target-provider pass-pipeline contributions for |phase|. The caller
 // owns phase ordering, surrounding pass.for/pass.where scopes, and global

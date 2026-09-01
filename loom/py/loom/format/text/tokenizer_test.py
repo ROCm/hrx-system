@@ -715,6 +715,18 @@ class TestAngleBracketScan:
         interior = tokenizer.scan_to_matching_angle_bracket()
         assert interior == "a<b<c>>"
 
+    def test_function_type_arrow(self) -> None:
+        tokenizer = Tokenizer("<(i32) -> (i32)>")
+        tokenizer.expect(TokenKind.LANGLE)
+        interior = tokenizer.scan_to_matching_angle_bracket()
+        assert interior == "(i32) -> (i32)"
+
+    def test_nested_function_type_arrow(self) -> None:
+        tokenizer = Tokenizer("<outer<(i32) -> (inner<i32>)>>")
+        tokenizer.expect(TokenKind.LANGLE)
+        interior = tokenizer.scan_to_matching_angle_bracket()
+        assert interior == "outer<(i32) -> (inner<i32>)>"
+
     def test_string_with_brackets(self) -> None:
         """Brackets inside strings are ignored during scanning."""
         tokenizer = Tokenizer('<"<tag>">>')

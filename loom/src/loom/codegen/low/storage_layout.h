@@ -120,6 +120,8 @@ typedef struct loom_low_storage_layout_builder_t {
 } loom_low_storage_layout_builder_t;
 
 typedef struct loom_low_storage_layout_reference_t {
+  // Ordinal of the root low.storage.reserve in the layout record table.
+  iree_host_size_t reservation_ordinal;
   // Root reservation containing the referenced storage bytes.
   loom_low_storage_layout_reservation_t reservation;
   // Byte offset from |reservation| to the referenced storage view.

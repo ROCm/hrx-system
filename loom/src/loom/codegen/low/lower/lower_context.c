@@ -6,7 +6,7 @@
 
 #include <string.h>
 
-#include "loom/codegen/low/lower/lower_internal.h"
+#include "loom/codegen/low/lower/context.h"
 #include "loom/codegen/low/memory_access_ir.h"
 #include "loom/codegen/low/source_memory_plan.h"
 #include "loom/error/error_catalog.h"
@@ -15,6 +15,35 @@
 #include "loom/ops/cfg/ops.h"
 #include "loom/ops/low/ops.h"
 #include "loom/target/registers.h"
+
+typedef struct loom_low_lower_target_state_record_t {
+  // Target-owned static key identifying this function-local state object.
+  const void* key;
+  // Byte length of state storage.
+  iree_host_size_t data_length;
+  // Zero-initialized state storage allocated from the lowering arena.
+  void* data;
+} loom_low_lower_target_state_record_t;
+
+typedef struct loom_low_lower_module_target_state_record_t {
+  // Target-owned static key identifying this module-scope state object.
+  const void* key;
+  // Byte length of state storage.
+  iree_host_size_t data_length;
+  // Zero-initialized state storage allocated from the module-state arena.
+  void* data;
+} loom_low_lower_module_target_state_record_t;
+
+struct loom_low_lower_module_state_t {
+  // Arena used for module-scope target state records and payloads.
+  iree_arena_allocator_t* arena;
+  // Module-scope target state records keyed by target-owned static storage.
+  loom_low_lower_module_target_state_record_t* target_state_records;
+  // Number of populated target_state_records entries.
+  iree_host_size_t target_state_record_count;
+  // Number of allocated target_state_records entries.
+  iree_host_size_t target_state_record_capacity;
+};
 
 static iree_string_view_t loom_low_lower_nonempty(
     iree_string_view_t value, iree_string_view_t placeholder) {
@@ -241,6 +270,21 @@ const loom_low_lower_abi_argument_t* loom_low_lower_context_argument_map(
   IREE_ASSERT_ARGUMENT(out_argument_count);
   *out_argument_count = context->lowering.argument_map_count;
   return context->lowering.argument_map;
+}
+
+iree_status_t loom_low_lower_context_acquire_value_domain(
+    loom_low_lower_context_t* context, loom_region_t* source_body) {
+  // Target-legalization query scopes can inspect source ops before CFG
+  // conversion, so nested source-region values must be ordinal-addressable even
+  // when the final source-to-low boundary expects CFG.
+  return loom_local_value_domain_acquire_for_region_tree(
+      context->module, source_body, &context->function_arena,
+      &context->lowering.value_domain);
+}
+
+void loom_low_lower_context_release_value_domain(
+    loom_low_lower_context_t* context) {
+  loom_local_value_domain_release(&context->lowering.value_domain);
 }
 
 const loom_local_value_domain_t* loom_low_lower_context_value_domain(
@@ -553,6 +597,13 @@ iree_status_t loom_low_lower_get_or_allocate_target_state(
   return iree_ok_status();
 }
 
+iree_status_t loom_low_lower_contract_query_get_or_allocate_target_state(
+    void* user_data, const void* key, iree_host_size_t data_length,
+    void** out_data) {
+  return loom_low_lower_get_or_allocate_target_state(
+      (loom_low_lower_context_t*)user_data, key, data_length, out_data);
+}
+
 iree_status_t loom_low_lower_get_or_allocate_module_target_state(
     loom_low_lower_context_t* context, const void* key,
     iree_host_size_t data_length, void** out_data) {
@@ -573,7 +624,7 @@ static iree_status_t loom_low_lower_replace_value_binding(
   return loom_low_lower_copy_value_name(context, source_value_id, low_value_id);
 }
 
-static loom_region_t* loom_low_lower_context_low_body(
+loom_region_t* loom_low_lower_context_low_body(
     const loom_low_lower_context_t* context) {
   if (loom_low_func_def_isa(context->low_func_op)) {
     return loom_low_func_def_body(context->low_func_op);
@@ -582,6 +633,17 @@ static loom_region_t* loom_low_lower_context_low_body(
     return loom_low_kernel_def_body(context->low_func_op);
   }
   return NULL;
+}
+
+void loom_low_lower_context_emission_scope_begin(
+    loom_low_lower_context_t* context) {
+  context->emission_arena_active = true;
+}
+
+void loom_low_lower_context_emission_scope_end(
+    loom_low_lower_context_t* context) {
+  context->emission_arena_active = false;
+  iree_arena_reset(&context->emission_arena);
 }
 
 iree_status_t loom_low_lower_interpose_entry_block(
@@ -699,7 +761,7 @@ static uint16_t loom_low_lower_source_block_index(
 
 iree_status_t loom_low_lower_lookup_successor_dest(
     loom_low_lower_context_t* context, const loom_op_t* source_terminator,
-    uint8_t successor_index, loom_block_t** out_low_dest) {
+    uint16_t successor_index, loom_block_t** out_low_dest) {
   *out_low_dest = NULL;
   IREE_ASSERT(source_terminator != NULL);
   IREE_ASSERT_LT(successor_index, source_terminator->successor_count);
@@ -724,31 +786,26 @@ iree_status_t loom_low_lower_materialize_structural_operand(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     iree_host_size_t operand_index, loom_value_id_t source_value_id,
     loom_type_t required_low_type, loom_value_id_t* inout_low_value_id) {
-  if (context->policy->materialize_structural_operand.fn == NULL) {
-    return iree_ok_status();
-  }
-
-  loom_value_id_t materialized_low_value_id = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(context->policy->materialize_structural_operand.fn(
-      context->policy->materialize_structural_operand.user_data, context,
-      source_op, operand_index, source_value_id, *inout_low_value_id,
-      required_low_type, &materialized_low_value_id));
-  if (materialized_low_value_id == *inout_low_value_id) {
-    return iree_ok_status();
+  if (context->policy->materialize_structural_operand.fn != NULL) {
+    loom_value_id_t materialized_low_value_id = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(context->policy->materialize_structural_operand.fn(
+        context->policy->materialize_structural_operand.user_data, context,
+        source_op, operand_index, source_value_id, *inout_low_value_id,
+        required_low_type, &materialized_low_value_id));
+    *inout_low_value_id = materialized_low_value_id;
   }
 
   const loom_type_t materialized_type =
-      loom_module_value_type(context->module, materialized_low_value_id);
+      loom_module_value_type(context->module, *inout_low_value_id);
   IREE_ASSERT(loom_type_equal(materialized_type, required_low_type),
               "lowering policy materialized a structural operand with the "
               "wrong type");
-  *inout_low_value_id = materialized_low_value_id;
   return iree_ok_status();
 }
 
 iree_status_t loom_low_lower_remap_successor_args(
     loom_low_lower_context_t* context, const loom_op_t* source_terminator,
-    uint8_t successor_index, loom_block_t* low_dest,
+    uint16_t successor_index, loom_block_t* low_dest,
     const loom_value_id_t* source_args, uint16_t source_arg_count,
     loom_value_id_t** out_low_args) {
   *out_low_args = NULL;
@@ -769,19 +826,12 @@ iree_status_t loom_low_lower_remap_successor_args(
         loom_block_arg_type(context->module, low_dest, i);
     const loom_type_t actual_type =
         loom_module_value_type(context->module, low_args[i]);
-    if (!loom_type_equal(actual_type, required_type)) {
-      IREE_ASSERT(context->policy->materialize_branch_arg.fn != NULL,
-                  "lowering policy produced a branch payload type mismatch");
+    if (!loom_type_equal(actual_type, required_type) &&
+        context->policy->materialize_branch_arg.fn != NULL) {
       IREE_RETURN_IF_ERROR(context->policy->materialize_branch_arg.fn(
           context->policy->materialize_branch_arg.user_data, context,
           source_terminator, successor_index, i, source_args[i], low_args[i],
           required_type, &low_args[i]));
-
-      const loom_type_t materialized_type =
-          loom_module_value_type(context->module, low_args[i]);
-      IREE_ASSERT(loom_type_equal(materialized_type, required_type),
-                  "lowering policy materialized a branch payload with the "
-                  "wrong type");
     }
     IREE_RETURN_IF_ERROR(loom_low_lower_materialize_structural_operand(
         context, source_terminator, i, source_args[i], required_type,
@@ -793,7 +843,7 @@ iree_status_t loom_low_lower_remap_successor_args(
 
 iree_status_t loom_low_lower_interpose_successor_dest(
     loom_low_lower_context_t* context, const loom_op_t* source_terminator,
-    uint8_t successor_index, loom_block_t* interposed_low_block,
+    uint16_t successor_index, loom_block_t* interposed_low_block,
     loom_block_t** out_previous_low_dest) {
   *out_previous_low_dest = NULL;
   IREE_ASSERT(source_terminator != NULL);

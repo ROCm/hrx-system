@@ -1660,6 +1660,11 @@ static void loom_vector_passthrough_transfer(const loom_value_facts_t* input,
   *out = *input;
 }
 
+static void loom_vector_sign_extend_i1_transfer(const loom_value_facts_t* input,
+                                                loom_value_facts_t* out) {
+  *out = loom_value_facts_sign_extend(*input, 1);
+}
+
 static void loom_vector_sitofp_transfer(loom_scalar_type_t scalar_type,
                                         const loom_value_facts_t* input,
                                         const void* user_data,
@@ -3152,8 +3157,20 @@ iree_status_t loom_vector_fptrunc_facts(loom_fact_context_t* context,
                                                  loom_vector_fptrunc_input(op));
 }
 
-LOOM_VECTOR_UNARY_FACTS(loom_vector_extsi_facts,
-                        loom_vector_passthrough_transfer)
+iree_status_t loom_vector_extsi_facts(loom_fact_context_t* context,
+                                      const loom_module_t* module,
+                                      const loom_op_t* op,
+                                      const loom_value_facts_t* operand_facts,
+                                      loom_value_facts_t* result_facts) {
+  const loom_scalar_type_t input_scalar_type = loom_type_element_type(
+      loom_module_value_type(module, loom_vector_extsi_input(op)));
+  const loom_vector_unary_transfer_fn_t transfer_fn =
+      input_scalar_type == LOOM_SCALAR_TYPE_I1
+          ? loom_vector_sign_extend_i1_transfer
+          : loom_vector_passthrough_transfer;
+  return loom_vector_unary_summary_facts(context, operand_facts, result_facts,
+                                         transfer_fn);
+}
 
 static loom_scalar_type_t loom_vector_first_operand_element_type(
     const loom_module_t* module, const loom_op_t* op) {

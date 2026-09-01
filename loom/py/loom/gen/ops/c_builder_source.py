@@ -446,7 +446,18 @@ def _generate_builder_implementation(
     else:
         result_count_expr = str(layout.fixed_result_count)
 
-    successor_count_expr = str(len(op.successors))
+    variadic_successor_params = [param for param in params if param["kind"] == "successor_variadic"]
+    if len(variadic_successor_params) > 1:
+        raise ValueError(f"Op '{op.name}': multiple variadic successor parameters")
+    if variadic_successor_params:
+        variadic_successor = variadic_successor_params[0]
+        variadic_successor_name = _c_parameter_name(variadic_successor["name"])
+        lines.append("  IREE_RETURN_IF_ERROR(loom_builder_check_count_range(")
+        lines.append(f"      {variadic_successor_name}_count, UINT16_MAX - {layout.fixed_successor_count},")
+        lines.append(f'      IREE_SV("{op.name} {variadic_successor["name"]}")));')
+        successor_count_expr = f"{layout.fixed_successor_count} + (uint16_t){variadic_successor_name}_count"
+    else:
+        successor_count_expr = str(layout.fixed_successor_count)
 
     region_count_expr = str(len(op.regions))
     for param in params:
@@ -599,6 +610,12 @@ def _generate_builder_implementation(
 
     # Fill in fixed successors.
     lines.extend(f"  loom_op_successors(*out_op)[{param['index']}] = {_c_parameter_name(param['name'])};" for param in params if param["kind"] == "successor")
+    for param in variadic_successor_params:
+        name = _c_parameter_name(param["name"])
+        lines.append(f"  if ({name}_count > 0) {{")
+        lines.append(f"    memcpy(loom_op_successors(*out_op) + {param['index']}, {name},")
+        lines.append(f"           {name}_count * sizeof(loom_block_t*));")
+        lines.append("  }")
 
     def implicit_block_arg_type_expr(arg_type_kw: str) -> str:
         scalar_type = c_builder_model.IMPLICIT_ARG_TYPE_MAP.get(arg_type_kw)

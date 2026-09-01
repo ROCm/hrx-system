@@ -47,6 +47,116 @@ static void loom_bytecode_count_op_regions(
   }
 }
 
+static void loom_bytecode_count_op_tree(const loom_op_t* op,
+                                        loom_bytecode_body_counts_t* counts) {
+  ++counts->op_count;
+  counts->value_count += op->result_count;
+  loom_bytecode_count_op_regions(op, counts);
+}
+
+static iree_status_t loom_bytecode_validate_module_op(
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_op_vtable_t** out_vtable) {
+  const loom_op_vtable_t* vtable = loom_op_vtable(module, op);
+  if (!vtable) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "module op kind 0x%04x is not registered",
+                            (unsigned)op->kind);
+  }
+  if (iree_all_bits_set(vtable->traits, LOOM_TRAIT_SYMBOL_DEFINE)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "symbol-defining op '%.*s' cannot use the MODULE_OPS section",
+        (int)loom_op_vtable_name(vtable).size,
+        loom_op_vtable_name(vtable).data);
+  }
+  if (!iree_all_bits_set(vtable->traits, LOOM_TRAIT_MODULE_SCOPE)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "op '%.*s' is not permitted at module scope",
+                            (int)loom_op_vtable_name(vtable).size,
+                            loom_op_vtable_name(vtable).data);
+  }
+  *out_vtable = vtable;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_bytecode_classify_ordinary_module_op(
+    const loom_module_t* module, const loom_op_t* op, bool* out_is_ordinary) {
+  *out_is_ordinary = false;
+  const loom_op_vtable_t* vtable = loom_op_vtable(module, op);
+  if (!vtable) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "module op kind 0x%04x is not registered",
+                            (unsigned)op->kind);
+  }
+  if (iree_all_bits_set(vtable->traits, LOOM_TRAIT_SYMBOL_DEFINE) ||
+      loom_op_vtable_is_keyed_module_record(vtable)) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(loom_bytecode_validate_module_op(module, op, &vtable));
+  *out_is_ordinary = true;
+  return iree_ok_status();
+}
+
+iree_status_t loom_bytecode_count_serialized_module_ops(
+    const loom_module_t* module, const loom_module_record_plan_t* record_plan,
+    loom_bytecode_body_counts_t* counts, iree_host_size_t* out_root_op_count) {
+  *counts = (loom_bytecode_body_counts_t){0};
+  *out_root_op_count = 0;
+  for (iree_host_size_t i = 0; i < record_plan->record_count; ++i) {
+    const loom_module_record_t* record = &record_plan->records[i];
+    const loom_op_vtable_t* vtable = NULL;
+    IREE_RETURN_IF_ERROR(
+        loom_bytecode_validate_module_op(module, record->op, &vtable));
+    if (!loom_op_vtable_is_keyed_module_record(vtable)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "canonical module record '%.*s' has no keyed record contract",
+          (int)loom_op_vtable_name(vtable).size,
+          loom_op_vtable_name(vtable).data);
+    }
+    if (iree_string_view_is_empty(record->key)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "keyed module record '%.*s' key must be non-empty",
+          (int)loom_op_vtable_name(vtable).size,
+          loom_op_vtable_name(vtable).data);
+    }
+    if (i > 0 && loom_module_record_identity_equal(&record_plan->records[i - 1],
+                                                   record)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "duplicate keyed module record '%.*s' with key '%.*s'",
+          (int)loom_op_vtable_name(vtable).size,
+          loom_op_vtable_name(vtable).data, (int)record->key.size,
+          record->key.data);
+    }
+    loom_bytecode_count_op_tree(record->op, counts);
+  }
+
+  iree_host_size_t ordinary_count = 0;
+  for (uint16_t block_index = 0; block_index < module->body->block_count;
+       ++block_index) {
+    const loom_block_t* block =
+        loom_region_const_block(module->body, block_index);
+    const loom_op_t* op = NULL;
+    loom_block_for_each_op(block, op) {
+      bool is_ordinary = false;
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_classify_ordinary_module_op(module, op, &is_ordinary));
+      if (!is_ordinary) continue;
+      loom_bytecode_count_op_tree(op, counts);
+      ++ordinary_count;
+    }
+  }
+  if (!iree_host_size_checked_add(record_plan->record_count, ordinary_count,
+                                  out_root_op_count)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "module operation count overflow");
+  }
+  return iree_ok_status();
+}
+
 static uint8_t loom_bytecode_count_root_regions(const loom_op_t* op) {
   uint8_t count = 0;
   loom_region_t** regions = loom_op_regions(op);
@@ -332,7 +442,7 @@ static iree_status_t loom_bytecode_write_operation(
   loom_block_t* const* successors = loom_op_const_successors(op);
   IREE_RETURN_IF_ERROR(
       loom_bytecode_page_writer_write_uvarint(writer, op->successor_count));
-  for (uint8_t i = 0; i < op->successor_count; ++i) {
+  for (uint16_t i = 0; i < op->successor_count; ++i) {
     uint16_t block_index = 0;
     IREE_RETURN_IF_ERROR(loom_bytecode_find_successor_block_index(
         op, successors[i], &block_index));
@@ -491,6 +601,87 @@ static iree_status_t loom_bytecode_write_region(
     IREE_RETURN_IF_ERROR(
         loom_bytecode_write_block(writer, numbering, value_numbering,
                                   loom_region_const_block(region, i), depth));
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_bytecode_assign_module_op_values(
+    loom_bytecode_value_numbering_t* value_numbering, const loom_op_t* op) {
+  const loom_value_id_t* results = loom_op_const_results(op);
+  for (uint16_t i = 0; i < op->result_count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_bytecode_value_numbering_assign_value(
+        value_numbering, results[i]));
+  }
+  loom_region_t** regions = loom_op_regions(op);
+  for (uint8_t i = 0; i < op->region_count; ++i) {
+    if (regions[i]) {
+      IREE_RETURN_IF_ERROR(loom_bytecode_value_numbering_assign_region(
+          value_numbering, regions[i]));
+    }
+  }
+  return iree_ok_status();
+}
+
+iree_status_t loom_bytecode_write_module_ops_section(
+    loom_bytecode_page_writer_t* page_writer,
+    loom_bytecode_numbering_t* numbering,
+    const loom_module_record_plan_t* record_plan,
+    const loom_bytecode_body_counts_t* counts, iree_host_size_t root_op_count) {
+  const loom_module_t* module = numbering->module;
+  loom_bytecode_value_numbering_t value_numbering;
+  loom_bytecode_value_numbering_initialize(&value_numbering, module,
+                                           numbering->arena);
+  IREE_RETURN_IF_ERROR(loom_bytecode_value_numbering_ensure_capacity(
+      &value_numbering, counts->value_count));
+
+  for (iree_host_size_t i = 0; i < record_plan->record_count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_bytecode_assign_module_op_values(
+        &value_numbering, record_plan->records[i].op));
+  }
+  for (uint16_t block_index = 0; block_index < module->body->block_count;
+       ++block_index) {
+    const loom_block_t* block =
+        loom_region_const_block(module->body, block_index);
+    const loom_op_t* op = NULL;
+    loom_block_for_each_op(block, op) {
+      bool is_ordinary = false;
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_classify_ordinary_module_op(module, op, &is_ordinary));
+      if (!is_ordinary) continue;
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_assign_module_op_values(&value_numbering, op));
+    }
+  }
+
+  IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_uvarint(
+      page_writer, counts->value_count));
+  IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_uvarint(
+      page_writer, counts->region_count));
+  IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_uvarint(
+      page_writer, counts->block_count));
+  IREE_RETURN_IF_ERROR(
+      loom_bytecode_page_writer_write_uvarint(page_writer, counts->op_count));
+  IREE_RETURN_IF_ERROR(
+      loom_bytecode_page_writer_write_uvarint(page_writer, root_op_count));
+
+  for (iree_host_size_t i = 0; i < record_plan->record_count; ++i) {
+    IREE_RETURN_IF_ERROR(
+        loom_bytecode_write_operation(page_writer, numbering, &value_numbering,
+                                      record_plan->records[i].op, 0));
+  }
+  for (uint16_t block_index = 0; block_index < module->body->block_count;
+       ++block_index) {
+    const loom_block_t* block =
+        loom_region_const_block(module->body, block_index);
+    const loom_op_t* op = NULL;
+    loom_block_for_each_op(block, op) {
+      bool is_ordinary = false;
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_classify_ordinary_module_op(module, op, &is_ordinary));
+      if (!is_ordinary) continue;
+      IREE_RETURN_IF_ERROR(loom_bytecode_write_operation(
+          page_writer, numbering, &value_numbering, op, 0));
+    }
   }
   return iree_ok_status();
 }

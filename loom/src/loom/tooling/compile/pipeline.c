@@ -6,6 +6,7 @@
 
 #include "loom/tooling/compile/pipeline.h"
 
+#include "loom/codegen/low/pipeline/legalizer_registry.h"
 #include "loom/codegen/low/pipeline/pass_environment.h"
 #include "loom/error/diagnostic.h"
 #include "loom/pass/builtin_registry.h"
@@ -253,6 +254,13 @@ iree_status_t loom_compile_run_pipeline(
   const loom_target_legalizer_provider_list_t legalizer_provider_list =
       loom_target_environment_legalizer_provider_list(
           options->target_environment);
+  loom_target_legalizer_registry_storage_t legalizer_registry_storage = {0};
+  if (iree_status_is_ok(status)) {
+    status = loom_low_legalizer_registry_storage_initialize(
+        legalizer_provider_list,
+        iree_arena_allocator(&out_result->version_arena),
+        &legalizer_registry_storage);
+  }
 
   loom_low_pass_environment_storage_t low_pass_environment_storage = {0};
   loom_target_pass_predicate_provider_storage_t predicate_storage = {0};
@@ -286,9 +294,10 @@ iree_status_t loom_compile_run_pipeline(
       .environment = loom_low_pass_environment_storage_initialize_mutable(
           &options->low_descriptor_registry->registry,
           &low_lower_policy_registry, &low_legality_provider_list,
-          &legalizer_provider_list, &math_policy_registry, options->report,
-          options->target_environment, &out_result->function_versions,
-          &low_pass_environment_storage),
+          loom_target_legalizer_registry_storage_registry(
+              &legalizer_registry_storage),
+          &math_policy_registry, options->report, options->target_environment,
+          &out_result->function_versions, &low_pass_environment_storage),
       .function_versions = &out_result->function_versions.list,
       .predicate_provider =
           loom_target_pass_predicate_provider(&predicate_storage),
@@ -308,5 +317,7 @@ iree_status_t loom_compile_run_pipeline(
     status = loom_pass_tool_run_flat_pipeline(module, pipeline, &run_options,
                                               &out_result->pass);
   }
+  loom_target_legalizer_registry_storage_deinitialize(
+      &legalizer_registry_storage);
   return status;
 }

@@ -8,8 +8,7 @@
 
 #include "loom/error/error_catalog.h"
 #include "loom/ir/module.h"
-#include "loom/target/arch/llvmir/contracts/generic_core.h"
-#include "loom/target/arch/llvmir/contracts/generic_core_lower_rules.h"
+#include "loom/target/arch/llvmir/contracts/sets.h"
 #include "loom/target/arch/llvmir/descriptors/descriptors.h"
 #include "loom/target/arch/llvmir/lower/lower.h"
 
@@ -198,26 +197,12 @@ static iree_status_t loom_llvmir_map_argument(
                               source_type, &out_argument->abi_type);
 }
 
-static const loom_low_lower_rule_set_t* const kLlvmirGenericRuleSets[] = {
-    &loom_llvmir_generic_core_lower_rule_set,
-};
-
-static const loom_target_contract_binding_t kLlvmirGenericContractBindings[] = {
-    {&loom_llvmir_generic_core_contract_fragment, 0},
-};
-
 static const loom_low_lower_policy_t kLlvmirGenericLowLowerPolicy = {
     .name = IREE_SVL("llvmir-generic-low-lower"),
     .error_catalog = &loom_error_catalog_core,
     .map_type = {.fn = loom_llvmir_map_type, .user_data = NULL},
     .map_argument = {.fn = loom_llvmir_map_argument, .user_data = NULL},
-    .rule_sets =
-        {
-            .count = IREE_ARRAYSIZE(kLlvmirGenericRuleSets),
-            .values = kLlvmirGenericRuleSets,
-        },
-    .contract_bindings = kLlvmirGenericContractBindings,
-    .contract_binding_count = IREE_ARRAYSIZE(kLlvmirGenericContractBindings),
+    .contract_set = &loom_llvmir_generic_contract_set,
 };
 
 const loom_low_lower_policy_t* loom_llvmir_generic_low_lower_policy(void) {

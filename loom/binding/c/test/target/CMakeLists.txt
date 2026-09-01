@@ -26,6 +26,8 @@ loom_cc_library(
     iree::testing::gtest
     loom::binding::c::loomc
     loom::binding::c::target::iree_hal
+    loom::binding::c::target::kernel
+    loom::binding::c::target::vm
     loom::binding::c::test::test_util
   TESTONLY
   INCLUDES

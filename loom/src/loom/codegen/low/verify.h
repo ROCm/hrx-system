@@ -92,7 +92,7 @@ static inline bool loom_low_verify_provider_list_is_empty(
 typedef struct loom_low_verify_options_t {
   // Descriptor registry available to this verification run. The registry is
   // target-owned static data; IR verification only uses it to resolve selected
-  // descriptor sets and packet semantics.
+  // descriptor sets and descriptor-backed operation semantics.
   const loom_low_descriptor_registry_t* descriptor_registry;
   // Optional compiler-owned versions carrying function target facts.
   // The list and its entries are borrowed for the duration of verification and
@@ -115,26 +115,12 @@ typedef struct loom_low_verify_result_t {
   uint32_t warning_count;
 } loom_low_verify_result_t;
 
-typedef struct loom_low_verify_scratch_t {
-  // Required value-id indexed u32 scratch storage for register-part masks.
-  loom_value_u32_scratch_t* value_scratch;
-} loom_low_verify_scratch_t;
-
-// Returns low verification scratch backed by |module|'s reusable scratch.
-static inline loom_low_verify_scratch_t loom_low_verify_scratch_for_module(
-    loom_module_t* module) {
-  return (loom_low_verify_scratch_t){
-      /*.value_scratch=*/&module->scratch.values,
-  };
-}
-
 // Verifies descriptor-local low function bodies in |module|. This checks that
 // each low.func target resolves to a descriptor set and that descriptor-backed
-// low.op/low.const packets match the selected descriptor rows. Verification is
-// logically read-only on IR but mutates |scratch|.
-iree_status_t loom_low_verify_module(const loom_module_t* module,
+// operations match their selected descriptor rows. Verification does not
+// mutate semantic IR; it temporarily acquires the module's local-value map.
+iree_status_t loom_low_verify_module(loom_module_t* module,
                                      const loom_low_verify_options_t* options,
-                                     loom_low_verify_scratch_t* scratch,
                                      loom_low_verify_result_t* out_result);
 
 // Returns the module being verified.

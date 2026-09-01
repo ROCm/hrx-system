@@ -15,6 +15,7 @@ from pathlib import Path
 
 from loom.builtin_types import ALL_BUILTIN_TYPES
 from loom.dialect.low import ALL_LOW_OPS
+from loom.dialect.metadata import ALL_METADATA_OPS
 from loom.dialect.test import (
     ALL_TEST_OPS,
     ALL_TEST_PARAMETERIZED_ATTRS,
@@ -41,6 +42,7 @@ from loom.ir import (
     SymbolName,
     SymbolNameArray,
     SymbolNameSet,
+    U64Attr,
 )
 
 
@@ -61,12 +63,17 @@ def _run_loom_format(arguments: list[object]) -> subprocess.CompletedProcess[str
 def _interop_module() -> tuple[Module, RegisterType]:
     parser = Parser()
     parser.register_ops(ALL_LOW_OPS)
+    parser.register_ops(ALL_METADATA_OPS)
     parser.register_ops(ALL_TEST_OPS)
     parser.register_types(ALL_BUILTIN_TYPES)
     parser.register_types(ALL_TEST_TYPES)
     parser.register_parameterized_attrs(ALL_TEST_PARAMETERIZED_ATTRS)
     module = parser.parse(
         "// Bytecode interoperability coverage.\n"
+        "\n"
+        'metadata.module "model.payload" = bytes("00feff")\n'
+        'metadata.module "model.revision" = u64(18446744073709551615)\n'
+        "test.module_metadata\n"
         "\n"
         "low.func.decl target<test.low.core> "
         "@typed_identity(%arg: reg<test.ptr : vector<4xi16>>) -> "
@@ -102,10 +109,14 @@ def _interop_module() -> tuple[Module, RegisterType]:
         "#test.feature_set<[low, -middle, high]>] "
         "using [#test.tile<width = 4>]\n"
         "  test.signed_enum_set_attrs [low, -middle, high] using []\n"
+        "  %metadata_seed = test.constant 0.0 : f32\n"
+        "  %metadata = test.attrs %metadata_seed "
+        '{"kernel.revision" = u64(18446744073709551614)} : f32\n'
         "  test.yield\n"
         "}\n"
         "test.record @parameterized_record "
-        "{options = #test.options<mode = precise, scopes = []>}\n"
+        '{"model.revision" = u64(18446744073709551615), '
+        "options = #test.options<mode = precise, scopes = []>}\n"
         "test.record @other_record\n"
         "test.decl @parameterized_types("
         "%scope: test.scope<subgroup>, "
@@ -170,6 +181,21 @@ def _assert_module_structure(module: Module, register_type: RegisterType) -> Blo
     ):
         raise AssertionError("block source trivia did not survive C bytecode")
     return entry_block
+
+
+def _assert_module_metadata(module: Module) -> None:
+    metadata = {
+        op.attributes["key"]: op.attributes["value"]
+        for op in module.body.ops
+        if op.name == "metadata.module"
+    }
+    if metadata != {
+        "model.payload": bytes.fromhex("00feff"),
+        "model.revision": U64Attr(2**64 - 1),
+    }:
+        raise AssertionError("module metadata did not survive C bytecode")
+    if sum(op.name == "test.module_metadata" for op in module.body.ops) != 1:
+        raise AssertionError("ordinary module operation did not survive C bytecode")
 
 
 def _assert_enum_and_symbol_attrs(entry_block: Block) -> None:
@@ -270,6 +296,9 @@ def _assert_parameterized_arrays(entry_block: Block) -> None:
         raise AssertionError("signed enum set did not survive C bytecode")
     if signed_set_op.attributes["optional_features"] != SignedEnumSetAttr():
         raise AssertionError("present empty signed enum set changed")
+    metadata_op = next(op for op in entry_block.ops if op.name == "test.attrs")
+    if metadata_op.attributes["dict"]["kernel.revision"] != U64Attr(2**64 - 2):
+        raise AssertionError("body dict lost exact unsigned metadata")
 
 
 def _assert_symbol_payloads(module: Module) -> None:
@@ -291,6 +320,8 @@ def _assert_symbol_payloads(module: Module) -> None:
         or record_options.get("scopes") != EnumArrayAttr()
     ):
         raise AssertionError("record dict lost present empty parameter")
+    if record.attributes["dict"]["model.revision"] != U64Attr(2**64 - 1):
+        raise AssertionError("record dict lost exact unsigned metadata")
     parameterized_types = next(
         (
             symbol.op
@@ -330,6 +361,7 @@ def main() -> None:
         raise ValueError("expected the C loom-format binary path")
     source_module, register_type = _interop_module()
     loaded_module = _roundtrip_through_c(Path(sys.argv[1]), source_module)
+    _assert_module_metadata(loaded_module)
     entry_block = _assert_module_structure(loaded_module, register_type)
     _assert_enum_and_symbol_attrs(entry_block)
     _assert_parameterized_attrs(entry_block)

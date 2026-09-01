@@ -95,10 +95,6 @@ static iree_status_t loom_low_schedule_initialize_storage(
       state->arena, state->body->block_count, sizeof(*state->blocks),
       (void**)&state->blocks));
   memset(state->blocks, 0, state->body->block_count * sizeof(*state->blocks));
-  IREE_RETURN_IF_ERROR(
-      iree_arena_allocate_array(state->arena, state->body->block_count,
-                                sizeof(*state->liveness_block_orders),
-                                (void**)&state->liveness_block_orders));
   if (node_count > 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(state->arena, node_count,
                                                    sizeof(*state->nodes),
@@ -107,6 +103,17 @@ static iree_status_t loom_low_schedule_initialize_storage(
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         state->arena, node_count, sizeof(*state->scheduled_node_indices),
         (void**)&state->scheduled_node_indices));
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_low_schedule_initialize_dependency_storage(
+    loom_low_schedule_build_state_t* state, iree_host_size_t node_count) {
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(state->arena, state->body->block_count,
+                                sizeof(*state->liveness_block_orders),
+                                (void**)&state->liveness_block_orders));
+  if (node_count > 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         state->arena, node_count, sizeof(*state->scheduled_ops),
         (void**)&state->scheduled_ops));
@@ -661,10 +668,69 @@ static bool loom_low_schedule_strategy_is_valid(
     case LOOM_LOW_SCHEDULE_STRATEGY_PRESSURE:
     case LOOM_LOW_SCHEDULE_STRATEGY_LATENCY_HIDING:
     case LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL:
+    case LOOM_LOW_SCHEDULE_STRATEGY_PRESERVE_SOURCE_ORDER:
       return true;
     default:
       return false;
   }
+}
+
+static iree_status_t loom_low_schedule_verify_source_order_options(
+    const loom_low_schedule_options_t* options) {
+  const bool has_pair_inputs =
+      options->pair_affinities.count != 0 ||
+      options->pair_affinities.placement_recipe_count != 0 ||
+      options->preferred_pair_uses.count != 0 ||
+      options->preferred_pair_uses.placement_recipe_count != 0;
+  if (options->diagnostic_flags != 0 ||
+      iree_any_bit_set(options->flags,
+                       LOOM_LOW_SCHEDULE_FLAG_RETAIN_PRESSURE_STEPS) ||
+      has_pair_inputs || options->structural_state_reads.count != 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "preserving source order does not perform scheduler diagnostics, "
+        "pressure analysis, pairing, or implicit-state analysis");
+  }
+  return iree_ok_status();
+}
+
+static bool loom_low_schedule_needs_liveness(
+    const loom_low_schedule_options_t* options) {
+  return iree_any_bit_set(options->flags,
+                          LOOM_LOW_SCHEDULE_FLAG_RETAIN_LIVENESS) ||
+         iree_any_bit_set(options->diagnostic_flags,
+                          LOOM_LOW_SCHEDULE_DIAGNOSTIC_PRESSURE_PEAKS);
+}
+
+static void loom_low_schedule_preserve_source_order(
+    loom_low_schedule_build_state_t* state) {
+  for (iree_host_size_t block_index = 0; block_index < state->body->block_count;
+       ++block_index) {
+    loom_low_schedule_block_t* block_record = &state->blocks[block_index];
+    block_record->scheduled_node_start = (uint32_t)state->scheduled_node_count;
+    block_record->scheduled_node_count = block_record->node_count;
+    for (uint32_t scheduled_ordinal = 0;
+         scheduled_ordinal < block_record->node_count; ++scheduled_ordinal) {
+      const uint32_t node_index = block_record->node_start + scheduled_ordinal;
+      state->nodes[node_index].scheduled_ordinal = scheduled_ordinal;
+      state->scheduled_node_indices[state->scheduled_node_count] = node_index;
+      ++state->scheduled_node_count;
+    }
+  }
+}
+
+static iree_status_t loom_low_schedule_build_source_order(
+    loom_low_schedule_build_state_t* state,
+    const loom_low_function_model_t* model, iree_arena_allocator_t* arena,
+    loom_liveness_analysis_t* out_liveness) {
+  if (loom_low_schedule_needs_liveness(state->options)) {
+    IREE_RETURN_IF_ERROR(
+        loom_liveness_analyze_local_value_domain_with_cfg_graph(
+            &model->value_domain, &model->cfg_graph,
+            loom_liveness_order_empty(), arena, out_liveness));
+  }
+  loom_low_schedule_preserve_source_order(state);
+  return iree_ok_status();
 }
 
 static void loom_low_schedule_insert_ready_node(
@@ -1338,6 +1404,56 @@ static void loom_low_schedule_initialize_preferred_pair_index(
   }
 }
 
+static iree_status_t loom_low_schedule_build_dependency_order(
+    loom_low_schedule_build_state_t* state,
+    const loom_low_function_model_t* model, iree_host_size_t node_count,
+    iree_arena_allocator_t* arena, loom_liveness_analysis_t* out_liveness) {
+  IREE_RETURN_IF_ERROR(
+      loom_low_schedule_initialize_dependency_storage(state, node_count));
+  IREE_RETURN_IF_ERROR(loom_low_schedule_initialize_pair_affinity_index(state));
+  loom_low_schedule_initialize_preferred_pair_index(state);
+  IREE_RETURN_IF_ERROR(loom_low_schedule_initialize_pair_setup_index(state));
+  IREE_RETURN_IF_ERROR(
+      loom_low_schedule_initialize_storage_read_tables(state, node_count));
+  IREE_RETURN_IF_ERROR(
+      loom_low_schedule_initialize_descriptor_tables(state, node_count));
+  IREE_RETURN_IF_ERROR(loom_low_schedule_build_dependencies(state));
+  if (loom_low_schedule_needs_liveness(state->options)) {
+    IREE_RETURN_IF_ERROR(
+        loom_liveness_analyze_local_value_domain_with_cfg_graph(
+            &model->value_domain, &model->cfg_graph,
+            loom_liveness_order_empty(), arena, out_liveness));
+  }
+  IREE_RETURN_IF_ERROR(loom_low_schedule_run_list_scheduler(state, node_count));
+  if (state->error_count != 0) return iree_ok_status();
+
+  loom_low_schedule_compact_model_summaries(state);
+  loom_low_schedule_compact_resource_summaries(state);
+  if (iree_any_bit_set(state->options->diagnostic_flags,
+                       LOOM_LOW_SCHEDULE_DIAGNOSTIC_PRESSURE_PEAKS)) {
+    IREE_RETURN_IF_ERROR(
+        loom_low_schedule_emit_pressure_diagnostics(state, out_liveness));
+  }
+  if (iree_any_bit_set(state->options->diagnostic_flags,
+                       LOOM_LOW_SCHEDULE_DIAGNOSTIC_CANDIDATE_DECISIONS)) {
+    IREE_RETURN_IF_ERROR(
+        loom_low_schedule_emit_candidate_decision_diagnostics(state));
+  }
+  if (iree_any_bit_set(state->options->diagnostic_flags,
+                       LOOM_LOW_SCHEDULE_DIAGNOSTIC_MODEL_QUALITY)) {
+    IREE_RETURN_IF_ERROR(loom_low_schedule_emit_model_diagnostics(state));
+  }
+  if (iree_any_bit_set(state->options->diagnostic_flags,
+                       LOOM_LOW_SCHEDULE_DIAGNOSTIC_RESOURCE_BOTTLENECKS)) {
+    IREE_RETURN_IF_ERROR(loom_low_schedule_emit_resource_diagnostics(state));
+  }
+  if (iree_any_bit_set(state->options->diagnostic_flags,
+                       LOOM_LOW_SCHEDULE_DIAGNOSTIC_HAZARD_GAPS)) {
+    IREE_RETURN_IF_ERROR(loom_low_schedule_emit_hazard_gap_diagnostics(state));
+  }
+  return iree_ok_status();
+}
+
 iree_status_t loom_low_schedule_function(
     const loom_low_function_model_t* model,
     const loom_low_schedule_options_t* options, iree_arena_allocator_t* arena,
@@ -1346,6 +1462,12 @@ iree_status_t loom_low_schedule_function(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "unknown low schedule strategy %d",
                             (int)options->strategy);
+  }
+  const bool preserves_source_order =
+      options->strategy == LOOM_LOW_SCHEDULE_STRATEGY_PRESERVE_SOURCE_ORDER;
+  if (preserves_source_order) {
+    IREE_RETURN_IF_ERROR(
+        loom_low_schedule_verify_source_order_options(options));
   }
   *out_table = (loom_low_schedule_table_t){
       .module = model->module,
@@ -1387,79 +1509,34 @@ iree_status_t loom_low_schedule_function(
   state.register_type_resolver =
       loom_low_register_type_resolver_for_descriptor_set(
           state.target.descriptor_set);
-  IREE_RETURN_IF_ERROR(
-      loom_low_schedule_initialize_pair_affinity_index(&state));
 
   const iree_host_size_t node_count = model->node_count;
-  const bool needs_liveness =
-      iree_any_bit_set(options->flags,
-                       LOOM_LOW_SCHEDULE_FLAG_RETAIN_LIVENESS) ||
-      iree_any_bit_set(options->diagnostic_flags,
-                       LOOM_LOW_SCHEDULE_DIAGNOSTIC_PRESSURE_PEAKS);
   loom_liveness_analysis_t liveness = {0};
   iree_status_t status =
       loom_low_schedule_initialize_storage(&state, node_count);
   if (iree_status_is_ok(status)) {
     status = loom_low_schedule_fill_nodes(&state);
   }
-  if (iree_status_is_ok(status)) {
-    loom_low_schedule_initialize_preferred_pair_index(&state);
-  }
-  if (iree_status_is_ok(status)) {
-    status = loom_low_schedule_initialize_pair_setup_index(&state);
-  }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && preserves_source_order) {
     status =
-        loom_low_schedule_initialize_storage_read_tables(&state, node_count);
+        loom_low_schedule_build_source_order(&state, model, arena, &liveness);
   }
-  if (iree_status_is_ok(status)) {
-    status = loom_low_schedule_initialize_descriptor_tables(&state, node_count);
-  }
-  if (iree_status_is_ok(status)) {
-    status = loom_low_schedule_build_dependencies(&state);
-  }
-  if (iree_status_is_ok(status) && needs_liveness) {
-    status = loom_liveness_analyze_local_value_domain_with_cfg_graph(
-        &model->value_domain, &model->cfg_graph, loom_liveness_order_empty(),
-        arena, &liveness);
-  }
-  if (iree_status_is_ok(status)) {
-    status = loom_low_schedule_run_list_scheduler(&state, node_count);
-  }
-  if (iree_status_is_ok(status) && state.error_count == 0) {
-    loom_low_schedule_compact_model_summaries(&state);
-    loom_low_schedule_compact_resource_summaries(&state);
-  }
-  if (iree_status_is_ok(status) && state.error_count == 0 &&
-      iree_any_bit_set(options->diagnostic_flags,
-                       LOOM_LOW_SCHEDULE_DIAGNOSTIC_PRESSURE_PEAKS)) {
-    status = loom_low_schedule_emit_pressure_diagnostics(&state, &liveness);
-  }
-  if (iree_status_is_ok(status) && state.error_count == 0 &&
-      iree_any_bit_set(options->diagnostic_flags,
-                       LOOM_LOW_SCHEDULE_DIAGNOSTIC_CANDIDATE_DECISIONS)) {
-    status = loom_low_schedule_emit_candidate_decision_diagnostics(&state);
-  }
-  if (iree_status_is_ok(status) && state.error_count == 0 &&
-      iree_any_bit_set(options->diagnostic_flags,
-                       LOOM_LOW_SCHEDULE_DIAGNOSTIC_MODEL_QUALITY)) {
-    status = loom_low_schedule_emit_model_diagnostics(&state);
-  }
-  if (iree_status_is_ok(status) && state.error_count == 0 &&
-      iree_any_bit_set(options->diagnostic_flags,
-                       LOOM_LOW_SCHEDULE_DIAGNOSTIC_RESOURCE_BOTTLENECKS)) {
-    status = loom_low_schedule_emit_resource_diagnostics(&state);
-  }
-  if (iree_status_is_ok(status) && state.error_count == 0 &&
-      iree_any_bit_set(options->diagnostic_flags,
-                       LOOM_LOW_SCHEDULE_DIAGNOSTIC_HAZARD_GAPS)) {
-    status = loom_low_schedule_emit_hazard_gap_diagnostics(&state);
+  if (iree_status_is_ok(status) && !preserves_source_order) {
+    status = loom_low_schedule_build_dependency_order(&state, model, node_count,
+                                                      arena, &liveness);
   }
 
   if (iree_status_is_ok(status)) {
     loom_low_storage_layout_t storage_layout;
     loom_low_storage_layout_builder_finish(&state.storage_layout_builder,
                                            &storage_layout);
+    const loom_liveness_order_t operation_order =
+        state.liveness_block_orders != NULL
+            ? (loom_liveness_order_t){
+                  .blocks = state.liveness_block_orders,
+                  .block_count = state.body->block_count,
+              }
+            : loom_liveness_order_empty();
     *out_table = (loom_low_schedule_table_t){
         .module = model->module,
         .function_op = model->function_op,
@@ -1471,11 +1548,7 @@ iree_status_t loom_low_schedule_function(
         .liveness = liveness,
         .blocks = state.blocks,
         .block_count = state.body->block_count,
-        .operation_order =
-            {
-                .blocks = state.liveness_block_orders,
-                .block_count = state.body->block_count,
-            },
+        .operation_order = operation_order,
         .cfg_graph = model->cfg_graph,
         .loop_forest = model->loop_forest,
         .nodes = state.nodes,

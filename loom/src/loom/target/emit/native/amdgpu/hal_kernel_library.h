@@ -29,9 +29,20 @@ extern "C" {
 #endif
 
 typedef struct loom_amdgpu_hal_kernel_library_options_t {
+  // Low representation environment containing every function in |module|.
+  // An empty environment uses the standalone AMDGPU provider set.
+  struct {
+    // Descriptor registry used to resolve function representation contracts.
+    const loom_low_descriptor_registry_t* descriptor_registry;
+    // Target-owned semantic verifiers corresponding to the registry.
+    loom_low_verify_provider_list_t verify_providers;
+  } low_environment;
   // Optional concrete compiler function versions participating in this
   // emission. The list and its version objects are borrowed for the call.
   const loom_function_version_list_t* function_versions;
+  // Optional caller-owned buffer receiving HAL executable entry ordinals for
+  // exported functions with stable compiler versions.
+  loom_target_emit_export_projection_buffer_t* export_projection;
   // Optional AMDGPU runtime support globals emitted into the HSACO.
   loom_amdgpu_runtime_global_flags_t runtime_globals;
   // Optional caller-owned code-object data symbols emitted into the HSACO.

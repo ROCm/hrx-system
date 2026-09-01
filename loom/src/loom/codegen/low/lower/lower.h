@@ -29,6 +29,7 @@
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/sanitizer/options.h"
+#include "loom/target/contract.h"
 #include "loom/target/low_legality.h"
 #include "loom/target/types.h"
 #include "loom/util/fact_table.h"
@@ -95,6 +96,13 @@ static inline bool loom_low_lower_rule_set_list_is_empty(
     loom_low_lower_rule_set_list_t list) {
   return list.count == 0;
 }
+
+typedef struct loom_low_lower_contract_set_t {
+  // Rule sets in the same priority order referenced by index bindings.
+  loom_low_lower_rule_set_list_t rule_sets;
+  // Immutable dense source-op contract index.
+  const loom_target_contract_index_t* index;
+} loom_low_lower_contract_set_t;
 
 typedef iree_status_t (*loom_low_lower_map_type_fn_t)(
     void* user_data, loom_low_lower_context_t* context,
@@ -218,7 +226,7 @@ typedef struct loom_low_lower_prepare_branch_callback_t {
 
 typedef iree_status_t (*loom_low_lower_materialize_branch_arg_fn_t)(
     void* user_data, loom_low_lower_context_t* context,
-    const loom_op_t* source_terminator, uint8_t successor_index,
+    const loom_op_t* source_terminator, uint16_t successor_index,
     uint16_t arg_index, loom_value_id_t source_value_id,
     loom_value_id_t low_value_id, loom_type_t required_low_type,
     loom_value_id_t* out_low_value_id);
@@ -239,11 +247,20 @@ typedef iree_status_t (*loom_low_lower_materialize_structural_operand_fn_t)(
     loom_value_id_t source_value_id, loom_value_id_t low_value_id,
     loom_type_t required_low_type, loom_value_id_t* out_low_value_id);
 
+typedef void (*loom_low_lower_mark_structural_operand_storage_demands_fn_t)(
+    void* user_data, loom_low_lower_context_t* context,
+    loom_value_id_t source_value_id);
+
 typedef struct loom_low_lower_materialize_structural_operand_callback_t {
-  // Optional callback invoked for low structural op operands after source value
-  // lookup. Targets use this to materialize target-defined storage contracts
-  // that are not represented in the low type, such as register parts.
+  // Optional callback invoked for low structural op operands after source
+  // value lookup. Targets use this to materialize target-defined boundary
+  // representations and storage contracts.
   loom_low_lower_materialize_structural_operand_fn_t fn;
+  // Optional callback marking source values needed to materialize a structural
+  // operand. Targets use this for dependencies not carried directly by the
+  // structural operation, such as a projected view's byte offset.
+  loom_low_lower_mark_structural_operand_storage_demands_fn_t
+      mark_storage_demands;
   // Caller-owned payload passed to |fn|.
   void* user_data;
 } loom_low_lower_materialize_structural_operand_callback_t;
@@ -262,6 +279,28 @@ typedef struct loom_low_lower_emit_cond_branch_callback_t {
   // Caller-owned payload passed to |fn|.
   void* user_data;
 } loom_low_lower_emit_cond_branch_callback_t;
+
+typedef bool (*loom_low_lower_can_emit_switch_fn_t)(
+    void* user_data, const loom_module_t* module, const loom_op_t* source_op,
+    const loom_target_facts_t* target_facts);
+
+typedef iree_status_t (*loom_low_lower_emit_switch_fn_t)(
+    void* user_data, loom_low_lower_context_t* context,
+    const loom_op_t* source_op, loom_value_id_t low_selector,
+    loom_block_t* low_default_dest, loom_block_t* const* low_case_dests,
+    uint16_t case_count);
+
+typedef struct loom_low_lower_switch_policy_t {
+  // Returns true when |source_op| can remain a cfg.switch through planning and
+  // be emitted directly by |emit|. The query is read-only and runs before
+  // source value facts are acquired.
+  loom_low_lower_can_emit_switch_fn_t can_emit;
+  // Emits one cfg.switch accepted by |can_emit| after its selector and
+  // successors have been mapped to target-low IR.
+  loom_low_lower_emit_switch_fn_t emit;
+  // Caller-owned payload passed to |can_emit| and |emit|.
+  void* user_data;
+} loom_low_lower_switch_policy_t;
 
 typedef enum loom_low_lower_abi_layout_kind_e {
   // Low function boundary layout on low.func.def/decl.
@@ -720,6 +759,28 @@ typedef struct loom_low_lower_finalize_function_callback_t {
   void* user_data;
 } loom_low_lower_finalize_function_callback_t;
 
+typedef struct loom_low_lower_prepare_module_result_t {
+  // True when the source module satisfies the policy's preparation contract.
+  bool valid;
+  // True when preparation changed source IR or semantic module state.
+  bool changed;
+} loom_low_lower_prepare_module_result_t;
+
+typedef iree_status_t (*loom_low_lower_prepare_module_fn_t)(
+    void* user_data, loom_module_t* module,
+    iree_diagnostic_emitter_t diagnostic_emitter,
+    iree_arena_allocator_t* scratch_arena,
+    loom_low_lower_prepare_module_result_t* out_result);
+
+typedef struct loom_low_lower_prepare_module_callback_t {
+  // Optional callback invoked once before source symbol selection when the
+  // module contains a target record selecting this policy. Targets use this
+  // to canonicalize module structure required by ordinary source lowering.
+  loom_low_lower_prepare_module_fn_t fn;
+  // Caller-owned payload passed to |fn|.
+  void* user_data;
+} loom_low_lower_prepare_module_callback_t;
+
 typedef iree_status_t (*loom_low_lower_finalize_module_fn_t)(
     void* user_data, loom_module_t* module,
     loom_low_lower_module_state_t* module_state,
@@ -734,9 +795,25 @@ typedef struct loom_low_lower_finalize_module_callback_t {
   void* user_data;
 } loom_low_lower_finalize_module_callback_t;
 
+typedef uint32_t loom_low_lower_policy_flags_t;
+
+enum loom_low_lower_policy_flag_bits_e {
+  // The policy lowers source module imports even when no physical target code
+  // import kind applies.
+  LOOM_LOW_LOWER_POLICY_FLAG_MODULE_IMPORTS = 1u << 0,
+  // Materializes distinct low transfer values for direct function arguments
+  // and call results. Policies whose physical ABI constrains call values
+  // enable this so allocation can place semantic values independently of ABI
+  // locations. Call and return operands use the policy's structural operand
+  // materializer.
+  LOOM_LOW_LOWER_POLICY_FLAG_EXPLICIT_ABI_TRANSFERS = 1u << 1,
+};
+
 typedef struct loom_low_lower_policy_t {
   // Stable policy name used in diagnostics and status messages.
   iree_string_view_t name;
+  // Target-low policy capability flags.
+  loom_low_lower_policy_flags_t flags;
   // Catalog resolving compact diagnostic refs carried by this policy's
   // generated rules and contract fragments.
   const loom_error_catalog_t* error_catalog;
@@ -766,25 +843,23 @@ typedef struct loom_low_lower_policy_t {
   // Optionally materializes branch payloads to the exact destination block
   // argument type after the canonical low value has been looked up.
   loom_low_lower_materialize_branch_arg_callback_t materialize_branch_arg;
-  // Optionally materializes structural op operands that have the correct low
-  // type but still need target-owned storage-contract adaptation.
+  // Optionally materializes structural op operands to their required low type
+  // and target-owned storage contract.
   loom_low_lower_materialize_structural_operand_callback_t
       materialize_structural_operand;
   // Optionally emits conditional branches that need target-specific structural
   // control packets instead of plain low.cond_br.
   loom_low_lower_emit_cond_branch_callback_t emit_cond_branch;
-  // Low declaration import kind for target-bound source imports, or zero when
-  // this policy does not lower import declarations.
+  // Optionally preserves selected cfg.switch ops for target-owned direct
+  // emission. Both callbacks are either populated together or left NULL.
+  loom_low_lower_switch_policy_t switch_lowering;
+  // Low declaration physical code import kind for target-bound source imports.
+  // Zero preserves only source module linkage on the low declaration.
   loom_low_func_decl_import_kind_t import_decl_kind;
-  // Optional table-driven source-op lowering rule sets in selection order. Rule
+  // Immutable source-op contracts and lowering rules in selection order. Rule
   // sets may overlap; the first matching rule wins and failed diagnostics use
   // the most-specific rejected candidate.
-  loom_low_lower_rule_set_list_t rule_sets;
-  // Active contract fragments composed into a dense root index for direct
-  // source-op lookup and read-only legality queries.
-  const loom_target_contract_binding_t* contract_bindings;
-  // Number of active contract fragments.
-  uint16_t contract_binding_count;
+  const loom_low_lower_contract_set_t* contract_set;
   // Optional target-owned descriptor-matrix projection used by generated
   // descriptor-matrix contract cases.
   loom_low_lower_descriptor_matrix_t descriptor_matrix;
@@ -803,6 +878,8 @@ typedef struct loom_low_lower_policy_t {
   loom_low_lower_emit_op_callback_t emit_op;
   // Optional target-owned function finalizer.
   loom_low_lower_finalize_function_callback_t finalize_function;
+  // Optional target-owned source module preparation.
+  loom_low_lower_prepare_module_callback_t prepare_module;
   // Optional target-owned module finalizer.
   loom_low_lower_finalize_module_callback_t finalize_module;
 } loom_low_lower_policy_t;
@@ -936,6 +1013,15 @@ typedef struct loom_low_lower_resolved_descriptor_t {
   // Descriptor row selected from the active descriptor set.
   const loom_low_descriptor_t* descriptor;
 } loom_low_lower_resolved_descriptor_t;
+
+// Prepares cfg.switch terminators for one selected target policy before source
+// value facts are acquired. Switches accepted by |policy| remain structural;
+// all others expand to exact index comparisons and conditional branches.
+// |out_changed| is true when any source CFG was expanded.
+iree_status_t loom_low_lower_prepare_cfg_switches(
+    loom_module_t* module, loom_func_like_t source_function,
+    const loom_target_facts_t* target_facts,
+    const loom_low_lower_policy_t* policy, bool* out_changed);
 
 // Lowers one func.def-like source function into a target-low function in place.
 //
@@ -1258,7 +1344,7 @@ iree_status_t loom_low_lower_append_low_block(loom_low_lower_context_t* context,
 // terminators should prefer this over raw block lookup.
 iree_status_t loom_low_lower_lookup_successor_dest(
     loom_low_lower_context_t* context, const loom_op_t* source_terminator,
-    uint8_t successor_index, loom_block_t** out_low_dest);
+    uint16_t successor_index, loom_block_t** out_low_dest);
 
 // Maps one source successor payload to low values accepted by |low_dest|.
 //
@@ -1267,13 +1353,13 @@ iree_status_t loom_low_lower_lookup_successor_dest(
 // loom_low_lower_lookup_value loops when forwarding block arguments.
 iree_status_t loom_low_lower_remap_successor_args(
     loom_low_lower_context_t* context, const loom_op_t* source_terminator,
-    uint8_t successor_index, loom_block_t* low_dest,
+    uint16_t successor_index, loom_block_t* low_dest,
     const loom_value_id_t* source_args, uint16_t source_arg_count,
     loom_value_id_t** out_low_args);
 
 // Materializes a low structural operand through the active target policy. The
-// incoming value must already have the required low type; the policy may return
-// the same value when no target-owned storage-contract adaptation is needed.
+// incoming value may have a different low type when source aliases erase a
+// target boundary representation. The result always has |required_low_type|.
 iree_status_t loom_low_lower_materialize_structural_operand(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     iree_host_size_t operand_index, loom_value_id_t source_value_id,
@@ -1288,7 +1374,7 @@ iree_status_t loom_low_lower_materialize_structural_operand(
 // original edge behavior.
 iree_status_t loom_low_lower_interpose_successor_dest(
     loom_low_lower_context_t* context, const loom_op_t* source_terminator,
-    uint8_t successor_index, loom_block_t* interposed_low_block,
+    uint16_t successor_index, loom_block_t* interposed_low_block,
     loom_block_t** out_previous_low_dest);
 
 // Records one target-owned structural branch plan for |source_terminator|.

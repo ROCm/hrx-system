@@ -25,7 +25,7 @@ typedef struct loom_amdgpu_region_exit_edge_t {
   // Source terminator whose successor edge exits the divergent region.
   const loom_op_t* terminator;
   // Successor ordinal on terminator that exits the divergent region.
-  uint8_t successor_index;
+  uint16_t successor_index;
 } loom_amdgpu_region_exit_edge_t;
 
 typedef struct loom_amdgpu_masked_region_t {
@@ -361,7 +361,7 @@ static iree_status_t loom_amdgpu_materialize_branch_address(
 
 iree_status_t loom_amdgpu_materialize_branch_arg(
     void* user_data, loom_low_lower_context_t* context,
-    const loom_op_t* source_terminator, uint8_t successor_index,
+    const loom_op_t* source_terminator, uint16_t successor_index,
     uint16_t arg_index, loom_value_id_t source_value_id,
     loom_value_id_t low_value_id, loom_type_t required_low_type,
     loom_value_id_t* out_low_value_id) {
@@ -502,7 +502,7 @@ loom_amdgpu_branch_analysis_workspace_allocate_secondary_region(
 }
 
 static void loom_amdgpu_record_masked_region_exit_edge(
-    const loom_op_t* terminator, uint8_t successor_index,
+    const loom_op_t* terminator, uint16_t successor_index,
     loom_amdgpu_masked_region_t* region) {
   region->exit_edges[region->exit_edge_count++] =
       (loom_amdgpu_region_exit_edge_t){
@@ -512,7 +512,7 @@ static void loom_amdgpu_record_masked_region_exit_edge(
 }
 
 static void loom_amdgpu_record_bounded_region_exit_edge(
-    const loom_op_t* terminator, uint8_t successor_index,
+    const loom_op_t* terminator, uint16_t successor_index,
     loom_amdgpu_bounded_region_t* region) {
   region->exit_edges[region->exit_edge_count++] =
       (loom_amdgpu_region_exit_edge_t){
@@ -525,7 +525,7 @@ static bool loom_amdgpu_region_has_single_entry(
     loom_region_t* source_body, const uint8_t* in_region,
     const loom_block_t* guard_block, const loom_block_t* region_entry,
     const loom_op_t* ignored_entry_terminator,
-    uint8_t ignored_entry_successor_index) {
+    uint16_t ignored_entry_successor_index) {
   const uint16_t region_entry_index =
       loom_amdgpu_source_region_block_index(source_body, region_entry);
 
@@ -538,7 +538,7 @@ static bool loom_amdgpu_region_has_single_entry(
       continue;
     }
     loom_block_t* const* successors = loom_op_const_successors(terminator);
-    for (uint8_t successor_index = 0;
+    for (uint16_t successor_index = 0;
          successor_index < terminator->successor_count; ++successor_index) {
       const uint16_t successor_block_index =
           loom_amdgpu_source_region_block_index(source_body,
@@ -567,7 +567,7 @@ static iree_status_t loom_amdgpu_verify_masked_region_single_entry(
     loom_low_lower_context_t* context, const loom_op_t* diagnostic_op,
     loom_region_t* source_body, const uint8_t* in_region,
     const loom_block_t* region_entry, const loom_op_t* ignored_entry_terminator,
-    uint8_t ignored_entry_successor_index) {
+    uint16_t ignored_entry_successor_index) {
   if (!loom_amdgpu_region_has_single_entry(
           source_body, in_region, diagnostic_op->parent_block, region_entry,
           ignored_entry_terminator, ignored_entry_successor_index)) {
@@ -608,7 +608,7 @@ static bool loom_amdgpu_try_analyze_bounded_region(
     }
 
     loom_block_t* const* successors = loom_op_const_successors(terminator);
-    for (uint8_t successor_index = 0;
+    for (uint16_t successor_index = 0;
          successor_index < terminator->successor_count; ++successor_index) {
       loom_block_t* successor = successors[successor_index];
       if (successor == continuation) {
@@ -720,7 +720,7 @@ static iree_status_t loom_amdgpu_analyze_then_masked_region(
     }
 
     loom_block_t* const* successors = loom_op_const_successors(terminator);
-    for (uint8_t successor_index = 0;
+    for (uint16_t successor_index = 0;
          successor_index < terminator->successor_count; ++successor_index) {
       loom_block_t* successor = successors[successor_index];
       if (successor == source_continuation) {
@@ -1263,7 +1263,7 @@ static bool loom_amdgpu_try_find_divergent_loop_entry_edge(
       continue;
     }
     loom_block_t* const* successors = loom_op_const_successors(terminator);
-    for (uint8_t successor_index = 0;
+    for (uint16_t successor_index = 0;
          successor_index < terminator->successor_count; ++successor_index) {
       if (successors[successor_index] != header_block) {
         continue;

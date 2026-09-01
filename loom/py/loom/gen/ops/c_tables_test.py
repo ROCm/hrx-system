@@ -17,6 +17,7 @@ from loom.assembly import (
     AttrParams,
     AttrTable,
     BlockRef,
+    BlockRefs,
     Clause,
     EncodingOf,
     Flags,
@@ -147,7 +148,7 @@ from loom.gen.ops.c_tables import (
     generate_type_registry,
 )
 from loom.location_tag import BuiltinLocationTag
-from loom.scalar_type import ScalarTypeKind
+from loom.scalar_type import SCALAR_TYPE_NONE, ScalarTypeKind
 
 
 @contextmanager
@@ -249,7 +250,10 @@ def test_type_constraint_map_covers_every_constraint() -> None:
 def test_generate_scalar_type_table_uses_length_partitioned_classification() -> None:
     generated = generate_scalar_type_table_inc()
 
+    assert SCALAR_TYPE_NONE == 0
     assert "loom_scalar_type_names[LOOM_SCALAR_TYPE_COUNT_]" in generated
+    assert f"LOOM_SCALAR_TYPE_NONE == {SCALAR_TYPE_NONE}" in generated
+    assert "return LOOM_SCALAR_TYPE_NONE;" in generated
     assert "switch (name.size)" in generated
     assert "iree_string_view_equal" in generated
     assert "for (" not in generated
@@ -2412,6 +2416,29 @@ def test_generate_builders_emit_successor_fields() -> None:
     assert "{LOOM_FORMAT_KIND_SUCCESSOR_REF, 0, 0}," in tables_c
 
 
+def test_generate_builders_emit_variadic_successor_fields() -> None:
+    op = Op(
+        "test.switch",
+        group=Dialect("test"),
+        successors=[
+            Successor("default_dest"),
+            Successor("case_dests", variadic=True),
+        ],
+        format=[BlockRef("default_dest"), BlockRefs("case_dests")],
+    )
+
+    ops_h = generate_ops_h("test", 0, [op])
+    builders_c = generate_builders_c("test", [op])
+    tables_c = generate_tables_c("test", 0, [op])
+
+    assert "LOOM_DEFINE_VARIADIC_SUCCESSORS(loom_test_switch_case_dests, 1)" in ops_h
+    assert "loom_block_t* const* case_dests" in ops_h
+    assert "case_dests_count, UINT16_MAX - 1" in builders_c
+    assert "1 + (uint16_t)case_dests_count" in builders_c
+    assert "loom_op_successors(*out_op) + 1, case_dests" in builders_c
+    assert "{LOOM_FORMAT_KIND_SUCCESSOR_REFS, 1, 0}," in tables_c
+
+
 def test_generate_tables_preserves_operand_and_result_descriptor_names() -> None:
     op = Op(
         "test.reduce",
@@ -3160,6 +3187,27 @@ def test_scoped_enum_rejects_context_free_c_builder() -> None:
 
     with _raises_value_error("requires a domain-aware handwritten C builder"):
         generate_ops_h("test", 0, [op])
+
+
+def test_optional_scoped_enum_generates_structural_c_builder() -> None:
+    op = Op(
+        "test.branch",
+        group=Dialect("test"),
+        attrs=[AttrDef("descriptor", "scoped_enum", optional=True)],
+        format=[
+            OptionalGroup(
+                [ScopedEnumRef("descriptor")],
+                anchor="descriptor",
+            )
+        ],
+    )
+
+    ops_h = generate_ops_h("test", 0, [op])
+    builders_c = generate_builders_c("test", [op])
+
+    assert "iree_status_t loom_test_branch_build(" in ops_h
+    assert "iree_status_t loom_test_branch_build(" in builders_c
+    assert "descriptor" not in builders_c
 
 
 def test_region_syntax_generates_format_selector() -> None:

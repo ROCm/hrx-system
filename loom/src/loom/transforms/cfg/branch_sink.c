@@ -126,10 +126,11 @@ static uint8_t loom_branch_sink_block_arg_region_index(
   if (direct_region_index != LOOM_BRANCH_SINK_REGION_INDEX_NONE) {
     return direct_region_index;
   }
-  if (!block->first_op || !block->first_op->parent_op) {
+  if (!block->parent_region || !block->parent_region->owner_op) {
     return LOOM_BRANCH_SINK_REGION_INDEX_NONE;
   }
-  return loom_branch_sink_op_region_index(branch, block->first_op->parent_op);
+  return loom_branch_sink_op_region_index(branch,
+                                          block->parent_region->owner_op);
 }
 
 static bool loom_branch_sink_merge_region_index(uint8_t region_index,
@@ -429,7 +430,8 @@ static iree_status_t loom_branch_sink_process_function_once(
 
 iree_status_t loom_branch_sink_run(loom_pass_t* pass, loom_module_t* module,
                                    loom_func_like_t function) {
-  if (!loom_func_like_body(function)) return iree_ok_status();
+  loom_region_t* body = loom_func_like_body(function);
+  if (!body) return iree_ok_status();
 
   loom_rewriter_t rewriter;
   IREE_RETURN_IF_ERROR(
@@ -444,9 +446,9 @@ iree_status_t loom_branch_sink_run(loom_pass_t* pass, loom_module_t* module,
   iree_status_t status = loom_branch_sink_region_stack_initialize(
       pass->arena, &context.region_stack);
   if (iree_status_is_ok(status)) {
-    status = loom_motion_analysis_initialize(module, /*fact_table=*/NULL,
-                                             /*value_domain=*/NULL, pass->arena,
-                                             &context.motion);
+    status = loom_motion_analysis_initialize_region(
+        module, body, /*fact_table=*/NULL, /*value_domain=*/NULL, pass->arena,
+        &context.motion);
   }
 
   bool changed = true;

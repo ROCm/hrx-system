@@ -42,6 +42,7 @@ from loom.format.bytecode.writer import (
     SECTION_ENCODINGS,
     SECTION_IR,
     SECTION_LOCATIONS,
+    SECTION_MODULE_OPS,
     SECTION_OPS,
     SECTION_SOURCE_TRIVIA,
     SECTION_SOURCES,
@@ -104,6 +105,7 @@ from loom.ir import (
     TiedResult,
     Type,
     TypeKind,
+    U64Attr,
     Value,
     rebuild_value_metadata,
     replace_canonical_attr_dict,
@@ -241,7 +243,10 @@ class BytecodeReader:
         if SECTION_LOCATIONS in sections:
             self._read_locations_section(sections[SECTION_LOCATIONS], module)
 
-        # Read IR and symbols.
+        # Read non-symbol module operations, then IR-backed symbols.
+        module_operations_data = sections.get(SECTION_MODULE_OPS)
+        if module_operations_data is not None:
+            self._read_module_operations(module_operations_data, module)
         ir_data = sections.get(SECTION_IR, (0, b""))
         symbols_data = sections.get(SECTION_SYMBOLS, (0, b""))
         if isinstance(symbols_data, tuple):
@@ -269,13 +274,22 @@ class BytecodeReader:
         region_count = 0
         block_count = 0
         op_count = 0
-        for symbol in module.symbols:
-            if symbol.op is None or not symbol.op.regions:
+        symbol_operation_ids = {
+            id(symbol.op) for symbol in module.symbols if symbol.op is not None
+        }
+        for operation in module.body.ops:
+            if operation.is_dead:
                 continue
-            counts = self._count_region_forest(symbol.op.regions)
-            region_count += counts[1]
-            block_count += counts[2]
-            op_count += counts[3]
+            if id(operation) in symbol_operation_ids:
+                counts = self._count_region_forest(operation.regions)
+                region_count += counts[1]
+                block_count += counts[2]
+                op_count += counts[3]
+            else:
+                counts = self._count_operation_tree(operation)
+                region_count += counts[1]
+                block_count += counts[2]
+                op_count += counts[3]
         return value_count, region_count, block_count, op_count
 
     # --- Low-level reads ---
@@ -1717,6 +1731,102 @@ class BytecodeReader:
             raise BytecodeError("root region allocation summary does not match IR")
         return region
 
+    def _read_module_operations(
+        self, section: tuple[int, bytes], module: Module
+    ) -> None:
+        """Read the bounded non-symbol module operation forest."""
+        _absolute_offset, data = section
+        offset = 0
+        value_count, offset = decode_varint(data, offset)
+        region_count, offset = decode_varint(data, offset)
+        block_count, offset = decode_varint(data, offset)
+        op_count, offset = decode_varint(data, offset)
+        root_op_count, offset = decode_varint(data, offset)
+        payload_length = len(data) - offset
+        allocation_counts = (
+            value_count,
+            region_count,
+            block_count,
+            op_count,
+            root_op_count,
+        )
+        if (
+            root_op_count == 0
+            or root_op_count > op_count
+            or any(count > 0xFFFFFFFF for count in allocation_counts)
+            or any(count > payload_length for count in allocation_counts)
+        ):
+            raise BytecodeError("module operation allocation summary is invalid")
+
+        value_map: list[int] = []
+        operations: list[Operation] = []
+        previous_record_identity: tuple[bytes, bytes] | None = None
+        ordinary_operation_seen = False
+        for _ in range(root_op_count):
+            operation, offset = self._read_operation(
+                data, offset, module, value_map, [module.body]
+            )
+            declaration = self._op_decls_by_name.get(operation.name)
+            if declaration is None:
+                raise BytecodeError(
+                    f"module operation {operation.name!r} is not registered"
+                )
+            if declaration.symbol_def is not None:
+                raise BytecodeError(
+                    "MODULE_OPS must not contain symbol-defining operations"
+                )
+            if not declaration.has_trait("ModuleScope"):
+                raise BytecodeError(
+                    f"operation {operation.name!r} is not permitted at module scope"
+                )
+
+            key_attr = declaration.keyed_module_record_attr
+            if key_attr is None:
+                ordinary_operation_seen = True
+            else:
+                if ordinary_operation_seen:
+                    raise BytecodeError(
+                        "keyed module records must precede ordinary module operations"
+                    )
+                key = operation.attributes.get(key_attr)
+                if not isinstance(key, str):
+                    raise BytecodeError(
+                        f"keyed module operation {operation.name!r} has no string "
+                        f"attribute {key_attr!r}"
+                    )
+                if not key:
+                    raise BytecodeError("keyed module record key must be non-empty")
+                identity = (
+                    operation.name.encode("utf-8"),
+                    key.encode("utf-8"),
+                )
+                if (
+                    previous_record_identity is not None
+                    and identity <= previous_record_identity
+                ):
+                    raise BytecodeError(
+                        "keyed module records are not in strict canonical order"
+                    )
+                previous_record_identity = identity
+            operations.append(operation)
+
+        if offset != len(data):
+            raise BytecodeError("MODULE_OPS section has trailing bytes")
+        parsed_counts = [0, 0, 0, 0]
+        for operation in operations:
+            counts = self._count_operation_tree(operation)
+            for index, count in enumerate(counts):
+                parsed_counts[index] += count
+        if tuple(parsed_counts) != (
+            value_count,
+            region_count,
+            block_count,
+            op_count,
+        ):
+            raise BytecodeError("module operation allocation summary does not match IR")
+        for operation in operations:
+            module.add_top_level_operation(operation)
+
     def _count_region_tree(self, region: Region) -> tuple[int, int, int, int]:
         """Return value, region, block, and op counts for a parsed region tree."""
         value_count = 0
@@ -1734,6 +1844,20 @@ class BytecodeReader:
                     region_count += nested_counts[1]
                     block_count += nested_counts[2]
                     op_count += nested_counts[3]
+        return value_count, region_count, block_count, op_count
+
+    def _count_operation_tree(self, operation: Operation) -> tuple[int, int, int, int]:
+        """Return value, region, block, and op counts for one parsed op tree."""
+        value_count = len(operation.results)
+        region_count = 0
+        block_count = 0
+        op_count = 1
+        for region in operation.regions:
+            counts = self._count_region_tree(region)
+            value_count += counts[0]
+            region_count += counts[1]
+            block_count += counts[2]
+            op_count += counts[3]
         return value_count, region_count, block_count, op_count
 
     def _count_region_forest(
@@ -2171,6 +2295,9 @@ class BytecodeReader:
                 return self._read_symbol_collection(
                     data, offset, attr_def, "symbol_set"
                 )
+            case 19:  # U64
+                value, offset = decode_varint(data, offset)
+                return U64Attr(value), offset
             case _:
                 raise BytecodeError(f"unknown attr value kind: {kind}")
 

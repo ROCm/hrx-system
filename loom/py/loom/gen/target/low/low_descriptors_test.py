@@ -24,6 +24,7 @@ from loom.target.low_descriptors import (
     LOW_DESCRIPTOR_ENCODING_ID_NONE,
     AsmForm,
     AsmImmediate,
+    AsmImmediateFlag,
     AsmOperandSegment,
     AsmOperandSegmentDelimiter,
     AsmResultValueType,
@@ -68,6 +69,7 @@ from loom.target.low_descriptors import (
 from loom.target.test.descriptors import (
     TEST_LOW_ADD_I32_DESCRIPTOR,
     TEST_LOW_BARRIER_DESCRIPTOR,
+    TEST_LOW_BR_DESCRIPTOR,
     TEST_LOW_COND_BR_I32_DESCRIPTOR,
     TEST_LOW_CONST_I32_DESCRIPTOR,
     TEST_LOW_CORE_DESCRIPTOR_SET,
@@ -75,6 +77,7 @@ from loom.target.test.descriptors import (
     TEST_LOW_STATE_ADD_I32_DESCRIPTOR,
     TEST_LOW_STATE_ADD_I32_RHS_ZERO_DESCRIPTOR,
     TEST_LOW_STATE_ADD_SCHEDULE_STATE_DESCRIPTOR,
+    TEST_LOW_SWITCH_DESCRIPTOR,
     TEST_LOW_WRITE_HIGH16_I32_DESCRIPTOR,
     TEST_LOW_WRITE_LOW16_I32_DESCRIPTOR,
 )
@@ -1417,7 +1420,7 @@ def test_generate_test_low_core_descriptor_set() -> None:
     assert '"test.low"' in generated.source
     assert '"test.spv.op_iadd.i32"' in generated.source
     assert '"OpIAdd"' in generated.source
-    assert ".op_kind = LOOM_LOW_DESCRIPTOR_OP_KIND_CONST," in generated.source
+    assert ".carrier = LOOM_LOW_DESCRIPTOR_CARRIER_CONST," in generated.source
     assert (".instruction_class_flags = LOOM_LOW_INSTRUCTION_CLASS_FLAG_SCALAR_ALU") in generated.source
 
 
@@ -1577,6 +1580,76 @@ def test_generator_emits_trailing_variadic_operand_segment() -> None:
     assert ".delimiter = LOOM_LOW_ASM_OPERAND_SEGMENT_DELIMITER_PAREN," in generated.source
     assert ".flags = LOOM_LOW_ASM_OPERAND_SEGMENT_FLAG_VARIADIC," in generated.source
     assert ".asm_operand_segments = kTestLowCoreAsmOperandSegments," in generated.source
+
+
+def test_generator_emits_bounded_variable_unit_count_operand() -> None:
+    dst, lhs, rhs = TEST_LOW_ADD_I32_DESCRIPTOR.operands
+    descriptor = replace(
+        TEST_LOW_ADD_I32_DESCRIPTOR,
+        operands=(
+            replace(
+                dst,
+                flags=(OperandFlag.VARIABLE_UNIT_COUNT,),
+                unit_count=64,
+            ),
+            replace(
+                lhs,
+                flags=(OperandFlag.VARIABLE_UNIT_COUNT,),
+                unit_count=64,
+            ),
+            rhs,
+        ),
+        asm_forms=(),
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(descriptor,),
+    )
+
+    generated = generate_descriptor_set(descriptor_set)
+
+    assert "LOOM_LOW_OPERAND_FLAG_VARIABLE_UNIT_COUNT" in generated.source
+    assert ".unit_count = 64," in generated.source
+
+
+def test_generator_rejects_zero_unit_count_operand() -> None:
+    dst, lhs, rhs = TEST_LOW_ADD_I32_DESCRIPTOR.operands
+    descriptor = replace(
+        TEST_LOW_ADD_I32_DESCRIPTOR,
+        operands=(dst, replace(lhs, unit_count=0), rhs),
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(descriptor,),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor 'test.add.i32' operand 'lhs' unit count must be nonzero"),
+    ):
+        generate_descriptor_set(descriptor_set)
+
+
+def test_generator_accepts_variable_unit_count_compact_assembly() -> None:
+    dst, lhs, rhs = TEST_LOW_ADD_I32_DESCRIPTOR.operands
+    descriptor = replace(
+        TEST_LOW_ADD_I32_DESCRIPTOR,
+        operands=(
+            replace(dst, flags=(OperandFlag.VARIABLE_UNIT_COUNT,)),
+            lhs,
+            rhs,
+        ),
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(descriptor,),
+    )
+
+    compiled = compiler.compile_descriptor_set(descriptor_set)
+    generated = generate_descriptor_set(descriptor_set)
+
+    assert len(compiled.asm_forms) == 1
+    assert "LOOM_LOW_OPERAND_FLAG_VARIABLE_UNIT_COUNT" in generated.source
 
 
 def test_generator_rejects_non_trailing_variadic_operand() -> None:
@@ -1836,6 +1909,35 @@ def test_generator_rejects_low_const_asm_operand() -> None:
     with pytest.raises(
         ValueError,
         match=re.escape("descriptor 'test.const.i32' low.const asm form 'test.const.i32' must expose exactly one result and no operands"),
+    ):
+        generate_descriptor_set(descriptor_set)
+
+
+def test_generator_rejects_low_br_descriptor_operands() -> None:
+    descriptor = replace(
+        TEST_LOW_BR_DESCRIPTOR,
+        operands=(TEST_LOW_STATE_ADD_SCHEDULE_STATE_DESCRIPTOR.operands[-1],),
+    )
+    descriptor_set = replace(TEST_LOW_CORE_DESCRIPTOR_SET, descriptors=(descriptor,))
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor 'test.br' uses low.br but declares 1 descriptor operands"),
+    ):
+        generate_descriptor_set(descriptor_set)
+
+
+def test_generator_rejects_optional_low_switch_selector() -> None:
+    selector = replace(
+        TEST_LOW_SWITCH_DESCRIPTOR.operands[0],
+        flags=(OperandFlag.OPTIONAL,),
+    )
+    descriptor = replace(TEST_LOW_SWITCH_DESCRIPTOR, operands=(selector,))
+    descriptor_set = replace(TEST_LOW_CORE_DESCRIPTOR_SET, descriptors=(descriptor,))
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor 'test.switch' uses low.switch but declares a descriptor operand shape other than one required selector"),
     ):
         generate_descriptor_set(descriptor_set)
 
@@ -2324,6 +2426,69 @@ def test_generator_emits_enum_immediate_domains() -> None:
     assert "test.condition" in generated.source
     assert "eq" in generated.source
     assert "ne" in generated.source
+
+
+def test_generator_emits_symbolic_enum_asm_immediate() -> None:
+    domain = EnumDomain(
+        "test.condition",
+        values=(EnumValue("ne", 1), EnumValue("eq", 0)),
+    )
+    enum_immediate = replace(
+        TEST_LOW_CONST_I32_DESCRIPTOR.immediates[0],
+        kind=ImmediateKind.ENUM,
+        enum_domain="test.condition",
+    )
+    descriptor = replace(
+        TEST_LOW_CONST_I32_DESCRIPTOR,
+        immediates=(enum_immediate,),
+        asm_forms=(
+            replace(
+                TEST_LOW_CONST_I32_DESCRIPTOR.asm_forms[0],
+                immediates=(
+                    AsmImmediate(
+                        enum_immediate.field_name,
+                        flags=(AsmImmediateFlag.ENUM_TOKEN,),
+                    ),
+                ),
+            ),
+        ),
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        enum_domains=(domain,),
+        descriptors=(descriptor,),
+    )
+
+    generated = generate_descriptor_set(descriptor_set)
+
+    assert "LOOM_LOW_ASM_IMMEDIATE_FLAG_ENUM_TOKEN" in generated.source
+
+
+def test_generator_rejects_symbolic_non_enum_asm_immediate() -> None:
+    descriptor = replace(
+        TEST_LOW_CONST_I32_DESCRIPTOR,
+        asm_forms=(
+            replace(
+                TEST_LOW_CONST_I32_DESCRIPTOR.asm_forms[0],
+                immediates=(
+                    AsmImmediate(
+                        TEST_LOW_CONST_I32_DESCRIPTOR.immediates[0].field_name,
+                        flags=(AsmImmediateFlag.ENUM_TOKEN,),
+                    ),
+                ),
+            ),
+        ),
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(descriptor,),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor 'test.const.i32' asm form 'test.const.i32' immediate 'i32_value' requests enum-token spelling for a non-enum field"),
+    ):
+        generate_descriptor_set(descriptor_set)
 
 
 def test_generator_rejects_missing_enum_immediate_domain() -> None:

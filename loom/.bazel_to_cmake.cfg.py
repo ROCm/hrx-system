@@ -69,6 +69,7 @@ _LOOM_CONFIG_CMAKE_OPTIONS = {
     "//loom/config/target/arch:amdgpu": "LOOM_TARGET_ARCH_AMDGPU",
     "//loom/config/target/arch:llvmir": "LOOM_TARGET_ARCH_LLVMIR",
     "//loom/config/target/arch:spirv": "LOOM_TARGET_ARCH_SPIRV",
+    "//loom/config/target/arch:vm": "LOOM_TARGET_ARCH_VM",
     "//loom/config/target/arch:wasm": "LOOM_TARGET_ARCH_WASM",
     "//loom/config/target/arch:x86": "LOOM_TARGET_ARCH_X86",
 }
@@ -973,71 +974,12 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
         )
         self._emit_platform_guard_end(target_compatible_with)
 
-    def loom_target_contract_table_cc_libraries(
-        self,
-        name,
-        generator,
-        args=None,
-        inputs=None,
-        contract_deps=None,
-        lower_rule_deps=None,
-        tags=None,
-        testonly=None,
-        target_compatible_with=None,
-        visibility=None,
-        **kwargs,
-    ):
-        if self._should_skip_target(tags=tags, **kwargs):
-            return
-        target_compatible_with = self._apply_loom_target_compatible_with(
-            target_compatible_with
-        )
-
-        name_block = self._convert_string_arg_block("NAME", name, quote=False)
-        generator_block = self._convert_single_target_block("GENERATOR", generator)
-        args_block, platform_args_block = self._convert_platform_select_strings(
-            name,
-            "ARGS",
-            self._convert_generated_args(args),
-            sort=False,
-        )
-        inputs_block, platform_inputs_block = self._convert_platform_select_strings(
-            name,
-            "INPUTS",
-            self._convert_generated_inputs(inputs),
-            sort=False,
-        )
-        contract_deps_block = self._convert_target_list_block(
-            "CONTRACT_DEPS", contract_deps
-        )
-        lower_rule_deps_block = self._convert_target_list_block(
-            "LOWER_RULE_DEPS", lower_rule_deps
-        )
-        testonly_block = self._convert_option_block("TESTONLY", testonly)
-
-        self._emit_platform_guard_begin(target_compatible_with)
-        if platform_args_block:
-            self._converter.body += platform_args_block
-        if platform_inputs_block:
-            self._converter.body += platform_inputs_block
-        self._converter.body += (
-            f"loom_target_contract_table_cc_libraries(\n"
-            f"{name_block}"
-            f"{generator_block}"
-            f"{args_block}"
-            f"{inputs_block}"
-            f"{contract_deps_block}"
-            f"{lower_rule_deps_block}"
-            f"{testonly_block}"
-            f")\n\n"
-        )
-        self._emit_platform_guard_end(target_compatible_with)
-
     def loom_target_contract_file_family(
         self,
         name,
         generator,
         fragments,
+        contract_sets,
         args=None,
         inputs=None,
         comment=None,
@@ -1059,6 +1001,14 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
             [
                 f"{stem}={fragment_key}"
                 for stem, fragment_key in sorted(fragments.items())
+            ],
+            sort=False,
+        )
+        contract_sets_block = self._convert_string_list_block(
+            "CONTRACT_SETS",
+            [
+                f"{contract_set_name}={','.join(fragment_stems)}"
+                for contract_set_name, fragment_stems in sorted(contract_sets.items())
             ],
             sort=False,
         )
@@ -1086,6 +1036,7 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
             f"{name_block}"
             f"{generator_block}"
             f"{fragments_block}"
+            f"{contract_sets_block}"
             f"{args_block}"
             f"{inputs_block}"
             f"{comment_block}"

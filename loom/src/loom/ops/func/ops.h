@@ -24,8 +24,15 @@ enum {
   LOOM_OP_FUNC_DEF = LOOM_OP_KIND(LOOM_DIALECT_FUNC, 0),
   LOOM_OP_FUNC_DECL = LOOM_OP_KIND(LOOM_DIALECT_FUNC, 1),
   LOOM_OP_FUNC_CALL = LOOM_OP_KIND(LOOM_DIALECT_FUNC, 2),
-  LOOM_OP_FUNC_RETURN = LOOM_OP_KIND(LOOM_DIALECT_FUNC, 3),
-  LOOM_OP_FUNC_COUNT_ = 4,
+  LOOM_OP_FUNC_CALL_INDIRECT = LOOM_OP_KIND(LOOM_DIALECT_FUNC, 3),
+  LOOM_OP_FUNC_RETURN = LOOM_OP_KIND(LOOM_DIALECT_FUNC, 4),
+  LOOM_OP_FUNC_FAIL = LOOM_OP_KIND(LOOM_DIALECT_FUNC, 5),
+  LOOM_OP_FUNC_NULL = LOOM_OP_KIND(LOOM_DIALECT_FUNC, 6),
+  LOOM_OP_FUNC_COMPARE_NULL = LOOM_OP_KIND(LOOM_DIALECT_FUNC, 7),
+  LOOM_OP_FUNC_ADDRESS = LOOM_OP_KIND(LOOM_DIALECT_FUNC, 8),
+  LOOM_OP_FUNC_REF_CAST = LOOM_OP_KIND(LOOM_DIALECT_FUNC, 9),
+  LOOM_OP_FUNC_IMPORT_RESOLVED = LOOM_OP_KIND(LOOM_DIALECT_FUNC, 10),
+  LOOM_OP_FUNC_COUNT_ = 11,
 };
 
 // Function visibility. Absent (0) means private (module-internal).
@@ -62,6 +69,34 @@ typedef enum loom_func_retain_e {
   LOOM_FUNC_RETAIN_COUNT_ = 2,
 } loom_func_retain_t;
 
+// Import resolution policy. Absent (0) means required.
+typedef enum loom_func_decl_import_policy_e {
+  LOOM_FUNC_DECL_IMPORT_POLICY_OPTIONAL = 1,
+  LOOM_FUNC_DECL_IMPORT_POLICY_COUNT_ = 2,
+} loom_func_decl_import_policy_t;
+
+// Non-OK program status returned by func.fail.
+typedef enum loom_func_fail_status_e {
+  LOOM_FUNC_FAIL_STATUS_CANCELLED = 1,
+  LOOM_FUNC_FAIL_STATUS_UNKNOWN = 2,
+  LOOM_FUNC_FAIL_STATUS_INVALID_ARGUMENT = 3,
+  LOOM_FUNC_FAIL_STATUS_DEADLINE_EXCEEDED = 4,
+  LOOM_FUNC_FAIL_STATUS_NOT_FOUND = 5,
+  LOOM_FUNC_FAIL_STATUS_ALREADY_EXISTS = 6,
+  LOOM_FUNC_FAIL_STATUS_PERMISSION_DENIED = 7,
+  LOOM_FUNC_FAIL_STATUS_RESOURCE_EXHAUSTED = 8,
+  LOOM_FUNC_FAIL_STATUS_FAILED_PRECONDITION = 9,
+  LOOM_FUNC_FAIL_STATUS_ABORTED = 10,
+  LOOM_FUNC_FAIL_STATUS_OUT_OF_RANGE = 11,
+  LOOM_FUNC_FAIL_STATUS_UNIMPLEMENTED = 12,
+  LOOM_FUNC_FAIL_STATUS_INTERNAL = 13,
+  LOOM_FUNC_FAIL_STATUS_UNAVAILABLE = 14,
+  LOOM_FUNC_FAIL_STATUS_DATA_LOSS = 15,
+  LOOM_FUNC_FAIL_STATUS_UNAUTHENTICATED = 16,
+  LOOM_FUNC_FAIL_STATUS_INCOMPATIBLE = 18,
+  LOOM_FUNC_FAIL_STATUS_COUNT_ = 19,
+} loom_func_fail_status_t;
+
 // LOOM_OP_FUNC_DEF: Function definition. Callable by name via func.call.
 // func.def @negate(%input: f32) -> (f32) {
 //   func.return %input : f32
@@ -80,7 +115,8 @@ LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_def_abi, 8, loom_target_abi_kind_t)
 LOOM_DEFINE_ATTR_DICT(loom_func_def_abi_attrs, 9)
 LOOM_DEFINE_ATTR_STRING(loom_func_def_export_symbol, 10)
 LOOM_DEFINE_ATTR_DICT(loom_func_def_export_attrs, 11)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_def_retain, 12, loom_func_retain_t)
+LOOM_DEFINE_ATTR_DICT(loom_func_def_export_metadata, 12)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_def_retain, 13, loom_func_retain_t)
 LOOM_DEFINE_REGION(loom_func_def_body, 0)
 enum loom_func_def_build_flag_bits_e {
   LOOM_FUNC_DEF_BUILD_FLAG_HAS_VISIBILITY = 1u << 0,
@@ -94,7 +130,8 @@ enum loom_func_def_build_flag_bits_e {
   LOOM_FUNC_DEF_BUILD_FLAG_HAS_EXPORT_SYMBOL = 1u << 8,
   LOOM_FUNC_DEF_BUILD_FLAG_HAS_ABI_ATTRS = 1u << 9,
   LOOM_FUNC_DEF_BUILD_FLAG_HAS_EXPORT_ATTRS = 1u << 10,
-  LOOM_FUNC_DEF_BUILD_FLAG_HAS_PREDICATES = 1u << 11,
+  LOOM_FUNC_DEF_BUILD_FLAG_HAS_EXPORT_METADATA = 1u << 11,
+  LOOM_FUNC_DEF_BUILD_FLAG_HAS_PREDICATES = 1u << 12,
 };
 typedef uint32_t loom_func_def_build_flags_t;
 iree_status_t loom_func_def_build(
@@ -111,6 +148,7 @@ iree_status_t loom_func_def_build(
     loom_optional loom_named_attr_slice_t abi_attrs,
     loom_optional loom_string_id_t export_symbol,
     loom_optional loom_named_attr_slice_t export_attrs,
+    loom_optional loom_named_attr_slice_t export_metadata,
     loom_symbol_ref_t callee,
     const loom_type_t* arg_types,
     iree_host_size_t arg_types_count,
@@ -135,32 +173,38 @@ LOOM_DEFINE_ATTR_SYMBOL(loom_func_decl_callee, 0)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_decl_visibility, 1, loom_func_visibility_t)
 LOOM_DEFINE_ATTR_STRING(loom_func_decl_import_module, 2)
 LOOM_DEFINE_ATTR_STRING(loom_func_decl_import_symbol, 3)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_decl_cc, 4, loom_func_cc_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_decl_purity, 5, loom_func_purity_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_decl_temperature, 6, loom_func_temperature_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_decl_inline_policy, 7, loom_inline_policy_t)
-LOOM_DEFINE_ATTR_SYMBOL(loom_func_decl_target, 8)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_decl_abi, 9, loom_target_abi_kind_t)
-LOOM_DEFINE_ATTR_DICT(loom_func_decl_abi_attrs, 10)
-LOOM_DEFINE_ATTR_STRING(loom_func_decl_export_symbol, 11)
-LOOM_DEFINE_ATTR_DICT(loom_func_decl_export_attrs, 12)
-LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_func_decl_predicates, 13)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_decl_retain, 14, loom_func_retain_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_decl_import_policy, 4, loom_func_decl_import_policy_t)
+LOOM_DEFINE_ATTR_DICT(loom_func_decl_import_metadata, 5)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_decl_cc, 6, loom_func_cc_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_decl_purity, 7, loom_func_purity_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_decl_temperature, 8, loom_func_temperature_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_decl_inline_policy, 9, loom_inline_policy_t)
+LOOM_DEFINE_ATTR_SYMBOL(loom_func_decl_target, 10)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_decl_abi, 11, loom_target_abi_kind_t)
+LOOM_DEFINE_ATTR_DICT(loom_func_decl_abi_attrs, 12)
+LOOM_DEFINE_ATTR_STRING(loom_func_decl_export_symbol, 13)
+LOOM_DEFINE_ATTR_DICT(loom_func_decl_export_attrs, 14)
+LOOM_DEFINE_ATTR_DICT(loom_func_decl_export_metadata, 15)
+LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_func_decl_predicates, 16)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_decl_retain, 17, loom_func_retain_t)
 enum loom_func_decl_build_flag_bits_e {
   LOOM_FUNC_DECL_BUILD_FLAG_HAS_VISIBILITY = 1u << 0,
   LOOM_FUNC_DECL_BUILD_FLAG_HAS_RETAIN = 1u << 1,
-  LOOM_FUNC_DECL_BUILD_FLAG_HAS_IMPORT_MODULE = 1u << 2,
-  LOOM_FUNC_DECL_BUILD_FLAG_HAS_IMPORT_SYMBOL = 1u << 3,
-  LOOM_FUNC_DECL_BUILD_FLAG_HAS_CC = 1u << 4,
-  LOOM_FUNC_DECL_BUILD_FLAG_HAS_PURITY = 1u << 5,
-  LOOM_FUNC_DECL_BUILD_FLAG_HAS_TEMPERATURE = 1u << 6,
-  LOOM_FUNC_DECL_BUILD_FLAG_HAS_INLINE_POLICY = 1u << 7,
-  LOOM_FUNC_DECL_BUILD_FLAG_HAS_TARGET = 1u << 8,
-  LOOM_FUNC_DECL_BUILD_FLAG_HAS_ABI = 1u << 9,
-  LOOM_FUNC_DECL_BUILD_FLAG_HAS_EXPORT_SYMBOL = 1u << 10,
-  LOOM_FUNC_DECL_BUILD_FLAG_HAS_ABI_ATTRS = 1u << 11,
-  LOOM_FUNC_DECL_BUILD_FLAG_HAS_EXPORT_ATTRS = 1u << 12,
-  LOOM_FUNC_DECL_BUILD_FLAG_HAS_PREDICATES = 1u << 13,
+  LOOM_FUNC_DECL_BUILD_FLAG_HAS_IMPORT_POLICY = 1u << 2,
+  LOOM_FUNC_DECL_BUILD_FLAG_HAS_IMPORT_MODULE = 1u << 3,
+  LOOM_FUNC_DECL_BUILD_FLAG_HAS_IMPORT_SYMBOL = 1u << 4,
+  LOOM_FUNC_DECL_BUILD_FLAG_HAS_CC = 1u << 5,
+  LOOM_FUNC_DECL_BUILD_FLAG_HAS_PURITY = 1u << 6,
+  LOOM_FUNC_DECL_BUILD_FLAG_HAS_TEMPERATURE = 1u << 7,
+  LOOM_FUNC_DECL_BUILD_FLAG_HAS_INLINE_POLICY = 1u << 8,
+  LOOM_FUNC_DECL_BUILD_FLAG_HAS_TARGET = 1u << 9,
+  LOOM_FUNC_DECL_BUILD_FLAG_HAS_ABI = 1u << 10,
+  LOOM_FUNC_DECL_BUILD_FLAG_HAS_EXPORT_SYMBOL = 1u << 11,
+  LOOM_FUNC_DECL_BUILD_FLAG_HAS_IMPORT_METADATA = 1u << 12,
+  LOOM_FUNC_DECL_BUILD_FLAG_HAS_ABI_ATTRS = 1u << 13,
+  LOOM_FUNC_DECL_BUILD_FLAG_HAS_EXPORT_ATTRS = 1u << 14,
+  LOOM_FUNC_DECL_BUILD_FLAG_HAS_EXPORT_METADATA = 1u << 15,
+  LOOM_FUNC_DECL_BUILD_FLAG_HAS_PREDICATES = 1u << 16,
 };
 typedef uint32_t loom_func_decl_build_flags_t;
 iree_status_t loom_func_decl_build(
@@ -168,8 +212,10 @@ iree_status_t loom_func_decl_build(
     loom_func_decl_build_flags_t build_flags,
     loom_optional uint8_t visibility,
     loom_optional uint8_t retain,
+    loom_optional uint8_t import_policy,
     loom_optional loom_string_id_t import_module,
     loom_optional loom_string_id_t import_symbol,
+    loom_optional loom_named_attr_slice_t import_metadata,
     loom_optional uint8_t cc,
     loom_optional uint8_t purity,
     loom_optional uint8_t temperature,
@@ -179,6 +225,7 @@ iree_status_t loom_func_decl_build(
     loom_optional loom_named_attr_slice_t abi_attrs,
     loom_optional loom_string_id_t export_symbol,
     loom_optional loom_named_attr_slice_t export_attrs,
+    loom_optional loom_named_attr_slice_t export_metadata,
     loom_symbol_ref_t callee,
     const loom_type_t* arg_types,
     iree_host_size_t arg_types_count,
@@ -230,6 +277,27 @@ iree_status_t loom_func_call_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
+// LOOM_OP_FUNC_CALL_INDIRECT: Call a first-class function value with an exact structural signature.
+// %result = func.call.indirect %target(%value) : (i32) -> (i32)
+LOOM_DEFINE_ISA(loom_func_call_indirect_isa, LOOM_OP_FUNC_CALL_INDIRECT)
+LOOM_DEFINE_OPERAND(loom_func_call_indirect_target, 0)
+LOOM_DEFINE_VARIADIC_OPERANDS(loom_func_call_indirect_operands, 1)
+LOOM_DEFINE_VARIADIC_RESULTS(loom_func_call_indirect_results, 0)
+iree_status_t loom_func_call_indirect_build(
+    loom_builder_t* builder,
+    loom_may_consume loom_value_id_t target,
+    loom_may_consume const loom_value_id_t* operands,
+    iree_host_size_t operands_count,
+    const loom_type_t* result_types,
+    iree_host_size_t result_count,
+    const loom_tied_result_t* tied_results,
+    iree_host_size_t tied_result_count,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_func_call_indirect_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
+
 // LOOM_OP_FUNC_RETURN: Return values from function body. Types must match enclosing function's result types.
 // func.return
 LOOM_DEFINE_ISA(loom_func_return_isa, LOOM_OP_FUNC_RETURN)
@@ -240,6 +308,89 @@ iree_status_t loom_func_return_build(
     iree_host_size_t operands_count,
     loom_location_id_t location,
     loom_op_t** out_op);
+
+// LOOM_OP_FUNC_FAIL: Terminate the current invocation with a status and diagnostic message.
+// func.fail invalid_argument, %message : buffer
+LOOM_DEFINE_ISA(loom_func_fail_isa, LOOM_OP_FUNC_FAIL)
+LOOM_DEFINE_OPERAND(loom_func_fail_message, 0)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_fail_status, 0, loom_func_fail_status_t)
+iree_status_t loom_func_fail_build(
+    loom_builder_t* builder,
+    loom_func_fail_status_t status,
+    loom_value_id_t message,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+
+// LOOM_OP_FUNC_NULL: Produce a null first-class function value of the declared type.
+// %null = func.null : func.ref<(i32) -> (i32)>
+LOOM_DEFINE_ISA(loom_func_null_isa, LOOM_OP_FUNC_NULL)
+LOOM_DEFINE_RESULT(loom_func_null_result, 0)
+iree_status_t loom_func_null_build(
+    loom_builder_t* builder,
+    loom_type_t result_type,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_func_null_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_FUNC_COMPARE_NULL: Return true when a first-class function value is null.
+// %is_null = func.compare.null %function : func.ref<(i32) -> (i32)>
+LOOM_DEFINE_ISA(loom_func_compare_null_isa, LOOM_OP_FUNC_COMPARE_NULL)
+LOOM_DEFINE_OPERAND(loom_func_compare_null_function, 0)
+LOOM_DEFINE_RESULT(loom_func_compare_null_result, 0)
+iree_status_t loom_func_compare_null_build(
+    loom_builder_t* builder,
+    loom_value_id_t function,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_func_compare_null_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_FUNC_ADDRESS: Produce a first-class function value addressing a callable symbol.
+// %function = func.address @callee : func.ref<(i32) -> (i32)>
+LOOM_DEFINE_ISA(loom_func_address_isa, LOOM_OP_FUNC_ADDRESS)
+LOOM_DEFINE_RESULT(loom_func_address_result, 0)
+LOOM_DEFINE_ATTR_SYMBOL(loom_func_address_callee, 0)
+iree_status_t loom_func_address_build(
+    loom_builder_t* builder,
+    loom_symbol_ref_t callee,
+    loom_type_t result_type,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_func_address_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_FUNC_REF_CAST: Widen a synchronous function reference to a yieldable reference with the same structural signature. The result aliases the same function value and only forgets the synchronous-call guarantee.
+// %yieldable = func.ref.cast %sync : func.ref<(i32) -> (i32)> to func.ref<yieldable (i32) -> (i32)>
+LOOM_DEFINE_ISA(loom_func_ref_cast_isa, LOOM_OP_FUNC_REF_CAST)
+LOOM_DEFINE_OPERAND(loom_func_ref_cast_source, 0)
+LOOM_DEFINE_RESULT(loom_func_ref_cast_result, 0)
+iree_status_t loom_func_ref_cast_build(
+    loom_builder_t* builder,
+    loom_may_consume loom_value_id_t source,
+    loom_type_t result_type,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_func_ref_cast_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_FUNC_IMPORT_RESOLVED: Return true when an optional imported function resolved during linking.
+// %available = func.import.resolved @optional_feature
+LOOM_DEFINE_ISA(loom_func_import_resolved_isa, LOOM_OP_FUNC_IMPORT_RESOLVED)
+LOOM_DEFINE_RESULT(loom_func_import_resolved_result, 0)
+LOOM_DEFINE_ATTR_SYMBOL(loom_func_import_resolved_callee, 0)
+iree_status_t loom_func_import_resolved_build(
+    loom_builder_t* builder,
+    loom_symbol_ref_t callee,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_func_import_resolved_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
 
 // Returns the vtable array for the func dialect.
 const loom_op_vtable_t* const* loom_func_dialect_vtables(

@@ -43,7 +43,6 @@ void loom_symbol_fact_table_initialize_with_options(
 void loom_symbol_fact_table_reset(loom_symbol_fact_table_t* table) {
   table->module = NULL;
   if (table->count == 0) return;
-  memset(table->entries, 0, table->count * sizeof(*table->entries));
   memset(table->states, 0, table->count * sizeof(*table->states));
 }
 
@@ -70,7 +69,6 @@ static iree_status_t loom_symbol_fact_table_ensure_capacity(
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       table->arena, new_capacity, sizeof(*new_states), (void**)&new_states));
 
-  memset(new_entries, 0, new_capacity * sizeof(*new_entries));
   memset(new_states, 0, new_capacity * sizeof(*new_states));
   if (table->count > 0) {
     memcpy(new_entries, table->entries, table->count * sizeof(*new_entries));

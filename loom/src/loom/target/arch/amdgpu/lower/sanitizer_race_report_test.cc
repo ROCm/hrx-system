@@ -139,6 +139,7 @@ class AmdgpuSanitizerRaceReportTest : public ::testing::Test {
         loom_make_named_attr_slice(NULL, 0),
         loom_make_named_attr_slice(NULL, 0),
         /*export_symbol=*/LOOM_STRING_ID_INVALID,
+        loom_make_named_attr_slice(NULL, 0),
         loom_make_named_attr_slice(NULL, 0), callee, /*arg_types=*/NULL,
         /*arg_types_count=*/0, /*result_types=*/NULL, /*result_count=*/0,
         /*tied_results=*/NULL, /*tied_result_count=*/0, /*predicates=*/NULL,
@@ -368,11 +369,8 @@ class AmdgpuSanitizerRaceReportTest : public ::testing::Test {
     options.descriptor_registry = &low_registry_.registry;
     options.emitter = {EmitDiagnosticToStderr, NULL};
     options.max_errors = 20;
-    loom_low_verify_scratch_t scratch =
-        loom_low_verify_scratch_for_module(module_);
     loom_low_verify_result_t result = {};
-    IREE_ASSERT_OK(
-        loom_low_verify_module(module_, &options, &scratch, &result));
+    IREE_ASSERT_OK(loom_low_verify_module(module_, &options, &result));
     EXPECT_EQ(result.error_count, 0u);
   }
 

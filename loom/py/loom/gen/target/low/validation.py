@@ -19,8 +19,8 @@ from loom.target.low_descriptors import (
     ConstraintKind,
     Descriptor,
     DescriptorAsmSurface,
+    DescriptorCarrier,
     DescriptorFlag,
-    DescriptorOpKind,
     DescriptorSet,
     EnumDomain,
     EnumValue,
@@ -665,6 +665,13 @@ def validate_descriptor_operands(descriptor: Descriptor) -> DescriptorOperandLay
                 raise ValueError(f"descriptor '{descriptor.key}' variadic operand '{operand.field_name}' cannot participate in a fixed instruction encoding")
         elif operand_role_is_packet_input(operand.role):
             minimum_packet_operand_count += 1
+        if operand.unit_count <= 0:
+            raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' unit count must be nonzero")
+        if OperandFlag.VARIABLE_UNIT_COUNT in operand.flags:
+            if operand.role not in (OperandRole.RESULT, OperandRole.OPERAND):
+                raise ValueError(f"descriptor '{descriptor.key}' variable-unit operand '{operand.field_name}' must be a result or ordinary operand")
+            if OperandFlag.VARIADIC in operand.flags:
+                raise ValueError(f"descriptor '{descriptor.key}' variable-unit operand '{operand.field_name}' cannot be variadic")
         if not operand.reg_alts:
             raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' has no register-class alternatives")
         validate_u16(
@@ -756,12 +763,34 @@ def operand_role_is_packet_input(role: OperandRole) -> bool:
     )
 
 
-def validate_descriptor_op_kind(descriptor: Descriptor, result_count: int) -> None:
-    """Validates the canonical low operation selected by a descriptor."""
-    if descriptor.op_kind is DescriptorOpKind.OP:
+def validate_descriptor_carrier(descriptor: Descriptor, result_count: int) -> None:
+    """Validates the canonical Low carrier selected by a descriptor."""
+    if descriptor.carrier is DescriptorCarrier.BRANCH:
+        if result_count != 0:
+            raise ValueError(f"descriptor '{descriptor.key}' uses low.br but declares {result_count} results")
+        if descriptor.immediates:
+            raise ValueError(f"descriptor '{descriptor.key}' uses low.br but declares ordinary immediates")
+        if descriptor.operands:
+            raise ValueError(f"descriptor '{descriptor.key}' uses low.br but declares {len(descriptor.operands)} descriptor operands")
         return
-    if descriptor.op_kind is not DescriptorOpKind.CONST:
-        raise ValueError(f"descriptor '{descriptor.key}' has unknown low operation kind '{descriptor.op_kind}'")
+    if descriptor.carrier is DescriptorCarrier.SWITCH:
+        if result_count != 0:
+            raise ValueError(f"descriptor '{descriptor.key}' uses low.switch but declares {result_count} results")
+        if descriptor.immediates:
+            raise ValueError(f"descriptor '{descriptor.key}' uses low.switch but declares ordinary immediates")
+        if (
+            len(descriptor.operands) != 1
+            or not operand_role_is_packet_input(descriptor.operands[0].role)
+            or OperandFlag.OPTIONAL in descriptor.operands[0].flags
+            or OperandFlag.VARIADIC in descriptor.operands[0].flags
+        ):
+            raise ValueError(f"descriptor '{descriptor.key}' uses low.switch but declares a descriptor operand shape other than one required selector")
+        return
+    if descriptor.carrier not in (DescriptorCarrier.OP, DescriptorCarrier.CONST):
+        raise ValueError(f"descriptor '{descriptor.key}' has unknown Low carrier '{descriptor.carrier}'")
+
+    if descriptor.carrier is DescriptorCarrier.OP:
+        return
     if result_count != 1:
         raise ValueError(f"descriptor '{descriptor.key}' uses low.const but declares {result_count} results instead of exactly one")
     if any(operand_role_is_packet_input(operand.role) for operand in descriptor.operands):

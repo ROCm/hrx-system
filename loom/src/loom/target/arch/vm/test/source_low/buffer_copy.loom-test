@@ -1,0 +1,14 @@
+// RUN: emit source-low output=low
+
+vm.target<core> @target
+
+func.def target(@target) @copy(%source: buffer, %source_offset: offset, %target: buffer, %target_offset: offset, %byte_length: offset) {
+  buffer.copy %source[%source_offset], %target[%target_offset], %byte_length
+  func.return
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) abi_layout({signature = type<(reg<vm.ref : buffer>, reg<vm.value : offset>, reg<vm.ref : buffer>, reg<vm.value : offset>, reg<vm.value : offset>) -> ()>}) @copy(%source: reg<vm.ref : buffer>, %source_offset: reg<vm.value : offset>, %target: reg<vm.ref : buffer>, %target_offset: reg<vm.value : offset>, %byte_length: reg<vm.value : offset>) asm {
+  buffer.copy %target, %target_offset, %source, %source_offset, %byte_length
+  return
+}

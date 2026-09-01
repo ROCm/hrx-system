@@ -636,7 +636,7 @@ iree_status_t loom_scalar_maximumf_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_SCALAR_MINNUMF: C99 fmin (NaN ignored, returns the non-NaN operand).
+// LOOM_OP_SCALAR_MINNUMF: Number-selecting minimum. One NaN selects the numeric operand, two NaNs produce NaN, and opposite signed zeros select -0.
 // %result = scalar.minnumf %lhs, %rhs : f32
 LOOM_DEFINE_ISA(loom_scalar_minnumf_isa, LOOM_OP_SCALAR_MINNUMF)
 LOOM_DEFINE_OPERAND(loom_scalar_minnumf_lhs, 0)
@@ -654,7 +654,7 @@ iree_status_t loom_scalar_minnumf_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_SCALAR_MAXNUMF: C99 fmax (NaN ignored, returns the non-NaN operand).
+// LOOM_OP_SCALAR_MAXNUMF: Number-selecting maximum. One NaN selects the numeric operand, two NaNs produce NaN, and opposite signed zeros select +0.
 // %result = scalar.maxnumf %lhs, %rhs : f32
 LOOM_DEFINE_ISA(loom_scalar_maxnumf_isa, LOOM_OP_SCALAR_MAXNUMF)
 LOOM_DEFINE_OPERAND(loom_scalar_maxnumf_lhs, 0)
@@ -1652,9 +1652,6 @@ iree_status_t loom_scalar_constant_facts(
     const loom_module_t* module, const loom_op_t* op,
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
-iree_status_t loom_scalar_constant_verify(
-    const loom_module_t* module, const loom_op_t* op,
-    iree_diagnostic_emitter_t emitter);
 
 // LOOM_OP_SCALAR_POISON: Materialize a typed Loom poison scalar. Poison represents an invalid scalar observation, such as extracting a lane proven not to exist. Pure scalar ops with any poison operand canonicalize to poison of the corresponding result type. Poison is not an LLVM poison value: it must be removed by dead-code elimination or diagnosed before it reaches a store, return, kernel boundary, or target-lowering boundary.
 // %p = scalar.poison : f32
@@ -1912,9 +1909,6 @@ iree_status_t loom_scalar_assume_facts(
     const loom_module_t* module, const loom_op_t* op,
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
-iree_status_t loom_scalar_assume_verify(
-    const loom_module_t* module, const loom_op_t* op,
-    iree_diagnostic_emitter_t emitter);
 
 // Returns the vtable array for the scalar dialect.
 const loom_op_vtable_t* const* loom_scalar_dialect_vtables(

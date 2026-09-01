@@ -325,6 +325,114 @@ function(iree_python_test_add_package_dirs TEST_NAME)
   )
 endfunction()
 
+# iree_py_generated_files()
+#
+# Runs one Python generator action to produce one or more declared build-tree
+# files. The generator must preserve output timestamps when contents are
+# unchanged. A private freshness stamp tracks generator inputs independently of
+# output contents so an authority-only edit can rerun generation without
+# forcing every C/C++ consumer to rebuild.
+#
+# Parameters:
+# NAME: name of the generated-file target.
+# GENERATOR: iree_py_library target with an executable entry point.
+# OUTPUTS: build-tree-relative output paths.
+# OUTPUT_FLAGS: generator flags paired one-to-one with OUTPUTS.
+# ARGS: arguments passed before the paired output arguments.
+# INPUTS: additional non-Python generator inputs.
+# COMMENT: optional build progress message.
+function(iree_py_generated_files)
+  cmake_parse_arguments(
+    _RULE
+    ""
+    "NAME;GENERATOR;COMMENT"
+    "OUTPUTS;OUTPUT_FLAGS;ARGS;INPUTS"
+    ${ARGN}
+  )
+
+  if(NOT _RULE_NAME)
+    message(FATAL_ERROR "generated file actions require NAME")
+  endif()
+  if(NOT _RULE_GENERATOR)
+    message(FATAL_ERROR "generated file actions require GENERATOR")
+  endif()
+  list(LENGTH _RULE_OUTPUTS _OUTPUT_COUNT)
+  if(_OUTPUT_COUNT EQUAL 0)
+    message(FATAL_ERROR "generated file actions require at least one output")
+  endif()
+  list(LENGTH _RULE_OUTPUT_FLAGS _OUTPUT_FLAG_COUNT)
+  if(NOT _OUTPUT_FLAG_COUNT EQUAL _OUTPUT_COUNT)
+    message(FATAL_ERROR
+      "generated file output flags and outputs must be paired")
+  endif()
+
+  set(_OUTPUTS)
+  set(_OUTPUT_ARGS)
+  math(EXPR _OUTPUT_LAST "${_OUTPUT_COUNT} - 1")
+  foreach(_INDEX RANGE 0 ${_OUTPUT_LAST})
+    list(GET _RULE_OUTPUTS ${_INDEX} _OUTPUT)
+    list(GET _RULE_OUTPUT_FLAGS ${_INDEX} _OUTPUT_FLAG)
+    set(_OUTPUT_PATH "${CMAKE_CURRENT_BINARY_DIR}/${_OUTPUT}")
+    list(APPEND _OUTPUTS "${_OUTPUT_PATH}")
+    list(APPEND _OUTPUT_ARGS "${_OUTPUT_FLAG}=${_OUTPUT_PATH}")
+  endforeach()
+  if(NOT _RULE_COMMENT)
+    set(_RULE_COMMENT "Generating ${_RULE_NAME}")
+  endif()
+
+  iree_py_library_entrypoint(_GENERATOR_ENTRYPOINT "${_RULE_GENERATOR}")
+  iree_py_library_collect_sources(_GENERATOR_INPUTS "${_RULE_GENERATOR}")
+  iree_py_library_collect_package_dirs(
+    _GENERATOR_PACKAGE_DIRS "${_RULE_GENERATOR}"
+  )
+  list(APPEND _GENERATOR_PACKAGE_DIRS "$ENV{PYTHONPATH}")
+  if(${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
+    list(JOIN _GENERATOR_PACKAGE_DIRS "\\;" _GENERATOR_PYTHONPATH)
+  else()
+    list(JOIN _GENERATOR_PACKAGE_DIRS ":" _GENERATOR_PYTHONPATH)
+  endif()
+
+  iree_package_name(_PACKAGE_NAME)
+  set(_GEN_TARGET "${_PACKAGE_NAME}_${_RULE_NAME}")
+  set(_GEN_STAMP
+    "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/${_GEN_TARGET}.stamp")
+  add_custom_command(
+    OUTPUT
+      "${_GEN_STAMP}"
+    BYPRODUCTS
+      ${_OUTPUTS}
+    COMMAND
+      "${CMAKE_COMMAND}" -E env
+      "PYTHONPATH=${_GENERATOR_PYTHONPATH}"
+      "PYTHONDONTWRITEBYTECODE=1"
+      "${Python3_EXECUTABLE}"
+      ${_GENERATOR_ENTRYPOINT}
+      ${_RULE_ARGS}
+      ${_OUTPUT_ARGS}
+    COMMAND
+      "${CMAKE_COMMAND}" -E touch "${_GEN_STAMP}"
+    DEPENDS
+      ${_GENERATOR_INPUTS}
+      ${_RULE_INPUTS}
+    COMMENT
+      "${_RULE_COMMENT}"
+    VERBATIM
+  )
+  set_source_files_properties(
+    ${_RULE_OUTPUTS}
+    ${_OUTPUTS}
+    PROPERTIES GENERATED TRUE
+  )
+
+  add_custom_target("${_GEN_TARGET}"
+    DEPENDS
+      "${_GEN_STAMP}"
+  )
+  iree_register_generated_compile_input("${_GEN_TARGET}"
+    OUTPUTS ${_OUTPUTS}
+  )
+endfunction()
+
 # iree_local_py_test()
 #
 # CMake function to run python test with provided python package paths.

@@ -26,6 +26,7 @@ class FuncBuilder(DialectBuilder):
         abi_attrs: Mapping[str, Any] | None = ...,
         export_symbol: str | None = ...,
         export_attrs: Mapping[str, Any] | None = ...,
+        export_metadata: Mapping[str, Any] | None = ...,
         callee: str,
         args: list[ValueRef] = ...,
         results: list[Type | TiedResultSpec],
@@ -41,8 +42,10 @@ class FuncBuilder(DialectBuilder):
         *,
         visibility: str | None = ...,
         retain: str | None = ...,
+        import_policy: str | None = ...,
         import_module: str | None = ...,
         import_symbol: str | None = ...,
+        import_metadata: Mapping[str, Any] | None = ...,
         cc: str | None = ...,
         purity: str | None = ...,
         temperature: str | None = ...,
@@ -52,6 +55,7 @@ class FuncBuilder(DialectBuilder):
         abi_attrs: Mapping[str, Any] | None = ...,
         export_symbol: str | None = ...,
         export_attrs: Mapping[str, Any] | None = ...,
+        export_metadata: Mapping[str, Any] | None = ...,
         callee: str,
         args: list[ValueRef] = ...,
         results: list[Type | TiedResultSpec],
@@ -75,9 +79,74 @@ class FuncBuilder(DialectBuilder):
         result_names: Sequence[str] | None = ...,
         location_id: int | None = ...,
     ) -> list[ValueRef]: ...
+    def call_indirect(
+        self,
+        *,
+        target: ValueRef,
+        operands: list[ValueRef] = ...,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> list[ValueRef]: ...
     def return_(
         self,
         *,
         operands: list[ValueRef] = ...,
         location_id: int | None = ...,
     ) -> None: ...
+    def fail(
+        self,
+        *,
+        status: str,
+        message: ValueRef,
+        location_id: int | None = ...,
+    ) -> None: ...
+    def null(
+        self,
+        *,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...
+    def compare_null(
+        self,
+        *,
+        function: ValueRef,
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...
+    def address(
+        self,
+        *,
+        callee: str,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...
+    def ref_cast(
+        self,
+        *,
+        source: ValueRef,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...
+    def resolved(
+        self,
+        *,
+        callee: str,
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...

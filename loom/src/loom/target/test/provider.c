@@ -9,8 +9,10 @@
 #include "loom/pass/test/registry.h"
 #include "loom/target/low_descriptor_registry_core_test.h"
 #include "loom/target/test/lower.h"
+#include "loom/target/test/target_records.h"
 
 const loom_target_provider_t loom_test_target_provider = {
+    .fact_type = &loom_test_target_fact_type,
     .initialize_low_descriptor_registry =
         loom_target_core_test_low_descriptor_registry_initialize,
     .initialize_low_lower_policy_registry =

@@ -20,6 +20,12 @@ loom_target_contract_file_family(
     "avx512=x86.avx512"
     "packed_dot=x86.packed_dot"
     "scalar=x86.scalar"
+  CONTRACT_SETS
+    "x86_avx2=scalar,avx2"
+    "x86_avx512=scalar,avx2,avx512"
+    "x86_avx512_packed_dot=scalar,avx2,avx512,packed_dot"
+    "x86_packed_dot=packed_dot"
+    "x86_scalar=scalar"
   COMMENT
     "Generating x86 contract table families"
 )
@@ -81,6 +87,28 @@ endif()
 if(LOOM_TARGET_ARCH_X86)
 loom_cc_library(
   NAME
+    sets
+  HDRS
+    "sets.h"
+  SRCS
+    "sets.c"
+  DEPS
+    ::avx2
+    ::avx2_lower_rules
+    ::avx512
+    ::avx512_lower_rules
+    ::packed_dot
+    ::packed_dot_lower_rules
+    ::scalar
+    ::scalar_lower_rules
+    loom::codegen::low::lower
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_X86)
+loom_cc_library(
+  NAME
     contracts
   HDRS
     "avx2.h"
@@ -91,6 +119,7 @@ loom_cc_library(
     "packed_dot_lower_rules.h"
     "scalar.h"
     "scalar_lower_rules.h"
+    "sets.h"
   DEPS
     ::avx2
     ::avx2_lower_rules
@@ -100,6 +129,7 @@ loom_cc_library(
     ::packed_dot_lower_rules
     ::scalar
     ::scalar_lower_rules
+    ::sets
   PUBLIC
 )
 endif()

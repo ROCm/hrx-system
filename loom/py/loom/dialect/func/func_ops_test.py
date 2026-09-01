@@ -10,7 +10,7 @@ from collections.abc import Sequence
 
 import pytest
 
-from loom.dialect.func import ALL_FUNC_OPS
+from loom.dialect.func import ALL_FUNC_OPS, ALL_FUNC_TYPES
 from loom.dsl import Op
 from loom.format.bytecode.reader import read_module
 from loom.format.bytecode.writer import write_module
@@ -34,7 +34,7 @@ def _parse_module(text: str) -> Module:
     parser = Parser()
     parser.register_ops(_all_roundtrip_ops())
     parser.register_parameterized_attrs(ALL_TARGET_PARAMETERIZED_ATTRS)
-    parser.register_types(ALL_BUILTIN_TYPES)
+    parser.register_types((*ALL_BUILTIN_TYPES, *ALL_FUNC_TYPES))
     return parser.parse(text)
 
 
@@ -45,7 +45,7 @@ def _print_module(module: Module) -> str:
 
     printer = Printer()
     printer.register_ops(_all_roundtrip_ops())
-    printer.register_types(ALL_BUILTIN_TYPES)
+    printer.register_types((*ALL_BUILTIN_TYPES, *ALL_FUNC_TYPES))
     return printer.print_module(module)
 
 
@@ -116,6 +116,11 @@ class TestFuncDeclRoundTrip:
         parser.register_types(ALL_BUILTIN_TYPES)
         with pytest.raises(ParseError, match=r"LBRACE|top-level op"):
             parser.parse("func.decl @bad(%a: f32) -> (f32) {\n  func.return %a : f32\n}\n")
+
+
+class TestFuncFailRoundTrip:
+    def test_explicit_status(self) -> None:
+        _roundtrip("func.def @fail(%message: buffer) {\n  func.fail invalid_argument, %message : buffer\n}\n")
 
 
 class TestFuncImportParsing:
@@ -193,6 +198,9 @@ class TestFuncImportRoundTrip:
     def test_public_import_roundtrip(self) -> None:
         _roundtrip(_module_text('func.decl public import("upstream") @relu(%x: f32) -> (f32)'))
 
+    def test_optional_import_roundtrip(self) -> None:
+        _roundtrip(_module_text('func.decl optional import("runtime", "feature_v2") @feature(%x: i32) -> (i32)'))
+
     def test_mixed_module_roundtrip(self) -> None:
         _roundtrip(
             _module_text(
@@ -223,7 +231,12 @@ class TestFuncImportCrossFormatRoundTrip:
             _module_text('func.decl import("math_lib", "matmul") @my_matmul(%a: f32) -> (f32)'),
         )
 
-    def test_import_metadata_preserved(self) -> None:
+    def test_optional_import_survives_bytecode(self) -> None:
+        self._cross_roundtrip(
+            _module_text('func.decl optional import("runtime", "feature_v2") @feature(%x: i32) -> (i32)'),
+        )
+
+    def test_import_identity_preserved(self) -> None:
         module = _parse_module(_module_text('func.decl import("math_lib", "original") @alias(%a: f32) -> (f32)'))
         loaded = read_module(write_module(module))
         sym = loaded.symbols[0]
@@ -231,6 +244,13 @@ class TestFuncImportCrossFormatRoundTrip:
         assert sym.source_module == "math_lib"
         assert sym.source_symbol == "original"
         assert sym.name == "alias"
+
+    def test_boundary_metadata_survives_bytecode(self) -> None:
+        self._cross_roundtrip(
+            _module_text(
+                'func.decl public import("math_lib", "original") import_metadata({"runtime.optional" = true, "runtime.revision" = u64(3)}) export_metadata({"help.summary" = "Aliased math entry", "wire.payload" = bytes("00feff")}) @alias(%a: f32) -> (f32)',
+            )
+        )
 
     def test_mixed_module_survives_bytecode(self) -> None:
         self._cross_roundtrip(
@@ -252,6 +272,50 @@ class TestFuncCallRoundTrip:
 
     def test_call_multiple_args_and_results(self) -> None:
         _roundtrip("func.def @multi(%a: f32, %b: i32) -> (f32, i32) {\n  %r0, %r1 = func.call @process(%a, %b) : (f32, i32) -> (f32, i32)\n  func.return %r0, %r1 : f32, i32\n}\n")
+
+
+class TestFunctionValueRoundTrip:
+    def test_function_reference_types(self) -> None:
+        _roundtrip(_module_text("func.decl @refs(%sync: func.ref<(i32) -> (i32)>, %yieldable: func.ref<yieldable (i32) -> (i32)>)"))
+
+    def test_function_reference_types_survive_bytecode(self) -> None:
+        text = _module_text("func.decl @refs(%sync: func.ref<(i32) -> (i32)>, %yieldable: func.ref<yieldable (i32) -> (i32)>)")
+        loaded = read_module(write_module(_parse_module(text)))
+        assert _print_module(loaded) == text
+
+    def test_function_carrier_operations(self) -> None:
+        _roundtrip(
+            _module_text(
+                'func.decl optional import("runtime", "callback") @callback(%x: i32) -> (i32)',
+                "",
+                "func.def @probe() -> (func.ref<(i32) -> (i32)>, i1, i1) {",
+                "  %function = func.address @callback : func.ref<(i32) -> (i32)>",
+                "  %available = func.import.resolved @callback",
+                "  %is_null = func.compare.null %function : func.ref<(i32) -> (i32)>",
+                "  func.return %function, %available, %is_null : func.ref<(i32) -> (i32)>, i1, i1",
+                "}",
+            )
+        )
+
+    def test_typed_null(self) -> None:
+        _roundtrip(
+            _module_text(
+                "func.def @null() -> (func.ref<(i32) -> (i32)>) {",
+                "  %function = func.null : func.ref<(i32) -> (i32)>",
+                "  func.return %function : func.ref<(i32) -> (i32)>",
+                "}",
+            )
+        )
+
+    def test_explicit_yieldability_widening(self) -> None:
+        _roundtrip(
+            _module_text(
+                "func.def @widen(%sync: func.ref<(i32) -> (i32)>) -> (func.ref<yieldable (i32) -> (i32)>) {",
+                "  %yieldable = func.ref.cast %sync : func.ref<(i32) -> (i32)> to func.ref<yieldable (i32) -> (i32)>",
+                "  func.return %yieldable : func.ref<yieldable (i32) -> (i32)>",
+                "}",
+            )
+        )
 
 
 class TestFuncReturnRoundTrip:

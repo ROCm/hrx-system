@@ -212,6 +212,61 @@ iree_string_view_t loom_low_descriptor_set_string(
   return loom_low_descriptor_set_string_view(descriptor_set, string_offset);
 }
 
+static const loom_low_enum_domain_t* loom_low_descriptor_set_enum_domain(
+    const loom_low_descriptor_set_t* descriptor_set, uint16_t enum_domain_id) {
+  if (descriptor_set == NULL ||
+      enum_domain_id >= descriptor_set->enum_domain_count) {
+    return NULL;
+  }
+  const loom_low_enum_domain_t* domain =
+      &descriptor_set->enum_domains[enum_domain_id];
+  if (domain->value_start > descriptor_set->enum_value_count ||
+      domain->value_count >
+          descriptor_set->enum_value_count - domain->value_start) {
+    return NULL;
+  }
+  return domain;
+}
+
+bool loom_low_descriptor_set_lookup_enum_value_by_token(
+    const loom_low_descriptor_set_t* descriptor_set, uint16_t enum_domain_id,
+    iree_string_view_t token, int64_t* out_value) {
+  *out_value = 0;
+  const loom_low_enum_domain_t* domain =
+      loom_low_descriptor_set_enum_domain(descriptor_set, enum_domain_id);
+  if (domain == NULL) return false;
+  for (uint16_t i = 0; i < domain->value_count; ++i) {
+    const loom_low_enum_value_t* enum_value =
+        &descriptor_set->enum_values[domain->value_start + i];
+    const iree_string_view_t enum_token = loom_low_descriptor_set_string_view(
+        descriptor_set, enum_value->token_string_offset);
+    if (iree_string_view_equal(token, enum_token)) {
+      *out_value = enum_value->value;
+      return true;
+    }
+  }
+  return false;
+}
+
+bool loom_low_descriptor_set_lookup_enum_token_by_value(
+    const loom_low_descriptor_set_t* descriptor_set, uint16_t enum_domain_id,
+    int64_t value, iree_string_view_t* out_token) {
+  *out_token = iree_string_view_empty();
+  const loom_low_enum_domain_t* domain =
+      loom_low_descriptor_set_enum_domain(descriptor_set, enum_domain_id);
+  if (domain == NULL) return false;
+  for (uint16_t i = 0; i < domain->value_count; ++i) {
+    const loom_low_enum_value_t* enum_value =
+        &descriptor_set->enum_values[domain->value_start + i];
+    if (enum_value->value == value) {
+      *out_token = loom_low_descriptor_set_string_view(
+          descriptor_set, enum_value->token_string_offset);
+      return true;
+    }
+  }
+  return false;
+}
+
 bool loom_low_descriptor_set_lookup_register_class(
     const loom_low_descriptor_set_t* descriptor_set,
     iree_string_view_t register_class_name,

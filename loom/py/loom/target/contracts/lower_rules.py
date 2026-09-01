@@ -72,7 +72,7 @@ from loom.target.contracts.source_memory import (
 from loom.target.low_descriptors import (
     ConstraintKind,
     Descriptor,
-    DescriptorOpKind,
+    DescriptorCarrier,
     OperandRole,
 )
 
@@ -1965,7 +1965,7 @@ def _lower_emit_kind(
     if emit.form == DescriptorEmitForm.ACCUMULATE_LANES:
         return LowerEmitKind.DESCRIPTOR_OP_ACCUMULATE_LANES
 
-    if emit.descriptor.op_kind is DescriptorOpKind.CONST:
+    if emit.descriptor.carrier is DescriptorCarrier.CONST:
         return LowerEmitKind.DESCRIPTOR_CONST
 
     result_bindings = (

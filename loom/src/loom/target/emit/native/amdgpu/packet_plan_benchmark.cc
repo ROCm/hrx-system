@@ -512,10 +512,8 @@ class PacketPlanFixture {
     verify_options.descriptor_registry = &target_registry_.registry;
     verify_options.max_errors = 20;
     loom_low_verify_result_t verify_result = {};
-    loom_low_verify_scratch_t verify_scratch =
-        loom_low_verify_scratch_for_module(module_);
-    AbortOnError(loom_low_verify_module(module_, &verify_options,
-                                        &verify_scratch, &verify_result));
+    AbortOnError(
+        loom_low_verify_module(module_, &verify_options, &verify_result));
     if (verify_result.error_count != 0) {
       std::abort();
     }

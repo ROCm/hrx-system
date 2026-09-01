@@ -30,6 +30,7 @@ typedef enum loom_target_codegen_format_e {
   LOOM_TARGET_CODEGEN_FORMAT_UNKNOWN = 0,
   LOOM_TARGET_CODEGEN_FORMAT_LLVMIR = 1,
   LOOM_TARGET_CODEGEN_FORMAT_SPIRV = 2,
+  LOOM_TARGET_CODEGEN_FORMAT_VM = 3,
   LOOM_TARGET_CODEGEN_FORMAT_LOW_NATIVE = 4,
   LOOM_TARGET_CODEGEN_FORMAT_WASM = 5,
 } loom_target_codegen_format_e;
@@ -41,6 +42,7 @@ typedef enum loom_target_artifact_format_e {
   LOOM_TARGET_ARTIFACT_FORMAT_COFF = 2,
   LOOM_TARGET_ARTIFACT_FORMAT_MACHO = 3,
   LOOM_TARGET_ARTIFACT_FORMAT_SPIRV_BINARY = 4,
+  LOOM_TARGET_ARTIFACT_FORMAT_VM_BYTECODE = 5,
   LOOM_TARGET_ARTIFACT_FORMAT_WASM_BINARY = 6,
   LOOM_TARGET_ARTIFACT_FORMAT_LLVMIR_TEXT = 7,
   LOOM_TARGET_ARTIFACT_FORMAT_LLVMIR_BITCODE = 8,
@@ -51,6 +53,7 @@ typedef enum loom_target_abi_kind_e {
   LOOM_TARGET_ABI_UNKNOWN = 0,
   LOOM_TARGET_ABI_OBJECT_FUNCTION = 1,
   LOOM_TARGET_ABI_HAL_KERNEL = 2,
+  LOOM_TARGET_ABI_VM_FUNCTION = 3,
   LOOM_TARGET_ABI_SHADER_ENTRY_POINT = 4,
   LOOM_TARGET_ABI_WASM_FUNCTION = 5,
   LOOM_TARGET_ABI_COMMAND_PROGRAM = 6,
@@ -70,6 +73,8 @@ static inline iree_string_view_t loom_target_codegen_format_name(
       return IREE_SV("llvmir");
     case LOOM_TARGET_CODEGEN_FORMAT_SPIRV:
       return IREE_SV("spirv");
+    case LOOM_TARGET_CODEGEN_FORMAT_VM:
+      return IREE_SV("vm");
     case LOOM_TARGET_CODEGEN_FORMAT_LOW_NATIVE:
       return IREE_SV("low_native");
     case LOOM_TARGET_CODEGEN_FORMAT_WASM:
@@ -92,6 +97,8 @@ static inline iree_string_view_t loom_target_artifact_format_name(
       return IREE_SV("macho");
     case LOOM_TARGET_ARTIFACT_FORMAT_SPIRV_BINARY:
       return IREE_SV("spirv_binary");
+    case LOOM_TARGET_ARTIFACT_FORMAT_VM_BYTECODE:
+      return IREE_SV("vm_bytecode");
     case LOOM_TARGET_ARTIFACT_FORMAT_WASM_BINARY:
       return IREE_SV("wasm_binary");
     case LOOM_TARGET_ARTIFACT_FORMAT_LLVMIR_TEXT:
@@ -112,6 +119,8 @@ static inline iree_string_view_t loom_target_abi_kind_name(
       return IREE_SV("object_function");
     case LOOM_TARGET_ABI_HAL_KERNEL:
       return IREE_SV("hal_kernel");
+    case LOOM_TARGET_ABI_VM_FUNCTION:
+      return IREE_SV("vm_function");
     case LOOM_TARGET_ABI_SHADER_ENTRY_POINT:
       return IREE_SV("shader_entry_point");
     case LOOM_TARGET_ABI_WASM_FUNCTION:
@@ -287,7 +296,7 @@ enum {
   LOOM_TARGET_BINDING_SOURCE_UNKNOWN = 0,
   // The source function authored its target record explicitly.
   LOOM_TARGET_BINDING_SOURCE_AUTHORED = 1,
-  // The source function was bound by an invocation specialization request.
+  // The effective target was selected or inherited through specialization.
   LOOM_TARGET_BINDING_SOURCE_SPECIALIZATION = 2,
 };
 

@@ -8,6 +8,15 @@
 
 #include <stdint.h>
 
+const loom_target_fact_type_t loom_wasm_target_fact_type = {
+    .name = IREE_SVL("wasm"),
+    .storage_size = sizeof(loom_target_facts_t),
+    .satisfies_identity_requirement =
+        loom_target_facts_selector_satisfies_identity_requirement,
+    .satisfies_specialization_requirement =
+        loom_target_facts_structural_satisfy_specialization_requirement,
+};
+
 static const loom_target_snapshot_t kWasmCoreSimd128Snapshot = {
     .name = IREE_SVL("wasm32-simd128"),
     .codegen_format = LOOM_TARGET_CODEGEN_FORMAT_WASM,

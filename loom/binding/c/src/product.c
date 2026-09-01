@@ -178,6 +178,12 @@ loomc_status_t loomc_request_create(
     return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
                              "binding_count is nonzero but bindings is NULL");
   }
+  for (loomc_host_size_t i = 0; i < root_count; ++i) {
+    if (roots[i].reserved != 0) {
+      return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
+                               "request root reserved fields must be zero");
+    }
+  }
   for (loomc_host_size_t i = 0; i < binding_count; ++i) {
     if (bindings[i].root_ordinal >= root_count) {
       return loomc_make_status(
