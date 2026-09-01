@@ -101,6 +101,8 @@ LOOMC_API_EXPORT loomc_status_t loomc_kernel_product_build_request(
     loomc_product_t** out_product, loomc_result_t** out_result);
 
 /// Returns the process-local kernel-product descriptor.
+///
+/// @return Process-lifetime descriptor for kernel products.
 LOOMC_API_EXPORT const loomc_product_descriptor_t*
 loomc_kernel_product_descriptor(void);
 
