@@ -96,6 +96,24 @@ class CommandPlanTest(unittest.TestCase):
         self.assertIn("dev.py: loud command", output.getvalue())
         self.assertIn(sys.executable, output.getvalue())
 
+    def test_announced_command_step_prints_label_without_command(self):
+        plan = CommandPlan(
+            [
+                CommandStep(
+                    [sys.executable, "-c", ""],
+                    cwd=Path.cwd(),
+                    label="starting long command",
+                    announce=True,
+                )
+            ]
+        )
+
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(plan.run(), 0)
+
+        self.assertEqual(output.getvalue(), "dev.py: starting long command\n")
+
     def test_windows_command_step_resolves_executable_from_child_path(self):
         child_path = "C:/source/.venv/Scripts;C:/Windows/System32"
         resolved_executable = "C:/source/.venv/Scripts/lefthook.exe"

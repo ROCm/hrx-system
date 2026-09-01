@@ -12,6 +12,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from build_tools.devtools import cmake as cmake_dev
 from build_tools.devtools import (
@@ -212,6 +213,32 @@ class CMakeTest(unittest.TestCase):
         )
         self.assertIn("ctest", inspect_plan.describe())
         self.assertNotIn("cmake --build", inspect_plan.describe())
+
+    def test_build_announces_targets_generator_and_tree(self):
+        tool_env = ToolEnvironment(ToolMode.SYSTEM, None)
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            build_dir = Path(temporary_dir)
+            (build_dir / "CMakeCache.txt").write_text(
+                "CMAKE_GENERATOR:INTERNAL=NMake Makefiles\n",
+                encoding="utf-8",
+            )
+            plan = cmake_dev.build_plan(
+                tool_env,
+                configured_build_dir=build_dir,
+                backend_args=["loom-compile"],
+                env={},
+            )
+
+            output = io.StringIO()
+            with (
+                mock.patch("subprocess.run", return_value=mock.Mock(returncode=0)),
+                contextlib.redirect_stdout(output),
+            ):
+                self.assertEqual(plan.run(), 0)
+
+            self.assertIn("targets=loom-compile", output.getvalue())
+            self.assertIn("generator=NMake Makefiles", output.getvalue())
+            self.assertIn(f"tree={build_dir}", output.getvalue())
 
     def test_fresh_configure_preserves_configured_generator(self):
         tool_env = ToolEnvironment(ToolMode.SYSTEM, None)

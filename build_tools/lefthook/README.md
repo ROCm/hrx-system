@@ -75,11 +75,12 @@ fragment useful commit-message prose. Long fenced code blocks, indented
 examples, Markdown tables, URLs, and final Git trailers are preserved as
 structured text.
 
-When body prose is too long, the hook writes a reflowed suggestion under
-`.tmp/commit-msg/` and prints a `git commit -F ...` retry command. The
-suggestion reflows ordinary prose paragraphs only: subject lines, trailers,
-fenced blocks, indented examples, tables, URLs, block quotes, and list items are
-left untouched. The same formatter is available directly:
+Before validation, the hook canonicalizes ordinary prose paragraphs to 72
+columns in the proposed commit message and proceeds without a retry. Inline
+code spans remain indivisible. Subject lines, trailers, fenced blocks, indented
+examples, tables, URLs, block quotes, and list items are left untouched;
+overlong structured lines still require an explicit edit. The same formatter is
+available directly:
 
 ```bash
 python build_tools/lefthook/commit_msg.py --format .git/COMMIT_EDITMSG
