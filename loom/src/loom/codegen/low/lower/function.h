@@ -46,6 +46,25 @@ iree_status_t loom_low_lower_remap_function_predicates(
 iree_status_t loom_low_lower_copy_function_source_presentation(
     loom_low_lower_context_t* context);
 
+// Emits resource-backed source arguments into the Low function entry block.
+iree_status_t loom_low_lower_emit_argument_resource_imports(
+    loom_low_lower_context_t* context);
+
+// Emits explicit ABI-to-semantic argument transfers when required by policy.
+iree_status_t loom_low_lower_emit_direct_argument_transfers(
+    loom_low_lower_context_t* context);
+
+// Emits target-owned function preamble operations.
+iree_status_t loom_low_lower_emit_preamble(loom_low_lower_context_t* context);
+
+// Emits target-owned function entry setup after argument materialization.
+iree_status_t loom_low_lower_emit_entry_setup(
+    loom_low_lower_context_t* context);
+
+// Finalizes target-owned state after the Low function body has been emitted.
+iree_status_t loom_low_lower_finalize_function(
+    loom_low_lower_context_t* context);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

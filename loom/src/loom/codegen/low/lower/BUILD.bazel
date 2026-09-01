@@ -30,6 +30,7 @@ loom_cc_library(
     name = "lower",
     srcs = [
         "contract_query.c",
+        "emission.c",
         "function.c",
         "lower.c",
         "lower_context.c",
@@ -42,10 +43,12 @@ loom_cc_library(
         "lower_rules.c",
         "plan.c",
         "storage.c",
+        "structural.c",
     ],
     hdrs = [
         "context.h",
         "contract_query.h",
+        "emission.h",
         "function.h",
         "lower.h",
         "lower_rule_descriptor.h",
@@ -54,6 +57,7 @@ loom_cc_library(
         "plan.h",
         "report.h",
         "storage.h",
+        "structural.h",
     ],
     visibility = _LOWER_VISIBILITY,
     deps = [

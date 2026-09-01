@@ -15,6 +15,7 @@ loom_cc_library(
   HDRS
     "context.h"
     "contract_query.h"
+    "emission.h"
     "function.h"
     "lower.h"
     "lower_rule_descriptor.h"
@@ -23,8 +24,10 @@ loom_cc_library(
     "plan.h"
     "report.h"
     "storage.h"
+    "structural.h"
   SRCS
     "contract_query.c"
+    "emission.c"
     "function.c"
     "lower.c"
     "lower_context.c"
@@ -37,6 +40,7 @@ loom_cc_library(
     "lower_rules.c"
     "plan.c"
     "storage.c"
+    "structural.c"
   DEPS
     iree::base
     iree::base::internal

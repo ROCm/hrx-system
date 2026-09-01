@@ -618,6 +618,153 @@ iree_status_t loom_low_lower_create_function_op(
   return iree_ok_status();
 }
 
+static iree_status_t loom_low_lower_intern_type_id(
+    loom_low_lower_context_t* context, loom_type_t type,
+    loom_type_id_t* out_type_id) {
+  return loom_module_intern_type_id(context->module, type, out_type_id);
+}
+
+static iree_status_t loom_low_lower_emit_argument_resource_import(
+    loom_low_lower_context_t* context, const loom_value_id_t* source_arguments,
+    uint16_t argument_index) {
+  const loom_low_lower_abi_argument_t* argument =
+      &context->lowering.argument_map[argument_index];
+  loom_type_t source_type = argument->resource_source_type;
+  if (loom_type_kind(source_type) == LOOM_TYPE_NONE) {
+    source_type = loom_module_value_type(context->module,
+                                         source_arguments[argument_index]);
+  }
+  loom_type_id_t source_type_id = LOOM_TYPE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(
+      loom_low_lower_intern_type_id(context, source_type, &source_type_id));
+  loom_op_t* resource_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_resource_build(
+      &context->builder, argument->resource_build_flags,
+      (uint8_t)argument->resource_import_kind, LOOM_VALUE_ID_INVALID,
+      argument->resource_index, source_type_id, argument->resource_extent,
+      argument->resource_cache_swizzle_stride, argument->abi_type,
+      context->source_function.op->location, &resource_op));
+  return loom_low_lower_bind_value(context, source_arguments[argument_index],
+                                   loom_low_resource_result(resource_op));
+}
+
+iree_status_t loom_low_lower_emit_argument_resource_imports(
+    loom_low_lower_context_t* context) {
+  uint16_t argument_count = 0;
+  const loom_value_id_t* source_arguments =
+      loom_func_like_arg_ids(context->source_function, &argument_count);
+  if (argument_count == 0 ||
+      argument_count == loom_low_lower_direct_argument_count(context)) {
+    return iree_ok_status();
+  }
+
+  loom_region_t* low_body = loom_low_lower_context_low_body(context);
+  loom_builder_ip_t saved_ip = loom_builder_enter_region(
+      &context->builder, context->low_func_op, low_body);
+  loom_builder_set_block(&context->builder, loom_region_entry_block(low_body));
+  iree_status_t status = iree_ok_status();
+  for (uint16_t i = 0; i < argument_count && iree_status_is_ok(status); ++i) {
+    if (context->lowering.argument_map[i].kind !=
+        LOOM_LOW_LOWER_ABI_ARGUMENT_RESOURCE) {
+      continue;
+    }
+    status = loom_low_lower_emit_argument_resource_import(context,
+                                                          source_arguments, i);
+  }
+
+  loom_builder_restore(&context->builder, saved_ip);
+  return status;
+}
+
+// Separates the target ABI live-in from the semantic function argument. The
+// transfer normally coalesces to the same storage and emits nothing. When an
+// internal call needs the ABI location while the argument remains live,
+// allocation can place the semantic identity elsewhere and materialize the
+// exact-state move at entry.
+iree_status_t loom_low_lower_emit_direct_argument_transfers(
+    loom_low_lower_context_t* context) {
+  if (!iree_any_bit_set(context->policy->flags,
+                        LOOM_LOW_LOWER_POLICY_FLAG_EXPLICIT_ABI_TRANSFERS)) {
+    return iree_ok_status();
+  }
+  uint16_t argument_count = 0;
+  const loom_value_id_t* source_arguments =
+      loom_func_like_arg_ids(context->source_function, &argument_count);
+  if (argument_count == 0) return iree_ok_status();
+
+  loom_region_t* low_body = loom_low_lower_context_low_body(context);
+  loom_builder_ip_t saved_ip = loom_builder_enter_region(
+      &context->builder, context->low_func_op, low_body);
+  loom_builder_set_block(&context->builder, loom_region_entry_block(low_body));
+  iree_status_t status = iree_ok_status();
+  for (uint16_t i = 0; i < argument_count && iree_status_is_ok(status); ++i) {
+    if (context->lowering.argument_map[i].kind !=
+        LOOM_LOW_LOWER_ABI_ARGUMENT_DIRECT) {
+      continue;
+    }
+    loom_value_id_t abi_value = LOOM_VALUE_ID_INVALID;
+    status =
+        loom_low_lower_lookup_value(context, source_arguments[i], &abi_value);
+    if (!iree_status_is_ok(status)) break;
+    loom_op_t* move_op = NULL;
+    status =
+        loom_low_move_build(&context->builder, abi_value, /*detached=*/false,
+                            loom_module_value_type(context->module, abi_value),
+                            context->source_function.op->location, &move_op);
+    if (!iree_status_is_ok(status)) break;
+
+    const loom_value_ordinal_t source_ordinal =
+        loom_low_lowering_frame_value_ordinal(&context->lowering,
+                                              source_arguments[i]);
+    const loom_value_id_t semantic_value = loom_low_move_result(move_op);
+    context->lowering.value_map[source_ordinal] = semantic_value;
+    status = loom_low_lower_copy_value_name(context, source_arguments[i],
+                                            semantic_value);
+  }
+  loom_builder_restore(&context->builder, saved_ip);
+  return status;
+}
+
+iree_status_t loom_low_lower_emit_preamble(loom_low_lower_context_t* context) {
+  if (context->policy->emit_preamble.fn == NULL) {
+    return iree_ok_status();
+  }
+
+  loom_region_t* low_body = loom_low_lower_context_low_body(context);
+  loom_builder_ip_t saved_ip = loom_builder_enter_region(
+      &context->builder, context->low_func_op, low_body);
+  loom_builder_set_block(&context->builder, loom_region_entry_block(low_body));
+  iree_status_t status = context->policy->emit_preamble.fn(
+      context->policy->emit_preamble.user_data, context);
+  loom_builder_restore(&context->builder, saved_ip);
+  return status;
+}
+
+iree_status_t loom_low_lower_emit_entry_setup(
+    loom_low_lower_context_t* context) {
+  if (context->policy->emit_entry_setup.fn == NULL) {
+    return iree_ok_status();
+  }
+
+  loom_region_t* low_body = loom_low_lower_context_low_body(context);
+  loom_builder_ip_t saved_ip = loom_builder_enter_region(
+      &context->builder, context->low_func_op, low_body);
+  loom_builder_set_block(&context->builder, loom_region_entry_block(low_body));
+  iree_status_t status = context->policy->emit_entry_setup.fn(
+      context->policy->emit_entry_setup.user_data, context);
+  loom_builder_restore(&context->builder, saved_ip);
+  return status;
+}
+
+iree_status_t loom_low_lower_finalize_function(
+    loom_low_lower_context_t* context) {
+  if (context->policy->finalize_function.fn == NULL) {
+    return iree_ok_status();
+  }
+  return context->policy->finalize_function.fn(
+      context->policy->finalize_function.user_data, context);
+}
+
 static iree_status_t loom_low_lower_map_decl_signature_types(
     loom_low_lower_context_t* context, loom_type_t** out_arg_types,
     iree_host_size_t* out_arg_count, loom_type_t** out_result_types,
