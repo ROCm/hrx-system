@@ -189,7 +189,7 @@ jobs:
 
   linux_cmake_vulkan:
     name: ${{ matrix.name }}
-    runs-on: [self-hosted, Linux, X64, gpu_navi4x]
+    runs-on: linux-gfx120X-gpu-rocm
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -198,16 +198,10 @@ jobs:
           - name: Linux / Vulkan
             command: iree-cmake-vulkan
     env:
-      AR: ${{ github.workspace }}/build/iree-cmake-vulkan/rocm-root/lib/llvm/bin/llvm-ar
-      CC: ${{ github.workspace }}/build/iree-cmake-vulkan/rocm-root/lib/llvm/bin/clang
-      CXX: ${{ github.workspace }}/build/iree-cmake-vulkan/rocm-root/lib/llvm/bin/clang++
-      HRX_ARTIFACT_SET: core
-      HRX_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}/build/iree-cmake-vulkan/downloads
-      HRX_OUTPUT_DIR: ${{ github.workspace }}/build/iree-cmake-vulkan
-      HRX_PYTHON: ${{ github.workspace }}/build/iree-cmake-vulkan/python/bin/python3
-      HRX_RELEASE_TYPE: nightly
-      HRX_ROCM_ROOT: ${{ github.workspace }}/build/iree-cmake-vulkan/rocm-root
-      PIP_CACHE_DIR: ${{ github.workspace }}/build/iree-cmake-vulkan/caches/pip
+      AR: ar
+      CC: gcc
+      CXX: g++
+      IREE_VULKAN_ALLOWED_DEVICE_IDS: "1002:7550 1002:7551"
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -215,8 +209,10 @@ jobs:
       - name: Adjust git config
         run: git config --global --add safe.directory "$PWD"
 
-      - name: Fetch ROCm toolchain
-        run: bash .github/scripts/fetch_rocm_toolchain.sh
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
 
       - name: Check Vulkan hardware environment
         timeout-minutes: 1
@@ -225,17 +221,17 @@ jobs:
       - name: Install CMake host tools
         run: |
           python3 --version
-          "${HRX_PYTHON}" -m pip install --upgrade cmake==3.31.6 ninja
-          echo "${HRX_OUTPUT_DIR}/python/bin" >> "$GITHUB_PATH"
+          python3 dev.py cmake setup --venv
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
 
       - name: Check tool versions
         run: |
           cmake --version
           ctest --version
           ninja --version
-          bash .github/scripts/check_host_toolchain.sh --expect-rocm
-          bash .github/scripts/check_rocm_device_toolchain.sh
-          test -d "${HRX_ROCM_ROOT}/include"
+          "${CC}" --version
+          "${CXX}" --version
+          "${AR}" --version
 
       - name: Run IREE CMake CI
         run: |

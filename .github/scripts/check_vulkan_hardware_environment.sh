@@ -17,6 +17,55 @@ if ! command -v timeout >/dev/null 2>&1; then
   exit 1
 fi
 
+select_allowed_device() {
+  local -a allowed_device_ids=()
+  local allowed_device_id
+  local vendor_id
+  local device_id
+  local pci_device_path
+  local actual_vendor_id
+  local actual_device_id
+  read -r -a allowed_device_ids <<<"${IREE_VULKAN_ALLOWED_DEVICE_IDS:-}"
+  for allowed_device_id in "${allowed_device_ids[@]}"; do
+    if [[ ! "${allowed_device_id}" =~ ^[0-9a-fA-F]{4}:[0-9a-fA-F]{4}$ ]]; then
+      echo "IREE_VULKAN_ALLOWED_DEVICE_IDS contains an invalid vendor:device ID: ${allowed_device_id}" >&2
+      exit 1
+    fi
+    vendor_id="${allowed_device_id%%:*}"
+    device_id="${allowed_device_id##*:}"
+    for pci_device_path in /sys/bus/pci/devices/*; do
+      if [[ ! -r "${pci_device_path}/vendor" || \
+            ! -r "${pci_device_path}/device" ]]; then
+        continue
+      fi
+      actual_vendor_id="$(<"${pci_device_path}/vendor")"
+      actual_device_id="$(<"${pci_device_path}/device")"
+      if [[ "${actual_vendor_id,,}" != "0x${vendor_id,,}" || \
+            "${actual_device_id,,}" != "0x${device_id,,}" ]]; then
+        continue
+      fi
+
+      allowed_device_id="${vendor_id,,}:${device_id,,}"
+      export DRI_PRIME="${allowed_device_id}!"
+      export IREE_VULKAN_EXPECTED_DEVICE_ID="${allowed_device_id}"
+      printf 'Selected Vulkan PCI device %s at %s.\n' \
+        "${allowed_device_id}" "${pci_device_path##*/}"
+      if [[ -n "${GITHUB_ENV:-}" ]]; then
+        printf 'DRI_PRIME=%s\nIREE_VULKAN_EXPECTED_DEVICE_ID=%s\n' \
+          "${DRI_PRIME}" "${IREE_VULKAN_EXPECTED_DEVICE_ID}" >>"${GITHUB_ENV}"
+      fi
+      return
+    done
+  done
+
+  if [[ -n "${IREE_VULKAN_ALLOWED_DEVICE_IDS:-}" ]]; then
+    echo "No allowed Vulkan PCI device is present: ${IREE_VULKAN_ALLOWED_DEVICE_IDS}" >&2
+    exit 1
+  fi
+}
+
+select_allowed_device
+
 readonly probe_timeout_seconds=30
 readonly probe_kill_after_seconds=5
 readonly runner_name="${RUNNER_NAME:-unknown}"
@@ -29,6 +78,7 @@ timeout --kill-after="${probe_kill_after_seconds}s" \
   "${probe_timeout_seconds}s" python3 -u - <<'PY' || probe_status=$?
 import ctypes
 import os
+import re
 import sys
 
 VK_SUCCESS = 0
@@ -100,6 +150,19 @@ def check_software_forcing_environment():
     check_environment_variable("VK_DRIVER_FILES")
 
 
+def expected_device_id():
+    value = os.environ.get("IREE_VULKAN_EXPECTED_DEVICE_ID", "").lower()
+    if not value:
+        return None
+    if not re.fullmatch(r"[0-9a-f]{4}:[0-9a-f]{4}", value):
+        raise SystemExit(
+            "IREE_VULKAN_EXPECTED_DEVICE_ID must use four-digit "
+            f"vendor:device hexadecimal IDs; got {value!r}"
+        )
+    vendor_id, device_id = value.split(":")
+    return int(vendor_id, 16), int(device_id, 16)
+
+
 def api_version_string(version):
     variant = version >> 29
     major = (version >> 22) & 0x7F
@@ -116,6 +179,7 @@ def vk_result_name(result):
 
 def main():
     check_software_forcing_environment()
+    required_device_id = expected_device_id()
 
     print("Loading the Vulkan loader...", flush=True)
     try:
@@ -187,6 +251,7 @@ def main():
             )
 
         first_device_is_hardware = False
+        first_device_id = None
         found_hardware = False
         print("Reading Vulkan physical device properties...", flush=True)
         print(f"Vulkan physical devices: {device_count.value}")
@@ -222,6 +287,7 @@ def main():
                     found_hardware = True
             if index == 0:
                 first_device_is_hardware = is_hardware
+                first_device_id = (properties.vendorID, properties.deviceID)
 
         if not found_hardware:
             raise SystemExit(
@@ -232,6 +298,14 @@ def main():
             raise SystemExit(
                 "Vulkan physical device 0 is not real hardware; the default "
                 "CI test device must not accidentally select a software device"
+            )
+        if required_device_id is not None and first_device_id != required_device_id:
+            expected_vendor, expected_device = required_device_id
+            actual_vendor, actual_device = first_device_id
+            raise SystemExit(
+                "Vulkan physical device 0 does not match the required CI device: "
+                f"expected {expected_vendor:04x}:{expected_device:04x}, "
+                f"got {actual_vendor:04x}:{actual_device:04x}"
             )
     finally:
         if instance.value:
