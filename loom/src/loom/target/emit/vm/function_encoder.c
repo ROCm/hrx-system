@@ -710,7 +710,7 @@ iree_status_t loom_vm_function_encode(
 
   loom_low_emission_frame_options_t frame_options = {
       .descriptor_registry = options->descriptor_registry,
-      .schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY,
+      .schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_PRESERVE_SOURCE_ORDER,
       .allocation_budgets = options->allocation_budgets,
       .allocation_budget_count = options->allocation_budget_count,
       .allocation_fixed_values = fixed_values,
