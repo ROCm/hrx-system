@@ -71,9 +71,6 @@ iree_status_t loom_vector_memory_footprint_run(loom_pass_t* pass,
   };
   iree_status_t status = loom_vector_memory_footprint_verify_function(
       module, function, &options, &result);
-  if (pass->value_facts != NULL) {
-    loom_pass_value_fact_owner_invalidate(pass->value_facts);
-  }
   IREE_RETURN_IF_ERROR(status);
   loom_vector_memory_footprint_statistics(pass)->ops_checked +=
       result.checked_op_count;

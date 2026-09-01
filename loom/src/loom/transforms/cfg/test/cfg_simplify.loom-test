@@ -161,6 +161,43 @@ func.def @deduplicates_block_args(%cond: i1, %a: i32, %b: i32) -> (i32) {
 
 // ====
 
+func.def @deduplicates_block_arg_batch(%cond: i1, %a: i32, %b: i32) -> (i32) {
+  cfg.cond_br %cond, ^left, ^right
+^left:
+  cfg.br ^join(%a: i32, %a: i32, %a: i32, %a: i32, %a: i32, %a: i32, %a: i32, %a: i32)
+^right:
+  cfg.br ^join(%b: i32, %b: i32, %b: i32, %b: i32, %b: i32, %b: i32, %b: i32, %b: i32)
+^join(%x0: i32, %x1: i32, %x2: i32, %x3: i32, %x4: i32, %x5: i32, %x6: i32, %x7: i32):
+  %s01 = test.addi %x0, %x1 : i32
+  %s23 = test.addi %x2, %x3 : i32
+  %s45 = test.addi %x4, %x5 : i32
+  %s67 = test.addi %x6, %x7 : i32
+  %s03 = test.addi %s01, %s23 : i32
+  %s47 = test.addi %s45, %s67 : i32
+  %sum = test.addi %s03, %s47 : i32
+  func.return %sum : i32
+}
+
+// ----
+func.def @deduplicates_block_arg_batch(%cond: i1, %a: i32, %b: i32) -> (i32) {
+  cfg.cond_br %cond, ^left, ^right
+^left:
+  cfg.br ^join(%a: i32)
+^right:
+  cfg.br ^join(%b: i32)
+^join(%x0: i32):
+  %s01 = test.addi %x0, %x0 : i32
+  %s23 = test.addi %x0, %x0 : i32
+  %s45 = test.addi %x0, %x0 : i32
+  %s67 = test.addi %x0, %x0 : i32
+  %s03 = test.addi %s01, %s23 : i32
+  %s47 = test.addi %s45, %s67 : i32
+  %sum = test.addi %s03, %s47 : i32
+  func.return %sum : i32
+}
+
+// ====
+
 func.def @merges_duplicate_return_blocks(%cond: i1, %value: i32) -> (i32) {
   cfg.cond_br %cond, ^then, ^else
 ^then:

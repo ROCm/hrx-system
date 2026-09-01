@@ -32,6 +32,7 @@ loom_cc_library(
     loom::pass::pipeline
     loom::pass::registry
     loom::pass::types
+    loom::pass::value_facts
     loom::rewrite::greedy
     loom::rewrite::rewriter
     loom::target::math_policy

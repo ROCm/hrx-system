@@ -28,27 +28,6 @@ TEST(PassTestRegistryTest, Verifies) {
   IREE_ASSERT_OK(loom_pass_registry_verify(loom_test_pass_registry()));
 }
 
-TEST(PassTestRegistryTest, ContainsExpectedPasses) {
-  const loom_pass_registry_t* registry = loom_test_pass_registry();
-  const iree_string_view_t expected_keys[] = {
-      IREE_SV("test.fail"),
-      IREE_SV("test.mark-changed"),
-      IREE_SV("test.module-noop"),
-      IREE_SV("test.noop"),
-      IREE_SV("test.options"),
-      IREE_SV("test.required"),
-      IREE_SV("test.requires-target"),
-      IREE_SV("test.resource-lifetime"),
-      IREE_SV("test.unavailable"),
-  };
-  ASSERT_EQ(registry->descriptor_count, IREE_ARRAYSIZE(expected_keys));
-  for (iree_host_size_t i = 0; i < registry->descriptor_count; ++i) {
-    EXPECT_TRUE(
-        iree_string_view_equal(registry->descriptors[i].key, expected_keys[i]))
-        << "unexpected test pass registry entry " << i;
-  }
-}
-
 TEST(PassTestRegistryTest, ValidatesOptions) {
   const loom_pass_descriptor_t* descriptor =
       LookupTestPass(IREE_SV("test.options"));

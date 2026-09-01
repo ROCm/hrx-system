@@ -125,22 +125,19 @@ typedef struct loom_linearize_view_accesses_vector_tile_t {
   loom_type_t flat_vector_type;
 } loom_linearize_view_accesses_vector_tile_t;
 
-static iree_status_t loom_linearize_view_accesses_op_list_initialize(
-    iree_arena_allocator_t* arena,
-    loom_linearize_view_accesses_op_list_t* list) {
-  list->count = 0;
-  list->capacity = 32;
-  return iree_arena_allocate_array(arena, list->capacity, sizeof(loom_op_t*),
-                                   (void**)&list->ops);
-}
-
 static iree_status_t loom_linearize_view_accesses_op_list_push(
     iree_arena_allocator_t* arena, loom_linearize_view_accesses_op_list_t* list,
     loom_op_t* op) {
   if (list->count >= list->capacity) {
-    IREE_RETURN_IF_ERROR(iree_arena_grow_array(
-        arena, list->count, list->count + 1, sizeof(loom_op_t*),
-        &list->capacity, (void**)&list->ops));
+    if (list->capacity == 0) {
+      list->capacity = 32;
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          arena, list->capacity, sizeof(loom_op_t*), (void**)&list->ops));
+    } else {
+      IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+          arena, list->count, list->count + 1, sizeof(loom_op_t*),
+          &list->capacity, (void**)&list->ops));
+    }
   }
   list->ops[list->count++] = op;
   return iree_ok_status();
@@ -1308,14 +1305,7 @@ iree_status_t loom_linearize_view_accesses_run(loom_pass_t* pass,
                                                loom_func_like_t function) {
   if (!loom_func_like_body(function)) return iree_ok_status();
 
-  loom_value_fact_table_t* fact_table = NULL;
-  IREE_RETURN_IF_ERROR(loom_pass_value_facts_acquire(
-      pass, module, loom_pass_value_fact_scope_function(function),
-      &fact_table));
-
   loom_linearize_view_accesses_op_list_t accesses = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_linearize_view_accesses_op_list_initialize(pass->arena, &accesses));
   loom_walk_result_t walk_result = LOOM_WALK_CONTINUE;
   loom_linearize_view_accesses_collect_context_t collect_context = {
       .arena = pass->arena,
@@ -1328,6 +1318,12 @@ iree_status_t loom_linearize_view_accesses_run(loom_pass_t* pass,
                              .user_data = &collect_context,
                          },
                          pass->arena, &walk_result));
+  if (accesses.count == 0) return iree_ok_status();
+
+  loom_value_fact_table_t* fact_table = NULL;
+  IREE_RETURN_IF_ERROR(loom_pass_value_facts_acquire(
+      pass, module, loom_pass_value_fact_scope_function(function),
+      &fact_table));
 
   loom_linearize_view_accesses_view_map_t view_map = {0};
   IREE_RETURN_IF_ERROR(

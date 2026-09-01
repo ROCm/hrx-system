@@ -12,6 +12,7 @@
 #include "loom/ops/op_defs.h"
 #include "loom/ops/test/ops.h"
 #include "loom/pass/report.h"
+#include "loom/pass/value_facts.h"
 
 static bool loom_test_pass_target_record_satisfies_requirement(
     const loom_pass_environment_capability_t* capability,
@@ -146,6 +147,14 @@ static iree_status_t loom_test_noop_run(loom_pass_t* pass,
       loom_test_invocation_statistics(pass);
   ++statistics->invocations;
   return iree_ok_status();
+}
+
+static iree_status_t loom_test_acquire_value_facts_run(
+    loom_pass_t* pass, loom_module_t* module, loom_func_like_t function) {
+  loom_value_fact_table_t* value_facts = NULL;
+  return loom_pass_value_facts_acquire(
+      pass, module, loom_pass_value_fact_scope_function(function),
+      &value_facts);
 }
 
 static iree_status_t loom_test_mark_changed_run(loom_pass_t* pass,
@@ -405,6 +414,16 @@ static const loom_pass_info_t* loom_test_noop_pass_info(void) {
   return &kTestNoopPassInfo;
 }
 
+static const loom_pass_info_t kTestAcquireValueFactsPassInfo = {
+    .name = IREE_SVL("test.acquire-value-facts"),
+    .description = IREE_SVL("Acquire function-scoped value facts."),
+    .kind = LOOM_PASS_FUNCTION,
+};
+
+static const loom_pass_info_t* loom_test_acquire_value_facts_pass_info(void) {
+  return &kTestAcquireValueFactsPassInfo;
+}
+
 static const loom_pass_info_t kTestOptionsPassInfo = {
     .name = IREE_SVL("test.options"),
     .description = IREE_SVL("Synthetic function pass with typed options."),
@@ -463,6 +482,11 @@ static const loom_pass_info_t* loom_test_unavailable_pass_info(void) {
 }
 
 static const loom_pass_descriptor_t kTestPassDescriptors[] = {
+    {
+        .key = IREE_SVL("test.acquire-value-facts"),
+        .info = loom_test_acquire_value_facts_pass_info,
+        .function_run = loom_test_acquire_value_facts_run,
+    },
     {
         .key = IREE_SVL("test.fail"),
         .info = loom_test_fail_pass_info,

@@ -31,7 +31,7 @@ typedef struct loom_canonicalizer_options_t {
   // Optional immutable target facts used by target-sensitive fact inference.
   const loom_target_facts_t* target_facts;
 
-  // Optional seed facts cloned into the driver-owned fact table before the
+  // Optional seed facts cloned into the prepared fact table before the
   // initial function analysis. Extension payloads are re-interned, so the seed
   // table may come from a different fact context. The target scope is supplied
   // independently by target_facts.
@@ -66,14 +66,14 @@ typedef struct loom_canonicalizer_t {
   // Module being transformed.
   loom_module_t* module;
 
-  // Caller-owned reusable value-fact storage used for region analysis.
+  // Caller-owned reusable value-fact storage used for function/region analysis.
   loom_pass_value_fact_owner_t* value_facts;
 
   // Parent arena whose block pool backs the resettable scratch arena.
   iree_arena_allocator_t* parent_arena;
 
-  // Reset before each region run; owns the rewriter worklist and
-  // symbolic-expression scratch state for the most recent run.
+  // Reset before each public run; owns the rewriter worklist and
+  // symbolic-expression scratch state for that run.
   iree_arena_allocator_t scratch_arena;
 
   // True after scratch_arena has been initialized and before deinitialize.
@@ -107,15 +107,17 @@ iree_status_t loom_canonicalizer_run_region(
     const loom_canonicalizer_options_t* options,
     loom_canonicalizer_result_t* out_result);
 
-// Runs canonicalization on a function-like op's root regions. Non-body regions
-// run first, then their facts seed body-region canonicalization.
+// Runs canonicalization on a function-like op's root regions. Facts are
+// computed once across the function; non-body regions canonicalize before the
+// body so their incremental updates are visible to body canonicalization.
 iree_status_t loom_canonicalizer_run_function(
     loom_canonicalizer_t* canonicalizer, loom_func_like_t function,
     const loom_canonicalizer_options_t* options,
     loom_canonicalizer_result_t* out_result);
 
-// Returns the fact table from the most recent run. The table is invalidated by
-// the next run and by loom_canonicalizer_deinitialize.
+// Returns the caller-owned fact table incrementally maintained by the most
+// recent run. A later run may replace the table. Deinitializing the
+// canonicalizer detaches the table without changing its owner-managed scope.
 const loom_value_fact_table_t* loom_canonicalizer_fact_table(
     const loom_canonicalizer_t* canonicalizer);
 

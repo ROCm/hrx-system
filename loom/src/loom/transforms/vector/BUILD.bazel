@@ -52,6 +52,23 @@ loom_cc_library(
     ],
 )
 
+loom_cc_test(
+    name = "memory_footprint_test",
+    srcs = ["memory_footprint_test.cc"],
+    deps = [
+        ":memory_footprint",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/pass:value_facts",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 loom_cc_library(
     name = "sink_single_use_reads",
     srcs = ["sink_single_use_reads.c"],

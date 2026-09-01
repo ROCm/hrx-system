@@ -51,6 +51,24 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_test(
+  NAME
+    memory_footprint_test
+  SRCS
+    "memory_footprint_test.cc"
+  DEPS
+    ::memory_footprint
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::format::text::parser
+    loom::ir
+    loom::ops::op_defs
+    loom::ops::test
+    loom::pass::types
+    loom::pass::value_facts
+)
+
 loom_cc_library(
   NAME
     sink_single_use_reads

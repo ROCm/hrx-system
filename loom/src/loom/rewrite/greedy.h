@@ -18,7 +18,6 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "loom/ir/ir.h"
-#include "loom/pass/value_facts.h"
 #include "loom/rewrite/rewriter.h"
 #include "loom/util/fact_table.h"
 
@@ -38,15 +37,6 @@ typedef uint32_t loom_greedy_rewrite_change_flags_t;
 typedef struct loom_greedy_rewrite_options_t {
   // Maximum number of fixed-point iterations. Zero selects the default.
   uint32_t max_iterations;
-
-  // Optional immutable target facts used by target-sensitive fact inference.
-  // Requires a driver with a value-fact owner.
-  const loom_target_facts_t* target_facts;
-
-  // Optional seed facts cloned into the driver-owned fact table before the
-  // initial region analysis. The target scope is supplied independently by
-  // target_facts. Requires a driver with a value-fact owner.
-  const loom_value_fact_table_t* seed_facts;
 
   // Optional constant materialization hook installed on the active rewriter.
   loom_materialize_constant_fn_t materialize_constant;
@@ -74,20 +64,17 @@ typedef struct loom_greedy_rewrite_result_t {
 } loom_greedy_rewrite_result_t;
 
 // Stateful greedy rewrite driver. The caller owns the module, scratch arena,
-// and value-fact owner. The driver keeps successful run facts queryable until
-// the next run, reset, or deinitialize.
+// and optional precomputed fact table. Rewrites incrementally maintain the
+// borrowed facts but never acquire, clear, or otherwise own their scope.
 typedef struct loom_greedy_rewrite_driver_t {
   // Module being transformed.
   loom_module_t* module;
 
-  // Optional reusable value-fact storage used for region analysis.
-  loom_pass_value_fact_owner_t* value_facts;
-
   // Caller-owned scratch arena for the active rewriter and pass callbacks.
   iree_arena_allocator_t* scratch_arena;
 
-  // Borrowed facts from value_facts for the most recent successful run.
-  loom_value_fact_table_t* latest_facts;
+  // Optional caller-computed facts incrementally maintained by rewrites.
+  loom_value_fact_table_t* fact_table;
 
   // Rewriter state for the active run.
   loom_rewriter_t rewriter;
@@ -145,19 +132,23 @@ typedef struct loom_greedy_rewrite_callbacks_t {
 // runs but remains owned by the caller.
 void loom_greedy_rewrite_driver_initialize(
     loom_module_t* module, iree_arena_allocator_t* scratch_arena,
-    loom_pass_value_fact_owner_t* value_facts,
+    loom_value_fact_table_t* fact_table,
     loom_greedy_rewrite_driver_t* out_driver);
 
-// Clears active rewriter state, invalidates borrowed facts, and resets scratch.
+// Replaces the caller-owned fact table used by subsequent runs. The driver must
+// not have an active run. NULL disables incremental fact maintenance.
+void loom_greedy_rewrite_driver_set_fact_table(
+    loom_greedy_rewrite_driver_t* driver, loom_value_fact_table_t* fact_table);
+
+// Clears active rewriter state and resets scratch. Borrowed facts remain valid.
 void loom_greedy_rewrite_driver_reset(loom_greedy_rewrite_driver_t* driver);
 
 // Releases active run state. Does not deinitialize the caller-owned scratch
-// arena or value-fact owner.
+// arena or fact table.
 void loom_greedy_rewrite_driver_deinitialize(
     loom_greedy_rewrite_driver_t* driver);
 
-// Returns the fact table from the most recent successful run. The table is
-// invalidated by the next driver run, reset, or deinitialize.
+// Returns the caller-owned fact table incrementally maintained by the driver.
 const loom_value_fact_table_t* loom_greedy_rewrite_driver_fact_table(
     const loom_greedy_rewrite_driver_t* driver);
 
@@ -170,10 +161,11 @@ void loom_greedy_rewrite_result_record_change(
     loom_greedy_rewrite_result_t* result, const loom_rewriter_t* rewriter,
     loom_greedy_rewrite_change_flags_t flags);
 
-// Runs greedy rewriting on an explicit region tree. |function| supplies the
-// logical function context for value-fact inference and may be empty for
-// detached regions. |parent_op| owns the root entry block arguments when
-// provided.
+// Runs greedy rewriting on an explicit region tree. |function| and |parent_op|
+// describe the region to policy callbacks; the driver does not rediscover or
+// recompute facts for the region. On failure the borrowed fact table may
+// contain partial incremental updates and its owner must invalidate it before
+// reuse.
 iree_status_t loom_greedy_rewrite_run_region(
     loom_greedy_rewrite_driver_t* driver, loom_func_like_t function,
     loom_region_t* region, loom_op_t* parent_op,

@@ -134,6 +134,12 @@ iree_status_t loom_rewriter_seed_region(loom_rewriter_t* rewriter,
 iree_status_t loom_rewriter_seed_function(loom_rewriter_t* rewriter,
                                           loom_func_like_t function);
 
+// Attaches caller-computed value facts to the rewriter for incremental
+// maintenance. The table must already cover every value the rewrite policy may
+// query and remains owned by the caller. NULL disables value-fact maintenance.
+void loom_rewriter_attach_value_facts(loom_rewriter_t* rewriter,
+                                      loom_value_fact_table_t* facts);
+
 // Enables value analysis on this rewriter using caller-owned fact storage and
 // runs the initial forward pass over |region| and its nested regions, seeding
 // facts from fact inference functions. |function| supplies the logical

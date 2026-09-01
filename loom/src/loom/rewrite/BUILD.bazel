@@ -33,7 +33,6 @@ loom_cc_library(
     deps = [
         ":rewriter",
         "//loom/src/loom/ir",
-        "//loom/src/loom/pass:value_facts",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
@@ -48,6 +47,7 @@ loom_cc_test(
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/test",
+        "//loom/src/loom/pass:value_facts",
         "//loom/src/loom/target:facts",
         "//loom/src/loom/target:types",
         "//runtime/src/iree/base/internal:arena",
