@@ -50,6 +50,9 @@ typedef struct loom_local_value_domain_t {
 //
 // The domain initially registers block arguments, op results, op operands, SSA
 // references carried by value types, and values captured by nested regions.
+// Storage is reserved once from the region's transitive definition count;
+// growth is only required when external captures or active rewrites add values
+// beyond that structural set.
 // Rewriting frames that create new values while the domain is active must
 // explicitly register those values before indexing ordinal-keyed scratch.
 iree_status_t loom_local_value_domain_acquire_for_region(
@@ -87,12 +90,11 @@ static inline loom_value_ordinal_t loom_local_value_domain_try_ordinal(
     const loom_local_value_domain_t* domain, loom_value_id_t value_id) {
   IREE_ASSERT(
       iree_any_bit_set(domain->flags, LOOM_LOCAL_VALUE_DOMAIN_FLAG_ACQUIRED));
-  const loom_value_u32_scratch_t* scratch = &domain->module->scratch.values;
   if (value_id >= domain->module->values.count) {
     return LOOM_VALUE_ORDINAL_INVALID;
   }
   const loom_value_ordinal_t value_ordinal =
-      loom_value_u32_scratch_load(scratch, value_id);
+      loom_module_value_ordinal_scratch_lookup(domain->module, value_id);
   if (value_ordinal == LOOM_VALUE_ORDINAL_INVALID) {
     return LOOM_VALUE_ORDINAL_INVALID;
   }

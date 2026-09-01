@@ -356,10 +356,8 @@ static iree_status_t loom_check_verify_pass_output(
       .max_errors = 100,
   };
   loom_low_verify_result_t low_verify_result = {0};
-  loom_low_verify_scratch_t low_verify_scratch =
-      loom_low_verify_scratch_for_module(module);
-  IREE_RETURN_IF_ERROR(loom_low_verify_module(
-      module, &low_verify_options, &low_verify_scratch, &low_verify_result));
+  IREE_RETURN_IF_ERROR(
+      loom_low_verify_module(module, &low_verify_options, &low_verify_result));
   *out_failed_verification = low_verify_result.error_count > 0;
   return iree_ok_status();
 }

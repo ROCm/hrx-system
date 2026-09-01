@@ -247,11 +247,8 @@ class AmdgpuSanitizerAccessTest : public ::testing::Test {
     options.descriptor_registry = &low_registry_.registry;
     options.emitter = {EmitDiagnosticToStderr, NULL};
     options.max_errors = 20;
-    loom_low_verify_scratch_t scratch =
-        loom_low_verify_scratch_for_module(module_);
     loom_low_verify_result_t result = {};
-    IREE_ASSERT_OK(
-        loom_low_verify_module(module_, &options, &scratch, &result));
+    IREE_ASSERT_OK(loom_low_verify_module(module_, &options, &result));
     EXPECT_EQ(result.error_count, 0u);
   }
 

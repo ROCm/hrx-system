@@ -198,19 +198,6 @@ iree_status_t loom_parse_keyword(loom_parser_t* parser, uint16_t keyword_id) {
 // Op finalization from accumulator to loom_op_t.
 //===----------------------------------------------------------------------===//
 
-static void loom_parser_set_region_parent_op(loom_region_t* region,
-                                             loom_op_t* parent_op) {
-  if (!region) {
-    return;
-  }
-  for (uint16_t block_index = 0; block_index < region->block_count;
-       ++block_index) {
-    loom_block_t* block = loom_region_block(region, block_index);
-    loom_op_t* op = NULL;
-    loom_block_for_each_op(block, op) { op->parent_op = parent_op; }
-  }
-}
-
 static loom_block_t* loom_parser_find_block_by_label(
     const loom_parser_t* parser, loom_region_t* region,
     iree_string_view_t label) {
@@ -537,10 +524,10 @@ static iree_status_t loom_finalize_op(
 
   // Copy regions.
   if (parsed->region_count > 0) {
-    memcpy(loom_op_regions(op), parsed->regions,
-           parsed->region_count * sizeof(loom_region_t*));
     for (uint8_t i = 0; i < parsed->region_count; ++i) {
-      loom_parser_set_region_parent_op(parsed->regions[i], op);
+      if (parsed->regions[i]) {
+        IREE_RETURN_IF_ERROR(loom_op_attach_region(op, i, parsed->regions[i]));
+      }
     }
   }
 

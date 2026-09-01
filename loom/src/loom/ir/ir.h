@@ -1859,6 +1859,12 @@ typedef struct loom_region_t {
   // region. Convergent ops cannot be removed or moved across control structure
   // even when they are otherwise memory-pure.
   uint32_t convergent_effect_count;
+  // Transitive number of SSA values defined by block arguments and operation
+  // results in this region and all regions nested below it.
+  uint32_t value_definition_count;
+  // Operation owning this region, or NULL for the module body and detached
+  // regions that have not been attached to an operation.
+  loom_op_t* owner_op;
   // Inline storage for the entry block.
   loom_block_t entry_block;
   // Ordered block pointer table. Points at inline_blocks for one-block regions.
@@ -1866,8 +1872,6 @@ typedef struct loom_region_t {
   // Inline block pointer table for the common single-block case.
   loom_block_t* inline_blocks[1];
 } loom_region_t;
-
-static_assert(sizeof(loom_region_t) == 88, "loom_region_t must be 88 bytes");
 
 // Returns true and writes |out_block_index| when |block| is owned by |region|.
 static inline bool loom_region_try_block_index(const loom_region_t* region,
@@ -2079,15 +2083,16 @@ static_assert((1u << LOOM_VALUE_SEGMENT_SHIFT) == LOOM_VALUE_SEGMENT_CAPACITY,
 
 // Stable storage for one range of module value IDs.
 //
-// Semantic values, reusable u32 scratch, and type-use adjacency heads share
-// one segment because they have the same value-ID lifetime and cardinality.
-// The structure-of-arrays layout keeps hot value iteration contiguous while
-// fitting the complete segment in a 32 KiB compiler workspace block.
+// Semantic values, function-local ordinal rows, and type-use adjacency heads
+// share one segment because they have the same value-ID lifetime and
+// cardinality. The structure-of-arrays layout keeps hot value iteration
+// contiguous while fitting the complete segment in a 32 KiB compiler
+// workspace block.
 typedef iree_alignas(64) struct loom_value_segment_t {
   // Cache-line-aligned semantic value rows.
   loom_value_t values[LOOM_VALUE_SEGMENT_CAPACITY];
-  // Reusable compiler scratch indexed by the same value rows.
-  uint32_t u32_scratch[LOOM_VALUE_SEGMENT_CAPACITY];
+  // Active function-local ordinals indexed by module value ID.
+  loom_value_ordinal_t local_ordinals[LOOM_VALUE_SEGMENT_CAPACITY];
   // Type-use adjacency heads indexed by the same value rows.
   loom_value_type_use_heads_t type_use_heads[LOOM_VALUE_SEGMENT_CAPACITY];
 } loom_value_segment_t;
@@ -2143,20 +2148,20 @@ static inline const loom_value_t* loom_value_table_const_value(
   return &segment->values[value_id & LOOM_VALUE_SEGMENT_MASK];
 }
 
-// Returns the mutable u32 scratch row for |value_id|.
-static inline uint32_t* loom_value_table_u32_scratch(loom_value_table_t* table,
-                                                     loom_value_id_t value_id) {
+// Returns the mutable local ordinal row for |value_id|.
+static inline loom_value_ordinal_t* loom_value_table_local_ordinal(
+    loom_value_table_t* table, loom_value_id_t value_id) {
   loom_value_segment_t* segment =
       loom_value_table_segment_for_id(table, value_id);
-  return &segment->u32_scratch[value_id & LOOM_VALUE_SEGMENT_MASK];
+  return &segment->local_ordinals[value_id & LOOM_VALUE_SEGMENT_MASK];
 }
 
-// Returns the const u32 scratch row for |value_id|.
-static inline const uint32_t* loom_value_table_const_u32_scratch(
+// Returns the const local ordinal row for |value_id|.
+static inline const loom_value_ordinal_t* loom_value_table_const_local_ordinal(
     const loom_value_table_t* table, loom_value_id_t value_id) {
   const loom_value_segment_t* segment =
       loom_value_table_const_segment_for_id(table, value_id);
-  return &segment->u32_scratch[value_id & LOOM_VALUE_SEGMENT_MASK];
+  return &segment->local_ordinals[value_id & LOOM_VALUE_SEGMENT_MASK];
 }
 
 // Returns the mutable type-use adjacency heads for |value_id|.
@@ -2176,39 +2181,14 @@ loom_value_table_const_type_use_heads(const loom_value_table_t* table,
   return &segment->type_use_heads[value_id & LOOM_VALUE_SEGMENT_MASK];
 }
 
-// Active state for module value-id indexed u32 scratch storage.
-typedef enum loom_value_u32_scratch_state_e {
-  // Scratch contents are not initialized for a specific typed user.
-  LOOM_VALUE_U32_SCRATCH_STATE_UNACQUIRED_UNKNOWN = 0,
-  // Scratch contents are initialized as value ordinals and not acquired.
-  LOOM_VALUE_U32_SCRATCH_STATE_UNACQUIRED_ORDINALS = 1,
-  // Scratch contents were last used as zero-initialized payloads and are not
-  // acquired.
-  LOOM_VALUE_U32_SCRATCH_STATE_UNACQUIRED_ZEROED = 2,
-  // Scratch is acquired as value ordinals by one compiler frame.
-  LOOM_VALUE_U32_SCRATCH_STATE_ACQUIRED_ORDINALS = 3,
-  // Scratch is acquired as zero-initialized u32 payloads by one frame.
-  LOOM_VALUE_U32_SCRATCH_STATE_ACQUIRED_ZEROED = 4,
-} loom_value_u32_scratch_state_t;
-
-// Compiler scratch mapping module value IDs to one active u32 payload.
-//
-// Scratch rows share the stable value segments and are reused by phase frames
-// that need value-id keyed storage. They do not describe semantic IR state:
-// value IDs remain the durable identity, while payloads are transient facts
-// assigned by the active frame. Only one typed frame may acquire the rows at a
-// time.
-typedef struct loom_value_u32_scratch_t {
-  // Value table whose segments own the u32 payload rows.
-  loom_value_table_t* value_table;
-  // Active ownership and payload interpretation state.
-  loom_value_u32_scratch_state_t state;
-} loom_value_u32_scratch_t;
-
 // Reusable non-semantic compiler scratch owned by a module.
+//
+// Each active compiler frame assigns ordinals only to the values in its local
+// domain. Pass-specific facts live in separate dense arrays indexed by those
+// ordinals; the module map never changes interpretation or stores pass data.
 typedef struct loom_module_scratch_t {
-  // Exclusive value-id indexed u32 scratch storage.
-  loom_value_u32_scratch_t values;
+  // True while one compiler frame owns the module-to-local value ordinal map.
+  bool value_ordinals_acquired;
 } loom_module_scratch_t;
 
 // Symbol table. Flat (no nesting), one per module.

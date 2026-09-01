@@ -941,13 +941,11 @@ static iree_status_t loom_amdgpu_hal_kernel_library_entries(
     }
   }
   loom_low_verify_result_t low_verify_result = {0};
-  loom_low_verify_scratch_t low_verify_scratch =
-      loom_low_verify_scratch_for_module(module);
   if (iree_status_is_ok(status) && !diagnostics_failed) {
     status = loom_target_entry_verify_low_module(
         module, low_registry, target_options, diagnostic_emitter,
         LOOM_AMDGPU_HAL_KERNEL_LIBRARY_DEFAULT_MAX_ERRORS,
-        low_verify_provider_list, &low_verify_scratch, &low_verify_result);
+        low_verify_provider_list, &low_verify_result);
     if (iree_status_is_ok(status) && low_verify_result.error_count != 0) {
       diagnostics_failed = true;
     }

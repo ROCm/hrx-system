@@ -96,10 +96,7 @@ class LowVerifyTest : public ::testing::Test {
     options.emitter = capture->emitter();
     options.provider_list = loom_low_verify_provider_list_empty();
     options.max_errors = 20;
-    loom_low_verify_scratch_t scratch =
-        loom_low_verify_scratch_for_module(module);
-    IREE_EXPECT_OK(
-        loom_low_verify_module(module, &options, &scratch, out_result));
+    IREE_EXPECT_OK(loom_low_verify_module(module, &options, out_result));
   }
 
   iree_arena_block_pool_t block_pool_;

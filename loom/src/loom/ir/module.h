@@ -174,37 +174,12 @@ void loom_module_value_ordinal_scratch_acquire(loom_module_t* module);
 // frame has cleared all value IDs it registered.
 void loom_module_value_ordinal_scratch_release(loom_module_t* module);
 
-// Acquires |scratch| as a value-id indexed zeroed u32 table. Entries in the
-// caller-specified active value range are reset to zero. Callers must release
-// before any other scratch mode can acquire the same storage.
-void loom_value_u32_scratch_acquire_zeroed(loom_value_u32_scratch_t* scratch,
-                                           iree_host_size_t value_count);
-
-// Releases |scratch| from zeroed u32 payload use.
-void loom_value_u32_scratch_release_zeroed(loom_value_u32_scratch_t* scratch);
-
-// Loads one row from an acquired value-id indexed u32 scratch table.
-static inline uint32_t loom_value_u32_scratch_load(
-    const loom_value_u32_scratch_t* scratch, loom_value_id_t value_id) {
-  IREE_ASSERT(value_id < scratch->value_table->count);
-  return *loom_value_table_const_u32_scratch(scratch->value_table, value_id);
-}
-
-// Stores one row in an acquired value-id indexed u32 scratch table.
-static inline void loom_value_u32_scratch_store(
-    loom_value_u32_scratch_t* scratch, loom_value_id_t value_id,
-    uint32_t value) {
-  IREE_ASSERT(value_id < scratch->value_table->count);
-  *loom_value_table_u32_scratch(scratch->value_table, value_id) = value;
-}
-
 // Returns true while a compiler frame owns the module value-ordinal scratch
 // map.
 static inline bool loom_module_value_ordinal_scratch_is_active(
     const loom_module_t* module) {
   IREE_ASSERT(module != NULL);
-  return module->scratch.values.state ==
-         LOOM_VALUE_U32_SCRATCH_STATE_ACQUIRED_ORDINALS;
+  return module->scratch.value_ordinals_acquired;
 }
 
 // Registers |value_id| with |ordinal| in the active value-ordinal scratch map.
@@ -212,14 +187,13 @@ static inline void loom_module_value_ordinal_scratch_set(
     loom_module_t* module, loom_value_id_t value_id,
     loom_value_ordinal_t ordinal) {
   IREE_ASSERT(module != NULL);
-  loom_value_u32_scratch_t* scratch = &module->scratch.values;
-  IREE_ASSERT_EQ(scratch->state,
-                 LOOM_VALUE_U32_SCRATCH_STATE_ACQUIRED_ORDINALS);
+  IREE_ASSERT(module->scratch.value_ordinals_acquired);
   IREE_ASSERT(value_id < module->values.count);
   IREE_ASSERT(ordinal != LOOM_VALUE_ORDINAL_INVALID);
-  IREE_ASSERT_EQ(loom_value_u32_scratch_load(scratch, value_id),
-                 LOOM_VALUE_ORDINAL_INVALID);
-  loom_value_u32_scratch_store(scratch, value_id, ordinal);
+  loom_value_ordinal_t* ordinal_row =
+      loom_value_table_local_ordinal(&module->values, value_id);
+  IREE_ASSERT_EQ(*ordinal_row, LOOM_VALUE_ORDINAL_INVALID);
+  *ordinal_row = ordinal;
 }
 
 // Clears a previously-registered |value_id| from the active value-ordinal
@@ -227,11 +201,10 @@ static inline void loom_module_value_ordinal_scratch_set(
 static inline void loom_module_value_ordinal_scratch_clear(
     loom_module_t* module, loom_value_id_t value_id) {
   IREE_ASSERT(module != NULL);
-  loom_value_u32_scratch_t* scratch = &module->scratch.values;
-  IREE_ASSERT_EQ(scratch->state,
-                 LOOM_VALUE_U32_SCRATCH_STATE_ACQUIRED_ORDINALS);
+  IREE_ASSERT(module->scratch.value_ordinals_acquired);
   IREE_ASSERT(value_id < module->values.count);
-  loom_value_u32_scratch_store(scratch, value_id, LOOM_VALUE_ORDINAL_INVALID);
+  *loom_value_table_local_ordinal(&module->values, value_id) =
+      LOOM_VALUE_ORDINAL_INVALID;
 }
 
 // Returns the active local ordinal for |value_id|, or INVALID when the active
@@ -239,13 +212,11 @@ static inline void loom_module_value_ordinal_scratch_clear(
 static inline loom_value_ordinal_t loom_module_value_ordinal_scratch_lookup(
     const loom_module_t* module, loom_value_id_t value_id) {
   IREE_ASSERT(module != NULL);
-  const loom_value_u32_scratch_t* scratch = &module->scratch.values;
-  IREE_ASSERT_EQ(scratch->state,
-                 LOOM_VALUE_U32_SCRATCH_STATE_ACQUIRED_ORDINALS);
+  IREE_ASSERT(module->scratch.value_ordinals_acquired);
   if (value_id >= module->values.count) {
     return LOOM_VALUE_ORDINAL_INVALID;
   }
-  return loom_value_u32_scratch_load(scratch, value_id);
+  return *loom_value_table_const_local_ordinal(&module->values, value_id);
 }
 
 // Registers a source identifier (filename, system tag, etc.) in |module| and
@@ -649,6 +620,20 @@ iree_status_t loom_module_allocate_block(loom_module_t* module,
 iree_status_t loom_module_allocate_region(loom_module_t* module,
                                           uint16_t block_count,
                                           loom_region_t** out_region);
+
+// Attaches detached |region| to the empty |region_index| slot on |op|.
+// This establishes the region owner and direct child-op parent links. When
+// |op| is already linked, the region's existing value-definition count is
+// propagated into its containing regions; otherwise op insertion accounts for
+// the complete subtree.
+iree_status_t loom_op_attach_region(loom_op_t* op, uint8_t region_index,
+                                    loom_region_t* region);
+
+// Adjusts |region|'s transitive value-definition count and every ancestor
+// region containing its owner op. IR mutation helpers use this to keep local
+// value-domain capacities current without rescanning operation trees.
+void loom_region_adjust_value_definition_count(loom_region_t* region,
+                                               int64_t delta);
 
 // Appends a new block to |region| and returns it in |*out_block|. Existing
 // block objects are never relocated; only the region's block pointer table may

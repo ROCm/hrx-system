@@ -229,13 +229,12 @@ iree_status_t loom_target_entry_verify_module(
 }
 
 iree_status_t loom_target_entry_verify_low_module(
-    const loom_module_t* module,
-    const loom_low_descriptor_registry_t* low_registry,
+    loom_module_t* module, const loom_low_descriptor_registry_t* low_registry,
     const loom_target_entry_options_t* options,
     loom_target_entry_diagnostic_emitter_t* diagnostic_emitter,
     uint32_t default_max_errors,
     loom_low_verify_provider_list_t low_verify_provider_list,
-    loom_low_verify_scratch_t* scratch, loom_low_verify_result_t* out_result) {
+    loom_low_verify_result_t* out_result) {
   const loom_low_verify_options_t low_verify_options = {
       .descriptor_registry = low_registry,
       .function_versions = options ? options->function_versions : NULL,
@@ -244,8 +243,7 @@ iree_status_t loom_target_entry_verify_low_module(
       .max_errors = loom_target_entry_max_errors(options, default_max_errors),
   };
   *out_result = (loom_low_verify_result_t){0};
-  return loom_low_verify_module(module, &low_verify_options, scratch,
-                                out_result);
+  return loom_low_verify_module(module, &low_verify_options, out_result);
 }
 
 static void loom_target_entry_initialize_fact_table(

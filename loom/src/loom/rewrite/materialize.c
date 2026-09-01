@@ -427,15 +427,10 @@ static iree_status_t loom_ir_clone_op_impl(
         (iree_host_size_t)source_op->successor_count * sizeof(loom_block_t*));
   }
   if (source_op->region_count > 0) {
-    memcpy(loom_op_regions(target_op), target_regions,
-           (iree_host_size_t)source_op->region_count * sizeof(loom_region_t*));
     for (uint8_t i = 0; i < source_op->region_count; ++i) {
       if (!target_regions[i]) continue;
-      for (uint16_t block_index = 0;
-           block_index < target_regions[i]->block_count; ++block_index) {
-        target_regions[i]->blocks[block_index]->parent_region =
-            target_regions[i];
-      }
+      IREE_RETURN_IF_ERROR(
+          loom_op_attach_region(target_op, i, target_regions[i]));
     }
   }
   if (source_op->result_count > 0) {
@@ -695,67 +690,13 @@ static bool loom_ir_move_source_value_id_is_valid(const loom_ir_remap_t* remap,
          loom_ir_move_value_id_is_valid(remap->source_module, value_id);
 }
 
-static const loom_op_t* loom_ir_move_region_owner_op(
-    const loom_region_t* region) {
-  if (!region) {
-    return NULL;
-  }
-  const loom_block_t* block = NULL;
-  loom_region_for_each_block(region, block) {
-    const loom_op_t* first_op = block->first_op;
-    if (first_op) {
-      return first_op->parent_op;
-    }
-  }
-  return NULL;
-}
-
-static bool loom_ir_move_region_contains_block_slow(
-    const loom_region_t* region, const loom_block_t* target) {
-  if (!region || !target) {
-    return false;
-  }
-  for (uint16_t block_index = 0; block_index < region->block_count;
-       ++block_index) {
-    const loom_block_t* block = loom_region_const_block(region, block_index);
-    if (block == target) {
-      return true;
-    }
-    const loom_op_t* op = NULL;
-    loom_block_for_each_op(block, op) {
-      loom_region_t** regions = loom_op_regions(op);
-      for (uint8_t i = 0; i < op->region_count; ++i) {
-        if (loom_ir_move_region_contains_block_slow(regions[i], target)) {
-          return true;
-        }
-      }
-    }
-  }
-  return false;
-}
-
 static bool loom_ir_move_block_is_nested_under_op(const loom_op_t* root,
                                                   const loom_block_t* block) {
-  if (!root || !block) {
-    return false;
-  }
-  const loom_op_t* owner_op =
-      loom_ir_move_region_owner_op(block->parent_region);
-  if (owner_op) {
-    for (const loom_op_t* current = owner_op; current;
-         current = current->parent_op) {
-      if (current == root) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  loom_region_t** regions = loom_op_regions(root);
-  for (uint8_t i = 0; i < root->region_count; ++i) {
-    if (loom_ir_move_region_contains_block_slow(regions[i], block)) {
-      return true;
-    }
+  if (!root || !block || !block->parent_region) return false;
+  const loom_op_t* owner_op = block->parent_region->owner_op;
+  for (const loom_op_t* current = owner_op; current;
+       current = current->parent_op) {
+    if (current == root) return true;
   }
   return false;
 }

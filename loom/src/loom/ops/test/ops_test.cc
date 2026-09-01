@@ -269,7 +269,7 @@ TEST_F(BuilderTest, AllocOpWithSuccessorsKeepsTrailingFieldsDistinct) {
 
   loom_op_successors(op)[0] = then_block;
   loom_op_successors(op)[1] = else_block;
-  loom_op_regions(op)[0] = child_region;
+  IREE_ASSERT_OK(loom_op_attach_region(op, 0, child_region));
   loom_op_operands(op)[0] = 42;
   loom_op_results(op)[0] = 7;
   loom_op_attrs(op)[0] = loom_attr_i64(99);
@@ -720,10 +720,10 @@ TEST_F(BuilderTest, RegionAccessor) {
   loom_op_t* op = NULL;
   IREE_ASSERT_OK(loom_builder_allocate_op(&builder_, LOOM_OP_TEST_MAP, 2, 1, 1,
                                           0, 0, LOOM_LOCATION_UNKNOWN, &op));
-  // Set a sentinel region pointer.
-  loom_region_t sentinel_region = {0};
-  loom_op_regions(op)[0] = &sentinel_region;
-  EXPECT_EQ(loom_test_map_body(op), &sentinel_region);
+  loom_region_t* region = NULL;
+  IREE_ASSERT_OK(loom_module_allocate_region(module_, 1, &region));
+  IREE_ASSERT_OK(loom_op_attach_region(op, 0, region));
+  EXPECT_EQ(loom_test_map_body(op), region);
 }
 
 TEST_F(BuilderTest, TrailingStorageAlignment) {
@@ -1043,6 +1043,9 @@ TEST_F(BuilderTest, FuncBuilder) {
   loom_region_t* body = loom_test_func_body(op);
   ASSERT_NE(body, nullptr);
   EXPECT_EQ(body->block_count, 1);
+  EXPECT_EQ(body->owner_op, op);
+  EXPECT_EQ(body->value_definition_count, 2u);
+  EXPECT_EQ(module_->body->value_definition_count, 3u);
   loom_block_t* entry = loom_region_entry_block(body);
   EXPECT_EQ(entry->arg_count, 2);
   EXPECT_EQ(loom_type_element_type(loom_block_arg_type(module_, entry, 0)),
@@ -1348,6 +1351,7 @@ TEST_F(BuilderTest, OpRemoveResultsCompactsDefinitionsAndTiedResults) {
   const loom_value_id_t old_result0 = loom_op_results(op)[0];
   const loom_value_id_t old_result1 = loom_op_results(op)[1];
   const loom_value_id_t old_result2 = loom_op_results(op)[2];
+  EXPECT_EQ(module_->body->value_definition_count, 4u);
 
   bool remove_results[] = {false, true, false};
   uint16_t removed_count = 0;
@@ -1372,10 +1376,12 @@ TEST_F(BuilderTest, OpRemoveResultsCompactsDefinitionsAndTiedResults) {
   EXPECT_EQ(loom_op_tied_results(op)[0].result_index, 1u);
   EXPECT_EQ(loom_op_tied_results(op)[0].operand_index, 0u);
   EXPECT_EQ(loom_test_invoke_callee(op).symbol_id, 1u);
+  EXPECT_EQ(module_->body->value_definition_count, 3u);
 
   EXPECT_EQ(loom_module_value(module_, operand)->use_count, 1u);
   IREE_ASSERT_OK(loom_op_erase(module_, op));
   EXPECT_EQ(loom_module_value(module_, operand)->use_count, 0u);
+  EXPECT_EQ(module_->body->value_definition_count, 1u);
 }
 
 TEST_F(BuilderTest, InlineUsesPopulated) {

@@ -159,6 +159,18 @@ loom_cc_test(
 )
 
 loom_cc_test(
+    name = "local_value_domain_test",
+    srcs = ["local_value_domain_test.cc"],
+    deps = [
+        ":ir",
+        "//loom/src/loom/ops/test",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "types_test",
     srcs = [
         "type_constraint_test.cc",

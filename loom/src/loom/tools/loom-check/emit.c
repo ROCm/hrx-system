@@ -1551,12 +1551,9 @@ iree_status_t loom_check_prepare_source_low_module(
       loom_target_entry_diagnostic_emitter_initialize(
           module, &entry_options, LOOM_EMITTER_VERIFIER, &verifier_emitter);
       loom_low_verify_result_t low_verify_result = {0};
-      loom_low_verify_scratch_t low_verify_scratch =
-          loom_low_verify_scratch_for_module(module);
       status = loom_target_entry_verify_low_module(
           module, &low_registry->registry, &entry_options, &verifier_emitter,
-          20, environment->low_verify_provider_list, &low_verify_scratch,
-          &low_verify_result);
+          20, environment->low_verify_provider_list, &low_verify_result);
     }
   }
   loom_compile_pipeline_result_deinitialize(&pipeline_result);
@@ -1729,11 +1726,9 @@ static iree_status_t loom_check_emit_verify_provider_module(
   loom_target_entry_diagnostic_emitter_initialize(
       module, &entry_options, LOOM_EMITTER_VERIFIER, &verifier_emitter);
   loom_low_verify_result_t low_verify_result = {0};
-  loom_low_verify_scratch_t low_verify_scratch =
-      loom_low_verify_scratch_for_module(module);
   IREE_RETURN_IF_ERROR(loom_target_entry_verify_low_module(
       module, &low_registry->registry, &entry_options, &verifier_emitter, 20,
-      low_verify_provider_list, &low_verify_scratch, &low_verify_result));
+      low_verify_provider_list, &low_verify_result));
   return iree_ok_status();
 }
 
@@ -2055,10 +2050,8 @@ iree_status_t loom_check_execute_emit(
           .max_errors = 20,
       };
       loom_low_verify_result_t low_verify_result = {0};
-      loom_low_verify_scratch_t low_verify_scratch =
-          loom_low_verify_scratch_for_module(module);
       status = loom_low_verify_module(module, &low_verify_options,
-                                      &low_verify_scratch, &low_verify_result);
+                                      &low_verify_result);
       if (iree_status_is_ok(status) && (low_verify_result.error_count > 0 ||
                                         diagnostic_collector.count > 0)) {
         status = loom_check_diagnostic_collector_finish(

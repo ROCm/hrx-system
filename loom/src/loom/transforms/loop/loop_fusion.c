@@ -156,8 +156,8 @@ static bool loom_loop_fusion_op_is_under_op(const loom_op_t* root,
 
 static bool loom_loop_fusion_block_is_under_op(const loom_op_t* root,
                                                const loom_block_t* block) {
-  if (!block || !block->first_op) return false;
-  return loom_loop_fusion_op_is_under_op(root, block->first_op->parent_op);
+  if (!block || !block->parent_region) return false;
+  return loom_loop_fusion_op_is_under_op(root, block->parent_region->owner_op);
 }
 
 static bool loom_loop_fusion_value_is_type_used_under_op(

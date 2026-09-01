@@ -126,10 +126,11 @@ static uint8_t loom_branch_sink_block_arg_region_index(
   if (direct_region_index != LOOM_BRANCH_SINK_REGION_INDEX_NONE) {
     return direct_region_index;
   }
-  if (!block->first_op || !block->first_op->parent_op) {
+  if (!block->parent_region || !block->parent_region->owner_op) {
     return LOOM_BRANCH_SINK_REGION_INDEX_NONE;
   }
-  return loom_branch_sink_op_region_index(branch, block->first_op->parent_op);
+  return loom_branch_sink_op_region_index(branch,
+                                          block->parent_region->owner_op);
 }
 
 static bool loom_branch_sink_merge_region_index(uint8_t region_index,

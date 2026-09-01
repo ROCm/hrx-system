@@ -64,10 +64,8 @@ static iree_status_t loom_low_source_workload_verify_low_module(
       .max_errors = 20,
   };
   loom_low_verify_result_t result = {0};
-  loom_low_verify_scratch_t scratch =
-      loom_low_verify_scratch_for_module(module);
   IREE_RETURN_IF_ERROR(
-      loom_low_verify_module(module, &verify_options, &scratch, &result));
+      loom_low_verify_module(module, &verify_options, &result));
   if (result.error_count != 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "generated low function failed verification");

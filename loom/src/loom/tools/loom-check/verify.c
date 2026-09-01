@@ -110,10 +110,8 @@ iree_status_t loom_check_execute_verify(
           .max_errors = 100,
       };
       loom_low_verify_result_t low_verify_result = {0};
-      loom_low_verify_scratch_t low_verify_scratch =
-          loom_low_verify_scratch_for_module(module);
       status = loom_low_verify_module(module, &low_verify_options,
-                                      &low_verify_scratch, &low_verify_result);
+                                      &low_verify_result);
     }
   }
 

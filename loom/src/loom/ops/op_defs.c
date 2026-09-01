@@ -1686,7 +1686,7 @@ iree_status_t loom_builder_create_region(loom_builder_t* builder, loom_op_t* op,
   loom_region_t* region = NULL;
   IREE_RETURN_IF_ERROR(
       loom_module_allocate_region(builder->module, 1, &region));
-  loom_op_regions(op)[region_index] = region;
+  IREE_RETURN_IF_ERROR(loom_op_attach_region(op, region_index, region));
   if (out_entry_block) {
     *out_entry_block = loom_region_entry_block(region);
   }
@@ -2319,6 +2319,10 @@ iree_status_t loom_op_remove_results(loom_module_t* module, loom_op_t* op,
         loom_value_def_make_op(op, new_index);
   }
 
+  if (op->parent_block) {
+    loom_region_adjust_value_definition_count(op->parent_block->parent_region,
+                                              -(int64_t)*out_removed_count);
+  }
   op->result_count = kept_count;
   op->tied_result_count = kept_tied_count;
 
@@ -2370,6 +2374,8 @@ static iree_status_t loom_op_verify_erase_preconditions(loom_module_t* module,
 
 static void loom_block_drop_arg_type_uses(loom_module_t* module,
                                           loom_block_t* block) {
+  loom_region_adjust_value_definition_count(block->parent_region,
+                                            -(int64_t)block->arg_count);
   for (uint16_t i = 0; i < block->arg_count; ++i) {
     loom_value_id_t arg_id = loom_block_arg_id(block, i);
     if (arg_id == LOOM_VALUE_ID_INVALID || arg_id >= module->values.count) {
@@ -3260,6 +3266,7 @@ static void loom_region_reset_summaries(loom_region_t* region) {
   region->read_effect_count = 0;
   region->write_effect_count = 0;
   region->convergent_effect_count = 0;
+  region->value_definition_count = 0;
   loom_block_t* block = NULL;
   loom_region_for_each_block(region, block) {
     block->parent_region = region;
@@ -3281,9 +3288,12 @@ static iree_status_t loom_region_compute_uses(loom_module_t* module,
                                               loom_region_t* region,
                                               loom_op_t* parent_op) {
   if (!region) return iree_ok_status();
+  region->owner_op = parent_op;
+  uint64_t value_definition_count = 0;
   loom_block_t* block = NULL;
   loom_region_for_each_block(region, block) {
     block->parent_region = region;
+    value_definition_count += block->arg_count;
     // Set def pointers for block arguments.
     for (uint16_t a = 0; a < block->arg_count; ++a) {
       loom_value_id_t arg_id = loom_block_arg_id(block, a);
@@ -3294,6 +3304,7 @@ static iree_status_t loom_region_compute_uses(loom_module_t* module,
     }
     loom_op_t* op = NULL;
     loom_block_for_each_op(block, op) {
+      value_definition_count += op->result_count;
       // Set parent pointers.
       op->parent_op = parent_op;
       op->parent_block = block;
@@ -3328,9 +3339,17 @@ static iree_status_t loom_region_compute_uses(loom_module_t* module,
       for (uint8_t r = 0; r < op->region_count; ++r) {
         loom_region_t* nested = loom_op_regions(op)[r];
         IREE_RETURN_IF_ERROR(loom_region_compute_uses(module, nested, op));
+        if (nested) {
+          value_definition_count += nested->value_definition_count;
+        }
       }
     }
   }
+  if (value_definition_count > UINT32_MAX) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "region defines too many SSA values");
+  }
+  region->value_definition_count = (uint32_t)value_definition_count;
   return iree_ok_status();
 }
 

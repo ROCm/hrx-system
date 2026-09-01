@@ -106,6 +106,8 @@ TEST_F(ModuleTest, AllocateAndFree) {
   ASSERT_NE(module, nullptr);
   EXPECT_NE(module->body, nullptr);
   EXPECT_EQ(module->body->block_count, 1);
+  EXPECT_EQ(module->body->value_definition_count, 0u);
+  EXPECT_EQ(module->body->owner_op, nullptr);
   loom_module_free(module);
 }
 
@@ -608,6 +610,7 @@ TEST_F(ModuleTest, RegionAppendBlockGrowthKeepsBlockReferencesStable) {
   op->kind = LOOM_OP_TEST_CONSTANT;
   op->parent_block = old_entry;
   IREE_ASSERT_OK(loom_block_append_op(module, old_entry, op));
+  EXPECT_EQ(body->value_definition_count, 1u);
 
   loom_block_t* appended = NULL;
   IREE_ASSERT_OK(loom_region_append_block(module, body, &appended));
@@ -704,6 +707,7 @@ TEST_F(ModuleTest, RegionRemoveBlocksCompactsAndDropsClosedUses) {
   IREE_ASSERT_OK(loom_test_addi_build(&builder, arg,
                                       loom_test_constant_result(constant),
                                       i32_type, LOOM_LOCATION_UNKNOWN, &add));
+  EXPECT_EQ(body->value_definition_count, 3u);
 
   bool remove_blocks[] = {false, true, false};
   uint16_t removed_count = 0;
@@ -728,6 +732,47 @@ TEST_F(ModuleTest, RegionRemoveBlocksCompactsAndDropsClosedUses) {
   EXPECT_EQ(
       loom_module_value(module, loom_test_constant_result(constant))->use_count,
       0u);
+  EXPECT_EQ(body->value_definition_count, 0u);
+
+  loom_module_free(module);
+}
+
+TEST_F(ModuleTest, AttachPopulatedRegionPropagatesValueDefinitions) {
+  loom_module_t* module = NULL;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
+                                      NULL, iree_allocator_system(), &module));
+
+  loom_region_t* child_region = NULL;
+  IREE_ASSERT_OK(loom_module_allocate_region(module, 1, &child_region));
+  loom_block_t* child_block = loom_region_entry_block(child_region);
+  loom_builder_t child_builder;
+  loom_builder_initialize(module, &module->arena, child_block, &child_builder);
+
+  loom_value_id_t arg_id = LOOM_VALUE_ID_INVALID;
+  const loom_type_t i32_type = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  IREE_ASSERT_OK(loom_builder_define_block_arg(&child_builder, child_block,
+                                               i32_type, &arg_id));
+  loom_op_t* constant = NULL;
+  IREE_ASSERT_OK(loom_test_constant_build(&child_builder, loom_attr_i64(1),
+                                          i32_type, LOOM_LOCATION_UNKNOWN,
+                                          &constant));
+  EXPECT_EQ(child_region->value_definition_count, 2u);
+  EXPECT_EQ(module->body->value_definition_count, 0u);
+
+  loom_builder_t module_builder;
+  loom_builder_initialize(module, &module->arena, loom_module_block(module),
+                          &module_builder);
+  loom_op_t* owner_op = NULL;
+  IREE_ASSERT_OK(loom_builder_allocate_op(
+      &module_builder, LOOM_OP_TEST_MAP, /*operand_count=*/0,
+      /*result_count=*/1, /*region_count=*/1, /*tied_result_count=*/0,
+      /*attribute_count=*/0, LOOM_LOCATION_UNKNOWN, &owner_op));
+  EXPECT_EQ(module->body->value_definition_count, 1u);
+
+  IREE_ASSERT_OK(loom_op_attach_region(owner_op, 0, child_region));
+  EXPECT_EQ(child_region->owner_op, owner_op);
+  EXPECT_EQ(constant->parent_op, owner_op);
+  EXPECT_EQ(module->body->value_definition_count, 3u);
 
   loom_module_free(module);
 }
@@ -1121,7 +1166,7 @@ TEST_F(ModuleTest, DefineValueSegmentGrowthKeepsPointersStable) {
   loom_module_free(module);
 }
 
-TEST_F(ModuleTest, DefineUntypedValuesPreservesRangeAndScratchState) {
+TEST_F(ModuleTest, DefineUntypedValuesPreservesRange) {
   loom_module_t* module = NULL;
   IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
                                       NULL, iree_allocator_system(), &module));
@@ -1129,9 +1174,6 @@ TEST_F(ModuleTest, DefineUntypedValuesPreservesRangeAndScratchState) {
   loom_value_id_t typed_id = LOOM_VALUE_ID_INVALID;
   IREE_ASSERT_OK(loom_module_define_value(
       module, loom_type_scalar(LOOM_SCALAR_TYPE_F32), &typed_id));
-  loom_value_u32_scratch_acquire_zeroed(&module->scratch.values,
-                                        module->values.count);
-  loom_value_u32_scratch_store(&module->scratch.values, typed_id, 42);
 
   const iree_host_size_t range_count = LOOM_VALUE_SEGMENT_CAPACITY + 7;
   loom_value_id_t base_value_id = LOOM_VALUE_ID_INVALID;
@@ -1139,18 +1181,13 @@ TEST_F(ModuleTest, DefineUntypedValuesPreservesRangeAndScratchState) {
       loom_module_define_untyped_values(module, range_count, &base_value_id));
   EXPECT_EQ(base_value_id, typed_id + 1);
   EXPECT_EQ(module->values.count, range_count + 1);
-  EXPECT_EQ(loom_value_u32_scratch_load(&module->scratch.values, typed_id),
-            42u);
   for (iree_host_size_t i = 0; i < range_count; ++i) {
     const loom_value_id_t value_id = base_value_id + (loom_value_id_t)i;
     const loom_value_t* value = loom_module_value(module, value_id);
     EXPECT_EQ(loom_type_kind(value->type), LOOM_TYPE_NONE);
     EXPECT_EQ(value->name_id, LOOM_STRING_ID_INVALID);
     EXPECT_EQ(value->def, loom_value_def_make_none());
-    EXPECT_EQ(loom_value_u32_scratch_load(&module->scratch.values, value_id),
-              0u);
   }
-  loom_value_u32_scratch_release_zeroed(&module->scratch.values);
 
   loom_value_id_t empty_base_value_id = 0;
   IREE_ASSERT_OK(
@@ -1202,7 +1239,6 @@ TEST_F(ModuleTest, ValueOrdinalScratchGrowsWithValueTable) {
   const iree_host_size_t initial_capacity =
       loom_value_table_capacity(&module->values);
   ASSERT_EQ(initial_capacity, LOOM_VALUE_SEGMENT_CAPACITY);
-  ASSERT_EQ(module->scratch.values.value_table, &module->values);
   loom_module_value_ordinal_scratch_acquire(module);
   loom_module_value_ordinal_scratch_set(module, first_id, 3);
 
@@ -1212,55 +1248,11 @@ TEST_F(ModuleTest, ValueOrdinalScratchGrowsWithValueTable) {
   }
 
   EXPECT_GT(loom_value_table_capacity(&module->values), initial_capacity);
-  EXPECT_EQ(module->scratch.values.value_table, &module->values);
   EXPECT_EQ(loom_module_value_ordinal_scratch_lookup(module, first_id), 3u);
   EXPECT_EQ(loom_module_value_ordinal_scratch_lookup(module, last_id),
             LOOM_VALUE_ORDINAL_INVALID);
 
   loom_module_value_ordinal_scratch_clear(module, first_id);
-  loom_module_value_ordinal_scratch_release(module);
-
-  loom_module_free(module);
-}
-
-TEST_F(ModuleTest, ValueU32ScratchAliasesOrdinalAndZeroedModes) {
-  loom_module_t* module = NULL;
-  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
-                                      NULL, iree_allocator_system(), &module));
-
-  loom_type_t f32 = loom_type_scalar(LOOM_SCALAR_TYPE_F32);
-  loom_value_id_t first_id = LOOM_VALUE_ID_INVALID;
-  loom_value_id_t second_id = LOOM_VALUE_ID_INVALID;
-  IREE_ASSERT_OK(loom_module_define_value(module, f32, &first_id));
-  IREE_ASSERT_OK(loom_module_define_value(module, f32, &second_id));
-
-  loom_module_value_ordinal_scratch_acquire(module);
-  loom_module_value_ordinal_scratch_set(module, first_id, 7);
-  loom_module_value_ordinal_scratch_clear(module, first_id);
-  loom_module_value_ordinal_scratch_release(module);
-
-  loom_value_u32_scratch_acquire_zeroed(&module->scratch.values,
-                                        module->values.count);
-  EXPECT_EQ(loom_value_u32_scratch_load(&module->scratch.values, first_id), 0u);
-  EXPECT_EQ(loom_value_u32_scratch_load(&module->scratch.values, second_id),
-            0u);
-  loom_value_u32_scratch_store(&module->scratch.values, first_id, 0x3u);
-  const iree_host_size_t initial_capacity =
-      loom_value_table_capacity(&module->values);
-  loom_value_id_t last_id = LOOM_VALUE_ID_INVALID;
-  for (iree_host_size_t i = module->values.count; i <= initial_capacity; ++i) {
-    IREE_ASSERT_OK(loom_module_define_value(module, f32, &last_id));
-  }
-  EXPECT_EQ(loom_value_u32_scratch_load(&module->scratch.values, last_id), 0u);
-  loom_value_u32_scratch_release_zeroed(&module->scratch.values);
-
-  loom_module_value_ordinal_scratch_acquire(module);
-  EXPECT_EQ(loom_module_value_ordinal_scratch_lookup(module, first_id),
-            LOOM_VALUE_ORDINAL_INVALID);
-  EXPECT_EQ(loom_module_value_ordinal_scratch_lookup(module, second_id),
-            LOOM_VALUE_ORDINAL_INVALID);
-  EXPECT_EQ(loom_module_value_ordinal_scratch_lookup(module, last_id),
-            LOOM_VALUE_ORDINAL_INVALID);
   loom_module_value_ordinal_scratch_release(module);
 
   loom_module_free(module);

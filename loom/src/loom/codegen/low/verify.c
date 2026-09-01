@@ -14,6 +14,7 @@
 #include "loom/codegen/low/storage_layout.h"
 #include "loom/error/error_catalog.h"
 #include "loom/ir/context.h"
+#include "loom/ir/local_value_domain.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
 #include "loom/target/function_version.h"
@@ -21,15 +22,23 @@
 #include "loom/util/walk.h"
 
 typedef struct loom_low_verify_state_t {
-  const loom_module_t* module;
+  // Module being verified and owning the transient local-value map.
+  loom_module_t* module;
+  // Descriptor registry used to resolve target-low operations.
   const loom_low_descriptor_registry_t* registry;
+  // Structured diagnostic emitter for user IR failures.
   iree_diagnostic_emitter_t emitter;
+  // Target-owned semantic verification providers.
   loom_low_verify_provider_list_t provider_list;
-  loom_low_verify_scratch_t* scratch;
+  // Accumulated verification result returned to the caller.
   loom_low_verify_result_t* result;
+  // Maximum number of errors emitted before aborting the walk.
   uint32_t max_errors;
+  // Storage retained across the full module verification run.
   iree_arena_allocator_t arena;
+  // Function-local storage reset after each verified function.
   iree_arena_allocator_t walk_arena;
+  // Lazily materialized module symbol facts.
   loom_symbol_fact_table_t symbol_facts;
   // Version handles densely indexed by the observed module symbol table.
   loom_target_function_version_snapshot_t function_version_snapshot;
@@ -38,14 +47,25 @@ typedef struct loom_low_verify_state_t {
 } loom_low_verify_state_t;
 
 typedef struct loom_low_function_verify_state_t {
+  // Module-level verification state shared by the function walk.
   loom_low_verify_state_t* state;
+  // Resolved target selected by the function declaration.
   const loom_low_resolved_target_t* target;
+  // Descriptor-backed register type resolver for the selected target.
   loom_low_register_type_resolver_t register_type_resolver;
+  // Stable function name used in diagnostics.
   iree_string_view_t function_name;
+  // Target-low function definition being verified.
   const loom_op_t* function_op;
+  // Function body or NULL for declarations and malformed definitions.
   loom_region_t* body;
+  // Dense local ordinal domain covering the complete function region tree.
+  loom_local_value_domain_t value_domain;
+  // Register-part masks indexed by function-local value ordinal.
+  loom_low_register_part_mask_t* defined_masks;
   // Packed storage sizes accumulated during the existing verifier walk.
   loom_low_storage_layout_space_sizes_t storage_space_sizes;
+  // Function-local state for each target-owned verification provider.
   void** provider_states;
 } loom_low_function_verify_state_t;
 
@@ -1009,23 +1029,17 @@ static iree_status_t loom_low_verify_emit_undefined_register_part(
 static loom_low_register_part_mask_t loom_low_verify_value_defined_mask(
     const loom_low_function_verify_state_t* function_state,
     loom_value_id_t value_id) {
-  const loom_value_u32_scratch_t* scratch =
-      function_state->state->scratch->value_scratch;
-  IREE_ASSERT_EQ(scratch->state, LOOM_VALUE_U32_SCRATCH_STATE_ACQUIRED_ZEROED);
-  IREE_ASSERT(value_id != LOOM_VALUE_ID_INVALID &&
-              value_id < function_state->state->module->values.count);
-  return loom_value_u32_scratch_load(scratch, value_id);
+  const loom_value_ordinal_t value_ordinal =
+      loom_local_value_domain_ordinal(&function_state->value_domain, value_id);
+  return function_state->defined_masks[value_ordinal];
 }
 
 static void loom_low_verify_set_value_defined_mask(
     loom_low_function_verify_state_t* function_state, loom_value_id_t value_id,
     loom_low_register_part_mask_t mask) {
-  loom_value_u32_scratch_t* scratch =
-      function_state->state->scratch->value_scratch;
-  IREE_ASSERT_EQ(scratch->state, LOOM_VALUE_U32_SCRATCH_STATE_ACQUIRED_ZEROED);
-  IREE_ASSERT(value_id != LOOM_VALUE_ID_INVALID &&
-              value_id < function_state->state->module->values.count);
-  loom_value_u32_scratch_store(scratch, value_id, mask);
+  const loom_value_ordinal_t value_ordinal =
+      loom_local_value_domain_ordinal(&function_state->value_domain, value_id);
+  function_state->defined_masks[value_ordinal] = mask;
 }
 
 static loom_low_register_part_mask_t
@@ -2108,8 +2122,23 @@ static iree_status_t loom_low_verify_function(loom_low_verify_state_t* state,
     return iree_ok_status();
   }
 
-  iree_status_t status =
-      loom_low_verify_begin_function_providers(&function_state);
+  iree_status_t status = loom_local_value_domain_acquire_for_region_tree(
+      state->module, body, &state->walk_arena, &function_state.value_domain);
+  if (iree_status_is_ok(status) &&
+      function_state.value_domain.value_count > 0) {
+    status = iree_arena_allocate_array(&state->walk_arena,
+                                       function_state.value_domain.value_count,
+                                       sizeof(*function_state.defined_masks),
+                                       (void**)&function_state.defined_masks);
+    if (iree_status_is_ok(status)) {
+      memset(function_state.defined_masks, 0,
+             function_state.value_domain.value_count *
+                 sizeof(*function_state.defined_masks));
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_low_verify_begin_function_providers(&function_state);
+  }
   if (iree_status_is_ok(status)) {
     status = loom_low_verify_initialize_block_arg_masks(&function_state, body);
   }
@@ -2126,34 +2155,28 @@ static iree_status_t loom_low_verify_function(loom_low_verify_state_t* state,
   if (iree_status_is_ok(status)) {
     status = loom_low_verify_end_function_providers(&function_state);
   }
+  loom_local_value_domain_release(&function_state.value_domain);
   return status;
 }
 
-iree_status_t loom_low_verify_module(const loom_module_t* module,
+iree_status_t loom_low_verify_module(loom_module_t* module,
                                      const loom_low_verify_options_t* options,
-                                     loom_low_verify_scratch_t* scratch,
                                      loom_low_verify_result_t* out_result) {
   IREE_ASSERT_ARGUMENT(module);
   IREE_ASSERT_ARGUMENT(options);
-  IREE_ASSERT_ARGUMENT(scratch);
   IREE_ASSERT_ARGUMENT(out_result);
   *out_result = (loom_low_verify_result_t){0};
-  IREE_ASSERT(scratch->value_scratch != NULL);
-  IREE_ASSERT_EQ(scratch->value_scratch->value_table, &module->values);
   loom_low_verify_state_t state = {
       .module = module,
       .registry = options->descriptor_registry,
       .emitter = options->emitter,
       .provider_list = options->provider_list,
-      .scratch = scratch,
       .result = out_result,
       .max_errors = options->max_errors,
   };
   iree_arena_initialize(module->arena.block_pool, &state.arena);
   iree_arena_initialize(module->arena.block_pool, &state.walk_arena);
   loom_symbol_fact_table_initialize(&state.symbol_facts, &state.arena);
-  loom_value_u32_scratch_acquire_zeroed(scratch->value_scratch,
-                                        module->values.count);
 
   iree_status_t status = loom_target_function_version_snapshot_build(
       module, options->function_versions, &state.arena,
@@ -2181,7 +2204,6 @@ iree_status_t loom_low_verify_module(const loom_module_t* module,
     status = loom_low_verify_end_module_providers(&state);
   }
 
-  loom_value_u32_scratch_release_zeroed(scratch->value_scratch);
   iree_arena_deinitialize(&state.walk_arena);
   iree_arena_deinitialize(&state.arena);
   return status;

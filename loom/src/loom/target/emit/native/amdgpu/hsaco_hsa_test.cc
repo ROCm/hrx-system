@@ -806,10 +806,8 @@ class LowKernelEmitter {
         loom_target_environment_low_verify_provider_list(&target_environment_);
     verify_options.max_errors = 20;
     loom_low_verify_result_t verify_result = {};
-    loom_low_verify_scratch_t verify_scratch =
-        loom_low_verify_scratch_for_module(module_);
-    IREE_RETURN_IF_ERROR(loom_low_verify_module(
-        module_, &verify_options, &verify_scratch, &verify_result));
+    IREE_RETURN_IF_ERROR(
+        loom_low_verify_module(module_, &verify_options, &verify_result));
     if (verify_result.error_count != 0) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "AMDGPU HSA low kernel failed low verification");

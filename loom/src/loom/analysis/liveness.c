@@ -651,13 +651,14 @@ static bool loom_liveness_op_defines_value(const loom_op_t* op,
   return false;
 }
 
-static bool loom_liveness_region_is_nested_in_op(const loom_op_t* owner_op,
-                                                 const loom_region_t* region);
-
 static bool loom_liveness_block_is_nested_in_op(const loom_op_t* owner_op,
                                                 const loom_block_t* block) {
-  return block &&
-         loom_liveness_region_is_nested_in_op(owner_op, block->parent_region);
+  const loom_op_t* current =
+      block && block->parent_region ? block->parent_region->owner_op : NULL;
+  for (; current; current = current->parent_op) {
+    if (current == owner_op) return true;
+  }
+  return false;
 }
 
 static bool loom_liveness_value_is_defined_inside_op(
@@ -673,23 +674,6 @@ static bool loom_liveness_value_is_defined_inside_op(
   while (def_op) {
     if (def_op == owner_op) return true;
     def_op = def_op->parent_op;
-  }
-  return false;
-}
-
-static bool loom_liveness_region_is_nested_in_op(const loom_op_t* owner_op,
-                                                 const loom_region_t* region) {
-  if (!owner_op || !region) return false;
-  loom_region_t* const* regions = loom_op_regions(owner_op);
-  for (uint8_t i = 0; i < owner_op->region_count; ++i) {
-    if (regions[i] == region) return true;
-    const loom_block_t* block = NULL;
-    loom_region_for_each_block(regions[i], block) {
-      const loom_op_t* op = NULL;
-      loom_block_for_each_op(block, op) {
-        if (loom_liveness_region_is_nested_in_op(op, region)) return true;
-      }
-    }
   }
   return false;
 }
