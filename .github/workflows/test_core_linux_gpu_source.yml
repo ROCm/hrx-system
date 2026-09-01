@@ -182,6 +182,7 @@ jobs:
 
       - name: Report ROCm environment
         id: rocm_environment
+        timeout-minutes: 1
         continue-on-error: ${{ inputs.experimental }}
         run: bash .github/scripts/check_rocm_environment.sh
 
