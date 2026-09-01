@@ -11,7 +11,7 @@
 
 #include "iree/base/internal/math.h"
 #include "loom/analysis/symbolic_expr_proof.h"
-#include "loom/codegen/low/lower/lower_internal.h"
+#include "loom/codegen/low/lower/context.h"
 #include "loom/codegen/low/lower/lower_rule_descriptor.h"
 #include "loom/codegen/low/lower/lower_rule_source_memory.h"
 #include "loom/ir/context.h"
@@ -24,6 +24,15 @@
 #include "loom/ops/vector/ops.h"
 #include "loom/ops/vector/storage.h"
 #include "loom/target/registers.h"
+
+struct loom_low_lower_rule_descriptor_map_t {
+  // Rule set whose local descriptor refs are resolved by descriptors.
+  const loom_low_lower_rule_set_t* rule_set;
+  // Descriptor rows indexed by rule-set-local descriptor ref.
+  const loom_low_descriptor_t* const* descriptors;
+  // Number of entries in descriptors.
+  uint16_t descriptor_count;
+};
 
 iree_string_view_t loom_low_lower_rule_set_string(
     const loom_low_lower_rule_set_t* rule_set,

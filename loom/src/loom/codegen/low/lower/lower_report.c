@@ -7,7 +7,8 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "loom/codegen/low/lower/lower_internal.h"
+#include "loom/codegen/low/lower/context.h"
+#include "loom/codegen/low/lower/report.h"
 #include "loom/ops/cfg/ops.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/index/ops.h"
@@ -17,6 +18,28 @@
 enum {
   // Default allocation block size for source-memory report rows.
   LOOM_LOW_LOWER_MEMORY_REPORT_ROW_VEC_DEFAULT_BYTE_LENGTH = 4096,
+};
+
+typedef struct loom_low_lower_memory_expr_term_t {
+  // Source SSA value multiplied into this symbolic byte expression.
+  loom_value_id_t value_id;
+  // Signed byte coefficient applied to |value_id|.
+  int64_t coefficient;
+} loom_low_lower_memory_expr_term_t;
+
+typedef struct loom_low_lower_memory_expr_key_t {
+  // Static byte constant added to all dynamic terms.
+  int64_t constant;
+  // Number of populated entries in |terms|.
+  uint8_t term_count;
+  // Sorted symbolic byte terms.
+  loom_low_lower_memory_expr_term_t
+      terms[LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_CAPACITY];
+} loom_low_lower_memory_expr_key_t;
+
+struct loom_low_lower_memory_expr_entry_t {
+  // Comparable symbolic expression key interned for report-only accounting.
+  loom_low_lower_memory_expr_key_t key;
 };
 
 static iree_status_t loom_low_lower_memory_report_row_list_append(

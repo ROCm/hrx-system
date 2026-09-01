@@ -4,20 +4,17 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Private state shared by source-to-target-low lowering implementation files.
+// Mutable state for one source-to-Low function lowering.
 
-#ifndef LOOM_CODEGEN_LOW_LOWER_LOWER_INTERNAL_H_
-#define LOOM_CODEGEN_LOW_LOWER_LOWER_INTERNAL_H_
+#ifndef LOOM_CODEGEN_LOW_LOWER_CONTEXT_H_
+#define LOOM_CODEGEN_LOW_LOWER_CONTEXT_H_
 
-#include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "loom/analysis/symbolic_expr.h"
 #include "loom/analysis/view_regions.h"
 #include "loom/codegen/low/builder.h"
-#include "loom/codegen/low/lower/lower.h"
-#include "loom/codegen/low/lower/lower_rules.h"
+#include "loom/codegen/low/lower/plan.h"
 #include "loom/codegen/low/memory_access.h"
-#include "loom/codegen/low/source_memory_plan.h"
 #include "loom/ir/local_value_domain.h"
 #include "loom/ir/module.h"
 
@@ -33,76 +30,12 @@ enum loom_low_lower_value_storage_flag_bits_e {
 };
 typedef uint8_t loom_low_lower_value_storage_flags_t;
 
-enum loom_low_lower_selected_plan_flag_bits_e {
-  // The selected source op is intentionally skipped because none of its results
-  // require target-low storage.
-  LOOM_LOW_LOWER_SELECTED_PLAN_ELIDED = (uint8_t)1u << 0,
-};
-typedef uint8_t loom_low_lower_selected_plan_flags_t;
-
-typedef struct loom_low_lower_memory_expr_term_t {
-  // Source SSA value multiplied into this symbolic byte expression.
-  loom_value_id_t value_id;
-  // Signed byte coefficient applied to |value_id|.
-  int64_t coefficient;
-} loom_low_lower_memory_expr_term_t;
-
-typedef struct loom_low_lower_memory_expr_key_t {
-  // Static byte constant added to all dynamic terms.
-  int64_t constant;
-  // Number of populated entries in |terms|.
-  uint8_t term_count;
-  // Sorted symbolic byte terms.
-  loom_low_lower_memory_expr_term_t
-      terms[LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_CAPACITY];
-} loom_low_lower_memory_expr_key_t;
-
-typedef struct loom_low_lower_memory_expr_entry_t {
-  // Comparable symbolic expression key interned for report-only accounting.
-  loom_low_lower_memory_expr_key_t key;
-} loom_low_lower_memory_expr_entry_t;
-
-typedef enum loom_low_lower_selected_plan_kind_e {
-  // Selection came from a table-driven source-to-low rule.
-  LOOM_LOW_LOWER_SELECTED_PLAN_RULE = 0,
-  // Selection came from a shared descriptor-matrix contract row.
-  LOOM_LOW_LOWER_SELECTED_PLAN_DESCRIPTOR_MATRIX = 1,
-  // Selection came from a target-owned callback plan.
-  LOOM_LOW_LOWER_SELECTED_PLAN_CALLBACK = 2,
-} loom_low_lower_selected_plan_kind_t;
-
-typedef struct loom_low_lower_selected_plan_t {
-  // Source op this selected plan lowers.
-  const loom_op_t* source_op;
-  // Selected plan representation.
-  loom_low_lower_selected_plan_kind_t kind;
-  // Selection lifecycle flags.
-  loom_low_lower_selected_plan_flags_t flags;
-  // Policy rule-set ordinal for table-driven selections.
-  uint16_t rule_set_index;
-  // Rule-table ordinal for table-driven selections.
-  uint16_t rule_index;
-  // Rule set owning |rule|, or NULL for target-owned callbacks.
-  const loom_low_lower_rule_set_t* rule_set;
-  // Table rule selected during planning, or NULL for target-owned callbacks.
-  const loom_low_lower_rule_t* rule;
-  // Resolved emit rows for |rule|, or NULL for target-owned callbacks.
-  const loom_low_lower_resolved_emit_t* resolved_emits;
-  // Canonical source-memory plan retained from rule selection, or NULL when
-  // the selected rule does not consume source memory.
-  const loom_low_source_memory_access_plan_t* source_memory_access;
-  // Target-owned plan selected during planning, or empty for table rules.
-  loom_low_lower_plan_t plan;
-} loom_low_lower_selected_plan_t;
-
-typedef struct loom_low_lower_rule_descriptor_map_t {
-  // Rule set whose local descriptor refs are resolved by descriptors.
-  const loom_low_lower_rule_set_t* rule_set;
-  // Descriptor rows indexed by rule-set-local descriptor ref.
-  const loom_low_descriptor_t* const* descriptors;
-  // Number of entries in descriptors.
-  uint16_t descriptor_count;
-} loom_low_lower_rule_descriptor_map_t;
+typedef struct loom_low_lower_memory_expr_entry_t
+    loom_low_lower_memory_expr_entry_t;
+typedef struct loom_low_lower_rule_descriptor_map_t
+    loom_low_lower_rule_descriptor_map_t;
+typedef struct loom_low_lower_target_state_record_t
+    loom_low_lower_target_state_record_t;
 
 typedef struct loom_low_lower_successor_interpositions_t {
   // Effective low destinations indexed by source terminator successor ordinal.
@@ -111,41 +44,6 @@ typedef struct loom_low_lower_successor_interpositions_t {
   // Number of entries in low_dests.
   uint16_t low_dest_count;
 } loom_low_lower_successor_interpositions_t;
-
-// Returns exact source execution evidence for an operation when loop and CFG
-// facts can prove it without target execution.
-iree_status_t loom_low_lower_source_op_execution_count_plus_one(
-    loom_low_lower_context_t* context, const loom_op_t* source_op,
-    uint64_t* out_execution_count_plus_one);
-
-typedef struct loom_low_lower_target_state_record_t {
-  // Target-owned static key identifying this function-local state object.
-  const void* key;
-  // Byte length of state storage.
-  iree_host_size_t data_length;
-  // Zero-initialized state storage allocated from the lowering arena.
-  void* data;
-} loom_low_lower_target_state_record_t;
-
-typedef struct loom_low_lower_module_target_state_record_t {
-  // Target-owned static key identifying this module-scope state object.
-  const void* key;
-  // Byte length of state storage.
-  iree_host_size_t data_length;
-  // Zero-initialized state storage allocated from the module-state arena.
-  void* data;
-} loom_low_lower_module_target_state_record_t;
-
-struct loom_low_lower_module_state_t {
-  // Arena used for module-scope target state records and payloads.
-  iree_arena_allocator_t* arena;
-  // Module-scope target state records keyed by target-owned static storage.
-  loom_low_lower_module_target_state_record_t* target_state_records;
-  // Number of populated target_state_records entries.
-  iree_host_size_t target_state_record_count;
-  // Number of allocated target_state_records entries.
-  iree_host_size_t target_state_record_capacity;
-};
 
 typedef enum loom_low_lower_function_analysis_phase_e {
   LOOM_LOW_LOWER_FUNCTION_ANALYSIS_EMPTY = 0,
@@ -301,4 +199,4 @@ iree_status_t loom_low_lower_copy_value_name(loom_low_lower_context_t* context,
 }  // extern "C"
 #endif
 
-#endif  // LOOM_CODEGEN_LOW_LOWER_LOWER_INTERNAL_H_
+#endif  // LOOM_CODEGEN_LOW_LOWER_CONTEXT_H_

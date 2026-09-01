@@ -41,12 +41,14 @@ loom_cc_library(
         "lower_rules.c",
     ],
     hdrs = [
+        "context.h",
         "contract_query.h",
         "lower.h",
-        "lower_internal.h",
         "lower_rule_descriptor.h",
         "lower_rule_source_memory.h",
         "lower_rules.h",
+        "plan.h",
+        "report.h",
     ],
     visibility = _LOWER_VISIBILITY,
     deps = [

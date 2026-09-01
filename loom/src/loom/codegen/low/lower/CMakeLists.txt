@@ -13,12 +13,14 @@ loom_cc_library(
   NAME
     lower
   HDRS
+    "context.h"
     "contract_query.h"
     "lower.h"
-    "lower_internal.h"
     "lower_rule_descriptor.h"
     "lower_rule_source_memory.h"
     "lower_rules.h"
+    "plan.h"
+    "report.h"
   SRCS
     "contract_query.c"
     "lower.c"

@@ -6,7 +6,7 @@
 
 #include <string.h>
 
-#include "loom/codegen/low/lower/lower_internal.h"
+#include "loom/codegen/low/lower/context.h"
 #include "loom/codegen/low/memory_access_ir.h"
 #include "loom/codegen/low/source_memory_plan.h"
 #include "loom/error/error_catalog.h"
@@ -15,6 +15,35 @@
 #include "loom/ops/cfg/ops.h"
 #include "loom/ops/low/ops.h"
 #include "loom/target/registers.h"
+
+typedef struct loom_low_lower_target_state_record_t {
+  // Target-owned static key identifying this function-local state object.
+  const void* key;
+  // Byte length of state storage.
+  iree_host_size_t data_length;
+  // Zero-initialized state storage allocated from the lowering arena.
+  void* data;
+} loom_low_lower_target_state_record_t;
+
+typedef struct loom_low_lower_module_target_state_record_t {
+  // Target-owned static key identifying this module-scope state object.
+  const void* key;
+  // Byte length of state storage.
+  iree_host_size_t data_length;
+  // Zero-initialized state storage allocated from the module-state arena.
+  void* data;
+} loom_low_lower_module_target_state_record_t;
+
+struct loom_low_lower_module_state_t {
+  // Arena used for module-scope target state records and payloads.
+  iree_arena_allocator_t* arena;
+  // Module-scope target state records keyed by target-owned static storage.
+  loom_low_lower_module_target_state_record_t* target_state_records;
+  // Number of populated target_state_records entries.
+  iree_host_size_t target_state_record_count;
+  // Number of allocated target_state_records entries.
+  iree_host_size_t target_state_record_capacity;
+};
 
 static iree_string_view_t loom_low_lower_nonempty(
     iree_string_view_t value, iree_string_view_t placeholder) {
