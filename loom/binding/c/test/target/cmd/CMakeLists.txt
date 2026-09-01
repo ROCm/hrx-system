@@ -19,6 +19,7 @@ loom_cc_test(
     iree::testing::gtest_main
     loom::binding::c::loomc
     loom::binding::c::target::cmd
+    loom::binding::c::target::kernel
     loom::binding::c::test::test_util
 )
 

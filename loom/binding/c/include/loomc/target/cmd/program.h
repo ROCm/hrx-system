@@ -27,9 +27,11 @@
 ///
 /// Without a request sink, construction leaves kernel implementation facets
 /// unopened. With a sink, it classifies only surviving source-backed launch
-/// sites and publishes one ordinary bytecode request per live semantic class.
-/// Published requests transfer independently and are never retained by the
-/// product.
+/// sites and publishes one executable-entry kernel request per live semantic
+/// class. Published requests require the kernel product descriptor and never
+/// request a host launch companion because the command program already owns
+/// physical launch geometry. They transfer independently and are never
+/// retained by the product.
 ///
 /// @par Example
 /// Build one command product from an already resolved root:

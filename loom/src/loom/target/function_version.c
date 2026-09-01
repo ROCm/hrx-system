@@ -31,7 +31,6 @@ iree_status_t loom_target_function_version_snapshot_build(
   };
   const iree_host_size_t function_version_count =
       function_versions != NULL ? function_versions->count : 0;
-  if (function_version_count == 0) return iree_ok_status();
   if (function_version_count > LOOM_FUNCTION_VERSION_ORDINAL_INVALID) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "target function-version count exceeds the "

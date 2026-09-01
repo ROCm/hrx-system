@@ -29,6 +29,7 @@
 #include "loomc/status.h"
 #include "loomc/target.h"
 #include "loomc/target/cmd.h"
+#include "loomc/target/kernel.h"
 #include "loomc/target/vm.h"
 #include "loomc/workspace.h"
 #include "test/util.h"
@@ -1191,15 +1192,26 @@ command.program.def public target(@device) @dispatch() launch() {
   };
   loomc_product_t* kernel_product = nullptr;
   loomc_result_t* compile_result = nullptr;
-  LOOMC_ASSERT_OK(loomc_compile_request(
+  LOOMC_ASSERT_OK(loomc_kernel_product_build_request(
       compiler.get(), workspace.get(), pass_program.get(),
       request_capture.requests[0].get(), &compile_options,
-      loomc_allocator_system(), &kernel_product, &compile_result));
+      /*emit_options=*/nullptr, loomc_allocator_system(), &kernel_product,
+      &compile_result));
   ProductPtr kernel_product_ptr(kernel_product);
   ResultPtr compile_result_ptr(compile_result);
   ExpectSucceededResult(compile_result_ptr.get());
+  ASSERT_EQ(loomc_product_descriptor(kernel_product_ptr.get()),
+            loomc_kernel_product_descriptor());
+  loomc_kernel_product_root_t kernel_root = {};
+  ASSERT_TRUE(
+      loomc_kernel_product_root_at(kernel_product_ptr.get(), 0, &kernel_root));
+  EXPECT_EQ(kernel_root.launch_config_artifact_ordinal,
+            LOOMC_KERNEL_ARTIFACT_ORDINAL_INVALID);
+  EXPECT_EQ(kernel_root.launch_config_function_ordinal,
+            LOOMC_KERNEL_FUNCTION_ORDINAL_INVALID);
   const loomc_artifact_t* text_artifact =
-      loomc_product_artifact_at(kernel_product_ptr.get(), 0);
+      FindArtifact(compile_result_ptr.get(), LOOMC_ARTIFACT_KIND_MODULE,
+                   LOOMC_ARTIFACT_FORMAT_LOOM_TEXT);
   ASSERT_NE(text_artifact, nullptr);
   const std::string module_text = ToString(text_artifact->contents);
   EXPECT_NE(module_text.find("target<amdgpu.rdna3_5.core>"), std::string::npos)

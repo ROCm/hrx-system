@@ -51,6 +51,7 @@ loom_cc_binary(
   DEPS
     loom::binding::c::loomc
     loom::binding::c::target::cmd
+    loom::binding::c::target::kernel
 )
 
 iree_native_test(

@@ -9,6 +9,7 @@
 
 #include "loomc/loomc.h"
 #include "loomc/target/cmd.h"
+#include "loomc/target/kernel.h"
 
 static const char kSourceText[] =
     "kernel.def @local() {\n"
@@ -44,20 +45,11 @@ typedef struct product_frontier_state_t {
   // Frozen provider index shared by command-product construction.
   loomc_link_index_t* link_index;
 
-  // Prepared compiler used for independently published kernel requests.
-  loomc_compiler_t* compiler;
-
-  // Prepared kernel compilation pipeline.
-  loomc_pass_program_t* pass_program;
-
   // Parent command product retained through result inspection.
   loomc_product_t* command_product;
 
   // Source-backed kernel request transferred by command construction.
   loomc_request_t* kernel_request;
-
-  // Independently compiled child kernel product.
-  loomc_product_t* kernel_product;
 } product_frontier_state_t;
 
 static void print_status(loomc_status_t status) {
@@ -101,11 +93,8 @@ static void product_frontier_state_initialize(product_frontier_state_t* state) {
 
 static void product_frontier_state_deinitialize(
     product_frontier_state_t* state) {
-  loomc_product_release(state->kernel_product);
   loomc_request_release(state->kernel_request);
   loomc_product_release(state->command_product);
-  loomc_pass_program_release(state->pass_program);
-  loomc_compiler_release(state->compiler);
   loomc_link_index_release(state->link_index);
   loomc_source_release(state->source);
   loomc_workspace_release(state->workspace);
@@ -184,22 +173,8 @@ static loomc_status_t prepare_product_frontier(
   }
   if (loomc_status_is_ok(status)) {
     *out_root_ordinal = root_symbol.ordinal;
-    status = loomc_compiler_create(state->context, NULL, state->allocator,
-                                   &state->compiler);
   }
 
-  loomc_result_t* pass_result = NULL;
-  if (loomc_status_is_ok(status)) {
-    status = loomc_pass_program_create_from_pipeline_text(
-        state->context, loomc_make_cstring_view("canonicalize,cse"), NULL,
-        state->allocator, &state->pass_program, &pass_result);
-  }
-  if (loomc_status_is_ok(status)) {
-    status = require_successful_result(pass_result,
-                                       "kernel pipeline preparation failed");
-  }
-
-  loomc_result_release(pass_result);
   loomc_result_release(index_result);
   loomc_link_index_builder_release(builder);
   return status;
@@ -241,41 +216,23 @@ static loomc_status_t build_command_product(product_frontier_state_t* state,
 }
 // --8<-- [end:build-command]
 
-// --8<-- [start:compile-request]
-static loomc_status_t compile_kernel_request(product_frontier_state_t* state) {
-  const loomc_compile_options_t options = {
-      .type = LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
-      .structure_size = sizeof(options),
-      .module_name = loomc_make_cstring_view("product-frontier-kernel"),
-      .artifact_flags = LOOMC_COMPILE_ARTIFACT_FLAG_MODULE_BYTECODE,
-  };
-  loomc_result_t* result = NULL;
-  loomc_status_t status = loomc_compile_request(
-      state->compiler, state->workspace, state->pass_program,
-      state->kernel_request, &options, state->allocator, &state->kernel_product,
-      &result);
-  if (loomc_status_is_ok(status)) {
-    status =
-        require_successful_result(result, "kernel request compilation failed");
-  }
-  const loomc_artifact_t* artifact = NULL;
-  if (loomc_status_is_ok(status)) {
-    artifact = loomc_product_artifact_at(state->kernel_product, 0);
-    status = require_condition(
-        loomc_product_descriptor(state->kernel_product) ==
-                loomc_compiled_module_product_descriptor() &&
-            loomc_product_export_count(state->kernel_product) == 1 &&
-            loomc_product_requirement_count(state->kernel_product) == 0 &&
-            artifact != NULL &&
-            loomc_string_view_equal(
-                artifact->format,
-                loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_LOOM_BYTECODE)),
-        "kernel product does not satisfy the child request");
-  }
-  loomc_result_release(result);
-  return status;
+// --8<-- [start:inspect-request]
+static loomc_status_t inspect_kernel_request(
+    const product_frontier_state_t* state) {
+  loomc_request_root_t root = {0};
+  loomc_request_binding_t binding = {0};
+  return require_condition(
+      loomc_request_product_descriptor(state->kernel_request) ==
+              loomc_kernel_product_descriptor() &&
+          loomc_request_root_count(state->kernel_request) == 1 &&
+          loomc_request_root_at(state->kernel_request, 0, &root) &&
+          root.goal == LOOMC_KERNEL_ROOT_GOAL_EXECUTABLE_ENTRY &&
+          loomc_request_binding_count(state->kernel_request) == 1 &&
+          loomc_request_binding_at(state->kernel_request, 0, &binding) &&
+          binding.root_ordinal == 0,
+      "kernel request does not satisfy the parent frontier");
 }
-// --8<-- [end:compile-request]
+// --8<-- [end:inspect-request]
 
 static loomc_status_t print_product_summary(
     const product_frontier_state_t* state) {
@@ -285,7 +242,7 @@ static loomc_status_t print_product_summary(
     return loomc_make_status(LOOMC_STATUS_FAILED_PRECONDITION,
                              "command program metadata is unavailable");
   }
-  printf("command=%.*s programs=1 requirements=%zu kernel_products=1\n",
+  printf("command=%.*s programs=1 requirements=%zu kernel_requests=1\n",
          (int)program.symbol.size, program.symbol.data,
          (size_t)loomc_product_requirement_count(state->command_product));
   return loomc_ok_status();
@@ -301,7 +258,7 @@ int main(void) {
     status = build_command_product(&state, root_ordinal);
   }
   if (loomc_status_is_ok(status)) {
-    status = compile_kernel_request(&state);
+    status = inspect_kernel_request(&state);
   }
   if (loomc_status_is_ok(status)) {
     status = print_product_summary(&state);

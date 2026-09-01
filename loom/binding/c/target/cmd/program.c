@@ -30,6 +30,7 @@
 #include "loom/transforms/kernel/kernel_request_producer.h"
 #include "loomc/compile.h"
 #include "loomc/iree.h"
+#include "loomc/target/kernel.h"
 
 enum {
   LOOMC_CMD_PROGRAM_PRODUCT_KNOWN_FLAGS =
@@ -374,14 +375,15 @@ static iree_status_t loomc_cmd_program_product_publish_kernel_request(
     const loomc_request_root_t root = {
         .module_ordinal = 0,
         .symbol_ordinal = bytecode_symbol_ordinal,
+        .goal = LOOMC_KERNEL_ROOT_GOAL_EXECUTABLE_ENTRY,
     };
     const loomc_request_binding_t binding = {
         .requirement_ordinal = request->entry_requirement_index,
         .root_ordinal = 0,
     };
     status = loomc_request_create_take_source(
-        loomc_compiled_module_product_descriptor(), &source, &root, 1, &binding,
-        1, invocation->request.allocator, &public_request);
+        loomc_kernel_product_descriptor(), &source, &root, 1, &binding, 1,
+        invocation->request.allocator, &public_request);
   }
   if (loomc_status_is_ok(status)) {
     loomc_request_t* transferred_request = public_request;

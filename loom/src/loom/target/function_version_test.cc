@@ -180,6 +180,8 @@ test.func @only() {
       module.get(), /*function_versions=*/nullptr, &arena, &snapshot));
 
   EXPECT_EQ(snapshot.symbol_count, module->symbols.count);
+  EXPECT_NE(snapshot.version_handles_by_symbol, nullptr);
+  EXPECT_NE(snapshot.version_ordinals_by_symbol, nullptr);
   EXPECT_EQ(loom_target_function_version_snapshot_at(
                 &snapshot, FindSymbol(module.get(), IREE_SV("only"))),
             nullptr);
