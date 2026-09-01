@@ -430,6 +430,9 @@ typedef enum iree_hal_task_queue_shutdown_phase_e {
 } iree_hal_task_queue_shutdown_phase_t;
 
 struct iree_hal_task_queue_t {
+  // Base HAL queue resource. Must be at offset zero.
+  iree_hal_queue_t base;
+
   // Affinity mask this queue processes.
   iree_hal_queue_affinity_t affinity;
 
@@ -585,9 +588,9 @@ struct iree_hal_task_queue_t {
 };
 
 iree_status_t iree_hal_task_queue_initialize(
-    iree_string_view_t identifier, iree_hal_queue_affinity_t affinity,
-    iree_task_scope_flags_t scope_flags, iree_task_executor_t* executor,
-    iree_async_proactor_t* proactor,
+    iree_string_view_t identifier, const iree_hal_queue_family_t* queue_family,
+    iree_hal_queue_affinity_t affinity, iree_task_scope_flags_t scope_flags,
+    iree_task_executor_t* executor, iree_async_proactor_t* proactor,
     iree_device_size_t inline_transfer_threshold,
     iree_arena_block_pool_t* small_block_pool,
     iree_arena_block_pool_t* large_block_pool,
@@ -598,8 +601,6 @@ iree_status_t iree_hal_task_queue_assign_frontier(
     iree_async_frontier_tracker_t* frontier_tracker, iree_async_axis_t axis);
 
 void iree_hal_task_queue_retire_frontier(iree_hal_task_queue_t* queue);
-
-void iree_hal_task_queue_deinitialize(iree_hal_task_queue_t* queue);
 
 void iree_hal_task_queue_trim(iree_hal_task_queue_t* queue);
 

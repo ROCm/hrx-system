@@ -3305,10 +3305,12 @@ static iree_status_t iree_hal_task_queue_submit_op(
 // iree_hal_task_queue_t
 //===----------------------------------------------------------------------===//
 
+static const iree_hal_queue_vtable_t iree_hal_task_queue_vtable;
+
 iree_status_t iree_hal_task_queue_initialize(
-    iree_string_view_t identifier, iree_hal_queue_affinity_t affinity,
-    iree_task_scope_flags_t scope_flags, iree_task_executor_t* executor,
-    iree_async_proactor_t* proactor,
+    iree_string_view_t identifier, const iree_hal_queue_family_t* queue_family,
+    iree_hal_queue_affinity_t affinity, iree_task_scope_flags_t scope_flags,
+    iree_task_executor_t* executor, iree_async_proactor_t* proactor,
     iree_device_size_t inline_transfer_threshold,
     iree_arena_block_pool_t* small_block_pool,
     iree_arena_block_pool_t* large_block_pool,
@@ -3318,6 +3320,8 @@ iree_status_t iree_hal_task_queue_initialize(
 
   memset(out_queue, 0, sizeof(*out_queue));
 
+  iree_hal_queue_initialize(queue_family, &iree_hal_task_queue_vtable,
+                            &out_queue->base);
   out_queue->affinity = affinity;
   out_queue->executor = executor;
   iree_task_executor_retain(out_queue->executor);
@@ -3401,16 +3405,24 @@ iree_status_t iree_hal_task_queue_initialize(
   iree_arena_initialize(large_block_pool, &out_queue->compute_item_arena);
 
   // Pre-allocate initial pool items.
-  for (uint32_t i = 0; i < IREE_HAL_TASK_QUEUE_COMPUTE_INITIAL_POOL_SIZE; ++i) {
+  iree_status_t status = iree_ok_status();
+  for (uint32_t i = 0; i < IREE_HAL_TASK_QUEUE_COMPUTE_INITIAL_POOL_SIZE &&
+                       iree_status_is_ok(status);
+       ++i) {
     iree_hal_task_queue_compute_item_t* item = NULL;
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_hal_task_queue_compute_item_allocate(out_queue, &item));
-    iree_hal_task_queue_compute_item_slist_push(&out_queue->compute_free_pool,
-                                                item);
+    status = iree_hal_task_queue_compute_item_allocate(out_queue, &item);
+    if (iree_status_is_ok(status)) {
+      iree_hal_task_queue_compute_item_slist_push(&out_queue->compute_free_pool,
+                                                  item);
+    }
+  }
+
+  if (!iree_status_is_ok(status)) {
+    iree_hal_queue_release(&out_queue->base);
   }
 
   IREE_TRACE_ZONE_END(z0);
-  return iree_ok_status();
+  return status;
 }
 
 iree_status_t iree_hal_task_queue_assign_frontier(
@@ -3433,7 +3445,7 @@ void iree_hal_task_queue_retire_frontier(iree_hal_task_queue_t* queue) {
   }
 }
 
-void iree_hal_task_queue_deinitialize(iree_hal_task_queue_t* queue) {
+static void iree_hal_task_queue_deinitialize(iree_hal_task_queue_t* queue) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
   // Reject new work and request control-process termination. If the process is
@@ -3493,6 +3505,11 @@ void iree_hal_task_queue_deinitialize(iree_hal_task_queue_t* queue) {
   iree_task_executor_release(queue->executor);
 
   IREE_TRACE_ZONE_END(z0);
+}
+
+static void iree_hal_task_queue_destroy(iree_hal_queue_t* base_queue) {
+  IREE_HAL_ASSERT_TYPE(base_queue, &iree_hal_task_queue_vtable);
+  iree_hal_task_queue_deinitialize((iree_hal_task_queue_t*)base_queue);
 }
 
 void iree_hal_task_queue_trim(iree_hal_task_queue_t* queue) {
@@ -4255,3 +4272,7 @@ static iree_status_t iree_hal_task_queue_drain_dispatch(
 
   return status;
 }
+
+static const iree_hal_queue_vtable_t iree_hal_task_queue_vtable = {
+    .destroy = iree_hal_task_queue_destroy,
+};

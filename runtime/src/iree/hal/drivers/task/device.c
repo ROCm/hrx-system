@@ -93,7 +93,13 @@ typedef struct iree_hal_task_device_t {
 
   iree_hal_device_topology_info_t topology_info;
 
+  // Pointer-unique identity of the task queue family.
+  iree_hal_queue_family_t queue_family;
+
+  // Number of successfully initialized entries in |queues|.
   iree_host_size_t queue_count;
+
+  // Provisioned task queues embedded in the device allocation.
   iree_hal_task_queue_t queues[];
 } iree_hal_task_device_t;
 
@@ -352,6 +358,8 @@ iree_status_t iree_hal_task_device_create(
   }
 
   if (iree_status_is_ok(status)) {
+    iree_hal_queue_family_initialize(/*ordinal=*/0, &device->queue_family);
+
     iree_arena_block_pool_initialize(4096, host_allocator,
                                      &device->small_block_pool);
     iree_arena_block_pool_initialize(params->arena_block_size, host_allocator,
@@ -365,8 +373,8 @@ iree_status_t iree_hal_task_device_create(
       iree_hal_executable_loader_retain(device->loaders[i]);
     }
 
-    device->queue_count = queue_count;
-    for (iree_host_size_t i = 0; i < device->queue_count; ++i) {
+    device->queue_count = 0;
+    for (iree_host_size_t i = 0; i < queue_count; ++i) {
       iree_hal_queue_affinity_t queue_affinity = 1ull << i;
       // Select a NUMA-correct proactor for this queue based on its executor's
       // node assignment. Falls back to the first proactor in the pool if the
@@ -379,11 +387,13 @@ iree_status_t iree_hal_task_device_create(
       if (!iree_status_is_ok(status)) break;
 
       status = iree_hal_task_queue_initialize(
-          device->identifier, queue_affinity, params->queue_scope_flags,
-          queue_executors[i], queue_proactor, params->inline_transfer_threshold,
-          &device->small_block_pool, &device->large_block_pool,
-          device->device_allocator, &device->queues[i]);
+          device->identifier, &device->queue_family, queue_affinity,
+          params->queue_scope_flags, queue_executors[i], queue_proactor,
+          params->inline_transfer_threshold, &device->small_block_pool,
+          &device->large_block_pool, device->device_allocator,
+          &device->queues[i]);
       if (!iree_status_is_ok(status)) break;
+      ++device->queue_count;
     }
   }
 
@@ -415,9 +425,13 @@ static void iree_hal_task_device_destroy(iree_hal_device_t* base_device) {
               "profiling sessions must be ended before device destruction");
 
   for (iree_host_size_t i = 0; i < device->queue_count; ++i) {
-    iree_hal_task_queue_deinitialize(&device->queues[i]);
+    iree_hal_queue_t* queue = &device->queues[i].base;
+    iree_atomic_ref_count_abort_if_uses(&queue->resource.ref_count);
+    iree_hal_queue_release(queue);
   }
-  iree_hal_task_device_clear_topology_info(device);
+  iree_async_frontier_tracker_release(device->frontier_tracker);
+  device->frontier_tracker = NULL;
+  memset(&device->topology_info, 0, sizeof(device->topology_info));
 
   for (iree_host_size_t i = 0; i < device->loader_count; ++i) {
     iree_hal_executable_loader_release(device->loaders[i]);

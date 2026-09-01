@@ -11,6 +11,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/math.h"
+#include "iree/hal/resource.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -19,6 +20,25 @@ extern "C" {
 //===----------------------------------------------------------------------===//
 // Types and Enums
 //===----------------------------------------------------------------------===//
+
+// Ordinal of a queue family in the immutable device queue specification.
+// Queue family ordinals are stable for the lifetime of a device.
+typedef uint32_t iree_hal_queue_family_ordinal_t;
+
+// A queue family owned by a HAL device.
+//
+// Queue family pointers are immutable, pointer-unique identities within a
+// device. Objects compatible with the same family store this borrowed pointer
+// and can compare it in constant time. The containing device must outlive all
+// objects referring to its queue families.
+typedef struct iree_hal_queue_family_t iree_hal_queue_family_t;
+
+// An exact hardware queue exposed by a HAL device.
+//
+// Queue references do not retain their parent device. The device must outlive
+// all queue references and releasing a device with outstanding retained queue
+// references is a programmer error.
+typedef struct iree_hal_queue_t iree_hal_queue_t;
 
 // A bitmap indicating logical device queue affinity.
 // Used to direct submissions to specific device queues or locate memory nearby
@@ -88,6 +108,74 @@ typedef uint64_t iree_hal_queue_affinity_t;
        ++queue_index, _queue_ordinal_base += _bit_offset + 1,                \
            _queue_bits =                                                     \
                iree_hal_queue_affinity_shr(_queue_bits, _bit_offset + 1))
+
+//===----------------------------------------------------------------------===//
+// iree_hal_queue_family_t
+//===----------------------------------------------------------------------===//
+
+// Returns the canonical ordinal of |queue_family| within its device.
+IREE_API_EXPORT iree_hal_queue_family_ordinal_t
+iree_hal_queue_family_ordinal(const iree_hal_queue_family_t* queue_family);
+
+//===----------------------------------------------------------------------===//
+// iree_hal_queue_t
+//===----------------------------------------------------------------------===//
+
+// Retains |queue| for the caller.
+// The parent device must remain live until the reference is released.
+IREE_API_EXPORT void iree_hal_queue_retain(iree_hal_queue_t* queue);
+
+// Releases |queue| from the caller.
+IREE_API_EXPORT void iree_hal_queue_release(iree_hal_queue_t* queue);
+
+// Returns the queue family containing |queue|.
+// The returned pointer is borrowed from the parent device.
+IREE_API_EXPORT const iree_hal_queue_family_t* iree_hal_queue_family(
+    const iree_hal_queue_t* queue);
+
+//===----------------------------------------------------------------------===//
+// iree_hal_queue_family_t implementation details
+//===----------------------------------------------------------------------===//
+
+// Immutable identity state embedded in each device queue family.
+struct iree_hal_queue_family_t {
+  // Canonical ordinal of the queue family within its device.
+  iree_hal_queue_family_ordinal_t ordinal;
+};
+
+// Initializes |out_queue_family| with its canonical |ordinal|.
+IREE_API_EXPORT void iree_hal_queue_family_initialize(
+    iree_hal_queue_family_ordinal_t ordinal,
+    iree_hal_queue_family_t* out_queue_family);
+
+//===----------------------------------------------------------------------===//
+// iree_hal_queue_t implementation details
+//===----------------------------------------------------------------------===//
+
+typedef struct iree_hal_queue_vtable_t {
+  // Destroys the queue after its final reference is released.
+  // Implementations embedding queues in a device allocation deinitialize the
+  // queue but leave storage reclamation to the device.
+  void(IREE_API_PTR* destroy)(iree_hal_queue_t* queue);
+} iree_hal_queue_vtable_t;
+IREE_HAL_ASSERT_VTABLE_LAYOUT(iree_hal_queue_vtable_t);
+
+// Common queue state embedded at offset zero in every queue implementation.
+struct iree_hal_queue_t {
+  // Base HAL resource state. Must be at offset zero.
+  iree_hal_resource_t resource;
+
+  // Queue family containing this queue. Borrowed from the parent device.
+  const iree_hal_queue_family_t* queue_family;
+};
+
+// Initializes |out_queue| with one owning reference.
+IREE_API_EXPORT void iree_hal_queue_initialize(
+    const iree_hal_queue_family_t* queue_family,
+    const iree_hal_queue_vtable_t* vtable, iree_hal_queue_t* out_queue);
+
+// Destroys |queue| after its final reference is released.
+IREE_API_EXPORT void iree_hal_queue_destroy(iree_hal_queue_t* queue);
 
 #ifdef __cplusplus
 }  // extern "C"

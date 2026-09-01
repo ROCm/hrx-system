@@ -78,6 +78,7 @@ iree_cc_library(
     "profile_metrics.c"
     "profile_options.c"
     "profile_sink.c"
+    "queue.c"
     "semaphore.c"
     "string_util.c"
     "topology.c"
