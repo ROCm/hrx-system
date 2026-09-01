@@ -8,7 +8,7 @@
 
 #include <string.h>
 
-#include "iree/hal/executable/amdgpu/executable_target.h"
+#include "iree/hal/drivers/amdgpu/target/selection.h"
 
 static iree_status_t iree_hal_amdgpu_device_spec_verify_params(
     const iree_hal_amdgpu_device_spec_params_t* params) {

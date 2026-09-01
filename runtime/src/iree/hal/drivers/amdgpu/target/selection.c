@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "iree/hal/executable/amdgpu/executable_target.h"
+#include "iree/hal/drivers/amdgpu/target/selection.h"
 
 enum {
   IREE_HAL_AMDGPU_EXECUTABLE_TARGET_PRIORITY_EXACT = 100,

@@ -9,8 +9,8 @@
 
 #include "iree/base/api.h"
 #include "iree/hal/allocator.h"
+#include "iree/hal/drivers/amdgpu/target/identity.h"
 #include "iree/hal/drivers/amdgpu/util/pm4_capabilities.h"
-#include "iree/hal/executable/amdgpu/target_id.h"
 #include "iree/hal/utils/device_spec_builder.h"
 
 #ifdef __cplusplus

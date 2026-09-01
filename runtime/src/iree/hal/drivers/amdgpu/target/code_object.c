@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "iree/hal/executable/amdgpu/code_object_target.h"
+#include "iree/hal/drivers/amdgpu/target/code_object.h"
 
 #include <string.h>
 
@@ -95,7 +95,7 @@ static const iree_hal_amdgpu_elf_machine_target_t
 };
 
 //===----------------------------------------------------------------------===//
-// AMDGPU Code Object Target Parsing
+// AMDGPU Code Object Identity Parsing
 //===----------------------------------------------------------------------===//
 
 static bool iree_hal_amdgpu_elf_has_available_bytes(
@@ -131,11 +131,11 @@ iree_hal_amdgpu_code_object_decode_v4_feature(uint32_t e_flags, uint32_t mask,
   return IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_UNSUPPORTED;
 }
 
-IREE_API_EXPORT iree_status_t iree_hal_amdgpu_code_object_target_id_from_elf(
+IREE_API_EXPORT iree_status_t iree_hal_amdgpu_code_object_identity_from_elf(
     iree_const_byte_span_t elf_data,
-    iree_hal_amdgpu_target_identity_t* out_target_id) {
-  IREE_ASSERT_ARGUMENT(out_target_id);
-  memset(out_target_id, 0, sizeof(*out_target_id));
+    iree_hal_amdgpu_target_identity_t* out_identity) {
+  IREE_ASSERT_ARGUMENT(out_identity);
+  memset(out_identity, 0, sizeof(*out_identity));
 
   if (!iree_hal_elf_data_starts_with_magic(elf_data)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -194,17 +194,17 @@ IREE_API_EXPORT iree_status_t iree_hal_amdgpu_code_object_target_id_from_elf(
   }
 
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_target_identity_parse_processor(
-      machine_target->processor, out_target_id));
+      machine_target->processor, out_identity));
 
   const uint8_t abi_version = header[IREE_HAL_AMDGPU_ELF_EI_ABIVERSION];
   if (abi_version == IREE_HAL_AMDGPU_ELF_HSA_ABI_VERSION_V3) {
-    out_target_id->amdhsa_features.sramecc =
+    out_identity->amdhsa_features.sramecc =
         iree_all_bits_set(e_flags, IREE_HAL_AMDGPU_EF_FEATURE_SRAMECC_V3)
             ? IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_ON
         : machine_target->sramecc_supported
             ? IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_OFF
             : IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_UNSUPPORTED;
-    out_target_id->amdhsa_features.xnack =
+    out_identity->amdhsa_features.xnack =
         iree_all_bits_set(e_flags, IREE_HAL_AMDGPU_EF_FEATURE_XNACK_V3)
             ? IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_ON
         : machine_target->xnack_supported
@@ -213,20 +213,20 @@ IREE_API_EXPORT iree_status_t iree_hal_amdgpu_code_object_target_id_from_elf(
   } else if (abi_version == IREE_HAL_AMDGPU_ELF_HSA_ABI_VERSION_V4 ||
              abi_version == IREE_HAL_AMDGPU_ELF_HSA_ABI_VERSION_V5 ||
              abi_version == IREE_HAL_AMDGPU_ELF_HSA_ABI_VERSION_V6) {
-    out_target_id->amdhsa_features.sramecc =
+    out_identity->amdhsa_features.sramecc =
         iree_hal_amdgpu_code_object_decode_v4_feature(
             e_flags, IREE_HAL_AMDGPU_EF_FEATURE_SRAMECC_V4,
             IREE_HAL_AMDGPU_EF_FEATURE_SRAMECC_ANY_V4,
             IREE_HAL_AMDGPU_EF_FEATURE_SRAMECC_OFF_V4,
             IREE_HAL_AMDGPU_EF_FEATURE_SRAMECC_ON_V4);
-    out_target_id->amdhsa_features.xnack =
+    out_identity->amdhsa_features.xnack =
         iree_hal_amdgpu_code_object_decode_v4_feature(
             e_flags, IREE_HAL_AMDGPU_EF_FEATURE_XNACK_V4,
             IREE_HAL_AMDGPU_EF_FEATURE_XNACK_ANY_V4,
             IREE_HAL_AMDGPU_EF_FEATURE_XNACK_OFF_V4,
             IREE_HAL_AMDGPU_EF_FEATURE_XNACK_ON_V4);
     if (abi_version == IREE_HAL_AMDGPU_ELF_HSA_ABI_VERSION_V6) {
-      out_target_id->generic_version =
+      out_identity->generic_version =
           (e_flags & IREE_HAL_AMDGPU_EF_GENERIC_VERSION) >>
           IREE_HAL_AMDGPU_EF_GENERIC_VERSION_OFFSET;
     }
@@ -236,24 +236,24 @@ IREE_API_EXPORT iree_status_t iree_hal_amdgpu_code_object_target_id_from_elf(
                             abi_version);
   }
 
-  if (out_target_id->kind == IREE_HAL_AMDGPU_TARGET_KIND_GENERIC &&
+  if (out_identity->kind == IREE_HAL_AMDGPU_TARGET_KIND_GENERIC &&
       abi_version != IREE_HAL_AMDGPU_ELF_HSA_ABI_VERSION_V6) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "generic AMDGPU code object target requires HSA ABI v6");
   }
-  if (out_target_id->kind == IREE_HAL_AMDGPU_TARGET_KIND_GENERIC &&
-      out_target_id->generic_version == 0) {
+  if (out_identity->kind == IREE_HAL_AMDGPU_TARGET_KIND_GENERIC &&
+      out_identity->generic_version == 0) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "generic AMDGPU code object target has no generic version");
   }
-  if (out_target_id->kind != IREE_HAL_AMDGPU_TARGET_KIND_GENERIC &&
-      out_target_id->generic_version != 0) {
+  if (out_identity->kind != IREE_HAL_AMDGPU_TARGET_KIND_GENERIC &&
+      out_identity->generic_version != 0) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "non-generic AMDGPU code object target has generic version %u",
-        out_target_id->generic_version);
+        out_identity->generic_version);
   }
   return iree_ok_status();
 }

@@ -5,17 +5,21 @@
 #include <string.h>
 
 #include "hrx_internal.h"
-#include "iree/hal/executable/amdgpu/executable_target.h"
+#ifdef HRX_HAS_IREE_AMDGPU_DRIVER
+#include "iree/hal/drivers/amdgpu/target/selection.h"
+#endif  // HRX_HAS_IREE_AMDGPU_DRIVER
 
 static iree_status_t hrx_executable_select_target(
     const iree_hal_device_spec_t* device_spec, iree_string_view_t target_family,
     iree_string_view_t artifact_target_key,
     iree_hal_executable_target_selection_result_t* out_result) {
+#ifdef HRX_HAS_IREE_AMDGPU_DRIVER
   if (iree_string_view_equal(target_family, IREE_SV("amdgpu"))) {
     return iree_hal_amdgpu_device_spec_select_executable_target(
         device_spec, artifact_target_key,
         /*physical_device_affinity=*/0, out_result);
   }
+#endif  // HRX_HAS_IREE_AMDGPU_DRIVER
 
   const iree_hal_executable_target_selection_t selection = {
       .family = target_family,

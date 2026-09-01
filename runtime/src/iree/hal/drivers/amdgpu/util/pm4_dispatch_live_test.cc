@@ -16,6 +16,7 @@
 #include "iree/base/api.h"
 #include "iree/base/threading/processor.h"
 #include "iree/hal/drivers/amdgpu/abi/kernel_descriptor.h"
+#include "iree/hal/drivers/amdgpu/target/identity.h"
 #include "iree/hal/drivers/amdgpu/util/aql_ring.h"
 #include "iree/hal/drivers/amdgpu/util/libhsa.h"
 #include "iree/hal/drivers/amdgpu/util/pm4_atomic.h"
@@ -25,7 +26,6 @@
 #include "iree/hal/drivers/amdgpu/util/pm4_program.h"
 #include "iree/hal/drivers/amdgpu/util/topology.h"
 #include "iree/hal/drivers/amdgpu/util/vmem.h"
-#include "iree/hal/executable/amdgpu/target_id.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 

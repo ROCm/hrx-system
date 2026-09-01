@@ -14,22 +14,22 @@ package(
 )
 
 iree_runtime_cc_library(
-    name = "target_id",
-    srcs = ["target_id.c"],
-    hdrs = ["target_id.h"],
-    textual_hdrs = ["target_id_map.inl"],
+    name = "identity",
+    srcs = ["identity.c"],
+    hdrs = ["identity.h"],
+    textual_hdrs = ["identity_catalog.inl"],
     deps = [
         "//runtime/src/iree/base",
     ],
 )
 
 iree_runtime_cc_library(
-    name = "code_object_target",
-    srcs = ["code_object_target.c"],
-    hdrs = ["code_object_target.h"],
+    name = "code_object",
+    srcs = ["code_object.c"],
+    hdrs = ["code_object.h"],
     textual_hdrs = ["//build_tools/amdgpu:elf_machine_map.inl"],
     deps = [
-        ":target_id",
+        ":identity",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base:core_headers",
         "//runtime/src/iree/hal/utils:elf_format",
@@ -37,11 +37,11 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_test(
-    name = "code_object_target_test",
-    srcs = ["code_object_target_test.cc"],
+    name = "code_object_test",
+    srcs = ["code_object_test.cc"],
     deps = [
-        ":code_object_target",
-        ":target_id",
+        ":code_object",
+        ":identity",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base:core_headers",
         "//runtime/src/iree/testing:gtest",
@@ -50,10 +50,10 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
-    name = "target_id_test",
-    srcs = ["target_id_test.cc"],
+    name = "identity_test",
+    srcs = ["identity_test.cc"],
     deps = [
-        ":target_id",
+        ":identity",
         "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
@@ -61,21 +61,21 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_library(
-    name = "executable_target",
-    srcs = ["executable_target.c"],
-    hdrs = ["executable_target.h"],
+    name = "selection",
+    srcs = ["selection.c"],
+    hdrs = ["selection.h"],
     deps = [
-        ":target_id",
+        ":identity",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/utils:device_spec_builder",
     ],
 )
 
 iree_runtime_cc_test(
-    name = "executable_target_test",
-    srcs = ["executable_target_test.cc"],
+    name = "selection_test",
+    srcs = ["selection_test.cc"],
     deps = [
-        ":executable_target",
+        ":selection",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

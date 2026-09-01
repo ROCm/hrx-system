@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "iree/hal/executable/amdgpu/executable_target.h"
+#include "iree/hal/drivers/amdgpu/target/selection.h"
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -45,7 +45,7 @@ static void CreateDeviceSpecWithFeatureQualifiedTargets(
   iree_hal_device_spec_builder_deinitialize(&builder);
 }
 
-TEST(ExecutableTargetTest, SelectsFeatureQualifiedExactTarget) {
+TEST(SelectionTest, SelectsFeatureQualifiedExactTarget) {
   iree_hal_device_spec_t* device_spec = NULL;
   CreateDeviceSpecWithFeatureQualifiedTargets(&device_spec);
 
@@ -62,7 +62,7 @@ TEST(ExecutableTargetTest, SelectsFeatureQualifiedExactTarget) {
   iree_hal_device_spec_release(device_spec);
 }
 
-TEST(ExecutableTargetTest, AdvertisesResolvedPhysicalTarget) {
+TEST(SelectionTest, AdvertisesResolvedPhysicalTarget) {
   iree_hal_amdgpu_target_identity_t identity;
   IREE_ASSERT_OK(iree_hal_amdgpu_target_identity_parse_artifact_key(
       IREE_SV("gfx1250"), &identity));
@@ -99,7 +99,7 @@ TEST(ExecutableTargetTest, AdvertisesResolvedPhysicalTarget) {
   iree_hal_device_spec_release(device_spec);
 }
 
-TEST(ExecutableTargetTest, SelectsFeatureQualifiedGenericTarget) {
+TEST(SelectionTest, SelectsFeatureQualifiedGenericTarget) {
   iree_hal_device_spec_t* device_spec = NULL;
   CreateDeviceSpecWithFeatureQualifiedTargets(&device_spec);
 
@@ -116,7 +116,7 @@ TEST(ExecutableTargetTest, SelectsFeatureQualifiedGenericTarget) {
   iree_hal_device_spec_release(device_spec);
 }
 
-TEST(ExecutableTargetTest, RejectsIncompatibleFeatureAndAffinity) {
+TEST(SelectionTest, RejectsIncompatibleFeatureAndAffinity) {
   iree_hal_device_spec_t* device_spec = NULL;
   CreateDeviceSpecWithFeatureQualifiedTargets(&device_spec);
 
@@ -135,7 +135,7 @@ TEST(ExecutableTargetTest, RejectsIncompatibleFeatureAndAffinity) {
   iree_hal_device_spec_release(device_spec);
 }
 
-TEST(ExecutableTargetTest, RejectsMalformedArtifactTarget) {
+TEST(SelectionTest, RejectsMalformedArtifactTarget) {
   iree_hal_device_spec_t* device_spec = NULL;
   CreateDeviceSpecWithFeatureQualifiedTargets(&device_spec);
 

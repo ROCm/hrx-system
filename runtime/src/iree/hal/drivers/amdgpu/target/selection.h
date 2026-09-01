@@ -4,10 +4,10 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef IREE_HAL_EXECUTABLE_AMDGPU_EXECUTABLE_TARGET_H_
-#define IREE_HAL_EXECUTABLE_AMDGPU_EXECUTABLE_TARGET_H_
+#ifndef IREE_HAL_DRIVERS_AMDGPU_TARGET_SELECTION_H_
+#define IREE_HAL_DRIVERS_AMDGPU_TARGET_SELECTION_H_
 
-#include "iree/hal/executable/amdgpu/target_id.h"
+#include "iree/hal/drivers/amdgpu/target/identity.h"
 #include "iree/hal/utils/device_spec_builder.h"
 
 #ifdef __cplusplus
@@ -46,4 +46,4 @@ iree_status_t iree_hal_amdgpu_device_spec_select_executable_target(
 }  // extern "C"
 #endif  // __cplusplus
 
-#endif  // IREE_HAL_EXECUTABLE_AMDGPU_EXECUTABLE_TARGET_H_
+#endif  // IREE_HAL_DRIVERS_AMDGPU_TARGET_SELECTION_H_

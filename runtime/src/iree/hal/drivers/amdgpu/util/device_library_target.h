@@ -8,7 +8,7 @@
 #define IREE_HAL_DRIVERS_AMDGPU_UTIL_DEVICE_LIBRARY_TARGET_H_
 
 #include "iree/base/api.h"
-#include "iree/hal/executable/amdgpu/target_id.h"
+#include "iree/hal/drivers/amdgpu/target/identity.h"
 
 #ifdef __cplusplus
 extern "C" {

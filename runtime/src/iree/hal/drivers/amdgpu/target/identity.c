@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "iree/hal/executable/amdgpu/target_id.h"
+#include "iree/hal/drivers/amdgpu/target/identity.h"
 
 typedef enum iree_hal_amdgpu_target_feature_support_bit_e {
   IREE_HAL_AMDGPU_TARGET_FEATURE_SUPPORT_NONE = 0u,
@@ -49,7 +49,7 @@ static const iree_hal_amdgpu_target_mapping_t
    generic_introduction_version,                                               \
    supported_features,                                                         \
    {default_wavefront_size, explicit_supported_wavefront_sizes}},
-#include "iree/hal/executable/amdgpu/target_id_map.inl"
+#include "iree/hal/drivers/amdgpu/target/identity_catalog.inl"
 #undef IREE_AMDGPU_TARGET_MAPPING
 };
 
@@ -57,7 +57,7 @@ static const iree_hal_amdgpu_physical_target_mapping_t
     iree_hal_amdgpu_physical_target_mappings[] = {
 #define IREE_AMDGPU_PHYSICAL_TARGET(processor, asic_revision, target) \
   {IREE_SVL(processor), asic_revision, IREE_SVL(target)},
-#include "iree/hal/executable/amdgpu/target_id_map.inl"
+#include "iree/hal/drivers/amdgpu/target/identity_catalog.inl"
 #undef IREE_AMDGPU_PHYSICAL_TARGET
 };
 

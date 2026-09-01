@@ -15,6 +15,8 @@
 #include "iree/hal/drivers/amdgpu/physical_device.h"
 #include "iree/hal/drivers/amdgpu/queue_affinity.h"
 #include "iree/hal/drivers/amdgpu/source_context.h"
+#include "iree/hal/drivers/amdgpu/target/code_object.h"
+#include "iree/hal/drivers/amdgpu/target/identity.h"
 #include "iree/hal/drivers/amdgpu/tsan_state.h"
 #include "iree/hal/drivers/amdgpu/util/global_table.h"
 #include "iree/hal/drivers/amdgpu/util/hsaco_metadata.h"
@@ -22,8 +24,6 @@
 #include "iree/hal/drivers/amdgpu/util/loaded_code_object.h"
 #include "iree/hal/drivers/amdgpu/util/topology.h"
 #include "iree/hal/drivers/amdgpu/util/vmem.h"
-#include "iree/hal/executable/amdgpu/code_object_target.h"
-#include "iree/hal/executable/amdgpu/target_id.h"
 
 //===----------------------------------------------------------------------===//
 // ISA Support
@@ -41,12 +41,12 @@ static iree_status_t iree_hal_amdgpu_executable_resolve_isa_target(
     return iree_ok_status();
   }
 
-  iree_hal_amdgpu_target_identity_t requested_target_id;
+  iree_hal_amdgpu_target_identity_t requested_identity;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_target_identity_parse_artifact_key(
-      target_key, &requested_target_id));
+      target_key, &requested_identity));
 
   *out_isa_target = iree_hal_amdgpu_agent_target_find_compatible_isa(
-      agent_target, &requested_target_id);
+      agent_target, &requested_identity);
   return iree_ok_status();
 }
 
@@ -319,33 +319,33 @@ static iree_status_t iree_hal_amdgpu_executable_select_physical_devices(
       queue_affinity_domain, requested_affinity, out_physical_devices);
 }
 
-static iree_status_t iree_hal_amdgpu_executable_format_target_id_for_message(
-    const iree_hal_amdgpu_target_identity_t* target_id,
+static iree_status_t iree_hal_amdgpu_executable_format_identity_for_message(
+    const iree_hal_amdgpu_target_identity_t* identity,
     iree_host_size_t buffer_capacity, char* buffer) {
   return iree_hal_amdgpu_target_identity_format_artifact_key(
-      target_id, buffer_capacity, buffer,
+      identity, buffer_capacity, buffer,
       /*out_buffer_length=*/NULL);
 }
 
 static iree_status_t iree_hal_amdgpu_executable_preflight_agent_code_object(
     const iree_hal_amdgpu_physical_device_t* physical_device,
     iree_host_size_t physical_device_ordinal,
-    const iree_hal_amdgpu_target_identity_t* code_object_target_id) {
+    const iree_hal_amdgpu_target_identity_t* code_object_identity) {
   const iree_hal_amdgpu_agent_target_t* agent_target =
       physical_device->agent_target;
   if (iree_hal_amdgpu_agent_target_find_compatible_isa(agent_target,
-                                                       code_object_target_id)) {
+                                                       code_object_identity)) {
     return iree_ok_status();
   }
   const iree_hal_amdgpu_target_compatibility_t primary_compatibility =
       iree_hal_amdgpu_target_identity_check_compatible(
-          code_object_target_id, &agent_target->primary_isa.identity);
+          code_object_identity, &agent_target->primary_isa.identity);
 
   char code_object_target[128] = {0};
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_executable_format_target_id_for_message(
-      code_object_target_id, sizeof(code_object_target), code_object_target));
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_executable_format_identity_for_message(
+      code_object_identity, sizeof(code_object_target), code_object_target));
   char primary_agent_target[128] = {0};
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_executable_format_target_id_for_message(
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_executable_format_identity_for_message(
       &agent_target->primary_isa.identity, sizeof(primary_agent_target),
       primary_agent_target));
   char mismatch_reasons[128] = {0};
@@ -366,16 +366,16 @@ static iree_status_t iree_hal_amdgpu_executable_preflight_code_object(
     iree_const_byte_span_t code_object_data,
     iree_host_size_t physical_device_count,
     iree_hal_amdgpu_physical_device_t* const* physical_device_list) {
-  iree_hal_amdgpu_target_identity_t code_object_target_id;
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_code_object_target_id_from_elf(
-      code_object_data, &code_object_target_id));
+  iree_hal_amdgpu_target_identity_t code_object_identity;
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_code_object_identity_from_elf(
+      code_object_data, &code_object_identity));
   for (iree_host_size_t i = 0; i < physical_device_count; ++i) {
     if (!iree_hal_amdgpu_physical_device_mask_contains(
             physical_devices->physical_device_mask, i)) {
       continue;
     }
     IREE_RETURN_IF_ERROR(iree_hal_amdgpu_executable_preflight_agent_code_object(
-        physical_device_list[i], i, &code_object_target_id));
+        physical_device_list[i], i, &code_object_identity));
   }
   return iree_ok_status();
 }
