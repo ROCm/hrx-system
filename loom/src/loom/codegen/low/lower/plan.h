@@ -57,6 +57,44 @@ typedef struct loom_low_lower_selected_plan_t {
   loom_low_lower_plan_t plan;
 } loom_low_lower_selected_plan_t;
 
+// Shared descriptor-matrix plan retained between contract selection and
+// emission.
+typedef struct loom_low_lower_descriptor_matrix_plan_t {
+  // Shared source adapter used by this matrix descriptor plan.
+  loom_target_contract_descriptor_matrix_source_t source;
+  // Descriptor row selected by the target matrix projection.
+  loom_low_lower_resolved_descriptor_t descriptor;
+  // Target-independent request facts used to materialize descriptor operands.
+  loom_contract_request_t contract_request;
+  // Target-owned immediate attributes materialized from request facts.
+  loom_named_attr_slice_t attrs;
+  // Native contraction placement selected by the target query.
+  const loom_native_contraction_facts_t* native_contraction_facts;
+} loom_low_lower_descriptor_matrix_plan_t;
+
+// Returns true when structured Low control flow is selected.
+bool loom_low_lower_structured_low_enabled(
+    const loom_low_lower_context_t* context);
+
+// Returns true when |source_op| is supported by structured Low lowering.
+bool loom_low_lower_supported_structured_source_op(
+    const loom_low_lower_context_t* context, const loom_op_t* source_op);
+
+// Returns true when |op| is lowered by target-independent structural logic.
+bool loom_low_lower_op_is_structural(const loom_module_t* module,
+                                     const loom_op_t* op);
+
+// Returns true when |kind| carries source-only metadata and emits no Low op.
+bool loom_low_lower_op_is_source_metadata(loom_op_kind_t kind);
+
+// Returns true when |op| requires target-policy selection.
+bool loom_low_lower_op_uses_policy(const loom_module_t* module,
+                                   const loom_op_t* op);
+
+// Returns true when |op| is a result-free hint that may be discarded.
+bool loom_low_lower_op_is_discardable_hint(const loom_module_t* module,
+                                           const loom_op_t* op);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

@@ -21,6 +21,7 @@ loom_cc_library(
     "lower_rules.h"
     "plan.h"
     "report.h"
+    "storage.h"
   SRCS
     "contract_query.c"
     "lower.c"
@@ -32,6 +33,8 @@ loom_cc_library(
     "lower_rule_source_memory_match.c"
     "lower_rule_source_memory_materialize.c"
     "lower_rules.c"
+    "plan.c"
+    "storage.c"
   DEPS
     iree::base
     iree::base::internal
