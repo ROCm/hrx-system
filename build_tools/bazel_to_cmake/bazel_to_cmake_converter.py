@@ -1175,6 +1175,9 @@ class BuildFileFunctions(object):
     def iree_assert_no_dependency(self, **kwargs):
         pass
 
+    def iree_assert_dependency_boundary(self, **kwargs):
+        pass
+
     def test_suite(self, **kwargs):
         pass
 
