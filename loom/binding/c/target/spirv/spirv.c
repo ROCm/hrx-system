@@ -27,6 +27,20 @@ static iree_status_t loomc_spirv_emit_module_artifact(
   loom_spirv_emit_low_module_options_t options = {0};
   loom_spirv_emit_low_module_options_initialize(&options);
   options.function_versions = request->function_versions;
+  loom_target_emit_export_projection_t* export_projections = NULL;
+  const iree_host_size_t export_projection_capacity =
+      request->function_versions != NULL ? request->function_versions->count
+                                         : 0;
+  if (export_projection_capacity != 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        request->scratch_arena, export_projection_capacity,
+        sizeof(*export_projections), (void**)&export_projections));
+  }
+  loom_target_emit_export_projection_buffer_t export_projection = {
+      .values = export_projections,
+      .capacity = export_projection_capacity,
+  };
+  options.export_projection = &export_projection;
   loom_spirv_module_binary_t binary = {0};
   iree_status_t status = loom_spirv_emit_low_module(
       request->module, request->low_descriptor_registry,
@@ -44,6 +58,8 @@ static iree_status_t loomc_spirv_emit_module_artifact(
       out_artifact->target_artifact_format =
           LOOM_TARGET_ARTIFACT_FORMAT_SPIRV_BINARY;
       out_artifact->contents = sequence;
+      out_artifact->export_projections = export_projection.values;
+      out_artifact->export_projection_count = export_projection.count;
     }
   }
 

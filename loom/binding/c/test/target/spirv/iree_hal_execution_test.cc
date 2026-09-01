@@ -79,31 +79,23 @@ loomc_status_t ValidateSpirvVulkanProfile(
   return loomc_ok_status();
 }
 
-loomc_status_t EmitSpirvModule(loomc_target_environment_t* target_environment,
-                               loomc_workspace_t* workspace,
-                               loomc_module_t* module,
-                               loomc_string_view_t artifact_format,
-                               loomc_string_view_t artifact_identifier,
-                               loomc_result_t** out_result) {
-  loomc_spirv_emit_options_t spirv_options = {
+TEST(LoomcSpirvIreeHalExecutionTest,
+     CompilesEmitsAndExecutesOnLiveVulkanHalDevice) {
+  const loomc_spirv_emit_options_t spirv_options = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_SPIRV_EMIT_OPTIONS,
       /*.structure_size=*/sizeof(spirv_options),
       /*.next=*/nullptr,
   };
-  loomc_emit_options_t emit_options = {
+  const loomc_emit_options_t emit_options = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
       /*.structure_size=*/sizeof(emit_options),
       /*.next=*/&spirv_options,
-      /*.artifact_format=*/artifact_format,
-      /*.identifier=*/artifact_identifier,
+      /*.artifact_format=*/
+      loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV),
+      /*.identifier=*/
+      loomc_make_cstring_view("double_i32_at_byte_offset.spv"),
       /*.artifact_flags=*/LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY,
   };
-  return loomc_emit_module(target_environment, workspace, module, &emit_options,
-                           loomc_allocator_system(), out_result);
-}
-
-TEST(LoomcSpirvIreeHalExecutionTest,
-     CompilesEmitsAndExecutesOnLiveVulkanHalDevice) {
   const loomc_iree_hal_profile_provider_t* profile_providers[] = {
       loomc_spirv_iree_hal_profile_provider(),
   };
@@ -123,9 +115,7 @@ TEST(LoomcSpirvIreeHalExecutionTest,
   target.target_pipeline_kind = LOOMC_TARGET_PIPELINE_KIND_PREPARED_LOW;
   target.control_flow_lowering = LOOMC_TARGET_CONTROL_FLOW_LOWERING_CFG;
   target.source_to_low_max_errors = 20;
-  target.artifact_format = loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_SPIRV);
-  target.artifact_identifier =
-      loomc_make_cstring_view("double_i32_at_byte_offset.spv");
+  target.emit_options = &emit_options;
   target.executable_target_selection = {
       /*.family=*/IREE_SV("spirv"),
       /*.target_key=*/IREE_SV("vulkan1.3+bda"),
@@ -136,7 +126,6 @@ TEST(LoomcSpirvIreeHalExecutionTest,
   target.profile_provider_count = 1;
   target.create_target_environment = CreateSpirvTargetEnvironment;
   target.validate_target_profile = ValidateSpirvVulkanProfile;
-  target.emit_module = EmitSpirvModule;
 
   loomc::testing::target::RunIreeHalKernelExecutionTest(target);
 }
