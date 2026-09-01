@@ -33,6 +33,17 @@ SERIALIZED_REFERENCE_PROFILE = loom_execution_profile(
     target_family = "test",
 )
 
+SUPPRESSED_REFERENCE_PROFILE = loom_execution_profile(
+    name = "suppressed_reference",
+    executor = "reference",
+    runner_args = ["--case=@scalar_case"],
+    sanitizer_suppressions = {
+        "lsan": "//build_tools/sanitizer:lsan_suppressions_vulkan.txt",
+    },
+    target_class = "cpu",
+    target_family = "test",
+)
+
 def _find_action(env, actions, mnemonic):
     for action in actions:
         if action.mnemonic == mnemonic:
@@ -232,24 +243,6 @@ def _test_transitive_audit_universe_is_separate_impl(env, target):
             basename,
         )
 
-def _test_wrapper_library_module_is_testonly(name, **kwargs):
-    analysis_test(
-        name = name,
-        attr_values = {
-            "timeout": "short",
-        },
-        impl = _test_wrapper_library_module_is_testonly_impl,
-        target = ":profiled_library",
-        **kwargs
-    )
-
-def _test_wrapper_library_module_is_testonly_impl(env, target):
-    env.expect.that_str(target[LoomLibraryInfo].module.basename).equals(
-        "profiled_library.loombc",
-    )
-    if not target[TestingAspectInfo].attrs.testonly:
-        env.fail("expected wrapper library module to be testonly")
-
 def _test_generated_kernel_binary_is_testonly(name, **kwargs):
     analysis_test(
         name = name,
@@ -290,7 +283,7 @@ def _test_execution_profile_contract(name, **kwargs):
             "timeout": "short",
         },
         impl = _test_execution_profile_contract_impl,
-        target = ":profiled_library_execute_reference_test_launcher",
+        target = ":profiled_test_launcher",
         **kwargs
     )
 
@@ -305,11 +298,13 @@ def _test_execution_profile_contract_impl(env, target):
     env.expect.that_str(info.profile_name).equals("reference")
     if info.runner_args != ["--case=@scalar_case"]:
         env.fail("unexpected runner args %r" % info.runner_args)
+    if not info.runner.basename.startswith("iree-test-loom"):
+        env.fail("unexpected correctness runner %r" % info.runner)
 
     runfiles = target[DefaultInfo].default_runfiles.files.to_list()
     _expect_basename(env, runfiles, "profile_cases.loom")
     _expect_basename(env, runfiles, "library_dependency.loombc")
-    _expect_no_basename(env, runfiles, "profiled_library.loombc")
+    _expect_no_basename(env, runfiles, "profiled_test.loombc")
 
     tags = target[TestingAspectInfo].attrs.tags
     for expected_tag in [
@@ -328,7 +323,7 @@ def _test_resource_profile_preserves_direct_execution(name, **kwargs):
             "timeout": "short",
         },
         impl = _test_resource_profile_preserves_direct_execution_impl,
-        target = ":profiled_library_execute_serialized_reference_test_launcher",
+        target = ":serialized_profile_test_launcher",
         **kwargs
     )
 
@@ -351,6 +346,27 @@ def _test_resource_profile_preserves_direct_execution_impl(env, target):
         if expected_tag not in tags:
             env.fail("expected %r in test tags %r" % (expected_tag, tags))
 
+def _test_suppression_profile_configures_test_environment(name, **kwargs):
+    analysis_test(
+        name = name,
+        attr_values = {
+            "timeout": "short",
+        },
+        impl = _test_suppression_profile_configures_test_environment_impl,
+        target = ":suppressed_profile_test",
+        **kwargs
+    )
+
+def _test_suppression_profile_configures_test_environment_impl(env, target):
+    test_env = target[TestingAspectInfo].attrs.env
+    expected = (
+        "suppressions=$(location " +
+        "//build_tools/sanitizer:lsan_suppressions_vulkan.txt):" +
+        "allow_addr2line=1"
+    )
+    if test_env.get("LSAN_OPTIONS") != expected:
+        env.fail("unexpected LSAN_OPTIONS in %r" % test_env)
+
 def loom_library_rules_test_suite(name):
     test_suite(
         name = name,
@@ -361,7 +377,7 @@ def loom_library_rules_test_suite(name):
             _test_library_keeps_dependency_module_separate,
             _test_redundant_direct_dependency_is_not_transitive,
             _test_resource_profile_preserves_direct_execution,
+            _test_suppression_profile_configures_test_environment,
             _test_transitive_audit_universe_is_separate,
-            _test_wrapper_library_module_is_testonly,
         ],
     )

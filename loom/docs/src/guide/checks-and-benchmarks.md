@@ -86,14 +86,16 @@ sweep, launches the kernel, and compares the mutated output tensor:
 The [`kernel.decl`](kernels-and-launch.md#declare-and-launch-the-complete-contract)
 is part of the test module's source contract. Supplying the production library
 can satisfy that declaration; it cannot make an undeclared launch valid. The
-test module therefore verifies and plans independently while the production
-module remains free of check records and private wrapper entries.
+test module therefore owns correctness and benchmark declarations independently
+while the production module remains free of check records.
 
 This is a scalable library shape: `motif/` and `kernel/` packages publish
-reusable modules, while their sibling `test/` packages own private wrappers,
-cases, and benchmark records. The public Bazel `loom_test_library` rule formats
-the authored source, plans its benchmarks, and expands target execution
-profiles without changing the Loom program.
+reusable modules, while their sibling `test/` packages own test modules, cases,
+and benchmark records. The public Bazel `loom_test` rule executes one
+authored source through `iree-test-loom`, with production `loom_library`
+dependencies supplied as explicit libraries. It executes each selected case
+sample once for correctness; benchmark planning and measurement remain explicit
+`iree-benchmark-loom` workflows.
 
 ## Parameters define the sample space
 

@@ -9,7 +9,7 @@
 load(
     "@hrx//loom/build_tools/bazel:defs.bzl",
     "loom_library",
-    "loom_test_library",
+    "loom_test",
 )
 
 package(
@@ -22,8 +22,9 @@ loom_library(
     srcs = ["kernel.loom"],
 )
 
-loom_test_library(
+loom_test(
     name = "tests",
-    srcs = ["tests.loom"],
+    src = "tests.loom",
+    tags = ["manual"],
     deps = [":kernel"],
 )

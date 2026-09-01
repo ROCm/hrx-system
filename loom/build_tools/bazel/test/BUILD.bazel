@@ -15,7 +15,7 @@ load(
     "loom_kernel_library",
     "loom_library",
     "loom_module",
-    "loom_test_library",
+    "loom_test",
 )
 load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test")
 load(
@@ -28,6 +28,7 @@ load(
     ":loom_library_rules_test.bzl",
     "REFERENCE_PROFILE",
     "SERIALIZED_REFERENCE_PROFILE",
+    "SUPPRESSED_REFERENCE_PROFILE",
     "loom_library_rules_test_suite",
 )
 load(
@@ -126,13 +127,26 @@ loom_library(
     deps = [":library_aggregate"],
 )
 
-loom_test_library(
-    name = "profiled_library",
-    srcs = ["profile_cases.loom"],
-    execution_profiles = [
-        REFERENCE_PROFILE,
-        SERIALIZED_REFERENCE_PROFILE,
-    ],
+loom_test(
+    name = "profiled_test",
+    src = "profile_cases.loom",
+    execution_profile = REFERENCE_PROFILE,
+    tags = ["manual"],
+    deps = [":library_dependency"],
+)
+
+loom_test(
+    name = "serialized_profile_test",
+    src = "profile_cases.loom",
+    execution_profile = SERIALIZED_REFERENCE_PROFILE,
+    tags = ["manual"],
+    deps = [":library_dependency"],
+)
+
+loom_test(
+    name = "suppressed_profile_test",
+    src = "profile_cases.loom",
+    execution_profile = SUPPRESSED_REFERENCE_PROFILE,
     tags = ["manual"],
     deps = [":library_dependency"],
 )
@@ -256,8 +270,7 @@ test_suite(
         ":loom_library_rules_tests",
         ":loom_module_direct_test",
         ":loom_target_profile_rules_tests",
-        ":profiled_library_execute_reference_test",
-        ":profiled_library_plan_test",
+        ":profiled_test",
         ":public_kernel_library_test",
         ":relocatable_library_direct_test",
         "//loom/build_tools/bazel/test/testdata/command_binary:test",
