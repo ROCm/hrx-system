@@ -28,6 +28,8 @@ loom_cc_library(
     loom::ops::kernel
     loom::ops::op_defs
     loom::rewrite::rewriter
+    loom::target::arch::amdgpu::amdhsa_target_id
+    loom::target::arch::amdgpu::artifact_key
     loom::target::arch::amdgpu::ops
     loom::target::arch::amdgpu::profile
     loom::target::arch::amdgpu::provider

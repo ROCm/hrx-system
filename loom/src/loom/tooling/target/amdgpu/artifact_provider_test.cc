@@ -19,10 +19,10 @@
 #include "loom/ir/module.h"
 #include "loom/ops/op_registry.h"
 #include "loom/sanitizer/options.h"
+#include "loom/target/arch/amdgpu/artifact_key.h"
 #include "loom/target/arch/amdgpu/descriptors/low_registry.h"
 #include "loom/target/arch/amdgpu/ops/registry.h"
 #include "loom/target/arch/amdgpu/profile.h"
-#include "loom/target/arch/amdgpu/target_id/target_id.h"
 #include "loom/target/arch/amdgpu/target_info.h"
 #include "loom/target/emit/native/amdgpu/runtime_globals.h"
 #include "loom/target/entry_selection.h"
@@ -395,9 +395,9 @@ TEST_F(AmdgpuHalArtifactProviderTest,
     loom_amdgpu_target_identity_initialize(target_info, &identity);
     char target_key_storage[128] = {};
     iree_string_view_t target_key = iree_string_view_empty();
-    IREE_ASSERT_OK(loom_amdgpu_artifact_target_key_format(
-        &identity, sizeof(target_key_storage), target_key_storage,
-        &target_key));
+    IREE_ASSERT_OK(
+        loom_amdgpu_artifact_key_format(&identity, sizeof(target_key_storage),
+                                        target_key_storage, &target_key));
     loom_run_hal_device_target_t target = {};
     IREE_ASSERT_OK(loom_amdgpu_hal_artifact_provider.select_target_key(
         &loom_amdgpu_hal_artifact_provider, target_key, iree_allocator_system(),
@@ -592,7 +592,7 @@ TEST_F(AmdgpuHalArtifactProviderTest,
   loom_amdgpu_target_identity_initialize(target_info, &identity);
   char target_key_storage[128] = {};
   iree_string_view_t target_key = iree_string_view_empty();
-  IREE_ASSERT_OK(loom_amdgpu_artifact_target_key_format(
+  IREE_ASSERT_OK(loom_amdgpu_artifact_key_format(
       &identity, sizeof(target_key_storage), target_key_storage, &target_key));
   iree_hal_device_spec_t* device_spec = nullptr;
   IREE_ASSERT_OK(
@@ -630,7 +630,7 @@ TEST_F(AmdgpuHalArtifactProviderTest,
   loom_amdgpu_target_identity_initialize(device_target, &device_identity);
   char target_key_storage[128] = {};
   iree_string_view_t target_key = iree_string_view_empty();
-  IREE_ASSERT_OK(loom_amdgpu_artifact_target_key_format(
+  IREE_ASSERT_OK(loom_amdgpu_artifact_key_format(
       &device_identity, sizeof(target_key_storage), target_key_storage,
       &target_key));
   iree_hal_device_spec_t* device_spec = nullptr;

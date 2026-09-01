@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/target/arch/amdgpu/target_id/target_id.h"
+#include "loom/target/arch/amdgpu/artifact_key.h"
 
 #include <string>
 
@@ -43,53 +43,56 @@ static const loom_amdgpu_target_info_t* LookupTarget(const char* name) {
   return target;
 }
 
-static std::string FormatArtifactTargetKey(
+static std::string FormatArtifactKey(
     const loom_amdgpu_target_identity_t& identity) {
   char buffer[128] = {};
-  iree_string_view_t target_key = iree_string_view_empty();
-  IREE_CHECK_OK(loom_amdgpu_artifact_target_key_format(
-      &identity, sizeof(buffer), buffer, &target_key));
-  return std::string(target_key.data, target_key.size);
+  iree_string_view_t artifact_key = iree_string_view_empty();
+  IREE_CHECK_OK(loom_amdgpu_artifact_key_format(&identity, sizeof(buffer),
+                                                buffer, &artifact_key));
+  return std::string(artifact_key.data, artifact_key.size);
 }
 
-static std::string FormatArenaArtifactTargetKey(
+static std::string FormatArenaArtifactKey(
     const loom_amdgpu_target_identity_t& identity) {
   TestArena arena;
-  iree_string_view_t target_key = iree_string_view_empty();
-  IREE_CHECK_OK(loom_amdgpu_artifact_target_key_format_arena(
-      &identity, arena.arena(), &target_key));
-  return std::string(target_key.data, target_key.size);
+  iree_string_view_t artifact_key = iree_string_view_empty();
+  IREE_CHECK_OK(loom_amdgpu_artifact_key_format_arena(&identity, arena.arena(),
+                                                      &artifact_key));
+  return std::string(artifact_key.data, artifact_key.size);
 }
 
-static std::string FormatCodeObjectTargetId(
-    const loom_amdgpu_target_identity_t& identity) {
-  TestArena arena;
-  iree_string_view_t target_id = iree_string_view_empty();
-  IREE_CHECK_OK(loom_amdgpu_amdhsa_code_object_target_id_format(
-      &identity, arena.arena(), &target_id));
-  return std::string(target_id.data, target_id.size);
+TEST(AmdgpuArtifactKeyTest, ParsesCanonicalTargetClasses) {
+  loom_amdgpu_target_identity_t identity = {};
+  IREE_ASSERT_OK(loom_amdgpu_artifact_key_parse(
+      IREE_SV("gfx942:sramecc+:xnack-"), &identity));
+  ASSERT_NE(identity.target, nullptr);
+  EXPECT_EQ(identity.target, LookupTarget("gfx942"));
+  EXPECT_EQ(identity.amdhsa_features.sramecc, LOOM_AMDGPU_TARGET_FEATURE_ON);
+  EXPECT_EQ(identity.amdhsa_features.xnack, LOOM_AMDGPU_TARGET_FEATURE_OFF);
+
+  IREE_ASSERT_OK(
+      loom_amdgpu_artifact_key_parse(IREE_SV("gfx11-generic"), &identity));
+  EXPECT_EQ(identity.target, LookupTarget("gfx11-generic"));
+
+  IREE_ASSERT_OK(
+      loom_amdgpu_artifact_key_parse(IREE_SV("gfx1250-a0"), &identity));
+  EXPECT_EQ(identity.target, LookupTarget("gfx1250-a0"));
 }
 
-TEST(AmdgpuTargetIdTest, SeparatesArtifactAndCodeObjectIdentity) {
+TEST(AmdgpuArtifactKeyTest, FormatsCanonicalFeatureOrder) {
   loom_amdgpu_target_identity_t identity = {};
   loom_amdgpu_target_identity_initialize(LookupTarget("gfx942"), &identity);
   identity.amdhsa_features.sramecc = LOOM_AMDGPU_TARGET_FEATURE_ON;
   identity.amdhsa_features.xnack = LOOM_AMDGPU_TARGET_FEATURE_OFF;
-  EXPECT_EQ(FormatArtifactTargetKey(identity), "gfx942:sramecc+:xnack-");
-  EXPECT_EQ(FormatArenaArtifactTargetKey(identity), "gfx942:sramecc+:xnack-");
-  EXPECT_EQ(FormatCodeObjectTargetId(identity),
-            "amdgcn-amd-amdhsa--gfx942:sramecc+:xnack-");
-
-  loom_amdgpu_target_identity_initialize(LookupTarget("gfx1250"), &identity);
-  EXPECT_EQ(FormatArtifactTargetKey(identity), "gfx1250");
-  EXPECT_EQ(FormatCodeObjectTargetId(identity), "amdgcn-amd-amdhsa--gfx1250");
+  EXPECT_EQ(FormatArtifactKey(identity), "gfx942:sramecc+:xnack-");
+  EXPECT_EQ(FormatArenaArtifactKey(identity), "gfx942:sramecc+:xnack-");
 
   loom_amdgpu_target_identity_initialize(LookupTarget("gfx1250-a0"), &identity);
-  EXPECT_EQ(FormatArtifactTargetKey(identity), "gfx1250-a0");
-  EXPECT_EQ(FormatCodeObjectTargetId(identity), "amdgcn-amd-amdhsa--gfx1250");
+  EXPECT_EQ(FormatArtifactKey(identity), "gfx1250-a0");
+  EXPECT_EQ(FormatArenaArtifactKey(identity), "gfx1250-a0");
 }
 
-TEST(AmdgpuTargetIdTest, ProjectsEveryGeneratedIdentityCombination) {
+TEST(AmdgpuArtifactKeyTest, RoundTripsEveryCompilerIdentityCombination) {
   static constexpr loom_amdgpu_target_id_feature_support_bit_t kFeatures[] = {
       LOOM_AMDGPU_TARGET_ID_FEATURE_SUPPORT_SRAMECC,
       LOOM_AMDGPU_TARGET_ID_FEATURE_SUPPORT_XNACK,
@@ -119,50 +122,53 @@ TEST(AmdgpuTargetIdTest, ProjectsEveryGeneratedIdentityCombination) {
         supported_features[supported_feature_count++] = feature;
       }
     }
-    iree_host_size_t feature_combination_count = 1;
+    iree_host_size_t combination_count = 1;
     for (iree_host_size_t i = 0; i < supported_feature_count; ++i) {
-      feature_combination_count *= IREE_ARRAYSIZE(kStates);
+      combination_count *= IREE_ARRAYSIZE(kStates);
     }
 
-    for (iree_host_size_t combination = 0;
-         combination < feature_combination_count; ++combination) {
+    for (iree_host_size_t combination = 0; combination < combination_count;
+         ++combination) {
       loom_amdgpu_target_identity_t identity = {};
       loom_amdgpu_target_identity_initialize(target, &identity);
       iree_host_size_t state_digits = combination;
       for (iree_host_size_t feature_ordinal = 0;
            feature_ordinal < supported_feature_count; ++feature_ordinal) {
-        loom_amdgpu_target_feature_state_t* feature_state =
+        loom_amdgpu_target_feature_state_t* state =
             loom_amdgpu_amdhsa_feature_state_select(
                 &identity.amdhsa_features, supported_features[feature_ordinal]);
-        ASSERT_NE(feature_state, nullptr);
-        *feature_state = kStates[state_digits % IREE_ARRAYSIZE(kStates)];
+        ASSERT_NE(state, nullptr);
+        *state = kStates[state_digits % IREE_ARRAYSIZE(kStates)];
         state_digits /= IREE_ARRAYSIZE(kStates);
       }
 
-      const std::string code_object_target = FormatCodeObjectTargetId(identity);
-      loom_amdgpu_amdhsa_target_id_t parsed = {};
-      IREE_ASSERT_OK(loom_amdgpu_target_info_parse_amdhsa_target_id(
-          iree_make_string_view(code_object_target.data(),
-                                code_object_target.size()),
+      const std::string artifact_key = FormatArtifactKey(identity);
+      EXPECT_EQ(FormatArenaArtifactKey(identity), artifact_key);
+      loom_amdgpu_target_identity_t parsed = {};
+      IREE_ASSERT_OK(loom_amdgpu_artifact_key_parse(
+          iree_make_string_view(artifact_key.data(), artifact_key.size()),
           &parsed));
-      EXPECT_EQ(parsed.processor, processor) << code_object_target;
-      for (const auto feature : kFeatures) {
-        EXPECT_EQ(
-            loom_amdgpu_amdhsa_feature_state_query(&parsed.features, feature),
-            loom_amdgpu_amdhsa_feature_state_query(&identity.amdhsa_features,
-                                                   feature))
-            << code_object_target;
-      }
-
-      std::string expected_artifact_target(target->name.data,
-                                           target->name.size);
-      expected_artifact_target.append(code_object_target.substr(
-          loom_amdgpu_target_info_amdhsa_target_id_prefix.size +
-          processor->name.size));
-      EXPECT_EQ(FormatArtifactTargetKey(identity), expected_artifact_target);
-      EXPECT_EQ(FormatArenaArtifactTargetKey(identity),
-                expected_artifact_target);
+      EXPECT_TRUE(loom_amdgpu_target_identity_equal(&identity, &parsed))
+          << artifact_key;
     }
+  }
+}
+
+TEST(AmdgpuArtifactKeyTest, RejectsMalformedOrUnsupportedKeys) {
+  static const iree_string_view_t kInvalidKeys[] = {
+      IREE_SV(""),
+      IREE_SV("gfx9999"),
+      IREE_SV("gfx942:"),
+      IREE_SV("gfx942::xnack+"),
+      IREE_SV("gfx942:wavefrontsize32+"),
+      IREE_SV("gfx942:xnack+:xnack-"),
+      IREE_SV("gfx1250:xnack+"),
+  };
+  for (const iree_string_view_t key : kInvalidKeys) {
+    loom_amdgpu_target_identity_t identity = {};
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                          loom_amdgpu_artifact_key_parse(key, &identity));
+    EXPECT_EQ(identity.target, nullptr);
   }
 }
 

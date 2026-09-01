@@ -15,7 +15,8 @@ if(LOOM_TARGET_ARCH_AMDGPU)
 endif()
 set(_loom_link_platform_deps "")
 if(LOOM_TARGET_ARCH_AMDGPU)
-  list(APPEND _loom_link_platform_deps loom::target::arch::amdgpu::artifact_profile)
+  list(APPEND _loom_link_platform_deps loom::target::arch::amdgpu::artifact_key)
+  list(APPEND _loom_link_platform_deps loom::target::arch::amdgpu::profile)
 endif()
 loom_cc_binary(
   NAME

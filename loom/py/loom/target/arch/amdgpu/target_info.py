@@ -38,7 +38,6 @@ from loom.target.arch.amdgpu.lds_bank_service import (
     validate_amdgpu_lds_bank_service_model_selection,
 )
 
-AMDGPU_AMDHSA_TARGET_TRIPLE = "amdgcn-amd-amdhsa"
 AMDGPU_PROCESSOR_ORDINAL_NONE = (2**16) - 1
 AMDGPU_DESCRIPTOR_SET_ORDINAL_NONE = (2**16) - 1
 AMDGPU_LDS_BANK_SERVICE_MODEL_SET_ORDINAL_NONE = (2**16) - 1

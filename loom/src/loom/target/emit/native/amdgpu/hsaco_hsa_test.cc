@@ -33,13 +33,13 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
+#include "loom/target/arch/amdgpu/amdhsa_target_id.h"
 #include "loom/target/arch/amdgpu/hal/binding_materialization.h"
 #include "loom/target/arch/amdgpu/hal/kernel_abi.h"
 #include "loom/target/arch/amdgpu/planning/packet_plan.h"
 #include "loom/target/arch/amdgpu/planning/storage_lease.h"
 #include "loom/target/arch/amdgpu/profile.h"
 #include "loom/target/arch/amdgpu/provider.h"
-#include "loom/target/arch/amdgpu/target_id/target_id.h"
 #include "loom/target/arch/amdgpu/target_info.h"
 #include "loom/target/emit/native/amdgpu/kernel_hsaco.h"
 #include "loom/target/function_version.h"
@@ -639,7 +639,7 @@ bool TryDiscoverCurrentAmdgpuTarget(const HsaApi& api,
   }
 
   loom_amdgpu_amdhsa_target_id_t target_id = {};
-  iree_status_t target_status = loom_amdgpu_target_info_parse_amdhsa_target_id(
+  iree_status_t target_status = loom_amdgpu_amdhsa_target_id_parse(
       iree_make_string_view(isa_search.isa_name.data(),
                             isa_search.isa_name.size()),
       &target_id);
@@ -1013,8 +1013,8 @@ std::string CodeObjectTargetIdForIdentity(
     const loom_amdgpu_target_identity_t& identity) {
   TestArena arena;
   iree_string_view_t target_id = iree_string_view_empty();
-  IREE_CHECK_OK(loom_amdgpu_amdhsa_code_object_target_id_format(
-      &identity, arena.arena(), &target_id));
+  IREE_CHECK_OK(loom_amdgpu_amdhsa_target_id_format(&identity, arena.arena(),
+                                                    &target_id));
   return std::string(target_id.data, target_id.size);
 }
 

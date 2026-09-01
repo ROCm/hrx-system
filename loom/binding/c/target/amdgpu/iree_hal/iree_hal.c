@@ -7,7 +7,6 @@
 #include "loomc/target/amdgpu/iree_hal.h"
 
 #include "diagnostic.h"
-#include "iree/hal/executable/amdgpu/target_id.h"
 #include "loomc/iree.h"
 #include "result.h"
 
@@ -50,24 +49,6 @@ static loomc_status_t loomc_amdgpu_iree_hal_validate_options(
                              "AMDGPU IREE HAL options require a device");
   }
   return loomc_ok_status();
-}
-
-static loomc_amdgpu_target_feature_state_t
-loomc_amdgpu_iree_hal_map_feature_state(
-    iree_hal_amdgpu_target_feature_state_t state) {
-  switch (state) {
-    case IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_ANY:
-      return LOOMC_AMDGPU_TARGET_FEATURE_ANY;
-    case IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_UNSUPPORTED:
-      return LOOMC_AMDGPU_TARGET_FEATURE_UNSUPPORTED;
-    case IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_OFF:
-      return LOOMC_AMDGPU_TARGET_FEATURE_OFF;
-    case IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_ON:
-      return LOOMC_AMDGPU_TARGET_FEATURE_ON;
-    default:
-      IREE_ASSERT_UNREACHABLE("unknown AMDGPU target feature state");
-      return LOOMC_AMDGPU_TARGET_FEATURE_ANY;
-  }
 }
 
 static loomc_status_t loomc_amdgpu_iree_hal_fail_status(loomc_result_t* result,
@@ -130,29 +111,12 @@ static loomc_status_t loomc_amdgpu_iree_hal_query_identity(
         "physical-device affinity");
   }
 
-  iree_hal_amdgpu_target_identity_t hal_identity = {0};
-  loomc_status_t status =
-      loomc_status_from_iree(iree_hal_amdgpu_target_identity_parse_artifact_key(
-          target_result.target->target_key, &hal_identity));
+  loomc_status_t status = loomc_amdgpu_target_identity_parse_artifact_key(
+      loomc_string_view_from_iree(target_result.target->target_key),
+      out_identity);
   if (!loomc_status_is_ok(status)) {
     return loomc_amdgpu_iree_hal_fail_status(result, status);
   }
-  if (hal_identity.kind != IREE_HAL_AMDGPU_TARGET_KIND_EXACT) {
-    return loomc_amdgpu_iree_hal_fail_cstring(
-        result, LOOMC_STATUS_FAILED_PRECONDITION,
-        "IREE HAL exact AMDGPU target contains a generic target key");
-  }
-
-  *out_identity = (loomc_amdgpu_target_identity_t){
-      .target = loomc_string_view_from_iree(hal_identity.target),
-      .amdhsa_features =
-          {
-              .sramecc = loomc_amdgpu_iree_hal_map_feature_state(
-                  hal_identity.amdhsa_features.sramecc),
-              .xnack = loomc_amdgpu_iree_hal_map_feature_state(
-                  hal_identity.amdhsa_features.xnack),
-          },
-  };
   return loomc_ok_status();
 }
 

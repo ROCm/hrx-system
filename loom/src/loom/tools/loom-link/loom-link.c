@@ -45,7 +45,8 @@
 #endif  // LOOM_LINK_HAVE_AMDGPU
 
 #if LOOM_LINK_HAVE_AMDGPU
-#include "loom/target/arch/amdgpu/artifact_profile.h"
+#include "loom/target/arch/amdgpu/artifact_key.h"
+#include "loom/target/arch/amdgpu/profile.h"
 #endif  // LOOM_LINK_HAVE_AMDGPU
 
 IREE_FLAG(string, mode, "auto",
@@ -354,8 +355,10 @@ static iree_status_t loom_link_cli_select_target_profile(
 
 #if LOOM_LINK_HAVE_AMDGPU
   if (iree_string_view_equal(family, IREE_SV("amdgpu"))) {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_artifact_target_profile_parse(
-        selector, &out_storage->amdgpu, /*out_target_kind=*/NULL));
+    loom_amdgpu_target_identity_t identity = {0};
+    IREE_RETURN_IF_ERROR(loom_amdgpu_artifact_key_parse(selector, &identity));
+    IREE_RETURN_IF_ERROR(
+        loom_amdgpu_target_profile_initialize(&identity, &out_storage->amdgpu));
     out_storage->profile = &out_storage->amdgpu.base;
     return iree_ok_status();
   }

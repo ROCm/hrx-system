@@ -11,12 +11,11 @@
 #include <vector>
 
 #include "iree/base/internal/arena.h"
-#include "iree/hal/executable/amdgpu/code_object_target.h"
 #include "iree/io/vec_stream.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/target/arch/amdgpu/amdhsa_target_id.h"
 #include "loom/target/arch/amdgpu/profile.h"
-#include "loom/target/arch/amdgpu/target_id/target_id.h"
 #include "loom/target/arch/amdgpu/target_info.h"
 #include "loom/target/emit/native/amdgpu/descriptor.h"
 #include "loom/target/emit/native/elf.h"
@@ -259,8 +258,8 @@ std::string CodeObjectTargetIdForIdentity(
     const loom_amdgpu_target_identity_t& identity) {
   TestArena arena;
   iree_string_view_t target_id = iree_string_view_empty();
-  IREE_CHECK_OK(loom_amdgpu_amdhsa_code_object_target_id_format(
-      &identity, arena.arena(), &target_id));
+  IREE_CHECK_OK(loom_amdgpu_amdhsa_target_id_format(&identity, arena.arena(),
+                                                    &target_id));
   return StringViewToString(target_id);
 }
 
@@ -830,21 +829,6 @@ TEST(AmdgpuHsacoTest, WritesEveryTargetCodeObjectFlags) {
                   processor->properties.elf.feature_flags |
                   (processor->properties.elf.generic_version
                    << LOOM_AMDGPU_ELF_GENERIC_VERSION_OFFSET_V6))
-        << StringViewToString(target->name);
-
-    iree_hal_amdgpu_target_identity_t decoded_target_id = {};
-    IREE_ASSERT_OK(iree_hal_amdgpu_code_object_target_id_from_elf(
-        iree_make_const_byte_span(bytes.data(), bytes.size()),
-        &decoded_target_id));
-    EXPECT_TRUE(
-        iree_string_view_equal(decoded_target_id.processor, processor->name))
-        << StringViewToString(target->name);
-    EXPECT_EQ(decoded_target_id.kind, processor->properties.elf.generic_version
-                                          ? IREE_HAL_AMDGPU_TARGET_KIND_GENERIC
-                                          : IREE_HAL_AMDGPU_TARGET_KIND_EXACT)
-        << StringViewToString(target->name);
-    EXPECT_EQ(decoded_target_id.generic_version,
-              processor->properties.elf.generic_version)
         << StringViewToString(target->name);
 
     const std::vector<Section> sections = ReadSections(bytes);

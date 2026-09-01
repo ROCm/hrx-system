@@ -41,6 +41,8 @@ loom_cc_library(
         "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/target:provider",
         "//loom/src/loom/target:types",
+        "//loom/src/loom/target/arch/amdgpu:amdhsa_target_id",
+        "//loom/src/loom/target/arch/amdgpu:artifact_key",
         "//loom/src/loom/target/arch/amdgpu:profile",
         "//loom/src/loom/target/arch/amdgpu:provider",
         "//loom/src/loom/target/arch/amdgpu:target_info",

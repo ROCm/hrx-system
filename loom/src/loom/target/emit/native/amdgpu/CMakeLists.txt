@@ -147,6 +147,7 @@ loom_cc_library(
     "metadata.c"
   DEPS
     iree::base
+    loom::target::arch::amdgpu::amdhsa_target_id
     loom::target::arch::amdgpu::target_info
     loom::target::types
   PUBLIC
@@ -350,10 +351,11 @@ loom_cc_library(
     loom::codegen::low::schedule
     loom::ir
     loom::ops::low
+    loom::target::arch::amdgpu::amdhsa_target_id
+    loom::target::arch::amdgpu::artifact_key
     loom::target::arch::amdgpu::facts
     loom::target::arch::amdgpu::hal::kernel_abi
     loom::target::arch::amdgpu::refs::target_refs
-    loom::target::arch::amdgpu::target_id
     loom::target::arch::amdgpu::target_info
     loom::target::launch
   PUBLIC
@@ -536,6 +538,7 @@ loom_cc_library(
     iree::base
     iree::base::internal::arena
     iree::io::stream
+    loom::target::arch::amdgpu::amdhsa_target_id
     loom::target::arch::amdgpu::target_info
     loom::target::emit::native::elf
   PUBLIC
@@ -602,6 +605,8 @@ loom_cc_library(
     loom::ir
     loom::ops::global
     loom::ops::low
+    loom::target::arch::amdgpu::amdhsa_target_id
+    loom::target::arch::amdgpu::artifact_key
     loom::target::arch::amdgpu::facts
     loom::target::arch::amdgpu::hal::kernel_abi
     loom::target::arch::amdgpu::matrix::contract
@@ -611,7 +616,6 @@ loom_cc_library(
     loom::target::arch::amdgpu::planning::vopd_plan
     loom::target::arch::amdgpu::provider
     loom::target::arch::amdgpu::refs::target_refs
-    loom::target::arch::amdgpu::target_id
     loom::target::arch::amdgpu::target_info
     loom::target::entry_selection
     loom::target::provider
@@ -647,13 +651,14 @@ loom_cc_test(
     loom::ops::sanitizer
     loom::ops::target
     loom::sanitizer::site_table
+    loom::target::arch::amdgpu::amdhsa_target_id
+    loom::target::arch::amdgpu::artifact_key
     loom::target::arch::amdgpu::descriptors::low_registry
     loom::target::arch::amdgpu::matrix::contract
     loom::target::arch::amdgpu::planning::wait_counters
     loom::target::arch::amdgpu::profile
     loom::target::arch::amdgpu::provider
     loom::target::arch::amdgpu::records::target_records
-    loom::target::arch::amdgpu::target_id
     loom::target::arch::amdgpu::target_info
     loom::target::emit::native::elf
     loom::target::facts_builder
@@ -719,12 +724,11 @@ loom_cc_test(
     ::metadata
     iree::base
     iree::base::internal::arena
-    iree::hal::executable::amdgpu::code_object_target
     iree::io::stream
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::target::arch::amdgpu::amdhsa_target_id
     loom::target::arch::amdgpu::profile
-    loom::target::arch::amdgpu::target_id
     loom::target::arch::amdgpu::target_info
     loom::target::emit::native::elf
   LABELS
@@ -779,13 +783,13 @@ loom_cc_test(
     loom::format::text::parser
     loom::ir
     loom::ops::low
+    loom::target::arch::amdgpu::amdhsa_target_id
     loom::target::arch::amdgpu::hal::binding_materialization
     loom::target::arch::amdgpu::hal::kernel_abi
     loom::target::arch::amdgpu::planning::packet_plan
     loom::target::arch::amdgpu::planning::storage_lease
     loom::target::arch::amdgpu::profile
     loom::target::arch::amdgpu::provider
-    loom::target::arch::amdgpu::target_id
     loom::target::arch::amdgpu::target_info
     loom::target::function_version
     loom::target::low_descriptor_registry

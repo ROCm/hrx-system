@@ -19,7 +19,6 @@ loom_cc_library(
     "iree_hal.c"
   DEPS
     iree::hal
-    iree::hal::executable::amdgpu::target_id
     loom::binding::c::loomc
     loom::binding::c::target::amdgpu
     loom::binding::c::target::iree_hal

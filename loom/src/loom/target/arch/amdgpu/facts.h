@@ -16,6 +16,8 @@
 extern "C" {
 #endif
 
+typedef struct loom_low_resolved_target_t loom_low_resolved_target_t;
+
 // Complete structured identity retained by AMDGPU facts and profiles.
 typedef struct loom_amdgpu_target_identity_t {
   // Exact, generic, or overlay target selected for this identity.
@@ -75,6 +77,17 @@ typedef struct loom_amdgpu_target_facts_t {
 
 // Static fact type used by AMDGPU target projection and structured profiles.
 extern const loom_target_fact_type_t loom_amdgpu_target_fact_type;
+
+// Returns the AMDGPU processor selected by a resolved low target, or NULL.
+const loom_amdgpu_processor_info_t*
+loom_amdgpu_target_processor_from_resolved_target(
+    const loom_low_resolved_target_t* target);
+
+// Returns the compiler-semantic processor properties selected by a resolved
+// low target, or NULL.
+const loom_amdgpu_processor_properties_t*
+loom_amdgpu_target_processor_properties_from_resolved_target(
+    const loom_low_resolved_target_t* target);
 
 // Initializes the normalized default identity for |target|.
 //

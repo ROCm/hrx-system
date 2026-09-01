@@ -23,8 +23,6 @@ _AMDGPU_NATIVE_VISIBILITY = ["//loom/src/loom/target/emit/native/amdgpu:__pkg__"
 
 _AMDGPU_ROOT_VISIBILITY = ["//loom/src/loom/target/arch/amdgpu:__pkg__"]
 
-_AMDGPU_TARGET_ID_VISIBILITY = ["//loom/src/loom/target/arch/amdgpu/target_id:__pkg__"]
-
 _AMDGPU_TOOLING_VISIBILITY = ["//loom/src/loom/tooling/target/amdgpu:__pkg__"]
 
 _AMDGPU_BINDING_VISIBILITY = ["//loom/binding/c/target/amdgpu:__pkg__"]
@@ -56,7 +54,6 @@ loom_generated_cc_library(
         _AMDGPU_LOWER_VISIBILITY +
         _AMDGPU_NATIVE_VISIBILITY +
         _AMDGPU_ROOT_VISIBILITY +
-        _AMDGPU_TARGET_ID_VISIBILITY +
         _AMDGPU_TOOLING_VISIBILITY +
         _AMDGPU_BINDING_VISIBILITY
     ),

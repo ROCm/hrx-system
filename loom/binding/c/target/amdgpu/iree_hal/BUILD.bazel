@@ -31,7 +31,6 @@ loom_cc_library(
         "//loom/binding/c/target/amdgpu",
         "//loom/binding/c/target/iree_hal",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/executable/amdgpu:target_id",
     ],
     alwayslink = True,
 )

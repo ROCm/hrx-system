@@ -6,8 +6,8 @@
 
 #include "loom/target/arch/amdgpu/planning/packet_plan.h"
 
+#include "loom/target/arch/amdgpu/facts.h"
 #include "loom/target/arch/amdgpu/planning/matrix_coexecution.h"
-#include "loom/target/arch/amdgpu/target_id/target_id.h"
 
 iree_status_t loom_amdgpu_packet_plan_build(
     const loom_low_schedule_table_t* schedule,
