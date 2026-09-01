@@ -160,6 +160,8 @@ typedef enum loom_low_schedule_strategy_e {
   LOOM_LOW_SCHEDULE_STRATEGY_LATENCY_HIDING = 2,
   // Chooses ready nodes using descriptor resource/hazard stall estimates.
   LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL = 3,
+  // Preserves verified source order without dependency or scheduler analysis.
+  LOOM_LOW_SCHEDULE_STRATEGY_PRESERVE_SOURCE_ORDER = 4,
 } loom_low_schedule_strategy_t;
 
 #define LOOM_LOW_SCHEDULE_MEMORY_ACCESS_RECORD_NONE UINT32_MAX
@@ -612,7 +614,8 @@ typedef struct loom_low_schedule_options_t {
   loom_low_schedule_diagnostic_flags_t diagnostic_flags;
   // Schedule construction behavior flags.
   loom_low_schedule_flags_t flags;
-  // Candidate selection strategy used within each dependency-ready set.
+  // Schedule construction strategy. PRESERVE_SOURCE_ORDER skips dependency
+  // construction and accepts no scheduler analysis or pairing requests.
   loom_low_schedule_strategy_t strategy;
 } loom_low_schedule_options_t;
 
@@ -640,6 +643,7 @@ typedef struct loom_low_schedule_table_t {
   // Number of block records.
   iree_host_size_t block_count;
   // Final top-level operation order retained for downstream liveness analysis.
+  // Empty means the function's IR source order.
   loom_liveness_order_t operation_order;
   // Read-only control-flow graph shared by target planning overlays.
   loom_cfg_graph_t cfg_graph;
@@ -650,7 +654,7 @@ typedef struct loom_low_schedule_table_t {
   // Number of schedule nodes.
   iree_host_size_t node_count;
   // Stable ordering dependency graph consumed by scheduling and target
-  // planning.
+  // planning. Empty when source order is preserved without scheduling.
   loom_low_schedule_dependency_graph_t dependencies;
   // Number of distinct producer-to-consumer dependency groups used by list
   // scheduling.

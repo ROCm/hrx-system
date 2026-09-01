@@ -287,10 +287,10 @@ static iree_status_t loom_wasm_module_build_function_frame(
     const loom_low_emission_frame_options_t* options,
     iree_arena_allocator_t* arena, loom_low_emission_frame_t* out_frame) {
   if (options->schedule_strategy !=
-      LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY) {
+      LOOM_LOW_SCHEDULE_STRATEGY_PRESERVE_SOURCE_ORDER) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
-        "Wasm module emission requires source-order low scheduling");
+        "Wasm module emission requires source-order frame construction");
   }
   IREE_RETURN_IF_ERROR(loom_low_emission_frame_build(
       module, function_op, options, arena, out_frame));
