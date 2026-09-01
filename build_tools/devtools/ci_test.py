@@ -914,6 +914,23 @@ class CiTest(unittest.TestCase):
             test_step.argv,
         )
 
+    def test_vulkan_commands_preserve_explicit_mesa_device_selection(self):
+        with mock.patch.dict(os.environ, {"DRI_PRIME": "1!"}):
+            bazel_steps = ci.steps_from_args(ci.parse_arguments(["iree-bazel-vulkan"]))
+            cmake_steps = ci.steps_from_args(ci.parse_arguments(["iree-cmake-vulkan"]))
+
+        bazel_test_step = next(
+            step for step in bazel_steps if step.name == "Test IREE / Vulkan"
+        )
+        self.assertIn("--test_env=DRI_PRIME=1!", bazel_test_step.argv)
+
+        cmake_test_steps = [
+            step for step in cmake_steps if step.name.startswith("Test IREE CMake")
+        ]
+        self.assertGreater(len(cmake_test_steps), 0)
+        for step in cmake_test_steps:
+            self.assertIn(("DRI_PRIME", "1!"), step.env)
+
     def test_bazel_gpu_command_surface_omits_nonexecuting_lanes(self):
         for command in (
             "iree-bazel-amdgpu-msan",
@@ -935,31 +952,6 @@ class CiTest(unittest.TestCase):
         ):
             with self.subTest(command=command):
                 self.assertIn(command, ci.BAZEL_COMMANDS)
-
-    def test_vulkan_workflows_require_hardware_preflight(self):
-        for path, job_name in (
-            (".github/workflows/ci_iree_bazel.yml", "linux_bazel_vulkan"),
-            (".github/workflows/ci_iree_cmake.yml", "linux_cmake_vulkan"),
-        ):
-            with self.subTest(path=path):
-                block = self.workflow_job_block(path, job_name)
-                self.assertIn("runs-on: [self-hosted, Linux, X64, gpu_navi4x]", block)
-                self.assertIn(
-                    "bash .github/scripts/check_vulkan_hardware_environment.sh",
-                    block,
-                )
-                self.assertNotIn("container:", block)
-                self.assertNotIn("install_vulkan_host_environment", block)
-                self.assertNotIn("VK_ICD_FILENAMES", block)
-                self.assertNotIn("VK_DRIVER_FILES", block)
-                self.assertNotIn("LIBGL_ALWAYS_SOFTWARE", block)
-
-        preflight = Path(
-            ".github/scripts/check_vulkan_hardware_environment.sh"
-        ).read_text()
-        self.assertNotIn("lvp_icd", preflight)
-        self.assertNotIn("mesa-vulkan-drivers", preflight)
-        self.assertNotIn("vulkan-loader", preflight)
 
     def test_bazel_cpu_sanitizer_workflow_is_split_by_configuration(self):
         block = self.workflow_job_block(

@@ -249,6 +249,7 @@ function(iree_cc_library)
       PUBLIC
         ${_RULE_DEPS}
         ${IREE_THREADS_DEPS}
+        ${IREE_DEFAULT_LINK_LIBRARIES}
     )
 
     iree_add_data_dependencies(NAME ${_NAME} DATA ${_RULE_DATA})
@@ -311,6 +312,7 @@ function(iree_cc_library)
         $<TARGET_OBJECTS:${_OBJECTS_NAME}>
         ${_RULE_DEPS}
         ${IREE_THREADS_DEPS}
+        ${IREE_DEFAULT_LINK_LIBRARIES}
     )
     target_include_directories(${_NAME}
       INTERFACE

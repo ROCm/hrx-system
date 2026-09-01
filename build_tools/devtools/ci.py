@@ -186,6 +186,13 @@ def amdgpu_libhsa_test_env() -> tuple[tuple[str, str], ...]:
     return (("IREE_HAL_AMDGPU_LIBHSA_PATH", libhsa_path),)
 
 
+def vulkan_device_test_env() -> tuple[tuple[str, str], ...]:
+    dri_prime = os.environ.get("DRI_PRIME")
+    if not dri_prime:
+        return ()
+    return (("DRI_PRIME", dri_prime),)
+
+
 def cmake_amdgpu_device_binary_options() -> tuple[str, ...]:
     rocm_root = os.environ.get("HRX_ROCM_ROOT")
     rocm_path_option = (
@@ -590,6 +597,7 @@ def vulkan_steps(targets: tuple[str, ...]) -> list[CiStep]:
             "Test IREE / Vulkan",
             scoped_targets + ci_config.VULKAN_XFAIL_TARGETS,
             test_tag_filters=ci_config.VULKAN_BAZEL_TEST_TAG_FILTERS,
+            test_env=vulkan_device_test_env(),
         ),
     ]
 
@@ -764,7 +772,7 @@ def cmake_vulkan_steps(command_name: str, sanitizer: str | None) -> list[CiStep]
                 command_name,
                 f"Test IREE CMake Vulkan package tests{sanitizer_name}",
                 regex=ci_config.VULKAN_CTEST_REGEX,
-                env=sanitizer_env(sanitizer),
+                env=sanitizer_env(sanitizer) + vulkan_device_test_env(),
             )
         )
         steps.append(
@@ -774,7 +782,7 @@ def cmake_vulkan_steps(command_name: str, sanitizer: str | None) -> list[CiStep]
                 label_regex=ci_config.VULKAN_CTEST_RESOURCE_LABEL_REGEX,
                 label_exclude_regex=ci_config.CTEST_MANUAL_LABEL_EXCLUDE_REGEX,
                 exclude_regex=ci_config.VULKAN_CTEST_REGEX,
-                env=sanitizer_env(sanitizer),
+                env=sanitizer_env(sanitizer) + vulkan_device_test_env(),
             )
         )
     return steps
