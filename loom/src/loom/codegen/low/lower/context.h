@@ -195,6 +195,23 @@ iree_status_t loom_low_lower_copy_value_name(loom_low_lower_context_t* context,
                                              loom_value_id_t source_value_id,
                                              loom_value_id_t low_value_id);
 
+// Returns the body of the emitted Low function.
+loom_region_t* loom_low_lower_context_low_body(
+    const loom_low_lower_context_t* context);
+
+// Begins a bounded Low IR construction scope.
+void loom_low_lower_context_emission_scope_begin(
+    loom_low_lower_context_t* context);
+
+// Ends a Low IR construction scope and releases its temporary storage.
+void loom_low_lower_context_emission_scope_end(
+    loom_low_lower_context_t* context);
+
+// Adapts function-local target state allocation to contract-query callbacks.
+iree_status_t loom_low_lower_contract_query_get_or_allocate_target_state(
+    void* user_data, const void* key, iree_host_size_t data_length,
+    void** out_data);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

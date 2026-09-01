@@ -15,6 +15,7 @@ loom_cc_library(
   HDRS
     "context.h"
     "contract_query.h"
+    "function.h"
     "lower.h"
     "lower_rule_descriptor.h"
     "lower_rule_source_memory.h"
@@ -24,6 +25,7 @@ loom_cc_library(
     "storage.h"
   SRCS
     "contract_query.c"
+    "function.c"
     "lower.c"
     "lower_context.c"
     "lower_control.c"

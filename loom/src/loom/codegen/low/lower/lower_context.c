@@ -582,6 +582,13 @@ iree_status_t loom_low_lower_get_or_allocate_target_state(
   return iree_ok_status();
 }
 
+iree_status_t loom_low_lower_contract_query_get_or_allocate_target_state(
+    void* user_data, const void* key, iree_host_size_t data_length,
+    void** out_data) {
+  return loom_low_lower_get_or_allocate_target_state(
+      (loom_low_lower_context_t*)user_data, key, data_length, out_data);
+}
+
 iree_status_t loom_low_lower_get_or_allocate_module_target_state(
     loom_low_lower_context_t* context, const void* key,
     iree_host_size_t data_length, void** out_data) {
@@ -602,7 +609,7 @@ static iree_status_t loom_low_lower_replace_value_binding(
   return loom_low_lower_copy_value_name(context, source_value_id, low_value_id);
 }
 
-static loom_region_t* loom_low_lower_context_low_body(
+loom_region_t* loom_low_lower_context_low_body(
     const loom_low_lower_context_t* context) {
   if (loom_low_func_def_isa(context->low_func_op)) {
     return loom_low_func_def_body(context->low_func_op);
@@ -611,6 +618,17 @@ static loom_region_t* loom_low_lower_context_low_body(
     return loom_low_kernel_def_body(context->low_func_op);
   }
   return NULL;
+}
+
+void loom_low_lower_context_emission_scope_begin(
+    loom_low_lower_context_t* context) {
+  context->emission_arena_active = true;
+}
+
+void loom_low_lower_context_emission_scope_end(
+    loom_low_lower_context_t* context) {
+  context->emission_arena_active = false;
+  iree_arena_reset(&context->emission_arena);
 }
 
 iree_status_t loom_low_lower_interpose_entry_block(

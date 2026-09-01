@@ -95,6 +95,10 @@ bool loom_low_lower_op_uses_policy(const loom_module_t* module,
 bool loom_low_lower_op_is_discardable_hint(const loom_module_t* module,
                                            const loom_op_t* op);
 
+// Selects and retains one lowering plan for each policy-owned source op.
+iree_status_t loom_low_lower_select_plans(loom_low_lower_context_t* context,
+                                          loom_region_t* source_body);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif
