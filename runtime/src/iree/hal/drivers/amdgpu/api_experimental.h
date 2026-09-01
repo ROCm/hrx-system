@@ -29,7 +29,8 @@ typedef struct iree_hal_amdgpu_experimental_execution_queue_topology_t {
   iree_host_size_t private_physical_queue_count;
   // Number of native compute units addressable by an HSA queue mask.
   uint32_t native_compute_unit_count;
-  // Required alignment of enabled native CU runs in mask bits.
+  // Native mask group size and alignment in bits. Groups begin at bit zero and
+  // must each be wholly enabled or wholly disabled.
   uint32_t native_compute_unit_mask_alignment;
   // Number of hardware partitions interleaved across native mask bits. Native
   // bit N belongs to partition N modulo this count, and a confining mask must
@@ -54,18 +55,20 @@ iree_hal_amdgpu_experimental_execution_queue_query(
 // a queue, share equal masks, or recycle the queue for another mask.
 //
 // The mask must describe the selected physical device's complete native
-// execution-unit domain. The queue is created normally and the mask is applied
-// before the queue is published to any submitter. ROCr may reject masks it
-// cannot represent exactly. In particular, each interleaved hardware partition
-// reported by the topology must retain at least one enabled compute unit; some
-// KFD targets interpret an all-zero per-partition mask as unconfined. A
-// process-wide HSA_CU_MASK is incompatible with this exact-mask interface. Any
-// failure destroys the unpublished queue. On success |out_queue_affinity| is
-// the stable private affinity for that physical queue. The queue remains bound
-// to the mask until device teardown; once configuration succeeds, every later
-// attempt for that queue fails, including one with an equal mask. Failed
-// creation leaves the slot unconfigured and may be retried. The caller owns all
-// mapping, sharing, capacity, and reuse policy above this boundary.
+// execution-unit domain. Each alignment-sized group reported by the topology,
+// beginning at native bit zero, must be wholly enabled or wholly disabled. The
+// queue is created normally and the mask is applied before the queue is
+// published to any submitter. ROCr may reject masks it cannot represent
+// exactly. In particular, each interleaved hardware partition reported by the
+// topology must retain at least one enabled compute unit; some KFD targets
+// interpret an all-zero per-partition mask as unconfined. A process-wide
+// HSA_CU_MASK is incompatible with this exact-mask interface. Any failure
+// destroys the unpublished queue. On success |out_queue_affinity| is the stable
+// private affinity for that physical queue. The queue remains bound to the mask
+// until device teardown; once configuration succeeds, every later attempt for
+// that queue fails, including one with an equal mask. Failed creation leaves
+// the slot unconfigured and may be retried. The caller owns all mapping,
+// sharing, capacity, and reuse policy above this boundary.
 IREE_API_EXPORT iree_status_t
 iree_hal_amdgpu_experimental_execution_queue_configure(
     iree_hal_device_t* device, iree_host_size_t physical_device_ordinal,

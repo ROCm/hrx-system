@@ -3535,6 +3535,8 @@ static iree_status_t iree_hal_amdgpu_logical_device_queue_flush(
 }
 
 typedef struct iree_hal_amdgpu_execution_queue_native_topology_t {
+  // Number of native mask bits in each representable group.
+  uint32_t mask_alignment;
   // Number of hardware partitions interleaved across native mask bits.
   uint32_t mask_partition_count;
 } iree_hal_amdgpu_execution_queue_native_topology_t;
@@ -3555,6 +3557,43 @@ iree_hal_amdgpu_logical_device_query_execution_queue_native_topology(
                             "physical device %" PRIhsz
                             " reports no hardware CU-mask partitions",
                             physical_device->device_ordinal);
+  }
+
+  const iree_hal_amdgpu_gfxip_version_t gfxip_version =
+      physical_device->agent_target->primary_isa.identity.version;
+  switch (gfxip_version.major) {
+    case 9:
+      out_topology->mask_alignment = 1;
+      break;
+    case 10:
+    case 11:
+      out_topology->mask_alignment = 2;
+      break;
+    case 12:
+      if (gfxip_version.minor != 0 && gfxip_version.minor != 5) {
+        return iree_make_status(
+            IREE_STATUS_UNIMPLEMENTED,
+            "AMDGPU execution queue topology is not defined for gfx%u.%u.%u",
+            gfxip_version.major, gfxip_version.minor, gfxip_version.stepping);
+      }
+      out_topology->mask_alignment = 2;
+      break;
+    default:
+      return iree_make_status(
+          IREE_STATUS_UNIMPLEMENTED,
+          "AMDGPU execution queue topology is not defined for gfx%u.%u.%u",
+          gfxip_version.major, gfxip_version.minor, gfxip_version.stepping);
+  }
+  if (IREE_UNLIKELY(physical_device->compute_unit_count %
+                        out_topology->mask_alignment !=
+                    0)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "physical device %" PRIhsz
+        " reports incompatible native CU topology: %u CUs, %u-bit native "
+        "mask alignment, and %u hardware partitions",
+        physical_device->device_ordinal, physical_device->compute_unit_count,
+        out_topology->mask_alignment, out_topology->mask_partition_count);
   }
   return iree_ok_status();
 }
@@ -3594,45 +3633,6 @@ iree_hal_amdgpu_experimental_execution_queue_query(
       iree_hal_amdgpu_logical_device_query_execution_queue_native_topology(
           logical_device, physical_device, &native_topology));
 
-  const iree_hal_amdgpu_gfxip_version_t gfxip_version =
-      physical_device->agent_target->primary_isa.identity.version;
-  uint32_t native_compute_unit_mask_alignment = 0;
-  switch (gfxip_version.major) {
-    case 9:
-      native_compute_unit_mask_alignment = 1;
-      break;
-    case 10:
-    case 11:
-      native_compute_unit_mask_alignment = 2;
-      break;
-    case 12:
-      if (gfxip_version.minor != 0 && gfxip_version.minor != 5) {
-        return iree_make_status(
-            IREE_STATUS_UNIMPLEMENTED,
-            "AMDGPU execution queue topology is not defined for gfx%u.%u.%u",
-            gfxip_version.major, gfxip_version.minor, gfxip_version.stepping);
-      }
-      native_compute_unit_mask_alignment = 2;
-      break;
-    default:
-      return iree_make_status(
-          IREE_STATUS_UNIMPLEMENTED,
-          "AMDGPU execution queue topology is not defined for gfx%u.%u.%u",
-          gfxip_version.major, gfxip_version.minor, gfxip_version.stepping);
-  }
-  if (IREE_UNLIKELY(physical_device->compute_unit_count %
-                        native_compute_unit_mask_alignment !=
-                    0)) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "physical device %" PRIhsz
-        " reports incompatible native CU topology: %u CUs, %u-bit native "
-        "mask alignment, and %u hardware partitions",
-        physical_device_ordinal, physical_device->compute_unit_count,
-        native_compute_unit_mask_alignment,
-        native_topology.mask_partition_count);
-  }
-
   *out_topology = (iree_hal_amdgpu_experimental_execution_queue_topology_t){
       .first_private_physical_queue_ordinal =
           physical_device->host_queue_ordinary_count,
@@ -3640,7 +3640,7 @@ iree_hal_amdgpu_experimental_execution_queue_query(
           physical_device->host_queue_capacity -
           physical_device->host_queue_ordinary_count,
       .native_compute_unit_count = physical_device->compute_unit_count,
-      .native_compute_unit_mask_alignment = native_compute_unit_mask_alignment,
+      .native_compute_unit_mask_alignment = native_topology.mask_alignment,
       .native_compute_unit_mask_partition_count =
           native_topology.mask_partition_count,
   };
@@ -3760,6 +3760,31 @@ iree_hal_amdgpu_experimental_execution_queue_configure(
       status =
           iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                            "CU mask must enable at least one compute unit");
+    }
+  }
+
+  if (iree_status_is_ok(status)) {
+    const uint32_t mask_alignment = native_topology.mask_alignment;
+    for (uint32_t group_start = 0;
+         group_start < physical_device->compute_unit_count;
+         group_start += mask_alignment) {
+      const bool group_enabled = (native_mask[group_start / 32u] &
+                                  (UINT32_C(1) << (group_start % 32u))) != 0;
+      for (uint32_t bit = group_start + 1; bit < group_start + mask_alignment;
+           ++bit) {
+        const bool bit_enabled =
+            (native_mask[bit / 32u] & (UINT32_C(1) << (bit % 32u))) != 0;
+        if (IREE_UNLIKELY(bit_enabled != group_enabled)) {
+          status = iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "CU mask for physical device %" PRIhsz
+              " partially enables native group starting at bit %u; "
+              "%u-bit groups must be entirely enabled or disabled",
+              physical_device_ordinal, group_start, mask_alignment);
+          break;
+        }
+      }
+      if (!iree_status_is_ok(status)) break;
     }
   }
 

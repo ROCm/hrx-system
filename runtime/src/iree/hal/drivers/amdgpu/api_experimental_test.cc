@@ -97,6 +97,113 @@ static hsa_status_t HSA_API RejectQueueCuMask(const hsa_queue_t* queue,
   (void)mask;
   return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 }
+
+static decltype(iree_hal_amdgpu_libhsa_t::hsa_agent_get_info)
+    native_aql_agent_get_info_delegate = nullptr;
+
+static hsa_status_t HSA_API NativeAqlAgentGetInfo(hsa_agent_t agent,
+                                                  hsa_agent_info_t attribute,
+                                                  void* value) {
+  if (attribute == (hsa_agent_info_t)HSA_AMD_AGENT_INFO_PM4_EMULATION) {
+    *static_cast<bool*>(value) = false;
+    return HSA_STATUS_SUCCESS;
+  }
+  return native_aql_agent_get_info_delegate(agent, attribute, value);
+}
+
+class ScopedNativeAqlLibhsa {
+ public:
+  ScopedNativeAqlLibhsa() = default;
+
+  ~ScopedNativeAqlLibhsa() {
+    if (!initialized_) return;
+    native_aql_agent_get_info_delegate = previous_agent_get_info_delegate_;
+    iree_hal_amdgpu_libhsa_deinitialize(&libhsa_);
+  }
+
+  iree_status_t Initialize(const iree_hal_amdgpu_libhsa_t* source_libhsa) {
+    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_libhsa_copy(source_libhsa, &libhsa_));
+    previous_agent_get_info_delegate_ = native_aql_agent_get_info_delegate;
+    native_aql_agent_get_info_delegate = libhsa_.hsa_agent_get_info;
+    libhsa_.hsa_agent_get_info = NativeAqlAgentGetInfo;
+    initialized_ = true;
+    return iree_ok_status();
+  }
+
+  const iree_hal_amdgpu_libhsa_t* libhsa() const { return &libhsa_; }
+
+  ScopedNativeAqlLibhsa(const ScopedNativeAqlLibhsa&) = delete;
+  ScopedNativeAqlLibhsa& operator=(const ScopedNativeAqlLibhsa&) = delete;
+
+ private:
+  bool initialized_ = false;
+  iree_hal_amdgpu_libhsa_t libhsa_ = {};
+  decltype(iree_hal_amdgpu_libhsa_t::hsa_agent_get_info)
+      previous_agent_get_info_delegate_ = nullptr;
+};
+
+class ScopedAgentTargetVersionOverride {
+ public:
+  ScopedAgentTargetVersionOverride(
+      iree_hal_amdgpu_physical_device_t* physical_device,
+      iree_hal_amdgpu_gfxip_version_t version)
+      : physical_device_(physical_device),
+        original_agent_target_(physical_device->agent_target),
+        agent_target_(*original_agent_target_) {
+    agent_target_.primary_isa.identity.version = version;
+    physical_device_->agent_target = &agent_target_;
+  }
+
+  ~ScopedAgentTargetVersionOverride() {
+    physical_device_->agent_target = original_agent_target_;
+  }
+
+  ScopedAgentTargetVersionOverride(const ScopedAgentTargetVersionOverride&) =
+      delete;
+  ScopedAgentTargetVersionOverride& operator=(
+      const ScopedAgentTargetVersionOverride&) = delete;
+
+ private:
+  iree_hal_amdgpu_physical_device_t* physical_device_;
+  const iree_hal_amdgpu_agent_target_t* original_agent_target_;
+  iree_hal_amdgpu_agent_target_t agent_target_;
+};
+
+static uint32_t queue_create_probe_call_count = 0;
+
+static hsa_status_t HSA_API
+ProbeQueueCreate(hsa_agent_t, uint32_t, hsa_queue_type32_t,
+                 void (*)(hsa_status_t, hsa_queue_t*, void*), void*, uint32_t,
+                 uint32_t, hsa_queue_t** queue) {
+  ++queue_create_probe_call_count;
+  *queue = nullptr;
+  return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+}
+
+class ScopedQueueCreateProbe {
+ public:
+  explicit ScopedQueueCreateProbe(
+      iree_hal_amdgpu_logical_device_t* logical_device)
+      : libhsa_(&logical_device->system->libhsa),
+        original_queue_create_(libhsa_->hsa_queue_create) {
+    queue_create_probe_call_count = 0;
+    libhsa_->hsa_queue_create = ProbeQueueCreate;
+  }
+
+  ~ScopedQueueCreateProbe() {
+    libhsa_->hsa_queue_create = original_queue_create_;
+  }
+
+  ScopedQueueCreateProbe(const ScopedQueueCreateProbe&) = delete;
+  ScopedQueueCreateProbe& operator=(const ScopedQueueCreateProbe&) = delete;
+
+  uint32_t call_count() const { return queue_create_probe_call_count; }
+  void ResetCallCount() { queue_create_probe_call_count = 0; }
+
+ private:
+  iree_hal_amdgpu_libhsa_t* libhsa_;
+  decltype(iree_hal_amdgpu_libhsa_t::hsa_queue_create) original_queue_create_;
+};
 #endif  // !IREE_HAL_AMDGPU_LIBHSA_STATIC
 
 iree_status_t SubmitFillAndWait(iree_hal_device_t* device,
@@ -339,6 +446,154 @@ TEST_F(AmdgpuExperimentalApiTest,
       mask_word_count * 32u, valid_mask.data(), &queue_affinity));
   EXPECT_NE(queue_affinity, 0u);
   IREE_EXPECT_OK(SubmitFillAndWait(test_device.device(), queue_affinity));
+}
+
+TEST_F(AmdgpuExperimentalApiTest,
+       RejectsMisalignedNativeComputeUnitGroupsBeforeQueueCreation) {
+#if IREE_HAL_AMDGPU_LIBHSA_STATIC
+  GTEST_SKIP() << "deterministic HSA queue injection requires dynamic libhsa";
+#else
+  iree_hal_amdgpu_logical_device_options_t options;
+  iree_hal_amdgpu_logical_device_options_initialize(&options);
+  options.host_queues.experimental_execution_queue_count = 1;
+  ScopedNativeAqlLibhsa native_aql_libhsa;
+  IREE_ASSERT_OK(native_aql_libhsa.Initialize(&libhsa_));
+  TestLogicalDevice test_device;
+  IREE_ASSERT_OK(test_device.Initialize(&options, native_aql_libhsa.libhsa()));
+
+  iree_hal_amdgpu_logical_device_t* logical_device =
+      test_device.logical_device();
+  iree_hal_amdgpu_physical_device_t* physical_device =
+      logical_device->physical_devices[0];
+  const iree_hal_amdgpu_gfxip_version_t gfx10_version = {
+      .major = 10,
+      .minor = 0,
+      .stepping = 0,
+  };
+  ScopedAgentTargetVersionOverride target_override(physical_device,
+                                                   gfx10_version);
+
+  iree_hal_amdgpu_experimental_execution_queue_topology_t queue_topology;
+  IREE_ASSERT_OK(iree_hal_amdgpu_experimental_execution_queue_query(
+      test_device.device(), /*physical_device_ordinal=*/0, &queue_topology));
+  ASSERT_EQ(queue_topology.native_compute_unit_mask_alignment, 2u);
+  if (queue_topology.native_compute_unit_mask_partition_count >=
+      queue_topology.native_compute_unit_count) {
+    GTEST_SKIP() << "device is too small to clear one bit while preserving "
+                    "every hardware partition";
+  }
+
+  std::vector<uint32_t> aligned_mask =
+      MakeFullNativeMask(queue_topology.native_compute_unit_count);
+  std::vector<uint32_t> misaligned_mask = aligned_mask;
+  misaligned_mask[0] &= ~UINT32_C(1);
+  const iree_host_size_t private_queue_ordinal =
+      queue_topology.first_private_physical_queue_ordinal;
+  const iree_host_size_t initial_host_queue_count =
+      physical_device->host_queue_count;
+  ScopedQueueCreateProbe queue_create_probe(logical_device);
+
+  iree_hal_queue_affinity_t queue_affinity = 1;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        iree_hal_amdgpu_experimental_execution_queue_configure(
+                            test_device.device(), /*physical_device_ordinal=*/0,
+                            private_queue_ordinal, misaligned_mask.size() * 32u,
+                            misaligned_mask.data(), &queue_affinity));
+  EXPECT_EQ(queue_affinity, 0u);
+  EXPECT_EQ(queue_create_probe.call_count(), 0u);
+  EXPECT_EQ(physical_device->host_queue_count, initial_host_queue_count);
+  EXPECT_FALSE(iree_hal_amdgpu_physical_device_host_queue_is_initialized(
+      physical_device, private_queue_ordinal));
+  EXPECT_EQ(
+      iree_atomic_load(&logical_device->configured_execution_queue_affinity,
+                       iree_memory_order_acquire),
+      0);
+
+  queue_create_probe.ResetCallCount();
+  queue_affinity = 1;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        iree_hal_amdgpu_experimental_execution_queue_configure(
+                            test_device.device(), /*physical_device_ordinal=*/0,
+                            private_queue_ordinal, aligned_mask.size() * 32u,
+                            aligned_mask.data(), &queue_affinity));
+  EXPECT_EQ(queue_affinity, 0u);
+  EXPECT_EQ(queue_create_probe.call_count(), 1u);
+  EXPECT_EQ(physical_device->host_queue_count, initial_host_queue_count);
+  EXPECT_FALSE(iree_hal_amdgpu_physical_device_host_queue_is_initialized(
+      physical_device, private_queue_ordinal));
+  EXPECT_EQ(
+      iree_atomic_load(&logical_device->configured_execution_queue_affinity,
+                       iree_memory_order_acquire),
+      0);
+#endif  // IREE_HAL_AMDGPU_LIBHSA_STATIC
+}
+
+TEST_F(AmdgpuExperimentalApiTest,
+       RejectsUndefinedMaskAlignmentBeforeQueueCreation) {
+#if IREE_HAL_AMDGPU_LIBHSA_STATIC
+  GTEST_SKIP() << "deterministic HSA queue injection requires dynamic libhsa";
+#else
+  iree_hal_amdgpu_logical_device_options_t options;
+  iree_hal_amdgpu_logical_device_options_initialize(&options);
+  options.host_queues.experimental_execution_queue_count = 1;
+  ScopedNativeAqlLibhsa native_aql_libhsa;
+  IREE_ASSERT_OK(native_aql_libhsa.Initialize(&libhsa_));
+  TestLogicalDevice test_device;
+  IREE_ASSERT_OK(test_device.Initialize(&options, native_aql_libhsa.libhsa()));
+
+  iree_hal_amdgpu_logical_device_t* logical_device =
+      test_device.logical_device();
+  iree_hal_amdgpu_physical_device_t* physical_device =
+      logical_device->physical_devices[0];
+  const iree_hal_amdgpu_gfxip_version_t undefined_version = {
+      .major = 13,
+      .minor = 0,
+      .stepping = 0,
+  };
+  ScopedAgentTargetVersionOverride target_override(physical_device,
+                                                   undefined_version);
+  ScopedQueueCreateProbe queue_create_probe(logical_device);
+
+  iree_hal_amdgpu_experimental_execution_queue_topology_t queue_topology = {
+      .first_private_physical_queue_ordinal = 1,
+      .private_physical_queue_count = 1,
+      .native_compute_unit_count = 1,
+      .native_compute_unit_mask_alignment = 1,
+      .native_compute_unit_mask_partition_count = 1,
+  };
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED,
+                        iree_hal_amdgpu_experimental_execution_queue_query(
+                            test_device.device(), /*physical_device_ordinal=*/0,
+                            &queue_topology));
+  EXPECT_EQ(queue_topology.first_private_physical_queue_ordinal, 0u);
+  EXPECT_EQ(queue_topology.private_physical_queue_count, 0u);
+  EXPECT_EQ(queue_topology.native_compute_unit_count, 0u);
+  EXPECT_EQ(queue_topology.native_compute_unit_mask_alignment, 0u);
+  EXPECT_EQ(queue_topology.native_compute_unit_mask_partition_count, 0u);
+  EXPECT_EQ(queue_create_probe.call_count(), 0u);
+
+  std::vector<uint32_t> mask =
+      MakeFullNativeMask(physical_device->compute_unit_count);
+  const iree_host_size_t private_queue_ordinal =
+      physical_device->host_queue_ordinary_count;
+  const iree_host_size_t initial_host_queue_count =
+      physical_device->host_queue_count;
+  iree_hal_queue_affinity_t queue_affinity = 1;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED,
+                        iree_hal_amdgpu_experimental_execution_queue_configure(
+                            test_device.device(), /*physical_device_ordinal=*/0,
+                            private_queue_ordinal, mask.size() * 32u,
+                            mask.data(), &queue_affinity));
+  EXPECT_EQ(queue_affinity, 0u);
+  EXPECT_EQ(queue_create_probe.call_count(), 0u);
+  EXPECT_EQ(physical_device->host_queue_count, initial_host_queue_count);
+  EXPECT_FALSE(iree_hal_amdgpu_physical_device_host_queue_is_initialized(
+      physical_device, private_queue_ordinal));
+  EXPECT_EQ(
+      iree_atomic_load(&logical_device->configured_execution_queue_affinity,
+                       iree_memory_order_acquire),
+      0);
+#endif  // IREE_HAL_AMDGPU_LIBHSA_STATIC
 }
 
 TEST_F(AmdgpuExperimentalApiTest,
