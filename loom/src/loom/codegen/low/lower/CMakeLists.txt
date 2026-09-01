@@ -23,6 +23,7 @@ loom_cc_library(
     "lower_rules.h"
     "plan.h"
     "report.h"
+    "source_query.h"
     "storage.h"
     "structural.h"
   SRCS
@@ -39,6 +40,7 @@ loom_cc_library(
     "lower_rule_source_memory_materialize.c"
     "lower_rules.c"
     "plan.c"
+    "source_query.c"
     "storage.c"
     "structural.c"
   DEPS

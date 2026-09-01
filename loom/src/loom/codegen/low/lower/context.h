@@ -164,6 +164,14 @@ struct loom_low_lower_context_t {
   loom_op_t* low_func_op;
 };
 
+// Acquires dense source-value ordinals for |source_body| into |context|.
+iree_status_t loom_low_lower_context_acquire_value_domain(
+    loom_low_lower_context_t* context, loom_region_t* source_body);
+
+// Releases the source-value domain acquired into |context|.
+void loom_low_lower_context_release_value_domain(
+    loom_low_lower_context_t* context);
+
 // Returns the source function name used in source-to-low diagnostics/reports.
 iree_string_view_t loom_low_lower_context_function_name(
     const loom_low_lower_context_t* context);
