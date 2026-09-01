@@ -196,6 +196,11 @@ TEST(BenchmarkSnapshotSinkTest, AggregatesDeduplicatedWorkItems) {
   EXPECT_EQ(benchmark_count, 2u);
 
   iree_string_view_t first_work_item = FirstArrayElement(work_items);
+  EXPECT_TRUE(iree_string_view_equal(
+      LookupObject(first_work_item, IREE_SV("benchmark")),
+      IREE_SV("kernel_latency")));
+  EXPECT_TRUE(iree_string_view_equal(
+      LookupObject(first_work_item, IREE_SV("case")), IREE_SV("kernel_case")));
   iree_string_view_t policy_json =
       LookupObject(first_work_item, IREE_SV("policy"));
   EXPECT_TRUE(

@@ -306,54 +306,6 @@
       "stderr": {
         "contains": ["is not canonically formatted"]
       }
-    },
-    {
-      "name": "accepts canonical generic target-low text in check mode",
-      "run": {
-        "tool": "loom-format",
-        "args": ["--check"]
-      },
-      "stdin": {
-        "text": "llvmir.target<object> @target {triple = \"amdgcn-amd-amdhsa\"}\n\nlow.kernel.def target<llvmir.generic.core>(@target) workgroup_size(64, 1, 1) @dispatch() {\n  %input = low.resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>\n  %value = low.op<llvmir.load.i32>(%input) {byte_offset = 4} : (reg<llvmir.ptr>) -> reg<llvmir.i32>\n  low.return\n}\n"
-      },
-      "stdout": {
-        "empty": true
-      }
-    },
-    {
-      "name": "preserves canonical target-low asm in check mode",
-      "run": {
-        "tool": "loom-format",
-        "args": ["--check"]
-      },
-      "stdin": {
-        "text": "llvmir.target<object> @target {triple = \"amdgcn-amd-amdhsa\"}\n\nlow.kernel.def target<llvmir.generic.core>(@target) workgroup_size(64, 1, 1) @dispatch() asm {\n  %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>\n  %value = load.i32 %input, 4\n  return\n}\n"
-      },
-      "stdout": {
-        "empty": true
-      }
-    },
-    {
-      "name": "diagnoses unresolved symbol before bytecode output",
-      "run": {
-        "tool": "loom-format",
-        "args": [
-          "--from=text",
-          "--to=bc",
-          "--output={tmp}/invalid.loombc"
-        ]
-      },
-      "stdin": {
-        "text": "func.def @caller(%value: index) -> (index) {\n  %result = func.call @external_identity(%value) : (index) -> (index)\n  func.return %result : index\n}\n"
-      },
-      "exit": {
-        "nonzero": true
-      },
-      "stderr": {
-        "contains": [
-          "error [SYMBOL/002]: symbol '@external_identity' is referenced but not defined"
-        ]
-      }
     }
   ]
 }

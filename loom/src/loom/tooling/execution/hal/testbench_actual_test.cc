@@ -327,6 +327,28 @@ check.case @nested_launch_schedule {
   loom_run_module_deinitialize(&run_module);
 }
 
+TEST_F(HalTestbenchActualTest, RejectsCaseWithoutKernelLaunch) {
+  static constexpr char kSource[] = R"(
+check.case @host_only {
+  %value = check.literal value(1) : i32
+  check.expect.equal actual(%value) expected(%value) : i32
+  check.return
+}
+)";
+  loom_run_module_t run_module = {};
+  loom_testbench_module_plan_t module_plan = {};
+  ParseAndPlan(IREE_SV(kSource), &run_module, &module_plan);
+  ASSERT_EQ(module_plan.case_count, 1u);
+
+  const loom_testbench_invocation_plan_t* kernel_launch = nullptr;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED,
+                        loom_run_hal_testbench_select_kernel_launch(
+                            &module_plan.cases[0], &kernel_launch));
+  EXPECT_EQ(kernel_launch, nullptr);
+
+  loom_run_module_deinitialize(&run_module);
+}
+
 TEST_F(HalTestbenchActualTest, RetainsResolvedLaunchConfigForExactWorkload) {
   static constexpr char kSource[] = R"(
 kernel.def @dynamic(%workgroup_count: index) {

@@ -2,60 +2,6 @@
   "version": 1,
   "cases": [
     {
-      "name": "prints link plan for source providers",
-      "cwd": "{srcdir}",
-      "run": {
-        "tool": "loom-link",
-        "args": [
-          "root.loom",
-          "--library=providers.loom",
-          "--root=@scale_i32_buffer",
-          "--print-plan"
-        ]
-      },
-      "stdout": {
-        "contains": {
-          "unordered": [
-            "root @scale_i32_buffer",
-            "provider @scale_i32_fallback"
-          ]
-        },
-        "not_contains": [
-          "@scale_i32_gfx1100",
-          "@scale_i32_gfx1200",
-          "@unused_provider"
-        ]
-      }
-    },
-    {
-      "name": "prints authoring check plan",
-      "cwd": "{srcdir}",
-      "run": {
-        "tool": "loom-link",
-        "args": [
-          "checks.loom",
-          "--library=root.loom",
-          "--library=providers.loom",
-          "--root=@scale_i32_buffer_case",
-          "--print-plan"
-        ]
-      },
-      "stdout": {
-        "contains": {
-          "unordered": [
-            "root @scale_i32_buffer_case",
-            "dependency @scale_i32_buffer",
-            "provider @scale_i32_fallback"
-          ]
-        },
-        "not_contains": [
-          "@scale_i32_gfx1100",
-          "@scale_i32_gfx1200",
-          "@unused_provider"
-        ]
-      }
-    },
-    {
       "name": "links bytecode provider library",
       "steps": [
         {

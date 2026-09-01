@@ -98,6 +98,50 @@ static bool JsonArrayContainsString(iree_string_view_t array,
   return false;
 }
 
+TEST(BenchmarkReportTest, WritesSelectedSampleAndCliIterationOverrides) {
+  iree_benchmark_loom_run_identity_t run = {};
+  run.run_id = IREE_SV("run");
+  iree_benchmark_loom_candidate_identity_t candidate = {};
+  candidate.candidate_id = IREE_SV("candidate");
+  loom_module_t module = {};
+  loom_testbench_benchmark_plan_t benchmark_plan = {};
+  benchmark_plan.name = IREE_SV("sampled_choice_latency");
+  benchmark_plan.sample_count = 2;
+  benchmark_plan.cartesian_sample_count = 2;
+  loom_testbench_case_plan_t case_plan = {};
+  case_plan.name = IREE_SV("sampled_choice");
+  case_plan.sample_count = 2;
+  case_plan.cartesian_sample_count = 2;
+  iree_benchmark_loom_benchmark_policy_t policy = {};
+  policy.measure_kind = IREE_BENCHMARK_LOOM_MEASURE_CASE_END_TO_END;
+  policy.measure = IREE_SV("case_end_to_end");
+  policy.iterations = 2;
+  iree_benchmark_loom_options_t options = {};
+  iree_benchmark_loom_options_initialize(&options);
+  options.sample_ordinal = 1;
+  options.iterations_specified = true;
+  options.warmup_iterations_specified = true;
+
+  iree_string_builder_t builder;
+  iree_string_builder_initialize(iree_allocator_system(), &builder);
+  IREE_ASSERT_OK(iree_benchmark_loom_append_plan_row(
+      &run, &candidate, &module, &benchmark_plan, &case_plan, &policy, &options,
+      iree_allocator_system(), &builder));
+
+  const iree_string_view_t plan =
+      ParseJsonDocument(iree_string_builder_view(&builder));
+  ExpectObjectValueEquals(plan, IREE_SV("selected_sample"), IREE_SV("1"));
+  ExpectObjectValueEquals(plan, IREE_SV("iterations"), IREE_SV("2"));
+  const iree_string_view_t cli_overrides =
+      LookupObject(plan, IREE_SV("cli_overrides"));
+  ExpectObjectValueEquals(cli_overrides, IREE_SV("iterations"),
+                          IREE_SV("true"));
+  ExpectObjectValueEquals(cli_overrides, IREE_SV("warmup_iterations"),
+                          IREE_SV("true"));
+
+  iree_string_builder_deinitialize(&builder);
+}
+
 TEST(BenchmarkReportTest, WritesStatusFieldJson) {
   iree_string_builder_t builder;
   iree_string_builder_initialize(iree_allocator_system(), &builder);

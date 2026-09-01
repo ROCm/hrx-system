@@ -307,6 +307,26 @@ TEST_F(LinkPlannerTest, MergeSelectsInputSymbolsInStableIndexOrder) {
   }
 }
 
+TEST_F(LinkPlannerTest, MergeSelectsMoreThanOneSymbolBitsetWord) {
+  std::string source;
+  for (int symbol_index = 0; symbol_index < 65; ++symbol_index) {
+    source += "func.def @symbol_" + std::to_string(symbol_index) +
+              "() {\n  func.return\n}\n\n";
+  }
+  loom_module_t* module =
+      Parse(iree_make_string_view(source.data(), source.size()));
+
+  IndexPtr index = CreateIndex();
+  AddMaterialized(index.get(), module, IREE_SV("input"),
+                  LOOM_LINK_PROVIDER_ROLE_INPUT);
+  PlanPtr plan = BuildPlan(index.get(), /*options=*/nullptr);
+
+  ASSERT_EQ(loom_link_plan_symbol_count(plan.get()), 65u);
+  const std::vector<std::string> planned_names = PlannedNames(plan.get());
+  EXPECT_EQ(planned_names.front(), "symbol_0");
+  EXPECT_EQ(planned_names.back(), "symbol_64");
+}
+
 TEST_F(LinkPlannerTest, LinkRootClosureSelectsPrivateDependencyOnly) {
   loom_module_t* module = Parse(Fixture(IREE_SV(
       "link_root_closure_selects_private_dependency_only_module.loom")));
