@@ -67,13 +67,6 @@ static iree_status_t loom_vm_launch_config_emit(
     const loom_target_emit_request_t* request,
     loom_target_emit_artifact_t* out_artifact) {
   *out_artifact = (loom_target_emit_artifact_t){0};
-  if (request->artifact_manifest.mode !=
-      LOOM_TARGET_ARTIFACT_MANIFEST_MODE_NONE) {
-    return iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "VM launch-config emission does not produce artifact manifests");
-  }
-
   const loom_vm_launch_config_program_t* program =
       (const loom_vm_launch_config_program_t*)capability;
   IREE_RETURN_IF_ERROR(
