@@ -96,6 +96,7 @@ loom_cc_library(
     loom::pass::builtin_registry
     loom::pass::pipeline
     loom::pass::registry
+    loom::pass::report
     loom::pass::tooling
     loom::sanitizer::options
     loom::target::entry_selection

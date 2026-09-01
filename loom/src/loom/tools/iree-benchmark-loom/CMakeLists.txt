@@ -263,9 +263,7 @@ iree_execution_test_suite(
   TOOLS
     "iree-benchmark-loom=::iree-benchmark-loom"
   DATA
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/iree-benchmark-loom/testdata/duplicate_symbol.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/iree-benchmark-loom/testdata/scalar_benchmarks.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/iree-test-loom/testdata/planning_issue_cases.loom"
   LABELS
     "hostonly"
 )

@@ -72,9 +72,6 @@ iree_execution_test_suite(
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-link/testdata/dependency_component.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-link/testdata/dependency_direct.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-link/testdata/dependency_transitive.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-link/testdata/merge_inline_kernel_helper.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-link/testdata/merge_many_symbols.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-link/testdata/target_profile_template_selection.loom"
   LABELS
     "hostonly"
 )

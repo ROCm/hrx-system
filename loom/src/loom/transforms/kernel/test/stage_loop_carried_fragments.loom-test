@@ -147,7 +147,7 @@ kernel.def target(@target) @stage_blocked_accumulator_fragment() {
 }
 
 // ====
-// RUN: pass-report stage-loop-carried-fragments,dce
+// RUN: compile-report stage-loop-carried-fragments,dce
 
 test.target<low_core> @target {abi = hal_kernel, subgroup_size = 64}
 
@@ -230,7 +230,7 @@ COMPILE-REPORT: source_low_transform[1] function=explicitly_stage_one_accumulato
 COMPILE-REPORT: source_low_transform[2] function=report_dense_accumulator_fragment_staging source_op=scf.for transform=stage-loop-carried-fragments outcome=selected reason=staged_workgroup_memory candidates=4 selected=4 removed_loop_carried=4 removed_payload_registers=32 shape=16x16 workgroup_bytes=4096 inserted_loads=8 inserted_stores=8 barriers=2
 
 // ====
-// RUN: pass-report sink-single-use-reads,stage-loop-carried-fragments,dce
+// RUN: compile-report sink-single-use-reads,stage-loop-carried-fragments,dce
 
 test.target<low_core> @target {abi = hal_kernel, subgroup_size = 64}
 
@@ -404,7 +404,7 @@ func.def @does_not_stage_ordinary_function(%lhs_values: vector<16xbf16>, %rhs_va
 }
 
 // ====
-// RUN: pass-report stage-loop-carried-fragments,dce
+// RUN: compile-report stage-loop-carried-fragments,dce
 
 test.target<low_core> @target {abi = hal_kernel, subgroup_size = 64}
 
@@ -522,7 +522,7 @@ COMPILE-REPORT: source_low_transform[2] function=decline_lane_dependent_cfg_arm 
 COMPILE-REPORT: source_low_transform[3] function=stage_exact_single_subgroup_control source_op=scf.for transform=stage-loop-carried-fragments outcome=selected reason=staged_workgroup_memory candidates=1 selected=1 removed_loop_carried=1 removed_payload_registers=8 shape=16x16 workgroup_bytes=1024 inserted_loads=2 inserted_stores=2 barriers=2
 
 // ====
-// RUN: pass-report stage-loop-carried-fragments,dce
+// RUN: compile-report stage-loop-carried-fragments,dce
 
 test.target<low_core> @target {abi = hal_kernel, subgroup_size = 64}
 

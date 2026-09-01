@@ -182,6 +182,24 @@ loom_cc_test(
 )
 
 loom_cc_test(
+    name = "issue_report_test",
+    srcs = ["issue_report_test.cc"],
+    deps = [
+        ":issue_report",
+        ":testbench",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/check",
+        "//loom/src/loom/ops/index",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/base/internal:json",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "expectation_test",
     srcs = ["expectation_test.cc"],
     deps = [

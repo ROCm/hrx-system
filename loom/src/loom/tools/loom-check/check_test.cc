@@ -118,6 +118,22 @@ TEST_F(CheckParseTest, PassWithLocations) {
                                      iree_make_cstring_view("dce,cse")));
 }
 
+TEST_F(CheckParseTest, PassReportMode) {
+  IREE_ASSERT_OK(Parse("// RUN: pass-report dce,cse\nfunc.def @f() {}\n"));
+  ASSERT_EQ(file_.case_count, 1);
+  EXPECT_EQ(file_.cases[0].mode, LOOM_CHECK_MODE_PASS_REPORT);
+  EXPECT_TRUE(iree_string_view_equal(file_.cases[0].pipeline,
+                                     iree_make_cstring_view("dce,cse")));
+}
+
+TEST_F(CheckParseTest, CompileReportMode) {
+  IREE_ASSERT_OK(Parse("// RUN: compile-report dce,cse\nfunc.def @f() {}\n"));
+  ASSERT_EQ(file_.case_count, 1);
+  EXPECT_EQ(file_.cases[0].mode, LOOM_CHECK_MODE_COMPILE_REPORT);
+  EXPECT_TRUE(iree_string_view_equal(file_.cases[0].pipeline,
+                                     iree_make_cstring_view("dce,cse")));
+}
+
 TEST_F(CheckParseTest, DuplicateRunModifierRejected) {
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,

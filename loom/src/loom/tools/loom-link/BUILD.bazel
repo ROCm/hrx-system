@@ -17,8 +17,6 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
-exports_files(["testdata/target_profile_template_selection.loom"])
-
 _AMDGPU_LINK_COPTS = iree_select({
     "//loom/config/target/arch:amdgpu": [
         "-DLOOM_LINK_HAVE_AMDGPU=1",
@@ -76,9 +74,6 @@ iree_execution_test_suite(
         "testdata/dependency_component.loom",
         "testdata/dependency_direct.loom",
         "testdata/dependency_transitive.loom",
-        "testdata/merge_inline_kernel_helper.loom",
-        "testdata/merge_many_symbols.loom",
-        "testdata/target_profile_template_selection.loom",
         "//loom/src/loom/link/testdata:provider_roots/direct.loom",
         "//loom/src/loom/link/testdata:provider_roots/transitive.loom",
         "//loom/src/loom/link/testdata:provider_roots/unused.loom",

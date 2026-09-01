@@ -26,7 +26,6 @@ _AMDGPU_ARTIFACTS_COMPATIBLE_WITH = loom_config_compatible_with([
 iree_execution_test_suite(
     name = "execution_test",
     data = [
-        "checks.loom",
         "providers.loom",
         "root.loom",
     ],

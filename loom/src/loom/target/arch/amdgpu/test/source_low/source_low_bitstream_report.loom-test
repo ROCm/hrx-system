@@ -1,4 +1,4 @@
-// RUN: pass-report target-legalize{mode=final,policy=reference-only},dce,canonicalize
+// RUN: compile-report target-legalize{mode=final,policy=reference-only},dce,canonicalize
 
 amdgpu.target<gfx11-generic> @target
 func.def target(@target) @report_i32_to_u4x8_bitunpack(%packed: vector<1xi32>) -> (vector<8xi32>) {

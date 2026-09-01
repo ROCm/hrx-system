@@ -85,7 +85,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) abi(hal_kernel) @bf16_result_to_
 
 // ====
 
-// RUN: pass-report source-to-low,low-dce
+// RUN: compile-report source-to-low,low-dce
 
 amdgpu.target<gfx1100> @target
 

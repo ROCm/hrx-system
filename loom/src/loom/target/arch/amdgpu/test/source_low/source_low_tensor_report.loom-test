@@ -1,4 +1,4 @@
-// RUN: pass-report canonicalize,source-to-low,low-dce
+// RUN: compile-report canonicalize,source-to-low,low-dce
 
 amdgpu.target<gfx1250> @target
 kernel.def target(@target) @report_tensor_load_to_lds() {

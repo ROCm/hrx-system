@@ -27,42 +27,6 @@
       }
     },
     {
-      "name": "selects target-constrained provider with target profile",
-      "run": {
-        "tool": "loom-link",
-        "args": [
-          "{srcdir}/testdata/target_profile_template_selection.loom",
-          "--root=@target_profile_entry",
-          "--target-profile=amdgpu:gfx11-generic"
-        ]
-      },
-      "stdout": {
-        "contains": [
-          "@wave32_target_profile_transform",
-          "target(@__loom_target_context_0_0)",
-          "amdgpu.target<gfx11-generic> @__loom_target_context_0_0"
-        ],
-        "not_contains": ["@portable_target_profile_transform"]
-      }
-    },
-    {
-      "name": "keeps targetless linking portable without target profile",
-      "run": {
-        "tool": "loom-link",
-        "args": [
-          "{srcdir}/testdata/target_profile_template_selection.loom",
-          "--root=@target_profile_entry"
-        ]
-      },
-      "stdout": {
-        "contains": ["@portable_target_profile_transform"],
-        "not_contains": [
-          "@wave32_target_profile_transform",
-          "amdgpu.target<"
-        ]
-      }
-    },
-    {
       "name": "roots direct library exports without flattening libraries",
       "steps": [
         {
@@ -127,206 +91,29 @@
       ]
     },
     {
-      "name": "merges input with many symbols",
+      "name": "writes linked bytecode and dependency report",
       "run": {
         "tool": "loom-link",
         "args": [
-          "{srcdir}/testdata/merge_many_symbols.loom",
-          "--mode=merge"
+          "{srcdir}/testdata/dependency_component.loom",
+          "--library={srcdir}/testdata/dependency_direct.loom",
+          "--library={srcdir}/testdata/dependency_transitive.loom",
+          "--mode=merge",
+          "--strict-deps",
+          "--dependency-component=//model:component",
+          "--dependency-report={tmp}/dependencies.json",
+          "--to=bc",
+          "--output={tmp}/linked.loombc"
         ]
       },
-      "stdout": {
-        "contains": [
-          "func.def @symbol_00() {",
-          "func.def @symbol_64() {"
-        ]
-      }
-    },
-    {
-      "name": "preserves required-inline kernel helper in merge",
-      "run": {
-        "tool": "loom-link",
-        "args": [
-          "{srcdir}/testdata/merge_inline_kernel_helper.loom",
-          "--mode=merge"
-        ]
-      },
-      "stdout": {
-        "contains": [
-          "func.def inline @subgroup_broadcast_helper",
-          "kernel.subgroup.broadcast",
-          "kernel.def @subgroup_broadcast_kernel"
-        ]
-      }
-    },
-    {
-      "name": "checks direct dependencies before merging a library",
-      "steps": [
+      "files": [
         {
-          "name": "accept-direct-dependencies",
-          "run": {
-            "tool": "loom-link",
-            "args": [
-              "{srcdir}/testdata/dependency_component.loom",
-              "--library={srcdir}/testdata/dependency_direct.loom",
-              "--library={srcdir}/testdata/dependency_transitive.loom",
-              "--mode=merge",
-              "--strict-deps",
-              "--dependency-component=//model:component",
-              "--dependency-report={tmp}/direct.json",
-              "--to=bc",
-              "--output={tmp}/direct.loombc"
-            ]
-          },
-          "files": [
-            {
-              "path": "{tmp}/direct.loombc",
-              "non_empty": true
-            },
-            {
-              "path": "{tmp}/direct.json",
-              "contains": [
-                "\"component\":\"//model:component\"",
-                "\"succeeded\":true",
-                "\"direct_dependencies\":2",
-                "\"dependency\":\"direct\""
-              ]
-            }
-          ]
+          "path": "{tmp}/linked.loombc",
+          "non_empty": true
         },
         {
-          "name": "reject-transitive-dependency",
-          "run": {
-            "tool": "loom-link",
-            "args": [
-              "{srcdir}/testdata/dependency_component.loom",
-              "--library={srcdir}/testdata/dependency_direct.loom",
-              "--transitive-library={srcdir}/testdata/dependency_transitive.loom",
-              "--mode=merge",
-              "--dependency-component=//model:component",
-              "--dependency-report={tmp}/transitive.json",
-              "--to=bc",
-              "--output={tmp}/transitive.loombc"
-            ]
-          },
-          "exit": {
-            "nonzero": true
-          },
-          "stderr": {
-            "contains": [
-              "LINK/DEPENDENCY/MISSING_DIRECT",
-              "@entry requires @transitive",
-              "no direct dependency of //model:component"
-            ]
-          },
-          "files": [
-            {
-              "path": "{tmp}/transitive.loombc",
-              "exists": false
-            },
-            {
-              "path": "{tmp}/transitive.json",
-              "contains": [
-                "\"succeeded\":false",
-                "\"dependency\":\"missing_direct\"",
-                "\"origin\":\"transitive\""
-              ]
-            }
-          ]
-        },
-        {
-          "name": "encode-component",
-          "run": {
-            "tool": "loom-format",
-            "args": [
-              "--to=bc",
-              "--output={tmp}/component.loombc",
-              "{srcdir}/testdata/dependency_component.loom"
-            ]
-          }
-        },
-        {
-          "name": "encode-direct-library",
-          "run": {
-            "tool": "loom-format",
-            "args": [
-              "--to=bc",
-              "--output={tmp}/dependency-direct.loombc",
-              "{srcdir}/testdata/dependency_direct.loom"
-            ]
-          }
-        },
-        {
-          "name": "encode-transitive-library",
-          "run": {
-            "tool": "loom-format",
-            "args": [
-              "--to=bc",
-              "--output={tmp}/dependency-transitive.loombc",
-              "{srcdir}/testdata/dependency_transitive.loom"
-            ]
-          }
-        },
-        {
-          "name": "reject-transitive-bytecode-dependency",
-          "run": {
-            "tool": "loom-link",
-            "args": [
-              "{tmp}/component.loombc",
-              "--library={tmp}/dependency-direct.loombc",
-              "--transitive-library={tmp}/dependency-transitive.loombc",
-              "--mode=merge",
-              "--strict-deps"
-            ]
-          },
-          "exit": {
-            "nonzero": true
-          },
-          "stderr": {
-            "contains": [
-              "LINK/DEPENDENCY/MISSING_DIRECT",
-              "@entry requires @transitive"
-            ]
-          }
-        }
-      ]
-    },
-    {
-      "name": "links import-free declarations in merge mode",
-      "steps": [
-        {
-          "name": "write-harness",
-          "write": {
-            "path": "{tmp}/harness.loom",
-            "text": "func.decl @identity(%x: i32) -> (i32)\n\nfunc.def @caller(%x: i32) -> (i32) {\n  %y = func.call @identity(%x) : (i32) -> (i32)\n  func.return %y : i32\n}\n"
-          }
-        },
-        {
-          "name": "write-corpus",
-          "write": {
-            "path": "{tmp}/corpus.loom",
-            "text": "func.def @identity(%x: i32) -> (i32) {\n  func.return %x : i32\n}\n"
-          }
-        },
-        {
-          "name": "link",
-          "run": {
-            "tool": "loom-link",
-            "args": [
-              "{tmp}/harness.loom",
-              "{tmp}/corpus.loom",
-              "--mode=merge"
-            ]
-          },
-          "stdout": {
-            "contains": [
-              "func.def @identity(%x: i32) -> (i32) {",
-              "func.def @caller(%x: i32) -> (i32) {",
-              "%y = func.call @identity(%x) : (i32) -> (i32)",
-              "func.return %y : i32"
-            ],
-            "not_contains": ["func.decl @identity"]
-          }
+          "path": "{tmp}/dependencies.json",
+          "non_empty": true
         }
       ]
     },
@@ -384,84 +171,6 @@
               "func.def @unused",
               "func.decl @identity"
             ]
-          }
-        }
-      ]
-    },
-    {
-      "name": "selects nested templates from bytecode library",
-      "steps": [
-        {
-          "name": "write-root",
-          "write": {
-            "path": "{tmp}/template-root.loom",
-            "text": "template.decl @demo.outer(%x: i32) -> (i32)\ntemplate.decl @demo.inner(%x: i32) -> (i32)\n\nfunc.def public @entry(%x: i32) -> (i32) {\n  %result = template.apply<@demo.outer>(%x) : (i32) -> (i32)\n  func.return %result : i32\n}\n"
-          }
-        },
-        {
-          "name": "write-library",
-          "write": {
-            "path": "{tmp}/template-library.loom",
-            "text": "template.decl @demo.outer(%x: i32) -> (i32)\ntemplate.decl @demo.inner(%x: i32) -> (i32)\ntemplate.decl @demo.unused(%x: i32) -> (i32)\n\ntemplate.def<@demo.outer> priority(20) @outer_fast(%x: i32) -> (i32) {\n  %result = template.apply<@demo.inner>(%x) : (i32) -> (i32)\n  template.return %result : i32\n}\n\ntemplate.def<@demo.outer> priority(1) @outer_fallback(%x: i32) -> (i32) {\n  template.return %x : i32\n}\n\ntemplate.def<@demo.inner> priority(20) @inner_fast(%x: i32) -> (i32) {\n  template.return %x : i32\n}\n\ntemplate.def<@demo.inner> priority(1) @inner_fallback(%x: i32) -> (i32) {\n  template.return %x : i32\n}\n\ntemplate.def<@demo.unused> @unused(%x: i32) -> (i32) {\n  template.return %x : i32\n}\n"
-          }
-        },
-        {
-          "name": "encode-library",
-          "run": {
-            "tool": "loom-format",
-            "args": [
-              "--from=text",
-              "--to=bc",
-              "--output={tmp}/template-library.loombc",
-              "{tmp}/template-library.loom"
-            ]
-          }
-        },
-        {
-          "name": "link",
-          "run": {
-            "tool": "loom-link",
-            "args": [
-              "{tmp}/template-root.loom",
-              "--library={tmp}/template-library.loombc",
-              "--root=@entry"
-            ]
-          },
-          "stdout": {
-            "contains": {
-              "unordered": [
-                "template.apply<@demo.outer>",
-                "template.def<@demo.outer> priority(20) @outer_fast",
-                "template.apply<@demo.inner>",
-                "template.def<@demo.inner> priority(20) @inner_fast"
-              ]
-            },
-            "not_contains": [
-              "@outer_fallback",
-              "@inner_fallback",
-              "@unused"
-            ]
-          }
-        },
-        {
-          "name": "merge-library",
-          "run": {
-            "tool": "loom-link",
-            "args": [
-              "{tmp}/template-library.loombc",
-              "--mode=merge"
-            ]
-          },
-          "stdout": {
-            "contains": {
-              "unordered": [
-                "@outer_fast",
-                "@outer_fallback",
-                "@inner_fast",
-                "@inner_fallback",
-                "@unused"
-              ]
-            }
           }
         }
       ]
@@ -569,112 +278,6 @@
               ]
             },
             "not_contains": ["func.decl"]
-          }
-        }
-      ]
-    },
-    {
-      "name": "rejects duplicate globals",
-      "steps": [
-        {
-          "name": "write-duplicate-a",
-          "write": {
-            "path": "{tmp}/duplicate_a.loom",
-            "text": "func.def public @duplicate(%x: i32) -> (i32) {\n  func.return %x : i32\n}\n"
-          }
-        },
-        {
-          "name": "write-duplicate-b",
-          "write": {
-            "path": "{tmp}/duplicate_b.loom",
-            "text": "func.def public @duplicate(%x: i32) -> (i32) {\n  func.return %x : i32\n}\n"
-          }
-        },
-        {
-          "name": "link",
-          "run": {
-            "tool": "loom-link",
-            "args": [
-              "{tmp}/duplicate_a.loom",
-              "{tmp}/duplicate_b.loom"
-            ]
-          },
-          "exit": {
-            "nonzero": true
-          },
-          "stderr": {
-            "contains": [
-              "global symbol '@duplicate'",
-              "conflicts with provider"
-            ]
-          }
-        }
-      ]
-    },
-    {
-      "name": "strips check records",
-      "steps": [
-        {
-          "name": "write-checks",
-          "write": {
-            "path": "{tmp}/checks.loom",
-            "text": "func.def @kernel(%x: i32) -> (i32) {\n  func.return %x : i32\n}\n\ncheck.case public @kernel_case {\n  %input = check.literal value(1) : i32\n  %actual = func.call @kernel(%input) : (i32) -> (i32)\n  check.expect.equal actual(%actual) expected(%input) : i32\n  check.return\n}\n\ncheck.benchmark<@kernel_case> @kernel_bench\n"
-          }
-        },
-        {
-          "name": "link",
-          "run": {
-            "tool": "loom-link",
-            "args": [
-              "{tmp}/checks.loom",
-              "--strip-check"
-            ]
-          },
-          "stdout": {
-            "contains": ["func.def @kernel(%x: i32) -> (i32) {"],
-            "not_contains": [
-              "check.case",
-              "check.benchmark"
-            ]
-          }
-        }
-      ]
-    },
-    {
-      "name": "materializes linked config",
-      "steps": [
-        {
-          "name": "write-config-a",
-          "write": {
-            "path": "{tmp}/config_a.loom",
-            "text": "config.decl @model36.model.hidden_size : %value: index where [range(%value, 0, 8192)]\n\nfunc.def @read_config() -> (index) {\n  %hidden = config.get @model36.model.hidden_size : index\n  func.return %hidden : index\n}\n"
-          }
-        },
-        {
-          "name": "write-config-b",
-          "write": {
-            "path": "{tmp}/config_b.loom",
-            "text": "config.decl @model36.model.hidden_size : %value: index where [mul(%value, 16)]\n\nfunc.def @also_reads_config() -> (index) {\n  %hidden = config.get @model36.model.hidden_size : index\n  func.return %hidden : index\n}\n"
-          }
-        },
-        {
-          "name": "link",
-          "run": {
-            "tool": "loom-link",
-            "args": [
-              "{tmp}/config_a.loom",
-              "{tmp}/config_b.loom",
-              "--config=model36.model.hidden_size=4096",
-              "--require-resolved-config"
-            ]
-          },
-          "stdout": {
-            "contains": [
-              "config.def @model36.model.hidden_size = 4096 : index",
-              "func.def @read_config() -> (index) {",
-              "func.def @also_reads_config() -> (index) {"
-            ],
-            "not_contains": ["config.decl @model36.model.hidden_size"]
           }
         }
       ]

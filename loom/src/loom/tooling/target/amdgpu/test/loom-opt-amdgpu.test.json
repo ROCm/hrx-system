@@ -2,26 +2,6 @@
   "version": 1,
   "cases": [
     {
-      "name": "runs AMDGPU source-low compile pipeline",
-      "run": {
-        "tool": "loom-opt",
-        "args": [
-          "{srcdir}/loom_opt_f32_arith.loom",
-          "--pipeline=source-low"
-        ]
-      },
-      "stdout": {
-        "contains": [
-          "low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f32_arith()",
-          "reg<amdgpu.sgpr x2>",
-          "low.op<amdgpu.v_add_f32>"
-        ],
-        "not_contains": [
-          "\nkernel.def target(@target) @f32_arith"
-        ]
-      }
-    },
-    {
       "name": "dumps AMDGPU source-low stage as JSONL",
       "run": {
         "tool": "loom-opt",
@@ -49,70 +29,6 @@
           "non_empty": true
         }
       ]
-    },
-    {
-      "name": "runs default AMDGPU prepared-low compile pipeline",
-      "run": {
-        "tool": "loom-opt",
-        "args": [
-          "{srcdir}/loom_opt_f32_arith.loom",
-          "--pipeline=default"
-        ]
-      },
-      "stdout": {
-        "contains": [
-          "low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({",
-          "uses_kernarg_segment_ptr = true",
-          "low.live_in<amdgpu.kernarg_segment_ptr>",
-          "low.op<amdgpu.s_load_dwordx4_offset_only>"
-        ]
-      }
-    },
-    {
-      "name": "prints full AMDGPU register types in text diagnostics",
-      "run": {
-        "tool": "loom-opt",
-        "args": [
-          "{srcdir}/amdgpu_bad_return.loom",
-          "--output={tmp}/unused.loom"
-        ]
-      },
-      "exit": {
-        "nonzero": true
-      },
-      "stderr": {
-        "contains": [
-          "yielded value has type reg<amdgpu.sgpr x2>",
-          "but expected reg<amdgpu.sgpr>"
-        ],
-        "not_contains": [
-          "reg<...>"
-        ]
-      }
-    },
-    {
-      "name": "prints full AMDGPU register types in JSON diagnostics",
-      "run": {
-        "tool": "loom-opt",
-        "args": [
-          "{srcdir}/amdgpu_bad_return.loom",
-          "--diagnostic-format=json",
-          "--output={tmp}/unused.loom"
-        ]
-      },
-      "exit": {
-        "nonzero": true
-      },
-      "stderr": {
-        "contains": [
-          "\"message\":\"yielded value has type reg<amdgpu.sgpr x2>",
-          "\"yield_type\":\"reg<amdgpu.sgpr x2>\"",
-          "\"expected_type\":\"reg<amdgpu.sgpr>\""
-        ],
-        "not_contains": [
-          "reg<...>"
-        ]
-      }
     }
   ]
 }

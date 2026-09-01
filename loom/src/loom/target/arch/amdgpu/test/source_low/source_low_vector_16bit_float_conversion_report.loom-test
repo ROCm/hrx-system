@@ -1,4 +1,4 @@
-// RUN: pass-report source-to-low,low-dce
+// RUN: compile-report source-to-low,low-dce
 
 amdgpu.target<gfx1100> @target
 

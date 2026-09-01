@@ -210,6 +210,7 @@ loom_cc_test(
     loom::format::text::parser
     loom::format::text::printer
     loom::ir
+    loom::ops::func
     loom::ops::op_registry
     loom::ops::target
     loom::ops::template

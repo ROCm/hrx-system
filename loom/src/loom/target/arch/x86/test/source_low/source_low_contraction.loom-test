@@ -212,7 +212,7 @@ func.def target(@target) @non_scalar_fragment_mma(
 
 // ====
 
-// RUN: pass-report source-to-low,low-dce
+// RUN: compile-report source-to-low,low-dce
 
 x86.target<avx512_packed_dot> @target
 

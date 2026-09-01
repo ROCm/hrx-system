@@ -18,6 +18,7 @@
 #include "loom/format/text/printer.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/ops/func/ops.h"
 #include "loom/ops/op_registry.h"
 #include "loom/ops/test/ops.h"
 #include "loom/ops/test/registry.h"
@@ -213,6 +214,32 @@ func.def @identity(%x: i32) -> (i32) {
   std::string text = Print(linked);
   EXPECT_EQ(text.find("func.decl @identity"), std::string::npos);
   EXPECT_NE(text.find("func.def @identity"), std::string::npos);
+}
+
+TEST_F(LinkerTest, MergePreservesRequiredInlinePolicy) {
+  loom_module_t* source = Parse(IREE_SV(R"(
+func.def inline @helper(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.def @caller(%value: i32) -> (i32) {
+  %result = func.call @helper(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+)"));
+
+  loom_module_t* linked = Link({source});
+  const loom_string_id_t helper_name =
+      loom_module_lookup_string(linked, IREE_SV("helper"));
+  ASSERT_NE(helper_name, LOOM_STRING_ID_INVALID);
+  const loom_symbol_id_t helper_symbol =
+      loom_module_find_symbol(linked, helper_name);
+  ASSERT_NE(helper_symbol, LOOM_SYMBOL_ID_INVALID);
+  loom_op_t* helper_op = linked->symbols.entries[helper_symbol].defining_op;
+  ASSERT_TRUE(loom_func_def_isa(helper_op));
+  EXPECT_EQ(
+      loom_func_like_inline_policy(loom_func_like_cast(linked, helper_op)),
+      LOOM_INLINE_POLICY_INLINE);
 }
 
 TEST_F(LinkerTest, ExactProjectionReportsResolvedTargetIdentity) {

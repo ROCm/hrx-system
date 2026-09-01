@@ -1,0 +1,8 @@
+// RUN: verify
+
+amdgpu.target<gfx11-generic> @target
+
+// ERROR@+1: TYPE/009 {yield_type="reg<amdgpu.sgpr x2>", expected_type="reg<amdgpu.sgpr>"}
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @return_type_mismatch(%predicate: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>) {
+  low.return %predicate : reg<amdgpu.sgpr x2>
+}

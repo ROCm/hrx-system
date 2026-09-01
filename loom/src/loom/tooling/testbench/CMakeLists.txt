@@ -205,6 +205,25 @@ loom_cc_test(
 
 loom_cc_test(
   NAME
+    issue_report_test
+  SRCS
+    "issue_report_test.cc"
+  DEPS
+    ::issue_report
+    ::testbench
+    iree::base
+    iree::base::internal::arena
+    iree::base::internal::json
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::format::text::parser
+    loom::ir
+    loom::ops::check
+    loom::ops::index
+)
+
+loom_cc_test(
+  NAME
     expectation_test
   SRCS
     "expectation_test.cc"

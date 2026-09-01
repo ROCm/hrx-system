@@ -31,6 +31,8 @@
 //   // RUN: with-locations pass <pipeline>
 //                           Run pipeline and print loc() annotations.
 //   // RUN: pass-report <pipeline>
+//                           Parse -> run pipeline -> pass report -> compare.
+//   // RUN: compile-report <pipeline>
 //                           Parse -> run pipeline -> compile report -> compare.
 //   // RUN: format <target> Parse -> convert format -> print -> compare.
 //   // RUN: emit <target>   Parse -> emit analysis or target-structured
@@ -141,7 +143,8 @@ typedef enum loom_check_mode_e {
   LOOM_CHECK_MODE_PASS = 2,       // Parse -> run pipeline -> print -> compare.
   LOOM_CHECK_MODE_FORMAT = 3,  // Parse -> convert format -> print -> compare.
   LOOM_CHECK_MODE_EMIT = 4,    // Parse -> emit target/check output -> compare.
-  LOOM_CHECK_MODE_PASS_REPORT = 5,  // Parse -> run pipeline -> report.
+  LOOM_CHECK_MODE_COMPILE_REPORT = 5,  // Run pipeline -> compile report.
+  LOOM_CHECK_MODE_PASS_REPORT = 6,     // Run pipeline -> pass report.
 } loom_check_mode_t;
 
 // Flags controlling optional textual output surfaces for a test case.
@@ -166,6 +169,8 @@ static inline const char* loom_check_mode_name(loom_check_mode_t mode) {
       return "emit";
     case LOOM_CHECK_MODE_PASS_REPORT:
       return "pass-report";
+    case LOOM_CHECK_MODE_COMPILE_REPORT:
+      return "compile-report";
     default:
       return "unknown";
   }

@@ -69,7 +69,11 @@ loom_module(
 # providers through their normal iree-test-loom suites.
 iree_execution_test_suite(
     name = "execution_test",
-    data = glob(["*.loom"]),
+    data = [
+        "cluster_b128_multicast.loom",
+        "shared_memory_vector_tile.loom",
+        "wave64_reductions.loom",
+    ],
     manifests = ["hip_authoring.test.json"],
     tags = ["hostonly"],
     target_compatible_with = loom_config_compatible_with([

@@ -280,11 +280,7 @@ loom_cc_binary(
 
 iree_execution_test_suite(
     name = "execution_test",
-    data = [
-        "testdata/duplicate_symbol.loom",
-        "testdata/scalar_benchmarks.loom",
-        "//loom/src/loom/tools/iree-test-loom:testdata/planning_issue_cases.loom",
-    ],
+    data = ["testdata/scalar_benchmarks.loom"],
     manifests = ["iree-benchmark-loom.test.json"],
     tags = ["hostonly"],
     tools = {

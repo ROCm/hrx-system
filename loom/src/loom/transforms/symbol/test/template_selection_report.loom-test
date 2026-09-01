@@ -1,0 +1,64 @@
+// RUN: pass-report select-templates
+
+template.decl @demo.report(%m: index) -> (index)
+
+template.def<@demo.report> priority(10) @aligned(%m: index) -> (index) where [mul(%m, 16)] {
+  template.return %m : index
+}
+
+template.def<@demo.report> priority(1) @fallback(%m: index) -> (index) {
+  template.return %m : index
+}
+
+func.def public @entry() -> (index) {
+  %n = index.constant 15 : index
+  %result = template.apply<@demo.report>(%n) : (index) -> (index)
+  func.return %result : index
+}
+
+// ----
+{"invocations":[{"pass":"select-templates","kind":"module","anchor":"module","pipeline":"__command_line","symbol":"<none>","instruction_index":0,"duration_ns":0,"changed":true,"status":{"code":0,"name":"OK"},"statistics":{"apply-sites":1,"exact-call-sites":0,"selected-sites":1,"fallback-selected-sites":1,"unresolved-sites":0,"no-provider-sites":0,"target-mismatch-sites":0,"rejected-sites":0,"family-rejected-sites":0,"missing-fact-sites":0,"ambiguous-sites":0,"materialization-blocked-sites":0,"provider-edges":1,"symbols-pruned":1},"details":[{"category":"template-selection","outcome":"fallback_selected","function":"entry","application_op":"template.apply","family":"demo.report","selected_provider":"fallback","selected_priority":1,"highest_provider_priority":10,"provider_count":2,"target_identity_match_count":2,"target_identity_unresolved_count":0,"possible_count":1,"best_match_count":1},{"category":"value-facts","acquisition_count":1,"cache_hit_count":0,"recomputation_count":1,"preparation_count":0,"invalidation_count":1,"scope_clear_count":1,"computed_value_count":2,"cleared_value_count":2}]}]}
+
+// ====
+// RUN: pass-report select-templates{mode=final}
+
+template.decl @demo.target_condition_report(%value: i32) -> (i32)
+
+template.def<@demo.target_condition_report> requires [#target.subgroup.size<64>] priority(10) @wave64(%value: i32) -> (i32) {
+  template.return %value : i32
+}
+
+template.def<@demo.target_condition_report> priority(1) @fallback(%value: i32) -> (i32) {
+  template.return %value : i32
+}
+
+func.def public @entry(%arg: i32) -> (i32) {
+  %result = template.apply<@demo.target_condition_report>(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+{"invocations":[{"pass":"select-templates","kind":"module","anchor":"module","pipeline":"__command_line","symbol":"<none>","instruction_index":0,"duration_ns":0,"changed":true,"status":{"code":0,"name":"OK"},"statistics":{"apply-sites":1,"exact-call-sites":0,"selected-sites":1,"fallback-selected-sites":1,"unresolved-sites":0,"no-provider-sites":0,"target-mismatch-sites":0,"rejected-sites":0,"family-rejected-sites":0,"missing-fact-sites":0,"ambiguous-sites":0,"materialization-blocked-sites":0,"provider-edges":1,"symbols-pruned":1},"details":[{"category":"template-selection","outcome":"fallback_selected","function":"entry","application_op":"template.apply","family":"demo.target_condition_report","selected_provider":"fallback","selected_priority":1,"unresolved_provider":"wave64","unresolved_priority":10,"unresolved_contract":"provider","unresolved_reason":"target_condition","unresolved_condition":"target.subgroup.size","highest_provider_priority":10,"provider_count":2,"target_identity_match_count":2,"target_identity_unresolved_count":0,"possible_count":2,"best_match_count":1}]}]}
+
+// ====
+// RUN: pass-report select-templates{mode=final}
+
+test.target<low_core> @low_core
+
+template.decl @demo.target_identity_report(%value: i32) -> (i32)
+
+template.def<@demo.target_identity_report> target(@low_core) priority(10) @targeted(%value: i32) -> (i32) {
+  template.return %value : i32
+}
+
+template.def<@demo.target_identity_report> priority(1) @fallback(%value: i32) -> (i32) {
+  template.return %value : i32
+}
+
+func.def public @entry(%arg: i32) -> (i32) {
+  %result = template.apply<@demo.target_identity_report>(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+{"invocations":[{"pass":"select-templates","kind":"module","anchor":"module","pipeline":"__command_line","symbol":"<none>","instruction_index":0,"duration_ns":0,"changed":true,"status":{"code":0,"name":"OK"},"statistics":{"apply-sites":1,"exact-call-sites":0,"selected-sites":1,"fallback-selected-sites":1,"unresolved-sites":0,"no-provider-sites":0,"target-mismatch-sites":0,"rejected-sites":0,"family-rejected-sites":0,"missing-fact-sites":0,"ambiguous-sites":0,"materialization-blocked-sites":0,"provider-edges":1,"symbols-pruned":1},"details":[{"category":"template-selection","outcome":"fallback_selected","function":"entry","application_op":"template.apply","family":"demo.target_identity_report","selected_provider":"fallback","selected_priority":1,"unresolved_provider":"targeted","unresolved_priority":10,"unresolved_contract":"provider","unresolved_reason":"target_identity","highest_provider_priority":10,"provider_count":2,"target_identity_match_count":1,"target_identity_unresolved_count":1,"possible_count":2,"best_match_count":1}]}]}

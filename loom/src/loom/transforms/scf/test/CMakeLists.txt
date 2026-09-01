@@ -17,6 +17,7 @@ loom_check_test_suite(
     "scf_to_cfg.loom-test"
     "scf_unroll.loom-test"
     "scf_unroll_bounds.loom-test"
+    "scf_unroll_report.loom-test"
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
