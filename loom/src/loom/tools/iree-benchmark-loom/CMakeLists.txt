@@ -91,12 +91,12 @@ loom_cc_library(
     loom::sanitizer::options
     loom::target::reporting::artifact_manifest
     loom::tooling::cli::help
+    loom::tooling::compile::options
     loom::tooling::compile::pipeline
+    loom::tooling::compile::report_capture
     loom::tooling::config
     loom::tooling::context
     loom::tooling::execution::benchmark
-    loom::tooling::execution::compile_options
-    loom::tooling::execution::compile_report_capture
     loom::tooling::execution::hal::artifact
     loom::tooling::execution::hal::benchmark
     loom::tooling::execution::hal::candidate

@@ -42,7 +42,7 @@ const loom_artifact_provider_t* loom_artifact_provider_registry_lookup(
 }
 
 static iree_status_t loom_artifact_candidate_publish_report(
-    const loom_run_candidate_compile_options_t* options,
+    const loom_compile_options_t* options,
     const loom_artifact_candidate_t* candidate) {
   if (options->report == NULL) {
     return iree_ok_status();
@@ -57,8 +57,8 @@ static iree_status_t loom_artifact_candidate_publish_report(
 
 static iree_status_t loom_artifact_candidate_initialize(
     const loom_artifact_provider_t* provider,
-    const loom_run_candidate_compile_options_t* options,
-    iree_allocator_t allocator, loom_artifact_candidate_t* out_candidate) {
+    const loom_compile_options_t* options, iree_allocator_t allocator,
+    loom_artifact_candidate_t* out_candidate) {
   *out_candidate = (loom_artifact_candidate_t){
       .host_allocator = allocator,
       .provider = provider,
@@ -81,8 +81,8 @@ static iree_status_t loom_artifact_candidate_initialize(
 }
 
 static void loom_artifact_candidate_record_report_status(
-    const loom_run_candidate_compile_options_t* options,
-    loom_artifact_candidate_t* candidate, iree_status_code_t status_code) {
+    const loom_compile_options_t* options, loom_artifact_candidate_t* candidate,
+    iree_status_code_t status_code) {
   loom_target_compile_report_t* report =
       options->report != NULL ? &candidate->compile_report : NULL;
   if (report == NULL) {
@@ -107,8 +107,8 @@ static void loom_artifact_candidate_record_report_status(
 static iree_status_t loom_artifact_candidate_emit(
     const loom_artifact_provider_t* provider,
     const loom_artifact_target_t* target, loom_module_t* module,
-    const loom_run_candidate_compile_options_t* options,
-    iree_allocator_t allocator, loom_artifact_candidate_t* candidate) {
+    const loom_compile_options_t* options, iree_allocator_t allocator,
+    loom_artifact_candidate_t* candidate) {
   if (provider->emit_artifact == NULL) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "artifact provider '%.*s' is missing required "
@@ -118,7 +118,7 @@ static iree_status_t loom_artifact_candidate_emit(
 
   loom_target_compile_report_t* report =
       options->report != NULL ? &candidate->compile_report : NULL;
-  loom_run_candidate_compile_options_t provider_options = *options;
+  loom_compile_options_t provider_options = *options;
   provider_options.report = report;
   iree_status_t status = provider->emit_artifact(
       provider, module, target, &provider_options, allocator,
@@ -140,8 +140,8 @@ static iree_status_t loom_artifact_candidate_emit(
 iree_status_t loom_artifact_candidate_emit_target(
     const loom_artifact_provider_t* provider,
     const loom_artifact_target_t* target, loom_module_t* module,
-    const loom_run_candidate_compile_options_t* options,
-    iree_allocator_t allocator, loom_artifact_candidate_t* out_candidate) {
+    const loom_compile_options_t* options, iree_allocator_t allocator,
+    loom_artifact_candidate_t* out_candidate) {
   if (target == NULL) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "artifact emission requires a selected target");
@@ -164,8 +164,8 @@ iree_status_t loom_artifact_candidate_emit_target(
 
 iree_status_t loom_artifact_candidate_emit_module_target(
     const loom_artifact_provider_t* provider, loom_module_t* module,
-    const loom_run_candidate_compile_options_t* options,
-    iree_allocator_t allocator, loom_artifact_candidate_t* out_candidate) {
+    const loom_compile_options_t* options, iree_allocator_t allocator,
+    loom_artifact_candidate_t* out_candidate) {
   iree_status_t status = loom_artifact_candidate_initialize(
       provider, options, allocator, out_candidate);
   if (iree_status_is_ok(status)) {

@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/tooling/execution/compile_report_capture.h"
+#include "loom/tooling/compile/report_capture.h"
 
 #include <string>
 
@@ -33,21 +33,20 @@ static std::string EmitDiagnosticJsonObject(
 }
 
 TEST(CompileReportCaptureTest, ConfiguresDetailedReportRequest) {
-  loom_run_compile_report_capture_options_t options = {};
-  loom_run_compile_report_capture_options_initialize(&options);
-  options.sink_format = LOOM_RUN_COMPILE_REPORT_SINK_FORMAT_JSON;
+  loom_compile_report_capture_options_t options = {};
+  loom_compile_report_capture_options_initialize(&options);
+  options.sink_format = LOOM_COMPILE_REPORT_SINK_FORMAT_JSON;
   options.detail_mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS;
 
-  loom_run_compile_report_capture_t capture = {};
-  IREE_ASSERT_OK(loom_run_compile_report_capture_initialize(
+  loom_compile_report_capture_t capture = {};
+  IREE_ASSERT_OK(loom_compile_report_capture_initialize(
       &options, iree_allocator_system(), &capture));
 
-  loom_run_candidate_compile_options_t compile_options = {};
-  loom_run_candidate_compile_options_initialize(&compile_options);
-  loom_run_compile_report_capture_configure_compile_options(&capture,
-                                                            &compile_options);
+  loom_compile_options_t compile_options = {};
+  loom_compile_options_initialize(&compile_options);
+  loom_compile_report_capture_configure_compile_options(&capture,
+                                                        &compile_options);
   EXPECT_EQ(compile_options.report, &capture.report);
-  EXPECT_EQ(compile_options.report_capture, &capture);
   EXPECT_TRUE(iree_all_bits_set(compile_options.target_pipeline_options
                                     .source_to_low_legality_diagnostic_flags,
                                 LOOM_TARGET_LOW_LEGALITY_DIAGNOSTIC_ALL));
@@ -65,24 +64,24 @@ TEST(CompileReportCaptureTest, ConfiguresDetailedReportRequest) {
           LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_LEGALIZATION_ROWS |
           LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_INSERTION_ROWS));
 
-  loom_run_compile_report_capture_deinitialize(&capture);
+  loom_compile_report_capture_deinitialize(&capture);
 }
 
 TEST(CompileReportCaptureTest,
      SummaryReportRequestsEconomicsWithoutSourceLowDiagnostics) {
-  loom_run_compile_report_capture_options_t options = {};
-  loom_run_compile_report_capture_options_initialize(&options);
-  options.sink_format = LOOM_RUN_COMPILE_REPORT_SINK_FORMAT_JSON;
+  loom_compile_report_capture_options_t options = {};
+  loom_compile_report_capture_options_initialize(&options);
+  options.sink_format = LOOM_COMPILE_REPORT_SINK_FORMAT_JSON;
   options.detail_mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY;
 
-  loom_run_compile_report_capture_t capture = {};
-  IREE_ASSERT_OK(loom_run_compile_report_capture_initialize(
+  loom_compile_report_capture_t capture = {};
+  IREE_ASSERT_OK(loom_compile_report_capture_initialize(
       &options, iree_allocator_system(), &capture));
 
-  loom_run_candidate_compile_options_t compile_options = {};
-  loom_run_candidate_compile_options_initialize(&compile_options);
-  loom_run_compile_report_capture_configure_compile_options(&capture,
-                                                            &compile_options);
+  loom_compile_options_t compile_options = {};
+  loom_compile_options_initialize(&compile_options);
+  loom_compile_report_capture_configure_compile_options(&capture,
+                                                        &compile_options);
   EXPECT_EQ(compile_options.target_pipeline_options
                 .source_to_low_legality_diagnostic_flags,
             0u);
@@ -91,17 +90,17 @@ TEST(CompileReportCaptureTest,
                 LOOM_TARGET_COMPILE_REPORT_DETAIL_SCHEDULE_BAND_SUMMARY_ROWS |
                 LOOM_TARGET_COMPILE_REPORT_DETAIL_SOURCE_LOW_ROWS);
 
-  loom_run_compile_report_capture_deinitialize(&capture);
+  loom_compile_report_capture_deinitialize(&capture);
 }
 
 TEST(CompileReportCaptureTest, AppendsWithSeparator) {
-  loom_run_compile_report_capture_options_t options = {};
-  loom_run_compile_report_capture_options_initialize(&options);
-  options.sink_format = LOOM_RUN_COMPILE_REPORT_SINK_FORMAT_TEXT;
+  loom_compile_report_capture_options_t options = {};
+  loom_compile_report_capture_options_initialize(&options);
+  options.sink_format = LOOM_COMPILE_REPORT_SINK_FORMAT_TEXT;
   options.detail_mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY;
 
-  loom_run_compile_report_capture_t capture = {};
-  IREE_ASSERT_OK(loom_run_compile_report_capture_initialize(
+  loom_compile_report_capture_t capture = {};
+  IREE_ASSERT_OK(loom_compile_report_capture_initialize(
       &options, iree_allocator_system(), &capture));
   capture.report.artifact_kind =
       LOOM_TARGET_COMPILE_ARTIFACT_KIND_TARGET_ARTIFACT;
@@ -110,25 +109,24 @@ TEST(CompileReportCaptureTest, AppendsWithSeparator) {
   iree_string_builder_initialize(iree_allocator_system(), &builder);
   IREE_ASSERT_OK(
       iree_string_builder_append_string(&builder, IREE_SV("output")));
-  IREE_ASSERT_OK(
-      loom_run_compile_report_capture_append_text(&capture, &builder));
+  IREE_ASSERT_OK(loom_compile_report_capture_append_text(&capture, &builder));
 
   iree_string_view_t output = iree_string_builder_view(&builder);
   EXPECT_NE(iree_string_view_find(output, IREE_SV("output\nCOMPILE-REPORT"), 0),
             IREE_STRING_VIEW_NPOS);
 
   iree_string_builder_deinitialize(&builder);
-  loom_run_compile_report_capture_deinitialize(&capture);
+  loom_compile_report_capture_deinitialize(&capture);
 }
 
 TEST(CompileReportCaptureTest, EmbedsCanonicalDiagnosticJson) {
-  loom_run_compile_report_capture_options_t options = {};
-  loom_run_compile_report_capture_options_initialize(&options);
-  options.sink_format = LOOM_RUN_COMPILE_REPORT_SINK_FORMAT_JSON;
+  loom_compile_report_capture_options_t options = {};
+  loom_compile_report_capture_options_initialize(&options);
+  options.sink_format = LOOM_COMPILE_REPORT_SINK_FORMAT_JSON;
   options.detail_mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS;
 
-  loom_run_compile_report_capture_t capture = {};
-  IREE_ASSERT_OK(loom_run_compile_report_capture_initialize(
+  loom_compile_report_capture_t capture = {};
+  IREE_ASSERT_OK(loom_compile_report_capture_initialize(
       &options, iree_allocator_system(), &capture));
 
   const iree_string_view_t source =
@@ -169,15 +167,14 @@ TEST(CompileReportCaptureTest, EmbedsCanonicalDiagnosticJson) {
                                                 nullptr};
   const std::string canonical_diagnostic_json =
       EmitDiagnosticJsonObject(&diagnostic, type_formatter);
-  IREE_ASSERT_OK(loom_run_compile_report_capture_record_diagnostic(
+  IREE_ASSERT_OK(loom_compile_report_capture_record_diagnostic(
       &capture, &diagnostic, type_formatter));
 
   iree_string_builder_t builder;
   iree_string_builder_initialize(iree_allocator_system(), &builder);
   loom_output_stream_t stream;
   loom_output_stream_for_builder(&builder, &stream);
-  IREE_ASSERT_OK(
-      loom_run_compile_report_capture_append_json(&capture, &stream));
+  IREE_ASSERT_OK(loom_compile_report_capture_append_json(&capture, &stream));
 
   const std::string report_json(iree_string_builder_buffer(&builder),
                                 iree_string_builder_size(&builder));
@@ -190,17 +187,17 @@ TEST(CompileReportCaptureTest, EmbedsCanonicalDiagnosticJson) {
             std::string::npos);
 
   iree_string_builder_deinitialize(&builder);
-  loom_run_compile_report_capture_deinitialize(&capture);
+  loom_compile_report_capture_deinitialize(&capture);
 }
 
 TEST(CompileReportCaptureTest, TextReportsDoNotSerializeDiagnosticJson) {
-  loom_run_compile_report_capture_options_t options = {};
-  loom_run_compile_report_capture_options_initialize(&options);
-  options.sink_format = LOOM_RUN_COMPILE_REPORT_SINK_FORMAT_TEXT;
+  loom_compile_report_capture_options_t options = {};
+  loom_compile_report_capture_options_initialize(&options);
+  options.sink_format = LOOM_COMPILE_REPORT_SINK_FORMAT_TEXT;
   options.detail_mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS;
 
-  loom_run_compile_report_capture_t capture = {};
-  IREE_ASSERT_OK(loom_run_compile_report_capture_initialize(
+  loom_compile_report_capture_t capture = {};
+  IREE_ASSERT_OK(loom_compile_report_capture_initialize(
       &options, iree_allocator_system(), &capture));
 
   loom_diagnostic_param_t params[] = {loom_param_string(IREE_SV("x"))};
@@ -211,7 +208,7 @@ TEST(CompileReportCaptureTest, TextReportsDoNotSerializeDiagnosticJson) {
       /*.param_count=*/IREE_ARRAYSIZE(params),
       /*.emitter=*/LOOM_EMITTER_PARSER,
   };
-  IREE_ASSERT_OK(loom_run_compile_report_capture_record_diagnostic(
+  IREE_ASSERT_OK(loom_compile_report_capture_record_diagnostic(
       &capture, &diagnostic,
       (loom_type_formatter_t){loom_type_format_minimal, nullptr}));
 
@@ -219,17 +216,17 @@ TEST(CompileReportCaptureTest, TextReportsDoNotSerializeDiagnosticJson) {
   EXPECT_TRUE(iree_string_view_is_empty(
       loom_json_value_list_body(&capture.diagnostics.json_values)));
 
-  loom_run_compile_report_capture_deinitialize(&capture);
+  loom_compile_report_capture_deinitialize(&capture);
 }
 
 TEST(CompileReportCaptureTest, AppendsJsonObject) {
-  loom_run_compile_report_capture_options_t options = {};
-  loom_run_compile_report_capture_options_initialize(&options);
-  options.sink_format = LOOM_RUN_COMPILE_REPORT_SINK_FORMAT_JSON;
+  loom_compile_report_capture_options_t options = {};
+  loom_compile_report_capture_options_initialize(&options);
+  options.sink_format = LOOM_COMPILE_REPORT_SINK_FORMAT_JSON;
   options.detail_mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY;
 
-  loom_run_compile_report_capture_t capture = {};
-  IREE_ASSERT_OK(loom_run_compile_report_capture_initialize(
+  loom_compile_report_capture_t capture = {};
+  IREE_ASSERT_OK(loom_compile_report_capture_initialize(
       &options, iree_allocator_system(), &capture));
   capture.report.artifact_kind =
       LOOM_TARGET_COMPILE_ARTIFACT_KIND_TARGET_ARTIFACT;
@@ -238,52 +235,51 @@ TEST(CompileReportCaptureTest, AppendsJsonObject) {
   iree_string_builder_initialize(iree_allocator_system(), &builder);
   loom_output_stream_t stream;
   loom_output_stream_for_builder(&builder, &stream);
-  IREE_ASSERT_OK(
-      loom_run_compile_report_capture_append_json(&capture, &stream));
+  IREE_ASSERT_OK(loom_compile_report_capture_append_json(&capture, &stream));
 
   iree_string_view_t output = iree_string_builder_view(&builder);
   EXPECT_NE(iree_string_view_find(
                 output, IREE_SV("\"artifact_kind\":\"target-artifact\""), 0),
             IREE_STRING_VIEW_NPOS);
   iree_string_builder_deinitialize(&builder);
-  loom_run_compile_report_capture_deinitialize(&capture);
+  loom_compile_report_capture_deinitialize(&capture);
 }
 
 TEST(CompileReportCaptureTest, ParsesStructuredRequestsByDefault) {
-  loom_run_compile_report_capture_options_t options = {};
-  loom_run_compile_report_capture_options_initialize(&options);
+  loom_compile_report_capture_options_t options = {};
+  loom_compile_report_capture_options_initialize(&options);
 
-  IREE_ASSERT_OK(loom_run_compile_report_capture_options_parse_request(
+  IREE_ASSERT_OK(loom_compile_report_capture_options_parse_request(
       IREE_SV("summary"), &options));
-  EXPECT_EQ(options.sink_format, LOOM_RUN_COMPILE_REPORT_SINK_FORMAT_JSON);
+  EXPECT_EQ(options.sink_format, LOOM_COMPILE_REPORT_SINK_FORMAT_JSON);
   EXPECT_EQ(options.detail_mode,
             LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY);
 
-  IREE_ASSERT_OK(loom_run_compile_report_capture_options_parse_request(
+  IREE_ASSERT_OK(loom_compile_report_capture_options_parse_request(
       IREE_SV("details"), &options));
-  EXPECT_EQ(options.sink_format, LOOM_RUN_COMPILE_REPORT_SINK_FORMAT_JSON);
+  EXPECT_EQ(options.sink_format, LOOM_COMPILE_REPORT_SINK_FORMAT_JSON);
   EXPECT_EQ(options.detail_mode,
             LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS);
 
-  IREE_ASSERT_OK(loom_run_compile_report_capture_options_parse_request(
+  IREE_ASSERT_OK(loom_compile_report_capture_options_parse_request(
       IREE_SV("text-details"), &options));
-  EXPECT_EQ(options.sink_format, LOOM_RUN_COMPILE_REPORT_SINK_FORMAT_TEXT);
+  EXPECT_EQ(options.sink_format, LOOM_COMPILE_REPORT_SINK_FORMAT_TEXT);
   EXPECT_EQ(options.detail_mode,
             LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS);
 
-  IREE_ASSERT_OK(loom_run_compile_report_capture_options_parse_request(
+  IREE_ASSERT_OK(loom_compile_report_capture_options_parse_request(
       IREE_SV("none"), &options));
-  EXPECT_FALSE(loom_run_compile_report_capture_options_is_enabled(&options));
+  EXPECT_FALSE(loom_compile_report_capture_options_is_enabled(&options));
 }
 
 TEST(CompileReportCaptureTest, AppendsConfiguredJsonOutput) {
-  loom_run_compile_report_capture_options_t options = {};
-  loom_run_compile_report_capture_options_initialize(&options);
-  IREE_ASSERT_OK(loom_run_compile_report_capture_options_parse_request(
+  loom_compile_report_capture_options_t options = {};
+  loom_compile_report_capture_options_initialize(&options);
+  IREE_ASSERT_OK(loom_compile_report_capture_options_parse_request(
       IREE_SV("summary"), &options));
 
-  loom_run_compile_report_capture_t capture = {};
-  IREE_ASSERT_OK(loom_run_compile_report_capture_initialize(
+  loom_compile_report_capture_t capture = {};
+  IREE_ASSERT_OK(loom_compile_report_capture_initialize(
       &options, iree_allocator_system(), &capture));
   capture.report.artifact_kind =
       LOOM_TARGET_COMPILE_ARTIFACT_KIND_TARGET_ARTIFACT;
@@ -292,8 +288,7 @@ TEST(CompileReportCaptureTest, AppendsConfiguredJsonOutput) {
   iree_string_builder_initialize(iree_allocator_system(), &builder);
   IREE_ASSERT_OK(
       iree_string_builder_append_string(&builder, IREE_SV("output")));
-  IREE_ASSERT_OK(
-      loom_run_compile_report_capture_append_output(&capture, &builder));
+  IREE_ASSERT_OK(loom_compile_report_capture_append_output(&capture, &builder));
 
   iree_string_view_t output = iree_string_builder_view(&builder);
   EXPECT_NE(
@@ -309,7 +304,7 @@ TEST(CompileReportCaptureTest, AppendsConfiguredJsonOutput) {
             IREE_STRING_VIEW_NPOS);
 
   iree_string_builder_deinitialize(&builder);
-  loom_run_compile_report_capture_deinitialize(&capture);
+  loom_compile_report_capture_deinitialize(&capture);
 }
 
 }  // namespace

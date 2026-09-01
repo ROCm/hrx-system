@@ -22,7 +22,7 @@
 #include "loom/target/provider.h"
 #include "loom/target/reporting/report.h"
 #include "loom/target/types.h"
-#include "loom/tooling/execution/compile_options.h"
+#include "loom/tooling/compile/options.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -84,8 +84,7 @@ typedef void (*loom_artifact_provider_deinitialize_target_fn_t)(
 // infrastructure failures return a non-OK status.
 typedef iree_status_t (*loom_artifact_provider_emit_fn_t)(
     const loom_artifact_provider_t* provider, loom_module_t* module,
-    const loom_artifact_target_t* target,
-    const loom_run_candidate_compile_options_t* options,
+    const loom_artifact_target_t* target, const loom_compile_options_t* options,
     iree_allocator_t allocator, bool* out_emitted,
     loom_artifact_t* out_artifact);
 
@@ -151,14 +150,14 @@ typedef struct loom_artifact_candidate_t {
 iree_status_t loom_artifact_candidate_emit_target(
     const loom_artifact_provider_t* provider,
     const loom_artifact_target_t* target, loom_module_t* module,
-    const loom_run_candidate_compile_options_t* options,
-    iree_allocator_t allocator, loom_artifact_candidate_t* out_candidate);
+    const loom_compile_options_t* options, iree_allocator_t allocator,
+    loom_artifact_candidate_t* out_candidate);
 
 // Emits |module| using its authored target records.
 iree_status_t loom_artifact_candidate_emit_module_target(
     const loom_artifact_provider_t* provider, loom_module_t* module,
-    const loom_run_candidate_compile_options_t* options,
-    iree_allocator_t allocator, loom_artifact_candidate_t* out_candidate);
+    const loom_compile_options_t* options, iree_allocator_t allocator,
+    loom_artifact_candidate_t* out_candidate);
 
 // Releases all artifact storage owned by |candidate|.
 void loom_artifact_candidate_deinitialize(loom_artifact_candidate_t* candidate);

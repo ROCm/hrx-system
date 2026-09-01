@@ -105,8 +105,7 @@ loom_amdgpu_artifact_provider_runtime_globals(
 
 static iree_status_t loom_amdgpu_artifact_provider_emit_artifact(
     const loom_artifact_provider_t* provider, loom_module_t* module,
-    const loom_artifact_target_t* target,
-    const loom_run_candidate_compile_options_t* options,
+    const loom_artifact_target_t* target, const loom_compile_options_t* options,
     iree_allocator_t allocator, bool* out_emitted,
     loom_artifact_t* out_artifact) {
   IREE_ASSERT_ARGUMENT(provider);
@@ -130,9 +129,8 @@ static iree_status_t loom_amdgpu_artifact_provider_emit_artifact(
       .source_resolver = options->source_resolver,
       .max_errors = options->max_errors,
       .report = options->report,
-      .capture_target_listing =
-          iree_all_bits_set(options->artifact_flags,
-                            LOOM_RUN_CANDIDATE_ARTIFACT_FLAG_TARGET_LISTING),
+      .capture_target_listing = iree_all_bits_set(
+          options->artifact_flags, LOOM_COMPILE_ARTIFACT_FLAG_TARGET_LISTING),
       .artifact_name = options->artifact_manifest.artifact_name,
       .artifact_manifest_identifier = options->artifact_manifest.identifier,
       .artifact_manifest =

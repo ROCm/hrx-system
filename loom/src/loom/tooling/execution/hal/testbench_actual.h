@@ -19,8 +19,8 @@
 #include "loom/analysis/kernel_launch_config.h"
 #include "loom/sanitizer/options.h"
 #include "loom/target/provider.h"
+#include "loom/tooling/compile/options.h"
 #include "loom/tooling/compile/pipeline.h"
-#include "loom/tooling/execution/compile_options.h"
 #include "loom/tooling/execution/hal/artifact.h"
 #include "loom/tooling/execution/hal/candidate.h"
 #include "loom/tooling/execution/hal/device_provider.h"
@@ -124,9 +124,9 @@ typedef struct loom_run_hal_testbench_actual_provider_options_t {
   // Optional caller-owned structured compile report to populate.
   loom_target_compile_report_t* report;
   // Optional debug artifacts requested from the selected backend.
-  loom_run_candidate_artifact_flags_t artifact_flags;
+  loom_compile_artifact_flags_t artifact_flags;
   // Optional artifact manifest requested from the selected backend.
-  loom_run_candidate_artifact_manifest_options_t artifact_manifest;
+  loom_compile_artifact_manifest_options_t artifact_manifest;
 } loom_run_hal_testbench_actual_provider_options_t;
 
 typedef struct loom_run_hal_testbench_actual_provider_t {
@@ -154,9 +154,9 @@ typedef struct loom_run_hal_testbench_actual_provider_t {
   // Optional caller-owned structured compile report to populate.
   loom_target_compile_report_t* report;
   // Optional debug artifacts requested from the selected backend.
-  loom_run_candidate_artifact_flags_t artifact_flags;
+  loom_compile_artifact_flags_t artifact_flags;
   // Optional artifact manifest requested from the selected backend.
-  loom_run_candidate_artifact_manifest_options_t artifact_manifest;
+  loom_compile_artifact_manifest_options_t artifact_manifest;
   // Private compile module owned by this provider.
   loom_run_module_t compile_module;
   // Config-materialized source kernel retained for launch evaluation.
@@ -233,9 +233,9 @@ typedef struct loom_run_hal_testbench_actual_sequence_options_t {
   // Maximum diagnostics to emit before stopping. Zero uses the default.
   uint32_t max_errors;
   // Optional debug artifacts requested from the selected backend.
-  loom_run_candidate_artifact_flags_t artifact_flags;
+  loom_compile_artifact_flags_t artifact_flags;
   // Optional artifact manifest requested from the selected backend.
-  loom_run_candidate_artifact_manifest_options_t artifact_manifest;
+  loom_compile_artifact_manifest_options_t artifact_manifest;
 } loom_run_hal_testbench_actual_sequence_options_t;
 
 typedef struct loom_run_hal_testbench_actual_sequence_t {

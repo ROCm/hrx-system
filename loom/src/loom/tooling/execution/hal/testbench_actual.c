@@ -24,8 +24,8 @@
 #include "loom/ops/target/facts.h"
 #include "loom/target/function_version.h"
 #include "loom/tooling/compile/pipeline.h"
+#include "loom/tooling/compile/report_capture.h"
 #include "loom/tooling/config/config.h"
-#include "loom/tooling/execution/compile_report_capture.h"
 #include "loom/util/fact_table.h"
 
 typedef struct loom_run_hal_testbench_actual_sequence_span_t
@@ -392,7 +392,7 @@ static iree_status_t loom_run_hal_testbench_materialize_config_set(
   IREE_RETURN_IF_ERROR(loom_tooling_config_materialize_module(
       provider->compile_module.module, &options,
       loom_run_session_block_pool(provider->session), NULL));
-  return loom_run_compile_report_record_materialized_config(
+  return loom_compile_report_record_materialized_config(
       provider->report, provider->compile_module.module, provider->config_set);
 }
 
@@ -695,8 +695,8 @@ iree_status_t loom_run_hal_testbench_actual_provider_compile(
     return iree_ok_status();
   }
 
-  loom_run_candidate_compile_options_t compile_options = {0};
-  loom_run_candidate_compile_options_initialize(&compile_options);
+  loom_compile_options_t compile_options = {0};
+  loom_compile_options_initialize(&compile_options);
   compile_options.function_versions =
       &provider->pipeline_result.function_versions.list;
   compile_options.target_pipeline_options =

@@ -11,12 +11,31 @@ iree_add_all_subdirs()
 
 loom_cc_library(
   NAME
+    options
+  HDRS
+    "options.h"
+  SRCS
+    "options.c"
+  DEPS
+    iree::base
+    loom::error::diagnostic
+    loom::ir
+    loom::target::pipeline_options
+    loom::target::reporting::artifact_manifest
+    loom::target::reporting::report
+    loom::verify
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     artifact
   HDRS
     "artifact.h"
   SRCS
     "artifact.c"
   DEPS
+    ::options
     iree::base
     loom::ir
     loom::target::pipeline_options
@@ -24,7 +43,27 @@ loom_cc_library(
     loom::target::provider
     loom::target::reporting::report
     loom::target::types
-    loom::tooling::execution::compile_options
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    report_capture
+  HDRS
+    "report_capture.h"
+  SRCS
+    "report_capture.c"
+  DEPS
+    ::options
+    iree::base
+    loom::error::diagnostic
+    loom::error::json_sink
+    loom::error::renderer
+    loom::ops::config
+    loom::target::reporting::format
+    loom::target::reporting::report
+    loom::tooling::config
+    loom::util::json
   PUBLIC
 )
 
@@ -58,6 +97,21 @@ loom_cc_library(
     loom::target::types
     loom::verify
   PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    report_capture_test
+  SRCS
+    "report_capture_test.cc"
+  DEPS
+    ::options
+    ::report_capture
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::error::error_defs
+    loom::error::json_sink
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

@@ -26,39 +26,6 @@ loom_cc_library(
 )
 
 loom_cc_library(
-    name = "compile_options",
-    srcs = ["compile_options.c"],
-    hdrs = ["compile_options.h"],
-    deps = [
-        "//loom/src/loom/error:diagnostic",
-        "//loom/src/loom/ir",
-        "//loom/src/loom/target:pipeline_options",
-        "//loom/src/loom/target/reporting:artifact_manifest",
-        "//loom/src/loom/target/reporting:report",
-        "//loom/src/loom/verify",
-        "//runtime/src/iree/base",
-    ],
-)
-
-loom_cc_library(
-    name = "compile_report_capture",
-    srcs = ["compile_report_capture.c"],
-    hdrs = ["compile_report_capture.h"],
-    deps = [
-        ":compile_options",
-        "//loom/src/loom/error:diagnostic",
-        "//loom/src/loom/error:json_sink",
-        "//loom/src/loom/error:renderer",
-        "//loom/src/loom/ops/config",
-        "//loom/src/loom/target/reporting:format",
-        "//loom/src/loom/target/reporting:report",
-        "//loom/src/loom/tooling/config",
-        "//loom/src/loom/util:json",
-        "//runtime/src/iree/base",
-    ],
-)
-
-loom_cc_library(
     name = "execution_provider",
     srcs = ["execution_provider.c"],
     hdrs = ["execution_provider.h"],
@@ -93,10 +60,10 @@ loom_cc_library(
     srcs = ["one_shot.c"],
     hdrs = ["one_shot.h"],
     deps = [
-        ":compile_options",
         ":session",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/tooling/compile:options",
         "//runtime/src/iree/base",
     ],
 )
@@ -126,20 +93,6 @@ loom_cc_test(
     deps = [
         ":benchmark",
         "//loom/src/loom/util:stream",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-    ],
-)
-
-loom_cc_test(
-    name = "compile_report_capture_test",
-    srcs = ["compile_report_capture_test.cc"],
-    deps = [
-        ":compile_options",
-        ":compile_report_capture",
-        "//loom/src/loom/error:error_defs",
-        "//loom/src/loom/error:json_sink",
         "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

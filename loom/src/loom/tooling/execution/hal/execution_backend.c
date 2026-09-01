@@ -12,7 +12,7 @@
 #include "iree/base/byte_sequence.h"
 #include "iree/base/internal/arena.h"
 #include "loom/target/entry_selection.h"
-#include "loom/tooling/execution/compile_report_capture.h"
+#include "loom/tooling/compile/report_capture.h"
 #include "loom/tooling/execution/hal/candidate.h"
 #include "loom/tooling/execution/hal/invocation.h"
 #include "loom/tooling/execution/hal/runtime.h"
@@ -239,7 +239,7 @@ iree_status_t loom_run_hal_execution_backend_run_one_shot(
         iree_string_builder_view(&invocation_result.output));
   }
   if (iree_status_is_ok(status) && request->compile_report_capture != NULL) {
-    status = loom_run_compile_report_capture_append_output(
+    status = loom_compile_report_capture_append_output(
         request->compile_report_capture, &request->result->output);
   }
 

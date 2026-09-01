@@ -4,10 +4,10 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Shared candidate compilation options for Loom execution tools.
+// Shared artifact compilation options for Loom compiler and execution tools.
 
-#ifndef LOOM_TOOLING_EXECUTION_COMPILE_OPTIONS_H_
-#define LOOM_TOOLING_EXECUTION_COMPILE_OPTIONS_H_
+#ifndef LOOM_TOOLING_COMPILE_OPTIONS_H_
+#define LOOM_TOOLING_COMPILE_OPTIONS_H_
 
 #include "iree/base/api.h"
 #include "loom/ir/function_version.h"
@@ -20,19 +20,16 @@
 extern "C" {
 #endif
 
-typedef struct loom_run_compile_report_capture_t
-    loom_run_compile_report_capture_t;
-
-typedef enum loom_run_candidate_artifact_flag_bits_e {
-  LOOM_RUN_CANDIDATE_ARTIFACT_FLAG_NONE = 0u,
+typedef enum loom_compile_artifact_flag_bits_e {
+  LOOM_COMPILE_ARTIFACT_FLAG_NONE = 0u,
   // Requests target-owned textual executable listings when the selected backend
   // can produce them without changing the loaded executable.
-  LOOM_RUN_CANDIDATE_ARTIFACT_FLAG_TARGET_LISTING = 1u << 0,
-} loom_run_candidate_artifact_flag_bits_t;
+  LOOM_COMPILE_ARTIFACT_FLAG_TARGET_LISTING = 1u << 0,
+} loom_compile_artifact_flag_bits_t;
 
-typedef uint32_t loom_run_candidate_artifact_flags_t;
+typedef uint32_t loom_compile_artifact_flags_t;
 
-typedef struct loom_run_candidate_artifact_manifest_options_t {
+typedef struct loom_compile_artifact_manifest_options_t {
   // Selected manifest detail mode.
   loom_target_artifact_manifest_mode_t mode;
 
@@ -41,9 +38,9 @@ typedef struct loom_run_candidate_artifact_manifest_options_t {
 
   // Emitted artifact name recorded inside the manifest.
   iree_string_view_t artifact_name;
-} loom_run_candidate_artifact_manifest_options_t;
+} loom_compile_artifact_manifest_options_t;
 
-typedef struct loom_run_candidate_compile_options_t {
+typedef struct loom_compile_options_t {
   // Optional compiler-owned function versions participating in artifact
   // emission. The list and its version objects are borrowed for the call.
   const loom_function_version_list_t* function_versions;
@@ -61,21 +58,17 @@ typedef struct loom_run_candidate_compile_options_t {
   uint32_t max_errors;
   // Optional caller-owned structured compile report to populate.
   loom_target_compile_report_t* report;
-  // Optional one-shot report capture receiving emitted diagnostics for report
-  // output adapters.
-  loom_run_compile_report_capture_t* report_capture;
   // Optional debug artifacts requested from the selected backend.
-  loom_run_candidate_artifact_flags_t artifact_flags;
+  loom_compile_artifact_flags_t artifact_flags;
   // Optional artifact manifest requested from the selected backend.
-  loom_run_candidate_artifact_manifest_options_t artifact_manifest;
-} loom_run_candidate_compile_options_t;
+  loom_compile_artifact_manifest_options_t artifact_manifest;
+} loom_compile_options_t;
 
 // Initializes compile options with stderr diagnostics and a small error cap.
-void loom_run_candidate_compile_options_initialize(
-    loom_run_candidate_compile_options_t* out_options);
+void loom_compile_options_initialize(loom_compile_options_t* out_options);
 
 #ifdef __cplusplus
 }  // extern "C"
 #endif
 
-#endif  // LOOM_TOOLING_EXECUTION_COMPILE_OPTIONS_H_
+#endif  // LOOM_TOOLING_COMPILE_OPTIONS_H_

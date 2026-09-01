@@ -132,8 +132,8 @@ class AmdgpuArtifactProviderTest : public ::testing::Test {
     ASSERT_NE(module.get(), nullptr);
 
     loom_artifact_target_t target = {};
-    loom_run_candidate_compile_options_t options = {};
-    loom_run_candidate_compile_options_initialize(&options);
+    loom_compile_options_t options = {};
+    loom_compile_options_initialize(&options);
     loom_artifact_t artifact = {};
     bool emitted = false;
     IREE_ASSERT_OK(loom_amdgpu_artifact_provider.emit_artifact(
@@ -294,10 +294,10 @@ TEST_F(AmdgpuArtifactProviderTest, RecordsDetailedReportRows) {
       /*.target_profile=*/&target_profile.base,
       /*.target_key=*/target_info->name,
   };
-  loom_run_candidate_compile_options_t options = {};
-  loom_run_candidate_compile_options_initialize(&options);
+  loom_compile_options_t options = {};
+  loom_compile_options_initialize(&options);
   options.report = &report;
-  options.artifact_flags = LOOM_RUN_CANDIDATE_ARTIFACT_FLAG_TARGET_LISTING;
+  options.artifact_flags = LOOM_COMPILE_ARTIFACT_FLAG_TARGET_LISTING;
   loom_artifact_t artifact = {};
   bool emitted = false;
   IREE_ASSERT_OK(loom_amdgpu_artifact_provider.emit_artifact(
@@ -353,8 +353,8 @@ TEST_F(AmdgpuArtifactProviderTest,
           /*.checks=*/LOOM_SANITIZER_CHECK_ACCESS | LOOM_SANITIZER_CHECK_RACE,
       },
   };
-  loom_run_candidate_compile_options_t options = {};
-  loom_run_candidate_compile_options_initialize(&options);
+  loom_compile_options_t options = {};
+  loom_compile_options_initialize(&options);
   options.target_pipeline_options = target_pipeline_options;
   loom_artifact_t artifact = {};
   bool emitted = false;

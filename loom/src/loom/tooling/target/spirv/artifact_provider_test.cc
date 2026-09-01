@@ -109,8 +109,8 @@ TEST_F(SpirvArtifactProviderTest, EmitsAuthoredRawBdaArtifact) {
   IREE_ASSERT_OK(ParseRawBdaRoundtripModule(&module));
   ASSERT_NE(module.get(), nullptr);
 
-  loom_run_candidate_compile_options_t options = {};
-  loom_run_candidate_compile_options_initialize(&options);
+  loom_compile_options_t options = {};
+  loom_compile_options_initialize(&options);
   loom_artifact_candidate_t candidate = {};
   IREE_ASSERT_OK(loom_artifact_candidate_emit_module_target(
       &loom_spirv_vulkan_artifact_provider, module.get(), &options,

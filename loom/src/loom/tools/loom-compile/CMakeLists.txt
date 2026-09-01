@@ -118,11 +118,11 @@ loom_cc_binary(
     loom::target::reporting::artifact_manifest
     loom::tooling::cli::help
     loom::tooling::compile::artifact
+    loom::tooling::compile::options
     loom::tooling::compile::pipeline
+    loom::tooling::compile::report_capture
     loom::tooling::config
     loom::tooling::context
-    loom::tooling::execution::compile_options
-    loom::tooling::execution::compile_report_capture
     loom::tooling::execution::execution_provider
     loom::tooling::execution::session
     loom::tooling::io::file

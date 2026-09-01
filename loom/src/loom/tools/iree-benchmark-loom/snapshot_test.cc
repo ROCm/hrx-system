@@ -464,13 +464,13 @@ TEST(BenchmarkSnapshotSinkTest, IncludesRequestedCompileReport) {
   iree_benchmark_loom_event_sink_t event_sink = {};
   iree_benchmark_loom_snapshot_event_sink_initialize(&snapshot, &event_sink);
 
-  loom_run_compile_report_capture_options_t capture_options = {};
-  loom_run_compile_report_capture_options_initialize(&capture_options);
-  capture_options.sink_format = LOOM_RUN_COMPILE_REPORT_SINK_FORMAT_JSON;
+  loom_compile_report_capture_options_t capture_options = {};
+  loom_compile_report_capture_options_initialize(&capture_options);
+  capture_options.sink_format = LOOM_COMPILE_REPORT_SINK_FORMAT_JSON;
   capture_options.detail_mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY;
-  loom_run_compile_report_capture_t capture = {};
-  IREE_ASSERT_OK(loom_run_compile_report_capture_initialize(
-      &capture_options, allocator, &capture));
+  loom_compile_report_capture_t capture = {};
+  IREE_ASSERT_OK(loom_compile_report_capture_initialize(&capture_options,
+                                                        allocator, &capture));
   capture.report.artifact_kind =
       LOOM_TARGET_COMPILE_ARTIFACT_KIND_TARGET_ARTIFACT;
   capture.report.detail_flags =
@@ -568,7 +568,7 @@ TEST(BenchmarkSnapshotSinkTest, IncludesRequestedCompileReport) {
       IREE_SV("8")));
 
   iree_string_builder_deinitialize(&output);
-  loom_run_compile_report_capture_deinitialize(&capture);
+  loom_compile_report_capture_deinitialize(&capture);
   iree_benchmark_loom_snapshot_sink_deinitialize(&snapshot);
 }
 

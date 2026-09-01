@@ -56,7 +56,7 @@ static iree_status_t loom_spirv_artifact_provider_emit_entries(
     loom_target_entry_list_t entries, const loom_artifact_target_t* target,
     loom_target_entry_diagnostic_emitter_t* diagnostic_emitter,
     const loom_target_low_descriptor_registry_t* low_registry,
-    const loom_run_candidate_artifact_manifest_options_t* artifact_manifest,
+    const loom_compile_artifact_manifest_options_t* artifact_manifest,
     iree_arena_allocator_t* arena, iree_allocator_t allocator,
     bool* out_emitted, loom_artifact_t* out_artifact) {
   *out_emitted = false;
@@ -166,8 +166,7 @@ static iree_status_t loom_spirv_artifact_provider_emit_entries(
 
 static iree_status_t loom_spirv_artifact_provider_emit_artifact(
     const loom_artifact_provider_t* provider, loom_module_t* module,
-    const loom_artifact_target_t* target,
-    const loom_run_candidate_compile_options_t* options,
+    const loom_artifact_target_t* target, const loom_compile_options_t* options,
     iree_allocator_t allocator, bool* out_emitted,
     loom_artifact_t* out_artifact) {
   IREE_ASSERT_ARGUMENT(provider);

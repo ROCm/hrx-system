@@ -127,12 +127,12 @@ iree_status_t FakeHalSelectCompatibleDeviceTarget(
   return FakeHalSelectDeviceTarget(provider, runtime, allocator, out_target);
 }
 
-iree_status_t FakeHalEmitArtifact(
-    const loom_artifact_provider_t* provider, loom_module_t* module,
-    const loom_artifact_target_t* target,
-    const loom_run_candidate_compile_options_t* options,
-    iree_allocator_t allocator, bool* out_emitted,
-    loom_artifact_t* out_artifact) {
+iree_status_t FakeHalEmitArtifact(const loom_artifact_provider_t* provider,
+                                  loom_module_t* module,
+                                  const loom_artifact_target_t* target,
+                                  const loom_compile_options_t* options,
+                                  iree_allocator_t allocator, bool* out_emitted,
+                                  loom_artifact_t* out_artifact) {
   (void)provider;
   (void)module;
   g_fake_hal_emit_was_called = true;
@@ -244,10 +244,9 @@ class HalCandidateTest : public ::testing::Test {
     return loom_run_module_parse(&session_, &options, out_module);
   }
 
-  void InitializeCompileOptions(
-      loom_run_module_t* run_module,
-      loom_run_candidate_compile_options_t* out_options) {
-    loom_run_candidate_compile_options_initialize(out_options);
+  void InitializeCompileOptions(loom_run_module_t* run_module,
+                                loom_compile_options_t* out_options) {
+    loom_compile_options_initialize(out_options);
     out_options->source_resolver = loom_run_module_source_resolver(run_module);
   }
 
@@ -258,7 +257,7 @@ TEST_F(HalCandidateTest, CompileHalExecutableCandidate) {
   loom_run_module_t run_module = {};
   IREE_ASSERT_OK(Parse(IREE_SV(kHalSource), &run_module));
 
-  loom_run_candidate_compile_options_t options = {};
+  loom_compile_options_t options = {};
   InitializeCompileOptions(&run_module, &options);
   const loom_function_version_list_t function_versions = {};
   options.function_versions = &function_versions;
@@ -333,7 +332,7 @@ TEST_F(HalCandidateTest, CompileHalExecutableCandidateWithoutReport) {
   loom_run_module_t run_module = {};
   IREE_ASSERT_OK(Parse(IREE_SV(kHalSource), &run_module));
 
-  loom_run_candidate_compile_options_t options = {};
+  loom_compile_options_t options = {};
   InitializeCompileOptions(&run_module, &options);
 
   loom_run_hal_candidate_t candidate = {};
@@ -358,7 +357,7 @@ TEST_F(HalCandidateTest, CompileHalRequiresHooks) {
   loom_run_module_t run_module = {};
   IREE_ASSERT_OK(Parse(IREE_SV(kHalSource), &run_module));
 
-  loom_run_candidate_compile_options_t options = {};
+  loom_compile_options_t options = {};
   InitializeCompileOptions(&run_module, &options);
 
   const loom_device_provider_t provider = {

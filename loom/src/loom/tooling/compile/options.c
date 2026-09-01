@@ -4,18 +4,17 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/tooling/execution/compile_options.h"
+#include "loom/tooling/compile/options.h"
 
 #include "loom/error/diagnostic.h"
 
 enum {
-  LOOM_RUN_DEFAULT_MAX_COMPILE_ERRORS = 20,
+  LOOM_COMPILE_DEFAULT_MAX_ERRORS = 20,
 };
 
-void loom_run_candidate_compile_options_initialize(
-    loom_run_candidate_compile_options_t* out_options) {
-  *out_options = (loom_run_candidate_compile_options_t){
+void loom_compile_options_initialize(loom_compile_options_t* out_options) {
+  *out_options = (loom_compile_options_t){
       .diagnostic_sink = {.fn = loom_diagnostic_stderr_sink},
-      .max_errors = LOOM_RUN_DEFAULT_MAX_COMPILE_ERRORS,
+      .max_errors = LOOM_COMPILE_DEFAULT_MAX_ERRORS,
   };
 }

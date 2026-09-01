@@ -25,10 +25,10 @@ loom_cc_library(
     loom::ir
     loom::sanitizer::options
     loom::tooling::cli::help
+    loom::tooling::compile::options
     loom::tooling::compile::pipeline
+    loom::tooling::compile::report_capture
     loom::tooling::context
-    loom::tooling::execution::compile_options
-    loom::tooling::execution::compile_report_capture
     loom::tooling::execution::execution_backend
     loom::tooling::execution::one_shot
     loom::tooling::execution::session

@@ -8,7 +8,7 @@
 
 #include <string.h>
 
-#include "loom/tooling/execution/compile_options.h"
+#include "loom/tooling/compile/options.h"
 #include "loom/tools/iree-benchmark-loom/diagnostics.h"
 #include "loom/tools/iree-benchmark-loom/module_query.h"
 
@@ -18,9 +18,8 @@ iree_status_t iree_benchmark_loom_hal_actual_provider_initialize(
     loom_sanitizer_options_t sanitizer,
     const loom_testbench_invocation_plan_t* kernel_launch,
     iree_string_view_t artifact_path_suffix,
-    const loom_run_compile_report_capture_options_t* compile_report_options,
-    const loom_run_candidate_artifact_manifest_options_t*
-        artifact_manifest_options,
+    const loom_compile_report_capture_options_t* compile_report_options,
+    const loom_compile_artifact_manifest_options_t* artifact_manifest_options,
     iree_benchmark_loom_hal_actual_provider_t* out_provider) {
   *out_provider = (iree_benchmark_loom_hal_actual_provider_t){
       .context = context,
@@ -29,24 +28,24 @@ iree_status_t iree_benchmark_loom_hal_actual_provider_initialize(
   iree_allocator_t host_allocator = context->execution.host_allocator;
   iree_benchmark_loom_diagnostic_capture_initialize(host_allocator,
                                                     &out_provider->diagnostics);
-  loom_run_candidate_artifact_manifest_options_t artifact_manifest = {0};
+  loom_compile_artifact_manifest_options_t artifact_manifest = {0};
   if (artifact_manifest_options != NULL) {
     artifact_manifest = *artifact_manifest_options;
   }
-  iree_status_t status = loom_run_compile_report_capture_initialize(
+  iree_status_t status = loom_compile_report_capture_initialize(
       compile_report_options, host_allocator,
       &out_provider->compile_report_capture);
   if (iree_status_is_ok(status)) {
     out_provider->compile_report_capture_initialized = true;
-    loom_run_candidate_compile_options_t report_options = {0};
-    loom_run_candidate_compile_options_initialize(&report_options);
-    loom_run_compile_report_capture_configure_compile_options(
+    loom_compile_options_t report_options = {0};
+    loom_compile_options_initialize(&report_options);
+    loom_compile_report_capture_configure_compile_options(
         &out_provider->compile_report_capture, &report_options);
-    loom_run_candidate_artifact_flags_t artifact_flags = 0;
+    loom_compile_artifact_flags_t artifact_flags = 0;
     if (context->artifact_bundle != NULL && context->artifact_bundle->enabled &&
         context->artifact_bundle->policy >=
             IREE_BENCHMARK_LOOM_ARTIFACT_BUNDLE_POLICY_DEBUG) {
-      artifact_flags |= LOOM_RUN_CANDIDATE_ARTIFACT_FLAG_TARGET_LISTING;
+      artifact_flags |= LOOM_COMPILE_ARTIFACT_FLAG_TARGET_LISTING;
     }
     loom_run_hal_testbench_actual_provider_options_t provider_options = {
         .context = &context->execution,
@@ -87,8 +86,7 @@ void iree_benchmark_loom_hal_actual_provider_deinitialize(
   }
   loom_run_hal_testbench_actual_provider_deinitialize(&provider->execution);
   if (provider->compile_report_capture_initialized) {
-    loom_run_compile_report_capture_deinitialize(
-        &provider->compile_report_capture);
+    loom_compile_report_capture_deinitialize(&provider->compile_report_capture);
   }
   iree_allocator_t host_allocator = provider->context->execution.host_allocator;
   iree_allocator_free(host_allocator, provider->hal_executable_path_storage);
@@ -106,9 +104,8 @@ iree_status_t iree_benchmark_loom_hal_actual_sequence_initialize(
     const loom_run_module_t* run_module, iree_string_view_t pipeline,
     loom_sanitizer_options_t sanitizer,
     const loom_testbench_case_plan_t* case_plan,
-    const loom_run_compile_report_capture_options_t* compile_report_options,
-    const loom_run_candidate_artifact_manifest_options_t*
-        artifact_manifest_options,
+    const loom_compile_report_capture_options_t* compile_report_options,
+    const loom_compile_artifact_manifest_options_t* artifact_manifest_options,
     iree_benchmark_loom_hal_actual_sequence_t* out_sequence) {
   IREE_ASSERT_ARGUMENT(context);
   IREE_ASSERT_ARGUMENT(case_plan);

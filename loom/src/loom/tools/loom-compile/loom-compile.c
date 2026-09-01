@@ -27,9 +27,9 @@
 #include "loom/tooling/cli/help.h"
 #include "loom/tooling/compile/artifact.h"
 #include "loom/tooling/compile/pipeline.h"
+#include "loom/tooling/compile/report_capture.h"
 #include "loom/tooling/config/config.h"
 #include "loom/tooling/context/context.h"
-#include "loom/tooling/execution/compile_report_capture.h"
 #include "loom/tooling/execution/execution_provider.h"
 #include "loom/tooling/execution/session.h"
 #include "loom/tooling/io/file.h"
@@ -60,7 +60,7 @@ typedef struct loom_compile_diagnostic_sink_t {
   // Printer context used to render target-owned register and storage types.
   loom_low_descriptor_text_print_context_t type_print_context;
   // Optional compile report capture receiving canonical diagnostic JSON.
-  loom_run_compile_report_capture_t* compile_report_capture;
+  loom_compile_report_capture_t* compile_report_capture;
 } loom_compile_diagnostic_sink_t;
 
 static iree_status_t loom_compile_format_diagnostic_type(
@@ -95,9 +95,9 @@ static iree_status_t loom_compile_diagnostic_sink(
   iree_status_t status =
       loom_diagnostic_format_with_options(diagnostic, &format_options, &stream);
   if (iree_status_is_ok(status)) {
-    loom_run_compile_report_capture_t* compile_report_capture =
+    loom_compile_report_capture_t* compile_report_capture =
         sink ? sink->compile_report_capture : NULL;
-    status = loom_run_compile_report_capture_record_diagnostic(
+    status = loom_compile_report_capture_record_diagnostic(
         compile_report_capture, diagnostic, format_options.type_formatter);
   }
   return status;
@@ -446,9 +446,9 @@ static iree_status_t loom_compile_select_roots(
 }
 
 static iree_status_t loom_compile_report_options_initialize(
-    loom_run_compile_report_capture_options_t* out_options) {
-  loom_run_compile_report_capture_options_initialize(out_options);
-  IREE_RETURN_IF_ERROR(loom_run_compile_report_capture_options_parse_request(
+    loom_compile_report_capture_options_t* out_options) {
+  loom_compile_report_capture_options_initialize(out_options);
+  IREE_RETURN_IF_ERROR(loom_compile_report_capture_options_parse_request(
       iree_make_cstring_view(FLAG_compile_report), out_options));
   return iree_ok_status();
 }
@@ -493,10 +493,10 @@ static iree_status_t loom_compile_make_artifact_manifest_path(
 }
 
 static iree_status_t loom_compile_artifact_manifest_options_initialize(
-    loom_run_candidate_artifact_manifest_options_t* out_options,
-    bool is_hal_backend, iree_allocator_t allocator,
-    iree_string_view_t* out_output_path, char** out_output_path_storage) {
-  *out_options = (loom_run_candidate_artifact_manifest_options_t){0};
+    loom_compile_artifact_manifest_options_t* out_options, bool is_hal_backend,
+    iree_allocator_t allocator, iree_string_view_t* out_output_path,
+    char** out_output_path_storage) {
+  *out_options = (loom_compile_artifact_manifest_options_t){0};
   *out_output_path = iree_string_view_empty();
   *out_output_path_storage = NULL;
   IREE_RETURN_IF_ERROR(loom_target_artifact_manifest_mode_parse(
@@ -540,7 +540,8 @@ static iree_status_t loom_compile_run_pass_pipeline(
     const loom_run_execution_environment_t* environment,
     loom_run_session_t* session, loom_run_module_t* run_module,
     loom_compile_default_pipeline_t default_pipeline,
-    const loom_run_candidate_compile_options_t* compile_options,
+    const loom_compile_options_t* compile_options,
+    loom_compile_report_capture_t* compile_report_capture,
     const loom_pass_trace_options_t* trace_options,
     loom_compile_pipeline_result_t* out_result) {
   loom_compile_pipeline_options_t pipeline_options = {0};
@@ -555,7 +556,7 @@ static iree_status_t loom_compile_run_pass_pipeline(
       loom_run_session_low_descriptor_registry(session);
   loom_compile_diagnostic_sink_t diagnostic_sink = {
       .run_module = run_module,
-      .compile_report_capture = compile_options->report_capture,
+      .compile_report_capture = compile_report_capture,
   };
   loom_low_descriptor_text_print_context_initialize(
       &pipeline_options.low_descriptor_registry->registry,
@@ -632,10 +633,10 @@ static iree_status_t loom_compile_write_optional_artifact_manifest(
 }
 
 static iree_status_t loom_compile_write_report(
-    const loom_run_compile_report_capture_t* compile_report_capture,
+    const loom_compile_report_capture_t* compile_report_capture,
     iree_string_view_t artifact_manifest_output_path,
     iree_allocator_t allocator) {
-  if (!loom_run_compile_report_capture_is_enabled(compile_report_capture)) {
+  if (!loom_compile_report_capture_is_enabled(compile_report_capture)) {
     return iree_ok_status();
   }
   const iree_string_view_t path =
@@ -644,7 +645,7 @@ static iree_status_t loom_compile_write_report(
       iree_string_view_equal(path, IREE_SV("stderr"))) {
     loom_output_stream_t stream;
     loom_output_stream_for_file(stderr, &stream);
-    IREE_RETURN_IF_ERROR(loom_run_compile_report_capture_write_output(
+    IREE_RETURN_IF_ERROR(loom_compile_report_capture_write_output(
         compile_report_capture, &stream, allocator));
     return fflush(stderr) == 0
                ? iree_ok_status()
@@ -666,7 +667,7 @@ static iree_status_t loom_compile_write_report(
     }
     loom_output_stream_t stream;
     loom_output_stream_for_file(stdout, &stream);
-    IREE_RETURN_IF_ERROR(loom_run_compile_report_capture_write_output(
+    IREE_RETURN_IF_ERROR(loom_compile_report_capture_write_output(
         compile_report_capture, &stream, allocator));
     return fflush(stdout) == 0
                ? iree_ok_status()
@@ -677,7 +678,7 @@ static iree_status_t loom_compile_write_report(
   loom_tooling_output_stream_t output;
   IREE_RETURN_IF_ERROR(
       loom_tooling_output_stream_open(path, allocator, &output));
-  iree_status_t status = loom_run_compile_report_capture_write_output(
+  iree_status_t status = loom_compile_report_capture_write_output(
       compile_report_capture, &output.stream, allocator);
   return iree_status_join(status, loom_tooling_output_stream_close(&output));
 }
@@ -698,11 +699,12 @@ static void loom_compile_record_terminal_report_status(
 
 static iree_status_t loom_compile_emit_command(
     loom_run_session_t* session, loom_run_module_t* run_module,
-    const loom_run_candidate_compile_options_t* compile_options,
+    const loom_compile_options_t* compile_options,
+    loom_compile_report_capture_t* compile_report_capture,
     iree_allocator_t allocator, bool* out_emitted) {
   loom_compile_diagnostic_sink_t diagnostic_sink = {
       .run_module = run_module,
-      .compile_report_capture = compile_options->report_capture,
+      .compile_report_capture = compile_report_capture,
   };
   loom_low_descriptor_text_print_context_initialize(
       &loom_run_session_low_descriptor_registry(session)->registry,
@@ -738,8 +740,8 @@ static iree_status_t loom_compile_emit_artifact(
     const loom_artifact_provider_t* artifact_provider,
     const loom_artifact_target_t* artifact_target,
     loom_run_module_t* run_module,
-    const loom_run_candidate_compile_options_t* compile_options,
-    const loom_run_compile_report_capture_t* compile_report_capture,
+    const loom_compile_options_t* compile_options,
+    const loom_compile_report_capture_t* compile_report_capture,
     iree_string_view_t artifact_manifest_output_path,
     iree_allocator_t allocator, bool* out_emitted, bool* out_report_written) {
   *out_emitted = false;
@@ -795,7 +797,7 @@ static iree_status_t loom_compile_emit_artifact(
   if (iree_status_is_ok(status)) {
     *out_emitted = candidate.compiled;
   }
-  if (loom_run_compile_report_capture_is_enabled(compile_report_capture)) {
+  if (loom_compile_report_capture_is_enabled(compile_report_capture)) {
     loom_compile_record_terminal_report_status(compile_options->report,
                                                iree_status_code(status),
                                                candidate.compiled ? 0 : 1);
@@ -833,8 +835,8 @@ static iree_status_t loom_compile_emit_target(
     const loom_run_execution_environment_t* environment,
     loom_run_session_t* session, const loom_target_emitter_t* target_emitter,
     loom_run_module_t* run_module,
-    const loom_run_candidate_compile_options_t* compile_options,
-    iree_allocator_t allocator, bool* out_emitted) {
+    const loom_compile_options_t* compile_options, iree_allocator_t allocator,
+    bool* out_emitted) {
   *out_emitted = false;
   if (target_emitter == NULL || target_emitter->emit == NULL) {
     return iree_make_status(IREE_STATUS_INTERNAL,
@@ -1114,7 +1116,7 @@ static iree_status_t loom_compile_specialize_explicit_artifact_target(
     const loom_run_execution_environment_t* environment,
     loom_run_session_t* session, loom_run_module_t* run_module,
     const loom_artifact_target_t* target,
-    loom_run_compile_report_capture_t* compile_report_capture,
+    loom_compile_report_capture_t* compile_report_capture,
     iree_allocator_t allocator) {
   loom_compile_diagnostic_sink_t compile_diagnostic_sink = {
       .run_module = run_module,
@@ -1642,13 +1644,12 @@ int main(int argc, char** argv) {
   char* input_filename_storage = NULL;
   loom_run_session_t session = {0};
   loom_run_module_t run_module = {0};
-  loom_run_compile_report_capture_options_t compile_report_options = {0};
-  loom_run_compile_report_capture_t compile_report_capture = {0};
+  loom_compile_report_capture_options_t compile_report_options = {0};
+  loom_compile_report_capture_t compile_report_capture = {0};
   loom_tooling_pass_trace_t pass_trace = {0};
   const loom_artifact_provider_t* artifact_provider = NULL;
   const loom_target_emitter_t* target_emitter = NULL;
-  loom_run_candidate_artifact_manifest_options_t artifact_manifest_options = {
-      0};
+  loom_compile_artifact_manifest_options_t artifact_manifest_options = {0};
   iree_string_view_t artifact_manifest_output_path = iree_string_view_empty();
   char* artifact_manifest_output_path_storage = NULL;
   bool is_command_backend = false;
@@ -1681,11 +1682,11 @@ int main(int argc, char** argv) {
     status = loom_compile_report_options_initialize(&compile_report_options);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_run_compile_report_capture_initialize(
+    status = loom_compile_report_capture_initialize(
         &compile_report_options, allocator, &compile_report_capture);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_run_compile_report_capture_record_materialized_config(
+    status = loom_compile_report_capture_record_materialized_config(
         &compile_report_capture, run_module.module, &config_set);
   }
   if (iree_status_is_ok(status)) {
@@ -1727,8 +1728,8 @@ int main(int argc, char** argv) {
         run_module.module);
   }
 
-  loom_run_candidate_compile_options_t compile_options = {0};
-  loom_run_candidate_compile_options_initialize(&compile_options);
+  loom_compile_options_t compile_options = {0};
+  loom_compile_options_initialize(&compile_options);
   loom_compile_pipeline_result_t pipeline_result = {0};
   compile_options.artifact_manifest = artifact_manifest_options;
   if (artifact_provider != NULL) {
@@ -1742,7 +1743,7 @@ int main(int argc, char** argv) {
   if (iree_status_is_ok(status)) {
     compile_options.source_resolver =
         loom_run_module_source_resolver(&run_module);
-    loom_run_compile_report_capture_configure_compile_options(
+    loom_compile_report_capture_configure_compile_options(
         &compile_report_capture, &compile_options);
   }
   if (iree_status_is_ok(status)) {
@@ -1765,7 +1766,7 @@ int main(int argc, char** argv) {
             .path = artifact_manifest_output_path,
         },
         {
-            .active = loom_run_compile_report_capture_options_is_enabled(
+            .active = loom_compile_report_capture_options_is_enabled(
                 &compile_report_options),
             .flag_name = IREE_SV("--compile-report-output"),
             .path = iree_make_cstring_view(FLAG_compile_report_output),
@@ -1797,7 +1798,8 @@ int main(int argc, char** argv) {
       status = loom_compile_run_pass_pipeline(
           &environment, &session, &run_module,
           LOOM_COMPILE_DEFAULT_PIPELINE_PREPARED_LOW, &compile_options,
-          loom_tooling_pass_trace_options(&pass_trace), &pipeline_result);
+          &compile_report_capture, loom_tooling_pass_trace_options(&pass_trace),
+          &pipeline_result);
     }
     status =
         iree_status_join(status, loom_tooling_pass_trace_close(&pass_trace));
@@ -1827,8 +1829,9 @@ int main(int argc, char** argv) {
                                         &run_module, &compile_options,
                                         allocator, &emitted);
     } else if (is_command_backend) {
-      status = loom_compile_emit_command(&session, &run_module,
-                                         &compile_options, allocator, &emitted);
+      status = loom_compile_emit_command(
+          &session, &run_module, &compile_options, &compile_report_capture,
+          allocator, &emitted);
     }
   }
   if (iree_status_is_ok(status) && exit_code == 0 && !emitted) {
@@ -1859,7 +1862,7 @@ int main(int argc, char** argv) {
         artifact_provider, &explicit_artifact_target, allocator);
   }
   loom_compile_pipeline_result_deinitialize(&pipeline_result);
-  loom_run_compile_report_capture_deinitialize(&compile_report_capture);
+  loom_compile_report_capture_deinitialize(&compile_report_capture);
   loom_run_module_deinitialize(&run_module);
   iree_allocator_free(allocator, input_filename_storage);
   iree_io_file_contents_free(contents);

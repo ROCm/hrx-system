@@ -65,7 +65,7 @@ loom_cc_library(
     ::device_provider
     ::runtime
     iree::base
-    loom::tooling::execution::compile_options
+    loom::tooling::compile::options
     loom::tooling::execution::session
   PUBLIC
 )
@@ -119,10 +119,10 @@ loom_cc_library(
     loom::target::function_version
     loom::target::provider
     loom::target::types
+    loom::tooling::compile::options
     loom::tooling::compile::pipeline
+    loom::tooling::compile::report_capture
     loom::tooling::config
-    loom::tooling::execution::compile_options
-    loom::tooling::execution::compile_report_capture
     loom::tooling::execution::session
     loom::tooling::testbench
     loom::tooling::testbench::invocation
@@ -168,7 +168,7 @@ loom_cc_library(
     iree::base::core_headers
     iree::base::internal::arena
     loom::target::entry_selection
-    loom::tooling::execution::compile_report_capture
+    loom::tooling::compile::report_capture
     loom::tooling::execution::execution_backend
     loom::tooling::execution::one_shot
     loom::tooling::io::file

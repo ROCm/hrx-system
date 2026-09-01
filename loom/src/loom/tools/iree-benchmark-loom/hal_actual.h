@@ -12,7 +12,7 @@
 #include "iree/base/api.h"
 #include "loom/ir/module.h"
 #include "loom/sanitizer/options.h"
-#include "loom/tooling/execution/compile_report_capture.h"
+#include "loom/tooling/compile/report_capture.h"
 #include "loom/tooling/execution/hal/testbench_actual.h"
 #include "loom/tooling/execution/session.h"
 #include "loom/tooling/testbench/testbench.h"
@@ -29,9 +29,8 @@ iree_status_t iree_benchmark_loom_hal_actual_provider_initialize(
     loom_sanitizer_options_t sanitizer,
     const loom_testbench_invocation_plan_t* kernel_launch,
     iree_string_view_t artifact_path_suffix,
-    const loom_run_compile_report_capture_options_t* compile_report_options,
-    const loom_run_candidate_artifact_manifest_options_t*
-        artifact_manifest_options,
+    const loom_compile_report_capture_options_t* compile_report_options,
+    const loom_compile_artifact_manifest_options_t* artifact_manifest_options,
     iree_benchmark_loom_hal_actual_provider_t* out_provider);
 
 // Releases provider-owned compile, diagnostic, and artifact path state.
@@ -44,9 +43,8 @@ iree_status_t iree_benchmark_loom_hal_actual_sequence_initialize(
     const loom_run_module_t* run_module, iree_string_view_t pipeline,
     loom_sanitizer_options_t sanitizer,
     const loom_testbench_case_plan_t* case_plan,
-    const loom_run_compile_report_capture_options_t* compile_report_options,
-    const loom_run_candidate_artifact_manifest_options_t*
-        artifact_manifest_options,
+    const loom_compile_report_capture_options_t* compile_report_options,
+    const loom_compile_artifact_manifest_options_t* artifact_manifest_options,
     iree_benchmark_loom_hal_actual_sequence_t* out_sequence);
 
 // Releases storage owned by |sequence|.

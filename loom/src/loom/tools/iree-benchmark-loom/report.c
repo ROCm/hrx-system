@@ -1547,16 +1547,16 @@ iree_status_t iree_benchmark_loom_write_hal_timing_interpretation_json(
 }
 
 static iree_status_t iree_benchmark_loom_write_compile_report_field_json(
-    const loom_run_compile_report_capture_t* compile_report_capture,
+    const loom_compile_report_capture_t* compile_report_capture,
     loom_json_object_writer_t* object) {
   if (compile_report_capture == NULL ||
-      !loom_run_compile_report_capture_is_enabled(compile_report_capture)) {
+      !loom_compile_report_capture_is_enabled(compile_report_capture)) {
     return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(
       loom_json_object_begin_field(object, IREE_SV("compile_report")));
-  return loom_run_compile_report_capture_append_json(compile_report_capture,
-                                                     object->stream);
+  return loom_compile_report_capture_append_json(compile_report_capture,
+                                                 object->stream);
 }
 
 static iree_status_t iree_benchmark_loom_append_candidate_artifact_stem(
@@ -1835,7 +1835,7 @@ iree_status_t iree_benchmark_loom_write_compile_report_artifact(
     iree_benchmark_loom_hal_actual_provider_t* provider,
     iree_allocator_t allocator) {
   if (!provider->execution.compile_report_available ||
-      !loom_run_compile_report_capture_is_enabled(
+      !loom_compile_report_capture_is_enabled(
           &provider->compile_report_capture) ||
       !iree_string_view_is_empty(provider->compile_report_artifact_path)) {
     return iree_ok_status();
