@@ -78,7 +78,6 @@ loom_module(
     "bc"
 )
 
-file(GLOB _GLOB_X_LOOM LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS *.loom)
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
 iree_execution_test_suite(
   NAME
@@ -89,7 +88,9 @@ iree_execution_test_suite(
     "loom-compile=loom::tools::loom-compile"
     "loom-opt=loom::tools::loom-opt"
   DATA
-    "${_GLOB_X_LOOM}"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/hip/cluster_b128_multicast.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/hip/shared_memory_vector_tile.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/hip/wave64_reductions.loom"
   LABELS
     "hostonly"
 )

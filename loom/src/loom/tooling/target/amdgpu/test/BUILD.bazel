@@ -30,16 +30,9 @@ _AMDGPU_EXECUTION_TEST_TAGS = [
 iree_execution_test_suite(
     name = "loom_compile_execution_test",
     data = [
-        "amdgpu_bad_return.loom",
-        "amdgpu_unused_kernargs.loom",
         "complete_authoring_module.loom",
-        "fragment_repack_lane_preamble.loom",
         "gfx1250_configured_fragment_bank.loom",
-        "long_sopp_branch.loom",
         "selected_root_amdgpu.loom",
-        "single_subgroup_barrier.loom",
-        "target_family_template_provider_amdgpu.loom",
-        "wave64_named_lane_broadcast.loom",
     ],
     manifests = ["loom-compile-amdgpu.test.json"],
     tags = ["hostonly"],
@@ -52,10 +45,7 @@ iree_execution_test_suite(
 
 iree_execution_test_suite(
     name = "loom_opt_execution_test",
-    data = [
-        "amdgpu_bad_return.loom",
-        "loom_opt_f32_arith.loom",
-    ],
+    data = ["loom_opt_f32_arith.loom"],
     manifests = ["loom-opt-amdgpu.test.json"],
     tags = ["hostonly"],
     target_compatible_with = _AMDGPU_ARTIFACTS_COMPATIBLE_WITH,

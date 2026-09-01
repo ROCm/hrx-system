@@ -19,16 +19,9 @@ iree_execution_test_suite(
     "loom-compile=loom::tools::loom-compile"
     "loom-compile-report=loom::py::loom::tools::loom-compile-report"
   DATA
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/amdgpu/test/amdgpu_bad_return.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/amdgpu/test/amdgpu_unused_kernargs.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/amdgpu/test/complete_authoring_module.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/amdgpu/test/fragment_repack_lane_preamble.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/amdgpu/test/gfx1250_configured_fragment_bank.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/amdgpu/test/long_sopp_branch.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/amdgpu/test/selected_root_amdgpu.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/amdgpu/test/single_subgroup_barrier.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/amdgpu/test/target_family_template_provider_amdgpu.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/amdgpu/test/wave64_named_lane_broadcast.loom"
   LABELS
     "hostonly"
 )
@@ -43,7 +36,6 @@ iree_execution_test_suite(
   TOOLS
     "loom-opt=loom::tools::loom-opt"
   DATA
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/amdgpu/test/amdgpu_bad_return.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/amdgpu/test/loom_opt_f32_arith.loom"
   LABELS
     "hostonly"
