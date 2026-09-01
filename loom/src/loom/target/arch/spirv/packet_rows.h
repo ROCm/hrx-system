@@ -25,7 +25,7 @@ extern "C" {
 #define LOOM_SPIRV_PACKET_MAX_OPERAND_COUNT 4
 #define LOOM_SPIRV_PACKET_OPERAND_TYPE_CAPACITY 3
 
-typedef enum loom_spirv_packet_form_e {
+enum loom_spirv_packet_form_e {
   LOOM_SPIRV_PACKET_FORM_UNSUPPORTED = 0,
   LOOM_SPIRV_PACKET_FORM_SCALAR_CONSTANT = 1,
   LOOM_SPIRV_PACKET_FORM_BINARY_SAME_TYPE = 2,
@@ -46,49 +46,80 @@ typedef enum loom_spirv_packet_form_e {
   LOOM_SPIRV_PACKET_FORM_COMPOSITE_CONSTRUCT = 17,
   LOOM_SPIRV_PACKET_FORM_COMPOSITE_EXTRACT = 18,
   LOOM_SPIRV_PACKET_FORM_COMPOSITE_INSERT = 19,
-} loom_spirv_packet_form_t;
+};
+typedef uint8_t loom_spirv_packet_form_t;
+
+// Ordinal into the generated packet value-type table. Zero names UNKNOWN.
+typedef uint16_t loom_spirv_packet_value_type_ref_t;
+
+#define LOOM_SPIRV_PACKET_VALUE_TYPE_REF_UNKNOWN \
+  ((loom_spirv_packet_value_type_ref_t)0)
 
 typedef struct loom_spirv_packet_row_t {
   // SPIR-V instruction opcode.
   uint32_t opcode;
+  // Form-specific packet literals selected by form.
+  union {
+    // Scalar-constant packet literals.
+    struct {
+      // Number of literal words emitted for the constant.
+      uint8_t literal_word_count;
+    } scalar_constant;
+    // Built-in input packet literals.
+    struct {
+      // SPIR-V BuiltIn enumerant.
+      uint32_t builtin;
+      // Vector component extracted from the built-in input.
+      uint8_t component_index;
+    } builtin_load;
+    // Control-barrier packet literals.
+    struct {
+      // SPIR-V execution scope literal.
+      uint32_t execution_scope;
+      // SPIR-V memory scope literal.
+      uint32_t memory_scope;
+      // SPIR-V memory semantics mask literal.
+      uint32_t memory_semantics;
+    } barrier;
+    // Cooperative-matrix packet literals.
+    struct {
+      // Cooperative matrix layout literal for load/store rows.
+      uint32_t layout;
+      // Cooperative matrix stride literal for load/store rows.
+      uint32_t stride;
+      // Cooperative matrix operands mask literal for mul-add rows.
+      uint32_t operands;
+    } cooperative_matrix;
+  } payload;
+  // Result value-type table ref, or UNKNOWN for result-less packets.
+  loom_spirv_packet_value_type_ref_t result_type_ref;
+  // Required value-type refs for packet operands. Four-operand packets use one
+  // repeated type because the inline type-ref capacity is three.
+  loom_spirv_packet_value_type_ref_t
+      operand_type_refs[LOOM_SPIRV_PACKET_OPERAND_TYPE_CAPACITY];
   // Emission algorithm selected for this descriptor.
   loom_spirv_packet_form_t form;
-  // Result value type, or UNKNOWN for result-less packets.
-  loom_spirv_value_type_t result_type;
-  // Required value types for packet operands. Four-operand packets use one
-  // repeated type because the inline type capacity is three.
-  loom_spirv_value_type_t
-      operand_types[LOOM_SPIRV_PACKET_OPERAND_TYPE_CAPACITY];
   // Expected packet result count.
   uint8_t result_count;
   // Expected packet operand count.
   uint8_t operand_count;
   // Descriptor-local immediate index read by the row.
   uint8_t immediate_index;
-  // Number of literal words emitted for SCALAR_CONSTANT rows.
-  uint8_t literal_word_count;
   // Alignment operand for aligned memory access rows.
   uint8_t memory_alignment;
-  // SPIR-V BuiltIn enumerant for built-in load rows.
-  uint32_t builtin;
-  // Vector component extracted from built-in input rows.
-  uint8_t component_index;
-  // SPIR-V execution scope literal for barrier rows.
-  uint32_t execution_scope;
-  // SPIR-V memory scope literal for barrier rows.
-  uint32_t memory_scope;
-  // SPIR-V memory semantics mask literal for barrier rows.
-  uint32_t memory_semantics;
-  // Cooperative matrix layout literal for load/store rows.
-  uint32_t cooperative_matrix_layout;
-  // Cooperative matrix stride literal for load/store rows.
-  uint32_t cooperative_matrix_stride;
-  // Cooperative matrix operands mask literal for mul-add rows.
-  uint32_t cooperative_matrix_operands;
 } loom_spirv_packet_row_t;
 
-static_assert(sizeof(loom_spirv_packet_row_t) == 128,
+static_assert(sizeof(loom_spirv_packet_row_t) == 32,
               "SPIR-V packet rows must remain compact");
+
+// Generated value types interned across all packet rows.
+extern const loom_spirv_value_type_t loom_spirv_packet_value_types[];
+
+// Returns the result value type required by |row|.
+static inline loom_spirv_value_type_t loom_spirv_packet_row_result_type(
+    const loom_spirv_packet_row_t* row) {
+  return loom_spirv_packet_value_types[row->result_type_ref];
+}
 
 // Returns the required value type for packet operand |operand_index|.
 static inline loom_spirv_value_type_t loom_spirv_packet_row_operand_type(
@@ -97,7 +128,7 @@ static inline loom_spirv_value_type_t loom_spirv_packet_row_operand_type(
       row->operand_count > LOOM_SPIRV_PACKET_OPERAND_TYPE_CAPACITY
           ? 0
           : operand_index;
-  return row->operand_types[type_index];
+  return loom_spirv_packet_value_types[row->operand_type_refs[type_index]];
 }
 
 // Returns the packet row for |descriptor_ordinal|, or NULL when the descriptor

@@ -1349,6 +1349,25 @@ def compile_descriptor_set(
     immediate_encoding_slice_starts = [row.encoding_slice_start for row in compiled_immediate_rows]
     immediate_enum_domain_ids = [row.enum_domain_id for row in compiled_immediate_rows]
 
+    compact_start_tables = (
+        ("descriptor", selected_descriptors),
+        ("asm operand index", asm_table_storage.operand_indices),
+        ("asm operand segment", asm_table_storage.operand_segments),
+        ("asm result value type", asm_table_storage.result_value_types),
+        ("asm immediate", asm_table_storage.immediates),
+        ("native asm value", asm_table_storage.native_values),
+        ("operand", operands),
+        ("immediate", immediates),
+        ("effect", effects),
+        ("constraint", constraints),
+        ("storage lease", storage_leases),
+        ("feature mask word", feature_mask_words),
+        ("encoding field value", encoding_field_values),
+        ("operand form", operand_forms),
+    )
+    for table_name, rows in compact_start_tables:
+        validation.validate_u16_table_count(len(rows), f"descriptor set '{spec.key}' {table_name}")
+
     descriptor_refs = sorted((descriptor.key, i) for i, descriptor in enumerate(selected_descriptors))
     seen_stable_ids: dict[int, str] = {}
     for descriptor in selected_descriptors:

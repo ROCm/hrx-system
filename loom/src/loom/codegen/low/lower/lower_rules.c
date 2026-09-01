@@ -1524,7 +1524,9 @@ static iree_status_t loom_low_lower_rule_matches(
   *out_source_memory_compatible = false;
   *out_uses_source_memory_access = false;
   for (uint16_t i = 0; i < rule->guard_count; ++i) {
-    uint16_t guard_index = (uint16_t)(rule->guard_start + i);
+    const uint16_t guard_ref_index = (uint16_t)(rule->guard_start + i);
+    const loom_low_lower_guard_ref_t guard_index =
+        rule_set->guard_refs[guard_ref_index];
     const loom_low_lower_guard_t* guard = &rule_set->guards[guard_index];
     bool guard_matches = false;
     IREE_RETURN_IF_ERROR(loom_low_lower_rule_guard_matches(
@@ -1870,14 +1872,14 @@ void loom_low_lower_rule_materialize_diagnostic_params(
     param_index = LOOM_LOW_LOWER_TARGET_CONTEXT_PARAM_COUNT;
   }
   const uint8_t stored_param_count = diagnostic->param_count - param_index;
-  const loom_low_lower_diagnostic_param_t* param_rows =
-      stored_param_count == 0
-          ? NULL
-          : &rule_set->diagnostic_params[diagnostic->param_start];
   for (uint8_t stored_param_index = 0; stored_param_index < stored_param_count;
        ++stored_param_index, ++param_index) {
+    const uint16_t param_ref_index =
+        (uint16_t)(diagnostic->param_start + stored_param_index);
+    const loom_low_lower_diagnostic_param_ref_t param_ordinal =
+        rule_set->diagnostic_param_refs[param_ref_index];
     const loom_low_lower_diagnostic_param_t* row =
-        &param_rows[stored_param_index];
+        &rule_set->diagnostic_params[param_ordinal];
     switch (row->kind) {
       case LOOM_LOW_LOWER_DIAGNOSTIC_PARAM_TARGET_KEY:
         out_params[param_index] = loom_param_string(

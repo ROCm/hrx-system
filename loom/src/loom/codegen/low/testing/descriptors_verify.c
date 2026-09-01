@@ -2177,12 +2177,6 @@ static iree_status_t loom_low_verify_descriptor(
       &descriptor_set->descriptors[descriptor_index];
   const loom_low_descriptor_view_t* descriptor_view =
       &descriptor_set->descriptor_views[descriptor_index];
-  if (descriptor->reserved != 0) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "low descriptor %" PRIu32
-                            " has a non-zero reserved field",
-                            descriptor_index);
-  }
   IREE_RETURN_IF_ERROR(loom_low_verify_known_flags(
       descriptor->flags,
       LOOM_LOW_DESCRIPTOR_FLAG_SIDE_EFFECTING |

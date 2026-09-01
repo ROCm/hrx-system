@@ -25,6 +25,8 @@ from loom.gen.target.contracts.lower_rule_rows import (
     value_ref_row,
 )
 from loom.gen.target.contracts.lower_rules import (
+    _intern_diagnostic_params,
+    _intern_rows,
     _validate_c_table_shape,
     generate_lower_rule_set,
 )
@@ -646,6 +648,39 @@ def test_diagnostic_param_row_emits_portable_signed_i64_literal() -> None:
     )
 
     assert ".value = {.i64_value = (-INT64_C(2147483648))}" in fields
+
+
+def test_generated_tables_intern_guards_and_diagnostic_params() -> None:
+    guards = (
+        LowerGuard(kind=GuardKind.VALUE_TYPE, diagnostic_index=2),
+        LowerGuard(kind=GuardKind.VALUE_TYPE, diagnostic_index=2),
+        LowerGuard(kind=GuardKind.VALUE_TYPE, diagnostic_index=3),
+    )
+    unique_guards, guard_refs = _intern_rows(guards)
+    assert unique_guards == (guards[0], guards[2])
+    assert guard_refs == (0, 0, 1)
+
+    params = (
+        LowerDiagnosticParam(
+            "first_name",
+            DiagnosticParamKind.STRING_LITERAL,
+            string_value="same value",
+        ),
+        LowerDiagnosticParam(
+            "second_name",
+            DiagnosticParamKind.STRING_LITERAL,
+            string_value="same value",
+        ),
+        LowerDiagnosticParam(
+            "different_value",
+            DiagnosticParamKind.STRING_LITERAL,
+            string_value="different value",
+        ),
+    )
+    unique_params, param_refs = _intern_diagnostic_params(params)
+    assert tuple(row for row, _ in unique_params) == (params[0], params[2])
+    assert tuple(source_index for _, source_index in unique_params) == (0, 2)
+    assert param_refs == (0, 0, 1)
 
 
 def test_diagnostic_rows_use_recorded_target_context() -> None:

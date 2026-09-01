@@ -382,6 +382,9 @@ typedef struct loom_low_lower_diagnostic_param_t {
 static_assert(sizeof(loom_low_lower_diagnostic_param_t) == 16,
               "loom_low_lower_diagnostic_param_t must be 16 bytes");
 
+// Ordinal into a rule set's interned diagnostic-parameter table.
+typedef uint16_t loom_low_lower_diagnostic_param_ref_t;
+
 enum loom_low_lower_diagnostic_flag_bits_e {
   // Materialize the canonical five target-context parameters before stored
   // parameter rows.
@@ -392,7 +395,7 @@ typedef uint8_t loom_low_lower_diagnostic_flags_t;
 typedef struct loom_low_lower_diagnostic_t {
   // Stable structured diagnostic identity.
   loom_error_ref_t error_ref;
-  // First stored parameter projection row.
+  // First stored parameter projection ref.
   uint16_t param_start;
   // Total number of materialized parameters, including implicit context.
   uint8_t param_count;
@@ -713,6 +716,9 @@ typedef struct loom_low_lower_guard_t {
 static_assert(sizeof(loom_low_lower_guard_t) == 32,
               "loom_low_lower_guard_t must be 32 bytes");
 
+// Ordinal into a rule set's interned guard table.
+typedef uint16_t loom_low_lower_guard_ref_t;
+
 typedef enum loom_low_lower_emit_kind_e {
   // Invalid or uninitialized emit action.
   LOOM_LOW_LOWER_EMIT_INVALID = 0,
@@ -833,9 +839,9 @@ typedef struct loom_low_lower_rule_t {
   // Number of rule-local temporary low values available while emitting this
   // rule.
   uint16_t temporary_count;
-  // First guard table row for this rule.
+  // First guard-ref row for this rule.
   uint16_t guard_start;
-  // Number of guard rows for this rule.
+  // Number of guard refs for this rule.
   uint16_t guard_count;
   // First emit-program table row for this rule.
   uint16_t emit_start;
@@ -905,14 +911,22 @@ typedef struct loom_low_lower_rule_set_t {
   const loom_low_lower_rule_descriptor_ref_t* descriptor_refs;
   // Number of rows in descriptor_refs.
   uint16_t descriptor_ref_count;
-  // Diagnostic parameter projection rows referenced by diagnostics.
+  // Interned diagnostic parameter projection rows.
   const loom_low_lower_diagnostic_param_t* diagnostic_params;
   // Number of rows in diagnostic_params.
   uint16_t diagnostic_param_count;
-  // Guard rows referenced by rules.
+  // Diagnostic parameter refs addressed by diagnostic param spans.
+  const loom_low_lower_diagnostic_param_ref_t* diagnostic_param_refs;
+  // Number of rows in diagnostic_param_refs.
+  uint16_t diagnostic_param_ref_count;
+  // Interned guard rows referenced by guard_refs.
   const loom_low_lower_guard_t* guards;
   // Number of rows in guards.
   uint16_t guard_count;
+  // Guard refs addressed by rule guard spans.
+  const loom_low_lower_guard_ref_t* guard_refs;
+  // Number of rows in guard_refs.
+  uint16_t guard_ref_count;
   // Attribute-copy rows referenced by emits.
   const loom_low_lower_attr_copy_t* attr_copies;
   // Number of rows in attr_copies.

@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Hashable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -50,6 +50,51 @@ class GeneratedLowerRuleSet:
 
     header: str
     source: str
+
+
+def _intern_rows[RowT: Hashable](
+    rows: Sequence[RowT],
+) -> tuple[tuple[RowT, ...], tuple[int, ...]]:
+    unique_rows: list[RowT] = []
+    row_refs: list[int] = []
+    row_ordinals: dict[RowT, int] = {}
+    for row in rows:
+        ordinal = row_ordinals.get(row)
+        if ordinal is None:
+            ordinal = len(unique_rows)
+            row_ordinals[row] = ordinal
+            unique_rows.append(row)
+        row_refs.append(ordinal)
+    return tuple(unique_rows), tuple(row_refs)
+
+
+def _diagnostic_param_storage_key(row: LowerDiagnosticParam) -> tuple[object, ...]:
+    return (
+        row.kind,
+        row.string_value,
+        row.value_ref_index,
+        row.i64_value,
+        row.u32_value,
+        row.u64_value,
+        row.bool_value,
+    )
+
+
+def _intern_diagnostic_params(
+    rows: Sequence[LowerDiagnosticParam],
+) -> tuple[tuple[tuple[LowerDiagnosticParam, int], ...], tuple[int, ...]]:
+    unique_rows: list[tuple[LowerDiagnosticParam, int]] = []
+    row_refs: list[int] = []
+    row_ordinals: dict[tuple[object, ...], int] = {}
+    for source_index, row in enumerate(rows):
+        key = _diagnostic_param_storage_key(row)
+        ordinal = row_ordinals.get(key)
+        if ordinal is None:
+            ordinal = len(unique_rows)
+            row_ordinals[key] = ordinal
+            unique_rows.append((row, source_index))
+        row_refs.append(ordinal)
+    return tuple(unique_rows), tuple(row_refs)
 
 
 def generate_lower_rule_set(
@@ -263,6 +308,7 @@ def _generate_source(
             fields.append(".flags = LOOM_LOW_LOWER_DIAGNOSTIC_FLAG_IMPLICIT_TARGET_CONTEXT")
         diagnostic_rows.append(fields)
 
+    unique_diagnostic_params, diagnostic_param_refs = _intern_diagnostic_params(diagnostic_param_rows)
     diagnostic_params_name = f"k{c_table_prefix}DiagnosticParams"
     lines.extend(
         lower_rule_rows.emit_optional_array(
@@ -271,10 +317,19 @@ def _generate_source(
             [
                 lower_rule_rows.diagnostic_param_row(
                     row,
-                    string_value_offset=(string_pool.ref(_diagnostic_param_string_label(index)) if row.kind == DiagnosticParamKind.STRING_LITERAL else None),
+                    string_value_offset=(string_pool.ref(_diagnostic_param_string_label(source_index)) if row.kind == DiagnosticParamKind.STRING_LITERAL else None),
                 )
-                for index, row in enumerate(diagnostic_param_rows)
+                for row, source_index in unique_diagnostic_params
             ],
+        )
+    )
+
+    diagnostic_param_refs_name = f"k{c_table_prefix}DiagnosticParamRefs"
+    lines.extend(
+        lower_rule_rows.emit_optional_value_array(
+            diagnostic_param_refs_name,
+            "loom_low_lower_diagnostic_param_ref_t",
+            [str(ref) for ref in diagnostic_param_refs],
         )
     )
 
@@ -287,12 +342,22 @@ def _generate_source(
         )
     )
 
+    unique_guards, guard_refs = _intern_rows(table.guards)
     guards_name = f"k{c_table_prefix}Guards"
     lines.extend(
         lower_rule_rows.emit_optional_array(
             guards_name,
             "loom_low_lower_guard_t",
-            [lower_rule_rows.guard_row(descriptor_refs, row) for row in table.guards],
+            [lower_rule_rows.guard_row(descriptor_refs, row) for row in unique_guards],
+        )
+    )
+
+    guard_refs_name = f"k{c_table_prefix}GuardRefs"
+    lines.extend(
+        lower_rule_rows.emit_optional_value_array(
+            guard_refs_name,
+            "loom_low_lower_guard_ref_t",
+            [str(ref) for ref in guard_refs],
         )
     )
 
@@ -374,8 +439,14 @@ def _generate_source(
             source_memories_name=source_memories_name,
             descriptor_ref_keys=descriptor_ref_keys,
             descriptor_refs_name=descriptor_refs_name,
+            diagnostic_param_rows=unique_diagnostic_params,
             diagnostic_params_name=diagnostic_params_name,
+            diagnostic_param_refs=diagnostic_param_refs,
+            diagnostic_param_refs_name=diagnostic_param_refs_name,
+            guard_rows=unique_guards,
             guards_name=guards_name,
+            guard_refs=guard_refs,
+            guard_refs_name=guard_refs_name,
             attr_copies_name=attr_copies_name,
             tied_results_name=tied_results_name,
             emits_name=emits_name,
