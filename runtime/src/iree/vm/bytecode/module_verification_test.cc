@@ -1145,72 +1145,72 @@ TEST(VMBytecodeModuleTest, RejectsMalformedFunctionInstructions) {
   constexpr uint32_t kImportResolvedOffset = 32;
   constexpr uint32_t kStackStoreOffset = 36;
   constexpr uint32_t kStackLoadOffset = 40;
-  expect_rejected([](MutableFunctionImage function) {
+  expect_rejected([=](MutableFunctionImage function) {
     auto* record = reinterpret_cast<iree_vm_isa_func_null_record_t*>(
         function.bytecode + kNullOffset);
     record->dst_f8 = 5;
   });
-  expect_rejected([](MutableFunctionImage function) {
+  expect_rejected([=](MutableFunctionImage function) {
     auto* record = reinterpret_cast<iree_vm_isa_func_compare_null_record_t*>(
         function.bytecode + kCompareNullOffset);
     record->dst_v8 = 2;
   });
-  expect_rejected([](MutableFunctionImage function) {
+  expect_rejected([=](MutableFunctionImage function) {
     auto* record = reinterpret_cast<iree_vm_isa_func_copy_record_t*>(
         function.bytecode + kCopyOffset);
     record->src_f8 = 5;
   });
-  expect_rejected([](MutableFunctionImage function) {
+  expect_rejected([=](MutableFunctionImage function) {
     auto* record = reinterpret_cast<iree_vm_isa_func_address_record_t*>(
         function.bytecode + kLocalAddressOffset);
     record->target_kind_u8 = UINT8_MAX;
   });
-  expect_rejected([](MutableFunctionImage function) {
+  expect_rejected([=](MutableFunctionImage function) {
     auto* record = reinterpret_cast<iree_vm_isa_func_address_record_t*>(
         function.bytecode + kLocalAddressOffset);
     record->zero_padding_u8 = 1;
   });
-  expect_rejected([](MutableFunctionImage function) {
+  expect_rejected([=](MutableFunctionImage function) {
     auto* record = reinterpret_cast<iree_vm_isa_func_address_record_t*>(
         function.bytecode + kLocalAddressOffset);
     record->target_ordinal_u16 = 2;
   });
-  expect_rejected([](MutableFunctionImage function) {
+  expect_rejected([=](MutableFunctionImage function) {
     auto* record = reinterpret_cast<iree_vm_isa_func_address_record_t*>(
         function.bytecode + kLocalAddressOffset);
     record->callable_type_ordinal_u16 = 2;
   });
-  expect_rejected([](MutableFunctionImage function) {
+  expect_rejected([=](MutableFunctionImage function) {
     auto* record = reinterpret_cast<iree_vm_isa_func_address_record_t*>(
         function.bytecode + kLocalAddressOffset);
     record->callable_type_ordinal_u16 = 1;
   });
-  expect_rejected([](MutableFunctionImage function) {
+  expect_rejected([=](MutableFunctionImage function) {
     auto* record = reinterpret_cast<iree_vm_isa_func_address_record_t*>(
         function.bytecode + kImportAddressOffset);
     record->target_kind_u8 = IREE_VM_ISA_CONTROL_CALL_TARGET_REQUIRED_IMPORT;
   });
-  expect_rejected([](MutableFunctionImage function) {
+  expect_rejected([=](MutableFunctionImage function) {
     auto* record = reinterpret_cast<iree_vm_isa_func_address_record_t*>(
         function.bytecode + kImportAddressOffset);
     record->target_ordinal_u16 = 1;
   });
-  expect_rejected([](MutableFunctionImage function) {
+  expect_rejected([=](MutableFunctionImage function) {
     auto* record = reinterpret_cast<iree_vm_isa_func_address_record_t*>(
         function.bytecode + kImportAddressOffset);
     record->callable_type_ordinal_u16 = 1;
   });
-  expect_rejected([](MutableFunctionImage function) {
+  expect_rejected([=](MutableFunctionImage function) {
     auto* record = reinterpret_cast<iree_vm_isa_func_import_resolved_record_t*>(
         function.bytecode + kImportResolvedOffset);
     record->import_ordinal_u16 = 1;
   });
-  expect_rejected([](MutableFunctionImage function) {
+  expect_rejected([=](MutableFunctionImage function) {
     auto* record = reinterpret_cast<iree_vm_isa_func_stack_store_record_t*>(
         function.bytecode + kStackStoreOffset);
     record->local_ordinal_u16 = 1;
   });
-  expect_rejected([](MutableFunctionImage function) {
+  expect_rejected([=](MutableFunctionImage function) {
     auto* record = reinterpret_cast<iree_vm_isa_func_stack_load_record_t*>(
         function.bytecode + kStackLoadOffset);
     record->dst_f8 = 5;

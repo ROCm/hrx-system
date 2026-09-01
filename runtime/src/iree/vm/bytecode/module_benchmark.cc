@@ -74,7 +74,7 @@ iree_status_t InvokeLaunchConfig(iree_vm_invocation_t* invocation,
 IREE_ATTRIBUTE_NOINLINE iree_status_t
 InvokeLaunchConfigOnStack(iree_vm_function_t function, uint32_t row_count,
                           iree_vm_variant_span_t results) {
-  alignas(max_align_t) uint8_t storage[kInvocationStorageSize];
+  alignas(iree_max_align_t) uint8_t storage[kInvocationStorageSize];
   iree_vm_invocation_t* invocation = nullptr;
   IREE_RETURN_IF_ERROR(iree_vm_invocation_initialize(
       iree_make_byte_span(storage, sizeof(storage)), &invocation));

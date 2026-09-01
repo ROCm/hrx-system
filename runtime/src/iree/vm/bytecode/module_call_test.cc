@@ -130,22 +130,22 @@ TEST(VMBytecodeModuleCallTest, RejectsMalformedCallInstructions) {
 
   constexpr uint32_t kDirectCallOffset = 4;
   constexpr uint32_t kIndirectCallOffset = 12;
-  expect_rejected(1, [](MutableFunctionImage function) {
+  expect_rejected(1, [=](MutableFunctionImage function) {
     auto* record = reinterpret_cast<iree_vm_isa_control_call_record_t*>(
         function.bytecode + kDirectCallOffset);
     record->target_kind_u8 = UINT8_MAX;
   });
-  expect_rejected(1, [](MutableFunctionImage function) {
+  expect_rejected(1, [=](MutableFunctionImage function) {
     auto* record = reinterpret_cast<iree_vm_isa_control_call_record_t*>(
         function.bytecode + kDirectCallOffset);
     record->target_ordinal_u16 = 6;
   });
-  expect_rejected(1, [](MutableFunctionImage function) {
+  expect_rejected(1, [=](MutableFunctionImage function) {
     auto* record = reinterpret_cast<iree_vm_isa_control_call_record_t*>(
         function.bytecode + kDirectCallOffset);
     record->direct_ref_move_mask_u16 = 1;
   });
-  expect_rejected(1, [](MutableFunctionImage function) {
+  expect_rejected(1, [=](MutableFunctionImage function) {
     auto* record = reinterpret_cast<iree_vm_isa_control_call_record_t*>(
         function.bytecode + kDirectCallOffset);
     record->zero_padding_u16 = 1;
@@ -166,25 +166,25 @@ TEST(VMBytecodeModuleCallTest, RejectsMalformedCallInstructions) {
   expect_rejected(0, [](MutableFunctionImage function) {
     function.row->flags_u16 |= IREE_VM_BYTECODE_FUNCTION_FLAG_HAS_CALL;
   });
-  expect_rejected(2, [](MutableFunctionImage function) {
+  expect_rejected(2, [=](MutableFunctionImage function) {
     auto* record =
         reinterpret_cast<iree_vm_isa_control_call_indirect_record_t*>(
             function.bytecode + kIndirectCallOffset);
     record->target_f8 = 1;
   });
-  expect_rejected(2, [](MutableFunctionImage function) {
+  expect_rejected(2, [=](MutableFunctionImage function) {
     auto* record =
         reinterpret_cast<iree_vm_isa_control_call_indirect_record_t*>(
             function.bytecode + kIndirectCallOffset);
     record->callable_type_ordinal_u16 = 2;
   });
-  expect_rejected(2, [](MutableFunctionImage function) {
+  expect_rejected(2, [=](MutableFunctionImage function) {
     auto* record =
         reinterpret_cast<iree_vm_isa_control_call_indirect_record_t*>(
             function.bytecode + kIndirectCallOffset);
     record->direct_ref_move_mask_u16 = 1;
   });
-  expect_rejected(2, [](MutableFunctionImage function) {
+  expect_rejected(2, [=](MutableFunctionImage function) {
     auto* record =
         reinterpret_cast<iree_vm_isa_control_call_indirect_record_t*>(
             function.bytecode + kIndirectCallOffset);
@@ -277,11 +277,11 @@ TEST(VMBytecodeModuleCallTest, ExecutesSwitchCasesHolesAndDefault) {
   iree_vm_function_t function = iree_vm_function_null();
   IREE_ASSERT_OK(
       harness.LookupFunction(IREE_SV("switch"), IREE_SV("select"), &function));
-  for (const auto [selector, expected] : {std::pair<int32_t, int32_t>{0, 10},
-                                          {1, 99},
-                                          {2, 12},
-                                          {3, 99},
-                                          {-1, 99}}) {
+  for (const auto& [selector, expected] : {std::pair<int32_t, int32_t>{0, 10},
+                                           {1, 99},
+                                           {2, 12},
+                                           {3, 99},
+                                           {-1, 99}}) {
     iree_vm_variant_t arguments[] = {iree_vm_variant_from_i32(selector)};
     iree_vm_variant_t results[1] = {};
     IREE_ASSERT_OK(iree_vm_invoke(harness.invocation, function,

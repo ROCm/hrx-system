@@ -364,7 +364,7 @@ void ExpectUpdatesPreservedUnderContention(
   constexpr uint32_t kIterationCount = 10000;
   std::array<std::thread, kThreadCount> threads;
   for (std::thread& thread : threads) {
-    thread = std::thread([&storage, carrier]() {
+    thread = std::thread([&storage, carrier, kIterationCount]() {
       for (uint32_t i = 0; i < kIterationCount; ++i) {
         (void)iree_vm_bytecode_atomic_apply(
             storage.data(), 1, IREE_VM_ISA_BUFFER_ATOMIC_KIND_ADD_INTEGER,

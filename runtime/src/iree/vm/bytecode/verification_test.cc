@@ -13,6 +13,7 @@
 #include <utility>
 #include <vector>
 
+#include "iree/base/alignment.h"
 #include "iree/base/status_cc.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -80,7 +81,7 @@ void AppendValue(const T& value, std::vector<uint8_t>* data) {
 }
 
 void AlignData(size_t alignment, std::vector<uint8_t>* data) {
-  data->resize((data->size() + alignment - 1) & ~(alignment - 1), 0);
+  data->resize(iree_host_align(data->size(), alignment), 0);
 }
 
 std::vector<SectionData> ExtractSections(const std::vector<uint8_t>& image) {
@@ -105,8 +106,7 @@ std::vector<SectionData> ExtractSections(const std::vector<uint8_t>& image) {
   std::vector<SectionData> sections;
   sections.reserve(header->section_count_u16);
   for (uint16_t i = 0; i < header->section_count_u16; ++i) {
-    offset = (offset + rows[i].payload_alignment_u32 - 1) &
-             ~(rows[i].payload_alignment_u32 - 1);
+    offset = iree_host_align(offset, rows[i].payload_alignment_u32);
     if (rows[i].byte_length_u64 > image.size() - offset) {
       ADD_FAILURE() << "test fixture has a truncated section payload";
       return {};

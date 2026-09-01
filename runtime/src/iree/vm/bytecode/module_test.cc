@@ -152,7 +152,7 @@ TEST(VMBytecodeModuleTest,
   iree_host_size_t required_description_size = 0;
   IREE_ASSERT_OK(iree_vm_export_query_description(
       run_export, iree_byte_span_empty(), &required_description_size, nullptr));
-  alignas(max_align_t) std::array<uint8_t, 1024> description_storage = {};
+  alignas(iree_max_align_t) std::array<uint8_t, 1024> description_storage = {};
   ASSERT_LE(required_description_size, description_storage.size());
   iree_vm_export_description_t description = {};
   IREE_ASSERT_OK(iree_vm_export_query_description(
@@ -361,7 +361,7 @@ TEST(VMBytecodeModuleTest,
   iree_host_size_t description_size = 0;
   IREE_ASSERT_OK(iree_vm_export_query_description(
       device_count_export, iree_byte_span_empty(), &description_size, NULL));
-  alignas(max_align_t) std::array<uint8_t, 256> description_storage = {};
+  alignas(iree_max_align_t) std::array<uint8_t, 256> description_storage = {};
   ASSERT_LE(description_size, description_storage.size());
   iree_vm_export_description_t description = {};
   IREE_ASSERT_OK(iree_vm_export_query_description(

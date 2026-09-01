@@ -229,7 +229,8 @@ static iree_status_t iree_vm_bytecode_verify_envelope(
   iree_vm_bytecode_cursor_t cursor = {contents, 0, "bytecode image"};
   const iree_vm_bytecode_v0_image_header_t* header = NULL;
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_cursor_take(
-      &cursor, sizeof(*header), iree_alignof(*header), (const void**)&header));
+      &cursor, sizeof(*header),
+      iree_alignof(iree_vm_bytecode_v0_image_header_t), (const void**)&header));
   if (memcmp(header->magic_u8, IREE_VM_BYTECODE_IMAGE_HEADER_MAGIC_U8_BYTES,
              IREE_VM_BYTECODE_IMAGE_HEADER_MAGIC_U8_LENGTH) != 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -251,7 +252,8 @@ static iree_status_t iree_vm_bytecode_verify_envelope(
 
   const iree_vm_bytecode_v0_section_directory_row_t* rows = NULL;
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_cursor_take_array(
-      &cursor, header->section_count_u16, sizeof(*rows), iree_alignof(*rows),
+      &cursor, header->section_count_u16, sizeof(*rows),
+      iree_alignof(iree_vm_bytecode_v0_section_directory_row_t),
       (const void**)&rows));
 
   memset(out_sections, 0, sizeof(*out_sections));
@@ -392,7 +394,9 @@ static iree_status_t iree_vm_bytecode_verify_strings(
   iree_vm_bytecode_cursor_t cursor = {span, 0, "Strings section"};
   const iree_vm_bytecode_v0_strings_header_t* header = NULL;
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_cursor_take(
-      &cursor, sizeof(*header), iree_alignof(*header), (const void**)&header));
+      &cursor, sizeof(*header),
+      iree_alignof(iree_vm_bytecode_v0_strings_header_t),
+      (const void**)&header));
   if (header->string_count_u32 == 0 || header->string_count_u32 > UINT16_MAX) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Strings count must be in [1, 65535]");
@@ -400,7 +404,8 @@ static iree_status_t iree_vm_bytecode_verify_strings(
   const iree_vm_bytecode_v0_string_offset_t* offsets = NULL;
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_cursor_take_array(
       &cursor, (iree_host_size_t)header->string_count_u32 + 1, sizeof(*offsets),
-      iree_alignof(*offsets), (const void**)&offsets));
+      iree_alignof(iree_vm_bytecode_v0_string_offset_t),
+      (const void**)&offsets));
   const iree_host_size_t data_length = span.data_length - cursor.offset;
   if (data_length > UINT32_MAX || offsets[0] != 0 ||
       offsets[header->string_count_u32] != data_length) {
@@ -436,14 +441,17 @@ static iree_status_t iree_vm_bytecode_verify_ref_types(
   iree_vm_bytecode_cursor_t cursor = {span, 0, "RefTypes section"};
   const iree_vm_bytecode_v0_ref_types_header_t* header = NULL;
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_cursor_take(
-      &cursor, sizeof(*header), iree_alignof(*header), (const void**)&header));
+      &cursor, sizeof(*header),
+      iree_alignof(iree_vm_bytecode_v0_ref_types_header_t),
+      (const void**)&header));
   if (header->group_count_u32 == 0 || header->group_count_u32 > UINT16_MAX) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "RefTypes group count must be in [1, 65535]");
   }
   const iree_vm_bytecode_v0_ref_type_group_row_t* groups = NULL;
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_cursor_take_array(
-      &cursor, header->group_count_u32, sizeof(*groups), iree_alignof(*groups),
+      &cursor, header->group_count_u32, sizeof(*groups),
+      iree_alignof(iree_vm_bytecode_v0_ref_type_group_row_t),
       (const void**)&groups));
   uint32_t entry_count = 0;
   for (uint32_t i = 0; i < header->group_count_u32; ++i) {
@@ -456,7 +464,8 @@ static iree_status_t iree_vm_bytecode_verify_ref_types(
   }
   const iree_vm_bytecode_v0_ref_type_entry_row_t* entries = NULL;
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_cursor_take_array(
-      &cursor, entry_count, sizeof(*entries), iree_alignof(*entries),
+      &cursor, entry_count, sizeof(*entries),
+      iree_alignof(iree_vm_bytecode_v0_ref_type_entry_row_t),
       (const void**)&entries));
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_cursor_finish(&cursor));
 
@@ -557,7 +566,9 @@ static iree_status_t iree_vm_bytecode_verify_signatures(
   iree_vm_bytecode_cursor_t cursor = {span, 0, "Signatures section"};
   const iree_vm_bytecode_v0_signatures_header_t* header = NULL;
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_cursor_take(
-      &cursor, sizeof(*header), iree_alignof(*header), (const void**)&header));
+      &cursor, sizeof(*header),
+      iree_alignof(iree_vm_bytecode_v0_signatures_header_t),
+      (const void**)&header));
   if (header->signature_count_u32 == 0 ||
       header->signature_count_u32 > 65536u) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -565,8 +576,8 @@ static iree_status_t iree_vm_bytecode_verify_signatures(
   }
   const iree_vm_bytecode_v0_signature_row_t* rows = NULL;
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_cursor_take_array(
-      &cursor, header->signature_count_u32, sizeof(*rows), iree_alignof(*rows),
-      (const void**)&rows));
+      &cursor, header->signature_count_u32, sizeof(*rows),
+      iree_alignof(iree_vm_bytecode_v0_signature_row_t), (const void**)&rows));
   uint32_t descriptor_count = 0;
   for (uint32_t i = 0; i < header->signature_count_u32; ++i) {
     const iree_vm_bytecode_v0_signature_row_t* row = &rows[i];
@@ -585,7 +596,8 @@ static iree_status_t iree_vm_bytecode_verify_signatures(
   const iree_vm_bytecode_v0_signature_descriptor_row_t* descriptors = NULL;
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_cursor_take_array(
       &cursor, descriptor_count, sizeof(*descriptors),
-      iree_alignof(*descriptors), (const void**)&descriptors));
+      iree_alignof(iree_vm_bytecode_v0_signature_descriptor_row_t),
+      (const void**)&descriptors));
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_cursor_finish(&cursor));
 
   layout->signatures.count = header->signature_count_u32;
@@ -685,7 +697,9 @@ static iree_status_t iree_vm_bytecode_verify_callable_types(
   iree_vm_bytecode_cursor_t cursor = {span, 0, "CallableTypes section"};
   const iree_vm_bytecode_v0_callable_types_header_t* header = NULL;
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_cursor_take(
-      &cursor, sizeof(*header), iree_alignof(*header), (const void**)&header));
+      &cursor, sizeof(*header),
+      iree_alignof(iree_vm_bytecode_v0_callable_types_header_t),
+      (const void**)&header));
   if (header->callable_type_count_u32 == 0 ||
       header->callable_type_count_u32 > 65536u) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -694,7 +708,8 @@ static iree_status_t iree_vm_bytecode_verify_callable_types(
   const iree_vm_bytecode_v0_callable_type_row_t* rows = NULL;
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_cursor_take_array(
       &cursor, header->callable_type_count_u32, sizeof(*rows),
-      iree_alignof(*rows), (const void**)&rows));
+      iree_alignof(iree_vm_bytecode_v0_callable_type_row_t),
+      (const void**)&rows));
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_cursor_finish(&cursor));
   layout->callable_types.count = header->callable_type_count_u32;
   layout->callable_types.rows = rows;
@@ -764,14 +779,17 @@ static iree_status_t iree_vm_bytecode_verify_imports(
   iree_vm_bytecode_cursor_t cursor = {span, 0, "Imports section"};
   const iree_vm_bytecode_v0_imports_header_t* header = NULL;
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_cursor_take(
-      &cursor, sizeof(*header), iree_alignof(*header), (const void**)&header));
+      &cursor, sizeof(*header),
+      iree_alignof(iree_vm_bytecode_v0_imports_header_t),
+      (const void**)&header));
   if (header->group_count_u32 == 0 || header->group_count_u32 > UINT16_MAX) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Imports group count must be in [1, 65535]");
   }
   const iree_vm_bytecode_v0_import_group_row_t* groups = NULL;
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_cursor_take_array(
-      &cursor, header->group_count_u32, sizeof(*groups), iree_alignof(*groups),
+      &cursor, header->group_count_u32, sizeof(*groups),
+      iree_alignof(iree_vm_bytecode_v0_import_group_row_t),
       (const void**)&groups));
   uint32_t entry_count = 0;
   for (uint32_t i = 0; i < header->group_count_u32; ++i) {
@@ -784,7 +802,8 @@ static iree_status_t iree_vm_bytecode_verify_imports(
   }
   const iree_vm_bytecode_v0_import_entry_row_t* entries = NULL;
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_cursor_take_array(
-      &cursor, entry_count, sizeof(*entries), iree_alignof(*entries),
+      &cursor, entry_count, sizeof(*entries),
+      iree_alignof(iree_vm_bytecode_v0_import_entry_row_t),
       (const void**)&entries));
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_cursor_finish(&cursor));
 
@@ -849,15 +868,17 @@ static iree_status_t iree_vm_bytecode_verify_exports(
   iree_vm_bytecode_cursor_t cursor = {span, 0, "Exports section"};
   const iree_vm_bytecode_v0_exports_header_t* header = NULL;
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_cursor_take(
-      &cursor, sizeof(*header), iree_alignof(*header), (const void**)&header));
+      &cursor, sizeof(*header),
+      iree_alignof(iree_vm_bytecode_v0_exports_header_t),
+      (const void**)&header));
   if (header->export_count_u32 == 0 || header->export_count_u32 > UINT16_MAX) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Exports count must be in [1, 65535]");
   }
   const iree_vm_bytecode_v0_export_row_t* rows = NULL;
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_cursor_take_array(
-      &cursor, header->export_count_u32, sizeof(*rows), iree_alignof(*rows),
-      (const void**)&rows));
+      &cursor, header->export_count_u32, sizeof(*rows),
+      iree_alignof(iree_vm_bytecode_v0_export_row_t), (const void**)&rows));
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_cursor_finish(&cursor));
   iree_string_view_t previous_name = iree_string_view_empty();
   for (uint32_t i = 0; i < header->export_count_u32; ++i) {
@@ -931,15 +952,17 @@ static iree_status_t iree_vm_bytecode_verify_functions(
   iree_vm_bytecode_cursor_t cursor = {span, 0, "Functions section"};
   const iree_vm_bytecode_v0_functions_header_t* header = NULL;
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_cursor_take(
-      &cursor, sizeof(*header), iree_alignof(*header), (const void**)&header));
+      &cursor, sizeof(*header),
+      iree_alignof(iree_vm_bytecode_v0_functions_header_t),
+      (const void**)&header));
   if (header->function_count_u32 == 0 || header->function_count_u32 > 65536u) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Functions count must be in [1, 65536]");
   }
   const iree_vm_bytecode_v0_function_row_t* rows = NULL;
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_cursor_take_array(
-      &cursor, header->function_count_u32, sizeof(*rows), iree_alignof(*rows),
-      (const void**)&rows));
+      &cursor, header->function_count_u32, sizeof(*rows),
+      iree_alignof(iree_vm_bytecode_v0_function_row_t), (const void**)&rows));
   uint32_t switch_target_count = 0;
   uint32_t bytecode_length = 0;
   for (uint32_t i = 0; i < header->function_count_u32; ++i) {
@@ -971,7 +994,8 @@ static iree_status_t iree_vm_bytecode_verify_functions(
   const iree_vm_bytecode_v0_switch_target_entry_t* switch_targets = NULL;
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_cursor_take_array(
       &cursor, switch_target_count, sizeof(*switch_targets),
-      iree_alignof(*switch_targets), (const void**)&switch_targets));
+      iree_alignof(iree_vm_bytecode_v0_switch_target_entry_t),
+      (const void**)&switch_targets));
   const uint8_t* bytecode_data = NULL;
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_cursor_take(
       &cursor, bytecode_length, 4, (const void**)&bytecode_data));
@@ -1040,7 +1064,9 @@ static iree_status_t iree_vm_bytecode_verify_globals(
   iree_vm_bytecode_cursor_t cursor = {span, 0, "Globals section"};
   const iree_vm_bytecode_v0_globals_header_t* header = NULL;
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_cursor_take(
-      &cursor, sizeof(*header), iree_alignof(*header), (const void**)&header));
+      &cursor, sizeof(*header),
+      iree_alignof(iree_vm_bytecode_v0_globals_header_t),
+      (const void**)&header));
   if ((header->value_count_u32 == 0 && header->ref_count_u32 == 0 &&
        header->function_count_u32 == 0) ||
       header->value_count_u32 > 65536u || header->ref_count_u32 > 65536u ||
@@ -1054,12 +1080,14 @@ static iree_status_t iree_vm_bytecode_verify_globals(
   }
   const iree_vm_bytecode_v0_global_ref_descriptor_row_t* refs = NULL;
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_cursor_take_array(
-      &cursor, header->ref_count_u32, sizeof(*refs), iree_alignof(*refs),
+      &cursor, header->ref_count_u32, sizeof(*refs),
+      iree_alignof(iree_vm_bytecode_v0_global_ref_descriptor_row_t),
       (const void**)&refs));
   const iree_vm_bytecode_v0_global_function_descriptor_row_t* functions = NULL;
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_cursor_take_array(
       &cursor, header->function_count_u32, sizeof(*functions),
-      iree_alignof(*functions), (const void**)&functions));
+      iree_alignof(iree_vm_bytecode_v0_global_function_descriptor_row_t),
+      (const void**)&functions));
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_cursor_finish(&cursor));
   for (uint32_t i = 0; i < header->ref_count_u32; ++i) {
     if (refs[i].ref_type_ordinal_u16 >= layout->ref_types.entry_count ||
@@ -1093,7 +1121,9 @@ static iree_status_t iree_vm_bytecode_verify_rodata(
   iree_vm_bytecode_cursor_t cursor = {span, 0, "Rodata section"};
   const iree_vm_bytecode_v0_rodata_header_t* header = NULL;
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_cursor_take(
-      &cursor, sizeof(*header), iree_alignof(*header), (const void**)&header));
+      &cursor, sizeof(*header),
+      iree_alignof(iree_vm_bytecode_v0_rodata_header_t),
+      (const void**)&header));
   if (header->block_count_u32 == 0 || header->block_count_u32 > 65536u ||
       header->zero_padding_u32 != 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -1102,7 +1132,8 @@ static iree_status_t iree_vm_bytecode_verify_rodata(
   const iree_vm_bytecode_v0_rodata_block_descriptor_t* descriptors = NULL;
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_cursor_take_array(
       &cursor, header->block_count_u32, sizeof(*descriptors),
-      iree_alignof(*descriptors), (const void**)&descriptors));
+      iree_alignof(iree_vm_bytecode_v0_rodata_block_descriptor_t),
+      (const void**)&descriptors));
   uint32_t maximum_alignment = IREE_VM_BYTECODE_SECTION_MIN_ALIGNMENT;
   for (uint32_t i = 0; i < header->block_count_u32; ++i) {
     const iree_vm_bytecode_v0_rodata_block_descriptor_t* descriptor =
@@ -1186,7 +1217,9 @@ static iree_status_t iree_vm_bytecode_verify_presentation(
   iree_vm_bytecode_cursor_t cursor = {span, 0, "Presentation section"};
   const iree_vm_bytecode_v0_presentation_header_t* header = NULL;
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_cursor_take(
-      &cursor, sizeof(*header), iree_alignof(*header), (const void**)&header));
+      &cursor, sizeof(*header),
+      iree_alignof(iree_vm_bytecode_v0_presentation_header_t),
+      (const void**)&header));
   if (header->entry_count_u32 == 0 || header->entry_count_u32 > 131071u) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Presentation entry count must be in [1, 131071]");
@@ -1194,7 +1227,8 @@ static iree_status_t iree_vm_bytecode_verify_presentation(
   const iree_vm_bytecode_v0_presentation_entry_row_t* entries = NULL;
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_cursor_take_array(
       &cursor, header->entry_count_u32, sizeof(*entries),
-      iree_alignof(*entries), (const void**)&entries));
+      iree_alignof(iree_vm_bytecode_v0_presentation_entry_row_t),
+      (const void**)&entries));
 
   uint32_t field_count = 0;
   uint16_t previous_kind = 0;
@@ -1249,7 +1283,8 @@ static iree_status_t iree_vm_bytecode_verify_presentation(
 
   const iree_vm_bytecode_v0_presentation_field_row_t* fields = NULL;
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_cursor_take_array(
-      &cursor, field_count, sizeof(*fields), iree_alignof(*fields),
+      &cursor, field_count, sizeof(*fields),
+      iree_alignof(iree_vm_bytecode_v0_presentation_field_row_t),
       (const void**)&fields));
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_cursor_finish(&cursor));
 
@@ -1382,7 +1417,9 @@ static iree_status_t iree_vm_bytecode_verify_metadata(
   iree_vm_bytecode_cursor_t cursor = {span, 0, "Metadata section"};
   const iree_vm_bytecode_v0_metadata_header_t* header = NULL;
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_cursor_take(
-      &cursor, sizeof(*header), iree_alignof(*header), (const void**)&header));
+      &cursor, sizeof(*header),
+      iree_alignof(iree_vm_bytecode_v0_metadata_header_t),
+      (const void**)&header));
   if (header->total_entry_count_u32 == 0 ||
       header->module_entry_count_u32 > header->total_entry_count_u32 ||
       header->import_scope_count_u32 > layout->imports.entry_count ||
@@ -1393,15 +1430,18 @@ static iree_status_t iree_vm_bytecode_verify_metadata(
   const iree_vm_bytecode_v0_metadata_scope_row_t* import_scopes = NULL;
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_cursor_take_array(
       &cursor, header->import_scope_count_u32, sizeof(*import_scopes),
-      iree_alignof(*import_scopes), (const void**)&import_scopes));
+      iree_alignof(iree_vm_bytecode_v0_metadata_scope_row_t),
+      (const void**)&import_scopes));
   const iree_vm_bytecode_v0_metadata_scope_row_t* export_scopes = NULL;
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_cursor_take_array(
       &cursor, header->export_scope_count_u32, sizeof(*export_scopes),
-      iree_alignof(*export_scopes), (const void**)&export_scopes));
+      iree_alignof(iree_vm_bytecode_v0_metadata_scope_row_t),
+      (const void**)&export_scopes));
   const iree_vm_bytecode_v0_metadata_entry_row_t* entries = NULL;
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_cursor_take_array(
       &cursor, header->total_entry_count_u32, sizeof(*entries),
-      iree_alignof(*entries), (const void**)&entries));
+      iree_alignof(iree_vm_bytecode_v0_metadata_entry_row_t),
+      (const void**)&entries));
   IREE_RETURN_IF_ERROR(
       iree_vm_bytecode_cursor_align(&cursor, iree_alignof(uint64_t)));
   iree_host_size_t value_offset_count = 0;
@@ -1414,7 +1454,8 @@ static iree_status_t iree_vm_bytecode_verify_metadata(
   const iree_vm_bytecode_v0_metadata_value_offset_t* value_offsets = NULL;
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_cursor_take_array(
       &cursor, value_offset_count, sizeof(*value_offsets),
-      iree_alignof(*value_offsets), (const void**)&value_offsets));
+      iree_alignof(iree_vm_bytecode_v0_metadata_value_offset_t),
+      (const void**)&value_offsets));
   const uint8_t* value_data = span.data + cursor.offset;
   const iree_host_size_t value_data_length = span.data_length - cursor.offset;
   cursor.offset = span.data_length;

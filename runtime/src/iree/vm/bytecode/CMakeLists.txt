@@ -244,6 +244,7 @@ iree_cc_test(
   DEPS
     ::bytecode
     ::inspection
+    iree::base::core_headers
     iree::testing::gtest
     iree::testing::gtest_main
     iree::vm
@@ -263,6 +264,7 @@ iree_cc_test(
     ::inspection
     ::module
     iree::base
+    iree::base::core_headers
     iree::testing::gtest
     iree::testing::gtest_main
     iree::vm
@@ -278,6 +280,7 @@ iree_cc_test(
     "module_test_data.h"
   DEPS
     ::bytecode
+    iree::base::core_headers
     iree::testing::gtest
     iree::testing::gtest_main
     iree::vm
@@ -294,6 +297,7 @@ iree_cc_test(
     "module_test_data.h"
   DEPS
     ::bytecode
+    iree::base::core_headers
     iree::testing::gtest
     iree::testing::gtest_main
     iree::vm
@@ -309,6 +313,7 @@ iree_cc_test(
     "tooling/dump_test.cc"
   DEPS
     ::dump
+    iree::base::core_headers
     iree::testing::gtest
     iree::testing::gtest_main
     iree::vm::bytecode::wire
@@ -326,6 +331,7 @@ iree_cc_fuzz(
     ::dump
     ::inspection
     iree::base
+    iree::base::core_headers
     iree::vm
     iree::vm::bytecode::wire
 )
@@ -343,6 +349,7 @@ iree_cc_test(
     ::dump
     ::inspection
     iree::base
+    iree::base::core_headers
     iree::testing::gtest
     iree::testing::gtest_main
     iree::vm
@@ -361,6 +368,7 @@ iree_cc_fuzz(
     ::dump
     ::inspection
     iree::base
+    iree::base::core_headers
     iree::vm
     iree::vm::bytecode::wire
 )
@@ -374,6 +382,7 @@ iree_cc_binary_benchmark(
     "module_test_data.h"
   DEPS
     ::bytecode
+    iree::base::core_headers
     iree::testing::benchmark
     iree::testing::benchmark_main
     iree::third_party::google_benchmark

@@ -6,6 +6,7 @@
 
 #include "iree/vm/bytecode/interpreter_float_math.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -110,12 +111,36 @@ void ExpectBits(Float actual, Float expected) {
 }
 
 template <typename Float>
+void ExpectHostMathNear(Float actual, Float expected) {
+  const Float scale = std::max(std::fabs(expected), Float{1});
+  const Float tolerance =
+      Float{4} * std::numeric_limits<Float>::epsilon() * scale;
+  EXPECT_NEAR(actual, expected, tolerance);
+}
+
+bool IsWidthMatchedHostMathSelector(uint8_t selector) {
+  return selector <= IREE_VM_ISA_FLOAT_MATH_UNARY_SQRT ||
+         selector == IREE_VM_ISA_FLOAT_MATH_UNARY_CBRT ||
+         (selector >= IREE_VM_ISA_FLOAT_MATH_UNARY_SIN &&
+          selector <= IREE_VM_ISA_FLOAT_MATH_UNARY_COS) ||
+         (selector >= IREE_VM_ISA_FLOAT_MATH_UNARY_TAN &&
+          selector <= IREE_VM_ISA_FLOAT_MATH_UNARY_ERFC);
+}
+
+template <typename Float>
 void ExpectArithmeticNaN(Float actual) {
   using Traits = MathTraits<Float>;
   const FloatBits<Float> bits = ToBits(actual);
   EXPECT_EQ(bits & Traits::kExponent, Traits::kExponent);
   EXPECT_NE(bits & Traits::kSignificand, 0u);
   EXPECT_NE(bits & Traits::kQuiet, 0u);
+}
+
+template <typename Float>
+void ExpectCanonicalArithmeticNaN(Float actual) {
+  using Traits = MathTraits<Float>;
+  const FloatBits<Float> bits = ToBits(actual);
+  EXPECT_EQ(bits & ~Traits::kSign, Traits::kExponent | Traits::kQuiet);
 }
 
 template <typename Float>
@@ -297,6 +322,8 @@ void CheckEverySelector() {
     const Float actual = EvaluateUnary(selector, kInput);
     if (std::isnan(expected)) {
       ExpectArithmeticNaN(actual);
+    } else if (IsWidthMatchedHostMathSelector(selector)) {
+      ExpectHostMathNear(actual, expected);
     } else {
       ExpectBits(actual, expected);
     }
@@ -325,6 +352,11 @@ void CheckExceptionalValues() {
   const Float negative_zero = -Float{0};
   const Float infinity = std::numeric_limits<Float>::infinity();
   const Float quiet_nan = std::numeric_limits<Float>::quiet_NaN();
+
+  ExpectCanonicalArithmeticNaN(
+      EvaluateUnary<Float>(IREE_VM_ISA_FLOAT_MATH_UNARY_SQRT, Float{-1}));
+  ExpectCanonicalArithmeticNaN(
+      EvaluateUnary<Float>(IREE_VM_ISA_FLOAT_MATH_UNARY_EXP, quiet_nan));
 
   const auto exact = [](uint8_t selector, Float input, Float expected) {
     ExpectBits(EvaluateUnary(selector, input), expected);

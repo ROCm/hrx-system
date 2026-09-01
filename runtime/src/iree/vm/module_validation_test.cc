@@ -197,8 +197,9 @@ struct ValidationModule {
     } else if (validation_module->mode == DefinitionMode::kUnsortedCallables) {
       *out_callable_type = {
           {{nullptr, 0}, {nullptr, 0}},
-          ordinal == 0 ? IREE_VM_CALLABLE_TYPE_FLAG_MAY_YIELD
-                       : IREE_VM_CALLABLE_TYPE_FLAG_NONE,
+          static_cast<iree_vm_callable_type_flags_t>(
+              ordinal == 0 ? IREE_VM_CALLABLE_TYPE_FLAG_MAY_YIELD
+                           : IREE_VM_CALLABLE_TYPE_FLAG_NONE),
           0,
           0,
       };
@@ -208,8 +209,9 @@ struct ValidationModule {
                    DefinitionMode::kUnsortedOverloadedImports) {
       *out_callable_type = {
           {{nullptr, 0}, {nullptr, 0}},
-          ordinal == 0 ? IREE_VM_CALLABLE_TYPE_FLAG_NONE
-                       : IREE_VM_CALLABLE_TYPE_FLAG_MAY_YIELD,
+          static_cast<iree_vm_callable_type_flags_t>(
+              ordinal == 0 ? IREE_VM_CALLABLE_TYPE_FLAG_NONE
+                           : IREE_VM_CALLABLE_TYPE_FLAG_MAY_YIELD),
           0,
           0,
       };

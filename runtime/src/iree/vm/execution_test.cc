@@ -181,7 +181,8 @@ void BlockCancellationWake(void* user_data) {
 }
 
 TEST(VMExecutionTest, ReusesPlacementAndAllocatedInvocationStorage) {
-  alignas(max_align_t) std::array<uint8_t, kInvocationStorageSize> storage = {};
+  alignas(iree_max_align_t) std::array<uint8_t, kInvocationStorageSize>
+      storage = {};
   iree_vm_invocation_t* invocation = nullptr;
   IREE_ASSERT_OK(iree_vm_invocation_initialize(
       iree_make_byte_span(storage.data(), storage.size()), &invocation));
@@ -203,7 +204,7 @@ TEST(VMExecutionTest, ReusesPlacementAndAllocatedInvocationStorage) {
   iree_vm_invocation_free(invocation);
   EXPECT_EQ(allocator.free_count, 1u);
 
-  alignas(max_align_t) std::array<uint8_t, 1> too_small;
+  alignas(iree_max_align_t) std::array<uint8_t, 1> too_small;
   std::memset(too_small.data(), 0xA5, too_small.size());
   const auto expected = too_small;
   invocation = reinterpret_cast<iree_vm_invocation_t*>(1);

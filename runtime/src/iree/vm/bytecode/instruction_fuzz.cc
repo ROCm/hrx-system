@@ -342,7 +342,7 @@ void ExerciseDescription(iree_vm_export_t export_value,
   iree_host_size_t required_size = 0;
   RequireOk(iree_vm_export_query_description(
       export_value, iree_byte_span_empty(), &required_size, nullptr));
-  alignas(max_align_t) std::array<uint8_t, 4096> storage = {};
+  alignas(iree_max_align_t) std::array<uint8_t, 4096> storage = {};
   if (required_size > storage.size()) std::abort();
   iree_vm_export_description_t description = {};
   RequireOk(iree_vm_export_query_description(
@@ -442,7 +442,7 @@ void ExerciseExecutable(const std::vector<uint8_t>& image,
   iree_vm_program_t* program = nullptr;
   RequireOk(iree_vm_program_create({module, iree_vm_module_span_empty()},
                                    iree_allocator_system(), &program));
-  alignas(max_align_t) std::array<uint8_t, kInvocationStorageSize>
+  alignas(iree_max_align_t) std::array<uint8_t, kInvocationStorageSize>
       invocation_storage = {};
   iree_vm_invocation_t* invocation = nullptr;
   RequireOk(iree_vm_invocation_initialize(

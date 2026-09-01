@@ -11,6 +11,7 @@
 #include <string_view>
 #include <utility>
 
+#include "iree/base/alignment.h"
 #include "iree/vm/bytecode/wire/core/abi.h"
 #include "iree/vm/bytecode/wire/core/buffer.h"
 #include "iree/vm/bytecode/wire/core/constant.h"
@@ -48,7 +49,7 @@ class ByteBuffer {
   }
 
   void Align(size_t alignment) {
-    data_.resize((data_.size() + alignment - 1) & ~(alignment - 1), 0);
+    data_.resize(iree_host_align(data_.size(), alignment), 0);
   }
 
   size_t size() const { return data_.size(); }
@@ -1579,8 +1580,7 @@ uint8_t* FindSectionPayload(std::vector<uint8_t>* image,
       header + 1);
   size_t offset = sizeof(*header) + header->section_count_u16 * sizeof(*rows);
   for (uint16_t i = 0; i < header->section_count_u16; ++i) {
-    offset = (offset + rows[i].payload_alignment_u32 - 1) &
-             ~(rows[i].payload_alignment_u32 - 1);
+    offset = iree_host_align(offset, rows[i].payload_alignment_u32);
     if (rows[i].section_type_u16 == section_type) {
       return image->data() + offset;
     }

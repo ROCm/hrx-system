@@ -6,7 +6,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
 
 #include "iree/testing/benchmark.h"
 #include "iree/vm/execution_test_provider.h"
@@ -41,7 +40,7 @@ void DeinitializeBenchmarkContext(BenchmarkContext* context) {
   iree_vm_program_release(context->program);
   iree_vm_module_release(context->application_module);
   iree_vm_module_release(context->math_module);
-  std::memset(context, 0, sizeof(*context));
+  *context = {};
 }
 
 iree_status_t InitializeBenchmarkContext(BenchmarkContext* context) {
@@ -94,7 +93,7 @@ iree_status_t InvokeLaunchConfig(iree_vm_invocation_t* invocation,
 IREE_ATTRIBUTE_NOINLINE iree_status_t
 InvokeLaunchConfigOnStack(iree_vm_function_t function, uint32_t row_count,
                           iree_vm_variant_span_t results) {
-  alignas(max_align_t) uint8_t storage[kInvocationStorageSize];
+  alignas(iree_max_align_t) uint8_t storage[kInvocationStorageSize];
   iree_vm_invocation_t* invocation = nullptr;
   IREE_RETURN_IF_ERROR(iree_vm_invocation_initialize(
       iree_make_byte_span(storage, sizeof(storage)), &invocation));

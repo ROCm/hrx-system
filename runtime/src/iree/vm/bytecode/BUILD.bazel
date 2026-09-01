@@ -316,6 +316,7 @@ iree_runtime_cc_test(
     deps = [
         ":bytecode",
         ":inspection",
+        "//runtime/src/iree/base:core_headers",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
         "//runtime/src/iree/vm",
@@ -336,6 +337,7 @@ iree_runtime_cc_test(
         ":inspection",
         ":module",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
         "//runtime/src/iree/vm",
@@ -352,6 +354,7 @@ iree_runtime_cc_test(
     ],
     deps = [
         ":bytecode",
+        "//runtime/src/iree/base:core_headers",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
         "//runtime/src/iree/vm",
@@ -369,6 +372,7 @@ iree_runtime_cc_test(
     ],
     deps = [
         ":bytecode",
+        "//runtime/src/iree/base:core_headers",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
         "//runtime/src/iree/vm",
@@ -385,6 +389,7 @@ iree_runtime_cc_test(
     ],
     deps = [
         ":dump",
+        "//runtime/src/iree/base:core_headers",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
         "//runtime/src/iree/vm/bytecode/wire",
@@ -403,6 +408,7 @@ iree_runtime_cc_fuzz(
         ":dump",
         ":inspection",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
         "//runtime/src/iree/vm",
         "//runtime/src/iree/vm/bytecode/wire",
     ],
@@ -421,6 +427,7 @@ iree_runtime_cc_test(
         ":dump",
         ":inspection",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
         "//runtime/src/iree/vm",
@@ -440,6 +447,7 @@ iree_runtime_cc_fuzz(
         ":dump",
         ":inspection",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
         "//runtime/src/iree/vm",
         "//runtime/src/iree/vm/bytecode/wire",
     ],
@@ -454,6 +462,7 @@ iree_runtime_cc_benchmark(
     ],
     deps = [
         ":bytecode",
+        "//runtime/src/iree/base:core_headers",
         "//runtime/src/iree/testing:benchmark",
         "//runtime/src/iree/testing:benchmark_main",
         "//runtime/src/iree/vm",
