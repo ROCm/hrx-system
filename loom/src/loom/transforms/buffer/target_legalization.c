@@ -505,7 +505,7 @@ static iree_status_t loom_buffer_legalize(
   }
 }
 
-static const loom_target_legalizer_entry_t kBufferLegalizerEntries[] = {
+static const loom_target_legalizer_rule_t kBufferLegalizerRules[] = {
     {
         .root_kind = LOOM_OP_BUFFER_COPY,
         .legalize = loom_buffer_legalize,
@@ -523,8 +523,8 @@ static const loom_target_legalizer_entry_t kBufferLegalizerEntries[] = {
 static const loom_target_legalizer_provider_t kBufferLegalizerProvider = {
     .name = IREE_SVL("buffer"),
     .strategy = LOOM_TARGET_LEGALIZER_STRATEGY_REFERENCE,
-    .entries = kBufferLegalizerEntries,
-    .entry_count = IREE_ARRAYSIZE(kBufferLegalizerEntries),
+    .rules = kBufferLegalizerRules,
+    .rule_count = IREE_ARRAYSIZE(kBufferLegalizerRules),
 };
 
 const loom_target_legalizer_provider_t* loom_buffer_target_legalizer_provider(

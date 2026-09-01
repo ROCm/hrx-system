@@ -118,7 +118,7 @@ static iree_status_t loom_vm_legalize_dynamic_vector_extract(
       .legalize = loom_vm_legalize_narrow_integer_binary, \
   }
 
-static const loom_target_legalizer_entry_t kVmLegalizerEntries[] = {
+static const loom_target_legalizer_rule_t kVmLegalizerRules[] = {
     {
         .root_kind = LOOM_OP_BUFFER_COPY,
         .legalize = loom_vm_retain_direct_target_op,
@@ -167,6 +167,6 @@ static const loom_target_legalizer_entry_t kVmLegalizerEntries[] = {
 const loom_target_legalizer_provider_t loom_vm_legalizer_provider = {
     .name = IREE_SVL("vm"),
     .strategy = LOOM_TARGET_LEGALIZER_STRATEGY_TARGET,
-    .entries = kVmLegalizerEntries,
-    .entry_count = IREE_ARRAYSIZE(kVmLegalizerEntries),
+    .rules = kVmLegalizerRules,
+    .rule_count = IREE_ARRAYSIZE(kVmLegalizerRules),
 };

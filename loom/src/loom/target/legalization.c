@@ -33,25 +33,25 @@ static iree_status_t loom_target_legalizer_registry_count_rows(
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                 "target legalizer provider must not be NULL");
       }
-      if (provider->entry_count == 0) {
+      if (provider->rule_count == 0) {
         continue;
       }
-      if (provider->entries == NULL) {
+      if (provider->rules == NULL) {
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
-            "target legalizer provider has entries but no entry table");
+            "target legalizer provider has rules but no rule table");
       }
       const uint32_t total_entry_count =
-          (uint32_t)(*out_entry_count) + provider->entry_count;
+          (uint32_t)(*out_entry_count) + provider->rule_count;
       if (total_entry_count > UINT16_MAX) {
         return iree_make_status(
             IREE_STATUS_RESOURCE_EXHAUSTED,
             "target legalizer registry entry count exceeds uint16_t capacity");
       }
       *out_entry_count = (uint16_t)total_entry_count;
-      for (uint16_t entry_index = 0; entry_index < provider->entry_count;
-           ++entry_index) {
-        const loom_op_kind_t op_kind = provider->entries[entry_index].root_kind;
+      for (uint16_t rule_index = 0; rule_index < provider->rule_count;
+           ++rule_index) {
+        const loom_op_kind_t op_kind = provider->rules[rule_index].root_kind;
         const uint8_t dialect_id = loom_op_dialect_id(op_kind);
         const uint8_t op_index = loom_op_dialect_index(op_kind);
         if (dialect_id < *out_dialect_base_id) {
@@ -119,9 +119,9 @@ static void loom_target_legalizer_registry_count_entries_by_op(
          provider_index < provider_list->count; ++provider_index) {
       const loom_target_legalizer_provider_t* provider =
           provider_list->values[provider_index];
-      for (uint16_t entry_index = 0; entry_index < provider->entry_count;
-           ++entry_index) {
-        const loom_op_kind_t op_kind = provider->entries[entry_index].root_kind;
+      for (uint16_t rule_index = 0; rule_index < provider->rule_count;
+           ++rule_index) {
+        const loom_op_kind_t op_kind = provider->rules[rule_index].root_kind;
         const uint8_t dialect_id = loom_op_dialect_id(op_kind);
         const uint8_t op_index = loom_op_dialect_index(op_kind);
         ++op_entries_by_dialect[dialect_id][op_index].entry_count;
@@ -166,19 +166,23 @@ static void loom_target_legalizer_registry_fill_entries(
          provider_index < provider_list->count; ++provider_index) {
       const loom_target_legalizer_provider_t* provider =
           provider_list->values[provider_index];
-      for (uint16_t entry_index = 0; entry_index < provider->entry_count;
-           ++entry_index) {
-        const loom_target_legalizer_entry_t* source_entry =
-            &provider->entries[entry_index];
-        const uint8_t dialect_id = loom_op_dialect_id(source_entry->root_kind);
-        const uint8_t op_index = loom_op_dialect_index(source_entry->root_kind);
+      for (uint16_t rule_index = 0; rule_index < provider->rule_count;
+           ++rule_index) {
+        const loom_target_legalizer_rule_t* source_rule =
+            &provider->rules[rule_index];
+        const uint8_t dialect_id = loom_op_dialect_id(source_rule->root_kind);
+        const uint8_t op_index = loom_op_dialect_index(source_rule->root_kind);
         loom_target_legalizer_op_entry_t* op_entry =
             &op_entries_by_dialect[dialect_id][op_index];
         loom_target_legalizer_entry_t* target_entry =
             &entries[op_entry->entry_start + op_entry->entry_count++];
-        *target_entry = *source_entry;
-        target_entry->provider_name = provider->name;
-        target_entry->provider_strategy = provider->strategy;
+        *target_entry = (loom_target_legalizer_entry_t){
+            .flags = source_rule->flags,
+            .root_kind = source_rule->root_kind,
+            .provider_name = provider->name,
+            .provider_strategy = provider->strategy,
+            .legalize = source_rule->legalize,
+        };
       }
     }
   }
