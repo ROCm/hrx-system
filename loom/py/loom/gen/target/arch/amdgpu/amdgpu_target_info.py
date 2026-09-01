@@ -24,10 +24,6 @@ def _ensure_runtime_py_on_path() -> None:
 
 _ensure_runtime_py_on_path()
 
-from build_tools.amdgpu.target_map_data import (  # noqa: E402
-    AMDGPU_PHYSICAL_TARGET_INFOS,
-)
-
 from loom.gen.support.c import c_string_arg as _c_string_arg  # noqa: E402
 from loom.gen.support.files import write_text_file  # noqa: E402
 from loom.gen.support.generated_file import line_comment_header  # noqa: E402
@@ -61,6 +57,9 @@ from loom.target.arch.amdgpu.lds_bank_service import (  # noqa: E402
 )
 from loom.target.arch.amdgpu.names import (  # noqa: E402
     amdgpu_descriptor_set_ordinal_constant_name,
+)
+from loom.target.arch.amdgpu.target_catalog import (  # noqa: E402
+    AMDGPU_PHYSICAL_TARGET_INFOS,
 )
 from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     AMDGPU_BUFFER_RESOURCE_CACHE_SWIZZLE_NONE,

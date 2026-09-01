@@ -11,15 +11,14 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 
-from build_tools.amdgpu.target_map_data import (
+from loom.target.arch.amdgpu.lds_bank_service import (
+    AMDGPU_LDS_BANK_SERVICE_MODELS_WAVE32_B128_QUAD_PHASES,
+)
+from loom.target.arch.amdgpu.target_catalog import (
     AMDGPU_EXACT_TARGET_INFOS,
     AMDGPU_GENERIC_CODE_OBJECT_INFOS,
     AMDGPU_PHYSICAL_TARGET_INFOS,
     AMDGPU_TARGET_OVERLAY_INFOS,
-)
-
-from loom.target.arch.amdgpu.lds_bank_service import (
-    AMDGPU_LDS_BANK_SERVICE_MODELS_WAVE32_B128_QUAD_PHASES,
 )
 from loom.target.arch.amdgpu.target_info import (
     AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_OCP_FP8_NONCANONICAL_NAN,
