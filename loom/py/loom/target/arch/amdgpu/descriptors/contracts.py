@@ -261,7 +261,7 @@ def _amdgpu_contract_descriptor_from_overlay(
         + tuple(
             operand for operand in operands if operand.role is not OperandRole.RESULT
         ),
-        op_kind=overlay.op_kind,
+        carrier=overlay.carrier,
         immediates=overlay.immediates,
         effects=overlay.effects,
         constraints=overlay.constraints,

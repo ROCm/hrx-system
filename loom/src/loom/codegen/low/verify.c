@@ -254,14 +254,10 @@ static iree_string_view_t loom_low_verify_string_or_empty(
 static iree_string_view_t loom_low_verify_descriptor_op_name(
     const loom_low_descriptor_t* descriptor) {
   switch (descriptor->carrier) {
-    case LOOM_LOW_DESCRIPTOR_CARRIER_PACKET:
-      switch (descriptor->op_kind) {
-        case LOOM_LOW_DESCRIPTOR_OP_KIND_OP:
-          return IREE_SV("low.op");
-        case LOOM_LOW_DESCRIPTOR_OP_KIND_CONST:
-          return IREE_SV("low.const");
-      }
-      break;
+    case LOOM_LOW_DESCRIPTOR_CARRIER_OP:
+      return IREE_SV("low.op");
+    case LOOM_LOW_DESCRIPTOR_CARRIER_CONST:
+      return IREE_SV("low.const");
     case LOOM_LOW_DESCRIPTOR_CARRIER_BRANCH:
       return IREE_SV("low.br");
     case LOOM_LOW_DESCRIPTOR_CARRIER_SWITCH:

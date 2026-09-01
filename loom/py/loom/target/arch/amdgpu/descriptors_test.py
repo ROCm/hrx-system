@@ -210,7 +210,7 @@ def test_contract_descriptor_projection_preserves_operation_kind() -> None:
     for overlay_builder in _AMDGPU_CONTRACT_DESCRIPTOR_OVERLAY_BUILDERS.values():
         overlay = overlay_builder()
         descriptor = _amdgpu_contract_descriptor_from_overlay(overlay)
-        assert descriptor.op_kind is overlay.op_kind
+        assert descriptor.carrier is overlay.carrier
 
 
 def test_generic_descriptor_contracts_are_member_intersections() -> None:

@@ -37,7 +37,7 @@ from loom.target.arch.vm.projection import (
     VM_CORE_DESCRIPTOR_SET,
     VM_INSTRUCTION_PROJECTIONS,
 )
-from loom.target.low_descriptors import DescriptorOpKind, ImmediateKind, OperandRole
+from loom.target.low_descriptors import DescriptorCarrier, ImmediateKind, OperandRole
 from loom.verify import type_satisfies_constraint
 
 _DESCRIPTORS_BY_KEY = {
@@ -329,7 +329,7 @@ def _require_descriptor_shape(
             f"{descriptor_result_count} results; expected {operand_count} and "
             f"{result_count}"
         )
-    if descriptor.op_kind is not DescriptorOpKind.OP:
+    if descriptor.carrier is not DescriptorCarrier.OP:
         raise ValueError(
             f"{descriptor_key}: source operation projection requires an "
             "instruction descriptor"

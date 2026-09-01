@@ -253,17 +253,11 @@ class DescriptorFlag(CEnum):
     MAY_YIELD = "LOOM_LOW_DESCRIPTOR_FLAG_MAY_YIELD"
 
 
-class DescriptorOpKind(CEnum):
-    """Canonical low IR operation used to represent a descriptor packet."""
-
-    OP = "LOOM_LOW_DESCRIPTOR_OP_KIND_OP"
-    CONST = "LOOM_LOW_DESCRIPTOR_OP_KIND_CONST"
-
-
 class DescriptorCarrier(CEnum):
-    """Canonical Low structural carrier for a descriptor."""
+    """Canonical Low IR operation used to carry a descriptor."""
 
-    PACKET = "LOOM_LOW_DESCRIPTOR_CARRIER_PACKET"
+    OP = "LOOM_LOW_DESCRIPTOR_CARRIER_OP"
+    CONST = "LOOM_LOW_DESCRIPTOR_CARRIER_CONST"
     BRANCH = "LOOM_LOW_DESCRIPTOR_CARRIER_BRANCH"
     SWITCH = "LOOM_LOW_DESCRIPTOR_CARRIER_SWITCH"
 
@@ -631,8 +625,7 @@ class Descriptor:
     semantic_tag: str | None
     operands: tuple[Operand, ...]
     schedule_class: str
-    carrier: DescriptorCarrier = DescriptorCarrier.PACKET
-    op_kind: DescriptorOpKind = DescriptorOpKind.OP
+    carrier: DescriptorCarrier = DescriptorCarrier.OP
     immediates: tuple[Immediate, ...] = ()
     encoding_field_values: tuple[EncodingFieldValue, ...] = ()
     asm_forms: tuple[AsmForm, ...] = ()

@@ -153,7 +153,7 @@ static iree_status_t loom_vm_function_structural_packet_byte_length(
   *out_byte_length = 0;
   const loom_op_t* op = packet->node->op;
   if (packet->descriptor != NULL &&
-      packet->descriptor->carrier == LOOM_LOW_DESCRIPTOR_CARRIER_PACKET) {
+      loom_low_descriptor_is_packet(packet->descriptor)) {
     const uint32_t descriptor_ordinal =
         (uint32_t)(packet->descriptor -
                    frame->target.descriptor_set->descriptors);

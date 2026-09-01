@@ -737,7 +737,7 @@ static iree_status_t loom_low_verify_asm_form(
   }
   const loom_low_descriptor_t* descriptor =
       &descriptor_set->descriptors[asm_form->descriptor_ordinal];
-  if (descriptor->op_kind == LOOM_LOW_DESCRIPTOR_OP_KIND_CONST &&
+  if (descriptor->carrier == LOOM_LOW_DESCRIPTOR_CARRIER_CONST &&
       (asm_form->result_operand_index_count != 1 ||
        asm_form->operand_index_count != 0)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -1962,21 +1962,8 @@ static iree_status_t loom_low_verify_descriptor_operand_roles(
 static iree_status_t loom_low_verify_descriptor_carrier(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor, uint32_t descriptor_index) {
-  if (descriptor->carrier_reserved != 0) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "low descriptor %" PRIu32
-                            " has nonzero reserved carrier bits",
-                            descriptor_index);
-  }
   if (descriptor->carrier == LOOM_LOW_DESCRIPTOR_CARRIER_BRANCH ||
       descriptor->carrier == LOOM_LOW_DESCRIPTOR_CARRIER_SWITCH) {
-    if (descriptor->op_kind != LOOM_LOW_DESCRIPTOR_OP_KIND_OP) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "low descriptor %" PRIu32
-          " structural carrier selects non-operation kind %u",
-          descriptor_index, (unsigned)descriptor->op_kind);
-    }
     if (descriptor->result_count != 0) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "low descriptor %" PRIu32
@@ -2015,45 +2002,37 @@ static iree_status_t loom_low_verify_descriptor_carrier(
     }
     return iree_ok_status();
   }
-  if (descriptor->carrier != LOOM_LOW_DESCRIPTOR_CARRIER_PACKET) {
+  if (descriptor->carrier == LOOM_LOW_DESCRIPTOR_CARRIER_OP) {
+    return iree_ok_status();
+  }
+  if (descriptor->carrier != LOOM_LOW_DESCRIPTOR_CARRIER_CONST) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "low descriptor %" PRIu32 " has invalid carrier %u",
                             descriptor_index, (unsigned)descriptor->carrier);
   }
-  switch (descriptor->op_kind) {
-    case LOOM_LOW_DESCRIPTOR_OP_KIND_OP:
-      return iree_ok_status();
-    case LOOM_LOW_DESCRIPTOR_OP_KIND_CONST:
-      if (descriptor->result_count != 1) {
-        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "low descriptor %" PRIu32
-                                " uses low.const but has %" PRIu16 " results",
-                                descriptor_index, descriptor->result_count);
-      }
-      for (uint16_t i = 0; i < descriptor->operand_count; ++i) {
-        const loom_low_operand_t* operand =
-            &descriptor_set->operands[descriptor->operand_start + i];
-        if (loom_low_operand_role_is_packet_operand(operand->role)) {
-          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                  "low descriptor %" PRIu32
-                                  " uses low.const but has packet operands",
-                                  descriptor_index);
-        }
-      }
-      if (descriptor->effect_count != 0) {
-        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "low descriptor %" PRIu32
-                                " uses low.const but has %" PRIu16
-                                " effect rows",
-                                descriptor_index, descriptor->effect_count);
-      }
-      return iree_ok_status();
-    default:
+  if (descriptor->result_count != 1) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "low descriptor %" PRIu32
+                            " uses low.const but has %" PRIu16 " results",
+                            descriptor_index, descriptor->result_count);
+  }
+  for (uint16_t i = 0; i < descriptor->operand_count; ++i) {
+    const loom_low_operand_t* operand =
+        &descriptor_set->operands[descriptor->operand_start + i];
+    if (loom_low_operand_role_is_packet_operand(operand->role)) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "low descriptor %" PRIu32
-                              " has invalid operation kind %u",
-                              descriptor_index, (unsigned)descriptor->op_kind);
+                              " uses low.const but has packet operands",
+                              descriptor_index);
+    }
   }
+  if (descriptor->effect_count != 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "low descriptor %" PRIu32
+                            " uses low.const but has %" PRIu16 " effect rows",
+                            descriptor_index, descriptor->effect_count);
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t loom_low_verify_descriptor_state_operands(

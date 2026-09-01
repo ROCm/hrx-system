@@ -218,7 +218,7 @@ void InitializeTestTables(TestTables* tables) {
   tables->descriptors[0].immediate_count = 1;
   tables->descriptor_views[0].schedule_class_id = 0;
   tables->descriptors[0].flags = LOOM_LOW_DESCRIPTOR_FLAG_DEAD_REMOVABLE;
-  tables->descriptors[0].op_kind = LOOM_LOW_DESCRIPTOR_OP_KIND_CONST;
+  tables->descriptors[0].carrier = LOOM_LOW_DESCRIPTOR_CARRIER_CONST;
   tables->descriptor_views[0].canonical_asm_form_ordinal =
       LOOM_LOW_ASM_FORM_ORDINAL_NONE;
 
@@ -1703,10 +1703,10 @@ TEST(LowDescriptorsTest, RejectsIncompleteDescriptorReferences) {
                         loom_low_descriptor_set_verify(&tables.set));
 }
 
-TEST(LowDescriptorsTest, RejectsInvalidDescriptorOperationKind) {
+TEST(LowDescriptorsTest, RejectsInvalidDescriptorCarrier) {
   TestTables tables;
   InitializeTestTables(&tables);
-  tables.descriptors[0].op_kind = static_cast<loom_low_descriptor_op_kind_t>(2);
+  tables.descriptors[0].carrier = static_cast<loom_low_descriptor_carrier_t>(4);
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         loom_low_descriptor_set_verify(&tables.set));

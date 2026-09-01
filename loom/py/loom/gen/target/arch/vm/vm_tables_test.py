@@ -179,7 +179,7 @@ def test_control_assert_reads_diagnostic_but_is_not_dead_removable() -> None:
 def test_control_fail_is_a_terminal_packet() -> None:
     descriptors = {descriptor.key: descriptor for descriptor in VM_CORE_DESCRIPTOR_SET.descriptors}
     control_fail = descriptors["vm.control.fail"]
-    assert control_fail.carrier is DescriptorCarrier.PACKET
+    assert control_fail.carrier is DescriptorCarrier.OP
     assert control_fail.effects == (
         Effect(EffectKind.CONTROL, flags=(EffectFlag.ORDERED,)),
         Effect(

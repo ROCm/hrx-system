@@ -213,7 +213,6 @@ def _descriptor_row_lines(
             f".feature_mask_word_start = {descriptor_rows[i]['feature_mask_word_start']},",
             f".feature_mask_word_count = {descriptor_rows[i]['feature_mask_word_count']},",
             f".carrier = {descriptor.carrier.c_name},",
-            ".carrier_reserved = 0,",
             f".encoding_field_value_start = {descriptor_rows[i]['encoding_field_value_start']},",
             f".encoding_field_value_count = {descriptor_rows[i]['encoding_field_value_count']},",
             f".encoding_format_id = {descriptor.encoding_format_id},",
@@ -233,7 +232,6 @@ def _descriptor_row_lines(
             f".operand_form_start = {descriptor_rows[i]['operand_form_start']},",
             f".operand_form_count = {descriptor_rows[i]['operand_form_count']},",
             f".flags = {c_spelling.flag_expr(descriptor.flags)},",
-            f".op_kind = {descriptor.op_kind.c_name},",
         ]
         for i, descriptor in enumerate(descriptors)
     ]

@@ -862,21 +862,15 @@ static inline uint16_t loom_low_schedule_class_schedule_distance_cycles(
              : schedule_class->latency_cycles;
 }
 
-enum loom_low_descriptor_op_kind_e {
-  // Descriptor packets use the general low.op representation.
-  LOOM_LOW_DESCRIPTOR_OP_KIND_OP = 0,
-  // Descriptor packets use the operandless, single-result low.const form.
-  LOOM_LOW_DESCRIPTOR_OP_KIND_CONST = 1,
-};
-typedef uint8_t loom_low_descriptor_op_kind_t;
-
 enum loom_low_descriptor_carrier_e {
-  // Descriptor packets use low.op or low.const according to |op_kind|.
-  LOOM_LOW_DESCRIPTOR_CARRIER_PACKET = 0,
+  // Descriptor uses the general low.op carrier.
+  LOOM_LOW_DESCRIPTOR_CARRIER_OP = 0,
+  // Descriptor uses the operandless, single-result low.const carrier.
+  LOOM_LOW_DESCRIPTOR_CARRIER_CONST = 1,
   // Descriptor uses the one-successor low.br structural carrier.
-  LOOM_LOW_DESCRIPTOR_CARRIER_BRANCH = 1,
+  LOOM_LOW_DESCRIPTOR_CARRIER_BRANCH = 2,
   // Descriptor uses the multi-successor low.switch structural carrier.
-  LOOM_LOW_DESCRIPTOR_CARRIER_SWITCH = 2,
+  LOOM_LOW_DESCRIPTOR_CARRIER_SWITCH = 3,
 };
 typedef uint8_t loom_low_descriptor_carrier_t;
 
@@ -909,12 +903,8 @@ typedef struct loom_low_descriptor_t {
   uint16_t operand_form_start;
   // Descriptor flags used by verifier, scheduler, and optimizer.
   loom_low_descriptor_flags_t flags;
-  // Canonical low IR operation used to represent this descriptor packet.
-  loom_low_descriptor_op_kind_t op_kind;
-  // Canonical Low packet or structural carrier for this descriptor.
+  // Canonical Low IR operation used to carry this descriptor.
   loom_low_descriptor_carrier_t carrier;
-  // Reserved for future carrier behavior. Must be zero.
-  uint8_t carrier_reserved;
   // Number of feature-mask words required by this descriptor.
   uint16_t feature_mask_word_count;
   // Number of target-owned fixed encoding field values for this descriptor.
@@ -945,6 +935,13 @@ typedef struct loom_low_descriptor_t {
 
 static_assert(sizeof(loom_low_descriptor_t) == 64,
               "loom_low_descriptor_t must be 64 bytes");
+
+// Returns true when |descriptor| uses an ordinary low.op or low.const packet.
+static inline bool loom_low_descriptor_is_packet(
+    const loom_low_descriptor_t* descriptor) {
+  return descriptor->carrier == LOOM_LOW_DESCRIPTOR_CARRIER_OP ||
+         descriptor->carrier == LOOM_LOW_DESCRIPTOR_CARRIER_CONST;
+}
 
 // Descriptor facts owned by one descriptor-set view. Rows correspond exactly
 // to the structural rows in loom_low_descriptor_set_t::descriptors. Keeping

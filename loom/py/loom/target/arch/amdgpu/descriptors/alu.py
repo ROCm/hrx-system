@@ -6672,7 +6672,7 @@ def _v_mov_b32_literal_overlay() -> AmdgpuDescriptorOverlay:
         semantic_tag="integer.const.u32",
         schedule_class=_SCHEDULE_VALU,
         operands=(AmdgpuOperandOverlay("VDST", _vgpr_result()),),
-        op_kind=DescriptorOpKind.CONST,
+        carrier=DescriptorCarrier.CONST,
         asm_forms=_asm(results=("dst",), immediates=("imm32",)),
         immediate_fields=("LITERAL",),
         immediates=(_U32_IMMEDIATE,),

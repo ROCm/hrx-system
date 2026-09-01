@@ -790,7 +790,7 @@ iree_status_t loom_vm_function_encode(
                      code_layout.packet_offsets[packet.packet_index]);
       if (loom_low_packet_is_compile_time_only(&packet)) continue;
       if (packet.descriptor != NULL &&
-          packet.descriptor->carrier == LOOM_LOW_DESCRIPTOR_CARRIER_PACKET) {
+          loom_low_descriptor_is_packet(packet.descriptor)) {
         IREE_RETURN_IF_ERROR(
             loom_vm_function_encode_descriptor_packet(&frame, &packet, writer));
       } else {

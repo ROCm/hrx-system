@@ -403,7 +403,7 @@ static iree_status_t loom_vm_emit_op(void* user_data,
   const loom_low_lower_resolved_descriptor_t resolved_descriptor = {
       .descriptor = descriptor,
   };
-  if (descriptor->op_kind == LOOM_LOW_DESCRIPTOR_OP_KIND_CONST) {
+  if (descriptor->carrier == LOOM_LOW_DESCRIPTOR_CARRIER_CONST) {
     return loom_vm_emit_constant(context, source_op, plan);
   }
 

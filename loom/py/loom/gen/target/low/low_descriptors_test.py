@@ -34,7 +34,6 @@ from loom.target.low_descriptors import (
     DescriptorAsmSurface,
     DescriptorCategory,
     DescriptorFlag,
-    DescriptorOpKind,
     Effect,
     EffectKind,
     EncodingFieldValue,
@@ -1421,7 +1420,7 @@ def test_generate_test_low_core_descriptor_set() -> None:
     assert '"test.low"' in generated.source
     assert '"test.spv.op_iadd.i32"' in generated.source
     assert '"OpIAdd"' in generated.source
-    assert ".op_kind = LOOM_LOW_DESCRIPTOR_OP_KIND_CONST," in generated.source
+    assert ".carrier = LOOM_LOW_DESCRIPTOR_CARRIER_CONST," in generated.source
     assert (".instruction_class_flags = LOOM_LOW_INSTRUCTION_CLASS_FLAG_SCALAR_ALU") in generated.source
 
 
@@ -1910,17 +1909,6 @@ def test_generator_rejects_low_const_asm_operand() -> None:
     with pytest.raises(
         ValueError,
         match=re.escape("descriptor 'test.const.i32' low.const asm form 'test.const.i32' must expose exactly one result and no operands"),
-    ):
-        generate_descriptor_set(descriptor_set)
-
-
-def test_generator_rejects_control_carrier_const_kind() -> None:
-    descriptor = replace(TEST_LOW_BR_DESCRIPTOR, op_kind=DescriptorOpKind.CONST)
-    descriptor_set = replace(TEST_LOW_CORE_DESCRIPTOR_SET, descriptors=(descriptor,))
-
-    with pytest.raises(
-        ValueError,
-        match=re.escape("descriptor 'test.br' uses low.br but selects operation kind 'CONST'"),
     ):
         generate_descriptor_set(descriptor_set)
 

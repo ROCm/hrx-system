@@ -248,10 +248,11 @@ static iree_status_t loom_low_descriptor_text_asm_make_packet(
   }
 
   const bool builds_as_const =
-      descriptor->op_kind == LOOM_LOW_DESCRIPTOR_OP_KIND_CONST;
+      descriptor->carrier == LOOM_LOW_DESCRIPTOR_CARRIER_CONST;
   loom_text_low_asm_carrier_t carrier = LOOM_TEXT_LOW_ASM_CARRIER_PACKET;
   switch (descriptor->carrier) {
-    case LOOM_LOW_DESCRIPTOR_CARRIER_PACKET:
+    case LOOM_LOW_DESCRIPTOR_CARRIER_OP:
+    case LOOM_LOW_DESCRIPTOR_CARRIER_CONST:
       break;
     case LOOM_LOW_DESCRIPTOR_CARRIER_BRANCH:
       carrier = LOOM_TEXT_LOW_ASM_CARRIER_BRANCH;

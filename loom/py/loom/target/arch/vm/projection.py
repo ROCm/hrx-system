@@ -82,7 +82,6 @@ from loom.target.low_descriptors import (
     Descriptor,
     DescriptorCarrier,
     DescriptorFlag,
-    DescriptorOpKind,
     DescriptorSet,
     Effect,
     EffectFlag,
@@ -726,7 +725,7 @@ def _descriptor(projection: VmInstructionProjection) -> Descriptor:
         schedule_class=(
             _CONSTANT_SCHEDULE_CLASS if is_constant else _EXECUTE_SCHEDULE_CLASS
         ),
-        op_kind=DescriptorOpKind.CONST if is_constant else DescriptorOpKind.OP,
+        carrier=DescriptorCarrier.CONST if is_constant else DescriptorCarrier.OP,
         immediates=tuple(immediates),
         asm_forms=asm_forms,
         effects=effects,
