@@ -1,4 +1,4 @@
-// RUN: pass-report target-legalize{mode=final},dce,canonicalize,source-to-low,low-dce
+// RUN: compile-report target-legalize{mode=final},dce,canonicalize,source-to-low,low-dce
 
 amdgpu.target<gfx11-generic> @target
 

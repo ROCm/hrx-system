@@ -69,7 +69,8 @@ void loom_check_print_case_header(iree_string_view_t filename,
           case_index + 1);
   fprintf(stderr, " [%s", loom_check_mode_name(test_case->mode));
   if (test_case->mode == LOOM_CHECK_MODE_PASS ||
-      test_case->mode == LOOM_CHECK_MODE_PASS_REPORT) {
+      test_case->mode == LOOM_CHECK_MODE_PASS_REPORT ||
+      test_case->mode == LOOM_CHECK_MODE_COMPILE_REPORT) {
     fprintf(stderr, " %.*s", (int)test_case->pipeline.size,
             test_case->pipeline.data);
   } else if (test_case->mode == LOOM_CHECK_MODE_FORMAT) {

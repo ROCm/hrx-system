@@ -213,6 +213,18 @@ static iree_status_t loom_check_parse_run_directive(
     return loom_check_verify_run_modifiers(*out_mode, *out_output_flags);
   }
 
+  if (iree_string_view_consume_prefix(
+          &value, iree_make_cstring_view("compile-report "))) {
+    *out_mode = LOOM_CHECK_MODE_COMPILE_REPORT;
+    *out_pipeline = iree_string_view_trim(value);
+    if (iree_string_view_is_empty(*out_pipeline)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "RUN: compile-report requires a pipeline argument");
+    }
+    return loom_check_verify_run_modifiers(*out_mode, *out_output_flags);
+  }
+
   if (iree_string_view_consume_prefix(&value,
                                       iree_make_cstring_view("format "))) {
     *out_mode = LOOM_CHECK_MODE_FORMAT;

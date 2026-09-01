@@ -1294,7 +1294,7 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(32, 1, 1) workg
 
 // ====
 
-// RUN: pass-report source-to-low,low-dce
+// RUN: compile-report source-to-low,low-dce
 
 amdgpu.target<gfx1100> @target
 

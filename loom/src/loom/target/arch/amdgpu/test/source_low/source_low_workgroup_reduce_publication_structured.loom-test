@@ -1,4 +1,4 @@
-// RUN: pass-report source-to-low{control-flow=structured-low},low-dce
+// RUN: compile-report source-to-low{control-flow=structured-low},low-dce
 
 amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 

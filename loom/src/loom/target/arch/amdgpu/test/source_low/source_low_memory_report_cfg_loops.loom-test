@@ -1,4 +1,4 @@
-// RUN: pass-report scf-to-cfg,cfg-simplify,source-to-low,low-dce
+// RUN: compile-report scf-to-cfg,cfg-simplify,source-to-low,low-dce
 
 amdgpu.target<gfx11-generic> @target
 

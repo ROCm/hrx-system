@@ -1,0 +1,132 @@
+// RUN: pass-report unroll-scf-for
+
+func.def @static_loop_without_unroll_policy() {
+  %start = index.constant 0 : index
+  %end = index.constant 32 : index
+  %step = index.constant 16 : index
+  scf.for %i = [%start to %end step %step] {
+    test.use %i : index
+  }
+  func.return
+}
+
+// ----
+{"invocations":[{"pass":"unroll-scf-for","kind":"func","anchor":"func","pipeline":"__command_line","symbol":"static_loop_without_unroll_policy","instruction_index":1,"duration_ns":0,"changed":false,"status":{"code":0,"name":"OK"},"statistics":{"loops-unrolled":0,"iterations-materialized":0,"policies-cleared":0},"details":[{"category":"scf-unroll","outcome":"structured","op":"scf.for","policy":"absent","trip_count_state":"exact","trip_count":2,"step":16,"lower_bound_kind":"static","lower":0},{"category":"value-facts","acquisition_count":1,"cache_hit_count":0,"recomputation_count":1,"preparation_count":0,"invalidation_count":0,"scope_clear_count":0,"computed_value_count":4,"cleared_value_count":0}]}]}
+
+// ====
+// RUN: pass-report unroll-scf-for
+
+config.def @runtime.sequence_width = 128 : index
+config.def @runtime.workgroup_size = 64 : index
+
+func.def @structured_sequence_loop(%lane0: index) {
+  %lane = index.assume %lane0 [range(%lane0, 0, 63)] : index
+  %sequence_width = config.get @runtime.sequence_width : index
+  %workgroup_size = config.get @runtime.workgroup_size : index
+  scf.for %column = [%lane to %sequence_width step %workgroup_size] {
+    test.use %column : index
+  }
+  func.return
+}
+
+// ----
+{"invocations":[{"pass":"unroll-scf-for","kind":"func","anchor":"func","pipeline":"__command_line","symbol":"structured_sequence_loop","instruction_index":1,"duration_ns":0,"changed":false,"status":{"code":0,"name":"OK"},"statistics":{"loops-unrolled":0,"iterations-materialized":0,"policies-cleared":0},"details":[{"category":"scf-unroll","outcome":"structured","op":"scf.for","policy":"absent","trip_count_state":"exact","trip_count":2,"step":64,"lower_bound_kind":"dynamic","lower_value_id":3,"lower_range_min":0,"lower_range_max":63},{"category":"value-facts","acquisition_count":1,"cache_hit_count":0,"recomputation_count":1,"preparation_count":0,"invalidation_count":0,"scope_clear_count":0,"computed_value_count":5,"cleared_value_count":0}]}]}
+
+// ====
+// RUN: pass-report unroll-scf-for
+
+func.def @dynamic_lower_full_unroll(%slot0: index) {
+  %slot = index.assume %slot0 [range(%slot0, 0, 7)] : index
+  %end = index.constant 16 : index
+  %step = index.constant 8 : index
+  scf.for %i = [%slot to %end step %step] unroll {
+    test.use %i : index
+  }
+  func.return
+}
+
+// ----
+{"invocations":[{"pass":"unroll-scf-for","kind":"func","anchor":"func","pipeline":"__command_line","symbol":"dynamic_lower_full_unroll","instruction_index":1,"duration_ns":0,"changed":true,"status":{"code":0,"name":"OK"},"statistics":{"loops-unrolled":1,"iterations-materialized":2,"policies-cleared":0},"details":[{"category":"scf-unroll","outcome":"unrolled","op":"scf.for","policy":"bare","schedule":"linear","trip_count":2,"step":8,"lower_bound_kind":"dynamic","lower_value_id":1,"lower_range_min":0,"lower_range_max":7},{"category":"value-facts","acquisition_count":1,"cache_hit_count":0,"recomputation_count":1,"preparation_count":0,"invalidation_count":2,"scope_clear_count":1,"computed_value_count":5,"cleared_value_count":5}]}]}
+
+// ====
+// RUN: pass-report unroll-scf-for
+
+func.def @clear_noop_factor() {
+  %start = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  %factor = index.constant 1 : index
+  scf.for %i = [%start to %end step %step] unroll(%factor) schedule(interleaved) {
+    test.use %i : index
+  }
+  func.return
+}
+
+// ----
+{"invocations":[{"pass":"unroll-scf-for","kind":"func","anchor":"func","pipeline":"__command_line","symbol":"clear_noop_factor","instruction_index":1,"duration_ns":0,"changed":true,"status":{"code":0,"name":"OK"},"statistics":{"loops-unrolled":0,"iterations-materialized":0,"policies-cleared":1},"details":[{"category":"scf-unroll","outcome":"cleared","op":"scf.for","policy":"factor","schedule":"interleaved","unroll_factor":1,"clear_reason":"factor_le_one"},{"category":"scf-unroll","outcome":"structured","op":"scf.for","policy":"absent","trip_count_state":"exact","trip_count":4,"step":1,"lower_bound_kind":"static","lower":0},{"category":"value-facts","acquisition_count":2,"cache_hit_count":0,"recomputation_count":2,"preparation_count":0,"invalidation_count":2,"scope_clear_count":2,"computed_value_count":10,"cleared_value_count":10}]}]}
+
+// ====
+// RUN: pass-report unroll-scf-for
+
+func.def @linear_stripmine_tail(%end: index) {
+  %start = index.constant 0 : index
+  %step = index.constant 1 : index
+  %factor = index.constant 2 : index
+  scf.for %i = [%start to %end step %step] unroll(%factor) {
+    test.use %i : index
+  }
+  func.return
+}
+
+// ----
+{"invocations":[{"pass":"unroll-scf-for","kind":"func","anchor":"func","pipeline":"__command_line","symbol":"linear_stripmine_tail","instruction_index":1,"duration_ns":0,"changed":true,"status":{"code":0,"name":"OK"},"statistics":{"loops-unrolled":1,"iterations-materialized":2,"policies-cleared":0},"details":[{"category":"scf-unroll","outcome":"stripmined","op":"scf.for","policy":"factor","schedule":"linear","unroll_factor":2,"step":1,"tail_strategy":"guarded_lanes","trip_count_state":"unresolved"},{"category":"value-facts","acquisition_count":2,"cache_hit_count":0,"recomputation_count":2,"preparation_count":0,"invalidation_count":2,"scope_clear_count":2,"computed_value_count":14,"cleared_value_count":14}]}]}
+
+// ====
+// RUN: pass-report unroll-scf-for
+
+func.def @interleaved_stripmine_tail(%end: index) {
+  %start = index.constant 0 : index
+  %step = index.constant 1 : index
+  %factor = index.constant 2 : index
+  scf.for %i = [%start to %end step %step] unroll(%factor) schedule(interleaved) {
+    test.use %i : index
+  }
+  func.return
+}
+
+// ----
+{"invocations":[{"pass":"unroll-scf-for","kind":"func","anchor":"func","pipeline":"__command_line","symbol":"interleaved_stripmine_tail","instruction_index":1,"duration_ns":0,"changed":true,"status":{"code":0,"name":"OK"},"statistics":{"loops-unrolled":1,"iterations-materialized":2,"policies-cleared":0},"details":[{"category":"scf-unroll","outcome":"stripmined","op":"scf.for","policy":"factor","schedule":"interleaved","unroll_factor":2,"step":1,"tail_strategy":"tail_loop","trip_count_state":"unresolved"},{"category":"value-facts","acquisition_count":2,"cache_hit_count":0,"recomputation_count":2,"preparation_count":0,"invalidation_count":2,"scope_clear_count":2,"computed_value_count":23,"cleared_value_count":23}]}]}
+
+// ====
+// RUN: pass-report unroll-scf-for
+
+func.def @linear_exact_stripmine_tail() {
+  %start = index.constant 0 : index
+  %end = index.constant 5 : index
+  %step = index.constant 1 : index
+  %factor = index.constant 2 : index
+  scf.for %i = [%start to %end step %step] unroll(%factor) {
+    test.use %i : index
+  }
+  func.return
+}
+
+// ----
+{"invocations":[{"pass":"unroll-scf-for","kind":"func","anchor":"func","pipeline":"__command_line","symbol":"linear_exact_stripmine_tail","instruction_index":1,"duration_ns":0,"changed":true,"status":{"code":0,"name":"OK"},"statistics":{"loops-unrolled":1,"iterations-materialized":2,"policies-cleared":0},"details":[{"category":"scf-unroll","outcome":"stripmined","op":"scf.for","policy":"factor","schedule":"linear","unroll_factor":2,"step":1,"tail_strategy":"guarded_lanes","trip_count_state":"exact","trip_count":5,"lower_bound_kind":"static","lower":0},{"category":"scf-unroll","outcome":"structured","op":"scf.for","policy":"absent","trip_count_state":"exact","trip_count":3,"step":2,"lower_bound_kind":"static","lower":0},{"category":"value-facts","acquisition_count":2,"cache_hit_count":0,"recomputation_count":2,"preparation_count":0,"invalidation_count":2,"scope_clear_count":2,"computed_value_count":14,"cleared_value_count":14}]}]}
+
+// ====
+// RUN: pass-report unroll-scf-for
+
+func.def @interleaved_dynamic_lower_stripmine_tail(%lane0: index) {
+  %lane = index.assume %lane0 [range(%lane0, 0, 63)] : index
+  %end = index.constant 192 : index
+  %step = index.constant 64 : index
+  %factor = index.constant 2 : index
+  scf.for %column = [%lane to %end step %step] unroll(%factor) schedule(interleaved) {
+    test.use %column : index
+  }
+  func.return
+}
+
+// ----
+{"invocations":[{"pass":"unroll-scf-for","kind":"func","anchor":"func","pipeline":"__command_line","symbol":"interleaved_dynamic_lower_stripmine_tail","instruction_index":1,"duration_ns":0,"changed":true,"status":{"code":0,"name":"OK"},"statistics":{"loops-unrolled":1,"iterations-materialized":2,"policies-cleared":0},"details":[{"category":"scf-unroll","outcome":"stripmined","op":"scf.for","policy":"factor","schedule":"interleaved","unroll_factor":2,"step":64,"tail_strategy":"tail_loop","trip_count_state":"exact","trip_count":3,"lower_bound_kind":"dynamic","lower_value_id":1,"lower_range_min":0,"lower_range_max":63},{"category":"value-facts","acquisition_count":2,"cache_hit_count":0,"recomputation_count":2,"preparation_count":0,"invalidation_count":2,"scope_clear_count":2,"computed_value_count":19,"cleared_value_count":19}]}]}

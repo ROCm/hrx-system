@@ -252,6 +252,7 @@ loom_cc_library(
         "//loom/src/loom/pass:builtin_registry",
         "//loom/src/loom/pass:pipeline",
         "//loom/src/loom/pass:registry",
+        "//loom/src/loom/pass:report",
         "//loom/src/loom/pass:tooling",
         "//loom/src/loom/sanitizer:options",
         "//loom/src/loom/target:entry_selection",

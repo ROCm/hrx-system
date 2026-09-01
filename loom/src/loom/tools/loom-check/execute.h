@@ -482,11 +482,21 @@ iree_status_t loom_check_execute_pass(
     iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
     loom_check_result_t* result);
 
-// Strips comments from input, parses, runs the pass pipeline specified
-// in test_case->pipeline, verifies the transformed module, prints the compile
-// report, and compares against the expected section. Same diff/update behavior
-// as roundtrip.
+// Strips comments from input, parses, runs the pass pipeline specified in
+// test_case->pipeline, prints its stable pass execution report, and compares
+// against the expected section. Same diff/update behavior as roundtrip.
 iree_status_t loom_check_execute_pass_report(
+    const loom_check_case_t* test_case, iree_host_size_t case_index,
+    loom_check_file_report_t* report, iree_string_view_t filename,
+    const loom_check_environment_t* environment, loom_context_t* context,
+    iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
+    loom_check_result_t* result);
+
+// Strips comments from input, parses, runs the pass pipeline specified in
+// test_case->pipeline, verifies the transformed module, prints the target
+// compile report, and compares against the expected section. Same diff/update
+// behavior as roundtrip.
+iree_status_t loom_check_execute_compile_report(
     const loom_check_case_t* test_case, iree_host_size_t case_index,
     loom_check_file_report_t* report, iree_string_view_t filename,
     const loom_check_environment_t* environment, loom_context_t* context,
