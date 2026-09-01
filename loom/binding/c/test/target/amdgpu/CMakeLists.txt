@@ -33,7 +33,6 @@ loom_cc_test(
     "iree_hal_test.cc"
   DEPS
     iree::hal
-    iree::hal::executable::amdgpu::executable_target
     iree::hal::utils::device_spec_builder
     iree::testing::gtest
     iree::testing::gtest_main

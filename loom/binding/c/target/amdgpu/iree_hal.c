@@ -7,6 +7,8 @@
 #include "loomc/target/amdgpu/iree_hal.h"
 
 #include "diagnostic.h"
+#include "loom/target/arch/amdgpu/artifact_key.h"
+#include "loom/target/arch/amdgpu/target_info.h"
 #include "loomc/iree.h"
 #include "result.h"
 
@@ -22,8 +24,9 @@ static loomc_status_t loomc_amdgpu_iree_hal_validate_string_view(
 static loomc_status_t loomc_amdgpu_iree_hal_validate_options(
     const loomc_amdgpu_iree_hal_profile_options_t* options) {
   if (options == NULL) {
-    return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
-                             "AMDGPU IREE HAL options must not be NULL");
+    return loomc_make_status(
+        LOOMC_STATUS_INVALID_ARGUMENT,
+        "AMDGPU IREE HAL profile options must not be NULL");
   }
   if (options->type != LOOMC_STRUCTURE_TYPE_NONE &&
       options->type != LOOMC_STRUCTURE_TYPE_AMDGPU_IREE_HAL_PROFILE_OPTIONS) {
@@ -111,7 +114,23 @@ static loomc_status_t loomc_amdgpu_iree_hal_query_identity(
         "physical-device affinity");
   }
 
-  loomc_status_t status = loomc_amdgpu_target_identity_parse_artifact_key(
+  loom_amdgpu_target_identity_t compiler_identity = {0};
+  loomc_status_t status = loomc_status_from_iree(loom_amdgpu_artifact_key_parse(
+      target_result.target->target_key, &compiler_identity));
+  if (!loomc_status_is_ok(status)) {
+    return loomc_amdgpu_iree_hal_fail_status(result, status);
+  }
+  if (loom_amdgpu_target_info_is_generic(compiler_identity.target)) {
+    return loomc_amdgpu_iree_hal_fail_status(
+        result,
+        loomc_status_from_iree(iree_make_status(
+            IREE_STATUS_FAILED_PRECONDITION,
+            "IREE HAL exact AMDGPU target '%.*s' uses a generic compiler key",
+            (int)target_result.target->target_key.size,
+            target_result.target->target_key.data)));
+  }
+
+  status = loomc_amdgpu_target_identity_parse_artifact_key(
       loomc_string_view_from_iree(target_result.target->target_key),
       out_identity);
   if (!loomc_status_is_ok(status)) {

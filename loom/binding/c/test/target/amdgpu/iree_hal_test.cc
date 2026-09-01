@@ -10,7 +10,6 @@
 #include <string>
 
 #include "iree/hal/api.h"
-#include "iree/hal/executable/amdgpu/executable_target.h"
 #include "iree/hal/utils/device_spec_builder.h"
 #include "iree/testing/gtest.h"
 #include "loomc/diagnostic.h"
@@ -41,11 +40,14 @@ typedef struct FakeHalDevice {
 } FakeHalDevice;
 
 typedef struct TestTarget {
-  // Canonical exact AMDGPU target key.
+  // Canonical AMDGPU target key.
   iree_string_view_t target_key;
 
   // Physical-device set represented by the target.
   iree_hal_physical_device_affinity_t physical_device_affinity;
+
+  // Advertised executable target kind.
+  iree_hal_executable_target_kind_t kind;
 } TestTarget;
 
 std::string ToString(loomc_string_view_t value) {
@@ -82,13 +84,16 @@ iree_status_t CreateAmdgpuDeviceSpec(const TestTarget* targets,
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0; i < target_count && iree_status_is_ok(status);
        ++i) {
-    iree_hal_amdgpu_target_identity_t identity = {};
-    status = iree_hal_amdgpu_target_identity_parse_artifact_key(
-        targets[i].target_key, &identity);
-    if (iree_status_is_ok(status)) {
-      status = iree_hal_amdgpu_device_spec_builder_add_executable_targets(
-          &builder, &identity, targets[i].physical_device_affinity);
-    }
+    const iree_hal_executable_target_t target = {
+        /*.family=*/IREE_SV("amdgpu"),
+        /*.target_key=*/targets[i].target_key,
+        /*.kind=*/targets[i].kind,
+        /*.priority=*/0,
+        /*.physical_device_affinity=*/targets[i].physical_device_affinity,
+        /*.flags=*/IREE_HAL_EXECUTABLE_TARGET_FLAG_NONE,
+    };
+    status =
+        iree_hal_device_spec_builder_add_executable_target(&builder, &target);
   }
   iree_hal_device_spec_t* device_spec = nullptr;
   if (iree_status_is_ok(status)) {
@@ -154,7 +159,7 @@ TargetProfilePtr CreateProfileFromHal(
 
 TEST(LoomcAmdgpuIreeHalTargetTest, CreatesExactProfileFromHalTarget) {
   const TestTarget targets[] = {
-      {IREE_SV("gfx1151"), 1},
+      {IREE_SV("gfx1151"), 1, IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT},
   };
   DeviceSpecPtr device_spec;
   IREE_ASSERT_OK(
@@ -182,7 +187,8 @@ TEST(LoomcAmdgpuIreeHalTargetTest, CreatesExactProfileFromHalTarget) {
 
 TEST(LoomcAmdgpuIreeHalTargetTest, PreservesStructuredAmdhsaFeatureModes) {
   const TestTarget targets[] = {
-      {IREE_SV("gfx942:sramecc+:xnack-"), 1},
+      {IREE_SV("gfx942:sramecc+:xnack-"), 1,
+       IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT},
   };
   DeviceSpecPtr device_spec;
   IREE_ASSERT_OK(
@@ -207,10 +213,36 @@ TEST(LoomcAmdgpuIreeHalTargetTest, PreservesStructuredAmdhsaFeatureModes) {
 }
 
 TEST(LoomcAmdgpuIreeHalTargetTest,
+     RejectsGenericCompilerTargetAdvertisedAsExact) {
+  const TestTarget targets[] = {
+      {IREE_SV("gfx11-generic"), 1, IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT},
+  };
+  DeviceSpecPtr device_spec;
+  IREE_ASSERT_OK(
+      CreateAmdgpuDeviceSpec(targets, IREE_ARRAYSIZE(targets), &device_spec));
+  FakeHalDevice device = {};
+  InitializeFakeDevice(device_spec.get(), &device);
+  TargetEnvironmentPtr target_environment = CreateAmdgpuTargetEnvironment();
+  loomc_result_t* result = nullptr;
+  TargetProfilePtr profile =
+      CreateProfileFromHal(target_environment.get(), &device,
+                           /*physical_device_affinity=*/0, &result);
+  ResultPtr result_ptr(result);
+
+  EXPECT_EQ(profile.get(), nullptr);
+  ExpectFailedAdapterResult(result_ptr.get());
+  const loomc_diagnostic_t* diagnostic =
+      loomc_result_diagnostic_at(result_ptr.get(), 0);
+  ASSERT_NE(diagnostic, nullptr);
+  EXPECT_THAT(ToString(diagnostic->message),
+              ::testing::HasSubstr("uses a generic compiler key"));
+}
+
+TEST(LoomcAmdgpuIreeHalTargetTest,
      PhysicalAffinityDisambiguatesHeterogeneousTargets) {
   const TestTarget targets[] = {
-      {IREE_SV("gfx1151"), 1},
-      {IREE_SV("gfx1100"), 2},
+      {IREE_SV("gfx1151"), 1, IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT},
+      {IREE_SV("gfx1100"), 2, IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT},
   };
   DeviceSpecPtr device_spec;
   IREE_ASSERT_OK(
@@ -242,7 +274,7 @@ TEST(LoomcAmdgpuIreeHalTargetTest,
 
 TEST(LoomcAmdgpuIreeHalTargetTest, ProviderRoutesThroughGenericHalRouter) {
   const TestTarget targets[] = {
-      {IREE_SV("gfx1151"), 1},
+      {IREE_SV("gfx1151"), 1, IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT},
   };
   DeviceSpecPtr device_spec;
   IREE_ASSERT_OK(

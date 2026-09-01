@@ -43,4 +43,24 @@ loom_cc_library(
 )
 endif()
 
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
+loom_cc_library(
+  NAME
+    iree_hal
+  HDRS
+    "${PROJECT_SOURCE_DIR}/loom/binding/c/include/loomc/target/amdgpu/iree_hal.h"
+  SRCS
+    "iree_hal.c"
+  DEPS
+    ::amdgpu
+    iree::hal
+    loom::binding::c::loomc
+    loom::binding::c::target::iree_hal
+    loom::target::arch::amdgpu::artifact_key
+    loom::target::arch::amdgpu::target_info
+  ALWAYSLINK
+  PUBLIC
+)
+endif()
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
