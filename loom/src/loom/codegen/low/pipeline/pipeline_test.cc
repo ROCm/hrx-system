@@ -69,9 +69,14 @@ TEST_F(LowPipelineTest, BuildsPacketizationPreparationFragment) {
   loom_block_t* pipeline_body =
       loom_region_entry_block(loom_pass_pipeline_body(pipeline_op));
   ASSERT_NE(pipeline_body, nullptr);
-  ASSERT_EQ(pipeline_body->op_count, 4u);
+  ASSERT_EQ(pipeline_body->op_count, 5u);
 
-  loom_op_t* cse_run = pipeline_body->first_op;
+  loom_op_t* canonicalize_run = pipeline_body->first_op;
+  ASSERT_TRUE(loom_pass_run_isa(canonicalize_run));
+  EXPECT_TRUE(iree_string_view_equal(RunKey(module.get(), canonicalize_run),
+                                     IREE_SV("canonicalize")));
+
+  loom_op_t* cse_run = canonicalize_run->next_op;
   ASSERT_TRUE(loom_pass_run_isa(cse_run));
   EXPECT_TRUE(
       iree_string_view_equal(RunKey(module.get(), cse_run), IREE_SV("cse")));
