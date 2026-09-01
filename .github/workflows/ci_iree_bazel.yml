@@ -285,6 +285,7 @@ jobs:
         run: bash .github/scripts/fetch_rocm_toolchain.sh
 
       - name: Check Vulkan hardware environment
+        timeout-minutes: 1
         run: bash .github/scripts/check_vulkan_hardware_environment.sh
 
       - name: Install Bazel host tools
@@ -426,6 +427,7 @@ jobs:
           test -d "${HRX_ROCM_ROOT}/include"
 
       - name: Report ROCm environment
+        timeout-minutes: 1
         run: bash .github/scripts/check_rocm_environment.sh
 
       - name: Run IREE Bazel CI

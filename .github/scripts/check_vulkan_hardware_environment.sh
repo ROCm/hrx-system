@@ -12,7 +12,21 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 1
 fi
 
-python3 - <<'PY'
+if ! command -v timeout >/dev/null 2>&1; then
+  echo "Required process supervisor timeout was not found." >&2
+  exit 1
+fi
+
+readonly probe_timeout_seconds=30
+readonly probe_kill_after_seconds=5
+readonly runner_name="${RUNNER_NAME:-unknown}"
+
+printf 'Checking Vulkan hardware on runner %s (timeout: %ss).\n' \
+  "${runner_name}" "${probe_timeout_seconds}"
+
+probe_status=0
+timeout --kill-after="${probe_kill_after_seconds}s" \
+  "${probe_timeout_seconds}s" python3 -u - <<'PY' || probe_status=$?
 import ctypes
 import os
 import sys
@@ -103,6 +117,7 @@ def vk_result_name(result):
 def main():
     check_software_forcing_environment()
 
+    print("Loading the Vulkan loader...", flush=True)
     try:
         vulkan = ctypes.CDLL("libvulkan.so.1")
     except OSError as error:
@@ -142,6 +157,7 @@ def main():
         ppEnabledExtensionNames=None,
     )
     instance = ctypes.c_void_p()
+    print("Creating a Vulkan instance...", flush=True)
     result = vulkan.vkCreateInstance(
         ctypes.byref(create_info), None, ctypes.byref(instance)
     )
@@ -150,6 +166,7 @@ def main():
 
     try:
         device_count = ctypes.c_uint32()
+        print("Enumerating Vulkan physical devices...", flush=True)
         result = vulkan.vkEnumeratePhysicalDevices(
             instance, ctypes.byref(device_count), None
         )
@@ -171,6 +188,7 @@ def main():
 
         first_device_is_hardware = False
         found_hardware = False
+        print("Reading Vulkan physical device properties...", flush=True)
         print(f"Vulkan physical devices: {device_count.value}")
         for index in range(device_count.value):
             properties = VkPhysicalDeviceProperties()
@@ -217,9 +235,29 @@ def main():
             )
     finally:
         if instance.value:
+            print("Destroying the Vulkan instance...", flush=True)
             vulkan.vkDestroyInstance(instance, None)
 
 
 if __name__ == "__main__":
     sys.exit(main())
 PY
+
+case "${probe_status}" in
+  0)
+    ;;
+  124)
+    printf 'Vulkan hardware probe exceeded %ss on runner %s; the last phase '\
+'above identifies the loader or driver operation that wedged.\n' \
+      "${probe_timeout_seconds}" "${runner_name}" >&2
+    exit 124
+    ;;
+  137)
+    printf 'Vulkan hardware probe on runner %s required SIGKILL after '\
+'exceeding %ss.\n' "${runner_name}" "${probe_timeout_seconds}" >&2
+    exit 137
+    ;;
+  *)
+    exit "${probe_status}"
+    ;;
+esac

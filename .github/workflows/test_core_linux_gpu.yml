@@ -153,6 +153,7 @@ jobs:
 
       - name: Report ROCm environment
         id: rocm_environment
+        timeout-minutes: 1
         continue-on-error: ${{ inputs.experimental }}
         run: |
           export PATH="${HRX_PUBLIC_DEPS_DIR}/bin:${PATH}"
