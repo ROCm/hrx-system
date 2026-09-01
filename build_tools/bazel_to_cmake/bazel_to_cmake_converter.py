@@ -1228,7 +1228,7 @@ class BuildFileFunctions(object):
         pass
 
     def loom_test(self, **kwargs):
-        # Loom correctness tests are Bazel-owned. CMake uses explicit test
+        # Loom execution tests are Bazel-owned. CMake uses explicit test
         # declarations for the configurations it supports.
         pass
 

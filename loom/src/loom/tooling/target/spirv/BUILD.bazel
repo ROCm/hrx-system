@@ -4,13 +4,16 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//build_tools/sanitizer:suppressions.bzl", "vulkan_suppressions")
-load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
     "loom_cc_library",
     "loom_cc_test",
     "loom_config_compatible_with",
+)
+load("//loom/build_tools/bazel:defs.bzl", "loom_test_suite")
+load(
+    ":execution_profiles.bzl",
+    "SPIRV_VULKAN_HARDWARE_PROFILE",
 )
 
 package(
@@ -30,12 +33,6 @@ _SPIRV_COMPILE_COMPATIBLE_WITH = loom_config_compatible_with([
 _SPIRV_VULKAN_HAL_COMPATIBLE_WITH = loom_config_compatible_with([
     "//loom/config/execute:iree_hal_vulkan",
 ])
-
-_SPIRV_VULKAN_EXECUTION_TEST_TAGS = [
-    "iree-run-requirement=runtime.resource.vulkan_device",
-    "requires-gpu-vulkan",
-    "runtime-resource=vulkan-device",
-]
 
 loom_cc_library(
     name = "artifact_provider",
@@ -210,9 +207,9 @@ loom_cc_test(
     ],
 )
 
-iree_execution_test_suite(
-    name = "iree_test_loom_execution_test",
-    data = [
+loom_test_suite(
+    name = "vulkan_tests",
+    srcs = [
         "test/spirv_vulkan_atomic_hal_actual.loom",
         "test/spirv_vulkan_coop_hal_actual.loom",
         "test/spirv_vulkan_coop_u8_hal_actual.loom",
@@ -224,12 +221,5 @@ iree_execution_test_suite(
         "//loom/src/loom/tooling/execution/hal:testdata/dynamic_workgroup_hal_actual.loom",
         "//loom/src/loom/tooling/execution/hal:testdata/launch_schedule_hal_actual.loom",
     ],
-    manifests = ["test/iree-test-loom_spirv_vulkan.test.json"],
-    resource_group = "loom-vulkan-tests",
-    sanitizer_suppressions = vulkan_suppressions,
-    tags = _SPIRV_VULKAN_EXECUTION_TEST_TAGS,
-    target_compatible_with = _SPIRV_VULKAN_HAL_COMPATIBLE_WITH,
-    tools = {
-        "iree-test-loom": "//loom/src/loom/tools/iree-test-loom",
-    },
+    execution_profile = SPIRV_VULKAN_HARDWARE_PROFILE,
 )
