@@ -30,7 +30,6 @@ from loom.target.low_descriptors import (
     LOW_DESCRIPTOR_SET_ORDINAL_NONE,
     AsmForm,
     AsmImmediateFlag,
-    AsmResultValueType,
     Constraint,
     ConstraintKind,
     Descriptor,
