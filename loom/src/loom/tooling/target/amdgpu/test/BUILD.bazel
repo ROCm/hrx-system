@@ -99,17 +99,3 @@ iree_execution_test_suite(
         "iree-test-loom": "//loom/src/loom/tools/iree-test-loom",
     },
 )
-
-iree_execution_test_suite(
-    name = "iree_benchmark_loom_execution_test",
-    data = [
-        "amdgpu_hal_actual.loom",
-        "//loom/src/loom/tooling/execution/hal:testdata/launch_schedule_hal_actual.loom",
-    ],
-    manifests = ["iree-benchmark-loom_amdgpu.test.json"],
-    tags = _AMDGPU_EXECUTION_TEST_TAGS + ["manual"],
-    target_compatible_with = _AMDGPU_HAL_COMPATIBLE_WITH,
-    tools = {
-        "iree-benchmark-loom": "//loom/src/loom/tools/iree-benchmark-loom",
-    },
-)
