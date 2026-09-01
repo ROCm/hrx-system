@@ -38,6 +38,7 @@ iree_py_test(
         "//loom/py/loom/tools:pytest_style_runner.py",
     ],
     args = ["loom.gen.target.arch.vm.vm_tables_test"],
+    imports = ["../../../../../../../runtime/src/iree/vm/bytecode/spec"],
     main = "pytest_style_runner.py",
     deps = [":tables"],
 )

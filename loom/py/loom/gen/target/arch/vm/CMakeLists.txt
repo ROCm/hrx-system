@@ -40,6 +40,8 @@ iree_py_test(
     "loom.gen.target.arch.vm.vm_tables_test"
   DEPS
     loom::py::loom::gen::target::arch::vm::tables
+  IMPORTS
+    "../../../../../../../runtime/src/iree/vm/bytecode/spec"
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"
