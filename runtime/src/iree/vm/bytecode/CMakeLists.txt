@@ -234,9 +234,13 @@ iree_cc_test(
   NAME
     module_test
   SRCS
+    "module_execution_test.cc"
     "module_test.cc"
     "module_test_data.cc"
     "module_test_data.h"
+    "module_test_types.cc"
+    "module_test_types.h"
+    "module_verification_test.cc"
   DEPS
     ::bytecode
     ::inspection
