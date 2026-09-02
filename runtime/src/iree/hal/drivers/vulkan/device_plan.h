@@ -26,7 +26,7 @@ extern "C" {
 #define IREE_HAL_VULKAN_MAX_QUEUE_LANES 3
 
 // Maximum recognized device extension names enabled during VkDevice creation.
-#define IREE_HAL_VULKAN_MAX_DEVICE_EXTENSION_NAMES 9
+#define IREE_HAL_VULKAN_MAX_DEVICE_EXTENSION_NAMES 11
 
 // Maximum queue-family create infos needed for current queue role assignment.
 #define IREE_HAL_VULKAN_MAX_QUEUE_CREATE_INFOS 3
@@ -109,6 +109,14 @@ typedef struct iree_hal_vulkan_device_plan_t {
 
   // VK_KHR_shader_bfloat16 features enabled during VkDevice creation.
   VkPhysicalDeviceShaderBfloat16FeaturesKHR enabled_shader_bfloat16_features;
+
+  // VK_EXT_shader_atomic_float features enabled during VkDevice creation.
+  VkPhysicalDeviceShaderAtomicFloatFeaturesEXT
+      enabled_shader_atomic_float_features;
+
+  // VK_EXT_shader_atomic_float2 features enabled during VkDevice creation.
+  VkPhysicalDeviceShaderAtomicFloat2FeaturesEXT
+      enabled_shader_atomic_float2_features;
 
   // Vulkan 1.1 features enabled during driver-owned VkDevice creation.
   VkPhysicalDeviceVulkan11Features enabled_features11;

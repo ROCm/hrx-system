@@ -76,6 +76,7 @@ class PhysicalDeviceSnapshotBuilder {
     snapshot_.features2.features.shaderInt16 = VK_TRUE;
     snapshot_.features2.features.shaderInt64 = VK_TRUE;
     snapshot_.features12.shaderBufferInt64Atomics = VK_TRUE;
+    snapshot_.features12.shaderSharedInt64Atomics = VK_TRUE;
     snapshot_.features13.shaderIntegerDotProduct = VK_TRUE;
     snapshot_.features12.vulkanMemoryModel = VK_TRUE;
     snapshot_.features12.vulkanMemoryModelDeviceScope = VK_TRUE;
@@ -117,6 +118,54 @@ class PhysicalDeviceSnapshotBuilder {
         VK_TRUE;
   }
 
+  void EnableShaderAtomicFloatExtension() {
+    snapshot_.available_extensions |=
+        IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_SHADER_ATOMIC_FLOAT;
+  }
+
+  void EnableShaderAtomicFloat2Extension() {
+    snapshot_.available_extensions |=
+        IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_SHADER_ATOMIC_FLOAT2;
+  }
+
+  void EnableShaderAtomicFloatExtensions() {
+    EnableShaderAtomicFloatExtension();
+    EnableShaderAtomicFloat2Extension();
+  }
+
+  void EnableShaderAtomicFloatFeatures() {
+    EnableShaderAtomicFloatExtensions();
+    snapshot_.shader_atomic_float_features.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT;
+    snapshot_.shader_atomic_float_features.shaderBufferFloat32Atomics = VK_TRUE;
+    snapshot_.shader_atomic_float_features.shaderBufferFloat32AtomicAdd =
+        VK_TRUE;
+    snapshot_.shader_atomic_float_features.shaderBufferFloat64Atomics = VK_TRUE;
+    snapshot_.shader_atomic_float_features.shaderBufferFloat64AtomicAdd =
+        VK_TRUE;
+    snapshot_.shader_atomic_float_features.shaderSharedFloat32Atomics = VK_TRUE;
+    snapshot_.shader_atomic_float_features.shaderSharedFloat32AtomicAdd =
+        VK_TRUE;
+    snapshot_.shader_atomic_float_features.shaderSharedFloat64Atomics = VK_TRUE;
+    snapshot_.shader_atomic_float_features.shaderSharedFloat64AtomicAdd =
+        VK_TRUE;
+    EnableShaderAtomicFloat2Features();
+  }
+
+  void EnableShaderAtomicFloat2Features() {
+    EnableShaderAtomicFloat2Extension();
+    snapshot_.shader_atomic_float2_features.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_2_FEATURES_EXT;
+    snapshot_.shader_atomic_float2_features.shaderBufferFloat16Atomics =
+        VK_TRUE;
+    snapshot_.shader_atomic_float2_features.shaderBufferFloat16AtomicAdd =
+        VK_TRUE;
+    snapshot_.shader_atomic_float2_features.shaderSharedFloat16Atomics =
+        VK_TRUE;
+    snapshot_.shader_atomic_float2_features.shaderSharedFloat16AtomicAdd =
+        VK_TRUE;
+  }
+
   const iree_hal_vulkan_physical_device_snapshot_t* snapshot() const {
     return &snapshot_;
   }
@@ -140,6 +189,25 @@ static iree_hal_vulkan_external_device_params_t DefaultExternalParams() {
   std::memset(&params, 0, sizeof(params));
   params.enabled_features = IREE_HAL_VULKAN_FEATURE_REQUIRED_BASELINE;
   return params;
+}
+
+static iree_hal_vulkan_features_t ShaderAtomicFloat2Features() {
+  return IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_FLOAT16_ATOMICS |
+         IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_FLOAT16_ATOMIC_ADD |
+         IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_SHARED_FLOAT16_ATOMICS |
+         IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_SHARED_FLOAT16_ATOMIC_ADD;
+}
+
+static iree_hal_vulkan_features_t ShaderAtomicFloatFeatures() {
+  return ShaderAtomicFloat2Features() |
+         IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_FLOAT32_ATOMICS |
+         IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_FLOAT32_ATOMIC_ADD |
+         IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_SHARED_FLOAT32_ATOMICS |
+         IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_SHARED_FLOAT32_ATOMIC_ADD |
+         IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_FLOAT64_ATOMICS |
+         IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_FLOAT64_ATOMIC_ADD |
+         IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_SHARED_FLOAT64_ATOMICS |
+         IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_SHARED_FLOAT64_ATOMIC_ADD;
 }
 
 static bool PlanContainsExtension(const iree_hal_vulkan_device_plan_t& plan,
@@ -302,6 +370,9 @@ TEST(DevicePlanTest, OwnedCreateReportsAvailableScalarShaderFeatures) {
       IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_INT64_ATOMICS));
   EXPECT_TRUE(iree_all_bits_set(
       plan.enabled_features,
+      IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_SHARED_INT64_ATOMICS));
+  EXPECT_TRUE(iree_all_bits_set(
+      plan.enabled_features,
       IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INTEGER_DOT_PRODUCT));
   EXPECT_TRUE(
       iree_all_bits_set(plan.enabled_features,
@@ -317,6 +388,7 @@ TEST(DevicePlanTest, OwnedCreateReportsAvailableScalarShaderFeatures) {
   EXPECT_TRUE(plan.enabled_features2.features.shaderInt16);
   EXPECT_TRUE(plan.enabled_features2.features.shaderInt64);
   EXPECT_TRUE(plan.enabled_features12.shaderBufferInt64Atomics);
+  EXPECT_TRUE(plan.enabled_features12.shaderSharedInt64Atomics);
   EXPECT_TRUE(plan.enabled_features13.shaderIntegerDotProduct);
   EXPECT_TRUE(plan.enabled_features12.vulkanMemoryModel);
   EXPECT_TRUE(plan.enabled_features12.vulkanMemoryModelDeviceScope);
@@ -467,6 +539,100 @@ TEST(DevicePlanTest, OwnedCreateRejectsRequestedShaderBfloat16WhenUnavailable) {
       iree_hal_vulkan_device_plan_initialize_for_create(
           builder.snapshot(), &options, IREE_HAL_VULKAN_REQUEST_FLAG_NONE,
           IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BFLOAT16_TYPE, &plan));
+}
+
+TEST(DevicePlanTest, OwnedCreateEnablesShaderAtomicFloatWhenAvailable) {
+  PhysicalDeviceSnapshotBuilder builder;
+  builder.AddQueueFamily(VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT, 1);
+  builder.EnableShaderAtomicFloatFeatures();
+
+  iree_hal_vulkan_device_options_t options = DefaultDeviceOptions();
+
+  iree_hal_vulkan_device_plan_t plan;
+  IREE_ASSERT_OK(iree_hal_vulkan_device_plan_initialize_for_create(
+      builder.snapshot(), &options, IREE_HAL_VULKAN_REQUEST_FLAG_NONE,
+      IREE_HAL_VULKAN_FEATURE_NONE, &plan));
+
+  const iree_hal_vulkan_features_t expected_features =
+      ShaderAtomicFloatFeatures();
+  EXPECT_TRUE(iree_all_bits_set(plan.enabled_features, expected_features));
+  EXPECT_TRUE(iree_all_bits_set(
+      plan.enabled_extensions,
+      IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_SHADER_ATOMIC_FLOAT |
+          IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_SHADER_ATOMIC_FLOAT2));
+  EXPECT_TRUE(
+      PlanContainsExtension(plan, VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME));
+  EXPECT_TRUE(
+      PlanContainsExtension(plan, VK_EXT_SHADER_ATOMIC_FLOAT_2_EXTENSION_NAME));
+
+  iree_hal_vulkan_device_plan_t copied_plan = plan;
+  VkDeviceCreateInfo create_info;
+  iree_hal_vulkan_device_plan_make_create_info(&copied_plan, &create_info);
+
+  EXPECT_EQ(&copied_plan.enabled_features2, create_info.pNext);
+  EXPECT_EQ(&copied_plan.enabled_features11,
+            copied_plan.enabled_features2.pNext);
+  EXPECT_EQ(&copied_plan.enabled_features12,
+            copied_plan.enabled_features11.pNext);
+  EXPECT_EQ(&copied_plan.enabled_features13,
+            copied_plan.enabled_features12.pNext);
+  EXPECT_EQ(&copied_plan.enabled_shader_atomic_float_features,
+            copied_plan.enabled_features13.pNext);
+  EXPECT_EQ(&copied_plan.enabled_shader_atomic_float2_features,
+            copied_plan.enabled_shader_atomic_float_features.pNext);
+  EXPECT_EQ(nullptr, copied_plan.enabled_shader_atomic_float2_features.pNext);
+}
+
+TEST(DevicePlanTest,
+     OwnedCreateDoesNotEnableShaderAtomicFloat2WithoutBaseExtension) {
+  PhysicalDeviceSnapshotBuilder builder;
+  builder.AddQueueFamily(VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT, 1);
+  builder.EnableShaderAtomicFloat2Features();
+
+  iree_hal_vulkan_device_options_t options = DefaultDeviceOptions();
+
+  iree_hal_vulkan_device_plan_t plan;
+  IREE_ASSERT_OK(iree_hal_vulkan_device_plan_initialize_for_create(
+      builder.snapshot(), &options, IREE_HAL_VULKAN_REQUEST_FLAG_NONE,
+      IREE_HAL_VULKAN_FEATURE_NONE, &plan));
+
+  EXPECT_FALSE(iree_any_bit_set(
+      plan.enabled_extensions,
+      IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_SHADER_ATOMIC_FLOAT2));
+  EXPECT_FALSE(
+      iree_any_bit_set(plan.enabled_features, ShaderAtomicFloat2Features()));
+}
+
+TEST(DevicePlanTest,
+     OwnedCreateRejectsRequestedShaderAtomicFloat2WithoutBaseExtension) {
+  PhysicalDeviceSnapshotBuilder builder;
+  builder.AddQueueFamily(VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT, 1);
+  builder.EnableShaderAtomicFloat2Features();
+
+  iree_hal_vulkan_device_options_t options = DefaultDeviceOptions();
+
+  iree_hal_vulkan_device_plan_t plan;
+  IREE_EXPECT_STATUS_IS(
+      StatusCode::kUnavailable,
+      iree_hal_vulkan_device_plan_initialize_for_create(
+          builder.snapshot(), &options, IREE_HAL_VULKAN_REQUEST_FLAG_NONE,
+          IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_FLOAT16_ATOMICS, &plan));
+}
+
+TEST(DevicePlanTest,
+     OwnedCreateRejectsRequestedShaderAtomicFloatWhenUnavailable) {
+  PhysicalDeviceSnapshotBuilder builder;
+  builder.AddQueueFamily(VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT, 1);
+
+  iree_hal_vulkan_device_options_t options = DefaultDeviceOptions();
+
+  iree_hal_vulkan_device_plan_t plan;
+  IREE_EXPECT_STATUS_IS(
+      StatusCode::kUnavailable,
+      iree_hal_vulkan_device_plan_initialize_for_create(
+          builder.snapshot(), &options, IREE_HAL_VULKAN_REQUEST_FLAG_NONE,
+          IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_FLOAT32_ATOMIC_ADD,
+          &plan));
 }
 
 TEST(DevicePlanTest,
@@ -710,6 +876,104 @@ TEST(DevicePlanTest, WrapRejectsShaderBfloat16WhenFeatureIsUnavailable) {
       IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BFLOAT16_TYPE;
   params.enabled_extensions |=
       IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_SHADER_BFLOAT16;
+  params.compute_queue_set.queue_family_index = 0;
+  params.compute_queue_set.queue_indices = 1ull << 0;
+
+  iree_hal_vulkan_device_plan_t plan;
+  IREE_EXPECT_STATUS_IS(StatusCode::kFailedPrecondition,
+                        iree_hal_vulkan_device_plan_initialize_for_wrap(
+                            builder.snapshot(), &options, &params, &plan));
+}
+
+TEST(DevicePlanTest, WrapCarriesShaderAtomicFloatFeatures) {
+  PhysicalDeviceSnapshotBuilder builder;
+  builder.AddQueueFamily(VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT, 1);
+  builder.EnableShaderAtomicFloatFeatures();
+
+  iree_hal_vulkan_device_options_t options = DefaultDeviceOptions();
+  iree_hal_vulkan_external_device_params_t params = DefaultExternalParams();
+  params.enabled_features |= ShaderAtomicFloatFeatures();
+  params.enabled_extensions |=
+      IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_SHADER_ATOMIC_FLOAT |
+      IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_SHADER_ATOMIC_FLOAT2;
+  params.compute_queue_set.queue_family_index = 0;
+  params.compute_queue_set.queue_indices = 1ull << 0;
+
+  iree_hal_vulkan_device_plan_t plan;
+  IREE_ASSERT_OK(iree_hal_vulkan_device_plan_initialize_for_wrap(
+      builder.snapshot(), &options, &params, &plan));
+
+  EXPECT_TRUE(
+      iree_all_bits_set(plan.enabled_features, ShaderAtomicFloatFeatures()));
+}
+
+TEST(DevicePlanTest, WrapRejectsShaderAtomicFloatWithoutEnabledExtension) {
+  PhysicalDeviceSnapshotBuilder builder;
+  builder.AddQueueFamily(VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT, 1);
+  builder.EnableShaderAtomicFloatFeatures();
+
+  iree_hal_vulkan_device_options_t options = DefaultDeviceOptions();
+  iree_hal_vulkan_external_device_params_t params = DefaultExternalParams();
+  params.enabled_features |=
+      IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_FLOAT32_ATOMICS;
+  params.compute_queue_set.queue_family_index = 0;
+  params.compute_queue_set.queue_indices = 1ull << 0;
+
+  iree_hal_vulkan_device_plan_t plan;
+  IREE_EXPECT_STATUS_IS(StatusCode::kFailedPrecondition,
+                        iree_hal_vulkan_device_plan_initialize_for_wrap(
+                            builder.snapshot(), &options, &params, &plan));
+}
+
+TEST(DevicePlanTest, WrapRejectsShaderAtomicFloat2WithoutEnabledExtension) {
+  PhysicalDeviceSnapshotBuilder builder;
+  builder.AddQueueFamily(VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT, 1);
+  builder.EnableShaderAtomicFloatFeatures();
+
+  iree_hal_vulkan_device_options_t options = DefaultDeviceOptions();
+  iree_hal_vulkan_external_device_params_t params = DefaultExternalParams();
+  params.enabled_features |=
+      IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_FLOAT16_ATOMICS;
+  params.compute_queue_set.queue_family_index = 0;
+  params.compute_queue_set.queue_indices = 1ull << 0;
+
+  iree_hal_vulkan_device_plan_t plan;
+  IREE_EXPECT_STATUS_IS(StatusCode::kFailedPrecondition,
+                        iree_hal_vulkan_device_plan_initialize_for_wrap(
+                            builder.snapshot(), &options, &params, &plan));
+}
+
+TEST(DevicePlanTest, WrapRejectsShaderAtomicFloat2WithoutBaseExtension) {
+  PhysicalDeviceSnapshotBuilder builder;
+  builder.AddQueueFamily(VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT, 1);
+  builder.EnableShaderAtomicFloatFeatures();
+
+  iree_hal_vulkan_device_options_t options = DefaultDeviceOptions();
+  iree_hal_vulkan_external_device_params_t params = DefaultExternalParams();
+  params.enabled_features |=
+      IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_FLOAT16_ATOMICS;
+  params.enabled_extensions |=
+      IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_SHADER_ATOMIC_FLOAT2;
+  params.compute_queue_set.queue_family_index = 0;
+  params.compute_queue_set.queue_indices = 1ull << 0;
+
+  iree_hal_vulkan_device_plan_t plan;
+  IREE_EXPECT_STATUS_IS(StatusCode::kFailedPrecondition,
+                        iree_hal_vulkan_device_plan_initialize_for_wrap(
+                            builder.snapshot(), &options, &params, &plan));
+}
+
+TEST(DevicePlanTest, WrapRejectsUnavailableShaderAtomicFloatFeature) {
+  PhysicalDeviceSnapshotBuilder builder;
+  builder.AddQueueFamily(VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT, 1);
+  builder.EnableShaderAtomicFloatExtensions();
+
+  iree_hal_vulkan_device_options_t options = DefaultDeviceOptions();
+  iree_hal_vulkan_external_device_params_t params = DefaultExternalParams();
+  params.enabled_features |=
+      IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_FLOAT64_ATOMIC_ADD;
+  params.enabled_extensions |=
+      IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_SHADER_ATOMIC_FLOAT;
   params.compute_queue_set.queue_family_index = 0;
   params.compute_queue_set.queue_indices = 1ull << 0;
 

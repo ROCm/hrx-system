@@ -18,7 +18,7 @@ extern "C" {
 #endif  // __cplusplus
 
 #define IREE_HAL_VULKAN_DEVICE_SPEC_SCHEMA_ID "iree.hal.drivers.vulkan.device"
-#define IREE_HAL_VULKAN_DEVICE_SPEC_SCHEMA_VERSION 3u
+#define IREE_HAL_VULKAN_DEVICE_SPEC_SCHEMA_VERSION 4u
 
 // Stable Vulkan device spec flags.
 typedef uint32_t iree_hal_vulkan_device_spec_flags_t;

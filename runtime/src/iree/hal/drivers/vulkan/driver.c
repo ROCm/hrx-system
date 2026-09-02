@@ -6,6 +6,7 @@
 
 #include "iree/hal/drivers/vulkan/driver.h"
 
+#include <inttypes.h>
 #include <stddef.h>
 #include <string.h>
 
@@ -68,7 +69,7 @@ static iree_status_t iree_hal_vulkan_driver_options_verify(
                        ~IREE_HAL_VULKAN_FEATURE_ALL_RECOGNIZED)) {
     status = iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "unrecognized Vulkan requested feature bits 0x%08x",
+        "unrecognized Vulkan requested feature bits 0x%016" PRIx64,
         options->requested_features & ~IREE_HAL_VULKAN_FEATURE_ALL_RECOGNIZED);
   }
   if (iree_status_is_ok(status)) {

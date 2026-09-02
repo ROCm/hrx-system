@@ -278,9 +278,22 @@ static iree_status_t iree_hal_vulkan_device_plan_select_extensions(
       iree_hal_vulkan_device_plan_enable_extension_if_available(
           snapshot, IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_COOPERATIVE_MATRIX,
           VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME, plan));
+  IREE_RETURN_IF_ERROR(
+      iree_hal_vulkan_device_plan_enable_extension_if_available(
+          snapshot, IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_SHADER_BFLOAT16,
+          IREE_HAL_VULKAN_KHR_SHADER_BFLOAT16_EXTENSION_NAME, plan));
+  IREE_RETURN_IF_ERROR(
+      iree_hal_vulkan_device_plan_enable_extension_if_available(
+          snapshot, IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_SHADER_ATOMIC_FLOAT,
+          VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME, plan));
+  if (!iree_all_bits_set(
+          plan->enabled_extensions,
+          IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_SHADER_ATOMIC_FLOAT)) {
+    return iree_ok_status();
+  }
   return iree_hal_vulkan_device_plan_enable_extension_if_available(
-      snapshot, IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_SHADER_BFLOAT16,
-      IREE_HAL_VULKAN_KHR_SHADER_BFLOAT16_EXTENSION_NAME, plan);
+      snapshot, IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_SHADER_ATOMIC_FLOAT2,
+      VK_EXT_SHADER_ATOMIC_FLOAT_2_EXTENSION_NAME, plan);
 }
 
 static void iree_hal_vulkan_device_plan_initialize_queue_create_infos(
@@ -363,9 +376,10 @@ static iree_status_t iree_hal_vulkan_device_plan_verify_requested_features(
   const iree_hal_vulkan_features_t unknown_features =
       requested_features & ~IREE_HAL_VULKAN_FEATURE_ALL_RECOGNIZED;
   if (unknown_features) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "unrecognized Vulkan requested feature bits 0x%08x",
-                            unknown_features);
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "unrecognized Vulkan requested feature bits 0x%016" PRIx64,
+        unknown_features);
   }
   const iree_hal_vulkan_features_t sparse_residency_bit =
       IREE_HAL_VULKAN_FEATURE_ENABLE_SPARSE_RESIDENCY_ALIASED &
@@ -424,6 +438,197 @@ iree_hal_vulkan_device_plan_verify_external_reported_feature(
       vulkan_feature_name);
 }
 
+#define IREE_HAL_VULKAN_SHADER_ATOMIC_FEATURE_COUNT 14
+
+// Features enabled through VK_EXT_shader_atomic_float.
+static const iree_hal_vulkan_features_t kShaderAtomicFloatFeatureBits =
+    IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_FLOAT32_ATOMICS |
+    IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_FLOAT32_ATOMIC_ADD |
+    IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_SHARED_FLOAT32_ATOMICS |
+    IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_SHARED_FLOAT32_ATOMIC_ADD |
+    IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_FLOAT64_ATOMICS |
+    IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_FLOAT64_ATOMIC_ADD |
+    IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_SHARED_FLOAT64_ATOMICS |
+    IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_SHARED_FLOAT64_ATOMIC_ADD;
+
+// Features enabled through VK_EXT_shader_atomic_float2.
+static const iree_hal_vulkan_features_t kShaderAtomicFloat2FeatureBits =
+    IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_FLOAT16_ATOMICS |
+    IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_FLOAT16_ATOMIC_ADD |
+    IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_SHARED_FLOAT16_ATOMICS |
+    IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_SHARED_FLOAT16_ATOMIC_ADD;
+
+// Maps a public HAL feature bit to its Vulkan feature-struct member.
+typedef struct iree_hal_vulkan_shader_atomic_feature_row_t {
+  // HAL feature bit reported in device specifications.
+  iree_hal_vulkan_features_t feature_bit;
+  // Whether the physical device reports the corresponding Vulkan feature.
+  bool available;
+  // Vulkan feature-struct member name used in diagnostics.
+  const char* vulkan_feature_name;
+} iree_hal_vulkan_shader_atomic_feature_row_t;
+
+// Complete set of shader atomic feature rows queried from a device snapshot.
+typedef struct iree_hal_vulkan_shader_atomic_feature_rows_t {
+  // One row for each atomic capability represented by the Vulkan HAL.
+  iree_hal_vulkan_shader_atomic_feature_row_t
+      values[IREE_HAL_VULKAN_SHADER_ATOMIC_FEATURE_COUNT];
+} iree_hal_vulkan_shader_atomic_feature_rows_t;
+
+static iree_hal_vulkan_shader_atomic_feature_rows_t
+iree_hal_vulkan_device_plan_query_shader_atomic_features(
+    const iree_hal_vulkan_physical_device_snapshot_t* snapshot) {
+  const bool shader_atomic_float_available =
+      iree_hal_vulkan_physical_device_has_extension(
+          snapshot, IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_SHADER_ATOMIC_FLOAT);
+  const bool shader_atomic_float2_available =
+      shader_atomic_float_available &&
+      iree_hal_vulkan_physical_device_has_extension(
+          snapshot, IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_SHADER_ATOMIC_FLOAT2);
+  return (iree_hal_vulkan_shader_atomic_feature_rows_t){
+      .values =
+          {
+              {IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_INT64_ATOMICS,
+               snapshot->features12.shaderBufferInt64Atomics,
+               "shaderBufferInt64Atomics"},
+              {IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_SHARED_INT64_ATOMICS,
+               snapshot->features12.shaderSharedInt64Atomics,
+               "shaderSharedInt64Atomics"},
+              {IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_FLOAT16_ATOMICS,
+               shader_atomic_float2_available &&
+                   snapshot->shader_atomic_float2_features
+                       .shaderBufferFloat16Atomics,
+               "shaderBufferFloat16Atomics"},
+              {IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_FLOAT16_ATOMIC_ADD,
+               shader_atomic_float2_available &&
+                   snapshot->shader_atomic_float2_features
+                       .shaderBufferFloat16AtomicAdd,
+               "shaderBufferFloat16AtomicAdd"},
+              {IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_SHARED_FLOAT16_ATOMICS,
+               shader_atomic_float2_available &&
+                   snapshot->shader_atomic_float2_features
+                       .shaderSharedFloat16Atomics,
+               "shaderSharedFloat16Atomics"},
+              {IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_SHARED_FLOAT16_ATOMIC_ADD,
+               shader_atomic_float2_available &&
+                   snapshot->shader_atomic_float2_features
+                       .shaderSharedFloat16AtomicAdd,
+               "shaderSharedFloat16AtomicAdd"},
+              {IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_FLOAT32_ATOMICS,
+               shader_atomic_float_available &&
+                   snapshot->shader_atomic_float_features
+                       .shaderBufferFloat32Atomics,
+               "shaderBufferFloat32Atomics"},
+              {IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_FLOAT32_ATOMIC_ADD,
+               shader_atomic_float_available &&
+                   snapshot->shader_atomic_float_features
+                       .shaderBufferFloat32AtomicAdd,
+               "shaderBufferFloat32AtomicAdd"},
+              {IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_SHARED_FLOAT32_ATOMICS,
+               shader_atomic_float_available &&
+                   snapshot->shader_atomic_float_features
+                       .shaderSharedFloat32Atomics,
+               "shaderSharedFloat32Atomics"},
+              {IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_SHARED_FLOAT32_ATOMIC_ADD,
+               shader_atomic_float_available &&
+                   snapshot->shader_atomic_float_features
+                       .shaderSharedFloat32AtomicAdd,
+               "shaderSharedFloat32AtomicAdd"},
+              {IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_FLOAT64_ATOMICS,
+               shader_atomic_float_available &&
+                   snapshot->shader_atomic_float_features
+                       .shaderBufferFloat64Atomics,
+               "shaderBufferFloat64Atomics"},
+              {IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_FLOAT64_ATOMIC_ADD,
+               shader_atomic_float_available &&
+                   snapshot->shader_atomic_float_features
+                       .shaderBufferFloat64AtomicAdd,
+               "shaderBufferFloat64AtomicAdd"},
+              {IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_SHARED_FLOAT64_ATOMICS,
+               shader_atomic_float_available &&
+                   snapshot->shader_atomic_float_features
+                       .shaderSharedFloat64Atomics,
+               "shaderSharedFloat64Atomics"},
+              {IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_SHARED_FLOAT64_ATOMIC_ADD,
+               shader_atomic_float_available &&
+                   snapshot->shader_atomic_float_features
+                       .shaderSharedFloat64AtomicAdd,
+               "shaderSharedFloat64AtomicAdd"},
+          },
+  };
+}
+
+static iree_status_t iree_hal_vulkan_device_plan_select_shader_atomic_features(
+    const iree_hal_vulkan_physical_device_snapshot_t* snapshot,
+    iree_hal_vulkan_features_t requested_features,
+    iree_hal_vulkan_features_t* enabled_features) {
+  const iree_hal_vulkan_shader_atomic_feature_rows_t rows =
+      iree_hal_vulkan_device_plan_query_shader_atomic_features(snapshot);
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(rows.values); ++i) {
+    IREE_RETURN_IF_ERROR(iree_hal_vulkan_device_plan_select_reported_feature(
+        requested_features, rows.values[i].feature_bit,
+        rows.values[i].available, rows.values[i].vulkan_feature_name,
+        enabled_features));
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t
+iree_hal_vulkan_device_plan_verify_external_shader_atomic_features(
+    const iree_hal_vulkan_physical_device_snapshot_t* snapshot,
+    iree_hal_vulkan_features_t enabled_features) {
+  const iree_hal_vulkan_shader_atomic_feature_rows_t rows =
+      iree_hal_vulkan_device_plan_query_shader_atomic_features(snapshot);
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(rows.values); ++i) {
+    IREE_RETURN_IF_ERROR(
+        iree_hal_vulkan_device_plan_verify_external_reported_feature(
+            enabled_features, rows.values[i].feature_bit,
+            rows.values[i].available, rows.values[i].vulkan_feature_name));
+  }
+  return iree_ok_status();
+}
+
+static void iree_hal_vulkan_device_plan_initialize_shader_atomic_features(
+    const iree_hal_vulkan_physical_device_snapshot_t* snapshot,
+    iree_hal_vulkan_device_plan_t* out_plan) {
+  out_plan->enabled_shader_atomic_float_features =
+      (VkPhysicalDeviceShaderAtomicFloatFeaturesEXT){
+          .sType =
+              VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT,
+          .shaderBufferFloat32Atomics =
+              snapshot->shader_atomic_float_features.shaderBufferFloat32Atomics,
+          .shaderBufferFloat32AtomicAdd = snapshot->shader_atomic_float_features
+                                              .shaderBufferFloat32AtomicAdd,
+          .shaderBufferFloat64Atomics =
+              snapshot->shader_atomic_float_features.shaderBufferFloat64Atomics,
+          .shaderBufferFloat64AtomicAdd = snapshot->shader_atomic_float_features
+                                              .shaderBufferFloat64AtomicAdd,
+          .shaderSharedFloat32Atomics =
+              snapshot->shader_atomic_float_features.shaderSharedFloat32Atomics,
+          .shaderSharedFloat32AtomicAdd = snapshot->shader_atomic_float_features
+                                              .shaderSharedFloat32AtomicAdd,
+          .shaderSharedFloat64Atomics =
+              snapshot->shader_atomic_float_features.shaderSharedFloat64Atomics,
+          .shaderSharedFloat64AtomicAdd = snapshot->shader_atomic_float_features
+                                              .shaderSharedFloat64AtomicAdd,
+      };
+  out_plan->enabled_shader_atomic_float2_features =
+      (VkPhysicalDeviceShaderAtomicFloat2FeaturesEXT){
+          .sType =
+              VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_2_FEATURES_EXT,
+          .shaderBufferFloat16Atomics = snapshot->shader_atomic_float2_features
+                                            .shaderBufferFloat16Atomics,
+          .shaderBufferFloat16AtomicAdd =
+              snapshot->shader_atomic_float2_features
+                  .shaderBufferFloat16AtomicAdd,
+          .shaderSharedFloat16Atomics = snapshot->shader_atomic_float2_features
+                                            .shaderSharedFloat16Atomics,
+          .shaderSharedFloat16AtomicAdd =
+              snapshot->shader_atomic_float2_features
+                  .shaderSharedFloat16AtomicAdd,
+      };
+}
+
 iree_status_t iree_hal_vulkan_device_plan_initialize_for_create(
     const iree_hal_vulkan_physical_device_snapshot_t* snapshot,
     const iree_hal_vulkan_device_options_t* device_options,
@@ -473,6 +678,7 @@ iree_status_t iree_hal_vulkan_device_plan_initialize_for_create(
           snapshot->features12.uniformAndStorageBuffer8BitAccess,
       .storagePushConstant8 = snapshot->features12.storagePushConstant8,
       .shaderBufferInt64Atomics = snapshot->features12.shaderBufferInt64Atomics,
+      .shaderSharedInt64Atomics = snapshot->features12.shaderSharedInt64Atomics,
       .shaderFloat16 = snapshot->features12.shaderFloat16,
       .shaderInt8 = snapshot->features12.shaderInt8,
       .scalarBlockLayout = VK_TRUE,
@@ -502,6 +708,8 @@ iree_status_t iree_hal_vulkan_device_plan_initialize_for_create(
           .sType =
               VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_BFLOAT16_FEATURES_KHR,
       };
+  iree_hal_vulkan_device_plan_initialize_shader_atomic_features(snapshot,
+                                                                out_plan);
   out_plan->enabled_features2 = (VkPhysicalDeviceFeatures2){
       .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
       .pNext = &out_plan->enabled_features11,
@@ -601,11 +809,9 @@ iree_status_t iree_hal_vulkan_device_plan_initialize_for_create(
       requested_features, IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INT64,
       snapshot->features2.features.shaderInt64, "shaderInt64",
       &out_plan->enabled_features));
-  IREE_RETURN_IF_ERROR(iree_hal_vulkan_device_plan_select_reported_feature(
-      requested_features,
-      IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_INT64_ATOMICS,
-      snapshot->features12.shaderBufferInt64Atomics, "shaderBufferInt64Atomics",
-      &out_plan->enabled_features));
+  IREE_RETURN_IF_ERROR(
+      iree_hal_vulkan_device_plan_select_shader_atomic_features(
+          snapshot, requested_features, &out_plan->enabled_features));
   IREE_RETURN_IF_ERROR(iree_hal_vulkan_device_plan_select_reported_feature(
       requested_features,
       IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INTEGER_DOT_PRODUCT,
@@ -678,9 +884,10 @@ static iree_status_t iree_hal_vulkan_verify_external_enabled_features(
   const iree_hal_vulkan_features_t unknown_features =
       enabled_features & ~IREE_HAL_VULKAN_FEATURE_ALL_RECOGNIZED;
   if (unknown_features) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "unrecognized Vulkan enabled feature bits 0x%08x",
-                            unknown_features);
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "unrecognized Vulkan enabled feature bits 0x%016" PRIx64,
+        unknown_features);
   }
 
 #define IREE_HAL_VULKAN_REQUIRE_ENABLED_FEATURE(bit, name)                \
@@ -827,11 +1034,8 @@ static iree_status_t iree_hal_vulkan_verify_external_enabled_features(
           enabled_features, IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INT64,
           snapshot->features2.features.shaderInt64, "shaderInt64"));
   IREE_RETURN_IF_ERROR(
-      iree_hal_vulkan_device_plan_verify_external_reported_feature(
-          enabled_features,
-          IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_INT64_ATOMICS,
-          snapshot->features12.shaderBufferInt64Atomics,
-          "shaderBufferInt64Atomics"));
+      iree_hal_vulkan_device_plan_verify_external_shader_atomic_features(
+          snapshot, enabled_features));
   IREE_RETURN_IF_ERROR(
       iree_hal_vulkan_device_plan_verify_external_reported_feature(
           enabled_features,
@@ -877,6 +1081,17 @@ static iree_status_t iree_hal_vulkan_verify_external_enabled_extensions(
         "physical device did not report",
         unavailable_extensions);
   }
+  if (iree_all_bits_set(
+          enabled_extensions,
+          IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_SHADER_ATOMIC_FLOAT2) &&
+      !iree_all_bits_set(
+          enabled_extensions,
+          IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_SHADER_ATOMIC_FLOAT)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "external Vulkan VkDevice enabled VK_EXT_shader_atomic_float2 "
+        "without its required VK_EXT_shader_atomic_float dependency");
+  }
   return iree_ok_status();
 }
 
@@ -912,6 +1127,26 @@ static iree_status_t iree_hal_vulkan_verify_external_device_contract(
         IREE_STATUS_FAILED_PRECONDITION,
         "external Vulkan VkDevice enabled shaderBFloat16 features without "
         "reporting VK_KHR_shader_bfloat16 as enabled");
+  }
+  if (iree_any_bit_set(external_device_params->enabled_features,
+                       kShaderAtomicFloatFeatureBits) &&
+      !iree_all_bits_set(
+          external_device_params->enabled_extensions,
+          IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_SHADER_ATOMIC_FLOAT)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "external Vulkan VkDevice enabled shader atomic float features "
+        "without reporting VK_EXT_shader_atomic_float as enabled");
+  }
+  if (iree_any_bit_set(external_device_params->enabled_features,
+                       kShaderAtomicFloat2FeatureBits) &&
+      !iree_all_bits_set(
+          external_device_params->enabled_extensions,
+          IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_SHADER_ATOMIC_FLOAT2)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "external Vulkan VkDevice enabled shader atomic float2 features "
+        "without reporting VK_EXT_shader_atomic_float2 as enabled");
   }
   return iree_ok_status();
 }
@@ -1076,6 +1311,15 @@ static void iree_hal_vulkan_device_plan_refresh_feature_chain(
       plan->enabled_shader_bfloat16_features.shaderBFloat16CooperativeMatrix) {
     plan->enabled_shader_bfloat16_features.pNext = feature_chain;
     feature_chain = &plan->enabled_shader_bfloat16_features;
+  }
+  if (iree_any_bit_set(plan->enabled_features,
+                       kShaderAtomicFloat2FeatureBits)) {
+    plan->enabled_shader_atomic_float2_features.pNext = feature_chain;
+    feature_chain = &plan->enabled_shader_atomic_float2_features;
+  }
+  if (iree_any_bit_set(plan->enabled_features, kShaderAtomicFloatFeatureBits)) {
+    plan->enabled_shader_atomic_float_features.pNext = feature_chain;
+    feature_chain = &plan->enabled_shader_atomic_float_features;
   }
   plan->enabled_features13.pNext = feature_chain;
   plan->enabled_features12.pNext = &plan->enabled_features13;

@@ -195,6 +195,18 @@ iree_hal_vulkan_available_device_extensions_from_list(
     available_extensions |=
         IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_SHADER_BFLOAT16;
   }
+  if (iree_hal_vulkan_extension_list_contains(
+          extension_count, extensions,
+          VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME)) {
+    available_extensions |=
+        IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_SHADER_ATOMIC_FLOAT;
+  }
+  if (iree_hal_vulkan_extension_list_contains(
+          extension_count, extensions,
+          VK_EXT_SHADER_ATOMIC_FLOAT_2_EXTENSION_NAME)) {
+    available_extensions |=
+        IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_SHADER_ATOMIC_FLOAT2;
+  }
   return available_extensions;
 }
 
@@ -326,6 +338,41 @@ static void iree_hal_vulkan_query_shader_bfloat16_features(
   VkPhysicalDeviceFeatures2 features2 = {
       .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
       .pNext = &snapshot->shader_bfloat16_features,
+  };
+  IREE_LEAK_CHECK_DISABLE_PUSH();
+  iree_vkGetPhysicalDeviceFeatures2(IREE_VULKAN_INSTANCE(&instance->syms),
+                                    handle, &features2);
+  IREE_LEAK_CHECK_DISABLE_POP();
+}
+
+static void iree_hal_vulkan_query_shader_atomic_float_features(
+    const iree_hal_vulkan_instance_t* instance, VkPhysicalDevice handle,
+    iree_hal_vulkan_physical_device_snapshot_t* snapshot) {
+  void* feature_chain = NULL;
+  if (iree_hal_vulkan_physical_device_has_extension(
+          snapshot,
+          IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_SHADER_ATOMIC_FLOAT2)) {
+    snapshot->shader_atomic_float2_features =
+        (VkPhysicalDeviceShaderAtomicFloat2FeaturesEXT){
+            .sType =
+                VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_2_FEATURES_EXT,
+            .pNext = feature_chain,
+        };
+    feature_chain = &snapshot->shader_atomic_float2_features;
+  }
+  if (iree_hal_vulkan_physical_device_has_extension(
+          snapshot, IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_SHADER_ATOMIC_FLOAT)) {
+    snapshot->shader_atomic_float_features =
+        (VkPhysicalDeviceShaderAtomicFloatFeaturesEXT){
+            .sType =
+                VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT,
+            .pNext = feature_chain,
+        };
+    feature_chain = &snapshot->shader_atomic_float_features;
+  }
+  VkPhysicalDeviceFeatures2 features2 = {
+      .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+      .pNext = feature_chain,
   };
   IREE_LEAK_CHECK_DISABLE_PUSH();
   iree_vkGetPhysicalDeviceFeatures2(IREE_VULKAN_INSTANCE(&instance->syms),
@@ -739,6 +786,16 @@ iree_status_t iree_hal_vulkan_physical_device_snapshot_initialize(
           out_snapshot, IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_SHADER_BFLOAT16)) {
     iree_hal_vulkan_query_shader_bfloat16_features(instance, handle,
                                                    out_snapshot);
+  }
+  if (iree_status_is_ok(status) &&
+      (iree_hal_vulkan_physical_device_has_extension(
+           out_snapshot,
+           IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_SHADER_ATOMIC_FLOAT) ||
+       iree_hal_vulkan_physical_device_has_extension(
+           out_snapshot,
+           IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_SHADER_ATOMIC_FLOAT2))) {
+    iree_hal_vulkan_query_shader_atomic_float_features(instance, handle,
+                                                       out_snapshot);
   }
 
   if (!iree_status_is_ok(status)) {
@@ -1168,6 +1225,44 @@ iree_status_t iree_hal_vulkan_dump_physical_device_info(
         iree_hal_vulkan_bool_string(snapshot.features13.subgroupSizeControl),
         iree_hal_vulkan_bool_string(
             snapshot.cooperative_matrix_features.cooperativeMatrix)));
+    IREE_HAL_VULKAN_APPEND(iree_string_builder_append_format(
+        builder,
+        "atomic_features: shaderBufferInt64Atomics=%s "
+        "shaderSharedInt64Atomics=%s "
+        "shaderBufferFloat16Atomics=%s shaderBufferFloat16AtomicAdd=%s "
+        "shaderSharedFloat16Atomics=%s shaderSharedFloat16AtomicAdd=%s "
+        "shaderBufferFloat32Atomics=%s shaderBufferFloat32AtomicAdd=%s "
+        "shaderSharedFloat32Atomics=%s shaderSharedFloat32AtomicAdd=%s "
+        "shaderBufferFloat64Atomics=%s shaderBufferFloat64AtomicAdd=%s "
+        "shaderSharedFloat64Atomics=%s shaderSharedFloat64AtomicAdd=%s\n",
+        iree_hal_vulkan_bool_string(
+            snapshot.features12.shaderBufferInt64Atomics),
+        iree_hal_vulkan_bool_string(
+            snapshot.features12.shaderSharedInt64Atomics),
+        iree_hal_vulkan_bool_string(
+            snapshot.shader_atomic_float2_features.shaderBufferFloat16Atomics),
+        iree_hal_vulkan_bool_string(snapshot.shader_atomic_float2_features
+                                        .shaderBufferFloat16AtomicAdd),
+        iree_hal_vulkan_bool_string(
+            snapshot.shader_atomic_float2_features.shaderSharedFloat16Atomics),
+        iree_hal_vulkan_bool_string(snapshot.shader_atomic_float2_features
+                                        .shaderSharedFloat16AtomicAdd),
+        iree_hal_vulkan_bool_string(
+            snapshot.shader_atomic_float_features.shaderBufferFloat32Atomics),
+        iree_hal_vulkan_bool_string(
+            snapshot.shader_atomic_float_features.shaderBufferFloat32AtomicAdd),
+        iree_hal_vulkan_bool_string(
+            snapshot.shader_atomic_float_features.shaderSharedFloat32Atomics),
+        iree_hal_vulkan_bool_string(
+            snapshot.shader_atomic_float_features.shaderSharedFloat32AtomicAdd),
+        iree_hal_vulkan_bool_string(
+            snapshot.shader_atomic_float_features.shaderBufferFloat64Atomics),
+        iree_hal_vulkan_bool_string(
+            snapshot.shader_atomic_float_features.shaderBufferFloat64AtomicAdd),
+        iree_hal_vulkan_bool_string(
+            snapshot.shader_atomic_float_features.shaderSharedFloat64Atomics),
+        iree_hal_vulkan_bool_string(snapshot.shader_atomic_float_features
+                                        .shaderSharedFloat64AtomicAdd)));
     if (snapshot.cooperative_matrix_features.cooperativeMatrix) {
       IREE_HAL_VULKAN_APPEND(iree_string_builder_append_format(
           builder, "cooperative_matrix: stages=0x%08x property_rows=%u\n",
