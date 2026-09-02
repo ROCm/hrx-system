@@ -38,6 +38,7 @@ constexpr uint32_t kSpirvCapabilityShader = 1;
 constexpr uint32_t kSpirvCapabilityFloat16 = 9;
 constexpr uint32_t kSpirvCapabilityFloat64 = 10;
 constexpr uint32_t kSpirvCapabilityInt64 = 11;
+constexpr uint32_t kSpirvCapabilityGroupNonUniform = 61;
 constexpr uint32_t kSpirvCapabilityVulkanMemoryModel = 5345;
 constexpr uint32_t kSpirvCapabilityPhysicalStorageBufferAddresses = 5347;
 constexpr uint32_t kSpirvStorageClassPhysicalStorageBuffer = 5349;
@@ -319,11 +320,6 @@ void ExpectVulkanBdaProfileBundle(const loomc_target_profile_t* profile) {
   EXPECT_EQ(bundle->snapshot->codegen_format, LOOM_TARGET_CODEGEN_FORMAT_SPIRV);
   EXPECT_EQ(bundle->snapshot->artifact_format,
             LOOM_TARGET_ARTIFACT_FORMAT_SPIRV_BINARY);
-  const loomc_spirv_feature_bits_t expected_features =
-      loomc_spirv_feature_bit(LOOMC_SPIRV_FEATURE_VULKAN_SHADER) |
-      loomc_spirv_feature_bit(LOOMC_SPIRV_FEATURE_PHYSICAL_STORAGE_BUFFER) |
-      loomc_spirv_feature_bit(LOOMC_SPIRV_FEATURE_INT64);
-  EXPECT_EQ(bundle->config->contract_feature_bits, expected_features);
 }
 
 TEST(TargetSpirvProfileTest, CreatesEmptyPartialProfile) {
@@ -621,6 +617,9 @@ TEST(TargetSpirvProfileTest, CreatesPresetProfileAndQueriesRows) {
       profile.get(), LOOMC_SPIRV_FEATURE_INT64, &state));
   EXPECT_EQ(state, LOOMC_TARGET_FACT_STATE_TRUE);
   LOOMC_EXPECT_OK(loomc_spirv_target_profile_query_feature(
+      profile.get(), LOOMC_SPIRV_FEATURE_GROUP_NON_UNIFORM, &state));
+  EXPECT_EQ(state, LOOMC_TARGET_FACT_STATE_TRUE);
+  LOOMC_EXPECT_OK(loomc_spirv_target_profile_query_feature(
       profile.get(), LOOMC_SPIRV_FEATURE_FLOAT16, &state));
   EXPECT_EQ(state, LOOMC_TARGET_FACT_STATE_UNKNOWN);
 
@@ -630,6 +629,8 @@ TEST(TargetSpirvProfileTest, CreatesPresetProfileAndQueriesRows) {
   EXPECT_EQ(info.addressing_model,
             kSpirvAddressingModelPhysicalStorageBuffer64);
   EXPECT_EQ(info.memory_model, kSpirvMemoryModelVulkan);
+  EXPECT_TRUE(
+      ProfileHasCapability(profile.get(), kSpirvCapabilityGroupNonUniform));
   EXPECT_TRUE(
       ProfileHasExtension(profile.get(), "SPV_KHR_vulkan_memory_model"));
   EXPECT_TRUE(

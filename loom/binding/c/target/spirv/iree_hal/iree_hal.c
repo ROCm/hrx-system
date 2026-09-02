@@ -316,6 +316,8 @@ static loomc_status_t loomc_spirv_iree_hal_query_facts(
       loomc_make_cstring_view("iree-hal:vulkan.device.api_version");
   LOOMC_RETURN_IF_ERROR(loomc_spirv_iree_hal_add_bool_feature(
       out_facts, true, LOOMC_SPIRV_FEATURE_VULKAN_SHADER, api_provenance));
+  LOOMC_RETURN_IF_ERROR(loomc_spirv_iree_hal_add_bool_feature(
+      out_facts, true, LOOMC_SPIRV_FEATURE_GROUP_NON_UNIFORM, api_provenance));
   LOOMC_RETURN_IF_ERROR(loomc_spirv_iree_hal_add_environment_fact(
       out_facts, LOOMC_SPIRV_ENVIRONMENT_MAX_SPIRV_VERSION,
       loomc_spirv_max_version_from_vulkan_api_version(

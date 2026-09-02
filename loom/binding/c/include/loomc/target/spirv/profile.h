@@ -137,8 +137,11 @@ typedef enum loomc_spirv_feature_e {
   /// 64-bit integer scalar support.
   LOOMC_SPIRV_FEATURE_INT64 = 15,
 
+  /// Core subgroup operations and subgroup memory scope.
+  LOOMC_SPIRV_FEATURE_GROUP_NON_UNIFORM = 16,
+
   /// Number of public SPIR-V feature identifiers.
-  LOOMC_SPIRV_FEATURE_COUNT = 16,
+  LOOMC_SPIRV_FEATURE_COUNT = 17,
 } loomc_spirv_feature_t;
 
 /// Bitset of `loomc_spirv_feature_t` values.

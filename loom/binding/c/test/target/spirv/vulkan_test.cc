@@ -36,6 +36,7 @@ struct MockVulkanDevice {
   uint32_t max_workgroup_storage_bytes = 49152;
   uint32_t max_workgroup_count[3] = {65535, 32768, 16384};
   uint32_t subgroup_size = 32;
+  VkSubgroupFeatureFlags subgroup_operations = VK_SUBGROUP_FEATURE_BASIC_BIT;
   VkBool32 shader_float64 = VK_TRUE;
   VkBool32 shader_int16 = VK_TRUE;
   VkBool32 shader_int64 = VK_FALSE;
@@ -80,10 +81,14 @@ void VKAPI_PTR MockGetPhysicalDeviceProperties2(
            reinterpret_cast<VkBaseOutStructure*>(properties->pNext);
        out != nullptr; out = out->pNext) {
     switch (out->sType) {
-      case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES:
-        reinterpret_cast<VkPhysicalDeviceSubgroupProperties*>(out)
-            ->subgroupSize = g_mock_vulkan_device->subgroup_size;
+      case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES: {
+        auto* subgroup_properties =
+            reinterpret_cast<VkPhysicalDeviceSubgroupProperties*>(out);
+        subgroup_properties->subgroupSize = g_mock_vulkan_device->subgroup_size;
+        subgroup_properties->supportedOperations =
+            g_mock_vulkan_device->subgroup_operations;
         break;
+      }
       default:
         break;
     }
@@ -339,6 +344,8 @@ TEST(TargetSpirvVulkanTest, CreatesProfileFromRawVulkanDevice) {
                      LOOMC_TARGET_FACT_STATE_TRUE);
   ExpectFeatureState(profile.get(), LOOMC_SPIRV_FEATURE_INT64,
                      LOOMC_TARGET_FACT_STATE_FALSE);
+  ExpectFeatureState(profile.get(), LOOMC_SPIRV_FEATURE_GROUP_NON_UNIFORM,
+                     LOOMC_TARGET_FACT_STATE_TRUE);
   ExpectFeatureState(profile.get(),
                      LOOMC_SPIRV_FEATURE_STORAGE_BUFFER_8BIT_ACCESS,
                      LOOMC_TARGET_FACT_STATE_TRUE);

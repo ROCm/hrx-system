@@ -251,6 +251,9 @@ TEST(LoomcSpirvIreeHalTargetTest, CreatesProfileFromHalFacts) {
       profile.get(), LOOMC_SPIRV_FEATURE_PHYSICAL_STORAGE_BUFFER,
       &feature_state));
   EXPECT_EQ(feature_state, LOOMC_TARGET_FACT_STATE_TRUE);
+  LOOMC_EXPECT_OK(loomc_spirv_target_profile_query_feature(
+      profile.get(), LOOMC_SPIRV_FEATURE_GROUP_NON_UNIFORM, &feature_state));
+  EXPECT_EQ(feature_state, LOOMC_TARGET_FACT_STATE_TRUE);
 }
 
 TEST(LoomcSpirvIreeHalTargetTest, MissingExecutableTargetFailsResult) {
