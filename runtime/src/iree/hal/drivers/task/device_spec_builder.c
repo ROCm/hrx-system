@@ -268,13 +268,9 @@ IREE_API_EXPORT iree_status_t iree_hal_task_device_spec_create(
   }
   iree_hal_queue_family_spec_t queue_family = {
       .name = IREE_SV("default"),
-      .queue_count = (uint32_t)params->queue_count,
+      .provisioned_queue_count = (uint32_t)params->queue_count,
       .priority_count = 1,
       .physical_device_affinity = 1ull,
-      .queue_affinity =
-          params->queue_count == IREE_HAL_MAX_QUEUES
-              ? IREE_HAL_QUEUE_AFFINITY_ANY
-              : (((iree_hal_queue_affinity_t)1 << params->queue_count) - 1),
       .role_flags = queue_role_flags,
       .atomic_capabilities = params->atomic_capabilities,
       .zero_compute_atomic_capabilities =

@@ -173,12 +173,11 @@ static const std::vector<uint8_t>& iree_hal_device_spec_fuzz_seed(void) {
 
     iree_hal_queue_family_spec_t queue_family = {};
     queue_family.name = iree_make_cstring_view("dispatch-and-transfer");
-    queue_family.queue_count = 4;
+    queue_family.provisioned_queue_count = 4;
     queue_family.priority_count = 2;
     queue_family.timestamp_valid_bits = 64;
     queue_family.timestamp_frequency_hz = UINT64_C(1000000000);
     queue_family.physical_device_affinity = 1;
-    queue_family.queue_affinity = 0xFu;
     queue_family.role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH |
                               IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER |
                               IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_PROFILING;

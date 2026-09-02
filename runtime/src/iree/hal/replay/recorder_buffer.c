@@ -71,7 +71,7 @@ void iree_hal_replay_recorder_buffer_make_object_payload(
   out_payload->allocation_size = iree_hal_buffer_allocation_size(base_buffer);
   out_payload->byte_offset = iree_hal_buffer_byte_offset(base_buffer);
   out_payload->byte_length = iree_hal_buffer_byte_length(base_buffer);
-  out_payload->queue_affinity = placement.queue_affinity;
+  out_payload->queue_family_affinity = placement.queue_family_affinity;
   out_payload->placement_flags = placement.flags;
   out_payload->memory_type = iree_hal_buffer_memory_type(base_buffer);
   out_payload->allowed_access = iree_hal_buffer_allowed_access(base_buffer);

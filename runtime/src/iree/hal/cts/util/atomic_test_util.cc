@@ -55,13 +55,13 @@ bool SelectAtomicTestConfiguration(const iree_hal_device_spec_t* device_spec,
       iree_hal_device_spec_memory(device_spec);
   if (!queues || !memory) return false;
 
-  for (iree_host_size_t queue_index = 0; queue_index < queues->family_count;
-       ++queue_index) {
+  for (iree_host_size_t family_index = 0; family_index < queues->family_count;
+       ++family_index) {
     const iree_hal_queue_family_spec_t& queue_family =
-        queues->families[queue_index];
+        queues->families[family_index];
     if (!iree_all_bits_set(queue_family.role_flags,
                            IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_ATOMIC) ||
-        queue_family.queue_affinity == 0) {
+        queue_family.provisioned_queue_count == 0) {
       continue;
     }
     const iree_hal_atomic_operation_flags_t queue_operations =
@@ -104,15 +104,13 @@ bool SelectAtomicTestConfiguration(const iree_hal_device_spec_t* device_spec,
         continue;
       }
 
-      const iree_hal_queue_affinity_t family_affinity =
-          queue_family.queue_affinity;
-      out_configuration->queue_affinity =
-          family_affinity & (~family_affinity + 1);
       out_configuration->buffer_params = {
           /*.usage=*/requirements.buffer_usage,
           /*.access=*/requirements.memory_access,
           /*.type=*/memory_type.memory_type,
-          /*.queue_affinity=*/out_configuration->queue_affinity,
+          /*.queue_family_affinity=*/
+          iree_hal_make_queue_family_affinity(
+              (iree_hal_queue_family_ordinal_t)family_index),
           /*.min_alignment=*/
           iree_hal_atomic_width_byte_count(requirements.width),
       };

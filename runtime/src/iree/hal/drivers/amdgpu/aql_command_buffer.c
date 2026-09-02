@@ -734,7 +734,8 @@ iree_hal_amdgpu_aql_command_buffer_materialize_prepublished_kernargs(
 
   iree_hal_buffer_params_t params =
       command_buffer->prepublished_kernargs.storage.buffer_params;
-  params.queue_affinity = command_buffer->base.queue_affinity;
+  params.queue_family_affinity =
+      iree_hal_make_queue_family_affinity(command_buffer->device_ordinal);
 
   iree_hal_buffer_t* template_buffer = NULL;
   iree_status_t status = iree_hal_allocator_allocate_buffer(

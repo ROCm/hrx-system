@@ -177,7 +177,7 @@ static iree_status_t hrx_mem_pool_ensure_hal_pools_locked(hrx_mem_pool_t pool) {
         .usage = IREE_HAL_BUFFER_USAGE_DEFAULT,
         .access = IREE_HAL_MEMORY_ACCESS_ALL,
         .type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
-        .queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY,
+        .queue_family_affinity = IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
     };
     IREE_RETURN_IF_ERROR(hrx_vmm_slab_provider_create(
         pool->device->allocator.hal_allocator, physical_buffer_params,
@@ -559,7 +559,8 @@ hrx_status_t hrx_mem_pool_allocate_buffer(hrx_mem_pool_t pool,
       .usage = (iree_hal_buffer_usage_t)params.usage,
       .access = (iree_hal_memory_access_t)params.access,
       .type = (iree_hal_memory_type_t)params.type,
-      .queue_affinity = (iree_hal_queue_affinity_t)params.queue_affinity,
+      .queue_family_affinity =
+          (iree_hal_queue_family_affinity_t)params.queue_affinity,
   };
 
   iree_hal_pool_t* hal_pool = NULL;

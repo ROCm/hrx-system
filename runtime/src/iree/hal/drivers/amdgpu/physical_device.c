@@ -706,7 +706,6 @@ iree_hal_amdgpu_physical_device_initialize_default_pool_resources(
     const iree_hal_amdgpu_physical_device_options_t* options,
     iree_async_proactor_t* proactor, iree_host_size_t device_ordinal,
     hsa_amd_memory_pool_t coarse_block_memory_pool,
-    iree_hal_queue_affinity_t queue_affinity_mask,
     iree_hal_amdgpu_asan_state_t* asan_state, iree_allocator_t host_allocator,
     iree_hal_amdgpu_physical_device_t* out_physical_device) {
   iree_hal_amdgpu_libhsa_t* libhsa = &system->libhsa;
@@ -736,9 +735,9 @@ iree_hal_amdgpu_physical_device_initialize_default_pool_resources(
   };
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_slab_provider_create(
       logical_device, libhsa, &system->topology, default_slab_options,
-      device_ordinal, queue_affinity_mask,
-      &out_physical_device->materialized_buffer_pool, slab_trace_name,
-      host_allocator, &out_physical_device->default_slab_provider));
+      device_ordinal, &out_physical_device->materialized_buffer_pool,
+      slab_trace_name, host_allocator,
+      &out_physical_device->default_slab_provider));
 
   if (properties.allocation_alignment < options->default_pool.alignment) {
     return iree_make_status(
@@ -803,9 +802,9 @@ iree_hal_amdgpu_physical_device_initialize_default_pool_resources(
   };
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_slab_provider_create(
       logical_device, libhsa, &system->topology, host_slab_options,
-      device_ordinal, queue_affinity_mask,
-      &out_physical_device->materialized_buffer_pool, host_slab_trace_name,
-      host_allocator, &out_physical_device->default_host_slab_provider));
+      device_ordinal, &out_physical_device->materialized_buffer_pool,
+      host_slab_trace_name, host_allocator,
+      &out_physical_device->default_host_slab_provider));
   return iree_ok_status();
 }
 
@@ -813,12 +812,12 @@ static iree_status_t iree_hal_amdgpu_physical_device_initialize_staging(
     iree_hal_device_t* logical_device, iree_hal_amdgpu_system_t* system,
     const iree_hal_amdgpu_physical_device_options_t* options,
     const iree_hal_amdgpu_host_memory_pools_t* host_memory_pools,
-    iree_hal_queue_affinity_t queue_affinity_mask,
+    iree_hal_queue_family_affinity_t queue_family_affinity,
     iree_allocator_t host_allocator,
     iree_hal_amdgpu_physical_device_t* out_physical_device) {
   return iree_hal_amdgpu_staging_pool_initialize(
       logical_device, &system->libhsa, &system->topology, host_memory_pools,
-      queue_affinity_mask, &options->file_staging, host_allocator,
+      queue_family_affinity, &options->file_staging, host_allocator,
       &out_physical_device->file_staging_pool);
 }
 
@@ -1036,26 +1035,18 @@ iree_status_t iree_hal_amdgpu_physical_device_initialize(
   // Create the default queue-allocation slab provider over the device
   // coarse-grained HSA pool and derive the TLSF policy used once topology
   // assignment provides an epoch query.
-  iree_hal_queue_affinity_t queue_affinity_mask = 0;
-  const iree_hal_amdgpu_queue_affinity_domain_t queue_affinity_domain = {
-      .supported_affinity = IREE_HAL_QUEUE_AFFINITY_ANY,
-      .physical_device_count = system->topology.gpu_agent_count,
-      .queue_count_per_physical_device = options->host_queue_count,
-  };
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_amdgpu_queue_affinity_for_physical_device(
-        queue_affinity_domain, device_ordinal, &queue_affinity_mask);
-  }
   if (iree_status_is_ok(status)) {
     status = iree_hal_amdgpu_physical_device_initialize_default_pool_resources(
         logical_device, system, options, proactor, device_ordinal,
-        coarse_block_memory_pool, queue_affinity_mask, asan_state,
-        host_allocator, out_physical_device);
+        coarse_block_memory_pool, asan_state, host_allocator,
+        out_physical_device);
   }
 
   if (iree_status_is_ok(status)) {
     status = iree_hal_amdgpu_physical_device_initialize_staging(
-        logical_device, system, options, host_memory_pools, queue_affinity_mask,
+        logical_device, system, options, host_memory_pools,
+        iree_hal_make_queue_family_affinity(
+            (iree_hal_queue_family_ordinal_t)device_ordinal),
         host_allocator, out_physical_device);
   }
   if (iree_status_is_ok(status)) {

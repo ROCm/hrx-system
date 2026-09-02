@@ -48,8 +48,8 @@ typedef struct iree_hal_vulkan_slab_provider_t {
   // Immutable HAL memory properties exposed by this provider.
   iree_hal_slab_provider_properties_t properties;
 
-  // Queue affinity mask valid for buffers materialized from this provider.
-  iree_hal_queue_affinity_t queue_affinity_mask;
+  // Queue families that may access buffers materialized from this provider.
+  iree_hal_queue_family_affinity_t queue_family_affinity_mask;
 
   // Minimum alignment used by whole-slab allocation requests.
   iree_device_size_t min_alignment;
@@ -131,7 +131,7 @@ iree_status_t iree_hal_vulkan_slab_provider_create(
   provider->properties.memory_type = options.memory_type;
   provider->properties.supported_usage = options.supported_usage;
   provider->properties.atomic_operations = options.atomic_operations;
-  provider->queue_affinity_mask = options.queue_affinity_mask;
+  provider->queue_family_affinity_mask = options.queue_family_affinity_mask;
   provider->min_alignment = options.min_alignment;
   provider->non_coherent_atom_size =
       options.non_coherent_atom_size ? options.non_coherent_atom_size : 1;
@@ -220,7 +220,7 @@ static iree_status_t iree_hal_vulkan_slab_provider_acquire_slab(
       .type = provider->properties.memory_type,
       .access = IREE_HAL_MEMORY_ACCESS_ALL,
       .usage = provider->properties.supported_usage,
-      .queue_affinity = provider->queue_affinity_mask,
+      .queue_family_affinity = provider->queue_family_affinity_mask,
       .min_alignment = min_alignment,
   };
   iree_hal_buffer_t* buffer = NULL;
@@ -323,19 +323,19 @@ static iree_status_t iree_hal_vulkan_slab_provider_wrap_buffer(
 #endif  // IREE_STATUS_MODE
   }
 
-  iree_hal_queue_affinity_t queue_affinity = params.queue_affinity;
-  if (iree_hal_queue_affinity_is_any(queue_affinity)) {
-    queue_affinity = provider->queue_affinity_mask;
-  } else {
-    iree_hal_queue_affinity_and_into(queue_affinity,
-                                     provider->queue_affinity_mask);
-    if (IREE_UNLIKELY(iree_hal_queue_affinity_is_empty(queue_affinity))) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "Vulkan slab provider queue affinity 0x%016" PRIx64
-          " does not cover requested buffer affinity 0x%016" PRIx64,
-          provider->queue_affinity_mask, params.queue_affinity);
-    }
+  iree_hal_queue_family_affinity_t queue_family_affinity =
+      params.queue_family_affinity;
+  if (iree_hal_queue_family_affinity_is_any(queue_family_affinity)) {
+    queue_family_affinity = provider->queue_family_affinity_mask;
+  } else if (IREE_UNLIKELY(iree_hal_queue_family_affinity_is_empty(
+                               queue_family_affinity) ||
+                           (queue_family_affinity &
+                            ~provider->queue_family_affinity_mask) != 0)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Vulkan slab provider queue family affinity 0x%016" PRIx64
+        " is outside the supported mask 0x%016" PRIx64,
+        queue_family_affinity, provider->queue_family_affinity_mask);
   }
 
   VkDeviceMemory device_memory = VK_NULL_HANDLE;
@@ -350,7 +350,7 @@ static iree_status_t iree_hal_vulkan_slab_provider_wrap_buffer(
 
   const iree_hal_buffer_placement_t placement = {
       .device = provider->parent_device,
-      .queue_affinity = queue_affinity,
+      .queue_family_affinity = queue_family_affinity,
       .flags = IREE_HAL_BUFFER_PLACEMENT_FLAG_NONE,
   };
   return iree_hal_vulkan_buffer_create_borrowed(

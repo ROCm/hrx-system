@@ -266,7 +266,8 @@ iree_hal_allocator_virtual_memory_query_granularity(
 
 IREE_API_EXPORT iree_status_t iree_hal_allocator_virtual_memory_reserve(
     iree_hal_allocator_t* IREE_RESTRICT allocator,
-    iree_hal_queue_affinity_t queue_affinity, iree_device_size_t size,
+    iree_hal_queue_family_affinity_t queue_family_affinity,
+    iree_device_size_t size,
     iree_hal_buffer_t** IREE_RESTRICT out_virtual_buffer) {
   IREE_ASSERT_ARGUMENT(allocator);
   IREE_ASSERT_ARGUMENT(out_virtual_buffer);
@@ -274,7 +275,7 @@ IREE_API_EXPORT iree_status_t iree_hal_allocator_virtual_memory_reserve(
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, (int64_t)size);
   iree_status_t status = _VTABLE_DISPATCH(allocator, virtual_memory_reserve)(
-      allocator, queue_affinity, size, out_virtual_buffer);
+      allocator, queue_family_affinity, size, out_virtual_buffer);
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
@@ -354,13 +355,13 @@ IREE_API_EXPORT iree_status_t iree_hal_allocator_virtual_memory_protect(
     iree_hal_allocator_t* IREE_RESTRICT allocator,
     iree_hal_buffer_t* IREE_RESTRICT virtual_buffer,
     iree_device_size_t virtual_offset, iree_device_size_t size,
-    iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_queue_family_affinity_t queue_family_affinity,
     iree_hal_memory_protection_t protection) {
   IREE_ASSERT_ARGUMENT(allocator);
   IREE_ASSERT_ARGUMENT(virtual_buffer);
   IREE_TRACE_ZONE_BEGIN(z0);
   iree_status_t status = _VTABLE_DISPATCH(allocator, virtual_memory_protect)(
-      allocator, virtual_buffer, virtual_offset, size, queue_affinity,
+      allocator, virtual_buffer, virtual_offset, size, queue_family_affinity,
       protection);
   IREE_TRACE_ZONE_END(z0);
   return status;
@@ -370,10 +371,12 @@ IREE_API_EXPORT iree_status_t iree_hal_allocator_virtual_memory_advise(
     iree_hal_allocator_t* IREE_RESTRICT allocator,
     iree_hal_buffer_t* IREE_RESTRICT virtual_buffer,
     iree_device_size_t virtual_offset, iree_device_size_t size,
-    iree_hal_queue_affinity_t queue_affinity, iree_hal_memory_advice_t advice) {
+    iree_hal_queue_family_affinity_t queue_family_affinity,
+    iree_hal_memory_advice_t advice) {
   IREE_ASSERT_ARGUMENT(allocator);
   IREE_ASSERT_ARGUMENT(virtual_buffer);
   // No tracing for advise - it's a hint that may be called frequently.
   return _VTABLE_DISPATCH(allocator, virtual_memory_advise)(
-      allocator, virtual_buffer, virtual_offset, size, queue_affinity, advice);
+      allocator, virtual_buffer, virtual_offset, size, queue_family_affinity,
+      advice);
 }

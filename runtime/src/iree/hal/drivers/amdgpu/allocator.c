@@ -14,7 +14,6 @@
 #include "iree/hal/drivers/amdgpu/buffer.h"
 #include "iree/hal/drivers/amdgpu/logical_device.h"
 #include "iree/hal/drivers/amdgpu/physical_device.h"
-#include "iree/hal/drivers/amdgpu/queue_affinity.h"
 #include "iree/hal/drivers/amdgpu/system.h"
 #include "iree/hal/drivers/amdgpu/util/topology.h"
 #include "iree/hal/drivers/amdgpu/util/vmem.h"
@@ -82,7 +81,7 @@ typedef struct iree_hal_amdgpu_allocator_t {
   // Unowned libhsa handle. Must be retained by the owner.
   const iree_hal_amdgpu_libhsa_t* libhsa;
 
-  // Unowned topology used to resolve queue affinity to a physical device.
+  // Unowned topology used to resolve queue-family accessibility and placement.
   const iree_hal_amdgpu_topology_t* topology;
 
   // Cached HSA memory pool properties used for placement and heap queries.
@@ -100,7 +99,7 @@ typedef struct iree_hal_amdgpu_allocator_placement_t {
   // HSA memory pool selected for the allocation.
   const iree_hal_amdgpu_allocator_memory_pool_t* memory_pool;
 
-  // Physical devices selected by the complete resolved queue affinity.
+  // Physical devices selected by the resolved queue-family affinity.
   iree_hal_amdgpu_gpu_agent_mask_t physical_device_mask;
 
   // Physical device ordinal owning |memory_pool|.
@@ -358,44 +357,47 @@ static iree_status_t iree_hal_amdgpu_allocator_query_pool_properties(
       &out_pool->atomic_memory_source_masks);
 }
 
-static iree_hal_amdgpu_queue_affinity_domain_t
-iree_hal_amdgpu_allocator_queue_affinity_domain(
-    const iree_hal_amdgpu_allocator_t* allocator) {
-  return (iree_hal_amdgpu_queue_affinity_domain_t){
-      .supported_affinity = allocator->logical_device->queue_affinity_mask,
-      .physical_device_count = allocator->topology->gpu_agent_count,
-      .queue_count_per_physical_device =
-          allocator->topology->gpu_agent_queue_count,
-  };
-}
-
-static bool iree_hal_amdgpu_allocator_select_device_ordinal(
+static bool iree_hal_amdgpu_allocator_normalize_queue_family_affinity(
     const iree_hal_amdgpu_allocator_t* allocator,
-    iree_hal_queue_affinity_t queue_affinity,
-    iree_hal_queue_affinity_t* out_queue_affinity,
+    iree_hal_queue_family_affinity_t queue_family_affinity,
+    iree_hal_queue_family_affinity_t* out_queue_family_affinity,
+    iree_hal_amdgpu_gpu_agent_mask_t* out_physical_device_mask,
     iree_host_size_t* out_device_ordinal) {
-  const iree_hal_amdgpu_queue_affinity_domain_t domain =
-      iree_hal_amdgpu_allocator_queue_affinity_domain(allocator);
-  iree_hal_amdgpu_queue_affinity_resolved_t resolved;
-  if (!iree_hal_amdgpu_queue_affinity_try_resolve(domain, queue_affinity,
-                                                  &resolved)) {
+  const iree_host_size_t family_count = allocator->topology->gpu_agent_count;
+  if (IREE_UNLIKELY(family_count == 0 ||
+                    family_count > IREE_HAL_MAX_QUEUE_FAMILIES)) {
     return false;
   }
-  if (out_queue_affinity) {
-    *out_queue_affinity = resolved.queue_affinity;
+  const iree_hal_queue_family_affinity_t supported_affinity =
+      family_count == IREE_HAL_MAX_QUEUE_FAMILIES
+          ? IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY
+          : (((iree_hal_queue_family_affinity_t)1 << family_count) - 1);
+  if (iree_hal_queue_family_affinity_is_any(queue_family_affinity)) {
+    queue_family_affinity = supported_affinity;
   }
-  *out_device_ordinal = resolved.physical_device_ordinal;
+  if (IREE_UNLIKELY(
+          iree_hal_queue_family_affinity_is_empty(queue_family_affinity) ||
+          !iree_all_bits_set(supported_affinity, queue_family_affinity))) {
+    return false;
+  }
+  if (out_queue_family_affinity) {
+    *out_queue_family_affinity = queue_family_affinity;
+  }
+  if (out_physical_device_mask) {
+    *out_physical_device_mask =
+        (iree_hal_amdgpu_gpu_agent_mask_t)queue_family_affinity;
+  }
+  *out_device_ordinal =
+      iree_math_count_trailing_zeros_u64(queue_family_affinity);
   return true;
 }
 
 static iree_status_t iree_hal_amdgpu_allocator_resolve_access_agents(
     const iree_hal_amdgpu_allocator_t* allocator,
-    iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_queue_family_affinity_t queue_family_affinity,
     iree_hal_amdgpu_access_agent_list_t* out_agent_list) {
   return iree_hal_amdgpu_access_agent_list_resolve_memory_agents(
-      allocator->topology,
-      iree_hal_amdgpu_allocator_queue_affinity_domain(allocator),
-      queue_affinity, out_agent_list);
+      allocator->topology, queue_family_affinity, out_agent_list);
 }
 
 static bool iree_hal_amdgpu_allocator_find_gpu_agent_ordinal(
@@ -631,16 +633,15 @@ static bool iree_hal_amdgpu_allocator_resolve_placement(
     iree_hal_amdgpu_allocator_placement_t* out_placement) {
   memset(out_placement, 0, sizeof(*out_placement));
 
-  const iree_hal_amdgpu_queue_affinity_domain_t affinity_domain =
-      iree_hal_amdgpu_allocator_queue_affinity_domain(allocator);
-  iree_hal_amdgpu_queue_affinity_physical_device_set_t physical_device_set;
-  if (!iree_hal_amdgpu_queue_affinity_try_select_physical_devices(
-          affinity_domain, params->queue_affinity, &physical_device_set)) {
+  iree_hal_queue_family_affinity_t queue_family_affinity = 0;
+  iree_hal_amdgpu_gpu_agent_mask_t physical_device_mask = 0;
+  iree_host_size_t device_ordinal = 0;
+  if (!iree_hal_amdgpu_allocator_normalize_queue_family_affinity(
+          allocator, params->queue_family_affinity, &queue_family_affinity,
+          &physical_device_mask, &device_ordinal)) {
     return false;
   }
-  params->queue_affinity = physical_device_set.queue_affinity;
-  const iree_host_size_t device_ordinal =
-      physical_device_set.first_physical_device_ordinal;
+  params->queue_family_affinity = queue_family_affinity;
 
   const iree_hal_memory_type_t requested_type = params->type;
   const iree_hal_memory_type_t required_type =
@@ -756,14 +757,12 @@ static bool iree_hal_amdgpu_allocator_resolve_placement(
   params->type = memory_type;
   params->usage &= supported_usage;
   out_placement->memory_pool = memory_pool;
-  out_placement->physical_device_mask =
-      physical_device_set.physical_device_mask;
+  out_placement->physical_device_mask = physical_device_mask;
   out_placement->physical_device_ordinal = (uint32_t)device_ordinal;
   out_placement->memory_type = memory_type;
   out_placement->atomic_memory_cells =
       iree_hal_amdgpu_atomic_memory_select_device_cells(
-          &memory_pool->atomic_memory_source_masks,
-          physical_device_set.physical_device_mask);
+          &memory_pool->atomic_memory_source_masks, physical_device_mask);
   return true;
 }
 
@@ -786,13 +785,13 @@ static iree_status_t iree_hal_amdgpu_allocator_require_virtual_memory(
 }
 
 static iree_hal_buffer_params_t iree_hal_amdgpu_allocator_virtual_buffer_params(
-    iree_hal_queue_affinity_t queue_affinity) {
+    iree_hal_queue_family_affinity_t queue_family_affinity) {
   return (iree_hal_buffer_params_t){
       .type = IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_DEVICE |
               IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
       .access = IREE_HAL_MEMORY_ACCESS_ALL,
       .usage = IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_DISPATCH,
-      .queue_affinity = queue_affinity,
+      .queue_family_affinity = queue_family_affinity,
   };
 }
 
@@ -842,7 +841,7 @@ static iree_status_t iree_hal_amdgpu_allocator_resolve_virtual_memory_placement(
   *out_placement = (iree_hal_amdgpu_virtual_memory_placement_t){
       .memory_pool = memory_placement.memory_pool->memory_pool,
       .device = (iree_hal_device_t*)allocator->logical_device,
-      .queue_affinity = params->queue_affinity,
+      .queue_family_affinity = params->queue_family_affinity,
       .memory_type = memory_placement.memory_type,
       .buffer_usage = params->usage,
       .atomic_memory_cells = memory_placement.atomic_memory_cells,
@@ -1300,9 +1299,10 @@ static void iree_hal_amdgpu_allocator_record_buffer_import(
 
   uint32_t physical_device_ordinal = UINT32_MAX;
   iree_host_size_t selected_device_ordinal = 0;
-  if (iree_hal_amdgpu_allocator_select_device_ordinal(
-          allocator, params.queue_affinity, /*out_queue_affinity=*/NULL,
-          &selected_device_ordinal)) {
+  if (iree_hal_amdgpu_allocator_normalize_queue_family_affinity(
+          allocator, params.queue_family_affinity,
+          /*out_queue_family_affinity=*/NULL,
+          /*out_physical_device_mask=*/NULL, &selected_device_ordinal)) {
     physical_device_ordinal = (uint32_t)selected_device_ordinal;
   }
 
@@ -1395,7 +1395,6 @@ static bool iree_hal_amdgpu_allocator_should_publish_asan_allocation(
 static iree_status_t iree_hal_amdgpu_allocator_allocate_asan_pool_buffer(
     iree_hal_amdgpu_allocator_t* allocator,
     const iree_hal_amdgpu_allocator_placement_t* memory_placement,
-    iree_hal_queue_affinity_t requested_queue_affinity,
     iree_hal_buffer_params_t params, iree_device_size_t byte_length,
     iree_hal_buffer_t** out_buffer) {
   IREE_ASSERT_ARGUMENT(out_buffer);
@@ -1419,30 +1418,6 @@ static iree_status_t iree_hal_amdgpu_allocator_allocate_asan_pool_buffer(
         IREE_STATUS_FAILED_PRECONDITION,
         "AMDGPU ASAN persistent allocation requires assigned default pools");
   }
-
-  const iree_hal_amdgpu_queue_affinity_domain_t domain =
-      iree_hal_amdgpu_allocator_queue_affinity_domain(allocator);
-  iree_hal_queue_affinity_t pool_queue_affinity = 0;
-  if (iree_hal_queue_affinity_is_any(requested_queue_affinity)) {
-    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_queue_affinity_for_physical_device(
-        domain, memory_placement->physical_device_ordinal,
-        &pool_queue_affinity));
-    iree_hal_queue_affinity_and_into(pool_queue_affinity,
-                                     domain.supported_affinity);
-  } else if (iree_hal_amdgpu_queue_affinity_is_physical_device_local(
-                 domain, requested_queue_affinity,
-                 memory_placement->physical_device_ordinal)) {
-    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_queue_affinity_normalize(
-        domain.supported_affinity, requested_queue_affinity,
-        &pool_queue_affinity));
-  } else {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "AMDGPU ASAN pool allocation queue affinity 0x%016" PRIx64
-        " spans queues outside physical device %" PRIu32,
-        requested_queue_affinity, memory_placement->physical_device_ordinal);
-  }
-  params.queue_affinity = pool_queue_affinity;
 
   const iree_device_size_t pool_allocation_size =
       byte_length == 0 ? 4 : byte_length;
@@ -1494,8 +1469,6 @@ static iree_status_t iree_hal_amdgpu_allocator_allocate_buffer(
 
   // Coerce options into those required by the current device.
   iree_hal_buffer_params_t compat_params = *params;
-  const iree_hal_queue_affinity_t requested_queue_affinity =
-      params->queue_affinity;
   iree_hal_amdgpu_allocator_placement_t memory_placement;
   if (!iree_hal_amdgpu_allocator_resolve_placement(
           allocator, &compat_params, /*allow_vmm_host_access=*/false,
@@ -1544,8 +1517,7 @@ static iree_status_t iree_hal_amdgpu_allocator_allocate_buffer(
   if (iree_hal_amdgpu_allocator_should_use_asan_pool(allocator,
                                                      &memory_placement)) {
     iree_status_t status = iree_hal_amdgpu_allocator_allocate_asan_pool_buffer(
-        allocator, &memory_placement, requested_queue_affinity, compat_params,
-        byte_length, out_buffer);
+        allocator, &memory_placement, compat_params, byte_length, out_buffer);
     if (iree_status_is_ok(status)) {
       IREE_STATISTICS(iree_hal_allocator_statistics_record_alloc(
           &allocator->statistics, iree_hal_buffer_memory_type(*out_buffer),
@@ -1590,7 +1562,7 @@ static iree_status_t iree_hal_amdgpu_allocator_allocate_buffer(
   // but never expands to all ROCR-visible platform agents.
   if (iree_status_is_ok(status)) {
     status = iree_hal_amdgpu_allocator_resolve_access_agents(
-        allocator, compat_params.queue_affinity, &access_agents);
+        allocator, compat_params.queue_family_affinity, &access_agents);
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_amdgpu_access_allow_agent_list(allocator->libhsa,
@@ -1628,9 +1600,7 @@ static iree_status_t iree_hal_amdgpu_allocator_allocate_buffer(
   if (iree_status_is_ok(status)) {
     const iree_hal_buffer_placement_t buffer_placement = {
         .device = (iree_hal_device_t*)allocator->logical_device,
-        .queue_affinity = compat_params.queue_affinity
-                              ? compat_params.queue_affinity
-                              : IREE_HAL_QUEUE_AFFINITY_ANY,
+        .queue_family_affinity = compat_params.queue_family_affinity,
         .flags = IREE_HAL_BUFFER_PLACEMENT_FLAG_NONE,
     };
     iree_hal_buffer_release_callback_t release_callback =
@@ -1825,7 +1795,7 @@ static iree_status_t iree_hal_amdgpu_allocator_import_device_allocation(
 
   iree_hal_amdgpu_access_agent_list_t access_agents;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_allocator_resolve_access_agents(
-      allocator, compat_params.queue_affinity, &access_agents));
+      allocator, compat_params.queue_family_affinity, &access_agents));
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_access_allow_agent_list(
       allocator->libhsa, &access_agents, pointer_range.agent_base));
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_asan_state_publish_imported_range(
@@ -1853,9 +1823,7 @@ static iree_status_t iree_hal_amdgpu_allocator_import_device_allocation(
   };
   const iree_hal_buffer_placement_t placement = {
       .device = (iree_hal_device_t*)allocator->logical_device,
-      .queue_affinity = compat_params.queue_affinity
-                            ? compat_params.queue_affinity
-                            : IREE_HAL_QUEUE_AFFINITY_ANY,
+      .queue_family_affinity = compat_params.queue_family_affinity,
       .flags = IREE_HAL_BUFFER_PLACEMENT_FLAG_NONE,
   };
   const iree_hal_amdgpu_atomic_memory_cell_flags_t atomic_memory_cells =
@@ -1981,7 +1949,7 @@ static iree_status_t iree_hal_amdgpu_allocator_import_buffer(
   void* agent_ptr = NULL;
   iree_hal_amdgpu_access_agent_list_t access_agents;
   iree_status_t status = iree_hal_amdgpu_allocator_resolve_access_agents(
-      allocator, compat_params.queue_affinity, &access_agents);
+      allocator, compat_params.queue_family_affinity, &access_agents);
   if (iree_status_is_ok(status)) {
     status = iree_hal_amdgpu_access_lock_host_allocation_to_pool(
         allocator->libhsa, &access_agents,
@@ -2020,9 +1988,7 @@ static iree_status_t iree_hal_amdgpu_allocator_import_buffer(
     };
     const iree_hal_buffer_placement_t placement = {
         .device = (iree_hal_device_t*)allocator->logical_device,
-        .queue_affinity = compat_params.queue_affinity
-                              ? compat_params.queue_affinity
-                              : IREE_HAL_QUEUE_AFFINITY_ANY,
+        .queue_family_affinity = compat_params.queue_family_affinity,
         .flags = IREE_HAL_BUFFER_PLACEMENT_FLAG_NONE,
     };
     status = iree_hal_amdgpu_buffer_create(
@@ -2153,14 +2119,15 @@ static iree_status_t iree_hal_amdgpu_allocator_virtual_memory_query_granularity(
 
 static iree_status_t iree_hal_amdgpu_allocator_virtual_memory_reserve(
     iree_hal_allocator_t* IREE_RESTRICT base_allocator,
-    iree_hal_queue_affinity_t queue_affinity, iree_device_size_t size,
+    iree_hal_queue_family_affinity_t queue_family_affinity,
+    iree_device_size_t size,
     iree_hal_buffer_t** IREE_RESTRICT out_virtual_buffer) {
   IREE_ASSERT_ARGUMENT(out_virtual_buffer);
   *out_virtual_buffer = NULL;
   iree_hal_amdgpu_allocator_t* allocator =
       iree_hal_amdgpu_allocator_cast(base_allocator);
   iree_hal_buffer_params_t params =
-      iree_hal_amdgpu_allocator_virtual_buffer_params(queue_affinity);
+      iree_hal_amdgpu_allocator_virtual_buffer_params(queue_family_affinity);
   iree_hal_amdgpu_virtual_memory_placement_t placement;
   IREE_RETURN_IF_ERROR(
       iree_hal_amdgpu_allocator_resolve_virtual_memory_placement(
@@ -2240,7 +2207,7 @@ static iree_status_t iree_hal_amdgpu_allocator_virtual_memory_protect(
     iree_hal_allocator_t* IREE_RESTRICT base_allocator,
     iree_hal_buffer_t* IREE_RESTRICT virtual_buffer,
     iree_device_size_t virtual_offset, iree_device_size_t size,
-    iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_queue_family_affinity_t queue_family_affinity,
     iree_hal_memory_protection_t protection) {
   iree_hal_amdgpu_allocator_t* allocator =
       iree_hal_amdgpu_allocator_cast(base_allocator);
@@ -2248,21 +2215,22 @@ static iree_status_t iree_hal_amdgpu_allocator_virtual_memory_protect(
       iree_hal_amdgpu_allocator_require_virtual_memory(allocator));
   return iree_hal_amdgpu_virtual_memory_protect(
       allocator->virtual_memory, virtual_buffer, virtual_offset, size,
-      queue_affinity, protection);
+      queue_family_affinity, protection);
 }
 
 static iree_status_t iree_hal_amdgpu_allocator_virtual_memory_advise(
     iree_hal_allocator_t* IREE_RESTRICT base_allocator,
     iree_hal_buffer_t* IREE_RESTRICT virtual_buffer,
     iree_device_size_t virtual_offset, iree_device_size_t size,
-    iree_hal_queue_affinity_t queue_affinity, iree_hal_memory_advice_t advice) {
+    iree_hal_queue_family_affinity_t queue_family_affinity,
+    iree_hal_memory_advice_t advice) {
   iree_hal_amdgpu_allocator_t* allocator =
       iree_hal_amdgpu_allocator_cast(base_allocator);
   IREE_RETURN_IF_ERROR(
       iree_hal_amdgpu_allocator_require_virtual_memory(allocator));
-  return iree_hal_amdgpu_virtual_memory_advise(allocator->virtual_memory,
-                                               virtual_buffer, virtual_offset,
-                                               size, queue_affinity, advice);
+  return iree_hal_amdgpu_virtual_memory_advise(
+      allocator->virtual_memory, virtual_buffer, virtual_offset, size,
+      queue_family_affinity, advice);
 }
 
 static const iree_hal_allocator_vtable_t iree_hal_amdgpu_allocator_vtable = {

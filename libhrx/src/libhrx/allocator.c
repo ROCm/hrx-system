@@ -35,7 +35,8 @@ hrx_status_t hrx_allocator_allocate_buffer(hrx_allocator_t allocator,
       .usage = (iree_hal_buffer_usage_t)params.usage,
       .access = (iree_hal_memory_access_t)params.access,
       .type = (iree_hal_memory_type_t)params.type,
-      .queue_affinity = (iree_hal_queue_affinity_t)params.queue_affinity,
+      .queue_family_affinity =
+          (iree_hal_queue_family_affinity_t)params.queue_affinity,
   };
 
   iree_hal_buffer_t* hal_buffer = NULL;
@@ -81,7 +82,8 @@ hrx_status_t hrx_allocator_import_buffer(hrx_allocator_t allocator,
       .usage = (iree_hal_buffer_usage_t)params.usage,
       .access = (iree_hal_memory_access_t)params.access,
       .type = (iree_hal_memory_type_t)params.type,
-      .queue_affinity = (iree_hal_queue_affinity_t)params.queue_affinity,
+      .queue_family_affinity =
+          (iree_hal_queue_family_affinity_t)params.queue_affinity,
   };
 
   iree_hal_external_buffer_t ext = {
@@ -173,7 +175,7 @@ hrx_status_t hrx_allocator_virtual_memory_reserve(
 
   iree_hal_buffer_t* hal_buffer = NULL;
   iree_status_t status = iree_hal_allocator_virtual_memory_reserve(
-      allocator->hal_allocator, (iree_hal_queue_affinity_t)affinity,
+      allocator->hal_allocator, (iree_hal_queue_family_affinity_t)affinity,
       (iree_device_size_t)size, &hal_buffer);
   if (!iree_status_is_ok(status)) {
     HRX_RETURN_AND_END_ZONE(z0, hrx_status_from_iree(status));
@@ -283,6 +285,6 @@ hrx_status_t hrx_allocator_virtual_memory_protect(
   return hrx_status_from_iree(iree_hal_allocator_virtual_memory_protect(
       allocator->hal_allocator, virtual_buffer->hal_buffer,
       (iree_device_size_t)virtual_offset, (iree_device_size_t)size,
-      /*queue_affinity=*/IREE_HAL_QUEUE_AFFINITY_ANY,
+      /*queue_family_affinity=*/IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
       (iree_hal_memory_protection_t)protection));
 }

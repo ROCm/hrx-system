@@ -1024,7 +1024,7 @@ iree_status_t iree_hal_webgpu_queue_alloca(
   // the async wait callback.
   iree_hal_buffer_placement_t placement = {
       .device = NULL,
-      .queue_affinity = compat_params.queue_affinity,
+      .queue_family_affinity = compat_params.queue_family_affinity,
       .flags = IREE_HAL_BUFFER_PLACEMENT_FLAG_NONE,
   };
   iree_hal_buffer_t* buffer = NULL;

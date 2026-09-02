@@ -242,7 +242,7 @@ iree_status_t iree_hal_amdgpu_host_queue_prepare_alloca_wrapper(
 
   iree_hal_buffer_placement_t placement = {
       .device = queue->logical_device,
-      .queue_affinity = queue->queue_affinity,
+      .queue_family_affinity = params->queue_family_affinity,
       .flags = IREE_HAL_BUFFER_PLACEMENT_FLAG_ASYNCHRONOUS,
   };
   if (iree_all_bits_set(flags, IREE_HAL_ALLOCA_FLAG_INDETERMINATE_LIFETIME)) {

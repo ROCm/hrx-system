@@ -61,7 +61,7 @@ void iree_hal_replay_recorder_allocator_make_allocate_buffer_payload(
     iree_hal_replay_allocator_allocate_buffer_payload_t* out_payload) {
   memset(out_payload, 0, sizeof(*out_payload));
   out_payload->allocation_size = allocation_size;
-  out_payload->queue_affinity = params->queue_affinity;
+  out_payload->queue_family_affinity = params->queue_family_affinity;
   out_payload->min_alignment = params->min_alignment;
   out_payload->usage = params->usage;
   out_payload->type = params->type;
@@ -366,7 +366,8 @@ iree_hal_replay_recorder_allocator_virtual_memory_query_granularity(
 
 static iree_status_t iree_hal_replay_recorder_allocator_virtual_memory_reserve(
     iree_hal_allocator_t* IREE_RESTRICT base_allocator,
-    iree_hal_queue_affinity_t queue_affinity, iree_device_size_t size,
+    iree_hal_queue_family_affinity_t queue_family_affinity,
+    iree_device_size_t size,
     iree_hal_buffer_t** IREE_RESTRICT out_virtual_buffer) {
   iree_hal_replay_recorder_allocator_t* allocator =
       iree_hal_replay_recorder_allocator_cast(base_allocator);
@@ -385,7 +386,7 @@ static iree_status_t iree_hal_replay_recorder_allocator_virtual_memory_reserve(
   iree_hal_buffer_t* base_buffer = NULL;
   iree_hal_buffer_t* replay_buffer = NULL;
   iree_status_t status = iree_hal_allocator_virtual_memory_reserve(
-      allocator->base_allocator, queue_affinity, size, &base_buffer);
+      allocator->base_allocator, queue_family_affinity, size, &base_buffer);
   if (iree_status_is_ok(status)) {
     status = iree_hal_replay_recorder_buffer_create_proxy(
         allocator->recorder, allocator->device_id, buffer_id,
@@ -510,7 +511,7 @@ static iree_status_t iree_hal_replay_recorder_allocator_virtual_memory_protect(
     iree_hal_allocator_t* IREE_RESTRICT base_allocator,
     iree_hal_buffer_t* IREE_RESTRICT virtual_buffer,
     iree_device_size_t virtual_offset, iree_device_size_t size,
-    iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_queue_family_affinity_t queue_family_affinity,
     iree_hal_memory_protection_t protection) {
   iree_hal_replay_recorder_allocator_t* allocator =
       iree_hal_replay_recorder_allocator_cast(base_allocator);
@@ -524,14 +525,15 @@ static iree_status_t iree_hal_replay_recorder_allocator_virtual_memory_protect(
       iree_hal_allocator_virtual_memory_protect(
           allocator->base_allocator,
           iree_hal_replay_recorder_buffer_base_or_self(virtual_buffer),
-          virtual_offset, size, queue_affinity, protection));
+          virtual_offset, size, queue_family_affinity, protection));
 }
 
 static iree_status_t iree_hal_replay_recorder_allocator_virtual_memory_advise(
     iree_hal_allocator_t* IREE_RESTRICT base_allocator,
     iree_hal_buffer_t* IREE_RESTRICT virtual_buffer,
     iree_device_size_t virtual_offset, iree_device_size_t size,
-    iree_hal_queue_affinity_t queue_affinity, iree_hal_memory_advice_t advice) {
+    iree_hal_queue_family_affinity_t queue_family_affinity,
+    iree_hal_memory_advice_t advice) {
   iree_hal_replay_recorder_allocator_t* allocator =
       iree_hal_replay_recorder_allocator_cast(base_allocator);
   iree_hal_replay_pending_record_t pending_record;
@@ -544,7 +546,7 @@ static iree_status_t iree_hal_replay_recorder_allocator_virtual_memory_advise(
       iree_hal_allocator_virtual_memory_advise(
           allocator->base_allocator,
           iree_hal_replay_recorder_buffer_base_or_self(virtual_buffer),
-          virtual_offset, size, queue_affinity, advice));
+          virtual_offset, size, queue_family_affinity, advice));
 }
 
 iree_status_t iree_hal_replay_recorder_wrap_allocator(

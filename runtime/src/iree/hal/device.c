@@ -299,14 +299,15 @@ IREE_API_EXPORT iree_status_t iree_hal_device_queue_dealloca(
   IREE_ASSERT_ARGUMENT(buffer);
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  // If the buffer has an origin then use it for the deallocation. Some buffers
-  // may not have an origin and we'll use the provided device.
+  // If the buffer has an origin then use it for the deallocation. Allocation
+  // placement describes queue-family accessibility and cannot select an exact
+  // execution queue, so the caller-provided queue affinity remains in effect.
+  // Some buffers may not have an origin and we'll use the provided device.
   const iree_hal_buffer_placement_t placement =
       iree_hal_buffer_allocation_placement(buffer);
   if (iree_all_bits_set(flags, IREE_HAL_DEALLOCA_FLAG_PREFER_ORIGIN) &&
       placement.device != NULL) {
     device = placement.device;
-    queue_affinity = placement.queue_affinity;
   }
 
   // If the buffer was not allocated asynchronously then this is just a barrier.

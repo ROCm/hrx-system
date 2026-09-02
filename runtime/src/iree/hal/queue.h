@@ -25,6 +25,38 @@ extern "C" {
 // Queue family ordinals are stable for the lifetime of a device.
 typedef uint32_t iree_hal_queue_family_ordinal_t;
 
+// A bitmap selecting queue families by their canonical ordinals.
+//
+// Queue family affinity describes which families may access a resource. It is
+// stable for the lifetime of a device and may be serialized or remoted. It does
+// not select an exact queue, establish execution ordering, or imply host
+// visibility.
+typedef uint64_t iree_hal_queue_family_affinity_t;
+
+// Specifies that every queue family may access the resource.
+#define IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY \
+  ((iree_hal_queue_family_affinity_t)(-1))
+
+// Maximum number of queue families addressable by a family affinity mask.
+#define IREE_HAL_MAX_QUEUE_FAMILIES \
+  (sizeof(iree_hal_queue_family_affinity_t) * 8)
+
+// Returns true if |queue_family_affinity| selects no queue families.
+#define iree_hal_queue_family_affinity_is_empty(queue_family_affinity) \
+  ((queue_family_affinity) == 0)
+
+// Returns true if |queue_family_affinity| selects every queue family.
+#define iree_hal_queue_family_affinity_is_any(queue_family_affinity) \
+  ((queue_family_affinity) == IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY)
+
+// Returns the affinity bit for |queue_family_ordinal|.
+// Requires |queue_family_ordinal| to be less than IREE_HAL_MAX_QUEUE_FAMILIES.
+static inline iree_hal_queue_family_affinity_t
+iree_hal_make_queue_family_affinity(
+    iree_hal_queue_family_ordinal_t queue_family_ordinal) {
+  return ((iree_hal_queue_family_affinity_t)1) << queue_family_ordinal;
+}
+
 // A queue family owned by a HAL device.
 //
 // Queue family pointers are immutable, pointer-unique identities within a
@@ -41,10 +73,9 @@ typedef struct iree_hal_queue_family_t iree_hal_queue_family_t;
 typedef struct iree_hal_queue_t iree_hal_queue_t;
 
 // A bitmap indicating logical device queue affinity.
-// Used to direct submissions to specific device queues or locate memory nearby
-// where it will be used. The meaning of the bits in the bitmap is
-// implementation-specific: a bit may represent a logical queue in an underlying
-// API such as a VkQueue or a physical queue such as a discrete virtual device.
+// Used to direct submissions to implementation-defined device queues. A bit may
+// represent a logical queue in an underlying API such as a VkQueue or a
+// physical queue such as a discrete virtual device.
 //
 // Bitwise operations can be performed on affinities; for example AND'ing two
 // affinities will produce the intersection and OR'ing will produce the union.

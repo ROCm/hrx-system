@@ -256,7 +256,7 @@ iree_hal_buffer_params_t loom_run_hal_testbench_host_visible_buffer_params(
       .access = IREE_HAL_MEMORY_ACCESS_ALL,
       .type =
           IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
-      .queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY,
+      .queue_family_affinity = IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
       .min_alignment = 0,
   };
 }

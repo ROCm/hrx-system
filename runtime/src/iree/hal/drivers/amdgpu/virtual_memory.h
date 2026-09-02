@@ -30,8 +30,8 @@ typedef struct iree_hal_amdgpu_virtual_memory_placement_t {
   // HAL device that owns virtual-buffer placement metadata.
   iree_hal_device_t* device;
 
-  // HAL queues permitted to access the virtual address range.
-  iree_hal_queue_affinity_t queue_affinity;
+  // HAL queue families permitted to access the virtual address range.
+  iree_hal_queue_family_affinity_t queue_family_affinity;
 
   // HAL memory type exposed by the virtual buffer and physical allocation.
   iree_hal_memory_type_t memory_type;
@@ -39,7 +39,8 @@ typedef struct iree_hal_amdgpu_virtual_memory_placement_t {
   // HAL buffer usage exposed by the virtual buffer.
   iree_hal_buffer_usage_t buffer_usage;
 
-  // Atomic memory cells supported by every queue in |queue_affinity|.
+  // Atomic memory cells supported by every family in
+  // |queue_family_affinity|.
   iree_hal_amdgpu_atomic_memory_cell_flags_t atomic_memory_cells;
 
   // Unowned source GPU masks for allocations from |memory_pool|.
@@ -109,14 +110,16 @@ iree_status_t iree_hal_amdgpu_virtual_memory_unmap(
 iree_status_t iree_hal_amdgpu_virtual_memory_protect(
     iree_hal_amdgpu_virtual_memory_state_t* state,
     iree_hal_buffer_t* virtual_buffer, iree_device_size_t virtual_offset,
-    iree_device_size_t size, iree_hal_queue_affinity_t queue_affinity,
+    iree_device_size_t size,
+    iree_hal_queue_family_affinity_t queue_family_affinity,
     iree_hal_memory_protection_t protection);
 
 // Validates an advisory virtual-address range and otherwise performs no work.
 iree_status_t iree_hal_amdgpu_virtual_memory_advise(
     iree_hal_amdgpu_virtual_memory_state_t* state,
     iree_hal_buffer_t* virtual_buffer, iree_device_size_t virtual_offset,
-    iree_device_size_t size, iree_hal_queue_affinity_t queue_affinity,
+    iree_device_size_t size,
+    iree_hal_queue_family_affinity_t queue_family_affinity,
     iree_hal_memory_advice_t advice);
 
 #ifdef __cplusplus

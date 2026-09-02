@@ -23,13 +23,11 @@ extern "C" {
 typedef struct iree_hal_vulkan_allocator_t iree_hal_vulkan_allocator_t;
 typedef struct iree_hal_vulkan_queue_t iree_hal_vulkan_queue_t;
 
-// Maps one HAL queue affinity bit to its Vulkan queue family.
+// Maps one canonical HAL queue family ordinal to its Vulkan queue family.
+// Array position is the HAL queue family ordinal.
 typedef struct iree_hal_vulkan_allocator_queue_family_t {
-  // HAL queue affinity bit selecting this family.
-  iree_hal_queue_affinity_t queue_affinity;
-
-  // Vulkan queue family index used by the selected queue.
-  uint32_t family_index;
+  // Native Vulkan queue family index backing the HAL queue family.
+  uint32_t native_family_index;
 } iree_hal_vulkan_allocator_queue_family_t;
 
 typedef enum iree_hal_vulkan_queue_alloca_strategy_e {

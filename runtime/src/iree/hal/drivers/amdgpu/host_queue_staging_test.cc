@@ -160,23 +160,15 @@ class HostQueueStagingTest : public ::testing::Test {
                                 "test device has no physical devices");
       }
 
-      iree_hal_queue_affinity_t queue_affinity_mask = 0;
-      const iree_hal_amdgpu_queue_affinity_domain_t domain = {
-          /*.supported_affinity=*/logical_device->queue_affinity_mask,
-          /*.physical_device_count=*/logical_device->physical_device_count,
-          /*.queue_count_per_physical_device=*/
-          physical_device->host_queue_capacity,
-      };
-      IREE_RETURN_IF_ERROR(iree_hal_amdgpu_queue_affinity_for_physical_device(
-          domain, physical_device->device_ordinal, &queue_affinity_mask));
-
       iree_hal_amdgpu_staging_pool_deinitialize(
           &physical_device->file_staging_pool);
       return iree_hal_amdgpu_staging_pool_initialize(
           base_device_, &logical_device->system->libhsa,
           &logical_device->system->topology,
-          &physical_device->host_memory_pools, queue_affinity_mask, options,
-          host_allocator, &physical_device->file_staging_pool);
+          &physical_device->host_memory_pools,
+          iree_hal_make_queue_family_affinity(
+              (iree_hal_queue_family_ordinal_t)physical_device->device_ordinal),
+          options, host_allocator, &physical_device->file_staging_pool);
     }
 
     iree_hal_device_t* base_device() const { return base_device_; }
@@ -335,7 +327,7 @@ class HostQueueStagingTest : public ::testing::Test {
     params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER |
                    IREE_HAL_BUFFER_USAGE_STORAGE |
                    IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED;
-    params.queue_affinity = kQueueAffinity0;
+    params.queue_family_affinity = iree_hal_make_queue_family_affinity(0);
     params.min_alignment = 16;
     return iree_hal_device_queue_alloca(
         device, kQueueAffinity0, iree_hal_semaphore_list_empty(), signal_list,

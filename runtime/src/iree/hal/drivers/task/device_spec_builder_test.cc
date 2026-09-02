@@ -151,8 +151,7 @@ TEST(TaskDeviceSpecBuilderTest, CapturesCommonTaskFacts) {
       iree_hal_device_spec_queues(spec);
   ASSERT_NE(queues, nullptr);
   ASSERT_EQ(queues->family_count, 1);
-  EXPECT_EQ(queues->families[0].queue_count, 2);
-  EXPECT_EQ(queues->families[0].queue_affinity, 3u);
+  EXPECT_EQ(queues->families[0].provisioned_queue_count, 2);
   EXPECT_TRUE(iree_all_bits_set(queues->families[0].role_flags,
                                 IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_ATOMIC));
   EXPECT_EQ(queues->families[0].atomic_capabilities.operations.device_scope_32,

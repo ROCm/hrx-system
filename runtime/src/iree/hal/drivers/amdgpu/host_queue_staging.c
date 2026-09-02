@@ -119,15 +119,10 @@ iree_status_t iree_hal_amdgpu_staging_pool_options_verify(
 
 static iree_status_t iree_hal_amdgpu_staging_pool_resolve_access_agents(
     const iree_hal_amdgpu_topology_t* topology,
-    iree_hal_queue_affinity_t queue_affinity_mask,
+    iree_hal_queue_family_affinity_t queue_family_affinity,
     iree_hal_amdgpu_access_agent_list_t* out_agent_list) {
-  const iree_hal_amdgpu_queue_affinity_domain_t domain = {
-      .supported_affinity = queue_affinity_mask,
-      .physical_device_count = topology->gpu_agent_count,
-      .queue_count_per_physical_device = topology->gpu_agent_queue_count,
-  };
   return iree_hal_amdgpu_access_agent_list_resolve_memory_agents(
-      topology, domain, queue_affinity_mask, out_agent_list);
+      topology, queue_family_affinity, out_agent_list);
 }
 
 static void iree_hal_amdgpu_staging_allocation_release(
@@ -283,7 +278,7 @@ iree_status_t iree_hal_amdgpu_staging_pool_initialize(
     iree_hal_device_t* logical_device, const iree_hal_amdgpu_libhsa_t* libhsa,
     const iree_hal_amdgpu_topology_t* topology,
     const iree_hal_amdgpu_host_memory_pools_t* host_memory_pools,
-    iree_hal_queue_affinity_t queue_affinity_mask,
+    iree_hal_queue_family_affinity_t queue_family_affinity,
     const iree_hal_amdgpu_staging_pool_options_t* options,
     iree_allocator_t host_allocator, iree_hal_amdgpu_staging_pool_t* out_pool) {
   IREE_ASSERT_ARGUMENT(logical_device);
@@ -366,7 +361,7 @@ iree_status_t iree_hal_amdgpu_staging_pool_initialize(
   if (iree_status_is_ok(status)) {
     iree_hal_amdgpu_access_agent_list_t access_agents;
     status = iree_hal_amdgpu_staging_pool_resolve_access_agents(
-        topology, queue_affinity_mask, &access_agents);
+        topology, queue_family_affinity, &access_agents);
     if (iree_status_is_ok(status)) {
       status = iree_hal_amdgpu_access_allow_agent_list(libhsa, &access_agents,
                                                        allocation_base);
@@ -424,7 +419,7 @@ iree_status_t iree_hal_amdgpu_staging_pool_initialize(
   if (iree_status_is_ok(status)) {
     const iree_hal_buffer_placement_t placement = {
         .device = logical_device,
-        .queue_affinity = queue_affinity_mask,
+        .queue_family_affinity = queue_family_affinity,
         .flags = IREE_HAL_BUFFER_PLACEMENT_FLAG_NONE,
     };
     status = iree_hal_amdgpu_buffer_create(

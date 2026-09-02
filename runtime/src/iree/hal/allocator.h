@@ -477,8 +477,9 @@ iree_hal_allocator_virtual_memory_query_granularity(
 // memory.
 //
 // |size| must be aligned to at least the minimum page size from
-// iree_hal_allocator_virtual_memory_query_granularity. |queue_affinity|
-// specifies which device queues will access this address range.
+// iree_hal_allocator_virtual_memory_query_granularity.
+// |queue_family_affinity| specifies which queue families may access this
+// address range.
 //
 // The reserved range has no access permissions and cannot be accessed until
 // physical memory is mapped via iree_hal_allocator_virtual_memory_map and
@@ -491,7 +492,8 @@ iree_hal_allocator_virtual_memory_query_granularity(
 // Returns IREE_STATUS_UNAVAILABLE if virtual memory is not supported.
 IREE_API_EXPORT iree_status_t iree_hal_allocator_virtual_memory_reserve(
     iree_hal_allocator_t* IREE_RESTRICT allocator,
-    iree_hal_queue_affinity_t queue_affinity, iree_device_size_t size,
+    iree_hal_queue_family_affinity_t queue_family_affinity,
+    iree_device_size_t size,
     iree_hal_buffer_t** IREE_RESTRICT out_virtual_buffer);
 
 // Releases a virtual address reservation created by virtual_memory_reserve.
@@ -570,9 +572,9 @@ IREE_API_EXPORT iree_status_t iree_hal_allocator_virtual_memory_unmap(
 // Sets access permissions for a virtual address range.
 //
 // |virtual_buffer| is the reserved VA range. |virtual_offset| and |size|
-// specify the range (must be page aligned). |queue_affinity| specifies which
-// device queues get the specified permissions. |protection| is a bitmask of
-// iree_hal_memory_protection_bits_t flags.
+// specify the range (must be page aligned). |queue_family_affinity| specifies
+// which queue families get the specified permissions. |protection| is a
+// bitmask of iree_hal_memory_protection_bits_t flags.
 //
 // By default, reserved VA ranges have no access permissions. Callers must
 // explicitly grant permissions after mapping physical memory.
@@ -582,15 +584,15 @@ IREE_API_EXPORT iree_status_t iree_hal_allocator_virtual_memory_protect(
     iree_hal_allocator_t* IREE_RESTRICT allocator,
     iree_hal_buffer_t* IREE_RESTRICT virtual_buffer,
     iree_device_size_t virtual_offset, iree_device_size_t size,
-    iree_hal_queue_affinity_t queue_affinity,
+    iree_hal_queue_family_affinity_t queue_family_affinity,
     iree_hal_memory_protection_t protection);
 
 // Provides usage hints for a virtual address range to optimize performance.
 //
 // |virtual_buffer| is the reserved VA range. |virtual_offset| and |size|
-// specify the range (does not need to be page aligned). |queue_affinity|
-// specifies which devices the advice applies to. |advice| is a bitmask of
-// iree_hal_memory_advice_bits_t flags.
+// specify the range (does not need to be page aligned).
+// |queue_family_affinity| specifies which queue families the advice applies
+// to. |advice| is a bitmask of iree_hal_memory_advice_bits_t flags.
 //
 // Advice is advisory only - incorrect hints may reduce performance but will
 // not cause incorrect behavior. Unsupported hints are silently ignored. Host
@@ -602,7 +604,8 @@ IREE_API_EXPORT iree_status_t iree_hal_allocator_virtual_memory_advise(
     iree_hal_allocator_t* IREE_RESTRICT allocator,
     iree_hal_buffer_t* IREE_RESTRICT virtual_buffer,
     iree_device_size_t virtual_offset, iree_device_size_t size,
-    iree_hal_queue_affinity_t queue_affinity, iree_hal_memory_advice_t advice);
+    iree_hal_queue_family_affinity_t queue_family_affinity,
+    iree_hal_memory_advice_t advice);
 
 //===----------------------------------------------------------------------===//
 // iree_hal_heap_allocator_t
@@ -682,7 +685,8 @@ typedef struct iree_hal_allocator_vtable_t {
       iree_device_size_t* IREE_RESTRICT out_recommended_page_size);
   iree_status_t(IREE_API_PTR* virtual_memory_reserve)(
       iree_hal_allocator_t* IREE_RESTRICT allocator,
-      iree_hal_queue_affinity_t queue_affinity, iree_device_size_t size,
+      iree_hal_queue_family_affinity_t queue_family_affinity,
+      iree_device_size_t size,
       iree_hal_buffer_t** IREE_RESTRICT out_virtual_buffer);
   iree_status_t(IREE_API_PTR* virtual_memory_release)(
       iree_hal_allocator_t* IREE_RESTRICT allocator,
@@ -709,13 +713,13 @@ typedef struct iree_hal_allocator_vtable_t {
       iree_hal_allocator_t* IREE_RESTRICT allocator,
       iree_hal_buffer_t* IREE_RESTRICT virtual_buffer,
       iree_device_size_t virtual_offset, iree_device_size_t size,
-      iree_hal_queue_affinity_t queue_affinity,
+      iree_hal_queue_family_affinity_t queue_family_affinity,
       iree_hal_memory_protection_t protection);
   iree_status_t(IREE_API_PTR* virtual_memory_advise)(
       iree_hal_allocator_t* IREE_RESTRICT allocator,
       iree_hal_buffer_t* IREE_RESTRICT virtual_buffer,
       iree_device_size_t virtual_offset, iree_device_size_t size,
-      iree_hal_queue_affinity_t queue_affinity,
+      iree_hal_queue_family_affinity_t queue_family_affinity,
       iree_hal_memory_advice_t advice);
 } iree_hal_allocator_vtable_t;
 IREE_HAL_ASSERT_VTABLE_LAYOUT(iree_hal_allocator_vtable_t);

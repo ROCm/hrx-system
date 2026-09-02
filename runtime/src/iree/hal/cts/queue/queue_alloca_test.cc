@@ -32,6 +32,7 @@ iree_hal_buffer_params_t MakeQueueAllocaBufferParams() {
   params.type = IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_DEVICE;
   params.access = IREE_HAL_MEMORY_ACCESS_ALL;
   params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_STORAGE;
+  params.queue_family_affinity = IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY;
   return params;
 }
 
@@ -349,7 +350,6 @@ TEST_P(QueueAllocaTest, ExplicitFixedBlockPoolCrossQueueWaitFrontier) {
       allocation_size, iree_hal_pool_epoch_query_null(), pool.out()));
 
   iree_hal_buffer_params_t queue0_params = MakeQueueAllocaBufferParams();
-  queue0_params.queue_affinity = kQueueAffinity0;
   Ref<iree_hal_buffer_t> queue0_buffer;
   SemaphoreList empty_wait;
   SemaphoreList queue0_alloca_signal(device_, {0}, {1});
@@ -376,7 +376,6 @@ TEST_P(QueueAllocaTest, ExplicitFixedBlockPoolCrossQueueWaitFrontier) {
   EXPECT_EQ(stats.wait_count, 0u);
 
   iree_hal_buffer_params_t queue1_params = MakeQueueAllocaBufferParams();
-  queue1_params.queue_affinity = kQueueAffinity1;
   Ref<iree_hal_buffer_t> queue1_buffer;
   SemaphoreList queue1_alloca_signal(device_, {0}, {1});
   IREE_ASSERT_OK(iree_hal_device_queue_alloca(
@@ -427,7 +426,6 @@ TEST_P(QueueAllocaTest, ExplicitFixedBlockPoolPendingDeallocaWaitFrontier) {
       allocation_size, iree_hal_pool_epoch_query_null(), pool.out()));
 
   iree_hal_buffer_params_t queue0_params = MakeQueueAllocaBufferParams();
-  queue0_params.queue_affinity = kQueueAffinity0;
   Ref<iree_hal_buffer_t> queue0_buffer;
   SemaphoreList empty_wait;
   SemaphoreList queue0_alloca_signal(device_, {0}, {1});
@@ -446,7 +444,6 @@ TEST_P(QueueAllocaTest, ExplicitFixedBlockPoolPendingDeallocaWaitFrontier) {
       queue0_buffer.get(), IREE_HAL_DEALLOCA_FLAG_NONE));
 
   iree_hal_buffer_params_t queue1_params = MakeQueueAllocaBufferParams();
-  queue1_params.queue_affinity = kQueueAffinity1;
   Ref<iree_hal_buffer_t> queue1_buffer;
   SemaphoreList queue1_alloca_signal(device_, {0}, {1});
   IREE_ASSERT_OK(iree_hal_device_queue_alloca(
@@ -496,7 +493,6 @@ TEST_P(QueueAllocaTest, ExplicitFixedBlockPoolRequiresWaitFrontierFlag) {
       allocation_size, iree_hal_pool_epoch_query_null(), pool.out()));
 
   iree_hal_buffer_params_t queue0_params = MakeQueueAllocaBufferParams();
-  queue0_params.queue_affinity = kQueueAffinity0;
   Ref<iree_hal_buffer_t> queue0_buffer;
   SemaphoreList empty_wait;
   SemaphoreList queue0_alloca_signal(device_, {0}, {1});
@@ -519,7 +515,6 @@ TEST_P(QueueAllocaTest, ExplicitFixedBlockPoolRequiresWaitFrontierFlag) {
   queue0_buffer.reset();
 
   iree_hal_buffer_params_t queue1_params = MakeQueueAllocaBufferParams();
-  queue1_params.queue_affinity = kQueueAffinity1;
   iree_hal_buffer_t* queue1_buffer = nullptr;
   SemaphoreList queue1_alloca_signal(device_, {0}, {1});
   iree_status_t alloca_status = iree_hal_device_queue_alloca(
@@ -553,7 +548,6 @@ TEST_P(QueueAllocaTest, ExplicitTLSFPoolCrossQueueStaleBlockGrows) {
       allocation_size, iree_hal_pool_epoch_query_null(), pool.out()));
 
   iree_hal_buffer_params_t queue0_params = MakeQueueAllocaBufferParams();
-  queue0_params.queue_affinity = kQueueAffinity0;
   Ref<iree_hal_buffer_t> queue0_buffer;
   SemaphoreList empty_wait;
   SemaphoreList queue0_alloca_signal(device_, {0}, {1});
@@ -580,7 +574,6 @@ TEST_P(QueueAllocaTest, ExplicitTLSFPoolCrossQueueStaleBlockGrows) {
   EXPECT_EQ(stats.wait_count, 0u);
 
   iree_hal_buffer_params_t queue1_params = MakeQueueAllocaBufferParams();
-  queue1_params.queue_affinity = kQueueAffinity1;
   Ref<iree_hal_buffer_t> queue1_buffer;
   SemaphoreList queue1_alloca_signal(device_, {0}, {1});
   IREE_ASSERT_OK(iree_hal_device_queue_alloca(
@@ -818,9 +811,8 @@ TEST_P(QueueAllocaTest, BufferMetadata) {
   EXPECT_EQ(placement.device, device_);
   EXPECT_TRUE(iree_all_bits_set(placement.flags,
                                 IREE_HAL_BUFFER_PLACEMENT_FLAG_ASYNCHRONOUS));
-  EXPECT_FALSE(iree_hal_queue_affinity_is_empty(placement.queue_affinity));
-  EXPECT_EQ(iree_hal_queue_affinity_count(placement.queue_affinity), 1u);
-
+  EXPECT_FALSE(
+      iree_hal_queue_family_affinity_is_empty(placement.queue_family_affinity));
   // Wait for completion and clean up.
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(signal_semaphore_list,
                                               iree_infinite_timeout(),
@@ -1015,34 +1007,6 @@ TEST_P(QueueAllocaTest, DefaultPoolRepeatedChainedAllocaDealloca) {
 
     iree_hal_buffer_release(buffer);
   }
-}
-
-// Verifies PREFER_ORIGIN reroutes dealloca to the queue affinity recorded in
-// the buffer placement instead of requiring the caller to repeat that queue
-// affinity manually.
-TEST_P(QueueAllocaTest, DeallocaPrefersOriginPlacement) {
-  IREE_TRACE_SCOPE();
-
-  SemaphoreList alloca_signal(device_, {0}, {1});
-  SemaphoreList dealloca_signal(device_, {0}, {1});
-
-  iree_hal_buffer_params_t params = MakeQueueAllocaBufferParams();
-
-  SemaphoreList empty_wait;
-  iree_hal_buffer_t* buffer = NULL;
-  IREE_ASSERT_OK(iree_hal_device_queue_alloca(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, alloca_signal,
-      /*pool=*/NULL, params, /*allocation_size=*/1024,
-      IREE_HAL_ALLOCA_FLAG_NONE, &buffer));
-  ASSERT_NE(buffer, nullptr);
-
-  IREE_ASSERT_OK(iree_hal_device_queue_dealloca(
-      device_, /*queue_affinity=*/0, alloca_signal, dealloca_signal, buffer,
-      IREE_HAL_DEALLOCA_FLAG_PREFER_ORIGIN));
-  IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
-      dealloca_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
-
-  iree_hal_buffer_release(buffer);
 }
 
 // Allocates with zero access flags (as the HAL module does) and verifies the

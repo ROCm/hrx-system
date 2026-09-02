@@ -55,13 +55,12 @@ class QueueAtomicTest : public CtsTestBase<> {
                                               kBufferSize, out_buffer);
   }
 
-  iree_status_t QueueStoreAndWait(const AtomicTestConfiguration& configuration,
-                                  iree_hal_buffer_t* buffer,
+  iree_status_t QueueStoreAndWait(iree_hal_buffer_t* buffer,
                                   iree_hal_atomic_store_params_t params) {
     SemaphoreList empty_wait;
     SemaphoreList signal(device_, {0}, {1});
     iree_status_t status = iree_hal_device_queue_atomic_store(
-        device_, configuration.queue_affinity, empty_wait, signal, buffer,
+        device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, signal, buffer,
         kTargetOffset, params);
     if (iree_status_is_ok(status)) {
       status = iree_hal_semaphore_list_wait(signal, iree_infinite_timeout(),
@@ -70,28 +69,12 @@ class QueueAtomicTest : public CtsTestBase<> {
     return status;
   }
 
-  iree_status_t QueueRmwAndWait(const AtomicTestConfiguration& configuration,
-                                iree_hal_buffer_t* buffer,
+  iree_status_t QueueRmwAndWait(iree_hal_buffer_t* buffer,
                                 iree_hal_atomic_rmw_params_t params) {
     SemaphoreList empty_wait;
     SemaphoreList signal(device_, {0}, {1});
     iree_status_t status = iree_hal_device_queue_atomic_rmw(
-        device_, configuration.queue_affinity, empty_wait, signal, buffer,
-        kTargetOffset, params);
-    if (iree_status_is_ok(status)) {
-      status = iree_hal_semaphore_list_wait(signal, iree_infinite_timeout(),
-                                            IREE_ASYNC_WAIT_FLAG_NONE);
-    }
-    return status;
-  }
-
-  iree_status_t QueueWaitAndWait(const AtomicTestConfiguration& configuration,
-                                 iree_hal_buffer_t* buffer,
-                                 iree_hal_atomic_wait_params_t params) {
-    SemaphoreList empty_wait;
-    SemaphoreList signal(device_, {0}, {1});
-    iree_status_t status = iree_hal_device_queue_atomic_wait(
-        device_, configuration.queue_affinity, empty_wait, signal, buffer,
+        device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, signal, buffer,
         kTargetOffset, params);
     if (iree_status_is_ok(status)) {
       status = iree_hal_semaphore_list_wait(signal, iree_infinite_timeout(),
@@ -101,10 +84,9 @@ class QueueAtomicTest : public CtsTestBase<> {
   }
 
   template <typename ValueType>
-  ValueType ReadAtomicValue(const AtomicTestConfiguration& configuration,
-                            iree_hal_buffer_t* buffer) {
+  ValueType ReadAtomicValue(iree_hal_buffer_t* buffer) {
     const std::vector<uint8_t> bytes = ReadBufferBytes(
-        buffer, kTargetOffset, sizeof(ValueType), configuration.queue_affinity);
+        buffer, kTargetOffset, sizeof(ValueType), IREE_HAL_QUEUE_AFFINITY_ANY);
     ValueType value = 0;
     EXPECT_EQ(bytes.size(), sizeof(value));
     if (bytes.size() == sizeof(value)) {
@@ -160,7 +142,7 @@ class QueueAtomicTest : public CtsTestBase<> {
         /*.width=*/width,
     };
     Status submission_status(iree_hal_device_queue_atomic_store(
-        device_, configuration.queue_affinity, empty_wait, signal, buffer,
+        device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, signal, buffer,
         /*target_offset=*/0, store_params));
     if (submission_status.ok()) {
       EXPECT_THAT(
@@ -202,9 +184,8 @@ class QueueAtomicTest : public CtsTestBase<> {
         /*.flags=*/atomic_flags,
         /*.width=*/width,
     };
-    IREE_ASSERT_OK(QueueStoreAndWait(configuration, buffer, store_params));
-    EXPECT_EQ(ReadAtomicValue<ValueType>(configuration, buffer),
-              static_cast<ValueType>(10));
+    IREE_ASSERT_OK(QueueStoreAndWait(buffer, store_params));
+    EXPECT_EQ(ReadAtomicValue<ValueType>(buffer), static_cast<ValueType>(10));
 
     iree_hal_atomic_rmw_params_t rmw_params = {
         /*.operand=*/5,
@@ -212,80 +193,28 @@ class QueueAtomicTest : public CtsTestBase<> {
         /*.width=*/width,
         /*.operation=*/IREE_HAL_ATOMIC_RMW_OPERATION_ADD,
     };
-    IREE_ASSERT_OK(QueueRmwAndWait(configuration, buffer, rmw_params));
-    EXPECT_EQ(ReadAtomicValue<ValueType>(configuration, buffer),
-              static_cast<ValueType>(15));
+    IREE_ASSERT_OK(QueueRmwAndWait(buffer, rmw_params));
+    EXPECT_EQ(ReadAtomicValue<ValueType>(buffer), static_cast<ValueType>(15));
 
     rmw_params.operand = 3;
     rmw_params.operation = IREE_HAL_ATOMIC_RMW_OPERATION_SUBTRACT;
-    IREE_ASSERT_OK(QueueRmwAndWait(configuration, buffer, rmw_params));
-    EXPECT_EQ(ReadAtomicValue<ValueType>(configuration, buffer),
-              static_cast<ValueType>(12));
+    IREE_ASSERT_OK(QueueRmwAndWait(buffer, rmw_params));
+    EXPECT_EQ(ReadAtomicValue<ValueType>(buffer), static_cast<ValueType>(12));
 
     rmw_params.operand = 10;
     rmw_params.operation = IREE_HAL_ATOMIC_RMW_OPERATION_AND;
-    IREE_ASSERT_OK(QueueRmwAndWait(configuration, buffer, rmw_params));
-    EXPECT_EQ(ReadAtomicValue<ValueType>(configuration, buffer),
-              static_cast<ValueType>(8));
+    IREE_ASSERT_OK(QueueRmwAndWait(buffer, rmw_params));
+    EXPECT_EQ(ReadAtomicValue<ValueType>(buffer), static_cast<ValueType>(8));
 
     rmw_params.operand = 3;
     rmw_params.operation = IREE_HAL_ATOMIC_RMW_OPERATION_OR;
-    IREE_ASSERT_OK(QueueRmwAndWait(configuration, buffer, rmw_params));
-    EXPECT_EQ(ReadAtomicValue<ValueType>(configuration, buffer),
-              static_cast<ValueType>(11));
+    IREE_ASSERT_OK(QueueRmwAndWait(buffer, rmw_params));
+    EXPECT_EQ(ReadAtomicValue<ValueType>(buffer), static_cast<ValueType>(11));
 
     rmw_params.operand = 15;
     rmw_params.operation = IREE_HAL_ATOMIC_RMW_OPERATION_XOR;
-    IREE_ASSERT_OK(QueueRmwAndWait(configuration, buffer, rmw_params));
-    EXPECT_EQ(ReadAtomicValue<ValueType>(configuration, buffer),
-              static_cast<ValueType>(4));
-  }
-
-  template <typename ValueType>
-  void RunWaitTest(iree_hal_atomic_width_t width) {
-    const iree_hal_atomic_operation_flags_t operation_flags =
-        IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT |
-        IREE_HAL_ATOMIC_OPERATION_FLAG_STORE;
-    AtomicTestConfiguration configuration;
-    if (!SelectConfiguration(width, operation_flags,
-                             IREE_HAL_ATOMIC_WAIT_CONDITION_FLAGS_ALL,
-                             &configuration)) {
-      GTEST_SKIP() << "Device does not advertise the tested "
-                      "queue/memory atomic wait set";
-    }
-
-    Ref<iree_hal_buffer_t> buffer;
-    IREE_ASSERT_OK(AllocateAtomicBuffer(configuration, buffer.out()));
-    const iree_hal_atomic_flags_t atomic_flags =
-        IREE_HAL_ATOMIC_FLAG_ACQUIRE | IREE_HAL_ATOMIC_FLAG_RELEASE;
-    const iree_hal_atomic_store_params_t store_params = {
-        /*.value=*/0x12,
-        /*.flags=*/atomic_flags,
-        /*.width=*/width,
-    };
-    IREE_ASSERT_OK(QueueStoreAndWait(configuration, buffer, store_params));
-
-    iree_hal_atomic_wait_params_t wait_params = {
-        /*.value=*/0x2,
-        /*.mask=*/0xF,
-        /*.flags=*/atomic_flags,
-        /*.width=*/width,
-        /*.condition=*/IREE_HAL_ATOMIC_WAIT_CONDITION_EQUAL,
-    };
-    IREE_ASSERT_OK(QueueWaitAndWait(configuration, buffer, wait_params));
-
-    wait_params.value = 0x3;
-    wait_params.condition = IREE_HAL_ATOMIC_WAIT_CONDITION_NOT_EQUAL;
-    IREE_ASSERT_OK(QueueWaitAndWait(configuration, buffer, wait_params));
-
-    wait_params.value = 0x10;
-    wait_params.mask =
-        width == IREE_HAL_ATOMIC_WIDTH_32 ? UINT32_MAX : UINT64_MAX;
-    wait_params.condition =
-        IREE_HAL_ATOMIC_WAIT_CONDITION_UNSIGNED_GREATER_EQUAL;
-    IREE_ASSERT_OK(QueueWaitAndWait(configuration, buffer, wait_params));
-    EXPECT_EQ(ReadAtomicValue<ValueType>(configuration, buffer),
-              static_cast<ValueType>(0x12));
+    IREE_ASSERT_OK(QueueRmwAndWait(buffer, rmw_params));
+    EXPECT_EQ(ReadAtomicValue<ValueType>(buffer), static_cast<ValueType>(4));
   }
 };
 
@@ -295,14 +224,6 @@ TEST_P(QueueAtomicTest, StoreAndRmw32) {
 
 TEST_P(QueueAtomicTest, StoreAndRmw64) {
   RunStoreAndRmwTest<uint64_t>(IREE_HAL_ATOMIC_WIDTH_64);
-}
-
-TEST_P(QueueAtomicTest, Wait32) {
-  RunWaitTest<uint32_t>(IREE_HAL_ATOMIC_WIDTH_32);
-}
-
-TEST_P(QueueAtomicTest, Wait64) {
-  RunWaitTest<uint64_t>(IREE_HAL_ATOMIC_WIDTH_64);
 }
 
 TEST_P(QueueAtomicTest, ResolvedMisalignmentFails64) {

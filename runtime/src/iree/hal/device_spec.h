@@ -411,8 +411,9 @@ typedef enum iree_hal_queue_family_spec_flag_bits_e {
 typedef struct iree_hal_queue_family_spec_t {
   // Human-readable queue family name.
   iree_string_view_t name;
-  // Number of queues in the family.
-  uint32_t queue_count;
+  // Number of queues in the immutable device provisioned-queue table.
+  // Dynamically acquired queues are not included.
+  uint32_t provisioned_queue_count;
   // Number of priority levels in the family.
   uint32_t priority_count;
   // Number of low bits defined in a tick captured on this family's queues.
@@ -421,10 +422,6 @@ typedef struct iree_hal_queue_family_spec_t {
   uint64_t timestamp_frequency_hz;
   // Nonzero physical-device set serviced by queues in this family.
   iree_hal_physical_device_affinity_t physical_device_affinity;
-  // Queue-affinity routing lanes selecting this family. One lane may route
-  // among several family queues. Atomic waits require callers to select
-  // exactly one bit from this mask.
-  iree_hal_queue_affinity_t queue_affinity;
   // Queue family role flags.
   iree_hal_queue_family_role_flags_t role_flags;
   // Atomic operations and wait predicates supported by this queue family.
@@ -475,7 +472,8 @@ typedef enum iree_hal_device_queue_spec_flag_bits_e {
 typedef struct iree_hal_device_queue_spec_t {
   // Number of queue family records.
   iree_host_size_t family_count;
-  // Queue family records.
+  // Queue family records in canonical ordinal order. Each array index is the
+  // family ordinal used by iree_hal_queue_family_affinity_t.
   const iree_hal_queue_family_spec_t* families;
   // Number of external timepoint handle records.
   iree_host_size_t external_timepoint_handle_count;

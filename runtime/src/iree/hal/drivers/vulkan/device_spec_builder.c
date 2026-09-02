@@ -277,6 +277,7 @@ static iree_status_t iree_hal_vulkan_device_spec_populate_virtual_memory(
               IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
       .usage = IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_STORAGE,
       .access = IREE_HAL_MEMORY_ACCESS_ALL,
+      .queue_family_affinity = IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
   };
   iree_device_size_t minimum_page_size = 0;
   iree_device_size_t recommended_page_size = 0;
@@ -333,24 +334,16 @@ static uint64_t iree_hal_vulkan_device_spec_timestamp_frequency_hz(
 }
 
 static uint32_t iree_hal_vulkan_device_spec_queue_timestamp_valid_bits(
-    const iree_hal_vulkan_queue_assignment_t* queue_assignment) {
-  uint32_t timestamp_valid_bits =
-      queue_assignment->compute.timestamp_valid_bits;
-  if (queue_assignment->transfer.timestamp_valid_bits != 0) {
+    const iree_hal_vulkan_queue_inventory_t* queue_inventory) {
+  uint32_t timestamp_valid_bits = 0;
+  for (iree_host_size_t i = 0; i < queue_inventory->family_count; ++i) {
+    const uint32_t family_timestamp_valid_bits =
+        queue_inventory->families[i].timestamp_valid_bits;
+    if (family_timestamp_valid_bits == 0) continue;
     timestamp_valid_bits =
         timestamp_valid_bits == 0
-            ? queue_assignment->transfer.timestamp_valid_bits
-            : iree_min(timestamp_valid_bits,
-                       queue_assignment->transfer.timestamp_valid_bits);
-  }
-  if (queue_assignment->sparse_binding.family_index !=
-          IREE_HAL_VULKAN_QUEUE_FAMILY_INVALID &&
-      queue_assignment->sparse_binding.timestamp_valid_bits != 0) {
-    timestamp_valid_bits =
-        timestamp_valid_bits == 0
-            ? queue_assignment->sparse_binding.timestamp_valid_bits
-            : iree_min(timestamp_valid_bits,
-                       queue_assignment->sparse_binding.timestamp_valid_bits);
+            ? family_timestamp_valid_bits
+            : iree_min(timestamp_valid_bits, family_timestamp_valid_bits);
   }
   return timestamp_valid_bits;
 }
@@ -358,39 +351,36 @@ static uint32_t iree_hal_vulkan_device_spec_queue_timestamp_valid_bits(
 static iree_status_t iree_hal_vulkan_device_spec_populate_queues(
     const iree_hal_vulkan_device_spec_params_t* params,
     iree_hal_device_spec_builder_t* builder) {
-  const iree_hal_vulkan_queue_assignment_t* queue_assignment =
-      &params->device_plan->queue_assignment;
+  const iree_hal_vulkan_queue_inventory_t* queue_inventory =
+      &params->device_plan->queue_inventory;
   const iree_hal_atomic_capabilities_t atomic_capabilities =
       iree_hal_vulkan_atomic_capabilities(
           params->device_plan->enabled_features);
-  const iree_hal_vulkan_queue_selection_t* queue_selections[] = {
-      &queue_assignment->compute,
-      &queue_assignment->transfer,
-  };
-  const iree_string_view_t queue_names[] = {
-      IREE_SV("compute"),
-      IREE_SV("transfer"),
-  };
-  iree_hal_queue_family_spec_t queue_families[IREE_ARRAYSIZE(queue_selections)];
+  char queue_family_names[IREE_HAL_MAX_QUEUE_FAMILIES][32];
+  iree_hal_queue_family_spec_t queue_families[IREE_HAL_MAX_QUEUE_FAMILIES];
   const uint64_t timestamp_frequency_hz =
       iree_hal_vulkan_device_spec_timestamp_frequency_hz(
           params->physical_device->properties2.properties.limits
               .timestampPeriod);
-  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(queue_selections); ++i) {
-    const iree_hal_vulkan_queue_selection_t* queue = queue_selections[i];
+  for (iree_host_size_t i = 0; i < queue_inventory->family_count; ++i) {
+    const iree_hal_vulkan_queue_family_plan_t* queue_family =
+        &queue_inventory->families[i];
+    const int name_length = iree_snprintf(
+        queue_family_names[i], IREE_ARRAYSIZE(queue_family_names[i]),
+        "queue-family-%u", queue_family->native_family_index);
     iree_hal_queue_family_role_flags_t role_flags =
         IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_HOST_CALL;
-    if (iree_all_bits_set(queue->flags, VK_QUEUE_COMPUTE_BIT)) {
+    if (iree_all_bits_set(queue_family->flags, VK_QUEUE_COMPUTE_BIT)) {
       role_flags |= IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH;
     }
-    if (iree_all_bits_set(queue->flags, VK_QUEUE_TRANSFER_BIT)) {
+    if (iree_all_bits_set(queue_family->flags, VK_QUEUE_TRANSFER_BIT)) {
       role_flags |= IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER;
     }
-    if (queue->timestamp_valid_bits != 0) {
+    if (queue_family->timestamp_valid_bits != 0) {
       role_flags |= IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_PROFILING;
     }
     const bool supports_atomics =
-        iree_all_bits_set(queue->flags, VK_QUEUE_COMPUTE_BIT) &&
+        iree_all_bits_set(queue_family->flags, VK_QUEUE_COMPUTE_BIT) &&
         (atomic_capabilities.operations.device_scope_32 != 0 ||
          atomic_capabilities.operations.device_scope_64 != 0 ||
          atomic_capabilities.operations.system_scope_32 != 0 ||
@@ -399,13 +389,13 @@ static iree_status_t iree_hal_vulkan_device_spec_populate_queues(
       role_flags |= IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_ATOMIC;
     }
     queue_families[i] = (iree_hal_queue_family_spec_t){
-        .name = queue_names[i],
-        .queue_count = 1,
+        .name = iree_make_string_view(queue_family_names[i],
+                                      (iree_host_size_t)name_length),
+        .provisioned_queue_count = queue_family->queue_count,
         .priority_count = 1,
-        .timestamp_valid_bits = queue->timestamp_valid_bits,
+        .timestamp_valid_bits = queue_family->timestamp_valid_bits,
         .timestamp_frequency_hz = timestamp_frequency_hz,
         .physical_device_affinity = 1ull,
-        .queue_affinity = queue->affinity,
         .role_flags = role_flags,
         .flags = IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_NONE,
     };
@@ -414,7 +404,7 @@ static iree_status_t iree_hal_vulkan_device_spec_populate_queues(
     }
   }
   iree_hal_device_queue_spec_t queues = {
-      .family_count = IREE_ARRAYSIZE(queue_families),
+      .family_count = queue_inventory->family_count,
       .families = queue_families,
       .flags = IREE_HAL_DEVICE_QUEUE_SPEC_FLAG_NONE,
   };
@@ -502,7 +492,7 @@ static iree_status_t iree_hal_vulkan_device_spec_populate_timing(
       IREE_HAL_DEVICE_TIMING_SPEC_FLAG_PROFILING_PERTURBS_EXECUTION;
   const uint32_t timestamp_valid_bits =
       iree_hal_vulkan_device_spec_queue_timestamp_valid_bits(
-          &params->device_plan->queue_assignment);
+          &params->device_plan->queue_inventory);
   if (timestamp_valid_bits != 0) {
     flags |= IREE_HAL_DEVICE_TIMING_SPEC_FLAG_DEVICE_TIMESTAMPS |
              IREE_HAL_DEVICE_TIMING_SPEC_FLAG_DISPATCH_EVENTS;

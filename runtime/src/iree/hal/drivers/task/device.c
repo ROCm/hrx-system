@@ -750,7 +750,7 @@ static iree_status_t iree_hal_task_device_prepare_alloca_wrapper(
 
   iree_hal_buffer_placement_t placement = {
       .device = base_device,
-      .queue_affinity = queue->affinity,
+      .queue_family_affinity = params->queue_family_affinity,
       .flags = IREE_HAL_BUFFER_PLACEMENT_FLAG_ASYNCHRONOUS,
   };
   if (iree_all_bits_set(flags, IREE_HAL_ALLOCA_FLAG_INDETERMINATE_LIFETIME)) {

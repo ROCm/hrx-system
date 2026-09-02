@@ -146,7 +146,7 @@ static iree_status_t iree_hal_streaming_event_timestamp_pool_grow(
                 IREE_HAL_MEMORY_TYPE_HOST_COHERENT;
   params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING;
   params.access = IREE_HAL_MEMORY_ACCESS_ALL;
-  params.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+  params.queue_family_affinity = IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY;
   iree_hal_buffer_t* buffer = NULL;
   iree_status_t status = iree_hal_allocator_allocate_buffer(
       pool->device_allocator, params,

@@ -10,7 +10,6 @@
 
 #include "iree/hal/drivers/amdgpu/access_policy.h"
 #include "iree/hal/drivers/amdgpu/buffer.h"
-#include "iree/hal/drivers/amdgpu/queue_affinity.h"
 #include "iree/hal/drivers/amdgpu/util/topology.h"
 #include "iree/hal/drivers/amdgpu/util/vmem.h"
 
@@ -24,8 +23,8 @@ typedef struct iree_hal_amdgpu_virtual_memory_range_t {
   // Byte length of the ROCr virtual reservation.
   iree_device_size_t size;
 
-  // HAL queues permitted to access the reservation.
-  iree_hal_queue_affinity_t queue_affinity;
+  // HAL queue families permitted to access the reservation.
+  iree_hal_queue_family_affinity_t queue_family_affinity;
 } iree_hal_amdgpu_virtual_memory_range_t;
 
 struct iree_hal_physical_memory_t {
@@ -208,7 +207,7 @@ static iree_status_t iree_hal_amdgpu_virtual_memory_resolve_range(
   *out_range = (iree_hal_amdgpu_virtual_memory_range_t){
       .base_ptr = base_ptr,
       .size = iree_hal_buffer_allocation_size(virtual_buffer),
-      .queue_affinity = placement.queue_affinity,
+      .queue_family_affinity = placement.queue_family_affinity,
   };
   return iree_ok_status();
 }
@@ -285,7 +284,7 @@ iree_status_t iree_hal_amdgpu_virtual_memory_reserve(
   if (iree_status_is_ok(status)) {
     const iree_hal_buffer_placement_t buffer_placement = {
         .device = placement.device,
-        .queue_affinity = placement.queue_affinity,
+        .queue_family_affinity = placement.queue_family_affinity,
         .flags = IREE_HAL_BUFFER_PLACEMENT_FLAG_NONE,
     };
     status = iree_hal_amdgpu_buffer_create(
@@ -447,20 +446,12 @@ iree_status_t iree_hal_amdgpu_virtual_memory_map(
         "physical mapping");
   }
 
-  const iree_hal_amdgpu_queue_affinity_domain_t domain = {
-      .supported_affinity = range.queue_affinity,
-      .physical_device_count = state->topology->gpu_agent_count,
-      .queue_count_per_physical_device = state->topology->gpu_agent_queue_count,
-  };
-  iree_hal_amdgpu_queue_affinity_physical_device_set_t physical_device_set;
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_queue_affinity_select_physical_devices(
-      domain, range.queue_affinity, &physical_device_set));
   const iree_hal_amdgpu_atomic_memory_cell_flags_t reservation_cells =
       iree_hal_amdgpu_buffer_atomic_memory_cells(virtual_buffer);
   const iree_hal_amdgpu_atomic_memory_cell_flags_t physical_cells =
       iree_hal_amdgpu_atomic_memory_select_device_cells(
           physical_memory->atomic_memory_source_masks,
-          physical_device_set.physical_device_mask);
+          (iree_hal_amdgpu_gpu_agent_mask_t)range.queue_family_affinity);
   if (IREE_UNLIKELY(!iree_all_bits_set(physical_cells, reservation_cells))) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
@@ -468,7 +459,7 @@ iree_status_t iree_hal_amdgpu_virtual_memory_map(
         " do not satisfy virtual reservation cells 0x%08" PRIx32
         " for physical device mask 0x%016" PRIx64,
         physical_cells, reservation_cells,
-        physical_device_set.physical_device_mask);
+        (iree_hal_amdgpu_gpu_agent_mask_t)range.queue_family_affinity);
   }
 
   void* map_ptr = (uint8_t*)range.base_ptr + virtual_offset;
@@ -509,7 +500,8 @@ iree_status_t iree_hal_amdgpu_virtual_memory_unmap(
 iree_status_t iree_hal_amdgpu_virtual_memory_protect(
     iree_hal_amdgpu_virtual_memory_state_t* state,
     iree_hal_buffer_t* virtual_buffer, iree_device_size_t virtual_offset,
-    iree_device_size_t size, iree_hal_queue_affinity_t queue_affinity,
+    iree_device_size_t size,
+    iree_hal_queue_family_affinity_t queue_family_affinity,
     iree_hal_memory_protection_t protection) {
   IREE_ASSERT_ARGUMENT(state);
   IREE_ASSERT_ARGUMENT(virtual_buffer);
@@ -534,14 +526,22 @@ iree_status_t iree_hal_amdgpu_virtual_memory_protect(
                             "the reservation");
   }
 
-  const iree_hal_amdgpu_queue_affinity_domain_t domain = {
-      .supported_affinity = range.queue_affinity,
-      .physical_device_count = state->topology->gpu_agent_count,
-      .queue_count_per_physical_device = state->topology->gpu_agent_queue_count,
-  };
+  if (iree_hal_queue_family_affinity_is_any(queue_family_affinity)) {
+    queue_family_affinity = range.queue_family_affinity;
+  } else if (IREE_UNLIKELY(iree_hal_queue_family_affinity_is_empty(
+                               queue_family_affinity) ||
+                           !iree_all_bits_set(range.queue_family_affinity,
+                                              queue_family_affinity))) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "AMDGPU virtual-memory protection family affinity 0x%016" PRIx64
+        " exceeds reservation affinity 0x%016" PRIx64,
+        queue_family_affinity, range.queue_family_affinity);
+  }
   iree_hal_amdgpu_access_agent_list_t agent_list;
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_access_agent_list_resolve_queue_agents(
-      state->topology, domain, queue_affinity, &agent_list));
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amdgpu_access_agent_list_resolve_queue_family_agents(
+          state->topology, queue_family_affinity, &agent_list));
 
   hsa_amd_memory_access_desc_t access_descs[IREE_HAL_AMDGPU_MAX_CPU_AGENT +
                                             IREE_HAL_AMDGPU_MAX_GPU_AGENT];
@@ -559,9 +559,9 @@ iree_status_t iree_hal_amdgpu_virtual_memory_protect(
 iree_status_t iree_hal_amdgpu_virtual_memory_advise(
     iree_hal_amdgpu_virtual_memory_state_t* state,
     iree_hal_buffer_t* virtual_buffer, iree_device_size_t virtual_offset,
-    iree_device_size_t size, iree_hal_queue_affinity_t queue_affinity,
+    iree_device_size_t size,
+    iree_hal_queue_family_affinity_t queue_family_affinity,
     iree_hal_memory_advice_t advice) {
-  (void)queue_affinity;
   (void)advice;
   IREE_ASSERT_ARGUMENT(state);
   IREE_ASSERT_ARGUMENT(virtual_buffer);
@@ -574,6 +574,17 @@ iree_status_t iree_hal_amdgpu_virtual_memory_advise(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "AMDGPU virtual-memory advice range exceeds the "
                             "reservation");
+  }
+  if (!iree_hal_queue_family_affinity_is_any(queue_family_affinity) &&
+      IREE_UNLIKELY(
+          iree_hal_queue_family_affinity_is_empty(queue_family_affinity) ||
+          !iree_all_bits_set(range.queue_family_affinity,
+                             queue_family_affinity))) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "AMDGPU virtual-memory advice family affinity 0x%016" PRIx64
+        " exceeds reservation affinity 0x%016" PRIx64,
+        queue_family_affinity, range.queue_family_affinity);
   }
   return iree_ok_status();
 }

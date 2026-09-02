@@ -228,6 +228,13 @@ static iree_status_t iree_hal_device_spec_validate_params(
   if (queues) {
     IREE_RETURN_IF_ERROR(iree_hal_device_spec_validate_count_pointer(
         queues->family_count, queues->families, "queues.families"));
+    if (IREE_UNLIKELY(queues->family_count > IREE_HAL_MAX_QUEUE_FAMILIES)) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "device spec queue family count %" PRIhsz
+          " exceeds queue-family affinity capacity %" PRIhsz,
+          queues->family_count, (iree_host_size_t)IREE_HAL_MAX_QUEUE_FAMILIES);
+    }
     IREE_RETURN_IF_ERROR(iree_hal_device_spec_validate_count_pointer(
         queues->external_timepoint_handle_count,
         queues->external_timepoint_handles,

@@ -122,6 +122,9 @@ typedef struct iree_hal_vulkan_queue_params_t {
   // Queue family index used to acquire the queue handle.
   uint32_t queue_family_index;
 
+  // Canonical HAL ordinal of the Vulkan queue family.
+  iree_hal_queue_family_ordinal_t queue_family_ordinal;
+
   // Queue index within the selected family.
   uint32_t queue_index;
 
@@ -181,6 +184,9 @@ typedef struct iree_hal_vulkan_queue_t {
 
   // Queue family index used to acquire the queue handle.
   uint32_t queue_family_index;
+
+  // Canonical HAL ordinal of the Vulkan queue family.
+  iree_hal_queue_family_ordinal_t queue_family_ordinal;
 
   // Queue index within the selected family.
   uint32_t queue_index;

@@ -13,7 +13,6 @@
 #include "iree/hal/drivers/amdgpu/buffer.h"
 #include "iree/hal/drivers/amdgpu/logical_device.h"
 #include "iree/hal/drivers/amdgpu/physical_device.h"
-#include "iree/hal/drivers/amdgpu/queue_affinity.h"
 #include "iree/hal/drivers/amdgpu/util/info.h"
 #include "iree/hal/drivers/amdgpu/util/topology.h"
 #include "iree/hal/drivers/amdgpu/util/vmem.h"
@@ -27,6 +26,8 @@ using iree::hal::cts::Ref;
 
 constexpr iree_hal_queue_affinity_t kQueueAffinity0 =
     ((iree_hal_queue_affinity_t)1ull) << 0;
+constexpr iree_hal_queue_family_affinity_t kQueueFamilyAffinity0 =
+    ((iree_hal_queue_family_affinity_t)1ull) << 0;
 
 static void CountingReleaseCallback(void* user_data, iree_hal_buffer_t*) {
   ++*static_cast<int*>(user_data);
@@ -73,7 +74,7 @@ static iree_status_t QueueReadbackAndWait(
       /*.type=*/IREE_HAL_MEMORY_TYPE_OPTIMAL |
           IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
           IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
-      /*.queue_affinity=*/queue_affinity,
+      /*.queue_family_affinity=*/kQueueFamilyAffinity0,
   };
   Ref<iree_hal_buffer_t> readback_buffer;
   IREE_RETURN_IF_ERROR(iree_hal_allocator_allocate_buffer(
@@ -95,7 +96,7 @@ static iree_hal_buffer_params_t DeviceLocalVirtualMemoryParams() {
       /*.usage=*/IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_STORAGE,
       /*.access=*/IREE_HAL_MEMORY_ACCESS_ALL,
       /*.type=*/IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
-      /*.queue_affinity=*/kQueueAffinity0,
+      /*.queue_family_affinity=*/kQueueFamilyAffinity0,
   };
 }
 
@@ -105,7 +106,7 @@ static iree_hal_buffer_params_t HostLocalVirtualMemoryParams() {
       /*.access=*/IREE_HAL_MEMORY_ACCESS_ALL,
       /*.type=*/
       IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
-      /*.queue_affinity=*/kQueueAffinity0,
+      /*.queue_family_affinity=*/kQueueFamilyAffinity0,
   };
 }
 
@@ -116,7 +117,7 @@ static iree_hal_buffer_params_t DeviceLocalHostVisibleVirtualMemoryParams() {
       /*.type=*/IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL |
           IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
           IREE_HAL_MEMORY_TYPE_HOST_COHERENT,
-      /*.queue_affinity=*/kQueueAffinity0,
+      /*.queue_family_affinity=*/kQueueFamilyAffinity0,
   };
 }
 
@@ -436,7 +437,8 @@ TEST_F(AllocatorTest, VirtualMemoryLifecycleUsesNativeState) {
 
   VirtualMemoryReservation virtual_memory(allocator);
   IREE_ASSERT_OK(iree_hal_allocator_virtual_memory_reserve(
-      allocator, kQueueAffinity0, recommended_page_size, virtual_memory.out()));
+      allocator, kQueueFamilyAffinity0, recommended_page_size,
+      virtual_memory.out()));
   ASSERT_NE(nullptr, virtual_memory.get());
   EXPECT_EQ(IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_DEVICE_SCOPE_32 |
                 IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_DEVICE_SCOPE_64,
@@ -463,7 +465,7 @@ TEST_F(AllocatorTest, VirtualMemoryLifecycleUsesNativeState) {
       recommended_page_size));
   IREE_ASSERT_NOT_OK(iree_hal_allocator_virtual_memory_protect(
       allocator, virtual_memory.get(), /*virtual_offset=*/0,
-      recommended_page_size, kQueueAffinity0,
+      recommended_page_size, kQueueFamilyAffinity0,
       IREE_HAL_MEMORY_PROTECTION_READ_WRITE));
 
   VirtualMemoryMapping mapping(allocator, virtual_memory.get(),
@@ -483,7 +485,7 @@ TEST_F(AllocatorTest, VirtualMemoryLifecycleUsesNativeState) {
 
   IREE_ASSERT_OK(iree_hal_allocator_virtual_memory_protect(
       allocator, virtual_memory.get(), /*virtual_offset=*/0,
-      recommended_page_size, kQueueAffinity0,
+      recommended_page_size, kQueueFamilyAffinity0,
       IREE_HAL_MEMORY_PROTECTION_READ_WRITE));
 
   constexpr iree_device_size_t kTouchedSize = 256;
@@ -557,7 +559,8 @@ TEST_F(AllocatorTest, VirtualMemoryMapsMinimumGranuleAcrossPools) {
 
   VirtualMemoryReservation virtual_memory(allocator);
   IREE_ASSERT_OK(iree_hal_allocator_virtual_memory_reserve(
-      allocator, kQueueAffinity0, reservation_size, virtual_memory.out()));
+      allocator, kQueueFamilyAffinity0, reservation_size,
+      virtual_memory.out()));
 
   PhysicalMemoryAllocation physical_memory(allocator);
   IREE_ASSERT_OK(iree_hal_allocator_physical_memory_allocate(
@@ -569,7 +572,7 @@ TEST_F(AllocatorTest, VirtualMemoryMapsMinimumGranuleAcrossPools) {
   IREE_ASSERT_OK(mapping.Map(physical_memory.get()));
   IREE_ASSERT_OK(iree_hal_allocator_virtual_memory_protect(
       allocator, virtual_memory.get(), /*virtual_offset=*/0,
-      host_minimum_page_size, kQueueAffinity0,
+      host_minimum_page_size, kQueueFamilyAffinity0,
       IREE_HAL_MEMORY_PROTECTION_READ_WRITE));
 
   IREE_ASSERT_OK(mapping.Unmap());
@@ -581,14 +584,8 @@ TEST_F(AllocatorTest,
     GTEST_SKIP() << "cross-device VMM requires at least two GPU agents";
   }
 
-  const iree_hal_amdgpu_queue_affinity_domain_t affinity_domain = {
-      /*.supported_affinity=*/IREE_HAL_QUEUE_AFFINITY_ANY,
-      /*.physical_device_count=*/topology_.gpu_agent_count,
-      /*.queue_count_per_physical_device=*/topology_.gpu_agent_queue_count,
-  };
-  iree_hal_queue_affinity_t backing_affinity = 0;
-  IREE_ASSERT_OK(iree_hal_amdgpu_queue_affinity_for_physical_device(
-      affinity_domain, /*physical_device_ordinal=*/1, &backing_affinity));
+  const iree_hal_queue_family_affinity_t backing_family_affinity =
+      iree_hal_make_queue_family_affinity(1);
 
   hsa_amd_memory_pool_t backing_pool = {0};
   IREE_ASSERT_OK(iree_hal_amdgpu_find_coarse_global_memory_pool(
@@ -617,7 +614,7 @@ TEST_F(AllocatorTest,
   ASSERT_GE(reservation_recommended_page_size, reservation_minimum_page_size);
 
   iree_hal_buffer_params_t backing_params = DeviceLocalVirtualMemoryParams();
-  backing_params.queue_affinity = backing_affinity;
+  backing_params.queue_family_affinity = backing_family_affinity;
   iree_device_size_t backing_minimum_page_size = 0;
   iree_device_size_t backing_recommended_page_size = 0;
   IREE_ASSERT_OK(iree_hal_allocator_virtual_memory_query_granularity(
@@ -630,7 +627,7 @@ TEST_F(AllocatorTest,
       reservation_recommended_page_size, backing_recommended_page_size);
   VirtualMemoryReservation virtual_memory(allocator);
   IREE_ASSERT_OK(iree_hal_allocator_virtual_memory_reserve(
-      allocator, kQueueAffinity0, mapping_size, virtual_memory.out()));
+      allocator, kQueueFamilyAffinity0, mapping_size, virtual_memory.out()));
   const iree_hal_amdgpu_atomic_memory_cell_flags_t reservation_cells =
       iree_hal_amdgpu_buffer_atomic_memory_cells(virtual_memory.get());
 
@@ -649,7 +646,7 @@ TEST_F(AllocatorTest,
   IREE_ASSERT_OK(mapping.Map(physical_memory.get()));
   IREE_ASSERT_OK(iree_hal_allocator_virtual_memory_protect(
       allocator, virtual_memory.get(), /*virtual_offset=*/0, mapping_size,
-      kQueueAffinity0, IREE_HAL_MEMORY_PROTECTION_READ_WRITE));
+      kQueueFamilyAffinity0, IREE_HAL_MEMORY_PROTECTION_READ_WRITE));
 
   constexpr iree_device_size_t kTouchedSize = 256;
   constexpr uint32_t kPattern = 0xC2055DE1u;
@@ -866,7 +863,7 @@ TEST_F(AllocatorTest,
   params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
   params.usage =
       IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_DISPATCH;
-  params.queue_affinity = 1ull;
+  params.queue_family_affinity = kQueueFamilyAffinity0;
 
   iree_hal_buffer_t* first_buffer = nullptr;
   uint64_t first_ptr = 0;
@@ -903,7 +900,7 @@ TEST_F(
   params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
   params.usage =
       IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_DISPATCH;
-  params.queue_affinity = 1ull;
+  params.queue_family_affinity = kQueueFamilyAffinity0;
 
   iree_hal_buffer_t* first_buffer = nullptr;
   uint64_t first_ptr = 0;
@@ -951,7 +948,7 @@ TEST_F(AllocatorTest, AsanDiagnosticsExposeDefaultQuarantineRetention) {
   params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
   params.usage =
       IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_DISPATCH;
-  params.queue_affinity = 1ull;
+  params.queue_family_affinity = kQueueFamilyAffinity0;
 
   iree_hal_buffer_t* buffer = nullptr;
   uint64_t ptr = 0;
@@ -997,7 +994,7 @@ TEST_F(AllocatorTest, AsanDiagnosticsExposeZeroQuarantineRelease) {
   params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
   params.usage =
       IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_DISPATCH;
-  params.queue_affinity = 1ull;
+  params.queue_family_affinity = kQueueFamilyAffinity0;
 
   iree_hal_buffer_t* buffer = nullptr;
   uint64_t ptr = 0;
@@ -1117,7 +1114,8 @@ TEST_F(AllocatorTest, AdvertisedMemoryHeapsAreAllocatable) {
       iree_hal_buffer_params_t params = {0};
       params.type = heap.type;
       params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
-      params.queue_affinity = ((iree_hal_queue_affinity_t)1) << device_index;
+      params.queue_family_affinity = iree_hal_make_queue_family_affinity(
+          (iree_hal_queue_family_ordinal_t)device_index);
       params.min_alignment = heap.min_alignment;
       iree_hal_buffer_params_t resolved_params = {0};
       iree_device_size_t resolved_allocation_size = 0;
@@ -1149,7 +1147,7 @@ TEST_F(AllocatorTest, DirectHostAccessDoesNotImplyUnifiedMemory) {
       IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
   params.usage =
       IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED;
-  params.queue_affinity = kQueueAffinity0;
+  params.queue_family_affinity = kQueueFamilyAffinity0;
 
   iree_hal_buffer_params_t resolved_params = {0};
   iree_device_size_t resolved_allocation_size = 0;
@@ -1190,7 +1188,7 @@ TEST_F(AllocatorTest, UnifiedMemorySatisfiesDualLocality) {
   params.access = IREE_HAL_MEMORY_ACCESS_ALL;
   params.usage =
       IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED;
-  params.queue_affinity = kQueueAffinity0;
+  params.queue_family_affinity = kQueueFamilyAffinity0;
 
   iree_hal_buffer_params_t resolved_params = {0};
   iree_device_size_t resolved_allocation_size = 0;
@@ -1264,7 +1262,7 @@ TEST_F(AllocatorTest, UnifiedMemorySatisfiesDualLocality) {
   import_params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
   import_params.access = IREE_HAL_MEMORY_ACCESS_ALL;
   import_params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
-  import_params.queue_affinity = kQueueAffinity0;
+  import_params.queue_family_affinity = kQueueFamilyAffinity0;
   buffer = NULL;
   iree_status_t import_status = iree_hal_allocator_import_buffer(
       test_device.allocator(), import_params, &external_buffer,
@@ -1540,7 +1538,7 @@ TEST_F(AllocatorTest, HostAllocationImportUsesFinePoolAtomicContract) {
   params.type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL;
   params.access = IREE_HAL_MEMORY_ACCESS_ALL;
   params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_STORAGE;
-  params.queue_affinity = kQueueAffinity0;
+  params.queue_family_affinity = kQueueFamilyAffinity0;
 
   int release_count = 0;
   iree_hal_buffer_release_callback_t callback = {};
@@ -1694,7 +1692,7 @@ TEST_F(AllocatorTest, DeviceAllocationImportRejectsUnknownPointer) {
   iree_hal_buffer_params_t params = {0};
   params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
   params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
-  params.queue_affinity = 1ull;
+  params.queue_family_affinity = kQueueFamilyAffinity0;
 
   uint32_t host_storage = 0;
   iree_hal_external_buffer_t external_buffer = {};
@@ -1727,7 +1725,7 @@ TEST_F(AllocatorTest, DeviceAllocationImportWrapsHsaAllocation) {
   params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
   params.usage =
       IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_DISPATCH;
-  params.queue_affinity = 1ull;
+  params.queue_family_affinity = kQueueFamilyAffinity0;
 
   iree_hal_buffer_params_t resolved_params = {0};
   iree_device_size_t resolved_allocation_size = 0;
@@ -1812,7 +1810,7 @@ TEST_F(AllocatorTest, AsanDeviceAllocationImportPublishesShadow) {
   params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
   params.usage =
       IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_DISPATCH;
-  params.queue_affinity = 1ull;
+  params.queue_family_affinity = kQueueFamilyAffinity0;
 
   iree_hal_external_buffer_t external_buffer = {};
   external_buffer.type = IREE_HAL_EXTERNAL_BUFFER_TYPE_DEVICE_ALLOCATION;
@@ -2003,7 +2001,7 @@ TEST_F(AllocatorTest, DeviceAllocationExportReportsHsaPointer) {
   params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
   params.usage =
       IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_DISPATCH;
-  params.queue_affinity = 1ull;
+  params.queue_family_affinity = kQueueFamilyAffinity0;
 
   iree_hal_buffer_params_t resolved_params = {0};
   iree_device_size_t resolved_allocation_size = 0;

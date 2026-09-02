@@ -202,7 +202,7 @@ static iree_status_t hrx_vmm_slab_provider_acquire_slab(
   };
 
   iree_status_t status = iree_hal_allocator_virtual_memory_reserve(
-      provider->allocator, provider->buffer_params.queue_affinity,
+      provider->allocator, provider->buffer_params.queue_family_affinity,
       allocation_size, &slab->virtual_buffer);
   if (iree_status_is_ok(status)) {
     status = iree_hal_allocator_physical_memory_allocate(
@@ -218,7 +218,7 @@ static iree_status_t hrx_vmm_slab_provider_acquire_slab(
   if (iree_status_is_ok(status)) {
     status = iree_hal_allocator_virtual_memory_protect(
         provider->allocator, slab->virtual_buffer, /*virtual_offset=*/0,
-        allocation_size, provider->buffer_params.queue_affinity,
+        allocation_size, provider->buffer_params.queue_family_affinity,
         IREE_HAL_MEMORY_PROTECTION_READ_WRITE);
   }
 

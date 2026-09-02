@@ -20,7 +20,7 @@ extern "C" {
 #define IREE_HAL_REPLAY_FILE_MAGIC 0x50525249u
 
 // Major version of the IREE HAL replay file format.
-#define IREE_HAL_REPLAY_FILE_VERSION_MAJOR 5u
+#define IREE_HAL_REPLAY_FILE_VERSION_MAJOR 6u
 
 // Minor version of the IREE HAL replay file format.
 #define IREE_HAL_REPLAY_FILE_VERSION_MINOR 0u
@@ -235,8 +235,8 @@ typedef struct iree_hal_replay_buffer_object_payload_t {
   uint64_t byte_offset;
   // Byte length of this buffer view.
   uint64_t byte_length;
-  // Queue affinity from the buffer placement metadata.
-  uint64_t queue_affinity;
+  // Queue family affinity from the buffer placement metadata.
+  uint64_t queue_family_affinity;
   // Buffer placement flags from the buffer placement metadata.
   uint32_t placement_flags;
   // Memory type bits assigned to the buffer.
@@ -255,8 +255,8 @@ typedef struct iree_hal_replay_buffer_object_payload_t {
 typedef struct iree_hal_replay_allocator_allocate_buffer_payload_t {
   // Requested allocation size, in bytes.
   uint64_t allocation_size;
-  // Requested queue affinity from the canonicalized buffer params.
-  uint64_t queue_affinity;
+  // Requested queue family affinity from the canonicalized buffer params.
+  uint64_t queue_family_affinity;
   // Requested minimum alignment, in bytes.
   uint64_t min_alignment;
   // Requested buffer usage bits.

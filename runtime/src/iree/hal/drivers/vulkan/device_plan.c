@@ -39,14 +39,22 @@ iree_status_t iree_hal_vulkan_queue_affinity_normalize(
 }
 
 static void iree_hal_vulkan_device_plan_initialize_empty(
-    iree_hal_vulkan_device_plan_t* out_plan) {
+    iree_allocator_t host_allocator, iree_hal_vulkan_device_plan_t* out_plan) {
   memset(out_plan, 0, sizeof(*out_plan));
+  out_plan->host_allocator = host_allocator;
   out_plan->queue_assignment.sparse_binding.family_index =
       IREE_HAL_VULKAN_QUEUE_FAMILY_INVALID;
-  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(out_plan->queue_priorities);
-       ++i) {
-    out_plan->queue_priorities[i] = 1.0f;
-  }
+}
+
+void iree_hal_vulkan_device_plan_deinitialize(
+    iree_hal_vulkan_device_plan_t* plan) {
+  IREE_ASSERT_ARGUMENT(plan);
+  iree_allocator_free(plan->host_allocator, plan->queue_create_infos);
+  iree_allocator_free(plan->host_allocator, plan->queue_priorities);
+  iree_allocator_free(plan->host_allocator,
+                      plan->queue_inventory.queue_indices);
+  iree_allocator_free(plan->host_allocator, plan->queue_inventory.families);
+  memset(plan, 0, sizeof(*plan));
 }
 
 static bool iree_hal_vulkan_queue_family_has(
@@ -296,66 +304,162 @@ static iree_status_t iree_hal_vulkan_device_plan_select_extensions(
       VK_EXT_SHADER_ATOMIC_FLOAT_2_EXTENSION_NAME, plan);
 }
 
-static void iree_hal_vulkan_device_plan_initialize_queue_create_infos(
-    iree_hal_vulkan_device_plan_t* plan) {
-  const iree_hal_vulkan_queue_assignment_t* queue_assignment =
-      &plan->queue_assignment;
-  uint32_t next_priority_offset = 0;
-  if (queue_assignment->compute.family_index ==
-      queue_assignment->transfer.family_index) {
-    const uint32_t queue_create_info_index = plan->queue_create_info_count++;
-    const uint32_t queue_count = queue_assignment->transfer.queue_index + 1;
-    plan->queue_priority_offsets[queue_create_info_index] =
-        next_priority_offset;
-    plan->queue_create_infos[queue_create_info_index] =
-        (VkDeviceQueueCreateInfo){
-            .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
-            .queueFamilyIndex = queue_assignment->compute.family_index,
-            .queueCount = queue_count,
-            .pQueuePriorities = &plan->queue_priorities[next_priority_offset],
-        };
-    next_priority_offset += queue_count;
-  } else {
-    uint32_t queue_create_info_index = plan->queue_create_info_count++;
-    plan->queue_priority_offsets[queue_create_info_index] =
-        next_priority_offset;
-    plan->queue_create_infos[queue_create_info_index] =
-        (VkDeviceQueueCreateInfo){
-            .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
-            .queueFamilyIndex = queue_assignment->compute.family_index,
-            .queueCount = 1,
-            .pQueuePriorities = &plan->queue_priorities[next_priority_offset],
-        };
-    next_priority_offset += 1;
+static void iree_hal_vulkan_insert_queue_family_index(
+    uint32_t family_index, uint32_t* family_indices,
+    iree_host_size_t* family_count) {
+  iree_host_size_t insert_index = 0;
+  while (insert_index < *family_count &&
+         family_indices[insert_index] < family_index) {
+    ++insert_index;
+  }
+  if (insert_index < *family_count &&
+      family_indices[insert_index] == family_index) {
+    return;
+  }
+  for (iree_host_size_t i = *family_count; i > insert_index; --i) {
+    family_indices[i] = family_indices[i - 1];
+  }
+  family_indices[insert_index] = family_index;
+  ++*family_count;
+}
 
-    queue_create_info_index = plan->queue_create_info_count++;
-    plan->queue_priority_offsets[queue_create_info_index] =
-        next_priority_offset;
-    plan->queue_create_infos[queue_create_info_index] =
-        (VkDeviceQueueCreateInfo){
-            .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
-            .queueFamilyIndex = queue_assignment->transfer.family_index,
-            .queueCount = 1,
-            .pQueuePriorities = &plan->queue_priorities[next_priority_offset],
-        };
-    next_priority_offset += 1;
+static iree_status_t iree_hal_vulkan_device_plan_allocate_queue_inventory(
+    iree_host_size_t family_count, iree_host_size_t queue_count,
+    bool allocate_create_infos, iree_hal_vulkan_device_plan_t* plan) {
+  if (family_count == 0 || family_count > IREE_HAL_MAX_QUEUE_FAMILIES) {
+    return iree_make_status(
+        IREE_STATUS_RESOURCE_EXHAUSTED,
+        "Vulkan logical device requires %" PRIhsz
+        " queue families; HAL family affinities support [1, %" PRIhsz "]",
+        family_count, IREE_HAL_MAX_QUEUE_FAMILIES);
   }
-  if (iree_hal_vulkan_queue_assignment_has_sparse_binding(queue_assignment) &&
-      queue_assignment->sparse_binding.family_index !=
-          queue_assignment->compute.family_index &&
-      queue_assignment->sparse_binding.family_index !=
-          queue_assignment->transfer.family_index) {
-    const uint32_t queue_create_info_index = plan->queue_create_info_count++;
-    plan->queue_priority_offsets[queue_create_info_index] =
-        next_priority_offset;
-    plan->queue_create_infos[queue_create_info_index] =
-        (VkDeviceQueueCreateInfo){
-            .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
-            .queueFamilyIndex = queue_assignment->sparse_binding.family_index,
-            .queueCount = 1,
-            .pQueuePriorities = &plan->queue_priorities[next_priority_offset],
-        };
+
+  iree_status_t status =
+      iree_allocator_malloc_array(plan->host_allocator, family_count,
+                                  sizeof(*plan->queue_inventory.families),
+                                  (void**)&plan->queue_inventory.families);
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc_array(
+        plan->host_allocator, queue_count,
+        sizeof(*plan->queue_inventory.queue_indices),
+        (void**)&plan->queue_inventory.queue_indices);
   }
+  if (allocate_create_infos && iree_status_is_ok(status)) {
+    status = iree_allocator_malloc_array(plan->host_allocator, queue_count,
+                                         sizeof(*plan->queue_priorities),
+                                         (void**)&plan->queue_priorities);
+  }
+  if (allocate_create_infos && iree_status_is_ok(status)) {
+    status = iree_allocator_malloc_array(plan->host_allocator, family_count,
+                                         sizeof(*plan->queue_create_infos),
+                                         (void**)&plan->queue_create_infos);
+  }
+  if (iree_status_is_ok(status)) {
+    plan->queue_inventory.family_count = family_count;
+    plan->queue_inventory.queue_count = queue_count;
+    plan->queue_create_info_count =
+        allocate_create_infos ? (uint32_t)family_count : 0;
+  } else {
+    iree_hal_vulkan_device_plan_deinitialize(plan);
+  }
+  return status;
+}
+
+static iree_status_t iree_hal_vulkan_device_plan_assign_family_ordinal(
+    const iree_hal_vulkan_queue_inventory_t* queue_inventory,
+    iree_hal_vulkan_queue_selection_t* selection) {
+  for (iree_host_size_t i = 0; i < queue_inventory->family_count; ++i) {
+    if (queue_inventory->families[i].native_family_index ==
+        selection->family_index) {
+      selection->family_ordinal = (iree_hal_queue_family_ordinal_t)i;
+      return iree_ok_status();
+    }
+  }
+  return iree_make_status(
+      IREE_STATUS_FAILED_PRECONDITION,
+      "selected Vulkan queue family %u is absent from the provisioned "
+      "inventory",
+      selection->family_index);
+}
+
+static iree_status_t iree_hal_vulkan_device_plan_assign_queue_family_ordinals(
+    iree_hal_vulkan_device_plan_t* plan) {
+  IREE_RETURN_IF_ERROR(iree_hal_vulkan_device_plan_assign_family_ordinal(
+      &plan->queue_inventory, &plan->queue_assignment.compute));
+  IREE_RETURN_IF_ERROR(iree_hal_vulkan_device_plan_assign_family_ordinal(
+      &plan->queue_inventory, &plan->queue_assignment.transfer));
+  if (iree_hal_vulkan_queue_assignment_has_sparse_binding(
+          &plan->queue_assignment)) {
+    IREE_RETURN_IF_ERROR(iree_hal_vulkan_device_plan_assign_family_ordinal(
+        &plan->queue_inventory, &plan->queue_assignment.sparse_binding));
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_vulkan_device_plan_initialize_owned_queues(
+    const iree_hal_vulkan_physical_device_snapshot_t* snapshot,
+    iree_hal_vulkan_device_plan_t* plan) {
+  uint32_t family_indices[IREE_HAL_MAX_QUEUE_FAMILIES];
+  iree_host_size_t family_count = 0;
+  iree_hal_vulkan_insert_queue_family_index(
+      plan->queue_assignment.compute.family_index, family_indices,
+      &family_count);
+  iree_hal_vulkan_insert_queue_family_index(
+      plan->queue_assignment.transfer.family_index, family_indices,
+      &family_count);
+  if (iree_hal_vulkan_queue_assignment_has_sparse_binding(
+          &plan->queue_assignment)) {
+    iree_hal_vulkan_insert_queue_family_index(
+        plan->queue_assignment.sparse_binding.family_index, family_indices,
+        &family_count);
+  }
+
+  iree_host_size_t queue_count = 0;
+  for (iree_host_size_t i = 0; i < family_count; ++i) {
+    const uint32_t native_queue_count =
+        snapshot->queue_families[family_indices[i]]
+            .queueFamilyProperties.queueCount;
+    if (!iree_host_size_checked_add(queue_count, native_queue_count,
+                                    &queue_count)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "Vulkan queue inventory size overflow");
+    }
+  }
+  IREE_RETURN_IF_ERROR(iree_hal_vulkan_device_plan_allocate_queue_inventory(
+      family_count, queue_count, /*allocate_create_infos=*/true, plan));
+
+  iree_host_size_t queue_offset = 0;
+  for (iree_host_size_t i = 0; i < family_count; ++i) {
+    const uint32_t family_index = family_indices[i];
+    const VkQueueFamilyProperties* properties =
+        &snapshot->queue_families[family_index].queueFamilyProperties;
+    plan->queue_inventory.families[i] = (iree_hal_vulkan_queue_family_plan_t){
+        .native_family_index = family_index,
+        .flags = properties->queueFlags,
+        .timestamp_valid_bits = properties->timestampValidBits,
+        .queue_count = properties->queueCount,
+        .queue_offset = queue_offset,
+    };
+    for (uint32_t queue_index = 0; queue_index < properties->queueCount;
+         ++queue_index) {
+      plan->queue_inventory.queue_indices[queue_offset + queue_index] =
+          queue_index;
+      plan->queue_priorities[queue_offset + queue_index] = 1.0f;
+    }
+    plan->queue_create_infos[i] = (VkDeviceQueueCreateInfo){
+        .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+        .queueFamilyIndex = family_index,
+        .queueCount = properties->queueCount,
+        .pQueuePriorities = &plan->queue_priorities[queue_offset],
+    };
+    queue_offset += properties->queueCount;
+  }
+  iree_status_t status =
+      iree_hal_vulkan_device_plan_assign_queue_family_ordinals(plan);
+  if (!iree_status_is_ok(status)) {
+    iree_hal_vulkan_device_plan_deinitialize(plan);
+  }
+  return status;
 }
 
 static iree_status_t iree_hal_vulkan_device_plan_verify_device_options(
@@ -624,11 +728,11 @@ iree_status_t iree_hal_vulkan_device_plan_initialize_for_create(
     const iree_hal_vulkan_device_options_t* device_options,
     iree_hal_vulkan_request_flags_t request_flags,
     iree_hal_vulkan_features_t required_features,
-    iree_hal_vulkan_device_plan_t* out_plan) {
+    iree_allocator_t host_allocator, iree_hal_vulkan_device_plan_t* out_plan) {
   IREE_ASSERT_ARGUMENT(snapshot);
   IREE_ASSERT_ARGUMENT(device_options);
   IREE_ASSERT_ARGUMENT(out_plan);
-  iree_hal_vulkan_device_plan_initialize_empty(out_plan);
+  iree_hal_vulkan_device_plan_initialize_empty(host_allocator, out_plan);
 
   IREE_RETURN_IF_ERROR(
       iree_hal_vulkan_device_plan_verify_device_options(device_options));
@@ -650,7 +754,6 @@ iree_status_t iree_hal_vulkan_device_plan_initialize_for_create(
   }
   IREE_RETURN_IF_ERROR(
       iree_hal_vulkan_device_plan_select_extensions(snapshot, out_plan));
-  iree_hal_vulkan_device_plan_initialize_queue_create_infos(out_plan);
 
   out_plan->enabled_features13 = (VkPhysicalDeviceVulkan13Features){
       .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
@@ -890,7 +993,8 @@ iree_status_t iree_hal_vulkan_device_plan_initialize_for_create(
           ? VK_TRUE
           : VK_FALSE;
 
-  return iree_ok_status();
+  return iree_hal_vulkan_device_plan_initialize_owned_queues(snapshot,
+                                                             out_plan);
 }
 
 static iree_status_t iree_hal_vulkan_verify_external_enabled_features(
@@ -1262,16 +1366,92 @@ static iree_status_t iree_hal_vulkan_select_external_queue_assignment(
   return iree_ok_status();
 }
 
+static void iree_hal_vulkan_merge_external_queue_set(
+    const iree_hal_vulkan_queue_set_t* queue_set, uint32_t* family_indices,
+    uint64_t* family_queue_masks, iree_host_size_t* family_count) {
+  if (!queue_set->queue_indices) return;
+  iree_host_size_t insert_index = 0;
+  while (insert_index < *family_count &&
+         family_indices[insert_index] < queue_set->queue_family_index) {
+    ++insert_index;
+  }
+  if (insert_index < *family_count &&
+      family_indices[insert_index] == queue_set->queue_family_index) {
+    family_queue_masks[insert_index] |= queue_set->queue_indices;
+    return;
+  }
+  for (iree_host_size_t i = *family_count; i > insert_index; --i) {
+    family_indices[i] = family_indices[i - 1];
+    family_queue_masks[i] = family_queue_masks[i - 1];
+  }
+  family_indices[insert_index] = queue_set->queue_family_index;
+  family_queue_masks[insert_index] = queue_set->queue_indices;
+  ++*family_count;
+}
+
+static iree_status_t iree_hal_vulkan_device_plan_initialize_wrapped_queues(
+    const iree_hal_vulkan_physical_device_snapshot_t* snapshot,
+    const iree_hal_vulkan_external_device_params_t* external_device_params,
+    iree_hal_vulkan_device_plan_t* plan) {
+  uint32_t family_indices[IREE_HAL_MAX_QUEUE_FAMILIES];
+  uint64_t family_queue_masks[IREE_HAL_MAX_QUEUE_FAMILIES];
+  iree_host_size_t family_count = 0;
+  iree_hal_vulkan_merge_external_queue_set(
+      &external_device_params->compute_queue_set, family_indices,
+      family_queue_masks, &family_count);
+  iree_hal_vulkan_merge_external_queue_set(
+      &external_device_params->transfer_queue_set, family_indices,
+      family_queue_masks, &family_count);
+  iree_hal_vulkan_merge_external_queue_set(
+      &external_device_params->sparse_binding_queue_set, family_indices,
+      family_queue_masks, &family_count);
+
+  iree_host_size_t queue_count = 0;
+  for (iree_host_size_t i = 0; i < family_count; ++i) {
+    queue_count += iree_math_count_ones_u64(family_queue_masks[i]);
+  }
+  IREE_RETURN_IF_ERROR(iree_hal_vulkan_device_plan_allocate_queue_inventory(
+      family_count, queue_count, /*allocate_create_infos=*/false, plan));
+
+  iree_host_size_t queue_offset = 0;
+  for (iree_host_size_t i = 0; i < family_count; ++i) {
+    const uint32_t family_index = family_indices[i];
+    const VkQueueFamilyProperties* properties =
+        &snapshot->queue_families[family_index].queueFamilyProperties;
+    const uint32_t family_queue_count =
+        iree_math_count_ones_u64(family_queue_masks[i]);
+    plan->queue_inventory.families[i] = (iree_hal_vulkan_queue_family_plan_t){
+        .native_family_index = family_index,
+        .flags = properties->queueFlags,
+        .timestamp_valid_bits = properties->timestampValidBits,
+        .queue_count = family_queue_count,
+        .queue_offset = queue_offset,
+    };
+    for (uint32_t queue_index = 0; queue_index < 64; ++queue_index) {
+      if (!iree_any_bit_set(family_queue_masks[i], 1ull << queue_index)) {
+        continue;
+      }
+      plan->queue_inventory.queue_indices[queue_offset++] = queue_index;
+    }
+  }
+  iree_status_t status =
+      iree_hal_vulkan_device_plan_assign_queue_family_ordinals(plan);
+  if (!iree_status_is_ok(status)) {
+    iree_hal_vulkan_device_plan_deinitialize(plan);
+  }
+  return status;
+}
+
 iree_status_t iree_hal_vulkan_device_plan_initialize_for_wrap(
     const iree_hal_vulkan_physical_device_snapshot_t* snapshot,
     const iree_hal_vulkan_device_options_t* device_options,
     const iree_hal_vulkan_external_device_params_t* external_device_params,
-    iree_hal_vulkan_device_plan_t* out_plan) {
+    iree_allocator_t host_allocator, iree_hal_vulkan_device_plan_t* out_plan) {
   IREE_ASSERT_ARGUMENT(snapshot);
   IREE_ASSERT_ARGUMENT(device_options);
   IREE_ASSERT_ARGUMENT(external_device_params);
   IREE_ASSERT_ARGUMENT(out_plan);
-  iree_hal_vulkan_device_plan_initialize_empty(out_plan);
+  iree_hal_vulkan_device_plan_initialize_empty(host_allocator, out_plan);
 
   if (device_options->flags != IREE_HAL_VULKAN_DEVICE_FLAG_NONE) {
     return iree_make_status(
@@ -1297,7 +1477,8 @@ iree_status_t iree_hal_vulkan_device_plan_initialize_for_wrap(
   out_plan->enabled_features = external_device_params->enabled_features;
   out_plan->enabled_extensions = external_device_params->enabled_extensions;
   out_plan->request_flags = external_device_params->request_flags;
-  return iree_ok_status();
+  return iree_hal_vulkan_device_plan_initialize_wrapped_queues(
+      snapshot, external_device_params, out_plan);
 }
 
 static void iree_hal_vulkan_device_plan_refresh_feature_chain(
@@ -1337,7 +1518,7 @@ void iree_hal_vulkan_device_plan_make_create_info(
   iree_hal_vulkan_device_plan_refresh_feature_chain(plan);
   for (uint32_t i = 0; i < plan->queue_create_info_count; ++i) {
     plan->queue_create_infos[i].pQueuePriorities =
-        &plan->queue_priorities[plan->queue_priority_offsets[i]];
+        &plan->queue_priorities[plan->queue_inventory.families[i].queue_offset];
   }
 
   *out_create_info = (VkDeviceCreateInfo){

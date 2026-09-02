@@ -28,9 +28,6 @@ extern "C" {
 // Maximum recognized device extension names enabled during VkDevice creation.
 #define IREE_HAL_VULKAN_MAX_DEVICE_EXTENSION_NAMES 11
 
-// Maximum queue-family create infos needed for current queue role assignment.
-#define IREE_HAL_VULKAN_MAX_QUEUE_CREATE_INFOS 3
-
 // Selected physical Vulkan queue identity and queue-family capabilities for
 // one logical queue role.
 typedef struct iree_hal_vulkan_queue_selection_t {
@@ -39,6 +36,9 @@ typedef struct iree_hal_vulkan_queue_selection_t {
 
   // Queue index within the selected family.
   uint32_t queue_index;
+
+  // Canonical HAL ordinal of the selected queue family.
+  iree_hal_queue_family_ordinal_t family_ordinal;
 
   // Queue family capability flags cached from the physical snapshot.
   VkQueueFlags flags;
@@ -65,11 +65,54 @@ typedef struct iree_hal_vulkan_queue_assignment_t {
   iree_host_size_t queue_count;
 } iree_hal_vulkan_queue_assignment_t;
 
+// One canonical HAL queue family backed by a provisioned Vulkan queue family.
+//
+// Array position in a device plan's queue inventory is the stable HAL queue
+// family ordinal. Families are sorted by |native_family_index|.
+typedef struct iree_hal_vulkan_queue_family_plan_t {
+  // Queue family index from the selected physical device.
+  uint32_t native_family_index;
+
+  // Queue family capability flags cached from the physical snapshot.
+  VkQueueFlags flags;
+
+  // Valid timestamp bits reported by the queue family.
+  uint32_t timestamp_valid_bits;
+
+  // Count of Vulkan queues provisioned in this family.
+  uint32_t queue_count;
+
+  // Start of this family's native queue indices in the flat inventory.
+  iree_host_size_t queue_offset;
+} iree_hal_vulkan_queue_family_plan_t;
+
+// Canonical inventory of every Vulkan queue provisioned for a logical device.
+typedef struct iree_hal_vulkan_queue_inventory_t {
+  // Count of canonical HAL queue families in |families|.
+  iree_host_size_t family_count;
+
+  // Queue families sorted by native Vulkan queue family index.
+  iree_hal_vulkan_queue_family_plan_t* families;
+
+  // Total count of native queue indices in |queue_indices|.
+  iree_host_size_t queue_count;
+
+  // Native queue indices grouped by family and sorted within each family.
+  uint32_t* queue_indices;
+} iree_hal_vulkan_queue_inventory_t;
+
 // Planned logical-device policy decisions that can be computed without a live
-// VkDevice handle.
+// VkDevice handle. The plan owns temporary storage and must not be copied after
+// initialization.
 typedef struct iree_hal_vulkan_device_plan_t {
+  // Host allocator used for plan-owned temporary storage.
+  iree_allocator_t host_allocator;
+
   // Queue role assignment selected for the logical device.
   iree_hal_vulkan_queue_assignment_t queue_assignment;
+
+  // Canonical inventory of every queue provisioned for the logical device.
+  iree_hal_vulkan_queue_inventory_t queue_inventory;
 
   // Non-device-feature behavior requested for the logical device.
   iree_hal_vulkan_request_flags_t request_flags;
@@ -87,15 +130,11 @@ typedef struct iree_hal_vulkan_device_plan_t {
   // Count of valid entries in enabled_extension_names.
   uint32_t enabled_extension_count;
 
-  // Queue priorities referenced by queue_create_infos.
-  float queue_priorities[IREE_HAL_VULKAN_MAX_QUEUE_CREATE_INFOS];
+  // Queue priorities referenced by |queue_create_infos|.
+  float* queue_priorities;
 
   // Queue-family create infos for driver-owned VkDevice creation.
-  VkDeviceQueueCreateInfo
-      queue_create_infos[IREE_HAL_VULKAN_MAX_QUEUE_CREATE_INFOS];
-
-  // Queue-priority start index for each entry in queue_create_infos.
-  uint32_t queue_priority_offsets[IREE_HAL_VULKAN_MAX_QUEUE_CREATE_INFOS];
+  VkDeviceQueueCreateInfo* queue_create_infos;
 
   // Count of valid entries in queue_create_infos.
   uint32_t queue_create_info_count;
@@ -144,19 +183,25 @@ iree_status_t iree_hal_vulkan_queue_affinity_normalize(
     iree_hal_queue_affinity_t* out_normalized_affinity);
 
 // Initializes |out_plan| for a driver-owned VkDevice created from |snapshot|.
+// The caller must deinitialize |out_plan| after any return.
 iree_status_t iree_hal_vulkan_device_plan_initialize_for_create(
     const iree_hal_vulkan_physical_device_snapshot_t* snapshot,
     const iree_hal_vulkan_device_options_t* device_options,
     iree_hal_vulkan_request_flags_t request_flags,
     iree_hal_vulkan_features_t required_features,
-    iree_hal_vulkan_device_plan_t* out_plan);
+    iree_allocator_t host_allocator, iree_hal_vulkan_device_plan_t* out_plan);
 
 // Initializes |out_plan| for a wrapped external VkDevice.
+// The caller must deinitialize |out_plan| after any return.
 iree_status_t iree_hal_vulkan_device_plan_initialize_for_wrap(
     const iree_hal_vulkan_physical_device_snapshot_t* snapshot,
     const iree_hal_vulkan_device_options_t* device_options,
     const iree_hal_vulkan_external_device_params_t* external_device_params,
-    iree_hal_vulkan_device_plan_t* out_plan);
+    iree_allocator_t host_allocator, iree_hal_vulkan_device_plan_t* out_plan);
+
+// Releases temporary storage owned by |plan|.
+void iree_hal_vulkan_device_plan_deinitialize(
+    iree_hal_vulkan_device_plan_t* plan);
 
 // Produces a VkDeviceCreateInfo view over |plan| for driver-owned device
 // creation.

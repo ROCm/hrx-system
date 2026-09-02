@@ -189,7 +189,7 @@ iree_status_t iree_hal_replay_executor_make_buffer_params(
   out_params->usage = payload->usage;
   out_params->type = payload->type;
   out_params->access = payload->access;
-  out_params->queue_affinity = payload->queue_affinity;
+  out_params->queue_family_affinity = payload->queue_family_affinity;
   out_params->min_alignment = payload->min_alignment;
   return iree_ok_status();
 }

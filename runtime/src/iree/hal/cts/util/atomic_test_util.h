@@ -33,8 +33,6 @@ struct AtomicTestRequirements {
 
 // Queue and allocation parameters satisfying an atomic test requirement.
 struct AtomicTestConfiguration {
-  // One exact queue-affinity bit from a matching queue family.
-  iree_hal_queue_affinity_t queue_affinity = 0;
   // Allocation parameters selecting a matching memory type.
   iree_hal_buffer_params_t buffer_params = {};
 };

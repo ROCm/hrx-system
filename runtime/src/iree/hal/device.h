@@ -320,12 +320,14 @@ typedef uint64_t iree_hal_dealloca_flags_t;
 enum iree_hal_dealloca_flag_bits_t {
   IREE_HAL_DEALLOCA_FLAG_NONE = 0,
 
-  // The provided device and queue affinity will be overridden with the origin
-  // of the allocation as defined by the placement, if available.
+  // The provided device will be overridden with the origin of the allocation
+  // as defined by the placement, if available. The provided queue affinity is
+  // retained because placement only describes queue-family accessibility and
+  // cannot select an exact execution queue.
   // If the buffer has no origin device (imported heap buffers and other rare
-  // cases) or was not allocated asynchronously the provided device and queue
-  // affinity will be used to insert a queue barrier. Callers must ensure the
-  // provided device is compatible with the fences provided.
+  // cases) or was not allocated asynchronously the provided device will be
+  // used to insert a queue barrier. Callers must ensure the provided device and
+  // queue affinity are compatible with the fences provided.
   IREE_HAL_DEALLOCA_FLAG_PREFER_ORIGIN = 1ull << 0,
 };
 

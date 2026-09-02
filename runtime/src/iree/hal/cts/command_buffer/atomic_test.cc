@@ -56,10 +56,9 @@ class CommandBufferAtomicTest : public CtsTestBase<> {
   }
 
   template <typename ValueType>
-  ValueType ReadAtomicValue(const AtomicTestConfiguration& configuration,
-                            iree_hal_buffer_t* buffer) {
+  ValueType ReadAtomicValue(iree_hal_buffer_t* buffer) {
     const std::vector<uint8_t> bytes = ReadBufferBytes(
-        buffer, kTargetOffset, sizeof(ValueType), configuration.queue_affinity);
+        buffer, kTargetOffset, sizeof(ValueType), IREE_HAL_QUEUE_AFFINITY_ANY);
     ValueType value = 0;
     EXPECT_EQ(bytes.size(), sizeof(value));
     if (bytes.size() == sizeof(value)) {
@@ -69,9 +68,9 @@ class CommandBufferAtomicTest : public CtsTestBase<> {
   }
 
   template <typename ValueType>
-  iree_status_t QueueStoreAtomicValue(
-      const AtomicTestConfiguration& configuration, iree_hal_buffer_t* buffer,
-      iree_hal_atomic_width_t width, ValueType value) {
+  iree_status_t QueueStoreAtomicValue(iree_hal_buffer_t* buffer,
+                                      iree_hal_atomic_width_t width,
+                                      ValueType value) {
     SemaphoreList empty_wait;
     SemaphoreList signal(device_, {0}, {1});
     const iree_hal_atomic_store_params_t params = {
@@ -80,7 +79,7 @@ class CommandBufferAtomicTest : public CtsTestBase<> {
         /*.width=*/width,
     };
     iree_status_t status = iree_hal_device_queue_atomic_store(
-        device_, configuration.queue_affinity, empty_wait, signal, buffer,
+        device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, signal, buffer,
         kTargetOffset, params);
     if (iree_status_is_ok(status)) {
       status = iree_hal_semaphore_list_wait(signal, iree_infinite_timeout(),
@@ -90,7 +89,6 @@ class CommandBufferAtomicTest : public CtsTestBase<> {
   }
 
   iree_status_t SubmitAtomicCommandBuffer(
-      const AtomicTestConfiguration& configuration,
       iree_hal_command_buffer_t* command_buffer,
       iree_hal_buffer_t* indirect_buffer) {
     iree_hal_buffer_binding_t binding = {
@@ -106,7 +104,7 @@ class CommandBufferAtomicTest : public CtsTestBase<> {
     SemaphoreList empty_wait;
     SemaphoreList signal(device_, {0}, {1});
     iree_status_t status = iree_hal_device_queue_execute(
-        device_, configuration.queue_affinity, empty_wait, signal,
+        device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, signal,
         command_buffer, binding_table, IREE_HAL_EXECUTE_FLAG_NONE);
     if (iree_status_is_ok(status)) {
       status = iree_hal_semaphore_list_wait(signal, iree_infinite_timeout(),
@@ -159,7 +157,7 @@ class CommandBufferAtomicTest : public CtsTestBase<> {
     Ref<iree_hal_command_buffer_t> command_buffer;
     IREE_ASSERT_OK(iree_hal_command_buffer_create(
         device_, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
-        IREE_HAL_COMMAND_CATEGORY_ATOMIC, configuration.queue_affinity,
+        IREE_HAL_COMMAND_CATEGORY_ATOMIC, IREE_HAL_QUEUE_AFFINITY_ANY,
         binding_capacity, command_buffer.out()));
     IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
     const iree_hal_buffer_ref_t target_ref =
@@ -188,7 +186,7 @@ class CommandBufferAtomicTest : public CtsTestBase<> {
     SemaphoreList empty_wait;
     SemaphoreList signal(device_, {0}, {1});
     Status submission_status(iree_hal_device_queue_execute(
-        device_, configuration.queue_affinity, empty_wait, signal,
+        device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, signal,
         command_buffer, binding_table, IREE_HAL_EXECUTE_FLAG_NONE));
     if (submission_status.ok()) {
       EXPECT_THAT(
@@ -231,7 +229,7 @@ class CommandBufferAtomicTest : public CtsTestBase<> {
     Ref<iree_hal_command_buffer_t> command_buffer;
     IREE_ASSERT_OK(iree_hal_command_buffer_create(
         device_, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
-        IREE_HAL_COMMAND_CATEGORY_ATOMIC, configuration.queue_affinity,
+        IREE_HAL_COMMAND_CATEGORY_ATOMIC, IREE_HAL_QUEUE_AFFINITY_ANY,
         binding_capacity, command_buffer.out()));
     IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
 
@@ -290,24 +288,22 @@ class CommandBufferAtomicTest : public CtsTestBase<> {
         IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE, target_ref, rmw_params));
     IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
 
-    IREE_ASSERT_OK(
-        SubmitAtomicCommandBuffer(configuration, command_buffer,
-                                  indirect ? first_buffer.get() : nullptr));
-    EXPECT_EQ(ReadAtomicValue<ValueType>(configuration, first_buffer),
+    IREE_ASSERT_OK(SubmitAtomicCommandBuffer(
+        command_buffer, indirect ? first_buffer.get() : nullptr));
+    EXPECT_EQ(ReadAtomicValue<ValueType>(first_buffer),
               static_cast<ValueType>(4));
 
     iree_hal_buffer_t* second_target =
         indirect ? second_buffer.get() : first_buffer.get();
-    IREE_ASSERT_OK(QueueStoreAtomicValue(configuration, second_target, width,
+    IREE_ASSERT_OK(QueueStoreAtomicValue(second_target, width,
                                          static_cast<ValueType>(99)));
-    IREE_ASSERT_OK(
-        SubmitAtomicCommandBuffer(configuration, command_buffer,
-                                  indirect ? second_buffer.get() : nullptr));
+    IREE_ASSERT_OK(SubmitAtomicCommandBuffer(
+        command_buffer, indirect ? second_buffer.get() : nullptr));
     if (indirect) {
-      EXPECT_EQ(ReadAtomicValue<ValueType>(configuration, second_buffer),
+      EXPECT_EQ(ReadAtomicValue<ValueType>(second_buffer),
                 static_cast<ValueType>(4));
     } else {
-      EXPECT_EQ(ReadAtomicValue<ValueType>(configuration, first_buffer),
+      EXPECT_EQ(ReadAtomicValue<ValueType>(first_buffer),
                 static_cast<ValueType>(4));
     }
   }
@@ -335,7 +331,7 @@ class CommandBufferAtomicTest : public CtsTestBase<> {
     Ref<iree_hal_command_buffer_t> command_buffer;
     IREE_ASSERT_OK(iree_hal_command_buffer_create(
         device_, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
-        IREE_HAL_COMMAND_CATEGORY_ATOMIC, configuration.queue_affinity,
+        IREE_HAL_COMMAND_CATEGORY_ATOMIC, IREE_HAL_QUEUE_AFFINITY_ANY,
         binding_capacity, command_buffer.out()));
     IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
 
@@ -386,24 +382,22 @@ class CommandBufferAtomicTest : public CtsTestBase<> {
         IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE, target_ref, wait_params));
     IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
 
-    IREE_ASSERT_OK(
-        SubmitAtomicCommandBuffer(configuration, command_buffer,
-                                  indirect ? first_buffer.get() : nullptr));
-    EXPECT_EQ(ReadAtomicValue<ValueType>(configuration, first_buffer),
+    IREE_ASSERT_OK(SubmitAtomicCommandBuffer(
+        command_buffer, indirect ? first_buffer.get() : nullptr));
+    EXPECT_EQ(ReadAtomicValue<ValueType>(first_buffer),
               static_cast<ValueType>(0x12));
 
     iree_hal_buffer_t* second_target =
         indirect ? second_buffer.get() : first_buffer.get();
-    IREE_ASSERT_OK(QueueStoreAtomicValue(configuration, second_target, width,
+    IREE_ASSERT_OK(QueueStoreAtomicValue(second_target, width,
                                          static_cast<ValueType>(0x22)));
-    IREE_ASSERT_OK(
-        SubmitAtomicCommandBuffer(configuration, command_buffer,
-                                  indirect ? second_buffer.get() : nullptr));
+    IREE_ASSERT_OK(SubmitAtomicCommandBuffer(
+        command_buffer, indirect ? second_buffer.get() : nullptr));
     if (indirect) {
-      EXPECT_EQ(ReadAtomicValue<ValueType>(configuration, second_buffer),
+      EXPECT_EQ(ReadAtomicValue<ValueType>(second_buffer),
                 static_cast<ValueType>(0x12));
     } else {
-      EXPECT_EQ(ReadAtomicValue<ValueType>(configuration, first_buffer),
+      EXPECT_EQ(ReadAtomicValue<ValueType>(first_buffer),
                 static_cast<ValueType>(0x12));
     }
   }

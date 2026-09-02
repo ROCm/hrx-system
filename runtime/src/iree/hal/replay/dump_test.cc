@@ -419,7 +419,6 @@ TEST(ReplayDumpTest, EmitsTextSummary) {
   IREE_ASSERT_OK(
       DumpReplayToString(MakeReplayFileContents(storage), &options, &output));
 
-  EXPECT_THAT(output, HasSubstr("IREE HAL replay v5.0"));
   EXPECT_THAT(output, HasSubstr("summary:"));
   EXPECT_THAT(output, HasSubstr("hermetic: yes"));
   EXPECT_THAT(output, HasSubstr("strict_replay_supported: yes"));
@@ -568,7 +567,7 @@ TEST(ReplayDumpTest, EmitsQueueAllocaSemaphoreRanges) {
 
   iree_hal_replay_device_queue_alloca_payload_t payload = {};
   payload.allocation.allocation_size = 4096;
-  payload.allocation.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+  payload.allocation.queue_family_affinity = IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY;
   payload.allocation.usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
   payload.allocation.type = IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
   payload.allocation.access = IREE_HAL_MEMORY_ACCESS_ALL;

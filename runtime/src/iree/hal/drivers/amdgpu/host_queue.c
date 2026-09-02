@@ -1597,11 +1597,6 @@ static iree_status_t iree_hal_amdgpu_host_queue_dealloca(
                             "unsupported dealloca flags: 0x%" PRIx64, flags);
   }
 
-  // iree_hal_device_queue_dealloca() applies PREFER_ORIGIN before vtable
-  // dispatch by rewriting the device and queue affinity from the buffer's
-  // allocation placement. Transient wrappers created by queue_alloca carry this
-  // queue's one-bit affinity in that placement, so this host-queue path can use
-  // |base_queue| directly.
   if (!iree_hal_amdgpu_transient_buffer_isa(buffer)) {
     return iree_hal_amdgpu_host_queue_execute(
         base_queue, wait_semaphore_list, signal_semaphore_list,

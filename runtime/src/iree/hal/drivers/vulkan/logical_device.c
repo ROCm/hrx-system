@@ -1231,14 +1231,11 @@ static iree_status_t iree_hal_vulkan_logical_device_queue_alloca(
   IREE_RETURN_IF_ERROR(iree_hal_vulkan_logical_device_select_queue_lane(
       device, IREE_HAL_VULKAN_QUEUE_ROLE_COMPUTE, /*required_flags=*/0,
       queue_affinity, &queue));
-  const iree_hal_queue_affinity_t allocation_queue_affinity =
-      queue->queue_affinity;
 
   iree_hal_vulkan_queue_alloca_plan_t allocation_plan;
   IREE_RETURN_IF_ERROR(iree_hal_vulkan_allocator_select_queue_alloca_plan(
       device->device_allocator, pool, &params, &allocation_size,
       &allocation_plan));
-  params.queue_affinity = allocation_queue_affinity;
   if (allocation_plan.strategy ==
           IREE_HAL_VULKAN_QUEUE_ALLOCA_STRATEGY_SPARSE &&
       !iree_all_bits_set(queue->queue_flags, VK_QUEUE_SPARSE_BINDING_BIT)) {
@@ -1803,23 +1800,22 @@ static iree_status_t iree_hal_vulkan_logical_device_initialize_proactor(
 }
 
 static iree_status_t iree_hal_vulkan_logical_device_initialize_allocator(
-    iree_hal_vulkan_logical_device_t* device) {
+    iree_hal_vulkan_logical_device_t* device,
+    const iree_hal_vulkan_device_plan_t* device_plan) {
   IREE_ASSERT_ARGUMENT(device);
-  const iree_hal_vulkan_allocator_queue_family_t queue_families[] = {
-      {
-          .queue_affinity = device->queues.compute.selection.affinity,
-          .family_index = device->queues.compute.selection.family_index,
-      },
-      {
-          .queue_affinity = device->queues.transfer.selection.affinity,
-          .family_index = device->queues.transfer.selection.family_index,
-      },
-  };
+  IREE_ASSERT_ARGUMENT(device_plan);
+  iree_hal_vulkan_allocator_queue_family_t
+      queue_families[IREE_HAL_MAX_QUEUE_FAMILIES];
+  for (iree_host_size_t i = 0; i < device_plan->queue_inventory.family_count;
+       ++i) {
+    queue_families[i].native_family_index =
+        device_plan->queue_inventory.families[i].native_family_index;
+  }
   return iree_hal_vulkan_allocator_create(
       (iree_hal_device_t*)device, &device->syms, device->logical_device,
       &device->physical_device, device->enabled_features,
       device->enabled_extensions, device->queues.affinity_mask,
-      IREE_ARRAYSIZE(queue_families), queue_families,
+      device_plan->queue_inventory.family_count, queue_families,
       device->queues.sparse_binding_lane, device->proactor,
       device->host_allocator, &device->device_allocator);
 }
@@ -1987,6 +1983,7 @@ static iree_status_t iree_hal_vulkan_logical_device_initialize_queue_lane(
           iree_hal_vulkan_logical_device_queue_handle_mutex(device, queue),
       .proactor = device->proactor,
       .queue_family_index = queue->selection.family_index,
+      .queue_family_ordinal = queue->selection.family_ordinal,
       .queue_index = queue->selection.queue_index,
       .queue_affinity = queue->selection.affinity,
       .role = role,
@@ -2122,7 +2119,8 @@ static iree_status_t iree_hal_vulkan_logical_device_initialize_from_plan(
     status = iree_hal_vulkan_logical_device_initialize_queues(device);
   }
   if (iree_status_is_ok(status)) {
-    status = iree_hal_vulkan_logical_device_initialize_allocator(device);
+    status = iree_hal_vulkan_logical_device_initialize_allocator(device,
+                                                                 device_plan);
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_vulkan_logical_device_initialize_queue_staging(device);
@@ -2151,7 +2149,7 @@ static iree_status_t iree_hal_vulkan_logical_device_create_from_selection(
   iree_hal_vulkan_device_plan_t device_plan;
   iree_status_t status = iree_hal_vulkan_device_plan_initialize_for_create(
       snapshot, device_options, driver_options->request_flags,
-      driver_options->required_features, &device_plan);
+      driver_options->required_features, host_allocator, &device_plan);
 
   iree_hal_vulkan_logical_device_t* device = NULL;
   if (iree_status_is_ok(status)) {
@@ -2187,6 +2185,7 @@ static iree_status_t iree_hal_vulkan_logical_device_create_from_selection(
   } else {
     iree_hal_device_release((iree_hal_device_t*)device);
   }
+  iree_hal_vulkan_device_plan_deinitialize(&device_plan);
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
@@ -2317,9 +2316,12 @@ IREE_API_EXPORT iree_status_t iree_hal_vulkan_wrap_device(
         &snapshot);
   }
   iree_hal_vulkan_device_plan_t device_plan;
+  bool device_plan_initialized = false;
   if (iree_status_is_ok(status)) {
+    device_plan_initialized = true;
     status = iree_hal_vulkan_device_plan_initialize_for_wrap(
-        &snapshot, options, external_device_params, &device_plan);
+        &snapshot, options, external_device_params, host_allocator,
+        &device_plan);
   }
 
   iree_hal_vulkan_logical_device_t* device = NULL;
@@ -2344,6 +2346,9 @@ IREE_API_EXPORT iree_status_t iree_hal_vulkan_wrap_device(
 
   iree_hal_vulkan_physical_device_snapshot_deinitialize(host_allocator,
                                                         &snapshot);
+  if (device_plan_initialized) {
+    iree_hal_vulkan_device_plan_deinitialize(&device_plan);
+  }
   IREE_TRACE_ZONE_END(z0);
   return status;
 }

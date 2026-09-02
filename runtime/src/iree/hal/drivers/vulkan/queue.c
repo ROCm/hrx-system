@@ -1126,7 +1126,8 @@ static iree_status_t iree_hal_vulkan_queue_bda_publication_block_create(
       .usage = IREE_HAL_BUFFER_USAGE_STORAGE_READ |
                IREE_HAL_BUFFER_USAGE_MAPPING_PERSISTENT |
                IREE_HAL_BUFFER_USAGE_MAPPING_ACCESS_SEQUENTIAL_WRITE,
-      .queue_affinity = queue->queue_affinity,
+      .queue_family_affinity =
+          iree_hal_make_queue_family_affinity(queue->queue_family_ordinal),
   };
   iree_status_t status = iree_hal_vulkan_allocator_allocate_direct_buffer(
       queue->device_allocator, &params, capacity, &block->buffer);
@@ -1557,7 +1558,8 @@ static iree_status_t iree_hal_vulkan_queue_staging_ring_create(
                IREE_HAL_BUFFER_USAGE_MAPPING_PERSISTENT |
                IREE_HAL_BUFFER_USAGE_MAPPING_ACCESS_RANDOM |
                IREE_HAL_BUFFER_USAGE_MAPPING_ACCESS_SEQUENTIAL_WRITE,
-      .queue_affinity = queue->queue_affinity,
+      .queue_family_affinity =
+          iree_hal_make_queue_family_affinity(queue->queue_family_ordinal),
   };
   iree_status_t status = iree_hal_allocator_allocate_buffer(
       queue->device_allocator, params, allocation_size, &ring->buffer);
@@ -4747,7 +4749,7 @@ static iree_status_t iree_hal_vulkan_queue_stage_alloca_sparse_backing(
   iree_hal_vulkan_queue_t* queue = submission->queue;
   iree_hal_buffer_placement_t placement = {
       .device = (iree_hal_device_t*)queue->device,
-      .queue_affinity = submission->alloca.params.queue_affinity,
+      .queue_family_affinity = submission->alloca.params.queue_family_affinity,
       .flags = IREE_HAL_BUFFER_PLACEMENT_FLAG_NONE,
   };
 
@@ -6000,6 +6002,7 @@ iree_status_t iree_hal_vulkan_queue_initialize(
   out_queue->queue_handle_mutex = params->queue_handle_mutex;
   out_queue->proactor = params->proactor;
   out_queue->queue_family_index = params->queue_family_index;
+  out_queue->queue_family_ordinal = params->queue_family_ordinal;
   out_queue->queue_index = params->queue_index;
   out_queue->queue_affinity = params->queue_affinity;
   out_queue->role = params->role;
@@ -6428,7 +6431,7 @@ static iree_status_t iree_hal_vulkan_queue_create_transient_buffer(
     iree_hal_alloca_flags_t flags, iree_hal_buffer_t** out_buffer) {
   iree_hal_buffer_placement_t placement = {
       .device = (iree_hal_device_t*)queue->device,
-      .queue_affinity = params.queue_affinity,
+      .queue_family_affinity = params.queue_family_affinity,
       .flags = IREE_HAL_BUFFER_PLACEMENT_FLAG_ASYNCHRONOUS,
   };
   if (iree_all_bits_set(flags, IREE_HAL_ALLOCA_FLAG_INDETERMINATE_LIFETIME)) {

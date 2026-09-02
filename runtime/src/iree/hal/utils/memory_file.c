@@ -143,6 +143,7 @@ IREE_API_EXPORT iree_status_t iree_hal_memory_file_wrap(
   }
 
   IREE_TRACE_ZONE_BEGIN(z0);
+  (void)queue_affinity;
 
   iree_byte_span_t contents = iree_io_file_handle_value(handle).host_allocation;
 
@@ -266,7 +267,7 @@ static iree_status_t iree_hal_memory_file_try_import_buffer(
   iree_hal_buffer_params_t storage_buffer_params = {
       .access = access | IREE_HAL_MEMORY_ACCESS_DISCARD |
                 (!is_aligned ? IREE_HAL_MEMORY_ACCESS_UNALIGNED : 0),
-      .queue_affinity = queue_affinity,
+      .queue_family_affinity = IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
       .type = IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_HOST |
               IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
       .usage = IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED |

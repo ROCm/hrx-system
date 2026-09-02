@@ -152,12 +152,12 @@ static iree_status_t iree_hal_replay_dump_append_text_payload(
       return iree_string_builder_append_format(
           builder,
           " allocation_size=%" PRIu64 " byte_offset=%" PRIu64
-          " byte_length=%" PRIu64 " queue_affinity=%" PRIu64
+          " byte_length=%" PRIu64 " queue_family_affinity=%" PRIu64
           " placement_flags=0x%08" PRIx32 " memory_type=0x%08" PRIx32
           " allowed_usage=0x%08" PRIx32 " allowed_access=0x%04" PRIx16,
           payload.allocation_size, payload.byte_offset, payload.byte_length,
-          payload.queue_affinity, payload.placement_flags, payload.memory_type,
-          payload.allowed_usage, payload.allowed_access);
+          payload.queue_family_affinity, payload.placement_flags,
+          payload.memory_type, payload.allowed_usage, payload.allowed_access);
     }
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_ALLOCATOR_ALLOCATE_BUFFER: {
       IREE_RETURN_IF_ERROR(iree_hal_replay_dump_payload_length_check(
@@ -166,10 +166,10 @@ static iree_status_t iree_hal_replay_dump_append_text_payload(
       memcpy(&payload, record->payload.data, sizeof(payload));
       return iree_string_builder_append_format(
           builder,
-          " allocation_size=%" PRIu64 " queue_affinity=%" PRIu64
+          " allocation_size=%" PRIu64 " queue_family_affinity=%" PRIu64
           " min_alignment=%" PRIu64 " usage=0x%08" PRIx32 " type=0x%08" PRIx32
           " access=0x%04" PRIx16,
-          payload.allocation_size, payload.queue_affinity,
+          payload.allocation_size, payload.queue_family_affinity,
           payload.min_alignment, payload.usage, payload.type, payload.access);
     }
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_ALLOCATOR_IMPORT_BUFFER: {
@@ -197,7 +197,8 @@ static iree_status_t iree_hal_replay_dump_append_text_payload(
           " access=0x%04" PRIx16 " external_type=%" PRIu32
           " external_flags=0x%08" PRIx32 " data_range=[%" PRIu64 ", +%" PRIu64
           "]",
-          payload.allocation.allocation_size, payload.allocation.queue_affinity,
+          payload.allocation.allocation_size,
+          payload.allocation.queue_family_affinity,
           payload.allocation.min_alignment, payload.allocation.usage,
           payload.allocation.type, payload.allocation.access,
           payload.external_type, payload.external_flags, data_offset,
@@ -445,13 +446,14 @@ static iree_status_t iree_hal_replay_dump_append_text_payload(
           &layout));
       return iree_string_builder_append_format(
           builder,
-          " allocation_size=%" PRIu64 " queue_affinity=%" PRIu64
+          " allocation_size=%" PRIu64 " queue_family_affinity=%" PRIu64
           " min_alignment=%" PRIu64 " usage=0x%08" PRIx32 " type=0x%08" PRIx32
           " access=0x%04" PRIx16 " submit_queue_affinity=%" PRIu64
           " flags=0x%016" PRIx64 " wait_count=%" PRIu64 " signal_count=%" PRIu64
           " wait_range=[%" PRIu64 ", +%" PRIhsz "] signal_range=[%" PRIu64
           ", +%" PRIhsz "]",
-          payload.allocation.allocation_size, payload.allocation.queue_affinity,
+          payload.allocation.allocation_size,
+          payload.allocation.queue_family_affinity,
           payload.allocation.min_alignment, payload.allocation.usage,
           payload.allocation.type, payload.allocation.access,
           payload.queue_affinity, payload.flags, payload.wait_semaphore_count,

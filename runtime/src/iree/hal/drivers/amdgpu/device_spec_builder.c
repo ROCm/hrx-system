@@ -90,20 +90,6 @@ iree_hal_amdgpu_device_spec_all_physical_device_affinity(
              : ((1ull << physical_device_count) - 1ull);
 }
 
-static iree_hal_queue_affinity_t
-iree_hal_amdgpu_device_spec_queue_affinity_for_physical_device(
-    iree_host_size_t physical_device_ordinal,
-    iree_host_size_t queue_count_per_physical_device) {
-  const iree_host_size_t first_queue_ordinal =
-      physical_device_ordinal * queue_count_per_physical_device;
-  if (queue_count_per_physical_device == IREE_HAL_MAX_QUEUES) {
-    return IREE_HAL_QUEUE_AFFINITY_ANY;
-  }
-  return (
-      (((iree_hal_queue_affinity_t)1 << queue_count_per_physical_device) - 1)
-      << first_queue_ordinal);
-}
-
 static iree_status_t iree_hal_amdgpu_device_spec_populate_identity(
     const iree_hal_amdgpu_device_spec_params_t* params,
     iree_hal_device_spec_builder_t* builder) {
@@ -364,14 +350,11 @@ static iree_status_t iree_hal_amdgpu_device_spec_populate_queues(
         physical_device = &params->physical_devices[i];
     families[i] = (iree_hal_queue_family_spec_t){
         .name = physical_device->identity.processor,
-        .queue_count = physical_device->queue_count,
+        .provisioned_queue_count = physical_device->queue_count,
         .priority_count = 1,
         .timestamp_valid_bits = 64,
         .timestamp_frequency_hz = physical_device->timestamp_frequency_hz,
         .physical_device_affinity = 1ull << i,
-        .queue_affinity =
-            iree_hal_amdgpu_device_spec_queue_affinity_for_physical_device(
-                i, physical_device->queue_count),
         .role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH |
                       IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER |
                       IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_HOST_CALL |

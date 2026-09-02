@@ -140,6 +140,7 @@ static iree_status_t iree_hal_amdgpu_executable_global_resolver_create_buffer(
     iree_device_size_t expected_byte_length,
     iree_hal_queue_affinity_t selected_queue_affinity,
     iree_host_size_t physical_device_ordinal, iree_hal_buffer_t** out_buffer) {
+  (void)selected_queue_affinity;
   iree_hal_amdgpu_executable_global_resolver_t* resolver =
       (iree_hal_amdgpu_executable_global_resolver_t*)user_data;
   *out_buffer = NULL;
@@ -182,7 +183,8 @@ static iree_status_t iree_hal_amdgpu_executable_global_resolver_create_buffer(
 
   iree_hal_buffer_placement_t placement = {
       .device = resolver->device,
-      .queue_affinity = selected_queue_affinity,
+      .queue_family_affinity = iree_hal_make_queue_family_affinity(
+          (iree_hal_queue_family_ordinal_t)physical_device_ordinal),
       .flags = IREE_HAL_BUFFER_PLACEMENT_FLAG_NONE,
   };
   iree_hal_buffer_release_callback_t release_callback = {

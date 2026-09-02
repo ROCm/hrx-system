@@ -103,7 +103,7 @@ TEST(BufferViewUtilTest, GenerateBufferUsesLogicalViewSizeForGenerator) {
       /*.usage=*/IREE_HAL_BUFFER_USAGE_DEFAULT,
       /*.access=*/0,
       /*.type=*/IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
-      /*.queue_affinity=*/0,
+      /*.queue_family_affinity=*/0,
   };
   iree_hal_buffer_view_t* buffer_view = NULL;
   iree_status_t status = iree_hal_buffer_view_generate_buffer(

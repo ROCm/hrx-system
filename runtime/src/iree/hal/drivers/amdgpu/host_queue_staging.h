@@ -89,7 +89,7 @@ iree_status_t iree_hal_amdgpu_staging_pool_initialize(
     iree_hal_device_t* logical_device, const iree_hal_amdgpu_libhsa_t* libhsa,
     const iree_hal_amdgpu_topology_t* topology,
     const iree_hal_amdgpu_host_memory_pools_t* host_memory_pools,
-    iree_hal_queue_affinity_t queue_affinity_mask,
+    iree_hal_queue_family_affinity_t queue_family_affinity,
     const iree_hal_amdgpu_staging_pool_options_t* options,
     iree_allocator_t host_allocator, iree_hal_amdgpu_staging_pool_t* out_pool);
 

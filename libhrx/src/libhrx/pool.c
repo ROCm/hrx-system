@@ -35,7 +35,8 @@ static bool hrx_iree_buffer_params_are_compatible(
   return pool_params.type == request_params.type &&
          pool_params.access == request_params.access &&
          pool_params.usage == request_params.usage &&
-         pool_params.queue_affinity == request_params.queue_affinity;
+         pool_params.queue_family_affinity ==
+             request_params.queue_family_affinity;
 }
 
 iree_status_t hrx_iree_exact_pool_create(iree_hal_allocator_t* allocator,

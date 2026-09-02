@@ -230,12 +230,12 @@ static iree_status_t iree_hal_replay_dump_append_json_payload(
           builder,
           ",\"payload\":{\"allocation_size\":%" PRIu64
           ",\"byte_offset\":%" PRIu64 ",\"byte_length\":%" PRIu64
-          ",\"queue_affinity\":%" PRIu64 ",\"placement_flags\":%" PRIu32
+          ",\"queue_family_affinity\":%" PRIu64 ",\"placement_flags\":%" PRIu32
           ",\"memory_type\":%" PRIu32 ",\"allowed_usage\":%" PRIu32
           ",\"allowed_access\":%" PRIu16 "}",
           payload.allocation_size, payload.byte_offset, payload.byte_length,
-          payload.queue_affinity, payload.placement_flags, payload.memory_type,
-          payload.allowed_usage, payload.allowed_access);
+          payload.queue_family_affinity, payload.placement_flags,
+          payload.memory_type, payload.allowed_usage, payload.allowed_access);
     }
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_ALLOCATOR_ALLOCATE_BUFFER: {
       IREE_RETURN_IF_ERROR(iree_hal_replay_dump_payload_length_check(
@@ -245,9 +245,9 @@ static iree_status_t iree_hal_replay_dump_append_json_payload(
       return iree_string_builder_append_format(
           builder,
           ",\"payload\":{\"allocation_size\":%" PRIu64
-          ",\"queue_affinity\":%" PRIu64 ",\"min_alignment\":%" PRIu64
+          ",\"queue_family_affinity\":%" PRIu64 ",\"min_alignment\":%" PRIu64
           ",\"usage\":%" PRIu32 ",\"type\":%" PRIu32 ",\"access\":%" PRIu16 "}",
-          payload.allocation_size, payload.queue_affinity,
+          payload.allocation_size, payload.queue_family_affinity,
           payload.min_alignment, payload.usage, payload.type, payload.access);
     }
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_ALLOCATOR_IMPORT_BUFFER: {
@@ -268,10 +268,11 @@ static iree_status_t iree_hal_replay_dump_append_json_payload(
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
           builder,
           ",\"payload\":{\"allocation_size\":%" PRIu64
-          ",\"queue_affinity\":%" PRIu64 ",\"min_alignment\":%" PRIu64
+          ",\"queue_family_affinity\":%" PRIu64 ",\"min_alignment\":%" PRIu64
           ",\"usage\":%" PRIu32 ",\"type\":%" PRIu32 ",\"access\":%" PRIu16
           ",\"external_type\":%" PRIu32 ",\"external_flags\":%" PRIu32,
-          payload.allocation.allocation_size, payload.allocation.queue_affinity,
+          payload.allocation.allocation_size,
+          payload.allocation.queue_family_affinity,
           payload.allocation.min_alignment, payload.allocation.usage,
           payload.allocation.type, payload.allocation.access,
           payload.external_type, payload.external_flags));
@@ -608,13 +609,14 @@ static iree_status_t iree_hal_replay_dump_append_json_payload(
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
           builder,
           ",\"payload\":{\"allocation_size\":%" PRIu64
-          ",\"allocation_queue_affinity\":%" PRIu64
+          ",\"allocation_queue_family_affinity\":%" PRIu64
           ",\"min_alignment\":%" PRIu64 ",\"usage\":%" PRIu32
           ",\"type\":%" PRIu32 ",\"access\":%" PRIu16
           ",\"queue_affinity\":%" PRIu64 ",\"flags\":%" PRIu64
           ",\"wait_semaphore_count\":%" PRIu64
           ",\"signal_semaphore_count\":%" PRIu64,
-          payload.allocation.allocation_size, payload.allocation.queue_affinity,
+          payload.allocation.allocation_size,
+          payload.allocation.queue_family_affinity,
           payload.allocation.min_alignment, payload.allocation.usage,
           payload.allocation.type, payload.allocation.access,
           payload.queue_affinity, payload.flags, payload.wait_semaphore_count,

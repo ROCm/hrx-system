@@ -473,9 +473,7 @@ typedef struct iree_hal_amdgpu_host_queue_t {
   // profiling enable reads it unlocked, so writes must precede both.
   iree_hal_amdgpu_pm4_timestamp_strategy_t pm4_timestamp_strategy;
 
-  // One-bit logical queue affinity identifying this queue in HAL buffer
-  // placements. queue_alloca uses this as the transient wrapper's origin so
-  // PREFER_ORIGIN dealloca routes back to the same queue.
+  // One-bit logical queue affinity routing device operations to this queue.
   iree_hal_queue_affinity_t queue_affinity;
 
   // Flattened logical queue ordinal in the owning HAL device.

@@ -533,7 +533,7 @@ iree_status_t iree_hal_streaming_memory_allocate_device(
       .usage = usage,
       .access = IREE_HAL_MEMORY_ACCESS_ALL,
       .type = memory_type,
-      .queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY,
+      .queue_family_affinity = IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
       .min_alignment = 64,
   };
 
@@ -583,14 +583,14 @@ iree_status_t iree_hal_streaming_memory_allocate_device_from_pool(
       .usage = IREE_HAL_BUFFER_USAGE_DEFAULT,
       .access = IREE_HAL_MEMORY_ACCESS_ALL,
       .type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
-      .queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY,
+      .queue_family_affinity = IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
       .min_alignment = 64,
   };
   hrx_buffer_params_t hrx_params = {
       .type = (hrx_memory_type_t)params.type,
       .access = (hrx_memory_access_t)params.access,
       .usage = (hrx_buffer_usage_t)params.usage,
-      .queue_affinity = (hrx_queue_affinity_t)params.queue_affinity,
+      .queue_affinity = (hrx_queue_affinity_t)params.queue_family_affinity,
   };
 
   hrx_buffer_t hrx_buffer = NULL;
@@ -1349,7 +1349,7 @@ static iree_status_t iree_hal_streaming_memory_allocate_host_with_context_mode(
       .usage = usage,
       .access = IREE_HAL_MEMORY_ACCESS_ALL,
       .type = memory_type,
-      .queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY,
+      .queue_family_affinity = IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
       .min_alignment = host_alignment,
   };
 
@@ -1415,7 +1415,7 @@ iree_hal_streaming_memory_allocate_owned_host_import_with_context_mode(
         .access = IREE_HAL_MEMORY_ACCESS_ALL,
         .type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
                 IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
-        .queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY,
+        .queue_family_affinity = IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
         .min_alignment = host_alignment,
     };
     iree_hal_external_buffer_t external_buffer = {
@@ -1690,7 +1690,7 @@ iree_status_t iree_hal_streaming_memory_register_host(
       .access = IREE_HAL_MEMORY_ACCESS_ALL,
       .type =
           IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
-      .queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY,
+      .queue_family_affinity = IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
   };
   iree_hal_external_buffer_t external_buffer = {
       .type = IREE_HAL_EXTERNAL_BUFFER_TYPE_HOST_ALLOCATION,

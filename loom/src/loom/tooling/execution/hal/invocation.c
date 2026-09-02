@@ -722,7 +722,7 @@ iree_status_t loom_run_hal_transfer_bindings_to_host(
       .access = IREE_HAL_MEMORY_ACCESS_ALL,
       .type =
           IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
-      .queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY,
+      .queue_family_affinity = IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
       .min_alignment = 0,
   };
   iree_hal_allocator_t* device_allocator =

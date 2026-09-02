@@ -59,7 +59,7 @@ TEST_P(VulkanAtomicSubmissionTest,
       /*.usage=*/IREE_HAL_BUFFER_USAGE_STORAGE_WRITE,
       /*.access=*/IREE_HAL_MEMORY_ACCESS_WRITE,
       /*.type=*/IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
-      /*.queue_affinity=*/configuration.queue_affinity,
+      /*.queue_family_affinity=*/IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
       /*.min_alignment=*/alignof(uint32_t),
   };
   Ref<iree_hal_buffer_t> target_buffer;
@@ -74,7 +74,7 @@ TEST_P(VulkanAtomicSubmissionTest,
       /*.width=*/IREE_HAL_ATOMIC_WIDTH_32,
   };
   EXPECT_THAT(Status(iree_hal_device_queue_atomic_store(
-                  device_, configuration.queue_affinity,
+                  device_, IREE_HAL_QUEUE_AFFINITY_ANY,
                   iree_hal_semaphore_list_empty(), signal, target_buffer,
                   /*target_offset=*/0, store_params)),
               StatusIs(StatusCode::kFailedPrecondition));
@@ -85,7 +85,7 @@ TEST_P(VulkanAtomicSubmissionTest,
   Ref<iree_hal_command_buffer_t> command_buffer;
   IREE_ASSERT_OK(iree_hal_command_buffer_create(
       device_, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
-      IREE_HAL_COMMAND_CATEGORY_ATOMIC, configuration.queue_affinity,
+      IREE_HAL_COMMAND_CATEGORY_ATOMIC, IREE_HAL_QUEUE_AFFINITY_ANY,
       /*binding_capacity=*/1, command_buffer.out()));
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
   IREE_ASSERT_OK(iree_hal_command_buffer_atomic_store(
@@ -107,7 +107,7 @@ TEST_P(VulkanAtomicSubmissionTest,
   };
   SemaphoreList execute_signal(device_, {0}, {1});
   EXPECT_THAT(Status(iree_hal_device_queue_execute(
-                  device_, configuration.queue_affinity,
+                  device_, IREE_HAL_QUEUE_AFFINITY_ANY,
                   iree_hal_semaphore_list_empty(), execute_signal,
                   command_buffer, binding_table, IREE_HAL_EXECUTE_FLAG_NONE)),
               StatusIs(StatusCode::kFailedPrecondition));

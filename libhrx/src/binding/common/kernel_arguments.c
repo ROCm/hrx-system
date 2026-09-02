@@ -99,7 +99,7 @@ static iree_status_t iree_hal_streaming_device_buffer_for_context(
       .usage = iree_hal_buffer_allowed_usage(buffer->buffer),
       .access = iree_hal_buffer_allowed_access(buffer->buffer),
       .type = (iree_hal_memory_type_t)buffer->memory_type,
-      .queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY,
+      .queue_family_affinity = IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
       .min_alignment = 0,
   };
   iree_hal_external_buffer_t external_buffer = {
