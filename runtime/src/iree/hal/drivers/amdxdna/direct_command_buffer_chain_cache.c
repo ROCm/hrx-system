@@ -258,6 +258,7 @@ static void iree_hal_amdxdna_chain_cmd_free_deferred(
 void iree_hal_amdxdna_chain_cmd_initialize(iree_hal_amdxdna_chain_cmd_t* cmd) {
   memset(cmd, 0, sizeof(*cmd));
   cmd->native_bindings_current = true;
+  cmd->descriptor_describes_contents = true;
 }
 
 void iree_hal_amdxdna_chain_cmd_deinitialize(
@@ -386,6 +387,7 @@ iree_status_t iree_hal_amdxdna_chain_cmd_set_deferred_descriptor(
   cmd->src_constant_patches = constant_patches;
   cmd->src_cu_idx = cu_idx;
   cmd->src_use_native_partial_elf = use_native_partial_elf;
+  cmd->descriptor_describes_contents = true;
   return iree_ok_status();
 }
 
@@ -414,21 +416,22 @@ static iree_status_t iree_hal_amdxdna_clone_constant_patch_list(
   return iree_ok_status();
 }
 
-iree_status_t iree_hal_amdxdna_chain_cmd_make_deferred_lists_owned(
-    iree_allocator_t host_allocator, iree_hal_amdxdna_chain_cmd_t* cmd) {
+iree_status_t iree_hal_amdxdna_chain_cmd_replace_deferred_lists_owned(
+    iree_allocator_t host_allocator, iree_hal_amdxdna_chain_cmd_t* cmd,
+    const iree_hal_amdxdna_chain_cmd_t* fresh) {
   iree_hal_amdxdna_u32_list_t new_asm_inst;
   iree_hal_amdxdna_u32_list_t new_patches;
   iree_hal_amdxdna_write32_constant_patch_list_t new_constant_patches;
   IREE_RETURN_IF_ERROR(iree_hal_amdxdna_clone_u32_list(
-      host_allocator, cmd->src_asm_inst, &new_asm_inst));
+      host_allocator, fresh->src_asm_inst, &new_asm_inst));
   iree_status_t status = iree_hal_amdxdna_clone_u32_list(
-      host_allocator, cmd->src_patches, &new_patches);
+      host_allocator, fresh->src_patches, &new_patches);
   if (!iree_status_is_ok(status)) {
     iree_allocator_free(host_allocator, new_asm_inst.data);
     return status;
   }
   status = iree_hal_amdxdna_clone_constant_patch_list(
-      host_allocator, cmd->src_constant_patches, &new_constant_patches);
+      host_allocator, fresh->src_constant_patches, &new_constant_patches);
   if (!iree_status_is_ok(status)) {
     iree_allocator_free(host_allocator, new_patches.data);
     iree_allocator_free(host_allocator, new_asm_inst.data);
@@ -449,7 +452,19 @@ iree_status_t iree_hal_amdxdna_chain_cmd_make_deferred_lists_owned(
   cmd->src_constant_patches = cmd->owned_src_constant_patches.data
                                   ? &cmd->owned_src_constant_patches
                                   : NULL;
+  cmd->src_executable_identity = fresh->src_executable_identity;
+  cmd->src_entry_point = fresh->src_entry_point;
+  cmd->src_run_ordinal = fresh->src_run_ordinal;
+  cmd->src_cu_idx = fresh->src_cu_idx;
+  cmd->src_use_native_partial_elf = fresh->src_use_native_partial_elf;
+  cmd->descriptor_describes_contents = true;
   return iree_ok_status();
+}
+
+iree_status_t iree_hal_amdxdna_chain_cmd_make_deferred_lists_owned(
+    iree_allocator_t host_allocator, iree_hal_amdxdna_chain_cmd_t* cmd) {
+  return iree_hal_amdxdna_chain_cmd_replace_deferred_lists_owned(host_allocator,
+                                                                 cmd, cmd);
 }
 
 void iree_hal_amdxdna_chain_group_initialize(
@@ -674,8 +689,8 @@ void iree_hal_amdxdna_chain_command_cache_entry_discard(
   IREE_ASSERT_ARGUMENT(cache);
   IREE_ASSERT_ARGUMENT(entry);
   IREE_ASSERT(entry->in_flight_count == 0);
-  iree_hal_amdxdna_chain_command_cache_entry_deinitialize(
-      cache->host_allocator, entry);
+  iree_hal_amdxdna_chain_command_cache_entry_deinitialize(cache->host_allocator,
+                                                          entry);
   iree_hal_amdxdna_chain_command_cache_entry_prepare_empty(entry);
 }
 
@@ -740,6 +755,32 @@ static bool iree_hal_amdxdna_chain_cmd_device_signature_matches(
              lhs->binding_lengths, rhs->binding_lengths, lhs->binding_count);
 }
 
+// True when both commands can reuse the same realized control program.
+// START_NPU templates use executable identity as immutable source. PARTIAL_ELF
+// templates may carry mutable TXN immediates, so they must also match by
+// control bytes.
+static bool iree_hal_amdxdna_chain_cmd_same_control_program(
+    const iree_hal_amdxdna_chain_cmd_t* lhs,
+    const iree_hal_amdxdna_chain_cmd_t* rhs) {
+  if (lhs->src_executable_identity != 0 || rhs->src_executable_identity != 0) {
+    if (lhs->src_executable_identity != rhs->src_executable_identity ||
+        lhs->src_entry_point != rhs->src_entry_point ||
+        lhs->src_run_ordinal != rhs->src_run_ordinal) {
+      return false;
+    }
+    if (lhs->src_use_native_partial_elf || rhs->src_use_native_partial_elf) {
+      return iree_hal_amdxdna_u32_list_equal(lhs->src_asm_inst,
+                                             rhs->src_asm_inst) &&
+             iree_hal_amdxdna_u32_list_equal(lhs->src_patches,
+                                             rhs->src_patches);
+    }
+    return true;
+  }
+  return iree_hal_amdxdna_u32_list_equal(lhs->src_asm_inst,
+                                         rhs->src_asm_inst) &&
+         iree_hal_amdxdna_u32_list_equal(lhs->src_patches, rhs->src_patches);
+}
+
 static bool iree_hal_amdxdna_chain_cmd_shape_matches(
     const iree_hal_amdxdna_chain_cmd_t* lhs,
     const iree_hal_amdxdna_chain_cmd_t* rhs) {
@@ -793,23 +834,31 @@ bool iree_hal_amdxdna_chain_command_cache_shape_matches(
   return true;
 }
 
+// `lhs` is the cached command and `rhs` the freshly recorded one: a descriptor
+// match means "resubmit the cached entry unchanged", so it is only sound while
+// the cached descriptor still describes the entry's realized contents.
 bool iree_hal_amdxdna_chain_cmd_descriptor_matches(
     const iree_hal_amdxdna_chain_cmd_t* lhs,
     const iree_hal_amdxdna_chain_cmd_t* rhs) {
+  if (!lhs->descriptor_describes_contents) return false;
   const bool same_immutable_source =
       lhs->src_executable_identity != 0 &&
       lhs->src_executable_identity == rhs->src_executable_identity &&
       lhs->src_entry_point == rhs->src_entry_point &&
       lhs->src_run_ordinal == rhs->src_run_ordinal;
   const bool has_immutable_source =
-      lhs->src_executable_identity != 0 ||
-      rhs->src_executable_identity != 0;
-  return ((has_immutable_source && same_immutable_source) ||
-          (!has_immutable_source &&
-           iree_hal_amdxdna_u32_list_equal(lhs->src_asm_inst,
-                                           rhs->src_asm_inst) &&
-           iree_hal_amdxdna_u32_list_equal(lhs->src_patches,
-                                           rhs->src_patches))) &&
+      lhs->src_executable_identity != 0 || rhs->src_executable_identity != 0;
+  const bool same_program =
+      (has_immutable_source && same_immutable_source &&
+       (!(lhs->src_use_native_partial_elf || rhs->src_use_native_partial_elf) ||
+        (iree_hal_amdxdna_u32_list_equal(lhs->src_asm_inst,
+                                         rhs->src_asm_inst) &&
+         iree_hal_amdxdna_u32_list_equal(lhs->src_patches,
+                                         rhs->src_patches)))) ||
+      (!has_immutable_source &&
+       iree_hal_amdxdna_u32_list_equal(lhs->src_asm_inst, rhs->src_asm_inst) &&
+       iree_hal_amdxdna_u32_list_equal(lhs->src_patches, rhs->src_patches));
+  return same_program &&
          lhs->src_use_native_partial_elf == rhs->src_use_native_partial_elf &&
          lhs->src_cu_idx.index == rhs->src_cu_idx.index &&
          iree_hal_amdxdna_u8_span_equal(
@@ -848,20 +897,29 @@ bool iree_hal_amdxdna_chain_command_cache_descriptor_matches(
   return true;
 }
 
+// As with iree_hal_amdxdna_chain_cmd_descriptor_matches, `lhs` is the cached
+// command. A template match re-realizes the control code from `rhs`'s template,
+// but only the cached command's `src_*` template is retained afterwards, so the
+// cached descriptor must still be the one its contents came from.
 bool iree_hal_amdxdna_chain_cmd_descriptor_template_matches(
     const iree_hal_amdxdna_chain_cmd_t* lhs,
     const iree_hal_amdxdna_chain_cmd_t* rhs) {
+  if (!lhs->descriptor_describes_contents) return false;
   const bool same_immutable_source =
       lhs->src_executable_identity != 0 &&
       lhs->src_executable_identity == rhs->src_executable_identity &&
       lhs->src_entry_point == rhs->src_entry_point &&
       lhs->src_run_ordinal == rhs->src_run_ordinal;
   const bool has_immutable_source =
-      lhs->src_executable_identity != 0 ||
-      rhs->src_executable_identity != 0;
-  return ((has_immutable_source && same_immutable_source) ||
-          (!has_immutable_source && lhs->src_asm_inst && rhs->src_asm_inst &&
-           lhs->src_asm_inst->count == rhs->src_asm_inst->count)) &&
+      lhs->src_executable_identity != 0 || rhs->src_executable_identity != 0;
+  const bool same_template =
+      (has_immutable_source && same_immutable_source &&
+       (!(lhs->src_use_native_partial_elf || rhs->src_use_native_partial_elf) ||
+        (lhs->src_asm_inst && rhs->src_asm_inst &&
+         lhs->src_asm_inst->count == rhs->src_asm_inst->count))) ||
+      (!has_immutable_source && lhs->src_asm_inst && rhs->src_asm_inst &&
+       lhs->src_asm_inst->count == rhs->src_asm_inst->count);
+  return same_template &&
          lhs->src_use_native_partial_elf == rhs->src_use_native_partial_elf &&
          lhs->src_cu_idx.index == rhs->src_cu_idx.index &&
          lhs->src_constant_count == rhs->src_constant_count &&
@@ -946,15 +1004,12 @@ iree_status_t iree_hal_amdxdna_update_cached_chain_cmd(
       device_bindings_changed || !cached->native_bindings_current;
   if (code_changed) {
     void* ctrl_ptr = NULL;
-    if (cached->ctrl_code_mapped_ptr) {
-      ctrl_ptr = cached->ctrl_code_mapped_ptr;
-    } else {
-      IREE_RETURN_IF_ERROR(
-          iree_hal_amdxdna_native_buffer_c_map(cached->ctrl_code, &ctrl_ptr));
-      cached->ctrl_code_mapped_ptr = ctrl_ptr;
-    }
+    IREE_RETURN_IF_ERROR(iree_hal_amdxdna_remap_ctrl_code(
+        cached->ctrl_code, &cached->ctrl_code_mapped_ptr));
+    ctrl_ptr = cached->ctrl_code_mapped_ptr;
     memcpy(ctrl_ptr, fresh->ctrl_words,
            fresh->ctrl_word_count * sizeof(*fresh->ctrl_words));
+    IREE_RETURN_IF_ERROR(iree_hal_amdxdna_publish_ctrl_code(cached->ctrl_code));
     IREE_RETURN_IF_ERROR(
         iree_hal_amdxdna_native_command_c_mark_code_dirty(cached->command));
     memcpy(cached->ctrl_words, fresh->ctrl_words,
@@ -970,6 +1025,23 @@ iree_status_t iree_hal_amdxdna_update_cached_chain_cmd(
     }
     cached->native_bindings_current = true;
     if (out_rebound) *out_rebound = true;
+  }
+  // Keep the descriptor honest about what the command now holds. A shape match
+  // does not require the same control program, so the ctrl_words realized above
+  // may have come from a template this command's cloned `src_*` descriptor does
+  // not describe. Refresh the constants in place when they fit, and retire the
+  // descriptor whenever anything else about it went stale, so descriptor-keyed
+  // reuse cannot resubmit this entry unchanged for a dispatch that needs
+  // different control code.
+  const bool constants_refreshed =
+      cached->src_constant_count == fresh->src_constant_count;
+  if (constants_refreshed && fresh->src_constant_count != 0) {
+    memcpy(cached->src_constants, fresh->src_constants,
+           fresh->src_constant_count);
+  }
+  if (!constants_refreshed ||
+      !iree_hal_amdxdna_chain_cmd_same_control_program(cached, fresh)) {
+    cached->descriptor_describes_contents = false;
   }
   memcpy(cached->binding_buffers, fresh->binding_buffers,
          fresh->binding_count * sizeof(*cached->binding_buffers));

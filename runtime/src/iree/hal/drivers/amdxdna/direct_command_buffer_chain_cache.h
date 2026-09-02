@@ -82,6 +82,12 @@ typedef struct iree_hal_amdxdna_chain_cmd_t {
   // child command still holds older bound-buffer pointers. Safe until the next
   // packet rewrite, which must rebind before BO-table generation dereferences.
   bool native_bindings_current;
+  // False once an in-place rewrite realized control code from a control program
+  // other than the one the `src_*` template above was cloned from. The realized
+  // ctrl_words are still correct, but the descriptor no longer describes them,
+  // so descriptor-keyed reuse (which resubmits the entry unchanged) must not
+  // match this command. Content-keyed reuse compares ctrl_words and stays safe.
+  bool descriptor_describes_contents;
 } iree_hal_amdxdna_chain_cmd_t;
 
 // A contiguous run of dispatches that share one native queue. Flushed as one
@@ -171,6 +177,9 @@ iree_status_t iree_hal_amdxdna_chain_cmd_set_deferred_descriptor(
     const iree_device_size_t* binding_lengths, iree_host_size_t binding_count);
 iree_status_t iree_hal_amdxdna_chain_cmd_make_deferred_lists_owned(
     iree_allocator_t host_allocator, iree_hal_amdxdna_chain_cmd_t* cmd);
+iree_status_t iree_hal_amdxdna_chain_cmd_replace_deferred_lists_owned(
+    iree_allocator_t host_allocator, iree_hal_amdxdna_chain_cmd_t* cmd,
+    const iree_hal_amdxdna_chain_cmd_t* fresh);
 void iree_hal_amdxdna_chain_group_initialize(
     iree_hal_amdxdna_chain_group_t* group);
 void iree_hal_amdxdna_chain_group_deinitialize(
@@ -281,6 +290,34 @@ void iree_hal_amdxdna_chain_command_cache_entry_release_in_flight(
 void iree_hal_amdxdna_chain_command_cache_entry_discard(
     iree_hal_amdxdna_device_chain_command_cache_t* cache,
     iree_hal_amdxdna_chain_command_cache_entry_t* entry);
+
+// Always re-map a cached control-code BO before rewriting it.
+//
+// Windows instruction BOs start as deferred host storage. The first submit
+// materializes them into a KMT mapping and frees that temporary storage.
+// A `ctrl_code_mapped_ptr` captured before materialize then dangles, so later
+// in-place rewrites land in freed memory while the device keeps executing the
+// first-token image. The RTP context-length program is the representative
+// steady-state case: same 28-word shape, only a WRITE32 immediate changes, and
+// a stale mapping freezes the attended length at the first decode step.
+static inline iree_status_t iree_hal_amdxdna_remap_ctrl_code(
+    iree_hal_amdxdna_native_buffer_t* buffer, void** io_mapped_ptr) {
+  void* mapped_ptr = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amdxdna_native_buffer_c_map(buffer, &mapped_ptr));
+  *io_mapped_ptr = mapped_ptr;
+  return iree_ok_status();
+}
+
+// Instruction BOs are Lock2-mapped. A process write barrier does not evict
+// dirty CPU cache lines from that mapping, so Path-B publication (which copies
+// from `buffer.cpu_ptr` into the command aperture) can restage the
+// pre-rewrite image unless the rewritten range is published first.
+static inline iree_status_t iree_hal_amdxdna_publish_ctrl_code(
+    iree_hal_amdxdna_native_buffer_t* buffer) {
+  return iree_hal_amdxdna_native_buffer_c_sync_all(
+      buffer, IREE_HAL_AMDXDNA_NATIVE_BUFFER_SYNC_HOST_TO_DEVICE);
+}
 
 #ifdef __cplusplus
 }  // extern "C"

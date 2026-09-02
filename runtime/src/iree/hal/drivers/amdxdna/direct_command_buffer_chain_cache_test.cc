@@ -322,6 +322,67 @@ TEST(ChainCommandCacheTest,
 }
 
 TEST(ChainCommandCacheTest,
+     PartialElfExactDescriptorRejectsChangedTxnForSameExecutableRun) {
+  uint32_t cached_control_data[] = {0xA, 0x1000, 0x0, 0xD};
+  uint32_t fresh_control_data[] = {0xA, 0x2000, 0x0, 0xD};
+  iree_hal_amdxdna_u32_list_t cached_control = {
+      cached_control_data,
+      IREE_ARRAYSIZE(cached_control_data),
+  };
+  iree_hal_amdxdna_u32_list_t fresh_control = {
+      fresh_control_data,
+      IREE_ARRAYSIZE(fresh_control_data),
+  };
+  auto cached_cmd = MakeCmd(FakeBuffer(0x10), /*device_addr=*/0x80000000);
+  auto fresh_cmd = MakeCmd(FakeBuffer(0x10), /*device_addr=*/0x80000000);
+  cached_cmd.src_executable_identity = 7;
+  fresh_cmd.src_executable_identity = 7;
+  cached_cmd.src_entry_point = 2;
+  fresh_cmd.src_entry_point = 2;
+  cached_cmd.src_run_ordinal = 3;
+  fresh_cmd.src_run_ordinal = 3;
+  cached_cmd.src_asm_inst = &cached_control;
+  fresh_cmd.src_asm_inst = &fresh_control;
+  auto cached_group = MakeGroup1(&cached_cmd);
+  auto fresh_group = MakeGroup1(&fresh_cmd);
+  auto entry = MakeCacheEntry(&cached_group);
+
+  EXPECT_FALSE(iree_hal_amdxdna_chain_command_cache_descriptor_matches(
+      &entry, &fresh_group, /*max_slots=*/24));
+  EXPECT_TRUE(iree_hal_amdxdna_chain_command_cache_descriptor_template_matches(
+      &entry, &fresh_group, /*max_slots=*/24));
+}
+
+TEST(ChainCommandCacheTest, DeferredDescriptorReplacementOwnsFreshTxn) {
+  uint32_t cached_control_data[] = {0xA, 0x1000, 0x0, 0xD};
+  uint32_t fresh_control_data[] = {0xA, 0x2000, 0x0, 0xD};
+  iree_hal_amdxdna_u32_list_t cached_control = {
+      cached_control_data,
+      IREE_ARRAYSIZE(cached_control_data),
+  };
+  iree_hal_amdxdna_u32_list_t fresh_control = {
+      fresh_control_data,
+      IREE_ARRAYSIZE(fresh_control_data),
+  };
+  auto cached_cmd = MakeCmd(FakeBuffer(0x10), /*device_addr=*/0x80000000);
+  auto fresh_cmd = MakeCmd(FakeBuffer(0x10), /*device_addr=*/0x80000000);
+  cached_cmd.src_asm_inst = &cached_control;
+  fresh_cmd.src_asm_inst = &fresh_control;
+
+  IREE_CHECK_OK(iree_hal_amdxdna_chain_cmd_make_deferred_lists_owned(
+      TestAllocator(), &cached_cmd));
+  IREE_CHECK_OK(iree_hal_amdxdna_chain_cmd_replace_deferred_lists_owned(
+      TestAllocator(), &cached_cmd, &fresh_cmd));
+  fresh_control_data[1] = 0x3000;
+
+  ASSERT_EQ(cached_cmd.src_asm_inst, &cached_cmd.owned_src_asm_inst);
+  ASSERT_EQ(cached_cmd.src_asm_inst->count, fresh_control.count);
+  EXPECT_EQ(cached_cmd.src_asm_inst->data[1], 0x2000u);
+  iree_hal_amdxdna_chain_cmd_deinitialize(TestAllocator(), &cached_cmd);
+  iree_hal_amdxdna_chain_cmd_deinitialize(TestAllocator(), &fresh_cmd);
+}
+
+TEST(ChainCommandCacheTest,
      DescriptorMatchesRejectDifferentExecutableOrRunWithSameShape) {
   auto cached_cmd = MakeCmd(FakeBuffer(0x10), /*device_addr=*/0x80000000);
   cached_cmd.src_executable_identity = 7;
@@ -338,9 +399,8 @@ TEST(ChainCommandCacheTest,
   auto different_executable_group = MakeGroup1(&different_executable_cmd);
   EXPECT_FALSE(iree_hal_amdxdna_chain_command_cache_descriptor_matches(
       &entry, &different_executable_group, /*max_slots=*/24));
-  EXPECT_FALSE(
-      iree_hal_amdxdna_chain_command_cache_descriptor_template_matches(
-          &entry, &different_executable_group, /*max_slots=*/24));
+  EXPECT_FALSE(iree_hal_amdxdna_chain_command_cache_descriptor_template_matches(
+      &entry, &different_executable_group, /*max_slots=*/24));
 
   auto different_run_cmd =
       MakeCmd(FakeBuffer(0x10), /*device_addr=*/0x80000000);
@@ -350,9 +410,38 @@ TEST(ChainCommandCacheTest,
   auto different_run_group = MakeGroup1(&different_run_cmd);
   EXPECT_FALSE(iree_hal_amdxdna_chain_command_cache_descriptor_matches(
       &entry, &different_run_group, /*max_slots=*/24));
-  EXPECT_FALSE(
-      iree_hal_amdxdna_chain_command_cache_descriptor_template_matches(
-          &entry, &different_run_group, /*max_slots=*/24));
+  EXPECT_FALSE(iree_hal_amdxdna_chain_command_cache_descriptor_template_matches(
+      &entry, &different_run_group, /*max_slots=*/24));
+}
+
+// A shape-match rewrite can realize control code from a program the cached
+// command's descriptor was not cloned from, which retires that descriptor. Both
+// descriptor paths reuse the cached descriptor as the source of truth for the
+// control code (one resubmits the entry unchanged, the other re-realizes from
+// the retained template), so neither may match a retired descriptor. The
+// content-keyed paths compare the realized words and stay usable.
+TEST(ChainCommandCacheTest, RetiredDescriptorOnlyMatchesByContent) {
+  auto cached_cmd = MakeCmd(FakeBuffer(0x10), /*device_addr=*/0x80000000);
+  auto fresh_cmd = MakeCmd(FakeBuffer(0x10), /*device_addr=*/0x80000000);
+  cached_cmd.src_executable_identity = 7;
+  fresh_cmd.src_executable_identity = 7;
+  cached_cmd.src_entry_point = 2;
+  fresh_cmd.src_entry_point = 2;
+  cached_cmd.src_run_ordinal = 3;
+  fresh_cmd.src_run_ordinal = 3;
+  cached_cmd.descriptor_describes_contents = false;
+  auto cached_group = MakeGroup1(&cached_cmd);
+  auto fresh_group = MakeGroup1(&fresh_cmd);
+  auto entry = MakeCacheEntry(&cached_group);
+
+  EXPECT_FALSE(iree_hal_amdxdna_chain_command_cache_descriptor_matches(
+      &entry, &fresh_group, /*max_slots=*/24));
+  EXPECT_FALSE(iree_hal_amdxdna_chain_command_cache_descriptor_template_matches(
+      &entry, &fresh_group, /*max_slots=*/24));
+  EXPECT_TRUE(iree_hal_amdxdna_chain_command_cache_device_matches(
+      &entry, &fresh_group, /*max_slots=*/24));
+  EXPECT_TRUE(iree_hal_amdxdna_chain_command_cache_shape_matches(
+      &entry, &fresh_group, /*max_slots=*/24));
 }
 
 TEST(ChainCommandCacheTest,
