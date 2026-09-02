@@ -126,8 +126,43 @@ def _declare_linked_module(
     )
     return module
 
+def _declare_test_module(
+        ctx,
+        root_module,
+        dependency_infos,
+        output_stem,
+        mnemonic,
+        progress_message):
+    dependencies = _collect_dependency_modules(dependency_infos)
+    module = ctx.actions.declare_file(output_stem + ".loombc")
+    args = ctx.actions.args()
+    args.add("--mode=link")
+    args.add("--include-input-tests")
+    args.add("--to=bc")
+    args.add("--output=%s" % module.path)
+    args.add(root_module)
+    args.add_all(dependencies.direct, format_each = "--library=%s")
+    args.add_all(
+        dependencies.transitive,
+        format_each = "--transitive-library=%s",
+    )
+
+    tool = ctx.toolchains[_LOOM_LINK_TOOLCHAIN_TYPE].tool
+    ctx.actions.run(
+        arguments = [args],
+        executable = tool.files_to_run,
+        inputs = depset(
+            direct = [root_module] + dependencies.direct + dependencies.transitive,
+        ),
+        mnemonic = mnemonic,
+        outputs = [module],
+        progress_message = progress_message,
+    )
+    return module
+
 loom_linking = struct(
     collect_dependency_modules = _collect_dependency_modules,
     declare_linked_module = _declare_linked_module,
     declare_relocatable_module = _declare_relocatable_module,
+    declare_test_module = _declare_test_module,
 )

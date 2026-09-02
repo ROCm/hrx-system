@@ -1,0 +1,8 @@
+check.case public @benchmark_case {
+  %actual = check.literal value(7) : i32
+  %expected = check.literal value(7) : i32
+  check.expect.equal actual(%actual) expected(%expected) : i32
+  check.return
+}
+
+check.benchmark<@benchmark_case> @scalar_benchmark

@@ -98,6 +98,9 @@ IREE_FLAG_NAMED(
     "module before template selection.");
 IREE_FLAG_NAMED(bool, include_input_exports, "include-input-exports", false,
                 "In link mode, add exported input symbols as roots.");
+IREE_FLAG_NAMED(
+    bool, include_input_tests, "include-input-tests", false,
+    "In link mode, add test/benchmark-only input symbols as roots.");
 IREE_FLAG_NAMED(bool, strip_check, "strip-check", false,
                 "Strip test/benchmark-only symbols before output.");
 IREE_FLAG_NAMED(
@@ -274,20 +277,21 @@ static iree_status_t loom_link_cli_parse_mode(iree_string_view_t value,
 static iree_status_t loom_link_cli_resolve_plan_mode(
     loom_link_cli_mode_t cli_mode, const iree_flag_string_list_t roots,
     iree_host_size_t root_library_count, bool include_input_exports,
-    loom_link_plan_mode_t* out_mode) {
+    bool include_input_tests, loom_link_plan_mode_t* out_mode) {
   if (cli_mode == LOOM_LINK_CLI_MODE_AUTO) {
-    *out_mode =
-        (roots.count > 0 || root_library_count > 0 || include_input_exports)
-            ? LOOM_LINK_PLAN_LINK
-            : LOOM_LINK_PLAN_MERGE;
+    *out_mode = (roots.count > 0 || root_library_count > 0 ||
+                 include_input_exports || include_input_tests)
+                    ? LOOM_LINK_PLAN_LINK
+                    : LOOM_LINK_PLAN_MERGE;
     return iree_ok_status();
   }
   if (cli_mode == LOOM_LINK_CLI_MODE_MERGE) {
-    if (roots.count > 0 || root_library_count > 0 || include_input_exports) {
+    if (roots.count > 0 || root_library_count > 0 || include_input_exports ||
+        include_input_tests) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
           "merge mode does not accept --root, --root-library, or "
-          "--include-input-exports");
+          "--include-input-exports/--include-input-tests");
     }
     *out_mode = LOOM_LINK_PLAN_MERGE;
     return iree_ok_status();
@@ -1131,7 +1135,9 @@ static void loom_link_cli_print_agents_markdown(FILE* stream) {
       "`--mode=merge` preserves every non-stripped primary-input symbol in\n"
       "input order. `--mode=link` keeps explicit `--root=@symbol` values,\n"
       "exports from each `--root-library`, optional\n"
-      "`--include-input-exports`, and reachable dependencies.\n"
+      "`--include-input-exports`, test-only symbols selected by\n"
+      "`--include-input-tests`, and reachable dependencies. The input-test\n"
+      "policy does not select tests contributed by libraries.\n"
       "A public library definition selected only as a dependency becomes\n"
       "private in the output; library visibility does not implicitly "
       "re-export\n"
@@ -1259,7 +1265,7 @@ int main(int argc, char** argv) {
   if (iree_status_is_ok(status)) {
     status = loom_link_cli_resolve_plan_mode(
         cli_mode, roots, FLAG_root_library_list().count,
-        FLAG_include_input_exports, &plan_mode);
+        FLAG_include_input_exports, FLAG_include_input_tests, &plan_mode);
   }
   if (iree_status_is_ok(status) && dependency_analysis_requested &&
       plan_mode != LOOM_LINK_PLAN_MERGE) {
@@ -1349,6 +1355,7 @@ int main(int argc, char** argv) {
                                : LOOM_LINK_PLAN_UNRESOLVED_ERROR,
       .test_symbol_policy = FLAG_strip_check ? LOOM_LINK_PLAN_TEST_SYMBOL_STRIP
                                              : LOOM_LINK_PLAN_TEST_SYMBOL_KEEP,
+      .include_input_tests = FLAG_include_input_tests,
   };
   if (iree_status_is_ok(status) && dependency_analysis_succeeded &&
       !FLAG_list_symbols) {

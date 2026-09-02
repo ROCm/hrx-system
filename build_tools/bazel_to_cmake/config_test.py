@@ -246,6 +246,57 @@ loom_check_test_suite(
         self.assertNotIn('"test/source_low/a.loom-test"', cmake)
         self.assertNotIn("iree_native_test(", cmake)
 
+    def test_ignored_rule_accepts_opaque_loaded_value(self):
+        repo_root = Path(__file__).resolve().parents[2]
+        loom = bazel_to_cmake_config.include_project(
+            str(repo_root / ".bazel_to_cmake.cfg.py"),
+            "loom/.bazel_to_cmake.cfg.py",
+        )
+        repo_cfg = SimpleNamespace(PROJECTS=[loom], REPO_MAP={"@hrx": ""})
+
+        cmake = bazel_to_cmake_converter.convert_build_file(
+            """
+load(
+    "//loom/build_tools/bazel:defs.bzl",
+    "loom_test",
+)
+load(
+    "//synthetic:policy.bzl",
+    TEST_EXECUTION_POLICY = "DEVICE_EXECUTION_POLICY",
+)
+
+loom_test(
+    name = "one_test",
+    srcs = ["one.loom", "two.loom"],
+    execution_profile = TEST_EXECUTION_POLICY,
+)
+""",
+            repo_cfg,
+            str(repo_root / "loom/src/loom/tooling/target/amdgpu/test"),
+            repo_root=str(repo_root),
+        )
+
+        self.assertNotIn("one_test", cmake)
+
+    def test_unhandled_loaded_rule_fails_loudly(self):
+        repo_root = Path(__file__).resolve().parents[2]
+        repo_cfg = SimpleNamespace(PROJECTS=[], REPO_MAP={"@hrx": ""})
+
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            "loaded symbol 'unhandled_rule'.*has no Bazel-to-CMake representation",
+        ):
+            bazel_to_cmake_converter.convert_build_file(
+                """
+load("//synthetic:rules.bzl", "unhandled_rule")
+
+unhandled_rule(name = "must_not_disappear")
+""",
+                repo_cfg,
+                str(repo_root / "synthetic"),
+                repo_root=str(repo_root),
+            )
+
     def test_glob_exclusions_have_distinct_cmake_storage(self):
         repo_root = Path(__file__).resolve().parents[2]
         loom = bazel_to_cmake_config.include_project(

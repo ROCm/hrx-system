@@ -322,6 +322,28 @@ check.benchmark<@sampled> @missing_value {value = 9}
   EXPECT_THAT(status.ToString(), HasSubstr("sampled"));
 }
 
+TEST_F(BenchmarkWorkPlanTest, AcceptsModuleWithoutBenchmarks) {
+  const loom_testbench_module_plan_t module_plan = PlanModule(R"(
+check.case @only_case {
+  check.return
+}
+)");
+
+  iree_benchmark_loom_options_t options = {};
+  iree_benchmark_loom_options_initialize(&options);
+
+  iree_benchmark_loom_work_plan_t work_plan = {};
+  IREE_ASSERT_OK(iree_benchmark_loom_work_plan_initialize(
+      &module_plan, &options, iree_allocator_system(), &work_plan));
+
+  EXPECT_EQ(work_plan.selected_benchmark_count, 0u);
+  EXPECT_EQ(work_plan.logical_sample_count, 0u);
+  EXPECT_EQ(work_plan.hal_compile_item_count, 0u);
+  EXPECT_EQ(work_plan.work_item_count, 0u);
+
+  iree_benchmark_loom_work_plan_deinitialize(&work_plan);
+}
+
 TEST_F(BenchmarkWorkPlanTest, RejectsMissingBenchmarkSelector) {
   const loom_testbench_module_plan_t module_plan = PlanModule(R"(
 check.case @sampled {

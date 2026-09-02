@@ -168,6 +168,37 @@ class _SelectsModule:
         pass
 
 
+class _OpaqueLoadedSymbol:
+    """A loaded .bzl symbol that the converter cannot evaluate.
+
+    Opaque values may flow through rules that have no CMake representation and
+    therefore ignore their arguments. Any attempt to call or interpret one
+    indicates that the converter needs an explicit handler for the symbol.
+    """
+
+    def __init__(self, bzl_label, symbol_name):
+        self._bzl_label = bzl_label
+        self._symbol_name = symbol_name
+
+    def _unsupported(self):
+        raise NotImplementedError(
+            f"loaded symbol {self._symbol_name!r} from {self._bzl_label!r} "
+            "has no Bazel-to-CMake representation"
+        )
+
+    def __bool__(self):
+        self._unsupported()
+
+    def __call__(self, *args, **kwargs):
+        self._unsupported()
+
+    def __str__(self):
+        self._unsupported()
+
+    def __repr__(self):
+        return f"_OpaqueLoadedSymbol({self._bzl_label!r}, {self._symbol_name!r})"
+
+
 class BuildFileFunctions(object):
     """Object passed to `exec` that has handlers for BUILD file functions."""
 
@@ -1113,50 +1144,58 @@ class BuildFileFunctions(object):
         pass
 
     def load(self, *args, **kwargs):
-        """Attempts to bind constants from loaded .bzl files.
+        """Binds converter handlers, constants, or opaque loaded symbols.
 
         Bazel load() imports names from .bzl files into the BUILD file's
         namespace. The converter can evaluate simple .bzl files that contain
         only Python-compatible constant assignments (lists, dicts, strings)
-        and bind the requested names. Complex .bzl files with Starlark-
-        specific constructs silently fall back to no-op behavior.
+        and bind the requested names. Symbols from files that cannot be
+        evaluated remain opaque: ignored Bazel-only rules may accept them, but
+        any attempt to interpret or call them fails loudly.
         """
-        if len(args) < 2:
+        if not args or not hasattr(self, "_exec_namespace"):
             return
         bzl_label = args[0]
-        names = args[1:]
+        requested_symbols = [(name, name) for name in args[1:]]
+        requested_symbols.extend(
+            (local_name, exported_name) for local_name, exported_name in kwargs.items()
+        )
+        if not requested_symbols:
+            return
 
-        # Resolve the .bzl file path from its label.
+        # Resolve the .bzl file path from its label when it belongs to this
+        # repository. External and missing files use opaque symbols below.
+        abs_path = None
         if bzl_label.startswith(":"):
             abs_path = os.path.join(self._build_dir, bzl_label[1:])
         elif bzl_label.startswith("//"):
             # "//path/to/pkg:file.bzl" -> "path/to/pkg/file.bzl"
             rel = bzl_label[2:].replace(":", "/")
             abs_path = os.path.join(self._repo_root, rel)
-        else:
-            return  # External repositories — can't resolve.
 
-        if not os.path.isfile(abs_path):
-            return
+        namespace = {}
+        if abs_path and os.path.isfile(abs_path):
+            try:
+                with open(abs_path) as f:
+                    exec(f.read(), namespace)
+            except Exception:
+                # Treat evaluation as all-or-nothing. Values assigned before a
+                # Starlark-only expression failed may depend on incomplete file
+                # state and are no more trustworthy than unresolved symbols.
+                namespace = {}
 
-        try:
-            namespace = {}
-            with open(abs_path) as f:
-                exec(f.read(), namespace)
-            for name in names:
-                if name in namespace and hasattr(self, "_exec_namespace"):
-                    # Only bind names not already provided by converter
-                    # handlers. This avoids overwriting converter methods
-                    # (like enforce_glob) with Starlark implementations that
-                    # reference native.glob() and other unavailable builtins.
-                    if name not in self._exec_namespace:
-                        self._exec_namespace[name] = namespace[name]
-        except Exception:
-            if hasattr(self, "_exec_namespace"):
-                for name in names:
-                    if name == "REQUIREMENTS" and name not in self._exec_namespace:
-                        self._exec_namespace[name] = []
-            pass  # .bzl uses Starlark features — fall back to no-op.
+        for local_name, exported_name in requested_symbols:
+            if local_name in self._exec_namespace:
+                continue
+            if exported_name in namespace:
+                self._exec_namespace[local_name] = namespace[exported_name]
+            elif exported_name in self._exec_namespace:
+                # Preserve converter handlers imported under an alias.
+                self._exec_namespace[local_name] = self._exec_namespace[exported_name]
+            else:
+                self._exec_namespace[local_name] = _OpaqueLoadedSymbol(
+                    bzl_label, exported_name
+                )
 
     def package(self, **kwargs):
         pass
@@ -1186,6 +1225,11 @@ class BuildFileFunctions(object):
         pass
 
     def test_suite(self, **kwargs):
+        pass
+
+    def loom_test(self, **kwargs):
+        # Loom execution tests are Bazel-owned. CMake uses explicit test
+        # declarations for the configurations it supports.
         pass
 
     def config_setting(self, **kwargs):

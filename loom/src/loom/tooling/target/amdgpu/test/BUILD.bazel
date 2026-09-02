@@ -6,6 +6,17 @@
 
 load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
+load(
+    "//loom/build_tools/bazel:defs.bzl",
+    "loom_test",
+)
+load(
+    "//loom/src/loom/tooling/target/amdgpu:execution_profiles.bzl",
+    "AMDGPU_ACCESS_PROFILE",
+    "AMDGPU_ASAN_PROFILE",
+    "AMDGPU_HARDWARE_PROFILE",
+    "AMDGPU_TSAN_PROFILE",
+)
 
 package(
     default_visibility = ["//visibility:public"],
@@ -16,16 +27,6 @@ package(
 _AMDGPU_ARTIFACTS_COMPATIBLE_WITH = loom_config_compatible_with([
     "//loom/config/target:amdgpu_artifacts",
 ])
-
-_AMDGPU_HAL_COMPATIBLE_WITH = loom_config_compatible_with([
-    "//loom/config/execute:amdgpu_hal",
-])
-
-_AMDGPU_EXECUTION_TEST_TAGS = [
-    "iree-run-requirement=runtime.resource.amd_gpu",
-    "requires-gpu-amd",
-    "runtime-resource=amd-gpu",
-]
 
 iree_execution_test_suite(
     name = "loom_compile_execution_test",
@@ -54,48 +55,38 @@ iree_execution_test_suite(
     },
 )
 
-iree_execution_test_suite(
-    name = "iree_test_loom_execution_test",
-    data = [
+loom_test(
+    name = "hal_tests",
+    srcs = [
         "amdgpu_hal_actual.loom",
-        "amdgpu_unused_kernargs.loom",
         "generated_tensor_cases.loom",
         "//loom/src/loom/tooling/execution/hal:testdata/buffer_bulk_hal_actual.loom",
         "//loom/src/loom/tooling/execution/hal:testdata/dynamic_workgroup_hal_actual.loom",
         "//loom/src/loom/tooling/execution/hal:testdata/launch_schedule_hal_actual.loom",
     ],
-    manifests = ["iree-test-loom_amdgpu.test.json"],
-    tags = _AMDGPU_EXECUTION_TEST_TAGS,
-    target_compatible_with = _AMDGPU_HAL_COMPATIBLE_WITH,
-    tools = {
-        "iree-test-loom": "//loom/src/loom/tools/iree-test-loom",
-    },
+    execution_profile = AMDGPU_HARDWARE_PROFILE,
 )
 
-# Host TSAN and AMDGPU ASAN require incompatible process address-space layouts.
-iree_execution_test_suite(
-    name = "iree_test_loom_asan_execution_test",
-    data = [
-        "amdgpu_unused_kernargs.loom",
-        "//loom/src/loom/test/corpus/sanitizer:amdgpu_asan_actual.loom",
-    ],
-    manifests = ["iree-test-loom_amdgpu_asan.test.json"],
-    tags = _AMDGPU_EXECUTION_TEST_TAGS + ["notsan"],
-    target_compatible_with = _AMDGPU_HAL_COMPATIBLE_WITH,
-    tools = {
-        "iree-test-loom": "//loom/src/loom/tools/iree-test-loom",
-    },
+loom_test(
+    name = "kernarg_hardware_test",
+    srcs = ["amdgpu_unused_kernargs.loom"],
+    execution_profile = AMDGPU_HARDWARE_PROFILE,
 )
 
-iree_execution_test_suite(
-    name = "iree_test_loom_tsan_execution_test",
-    data = [
-        "//loom/src/loom/test/corpus/sanitizer:amdgpu_tsan_actual.loom",
-    ],
-    manifests = ["iree-test-loom_amdgpu_tsan.test.json"],
-    tags = _AMDGPU_EXECUTION_TEST_TAGS,
-    target_compatible_with = _AMDGPU_HAL_COMPATIBLE_WITH,
-    tools = {
-        "iree-test-loom": "//loom/src/loom/tools/iree-test-loom",
-    },
+loom_test(
+    name = "kernarg_access_test",
+    srcs = ["amdgpu_unused_kernargs.loom"],
+    execution_profile = AMDGPU_ACCESS_PROFILE,
+)
+
+loom_test(
+    name = "asan_test",
+    srcs = ["//loom/src/loom/test/corpus/sanitizer:amdgpu_asan_actual.loom"],
+    execution_profile = AMDGPU_ASAN_PROFILE,
+)
+
+loom_test(
+    name = "tsan_test",
+    srcs = ["//loom/src/loom/test/corpus/sanitizer:amdgpu_tsan_actual.loom"],
+    execution_profile = AMDGPU_TSAN_PROFILE,
 )
