@@ -7,6 +7,7 @@
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/encoding.h"
 
 #include <array>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -184,6 +185,51 @@ TEST(DescriptorEncodingTest, PhysicalAssignmentsReproduceVectorLeaves) {
     IREE_ASSERT_OK(BuildVectorAddLeaf(test_case.descriptor_key, &program));
     EXPECT_EQ(program, std::vector<uint8_t>(test_case.expected.begin(),
                                             test_case.expected.end()));
+  }
+}
+
+TEST(DescriptorEncodingTest, VolatileAliasesPreservePhysicalEncoding) {
+  struct TestCase {
+    std::string_view descriptor_key;
+    std::vector<std::string_view> registers;
+    std::vector<int64_t> immediates;
+  };
+  const TestCase test_cases[] = {
+      {
+          "amd.xdna.aie2p.load.scalar.indexed.immediate",
+          {"r3", "p0"},
+          {4},
+      },
+      {
+          "amd.xdna.aie2p.store.scalar.indexed.immediate",
+          {"r3", "p0"},
+          {4},
+      },
+      {
+          "amd.xdna.aie2p.load.a.i8x64.indexed.immediate",
+          {"x0", "p0"},
+          {64},
+      },
+      {
+          "amd.xdna.aie2p.store.i8x64.indexed.immediate",
+          {"x0", "p0"},
+          {64},
+      },
+  };
+
+  const loom_low_descriptor_set_t* descriptor_set =
+      loom_aie2p_core_descriptor_set();
+  for (const TestCase& test_case : test_cases) {
+    loom_aie2p_encoded_slot_t ordinary_slot;
+    IREE_ASSERT_OK(EncodeDescriptor(descriptor_set, test_case.descriptor_key,
+                                    test_case.registers, test_case.immediates,
+                                    &ordinary_slot));
+    loom_aie2p_encoded_slot_t volatile_slot;
+    IREE_ASSERT_OK(EncodeDescriptor(
+        descriptor_set, std::string(test_case.descriptor_key) + ".volatile",
+        test_case.registers, test_case.immediates, &volatile_slot));
+    EXPECT_EQ(volatile_slot.slot, ordinary_slot.slot);
+    EXPECT_EQ(volatile_slot.value, ordinary_slot.value);
   }
 }
 

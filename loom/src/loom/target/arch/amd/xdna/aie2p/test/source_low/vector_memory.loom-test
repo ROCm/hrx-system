@@ -1,6 +1,20 @@
 // RUN: emit source-low output=low
 
 aie2p.target<core> @target
+func.def target(@target) @volatile_copy_i8x64(
+    %source: buffer,
+    %output: buffer
+) {
+  %source_aligned, %output_aligned = buffer.assume.alignment %source, %output {minimum_alignment = 64} : buffer, buffer
+  %base = index.constant 0 : offset
+  %source_view = buffer.view %source_aligned[%base] : buffer -> view<64xi8>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<64xi8>
+  %first = vector.load<volatile> %source_view[0] : view<64xi8> -> vector<64xi8>
+  %second = vector.load<volatile> %source_view[0] : view<64xi8> -> vector<64xi8>
+  vector.store<volatile> %second, %output_view[0] : vector<64xi8>, view<64xi8>
+  func.return
+}
+
 func.def target(@target) @copy_i8x64(%source: buffer, %output: buffer) {
   %source_aligned, %output_aligned = buffer.assume.alignment %source, %output {minimum_alignment = 64} : buffer, buffer
   %base = index.constant 0 : offset
@@ -95,6 +109,15 @@ func.def target(@target) @copy_i32x16_dynamic_static(
 }
 
 // ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @volatile_copy_i8x64() asm {
+  %source_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %first = vlda.512.i8x64.volatile %source_view, 0
+  %second = vlda.512.i8x64.volatile %source_view, 0
+  vst.512.i8x64.volatile %second, %output_view, 0
+  return
+}
+
 low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @copy_i8x64() asm {
   %source_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
@@ -128,35 +151,35 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @add_i32x
 low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @copy_i32x16_materialized_static() asm {
   %source_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
-  %85 = mov.static-byte-offset 1024
-  %86 = mov.address-index %85
-  %value = vlda.512.i32x16.index %source_view, %86
-  vst.512.i32x16.index %value, %output_view, %86
+  %98 = mov.static-byte-offset 1024
+  %99 = mov.address-index %98
+  %value = vlda.512.i32x16.index %source_view, %99
+  vst.512.i32x16.index %value, %output_view, %99
   return
 }
 
 low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @copy_i32x16_dynamic(%element: reg<aie2p.er>) asm {
   %source_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
-  %93 = mov.i32 2
-  %94 = lshl %element, %93
-  %95 = mov.address-index %94
-  %value = vlda.512.i32x16.index %source_view, %95
-  vst.512.i32x16.index %value, %output_view, %95
+  %106 = mov.i32 2
+  %107 = lshl %element, %106
+  %108 = mov.address-index %107
+  %value = vlda.512.i32x16.index %source_view, %108
+  vst.512.i32x16.index %value, %output_view, %108
   return
 }
 
 low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @copy_i32x16_dynamic_static(%element: reg<aie2p.er>) asm {
   %source_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
-  %103 = mov.static-byte-offset 64
-  %104 = mov.i32 2
-  %105 = lshl %element, %104
-  %106 = add.rr %105, %103
-  %107 = mov.address-index %106
-  %value = vlda.512.i32x16.index %source_view, %107
-  %112 = add.rr %105, %103
-  %113 = mov.address-index %112
-  vst.512.i32x16.index %value, %output_view, %113
+  %116 = mov.static-byte-offset 64
+  %117 = mov.i32 2
+  %118 = lshl %element, %117
+  %119 = add.rr %118, %116
+  %120 = mov.address-index %119
+  %value = vlda.512.i32x16.index %source_view, %120
+  %125 = add.rr %118, %116
+  %126 = mov.address-index %125
+  vst.512.i32x16.index %value, %output_view, %126
   return
 }

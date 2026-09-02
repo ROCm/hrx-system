@@ -6,6 +6,8 @@
 
 """Tests for AMD XDNA AIE2P scalar and vector memory selection."""
 
+from dataclasses import replace
+
 from loom.dialect.vector import defs as vector
 from loom.dialect.view import defs as view
 from loom.target.arch.amd.xdna.aie2p.contracts.memory import AIE2P_MEMORY_RULES
@@ -34,12 +36,13 @@ _MEMORY_ROOTS = (
 )
 
 
-def _rules_for(root_kind, *source_ops):
+def _rules_for(root_kind, *source_ops, volatile: bool = False):
     return [
         rule
         for rule in AIE2P_MEMORY_RULES
         if rule.source_op in source_ops
         and rule.emit[-1].source_memory.root_kind is root_kind
+        and rule.descriptor.key.endswith(".volatile") is volatile
     ]
 
 
@@ -105,6 +108,44 @@ def test_scalar_memory_rules_cover_every_address_form() -> None:
             assert constraint.vector_lane_count == 1
             assert constraint.vector_lane_byte_stride == 4
             assert constraint.minimum_alignment == 4
+
+
+def test_volatile_memory_rules_mirror_every_ordinary_rule() -> None:
+    for root_kind, _ in _MEMORY_ROOTS:
+        for source_ops in (
+            (view.view_load, view.view_store),
+            (vector.vector_load, vector.vector_store),
+        ):
+            ordinary_rules = _rules_for(root_kind, *source_ops)
+            volatile_rules = _rules_for(root_kind, *source_ops, volatile=True)
+            assert len(volatile_rules) == len(ordinary_rules)
+            for volatile_rule, ordinary_rule in zip(
+                volatile_rules, ordinary_rules, strict=True
+            ):
+                assert volatile_rule.descriptor.key == (
+                    f"{ordinary_rule.descriptor.key}.volatile"
+                )
+                assert volatile_rule.guards[0].kind is (
+                    GuardKind.INSTANCE_FLAGS_HAS_ALL
+                )
+                assert volatile_rule.guards[0].field == "memory_flags"
+                assert volatile_rule.guards[0].enum_keyword == "volatile"
+                assert volatile_rule.guards[1:] == ordinary_rule.guards
+                assert len(volatile_rule.emit) == len(ordinary_rule.emit)
+                for emit_index, (volatile_emit, ordinary_emit) in enumerate(
+                    zip(volatile_rule.emit, ordinary_rule.emit, strict=True)
+                ):
+                    expected_descriptor = ordinary_emit.descriptor
+                    if emit_index == len(ordinary_rule.emit) - 1:
+                        assert volatile_emit.descriptor.key == (
+                            f"{ordinary_emit.descriptor.key}.volatile"
+                        )
+                    else:
+                        assert volatile_emit.descriptor == ordinary_emit.descriptor
+                    assert (
+                        replace(volatile_emit, descriptor=expected_descriptor)
+                        == ordinary_emit
+                    )
 
 
 def test_vector_memory_rules_cover_every_native_width_and_address_form() -> None:
