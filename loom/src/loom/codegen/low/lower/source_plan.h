@@ -22,6 +22,8 @@
 extern "C" {
 #endif
 
+typedef struct loom_low_lower_resolved_emit_t loom_low_lower_resolved_emit_t;
+
 enum loom_low_lower_value_storage_flag_bits_e {
   // The source value must be materialized as a target-Low SSA value.
   LOOM_LOW_LOWER_VALUE_STORAGE_REQUIRED = (uint8_t)1u << 0,

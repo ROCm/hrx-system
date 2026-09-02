@@ -8,6 +8,7 @@
 
 #include <stdint.h>
 
+#include "loom/codegen/low/lower/lower_rule_match.h"
 #include "loom/ir/context.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/ops/vector/storage.h"

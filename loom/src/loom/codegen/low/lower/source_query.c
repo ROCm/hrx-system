@@ -10,7 +10,7 @@
 
 #include "loom/codegen/low/lower/contract_query.h"
 #include "loom/codegen/low/lower/lower_context.h"
-#include "loom/codegen/low/lower/lower_rules.h"
+#include "loom/codegen/low/lower/lower_rule_match.h"
 #include "loom/ir/module.h"
 #include "loom/ops/func/ops.h"
 #include "loom/target/low_descriptor_registry.h"

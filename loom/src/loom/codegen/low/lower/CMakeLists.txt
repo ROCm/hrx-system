@@ -19,7 +19,10 @@ loom_cc_library(
     "lower_context.h"
     "lower_report.h"
     "lower_rule_descriptor.h"
+    "lower_rule_emit.h"
+    "lower_rule_match.h"
     "lower_rule_source_memory.h"
+    "lower_rule_value.h"
     "lower_rules.h"
     "module_state.h"
     "source_plan.h"
@@ -32,9 +35,11 @@ loom_cc_library(
     "lower_policy.c"
     "lower_report.c"
     "lower_rule_descriptor.c"
+    "lower_rule_emit.c"
+    "lower_rule_match.c"
     "lower_rule_source_memory_match.c"
     "lower_rule_source_memory_materialize.c"
-    "lower_rules.c"
+    "lower_rule_value.c"
     "module_state.c"
     "source_plan.c"
     "source_query.c"
@@ -128,6 +133,61 @@ loom_cc_test(
     ::lower
     iree::testing::gtest
     iree::testing::gtest_main
+)
+
+loom_cc_test(
+  NAME
+    lower_rule_value_test
+  SRCS
+    "lower_rule_value_test.cc"
+  DEPS
+    ::lower
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::codegen::low::testing::source_workload
+    loom::ir
+    loom::ir::facts
+    loom::ops::func
+    loom::ops::scalar
+    loom::util::fact_table
+)
+
+loom_cc_test(
+  NAME
+    lower_rule_match_test
+  SRCS
+    "lower_rule_match_test.cc"
+  DEPS
+    ::lower
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::codegen::low::testing::source_workload
+    loom::ir
+    loom::ops::index
+)
+
+loom_cc_test(
+  NAME
+    lower_rule_emit_test
+  SRCS
+    "lower_rule_emit_test.cc"
+  DEPS
+    ::lower
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::codegen::low::testing::source_workload
+    loom::ir
+    loom::ops::func
+    loom::ops::low
+    loom::ops::scalar
+    loom::target::test::descriptors
+    loom::target::test::low_registry
+    loom::target::test::lower
+    loom::target::test::target_record_table
+    loom::util::fact_table
 )
 
 loom_cc_test(

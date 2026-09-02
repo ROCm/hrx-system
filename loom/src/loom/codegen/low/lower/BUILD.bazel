@@ -36,9 +36,11 @@ loom_cc_library(
         "lower_policy.c",
         "lower_report.c",
         "lower_rule_descriptor.c",
+        "lower_rule_emit.c",
+        "lower_rule_match.c",
         "lower_rule_source_memory_match.c",
         "lower_rule_source_memory_materialize.c",
-        "lower_rules.c",
+        "lower_rule_value.c",
         "module_state.c",
         "source_plan.c",
         "source_query.c",
@@ -50,7 +52,10 @@ loom_cc_library(
         "lower_context.h",
         "lower_report.h",
         "lower_rule_descriptor.h",
+        "lower_rule_emit.h",
+        "lower_rule_match.h",
         "lower_rule_source_memory.h",
+        "lower_rule_value.h",
         "lower_rules.h",
         "module_state.h",
         "source_plan.h",
@@ -143,6 +148,58 @@ loom_cc_test(
     srcs = ["lower_context_test.cc"],
     deps = [
         ":lower",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "lower_rule_value_test",
+    srcs = ["lower_rule_value_test.cc"],
+    deps = [
+        ":lower",
+        "//loom/src/loom/codegen/low/testing:source_workload",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:facts",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "lower_rule_match_test",
+    srcs = ["lower_rule_match_test.cc"],
+    deps = [
+        ":lower",
+        "//loom/src/loom/codegen/low/testing:source_workload",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/index",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "lower_rule_emit_test",
+    srcs = ["lower_rule_emit_test.cc"],
+    deps = [
+        ":lower",
+        "//loom/src/loom/codegen/low/testing:source_workload",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/target/test:descriptors",
+        "//loom/src/loom/target/test:low_registry",
+        "//loom/src/loom/target/test:lower",
+        "//loom/src/loom/target/test:target_record_table",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

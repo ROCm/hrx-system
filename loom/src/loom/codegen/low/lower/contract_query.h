@@ -16,7 +16,7 @@
 #define LOOM_CODEGEN_LOW_LOWER_CONTRACT_QUERY_H_
 
 #include "iree/base/api.h"
-#include "loom/codegen/low/lower/lower_rules.h"
+#include "loom/codegen/low/lower/lower_rule_match.h"
 #include "loom/ir/ir.h"
 #include "loom/target/contract.h"
 

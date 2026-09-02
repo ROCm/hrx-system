@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "loom/codegen/low/lower/lower_context.h"
+#include "loom/codegen/low/lower/lower_rule_emit.h"
 #include "loom/codegen/low/lower/source_plan.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"

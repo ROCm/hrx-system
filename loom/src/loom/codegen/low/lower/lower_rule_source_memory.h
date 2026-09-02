@@ -17,6 +17,9 @@
 extern "C" {
 #endif
 
+typedef struct loom_low_lower_rule_match_context_t
+    loom_low_lower_rule_match_context_t;
+
 typedef struct loom_low_lower_rule_source_memory_state_t {
   // Source op whose canonical access is retained in this state.
   const loom_op_t* source_op;
