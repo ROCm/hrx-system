@@ -88,6 +88,80 @@ needed merely because a helper is small; it is used when the source contract
 requires the boundary to disappear at the current stage. Without an explicit
 policy, the consuming pass decides from target, call graph, and cost evidence.
 
+## Invoke an authored Low schedule fragment
+
+`low.invoke` is the explicit boundary for a source function that delegates a
+value transformation to an authored `low.func.def`. It is useful when a
+reverse-engineered instruction schedule is already known but loads, stores,
+launch geometry, and the surrounding algorithm should remain in source IR.
+The source-to-Low pipeline always inlines the helper; it does not introduce a
+runtime call or leave the boundary for a backend to interpret.
+
+The call site retains source types while the helper signature uses target-Low
+register types. Physical register classes are carrier-only: source semantic
+types are represented by the helper's predicates and facts rather than a
+second type inside the physical register carrier.
+
+```loom
+amdgpu.target<gfx11-generic> @schedule_target
+
+low.func.def schedule(locked)
+    target<amdgpu.gfx11.generic.core>(@schedule_target)
+    @pack_pair(%even: reg<amdgpu.vgpr>, %odd: reg<amdgpu.vgpr>)
+    -> (reg<amdgpu.vgpr>) asm {
+  %selector = s_mov_b32 0x05040100
+  %packed = v_perm_b32 %odd, %even, %selector
+  return %packed
+}
+
+// %even and %odd are produced by ordinary source-level vector loads.
+%packed = low.invoke @pack_pair(%even, %odd)
+    : (vector<2xf16>, vector<2xf16>) -> (vector<2xf16>)
+```
+
+Lowering proves that each source operand and result maps exactly to the
+helper's register signature. The helper has virtual register allocation, one
+outer body block ending in `low.return`, and no function-entry resources or
+live-ins. A nested call has its own target and representation boundary and is
+therefore rejected instead of escaping into the caller accidentally.
+
+Target compatibility is directional. A concrete `gfx1151` caller can invoke a
+helper authored for `gfx11-generic` because the concrete target satisfies the
+generic requirement. Lowering then projects the helper's register classes and
+instruction descriptors by stable identity into the caller's
+`amdgpu.rdna3_5.core` representation. A generic caller cannot invoke an
+exact-only `gfx1151` helper. A helper may omit its target witness when only the
+representation contract matters; the caller then supplies the target facts and
+must still use a target contract supported by that representation.
+
+Value-fact analysis remains local across this boundary. Source function
+argument predicates are remapped onto the generated Low function, while facts
+expressed by emitted Low producers are recomputed with the cloned operations.
+The helper's authored argument predicates are preconditions: lowering resolves
+each predicate against the call-site operands and proves it from caller-visible
+facts. An unknown or contradicted precondition rejects the invocation. Only
+after every precondition is proven does lowering remap the predicates to the
+call-site values as `low.assume` identities and clone the body. The assumption
+therefore reifies an established fact for downstream local analysis; it never
+creates a fact needed to justify the call. This is the explicit source-to-Low
+fact bridge for scalar dimensions, indices, and similar register arguments. A
+helper states every fact its implementation requires in its `where` clause;
+`low.invoke` does not serialize the caller's analysis table or turn
+opportunistically inferred facts into hidden callee assumptions.
+
+`schedule(locked)` makes instruction order part of the helper contract.
+Inlining surrounds every authored operation with source-order scheduling
+boundaries so surrounding source operations cannot interleave with the
+fragment. Locked helpers are straight-line; nested regions are rejected
+because preserving only their outer position would not preserve their internal
+schedule. Helpers without the locked contract remain available to normal Low
+scheduling.
+
+Acceptance uses the same default compiler pipeline as maintained Loom source
+and executes through `iree-test-loom`. Direct execution of prepared Low can be
+useful while reconstructing a schedule, but it establishes an oracle rather
+than proving that the maintained source survives compilation.
+
 ## Conditionals can return values
 
 [`scf.if`](../reference/dialects/scf/ops/if.md) consumes an `i1` condition. A

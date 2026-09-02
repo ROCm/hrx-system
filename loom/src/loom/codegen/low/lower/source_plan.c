@@ -26,6 +26,7 @@
 #include "loom/ops/encoding/ops.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/kernel/ops.h"
+#include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/scf/ops.h"
 
@@ -84,6 +85,7 @@ static bool loom_low_lower_op_is_structural(const loom_module_t* module,
     case LOOM_OP_FUNC_CALL:
     case LOOM_OP_FUNC_RETURN:
     case LOOM_OP_KERNEL_RETURN:
+    case LOOM_OP_LOW_INVOKE:
     case LOOM_OP_SCF_FOR:
     case LOOM_OP_SCF_IF:
     case LOOM_OP_SCF_WHILE:
@@ -491,6 +493,10 @@ static void loom_low_lower_mark_structural_storage_demands(
     case LOOM_OP_FUNC_CALL:
       loom_low_lower_mark_value_slice_storage_required(
           context, loom_func_call_operands(source_op));
+      return;
+    case LOOM_OP_LOW_INVOKE:
+      loom_low_lower_mark_value_slice_storage_required(
+          context, loom_low_invoke_operands(source_op));
       return;
     case LOOM_OP_FUNC_RETURN:
       loom_low_lower_mark_value_slice_storage_required(

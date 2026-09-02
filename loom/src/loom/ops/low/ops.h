@@ -484,7 +484,7 @@ iree_status_t loom_low_concat_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_LOW_INVOKE: Invoke an explicitly selected translated low function from non-low IR.
+// LOOM_OP_LOW_INVOKE: Required-inline edge from source IR to an explicitly selected target-Low function. The call site retains source value types; source-to-Low lowering maps them to the helper register signature, proves directional target and representation compatibility, and clones the helper body into the caller. The helper must be a module-local low.func.def with virtual register allocation and one outer body block. Function-entry resources and nested calls cannot cross the boundary. Caller facts must prove every authored helper argument predicate before lowering reifies those predicates as low.assume identities at the inline site. schedule(locked) helpers must be straight-line and preserve their authored instruction order.
 // %result = low.invoke @extern_add(%lhs, %rhs) : (i32, i32) -> (i32)
 LOOM_DEFINE_ISA(loom_low_invoke_isa, LOOM_OP_LOW_INVOKE)
 LOOM_DEFINE_VARIADIC_OPERANDS(loom_low_invoke_operands, 0)

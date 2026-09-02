@@ -74,6 +74,27 @@ low.kernel.def target<test.low.core>(@test_target) @kernel_return_rejects_values
 
 test.target<low_core> @test_target
 
+// Carrier-only target registers retain predicates as target facts without
+// claiming a source-level numeric type.
+low.func.def target<test.low.core>(@test_target) @opaque_register_predicate(%value: reg<test.i32>) where [range(%value, 0, 16)] asm {
+  return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+// A typed register has enough semantic information to reject a mismatched
+// predicate kind.
+// ERROR@+1: TYPE/003 {operand_name="predicates[0].arg[0]", actual_type="reg<test.i32 : f32>", expected_constraint="integer, index, or offset scalar"}
+low.func.def target<test.low.core>(@test_target) @typed_register_predicate_mismatch(%value: reg<test.i32 : f32>) where [range(%value, 0, 16)] asm {
+  return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
 low.func.def target<test.low.core>(@test_target) @storage_view_passes(%value: reg<test.i32>) -> (reg<test.i32>) {
   %storage = low.storage.reserve {byte_alignment = 16, byte_length = 64} : low.storage<scratch>
   %view = low.storage.view %storage {offset = 16, byte_length = 16} : low.storage<scratch> -> low.storage<scratch>

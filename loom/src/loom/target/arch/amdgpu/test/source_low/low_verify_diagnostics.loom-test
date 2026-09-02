@@ -6,3 +6,14 @@ amdgpu.target<gfx11-generic> @target
 low.func.def target<amdgpu.gfx11.generic.core>(@target) @return_type_mismatch(%predicate: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>) {
   low.return %predicate : reg<amdgpu.sgpr x2>
 }
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+// Physical register classes are carrier-only in canonical Low IR. Semantic
+// constraints belong in predicates and facts rather than the register type.
+// ERROR@+1: TARGET/077 {function_name="typed_physical_carrier", value_kind="argument", value_name="value", actual_type="reg<amdgpu.sgpr : index>", register_class="amdgpu.sgpr"}
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @typed_physical_carrier(%value: reg<amdgpu.sgpr : index>) asm {
+  return
+}

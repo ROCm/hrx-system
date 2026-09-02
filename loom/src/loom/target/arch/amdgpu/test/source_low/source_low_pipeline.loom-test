@@ -340,6 +340,7 @@ pass.pipeline<module> @__loom_check_prepared_low pipeline {
       low-dce
     }
   }
+  symbol-dce
   for func {
     where target {
       where target(abi = "hal_kernel", codegen = "low_native", family = "amdgpu") {

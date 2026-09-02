@@ -1290,6 +1290,175 @@ ERR_TARGET_071 = ErrorDef(
     ),
 )
 
+# ERR_TARGET_072: Low invocation cannot preserve the helper contract.
+ERR_TARGET_072 = ErrorDef(
+    domain=ErrorDomain.TARGET,
+    code=72,
+    severity=Severity.ERROR,
+    summary="Low invocation cannot preserve the helper contract.",
+    message=(
+        "target '{target_key}' export '{export_name}' config '{config_key}' "
+        "rejected '{op_name}' in '@{function_name}': low helper "
+        "'@{callee_name}' cannot be inlined because {reason}"
+    ),
+    params=(
+        *_TARGET_CONTEXT_PARAMS,
+        ErrorParam("callee_name", ParamKind.STRING),
+        ErrorParam("reason", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Use a module-local, single-block low.func.def with virtual register "
+        "allocation and no function-entry resource imports"
+    ),
+)
+
+# ERR_TARGET_073: Low invocation signature count does not match the helper.
+ERR_TARGET_073 = ErrorDef(
+    domain=ErrorDomain.TARGET,
+    code=73,
+    severity=Severity.ERROR,
+    summary="Low invocation signature count does not match the helper.",
+    message=(
+        "target '{target_key}' export '{export_name}' config '{config_key}' "
+        "rejected '{op_name}' in '@{function_name}': low helper "
+        "'@{callee_name}' expects {expected_count} {value_kind}(s), but the "
+        "invocation has {actual_count}"
+    ),
+    params=(
+        *_TARGET_CONTEXT_PARAMS,
+        ErrorParam("callee_name", ParamKind.STRING),
+        ErrorParam("value_kind", ParamKind.STRING),
+        ErrorParam("actual_count", ParamKind.U32),
+        ErrorParam("expected_count", ParamKind.U32),
+    ),
+    fix_hint=(
+        "Match the low.invoke operand and result counts to the low helper signature"
+    ),
+)
+
+# ERR_TARGET_074: Low invocation value does not match the helper register ABI.
+ERR_TARGET_074 = ErrorDef(
+    domain=ErrorDomain.TARGET,
+    code=74,
+    severity=Severity.ERROR,
+    summary="Low invocation value does not match the helper register ABI.",
+    message=(
+        "target '{target_key}' export '{export_name}' config '{config_key}' "
+        "rejected '{op_name}' in '@{function_name}': mapped {value_kind} "
+        "type {actual_type} does not match low helper '@{callee_name}' "
+        "register type {expected_type}"
+    ),
+    params=(
+        *_TARGET_CONTEXT_PARAMS,
+        ErrorParam("callee_name", ParamKind.STRING),
+        ErrorParam("value_kind", ParamKind.STRING),
+        ErrorParam("actual_type", ParamKind.TYPE),
+        ErrorParam("expected_type", ParamKind.TYPE),
+    ),
+    fix_hint=(
+        "Use source values whose target-low mapping exactly matches the low "
+        "helper register signature"
+    ),
+)
+
+# ERR_TARGET_075: Low invocation representation cannot encode caller target.
+ERR_TARGET_075 = ErrorDef(
+    domain=ErrorDomain.TARGET,
+    code=75,
+    severity=Severity.ERROR,
+    summary="Low invocation representation cannot encode caller target.",
+    message=(
+        "target '{target_key}' export '{export_name}' config '{config_key}' "
+        "rejected '{op_name}' in '@{function_name}': low helper "
+        "'@{callee_name}' uses representation contract "
+        "'{callee_contract}', which cannot represent caller target contract "
+        "'{caller_target_contract}'"
+    ),
+    params=(
+        *_TARGET_CONTEXT_PARAMS,
+        ErrorParam("callee_name", ParamKind.STRING),
+        ErrorParam("callee_contract", ParamKind.STRING),
+        ErrorParam("caller_target_contract", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Use a portable representation contract that includes the caller "
+        "target, or select a compatible helper"
+    ),
+)
+
+# ERR_TARGET_076: Low invocation target requirement is not satisfied.
+ERR_TARGET_076 = ErrorDef(
+    domain=ErrorDomain.TARGET,
+    code=76,
+    severity=Severity.ERROR,
+    summary="Low invocation target requirement is not satisfied.",
+    message=(
+        "target '{target_key}' export '{export_name}' config '{config_key}' "
+        "rejected '{op_name}' in '@{function_name}': low helper "
+        "'@{callee_name}' requires target '{callee_target}', which caller "
+        "target '{caller_target}' does not satisfy"
+    ),
+    params=(
+        *_TARGET_CONTEXT_PARAMS,
+        ErrorParam("callee_name", ParamKind.STRING),
+        ErrorParam("callee_target", ParamKind.STRING),
+        ErrorParam("caller_target", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Select a low helper authored for the caller target or for a generic "
+        "target satisfied by the caller"
+    ),
+)
+
+# ERR_TARGET_077: Physical Low register carries a semantic value type.
+ERR_TARGET_077 = ErrorDef(
+    domain=ErrorDomain.TARGET,
+    code=77,
+    severity=Severity.ERROR,
+    summary="Physical Low register carries a semantic value type.",
+    message=(
+        "low function '@{function_name}' {value_kind} '{value_name}' has "
+        "type {actual_type}, but register class '{register_class}' represents "
+        "target-visible physical storage"
+    ),
+    params=(
+        ErrorParam("function_name", ParamKind.STRING),
+        ErrorParam("value_kind", ParamKind.STRING),
+        ErrorParam("value_name", ParamKind.STRING),
+        ErrorParam("actual_type", ParamKind.TYPE),
+        ErrorParam("register_class", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Use the canonical carrier-only register type for physical storage; "
+        "retain source semantic constraints as verified predicates and facts"
+    ),
+)
+
+# ERR_TARGET_078: Low invocation helper precondition is not proven.
+ERR_TARGET_078 = ErrorDef(
+    domain=ErrorDomain.TARGET,
+    code=78,
+    severity=Severity.ERROR,
+    summary="Low invocation helper precondition is not proven.",
+    message=(
+        "target '{target_key}' export '{export_name}' config '{config_key}' "
+        "rejected '{op_name}' in '@{function_name}': low helper "
+        "'@{callee_name}' precondition {predicate_index} '{predicate_kind}' "
+        "is {proof_result} from caller facts"
+    ),
+    params=(
+        *_TARGET_CONTEXT_PARAMS,
+        ErrorParam("callee_name", ParamKind.STRING),
+        ErrorParam("predicate_index", ParamKind.U32),
+        ErrorParam("predicate_kind", ParamKind.STRING),
+        ErrorParam("proof_result", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Establish the required fact in the maintained source contract or use "
+        "a helper whose preconditions follow from the caller facts"
+    ),
+)
+
 ALL_TARGET_ERRORS = (
     ERR_TARGET_001,
     ERR_TARGET_002,
@@ -1353,4 +1522,11 @@ ALL_TARGET_ERRORS = (
     ERR_TARGET_069,
     ERR_TARGET_070,
     ERR_TARGET_071,
+    ERR_TARGET_072,
+    ERR_TARGET_073,
+    ERR_TARGET_074,
+    ERR_TARGET_075,
+    ERR_TARGET_076,
+    ERR_TARGET_077,
+    ERR_TARGET_078,
 )
