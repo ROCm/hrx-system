@@ -810,6 +810,7 @@ iree_cc_test(
     iree::hal
     iree::hal::cts::util::profile_test_util
     iree::hal::cts::util::test_base
+    iree::hal::drivers::amdgpu::util::queue_primitives
     iree::hal::testing::mock_device
     iree::testing::gtest
     iree::testing::gtest_main

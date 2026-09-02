@@ -386,10 +386,10 @@ TEST_F(ExecutableTest, RestrictiveExecutionQueueMasksConstrainKernelPlacement) {
   ASSERT_NE(private_affinity_a, private_affinity_b);
 
   const iree_hal_amdgpu_queue_affinity_domain_t affinity_domain = {
-      .supported_affinity = logical_device->queue_affinity_mask,
-      .physical_device_count = logical_device->physical_device_count,
-      .queue_count_per_physical_device =
-          logical_device->system->topology.gpu_agent_queue_count,
+      /*.supported_affinity=*/logical_device->queue_affinity_mask,
+      /*.physical_device_count=*/logical_device->physical_device_count,
+      /*.queue_count_per_physical_device=*/
+      logical_device->system->topology.gpu_agent_queue_count,
   };
   iree_hal_queue_affinity_t ordinary_affinity = 0;
   IREE_ASSERT_OK(iree_hal_amdgpu_queue_affinity_for_physical_queue(
@@ -422,26 +422,34 @@ TEST_F(ExecutableTest, RestrictiveExecutionQueueMasksConstrainKernelPlacement) {
                                          workgroup_size, &mask_b_ids));
 
   ASSERT_EQ(ordinary_ids.size(), queue_topology.native_compute_unit_count);
-  // KFD interleaves gfx9.4.3 CU-mask bits by XCC first: bits 0-7 select
-  // (XCC 0-7, SE 0, CU 0). The device kernel uses HIP's gfx942 __smid bit
-  // packing. KFD requires at least one enabled CU in each XCC to avoid an
-  // all-zero per-XCC register being interpreted as unconfined. The exact IDs
-  // requested by bits {0..7} and {8..15} are therefore SE0/CU0 and SE1/CU0
-  // from every XCC, respectively.
-  const std::vector<uint32_t> expected_mask_a_ids = {0u,   64u,  128u, 192u,
-                                                     256u, 320u, 384u, 448u};
-  const std::vector<uint32_t> expected_mask_b_ids = {16u,  80u,  144u, 208u,
-                                                     272u, 336u, 400u, 464u};
-  EXPECT_EQ(mask_a_ids, expected_mask_a_ids);
-  EXPECT_EQ(mask_b_ids, expected_mask_b_ids);
-  EXPECT_EQ(mask_a_ids.size(), xcc_count);
-  EXPECT_EQ(mask_b_ids.size(), xcc_count);
-  EXPECT_TRUE(std::includes(expected_mask_a_ids.begin(),
-                            expected_mask_a_ids.end(), mask_a_ids.begin(),
-                            mask_a_ids.end()));
-  EXPECT_TRUE(std::includes(expected_mask_b_ids.begin(),
-                            expected_mask_b_ids.end(), mask_b_ids.begin(),
-                            mask_b_ids.end()));
+  // KFD interleaves gfx9.4.3 CU-mask bits by XCC across active CU slots.
+  // Harvested physical CU ordinals may differ between XCCs, so confinement is
+  // defined by one ordinary-queue-visible unit per XCC in the selected SE.
+  const auto expect_mask_topology = [&](const std::vector<uint32_t>& ids,
+                                        uint32_t expected_se_id) {
+    EXPECT_EQ(ids.size(), xcc_count);
+    std::vector<bool> observed_xccs(xcc_count, false);
+    for (uint32_t id : ids) {
+      const uint32_t xcc_id = id >> 6u;
+      const uint32_t se_id = (id >> 4u) & 0x3u;
+      const uint32_t physical_cu_id = id & 0xFu;
+      ASSERT_LT(xcc_id, xcc_count)
+          << "execution-unit ID " << id << " decodes to XCC " << xcc_id
+          << ", SE " << se_id << ", physical CU " << physical_cu_id;
+      EXPECT_EQ(se_id, expected_se_id)
+          << "execution-unit ID " << id << " decodes to XCC " << xcc_id
+          << ", SE " << se_id << ", physical CU " << physical_cu_id;
+      EXPECT_FALSE(observed_xccs[xcc_id])
+          << "execution-unit ID " << id << " repeats XCC " << xcc_id
+          << " at SE " << se_id << ", physical CU " << physical_cu_id;
+      observed_xccs[xcc_id] = true;
+    }
+    for (uint32_t xcc_id = 0; xcc_id < xcc_count; ++xcc_id) {
+      EXPECT_TRUE(observed_xccs[xcc_id]) << "missing XCC " << xcc_id;
+    }
+  };
+  expect_mask_topology(mask_a_ids, /*expected_se_id=*/0);
+  expect_mask_topology(mask_b_ids, /*expected_se_id=*/1);
   EXPECT_TRUE(std::includes(ordinary_ids.begin(), ordinary_ids.end(),
                             mask_a_ids.begin(), mask_a_ids.end()));
   EXPECT_TRUE(std::includes(ordinary_ids.begin(), ordinary_ids.end(),
