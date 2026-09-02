@@ -38,6 +38,7 @@ loom_cc_library(
     loom::error::renderer
     loom::format::text::printer
     loom::ir
+    loom::ops::callable_effects
     loom::ops::op_defs
     loom::ops::special_values
     loom::target::registers

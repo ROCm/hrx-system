@@ -477,15 +477,17 @@ static void loom_low_allocation_checker_constraints(
     const loom_low_allocation_assignment_t* assignment =
         loom_low_allocation_checker_assignment_for_ordinal(
             checker, fixed->value_ordinal, &assignment_index);
-    if (assignment == NULL || assignment->value_id != fixed->value_id ||
-        assignment->descriptor_reg_class_id != fixed->descriptor_reg_class_id ||
-        assignment->location_kind != fixed->location_kind ||
-        assignment->location_base != fixed->location_base ||
-        assignment->location_count != fixed->location_count) {
+    const loom_low_allocation_assignment_t* required = &fixed->assignment;
+    if (assignment == NULL || assignment->value_id != required->value_id ||
+        assignment->descriptor_reg_class_id !=
+            required->descriptor_reg_class_id ||
+        assignment->location_kind != required->location_kind ||
+        assignment->location_base != required->location_base ||
+        assignment->location_count != required->location_count) {
       loom_low_allocation_checker_record(
           checker, LOOM_LOW_ALLOCATION_CHECK_VIOLATION_FIXED_LOCATION,
-          (uint32_t)i, assignment_index, fixed->value_id, LOOM_VALUE_ID_INVALID,
-          fixed->interval ? fixed->interval->start_point : UINT32_MAX);
+          (uint32_t)i, assignment_index, required->value_id,
+          LOOM_VALUE_ID_INVALID, required->start_point);
     }
   }
 

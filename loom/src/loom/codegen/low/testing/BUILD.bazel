@@ -77,6 +77,10 @@ loom_cc_library(
     testonly = True,
     srcs = ["source_workload.c"],
     hdrs = ["source_workload.h"],
+    visibility = [
+        "//loom/src/loom/codegen/low:__pkg__",
+        "//loom/src/loom/codegen/low/lower:__pkg__",
+    ],
     deps = [
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:combining",

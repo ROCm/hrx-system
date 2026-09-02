@@ -16,7 +16,7 @@
 
 #include "iree/base/api.h"
 #include "loom/codegen/low/lower/lower.h"
-#include "loom/codegen/low/lower/lower_rules.h"
+#include "loom/codegen/low/lower/rule_match.h"
 
 #ifdef __cplusplus
 extern "C" {

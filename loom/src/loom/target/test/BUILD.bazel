@@ -25,6 +25,7 @@ _TEST_LOW_LOWER_VISIBILITY = [
 
 _TEST_LOW_REGISTRY_VISIBILITY = [
     "//loom/src/loom/codegen/low:__pkg__",
+    "//loom/src/loom/codegen/low/lower:__pkg__",
     "//loom/src/loom/codegen/low/transforms/pipeline:__pkg__",
     "//loom/src/loom/target:__pkg__",
 ]

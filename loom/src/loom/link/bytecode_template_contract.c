@@ -217,11 +217,8 @@ static iree_status_t loom_link_bytecode_template_decode_conditions(
     loom_attribute_t value = loom_attr_absent();
     IREE_RETURN_IF_ERROR(loom_link_bytecode_template_decode_condition(
         reader, expected_family_kind, &cursor, &value));
-    const loom_target_condition_descriptor_t* descriptor = NULL;
-    IREE_RETURN_IF_ERROR(
-        loom_target_condition_resolve(reader->context, value, &descriptor));
     conditions[i] = (loom_target_condition_t){
-        .descriptor = descriptor,
+        .descriptor = loom_target_condition_resolve(reader->context, value),
         .value = value,
     };
   }

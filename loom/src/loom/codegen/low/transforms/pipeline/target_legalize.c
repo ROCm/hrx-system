@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "loom/analysis/contract.h"
+#include "loom/codegen/low/lower/source_query.h"
 #include "loom/codegen/low/lower/source_selection.h"
 #include "loom/codegen/low/pipeline/pass_environment.h"
 #include "loom/error/error_catalog.h"
@@ -26,10 +27,6 @@
 #include "loom/target/low_descriptor_registry.h"
 #include "loom/target/low_legality.h"
 #include "loom/target/reporting/report.h"
-#include "loom/transforms/buffer/target_legalization.h"
-#include "loom/transforms/scalar/target_legalization.h"
-#include "loom/transforms/vector/target_legalization.h"
-#include "loom/transforms/view/target_legalization.h"
 #include "loom/util/walk.h"
 
 typedef struct loom_low_target_legalize_pass_state_t {
@@ -1205,21 +1202,21 @@ loom_low_target_legalize_apply_final_rejection_to_contract_query(
   return iree_ok_status();
 }
 
-static void loom_low_target_legalize_destroy_query_scope(
+static void loom_low_target_legalize_deinitialize_query_scope(
     loom_low_target_legalize_function_state_t* state) {
   if (state->query_scope == NULL) {
     return;
   }
   state->legalization_context.value_domain = NULL;
   state->legalization_context.view_regions = NULL;
-  loom_low_lower_source_query_scope_destroy(state->query_scope);
+  loom_low_lower_source_query_scope_deinitialize(state->query_scope);
   state->query_scope = NULL;
 }
 
 static iree_status_t loom_low_target_legalize_refresh_query_scope(
     loom_low_target_legalize_function_state_t* state,
     const loom_value_fact_table_t* fact_table) {
-  loom_low_target_legalize_destroy_query_scope(state);
+  loom_low_target_legalize_deinitialize_query_scope(state);
   state->lower_options.fact_table = (loom_value_fact_table_t*)fact_table;
   IREE_RETURN_IF_ERROR(loom_low_lower_source_query_scope_create(
       state->module, state->selection->func, &state->lower_options,
@@ -1453,7 +1450,7 @@ static iree_status_t loom_low_target_legalize_rewrite_op(
 static void loom_low_target_legalize_changed(
     void* user_data, loom_greedy_rewrite_driver_t* driver) {
   (void)driver;
-  loom_low_target_legalize_destroy_query_scope(
+  loom_low_target_legalize_deinitialize_query_scope(
       (loom_low_target_legalize_function_state_t*)user_data);
 }
 
@@ -1644,7 +1641,7 @@ static iree_status_t loom_low_target_legalize_function(
           module, &state, pass_state, final_facts, &final_error_count);
     }
   }
-  loom_low_target_legalize_destroy_query_scope(&state);
+  loom_low_target_legalize_deinitialize_query_scope(&state);
   loom_greedy_rewrite_driver_deinitialize(&rewrite_driver);
   iree_arena_deinitialize(&rewrite_arena);
   loom_pass_value_fact_owner_deinitialize(&rewrite_value_facts);
@@ -1654,37 +1651,6 @@ static iree_status_t loom_low_target_legalize_function(
       (int64_t)(state.preflight_error_count + final_error_count);
   *out_emitted_error_diagnostics =
       state.preflight_error_count != 0 || final_error_count != 0;
-  return iree_ok_status();
-}
-
-static iree_status_t loom_low_target_legalize_compose_providers(
-    const loom_target_legalizer_provider_list_t* target_provider_list,
-    iree_arena_allocator_t* arena,
-    const loom_target_legalizer_provider_t* const** out_providers,
-    iree_host_size_t* out_provider_count) {
-  const loom_target_legalizer_provider_t* scalar_provider =
-      loom_scalar_target_legalizer_provider();
-  const loom_target_legalizer_provider_t* buffer_provider =
-      loom_buffer_target_legalizer_provider();
-  const loom_target_legalizer_provider_t* vector_provider =
-      loom_vector_target_legalizer_provider();
-  const loom_target_legalizer_provider_t* view_provider =
-      loom_view_target_legalizer_provider();
-  const iree_host_size_t target_provider_count =
-      target_provider_list ? target_provider_list->count : 0;
-  const iree_host_size_t provider_count = target_provider_count + 4;
-  const loom_target_legalizer_provider_t** providers = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, provider_count, sizeof(*providers), (void**)&providers));
-  for (iree_host_size_t i = 0; i < target_provider_count; ++i) {
-    providers[i] = target_provider_list->values[i];
-  }
-  providers[target_provider_count] = buffer_provider;
-  providers[target_provider_count + 1] = scalar_provider;
-  providers[target_provider_count + 2] = vector_provider;
-  providers[target_provider_count + 3] = view_provider;
-  *out_providers = providers;
-  *out_provider_count = provider_count;
   return iree_ok_status();
 }
 
@@ -1700,37 +1666,22 @@ iree_status_t loom_low_target_legalize_run(loom_pass_t* pass,
       loom_target_pass_capability_from_pass(pass);
   const loom_target_low_legality_provider_list_t* legality_provider_list =
       loom_low_pass_capability_legality_provider_list(low_capability);
-  const loom_target_legalizer_provider_list_t* target_legalizer_provider_list =
-      loom_low_pass_capability_legalizer_provider_list(low_capability);
+  const loom_target_legalizer_registry_t* legalizer_registry =
+      loom_low_pass_capability_legalizer_registry(low_capability);
 
   iree_arena_allocator_t run_arena;
   iree_arena_initialize(module->arena.block_pool, &run_arena);
 
-  const loom_target_legalizer_provider_t* const* legalizer_providers = NULL;
-  iree_host_size_t legalizer_provider_count = 0;
-  iree_status_t status = loom_low_target_legalize_compose_providers(
-      target_legalizer_provider_list, &run_arena, &legalizer_providers,
-      &legalizer_provider_count);
-
-  loom_target_legalizer_registry_t legalizer_registry = {0};
-  if (iree_status_is_ok(status)) {
-    status = loom_target_legalizer_registry_compose(
-        legalizer_providers, legalizer_provider_count, &legalizer_registry,
-        &run_arena);
-  }
-
   loom_low_source_selection_list_t selection_list = {0};
-  if (iree_status_is_ok(status)) {
-    const loom_low_source_selection_options_t selection_options = {
-        .policy_registry = policy_registry,
-        .diagnostic_emitter = pass->diagnostic_emitter,
-        .lowering_kind = IREE_SV("target-legalize"),
-        .function_versions =
-            loom_target_pass_capability_function_versions(target_capability),
-    };
-    status = loom_low_select_source_funcs(module, &selection_options,
-                                          &run_arena, &selection_list);
-  }
+  const loom_low_source_selection_options_t selection_options = {
+      .policy_registry = policy_registry,
+      .diagnostic_emitter = pass->diagnostic_emitter,
+      .lowering_kind = IREE_SV("target-legalize"),
+      .function_versions =
+          loom_target_pass_capability_function_versions(target_capability),
+  };
+  iree_status_t status = loom_low_select_target_bound_funcs(
+      module, &selection_options, &run_arena, &selection_list);
 
   bool emitted_error_diagnostics = false;
   uint32_t function_count = 0;
@@ -1742,7 +1693,7 @@ iree_status_t loom_low_target_legalize_run(loom_pass_t* pass,
        !emitted_error_diagnostics;
        ++i) {
     status = loom_low_target_legalize_function(
-        pass, module, state, &selection_list.values[i], &legalizer_registry,
+        pass, module, state, &selection_list.values[i], legalizer_registry,
         legality_list, &run_arena, &emitted_error_diagnostics);
     if (iree_status_is_ok(status)) {
       ++function_count;

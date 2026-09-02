@@ -9,7 +9,7 @@
 #include "iree/base/internal/arena.h"
 #include "loom/analysis/symbolic_expr.h"
 #include "loom/analysis/view_regions.h"
-#include "loom/codegen/low/lower/lower_rule_source_memory.h"
+#include "loom/codegen/low/lower/rule_source_memory.h"
 #include "loom/error/error_catalog.h"
 #include "loom/ir/context.h"
 #include "loom/ops/vector/ops.h"

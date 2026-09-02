@@ -187,7 +187,7 @@ static iree_status_t loom_view_legalize_atomic_addf(
                                                          out_result);
 }
 
-static const loom_target_legalizer_entry_t kViewLegalizerEntries[] = {
+static const loom_target_legalizer_rule_t kViewLegalizerRules[] = {
     {
         .root_kind = LOOM_OP_VIEW_ATOMIC_REDUCE,
         .legalize = loom_view_legalize_atomic_addf,
@@ -201,8 +201,8 @@ static const loom_target_legalizer_entry_t kViewLegalizerEntries[] = {
 static const loom_target_legalizer_provider_t kViewLegalizerProvider = {
     .name = IREE_SVL("view"),
     .strategy = LOOM_TARGET_LEGALIZER_STRATEGY_REFERENCE,
-    .entries = kViewLegalizerEntries,
-    .entry_count = IREE_ARRAYSIZE(kViewLegalizerEntries),
+    .rules = kViewLegalizerRules,
+    .rule_count = IREE_ARRAYSIZE(kViewLegalizerRules),
 };
 
 const loom_target_legalizer_provider_t* loom_view_target_legalizer_provider(

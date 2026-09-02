@@ -143,6 +143,7 @@ scalar_remui = binary_op(
 scalar_ceildivsi = binary_op(
     "scalar.ceildivsi",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=INTEGER,
     doc="Signed integer division, rounding toward positive infinity.",
     canonicalize="loom_scalar_ceildivsi_canonicalize",
@@ -152,6 +153,7 @@ scalar_ceildivsi = binary_op(
 scalar_ceildivui = binary_op(
     "scalar.ceildivui",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=INTEGER,
     doc="Unsigned integer division, rounding toward positive infinity.",
     canonicalize="loom_scalar_ceildivui_canonicalize",
@@ -161,6 +163,7 @@ scalar_ceildivui = binary_op(
 scalar_floordivsi = binary_op(
     "scalar.floordivsi",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=INTEGER,
     doc="Signed integer division, rounding toward negative infinity.",
     canonicalize="loom_scalar_floordivsi_canonicalize",
@@ -170,6 +173,7 @@ scalar_floordivsi = binary_op(
 scalar_negi = unary_op(
     "scalar.negi",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=INTEGER,
     doc="Integer negation.",
     traits=[INVOLUTION, DISTRIBUTION_TRANSFER],
@@ -181,6 +185,7 @@ scalar_negi = unary_op(
 scalar_absi = unary_op(
     "scalar.absi",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=INTEGER,
     doc="Integer absolute value.",
     traits=[IDEMPOTENT, DISTRIBUTION_TRANSFER],
@@ -192,6 +197,7 @@ scalar_absi = unary_op(
 scalar_minsi = binary_op(
     "scalar.minsi",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=INTEGER,
     doc="Signed integer minimum.",
     commutative=True,
@@ -204,6 +210,7 @@ scalar_minsi = binary_op(
 scalar_maxsi = binary_op(
     "scalar.maxsi",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=INTEGER,
     doc="Signed integer maximum.",
     commutative=True,
@@ -216,6 +223,7 @@ scalar_maxsi = binary_op(
 scalar_minui = binary_op(
     "scalar.minui",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=INTEGER,
     doc="Unsigned integer minimum.",
     commutative=True,
@@ -228,6 +236,7 @@ scalar_minui = binary_op(
 scalar_maxui = binary_op(
     "scalar.maxui",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=INTEGER,
     doc="Unsigned integer maximum.",
     commutative=True,
@@ -358,6 +367,7 @@ scalar_negf = unary_op(
 scalar_absf = unary_op(
     "scalar.absf",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=FLOAT,
     doc="Floating-point absolute value.",
     traits=[IDEMPOTENT],
@@ -370,6 +380,7 @@ scalar_absf = unary_op(
 scalar_minimumf = binary_op(
     "scalar.minimumf",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=FLOAT,
     doc="IEEE 754 minimum (NaN propagates).",
     commutative=True,
@@ -381,6 +392,7 @@ scalar_minimumf = binary_op(
 scalar_maximumf = binary_op(
     "scalar.maximumf",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=FLOAT,
     doc="IEEE 754 maximum (NaN propagates).",
     commutative=True,
@@ -454,6 +466,7 @@ scalar_clampf = Op(
 scalar_copysignf = binary_op(
     "scalar.copysignf",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=FLOAT,
     doc="Copy sign of rhs onto magnitude of lhs.",
     flags=("fastmath", FastMathFlags),

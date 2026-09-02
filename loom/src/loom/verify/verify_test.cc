@@ -2464,6 +2464,25 @@ TEST_F(VerifyTest, RejectsRankZeroVectorType) {
   EXPECT_EQ(GetStringParam(*entry, 2), "vector_rank_zero");
 }
 
+TEST_F(VerifyTest, RejectsNoneScalarType) {
+  loom_type_t scalar_type = loom_type_scalar(LOOM_SCALAR_TYPE_NONE);
+  loom_type_t arg_types[] = {scalar_type};
+  loom_value_id_t args[1];
+  EnterTestFunc(arg_types, 1, args);
+
+  TerminateFunc();
+  DiagnosticCapture structured;
+  auto result = VerifyStructured(&structured);
+  EXPECT_GT(result.error_count, 0u);
+  const CapturedDiagnostic* entry = FindDiagnostic(
+      structured, loom_error_def_lookup(LOOM_ERROR_DOMAIN_TYPE, 10));
+  ASSERT_NE(entry, nullptr) << "Expected TYPE/010 invalid element type error";
+  EXPECT_EQ(GetStringParam(*entry, 0), "block arg 0");
+  ExpectNoFieldRefParam(*entry, 0);
+  ExpectTypeParam(*entry, 1, scalar_type);
+  EXPECT_EQ(GetStringParam(*entry, 2), "element_type_out_of_range");
+}
+
 TEST_F(VerifyTest, RejectsOutOfRangeTypeKind) {
   loom_type_t invalid_type = {0};
   invalid_type.header =

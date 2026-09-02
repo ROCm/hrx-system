@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Shared effect propagation for operations that reference callable symbols.
+// Shared effect semantics for operations that reference callable symbols.
 
 #ifndef LOOM_OPS_CALLABLE_EFFECTS_H_
 #define LOOM_OPS_CALLABLE_EFFECTS_H_
@@ -16,6 +16,11 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+// Returns true when |function| has pure callable semantics. Definitions are
+// classified from their cached body effects while declarations use their
+// explicit purity contract.
+bool loom_callable_effects_is_pure(loom_func_like_t function);
 
 // Propagates a resolved callee's purity to |op| when the operation has no
 // explicit purity. Unresolved symbols and impure callees leave |op| unchanged.

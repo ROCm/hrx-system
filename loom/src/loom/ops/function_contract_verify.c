@@ -52,6 +52,127 @@ typedef struct loom_function_contract_boundary_t {
   const char* result_prefix;
 } loom_function_contract_boundary_t;
 
+static bool loom_function_contract_signature_contains_value(
+    const loom_value_id_t* argument_ids, uint16_t argument_count,
+    const loom_value_id_t* result_ids, uint16_t result_count,
+    loom_value_id_t value_id) {
+  for (uint16_t i = 0; i < argument_count; ++i) {
+    if (argument_ids[i] == value_id) return true;
+  }
+  for (uint16_t i = 0; i < result_count; ++i) {
+    if (result_ids[i] == value_id) return true;
+  }
+  return false;
+}
+
+static void loom_function_contract_format_predicate_argument(
+    char* buffer, iree_host_size_t buffer_capacity, uint16_t predicate_index,
+    uint8_t argument_index) {
+  iree_snprintf(buffer, buffer_capacity, "predicates[%u].arg[%u]",
+                predicate_index, argument_index);
+}
+
+static iree_string_view_t loom_function_contract_predicate_expected_type(
+    uint8_t predicate_kind) {
+  switch ((loom_predicate_kind_t)predicate_kind) {
+    case LOOM_PREDICATE_NOT_NAN:
+    case LOOM_PREDICATE_NOT_INF:
+    case LOOM_PREDICATE_FINITE:
+      return IREE_SV("floating-point scalar");
+    default:
+      return IREE_SV("integer, index, or offset scalar");
+  }
+}
+
+static iree_status_t loom_function_contract_emit_predicate_origin_error(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter, uint16_t predicate_index,
+    uint8_t argument_index) {
+  char field_name[40];
+  loom_function_contract_format_predicate_argument(
+      field_name, sizeof(field_name), predicate_index, argument_index);
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(loom_op_name(module, op)),
+      loom_param_string(iree_make_cstring_view(field_name)),
+      loom_param_string(IREE_SV("a function argument or result")),
+  };
+  const loom_diagnostic_emission_t emission = {
+      .op = op,
+      .error = LOOM_ERR_STRUCTURE_032,
+      .params = params,
+      .param_count = IREE_ARRAYSIZE(params),
+  };
+  return iree_diagnostic_emit(emitter, &emission);
+}
+
+static iree_status_t loom_function_contract_emit_predicate_type_error(
+    const loom_op_t* op, iree_diagnostic_emitter_t emitter,
+    uint16_t predicate_index, uint8_t argument_index, loom_type_t actual_type,
+    uint8_t predicate_kind) {
+  char field_name[40];
+  loom_function_contract_format_predicate_argument(
+      field_name, sizeof(field_name), predicate_index, argument_index);
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(iree_make_cstring_view(field_name)),
+      loom_param_type(actual_type),
+      loom_param_string(
+          loom_function_contract_predicate_expected_type(predicate_kind)),
+  };
+  const loom_diagnostic_emission_t emission = {
+      .op = op,
+      .error = LOOM_ERR_TYPE_003,
+      .params = params,
+      .param_count = IREE_ARRAYSIZE(params),
+  };
+  return iree_diagnostic_emit(emitter, &emission);
+}
+
+static iree_status_t loom_function_contract_verify_predicates(
+    const loom_module_t* module, const loom_op_t* op, loom_func_like_t function,
+    iree_diagnostic_emitter_t emitter) {
+  uint16_t predicate_count = 0;
+  const loom_predicate_t* predicates =
+      loom_func_like_predicates(function, &predicate_count);
+  if (predicate_count == 0) return iree_ok_status();
+
+  uint16_t argument_count = 0;
+  const loom_value_id_t* argument_ids =
+      loom_func_like_arg_ids(function, &argument_count);
+  const loom_value_id_t* result_ids = loom_op_const_results(op);
+  for (uint16_t predicate_index = 0; predicate_index < predicate_count;
+       ++predicate_index) {
+    const loom_predicate_t* predicate = &predicates[predicate_index];
+    if (predicate->arg_tags[0] != LOOM_PRED_ARG_VALUE) {
+      return loom_function_contract_emit_predicate_origin_error(
+          module, op, emitter, predicate_index, 0);
+    }
+    for (uint8_t argument_index = 0; argument_index < predicate->arg_count;
+         ++argument_index) {
+      if (predicate->arg_tags[argument_index] != LOOM_PRED_ARG_VALUE) continue;
+      const int64_t encoded_value_id = predicate->args[argument_index];
+      if (encoded_value_id < 0 || encoded_value_id > UINT32_MAX) {
+        return loom_function_contract_emit_predicate_origin_error(
+            module, op, emitter, predicate_index, argument_index);
+      }
+      const loom_value_id_t value_id = (loom_value_id_t)encoded_value_id;
+      if (!loom_function_contract_signature_contains_value(
+              argument_ids, argument_count, result_ids, op->result_count,
+              value_id)) {
+        return loom_function_contract_emit_predicate_origin_error(
+            module, op, emitter, predicate_index, argument_index);
+      }
+      const loom_type_t value_type = loom_module_value_type(module, value_id);
+      if (!loom_predicate_kind_accepts_value_type(predicate->kind,
+                                                  value_type)) {
+        return loom_function_contract_emit_predicate_type_error(
+            op, emitter, predicate_index, argument_index, value_type,
+            predicate->kind);
+      }
+    }
+  }
+  return iree_ok_status();
+}
+
 static const loom_symbol_t* loom_function_contract_lookup_symbol(
     const loom_module_t* module, loom_symbol_ref_t symbol_ref) {
   if (!loom_symbol_ref_is_valid(symbol_ref) || symbol_ref.module_id != 0 ||
@@ -269,7 +390,7 @@ iree_status_t loom_function_call_contract_verify(
 static iree_status_t loom_function_provider_family_contract_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter) {
-  loom_func_like_t provider = loom_func_like_cast(module, (loom_op_t*)op);
+  loom_func_like_t provider = loom_func_like_const_cast(module, op);
   const loom_symbol_ref_t family = loom_func_like_template_family(provider);
   if (!loom_symbol_ref_is_valid(family)) {
     return iree_ok_status();
@@ -330,10 +451,15 @@ static iree_status_t loom_function_verify_target_conditions(
   const loom_parameterized_attr_array_t requirements =
       loom_func_like_requires(function);
   for (iree_host_size_t i = 0; i < requirements.count; ++i) {
-    const loom_target_condition_descriptor_t* descriptor = NULL;
-    iree_status_t status = loom_target_condition_resolve(
-        module->context, requirements.values[i], &descriptor);
-    if (!iree_status_is_ok(status)) {
+    const loom_target_condition_descriptor_t* descriptor =
+        loom_target_condition_resolve(module->context, requirements.values[i]);
+    const iree_string_view_t invalid_reason =
+        descriptor != NULL
+            ? loom_target_condition_validate(descriptor, requirements.values[i])
+            : IREE_SV(
+                  "parameterized attribute family is not a target "
+                  "condition");
+    if (!iree_string_view_is_empty(invalid_reason)) {
       const loom_symbol_ref_t function_ref = loom_func_like_callee(function);
       const loom_symbol_t* function_symbol =
           &module->symbols.entries[function_ref.symbol_id];
@@ -344,7 +470,7 @@ static iree_status_t loom_function_verify_target_conditions(
               loom_param_u32((uint32_t)i),
               loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE,
                                         function.vtable->requires_attr_index)),
-          loom_param_string(iree_status_message(status)),
+          loom_param_string(invalid_reason),
       };
       loom_diagnostic_emission_t emission = {
           .op = function_op,
@@ -352,9 +478,7 @@ static iree_status_t loom_function_verify_target_conditions(
           .params = params,
           .param_count = IREE_ARRAYSIZE(params),
       };
-      iree_status_t emission_status = iree_diagnostic_emit(emitter, &emission);
-      iree_status_ignore(status);
-      return emission_status;
+      return iree_diagnostic_emit(emitter, &emission);
     }
   }
   return iree_ok_status();
@@ -366,8 +490,10 @@ iree_status_t loom_function_contract_verify(const loom_module_t* module,
   // Targetless functions are valid generic program representations. A compile
   // invocation may bind an exact target later, so source verification cannot
   // require an authored target attribute.
-  loom_func_like_t function = loom_func_like_cast(module, (loom_op_t*)op);
+  loom_func_like_t function = loom_func_like_const_cast(module, op);
   IREE_ASSERT(loom_func_like_isa(function));
+  IREE_RETURN_IF_ERROR(
+      loom_function_contract_verify_predicates(module, op, function, emitter));
   return loom_function_verify_target_conditions(module, op, function, emitter);
 }
 
@@ -376,7 +502,7 @@ iree_status_t loom_function_provider_contract_verify(
     iree_diagnostic_emitter_t emitter) {
   IREE_RETURN_IF_ERROR(loom_function_contract_verify(module, op, emitter));
 
-  loom_func_like_t provider = loom_func_like_cast(module, (loom_op_t*)op);
+  loom_func_like_t provider = loom_func_like_const_cast(module, op);
   const loom_symbol_ref_t target_ref = loom_func_like_target(provider);
   if (loom_symbol_ref_is_valid(target_ref)) {
     const loom_symbol_t* target_symbol =

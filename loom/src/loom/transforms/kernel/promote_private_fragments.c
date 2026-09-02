@@ -943,7 +943,8 @@ static iree_status_t loom_promote_private_fragments_process_view(
 iree_status_t loom_promote_private_fragments_run(loom_pass_t* pass,
                                                  loom_module_t* module,
                                                  loom_func_like_t function) {
-  if (!loom_func_like_body(function)) return iree_ok_status();
+  loom_region_t* body = loom_func_like_body(function);
+  if (!body) return iree_ok_status();
 
   loom_rewriter_t rewriter;
   IREE_RETURN_IF_ERROR(
@@ -955,7 +956,8 @@ iree_status_t loom_promote_private_fragments_run(loom_pass_t* pass,
     iteration_changed = false;
 
     loom_dominance_info_t dominance = {0};
-    status = loom_dominance_info_initialize(module, pass->arena, &dominance);
+    status = loom_dominance_info_initialize_region(module, body, pass->arena,
+                                                   &dominance);
     loom_promote_private_fragments_view_list_t views = {0};
     if (iree_status_is_ok(status)) {
       status = loom_promote_private_fragments_view_list_initialize(pass->arena,

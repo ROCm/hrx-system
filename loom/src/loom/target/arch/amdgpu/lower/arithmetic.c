@@ -9,7 +9,7 @@
 #include <stdint.h>
 
 #include "loom/codegen/low/descriptors.h"
-#include "loom/codegen/low/lower/lower_rules.h"
+#include "loom/codegen/low/lower/rule_match.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ir/types.h"

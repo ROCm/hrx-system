@@ -297,7 +297,7 @@ static iree_status_t loom_vector_legalize_extract(
   return iree_ok_status();
 }
 
-static const loom_target_legalizer_entry_t kVectorLegalizerEntries[] = {
+static const loom_target_legalizer_rule_t kVectorLegalizerRules[] = {
     {
         .root_kind = LOOM_OP_VECTOR_REDUCE,
         .legalize = loom_vector_legalize_reduce,
@@ -379,8 +379,8 @@ static const loom_target_legalizer_entry_t kVectorLegalizerEntries[] = {
 static const loom_target_legalizer_provider_t kVectorLegalizerProvider = {
     .name = IREE_SVL("vector"),
     .strategy = LOOM_TARGET_LEGALIZER_STRATEGY_REFERENCE,
-    .entries = kVectorLegalizerEntries,
-    .entry_count = IREE_ARRAYSIZE(kVectorLegalizerEntries),
+    .rules = kVectorLegalizerRules,
+    .rule_count = IREE_ARRAYSIZE(kVectorLegalizerRules),
 };
 
 const loom_target_legalizer_provider_t* loom_vector_target_legalizer_provider(

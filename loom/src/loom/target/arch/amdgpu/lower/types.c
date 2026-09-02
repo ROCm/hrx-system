@@ -230,7 +230,7 @@ loom_amdgpu_vector_storage_kind_flags_t loom_amdgpu_vector_storage_kind_flags(
 static const loom_amdgpu_vector_storage_rule_t*
 loom_amdgpu_vector_storage_rule_for_element_type(
     loom_scalar_type_t element_type) {
-  if (element_type >= LOOM_SCALAR_TYPE_COUNT_) {
+  if (!loom_scalar_type_is_valid(element_type)) {
     return NULL;
   }
   const loom_amdgpu_vector_storage_rule_t* rule =
@@ -242,7 +242,7 @@ static bool loom_amdgpu_type_vector_storage_with_rule(
     loom_type_t type, const loom_amdgpu_vector_storage_rule_t* rule,
     loom_amdgpu_vector_storage_t* out_storage) {
   if (rule == NULL || !loom_type_is_vector(type) ||
-      loom_type_element_type(type) >= LOOM_SCALAR_TYPE_COUNT_) {
+      !loom_scalar_type_is_valid(loom_type_element_type(type))) {
     return false;
   }
 

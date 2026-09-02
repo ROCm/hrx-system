@@ -13,22 +13,36 @@ loom_cc_library(
   NAME
     lower
   HDRS
+    "context.h"
     "contract_query.h"
+    "function_boundary.h"
     "lower.h"
-    "lower_internal.h"
-    "lower_rule_descriptor.h"
-    "lower_rule_source_memory.h"
-    "lower_rules.h"
+    "module_state.h"
+    "report.h"
+    "rule_descriptor.h"
+    "rule_emit.h"
+    "rule_match.h"
+    "rule_source_memory.h"
+    "rule_value.h"
+    "rules.h"
+    "source_plan.h"
+    "source_query.h"
   SRCS
+    "context.c"
     "contract_query.c"
+    "function_boundary.c"
     "lower.c"
-    "lower_context.c"
-    "lower_policy.c"
-    "lower_report.c"
-    "lower_rule_descriptor.c"
-    "lower_rule_source_memory_match.c"
-    "lower_rule_source_memory_materialize.c"
-    "lower_rules.c"
+    "module_state.c"
+    "policy.c"
+    "report.c"
+    "rule_descriptor.c"
+    "rule_emit.c"
+    "rule_match.c"
+    "rule_source_memory_match.c"
+    "rule_source_memory_materialize.c"
+    "rule_value.c"
+    "source_plan.c"
+    "source_query.c"
   DEPS
     iree::base
     iree::base::internal
@@ -90,12 +104,171 @@ loom_cc_library(
     loom::error::emitter
     loom::error::error_defs
     loom::ir
+    loom::ops::func
     loom::ops::func_symbol_facts
+    loom::ops::kernel
     loom::ops::target
     loom::target::function_contract
     loom::target::function_version
     loom::target::types
   PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    module_state_test
+  SRCS
+    "module_state_test.cc"
+  DEPS
+    ::lower
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+loom_cc_test(
+  NAME
+    context_test
+  SRCS
+    "context_test.cc"
+  DEPS
+    ::lower
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+loom_cc_test(
+  NAME
+    rule_value_test
+  SRCS
+    "rule_value_test.cc"
+  DEPS
+    ::lower
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::codegen::low::testing::source_workload
+    loom::ir
+    loom::ir::facts
+    loom::ops::func
+    loom::ops::scalar
+    loom::util::fact_table
+)
+
+loom_cc_test(
+  NAME
+    rule_match_test
+  SRCS
+    "rule_match_test.cc"
+  DEPS
+    ::lower
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::codegen::low::testing::source_workload
+    loom::ir
+    loom::ops::index
+)
+
+loom_cc_test(
+  NAME
+    rule_emit_test
+  SRCS
+    "rule_emit_test.cc"
+  DEPS
+    ::lower
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::codegen::low::testing::source_workload
+    loom::ir
+    loom::ops::func
+    loom::ops::low
+    loom::ops::scalar
+    loom::target::test::descriptors
+    loom::target::test::low_registry
+    loom::target::test::lower
+    loom::target::test::target_record_table
+    loom::util::fact_table
+)
+
+loom_cc_test(
+  NAME
+    source_query_test
+  SRCS
+    "source_query_test.cc"
+  DEPS
+    ::lower
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::ir
+    loom::ops::scalar
+    loom::ops::test
+    loom::target::low_descriptor_registry
+    loom::target::test::low_registry
+    loom::target::test::lower
+    loom::target::test::target_record_table
+    loom::util::fact_table
+)
+
+loom_cc_test(
+  NAME
+    source_plan_test
+  SRCS
+    "source_plan_test.cc"
+  DEPS
+    ::lower
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::codegen::low::testing::source_workload
+    loom::ir
+    loom::ops::func
+    loom::ops::scalar
+    loom::target::low_descriptor_registry
+    loom::target::test::low_registry
+    loom::target::test::lower
+    loom::target::test::target_record_table
+    loom::util::fact_table
+)
+
+loom_cc_test(
+  NAME
+    function_boundary_test
+  SRCS
+    "function_boundary_test.cc"
+  DEPS
+    ::lower
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::codegen::low::testing::source_workload
+    loom::ir
+    loom::ops::func
+    loom::ops::low
+    loom::target::registers
+    loom::target::test::descriptors
+    loom::target::test::low_registry
+    loom::target::test::lower
+    loom::target::test::target_record_table
+    loom::util::fact_table
+)
+
+loom_cc_test(
+  NAME
+    report_test
+  SRCS
+    "report_test.cc"
+  DEPS
+    ::lower
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::codegen::low::testing::source_workload
+    loom::ir
+    loom::ops::func
+    loom::ops::scalar
+    loom::target::test::low_registry
+    loom::target::test::lower
+    loom::target::test::target_record_table
+    loom::util::fact_table
 )
 
 loom_cc_test(
@@ -123,9 +296,9 @@ loom_cc_test(
 
 loom_cc_test(
   NAME
-    lower_policy_registry_test
+    policy_registry_test
   SRCS
-    "lower_policy_registry_test.cc"
+    "policy_registry_test.cc"
   DEPS
     ::lower
     iree::testing::gtest

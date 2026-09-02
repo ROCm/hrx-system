@@ -98,9 +98,8 @@ TEST_F(TargetConditionTest, ResolvesRegisteredConditionDescriptor) {
   const loom_attribute_t condition =
       MakeClause(LOOM_PARAMETERIZED_ATTR_TARGET_SUBGROUP_SIZE, 64, &slot);
 
-  const loom_target_condition_descriptor_t* descriptor = nullptr;
-  IREE_ASSERT_OK(
-      loom_target_condition_resolve(&context_, condition, &descriptor));
+  const loom_target_condition_descriptor_t* descriptor =
+      loom_target_condition_resolve(&context_, condition);
   EXPECT_EQ(descriptor, &loom_target_subgroup_size_condition);
 }
 
@@ -109,30 +108,28 @@ TEST_F(TargetConditionTest, RejectsNonConditionFamily) {
   const loom_attribute_t value =
       MakeClause(LOOM_PARAMETERIZED_ATTR_TEST_TILE, 16, &slot);
 
-  const loom_target_condition_descriptor_t* descriptor = nullptr;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      loom_target_condition_resolve(&context_, value, &descriptor));
-  EXPECT_EQ(descriptor, nullptr);
-}
-
-TEST_F(TargetConditionTest, RejectsInvalidOrUnregisteredFamily) {
-  const loom_target_condition_descriptor_t* descriptor = nullptr;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      loom_target_condition_resolve(&context_, loom_attr_i64(64), &descriptor));
-  EXPECT_EQ(descriptor, nullptr);
-
-  loom_attribute_t slot = {};
-  const loom_attribute_t unregistered = MakeClause(
-      LOOM_PARAMETERIZED_ATTR_KIND(LOOM_DIALECT_TARGET, 1), 64, &slot);
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      loom_target_condition_resolve(&context_, unregistered, &descriptor));
+  const loom_target_condition_descriptor_t* descriptor =
+      loom_target_condition_resolve(&context_, value);
   EXPECT_EQ(descriptor, nullptr);
 }
 
 TEST_F(TargetConditionTest, ValidatesSubgroupSizeDomain) {
+  const int64_t valid_sizes[] = {
+      1,
+      64,
+      UINT32_MAX,
+  };
+  for (int64_t valid_size : valid_sizes) {
+    loom_attribute_t slot = {};
+    const loom_attribute_t condition = MakeClause(
+        LOOM_PARAMETERIZED_ATTR_TARGET_SUBGROUP_SIZE, valid_size, &slot);
+    const loom_target_condition_descriptor_t* descriptor =
+        loom_target_condition_resolve(&context_, condition);
+    ASSERT_NE(descriptor, nullptr);
+    EXPECT_TRUE(iree_string_view_is_empty(
+        loom_target_condition_validate(descriptor, condition)));
+  }
+
   const int64_t invalid_sizes[] = {
       -1,
       0,
@@ -142,12 +139,25 @@ TEST_F(TargetConditionTest, ValidatesSubgroupSizeDomain) {
     loom_attribute_t slot = {};
     const loom_attribute_t condition = MakeClause(
         LOOM_PARAMETERIZED_ATTR_TARGET_SUBGROUP_SIZE, invalid_size, &slot);
-    const loom_target_condition_descriptor_t* descriptor = nullptr;
-    IREE_EXPECT_STATUS_IS(
-        IREE_STATUS_INVALID_ARGUMENT,
-        loom_target_condition_resolve(&context_, condition, &descriptor));
-    EXPECT_EQ(descriptor, nullptr);
+    const loom_target_condition_descriptor_t* descriptor =
+        loom_target_condition_resolve(&context_, condition);
+    ASSERT_NE(descriptor, nullptr);
+    EXPECT_TRUE(iree_string_view_equal(
+        loom_target_condition_validate(descriptor, condition),
+        IREE_SV("target.subgroup.size requires a nonzero unsigned 32-bit "
+                "size")));
   }
+}
+
+TEST_F(TargetConditionTest, ConditionWithoutValidatorIsValid) {
+  loom_attribute_t slot = {};
+  const loom_attribute_t condition =
+      MakeClause(LOOM_PARAMETERIZED_ATTR_TARGET_SUBGROUP_SIZE, 64, &slot);
+  loom_target_condition_descriptor_t descriptor =
+      loom_target_subgroup_size_condition;
+  descriptor.validate = nullptr;
+  EXPECT_TRUE(iree_string_view_is_empty(
+      loom_target_condition_validate(&descriptor, condition)));
 }
 
 TEST_F(TargetConditionTest, EvaluatesNormalizedSubgroupSize) {
@@ -158,9 +168,9 @@ TEST_F(TargetConditionTest, EvaluatesNormalizedSubgroupSize) {
   loom_attribute_t slot = {};
   const loom_attribute_t condition =
       MakeClause(LOOM_PARAMETERIZED_ATTR_TARGET_SUBGROUP_SIZE, 64, &slot);
-  const loom_target_condition_descriptor_t* descriptor = nullptr;
-  IREE_ASSERT_OK(
-      loom_target_condition_resolve(&context_, condition, &descriptor));
+  const loom_target_condition_descriptor_t* descriptor =
+      loom_target_condition_resolve(&context_, condition);
+  ASSERT_NE(descriptor, nullptr);
 
   EXPECT_EQ(loom_target_condition_evaluate(descriptor, condition, nullptr),
             LOOM_TARGET_CONDITION_UNBOUND);

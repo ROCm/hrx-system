@@ -76,12 +76,14 @@ typedef struct loom_motion_analysis_t {
   loom_motion_region_stack_t region_stack;
 } loom_motion_analysis_t;
 
-// Initializes shared motion analysis state. |fact_table| and |value_domain| may
-// both be NULL for effect-free relocation clients. Memory-aware loop placement
-// requires both. The caller owns all borrowed state and must keep it live for
-// the analysis object's lifetime.
-iree_status_t loom_motion_analysis_initialize(
-    const loom_module_t* module, loom_value_fact_table_t* fact_table,
+// Initializes shared motion analysis state for |region| and its nested region
+// tree. All queried insertion points and CFG relationships must remain in that
+// tree. |fact_table| and |value_domain| may both be NULL for effect-free
+// relocation clients. Memory-aware loop placement requires both. The caller
+// owns all borrowed state and must keep it live for the analysis lifetime.
+iree_status_t loom_motion_analysis_initialize_region(
+    const loom_module_t* module, const loom_region_t* region,
+    loom_value_fact_table_t* fact_table,
     const loom_local_value_domain_t* value_domain,
     iree_arena_allocator_t* arena, loom_motion_analysis_t* out_analysis);
 

@@ -202,7 +202,6 @@ static inline void loom_value_u32_scratch_store(
 // map.
 static inline bool loom_module_value_ordinal_scratch_is_active(
     const loom_module_t* module) {
-  IREE_ASSERT(module != NULL);
   return module->scratch.values.state ==
          LOOM_VALUE_U32_SCRATCH_STATE_ACQUIRED_ORDINALS;
 }
@@ -211,7 +210,6 @@ static inline bool loom_module_value_ordinal_scratch_is_active(
 static inline void loom_module_value_ordinal_scratch_set(
     loom_module_t* module, loom_value_id_t value_id,
     loom_value_ordinal_t ordinal) {
-  IREE_ASSERT(module != NULL);
   loom_value_u32_scratch_t* scratch = &module->scratch.values;
   IREE_ASSERT_EQ(scratch->state,
                  LOOM_VALUE_U32_SCRATCH_STATE_ACQUIRED_ORDINALS);
@@ -226,7 +224,6 @@ static inline void loom_module_value_ordinal_scratch_set(
 // scratch map.
 static inline void loom_module_value_ordinal_scratch_clear(
     loom_module_t* module, loom_value_id_t value_id) {
-  IREE_ASSERT(module != NULL);
   loom_value_u32_scratch_t* scratch = &module->scratch.values;
   IREE_ASSERT_EQ(scratch->state,
                  LOOM_VALUE_U32_SCRATCH_STATE_ACQUIRED_ORDINALS);
@@ -238,7 +235,6 @@ static inline void loom_module_value_ordinal_scratch_clear(
 // frame did not register that value.
 static inline loom_value_ordinal_t loom_module_value_ordinal_scratch_lookup(
     const loom_module_t* module, loom_value_id_t value_id) {
-  IREE_ASSERT(module != NULL);
   const loom_value_u32_scratch_t* scratch = &module->scratch.values;
   IREE_ASSERT_EQ(scratch->state,
                  LOOM_VALUE_U32_SCRATCH_STATE_ACQUIRED_ORDINALS);

@@ -53,7 +53,6 @@ loom_cc_library(
     ::facts
     iree::base
     loom::ir
-    loom::util::bstring
   PUBLIC
 )
 
@@ -547,6 +546,18 @@ loom_cc_library(
     loom::rewrite::rewriter
     loom::util::fact_table
   PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    legalization_test
+  SRCS
+    "legalization_test.cc"
+  DEPS
+    ::legalization
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 
 loom_cc_test(

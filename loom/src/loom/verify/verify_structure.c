@@ -8,6 +8,7 @@
 
 #include "loom/error/error_catalog.h"
 #include "loom/ir/parameterized_type.h"
+#include "loom/ops/callable_effects.h"
 #include "loom/ops/op_defs.h"
 #include "loom/verify/verify_diagnostics.h"
 
@@ -425,6 +426,52 @@ void loom_verify_func_purity_body_effects(loom_verify_state_t* state,
   loom_verify_emit_structured(state, op, LOOM_ERR_STRUCTURE_017, params,
                               IREE_ARRAYSIZE(params));
 }
+
+void loom_verify_call_purity(loom_verify_state_t* state, const loom_op_t* op,
+                             const loom_op_vtable_t* vtable) {
+  const loom_call_like_vtable_t* call_vtable = vtable->call_like;
+  if (!call_vtable || call_vtable->purity_attr_index == LOOM_ATTR_INDEX_NONE) {
+    return;
+  }
+  const loom_attribute_t* attrs = loom_op_const_attrs(op);
+  if (loom_attr_as_enum(attrs[call_vtable->purity_attr_index]) == 0) return;
+
+  const loom_symbol_ref_t callee =
+      loom_attr_as_symbol(attrs[call_vtable->callee_attr_index]);
+  if (!loom_symbol_ref_is_valid(callee) || callee.module_id != 0 ||
+      callee.symbol_id >= state->module->symbols.count) {
+    return;
+  }
+  const loom_symbol_t* symbol =
+      &state->module->symbols.entries[callee.symbol_id];
+  if (!symbol->defining_op) return;
+  const loom_func_like_t function =
+      loom_func_like_const_cast(state->module, symbol->defining_op);
+  if (!loom_func_like_isa(function) ||
+      loom_callable_effects_is_pure(function)) {
+    return;
+  }
+
+  const iree_string_view_t callee_name = loom_verify_symbol_name(state, callee);
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(callee_name),
+      loom_param_string(callee_name),
+  };
+  const loom_diagnostic_related_op_t related_ops[] = {{
+      .label = IREE_SV("contract defined here"),
+      .op = symbol->defining_op,
+  }};
+  const loom_diagnostic_emission_t emission = {
+      .op = op,
+      .error = LOOM_ERR_STRUCTURE_034,
+      .params = params,
+      .param_count = IREE_ARRAYSIZE(params),
+      .related_ops = related_ops,
+      .related_op_count = IREE_ARRAYSIZE(related_ops),
+  };
+  loom_verify_emit_diagnostic(state, &emission);
+}
+
 void loom_verify_op_structure(loom_verify_state_t* state, const loom_op_t* op,
                               const loom_op_vtable_t* vtable) {
   iree_string_view_t op_name = loom_op_vtable_name(vtable);
@@ -1229,9 +1276,10 @@ void loom_verify_operand_dicts(loom_verify_state_t* state, const loom_op_t* op,
 typedef enum loom_verify_type_malformation_e {
   LOOM_VERIFY_TYPE_MALFORMATION_NONE = 0,
   LOOM_VERIFY_TYPE_MALFORMATION_TYPE_KIND_OUT_OF_RANGE = 1,
-  LOOM_VERIFY_TYPE_MALFORMATION_ENCODING_ROLE_OUT_OF_RANGE = 2,
-  LOOM_VERIFY_TYPE_MALFORMATION_VECTOR_RANK_ZERO = 3,
-  LOOM_VERIFY_TYPE_MALFORMATION_VECTOR_ENCODING_ATTACHMENT = 4,
+  LOOM_VERIFY_TYPE_MALFORMATION_ELEMENT_TYPE_OUT_OF_RANGE = 2,
+  LOOM_VERIFY_TYPE_MALFORMATION_ENCODING_ROLE_OUT_OF_RANGE = 3,
+  LOOM_VERIFY_TYPE_MALFORMATION_VECTOR_RANK_ZERO = 4,
+  LOOM_VERIFY_TYPE_MALFORMATION_VECTOR_ENCODING_ATTACHMENT = 5,
 } loom_verify_type_malformation_t;
 
 static iree_string_view_t loom_verify_type_malformation_code(
@@ -1239,6 +1287,8 @@ static iree_string_view_t loom_verify_type_malformation_code(
   switch (malformation) {
     case LOOM_VERIFY_TYPE_MALFORMATION_TYPE_KIND_OUT_OF_RANGE:
       return IREE_SV("type_kind_out_of_range");
+    case LOOM_VERIFY_TYPE_MALFORMATION_ELEMENT_TYPE_OUT_OF_RANGE:
+      return IREE_SV("element_type_out_of_range");
     case LOOM_VERIFY_TYPE_MALFORMATION_ENCODING_ROLE_OUT_OF_RANGE:
       return IREE_SV("encoding_role_out_of_range");
     case LOOM_VERIFY_TYPE_MALFORMATION_VECTOR_RANK_ZERO:
@@ -1256,6 +1306,10 @@ loom_verify_type_well_formed_malformation(loom_type_t type) {
   loom_type_kind_t kind = loom_type_kind(type);
   if (!loom_type_kind_is_valid(kind)) {
     return LOOM_VERIFY_TYPE_MALFORMATION_TYPE_KIND_OUT_OF_RANGE;
+  }
+  if ((loom_type_is_scalar(type) || loom_type_is_shaped(type)) &&
+      !loom_scalar_type_is_valid(loom_type_element_type(type))) {
+    return LOOM_VERIFY_TYPE_MALFORMATION_ELEMENT_TYPE_OUT_OF_RANGE;
   }
   switch (kind) {
     case LOOM_TYPE_ENCODING:

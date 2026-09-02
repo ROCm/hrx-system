@@ -130,6 +130,35 @@ TEST_F(BytecodeTypeTest, RejectsNonTopologicalTypeReference) {
   EXPECT_EQ(error_count_, 1u);
 }
 
+TEST_F(BytecodeTypeTest, RejectsNoneScalarType) {
+  const uint8_t data[] = {
+      LOOM_BYTECODE_TYPE_SCALAR,
+      LOOM_SCALAR_TYPE_NONE,
+  };
+  loom_bytecode_type_plan_entry_t entry = {};
+  loom_bytecode_type_fact_t* fact = nullptr;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_DEFERRED,
+                        DecodeEntry(/*type_index=*/0, data, sizeof(data),
+                                    /*absolute_offset=*/0, &entry, &fact));
+  EXPECT_EQ(error_count_, 1u);
+}
+
+TEST_F(BytecodeTypeTest, RejectsNoneShapedElementType) {
+  const uint8_t data[] = {
+      LOOM_BYTECODE_TYPE_TENSOR,
+      LOOM_SCALAR_TYPE_NONE,
+      /*rank=*/0,
+      LOOM_BYTECODE_ENCODING_ATTACHMENT_NONE,
+      /*encoding_instance=*/0,
+  };
+  loom_bytecode_type_plan_entry_t entry = {};
+  loom_bytecode_type_fact_t* fact = nullptr;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_DEFERRED,
+                        DecodeEntry(/*type_index=*/0, data, sizeof(data),
+                                    /*absolute_offset=*/0, &entry, &fact));
+  EXPECT_EQ(error_count_, 1u);
+}
+
 TEST_F(BytecodeTypeTest, DecodesOneIndexedEntry) {
   const uint8_t data[] = {
       LOOM_BYTECODE_TYPE_FUNCTION, 0x01, 0x01, 0x01, 0x00,

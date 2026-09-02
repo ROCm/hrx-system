@@ -44,6 +44,36 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "legalizer_registry",
+    srcs = ["legalizer_registry.c"],
+    hdrs = ["legalizer_registry.h"],
+    visibility = _LOW_PASS_ENVIRONMENT_VISIBILITY,
+    deps = [
+        "//loom/src/loom/target:legalization",
+        "//loom/src/loom/transforms/buffer:target_legalization",
+        "//loom/src/loom/transforms/scalar:target_legalization",
+        "//loom/src/loom/transforms/vector:target_legalization",
+        "//loom/src/loom/transforms/view:target_legalization",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "legalizer_registry_test",
+    srcs = ["legalizer_registry_test.cc"],
+    deps = [
+        ":legalizer_registry",
+        "//loom/src/loom/ops/buffer",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/ops/vector",
+        "//loom/src/loom/ops/view",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "pass_environment",
     srcs = ["pass_environment.c"],
     hdrs = ["pass_environment.h"],

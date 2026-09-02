@@ -226,7 +226,7 @@ static bool loom_vector_to_scalar_encoded_auxiliary_matches_format(
     const loom_vector_to_scalar_encoded_operand_t* operand,
     loom_encoding_auxiliary_key_t key,
     loom_value_fact_numeric_format_flags_t format, loom_type_t result_type) {
-  loom_scalar_type_t expected_scalar_type = 0;
+  loom_scalar_type_t expected_scalar_type = LOOM_SCALAR_TYPE_NONE;
   if (!loom_numeric_format_direct_scalar_type(format, &expected_scalar_type)) {
     return false;
   }
@@ -266,7 +266,7 @@ static bool loom_vector_to_scalar_encoded_logical_element_count_matches(
 static bool loom_vector_to_scalar_encoded_physical_lane_type_matches(
     loom_value_fact_encoded_operand_schema_t schema,
     loom_type_t raw_lane_type) {
-  loom_scalar_type_t expected_scalar_type = 0;
+  loom_scalar_type_t expected_scalar_type = LOOM_SCALAR_TYPE_NONE;
   if (!loom_numeric_format_direct_scalar_type(schema.element_format,
                                               &expected_scalar_type)) {
     return false;

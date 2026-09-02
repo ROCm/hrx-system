@@ -147,7 +147,7 @@ from loom.gen.ops.c_tables import (
     generate_type_registry,
 )
 from loom.location_tag import BuiltinLocationTag
-from loom.scalar_type import ScalarTypeKind
+from loom.scalar_type import SCALAR_TYPE_NONE, ScalarTypeKind
 
 
 @contextmanager
@@ -249,7 +249,10 @@ def test_type_constraint_map_covers_every_constraint() -> None:
 def test_generate_scalar_type_table_uses_length_partitioned_classification() -> None:
     generated = generate_scalar_type_table_inc()
 
+    assert SCALAR_TYPE_NONE == 0
     assert "loom_scalar_type_names[LOOM_SCALAR_TYPE_COUNT_]" in generated
+    assert f"LOOM_SCALAR_TYPE_NONE == {SCALAR_TYPE_NONE}" in generated
+    assert "return LOOM_SCALAR_TYPE_NONE;" in generated
     assert "switch (name.size)" in generated
     assert "iree_string_view_equal" in generated
     assert "for (" not in generated

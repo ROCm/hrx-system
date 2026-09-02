@@ -1142,3 +1142,13 @@ class TestBuilder(DialectBuilder):
         *,
         location_id: int | None = ...,
     ) -> None: ...
+    def memory_fence(
+        self,
+        *,
+        input: ValueRef,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...

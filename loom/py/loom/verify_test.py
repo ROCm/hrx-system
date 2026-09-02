@@ -47,6 +47,34 @@ from loom.ir import (
 from loom.verify import type_satisfies_constraint, verify_module
 
 
+def test_type_constraints_match_payload_scalars() -> None:
+    accepted_kinds = (
+        ir.ScalarTypeKind.I1,
+        ir.ScalarTypeKind.I8,
+        ir.ScalarTypeKind.I16,
+        ir.ScalarTypeKind.I32,
+        ir.ScalarTypeKind.I64,
+        ir.ScalarTypeKind.F8E4M3,
+        ir.ScalarTypeKind.F8E5M2,
+        ir.ScalarTypeKind.F16,
+        ir.ScalarTypeKind.BF16,
+        ir.ScalarTypeKind.F32,
+        ir.ScalarTypeKind.F64,
+    )
+    for kind in accepted_kinds:
+        assert type_satisfies_constraint(
+            ir.ScalarType(kind), TypeConstraint.PAYLOAD_SCALAR
+        )
+
+    rejected_types = (
+        ir.INDEX,
+        ir.OFFSET,
+        ir.ShapedType(ir.TypeKind.VECTOR, ir.I32, (ir.StaticDim(1),)),
+    )
+    for value_type in rejected_types:
+        assert not type_satisfies_constraint(value_type, TypeConstraint.PAYLOAD_SCALAR)
+
+
 def test_type_constraints_match_byte_pattern_scalars() -> None:
     accepted_kinds = (
         ir.ScalarTypeKind.I8,

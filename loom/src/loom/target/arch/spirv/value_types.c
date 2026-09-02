@@ -43,7 +43,7 @@ static bool loom_spirv_numeric_scalar_type_from_loom_scalar_type(
       *out_scalar_type = LOOM_SPIRV_SCALAR_TYPE_U64;
       return true;
     case LOOM_SCALAR_TYPE_I1:
-    case LOOM_SCALAR_TYPE_COUNT_:
+    case LOOM_SCALAR_TYPE_NONE:
       return false;
   }
   return false;

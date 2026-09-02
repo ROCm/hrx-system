@@ -281,7 +281,7 @@ static iree_status_t loom_buffer_legalize_fill(
 
   const loom_scalar_type_t pattern_type = loom_type_element_type(
       loom_module_value_type(context->module, loom_buffer_fill_pattern(op)));
-  loom_scalar_type_t working_type = LOOM_SCALAR_TYPE_COUNT_;
+  loom_scalar_type_t working_type = LOOM_SCALAR_TYPE_NONE;
   loom_value_id_t pattern_bits = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_buffer_legalize_build_pattern_bits(
       &rewriter->builder, loom_buffer_fill_pattern(op), pattern_type,
@@ -505,7 +505,7 @@ static iree_status_t loom_buffer_legalize(
   }
 }
 
-static const loom_target_legalizer_entry_t kBufferLegalizerEntries[] = {
+static const loom_target_legalizer_rule_t kBufferLegalizerRules[] = {
     {
         .root_kind = LOOM_OP_BUFFER_COPY,
         .legalize = loom_buffer_legalize,
@@ -523,8 +523,8 @@ static const loom_target_legalizer_entry_t kBufferLegalizerEntries[] = {
 static const loom_target_legalizer_provider_t kBufferLegalizerProvider = {
     .name = IREE_SVL("buffer"),
     .strategy = LOOM_TARGET_LEGALIZER_STRATEGY_REFERENCE,
-    .entries = kBufferLegalizerEntries,
-    .entry_count = IREE_ARRAYSIZE(kBufferLegalizerEntries),
+    .rules = kBufferLegalizerRules,
+    .rule_count = IREE_ARRAYSIZE(kBufferLegalizerRules),
 };
 
 const loom_target_legalizer_provider_t* loom_buffer_target_legalizer_provider(

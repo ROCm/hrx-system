@@ -4,14 +4,14 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Source module selection for source-to-low lowering.
+// Target-bound function selection for Low lowering and legalization.
 //
-// This is once-per-module JIT compilation setup. It resolves each source
-// symbol's target binding, checks that the low lowering policy supports the
-// resulting target contract, and returns the concrete inputs needed by the
-// core lowerer. Specialized functions use their compiler-owned
-// function-version facts; unrefined functions use facts projected from their
-// authored target witness.
+// This is once-per-module JIT compilation setup. Source selectors distinguish
+// source function and kernel operations from existing Low IR before resolving
+// target bindings. The broader target-bound selector lets legalization revisit
+// both forms. Specialized functions use their compiler-owned function-version
+// facts; unrefined functions use facts projected from their authored target
+// witness.
 
 #ifndef LOOM_CODEGEN_LOW_LOWER_SOURCE_SELECTION_H_
 #define LOOM_CODEGEN_LOW_LOWER_SOURCE_SELECTION_H_
@@ -34,7 +34,7 @@ typedef struct loom_low_source_selection_options_t {
   const loom_low_lower_policy_registry_t* policy_registry;
 
   // Structured diagnostic emitter for invalid target contracts encountered
-  // while selecting source functions.
+  // while selecting functions.
   iree_diagnostic_emitter_t diagnostic_emitter;
 
   // User-facing lowering kind used in diagnostics.
@@ -48,20 +48,20 @@ typedef struct loom_low_source_selection_options_t {
 } loom_low_source_selection_options_t;
 
 typedef enum loom_low_source_selection_kind_e {
-  // Target-bound function body selected for source-to-low lowering.
+  // Target-bound function body selected for lowering or legalization.
   LOOM_LOW_SOURCE_SELECTION_FUNCTION = 1,
-  // Target-bound external declaration selected for low import declaration.
+  // Source external declaration selected for Low import declaration lowering.
   LOOM_LOW_SOURCE_SELECTION_IMPORT_DECL = 2,
 } loom_low_source_selection_kind_t;
 
 typedef struct loom_low_source_selection_t {
-  // Selected source symbol category.
+  // Selected symbol category.
   loom_low_source_selection_kind_t kind;
 
-  // Source func-like op selected for lowering.
+  // Selected func-like op.
   loom_func_like_t func;
 
-  // Borrowed source function symbol name.
+  // Borrowed function symbol name.
   iree_string_view_t function_name;
 
   // Mutable identity for the target-refined compiler version, or NULL when
@@ -111,15 +111,15 @@ loom_low_source_selection_target_bundle(
 }
 
 typedef struct loom_low_source_selection_list_t {
-  // Source func-like symbols selected for lowering.
+  // Selected func-like symbols.
   loom_low_source_selection_t* values;
 
-  // Number of source selections in |values|.
+  // Number of selections in |values|.
   iree_host_size_t count;
 } loom_low_source_selection_list_t;
 
-// Selects all source funcs and import declarations compatible with the injected
-// target-low registries.
+// Selects all source function and kernel definitions plus imported function
+// declarations compatible with the injected target-low registries.
 //
 // The returned selection array is allocated from |arena| and remains valid for
 // the arena lifetime. A module with no compatible symbols succeeds with an
@@ -130,12 +130,26 @@ iree_status_t loom_low_select_source_symbols(
     iree_arena_allocator_t* arena,
     loom_low_source_selection_list_t* out_selection_list);
 
-// Selects all source funcs compatible with the injected target-low registries.
+// Selects all source function and kernel definitions compatible with the
+// injected target-low registries.
 //
 // The returned selection array is allocated from |arena| and remains valid for
 // the arena lifetime. A module with no compatible funcs succeeds with an empty
 // list so module passes can be no-ops.
 iree_status_t loom_low_select_source_funcs(
+    const loom_module_t* module,
+    const loom_low_source_selection_options_t* options,
+    iree_arena_allocator_t* arena,
+    loom_low_source_selection_list_t* out_selection_list);
+
+// Selects all target-bound function bodies compatible with the injected
+// target-low registries, including bodies already authored or lowered in Low
+// IR.
+//
+// The returned selection array is allocated from |arena| and remains valid for
+// the arena lifetime. A module with no compatible funcs succeeds with an empty
+// list so module passes can be no-ops.
+iree_status_t loom_low_select_target_bound_funcs(
     const loom_module_t* module,
     const loom_low_source_selection_options_t* options,
     iree_arena_allocator_t* arena,

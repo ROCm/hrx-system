@@ -139,6 +139,17 @@ class ValueMaterializerTest : public ::testing::Test {
     return buffer_view;
   }
 
+  void ExpectRawU32Scalar(const loom_testbench_value_table_t* table,
+                          loom_value_id_t value_id, uint32_t expected_bits) {
+    loom_testbench_value_t value = {};
+    IREE_ASSERT_OK(
+        loom_testbench_value_table_lookup_retain(table, value_id, &value));
+    ASSERT_TRUE(loom_testbench_value_is_scalar(&value));
+    EXPECT_EQ(value.scalar.kind, IREE_TOOLING_VALUE_KIND_RAW_U32);
+    EXPECT_EQ(value.scalar.storage.u32, expected_bits);
+    loom_testbench_value_deinitialize(&value);
+  }
+
   template <typename T>
   void ExpectBufferViewContents(iree_hal_buffer_view_t* buffer_view,
                                 std::vector<iree_hal_dim_t> shape,
@@ -172,6 +183,56 @@ class ValueMaterializerTest : public ::testing::Test {
   iree_io_stream_t* written_stream_ = nullptr;
   std::string written_path_;
 };
+
+TEST_F(ValueMaterializerTest, MaterializesNarrowScalarLiterals) {
+  struct NarrowScalarLiteral {
+    loom_scalar_type_t scalar_type;
+    double value;
+    uint32_t expected_bits;
+  };
+  const NarrowScalarLiteral literals[] = {
+      {LOOM_SCALAR_TYPE_F8E4M3, 0.25, 0x28},
+      {LOOM_SCALAR_TYPE_F8E5M2, 0.25, 0x34},
+      {LOOM_SCALAR_TYPE_F16, 0.5, 0x3800},
+      {LOOM_SCALAR_TYPE_BF16, -2.0, 0xC000},
+  };
+
+  loom_module_t* module = nullptr;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("narrow_scalars"),
+                                      &block_pool_, nullptr, host_allocator_,
+                                      &module));
+
+  loom_testbench_value_source_plan_t sources[IREE_ARRAYSIZE(literals)] = {};
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(literals); ++i) {
+    const loom_type_t type = loom_type_scalar(literals[i].scalar_type);
+    loom_value_id_t value_id = LOOM_VALUE_ID_INVALID;
+    IREE_ASSERT_OK(loom_module_define_value(module, type, &value_id));
+    sources[i].kind = LOOM_TESTBENCH_VALUE_SOURCE_LITERAL;
+    sources[i].value_id = value_id;
+    sources[i].type = loom_module_value_type(module, value_id);
+    sources[i].literal.value = loom_attr_f64(literals[i].value);
+  }
+
+  loom_testbench_case_plan_t case_plan = {};
+  case_plan.value_sources = sources;
+  case_plan.value_source_count = IREE_ARRAYSIZE(sources);
+  case_plan.cartesian_sample_count = 1;
+  case_plan.sample_count = 1;
+
+  loom_testbench_value_table_t table = {};
+  IREE_ASSERT_OK(loom_testbench_value_table_initialize(
+      module, &case_plan, host_allocator_, &table));
+  loom_testbench_value_materializer_options_t options = MaterializerOptions();
+  IREE_ASSERT_OK(loom_testbench_materialize_case_sample(
+      &options, &case_plan, /*sample_ordinal=*/0, &table));
+
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(literals); ++i) {
+    ExpectRawU32Scalar(&table, sources[i].value_id, literals[i].expected_bits);
+  }
+
+  loom_testbench_value_table_deinitialize(&table);
+  loom_module_free(module);
+}
 
 TEST_F(ValueMaterializerTest, MaterializesGeneratedValues) {
   loom_module_t* module = ParseModule(R"(

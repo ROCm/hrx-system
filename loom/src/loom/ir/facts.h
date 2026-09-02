@@ -363,6 +363,13 @@ bool loom_value_facts_make_unsigned_raw_bits(uint64_t raw_bits,
 loom_value_facts_t loom_value_facts_make_signed_raw_bits(uint64_t raw_bits,
                                                          int32_t bit_count);
 
+// Returns facts for a signed extension from |source_bit_count|. Fixed-width
+// integer facts already use their signed numeric domain except for logical i1
+// facts, whose 0/1 domain is mapped to 0/-1. The source bit count comes from a
+// verified fixed-width integer type.
+loom_value_facts_t loom_value_facts_sign_extend(loom_value_facts_t source_facts,
+                                                int32_t source_bit_count);
+
 // Returns conservative unsigned range facts for a value with |bit_count|
 // meaningful bits.
 loom_value_facts_t loom_value_facts_make_unsigned_bit_count_range(

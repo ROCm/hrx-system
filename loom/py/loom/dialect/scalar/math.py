@@ -45,6 +45,7 @@ _FM = ("fastmath", FastMathFlags)
 scalar_expf = unary_op(
     "scalar.expf",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=FLOAT,
     doc="Exponential: e^x.",
     flags=_FM,
@@ -54,6 +55,7 @@ scalar_expf = unary_op(
 scalar_exp2f = unary_op(
     "scalar.exp2f",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=FLOAT,
     doc="Base-2 exponential: 2^x.",
     flags=_FM,
@@ -63,6 +65,7 @@ scalar_exp2f = unary_op(
 scalar_expm1f = unary_op(
     "scalar.expm1f",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=FLOAT,
     doc="Exponential minus one: e^x - 1 (numerically stable near 0).",
     flags=_FM,
@@ -72,6 +75,7 @@ scalar_expm1f = unary_op(
 scalar_logf = unary_op(
     "scalar.logf",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=FLOAT,
     doc="Natural logarithm: ln(x).",
     flags=_FM,
@@ -81,6 +85,7 @@ scalar_logf = unary_op(
 scalar_log2f = unary_op(
     "scalar.log2f",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=FLOAT,
     doc="Base-2 logarithm.",
     flags=_FM,
@@ -90,6 +95,7 @@ scalar_log2f = unary_op(
 scalar_log10f = unary_op(
     "scalar.log10f",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=FLOAT,
     doc="Base-10 logarithm.",
     flags=_FM,
@@ -99,6 +105,7 @@ scalar_log10f = unary_op(
 scalar_log1pf = unary_op(
     "scalar.log1pf",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=FLOAT,
     doc="Natural logarithm of 1+x: ln(1+x) (numerically stable near 0).",
     flags=_FM,
@@ -113,6 +120,7 @@ scalar_log1pf = unary_op(
 scalar_powf = binary_op(
     "scalar.powf",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=FLOAT,
     doc="Power: x^y.",
     flags=_FM,
@@ -123,6 +131,7 @@ scalar_powf = binary_op(
 scalar_sqrtf = unary_op(
     "scalar.sqrtf",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=FLOAT,
     doc="Square root.",
     flags=_FM,
@@ -132,6 +141,7 @@ scalar_sqrtf = unary_op(
 scalar_rsqrtf = unary_op(
     "scalar.rsqrtf",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=FLOAT,
     doc="Reciprocal square root: 1/sqrt(x).",
     flags=_FM,
@@ -141,6 +151,7 @@ scalar_rsqrtf = unary_op(
 scalar_cbrtf = unary_op(
     "scalar.cbrtf",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=FLOAT,
     doc="Cube root.",
     flags=_FM,
@@ -155,6 +166,7 @@ scalar_cbrtf = unary_op(
 scalar_sinf = unary_op(
     "scalar.sinf",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=FLOAT,
     doc="Sine.",
     flags=_FM,
@@ -164,6 +176,7 @@ scalar_sinf = unary_op(
 scalar_cosf = unary_op(
     "scalar.cosf",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=FLOAT,
     doc="Cosine.",
     flags=_FM,
@@ -173,6 +186,7 @@ scalar_cosf = unary_op(
 scalar_sinturnsf = unary_op(
     "scalar.sinturnsf",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=FLOAT,
     doc=("Sine over turns: sin(2*pi*x), preserving finite-input periodicity and exact quarter-turn cardinals. Non-finite inputs produce NaN."),
     flags=_FM,
@@ -182,6 +196,7 @@ scalar_sinturnsf = unary_op(
 scalar_costurnsf = unary_op(
     "scalar.costurnsf",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=FLOAT,
     doc=("Cosine over turns: cos(2*pi*x), preserving finite-input periodicity and exact quarter-turn cardinals. Non-finite inputs produce NaN."),
     flags=_FM,
@@ -191,6 +206,7 @@ scalar_costurnsf = unary_op(
 scalar_tanf = unary_op(
     "scalar.tanf",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=FLOAT,
     doc="Tangent.",
     flags=_FM,
@@ -200,6 +216,7 @@ scalar_tanf = unary_op(
 scalar_asinf = unary_op(
     "scalar.asinf",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=FLOAT,
     doc="Arcsine.",
     flags=_FM,
@@ -209,6 +226,7 @@ scalar_asinf = unary_op(
 scalar_acosf = unary_op(
     "scalar.acosf",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=FLOAT,
     doc="Arccosine.",
     flags=_FM,
@@ -218,6 +236,7 @@ scalar_acosf = unary_op(
 scalar_atanf = unary_op(
     "scalar.atanf",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=FLOAT,
     doc="Arctangent.",
     flags=_FM,
@@ -227,6 +246,7 @@ scalar_atanf = unary_op(
 scalar_atan2f = binary_op(
     "scalar.atan2f",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=FLOAT,
     doc="Two-argument arctangent: atan2(y, x).",
     flags=_FM,
@@ -241,6 +261,7 @@ scalar_atan2f = binary_op(
 scalar_sinhf = unary_op(
     "scalar.sinhf",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=FLOAT,
     doc="Hyperbolic sine.",
     flags=_FM,
@@ -250,6 +271,7 @@ scalar_sinhf = unary_op(
 scalar_coshf = unary_op(
     "scalar.coshf",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=FLOAT,
     doc="Hyperbolic cosine.",
     flags=_FM,
@@ -259,6 +281,7 @@ scalar_coshf = unary_op(
 scalar_tanhf = unary_op(
     "scalar.tanhf",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=FLOAT,
     doc="Hyperbolic tangent.",
     flags=_FM,
@@ -268,6 +291,7 @@ scalar_tanhf = unary_op(
 scalar_asinhf = unary_op(
     "scalar.asinhf",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=FLOAT,
     doc="Inverse hyperbolic sine.",
     flags=_FM,
@@ -277,6 +301,7 @@ scalar_asinhf = unary_op(
 scalar_acoshf = unary_op(
     "scalar.acoshf",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=FLOAT,
     doc="Inverse hyperbolic cosine.",
     flags=_FM,
@@ -286,6 +311,7 @@ scalar_acoshf = unary_op(
 scalar_atanhf = unary_op(
     "scalar.atanhf",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=FLOAT,
     doc="Inverse hyperbolic tangent.",
     flags=_FM,
@@ -300,6 +326,7 @@ scalar_atanhf = unary_op(
 scalar_erff = unary_op(
     "scalar.erff",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=FLOAT,
     doc="Error function (used in GeLU activation).",
     flags=_FM,
@@ -309,6 +336,7 @@ scalar_erff = unary_op(
 scalar_erfcf = unary_op(
     "scalar.erfcf",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=FLOAT,
     doc="Complementary error function: 1 - erf(x).",
     flags=_FM,
@@ -319,6 +347,7 @@ scalar_erfcf = unary_op(
 scalar_logisticf = unary_op(
     "scalar.logisticf",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=FLOAT,
     doc="Logistic sigmoid: 1 / (1 + exp(-x)).",
     flags=_FM,
@@ -329,6 +358,7 @@ scalar_logisticf = unary_op(
 scalar_siluf = unary_op(
     "scalar.siluf",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=FLOAT,
     doc="SiLU activation: x * logistic(x).",
     flags=_FM,
@@ -339,6 +369,7 @@ scalar_siluf = unary_op(
 scalar_softplusf = unary_op(
     "scalar.softplusf",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=FLOAT,
     doc="Softplus activation: log(1 + exp(x)).",
     flags=_FM,
@@ -416,6 +447,7 @@ scalar_fmaf = Op(
 scalar_ceilf = unary_op(
     "scalar.ceilf",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=FLOAT,
     doc="Round toward positive infinity.",
     traits=[IDEMPOTENT],
@@ -427,6 +459,7 @@ scalar_ceilf = unary_op(
 scalar_floorf = unary_op(
     "scalar.floorf",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=FLOAT,
     doc="Round toward negative infinity.",
     traits=[IDEMPOTENT],
@@ -438,6 +471,7 @@ scalar_floorf = unary_op(
 scalar_roundf = unary_op(
     "scalar.roundf",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=FLOAT,
     doc="Round to nearest, ties away from zero.",
     traits=[IDEMPOTENT],
@@ -449,6 +483,7 @@ scalar_roundf = unary_op(
 scalar_roundevenf = unary_op(
     "scalar.roundevenf",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=FLOAT,
     doc="Round to nearest, ties to even (IEEE 754 default rounding).",
     traits=[IDEMPOTENT],
@@ -460,6 +495,7 @@ scalar_roundevenf = unary_op(
 scalar_truncf = unary_op(
     "scalar.truncf",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=FLOAT,
     doc="Round toward zero (C trunc).",
     traits=[IDEMPOTENT],

@@ -779,6 +779,22 @@ loom_module(
                 deps=[],
             )
 
+    def test_generated_files_requires_explicit_cmake_projection(self):
+        functions = bazel_to_cmake_converter.BuildFileFunctions(
+            converter=SimpleNamespace(body=""),
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            build_dir="runtime/src/iree/vm/bytecode/tooling",
+        )
+
+        functions.iree_generated_files(
+            name="tables_gen",
+            tags=["skip-bazel_to_cmake"],
+        )
+        with self.assertRaisesRegex(
+            NotImplementedError, "requires an explicit CMake projection"
+        ):
+            functions.iree_generated_files(name="tables_gen")
+
     def test_requirement_policy_loads_cross_project_requirement_defs(self):
         repo_root = Path(__file__).resolve().parents[2]
         source = """

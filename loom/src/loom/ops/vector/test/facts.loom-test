@@ -1,5 +1,23 @@
 // RUN: pass canonicalize
 
+// Lanewise i1 signed extension maps the logical true bit to negative one.
+func.def @extsi_uniform_i1(%x: i1) -> (i64, i64) {
+  %bits = vector.splat %x : vector<4xi1>
+  %wide = vector.extsi %bits : vector<4xi1> to vector<4xi32>
+  %lane = vector.extract %wide[0] : vector<4xi32> -> i32
+  %lo = test.fact_range_lo %lane : i32 -> i64
+  %hi = test.fact_range_hi %lane : i32 -> i64
+  func.return %lo, %hi : i64, i64
+}
+// ----
+func.def @extsi_uniform_i1(%x: i1) -> (i64, i64) {
+  %lo = scalar.constant -1 : i64
+  %hi = scalar.constant 0 : i64
+  func.return %lo, %hi : i64, i64
+}
+
+// ====
+
 // Compile-time vectors have the same value in every workitem even though their
 // logical elements are represented by an extension fact.
 func.def @constant_is_workgroup_uniform() -> (i1, i1) {

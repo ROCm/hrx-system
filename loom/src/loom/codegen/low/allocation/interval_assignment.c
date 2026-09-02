@@ -613,12 +613,14 @@ static bool loom_low_allocation_interval_assignment_tied_fixed_location_matches(
   }
   return loom_low_allocation_interval_assignment_tied_location_matches(
       state->context->target->descriptor_set, relation, fixed_is_result,
-      fixed_value->descriptor_reg_class_id, fixed_value->location_kind,
-      fixed_value->location_base, fixed_value->location_count,
-      counterpart_fixed_value->descriptor_reg_class_id,
-      counterpart_fixed_value->location_kind,
-      counterpart_fixed_value->location_base,
-      counterpart_fixed_value->location_count);
+      fixed_value->assignment.descriptor_reg_class_id,
+      fixed_value->assignment.location_kind,
+      fixed_value->assignment.location_base,
+      fixed_value->assignment.location_count,
+      counterpart_fixed_value->assignment.descriptor_reg_class_id,
+      counterpart_fixed_value->assignment.location_kind,
+      counterpart_fixed_value->assignment.location_base,
+      counterpart_fixed_value->assignment.location_count);
 }
 
 static bool
@@ -635,8 +637,10 @@ loom_low_allocation_interval_assignment_tied_assignment_location_matches(
   }
   return loom_low_allocation_interval_assignment_tied_location_matches(
       state->context->target->descriptor_set, relation, fixed_is_result,
-      fixed_value->descriptor_reg_class_id, fixed_value->location_kind,
-      fixed_value->location_base, fixed_value->location_count,
+      fixed_value->assignment.descriptor_reg_class_id,
+      fixed_value->assignment.location_kind,
+      fixed_value->assignment.location_base,
+      fixed_value->assignment.location_count,
       counterpart_assignment->descriptor_reg_class_id,
       counterpart_assignment->location_kind,
       counterpart_assignment->location_base,
@@ -774,10 +778,13 @@ loom_low_allocation_interval_assignment_assign_fixed_interval(
   loom_low_allocation_search_context_t search_context =
       loom_low_allocation_interval_assignment_search_context(state);
   if (loom_low_allocation_search_location_conflicts(
-          &search_context, interval, fixed_value->descriptor_reg_class_id,
-          fixed_value->location_kind, fixed_value->location_base,
-          fixed_value->location_count, ignored_value_ids, ignored_value_count,
-          ignored_storage_lease_value_ids, ignored_storage_lease_value_count,
+          &search_context, interval,
+          fixed_value->assignment.descriptor_reg_class_id,
+          fixed_value->assignment.location_kind,
+          fixed_value->assignment.location_base,
+          fixed_value->assignment.location_count, ignored_value_ids,
+          ignored_value_count, ignored_storage_lease_value_ids,
+          ignored_storage_lease_value_count,
           LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FORBIDDEN)) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
@@ -785,21 +792,9 @@ loom_low_allocation_interval_assignment_assign_fixed_interval(
         "overlapping another live interval or reserved range");
   }
 
-  const loom_low_allocation_assignment_t assignment = {
-      .value_id = interval->value_id,
-      .value_class = interval->value_class,
-      .descriptor_reg_class_id = fixed_value->descriptor_reg_class_id,
-      .start_point = interval->start_point,
-      .end_point =
-          loom_low_allocation_live_range_interval_storage_end_point(interval),
-      .unit_count = interval->unit_count,
-      .location_kind = fixed_value->location_kind,
-      .location_base = fixed_value->location_base,
-      .location_count = fixed_value->location_count,
-  };
   IREE_RETURN_IF_ERROR(
       loom_low_allocation_interval_assignment_append_assignment(
-          state, &assignment, ignored_storage_lease_value_ids,
+          state, &fixed_value->assignment, ignored_storage_lease_value_ids,
           ignored_storage_lease_value_count, NULL));
   *out_assigned = true;
   return iree_ok_status();

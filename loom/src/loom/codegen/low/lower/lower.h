@@ -22,6 +22,8 @@
 #include "loom/analysis/native_layout.h"
 #include "loom/analysis/symbolic_expr.h"
 #include "loom/codegen/low/descriptors.h"
+#include "loom/codegen/low/lower/module_state.h"
+#include "loom/codegen/low/lower/report.h"
 #include "loom/codegen/low/memory_access.h"
 #include "loom/error/emitter.h"
 #include "loom/error/error_defs.h"
@@ -38,9 +40,6 @@ extern "C" {
 #endif
 
 typedef struct loom_low_lower_context_t loom_low_lower_context_t;
-typedef struct loom_low_lower_module_state_t loom_low_lower_module_state_t;
-typedef struct loom_low_lower_source_query_scope_t
-    loom_low_lower_source_query_scope_t;
 typedef struct loom_low_lower_rule_set_t loom_low_lower_rule_set_t;
 typedef struct loom_low_source_memory_access_plan_t
     loom_low_source_memory_access_plan_t;
@@ -951,82 +950,6 @@ iree_status_t loom_low_lower_function(loom_module_t* module,
                                       const loom_low_lower_options_t* options,
                                       loom_low_lower_result_t* out_result);
 
-// Releases report row storage owned by |result|.
-void loom_low_lower_result_deinitialize(loom_low_lower_result_t* result);
-
-// Creates a module-scope target-state container allocated from |arena|.
-//
-// Callers pass the returned state through every loom_low_lower_function call in
-// one source-to-low module pass and then invoke policy module finalizers before
-// releasing |arena|. Target-owned state stored here must be treated as
-// pass-local scratch until a module finalizer materializes durable IR.
-iree_status_t loom_low_lower_module_state_create(
-    iree_arena_allocator_t* arena,
-    loom_low_lower_module_state_t** out_module_state);
-
-// Returns module-scope target state for |key|, allocating zeroed storage on
-// first use.
-//
-// Keys must be target-owned static addresses. Reusing a key with a different
-// data length is an internal lowering error. The returned storage remains valid
-// until the arena passed to loom_low_lower_module_state_create is released.
-iree_status_t loom_low_lower_module_state_get_or_allocate(
-    loom_low_lower_module_state_t* module_state, const void* key,
-    iree_host_size_t data_length, void** out_data);
-
-// Allocates uninitialized pass-local module-state storage.
-iree_status_t loom_low_lower_module_state_allocate(
-    loom_low_lower_module_state_t* module_state, iree_host_size_t byte_length,
-    void** out_ptr);
-
-// Allocates an uninitialized pass-local module-state array.
-iree_status_t loom_low_lower_module_state_allocate_array(
-    loom_low_lower_module_state_t* module_state, iree_host_size_t count,
-    iree_host_size_t element_size, void** out_ptr);
-
-// Lowers one target-bound external function declaration into a low.func.decl.
-//
-// The emitted low declaration preserves the source symbol identity, maps the
-// source signature through |options->policy|, and records the policy import
-// kind plus the resolved import symbol as the low code symbol.
-iree_status_t loom_low_lower_import_declaration(
-    loom_module_t* module, loom_func_like_t source_declaration,
-    const loom_low_lower_options_t* options,
-    loom_low_lower_result_t* out_result);
-
-// Creates a read-only source-to-low target contract query scope for one source
-// function.
-//
-// The scope shares source-to-low's contract adapter: generated rule refs,
-// policy map-contract-value callbacks, descriptor-matrix queries, and value
-// materializer predicates all observe the same lowering context shape used by
-// loom_low_lower_function. Callers must destroy the scope before releasing
-// |module| or |options| even though the scope storage itself is arena-owned.
-iree_status_t loom_low_lower_source_query_scope_create(
-    loom_module_t* module, loom_func_like_t source_function,
-    const loom_low_lower_options_t* options, iree_arena_allocator_t* arena,
-    loom_low_lower_source_query_scope_t** out_scope);
-
-// Releases analyses owned by |scope|. The scope allocation itself remains owned
-// by the arena passed to loom_low_lower_source_query_scope_create.
-void loom_low_lower_source_query_scope_destroy(
-    loom_low_lower_source_query_scope_t* scope);
-
-// Returns a contract-query callback backed by |scope|.
-loom_target_contract_query_callback_t
-loom_low_lower_source_query_scope_callback(
-    loom_low_lower_source_query_scope_t* scope);
-
-// Returns the active function-local value domain owned by |scope|, or NULL when
-// the scoped source function has no body.
-const loom_local_value_domain_t* loom_low_lower_source_query_scope_value_domain(
-    const loom_low_lower_source_query_scope_t* scope);
-
-// Returns the analyzed view regions owned by |scope|.
-iree_status_t loom_low_lower_source_query_scope_view_regions(
-    loom_low_lower_source_query_scope_t* scope,
-    const loom_view_region_table_t** out_view_regions);
-
 // Returns the module being mutated by the current lowering.
 loom_module_t* loom_low_lower_context_module(loom_low_lower_context_t* context);
 
@@ -1397,18 +1320,6 @@ iree_status_t loom_low_lower_record_source_memory_access(
     loom_low_lower_context_t* context, loom_op_t* low_op,
     const loom_low_source_memory_access_plan_t* source_plan,
     loom_low_lower_memory_access_record_flags_t flags);
-
-// Populates row source interval evidence from |source_plan| and interns exact
-// symbolic interval endpoints when report-only accounting can prove them.
-iree_status_t loom_low_lower_memory_report_row_populate_source_interval(
-    loom_low_lower_context_t* context,
-    const loom_low_source_memory_access_plan_t* source_plan,
-    loom_low_lower_memory_report_row_t* row);
-
-// Records an emitted source-memory packet report row.
-iree_status_t loom_low_lower_record_memory_report_row(
-    loom_low_lower_context_t* context, const loom_op_t* source_op,
-    const loom_low_lower_memory_report_row_t* row);
 
 // Emits ERR_TARGET_033 for a source value type rejected by the active
 // target-low policy.

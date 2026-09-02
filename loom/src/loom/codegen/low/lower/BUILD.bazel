@@ -29,23 +29,37 @@ _LOWER_VISIBILITY = [
 loom_cc_library(
     name = "lower",
     srcs = [
+        "context.c",
         "contract_query.c",
+        "function_boundary.c",
         "lower.c",
-        "lower_context.c",
-        "lower_policy.c",
-        "lower_report.c",
-        "lower_rule_descriptor.c",
-        "lower_rule_source_memory_match.c",
-        "lower_rule_source_memory_materialize.c",
-        "lower_rules.c",
+        "module_state.c",
+        "policy.c",
+        "report.c",
+        "rule_descriptor.c",
+        "rule_emit.c",
+        "rule_match.c",
+        "rule_source_memory_match.c",
+        "rule_source_memory_materialize.c",
+        "rule_value.c",
+        "source_plan.c",
+        "source_query.c",
     ],
     hdrs = [
+        "context.h",
         "contract_query.h",
+        "function_boundary.h",
         "lower.h",
-        "lower_internal.h",
-        "lower_rule_descriptor.h",
-        "lower_rule_source_memory.h",
-        "lower_rules.h",
+        "module_state.h",
+        "report.h",
+        "rule_descriptor.h",
+        "rule_emit.h",
+        "rule_match.h",
+        "rule_source_memory.h",
+        "rule_value.h",
+        "rules.h",
+        "source_plan.h",
+        "source_query.h",
     ],
     visibility = _LOWER_VISIBILITY,
     deps = [
@@ -109,12 +123,162 @@ loom_cc_library(
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:func_symbol_facts",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/kernel",
         "//loom/src/loom/ops/target",
         "//loom/src/loom/target:function_contract",
         "//loom/src/loom/target:function_version",
         "//loom/src/loom/target:types",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "module_state_test",
+    srcs = ["module_state_test.cc"],
+    deps = [
+        ":lower",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "context_test",
+    srcs = ["context_test.cc"],
+    deps = [
+        ":lower",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "rule_value_test",
+    srcs = ["rule_value_test.cc"],
+    deps = [
+        ":lower",
+        "//loom/src/loom/codegen/low/testing:source_workload",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:facts",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "rule_match_test",
+    srcs = ["rule_match_test.cc"],
+    deps = [
+        ":lower",
+        "//loom/src/loom/codegen/low/testing:source_workload",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/index",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "rule_emit_test",
+    srcs = ["rule_emit_test.cc"],
+    deps = [
+        ":lower",
+        "//loom/src/loom/codegen/low/testing:source_workload",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/target/test:descriptors",
+        "//loom/src/loom/target/test:low_registry",
+        "//loom/src/loom/target/test:lower",
+        "//loom/src/loom/target/test:target_record_table",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "source_query_test",
+    srcs = ["source_query_test.cc"],
+    deps = [
+        ":lower",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/target:low_descriptor_registry",
+        "//loom/src/loom/target/test:low_registry",
+        "//loom/src/loom/target/test:lower",
+        "//loom/src/loom/target/test:target_record_table",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "source_plan_test",
+    srcs = ["source_plan_test.cc"],
+    deps = [
+        ":lower",
+        "//loom/src/loom/codegen/low/testing:source_workload",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/target:low_descriptor_registry",
+        "//loom/src/loom/target/test:low_registry",
+        "//loom/src/loom/target/test:lower",
+        "//loom/src/loom/target/test:target_record_table",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "function_boundary_test",
+    srcs = ["function_boundary_test.cc"],
+    deps = [
+        ":lower",
+        "//loom/src/loom/codegen/low/testing:source_workload",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target:registers",
+        "//loom/src/loom/target/test:descriptors",
+        "//loom/src/loom/target/test:low_registry",
+        "//loom/src/loom/target/test:lower",
+        "//loom/src/loom/target/test:target_record_table",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "report_test",
+    srcs = ["report_test.cc"],
+    deps = [
+        ":lower",
+        "//loom/src/loom/codegen/low/testing:source_workload",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/target/test:low_registry",
+        "//loom/src/loom/target/test:lower",
+        "//loom/src/loom/target/test:target_record_table",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
@@ -141,8 +305,8 @@ loom_cc_test(
 )
 
 loom_cc_test(
-    name = "lower_policy_registry_test",
-    srcs = ["lower_policy_registry_test.cc"],
+    name = "policy_registry_test",
+    srcs = ["policy_registry_test.cc"],
     deps = [
         ":lower",
         "//loom/src/loom/ops/scalar",

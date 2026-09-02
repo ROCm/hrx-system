@@ -583,7 +583,7 @@ static iree_status_t loom_link_kernel_config_build_ir_declaration(
     const loom_link_plan_module_symbol_t* selected, const loom_op_t* source_op,
     loom_builder_t* builder, loom_op_t** out_declaration) {
   loom_func_like_t source_function =
-      loom_func_like_cast(projection->source_module, (loom_op_t*)source_op);
+      loom_func_like_const_cast(projection->source_module, source_op);
   const loom_value_slice_t source_workloads =
       loom_kernel_workload_arg_ids(projection->source_module, source_op);
   uint16_t source_argument_count = 0;
@@ -672,7 +672,7 @@ static iree_status_t loom_link_kernel_config_build_ir_helper(
     iree_host_size_t selection_ordinal, const loom_op_t* source_op,
     loom_builder_t* builder) {
   loom_func_like_t source_function =
-      loom_func_like_cast(projection->source_module, (loom_op_t*)source_op);
+      loom_func_like_const_cast(projection->source_module, source_op);
   const loom_value_slice_t source_workloads =
       loom_kernel_workload_arg_ids(projection->source_module, source_op);
 

@@ -21,6 +21,39 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    legalizer_registry
+  HDRS
+    "legalizer_registry.h"
+  SRCS
+    "legalizer_registry.c"
+  DEPS
+    iree::base
+    loom::target::legalization
+    loom::transforms::buffer::target_legalization
+    loom::transforms::scalar::target_legalization
+    loom::transforms::vector::target_legalization
+    loom::transforms::view::target_legalization
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    legalizer_registry_test
+  SRCS
+    "legalizer_registry_test.cc"
+  DEPS
+    ::legalizer_registry
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::ops::buffer
+    loom::ops::scalar
+    loom::ops::vector
+    loom::ops::view
+)
+
+loom_cc_library(
+  NAME
     pass_environment
   HDRS
     "pass_environment.h"

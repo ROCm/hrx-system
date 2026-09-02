@@ -556,8 +556,8 @@ static iree_status_t loom_wasm_build_local_layout(
       .allocator = allocator,
   };
 
-  loom_func_like_t function = loom_func_like_cast(
-      allocation->module, (loom_op_t*)allocation->function_op);
+  loom_func_like_t function =
+      loom_func_like_const_cast(allocation->module, allocation->function_op);
   if (!loom_func_like_isa(function)) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "Wasm emission requires a func-like low function");

@@ -114,6 +114,7 @@ scalar_shrui = binary_op(
 scalar_rotli = binary_op(
     "scalar.rotli",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=INTEGER,
     doc="Left rotate.",
     facts="loom_scalar_rotli_facts",
@@ -123,6 +124,7 @@ scalar_rotli = binary_op(
 scalar_rotri = binary_op(
     "scalar.rotri",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=INTEGER,
     doc="Right rotate.",
     facts="loom_scalar_rotri_facts",
@@ -137,6 +139,7 @@ scalar_rotri = binary_op(
 scalar_ctlzi = unary_op(
     "scalar.ctlzi",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=INTEGER,
     doc="Count leading zeros.",
     facts="loom_scalar_ctlzi_facts",
@@ -146,6 +149,7 @@ scalar_ctlzi = unary_op(
 scalar_cttzi = unary_op(
     "scalar.cttzi",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=INTEGER,
     doc="Count trailing zeros.",
     facts="loom_scalar_cttzi_facts",
@@ -155,6 +159,7 @@ scalar_cttzi = unary_op(
 scalar_ctpopi = unary_op(
     "scalar.ctpopi",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     type_constraint=INTEGER,
     doc="Population count (number of set bits).",
     facts="loom_scalar_ctpopi_facts",

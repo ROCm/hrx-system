@@ -737,13 +737,13 @@ static iree_status_t loom_cse_push_region_frames(
 //===----------------------------------------------------------------------===//
 
 // Returns true if the op must not be CSE'd. An op prevents CSE if it
-// has observable side effects (writes, unknown effects, non-determinism),
-// depends on a convergent participant set, or produces a unique identity per
-// execution (allocations).
+// has observable side effects (writes, memory fences, unknown effects, or
+// non-determinism), depends on a convergent participant set, or produces a
+// unique identity per execution (allocations).
 static inline bool loom_cse_prevents_cse(loom_trait_flags_t traits) {
-  return (traits & (LOOM_TRAIT_WRITES_MEMORY | LOOM_TRAIT_UNKNOWN_EFFECTS |
-                    LOOM_TRAIT_NON_DETERMINISTIC | LOOM_TRAIT_UNIQUE_IDENTITY |
-                    LOOM_TRAIT_CONVERGENT)) != 0;
+  return loom_traits_has_side_effects(traits) ||
+         iree_any_bit_set(traits,
+                          LOOM_TRAIT_UNIQUE_IDENTITY | LOOM_TRAIT_CONVERGENT);
 }
 
 static bool loom_cse_result_transfers_operand_ownership(

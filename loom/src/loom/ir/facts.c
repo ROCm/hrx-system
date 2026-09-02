@@ -337,6 +337,19 @@ loom_value_facts_t loom_value_facts_make_signed_raw_bits(uint64_t raw_bits,
       loom_value_facts_sign_extend_raw_bits(raw_bits, bit_count));
 }
 
+loom_value_facts_t loom_value_facts_sign_extend(loom_value_facts_t source_facts,
+                                                int32_t source_bit_count) {
+  if (source_bit_count != 1) return source_facts;
+
+  uint64_t raw_bits = 0;
+  loom_value_facts_t result_facts =
+      loom_value_facts_as_exact_raw_bits(source_facts, 1, &raw_bits)
+          ? loom_value_facts_make_signed_raw_bits(raw_bits, 1)
+          : loom_value_facts_make(-1, 0, 1);
+  loom_value_facts_propagate_unary_distribution(source_facts, &result_facts);
+  return result_facts;
+}
+
 loom_value_facts_t loom_value_facts_make_unsigned_bit_count_range(
     int64_t bit_count) {
   if (bit_count <= 0 || bit_count > 63) {
@@ -966,6 +979,17 @@ void loom_value_facts_remui(const loom_value_facts_t* lhs,
   loom_value_facts_propagate_binary_distribution(lhs_facts, rhs_facts, out);
 }
 
+// Computes a signed remainder with truncation-toward-zero semantics. The
+// divisor must be nonzero. Unsigned division makes the INT64_MIN / -1 overflow
+// pair representable and its remainder is zero as required.
+static int64_t loom_value_facts_remainder_i64(int64_t dividend,
+                                              int64_t divisor) {
+  const uint64_t remainder =
+      iree_math_magnitude_i64(dividend) % iree_math_magnitude_i64(divisor);
+  if (dividend >= 0 || remainder == 0) return (int64_t)remainder;
+  return -(int64_t)remainder;
+}
+
 void loom_value_facts_remsi(const loom_value_facts_t* lhs,
                             const loom_value_facts_t* rhs,
                             loom_value_facts_t* out) {
@@ -981,26 +1005,37 @@ void loom_value_facts_remsi(const loom_value_facts_t* lhs,
   }
   // Both exact: fold directly.
   if (lhs_facts.range_lo == lhs_facts.range_hi && rhs_lo == rhs_hi) {
-    *out = loom_value_facts_exact_i64(lhs_facts.range_lo % rhs_lo);
+    *out = loom_value_facts_exact_i64(
+        loom_value_facts_remainder_i64(lhs_facts.range_lo, rhs_lo));
     loom_value_facts_propagate_binary_distribution(lhs_facts, rhs_facts, out);
     return;
   }
   // Result magnitude is bounded by |divisor| - 1.
-  // Use unsigned abs to avoid llabs(INT64_MIN) UB.
-  uint64_t abs_lo =
-      (rhs_lo >= 0) ? (uint64_t)rhs_lo : (uint64_t)(-(rhs_lo + 1)) + 1;
-  uint64_t abs_hi =
-      (rhs_hi >= 0) ? (uint64_t)rhs_hi : (uint64_t)(-(rhs_hi + 1)) + 1;
-  int64_t abs_bound = (int64_t)(abs_lo > abs_hi ? abs_lo : abs_hi);
+  const uint64_t maximum_divisor_magnitude = iree_max(
+      iree_math_magnitude_i64(rhs_lo), iree_math_magnitude_i64(rhs_hi));
+  // The nonzero divisor magnitude is in [1, 2^63], so subtracting one always
+  // produces a representable signed upper bound.
+  const int64_t remainder_bound =
+      (int64_t)(maximum_divisor_magnitude - UINT64_C(1));
   // Signed remainder preserves the sign of the dividend. Conservative
-  // bound: [-(abs_bound - 1), abs_bound - 1].
-  *out = loom_value_facts_make(-(abs_bound - 1), abs_bound - 1, 1);
+  // bound: [-remainder_bound, remainder_bound].
+  *out = loom_value_facts_make(-remainder_bound, remainder_bound, 1);
   loom_value_facts_propagate_binary_distribution(lhs_facts, rhs_facts, out);
 }
 
 //===----------------------------------------------------------------------===//
 // Transfer functions: shifts
 //===----------------------------------------------------------------------===//
+
+// Performs a 64-bit arithmetic right shift without relying on the host C
+// implementation's handling of signed negative operands. The shift must be in
+// [0, 63].
+static int64_t loom_value_facts_arithmetic_shift_right_i64(int64_t value,
+                                                           uint32_t shift) {
+  if (value >= 0) return (int64_t)((uint64_t)value >> shift);
+  const uint64_t complement_magnitude = (uint64_t)(-(value + INT64_C(1)));
+  return -INT64_C(1) - (int64_t)(complement_magnitude >> shift);
+}
 
 void loom_value_facts_shli(const loom_value_facts_t* lhs,
                            const loom_value_facts_t* rhs,
@@ -1125,8 +1160,10 @@ void loom_value_facts_shrsi(const loom_value_facts_t* lhs,
     return;
   }
   // Arithmetic right shift preserves sign.
-  int64_t lo = lhs_lo >> shift;
-  int64_t hi = lhs_hi >> shift;
+  int64_t lo =
+      loom_value_facts_arithmetic_shift_right_i64(lhs_lo, (uint32_t)shift);
+  int64_t hi =
+      loom_value_facts_arithmetic_shift_right_i64(lhs_hi, (uint32_t)shift);
   int64_t factor = (int64_t)1 << shift;
   int64_t divisor = (lhs_divisor % factor == 0) ? lhs_divisor / factor : 1;
   *out = loom_value_facts_make(lo, hi, divisor);

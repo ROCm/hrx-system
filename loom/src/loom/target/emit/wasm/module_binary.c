@@ -6,10 +6,11 @@
 
 #include "loom/target/emit/wasm/module_binary.h"
 
-#include <inttypes.h>
 #include <string.h>
 
+#include "loom/codegen/low/allocation.h"
 #include "loom/codegen/low/function.h"
+#include "loom/codegen/low/function_model.h"
 #include "loom/codegen/low/target_binding.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
@@ -72,8 +73,8 @@ typedef struct loom_wasm_module_function_t {
   uint32_t function_index;
   // Wasm type index assigned by signature interning.
   uint32_t type_index;
-  // Emission frame produced for this low function.
-  loom_low_emission_frame_t frame;
+  // Source-order allocation produced for this low function.
+  loom_low_allocation_table_t allocation;
   // Interned Wasm function signature.
   loom_wasm_function_type_t type;
   // Size-prefixed Wasm code-section body bytes.
@@ -104,8 +105,8 @@ static iree_status_t loom_wasm_module_write_section(
     const loom_wasm_binary_writer_t* payload_writer) {
   if (payload_writer->length > UINT32_MAX) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "Wasm section %" PRIu8 " exceeds u32 size",
-                            section_id);
+                            "Wasm section %u exceeds u32 size",
+                            (unsigned)section_id);
   }
   IREE_RETURN_IF_ERROR(loom_wasm_binary_write_u8(module_writer, section_id));
   IREE_RETURN_IF_ERROR(loom_wasm_binary_write_u32_leb(
@@ -148,8 +149,7 @@ static iree_string_view_t loom_wasm_module_symbol_name(
 static iree_string_view_t loom_wasm_module_function_export_name(
     const loom_module_t* module, const loom_symbol_t* symbol,
     const loom_op_t* function_op) {
-  loom_func_like_t function =
-      loom_func_like_cast(module, (loom_op_t*)function_op);
+  loom_func_like_t function = loom_func_like_const_cast(module, function_op);
   if (!loom_func_like_isa(function)) {
     return iree_string_view_empty();
   }
@@ -218,11 +218,11 @@ static iree_status_t loom_wasm_module_build_value_type_list(
 }
 
 static iree_status_t loom_wasm_module_build_function_type(
-    const loom_low_emission_frame_t* frame, iree_arena_allocator_t* arena,
-    loom_wasm_function_type_t* out_type) {
+    const loom_low_allocation_table_t* allocation,
+    iree_arena_allocator_t* arena, loom_wasm_function_type_t* out_type) {
   *out_type = (loom_wasm_function_type_t){0};
   loom_func_like_t function =
-      loom_func_like_cast(frame->module, (loom_op_t*)frame->function_op);
+      loom_func_like_const_cast(allocation->module, allocation->function_op);
   if (!loom_func_like_isa(function)) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "Wasm module emission requires a func-like op");
@@ -231,14 +231,15 @@ static iree_status_t loom_wasm_module_build_function_type(
   uint16_t parameter_count = 0;
   const loom_value_id_t* parameters =
       loom_func_like_arg_ids(function, &parameter_count);
-  loom_value_slice_t results = loom_low_func_def_results(frame->function_op);
+  loom_value_slice_t results =
+      loom_low_func_def_results(allocation->function_op);
 
   iree_status_t status = loom_wasm_module_build_value_type_list(
-      frame->module, frame->target.descriptor_set, parameters, parameter_count,
-      arena, &out_type->parameters);
+      allocation->module, allocation->target.descriptor_set, parameters,
+      parameter_count, arena, &out_type->parameters);
   if (iree_status_is_ok(status)) {
     status = loom_wasm_module_build_value_type_list(
-        frame->module, frame->target.descriptor_set, results.values,
+        allocation->module, allocation->target.descriptor_set, results.values,
         results.count, arena, &out_type->results);
   }
   if (iree_status_is_ok(status)) {
@@ -283,43 +284,55 @@ static iree_status_t loom_wasm_module_intern_function_type(
   return iree_ok_status();
 }
 
-static iree_status_t loom_wasm_module_build_function_frame(
+static iree_status_t loom_wasm_module_build_function_allocation(
     loom_module_t* module, loom_op_t* function_op,
-    const loom_low_emission_frame_options_t* options,
-    iree_arena_allocator_t* arena, loom_low_emission_frame_t* out_frame) {
-  if (options->schedule_strategy !=
-      LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "Wasm module emission requires source-order low scheduling");
+    const loom_low_descriptor_registry_t* descriptor_registry,
+    iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
+    loom_low_allocation_table_t* out_allocation) {
+  loom_low_function_model_t model = {0};
+  iree_status_t status = loom_low_function_model_initialize(
+      module, function_op,
+      /*function_target_facts=*/NULL, descriptor_registry, diagnostic_emitter,
+      LOOM_LOW_FUNCTION_MODEL_FLAG_REGION_TREE, arena, &model);
+  if (iree_status_is_ok(status)) {
+    const loom_low_allocation_options_t allocation_options = {
+        .emitter = diagnostic_emitter,
+    };
+    status = loom_low_allocate_function(&model, &allocation_options, arena,
+                                        out_allocation);
   }
-  IREE_RETURN_IF_ERROR(loom_low_emission_frame_build(
-      module, function_op, options, arena, out_frame));
-  if (out_frame->target.descriptor_set !=
-      loom_wasm_core_simd128_descriptor_set()) {
-    return iree_make_status(
+  loom_low_function_model_deinitialize(&model);
+  if (iree_status_is_ok(status) &&
+      out_allocation->target.descriptor_set !=
+          loom_wasm_core_simd128_descriptor_set()) {
+    status = iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "Wasm module emission requires descriptor set 'wasm.core.simd128'");
   }
-  return iree_ok_status();
+  return status;
 }
 
 static iree_status_t loom_wasm_module_prepare_function(
     loom_wasm_module_layout_t* layout, loom_wasm_module_function_t* function,
-    loom_module_t* module, const loom_low_emission_frame_options_t* options,
+    loom_module_t* module,
+    const loom_low_descriptor_registry_t* descriptor_registry,
+    iree_diagnostic_emitter_t diagnostic_emitter,
     iree_arena_allocator_t* arena) {
-  IREE_RETURN_IF_ERROR(loom_wasm_module_build_function_frame(
-      module, function->symbol->defining_op, options, arena, &function->frame));
+  IREE_RETURN_IF_ERROR(loom_wasm_module_build_function_allocation(
+      module, function->symbol->defining_op, descriptor_registry,
+      diagnostic_emitter, arena, &function->allocation));
   IREE_RETURN_IF_ERROR(loom_wasm_module_build_function_type(
-      &function->frame, arena, &function->type));
+      &function->allocation, arena, &function->type));
   IREE_RETURN_IF_ERROR(loom_wasm_module_intern_function_type(
       layout, &function->type, &function->type_index));
   return iree_ok_status();
 }
 
 static iree_status_t loom_wasm_module_collect_functions(
-    loom_module_t* module, const loom_low_emission_frame_options_t* options,
-    iree_arena_allocator_t* arena, loom_wasm_module_layout_t* out_layout) {
+    loom_module_t* module,
+    const loom_low_descriptor_registry_t* descriptor_registry,
+    iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
+    loom_wasm_module_layout_t* out_layout) {
   *out_layout = (loom_wasm_module_layout_t){
       .module = module,
   };
@@ -382,7 +395,8 @@ static iree_status_t loom_wasm_module_collect_functions(
       ++out_layout->export_count;
     }
     IREE_RETURN_IF_ERROR(loom_wasm_module_prepare_function(
-        out_layout, function, module, options, arena));
+        out_layout, function, module, descriptor_registry, diagnostic_emitter,
+        arena));
     ++out_layout->function_count;
   }
 
@@ -405,8 +419,8 @@ static iree_status_t loom_wasm_module_resolve_function_index(
   if (callee.symbol_id >= layout->module->symbols.count) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "Wasm direct call uses an out-of-range callee "
-                            "symbol %" PRIu16,
-                            callee.symbol_id);
+                            "symbol %u",
+                            (unsigned)callee.symbol_id);
   }
   const uint32_t function_index =
       layout->symbol_function_indices[callee.symbol_id];
@@ -430,9 +444,8 @@ static iree_status_t loom_wasm_module_emit_function_bodies(
   };
   for (iree_host_size_t i = 0; i < layout->function_count; ++i) {
     loom_wasm_module_function_t* function = &layout->functions[i];
-    IREE_RETURN_IF_ERROR(
-        loom_wasm_emit_function_body(&function->frame.allocation, &body_options,
-                                     allocator, &function->body));
+    IREE_RETURN_IF_ERROR(loom_wasm_emit_function_body(
+        &function->allocation, &body_options, allocator, &function->body));
     if (iree_any_bit_set(function->body.flags,
                          LOOM_WASM_FUNCTION_BODY_FLAG_USES_MEMORY)) {
       layout->flags |= LOOM_WASM_MODULE_BINARY_FLAG_DEFINES_MEMORY;
@@ -704,20 +717,20 @@ void loom_wasm_module_binary_deinitialize(loom_wasm_module_binary_t* module,
   *module = (loom_wasm_module_binary_t){0};
 }
 
-iree_status_t loom_wasm_emit_module(
-    loom_module_t* module, const loom_low_emission_frame_options_t* options,
-    iree_arena_allocator_t* arena, iree_allocator_t allocator,
-    loom_wasm_module_binary_t* out_module) {
+iree_status_t loom_wasm_emit_low_module(
+    loom_module_t* module,
+    const loom_low_descriptor_registry_t* descriptor_registry,
+    iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
+    iree_allocator_t allocator, loom_wasm_module_binary_t* out_module) {
   IREE_ASSERT_ARGUMENT(module);
-  IREE_ASSERT_ARGUMENT(options);
-  IREE_ASSERT_ARGUMENT(options->descriptor_registry);
+  IREE_ASSERT_ARGUMENT(descriptor_registry);
   IREE_ASSERT_ARGUMENT(arena);
   IREE_ASSERT_ARGUMENT(out_module);
   *out_module = (loom_wasm_module_binary_t){0};
 
   loom_wasm_module_layout_t layout = {0};
-  iree_status_t status =
-      loom_wasm_module_collect_functions(module, options, arena, &layout);
+  iree_status_t status = loom_wasm_module_collect_functions(
+      module, descriptor_registry, diagnostic_emitter, arena, &layout);
   if (iree_status_is_ok(status)) {
     status = loom_wasm_module_emit_function_bodies(&layout, allocator);
   }

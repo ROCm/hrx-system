@@ -144,11 +144,8 @@ static iree_status_t loom_func_symbol_resolve_target_conditions(
       (void**)&target_conditions));
   for (iree_host_size_t i = 0; i < authored_requirements.count; ++i) {
     const loom_attribute_t value = authored_requirements.values[i];
-    const loom_target_condition_descriptor_t* descriptor = NULL;
-    IREE_RETURN_IF_ERROR(
-        loom_target_condition_resolve(module->context, value, &descriptor));
     target_conditions[i] = (loom_target_condition_t){
-        .descriptor = descriptor,
+        .descriptor = loom_target_condition_resolve(module->context, value),
         .value = value,
     };
   }

@@ -93,6 +93,40 @@ uint8_t loom_predicate_kind_argument_count(uint8_t kind) {
   return UINT8_MAX;
 }
 
+bool loom_predicate_kind_accepts_value_type(uint8_t kind, loom_type_t type) {
+  if (loom_type_is_register(type)) {
+    const loom_type_t* value_type = loom_type_register_value_type(type);
+    if (value_type == NULL) return false;
+    type = *value_type;
+  }
+  if (!loom_type_is_scalar(type)) return false;
+
+  const loom_scalar_type_t scalar_type = loom_type_element_type(type);
+  switch ((loom_predicate_kind_t)kind) {
+    case LOOM_PREDICATE_EQ:
+    case LOOM_PREDICATE_NE:
+    case LOOM_PREDICATE_LT:
+    case LOOM_PREDICATE_LE:
+    case LOOM_PREDICATE_GT:
+    case LOOM_PREDICATE_GE:
+    case LOOM_PREDICATE_MUL:
+    case LOOM_PREDICATE_MIN:
+    case LOOM_PREDICATE_MAX:
+    case LOOM_PREDICATE_POW2:
+    case LOOM_PREDICATE_RANGE:
+      return scalar_type == LOOM_SCALAR_TYPE_INDEX ||
+             scalar_type == LOOM_SCALAR_TYPE_OFFSET ||
+             loom_scalar_type_is_integer(scalar_type);
+    case LOOM_PREDICATE_NOT_NAN:
+    case LOOM_PREDICATE_NOT_INF:
+    case LOOM_PREDICATE_FINITE:
+      return loom_scalar_type_is_float(scalar_type);
+    case LOOM_PREDICATE_COUNT_:
+      return false;
+  }
+  return false;
+}
+
 iree_status_t loom_signed_enum_set_canonical_word_count(
     loom_signed_enum_set_t set, iree_host_size_t* out_word_count) {
   if (out_word_count == NULL) {

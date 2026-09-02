@@ -1652,9 +1652,6 @@ iree_status_t loom_scalar_constant_facts(
     const loom_module_t* module, const loom_op_t* op,
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
-iree_status_t loom_scalar_constant_verify(
-    const loom_module_t* module, const loom_op_t* op,
-    iree_diagnostic_emitter_t emitter);
 
 // LOOM_OP_SCALAR_POISON: Materialize a typed Loom poison scalar. Poison represents an invalid scalar observation, such as extracting a lane proven not to exist. Pure scalar ops with any poison operand canonicalize to poison of the corresponding result type. Poison is not an LLVM poison value: it must be removed by dead-code elimination or diagnosed before it reaches a store, return, kernel boundary, or target-lowering boundary.
 // %p = scalar.poison : f32
@@ -1912,9 +1909,6 @@ iree_status_t loom_scalar_assume_facts(
     const loom_module_t* module, const loom_op_t* op,
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
-iree_status_t loom_scalar_assume_verify(
-    const loom_module_t* module, const loom_op_t* op,
-    iree_diagnostic_emitter_t emitter);
 
 // Returns the vtable array for the scalar dialect.
 const loom_op_vtable_t* const* loom_scalar_dialect_vtables(

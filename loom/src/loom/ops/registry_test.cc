@@ -14,6 +14,7 @@
 #include "loom/ops/index/ops.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/op_registry.h"
+#include "loom/ops/scalar/ops.h"
 #include "loom/ops/type_registry.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/util/fact_table.h"
@@ -89,6 +90,13 @@ TEST(OpSemantics, DialectTablesAreDenseAndQueryable) {
   EXPECT_EQ(
       buffer_semantics[loom_op_dialect_index(LOOM_OP_BUFFER_ALLOCA)].phase,
       LOOM_OP_PHASE_EXECUTABLE);
+
+  EXPECT_EQ(loom_scalar_op_semantics(LOOM_OP_SCALAR_CEILDIVSI).phase,
+            LOOM_OP_PHASE_EXECUTABLE);
+  EXPECT_EQ(loom_scalar_op_semantics(LOOM_OP_SCALAR_POISON).phase,
+            LOOM_OP_PHASE_UNSPECIFIED);
+  EXPECT_EQ(loom_scalar_op_semantics(LOOM_OP_SCALAR_ASSUME).phase,
+            LOOM_OP_PHASE_UNSPECIFIED);
 
   loom_op_semantics_t iota_semantics =
       loom_vector_op_semantics(LOOM_OP_VECTOR_IOTA);

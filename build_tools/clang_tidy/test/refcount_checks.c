@@ -46,6 +46,10 @@ typedef struct iree_clang_tidy_refcount_misused_counter_t {
   iree_atomic_ref_count_t pending_submissions;
 } iree_clang_tidy_refcount_misused_counter_t;
 
+typedef struct iree_clang_tidy_refcount_misnamed_counter_t {
+  iree_atomic_ref_count_t counter;
+} iree_clang_tidy_refcount_misnamed_counter_t;
+
 typedef struct iree_clang_tidy_refcounted_with_counter_t {
   iree_atomic_ref_count_t ref_count;
   iree_atomic_ref_count_t queued_callbacks;

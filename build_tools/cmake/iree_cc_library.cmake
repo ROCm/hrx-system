@@ -422,6 +422,23 @@ function(iree_cc_library)
     )
   endif()
 
+  # Order compilation after any registered producers of generated sources or
+  # headers. Generated files are represented as paths rather than link targets,
+  # so the ordinary target dependency graph cannot infer this edge.
+  if(_RULE_IS_INTERFACE)
+    set(_GENERATED_INPUT_CONSUMER ${_NAME})
+  else()
+    set(_GENERATED_INPUT_CONSUMER ${_OBJECTS_NAME})
+  endif()
+  foreach(_GENERATED_INPUT IN LISTS
+      _RULE_GENERATED_SRC_TARGET_SRCS
+      _RULE_GENERATED_HDR_FILES)
+    iree_generated_output_add_consumer(
+      "${_GENERATED_INPUT}"
+      "${_GENERATED_INPUT_CONSUMER}"
+    )
+  endforeach()
+
   if(NOT _RULE_TESTONLY)
     iree_install_targets(
       TARGETS ${_NAME}

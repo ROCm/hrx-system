@@ -10,7 +10,9 @@
 
 #include "loom/analysis/symbol_facts.h"
 #include "loom/ir/module.h"
+#include "loom/ops/func/ops.h"
 #include "loom/ops/func_symbol_facts.h"
+#include "loom/ops/kernel/ops.h"
 #include "loom/ops/target/facts.h"
 #include "loom/target/function_contract.h"
 
@@ -123,6 +125,7 @@ typedef uint8_t loom_low_source_selection_filter_t;
 
 #define LOOM_LOW_SOURCE_SELECTION_FILTER_FUNCTION ((uint8_t)1u << 0)
 #define LOOM_LOW_SOURCE_SELECTION_FILTER_IMPORT_DECL ((uint8_t)1u << 1)
+#define LOOM_LOW_SOURCE_SELECTION_FILTER_SOURCE_OP ((uint8_t)1u << 2)
 
 static iree_status_t loom_low_source_selection_try_symbol(
     const loom_module_t* module,
@@ -137,6 +140,12 @@ static iree_status_t loom_low_source_selection_try_symbol(
   IREE_RETURN_IF_ERROR(loom_low_source_selection_lookup_func_facts(
       module, fact_table, symbol_id, &func_facts));
   if (!func_facts) {
+    return iree_ok_status();
+  }
+  if (iree_all_bits_set(filter, LOOM_LOW_SOURCE_SELECTION_FILTER_SOURCE_OP) &&
+      func_facts->func_op->kind != LOOM_OP_FUNC_DEF &&
+      func_facts->func_op->kind != LOOM_OP_KERNEL_DEF &&
+      func_facts->func_op->kind != LOOM_OP_FUNC_DECL) {
     return iree_ok_status();
   }
   loom_low_source_selection_kind_t kind = 0;
@@ -262,11 +271,24 @@ iree_status_t loom_low_select_source_symbols(
   return loom_low_select_source_symbols_with_filter(
       module, options,
       LOOM_LOW_SOURCE_SELECTION_FILTER_FUNCTION |
-          LOOM_LOW_SOURCE_SELECTION_FILTER_IMPORT_DECL,
+          LOOM_LOW_SOURCE_SELECTION_FILTER_IMPORT_DECL |
+          LOOM_LOW_SOURCE_SELECTION_FILTER_SOURCE_OP,
       arena, out_selection_list);
 }
 
 iree_status_t loom_low_select_source_funcs(
+    const loom_module_t* module,
+    const loom_low_source_selection_options_t* options,
+    iree_arena_allocator_t* arena,
+    loom_low_source_selection_list_t* out_selection_list) {
+  return loom_low_select_source_symbols_with_filter(
+      module, options,
+      LOOM_LOW_SOURCE_SELECTION_FILTER_FUNCTION |
+          LOOM_LOW_SOURCE_SELECTION_FILTER_SOURCE_OP,
+      arena, out_selection_list);
+}
+
+iree_status_t loom_low_select_target_bound_funcs(
     const loom_module_t* module,
     const loom_low_source_selection_options_t* options,
     iree_arena_allocator_t* arena,

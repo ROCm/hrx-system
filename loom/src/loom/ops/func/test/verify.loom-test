@@ -5,6 +5,38 @@ func.def @semantic() {
   func.return
 }
 
+// Named function results are part of the signature contract and may carry
+// postconditions relating them to function arguments.
+func.def @postcondition(%value: i32) -> (%result: i32) where [eq(%result, %value)] {
+  func.return %value : i32
+}
+
+// ====
+
+// A predicate constrains a signature value rather than being a standalone
+// compile-time boolean expression.
+// ERROR@+1: STRUCTURE/032 {op_name="func.def", field_name="predicates[0].arg[0]", required_origin="a function argument or result"}
+func.def @constant_predicate(%value: i32) where [eq(4, %value)] {
+  func.return
+}
+
+// ====
+
+// Integer relation predicates require integer-domain signature values.
+// ERROR@+1: TYPE/003 {operand_name="predicates[0].arg[0]", actual_type="f32", expected_constraint="integer, index, or offset scalar"}
+func.def @integer_predicate_on_float(%value: f32) where [eq(%value, 4)] {
+  func.return
+}
+
+// ====
+
+// Floating-point classification predicates require floating-point signature
+// values.
+// ERROR@+1: TYPE/003 {operand_name="predicates[0].arg[0]", actual_type="i32", expected_constraint="floating-point scalar"}
+func.def @float_predicate_on_integer(%value: i32) where [finite(%value)] {
+  func.return
+}
+
 // ====
 
 kernel.decl @launch_only() launch()
@@ -76,7 +108,7 @@ template.ukernel<@test.large> target(@large_target) @large_ukernel()
 // valid as typed provider requirements.
 template.decl @test.invalid_condition()
 
-// ERROR@+1: TARGET/068 {function_name="not_a_condition", condition_index="0", reason="parameterized attribute family 'test.tile' is not a target condition"}
+// ERROR@+1: TARGET/068 {function_name="not_a_condition", condition_index="0", reason="parameterized attribute family is not a target condition"}
 template.def<@test.invalid_condition> requires [#test.tile<width = 8>] @not_a_condition() {
   template.return
 }
@@ -86,14 +118,14 @@ template.def<@test.invalid_condition> requires [#test.tile<width = 8>] @not_a_co
 // Target condition values are validated at the authored provider boundary.
 template.decl @test.invalid_condition()
 
-// ERROR@+1: TARGET/068 {function_name="invalid_size", condition_index="0", reason="target.subgroup.size requires a nonzero unsigned 32-bit size; got 0"}
+// ERROR@+1: TARGET/068 {function_name="invalid_size", condition_index="0", reason="target.subgroup.size requires a nonzero unsigned 32-bit size"}
 template.ukernel<@test.invalid_condition> requires [#target.subgroup.size<0>] @invalid_size()
 
 // ====
 
 // Family requirements use the same typed target-condition boundary as
 // provider requirements.
-// ERROR@+1: TARGET/068 {function_name="invalid_family_condition", condition_index="0", reason="parameterized attribute family 'test.tile' is not a target condition"}
+// ERROR@+1: TARGET/068 {function_name="invalid_family_condition", condition_index="0", reason="parameterized attribute family is not a target condition"}
 template.decl requires [#test.tile<width = 8>] @invalid_family_condition()
 
 // ====
@@ -126,4 +158,63 @@ func.def @wrong_application_argument(%value: f32) -> (i32) {
   // ERROR@+1: TYPE/001 {field_a="operand 0", type_a="f32", field_b="contract argument 0", type_b="i32"}
   %result = template.apply<@test.application_signature>(%value) : (f32) -> (i32)
   func.return %result : i32
+}
+
+// ====
+
+func.decl pure @pure_external()
+
+func.def @pure_body() {
+  func.return
+}
+
+func.def @pure_direct_calls() {
+  func.call pure @pure_external() : ()
+  func.call pure @pure_body() : ()
+  func.return
+}
+
+// ====
+
+func.decl @observable_effect()
+
+func.def @impure_helper() {
+  func.call @observable_effect() : ()
+  func.return
+}
+
+func.def @pure_calls_require_pure_callees() {
+  // ERROR@+1: STRUCTURE/034 {callee_name="impure_helper", boundary_name="impure_helper"}
+  func.call pure @impure_helper() : ()
+  func.return
+}
+
+// ====
+
+template.decl @test.pure_provider()
+
+template.def<@test.pure_provider> @pure_provider() {
+  template.return
+}
+
+func.def @pure_exact_template_call() {
+  template.call pure @pure_provider() : ()
+  func.return
+}
+
+// ====
+
+func.decl @template_observable_effect()
+
+template.decl @test.impure_provider()
+
+template.def<@test.impure_provider> @impure_provider() {
+  func.call @template_observable_effect() : ()
+  template.return
+}
+
+func.def @pure_template_calls_require_pure_providers() {
+  // ERROR@+1: STRUCTURE/034 {callee_name="impure_provider", boundary_name="impure_provider"}
+  template.call pure @impure_provider() : ()
+  func.return
 }

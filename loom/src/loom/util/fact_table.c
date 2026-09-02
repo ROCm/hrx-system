@@ -2026,18 +2026,16 @@ iree_status_t loom_value_fact_table_widen_for_type(
 iree_status_t loom_value_fact_table_clone_defined_facts(
     loom_value_fact_table_t* target, const loom_value_fact_table_t* source,
     const loom_module_t* module) {
-  for (iree_host_size_t i = 0; i < source->count; ++i) {
-    if (source->entries[i].known_divisor == 0) continue;
-    IREE_ASSERT_LT(i, (iree_host_size_t)LOOM_VALUE_ID_INVALID);
-    const loom_value_id_t value_id = (loom_value_id_t)i;
+  for (iree_host_size_t i = 0; i < source->touched_count; ++i) {
+    const loom_value_id_t value_id = source->touched_values[i];
     loom_value_facts_t cloned_facts = loom_value_facts_unknown();
     if (module && value_id < module->values.count) {
       IREE_RETURN_IF_ERROR(loom_value_fact_table_clone_fact_for_type(
           target, source, module, loom_module_value_type(module, value_id),
-          source->entries[i], &cloned_facts));
+          source->entries[value_id], &cloned_facts));
     } else {
       IREE_RETURN_IF_ERROR(loom_value_fact_table_clone_fact(
-          target, source, source->entries[i], &cloned_facts));
+          target, source, source->entries[value_id], &cloned_facts));
     }
     IREE_RETURN_IF_ERROR(
         loom_value_fact_table_define(target, value_id, cloned_facts));

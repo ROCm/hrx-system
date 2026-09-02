@@ -75,6 +75,7 @@ loom_cc_library(
     loom::codegen::low::function_model
     loom::codegen::low::lower
     loom::codegen::low::packet_json
+    loom::codegen::low::pipeline::legalizer_registry
     loom::codegen::low::pipeline::pass_environment
     loom::codegen::low::schedule
     loom::codegen::low::target_binding

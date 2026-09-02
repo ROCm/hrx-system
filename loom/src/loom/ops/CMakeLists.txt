@@ -74,6 +74,22 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_test(
+  NAME
+    function_contract_verify_test
+  SRCS
+    "function_contract_verify_test.cc"
+  DEPS
+    ::function_contract_verify
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::error::error_defs
+    loom::ir
+    loom::ops::func
+    loom::testing::diagnostic_matchers
+)
+
 loom_cc_library(
   NAME
     callable_effects
@@ -87,6 +103,21 @@ loom_cc_library(
     loom::ir
     loom::rewrite::rewriter
   PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    callable_effects_test
+  SRCS
+    "callable_effects_test.cc"
+  DEPS
+    ::callable_effects
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::ir
+    loom::ops::func
+    loom::rewrite::rewriter
 )
 
 loom_cc_library(
@@ -304,6 +335,7 @@ loom_cc_test(
     loom::ops::func
     loom::ops::index
     loom::ops::kernel
+    loom::ops::scalar
     loom::ops::template
     loom::ops::test
     loom::ops::vector

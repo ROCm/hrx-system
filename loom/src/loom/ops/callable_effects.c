@@ -9,7 +9,7 @@
 #include "loom/ir/module.h"
 #include "loom/ops/op_defs.h"
 
-static bool loom_callable_effects_is_pure(loom_func_like_t function) {
+bool loom_callable_effects_is_pure(loom_func_like_t function) {
   if (!loom_func_like_isa(function)) {
     return false;
   }

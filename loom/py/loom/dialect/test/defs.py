@@ -80,6 +80,7 @@ from loom.dsl import (
     INTEGER,
     INVOLUTION,
     ISOLATED_FROM_ABOVE,
+    MEMORY_FENCE,
     MODULE_SCOPE,
     POISON_BOUNDARY,
     POOL,
@@ -3012,6 +3013,18 @@ test_target = Op(
     ],
 )
 
+test_memory_fence = Op(
+    "test.memory_fence",
+    group=test_ops,
+    doc="Value-producing memory fence used to verify transform ordering.",
+    operands=[Operand("input", ANY)],
+    results=[Result("result", ANY)],
+    constraints=[SameType("input", "result")],
+    traits=[MEMORY_FENCE],
+    format=[Ref("input"), COLON, TypeOf("input")],
+    examples=["%result = test.memory_fence %input : i32"],
+)
+
 # ============================================================================
 # Registry: all test ops in declaration order
 # ============================================================================
@@ -3134,4 +3147,5 @@ ALL_TEST_OPS: tuple[Op, ...] = (
     test_condition_refines_positive,
     test_partitioned_call,
     test_module_metadata,
+    test_memory_fence,
 )

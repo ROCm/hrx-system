@@ -955,7 +955,10 @@ iree_status_t loom_scalar_extsi_facts(loom_fact_context_t* context,
                                       const loom_op_t* op,
                                       const loom_value_facts_t* operand_facts,
                                       loom_value_facts_t* result_facts) {
-  result_facts[0] = operand_facts[0];
+  const loom_scalar_type_t input_scalar_type = loom_type_element_type(
+      loom_module_value_type(module, loom_scalar_extsi_input(op)));
+  result_facts[0] = loom_value_facts_sign_extend(
+      operand_facts[0], loom_scalar_type_bitwidth(input_scalar_type));
   return iree_ok_status();
 }
 
@@ -964,8 +967,8 @@ iree_status_t loom_scalar_extui_facts(loom_fact_context_t* context,
                                       const loom_op_t* op,
                                       const loom_value_facts_t* operand_facts,
                                       loom_value_facts_t* result_facts) {
-  loom_scalar_type_t input_scalar_type = LOOM_SCALAR_TYPE_COUNT_;
-  loom_scalar_type_t result_scalar_type = LOOM_SCALAR_TYPE_COUNT_;
+  loom_scalar_type_t input_scalar_type = LOOM_SCALAR_TYPE_NONE;
+  loom_scalar_type_t result_scalar_type = LOOM_SCALAR_TYPE_NONE;
   int64_t input_lo = 0;
   int64_t input_hi = 0;
   int64_t result_lo = 0;
@@ -1025,8 +1028,8 @@ iree_status_t loom_scalar_trunci_facts(loom_fact_context_t* context,
                                        const loom_op_t* op,
                                        const loom_value_facts_t* operand_facts,
                                        loom_value_facts_t* result_facts) {
-  loom_scalar_type_t input_scalar_type = LOOM_SCALAR_TYPE_COUNT_;
-  loom_scalar_type_t result_scalar_type = LOOM_SCALAR_TYPE_COUNT_;
+  loom_scalar_type_t input_scalar_type = LOOM_SCALAR_TYPE_NONE;
+  loom_scalar_type_t result_scalar_type = LOOM_SCALAR_TYPE_NONE;
   int64_t input_lo = 0;
   int64_t input_hi = 0;
   int64_t result_lo = 0;

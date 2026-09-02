@@ -518,7 +518,7 @@ static iree_status_t loom_target_low_legality_verify_scalar_type(
       }
       return loom_target_low_legality_emit_type_constraint(
           context, op, type, IREE_SV("scalar.fp8_decode_or_contract"));
-    case LOOM_SCALAR_TYPE_COUNT_:
+    case LOOM_SCALAR_TYPE_NONE:
       break;
   }
   return loom_target_low_legality_emit_type_constraint(context, op, type,

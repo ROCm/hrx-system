@@ -240,7 +240,7 @@ static iree_status_t loom_low_resolve_function_representation(
   }
 
   const loom_func_like_t low_func =
-      loom_func_like_cast(module, (loom_op_t*)low_func_op);
+      loom_func_like_const_cast(module, low_func_op);
   *out_descriptor_set_key =
       loom_low_string_or_empty(module, loom_func_like_repr_contract(low_func));
   const loom_low_descriptor_set_t* descriptor_set =
@@ -261,7 +261,7 @@ static iree_status_t loom_low_resolve_function_target_facts(
     iree_diagnostic_emitter_t emitter, loom_symbol_fact_table_t* fact_table,
     loom_low_resolved_target_t* out_target) {
   const loom_func_like_t low_func =
-      loom_func_like_cast(module, (loom_op_t*)low_func_op);
+      loom_func_like_const_cast(module, low_func_op);
   const loom_symbol_ref_t func_ref = loom_func_like_callee(low_func);
 
   const loom_symbol_facts_base_t* base_facts = NULL;
