@@ -6,20 +6,9 @@
 
 #include "loom/target/emit/wasm/check/loom_check.h"
 
-#include <stdint.h>
-
 #include "loom/target/emit/wasm/module_binary.h"
 #include "loom/target/tool/wasm.h"
 #include "loom/tools/loom-check/diagnostics.h"
-#include "loom/tools/loom-check/low_emit.h"
-
-typedef struct loom_wasm_loom_check_emit_request_t {
-  // Explicit per-class register budgets passed to allocation.
-  loom_low_allocation_budget_t
-      allocation_budgets[LOOM_CHECK_LOW_EMIT_MAX_ALLOCATION_BUDGETS];
-  // Number of initialized entries in |allocation_budgets|.
-  iree_host_size_t allocation_budget_count;
-} loom_wasm_loom_check_emit_request_t;
 
 static bool loom_wasm_loom_check_case_has_requirement(
     const loom_check_case_t* test_case, iree_string_view_t requirement) {
@@ -59,55 +48,6 @@ static bool loom_wasm_loom_check_emit_provider_matches(
     const loom_check_emit_provider_t* provider,
     iree_string_view_t target_name) {
   return iree_string_view_equal(target_name, IREE_SV("wasm-dis"));
-}
-
-static iree_status_t loom_wasm_loom_check_consume_token(
-    iree_string_view_t* remaining, iree_string_view_t* out_token) {
-  iree_string_view_t text = iree_string_view_trim(*remaining);
-  iree_string_view_t token = iree_string_view_empty();
-  iree_string_view_t rest = iree_string_view_empty();
-  iree_string_view_split(text, ' ', &token, &rest);
-  token = iree_string_view_trim(token);
-  *remaining = iree_string_view_trim(rest);
-  *out_token = token;
-  return iree_ok_status();
-}
-
-static iree_status_t loom_wasm_loom_check_parse_emit_request(
-    iree_string_view_t target_options,
-    loom_wasm_loom_check_emit_request_t* out_request) {
-  *out_request = (loom_wasm_loom_check_emit_request_t){0};
-
-  while (!iree_string_view_is_empty(target_options)) {
-    iree_string_view_t token = iree_string_view_empty();
-    IREE_RETURN_IF_ERROR(
-        loom_wasm_loom_check_consume_token(&target_options, &token));
-    if (iree_string_view_is_empty(token)) {
-      continue;
-    }
-    iree_string_view_t option_name = iree_string_view_empty();
-    iree_string_view_t option_value = iree_string_view_empty();
-    iree_string_view_split(token, '=', &option_name, &option_value);
-    option_name = iree_string_view_trim(option_name);
-    option_value = iree_string_view_trim(option_value);
-    if (iree_string_view_equal(option_name, IREE_SV("strategy"))) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "wasm-dis emits structured source-order modules; schedule strategy "
-          "options are not supported");
-    }
-    if (iree_string_view_equal(option_name, IREE_SV("fixed"))) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "wasm-dis emits whole modules; function-local fixed allocation "
-          "options are not supported");
-    }
-    IREE_RETURN_IF_ERROR(loom_check_low_emit_parse_allocation_budget(
-        token, IREE_SV("wasm-dis"), out_request->allocation_budgets,
-        IREE_ARRAYSIZE(out_request->allocation_budgets),
-        &out_request->allocation_budget_count));
-  }
-  return iree_ok_status();
 }
 
 static iree_status_t loom_wasm_loom_check_emit_provider_check_requirements(
@@ -256,9 +196,11 @@ static iree_status_t loom_wasm_loom_check_strip_objdump_preamble(
 static iree_status_t loom_wasm_loom_check_emit_provider_execute(
     const loom_check_emit_provider_t* provider,
     const loom_check_emit_provider_request_t* request) {
-  loom_wasm_loom_check_emit_request_t emit_request = {0};
-  IREE_RETURN_IF_ERROR(loom_wasm_loom_check_parse_emit_request(
-      request->target_options, &emit_request));
+  if (!iree_string_view_is_empty(
+          iree_string_view_trim(request->target_options))) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "wasm-dis does not accept options");
+  }
 
   loom_check_diagnostic_emitter_capture_t capture = {
       .diagnostic_collector = request->diagnostic_collector,
@@ -270,18 +212,10 @@ static iree_status_t loom_wasm_loom_check_emit_provider_execute(
       .fn = loom_check_diagnostic_emitter_capture_emit,
       .user_data = &capture,
   };
-  const loom_low_emission_frame_options_t frame_options = {
-      .descriptor_registry = &request->low_registry->registry,
-      .schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY,
-      .allocation_budgets = emit_request.allocation_budgets,
-      .allocation_budget_count = emit_request.allocation_budget_count,
-      .emitter = diagnostic_emitter,
-  };
-
   loom_wasm_module_binary_t module = {0};
-  iree_status_t status = loom_wasm_emit_module(
-      request->module, &frame_options, request->case_arena,
-      request->host_allocator, &module);
+  iree_status_t status = loom_wasm_emit_low_module(
+      request->module, &request->low_registry->registry, diagnostic_emitter,
+      request->case_arena, request->host_allocator, &module);
 
   loom_wasm_toolchain_t toolchain;
   loom_wasm_toolchain_initialize_from_environment(&toolchain);

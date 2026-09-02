@@ -7,8 +7,6 @@
 // loom-check binary with all build-enabled product providers linked in.
 // Test builds may additionally enable the synthetic test provider.
 
-#include <stddef.h>
-
 #include "loom/target/arch/cmd/check/provider.h"
 #include "loom/tools/loom-check/provider.h"
 #ifndef LOOM_CHECK_HAVE_TEST_PROVIDER

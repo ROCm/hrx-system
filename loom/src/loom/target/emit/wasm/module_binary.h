@@ -7,9 +7,9 @@
 // WebAssembly binary module emission from prepared target-low modules.
 //
 // This target-owned layer is the Wasm artifact boundary: it walks the input
-// module, assigns Wasm function/type/export indices, builds low emission frames
-// for each wasm.core.simd128 low.func.def, and writes one binary module. Tool
-// validation, disassembly, and execution remain outside this production
+// module, assigns Wasm function/type/export indices, allocates target-local
+// values for each wasm.core.simd128 low.func.def, and writes one binary module.
+// Tool validation, disassembly, and execution remain outside this production
 // emitter.
 
 #ifndef LOOM_TARGET_EMIT_WASM_MODULE_BINARY_H_
@@ -17,7 +17,8 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
-#include "loom/codegen/low/frame.h"
+#include "loom/codegen/low/descriptors.h"
+#include "loom/error/emitter.h"
 #include "loom/ir/module.h"
 
 #ifdef __cplusplus
@@ -52,14 +53,14 @@ void loom_wasm_module_binary_deinitialize(loom_wasm_module_binary_t* module,
 // exports low functions marked public or carrying an explicit export symbol.
 //
 // Imports, kernel entries, and non-wasm low functions currently fail loud. The
-// body emitter walks structured regions in source order, so module emission
-// requires source-priority frame scheduling. The caller owns source-to-low
-// lowering, target verification, and the remaining frame options used by the
-// scheduler/allocator.
-iree_status_t loom_wasm_emit_module(
-    loom_module_t* module, const loom_low_emission_frame_options_t* options,
-    iree_arena_allocator_t* arena, iree_allocator_t allocator,
-    loom_wasm_module_binary_t* out_module);
+// body emitter walks structured regions in source order. Allocation therefore
+// uses the IR order directly and performs no dependency scheduling. The caller
+// owns source-to-low lowering and target verification.
+iree_status_t loom_wasm_emit_low_module(
+    loom_module_t* module,
+    const loom_low_descriptor_registry_t* descriptor_registry,
+    iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
+    iree_allocator_t allocator, loom_wasm_module_binary_t* out_module);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -101,9 +101,10 @@ loom_cc_library(
     iree::base::internal::arena
     loom::codegen::low::allocation
     loom::codegen::low::descriptors
-    loom::codegen::low::frame
     loom::codegen::low::function
+    loom::codegen::low::function_model
     loom::codegen::low::target_binding
+    loom::error::emitter
     loom::ir
     loom::ops::low
     loom::ops::op_defs
