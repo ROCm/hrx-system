@@ -19,11 +19,13 @@ extern "C" {
 // Invalid Vulkan queue family index used for absent optional queue roles.
 #define IREE_HAL_VULKAN_QUEUE_FAMILY_INVALID UINT32_MAX
 
-// Default count of public HAL queue affinity lanes exposed by Vulkan devices.
-#define IREE_HAL_VULKAN_DEFAULT_QUEUE_COUNT 2
-
-// Maximum live Vulkan queue lanes needed for the current queue role model.
-#define IREE_HAL_VULKAN_MAX_QUEUE_LANES 3
+// Legacy queue-affinity bits routed by the Vulkan device facade.
+//
+// Exact hardware queue identity comes from the canonical queue inventory. The
+// device facade maps its compute and transfer entry points through these bits
+// independently of that identity.
+#define IREE_HAL_VULKAN_QUEUE_ROLE_AFFINITY_MASK \
+  ((iree_hal_queue_affinity_t)0x3)
 
 // Maximum recognized device extension names enabled during VkDevice creation.
 #define IREE_HAL_VULKAN_MAX_DEVICE_EXTENSION_NAMES 11
@@ -39,6 +41,9 @@ typedef struct iree_hal_vulkan_queue_selection_t {
 
   // Canonical HAL ordinal of the selected queue family.
   iree_hal_queue_family_ordinal_t family_ordinal;
+
+  // Canonical ordinal of the selected queue within its HAL queue family.
+  uint32_t queue_ordinal;
 
   // Queue family capability flags cached from the physical snapshot.
   VkQueueFlags flags;
@@ -60,9 +65,6 @@ typedef struct iree_hal_vulkan_queue_assignment_t {
 
   // Internal queue used for sparse memory binding operations.
   iree_hal_vulkan_queue_selection_t sparse_binding;
-
-  // Count of distinct HAL queues exposed through queue affinity.
-  iree_host_size_t queue_count;
 } iree_hal_vulkan_queue_assignment_t;
 
 // One canonical HAL queue family backed by a provisioned Vulkan queue family.

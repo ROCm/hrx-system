@@ -206,7 +206,7 @@ iree_status_t iree_hal_vulkan_sparse_buffer_bind_sync(
   iree_hal_semaphore_t* signal_semaphore = NULL;
   uint64_t signal_value = 1;
   iree_status_t status = iree_hal_semaphore_create(
-      placement.device, sparse_binding_queue->queue_affinity,
+      placement.device, IREE_HAL_QUEUE_AFFINITY_ANY,
       /*initial_value=*/0, IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &signal_semaphore);
   if (iree_status_is_ok(status)) {
     const iree_hal_semaphore_list_t signal_semaphore_list = {

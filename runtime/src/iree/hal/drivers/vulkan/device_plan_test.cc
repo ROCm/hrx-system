@@ -292,7 +292,9 @@ TEST(DevicePlanTest, OwnedCreateInventoriesEverySelectedFamilyQueue) {
   EXPECT_EQ(2u, plan.queue_assignment.transfer.family_index);
   EXPECT_EQ(0u, plan.queue_assignment.transfer.queue_index);
   EXPECT_EQ(0u, plan.queue_assignment.compute.family_ordinal);
+  EXPECT_EQ(0u, plan.queue_assignment.compute.queue_ordinal);
   EXPECT_EQ(1u, plan.queue_assignment.transfer.family_ordinal);
+  EXPECT_EQ(0u, plan.queue_assignment.transfer.queue_ordinal);
   ASSERT_EQ(2u, plan.queue_inventory.family_count);
   EXPECT_EQ(1u, plan.queue_inventory.families[0].native_family_index);
   EXPECT_EQ(3u, plan.queue_inventory.families[0].queue_count);
@@ -328,6 +330,8 @@ TEST(DevicePlanTest,
   EXPECT_EQ(0u, plan.queue_assignment.compute.queue_index);
   EXPECT_EQ(0u, plan.queue_assignment.transfer.family_index);
   EXPECT_EQ(1u, plan.queue_assignment.transfer.queue_index);
+  EXPECT_EQ(0u, plan.queue_assignment.compute.queue_ordinal);
+  EXPECT_EQ(1u, plan.queue_assignment.transfer.queue_ordinal);
   ASSERT_EQ(1u, plan.queue_inventory.family_count);
   EXPECT_EQ(2u, plan.queue_inventory.families[0].queue_count);
   EXPECT_EQ(2u, plan.queue_inventory.queue_count);
@@ -1137,10 +1141,13 @@ TEST(DevicePlanTest, WrapInventoriesEverySuppliedQueueWithoutDuplicates) {
 
   EXPECT_EQ(1u, plan.queue_assignment.compute.queue_index);
   EXPECT_EQ(1u, plan.queue_assignment.compute.family_ordinal);
+  EXPECT_EQ(0u, plan.queue_assignment.compute.queue_ordinal);
   EXPECT_EQ(2u, plan.queue_assignment.transfer.queue_index);
   EXPECT_EQ(0u, plan.queue_assignment.transfer.family_ordinal);
+  EXPECT_EQ(0u, plan.queue_assignment.transfer.queue_ordinal);
   EXPECT_EQ(5u, plan.queue_assignment.sparse_binding.queue_index);
   EXPECT_EQ(1u, plan.queue_assignment.sparse_binding.family_ordinal);
+  EXPECT_EQ(1u, plan.queue_assignment.sparse_binding.queue_ordinal);
   ASSERT_EQ(2u, plan.queue_inventory.family_count);
   EXPECT_EQ(0u, plan.queue_inventory.families[0].native_family_index);
   EXPECT_EQ(2u, plan.queue_inventory.families[0].queue_count);

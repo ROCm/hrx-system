@@ -118,7 +118,7 @@ static uint32_t iree_hal_vulkan_select_transfer_queue_family(
   if (same_family_index != IREE_HAL_VULKAN_QUEUE_FAMILY_INVALID) {
     const VkQueueFamilyProperties* compute_family =
         &snapshot->queue_families[same_family_index].queueFamilyProperties;
-    if (compute_family->queueCount >= IREE_HAL_VULKAN_DEFAULT_QUEUE_COUNT) {
+    if (compute_family->queueCount >= 2) {
       return same_family_index;
     }
   }
@@ -192,10 +192,8 @@ static iree_status_t iree_hal_vulkan_select_queue_assignment(
     transfer_queue_index = 1;
   }
 
-  // Always expose the default two HAL queue affinities. Devices with only one
-  // compatible physical queue alias the transfer lane onto the compute handle;
-  // queue initialization shares the VkQueue handle mutex in that case while
-  // keeping independent HAL frontier axes.
+  // Route the legacy device facade through compute and transfer affinity bits.
+  // Exact queue identity is assigned after the canonical inventory is built.
   out_queue_assignment->compute = (iree_hal_vulkan_queue_selection_t){
       .family_index = compute_family_index,
       .queue_index = 0,
@@ -221,7 +219,6 @@ static iree_status_t iree_hal_vulkan_select_queue_assignment(
         .affinity = 0,
     };
   }
-  out_queue_assignment->queue_count = IREE_HAL_VULKAN_DEFAULT_QUEUE_COUNT;
   return iree_ok_status();
 }
 
@@ -365,15 +362,27 @@ static iree_status_t iree_hal_vulkan_device_plan_allocate_queue_inventory(
   return status;
 }
 
-static iree_status_t iree_hal_vulkan_device_plan_assign_family_ordinal(
+static iree_status_t iree_hal_vulkan_device_plan_assign_queue_coordinate(
     const iree_hal_vulkan_queue_inventory_t* queue_inventory,
     iree_hal_vulkan_queue_selection_t* selection) {
   for (iree_host_size_t i = 0; i < queue_inventory->family_count; ++i) {
-    if (queue_inventory->families[i].native_family_index ==
-        selection->family_index) {
+    const iree_hal_vulkan_queue_family_plan_t* family =
+        &queue_inventory->families[i];
+    if (family->native_family_index != selection->family_index) continue;
+    for (uint32_t j = 0; j < family->queue_count; ++j) {
+      if (queue_inventory->queue_indices[family->queue_offset + j] !=
+          selection->queue_index) {
+        continue;
+      }
       selection->family_ordinal = (iree_hal_queue_family_ordinal_t)i;
+      selection->queue_ordinal = j;
       return iree_ok_status();
     }
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "selected Vulkan queue %u in family %u is absent from the "
+        "provisioned inventory",
+        selection->queue_index, selection->family_index);
   }
   return iree_make_status(
       IREE_STATUS_FAILED_PRECONDITION,
@@ -382,15 +391,15 @@ static iree_status_t iree_hal_vulkan_device_plan_assign_family_ordinal(
       selection->family_index);
 }
 
-static iree_status_t iree_hal_vulkan_device_plan_assign_queue_family_ordinals(
+static iree_status_t iree_hal_vulkan_device_plan_resolve_queue_coordinates(
     iree_hal_vulkan_device_plan_t* plan) {
-  IREE_RETURN_IF_ERROR(iree_hal_vulkan_device_plan_assign_family_ordinal(
+  IREE_RETURN_IF_ERROR(iree_hal_vulkan_device_plan_assign_queue_coordinate(
       &plan->queue_inventory, &plan->queue_assignment.compute));
-  IREE_RETURN_IF_ERROR(iree_hal_vulkan_device_plan_assign_family_ordinal(
+  IREE_RETURN_IF_ERROR(iree_hal_vulkan_device_plan_assign_queue_coordinate(
       &plan->queue_inventory, &plan->queue_assignment.transfer));
   if (iree_hal_vulkan_queue_assignment_has_sparse_binding(
           &plan->queue_assignment)) {
-    IREE_RETURN_IF_ERROR(iree_hal_vulkan_device_plan_assign_family_ordinal(
+    IREE_RETURN_IF_ERROR(iree_hal_vulkan_device_plan_assign_queue_coordinate(
         &plan->queue_inventory, &plan->queue_assignment.sparse_binding));
   }
   return iree_ok_status();
@@ -455,7 +464,7 @@ static iree_status_t iree_hal_vulkan_device_plan_initialize_owned_queues(
     queue_offset += properties->queueCount;
   }
   iree_status_t status =
-      iree_hal_vulkan_device_plan_assign_queue_family_ordinals(plan);
+      iree_hal_vulkan_device_plan_resolve_queue_coordinates(plan);
   if (!iree_status_is_ok(status)) {
     iree_hal_vulkan_device_plan_deinitialize(plan);
   }
@@ -1362,7 +1371,6 @@ static iree_status_t iree_hal_vulkan_select_external_queue_assignment(
     out_queue_assignment->sparse_binding = out_queue_assignment->transfer;
     out_queue_assignment->sparse_binding.affinity = 0;
   }
-  out_queue_assignment->queue_count = IREE_HAL_VULKAN_DEFAULT_QUEUE_COUNT;
   return iree_ok_status();
 }
 
@@ -1435,7 +1443,7 @@ static iree_status_t iree_hal_vulkan_device_plan_initialize_wrapped_queues(
     }
   }
   iree_status_t status =
-      iree_hal_vulkan_device_plan_assign_queue_family_ordinals(plan);
+      iree_hal_vulkan_device_plan_resolve_queue_coordinates(plan);
   if (!iree_status_is_ok(status)) {
     iree_hal_vulkan_device_plan_deinitialize(plan);
   }
