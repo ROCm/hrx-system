@@ -33,6 +33,32 @@ from loom.gen.docs.reference import (  # noqa: E402
 )
 
 
+def _script_environment() -> dict[str, str]:
+    environment = os.environ.copy()
+    python_bin_dir = str(Path(sys.executable).parent)
+    environment["PATH"] = python_bin_dir + os.pathsep + environment.get("PATH", "")
+    if os.name == "nt":
+        # POSIX build wrappers honor this override instead of resolving the
+        # Windows Store's python3 application alias from Git Bash.
+        environment["PYTHON"] = sys.executable
+    return environment
+
+
+def _script_command(
+    script: Path, arguments: list[str], environment: dict[str, str]
+) -> list[str]:
+    command = [str(script), *arguments]
+    if os.name != "nt":
+        return command
+    shell = environment.get("BAZEL_SH")
+    if not shell:
+        raise RuntimeError(
+            "BAZEL_SH is required to run documentation generators on Windows; "
+            "invoke the documented `python dev.py docs ...` entry point"
+        )
+    return [shell, *command]
+
+
 def _work_root() -> Path:
     configured_root = Path(os.environ.get("LOOM_DOCS_WORK_DIR", DEFAULT_WORK_ROOT))
     if not configured_root.is_absolute():
@@ -65,15 +91,14 @@ def _remove_generated_directory(path: Path) -> None:
 def _generate_c_api(work_root: Path) -> Path:
     output_root = work_root / "c-api"
     _remove_generated_directory(output_root)
-    environment = os.environ.copy()
-    python_bin_dir = str(Path(sys.executable).parent)
-    environment["PATH"] = python_bin_dir + os.pathsep + environment.get("PATH", "")
+    environment = _script_environment()
+    print("Generating Loom C API reference...", flush=True)
     subprocess.run(
-        [
-            str(C_API_GENERATOR),
-            "--check",
-            f"--output={output_root}",
-        ],
+        _script_command(
+            C_API_GENERATOR,
+            ["--check", f"--output={output_root}"],
+            environment,
+        ),
         cwd=REPO_ROOT,
         env=environment,
         check=True,
@@ -89,15 +114,17 @@ def _generate_example_outputs(work_root: Path) -> Path:
     _remove_generated_directory(output_root)
     output_root.mkdir(parents=True)
 
-    environment = os.environ.copy()
-    python_bin_dir = str(Path(sys.executable).parent)
-    environment["PATH"] = python_bin_dir + os.pathsep + environment.get("PATH", "")
+    environment = _script_environment()
     for generator in sorted(EXAMPLE_SOURCE_ROOT.rglob(DOC_GENERATOR_NAME)):
         relative_package = generator.parent.relative_to(EXAMPLE_SOURCE_ROOT)
         package_output_root = output_root / relative_package
         package_output_root.mkdir(parents=True)
+        print(
+            f"Generating documentation example {relative_package.as_posix()}...",
+            flush=True,
+        )
         subprocess.run(
-            [str(generator), str(package_output_root)],
+            _script_command(generator, [str(package_output_root)], environment),
             cwd=REPO_ROOT,
             env=environment,
             check=True,

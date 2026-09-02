@@ -68,21 +68,23 @@ class PrepareTest(unittest.TestCase):
 
             with (
                 mock.patch.object(prepare, "EXAMPLE_SOURCE_ROOT", example_root),
+                mock.patch.dict(prepare.os.environ, {"BAZEL_SH": "test-bash"}),
                 mock.patch.object(prepare.subprocess, "run") as run,
             ):
                 output_root = prepare._generate_example_outputs(work_root)
 
             self.assertEqual(output_root, work_root / "examples")
             self.assertFalse(stale_output.exists())
+            self.assertEqual(len(run.call_args_list), 2)
             self.assertEqual(
-                [call.args[0] for call in run.call_args_list],
-                [
-                    [str(first_generator), str(output_root / "alpha")],
-                    [
-                        str(second_generator),
-                        str(output_root / "nested" / "beta"),
-                    ],
-                ],
+                {
+                    (Path(call.args[0][-2]), Path(call.args[0][-1]))
+                    for call in run.call_args_list
+                },
+                {
+                    (first_generator, output_root / "alpha"),
+                    (second_generator, output_root / "nested" / "beta"),
+                },
             )
             for call in run.call_args_list:
                 self.assertEqual(call.kwargs["cwd"], prepare.REPO_ROOT)
