@@ -63,10 +63,8 @@ class CommandBufferFillBufferTest : public CtsTestBase<> {
     }
 
     out_data.resize(buffer_size);
-    IREE_ASSERT_OK(iree_hal_device_transfer_d2h(
-        device_, device_buffer, /*source_offset=*/0, out_data.data(),
-        buffer_size, IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT,
-        iree_infinite_timeout()));
+    IREE_ASSERT_OK(DownloadBufferData(device_buffer, /*source_offset=*/0,
+                                      out_data.data(), buffer_size));
 
     iree_hal_command_buffer_release(command_buffer);
     iree_hal_buffer_release(device_buffer);

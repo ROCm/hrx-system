@@ -256,9 +256,8 @@ TEST_P(DispatchPipelineTest, TransientInputPipeline) {
       alloca_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
 
   std::vector<uint32_t> input_data = {5, 10, 15, 20};
-  IREE_ASSERT_OK(iree_hal_device_transfer_h2d(
-      device_, input_data.data(), transient_input, 0, kBufferSize,
-      IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout()));
+  IREE_ASSERT_OK(UploadBufferData(input_data.data(), transient_input,
+                                  /*target_offset=*/0, kBufferSize));
 
   // Persistent output buffer.
   Ref<iree_hal_buffer_t> output;

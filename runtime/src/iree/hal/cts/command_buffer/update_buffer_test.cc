@@ -68,10 +68,8 @@ TEST_P(CommandBufferUpdateBufferTest, WholeBuffer) {
   IREE_ASSERT_OK(SubmitWithBindings(command_buffer, device_buffer));
 
   std::vector<uint8_t> actual_data(target_buffer_size);
-  IREE_ASSERT_OK(iree_hal_device_transfer_d2h(
-      device_, device_buffer, /*source_offset=*/0, actual_data.data(),
-      actual_data.size(), IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT,
-      iree_infinite_timeout()));
+  IREE_ASSERT_OK(DownloadBufferData(device_buffer, /*source_offset=*/0,
+                                    actual_data.data(), actual_data.size()));
   EXPECT_THAT(actual_data, ContainerEq(source_buffer));
 
   iree_hal_command_buffer_release(command_buffer);
@@ -104,10 +102,8 @@ TEST_P(CommandBufferUpdateBufferTest, LargerPayload) {
   IREE_ASSERT_OK(SubmitWithBindings(command_buffer, device_buffer));
 
   std::vector<uint8_t> actual_data(target_buffer_size);
-  IREE_ASSERT_OK(iree_hal_device_transfer_d2h(
-      device_, device_buffer, /*source_offset=*/0, actual_data.data(),
-      actual_data.size(), IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT,
-      iree_infinite_timeout()));
+  IREE_ASSERT_OK(DownloadBufferData(device_buffer, /*source_offset=*/0,
+                                    actual_data.data(), actual_data.size()));
   EXPECT_THAT(actual_data, ContainerEq(source_buffer));
 
   iree_hal_command_buffer_release(command_buffer);
@@ -140,10 +136,8 @@ TEST_P(CommandBufferUpdateBufferTest, WithOffsets) {
   IREE_ASSERT_OK(SubmitWithBindings(command_buffer, device_buffer));
 
   std::vector<uint8_t> actual_data(target_buffer_size);
-  IREE_ASSERT_OK(iree_hal_device_transfer_d2h(
-      device_, device_buffer, /*source_offset=*/0, actual_data.data(),
-      actual_data.size(), IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT,
-      iree_infinite_timeout()));
+  IREE_ASSERT_OK(DownloadBufferData(device_buffer, /*source_offset=*/0,
+                                    actual_data.data(), actual_data.size()));
   std::vector<uint8_t> reference_buffer{0x00, 0x00, 0x00, 0x00,  //
                                         0x05, 0x06, 0x07, 0x08,  //
                                         0xA1, 0xA2, 0xA3, 0xA4,  //
@@ -188,10 +182,8 @@ TEST_P(CommandBufferUpdateBufferTest, Subspan) {
 
   // Check the full buffer contents.
   std::vector<uint8_t> actual_data(target_buffer_size);
-  IREE_ASSERT_OK(iree_hal_device_transfer_d2h(
-      device_, device_buffer, /*source_offset=*/0, actual_data.data(),
-      actual_data.size(), IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT,
-      iree_infinite_timeout()));
+  IREE_ASSERT_OK(DownloadBufferData(device_buffer, /*source_offset=*/0,
+                                    actual_data.data(), actual_data.size()));
   std::vector<uint8_t> reference_buffer{0x00, 0x00, 0x00, 0x00,  //
                                         0x00, 0x00, 0x00, 0x00,  //
                                         0x05, 0x06, 0x07, 0x08,  //
@@ -200,10 +192,9 @@ TEST_P(CommandBufferUpdateBufferTest, Subspan) {
 
   // Also check via the subspan.
   std::vector<uint8_t> actual_data_subspan(subspan_length);
-  IREE_ASSERT_OK(iree_hal_device_transfer_d2h(
-      device_, buffer_subspan, /*source_offset=*/0, actual_data_subspan.data(),
-      actual_data_subspan.size(), IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT,
-      iree_infinite_timeout()));
+  IREE_ASSERT_OK(DownloadBufferData(buffer_subspan, /*source_offset=*/0,
+                                    actual_data_subspan.data(),
+                                    actual_data_subspan.size()));
   std::vector<uint8_t> reference_buffer_subspan{0x00, 0x00, 0x00, 0x00,  //
                                                 0x05, 0x06, 0x07, 0x08};
   EXPECT_THAT(actual_data_subspan, ContainerEq(reference_buffer_subspan));

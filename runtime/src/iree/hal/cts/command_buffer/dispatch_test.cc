@@ -126,10 +126,8 @@ TEST_P(DispatchTest, DispatchAbs) {
   IREE_ASSERT_OK(SubmitCommandBufferAndWait(command_buffer, binding_table));
 
   float output_values[4] = {0.0f};
-  IREE_ASSERT_OK(iree_hal_device_transfer_d2h(
-      device_, output_buffer,
-      /*source_offset=*/0, output_values, sizeof(output_values),
-      IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout()));
+  IREE_ASSERT_OK(DownloadBufferData(output_buffer, /*source_offset=*/0,
+                                    output_values, sizeof(output_values)));
   EXPECT_THAT(output_values, ::testing::ElementsAre(-9.0f, 2.5f, 2.5f, -9.0f));
 
   iree_hal_command_buffer_release(command_buffer);

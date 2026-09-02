@@ -64,7 +64,6 @@ iree_cc_library(
     iree::base
     iree::base::threading
     iree::hal
-    iree::io::file_handle
     iree::testing::gtest
   TESTONLY
   PUBLIC

@@ -187,9 +187,9 @@ TEST_P(ExecutableTest, LookupGlobalByName) {
   const uint64_t expected_value = 0xFEEDFACECAFEBEEFull;
   SemaphoreList empty_wait;
   SemaphoreList update_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_device_queue_update(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, update_signal,
-      &expected_value, /*source_offset=*/0, global_buffer, /*target_offset=*/0,
+  IREE_ASSERT_OK(iree_hal_queue_update(
+      transfer_queue_, empty_wait, update_signal, &expected_value,
+      /*source_offset=*/0, global_buffer, /*target_offset=*/0,
       sizeof(expected_value), IREE_HAL_UPDATE_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
       update_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
@@ -214,9 +214,9 @@ TEST_P(ExecutableTest, GlobalBufferVisibleToDispatch) {
   const uint64_t expected_value = 0xBADDEC0DEFEED123ull;
   SemaphoreList empty_wait;
   SemaphoreList update_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_device_queue_update(
-      device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, update_signal,
-      &expected_value, /*source_offset=*/0, global_buffer, /*target_offset=*/0,
+  IREE_ASSERT_OK(iree_hal_queue_update(
+      transfer_queue_, empty_wait, update_signal, &expected_value,
+      /*source_offset=*/0, global_buffer, /*target_offset=*/0,
       sizeof(expected_value), IREE_HAL_UPDATE_FLAG_NONE));
 
   Ref<iree_hal_buffer_t> output_buffer;

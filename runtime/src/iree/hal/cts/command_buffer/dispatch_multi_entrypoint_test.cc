@@ -210,20 +210,18 @@ TEST_P(DispatchMultiEntrypointTest, NegateAndDouble) {
 
   // Read back and verify negate output: [-1, -2, -3, -4].
   std::vector<int32_t> negate_data(4);
-  IREE_ASSERT_OK(iree_hal_device_transfer_d2h(
-      device_, output_negate, /*source_offset=*/0,
-      /*target_buffer=*/negate_data.data(),
-      /*data_length=*/negate_data.size() * sizeof(int32_t),
-      IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout()));
+  IREE_ASSERT_OK(
+      DownloadBufferData(output_negate, /*source_offset=*/0,
+                         /*target=*/negate_data.data(),
+                         /*length=*/negate_data.size() * sizeof(int32_t)));
   EXPECT_THAT(negate_data, ContainerEq(std::vector<int32_t>{-1, -2, -3, -4}));
 
   // Read back and verify double output: [2, 4, 6, 8].
   std::vector<uint32_t> double_data(4);
-  IREE_ASSERT_OK(iree_hal_device_transfer_d2h(
-      device_, output_double, /*source_offset=*/0,
-      /*target_buffer=*/double_data.data(),
-      /*data_length=*/double_data.size() * sizeof(uint32_t),
-      IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout()));
+  IREE_ASSERT_OK(
+      DownloadBufferData(output_double, /*source_offset=*/0,
+                         /*target=*/double_data.data(),
+                         /*length=*/double_data.size() * sizeof(uint32_t)));
   EXPECT_THAT(double_data, ContainerEq(std::vector<uint32_t>{2, 4, 6, 8}));
 
   iree_hal_command_buffer_release(command_buffer);

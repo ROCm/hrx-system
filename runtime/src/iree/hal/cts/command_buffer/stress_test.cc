@@ -28,9 +28,9 @@ class CommandBufferStressTest : public CtsTestBase<> {
                         iree_host_size_t pattern_length) {
     SemaphoreList empty_wait;
     SemaphoreList fill_signal(device_, {0}, {1});
-    IREE_ASSERT_OK(iree_hal_device_queue_fill(
-        device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, fill_signal,
-        target_buffer, /*target_offset=*/0, length, pattern, pattern_length,
+    IREE_ASSERT_OK(iree_hal_queue_fill(
+        transfer_queue_, empty_wait, fill_signal, target_buffer,
+        /*target_offset=*/0, length, pattern, pattern_length,
         IREE_HAL_FILL_FLAG_NONE));
     IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
         fill_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));

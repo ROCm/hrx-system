@@ -124,10 +124,9 @@ TEST_P(CommandBufferCopyBufferTest, CopyWholeBuffer) {
 
   // Read the device buffer and compare.
   std::vector<uint8_t> actual_data(kDefaultAllocationSize);
-  IREE_ASSERT_OK(iree_hal_device_transfer_d2h(
-      device_, target_buffer, /*source_offset=*/0, actual_data.data(),
-      kDefaultAllocationSize, IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT,
-      iree_infinite_timeout()));
+  IREE_ASSERT_OK(DownloadBufferData(target_buffer, /*source_offset=*/0,
+                                    actual_data.data(),
+                                    kDefaultAllocationSize));
   EXPECT_THAT(actual_data, ContainerEq(reference_buffer));
 }
 
@@ -179,10 +178,9 @@ TEST_P(CommandBufferCopyBufferTest, CopySubBuffer) {
 
   // Read the device buffer and compare.
   std::vector<uint8_t> actual_data(kDefaultAllocationSize);
-  IREE_ASSERT_OK(iree_hal_device_transfer_d2h(
-      device_, target_buffer, /*source_offset=*/0, actual_data.data(),
-      kDefaultAllocationSize, IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT,
-      iree_infinite_timeout()));
+  IREE_ASSERT_OK(DownloadBufferData(target_buffer, /*source_offset=*/0,
+                                    actual_data.data(),
+                                    kDefaultAllocationSize));
   EXPECT_THAT(actual_data, ContainerEq(reference_buffer));
 }
 

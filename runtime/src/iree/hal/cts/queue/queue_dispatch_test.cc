@@ -639,11 +639,10 @@ class QueueDispatchIndirectParametersTest : public CtsTestBase<> {
     };
     SemaphoreList update_signal(device_, {0}, {1});
     SemaphoreList empty_wait;
-    IREE_ASSERT_OK(iree_hal_device_queue_update(
-        device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, update_signal,
-        parameter_data, /*source_offset=*/0, parameter_buffer,
-        /*target_offset=*/0, sizeof(parameter_data),
-        IREE_HAL_UPDATE_FLAG_NONE));
+    IREE_ASSERT_OK(iree_hal_queue_update(
+        transfer_queue_, empty_wait, update_signal, parameter_data,
+        /*source_offset=*/0, parameter_buffer, /*target_offset=*/0,
+        sizeof(parameter_data), IREE_HAL_UPDATE_FLAG_NONE));
 
     iree_hal_buffer_ref_t binding_refs[1] = {
         iree_hal_make_buffer_ref(output_buffer, /*offset=*/0,

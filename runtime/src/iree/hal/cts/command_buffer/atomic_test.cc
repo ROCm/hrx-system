@@ -57,8 +57,8 @@ class CommandBufferAtomicTest : public CtsTestBase<> {
 
   template <typename ValueType>
   ValueType ReadAtomicValue(iree_hal_buffer_t* buffer) {
-    const std::vector<uint8_t> bytes = ReadBufferBytes(
-        buffer, kTargetOffset, sizeof(ValueType), IREE_HAL_QUEUE_AFFINITY_ANY);
+    const std::vector<uint8_t> bytes =
+        ReadBufferBytes(buffer, kTargetOffset, sizeof(ValueType));
     ValueType value = 0;
     EXPECT_EQ(bytes.size(), sizeof(value));
     if (bytes.size() == sizeof(value)) {

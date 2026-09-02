@@ -32,7 +32,6 @@
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
 #include "iree/hal/cts/util/registry.h"
-#include "iree/io/file_handle.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -413,6 +412,21 @@ class CtsTestBase : public BaseType {
     iree_hal_device_retain(device_);
     device_allocator_ = cached.allocator;
     iree_hal_allocator_retain(device_allocator_);
+
+    const iree_hal_device_queue_spec_t* queue_spec =
+        iree_hal_device_spec_queues(iree_hal_device_spec(device_));
+    for (iree_host_size_t i = 0; i < queue_spec->family_count; ++i) {
+      const iree_hal_queue_family_spec_t* family_spec =
+          &queue_spec->families[i];
+      if (family_spec->provisioned_queue_count > 0 &&
+          iree_all_bits_set(family_spec->role_flags,
+                            IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER)) {
+        transfer_queue_ =
+            iree_hal_device_queue(device_, (iree_hal_queue_family_ordinal_t)i,
+                                  /*queue_ordinal=*/0);
+        break;
+      }
+    }
   }
 
   void TearDown() override {
@@ -429,6 +443,7 @@ class CtsTestBase : public BaseType {
     // releases just decrement the refcount, they don't destroy anything.
     iree_hal_allocator_release(device_allocator_);
     device_allocator_ = nullptr;
+    transfer_queue_ = nullptr;
     iree_hal_device_release(device_);
     device_ = nullptr;
     iree_hal_device_group_release(device_group_);
@@ -543,21 +558,22 @@ class CtsTestBase : public BaseType {
   iree_status_t CreateZeroedDeviceBuffer(iree_device_size_t buffer_size,
                                          iree_hal_buffer_t** out_buffer) {
     *out_buffer = nullptr;
-    iree_hal_buffer_params_t params = {0};
-    params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-    params.usage =
-        IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
+    if (!transfer_queue_) {
+      return iree_make_status(
+          IREE_STATUS_UNIMPLEMENTED,
+          "device has no provisioned transfer-capable queue");
+    }
     iree_hal_buffer_t* buffer = nullptr;
-    iree_status_t status = iree_hal_allocator_allocate_buffer(
-        device_allocator_, params, buffer_size, &buffer);
+    iree_status_t status =
+        CreateUninitializedDeviceBuffer(buffer_size, &buffer);
     if (iree_status_is_ok(status)) {
       uint8_t pattern = 0;
       SemaphoreList empty_wait;
       SemaphoreList fill_signal(device_, {0}, {1});
-      status = iree_hal_device_queue_fill(
-          device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, fill_signal, buffer,
-          /*target_offset=*/0, buffer_size, &pattern, sizeof(pattern),
-          IREE_HAL_FILL_FLAG_NONE);
+      status =
+          iree_hal_queue_fill(transfer_queue_, empty_wait, fill_signal, buffer,
+                              /*target_offset=*/0, buffer_size, &pattern,
+                              sizeof(pattern), IREE_HAL_FILL_FLAG_NONE);
       if (iree_status_is_ok(status)) {
         status = iree_hal_semaphore_list_wait(
             fill_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE);
@@ -575,20 +591,21 @@ class CtsTestBase : public BaseType {
                                            iree_device_size_t buffer_size,
                                            iree_hal_buffer_t** out_buffer) {
     *out_buffer = nullptr;
-    iree_hal_buffer_params_t params = {0};
-    params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-    params.usage =
-        IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
+    if (!transfer_queue_) {
+      return iree_make_status(
+          IREE_STATUS_UNIMPLEMENTED,
+          "device has no provisioned transfer-capable queue");
+    }
     iree_hal_buffer_t* buffer = nullptr;
-    iree_status_t status = iree_hal_allocator_allocate_buffer(
-        device_allocator_, params, buffer_size, &buffer);
+    iree_status_t status =
+        CreateUninitializedDeviceBuffer(buffer_size, &buffer);
     if (iree_status_is_ok(status)) {
       SemaphoreList empty_wait;
       SemaphoreList upload_signal(device_, {0}, {1});
-      status = iree_hal_device_queue_update(
-          device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, upload_signal,
-          source_data, /*source_offset=*/0, buffer, /*target_offset=*/0,
-          buffer_size, IREE_HAL_UPDATE_FLAG_NONE);
+      status = iree_hal_queue_update(
+          transfer_queue_, empty_wait, upload_signal, source_data,
+          /*source_offset=*/0, buffer, /*target_offset=*/0, buffer_size,
+          IREE_HAL_UPDATE_FLAG_NONE);
       if (iree_status_is_ok(status)) {
         status = iree_hal_semaphore_list_wait(
             upload_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE);
@@ -607,20 +624,21 @@ class CtsTestBase : public BaseType {
                                          PatternType pattern,
                                          iree_hal_buffer_t** out_buffer) {
     *out_buffer = nullptr;
-    iree_hal_buffer_params_t params = {0};
-    params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-    params.usage =
-        IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
+    if (!transfer_queue_) {
+      return iree_make_status(
+          IREE_STATUS_UNIMPLEMENTED,
+          "device has no provisioned transfer-capable queue");
+    }
     iree_hal_buffer_t* buffer = nullptr;
-    iree_status_t status = iree_hal_allocator_allocate_buffer(
-        device_allocator_, params, buffer_size, &buffer);
+    iree_status_t status =
+        CreateUninitializedDeviceBuffer(buffer_size, &buffer);
     if (iree_status_is_ok(status)) {
       SemaphoreList empty_wait;
       SemaphoreList fill_signal(device_, {0}, {1});
-      status = iree_hal_device_queue_fill(
-          device_, IREE_HAL_QUEUE_AFFINITY_ANY, empty_wait, fill_signal, buffer,
-          /*target_offset=*/0, buffer_size, &pattern, sizeof(pattern),
-          IREE_HAL_FILL_FLAG_NONE);
+      status =
+          iree_hal_queue_fill(transfer_queue_, empty_wait, fill_signal, buffer,
+                              /*target_offset=*/0, buffer_size, &pattern,
+                              sizeof(pattern), IREE_HAL_FILL_FLAG_NONE);
       if (iree_status_is_ok(status)) {
         status = iree_hal_semaphore_list_wait(
             fill_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE);
@@ -653,44 +671,56 @@ class CtsTestBase : public BaseType {
     return data;
   }
 
-  // Reads a specific byte range from a buffer.
-  std::vector<uint8_t> ReadBufferBytes(
-      iree_hal_buffer_t* buffer, iree_device_size_t offset,
-      iree_device_size_t length,
-      iree_hal_queue_affinity_t queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY) {
-    std::vector<uint8_t> data(length);
-    if (iree_all_bits_set(iree_hal_buffer_memory_type(buffer),
-                          IREE_HAL_MEMORY_TYPE_HOST_VISIBLE) &&
-        iree_all_bits_set(iree_hal_buffer_allowed_usage(buffer),
-                          IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED)) {
-      IREE_EXPECT_OK(
-          iree_hal_buffer_map_read(buffer, offset, data.data(), length));
-      return data;
+  // Uploads host bytes to a buffer and waits for completion.
+  iree_status_t UploadBufferData(const void* source,
+                                 iree_hal_buffer_t* target_buffer,
+                                 iree_device_size_t target_offset,
+                                 iree_device_size_t length) {
+    if (!transfer_queue_) {
+      return iree_make_status(
+          IREE_STATUS_UNIMPLEMENTED,
+          "device has no provisioned transfer-capable queue");
     }
-
-    iree_io_file_handle_t* handle = nullptr;
-    IREE_EXPECT_OK(iree_io_file_handle_wrap_host_allocation(
-        IREE_IO_FILE_ACCESS_READ | IREE_IO_FILE_ACCESS_WRITE,
-        iree_make_byte_span(data.data(), length),
-        iree_io_file_handle_release_callback_null(), iree_allocator_system(),
-        &handle));
-    if (!handle) return data;
-
-    iree_hal_file_t* file = nullptr;
-    IREE_EXPECT_OK(iree_hal_file_import(
-        device_, queue_affinity, IREE_HAL_MEMORY_ACCESS_WRITE, handle,
-        IREE_HAL_EXTERNAL_FILE_FLAG_NONE, &file));
-    iree_io_file_handle_release(handle);
-    if (!file) return data;
-
     SemaphoreList empty_wait;
-    SemaphoreList write_signal(device_, {0}, {1});
-    IREE_EXPECT_OK(iree_hal_device_queue_write(
-        device_, queue_affinity, empty_wait, write_signal, buffer, offset, file,
-        /*target_offset=*/0, length, IREE_HAL_WRITE_FLAG_NONE));
-    IREE_EXPECT_OK(iree_hal_semaphore_list_wait(
-        write_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
-    iree_hal_file_release(file);
+    SemaphoreList upload_signal(device_, {0}, {1});
+    iree_status_t status =
+        iree_hal_queue_upload(transfer_queue_, empty_wait, upload_signal,
+                              source, target_buffer, target_offset, length);
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_semaphore_list_wait(
+          upload_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE);
+    }
+    return status;
+  }
+
+  // Downloads buffer bytes to host memory and waits for completion.
+  iree_status_t DownloadBufferData(iree_hal_buffer_t* source_buffer,
+                                   iree_device_size_t source_offset,
+                                   void* target, iree_device_size_t length) {
+    if (!transfer_queue_) {
+      return iree_make_status(
+          IREE_STATUS_UNIMPLEMENTED,
+          "device has no provisioned transfer-capable queue");
+    }
+    SemaphoreList empty_wait;
+    SemaphoreList download_signal(device_, {0}, {1});
+    iree_status_t status =
+        iree_hal_queue_download(transfer_queue_, empty_wait, download_signal,
+                                source_buffer, source_offset, target, length);
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_semaphore_list_wait(
+          download_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE);
+    }
+    return status;
+  }
+
+  // Reads a specific byte range from a buffer.
+  std::vector<uint8_t> ReadBufferBytes(iree_hal_buffer_t* buffer,
+                                       iree_device_size_t offset,
+                                       iree_device_size_t length) {
+    std::vector<uint8_t> data(length);
+    IREE_EXPECT_OK(
+        DownloadBufferData(buffer, offset, data.data(), data.size()));
     return data;
   }
 
@@ -762,10 +792,16 @@ class CtsTestBase : public BaseType {
     EXPECT_EQ(expected_value, value);
   }
 
+  // Retained HAL driver backing |device_|.
   iree_hal_driver_t* driver_ = nullptr;
+  // Retained topology group containing |device_|.
   iree_hal_device_group_t* device_group_ = nullptr;
+  // Retained HAL device used by the test.
   iree_hal_device_t* device_ = nullptr;
+  // Retained allocator exposed by |device_|.
   iree_hal_allocator_t* device_allocator_ = nullptr;
+  // Provisioned transfer-capable queue borrowed from |device_|.
+  iree_hal_queue_t* transfer_queue_ = nullptr;
 
  private:
   // Extracts the canonical test identity "TestClass.TestMethod" from GTest's

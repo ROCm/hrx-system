@@ -143,11 +143,10 @@ TEST_P(DispatchConstantsBindingsTest, ScaleAndOffset) {
   IREE_ASSERT_OK(SubmitCommandBufferAndWait(command_buffer, binding_table));
 
   std::vector<uint32_t> output_data(4);
-  IREE_ASSERT_OK(iree_hal_device_transfer_d2h(
-      device_, output_buffer, /*source_offset=*/0,
-      /*target_buffer=*/output_data.data(),
-      /*data_length=*/output_data.size() * sizeof(uint32_t),
-      IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout()));
+  IREE_ASSERT_OK(
+      DownloadBufferData(output_buffer, /*source_offset=*/0,
+                         /*target=*/output_data.data(),
+                         /*length=*/output_data.size() * sizeof(uint32_t)));
 
   // output[i] = input[i] * 3 + 10 = [13, 16, 19, 22].
   std::vector<uint32_t> expected_data = {13, 16, 19, 22};
