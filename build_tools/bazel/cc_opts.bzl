@@ -163,7 +163,7 @@ _ADDRESS_SANITIZER_LINKOPTS = select({
 
 _ADDRESS_SANITIZER_LINK_DEPS = select({
     "//build_tools/bazel:address_sanitizer_cc_compiler_clang_cl_x86_64": [
-        "@local_config_cc//:clang_cl_x64_asan_runtime",
+        "//build_tools/bazel:address_sanitizer_runtime",
     ],
     "//conditions:default": [],
 })
