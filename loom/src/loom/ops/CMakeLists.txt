@@ -304,6 +304,7 @@ loom_cc_test(
     loom::ops::func
     loom::ops::index
     loom::ops::kernel
+    loom::ops::scalar
     loom::ops::template
     loom::ops::test
     loom::ops::vector

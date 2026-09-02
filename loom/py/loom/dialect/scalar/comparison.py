@@ -107,6 +107,7 @@ scalar_cmpf = comparison_op(
 scalar_isnanf = Op(
     "scalar.isnanf",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     doc="Returns true (i1) if the operand is NaN.",
     operands=[Operand("input", FLOAT)],
     results=[Result("result", I1)],
@@ -119,6 +120,7 @@ scalar_isnanf = Op(
 scalar_isinff = Op(
     "scalar.isinff",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     doc="Returns true (i1) if the operand is positive or negative infinity.",
     operands=[Operand("input", FLOAT)],
     results=[Result("result", I1)],
@@ -131,6 +133,7 @@ scalar_isinff = Op(
 scalar_isfinitef = Op(
     "scalar.isfinitef",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     doc="Returns true (i1) if the operand is finite (not NaN and not infinity).",
     operands=[Operand("input", FLOAT)],
     results=[Result("result", I1)],
@@ -143,6 +146,7 @@ scalar_isfinitef = Op(
 scalar_signf = Op(
     "scalar.signf",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     doc="Floating-point sign: returns -1.0, 0.0, or 1.0.",
     operands=[Operand("input", FLOAT)],
     results=[Result("result", FLOAT)],
@@ -156,6 +160,7 @@ scalar_signf = Op(
 scalar_signi = Op(
     "scalar.signi",
     group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
     doc="Integer sign: returns -1, 0, or 1.",
     operands=[Operand("input", INTEGER)],
     results=[Result("result", INTEGER)],
