@@ -281,6 +281,8 @@ iree_cc_library(
     "host_queue_submission.h"
     "host_queue_timestamp.c"
     "host_queue_timestamp.h"
+    "host_queue_transfer.c"
+    "host_queue_transfer.h"
     "host_queue_waits.c"
     "host_queue_waits.h"
     "hostcall_provider.c"

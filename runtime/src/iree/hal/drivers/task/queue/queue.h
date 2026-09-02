@@ -82,9 +82,7 @@ typedef enum iree_hal_task_queue_op_type_e {
   IREE_HAL_TASK_QUEUE_OP_DEALLOCA,
   IREE_HAL_TASK_QUEUE_OP_READ,
   IREE_HAL_TASK_QUEUE_OP_WRITE,
-  IREE_HAL_TASK_QUEUE_OP_FILL,
-  IREE_HAL_TASK_QUEUE_OP_COPY,
-  IREE_HAL_TASK_QUEUE_OP_UPDATE,
+  IREE_HAL_TASK_QUEUE_OP_TRANSFER,
   IREE_HAL_TASK_QUEUE_OP_ATOMIC_WAIT,
   IREE_HAL_TASK_QUEUE_OP_ATOMIC_STORE,
   IREE_HAL_TASK_QUEUE_OP_ATOMIC_RMW,
@@ -141,6 +139,14 @@ struct iree_hal_task_queue_op_t {
   // table buffers, etc.). Allocated from the small block pool.
   iree_hal_resource_set_t* resource_set;
 
+  // SCOPED buffer mappings referenced by a deferred block recording. The
+  // arena-owned array remains live through recording execution and is unmapped
+  // before user-visible completion is published.
+  iree_hal_buffer_mapping_t* recording_mappings;
+
+  // Number of entries in |recording_mappings|.
+  iree_host_size_t recording_mapping_count;
+
   // Frontier tracker advanced when the operation completes.
   iree_async_frontier_tracker_t* frontier_tracker;
 
@@ -176,13 +182,6 @@ struct iree_hal_task_queue_op_t {
     struct {
       iree_hal_command_buffer_t* command_buffer;
       iree_hal_buffer_binding_table_t binding_table;
-      // SCOPED buffer mappings for binding table resolution. Arena-allocated,
-      // indexed 1:1 with resolved block binding entries. Unmapped in
-      // op_destroy before retained buffers are released. NULL when no mappings
-      // are required.
-      iree_hal_buffer_mapping_t* binding_mappings;
-      // Number of entries in binding_mappings.
-      iree_host_size_t binding_mapping_count;
     } commands;
     struct {
       iree_hal_device_t* device;
@@ -228,26 +227,13 @@ struct iree_hal_task_queue_op_t {
       iree_device_size_t length;
     } write;
     struct {
-      iree_hal_buffer_t* target_buffer;
-      iree_device_size_t target_offset;
-      iree_device_size_t length;
-      uint8_t pattern[4];
-      uint8_t pattern_length;
-    } fill;
-    struct {
-      iree_hal_buffer_t* source_buffer;
-      iree_device_size_t source_offset;
-      iree_hal_buffer_t* target_buffer;
-      iree_device_size_t target_offset;
-      iree_device_size_t length;
-    } copy;
-    struct {
-      iree_hal_buffer_t* target_buffer;
-      iree_device_size_t target_offset;
-      iree_device_size_t length;
-      // Source data arena-allocated (pointer into operation arena).
-      const void* source_data;
-    } update;
+      // Number of operations in the captured transaction.
+      iree_host_size_t operation_count;
+      // Arena-owned operation storage with captured fill and update data.
+      iree_hal_transfer_operation_t* operations;
+      // Saturating sum of active operation lengths used for strategy selection.
+      iree_device_size_t total_length;
+    } transfer;
     struct {
       // Retained buffer containing the target location.
       iree_hal_buffer_t* target_buffer;
@@ -433,6 +419,9 @@ struct iree_hal_task_queue_t {
   // Base HAL queue resource. Must be at offset zero.
   iree_hal_queue_t base;
 
+  // Parent device used to validate queue operation resources. Borrowed.
+  iree_hal_device_t* device;
+
   // Affinity mask this queue processes.
   iree_hal_queue_affinity_t affinity;
 
@@ -461,9 +450,9 @@ struct iree_hal_task_queue_t {
   // this queue."
   iree_atomic_int64_t epoch;
 
-  // Length (in bytes) at which queue-level fill/copy operations route through
-  // the block processor framework instead of executing as a direct memcpy in
-  // the queue drain thread. See iree_hal_task_device_params_t for details.
+  // Aggregate payload length at which queue transfer transactions route
+  // through the multi-worker block processor. See
+  // iree_hal_task_device_params_t for details.
   iree_device_size_t inline_transfer_threshold;
 
   // Shared block pool for allocating submission transients.
@@ -588,7 +577,8 @@ struct iree_hal_task_queue_t {
 };
 
 iree_status_t iree_hal_task_queue_initialize(
-    iree_string_view_t identifier, const iree_hal_queue_family_t* queue_family,
+    iree_string_view_t identifier, iree_hal_device_t* device,
+    const iree_hal_queue_family_t* queue_family,
     iree_hal_queue_affinity_t affinity, iree_task_scope_flags_t scope_flags,
     iree_task_executor_t* executor, iree_async_proactor_t* proactor,
     iree_device_size_t inline_transfer_threshold,

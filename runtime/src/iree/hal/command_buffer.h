@@ -263,24 +263,6 @@ enum iree_hal_memory_advise_flag_bits_t {
   // TODO(benvanik): ASAN hints (protect/unprotect).
 };
 
-// Bitfield specifying flags controlling a fill operation.
-typedef uint64_t iree_hal_fill_flags_t;
-enum iree_hal_fill_flag_bits_t {
-  IREE_HAL_FILL_FLAG_NONE = 0,
-};
-
-// Bitfield specifying flags controlling an update operation.
-typedef uint64_t iree_hal_update_flags_t;
-enum iree_hal_update_flag_bits_t {
-  IREE_HAL_UPDATE_FLAG_NONE = 0,
-};
-
-// Bitfield specifying flags controlling a copy operation.
-typedef uint64_t iree_hal_copy_flags_t;
-enum iree_hal_copy_flag_bits_t {
-  IREE_HAL_COPY_FLAG_NONE = 0,
-};
-
 // Configuration defining how a dispatch is performed.
 typedef struct iree_hal_dispatch_config_t {
   // Optional workgroup size for targets that have workgroup sizes specified by

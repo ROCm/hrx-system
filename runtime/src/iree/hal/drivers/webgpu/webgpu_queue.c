@@ -27,8 +27,24 @@ static void iree_hal_webgpu_queue_destroy(iree_hal_queue_t* base_queue) {
   iree_hal_webgpu_queue_deinitialize((iree_hal_webgpu_queue_t*)base_queue);
 }
 
+static iree_status_t iree_hal_webgpu_queue_transfer(
+    iree_hal_queue_t* base_queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_host_size_t operation_count,
+    const iree_hal_transfer_operation_t* operations) {
+  (void)base_queue;
+  (void)wait_semaphore_list;
+  (void)signal_semaphore_list;
+  (void)operation_count;
+  (void)operations;
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "WebGPU exact-queue transfers are not implemented");
+}
+
 static const iree_hal_queue_vtable_t iree_hal_webgpu_queue_vtable = {
     .destroy = iree_hal_webgpu_queue_destroy,
+    .transfer = iree_hal_webgpu_queue_transfer,
 };
 
 iree_status_t iree_hal_webgpu_queue_initialize(

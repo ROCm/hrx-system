@@ -27,6 +27,7 @@
 #include "iree/hal/drivers/amdgpu/host_queue_profile_events.h"
 #include "iree/hal/drivers/amdgpu/host_queue_submission.h"
 #include "iree/hal/drivers/amdgpu/host_queue_timestamp.h"
+#include "iree/hal/drivers/amdgpu/host_queue_transfer.h"
 #include "iree/hal/drivers/amdgpu/host_queue_waits.h"
 #include "iree/hal/drivers/amdgpu/semaphore.h"
 #include "iree/hal/drivers/amdgpu/transient_buffer.h"
@@ -2026,4 +2027,5 @@ static void iree_hal_amdgpu_host_queue_destroy(iree_hal_queue_t* base_queue) {
 
 static const iree_hal_queue_vtable_t iree_hal_amdgpu_host_queue_vtable = {
     .destroy = iree_hal_amdgpu_host_queue_destroy,
+    .transfer = iree_hal_amdgpu_host_queue_transfer,
 };

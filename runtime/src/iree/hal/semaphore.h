@@ -321,8 +321,6 @@ typedef struct iree_hal_external_timepoint_t {
 // https://www.youtube.com/watch?v=SpE--Rf516Y
 // https://www.khronos.org/assets/uploads/developers/library/2018-xdc/Vulkan-Timeline-Semaphores-Part-1_Sep18.pdf
 // https://docs.microsoft.com/en-us/windows/win32/direct3d12/user-mode-heap-synchronization
-typedef struct iree_hal_semaphore_t iree_hal_semaphore_t;
-
 // Creates a semaphore that can be used with command queues owned by this
 // device. To use the semaphores with other devices or instances they must
 // first be exported.
@@ -409,32 +407,6 @@ IREE_API_EXPORT iree_status_t iree_hal_semaphore_export_timepoint(
     iree_hal_external_timepoint_type_t requested_type,
     iree_hal_external_timepoint_flags_t requested_flags,
     iree_hal_external_timepoint_t* IREE_RESTRICT out_external_timepoint);
-
-//===----------------------------------------------------------------------===//
-// iree_hal_semaphore_list_t
-//===----------------------------------------------------------------------===//
-
-// A list of semaphores and their corresponding payloads.
-// When signaling each semaphore will be set to the new payload value provided.
-// When waiting each semaphore must reach or exceed the payload value.
-// This points at external storage and does not retain the semaphores itself.
-typedef struct iree_hal_semaphore_list_t {
-  iree_host_size_t count;
-  iree_hal_semaphore_t** semaphores;
-  uint64_t* payload_values;
-} iree_hal_semaphore_list_t;
-
-// Returns an empty semaphore list.
-static inline iree_hal_semaphore_list_t iree_hal_semaphore_list_empty(void) {
-  iree_hal_semaphore_list_t list = {0};
-  return list;
-}
-
-// Returns true if the |semaphore_list| is empty.
-static inline bool iree_hal_semaphore_list_is_empty(
-    iree_hal_semaphore_list_t semaphore_list) {
-  return semaphore_list.count == 0;
-}
 
 // Retains each semaphore in the semaphore list.
 IREE_API_EXPORT void iree_hal_semaphore_list_retain(

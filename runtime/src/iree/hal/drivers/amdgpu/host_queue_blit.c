@@ -184,20 +184,29 @@ static iree_status_t iree_hal_amdgpu_host_queue_submit_pm4_write_data(
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_buffer_t* target_buffer,
     const iree_hal_amdgpu_host_queue_pm4_write_data_t* write_data,
+    iree_hal_amdgpu_reclaim_action_t pre_signal_action,
+    iree_hal_resource_t* completion_resource,
     const iree_hal_amdgpu_host_queue_profile_event_info_t* profile_event_info,
     iree_hal_amdgpu_host_queue_submission_flags_t submission_flags,
     bool* out_ready, uint64_t* out_submission_id) {
-  if (out_submission_id) *out_submission_id = 0;
-  iree_hal_resource_t* operation_resources[1] = {
+  iree_hal_resource_t* operation_resources[2] = {
       (iree_hal_resource_t*)target_buffer,
+      completion_resource,
   };
+  const iree_host_size_t operation_resource_count =
+      completion_resource ? IREE_ARRAYSIZE(operation_resources) : 1;
 
   iree_hal_amdgpu_host_queue_pm4_ib_submission_t submission;
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_host_queue_try_begin_pm4_ib_submission(
-      queue, resolution, signal_semaphore_list,
-      IREE_ARRAYSIZE(operation_resources), iree_hsa_signal_null(),
-      profile_event_info, out_ready, &submission));
-  if (!*out_ready) return iree_ok_status();
+  bool ready = false;
+  iree_status_t status = iree_hal_amdgpu_host_queue_try_begin_pm4_ib_submission(
+      queue, resolution, signal_semaphore_list, operation_resource_count,
+      iree_hsa_signal_null(), profile_event_info, &ready, &submission);
+  if (!iree_status_is_ok(status)) return status;
+  if (!ready) {
+    *out_ready = false;
+    if (out_submission_id) *out_submission_id = 0;
+    return iree_ok_status();
+  }
 
   bool did_emit = false;
   if (write_data->length == 4) {
@@ -217,11 +226,14 @@ static iree_status_t iree_hal_amdgpu_host_queue_submit_pm4_write_data(
   }
   submission.minimum_release_scope =
       iree_hal_amdgpu_host_queue_buffer_release_scope(target_buffer);
+  submission.kernel.pre_signal_action = pre_signal_action;
   uint64_t submission_epoch = 0;
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_host_queue_finish_pm4_ib_submission(
+  status = iree_hal_amdgpu_host_queue_finish_pm4_ib_submission(
       queue, resolution, signal_semaphore_list, operation_resources,
-      IREE_ARRAYSIZE(operation_resources), profile_event_info, submission_flags,
-      &submission, &submission_epoch));
+      operation_resource_count, profile_event_info, submission_flags,
+      &submission, &submission_epoch);
+  if (!iree_status_is_ok(status)) return status;
+  *out_ready = true;
   if (out_submission_id) *out_submission_id = submission_epoch;
   return iree_ok_status();
 }
@@ -264,21 +276,46 @@ static iree_status_t iree_hal_amdgpu_host_queue_submit_pm4_copy_data(
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_buffer_t* source_buffer, iree_hal_buffer_t* target_buffer,
     const iree_hal_amdgpu_host_queue_pm4_copy_data_t* copy_data,
+    iree_hsa_fence_scope_t minimum_acquire_scope,
+    iree_hsa_fence_scope_t minimum_release_scope,
+    iree_hal_amdgpu_reclaim_action_t pre_signal_action,
+    iree_hal_resource_t* const* extra_operation_resources,
+    iree_host_size_t extra_operation_resource_count,
     const iree_hal_amdgpu_host_queue_profile_event_info_t* profile_event_info,
     iree_hal_amdgpu_host_queue_submission_flags_t submission_flags,
     bool* out_ready, uint64_t* out_submission_id) {
-  if (out_submission_id) *out_submission_id = 0;
-  iree_hal_resource_t* operation_resources[2] = {
-      (iree_hal_resource_t*)source_buffer,
-      (iree_hal_resource_t*)target_buffer,
-  };
+  iree_host_size_t operation_resource_count = 0;
+  if (!iree_host_size_checked_add(2, extra_operation_resource_count,
+                                  &operation_resource_count)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "copy operation resource count overflows");
+  }
+  iree_host_size_t operation_resources_size = 0;
+  if (!iree_host_size_checked_mul(operation_resource_count,
+                                  sizeof(iree_hal_resource_t*),
+                                  &operation_resources_size)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "copy operation resource table size overflows");
+  }
+  iree_hal_resource_t** operation_resources =
+      (iree_hal_resource_t**)iree_alloca(operation_resources_size);
+  operation_resources[0] = (iree_hal_resource_t*)source_buffer;
+  operation_resources[1] = (iree_hal_resource_t*)target_buffer;
+  for (iree_host_size_t i = 0; i < extra_operation_resource_count; ++i) {
+    operation_resources[2 + i] = extra_operation_resources[i];
+  }
 
   iree_hal_amdgpu_host_queue_pm4_ib_submission_t submission;
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_host_queue_try_begin_pm4_ib_submission(
-      queue, resolution, signal_semaphore_list,
-      IREE_ARRAYSIZE(operation_resources), iree_hsa_signal_null(),
-      profile_event_info, out_ready, &submission));
-  if (!*out_ready) return iree_ok_status();
+  bool ready = false;
+  iree_status_t status = iree_hal_amdgpu_host_queue_try_begin_pm4_ib_submission(
+      queue, resolution, signal_semaphore_list, operation_resource_count,
+      iree_hsa_signal_null(), profile_event_info, &ready, &submission);
+  if (!iree_status_is_ok(status)) return status;
+  if (!ready) {
+    *out_ready = false;
+    if (out_submission_id) *out_submission_id = 0;
+    return iree_ok_status();
+  }
 
   bool did_emit = false;
   if (copy_data->length == 4) {
@@ -295,15 +332,20 @@ static iree_status_t iree_hal_amdgpu_host_queue_submit_pm4_copy_data(
     return iree_make_status(IREE_STATUS_INTERNAL,
                             "PM4 COPY_DATA payload does not fit IB slot");
   }
-  submission.minimum_acquire_scope =
-      iree_hal_amdgpu_host_queue_buffer_acquire_scope(source_buffer);
-  submission.minimum_release_scope =
-      iree_hal_amdgpu_host_queue_buffer_release_scope(target_buffer);
+  submission.minimum_acquire_scope = iree_hal_amdgpu_host_queue_max_fence_scope(
+      minimum_acquire_scope,
+      iree_hal_amdgpu_host_queue_buffer_acquire_scope(source_buffer));
+  submission.minimum_release_scope = iree_hal_amdgpu_host_queue_max_fence_scope(
+      minimum_release_scope,
+      iree_hal_amdgpu_host_queue_buffer_release_scope(target_buffer));
+  submission.kernel.pre_signal_action = pre_signal_action;
   uint64_t submission_epoch = 0;
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_host_queue_finish_pm4_ib_submission(
+  status = iree_hal_amdgpu_host_queue_finish_pm4_ib_submission(
       queue, resolution, signal_semaphore_list, operation_resources,
-      IREE_ARRAYSIZE(operation_resources), profile_event_info, submission_flags,
-      &submission, &submission_epoch));
+      operation_resource_count, profile_event_info, submission_flags,
+      &submission, &submission_epoch);
+  if (!iree_status_is_ok(status)) return status;
+  *out_ready = true;
   if (out_submission_id) *out_submission_id = submission_epoch;
   return iree_ok_status();
 }
@@ -345,8 +387,25 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_fill(
     iree_host_size_t pattern_length, iree_hal_fill_flags_t flags,
     iree_hal_amdgpu_host_queue_submission_flags_t submission_flags,
     bool* out_ready) {
+  return iree_hal_amdgpu_host_queue_submit_fill_with_action(
+      queue, resolution, signal_semaphore_list, target_buffer, target_offset,
+      length, pattern_bits, pattern_length, flags,
+      (iree_hal_amdgpu_reclaim_action_t){0}, /*completion_resource=*/NULL,
+      submission_flags, out_ready);
+}
+
+iree_status_t iree_hal_amdgpu_host_queue_submit_fill_with_action(
+    iree_hal_amdgpu_host_queue_t* queue,
+    const iree_hal_amdgpu_wait_resolution_t* resolution,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_device_size_t length, uint64_t pattern_bits,
+    iree_host_size_t pattern_length, iree_hal_fill_flags_t flags,
+    iree_hal_amdgpu_reclaim_action_t pre_signal_action,
+    iree_hal_resource_t* completion_resource,
+    iree_hal_amdgpu_host_queue_submission_flags_t submission_flags,
+    bool* out_ready) {
   IREE_ASSERT_ARGUMENT(out_ready);
-  *out_ready = false;
   if (IREE_UNLIKELY(queue->is_shutting_down)) {
     return iree_make_status(IREE_STATUS_CANCELLED, "queue shutting down");
   }
@@ -364,16 +423,19 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_fill(
         iree_hal_amdgpu_host_queue_make_blit_profile_event_info(
             IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_FILL, length);
     uint64_t submission_id = 0;
+    bool ready = false;
     iree_status_t status = iree_hal_amdgpu_host_queue_submit_pm4_write_data(
         queue, resolution, signal_semaphore_list, target_buffer,
-        &pm4_write_data, &profile_event_info, submission_flags, out_ready,
-        &submission_id);
-    if (iree_status_is_ok(status) && *out_ready) {
+        &pm4_write_data, pre_signal_action, completion_resource,
+        &profile_event_info, submission_flags, &ready, &submission_id);
+    if (!iree_status_is_ok(status)) return status;
+    if (ready) {
       iree_hal_amdgpu_host_queue_record_submitted_blit_profile_event(
           queue, resolution, signal_semaphore_list, submission_id,
           &profile_event_info);
     }
-    return status;
+    *out_ready = ready;
+    return iree_ok_status();
   }
 
   iree_hsa_kernel_dispatch_packet_t dispatch_packet;
@@ -382,25 +444,33 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_fill(
       queue, target_device_ptr, length, pattern_bits, pattern_length,
       &dispatch_packet, &kernargs));
 
-  iree_hal_resource_t* operation_resources[1] = {
+  iree_hal_resource_t* operation_resources[2] = {
       (iree_hal_resource_t*)target_buffer,
+      completion_resource,
   };
+  const iree_host_size_t operation_resource_count =
+      completion_resource ? IREE_ARRAYSIZE(operation_resources) : 1;
   uint64_t submission_id = 0;
   iree_hal_amdgpu_host_queue_profile_event_info_t profile_event_info =
       iree_hal_amdgpu_host_queue_make_blit_profile_event_info(
           IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_FILL, length);
-  iree_status_t status = iree_hal_amdgpu_host_queue_submit_dispatch_packet(
-      queue, resolution, signal_semaphore_list, &dispatch_packet, &kernargs,
-      IREE_HAL_AMDGPU_DEVICE_BUFFER_FILL_KERNARG_SIZE, operation_resources,
-      IREE_ARRAYSIZE(operation_resources), IREE_HSA_FENCE_SCOPE_NONE,
-      iree_hal_amdgpu_host_queue_buffer_release_scope(target_buffer),
-      &profile_event_info, submission_flags, out_ready, &submission_id);
-  if (iree_status_is_ok(status) && *out_ready) {
+  bool ready = false;
+  iree_status_t status =
+      iree_hal_amdgpu_host_queue_submit_dispatch_packet_with_action(
+          queue, resolution, signal_semaphore_list, &dispatch_packet, &kernargs,
+          IREE_HAL_AMDGPU_DEVICE_BUFFER_FILL_KERNARG_SIZE, operation_resources,
+          operation_resource_count, IREE_HSA_FENCE_SCOPE_NONE,
+          iree_hal_amdgpu_host_queue_buffer_release_scope(target_buffer),
+          pre_signal_action, &profile_event_info, submission_flags, &ready,
+          &submission_id);
+  if (!iree_status_is_ok(status)) return status;
+  if (ready) {
     iree_hal_amdgpu_host_queue_record_submitted_blit_profile_event(
         queue, resolution, signal_semaphore_list, submission_id,
         &profile_event_info);
   }
-  return status;
+  *out_ready = ready;
+  return iree_ok_status();
 }
 
 static_assert(IREE_HAL_AMDGPU_DEVICE_BUFFER_COPY_KERNARG_SIZE <=
@@ -526,7 +596,6 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_copy(
     iree_hal_amdgpu_host_queue_submission_flags_t submission_flags,
     bool* out_ready) {
   IREE_ASSERT_ARGUMENT(out_ready);
-  *out_ready = false;
   if (IREE_UNLIKELY(queue->is_shutting_down)) {
     return iree_make_status(IREE_STATUS_CANCELLED, "queue shutting down");
   }
@@ -545,16 +614,22 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_copy(
         iree_hal_amdgpu_host_queue_make_blit_profile_event_info(
             profile_event_type, length);
     uint64_t submission_id = 0;
+    bool ready = false;
     iree_status_t status = iree_hal_amdgpu_host_queue_submit_pm4_copy_data(
         queue, resolution, signal_semaphore_list, source_buffer, target_buffer,
-        &pm4_copy_data, &profile_event_info, submission_flags, out_ready,
-        &submission_id);
-    if (iree_status_is_ok(status) && *out_ready) {
+        &pm4_copy_data, IREE_HSA_FENCE_SCOPE_NONE, IREE_HSA_FENCE_SCOPE_NONE,
+        (iree_hal_amdgpu_reclaim_action_t){0},
+        /*extra_operation_resources=*/NULL,
+        /*extra_operation_resource_count=*/0, &profile_event_info,
+        submission_flags, &ready, &submission_id);
+    if (!iree_status_is_ok(status)) return status;
+    if (ready) {
       iree_hal_amdgpu_host_queue_record_submitted_blit_profile_event(
           queue, resolution, signal_semaphore_list, submission_id,
           &profile_event_info);
     }
-    return status;
+    *out_ready = ready;
+    return iree_ok_status();
   }
 
   iree_hsa_kernel_dispatch_packet_t dispatch_packet;
@@ -571,19 +646,22 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_copy(
   iree_hal_amdgpu_host_queue_profile_event_info_t profile_event_info =
       iree_hal_amdgpu_host_queue_make_blit_profile_event_info(
           profile_event_type, length);
+  bool ready = false;
   iree_status_t status = iree_hal_amdgpu_host_queue_submit_dispatch_packet(
       queue, resolution, signal_semaphore_list, &dispatch_packet, &kernargs,
       IREE_HAL_AMDGPU_DEVICE_BUFFER_COPY_KERNARG_SIZE, operation_resources,
       IREE_ARRAYSIZE(operation_resources),
       iree_hal_amdgpu_host_queue_buffer_acquire_scope(source_buffer),
       iree_hal_amdgpu_host_queue_buffer_release_scope(target_buffer),
-      &profile_event_info, submission_flags, out_ready, &submission_id);
-  if (iree_status_is_ok(status) && *out_ready) {
+      &profile_event_info, submission_flags, &ready, &submission_id);
+  if (!iree_status_is_ok(status)) return status;
+  if (ready) {
     iree_hal_amdgpu_host_queue_record_submitted_blit_profile_event(
         queue, resolution, signal_semaphore_list, submission_id,
         &profile_event_info);
   }
-  return status;
+  *out_ready = ready;
+  return iree_ok_status();
 }
 
 iree_status_t iree_hal_amdgpu_host_queue_submit_copy_with_action(
@@ -601,7 +679,6 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_copy_with_action(
     iree_hal_amdgpu_host_queue_submission_flags_t submission_flags,
     bool* out_ready) {
   IREE_ASSERT_ARGUMENT(out_ready);
-  *out_ready = false;
   if (IREE_UNLIKELY(queue->is_shutting_down)) {
     return iree_make_status(IREE_STATUS_CANCELLED, "queue shutting down");
   }
@@ -616,6 +693,31 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_copy_with_action(
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_host_queue_prepare_copy_ranges(
       source_buffer, source_offset, target_buffer, target_offset, length, flags,
       &source_device_ptr, &target_device_ptr));
+
+  iree_hal_amdgpu_host_queue_pm4_copy_data_t pm4_copy_data;
+  if (iree_hal_amdgpu_host_queue_prepare_pm4_copy_data(
+          queue, source_device_ptr, target_device_ptr, length,
+          &pm4_copy_data)) {
+    iree_hal_amdgpu_host_queue_profile_event_info_t profile_event_info =
+        iree_hal_amdgpu_host_queue_make_blit_profile_event_info(
+            IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_COPY, length);
+    uint64_t submission_id = 0;
+    bool ready = false;
+    iree_status_t status = iree_hal_amdgpu_host_queue_submit_pm4_copy_data(
+        queue, resolution, signal_semaphore_list, source_buffer, target_buffer,
+        &pm4_copy_data, minimum_acquire_scope, minimum_release_scope,
+        pre_signal_action, extra_operation_resources,
+        extra_operation_resource_count, &profile_event_info, submission_flags,
+        &ready, &submission_id);
+    if (!iree_status_is_ok(status)) return status;
+    if (ready) {
+      iree_hal_amdgpu_host_queue_record_submitted_blit_profile_event(
+          queue, resolution, signal_semaphore_list, submission_id,
+          &profile_event_info);
+    }
+    *out_ready = ready;
+    return iree_ok_status();
+  }
 
   iree_hsa_kernel_dispatch_packet_t dispatch_packet;
   iree_hal_amdgpu_device_buffer_copy_kernargs_t kernargs;
@@ -648,12 +750,18 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_copy_with_action(
   iree_hal_amdgpu_host_queue_profile_event_info_t profile_event_info =
       iree_hal_amdgpu_host_queue_make_blit_profile_event_info(
           IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_COPY, length);
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_host_queue_try_begin_dispatch_submission(
-      queue, resolution, signal_semaphore_list, operation_resource_count,
-      /*kernarg_block_count=*/1,
-      (iree_hal_amdgpu_profile_dispatch_event_reservation_t){0},
-      &profile_event_info, out_ready, &submission));
-  if (!*out_ready) return iree_ok_status();
+  bool ready = false;
+  iree_status_t status =
+      iree_hal_amdgpu_host_queue_try_begin_dispatch_submission(
+          queue, resolution, signal_semaphore_list, operation_resource_count,
+          /*kernarg_block_count=*/1,
+          (iree_hal_amdgpu_profile_dispatch_event_reservation_t){0},
+          &profile_event_info, &ready, &submission);
+  if (!iree_status_is_ok(status)) return status;
+  if (!ready) {
+    *out_ready = false;
+    return iree_ok_status();
+  }
 
   memcpy(submission.kernel.kernargs.blocks->data, &kernargs,
          IREE_HAL_AMDGPU_DEVICE_BUFFER_COPY_KERNARG_SIZE);
@@ -677,6 +785,7 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_copy_with_action(
   iree_hal_amdgpu_host_queue_record_submitted_blit_profile_event(
       queue, resolution, signal_semaphore_list, submission_id,
       &profile_event_info);
+  *out_ready = true;
   return iree_ok_status();
 }
 
@@ -763,8 +872,25 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_update(
     iree_device_size_t length, iree_hal_update_flags_t flags,
     iree_hal_amdgpu_host_queue_submission_flags_t submission_flags,
     bool* out_ready) {
+  return iree_hal_amdgpu_host_queue_submit_update_with_action(
+      queue, resolution, signal_semaphore_list, source_buffer, source_offset,
+      target_buffer, target_offset, length, flags,
+      (iree_hal_amdgpu_reclaim_action_t){0}, /*completion_resource=*/NULL,
+      submission_flags, out_ready);
+}
+
+iree_status_t iree_hal_amdgpu_host_queue_submit_update_with_action(
+    iree_hal_amdgpu_host_queue_t* queue,
+    const iree_hal_amdgpu_wait_resolution_t* resolution,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    const void* source_buffer, iree_host_size_t source_offset,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_device_size_t length, iree_hal_update_flags_t flags,
+    iree_hal_amdgpu_reclaim_action_t pre_signal_action,
+    iree_hal_resource_t* completion_resource,
+    iree_hal_amdgpu_host_queue_submission_flags_t submission_flags,
+    bool* out_ready) {
   IREE_ASSERT_ARGUMENT(out_ready);
-  *out_ready = false;
   if (IREE_UNLIKELY(queue->is_shutting_down)) {
     return iree_make_status(IREE_STATUS_CANCELLED, "queue shutting down");
   }
@@ -784,16 +910,19 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_update(
         iree_hal_amdgpu_host_queue_make_blit_profile_event_info(
             IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_UPDATE, length);
     uint64_t submission_id = 0;
+    bool ready = false;
     iree_status_t status = iree_hal_amdgpu_host_queue_submit_pm4_write_data(
         queue, resolution, signal_semaphore_list, target_buffer,
-        &pm4_write_data, &profile_event_info, submission_flags, out_ready,
-        &submission_id);
-    if (iree_status_is_ok(status) && *out_ready) {
+        &pm4_write_data, pre_signal_action, completion_resource,
+        &profile_event_info, submission_flags, &ready, &submission_id);
+    if (!iree_status_is_ok(status)) return status;
+    if (ready) {
       iree_hal_amdgpu_host_queue_record_submitted_blit_profile_event(
           queue, resolution, signal_semaphore_list, submission_id,
           &profile_event_info);
     }
-    return status;
+    *out_ready = ready;
+    return iree_ok_status();
   }
 
   const iree_host_size_t source_payload_offset =
@@ -841,12 +970,24 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_update(
   iree_hal_amdgpu_host_queue_profile_event_info_t profile_event_info =
       iree_hal_amdgpu_host_queue_make_blit_profile_event_info(
           IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_UPDATE, length);
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_host_queue_try_begin_dispatch_submission(
-      queue, resolution, signal_semaphore_list,
-      /*operation_resource_count=*/1, (uint32_t)kernarg_block_count,
-      (iree_hal_amdgpu_profile_dispatch_event_reservation_t){0},
-      &profile_event_info, out_ready, &submission));
-  if (!*out_ready) return iree_ok_status();
+  iree_hal_resource_t* operation_resources[2] = {
+      (iree_hal_resource_t*)target_buffer,
+      completion_resource,
+  };
+  const iree_host_size_t operation_resource_count =
+      completion_resource ? IREE_ARRAYSIZE(operation_resources) : 1;
+  bool ready = false;
+  iree_status_t status =
+      iree_hal_amdgpu_host_queue_try_begin_dispatch_submission(
+          queue, resolution, signal_semaphore_list, operation_resource_count,
+          (uint32_t)kernarg_block_count,
+          (iree_hal_amdgpu_profile_dispatch_event_reservation_t){0},
+          &profile_event_info, &ready, &submission);
+  if (!iree_status_is_ok(status)) return status;
+  if (!ready) {
+    *out_ready = false;
+    return iree_ok_status();
+  }
 
   uint8_t* staged_source_bytes =
       (uint8_t*)submission.kernel.kernargs.blocks + source_payload_offset;
@@ -863,17 +1004,16 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_update(
           submission.dispatch_completion_signal);
   submission.minimum_release_scope =
       iree_hal_amdgpu_host_queue_buffer_release_scope(target_buffer);
+  submission.kernel.pre_signal_action = pre_signal_action;
 
-  iree_hal_resource_t* operation_resources[1] = {
-      (iree_hal_resource_t*)target_buffer,
-  };
   const uint64_t submission_id =
       iree_hal_amdgpu_host_queue_finish_dispatch_submission(
           queue, resolution, signal_semaphore_list, operation_resources,
-          IREE_ARRAYSIZE(operation_resources), &profile_event_info,
-          submission_flags, &submission);
+          operation_resource_count, &profile_event_info, submission_flags,
+          &submission);
   iree_hal_amdgpu_host_queue_record_submitted_blit_profile_event(
       queue, resolution, signal_semaphore_list, submission_id,
       &profile_event_info);
+  *out_ready = true;
   return iree_ok_status();
 }

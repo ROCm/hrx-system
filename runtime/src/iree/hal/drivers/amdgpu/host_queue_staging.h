@@ -12,6 +12,7 @@
 #include "iree/hal/api.h"
 #include "iree/hal/drivers/amdgpu/system.h"
 #include "iree/hal/drivers/amdgpu/util/libhsa.h"
+#include "iree/hal/drivers/amdgpu/util/notification_ring.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -27,6 +28,8 @@ extern "C" {
 #define IREE_HAL_AMDGPU_STAGING_SLOT_COUNT_DEFAULT 4u
 
 typedef struct iree_hal_amdgpu_host_queue_t iree_hal_amdgpu_host_queue_t;
+typedef struct iree_hal_amdgpu_staging_transfer_t
+    iree_hal_amdgpu_staging_transfer_t;
 typedef struct iree_hal_amdgpu_staging_pool_waiter_t
     iree_hal_amdgpu_staging_pool_waiter_t;
 
@@ -96,6 +99,30 @@ iree_status_t iree_hal_amdgpu_staging_pool_initialize(
 // Deinitializes |pool| and releases its fixed staging allocation.
 void iree_hal_amdgpu_staging_pool_deinitialize(
     iree_hal_amdgpu_staging_pool_t* pool);
+
+// Captures a borrowed host-to-device transfer without scheduling it.
+iree_status_t iree_hal_amdgpu_staging_transfer_create_upload(
+    iree_hal_amdgpu_host_queue_t* queue, const void* source,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_device_size_t length,
+    iree_hal_amdgpu_staging_transfer_t** out_transfer);
+
+// Captures a device-to-borrowed-host transfer without scheduling it.
+iree_status_t iree_hal_amdgpu_staging_transfer_create_download(
+    iree_hal_amdgpu_host_queue_t* queue, iree_hal_buffer_t* source_buffer,
+    iree_device_size_t source_offset, void* target, iree_device_size_t length,
+    iree_hal_amdgpu_staging_transfer_t** out_transfer);
+
+// Starts a captured host transfer. The optional |completion_resource| keeps
+// |completion_action.user_data| live until the action executes.
+iree_status_t iree_hal_amdgpu_staging_transfer_start(
+    iree_hal_amdgpu_staging_transfer_t* transfer,
+    iree_hal_amdgpu_reclaim_action_t completion_action,
+    iree_hal_resource_t* completion_resource);
+
+// Releases a captured host transfer.
+void iree_hal_amdgpu_staging_transfer_release(
+    iree_hal_amdgpu_staging_transfer_t* transfer);
 
 // Submits a chunked fd-backed queue_read through the staging pool.
 iree_status_t iree_hal_amdgpu_host_queue_submit_staged_read(

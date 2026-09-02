@@ -416,6 +416,25 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_dispatch_packet(
     iree_hal_amdgpu_host_queue_submission_flags_t submission_flags,
     bool* out_ready, uint64_t* out_submission_id);
 
+// Emits one kernel-dispatch submission with an optional pre-signal action.
+// |operation_resources| must keep |pre_signal_action.user_data| live when the
+// action references a HAL resource. Caller must hold submission_mutex.
+iree_status_t iree_hal_amdgpu_host_queue_submit_dispatch_packet_with_action(
+    iree_hal_amdgpu_host_queue_t* queue,
+    const iree_hal_amdgpu_wait_resolution_t* resolution,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    const iree_hsa_kernel_dispatch_packet_t* dispatch_packet_template,
+    const void* kernargs, iree_host_size_t kernarg_length,
+    iree_hal_resource_t* const* operation_resources,
+    iree_host_size_t operation_resource_count,
+    iree_hsa_fence_scope_t minimum_acquire_scope,
+    iree_hsa_fence_scope_t minimum_release_scope,
+    iree_hal_amdgpu_reclaim_action_t pre_signal_action,
+    const iree_hal_amdgpu_host_queue_profile_event_info_t*
+        profile_queue_event_info,
+    iree_hal_amdgpu_host_queue_submission_flags_t submission_flags,
+    bool* out_ready, uint64_t* out_submission_id);
+
 // Emits one PM4-IB payload submission referencing persistent device-visible PM4
 // dwords. Caller must hold submission_mutex and keep |ib_dwords| and any
 // non-null |publication_signal| live through |operation_resources|,

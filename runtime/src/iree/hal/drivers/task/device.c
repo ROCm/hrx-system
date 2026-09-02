@@ -251,9 +251,8 @@ void iree_hal_task_device_params_initialize(
     iree_hal_task_device_params_t* out_params) {
   out_params->arena_block_size = 32 * 1024;
   out_params->queue_scope_flags = IREE_TASK_SCOPE_FLAG_NONE;
-  // 256 KB is a rough crossover point: below this, cmd builder + processor
-  // context setup dominates the memcpy itself; above, the framework overhead
-  // becomes negligible relative to bandwidth-bound work. Tune per deployment.
+  // Preserve the 256 KB strategy threshold previously used for scalar fills
+  // and copies while applying it to the aggregate transaction payload.
   out_params->inline_transfer_threshold = 256 * 1024;
 }
 
@@ -387,11 +386,11 @@ iree_status_t iree_hal_task_device_create(
       if (!iree_status_is_ok(status)) break;
 
       status = iree_hal_task_queue_initialize(
-          device->identifier, &device->queue_family, queue_affinity,
-          params->queue_scope_flags, queue_executors[i], queue_proactor,
-          params->inline_transfer_threshold, &device->small_block_pool,
-          &device->large_block_pool, device->device_allocator,
-          &device->queues[i]);
+          device->identifier, (iree_hal_device_t*)device, &device->queue_family,
+          queue_affinity, params->queue_scope_flags, queue_executors[i],
+          queue_proactor, params->inline_transfer_threshold,
+          &device->small_block_pool, &device->large_block_pool,
+          device->device_allocator, &device->queues[i]);
       if (!iree_status_is_ok(status)) break;
       ++device->queue_count;
     }

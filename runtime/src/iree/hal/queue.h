@@ -17,6 +17,9 @@
 extern "C" {
 #endif  // __cplusplus
 
+typedef struct iree_hal_buffer_t iree_hal_buffer_t;
+typedef struct iree_hal_semaphore_t iree_hal_semaphore_t;
+
 //===----------------------------------------------------------------------===//
 // Types and Enums
 //===----------------------------------------------------------------------===//
@@ -78,6 +81,175 @@ typedef struct iree_hal_queue_family_t iree_hal_queue_family_t;
 // all queue references and releasing a device with outstanding retained queue
 // references is a programmer error.
 typedef struct iree_hal_queue_t iree_hal_queue_t;
+
+// A list of semaphores and their corresponding payloads.
+// When signaling each semaphore will be set to the new payload value provided.
+// When waiting each semaphore must reach or exceed the payload value.
+// This points at external storage and does not retain the semaphores itself.
+typedef struct iree_hal_semaphore_list_t {
+  // Number of semaphore timepoints in the list.
+  iree_host_size_t count;
+
+  // Semaphore pointers paired with |payload_values|. Unowned.
+  iree_hal_semaphore_t** semaphores;
+
+  // Timeline payload values paired with |semaphores|. Unowned.
+  uint64_t* payload_values;
+} iree_hal_semaphore_list_t;
+
+// Returns an empty semaphore list.
+static inline iree_hal_semaphore_list_t iree_hal_semaphore_list_empty(void) {
+  iree_hal_semaphore_list_t list = {0};
+  return list;
+}
+
+// Returns true if |semaphore_list| is empty.
+static inline bool iree_hal_semaphore_list_is_empty(
+    iree_hal_semaphore_list_t semaphore_list) {
+  return semaphore_list.count == 0;
+}
+
+// Bitfield specifying flags controlling a fill operation.
+typedef uint64_t iree_hal_fill_flags_t;
+enum iree_hal_fill_flag_bits_t {
+  IREE_HAL_FILL_FLAG_NONE = 0,
+};
+
+// Bitfield specifying flags controlling an update operation.
+typedef uint64_t iree_hal_update_flags_t;
+enum iree_hal_update_flag_bits_t {
+  IREE_HAL_UPDATE_FLAG_NONE = 0,
+};
+
+// Bitfield specifying flags controlling a copy operation.
+typedef uint64_t iree_hal_copy_flags_t;
+enum iree_hal_copy_flag_bits_t {
+  IREE_HAL_COPY_FLAG_NONE = 0,
+};
+
+// Identifies the payload active in an iree_hal_transfer_operation_t.
+typedef enum iree_hal_transfer_operation_type_t {
+  // Repeats a captured pattern across a device buffer range.
+  IREE_HAL_TRANSFER_OPERATION_TYPE_FILL = 0,
+
+  // Copies captured host bytes into a device buffer range.
+  IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE = 1,
+
+  // Copies between two device buffer ranges.
+  IREE_HAL_TRANSFER_OPERATION_TYPE_COPY = 2,
+
+  // Reads borrowed host bytes into a device buffer range after queue waits.
+  IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD = 3,
+
+  // Writes a device buffer range into borrowed host memory after queue waits.
+  IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD = 4,
+} iree_hal_transfer_operation_type_t;
+
+// One operation in a queue transfer transaction.
+//
+// Operations in a transaction are unordered siblings. Overlapping ranges are
+// valid only when every access is a read; any overlapping write is a data race.
+typedef struct iree_hal_transfer_operation_t {
+  // Operation type selecting the active payload below.
+  iree_hal_transfer_operation_type_t type;
+
+  union {
+    // IREE_HAL_TRANSFER_OPERATION_TYPE_FILL payload.
+    struct {
+      // Buffer receiving the repeated pattern.
+      iree_hal_buffer_t* target_buffer;
+
+      // Byte offset into |target_buffer| where the fill begins.
+      iree_device_size_t target_offset;
+
+      // Number of bytes to fill.
+      iree_device_size_t length;
+
+      // Pattern bytes captured before iree_hal_queue_transfer returns.
+      const void* pattern;
+
+      // Number of bytes in |pattern|.
+      iree_host_size_t pattern_length;
+
+      // Flags controlling fill behavior.
+      iree_hal_fill_flags_t flags;
+    } fill;
+
+    // IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE payload.
+    struct {
+      // Host allocation containing bytes captured before the call returns.
+      const void* source_buffer;
+
+      // Byte offset into |source_buffer| where the update begins.
+      iree_host_size_t source_offset;
+
+      // Buffer receiving the captured bytes.
+      iree_hal_buffer_t* target_buffer;
+
+      // Byte offset into |target_buffer| where the update begins.
+      iree_device_size_t target_offset;
+
+      // Number of bytes to update.
+      iree_device_size_t length;
+
+      // Flags controlling update behavior.
+      iree_hal_update_flags_t flags;
+    } update;
+
+    // IREE_HAL_TRANSFER_OPERATION_TYPE_COPY payload.
+    struct {
+      // Buffer providing the source bytes.
+      iree_hal_buffer_t* source_buffer;
+
+      // Byte offset into |source_buffer| where the copy begins.
+      iree_device_size_t source_offset;
+
+      // Buffer receiving the copied bytes.
+      iree_hal_buffer_t* target_buffer;
+
+      // Byte offset into |target_buffer| where the copy begins.
+      iree_device_size_t target_offset;
+
+      // Number of bytes to copy.
+      iree_device_size_t length;
+
+      // Flags controlling copy behavior.
+      iree_hal_copy_flags_t flags;
+    } copy;
+
+    // IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD payload.
+    struct {
+      // Host bytes read after the transaction wait timepoints are reached.
+      // The allocation is borrowed until terminal transaction completion.
+      const void* source;
+
+      // Buffer receiving the host bytes.
+      iree_hal_buffer_t* target_buffer;
+
+      // Byte offset into |target_buffer| where the upload begins.
+      iree_device_size_t target_offset;
+
+      // Number of bytes to upload.
+      iree_device_size_t length;
+    } upload;
+
+    // IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD payload.
+    struct {
+      // Buffer providing the source bytes.
+      iree_hal_buffer_t* source_buffer;
+
+      // Byte offset into |source_buffer| where the download begins.
+      iree_device_size_t source_offset;
+
+      // Host allocation receiving bytes before completion is published.
+      // The allocation is borrowed until terminal transaction completion.
+      void* target;
+
+      // Number of bytes to download.
+      iree_device_size_t length;
+    } download;
+  };
+} iree_hal_transfer_operation_t;
 
 // A bitmap indicating logical device queue affinity.
 // Used to direct submissions to implementation-defined device queues. A bit may
@@ -171,6 +343,83 @@ IREE_API_EXPORT void iree_hal_queue_release(iree_hal_queue_t* queue);
 IREE_API_EXPORT const iree_hal_queue_family_t* iree_hal_queue_family(
     const iree_hal_queue_t* queue);
 
+// Enqueues one transfer transaction on the exact hardware |queue|.
+//
+// All operations become eligible after every |wait_semaphore_list| timepoint is
+// reached. The |signal_semaphore_list| timepoints are published only after all
+// operations complete, including any final copies into download host memory.
+// An empty transaction is a semaphore barrier.
+//
+// Implementations validate and capture the complete transaction before
+// returning. Fill patterns and update source bytes are copied during capture.
+// A synchronous failure captures no operations, schedules no work, and does not
+// modify the signal semaphores. Asynchronous failures after successful capture
+// are reported through the signal semaphores.
+//
+// Zero-length operations are ignored and their remaining payload fields are not
+// inspected. A transaction containing only zero-length operations is therefore
+// a semaphore barrier.
+//
+// Non-empty uploads and downloads borrow their host ranges until the
+// transaction completes or fails asynchronously and therefore require at least
+// one signal semaphore. Upload source reads and download target writes occur
+// after the wait timepoints are reached. Callers may order host writes before
+// an upload using those waits but must not concurrently access a borrowed range
+// while its transfer may be active.
+IREE_API_EXPORT iree_status_t
+iree_hal_queue_transfer(iree_hal_queue_t* queue,
+                        const iree_hal_semaphore_list_t wait_semaphore_list,
+                        const iree_hal_semaphore_list_t signal_semaphore_list,
+                        iree_host_size_t operation_count,
+                        const iree_hal_transfer_operation_t* operations);
+
+// Enqueues a scalar fill as a one-operation transfer transaction.
+IREE_API_EXPORT iree_status_t iree_hal_queue_fill(
+    iree_hal_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_device_size_t length, const void* pattern,
+    iree_host_size_t pattern_length, iree_hal_fill_flags_t flags);
+
+// Enqueues a scalar captured update as a one-operation transfer transaction.
+IREE_API_EXPORT iree_status_t iree_hal_queue_update(
+    iree_hal_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    const void* source_buffer, iree_host_size_t source_offset,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_device_size_t length, iree_hal_update_flags_t flags);
+
+// Enqueues a scalar device buffer copy as a one-operation transaction.
+IREE_API_EXPORT iree_status_t iree_hal_queue_copy(
+    iree_hal_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_device_size_t length, iree_hal_copy_flags_t flags);
+
+// Enqueues a scalar upload from borrowed host memory.
+// The non-empty |source| range remains live and unmodified until terminal
+// completion is observed through |signal_semaphore_list|.
+IREE_API_EXPORT iree_status_t iree_hal_queue_upload(
+    iree_hal_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list, const void* source,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_device_size_t length);
+
+// Enqueues a scalar download into borrowed host memory.
+// The non-empty |target| range remains live and inaccessible until terminal
+// completion is observed through |signal_semaphore_list|.
+IREE_API_EXPORT iree_status_t iree_hal_queue_download(
+    iree_hal_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
+    void* target, iree_device_size_t length);
+
 //===----------------------------------------------------------------------===//
 // iree_hal_queue_family_t implementation details
 //===----------------------------------------------------------------------===//
@@ -195,6 +444,14 @@ typedef struct iree_hal_queue_vtable_t {
   // Implementations embedding queues in a device allocation deinitialize the
   // queue but leave storage reclamation to the device.
   void(IREE_API_PTR* destroy)(iree_hal_queue_t* queue);
+
+  // Enqueues an all-or-nothing transfer transaction.
+  iree_status_t(IREE_API_PTR* transfer)(
+      iree_hal_queue_t* queue,
+      const iree_hal_semaphore_list_t wait_semaphore_list,
+      const iree_hal_semaphore_list_t signal_semaphore_list,
+      iree_host_size_t operation_count,
+      const iree_hal_transfer_operation_t* operations);
 } iree_hal_queue_vtable_t;
 IREE_HAL_ASSERT_VTABLE_LAYOUT(iree_hal_queue_vtable_t);
 
