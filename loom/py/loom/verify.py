@@ -1124,6 +1124,8 @@ def _scalar_satisfies_constraint(
         return scalar_kind in _INTEGER_SCALAR_KINDS
     if constraint == TypeConstraint.FLOAT:
         return scalar_kind in _FLOAT_SCALAR_KINDS
+    if constraint == TypeConstraint.PAYLOAD_SCALAR:
+        return scalar_kind in _PAYLOAD_SCALAR_KINDS
     if constraint == TypeConstraint.BITWISE_SCALAR:
         return scalar_kind in _BITWISE_SCALAR_KINDS
     if constraint == TypeConstraint.BYTE_PATTERN_SCALAR:
@@ -1199,6 +1201,8 @@ _FLOAT_SCALAR_KINDS = frozenset(
         ScalarTypeKind.F64,
     }
 )
+
+_PAYLOAD_SCALAR_KINDS = _INTEGER_SCALAR_KINDS | _FLOAT_SCALAR_KINDS
 
 _BYTE_PATTERN_SCALAR_KINDS = frozenset(
     {
