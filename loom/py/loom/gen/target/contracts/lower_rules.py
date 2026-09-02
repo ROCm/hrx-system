@@ -162,7 +162,7 @@ def _generate_header(*, header_guard: str, symbol_name: str) -> str:
             f"#ifndef {header_guard}",
             f"#define {header_guard}",
             "",
-            '#include "loom/codegen/low/lower/lower_rules.h"',
+            '#include "loom/codegen/low/lower/rules.h"',
             "",
             "#ifdef __cplusplus",
             'extern "C" {',

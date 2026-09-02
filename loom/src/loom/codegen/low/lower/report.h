@@ -13,8 +13,8 @@
 // result is deinitialized. Per-function analysis state is arena-backed and
 // lives only for the active lowering call.
 
-#ifndef LOOM_CODEGEN_LOW_LOWER_LOWER_REPORT_H_
-#define LOOM_CODEGEN_LOW_LOWER_LOWER_REPORT_H_
+#ifndef LOOM_CODEGEN_LOW_LOWER_REPORT_H_
+#define LOOM_CODEGEN_LOW_LOWER_REPORT_H_
 
 #include "iree/base/api.h"
 
@@ -81,4 +81,4 @@ iree_status_t loom_low_lower_record_memory_report_row(
 }  // extern "C"
 #endif
 
-#endif  // LOOM_CODEGEN_LOW_LOWER_LOWER_REPORT_H_
+#endif  // LOOM_CODEGEN_LOW_LOWER_REPORT_H_

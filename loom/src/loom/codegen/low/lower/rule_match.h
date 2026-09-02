@@ -10,11 +10,11 @@
 // target features, and descriptor availability. It returns a stable selected
 // rule row or the best structured rejection; it never emits target-Low IR.
 
-#ifndef LOOM_CODEGEN_LOW_LOWER_LOWER_RULE_MATCH_H_
-#define LOOM_CODEGEN_LOW_LOWER_LOWER_RULE_MATCH_H_
+#ifndef LOOM_CODEGEN_LOW_LOWER_RULE_MATCH_H_
+#define LOOM_CODEGEN_LOW_LOWER_RULE_MATCH_H_
 
 #include "iree/base/api.h"
-#include "loom/codegen/low/lower/lower_rules.h"
+#include "loom/codegen/low/lower/rules.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -215,4 +215,4 @@ iree_status_t loom_low_lower_rule_set_emit_selection_failure(
 }  // extern "C"
 #endif
 
-#endif  // LOOM_CODEGEN_LOW_LOWER_LOWER_RULE_MATCH_H_
+#endif  // LOOM_CODEGEN_LOW_LOWER_RULE_MATCH_H_

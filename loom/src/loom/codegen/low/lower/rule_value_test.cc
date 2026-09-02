@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/codegen/low/lower/lower_rule_value.h"
+#include "loom/codegen/low/lower/rule_value.h"
 
 #include <cstdint>
 

@@ -9,12 +9,12 @@
 #include <string.h>
 
 #include "loom/analysis/contract_vector.h"
+#include "loom/codegen/low/lower/context.h"
 #include "loom/codegen/low/lower/contract_query.h"
-#include "loom/codegen/low/lower/lower_context.h"
-#include "loom/codegen/low/lower/lower_rule_emit.h"
-#include "loom/codegen/low/lower/lower_rule_match.h"
-#include "loom/codegen/low/lower/lower_rule_source_memory.h"
-#include "loom/codegen/low/lower/lower_rule_value.h"
+#include "loom/codegen/low/lower/rule_emit.h"
+#include "loom/codegen/low/lower/rule_match.h"
+#include "loom/codegen/low/lower/rule_source_memory.h"
+#include "loom/codegen/low/lower/rule_value.h"
 #include "loom/codegen/low/lower/source_query.h"
 #include "loom/codegen/low/source_memory_plan.h"
 #include "loom/error/error_catalog.h"

@@ -7,8 +7,8 @@
 // Target-low descriptor result representation queries used by generated rule
 // emission and rule-owned value materializers.
 
-#ifndef LOOM_CODEGEN_LOW_LOWER_LOWER_RULE_DESCRIPTOR_H_
-#define LOOM_CODEGEN_LOW_LOWER_LOWER_RULE_DESCRIPTOR_H_
+#ifndef LOOM_CODEGEN_LOW_LOWER_RULE_DESCRIPTOR_H_
+#define LOOM_CODEGEN_LOW_LOWER_RULE_DESCRIPTOR_H_
 
 #include "iree/base/api.h"
 #include "loom/codegen/low/lower/lower.h"
@@ -31,4 +31,4 @@ iree_status_t loom_low_lower_rule_descriptor_result_type(
 }  // extern "C"
 #endif
 
-#endif  // LOOM_CODEGEN_LOW_LOWER_LOWER_RULE_DESCRIPTOR_H_
+#endif  // LOOM_CODEGEN_LOW_LOWER_RULE_DESCRIPTOR_H_

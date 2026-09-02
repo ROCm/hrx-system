@@ -4,16 +4,18 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/codegen/low/lower/lower_report.h"
+#include "loom/codegen/low/lower/rule_emit.h"
 
+#include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
-#include "loom/codegen/low/lower/lower.h"
 #include "loom/codegen/low/testing/source_workload.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/func/ops.h"
+#include "loom/ops/low/ops.h"
 #include "loom/ops/scalar/ops.h"
+#include "loom/target/test/descriptors.h"
 #include "loom/target/test/low_registry.h"
 #include "loom/target/test/lower.h"
 #include "loom/target/test/target_records.h"
@@ -22,7 +24,7 @@
 namespace loom {
 namespace {
 
-class LowLowerReportTest : public ::testing::Test {
+class LowLowerRuleEmitTest : public ::testing::Test {
  protected:
   void SetUp() override {
     iree_arena_block_pool_initialize(4096, iree_allocator_system(),
@@ -31,9 +33,9 @@ class LowLowerReportTest : public ::testing::Test {
     loom_context_initialize(iree_allocator_system(), &context_);
     IREE_ASSERT_OK(loom_low_source_workload_register_dialects(&context_));
     IREE_ASSERT_OK(loom_context_finalize(&context_));
-    IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("lower_report_test"),
-                                        &block_pool_, nullptr,
-                                        iree_allocator_system(), &module_));
+    IREE_ASSERT_OK(loom_module_allocate(
+        &context_, IREE_SV("lower_rule_emit_test"), &block_pool_, nullptr,
+        iree_allocator_system(), &module_));
     loom_test_low_descriptor_registry_initialize(&descriptor_registry_);
     target_facts_.fact_type = &loom_test_target_fact_type;
     target_facts_.storage.bundle = *loom_test_target_bundles.values[1];
@@ -43,7 +45,6 @@ class LowLowerReportTest : public ::testing::Test {
     fact_table_.context.target_facts = &target_facts_;
     IREE_ASSERT_OK(
         loom_value_fact_table_compute(&fact_table_, module_, function_));
-
     options_.target_facts = &target_facts_;
     options_.descriptor_registry = &descriptor_registry_.registry;
     options_.policy = loom_test_low_lower_policy();
@@ -63,8 +64,8 @@ class LowLowerReportTest : public ::testing::Test {
     loom_builder_initialize(module_, &module_->arena,
                             loom_module_block(module_), &module_builder);
     loom_string_id_t name_id = LOOM_STRING_ID_INVALID;
-    IREE_ASSERT_OK(
-        loom_builder_intern_string(&module_builder, IREE_SV("add"), &name_id));
+    IREE_ASSERT_OK(loom_builder_intern_string(&module_builder,
+                                              IREE_SV("emit_add"), &name_id));
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_ASSERT_OK(loom_module_add_symbol(module_, name_id, &symbol_id));
     const loom_symbol_ref_t symbol = {
@@ -82,17 +83,19 @@ class LowLowerReportTest : public ::testing::Test {
         argument_types, IREE_ARRAYSIZE(argument_types), &i32_type, 1, nullptr,
         0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &function_op));
     function_ = loom_func_like_cast(module_, function_op);
+    uint16_t argument_count = 0;
+    const loom_value_id_t* arguments =
+        loom_func_like_arg_ids(function_, &argument_count);
+    ASSERT_EQ(argument_count, 2u);
 
-    loom_block_t* entry_block =
-        loom_region_entry_block(loom_func_like_body(function_));
-    const loom_value_id_t lhs = loom_block_arg_id(entry_block, 0);
-    const loom_value_id_t rhs = loom_block_arg_id(entry_block, 1);
     loom_builder_t body_builder;
-    loom_builder_initialize(module_, &module_->arena, entry_block,
-                            &body_builder);
+    loom_builder_initialize(
+        module_, &module_->arena,
+        loom_region_entry_block(loom_func_like_body(function_)), &body_builder);
     body_builder.ip.parent_op = function_op;
     loom_op_t* add_op = nullptr;
-    IREE_ASSERT_OK(loom_scalar_addi_build(&body_builder, 0, lhs, rhs, i32_type,
+    IREE_ASSERT_OK(loom_scalar_addi_build(&body_builder, /*overflow_flags=*/0,
+                                          arguments[0], arguments[1], i32_type,
                                           LOOM_LOCATION_UNKNOWN, &add_op));
     const loom_value_id_t result = loom_scalar_addi_result(add_op);
     loom_op_t* return_op = nullptr;
@@ -112,45 +115,45 @@ class LowLowerReportTest : public ::testing::Test {
   loom_low_lower_result_t result_ = {};
 };
 
-TEST_F(LowLowerReportTest, CapturesAndReleasesSelectionRows) {
-  options_.report_allocator = iree_allocator_system();
+TEST_F(LowLowerRuleEmitTest, EmitsDescriptorOperandsAndResultBinding) {
   IREE_ASSERT_OK(
       loom_low_lower_function(module_, function_, &options_, &result_));
+  ASSERT_EQ(result_.error_count, 0u);
+  ASSERT_NE(result_.low_func_op, nullptr);
 
-  EXPECT_EQ(result_.selected_source_op_count, 1u);
-  EXPECT_EQ(result_.emitted_low_op_count, 1u);
-  ASSERT_EQ(result_.report_rows.count, 1u);
-  ASSERT_NE(result_.report_rows.head, nullptr);
-  ASSERT_EQ(result_.report_rows.head, result_.report_rows.tail);
-  ASSERT_EQ(result_.report_rows.head->count, 1u);
-  const loom_low_lower_report_row_t& row =
-      loom_low_lower_report_row_vec_const_rows(result_.report_rows.head)[0];
-  EXPECT_TRUE(iree_string_view_equal(row.function_name, IREE_SV("add")));
-  EXPECT_EQ(row.source_op_kind, LOOM_OP_SCALAR_ADDI);
-  EXPECT_EQ(row.selection_kind, LOOM_LOW_LOWER_REPORT_SELECTION_RULE);
-  EXPECT_EQ(row.emitted_low_op_count, 1u);
-  EXPECT_EQ(row.execution_count_plus_one, 2u);
-  EXPECT_TRUE(iree_string_view_equal(row.descriptor_semantic_tag,
-                                     IREE_SV("integer.add.i32")));
+  const loom_func_like_t low_function =
+      loom_func_like_cast(module_, result_.low_func_op);
+  uint16_t argument_count = 0;
+  const loom_value_id_t* arguments =
+      loom_func_like_arg_ids(low_function, &argument_count);
+  ASSERT_EQ(argument_count, 2u);
 
-  loom_low_lower_result_deinitialize(&result_);
-  EXPECT_EQ(result_.report_rows.count, 0u);
-  EXPECT_EQ(result_.report_rows.head, nullptr);
-  EXPECT_EQ(result_.report_rows.tail, nullptr);
-  EXPECT_TRUE(iree_allocator_is_null(result_.report_allocator));
-  EXPECT_TRUE(iree_allocator_is_null(result_.memory_report_row_allocator));
-}
+  loom_op_t* emitted_add = nullptr;
+  loom_op_t* emitted_return = nullptr;
+  loom_op_t* op = nullptr;
+  loom_block_for_each_op(
+      loom_region_entry_block(loom_func_like_body(low_function)), op) {
+    if (loom_low_op_isa(op) && loom_low_op_descriptor(op) ==
+                                   TEST_LOW_CORE_DESCRIPTOR_REF_TEST_ADD_I32) {
+      ASSERT_EQ(emitted_add, nullptr);
+      emitted_add = op;
+    } else if (loom_low_return_isa(op)) {
+      emitted_return = op;
+    }
+  }
+  ASSERT_NE(emitted_add, nullptr);
+  ASSERT_NE(emitted_return, nullptr);
 
-TEST_F(LowLowerReportTest, DisabledReportsProduceNoRows) {
-  IREE_ASSERT_OK(
-      loom_low_lower_function(module_, function_, &options_, &result_));
-
-  EXPECT_EQ(result_.selected_source_op_count, 0u);
-  EXPECT_EQ(result_.emitted_low_op_count, 0u);
-  EXPECT_EQ(result_.report_rows.count, 0u);
-  EXPECT_EQ(result_.report_rows.head, nullptr);
-  EXPECT_EQ(result_.memory_report_rows.count, 0u);
-  EXPECT_EQ(result_.memory_report_rows.rows, nullptr);
+  const loom_value_slice_t operands = loom_low_op_operands(emitted_add);
+  ASSERT_EQ(operands.count, 2u);
+  EXPECT_EQ(operands.values[0], arguments[0]);
+  EXPECT_EQ(operands.values[1], arguments[1]);
+  const loom_value_slice_t results = loom_low_op_results(emitted_add);
+  ASSERT_EQ(results.count, 1u);
+  const loom_value_slice_t return_values =
+      loom_low_return_values(emitted_return);
+  ASSERT_EQ(return_values.count, 1u);
+  EXPECT_EQ(return_values.values[0], results.values[0]);
 }
 
 }  // namespace

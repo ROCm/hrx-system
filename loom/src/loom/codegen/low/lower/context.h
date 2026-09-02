@@ -11,8 +11,8 @@
 // function-lifetime state shared by the lowering orchestrator, planning,
 // callable-boundary, reporting, and rule-interpreter components.
 
-#ifndef LOOM_CODEGEN_LOW_LOWER_LOWER_CONTEXT_H_
-#define LOOM_CODEGEN_LOW_LOWER_LOWER_CONTEXT_H_
+#ifndef LOOM_CODEGEN_LOW_LOWER_CONTEXT_H_
+#define LOOM_CODEGEN_LOW_LOWER_CONTEXT_H_
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
@@ -20,8 +20,8 @@
 #include "loom/analysis/view_regions.h"
 #include "loom/codegen/low/builder.h"
 #include "loom/codegen/low/lower/lower.h"
-#include "loom/codegen/low/lower/lower_report.h"
-#include "loom/codegen/low/lower/lower_rules.h"
+#include "loom/codegen/low/lower/report.h"
+#include "loom/codegen/low/lower/rules.h"
 #include "loom/codegen/low/lower/source_plan.h"
 #include "loom/codegen/low/memory_access.h"
 #include "loom/codegen/low/source_memory_plan.h"
@@ -191,4 +191,4 @@ void loom_low_lower_emission_scope_end(loom_low_lower_context_t* context);
 }  // extern "C"
 #endif
 
-#endif  // LOOM_CODEGEN_LOW_LOWER_LOWER_CONTEXT_H_
+#endif  // LOOM_CODEGEN_LOW_LOWER_CONTEXT_H_

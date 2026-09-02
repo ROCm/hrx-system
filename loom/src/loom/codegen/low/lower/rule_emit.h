@@ -10,11 +10,11 @@
 // descriptors. It interprets the rule's emit program into target-Low operands,
 // attributes, packets, result bindings, aliases, and elisions.
 
-#ifndef LOOM_CODEGEN_LOW_LOWER_LOWER_RULE_EMIT_H_
-#define LOOM_CODEGEN_LOW_LOWER_LOWER_RULE_EMIT_H_
+#ifndef LOOM_CODEGEN_LOW_LOWER_RULE_EMIT_H_
+#define LOOM_CODEGEN_LOW_LOWER_RULE_EMIT_H_
 
 #include "iree/base/api.h"
-#include "loom/codegen/low/lower/lower_rules.h"
+#include "loom/codegen/low/lower/rules.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -47,4 +47,4 @@ iree_status_t loom_low_lower_rule_set_emit_rule(
 }  // extern "C"
 #endif
 
-#endif  // LOOM_CODEGEN_LOW_LOWER_LOWER_RULE_EMIT_H_
+#endif  // LOOM_CODEGEN_LOW_LOWER_RULE_EMIT_H_

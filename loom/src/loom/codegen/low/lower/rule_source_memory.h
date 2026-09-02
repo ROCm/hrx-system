@@ -7,11 +7,11 @@
 // Source-memory matching and address materialization for generated lowering
 // rules.
 
-#ifndef LOOM_CODEGEN_LOW_LOWER_LOWER_RULE_SOURCE_MEMORY_H_
-#define LOOM_CODEGEN_LOW_LOWER_LOWER_RULE_SOURCE_MEMORY_H_
+#ifndef LOOM_CODEGEN_LOW_LOWER_RULE_SOURCE_MEMORY_H_
+#define LOOM_CODEGEN_LOW_LOWER_RULE_SOURCE_MEMORY_H_
 
 #include "iree/base/api.h"
-#include "loom/codegen/low/lower/lower_rules.h"
+#include "loom/codegen/low/lower/rules.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -96,4 +96,4 @@ iree_status_t loom_low_lower_rule_materialize_source_memory_address(
 }  // extern "C"
 #endif
 
-#endif  // LOOM_CODEGEN_LOW_LOWER_LOWER_RULE_SOURCE_MEMORY_H_
+#endif  // LOOM_CODEGEN_LOW_LOWER_RULE_SOURCE_MEMORY_H_

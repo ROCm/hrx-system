@@ -13,34 +13,34 @@ loom_cc_library(
   NAME
     lower
   HDRS
+    "context.h"
     "contract_query.h"
     "function_boundary.h"
     "lower.h"
-    "lower_context.h"
-    "lower_report.h"
-    "lower_rule_descriptor.h"
-    "lower_rule_emit.h"
-    "lower_rule_match.h"
-    "lower_rule_source_memory.h"
-    "lower_rule_value.h"
-    "lower_rules.h"
     "module_state.h"
+    "report.h"
+    "rule_descriptor.h"
+    "rule_emit.h"
+    "rule_match.h"
+    "rule_source_memory.h"
+    "rule_value.h"
+    "rules.h"
     "source_plan.h"
     "source_query.h"
   SRCS
+    "context.c"
     "contract_query.c"
     "function_boundary.c"
     "lower.c"
-    "lower_context.c"
-    "lower_policy.c"
-    "lower_report.c"
-    "lower_rule_descriptor.c"
-    "lower_rule_emit.c"
-    "lower_rule_match.c"
-    "lower_rule_source_memory_match.c"
-    "lower_rule_source_memory_materialize.c"
-    "lower_rule_value.c"
     "module_state.c"
+    "policy.c"
+    "report.c"
+    "rule_descriptor.c"
+    "rule_emit.c"
+    "rule_match.c"
+    "rule_source_memory_match.c"
+    "rule_source_memory_materialize.c"
+    "rule_value.c"
     "source_plan.c"
     "source_query.c"
   DEPS
@@ -128,9 +128,9 @@ loom_cc_test(
 
 loom_cc_test(
   NAME
-    lower_context_test
+    context_test
   SRCS
-    "lower_context_test.cc"
+    "context_test.cc"
   DEPS
     ::lower
     iree::testing::gtest
@@ -139,9 +139,9 @@ loom_cc_test(
 
 loom_cc_test(
   NAME
-    lower_rule_value_test
+    rule_value_test
   SRCS
-    "lower_rule_value_test.cc"
+    "rule_value_test.cc"
   DEPS
     ::lower
     iree::base::internal::arena
@@ -157,9 +157,9 @@ loom_cc_test(
 
 loom_cc_test(
   NAME
-    lower_rule_match_test
+    rule_match_test
   SRCS
-    "lower_rule_match_test.cc"
+    "rule_match_test.cc"
   DEPS
     ::lower
     iree::base::internal::arena
@@ -172,9 +172,9 @@ loom_cc_test(
 
 loom_cc_test(
   NAME
-    lower_rule_emit_test
+    rule_emit_test
   SRCS
-    "lower_rule_emit_test.cc"
+    "rule_emit_test.cc"
   DEPS
     ::lower
     iree::base::internal::arena
@@ -254,9 +254,9 @@ loom_cc_test(
 
 loom_cc_test(
   NAME
-    lower_report_test
+    report_test
   SRCS
-    "lower_report_test.cc"
+    "report_test.cc"
   DEPS
     ::lower
     iree::testing::gtest
@@ -296,9 +296,9 @@ loom_cc_test(
 
 loom_cc_test(
   NAME
-    lower_policy_registry_test
+    policy_registry_test
   SRCS
-    "lower_policy_registry_test.cc"
+    "policy_registry_test.cc"
   DEPS
     ::lower
     iree::testing::gtest

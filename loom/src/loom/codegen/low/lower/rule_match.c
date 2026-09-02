@@ -4,16 +4,16 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/codegen/low/lower/lower_rule_match.h"
+#include "loom/codegen/low/lower/rule_match.h"
 
 #include <stdint.h>
 #include <string.h>
 
 #include "iree/base/internal/math.h"
 #include "loom/analysis/symbolic_expr_proof.h"
-#include "loom/codegen/low/lower/lower_context.h"
-#include "loom/codegen/low/lower/lower_rule_source_memory.h"
-#include "loom/codegen/low/lower/lower_rule_value.h"
+#include "loom/codegen/low/lower/context.h"
+#include "loom/codegen/low/lower/rule_source_memory.h"
+#include "loom/codegen/low/lower/rule_value.h"
 #include "loom/ir/context.h"
 #include "loom/ir/float_facts.h"
 #include "loom/ir/module.h"

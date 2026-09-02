@@ -16,7 +16,7 @@
 #ifndef LOOM_CODEGEN_LOW_LOWER_SOURCE_PLAN_H_
 #define LOOM_CODEGEN_LOW_LOWER_SOURCE_PLAN_H_
 
-#include "loom/codegen/low/lower/lower_rules.h"
+#include "loom/codegen/low/lower/rules.h"
 
 #ifdef __cplusplus
 extern "C" {

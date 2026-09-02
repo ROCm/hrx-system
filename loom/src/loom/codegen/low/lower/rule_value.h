@@ -11,11 +11,11 @@
 // on how source values and scalar facts are projected. This component owns that
 // shared interpretation; it does not select rules or emit target-Low IR.
 
-#ifndef LOOM_CODEGEN_LOW_LOWER_LOWER_RULE_VALUE_H_
-#define LOOM_CODEGEN_LOW_LOWER_LOWER_RULE_VALUE_H_
+#ifndef LOOM_CODEGEN_LOW_LOWER_RULE_VALUE_H_
+#define LOOM_CODEGEN_LOW_LOWER_RULE_VALUE_H_
 
 #include "iree/base/api.h"
-#include "loom/codegen/low/lower/lower_rules.h"
+#include "loom/codegen/low/lower/rules.h"
 #include "loom/util/fact_table.h"
 
 #ifdef __cplusplus
@@ -72,4 +72,4 @@ bool loom_low_lower_rule_value_facts_u32_divisor_magic_info(
 }  // extern "C"
 #endif
 
-#endif  // LOOM_CODEGEN_LOW_LOWER_LOWER_RULE_VALUE_H_
+#endif  // LOOM_CODEGEN_LOW_LOWER_RULE_VALUE_H_

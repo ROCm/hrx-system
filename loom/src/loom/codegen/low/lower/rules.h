@@ -8,10 +8,10 @@
 //
 // Targets use these records to describe source op guards and descriptor-backed
 // Low packet emission as compact .rodata. Matching and emission are separate
-// interpreters declared by lower_rule_match.h and lower_rule_emit.h.
+// interpreters declared by rule_match.h and rule_emit.h.
 
-#ifndef LOOM_CODEGEN_LOW_LOWER_LOWER_RULES_H_
-#define LOOM_CODEGEN_LOW_LOWER_LOWER_RULES_H_
+#ifndef LOOM_CODEGEN_LOW_LOWER_RULES_H_
+#define LOOM_CODEGEN_LOW_LOWER_RULES_H_
 
 #include "iree/base/api.h"
 #include "loom/codegen/low/lower/lower.h"
@@ -862,4 +862,4 @@ static inline iree_string_view_t loom_low_lower_rule_set_string(
 }  // extern "C"
 #endif
 
-#endif  // LOOM_CODEGEN_LOW_LOWER_LOWER_RULES_H_
+#endif  // LOOM_CODEGEN_LOW_LOWER_RULES_H_
