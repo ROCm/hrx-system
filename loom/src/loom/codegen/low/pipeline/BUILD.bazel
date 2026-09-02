@@ -58,6 +58,21 @@ loom_cc_library(
     ],
 )
 
+loom_cc_test(
+    name = "legalizer_registry_test",
+    srcs = ["legalizer_registry_test.cc"],
+    deps = [
+        ":legalizer_registry",
+        "//loom/src/loom/ops/buffer",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/ops/vector",
+        "//loom/src/loom/ops/view",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 loom_cc_library(
     name = "pass_environment",
     srcs = ["pass_environment.c"],

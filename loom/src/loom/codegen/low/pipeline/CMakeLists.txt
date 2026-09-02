@@ -36,6 +36,22 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_test(
+  NAME
+    legalizer_registry_test
+  SRCS
+    "legalizer_registry_test.cc"
+  DEPS
+    ::legalizer_registry
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::ops::buffer
+    loom::ops::scalar
+    loom::ops::vector
+    loom::ops::view
+)
+
 loom_cc_library(
   NAME
     pass_environment
