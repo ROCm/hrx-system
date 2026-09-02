@@ -9,6 +9,7 @@
 #include <stdio.h>
 
 #include "iree/io/stdio_stream.h"
+#include "iree/io/stdio_util.h"
 #include "iree/io/stream.h"
 #include "loomc/iree.h"
 #include "source.h"
@@ -130,6 +131,16 @@ loomc_status_t loomc_artifact_write_to_file(const loomc_artifact_t* artifact,
                              "artifact and file must not be NULL");
   }
   LOOMC_RETURN_IF_ERROR(loomc_artifact_validate_contents(artifact->contents));
+  // The Windows CRT defaults stdout and text-opened files to newline
+  // translation. Artifacts are byte sequences even when their format is text.
+#if defined(IREE_PLATFORM_WINDOWS)
+  if (fflush(file) != 0 || IREE_IO_SET_BINARY_MODE(file) == -1) {
+    return loomc_make_status(LOOMC_STATUS_UNKNOWN,
+                             "failed to set artifact file to binary mode");
+  }
+#else
+  IREE_IO_SET_BINARY_MODE(file);
+#endif  // IREE_PLATFORM_WINDOWS
   return loomc_byte_sequence_enumerate(
       artifact->contents, (loomc_byte_sequence_callback_t){
                               .fn = loomc_artifact_write_file_segment,
