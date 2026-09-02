@@ -75,6 +75,21 @@ loom_cc_library(
     ],
 )
 
+loom_cc_test(
+    name = "function_contract_verify_test",
+    srcs = ["function_contract_verify_test.cc"],
+    deps = [
+        ":function_contract_verify",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/testing:diagnostic_matchers",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 loom_cc_library(
     name = "callable_effects",
     srcs = ["callable_effects.c"],

@@ -17,8 +17,10 @@
 extern "C" {
 #endif
 
-// Verifies generic function target contract structure. Dialect-specific
-// verifiers should call this before checking dialect-local function rules.
+// Verifies generic function signature and target contracts. Predicate values
+// must belong to the function signature and satisfy the predicate kind's value
+// type domain. Dialect-specific verifiers should call this before checking
+// dialect-local function rules.
 iree_status_t loom_function_contract_verify(const loom_module_t* module,
                                             const loom_op_t* op,
                                             iree_diagnostic_emitter_t emitter);

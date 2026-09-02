@@ -5,6 +5,38 @@ func.def @semantic() {
   func.return
 }
 
+// Named function results are part of the signature contract and may carry
+// postconditions relating them to function arguments.
+func.def @postcondition(%value: i32) -> (%result: i32) where [eq(%result, %value)] {
+  func.return %value : i32
+}
+
+// ====
+
+// A predicate constrains a signature value rather than being a standalone
+// compile-time boolean expression.
+// ERROR@+1: STRUCTURE/032 {op_name="func.def", field_name="predicates[0].arg[0]", required_origin="a function argument or result"}
+func.def @constant_predicate(%value: i32) where [eq(4, %value)] {
+  func.return
+}
+
+// ====
+
+// Integer relation predicates require integer-domain signature values.
+// ERROR@+1: TYPE/003 {operand_name="predicates[0].arg[0]", actual_type="f32", expected_constraint="integer, index, or offset scalar"}
+func.def @integer_predicate_on_float(%value: f32) where [eq(%value, 4)] {
+  func.return
+}
+
+// ====
+
+// Floating-point classification predicates require floating-point signature
+// values.
+// ERROR@+1: TYPE/003 {operand_name="predicates[0].arg[0]", actual_type="i32", expected_constraint="floating-point scalar"}
+func.def @float_predicate_on_integer(%value: i32) where [finite(%value)] {
+  func.return
+}
+
 // ====
 
 kernel.decl @launch_only() launch()
