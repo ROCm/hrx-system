@@ -451,10 +451,15 @@ static iree_status_t loom_function_verify_target_conditions(
   const loom_parameterized_attr_array_t requirements =
       loom_func_like_requires(function);
   for (iree_host_size_t i = 0; i < requirements.count; ++i) {
-    const loom_target_condition_descriptor_t* descriptor = NULL;
-    iree_status_t status = loom_target_condition_resolve(
-        module->context, requirements.values[i], &descriptor);
-    if (!iree_status_is_ok(status)) {
+    const loom_target_condition_descriptor_t* descriptor =
+        loom_target_condition_resolve(module->context, requirements.values[i]);
+    const iree_string_view_t invalid_reason =
+        descriptor != NULL
+            ? loom_target_condition_validate(descriptor, requirements.values[i])
+            : IREE_SV(
+                  "parameterized attribute family is not a target "
+                  "condition");
+    if (!iree_string_view_is_empty(invalid_reason)) {
       const loom_symbol_ref_t function_ref = loom_func_like_callee(function);
       const loom_symbol_t* function_symbol =
           &module->symbols.entries[function_ref.symbol_id];
@@ -465,7 +470,7 @@ static iree_status_t loom_function_verify_target_conditions(
               loom_param_u32((uint32_t)i),
               loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE,
                                         function.vtable->requires_attr_index)),
-          loom_param_string(iree_status_message(status)),
+          loom_param_string(invalid_reason),
       };
       loom_diagnostic_emission_t emission = {
           .op = function_op,
@@ -473,9 +478,7 @@ static iree_status_t loom_function_verify_target_conditions(
           .params = params,
           .param_count = IREE_ARRAYSIZE(params),
       };
-      iree_status_t emission_status = iree_diagnostic_emit(emitter, &emission);
-      iree_status_ignore(status);
-      return emission_status;
+      return iree_diagnostic_emit(emitter, &emission);
     }
   }
   return iree_ok_status();

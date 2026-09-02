@@ -32,17 +32,14 @@ iree_status_t loom_target_subgroup_size_facts(
       });
 }
 
-static iree_status_t loom_target_subgroup_size_condition_validate(
+static iree_string_view_t loom_target_subgroup_size_condition_validate(
     loom_attribute_t condition) {
   const int64_t subgroup_size = loom_target_subgroup_size_attr_size(condition);
   if (subgroup_size > 0 && subgroup_size <= UINT32_MAX) {
-    return iree_ok_status();
+    return iree_string_view_empty();
   }
-  return iree_make_status(
-      IREE_STATUS_INVALID_ARGUMENT,
-      "target.subgroup.size requires a nonzero unsigned 32-bit size; got "
-      "%" PRId64,
-      subgroup_size);
+  return IREE_SV(
+      "target.subgroup.size requires a nonzero unsigned 32-bit size");
 }
 
 static loom_target_condition_outcome_t

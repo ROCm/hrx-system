@@ -53,7 +53,6 @@ loom_cc_library(
     ::facts
     iree::base
     loom::ir
-    loom::util::bstring
   PUBLIC
 )
 

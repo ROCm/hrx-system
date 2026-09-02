@@ -34,7 +34,9 @@ enum loom_target_condition_outcome_e {
 
 // Validates family-specific value constraints at the authored IR boundary.
 // Generic structural verification has already established the family schema.
-typedef iree_status_t (*loom_target_condition_validate_fn_t)(
+// Returns an empty view when valid or a borrowed process-lifetime description
+// of the violated constraint when invalid.
+typedef iree_string_view_t (*loom_target_condition_validate_fn_t)(
     loom_attribute_t condition);
 
 // Evaluates one structurally and semantically verified condition.
@@ -85,12 +87,18 @@ typedef struct loom_target_condition_t {
 static_assert(sizeof(loom_target_condition_t) == 24,
               "resolved target condition must remain 24 bytes");
 
-// Resolves and validates one structurally verified parameterized attribute as
-// a target condition. This is a cold authored-input boundary. On success,
-// |out_descriptor| borrows static process-lifetime storage.
-iree_status_t loom_target_condition_resolve(
-    const loom_context_t* context, loom_attribute_t condition,
-    const loom_target_condition_descriptor_t** out_descriptor);
+// Resolves one structurally verified parameterized attribute family to its
+// target-condition semantics. Returns NULL when the registered family is not a
+// target condition. The returned descriptor has process lifetime.
+const loom_target_condition_descriptor_t* loom_target_condition_resolve(
+    const loom_context_t* context, loom_attribute_t condition);
+
+// Validates the family-specific value domain of one resolved target condition.
+// Returns an empty view when valid or a borrowed process-lifetime description
+// of the violated constraint when invalid.
+iree_string_view_t loom_target_condition_validate(
+    const loom_target_condition_descriptor_t* descriptor,
+    loom_attribute_t condition);
 
 // Evaluates one resolved descriptor/value pair against bound facts.
 // Provider summaries preserve this pair so selection performs only this
