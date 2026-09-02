@@ -41,8 +41,8 @@ typedef struct iree_hal_amdxdna_single_command_cache_entry_t {
   // Static descriptor identity for late-bound START_NPU template reuse. The
   // cached command owns the mutable control-code BO/native command, while these
   // fields identify which run template it came from. They point into the owned
-  // clones below (never at executable memory) so a match compares by content and
-  // stays valid after the recording executable is destroyed.
+  // clones below (never at executable memory) so a match compares by content
+  // and stays valid after the recording executable is destroyed.
   const iree_hal_amdxdna_u32_list_t* src_asm_inst;
   const iree_hal_amdxdna_u32_list_t* src_patches;
   // Owned clones of the executable's template lists. The device cache outlives
@@ -81,7 +81,7 @@ iree_status_t iree_hal_amdxdna_single_command_cache_create(
     iree_hal_amdxdna_device_single_command_cache_t** out_cache);
 
 iree_hal_amdxdna_device_single_command_cache_t*
-    iree_hal_amdxdna_get_single_command_cache(iree_hal_amdxdna_device* device);
+iree_hal_amdxdna_get_single_command_cache(iree_hal_amdxdna_device* device);
 
 void iree_hal_amdxdna_single_command_cache_invalidate_queue(
     iree_hal_amdxdna_device_single_command_cache_t* cache,
@@ -95,6 +95,18 @@ iree_status_t iree_hal_amdxdna_find_single_command_cache_entry(
     const uint64_t* binding_device_addrs,
     const iree_device_size_t* binding_offsets,
     const iree_device_size_t* binding_lengths, iree_host_size_t binding_count,
+    iree_hal_amdxdna_single_command_cache_entry_t** out_entry);
+
+// Finds a retained PARTIAL_ELF command whose realized control code has the same
+// shape as a freshly recorded dispatch, without requiring it to have come from
+// the same run template. The caller must re-patch the entry from its own
+// descriptor (which rewrites every control word and rebinds every buffer) and
+// then refresh the entry's descriptor identity.
+iree_status_t
+iree_hal_amdxdna_find_single_command_cache_partial_elf_shape_entry(
+    iree_hal_amdxdna_device_single_command_cache_t* cache,
+    iree_hal_amdxdna_native_queue_t* queue, uint32_t cu_index,
+    iree_host_size_t ctrl_word_count, iree_host_size_t binding_count,
     iree_hal_amdxdna_single_command_cache_entry_t** out_entry);
 
 iree_status_t
@@ -127,11 +139,12 @@ iree_hal_amdxdna_store_single_command_cache_entry(
     iree_hal_amdxdna_native_buffer_t* ctrl_code_buffer,
     iree_hal_amdxdna_native_command_t* command);
 
-// Records the descriptor template that produced this cached command, cloning the
-// executable-owned |asm_inst|/|patches| lists into cache-owned storage so later
-// reuse is matched by content rather than by (potentially dangling) pointer
-// identity. Cloning is best-effort: on allocation failure the owned lists are
-// left empty and the entry simply never produces a template-cache hit.
+// Records the descriptor template that produced this cached command, cloning
+// the executable-owned |asm_inst|/|patches| lists into cache-owned storage so
+// later reuse is matched by content rather than by (potentially dangling)
+// pointer identity. Cloning is best-effort: on allocation failure the owned
+// lists are left empty and the entry simply never produces a template-cache
+// hit.
 void iree_hal_amdxdna_single_command_cache_entry_set_descriptor_template(
     iree_hal_amdxdna_device_single_command_cache_t* cache,
     iree_hal_amdxdna_single_command_cache_entry_t* entry,

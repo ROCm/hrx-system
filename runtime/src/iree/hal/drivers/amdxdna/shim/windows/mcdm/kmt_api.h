@@ -519,13 +519,11 @@ bool SubmitPathBApertureSync(const KmtApi& api, const Device& device,
 // Path-B aperture publication is two independent happens-before edges:
 //
 //   1. CommitPathBCodeWrite / CopyAndCommitPathBCodeWrites makes CPU stores
-//      device-visible (compact: cache flush of each 0x8000 slot; legacy:
-//      D3DKMTInvalidateCache). Skip this only when the CPU did not write
-//      AND the previous device image is known still resident. Compact Path-B
-//      firmware does not retain aperture GPU contents across consumes, so
-//      native submit restages from the CPU source of truth and
-//      KMT-invalidates the allocation before every consume. Compact Commit
-//      is CPU clflush only and does not snoop the NPU cache.
+//      device-visible (cache-line sync for mapped sub-LLC ranges, falling back
+//      to D3DKMTInvalidateCache for larger or unmapped ranges). Skip this only
+//      when the CPU did not write AND the previous device image is known still
+//      resident. Native submit restages from the CPU source of truth before
+//      every consume. The commit step does not snoop the NPU cache.
 //   2. PublishPathBCodeWrite / opcode-9 end markers publish those slots in
 //      HW-queue order so a later state-3/chain command may consume them.
 //      Opcode-9 is not a copy and not a sticky mapping. Firmware that

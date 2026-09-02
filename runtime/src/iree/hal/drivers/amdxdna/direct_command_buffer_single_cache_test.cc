@@ -265,7 +265,8 @@ TEST(SingleCommandCacheTest, DescriptorTemplateMatchesByContentNotPointer) {
           &cache, FakeQueue(0x270), /*cu_index=*/5, &fail_asm, &patches,
           /*constant_count=*/0, /*use_native_partial_elf=*/false,
           IREE_ARRAYSIZE(binding_buffers), &found));
-  EXPECT_EQ(found, nullptr) << "different content must not reuse cached command";
+  EXPECT_EQ(found, nullptr)
+      << "different content must not reuse cached command";
 
   // An identical template presented through a brand-new pointer must still hit.
   uint32_t pred_words_copy[] = {100, 101, 102, 103};
@@ -278,6 +279,62 @@ TEST(SingleCommandCacheTest, DescriptorTemplateMatchesByContentNotPointer) {
           /*constant_count=*/0, /*use_native_partial_elf=*/false,
           IREE_ARRAYSIZE(binding_buffers), &found));
   EXPECT_EQ(found, stored) << "identical content must reuse cached command";
+
+  FreeSignature(&cache, stored);
+  iree_slim_mutex_deinitialize(&cache.mutex);
+}
+
+TEST(SingleCommandCacheTest, PartialElfShapeHitIgnoresTemplateIdentity) {
+  iree_hal_amdxdna_device_single_command_cache_t cache = {};
+  cache.host_allocator = TestAllocator();
+  iree_slim_mutex_initialize(&cache.mutex);
+  uint32_t ctrl_words[] = {12, 13, 14};
+  iree_hal_amdxdna_native_buffer_t* binding_buffers[] = {FakeBuffer(0x161)};
+  const uint64_t binding_device_addrs[] = {0x86100000};
+  const iree_device_size_t binding_offsets[] = {0};
+  const iree_device_size_t binding_lengths[] = {4096};
+  uint32_t stored_words[] = {100, 101, 102};
+  iree_hal_amdxdna_u32_list_t stored_asm = {stored_words,
+                                            IREE_ARRAYSIZE(stored_words)};
+  uint32_t other_words[] = {200, 201, 202};
+  iree_hal_amdxdna_u32_list_t other_asm = {other_words,
+                                           IREE_ARRAYSIZE(other_words)};
+  uint32_t patch_words[] = {0, 0, 0};
+  iree_hal_amdxdna_u32_list_t patches = {patch_words,
+                                         IREE_ARRAYSIZE(patch_words)};
+
+  auto* stored = iree_hal_amdxdna_store_single_command_cache_entry(
+      &cache, FakeQueue(0x271), /*cu_index=*/5, ctrl_words,
+      IREE_ARRAYSIZE(ctrl_words), binding_buffers, binding_device_addrs,
+      binding_offsets, binding_lengths, IREE_ARRAYSIZE(binding_buffers),
+      FakeBuffer(0x371), FakeCommand(0x471));
+  ASSERT_NE(stored, nullptr);
+  iree_hal_amdxdna_single_command_cache_entry_set_descriptor_template(
+      &cache, stored, &stored_asm, &patches, /*constant_count=*/0,
+      /*use_native_partial_elf=*/true, /*ctrl_code_mapped_ptr=*/nullptr);
+
+  iree_hal_amdxdna_single_command_cache_entry_t* found = nullptr;
+  IREE_CHECK_OK(
+      iree_hal_amdxdna_find_single_command_cache_descriptor_template_entry(
+          &cache, FakeQueue(0x271), /*cu_index=*/5, &other_asm, &patches,
+          /*constant_count=*/0, /*use_native_partial_elf=*/true,
+          IREE_ARRAYSIZE(binding_buffers), &found));
+  EXPECT_EQ(found, nullptr);
+
+  IREE_CHECK_OK(
+      iree_hal_amdxdna_find_single_command_cache_partial_elf_shape_entry(
+          &cache, FakeQueue(0x271), /*cu_index=*/5, IREE_ARRAYSIZE(other_words),
+          IREE_ARRAYSIZE(binding_buffers), &found));
+  EXPECT_EQ(found, stored);
+
+  iree_hal_amdxdna_single_command_cache_entry_acquire_in_flight(stored);
+  found = stored;
+  IREE_CHECK_OK(
+      iree_hal_amdxdna_find_single_command_cache_partial_elf_shape_entry(
+          &cache, FakeQueue(0x271), /*cu_index=*/5, IREE_ARRAYSIZE(other_words),
+          IREE_ARRAYSIZE(binding_buffers), &found));
+  EXPECT_EQ(found, nullptr);
+  iree_hal_amdxdna_single_command_cache_entry_release_in_flight(&cache, stored);
 
   FreeSignature(&cache, stored);
   iree_slim_mutex_deinitialize(&cache.mutex);

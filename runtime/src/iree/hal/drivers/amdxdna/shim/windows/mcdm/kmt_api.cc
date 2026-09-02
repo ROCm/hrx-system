@@ -238,15 +238,16 @@ uint64_t LastLevelCacheSize() {
   return cache_size;
 }
 
-bool SyncSmallBufferCpuCache(const Buffer& buffer, uint64_t offset,
-                             uint64_t length, Error* out_error) {
+bool SyncMappedCpuCacheRange(void* mapping, uint64_t mapping_size,
+                             uint64_t offset, uint64_t length,
+                             const char* range_name, Error* out_error) {
   if (length == 0) return true;
-  if (!buffer.cpu_ptr || offset > buffer.size || length > buffer.size - offset) {
-    SetError(out_error, "CPU BO sync range is out of bounds");
+  if (!mapping || offset > mapping_size || length > mapping_size - offset) {
+    SetErrorFormat(out_error, "%s sync range is out of bounds", range_name);
     return false;
   }
   constexpr uintptr_t kCacheLineSize = 64;
-  uintptr_t line = reinterpret_cast<uintptr_t>(buffer.cpu_ptr) + offset;
+  uintptr_t line = reinterpret_cast<uintptr_t>(mapping) + offset;
   const uintptr_t end = line + length;
   _mm_lfence();
   if (line & (kCacheLineSize - 1)) {
@@ -258,6 +259,12 @@ bool SyncSmallBufferCpuCache(const Buffer& buffer, uint64_t offset,
     line += kCacheLineSize;
   }
   return true;
+}
+
+bool SyncSmallBufferCpuCache(const Buffer& buffer, uint64_t offset,
+                             uint64_t length, Error* out_error) {
+  return SyncMappedCpuCacheRange(buffer.cpu_ptr, buffer.size, offset, length,
+                                 "CPU BO", out_error);
 }
 
 enum class CpuCacheOperation {
@@ -1688,6 +1695,10 @@ bool SyncBuffer(const KmtApi& api, const Device& device, const Buffer& buffer,
   return CheckStatus("D3DKMTInvalidateCache", status, out_error);
 }
 
+bool LockCommandApertureGpuMapping(const KmtApi& api, const Device& device,
+                                   CommandAperture* aperture,
+                                   Error* out_error);
+
 bool LockCommandApertureGpuAfterBootstrap(const KmtApi& api,
                                           const Device& device,
                                           CommandAperture* aperture,
@@ -1699,6 +1710,22 @@ bool SyncCommandApertureCode(const KmtApi& api, const Device& device,
   if (!aperture.gpu_allocation) {
     SetError(out_error, "SyncCommandApertureCode called before aperture setup");
     return false;
+  }
+  // Same policy as SyncBuffer: XRT synchronizes mapped ranges smaller than the
+  // LLC with cache-line operations and keeps allocation-level KMT invalidation
+  // only for larger ranges. Command code and chain descriptors are always far
+  // below the LLC, while a KMT transition on the aperture costs ~300us -- more
+  // than an order of magnitude above a hardware-queue submit -- because the
+  // driver services it over the whole 64MiB allocation rather than the
+  // requested range. The written bytes already reach memory via the
+  // non-temporal stores and fence in CopyAndCommitPathBCodeWrites, and the NPU
+  // side is still invalidated by the opcode-9 publication that follows.
+  const uint64_t last_level_cache_size = LastLevelCacheSize();
+  if (aperture.gpu_cpu_ptr && last_level_cache_size &&
+      length < last_level_cache_size) {
+    return SyncMappedCpuCacheRange(aperture.gpu_cpu_ptr, aperture.gpu_va_size,
+                                   offset, length, "command aperture code",
+                                   out_error);
   }
   D3DKMT_INVALIDATECACHE invalidate = {};
   invalidate.hDevice = device.device;
@@ -1757,7 +1784,9 @@ bool RefreshCommandApertureGpuMapping(const KmtApi& api, const Device& device,
   // The path-B code BO is written through the host mapping after bootstrap.
   // Pair the cache invalidate with a lock transition so the MCDM miniport sees
   // the freshly staged instruction bytes before the opcode-3 submit consumes
-  // the aperture.
+  // the aperture. Callers have already invalidated the range they wrote, and
+  // XRT invalidates the whole aperture only once after the opcode-2 bootstrap
+  // submit, so the transition must not repeat that allocation-wide invalidate.
   if (aperture->gpu_cpu_ptr) {
     D3DKMT_UNLOCK2 unlock = {};
     unlock.hDevice = device.device;
@@ -1770,7 +1799,7 @@ bool RefreshCommandApertureGpuMapping(const KmtApi& api, const Device& device,
     aperture->gpu_cpu_ptr = nullptr;
     aperture->code_cpu_ptr = nullptr;
   }
-  return LockCommandApertureGpuAfterBootstrap(api, device, aperture, out_error);
+  return LockCommandApertureGpuMapping(api, device, aperture, out_error);
 }
 
 bool RefreshBufferCpuMapping(const KmtApi& api, const Device& device,
@@ -2270,14 +2299,12 @@ bool EnsureCommandApertureGpuMapping(const KmtApi& api, const Device& device,
   return true;
 }
 
-bool LockCommandApertureGpuAfterBootstrap(const KmtApi& api,
-                                          const Device& device,
-                                          CommandAperture* aperture,
-                                          Error* out_error) {
+bool LockCommandApertureGpuMapping(const KmtApi& api, const Device& device,
+                                   CommandAperture* aperture,
+                                   Error* out_error) {
   if (!aperture || !aperture->gpu_allocation) {
     SetError(out_error,
-             "LockCommandApertureGpuAfterBootstrap called before aperture "
-             "setup");
+             "command aperture GPU lock called before aperture setup");
     return false;
   }
   if (aperture->gpu_cpu_ptr) return true;
@@ -2295,13 +2322,25 @@ bool LockCommandApertureGpuAfterBootstrap(const KmtApi& api,
         static_cast<uint8_t*>(aperture->gpu_cpu_ptr) +
         aperture->code_offset;
   }
+  return true;
+}
+
+bool LockCommandApertureGpuAfterBootstrap(const KmtApi& api,
+                                          const Device& device,
+                                          CommandAperture* aperture,
+                                          Error* out_error) {
+  const bool was_locked = aperture && aperture->gpu_cpu_ptr;
+  if (!LockCommandApertureGpuMapping(api, device, aperture, out_error)) {
+    return false;
+  }
+  if (was_locked) return true;
 
   D3DKMT_INVALIDATECACHE invalidate = {};
   invalidate.hDevice = device.device;
   invalidate.hAllocation = aperture->gpu_allocation;
   invalidate.Offset = 0;
   invalidate.Length = aperture->gpu_va_size;
-  status = api.invalidate_cache(&invalidate);
+  NTSTATUS status = api.invalidate_cache(&invalidate);
   return CheckStatus("D3DKMTInvalidateCache(command aperture)", status,
                      out_error);
 }

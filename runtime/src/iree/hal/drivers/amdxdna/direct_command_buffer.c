@@ -1742,9 +1742,34 @@ iree_hal_amdxdna_direct_command_buffer_submit_accumulated_single(
             cmd->src_use_native_partial_elf, cmd->binding_count,
             &single_cache_entry);
   }
+  // Descriptor identity only reuses a command recorded from the same run
+  // template. Models that fan one dispatch out over many distinct templates
+  // (MoE expert layers) never match, so every dispatch would otherwise
+  // allocate, make resident, and destroy a fresh control-code BO. Each of those
+  // allocations records a paging fence that every later hardware-queue submit
+  // has to wait on, which costs far more than the allocation itself. Reuse any
+  // idle PARTIAL_ELF command of the same shape instead and re-patch it in
+  // place, mirroring what the chain cache already does.
+  bool reused_partial_elf_shape = false;
+  if (iree_status_is_ok(status) && !single_cache_entry && single_cache_locked) {
+    status = iree_hal_amdxdna_find_single_command_cache_partial_elf_shape_entry(
+        single_command_cache, group->queue, cmd->src_cu_idx.index,
+        cmd->src_asm_inst->count, cmd->binding_count, &single_cache_entry);
+    reused_partial_elf_shape = single_cache_entry != NULL;
+  }
   if (iree_status_is_ok(status) && single_cache_entry) {
     status = iree_hal_amdxdna_rewrite_cached_single_partial_elf_cmd(
         command_buffer, single_command_cache, single_cache_entry, cmd);
+    // The rewrite realized this dispatch's descriptor into the entry, so the
+    // entry's recorded identity has to follow it or a later exact-descriptor
+    // lookup would match contents that are no longer there.
+    if (iree_status_is_ok(status) && reused_partial_elf_shape) {
+      iree_hal_amdxdna_single_command_cache_entry_set_descriptor_template(
+          single_command_cache, single_cache_entry, cmd->src_asm_inst,
+          cmd->src_patches, cmd->src_constant_count,
+          cmd->src_use_native_partial_elf,
+          single_cache_entry->ctrl_code_mapped_ptr);
+    }
     if (iree_status_is_ok(status) &&
         iree_hal_amdxdna_direct_command_buffer_uses_async_completion(
             command_buffer)) {

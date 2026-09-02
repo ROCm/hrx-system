@@ -1210,7 +1210,7 @@ TEST(KmtApiTest, CompactPathBSetupMakesApertureResidentAfterBootstrap) {
             0);
 }
 
-TEST(KmtApiTest, LegacyPathBSetupPublishesPayloadAfterFinalWrite) {
+TEST(KmtApiTest, LegacyPathBSetupCopiesPayloadAfterBootstrapInvalidate) {
   ResetFakes();
   KmtApi api = {};
   api.submit_command_to_hw_queue = FakeSubmitCommandToHwQueue;
@@ -1243,14 +1243,13 @@ TEST(KmtApiTest, LegacyPathBSetupPublishesPayloadAfterFinalWrite) {
       << ErrorMessage(&error);
   const SetupCall expected_calls[] = {
       SetupCall::submit, SetupCall::lock, SetupCall::invalidate,
-      SetupCall::invalidate, SetupCall::submit, SetupCall::wait};
+      SetupCall::submit, SetupCall::wait};
   ASSERT_EQ(g_setup_call_count, std::size(expected_calls));
   for (size_t i = 0; i < std::size(expected_calls); ++i) {
     EXPECT_EQ(g_setup_calls[i], expected_calls[i]);
   }
-  ASSERT_EQ(g_invalidate_count, 2u);
+  ASSERT_EQ(g_invalidate_count, 1u);
   EXPECT_EQ(g_invalidate_first_bytes[0], 0u);
-  EXPECT_EQ(g_invalidate_first_bytes[1], 0x5au);
   EXPECT_EQ(std::memcmp(g_locked_aperture.data(), setup_payload.data(),
                         setup_payload.size()),
             0);
@@ -1747,14 +1746,13 @@ TEST(KmtApiTest, CodeRangeLifecycleMatchesNegotiatedAbi) {
   EXPECT_EQ(g_wait_fences[0], 10u);
 
   run(McdmAbi::legacy, 107600);
-  ASSERT_EQ(g_setup_call_count, 7u);
-  EXPECT_EQ(g_setup_calls[0], SetupCall::invalidate);
-  EXPECT_EQ(g_setup_calls[1], SetupCall::submit);
-  EXPECT_EQ(g_setup_calls[2], SetupCall::submit);
-  EXPECT_EQ(g_setup_calls[3], SetupCall::submit);
-  EXPECT_EQ(g_setup_calls[4], SetupCall::wait);
-  EXPECT_EQ(g_setup_calls[5], SetupCall::submit);
-  EXPECT_EQ(g_setup_calls[6], SetupCall::submit);
+  const SetupCall legacy_calls[] = {
+      SetupCall::submit, SetupCall::submit, SetupCall::submit,
+      SetupCall::wait, SetupCall::submit, SetupCall::submit};
+  ASSERT_EQ(g_setup_call_count, std::size(legacy_calls));
+  for (size_t i = 0; i < std::size(legacy_calls); ++i) {
+    EXPECT_EQ(g_setup_calls[i], legacy_calls[i]);
+  }
   ASSERT_EQ(g_submit_count, 5u);
   EXPECT_EQ(g_submit_opcodes[0], 9u);
   EXPECT_EQ(g_submit_offsets[0], 0x28000u);
@@ -1929,8 +1927,7 @@ TEST(KmtApiTest, CodeWriteRemapMatchesNegotiatedAbi) {
   EXPECT_EQ(g_setup_call_count, 0u);
 
   run(McdmAbi::legacy);
-  const SetupCall legacy_calls[] = {SetupCall::unlock, SetupCall::lock,
-                                    SetupCall::invalidate};
+  const SetupCall legacy_calls[] = {SetupCall::unlock, SetupCall::lock};
   ASSERT_EQ(g_setup_call_count, std::size(legacy_calls));
   for (size_t i = 0; i < std::size(legacy_calls); ++i) {
     EXPECT_EQ(g_setup_calls[i], legacy_calls[i]);

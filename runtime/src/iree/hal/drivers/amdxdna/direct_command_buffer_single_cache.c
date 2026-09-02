@@ -227,9 +227,10 @@ static bool iree_hal_amdxdna_single_command_cache_descriptor_template_matches(
          cache->src_use_native_partial_elf == use_native_partial_elf &&
          cache->ctrl_word_count == (asm_inst ? asm_inst->count : 0) &&
          cache->binding_count == binding_count &&
-         iree_hal_amdxdna_u32_span_equal(
-             cache->owned_src_asm_inst.data, cache->owned_src_asm_inst.count,
-             asm_inst ? asm_inst->data : NULL, asm_inst ? asm_inst->count : 0) &&
+         iree_hal_amdxdna_u32_span_equal(cache->owned_src_asm_inst.data,
+                                         cache->owned_src_asm_inst.count,
+                                         asm_inst ? asm_inst->data : NULL,
+                                         asm_inst ? asm_inst->count : 0) &&
          iree_hal_amdxdna_u32_span_equal(
              cache->owned_src_patches.data, cache->owned_src_patches.count,
              patches ? patches->data : NULL, patches ? patches->count : 0);
@@ -283,6 +284,37 @@ iree_status_t iree_hal_amdxdna_update_single_command_cache_entry(
          binding_count * sizeof(*entry->binding_offsets));
   memcpy(entry->binding_lengths, binding_lengths,
          binding_count * sizeof(*entry->binding_lengths));
+  return iree_ok_status();
+}
+
+static bool iree_hal_amdxdna_single_command_cache_partial_elf_shape_matches(
+    const iree_hal_amdxdna_single_command_cache_entry_t* cache,
+    iree_hal_amdxdna_native_queue_t* queue, uint32_t cu_index,
+    iree_host_size_t ctrl_word_count, iree_host_size_t binding_count) {
+  return cache->command && cache->ctrl_code_buffer && cache->queue == queue &&
+         cache->in_flight_count == 0 && cache->cu_index == cu_index &&
+         cache->src_use_native_partial_elf && cache->src_asm_inst != NULL &&
+         cache->src_patches != NULL &&
+         cache->ctrl_word_count == ctrl_word_count &&
+         cache->binding_count == binding_count;
+}
+
+iree_status_t
+iree_hal_amdxdna_find_single_command_cache_partial_elf_shape_entry(
+    iree_hal_amdxdna_device_single_command_cache_t* cache,
+    iree_hal_amdxdna_native_queue_t* queue, uint32_t cu_index,
+    iree_host_size_t ctrl_word_count, iree_host_size_t binding_count,
+    iree_hal_amdxdna_single_command_cache_entry_t** out_entry) {
+  *out_entry = NULL;
+  for (iree_host_size_t i = 0; i < cache->entry_count; ++i) {
+    iree_hal_amdxdna_single_command_cache_entry_t* entry = &cache->entries[i];
+    if (iree_hal_amdxdna_single_command_cache_partial_elf_shape_matches(
+            entry, queue, cu_index, ctrl_word_count, binding_count)) {
+      entry->last_use = ++cache->use_clock;
+      *out_entry = entry;
+      return iree_ok_status();
+    }
+  }
   return iree_ok_status();
 }
 
@@ -400,16 +432,18 @@ void iree_hal_amdxdna_single_command_cache_entry_set_descriptor_template(
   IREE_ASSERT_ARGUMENT(entry);
   // Clone the executable-owned template lists into cache-owned storage so reuse
   // is matched by content and stays valid after the recording executable dies.
-  // Best-effort: if a clone fails the owned list is left empty, so the matcher's
-  // content compare simply never hits for this entry (correctness preserved).
+  // Best-effort: if a clone fails the owned list is left empty, so the
+  // matcher's content compare simply never hits for this entry (correctness
+  // preserved).
   iree_allocator_free(cache->host_allocator, entry->owned_src_asm_inst.data);
   iree_allocator_free(cache->host_allocator, entry->owned_src_patches.data);
   entry->owned_src_asm_inst.data = NULL;
   entry->owned_src_asm_inst.count = 0;
   entry->owned_src_patches.data = NULL;
   entry->owned_src_patches.count = 0;
-  iree_status_t clone_status = iree_hal_amdxdna_single_command_cache_clone_u32_list(
-      cache->host_allocator, asm_inst, &entry->owned_src_asm_inst);
+  iree_status_t clone_status =
+      iree_hal_amdxdna_single_command_cache_clone_u32_list(
+          cache->host_allocator, asm_inst, &entry->owned_src_asm_inst);
   if (iree_status_is_ok(clone_status)) {
     clone_status = iree_hal_amdxdna_single_command_cache_clone_u32_list(
         cache->host_allocator, patches, &entry->owned_src_patches);
