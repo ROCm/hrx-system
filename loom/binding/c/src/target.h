@@ -8,6 +8,7 @@
 #define LOOMC_TARGET_STORAGE_H_
 
 #include "iree/base/internal/arena.h"
+#include "loom/codegen/low/pipeline/legalizer_registry.h"
 #include "loom/codegen/low/pipeline/pass_environment.h"
 #include "loom/pass/registry.h"
 #include "loom/target/function_version.h"
@@ -47,8 +48,8 @@ typedef struct loomc_target_pass_environment_t {
   // Target-low source legality providers linked into this environment.
   loom_target_low_legality_provider_list_t low_legality_provider_list;
 
-  // Target source legalizer providers linked into this environment.
-  loom_target_legalizer_provider_list_t legalizer_provider_list;
+  // Dense source legalizer registry shared by every pass execution.
+  loom_target_legalizer_registry_storage_t legalizer_registry_storage;
 } loomc_target_pass_environment_t;
 
 // Creates a public target environment from an internal provider set.

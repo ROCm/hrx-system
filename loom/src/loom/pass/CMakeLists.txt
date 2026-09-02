@@ -429,7 +429,9 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     loom::codegen::low::pipeline::pass_environment
+    loom::codegen::low::pipeline::pass_requirements
     loom::pass::testing::registry_verify
+    loom::target::legalization
     loom::target::pass_environment
     loom::target::pass_requirements
 )

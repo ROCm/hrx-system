@@ -185,6 +185,7 @@ loom_cc_library(
         "//loom/src/loom/codegen/low:repr",
         "//loom/src/loom/codegen/low:target_binding",
         "//loom/src/loom/codegen/low:text_asm",
+        "//loom/src/loom/codegen/low/pipeline:legalizer_registry",
         "//loom/src/loom/codegen/low/pipeline:pass_environment",
         "//loom/src/loom/error:diagnostic",
         "//loom/src/loom/error:error_defs",

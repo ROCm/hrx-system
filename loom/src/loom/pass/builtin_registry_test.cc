@@ -9,7 +9,9 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/codegen/low/pipeline/pass_environment.h"
+#include "loom/codegen/low/pipeline/pass_requirements.h"
 #include "loom/pass/testing/registry_verify.h"
+#include "loom/target/legalization.h"
 #include "loom/target/pass_environment.h"
 #include "loom/target/pass_requirements.h"
 
@@ -169,6 +171,41 @@ TEST(PassBuiltinRegistryTest, ValidatesBuiltinOptionSchemas) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         loom_pass_descriptor_validate_options(
                             source_to_low, IREE_SV("max-errors=-1")));
+
+  const loom_pass_descriptor_t* target_legalize =
+      LookupBuiltinPass(IREE_SV("target-legalize"));
+  ASSERT_NE(target_legalize, nullptr);
+  ASSERT_EQ(target_legalize->requirement_count, 3u);
+  EXPECT_TRUE(iree_string_view_equal(
+      target_legalize->requirement_defs[0].key,
+      IREE_SV(LOOM_LOW_PASS_REQUIREMENT_TARGET_LEGALIZER_REGISTRY)));
+  EXPECT_TRUE(iree_string_view_equal(
+      target_legalize->requirement_defs[1].key,
+      IREE_SV(LOOM_LOW_PASS_REQUIREMENT_TARGET_LOW_DESCRIPTOR_REGISTRY)));
+  EXPECT_TRUE(iree_string_view_equal(
+      target_legalize->requirement_defs[2].key,
+      IREE_SV(LOOM_LOW_PASS_REQUIREMENT_TARGET_LOW_LOWER_POLICY_REGISTRY)));
+}
+
+TEST(PassBuiltinRegistryTest, LegalizerRequirementTracksPreparedRegistry) {
+  const loom_target_legalizer_registry_t legalizer_registry = {};
+  const loom_low_pass_capability_t prepared_capability =
+      loom_low_pass_capability_make(
+          /*descriptor_registry=*/nullptr, /*lower_policy_registry=*/nullptr,
+          /*legality_provider_list=*/nullptr, &legalizer_registry,
+          /*compile_report=*/nullptr);
+  EXPECT_TRUE(loom_pass_environment_capability_satisfies_requirement(
+      &prepared_capability.base,
+      IREE_SV(LOOM_LOW_PASS_REQUIREMENT_TARGET_LEGALIZER_REGISTRY)));
+
+  const loom_low_pass_capability_t empty_capability =
+      loom_low_pass_capability_make(
+          /*descriptor_registry=*/nullptr, /*lower_policy_registry=*/nullptr,
+          /*legality_provider_list=*/nullptr, /*legalizer_registry=*/nullptr,
+          /*compile_report=*/nullptr);
+  EXPECT_FALSE(loom_pass_environment_capability_satisfies_requirement(
+      &empty_capability.base,
+      IREE_SV(LOOM_LOW_PASS_REQUIREMENT_TARGET_LEGALIZER_REGISTRY)));
 }
 
 }  // namespace

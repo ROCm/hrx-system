@@ -234,6 +234,7 @@ loom_cc_library(
         "//loom/src/loom/codegen/low:text_asm",
         "//loom/src/loom/codegen/low:verify",
         "//loom/src/loom/codegen/low/lower",
+        "//loom/src/loom/codegen/low/pipeline:legalizer_registry",
         "//loom/src/loom/codegen/low/pipeline:pass_environment",
         "//loom/src/loom/codegen/low/schedule",
         "//loom/src/loom/error:diagnostic",

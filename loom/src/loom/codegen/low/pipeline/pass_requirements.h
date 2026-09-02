@@ -19,4 +19,9 @@
 #define LOOM_LOW_PASS_REQUIREMENT_TARGET_LOW_LOWER_POLICY_REGISTRY \
   "target.low-lower-policy-registry"
 
+// Pass requirement satisfied when the pass environment provides a dense
+// source legalizer registry.
+#define LOOM_LOW_PASS_REQUIREMENT_TARGET_LEGALIZER_REGISTRY \
+  "target.legalizer-registry"
+
 #endif  // LOOM_CODEGEN_LOW_PIPELINE_PASS_REQUIREMENTS_H_
