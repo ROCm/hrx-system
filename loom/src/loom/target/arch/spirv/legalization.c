@@ -38,7 +38,7 @@ static iree_status_t loom_spirv_legalize_vector_atomic(
   return iree_ok_status();
 }
 
-static const loom_target_legalizer_entry_t kSpirvLegalizerEntries[] = {
+static const loom_target_legalizer_rule_t kSpirvLegalizerRules[] = {
     {
         .root_kind = LOOM_OP_VECTOR_ATOMIC_REDUCE,
         .legalize = loom_spirv_legalize_vector_atomic,
@@ -65,8 +65,8 @@ const loom_target_legalizer_provider_t
     loom_spirv_target_legalizer_provider_storage = {
         .name = IREE_SVL("spirv"),
         .strategy = LOOM_TARGET_LEGALIZER_STRATEGY_TARGET,
-        .entries = kSpirvLegalizerEntries,
-        .entry_count = IREE_ARRAYSIZE(kSpirvLegalizerEntries),
+        .rules = kSpirvLegalizerRules,
+        .rule_count = IREE_ARRAYSIZE(kSpirvLegalizerRules),
 };
 
 const loom_target_legalizer_provider_t* loom_spirv_target_legalizer_provider(
