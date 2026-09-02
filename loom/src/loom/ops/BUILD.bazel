@@ -102,6 +102,20 @@ loom_cc_library(
     ],
 )
 
+loom_cc_test(
+    name = "callable_effects_test",
+    srcs = ["callable_effects_test.cc"],
+    deps = [
+        ":callable_effects",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/rewrite:rewriter",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 loom_cc_library(
     name = "storage_facts",
     srcs = ["storage_facts.c"],

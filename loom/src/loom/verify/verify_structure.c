@@ -8,6 +8,7 @@
 
 #include "loom/error/error_catalog.h"
 #include "loom/ir/parameterized_type.h"
+#include "loom/ops/callable_effects.h"
 #include "loom/ops/op_defs.h"
 #include "loom/verify/verify_diagnostics.h"
 
@@ -425,6 +426,52 @@ void loom_verify_func_purity_body_effects(loom_verify_state_t* state,
   loom_verify_emit_structured(state, op, LOOM_ERR_STRUCTURE_017, params,
                               IREE_ARRAYSIZE(params));
 }
+
+void loom_verify_call_purity(loom_verify_state_t* state, const loom_op_t* op,
+                             const loom_op_vtable_t* vtable) {
+  const loom_call_like_vtable_t* call_vtable = vtable->call_like;
+  if (!call_vtable || call_vtable->purity_attr_index == LOOM_ATTR_INDEX_NONE) {
+    return;
+  }
+  const loom_attribute_t* attrs = loom_op_const_attrs(op);
+  if (loom_attr_as_enum(attrs[call_vtable->purity_attr_index]) == 0) return;
+
+  const loom_symbol_ref_t callee =
+      loom_attr_as_symbol(attrs[call_vtable->callee_attr_index]);
+  if (!loom_symbol_ref_is_valid(callee) || callee.module_id != 0 ||
+      callee.symbol_id >= state->module->symbols.count) {
+    return;
+  }
+  const loom_symbol_t* symbol =
+      &state->module->symbols.entries[callee.symbol_id];
+  if (!symbol->defining_op) return;
+  const loom_func_like_t function =
+      loom_func_like_const_cast(state->module, symbol->defining_op);
+  if (!loom_func_like_isa(function) ||
+      loom_callable_effects_is_pure(function)) {
+    return;
+  }
+
+  const iree_string_view_t callee_name = loom_verify_symbol_name(state, callee);
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(callee_name),
+      loom_param_string(callee_name),
+  };
+  const loom_diagnostic_related_op_t related_ops[] = {{
+      .label = IREE_SV("contract defined here"),
+      .op = symbol->defining_op,
+  }};
+  const loom_diagnostic_emission_t emission = {
+      .op = op,
+      .error = LOOM_ERR_STRUCTURE_034,
+      .params = params,
+      .param_count = IREE_ARRAYSIZE(params),
+      .related_ops = related_ops,
+      .related_op_count = IREE_ARRAYSIZE(related_ops),
+  };
+  loom_verify_emit_diagnostic(state, &emission);
+}
+
 void loom_verify_op_structure(loom_verify_state_t* state, const loom_op_t* op,
                               const loom_op_vtable_t* vtable) {
   iree_string_view_t op_name = loom_op_vtable_name(vtable);

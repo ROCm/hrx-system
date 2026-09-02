@@ -1389,39 +1389,6 @@ static iree_status_t loom_low_emit_call_type_mismatch(
       IREE_ARRAYSIZE(params));
 }
 
-static iree_status_t loom_low_emit_call_impure_callee_error(
-    const loom_module_t* module, const loom_op_t* call_op,
-    loom_symbol_ref_t callee, iree_string_view_t boundary_name,
-    const loom_op_t* related_op, iree_string_view_t related_label,
-    iree_diagnostic_emitter_t emitter) {
-  loom_diagnostic_param_t params[] = {
-      loom_param_string(loom_low_symbol_name(module, callee)),
-      loom_param_string(boundary_name),
-  };
-  loom_diagnostic_related_op_t related[] = {{
-      .label = related_label,
-      .op = related_op,
-  }};
-  return loom_low_emit_related(emitter, call_op, LOOM_ERR_STRUCTURE_034, params,
-                               IREE_ARRAYSIZE(params), related,
-                               related_op ? IREE_ARRAYSIZE(related) : 0);
-}
-
-static bool loom_low_func_like_is_pure(const loom_module_t* module,
-                                       const loom_op_t* op) {
-  loom_func_like_t func = loom_func_like_const_cast(module, op);
-  if (!loom_func_like_isa(func)) {
-    return false;
-  }
-  loom_region_t* body = loom_func_like_body(func);
-  if (body) {
-    return !loom_region_has_read_effects(body) &&
-           !loom_region_has_write_effects(body) &&
-           !loom_region_has_convergent_effects(body);
-  }
-  return loom_func_like_purity(func) != 0;
-}
-
 static iree_status_t loom_low_verify_call_argument_count(
     const loom_module_t* module, const loom_op_t* call_op,
     const loom_low_callee_signature_t* signature,
@@ -1490,25 +1457,6 @@ static iree_status_t loom_low_verify_call_result_types(
         actual_type, "callee result", expected_type));
   }
   return iree_ok_status();
-}
-
-static iree_status_t loom_low_verify_call_purity(
-    const loom_module_t* module, const loom_op_t* call_op,
-    loom_symbol_ref_t callee, uint8_t purity,
-    const loom_low_callee_signature_t* signature,
-    iree_diagnostic_emitter_t emitter) {
-  if (purity == 0) {
-    return iree_ok_status();
-  }
-
-  const loom_op_t* purity_op = signature->definition_op;
-  if (loom_low_func_like_is_pure(module, purity_op)) {
-    return iree_ok_status();
-  }
-
-  return loom_low_emit_call_impure_callee_error(
-      module, call_op, callee, loom_low_symbol_name(module, callee), purity_op,
-      IREE_SV("contract defined here"), emitter);
 }
 
 static iree_status_t loom_low_verify_func_call_context(
@@ -1848,11 +1796,7 @@ iree_status_t loom_low_func_call_verify(const loom_module_t* module,
       loom_low_verify_call_result_count(module, op, &low_signature, emitter));
   IREE_RETURN_IF_ERROR(
       loom_low_verify_call_argument_types(module, op, &low_signature, emitter));
-  IREE_RETURN_IF_ERROR(
-      loom_low_verify_call_result_types(module, op, &low_signature, emitter));
-  return loom_low_verify_call_purity(module, op, callee,
-                                     loom_low_func_call_purity(op),
-                                     &low_signature, emitter);
+  return loom_low_verify_call_result_types(module, op, &low_signature, emitter);
 }
 
 iree_status_t loom_low_invoke_verify(const loom_module_t* module,
@@ -1870,8 +1814,7 @@ iree_status_t loom_low_invoke_verify(const loom_module_t* module,
         module, op, callee, loom_low_invoke_callee_ATTR_INDEX, symbol, emitter);
   }
 
-  return loom_low_verify_call_purity(
-      module, op, callee, loom_low_invoke_purity(op), &low_signature, emitter);
+  return iree_ok_status();
 }
 
 loom_trait_flags_t loom_low_func_call_effective_traits(const loom_op_t* op) {

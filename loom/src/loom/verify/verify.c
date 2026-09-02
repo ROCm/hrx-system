@@ -383,6 +383,11 @@ IREE_ATTRIBUTE_ALWAYS_INLINE static inline iree_status_t loom_verify_op(
   IREE_RETURN_IF_ERROR(loom_verify_pending_diagnostic_status(state));
   loom_verify_symbol_references(state, op, vtable);
   IREE_RETURN_IF_ERROR(loom_verify_pending_diagnostic_status(state));
+  if (vtable->call_like &&
+      vtable->call_like->purity_attr_index != LOOM_ATTR_INDEX_NONE) {
+    loom_verify_call_purity(state, op, vtable);
+    IREE_RETURN_IF_ERROR(loom_verify_pending_diagnostic_status(state));
+  }
 
   // Define result values. Must happen after all checks on this op
   // so that a result cannot appear to dominate its own defining op.

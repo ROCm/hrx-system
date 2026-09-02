@@ -105,6 +105,21 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_test(
+  NAME
+    callable_effects_test
+  SRCS
+    "callable_effects_test.cc"
+  DEPS
+    ::callable_effects
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::ir
+    loom::ops::func
+    loom::rewrite::rewriter
+)
+
 loom_cc_library(
   NAME
     storage_facts

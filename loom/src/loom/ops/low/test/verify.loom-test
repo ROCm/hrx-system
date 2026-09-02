@@ -403,6 +403,18 @@ func.def @pure_invoke_impure_low(%lhs: i32) -> (i32) {
 
 test.target<low_core> @test_target
 
+low.func.decl target<test.low.core>(@test_target) @impure_low()
+
+low.func.def target<test.low.core>(@test_target) @pure_low_call_requires_pure_callee() {
+  // ERROR@+1: STRUCTURE/034 {callee_name="impure_low", boundary_name="impure_low"}
+  low.func.call pure @impure_low() : ()
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
 // Storage traffic is valid when all traffic stays inside owned storage views.
 low.func.def target<test.low.core>(@test_target) @slot_roundtrip(%input: reg<test.i32>) -> (reg<test.i32>) {
   %storage = low.storage.reserve {byte_alignment = 4, byte_length = 4} : low.storage<scratch>
