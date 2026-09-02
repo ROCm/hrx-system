@@ -69,6 +69,13 @@ iree_status_t loom_vector_descriptor_to_scalar_rewrite_op(
     loom_pass_t* pass, loom_rewriter_t* rewriter, loom_op_t* op,
     bool* out_rewritten);
 
+// Rewrites one vector atomic op into scalar view atomics. This covers reduce,
+// read-modify-write, masked variants, and compare-exchange.
+iree_status_t loom_vector_atomic_to_scalar_rewrite_op(loom_pass_t* pass,
+                                                      loom_rewriter_t* rewriter,
+                                                      loom_op_t* op,
+                                                      bool* out_rewritten);
+
 // Rewrites one vector.decode op using scalar reference semantics.
 iree_status_t loom_vector_decode_to_scalar_rewrite_op(loom_pass_t* pass,
                                                       loom_rewriter_t* rewriter,

@@ -169,6 +169,8 @@ loom_cc_library(
   HDRS
     "module_emitter.h"
   SRCS
+    "function_atomic.c"
+    "function_atomic.h"
     "function_control.c"
     "function_control.h"
     "function_emitter.c"
@@ -283,6 +285,8 @@ loom_check_test_suite(
   NAME
     loom_check_file_test
   SRCS
+    "test/atomic.loom-test"
+    "test/atomic_diagnostics.loom-test"
     "test/barrier.loom-test"
     "test/buffer_raw.loom-test"
     "test/cooperative_matrix.loom-test"

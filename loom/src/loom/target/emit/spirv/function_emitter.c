@@ -17,6 +17,7 @@
 #include "loom/target/arch/spirv/descriptors/descriptors.h"
 #include "loom/target/arch/spirv/packet_rows.h"
 #include "loom/target/emit/spirv/binary_format.h"
+#include "loom/target/emit/spirv/function_atomic.h"
 #include "loom/target/emit/spirv/function_control.h"
 #include "loom/target/emit/spirv/module_abi.h"
 #include "loom/target/emit/spirv/module_instructions.h"
@@ -287,14 +288,14 @@ static iree_string_view_t loom_spirv_emit_immediate_name(
                                         immediate->field_name_string_offset);
 }
 
-static iree_status_t loom_spirv_emit_lookup_i64_immediate(
+iree_status_t loom_spirv_emit_lookup_packet_i64_immediate(
     loom_spirv_emit_state_t* state, const loom_low_descriptor_packet_t* packet,
-    const loom_spirv_packet_row_t* row, int64_t* out_value) {
-  const loom_low_immediate_t* immediate =
-      loom_spirv_emit_descriptor_immediate(state, packet, row->immediate_index);
+    uint8_t descriptor_immediate_index, int64_t* out_value) {
+  const loom_low_immediate_t* immediate = loom_spirv_emit_descriptor_immediate(
+      state, packet, descriptor_immediate_index);
   IREE_ASSERT(immediate != NULL);
   const uint32_t immediate_row =
-      packet->descriptor->immediate_start + row->immediate_index;
+      packet->descriptor->immediate_start + descriptor_immediate_index;
   IREE_ASSERT_LT(immediate_row, state->immediate_name_id_count);
   const loom_string_id_t expected_name_id =
       state->immediate_name_ids[immediate_row];
@@ -341,8 +342,8 @@ static iree_status_t loom_spirv_emit_scalar_constant_packet(
     loom_spirv_emit_state_t* state, const loom_low_descriptor_packet_t* packet,
     const loom_spirv_packet_row_t* row) {
   int64_t value = 0;
-  IREE_RETURN_IF_ERROR(
-      loom_spirv_emit_lookup_i64_immediate(state, packet, row, &value));
+  IREE_RETURN_IF_ERROR(loom_spirv_emit_lookup_packet_i64_immediate(
+      state, packet, row->immediate_index, &value));
   uint32_t type_id = 0;
   IREE_RETURN_IF_ERROR(loom_spirv_emit_type_id_for_value_type(
       state->type_context, loom_spirv_packet_row_result_type(row), &type_id));
@@ -477,8 +478,8 @@ static iree_status_t loom_spirv_emit_composite_extract_packet(
   IREE_RETURN_IF_ERROR(
       loom_spirv_emit_load_packet_operands(state, packet, row, operands));
   int64_t component_index = 0;
-  IREE_RETURN_IF_ERROR(loom_spirv_emit_lookup_i64_immediate(state, packet, row,
-                                                            &component_index));
+  IREE_RETURN_IF_ERROR(loom_spirv_emit_lookup_packet_i64_immediate(
+      state, packet, row->immediate_index, &component_index));
   uint32_t result_type_id = 0;
   IREE_RETURN_IF_ERROR(loom_spirv_emit_type_id_for_value_type(
       state->type_context, loom_spirv_packet_row_result_type(row),
@@ -508,8 +509,8 @@ static iree_status_t loom_spirv_emit_composite_insert_packet(
   IREE_RETURN_IF_ERROR(
       loom_spirv_emit_load_packet_operands(state, packet, row, operands));
   int64_t component_index = 0;
-  IREE_RETURN_IF_ERROR(loom_spirv_emit_lookup_i64_immediate(state, packet, row,
-                                                            &component_index));
+  IREE_RETURN_IF_ERROR(loom_spirv_emit_lookup_packet_i64_immediate(
+      state, packet, row->immediate_index, &component_index));
   uint32_t result_type_id = 0;
   IREE_RETURN_IF_ERROR(loom_spirv_emit_type_id_for_value_type(
       state->type_context, loom_spirv_packet_row_result_type(row),
@@ -991,6 +992,17 @@ static iree_status_t loom_spirv_emit_descriptor_packet(
                                                                row);
     case LOOM_SPIRV_PACKET_FORM_CONTROL_BARRIER:
       return loom_spirv_emit_control_barrier_packet(state, row);
+    case LOOM_SPIRV_PACKET_FORM_ATOMIC:
+      return loom_spirv_emit_atomic_packet(state, packet, row);
+    case LOOM_SPIRV_PACKET_FORM_ATOMIC_COMPARE_EXCHANGE:
+      return loom_spirv_emit_atomic_compare_exchange_packet(state, packet, row);
+    case LOOM_SPIRV_PACKET_FORM_ATOMIC_FLOAT_BITCAST:
+      return loom_spirv_emit_atomic_float_bitcast_packet(state, packet, row);
+    case LOOM_SPIRV_PACKET_FORM_ATOMIC_FLOAT_CAS:
+      return loom_spirv_emit_atomic_float_cas_packet(state, packet, row);
+    case LOOM_SPIRV_PACKET_FORM_ATOMIC_FLOAT_COMPARE_EXCHANGE:
+      return loom_spirv_emit_atomic_float_compare_exchange_packet(state, packet,
+                                                                  row);
     case LOOM_SPIRV_PACKET_FORM_UNSUPPORTED:
       break;
   }

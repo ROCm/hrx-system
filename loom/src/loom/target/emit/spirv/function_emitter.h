@@ -123,6 +123,11 @@ iree_status_t loom_spirv_emit_lookup_value(
     loom_spirv_emit_state_t* state, loom_value_id_t value_id,
     loom_spirv_module_value_ref_t* out_value_ref);
 
+// Resolves descriptor immediate |descriptor_immediate_index| from |packet|.
+iree_status_t loom_spirv_emit_lookup_packet_i64_immediate(
+    loom_spirv_emit_state_t* state, const loom_low_descriptor_packet_t* packet,
+    uint8_t descriptor_immediate_index, int64_t* out_value);
+
 // Returns true when a function-local value already has a SPIR-V ref.
 static inline bool loom_spirv_emit_value_ref_exists(
     loom_spirv_emit_state_t* state, loom_value_id_t value_id) {

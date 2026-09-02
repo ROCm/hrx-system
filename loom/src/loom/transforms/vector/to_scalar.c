@@ -867,6 +867,32 @@ iree_status_t loom_vector_descriptor_to_scalar_rewrite_op(
   return iree_ok_status();
 }
 
+iree_status_t loom_vector_atomic_to_scalar_rewrite_op(loom_pass_t* pass,
+                                                      loom_rewriter_t* rewriter,
+                                                      loom_op_t* op,
+                                                      bool* out_rewritten) {
+  *out_rewritten = false;
+  loom_builder_set_before(&rewriter->builder, op);
+  bool handled = false;
+  if (loom_vector_atomic_reduce_isa(op) ||
+      loom_vector_atomic_reduce_mask_isa(op)) {
+    IREE_RETURN_IF_ERROR(loom_vector_to_scalar_lower_atomic_reduce_op(
+        pass, rewriter, op, &handled));
+  } else if (loom_vector_atomic_rmw_isa(op) ||
+             loom_vector_atomic_rmw_mask_isa(op)) {
+    IREE_RETURN_IF_ERROR(loom_vector_to_scalar_lower_atomic_rmw_op(
+        pass, rewriter, op, &handled));
+  } else if (loom_vector_atomic_cmpxchg_isa(op)) {
+    IREE_RETURN_IF_ERROR(loom_vector_to_scalar_lower_atomic_cmpxchg_op(
+        pass, rewriter, op, &handled));
+  }
+  if (handled && !loom_pass_has_error_diagnostics(pass) &&
+      iree_any_bit_set(op->flags, LOOM_OP_FLAG_DEAD)) {
+    *out_rewritten = true;
+  }
+  return iree_ok_status();
+}
+
 iree_status_t loom_vector_decode_to_scalar_rewrite_op(loom_pass_t* pass,
                                                       loom_rewriter_t* rewriter,
                                                       loom_op_t* op,

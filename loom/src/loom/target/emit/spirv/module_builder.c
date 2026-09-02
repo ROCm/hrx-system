@@ -60,7 +60,11 @@ static bool loom_spirv_module_builder_uses_vulkan_memory_model(
     return true;
   }
   return loom_spirv_feature_set_has_atom(
-      &builder->feature_set, LOOM_SPIRV_FEATURE_ATOM_COOPERATIVE_MATRIX_KHR);
+             &builder->feature_set,
+             LOOM_SPIRV_FEATURE_ATOM_COOPERATIVE_MATRIX_KHR) ||
+         loom_spirv_feature_set_has_atom(
+             &builder->feature_set,
+             LOOM_SPIRV_FEATURE_ATOM_VULKAN_MEMORY_MODEL_DEVICE_SCOPE);
 }
 
 static bool loom_spirv_module_builder_should_emit_capability(

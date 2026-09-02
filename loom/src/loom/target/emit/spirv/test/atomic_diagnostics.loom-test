@@ -1,0 +1,198 @@
+// RUN: pass source-to-low
+
+spirv.target<vulkan1_3> @target {contract_feature_bits = 2147516422}
+func.def target(@target) @rejects_i1_atomic(%value: i1, %buffer: buffer) {
+  %base = index.constant 0 : offset
+  %global = buffer.assume.memory_space<global> %buffer : buffer
+  %aligned = buffer.assume.alignment %global {minimum_alignment = 1} : buffer
+  // ERROR@+1: TARGET/002 {field_name="result", actual_type="view<1xi1>"}
+  %view = buffer.view %aligned[%base] : buffer -> view<1xi1>
+  // ERROR@+1: TARGET/002 {field_name="view", actual_type="view<1xi1>"}
+  view.atomic.reduce<andi> %value, %view[0] {ordering = relaxed, scope = workgroup} : i1, view<1xi1>
+  func.return
+}
+
+// ====
+// RUN: pass source-to-low
+
+spirv.target<vulkan1_3> @target {contract_feature_bits = 2147516422}
+func.def target(@target) @rejects_i8_atomic(%value: i8, %buffer: buffer) {
+  %base = index.constant 0 : offset
+  %global = buffer.assume.memory_space<global> %buffer : buffer
+  %aligned = buffer.assume.alignment %global {minimum_alignment = 1} : buffer
+  %view = buffer.view %aligned[%base] : buffer -> view<1xi8>
+  // ERROR@+1: TARGET/002 {field_name="view", actual_type="view<1xi8>"}
+  view.atomic.reduce<addi> %value, %view[0] {ordering = relaxed, scope = workgroup} : i8, view<1xi8>
+  func.return
+}
+
+// ====
+// RUN: pass source-to-low
+
+spirv.target<vulkan1_3> @i16_target {contract_feature_bits = 2147516742}
+func.def target(@i16_target) @rejects_i16_atomic(%value: i16, %buffer: buffer) {
+  %base = index.constant 0 : offset
+  %global = buffer.assume.memory_space<global> %buffer : buffer
+  %aligned = buffer.assume.alignment %global {minimum_alignment = 2} : buffer
+  %view = buffer.view %aligned[%base] : buffer -> view<1xi16>
+  // ERROR@+1: TARGET/002 {field_name="view", actual_type="view<1xi16>"}
+  view.atomic.reduce<addi> %value, %view[0] {ordering = relaxed, scope = workgroup} : i16, view<1xi16>
+  func.return
+}
+
+// ====
+// RUN: pass source-to-low
+
+spirv.target<vulkan1_3> @target {contract_feature_bits = 2147516422}
+func.def target(@target) @rejects_f8e4m3_atomic(%value: f8E4M3, %buffer: buffer) {
+  %base = index.constant 0 : offset
+  %global = buffer.assume.memory_space<global> %buffer : buffer
+  %aligned = buffer.assume.alignment %global {minimum_alignment = 1} : buffer
+  // ERROR@+1: TARGET/002 {field_name="result", actual_type="view<1xf8E4M3>"}
+  %view = buffer.view %aligned[%base] : buffer -> view<1xf8E4M3>
+  // ERROR@+1: TARGET/002 {field_name="view", actual_type="view<1xf8E4M3>"}
+  view.atomic.reduce<addf> %value, %view[0] {ordering = relaxed, scope = workgroup} : f8E4M3, view<1xf8E4M3>
+  func.return
+}
+
+// ====
+// RUN: pass source-to-low
+
+spirv.target<vulkan1_3> @target {contract_feature_bits = 2147516422}
+func.def target(@target) @rejects_f8e5m2_atomic(%value: f8E5M2, %buffer: buffer) {
+  %base = index.constant 0 : offset
+  %global = buffer.assume.memory_space<global> %buffer : buffer
+  %aligned = buffer.assume.alignment %global {minimum_alignment = 1} : buffer
+  // ERROR@+1: TARGET/002 {field_name="result", actual_type="view<1xf8E5M2>"}
+  %view = buffer.view %aligned[%base] : buffer -> view<1xf8E5M2>
+  // ERROR@+1: TARGET/002 {field_name="view", actual_type="view<1xf8E5M2>"}
+  view.atomic.reduce<addf> %value, %view[0] {ordering = relaxed, scope = workgroup} : f8E5M2, view<1xf8E5M2>
+  func.return
+}
+
+// ====
+// RUN: pass source-to-low
+
+spirv.target<vulkan1_3> @target {contract_feature_bits = 2147516422}
+func.def target(@target) @rejects_bf16_atomic(%value: bf16, %buffer: buffer) {
+  %base = index.constant 0 : offset
+  %global = buffer.assume.memory_space<global> %buffer : buffer
+  %aligned = buffer.assume.alignment %global {minimum_alignment = 2} : buffer
+  %view = buffer.view %aligned[%base] : buffer -> view<1xbf16>
+  // ERROR@+1: TARGET/002 {field_name="view", actual_type="view<1xbf16>"}
+  view.atomic.reduce<addf> %value, %view[0] {ordering = relaxed, scope = workgroup} : bf16, view<1xbf16>
+  func.return
+}
+
+// ====
+// RUN: pass source-to-low
+
+spirv.target<vulkan1_3> @f16_target {contract_feature_bits = 2150138126}
+func.def target(@f16_target) @rejects_f16_minimum(%value: f16, %buffer: buffer) {
+  %base = index.constant 0 : offset
+  %global = buffer.assume.memory_space<global> %buffer : buffer
+  %aligned = buffer.assume.alignment %global {minimum_alignment = 2} : buffer
+  %view = buffer.view %aligned[%base] : buffer -> view<1xf16>
+  // ERROR@+1: TARGET/002 {field_name="view", actual_type="view<1xf16>"}
+  %old = view.atomic.rmw<minimumf> %value, %view[0] {ordering = relaxed, scope = workgroup} : f16, view<1xf16> -> f16
+  func.return
+}
+
+// ====
+// RUN: pass source-to-low
+
+spirv.target<vulkan1_3> @f16_target {contract_feature_bits = 2150138126}
+func.def target(@f16_target) @rejects_f16_compare_exchange(%value: f16, %buffer: buffer) {
+  %base = index.constant 0 : offset
+  %global = buffer.assume.memory_space<global> %buffer : buffer
+  %aligned = buffer.assume.alignment %global {minimum_alignment = 2} : buffer
+  %view = buffer.view %aligned[%base] : buffer -> view<1xf16>
+  // ERROR@+1: TARGET/002 {field_name="view", actual_type="view<1xf16>"}
+  %old = view.atomic.cmpxchg %value, %value, %view[0] {failure_ordering = relaxed, scope = workgroup, success_ordering = relaxed} : f16, view<1xf16> -> f16
+  func.return
+}
+
+// ====
+// RUN: pass source-to-low
+
+spirv.target<vulkan1_3> @target {contract_feature_bits = 2147516422}
+func.def target(@target) @rejects_index_compare_exchange(%value: index, %buffer: buffer) {
+  %base = index.constant 0 : offset
+  %global = buffer.assume.memory_space<global> %buffer : buffer
+  %aligned = buffer.assume.alignment %global {minimum_alignment = 8} : buffer
+  // ERROR@+1: TARGET/002 {field_name="result", actual_type="view<1xindex>"}
+  %view = buffer.view %aligned[%base] : buffer -> view<1xindex>
+  // ERROR@+1: TARGET/002 {field_name="view", actual_type="view<1xindex>"}
+  %old = view.atomic.cmpxchg %value, %value, %view[0] {failure_ordering = relaxed, scope = workgroup, success_ordering = relaxed} : index, view<1xindex> -> index
+  func.return
+}
+
+// ====
+// RUN: pass source-to-low
+
+spirv.target<vulkan1_3> @target {contract_feature_bits = 2147516422}
+func.def target(@target) @rejects_sequentially_consistent(%value: i32, %buffer: buffer) {
+  %base = index.constant 0 : offset
+  %global = buffer.assume.memory_space<global> %buffer : buffer
+  %aligned = buffer.assume.alignment %global {minimum_alignment = 4} : buffer
+  %view = buffer.view %aligned[%base] : buffer -> view<1xi32>
+  // ERROR@+1: TARGET/003 {subject_role="field", subject_name="ordering"}
+  view.atomic.reduce<addi> %value, %view[0] {ordering = seq_cst, scope = workgroup} : i32, view<1xi32>
+  func.return
+}
+
+// ====
+// RUN: pass source-to-low
+
+spirv.target<vulkan1_3> @target {contract_feature_bits = 2147516422}
+func.def target(@target) @rejects_system_scope(%value: i32, %buffer: buffer) {
+  %base = index.constant 0 : offset
+  %global = buffer.assume.memory_space<global> %buffer : buffer
+  %aligned = buffer.assume.alignment %global {minimum_alignment = 4} : buffer
+  %view = buffer.view %aligned[%base] : buffer -> view<1xi32>
+  // ERROR@+1: TARGET/003 {subject_role="field", subject_name="scope"}
+  view.atomic.reduce<addi> %value, %view[0] {ordering = relaxed, scope = system} : i32, view<1xi32>
+  func.return
+}
+
+// ====
+// RUN: pass source-to-low
+
+spirv.target<vulkan1_3> @target {contract_feature_bits = 2147516422}
+func.def target(@target) @rejects_ordered_invocation_scope(%value: i32, %buffer: buffer) {
+  %base = index.constant 0 : offset
+  %global = buffer.assume.memory_space<global> %buffer : buffer
+  %aligned = buffer.assume.alignment %global {minimum_alignment = 4} : buffer
+  %view = buffer.view %aligned[%base] : buffer -> view<1xi32>
+  // ERROR@+1: TARGET/003
+  view.atomic.reduce<addi> %value, %view[0] {ordering = acquire, scope = thread} : i32, view<1xi32>
+  func.return
+}
+
+// ====
+// RUN: pass source-to-low
+
+spirv.target<vulkan1_3> @target {contract_feature_bits = 2147516422}
+func.def target(@target) @rejects_device_scope_without_device_scope_feature(%value: i32, %buffer: buffer) {
+  %base = index.constant 0 : offset
+  %global = buffer.assume.memory_space<global> %buffer : buffer
+  %aligned = buffer.assume.alignment %global {minimum_alignment = 4} : buffer
+  %view = buffer.view %aligned[%base] : buffer -> view<1xi32>
+  // ERROR@+1: TARGET/003 {subject_role="descriptor", subject_name="spirv.atomic.reduce.iadd.storage_buffer.i32.device", constraint_key="descriptor_available"}
+  view.atomic.reduce<addi> %value, %view[0] {ordering = relaxed, scope = device} : i32, view<1xi32>
+  func.return
+}
+
+// ====
+// RUN: pass source-to-low
+
+spirv.target<vulkan1_3> @target {contract_feature_bits = 2147516422}
+func.def target(@target) @rejects_i64_without_storage_atomic_feature(%value: i64, %buffer: buffer) {
+  %base = index.constant 0 : offset
+  %global = buffer.assume.memory_space<global> %buffer : buffer
+  %aligned = buffer.assume.alignment %global {minimum_alignment = 8} : buffer
+  %view = buffer.view %aligned[%base] : buffer -> view<1xi64>
+  // ERROR@+1: TARGET/003 {subject_role="descriptor", subject_name="spirv.atomic.reduce.iadd.storage_buffer.i64.workgroup", constraint_key="descriptor_available"}
+  view.atomic.reduce<addi> %value, %view[0] {ordering = relaxed, scope = workgroup} : i64, view<1xi64>
+  func.return
+}

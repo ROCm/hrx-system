@@ -154,6 +154,8 @@ loom_cc_library(
 loom_cc_library(
     name = "module_emitter",
     srcs = [
+        "function_atomic.c",
+        "function_atomic.h",
         "function_control.c",
         "function_control.h",
         "function_emitter.c",
@@ -247,6 +249,8 @@ loom_cc_test(
 loom_check_test_suite(
     name = "loom_check_file_test",
     srcs = [
+        "test/atomic.loom-test",
+        "test/atomic_diagnostics.loom-test",
         "test/barrier.loom-test",
         "test/buffer_raw.loom-test",
         "test/cooperative_matrix.loom-test",

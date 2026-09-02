@@ -31,17 +31,20 @@ loom_cc_library(
     loom::error::error_defs
     loom::ir
     loom::ir::facts
+    loom::ops::atomic
     loom::ops::buffer
     loom::ops::func
     loom::ops::kernel
     loom::ops::low
     loom::ops::vector
+    loom::ops::view
     loom::target::arch::spirv::contracts
     loom::target::arch::spirv::cooperative_properties
     loom::target::arch::spirv::descriptors
     loom::target::arch::spirv::descriptors::descriptors_ids
     loom::target::arch::spirv::error_defs
     loom::target::arch::spirv::facts
+    loom::target::arch::spirv::features
     loom::target::arch::spirv::isa
     loom::target::arch::spirv::ops
     loom::target::arch::spirv::registers
