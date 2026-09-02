@@ -214,6 +214,12 @@ static bool loom_promote_private_fragments_is_rank1_dynamic_index(
          indices.values[0] == index;
 }
 
+static bool loom_promote_private_fragments_is_observable(
+    const loom_module_t* module, const loom_op_t* op) {
+  return iree_any_bit_set(loom_op_effective_traits(module, op),
+                          LOOM_TRAIT_OBSERVABLE_EFFECT);
+}
+
 static bool loom_promote_private_fragments_source_origin_from_copy_load(
     const loom_module_t* module, const loom_op_t* source_load_op,
     loom_value_id_t induction_variable, int64_t fragment_length,
@@ -345,6 +351,10 @@ static bool loom_promote_private_fragments_read_copy_loop(
   if (loom_value_is_block_arg(stored)) return false;
   loom_op_t* source_load_op = loom_value_def_op(stored);
   if (!loom_view_load_isa(source_load_op)) return false;
+  if (loom_promote_private_fragments_is_observable(module, source_load_op) ||
+      loom_promote_private_fragments_is_observable(module, private_store_op)) {
+    return false;
+  }
   if (source_load_op->parent_op != loop_op ||
       source_load_op->parent_block != private_store_op->parent_block) {
     return false;
@@ -382,6 +392,9 @@ static iree_status_t loom_promote_private_fragments_collect_uses(
   loom_value_for_each_use(view_value, use) {
     loom_op_t* user_op = loom_use_user_op(*use);
     if (loom_view_load_isa(user_op) && loom_use_operand_index(*use) == 0) {
+      if (loom_promote_private_fragments_is_observable(module, user_op)) {
+        return iree_ok_status();
+      }
       IREE_RETURN_IF_ERROR(loom_promote_private_fragments_op_list_push(
           pass->arena, out_loads, user_op));
       continue;
@@ -498,11 +511,17 @@ static iree_status_t loom_promote_private_fragments_collect_single_store_uses(
   loom_value_for_each_use(view_value, use) {
     loom_op_t* user_op = loom_use_user_op(*use);
     if (loom_view_load_isa(user_op) && loom_use_operand_index(*use) == 0) {
+      if (loom_promote_private_fragments_is_observable(module, user_op)) {
+        return iree_ok_status();
+      }
       IREE_RETURN_IF_ERROR(loom_promote_private_fragments_op_list_push(
           pass->arena, out_loads, user_op));
       continue;
     }
     if (loom_view_store_isa(user_op) && loom_use_operand_index(*use) == 1) {
+      if (loom_promote_private_fragments_is_observable(module, user_op)) {
+        return iree_ok_status();
+      }
       if (*out_store_op) return iree_ok_status();
       *out_store_op = user_op;
       continue;
@@ -577,10 +596,11 @@ static iree_status_t loom_promote_private_fragments_promote(
 
   loom_op_t* vector_load_op = NULL;
   IREE_RETURN_IF_ERROR(loom_vector_load_build(
-      &context->rewriter->builder, 0, copy_loop->source_view,
-      copy_loop->indices, copy_loop->index_count, static_indices,
-      copy_loop->static_index_count, 0, 0, copy_loop->vector_type,
-      copy_loop->source_load_op->location, &vector_load_op));
+      &context->rewriter->builder, 0, /*instance_flags=*/0,
+      copy_loop->source_view, copy_loop->indices, copy_loop->index_count,
+      static_indices, copy_loop->static_index_count, 0, 0,
+      copy_loop->vector_type, copy_loop->source_load_op->location,
+      &vector_load_op));
   loom_value_id_t vector_value = loom_vector_load_result(vector_load_op);
   IREE_RETURN_IF_ERROR(loom_promote_private_fragments_name_vector_value(
       context, loom_buffer_view_result(view_op), vector_value));
@@ -679,6 +699,10 @@ static iree_status_t loom_promote_private_fragments_collect_static_slot_uses(
   loom_value_for_each_use(view_value, use) {
     loom_op_t* user_op = loom_use_user_op(*use);
     int64_t slot_index = 0;
+    if ((loom_view_load_isa(user_op) || loom_view_store_isa(user_op)) &&
+        loom_promote_private_fragments_is_observable(module, user_op)) {
+      return iree_ok_status();
+    }
     if (loom_view_load_isa(user_op) && loom_use_operand_index(*use) == 0 &&
         loom_promote_private_fragments_is_static_slot_load(
             module, user_op, private_view, fragment_length, &slot_index)) {
@@ -847,6 +871,10 @@ loom_promote_private_fragments_try_erase_static_slot_noop_stores(
     if (!loom_view_store_isa(store_op) || loom_use_operand_index(*use) != 1) {
       continue;
     }
+    if (loom_promote_private_fragments_is_observable(context->module,
+                                                     store_op)) {
+      continue;
+    }
     int64_t store_slot_index = 0;
     if (!loom_promote_private_fragments_is_static_slot_store(
             context->module, store_op, private_view, fragment_length,
@@ -865,7 +893,9 @@ loom_promote_private_fragments_try_erase_static_slot_noop_stores(
     if (!loom_promote_private_fragments_is_static_slot_load(
             context->module, load_op, private_view, fragment_length,
             &load_slot_index) ||
-        load_slot_index != store_slot_index) {
+        load_slot_index != store_slot_index ||
+        loom_promote_private_fragments_is_observable(context->module,
+                                                     load_op)) {
       continue;
     }
     if (load_op->parent_block != store_op->parent_block ||

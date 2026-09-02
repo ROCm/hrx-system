@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Shared target-independent memory-space vocabulary."""
+"""Shared target-independent memory vocabulary."""
 
 from loom.dsl import EnumCase, EnumDef
 
@@ -30,4 +30,25 @@ MemorySpace = EnumDef(
     c_include="loom/ir/facts.h",
 )
 
-__all__ = ["MemorySpace"]
+MemoryAccessFlags = EnumDef(
+    "MemoryAccessFlags",
+    [
+        EnumCase(
+            "volatile",
+            1,
+            doc=(
+                "Require every dynamic access to execute as an independently "
+                "observable operation and preserve its order relative to other "
+                "volatile accesses. A target may decompose one logical access "
+                "into multiple physical accesses. This does not provide "
+                "atomicity, synchronization, or a cache-coherence guarantee."
+            ),
+        ),
+    ],
+    doc="Execution-semantics modifiers shared by scalar and vector memory accesses.",
+    c_type="loom_memory_access_flags_t",
+    c_const_prefix="LOOM_MEMORY_ACCESS_FLAG",
+    c_include="loom/ops/op_defs.h",
+)
+
+__all__ = ["MemoryAccessFlags", "MemorySpace"]

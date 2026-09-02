@@ -92,6 +92,17 @@ func.def @observable_ops_do_not_cse() -> (i32, i32) {
 
 // ====
 
+// Volatile reads of the same address are separate observations.
+// RUN: pass cse
+func.def @volatile_loads_do_not_cse(%buffer: buffer, %offset: offset) -> (i32, i32) {
+  %view = buffer.view %buffer[%offset] : buffer -> view<1xi32>
+  %lhs = view.load<volatile> %view[0] : view<1xi32> -> i32
+  %rhs = view.load<volatile> %view[0] : view<1xi32> -> i32
+  func.return %lhs, %rhs : i32, i32
+}
+
+// ====
+
 // Function passes still run over the function-like body projection. CSE can be
 // driven over every root region. Equivalent expressions are only shared inside
 // one region tree; config and body keep separate SSA scopes.

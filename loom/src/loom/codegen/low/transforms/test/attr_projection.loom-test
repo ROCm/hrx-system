@@ -14,3 +14,24 @@ low.func.def target<test.low.core>(@test_target) abi(object_function) @attr_minu
   %result = low.const<test.const.i32> {i32_value = -24} : reg<test.i32>
   low.return %result : reg<test.i32>
 }
+
+// ====
+// RUN: pass source-to-low
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @volatile_vector_load(%source: buffer) -> (vector<4xi32>) {
+  %base = index.constant 0 : offset
+  %view = buffer.view %source[%base] : buffer -> view<4xi32>
+  %result = vector.load<volatile> %view[0] : view<4xi32> -> vector<4xi32>
+  func.return %result : vector<4xi32>
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) abi(object_function) @volatile_vector_load() -> (reg<test.i32 x4>) {
+  %view = low.resource<native_pointer> {index = 0, source_type = buffer} : reg<test.ptr>
+  %result = low.op<test.load.ordered.v4i32>(%view) : (reg<test.ptr>) -> reg<test.i32 x4>
+  low.return %result : reg<test.i32 x4>
+}

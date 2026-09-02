@@ -71,6 +71,23 @@ func.def @dead_observable_stays() {
 
 // ====
 
+// A volatile load is an observation even when its SSA result is unused.
+// RUN: pass dce
+func.def @dead_volatile_load_stays(%buffer: buffer, %offset: offset) {
+  %view = buffer.view %buffer[%offset] : buffer -> view<1xi32>
+  %dead = view.load<volatile> %view[0] : view<1xi32> -> i32
+  func.return
+}
+
+// ----
+func.def @dead_volatile_load_stays(%buffer: buffer, %offset: offset) {
+  %view = buffer.view %buffer[%offset] : buffer -> view<1xi32>
+  %dead = view.load<volatile> %view[0] : view<1xi32> -> i32
+  func.return
+}
+
+// ====
+
 // An observable op nested in structured control keeps its parent live even
 // when no yielded result is observed.
 // RUN: pass dce

@@ -85,6 +85,7 @@ loom_cc_library(
     loom::ops::scf
     loom::ops::type_registry
     loom::ops::vector
+    loom::ops::view
     loom::rewrite::materialize
     loom::rewrite::remap
     loom::sanitizer::options

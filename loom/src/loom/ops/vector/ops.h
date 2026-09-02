@@ -176,6 +176,9 @@ enum {
   LOOM_OP_VECTOR_COUNT_ = 151,
 };
 
+// Execution-semantics modifiers shared by scalar and vector memory accesses.
+#define LOOM_VECTOR_MEMORYACCESSFLAGS_VOLATILE ((uint8_t)1)
+
 // IEEE 754 fast-math relaxation flags for float operations.
 #define LOOM_VECTOR_FASTMATHFLAGS_REASSOC ((uint8_t)1)
 #define LOOM_VECTOR_FASTMATHFLAGS_NNAN ((uint8_t)2)
@@ -802,6 +805,7 @@ LOOM_DEFINE_ISA(loom_vector_load_isa, LOOM_OP_VECTOR_LOAD)
 LOOM_DEFINE_OPERAND(loom_vector_load_view, 0)
 LOOM_DEFINE_VARIADIC_OPERANDS(loom_vector_load_indices, 1)
 LOOM_DEFINE_RESULT(loom_vector_load_result, 0)
+LOOM_DEFINE_INSTANCE_FLAGS(loom_vector_load_memory_flags)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_vector_load_cache_scope, 0, loom_cache_scope_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_vector_load_cache_temporal, 1, loom_cache_temporal_t)
 LOOM_DEFINE_ATTR_I64_ARRAY(loom_vector_load_static_indices, 2)
@@ -813,6 +817,7 @@ typedef uint32_t loom_vector_load_build_flags_t;
 iree_status_t loom_vector_load_build(
     loom_builder_t* builder,
     loom_vector_load_build_flags_t build_flags,
+    uint8_t instance_flags,
     loom_may_consume loom_value_id_t view,
     const loom_value_id_t* indices,
     iree_host_size_t indices_count,
@@ -823,6 +828,7 @@ iree_status_t loom_vector_load_build(
     loom_type_t result_type,
     loom_location_id_t location,
     loom_op_t** out_op);
+loom_trait_flags_t loom_memory_access_effective_traits(const loom_op_t* op);
 iree_status_t loom_vector_load_facts(
     loom_fact_context_t* context,
     const loom_module_t* module, const loom_op_t* op,
@@ -838,6 +844,7 @@ LOOM_DEFINE_ISA(loom_vector_store_isa, LOOM_OP_VECTOR_STORE)
 LOOM_DEFINE_OPERAND(loom_vector_store_value, 0)
 LOOM_DEFINE_OPERAND(loom_vector_store_view, 1)
 LOOM_DEFINE_VARIADIC_OPERANDS(loom_vector_store_indices, 2)
+LOOM_DEFINE_INSTANCE_FLAGS(loom_vector_store_memory_flags)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_vector_store_cache_scope, 0, loom_cache_scope_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_vector_store_cache_temporal, 1, loom_cache_temporal_t)
 LOOM_DEFINE_ATTR_I64_ARRAY(loom_vector_store_static_indices, 2)
@@ -849,6 +856,7 @@ typedef uint32_t loom_vector_store_build_flags_t;
 iree_status_t loom_vector_store_build(
     loom_builder_t* builder,
     loom_vector_store_build_flags_t build_flags,
+    uint8_t instance_flags,
     loom_value_id_t value,
     loom_value_id_t view,
     const loom_value_id_t* indices,
@@ -859,6 +867,7 @@ iree_status_t loom_vector_store_build(
     loom_optional uint8_t cache_temporal,
     loom_location_id_t location,
     loom_op_t** out_op);
+loom_trait_flags_t loom_memory_access_effective_traits(const loom_op_t* op);
 iree_status_t loom_vector_store_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);

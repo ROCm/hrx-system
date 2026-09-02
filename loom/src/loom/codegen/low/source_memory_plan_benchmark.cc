@@ -204,8 +204,8 @@ class SourceMemoryPlanBenchmark {
     for (int64_t i = 0; i < memory_access_count; ++i) {
       loom_op_t* load_op = nullptr;
       IREE_CHECK_OK(loom_vector_load_build(
-          &builder_, 0, loom_buffer_view_result(view_op), dynamic_indices,
-          IREE_ARRAYSIZE(dynamic_indices), static_indices,
+          &builder_, 0, /*instance_flags=*/0, loom_buffer_view_result(view_op),
+          dynamic_indices, IREE_ARRAYSIZE(dynamic_indices), static_indices,
           IREE_ARRAYSIZE(static_indices), 0, 0, vector_type,
           LOOM_LOCATION_UNKNOWN, &load_op));
       memory_ops_.push_back(load_op);

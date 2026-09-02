@@ -35,6 +35,7 @@ class ViewBuilder(DialectBuilder):
     def load(
         self,
         *,
+        memory_flags: str = ...,
         view: ValueRef,
         indices: list[int | ValueRef],
         cache_scope: str | None = ...,
@@ -48,6 +49,7 @@ class ViewBuilder(DialectBuilder):
     def store(
         self,
         *,
+        memory_flags: str = ...,
         value: ValueRef,
         view: ValueRef,
         indices: list[int | ValueRef],

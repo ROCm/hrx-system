@@ -481,6 +481,17 @@ func.def @extract_multi_use_load_keeps_wide_load(%input: buffer, %offset: offset
 
 // ====
 
+// Narrowing a volatile vector load would discard observable accesses to the
+// lanes outside of the extract footprint.
+func.def @extract_volatile_load_keeps_wide_load(%input: buffer, %offset: offset) -> (i32) {
+  %view = buffer.view %input[%offset] : buffer -> view<4xi32>
+  %wide = vector.load<volatile> %view[0] : view<4xi32> -> vector<4xi32>
+  %lane2 = vector.extract %wide[2] : vector<4xi32> -> i32
+  func.return %lane2 : i32
+}
+
+// ====
+
 // A zero-lane range mask performs no range tests.
 func.def @empty_mask_range(%lo: index, %hi: index, %step: index) -> (vector<0xi1>) {
   %r = vector.mask.range [%lo to %hi step %step] : index -> vector<0xi1>

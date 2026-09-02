@@ -11,6 +11,7 @@ from loom.assembly import (
     COLON,
     COMMA,
     AttrDict,
+    Flags,
     IndexList,
     Ref,
     ResultType,
@@ -19,8 +20,10 @@ from loom.assembly import (
 )
 from loom.dialect.atomic import AtomicKind, AtomicOrdering, AtomicScope
 from loom.dialect.cache import CacheScope, CacheTemporal
+from loom.dialect.memory import MemoryAccessFlags
 from loom.dsl import (
     ATTR_TYPE_ENUM,
+    ATTR_TYPE_FLAGS,
     ATTR_TYPE_I64_ARRAY,
     FACT_IDENTITY,
     HINT,
@@ -235,13 +238,23 @@ view_load = Op(
         Operand("indices", INDEX, doc="Dynamic logical element indices.", variadic=True),
     ],
     results=[Result("result", SCALAR, doc="Loaded scalar element.")],
-    attrs=_indexed_memory_attrs(),
+    attrs=[
+        AttrDef(
+            "memory_flags",
+            ATTR_TYPE_FLAGS,
+            optional=True,
+            enum_def=MemoryAccessFlags,
+        ),
+        *_indexed_memory_attrs(),
+    ],
     constraints=[SameElementType("view", "result")],
     effects=[Reads("view")],
     interfaces=[_memory_access_interface()],
+    effective_traits="loom_memory_access_effective_traits",
     verify="loom_view_load_verify",
     facts="loom_view_load_facts",
     format=[
+        Flags("memory_flags"),
         Ref("view"),
         IndexList("indices", "static_indices"),
         AttrDict(),
@@ -252,6 +265,7 @@ view_load = Op(
     ],
     examples=[
         "%x = view.load %view[%row, %col] : view<[%M]x[%N]xf32, %layout> -> f32",
+        "%flag = view.load<volatile> %mailbox[%index] : view<16xi32> -> i32",
     ],
 )
 
@@ -264,12 +278,22 @@ view_store = Op(
         Operand("view", VIEW, doc="Typed destination view."),
         Operand("indices", INDEX, doc="Dynamic logical element indices.", variadic=True),
     ],
-    attrs=_indexed_memory_attrs(),
+    attrs=[
+        AttrDef(
+            "memory_flags",
+            ATTR_TYPE_FLAGS,
+            optional=True,
+            enum_def=MemoryAccessFlags,
+        ),
+        *_indexed_memory_attrs(),
+    ],
     constraints=[SameElementType("value", "view")],
     effects=[Writes("view")],
     interfaces=[_memory_access_interface(value="value")],
+    effective_traits="loom_memory_access_effective_traits",
     verify="loom_view_store_verify",
     format=[
+        Flags("memory_flags"),
         Ref("value"),
         COMMA,
         Ref("view"),
@@ -282,6 +306,7 @@ view_store = Op(
     ],
     examples=[
         "view.store %x, %view[%row, %col] : f32, view<[%M]x[%N]xf32, %layout>",
+        "view.store<volatile> %flag, %mailbox[%index] : i32, view<16xi32>",
     ],
 )
 

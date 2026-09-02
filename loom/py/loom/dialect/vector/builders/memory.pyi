@@ -45,6 +45,7 @@ class VectorMemoryMixin:
     def load(
         self,
         *,
+        memory_flags: str = ...,
         view: ValueRef,
         indices: list[int | ValueRef],
         cache_scope: str | None = ...,
@@ -58,6 +59,7 @@ class VectorMemoryMixin:
     def store(
         self,
         *,
+        memory_flags: str = ...,
         value: ValueRef,
         view: ValueRef,
         indices: list[int | ValueRef],

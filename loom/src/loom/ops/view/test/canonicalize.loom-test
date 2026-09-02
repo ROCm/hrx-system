@@ -31,3 +31,15 @@ func.def @non_adjacent_f16_view_loads_stay_scalar(%input: buffer, %base: index) 
   %b = view.load %view[%next] : view<32xf16> -> f16
   func.return %a, %b : f16, f16
 }
+
+// ====
+
+func.def @adjacent_volatile_f16_view_loads_stay_scalar(%input: buffer, %base: index) -> (f16, f16) {
+  %byte_base = index.constant 0 : offset
+  %element_stride = index.constant 1 : index
+  %view = buffer.view %input[%byte_base] : buffer -> view<32xf16>
+  %next = index.add %base, %element_stride : index
+  %a = view.load<volatile> %view[%base] : view<32xf16> -> f16
+  %b = view.load<volatile> %view[%next] : view<32xf16> -> f16
+  func.return %a, %b : f16, f16
+}

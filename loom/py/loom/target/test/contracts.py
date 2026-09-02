@@ -59,6 +59,7 @@ from loom.target.test.descriptors import (
     TEST_LOW_FROM_ELEMENTS_V4I32_DESCRIPTOR,
     TEST_LOW_LOAD_INDEX_V4F32_DESCRIPTOR,
     TEST_LOW_LOAD_INDEX_V4I32_DESCRIPTOR,
+    TEST_LOW_LOAD_ORDERED_V4I32_DESCRIPTOR,
     TEST_LOW_LOAD_V4F32_DESCRIPTOR,
     TEST_LOW_LOAD_V4I32_DESCRIPTOR,
     TEST_LOW_MUL_F32_DESCRIPTOR,
@@ -248,6 +249,7 @@ def _vector_load_rule(
     result_type: TypePattern,
     *,
     dynamic: bool,
+    volatile: bool = False,
 ) -> DescriptorRule:
     operands = {"address": ValueRef.operand("view")}
     if dynamic:
@@ -256,6 +258,11 @@ def _vector_load_rule(
         source_op=vector.vector_load,
         descriptor=descriptor,
         guards=(
+            *(
+                (Guard.instance_flags_has_all("memory_flags", "volatile"),)
+                if volatile
+                else ()
+            ),
             Guard.operand_segment_count("indices", 1 if dynamic else 0),
             Guard.value_type("result", result_type),
         ),
@@ -421,6 +428,12 @@ TEST_LOW_CORE_CONTRACT_FRAGMENT = ContractFragment(
             TEST_LOW_MUL_I32_DESCRIPTOR,
             _V4I32,
             semantic_tag="integer.mul.i32",
+        ),
+        _vector_load_rule(
+            TEST_LOW_LOAD_ORDERED_V4I32_DESCRIPTOR,
+            _V4I32,
+            dynamic=False,
+            volatile=True,
         ),
         _vector_load_rule(
             TEST_LOW_LOAD_V4I32_DESCRIPTOR,
