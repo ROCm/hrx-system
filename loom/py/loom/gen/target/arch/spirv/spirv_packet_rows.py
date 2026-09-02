@@ -201,7 +201,7 @@ class _PacketRow:
     memory_scope: str | None = None
     memory_semantics: str | None = None
     cooperative_matrix_layout: str | None = None
-    cooperative_matrix_stride: int = 0
+    cooperative_matrix_element_stride: int = 0
     cooperative_matrix_operands: str | None = None
 
     def encoded_operand_types(self) -> tuple[str, ...]:
@@ -248,8 +248,8 @@ class _PacketRow:
             lines.append(f"            .payload.barrier.memory_semantics = {self.memory_semantics},")
         if self.cooperative_matrix_layout is not None:
             lines.append(f"            .payload.cooperative_matrix.layout = {self.cooperative_matrix_layout},")
-        if self.cooperative_matrix_stride:
-            lines.append(f"            .payload.cooperative_matrix.stride = {self.cooperative_matrix_stride},")
+        if self.cooperative_matrix_element_stride:
+            lines.append(f"            .payload.cooperative_matrix.element_stride = {self.cooperative_matrix_element_stride},")
         if self.cooperative_matrix_operands is not None:
             lines.append(f"            .payload.cooperative_matrix.operands = {self.cooperative_matrix_operands},")
         lines.append("        },")
@@ -388,10 +388,6 @@ def _workgroup_rows() -> list[_PacketRow]:
     return rows
 
 
-def _row_byte_stride(columns: int, scalar: StorageBufferScalar) -> int:
-    return columns * scalar.byte_width
-
-
 def _cooperative_matrix_rows_for_case(case: CooperativeMatrixCase) -> list[_PacketRow]:
     lhs_scalar = case.lhs_scalar
     rhs_scalar = case.rhs_scalar
@@ -422,10 +418,10 @@ def _cooperative_matrix_rows_for_case(case: CooperativeMatrixCase) -> list[_Pack
         matrix_use="LOOM_SPIRV_COOPERATIVE_MATRIX_USE_MATRIX_ACCUMULATOR_KHR",
     )
     row_major_layout = "LOOM_SPIRV_COOPERATIVE_MATRIX_LAYOUT_ROW_MAJOR_KHR"
-    lhs_stride = _row_byte_stride(case.lhs_columns, lhs_scalar)
-    rhs_stride = _row_byte_stride(case.rhs_columns, rhs_scalar)
-    accumulator_stride = _row_byte_stride(case.accumulator_columns, accumulator_scalar)
-    result_stride = _row_byte_stride(case.accumulator_columns, result_scalar)
+    lhs_element_stride = case.lhs_columns
+    rhs_element_stride = case.rhs_columns
+    accumulator_element_stride = case.accumulator_columns
+    result_element_stride = case.accumulator_columns
     return [
         _PacketRow(
             case.descriptor_key(
@@ -440,7 +436,7 @@ def _cooperative_matrix_rows_for_case(case: CooperativeMatrixCase) -> list[_Pack
             result_count=1,
             memory_alignment=16,
             cooperative_matrix_layout=row_major_layout,
-            cooperative_matrix_stride=lhs_stride,
+            cooperative_matrix_element_stride=lhs_element_stride,
         ),
         _PacketRow(
             case.descriptor_key(
@@ -455,7 +451,7 @@ def _cooperative_matrix_rows_for_case(case: CooperativeMatrixCase) -> list[_Pack
             result_count=1,
             memory_alignment=16,
             cooperative_matrix_layout=row_major_layout,
-            cooperative_matrix_stride=rhs_stride,
+            cooperative_matrix_element_stride=rhs_element_stride,
         ),
         _PacketRow(
             case.descriptor_key(
@@ -470,7 +466,7 @@ def _cooperative_matrix_rows_for_case(case: CooperativeMatrixCase) -> list[_Pack
             result_count=1,
             memory_alignment=16,
             cooperative_matrix_layout=row_major_layout,
-            cooperative_matrix_stride=accumulator_stride,
+            cooperative_matrix_element_stride=accumulator_element_stride,
         ),
         _PacketRow(
             case.descriptor_key(
@@ -499,7 +495,7 @@ def _cooperative_matrix_rows_for_case(case: CooperativeMatrixCase) -> list[_Pack
             ),
             memory_alignment=16,
             cooperative_matrix_layout=row_major_layout,
-            cooperative_matrix_stride=result_stride,
+            cooperative_matrix_element_stride=result_element_stride,
         ),
     ]
 
