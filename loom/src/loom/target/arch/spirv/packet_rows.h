@@ -85,8 +85,8 @@ typedef struct loom_spirv_packet_row_t {
     struct {
       // Cooperative matrix layout literal for load/store rows.
       uint32_t layout;
-      // Cooperative matrix stride literal for load/store rows.
-      uint32_t stride;
+      // Row stride in elements of the load/store pointer's pointee type.
+      uint32_t element_stride;
       // Cooperative matrix operands mask literal for mul-add rows.
       uint32_t operands;
     } cooperative_matrix;

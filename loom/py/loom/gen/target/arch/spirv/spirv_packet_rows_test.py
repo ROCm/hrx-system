@@ -234,7 +234,7 @@ def test_generation_emits_complete_float_constant_packet_rows() -> None:
         assert descriptor.feature_mask_words == ((scalar.feature_bits,) if scalar.feature_bits else ())
 
 
-def test_generation_uses_byte_strides_for_cooperative_matrix_rows() -> None:
+def test_generation_uses_element_strides_for_cooperative_matrix_rows() -> None:
     f16_lhs = _packet_row(
         _cooperative_matrix_descriptor(
             "op_cooperative_matrix_load_khr",
@@ -265,9 +265,9 @@ def test_generation_uses_byte_strides_for_cooperative_matrix_rows() -> None:
             layout="row_major",
         ),
     )
-    assert f16_lhs.cooperative_matrix_stride == 32
-    assert f16_init.cooperative_matrix_stride == 64
-    assert f16_store.cooperative_matrix_stride == 64
+    assert f16_lhs.cooperative_matrix_element_stride == 16
+    assert f16_init.cooperative_matrix_element_stride == 16
+    assert f16_store.cooperative_matrix_element_stride == 16
 
     bf16_rhs = _packet_row(
         _cooperative_matrix_descriptor(
@@ -279,7 +279,7 @@ def test_generation_uses_byte_strides_for_cooperative_matrix_rows() -> None:
             layout="row_major",
         ),
     )
-    assert bf16_rhs.cooperative_matrix_stride == 32
+    assert bf16_rhs.cooperative_matrix_element_stride == 16
 
     s8_lhs = _packet_row(
         _cooperative_matrix_descriptor(
@@ -311,9 +311,9 @@ def test_generation_uses_byte_strides_for_cooperative_matrix_rows() -> None:
             layout="row_major",
         ),
     )
-    assert s8_lhs.cooperative_matrix_stride == 32
-    assert s8_rhs.cooperative_matrix_stride == 16
-    assert s8_store.cooperative_matrix_stride == 64
+    assert s8_lhs.cooperative_matrix_element_stride == 32
+    assert s8_rhs.cooperative_matrix_element_stride == 16
+    assert s8_store.cooperative_matrix_element_stride == 16
 
     u8_lhs = _packet_row(
         _cooperative_matrix_descriptor(
@@ -337,8 +337,8 @@ def test_generation_uses_byte_strides_for_cooperative_matrix_rows() -> None:
     )
     assert "LOOM_SPIRV_SCALAR_TYPE_U8" in u8_lhs.result_type
     assert "LOOM_SPIRV_SCALAR_TYPE_U32" in u8_store.operand_types[1]
-    assert u8_lhs.cooperative_matrix_stride == 32
-    assert u8_store.cooperative_matrix_stride == 64
+    assert u8_lhs.cooperative_matrix_element_stride == 32
+    assert u8_store.cooperative_matrix_element_stride == 16
 
 
 def test_generation_offsets_storage_buffer_address_before_pointer_conversion() -> None:

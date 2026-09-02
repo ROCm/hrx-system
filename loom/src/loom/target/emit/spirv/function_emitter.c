@@ -806,9 +806,9 @@ static iree_status_t loom_spirv_emit_cooperative_matrix_layout_operands(
   IREE_RETURN_IF_ERROR(loom_spirv_emit_u32_constant(
       state->type_context, row->payload.cooperative_matrix.layout,
       out_layout_id));
-  return loom_spirv_emit_u32_constant(state->type_context,
-                                      row->payload.cooperative_matrix.stride,
-                                      out_stride_id);
+  return loom_spirv_emit_u32_constant(
+      state->type_context, row->payload.cooperative_matrix.element_stride,
+      out_stride_id);
 }
 
 static iree_status_t loom_spirv_emit_cooperative_matrix_load_packet(

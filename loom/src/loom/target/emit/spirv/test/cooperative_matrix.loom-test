@@ -100,10 +100,8 @@ low.kernel.def target<spirv.logical.core>(@hal_target_coop_f16) workgroup_size(3
     %uint_16 = OpConstant %uint 16
      %uint_0 = OpConstant %uint 0
          %65 = OpTypeCooperativeMatrixKHR %half %uint_3 %uint_16 %uint_16 %uint_0
-    %uint_32 = OpConstant %uint 32
-         %68 = OpTypeCooperativeMatrixKHR %half %uint_3 %uint_16 %uint_16 %uint_1
-         %70 = OpTypeCooperativeMatrixKHR %float %uint_3 %uint_16 %uint_16 %uint_2_0
-    %uint_64 = OpConstant %uint 64
+         %67 = OpTypeCooperativeMatrixKHR %half %uint_3 %uint_16 %uint_16 %uint_1
+         %69 = OpTypeCooperativeMatrixKHR %float %uint_3 %uint_16 %uint_16 %uint_2_0
 %spirv_raw_bda_cooperative_matrix_f16 = OpFunction %void None %10
          %11 = OpLabel
          %16 = OpAccessChain %_ptr_PushConstant_uint %8 %int_6 %int_0
@@ -138,11 +136,11 @@ low.kernel.def target<spirv.logical.core>(@hal_target_coop_f16) workgroup_size(3
   %init_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %57
          %61 = OpIAdd %ulong %out_buffer %byte_offset
    %out_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %61
-        %lhs = OpCooperativeMatrixLoadKHR %65 %lhs_view %uint_0 %uint_32 Aligned 16
-        %rhs = OpCooperativeMatrixLoadKHR %68 %rhs_view %uint_0 %uint_32 Aligned 16
-       %init = OpCooperativeMatrixLoadKHR %70 %init_view %uint_0 %uint_64 Aligned 16
-     %result = OpCooperativeMatrixMulAddKHR %70 %lhs %rhs %init
-               OpCooperativeMatrixStoreKHR %out_view %result %uint_0 %uint_64 Aligned 16
+        %lhs = OpCooperativeMatrixLoadKHR %65 %lhs_view %uint_0 %uint_16 Aligned 16
+        %rhs = OpCooperativeMatrixLoadKHR %67 %rhs_view %uint_0 %uint_16 Aligned 16
+       %init = OpCooperativeMatrixLoadKHR %69 %init_view %uint_0 %uint_16 Aligned 16
+     %result = OpCooperativeMatrixMulAddKHR %69 %lhs %rhs %init
+               OpCooperativeMatrixStoreKHR %out_view %result %uint_0 %uint_16 Aligned 16
                OpReturn
                OpFunctionEnd
 
@@ -253,7 +251,6 @@ low.kernel.def target<spirv.logical.core>(@hal_target_coop_s8) workgroup_size(32
          %65 = OpTypeCooperativeMatrixKHR %char %uint_3 %uint_16 %uint_32 %uint_0
          %67 = OpTypeCooperativeMatrixKHR %char %uint_3 %uint_32 %uint_16 %uint_1
          %69 = OpTypeCooperativeMatrixKHR %int %uint_3 %uint_16 %uint_16 %uint_2_0
-    %uint_64 = OpConstant %uint 64
 %spirv_raw_bda_cooperative_matrix_s8_signed_saturating = OpFunction %void None %10
          %11 = OpLabel
          %16 = OpAccessChain %_ptr_PushConstant_uint %8 %int_6 %int_0
@@ -290,9 +287,9 @@ low.kernel.def target<spirv.logical.core>(@hal_target_coop_s8) workgroup_size(32
    %out_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %60
         %lhs = OpCooperativeMatrixLoadKHR %65 %lhs_view %uint_0 %uint_32 Aligned 16
         %rhs = OpCooperativeMatrixLoadKHR %67 %rhs_view %uint_0 %uint_16 Aligned 16
-       %init = OpCooperativeMatrixLoadKHR %69 %init_view %uint_0 %uint_64 Aligned 16
+       %init = OpCooperativeMatrixLoadKHR %69 %init_view %uint_0 %uint_16 Aligned 16
      %result = OpCooperativeMatrixMulAddKHR %69 %lhs %rhs %init MatrixASignedComponentsKHR|MatrixBSignedComponentsKHR|MatrixCSignedComponentsKHR|MatrixResultSignedComponentsKHR|SaturatingAccumulationKHR
-               OpCooperativeMatrixStoreKHR %out_view %result %uint_0 %uint_64 Aligned 16
+               OpCooperativeMatrixStoreKHR %out_view %result %uint_0 %uint_16 Aligned 16
                OpReturn
                OpFunctionEnd
 
@@ -403,7 +400,6 @@ low.kernel.def target<spirv.logical.core>(@hal_target_coop_u8) workgroup_size(32
          %65 = OpTypeCooperativeMatrixKHR %uchar %uint_3 %uint_16 %uint_32 %uint_0
          %67 = OpTypeCooperativeMatrixKHR %uchar %uint_3 %uint_32 %uint_16 %uint_1
          %69 = OpTypeCooperativeMatrixKHR %uint %uint_3 %uint_16 %uint_16 %uint_2_0
-    %uint_64 = OpConstant %uint 64
 %spirv_raw_bda_cooperative_matrix_u8 = OpFunction %void None %10
          %11 = OpLabel
          %16 = OpAccessChain %_ptr_PushConstant_uint %8 %int_6 %int_0
@@ -440,9 +436,9 @@ low.kernel.def target<spirv.logical.core>(@hal_target_coop_u8) workgroup_size(32
    %out_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_uint %60
         %lhs = OpCooperativeMatrixLoadKHR %65 %lhs_view %uint_0 %uint_32 Aligned 16
         %rhs = OpCooperativeMatrixLoadKHR %67 %rhs_view %uint_0 %uint_16 Aligned 16
-       %init = OpCooperativeMatrixLoadKHR %69 %init_view %uint_0 %uint_64 Aligned 16
+       %init = OpCooperativeMatrixLoadKHR %69 %init_view %uint_0 %uint_16 Aligned 16
      %result = OpCooperativeMatrixMulAddKHR %69 %lhs %rhs %init
-               OpCooperativeMatrixStoreKHR %out_view %result %uint_0 %uint_64 Aligned 16
+               OpCooperativeMatrixStoreKHR %out_view %result %uint_0 %uint_16 Aligned 16
                OpReturn
                OpFunctionEnd
 
@@ -553,10 +549,8 @@ low.kernel.def target<spirv.logical.core>(@hal_target_coop_bf16) workgroup_size(
     %uint_16 = OpConstant %uint 16
      %uint_0 = OpConstant %uint 0
          %65 = OpTypeCooperativeMatrixKHR %bfloat16 %uint_3 %uint_16 %uint_16 %uint_0
-    %uint_32 = OpConstant %uint 32
-         %68 = OpTypeCooperativeMatrixKHR %bfloat16 %uint_3 %uint_16 %uint_16 %uint_1
-         %70 = OpTypeCooperativeMatrixKHR %float %uint_3 %uint_16 %uint_16 %uint_2_0
-    %uint_64 = OpConstant %uint 64
+         %67 = OpTypeCooperativeMatrixKHR %bfloat16 %uint_3 %uint_16 %uint_16 %uint_1
+         %69 = OpTypeCooperativeMatrixKHR %float %uint_3 %uint_16 %uint_16 %uint_2_0
 %spirv_raw_bda_cooperative_matrix_bf16 = OpFunction %void None %10
          %11 = OpLabel
          %16 = OpAccessChain %_ptr_PushConstant_uint %8 %int_6 %int_0
@@ -591,10 +585,10 @@ low.kernel.def target<spirv.logical.core>(@hal_target_coop_bf16) workgroup_size(
   %init_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %57
          %61 = OpIAdd %ulong %out_buffer %byte_offset
    %out_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %61
-        %lhs = OpCooperativeMatrixLoadKHR %65 %lhs_view %uint_0 %uint_32 Aligned 16
-        %rhs = OpCooperativeMatrixLoadKHR %68 %rhs_view %uint_0 %uint_32 Aligned 16
-       %init = OpCooperativeMatrixLoadKHR %70 %init_view %uint_0 %uint_64 Aligned 16
-     %result = OpCooperativeMatrixMulAddKHR %70 %lhs %rhs %init
-               OpCooperativeMatrixStoreKHR %out_view %result %uint_0 %uint_64 Aligned 16
+        %lhs = OpCooperativeMatrixLoadKHR %65 %lhs_view %uint_0 %uint_16 Aligned 16
+        %rhs = OpCooperativeMatrixLoadKHR %67 %rhs_view %uint_0 %uint_16 Aligned 16
+       %init = OpCooperativeMatrixLoadKHR %69 %init_view %uint_0 %uint_16 Aligned 16
+     %result = OpCooperativeMatrixMulAddKHR %69 %lhs %rhs %init
+               OpCooperativeMatrixStoreKHR %out_view %result %uint_0 %uint_16 Aligned 16
                OpReturn
                OpFunctionEnd
