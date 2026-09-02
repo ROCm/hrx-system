@@ -717,12 +717,20 @@ iree_status_t loom_spirv_emit_type_ptr_physical_storage_buffer_u64(
 iree_status_t loom_spirv_emit_type_ptr_physical_storage_buffer_scalar(
     loom_spirv_type_context_t* context, loom_spirv_scalar_type_t scalar_type,
     uint32_t* out_type_id) {
+  const loom_spirv_scalar_type_descriptor_t* scalar_descriptor =
+      loom_spirv_scalar_type_descriptor(scalar_type);
+  if (scalar_descriptor == NULL || scalar_descriptor->bit_width == 0 ||
+      (scalar_descriptor->bit_width % 8) != 0) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "SPIR-V physical storage scalar pointer requires "
+                            "a byte-addressable scalar type");
+  }
   uint32_t scalar_type_id = 0;
   IREE_RETURN_IF_ERROR(
       loom_spirv_emit_type_scalar(context, scalar_type, &scalar_type_id));
   return loom_spirv_emit_type_pointer(
       context, LOOM_SPIRV_STORAGE_CLASS_PHYSICAL_STORAGE_BUFFER, scalar_type_id,
-      /*pointer_array_stride=*/1, out_type_id);
+      /*pointer_array_stride=*/scalar_descriptor->bit_width / 8, out_type_id);
 }
 
 iree_status_t loom_spirv_emit_type_ptr_workgroup_scalar(

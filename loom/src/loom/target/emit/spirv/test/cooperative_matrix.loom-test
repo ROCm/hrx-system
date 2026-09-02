@@ -67,8 +67,8 @@ low.kernel.def target<spirv.logical.core>(@hal_target_coop_f16) workgroup_size(3
                OpDecorate %_runtimearr_ulong ArrayStride 8
                OpDecorate %_struct_28 Block
                OpMemberDecorate %_struct_28 0 Offset 0
-               OpDecorate %_ptr_PhysicalStorageBuffer_half ArrayStride 1
-               OpDecorate %_ptr_PhysicalStorageBuffer_float ArrayStride 1
+               OpDecorate %_ptr_PhysicalStorageBuffer_half ArrayStride 2
+               OpDecorate %_ptr_PhysicalStorageBuffer_float ArrayStride 4
       %ulong = OpTypeInt 64 0
        %uint = OpTypeInt 32 0
      %uint_2 = OpConstant %uint 2
@@ -144,7 +144,6 @@ low.kernel.def target<spirv.logical.core>(@hal_target_coop_f16) workgroup_size(3
                OpReturn
                OpFunctionEnd
 
-
 // ====
 
 
@@ -217,7 +216,7 @@ low.kernel.def target<spirv.logical.core>(@hal_target_coop_s8) workgroup_size(32
                OpDecorate %_struct_28 Block
                OpMemberDecorate %_struct_28 0 Offset 0
                OpDecorate %_ptr_PhysicalStorageBuffer_char ArrayStride 1
-               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 1
+               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 4
       %ulong = OpTypeInt 64 0
        %uint = OpTypeInt 32 0
      %uint_2 = OpConstant %uint 2
@@ -293,7 +292,6 @@ low.kernel.def target<spirv.logical.core>(@hal_target_coop_s8) workgroup_size(32
                OpReturn
                OpFunctionEnd
 
-
 // ====
 
 
@@ -366,7 +364,7 @@ low.kernel.def target<spirv.logical.core>(@hal_target_coop_u8) workgroup_size(32
                OpDecorate %_struct_28 Block
                OpMemberDecorate %_struct_28 0 Offset 0
                OpDecorate %_ptr_PhysicalStorageBuffer_uchar ArrayStride 1
-               OpDecorate %_ptr_PhysicalStorageBuffer_uint ArrayStride 1
+               OpDecorate %_ptr_PhysicalStorageBuffer_uint ArrayStride 4
       %ulong = OpTypeInt 64 0
        %uint = OpTypeInt 32 0
      %uint_2 = OpConstant %uint 2
@@ -442,7 +440,6 @@ low.kernel.def target<spirv.logical.core>(@hal_target_coop_u8) workgroup_size(32
                OpReturn
                OpFunctionEnd
 
-
 // ====
 
 
@@ -516,8 +513,8 @@ low.kernel.def target<spirv.logical.core>(@hal_target_coop_bf16) workgroup_size(
                OpDecorate %_runtimearr_ulong ArrayStride 8
                OpDecorate %_struct_28 Block
                OpMemberDecorate %_struct_28 0 Offset 0
-               OpDecorate %_ptr_PhysicalStorageBuffer_bfloat16 ArrayStride 1
-               OpDecorate %_ptr_PhysicalStorageBuffer_float ArrayStride 1
+               OpDecorate %_ptr_PhysicalStorageBuffer_bfloat16 ArrayStride 2
+               OpDecorate %_ptr_PhysicalStorageBuffer_float ArrayStride 4
       %ulong = OpTypeInt 64 0
        %uint = OpTypeInt 32 0
      %uint_2 = OpConstant %uint 2

@@ -91,7 +91,7 @@ kernel.def target(@target) @ordinary_vector_structure_i32() {
                OpDecorate %_runtimearr_ulong ArrayStride 8
                OpDecorate %_struct_13 Block
                OpMemberDecorate %_struct_13 0 Offset 0
-               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 1
+               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 4
       %ulong = OpTypeInt 64 0
        %uint = OpTypeInt 32 0
   %_struct_4 = OpTypeStruct %ulong %ulong %uint %uint %uint %uint

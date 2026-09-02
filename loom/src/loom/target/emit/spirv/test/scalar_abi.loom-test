@@ -109,10 +109,10 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) @
                OpDecorate %_struct_28 Block
                OpMemberDecorate %_struct_28 0 Offset 0
                OpDecorate %_ptr_PhysicalStorageBuffer_char ArrayStride 1
-               OpDecorate %_ptr_PhysicalStorageBuffer_short ArrayStride 1
-               OpDecorate %_ptr_PhysicalStorageBuffer_half ArrayStride 1
-               OpDecorate %_ptr_PhysicalStorageBuffer_bfloat16 ArrayStride 1
-               OpDecorate %_ptr_PhysicalStorageBuffer_double ArrayStride 1
+               OpDecorate %_ptr_PhysicalStorageBuffer_short ArrayStride 2
+               OpDecorate %_ptr_PhysicalStorageBuffer_half ArrayStride 2
+               OpDecorate %_ptr_PhysicalStorageBuffer_bfloat16 ArrayStride 2
+               OpDecorate %_ptr_PhysicalStorageBuffer_double ArrayStride 8
       %ulong = OpTypeInt 64 0
        %uint = OpTypeInt 32 0
      %uint_2 = OpConstant %uint 2
@@ -233,7 +233,6 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) @
                OpStore %output_f64_view %sum_f64 Aligned 8
                OpReturn
                OpFunctionEnd
-
 
 // ====
 
@@ -560,14 +559,14 @@ low.kernel.def target<spirv.logical.core>(@hal_target_scalar_payloads) workgroup
                OpDecorate %_runtimearr_ulong ArrayStride 8
                OpDecorate %_struct_87 Block
                OpMemberDecorate %_struct_87 0 Offset 0
-               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 1
+               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 4
                OpDecorate %_ptr_PhysicalStorageBuffer_char ArrayStride 1
-               OpDecorate %_ptr_PhysicalStorageBuffer_short ArrayStride 1
-               OpDecorate %_ptr_PhysicalStorageBuffer_half ArrayStride 1
-               OpDecorate %_ptr_PhysicalStorageBuffer_bfloat16 ArrayStride 1
-               OpDecorate %_ptr_PhysicalStorageBuffer_float ArrayStride 1
-               OpDecorate %_ptr_PhysicalStorageBuffer_double ArrayStride 1
-               OpDecorate %_ptr_PhysicalStorageBuffer_long ArrayStride 1
+               OpDecorate %_ptr_PhysicalStorageBuffer_short ArrayStride 2
+               OpDecorate %_ptr_PhysicalStorageBuffer_half ArrayStride 2
+               OpDecorate %_ptr_PhysicalStorageBuffer_bfloat16 ArrayStride 2
+               OpDecorate %_ptr_PhysicalStorageBuffer_float ArrayStride 4
+               OpDecorate %_ptr_PhysicalStorageBuffer_double ArrayStride 8
+               OpDecorate %_ptr_PhysicalStorageBuffer_long ArrayStride 8
       %ulong = OpTypeInt 64 0
        %uint = OpTypeInt 32 0
     %uint_12 = OpConstant %uint 12

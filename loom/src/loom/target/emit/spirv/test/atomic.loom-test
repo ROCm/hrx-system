@@ -49,7 +49,7 @@ func.def target(@target) @integer_atomic_probe(%value: i32, %buffer: buffer) {
                OpDecorate %_struct_10 Block
                OpDecorate %8 DescriptorSet 0
                OpDecorate %8 Binding 1
-               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 1
+               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 4
         %int = OpTypeInt 32 1
       %int_0 = OpConstant %int 0
   %_struct_5 = OpTypeStruct %int
@@ -329,7 +329,7 @@ func.def target(@f32_fallback_target) @f32_atomic_fallbacks(%value: f32, %buffer
                OpDecorate %_struct_11 Block
                OpDecorate %9 DescriptorSet 0
                OpDecorate %9 Binding 1
-               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 1
+               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 4
         %int = OpTypeInt 32 1
       %int_0 = OpConstant %int 0
       %float = OpTypeFloat 32
@@ -567,9 +567,9 @@ func.def target(@native_float_target) @native_float_atomics(%buffer: buffer) {
                OpDecorate %_struct_6 Block
                OpDecorate %4 DescriptorSet 0
                OpDecorate %4 Binding 0
-               OpDecorate %_ptr_PhysicalStorageBuffer_half ArrayStride 1
-               OpDecorate %_ptr_PhysicalStorageBuffer_float ArrayStride 1
-               OpDecorate %_ptr_PhysicalStorageBuffer_double ArrayStride 1
+               OpDecorate %_ptr_PhysicalStorageBuffer_half ArrayStride 2
+               OpDecorate %_ptr_PhysicalStorageBuffer_float ArrayStride 4
+               OpDecorate %_ptr_PhysicalStorageBuffer_double ArrayStride 8
         %int = OpTypeInt 32 1
       %int_0 = OpConstant %int 0
       %ulong = OpTypeInt 64 0
@@ -729,7 +729,7 @@ func.def target(@f64_fallback_target) @f64_atomic_fallbacks(%buffer: buffer) {
                OpDecorate %_struct_6 Block
                OpDecorate %4 DescriptorSet 0
                OpDecorate %4 Binding 0
-               OpDecorate %_ptr_PhysicalStorageBuffer_long ArrayStride 1
+               OpDecorate %_ptr_PhysicalStorageBuffer_long ArrayStride 8
         %int = OpTypeInt 32 1
       %int_0 = OpConstant %int 0
       %ulong = OpTypeInt 64 0
@@ -1038,7 +1038,7 @@ func.def target(@vector_atomic_target) @vector_atomic_forms(%value: i32, %expect
                OpDecorate %_struct_12 Block
                OpDecorate %10 DescriptorSet 0
                OpDecorate %10 Binding 3
-               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 1
+               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 4
         %int = OpTypeInt 32 1
       %int_0 = OpConstant %int 0
   %_struct_5 = OpTypeStruct %int
