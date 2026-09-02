@@ -44,3 +44,45 @@ check.case public @low_invoke_pack_pair_case {
   check.expect.equal actual(%output) expected(%expected) : tensor<8xf16>
   check.return
 }
+
+// Schedule-free helpers are the maintained low.invoke path. Their packets
+// participate in normal scheduling with the surrounding source operations.
+low.func.def target<amdgpu.gfx11.generic.core>(@low_invoke_target) @low_invoke_schedule_free_pack_pair(%even: reg<amdgpu.vgpr x2>, %odd: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x4>) asm {
+  %even0 = slice %even[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %even1 = slice %even[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %odd0 = slice %odd[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %odd1 = slice %odd[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %selector0 = s_mov_b32 84148480
+  %selector1 = s_mov_b32 117834498
+  %packed0 = v_perm_b32 %odd0, %even0, %selector0
+  %packed1 = v_perm_b32 %odd1, %even1, %selector0
+  %packed2 = v_perm_b32 %odd0, %even0, %selector1
+  %packed3 = v_perm_b32 %odd1, %even1, %selector1
+  %packed = concat(%packed0, %packed1, %packed2, %packed3) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  return %packed
+}
+
+kernel.def target(@low_invoke_target) @low_invoke_schedule_free_pack_pair_kernel() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%input_buffer: buffer, %output_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c4 = index.constant 4 : index
+  %input = buffer.view %input_buffer[%base] : buffer -> view<8xf16>
+  %output = buffer.view %output_buffer[%base] : buffer -> view<8xf16>
+  %even = vector.load %input[%c0] : view<8xf16> -> vector<4xf16>
+  %odd = vector.load %input[%c4] : view<8xf16> -> vector<4xf16>
+  %packed = low.invoke @low_invoke_schedule_free_pack_pair(%even, %odd) : (vector<4xf16>, vector<4xf16>) -> (vector<8xf16>)
+  vector.store %packed, %output[%c0] : vector<8xf16>, view<8xf16>
+  kernel.return
+}
+
+check.case public @low_invoke_schedule_free_pack_pair_case {
+  %input = check.generate.fill value(1.0) : tensor<8xf16>
+  %output = check.generate.fill value(0.0) : tensor<8xf16>
+  %expected = check.generate.fill value(1.0) : tensor<8xf16>
+  kernel.launch @low_invoke_schedule_free_pack_pair_kernel(%input, %output) : (tensor<8xf16>, tensor<8xf16>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<8xf16>
+  check.return
+}

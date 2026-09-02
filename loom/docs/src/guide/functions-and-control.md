@@ -88,14 +88,15 @@ needed merely because a helper is small; it is used when the source contract
 requires the boundary to disappear at the current stage. Without an explicit
 policy, the consuming pass decides from target, call graph, and cost evidence.
 
-## Invoke an authored Low schedule fragment
+## Invoke an authored Low fragment
 
 `low.invoke` is the explicit boundary for a source function that delegates a
-value transformation to an authored `low.func.def`. It is useful when a
-reverse-engineered instruction schedule is already known but loads, stores,
-launch geometry, and the surrounding algorithm should remain in source IR.
+value transformation to an authored `low.func.def`. It is a narrow migration
+boundary for lifting a reverse-engineered instruction fragment while loads,
+stores, launch geometry, and the surrounding algorithm move into source IR.
 The source-to-Low pipeline always inlines the helper; it does not introduce a
-runtime call or leave the boundary for a backend to interpret.
+runtime call or leave the boundary for a backend to interpret. The resulting
+packets normally participate in scheduling and allocation with the caller.
 
 The call site retains source types while the helper signature uses target-Low
 register types. Physical register classes are carrier-only: source semantic
@@ -105,8 +106,7 @@ second type inside the physical register carrier.
 ```loom
 amdgpu.target<gfx11-generic> @schedule_target
 
-low.func.def schedule(locked)
-    target<amdgpu.gfx11.generic.core>(@schedule_target)
+low.func.def target<amdgpu.gfx11.generic.core>(@schedule_target)
     @pack_pair(%even: reg<amdgpu.vgpr>, %odd: reg<amdgpu.vgpr>)
     -> (reg<amdgpu.vgpr>) asm {
   %selector = s_mov_b32 0x05040100
@@ -149,13 +149,18 @@ helper states every fact its implementation requires in its `where` clause;
 `low.invoke` does not serialize the caller's analysis table or turn
 opportunistically inferred facts into hidden callee assumptions.
 
-`schedule(locked)` makes instruction order part of the helper contract.
-Inlining surrounds every authored operation with source-order scheduling
-boundaries so surrounding source operations cannot interleave with the
-fragment. Locked helpers are straight-line; nested regions are rejected
-because preserving only their outer position would not preserve their internal
-schedule. Helpers without the locked contract remain available to normal Low
-scheduling.
+The schedule-free form is the ordinary `low.invoke` contract. It keeps SSA and
+target instruction constraints while allowing the scheduler to place the
+inlined packets among surrounding operations. This is also the useful boundary
+for incrementally replacing an oracle fragment with higher-level source.
+
+`schedule(locked)` remains an experimental escape hatch when exact source order
+is itself part of an oracle. Inlining conservatively surrounds every authored
+operation with source-order scheduling boundaries, preventing surrounding
+source operations from interleaving with the fragment. Locked helpers are
+straight-line; nested regions are rejected because preserving only their outer
+position would not preserve their internal schedule. This heavy constraint is
+not evidence that a recovered fragment is ready to become maintained source.
 
 Acceptance uses the same default compiler pipeline as maintained Loom source
 and executes through `iree-test-loom`. Direct execution of prepared Low can be
