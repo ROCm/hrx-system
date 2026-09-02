@@ -119,6 +119,36 @@ TEST_F(VulkanBufferTest, DenseAddressOverflowFails) {
       iree_hal_vulkan_buffer_device_address(buffer_, &device_address));
 }
 
+TEST_F(VulkanBufferTest, DenseRangeAlignmentIncludesHandleOffset) {
+  IREE_ASSERT_OK(
+      CreateDenseBuffer(/*handle_offset=*/2, /*device_address=*/0x10000));
+
+  EXPECT_EQ(iree_hal_vulkan_buffer_range_dword_alignment(
+                buffer_, /*local_byte_offset=*/2, /*local_byte_length=*/4),
+            IREE_HAL_VULKAN_BUFFER_RANGE_ALIGNMENT_ALIGNED);
+  EXPECT_EQ(iree_hal_vulkan_buffer_range_dword_alignment(
+                buffer_, /*local_byte_offset=*/0, /*local_byte_length=*/4),
+            IREE_HAL_VULKAN_BUFFER_RANGE_ALIGNMENT_UNALIGNED);
+  EXPECT_EQ(iree_hal_vulkan_buffer_range_dword_alignment(
+                buffer_, /*local_byte_offset=*/2, /*local_byte_length=*/3),
+            IREE_HAL_VULKAN_BUFFER_RANGE_ALIGNMENT_UNALIGNED);
+}
+
+TEST_F(VulkanBufferTest, DenseRangeAlignmentValidatesRange) {
+  IREE_ASSERT_OK(
+      CreateDenseBuffer(/*handle_offset=*/0, /*device_address=*/0x10000));
+
+  EXPECT_EQ(iree_hal_vulkan_buffer_range_dword_alignment(
+                buffer_, /*local_byte_offset=*/16, /*local_byte_length=*/0),
+            IREE_HAL_VULKAN_BUFFER_RANGE_ALIGNMENT_ALIGNED);
+  EXPECT_EQ(iree_hal_vulkan_buffer_range_dword_alignment(
+                buffer_, /*local_byte_offset=*/17, /*local_byte_length=*/0),
+            IREE_HAL_VULKAN_BUFFER_RANGE_ALIGNMENT_UNKNOWN);
+  EXPECT_EQ(iree_hal_vulkan_buffer_range_dword_alignment(
+                buffer_, /*local_byte_offset=*/12, /*local_byte_length=*/8),
+            IREE_HAL_VULKAN_BUFFER_RANGE_ALIGNMENT_UNKNOWN);
+}
+
 TEST_F(VulkanBufferTest, SparseAddressIncludesSubspanOffset) {
   IREE_ASSERT_OK(
       CreateSparseSubspan(/*byte_offset=*/4, /*device_address=*/0x10000));
@@ -146,6 +176,18 @@ TEST_F(VulkanBufferTest, SparseAddressOverflowFails) {
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_OUT_OF_RANGE,
       iree_hal_vulkan_buffer_device_address(buffer_, &device_address));
+}
+
+TEST_F(VulkanBufferTest, SparseRangeAlignmentIncludesSubspanOffset) {
+  IREE_ASSERT_OK(
+      CreateSparseSubspan(/*byte_offset=*/2, /*device_address=*/0x10000));
+
+  EXPECT_EQ(iree_hal_vulkan_buffer_range_dword_alignment(
+                buffer_, /*local_byte_offset=*/2, /*local_byte_length=*/4),
+            IREE_HAL_VULKAN_BUFFER_RANGE_ALIGNMENT_ALIGNED);
+  EXPECT_EQ(iree_hal_vulkan_buffer_range_dword_alignment(
+                buffer_, /*local_byte_offset=*/0, /*local_byte_length=*/4),
+            IREE_HAL_VULKAN_BUFFER_RANGE_ALIGNMENT_UNALIGNED);
 }
 
 }  // namespace

@@ -80,6 +80,27 @@ iree_status_t iree_hal_vulkan_buffer_resolve_backing_offset(
     iree_device_size_t local_byte_offset,
     iree_device_size_t* out_backing_byte_offset);
 
+// Classification of a Vulkan buffer range's dword alignment.
+typedef enum iree_hal_vulkan_buffer_range_alignment_e {
+  // The backing buffer or its final offset is not available while routing.
+  IREE_HAL_VULKAN_BUFFER_RANGE_ALIGNMENT_UNKNOWN = 0,
+
+  // The resolved offset and length are both dword aligned.
+  IREE_HAL_VULKAN_BUFFER_RANGE_ALIGNMENT_ALIGNED = 1,
+
+  // The resolved offset or length is not dword aligned.
+  IREE_HAL_VULKAN_BUFFER_RANGE_ALIGNMENT_UNALIGNED = 2,
+} iree_hal_vulkan_buffer_range_alignment_t;
+
+// Classifies the dword alignment of |buffer|'s resolved Vulkan range.
+//
+// This is a routing query only. Invalid ranges classify as unknown and queue
+// submission remains responsible for reporting the validation failure.
+iree_hal_vulkan_buffer_range_alignment_t
+iree_hal_vulkan_buffer_range_dword_alignment(
+    iree_hal_buffer_t* buffer, iree_device_size_t local_byte_offset,
+    iree_device_size_t local_byte_length);
+
 // Returns the Vulkan memory and buffer handles backing |buffer|.
 iree_status_t iree_hal_vulkan_buffer_handle(iree_hal_buffer_t* buffer,
                                             VkDeviceMemory* out_memory,
