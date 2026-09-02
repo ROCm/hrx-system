@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "loom/codegen/low/launch_config_program.h"
+#include "loom/codegen/low/lower/function_boundary.h"
 #include "loom/codegen/low/lower/source_selection.h"
 #include "loom/codegen/low/pipeline/pass_environment.h"
 #include "loom/pass/pipeline.h"

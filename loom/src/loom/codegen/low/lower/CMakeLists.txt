@@ -14,6 +14,7 @@ loom_cc_library(
     lower
   HDRS
     "contract_query.h"
+    "function_boundary.h"
     "lower.h"
     "lower_internal.h"
     "lower_report.h"
@@ -25,6 +26,7 @@ loom_cc_library(
     "source_query.h"
   SRCS
     "contract_query.c"
+    "function_boundary.c"
     "lower.c"
     "lower_context.c"
     "lower_policy.c"
@@ -150,6 +152,27 @@ loom_cc_test(
     loom::ops::func
     loom::ops::scalar
     loom::target::low_descriptor_registry
+    loom::target::test::low_registry
+    loom::target::test::lower
+    loom::target::test::target_record_table
+    loom::util::fact_table
+)
+
+loom_cc_test(
+  NAME
+    function_boundary_test
+  SRCS
+    "function_boundary_test.cc"
+  DEPS
+    ::lower
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::codegen::low::testing::source_workload
+    loom::ir
+    loom::ops::func
+    loom::ops::low
+    loom::target::registers
+    loom::target::test::descriptors
     loom::target::test::low_registry
     loom::target::test::lower
     loom::target::test::target_record_table

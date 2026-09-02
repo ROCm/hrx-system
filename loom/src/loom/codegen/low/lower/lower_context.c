@@ -363,6 +363,15 @@ iree_arena_allocator_t* loom_low_lower_context_emission_arena(
   return &context->emission_arena;
 }
 
+void loom_low_lower_emission_scope_begin(loom_low_lower_context_t* context) {
+  context->emission_arena_active = true;
+}
+
+void loom_low_lower_emission_scope_end(loom_low_lower_context_t* context) {
+  context->emission_arena_active = false;
+  iree_arena_reset(&context->emission_arena);
+}
+
 loom_low_lower_module_state_t* loom_low_lower_context_module_state(
     loom_low_lower_context_t* context) {
   return context->module_state;

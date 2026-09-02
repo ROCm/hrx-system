@@ -187,6 +187,13 @@ iree_status_t loom_low_lower_copy_value_name(loom_low_lower_context_t* context,
                                              loom_value_id_t source_value_id,
                                              loom_value_id_t low_value_id);
 
+// Begins a bounded target-Low IR construction scope.
+void loom_low_lower_emission_scope_begin(loom_low_lower_context_t* context);
+
+// Ends the active target-Low IR construction scope and releases its scratch
+// storage.
+void loom_low_lower_emission_scope_end(loom_low_lower_context_t* context);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

@@ -950,16 +950,6 @@ iree_status_t loom_low_lower_function(loom_module_t* module,
                                       const loom_low_lower_options_t* options,
                                       loom_low_lower_result_t* out_result);
 
-// Lowers one target-bound external function declaration into a low.func.decl.
-//
-// The emitted low declaration preserves the source symbol identity, maps the
-// source signature through |options->policy|, and records the policy import
-// kind plus the resolved import symbol as the low code symbol.
-iree_status_t loom_low_lower_import_declaration(
-    loom_module_t* module, loom_func_like_t source_declaration,
-    const loom_low_lower_options_t* options,
-    loom_low_lower_result_t* out_result);
-
 // Returns the module being mutated by the current lowering.
 loom_module_t* loom_low_lower_context_module(loom_low_lower_context_t* context);
 
