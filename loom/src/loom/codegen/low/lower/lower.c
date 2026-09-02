@@ -2835,7 +2835,9 @@ static iree_status_t loom_low_lower_emit_scf_while(
   return status;
 }
 
-static iree_status_t loom_low_lower_structural_op(
+// Keeps the uncommon structural dispatcher out of ordinary selected-plan
+// emission.
+IREE_ATTRIBUTE_NOINLINE static iree_status_t loom_low_lower_structural_op(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     bool* out_handled) {
   *out_handled = true;
@@ -3367,13 +3369,22 @@ static iree_status_t loom_low_lower_emit_selected_plan(
 
 static iree_status_t loom_low_lower_emit_source_op(
     loom_low_lower_context_t* context, const loom_op_t* source_op) {
+  if (context->lowering.selected_plan_emit_index <
+          context->lowering.selected_plan_count &&
+      context->lowering
+              .selected_plans[context->lowering.selected_plan_emit_index]
+              .source_op == source_op) {
+    return loom_low_lower_emit_selected_plan(context, source_op);
+  }
   bool handled = false;
   IREE_RETURN_IF_ERROR(
       loom_low_lower_structural_op(context, source_op, &handled));
   if (handled || loom_low_lower_op_is_source_metadata(source_op->kind)) {
     return iree_ok_status();
   }
-  return loom_low_lower_emit_selected_plan(context, source_op);
+  IREE_ASSERT_UNREACHABLE(
+      "source op has neither a structural lowering nor a selected plan");
+  IREE_BUILTIN_UNREACHABLE();
 }
 
 static iree_status_t loom_low_lower_emit_region_ops(
