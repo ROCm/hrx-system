@@ -1256,6 +1256,15 @@ static inline bool loom_func_like_isa(loom_func_like_t func) {
 loom_func_like_t loom_func_like_cast(const loom_module_t* module,
                                      loom_op_t* op);
 
+// Casts const |op| to loom_func_like_t if it implements the FuncLike
+// interface. Returns {NULL, NULL} if |op| is NULL or does not implement it.
+// The returned interface view does not encode transitive constness; callers
+// must preserve the access discipline of the input operation.
+static inline loom_func_like_t loom_func_like_const_cast(
+    const loom_module_t* module, const loom_op_t* op) {
+  return loom_func_like_cast(module, (loom_op_t*)op);
+}
+
 // Returns the body region of a func-like op, or NULL for bodyless ops
 // (func.decl, template.ukernel) or if |func| is not valid.
 loom_region_t* loom_func_like_body(loom_func_like_t func);

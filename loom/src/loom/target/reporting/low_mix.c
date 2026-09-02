@@ -811,7 +811,7 @@ iree_status_t loom_target_compile_report_low_dynamic_context_initialize(
       &out_context->fact_table, &out_context->arena,
       frame->module->values.count);
   loom_func_like_t function =
-      loom_func_like_cast(frame->module, (loom_op_t*)frame->function_op);
+      loom_func_like_const_cast(frame->module, frame->function_op);
   if (iree_status_is_ok(status)) {
     status = loom_value_fact_table_compute_region(
         &out_context->fact_table, frame->module, function,

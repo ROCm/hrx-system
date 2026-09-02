@@ -264,7 +264,7 @@ static iree_status_t loom_target_artifact_manifest_collect_low_resources(
     iree_arena_allocator_t* arena,
     loom_target_artifact_manifest_interface_t* out_interface) {
   loom_region_t* body =
-      loom_func_like_body(loom_func_like_cast(module, (loom_op_t*)function_op));
+      loom_func_like_body(loom_func_like_const_cast(module, function_op));
   if (body == NULL) return iree_ok_status();
 
   uint32_t resource_count = 0;

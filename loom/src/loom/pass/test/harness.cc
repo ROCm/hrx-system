@@ -195,8 +195,7 @@ loom_func_like_t PassTestHarness::Function(loom_module_t* module,
   if (!op) {
     return {};
   }
-  loom_func_like_t function =
-      loom_func_like_cast(module, const_cast<loom_op_t*>(op));
+  loom_func_like_t function = loom_func_like_const_cast(module, op);
   EXPECT_TRUE(loom_func_like_isa(function));
   return function;
 }

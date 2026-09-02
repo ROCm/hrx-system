@@ -269,7 +269,7 @@ iree_status_t loom_function_call_contract_verify(
 static iree_status_t loom_function_provider_family_contract_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter) {
-  loom_func_like_t provider = loom_func_like_cast(module, (loom_op_t*)op);
+  loom_func_like_t provider = loom_func_like_const_cast(module, op);
   const loom_symbol_ref_t family = loom_func_like_template_family(provider);
   if (!loom_symbol_ref_is_valid(family)) {
     return iree_ok_status();
@@ -366,7 +366,7 @@ iree_status_t loom_function_contract_verify(const loom_module_t* module,
   // Targetless functions are valid generic program representations. A compile
   // invocation may bind an exact target later, so source verification cannot
   // require an authored target attribute.
-  loom_func_like_t function = loom_func_like_cast(module, (loom_op_t*)op);
+  loom_func_like_t function = loom_func_like_const_cast(module, op);
   IREE_ASSERT(loom_func_like_isa(function));
   return loom_function_verify_target_conditions(module, op, function, emitter);
 }
@@ -376,7 +376,7 @@ iree_status_t loom_function_provider_contract_verify(
     iree_diagnostic_emitter_t emitter) {
   IREE_RETURN_IF_ERROR(loom_function_contract_verify(module, op, emitter));
 
-  loom_func_like_t provider = loom_func_like_cast(module, (loom_op_t*)op);
+  loom_func_like_t provider = loom_func_like_const_cast(module, op);
   const loom_symbol_ref_t target_ref = loom_func_like_target(provider);
   if (loom_symbol_ref_is_valid(target_ref)) {
     const loom_symbol_t* target_symbol =

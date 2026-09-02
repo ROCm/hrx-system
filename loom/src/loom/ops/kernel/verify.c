@@ -1188,7 +1188,7 @@ static iree_status_t loom_kernel_verify_barrier_control_walk(
 static iree_status_t loom_kernel_verify_barrier_controls(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter) {
-  loom_func_like_t function = loom_func_like_cast(module, (loom_op_t*)op);
+  loom_func_like_t function = loom_func_like_const_cast(module, op);
   if (!loom_func_like_isa(function)) return iree_ok_status();
 
   iree_arena_allocator_t arena;
