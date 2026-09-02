@@ -259,7 +259,7 @@ static iree_status_t loom_bytecode_type_plan_build_shaped(
     loom_scalar_type_t element_type, uint8_t rank, uint8_t attachment,
     uint64_t encoding_instance, const uint64_t* dims, loom_type_t* out_type,
     uint64_t offset) {
-  if (element_type >= LOOM_SCALAR_TYPE_COUNT_) {
+  if (!loom_scalar_type_is_valid(element_type)) {
     return loom_bytecode_reader_emit_enum_value(
         decoder, IREE_SV("element_type"), element_type, LOOM_SCALAR_TYPE_COUNT_,
         offset);
@@ -381,7 +381,7 @@ static iree_status_t loom_bytecode_type_plan_decode_entry(
           loom_bytecode_reader_cursor_absolute_position(cursor);
       IREE_RETURN_IF_ERROR(
           loom_bytecode_reader_read_u8(decoder, cursor, &element_type));
-      if (element_type >= LOOM_SCALAR_TYPE_COUNT_) {
+      if (!loom_scalar_type_is_valid(element_type)) {
         return loom_bytecode_reader_emit_enum_value(
             decoder, IREE_SV("scalar_type"), element_type,
             LOOM_SCALAR_TYPE_COUNT_, element_offset);

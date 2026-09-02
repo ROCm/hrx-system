@@ -964,8 +964,8 @@ iree_status_t loom_scalar_extui_facts(loom_fact_context_t* context,
                                       const loom_op_t* op,
                                       const loom_value_facts_t* operand_facts,
                                       loom_value_facts_t* result_facts) {
-  loom_scalar_type_t input_scalar_type = LOOM_SCALAR_TYPE_COUNT_;
-  loom_scalar_type_t result_scalar_type = LOOM_SCALAR_TYPE_COUNT_;
+  loom_scalar_type_t input_scalar_type = LOOM_SCALAR_TYPE_NONE;
+  loom_scalar_type_t result_scalar_type = LOOM_SCALAR_TYPE_NONE;
   int64_t input_lo = 0;
   int64_t input_hi = 0;
   int64_t result_lo = 0;
@@ -1025,8 +1025,8 @@ iree_status_t loom_scalar_trunci_facts(loom_fact_context_t* context,
                                        const loom_op_t* op,
                                        const loom_value_facts_t* operand_facts,
                                        loom_value_facts_t* result_facts) {
-  loom_scalar_type_t input_scalar_type = LOOM_SCALAR_TYPE_COUNT_;
-  loom_scalar_type_t result_scalar_type = LOOM_SCALAR_TYPE_COUNT_;
+  loom_scalar_type_t input_scalar_type = LOOM_SCALAR_TYPE_NONE;
+  loom_scalar_type_t result_scalar_type = LOOM_SCALAR_TYPE_NONE;
   int64_t input_lo = 0;
   int64_t input_hi = 0;
   int64_t result_lo = 0;

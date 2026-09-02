@@ -180,7 +180,7 @@ loom_amdgpu_scalar_value_register_mapping_for_type(loom_type_t source_type) {
     return NULL;
   }
   const loom_scalar_type_t element_type = loom_type_element_type(source_type);
-  if (element_type >= LOOM_SCALAR_TYPE_COUNT_) {
+  if (!loom_scalar_type_is_valid(element_type)) {
     return NULL;
   }
   const loom_amdgpu_scalar_value_register_mapping_t* mapping =

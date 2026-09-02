@@ -17,10 +17,11 @@ namespace {
 TEST(ScalarTypeTest, RoundTripNames) {
   for (int i = 0; i < LOOM_SCALAR_TYPE_COUNT_; ++i) {
     loom_scalar_type_t scalar_type = (loom_scalar_type_t)i;
+    if (!loom_scalar_type_is_valid(scalar_type)) continue;
     const char* name = loom_scalar_type_name(scalar_type);
     ASSERT_NE(name, nullptr) << i;
 
-    loom_scalar_type_t parsed = LOOM_SCALAR_TYPE_COUNT_;
+    loom_scalar_type_t parsed = LOOM_SCALAR_TYPE_NONE;
     ASSERT_TRUE(loom_scalar_type_parse(iree_make_cstring_view(name), &parsed))
         << name;
     EXPECT_EQ(parsed, scalar_type) << name;
@@ -29,6 +30,12 @@ TEST(ScalarTypeTest, RoundTripNames) {
 }
 
 TEST(ScalarTypeTest, InvalidValues) {
+  loom_scalar_type_t zero_initialized = {0};
+  EXPECT_EQ(zero_initialized, LOOM_SCALAR_TYPE_NONE);
+  EXPECT_FALSE(loom_scalar_type_is_valid(zero_initialized));
+  EXPECT_EQ(loom_scalar_type_name(zero_initialized), nullptr);
+  EXPECT_EQ(loom_scalar_type_bitwidth(zero_initialized), 0);
+
   EXPECT_EQ(loom_scalar_type_name((loom_scalar_type_t)-1), nullptr);
   EXPECT_EQ(loom_scalar_type_name(LOOM_SCALAR_TYPE_COUNT_), nullptr);
   EXPECT_EQ(loom_scalar_type_bitwidth((loom_scalar_type_t)-1), 0);

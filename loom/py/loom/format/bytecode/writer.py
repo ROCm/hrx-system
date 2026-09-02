@@ -179,7 +179,7 @@ BYTECODE_IR_KIND_BY_TYPE_KIND: dict[int, TypeKind] = {
 
 # File magic and version.
 MAGIC = b"LOOM"
-FORMAT_VERSION = 34
+FORMAT_VERSION = 35
 PRODUCER = "loom-py"
 
 SYMBOL_INTERFACE_BITS = {

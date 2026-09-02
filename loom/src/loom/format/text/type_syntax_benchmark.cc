@@ -36,12 +36,14 @@ enum class SyntaxWorkload {
 
 static constexpr int64_t kClassificationBatchCount = 4096;
 
-static std::array<iree_string_view_t, LOOM_SCALAR_TYPE_COUNT_>
+static constexpr size_t kConcreteScalarTypeCount = LOOM_SCALAR_TYPE_COUNT_ - 1;
+
+static std::array<iree_string_view_t, kConcreteScalarTypeCount>
 BuildScalarTypeNameViews() {
-  std::array<iree_string_view_t, LOOM_SCALAR_TYPE_COUNT_> names;
-  for (int i = 0; i < LOOM_SCALAR_TYPE_COUNT_; ++i) {
-    names[(size_t)i] =
-        iree_make_cstring_view(loom_scalar_type_name((loom_scalar_type_t)i));
+  std::array<iree_string_view_t, kConcreteScalarTypeCount> names;
+  for (size_t i = 0; i < names.size(); ++i) {
+    const loom_scalar_type_t scalar_type = (loom_scalar_type_t)(i + 1);
+    names[i] = iree_make_cstring_view(loom_scalar_type_name(scalar_type));
   }
   return names;
 }
@@ -148,7 +150,7 @@ static std::string BuildSyntaxModule(SyntaxWorkload workload,
     switch (workload) {
       case SyntaxWorkload::kScalarTypes: {
         const loom_scalar_type_t scalar_type =
-            (loom_scalar_type_t)(i % LOOM_SCALAR_TYPE_COUNT_);
+            (loom_scalar_type_t)(i % kConcreteScalarTypeCount + 1);
         source.append(loom_scalar_type_name(scalar_type));
         break;
       }
@@ -238,14 +240,14 @@ static void BM_ScalarTypeClassifyKnown(benchmark::State& state) {
     for (int64_t batch = 0; batch < kClassificationBatchCount; ++batch) {
       for (iree_string_view_t type_name : type_names) {
         benchmark::DoNotOptimize(type_name);
-        loom_scalar_type_t type = 0;
+        loom_scalar_type_t type = LOOM_SCALAR_TYPE_NONE;
         bool matched = loom_scalar_type_parse(type_name, &type);
         benchmark::DoNotOptimize(matched);
         benchmark::DoNotOptimize(type);
       }
     }
   }
-  state.SetItemsProcessed(state.iterations() * LOOM_SCALAR_TYPE_COUNT_ *
+  state.SetItemsProcessed(state.iterations() * kConcreteScalarTypeCount *
                           kClassificationBatchCount);
 }
 BENCHMARK(BM_ScalarTypeClassifyKnown);
@@ -255,7 +257,7 @@ static void BM_ScalarTypeClassifyMiss(benchmark::State& state) {
     for (int64_t batch = 0; batch < kClassificationBatchCount; ++batch) {
       iree_string_view_t type_name = IREE_SV("not_a_scalar_type");
       benchmark::DoNotOptimize(type_name);
-      loom_scalar_type_t type = 0;
+      loom_scalar_type_t type = LOOM_SCALAR_TYPE_NONE;
       bool matched = loom_scalar_type_parse(type_name, &type);
       benchmark::DoNotOptimize(matched);
       benchmark::DoNotOptimize(type);

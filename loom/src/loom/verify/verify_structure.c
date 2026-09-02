@@ -1229,9 +1229,10 @@ void loom_verify_operand_dicts(loom_verify_state_t* state, const loom_op_t* op,
 typedef enum loom_verify_type_malformation_e {
   LOOM_VERIFY_TYPE_MALFORMATION_NONE = 0,
   LOOM_VERIFY_TYPE_MALFORMATION_TYPE_KIND_OUT_OF_RANGE = 1,
-  LOOM_VERIFY_TYPE_MALFORMATION_ENCODING_ROLE_OUT_OF_RANGE = 2,
-  LOOM_VERIFY_TYPE_MALFORMATION_VECTOR_RANK_ZERO = 3,
-  LOOM_VERIFY_TYPE_MALFORMATION_VECTOR_ENCODING_ATTACHMENT = 4,
+  LOOM_VERIFY_TYPE_MALFORMATION_ELEMENT_TYPE_OUT_OF_RANGE = 2,
+  LOOM_VERIFY_TYPE_MALFORMATION_ENCODING_ROLE_OUT_OF_RANGE = 3,
+  LOOM_VERIFY_TYPE_MALFORMATION_VECTOR_RANK_ZERO = 4,
+  LOOM_VERIFY_TYPE_MALFORMATION_VECTOR_ENCODING_ATTACHMENT = 5,
 } loom_verify_type_malformation_t;
 
 static iree_string_view_t loom_verify_type_malformation_code(
@@ -1239,6 +1240,8 @@ static iree_string_view_t loom_verify_type_malformation_code(
   switch (malformation) {
     case LOOM_VERIFY_TYPE_MALFORMATION_TYPE_KIND_OUT_OF_RANGE:
       return IREE_SV("type_kind_out_of_range");
+    case LOOM_VERIFY_TYPE_MALFORMATION_ELEMENT_TYPE_OUT_OF_RANGE:
+      return IREE_SV("element_type_out_of_range");
     case LOOM_VERIFY_TYPE_MALFORMATION_ENCODING_ROLE_OUT_OF_RANGE:
       return IREE_SV("encoding_role_out_of_range");
     case LOOM_VERIFY_TYPE_MALFORMATION_VECTOR_RANK_ZERO:
@@ -1256,6 +1259,10 @@ loom_verify_type_well_formed_malformation(loom_type_t type) {
   loom_type_kind_t kind = loom_type_kind(type);
   if (!loom_type_kind_is_valid(kind)) {
     return LOOM_VERIFY_TYPE_MALFORMATION_TYPE_KIND_OUT_OF_RANGE;
+  }
+  if ((loom_type_is_scalar(type) || loom_type_is_shaped(type)) &&
+      !loom_scalar_type_is_valid(loom_type_element_type(type))) {
+    return LOOM_VERIFY_TYPE_MALFORMATION_ELEMENT_TYPE_OUT_OF_RANGE;
   }
   switch (kind) {
     case LOOM_TYPE_ENCODING:

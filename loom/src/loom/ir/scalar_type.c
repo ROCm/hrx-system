@@ -23,14 +23,14 @@ static_assert(IREE_ARRAYSIZE(loom_scalar_type_bitwidths) ==
               "loom_scalar_type_bitwidths out of sync with enum");
 
 const char* loom_scalar_type_name(loom_scalar_type_t type) {
-  if (type < LOOM_SCALAR_TYPE_COUNT_) {
+  if (loom_scalar_type_is_valid(type)) {
     return loom_scalar_type_names[type];
   }
   return NULL;
 }
 
 int32_t loom_scalar_type_bitwidth(loom_scalar_type_t type) {
-  if (type < LOOM_SCALAR_TYPE_COUNT_) {
+  if (loom_scalar_type_is_valid(type)) {
     return loom_scalar_type_bitwidths[type];
   }
   return 0;
@@ -94,7 +94,7 @@ bool loom_scalar_type_fp8_format(loom_scalar_type_t type,
 bool loom_scalar_type_parse(iree_string_view_t name,
                             loom_scalar_type_t* out_type) {
   const loom_scalar_type_t type = loom_scalar_type_classify_name(name);
-  if (type == LOOM_SCALAR_TYPE_COUNT_) return false;
+  if (type == LOOM_SCALAR_TYPE_NONE) return false;
   *out_type = type;
   return true;
 }

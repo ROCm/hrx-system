@@ -168,7 +168,7 @@ bool loom_amdgpu_vector_decode_scale_source(
     loom_value_fact_numeric_format_flags_t scale_format,
     loom_value_id_t* out_scale_source) {
   *out_scale_source = LOOM_VALUE_ID_INVALID;
-  loom_scalar_type_t scale_element_type = 0;
+  loom_scalar_type_t scale_element_type = LOOM_SCALAR_TYPE_NONE;
   if (!loom_amdgpu_vector_decode_scale_element_type(scale_format,
                                                     &scale_element_type)) {
     return false;

@@ -233,7 +233,7 @@ static void loom_test_gen_values_rebuild_buckets(
     loom_type_t type = values->types[i];
     if (loom_type_is_scalar(type)) {
       loom_scalar_type_t scalar = loom_type_element_type(type);
-      if (scalar < LOOM_SCALAR_TYPE_COUNT_) {
+      if (loom_scalar_type_is_valid(scalar)) {
         values->bucket_counts[scalar]++;
       }
     }
@@ -250,7 +250,7 @@ static void loom_test_gen_values_rebuild_buckets(
     loom_type_t type = values->types[i];
     if (loom_type_is_scalar(type)) {
       loom_scalar_type_t scalar = loom_type_element_type(type);
-      if (scalar < LOOM_SCALAR_TYPE_COUNT_) {
+      if (loom_scalar_type_is_valid(scalar)) {
         uint16_t bucket_offset =
             values->bucket_starts[scalar] + fill_counts[scalar];
         values->bucket_indices[bucket_offset] = i;
@@ -265,7 +265,7 @@ loom_value_id_t loom_test_gen_values_pick_typed(loom_test_gen_t* gen,
                                                 loom_test_gen_values_t* values,
                                                 loom_scalar_type_t type) {
   loom_test_gen_values_rebuild_buckets(values);
-  if (type >= LOOM_SCALAR_TYPE_COUNT_) return LOOM_VALUE_ID_INVALID;
+  if (!loom_scalar_type_is_valid(type)) return LOOM_VALUE_ID_INVALID;
   uint16_t bucket_count = values->bucket_counts[type];
   if (bucket_count == 0) return LOOM_VALUE_ID_INVALID;
   uint32_t pick = loom_test_gen_next_range(gen, bucket_count);
