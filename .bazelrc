@@ -103,6 +103,7 @@ build:asan --copt=-fsanitize=address
 build:asan --copt=-fsanitize-address-use-after-scope
 build:asan --cc_output_directory_tag=asan
 build:asan --copt=-DADDRESS_SANITIZER
+build:asan --@rules_cc//:link_extra_libs=//build_tools/bazel:address_sanitizer_runtime
 
 # MemorySanitizer.
 build:msan --config=sanitizer
@@ -150,6 +151,7 @@ build:fuzzer --copt=-fsanitize=fuzzer-no-link
 build:fuzzer --linkopt=-fsanitize=fuzzer-no-link
 build:fuzzer --cc_output_directory_tag=asan-fuzzer
 build:fuzzer --copt=-DFUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
+build:fuzzer --@rules_cc//:link_extra_libs=//build_tools/bazel:address_sanitizer_runtime
 
 # -----------------------------------------------------------------------------
 # Local/generated configuration.

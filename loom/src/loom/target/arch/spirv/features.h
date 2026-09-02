@@ -54,8 +54,40 @@ typedef enum loom_spirv_feature_atom_e {
   LOOM_SPIRV_FEATURE_ATOM_BFLOAT16_COOPERATIVE_MATRIX_KHR = 14,
   // 64-bit integer scalar support.
   LOOM_SPIRV_FEATURE_ATOM_INT64 = 15,
+  // Vulkan memory-model Device scope support.
+  LOOM_SPIRV_FEATURE_ATOM_VULKAN_MEMORY_MODEL_DEVICE_SCOPE = 16,
+  // 64-bit integer atomics in storage-buffer memory.
+  LOOM_SPIRV_FEATURE_ATOM_STORAGE_BUFFER_INT64_ATOMICS = 17,
+  // 64-bit integer atomics in workgroup memory.
+  LOOM_SPIRV_FEATURE_ATOM_WORKGROUP_INT64_ATOMICS = 18,
+  // 16-bit floating-point basic atomics in storage-buffer memory.
+  LOOM_SPIRV_FEATURE_ATOM_STORAGE_BUFFER_FLOAT16_ATOMICS = 19,
+  // 16-bit floating-point basic atomics in workgroup memory.
+  LOOM_SPIRV_FEATURE_ATOM_WORKGROUP_FLOAT16_ATOMICS = 20,
+  // 16-bit floating-point atomic add in storage-buffer memory.
+  LOOM_SPIRV_FEATURE_ATOM_STORAGE_BUFFER_FLOAT16_ATOMIC_ADD = 21,
+  // 16-bit floating-point atomic add in workgroup memory.
+  LOOM_SPIRV_FEATURE_ATOM_WORKGROUP_FLOAT16_ATOMIC_ADD = 22,
+  // 32-bit floating-point basic atomics in storage-buffer memory.
+  LOOM_SPIRV_FEATURE_ATOM_STORAGE_BUFFER_FLOAT32_ATOMICS = 23,
+  // 32-bit floating-point basic atomics in workgroup memory.
+  LOOM_SPIRV_FEATURE_ATOM_WORKGROUP_FLOAT32_ATOMICS = 24,
+  // 32-bit floating-point atomic add in storage-buffer memory.
+  LOOM_SPIRV_FEATURE_ATOM_STORAGE_BUFFER_FLOAT32_ATOMIC_ADD = 25,
+  // 32-bit floating-point atomic add in workgroup memory.
+  LOOM_SPIRV_FEATURE_ATOM_WORKGROUP_FLOAT32_ATOMIC_ADD = 26,
+  // 64-bit floating-point basic atomics in storage-buffer memory.
+  LOOM_SPIRV_FEATURE_ATOM_STORAGE_BUFFER_FLOAT64_ATOMICS = 27,
+  // 64-bit floating-point basic atomics in workgroup memory.
+  LOOM_SPIRV_FEATURE_ATOM_WORKGROUP_FLOAT64_ATOMICS = 28,
+  // 64-bit floating-point atomic add in storage-buffer memory.
+  LOOM_SPIRV_FEATURE_ATOM_STORAGE_BUFFER_FLOAT64_ATOMIC_ADD = 29,
+  // 64-bit floating-point atomic add in workgroup memory.
+  LOOM_SPIRV_FEATURE_ATOM_WORKGROUP_FLOAT64_ATOMIC_ADD = 30,
+  // Core subgroup operations and subgroup memory scope.
+  LOOM_SPIRV_FEATURE_ATOM_GROUP_NON_UNIFORM = 31,
   // Number of feature atom enum slots.
-  LOOM_SPIRV_FEATURE_ATOM_COUNT = 16,
+  LOOM_SPIRV_FEATURE_ATOM_COUNT = 32,
 } loom_spirv_feature_atom_t;
 
 // Bitset of loom_spirv_feature_atom_t values.
@@ -102,33 +134,109 @@ typedef enum loom_spirv_feature_bit_e {
       UINT64_C(1) << LOOM_SPIRV_FEATURE_ATOM_BFLOAT16_COOPERATIVE_MATRIX_KHR,
   // Target enables 64-bit integer scalar support.
   LOOM_SPIRV_FEATURE_INT64 = UINT64_C(1) << LOOM_SPIRV_FEATURE_ATOM_INT64,
-
-  // Feature bits known by the SPIR-V target package.
-  LOOM_SPIRV_FEATURE_KNOWN_BITS =
-      LOOM_SPIRV_FEATURE_VULKAN_SHADER |
-      LOOM_SPIRV_FEATURE_PHYSICAL_STORAGE_BUFFER | LOOM_SPIRV_FEATURE_FLOAT16 |
-      LOOM_SPIRV_FEATURE_FLOAT64 | LOOM_SPIRV_FEATURE_INT8 |
-      LOOM_SPIRV_FEATURE_INT16 | LOOM_SPIRV_FEATURE_STORAGE_BUFFER_8BIT_ACCESS |
-      LOOM_SPIRV_FEATURE_STORAGE_BUFFER_16BIT_ACCESS |
-      LOOM_SPIRV_FEATURE_COOPERATIVE_VECTOR_NV |
-      LOOM_SPIRV_FEATURE_COOPERATIVE_VECTOR_TRAINING_NV |
-      LOOM_SPIRV_FEATURE_COOPERATIVE_MATRIX_KHR |
-      LOOM_SPIRV_FEATURE_BFLOAT16_TYPE_KHR |
-      LOOM_SPIRV_FEATURE_BFLOAT16_DOT_PRODUCT_KHR |
-      LOOM_SPIRV_FEATURE_BFLOAT16_COOPERATIVE_MATRIX_KHR |
-      LOOM_SPIRV_FEATURE_INT64,
-  // Feature bits selected by the built-in Vulkan 1.3 BDA profile.
-  LOOM_SPIRV_FEATURE_PROFILE_VULKAN_1_3_BDA =
-      LOOM_SPIRV_FEATURE_VULKAN_SHADER |
-      LOOM_SPIRV_FEATURE_PHYSICAL_STORAGE_BUFFER | LOOM_SPIRV_FEATURE_INT64,
+  // Target enables Vulkan memory-model Device scope support.
+  LOOM_SPIRV_FEATURE_VULKAN_MEMORY_MODEL_DEVICE_SCOPE =
+      UINT64_C(1) << LOOM_SPIRV_FEATURE_ATOM_VULKAN_MEMORY_MODEL_DEVICE_SCOPE,
+  // Target enables 64-bit integer atomics in storage-buffer memory.
+  LOOM_SPIRV_FEATURE_STORAGE_BUFFER_INT64_ATOMICS =
+      UINT64_C(1) << LOOM_SPIRV_FEATURE_ATOM_STORAGE_BUFFER_INT64_ATOMICS,
+  // Target enables 64-bit integer atomics in workgroup memory.
+  LOOM_SPIRV_FEATURE_WORKGROUP_INT64_ATOMICS =
+      UINT64_C(1) << LOOM_SPIRV_FEATURE_ATOM_WORKGROUP_INT64_ATOMICS,
+  // Target enables 16-bit floating-point basic atomics in storage-buffer
+  // memory.
+  LOOM_SPIRV_FEATURE_STORAGE_BUFFER_FLOAT16_ATOMICS =
+      UINT64_C(1) << LOOM_SPIRV_FEATURE_ATOM_STORAGE_BUFFER_FLOAT16_ATOMICS,
+  // Target enables 16-bit floating-point basic atomics in workgroup memory.
+  LOOM_SPIRV_FEATURE_WORKGROUP_FLOAT16_ATOMICS =
+      UINT64_C(1) << LOOM_SPIRV_FEATURE_ATOM_WORKGROUP_FLOAT16_ATOMICS,
+  // Target enables 16-bit floating-point atomic add in storage-buffer memory.
+  LOOM_SPIRV_FEATURE_STORAGE_BUFFER_FLOAT16_ATOMIC_ADD =
+      UINT64_C(1) << LOOM_SPIRV_FEATURE_ATOM_STORAGE_BUFFER_FLOAT16_ATOMIC_ADD,
+  // Target enables 16-bit floating-point atomic add in workgroup memory.
+  LOOM_SPIRV_FEATURE_WORKGROUP_FLOAT16_ATOMIC_ADD =
+      UINT64_C(1) << LOOM_SPIRV_FEATURE_ATOM_WORKGROUP_FLOAT16_ATOMIC_ADD,
+  // Target enables 32-bit floating-point basic atomics in storage-buffer
+  // memory.
+  LOOM_SPIRV_FEATURE_STORAGE_BUFFER_FLOAT32_ATOMICS =
+      UINT64_C(1) << LOOM_SPIRV_FEATURE_ATOM_STORAGE_BUFFER_FLOAT32_ATOMICS,
+  // Target enables 32-bit floating-point basic atomics in workgroup memory.
+  LOOM_SPIRV_FEATURE_WORKGROUP_FLOAT32_ATOMICS =
+      UINT64_C(1) << LOOM_SPIRV_FEATURE_ATOM_WORKGROUP_FLOAT32_ATOMICS,
+  // Target enables 32-bit floating-point atomic add in storage-buffer memory.
+  LOOM_SPIRV_FEATURE_STORAGE_BUFFER_FLOAT32_ATOMIC_ADD =
+      UINT64_C(1) << LOOM_SPIRV_FEATURE_ATOM_STORAGE_BUFFER_FLOAT32_ATOMIC_ADD,
+  // Target enables 32-bit floating-point atomic add in workgroup memory.
+  LOOM_SPIRV_FEATURE_WORKGROUP_FLOAT32_ATOMIC_ADD =
+      UINT64_C(1) << LOOM_SPIRV_FEATURE_ATOM_WORKGROUP_FLOAT32_ATOMIC_ADD,
+  // Target enables 64-bit floating-point basic atomics in storage-buffer
+  // memory.
+  LOOM_SPIRV_FEATURE_STORAGE_BUFFER_FLOAT64_ATOMICS =
+      UINT64_C(1) << LOOM_SPIRV_FEATURE_ATOM_STORAGE_BUFFER_FLOAT64_ATOMICS,
+  // Target enables 64-bit floating-point basic atomics in workgroup memory.
+  LOOM_SPIRV_FEATURE_WORKGROUP_FLOAT64_ATOMICS =
+      UINT64_C(1) << LOOM_SPIRV_FEATURE_ATOM_WORKGROUP_FLOAT64_ATOMICS,
+  // Target enables 64-bit floating-point atomic add in storage-buffer memory.
+  LOOM_SPIRV_FEATURE_STORAGE_BUFFER_FLOAT64_ATOMIC_ADD =
+      UINT64_C(1) << LOOM_SPIRV_FEATURE_ATOM_STORAGE_BUFFER_FLOAT64_ATOMIC_ADD,
+  // Target enables 64-bit floating-point atomic add in workgroup memory.
+  LOOM_SPIRV_FEATURE_WORKGROUP_FLOAT64_ATOMIC_ADD =
+      UINT64_C(1) << LOOM_SPIRV_FEATURE_ATOM_WORKGROUP_FLOAT64_ATOMIC_ADD,
 } loom_spirv_feature_bit_t;
 
+// Target enables core subgroup operations and subgroup memory scope.
+// This atom occupies bit 31, which cannot be represented by a C enum on
+// implementations with a 32-bit signed enum representation.
+#define LOOM_SPIRV_FEATURE_GROUP_NON_UNIFORM \
+  (UINT64_C(1) << LOOM_SPIRV_FEATURE_ATOM_GROUP_NON_UNIFORM)
+
+// Feature bits known by the SPIR-V target package.
+#define LOOM_SPIRV_FEATURE_KNOWN_BITS                                         \
+  (LOOM_SPIRV_FEATURE_VULKAN_SHADER |                                         \
+   LOOM_SPIRV_FEATURE_PHYSICAL_STORAGE_BUFFER | LOOM_SPIRV_FEATURE_FLOAT16 |  \
+   LOOM_SPIRV_FEATURE_FLOAT64 | LOOM_SPIRV_FEATURE_INT8 |                     \
+   LOOM_SPIRV_FEATURE_INT16 | LOOM_SPIRV_FEATURE_STORAGE_BUFFER_8BIT_ACCESS | \
+   LOOM_SPIRV_FEATURE_STORAGE_BUFFER_16BIT_ACCESS |                           \
+   LOOM_SPIRV_FEATURE_COOPERATIVE_VECTOR_NV |                                 \
+   LOOM_SPIRV_FEATURE_COOPERATIVE_VECTOR_TRAINING_NV |                        \
+   LOOM_SPIRV_FEATURE_COOPERATIVE_MATRIX_KHR |                                \
+   LOOM_SPIRV_FEATURE_BFLOAT16_TYPE_KHR |                                     \
+   LOOM_SPIRV_FEATURE_BFLOAT16_DOT_PRODUCT_KHR |                              \
+   LOOM_SPIRV_FEATURE_BFLOAT16_COOPERATIVE_MATRIX_KHR |                       \
+   LOOM_SPIRV_FEATURE_INT64 |                                                 \
+   LOOM_SPIRV_FEATURE_VULKAN_MEMORY_MODEL_DEVICE_SCOPE |                      \
+   LOOM_SPIRV_FEATURE_STORAGE_BUFFER_INT64_ATOMICS |                          \
+   LOOM_SPIRV_FEATURE_WORKGROUP_INT64_ATOMICS |                               \
+   LOOM_SPIRV_FEATURE_STORAGE_BUFFER_FLOAT16_ATOMICS |                        \
+   LOOM_SPIRV_FEATURE_WORKGROUP_FLOAT16_ATOMICS |                             \
+   LOOM_SPIRV_FEATURE_STORAGE_BUFFER_FLOAT16_ATOMIC_ADD |                     \
+   LOOM_SPIRV_FEATURE_WORKGROUP_FLOAT16_ATOMIC_ADD |                          \
+   LOOM_SPIRV_FEATURE_STORAGE_BUFFER_FLOAT32_ATOMICS |                        \
+   LOOM_SPIRV_FEATURE_WORKGROUP_FLOAT32_ATOMICS |                             \
+   LOOM_SPIRV_FEATURE_STORAGE_BUFFER_FLOAT32_ATOMIC_ADD |                     \
+   LOOM_SPIRV_FEATURE_WORKGROUP_FLOAT32_ATOMIC_ADD |                          \
+   LOOM_SPIRV_FEATURE_STORAGE_BUFFER_FLOAT64_ATOMICS |                        \
+   LOOM_SPIRV_FEATURE_WORKGROUP_FLOAT64_ATOMICS |                             \
+   LOOM_SPIRV_FEATURE_STORAGE_BUFFER_FLOAT64_ATOMIC_ADD |                     \
+   LOOM_SPIRV_FEATURE_WORKGROUP_FLOAT64_ATOMIC_ADD |                          \
+   LOOM_SPIRV_FEATURE_GROUP_NON_UNIFORM)
+
+// Feature bits unconditionally required by Vulkan 1.3 BDA HAL modules.
+#define LOOM_SPIRV_FEATURE_MODULE_VULKAN_1_3_BDA_BASELINE \
+  (LOOM_SPIRV_FEATURE_VULKAN_SHADER |                     \
+   LOOM_SPIRV_FEATURE_PHYSICAL_STORAGE_BUFFER | LOOM_SPIRV_FEATURE_INT64)
+
+// Feature bits available in the built-in Vulkan 1.3 BDA target profile.
+#define LOOM_SPIRV_FEATURE_PROFILE_VULKAN_1_3_BDA      \
+  (LOOM_SPIRV_FEATURE_MODULE_VULKAN_1_3_BDA_BASELINE | \
+   LOOM_SPIRV_FEATURE_GROUP_NON_UNIFORM)
+
 // Maximum number of OpExtension rows emitted by all modeled atoms.
-#define LOOM_SPIRV_FEATURE_MAX_EXTENSION_COUNT 7
+#define LOOM_SPIRV_FEATURE_MAX_EXTENSION_COUNT 9
 // Maximum number of OpCapability rows emitted by all modeled atoms.
-#define LOOM_SPIRV_FEATURE_MAX_CAPABILITY_COUNT 16
+#define LOOM_SPIRV_FEATURE_MAX_CAPABILITY_COUNT 24
 // Maximum number of opcode rows exposed by all modeled atoms.
-#define LOOM_SPIRV_FEATURE_MAX_OPCODE_COUNT 12
+#define LOOM_SPIRV_FEATURE_MAX_OPCODE_COUNT 13
 // Maximum number of storage-class rows exposed by all modeled atoms.
 #define LOOM_SPIRV_FEATURE_MAX_STORAGE_CLASS_COUNT 1
 // Maximum number of decoration rows exposed by all modeled atoms.

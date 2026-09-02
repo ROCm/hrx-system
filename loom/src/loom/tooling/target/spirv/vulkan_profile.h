@@ -70,6 +70,37 @@ typedef enum loom_spirv_vulkan_hal_profile_flag_bits_e {
   // The logical device exposes shaderBFloat16CooperativeMatrix.
   LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_SHADER_BFLOAT16_COOPERATIVE_MATRIX = 1u
                                                                           << 16,
+  // The logical device exposes shaderBufferInt64Atomics.
+  LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_STORAGE_BUFFER_INT64_ATOMICS = 1u << 17,
+  // The logical device exposes shaderSharedInt64Atomics.
+  LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_WORKGROUP_INT64_ATOMICS = 1u << 18,
+  // The logical device exposes shaderBufferFloat16Atomics.
+  LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_STORAGE_BUFFER_FLOAT16_ATOMICS = 1u << 19,
+  // The logical device exposes shaderBufferFloat16AtomicAdd.
+  LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_STORAGE_BUFFER_FLOAT16_ATOMIC_ADD = 1u
+                                                                         << 20,
+  // The logical device exposes shaderSharedFloat16Atomics.
+  LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_WORKGROUP_FLOAT16_ATOMICS = 1u << 21,
+  // The logical device exposes shaderSharedFloat16AtomicAdd.
+  LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_WORKGROUP_FLOAT16_ATOMIC_ADD = 1u << 22,
+  // The logical device exposes shaderBufferFloat32Atomics.
+  LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_STORAGE_BUFFER_FLOAT32_ATOMICS = 1u << 23,
+  // The logical device exposes shaderBufferFloat32AtomicAdd.
+  LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_STORAGE_BUFFER_FLOAT32_ATOMIC_ADD = 1u
+                                                                         << 24,
+  // The logical device exposes shaderSharedFloat32Atomics.
+  LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_WORKGROUP_FLOAT32_ATOMICS = 1u << 25,
+  // The logical device exposes shaderSharedFloat32AtomicAdd.
+  LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_WORKGROUP_FLOAT32_ATOMIC_ADD = 1u << 26,
+  // The logical device exposes shaderBufferFloat64Atomics.
+  LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_STORAGE_BUFFER_FLOAT64_ATOMICS = 1u << 27,
+  // The logical device exposes shaderBufferFloat64AtomicAdd.
+  LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_STORAGE_BUFFER_FLOAT64_ATOMIC_ADD = 1u
+                                                                         << 28,
+  // The logical device exposes shaderSharedFloat64Atomics.
+  LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_WORKGROUP_FLOAT64_ATOMICS = 1u << 29,
+  // The logical device exposes shaderSharedFloat64AtomicAdd.
+  LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_WORKGROUP_FLOAT64_ATOMIC_ADD = 1u << 30,
 } loom_spirv_vulkan_hal_profile_flag_bits_t;
 
 typedef uint32_t loom_spirv_vulkan_hal_profile_flags_t;

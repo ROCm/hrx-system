@@ -48,19 +48,30 @@ static void InitializeFakeHalDevice(const iree_hal_device_spec_t* device_spec,
 }
 
 static iree_hal_vulkan_features_t BaselineVulkanFeatures() {
-  return IREE_HAL_VULKAN_FEATURE_ENABLE_BUFFER_DEVICE_ADDRESSES |
-         IREE_HAL_VULKAN_FEATURE_ENABLE_SUBGROUP_SIZE_CONTROL |
-         IREE_HAL_VULKAN_FEATURE_ENABLE_COOPERATIVE_MATRIX |
-         IREE_HAL_VULKAN_FEATURE_ENABLE_STORAGE_BUFFER_8BIT_ACCESS |
-         IREE_HAL_VULKAN_FEATURE_ENABLE_STORAGE_BUFFER_16BIT_ACCESS |
-         IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FLOAT16 |
-         IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BFLOAT16_TYPE |
-         IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BFLOAT16_DOT_PRODUCT |
-         IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INT8 |
-         IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INT16 |
-         IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INT64 |
-         IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INTEGER_DOT_PRODUCT |
-         IREE_HAL_VULKAN_FEATURE_ENABLE_VULKAN_MEMORY_MODEL;
+  return {/*.general=*/
+          IREE_HAL_VULKAN_FEATURE_ENABLE_BUFFER_DEVICE_ADDRESSES |
+              IREE_HAL_VULKAN_FEATURE_ENABLE_SUBGROUP_SIZE_CONTROL |
+              IREE_HAL_VULKAN_FEATURE_ENABLE_COOPERATIVE_MATRIX |
+              IREE_HAL_VULKAN_FEATURE_ENABLE_STORAGE_BUFFER_8BIT_ACCESS |
+              IREE_HAL_VULKAN_FEATURE_ENABLE_STORAGE_BUFFER_16BIT_ACCESS |
+              IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FLOAT16 |
+              IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BFLOAT16_TYPE |
+              IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BFLOAT16_DOT_PRODUCT |
+              IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INT8 |
+              IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INT16 |
+              IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INT64 |
+              IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INTEGER_DOT_PRODUCT |
+              IREE_HAL_VULKAN_FEATURE_ENABLE_VULKAN_MEMORY_MODEL,
+          /*.atomics=*/0};
+}
+
+static iree_hal_vulkan_features_t AtomicVulkanFeatures() {
+  iree_hal_vulkan_features_t features = BaselineVulkanFeatures();
+  features.general |=
+      IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FLOAT64 |
+      IREE_HAL_VULKAN_FEATURE_ENABLE_VULKAN_MEMORY_MODEL_DEVICE_SCOPE;
+  features.atomics = IREE_HAL_VULKAN_SHADER_ATOMIC_FEATURE_ALL_RECOGNIZED;
+  return features;
 }
 
 static iree_status_t CreateDeviceSpec(
@@ -324,6 +335,40 @@ TEST(VulkanProfileTest, QueryKeepsExecutableTargetSupportSeparate) {
   iree_hal_device_spec_release(device_spec);
 }
 
+TEST(VulkanProfileTest, QueryProjectsAtomicFeatures) {
+  iree_hal_device_spec_t* device_spec = NULL;
+  IREE_ASSERT_OK(CreateDeviceSpec(AtomicVulkanFeatures(),
+                                  /*include_target=*/true,
+                                  /*cooperative_matrix_property_count=*/0,
+                                  /*cooperative_matrix_properties=*/nullptr,
+                                  &device_spec));
+  fake_hal_device_t device = {};
+  InitializeFakeHalDevice(device_spec, &device);
+
+  loom_spirv_vulkan_hal_profile_facts_t facts = {};
+  IREE_ASSERT_OK(
+      loom_spirv_vulkan_hal_profile_query((iree_hal_device_t*)&device, &facts));
+
+  const loom_spirv_vulkan_hal_profile_flags_t expected_flags =
+      LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_STORAGE_BUFFER_INT64_ATOMICS |
+      LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_WORKGROUP_INT64_ATOMICS |
+      LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_STORAGE_BUFFER_FLOAT16_ATOMICS |
+      LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_STORAGE_BUFFER_FLOAT16_ATOMIC_ADD |
+      LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_WORKGROUP_FLOAT16_ATOMICS |
+      LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_WORKGROUP_FLOAT16_ATOMIC_ADD |
+      LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_STORAGE_BUFFER_FLOAT32_ATOMICS |
+      LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_STORAGE_BUFFER_FLOAT32_ATOMIC_ADD |
+      LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_WORKGROUP_FLOAT32_ATOMICS |
+      LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_WORKGROUP_FLOAT32_ATOMIC_ADD |
+      LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_STORAGE_BUFFER_FLOAT64_ATOMICS |
+      LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_STORAGE_BUFFER_FLOAT64_ATOMIC_ADD |
+      LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_WORKGROUP_FLOAT64_ATOMICS |
+      LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_WORKGROUP_FLOAT64_ATOMIC_ADD |
+      LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_VULKAN_MEMORY_MODEL_DEVICE_SCOPE;
+  EXPECT_TRUE(iree_all_bits_set(facts.flags, expected_flags));
+  iree_hal_device_spec_release(device_spec);
+}
+
 TEST(VulkanProfileTest, CopiesCooperativeMatrixRowsFromDeviceSpec) {
   const iree_hal_vulkan_cooperative_matrix_property_t source_row =
       F16DeviceMatrixRow();
@@ -468,6 +513,51 @@ TEST(VulkanProfileTest, MaterializesBfloat16Features) {
                         LOOM_SPIRV_FEATURE_BFLOAT16_COOPERATIVE_MATRIX_KHR));
 }
 
+TEST(VulkanProfileTest, MaterializesAtomicFeatures) {
+  loom_spirv_vulkan_hal_profile_facts_t facts = BaselineFacts();
+  facts.flags |=
+      LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_SHADER_FLOAT16 |
+      LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_SHADER_FLOAT64 |
+      LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_STORAGE_BUFFER_INT64_ATOMICS |
+      LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_WORKGROUP_INT64_ATOMICS |
+      LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_STORAGE_BUFFER_FLOAT16_ATOMICS |
+      LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_STORAGE_BUFFER_FLOAT16_ATOMIC_ADD |
+      LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_WORKGROUP_FLOAT16_ATOMICS |
+      LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_WORKGROUP_FLOAT16_ATOMIC_ADD |
+      LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_STORAGE_BUFFER_FLOAT32_ATOMICS |
+      LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_STORAGE_BUFFER_FLOAT32_ATOMIC_ADD |
+      LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_WORKGROUP_FLOAT32_ATOMICS |
+      LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_WORKGROUP_FLOAT32_ATOMIC_ADD |
+      LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_STORAGE_BUFFER_FLOAT64_ATOMICS |
+      LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_STORAGE_BUFFER_FLOAT64_ATOMIC_ADD |
+      LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_WORKGROUP_FLOAT64_ATOMICS |
+      LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_WORKGROUP_FLOAT64_ATOMIC_ADD |
+      LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_VULKAN_MEMORY_MODEL_DEVICE_SCOPE;
+
+  loom_target_bundle_storage_t storage = {};
+  IREE_ASSERT_OK(
+      loom_spirv_vulkan_hal_profile_initialize_target_bundle(&facts, &storage));
+
+  const loom_spirv_feature_bits_t expected_features =
+      LOOM_SPIRV_FEATURE_VULKAN_MEMORY_MODEL_DEVICE_SCOPE |
+      LOOM_SPIRV_FEATURE_STORAGE_BUFFER_INT64_ATOMICS |
+      LOOM_SPIRV_FEATURE_WORKGROUP_INT64_ATOMICS |
+      LOOM_SPIRV_FEATURE_STORAGE_BUFFER_FLOAT16_ATOMICS |
+      LOOM_SPIRV_FEATURE_STORAGE_BUFFER_FLOAT16_ATOMIC_ADD |
+      LOOM_SPIRV_FEATURE_WORKGROUP_FLOAT16_ATOMICS |
+      LOOM_SPIRV_FEATURE_WORKGROUP_FLOAT16_ATOMIC_ADD |
+      LOOM_SPIRV_FEATURE_STORAGE_BUFFER_FLOAT32_ATOMICS |
+      LOOM_SPIRV_FEATURE_STORAGE_BUFFER_FLOAT32_ATOMIC_ADD |
+      LOOM_SPIRV_FEATURE_WORKGROUP_FLOAT32_ATOMICS |
+      LOOM_SPIRV_FEATURE_WORKGROUP_FLOAT32_ATOMIC_ADD |
+      LOOM_SPIRV_FEATURE_STORAGE_BUFFER_FLOAT64_ATOMICS |
+      LOOM_SPIRV_FEATURE_STORAGE_BUFFER_FLOAT64_ATOMIC_ADD |
+      LOOM_SPIRV_FEATURE_WORKGROUP_FLOAT64_ATOMICS |
+      LOOM_SPIRV_FEATURE_WORKGROUP_FLOAT64_ATOMIC_ADD;
+  EXPECT_TRUE(iree_all_bits_set(storage.config.contract_feature_bits,
+                                expected_features));
+}
+
 TEST(VulkanProfileTest, KeepsDependentBfloat16FeaturesClosed) {
   loom_spirv_vulkan_hal_profile_facts_t facts = BaselineFacts();
   facts.flags |= LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_SHADER_BFLOAT16_DOT_PRODUCT;
@@ -483,6 +573,51 @@ TEST(VulkanProfileTest, KeepsDependentBfloat16FeaturesClosed) {
   EXPECT_FALSE(
       iree_any_bit_set(storage.config.contract_feature_bits,
                        LOOM_SPIRV_FEATURE_BFLOAT16_COOPERATIVE_MATRIX_KHR));
+}
+
+TEST(VulkanProfileTest, KeepsFloatingPointAtomicScalarDependenciesClosed) {
+  const loom_spirv_vulkan_hal_profile_flags_t float16_atomic_flags =
+      LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_STORAGE_BUFFER_FLOAT16_ATOMICS |
+      LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_STORAGE_BUFFER_FLOAT16_ATOMIC_ADD |
+      LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_WORKGROUP_FLOAT16_ATOMICS |
+      LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_WORKGROUP_FLOAT16_ATOMIC_ADD;
+  const loom_spirv_vulkan_hal_profile_flags_t float64_atomic_flags =
+      LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_STORAGE_BUFFER_FLOAT64_ATOMICS |
+      LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_STORAGE_BUFFER_FLOAT64_ATOMIC_ADD |
+      LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_WORKGROUP_FLOAT64_ATOMICS |
+      LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_WORKGROUP_FLOAT64_ATOMIC_ADD;
+  const loom_spirv_feature_bits_t float16_atomic_features =
+      LOOM_SPIRV_FEATURE_STORAGE_BUFFER_FLOAT16_ATOMICS |
+      LOOM_SPIRV_FEATURE_STORAGE_BUFFER_FLOAT16_ATOMIC_ADD |
+      LOOM_SPIRV_FEATURE_WORKGROUP_FLOAT16_ATOMICS |
+      LOOM_SPIRV_FEATURE_WORKGROUP_FLOAT16_ATOMIC_ADD;
+  const loom_spirv_feature_bits_t float64_atomic_features =
+      LOOM_SPIRV_FEATURE_STORAGE_BUFFER_FLOAT64_ATOMICS |
+      LOOM_SPIRV_FEATURE_STORAGE_BUFFER_FLOAT64_ATOMIC_ADD |
+      LOOM_SPIRV_FEATURE_WORKGROUP_FLOAT64_ATOMICS |
+      LOOM_SPIRV_FEATURE_WORKGROUP_FLOAT64_ATOMIC_ADD;
+
+  loom_spirv_vulkan_hal_profile_facts_t facts = BaselineFacts();
+  facts.flags |= LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_SHADER_FLOAT64 |
+                 float16_atomic_flags | float64_atomic_flags;
+  loom_target_bundle_storage_t float64_storage = {};
+  IREE_ASSERT_OK(loom_spirv_vulkan_hal_profile_initialize_target_bundle(
+      &facts, &float64_storage));
+  EXPECT_FALSE(iree_any_bit_set(float64_storage.config.contract_feature_bits,
+                                float16_atomic_features));
+  EXPECT_TRUE(iree_all_bits_set(float64_storage.config.contract_feature_bits,
+                                float64_atomic_features));
+
+  facts = BaselineFacts();
+  facts.flags |= LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_SHADER_FLOAT16 |
+                 float16_atomic_flags | float64_atomic_flags;
+  loom_target_bundle_storage_t float16_storage = {};
+  IREE_ASSERT_OK(loom_spirv_vulkan_hal_profile_initialize_target_bundle(
+      &facts, &float16_storage));
+  EXPECT_TRUE(iree_all_bits_set(float16_storage.config.contract_feature_bits,
+                                float16_atomic_features));
+  EXPECT_FALSE(iree_any_bit_set(float16_storage.config.contract_feature_bits,
+                                float64_atomic_features));
 }
 
 TEST(VulkanProfileTest, ImportsExactCooperativeMatrixRows) {

@@ -91,19 +91,18 @@ iree_hal_vulkan_atomic_capabilities(
     iree_hal_vulkan_features_t enabled_features) {
   iree_hal_atomic_capabilities_t capabilities;
   memset(&capabilities, 0, sizeof(capabilities));
-  const iree_hal_vulkan_features_t required_features =
+  const iree_hal_vulkan_general_features_t required_general_features =
       IREE_HAL_VULKAN_FEATURE_ENABLE_BUFFER_DEVICE_ADDRESSES |
       IREE_HAL_VULKAN_FEATURE_ENABLE_VULKAN_MEMORY_MODEL |
       IREE_HAL_VULKAN_FEATURE_ENABLE_VULKAN_MEMORY_MODEL_DEVICE_SCOPE;
-  if (!iree_all_bits_set(enabled_features, required_features)) {
+  if (!iree_all_bits_set(enabled_features.general, required_general_features)) {
     return capabilities;
   }
   capabilities.operations.device_scope_32 = IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL;
   capabilities.wait_conditions.device_scope_32 =
       IREE_HAL_ATOMIC_WAIT_CONDITION_FLAGS_ALL;
-  if (iree_all_bits_set(
-          enabled_features,
-          IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_INT64_ATOMICS)) {
+  if (iree_all_bits_set(enabled_features.atomics,
+                        IREE_HAL_VULKAN_SHADER_ATOMIC_FEATURE_BUFFER_INT64)) {
     capabilities.operations.device_scope_64 =
         IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL;
     capabilities.wait_conditions.device_scope_64 =

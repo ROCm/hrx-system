@@ -72,8 +72,10 @@ void InitializeFakeDevice(const iree_hal_device_spec_t* device_spec,
 }
 
 iree_hal_vulkan_features_t RequiredVulkanFeatures() {
-  return IREE_HAL_VULKAN_FEATURE_ENABLE_BUFFER_DEVICE_ADDRESSES |
-         IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INT64;
+  return {/*.general=*/
+          IREE_HAL_VULKAN_FEATURE_ENABLE_BUFFER_DEVICE_ADDRESSES |
+              IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INT64,
+          /*.atomics=*/0};
 }
 
 iree_status_t CreateVulkanDeviceSpec(
@@ -218,11 +220,14 @@ TargetProfilePtr CreateProfileFromHal(
 }
 
 TEST(LoomcSpirvIreeHalTargetTest, CreatesProfileFromHalFacts) {
+  iree_hal_vulkan_features_t enabled_features = RequiredVulkanFeatures();
+  enabled_features.general |=
+      IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FLOAT16 |
+      IREE_HAL_VULKAN_FEATURE_ENABLE_STORAGE_BUFFER_8BIT_ACCESS;
   DeviceSpecPtr device_spec;
-  IREE_ASSERT_OK(CreateVulkanDeviceSpec(
-      RequiredVulkanFeatures() | IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FLOAT16 |
-          IREE_HAL_VULKAN_FEATURE_ENABLE_STORAGE_BUFFER_8BIT_ACCESS,
-      /*include_dispatch=*/true, /*include_target=*/true, &device_spec));
+  IREE_ASSERT_OK(CreateVulkanDeviceSpec(enabled_features,
+                                        /*include_dispatch=*/true,
+                                        /*include_target=*/true, &device_spec));
   FakeHalDevice device = {};
   InitializeFakeDevice(device_spec.get(), &device);
   TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
@@ -245,6 +250,9 @@ TEST(LoomcSpirvIreeHalTargetTest, CreatesProfileFromHalFacts) {
   LOOMC_EXPECT_OK(loomc_spirv_target_profile_query_feature(
       profile.get(), LOOMC_SPIRV_FEATURE_PHYSICAL_STORAGE_BUFFER,
       &feature_state));
+  EXPECT_EQ(feature_state, LOOMC_TARGET_FACT_STATE_TRUE);
+  LOOMC_EXPECT_OK(loomc_spirv_target_profile_query_feature(
+      profile.get(), LOOMC_SPIRV_FEATURE_GROUP_NON_UNIFORM, &feature_state));
   EXPECT_EQ(feature_state, LOOMC_TARGET_FACT_STATE_TRUE);
 }
 

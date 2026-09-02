@@ -26,7 +26,7 @@ extern "C" {
 #define IREE_HAL_VULKAN_MAX_QUEUE_LANES 3
 
 // Maximum recognized device extension names enabled during VkDevice creation.
-#define IREE_HAL_VULKAN_MAX_DEVICE_EXTENSION_NAMES 9
+#define IREE_HAL_VULKAN_MAX_DEVICE_EXTENSION_NAMES 11
 
 // Maximum queue-family create infos needed for current queue role assignment.
 #define IREE_HAL_VULKAN_MAX_QUEUE_CREATE_INFOS 3
@@ -74,7 +74,7 @@ typedef struct iree_hal_vulkan_device_plan_t {
   // Non-device-feature behavior requested for the logical device.
   iree_hal_vulkan_request_flags_t request_flags;
 
-  // HAL feature bits enabled or supplied on the logical device.
+  // HAL features enabled or supplied on the logical device.
   iree_hal_vulkan_features_t enabled_features;
 
   // Recognized Vulkan device extension bits enabled on the logical device.
@@ -110,6 +110,14 @@ typedef struct iree_hal_vulkan_device_plan_t {
   // VK_KHR_shader_bfloat16 features enabled during VkDevice creation.
   VkPhysicalDeviceShaderBfloat16FeaturesKHR enabled_shader_bfloat16_features;
 
+  // VK_EXT_shader_atomic_float features enabled during VkDevice creation.
+  VkPhysicalDeviceShaderAtomicFloatFeaturesEXT
+      enabled_shader_atomic_float_features;
+
+  // VK_EXT_shader_atomic_float2 features enabled during VkDevice creation.
+  VkPhysicalDeviceShaderAtomicFloat2FeaturesEXT
+      enabled_shader_atomic_float2_features;
+
   // Vulkan 1.1 features enabled during driver-owned VkDevice creation.
   VkPhysicalDeviceVulkan11Features enabled_features11;
 
@@ -140,7 +148,7 @@ iree_status_t iree_hal_vulkan_device_plan_initialize_for_create(
     const iree_hal_vulkan_physical_device_snapshot_t* snapshot,
     const iree_hal_vulkan_device_options_t* device_options,
     iree_hal_vulkan_request_flags_t request_flags,
-    iree_hal_vulkan_features_t requested_features,
+    iree_hal_vulkan_features_t required_features,
     iree_hal_vulkan_device_plan_t* out_plan);
 
 // Initializes |out_plan| for a wrapped external VkDevice.

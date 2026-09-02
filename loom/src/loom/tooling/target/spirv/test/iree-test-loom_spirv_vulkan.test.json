@@ -46,6 +46,91 @@
       }
     },
     {
+      "name": "runs contended spirv vulkan atomic f32 reduction",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/../../../../test/corpus/conformance/global_atomic_add_f32.loom",
+          "--case=@global_atomic_reduce_add_f32_case",
+          "--device=vulkan",
+          "--vulkan_validation_layers=false"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"format\":\"loom.test.v0\"",
+          "\"case\":\"global_atomic_reduce_add_f32_case\"",
+          "\"passed\":true"
+        ]
+      }
+    },
+    {
+      "name": "runs contended spirv vulkan atomic f32 RMW",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/../../../../test/corpus/conformance/global_atomic_add_f32.loom",
+          "--case=@global_atomic_rmw_add_f32_case",
+          "--device=vulkan",
+          "--vulkan_validation_layers=false"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"format\":\"loom.test.v0\"",
+          "\"case\":\"global_atomic_rmw_add_f32_case\"",
+          "\"passed\":true"
+        ]
+      }
+    },
+    {
+      "name": "runs spirv vulkan atomic i64 compare-exchange when available",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/../../../../test/corpus/conformance/global_atomic_add_f32.loom",
+          "--case=@global_atomic_cmpxchg_i64_case",
+          "--device=vulkan",
+          "--vulkan_validation_layers=false"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"format\":\"loom.test.v0\"",
+          {
+            "regex": "\"case\":\"global_atomic_cmpxchg_i64_case\".*(\"passed\":true|\"code\":\"requirement_not_satisfied\",\"provider_code\":\"feature_disabled\")"
+          }
+        ]
+      }
+    },
+    {
+      "name": "runs spirv vulkan atomic operation semantics",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/spirv_vulkan_atomic_hal_actual.loom",
+          "--device=vulkan",
+          "--vulkan_validation_layers=false"
+        ]
+      },
+      "stdout": {
+        "contains": {
+          "unordered": [
+            "\"format\":\"loom.test.v0\"",
+            "\"case_count\":7",
+            "\"failed_sample_count\":0",
+            "\"case\":\"global_atomic_i32_operations_case\"",
+            "\"case\":\"global_atomic_f32_operations_case\"",
+            "\"case\":\"global_atomic_f64_operations_case\"",
+            "\"case\":\"global_atomic_f16_exchange_case\"",
+            "\"case\":\"global_atomic_f16_add_case\"",
+            "\"case\":\"workgroup_atomic_carriers_case\"",
+            "\"case\":\"global_vector_atomic_forms_case\""
+          ]
+        }
+      }
+    },
+    {
       "name": "runs spirv vulkan scalar case",
       "run": {
         "tool": "iree-test-loom",

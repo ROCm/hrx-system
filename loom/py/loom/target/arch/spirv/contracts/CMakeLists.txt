@@ -14,8 +14,11 @@ iree_py_library(
     contracts
   SRCS
     "__init__.py"
+    "atomic.py"
+    "descriptor_rule.py"
     "index.py"
     "logical_core.py"
+    "memory.py"
     "ordinary_vector.py"
   DEPS
     loom::py::loom::core
@@ -27,6 +30,7 @@ iree_py_library(
     loom::py::loom::dialect::vector::vector
     loom::py::loom::dialect::view::view
     loom::py::loom::error::error
+    loom::py::loom::target::arch::spirv::atomic
     loom::py::loom::target::arch::spirv::builtins
     loom::py::loom::target::arch::spirv::cooperative_matrix
     loom::py::loom::target::arch::spirv::descriptors
@@ -36,6 +40,29 @@ iree_py_library(
     loom::py::loom::target::arch::spirv::scalar_conversion
     loom::py::loom::target::arch::spirv::scalar_memory
     loom::py::loom::target::contracts::contracts
+)
+
+iree_py_test(
+  NAME
+    atomic_test
+  MAIN
+    "../../../../tools/pytest_style_runner.py"
+  SRCS
+    "atomic_test.py"
+    "../../../../tools/pytest_style_runner.py"
+  ARGS
+    "loom.target.arch.spirv.contracts.atomic_test"
+  DEPS
+    loom::py::loom::target::arch::spirv::contracts::contracts
+    loom::py::loom::dialect::view::view
+    loom::py::loom::target::arch::spirv::atomic
+    loom::py::loom::target::contracts::contracts
+  PACKAGE_DIRS
+    "${PROJECT_SOURCE_DIR}/loom/py"
+    "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
+  TIMEOUT
+    60
 )
 
 iree_py_test(

@@ -39,7 +39,7 @@ func.def target(@target) @scalar_static_rank2_i32(%input: buffer, %output: buffe
                OpDecorate %_struct_11 Block
                OpDecorate %10 DescriptorSet 0
                OpDecorate %10 Binding 2
-               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 1
+               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 4
         %int = OpTypeInt 32 1
       %int_0 = OpConstant %int 0
       %ulong = OpTypeInt 64 0
@@ -116,7 +116,7 @@ func.def target(@target) @scalar_dynamic_view_base_i32(%input: buffer, %output: 
                OpDecorate %_struct_12 Block
                OpDecorate %11 DescriptorSet 0
                OpDecorate %11 Binding 3
-               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 1
+               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 4
         %int = OpTypeInt 32 1
       %int_0 = OpConstant %int 0
       %ulong = OpTypeInt 64 0
@@ -200,7 +200,7 @@ func.def target(@target) @scalar_materialized_view_base_suffix_i32(%input: buffe
                OpDecorate %_struct_12 Block
                OpDecorate %11 DescriptorSet 0
                OpDecorate %11 Binding 3
-               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 1
+               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 4
         %int = OpTypeInt 32 1
       %int_0 = OpConstant %int 0
       %ulong = OpTypeInt 64 0
@@ -284,7 +284,7 @@ func.def target(@target) @scalar_dynamic_index_i32(%input: buffer, %output: buff
                OpDecorate %10 Binding 2
                OpDecorate %14 DescriptorSet 0
                OpDecorate %14 Binding 3
-               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 1
+               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 4
         %int = OpTypeInt 32 1
       %int_0 = OpConstant %int 0
       %ulong = OpTypeInt 64 0
@@ -374,7 +374,7 @@ func.def target(@target) @scalar_mixed_rank2_i32(%input: buffer, %output: buffer
                OpDecorate %15 Binding 4
                OpDecorate %16 DescriptorSet 0
                OpDecorate %16 Binding 5
-               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 1
+               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 4
         %int = OpTypeInt 32 1
       %int_0 = OpConstant %int 0
       %ulong = OpTypeInt 64 0
@@ -477,7 +477,7 @@ func.def target(@target) @scalar_dynamic_stride_i32(%input: buffer, %output: buf
                OpDecorate %15 Binding 4
                OpDecorate %16 DescriptorSet 0
                OpDecorate %16 Binding 5
-               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 1
+               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 4
         %int = OpTypeInt 32 1
       %int_0 = OpConstant %int 0
       %ulong = OpTypeInt 64 0
@@ -580,7 +580,7 @@ func.def target(@target) @scalar_subview_dynamic_index_i32(%input: buffer, %outp
                OpDecorate %11 Binding 3
                OpDecorate %15 DescriptorSet 0
                OpDecorate %15 Binding 4
-               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 1
+               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 4
         %int = OpTypeInt 32 1
       %int_0 = OpConstant %int 0
       %ulong = OpTypeInt 64 0

@@ -9,7 +9,8 @@ kernel.def @global_atomic_reduce_add_f32() {
   %base = index.constant 0 : offset
   %output_index = index.constant 0 : index
   %output_global = buffer.assume.memory_space<global> %output : buffer
-  %output_view = buffer.view %output_global[%base] : buffer -> view<1xf32>
+  %output_aligned = buffer.assume.alignment %output_global {minimum_alignment = 4} : buffer
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<1xf32>
   %atomic_increment = scalar.constant 1.0 : f32
   view.atomic.reduce<addf> %atomic_increment, %output_view[%output_index] {ordering = relaxed, scope = device} : f32, view<1xf32>
   kernel.return
@@ -26,8 +27,10 @@ kernel.def @global_atomic_rmw_add_f32() {
   %result_index = index.constant 0 : index
   %accumulator_global = buffer.assume.memory_space<global> %accumulator : buffer
   %old_sum_global = buffer.assume.memory_space<global> %old_sum : buffer
-  %accumulator_view = buffer.view %accumulator_global[%base] : buffer -> view<1xf32>
-  %old_sum_view = buffer.view %old_sum_global[%base] : buffer -> view<1xf32>
+  %accumulator_aligned = buffer.assume.alignment %accumulator_global {minimum_alignment = 4} : buffer
+  %old_sum_aligned = buffer.assume.alignment %old_sum_global {minimum_alignment = 4} : buffer
+  %accumulator_view = buffer.view %accumulator_aligned[%base] : buffer -> view<1xf32>
+  %old_sum_view = buffer.view %old_sum_aligned[%base] : buffer -> view<1xf32>
   %atomic_increment = scalar.constant 1.0 : f32
   %old = view.atomic.rmw<addf> %atomic_increment, %accumulator_view[%result_index] {ordering = relaxed, scope = device} : f32, view<1xf32> -> f32
   view.atomic.reduce<addf> %old, %old_sum_view[%result_index] {ordering = relaxed, scope = device} : f32, view<1xf32>
@@ -45,8 +48,10 @@ kernel.def @global_atomic_cmpxchg_i64() {
   %value_index = index.constant 0 : index
   %value_global = buffer.assume.memory_space<global> %value : buffer
   %old_value_global = buffer.assume.memory_space<global> %old_value : buffer
-  %value_view = buffer.view %value_global[%base] : buffer -> view<1xi64>
-  %old_value_view = buffer.view %old_value_global[%base] : buffer -> view<1xi64>
+  %value_aligned = buffer.assume.alignment %value_global {minimum_alignment = 8} : buffer
+  %old_value_aligned = buffer.assume.alignment %old_value_global {minimum_alignment = 8} : buffer
+  %value_view = buffer.view %value_aligned[%base] : buffer -> view<1xi64>
+  %old_value_view = buffer.view %old_value_aligned[%base] : buffer -> view<1xi64>
   %expected = scalar.constant 7 : i64
   %replacement = scalar.constant 9 : i64
   %old = view.atomic.cmpxchg %expected, %replacement, %value_view[%value_index] {failure_ordering = relaxed, scope = device, success_ordering = relaxed} : i64, view<1xi64> -> i64

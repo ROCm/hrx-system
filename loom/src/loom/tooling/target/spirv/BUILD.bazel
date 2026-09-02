@@ -213,11 +213,13 @@ loom_cc_test(
 iree_execution_test_suite(
     name = "iree_test_loom_execution_test",
     data = [
+        "test/spirv_vulkan_atomic_hal_actual.loom",
         "test/spirv_vulkan_coop_hal_actual.loom",
         "test/spirv_vulkan_coop_u8_hal_actual.loom",
         "test/spirv_vulkan_hal_actual.loom",
         "test/spirv_vulkan_integer_hal_actual.loom",
         "test/spirv_vulkan_quantized_hal_actual.loom",
+        "//loom/src/loom/test/corpus/conformance:global_atomic_add_f32.loom",
         "//loom/src/loom/tooling/execution/hal:testdata/buffer_bulk_hal_actual.loom",
         "//loom/src/loom/tooling/execution/hal:testdata/dynamic_workgroup_hal_actual.loom",
         "//loom/src/loom/tooling/execution/hal:testdata/launch_schedule_hal_actual.loom",

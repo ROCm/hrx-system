@@ -102,6 +102,7 @@ iree_py_library(
   DEPS
     loom::py::loom::gen::support::support
     loom::py::loom::target::low_descriptors
+    loom::py::loom::target::arch::spirv::atomic
     loom::py::loom::target::arch::spirv::builtins
     loom::py::loom::target::arch::spirv::cooperative_matrix
     loom::py::loom::target::arch::spirv::descriptors

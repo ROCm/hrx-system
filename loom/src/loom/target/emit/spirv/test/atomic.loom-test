@@ -1,0 +1,1088 @@
+// RUN: emit spirv-dis input=source-low validate
+// REQUIRES: spirv-dis, spirv-val
+
+spirv.target<vulkan1_3> @target {contract_feature_bits = 2147975174}
+func.def target(@target) @integer_atomic_probe(%value: i32, %buffer: buffer) {
+  %base = index.constant 0 : offset
+  %index = index.constant 0 : index
+  %global = buffer.assume.memory_space<global> %buffer : buffer
+  %aligned = buffer.assume.alignment %global {minimum_alignment = 4} : buffer
+  %view = buffer.view %aligned[%base] : buffer -> view<1xi32>
+  %exchange = view.atomic.rmw<xchgi> %value, %view[%index] {ordering = relaxed, scope = thread} : i32, view<1xi32> -> i32
+  view.atomic.reduce<addi> %value, %view[%index] {ordering = relaxed, scope = device} : i32, view<1xi32>
+  view.atomic.reduce<subi> %value, %view[%index] {ordering = acquire, scope = subgroup} : i32, view<1xi32>
+  view.atomic.reduce<andi> %value, %view[%index] {ordering = release, scope = workgroup} : i32, view<1xi32>
+  view.atomic.reduce<ori> %value, %view[%index] {ordering = acq_rel, scope = device} : i32, view<1xi32>
+  view.atomic.reduce<xori> %value, %view[%index] {ordering = relaxed, scope = thread} : i32, view<1xi32>
+  view.atomic.reduce<minsi> %value, %view[%index] {ordering = acquire, scope = subgroup} : i32, view<1xi32>
+  view.atomic.reduce<maxsi> %value, %view[%index] {ordering = release, scope = workgroup} : i32, view<1xi32>
+  view.atomic.reduce<minui> %value, %view[%index] {ordering = acq_rel, scope = device} : i32, view<1xi32>
+  %old = view.atomic.rmw<maxui> %value, %view[%index] {ordering = acquire, scope = subgroup} : i32, view<1xi32> -> i32
+  %prior = view.atomic.cmpxchg %old, %value, %view[%index] {failure_ordering = acquire, scope = workgroup, success_ordering = acq_rel} : i32, view<1xi32> -> i32
+  func.return
+}
+
+// ----
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpCapability VulkanMemoryModelDeviceScope
+               OpCapability Int64Atomics
+               OpCapability GroupNonUniform
+               OpExtension "SPV_KHR_vulkan_memory_model"
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %integer_atomic_probe "integer_atomic_probe"
+               OpExecutionMode %integer_atomic_probe LocalSize 1 1 1
+               OpName %integer_atomic_probe "integer_atomic_probe"
+               OpName %value "value"
+               OpName %aligned "aligned"
+               OpName %exchange "exchange"
+               OpName %old "old"
+               OpName %prior "prior"
+               OpMemberDecorate %_struct_5 0 Offset 0
+               OpDecorate %_struct_5 Block
+               OpDecorate %4 DescriptorSet 0
+               OpDecorate %4 Binding 0
+               OpMemberDecorate %_struct_10 0 Offset 0
+               OpDecorate %_struct_10 Block
+               OpDecorate %8 DescriptorSet 0
+               OpDecorate %8 Binding 1
+               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 4
+        %int = OpTypeInt 32 1
+      %int_0 = OpConstant %int 0
+  %_struct_5 = OpTypeStruct %int
+%_ptr_StorageBuffer__struct_5 = OpTypePointer StorageBuffer %_struct_5
+%_ptr_StorageBuffer_int = OpTypePointer StorageBuffer %int
+          %4 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
+      %ulong = OpTypeInt 64 0
+ %_struct_10 = OpTypeStruct %ulong
+%_ptr_StorageBuffer__struct_10 = OpTypePointer StorageBuffer %_struct_10
+%_ptr_StorageBuffer_ulong = OpTypePointer StorageBuffer %ulong
+          %8 = OpVariable %_ptr_StorageBuffer__struct_10 StorageBuffer
+       %void = OpTypeVoid
+         %14 = OpTypeFunction %void
+    %ulong_0 = OpConstant %ulong 0
+%_ptr_PhysicalStorageBuffer_int = OpTypePointer PhysicalStorageBuffer %int
+       %uint = OpTypeInt 32 0
+     %uint_4 = OpConstant %uint 4
+     %uint_0 = OpConstant %uint 0
+     %uint_1 = OpConstant %uint 1
+     %uint_3 = OpConstant %uint 3
+    %uint_66 = OpConstant %uint 66
+     %uint_2 = OpConstant %uint 2
+    %uint_68 = OpConstant %uint 68
+    %uint_72 = OpConstant %uint 72
+%integer_atomic_probe = OpFunction %void None %14
+         %15 = OpLabel
+         %16 = OpAccessChain %_ptr_StorageBuffer_int %4 %int_0
+      %value = OpLoad %int %16 Aligned 4
+         %18 = OpAccessChain %_ptr_StorageBuffer_ulong %8 %int_0
+    %aligned = OpLoad %ulong %18 Aligned 8
+         %21 = OpIAdd %ulong %aligned %ulong_0
+         %23 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %21
+   %exchange = OpAtomicExchange %int %23 %uint_4 %uint_0 %value
+         %29 = OpAtomicIAdd %int %23 %uint_1 %uint_0 %value
+         %32 = OpAtomicISub %int %23 %uint_3 %uint_66 %value
+         %35 = OpAtomicAnd %int %23 %uint_2 %uint_68 %value
+         %37 = OpAtomicOr %int %23 %uint_1 %uint_72 %value
+         %38 = OpAtomicXor %int %23 %uint_4 %uint_0 %value
+         %39 = OpAtomicSMin %int %23 %uint_3 %uint_66 %value
+         %40 = OpAtomicSMax %int %23 %uint_2 %uint_68 %value
+         %41 = OpAtomicUMin %int %23 %uint_1 %uint_72 %value
+        %old = OpAtomicUMax %int %23 %uint_3 %uint_66 %value
+      %prior = OpAtomicCompareExchange %int %23 %uint_2 %uint_72 %uint_66 %value %old
+               OpReturn
+               OpFunctionEnd
+
+// ====
+
+// One exact operation forces every alias of a Workgroup allocation onto the
+// integer carrier, even when native floating-point atomics are available.
+spirv.target<vulkan1_3> @workgroup_mixed_alias_target {contract_feature_bits = 2231402502}
+func.def target(@workgroup_mixed_alias_target) @workgroup_mixed_alias_atomics(%value: f32) {
+  %byte_length = index.constant 4 : offset
+  %base = index.constant 0 : offset
+  %scratch = buffer.alloca<workgroup> align(4) %byte_length : buffer
+  %native_view = buffer.view %scratch[%base] : buffer -> view<1xf32>
+  %exact_view = buffer.view %scratch[%base] : buffer -> view<1xf32>
+  view.store %value, %native_view[0] : f32, view<1xf32>
+  %exchange = view.atomic.rmw<xchgf> %value, %native_view[0] {ordering = relaxed, scope = workgroup} : f32, view<1xf32> -> f32
+  %add = view.atomic.rmw<addf> %exchange, %native_view[0] {ordering = acquire, scope = workgroup} : f32, view<1xf32> -> f32
+  %minimum = view.atomic.rmw<minimumf> %add, %exact_view[0] {ordering = acq_rel, scope = workgroup} : f32, view<1xf32> -> f32
+  func.return
+}
+
+// ----
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpCapability AtomicFloat32AddEXT
+               OpExtension "SPV_KHR_vulkan_memory_model"
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpExtension "SPV_EXT_shader_atomic_float_add"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %workgroup_mixed_alias_atomics "workgroup_mixed_alias_atomics"
+               OpExecutionMode %workgroup_mixed_alias_atomics LocalSize 1 1 1
+               OpName %workgroup_mixed_alias_atomics "workgroup_mixed_alias_atomics"
+               OpName %value "value"
+               OpName %native_view "native_view"
+               OpName %exchange "exchange"
+               OpName %add "add"
+               OpName %minimum "minimum"
+               OpMemberDecorate %_struct_6 0 Offset 0
+               OpDecorate %_struct_6 Block
+               OpDecorate %4 DescriptorSet 0
+               OpDecorate %4 Binding 0
+               OpDecorate %_arr_int_uint_1 ArrayStride 4
+        %int = OpTypeInt 32 1
+      %int_0 = OpConstant %int 0
+      %float = OpTypeFloat 32
+  %_struct_6 = OpTypeStruct %float
+%_ptr_StorageBuffer__struct_6 = OpTypePointer StorageBuffer %_struct_6
+%_ptr_StorageBuffer_float = OpTypePointer StorageBuffer %float
+          %4 = OpVariable %_ptr_StorageBuffer__struct_6 StorageBuffer
+       %void = OpTypeVoid
+         %10 = OpTypeFunction %void
+       %uint = OpTypeInt 32 0
+     %uint_1 = OpConstant %uint 1
+%_arr_int_uint_1 = OpTypeArray %int %uint_1
+%_ptr_Workgroup__arr_int_uint_1 = OpTypePointer Workgroup %_arr_int_uint_1
+%native_view = OpVariable %_ptr_Workgroup__arr_int_uint_1 Workgroup
+    %int_0_0 = OpConstant %int 0
+%_ptr_Workgroup_int = OpTypePointer Workgroup %int
+     %uint_2 = OpConstant %uint 2
+     %uint_0 = OpConstant %uint 0
+   %uint_258 = OpConstant %uint 258
+       %bool = OpTypeBool
+   %uint_264 = OpConstant %uint 264
+%workgroup_mixed_alias_atomics = OpFunction %void None %10
+         %11 = OpLabel
+         %12 = OpAccessChain %_ptr_StorageBuffer_float %4 %int_0
+      %value = OpLoad %float %12 Aligned 4
+         %19 = OpBitcast %int %value
+         %22 = OpAccessChain %_ptr_Workgroup_int %native_view %int_0_0
+               OpStore %22 %19 Aligned 4
+         %25 = OpBitcast %int %value
+         %26 = OpAtomicExchange %int %22 %uint_2 %uint_0 %25
+   %exchange = OpBitcast %float %26
+         %29 = OpBitcast %int %exchange
+         %30 = OpAtomicLoad %int %22 %uint_2 %uint_0
+               OpBranch %31
+         %31 = OpLabel
+         %34 = OpPhi %int %30 %11 %35 %32
+         %36 = OpBitcast %float %34
+         %37 = OpFAdd %float %36 %exchange
+         %38 = OpBitcast %int %37
+         %35 = OpAtomicCompareExchange %int %22 %uint_2 %uint_258 %uint_0 %38 %34
+         %40 = OpIEqual %bool %35 %34
+               OpLoopMerge %33 %32 None
+               OpBranchConditional %40 %33 %32
+         %32 = OpLabel
+               OpBranch %31
+         %33 = OpLabel
+        %add = OpBitcast %float %35
+         %43 = OpBitcast %int %add
+         %44 = OpAtomicLoad %int %22 %uint_2 %uint_0
+               OpBranch %45
+         %45 = OpLabel
+         %48 = OpPhi %int %44 %33 %49 %46
+         %50 = OpBitcast %float %48
+         %51 = OpFOrdLessThan %bool %50 %add
+         %52 = OpSelect %float %51 %50 %add
+         %53 = OpFOrdEqual %bool %50 %add
+         %54 = OpBitwiseOr %int %48 %43
+         %55 = OpBitcast %float %54
+         %56 = OpSelect %float %53 %55 %52
+         %57 = OpIsNan %bool %50
+         %58 = OpIsNan %bool %add
+         %59 = OpLogicalOr %bool %57 %58
+         %60 = OpSelect %float %57 %50 %add
+         %61 = OpSelect %float %59 %60 %56
+         %62 = OpBitcast %int %61
+         %49 = OpAtomicCompareExchange %int %22 %uint_2 %uint_264 %uint_0 %62 %48
+         %63 = OpIEqual %bool %49 %48
+               OpLoopMerge %47 %46 None
+               OpBranchConditional %63 %47 %46
+         %46 = OpLabel
+               OpBranch %45
+         %47 = OpLabel
+    %minimum = OpBitcast %float %49
+               OpReturn
+               OpFunctionEnd
+
+// ====
+
+// Integer atomics use a same-width Workgroup carrier, including the optional
+// i64 path guarded by shaderSharedInt64Atomics.
+spirv.target<vulkan1_3> @workgroup_i64_target {contract_feature_bits = 2147778566}
+func.def target(@workgroup_i64_target) @workgroup_i64_atomics(%value: i64) {
+  %byte_length = index.constant 8 : offset
+  %base = index.constant 0 : offset
+  %scratch = buffer.alloca<workgroup> align(8) %byte_length : buffer
+  %view = buffer.view %scratch[%base] : buffer -> view<1xi64>
+  %old = view.atomic.rmw<addi> %value, %view[0] {ordering = acquire, scope = workgroup} : i64, view<1xi64> -> i64
+  %prior = view.atomic.cmpxchg %old, %value, %view[0] {failure_ordering = acquire, scope = workgroup, success_ordering = acq_rel} : i64, view<1xi64> -> i64
+  func.return
+}
+
+// ----
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpCapability Int64Atomics
+               OpExtension "SPV_KHR_vulkan_memory_model"
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %workgroup_i64_atomics "workgroup_i64_atomics"
+               OpExecutionMode %workgroup_i64_atomics LocalSize 1 1 1
+               OpName %workgroup_i64_atomics "workgroup_i64_atomics"
+               OpName %value "value"
+               OpName %view "view"
+               OpName %old "old"
+               OpName %prior "prior"
+               OpMemberDecorate %_struct_6 0 Offset 0
+               OpDecorate %_struct_6 Block
+               OpDecorate %4 DescriptorSet 0
+               OpDecorate %4 Binding 0
+               OpDecorate %_arr_long_uint_1 ArrayStride 8
+        %int = OpTypeInt 32 1
+      %int_0 = OpConstant %int 0
+       %long = OpTypeInt 64 1
+  %_struct_6 = OpTypeStruct %long
+%_ptr_StorageBuffer__struct_6 = OpTypePointer StorageBuffer %_struct_6
+%_ptr_StorageBuffer_long = OpTypePointer StorageBuffer %long
+          %4 = OpVariable %_ptr_StorageBuffer__struct_6 StorageBuffer
+       %void = OpTypeVoid
+         %10 = OpTypeFunction %void
+       %uint = OpTypeInt 32 0
+     %uint_1 = OpConstant %uint 1
+%_arr_long_uint_1 = OpTypeArray %long %uint_1
+%_ptr_Workgroup__arr_long_uint_1 = OpTypePointer Workgroup %_arr_long_uint_1
+       %view = OpVariable %_ptr_Workgroup__arr_long_uint_1 Workgroup
+    %int_0_0 = OpConstant %int 0
+%_ptr_Workgroup_long = OpTypePointer Workgroup %long
+     %uint_2 = OpConstant %uint 2
+   %uint_258 = OpConstant %uint 258
+   %uint_264 = OpConstant %uint 264
+%workgroup_i64_atomics = OpFunction %void None %10
+         %11 = OpLabel
+         %12 = OpAccessChain %_ptr_StorageBuffer_long %4 %int_0
+      %value = OpLoad %long %12 Aligned 8
+         %21 = OpAccessChain %_ptr_Workgroup_long %view %int_0_0
+        %old = OpAtomicIAdd %long %21 %uint_2 %uint_258 %value
+      %prior = OpAtomicCompareExchange %long %21 %uint_2 %uint_264 %uint_258 %value %old
+               OpReturn
+               OpFunctionEnd
+
+// ====
+
+// Native floating-point atomic instructions are optional. Integer CAS gives
+// f32 targets complete exchange, add, min/max, and compare-exchange semantics.
+spirv.target<vulkan1_3> @f32_fallback_target {contract_feature_bits = 2147516422}
+func.def target(@f32_fallback_target) @f32_atomic_fallbacks(%value: f32, %buffer: buffer) {
+  %base = index.constant 0 : offset
+  %index = index.constant 0 : index
+  %global = buffer.assume.memory_space<global> %buffer : buffer
+  %aligned = buffer.assume.alignment %global {minimum_alignment = 4} : buffer
+  %view = buffer.view %aligned[%base] : buffer -> view<1xf32>
+  view.atomic.reduce<addf> %value, %view[%index] {ordering = relaxed, scope = workgroup} : f32, view<1xf32>
+  %exchange = view.atomic.rmw<xchgf> %value, %view[%index] {ordering = relaxed, scope = thread} : f32, view<1xf32> -> f32
+  %add = view.atomic.rmw<addf> %value, %view[%index] {ordering = acquire, scope = subgroup} : f32, view<1xf32> -> f32
+  %minimum = view.atomic.rmw<minimumf> %value, %view[%index] {ordering = release, scope = workgroup} : f32, view<1xf32> -> f32
+  %maximum = view.atomic.rmw<maximumf> %value, %view[%index] {ordering = acq_rel, scope = workgroup} : f32, view<1xf32> -> f32
+  %minnum = view.atomic.rmw<minnumf> %value, %view[%index] {ordering = relaxed, scope = workgroup} : f32, view<1xf32> -> f32
+  %maxnum = view.atomic.rmw<maxnumf> %value, %view[%index] {ordering = acquire, scope = workgroup} : f32, view<1xf32> -> f32
+  %prior = view.atomic.cmpxchg %exchange, %value, %view[%index] {failure_ordering = acquire, scope = workgroup, success_ordering = acq_rel} : f32, view<1xf32> -> f32
+  func.return
+}
+
+// ----
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpCapability GroupNonUniform
+               OpExtension "SPV_KHR_vulkan_memory_model"
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %f32_atomic_fallbacks "f32_atomic_fallbacks"
+               OpExecutionMode %f32_atomic_fallbacks LocalSize 1 1 1
+               OpName %f32_atomic_fallbacks "f32_atomic_fallbacks"
+               OpName %value "value"
+               OpName %aligned "aligned"
+               OpName %exchange "exchange"
+               OpName %add "add"
+               OpName %minimum "minimum"
+               OpName %maximum "maximum"
+               OpName %minnum "minnum"
+               OpName %maxnum "maxnum"
+               OpName %prior "prior"
+               OpMemberDecorate %_struct_6 0 Offset 0
+               OpDecorate %_struct_6 Block
+               OpDecorate %4 DescriptorSet 0
+               OpDecorate %4 Binding 0
+               OpMemberDecorate %_struct_11 0 Offset 0
+               OpDecorate %_struct_11 Block
+               OpDecorate %9 DescriptorSet 0
+               OpDecorate %9 Binding 1
+               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 4
+        %int = OpTypeInt 32 1
+      %int_0 = OpConstant %int 0
+      %float = OpTypeFloat 32
+  %_struct_6 = OpTypeStruct %float
+%_ptr_StorageBuffer__struct_6 = OpTypePointer StorageBuffer %_struct_6
+%_ptr_StorageBuffer_float = OpTypePointer StorageBuffer %float
+          %4 = OpVariable %_ptr_StorageBuffer__struct_6 StorageBuffer
+      %ulong = OpTypeInt 64 0
+ %_struct_11 = OpTypeStruct %ulong
+%_ptr_StorageBuffer__struct_11 = OpTypePointer StorageBuffer %_struct_11
+%_ptr_StorageBuffer_ulong = OpTypePointer StorageBuffer %ulong
+          %9 = OpVariable %_ptr_StorageBuffer__struct_11 StorageBuffer
+       %void = OpTypeVoid
+         %15 = OpTypeFunction %void
+    %ulong_0 = OpConstant %ulong 0
+%_ptr_PhysicalStorageBuffer_int = OpTypePointer PhysicalStorageBuffer %int
+       %uint = OpTypeInt 32 0
+     %uint_2 = OpConstant %uint 2
+     %uint_0 = OpConstant %uint 0
+       %bool = OpTypeBool
+     %uint_4 = OpConstant %uint 4
+     %uint_3 = OpConstant %uint 3
+    %uint_66 = OpConstant %uint 66
+    %uint_68 = OpConstant %uint 68
+    %uint_72 = OpConstant %uint 72
+%f32_atomic_fallbacks = OpFunction %void None %15
+         %16 = OpLabel
+         %17 = OpAccessChain %_ptr_StorageBuffer_float %4 %int_0
+      %value = OpLoad %float %17 Aligned 4
+         %19 = OpAccessChain %_ptr_StorageBuffer_ulong %9 %int_0
+    %aligned = OpLoad %ulong %19 Aligned 8
+         %22 = OpIAdd %ulong %aligned %ulong_0
+         %24 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %22
+         %28 = OpBitcast %int %value
+         %29 = OpAtomicLoad %int %24 %uint_2 %uint_0
+               OpBranch %30
+         %30 = OpLabel
+         %33 = OpPhi %int %29 %16 %34 %31
+         %35 = OpBitcast %float %33
+         %36 = OpFAdd %float %35 %value
+         %37 = OpBitcast %int %36
+         %34 = OpAtomicCompareExchange %int %24 %uint_2 %uint_0 %uint_0 %37 %33
+         %39 = OpIEqual %bool %34 %33
+               OpLoopMerge %32 %31 None
+               OpBranchConditional %39 %32 %31
+         %31 = OpLabel
+               OpBranch %30
+         %32 = OpLabel
+         %41 = OpBitcast %int %value
+         %42 = OpAtomicExchange %int %24 %uint_4 %uint_0 %41
+   %exchange = OpBitcast %float %42
+         %46 = OpBitcast %int %value
+         %47 = OpAtomicLoad %int %24 %uint_3 %uint_0
+               OpBranch %48
+         %48 = OpLabel
+         %51 = OpPhi %int %47 %32 %52 %49
+         %53 = OpBitcast %float %51
+         %54 = OpFAdd %float %53 %value
+         %55 = OpBitcast %int %54
+         %52 = OpAtomicCompareExchange %int %24 %uint_3 %uint_66 %uint_0 %55 %51
+         %56 = OpIEqual %bool %52 %51
+               OpLoopMerge %50 %49 None
+               OpBranchConditional %56 %50 %49
+         %49 = OpLabel
+               OpBranch %48
+         %50 = OpLabel
+        %add = OpBitcast %float %52
+         %59 = OpBitcast %int %value
+         %60 = OpAtomicLoad %int %24 %uint_2 %uint_0
+               OpBranch %61
+         %61 = OpLabel
+         %64 = OpPhi %int %60 %50 %65 %62
+         %66 = OpBitcast %float %64
+         %67 = OpFOrdLessThan %bool %66 %value
+         %68 = OpSelect %float %67 %66 %value
+         %69 = OpFOrdEqual %bool %66 %value
+         %70 = OpBitwiseOr %int %64 %59
+         %71 = OpBitcast %float %70
+         %72 = OpSelect %float %69 %71 %68
+         %73 = OpIsNan %bool %66
+         %74 = OpIsNan %bool %value
+         %75 = OpLogicalOr %bool %73 %74
+         %76 = OpSelect %float %73 %66 %value
+         %77 = OpSelect %float %75 %76 %72
+         %78 = OpBitcast %int %77
+         %65 = OpAtomicCompareExchange %int %24 %uint_2 %uint_68 %uint_0 %78 %64
+         %79 = OpIEqual %bool %65 %64
+               OpLoopMerge %63 %62 None
+               OpBranchConditional %79 %63 %62
+         %62 = OpLabel
+               OpBranch %61
+         %63 = OpLabel
+    %minimum = OpBitcast %float %65
+         %82 = OpBitcast %int %value
+         %83 = OpAtomicLoad %int %24 %uint_2 %uint_0
+               OpBranch %84
+         %84 = OpLabel
+         %87 = OpPhi %int %83 %63 %88 %85
+         %89 = OpBitcast %float %87
+         %90 = OpFOrdGreaterThan %bool %89 %value
+         %91 = OpSelect %float %90 %89 %value
+         %92 = OpFOrdEqual %bool %89 %value
+         %93 = OpBitwiseAnd %int %87 %82
+         %94 = OpBitcast %float %93
+         %95 = OpSelect %float %92 %94 %91
+         %96 = OpIsNan %bool %89
+         %97 = OpIsNan %bool %value
+         %98 = OpLogicalOr %bool %96 %97
+         %99 = OpSelect %float %96 %89 %value
+        %100 = OpSelect %float %98 %99 %95
+        %101 = OpBitcast %int %100
+         %88 = OpAtomicCompareExchange %int %24 %uint_2 %uint_72 %uint_0 %101 %87
+        %102 = OpIEqual %bool %88 %87
+               OpLoopMerge %86 %85 None
+               OpBranchConditional %102 %86 %85
+         %85 = OpLabel
+               OpBranch %84
+         %86 = OpLabel
+    %maximum = OpBitcast %float %88
+        %104 = OpBitcast %int %value
+        %105 = OpAtomicLoad %int %24 %uint_2 %uint_0
+               OpBranch %106
+        %106 = OpLabel
+        %109 = OpPhi %int %105 %86 %110 %107
+        %111 = OpBitcast %float %109
+        %112 = OpFOrdLessThan %bool %111 %value
+        %113 = OpSelect %float %112 %111 %value
+        %114 = OpFOrdEqual %bool %111 %value
+        %115 = OpBitwiseOr %int %109 %104
+        %116 = OpBitcast %float %115
+        %117 = OpSelect %float %114 %116 %113
+        %118 = OpIsNan %bool %111
+        %119 = OpIsNan %bool %value
+        %120 = OpSelect %float %118 %value %117
+        %121 = OpSelect %float %119 %111 %120
+        %122 = OpBitcast %int %121
+        %110 = OpAtomicCompareExchange %int %24 %uint_2 %uint_0 %uint_0 %122 %109
+        %123 = OpIEqual %bool %110 %109
+               OpLoopMerge %108 %107 None
+               OpBranchConditional %123 %108 %107
+        %107 = OpLabel
+               OpBranch %106
+        %108 = OpLabel
+     %minnum = OpBitcast %float %110
+        %125 = OpBitcast %int %value
+        %126 = OpAtomicLoad %int %24 %uint_2 %uint_0
+               OpBranch %127
+        %127 = OpLabel
+        %130 = OpPhi %int %126 %108 %131 %128
+        %132 = OpBitcast %float %130
+        %133 = OpFOrdGreaterThan %bool %132 %value
+        %134 = OpSelect %float %133 %132 %value
+        %135 = OpFOrdEqual %bool %132 %value
+        %136 = OpBitwiseAnd %int %130 %125
+        %137 = OpBitcast %float %136
+        %138 = OpSelect %float %135 %137 %134
+        %139 = OpIsNan %bool %132
+        %140 = OpIsNan %bool %value
+        %141 = OpSelect %float %139 %value %138
+        %142 = OpSelect %float %140 %132 %141
+        %143 = OpBitcast %int %142
+        %131 = OpAtomicCompareExchange %int %24 %uint_2 %uint_66 %uint_0 %143 %130
+        %144 = OpIEqual %bool %131 %130
+               OpLoopMerge %129 %128 None
+               OpBranchConditional %144 %129 %128
+        %128 = OpLabel
+               OpBranch %127
+        %129 = OpLabel
+     %maxnum = OpBitcast %float %131
+        %146 = OpBitcast %int %value
+        %147 = OpBitcast %int %exchange
+        %148 = OpAtomicCompareExchange %int %24 %uint_2 %uint_72 %uint_66 %146 %147
+      %prior = OpBitcast %float %148
+               OpReturn
+               OpFunctionEnd
+
+// ====
+
+// Exchange and add select native float atomics for every Vulkan-supported
+// width when the corresponding storage-buffer features are available.
+spirv.target<vulkan1_3> @native_float_target {contract_feature_bits = 2863169886}
+func.def target(@native_float_target) @native_float_atomics(%buffer: buffer) {
+  %base = index.constant 0 : offset
+  %index = index.constant 0 : index
+  %value16 = scalar.constant 1.0 : f16
+  %value32 = scalar.constant 2.0 : f32
+  %value64 = scalar.constant 3.0 : f64
+  %global = buffer.assume.memory_space<global> %buffer : buffer
+  %aligned = buffer.assume.alignment %global {minimum_alignment = 8} : buffer
+  %view16 = buffer.view %aligned[%base] : buffer -> view<1xf16>
+  %view32 = buffer.view %aligned[%base] : buffer -> view<1xf32>
+  %view64 = buffer.view %aligned[%base] : buffer -> view<1xf64>
+  %exchange16 = view.atomic.rmw<xchgf> %value16, %view16[%index] {ordering = relaxed, scope = workgroup} : f16, view<1xf16> -> f16
+  view.atomic.reduce<addf> %value16, %view16[%index] {ordering = release, scope = workgroup} : f16, view<1xf16>
+  %add16 = view.atomic.rmw<addf> %value16, %view16[%index] {ordering = acquire, scope = workgroup} : f16, view<1xf16> -> f16
+  %exchange32 = view.atomic.rmw<xchgf> %value32, %view32[%index] {ordering = relaxed, scope = workgroup} : f32, view<1xf32> -> f32
+  %add32 = view.atomic.rmw<addf> %value32, %view32[%index] {ordering = acq_rel, scope = workgroup} : f32, view<1xf32> -> f32
+  %exchange64 = view.atomic.rmw<xchgf> %value64, %view64[%index] {ordering = relaxed, scope = workgroup} : f64, view<1xf64> -> f64
+  %add64 = view.atomic.rmw<addf> %value64, %view64[%index] {ordering = acq_rel, scope = workgroup} : f64, view<1xf64> -> f64
+  func.return
+}
+
+// ----
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpCapability Float16
+               OpCapability Float64
+               OpCapability Int16
+               OpCapability StorageBuffer16BitAccess
+               OpCapability AtomicFloat16AddEXT
+               OpCapability AtomicFloat32AddEXT
+               OpCapability AtomicFloat64AddEXT
+               OpExtension "SPV_KHR_vulkan_memory_model"
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpExtension "SPV_KHR_16bit_storage"
+               OpExtension "SPV_EXT_shader_atomic_float_add"
+               OpExtension "SPV_EXT_shader_atomic_float16_add"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %native_float_atomics "native_float_atomics"
+               OpExecutionMode %native_float_atomics LocalSize 1 1 1
+               OpName %native_float_atomics "native_float_atomics"
+               OpName %aligned "aligned"
+               OpName %value16 "value16"
+               OpName %value32 "value32"
+               OpName %value64 "value64"
+               OpName %exchange16 "exchange16"
+               OpName %add16 "add16"
+               OpName %exchange32 "exchange32"
+               OpName %add32 "add32"
+               OpName %exchange64 "exchange64"
+               OpName %add64 "add64"
+               OpMemberDecorate %_struct_6 0 Offset 0
+               OpDecorate %_struct_6 Block
+               OpDecorate %4 DescriptorSet 0
+               OpDecorate %4 Binding 0
+               OpDecorate %_ptr_PhysicalStorageBuffer_half ArrayStride 2
+               OpDecorate %_ptr_PhysicalStorageBuffer_float ArrayStride 4
+               OpDecorate %_ptr_PhysicalStorageBuffer_double ArrayStride 8
+        %int = OpTypeInt 32 1
+      %int_0 = OpConstant %int 0
+      %ulong = OpTypeInt 64 0
+  %_struct_6 = OpTypeStruct %ulong
+%_ptr_StorageBuffer__struct_6 = OpTypePointer StorageBuffer %_struct_6
+%_ptr_StorageBuffer_ulong = OpTypePointer StorageBuffer %ulong
+          %4 = OpVariable %_ptr_StorageBuffer__struct_6 StorageBuffer
+       %void = OpTypeVoid
+         %10 = OpTypeFunction %void
+       %half = OpTypeFloat 16
+    %value16 = OpConstant %half 0x1p+0
+      %float = OpTypeFloat 32
+    %value32 = OpConstant %float 2
+     %double = OpTypeFloat 64
+    %value64 = OpConstant %double 3
+    %ulong_0 = OpConstant %ulong 0
+%_ptr_PhysicalStorageBuffer_half = OpTypePointer PhysicalStorageBuffer %half
+       %uint = OpTypeInt 32 0
+     %uint_2 = OpConstant %uint 2
+     %uint_0 = OpConstant %uint 0
+    %uint_68 = OpConstant %uint 68
+    %uint_66 = OpConstant %uint 66
+%_ptr_PhysicalStorageBuffer_float = OpTypePointer PhysicalStorageBuffer %float
+    %uint_72 = OpConstant %uint 72
+%_ptr_PhysicalStorageBuffer_double = OpTypePointer PhysicalStorageBuffer %double
+%native_float_atomics = OpFunction %void None %10
+         %11 = OpLabel
+         %12 = OpAccessChain %_ptr_StorageBuffer_ulong %4 %int_0
+    %aligned = OpLoad %ulong %12 Aligned 8
+         %21 = OpIAdd %ulong %aligned %ulong_0
+         %23 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_half %21
+ %exchange16 = OpAtomicExchange %half %23 %uint_2 %uint_0 %value16
+         %29 = OpAtomicFAddEXT %half %23 %uint_2 %uint_68 %value16
+      %add16 = OpAtomicFAddEXT %half %23 %uint_2 %uint_66 %value16
+         %32 = OpIAdd %ulong %aligned %ulong_0
+         %34 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %32
+ %exchange32 = OpAtomicExchange %float %34 %uint_2 %uint_0 %value32
+      %add32 = OpAtomicFAddEXT %float %34 %uint_2 %uint_72 %value32
+         %38 = OpIAdd %ulong %aligned %ulong_0
+         %40 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_double %38
+ %exchange64 = OpAtomicExchange %double %40 %uint_2 %uint_0 %value64
+      %add64 = OpAtomicFAddEXT %double %40 %uint_2 %uint_72 %value64
+               OpReturn
+               OpFunctionEnd
+
+// ====
+
+// A pure floating-point Workgroup allocation retains its floating-point
+// carrier when every atomic operation has a native instruction.
+spirv.target<vulkan1_3> @workgroup_native_float_target {contract_feature_bits = 2231402502}
+func.def target(@workgroup_native_float_target) @workgroup_native_float_atomics(%value: f32) {
+  %byte_length = index.constant 4 : offset
+  %base = index.constant 0 : offset
+  %scratch = buffer.alloca<workgroup> align(4) %byte_length : buffer
+  %view = buffer.view %scratch[%base] : buffer -> view<1xf32>
+  %exchange = view.atomic.rmw<xchgf> %value, %view[0] {ordering = relaxed, scope = workgroup} : f32, view<1xf32> -> f32
+  %add = view.atomic.rmw<addf> %value, %view[0] {ordering = acq_rel, scope = workgroup} : f32, view<1xf32> -> f32
+  func.return
+}
+
+// ----
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpCapability AtomicFloat32AddEXT
+               OpExtension "SPV_KHR_vulkan_memory_model"
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpExtension "SPV_EXT_shader_atomic_float_add"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %workgroup_native_float_atomics "workgroup_native_float_atomics"
+               OpExecutionMode %workgroup_native_float_atomics LocalSize 1 1 1
+               OpName %workgroup_native_float_atomics "workgroup_native_float_atomics"
+               OpName %value "value"
+               OpName %view "view"
+               OpName %exchange "exchange"
+               OpName %add "add"
+               OpMemberDecorate %_struct_6 0 Offset 0
+               OpDecorate %_struct_6 Block
+               OpDecorate %4 DescriptorSet 0
+               OpDecorate %4 Binding 0
+               OpDecorate %_arr_float_uint_1 ArrayStride 4
+        %int = OpTypeInt 32 1
+      %int_0 = OpConstant %int 0
+      %float = OpTypeFloat 32
+  %_struct_6 = OpTypeStruct %float
+%_ptr_StorageBuffer__struct_6 = OpTypePointer StorageBuffer %_struct_6
+%_ptr_StorageBuffer_float = OpTypePointer StorageBuffer %float
+          %4 = OpVariable %_ptr_StorageBuffer__struct_6 StorageBuffer
+       %void = OpTypeVoid
+         %10 = OpTypeFunction %void
+       %uint = OpTypeInt 32 0
+     %uint_1 = OpConstant %uint 1
+%_arr_float_uint_1 = OpTypeArray %float %uint_1
+%_ptr_Workgroup__arr_float_uint_1 = OpTypePointer Workgroup %_arr_float_uint_1
+       %view = OpVariable %_ptr_Workgroup__arr_float_uint_1 Workgroup
+    %int_0_0 = OpConstant %int 0
+%_ptr_Workgroup_float = OpTypePointer Workgroup %float
+     %uint_2 = OpConstant %uint 2
+     %uint_0 = OpConstant %uint 0
+   %uint_264 = OpConstant %uint 264
+%workgroup_native_float_atomics = OpFunction %void None %10
+         %11 = OpLabel
+         %12 = OpAccessChain %_ptr_StorageBuffer_float %4 %int_0
+      %value = OpLoad %float %12 Aligned 4
+         %21 = OpAccessChain %_ptr_Workgroup_float %view %int_0_0
+   %exchange = OpAtomicExchange %float %21 %uint_2 %uint_0 %value
+        %add = OpAtomicFAddEXT %float %21 %uint_2 %uint_264 %value
+               OpReturn
+               OpFunctionEnd
+
+// ====
+
+// The integer-CAS fallback extends complete float semantics to f64 when the
+// target has 64-bit storage atomics but lacks native float atomics.
+spirv.target<vulkan1_3> @f64_fallback_target {contract_feature_bits = 2147647510}
+func.def target(@f64_fallback_target) @f64_atomic_fallbacks(%buffer: buffer) {
+  %base = index.constant 0 : offset
+  %index = index.constant 0 : index
+  %value = scalar.constant 1.0 : f64
+  %global = buffer.assume.memory_space<global> %buffer : buffer
+  %aligned = buffer.assume.alignment %global {minimum_alignment = 8} : buffer
+  %view = buffer.view %aligned[%base] : buffer -> view<1xf64>
+  %exchange = view.atomic.rmw<xchgf> %value, %view[%index] {ordering = relaxed, scope = thread} : f64, view<1xf64> -> f64
+  %add = view.atomic.rmw<addf> %value, %view[%index] {ordering = acquire, scope = subgroup} : f64, view<1xf64> -> f64
+  view.atomic.reduce<minimumf> %value, %view[%index] {ordering = release, scope = workgroup} : f64, view<1xf64>
+  %maximum = view.atomic.rmw<maximumf> %value, %view[%index] {ordering = acq_rel, scope = workgroup} : f64, view<1xf64> -> f64
+  %minnum = view.atomic.rmw<minnumf> %value, %view[%index] {ordering = relaxed, scope = workgroup} : f64, view<1xf64> -> f64
+  %maxnum = view.atomic.rmw<maxnumf> %value, %view[%index] {ordering = acquire, scope = workgroup} : f64, view<1xf64> -> f64
+  %prior = view.atomic.cmpxchg %exchange, %value, %view[%index] {failure_ordering = acquire, scope = workgroup, success_ordering = acq_rel} : f64, view<1xf64> -> f64
+  func.return
+}
+
+// ----
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpCapability Float64
+               OpCapability Int64Atomics
+               OpCapability GroupNonUniform
+               OpExtension "SPV_KHR_vulkan_memory_model"
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %f64_atomic_fallbacks "f64_atomic_fallbacks"
+               OpExecutionMode %f64_atomic_fallbacks LocalSize 1 1 1
+               OpName %f64_atomic_fallbacks "f64_atomic_fallbacks"
+               OpName %aligned "aligned"
+               OpName %value "value"
+               OpName %exchange "exchange"
+               OpName %add "add"
+               OpName %maximum "maximum"
+               OpName %minnum "minnum"
+               OpName %maxnum "maxnum"
+               OpName %prior "prior"
+               OpMemberDecorate %_struct_6 0 Offset 0
+               OpDecorate %_struct_6 Block
+               OpDecorate %4 DescriptorSet 0
+               OpDecorate %4 Binding 0
+               OpDecorate %_ptr_PhysicalStorageBuffer_long ArrayStride 8
+        %int = OpTypeInt 32 1
+      %int_0 = OpConstant %int 0
+      %ulong = OpTypeInt 64 0
+  %_struct_6 = OpTypeStruct %ulong
+%_ptr_StorageBuffer__struct_6 = OpTypePointer StorageBuffer %_struct_6
+%_ptr_StorageBuffer_ulong = OpTypePointer StorageBuffer %ulong
+          %4 = OpVariable %_ptr_StorageBuffer__struct_6 StorageBuffer
+       %void = OpTypeVoid
+         %10 = OpTypeFunction %void
+     %double = OpTypeFloat 64
+      %value = OpConstant %double 1
+    %ulong_0 = OpConstant %ulong 0
+       %long = OpTypeInt 64 1
+%_ptr_PhysicalStorageBuffer_long = OpTypePointer PhysicalStorageBuffer %long
+       %uint = OpTypeInt 32 0
+     %uint_4 = OpConstant %uint 4
+     %uint_0 = OpConstant %uint 0
+     %uint_3 = OpConstant %uint 3
+    %uint_66 = OpConstant %uint 66
+       %bool = OpTypeBool
+     %uint_2 = OpConstant %uint 2
+    %uint_68 = OpConstant %uint 68
+    %uint_72 = OpConstant %uint 72
+%f64_atomic_fallbacks = OpFunction %void None %10
+         %11 = OpLabel
+         %12 = OpAccessChain %_ptr_StorageBuffer_ulong %4 %int_0
+    %aligned = OpLoad %ulong %12 Aligned 8
+         %17 = OpIAdd %ulong %aligned %ulong_0
+         %20 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_long %17
+         %24 = OpBitcast %long %value
+         %25 = OpAtomicExchange %long %20 %uint_4 %uint_0 %24
+   %exchange = OpBitcast %double %25
+         %29 = OpBitcast %long %value
+         %30 = OpAtomicLoad %long %20 %uint_3 %uint_0
+               OpBranch %31
+         %31 = OpLabel
+         %34 = OpPhi %long %30 %11 %35 %32
+         %36 = OpBitcast %double %34
+         %37 = OpFAdd %double %36 %value
+         %38 = OpBitcast %long %37
+         %35 = OpAtomicCompareExchange %long %20 %uint_3 %uint_66 %uint_0 %38 %34
+         %40 = OpIEqual %bool %35 %34
+               OpLoopMerge %33 %32 None
+               OpBranchConditional %40 %33 %32
+         %32 = OpLabel
+               OpBranch %31
+         %33 = OpLabel
+        %add = OpBitcast %double %35
+         %44 = OpBitcast %long %value
+         %45 = OpAtomicLoad %long %20 %uint_2 %uint_0
+               OpBranch %46
+         %46 = OpLabel
+         %49 = OpPhi %long %45 %33 %50 %47
+         %51 = OpBitcast %double %49
+         %52 = OpFOrdLessThan %bool %51 %value
+         %53 = OpSelect %double %52 %51 %value
+         %54 = OpFOrdEqual %bool %51 %value
+         %55 = OpBitwiseOr %long %49 %44
+         %56 = OpBitcast %double %55
+         %57 = OpSelect %double %54 %56 %53
+         %58 = OpIsNan %bool %51
+         %59 = OpIsNan %bool %value
+         %60 = OpLogicalOr %bool %58 %59
+         %61 = OpSelect %double %58 %51 %value
+         %62 = OpSelect %double %60 %61 %57
+         %63 = OpBitcast %long %62
+         %50 = OpAtomicCompareExchange %long %20 %uint_2 %uint_68 %uint_0 %63 %49
+         %64 = OpIEqual %bool %50 %49
+               OpLoopMerge %48 %47 None
+               OpBranchConditional %64 %48 %47
+         %47 = OpLabel
+               OpBranch %46
+         %48 = OpLabel
+         %66 = OpBitcast %long %value
+         %67 = OpAtomicLoad %long %20 %uint_2 %uint_0
+               OpBranch %68
+         %68 = OpLabel
+         %71 = OpPhi %long %67 %48 %72 %69
+         %73 = OpBitcast %double %71
+         %74 = OpFOrdGreaterThan %bool %73 %value
+         %75 = OpSelect %double %74 %73 %value
+         %76 = OpFOrdEqual %bool %73 %value
+         %77 = OpBitwiseAnd %long %71 %66
+         %78 = OpBitcast %double %77
+         %79 = OpSelect %double %76 %78 %75
+         %80 = OpIsNan %bool %73
+         %81 = OpIsNan %bool %value
+         %82 = OpLogicalOr %bool %80 %81
+         %83 = OpSelect %double %80 %73 %value
+         %84 = OpSelect %double %82 %83 %79
+         %85 = OpBitcast %long %84
+         %72 = OpAtomicCompareExchange %long %20 %uint_2 %uint_72 %uint_0 %85 %71
+         %86 = OpIEqual %bool %72 %71
+               OpLoopMerge %70 %69 None
+               OpBranchConditional %86 %70 %69
+         %69 = OpLabel
+               OpBranch %68
+         %70 = OpLabel
+    %maximum = OpBitcast %double %72
+         %88 = OpBitcast %long %value
+         %89 = OpAtomicLoad %long %20 %uint_2 %uint_0
+               OpBranch %90
+         %90 = OpLabel
+         %93 = OpPhi %long %89 %70 %94 %91
+         %95 = OpBitcast %double %93
+         %96 = OpFOrdLessThan %bool %95 %value
+         %97 = OpSelect %double %96 %95 %value
+         %98 = OpFOrdEqual %bool %95 %value
+         %99 = OpBitwiseOr %long %93 %88
+        %100 = OpBitcast %double %99
+        %101 = OpSelect %double %98 %100 %97
+        %102 = OpIsNan %bool %95
+        %103 = OpIsNan %bool %value
+        %104 = OpSelect %double %102 %value %101
+        %105 = OpSelect %double %103 %95 %104
+        %106 = OpBitcast %long %105
+         %94 = OpAtomicCompareExchange %long %20 %uint_2 %uint_0 %uint_0 %106 %93
+        %107 = OpIEqual %bool %94 %93
+               OpLoopMerge %92 %91 None
+               OpBranchConditional %107 %92 %91
+         %91 = OpLabel
+               OpBranch %90
+         %92 = OpLabel
+     %minnum = OpBitcast %double %94
+        %109 = OpBitcast %long %value
+        %110 = OpAtomicLoad %long %20 %uint_2 %uint_0
+               OpBranch %111
+        %111 = OpLabel
+        %114 = OpPhi %long %110 %92 %115 %112
+        %116 = OpBitcast %double %114
+        %117 = OpFOrdGreaterThan %bool %116 %value
+        %118 = OpSelect %double %117 %116 %value
+        %119 = OpFOrdEqual %bool %116 %value
+        %120 = OpBitwiseAnd %long %114 %109
+        %121 = OpBitcast %double %120
+        %122 = OpSelect %double %119 %121 %118
+        %123 = OpIsNan %bool %116
+        %124 = OpIsNan %bool %value
+        %125 = OpSelect %double %123 %value %122
+        %126 = OpSelect %double %124 %116 %125
+        %127 = OpBitcast %long %126
+        %115 = OpAtomicCompareExchange %long %20 %uint_2 %uint_66 %uint_0 %127 %114
+        %128 = OpIEqual %bool %115 %114
+               OpLoopMerge %113 %112 None
+               OpBranchConditional %128 %113 %112
+        %112 = OpLabel
+               OpBranch %111
+        %113 = OpLabel
+     %maxnum = OpBitcast %double %115
+        %130 = OpBitcast %long %value
+        %131 = OpBitcast %long %exchange
+        %132 = OpAtomicCompareExchange %long %20 %uint_2 %uint_72 %uint_66 %130 %131
+      %prior = OpBitcast %double %132
+               OpReturn
+               OpFunctionEnd
+
+// ====
+
+// Workgroup-memory CAS uses the same exact float combine while preserving the
+// Workgroup storage class and memory-semantics bit.
+spirv.target<vulkan1_3> @workgroup_float_target {contract_feature_bits = 2147516422}
+func.def target(@workgroup_float_target) @workgroup_float_fallback(%value: f32) {
+  %byte_length = index.constant 4 : offset
+  %base = index.constant 0 : offset
+  %scratch = buffer.alloca<workgroup> align(4) %byte_length : buffer
+  %view = buffer.view %scratch[%base] : buffer -> view<1xf32>
+  view.store %value, %view[0] : f32, view<1xf32>
+  %loaded = view.load %view[0] : view<1xf32> -> f32
+  %old = view.atomic.rmw<minimumf> %loaded, %view[0] {ordering = acquire, scope = workgroup} : f32, view<1xf32> -> f32
+  %prior = view.atomic.cmpxchg %old, %value, %view[0] {failure_ordering = relaxed, scope = workgroup, success_ordering = release} : f32, view<1xf32> -> f32
+  func.return
+}
+
+// ----
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpExtension "SPV_KHR_vulkan_memory_model"
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %workgroup_float_fallback "workgroup_float_fallback"
+               OpExecutionMode %workgroup_float_fallback LocalSize 1 1 1
+               OpName %workgroup_float_fallback "workgroup_float_fallback"
+               OpName %value "value"
+               OpName %view "view"
+               OpName %loaded "loaded"
+               OpName %old "old"
+               OpName %prior "prior"
+               OpMemberDecorate %_struct_6 0 Offset 0
+               OpDecorate %_struct_6 Block
+               OpDecorate %4 DescriptorSet 0
+               OpDecorate %4 Binding 0
+               OpDecorate %_arr_int_uint_1 ArrayStride 4
+        %int = OpTypeInt 32 1
+      %int_0 = OpConstant %int 0
+      %float = OpTypeFloat 32
+  %_struct_6 = OpTypeStruct %float
+%_ptr_StorageBuffer__struct_6 = OpTypePointer StorageBuffer %_struct_6
+%_ptr_StorageBuffer_float = OpTypePointer StorageBuffer %float
+          %4 = OpVariable %_ptr_StorageBuffer__struct_6 StorageBuffer
+       %void = OpTypeVoid
+         %10 = OpTypeFunction %void
+       %uint = OpTypeInt 32 0
+     %uint_1 = OpConstant %uint 1
+%_arr_int_uint_1 = OpTypeArray %int %uint_1
+%_ptr_Workgroup__arr_int_uint_1 = OpTypePointer Workgroup %_arr_int_uint_1
+       %view = OpVariable %_ptr_Workgroup__arr_int_uint_1 Workgroup
+    %int_0_0 = OpConstant %int 0
+%_ptr_Workgroup_int = OpTypePointer Workgroup %int
+     %uint_2 = OpConstant %uint 2
+   %uint_258 = OpConstant %uint 258
+     %uint_0 = OpConstant %uint 0
+       %bool = OpTypeBool
+   %uint_260 = OpConstant %uint 260
+%workgroup_float_fallback = OpFunction %void None %10
+         %11 = OpLabel
+         %12 = OpAccessChain %_ptr_StorageBuffer_float %4 %int_0
+      %value = OpLoad %float %12 Aligned 4
+         %19 = OpBitcast %int %value
+         %22 = OpAccessChain %_ptr_Workgroup_int %view %int_0_0
+               OpStore %22 %19 Aligned 4
+         %23 = OpLoad %int %22 Aligned 4
+     %loaded = OpBitcast %float %23
+         %28 = OpBitcast %int %loaded
+         %29 = OpAtomicLoad %int %22 %uint_2 %uint_0
+               OpBranch %30
+         %30 = OpLabel
+         %33 = OpPhi %int %29 %11 %34 %31
+         %35 = OpBitcast %float %33
+         %37 = OpFOrdLessThan %bool %35 %loaded
+         %38 = OpSelect %float %37 %35 %loaded
+         %39 = OpFOrdEqual %bool %35 %loaded
+         %40 = OpBitwiseOr %int %33 %28
+         %41 = OpBitcast %float %40
+         %42 = OpSelect %float %39 %41 %38
+         %43 = OpIsNan %bool %35
+         %44 = OpIsNan %bool %loaded
+         %45 = OpLogicalOr %bool %43 %44
+         %46 = OpSelect %float %43 %35 %loaded
+         %47 = OpSelect %float %45 %46 %42
+         %48 = OpBitcast %int %47
+         %34 = OpAtomicCompareExchange %int %22 %uint_2 %uint_258 %uint_0 %48 %33
+         %49 = OpIEqual %bool %34 %33
+               OpLoopMerge %32 %31 None
+               OpBranchConditional %49 %32 %31
+         %31 = OpLabel
+               OpBranch %30
+         %32 = OpLabel
+        %old = OpBitcast %float %34
+         %52 = OpBitcast %int %value
+         %53 = OpBitcast %int %old
+         %54 = OpAtomicCompareExchange %int %22 %uint_2 %uint_260 %uint_0 %52 %53
+      %prior = OpBitcast %float %54
+               OpReturn
+               OpFunctionEnd
+
+// ====
+
+// Vector atomics reach the same scalar contracts after the standard
+// vector-to-scalar memory lowering.
+spirv.target<vulkan1_3> @vector_atomic_target {contract_feature_bits = 2147516422}
+func.def target(@vector_atomic_target) @vector_atomic_forms(%value: i32, %expected: i32, %replacement: i32, %buffer: buffer) {
+  %base = index.constant 0 : offset
+  %layout = encoding.layout.dense : encoding<layout>
+  %offsets = vector.constant 0 : vector<2xindex>
+  %values = vector.splat %value : vector<2xi32>
+  %expected_values = vector.splat %expected : vector<2xi32>
+  %replacement_values = vector.splat %replacement : vector<2xi32>
+  %mask = vector.constant true : vector<2xi1>
+  %global = buffer.assume.memory_space<global> %buffer : buffer
+  %aligned = buffer.assume.alignment %global {minimum_alignment = 4} : buffer
+  %view = buffer.view %aligned[%base] : buffer -> view<8xi32, %layout>
+  vector.atomic.reduce<addi> %values, %view[0][%offsets] {ordering = relaxed, scope = workgroup} : vector<2xi32>, view<8xi32, %layout>, vector<2xindex>
+  vector.atomic.reduce.mask<ori> %values, %view[0][%offsets], %mask {ordering = release, scope = workgroup} : vector<2xi32>, view<8xi32, %layout>, vector<2xindex>, vector<2xi1>
+  %old = vector.atomic.rmw<xchgi> %values, %view[0][%offsets] {ordering = acquire, scope = workgroup} : vector<2xi32>, view<8xi32, %layout>, vector<2xindex>
+  %masked_old = vector.atomic.rmw.mask<xori> %values, %view[0][%offsets], %mask, %old {ordering = acq_rel, scope = workgroup} : vector<2xi32>, view<8xi32, %layout>, vector<2xindex>, vector<2xi1>, vector<2xi32>
+  %prior = vector.atomic.cmpxchg %expected_values, %replacement_values, %view[0][%offsets] {success_ordering = acq_rel, failure_ordering = acquire, scope = workgroup} : vector<2xi32>, view<8xi32, %layout>, vector<2xindex> -> vector<2xi32>
+  func.return
+}
+
+// ----
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpExtension "SPV_KHR_vulkan_memory_model"
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %vector_atomic_forms "vector_atomic_forms"
+               OpExecutionMode %vector_atomic_forms LocalSize 1 1 1
+               OpName %vector_atomic_forms "vector_atomic_forms"
+               OpName %value "value"
+               OpName %expected "expected"
+               OpName %replacement "replacement"
+               OpName %aligned "aligned"
+               OpMemberDecorate %_struct_5 0 Offset 0
+               OpDecorate %_struct_5 Block
+               OpDecorate %4 DescriptorSet 0
+               OpDecorate %4 Binding 0
+               OpDecorate %8 DescriptorSet 0
+               OpDecorate %8 Binding 1
+               OpDecorate %9 DescriptorSet 0
+               OpDecorate %9 Binding 2
+               OpMemberDecorate %_struct_12 0 Offset 0
+               OpDecorate %_struct_12 Block
+               OpDecorate %10 DescriptorSet 0
+               OpDecorate %10 Binding 3
+               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 4
+        %int = OpTypeInt 32 1
+      %int_0 = OpConstant %int 0
+  %_struct_5 = OpTypeStruct %int
+%_ptr_StorageBuffer__struct_5 = OpTypePointer StorageBuffer %_struct_5
+%_ptr_StorageBuffer_int = OpTypePointer StorageBuffer %int
+          %4 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
+          %8 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
+          %9 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
+      %ulong = OpTypeInt 64 0
+ %_struct_12 = OpTypeStruct %ulong
+%_ptr_StorageBuffer__struct_12 = OpTypePointer StorageBuffer %_struct_12
+%_ptr_StorageBuffer_ulong = OpTypePointer StorageBuffer %ulong
+         %10 = OpVariable %_ptr_StorageBuffer__struct_12 StorageBuffer
+       %void = OpTypeVoid
+         %16 = OpTypeFunction %void
+    %ulong_0 = OpConstant %ulong 0
+%_ptr_PhysicalStorageBuffer_int = OpTypePointer PhysicalStorageBuffer %int
+       %uint = OpTypeInt 32 0
+     %uint_2 = OpConstant %uint 2
+     %uint_0 = OpConstant %uint 0
+    %uint_68 = OpConstant %uint 68
+    %uint_66 = OpConstant %uint 66
+    %uint_72 = OpConstant %uint 72
+%vector_atomic_forms = OpFunction %void None %16
+         %17 = OpLabel
+         %18 = OpAccessChain %_ptr_StorageBuffer_int %4 %int_0
+      %value = OpLoad %int %18 Aligned 4
+         %20 = OpAccessChain %_ptr_StorageBuffer_int %8 %int_0
+   %expected = OpLoad %int %20 Aligned 4
+         %22 = OpAccessChain %_ptr_StorageBuffer_int %9 %int_0
+%replacement = OpLoad %int %22 Aligned 4
+         %24 = OpAccessChain %_ptr_StorageBuffer_ulong %10 %int_0
+    %aligned = OpLoad %ulong %24 Aligned 8
+         %27 = OpIAdd %ulong %aligned %ulong_0
+         %29 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %27
+         %33 = OpAtomicIAdd %int %29 %uint_2 %uint_0 %value
+         %34 = OpAtomicIAdd %int %29 %uint_2 %uint_0 %value
+         %36 = OpAtomicOr %int %29 %uint_2 %uint_68 %value
+         %37 = OpAtomicOr %int %29 %uint_2 %uint_68 %value
+         %39 = OpAtomicExchange %int %29 %uint_2 %uint_66 %value
+         %40 = OpAtomicExchange %int %29 %uint_2 %uint_66 %value
+         %42 = OpAtomicXor %int %29 %uint_2 %uint_72 %value
+         %43 = OpAtomicXor %int %29 %uint_2 %uint_72 %value
+         %44 = OpAtomicCompareExchange %int %29 %uint_2 %uint_72 %uint_66 %replacement %expected
+         %45 = OpAtomicCompareExchange %int %29 %uint_2 %uint_72 %uint_66 %replacement %expected
+               OpReturn
+               OpFunctionEnd

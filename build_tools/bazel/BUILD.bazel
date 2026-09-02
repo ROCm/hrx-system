@@ -192,6 +192,18 @@ selects.config_setting_group(
     ],
 )
 
+# Runtime linked into every rules_cc executable in Windows clang-cl ASAN
+# configurations. Other target configurations receive an empty C/C++ library.
+iree_cc_library(
+    name = "address_sanitizer_runtime",
+    deps = select({
+        ":address_sanitizer_cc_compiler_clang_cl_x86_64": [
+            "@local_config_cc//:clang_cl_x64_asan_runtime",
+        ],
+        "//conditions:default": [],
+    }),
+)
+
 config_setting(
     name = "sanitizer_cc_compiler_clang_cl",
     flag_values = {

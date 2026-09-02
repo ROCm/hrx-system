@@ -117,7 +117,7 @@ loom_cc_library(
     srcs = ["features.c"],
     hdrs = ["features.h"],
     textual_hdrs = [":features_tables.inl"],
-    visibility = _SPIRV_C_API_VISIBILITY + _SPIRV_EMIT_VISIBILITY + _SPIRV_RECORDS_VISIBILITY + _SPIRV_TOOLING_VISIBILITY,
+    visibility = _SPIRV_C_API_VISIBILITY + _SPIRV_EMIT_VISIBILITY + _SPIRV_LOWER_VISIBILITY + _SPIRV_RECORDS_VISIBILITY + _SPIRV_TOOLING_VISIBILITY,
     deps = [
         ":isa",
         "//runtime/src/iree/base",
@@ -291,11 +291,25 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "legalization",
+    srcs = ["legalization.c"],
+    hdrs = ["legalization.h"],
+    deps = [
+        "//loom/src/loom/ops/vector",
+        "//loom/src/loom/target:legalization",
+        "//loom/src/loom/target/arch/spirv/descriptors",
+        "//loom/src/loom/transforms/vector:to_scalar",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "provider",
     srcs = ["provider.c"],
     hdrs = ["provider.h"],
     visibility = _SPIRV_PROVIDER_VISIBILITY,
     deps = [
+        ":legalization",
         ":low_verify",
         ":math_policy",
         ":profile",

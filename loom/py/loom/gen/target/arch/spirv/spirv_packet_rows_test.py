@@ -20,6 +20,17 @@ from loom.gen.target.arch.spirv.spirv_packet_rows import (
     _validate_rows,
     generate_tables,
 )
+from loom.target.arch.spirv.atomic import (
+    ATOMIC_FLOAT_OPERATIONS,
+    ATOMIC_FLOAT_SCALARS,
+    ATOMIC_INTEGER_OPERATIONS,
+    ATOMIC_INTEGER_SCALARS,
+    ATOMIC_ORDERINGS,
+    ATOMIC_SCOPES,
+    ATOMIC_STORAGE_CLASSES,
+    atomic_descriptor_key,
+    float_atomic_descriptor_key,
+)
 from loom.target.arch.spirv.builtins import BUILTIN_DIMENSIONS, BUILTIN_INDEX_QUERIES
 from loom.target.arch.spirv.cooperative_matrix import cooperative_matrix_descriptor_key
 from loom.target.arch.spirv.descriptors import SPIRV_LOGICAL_CORE_DESCRIPTOR_SET
@@ -75,6 +86,10 @@ def _packet_row(descriptor_key: str) -> _PacketRow:
 
 def _packet_value_types(row: _PacketRow) -> tuple[str, ...]:
     return ((row.result_type,) if row.result_type is not None else ()) + row.operand_types
+
+
+def _atomic_model_row(rows, attribute: str, value: str):
+    return next(row for row in rows if getattr(row, attribute) == value)
 
 
 def test_validation_rejects_duplicate_packet_descriptor_keys() -> None:
@@ -718,3 +733,99 @@ def test_generation_emits_complete_address_conversion_rows() -> None:
             assert f".payload.builtin_load.component_index = {dimension.component_index}" in tables
 
     assert "LOOM_SPIRV_PACKET_FORM_LOAD_BUILTIN" in tables
+
+
+def test_generation_emits_atomic_packet_forms_and_immediates() -> None:
+    atomic_rows = tuple(row for row in _packet_rows() if row.descriptor_key.startswith("spirv.atomic."))
+    assert len(atomic_rows) == 656
+
+    i64 = _atomic_model_row(ATOMIC_INTEGER_SCALARS, "source_type", "i64")
+    integer_subtract = _atomic_model_row(ATOMIC_INTEGER_OPERATIONS, "source_kind", "subi")
+    workgroup = _atomic_model_row(ATOMIC_STORAGE_CLASSES, "suffix", "workgroup")
+    subgroup = _atomic_model_row(ATOMIC_SCOPES, "source_keyword", "subgroup")
+    integer_rmw = _packet_row(
+        atomic_descriptor_key(
+            "rmw",
+            i64,
+            workgroup,
+            subgroup,
+            operation=integer_subtract,
+        )
+    )
+    assert integer_rmw.opcode == "LOOM_SPIRV_OP_ATOMIC_I_SUB"
+    assert integer_rmw.form == "LOOM_SPIRV_PACKET_FORM_ATOMIC"
+    assert integer_rmw.result_count == 1
+    assert integer_rmw.immediate_index == 0
+    assert integer_rmw.atomic_scope == "LOOM_SPIRV_SCOPE_SUBGROUP"
+    assert integer_rmw.atomic_storage_semantics == "LOOM_SPIRV_MEMORY_SEMANTICS_WORKGROUP_MEMORY_MASK"
+    assert "LOOM_SPIRV_SCALAR_TYPE_S64" in integer_rmw.result_type
+    assert "LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP" in integer_rmw.operand_types[0]
+
+    acq_rel = _atomic_model_row(ATOMIC_ORDERINGS, "source_keyword", "acq_rel")
+    integer_cmpxchg = _packet_row(
+        atomic_descriptor_key(
+            "cmpxchg",
+            i64,
+            workgroup,
+            subgroup,
+            success_ordering=acq_rel,
+        )
+    )
+    assert integer_cmpxchg.form == "LOOM_SPIRV_PACKET_FORM_ATOMIC_COMPARE_EXCHANGE"
+    assert integer_cmpxchg.atomic_success_ordering == acq_rel.ordinal
+    assert len(integer_cmpxchg.operand_types) == 3
+
+    f32 = _atomic_model_row(ATOMIC_FLOAT_SCALARS, "source_type", "f32")
+    float_add = _atomic_model_row(ATOMIC_FLOAT_OPERATIONS, "source_kind", "addf")
+    storage_buffer = _atomic_model_row(ATOMIC_STORAGE_CLASSES, "suffix", "storage_buffer")
+    device = _atomic_model_row(ATOMIC_SCOPES, "source_keyword", "device")
+    native_float_add = _packet_row(
+        float_atomic_descriptor_key(
+            "rmw",
+            "native",
+            f32,
+            storage_buffer,
+            device,
+            operation=float_add,
+        )
+    )
+    assert native_float_add.opcode == "LOOM_SPIRV_OP_ATOMIC_F_ADD_EXT"
+    assert native_float_add.form == "LOOM_SPIRV_PACKET_FORM_ATOMIC"
+    assert native_float_add.atomic_scope == "LOOM_SPIRV_SCOPE_DEVICE"
+    assert native_float_add.atomic_storage_semantics == "LOOM_SPIRV_MEMORY_SEMANTICS_UNIFORM_MEMORY_MASK"
+    assert "LOOM_SPIRV_SCALAR_TYPE_F32" in native_float_add.operand_types[0]
+
+    float_minimum = _atomic_model_row(ATOMIC_FLOAT_OPERATIONS, "source_kind", "minimumf")
+    float_cas = _packet_row(
+        float_atomic_descriptor_key(
+            "reduce",
+            "cas",
+            f32,
+            workgroup,
+            subgroup,
+            operation=float_minimum,
+        )
+    )
+    assert float_cas.form == "LOOM_SPIRV_PACKET_FORM_ATOMIC_FLOAT_CAS"
+    assert float_cas.result_count == 0
+    assert float_cas.atomic_integer_scalar == "LOOM_SPIRV_SCALAR_TYPE_S32"
+    assert float_cas.atomic_float_operation == float_minimum.cas_operation
+    assert "LOOM_SPIRV_SCALAR_TYPE_S32" in float_cas.operand_types[0]
+
+    f64 = _atomic_model_row(ATOMIC_FLOAT_SCALARS, "source_type", "f64")
+    release = _atomic_model_row(ATOMIC_ORDERINGS, "source_keyword", "release")
+    float_cmpxchg = _packet_row(
+        float_atomic_descriptor_key(
+            "cmpxchg",
+            "bitcast",
+            f64,
+            storage_buffer,
+            device,
+            success_ordering=release,
+        )
+    )
+    assert float_cmpxchg.form == "LOOM_SPIRV_PACKET_FORM_ATOMIC_FLOAT_COMPARE_EXCHANGE"
+    assert float_cmpxchg.atomic_integer_scalar == "LOOM_SPIRV_SCALAR_TYPE_S64"
+    assert float_cmpxchg.atomic_success_ordering == release.ordinal
+    assert "LOOM_SPIRV_SCALAR_TYPE_S64" in float_cmpxchg.operand_types[0]
+    assert all("LOOM_SPIRV_SCALAR_TYPE_F64" in operand_type for operand_type in float_cmpxchg.operand_types[1:])

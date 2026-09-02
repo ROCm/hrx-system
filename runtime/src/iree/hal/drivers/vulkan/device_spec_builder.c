@@ -443,7 +443,7 @@ static iree_status_t iree_hal_vulkan_device_spec_populate_dispatch(
   const VkPhysicalDeviceLimits* limits =
       &params->physical_device->properties2.properties.limits;
   const bool has_subgroup_size_control =
-      iree_all_bits_set(params->device_plan->enabled_features,
+      iree_all_bits_set(params->device_plan->enabled_features.general,
                         IREE_HAL_VULKAN_FEATURE_ENABLE_SUBGROUP_SIZE_CONTROL);
   const uint32_t subgroup_size =
       params->physical_device->subgroup_properties.subgroupSize;
@@ -486,7 +486,7 @@ static iree_status_t iree_hal_vulkan_device_spec_populate_dispatch(
       .addressing.address_space_bits = 64,
       .addressing.minimum_buffer_device_address_alignment =
           iree_all_bits_set(
-              params->device_plan->enabled_features,
+              params->device_plan->enabled_features.general,
               IREE_HAL_VULKAN_FEATURE_ENABLE_BUFFER_DEVICE_ADDRESSES)
               ? limits->minStorageBufferOffsetAlignment
               : 0,
@@ -534,7 +534,7 @@ static iree_status_t iree_hal_vulkan_device_spec_populate_executables(
     const iree_hal_vulkan_device_spec_params_t* params,
     iree_hal_device_spec_builder_t* builder) {
   if (!iree_all_bits_set(
-          params->device_plan->enabled_features,
+          params->device_plan->enabled_features.general,
           IREE_HAL_VULKAN_FEATURE_ENABLE_BUFFER_DEVICE_ADDRESSES)) {
     return iree_ok_status();
   }
@@ -565,7 +565,7 @@ static iree_status_t iree_hal_vulkan_device_spec_populate_facet(
 
   iree_host_size_t property_count = 0;
   const VkCooperativeMatrixPropertiesKHR* source_properties = NULL;
-  if (iree_all_bits_set(params->device_plan->enabled_features,
+  if (iree_all_bits_set(params->device_plan->enabled_features.general,
                         IREE_HAL_VULKAN_FEATURE_ENABLE_COOPERATIVE_MATRIX)) {
     property_count = params->physical_device->cooperative_matrix_property_count;
     source_properties =

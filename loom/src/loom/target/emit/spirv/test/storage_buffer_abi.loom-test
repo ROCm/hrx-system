@@ -48,7 +48,7 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) @
                OpDecorate %_runtimearr_ulong ArrayStride 8
                OpDecorate %_struct_28 Block
                OpMemberDecorate %_struct_28 0 Offset 0
-               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 1
+               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 4
       %ulong = OpTypeInt 64 0
        %uint = OpTypeInt 32 0
      %uint_2 = OpConstant %uint 2
@@ -101,7 +101,6 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) @
                OpStore %output_view %incremented Aligned 4
                OpReturn
                OpFunctionEnd
-
 
 // ====
 
@@ -174,7 +173,7 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 2, 1) @
                OpDecorate %workgroup_id BuiltIn WorkgroupId
                OpDecorate %local_invocation_id BuiltIn LocalInvocationId
                OpDecorate %global_invocation_id BuiltIn GlobalInvocationId
-               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 1
+               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 4
       %ulong = OpTypeInt 64 0
        %uint = OpTypeInt 32 0
   %_struct_4 = OpTypeStruct %ulong %ulong %uint %uint %uint %uint
@@ -233,7 +232,6 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 2, 1) @
                OpStore %output_view %loaded Aligned 4
                OpReturn
                OpFunctionEnd
-
 
 // ====
 
@@ -304,7 +302,7 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) @
                OpDecorate %_runtimearr_ulong ArrayStride 8
                OpDecorate %_struct_38 Block
                OpMemberDecorate %_struct_38 0 Offset 0
-               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 1
+               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 4
       %ulong = OpTypeInt 64 0
        %uint = OpTypeInt 32 0
      %uint_4 = OpConstant %uint 4
@@ -376,7 +374,6 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) @
                OpReturn
                OpFunctionEnd
 
-
 // ====
 
 
@@ -435,7 +432,7 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) @
                OpDecorate %_runtimearr_ulong ArrayStride 8
                OpDecorate %_struct_38 Block
                OpMemberDecorate %_struct_38 0 Offset 0
-               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 1
+               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 4
       %ulong = OpTypeInt 64 0
        %uint = OpTypeInt 32 0
      %uint_4 = OpConstant %uint 4
@@ -505,7 +502,6 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) @
                OpReturn
                OpFunctionEnd
 
-
 // ====
 
 
@@ -564,7 +560,7 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) @
                OpDecorate %_runtimearr_ulong ArrayStride 8
                OpDecorate %_struct_28 Block
                OpMemberDecorate %_struct_28 0 Offset 0
-               OpDecorate %_ptr_PhysicalStorageBuffer_float ArrayStride 1
+               OpDecorate %_ptr_PhysicalStorageBuffer_float ArrayStride 4
       %ulong = OpTypeInt 64 0
        %uint = OpTypeInt 32 0
      %uint_2 = OpConstant %uint 2
@@ -622,7 +618,6 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) @
                OpReturn
                OpFunctionEnd
 
-
 // ====
 
 
@@ -679,7 +674,7 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) @
                OpDecorate %_runtimearr_ulong ArrayStride 8
                OpDecorate %_struct_28 Block
                OpMemberDecorate %_struct_28 0 Offset 0
-               OpDecorate %_ptr_PhysicalStorageBuffer_long ArrayStride 1
+               OpDecorate %_ptr_PhysicalStorageBuffer_long ArrayStride 8
       %ulong = OpTypeInt 64 0
        %uint = OpTypeInt 32 0
      %uint_2 = OpConstant %uint 2
@@ -737,7 +732,6 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) @
                OpReturn
                OpFunctionEnd
 
-
 // ====
 
 
@@ -785,7 +779,7 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @spirv_
                OpDecorate %_struct_12 Block
                OpDecorate %11 DescriptorSet 0
                OpDecorate %11 Binding 3
-               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 1
+               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 4
         %int = OpTypeInt 32 1
       %int_0 = OpConstant %int 0
       %ulong = OpTypeInt 64 0

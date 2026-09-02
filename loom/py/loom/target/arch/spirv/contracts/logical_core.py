@@ -25,17 +25,52 @@ from loom.dialect.vector import defs as vector
 from loom.dialect.view import ALL_VIEW_OPS
 from loom.dialect.view import defs as view
 from loom.dsl import Op
-from loom.error.spirv import ERR_SPIRV_028, ERR_SPIRV_029
-from loom.error.target import ERR_TARGET_050
 from loom.target.arch.spirv.builtins import (
     BUILTIN_DIMENSIONS,
     BUILTIN_INDEX_QUERIES,
     BuiltinDimension,
     BuiltinIndexQuery,
 )
+from loom.target.arch.spirv.contracts.atomic import SPIRV_ATOMIC_CONTRACT_CASES
+from loom.target.arch.spirv.contracts.descriptor_rule import (
+    descriptor_feature_guards as _feature_guards,
+)
+from loom.target.arch.spirv.contracts.descriptor_rule import (
+    emit_descriptor_op as _descriptor_emit,
+)
+from loom.target.arch.spirv.contracts.descriptor_rule import (
+    logical_core_descriptor as _descriptor,
+)
 from loom.target.arch.spirv.contracts.index import (
     SPIRV_INDEX_CONVERSION_RULES,
     SPIRV_INDEX_NUMERIC_RULES,
+)
+from loom.target.arch.spirv.contracts.memory import (
+    STORAGE_BUFFER_MEMORY_SPACES as _STORAGE_BUFFER_MEMORY_SPACES,
+)
+from loom.target.arch.spirv.contracts.memory import (
+    WORKGROUP_MEMORY_SPACES as _WORKGROUP_MEMORY_SPACES,
+)
+from loom.target.arch.spirv.contracts.memory import (
+    source_memory_address_feature_guards as _source_memory_address_feature_guards,
+)
+from loom.target.arch.spirv.contracts.memory import (
+    storage_buffer_address_materializer as _storage_buffer_address_materializer,
+)
+from loom.target.arch.spirv.contracts.memory import (
+    storage_buffer_alignment_diagnostic as _storage_buffer_alignment_diagnostic,
+)
+from loom.target.arch.spirv.contracts.memory import (
+    storage_buffer_source_memory as _storage_buffer_source_memory,
+)
+from loom.target.arch.spirv.contracts.memory import (
+    workgroup_address_materializer as _workgroup_address_materializer,
+)
+from loom.target.arch.spirv.contracts.memory import (
+    workgroup_carrier_guard as _workgroup_carrier_guard,
+)
+from loom.target.arch.spirv.contracts.memory import (
+    workgroup_source_memory as _workgroup_source_memory,
 )
 from loom.target.arch.spirv.contracts.ordinary_vector import (
     SPIRV_ORDINARY_VECTOR_CONTRACT_CASES,
@@ -46,6 +81,7 @@ from loom.target.arch.spirv.cooperative_matrix import (
 )
 from loom.target.arch.spirv.descriptors import SPIRV_LOGICAL_CORE_DESCRIPTOR_SET
 from loom.target.arch.spirv.scalar_alu import (
+    BFLOAT16_SCALAR_TYPE,
     BOOLEAN_BINARY_OPERATIONS,
     BOOLEAN_CONSTANTS,
     FLOAT_BINARY_OPERATIONS,
@@ -78,6 +114,7 @@ from loom.target.arch.spirv.scalar_memory import (
     SOURCE_STORAGE_BUFFER_SCALARS,
     STORAGE_BUFFER_SCALARS,
     StorageBufferScalar,
+    storage_buffer_scalar_by_suffix,
 )
 from loom.target.contracts import (
     AttrProject,
@@ -92,10 +129,7 @@ from loom.target.contracts import (
     GuardDiagnostic,
     ResultTypeBinding,
     Scalar,
-    SourceMemoryAddressBase,
-    SourceMemoryAddressCoordinateType,
     SourceMemoryAddressLayout,
-    SourceMemoryAddressMaterializer,
     SourceMemoryConstraint,
     SourceMemoryDynamicIndexSource,
     SourceMemoryOperation,
@@ -108,15 +142,7 @@ from loom.target.contracts import (
     ValueRef,
     Vector,
     View,
-    descriptor_by_key,
-    i64_param,
-    source_memory_minimum_alignment_param,
-    string_param,
-    target_diagnostic,
-    u32_param,
-    value_type_param,
 )
-from loom.target.low_descriptors import Descriptor
 
 _I1 = Scalar("i1")
 _I8 = Scalar("i8")
@@ -126,9 +152,14 @@ _F8E5M2 = Scalar("f8E5M2")
 _INDEX = Scalar("index")
 _OFFSET = Scalar("offset")
 
-
-def _descriptor(key: str) -> Descriptor:
-    return descriptor_by_key(SPIRV_LOGICAL_CORE_DESCRIPTOR_SET, key)
+_SIGNED_INTEGER_ALU_TYPE_BY_BIT_WIDTH = {
+    scalar_pair.bit_width: scalar_pair.signed
+    for scalar_pair in INTEGER_SCALAR_ALU_TYPE_PAIRS
+}
+_FLOAT_ALU_TYPE_BY_SOURCE_TYPE = {
+    scalar.source_type: scalar
+    for scalar in (*FLOAT_SCALAR_ALU_TYPES, BFLOAT16_SCALAR_TYPE)
+}
 
 
 def _typed_guards(
@@ -136,36 +167,6 @@ def _typed_guards(
     type_pattern: TypePattern,
 ) -> tuple[Guard, ...]:
     return tuple(Guard.value_type(field, type_pattern) for field in fields)
-
-
-def _feature_guards(descriptor: Descriptor) -> tuple[Guard, ...]:
-    return (
-        (Guard.descriptor_available(descriptor),)
-        if descriptor.feature_mask_words
-        else ()
-    )
-
-
-def _descriptor_emit(
-    *,
-    descriptor: Descriptor,
-    operands: dict[str, ValueRef] | None = None,
-    results: dict[str, ValueRef] | None = None,
-    result_types: dict[str, ResultTypeBinding] | None = None,
-    immediates: dict[str, AttrProject] | None = None,
-    source_memory: SourceMemoryConstraint | None = None,
-    source_memory_address_materializer: SourceMemoryAddressMaterializer | None = None,
-) -> EmitDescriptorOp:
-    return EmitDescriptorOp(
-        descriptor=descriptor,
-        operands={} if operands is None else operands,
-        results={} if results is None else results,
-        result_types=result_types,
-        immediates={} if immediates is None else immediates,
-        form=DescriptorEmitForm.OP,
-        source_memory=source_memory,
-        source_memory_address_materializer=source_memory_address_materializer,
-    )
 
 
 def _integer_constant_rule(scalar_pair: IntegerAluTypePair) -> DescriptorRule:
@@ -654,10 +655,6 @@ def _buffer_view_rule(
     )
 
 
-_STORAGE_BUFFER_MEMORY_SPACES = ("unknown", "generic", "global", "descriptor")
-_WORKGROUP_MEMORY_SPACES = ("workgroup",)
-
-
 def _raw_storage_buffer_byte_load_rule() -> DescriptorRule:
     scalar = RAW_STORAGE_BUFFER_BYTE
     address_descriptor = _descriptor(
@@ -780,149 +777,19 @@ def _workgroup_subview_rule(scalar: StorageBufferScalar) -> ValueAliasRule:
     )
 
 
-def _storage_buffer_alignment_diagnostic(
-    required_alignment: int,
-) -> GuardDiagnostic:
-    return GuardDiagnostic(
-        ref=target_diagnostic(
-            ERR_TARGET_050,
-            value_type_param("value_type", "view"),
-            u32_param("required_alignment", required_alignment),
-            source_memory_minimum_alignment_param("known_alignment"),
+def _float_integer_carrier(
+    scalar: StorageBufferScalar,
+) -> tuple[ScalarAluType, ScalarAluType, StorageBufferScalar]:
+    float_type = _FLOAT_ALU_TYPE_BY_SOURCE_TYPE.get(scalar.source_type)
+    integer_type = _SIGNED_INTEGER_ALU_TYPE_BY_BIT_WIDTH.get(scalar.byte_width * 8)
+    if float_type is None or integer_type is None:
+        raise ValueError(
+            f"missing same-width integer carrier for '{scalar.source_type}'"
         )
-    )
-
-
-def _storage_buffer_address_diagnostic() -> GuardDiagnostic:
-    return GuardDiagnostic(
-        ref=target_diagnostic(
-            ERR_SPIRV_028,
-            i64_param("required_range_lo", 0),
-            i64_param("required_range_hi", (2**31) - 1),
-            string_param(
-                "constraint_key",
-                "source_memory.address_index_non_negative_s32",
-            ),
-        )
-    )
-
-
-def _storage_buffer_address_materializer(
-    scalar: StorageBufferScalar,
-) -> SourceMemoryAddressMaterializer:
-    return SourceMemoryAddressMaterializer(
-        const_coordinate=_descriptor("spirv.op_constant.offset64"),
-        add_coordinate=_descriptor("spirv.op_iadd.offset64"),
-        mul_coordinate=_descriptor("spirv.op_imul.offset64"),
-        shl_coordinate=None,
-        index_to_coordinate_input=_descriptor("spirv.op_bitcast.i32.u32"),
-        index_to_coordinate=_descriptor("spirv.op_uconvert.u32.offset64"),
-        address=_descriptor(
-            f"spirv.op_ptr_access_chain.storage_buffer.{scalar.suffix}.byte_offset"
-        ),
-        base=SourceMemoryAddressBase.ROOT,
-        coordinate_type=SourceMemoryAddressCoordinateType.OFFSET,
-        const_coordinate_immediate="offset64_value",
-        diagnostic=_storage_buffer_address_diagnostic(),
-    )
-
-
-def _source_memory_address_feature_guards(
-    materializer: SourceMemoryAddressMaterializer,
-) -> tuple[Guard, ...]:
-    descriptors = (
-        materializer.const_coordinate,
-        materializer.add_coordinate,
-        materializer.mul_coordinate,
-        materializer.shl_coordinate,
-        materializer.index_to_coordinate_input,
-        materializer.index_to_coordinate,
-        materializer.address,
-    )
-    return tuple(
-        guard
-        for descriptor in descriptors
-        if descriptor is not None
-        for guard in _feature_guards(descriptor)
-    )
-
-
-def _storage_buffer_source_memory(
-    operation: SourceMemoryOperation,
-    scalar: StorageBufferScalar,
-) -> SourceMemoryConstraint:
-    return SourceMemoryConstraint(
-        operation=operation,
-        root_kind=SourceMemoryRootKind.ANY,
-        memory_spaces=_STORAGE_BUFFER_MEMORY_SPACES,
-        element_byte_count=scalar.byte_width,
-        vector_lane_count=1,
-        vector_lane_byte_stride=scalar.byte_width,
-        static_byte_offset_minimum=0,
-        static_byte_offset_maximum=(2**63) - 1,
-        minimum_alignment=scalar.byte_width,
-        dynamic_term_count=None,
-        dynamic_index_source=SourceMemoryDynamicIndexSource.NONE,
-        diagnostic=_storage_buffer_alignment_diagnostic(scalar.byte_width),
-    )
-
-
-def _workgroup_source_memory(
-    operation: SourceMemoryOperation,
-    scalar: StorageBufferScalar,
-) -> SourceMemoryConstraint:
-    return SourceMemoryConstraint(
-        operation=operation,
-        root_kind=SourceMemoryRootKind.ALLOCA,
-        memory_spaces=_WORKGROUP_MEMORY_SPACES,
-        element_byte_count=scalar.byte_width,
-        vector_lane_count=1,
-        vector_lane_byte_stride=scalar.byte_width,
-        static_byte_offset_minimum=0,
-        static_byte_offset_maximum=(2**63) - 1,
-        minimum_alignment=scalar.byte_width,
-        dynamic_term_count=None,
-        dynamic_index_source=SourceMemoryDynamicIndexSource.NONE,
-        diagnostic=_storage_buffer_alignment_diagnostic(scalar.byte_width),
-    )
-
-
-def _workgroup_address_diagnostic(
-    scalar: StorageBufferScalar,
-) -> GuardDiagnostic:
-    return GuardDiagnostic(
-        ref=target_diagnostic(
-            ERR_SPIRV_029,
-            u32_param("element_byte_count", scalar.byte_width),
-            i64_param("required_range_lo", 0),
-            i64_param("required_range_hi", (2**31) - 1),
-            string_param(
-                "constraint_key",
-                "source_memory.workgroup_element_index_non_negative_s32",
-            ),
-        )
-    )
-
-
-def _workgroup_address_materializer(
-    scalar: StorageBufferScalar,
-) -> SourceMemoryAddressMaterializer:
-    return SourceMemoryAddressMaterializer(
-        const_coordinate=_descriptor("spirv.op_constant.i32"),
-        add_coordinate=_descriptor("spirv.op_iadd.i32"),
-        mul_coordinate=_descriptor("spirv.op_imul.i32"),
-        shl_coordinate=_descriptor("spirv.op_shift_left_logical.i32"),
-        address=_descriptor(
-            f"spirv.op_access_chain.workgroup.{scalar.suffix}.element_index"
-        ),
-        base=SourceMemoryAddressBase.BASE_VIEW,
-        coordinate_type=SourceMemoryAddressCoordinateType.INDEX,
-        coordinate_unit_byte_count=scalar.byte_width,
-        coordinate_minimum=0,
-        coordinate_maximum=(2**31) - 1,
-        const_coordinate_immediate="i32_value",
-        diagnostic=_workgroup_address_diagnostic(scalar),
-    )
+    integer_storage_scalar = storage_buffer_scalar_by_suffix(integer_type.suffix)
+    if integer_storage_scalar is None:
+        raise ValueError(f"missing SPIR-V storage scalar '{integer_type.suffix}'")
+    return float_type, integer_type, integer_storage_scalar
 
 
 def _cooperative_matrix_memory(
@@ -1210,6 +1077,87 @@ def _view_store_rule(scalar: StorageBufferScalar) -> DescriptorRule:
     )
 
 
+def _view_load_workgroup_integer_carrier_rule(
+    scalar: StorageBufferScalar,
+) -> DescriptorRule:
+    float_type, integer_type, integer_scalar = _float_integer_carrier(scalar)
+    descriptor = _descriptor(f"spirv.op_load.workgroup.{integer_scalar.suffix}")
+    bitcast_descriptor = _descriptor(_integer_view_key(integer_type, float_type))
+    address_materializer = _workgroup_address_materializer(integer_scalar)
+    return DescriptorRule(
+        source_op=view.view_load,
+        descriptor=descriptor,
+        guards=(
+            Guard.value_type("view", View(scalar.source_type)),
+            Guard.value_type("result", Scalar(scalar.source_type)),
+            _workgroup_carrier_guard(integer_scalar.suffix),
+            *_source_memory_address_feature_guards(address_materializer),
+            *_feature_guards(descriptor),
+            *_feature_guards(bitcast_descriptor),
+        ),
+        emit=(
+            _descriptor_emit(
+                descriptor=descriptor,
+                operands={"ptr": ValueRef.source_memory_address()},
+                results={"dst": ValueRef.temporary("integer_value")},
+                result_types={"dst": DescriptorResultType()},
+                source_memory=_workgroup_source_memory(
+                    SourceMemoryOperation.LOAD,
+                    scalar,
+                ),
+                source_memory_address_materializer=address_materializer,
+            ),
+            _integer_view_emit(
+                source_type=integer_type,
+                result_type=float_type,
+                input_ref=ValueRef.temporary("integer_value"),
+                output_ref=ValueRef.result("result"),
+            ),
+        ),
+    )
+
+
+def _view_store_workgroup_integer_carrier_rule(
+    scalar: StorageBufferScalar,
+) -> DescriptorRule:
+    float_type, integer_type, integer_scalar = _float_integer_carrier(scalar)
+    descriptor = _descriptor(f"spirv.op_store.workgroup.{integer_scalar.suffix}")
+    bitcast_descriptor = _descriptor(_integer_view_key(float_type, integer_type))
+    address_materializer = _workgroup_address_materializer(integer_scalar)
+    return DescriptorRule(
+        source_op=view.view_store,
+        descriptor=descriptor,
+        guards=(
+            Guard.value_type("view", View(scalar.source_type)),
+            Guard.value_type("value", Scalar(scalar.source_type)),
+            _workgroup_carrier_guard(integer_scalar.suffix),
+            *_source_memory_address_feature_guards(address_materializer),
+            *_feature_guards(descriptor),
+            *_feature_guards(bitcast_descriptor),
+        ),
+        emit=(
+            _integer_view_emit(
+                source_type=float_type,
+                result_type=integer_type,
+                input_ref=ValueRef.operand("value"),
+                output_ref=ValueRef.temporary("integer_value"),
+            ),
+            _descriptor_emit(
+                descriptor=descriptor,
+                operands={
+                    "ptr": ValueRef.source_memory_address(),
+                    "value": ValueRef.temporary("integer_value"),
+                },
+                source_memory=_workgroup_source_memory(
+                    SourceMemoryOperation.STORE,
+                    scalar,
+                ),
+                source_memory_address_materializer=address_materializer,
+            ),
+        ),
+    )
+
+
 def _view_load_workgroup_rule(scalar: StorageBufferScalar) -> DescriptorRule:
     scalar_type = Scalar(scalar.source_type)
     view_type = View(scalar.source_type)
@@ -1221,6 +1169,7 @@ def _view_load_workgroup_rule(scalar: StorageBufferScalar) -> DescriptorRule:
         guards=(
             Guard.value_type("view", view_type),
             Guard.value_type("result", scalar_type),
+            _workgroup_carrier_guard(scalar.suffix),
             *_source_memory_address_feature_guards(address_materializer),
             *_feature_guards(descriptor),
         ),
@@ -1250,6 +1199,7 @@ def _view_store_workgroup_rule(scalar: StorageBufferScalar) -> DescriptorRule:
         guards=(
             Guard.value_type("view", view_type),
             Guard.value_type("value", scalar_type),
+            _workgroup_carrier_guard(scalar.suffix),
             *_source_memory_address_feature_guards(address_materializer),
             *_feature_guards(descriptor),
         ),
@@ -1289,6 +1239,9 @@ def _storage_buffer_rules() -> tuple[ContractCase, ...]:
         rules.append(_view_store_rule(scalar))
         rules.append(_view_load_workgroup_rule(scalar))
         rules.append(_view_store_workgroup_rule(scalar))
+        if scalar.source_type in _FLOAT_ALU_TYPE_BY_SOURCE_TYPE:
+            rules.append(_view_load_workgroup_integer_carrier_rule(scalar))
+            rules.append(_view_store_workgroup_integer_carrier_rule(scalar))
     return tuple(rules)
 
 
@@ -1483,6 +1436,7 @@ SPIRV_LOGICAL_CORE_CONTRACT_FRAGMENT = ContractFragment(
         _raw_storage_buffer_byte_load_rule(),
         _raw_storage_buffer_byte_store_rule(),
         *_storage_buffer_rules(),
+        *SPIRV_ATOMIC_CONTRACT_CASES,
         *_control_barrier_rules(),
         *_cooperative_matrix_rules(),
         DescriptorMatrixRule(

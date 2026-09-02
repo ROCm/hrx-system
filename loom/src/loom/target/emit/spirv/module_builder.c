@@ -60,7 +60,11 @@ static bool loom_spirv_module_builder_uses_vulkan_memory_model(
     return true;
   }
   return loom_spirv_feature_set_has_atom(
-      &builder->feature_set, LOOM_SPIRV_FEATURE_ATOM_COOPERATIVE_MATRIX_KHR);
+             &builder->feature_set,
+             LOOM_SPIRV_FEATURE_ATOM_COOPERATIVE_MATRIX_KHR) ||
+         loom_spirv_feature_set_has_atom(
+             &builder->feature_set,
+             LOOM_SPIRV_FEATURE_ATOM_VULKAN_MEMORY_MODEL_DEVICE_SCOPE);
 }
 
 static bool loom_spirv_module_builder_should_emit_capability(
@@ -101,9 +105,14 @@ static void loom_spirv_module_builder_select_memory_model(
 static loom_spirv_feature_bits_t loom_spirv_module_builder_base_feature_bits(
     const loom_target_bundle_t* target) {
   if (target->export_plan->abi_kind == LOOM_TARGET_ABI_HAL_KERNEL) {
-    return LOOM_SPIRV_FEATURE_PROFILE_VULKAN_1_3_BDA;
+    return LOOM_SPIRV_FEATURE_MODULE_VULKAN_1_3_BDA_BASELINE;
   }
-  return (loom_spirv_feature_bits_t)target->config->contract_feature_bits;
+
+  // Shader entry-point modules inherit their target contract features. Subgroup
+  // operations and subgroup memory scopes demand GroupNonUniform through their
+  // descriptors only when the emitted module uses them.
+  return (loom_spirv_feature_bits_t)target->config->contract_feature_bits &
+         ~LOOM_SPIRV_FEATURE_GROUP_NON_UNIFORM;
 }
 
 static iree_status_t loom_spirv_module_builder_emit_feature_preamble(

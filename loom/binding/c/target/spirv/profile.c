@@ -118,6 +118,8 @@ static loom_spirv_feature_atom_t loomc_spirv_feature_atom_from_public(
       return LOOM_SPIRV_FEATURE_ATOM_BFLOAT16_COOPERATIVE_MATRIX_KHR;
     case LOOMC_SPIRV_FEATURE_INT64:
       return LOOM_SPIRV_FEATURE_ATOM_INT64;
+    case LOOMC_SPIRV_FEATURE_GROUP_NON_UNIFORM:
+      return LOOM_SPIRV_FEATURE_ATOM_GROUP_NON_UNIFORM;
     case LOOMC_SPIRV_FEATURE_UNKNOWN:
     case LOOMC_SPIRV_FEATURE_COUNT:
       return LOOM_SPIRV_FEATURE_ATOM_UNKNOWN;
@@ -487,13 +489,15 @@ static loomc_status_t loomc_spirv_profile_apply_environment_fact(
       &environment_states[environment], result);
 }
 
-static loomc_status_t loomc_spirv_profile_apply_feature_bits(
-    loomc_spirv_feature_bits_t feature_bits, loomc_string_view_t provenance,
+static loomc_status_t loomc_spirv_profile_apply_loom_feature_bits(
+    loom_spirv_feature_bits_t feature_bits, loomc_string_view_t provenance,
     loomc_spirv_feature_state_t* feature_states, loomc_result_t* result) {
   for (uint32_t i = LOOMC_SPIRV_FEATURE_UNKNOWN + 1;
        i < LOOMC_SPIRV_FEATURE_COUNT; ++i) {
     const loomc_spirv_feature_t feature = (loomc_spirv_feature_t)i;
-    if ((feature_bits & loomc_spirv_feature_bit(feature)) == 0) {
+    const loom_spirv_feature_atom_t atom =
+        loomc_spirv_feature_atom_from_public(feature);
+    if ((feature_bits & loom_spirv_feature_atom_bit(atom)) == 0) {
       continue;
     }
     LOOMC_RETURN_IF_ERROR(loomc_spirv_profile_apply_feature_fact(
@@ -513,7 +517,7 @@ static loomc_status_t loomc_spirv_profile_apply_preset(
     case LOOMC_SPIRV_PROFILE_PRESET_NONE:
       return loomc_ok_status();
     case LOOMC_SPIRV_PROFILE_PRESET_VULKAN_1_3_BDA:
-      return loomc_spirv_profile_apply_feature_bits(
+      return loomc_spirv_profile_apply_loom_feature_bits(
           LOOM_SPIRV_FEATURE_PROFILE_VULKAN_1_3_BDA,
           loomc_make_cstring_view("preset:vulkan1.3-bda"), feature_states,
           result);

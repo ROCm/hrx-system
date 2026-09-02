@@ -231,6 +231,8 @@ TEST(TargetSpirvVulkaninfoTest, ImportsGpuinfoProfileWrapper) {
 
   ExpectFeatureState(profile.get(), LOOMC_SPIRV_FEATURE_VULKAN_SHADER,
                      LOOMC_TARGET_FACT_STATE_TRUE);
+  ExpectFeatureState(profile.get(), LOOMC_SPIRV_FEATURE_GROUP_NON_UNIFORM,
+                     LOOMC_TARGET_FACT_STATE_TRUE);
   ExpectFeatureState(profile.get(), LOOMC_SPIRV_FEATURE_PHYSICAL_STORAGE_BUFFER,
                      LOOMC_TARGET_FACT_STATE_TRUE);
   ExpectFeatureState(profile.get(), LOOMC_SPIRV_FEATURE_FLOAT16,

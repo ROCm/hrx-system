@@ -63,6 +63,33 @@ iree_py_test(
 )
 
 iree_py_library(
+    name = "atomic",
+    srcs = [
+        "__init__.py",
+        "atomic.py",
+    ],
+    deps = [
+        ":features",
+    ],
+)
+
+iree_py_test(
+    name = "atomic_test",
+    size = "small",
+    srcs = [
+        "atomic_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.target.arch.spirv.atomic_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":atomic",
+        ":descriptors",
+        "//loom/py/loom/dialect:shared",
+    ],
+)
+
+iree_py_library(
     name = "builtins",
     srcs = [
         "__init__.py",
@@ -77,6 +104,7 @@ iree_py_library(
         "descriptors.py",
     ],
     deps = [
+        ":atomic",
         ":builtins",
         ":cooperative_matrix",
         ":features",
@@ -104,6 +132,7 @@ iree_py_test(
     args = ["loom.target.arch.spirv.descriptors_test"],
     main = "pytest_style_runner.py",
     deps = [
+        ":atomic",
         ":builtins",
         ":cooperative_matrix",
         ":descriptors",

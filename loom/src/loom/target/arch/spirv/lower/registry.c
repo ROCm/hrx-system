@@ -196,6 +196,20 @@ static iree_status_t loom_spirv_map_value(void* user_data,
                                           loom_value_id_t source_value_id,
                                           loom_type_t source_type,
                                           loom_type_t* out_low_type) {
+  if (loom_type_is_view(source_type)) {
+    bool is_workgroup = false;
+    uint16_t register_class_id = LOOM_LOW_REG_CLASS_NONE;
+    IREE_RETURN_IF_ERROR(loom_spirv_resolve_workgroup_view_reg_class(
+        context, source_value_id, &is_workgroup, &register_class_id));
+    if (is_workgroup) {
+      if (register_class_id == LOOM_LOW_REG_CLASS_NONE) {
+        return loom_low_lower_emit_source_type_unsupported(
+            context, source_op, IREE_SV("source"), source_type);
+      }
+      return loom_spirv_make_register_type(context, register_class_id,
+                                           out_low_type);
+    }
+  }
   if (loom_type_is_vector(source_type)) {
     if (loom_func_return_isa(source_op)) {
       return loom_low_lower_emit_source_type_unsupported(
@@ -229,6 +243,29 @@ static iree_status_t loom_spirv_map_value(void* user_data,
   }
   return loom_spirv_map_type(user_data, context, source_op, source_type,
                              out_low_type);
+}
+
+static iree_status_t loom_spirv_map_contract_value(
+    void* user_data,
+    const loom_target_contract_query_environment_t* environment,
+    const loom_op_t* source_op, loom_value_id_t source_value_id,
+    loom_low_lower_rule_mapped_value_t* out_mapped_value) {
+  (void)user_data;
+  (void)source_op;
+  *out_mapped_value = loom_low_lower_rule_mapped_value_none();
+  const loom_type_t source_type =
+      loom_module_value_type(environment->module, source_value_id);
+  if (!loom_type_is_view(source_type)) return iree_ok_status();
+
+  bool is_workgroup = false;
+  uint16_t register_class_id = LOOM_LOW_REG_CLASS_NONE;
+  IREE_RETURN_IF_ERROR(loom_spirv_resolve_workgroup_contract_view_reg_class(
+      environment, source_value_id, &is_workgroup, &register_class_id));
+  if (is_workgroup && register_class_id != LOOM_LOW_REG_CLASS_NONE) {
+    *out_mapped_value =
+        loom_low_lower_rule_mapped_value_register(register_class_id, 1);
+  }
+  return iree_ok_status();
 }
 
 static uint32_t loom_spirv_hal_binding_index(loom_low_lower_context_t* context,
@@ -325,6 +362,8 @@ static const loom_low_lower_policy_t kSpirvLowLowerPolicy = {
     .error_catalog = &loom_spirv_error_catalog,
     .map_type = {.fn = loom_spirv_map_type, .user_data = NULL},
     .map_value = {.fn = loom_spirv_map_value, .user_data = NULL},
+    .map_contract_value = {.fn = loom_spirv_map_contract_value,
+                           .user_data = NULL},
     .map_argument = {.fn = loom_spirv_map_argument, .user_data = NULL},
     .source_type_supported = {.fn = loom_spirv_source_type_supported,
                               .user_data = NULL},

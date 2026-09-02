@@ -379,6 +379,12 @@ static loomc_status_t loomc_spirv_vulkan_query_properties(
   options->functions->get_physical_device_properties2(options->physical_device,
                                                       &properties2);
   IREE_LEAK_CHECK_DISABLE_POP();
+  LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkan_add_bool_feature(
+      facts,
+      (subgroup_properties.supportedOperations &
+       VK_SUBGROUP_FEATURE_BASIC_BIT) != 0,
+      LOOMC_SPIRV_FEATURE_GROUP_NON_UNIFORM,
+      loomc_make_cstring_view("vulkan:subgroupSupportedOperations")));
   return loomc_spirv_vulkan_add_limit_fact(
       facts, LOOMC_SPIRV_LIMIT_SUBGROUP_SIZE, subgroup_properties.subgroupSize,
       loomc_make_cstring_view("vulkan:subgroupSize"));

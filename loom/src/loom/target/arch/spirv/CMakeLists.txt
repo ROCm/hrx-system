@@ -319,12 +319,31 @@ endif()
 if(LOOM_TARGET_ARCH_SPIRV)
 loom_cc_library(
   NAME
+    legalization
+  HDRS
+    "legalization.h"
+  SRCS
+    "legalization.c"
+  DEPS
+    iree::base
+    loom::ops::vector
+    loom::target::arch::spirv::descriptors
+    loom::target::legalization
+    loom::transforms::vector::to_scalar
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_SPIRV)
+loom_cc_library(
+  NAME
     provider
   HDRS
     "provider.h"
   SRCS
     "provider.c"
   DEPS
+    ::legalization
     ::low_verify
     ::math_policy
     ::profile

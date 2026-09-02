@@ -5,6 +5,16 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 from loom.ir import parse_scalar_type_kind
+from loom.target.arch.spirv.atomic import (
+    ATOMIC_FLOAT_OPERATIONS,
+    ATOMIC_FLOAT_SCALARS,
+    ATOMIC_INTEGER_OPERATIONS,
+    ATOMIC_INTEGER_SCALARS,
+    ATOMIC_SCOPES,
+    ATOMIC_STORAGE_CLASSES,
+    atomic_descriptor_key,
+    float_atomic_descriptor_key,
+)
 from loom.target.arch.spirv.builtins import (
     BUILTIN_DIMENSIONS,
     BUILTIN_INDEX_QUERIES,
@@ -65,6 +75,87 @@ def _scalar_recipe(source_type: str) -> AsmResultValueType:
     element_type = parse_scalar_type_kind(source_type)
     assert element_type is not None
     return AsmResultValueType(element_type)
+
+
+def _atomic_result_recipes() -> dict[str, AsmResultValueType]:
+    recipes: dict[str, AsmResultValueType] = {}
+
+    def add(key: str, source_type: str) -> None:
+        assert key not in recipes
+        recipes[key] = _scalar_recipe(source_type)
+
+    for scalar in ATOMIC_INTEGER_SCALARS:
+        for storage_class in ATOMIC_STORAGE_CLASSES:
+            for scope in ATOMIC_SCOPES:
+                for operation in ATOMIC_INTEGER_OPERATIONS:
+                    add(
+                        atomic_descriptor_key(
+                            "rmw",
+                            scalar,
+                            storage_class,
+                            scope,
+                            operation=operation,
+                        ),
+                        scalar.source_type,
+                    )
+                for success_ordering in scope.orderings:
+                    add(
+                        atomic_descriptor_key(
+                            "cmpxchg",
+                            scalar,
+                            storage_class,
+                            scope,
+                            success_ordering=success_ordering,
+                        ),
+                        scalar.source_type,
+                    )
+
+    for scalar in ATOMIC_FLOAT_SCALARS:
+        for storage_class in ATOMIC_STORAGE_CLASSES:
+            for scope in ATOMIC_SCOPES:
+                for operation in ATOMIC_FLOAT_OPERATIONS:
+                    if operation.native_opcode is not None:
+                        add(
+                            float_atomic_descriptor_key(
+                                "rmw",
+                                "native",
+                                scalar,
+                                storage_class,
+                                scope,
+                                operation=operation,
+                            ),
+                            scalar.source_type,
+                        )
+                    if scalar.integer_scalar_enum is None:
+                        continue
+                    strategy = "bitcast" if operation.source_kind == "xchgf" else "cas"
+                    add(
+                        float_atomic_descriptor_key(
+                            "rmw",
+                            strategy,
+                            scalar,
+                            storage_class,
+                            scope,
+                            operation=operation,
+                        ),
+                        scalar.source_type,
+                    )
+                if scalar.integer_scalar_enum is None:
+                    continue
+                for success_ordering in scope.orderings:
+                    add(
+                        float_atomic_descriptor_key(
+                            "cmpxchg",
+                            "bitcast",
+                            scalar,
+                            storage_class,
+                            scope,
+                            success_ordering=success_ordering,
+                        ),
+                        scalar.source_type,
+                    )
+
+    return recipes
 
 
 def test_result_asm_recipes_cover_every_spirv_descriptor_family() -> None:
@@ -219,6 +310,9 @@ def test_result_asm_recipes_cover_every_spirv_descriptor_family() -> None:
                 add_scalar_recipe(load_key, scalar.source_type)
             else:
                 add_carrier_only(load_key)
+
+    for key, recipe in _atomic_result_recipes().items():
+        add_recipe(key, recipe)
 
     raw_byte_suffix = RAW_STORAGE_BUFFER_BYTE.suffix
     add_carrier_only(

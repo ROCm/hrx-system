@@ -27,6 +27,20 @@ _ensure_runtime_py_on_path()
 from loom.gen.support.c import CIdentifierCase, c_identifier  # noqa: E402
 from loom.gen.support.files import write_text_file  # noqa: E402
 from loom.gen.support.generated_file import line_comment_header  # noqa: E402
+from loom.target.arch.spirv.atomic import (  # noqa: E402
+    ATOMIC_FLOAT_OPERATIONS,
+    ATOMIC_FLOAT_SCALARS,
+    ATOMIC_INTEGER_OPERATIONS,
+    ATOMIC_INTEGER_SCALARS,
+    ATOMIC_SCOPES,
+    ATOMIC_STORAGE_CLASSES,
+    AtomicFloatScalar,
+    AtomicIntegerScalar,
+    AtomicScope,
+    AtomicStorageClass,
+    atomic_descriptor_key,
+    float_atomic_descriptor_key,
+)
 from loom.target.arch.spirv.builtins import (  # noqa: E402
     BUILTIN_DIMENSIONS,
     BUILTIN_INDEX_QUERIES,
@@ -203,6 +217,11 @@ class _PacketRow:
     cooperative_matrix_layout: str | None = None
     cooperative_matrix_element_stride: int = 0
     cooperative_matrix_operands: str | None = None
+    atomic_scope: str | None = None
+    atomic_storage_semantics: str | None = None
+    atomic_success_ordering: int | None = None
+    atomic_integer_scalar: str | None = None
+    atomic_float_operation: int | None = None
 
     def encoded_operand_types(self) -> tuple[str, ...]:
         if len(self.operand_types) <= _PACKET_OPERAND_TYPE_CAPACITY:
@@ -252,6 +271,16 @@ class _PacketRow:
             lines.append(f"            .payload.cooperative_matrix.element_stride = {self.cooperative_matrix_element_stride},")
         if self.cooperative_matrix_operands is not None:
             lines.append(f"            .payload.cooperative_matrix.operands = {self.cooperative_matrix_operands},")
+        if self.atomic_scope is not None:
+            lines.append(f"            .payload.atomic.memory_scope = {self.atomic_scope},")
+        if self.atomic_storage_semantics is not None:
+            lines.append(f"            .payload.atomic.storage_semantics = {self.atomic_storage_semantics},")
+        if self.atomic_success_ordering is not None:
+            lines.append(f"            .payload.atomic.success_ordering = {self.atomic_success_ordering},")
+        if self.atomic_integer_scalar is not None:
+            lines.append(f"            .payload.atomic.integer_scalar = {self.atomic_integer_scalar},")
+        if self.atomic_float_operation is not None:
+            lines.append(f"            .payload.atomic.float_operation = {self.atomic_float_operation},")
         lines.append("        },")
         return "\n".join(lines)
 
@@ -272,6 +301,240 @@ def _control_barrier_rows() -> list[_PacketRow]:
             ("workgroup", "LOOM_SPIRV_SCOPE_WORKGROUP"),
         )
     ]
+
+
+def _atomic_scalar_value(scalar: AtomicIntegerScalar) -> str:
+    return _value_type("LOOM_SPIRV_VALUE_CLASS_SCALAR", scalar.scalar_enum)
+
+
+def _atomic_pointer_value(
+    scalar: AtomicIntegerScalar | AtomicFloatScalar,
+    storage_class: AtomicStorageClass,
+) -> str:
+    return _atomic_pointer_value_for_scalar(
+        scalar.scalar_enum,
+        storage_class,
+    )
+
+
+def _atomic_pointer_value_for_scalar(
+    scalar_enum: str,
+    storage_class: AtomicStorageClass,
+) -> str:
+    value_class = "LOOM_SPIRV_VALUE_CLASS_PTR_PHYSICAL_STORAGE_BUFFER" if storage_class.suffix == "storage_buffer" else "LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP"
+    return _value_type(value_class, scalar_enum)
+
+
+def _atomic_rows_for_scope(
+    scalar: AtomicIntegerScalar,
+    storage_class: AtomicStorageClass,
+    scope: AtomicScope,
+) -> tuple[_PacketRow, ...]:
+    scalar_value = _atomic_scalar_value(scalar)
+    pointer_value = _atomic_pointer_value(scalar, storage_class)
+    common = {
+        "atomic_scope": scope.spirv_scope,
+        "atomic_storage_semantics": storage_class.memory_semantics,
+    }
+    rows: list[_PacketRow] = []
+    for operation in ATOMIC_INTEGER_OPERATIONS:
+        if operation.supports_reduce:
+            rows.append(
+                _PacketRow(
+                    atomic_descriptor_key(
+                        "reduce",
+                        scalar,
+                        storage_class,
+                        scope,
+                        operation=operation,
+                    ),
+                    opcode=operation.opcode,
+                    form="LOOM_SPIRV_PACKET_FORM_ATOMIC",
+                    operand_types=(pointer_value, scalar_value),
+                    immediate_index=0,
+                    **common,
+                )
+            )
+        rows.append(
+            _PacketRow(
+                atomic_descriptor_key(
+                    "rmw",
+                    scalar,
+                    storage_class,
+                    scope,
+                    operation=operation,
+                ),
+                opcode=operation.opcode,
+                form="LOOM_SPIRV_PACKET_FORM_ATOMIC",
+                result_type=scalar_value,
+                operand_types=(pointer_value, scalar_value),
+                result_count=1,
+                immediate_index=0,
+                **common,
+            )
+        )
+    rows.extend(
+        _PacketRow(
+            atomic_descriptor_key(
+                "cmpxchg",
+                scalar,
+                storage_class,
+                scope,
+                success_ordering=success_ordering,
+            ),
+            opcode="LOOM_SPIRV_OP_ATOMIC_COMPARE_EXCHANGE",
+            form="LOOM_SPIRV_PACKET_FORM_ATOMIC_COMPARE_EXCHANGE",
+            result_type=scalar_value,
+            operand_types=(pointer_value, scalar_value, scalar_value),
+            result_count=1,
+            immediate_index=0,
+            atomic_success_ordering=success_ordering.ordinal,
+            **common,
+        )
+        for success_ordering in scope.orderings
+    )
+    return tuple(rows)
+
+
+def _atomic_rows() -> list[_PacketRow]:
+    return [row for scalar in ATOMIC_INTEGER_SCALARS for storage_class in ATOMIC_STORAGE_CLASSES for scope in ATOMIC_SCOPES for row in _atomic_rows_for_scope(scalar, storage_class, scope)]
+
+
+def _float_atomic_rows_for_scope(
+    scalar: AtomicFloatScalar,
+    storage_class: AtomicStorageClass,
+    scope: AtomicScope,
+) -> tuple[_PacketRow, ...]:
+    scalar_value = _value_type("LOOM_SPIRV_VALUE_CLASS_SCALAR", scalar.scalar_enum)
+    pointer_value = _atomic_pointer_value(scalar, storage_class)
+    common = {
+        "atomic_scope": scope.spirv_scope,
+        "atomic_storage_semantics": storage_class.memory_semantics,
+    }
+    rows: list[_PacketRow] = []
+    for operation in ATOMIC_FLOAT_OPERATIONS:
+        if operation.native_opcode is not None:
+            if operation.supports_reduce:
+                rows.append(
+                    _PacketRow(
+                        float_atomic_descriptor_key(
+                            "reduce",
+                            "native",
+                            scalar,
+                            storage_class,
+                            scope,
+                            operation=operation,
+                        ),
+                        opcode=operation.native_opcode,
+                        form="LOOM_SPIRV_PACKET_FORM_ATOMIC",
+                        operand_types=(pointer_value, scalar_value),
+                        immediate_index=0,
+                        **common,
+                    )
+                )
+            rows.append(
+                _PacketRow(
+                    float_atomic_descriptor_key(
+                        "rmw",
+                        "native",
+                        scalar,
+                        storage_class,
+                        scope,
+                        operation=operation,
+                    ),
+                    opcode=operation.native_opcode,
+                    form="LOOM_SPIRV_PACKET_FORM_ATOMIC",
+                    result_type=scalar_value,
+                    operand_types=(pointer_value, scalar_value),
+                    result_count=1,
+                    immediate_index=0,
+                    **common,
+                )
+            )
+        if scalar.integer_scalar_enum is None:
+            continue
+        integer_pointer_value = _atomic_pointer_value_for_scalar(
+            scalar.integer_scalar_enum,
+            storage_class,
+        )
+        integer_common = {
+            **common,
+            "atomic_integer_scalar": scalar.integer_scalar_enum,
+        }
+        if operation.source_kind == "xchgf":
+            rows.append(
+                _PacketRow(
+                    float_atomic_descriptor_key(
+                        "rmw",
+                        "bitcast",
+                        scalar,
+                        storage_class,
+                        scope,
+                        operation=operation,
+                    ),
+                    opcode="LOOM_SPIRV_OP_ATOMIC_EXCHANGE",
+                    form="LOOM_SPIRV_PACKET_FORM_ATOMIC_FLOAT_BITCAST",
+                    result_type=scalar_value,
+                    operand_types=(integer_pointer_value, scalar_value),
+                    result_count=1,
+                    immediate_index=0,
+                    **integer_common,
+                )
+            )
+            continue
+        rows.extend(
+            _PacketRow(
+                float_atomic_descriptor_key(
+                    form,
+                    "cas",
+                    scalar,
+                    storage_class,
+                    scope,
+                    operation=operation,
+                ),
+                opcode="LOOM_SPIRV_OP_ATOMIC_COMPARE_EXCHANGE",
+                form="LOOM_SPIRV_PACKET_FORM_ATOMIC_FLOAT_CAS",
+                result_type=scalar_value if form == "rmw" else None,
+                operand_types=(integer_pointer_value, scalar_value),
+                result_count=1 if form == "rmw" else 0,
+                immediate_index=0,
+                atomic_float_operation=operation.cas_operation,
+                **integer_common,
+            )
+            for form in (("reduce", "rmw") if operation.supports_reduce else ("rmw",))
+        )
+    if scalar.integer_scalar_enum is not None:
+        rows.extend(
+            _PacketRow(
+                float_atomic_descriptor_key(
+                    "cmpxchg",
+                    "bitcast",
+                    scalar,
+                    storage_class,
+                    scope,
+                    success_ordering=success_ordering,
+                ),
+                opcode="LOOM_SPIRV_OP_ATOMIC_COMPARE_EXCHANGE",
+                form="LOOM_SPIRV_PACKET_FORM_ATOMIC_FLOAT_COMPARE_EXCHANGE",
+                result_type=scalar_value,
+                operand_types=(
+                    integer_pointer_value,
+                    scalar_value,
+                    scalar_value,
+                ),
+                result_count=1,
+                immediate_index=0,
+                atomic_success_ordering=success_ordering.ordinal,
+                atomic_integer_scalar=scalar.integer_scalar_enum,
+                **common,
+            )
+            for success_ordering in scope.orderings
+        )
+    return tuple(rows)
+
+
+def _float_atomic_rows() -> list[_PacketRow]:
+    return [row for scalar in ATOMIC_FLOAT_SCALARS for storage_class in ATOMIC_STORAGE_CLASSES for scope in ATOMIC_SCOPES for row in _float_atomic_rows_for_scope(scalar, storage_class, scope)]
 
 
 def _storage_buffer_rows_for_scalar(
@@ -878,6 +1141,8 @@ def _packet_rows() -> tuple[_PacketRow, ...]:
         *_storage_buffer_rows(),
         *_raw_storage_buffer_byte_rows(),
         *_workgroup_rows(),
+        *_atomic_rows(),
+        *_float_atomic_rows(),
         *_control_barrier_rows(),
         *_cooperative_matrix_rows(),
     )

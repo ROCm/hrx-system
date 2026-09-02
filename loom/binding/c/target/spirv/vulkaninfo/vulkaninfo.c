@@ -484,9 +484,15 @@ static loomc_status_t loomc_spirv_vulkaninfo_add_api_version(
   const uint32_t max_spirv_version =
       loomc_spirv_max_version_from_vulkan_api_version(vulkan_major,
                                                       vulkan_minor);
-  return loomc_spirv_vulkaninfo_add_environment_fact(
+  LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkaninfo_add_environment_fact(
       import, LOOMC_SPIRV_ENVIRONMENT_MAX_SPIRV_VERSION, max_spirv_version,
-      provenance);
+      provenance));
+  if (vulkan_major > 1 || (vulkan_major == 1 && vulkan_minor >= 1)) {
+    return loomc_spirv_vulkaninfo_add_feature_fact(
+        import, LOOMC_SPIRV_FEATURE_GROUP_NON_UNIFORM,
+        LOOMC_TARGET_FACT_STATE_TRUE, provenance);
+  }
+  return loomc_ok_status();
 }
 
 static loomc_status_t loomc_spirv_vulkaninfo_select_profile_capability(

@@ -1,0 +1,830 @@
+// SPIR-V Vulkan integer atomics must preserve the operation, signedness,
+// ordering, scope, returned old value, and final memory value. One invocation
+// keeps each observation deterministic while still executing the production
+// storage-buffer atomic path on the device.
+kernel.def @global_atomic_i32_operations() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%values: buffer, %results: buffer) {
+  %base = index.constant 0 : offset
+  %values_global = buffer.assume.memory_space<global> %values : buffer
+  %results_global = buffer.assume.memory_space<global> %results : buffer
+  %values_aligned = buffer.assume.alignment %values_global {minimum_alignment = 4} : buffer
+  %results_aligned = buffer.assume.alignment %results_global {minimum_alignment = 4} : buffer
+  %values_view = buffer.view %values_aligned[%base] : buffer -> view<11xi32>
+  %results_view = buffer.view %results_aligned[%base] : buffer -> view<11xi32>
+
+  %c0_index = index.constant 0 : index
+  %c1_index = index.constant 1 : index
+  %c2_index = index.constant 2 : index
+  %c3_index = index.constant 3 : index
+  %c4_index = index.constant 4 : index
+  %c5_index = index.constant 5 : index
+  %c6_index = index.constant 6 : index
+  %c7_index = index.constant 7 : index
+  %c8_index = index.constant 8 : index
+  %c9_index = index.constant 9 : index
+  %c10_index = index.constant 10 : index
+  %failure = scalar.constant 0 : i32
+  %success = scalar.constant 1 : i32
+
+  %xchg_initial = scalar.constant 5 : i32
+  %xchg_value = scalar.constant 9 : i32
+  view.store %xchg_initial, %values_view[%c0_index] : i32, view<11xi32>
+  %xchg_old = view.atomic.rmw<xchgi> %xchg_value, %values_view[%c0_index] {ordering = relaxed, scope = thread} : i32, view<11xi32> -> i32
+  %xchg_final = view.load %values_view[%c0_index] : view<11xi32> -> i32
+  %xchg_old_ok = scalar.cmpi eq, %xchg_old, %xchg_initial : i32
+  %xchg_final_ok = scalar.cmpi eq, %xchg_final, %xchg_value : i32
+  %xchg_ok = scalar.andi %xchg_old_ok, %xchg_final_ok : i1
+  %xchg_result = scf.select %xchg_ok, %success, %failure : i32
+  view.store %xchg_result, %results_view[%c0_index] : i32, view<11xi32>
+
+  %add_initial = scalar.constant 5 : i32
+  %add_value = scalar.constant 3 : i32
+  %add_expected = scalar.constant 8 : i32
+  view.store %add_initial, %values_view[%c1_index] : i32, view<11xi32>
+  %add_old = view.atomic.rmw<addi> %add_value, %values_view[%c1_index] {ordering = acquire, scope = subgroup} : i32, view<11xi32> -> i32
+  %add_final = view.load %values_view[%c1_index] : view<11xi32> -> i32
+  %add_old_ok = scalar.cmpi eq, %add_old, %add_initial : i32
+  %add_final_ok = scalar.cmpi eq, %add_final, %add_expected : i32
+  %add_ok = scalar.andi %add_old_ok, %add_final_ok : i1
+  %add_result = scf.select %add_ok, %success, %failure : i32
+  view.store %add_result, %results_view[%c1_index] : i32, view<11xi32>
+
+  %sub_initial = scalar.constant 5 : i32
+  %sub_value = scalar.constant 3 : i32
+  %sub_expected = scalar.constant 2 : i32
+  view.store %sub_initial, %values_view[%c2_index] : i32, view<11xi32>
+  %sub_old = view.atomic.rmw<subi> %sub_value, %values_view[%c2_index] {ordering = release, scope = workgroup} : i32, view<11xi32> -> i32
+  %sub_final = view.load %values_view[%c2_index] : view<11xi32> -> i32
+  %sub_old_ok = scalar.cmpi eq, %sub_old, %sub_initial : i32
+  %sub_final_ok = scalar.cmpi eq, %sub_final, %sub_expected : i32
+  %sub_ok = scalar.andi %sub_old_ok, %sub_final_ok : i1
+  %sub_result = scf.select %sub_ok, %success, %failure : i32
+  view.store %sub_result, %results_view[%c2_index] : i32, view<11xi32>
+
+  %and_initial = scalar.constant 15 : i32
+  %and_value = scalar.constant 6 : i32
+  %and_expected = scalar.constant 6 : i32
+  view.store %and_initial, %values_view[%c3_index] : i32, view<11xi32>
+  %and_old = view.atomic.rmw<andi> %and_value, %values_view[%c3_index] {ordering = acq_rel, scope = device} : i32, view<11xi32> -> i32
+  %and_final = view.load %values_view[%c3_index] : view<11xi32> -> i32
+  %and_old_ok = scalar.cmpi eq, %and_old, %and_initial : i32
+  %and_final_ok = scalar.cmpi eq, %and_final, %and_expected : i32
+  %and_ok = scalar.andi %and_old_ok, %and_final_ok : i1
+  %and_result = scf.select %and_ok, %success, %failure : i32
+  view.store %and_result, %results_view[%c3_index] : i32, view<11xi32>
+
+  %or_initial = scalar.constant 8 : i32
+  %or_value = scalar.constant 3 : i32
+  %or_expected = scalar.constant 11 : i32
+  view.store %or_initial, %values_view[%c4_index] : i32, view<11xi32>
+  %or_old = view.atomic.rmw<ori> %or_value, %values_view[%c4_index] {ordering = relaxed, scope = thread} : i32, view<11xi32> -> i32
+  %or_final = view.load %values_view[%c4_index] : view<11xi32> -> i32
+  %or_old_ok = scalar.cmpi eq, %or_old, %or_initial : i32
+  %or_final_ok = scalar.cmpi eq, %or_final, %or_expected : i32
+  %or_ok = scalar.andi %or_old_ok, %or_final_ok : i1
+  %or_result = scf.select %or_ok, %success, %failure : i32
+  view.store %or_result, %results_view[%c4_index] : i32, view<11xi32>
+
+  %xor_initial = scalar.constant 10 : i32
+  %xor_value = scalar.constant 12 : i32
+  %xor_expected = scalar.constant 6 : i32
+  view.store %xor_initial, %values_view[%c5_index] : i32, view<11xi32>
+  %xor_old = view.atomic.rmw<xori> %xor_value, %values_view[%c5_index] {ordering = acq_rel, scope = subgroup} : i32, view<11xi32> -> i32
+  %xor_final = view.load %values_view[%c5_index] : view<11xi32> -> i32
+  %xor_old_ok = scalar.cmpi eq, %xor_old, %xor_initial : i32
+  %xor_final_ok = scalar.cmpi eq, %xor_final, %xor_expected : i32
+  %xor_ok = scalar.andi %xor_old_ok, %xor_final_ok : i1
+  %xor_result = scf.select %xor_ok, %success, %failure : i32
+  view.store %xor_result, %results_view[%c5_index] : i32, view<11xi32>
+
+  %smin_initial = scalar.constant -5 : i32
+  %smin_value = scalar.constant -9 : i32
+  view.store %smin_initial, %values_view[%c6_index] : i32, view<11xi32>
+  %smin_old = view.atomic.rmw<minsi> %smin_value, %values_view[%c6_index] {ordering = acquire, scope = workgroup} : i32, view<11xi32> -> i32
+  %smin_final = view.load %values_view[%c6_index] : view<11xi32> -> i32
+  %smin_old_ok = scalar.cmpi eq, %smin_old, %smin_initial : i32
+  %smin_final_ok = scalar.cmpi eq, %smin_final, %smin_value : i32
+  %smin_ok = scalar.andi %smin_old_ok, %smin_final_ok : i1
+  %smin_result = scf.select %smin_ok, %success, %failure : i32
+  view.store %smin_result, %results_view[%c6_index] : i32, view<11xi32>
+
+  %smax_initial = scalar.constant -5 : i32
+  %smax_value = scalar.constant 2 : i32
+  view.store %smax_initial, %values_view[%c7_index] : i32, view<11xi32>
+  %smax_old = view.atomic.rmw<maxsi> %smax_value, %values_view[%c7_index] {ordering = release, scope = device} : i32, view<11xi32> -> i32
+  %smax_final = view.load %values_view[%c7_index] : view<11xi32> -> i32
+  %smax_old_ok = scalar.cmpi eq, %smax_old, %smax_initial : i32
+  %smax_final_ok = scalar.cmpi eq, %smax_final, %smax_value : i32
+  %smax_ok = scalar.andi %smax_old_ok, %smax_final_ok : i1
+  %smax_result = scf.select %smax_ok, %success, %failure : i32
+  view.store %smax_result, %results_view[%c7_index] : i32, view<11xi32>
+
+  %umin_initial = scalar.constant -1 : i32
+  %umin_value = scalar.constant 2 : i32
+  view.store %umin_initial, %values_view[%c8_index] : i32, view<11xi32>
+  %umin_old = view.atomic.rmw<minui> %umin_value, %values_view[%c8_index] {ordering = release, scope = subgroup} : i32, view<11xi32> -> i32
+  %umin_final = view.load %values_view[%c8_index] : view<11xi32> -> i32
+  %umin_old_ok = scalar.cmpi eq, %umin_old, %umin_initial : i32
+  %umin_final_ok = scalar.cmpi eq, %umin_final, %umin_value : i32
+  %umin_ok = scalar.andi %umin_old_ok, %umin_final_ok : i1
+  %umin_result = scf.select %umin_ok, %success, %failure : i32
+  view.store %umin_result, %results_view[%c8_index] : i32, view<11xi32>
+
+  %umax_initial = scalar.constant -1 : i32
+  %umax_value = scalar.constant 2 : i32
+  view.store %umax_initial, %values_view[%c9_index] : i32, view<11xi32>
+  %umax_old = view.atomic.rmw<maxui> %umax_value, %values_view[%c9_index] {ordering = acq_rel, scope = workgroup} : i32, view<11xi32> -> i32
+  %umax_final = view.load %values_view[%c9_index] : view<11xi32> -> i32
+  %umax_old_ok = scalar.cmpi eq, %umax_old, %umax_initial : i32
+  %umax_final_ok = scalar.cmpi eq, %umax_final, %umax_initial : i32
+  %umax_ok = scalar.andi %umax_old_ok, %umax_final_ok : i1
+  %umax_result = scf.select %umax_ok, %success, %failure : i32
+  view.store %umax_result, %results_view[%c9_index] : i32, view<11xi32>
+
+  %cmpx_initial = scalar.constant 7 : i32
+  %cmpx_success_replacement = scalar.constant 9 : i32
+  %cmpx_failure_replacement = scalar.constant 11 : i32
+  view.store %cmpx_initial, %values_view[%c10_index] : i32, view<11xi32>
+  %cmpx_success_old = view.atomic.cmpxchg %cmpx_initial, %cmpx_success_replacement, %values_view[%c10_index] {failure_ordering = acquire, scope = device, success_ordering = acq_rel} : i32, view<11xi32> -> i32
+  %cmpx_failure_old = view.atomic.cmpxchg %cmpx_initial, %cmpx_failure_replacement, %values_view[%c10_index] {failure_ordering = relaxed, scope = device, success_ordering = release} : i32, view<11xi32> -> i32
+  %cmpx_final = view.load %values_view[%c10_index] : view<11xi32> -> i32
+  %cmpx_success_old_ok = scalar.cmpi eq, %cmpx_success_old, %cmpx_initial : i32
+  %cmpx_failure_old_ok = scalar.cmpi eq, %cmpx_failure_old, %cmpx_success_replacement : i32
+  %cmpx_final_ok = scalar.cmpi eq, %cmpx_final, %cmpx_success_replacement : i32
+  %cmpx_old_ok = scalar.andi %cmpx_success_old_ok, %cmpx_failure_old_ok : i1
+  %cmpx_ok = scalar.andi %cmpx_old_ok, %cmpx_final_ok : i1
+  %cmpx_result = scf.select %cmpx_ok, %success, %failure : i32
+  view.store %cmpx_result, %results_view[%c10_index] : i32, view<11xi32>
+  kernel.return
+}
+
+check.case public @global_atomic_i32_operations_case {
+  check.requires<hal.vulkan.feature> {feature = "vulkan_memory_model_device_scope"}
+  %values = check.generate.fill value(0) : tensor<11xi32>
+  %results = check.generate.fill value(0) : tensor<11xi32>
+  %expected = check.generate.fill value(1) : tensor<11xi32>
+  kernel.launch @global_atomic_i32_operations(%values, %results) : (tensor<11xi32>, tensor<11xi32>)
+  check.expect.equal actual(%results) expected(%expected) : tensor<11xi32>
+  check.return
+}
+
+// Floating-point minimum and maximum preserve Loom's exact NaN and signed-zero
+// semantics. Compare-exchange compares float payloads bitwise, while native
+// exchange/add and compare-exchange-loop operations all return the old value.
+kernel.def @global_atomic_f32_operations() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%values: buffer, %results: buffer) {
+  %base = index.constant 0 : offset
+  %values_global = buffer.assume.memory_space<global> %values : buffer
+  %results_global = buffer.assume.memory_space<global> %results : buffer
+  %values_aligned = buffer.assume.alignment %values_global {minimum_alignment = 4} : buffer
+  %results_aligned = buffer.assume.alignment %results_global {minimum_alignment = 4} : buffer
+  %values_view = buffer.view %values_aligned[%base] : buffer -> view<14xf32>
+  %results_view = buffer.view %results_aligned[%base] : buffer -> view<14xi32>
+
+  %c0_index = index.constant 0 : index
+  %c1_index = index.constant 1 : index
+  %c2_index = index.constant 2 : index
+  %c3_index = index.constant 3 : index
+  %c4_index = index.constant 4 : index
+  %c5_index = index.constant 5 : index
+  %c6_index = index.constant 6 : index
+  %c7_index = index.constant 7 : index
+  %c8_index = index.constant 8 : index
+  %c9_index = index.constant 9 : index
+  %c10_index = index.constant 10 : index
+  %c11_index = index.constant 11 : index
+  %c12_index = index.constant 12 : index
+  %c13_index = index.constant 13 : index
+  %failure = scalar.constant 0 : i32
+  %success = scalar.constant 1 : i32
+
+  %positive_signed_zero_bits = scalar.constant 0 : i32
+  %negative_signed_zero_bits = scalar.constant -2147483648 : i32
+  %initial_value_bits = scalar.constant 1065353216 : i32
+  %update_value_bits = scalar.constant 1073741824 : i32
+  %combined_value_bits = scalar.constant 1077936128 : i32
+  %nan_a_bits = scalar.constant 2143289345 : i32
+  %nan_b_bits = scalar.constant 2143289346 : i32
+  %positive_zero = scalar.bitcast %positive_signed_zero_bits : i32 to f32
+  %negative_zero = scalar.bitcast %negative_signed_zero_bits : i32 to f32
+  %one = scalar.bitcast %initial_value_bits : i32 to f32
+  %two = scalar.bitcast %update_value_bits : i32 to f32
+  %nan_a = scalar.bitcast %nan_a_bits : i32 to f32
+  %nan_b = scalar.bitcast %nan_b_bits : i32 to f32
+
+  view.store %one, %values_view[%c0_index] : f32, view<14xf32>
+  %xchg_old = view.atomic.rmw<xchgf> %two, %values_view[%c0_index] {ordering = relaxed, scope = thread} : f32, view<14xf32> -> f32
+  %xchg_final = view.load %values_view[%c0_index] : view<14xf32> -> f32
+  %xchg_old_bits = scalar.bitcast %xchg_old : f32 to i32
+  %xchg_final_bits = scalar.bitcast %xchg_final : f32 to i32
+  %xchg_old_ok = scalar.cmpi eq, %xchg_old_bits, %initial_value_bits : i32
+  %xchg_final_ok = scalar.cmpi eq, %xchg_final_bits, %update_value_bits : i32
+  %xchg_ok = scalar.andi %xchg_old_ok, %xchg_final_ok : i1
+  %xchg_result = scf.select %xchg_ok, %success, %failure : i32
+  view.store %xchg_result, %results_view[%c0_index] : i32, view<14xi32>
+
+  view.store %one, %values_view[%c1_index] : f32, view<14xf32>
+  %add_old = view.atomic.rmw<addf> %two, %values_view[%c1_index] {ordering = acquire, scope = subgroup} : f32, view<14xf32> -> f32
+  %add_final = view.load %values_view[%c1_index] : view<14xf32> -> f32
+  %add_old_bits = scalar.bitcast %add_old : f32 to i32
+  %add_final_bits = scalar.bitcast %add_final : f32 to i32
+  %add_old_ok = scalar.cmpi eq, %add_old_bits, %initial_value_bits : i32
+  %add_final_ok = scalar.cmpi eq, %add_final_bits, %combined_value_bits : i32
+  %add_ok = scalar.andi %add_old_ok, %add_final_ok : i1
+  %add_result = scf.select %add_ok, %success, %failure : i32
+  view.store %add_result, %results_view[%c1_index] : i32, view<14xi32>
+
+  view.store %two, %values_view[%c2_index] : f32, view<14xf32>
+  %minimum_numeric_old = view.atomic.rmw<minimumf> %one, %values_view[%c2_index] {ordering = release, scope = workgroup} : f32, view<14xf32> -> f32
+  %minimum_numeric_final = view.load %values_view[%c2_index] : view<14xf32> -> f32
+  %minimum_numeric_old_bits = scalar.bitcast %minimum_numeric_old : f32 to i32
+  %minimum_numeric_final_bits = scalar.bitcast %minimum_numeric_final : f32 to i32
+  %minimum_numeric_old_ok = scalar.cmpi eq, %minimum_numeric_old_bits, %update_value_bits : i32
+  %minimum_numeric_final_ok = scalar.cmpi eq, %minimum_numeric_final_bits, %initial_value_bits : i32
+  %minimum_numeric_ok = scalar.andi %minimum_numeric_old_ok, %minimum_numeric_final_ok : i1
+  %minimum_numeric_result = scf.select %minimum_numeric_ok, %success, %failure : i32
+  view.store %minimum_numeric_result, %results_view[%c2_index] : i32, view<14xi32>
+
+  view.store %positive_zero, %values_view[%c3_index] : f32, view<14xf32>
+  %minimum_zero_old = view.atomic.rmw<minimumf> %negative_zero, %values_view[%c3_index] {ordering = acq_rel, scope = device} : f32, view<14xf32> -> f32
+  %minimum_zero_final = view.load %values_view[%c3_index] : view<14xf32> -> f32
+  %minimum_zero_old_bits = scalar.bitcast %minimum_zero_old : f32 to i32
+  %minimum_zero_final_bits = scalar.bitcast %minimum_zero_final : f32 to i32
+  %minimum_zero_old_ok = scalar.cmpi eq, %minimum_zero_old_bits, %positive_signed_zero_bits : i32
+  %minimum_zero_final_ok = scalar.cmpi eq, %minimum_zero_final_bits, %negative_signed_zero_bits : i32
+  %minimum_zero_ok = scalar.andi %minimum_zero_old_ok, %minimum_zero_final_ok : i1
+  %minimum_zero_result = scf.select %minimum_zero_ok, %success, %failure : i32
+  view.store %minimum_zero_result, %results_view[%c3_index] : i32, view<14xi32>
+
+  view.store %one, %values_view[%c4_index] : f32, view<14xf32>
+  %minimum_nan_old = view.atomic.rmw<minimumf> %nan_a, %values_view[%c4_index] {ordering = relaxed, scope = workgroup} : f32, view<14xf32> -> f32
+  %minimum_nan_final = view.load %values_view[%c4_index] : view<14xf32> -> f32
+  %minimum_nan_old_bits = scalar.bitcast %minimum_nan_old : f32 to i32
+  %minimum_nan_final_bits = scalar.bitcast %minimum_nan_final : f32 to i32
+  %minimum_nan_old_ok = scalar.cmpi eq, %minimum_nan_old_bits, %initial_value_bits : i32
+  %minimum_nan_final_ok = scalar.cmpi eq, %minimum_nan_final_bits, %nan_a_bits : i32
+  %minimum_nan_ok = scalar.andi %minimum_nan_old_ok, %minimum_nan_final_ok : i1
+  %minimum_nan_result = scf.select %minimum_nan_ok, %success, %failure : i32
+  view.store %minimum_nan_result, %results_view[%c4_index] : i32, view<14xi32>
+
+  view.store %one, %values_view[%c5_index] : f32, view<14xf32>
+  %maximum_numeric_old = view.atomic.rmw<maximumf> %two, %values_view[%c5_index] {ordering = acquire, scope = subgroup} : f32, view<14xf32> -> f32
+  %maximum_numeric_final = view.load %values_view[%c5_index] : view<14xf32> -> f32
+  %maximum_numeric_old_bits = scalar.bitcast %maximum_numeric_old : f32 to i32
+  %maximum_numeric_final_bits = scalar.bitcast %maximum_numeric_final : f32 to i32
+  %maximum_numeric_old_ok = scalar.cmpi eq, %maximum_numeric_old_bits, %initial_value_bits : i32
+  %maximum_numeric_final_ok = scalar.cmpi eq, %maximum_numeric_final_bits, %update_value_bits : i32
+  %maximum_numeric_ok = scalar.andi %maximum_numeric_old_ok, %maximum_numeric_final_ok : i1
+  %maximum_numeric_result = scf.select %maximum_numeric_ok, %success, %failure : i32
+  view.store %maximum_numeric_result, %results_view[%c5_index] : i32, view<14xi32>
+
+  view.store %negative_zero, %values_view[%c6_index] : f32, view<14xf32>
+  %maximum_zero_old = view.atomic.rmw<maximumf> %positive_zero, %values_view[%c6_index] {ordering = release, scope = workgroup} : f32, view<14xf32> -> f32
+  %maximum_zero_final = view.load %values_view[%c6_index] : view<14xf32> -> f32
+  %maximum_zero_old_bits = scalar.bitcast %maximum_zero_old : f32 to i32
+  %maximum_zero_final_bits = scalar.bitcast %maximum_zero_final : f32 to i32
+  %maximum_zero_old_ok = scalar.cmpi eq, %maximum_zero_old_bits, %negative_signed_zero_bits : i32
+  %maximum_zero_final_ok = scalar.cmpi eq, %maximum_zero_final_bits, %positive_signed_zero_bits : i32
+  %maximum_zero_ok = scalar.andi %maximum_zero_old_ok, %maximum_zero_final_ok : i1
+  %maximum_zero_result = scf.select %maximum_zero_ok, %success, %failure : i32
+  view.store %maximum_zero_result, %results_view[%c6_index] : i32, view<14xi32>
+
+  view.store %nan_a, %values_view[%c7_index] : f32, view<14xf32>
+  %maximum_nan_old = view.atomic.rmw<maximumf> %one, %values_view[%c7_index] {ordering = acq_rel, scope = device} : f32, view<14xf32> -> f32
+  %maximum_nan_final = view.load %values_view[%c7_index] : view<14xf32> -> f32
+  %maximum_nan_old_bits = scalar.bitcast %maximum_nan_old : f32 to i32
+  %maximum_nan_final_bits = scalar.bitcast %maximum_nan_final : f32 to i32
+  %maximum_nan_old_ok = scalar.cmpi eq, %maximum_nan_old_bits, %nan_a_bits : i32
+  %maximum_nan_final_ok = scalar.cmpi eq, %maximum_nan_final_bits, %nan_a_bits : i32
+  %maximum_nan_ok = scalar.andi %maximum_nan_old_ok, %maximum_nan_final_ok : i1
+  %maximum_nan_result = scf.select %maximum_nan_ok, %success, %failure : i32
+  view.store %maximum_nan_result, %results_view[%c7_index] : i32, view<14xi32>
+
+  view.store %two, %values_view[%c8_index] : f32, view<14xf32>
+  %minnum_numeric_old = view.atomic.rmw<minnumf> %one, %values_view[%c8_index] {ordering = relaxed, scope = thread} : f32, view<14xf32> -> f32
+  %minnum_numeric_final = view.load %values_view[%c8_index] : view<14xf32> -> f32
+  %minnum_numeric_old_bits = scalar.bitcast %minnum_numeric_old : f32 to i32
+  %minnum_numeric_final_bits = scalar.bitcast %minnum_numeric_final : f32 to i32
+  %minnum_numeric_old_ok = scalar.cmpi eq, %minnum_numeric_old_bits, %update_value_bits : i32
+  %minnum_numeric_final_ok = scalar.cmpi eq, %minnum_numeric_final_bits, %initial_value_bits : i32
+  %minnum_numeric_ok = scalar.andi %minnum_numeric_old_ok, %minnum_numeric_final_ok : i1
+  %minnum_numeric_result = scf.select %minnum_numeric_ok, %success, %failure : i32
+  view.store %minnum_numeric_result, %results_view[%c8_index] : i32, view<14xi32>
+
+  view.store %nan_a, %values_view[%c9_index] : f32, view<14xf32>
+  %minnum_nan_old = view.atomic.rmw<minnumf> %one, %values_view[%c9_index] {ordering = acquire, scope = subgroup} : f32, view<14xf32> -> f32
+  %minnum_nan_final = view.load %values_view[%c9_index] : view<14xf32> -> f32
+  %minnum_nan_old_bits = scalar.bitcast %minnum_nan_old : f32 to i32
+  %minnum_nan_old_ok = scalar.cmpi eq, %minnum_nan_old_bits, %nan_a_bits : i32
+  %minnum_nan_final_bits = scalar.bitcast %minnum_nan_final : f32 to i32
+  %minnum_nan_final_ok = scalar.cmpi eq, %minnum_nan_final_bits, %initial_value_bits : i32
+  %minnum_nan_ok = scalar.andi %minnum_nan_old_ok, %minnum_nan_final_ok : i1
+  %minnum_nan_result = scf.select %minnum_nan_ok, %success, %failure : i32
+  view.store %minnum_nan_result, %results_view[%c9_index] : i32, view<14xi32>
+
+  view.store %one, %values_view[%c10_index] : f32, view<14xf32>
+  %maxnum_numeric_old = view.atomic.rmw<maxnumf> %two, %values_view[%c10_index] {ordering = release, scope = workgroup} : f32, view<14xf32> -> f32
+  %maxnum_numeric_final = view.load %values_view[%c10_index] : view<14xf32> -> f32
+  %maxnum_numeric_old_bits = scalar.bitcast %maxnum_numeric_old : f32 to i32
+  %maxnum_numeric_final_bits = scalar.bitcast %maxnum_numeric_final : f32 to i32
+  %maxnum_numeric_old_ok = scalar.cmpi eq, %maxnum_numeric_old_bits, %initial_value_bits : i32
+  %maxnum_numeric_final_ok = scalar.cmpi eq, %maxnum_numeric_final_bits, %update_value_bits : i32
+  %maxnum_numeric_ok = scalar.andi %maxnum_numeric_old_ok, %maxnum_numeric_final_ok : i1
+  %maxnum_numeric_result = scf.select %maxnum_numeric_ok, %success, %failure : i32
+  view.store %maxnum_numeric_result, %results_view[%c10_index] : i32, view<14xi32>
+
+  view.store %one, %values_view[%c11_index] : f32, view<14xf32>
+  %maxnum_nan_old = view.atomic.rmw<maxnumf> %nan_a, %values_view[%c11_index] {ordering = acq_rel, scope = device} : f32, view<14xf32> -> f32
+  %maxnum_nan_final = view.load %values_view[%c11_index] : view<14xf32> -> f32
+  %maxnum_nan_old_bits = scalar.bitcast %maxnum_nan_old : f32 to i32
+  %maxnum_nan_final_bits = scalar.bitcast %maxnum_nan_final : f32 to i32
+  %maxnum_nan_old_ok = scalar.cmpi eq, %maxnum_nan_old_bits, %initial_value_bits : i32
+  %maxnum_nan_final_ok = scalar.cmpi eq, %maxnum_nan_final_bits, %initial_value_bits : i32
+  %maxnum_nan_ok = scalar.andi %maxnum_nan_old_ok, %maxnum_nan_final_ok : i1
+  %maxnum_nan_result = scf.select %maxnum_nan_ok, %success, %failure : i32
+  view.store %maxnum_nan_result, %results_view[%c11_index] : i32, view<14xi32>
+
+  view.store %nan_a, %values_view[%c12_index] : f32, view<14xf32>
+  %cmpx_success_old = view.atomic.cmpxchg %nan_a, %two, %values_view[%c12_index] {failure_ordering = acquire, scope = device, success_ordering = acq_rel} : f32, view<14xf32> -> f32
+  %cmpx_success_final = view.load %values_view[%c12_index] : view<14xf32> -> f32
+  %cmpx_success_old_bits = scalar.bitcast %cmpx_success_old : f32 to i32
+  %cmpx_success_final_bits = scalar.bitcast %cmpx_success_final : f32 to i32
+  %cmpx_success_old_ok = scalar.cmpi eq, %cmpx_success_old_bits, %nan_a_bits : i32
+  %cmpx_success_final_ok = scalar.cmpi eq, %cmpx_success_final_bits, %update_value_bits : i32
+  %cmpx_success_ok = scalar.andi %cmpx_success_old_ok, %cmpx_success_final_ok : i1
+  %cmpx_success_result = scf.select %cmpx_success_ok, %success, %failure : i32
+  view.store %cmpx_success_result, %results_view[%c12_index] : i32, view<14xi32>
+
+  view.store %nan_a, %values_view[%c13_index] : f32, view<14xf32>
+  %cmpx_failure_old = view.atomic.cmpxchg %nan_b, %two, %values_view[%c13_index] {failure_ordering = relaxed, scope = device, success_ordering = release} : f32, view<14xf32> -> f32
+  %cmpx_failure_final = view.load %values_view[%c13_index] : view<14xf32> -> f32
+  %cmpx_failure_old_bits = scalar.bitcast %cmpx_failure_old : f32 to i32
+  %cmpx_failure_final_bits = scalar.bitcast %cmpx_failure_final : f32 to i32
+  %cmpx_failure_old_ok = scalar.cmpi eq, %cmpx_failure_old_bits, %nan_a_bits : i32
+  %cmpx_failure_final_ok = scalar.cmpi eq, %cmpx_failure_final_bits, %nan_a_bits : i32
+  %cmpx_failure_ok = scalar.andi %cmpx_failure_old_ok, %cmpx_failure_final_ok : i1
+  %cmpx_failure_result = scf.select %cmpx_failure_ok, %success, %failure : i32
+  view.store %cmpx_failure_result, %results_view[%c13_index] : i32, view<14xi32>
+  kernel.return
+}
+
+check.case public @global_atomic_f32_operations_case {
+  check.requires<hal.vulkan.feature> {feature = "vulkan_memory_model_device_scope"}
+  %values = check.generate.fill value(0.0) : tensor<14xf32>
+  %results = check.generate.fill value(0) : tensor<14xi32>
+  %expected = check.generate.fill value(1) : tensor<14xi32>
+  kernel.launch @global_atomic_f32_operations(%values, %results) : (tensor<14xf32>, tensor<14xi32>)
+  check.expect.equal actual(%results) expected(%expected) : tensor<14xi32>
+  check.return
+}
+
+// FP64 exchange can use a native instruction while add and exact min/max use
+// the same-width integer compare-exchange fallback when native operations are
+// absent. The case is feature-gated as one unit by the selected target profile.
+kernel.def @global_atomic_f64_operations() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%values: buffer, %results: buffer) {
+  %base = index.constant 0 : offset
+  %values_global = buffer.assume.memory_space<global> %values : buffer
+  %results_global = buffer.assume.memory_space<global> %results : buffer
+  %values_aligned = buffer.assume.alignment %values_global {minimum_alignment = 8} : buffer
+  %results_aligned = buffer.assume.alignment %results_global {minimum_alignment = 4} : buffer
+  %values_view = buffer.view %values_aligned[%base] : buffer -> view<5xf64>
+  %results_view = buffer.view %results_aligned[%base] : buffer -> view<5xi32>
+
+  %c0_index = index.constant 0 : index
+  %c1_index = index.constant 1 : index
+  %c2_index = index.constant 2 : index
+  %c3_index = index.constant 3 : index
+  %c4_index = index.constant 4 : index
+  %failure = scalar.constant 0 : i32
+  %success = scalar.constant 1 : i32
+
+  %positive_signed_zero_bits = scalar.constant 0 : i64
+  %negative_signed_zero_bits = scalar.constant -9223372036854775808 : i64
+  %initial_value_bits = scalar.constant 4607182418800017408 : i64
+  %update_value_bits = scalar.constant 4611686018427387904 : i64
+  %combined_value_bits = scalar.constant 4613937818241073152 : i64
+  %nan_bits = scalar.constant 9221120237041090561 : i64
+  %positive_zero = scalar.bitcast %positive_signed_zero_bits : i64 to f64
+  %negative_zero = scalar.bitcast %negative_signed_zero_bits : i64 to f64
+  %one = scalar.bitcast %initial_value_bits : i64 to f64
+  %two = scalar.bitcast %update_value_bits : i64 to f64
+  %nan = scalar.bitcast %nan_bits : i64 to f64
+
+  view.store %one, %values_view[%c0_index] : f64, view<5xf64>
+  %xchg_old = view.atomic.rmw<xchgf> %two, %values_view[%c0_index] {ordering = relaxed, scope = thread} : f64, view<5xf64> -> f64
+  %xchg_final = view.load %values_view[%c0_index] : view<5xf64> -> f64
+  %xchg_old_bits = scalar.bitcast %xchg_old : f64 to i64
+  %xchg_final_bits = scalar.bitcast %xchg_final : f64 to i64
+  %xchg_old_ok = scalar.cmpi eq, %xchg_old_bits, %initial_value_bits : i64
+  %xchg_final_ok = scalar.cmpi eq, %xchg_final_bits, %update_value_bits : i64
+  %xchg_ok = scalar.andi %xchg_old_ok, %xchg_final_ok : i1
+  %xchg_result = scf.select %xchg_ok, %success, %failure : i32
+  view.store %xchg_result, %results_view[%c0_index] : i32, view<5xi32>
+
+  view.store %one, %values_view[%c1_index] : f64, view<5xf64>
+  %add_old = view.atomic.rmw<addf> %two, %values_view[%c1_index] {ordering = acquire, scope = subgroup} : f64, view<5xf64> -> f64
+  %add_final = view.load %values_view[%c1_index] : view<5xf64> -> f64
+  %add_old_bits = scalar.bitcast %add_old : f64 to i64
+  %add_final_bits = scalar.bitcast %add_final : f64 to i64
+  %add_old_ok = scalar.cmpi eq, %add_old_bits, %initial_value_bits : i64
+  %add_final_ok = scalar.cmpi eq, %add_final_bits, %combined_value_bits : i64
+  %add_ok = scalar.andi %add_old_ok, %add_final_ok : i1
+  %add_result = scf.select %add_ok, %success, %failure : i32
+  view.store %add_result, %results_view[%c1_index] : i32, view<5xi32>
+
+  view.store %positive_zero, %values_view[%c2_index] : f64, view<5xf64>
+  %minimum_old = view.atomic.rmw<minimumf> %negative_zero, %values_view[%c2_index] {ordering = release, scope = workgroup} : f64, view<5xf64> -> f64
+  %minimum_final = view.load %values_view[%c2_index] : view<5xf64> -> f64
+  %minimum_old_bits = scalar.bitcast %minimum_old : f64 to i64
+  %minimum_final_bits = scalar.bitcast %minimum_final : f64 to i64
+  %minimum_old_ok = scalar.cmpi eq, %minimum_old_bits, %positive_signed_zero_bits : i64
+  %minimum_final_ok = scalar.cmpi eq, %minimum_final_bits, %negative_signed_zero_bits : i64
+  %minimum_ok = scalar.andi %minimum_old_ok, %minimum_final_ok : i1
+  %minimum_result = scf.select %minimum_ok, %success, %failure : i32
+  view.store %minimum_result, %results_view[%c2_index] : i32, view<5xi32>
+
+  view.store %nan, %values_view[%c3_index] : f64, view<5xf64>
+  %minnum_old = view.atomic.rmw<minnumf> %one, %values_view[%c3_index] {ordering = acq_rel, scope = device} : f64, view<5xf64> -> f64
+  %minnum_final = view.load %values_view[%c3_index] : view<5xf64> -> f64
+  %minnum_old_bits = scalar.bitcast %minnum_old : f64 to i64
+  %minnum_final_bits = scalar.bitcast %minnum_final : f64 to i64
+  %minnum_old_ok = scalar.cmpi eq, %minnum_old_bits, %nan_bits : i64
+  %minnum_final_ok = scalar.cmpi eq, %minnum_final_bits, %initial_value_bits : i64
+  %minnum_ok = scalar.andi %minnum_old_ok, %minnum_final_ok : i1
+  %minnum_result = scf.select %minnum_ok, %success, %failure : i32
+  view.store %minnum_result, %results_view[%c3_index] : i32, view<5xi32>
+
+  view.store %nan, %values_view[%c4_index] : f64, view<5xf64>
+  %cmpx_old = view.atomic.cmpxchg %nan, %two, %values_view[%c4_index] {failure_ordering = acquire, scope = device, success_ordering = acq_rel} : f64, view<5xf64> -> f64
+  %cmpx_final = view.load %values_view[%c4_index] : view<5xf64> -> f64
+  %cmpx_old_bits = scalar.bitcast %cmpx_old : f64 to i64
+  %cmpx_final_bits = scalar.bitcast %cmpx_final : f64 to i64
+  %cmpx_old_ok = scalar.cmpi eq, %cmpx_old_bits, %nan_bits : i64
+  %cmpx_final_ok = scalar.cmpi eq, %cmpx_final_bits, %update_value_bits : i64
+  %cmpx_ok = scalar.andi %cmpx_old_ok, %cmpx_final_ok : i1
+  %cmpx_result = scf.select %cmpx_ok, %success, %failure : i32
+  view.store %cmpx_result, %results_view[%c4_index] : i32, view<5xi32>
+  kernel.return
+}
+
+check.case public @global_atomic_f64_operations_case {
+  check.requires<hal.vulkan.feature> {feature = "shader_float64"}
+  check.requires<hal.vulkan.feature> {feature = "shader_int64"}
+  check.requires<hal.vulkan.feature> {feature = "shader_buffer_int64_atomics"}
+  check.requires<hal.vulkan.feature> {feature = "vulkan_memory_model_device_scope"}
+  %values = check.generate.fill value(0.0) : tensor<5xf64>
+  %results = check.generate.fill value(0) : tensor<5xi32>
+  %expected = check.generate.fill value(1) : tensor<5xi32>
+  kernel.launch @global_atomic_f64_operations(%values, %results) : (tensor<5xf64>, tensor<5xi32>)
+  check.expect.equal actual(%results) expected(%expected) : tensor<5xi32>
+  check.return
+}
+
+// FP16 has no same-width integer compare-exchange fallback in Vulkan SPIR-V,
+// so exchange and add are independently gated native operations.
+kernel.def @global_atomic_f16_exchange() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%value: buffer, %result: buffer) {
+  %base = index.constant 0 : offset
+  %value_index = index.constant 0 : index
+  %failure = scalar.constant 0 : i32
+  %success = scalar.constant 1 : i32
+  %initial_value_bits = scalar.constant 15360 : i16
+  %update_value_bits = scalar.constant 16384 : i16
+  %one = scalar.bitcast %initial_value_bits : i16 to f16
+  %two = scalar.bitcast %update_value_bits : i16 to f16
+  %value_global = buffer.assume.memory_space<global> %value : buffer
+  %result_global = buffer.assume.memory_space<global> %result : buffer
+  %value_aligned = buffer.assume.alignment %value_global {minimum_alignment = 2} : buffer
+  %result_aligned = buffer.assume.alignment %result_global {minimum_alignment = 4} : buffer
+  %value_view = buffer.view %value_aligned[%base] : buffer -> view<1xf16>
+  %result_view = buffer.view %result_aligned[%base] : buffer -> view<1xi32>
+
+  view.store %one, %value_view[%value_index] : f16, view<1xf16>
+  %xchg_old = view.atomic.rmw<xchgf> %two, %value_view[%value_index] {ordering = relaxed, scope = thread} : f16, view<1xf16> -> f16
+  %xchg_final = view.load %value_view[%value_index] : view<1xf16> -> f16
+  %xchg_old_bits = scalar.bitcast %xchg_old : f16 to i16
+  %xchg_final_bits = scalar.bitcast %xchg_final : f16 to i16
+  %xchg_old_ok = scalar.cmpi eq, %xchg_old_bits, %initial_value_bits : i16
+  %xchg_final_ok = scalar.cmpi eq, %xchg_final_bits, %update_value_bits : i16
+  %xchg_ok = scalar.andi %xchg_old_ok, %xchg_final_ok : i1
+  %xchg_result = scf.select %xchg_ok, %success, %failure : i32
+  view.store %xchg_result, %result_view[%value_index] : i32, view<1xi32>
+  kernel.return
+}
+
+kernel.def @global_atomic_f16_add() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%value: buffer, %result: buffer) {
+  %base = index.constant 0 : offset
+  %value_index = index.constant 0 : index
+  %failure = scalar.constant 0 : i32
+  %success = scalar.constant 1 : i32
+  %initial_value_bits = scalar.constant 15360 : i16
+  %update_value_bits = scalar.constant 16384 : i16
+  %combined_value_bits = scalar.constant 16896 : i16
+  %one = scalar.bitcast %initial_value_bits : i16 to f16
+  %two = scalar.bitcast %update_value_bits : i16 to f16
+  %value_global = buffer.assume.memory_space<global> %value : buffer
+  %result_global = buffer.assume.memory_space<global> %result : buffer
+  %value_aligned = buffer.assume.alignment %value_global {minimum_alignment = 2} : buffer
+  %result_aligned = buffer.assume.alignment %result_global {minimum_alignment = 4} : buffer
+  %value_view = buffer.view %value_aligned[%base] : buffer -> view<1xf16>
+  %result_view = buffer.view %result_aligned[%base] : buffer -> view<1xi32>
+
+  view.store %one, %value_view[%value_index] : f16, view<1xf16>
+  %add_old = view.atomic.rmw<addf> %two, %value_view[%value_index] {ordering = acq_rel, scope = device} : f16, view<1xf16> -> f16
+  %add_final = view.load %value_view[%value_index] : view<1xf16> -> f16
+  %add_old_bits = scalar.bitcast %add_old : f16 to i16
+  %add_final_bits = scalar.bitcast %add_final : f16 to i16
+  %add_old_ok = scalar.cmpi eq, %add_old_bits, %initial_value_bits : i16
+  %add_final_ok = scalar.cmpi eq, %add_final_bits, %combined_value_bits : i16
+  %add_ok = scalar.andi %add_old_ok, %add_final_ok : i1
+  %add_result = scf.select %add_ok, %success, %failure : i32
+  view.store %add_result, %result_view[%value_index] : i32, view<1xi32>
+  kernel.return
+}
+
+check.case public @global_atomic_f16_exchange_case {
+  check.requires<hal.vulkan.feature> {feature = "shader_float16"}
+  check.requires<hal.vulkan.feature> {feature = "storage_buffer_16bit_access"}
+  check.requires<hal.vulkan.feature> {feature = "shader_buffer_float16_atomics"}
+  %value = check.generate.fill value(0.0) : tensor<1xf16>
+  %result = check.generate.fill value(0) : tensor<1xi32>
+  %expected = check.generate.fill value(1) : tensor<1xi32>
+  kernel.launch @global_atomic_f16_exchange(%value, %result) : (tensor<1xf16>, tensor<1xi32>)
+  check.expect.equal actual(%result) expected(%expected) : tensor<1xi32>
+  check.return
+}
+
+check.case public @global_atomic_f16_add_case {
+  check.requires<hal.vulkan.feature> {feature = "shader_float16"}
+  check.requires<hal.vulkan.feature> {feature = "storage_buffer_16bit_access"}
+  check.requires<hal.vulkan.feature> {feature = "shader_buffer_float16_atomic_add"}
+  check.requires<hal.vulkan.feature> {feature = "vulkan_memory_model_device_scope"}
+  %value = check.generate.fill value(0.0) : tensor<1xf16>
+  %result = check.generate.fill value(0) : tensor<1xi32>
+  %expected = check.generate.fill value(1) : tensor<1xi32>
+  kernel.launch @global_atomic_f16_add(%value, %result) : (tensor<1xf16>, tensor<1xi32>)
+  check.expect.equal actual(%result) expected(%expected) : tensor<1xi32>
+  check.return
+}
+
+// Workgroup allocation carriers are selected for the entire allocation. Pure
+// native float use may retain a float carrier; exact operations and mixed
+// integer/float aliases use a same-width integer carrier and CAS lowering.
+kernel.def @workgroup_atomic_carriers() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%results: buffer) {
+  %base = index.constant 0 : offset
+  %word_bytes = index.constant 4 : offset
+  %c0_index = index.constant 0 : index
+  %c1_index = index.constant 1 : index
+  %c2_index = index.constant 2 : index
+  %c3_index = index.constant 3 : index
+  %failure = scalar.constant 0 : i32
+  %success = scalar.constant 1 : i32
+  %positive_signed_zero_bits = scalar.constant 0 : i32
+  %negative_signed_zero_bits = scalar.constant -2147483648 : i32
+  %initial_value_bits = scalar.constant 1065353216 : i32
+  %update_value_bits = scalar.constant 1073741824 : i32
+  %combined_value_bits = scalar.constant 1077936128 : i32
+  %positive_zero = scalar.bitcast %positive_signed_zero_bits : i32 to f32
+  %negative_zero = scalar.bitcast %negative_signed_zero_bits : i32 to f32
+  %one = scalar.bitcast %initial_value_bits : i32 to f32
+  %two = scalar.bitcast %update_value_bits : i32 to f32
+
+  %results_global = buffer.assume.memory_space<global> %results : buffer
+  %results_aligned = buffer.assume.alignment %results_global {minimum_alignment = 4} : buffer
+  %results_view = buffer.view %results_aligned[%base] : buffer -> view<4xi32>
+
+  %native_scratch = buffer.alloca<workgroup> align(4) %word_bytes : buffer
+  %native_view = buffer.view %native_scratch[%base] : buffer -> view<1xf32>
+  view.store %one, %native_view[%c0_index] : f32, view<1xf32>
+  %native_xchg_old = view.atomic.rmw<xchgf> %two, %native_view[%c0_index] {ordering = relaxed, scope = workgroup} : f32, view<1xf32> -> f32
+  %native_add_old = view.atomic.rmw<addf> %one, %native_view[%c0_index] {ordering = acq_rel, scope = workgroup} : f32, view<1xf32> -> f32
+  %native_final = view.load %native_view[%c0_index] : view<1xf32> -> f32
+  %native_xchg_old_bits = scalar.bitcast %native_xchg_old : f32 to i32
+  %native_add_old_bits = scalar.bitcast %native_add_old : f32 to i32
+  %native_final_bits = scalar.bitcast %native_final : f32 to i32
+  %native_xchg_ok = scalar.cmpi eq, %native_xchg_old_bits, %initial_value_bits : i32
+  %native_add_ok = scalar.cmpi eq, %native_add_old_bits, %update_value_bits : i32
+  %native_final_ok = scalar.cmpi eq, %native_final_bits, %combined_value_bits : i32
+  %native_old_ok = scalar.andi %native_xchg_ok, %native_add_ok : i1
+  %native_ok = scalar.andi %native_old_ok, %native_final_ok : i1
+  %native_result = scf.select %native_ok, %success, %failure : i32
+  view.store %native_result, %results_view[%c0_index] : i32, view<4xi32>
+
+  %exact_scratch = buffer.alloca<workgroup> align(4) %word_bytes : buffer
+  %exact_view = buffer.view %exact_scratch[%base] : buffer -> view<1xf32>
+  view.store %positive_zero, %exact_view[%c0_index] : f32, view<1xf32>
+  %exact_old = view.atomic.rmw<minimumf> %negative_zero, %exact_view[%c0_index] {ordering = acq_rel, scope = workgroup} : f32, view<1xf32> -> f32
+  %exact_final = view.load %exact_view[%c0_index] : view<1xf32> -> f32
+  %exact_old_bits = scalar.bitcast %exact_old : f32 to i32
+  %exact_final_bits = scalar.bitcast %exact_final : f32 to i32
+  %exact_old_ok = scalar.cmpi eq, %exact_old_bits, %positive_signed_zero_bits : i32
+  %exact_final_ok = scalar.cmpi eq, %exact_final_bits, %negative_signed_zero_bits : i32
+  %exact_ok = scalar.andi %exact_old_ok, %exact_final_ok : i1
+  %exact_result = scf.select %exact_ok, %success, %failure : i32
+  view.store %exact_result, %results_view[%c1_index] : i32, view<4xi32>
+
+  %mixed_scratch = buffer.alloca<workgroup> align(4) %word_bytes : buffer
+  %mixed_float_view = buffer.view %mixed_scratch[%base] : buffer -> view<1xf32>
+  %mixed_integer_view = buffer.view %mixed_scratch[%base] : buffer -> view<1xi32>
+  view.store %initial_value_bits, %mixed_integer_view[%c0_index] : i32, view<1xi32>
+  %mixed_old = view.atomic.rmw<addf> %one, %mixed_float_view[%c0_index] {ordering = acq_rel, scope = workgroup} : f32, view<1xf32> -> f32
+  %mixed_final_bits = view.load %mixed_integer_view[%c0_index] : view<1xi32> -> i32
+  %mixed_old_bits = scalar.bitcast %mixed_old : f32 to i32
+  %mixed_old_ok = scalar.cmpi eq, %mixed_old_bits, %initial_value_bits : i32
+  %mixed_final_ok = scalar.cmpi eq, %mixed_final_bits, %update_value_bits : i32
+  %mixed_ok = scalar.andi %mixed_old_ok, %mixed_final_ok : i1
+  %mixed_result = scf.select %mixed_ok, %success, %failure : i32
+  view.store %mixed_result, %results_view[%c2_index] : i32, view<4xi32>
+
+  %integer_scratch = buffer.alloca<workgroup> align(4) %word_bytes : buffer
+  %integer_view = buffer.view %integer_scratch[%base] : buffer -> view<1xi32>
+  %integer_initial = scalar.constant 7 : i32
+  %integer_replacement = scalar.constant 9 : i32
+  %integer_increment = scalar.constant 1 : i32
+  %integer_final_expected = scalar.constant 10 : i32
+  view.store %integer_initial, %integer_view[%c0_index] : i32, view<1xi32>
+  %integer_cmpx_old = view.atomic.cmpxchg %integer_initial, %integer_replacement, %integer_view[%c0_index] {failure_ordering = acquire, scope = workgroup, success_ordering = acq_rel} : i32, view<1xi32> -> i32
+  %integer_add_old = view.atomic.rmw<addi> %integer_increment, %integer_view[%c0_index] {ordering = acq_rel, scope = workgroup} : i32, view<1xi32> -> i32
+  %integer_final = view.load %integer_view[%c0_index] : view<1xi32> -> i32
+  %integer_cmpx_ok = scalar.cmpi eq, %integer_cmpx_old, %integer_initial : i32
+  %integer_add_ok = scalar.cmpi eq, %integer_add_old, %integer_replacement : i32
+  %integer_final_ok = scalar.cmpi eq, %integer_final, %integer_final_expected : i32
+  %integer_old_ok = scalar.andi %integer_cmpx_ok, %integer_add_ok : i1
+  %integer_ok = scalar.andi %integer_old_ok, %integer_final_ok : i1
+  %integer_result = scf.select %integer_ok, %success, %failure : i32
+  view.store %integer_result, %results_view[%c3_index] : i32, view<4xi32>
+  kernel.return
+}
+
+check.case public @workgroup_atomic_carriers_case {
+  %results = check.generate.fill value(0) : tensor<4xi32>
+  %expected = check.generate.fill value(1) : tensor<4xi32>
+  kernel.launch @workgroup_atomic_carriers(%results) : (tensor<4xi32>)
+  check.expect.equal actual(%results) expected(%expected) : tensor<4xi32>
+  check.return
+}
+
+// Vector atomic forms scalarize through the standard vector memory path before
+// selecting the same scalar SPIR-V contracts. This covers unmasked and masked
+// reductions, unmasked and masked RMW results, and compare-exchange results.
+kernel.def @global_vector_atomic_forms() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%values: buffer, %results: buffer) {
+  %base = index.constant 0 : offset
+  %layout = encoding.layout.dense : encoding<layout>
+  %c0_index = index.constant 0 : index
+  %c1_index = index.constant 1 : index
+  %c2_index = index.constant 2 : index
+  %c3_index = index.constant 3 : index
+  %c4_index = index.constant 4 : index
+  %c5_index = index.constant 5 : index
+  %c6_index = index.constant 6 : index
+  %c7_index = index.constant 7 : index
+  %c8_index = index.constant 8 : index
+  %c9_index = index.constant 9 : index
+  %false = scalar.constant false : i1
+  %true = scalar.constant true : i1
+  %failure = scalar.constant 0 : i32
+  %success = scalar.constant 1 : i32
+  %offsets = vector.from_elements %c0_index, %c1_index : vector<2xindex>
+  %first_lane_mask = vector.from_elements %true, %false : vector<2xi1>
+  %second_lane_mask = vector.from_elements %false, %true : vector<2xi1>
+
+  %values_global = buffer.assume.memory_space<global> %values : buffer
+  %results_global = buffer.assume.memory_space<global> %results : buffer
+  %values_aligned = buffer.assume.alignment %values_global {minimum_alignment = 4} : buffer
+  %results_aligned = buffer.assume.alignment %results_global {minimum_alignment = 4} : buffer
+  %values_view = buffer.view %values_aligned[%base] : buffer -> view<10xi32, %layout>
+  %results_view = buffer.view %results_aligned[%base] : buffer -> view<5xi32>
+
+  %reduce_initial0 = scalar.constant 1 : i32
+  %reduce_initial1 = scalar.constant 2 : i32
+  %reduce_value0 = scalar.constant 3 : i32
+  %reduce_value1 = scalar.constant 4 : i32
+  %reduce_expected0 = scalar.constant 4 : i32
+  %reduce_expected1 = scalar.constant 6 : i32
+  %reduce_values = vector.from_elements %reduce_value0, %reduce_value1 : vector<2xi32>
+  view.store %reduce_initial0, %values_view[%c0_index] : i32, view<10xi32, %layout>
+  view.store %reduce_initial1, %values_view[%c1_index] : i32, view<10xi32, %layout>
+  vector.atomic.reduce<addi> %reduce_values, %values_view[0][%offsets] {ordering = relaxed, scope = workgroup} : vector<2xi32>, view<10xi32, %layout>, vector<2xindex>
+  %reduce_final0 = view.load %values_view[%c0_index] : view<10xi32, %layout> -> i32
+  %reduce_final1 = view.load %values_view[%c1_index] : view<10xi32, %layout> -> i32
+  %reduce_final0_ok = scalar.cmpi eq, %reduce_final0, %reduce_expected0 : i32
+  %reduce_final1_ok = scalar.cmpi eq, %reduce_final1, %reduce_expected1 : i32
+  %reduce_ok = scalar.andi %reduce_final0_ok, %reduce_final1_ok : i1
+  %reduce_result = scf.select %reduce_ok, %success, %failure : i32
+  view.store %reduce_result, %results_view[%c0_index] : i32, view<5xi32>
+
+  %masked_reduce_initial = scalar.constant 8 : i32
+  %masked_reduce_value = scalar.constant 3 : i32
+  %masked_reduce_expected0 = scalar.constant 11 : i32
+  %masked_reduce_values = vector.splat %masked_reduce_value : vector<2xi32>
+  view.store %masked_reduce_initial, %values_view[%c2_index] : i32, view<10xi32, %layout>
+  view.store %masked_reduce_initial, %values_view[%c3_index] : i32, view<10xi32, %layout>
+  vector.atomic.reduce.mask<ori> %masked_reduce_values, %values_view[2][%offsets], %first_lane_mask {ordering = release, scope = workgroup} : vector<2xi32>, view<10xi32, %layout>, vector<2xindex>, vector<2xi1>
+  %masked_reduce_final0 = view.load %values_view[%c2_index] : view<10xi32, %layout> -> i32
+  %masked_reduce_final1 = view.load %values_view[%c3_index] : view<10xi32, %layout> -> i32
+  %masked_reduce_final0_ok = scalar.cmpi eq, %masked_reduce_final0, %masked_reduce_expected0 : i32
+  %masked_reduce_final1_ok = scalar.cmpi eq, %masked_reduce_final1, %masked_reduce_initial : i32
+  %masked_reduce_ok = scalar.andi %masked_reduce_final0_ok, %masked_reduce_final1_ok : i1
+  %masked_reduce_result = scf.select %masked_reduce_ok, %success, %failure : i32
+  view.store %masked_reduce_result, %results_view[%c1_index] : i32, view<5xi32>
+
+  %rmw_initial0 = scalar.constant 5 : i32
+  %rmw_initial1 = scalar.constant 6 : i32
+  %rmw_value0 = scalar.constant 7 : i32
+  %rmw_value1 = scalar.constant 8 : i32
+  %rmw_values = vector.from_elements %rmw_value0, %rmw_value1 : vector<2xi32>
+  view.store %rmw_initial0, %values_view[%c4_index] : i32, view<10xi32, %layout>
+  view.store %rmw_initial1, %values_view[%c5_index] : i32, view<10xi32, %layout>
+  %rmw_old = vector.atomic.rmw<xchgi> %rmw_values, %values_view[4][%offsets] {ordering = acquire, scope = workgroup} : vector<2xi32>, view<10xi32, %layout>, vector<2xindex>
+  %rmw_old0 = vector.extract %rmw_old[0] : vector<2xi32> -> i32
+  %rmw_old1 = vector.extract %rmw_old[1] : vector<2xi32> -> i32
+  %rmw_final0 = view.load %values_view[%c4_index] : view<10xi32, %layout> -> i32
+  %rmw_final1 = view.load %values_view[%c5_index] : view<10xi32, %layout> -> i32
+  %rmw_old0_ok = scalar.cmpi eq, %rmw_old0, %rmw_initial0 : i32
+  %rmw_old1_ok = scalar.cmpi eq, %rmw_old1, %rmw_initial1 : i32
+  %rmw_final0_ok = scalar.cmpi eq, %rmw_final0, %rmw_value0 : i32
+  %rmw_final1_ok = scalar.cmpi eq, %rmw_final1, %rmw_value1 : i32
+  %rmw_old_ok = scalar.andi %rmw_old0_ok, %rmw_old1_ok : i1
+  %rmw_final_ok = scalar.andi %rmw_final0_ok, %rmw_final1_ok : i1
+  %rmw_ok = scalar.andi %rmw_old_ok, %rmw_final_ok : i1
+  %rmw_result = scf.select %rmw_ok, %success, %failure : i32
+  view.store %rmw_result, %results_view[%c2_index] : i32, view<5xi32>
+
+  %masked_rmw_initial0 = scalar.constant 10 : i32
+  %masked_rmw_initial1 = scalar.constant 12 : i32
+  %masked_rmw_value0 = scalar.constant 3 : i32
+  %masked_rmw_value1 = scalar.constant 5 : i32
+  %masked_rmw_passthrough0 = scalar.constant 101 : i32
+  %masked_rmw_passthrough1 = scalar.constant 102 : i32
+  %masked_rmw_expected1 = scalar.constant 9 : i32
+  %masked_rmw_values = vector.from_elements %masked_rmw_value0, %masked_rmw_value1 : vector<2xi32>
+  %masked_rmw_passthrough = vector.from_elements %masked_rmw_passthrough0, %masked_rmw_passthrough1 : vector<2xi32>
+  view.store %masked_rmw_initial0, %values_view[%c6_index] : i32, view<10xi32, %layout>
+  view.store %masked_rmw_initial1, %values_view[%c7_index] : i32, view<10xi32, %layout>
+  %masked_rmw_old = vector.atomic.rmw.mask<xori> %masked_rmw_values, %values_view[6][%offsets], %second_lane_mask, %masked_rmw_passthrough {ordering = acq_rel, scope = workgroup} : vector<2xi32>, view<10xi32, %layout>, vector<2xindex>, vector<2xi1>, vector<2xi32>
+  %masked_rmw_old0 = vector.extract %masked_rmw_old[0] : vector<2xi32> -> i32
+  %masked_rmw_old1 = vector.extract %masked_rmw_old[1] : vector<2xi32> -> i32
+  %masked_rmw_final0 = view.load %values_view[%c6_index] : view<10xi32, %layout> -> i32
+  %masked_rmw_final1 = view.load %values_view[%c7_index] : view<10xi32, %layout> -> i32
+  %masked_rmw_old0_ok = scalar.cmpi eq, %masked_rmw_old0, %masked_rmw_passthrough0 : i32
+  %masked_rmw_old1_ok = scalar.cmpi eq, %masked_rmw_old1, %masked_rmw_initial1 : i32
+  %masked_rmw_final0_ok = scalar.cmpi eq, %masked_rmw_final0, %masked_rmw_initial0 : i32
+  %masked_rmw_final1_ok = scalar.cmpi eq, %masked_rmw_final1, %masked_rmw_expected1 : i32
+  %masked_rmw_old_ok = scalar.andi %masked_rmw_old0_ok, %masked_rmw_old1_ok : i1
+  %masked_rmw_final_ok = scalar.andi %masked_rmw_final0_ok, %masked_rmw_final1_ok : i1
+  %masked_rmw_ok = scalar.andi %masked_rmw_old_ok, %masked_rmw_final_ok : i1
+  %masked_rmw_result = scf.select %masked_rmw_ok, %success, %failure : i32
+  view.store %masked_rmw_result, %results_view[%c3_index] : i32, view<5xi32>
+
+  %cmpx_initial0 = scalar.constant 20 : i32
+  %cmpx_initial1 = scalar.constant 21 : i32
+  %cmpx_expected1 = scalar.constant 99 : i32
+  %cmpx_replacement0 = scalar.constant 30 : i32
+  %cmpx_replacement1 = scalar.constant 31 : i32
+  %cmpx_expected = vector.from_elements %cmpx_initial0, %cmpx_expected1 : vector<2xi32>
+  %cmpx_replacement = vector.from_elements %cmpx_replacement0, %cmpx_replacement1 : vector<2xi32>
+  view.store %cmpx_initial0, %values_view[%c8_index] : i32, view<10xi32, %layout>
+  view.store %cmpx_initial1, %values_view[%c9_index] : i32, view<10xi32, %layout>
+  %cmpx_old = vector.atomic.cmpxchg %cmpx_expected, %cmpx_replacement, %values_view[8][%offsets] {failure_ordering = acquire, scope = workgroup, success_ordering = acq_rel} : vector<2xi32>, view<10xi32, %layout>, vector<2xindex> -> vector<2xi32>
+  %cmpx_old0 = vector.extract %cmpx_old[0] : vector<2xi32> -> i32
+  %cmpx_old1 = vector.extract %cmpx_old[1] : vector<2xi32> -> i32
+  %cmpx_final0 = view.load %values_view[%c8_index] : view<10xi32, %layout> -> i32
+  %cmpx_final1 = view.load %values_view[%c9_index] : view<10xi32, %layout> -> i32
+  %cmpx_old0_ok = scalar.cmpi eq, %cmpx_old0, %cmpx_initial0 : i32
+  %cmpx_old1_ok = scalar.cmpi eq, %cmpx_old1, %cmpx_initial1 : i32
+  %cmpx_final0_ok = scalar.cmpi eq, %cmpx_final0, %cmpx_replacement0 : i32
+  %cmpx_final1_ok = scalar.cmpi eq, %cmpx_final1, %cmpx_initial1 : i32
+  %cmpx_old_ok = scalar.andi %cmpx_old0_ok, %cmpx_old1_ok : i1
+  %cmpx_final_ok = scalar.andi %cmpx_final0_ok, %cmpx_final1_ok : i1
+  %cmpx_ok = scalar.andi %cmpx_old_ok, %cmpx_final_ok : i1
+  %cmpx_result = scf.select %cmpx_ok, %success, %failure : i32
+  view.store %cmpx_result, %results_view[%c4_index] : i32, view<5xi32>
+  kernel.return
+}
+
+check.case public @global_vector_atomic_forms_case {
+  %values = check.generate.fill value(0) : tensor<10xi32>
+  %results = check.generate.fill value(0) : tensor<5xi32>
+  %expected = check.generate.fill value(1) : tensor<5xi32>
+  kernel.launch @global_vector_atomic_forms(%values, %results) : (tensor<10xi32>, tensor<5xi32>)
+  check.expect.equal actual(%results) expected(%expected) : tensor<5xi32>
+  check.return
+}

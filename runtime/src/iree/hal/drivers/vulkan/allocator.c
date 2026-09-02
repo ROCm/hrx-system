@@ -152,7 +152,7 @@ struct iree_hal_vulkan_allocator_t {
   // Physical-device memory properties captured during logical-device creation.
   VkPhysicalDeviceMemoryProperties2 memory_properties2;
 
-  // HAL feature bits enabled on the logical device.
+  // HAL features enabled on the logical device.
   iree_hal_vulkan_features_t enabled_features;
 
   // Device extension bits enabled on the logical device.
@@ -1068,7 +1068,7 @@ static bool iree_hal_vulkan_allocator_allocation_size_in_range(
 
 static bool iree_hal_vulkan_allocator_supports_sparse_binding(
     const iree_hal_vulkan_allocator_t* allocator) {
-  return iree_all_bits_set(allocator->enabled_features,
+  return iree_all_bits_set(allocator->enabled_features.general,
                            IREE_HAL_VULKAN_FEATURE_ENABLE_SPARSE_BINDING) &&
          allocator->sparse_binding_queue != NULL;
 }
@@ -1076,7 +1076,7 @@ static bool iree_hal_vulkan_allocator_supports_sparse_binding(
 static bool iree_hal_vulkan_allocator_supports_sparse_virtual_memory(
     const iree_hal_vulkan_allocator_t* allocator) {
   return iree_all_bits_set(
-             allocator->enabled_features,
+             allocator->enabled_features.general,
              IREE_HAL_VULKAN_FEATURE_ENABLE_SPARSE_RESIDENCY_ALIASED) &&
          allocator->sparse_binding_queue != NULL;
 }
@@ -1273,7 +1273,7 @@ static VkBufferUsageFlags iree_hal_vulkan_buffer_usage_from_hal(
     usage |= VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
   }
   if (iree_all_bits_set(
-          allocator->enabled_features,
+          allocator->enabled_features.general,
           IREE_HAL_VULKAN_FEATURE_ENABLE_BUFFER_DEVICE_ADDRESSES) &&
       iree_any_bit_set(hal_usage, IREE_HAL_BUFFER_USAGE_DISPATCH)) {
     usage |= VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
@@ -1375,7 +1375,7 @@ static bool iree_hal_vulkan_allocator_uses_buffer_device_address(
     const iree_hal_vulkan_allocator_t* allocator,
     iree_hal_buffer_usage_t hal_usage) {
   return iree_all_bits_set(
-             allocator->enabled_features,
+             allocator->enabled_features.general,
              IREE_HAL_VULKAN_FEATURE_ENABLE_BUFFER_DEVICE_ADDRESSES) &&
          iree_any_bit_set(hal_usage, IREE_HAL_BUFFER_USAGE_DISPATCH);
 }

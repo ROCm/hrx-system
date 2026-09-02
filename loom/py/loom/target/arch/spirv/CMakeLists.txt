@@ -55,6 +55,38 @@ endif()
 
 iree_py_library(
   NAME
+    atomic
+  SRCS
+    "__init__.py"
+    "atomic.py"
+  DEPS
+    loom::py::loom::target::arch::spirv::features
+)
+
+iree_py_test(
+  NAME
+    atomic_test
+  MAIN
+    "../../../tools/pytest_style_runner.py"
+  SRCS
+    "atomic_test.py"
+    "../../../tools/pytest_style_runner.py"
+  ARGS
+    "loom.target.arch.spirv.atomic_test"
+  DEPS
+    loom::py::loom::target::arch::spirv::atomic
+    loom::py::loom::target::arch::spirv::descriptors
+    loom::py::loom::dialect::shared
+  PACKAGE_DIRS
+    "${PROJECT_SOURCE_DIR}/loom/py"
+    "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
+  TIMEOUT
+    60
+)
+
+iree_py_library(
+  NAME
     builtins
   SRCS
     "__init__.py"
@@ -68,6 +100,7 @@ iree_py_library(
     "__init__.py"
     "descriptors.py"
   DEPS
+    loom::py::loom::target::arch::spirv::atomic
     loom::py::loom::target::arch::spirv::builtins
     loom::py::loom::target::arch::spirv::cooperative_matrix
     loom::py::loom::target::arch::spirv::features
@@ -95,6 +128,7 @@ iree_py_test(
   ARGS
     "loom.target.arch.spirv.descriptors_test"
   DEPS
+    loom::py::loom::target::arch::spirv::atomic
     loom::py::loom::target::arch::spirv::builtins
     loom::py::loom::target::arch::spirv::cooperative_matrix
     loom::py::loom::target::arch::spirv::descriptors
