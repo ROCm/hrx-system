@@ -129,6 +129,12 @@ static bool loom_verify_trait_conflict(loom_trait_flags_t traits,
     *out_trait_b = IREE_SV("UNKNOWN_EFFECTS");
     return true;
   }
+  if (iree_all_bits_set(traits,
+                        LOOM_TRAIT_HINT | LOOM_TRAIT_OBSERVABLE_EFFECT)) {
+    *out_trait_a = IREE_SV("HINT");
+    *out_trait_b = IREE_SV("OBSERVABLE_EFFECT");
+    return true;
+  }
   if (iree_all_bits_set(traits, LOOM_TRAIT_HINT | LOOM_TRAIT_MEMORY_FENCE)) {
     *out_trait_a = IREE_SV("HINT");
     *out_trait_b = IREE_SV("MEMORY_FENCE");
@@ -164,6 +170,12 @@ static bool loom_verify_trait_conflict(loom_trait_flags_t traits,
   if (iree_all_bits_set(traits, LOOM_TRAIT_PURE | LOOM_TRAIT_UNKNOWN_EFFECTS)) {
     *out_trait_a = IREE_SV("PURE");
     *out_trait_b = IREE_SV("UNKNOWN_EFFECTS");
+    return true;
+  }
+  if (iree_all_bits_set(traits,
+                        LOOM_TRAIT_PURE | LOOM_TRAIT_OBSERVABLE_EFFECT)) {
+    *out_trait_a = IREE_SV("PURE");
+    *out_trait_b = IREE_SV("OBSERVABLE_EFFECT");
     return true;
   }
   if (iree_all_bits_set(traits, LOOM_TRAIT_PURE | LOOM_TRAIT_MEMORY_FENCE)) {
@@ -202,6 +214,12 @@ static bool loom_verify_trait_conflict(loom_trait_flags_t traits,
           traits, LOOM_TRAIT_SAFE_TO_SPECULATE | LOOM_TRAIT_UNKNOWN_EFFECTS)) {
     *out_trait_a = IREE_SV("SAFE_TO_SPECULATE");
     *out_trait_b = IREE_SV("UNKNOWN_EFFECTS");
+    return true;
+  }
+  if (iree_all_bits_set(traits, LOOM_TRAIT_SAFE_TO_SPECULATE |
+                                    LOOM_TRAIT_OBSERVABLE_EFFECT)) {
+    *out_trait_a = IREE_SV("SAFE_TO_SPECULATE");
+    *out_trait_b = IREE_SV("OBSERVABLE_EFFECT");
     return true;
   }
   if (iree_all_bits_set(
@@ -414,7 +432,8 @@ void loom_verify_func_purity_body_effects(loom_verify_state_t* state,
   loom_region_t* body = loom_op_regions(op)[func_vtable->body_region_index];
   if (!loom_region_has_read_effects(body) &&
       !loom_region_has_write_effects(body) &&
-      !loom_region_has_convergent_effects(body)) {
+      !loom_region_has_convergent_effects(body) &&
+      !loom_region_has_observable_effects(body)) {
     return;
   }
   loom_diagnostic_param_t params[] = {
@@ -422,6 +441,7 @@ void loom_verify_func_purity_body_effects(loom_verify_state_t* state,
       loom_param_u32(body ? body->read_effect_count : 0),
       loom_param_u32(body ? body->write_effect_count : 0),
       loom_param_u32(body ? body->convergent_effect_count : 0),
+      loom_param_u32(body ? body->observable_effect_count : 0),
   };
   loom_verify_emit_structured(state, op, LOOM_ERR_STRUCTURE_017, params,
                               IREE_ARRAYSIZE(params));

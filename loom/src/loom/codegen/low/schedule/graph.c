@@ -126,10 +126,11 @@ static bool loom_low_schedule_node_has_effects(
                             LOOM_LOW_DESCRIPTOR_FLAG_SIDE_EFFECTING |
                                 LOOM_LOW_DESCRIPTOR_FLAG_TERMINATOR);
   }
-  return iree_any_bit_set(node->traits, LOOM_TRAIT_READS_MEMORY |
-                                            LOOM_TRAIT_WRITES_MEMORY |
-                                            LOOM_TRAIT_NON_DETERMINISTIC |
-                                            LOOM_TRAIT_UNKNOWN_EFFECTS);
+  return loom_traits_may_read(node->traits) ||
+         loom_traits_may_write(node->traits) ||
+         iree_any_bit_set(node->traits, LOOM_TRAIT_NON_DETERMINISTIC |
+                                            LOOM_TRAIT_CONVERGENT |
+                                            LOOM_TRAIT_OBSERVABLE_EFFECT);
 }
 
 static iree_status_t loom_low_schedule_resolve_descriptor(
@@ -1865,7 +1866,8 @@ static iree_status_t loom_low_schedule_note_structural_effects(
   const loom_low_schedule_node_t* node = &state->nodes[node_index];
   if (iree_any_bit_set(node->traits, LOOM_TRAIT_NON_DETERMINISTIC |
                                          LOOM_TRAIT_UNKNOWN_EFFECTS |
-                                         LOOM_TRAIT_CONVERGENT)) {
+                                         LOOM_TRAIT_CONVERGENT |
+                                         LOOM_TRAIT_OBSERVABLE_EFFECT)) {
     return loom_low_schedule_effect_frontier_note_ordered(
         state, frontier, node_index,
         loom_low_schedule_dependency_endpoint_none());

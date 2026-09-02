@@ -254,7 +254,8 @@ typedef enum loom_low_memory_space_e {
 // Bitset of effect flags.
 typedef uint16_t loom_low_effect_flags_t;
 
-// Effect must be preserved during scheduling.
+// Effect preserves its source-relative order during scheduling. Each execution
+// of an ordered memory effect is also independently observable.
 #define LOOM_LOW_EFFECT_FLAG_ORDERED ((uint16_t)1u << 0)
 // Effect participates in alias-like dependency construction.
 #define LOOM_LOW_EFFECT_FLAG_DEPENDENCY ((uint16_t)1u << 1)

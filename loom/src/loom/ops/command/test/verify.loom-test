@@ -114,6 +114,14 @@ command.program.def @convergent_preparation(%value: index) launch() {
 
 // ====
 
+command.program.def @observable_preparation() launch() {
+  // ERROR@+1: STRUCTURE/053 {op_name="test.effectful_constant"}
+  %unused = test.effectful_constant 42 : i32
+  command.return
+}
+
+// ====
+
 command.program.def @memory_effects_are_not_preparation() launch(%storage: buffer) {
   %base = index.constant 0 : offset
   %element = index.constant 0 : index

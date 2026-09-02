@@ -448,7 +448,7 @@ iree_status_t loom_test_constant_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_TEST_EFFECTFUL_CONSTANT: Unknown-effect test op with exact result facts. This guards the canonicalizer contract that fact folding may use exact facts from an effectful op without erasing the op itself.
+// LOOM_OP_TEST_EFFECTFUL_CONSTANT: Independently observable test op with exact result facts. This guards the canonicalizer contract that fact folding may use exact facts from an observable op without erasing the op itself.
 // %value = test.effectful_constant 42 : i64
 LOOM_DEFINE_ISA(loom_test_effectful_constant_isa, LOOM_OP_TEST_EFFECTFUL_CONSTANT)
 LOOM_DEFINE_RESULT(loom_test_effectful_constant_result, 0)

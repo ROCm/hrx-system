@@ -108,7 +108,8 @@ static iree_status_t loom_kernel_verify_launch_config_purity(
   const loom_region_t* config = loom_kernel_def_config(op);
   if (!loom_region_has_read_effects(config) &&
       !loom_region_has_write_effects(config) &&
-      !loom_region_has_convergent_effects(config)) {
+      !loom_region_has_convergent_effects(config) &&
+      !loom_region_has_observable_effects(config)) {
     return iree_ok_status();
   }
   const loom_diagnostic_param_t params[] = {
@@ -116,6 +117,7 @@ static iree_status_t loom_kernel_verify_launch_config_purity(
       loom_param_u32(config->read_effect_count),
       loom_param_u32(config->write_effect_count),
       loom_param_u32(config->convergent_effect_count),
+      loom_param_u32(config->observable_effect_count),
   };
   return loom_kernel_emit(emitter, op, LOOM_ERR_STRUCTURE_052, params,
                           IREE_ARRAYSIZE(params));

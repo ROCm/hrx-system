@@ -84,7 +84,8 @@ static bool loom_motion_op_is_nested_under(const loom_op_t* root,
 static bool loom_motion_traits_are_effect_free_relocatable(
     loom_trait_flags_t traits, bool is_root_op) {
   if (!iree_any_bit_set(traits, LOOM_TRAIT_PURE)) return false;
-  if (iree_any_bit_set(traits, LOOM_TRAIT_HINT | LOOM_TRAIT_CONVERGENT)) {
+  if (iree_any_bit_set(traits, LOOM_TRAIT_HINT | LOOM_TRAIT_CONVERGENT |
+                                   LOOM_TRAIT_OBSERVABLE_EFFECT)) {
     return false;
   }
   if (is_root_op && iree_any_bit_set(traits, LOOM_TRAIT_TERMINATOR)) {
@@ -104,7 +105,8 @@ static bool loom_motion_traits_are_speculatable(loom_trait_flags_t traits,
   }
   if (!iree_any_bit_set(traits, LOOM_TRAIT_PURE)) return false;
   if (!loom_traits_are_safe_to_speculate(traits)) return false;
-  if (iree_any_bit_set(traits, LOOM_TRAIT_HINT | LOOM_TRAIT_CONVERGENT)) {
+  if (iree_any_bit_set(traits, LOOM_TRAIT_HINT | LOOM_TRAIT_CONVERGENT |
+                                   LOOM_TRAIT_OBSERVABLE_EFFECT)) {
     return false;
   }
   if (loom_traits_has_unique_identity(traits)) return false;
@@ -116,6 +118,7 @@ static bool loom_motion_op_has_retained_regions(const loom_module_t* module,
   return loom_op_regions_have_read_effects(op) ||
          loom_op_regions_have_write_effects(op) ||
          loom_op_regions_have_convergent_effects(op) ||
+         loom_op_regions_have_observable_effects(op) ||
          loom_op_regions_have_hints(module, op);
 }
 
@@ -153,6 +156,7 @@ bool loom_motion_op_can_rematerialize_effect_free(const loom_module_t* module,
       iree_any_bit_set(traits, LOOM_TRAIT_TERMINATOR | LOOM_TRAIT_HINT |
                                    LOOM_TRAIT_POISON_BOUNDARY |
                                    LOOM_TRAIT_CONVERGENT |
+                                   LOOM_TRAIT_OBSERVABLE_EFFECT |
                                    LOOM_TRAIT_UNIQUE_IDENTITY)) {
     return false;
   }
@@ -182,7 +186,7 @@ bool loom_motion_read_can_cross_op(const loom_module_t* module,
   return !iree_any_bit_set(
       traits, LOOM_TRAIT_NON_DETERMINISTIC | LOOM_TRAIT_HINT |
                   LOOM_TRAIT_POISON_BOUNDARY | LOOM_TRAIT_CONVERGENT |
-                  LOOM_TRAIT_UNIQUE_IDENTITY);
+                  LOOM_TRAIT_OBSERVABLE_EFFECT | LOOM_TRAIT_UNIQUE_IDENTITY);
 }
 
 //===----------------------------------------------------------------------===//
@@ -362,11 +366,11 @@ bool loom_motion_op_is_ordinary_load(const loom_module_t* module,
   const loom_trait_flags_t traits = loom_op_effective_traits(module, op);
   if (!loom_traits_may_read(traits) || loom_traits_may_write(traits) ||
       iree_any_bit_set(
-          traits, LOOM_TRAIT_TERMINATOR | LOOM_TRAIT_HINT |
-                      LOOM_TRAIT_CONVERGENT | LOOM_TRAIT_UNIQUE_IDENTITY |
-                      LOOM_TRAIT_POISON_BOUNDARY | LOOM_TRAIT_MEMORY_FENCE |
-                      LOOM_TRAIT_NON_DETERMINISTIC |
-                      LOOM_TRAIT_UNKNOWN_EFFECTS)) {
+          traits,
+          LOOM_TRAIT_TERMINATOR | LOOM_TRAIT_HINT | LOOM_TRAIT_CONVERGENT |
+              LOOM_TRAIT_UNIQUE_IDENTITY | LOOM_TRAIT_POISON_BOUNDARY |
+              LOOM_TRAIT_MEMORY_FENCE | LOOM_TRAIT_NON_DETERMINISTIC |
+              LOOM_TRAIT_OBSERVABLE_EFFECT | LOOM_TRAIT_UNKNOWN_EFFECTS)) {
     return false;
   }
   const loom_memory_access_t access = loom_memory_access_cast(module, op);

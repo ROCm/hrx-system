@@ -81,6 +81,17 @@ func.def @memory_fences_do_not_cse(%value: i32) -> (i32, i32) {
 
 // ====
 
+// Independently observable ops remain distinct even when their attributes
+// match.
+// RUN: pass cse
+func.def @observable_ops_do_not_cse() -> (i32, i32) {
+  %lhs = test.effectful_constant 42 : i32
+  %rhs = test.effectful_constant 42 : i32
+  func.return %lhs, %rhs : i32, i32
+}
+
+// ====
+
 // Function passes still run over the function-like body projection. CSE can be
 // driven over every root region. Equivalent expressions are only shared inside
 // one region tree; config and body keep separate SSA scopes.
@@ -335,6 +346,20 @@ low.func.def target<test.low.core>(@test_target) @descriptor_low_reads_cse(%ptr:
   %a = test.load.v4i32 %ptr
   %out = test.add.v4i32 %a, %a
   return %out
+}
+
+// ====
+
+// Ordered descriptor reads represent distinct runtime observations and cannot
+// CSE even without an intervening write.
+// RUN: pass cse
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @descriptor_low_ordered_reads_do_not_cse(%ptr: reg<test.ptr>) -> (reg<test.i32 x4>, reg<test.i32 x4>) asm {
+  %lhs = test.load.ordered.v4i32 %ptr
+  %rhs = test.load.ordered.v4i32 %ptr
+  return %lhs, %rhs
 }
 
 // ====

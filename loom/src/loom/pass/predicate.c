@@ -40,6 +40,8 @@ static const loom_pass_trait_name_t kLoomPassTraitNames[] = {
     {IREE_SVL("non-deterministic"), LOOM_TRAIT_NON_DETERMINISTIC},
     {IREE_SVL("UnknownEffects"), LOOM_TRAIT_UNKNOWN_EFFECTS},
     {IREE_SVL("unknown-effects"), LOOM_TRAIT_UNKNOWN_EFFECTS},
+    {IREE_SVL("ObservableEffect"), LOOM_TRAIT_OBSERVABLE_EFFECT},
+    {IREE_SVL("observable-effect"), LOOM_TRAIT_OBSERVABLE_EFFECT},
     {IREE_SVL("MemoryFence"), LOOM_TRAIT_MEMORY_FENCE},
     {IREE_SVL("memory-fence"), LOOM_TRAIT_MEMORY_FENCE},
     {IREE_SVL("CompileTimeOnly"), LOOM_TRAIT_COMPILE_TIME_ONLY},

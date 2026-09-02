@@ -1701,7 +1701,8 @@ static iree_status_t loom_amdgpu_wait_plan_finish_node_classification(
       }
       if (iree_any_bit_set(node->traits, LOOM_TRAIT_NON_DETERMINISTIC |
                                              LOOM_TRAIT_UNKNOWN_EFFECTS |
-                                             LOOM_TRAIT_CONVERGENT)) {
+                                             LOOM_TRAIT_CONVERGENT |
+                                             LOOM_TRAIT_OBSERVABLE_EFFECT)) {
         node_state->flags |= LOOM_AMDGPU_WAIT_NODE_STATE_DEPENDENCY_READ |
                              LOOM_AMDGPU_WAIT_NODE_STATE_DEPENDENCY_WRITE;
         frontier_node->read_space_flags |= generic_space;

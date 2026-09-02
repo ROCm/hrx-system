@@ -594,7 +594,7 @@ static bool loom_symbolic_expr_ops_can_structurally_match(
       LOOM_TRAIT_NON_DETERMINISTIC | LOOM_TRAIT_UNKNOWN_EFFECTS |
       LOOM_TRAIT_UNIQUE_IDENTITY | LOOM_TRAIT_CONVERGENT |
       LOOM_TRAIT_READS_MEMORY | LOOM_TRAIT_WRITES_MEMORY |
-      LOOM_TRAIT_MEMORY_FENCE;
+      LOOM_TRAIT_MEMORY_FENCE | LOOM_TRAIT_OBSERVABLE_EFFECT;
   const loom_trait_flags_t left_traits =
       loom_op_effective_traits(module, left_op);
   const loom_trait_flags_t right_traits =

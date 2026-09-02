@@ -14,7 +14,7 @@ kernel.def @pure_launch_configuration_call(%count: index) {
 
 func.decl @unknown_launch_extent(%value: index) -> (index)
 
-// ERROR@+1: STRUCTURE/052 {op_name="kernel.def", read_count="1", write_count="1", convergent_count="0"}
+// ERROR@+1: STRUCTURE/052 {op_name="kernel.def", read_count="1", write_count="1", convergent_count="0", observable_count="0"}
 kernel.def @unknown_effect_launch_configuration(%count: index) {
   %c1 = index.constant 1 : index
   %workgroups = func.call @unknown_launch_extent(%count) : (index) -> (index)
@@ -25,11 +25,22 @@ kernel.def @unknown_effect_launch_configuration(%count: index) {
 
 // ====
 
-// ERROR@+1: STRUCTURE/052 {op_name="kernel.def", read_count="0", write_count="0", convergent_count="1"}
+// ERROR@+1: STRUCTURE/052 {op_name="kernel.def", read_count="0", write_count="0", convergent_count="1", observable_count="0"}
 kernel.def @convergent_launch_configuration(%count: index) {
   %c1 = index.constant 1 : index
   %workgroups = test.convergent %count : index
   kernel.launch.config workgroups(%workgroups, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch() {
+  kernel.return
+}
+
+// ====
+
+// ERROR@+1: STRUCTURE/052 {op_name="kernel.def", read_count="0", write_count="0", convergent_count="0", observable_count="1"}
+kernel.def @observable_launch_configuration(%count: index) {
+  %c1 = index.constant 1 : index
+  %dead = test.effectful_constant 42 : i32
+  kernel.launch.config workgroups(%count, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch() {
   kernel.return
 }

@@ -942,10 +942,12 @@ enum {
 static bool loom_scf_if_regions_are_discardable(const loom_module_t* module,
                                                 loom_op_t* op) {
   // Read-only branch work with no yielded observer is dead. Writes,
-  // convergence, and hints are retained because they affect memory,
-  // participant-set semantics, or requested code-generation shape.
+  // independently observable execution, convergence, and hints are retained
+  // because they affect memory, runtime behavior, participant-set semantics,
+  // or requested code-generation shape.
   if (loom_op_regions_have_write_effects(op)) return false;
   if (loom_op_regions_have_convergent_effects(op)) return false;
+  if (loom_op_regions_have_observable_effects(op)) return false;
   return !loom_op_regions_have_hints(module, op);
 }
 
@@ -1183,7 +1185,8 @@ static bool loom_scf_if_op_is_strippable_fact_identity(
     loom_trait_flags_t traits) {
   if (loom_traits_are_fact_identity(traits) &&
       iree_any_bit_set(traits, LOOM_TRAIT_PURE) &&
-      !iree_any_bit_set(traits, LOOM_TRAIT_HINT | LOOM_TRAIT_CONVERGENT) &&
+      !iree_any_bit_set(traits, LOOM_TRAIT_HINT | LOOM_TRAIT_CONVERGENT |
+                                    LOOM_TRAIT_OBSERVABLE_EFFECT) &&
       !loom_traits_may_read(traits) && !loom_traits_may_write(traits) &&
       op->operand_count == 1 && op->result_count == 1) {
     return loom_type_equal(
@@ -1202,7 +1205,8 @@ static bool loom_scf_if_op_can_selectify_speculate(const loom_module_t* module,
     return true;
   }
   if (!iree_any_bit_set(traits, LOOM_TRAIT_PURE)) return false;
-  if (iree_any_bit_set(traits, LOOM_TRAIT_HINT | LOOM_TRAIT_CONVERGENT)) {
+  if (iree_any_bit_set(traits, LOOM_TRAIT_HINT | LOOM_TRAIT_CONVERGENT |
+                                   LOOM_TRAIT_OBSERVABLE_EFFECT)) {
     return false;
   }
   if (loom_traits_may_read(traits) || loom_traits_may_write(traits)) {

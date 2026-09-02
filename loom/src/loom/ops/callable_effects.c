@@ -17,7 +17,8 @@ bool loom_callable_effects_is_pure(loom_func_like_t function) {
   if (body) {
     return !loom_region_has_read_effects(body) &&
            !loom_region_has_write_effects(body) &&
-           !loom_region_has_convergent_effects(body);
+           !loom_region_has_convergent_effects(body) &&
+           !loom_region_has_observable_effects(body);
   }
   return loom_func_like_purity(function) != 0;
 }

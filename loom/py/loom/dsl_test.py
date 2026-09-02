@@ -72,6 +72,7 @@ from loom.dsl import (
     MEMORY_FENCE,
     MODULE_SCOPE,
     NON_DETERMINISTIC,
+    OBSERVABLE_EFFECT,
     OFFSET,
     POISON,
     POOL,
@@ -990,6 +991,7 @@ class TestTraits:
             ELEMENTWISE,
             DECOMPOSABLE,
             CONVERGENT,
+            OBSERVABLE_EFFECT,
             SAFE_TO_SPECULATE,
             REFINABLE_RESULT_TYPE_REFS,
         ]
@@ -2648,6 +2650,10 @@ class TestEffects:
         op = Op("test.command", traits=[UNKNOWN_EFFECTS, COMMAND_EFFECT])
         assert not op.is_pure
 
+    def test_command_effect_classifies_observable_effect(self) -> None:
+        op = Op("test.command", traits=[OBSERVABLE_EFFECT, COMMAND_EFFECT])
+        assert not op.is_pure
+
     def test_command_effect_requires_observable_effects(self) -> None:
         with _raises(ValueError, match="COMMAND_EFFECT requires"):
             Op("test.bad", traits=[COMMAND_EFFECT])
@@ -2762,6 +2768,22 @@ class TestEffects:
     def test_hint_with_convergent_raises(self) -> None:
         with _raises(ValueError, match="HINT.*CONVERGENT"):
             Op("test.bad", traits=[HINT, CONVERGENT])
+
+    def test_observable_effect_not_pure(self) -> None:
+        op = Op("test.observe", traits=[OBSERVABLE_EFFECT])
+        assert not op.is_pure
+
+    def test_observable_effect_with_pure_raises(self) -> None:
+        with _raises(ValueError, match="PURE.*OBSERVABLE_EFFECT"):
+            Op("test.bad", traits=[PURE, OBSERVABLE_EFFECT])
+
+    def test_observable_effect_with_hint_raises(self) -> None:
+        with _raises(ValueError, match="HINT.*OBSERVABLE_EFFECT"):
+            Op("test.bad", traits=[HINT, OBSERVABLE_EFFECT])
+
+    def test_observable_effect_with_safe_to_speculate_raises(self) -> None:
+        with _raises(ValueError, match="SAFE_TO_SPECULATE.*OBSERVABLE_EFFECT"):
+            Op("test.bad", traits=[SAFE_TO_SPECULATE, OBSERVABLE_EFFECT])
 
     def test_compile_time_only_can_refine_values(self) -> None:
         op = Op(
