@@ -221,10 +221,14 @@ typedef enum loom_spirv_feature_bit_e {
    LOOM_SPIRV_FEATURE_WORKGROUP_FLOAT64_ATOMIC_ADD |                          \
    LOOM_SPIRV_FEATURE_GROUP_NON_UNIFORM)
 
-// Feature bits selected by the built-in Vulkan 1.3 BDA profile.
-#define LOOM_SPIRV_FEATURE_PROFILE_VULKAN_1_3_BDA                          \
-  (LOOM_SPIRV_FEATURE_VULKAN_SHADER |                                      \
-   LOOM_SPIRV_FEATURE_PHYSICAL_STORAGE_BUFFER | LOOM_SPIRV_FEATURE_INT64 | \
+// Feature bits unconditionally required by Vulkan 1.3 BDA HAL modules.
+#define LOOM_SPIRV_FEATURE_MODULE_VULKAN_1_3_BDA_BASELINE \
+  (LOOM_SPIRV_FEATURE_VULKAN_SHADER |                     \
+   LOOM_SPIRV_FEATURE_PHYSICAL_STORAGE_BUFFER | LOOM_SPIRV_FEATURE_INT64)
+
+// Feature bits available in the built-in Vulkan 1.3 BDA target profile.
+#define LOOM_SPIRV_FEATURE_PROFILE_VULKAN_1_3_BDA      \
+  (LOOM_SPIRV_FEATURE_MODULE_VULKAN_1_3_BDA_BASELINE | \
    LOOM_SPIRV_FEATURE_GROUP_NON_UNIFORM)
 
 // Maximum number of OpExtension rows emitted by all modeled atoms.

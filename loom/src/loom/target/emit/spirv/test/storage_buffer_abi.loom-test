@@ -19,7 +19,6 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) @
                OpCapability Shader
                OpCapability PhysicalStorageBufferAddresses
                OpCapability Int64
-               OpCapability GroupNonUniform
                OpExtension "SPV_KHR_physical_storage_buffer"
                OpMemoryModel PhysicalStorageBuffer64 GLSL450
                OpEntryPoint GLCompute %spirv_raw_bda_storage_buffer_i32_roundtrip "spirv_raw_bda_storage_buffer_i32_roundtrip"
@@ -135,7 +134,6 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 2, 1) @
                OpCapability Shader
                OpCapability PhysicalStorageBufferAddresses
                OpCapability Int64
-               OpCapability GroupNonUniform
                OpExtension "SPV_KHR_physical_storage_buffer"
                OpMemoryModel PhysicalStorageBuffer64 GLSL450
                OpEntryPoint GLCompute %spirv_raw_bda_builtin_storage_buffer_i32 "spirv_raw_bda_builtin_storage_buffer_i32" %workgroup_id %local_invocation_id %global_invocation_id
@@ -268,7 +266,6 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) @
                OpCapability Shader
                OpCapability PhysicalStorageBufferAddresses
                OpCapability Int64
-               OpCapability GroupNonUniform
                OpExtension "SPV_KHR_physical_storage_buffer"
                OpMemoryModel PhysicalStorageBuffer64 GLSL450
                OpEntryPoint GLCompute %spirv_raw_bda_storage_buffer_i32_select "spirv_raw_bda_storage_buffer_i32_select"
@@ -407,7 +404,6 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) @
                OpCapability Shader
                OpCapability PhysicalStorageBufferAddresses
                OpCapability Int64
-               OpCapability GroupNonUniform
                OpExtension "SPV_KHR_physical_storage_buffer"
                OpMemoryModel PhysicalStorageBuffer64 GLSL450
                OpEntryPoint GLCompute %spirv_raw_bda_storage_buffer_i32_guard "spirv_raw_bda_storage_buffer_i32_guard"
@@ -536,7 +532,6 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) @
                OpCapability Shader
                OpCapability PhysicalStorageBufferAddresses
                OpCapability Int64
-               OpCapability GroupNonUniform
                OpExtension "SPV_KHR_physical_storage_buffer"
                OpMemoryModel PhysicalStorageBuffer64 GLSL450
                OpEntryPoint GLCompute %spirv_raw_bda_storage_buffer_f32_copy "spirv_raw_bda_storage_buffer_f32_copy"
@@ -653,7 +648,6 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) @
                OpCapability Shader
                OpCapability PhysicalStorageBufferAddresses
                OpCapability Int64
-               OpCapability GroupNonUniform
                OpExtension "SPV_KHR_physical_storage_buffer"
                OpMemoryModel PhysicalStorageBuffer64 GLSL450
                OpEntryPoint GLCompute %spirv_raw_bda_storage_buffer_i64_copy "spirv_raw_bda_storage_buffer_i64_copy"
@@ -766,7 +760,6 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @spirv_
                OpCapability VulkanMemoryModel
                OpCapability PhysicalStorageBufferAddresses
                OpCapability Int64
-               OpCapability GroupNonUniform
                OpExtension "SPV_KHR_vulkan_memory_model"
                OpExtension "SPV_KHR_physical_storage_buffer"
                OpMemoryModel PhysicalStorageBuffer64 Vulkan

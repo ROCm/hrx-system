@@ -432,6 +432,8 @@ TEST(SpirvModuleBuilderTest, EmitsRawBdaHalKernelPreamble) {
       instructions, LOOM_SPIRV_OP_CAPABILITY,
       {LOOM_SPIRV_CAPABILITY_PHYSICAL_STORAGE_BUFFER_ADDRESSES}));
   EXPECT_FALSE(HasInstruction(instructions, LOOM_SPIRV_OP_CAPABILITY,
+                              {LOOM_SPIRV_CAPABILITY_GROUP_NON_UNIFORM}));
+  EXPECT_FALSE(HasInstruction(instructions, LOOM_SPIRV_OP_CAPABILITY,
                               {LOOM_SPIRV_CAPABILITY_VULKAN_MEMORY_MODEL}));
   EXPECT_TRUE(
       HasInstruction(instructions, LOOM_SPIRV_OP_MEMORY_MODEL,

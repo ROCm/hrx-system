@@ -53,7 +53,6 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) @
                OpCapability StorageBuffer8BitAccess
                OpCapability StorageBuffer16BitAccess
                OpCapability BFloat16TypeKHR
-               OpCapability GroupNonUniform
                OpExtension "SPV_KHR_physical_storage_buffer"
                OpExtension "SPV_KHR_8bit_storage"
                OpExtension "SPV_KHR_16bit_storage"
@@ -505,7 +504,6 @@ low.kernel.def target<spirv.logical.core>(@hal_target_scalar_payloads) workgroup
                OpCapability StorageBuffer8BitAccess
                OpCapability StorageBuffer16BitAccess
                OpCapability BFloat16TypeKHR
-               OpCapability GroupNonUniform
                OpExtension "SPV_KHR_physical_storage_buffer"
                OpExtension "SPV_KHR_8bit_storage"
                OpExtension "SPV_KHR_16bit_storage"

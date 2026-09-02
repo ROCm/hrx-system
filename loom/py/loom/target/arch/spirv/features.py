@@ -389,7 +389,7 @@ FEATURE_ATOMS = (
 FEATURE_PROFILES = (
     FeatureProfile(
         c_suffix="VULKAN_1_3_BDA",
-        doc="Feature bits selected by the built-in Vulkan 1.3 BDA profile.",
+        doc="Feature bits available in the built-in Vulkan 1.3 BDA profile.",
         atoms=(
             "vulkan_shader",
             "physical_storage_buffer",

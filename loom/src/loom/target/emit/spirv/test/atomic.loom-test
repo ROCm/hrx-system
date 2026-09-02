@@ -120,7 +120,6 @@ func.def target(@workgroup_mixed_alias_target) @workgroup_mixed_alias_atomics(%v
                OpCapability PhysicalStorageBufferAddresses
                OpCapability Int64
                OpCapability AtomicFloat32AddEXT
-               OpCapability GroupNonUniform
                OpExtension "SPV_KHR_vulkan_memory_model"
                OpExtension "SPV_KHR_physical_storage_buffer"
                OpExtension "SPV_EXT_shader_atomic_float_add"
@@ -235,7 +234,6 @@ func.def target(@workgroup_i64_target) @workgroup_i64_atomics(%value: i64) {
                OpCapability PhysicalStorageBufferAddresses
                OpCapability Int64
                OpCapability Int64Atomics
-               OpCapability GroupNonUniform
                OpExtension "SPV_KHR_vulkan_memory_model"
                OpExtension "SPV_KHR_physical_storage_buffer"
                OpMemoryModel PhysicalStorageBuffer64 Vulkan
@@ -546,7 +544,6 @@ func.def target(@native_float_target) @native_float_atomics(%buffer: buffer) {
                OpCapability AtomicFloat16AddEXT
                OpCapability AtomicFloat32AddEXT
                OpCapability AtomicFloat64AddEXT
-               OpCapability GroupNonUniform
                OpExtension "SPV_KHR_vulkan_memory_model"
                OpExtension "SPV_KHR_physical_storage_buffer"
                OpExtension "SPV_KHR_16bit_storage"
@@ -639,7 +636,6 @@ func.def target(@workgroup_native_float_target) @workgroup_native_float_atomics(
                OpCapability PhysicalStorageBufferAddresses
                OpCapability Int64
                OpCapability AtomicFloat32AddEXT
-               OpCapability GroupNonUniform
                OpExtension "SPV_KHR_vulkan_memory_model"
                OpExtension "SPV_KHR_physical_storage_buffer"
                OpExtension "SPV_EXT_shader_atomic_float_add"
@@ -912,7 +908,6 @@ func.def target(@workgroup_float_target) @workgroup_float_fallback(%value: f32) 
                OpCapability VulkanMemoryModel
                OpCapability PhysicalStorageBufferAddresses
                OpCapability Int64
-               OpCapability GroupNonUniform
                OpExtension "SPV_KHR_vulkan_memory_model"
                OpExtension "SPV_KHR_physical_storage_buffer"
                OpMemoryModel PhysicalStorageBuffer64 Vulkan
@@ -1021,7 +1016,6 @@ func.def target(@vector_atomic_target) @vector_atomic_forms(%value: i32, %expect
                OpCapability VulkanMemoryModel
                OpCapability PhysicalStorageBufferAddresses
                OpCapability Int64
-               OpCapability GroupNonUniform
                OpExtension "SPV_KHR_vulkan_memory_model"
                OpExtension "SPV_KHR_physical_storage_buffer"
                OpMemoryModel PhysicalStorageBuffer64 Vulkan
