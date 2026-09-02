@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from itertools import combinations
 from pathlib import Path
 
@@ -106,6 +106,7 @@ class _DescriptorSpec:
     storage_continuation_part: str | None = None
     schedule_alternatives: tuple[str, ...] = ()
     memory_width_bits: int | None = None
+    ordered_memory: bool = False
 
 
 _VECTOR_MEMORY_FORM_FAMILIES = (
@@ -244,7 +245,7 @@ def _vector_memory_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
     return tuple(result)
 
 
-_DESCRIPTOR_SPECS = (
+_BASE_DESCRIPTOR_SPECS = (
     _DescriptorSpec(
         "ADD_add_r_ri",
         f"{_TARGET_KEY}.add.i32.immediate",
@@ -894,6 +895,36 @@ _ASM_MNEMONIC_BY_FORM = {
 }
 
 _MACHINE_FORMS = {form.name: form for form in CORE_MACHINE_TABLE.forms}
+
+
+def _with_ordered_memory_variants(
+    specifications: tuple[_DescriptorSpec, ...],
+) -> tuple[_DescriptorSpec, ...]:
+    """Adds semantic aliases for independently observable memory accesses."""
+
+    result: list[_DescriptorSpec] = []
+    for spec in specifications:
+        if spec.ordered_memory:
+            raise ValueError(f"{spec.key}: base descriptor is already ordered")
+        result.append(spec)
+        form = _MACHINE_FORMS[spec.form_name]
+        if not (has_property(form, "mayLoad") or has_property(form, "mayStore")):
+            continue
+        result.append(
+            replace(
+                spec,
+                key=f"{spec.key}.volatile",
+                semantic_tag=f"{spec.semantic_tag}.volatile",
+                schedule_alternatives=tuple(
+                    f"{key}.volatile" for key in spec.schedule_alternatives
+                ),
+                ordered_memory=True,
+            )
+        )
+    return tuple(result)
+
+
+_DESCRIPTOR_SPECS = _with_ordered_memory_variants(_BASE_DESCRIPTOR_SPECS)
 _MACHINE_REGISTERS = {
     register.name: register for register in CORE_MACHINE_TABLE.physical_registers
 }
@@ -1757,6 +1788,9 @@ def _memory_timing_event(spec: _DescriptorSpec, access: str) -> str:
 
 
 def _effects(spec: _DescriptorSpec, form: MachineForm) -> tuple[Effect, ...]:
+    has_memory_effect = has_property(form, "mayLoad") or has_property(form, "mayStore")
+    if spec.ordered_memory and not has_memory_effect:
+        raise ValueError(f"{form.name}: ordered memory alias is not a memory form")
     register_width_bits = spec.memory_width_bits
     if register_width_bits is None:
         register_width_bits = max(
@@ -1770,11 +1804,16 @@ def _effects(spec: _DescriptorSpec, form: MachineForm) -> tuple[Effect, ...]:
             ),
             default=0,
         )
-    elif not (has_property(form, "mayLoad") or has_property(form, "mayStore")):
+    elif not has_memory_effect:
         raise ValueError(
             f"{form.name}: explicit memory width requires a memory instruction"
         )
     result = []
+    memory_flags = (
+        (EffectFlag.ORDERED, EffectFlag.DEPENDENCY)
+        if spec.ordered_memory
+        else (EffectFlag.DEPENDENCY,)
+    )
     if has_property(form, "mayLoad"):
         if register_width_bits == 0:
             raise ValueError(f"{form.name}: load has no register payload width")
@@ -1782,7 +1821,7 @@ def _effects(spec: _DescriptorSpec, form: MachineForm) -> tuple[Effect, ...]:
             Effect(
                 EffectKind.READ,
                 MemorySpace.WORKGROUP,
-                flags=(EffectFlag.DEPENDENCY,),
+                flags=memory_flags,
                 width_bits=register_width_bits,
                 timing_event=_memory_timing_event(spec, "read"),
             )
@@ -1794,7 +1833,7 @@ def _effects(spec: _DescriptorSpec, form: MachineForm) -> tuple[Effect, ...]:
             Effect(
                 EffectKind.WRITE,
                 MemorySpace.WORKGROUP,
-                flags=(EffectFlag.DEPENDENCY,),
+                flags=memory_flags,
                 width_bits=register_width_bits,
                 timing_event=_memory_timing_event(spec, "write"),
             )
@@ -1934,8 +1973,11 @@ def _descriptor(spec: _DescriptorSpec) -> Descriptor:
             f"{form.name}: tied outputs cannot be implicit architectural outputs "
             f"{sorted(tied_implicit_outputs)}"
         )
-    mnemonic = spec.asm_mnemonic or _ASM_MNEMONIC_BY_FORM.get(
+    physical_mnemonic = spec.asm_mnemonic or _ASM_MNEMONIC_BY_FORM.get(
         spec.form_name, form.assembly.split("\t", 1)[0].strip()
+    )
+    mnemonic = (
+        f"{physical_mnemonic}.volatile" if spec.ordered_memory else physical_mnemonic
     )
     descriptor = Descriptor(
         key=spec.key,
@@ -1966,6 +2008,9 @@ def _descriptor(spec: _DescriptorSpec) -> Descriptor:
         asm_forms=(
             AsmForm(
                 mnemonic=mnemonic,
+                native_assembly_mnemonic=(
+                    physical_mnemonic if spec.ordered_memory else None
+                ),
                 results=tuple(operand.name for operand in register_outputs),
                 operands=(
                     *(operand.name for operand in register_inputs),

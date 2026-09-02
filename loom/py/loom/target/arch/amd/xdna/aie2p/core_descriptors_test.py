@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from itertools import combinations
 
+from loom.target.arch.amd.xdna.aie.machine import has_property
 from loom.target.arch.amd.xdna.aie.schedule import (
     PipelineStageKind,
     pipeline_uses,
@@ -16,6 +17,7 @@ from loom.target.arch.amd.xdna.aie2p.core_descriptors import (
     _BUNDLE_SLOT_EXCLUSIONS,
     _DESCRIPTOR_SPECS,
     _INSTRUCTION_ENCODINGS,
+    _MACHINE_FORMS,
     _SCHEDULE_CLASS_NAMES,
     _SLOT_RESOURCE_KINDS,
     AIE2P_CORE_DESCRIPTOR_SET,
@@ -32,6 +34,7 @@ from loom.target.arch.amd.xdna.aie2p.core_schedule_data import CORE_SCHEDULE_TAB
 from loom.target.low_descriptors import (
     ConstraintKind,
     DescriptorFlag,
+    EffectFlag,
     EffectKind,
     ImmediateFlag,
     ImmediateKind,
@@ -796,6 +799,72 @@ def test_implicit_registers_and_machine_ties_reach_low() -> None:
     assert constraints[0].kind is ConstraintKind.TIED
     assert constraints[0].lhs_operand_index == 1
     assert constraints[0].rhs_operand_index == 2
+
+
+def test_ordered_memory_descriptors_are_semantic_physical_aliases() -> None:
+    descriptors = {
+        descriptor.key: descriptor
+        for descriptor in AIE2P_CORE_DESCRIPTOR_SET.descriptors
+    }
+    ordinary_specs = {
+        spec.key: spec for spec in _DESCRIPTOR_SPECS if not spec.ordered_memory
+    }
+    ordered_specs = tuple(spec for spec in _DESCRIPTOR_SPECS if spec.ordered_memory)
+    assert ordered_specs
+    assert {spec.key.removesuffix(".volatile") for spec in ordered_specs} == {
+        spec.key
+        for spec in ordinary_specs.values()
+        if has_property(_MACHINE_FORMS[spec.form_name], "mayLoad")
+        or has_property(_MACHINE_FORMS[spec.form_name], "mayStore")
+    }
+
+    for ordered_spec in ordered_specs:
+        ordinary_key = ordered_spec.key.removesuffix(".volatile")
+        ordinary_spec = ordinary_specs[ordinary_key]
+        assert ordered_spec.form_name == ordinary_spec.form_name
+        assert ordered_spec.itinerary == ordinary_spec.itinerary
+        assert ordered_spec.schedule_alternatives == tuple(
+            f"{key}.volatile" for key in ordinary_spec.schedule_alternatives
+        )
+
+        ordinary = descriptors[ordinary_key]
+        ordered = descriptors[ordered_spec.key]
+        assert ordered.encoding_id == ordinary.encoding_id
+        assert ordered.schedule_class == ordinary.schedule_class
+        assert ordered.operands == ordinary.operands
+        assert ordered.immediates == ordinary.immediates
+        assert ordered.encoding_field_values == ordinary.encoding_field_values
+        assert ordered.constraints == ordinary.constraints
+        assert ordered.flags == ordinary.flags
+        assert ordered.instruction_classes == ordinary.instruction_classes
+        assert ordered.mnemonic == f"{ordinary.mnemonic}.volatile"
+        assert ordered.semantic_tag == f"{ordinary.semantic_tag}.volatile"
+        assert ordered.schedule_alternatives == tuple(
+            f"{key}.volatile" for key in ordinary.schedule_alternatives
+        )
+        assert len(ordered.asm_forms) == len(ordinary.asm_forms) == 1
+        assert (
+            ordered.asm_forms[0].mnemonic
+            == f"{ordinary.asm_forms[0].mnemonic}.volatile"
+        )
+        assert (
+            ordered.asm_forms[0].native_assembly_mnemonic
+            == ordinary.asm_forms[0].mnemonic
+        )
+        assert len(ordered.effects) == len(ordinary.effects)
+        for ordered_effect, ordinary_effect in zip(
+            ordered.effects, ordinary.effects, strict=True
+        ):
+            assert ordered_effect.kind == ordinary_effect.kind
+            assert ordered_effect.memory_space == ordinary_effect.memory_space
+            assert ordered_effect.scope_id == ordinary_effect.scope_id
+            assert ordered_effect.counter_id == ordinary_effect.counter_id
+            assert ordered_effect.width_bits == ordinary_effect.width_bits
+            assert ordered_effect.timing_event == ordinary_effect.timing_event
+            assert ordered_effect.flags == (
+                EffectFlag.ORDERED,
+                *ordinary_effect.flags,
+            )
 
 
 def test_seed_schedule_contract_retains_endpoint_events_and_separations() -> None:

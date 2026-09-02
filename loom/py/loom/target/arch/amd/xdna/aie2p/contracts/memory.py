@@ -241,12 +241,16 @@ def _memory_rule(
     minimum_alignment: int,
     immediate_offset_minimum: int,
     immediate_offset_maximum: int,
+    volatile: bool,
 ) -> DescriptorRule:
     is_load = operation is SourceMemoryOperation.LOAD
     immediate_memory = address_form is _MemoryAddressForm.IMMEDIATE
-    memory_descriptor = _descriptor(
+    memory_descriptor_key = (
         immediate_descriptor_key if immediate_memory else register_descriptor_key
     )
+    if volatile:
+        memory_descriptor_key = f"{memory_descriptor_key}.volatile"
+    memory_descriptor = _descriptor(memory_descriptor_key)
     source_memory = _memory_constraint(
         operation,
         address_form,
@@ -300,6 +304,11 @@ def _memory_rule(
         descriptor=memory_descriptor,
         guards=(
             *(
+                (Guard.instance_flags_has_all("memory_flags", "volatile"),)
+                if volatile
+                else ()
+            ),
+            *(
                 (Guard.operand_segment_count("indices", 0),)
                 if address_form
                 in (
@@ -314,7 +323,7 @@ def _memory_rule(
     )
 
 
-def _scalar_memory_rules() -> tuple[DescriptorRule, ...]:
+def _scalar_memory_rules(*, volatile: bool) -> tuple[DescriptorRule, ...]:
     return tuple(
         _memory_rule(
             operation,
@@ -330,6 +339,7 @@ def _scalar_memory_rules() -> tuple[DescriptorRule, ...]:
             minimum_alignment=4,
             immediate_offset_minimum=-32,
             immediate_offset_maximum=28,
+            volatile=volatile,
         )
         for root_kind, memory_spaces in _MEMORY_ROOTS
         for operation, source_op, immediate_descriptor_key, register_descriptor_key in (
@@ -350,7 +360,7 @@ def _scalar_memory_rules() -> tuple[DescriptorRule, ...]:
     )
 
 
-def _vector_memory_rules() -> tuple[DescriptorRule, ...]:
+def _vector_memory_rules(*, volatile: bool) -> tuple[DescriptorRule, ...]:
     return tuple(
         _memory_rule(
             operation,
@@ -374,6 +384,7 @@ def _vector_memory_rules() -> tuple[DescriptorRule, ...]:
             minimum_alignment=width_bits // 8,
             immediate_offset_minimum=-(width_bits),
             immediate_offset_maximum=width_bits - width_bits // 8,
+            volatile=volatile,
         )
         for root_kind, memory_spaces in _MEMORY_ROOTS
         for (
@@ -392,6 +403,8 @@ def _vector_memory_rules() -> tuple[DescriptorRule, ...]:
 
 
 AIE2P_MEMORY_RULES: tuple[DescriptorRule, ...] = (
-    *_scalar_memory_rules(),
-    *_vector_memory_rules(),
+    *_scalar_memory_rules(volatile=True),
+    *_vector_memory_rules(volatile=True),
+    *_scalar_memory_rules(volatile=False),
+    *_vector_memory_rules(volatile=False),
 )
