@@ -67,7 +67,10 @@ IREE_API_EXPORT iree_status_t iree_hal_vulkan_device_spec_encode(
   iree_unaligned_store_le_u32(payload.data + 8, spec->api_version);
   iree_unaligned_store_le_u32(payload.data + 12, spec->driver_version);
   iree_unaligned_store_le_u32(payload.data + 16, spec->physical_device_type);
-  iree_unaligned_store_le_u64(payload.data + 20, spec->enabled_features);
+  iree_unaligned_store_le_u32(payload.data + 20,
+                              spec->enabled_features.general);
+  iree_unaligned_store_le_u32(payload.data + 24,
+                              spec->enabled_features.atomics);
   iree_unaligned_store_le_u32(payload.data + 28, spec->flags);
   iree_unaligned_store_le_u32(payload.data + 32, (uint32_t)property_count);
   for (iree_host_size_t i = 0; i < property_count; ++i) {
@@ -131,7 +134,10 @@ IREE_API_EXPORT iree_status_t iree_hal_vulkan_device_spec_decode(
   out_spec->driver_version = iree_unaligned_load_le_u32(payload.data + 12);
   out_spec->physical_device_type =
       iree_unaligned_load_le_u32(payload.data + 16);
-  out_spec->enabled_features = iree_unaligned_load_le_u64(payload.data + 20);
+  out_spec->enabled_features.general =
+      iree_unaligned_load_le_u32(payload.data + 20);
+  out_spec->enabled_features.atomics =
+      iree_unaligned_load_le_u32(payload.data + 24);
   out_spec->flags = iree_unaligned_load_le_u32(payload.data + 28);
   out_spec->cooperative_matrix.count = property_count;
   out_spec->cooperative_matrix.encoded_data =

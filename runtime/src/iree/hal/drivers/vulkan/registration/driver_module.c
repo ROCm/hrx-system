@@ -111,14 +111,15 @@ static iree_status_t iree_hal_vulkan_driver_factory_try_create(
     options.request_flags |= IREE_HAL_VULKAN_REQUEST_FLAG_TRACING;
   }
   if (FLAG_vulkan_robust_buffer_access) {
-    options.requested_features |=
+    options.required_features.general |=
         IREE_HAL_VULKAN_FEATURE_ENABLE_ROBUST_BUFFER_ACCESS;
   }
   if (FLAG_vulkan_sparse_binding) {
-    options.requested_features |= IREE_HAL_VULKAN_FEATURE_ENABLE_SPARSE_BINDING;
+    options.required_features.general |=
+        IREE_HAL_VULKAN_FEATURE_ENABLE_SPARSE_BINDING;
   }
   if (FLAG_vulkan_sparse_residency) {
-    options.requested_features |=
+    options.required_features.general |=
         IREE_HAL_VULKAN_FEATURE_ENABLE_SPARSE_RESIDENCY_ALIASED;
   }
   if (FLAG_vulkan_dedicated_compute_queue) {

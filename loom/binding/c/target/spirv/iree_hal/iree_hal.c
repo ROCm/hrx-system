@@ -188,8 +188,8 @@ static uint32_t loomc_spirv_iree_hal_vulkan_api_version_minor(
 
 static bool loomc_spirv_iree_hal_vulkan_feature_enabled(
     const iree_hal_vulkan_device_spec_t* spec,
-    iree_hal_vulkan_features_t feature) {
-  return iree_all_bits_set(spec->enabled_features, feature);
+    iree_hal_vulkan_general_features_t feature) {
+  return iree_all_bits_set(spec->enabled_features.general, feature);
 }
 
 static loomc_status_t loomc_spirv_iree_hal_decode_vulkan_spec(

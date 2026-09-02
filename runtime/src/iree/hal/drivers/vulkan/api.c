@@ -33,6 +33,36 @@ static bool iree_hal_vulkan_extension_name_list_contains(
   return false;
 }
 
+IREE_API_EXPORT iree_status_t
+iree_hal_vulkan_features_validate(iree_hal_vulkan_features_t features) {
+  const iree_hal_vulkan_general_features_t unknown_general_features =
+      features.general & ~IREE_HAL_VULKAN_FEATURE_ALL_RECOGNIZED;
+  if (unknown_general_features) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unrecognized Vulkan general feature bits 0x%08x",
+                            unknown_general_features);
+  }
+  const iree_hal_vulkan_shader_atomic_features_t unknown_atomic_features =
+      features.atomics & ~IREE_HAL_VULKAN_SHADER_ATOMIC_FEATURE_ALL_RECOGNIZED;
+  if (unknown_atomic_features) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "unrecognized Vulkan shader atomic feature bits 0x%08x",
+        unknown_atomic_features);
+  }
+  const iree_hal_vulkan_general_features_t sparse_residency_only_bit =
+      IREE_HAL_VULKAN_FEATURE_ENABLE_SPARSE_RESIDENCY_ALIASED &
+      ~IREE_HAL_VULKAN_FEATURE_ENABLE_SPARSE_BINDING;
+  if (iree_any_bit_set(features.general, sparse_residency_only_bit) &&
+      !iree_all_bits_set(
+          features.general,
+          IREE_HAL_VULKAN_FEATURE_ENABLE_SPARSE_RESIDENCY_ALIASED)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Vulkan sparse residency requires sparse binding");
+  }
+  return iree_ok_status();
+}
+
 IREE_API_EXPORT iree_status_t iree_hal_vulkan_device_extensions_from_names(
     iree_host_size_t extension_count, const char* const* extension_names,
     iree_hal_vulkan_device_extensions_t* out_extensions) {

@@ -13,150 +13,160 @@
 typedef struct loom_spirv_vulkan_feature_requirement_t {
   // Stable requirement feature name accepted by hal.vulkan.feature.
   iree_string_view_t name;
-  // Vulkan HAL feature bit that must be enabled on the logical device.
-  iree_hal_vulkan_features_t feature;
+  // Vulkan HAL features that must be enabled on the logical device.
+  iree_hal_vulkan_features_t required_features;
 } loom_spirv_vulkan_feature_requirement_t;
 
 static const loom_spirv_vulkan_feature_requirement_t
     kLoomSpirvVulkanFeatureRequirements[] = {
         {
             .name = IREE_SVL("buffer_device_address"),
-            .feature = IREE_HAL_VULKAN_FEATURE_ENABLE_BUFFER_DEVICE_ADDRESSES,
+            .required_features.general =
+                IREE_HAL_VULKAN_FEATURE_ENABLE_BUFFER_DEVICE_ADDRESSES,
         },
         {
             .name = IREE_SVL("cooperative_matrix_khr"),
-            .feature = IREE_HAL_VULKAN_FEATURE_ENABLE_COOPERATIVE_MATRIX,
+            .required_features.general =
+                IREE_HAL_VULKAN_FEATURE_ENABLE_COOPERATIVE_MATRIX,
         },
         {
             .name = IREE_SVL("shader_bfloat16_cooperative_matrix"),
-            .feature =
+            .required_features.general =
                 IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BFLOAT16_COOPERATIVE_MATRIX,
         },
         {
             .name = IREE_SVL("shader_bfloat16_dot_product"),
-            .feature =
+            .required_features.general =
                 IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BFLOAT16_DOT_PRODUCT,
         },
         {
             .name = IREE_SVL("shader_bfloat16_type"),
-            .feature = IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BFLOAT16_TYPE,
+            .required_features.general =
+                IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BFLOAT16_TYPE,
         },
         {
             .name = IREE_SVL("shader_buffer_float16_atomic_add"),
-            .feature =
-                IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_FLOAT16_ATOMIC_ADD,
+            .required_features.atomics =
+                IREE_HAL_VULKAN_SHADER_ATOMIC_FEATURE_BUFFER_FLOAT16_ADD,
         },
         {
             .name = IREE_SVL("shader_buffer_float16_atomics"),
-            .feature =
-                IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_FLOAT16_ATOMICS,
+            .required_features.atomics =
+                IREE_HAL_VULKAN_SHADER_ATOMIC_FEATURE_BUFFER_FLOAT16,
         },
         {
             .name = IREE_SVL("shader_buffer_float32_atomic_add"),
-            .feature =
-                IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_FLOAT32_ATOMIC_ADD,
+            .required_features.atomics =
+                IREE_HAL_VULKAN_SHADER_ATOMIC_FEATURE_BUFFER_FLOAT32_ADD,
         },
         {
             .name = IREE_SVL("shader_buffer_float32_atomics"),
-            .feature =
-                IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_FLOAT32_ATOMICS,
+            .required_features.atomics =
+                IREE_HAL_VULKAN_SHADER_ATOMIC_FEATURE_BUFFER_FLOAT32,
         },
         {
             .name = IREE_SVL("shader_buffer_float64_atomic_add"),
-            .feature =
-                IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_FLOAT64_ATOMIC_ADD,
+            .required_features.atomics =
+                IREE_HAL_VULKAN_SHADER_ATOMIC_FEATURE_BUFFER_FLOAT64_ADD,
         },
         {
             .name = IREE_SVL("shader_buffer_float64_atomics"),
-            .feature =
-                IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_FLOAT64_ATOMICS,
+            .required_features.atomics =
+                IREE_HAL_VULKAN_SHADER_ATOMIC_FEATURE_BUFFER_FLOAT64,
         },
         {
             .name = IREE_SVL("shader_buffer_int64_atomics"),
-            .feature =
-                IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_INT64_ATOMICS,
+            .required_features.atomics =
+                IREE_HAL_VULKAN_SHADER_ATOMIC_FEATURE_BUFFER_INT64,
         },
         {
             .name = IREE_SVL("shader_shared_float16_atomic_add"),
-            .feature =
-                IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_SHARED_FLOAT16_ATOMIC_ADD,
+            .required_features.atomics =
+                IREE_HAL_VULKAN_SHADER_ATOMIC_FEATURE_SHARED_FLOAT16_ADD,
         },
         {
             .name = IREE_SVL("shader_shared_float16_atomics"),
-            .feature =
-                IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_SHARED_FLOAT16_ATOMICS,
+            .required_features.atomics =
+                IREE_HAL_VULKAN_SHADER_ATOMIC_FEATURE_SHARED_FLOAT16,
         },
         {
             .name = IREE_SVL("shader_shared_float32_atomic_add"),
-            .feature =
-                IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_SHARED_FLOAT32_ATOMIC_ADD,
+            .required_features.atomics =
+                IREE_HAL_VULKAN_SHADER_ATOMIC_FEATURE_SHARED_FLOAT32_ADD,
         },
         {
             .name = IREE_SVL("shader_shared_float32_atomics"),
-            .feature =
-                IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_SHARED_FLOAT32_ATOMICS,
+            .required_features.atomics =
+                IREE_HAL_VULKAN_SHADER_ATOMIC_FEATURE_SHARED_FLOAT32,
         },
         {
             .name = IREE_SVL("shader_shared_float64_atomic_add"),
-            .feature =
-                IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_SHARED_FLOAT64_ATOMIC_ADD,
+            .required_features.atomics =
+                IREE_HAL_VULKAN_SHADER_ATOMIC_FEATURE_SHARED_FLOAT64_ADD,
         },
         {
             .name = IREE_SVL("shader_shared_float64_atomics"),
-            .feature =
-                IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_SHARED_FLOAT64_ATOMICS,
+            .required_features.atomics =
+                IREE_HAL_VULKAN_SHADER_ATOMIC_FEATURE_SHARED_FLOAT64,
         },
         {
             .name = IREE_SVL("shader_shared_int64_atomics"),
-            .feature =
-                IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_SHARED_INT64_ATOMICS,
+            .required_features.atomics =
+                IREE_HAL_VULKAN_SHADER_ATOMIC_FEATURE_SHARED_INT64,
         },
         {
             .name = IREE_SVL("shader_float16"),
-            .feature = IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FLOAT16,
+            .required_features.general =
+                IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FLOAT16,
         },
         {
             .name = IREE_SVL("shader_float64"),
-            .feature = IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FLOAT64,
+            .required_features.general =
+                IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FLOAT64,
         },
         {
             .name = IREE_SVL("shader_int8"),
-            .feature = IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INT8,
+            .required_features.general =
+                IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INT8,
         },
         {
             .name = IREE_SVL("shader_int16"),
-            .feature = IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INT16,
+            .required_features.general =
+                IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INT16,
         },
         {
             .name = IREE_SVL("shader_int64"),
-            .feature = IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INT64,
+            .required_features.general =
+                IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INT64,
         },
         {
             .name = IREE_SVL("shader_integer_dot_product"),
-            .feature =
+            .required_features.general =
                 IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INTEGER_DOT_PRODUCT,
         },
         {
             .name = IREE_SVL("storage_buffer_8bit_access"),
-            .feature =
+            .required_features.general =
                 IREE_HAL_VULKAN_FEATURE_ENABLE_STORAGE_BUFFER_8BIT_ACCESS,
         },
         {
             .name = IREE_SVL("storage_buffer_16bit_access"),
-            .feature =
+            .required_features.general =
                 IREE_HAL_VULKAN_FEATURE_ENABLE_STORAGE_BUFFER_16BIT_ACCESS,
         },
         {
             .name = IREE_SVL("subgroup_size_control"),
-            .feature = IREE_HAL_VULKAN_FEATURE_ENABLE_SUBGROUP_SIZE_CONTROL,
+            .required_features.general =
+                IREE_HAL_VULKAN_FEATURE_ENABLE_SUBGROUP_SIZE_CONTROL,
         },
         {
             .name = IREE_SVL("vulkan_memory_model"),
-            .feature = IREE_HAL_VULKAN_FEATURE_ENABLE_VULKAN_MEMORY_MODEL,
+            .required_features.general =
+                IREE_HAL_VULKAN_FEATURE_ENABLE_VULKAN_MEMORY_MODEL,
         },
         {
             .name = IREE_SVL("vulkan_memory_model_device_scope"),
-            .feature =
+            .required_features.general =
                 IREE_HAL_VULKAN_FEATURE_ENABLE_VULKAN_MEMORY_MODEL_DEVICE_SCOPE,
         },
 };
@@ -245,7 +255,10 @@ static iree_status_t loom_spirv_vulkan_hal_testbench_query_feature_requirement(
   IREE_RETURN_IF_ERROR(
       loom_spirv_vulkan_testbench_decode_device_spec(context, &vulkan_spec));
   const bool satisfied =
-      iree_all_bits_set(vulkan_spec.enabled_features, requirement->feature);
+      iree_all_bits_set(vulkan_spec.enabled_features.general,
+                        requirement->required_features.general) &&
+      iree_all_bits_set(vulkan_spec.enabled_features.atomics,
+                        requirement->required_features.atomics);
   out_result->state =
       satisfied ? LOOM_TESTBENCH_REQUIREMENT_PROVIDER_STATE_SATISFIED
                 : LOOM_TESTBENCH_REQUIREMENT_PROVIDER_STATE_UNSATISFIED;

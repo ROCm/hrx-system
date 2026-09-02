@@ -700,7 +700,7 @@ iree_hal_vulkan_device_query_cooperative_matrix_properties(
 
   iree_hal_vulkan_logical_device_t* device =
       iree_hal_vulkan_logical_device_cast(base_device);
-  if (!iree_all_bits_set(device->enabled_features,
+  if (!iree_all_bits_set(device->enabled_features.general,
                          IREE_HAL_VULKAN_FEATURE_ENABLE_COOPERATIVE_MATRIX)) {
     return iree_ok_status();
   }
@@ -2091,7 +2091,7 @@ static iree_status_t iree_hal_vulkan_logical_device_create_from_selection(
   iree_hal_vulkan_device_plan_t device_plan;
   iree_status_t status = iree_hal_vulkan_device_plan_initialize_for_create(
       snapshot, device_options, driver_options->request_flags,
-      driver_options->requested_features, &device_plan);
+      driver_options->required_features, &device_plan);
 
   iree_hal_vulkan_logical_device_t* device = NULL;
   if (iree_status_is_ok(status)) {

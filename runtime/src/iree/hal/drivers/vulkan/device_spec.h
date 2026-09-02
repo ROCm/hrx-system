@@ -43,7 +43,7 @@ typedef struct iree_hal_vulkan_device_spec_t {
   uint32_t driver_version;
   // VkPhysicalDeviceType value reported by the physical device.
   uint32_t physical_device_type;
-  // IREE Vulkan feature bits enabled on the logical device.
+  // IREE Vulkan features enabled on the logical device.
   iree_hal_vulkan_features_t enabled_features;
   // Stable Vulkan device spec flags.
   iree_hal_vulkan_device_spec_flags_t flags;

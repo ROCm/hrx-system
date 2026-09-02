@@ -74,7 +74,7 @@ typedef struct iree_hal_vulkan_device_plan_t {
   // Non-device-feature behavior requested for the logical device.
   iree_hal_vulkan_request_flags_t request_flags;
 
-  // HAL feature bits enabled or supplied on the logical device.
+  // HAL features enabled or supplied on the logical device.
   iree_hal_vulkan_features_t enabled_features;
 
   // Recognized Vulkan device extension bits enabled on the logical device.
@@ -148,7 +148,7 @@ iree_status_t iree_hal_vulkan_device_plan_initialize_for_create(
     const iree_hal_vulkan_physical_device_snapshot_t* snapshot,
     const iree_hal_vulkan_device_options_t* device_options,
     iree_hal_vulkan_request_flags_t request_flags,
-    iree_hal_vulkan_features_t requested_features,
+    iree_hal_vulkan_features_t required_features,
     iree_hal_vulkan_device_plan_t* out_plan);
 
 // Initializes |out_plan| for a wrapped external VkDevice.

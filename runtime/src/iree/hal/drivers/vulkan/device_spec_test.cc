@@ -23,10 +23,14 @@ static iree_hal_vulkan_device_spec_t MakeTestSpec() {
       /*.api_version=*/VK_MAKE_API_VERSION(0, 1, 3, 0),
       /*.driver_version=*/1234,
       /*.physical_device_type=*/VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU,
-      /*.enabled_features=*/IREE_HAL_VULKAN_FEATURE_REQUIRED_BASELINE |
-          IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FLOAT16 |
-          IREE_HAL_VULKAN_FEATURE_ENABLE_SUBGROUP_SIZE_CONTROL |
-          IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_SHARED_FLOAT64_ATOMIC_ADD,
+      /*.enabled_features=*/
+      {
+          /*.general=*/IREE_HAL_VULKAN_FEATURE_REQUIRED_BASELINE |
+              IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FLOAT16 |
+              IREE_HAL_VULKAN_FEATURE_ENABLE_SUBGROUP_SIZE_CONTROL,
+          /*.atomics=*/
+          IREE_HAL_VULKAN_SHADER_ATOMIC_FEATURE_SHARED_FLOAT64_ADD,
+      },
       /*.flags=*/IREE_HAL_VULKAN_DEVICE_SPEC_FLAG_NONE,
   };
 }
@@ -59,7 +63,8 @@ TEST(DeviceSpecTest, EncodesAndDecodesPayload) {
   EXPECT_EQ(decoded.api_version, VK_MAKE_API_VERSION(0, 1, 3, 0));
   EXPECT_EQ(decoded.driver_version, 1234u);
   EXPECT_EQ(decoded.physical_device_type, VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU);
-  EXPECT_EQ(decoded.enabled_features, source.enabled_features);
+  EXPECT_EQ(decoded.enabled_features.general, source.enabled_features.general);
+  EXPECT_EQ(decoded.enabled_features.atomics, source.enabled_features.atomics);
   EXPECT_EQ(decoded.flags, source.flags);
   ASSERT_EQ(decoded.cooperative_matrix.count, 1);
   iree_hal_vulkan_cooperative_matrix_property_t decoded_property = {};
@@ -149,7 +154,8 @@ TEST(DeviceSpecTest, AddsAndFindsCoreFacet) {
 
   iree_hal_vulkan_device_spec_t decoded = {0};
   IREE_ASSERT_OK(iree_hal_vulkan_device_spec_decode_facet(facet, &decoded));
-  EXPECT_EQ(decoded.enabled_features, source.enabled_features);
+  EXPECT_EQ(decoded.enabled_features.general, source.enabled_features.general);
+  EXPECT_EQ(decoded.enabled_features.atomics, source.enabled_features.atomics);
   EXPECT_EQ(decoded.physical_device_type, source.physical_device_type);
   ASSERT_EQ(decoded.cooperative_matrix.count, 1);
 
@@ -158,20 +164,24 @@ TEST(DeviceSpecTest, AddsAndFindsCoreFacet) {
 }
 
 TEST(DeviceSpecTest, AtomicCapabilitiesRequireExactFeatures) {
-  const iree_hal_vulkan_features_t required_features =
-      IREE_HAL_VULKAN_FEATURE_ENABLE_BUFFER_DEVICE_ADDRESSES |
-      IREE_HAL_VULKAN_FEATURE_ENABLE_VULKAN_MEMORY_MODEL |
-      IREE_HAL_VULKAN_FEATURE_ENABLE_VULKAN_MEMORY_MODEL_DEVICE_SCOPE;
-  const iree_hal_vulkan_features_t required_feature_bits[] = {
+  const iree_hal_vulkan_features_t required_features = {
+      /*.general=*/IREE_HAL_VULKAN_FEATURE_ENABLE_BUFFER_DEVICE_ADDRESSES |
+          IREE_HAL_VULKAN_FEATURE_ENABLE_VULKAN_MEMORY_MODEL |
+          IREE_HAL_VULKAN_FEATURE_ENABLE_VULKAN_MEMORY_MODEL_DEVICE_SCOPE,
+      /*.atomics=*/0,
+  };
+  const iree_hal_vulkan_general_features_t required_feature_bits[] = {
       IREE_HAL_VULKAN_FEATURE_ENABLE_BUFFER_DEVICE_ADDRESSES,
       IREE_HAL_VULKAN_FEATURE_ENABLE_VULKAN_MEMORY_MODEL,
       IREE_HAL_VULKAN_FEATURE_ENABLE_VULKAN_MEMORY_MODEL_DEVICE_SCOPE,
   };
-  for (iree_hal_vulkan_features_t removed_feature : required_feature_bits) {
+  for (iree_hal_vulkan_general_features_t removed_feature :
+       required_feature_bits) {
     SCOPED_TRACE(removed_feature);
+    iree_hal_vulkan_features_t remaining_features = required_features;
+    remaining_features.general &= ~removed_feature;
     const iree_hal_atomic_capabilities_t capabilities =
-        iree_hal_vulkan_atomic_capabilities(required_features &
-                                            ~removed_feature);
+        iree_hal_vulkan_atomic_capabilities(remaining_features);
     EXPECT_EQ(capabilities.operations.device_scope_32,
               IREE_HAL_ATOMIC_OPERATION_FLAG_NONE);
     EXPECT_EQ(capabilities.wait_conditions.device_scope_32,
@@ -187,9 +197,9 @@ TEST(DeviceSpecTest, AtomicCapabilitiesRequireExactFeatures) {
   EXPECT_EQ(capabilities.operations.device_scope_64,
             IREE_HAL_ATOMIC_OPERATION_FLAG_NONE);
 
-  capabilities = iree_hal_vulkan_atomic_capabilities(
-      required_features |
-      IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_INT64_ATOMICS);
+  iree_hal_vulkan_features_t int64_features = required_features;
+  int64_features.atomics |= IREE_HAL_VULKAN_SHADER_ATOMIC_FEATURE_BUFFER_INT64;
+  capabilities = iree_hal_vulkan_atomic_capabilities(int64_features);
   EXPECT_EQ(capabilities.operations.device_scope_64,
             IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL);
   EXPECT_EQ(capabilities.wait_conditions.device_scope_64,
@@ -263,14 +273,15 @@ TEST(DeviceSpecTest, CreatesSpecFromParams) {
 
   iree_hal_vulkan_device_plan_t device_plan = {};
   device_plan.request_flags = IREE_HAL_VULKAN_REQUEST_FLAG_TRACING;
-  device_plan.enabled_features =
+  device_plan.enabled_features.general =
       IREE_HAL_VULKAN_FEATURE_REQUIRED_BASELINE |
       IREE_HAL_VULKAN_FEATURE_ENABLE_BUFFER_DEVICE_ADDRESSES |
       IREE_HAL_VULKAN_FEATURE_ENABLE_VULKAN_MEMORY_MODEL |
       IREE_HAL_VULKAN_FEATURE_ENABLE_VULKAN_MEMORY_MODEL_DEVICE_SCOPE |
-      IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_INT64_ATOMICS |
       IREE_HAL_VULKAN_FEATURE_ENABLE_COOPERATIVE_MATRIX |
       IREE_HAL_VULKAN_FEATURE_ENABLE_SUBGROUP_SIZE_CONTROL;
+  device_plan.enabled_features.atomics =
+      IREE_HAL_VULKAN_SHADER_ATOMIC_FEATURE_BUFFER_INT64;
   device_plan.enabled_extensions =
       IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_CALIBRATED_TIMESTAMPS;
   device_plan.queue_assignment.queue_count = 2;
@@ -411,7 +422,10 @@ TEST(DeviceSpecTest, CreatesSpecFromParams) {
   iree_hal_vulkan_device_spec_t decoded = {};
   IREE_ASSERT_OK(iree_hal_vulkan_device_spec_decode_facet(facet, &decoded));
   EXPECT_EQ(decoded.api_version, VK_MAKE_API_VERSION(0, 1, 3, 0));
-  EXPECT_EQ(decoded.enabled_features, device_plan.enabled_features);
+  EXPECT_EQ(decoded.enabled_features.general,
+            device_plan.enabled_features.general);
+  EXPECT_EQ(decoded.enabled_features.atomics,
+            device_plan.enabled_features.atomics);
   EXPECT_EQ(decoded.physical_device_type, VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU);
   ASSERT_EQ(decoded.cooperative_matrix.count, 1);
   iree_hal_vulkan_cooperative_matrix_property_t decoded_property = {};

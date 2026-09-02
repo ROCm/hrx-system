@@ -14,8 +14,8 @@
 #include "loom/target/arch/spirv/records/target_records.h"
 
 typedef struct loom_spirv_vulkan_hal_feature_row_t {
-  // Vulkan HAL feature bit required for this profile fact.
-  iree_hal_vulkan_features_t vulkan_feature;
+  // Vulkan HAL features required for this profile fact.
+  iree_hal_vulkan_features_t required_features;
   // Compact fact flag set when the HAL reports the feature as available.
   loom_spirv_vulkan_hal_profile_flag_bits_t flag;
   // Additional fact flags required before projecting |feature_bits|.
@@ -26,50 +26,55 @@ typedef struct loom_spirv_vulkan_hal_feature_row_t {
 
 static const loom_spirv_vulkan_hal_feature_row_t kVulkanFeatureRows[] = {
     {
-        .vulkan_feature =
+        .required_features.general =
             IREE_HAL_VULKAN_FEATURE_ENABLE_BUFFER_DEVICE_ADDRESSES,
         .flag = LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_BUFFER_DEVICE_ADDRESS,
         .feature_bits = 0,
     },
     {
-        .vulkan_feature = IREE_HAL_VULKAN_FEATURE_ENABLE_SUBGROUP_SIZE_CONTROL,
+        .required_features.general =
+            IREE_HAL_VULKAN_FEATURE_ENABLE_SUBGROUP_SIZE_CONTROL,
         .flag = LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_SUBGROUP_SIZE_CONTROL,
         .feature_bits = 0,
     },
     {
-        .vulkan_feature = IREE_HAL_VULKAN_FEATURE_ENABLE_COOPERATIVE_MATRIX,
+        .required_features.general =
+            IREE_HAL_VULKAN_FEATURE_ENABLE_COOPERATIVE_MATRIX,
         .flag = LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_COOPERATIVE_MATRIX_KHR,
         .feature_bits = LOOM_SPIRV_FEATURE_COOPERATIVE_MATRIX_KHR,
     },
     {
-        .vulkan_feature =
+        .required_features.general =
             IREE_HAL_VULKAN_FEATURE_ENABLE_STORAGE_BUFFER_8BIT_ACCESS,
         .flag = LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_STORAGE_BUFFER_8BIT_ACCESS,
         .feature_bits = LOOM_SPIRV_FEATURE_STORAGE_BUFFER_8BIT_ACCESS,
     },
     {
-        .vulkan_feature =
+        .required_features.general =
             IREE_HAL_VULKAN_FEATURE_ENABLE_STORAGE_BUFFER_16BIT_ACCESS,
         .flag = LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_STORAGE_BUFFER_16BIT_ACCESS,
         .feature_bits = LOOM_SPIRV_FEATURE_STORAGE_BUFFER_16BIT_ACCESS,
     },
     {
-        .vulkan_feature = IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FLOAT16,
+        .required_features.general =
+            IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FLOAT16,
         .flag = LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_SHADER_FLOAT16,
         .feature_bits = LOOM_SPIRV_FEATURE_FLOAT16,
     },
     {
-        .vulkan_feature = IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FLOAT64,
+        .required_features.general =
+            IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FLOAT64,
         .flag = LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_SHADER_FLOAT64,
         .feature_bits = LOOM_SPIRV_FEATURE_FLOAT64,
     },
     {
-        .vulkan_feature = IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BFLOAT16_TYPE,
+        .required_features.general =
+            IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BFLOAT16_TYPE,
         .flag = LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_SHADER_BFLOAT16_TYPE,
         .feature_bits = LOOM_SPIRV_FEATURE_BFLOAT16_TYPE_KHR,
     },
     {
-        .vulkan_feature =
+        .required_features.general =
             IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BFLOAT16_DOT_PRODUCT,
         .flag = LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_SHADER_BFLOAT16_DOT_PRODUCT,
         .required_flags =
@@ -77,7 +82,7 @@ static const loom_spirv_vulkan_hal_feature_row_t kVulkanFeatureRows[] = {
         .feature_bits = LOOM_SPIRV_FEATURE_BFLOAT16_DOT_PRODUCT_KHR,
     },
     {
-        .vulkan_feature =
+        .required_features.general =
             IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BFLOAT16_COOPERATIVE_MATRIX,
         .flag =
             LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_SHADER_BFLOAT16_COOPERATIVE_MATRIX,
@@ -87,134 +92,137 @@ static const loom_spirv_vulkan_hal_feature_row_t kVulkanFeatureRows[] = {
         .feature_bits = LOOM_SPIRV_FEATURE_BFLOAT16_COOPERATIVE_MATRIX_KHR,
     },
     {
-        .vulkan_feature = IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INT8,
+        .required_features.general = IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INT8,
         .flag = LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_SHADER_INT8,
         .feature_bits = LOOM_SPIRV_FEATURE_INT8,
     },
     {
-        .vulkan_feature = IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INT16,
+        .required_features.general =
+            IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INT16,
         .flag = LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_SHADER_INT16,
         .feature_bits = LOOM_SPIRV_FEATURE_INT16,
     },
     {
-        .vulkan_feature = IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INT64,
+        .required_features.general =
+            IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INT64,
         .flag = LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_SHADER_INT64,
         .feature_bits = LOOM_SPIRV_FEATURE_INT64,
     },
     {
-        .vulkan_feature =
+        .required_features.general =
             IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INTEGER_DOT_PRODUCT,
         .flag = LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_SHADER_INTEGER_DOT_PRODUCT,
         .feature_bits = 0,
     },
     {
-        .vulkan_feature = IREE_HAL_VULKAN_FEATURE_ENABLE_VULKAN_MEMORY_MODEL,
+        .required_features.general =
+            IREE_HAL_VULKAN_FEATURE_ENABLE_VULKAN_MEMORY_MODEL,
         .flag = LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_VULKAN_MEMORY_MODEL,
         .feature_bits = 0,
     },
     {
-        .vulkan_feature =
+        .required_features.general =
             IREE_HAL_VULKAN_FEATURE_ENABLE_VULKAN_MEMORY_MODEL_DEVICE_SCOPE,
         .flag =
             LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_VULKAN_MEMORY_MODEL_DEVICE_SCOPE,
         .feature_bits = LOOM_SPIRV_FEATURE_VULKAN_MEMORY_MODEL_DEVICE_SCOPE,
     },
     {
-        .vulkan_feature =
-            IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_INT64_ATOMICS,
+        .required_features.atomics =
+            IREE_HAL_VULKAN_SHADER_ATOMIC_FEATURE_BUFFER_INT64,
         .flag = LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_STORAGE_BUFFER_INT64_ATOMICS,
         .required_flags = LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_SHADER_INT64,
         .feature_bits = LOOM_SPIRV_FEATURE_STORAGE_BUFFER_INT64_ATOMICS,
     },
     {
-        .vulkan_feature =
-            IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_SHARED_INT64_ATOMICS,
+        .required_features.atomics =
+            IREE_HAL_VULKAN_SHADER_ATOMIC_FEATURE_SHARED_INT64,
         .flag = LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_WORKGROUP_INT64_ATOMICS,
         .required_flags = LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_SHADER_INT64,
         .feature_bits = LOOM_SPIRV_FEATURE_WORKGROUP_INT64_ATOMICS,
     },
     {
-        .vulkan_feature =
-            IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_FLOAT16_ATOMICS,
+        .required_features.atomics =
+            IREE_HAL_VULKAN_SHADER_ATOMIC_FEATURE_BUFFER_FLOAT16,
         .flag =
             LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_STORAGE_BUFFER_FLOAT16_ATOMICS,
         .required_flags = LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_SHADER_FLOAT16,
         .feature_bits = LOOM_SPIRV_FEATURE_STORAGE_BUFFER_FLOAT16_ATOMICS,
     },
     {
-        .vulkan_feature =
-            IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_FLOAT16_ATOMIC_ADD,
+        .required_features.atomics =
+            IREE_HAL_VULKAN_SHADER_ATOMIC_FEATURE_BUFFER_FLOAT16_ADD,
         .flag =
             LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_STORAGE_BUFFER_FLOAT16_ATOMIC_ADD,
         .required_flags = LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_SHADER_FLOAT16,
         .feature_bits = LOOM_SPIRV_FEATURE_STORAGE_BUFFER_FLOAT16_ATOMIC_ADD,
     },
     {
-        .vulkan_feature =
-            IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_SHARED_FLOAT16_ATOMICS,
+        .required_features.atomics =
+            IREE_HAL_VULKAN_SHADER_ATOMIC_FEATURE_SHARED_FLOAT16,
         .flag = LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_WORKGROUP_FLOAT16_ATOMICS,
         .required_flags = LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_SHADER_FLOAT16,
         .feature_bits = LOOM_SPIRV_FEATURE_WORKGROUP_FLOAT16_ATOMICS,
     },
     {
-        .vulkan_feature =
-            IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_SHARED_FLOAT16_ATOMIC_ADD,
+        .required_features.atomics =
+            IREE_HAL_VULKAN_SHADER_ATOMIC_FEATURE_SHARED_FLOAT16_ADD,
         .flag = LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_WORKGROUP_FLOAT16_ATOMIC_ADD,
         .required_flags = LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_SHADER_FLOAT16,
         .feature_bits = LOOM_SPIRV_FEATURE_WORKGROUP_FLOAT16_ATOMIC_ADD,
     },
     {
-        .vulkan_feature =
-            IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_FLOAT32_ATOMICS,
+        .required_features.atomics =
+            IREE_HAL_VULKAN_SHADER_ATOMIC_FEATURE_BUFFER_FLOAT32,
         .flag =
             LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_STORAGE_BUFFER_FLOAT32_ATOMICS,
         .feature_bits = LOOM_SPIRV_FEATURE_STORAGE_BUFFER_FLOAT32_ATOMICS,
     },
     {
-        .vulkan_feature =
-            IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_FLOAT32_ATOMIC_ADD,
+        .required_features.atomics =
+            IREE_HAL_VULKAN_SHADER_ATOMIC_FEATURE_BUFFER_FLOAT32_ADD,
         .flag =
             LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_STORAGE_BUFFER_FLOAT32_ATOMIC_ADD,
         .feature_bits = LOOM_SPIRV_FEATURE_STORAGE_BUFFER_FLOAT32_ATOMIC_ADD,
     },
     {
-        .vulkan_feature =
-            IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_SHARED_FLOAT32_ATOMICS,
+        .required_features.atomics =
+            IREE_HAL_VULKAN_SHADER_ATOMIC_FEATURE_SHARED_FLOAT32,
         .flag = LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_WORKGROUP_FLOAT32_ATOMICS,
         .feature_bits = LOOM_SPIRV_FEATURE_WORKGROUP_FLOAT32_ATOMICS,
     },
     {
-        .vulkan_feature =
-            IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_SHARED_FLOAT32_ATOMIC_ADD,
+        .required_features.atomics =
+            IREE_HAL_VULKAN_SHADER_ATOMIC_FEATURE_SHARED_FLOAT32_ADD,
         .flag = LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_WORKGROUP_FLOAT32_ATOMIC_ADD,
         .feature_bits = LOOM_SPIRV_FEATURE_WORKGROUP_FLOAT32_ATOMIC_ADD,
     },
     {
-        .vulkan_feature =
-            IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_FLOAT64_ATOMICS,
+        .required_features.atomics =
+            IREE_HAL_VULKAN_SHADER_ATOMIC_FEATURE_BUFFER_FLOAT64,
         .flag =
             LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_STORAGE_BUFFER_FLOAT64_ATOMICS,
         .required_flags = LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_SHADER_FLOAT64,
         .feature_bits = LOOM_SPIRV_FEATURE_STORAGE_BUFFER_FLOAT64_ATOMICS,
     },
     {
-        .vulkan_feature =
-            IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_FLOAT64_ATOMIC_ADD,
+        .required_features.atomics =
+            IREE_HAL_VULKAN_SHADER_ATOMIC_FEATURE_BUFFER_FLOAT64_ADD,
         .flag =
             LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_STORAGE_BUFFER_FLOAT64_ATOMIC_ADD,
         .required_flags = LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_SHADER_FLOAT64,
         .feature_bits = LOOM_SPIRV_FEATURE_STORAGE_BUFFER_FLOAT64_ATOMIC_ADD,
     },
     {
-        .vulkan_feature =
-            IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_SHARED_FLOAT64_ATOMICS,
+        .required_features.atomics =
+            IREE_HAL_VULKAN_SHADER_ATOMIC_FEATURE_SHARED_FLOAT64,
         .flag = LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_WORKGROUP_FLOAT64_ATOMICS,
         .required_flags = LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_SHADER_FLOAT64,
         .feature_bits = LOOM_SPIRV_FEATURE_WORKGROUP_FLOAT64_ATOMICS,
     },
     {
-        .vulkan_feature =
-            IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_SHARED_FLOAT64_ATOMIC_ADD,
+        .required_features.atomics =
+            IREE_HAL_VULKAN_SHADER_ATOMIC_FEATURE_SHARED_FLOAT64_ADD,
         .flag = LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_WORKGROUP_FLOAT64_ATOMIC_ADD,
         .required_flags = LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_SHADER_FLOAT64,
         .feature_bits = LOOM_SPIRV_FEATURE_WORKGROUP_FLOAT64_ATOMIC_ADD,
@@ -225,7 +233,10 @@ static void loom_spirv_vulkan_hal_profile_project_feature_flag(
     const iree_hal_vulkan_device_spec_t* vulkan_spec,
     const loom_spirv_vulkan_hal_feature_row_t* row,
     loom_spirv_vulkan_hal_profile_facts_t* facts) {
-  if (iree_all_bits_set(vulkan_spec->enabled_features, row->vulkan_feature)) {
+  if (iree_all_bits_set(vulkan_spec->enabled_features.general,
+                        row->required_features.general) &&
+      iree_all_bits_set(vulkan_spec->enabled_features.atomics,
+                        row->required_features.atomics)) {
     facts->flags |= row->flag;
   }
 }
