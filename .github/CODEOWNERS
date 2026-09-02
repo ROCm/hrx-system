@@ -3,8 +3,8 @@
 
 # Subsystem ownership. The last matching pattern wins for each file.
 /libhrx/ @ROCm/libhrx-leads
-/loom/ @ROCm/loom-leads
-/runtime/ @ROCm/runtime-leads
+/loom/ @ROCm/hrx-loom-leads
+/runtime/ @ROCm/hrx-runtime-leads
 
 # Explicit high-signal restatements of the default ownership policy.
 /build_tools/ @ROCm/hrx-system-leads
