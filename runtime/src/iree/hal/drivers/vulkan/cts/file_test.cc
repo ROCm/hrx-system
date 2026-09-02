@@ -107,8 +107,6 @@ TEST_P(VulkanFileTest, NativeFileShortReadExceedsStagingRingFails) {
   const iree_device_size_t import_length = 20 * 1024 * 1024 + 31;
   const iree_device_size_t actual_length = 4 * 1024 * 1024 + 17;
   const std::vector<uint8_t> import_contents(import_length, 0);
-  const std::vector<uint8_t> actual_contents =
-      MakeDeterministicBytes(actual_length);
 
   iree::testing::TempFilePath path("iree_vulkan_hal_cts_native_file_short");
   IREE_ASSERT_OK(iree_io_file_contents_write(
@@ -130,10 +128,7 @@ TEST_P(VulkanFileTest, NativeFileShortReadExceedsStagingRingFails) {
       IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE, handle.get(),
       IREE_HAL_EXTERNAL_FILE_FLAG_NONE, file.out()));
 
-  IREE_ASSERT_OK(iree_io_file_contents_write(
-      path.path_view(),
-      iree_make_const_byte_span(actual_contents.data(), actual_contents.size()),
-      iree_allocator_system()));
+  IREE_ASSERT_OK(iree_io_file_handle_resize(handle.get(), actual_length));
 
   Ref<iree_hal_buffer_t> target_buffer;
   IREE_ASSERT_OK(CreateZeroedDeviceBuffer(import_length, target_buffer.out()));
