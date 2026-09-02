@@ -555,6 +555,42 @@ static iree_status_t loom_testbench_attr_to_scalar_value(
         return iree_ok_status();
       }
       break;
+    case LOOM_SCALAR_TYPE_F8E4M3:
+      if (loom_testbench_attr_as_f64(attr, &floating_value)) {
+        *out_value = (iree_tooling_value_t){
+            .kind = IREE_TOOLING_VALUE_KIND_RAW_U32,
+            .storage.u32 = iree_math_f32_to_f8e4m3fn((float)floating_value),
+        };
+        return iree_ok_status();
+      }
+      break;
+    case LOOM_SCALAR_TYPE_F8E5M2:
+      if (loom_testbench_attr_as_f64(attr, &floating_value)) {
+        *out_value = (iree_tooling_value_t){
+            .kind = IREE_TOOLING_VALUE_KIND_RAW_U32,
+            .storage.u32 = iree_math_f32_to_f8e5m2((float)floating_value),
+        };
+        return iree_ok_status();
+      }
+      break;
+    case LOOM_SCALAR_TYPE_F16:
+      if (loom_testbench_attr_as_f64(attr, &floating_value)) {
+        *out_value = (iree_tooling_value_t){
+            .kind = IREE_TOOLING_VALUE_KIND_RAW_U32,
+            .storage.u32 = iree_math_f32_to_f16((float)floating_value),
+        };
+        return iree_ok_status();
+      }
+      break;
+    case LOOM_SCALAR_TYPE_BF16:
+      if (loom_testbench_attr_as_f64(attr, &floating_value)) {
+        *out_value = (iree_tooling_value_t){
+            .kind = IREE_TOOLING_VALUE_KIND_RAW_U32,
+            .storage.u32 = iree_math_f32_to_bf16((float)floating_value),
+        };
+        return iree_ok_status();
+      }
+      break;
     case LOOM_SCALAR_TYPE_F32:
       if (loom_testbench_attr_as_f64(attr, &floating_value)) {
         *out_value = (iree_tooling_value_t){
