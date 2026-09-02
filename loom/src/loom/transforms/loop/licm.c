@@ -212,7 +212,8 @@ static iree_status_t loom_licm_process_function_once(
 
 iree_status_t loom_licm_run(loom_pass_t* pass, loom_module_t* module,
                             loom_func_like_t function) {
-  if (!loom_func_like_body(function)) return iree_ok_status();
+  loom_region_t* body = loom_func_like_body(function);
+  if (!body) return iree_ok_status();
 
   loom_rewriter_t rewriter;
   IREE_RETURN_IF_ERROR(
@@ -232,8 +233,7 @@ iree_status_t loom_licm_run(loom_pass_t* pass, loom_module_t* module,
   }
   if (iree_status_is_ok(status)) {
     status = loom_local_value_domain_acquire_for_region_tree(
-        module, loom_func_like_body(function), pass->arena,
-        &context.value_domain);
+        module, body, pass->arena, &context.value_domain);
   }
   if (iree_status_is_ok(status)) {
     status = loom_pass_value_facts_acquire(
@@ -241,9 +241,9 @@ iree_status_t loom_licm_run(loom_pass_t* pass, loom_module_t* module,
         &context.fact_table);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_motion_analysis_initialize(module, context.fact_table,
-                                             &context.value_domain, pass->arena,
-                                             &context.motion);
+    status = loom_motion_analysis_initialize_region(
+        module, body, context.fact_table, &context.value_domain, pass->arena,
+        &context.motion);
   }
 
   bool changed = true;

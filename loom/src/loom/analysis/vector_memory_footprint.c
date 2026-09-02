@@ -37,6 +37,9 @@ typedef struct loom_vector_memory_footprint_state_t {
   // Module whose function body is being checked.
   loom_module_t* module;
 
+  // Root function region containing every verified access.
+  loom_region_t* root_region;
+
   // Caller-owned verification options.
   const loom_vector_memory_footprint_options_t* options;
 
@@ -1556,8 +1559,8 @@ static iree_status_t loom_vector_memory_footprint_ensure_dominance(
   if (state->dominance_initialized) {
     return iree_ok_status();
   }
-  IREE_RETURN_IF_ERROR(loom_dominance_info_initialize(
-      state->module, state->arena, &state->dominance));
+  IREE_RETURN_IF_ERROR(loom_dominance_info_initialize_region(
+      state->module, state->root_region, state->arena, &state->dominance));
   state->dominance_initialized = true;
   return iree_ok_status();
 }
@@ -1905,6 +1908,7 @@ iree_status_t loom_vector_memory_footprint_verify_function(
   iree_arena_initialize(module->arena.block_pool, &arena);
   loom_vector_memory_footprint_state_t state = {
       .module = module,
+      .root_region = body,
       .options = options,
       .arena = &arena,
       .fact_table = options->fact_table,
