@@ -14,45 +14,33 @@
 namespace loom {
 namespace {
 
-static const int kTargetPayload = 1;
-static const int kReferencePayload = 2;
-
-static const loom_target_legalizer_entry_t kTargetEntries[] = {
+static const loom_target_legalizer_rule_t kTargetRules[] = {
     {/*.flags=*/0,
      /*.root_kind=*/LOOM_OP_KIND(LOOM_DIALECT_SCALAR, 3),
-     /*.provider_name=*/{},
-     /*.provider_strategy=*/LOOM_TARGET_LEGALIZER_STRATEGY_UNKNOWN,
-     /*.legalize=*/nullptr,
-     /*.user_data=*/&kTargetPayload},
+     /*.legalize=*/nullptr},
     {/*.flags=*/0,
      /*.root_kind=*/LOOM_OP_KIND(LOOM_DIALECT_VECTOR, 2),
-     /*.provider_name=*/{},
-     /*.provider_strategy=*/LOOM_TARGET_LEGALIZER_STRATEGY_UNKNOWN,
-     /*.legalize=*/nullptr,
-     /*.user_data=*/&kTargetPayload},
+     /*.legalize=*/nullptr},
 };
 
-static const loom_target_legalizer_entry_t kReferenceEntries[] = {
+static const loom_target_legalizer_rule_t kReferenceRules[] = {
     {/*.flags=*/0,
      /*.root_kind=*/LOOM_OP_KIND(LOOM_DIALECT_SCALAR, 3),
-     /*.provider_name=*/{},
-     /*.provider_strategy=*/LOOM_TARGET_LEGALIZER_STRATEGY_UNKNOWN,
-     /*.legalize=*/nullptr,
-     /*.user_data=*/&kReferencePayload},
+     /*.legalize=*/nullptr},
 };
 
 static const loom_target_legalizer_provider_t kTargetProvider = {
     /*.name=*/IREE_SVL("target"),
     /*.strategy=*/LOOM_TARGET_LEGALIZER_STRATEGY_TARGET,
-    /*.entries=*/kTargetEntries,
-    /*.entry_count=*/IREE_ARRAYSIZE(kTargetEntries),
+    /*.rules=*/kTargetRules,
+    /*.rule_count=*/IREE_ARRAYSIZE(kTargetRules),
 };
 
 static const loom_target_legalizer_provider_t kReferenceProvider = {
     /*.name=*/IREE_SVL("reference"),
     /*.strategy=*/LOOM_TARGET_LEGALIZER_STRATEGY_REFERENCE,
-    /*.entries=*/kReferenceEntries,
-    /*.entry_count=*/IREE_ARRAYSIZE(kReferenceEntries),
+    /*.rules=*/kReferenceRules,
+    /*.rule_count=*/IREE_ARRAYSIZE(kReferenceRules),
 };
 
 TEST(TargetLegalizerRegistryTest, ComposesOrderedProviderListsIntoOneSlab) {
@@ -87,12 +75,10 @@ TEST(TargetLegalizerRegistryTest, ComposesOrderedProviderListsIntoOneSlab) {
                                      IREE_SV("target")));
   EXPECT_EQ(scalar_entries[0].provider_strategy,
             LOOM_TARGET_LEGALIZER_STRATEGY_TARGET);
-  EXPECT_EQ(scalar_entries[0].user_data, &kTargetPayload);
   EXPECT_TRUE(iree_string_view_equal(scalar_entries[1].provider_name,
                                      IREE_SV("reference")));
   EXPECT_EQ(scalar_entries[1].provider_strategy,
             LOOM_TARGET_LEGALIZER_STRATEGY_REFERENCE);
-  EXPECT_EQ(scalar_entries[1].user_data, &kReferencePayload);
 
   EXPECT_EQ(loom_target_legalizer_registry_lookup_kind(
                 registry, LOOM_OP_KIND(LOOM_DIALECT_TEST, 0))

@@ -33,7 +33,7 @@ static iree_status_t loom_x86_retain_native_vector_op(
   return iree_ok_status();
 }
 
-static const loom_target_legalizer_entry_t kX86LegalizerEntries[] = {
+static const loom_target_legalizer_rule_t kX86LegalizerRules[] = {
     {
         .root_kind = LOOM_OP_VECTOR_DOT2F,
         .legalize = loom_x86_retain_native_vector_op,
@@ -52,8 +52,8 @@ const loom_target_legalizer_provider_t
     loom_x86_target_legalizer_provider_storage = {
         .name = IREE_SVL("x86"),
         .strategy = LOOM_TARGET_LEGALIZER_STRATEGY_TARGET,
-        .entries = kX86LegalizerEntries,
-        .entry_count = IREE_ARRAYSIZE(kX86LegalizerEntries),
+        .rules = kX86LegalizerRules,
+        .rule_count = IREE_ARRAYSIZE(kX86LegalizerRules),
 };
 
 const loom_target_legalizer_provider_t* loom_x86_target_legalizer_provider(

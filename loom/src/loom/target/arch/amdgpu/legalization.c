@@ -883,7 +883,7 @@ static iree_status_t loom_amdgpu_legalize_result_fragment_store_epilogue_loop(
   return iree_ok_status();
 }
 
-static const loom_target_legalizer_entry_t kAmdgpuLegalizerEntries[] = {
+static const loom_target_legalizer_rule_t kAmdgpuLegalizerRules[] = {
     {
         .root_kind = LOOM_OP_VIEW_ATOMIC_REDUCE,
         .legalize = loom_amdgpu_legalize_atomic_addf,
@@ -975,8 +975,8 @@ const loom_target_legalizer_provider_t
     loom_amdgpu_target_legalizer_provider_storage = {
         .name = IREE_SVL("amdgpu"),
         .strategy = LOOM_TARGET_LEGALIZER_STRATEGY_TARGET,
-        .entries = kAmdgpuLegalizerEntries,
-        .entry_count = IREE_ARRAYSIZE(kAmdgpuLegalizerEntries),
+        .rules = kAmdgpuLegalizerRules,
+        .rule_count = IREE_ARRAYSIZE(kAmdgpuLegalizerRules),
 };
 
 const loom_target_legalizer_provider_t* loom_amdgpu_target_legalizer_provider(

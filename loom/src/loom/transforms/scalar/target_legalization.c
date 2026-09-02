@@ -462,7 +462,7 @@ static iree_status_t loom_scalar_legalize_fmai(
   return iree_ok_status();
 }
 
-static const loom_target_legalizer_entry_t kScalarLegalizerEntries[] = {
+static const loom_target_legalizer_rule_t kScalarLegalizerRules[] = {
     {
         .root_kind = LOOM_OP_SCALAR_EXTF,
         .legalize = loom_scalar_legalize_extf,
@@ -480,8 +480,8 @@ static const loom_target_legalizer_entry_t kScalarLegalizerEntries[] = {
 static const loom_target_legalizer_provider_t kScalarLegalizerProvider = {
     .name = IREE_SVL("scalar"),
     .strategy = LOOM_TARGET_LEGALIZER_STRATEGY_REFERENCE,
-    .entries = kScalarLegalizerEntries,
-    .entry_count = IREE_ARRAYSIZE(kScalarLegalizerEntries),
+    .rules = kScalarLegalizerRules,
+    .rule_count = IREE_ARRAYSIZE(kScalarLegalizerRules),
 };
 
 const loom_target_legalizer_provider_t* loom_scalar_target_legalizer_provider(

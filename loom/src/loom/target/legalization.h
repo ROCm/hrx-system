@@ -33,6 +33,7 @@ extern "C" {
 typedef struct loom_view_region_table_t loom_view_region_table_t;
 typedef struct loom_local_value_domain_t loom_local_value_domain_t;
 typedef struct loom_target_legalizer_entry_t loom_target_legalizer_entry_t;
+typedef struct loom_target_legalizer_rule_t loom_target_legalizer_rule_t;
 typedef struct loom_target_legalizer_provider_t
     loom_target_legalizer_provider_t;
 
@@ -143,6 +144,17 @@ typedef iree_status_t (*loom_target_legalizer_fn_t)(
     loom_target_legalization_context_t* context, loom_op_t* op,
     loom_target_legalizer_result_t* out_result);
 
+// Provider-owned rule copied into a composed legalizer registry.
+struct loom_target_legalizer_rule_t {
+  // Entry-specific behavior flags.
+  loom_target_legalizer_entry_flags_t flags;
+  // Op kind this legalizer can rewrite.
+  loom_op_kind_t root_kind;
+  // Rewriter callback for root_kind.
+  loom_target_legalizer_fn_t legalize;
+};
+
+// Composed legalizer entry used during legalization dispatch.
 struct loom_target_legalizer_entry_t {
   // Entry-specific behavior flags.
   loom_target_legalizer_entry_flags_t flags;
@@ -154,8 +166,6 @@ struct loom_target_legalizer_entry_t {
   loom_target_legalizer_strategy_t provider_strategy;
   // Rewriter callback for root_kind.
   loom_target_legalizer_fn_t legalize;
-  // Provider-owned payload consumed by legalize.
-  const void* user_data;
 };
 
 struct loom_target_legalizer_provider_t {
@@ -163,10 +173,10 @@ struct loom_target_legalizer_provider_t {
   iree_string_view_t name;
   // Strategy shared by legalizer rows from this provider.
   loom_target_legalizer_strategy_t strategy;
-  // Legalizer rows contributed by this provider.
-  const loom_target_legalizer_entry_t* entries;
-  // Number of rows in entries.
-  uint16_t entry_count;
+  // Legalizer rules contributed by this provider.
+  const loom_target_legalizer_rule_t* rules;
+  // Number of provider-owned rules.
+  uint16_t rule_count;
 };
 
 typedef struct loom_target_legalizer_provider_list_t {
@@ -243,9 +253,9 @@ typedef struct loom_target_legalizer_registry_t {
 
 // Owned storage for a composed target legalizer registry.
 //
-// Provider-owned names, callbacks, and payload pointers remain borrowed from
-// their defining compiler packages. The allocation contains only the dense
-// dispatch tables and copied entry records required to query them efficiently.
+// Provider-owned names and callbacks remain borrowed from their defining
+// compiler packages. The allocation contains only the dense dispatch tables
+// and copied entry records required to query them efficiently.
 typedef struct loom_target_legalizer_registry_storage_t {
   // Allocator used to release |allocation|.
   iree_allocator_t allocator;
