@@ -1,0 +1,96 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx1151> @helper_target
+amdgpu.target<gfx11-generic> @caller_target
+
+low.func.def target<amdgpu.rdna3_5.core>(@helper_target) @exact_helper(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  return %value
+}
+
+func.def target(@caller_target) @generic_caller(%value: vector<1xi32>) -> (vector<1xi32>) {
+  // ERROR@+1: TARGET/076 {callee_name="exact_helper", callee_target="gfx1151", caller_target="gfx11-generic"}
+  %result = low.invoke @exact_helper(%value) : (vector<1xi32>) -> (vector<1xi32>)
+  func.return %result : vector<1xi32>
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @unary_helper(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  return %value
+}
+
+func.def target(@target) @wrong_operand_count(%lhs: vector<1xi32>, %rhs: vector<1xi32>) -> (vector<1xi32>) {
+  // ERROR@+1: TARGET/073 {callee_name="unary_helper", value_kind="operand", actual_count="2", expected_count="1"}
+  %result = low.invoke @unary_helper(%lhs, %rhs) : (vector<1xi32>, vector<1xi32>) -> (vector<1xi32>)
+  func.return %result : vector<1xi32>
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @wide_helper(%value: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
+  return %value
+}
+
+func.def target(@target) @wrong_operand_type(%value: vector<1xi32>) -> (vector<1xi32>) {
+  // ERROR@+1: TARGET/074 {callee_name="wide_helper", value_kind="operand", actual_type="reg<amdgpu.vgpr>", expected_type="reg<amdgpu.vgpr x2>"}
+  %result = low.invoke @wide_helper(%value) : (vector<1xi32>) -> (vector<1xi32>)
+  func.return %result : vector<1xi32>
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @multiple_of_16(%value: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) where [mul(%value, 16)] asm {
+  return %value
+}
+
+func.def target(@target) @unproven_precondition(%value: index) -> (index) {
+  // ERROR@+1: TARGET/078 {callee_name="multiple_of_16", predicate_index="0", predicate_kind="mul", proof_result="not proven"}
+  %result = low.invoke @multiple_of_16(%value) : (index) -> (index)
+  func.return %result : index
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @multiple_of_16(%value: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) where [mul(%value, 16)] asm {
+  return %value
+}
+
+func.def target(@target) @contradicted_precondition() -> (index) {
+  %c3 = index.constant 3 : index
+  // ERROR@+1: TARGET/078 {callee_name="multiple_of_16", predicate_index="0", predicate_kind="mul", proof_result="proven false"}
+  %result = low.invoke @multiple_of_16(%c3) : (index) -> (index)
+  func.return %result : index
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @ordered_pair(%lower: reg<amdgpu.sgpr>, %upper: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) where [le(%lower, %upper)] asm {
+  return %lower, %upper
+}
+
+// A stronger relational caller contract proves the helper precondition even
+// though neither argument has a scalar interval that proves the relation.
+func.def target(@target) @proven_relational_precondition(%lower: index, %upper: index) -> (index, index) where [lt(%lower, %upper)] {
+  %result_lower, %result_upper = low.invoke @ordered_pair(%lower, %upper) : (index, index) -> (index, index)
+  func.return %result_lower, %result_upper : index, index
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @ordered_pair(%lower: reg<amdgpu.sgpr>, %upper: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) where [le(%lower, %upper)] asm {
+  return %lower, %upper
+}
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @proven_relational_precondition(%lower: reg<amdgpu.sgpr>, %upper: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) where [lt(%lower, %upper)] asm {
+  %result_lower, %result_upper = low.assume %lower, %upper [le(%lower, %upper)] : reg<amdgpu.sgpr>, reg<amdgpu.sgpr>
+  return %result_lower, %result_upper
+}

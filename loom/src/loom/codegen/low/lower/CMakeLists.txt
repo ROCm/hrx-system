@@ -16,6 +16,7 @@ loom_cc_library(
     "context.h"
     "contract_query.h"
     "function_boundary.h"
+    "low_invoke.h"
     "lower.h"
     "module_state.h"
     "report.h"
@@ -31,6 +32,7 @@ loom_cc_library(
     "context.c"
     "contract_query.c"
     "function_boundary.c"
+    "low_invoke.c"
     "lower.c"
     "module_state.c"
     "policy.c"
@@ -51,6 +53,7 @@ loom_cc_library(
     loom::analysis::contract_vector
     loom::analysis::kernel_async_legality
     loom::analysis::native_layout
+    loom::analysis::symbol_facts
     loom::analysis::symbolic_expr
     loom::analysis::vector_memory_footprint
     loom::analysis::view_regions
@@ -59,6 +62,7 @@ loom_cc_library(
     loom::codegen::low::memory_access
     loom::codegen::low::memory_access_ir
     loom::codegen::low::source_memory_plan
+    loom::decision::predicate
     loom::error::emitter
     loom::error::error_defs
     loom::ir
@@ -67,16 +71,19 @@ loom_cc_library(
     loom::ops::cfg
     loom::ops::encoding
     loom::ops::func
+    loom::ops::func_symbol_facts
     loom::ops::index
     loom::ops::kernel
     loom::ops::low
     loom::ops::op_defs
     loom::ops::scf
     loom::ops::vector
+    loom::rewrite::materialize
     loom::rewrite::remap
     loom::sanitizer::options
     loom::target::contract
     loom::target::facts
+    loom::target::function_contract
     loom::target::low_descriptor_registry
     loom::target::low_legality
     loom::target::registers

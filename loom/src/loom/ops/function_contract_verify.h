@@ -18,9 +18,11 @@ extern "C" {
 #endif
 
 // Verifies generic function signature and target contracts. Predicate values
-// must belong to the function signature and satisfy the predicate kind's value
-// type domain. Dialect-specific verifiers should call this before checking
-// dialect-local function rules.
+// must belong to the function signature. Source values and typed target
+// registers must satisfy the predicate kind's semantic value domain. Registers
+// without semantic types defer domain validation to the target-bound verifier,
+// which owns the canonical register representation. Dialect-specific verifiers
+// should call this before checking dialect-local function rules.
 iree_status_t loom_function_contract_verify(const loom_module_t* module,
                                             const loom_op_t* op,
                                             iree_diagnostic_emitter_t emitter);

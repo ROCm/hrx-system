@@ -13,6 +13,7 @@
 #include "loom/codegen/low/lower/context.h"
 #include "loom/codegen/low/lower/contract_query.h"
 #include "loom/codegen/low/lower/function_boundary.h"
+#include "loom/codegen/low/lower/low_invoke.h"
 #include "loom/codegen/low/lower/report.h"
 #include "loom/codegen/low/lower/rule_emit.h"
 #include "loom/codegen/low/lower/rule_source_memory.h"
@@ -574,6 +575,8 @@ IREE_ATTRIBUTE_NOINLINE static iree_status_t loom_low_lower_structural_op(
       }
       return iree_ok_status();
     }
+    case LOOM_OP_LOW_INVOKE:
+      return loom_low_lower_invoke(context, source_op);
     case LOOM_OP_KERNEL_RETURN: {
       loom_op_t* low_return_op = NULL;
       return loom_low_return_build(&context->builder, NULL, 0,

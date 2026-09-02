@@ -35,6 +35,10 @@ typedef struct PipelineRunCounts {
   int source_to_low = 0;
   // Lexical pass-run ordinal of source-to-low.
   int source_to_low_ordinal = 0;
+  // Number of symbol-DCE runs after source-to-Low lowering.
+  int symbol_dce = 0;
+  // Lexical pass-run ordinal of symbol DCE.
+  int symbol_dce_ordinal = 0;
   // Diagnostics option on the source-to-low pass.
   iree_string_view_t source_to_low_diagnostics = iree_string_view_empty();
   // Sanitizer reporting option on the source-to-low pass.
@@ -113,6 +117,9 @@ iree_status_t InspectPipelineRun(void* user_data, loom_op_t* op,
     counts->source_to_low_sanitizer_reporting =
         FindStringOption(count_context->module, loom_pass_run_options(op),
                          IREE_SV("sanitizer-reporting"));
+  } else if (iree_string_view_equal(key, IREE_SV("symbol-dce"))) {
+    ++counts->symbol_dce;
+    counts->symbol_dce_ordinal = count_context->current_run_ordinal;
   } else if (iree_string_view_equal(key,
                                     IREE_SV("sanitizer-insert-assertions"))) {
     ++counts->sanitizer_insert_assertions;
@@ -201,10 +208,12 @@ TEST_F(TargetPipelineTest, ZeroChecksBuildsNoSanitizerPassSlots) {
   EXPECT_EQ(counts.final_template_selection, 1);
   EXPECT_EQ(counts.target_callgraph_specialization, 1);
   EXPECT_EQ(counts.source_to_low, 1);
+  EXPECT_EQ(counts.symbol_dce, 1);
   EXPECT_LT(counts.final_template_selection_ordinal,
             counts.target_callgraph_specialization_ordinal);
   EXPECT_LT(counts.target_callgraph_specialization_ordinal,
             counts.source_to_low_ordinal);
+  EXPECT_LT(counts.source_to_low_ordinal, counts.symbol_dce_ordinal);
   EXPECT_TRUE(iree_string_view_is_empty(counts.source_to_low_diagnostics));
   EXPECT_TRUE(
       iree_string_view_is_empty(counts.source_to_low_sanitizer_reporting));
@@ -226,6 +235,7 @@ TEST_F(TargetPipelineTest, ExpandedSourceStopsBeforeCallgraphSpecialization) {
   EXPECT_EQ(counts.final_template_selection, 1);
   EXPECT_EQ(counts.target_callgraph_specialization, 0);
   EXPECT_EQ(counts.source_to_low, 0);
+  EXPECT_EQ(counts.symbol_dce, 0);
 }
 
 TEST_F(TargetPipelineTest, DiagnosticArtifactsPreserveRawSourceBoundary) {
@@ -240,6 +250,7 @@ TEST_F(TargetPipelineTest, DiagnosticArtifactsPreserveRawSourceBoundary) {
   EXPECT_EQ(counts.final_template_selection, 0);
   EXPECT_EQ(counts.target_callgraph_specialization, 0);
   EXPECT_EQ(counts.source_to_low, 1);
+  EXPECT_EQ(counts.symbol_dce, 0);
 }
 
 TEST_F(TargetPipelineTest, OperandFormDiagnosticsBuildsSourceToLowOption) {

@@ -1547,7 +1547,19 @@ low_invoke = Op(
     "low.invoke",
     group=low_ops,
     phase=OpPhase.EXECUTABLE,
-    doc="Invoke an explicitly selected translated low function from non-low IR.",
+    doc=(
+        "Required-inline edge from source IR to an explicitly selected "
+        "target-Low function. The call site retains source value types; "
+        "source-to-Low lowering maps them to the helper register signature, "
+        "proves directional target and representation compatibility, and "
+        "clones the helper body into the caller. The helper must be a "
+        "module-local low.func.def with virtual register allocation and one "
+        "outer body block. Function-entry resources and nested calls cannot "
+        "cross the boundary. Caller facts must prove every authored helper "
+        "argument predicate before lowering reifies those predicates as "
+        "low.assume identities at the inline site. schedule(locked) helpers "
+        "must be straight-line and preserve their authored instruction order."
+    ),
     operands=[Operand("operands", ANY, variadic=True)],
     attrs=[
         AttrDef(

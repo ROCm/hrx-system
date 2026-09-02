@@ -162,7 +162,16 @@ static iree_status_t loom_function_contract_verify_predicates(
             module, op, emitter, predicate_index, argument_index);
       }
       const loom_type_t value_type = loom_module_value_type(module, value_id);
-      if (!loom_predicate_kind_accepts_value_type(predicate->kind,
+      // Registers without a semantic value type do not expose a numeric domain
+      // to this target-independent verifier. The target-bound Low verifier
+      // decides whether that register form is canonical for its register class.
+      // Ordinary source values and typed registers retain the strict domain
+      // check here.
+      const bool has_verifiable_semantic_type =
+          !loom_type_is_register(value_type) ||
+          loom_type_register_has_value_type(value_type);
+      if (has_verifiable_semantic_type &&
+          !loom_predicate_kind_accepts_value_type(predicate->kind,
                                                   value_type)) {
         return loom_function_contract_emit_predicate_type_error(
             op, emitter, predicate_index, argument_index, value_type,
