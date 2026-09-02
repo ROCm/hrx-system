@@ -4,9 +4,10 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "loom/codegen/low/lower/lower_context.h"
+
 #include <string.h>
 
-#include "loom/codegen/low/lower/lower_internal.h"
 #include "loom/codegen/low/memory_access_ir.h"
 #include "loom/codegen/low/source_memory_plan.h"
 #include "loom/error/error_catalog.h"

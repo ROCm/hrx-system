@@ -4,10 +4,15 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Private state shared by source-to-target-low lowering implementation files.
+// Source-to-Low lowering context implementation contract.
+//
+// Public target callbacks use the opaque context accessors declared in
+// lower.h. This header owns the stack-local context representation and the
+// function-lifetime state shared by the lowering orchestrator, planning,
+// callable-boundary, reporting, and rule-interpreter components.
 
-#ifndef LOOM_CODEGEN_LOW_LOWER_LOWER_INTERNAL_H_
-#define LOOM_CODEGEN_LOW_LOWER_LOWER_INTERNAL_H_
+#ifndef LOOM_CODEGEN_LOW_LOWER_LOWER_CONTEXT_H_
+#define LOOM_CODEGEN_LOW_LOWER_LOWER_CONTEXT_H_
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
@@ -27,6 +32,7 @@
 extern "C" {
 #endif
 
+// Sentinel indicating that a source value was intentionally erased.
 #define LOOM_LOW_LOWER_VALUE_ID_ELIDED ((loom_value_id_t)(UINT32_MAX - 1))
 
 typedef struct loom_low_lower_rule_descriptor_map_t {
@@ -198,4 +204,4 @@ void loom_low_lower_emission_scope_end(loom_low_lower_context_t* context);
 }  // extern "C"
 #endif
 
-#endif  // LOOM_CODEGEN_LOW_LOWER_LOWER_INTERNAL_H_
+#endif  // LOOM_CODEGEN_LOW_LOWER_LOWER_CONTEXT_H_

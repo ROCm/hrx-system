@@ -9,7 +9,7 @@
 #include <string.h>
 
 #include "loom/codegen/low/lower/contract_query.h"
-#include "loom/codegen/low/lower/lower_internal.h"
+#include "loom/codegen/low/lower/lower_context.h"
 #include "loom/codegen/low/lower/lower_rules.h"
 #include "loom/ir/module.h"
 #include "loom/ops/func/ops.h"

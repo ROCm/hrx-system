@@ -16,7 +16,7 @@ loom_cc_library(
     "contract_query.h"
     "function_boundary.h"
     "lower.h"
-    "lower_internal.h"
+    "lower_context.h"
     "lower_report.h"
     "lower_rule_descriptor.h"
     "lower_rule_source_memory.h"
@@ -115,6 +115,17 @@ loom_cc_test(
   DEPS
     ::lower
     iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+loom_cc_test(
+  NAME
+    lower_context_test
+  SRCS
+    "lower_context_test.cc"
+  DEPS
+    ::lower
     iree::testing::gtest
     iree::testing::gtest_main
 )

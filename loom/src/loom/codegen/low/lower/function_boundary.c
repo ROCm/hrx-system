@@ -7,7 +7,7 @@
 #include "loom/codegen/low/lower/function_boundary.h"
 
 #include "iree/base/internal/arena.h"
-#include "loom/codegen/low/lower/lower_internal.h"
+#include "loom/codegen/low/lower/lower_context.h"
 #include "loom/codegen/low/lower/source_plan.h"
 #include "loom/error/error_catalog.h"
 #include "loom/ir/context.h"

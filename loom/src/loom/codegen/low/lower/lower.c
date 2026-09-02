@@ -12,7 +12,7 @@
 #include "loom/analysis/vector_memory_footprint.h"
 #include "loom/codegen/low/lower/contract_query.h"
 #include "loom/codegen/low/lower/function_boundary.h"
-#include "loom/codegen/low/lower/lower_internal.h"
+#include "loom/codegen/low/lower/lower_context.h"
 #include "loom/codegen/low/lower/lower_report.h"
 #include "loom/codegen/low/lower/lower_rule_source_memory.h"
 #include "loom/codegen/low/lower/lower_rules.h"

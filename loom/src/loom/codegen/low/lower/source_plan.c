@@ -10,7 +10,7 @@
 
 #include "loom/analysis/contract_vector.h"
 #include "loom/codegen/low/lower/contract_query.h"
-#include "loom/codegen/low/lower/lower_internal.h"
+#include "loom/codegen/low/lower/lower_context.h"
 #include "loom/codegen/low/lower/lower_rule_source_memory.h"
 #include "loom/codegen/low/lower/source_query.h"
 #include "loom/codegen/low/source_memory_plan.h"
