@@ -1534,6 +1534,22 @@ bool loom_region_branch_region_yield_only_operands(
 // MemoryAccess interface
 //===----------------------------------------------------------------------===//
 
+// Per-instance execution-semantics modifiers for memory-access operations.
+enum loom_memory_access_flag_bits_e {
+  // Requires every dynamic access to execute as an independently observable
+  // operation and preserves its order relative to other volatile accesses. A
+  // target may decompose one logical access into multiple physical accesses.
+  // This does not provide atomicity, synchronization, or a cache-coherence
+  // guarantee.
+  LOOM_MEMORY_ACCESS_FLAG_VOLATILE = 1u << 0,
+};
+typedef uint8_t loom_memory_access_flags_t;
+
+// Derives effective traits for a memory-access operation from its instance
+// flags. Volatile accesses carry ObservableEffect in addition to their static
+// read or write effects.
+loom_trait_flags_t loom_memory_access_effective_traits(const loom_op_t* op);
+
 // Returns true if |access| refers to a valid memory-access op. All accessor
 // helpers below tolerate a NULL op vtable and return safe defaults.
 static inline bool loom_memory_access_isa(loom_memory_access_t access) {

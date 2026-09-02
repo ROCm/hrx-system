@@ -1483,6 +1483,24 @@ ERR_TARGET_080 = ErrorDef(
     ),
 )
 
+# ERR_TARGET_081: Target lowering loses volatile memory semantics.
+ERR_TARGET_081 = ErrorDef(
+    domain=ErrorDomain.TARGET,
+    code=81,
+    severity=Severity.ERROR,
+    summary="Target lowering loses volatile memory semantics.",
+    message=(
+        "target '{target_key}' export '{export_name}' config '{config_key}' "
+        "selected a lowering for volatile memory operation '{op_name}' in "
+        "'@{function_name}' that has no ordered source-memory descriptor"
+    ),
+    params=_TARGET_CONTEXT_PARAMS,
+    fix_hint=(
+        "Select a source-memory descriptor carrying an ordered read or write "
+        "effect for the volatile operation."
+    ),
+)
+
 ALL_TARGET_ERRORS = (
     ERR_TARGET_001,
     ERR_TARGET_002,
@@ -1554,4 +1572,5 @@ ALL_TARGET_ERRORS = (
     ERR_TARGET_078,
     ERR_TARGET_079,
     ERR_TARGET_080,
+    ERR_TARGET_081,
 )

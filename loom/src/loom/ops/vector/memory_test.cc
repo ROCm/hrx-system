@@ -400,8 +400,9 @@ TEST_F(VectorMemoryTest, OpFootprintKindClassifiesMemoryFamilies) {
 
   loom_op_t* vector_load = nullptr;
   IREE_ASSERT_OK(loom_vector_load_build(
-      &builder_, /*build_flags=*/0, view, indices, IREE_ARRAYSIZE(indices),
-      static_indices, IREE_ARRAYSIZE(static_indices), /*cache_scope=*/0,
+      &builder_, /*build_flags=*/0, /*instance_flags=*/0, view, indices,
+      IREE_ARRAYSIZE(indices), static_indices, IREE_ARRAYSIZE(static_indices),
+      /*cache_scope=*/0,
       /*cache_temporal=*/0,
       loom_type_shaped_1d(LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_F32,
                           loom_dim_pack_static(8), /*encoding_id=*/0),
@@ -411,7 +412,7 @@ TEST_F(VectorMemoryTest, OpFootprintKindClassifiesMemoryFamilies) {
 
   loom_op_t* vector_store = nullptr;
   IREE_ASSERT_OK(loom_vector_store_build(
-      &builder_, /*build_flags=*/0, value, view, indices,
+      &builder_, /*build_flags=*/0, /*instance_flags=*/0, value, view, indices,
       IREE_ARRAYSIZE(indices), static_indices, IREE_ARRAYSIZE(static_indices),
       /*cache_scope=*/0, /*cache_temporal=*/0, LOOM_LOCATION_UNKNOWN,
       &vector_store));

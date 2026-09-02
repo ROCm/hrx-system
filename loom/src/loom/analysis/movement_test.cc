@@ -243,7 +243,7 @@ TEST_F(MovementTest, ClassifiesStaticDenseVectorLoadFootprint) {
   int64_t static_indices[] = {3};
   loom_op_t* op = nullptr;
   IREE_ASSERT_OK(loom_vector_load_build(
-      &builder_, 0, view, nullptr, 0, static_indices,
+      &builder_, 0, /*instance_flags=*/0, view, nullptr, 0, static_indices,
       IREE_ARRAYSIZE(static_indices), 0, 0,
       VectorType1D(LOOM_SCALAR_TYPE_F32, 4), LOOM_LOCATION_UNKNOWN, &op));
 
@@ -274,7 +274,7 @@ TEST_F(MovementTest, ClassifiesStaticDenseScalarLoadFootprint) {
   int64_t static_indices[] = {3};
   loom_op_t* op = nullptr;
   IREE_ASSERT_OK(loom_view_load_build(
-      &builder_, 0, view, nullptr, 0, static_indices,
+      &builder_, 0, /*instance_flags=*/0, view, nullptr, 0, static_indices,
       IREE_ARRAYSIZE(static_indices), 0, 0,
       loom_type_scalar(LOOM_SCALAR_TYPE_F32), LOOM_LOCATION_UNKNOWN, &op));
 
@@ -303,9 +303,10 @@ TEST_F(MovementTest, ClassifiesStaticStridedScalarStoreFootprint) {
       buffer, 8, ViewType2D(LOOM_SCALAR_TYPE_I32, 8, 8, layout));
   int64_t static_indices[] = {1, 2};
   loom_op_t* op = nullptr;
-  IREE_ASSERT_OK(loom_view_store_build(
-      &builder_, 0, value, view, nullptr, 0, static_indices,
-      IREE_ARRAYSIZE(static_indices), 0, 0, LOOM_LOCATION_UNKNOWN, &op));
+  IREE_ASSERT_OK(loom_view_store_build(&builder_, 0, /*instance_flags=*/0,
+                                       value, view, nullptr, 0, static_indices,
+                                       IREE_ARRAYSIZE(static_indices), 0, 0,
+                                       LOOM_LOCATION_UNKNOWN, &op));
 
   loom_movement_analysis_t analysis = {};
   InitializeAnalysis(&analysis);
@@ -335,17 +336,17 @@ TEST_F(MovementTest, CarriesViewAlignmentFacts) {
   int64_t static_indices[] = {0};
 
   loom_op_t* aligned_op = nullptr;
-  IREE_ASSERT_OK(loom_vector_load_build(&builder_, 0, aligned_view, nullptr, 0,
-                                        static_indices,
-                                        IREE_ARRAYSIZE(static_indices), 0, 0,
-                                        VectorType1D(LOOM_SCALAR_TYPE_F32, 4),
-                                        LOOM_LOCATION_UNKNOWN, &aligned_op));
+  IREE_ASSERT_OK(loom_vector_load_build(
+      &builder_, 0, /*instance_flags=*/0, aligned_view, nullptr, 0,
+      static_indices, IREE_ARRAYSIZE(static_indices), 0, 0,
+      VectorType1D(LOOM_SCALAR_TYPE_F32, 4), LOOM_LOCATION_UNKNOWN,
+      &aligned_op));
   loom_op_t* misaligned_op = nullptr;
-  IREE_ASSERT_OK(loom_vector_load_build(&builder_, 0, misaligned_view, nullptr,
-                                        0, static_indices,
-                                        IREE_ARRAYSIZE(static_indices), 0, 0,
-                                        VectorType1D(LOOM_SCALAR_TYPE_F32, 4),
-                                        LOOM_LOCATION_UNKNOWN, &misaligned_op));
+  IREE_ASSERT_OK(loom_vector_load_build(
+      &builder_, 0, /*instance_flags=*/0, misaligned_view, nullptr, 0,
+      static_indices, IREE_ARRAYSIZE(static_indices), 0, 0,
+      VectorType1D(LOOM_SCALAR_TYPE_F32, 4), LOOM_LOCATION_UNKNOWN,
+      &misaligned_op));
 
   loom_movement_analysis_t analysis = {};
   InitializeAnalysis(&analysis);
@@ -372,8 +373,9 @@ TEST_F(MovementTest, ClassifiesStaticStridedVectorStore) {
   int64_t static_indices[] = {1, 0};
   loom_op_t* op = nullptr;
   IREE_ASSERT_OK(loom_vector_store_build(
-      &builder_, 0, value, view, nullptr, 0, static_indices,
-      IREE_ARRAYSIZE(static_indices), 0, 0, LOOM_LOCATION_UNKNOWN, &op));
+      &builder_, 0, /*instance_flags=*/0, value, view, nullptr, 0,
+      static_indices, IREE_ARRAYSIZE(static_indices), 0, 0,
+      LOOM_LOCATION_UNKNOWN, &op));
 
   loom_movement_analysis_t analysis = {};
   InitializeAnalysis(&analysis);

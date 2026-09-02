@@ -596,3 +596,75 @@ func.def @keeps_conditionally_stored_private_lane(%input: buffer, %output: buffe
   view.store %selected, %output_view[%lane] : f16, view<64xf16>
   func.return
 }
+
+// ====
+
+func.def @keeps_volatile_fragment_copy(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<4xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<4xf32>
+  %fragment_bytes = index.constant 16 : offset
+  %fragment_buffer = buffer.alloca<private> align(4) %fragment_bytes : buffer
+  %fragment = buffer.view %fragment_buffer[%base] : buffer -> view<4xf32>
+  %start = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  scf.for %lane = [%start to %end step %step] {
+    %copy = view.load<volatile> %input_view[%lane] : view<4xf32> -> f32
+    view.store %copy, %fragment[%lane] : f32, view<4xf32>
+  }
+  %selected = view.load %fragment[2] : view<4xf32> -> f32
+  view.store %selected, %output_view[2] : f32, view<4xf32>
+  func.return
+}
+
+// ----
+func.def @keeps_volatile_fragment_copy(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<4xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<4xf32>
+  %fragment_bytes = index.constant 16 : offset
+  %fragment_buffer = buffer.alloca<private> align(4) %fragment_bytes : buffer
+  %fragment = buffer.view %fragment_buffer[%base] : buffer -> view<4xf32>
+  %start = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  scf.for %lane = [%start to %end step %step] {
+    %copy = view.load<volatile> %input_view[%lane] : view<4xf32> -> f32
+    view.store %copy, %fragment[%lane] : f32, view<4xf32>
+  }
+  %selected = view.load %fragment[2] : view<4xf32> -> f32
+  view.store %selected, %output_view[2] : f32, view<4xf32>
+  func.return
+}
+
+// ====
+
+func.def @keeps_volatile_private_noop(%output: buffer, %value: i64) {
+  %base = index.constant 0 : offset
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi64>
+  %slot_bytes = index.constant 8 : offset
+  %slot_buffer = buffer.alloca<private> align(8) %slot_bytes : buffer
+  %slot = buffer.view %slot_buffer[%base] : buffer -> view<1xi64>
+  view.store %value, %slot[0] : i64, view<1xi64>
+  %observed = view.load<volatile> %slot[0] : view<1xi64> -> i64
+  view.store %observed, %slot[0] : i64, view<1xi64>
+  %result = view.load %slot[0] : view<1xi64> -> i64
+  view.store %result, %output_view[0] : i64, view<1xi64>
+  func.return
+}
+
+// ----
+func.def @keeps_volatile_private_noop(%output: buffer, %value: i64) {
+  %base = index.constant 0 : offset
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi64>
+  %slot_bytes = index.constant 8 : offset
+  %slot_buffer = buffer.alloca<private> align(8) %slot_bytes : buffer
+  %slot = buffer.view %slot_buffer[%base] : buffer -> view<1xi64>
+  view.store %value, %slot[0] : i64, view<1xi64>
+  %observed = view.load<volatile> %slot[0] : view<1xi64> -> i64
+  view.store %observed, %slot[0] : i64, view<1xi64>
+  %result = view.load %slot[0] : view<1xi64> -> i64
+  view.store %result, %output_view[0] : i64, view<1xi64>
+  func.return
+}

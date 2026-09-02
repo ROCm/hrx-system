@@ -19,6 +19,30 @@ func.def @load_static(%buffer: buffer, %byte_offset: offset) -> (vector<2xf32>) 
 
 // ====
 
+// Volatile vector accesses retain their execution semantics when their
+// footprint is decomposed into scalar accesses.
+func.def @volatile_static(%buffer: buffer, %byte_offset: offset, %value: vector<2xi32>) -> (vector<2xi32>) {
+  %view = buffer.view %buffer[%byte_offset] : buffer -> view<8xi32>
+  %loaded = vector.load<volatile> %view[3] : view<8xi32> -> vector<2xi32>
+  vector.store<volatile> %value, %view[5] : vector<2xi32>, view<8xi32>
+  func.return %loaded : vector<2xi32>
+}
+
+// ----
+func.def @volatile_static(%buffer: buffer, %byte_offset: offset, %value: vector<2xi32>) -> (vector<2xi32>) {
+  %view = buffer.view %buffer[%byte_offset] : buffer -> view<8xi32>
+  %8 = view.load<volatile> %view[3] : view<8xi32> -> i32
+  %9 = view.load<volatile> %view[4] : view<8xi32> -> i32
+  %loaded = vector.from_elements %8, %9 : vector<2xi32>
+  %6 = vector.extract %value[0] : vector<2xi32> -> i32
+  view.store<volatile> %6, %view[5] : i32, view<8xi32>
+  %7 = vector.extract %value[1] : vector<2xi32> -> i32
+  view.store<volatile> %7, %view[6] : i32, view<8xi32>
+  func.return %loaded : vector<2xi32>
+}
+
+// ====
+
 // RUN: with-locations pass vector-to-scalar
 
 func.def @load_static_preserves_sanitizer_site_location(%buffer: buffer, %byte_offset: offset) -> (vector<2xf32>) {

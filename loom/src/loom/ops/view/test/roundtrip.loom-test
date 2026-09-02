@@ -80,6 +80,17 @@ func.def @scalar_view_memory(%buffer: buffer, %offset: offset, %row: index, %col
 
 // ====
 
+// Volatile access semantics are carried by optional instance flags while
+// cache policy remains an ordinary target-selection attribute.
+func.def @volatile_scalar_view_memory(%buffer: buffer, %offset: offset, %index: index, %value: i32) -> (i32) {
+  %view = buffer.view %buffer[%offset] : buffer -> view<16xi32>
+  %loaded = view.load<volatile> %view[%index] {cache_scope = system} : view<16xi32> -> i32
+  view.store<volatile> %value, %view[%index] : i32, view<16xi32>
+  func.return %loaded : i32
+}
+
+// ====
+
 // Scalar atomics are the element-level substrate for vector atomic reference
 // lowering. Ordering and scope remain explicit after scalarization.
 func.def @scalar_view_atomics(%buffer: buffer, %offset: offset, %row: index, %col: index, %ivalue: i32, %fvalue: f32) {

@@ -102,6 +102,7 @@ loom_cc_library(
         "//loom/src/loom/ops/scf",
         "//loom/src/loom/ops/vector",
         "//loom/src/loom/rewrite:materialize",
+        "//loom/src/loom/ops/view",
         "//loom/src/loom/rewrite:remap",
         "//loom/src/loom/sanitizer:options",
         "//loom/src/loom/target:contract",

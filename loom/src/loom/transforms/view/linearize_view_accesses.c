@@ -878,9 +878,9 @@ static iree_status_t loom_linearize_view_accesses_rewrite_load(
       loom_rewriter_value_checkpoint(context->rewriter);
   loom_op_t* linear_load_op = NULL;
   IREE_RETURN_IF_ERROR(loom_view_load_build(
-      builder, build_flags, linear_view, dynamic_indices, dynamic_index_count,
-      static_indices, IREE_ARRAYSIZE(static_indices),
-      loom_view_load_cache_scope(load_op),
+      builder, build_flags, loom_view_load_memory_flags(load_op), linear_view,
+      dynamic_indices, dynamic_index_count, static_indices,
+      IREE_ARRAYSIZE(static_indices), loom_view_load_cache_scope(load_op),
       loom_view_load_cache_temporal(load_op),
       loom_module_value_type(context->module, loom_view_load_result(load_op)),
       load_op->location, &linear_load_op));
@@ -954,9 +954,10 @@ static iree_status_t loom_linearize_view_accesses_rewrite_store(
 
   loom_op_t* linear_store_op = NULL;
   IREE_RETURN_IF_ERROR(loom_view_store_build(
-      builder, build_flags, loom_view_store_value(store_op), linear_view,
-      dynamic_indices, dynamic_index_count, static_indices,
-      IREE_ARRAYSIZE(static_indices), loom_view_store_cache_scope(store_op),
+      builder, build_flags, loom_view_store_memory_flags(store_op),
+      loom_view_store_value(store_op), linear_view, dynamic_indices,
+      dynamic_index_count, static_indices, IREE_ARRAYSIZE(static_indices),
+      loom_view_store_cache_scope(store_op),
       loom_view_store_cache_temporal(store_op), store_op->location,
       &linear_store_op));
   IREE_RETURN_IF_ERROR(loom_rewriter_erase(context->rewriter, store_op));
@@ -1034,7 +1035,8 @@ static iree_status_t loom_linearize_view_accesses_rewrite_vector_load(
               : IREE_ARRAYSIZE(dynamic_indices);
       loom_op_t* row_load_op = NULL;
       IREE_RETURN_IF_ERROR(loom_vector_load_build(
-          builder, cache_policy.build_flags, linear_view, dynamic_indices,
+          builder, cache_policy.build_flags,
+          loom_vector_load_memory_flags(load_op), linear_view, dynamic_indices,
           dynamic_index_count, static_indices, IREE_ARRAYSIZE(static_indices),
           cache_policy.cache_scope, cache_policy.cache_temporal,
           tile.row_vector_type, load_op->location, &row_load_op));
@@ -1111,10 +1113,11 @@ static iree_status_t loom_linearize_view_accesses_rewrite_vector_load(
       loom_rewriter_value_checkpoint(context->rewriter);
   loom_op_t* linear_load_op = NULL;
   IREE_RETURN_IF_ERROR(loom_vector_load_build(
-      builder, cache_policy.build_flags, linear_view, dynamic_indices,
-      dynamic_index_count, static_indices, IREE_ARRAYSIZE(static_indices),
-      cache_policy.cache_scope, cache_policy.cache_temporal, result_type,
-      load_op->location, &linear_load_op));
+      builder, cache_policy.build_flags, loom_vector_load_memory_flags(load_op),
+      linear_view, dynamic_indices, dynamic_index_count, static_indices,
+      IREE_ARRAYSIZE(static_indices), cache_policy.cache_scope,
+      cache_policy.cache_temporal, result_type, load_op->location,
+      &linear_load_op));
   loom_value_id_t replacement = loom_vector_load_result(linear_load_op);
   IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
       context->rewriter, load_op, &replacement, 1, value_checkpoint));
@@ -1208,7 +1211,8 @@ static iree_status_t loom_linearize_view_accesses_rewrite_vector_store(
               : IREE_ARRAYSIZE(dynamic_indices);
       loom_op_t* row_store_op = NULL;
       IREE_RETURN_IF_ERROR(loom_vector_store_build(
-          builder, cache_policy.build_flags, row_value, linear_view,
+          builder, cache_policy.build_flags,
+          loom_vector_store_memory_flags(store_op), row_value, linear_view,
           dynamic_indices, dynamic_index_count, static_indices,
           IREE_ARRAYSIZE(static_indices), cache_policy.cache_scope,
           cache_policy.cache_temporal, store_op->location, &row_store_op));
@@ -1263,10 +1267,12 @@ static iree_status_t loom_linearize_view_accesses_rewrite_vector_store(
                                              : IREE_ARRAYSIZE(dynamic_indices);
   loom_op_t* linear_store_op = NULL;
   IREE_RETURN_IF_ERROR(loom_vector_store_build(
-      builder, cache_policy.build_flags, loom_vector_store_value(store_op),
-      linear_view, dynamic_indices, dynamic_index_count, static_indices,
-      IREE_ARRAYSIZE(static_indices), cache_policy.cache_scope,
-      cache_policy.cache_temporal, store_op->location, &linear_store_op));
+      builder, cache_policy.build_flags,
+      loom_vector_store_memory_flags(store_op),
+      loom_vector_store_value(store_op), linear_view, dynamic_indices,
+      dynamic_index_count, static_indices, IREE_ARRAYSIZE(static_indices),
+      cache_policy.cache_scope, cache_policy.cache_temporal, store_op->location,
+      &linear_store_op));
   IREE_RETURN_IF_ERROR(loom_rewriter_erase(context->rewriter, store_op));
   ++context->statistics->vector_stores_linearized;
   *out_changed = true;

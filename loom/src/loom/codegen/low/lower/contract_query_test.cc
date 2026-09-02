@@ -540,8 +540,8 @@ TEST_F(LowContractQuerySourceMemoryTest,
   int64_t static_indices[] = {INT64_MIN};
   loom_op_t* load_op = nullptr;
   IREE_ASSERT_OK(loom_vector_load_build(
-      &builder_, 0, loom_buffer_view_result(view_op), dynamic_indices,
-      IREE_ARRAYSIZE(dynamic_indices), static_indices,
+      &builder_, 0, /*instance_flags=*/0, loom_buffer_view_result(view_op),
+      dynamic_indices, IREE_ARRAYSIZE(dynamic_indices), static_indices,
       IREE_ARRAYSIZE(static_indices), 0, 0, VectorType1D(1),
       LOOM_LOCATION_UNKNOWN, &load_op));
 

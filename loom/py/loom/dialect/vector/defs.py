@@ -41,6 +41,7 @@ from loom.assembly import (
 from loom.dialect.atomic import AtomicKind, AtomicOrdering, AtomicScope
 from loom.dialect.cache import CacheScope, CacheTemporal
 from loom.dialect.combining import CombiningKind
+from loom.dialect.memory import MemoryAccessFlags
 from loom.dialect.scalar import ClampFMode, FastMathFlags, GeluVariant, IntOverflowFlags
 from loom.dialect.scalar.comparison import CmpFPredicate, CmpIPredicate
 from loom.dsl import (
@@ -1627,14 +1628,24 @@ vector_load = Op(
         Operand("indices", INDEX, doc="Dynamic logical origin indices.", variadic=True),
     ],
     results=[Result("result", VECTOR, doc="Loaded vector value.")],
-    attrs=_indexed_memory_attrs(),
+    attrs=[
+        AttrDef(
+            "memory_flags",
+            ATTR_TYPE_FLAGS,
+            optional=True,
+            enum_def=MemoryAccessFlags,
+        ),
+        *_indexed_memory_attrs(),
+    ],
     constraints=[SameElementType("view", "result")],
     traits=[REFINABLE_RESULT_TYPE_REFS],
     effects=[Reads("view")],
     interfaces=[_memory_access_interface()],
+    effective_traits="loom_memory_access_effective_traits",
     verify="loom_vector_load_verify",
     facts="loom_vector_load_facts",
     format=[
+        Flags("memory_flags"),
         Ref("view"),
         IndexList("indices", "static_indices"),
         AttrDict(),
@@ -1645,6 +1656,7 @@ vector_load = Op(
     ],
     examples=[
         "%v = vector.load %view[%row, %col] : view<[%m]x[%n]xf32, %layout> -> vector<4x8xf32>",
+        "%packet = vector.load<volatile> %ring[%head] : view<[%capacity]x16xi8> -> vector<16xi8>",
     ],
 )
 
@@ -1662,12 +1674,22 @@ vector_store = Op(
         Operand("view", VIEW, doc="Typed destination view."),
         Operand("indices", INDEX, doc="Dynamic logical origin indices.", variadic=True),
     ],
-    attrs=_indexed_memory_attrs(),
+    attrs=[
+        AttrDef(
+            "memory_flags",
+            ATTR_TYPE_FLAGS,
+            optional=True,
+            enum_def=MemoryAccessFlags,
+        ),
+        *_indexed_memory_attrs(),
+    ],
     constraints=[SameElementType("value", "view")],
     effects=[Writes("view")],
     interfaces=[_memory_access_interface(value="value")],
+    effective_traits="loom_memory_access_effective_traits",
     verify="loom_vector_store_verify",
     format=[
+        Flags("memory_flags"),
         Ref("value"),
         COMMA,
         Ref("view"),
@@ -1680,6 +1702,7 @@ vector_store = Op(
     ],
     examples=[
         "vector.store %v, %view[%row, %col] : vector<4x8xf32>, view<[%m]x[%n]xf32, %layout>",
+        "vector.store<volatile> %packet, %ring[%tail] : vector<16xi8>, view<[%capacity]x16xi8>",
     ],
 )
 

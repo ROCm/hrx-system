@@ -25,8 +25,8 @@ TEST_F(SourceMemoryPlanTest, StaticDenseScalarLoadUsesMemoryAccessFacet) {
       &builder_,
       LOOM_VIEW_LOAD_BUILD_FLAG_HAS_CACHE_SCOPE |
           LOOM_VIEW_LOAD_BUILD_FLAG_HAS_CACHE_TEMPORAL,
-      loom_buffer_view_result(view_op), nullptr, 0, static_indices,
-      IREE_ARRAYSIZE(static_indices), LOOM_CACHE_SCOPE_DEVICE,
+      /*instance_flags=*/0, loom_buffer_view_result(view_op), nullptr, 0,
+      static_indices, IREE_ARRAYSIZE(static_indices), LOOM_CACHE_SCOPE_DEVICE,
       LOOM_CACHE_TEMPORAL_NON_TEMPORAL, loom_type_scalar(LOOM_SCALAR_TYPE_F32),
       LOOM_LOCATION_UNKNOWN, &load_op));
 
@@ -72,8 +72,8 @@ TEST_F(SourceMemoryPlanTest, DynamicDenseLoadClassifiesWorkitemIndex) {
   int64_t static_indices[] = {INT64_MIN};
   loom_op_t* load_op = nullptr;
   IREE_ASSERT_OK(loom_vector_load_build(
-      &builder_, 0, loom_buffer_view_result(view_op), dynamic_indices,
-      IREE_ARRAYSIZE(dynamic_indices), static_indices,
+      &builder_, 0, /*instance_flags=*/0, loom_buffer_view_result(view_op),
+      dynamic_indices, IREE_ARRAYSIZE(dynamic_indices), static_indices,
       IREE_ARRAYSIZE(static_indices), 0, 0, VectorType1D(4),
       LOOM_LOCATION_UNKNOWN, &load_op));
 
@@ -124,8 +124,8 @@ TEST_F(SourceMemoryPlanTest, DynamicDenseLoadRetainsSubgroupUniformIndex) {
   int64_t static_indices[] = {INT64_MIN};
   loom_op_t* load_op = nullptr;
   IREE_ASSERT_OK(loom_vector_load_build(
-      &builder_, 0, loom_buffer_view_result(view_op), dynamic_indices,
-      IREE_ARRAYSIZE(dynamic_indices), static_indices,
+      &builder_, 0, /*instance_flags=*/0, loom_buffer_view_result(view_op),
+      dynamic_indices, IREE_ARRAYSIZE(dynamic_indices), static_indices,
       IREE_ARRAYSIZE(static_indices), 0, 0, VectorType1D(4),
       LOOM_LOCATION_UNKNOWN, &load_op));
 
@@ -165,8 +165,8 @@ TEST_F(SourceMemoryPlanTest, DynamicDenseLoadKeepsAssumedWorkitemSource) {
   int64_t static_indices[] = {INT64_MIN};
   loom_op_t* load_op = nullptr;
   IREE_ASSERT_OK(loom_vector_load_build(
-      &builder_, 0, loom_buffer_view_result(view_op), dynamic_indices,
-      IREE_ARRAYSIZE(dynamic_indices), static_indices,
+      &builder_, 0, /*instance_flags=*/0, loom_buffer_view_result(view_op),
+      dynamic_indices, IREE_ARRAYSIZE(dynamic_indices), static_indices,
       IREE_ARRAYSIZE(static_indices), 0, 0, VectorType1D(4),
       LOOM_LOCATION_UNKNOWN, &load_op));
 
@@ -212,8 +212,8 @@ TEST_F(SourceMemoryPlanTest, DynamicDenseLoadClassifiesForwardedWorkitemIndex) {
   int64_t static_indices[] = {INT64_MIN};
   loom_op_t* load_op = nullptr;
   IREE_ASSERT_OK(loom_vector_load_build(
-      &builder_, 0, loom_buffer_view_result(view_op), dynamic_indices,
-      IREE_ARRAYSIZE(dynamic_indices), static_indices,
+      &builder_, 0, /*instance_flags=*/0, loom_buffer_view_result(view_op),
+      dynamic_indices, IREE_ARRAYSIZE(dynamic_indices), static_indices,
       IREE_ARRAYSIZE(static_indices), 0, 0, VectorType1D(4),
       LOOM_LOCATION_UNKNOWN, &load_op));
 
@@ -257,8 +257,8 @@ TEST_F(SourceMemoryPlanTest, DynamicDenseLoadFactorsScaledWorkitemIndex) {
   int64_t static_indices[] = {INT64_MIN};
   loom_op_t* load_op = nullptr;
   IREE_ASSERT_OK(loom_vector_load_build(
-      &builder_, 0, loom_buffer_view_result(view_op), dynamic_indices,
-      IREE_ARRAYSIZE(dynamic_indices), static_indices,
+      &builder_, 0, /*instance_flags=*/0, loom_buffer_view_result(view_op),
+      dynamic_indices, IREE_ARRAYSIZE(dynamic_indices), static_indices,
       IREE_ARRAYSIZE(static_indices), 0, 0, VectorType1D(1),
       LOOM_LOCATION_UNKNOWN, &load_op));
 
@@ -314,8 +314,8 @@ TEST_F(SourceMemoryPlanTest, DynamicDenseLoadFactorsScaledOffsetWorkitemIndex) {
   int64_t static_indices[] = {INT64_MIN};
   loom_op_t* load_op = nullptr;
   IREE_ASSERT_OK(loom_vector_load_build(
-      &builder_, 0, loom_buffer_view_result(view_op), dynamic_indices,
-      IREE_ARRAYSIZE(dynamic_indices), static_indices,
+      &builder_, 0, /*instance_flags=*/0, loom_buffer_view_result(view_op),
+      dynamic_indices, IREE_ARRAYSIZE(dynamic_indices), static_indices,
       IREE_ARRAYSIZE(static_indices), 0, 0, VectorType1D(1),
       LOOM_LOCATION_UNKNOWN, &load_op));
 
@@ -366,8 +366,8 @@ TEST_F(SourceMemoryPlanTest, DynamicDenseLoadFactorsMaddWorkitemIndex) {
   int64_t static_indices[] = {INT64_MIN};
   loom_op_t* load_op = nullptr;
   IREE_ASSERT_OK(loom_vector_load_build(
-      &builder_, 0, loom_buffer_view_result(view_op), dynamic_indices,
-      IREE_ARRAYSIZE(dynamic_indices), static_indices,
+      &builder_, 0, /*instance_flags=*/0, loom_buffer_view_result(view_op),
+      dynamic_indices, IREE_ARRAYSIZE(dynamic_indices), static_indices,
       IREE_ARRAYSIZE(static_indices), 0, 0, VectorType1D(1),
       LOOM_LOCATION_UNKNOWN, &load_op));
 
@@ -415,8 +415,8 @@ TEST_F(SourceMemoryPlanTest, DynamicDenseLoadFactorsDeepAffineIndex) {
   int64_t static_indices[] = {INT64_MIN};
   loom_op_t* load_op = nullptr;
   IREE_ASSERT_OK(loom_vector_load_build(
-      &builder_, 0, loom_buffer_view_result(view_op), dynamic_indices,
-      IREE_ARRAYSIZE(dynamic_indices), static_indices,
+      &builder_, 0, /*instance_flags=*/0, loom_buffer_view_result(view_op),
+      dynamic_indices, IREE_ARRAYSIZE(dynamic_indices), static_indices,
       IREE_ARRAYSIZE(static_indices), 0, 0, VectorType1D(1),
       LOOM_LOCATION_UNKNOWN, &load_op));
 
@@ -452,8 +452,8 @@ TEST_F(SourceMemoryPlanTest, DynamicDenseLoadClassifiesMultipleIndices) {
   int64_t static_indices[] = {INT64_MIN, INT64_MIN};
   loom_op_t* load_op = nullptr;
   IREE_ASSERT_OK(loom_vector_load_build(
-      &builder_, 0, loom_buffer_view_result(view_op), dynamic_indices,
-      IREE_ARRAYSIZE(dynamic_indices), static_indices,
+      &builder_, 0, /*instance_flags=*/0, loom_buffer_view_result(view_op),
+      dynamic_indices, IREE_ARRAYSIZE(dynamic_indices), static_indices,
       IREE_ARRAYSIZE(static_indices), 0, 0, VectorType1D(4),
       LOOM_LOCATION_UNKNOWN, &load_op));
 
@@ -523,8 +523,8 @@ TEST_F(SourceMemoryPlanTest, DynamicDenseLoadRetainsOffsetAcrossDynamicStride) {
   const int64_t static_indices[] = {INT64_MIN, INT64_MIN};
   loom_op_t* load_op = nullptr;
   IREE_ASSERT_OK(loom_vector_load_build(
-      &builder_, 0, loom_buffer_view_result(view_op), dynamic_indices,
-      IREE_ARRAYSIZE(dynamic_indices), static_indices,
+      &builder_, 0, /*instance_flags=*/0, loom_buffer_view_result(view_op),
+      dynamic_indices, IREE_ARRAYSIZE(dynamic_indices), static_indices,
       IREE_ARRAYSIZE(static_indices), 0, 0,
       VectorType1D(LOOM_SCALAR_TYPE_F16, 1), LOOM_LOCATION_UNKNOWN, &load_op));
 
@@ -538,9 +538,9 @@ TEST_F(SourceMemoryPlanTest, DynamicDenseLoadRetainsOffsetAcrossDynamicStride) {
   };
   loom_op_t* scaled_load_op = nullptr;
   IREE_ASSERT_OK(loom_vector_load_build(
-      &builder_, 0, loom_buffer_view_result(view_op), scaled_dynamic_indices,
-      IREE_ARRAYSIZE(scaled_dynamic_indices), static_indices,
-      IREE_ARRAYSIZE(static_indices), 0, 0,
+      &builder_, 0, /*instance_flags=*/0, loom_buffer_view_result(view_op),
+      scaled_dynamic_indices, IREE_ARRAYSIZE(scaled_dynamic_indices),
+      static_indices, IREE_ARRAYSIZE(static_indices), 0, 0,
       VectorType1D(LOOM_SCALAR_TYPE_F16, 1), LOOM_LOCATION_UNKNOWN,
       &scaled_load_op));
 
@@ -604,13 +604,13 @@ TEST_F(SourceMemoryPlanTest, ScalarViewAccessClassifiesCoordinateAxes) {
   int64_t static_indices[] = {INT64_MIN, INT64_MIN};
   loom_op_t* load_op = nullptr;
   IREE_ASSERT_OK(loom_view_load_build(
-      &builder_, 0, loom_buffer_view_result(view_op), dynamic_indices,
-      IREE_ARRAYSIZE(dynamic_indices), static_indices,
+      &builder_, 0, /*instance_flags=*/0, loom_buffer_view_result(view_op),
+      dynamic_indices, IREE_ARRAYSIZE(dynamic_indices), static_indices,
       IREE_ARRAYSIZE(static_indices), 0, 0,
       loom_type_scalar(LOOM_SCALAR_TYPE_F32), LOOM_LOCATION_UNKNOWN, &load_op));
   loom_op_t* store_op = nullptr;
   IREE_ASSERT_OK(loom_view_store_build(
-      &builder_, 0, loom_view_load_result(load_op),
+      &builder_, 0, /*instance_flags=*/0, loom_view_load_result(load_op),
       loom_buffer_view_result(view_op), dynamic_indices,
       IREE_ARRAYSIZE(dynamic_indices), static_indices,
       IREE_ARRAYSIZE(static_indices), 0, 0, LOOM_LOCATION_UNKNOWN, &store_op));
@@ -689,8 +689,8 @@ TEST_F(SourceMemoryPlanTest, LinearizedScalarViewLoadRecoversCoordinateTerms) {
   int64_t static_indices[] = {INT64_MIN};
   loom_op_t* load_op = nullptr;
   IREE_ASSERT_OK(loom_view_load_build(
-      &builder_, 0, loom_buffer_view_result(view_op), dynamic_indices,
-      IREE_ARRAYSIZE(dynamic_indices), static_indices,
+      &builder_, 0, /*instance_flags=*/0, loom_buffer_view_result(view_op),
+      dynamic_indices, IREE_ARRAYSIZE(dynamic_indices), static_indices,
       IREE_ARRAYSIZE(static_indices), 0, 0,
       loom_type_scalar(LOOM_SCALAR_TYPE_F32), LOOM_LOCATION_UNKNOWN, &load_op));
 
@@ -768,8 +768,8 @@ TEST_F(SourceMemoryPlanTest,
   int64_t static_indices[] = {INT64_MIN};
   loom_op_t* load_op = nullptr;
   IREE_ASSERT_OK(loom_view_load_build(
-      &builder_, 0, loom_buffer_view_result(view_op), dynamic_indices,
-      IREE_ARRAYSIZE(dynamic_indices), static_indices,
+      &builder_, 0, /*instance_flags=*/0, loom_buffer_view_result(view_op),
+      dynamic_indices, IREE_ARRAYSIZE(dynamic_indices), static_indices,
       IREE_ARRAYSIZE(static_indices), 0, 0,
       loom_type_scalar(LOOM_SCALAR_TYPE_F32), LOOM_LOCATION_UNKNOWN, &load_op));
 
@@ -843,8 +843,8 @@ TEST_F(SourceMemoryPlanTest,
   int64_t static_indices[] = {INT64_MIN};
   loom_op_t* load_op = nullptr;
   IREE_ASSERT_OK(loom_view_load_build(
-      &builder_, 0, loom_buffer_view_result(view_op), dynamic_indices,
-      IREE_ARRAYSIZE(dynamic_indices), static_indices,
+      &builder_, 0, /*instance_flags=*/0, loom_buffer_view_result(view_op),
+      dynamic_indices, IREE_ARRAYSIZE(dynamic_indices), static_indices,
       IREE_ARRAYSIZE(static_indices), 0, 0,
       loom_type_scalar(LOOM_SCALAR_TYPE_F32), LOOM_LOCATION_UNKNOWN, &load_op));
 
@@ -922,9 +922,10 @@ TEST_F(SourceMemoryPlanTest,
   int64_t ranked_static_indices[] = {INT64_MIN, INT64_MIN};
   loom_op_t* ranked_load_op = nullptr;
   IREE_ASSERT_OK(loom_view_load_build(
-      &builder_, 0, loom_buffer_view_result(ranked_view_op),
-      ranked_dynamic_indices, IREE_ARRAYSIZE(ranked_dynamic_indices),
-      ranked_static_indices, IREE_ARRAYSIZE(ranked_static_indices), 0, 0,
+      &builder_, 0, /*instance_flags=*/0,
+      loom_buffer_view_result(ranked_view_op), ranked_dynamic_indices,
+      IREE_ARRAYSIZE(ranked_dynamic_indices), ranked_static_indices,
+      IREE_ARRAYSIZE(ranked_static_indices), 0, 0,
       loom_type_scalar(LOOM_SCALAR_TYPE_F32), LOOM_LOCATION_UNKNOWN,
       &ranked_load_op));
   const loom_value_id_t linear_dynamic_indices[] = {
@@ -932,9 +933,10 @@ TEST_F(SourceMemoryPlanTest,
   int64_t linear_static_indices[] = {INT64_MIN};
   loom_op_t* linear_load_op = nullptr;
   IREE_ASSERT_OK(loom_view_load_build(
-      &builder_, 0, loom_buffer_view_result(linear_view_op),
-      linear_dynamic_indices, IREE_ARRAYSIZE(linear_dynamic_indices),
-      linear_static_indices, IREE_ARRAYSIZE(linear_static_indices), 0, 0,
+      &builder_, 0, /*instance_flags=*/0,
+      loom_buffer_view_result(linear_view_op), linear_dynamic_indices,
+      IREE_ARRAYSIZE(linear_dynamic_indices), linear_static_indices,
+      IREE_ARRAYSIZE(linear_static_indices), 0, 0,
       loom_type_scalar(LOOM_SCALAR_TYPE_F32), LOOM_LOCATION_UNKNOWN,
       &linear_load_op));
 
@@ -1010,8 +1012,8 @@ TEST_F(SourceMemoryPlanTest, ExactDynamicIndexFoldsIntoStaticOffset) {
   int64_t static_indices[] = {INT64_MIN, INT64_MIN};
   loom_op_t* load_op = nullptr;
   IREE_ASSERT_OK(loom_vector_load_build(
-      &builder_, 0, loom_buffer_view_result(view_op), dynamic_indices,
-      IREE_ARRAYSIZE(dynamic_indices), static_indices,
+      &builder_, 0, /*instance_flags=*/0, loom_buffer_view_result(view_op),
+      dynamic_indices, IREE_ARRAYSIZE(dynamic_indices), static_indices,
       IREE_ARRAYSIZE(static_indices), 0, 0, VectorType1D(4),
       LOOM_LOCATION_UNKNOWN, &load_op));
 

@@ -65,6 +65,17 @@ loom_vector_to_scalar_memory_cache_policy(
   return policy;
 }
 
+static loom_memory_access_flags_t loom_vector_to_scalar_memory_flags(
+    loom_vector_to_scalar_state_t* state) {
+  if (loom_vector_load_isa(state->op)) {
+    return loom_vector_load_memory_flags(state->op);
+  }
+  if (loom_vector_store_isa(state->op)) {
+    return loom_vector_store_memory_flags(state->op);
+  }
+  return 0;
+}
+
 static uint8_t loom_vector_to_scalar_enum_attr_value(loom_attribute_t attr) {
   return loom_attr_as_enum(attr);
 }
@@ -314,6 +325,7 @@ static iree_status_t loom_vector_to_scalar_build_view_load_lane(
       loom_vector_to_scalar_memory_cache_policy(state);
   IREE_RETURN_IF_ERROR(loom_view_load_build(
       &state->rewriter->builder, cache_policy.build_flags,
+      loom_vector_to_scalar_memory_flags(state),
       loom_vector_to_scalar_memory_view(state), view_indices.dynamic_indices,
       view_indices.dynamic_index_count, view_indices.static_indices,
       view_indices.static_index_count, cache_policy.cache_scope,
@@ -431,6 +443,7 @@ iree_status_t loom_vector_to_scalar_build_load_expand_lane(
       loom_vector_to_scalar_memory_cache_policy(state);
   IREE_RETURN_IF_ERROR(loom_view_load_build(
       &state->rewriter->builder, cache_policy.build_flags,
+      loom_vector_to_scalar_memory_flags(state),
       loom_vector_to_scalar_memory_view(state), view_indices.dynamic_indices,
       view_indices.dynamic_index_count, view_indices.static_indices,
       view_indices.static_index_count, cache_policy.cache_scope,
@@ -506,7 +519,8 @@ static iree_status_t loom_vector_to_scalar_emit_view_store_lane(
   loom_vector_memory_cache_policy_t cache_policy =
       loom_vector_to_scalar_memory_cache_policy(state);
   return loom_view_store_build(
-      &state->rewriter->builder, cache_policy.build_flags, lane,
+      &state->rewriter->builder, cache_policy.build_flags,
+      loom_vector_to_scalar_memory_flags(state), lane,
       loom_vector_to_scalar_memory_view(state), view_indices.dynamic_indices,
       view_indices.dynamic_index_count, view_indices.static_indices,
       view_indices.static_index_count, cache_policy.cache_scope,
@@ -583,7 +597,8 @@ static iree_status_t loom_vector_to_scalar_emit_store_compress_lane(
   loom_vector_memory_cache_policy_t cache_policy =
       loom_vector_to_scalar_memory_cache_policy(state);
   IREE_RETURN_IF_ERROR(loom_view_store_build(
-      &state->rewriter->builder, cache_policy.build_flags, lane,
+      &state->rewriter->builder, cache_policy.build_flags,
+      loom_vector_to_scalar_memory_flags(state), lane,
       loom_vector_to_scalar_memory_view(state), view_indices.dynamic_indices,
       view_indices.dynamic_index_count, view_indices.static_indices,
       view_indices.static_index_count, cache_policy.cache_scope,
@@ -846,7 +861,8 @@ static iree_status_t loom_vector_to_scalar_emit_fragment_store_lane(
   loom_vector_memory_cache_policy_t cache_policy =
       loom_vector_to_scalar_memory_cache_policy(state);
   return loom_view_store_build(
-      &state->rewriter->builder, cache_policy.build_flags, lane,
+      &state->rewriter->builder, cache_policy.build_flags,
+      loom_vector_to_scalar_memory_flags(state), lane,
       loom_vector_to_scalar_memory_view(state), view_indices.dynamic_indices,
       view_indices.dynamic_index_count, view_indices.static_indices,
       view_indices.static_index_count, cache_policy.cache_scope,
@@ -1090,7 +1106,8 @@ static iree_status_t loom_vector_to_scalar_emit_physical_result_store_lane(
   loom_vector_memory_cache_policy_t cache_policy =
       loom_vector_to_scalar_memory_cache_policy(state);
   return loom_view_store_build(
-      &state->rewriter->builder, cache_policy.build_flags, lane,
+      &state->rewriter->builder, cache_policy.build_flags,
+      loom_vector_to_scalar_memory_flags(state), lane,
       loom_vector_fragment_store_view(state->op), view_indices.dynamic_indices,
       view_indices.dynamic_index_count, view_indices.static_indices,
       view_indices.static_index_count, cache_policy.cache_scope,

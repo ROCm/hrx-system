@@ -86,6 +86,7 @@ loom_cc_library(
     loom::ops::type_registry
     loom::ops::vector
     loom::rewrite::materialize
+    loom::ops::view
     loom::rewrite::remap
     loom::sanitizer::options
     loom::target::contract

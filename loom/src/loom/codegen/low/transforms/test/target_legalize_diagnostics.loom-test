@@ -37,6 +37,19 @@ func.def target(@test_target) @rejects_unresolved_compile_time_query(%schema: en
 }
 
 // ====
+// RUN: pass source-to-low
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @rejects_volatile_load_without_ordered_descriptor(%source: buffer) -> (vector<4xf32>) {
+  %base = index.constant 0 : offset
+  %view = buffer.view %source[%base] : buffer -> view<4xf32>
+  // ERROR@+1: TARGET/081
+  %result = vector.load<volatile> %view[0] : view<4xf32> -> vector<4xf32>
+  func.return %result : vector<4xf32>
+}
+
+// ====
 // RUN: pass dce,canonicalize,source-to-low
 
 test.target<low_core> @test_target

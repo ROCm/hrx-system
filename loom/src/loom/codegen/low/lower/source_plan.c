@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "loom/analysis/contract_vector.h"
+#include "loom/codegen/low/descriptors.h"
 #include "loom/codegen/low/lower/context.h"
 #include "loom/codegen/low/lower/contract_query.h"
 #include "loom/codegen/low/lower/rule_emit.h"
@@ -29,6 +30,8 @@
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/scf/ops.h"
+#include "loom/ops/vector/ops.h"
+#include "loom/ops/view/ops.h"
 
 iree_status_t loom_low_lower_source_plan_check_mapped_value(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
@@ -736,6 +739,69 @@ static void loom_low_lower_record_elided_hint_plan(
                });
 }
 
+static bool loom_low_lower_descriptor_has_ordered_memory_effect(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_t* descriptor) {
+  for (uint16_t i = 0; i < descriptor->effect_count; ++i) {
+    const uint32_t effect_index = descriptor->effect_start + i;
+    IREE_ASSERT_LT(effect_index, descriptor_set->effect_count);
+    const loom_low_effect_t* effect = &descriptor_set->effects[effect_index];
+    if ((effect->kind == LOOM_LOW_EFFECT_KIND_READ ||
+         effect->kind == LOOM_LOW_EFFECT_KIND_WRITE) &&
+        iree_any_bit_set(effect->flags, LOOM_LOW_EFFECT_FLAG_ORDERED)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool loom_low_lower_selected_plan_preserves_volatile_memory(
+    const loom_low_lower_context_t* context,
+    const loom_low_lower_selected_plan_t* selected_plan) {
+  const loom_op_t* source_op = selected_plan->source_op;
+  if ((!loom_view_load_isa(source_op) && !loom_view_store_isa(source_op) &&
+       !loom_vector_load_isa(source_op) && !loom_vector_store_isa(source_op)) ||
+      !iree_any_bit_set(source_op->instance_flags,
+                        LOOM_MEMORY_ACCESS_FLAG_VOLATILE)) {
+    return true;
+  }
+  if (selected_plan->kind != LOOM_LOW_LOWER_SELECTED_PLAN_RULE ||
+      selected_plan->rule == NULL || selected_plan->resolved_emits == NULL) {
+    return false;
+  }
+  bool found_source_memory_emit = false;
+  for (uint16_t i = 0; i < selected_plan->rule->emit_count; ++i) {
+    const loom_low_lower_resolved_emit_t* resolved_emit =
+        &selected_plan->resolved_emits[i];
+    if (resolved_emit->emit->source_memory_ordinal == 0) {
+      continue;
+    }
+    found_source_memory_emit = true;
+    if (!loom_low_lower_descriptor_has_ordered_memory_effect(
+            context->descriptor_set, resolved_emit->descriptor.descriptor)) {
+      return false;
+    }
+  }
+  return found_source_memory_emit;
+}
+
+static iree_status_t loom_low_lower_validate_selected_plans(
+    loom_low_lower_context_t* context) {
+  const loom_low_lower_source_plan_t* source_plan =
+      &context->lowering.source_plan;
+  for (iree_host_size_t i = 0; i < source_plan->selected_plan_count; ++i) {
+    const loom_low_lower_selected_plan_t* selected_plan =
+        &source_plan->selected_plans[i];
+    if (!loom_low_lower_selected_plan_preserves_volatile_memory(
+            context, selected_plan)) {
+      return loom_low_lower_emit_target_context_error(
+          context, selected_plan->source_op, LOOM_ERR_TARGET_081,
+          /*extra_params=*/NULL, /*extra_param_count=*/0);
+    }
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_low_lower_try_select_op_callback(
     loom_low_lower_context_t* context,
     loom_low_lower_select_op_callback_t callback, const loom_op_t* source_op,
@@ -1104,6 +1170,10 @@ iree_status_t loom_low_lower_source_plan_build(
                                         /*skip_entry_block_args=*/true);
   }
   if (iree_status_is_ok(status)) {
+    status = loom_low_lower_validate_selected_plans(context);
+  }
+  if (iree_status_is_ok(status) &&
+      !loom_low_lower_context_should_stop(context)) {
     loom_low_lower_analyze_storage_demands(context, source_body);
   }
   iree_arena_deinitialize(&context->planning_arena);

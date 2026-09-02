@@ -722,8 +722,9 @@ static iree_status_t loom_amdgpu_vector_packet_materialize_memory_load(
       packetized_value->source_type, slice->lane_count);
   loom_op_t* packet_op = NULL;
   IREE_RETURN_IF_ERROR(loom_vector_load_build(
-      &context->rewriter->builder, cache_policy.build_flags, footprint.view,
-      dynamic_indices, dynamic_index_count, static_indices, static_index_count,
+      &context->rewriter->builder, cache_policy.build_flags,
+      loom_vector_load_memory_flags(op), footprint.view, dynamic_indices,
+      dynamic_index_count, static_indices, static_index_count,
       cache_policy.cache_scope, cache_policy.cache_temporal, packet_type,
       op->location, &packet_op));
   packetized_value->packet = loom_vector_load_result(packet_op);
@@ -861,10 +862,11 @@ static iree_status_t loom_amdgpu_vector_packet_store(
       &dynamic_index_count, &static_indices, &static_index_count));
   loom_op_t* packet_store_op = NULL;
   IREE_RETURN_IF_ERROR(loom_vector_store_build(
-      &context->rewriter->builder, store_cache_policy.build_flags, packet,
-      store_footprint->view, dynamic_indices, dynamic_index_count,
-      static_indices, static_index_count, store_cache_policy.cache_scope,
-      store_cache_policy.cache_temporal, store_op->location, &packet_store_op));
+      &context->rewriter->builder, store_cache_policy.build_flags,
+      loom_vector_store_memory_flags(store_op), packet, store_footprint->view,
+      dynamic_indices, dynamic_index_count, static_indices, static_index_count,
+      store_cache_policy.cache_scope, store_cache_policy.cache_temporal,
+      store_op->location, &packet_store_op));
   return iree_ok_status();
 }
 
@@ -1003,8 +1005,9 @@ static iree_status_t loom_amdgpu_vector_packet_staging_store(
   }
   loom_op_t* staging_store_op = NULL;
   return loom_vector_store_build(
-      &packetization->context->rewriter->builder, /*build_flags=*/0, packet,
-      staging_view, dynamic_indices, dynamic_index_count, &static_index,
+      &packetization->context->rewriter->builder, /*build_flags=*/0,
+      /*instance_flags=*/0, packet, staging_view, dynamic_indices,
+      dynamic_index_count, &static_index,
       /*static_indices_count=*/1, /*cache_scope=*/0, /*cache_temporal=*/0,
       store_op->location, &staging_store_op);
 }
@@ -1028,7 +1031,8 @@ static iree_status_t loom_amdgpu_vector_packet_staging_load(
   loom_op_t* staging_load_op = NULL;
   IREE_RETURN_IF_ERROR(loom_vector_load_build(
       &packetization->context->rewriter->builder, /*build_flags=*/0,
-      staging_view, dynamic_indices, dynamic_index_count, &static_index,
+      /*instance_flags=*/0, staging_view, dynamic_indices, dynamic_index_count,
+      &static_index,
       /*static_indices_count=*/1, /*cache_scope=*/0, /*cache_temporal=*/0,
       packet_type, store_op->location, &staging_load_op));
   *out_packet = loom_vector_load_result(staging_load_op);

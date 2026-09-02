@@ -889,8 +889,9 @@ static iree_status_t loom_low_source_workload_gen_vector4xi32_load(
 
   loom_op_t* op = NULL;
   IREE_RETURN_IF_ERROR(loom_vector_load_build(
-      context->builder, 0, context->integer_load_view, NULL, 0, static_indices,
-      1, 0, 0, vector_type, LOOM_LOCATION_UNKNOWN, &op));
+      context->builder, 0, /*instance_flags=*/0, context->integer_load_view,
+      NULL, 0, static_indices, 1, 0, 0, vector_type, LOOM_LOCATION_UNKNOWN,
+      &op));
   loom_low_source_workload_values_add(context->values,
                                       loom_vector_load_result(op), vector_type);
   *out_result = LOOM_LOW_SOURCE_WORKLOAD_HOOK_EMITTED;
@@ -913,8 +914,9 @@ static iree_status_t loom_low_source_workload_gen_vector4xi32_store(
       context->builder, &static_indices));
   loom_op_t* op = NULL;
   IREE_RETURN_IF_ERROR(loom_vector_store_build(
-      context->builder, 0, value, context->integer_store_view, NULL, 0,
-      static_indices, 1, 0, 0, LOOM_LOCATION_UNKNOWN, &op));
+      context->builder, 0, /*instance_flags=*/0, value,
+      context->integer_store_view, NULL, 0, static_indices, 1, 0, 0,
+      LOOM_LOCATION_UNKNOWN, &op));
   (void)op;
   *out_result = LOOM_LOW_SOURCE_WORKLOAD_HOOK_EMITTED;
   return iree_ok_status();
@@ -930,8 +932,8 @@ static iree_status_t loom_low_source_workload_gen_vector4xf32_load(
 
   loom_op_t* op = NULL;
   IREE_RETURN_IF_ERROR(loom_vector_load_build(
-      context->builder, 0, context->float_load_view, NULL, 0, static_indices, 1,
-      0, 0, vector_type, LOOM_LOCATION_UNKNOWN, &op));
+      context->builder, 0, /*instance_flags=*/0, context->float_load_view, NULL,
+      0, static_indices, 1, 0, 0, vector_type, LOOM_LOCATION_UNKNOWN, &op));
   loom_low_source_workload_values_add(context->values,
                                       loom_vector_load_result(op), vector_type);
   *out_result = LOOM_LOW_SOURCE_WORKLOAD_HOOK_EMITTED;
@@ -954,8 +956,9 @@ static iree_status_t loom_low_source_workload_gen_vector4xf32_store(
       context->builder, &static_indices));
   loom_op_t* op = NULL;
   IREE_RETURN_IF_ERROR(loom_vector_store_build(
-      context->builder, 0, value, context->float_store_view, NULL, 0,
-      static_indices, 1, 0, 0, LOOM_LOCATION_UNKNOWN, &op));
+      context->builder, 0, /*instance_flags=*/0, value,
+      context->float_store_view, NULL, 0, static_indices, 1, 0, 0,
+      LOOM_LOCATION_UNKNOWN, &op));
   (void)op;
   *out_result = LOOM_LOW_SOURCE_WORKLOAD_HOOK_EMITTED;
   return iree_ok_status();
@@ -982,7 +985,8 @@ static iree_status_t loom_low_source_workload_gen_vector4xi32_indexed_load(
       context->builder, &static_indices));
   loom_op_t* op = NULL;
   IREE_RETURN_IF_ERROR(loom_vector_load_build(
-      context->builder, 0, context->indexed_integer_load_view, dynamic_indices,
+      context->builder, 0, /*instance_flags=*/0,
+      context->indexed_integer_load_view, dynamic_indices,
       IREE_ARRAYSIZE(dynamic_indices), static_indices, 1, 0, 0, vector_type,
       LOOM_LOCATION_UNKNOWN, &op));
   loom_low_source_workload_values_add(context->values,
@@ -1014,8 +1018,9 @@ static iree_status_t loom_low_source_workload_gen_vector4xi32_indexed_store(
       context->builder, &static_indices));
   loom_op_t* op = NULL;
   IREE_RETURN_IF_ERROR(loom_vector_store_build(
-      context->builder, 0, value, context->indexed_integer_store_view,
-      dynamic_indices, IREE_ARRAYSIZE(dynamic_indices), static_indices, 1, 0, 0,
+      context->builder, 0, /*instance_flags=*/0, value,
+      context->indexed_integer_store_view, dynamic_indices,
+      IREE_ARRAYSIZE(dynamic_indices), static_indices, 1, 0, 0,
       LOOM_LOCATION_UNKNOWN, &op));
   (void)op;
   *out_result = LOOM_LOW_SOURCE_WORKLOAD_HOOK_EMITTED;
@@ -1042,10 +1047,11 @@ static iree_status_t loom_low_source_workload_gen_vector4xf32_indexed_load(
   IREE_RETURN_IF_ERROR(loom_low_source_workload_allocate_dynamic_index_sentinel(
       context->builder, &static_indices));
   loom_op_t* op = NULL;
-  IREE_RETURN_IF_ERROR(loom_vector_load_build(
-      context->builder, 0, context->indexed_float_load_view, dynamic_indices,
-      IREE_ARRAYSIZE(dynamic_indices), static_indices, 1, 0, 0, vector_type,
-      LOOM_LOCATION_UNKNOWN, &op));
+  IREE_RETURN_IF_ERROR(
+      loom_vector_load_build(context->builder, 0, /*instance_flags=*/0,
+                             context->indexed_float_load_view, dynamic_indices,
+                             IREE_ARRAYSIZE(dynamic_indices), static_indices, 1,
+                             0, 0, vector_type, LOOM_LOCATION_UNKNOWN, &op));
   loom_low_source_workload_values_add(context->values,
                                       loom_vector_load_result(op), vector_type);
   *out_result = LOOM_LOW_SOURCE_WORKLOAD_HOOK_EMITTED;
@@ -1075,8 +1081,9 @@ static iree_status_t loom_low_source_workload_gen_vector4xf32_indexed_store(
       context->builder, &static_indices));
   loom_op_t* op = NULL;
   IREE_RETURN_IF_ERROR(loom_vector_store_build(
-      context->builder, 0, value, context->indexed_float_store_view,
-      dynamic_indices, IREE_ARRAYSIZE(dynamic_indices), static_indices, 1, 0, 0,
+      context->builder, 0, /*instance_flags=*/0, value,
+      context->indexed_float_store_view, dynamic_indices,
+      IREE_ARRAYSIZE(dynamic_indices), static_indices, 1, 0, 0,
       LOOM_LOCATION_UNKNOWN, &op));
   (void)op;
   *out_result = LOOM_LOW_SOURCE_WORKLOAD_HOOK_EMITTED;
