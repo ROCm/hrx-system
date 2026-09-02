@@ -16,11 +16,23 @@
 #include "iree/hal/replay/recorder_command_buffer.h"
 #include "iree/hal/replay/recorder_executable.h"
 #include "iree/hal/replay/recorder_file.h"
+#include "iree/hal/replay/recorder_queue.h"
 #include "iree/hal/replay/recorder_record.h"
 
 //===----------------------------------------------------------------------===//
 // iree_hal_replay_device_t
 //===----------------------------------------------------------------------===//
+
+typedef struct iree_hal_replay_queue_family_t {
+  // Canonical family identity owned by the recording wrapper device.
+  iree_hal_queue_family_t base;
+
+  // Start of this family's queues in the wrapper's flat queue table.
+  iree_host_size_t queue_offset;
+
+  // Number of provisioned queues in this family.
+  uint32_t queue_count;
+} iree_hal_replay_queue_family_t;
 
 typedef struct iree_hal_replay_device_t {
   // HAL resource header for the recording wrapper device.
@@ -39,6 +51,18 @@ typedef struct iree_hal_replay_device_t {
   iree_hal_replay_object_id_t device_id;
   // Topology information assigned to this wrapper during group creation.
   iree_hal_device_topology_info_t topology_info;
+
+  // Number of canonical queue-family records.
+  iree_host_size_t queue_family_count;
+
+  // Wrapper-owned canonical queue-family records in ordinal order.
+  iree_hal_replay_queue_family_t* queue_families;
+
+  // Number of successfully initialized queue proxies.
+  iree_host_size_t initialized_queue_count;
+
+  // Wrapper-owned provisioned queue proxies grouped by canonical family.
+  iree_hal_replay_recorder_queue_t* queues;
 } iree_hal_replay_device_t;
 
 static const iree_hal_device_vtable_t iree_hal_replay_device_vtable;
@@ -82,6 +106,11 @@ static void iree_hal_replay_device_destroy(iree_hal_device_t* base_device) {
   iree_allocator_t host_allocator = device->host_allocator;
   IREE_TRACE_ZONE_BEGIN(z0);
 
+  for (iree_host_size_t i = 0; i < device->initialized_queue_count; ++i) {
+    iree_hal_queue_t* queue = &device->queues[i].base;
+    iree_atomic_ref_count_abort_if_uses(&queue->resource.ref_count);
+    iree_hal_queue_release(queue);
+  }
   iree_hal_allocator_release(device->allocator);
   iree_hal_device_release(device->base_device);
   iree_hal_device_group_release(device->base_group);
@@ -129,6 +158,26 @@ static const iree_hal_device_spec_t* iree_hal_replay_device_spec(
     iree_hal_device_t* base_device) {
   iree_hal_replay_device_t* device = iree_hal_replay_device_cast(base_device);
   return iree_hal_device_spec(device->base_device);
+}
+
+static const iree_hal_queue_family_t* iree_hal_replay_device_queue_family(
+    iree_hal_device_t* base_device,
+    iree_hal_queue_family_ordinal_t family_ordinal) {
+  iree_hal_replay_device_t* device = iree_hal_replay_device_cast(base_device);
+  if (family_ordinal >= device->queue_family_count) return NULL;
+  return &device->queue_families[family_ordinal].base;
+}
+
+static iree_hal_queue_t* iree_hal_replay_device_queue(
+    iree_hal_device_t* base_device,
+    iree_hal_queue_family_ordinal_t family_ordinal,
+    iree_hal_queue_ordinal_t queue_ordinal) {
+  iree_hal_replay_device_t* device = iree_hal_replay_device_cast(base_device);
+  if (family_ordinal >= device->queue_family_count) return NULL;
+  const iree_hal_replay_queue_family_t* family =
+      &device->queue_families[family_ordinal];
+  if (queue_ordinal >= family->queue_count) return NULL;
+  return &device->queues[family->queue_offset + queue_ordinal].base;
 }
 
 static iree_status_t iree_hal_replay_device_sample_observation(
@@ -1519,11 +1568,41 @@ static iree_status_t iree_hal_replay_wrap_device(
   *out_device = NULL;
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  iree_hal_replay_device_t* device = NULL;
+  const iree_hal_device_spec_t* base_device_spec =
+      iree_hal_device_spec(base_device);
+  const iree_hal_device_queue_spec_t* base_queue_spec =
+      base_device_spec ? iree_hal_device_spec_queues(base_device_spec) : NULL;
+  const iree_host_size_t queue_family_count =
+      base_queue_spec ? base_queue_spec->family_count : 0;
+  iree_host_size_t queue_count = 0;
+  for (iree_host_size_t i = 0; i < queue_family_count; ++i) {
+    if (IREE_UNLIKELY(!iree_host_size_checked_add(
+            queue_count, base_queue_spec->families[i].provisioned_queue_count,
+            &queue_count))) {
+      IREE_TRACE_ZONE_END(z0);
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "recording queue table size overflow");
+    }
+  }
+
+  iree_host_size_t queue_families_offset = 0;
+  iree_host_size_t queues_offset = 0;
+  iree_host_size_t total_size = 0;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0,
-      iree_allocator_malloc(host_allocator, sizeof(*device), (void**)&device));
-  memset(device, 0, sizeof(*device));
+      IREE_STRUCT_LAYOUT(
+          sizeof(iree_hal_replay_device_t), &total_size,
+          IREE_STRUCT_FIELD_ALIGNED(
+              queue_family_count, iree_hal_replay_queue_family_t,
+              iree_alignof(iree_hal_replay_queue_family_t),
+              &queue_families_offset),
+          IREE_STRUCT_FIELD_ALIGNED(
+              queue_count, iree_hal_replay_recorder_queue_t,
+              iree_alignof(iree_hal_replay_recorder_queue_t), &queues_offset)));
+  iree_hal_replay_device_t* device = NULL;
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_allocator_malloc(host_allocator, total_size, (void**)&device));
+  memset(device, 0, total_size);
   iree_hal_resource_initialize(&iree_hal_replay_device_vtable,
                                &device->resource);
   device->host_allocator = host_allocator;
@@ -1534,10 +1613,63 @@ static iree_status_t iree_hal_replay_wrap_device(
   device->base_device = base_device;
   iree_hal_device_retain(device->base_device);
 
-  iree_status_t status = iree_hal_replay_recorder_record_object(
-      recorder, IREE_HAL_REPLAY_OBJECT_ID_NONE,
-      IREE_HAL_REPLAY_OBJECT_TYPE_DEVICE, IREE_HAL_REPLAY_PAYLOAD_TYPE_NONE, 0,
-      NULL, &device->device_id);
+  device->queue_family_count = queue_family_count;
+  device->queue_families =
+      queue_family_count
+          ? (iree_hal_replay_queue_family_t*)((uint8_t*)device +
+                                              queue_families_offset)
+          : NULL;
+  device->queues = queue_count
+                       ? (iree_hal_replay_recorder_queue_t*)((uint8_t*)device +
+                                                             queues_offset)
+                       : NULL;
+
+  iree_status_t status = iree_ok_status();
+  iree_host_size_t flat_queue_ordinal = 0;
+  for (iree_host_size_t i = 0;
+       i < queue_family_count && iree_status_is_ok(status); ++i) {
+    const iree_hal_queue_family_ordinal_t family_ordinal =
+        (iree_hal_queue_family_ordinal_t)i;
+    if (IREE_UNLIKELY(
+            !iree_hal_device_queue_family(base_device, family_ordinal))) {
+      status = iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "wrapped device queue spec advertises family %" PRIhsz
+          " but the device did not expose it",
+          i);
+      break;
+    }
+    const uint32_t family_queue_count =
+        base_queue_spec->families[i].provisioned_queue_count;
+    iree_hal_replay_queue_family_t* queue_family = &device->queue_families[i];
+    iree_hal_queue_family_initialize(family_ordinal, &queue_family->base);
+    queue_family->queue_offset = flat_queue_ordinal;
+    queue_family->queue_count = family_queue_count;
+    for (uint32_t j = 0; j < family_queue_count && iree_status_is_ok(status);
+         ++j) {
+      iree_hal_queue_t* base_queue = iree_hal_device_queue(
+          base_device, family_ordinal, (iree_hal_queue_ordinal_t)j);
+      if (IREE_UNLIKELY(!base_queue)) {
+        status = iree_make_status(
+            IREE_STATUS_FAILED_PRECONDITION,
+            "wrapped device queue spec advertises family %" PRIhsz
+            " queue %u but the device did not expose it",
+            i, j);
+        break;
+      }
+      iree_hal_replay_recorder_queue_initialize(
+          &queue_family->base, base_queue,
+          &device->queues[flat_queue_ordinal++]);
+      ++device->initialized_queue_count;
+    }
+  }
+
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_replay_recorder_record_object(
+        recorder, IREE_HAL_REPLAY_OBJECT_ID_NONE,
+        IREE_HAL_REPLAY_OBJECT_TYPE_DEVICE, IREE_HAL_REPLAY_PAYLOAD_TYPE_NONE,
+        0, NULL, &device->device_id);
+  }
   iree_hal_allocator_t* base_allocator =
       iree_status_is_ok(status) ? iree_hal_device_allocator(device->base_device)
                                 : NULL;
@@ -1549,11 +1681,7 @@ static iree_status_t iree_hal_replay_wrap_device(
   if (iree_status_is_ok(status)) {
     *out_device = (iree_hal_device_t*)device;
   } else {
-    iree_hal_allocator_release(device->allocator);
-    iree_hal_device_release(device->base_device);
-    iree_hal_device_group_release(device->base_group);
-    iree_hal_replay_recorder_release(device->recorder);
-    iree_allocator_free(host_allocator, device);
+    iree_hal_device_release((iree_hal_device_t*)device);
   }
 
   IREE_TRACE_ZONE_END(z0);
@@ -1615,6 +1743,8 @@ static const iree_hal_device_vtable_t iree_hal_replay_device_vtable = {
     .replace_channel_provider = iree_hal_replay_replace_channel_provider,
     .trim = iree_hal_replay_device_trim,
     .device_spec = iree_hal_replay_device_spec,
+    .queue_family = iree_hal_replay_device_queue_family,
+    .queue = iree_hal_replay_device_queue,
     .sample_observation = iree_hal_replay_device_sample_observation,
     .topology_info = iree_hal_replay_device_topology_info,
     .refine_topology_edge = iree_hal_replay_device_refine_topology_edge,

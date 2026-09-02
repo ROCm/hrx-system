@@ -2292,6 +2292,29 @@ static const iree_hal_device_spec_t* iree_hal_amdgpu_logical_device_spec(
   return logical_device->device_spec;
 }
 
+static const iree_hal_queue_family_t*
+iree_hal_amdgpu_logical_device_queue_family(
+    iree_hal_device_t* base_device,
+    iree_hal_queue_family_ordinal_t family_ordinal) {
+  iree_hal_amdgpu_logical_device_t* logical_device =
+      iree_hal_amdgpu_logical_device_cast(base_device);
+  if (family_ordinal >= logical_device->physical_device_count) return NULL;
+  return &logical_device->physical_devices[family_ordinal]->queue_family;
+}
+
+static iree_hal_queue_t* iree_hal_amdgpu_logical_device_queue(
+    iree_hal_device_t* base_device,
+    iree_hal_queue_family_ordinal_t family_ordinal,
+    iree_hal_queue_ordinal_t queue_ordinal) {
+  iree_hal_amdgpu_logical_device_t* logical_device =
+      iree_hal_amdgpu_logical_device_cast(base_device);
+  if (family_ordinal >= logical_device->physical_device_count) return NULL;
+  iree_hal_amdgpu_physical_device_t* physical_device =
+      logical_device->physical_devices[family_ordinal];
+  if (queue_ordinal >= physical_device->host_queue_count) return NULL;
+  return &physical_device->host_queues[queue_ordinal].base;
+}
+
 static iree_status_t iree_hal_amdgpu_logical_device_sample_observation(
     iree_hal_device_t* base_device,
     iree_hal_device_observation_flags_t requested_flags,
@@ -3619,6 +3642,8 @@ static const iree_hal_device_vtable_t iree_hal_amdgpu_logical_device_vtable = {
     .replace_channel_provider = iree_hal_amdgpu_replace_channel_provider,
     .trim = iree_hal_amdgpu_logical_device_trim,
     .device_spec = iree_hal_amdgpu_logical_device_spec,
+    .queue_family = iree_hal_amdgpu_logical_device_queue_family,
+    .queue = iree_hal_amdgpu_logical_device_queue,
     .sample_observation = iree_hal_amdgpu_logical_device_sample_observation,
     .topology_info = iree_hal_amdgpu_logical_device_topology_info,
     .refine_topology_edge = iree_hal_amdgpu_logical_device_refine_topology_edge,

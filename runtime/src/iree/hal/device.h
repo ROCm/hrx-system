@@ -712,6 +712,24 @@ iree_status_t iree_hal_device_trim(iree_hal_device_t* device);
 IREE_API_EXPORT const iree_hal_device_spec_t* iree_hal_device_spec(
     iree_hal_device_t* device);
 
+// Returns the queue family at canonical |family_ordinal| or NULL if invalid.
+//
+// The returned pointer is borrowed from |device| and remains stable until the
+// device is destroyed.
+IREE_API_EXPORT const iree_hal_queue_family_t* iree_hal_device_queue_family(
+    iree_hal_device_t* device, iree_hal_queue_family_ordinal_t family_ordinal);
+
+// Returns the provisioned hardware queue at the given coordinate or NULL if
+// either ordinal is invalid.
+//
+// This is an infallible lookup over queues provisioned during device creation;
+// it never creates or acquires a queue. The returned pointer is borrowed from
+// |device| and remains stable until the device is destroyed. The caller may
+// retain the queue but must still ensure the device outlives that reference.
+IREE_API_EXPORT iree_hal_queue_t* iree_hal_device_queue(
+    iree_hal_device_t* device, iree_hal_queue_family_ordinal_t family_ordinal,
+    iree_hal_queue_ordinal_t queue_ordinal);
+
 // Initializes |out_observation| for a device state sample.
 IREE_API_EXPORT void iree_hal_device_observation_initialize(
     iree_hal_device_observation_flags_t requested_flags,
@@ -1325,6 +1343,14 @@ typedef struct iree_hal_device_vtable_t {
 
   const iree_hal_device_spec_t*(IREE_API_PTR* device_spec)(
       iree_hal_device_t* device);
+
+  const iree_hal_queue_family_t*(IREE_API_PTR* queue_family)(
+      iree_hal_device_t* device,
+      iree_hal_queue_family_ordinal_t family_ordinal);
+
+  iree_hal_queue_t*(IREE_API_PTR* queue)(
+      iree_hal_device_t* device, iree_hal_queue_family_ordinal_t family_ordinal,
+      iree_hal_queue_ordinal_t queue_ordinal);
 
   iree_status_t(IREE_API_PTR* sample_observation)(
       iree_hal_device_t* device,

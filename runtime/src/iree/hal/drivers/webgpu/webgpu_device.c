@@ -63,7 +63,13 @@ typedef struct iree_hal_webgpu_device_t {
   // Topology information if this device is part of a multi-device topology.
   iree_hal_device_topology_info_t topology_info;
 
-  // Today: 1 queue. Future: queue[N] with queue selection by affinity.
+  // Pointer-unique identity of the WebGPU queue family.
+  iree_hal_queue_family_t queue_family;
+
+  // Number of successfully initialized provisioned queues.
+  iree_host_size_t queue_count;
+
+  // WebGPU exposes exactly one native queue per device.
   iree_hal_webgpu_queue_t queue;
 
   // + trailing identifier string storage
@@ -77,6 +83,63 @@ static iree_hal_webgpu_device_t* iree_hal_webgpu_device_cast(
     iree_hal_device_t* base_value) {
   IREE_HAL_ASSERT_TYPE(base_value, &iree_hal_webgpu_device_vtable);
   return (iree_hal_webgpu_device_t*)base_value;
+}
+
+static iree_status_t iree_hal_webgpu_device_spec_create(
+    iree_string_view_t identifier, iree_allocator_t host_allocator,
+    iree_hal_device_spec_t** out_device_spec) {
+  IREE_ASSERT_ARGUMENT(out_device_spec);
+  *out_device_spec = NULL;
+
+  iree_hal_physical_device_spec_t physical_device = {
+      .identity =
+          {
+              .display_name = identifier,
+              .backend_path = identifier,
+              .flags = IREE_HAL_PHYSICAL_DEVICE_IDENTITY_FLAG_NONE,
+          },
+      .physical_ordinal = 0,
+      .partition_ordinal = 0,
+      .partition_count = 1,
+      .physical_device_affinity = 1ull,
+  };
+  iree_hal_device_identity_spec_t identity = {
+      .logical_device_id = identifier,
+      .display_name = identifier,
+      .driver_id = IREE_SV("webgpu"),
+      .backend_id = IREE_SV("webgpu"),
+      .physical_device_count = 1,
+      .physical_devices = &physical_device,
+      .flags = IREE_HAL_DEVICE_IDENTITY_FLAG_NONE,
+  };
+  iree_hal_queue_family_spec_t queue_family = {
+      .name = IREE_SV("default"),
+      .provisioned_queue_count = 1,
+      .priority_count = 1,
+      .physical_device_affinity = 1ull,
+      .role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH |
+                    IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER |
+                    IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_HOST_CALL,
+      .flags = IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_NONE,
+  };
+  iree_hal_device_queue_spec_t queues = {
+      .family_count = 1,
+      .families = &queue_family,
+      .flags = IREE_HAL_DEVICE_QUEUE_SPEC_FLAG_NONE,
+  };
+
+  iree_hal_device_spec_builder_t builder;
+  iree_hal_device_spec_builder_initialize(host_allocator, &builder);
+  iree_status_t status =
+      iree_hal_device_spec_builder_set_identity(&builder, &identity);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_device_spec_builder_set_queues(&builder, &queues);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_device_spec_builder_finalize(&builder, out_device_spec);
+  }
+  iree_hal_device_spec_builder_deinitialize(&builder);
+  return status;
 }
 
 iree_status_t iree_hal_webgpu_device_create(
@@ -99,6 +162,7 @@ iree_status_t iree_hal_webgpu_device_create(
   memset(device, 0, total_size);
   iree_hal_resource_initialize(&iree_hal_webgpu_device_vtable,
                                &device->resource);
+  iree_hal_queue_family_initialize(/*ordinal=*/0, &device->queue_family);
   iree_string_view_append_to_buffer(
       identifier, &device->identifier,
       (char*)device + total_size - identifier.size);
@@ -118,9 +182,8 @@ iree_status_t iree_hal_webgpu_device_create(
   iree_status_t status =
       iree_async_proactor_pool_get(device->proactor_pool, 0, &proactor);
   if (iree_status_is_ok(status)) {
-    status = iree_hal_device_spec_create_minimal(
-        identifier, identifier, IREE_SV("webgpu"), IREE_SV("webgpu"),
-        host_allocator, &device->device_spec);
+    status = iree_hal_webgpu_device_spec_create(identifier, host_allocator,
+                                                &device->device_spec);
   }
 
   // Create the builtin compute pipelines for fill/copy operations.
@@ -134,8 +197,10 @@ iree_status_t iree_hal_webgpu_device_create(
     iree_hal_webgpu_handle_t queue_handle =
         iree_hal_webgpu_import_device_get_queue(device_handle);
     status = iree_hal_webgpu_queue_initialize(
-        device_handle, queue_handle, &device->builtins, proactor,
+        &device->queue_family, device_handle, queue_handle, &device->builtins,
+        proactor,
         /*frontier_tracker=*/NULL, /*axis=*/0, host_allocator, &device->queue);
+    if (iree_status_is_ok(status)) device->queue_count = 1;
   }
 
   // Create the device allocator.
@@ -191,7 +256,11 @@ static void iree_hal_webgpu_device_destroy(iree_hal_device_t* base_device) {
 
   iree_hal_allocator_release(device->device_allocator);
   iree_hal_webgpu_device_clear_topology_info(device);
-  iree_hal_webgpu_queue_deinitialize(&device->queue);
+  if (device->queue_count != 0) {
+    iree_atomic_ref_count_abort_if_uses(&device->queue.base.resource.ref_count);
+    iree_hal_queue_release(&device->queue.base);
+    device->queue_count = 0;
+  }
   iree_hal_webgpu_builtins_deinitialize(&device->builtins);
   iree_hal_channel_provider_release(device->channel_provider);
   iree_hal_device_spec_release(device->device_spec);
@@ -247,6 +316,22 @@ static const iree_hal_device_spec_t* iree_hal_webgpu_device_spec(
     iree_hal_device_t* base_device) {
   iree_hal_webgpu_device_t* device = iree_hal_webgpu_device_cast(base_device);
   return device->device_spec;
+}
+
+static const iree_hal_queue_family_t* iree_hal_webgpu_device_queue_family(
+    iree_hal_device_t* base_device,
+    iree_hal_queue_family_ordinal_t family_ordinal) {
+  iree_hal_webgpu_device_t* device = iree_hal_webgpu_device_cast(base_device);
+  return family_ordinal == 0 ? &device->queue_family : NULL;
+}
+
+static iree_hal_queue_t* iree_hal_webgpu_device_queue(
+    iree_hal_device_t* base_device,
+    iree_hal_queue_family_ordinal_t family_ordinal,
+    iree_hal_queue_ordinal_t queue_ordinal) {
+  iree_hal_webgpu_device_t* device = iree_hal_webgpu_device_cast(base_device);
+  if (family_ordinal != 0 || queue_ordinal >= device->queue_count) return NULL;
+  return &device->queue.base;
 }
 
 static iree_status_t iree_hal_webgpu_device_sample_observation(
@@ -620,6 +705,8 @@ static const iree_hal_device_vtable_t iree_hal_webgpu_device_vtable = {
     .replace_channel_provider = iree_hal_webgpu_replace_channel_provider,
     .trim = iree_hal_webgpu_device_trim,
     .device_spec = iree_hal_webgpu_device_spec,
+    .queue_family = iree_hal_webgpu_device_queue_family,
+    .queue = iree_hal_webgpu_device_queue,
     .sample_observation = iree_hal_webgpu_device_sample_observation,
     .topology_info = iree_hal_webgpu_device_topology_info,
     .refine_topology_edge = iree_hal_webgpu_device_refine_topology_edge,

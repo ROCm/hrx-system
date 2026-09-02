@@ -409,6 +409,15 @@ iree_status_t iree_hal_mock_device_create(
     status = iree_hal_mock_device_default_spec_create(options, host_allocator,
                                                       &device->device_spec);
   }
+  if (iree_status_is_ok(status)) {
+    const iree_hal_device_queue_spec_t* queues =
+        iree_hal_device_spec_queues(device->device_spec);
+    if (IREE_UNLIKELY(queues && queues->family_count != 0)) {
+      status = iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "mock devices cannot expose queue families or provisioned queues");
+    }
+  }
   if (!iree_status_is_ok(status)) {
     iree_hal_device_release((iree_hal_device_t*)device);
     return status;
@@ -445,6 +454,19 @@ static const iree_hal_device_spec_t* iree_hal_mock_device_spec(
     iree_hal_device_t* base_device) {
   iree_hal_mock_device_t* device = iree_hal_mock_device_cast(base_device);
   return device->device_spec;
+}
+
+static const iree_hal_queue_family_t* iree_hal_mock_device_queue_family(
+    iree_hal_device_t* base_device,
+    iree_hal_queue_family_ordinal_t family_ordinal) {
+  return NULL;
+}
+
+static iree_hal_queue_t* iree_hal_mock_device_queue(
+    iree_hal_device_t* base_device,
+    iree_hal_queue_family_ordinal_t family_ordinal,
+    iree_hal_queue_ordinal_t queue_ordinal) {
+  return NULL;
 }
 
 static iree_status_t iree_hal_mock_device_sample_observation(
@@ -743,6 +765,8 @@ static const iree_hal_device_vtable_t iree_hal_mock_device_vtable = {
     .replace_channel_provider = iree_hal_mock_device_replace_channel_provider,
     .trim = iree_hal_mock_device_trim,
     .device_spec = iree_hal_mock_device_spec,
+    .queue_family = iree_hal_mock_device_queue_family,
+    .queue = iree_hal_mock_device_queue,
     .sample_observation = iree_hal_mock_device_sample_observation,
     .topology_info = iree_hal_mock_device_topology_info,
     .refine_topology_edge = iree_hal_mock_device_refine_topology_edge,

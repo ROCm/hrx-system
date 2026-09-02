@@ -23,7 +23,16 @@
 // iree_hal_webgpu_queue_t
 //===----------------------------------------------------------------------===//
 
+static void iree_hal_webgpu_queue_destroy(iree_hal_queue_t* base_queue) {
+  iree_hal_webgpu_queue_deinitialize((iree_hal_webgpu_queue_t*)base_queue);
+}
+
+static const iree_hal_queue_vtable_t iree_hal_webgpu_queue_vtable = {
+    .destroy = iree_hal_webgpu_queue_destroy,
+};
+
 iree_status_t iree_hal_webgpu_queue_initialize(
+    const iree_hal_queue_family_t* queue_family,
     iree_hal_webgpu_handle_t device_handle,
     iree_hal_webgpu_handle_t queue_handle,
     const iree_hal_webgpu_builtins_t* builtins, iree_async_proactor_t* proactor,
@@ -51,6 +60,9 @@ iree_status_t iree_hal_webgpu_queue_initialize(
       &out_queue->scratch_builder);
   if (!iree_status_is_ok(status)) {
     iree_arena_block_pool_deinitialize(&out_queue->block_pool);
+  } else {
+    iree_hal_queue_initialize(queue_family, &iree_hal_webgpu_queue_vtable,
+                              &out_queue->base);
   }
   return status;
 }

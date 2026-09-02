@@ -346,6 +346,19 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
+    name = "queue_tests",
+    srcs = ["//runtime/src/iree/hal/cts/util:test_main.cc"],
+    deps = [
+        ":backends",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/hal/cts/queue:queue_test",
+        "//runtime/src/iree/hal/cts/util:registry",
+        "//runtime/src/iree/hal/cts/util:test_base",
+        "//runtime/src/iree/testing:gtest",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "queue_alloca_tests",
     srcs = ["//runtime/src/iree/hal/cts/util:test_main.cc"],
     deps = [

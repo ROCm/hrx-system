@@ -39,6 +39,9 @@ extern "C" {
 //===----------------------------------------------------------------------===//
 
 typedef struct iree_hal_webgpu_queue_t {
+  // Exact HAL queue resource. Must be at offset zero.
+  iree_hal_queue_t base;
+
   // Bridge handles for the GPUDevice and its GPUQueue.
   iree_hal_webgpu_handle_t device_handle;
   iree_hal_webgpu_handle_t queue_handle;
@@ -73,6 +76,7 @@ typedef struct iree_hal_webgpu_queue_t {
 // Initializes a queue. All borrowed pointers (builtins, proactor,
 // frontier_tracker) must outlive the queue.
 iree_status_t iree_hal_webgpu_queue_initialize(
+    const iree_hal_queue_family_t* queue_family,
     iree_hal_webgpu_handle_t device_handle,
     iree_hal_webgpu_handle_t queue_handle,
     const iree_hal_webgpu_builtins_t* builtins, iree_async_proactor_t* proactor,

@@ -25,6 +25,13 @@ extern "C" {
 // Queue family ordinals are stable for the lifetime of a device.
 typedef uint32_t iree_hal_queue_family_ordinal_t;
 
+// Ordinal of a provisioned queue within one queue family.
+//
+// Queue ordinals are stable coordinates in the immutable provisioned-queue
+// table for the lifetime of a device. They are not intrinsic queue identities:
+// dynamically acquired queues do not have provisioned queue ordinals.
+typedef uint32_t iree_hal_queue_ordinal_t;
+
 // A bitmap selecting queue families by their canonical ordinals.
 //
 // Queue family affinity describes which families may access a resource. It is

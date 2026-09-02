@@ -87,6 +87,19 @@ IREE_API_EXPORT const iree_hal_device_spec_t* iree_hal_device_spec(
   return _VTABLE_DISPATCH(device, device_spec)(device);
 }
 
+IREE_API_EXPORT const iree_hal_queue_family_t* iree_hal_device_queue_family(
+    iree_hal_device_t* device, iree_hal_queue_family_ordinal_t family_ordinal) {
+  IREE_ASSERT_ARGUMENT(device);
+  return _VTABLE_DISPATCH(device, queue_family)(device, family_ordinal);
+}
+
+IREE_API_EXPORT iree_hal_queue_t* iree_hal_device_queue(
+    iree_hal_device_t* device, iree_hal_queue_family_ordinal_t family_ordinal,
+    iree_hal_queue_ordinal_t queue_ordinal) {
+  IREE_ASSERT_ARGUMENT(device);
+  return _VTABLE_DISPATCH(device, queue)(device, family_ordinal, queue_ordinal);
+}
+
 IREE_API_EXPORT void iree_hal_device_observation_initialize(
     iree_hal_device_observation_flags_t requested_flags,
     iree_hal_device_observation_t* out_observation) {

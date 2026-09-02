@@ -471,6 +471,56 @@ TEST(ReplayRecorderTest, WrapDeviceGroupRecordsOrderedDeviceOperations) {
   EXPECT_EQ(1u, summary.refine_topology_record_count);
 }
 
+TEST(ReplayRecorderTest, WrappedDeviceOwnsProvisionedQueueProxies) {
+  std::vector<uint8_t> storage(16384, 0);
+  iree_hal_replay_recorder_t* recorder = CreateHostAllocationRecorder(&storage);
+
+  iree_hal_device_group_t* source_group = CreateTaskDeviceGroup();
+  iree_hal_device_group_t* wrapped_group = nullptr;
+  IREE_ASSERT_OK(iree_hal_replay_wrap_device_group(
+      recorder, source_group, iree_allocator_system(), &wrapped_group));
+
+  iree_hal_device_t* source_device =
+      iree_hal_device_group_device_at(source_group, 0);
+  iree_hal_device_t* wrapped_device =
+      iree_hal_device_group_device_at(wrapped_group, 0);
+  const iree_hal_device_queue_spec_t* queue_spec =
+      iree_hal_device_spec_queues(iree_hal_device_spec(source_device));
+  ASSERT_NE(nullptr, queue_spec);
+  for (iree_host_size_t i = 0; i < queue_spec->family_count; ++i) {
+    const iree_hal_queue_family_ordinal_t family_ordinal =
+        (iree_hal_queue_family_ordinal_t)i;
+    const iree_hal_queue_family_t* source_family =
+        iree_hal_device_queue_family(source_device, family_ordinal);
+    const iree_hal_queue_family_t* wrapped_family =
+        iree_hal_device_queue_family(wrapped_device, family_ordinal);
+    ASSERT_NE(nullptr, source_family);
+    ASSERT_NE(nullptr, wrapped_family);
+    EXPECT_NE(source_family, wrapped_family);
+
+    const uint32_t queue_count =
+        queue_spec->families[i].provisioned_queue_count;
+    for (uint32_t j = 0; j < queue_count; ++j) {
+      const iree_hal_queue_ordinal_t queue_ordinal =
+          (iree_hal_queue_ordinal_t)j;
+      iree_hal_queue_t* source_queue =
+          iree_hal_device_queue(source_device, family_ordinal, queue_ordinal);
+      iree_hal_queue_t* wrapped_queue =
+          iree_hal_device_queue(wrapped_device, family_ordinal, queue_ordinal);
+      ASSERT_NE(nullptr, source_queue);
+      ASSERT_NE(nullptr, wrapped_queue);
+      EXPECT_NE(source_queue, wrapped_queue);
+      EXPECT_EQ(source_family, iree_hal_queue_family(source_queue));
+      EXPECT_EQ(wrapped_family, iree_hal_queue_family(wrapped_queue));
+    }
+  }
+
+  IREE_ASSERT_OK(iree_hal_replay_recorder_close(recorder));
+  iree_hal_replay_recorder_release(recorder);
+  iree_hal_device_group_release(wrapped_group);
+  iree_hal_device_group_release(source_group);
+}
+
 TEST(ReplayRecorderTest, WrappedDeviceRecordsHostCallAsUnsupported) {
   std::vector<uint8_t> storage(16384, 0);
   iree_hal_replay_recorder_t* recorder = CreateHostAllocationRecorder(&storage);

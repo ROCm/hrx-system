@@ -1366,7 +1366,9 @@ void iree_hal_amdgpu_physical_device_deassign_frontier(
   physical_device->system_event_target = NULL;
 
   for (iree_host_size_t i = 0; i < physical_device->host_queue_count; ++i) {
-    iree_hal_queue_release(&physical_device->host_queues[i].base);
+    iree_hal_queue_t* queue = &physical_device->host_queues[i].base;
+    iree_atomic_ref_count_abort_if_uses(&queue->resource.ref_count);
+    iree_hal_queue_release(queue);
   }
   physical_device->host_queue_count = 0;
   if (physical_device->default_pool_set.entries) {

@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-# Queue operation CTS tests: host calls, semaphore submission orchestration.
+# Hardware queue identity and operation CTS tests.
 
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
 
@@ -12,6 +12,17 @@ package(
     default_visibility = ["//visibility:public"],
     features = ["layering_check"],
     licenses = ["notice"],
+)
+
+iree_runtime_cc_library(
+    name = "queue_test",
+    testonly = True,
+    srcs = ["queue_test.cc"],
+    deps = [
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/cts/util:test_base",
+    ],
+    alwayslink = True,
 )
 
 iree_runtime_cc_library(
@@ -96,6 +107,7 @@ iree_runtime_cc_library(
         ":queue_atomic_test",
         ":queue_dispatch_test",
         ":queue_host_call_test",
+        ":queue_test",
         ":queue_transfer_test",
         ":semaphore_submission_test",
     ],

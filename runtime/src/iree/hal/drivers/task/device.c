@@ -507,6 +507,22 @@ static const iree_hal_device_spec_t* iree_hal_task_device_spec(
   return device->device_spec;
 }
 
+static const iree_hal_queue_family_t* iree_hal_task_device_queue_family(
+    iree_hal_device_t* base_device,
+    iree_hal_queue_family_ordinal_t family_ordinal) {
+  iree_hal_task_device_t* device = iree_hal_task_device_cast(base_device);
+  return family_ordinal == 0 ? &device->queue_family : NULL;
+}
+
+static iree_hal_queue_t* iree_hal_task_device_queue(
+    iree_hal_device_t* base_device,
+    iree_hal_queue_family_ordinal_t family_ordinal,
+    iree_hal_queue_ordinal_t queue_ordinal) {
+  iree_hal_task_device_t* device = iree_hal_task_device_cast(base_device);
+  if (family_ordinal != 0 || queue_ordinal >= device->queue_count) return NULL;
+  return &device->queues[queue_ordinal].base;
+}
+
 static iree_status_t iree_hal_task_device_sample_observation(
     iree_hal_device_t* base_device,
     iree_hal_device_observation_flags_t requested_flags,
@@ -1226,6 +1242,8 @@ static const iree_hal_device_vtable_t iree_hal_task_device_vtable = {
     .replace_channel_provider = iree_hal_task_replace_channel_provider,
     .trim = iree_hal_task_device_trim,
     .device_spec = iree_hal_task_device_spec,
+    .queue_family = iree_hal_task_device_queue_family,
+    .queue = iree_hal_task_device_queue,
     .sample_observation = iree_hal_task_device_sample_observation,
     .topology_info = iree_hal_task_device_topology_info,
     .refine_topology_edge = iree_hal_task_device_refine_topology_edge,

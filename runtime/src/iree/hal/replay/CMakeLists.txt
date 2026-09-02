@@ -139,6 +139,8 @@ iree_cc_library(
     "recorder_executable.h"
     "recorder_file.c"
     "recorder_file.h"
+    "recorder_queue.c"
+    "recorder_queue.h"
     "recorder_record.h"
   DEPS
     ::digest
