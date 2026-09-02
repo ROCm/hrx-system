@@ -10,7 +10,7 @@
 
 #include "loom/analysis/condition_facts.h"
 #include "loom/analysis/symbol_facts.h"
-#include "loom/analysis/symbolic_value.h"
+#include "loom/analysis/symbolic_expr_proof.h"
 #include "loom/codegen/low/builder.h"
 #include "loom/codegen/low/descriptors.h"
 #include "loom/codegen/low/lower/context.h"
@@ -491,9 +491,13 @@ static iree_status_t loom_low_invoke_integer_operands_match(
       loom_low_lower_context_symbolic_expr_context(context);
   if (known_operand.kind == LOOM_CONDITION_INTEGER_OPERAND_VALUE &&
       queried_operand.kind == LOOM_CONDITION_INTEGER_OPERAND_VALUE) {
-    return loom_symbolic_values_match(expression_context,
-                                      known_operand.value_id,
-                                      queried_operand.value_id, out_match);
+    loom_symbolic_proof_result_t equality = LOOM_SYMBOLIC_PROOF_UNKNOWN;
+    IREE_RETURN_IF_ERROR(
+        loom_symbolic_expr_prove_value_relation_with_active_facts(
+            expression_context, LOOM_SYMBOLIC_INTEGER_RELATION_EQ,
+            known_operand.value_id, queried_operand.value_id, &equality));
+    *out_match = equality == LOOM_SYMBOLIC_PROOF_TRUE;
+    return iree_ok_status();
   }
 
   const loom_condition_integer_operand_t value_operand =
@@ -508,12 +512,13 @@ static iree_status_t loom_low_invoke_integer_operands_match(
       constant_operand.kind != LOOM_CONDITION_INTEGER_OPERAND_CONSTANT) {
     return iree_ok_status();
   }
-  loom_value_facts_t value_facts = loom_value_facts_unknown();
-  IREE_RETURN_IF_ERROR(loom_symbolic_value_lookup_condition_refined_facts(
-      expression_context, value_operand.value_id, &value_facts));
+  loom_symbolic_expr_t value_expression = {0};
+  IREE_RETURN_IF_ERROR(loom_symbolic_expr_from_value(
+      expression_context, value_operand.value_id, &value_expression));
   int64_t exact_value = 0;
-  *out_match = loom_value_facts_as_exact_i64(value_facts, &exact_value) &&
-               exact_value == constant_operand.constant;
+  *out_match =
+      loom_value_facts_as_exact_i64(value_expression.facts, &exact_value) &&
+      exact_value == constant_operand.constant;
   return iree_ok_status();
 }
 
@@ -610,10 +615,11 @@ static iree_status_t loom_low_invoke_prove_predicate(
   if (queried_relation.left.kind == LOOM_CONDITION_INTEGER_OPERAND_VALUE &&
       queried_relation.right.kind == LOOM_CONDITION_INTEGER_OPERAND_VALUE) {
     loom_symbolic_proof_result_t symbolic_result = LOOM_SYMBOLIC_PROOF_UNKNOWN;
-    IREE_RETURN_IF_ERROR(loom_symbolic_value_prove_relation(
-        loom_low_lower_context_symbolic_expr_context(context),
-        queried_relation.relation, queried_relation.left.value_id,
-        queried_relation.right.value_id, &symbolic_result));
+    IREE_RETURN_IF_ERROR(
+        loom_symbolic_expr_prove_value_relation_with_active_facts(
+            loom_low_lower_context_symbolic_expr_context(context),
+            queried_relation.relation, queried_relation.left.value_id,
+            queried_relation.right.value_id, &symbolic_result));
     if (symbolic_result != LOOM_SYMBOLIC_PROOF_UNKNOWN) {
       *out_proof_result = symbolic_result == LOOM_SYMBOLIC_PROOF_TRUE
                               ? LOOM_DECISION_TRUTH_TRUE
@@ -667,9 +673,12 @@ static iree_status_t loom_low_invoke_resolve_precondition_operand(
       const loom_value_id_t source_value =
           invoke_operands.values[callee_argument_index];
       out_operand->identity = source_value;
-      return loom_symbolic_value_lookup_condition_refined_facts(
+      loom_symbolic_expr_t source_expression = {0};
+      IREE_RETURN_IF_ERROR(loom_symbolic_expr_from_value(
           loom_low_lower_context_symbolic_expr_context(context), source_value,
-          &out_operand->facts);
+          &source_expression));
+      out_operand->facts = source_expression.facts;
+      return iree_ok_status();
     }
     case LOOM_PRED_ARG_NONE:
     default:
