@@ -39,6 +39,7 @@ loom_cc_library(
         "lower_rule_source_memory_materialize.c",
         "lower_rules.c",
         "module_state.c",
+        "source_plan.c",
         "source_query.c",
     ],
     hdrs = [
@@ -49,6 +50,7 @@ loom_cc_library(
         "lower_rule_source_memory.h",
         "lower_rules.h",
         "module_state.h",
+        "source_plan.h",
         "source_query.h",
     ],
     visibility = _LOWER_VISIBILITY,
@@ -141,6 +143,25 @@ loom_cc_test(
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/scalar",
         "//loom/src/loom/ops/test",
+        "//loom/src/loom/target:low_descriptor_registry",
+        "//loom/src/loom/target/test:low_registry",
+        "//loom/src/loom/target/test:lower",
+        "//loom/src/loom/target/test:target_record_table",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "source_plan_test",
+    srcs = ["source_plan_test.cc"],
+    deps = [
+        ":lower",
+        "//loom/src/loom/codegen/low/testing:source_workload",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/scalar",
         "//loom/src/loom/target:low_descriptor_registry",
         "//loom/src/loom/target/test:low_registry",
         "//loom/src/loom/target/test:lower",

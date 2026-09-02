@@ -16,6 +16,7 @@
 #include "loom/codegen/low/builder.h"
 #include "loom/codegen/low/lower/lower.h"
 #include "loom/codegen/low/lower/lower_rules.h"
+#include "loom/codegen/low/lower/source_plan.h"
 #include "loom/codegen/low/memory_access.h"
 #include "loom/codegen/low/source_memory_plan.h"
 #include "loom/ir/local_value_domain.h"
@@ -26,19 +27,6 @@ extern "C" {
 #endif
 
 #define LOOM_LOW_LOWER_VALUE_ID_ELIDED ((loom_value_id_t)(UINT32_MAX - 1))
-
-enum loom_low_lower_value_storage_flag_bits_e {
-  // The source value must be materialized as a low SSA value.
-  LOOM_LOW_LOWER_VALUE_STORAGE_REQUIRED = (uint8_t)1u << 0,
-};
-typedef uint8_t loom_low_lower_value_storage_flags_t;
-
-enum loom_low_lower_selected_plan_flag_bits_e {
-  // The selected source op is intentionally skipped because none of its results
-  // require target-low storage.
-  LOOM_LOW_LOWER_SELECTED_PLAN_ELIDED = (uint8_t)1u << 0,
-};
-typedef uint8_t loom_low_lower_selected_plan_flags_t;
 
 typedef struct loom_low_lower_memory_expr_term_t {
   // Source SSA value multiplied into this symbolic byte expression.
@@ -61,39 +49,6 @@ typedef struct loom_low_lower_memory_expr_entry_t {
   // Comparable symbolic expression key interned for report-only accounting.
   loom_low_lower_memory_expr_key_t key;
 } loom_low_lower_memory_expr_entry_t;
-
-typedef enum loom_low_lower_selected_plan_kind_e {
-  // Selection came from a table-driven source-to-low rule.
-  LOOM_LOW_LOWER_SELECTED_PLAN_RULE = 0,
-  // Selection came from a shared descriptor-matrix contract row.
-  LOOM_LOW_LOWER_SELECTED_PLAN_DESCRIPTOR_MATRIX = 1,
-  // Selection came from a target-owned callback plan.
-  LOOM_LOW_LOWER_SELECTED_PLAN_CALLBACK = 2,
-} loom_low_lower_selected_plan_kind_t;
-
-typedef struct loom_low_lower_selected_plan_t {
-  // Source op this selected plan lowers.
-  const loom_op_t* source_op;
-  // Selected plan representation.
-  loom_low_lower_selected_plan_kind_t kind;
-  // Selection lifecycle flags.
-  loom_low_lower_selected_plan_flags_t flags;
-  // Policy rule-set ordinal for table-driven selections.
-  uint16_t rule_set_index;
-  // Rule-table ordinal for table-driven selections.
-  uint16_t rule_index;
-  // Rule set owning |rule|, or NULL for target-owned callbacks.
-  const loom_low_lower_rule_set_t* rule_set;
-  // Table rule selected during planning, or NULL for target-owned callbacks.
-  const loom_low_lower_rule_t* rule;
-  // Resolved emit rows for |rule|, or NULL for target-owned callbacks.
-  const loom_low_lower_resolved_emit_t* resolved_emits;
-  // Canonical source-memory plan retained from rule selection, or NULL when
-  // the selected rule does not consume source memory.
-  const loom_low_source_memory_access_plan_t* source_memory_access;
-  // Target-owned plan selected during planning, or empty for table rules.
-  loom_low_lower_plan_t plan;
-} loom_low_lower_selected_plan_t;
 
 typedef struct loom_low_lower_rule_descriptor_map_t {
   // Rule set whose local descriptor refs are resolved by descriptors.
@@ -151,8 +106,8 @@ typedef struct loom_low_lowering_frame_t {
   loom_condition_query_t condition_query;
   // Stable function analyses advanced monotonically on demand.
   loom_low_lower_function_analysis_t function_analysis;
-  // Per-source-value storage demand flags indexed by source value ordinal.
-  loom_low_lower_value_storage_flags_t* value_storage_flags;
+  // Retained source lowering decisions and value materialization demands.
+  loom_low_lower_source_plan_t source_plan;
   // Source local value ordinal to emitted low value ID map.
   loom_value_id_t* value_map;
   // Source block ordinal to emitted low block pointer map.
@@ -165,14 +120,6 @@ typedef struct loom_low_lowering_frame_t {
   loom_low_lower_abi_argument_t* argument_map;
   // Number of entries in argument_map.
   uint16_t argument_map_count;
-  // Selected lowering plans for non-structural source ops.
-  loom_low_lower_selected_plan_t* selected_plans;
-  // Number of selected plan slots used during planning.
-  iree_host_size_t selected_plan_count;
-  // Number of selected plan slots allocated for planning.
-  iree_host_size_t selected_plan_capacity;
-  // Next selected plan consumed by the emission walk.
-  iree_host_size_t selected_plan_emit_index;
   // Cached source-function CFG block execution counts for memory reports.
   uint64_t* source_block_execution_counts;
   // True when source_block_execution_counts has been initialized.
