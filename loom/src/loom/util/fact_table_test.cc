@@ -716,6 +716,31 @@ TEST_F(FactTableTest, EncodingSummaryStridedLayoutInternsStrideFacts) {
   EXPECT_EQ(result.address_layout.strides[1].range_lo, 1);
 }
 
+TEST_F(FactTableTest, CloneDefinedFactsCopiesSparseFacts) {
+  loom_value_fact_table_t source = {0};
+  IREE_ASSERT_OK(loom_value_fact_table_initialize(&source, &arena_, 0));
+  IREE_ASSERT_OK(loom_value_fact_table_define(&source, 100,
+                                              loom_value_facts_exact_i64(100)));
+  IREE_ASSERT_OK(
+      loom_value_fact_table_define(&source, 2, loom_value_facts_exact_i64(2)));
+  IREE_ASSERT_OK(loom_value_fact_table_define(&source, 100,
+                                              loom_value_facts_exact_i64(101)));
+
+  iree_arena_allocator_t target_arena;
+  iree_arena_initialize(&block_pool_, &target_arena);
+  loom_value_fact_table_t target = {0};
+  IREE_ASSERT_OK(loom_value_fact_table_initialize(&target, &target_arena, 0));
+  IREE_ASSERT_OK(
+      loom_value_fact_table_clone_defined_facts(&target, &source, nullptr));
+
+  EXPECT_EQ(loom_value_fact_table_lookup(&target, 100).range_lo, 101);
+  EXPECT_EQ(loom_value_fact_table_lookup(&target, 2).range_lo, 2);
+  EXPECT_TRUE(
+      loom_value_facts_is_unknown(loom_value_fact_table_lookup(&target, 50)));
+
+  iree_arena_deinitialize(&target_arena);
+}
+
 TEST_F(FactTableTest, CloneDefinedFactsReinternsExtensions) {
   loom_value_fact_table_t source = {0};
   IREE_ASSERT_OK(loom_value_fact_table_initialize(&source, &arena_, 8));
