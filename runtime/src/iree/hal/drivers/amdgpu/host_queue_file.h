@@ -7,7 +7,9 @@
 #ifndef IREE_HAL_DRIVERS_AMDGPU_HOST_QUEUE_FILE_H_
 #define IREE_HAL_DRIVERS_AMDGPU_HOST_QUEUE_FILE_H_
 
-#include "iree/hal/drivers/amdgpu/virtual_queue.h"
+#include "iree/hal/api.h"
+
+typedef struct iree_hal_amdgpu_host_queue_t iree_hal_amdgpu_host_queue_t;
 
 #ifdef __cplusplus
 extern "C" {
@@ -16,7 +18,7 @@ extern "C" {
 // Implements queue_read for memory-file, direct mappable, and staged fd-backed
 // file transfers.
 iree_status_t iree_hal_amdgpu_host_queue_read_file(
-    iree_hal_amdgpu_virtual_queue_t* queue,
+    iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_file_t* source_file, uint64_t source_offset,
@@ -26,7 +28,7 @@ iree_status_t iree_hal_amdgpu_host_queue_read_file(
 // Implements queue_write for memory-file, direct mappable, and staged fd-backed
 // file transfers.
 iree_status_t iree_hal_amdgpu_host_queue_write_file(
-    iree_hal_amdgpu_virtual_queue_t* queue,
+    iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,

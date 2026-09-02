@@ -34,8 +34,8 @@
 #include "iree/hal/drivers/amdgpu/util/pm4_emitter.h"
 #include "iree/hal/utils/resource_set.h"
 
-static const iree_hal_amdgpu_virtual_queue_vtable_t
-    iree_hal_amdgpu_host_queue_vtable;
+static void iree_hal_amdgpu_host_queue_destroy(iree_hal_queue_t* base_queue);
+static const iree_hal_queue_vtable_t iree_hal_amdgpu_host_queue_vtable;
 
 static iree_status_t iree_hal_amdgpu_host_queue_submit_tsan_state_initialize(
     iree_hal_amdgpu_host_queue_t* queue,
@@ -803,6 +803,7 @@ static void iree_hal_amdgpu_host_queue_error_callback(hsa_status_t status,
 }
 
 iree_status_t iree_hal_amdgpu_host_queue_initialize(
+    const iree_hal_queue_family_t* queue_family,
     const iree_hal_amdgpu_libhsa_t* libhsa, iree_hal_device_t* logical_device,
     void* hostcall_buffer, iree_async_proactor_t* proactor,
     hsa_agent_t gpu_agent,
@@ -828,6 +829,7 @@ iree_status_t iree_hal_amdgpu_host_queue_initialize(
     uint32_t notification_capacity, uint32_t kernarg_capacity_in_blocks,
     uint32_t upload_capacity, iree_allocator_t host_allocator,
     iree_hal_amdgpu_host_queue_t* out_queue) {
+  IREE_ASSERT_ARGUMENT(queue_family);
   IREE_ASSERT_ARGUMENT(libhsa);
   IREE_ASSERT_ARGUMENT(logical_device);
   IREE_ASSERT_ARGUMENT(proactor);
@@ -861,7 +863,8 @@ iree_status_t iree_hal_amdgpu_host_queue_initialize(
   IREE_TRACE_ZONE_BEGIN(z0);
 
   memset(out_queue, 0, sizeof(*out_queue));
-  out_queue->base.vtable = &iree_hal_amdgpu_host_queue_vtable;
+  iree_hal_queue_initialize(queue_family, &iree_hal_amdgpu_host_queue_vtable,
+                            &out_queue->base);
   out_queue->libhsa = libhsa;
   out_queue->logical_device = logical_device;
   out_queue->hostcall_buffer = hostcall_buffer;
@@ -1024,7 +1027,7 @@ void iree_hal_amdgpu_host_queue_deinitialize(
     iree_hal_amdgpu_host_queue_t* queue) {
   iree_hal_amdgpu_host_queue_begin_deinitialize(queue);
   iree_hal_amdgpu_host_queue_wait_idle_before_deinitialize(queue);
-  iree_hal_amdgpu_host_queue_finish_deinitialize(queue);
+  iree_hal_queue_release(&queue->base);
 }
 
 void iree_hal_amdgpu_host_queue_finish_deinitialize(
@@ -1175,8 +1178,9 @@ iree_status_t iree_hal_amdgpu_host_queue_set_hsa_profiling_enabled(
   return status;
 }
 
-static void iree_hal_amdgpu_host_queue_trim(
-    iree_hal_amdgpu_virtual_queue_t* base_queue) {}
+void iree_hal_amdgpu_host_queue_trim(iree_hal_amdgpu_host_queue_t* queue) {
+  (void)queue;
+}
 
 //===----------------------------------------------------------------------===//
 // Queue operations
@@ -1343,16 +1347,13 @@ static iree_status_t iree_hal_amdgpu_host_queue_signal_empty_barrier(
   return status;
 }
 
-static iree_status_t iree_hal_amdgpu_host_queue_execute(
-    iree_hal_amdgpu_virtual_queue_t* base_queue,
+iree_status_t iree_hal_amdgpu_host_queue_execute(
+    iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_command_buffer_t* command_buffer,
     iree_hal_buffer_binding_table_t binding_table,
     iree_hal_execute_flags_t flags) {
-  iree_hal_amdgpu_host_queue_t* queue =
-      (iree_hal_amdgpu_host_queue_t*)base_queue;
-
   IREE_RETURN_IF_ERROR(
       iree_hal_amdgpu_host_queue_validate_execute_flags(flags));
 
@@ -1436,13 +1437,10 @@ static iree_status_t iree_hal_amdgpu_host_queue_execute(
 }
 
 static iree_status_t iree_hal_amdgpu_host_queue_enqueue_atomic(
-    iree_hal_amdgpu_virtual_queue_t* base_queue,
+    iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     const iree_hal_amdgpu_host_queue_atomic_operation_t* operation) {
-  iree_hal_amdgpu_host_queue_t* queue =
-      (iree_hal_amdgpu_host_queue_t*)base_queue;
-
   iree_hal_amdgpu_host_queue_op_submission_t submission;
   iree_hal_amdgpu_host_queue_op_submission_begin(queue, wait_semaphore_list,
                                                  &submission);
@@ -1470,8 +1468,8 @@ static iree_status_t iree_hal_amdgpu_host_queue_enqueue_atomic(
   return iree_hal_amdgpu_host_queue_op_submission_end(&submission, status);
 }
 
-static iree_status_t iree_hal_amdgpu_host_queue_atomic_wait(
-    iree_hal_amdgpu_virtual_queue_t* base_queue,
+iree_status_t iree_hal_amdgpu_host_queue_atomic_wait(
+    iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
@@ -1483,11 +1481,11 @@ static iree_status_t iree_hal_amdgpu_host_queue_atomic_wait(
       .params.wait = params,
   };
   return iree_hal_amdgpu_host_queue_enqueue_atomic(
-      base_queue, wait_semaphore_list, signal_semaphore_list, &operation);
+      queue, wait_semaphore_list, signal_semaphore_list, &operation);
 }
 
-static iree_status_t iree_hal_amdgpu_host_queue_atomic_store(
-    iree_hal_amdgpu_virtual_queue_t* base_queue,
+iree_status_t iree_hal_amdgpu_host_queue_atomic_store(
+    iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
@@ -1499,11 +1497,11 @@ static iree_status_t iree_hal_amdgpu_host_queue_atomic_store(
       .params.store = params,
   };
   return iree_hal_amdgpu_host_queue_enqueue_atomic(
-      base_queue, wait_semaphore_list, signal_semaphore_list, &operation);
+      queue, wait_semaphore_list, signal_semaphore_list, &operation);
 }
 
-static iree_status_t iree_hal_amdgpu_host_queue_atomic_rmw(
-    iree_hal_amdgpu_virtual_queue_t* base_queue,
+iree_status_t iree_hal_amdgpu_host_queue_atomic_rmw(
+    iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
@@ -1515,11 +1513,11 @@ static iree_status_t iree_hal_amdgpu_host_queue_atomic_rmw(
       .params.rmw = params,
   };
   return iree_hal_amdgpu_host_queue_enqueue_atomic(
-      base_queue, wait_semaphore_list, signal_semaphore_list, &operation);
+      queue, wait_semaphore_list, signal_semaphore_list, &operation);
 }
 
-static iree_status_t iree_hal_amdgpu_host_queue_alloca(
-    iree_hal_amdgpu_virtual_queue_t* base_queue,
+iree_status_t iree_hal_amdgpu_host_queue_alloca(
+    iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_pool_t* pool, iree_hal_buffer_params_t params,
@@ -1527,9 +1525,6 @@ static iree_status_t iree_hal_amdgpu_host_queue_alloca(
     iree_hal_buffer_t** IREE_RESTRICT out_buffer) {
   IREE_ASSERT_ARGUMENT(out_buffer);
   *out_buffer = NULL;
-
-  iree_hal_amdgpu_host_queue_t* queue =
-      (iree_hal_amdgpu_host_queue_t*)base_queue;
 
   iree_hal_pool_t* allocation_pool = NULL;
   iree_hal_buffer_t* buffer = NULL;
@@ -1582,14 +1577,11 @@ static iree_status_t iree_hal_amdgpu_host_queue_alloca(
   return status;
 }
 
-static iree_status_t iree_hal_amdgpu_host_queue_dealloca(
-    iree_hal_amdgpu_virtual_queue_t* base_queue,
+iree_status_t iree_hal_amdgpu_host_queue_dealloca(
+    iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_buffer_t* buffer, iree_hal_dealloca_flags_t flags) {
-  iree_hal_amdgpu_host_queue_t* queue =
-      (iree_hal_amdgpu_host_queue_t*)base_queue;
-
   if (IREE_UNLIKELY(
           iree_any_bit_set(flags, ~(IREE_HAL_DEALLOCA_FLAG_NONE |
                                     IREE_HAL_DEALLOCA_FLAG_PREFER_ORIGIN)))) {
@@ -1599,7 +1591,7 @@ static iree_status_t iree_hal_amdgpu_host_queue_dealloca(
 
   if (!iree_hal_amdgpu_transient_buffer_isa(buffer)) {
     return iree_hal_amdgpu_host_queue_execute(
-        base_queue, wait_semaphore_list, signal_semaphore_list,
+        queue, wait_semaphore_list, signal_semaphore_list,
         /*command_buffer=*/NULL, iree_hal_buffer_binding_table_empty(),
         IREE_HAL_EXECUTE_FLAG_NONE);
   }
@@ -1640,16 +1632,13 @@ static iree_status_t iree_hal_amdgpu_host_queue_dealloca(
 // Queue fill entry point. Resolves waits under submission_mutex and captures a
 // pending operation when waits, an unstaged target or submission capacity
 // require deferral.
-static iree_status_t iree_hal_amdgpu_host_queue_fill(
-    iree_hal_amdgpu_virtual_queue_t* base_queue,
+iree_status_t iree_hal_amdgpu_host_queue_fill(
+    iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
     iree_device_size_t length, uint64_t pattern_bits,
     iree_host_size_t pattern_length, iree_hal_fill_flags_t flags) {
-  iree_hal_amdgpu_host_queue_t* queue =
-      (iree_hal_amdgpu_host_queue_t*)base_queue;
-
   iree_hal_amdgpu_host_queue_op_submission_t submission;
   iree_hal_amdgpu_host_queue_op_submission_begin(queue, wait_semaphore_list,
                                                  &submission);
@@ -1683,15 +1672,12 @@ static iree_status_t iree_hal_amdgpu_host_queue_fill(
 // Queue timestamp entry point. Resolves waits under submission_mutex and
 // captures a pending operation when waits, target staging, or submission
 // capacity require deferral.
-static iree_status_t iree_hal_amdgpu_host_queue_timestamp(
-    iree_hal_amdgpu_virtual_queue_t* base_queue,
+iree_status_t iree_hal_amdgpu_host_queue_timestamp(
+    iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
     iree_hal_timestamp_flags_t flags) {
-  iree_hal_amdgpu_host_queue_t* queue =
-      (iree_hal_amdgpu_host_queue_t*)base_queue;
-
   // Reject unsupported flags synchronously at enqueue, before the
   // immediate/deferred split, so the error is deterministic regardless of
   // wait-list state (mirrors the up-front flag validation in queue_execute).
@@ -1772,31 +1758,28 @@ iree_status_t iree_hal_amdgpu_host_queue_copy_buffer(
 
 // Queue copy entry point. The shared copy path is also used by file read/write
 // staging so all copy-shaped operations use the same wait/backpressure path.
-static iree_status_t iree_hal_amdgpu_host_queue_copy(
-    iree_hal_amdgpu_virtual_queue_t* base_queue,
+iree_status_t iree_hal_amdgpu_host_queue_copy(
+    iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
     iree_device_size_t length, iree_hal_copy_flags_t flags) {
   return iree_hal_amdgpu_host_queue_copy_buffer(
-      (iree_hal_amdgpu_host_queue_t*)base_queue, wait_semaphore_list,
-      signal_semaphore_list, source_buffer, source_offset, target_buffer,
-      target_offset, length, flags, IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_COPY);
+      queue, wait_semaphore_list, signal_semaphore_list, source_buffer,
+      source_offset, target_buffer, target_offset, length, flags,
+      IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_COPY);
 }
 
 // Queue update entry point. Immediate updates copy into queue-owned kernarg
 // memory; deferred updates copy into the pending-op arena.
-static iree_status_t iree_hal_amdgpu_host_queue_update(
-    iree_hal_amdgpu_virtual_queue_t* base_queue,
+iree_status_t iree_hal_amdgpu_host_queue_update(
+    iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     const void* source_buffer, iree_host_size_t source_offset,
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
     iree_device_size_t length, iree_hal_update_flags_t flags) {
-  iree_hal_amdgpu_host_queue_t* queue =
-      (iree_hal_amdgpu_host_queue_t*)base_queue;
-
   iree_hal_amdgpu_host_queue_op_submission_t submission;
   iree_hal_amdgpu_host_queue_op_submission_begin(queue, wait_semaphore_list,
                                                  &submission);
@@ -1836,8 +1819,8 @@ static bool iree_hal_amdgpu_host_queue_is_noop_dispatch(
 
 // Queue dispatch entry point. Empty direct dispatches route through the barrier
 // path so they still signal semaphores and profile as dispatch submissions.
-static iree_status_t iree_hal_amdgpu_host_queue_dispatch(
-    iree_hal_amdgpu_virtual_queue_t* base_queue,
+iree_status_t iree_hal_amdgpu_host_queue_dispatch(
+    iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_executable_t* executable,
@@ -1845,8 +1828,6 @@ static iree_status_t iree_hal_amdgpu_host_queue_dispatch(
     const iree_hal_dispatch_config_t config, iree_const_byte_span_t constants,
     const iree_hal_buffer_ref_list_t bindings,
     iree_hal_dispatch_flags_t flags) {
-  iree_hal_amdgpu_host_queue_t* queue =
-      (iree_hal_amdgpu_host_queue_t*)base_queue;
   const bool is_noop_dispatch =
       iree_hal_amdgpu_host_queue_is_noop_dispatch(config, flags);
 
@@ -1921,27 +1902,27 @@ static iree_status_t iree_hal_amdgpu_host_queue_dispatch(
   return iree_hal_amdgpu_host_queue_op_submission_end(&submission, status);
 }
 
-static iree_status_t iree_hal_amdgpu_host_queue_read(
-    iree_hal_amdgpu_virtual_queue_t* base_queue,
+iree_status_t iree_hal_amdgpu_host_queue_read(
+    iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_file_t* source_file, uint64_t source_offset,
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
     iree_device_size_t length, iree_hal_read_flags_t flags) {
   return iree_hal_amdgpu_host_queue_read_file(
-      base_queue, wait_semaphore_list, signal_semaphore_list, source_file,
+      queue, wait_semaphore_list, signal_semaphore_list, source_file,
       source_offset, target_buffer, target_offset, length, flags);
 }
 
-static iree_status_t iree_hal_amdgpu_host_queue_write(
-    iree_hal_amdgpu_virtual_queue_t* base_queue,
+iree_status_t iree_hal_amdgpu_host_queue_write(
+    iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
     iree_hal_file_t* target_file, uint64_t target_offset,
     iree_device_size_t length, iree_hal_write_flags_t flags) {
   return iree_hal_amdgpu_host_queue_write_file(
-      base_queue, wait_semaphore_list, signal_semaphore_list, source_buffer,
+      queue, wait_semaphore_list, signal_semaphore_list, source_buffer,
       source_offset, target_file, target_offset, length, flags);
 }
 
@@ -1997,17 +1978,14 @@ iree_status_t iree_hal_amdgpu_host_queue_enqueue_host_action(
   return iree_hal_amdgpu_host_queue_op_submission_end(&submission, status);
 }
 
-static iree_status_t iree_hal_amdgpu_host_queue_host_call(
-    iree_hal_amdgpu_virtual_queue_t* base_queue,
+iree_status_t iree_hal_amdgpu_host_queue_host_call(
+    iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_host_call_t call, const uint64_t args[4],
     iree_hal_host_call_flags_t flags) {
   IREE_RETURN_IF_ERROR(
       iree_hal_amdgpu_host_queue_validate_host_call(call, args, flags));
-
-  iree_hal_amdgpu_host_queue_t* queue =
-      (iree_hal_amdgpu_host_queue_t*)base_queue;
 
   iree_hal_amdgpu_host_queue_op_submission_t submission;
   iree_hal_amdgpu_host_queue_op_submission_begin(queue, wait_semaphore_list,
@@ -2031,31 +2009,21 @@ static iree_status_t iree_hal_amdgpu_host_queue_host_call(
   return iree_hal_amdgpu_host_queue_op_submission_end(&submission, status);
 }
 
-static iree_status_t iree_hal_amdgpu_host_queue_flush(
-    iree_hal_amdgpu_virtual_queue_t* base_queue) {
+iree_status_t iree_hal_amdgpu_host_queue_flush(
+    iree_hal_amdgpu_host_queue_t* queue) {
+  (void)queue;
   return iree_ok_status();
 }
 
 //===----------------------------------------------------------------------===//
-// Virtual queue vtable
+// HAL queue resource
 //===----------------------------------------------------------------------===//
 
-static const iree_hal_amdgpu_virtual_queue_vtable_t
-    iree_hal_amdgpu_host_queue_vtable = {
-        .trim = iree_hal_amdgpu_host_queue_trim,
-        .alloca = iree_hal_amdgpu_host_queue_alloca,
-        .dealloca = iree_hal_amdgpu_host_queue_dealloca,
-        .fill = iree_hal_amdgpu_host_queue_fill,
-        .update = iree_hal_amdgpu_host_queue_update,
-        .copy = iree_hal_amdgpu_host_queue_copy,
-        .read = iree_hal_amdgpu_host_queue_read,
-        .write = iree_hal_amdgpu_host_queue_write,
-        .host_call = iree_hal_amdgpu_host_queue_host_call,
-        .dispatch = iree_hal_amdgpu_host_queue_dispatch,
-        .execute = iree_hal_amdgpu_host_queue_execute,
-        .atomic_wait = iree_hal_amdgpu_host_queue_atomic_wait,
-        .atomic_store = iree_hal_amdgpu_host_queue_atomic_store,
-        .atomic_rmw = iree_hal_amdgpu_host_queue_atomic_rmw,
-        .timestamp = iree_hal_amdgpu_host_queue_timestamp,
-        .flush = iree_hal_amdgpu_host_queue_flush,
+static void iree_hal_amdgpu_host_queue_destroy(iree_hal_queue_t* base_queue) {
+  iree_hal_amdgpu_host_queue_finish_deinitialize(
+      (iree_hal_amdgpu_host_queue_t*)base_queue);
+}
+
+static const iree_hal_queue_vtable_t iree_hal_amdgpu_host_queue_vtable = {
+    .destroy = iree_hal_amdgpu_host_queue_destroy,
 };

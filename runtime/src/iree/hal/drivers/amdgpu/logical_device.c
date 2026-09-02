@@ -86,8 +86,7 @@ static iree_status_t iree_hal_amdgpu_logical_device_resolve_hostcall_provider(
 // Returns the queue for a flattened logical queue ordinal.
 static iree_status_t iree_hal_amdgpu_logical_device_queue_from_ordinal(
     iree_hal_amdgpu_logical_device_t* logical_device,
-    iree_host_size_t queue_ordinal,
-    iree_hal_amdgpu_virtual_queue_t** out_queue) {
+    iree_host_size_t queue_ordinal, iree_hal_amdgpu_host_queue_t** out_queue) {
   IREE_ASSERT_ARGUMENT(logical_device);
   IREE_ASSERT_ARGUMENT(out_queue);
   *out_queue = NULL;
@@ -109,8 +108,7 @@ static iree_status_t iree_hal_amdgpu_logical_device_queue_from_ordinal(
                             resolved.physical_device_ordinal);
   }
 
-  *out_queue =
-      &physical_device->host_queues[resolved.physical_queue_ordinal].base;
+  *out_queue = &physical_device->host_queues[resolved.physical_queue_ordinal];
   return iree_ok_status();
 }
 
@@ -1514,7 +1512,7 @@ static iree_status_t iree_hal_amdgpu_logical_device_set_trace_profiling_enabled(
 static iree_status_t iree_hal_amdgpu_logical_device_select_host_queue(
     iree_hal_amdgpu_logical_device_t* logical_device,
     iree_hal_queue_affinity_t queue_affinity,
-    iree_hal_amdgpu_virtual_queue_t** out_queue) {
+    iree_hal_amdgpu_host_queue_t** out_queue) {
   IREE_ASSERT_ARGUMENT(logical_device);
   IREE_ASSERT_ARGUMENT(out_queue);
   *out_queue = NULL;
@@ -2990,12 +2988,12 @@ static iree_status_t iree_hal_amdgpu_logical_device_queue_alloca(
       iree_hal_amdgpu_logical_device_cast(base_device);
   IREE_RETURN_IF_ERROR(
       iree_hal_amdgpu_logical_device_check_failure(logical_device));
-  iree_hal_amdgpu_virtual_queue_t* queue = NULL;
+  iree_hal_amdgpu_host_queue_t* queue = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_logical_device_select_host_queue(
       logical_device, queue_affinity, &queue));
-  return queue->vtable->alloca(queue, wait_semaphore_list,
-                               signal_semaphore_list, pool, params,
-                               allocation_size, flags, out_buffer);
+  return iree_hal_amdgpu_host_queue_alloca(queue, wait_semaphore_list,
+                                           signal_semaphore_list, pool, params,
+                                           allocation_size, flags, out_buffer);
 }
 
 static iree_status_t iree_hal_amdgpu_logical_device_queue_dealloca(
@@ -3007,11 +3005,11 @@ static iree_status_t iree_hal_amdgpu_logical_device_queue_dealloca(
       iree_hal_amdgpu_logical_device_cast(base_device);
   IREE_RETURN_IF_ERROR(
       iree_hal_amdgpu_logical_device_check_failure(logical_device));
-  iree_hal_amdgpu_virtual_queue_t* queue = NULL;
+  iree_hal_amdgpu_host_queue_t* queue = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_logical_device_select_host_queue(
       logical_device, queue_affinity, &queue));
-  return queue->vtable->dealloca(queue, wait_semaphore_list,
-                                 signal_semaphore_list, buffer, flags);
+  return iree_hal_amdgpu_host_queue_dealloca(
+      queue, wait_semaphore_list, signal_semaphore_list, buffer, flags);
 }
 
 static iree_status_t iree_hal_amdgpu_logical_device_queue_fill(
@@ -3045,12 +3043,12 @@ static iree_status_t iree_hal_amdgpu_logical_device_queue_fill(
       iree_hal_amdgpu_logical_device_cast(base_device);
   IREE_RETURN_IF_ERROR(
       iree_hal_amdgpu_logical_device_check_failure(logical_device));
-  iree_hal_amdgpu_virtual_queue_t* queue = NULL;
+  iree_hal_amdgpu_host_queue_t* queue = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_logical_device_select_host_queue(
       logical_device, queue_affinity, &queue));
-  return queue->vtable->fill(queue, wait_semaphore_list, signal_semaphore_list,
-                             target_buffer, target_offset, length, pattern_bits,
-                             pattern_length, flags);
+  return iree_hal_amdgpu_host_queue_fill(
+      queue, wait_semaphore_list, signal_semaphore_list, target_buffer,
+      target_offset, length, pattern_bits, pattern_length, flags);
 }
 
 static iree_status_t iree_hal_amdgpu_logical_device_queue_update(
@@ -3064,10 +3062,10 @@ static iree_status_t iree_hal_amdgpu_logical_device_queue_update(
       iree_hal_amdgpu_logical_device_cast(base_device);
   IREE_RETURN_IF_ERROR(
       iree_hal_amdgpu_logical_device_check_failure(logical_device));
-  iree_hal_amdgpu_virtual_queue_t* queue = NULL;
+  iree_hal_amdgpu_host_queue_t* queue = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_logical_device_select_host_queue(
       logical_device, queue_affinity, &queue));
-  return queue->vtable->update(
+  return iree_hal_amdgpu_host_queue_update(
       queue, wait_semaphore_list, signal_semaphore_list, source_buffer,
       source_offset, target_buffer, target_offset, length, flags);
 }
@@ -3083,12 +3081,12 @@ static iree_status_t iree_hal_amdgpu_logical_device_queue_copy(
       iree_hal_amdgpu_logical_device_cast(base_device);
   IREE_RETURN_IF_ERROR(
       iree_hal_amdgpu_logical_device_check_failure(logical_device));
-  iree_hal_amdgpu_virtual_queue_t* queue = NULL;
+  iree_hal_amdgpu_host_queue_t* queue = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_logical_device_select_host_queue(
       logical_device, queue_affinity, &queue));
-  return queue->vtable->copy(queue, wait_semaphore_list, signal_semaphore_list,
-                             source_buffer, source_offset, target_buffer,
-                             target_offset, length, flags);
+  return iree_hal_amdgpu_host_queue_copy(
+      queue, wait_semaphore_list, signal_semaphore_list, source_buffer,
+      source_offset, target_buffer, target_offset, length, flags);
 }
 
 static iree_status_t iree_hal_amdgpu_logical_device_queue_read(
@@ -3102,12 +3100,12 @@ static iree_status_t iree_hal_amdgpu_logical_device_queue_read(
       iree_hal_amdgpu_logical_device_cast(base_device);
   IREE_RETURN_IF_ERROR(
       iree_hal_amdgpu_logical_device_check_failure(logical_device));
-  iree_hal_amdgpu_virtual_queue_t* queue = NULL;
+  iree_hal_amdgpu_host_queue_t* queue = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_logical_device_select_host_queue(
       logical_device, queue_affinity, &queue));
-  return queue->vtable->read(queue, wait_semaphore_list, signal_semaphore_list,
-                             source_file, source_offset, target_buffer,
-                             target_offset, length, flags);
+  return iree_hal_amdgpu_host_queue_read(
+      queue, wait_semaphore_list, signal_semaphore_list, source_file,
+      source_offset, target_buffer, target_offset, length, flags);
 }
 
 static iree_status_t iree_hal_amdgpu_logical_device_queue_write(
@@ -3121,12 +3119,12 @@ static iree_status_t iree_hal_amdgpu_logical_device_queue_write(
       iree_hal_amdgpu_logical_device_cast(base_device);
   IREE_RETURN_IF_ERROR(
       iree_hal_amdgpu_logical_device_check_failure(logical_device));
-  iree_hal_amdgpu_virtual_queue_t* queue = NULL;
+  iree_hal_amdgpu_host_queue_t* queue = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_logical_device_select_host_queue(
       logical_device, queue_affinity, &queue));
-  return queue->vtable->write(queue, wait_semaphore_list, signal_semaphore_list,
-                              source_buffer, source_offset, target_file,
-                              target_offset, length, flags);
+  return iree_hal_amdgpu_host_queue_write(
+      queue, wait_semaphore_list, signal_semaphore_list, source_buffer,
+      source_offset, target_file, target_offset, length, flags);
 }
 
 static iree_status_t iree_hal_amdgpu_logical_device_queue_host_call(
@@ -3139,11 +3137,11 @@ static iree_status_t iree_hal_amdgpu_logical_device_queue_host_call(
       iree_hal_amdgpu_logical_device_cast(base_device);
   IREE_RETURN_IF_ERROR(
       iree_hal_amdgpu_logical_device_check_failure(logical_device));
-  iree_hal_amdgpu_virtual_queue_t* queue = NULL;
+  iree_hal_amdgpu_host_queue_t* queue = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_logical_device_select_host_queue(
       logical_device, queue_affinity, &queue));
-  return queue->vtable->host_call(queue, wait_semaphore_list,
-                                  signal_semaphore_list, call, args, flags);
+  return iree_hal_amdgpu_host_queue_host_call(
+      queue, wait_semaphore_list, signal_semaphore_list, call, args, flags);
 }
 
 static iree_status_t iree_hal_amdgpu_logical_device_queue_dispatch(
@@ -3159,10 +3157,10 @@ static iree_status_t iree_hal_amdgpu_logical_device_queue_dispatch(
       iree_hal_amdgpu_logical_device_cast(base_device);
   IREE_RETURN_IF_ERROR(
       iree_hal_amdgpu_logical_device_check_failure(logical_device));
-  iree_hal_amdgpu_virtual_queue_t* queue = NULL;
+  iree_hal_amdgpu_host_queue_t* queue = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_logical_device_select_host_queue(
       logical_device, queue_affinity, &queue));
-  return queue->vtable->dispatch(
+  return iree_hal_amdgpu_host_queue_dispatch(
       queue, wait_semaphore_list, signal_semaphore_list, executable,
       export_ordinal, config, constants, bindings, flags);
 }
@@ -3178,12 +3176,12 @@ static iree_status_t iree_hal_amdgpu_logical_device_queue_execute(
       iree_hal_amdgpu_logical_device_cast(base_device);
   IREE_RETURN_IF_ERROR(
       iree_hal_amdgpu_logical_device_check_failure(logical_device));
-  iree_hal_amdgpu_virtual_queue_t* queue = NULL;
+  iree_hal_amdgpu_host_queue_t* queue = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_logical_device_select_host_queue(
       logical_device, queue_affinity, &queue));
-  return queue->vtable->execute(queue, wait_semaphore_list,
-                                signal_semaphore_list, command_buffer,
-                                binding_table, flags);
+  return iree_hal_amdgpu_host_queue_execute(
+      queue, wait_semaphore_list, signal_semaphore_list, command_buffer,
+      binding_table, flags);
 }
 
 static iree_status_t iree_hal_amdgpu_logical_device_queue_atomic_wait(
@@ -3196,12 +3194,12 @@ static iree_status_t iree_hal_amdgpu_logical_device_queue_atomic_wait(
       iree_hal_amdgpu_logical_device_cast(base_device);
   IREE_RETURN_IF_ERROR(
       iree_hal_amdgpu_logical_device_check_failure(logical_device));
-  iree_hal_amdgpu_virtual_queue_t* queue = NULL;
+  iree_hal_amdgpu_host_queue_t* queue = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_logical_device_select_host_queue(
       logical_device, queue_affinity, &queue));
-  return queue->vtable->atomic_wait(queue, wait_semaphore_list,
-                                    signal_semaphore_list, target_buffer,
-                                    target_offset, params);
+  return iree_hal_amdgpu_host_queue_atomic_wait(
+      queue, wait_semaphore_list, signal_semaphore_list, target_buffer,
+      target_offset, params);
 }
 
 static iree_status_t iree_hal_amdgpu_logical_device_queue_atomic_store(
@@ -3214,12 +3212,12 @@ static iree_status_t iree_hal_amdgpu_logical_device_queue_atomic_store(
       iree_hal_amdgpu_logical_device_cast(base_device);
   IREE_RETURN_IF_ERROR(
       iree_hal_amdgpu_logical_device_check_failure(logical_device));
-  iree_hal_amdgpu_virtual_queue_t* queue = NULL;
+  iree_hal_amdgpu_host_queue_t* queue = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_logical_device_select_host_queue(
       logical_device, queue_affinity, &queue));
-  return queue->vtable->atomic_store(queue, wait_semaphore_list,
-                                     signal_semaphore_list, target_buffer,
-                                     target_offset, params);
+  return iree_hal_amdgpu_host_queue_atomic_store(
+      queue, wait_semaphore_list, signal_semaphore_list, target_buffer,
+      target_offset, params);
 }
 
 static iree_status_t iree_hal_amdgpu_logical_device_queue_atomic_rmw(
@@ -3232,12 +3230,12 @@ static iree_status_t iree_hal_amdgpu_logical_device_queue_atomic_rmw(
       iree_hal_amdgpu_logical_device_cast(base_device);
   IREE_RETURN_IF_ERROR(
       iree_hal_amdgpu_logical_device_check_failure(logical_device));
-  iree_hal_amdgpu_virtual_queue_t* queue = NULL;
+  iree_hal_amdgpu_host_queue_t* queue = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_logical_device_select_host_queue(
       logical_device, queue_affinity, &queue));
-  return queue->vtable->atomic_rmw(queue, wait_semaphore_list,
-                                   signal_semaphore_list, target_buffer,
-                                   target_offset, params);
+  return iree_hal_amdgpu_host_queue_atomic_rmw(
+      queue, wait_semaphore_list, signal_semaphore_list, target_buffer,
+      target_offset, params);
 }
 
 static iree_status_t iree_hal_amdgpu_logical_device_queue_timestamp(
@@ -3250,12 +3248,12 @@ static iree_status_t iree_hal_amdgpu_logical_device_queue_timestamp(
       iree_hal_amdgpu_logical_device_cast(base_device);
   IREE_RETURN_IF_ERROR(
       iree_hal_amdgpu_logical_device_check_failure(logical_device));
-  iree_hal_amdgpu_virtual_queue_t* queue = NULL;
+  iree_hal_amdgpu_host_queue_t* queue = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_logical_device_select_host_queue(
       logical_device, queue_affinity, &queue));
-  return queue->vtable->timestamp(queue, wait_semaphore_list,
-                                  signal_semaphore_list, target_buffer,
-                                  target_offset, flags);
+  return iree_hal_amdgpu_host_queue_timestamp(
+      queue, wait_semaphore_list, signal_semaphore_list, target_buffer,
+      target_offset, flags);
 }
 
 static iree_status_t iree_hal_amdgpu_logical_device_queue_flush(
@@ -3268,10 +3266,10 @@ static iree_status_t iree_hal_amdgpu_logical_device_queue_flush(
       logical_device->queue_affinity_mask, queue_affinity, &queue_affinity));
 
   IREE_HAL_FOR_QUEUE_AFFINITY(queue_affinity) {
-    iree_hal_amdgpu_virtual_queue_t* queue = NULL;
+    iree_hal_amdgpu_host_queue_t* queue = NULL;
     IREE_RETURN_IF_ERROR(iree_hal_amdgpu_logical_device_queue_from_ordinal(
         logical_device, queue_ordinal, &queue));
-    IREE_RETURN_IF_ERROR(queue->vtable->flush(queue));
+    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_host_queue_flush(queue));
   }
   return iree_ok_status();
 }

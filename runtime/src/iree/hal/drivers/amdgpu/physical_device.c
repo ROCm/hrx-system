@@ -354,6 +354,9 @@ static iree_status_t iree_hal_amdgpu_physical_device_initialize_identity(
   memset(out_physical_device, 0, sizeof(*out_physical_device));
   out_physical_device->device_agent = device_agent;
   out_physical_device->device_ordinal = device_ordinal;
+  iree_hal_queue_family_initialize(
+      (iree_hal_queue_family_ordinal_t)device_ordinal,
+      &out_physical_device->queue_family);
   out_physical_device->host_memory_pools = *host_memory_pools;
   out_physical_device->host_queue_capacity = options->host_queue_count;
   out_physical_device->host_queue_aql_capacity =
@@ -1281,7 +1284,7 @@ iree_status_t iree_hal_amdgpu_physical_device_assign_frontier(
     iree_thread_affinity_set_group_any(physical_device->host_numa_node,
                                        &completion_thread_affinity);
     status = iree_hal_amdgpu_host_queue_initialize(
-        libhsa, logical_device,
+        &physical_device->queue_family, libhsa, logical_device,
         iree_hal_amdgpu_physical_device_hostcall_buffer(physical_device),
         proactor, physical_device->device_agent,
         &kernarg_ring_memory.descriptor, host_memory_pools->fine_pool,
@@ -1324,6 +1327,14 @@ void iree_hal_amdgpu_physical_device_deassign_frontier(
     iree_hal_amdgpu_physical_device_t* physical_device) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
+  // The physical device owns the initial queue references and must outlive all
+  // references retained by HAL users. Prove that lifetime invariant across all
+  // queues before beginning the irreversible shutdown sequence.
+  for (iree_host_size_t i = 0; i < physical_device->host_queue_count; ++i) {
+    iree_atomic_ref_count_abort_if_uses(
+        &physical_device->host_queues[i].base.resource.ref_count);
+  }
+
   // Close admission across every queue before blocking on any of them so
   // teardown latency is not serialized across the device's queues.
   for (iree_host_size_t i = 0; i < physical_device->host_queue_count; ++i) {
@@ -1355,8 +1366,7 @@ void iree_hal_amdgpu_physical_device_deassign_frontier(
   physical_device->system_event_target = NULL;
 
   for (iree_host_size_t i = 0; i < physical_device->host_queue_count; ++i) {
-    iree_hal_amdgpu_host_queue_finish_deinitialize(
-        &physical_device->host_queues[i]);
+    iree_hal_queue_release(&physical_device->host_queues[i].base);
   }
   physical_device->host_queue_count = 0;
   if (physical_device->default_pool_set.entries) {
@@ -1477,8 +1487,7 @@ iree_status_t iree_hal_amdgpu_physical_device_trim(
   IREE_TRACE_ZONE_BEGIN(z0);
 
   for (iree_host_size_t i = 0; i < physical_device->host_queue_count; ++i) {
-    physical_device->host_queues[i].base.vtable->trim(
-        &physical_device->host_queues[i].base);
+    iree_hal_amdgpu_host_queue_trim(&physical_device->host_queues[i]);
   }
 
   iree_hal_amdgpu_block_pool_trim(&physical_device->coarse_block_pools.small);

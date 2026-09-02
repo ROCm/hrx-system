@@ -27,7 +27,6 @@
 #include "iree/hal/drivers/amdgpu/util/notification_ring.h"
 #include "iree/hal/drivers/amdgpu/util/pm4_capabilities.h"
 #include "iree/hal/drivers/amdgpu/util/queue_upload_ring.h"
-#include "iree/hal/drivers/amdgpu/virtual_queue.h"
 #include "iree/hal/pool.h"
 #include "iree/hal/profile_schema.h"
 #include "iree/hal/profile_sink.h"
@@ -150,7 +149,7 @@ IREE_ASYNC_FIXED_FRONTIER_TYPE(iree_hal_amdgpu_host_queue_frontier_t,
   (2u + IREE_HAL_AMDGPU_HOST_QUEUE_DISPATCH_SCRATCH_BINDING_CAPACITY)
 
 // Host-driven queue with per-queue epoch signal and wait-backed
-// notification ring. Embeds iree_hal_amdgpu_virtual_queue_t at offset 0.
+// notification ring. Embeds iree_hal_queue_t at offset zero.
 //
 // The epoch signal (owned by the notification ring) is a single hsa_signal_t
 // set as completion_signal on each submission's last AQL packet. The CP
@@ -158,11 +157,11 @@ IREE_ASYNC_FIXED_FRONTIER_TYPE(iree_hal_amdgpu_host_queue_frontier_t,
 // semaphore signals that serialized completion drain publishes when the epoch
 // advances.
 //
-// All queue operations enter through the virtual_queue vtable. There are no
-// public methods beyond initialize/deinitialize.
+// Every operation targets this exact queue and shares its submission, progress,
+// failure, notification, and reclaim state.
 typedef struct iree_hal_amdgpu_host_queue_t {
-  // Virtual queue vtable at offset 0.
-  iree_hal_amdgpu_virtual_queue_t base;
+  // Base HAL queue resource. Must be at offset zero.
+  iree_hal_queue_t base;
 
   // HSA API handle for queue operations. Not retained.
   const iree_hal_amdgpu_libhsa_t* libhsa;
@@ -708,6 +707,7 @@ void iree_hal_amdgpu_host_queue_enqueue_post_drain_action(
 // event records must be host-readable because the profiling sink serializes
 // them on the CPU.
 iree_status_t iree_hal_amdgpu_host_queue_initialize(
+    const iree_hal_queue_family_t* queue_family,
     const iree_hal_amdgpu_libhsa_t* libhsa, iree_hal_device_t* logical_device,
     void* hostcall_buffer, iree_async_proactor_t* proactor,
     hsa_agent_t gpu_agent,
@@ -733,6 +733,133 @@ iree_status_t iree_hal_amdgpu_host_queue_initialize(
     uint32_t notification_capacity, uint32_t kernarg_capacity_in_blocks,
     uint32_t upload_capacity, iree_allocator_t host_allocator,
     iree_hal_amdgpu_host_queue_t* out_queue);
+
+// Trims transient resources retained by |queue|.
+void iree_hal_amdgpu_host_queue_trim(iree_hal_amdgpu_host_queue_t* queue);
+
+// Enqueues an asynchronous pool allocation on |queue|.
+iree_status_t iree_hal_amdgpu_host_queue_alloca(
+    iree_hal_amdgpu_host_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_pool_t* pool, iree_hal_buffer_params_t params,
+    iree_device_size_t allocation_size, iree_hal_alloca_flags_t flags,
+    iree_hal_buffer_t** IREE_RESTRICT out_buffer);
+
+// Enqueues an asynchronous pool deallocation on |queue|.
+iree_status_t iree_hal_amdgpu_host_queue_dealloca(
+    iree_hal_amdgpu_host_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* buffer, iree_hal_dealloca_flags_t flags);
+
+// Enqueues a buffer fill on |queue|.
+iree_status_t iree_hal_amdgpu_host_queue_fill(
+    iree_hal_amdgpu_host_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_device_size_t length, uint64_t pattern_bits,
+    iree_host_size_t pattern_length, iree_hal_fill_flags_t flags);
+
+// Enqueues a host-to-buffer update on |queue|.
+iree_status_t iree_hal_amdgpu_host_queue_update(
+    iree_hal_amdgpu_host_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    const void* source_buffer, iree_host_size_t source_offset,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_device_size_t length, iree_hal_update_flags_t flags);
+
+// Enqueues a buffer copy on |queue|.
+iree_status_t iree_hal_amdgpu_host_queue_copy(
+    iree_hal_amdgpu_host_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_device_size_t length, iree_hal_copy_flags_t flags);
+
+// Enqueues a file-to-buffer read on |queue|.
+iree_status_t iree_hal_amdgpu_host_queue_read(
+    iree_hal_amdgpu_host_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_file_t* source_file, uint64_t source_offset,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_device_size_t length, iree_hal_read_flags_t flags);
+
+// Enqueues a buffer-to-file write on |queue|.
+iree_status_t iree_hal_amdgpu_host_queue_write(
+    iree_hal_amdgpu_host_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
+    iree_hal_file_t* target_file, uint64_t target_offset,
+    iree_device_size_t length, iree_hal_write_flags_t flags);
+
+// Enqueues a host callback on |queue|.
+iree_status_t iree_hal_amdgpu_host_queue_host_call(
+    iree_hal_amdgpu_host_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_host_call_t call, const uint64_t args[4],
+    iree_hal_host_call_flags_t flags);
+
+// Enqueues a direct executable dispatch on |queue|.
+iree_status_t iree_hal_amdgpu_host_queue_dispatch(
+    iree_hal_amdgpu_host_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_executable_t* executable,
+    iree_hal_executable_function_t export_ordinal,
+    const iree_hal_dispatch_config_t config, iree_const_byte_span_t constants,
+    const iree_hal_buffer_ref_list_t bindings, iree_hal_dispatch_flags_t flags);
+
+// Enqueues a command buffer execution on |queue|.
+iree_status_t iree_hal_amdgpu_host_queue_execute(
+    iree_hal_amdgpu_host_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_command_buffer_t* command_buffer,
+    iree_hal_buffer_binding_table_t binding_table,
+    iree_hal_execute_flags_t flags);
+
+// Enqueues an atomic wait on |queue|.
+iree_status_t iree_hal_amdgpu_host_queue_atomic_wait(
+    iree_hal_amdgpu_host_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_wait_params_t params);
+
+// Enqueues an atomic store on |queue|.
+iree_status_t iree_hal_amdgpu_host_queue_atomic_store(
+    iree_hal_amdgpu_host_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_store_params_t params);
+
+// Enqueues an atomic read-modify-write operation on |queue|.
+iree_status_t iree_hal_amdgpu_host_queue_atomic_rmw(
+    iree_hal_amdgpu_host_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_atomic_rmw_params_t params);
+
+// Enqueues a device timestamp write on |queue|.
+iree_status_t iree_hal_amdgpu_host_queue_timestamp(
+    iree_hal_amdgpu_host_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_timestamp_flags_t flags);
+
+// Flushes host-side work pending on |queue|.
+iree_status_t iree_hal_amdgpu_host_queue_flush(
+    iree_hal_amdgpu_host_queue_t* queue);
 
 // Initializes queue-owned TSAN state.
 //

@@ -105,7 +105,7 @@ typedef struct iree_hal_amdgpu_system_event_agent_target_t
 
 // Default per-queue hardware AQL ring capacity in packets.
 #define IREE_HAL_AMDGPU_PHYSICAL_DEVICE_DEFAULT_HOST_QUEUE_AQL_CAPACITY \
-  IREE_HAL_AMDGPU_DEFAULT_EXECUTION_QUEUE_CAPACITY
+  (64 * 1024)
 
 // Default per-queue completion/reclaim ring capacity in epochs and hot entries.
 #define IREE_HAL_AMDGPU_PHYSICAL_DEVICE_DEFAULT_HOST_QUEUE_NOTIFICATION_CAPACITY \
@@ -113,8 +113,7 @@ typedef struct iree_hal_amdgpu_system_event_agent_target_t
 
 // Default per-queue kernarg ring capacity in 64-byte blocks.
 #define IREE_HAL_AMDGPU_PHYSICAL_DEVICE_DEFAULT_HOST_QUEUE_KERNARG_CAPACITY \
-  ((uint32_t)(IREE_HAL_AMDGPU_DEFAULT_KERNARG_RINGBUFFER_CAPACITY /         \
-              sizeof(iree_hal_amdgpu_kernarg_block_t)))
+  ((uint32_t)((16 * 1024 * 1024) / sizeof(iree_hal_amdgpu_kernarg_block_t)))
 #define IREE_HAL_AMDGPU_PHYSICAL_DEVICE_DEFAULT_HOST_QUEUE_UPLOAD_CAPACITY 0
 
 // Options controlling how a physical device is initialized.
@@ -197,6 +196,8 @@ typedef struct iree_hal_amdgpu_physical_device_t {
   hsa_agent_t device_agent;
   // Ordinal of the GPU agent within the topology.
   iree_host_size_t device_ordinal;
+  // Pointer-unique queue family identity for queues targeting this GPU agent.
+  iree_hal_queue_family_t queue_family;
   // HSA driver identifier used when querying per-device clock counters.
   uint32_t driver_uid;
   // PCI domain from HSA_AMD_AGENT_INFO_DOMAIN.
