@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "loom/analysis/contract.h"
+#include "loom/codegen/low/lower/source_query.h"
 #include "loom/codegen/low/lower/source_selection.h"
 #include "loom/codegen/low/pipeline/pass_environment.h"
 #include "loom/error/error_catalog.h"
@@ -1201,21 +1202,21 @@ loom_low_target_legalize_apply_final_rejection_to_contract_query(
   return iree_ok_status();
 }
 
-static void loom_low_target_legalize_destroy_query_scope(
+static void loom_low_target_legalize_deinitialize_query_scope(
     loom_low_target_legalize_function_state_t* state) {
   if (state->query_scope == NULL) {
     return;
   }
   state->legalization_context.value_domain = NULL;
   state->legalization_context.view_regions = NULL;
-  loom_low_lower_source_query_scope_destroy(state->query_scope);
+  loom_low_lower_source_query_scope_deinitialize(state->query_scope);
   state->query_scope = NULL;
 }
 
 static iree_status_t loom_low_target_legalize_refresh_query_scope(
     loom_low_target_legalize_function_state_t* state,
     const loom_value_fact_table_t* fact_table) {
-  loom_low_target_legalize_destroy_query_scope(state);
+  loom_low_target_legalize_deinitialize_query_scope(state);
   state->lower_options.fact_table = (loom_value_fact_table_t*)fact_table;
   IREE_RETURN_IF_ERROR(loom_low_lower_source_query_scope_create(
       state->module, state->selection->func, &state->lower_options,
@@ -1449,7 +1450,7 @@ static iree_status_t loom_low_target_legalize_rewrite_op(
 static void loom_low_target_legalize_changed(
     void* user_data, loom_greedy_rewrite_driver_t* driver) {
   (void)driver;
-  loom_low_target_legalize_destroy_query_scope(
+  loom_low_target_legalize_deinitialize_query_scope(
       (loom_low_target_legalize_function_state_t*)user_data);
 }
 
@@ -1640,7 +1641,7 @@ static iree_status_t loom_low_target_legalize_function(
           module, &state, pass_state, final_facts, &final_error_count);
     }
   }
-  loom_low_target_legalize_destroy_query_scope(&state);
+  loom_low_target_legalize_deinitialize_query_scope(&state);
   loom_greedy_rewrite_driver_deinitialize(&rewrite_driver);
   iree_arena_deinitialize(&rewrite_arena);
   loom_pass_value_fact_owner_deinitialize(&rewrite_value_facts);

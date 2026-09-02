@@ -20,6 +20,7 @@ loom_cc_library(
     "lower_rule_source_memory.h"
     "lower_rules.h"
     "module_state.h"
+    "source_query.h"
   SRCS
     "contract_query.c"
     "lower.c"
@@ -31,6 +32,7 @@ loom_cc_library(
     "lower_rule_source_memory_materialize.c"
     "lower_rules.c"
     "module_state.c"
+    "source_query.c"
   DEPS
     iree::base
     iree::base::internal
@@ -110,6 +112,25 @@ loom_cc_test(
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
+)
+
+loom_cc_test(
+  NAME
+    source_query_test
+  SRCS
+    "source_query_test.cc"
+  DEPS
+    ::lower
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::ir
+    loom::ops::scalar
+    loom::ops::test
+    loom::target::low_descriptor_registry
+    loom::target::test::low_registry
+    loom::target::test::lower
+    loom::target::test::target_record_table
+    loom::util::fact_table
 )
 
 loom_cc_test(
