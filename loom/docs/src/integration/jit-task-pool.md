@@ -1,4 +1,4 @@
-# Schedule concurrent JIT work
+# Use the JIT task pool
 
 **Example source:** [`loom/binding/c/example/jit_task_pool.c`](https://github.com/ROCm/hrx-system/blob/main/loom/binding/c/example/jit_task_pool.c)
 
@@ -122,14 +122,14 @@ for the service lifetime, then uses request completion objects, callbacks,
 futures, or event-loop messages. Neither a queue nor the pool exposes a global
 idle wait: another producer may publish work at any time, and observing a
 transiently empty domain does not mean an application request is complete. The
-request owner knows its actual frontier and terminalizes it when every required
-product has resolved.
+request owner knows exactly which products it is waiting for and terminalizes
+its completion object when all of them have resolved.
 
 Queue shutdown is drain-only. It stops that domain from accepting work, executes
 every accepted task, and releases its cooperative process without affecting
 other domains attached to the pool. Work that recursively publishes child tasks
-therefore completes its application frontier before its queue begins teardown;
-publication attempted after shutdown is correctly rejected. Attached queues
+therefore completes its request before its queue begins teardown; publication
+attempted after shutdown is correctly rejected. Attached queues
 retain the shared executor, so they may outlive the convenience pool handle and
 the final owner joins the worker threads.
 

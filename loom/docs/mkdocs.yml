@@ -81,7 +81,7 @@ nav:
       - Agent-driven kernel development: workflows/agent-driven-kernel-development.md
       - Format and verify source: workflows/format-and-verify.md
       - Link and package modules: workflows/link-and-package.md
-      - Compose recursive product frontiers: workflows/product-frontiers.md
+      - Split command and kernel compilation: workflows/product-frontiers.md
       - Build libraries and binaries with Bazel: workflows/build-with-bazel.md
       - Test correctness: workflows/test-correctness.md
       - Benchmark checked work: workflows/benchmark.md
@@ -94,8 +94,8 @@ nav:
   - Integration:
       - Integration map: integration/index.md
       - Compose modules in memory: integration/module-composition.md
-      - Embed product frontiers: integration/product-frontier.md
-      - Schedule concurrent JIT work: integration/jit-task-pool.md
+      - Parallelize kernel JIT compilation: integration/product-frontier.md
+      - Use the JIT task pool: integration/jit-task-pool.md
       - Embed kernel JIT compilation: integration/jit-kernel.md
   - Reference:
       - Reference map: reference/index.md

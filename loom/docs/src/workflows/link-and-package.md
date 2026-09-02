@@ -144,8 +144,8 @@ re-exported through every product that consumes one definition.
 
 Some products close before every reachable implementation. Portable command
 construction, for example, follows a kernel's contract and pure configuration
-without pulling its device body into the command artifact. [Compose recursive
-product frontiers](product-frontiers.md) follows that boundary through mixed
+without pulling its device body into the command artifact. [Split command and
+kernel compilation](product-frontiers.md) follows that boundary through mixed
 local, linked, bytecode, and external kernels and shows how child source
 requests remain ordinary Loom modules.
 

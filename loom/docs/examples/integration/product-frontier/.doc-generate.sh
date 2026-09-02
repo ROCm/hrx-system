@@ -5,8 +5,8 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-# Runs the public product-frontier example and stages its source and checked
-# output for MkDocs.
+# Runs the public scheduled-JIT example and stages its source and checked output
+# for MkDocs.
 
 set -euo pipefail
 
@@ -49,7 +49,7 @@ trap cleanup EXIT
 
 summary_output="${temporary_root}/summary.txt"
 "${product_frontier}" >"${summary_output}"
-expected_summary='command=run programs=1 requirements=2 kernel_products=1'
+expected_summary='command=run requirements=4 compiled=3 external=1'
 actual_summary="$(<"${summary_output}")"
 if [[ "${actual_summary}" != "${expected_summary}" ]]; then
   printf 'unexpected product-frontier summary:\n%s\n' "${actual_summary}" >&2
