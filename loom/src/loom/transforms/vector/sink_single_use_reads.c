@@ -176,6 +176,7 @@ static bool loom_sink_single_use_reads_is_read_candidate(
   }
   if (iree_any_bit_set(traits, LOOM_TRAIT_HINT | LOOM_TRAIT_POISON_BOUNDARY |
                                    LOOM_TRAIT_CONVERGENT |
+                                   LOOM_TRAIT_OBSERVABLE_EFFECT |
                                    LOOM_TRAIT_UNIQUE_IDENTITY)) {
     return false;
   }
@@ -205,10 +206,10 @@ static bool loom_sink_single_use_reads_find_same_block_user(
       loom_op_effective_traits(context->module, user_op);
   if (!iree_any_bit_set(user_traits, LOOM_TRAIT_PURE) ||
       loom_traits_may_read(user_traits) || loom_traits_may_write(user_traits) ||
-      iree_any_bit_set(user_traits, LOOM_TRAIT_HINT |
-                                        LOOM_TRAIT_POISON_BOUNDARY |
-                                        LOOM_TRAIT_CONVERGENT |
-                                        LOOM_TRAIT_UNIQUE_IDENTITY)) {
+      iree_any_bit_set(
+          user_traits,
+          LOOM_TRAIT_HINT | LOOM_TRAIT_POISON_BOUNDARY | LOOM_TRAIT_CONVERGENT |
+              LOOM_TRAIT_OBSERVABLE_EFFECT | LOOM_TRAIT_UNIQUE_IDENTITY)) {
     return false;
   }
   *out_user_op = user_op;

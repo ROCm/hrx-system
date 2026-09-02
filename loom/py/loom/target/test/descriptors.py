@@ -394,6 +394,14 @@ _COUNTER_LOAD_EFFECT = Effect(
     width_bits=128,
 )
 
+_ORDERED_LOAD_EFFECT = Effect(
+    EffectKind.READ,
+    memory_space=MemorySpace.GENERIC,
+    flags=(EffectFlag.ORDERED, EffectFlag.DEPENDENCY),
+    width_bits=128,
+    timing_event=_EVENT_MEMORY_READ,
+)
+
 _STORE_EFFECT = Effect(
     EffectKind.WRITE,
     memory_space=MemorySpace.GENERIC,
@@ -1200,6 +1208,20 @@ TEST_LOW_COUNTER_LOAD_V4I32_DESCRIPTOR = Descriptor(
     flags=(DescriptorFlag.SIDE_EFFECTING,),
 )
 
+TEST_LOW_LOAD_ORDERED_V4I32_DESCRIPTOR = Descriptor(
+    key="test.load.ordered.v4i32",
+    mnemonic="test.load.ordered.v4i32",
+    semantic_tag="memory.load.ordered.v128",
+    operands=(
+        Operand("dst", OperandRole.RESULT, _I32_ALT, unit_count=4),
+        _ptr_resource("address"),
+    ),
+    asm_forms=_asm(results=("dst",), operands=("address",)),
+    effects=(_ORDERED_LOAD_EFFECT,),
+    schedule_class=_SCHEDULE_LOAD,
+    flags=(DescriptorFlag.SIDE_EFFECTING,),
+)
+
 TEST_LOW_LOAD_V4F32_DESCRIPTOR = Descriptor(
     key="test.load.v4f32",
     mnemonic="test.load.v4f32",
@@ -1834,6 +1856,7 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_STATE_ADD_I32_RHS_ZERO_DESCRIPTOR,
         TEST_LOW_LOAD_V4I32_DESCRIPTOR,
         TEST_LOW_COUNTER_LOAD_V4I32_DESCRIPTOR,
+        TEST_LOW_LOAD_ORDERED_V4I32_DESCRIPTOR,
         TEST_LOW_LOAD_V4F32_DESCRIPTOR,
         TEST_LOW_LOAD_INDEX_V4I32_DESCRIPTOR,
         TEST_LOW_LOAD_INDEX_V4F32_DESCRIPTOR,

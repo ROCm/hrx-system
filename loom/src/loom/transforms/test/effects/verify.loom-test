@@ -42,3 +42,13 @@ func.def pure @pure_body_rejects_convergent(%value: i32) {
   %dead = test.convergent %value : i32
   func.return
 }
+
+// ====
+
+// A pure function cannot contain an independently observable execution even
+// when that execution has no memory footprint.
+// ERROR@+1: STRUCTURE/017
+func.def pure @pure_body_rejects_observable() {
+  %dead = test.effectful_constant 42 : i32
+  func.return
+}

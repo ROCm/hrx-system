@@ -35,9 +35,15 @@ loom_trait_flags_t loom_low_descriptor_effective_traits(
     switch (effect->kind) {
       case LOOM_LOW_EFFECT_KIND_READ:
         traits |= LOOM_TRAIT_READS_MEMORY;
+        if (iree_any_bit_set(effect->flags, LOOM_LOW_EFFECT_FLAG_ORDERED)) {
+          traits |= LOOM_TRAIT_OBSERVABLE_EFFECT;
+        }
         break;
       case LOOM_LOW_EFFECT_KIND_WRITE:
         traits |= LOOM_TRAIT_WRITES_MEMORY;
+        if (iree_any_bit_set(effect->flags, LOOM_LOW_EFFECT_FLAG_ORDERED)) {
+          traits |= LOOM_TRAIT_OBSERVABLE_EFFECT;
+        }
         break;
       case LOOM_LOW_EFFECT_KIND_CONTROL:
         traits |= LOOM_TRAIT_TERMINATOR;

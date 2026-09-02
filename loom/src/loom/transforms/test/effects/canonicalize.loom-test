@@ -86,8 +86,18 @@ func.def @dead_read_only_load_dies(%buffer: buffer, %offset: offset) {
 
 // ====
 
-// Exact facts produced by an unknown-effect op can fold downstream pure users,
-// but generic fact folding must not erase the effectful producer itself.
+// Canonicalization may discover exact facts produced by an observable
+// operation, but its mini-DCE cannot replace the runtime observation with
+// those facts.
+func.def @dead_observable_stays() {
+  %dead = test.effectful_constant 42 : i32
+  func.return
+}
+
+// ====
+
+// Exact facts produced by an observable op can fold downstream pure users, but
+// generic fact folding must not erase the observable producer itself.
 func.def @effectful_exact_facts_do_not_erase_producer() -> (i64) {
   %value = test.effectful_constant 42 : i64
   %observed = test.fact_range_lo %value : i64 -> i64

@@ -147,6 +147,7 @@ __all__ = [
     "ISOLATED_FROM_ABOVE",
     "NON_DETERMINISTIC",
     "UNKNOWN_EFFECTS",
+    "OBSERVABLE_EFFECT",
     "MEMORY_FENCE",
     "CONVERGENT",
     "HINT",
@@ -1195,6 +1196,10 @@ NON_DETERMINISTIC = Trait("NonDeterministic")
 # Effects depend on runtime state (e.g., func.call depends on the callee).
 # Passes treat this conservatively as both READS_MEMORY and WRITES_MEMORY.
 UNKNOWN_EFFECTS = Trait("UnknownEffects")
+# Each dynamic execution is externally observable independently of its SSA
+# results. Optimizers preserve its execution count and control predicate. This
+# does not imply memory access, ordering, non-determinism, or convergence.
+OBSERVABLE_EFFECT = Trait("ObservableEffect")
 # Op represents an explicit command-program effect such as dispatch or schedule
 # composition. The op must independently declare its exact or unknown effects;
 # this trait classifies those effects instead of replacing them.
@@ -4833,7 +4838,13 @@ def _validate_no_effect_conflicts(
     """Validate trait-only ops for effect-related conflicts."""
     trait_names = {t.name for t in traits}
     if "CommandEffect" in trait_names and not trait_names.intersection(
-        {"UnknownEffects", "MemoryFence", "NonDeterministic", "Convergent"}
+        {
+            "UnknownEffects",
+            "ObservableEffect",
+            "MemoryFence",
+            "NonDeterministic",
+            "Convergent",
+        }
     ):
         raise ValueError(
             f"Op '{op_name}': COMMAND_EFFECT requires explicit or unknown "
@@ -4848,6 +4859,7 @@ def _validate_no_effect_conflicts(
             )
         runtime_traits = {
             "UnknownEffects",
+            "ObservableEffect",
             "MemoryFence",
             "NonDeterministic",
             "Convergent",
@@ -4869,6 +4881,11 @@ def _validate_no_effect_conflicts(
             f"Op '{op_name}': declares both PURE and UNKNOWN_EFFECTS. "
             f"A pure op has no effects."
         )
+    if "Pure" in trait_names and "ObservableEffect" in trait_names:
+        raise ValueError(
+            f"Op '{op_name}': declares both PURE and OBSERVABLE_EFFECT. "
+            f"An independently observable execution is not pure."
+        )
     if "Pure" in trait_names and "MemoryFence" in trait_names:
         raise ValueError(
             f"Op '{op_name}': declares both PURE and MEMORY_FENCE. "
@@ -4889,6 +4906,11 @@ def _validate_no_effect_conflicts(
         raise ValueError(
             f"Op '{op_name}': declares both HINT and UNKNOWN_EFFECTS. "
             f"Hints are not semantic effects."
+        )
+    if "Hint" in trait_names and "ObservableEffect" in trait_names:
+        raise ValueError(
+            f"Op '{op_name}': declares both HINT and OBSERVABLE_EFFECT. "
+            f"Observable execution is semantic, not a compiler hint."
         )
     if "Hint" in trait_names and "MemoryFence" in trait_names:
         raise ValueError(
@@ -4915,6 +4937,12 @@ def _validate_no_effect_conflicts(
         raise ValueError(
             f"Op '{op_name}': declares both SAFE_TO_SPECULATE and UNKNOWN_EFFECTS. "
             f"Unknown effects cannot be executed on additional control paths."
+        )
+    if "SafeToSpeculate" in trait_names and "ObservableEffect" in trait_names:
+        raise ValueError(
+            f"Op '{op_name}': declares both SAFE_TO_SPECULATE and "
+            f"OBSERVABLE_EFFECT. Speculation must not add externally "
+            f"observable executions."
         )
     if "SafeToSpeculate" in trait_names and "MemoryFence" in trait_names:
         raise ValueError(
@@ -5977,8 +6005,8 @@ class Op:
 
         An op is pure if it explicitly declares traits=[PURE], or if it
         has no effects, no ownership effects, no ALLOCATES results, and no HINT,
-        NON_DETERMINISTIC, UNKNOWN_EFFECTS, MEMORY_FENCE, or UNIQUE_IDENTITY
-        traits.
+        NON_DETERMINISTIC, UNKNOWN_EFFECTS, OBSERVABLE_EFFECT, MEMORY_FENCE, or
+        UNIQUE_IDENTITY traits.
         """
         if self.has_trait("Pure"):
             return True
@@ -5995,6 +6023,7 @@ class Op:
         if (
             self.has_trait("NonDeterministic")
             or self.has_trait("UnknownEffects")
+            or self.has_trait("ObservableEffect")
             or self.has_trait("MemoryFence")
         ):
             return False

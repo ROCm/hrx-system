@@ -743,6 +743,12 @@ enum loom_trait_bits_e {
   // sentinel that propagates through ordinary pure computation until erased
   // or rejected at an observation boundary.
   LOOM_TRAIT_POISON = 1u << 28,
+  // Each dynamic execution is externally observable independently of its SSA
+  // results. Generic transforms must preserve the execution count and control
+  // predicate: the op cannot be erased, merged, duplicated, rematerialized, or
+  // relocated. This does not itself imply a memory footprint, memory ordering,
+  // non-determinism, or convergence; operations declare those independently.
+  LOOM_TRAIT_OBSERVABLE_EFFECT = 1u << 29,
 };
 typedef uint32_t loom_trait_flags_t;
 
@@ -765,13 +771,12 @@ static inline bool loom_traits_may_read(loom_trait_flags_t traits) {
          0;
 }
 
-// Returns true if the trait flags indicate the op may produce different
-// results for identical inputs, write memory, order memory, or have unknown
-// effects.
+// Returns true if the trait flags indicate the op has an execution property
+// that prevents treating exact result facts as a replacement for the op.
 static inline bool loom_traits_has_side_effects(loom_trait_flags_t traits) {
   return (traits & (LOOM_TRAIT_WRITES_MEMORY | LOOM_TRAIT_UNKNOWN_EFFECTS |
-                    LOOM_TRAIT_NON_DETERMINISTIC | LOOM_TRAIT_MEMORY_FENCE)) !=
-         0;
+                    LOOM_TRAIT_NON_DETERMINISTIC | LOOM_TRAIT_MEMORY_FENCE |
+                    LOOM_TRAIT_OBSERVABLE_EFFECT)) != 0;
 }
 
 // Returns true when the op carries an explicit memory ordering effect.
@@ -811,6 +816,13 @@ static inline bool loom_traits_are_safe_to_speculate(
 // execution site. This is independent of ordinary memory effects.
 static inline bool loom_traits_are_convergent(loom_trait_flags_t traits) {
   return (traits & LOOM_TRAIT_CONVERGENT) != 0;
+}
+
+// Returns true when each dynamic execution of the op must remain observable
+// independently of whether its SSA results are used.
+static inline bool loom_traits_have_observable_effects(
+    loom_trait_flags_t traits) {
+  return (traits & LOOM_TRAIT_OBSERVABLE_EFFECT) != 0;
 }
 
 // Returns true when the op materializes a poison value.
@@ -1842,6 +1854,10 @@ typedef struct loom_region_t {
   // region. Convergent ops cannot be removed or moved across control structure
   // even when they are otherwise memory-pure.
   uint32_t convergent_effect_count;
+  // Transitive count of independently observable executions in all live ops
+  // nested in this region. These ops remain live even when their SSA results
+  // are unused.
+  uint32_t observable_effect_count;
   // Inline storage for the entry block.
   loom_block_t entry_block;
   // Ordered block pointer table. Points at inline_blocks for one-block regions.
@@ -1912,6 +1928,13 @@ static inline bool loom_region_has_convergent_effects(
   return region && region->convergent_effect_count != 0;
 }
 
+// Returns true when any live op nested in |region| has an independently
+// observable execution effect.
+static inline bool loom_region_has_observable_effects(
+    const loom_region_t* region) {
+  return region && region->observable_effect_count != 0;
+}
+
 // Returns true when any child region of |op| has a read-like effect.
 static inline bool loom_op_regions_have_read_effects(const loom_op_t* op) {
   loom_region_t** regions = loom_op_regions(op);
@@ -1936,6 +1959,17 @@ static inline bool loom_op_regions_have_convergent_effects(
   loom_region_t** regions = loom_op_regions(op);
   for (uint8_t i = 0; i < op->region_count; ++i) {
     if (loom_region_has_convergent_effects(regions[i])) return true;
+  }
+  return false;
+}
+
+// Returns true when any child region of |op| has an independently observable
+// execution effect.
+static inline bool loom_op_regions_have_observable_effects(
+    const loom_op_t* op) {
+  loom_region_t** regions = loom_op_regions(op);
+  for (uint8_t i = 0; i < op->region_count; ++i) {
+    if (loom_region_has_observable_effects(regions[i])) return true;
   }
   return false;
 }

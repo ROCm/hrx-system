@@ -283,7 +283,8 @@ static bool loom_verify_op_observes_poison(
   }
   const loom_trait_flags_t boundary_traits =
       LOOM_TRAIT_READS_MEMORY | LOOM_TRAIT_WRITES_MEMORY |
-      LOOM_TRAIT_NON_DETERMINISTIC | LOOM_TRAIT_UNKNOWN_EFFECTS;
+      LOOM_TRAIT_NON_DETERMINISTIC | LOOM_TRAIT_UNKNOWN_EFFECTS |
+      LOOM_TRAIT_OBSERVABLE_EFFECT;
   if (iree_any_bit_set(traits, boundary_traits)) {
     *out_boundary_kind = IREE_SV("effectful operation");
     return true;
