@@ -341,8 +341,10 @@ def test_generation_uses_byte_strides_for_cooperative_matrix_rows() -> None:
     assert u8_store.cooperative_matrix_stride == 64
 
 
-def test_generation_keeps_storage_buffer_address_untyped_until_access_chain() -> None:
+def test_generation_offsets_storage_buffer_address_before_pointer_conversion() -> None:
     access_row = _packet_row("spirv.op_ptr_access_chain.storage_buffer.f32.byte_offset")
+    assert access_row.opcode == "LOOM_SPIRV_OP_CONVERT_U_TO_PTR"
+    assert access_row.form == "LOOM_SPIRV_PACKET_FORM_PHYSICAL_STORAGE_BUFFER_BYTE_OFFSET"
     assert "LOOM_SPIRV_VALUE_CLASS_PTR_PHYSICAL_STORAGE_BUFFER" in access_row.result_type
     assert "LOOM_SPIRV_SCALAR_TYPE_F32" in access_row.result_type
     assert "LOOM_SPIRV_VALUE_CLASS_STORAGE_BUFFER_ADDRESS" in access_row.operand_types[0]

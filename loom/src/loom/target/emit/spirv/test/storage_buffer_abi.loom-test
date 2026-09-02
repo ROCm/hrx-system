@@ -92,12 +92,12 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) @
          %40 = OpIAdd %uint %35 %uint_1
          %41 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %33 %int_0 %40
      %output = OpLoad %ulong %41 Aligned 8
-         %44 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %input
- %input_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %44 %byte_offset
+         %43 = OpIAdd %ulong %input %byte_offset
+ %input_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %43
      %loaded = OpLoad %int %input_view Aligned 4
 %incremented = OpIAdd %int %loaded %loaded
-         %48 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %output
-%output_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %48 %byte_offset
+         %48 = OpIAdd %ulong %output %byte_offset
+%output_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %48
                OpStore %output_view %incremented Aligned 4
                OpReturn
                OpFunctionEnd
@@ -225,11 +225,11 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 2, 1) @
  %byte_index = OpShiftLeftLogical %int %linear %shift
 %unsigned_byte_index = OpBitcast %uint %byte_index
 %byte_offset = OpUConvert %ulong %unsigned_byte_index
-         %51 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %input
- %input_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %51 %byte_offset
+         %50 = OpIAdd %ulong %input %byte_offset
+ %input_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %50
      %loaded = OpLoad %int %input_view Aligned 4
-         %54 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %output
-%output_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %54 %byte_offset
+         %54 = OpIAdd %ulong %output %byte_offset
+%output_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %54
                OpStore %output_view %loaded Aligned 4
                OpReturn
                OpFunctionEnd
@@ -363,15 +363,15 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) @
      %output = OpLoad %ulong %50 Aligned 8
      %inside = OpULessThanEqual %bool %byte_offset %limit
 %selected_offset = OpSelect %ulong %inside %byte_offset %zero_offset
-         %57 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %input
- %input_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %57 %selected_offset
+         %56 = OpIAdd %ulong %input %selected_offset
+ %input_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %56
      %loaded = OpLoad %int %input_view Aligned 4
    %positive = OpSGreaterThan %bool %loaded %zero
    %selected = OpSelect %int %positive %loaded %zero
    %quotient = OpSDiv %int %selected %one
   %remainder = OpSRem %int %quotient %one
-         %66 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %output
-%output_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %66 %selected_offset
+         %66 = OpIAdd %ulong %output %selected_offset
+%output_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %66
                OpStore %output_view %remainder Aligned 4
                OpReturn
                OpFunctionEnd
@@ -493,12 +493,12 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) @
                OpSelectionMerge %55 None
                OpBranchConditional %inside %54 %55
          %54 = OpLabel
-         %57 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %input
- %input_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %57 %byte_offset
+         %56 = OpIAdd %ulong %input %byte_offset
+ %input_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %56
      %loaded = OpLoad %int %input_view Aligned 4
 %incremented = OpIAdd %int %loaded %loaded
-         %61 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %output
-%output_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %61 %byte_offset
+         %61 = OpIAdd %ulong %output %byte_offset
+%output_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %61
                OpStore %output_view %incremented Aligned 4
                OpBranch %55
          %55 = OpLabel
@@ -609,15 +609,15 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) @
          %40 = OpIAdd %uint %35 %uint_1
          %41 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %33 %int_0 %40
      %output = OpLoad %ulong %41 Aligned 8
-         %45 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %input
- %input_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_float %45 %byte_offset
+         %43 = OpIAdd %ulong %input %byte_offset
+ %input_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %43
      %loaded = OpLoad %float %input_view Aligned 4
         %sum = OpFAdd %float %loaded %loaded
     %product = OpFMul %float %sum %loaded
    %quotient = OpFDiv %float %product %loaded
   %remainder = OpFRem %float %quotient %loaded
-         %52 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %output
-%output_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_float %52 %byte_offset
+         %52 = OpIAdd %ulong %output %byte_offset
+%output_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %52
                OpStore %output_view %remainder Aligned 4
                OpReturn
                OpFunctionEnd
@@ -725,14 +725,14 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) @
          %40 = OpIAdd %uint %35 %uint_1
          %41 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %33 %int_0 %40
      %output = OpLoad %ulong %41 Aligned 8
-         %45 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_long %input
- %input_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_long %45 %byte_offset
+         %43 = OpIAdd %ulong %input %byte_offset
+ %input_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_long %43
      %loaded = OpLoad %long %input_view Aligned 8
         %sum = OpIAdd %long %loaded %loaded
      %larger = OpSGreaterThan %bool %sum %loaded
    %selected = OpSelect %long %larger %sum %loaded
-         %52 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_long %output
-%output_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_long %52 %byte_offset
+         %52 = OpIAdd %ulong %output %byte_offset
+%output_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_long %52
                OpStore %output_view %selected Aligned 8
                OpReturn
                OpFunctionEnd
@@ -810,12 +810,12 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @spirv_
      %output = OpLoad %ulong %20 Aligned 8
          %22 = OpAccessChain %_ptr_StorageBuffer_ulong %10 %int_0
 %byte_offset = OpLoad %ulong %22 Aligned 8
-         %25 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %input
- %input_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %25 %byte_offset
+         %24 = OpIAdd %ulong %input %byte_offset
+ %input_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %24
      %loaded = OpLoad %int %input_view Aligned 4
 %incremented = OpIAdd %int %loaded %loaded
-         %29 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %output
-%output_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %29 %byte_offset
+         %29 = OpIAdd %ulong %output %byte_offset
+%output_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %29
                OpStore %output_view %incremented Aligned 4
          %31 = OpAccessChain %_ptr_StorageBuffer_int %11 %int_0
                OpStore %31 %loaded Aligned 4

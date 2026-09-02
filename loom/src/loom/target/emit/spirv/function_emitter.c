@@ -682,45 +682,35 @@ static iree_status_t loom_spirv_emit_select_packet(
       loom_spirv_packet_row_result_type(row));
 }
 
-static iree_status_t loom_spirv_emit_typed_physical_storage_buffer_pointer(
-    loom_spirv_emit_state_t* state, loom_spirv_module_value_ref_t address,
-    loom_spirv_value_type_t pointer_type, uint32_t pointer_type_id,
-    uint32_t* out_pointer_id) {
-  if (address.value_type.value_class ==
-      LOOM_SPIRV_VALUE_CLASS_PTR_PHYSICAL_STORAGE_BUFFER) {
-    IREE_ASSERT(loom_spirv_value_type_equal(address.value_type, pointer_type));
-    *out_pointer_id = address.id;
-    return iree_ok_status();
-  }
-  IREE_ASSERT_EQ(address.value_type.value_class,
-                 LOOM_SPIRV_VALUE_CLASS_STORAGE_BUFFER_ADDRESS);
-  const uint32_t result_id = loom_spirv_emit_allocate_id(state);
-  const uint32_t operands[] = {
-      pointer_type_id,
-      result_id,
-      address.id,
-  };
-  IREE_RETURN_IF_ERROR(loom_spirv_binary_write_instruction(
-      loom_spirv_emit_section(state, LOOM_SPIRV_MODULE_SECTION_FUNCTION),
-      LOOM_SPIRV_OP_CONVERT_U_TO_PTR, operands, IREE_ARRAYSIZE(operands)));
-  *out_pointer_id = result_id;
-  return iree_ok_status();
-}
-
-static iree_status_t loom_spirv_emit_ptr_access_chain_packet(
+static iree_status_t loom_spirv_emit_physical_storage_buffer_byte_offset_packet(
     loom_spirv_emit_state_t* state, const loom_low_descriptor_packet_t* packet,
     const loom_spirv_packet_row_t* row) {
   loom_spirv_module_value_ref_t operands[2] = {0};
   IREE_RETURN_IF_ERROR(
       loom_spirv_emit_load_packet_operands(state, packet, row, operands));
+  IREE_ASSERT_EQ(operands[0].value_type.value_class,
+                 LOOM_SPIRV_VALUE_CLASS_STORAGE_BUFFER_ADDRESS);
+  IREE_ASSERT_EQ(operands[0].type_id, operands[1].type_id);
+
+  // Storage-buffer coordinates are byte offsets. Add the offset to the raw
+  // address before selecting a pointee type so SPIR-V cannot scale it by the
+  // pointee size.
+  const uint32_t byte_address_id = loom_spirv_emit_allocate_id(state);
+  const uint32_t byte_address_operands[] = {
+      operands[0].type_id,
+      byte_address_id,
+      operands[0].id,
+      operands[1].id,
+  };
+  IREE_RETURN_IF_ERROR(loom_spirv_binary_write_instruction(
+      loom_spirv_emit_section(state, LOOM_SPIRV_MODULE_SECTION_FUNCTION),
+      LOOM_SPIRV_OP_I_ADD, byte_address_operands,
+      IREE_ARRAYSIZE(byte_address_operands)));
+
   uint32_t result_type_id = 0;
   IREE_RETURN_IF_ERROR(loom_spirv_emit_type_id_for_value_type(
       state->type_context, loom_spirv_packet_row_result_type(row),
       &result_type_id));
-  uint32_t base_pointer_id = 0;
-  IREE_RETURN_IF_ERROR(loom_spirv_emit_typed_physical_storage_buffer_pointer(
-      state, operands[0], loom_spirv_packet_row_result_type(row),
-      result_type_id, &base_pointer_id));
   uint32_t result_id = 0;
   IREE_RETURN_IF_ERROR(loom_spirv_emit_prepare_packet_result(
       state, packet, result_type_id, loom_spirv_packet_row_result_type(row),
@@ -728,8 +718,7 @@ static iree_status_t loom_spirv_emit_ptr_access_chain_packet(
   const uint32_t instruction_operands[] = {
       result_type_id,
       result_id,
-      base_pointer_id,
-      operands[1].id,
+      byte_address_id,
   };
   IREE_RETURN_IF_ERROR(loom_spirv_binary_write_instruction(
       loom_spirv_emit_section(state, LOOM_SPIRV_MODULE_SECTION_FUNCTION),
@@ -983,8 +972,9 @@ static iree_status_t loom_spirv_emit_descriptor_packet(
       return loom_spirv_emit_compare_same_type_packet(state, packet, row);
     case LOOM_SPIRV_PACKET_FORM_SELECT:
       return loom_spirv_emit_select_packet(state, packet, row);
-    case LOOM_SPIRV_PACKET_FORM_PTR_ACCESS_CHAIN:
-      return loom_spirv_emit_ptr_access_chain_packet(state, packet, row);
+    case LOOM_SPIRV_PACKET_FORM_PHYSICAL_STORAGE_BUFFER_BYTE_OFFSET:
+      return loom_spirv_emit_physical_storage_buffer_byte_offset_packet(
+          state, packet, row);
     case LOOM_SPIRV_PACKET_FORM_ACCESS_CHAIN:
       return loom_spirv_emit_access_chain_packet(state, packet, row);
     case LOOM_SPIRV_PACKET_FORM_LOAD_ALIGNED:
