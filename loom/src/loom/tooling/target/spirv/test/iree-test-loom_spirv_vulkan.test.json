@@ -108,7 +108,7 @@
       "run": {
         "tool": "iree-test-loom",
         "args": [
-          "{srcdir}/../../../../test/corpus/conformance/global_atomic_semantics.loom",
+          "{srcdir}/spirv_vulkan_atomic_hal_actual.loom",
           "--device=vulkan",
           "--vulkan_validation_layers=false"
         ]

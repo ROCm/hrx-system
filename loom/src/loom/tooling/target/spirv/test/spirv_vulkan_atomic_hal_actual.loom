@@ -1,4 +1,4 @@
-// Vulkan SPIR-V integer atomics must preserve the operation, signedness,
+// SPIR-V Vulkan integer atomics must preserve the operation, signedness,
 // ordering, scope, returned old value, and final memory value. One invocation
 // keeps each observation deterministic while still executing the production
 // storage-buffer atomic path on the device.
