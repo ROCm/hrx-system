@@ -15,8 +15,11 @@ iree_py_library(
     name = "contracts",
     srcs = [
         "__init__.py",
+        "atomic.py",
+        "descriptor_rule.py",
         "index.py",
         "logical_core.py",
+        "memory.py",
         "ordinary_vector.py",
     ],
     deps = [
@@ -29,6 +32,7 @@ iree_py_library(
         "//loom/py/loom/dialect/vector",
         "//loom/py/loom/dialect/view",
         "//loom/py/loom/error",
+        "//loom/py/loom/target/arch/spirv:atomic",
         "//loom/py/loom/target/arch/spirv:builtins",
         "//loom/py/loom/target/arch/spirv:cooperative_matrix",
         "//loom/py/loom/target/arch/spirv:descriptors",
@@ -37,6 +41,23 @@ iree_py_library(
         "//loom/py/loom/target/arch/spirv:scalar_constant",
         "//loom/py/loom/target/arch/spirv:scalar_conversion",
         "//loom/py/loom/target/arch/spirv:scalar_memory",
+        "//loom/py/loom/target/contracts",
+    ],
+)
+
+iree_py_test(
+    name = "atomic_test",
+    size = "small",
+    srcs = [
+        "atomic_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.target.arch.spirv.contracts.atomic_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":contracts",
+        "//loom/py/loom/dialect/view",
+        "//loom/py/loom/target/arch/spirv:atomic",
         "//loom/py/loom/target/contracts",
     ],
 )

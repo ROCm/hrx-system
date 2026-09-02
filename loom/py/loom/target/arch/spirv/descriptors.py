@@ -11,6 +11,28 @@ from __future__ import annotations
 from pathlib import Path
 
 from loom.ir import parse_scalar_type_kind
+from loom.target.arch.spirv.atomic import (
+    ATOMIC_FLOAT_OPERATIONS,
+    ATOMIC_FLOAT_SCALARS,
+    ATOMIC_INTEGER_OPERATIONS,
+    ATOMIC_INTEGER_SCALARS,
+    ATOMIC_ORDERINGS,
+    ATOMIC_SCOPES,
+    ATOMIC_STORAGE_CLASSES,
+    AtomicFloatOperation,
+    AtomicFloatScalar,
+    AtomicIntegerOperation,
+    AtomicIntegerScalar,
+    AtomicOrdering,
+    AtomicScope,
+    AtomicStorageClass,
+    atomic_descriptor_key,
+    atomic_feature_bits,
+    cmpxchg_failure_orderings,
+    float_atomic_cas_feature_bits,
+    float_atomic_descriptor_key,
+    float_atomic_native_feature_bits,
+)
 from loom.target.arch.spirv.builtins import (
     BUILTIN_DIMENSIONS,
     BUILTIN_INDEX_QUERIES,
@@ -86,6 +108,8 @@ from loom.target.low_descriptors import (
     Effect,
     EffectFlag,
     EffectKind,
+    EnumDomain,
+    EnumValue,
     Immediate,
     ImmediateKind,
     InstructionClass,
@@ -111,16 +135,22 @@ _REG_PTR_FUNCTION = "spirv.ptr.function"
 _REG_PTR_STORAGE_BUFFER = "spirv.ptr.storage_buffer"
 
 _RESOURCE_ALU = "spirv.alu"
+_RESOURCE_ATOMIC = "spirv.atomic"
 _RESOURCE_LOAD = "spirv.load"
 _RESOURCE_MATRIX = "spirv.matrix"
 _RESOURCE_STORE = "spirv.store"
 _RESOURCE_VARIABLE = "spirv.variable"
 
 _SCHEDULE_ALU = "spirv.alu"
+_SCHEDULE_ATOMIC = "spirv.atomic"
 _SCHEDULE_LOAD = "spirv.load"
 _SCHEDULE_MATRIX = "spirv.matrix"
 _SCHEDULE_STORE = "spirv.store"
 _SCHEDULE_VARIABLE = "spirv.variable"
+
+_ATOMIC_ORDERING_ENUM = "spirv.atomic_ordering"
+_ATOMIC_RELAXED_ORDERING_ENUM = "spirv.atomic_ordering.relaxed"
+_ATOMIC_ACQUIRE_OR_WEAKER_ORDERING_ENUM = "spirv.atomic_ordering.acquire_or_weaker"
 
 _ID_ALT = (RegClassAlt(_REG_ID),)
 _OFFSET64_ALT = (RegClassAlt(_REG_OFFSET64),)
@@ -152,6 +182,35 @@ def _float_constant_immediate(scalar: FloatConstantType) -> Immediate:
         ImmediateKind.UNSIGNED,
         bit_width=scalar.bit_width,
         unsigned_max=(2**scalar.bit_width) - 1,
+    )
+
+
+def _atomic_ordering_immediate(scope: AtomicScope) -> Immediate:
+    enum_domain = (
+        _ATOMIC_RELAXED_ORDERING_ENUM
+        if len(scope.orderings) == 1
+        else _ATOMIC_ORDERING_ENUM
+    )
+    return Immediate(
+        "ordering",
+        ImmediateKind.ENUM,
+        enum_domain=enum_domain,
+    )
+
+
+def _atomic_failure_ordering_immediate(
+    success_ordering: AtomicOrdering,
+) -> Immediate:
+    failure_orderings = cmpxchg_failure_orderings(success_ordering)
+    enum_domain = (
+        _ATOMIC_RELAXED_ORDERING_ENUM
+        if len(failure_orderings) == 1
+        else _ATOMIC_ACQUIRE_OR_WEAKER_ORDERING_ENUM
+    )
+    return Immediate(
+        "failure_ordering",
+        ImmediateKind.ENUM,
+        enum_domain=enum_domain,
     )
 
 
@@ -650,6 +709,329 @@ def _cooperative_matrix_effect(
         flags=(EffectFlag.DEPENDENCY,),
         width_bits=byte_width * rows * columns * 8,
     )
+
+
+def _atomic_effects(
+    storage_class: AtomicStorageClass,
+    scalar: AtomicIntegerScalar | AtomicFloatScalar,
+) -> tuple[Effect, ...]:
+    memory_space = (
+        MemorySpace.GLOBAL
+        if storage_class.suffix == "storage_buffer"
+        else MemorySpace.WORKGROUP
+    )
+    return (
+        Effect(
+            EffectKind.READ,
+            memory_space=memory_space,
+            flags=(EffectFlag.DEPENDENCY,),
+            width_bits=scalar.byte_width * 8,
+        ),
+        Effect(
+            EffectKind.WRITE,
+            memory_space=memory_space,
+            flags=(EffectFlag.DEPENDENCY,),
+            width_bits=scalar.byte_width * 8,
+        ),
+    )
+
+
+def _atomic_pointer_operand(
+    storage_class: AtomicStorageClass,
+    scalar_suffix: str,
+) -> Operand:
+    if storage_class.suffix == "storage_buffer":
+        return _ptr_storage_buffer_operand("ptr")
+    if storage_class.suffix == "workgroup":
+        return Operand(
+            "ptr",
+            OperandRole.RESOURCE,
+            (RegClassAlt(f"spirv.ptr.workgroup.{scalar_suffix}"),),
+        )
+    raise ValueError(f"unknown atomic storage class '{storage_class.suffix}'")
+
+
+def _atomic_descriptor(
+    form: str,
+    scalar: AtomicIntegerScalar,
+    storage_class: AtomicStorageClass,
+    scope: AtomicScope,
+    *,
+    operation: AtomicIntegerOperation | None = None,
+    success_ordering: AtomicOrdering | None = None,
+) -> Descriptor:
+    key = atomic_descriptor_key(
+        form,
+        scalar,
+        storage_class,
+        scope,
+        operation=operation,
+        success_ordering=success_ordering,
+    )
+    pointer = _atomic_pointer_operand(storage_class, scalar.suffix)
+    if form == "cmpxchg":
+        if success_ordering is None:
+            raise ValueError("compare-exchange descriptor requires success ordering")
+        mnemonic = f"OpAtomicCompareExchange.{success_ordering.source_keyword}"
+        operands = (
+            _id_result("old"),
+            pointer,
+            _id_operand("replacement"),
+            _id_operand("expected"),
+        )
+        immediates = (_atomic_failure_ordering_immediate(success_ordering),)
+        asm_results = ("old",)
+        asm_operands = ("ptr", "replacement", "expected")
+        asm_immediates = ("failure_ordering",)
+    else:
+        if operation is None:
+            raise ValueError(f"{form} descriptor requires an atomic operation")
+        mnemonic = operation.mnemonic
+        operands = (
+            *((_id_result("old"),) if form == "rmw" else ()),
+            pointer,
+            _id_operand("value"),
+        )
+        immediates = (_atomic_ordering_immediate(scope),)
+        asm_results = ("old",) if form == "rmw" else ()
+        asm_operands = ("ptr", "value")
+        asm_immediates = ("ordering",)
+    feature_bits = atomic_feature_bits(scalar, storage_class, scope)
+    return Descriptor(
+        key=key,
+        mnemonic=(
+            f"{mnemonic}.{form}.{storage_class.suffix}.{scalar.suffix}."
+            f"{scope.source_keyword}"
+        ),
+        semantic_tag=key,
+        operands=operands,
+        immediates=immediates,
+        feature_mask_words=(feature_bits,) if feature_bits else (),
+        asm_forms=_asm(
+            results=asm_results,
+            operands=asm_operands,
+            immediates=asm_immediates,
+            result_value_types=(
+                (_scalar_result_value_type(scalar.source_type),) if asm_results else ()
+            ),
+        ),
+        effects=_atomic_effects(storage_class, scalar),
+        schedule_class=_SCHEDULE_ATOMIC,
+        flags=(DescriptorFlag.SIDE_EFFECTING,),
+    )
+
+
+def _atomic_descriptors() -> tuple[Descriptor, ...]:
+    descriptors: list[Descriptor] = []
+    for scalar in ATOMIC_INTEGER_SCALARS:
+        for storage_class in ATOMIC_STORAGE_CLASSES:
+            for scope in ATOMIC_SCOPES:
+                for operation in ATOMIC_INTEGER_OPERATIONS:
+                    if operation.supports_reduce:
+                        descriptors.append(
+                            _atomic_descriptor(
+                                "reduce",
+                                scalar,
+                                storage_class,
+                                scope,
+                                operation=operation,
+                            )
+                        )
+                    descriptors.append(
+                        _atomic_descriptor(
+                            "rmw",
+                            scalar,
+                            storage_class,
+                            scope,
+                            operation=operation,
+                        )
+                    )
+                descriptors.extend(
+                    _atomic_descriptor(
+                        "cmpxchg",
+                        scalar,
+                        storage_class,
+                        scope,
+                        success_ordering=success_ordering,
+                    )
+                    for success_ordering in scope.orderings
+                )
+    return tuple(descriptors)
+
+
+def _float_atomic_descriptor(
+    form: str,
+    strategy: str,
+    scalar: AtomicFloatScalar,
+    storage_class: AtomicStorageClass,
+    scope: AtomicScope,
+    *,
+    operation: AtomicFloatOperation | None = None,
+    success_ordering: AtomicOrdering | None = None,
+) -> Descriptor:
+    key = float_atomic_descriptor_key(
+        form,
+        strategy,
+        scalar,
+        storage_class,
+        scope,
+        operation=operation,
+        success_ordering=success_ordering,
+    )
+    pointer_suffix = scalar.suffix
+    if strategy != "native":
+        if scalar.integer_suffix is None:
+            raise ValueError(f"{scalar.source_type} has no integer atomic carrier")
+        pointer_suffix = scalar.integer_suffix
+    pointer = _atomic_pointer_operand(storage_class, pointer_suffix)
+    if form == "cmpxchg":
+        if success_ordering is None or strategy != "bitcast":
+            raise ValueError("floating compare-exchange requires bitcast strategy")
+        mnemonic = f"OpAtomicCompareExchange.{success_ordering.source_keyword}.bitcast"
+        operands = (
+            _id_result("old"),
+            pointer,
+            _id_operand("replacement"),
+            _id_operand("expected"),
+        )
+        immediates = (_atomic_failure_ordering_immediate(success_ordering),)
+        asm_results = ("old",)
+        asm_operands = ("ptr", "replacement", "expected")
+        asm_immediates = ("failure_ordering",)
+    else:
+        if operation is None:
+            raise ValueError(f"{form} descriptor requires an atomic operation")
+        if strategy == "native":
+            if operation.native_mnemonic is None:
+                raise ValueError(
+                    f"{operation.source_kind} has no native SPIR-V instruction"
+                )
+            mnemonic = operation.native_mnemonic
+        elif strategy == "bitcast":
+            if operation.source_kind != "xchgf":
+                raise ValueError("only floating exchange has a direct bitcast form")
+            mnemonic = "OpAtomicExchange.bitcast"
+        elif strategy == "cas":
+            if operation.source_kind == "xchgf":
+                raise ValueError("floating exchange uses the direct bitcast form")
+            mnemonic = f"OpAtomicCompareExchange.loop.{operation.suffix}"
+        else:
+            raise ValueError(f"unknown floating atomic strategy '{strategy}'")
+        operands = (
+            *((_id_result("old"),) if form == "rmw" else ()),
+            pointer,
+            _id_operand("value"),
+        )
+        immediates = (_atomic_ordering_immediate(scope),)
+        asm_results = ("old",) if form == "rmw" else ()
+        asm_operands = ("ptr", "value")
+        asm_immediates = ("ordering",)
+    feature_bits = (
+        float_atomic_native_feature_bits(scalar, operation, storage_class, scope)
+        if strategy == "native" and operation is not None
+        else float_atomic_cas_feature_bits(scalar, storage_class, scope)
+    )
+    return Descriptor(
+        key=key,
+        mnemonic=(
+            f"{mnemonic}.{form}.{storage_class.suffix}.{scalar.suffix}."
+            f"{scope.source_keyword}"
+        ),
+        semantic_tag=key,
+        operands=operands,
+        immediates=immediates,
+        feature_mask_words=(feature_bits,) if feature_bits else (),
+        asm_forms=_asm(
+            results=asm_results,
+            operands=asm_operands,
+            immediates=asm_immediates,
+            result_value_types=(
+                (_scalar_result_value_type(scalar.source_type),) if asm_results else ()
+            ),
+        ),
+        effects=_atomic_effects(storage_class, scalar),
+        schedule_class=_SCHEDULE_ATOMIC,
+        flags=(DescriptorFlag.SIDE_EFFECTING,),
+    )
+
+
+def _float_atomic_descriptors() -> tuple[Descriptor, ...]:
+    descriptors: list[Descriptor] = []
+    for scalar in ATOMIC_FLOAT_SCALARS:
+        for storage_class in ATOMIC_STORAGE_CLASSES:
+            for scope in ATOMIC_SCOPES:
+                for operation in ATOMIC_FLOAT_OPERATIONS:
+                    if operation.native_opcode is not None:
+                        if operation.supports_reduce:
+                            descriptors.append(
+                                _float_atomic_descriptor(
+                                    "reduce",
+                                    "native",
+                                    scalar,
+                                    storage_class,
+                                    scope,
+                                    operation=operation,
+                                )
+                            )
+                        descriptors.append(
+                            _float_atomic_descriptor(
+                                "rmw",
+                                "native",
+                                scalar,
+                                storage_class,
+                                scope,
+                                operation=operation,
+                            )
+                        )
+                    if scalar.integer_scalar_enum is None:
+                        continue
+                    if operation.source_kind == "xchgf":
+                        descriptors.append(
+                            _float_atomic_descriptor(
+                                "rmw",
+                                "bitcast",
+                                scalar,
+                                storage_class,
+                                scope,
+                                operation=operation,
+                            )
+                        )
+                        continue
+                    if operation.supports_reduce:
+                        descriptors.append(
+                            _float_atomic_descriptor(
+                                "reduce",
+                                "cas",
+                                scalar,
+                                storage_class,
+                                scope,
+                                operation=operation,
+                            )
+                        )
+                    descriptors.append(
+                        _float_atomic_descriptor(
+                            "rmw",
+                            "cas",
+                            scalar,
+                            storage_class,
+                            scope,
+                            operation=operation,
+                        )
+                    )
+                if scalar.integer_scalar_enum is None:
+                    continue
+                descriptors.extend(
+                    _float_atomic_descriptor(
+                        "cmpxchg",
+                        "bitcast",
+                        scalar,
+                        storage_class,
+                        scope,
+                        success_ordering=success_ordering,
+                    )
+                    for success_ordering in scope.orderings
+                )
+    return tuple(descriptors)
 
 
 def _ptr_access_chain_storage_buffer_descriptor(
@@ -1303,6 +1685,7 @@ SPIRV_LOGICAL_CORE_DESCRIPTOR_SET = DescriptorSet(
     ),
     resources=(
         Resource(_RESOURCE_ALU, capacity_per_cycle=1, kind=ResourceKind.SCALAR_ALU),
+        Resource(_RESOURCE_ATOMIC, capacity_per_cycle=1, kind=ResourceKind.STORE),
         Resource(_RESOURCE_LOAD, capacity_per_cycle=1, kind=ResourceKind.LOAD),
         Resource(_RESOURCE_MATRIX, capacity_per_cycle=1, kind=ResourceKind.MATRIX),
         Resource(_RESOURCE_STORE, capacity_per_cycle=1, kind=ResourceKind.STORE),
@@ -1315,6 +1698,13 @@ SPIRV_LOGICAL_CORE_DESCRIPTOR_SET = DescriptorSet(
             latency_cycles=1,
             issue_uses=(IssueUse(_RESOURCE_ALU, cycles=1, units=1),),
             model_quality=ModelQuality.ESTIMATED,
+        ),
+        ScheduleClass(
+            _SCHEDULE_ATOMIC,
+            latency_kind=LatencyKind.VARIABLE,
+            issue_uses=(IssueUse(_RESOURCE_ATOMIC, cycles=1, units=1),),
+            flags=(ScheduleClassFlag.MAY_LOAD, ScheduleClassFlag.MAY_STORE),
+            model_quality=ModelQuality.FALLBACK,
         ),
         ScheduleClass(
             _SCHEDULE_LOAD,
@@ -1440,6 +1830,8 @@ SPIRV_LOGICAL_CORE_DESCRIPTOR_SET = DescriptorSet(
         *_storage_buffer_descriptors(),
         *_raw_storage_buffer_byte_descriptors(),
         *_workgroup_descriptors(),
+        *_atomic_descriptors(),
+        *_float_atomic_descriptors(),
         *_control_barrier_descriptors(),
         *_cooperative_matrix_descriptors(),
         Descriptor(
@@ -1450,6 +1842,26 @@ SPIRV_LOGICAL_CORE_DESCRIPTOR_SET = DescriptorSet(
             asm_forms=_asm(results=("ptr",)),
             schedule_class=_SCHEDULE_VARIABLE,
             instruction_classes=(InstructionClass.OTHER,),
+        ),
+    ),
+    enum_domains=(
+        EnumDomain(
+            _ATOMIC_ORDERING_ENUM,
+            tuple(
+                EnumValue(ordering.source_keyword, ordering.ordinal)
+                for ordering in ATOMIC_ORDERINGS
+            ),
+        ),
+        EnumDomain(
+            _ATOMIC_RELAXED_ORDERING_ENUM,
+            (EnumValue("relaxed", 0),),
+        ),
+        EnumDomain(
+            _ATOMIC_ACQUIRE_OR_WEAKER_ORDERING_ENUM,
+            (
+                EnumValue("relaxed", 0),
+                EnumValue("acquire", 1),
+            ),
         ),
     ),
 )

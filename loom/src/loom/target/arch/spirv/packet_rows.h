@@ -46,6 +46,11 @@ enum loom_spirv_packet_form_e {
   LOOM_SPIRV_PACKET_FORM_COMPOSITE_CONSTRUCT = 17,
   LOOM_SPIRV_PACKET_FORM_COMPOSITE_EXTRACT = 18,
   LOOM_SPIRV_PACKET_FORM_COMPOSITE_INSERT = 19,
+  LOOM_SPIRV_PACKET_FORM_ATOMIC = 20,
+  LOOM_SPIRV_PACKET_FORM_ATOMIC_COMPARE_EXCHANGE = 21,
+  LOOM_SPIRV_PACKET_FORM_ATOMIC_FLOAT_BITCAST = 22,
+  LOOM_SPIRV_PACKET_FORM_ATOMIC_FLOAT_CAS = 23,
+  LOOM_SPIRV_PACKET_FORM_ATOMIC_FLOAT_COMPARE_EXCHANGE = 24,
 };
 typedef uint8_t loom_spirv_packet_form_t;
 
@@ -90,6 +95,19 @@ typedef struct loom_spirv_packet_row_t {
       // Cooperative matrix operands mask literal for mul-add rows.
       uint32_t operands;
     } cooperative_matrix;
+    // Atomic instruction literals.
+    struct {
+      // SPIR-V memory Scope enumerant.
+      uint32_t memory_scope;
+      // Storage-class Memory Semantics bit used for ordered accesses.
+      uint32_t storage_semantics;
+      // Success ordering ordinal for compare-exchange packets.
+      uint8_t success_ordering;
+      // Integer scalar type used to bitcast floating-point atomics.
+      uint8_t integer_scalar;
+      // Floating-point combine operation selected for a CAS loop.
+      uint8_t float_operation;
+    } atomic;
   } payload;
   // Result value-type table ref, or UNKNOWN for result-less packets.
   loom_spirv_packet_value_type_ref_t result_type_ref;
