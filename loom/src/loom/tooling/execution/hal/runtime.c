@@ -12,6 +12,34 @@
 #include "iree/hal/api.h"
 #include "iree/tooling/device_util.h"
 
+static iree_status_t loom_run_hal_runtime_select_transfer_queue(
+    iree_hal_device_t* device, iree_hal_queue_t** out_queue) {
+  *out_queue = NULL;
+  const iree_hal_device_queue_spec_t* queue_spec =
+      iree_hal_device_spec_queues(iree_hal_device_spec(device));
+  for (iree_host_size_t i = 0; i < queue_spec->family_count; ++i) {
+    const iree_hal_queue_family_spec_t* family_spec = &queue_spec->families[i];
+    if (family_spec->provisioned_queue_count == 0 ||
+        !iree_all_bits_set(family_spec->role_flags,
+                           IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER)) {
+      continue;
+    }
+
+    iree_hal_queue_t* queue = iree_hal_device_queue(
+        device, (iree_hal_queue_family_ordinal_t)i, /*queue_ordinal=*/0);
+    if (IREE_UNLIKELY(queue == NULL)) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "HAL device queue specification advertises provisioned transfer "
+          "queue family %" PRIhsz " but the queue is unavailable",
+          i);
+    }
+    *out_queue = queue;
+    break;
+  }
+  return iree_ok_status();
+}
+
 void loom_run_hal_runtime_options_initialize(
     iree_string_view_t hal_driver_name,
     loom_run_hal_runtime_options_t* out_options) {
@@ -69,6 +97,10 @@ iree_status_t loom_run_hal_runtime_initialize(
   }
   iree_async_proactor_pool_release(proactor_pool);
   if (iree_status_is_ok(status)) {
+    status = loom_run_hal_runtime_select_transfer_queue(
+        out_runtime->device, &out_runtime->transfer_queue);
+  }
+  if (iree_status_is_ok(status)) {
     status = iree_hal_device_group_create_from_device(
         out_runtime->device, frontier_tracker, allocator,
         &out_runtime->device_group);
@@ -84,6 +116,7 @@ void loom_run_hal_runtime_deinitialize(loom_run_hal_runtime_t* runtime) {
   if (runtime == NULL) {
     return;
   }
+  runtime->transfer_queue = NULL;
   iree_hal_device_group_release(runtime->device_group);
   iree_hal_device_release(runtime->device);
   *runtime = (loom_run_hal_runtime_t){0};

@@ -82,6 +82,13 @@ typedef struct loom_run_hal_prepared_candidate_t {
 typedef struct loom_run_hal_iteration_t {
   // Iteration-owned binding list cloned from the invocation plan.
   loom_run_hal_binding_list_t bindings;
+  // Device timepoint reached after the iteration dispatch completes.
+  struct {
+    // Retained timeline semaphore signaled by the dispatch.
+    iree_hal_semaphore_t* semaphore;
+    // Semaphore payload value signaled by the dispatch.
+    uint64_t value;
+  } dispatch_completion;
   // True when |bindings| has been initialized for this iteration.
   bool has_bindings;
 } loom_run_hal_iteration_t;
@@ -455,9 +462,14 @@ iree_status_t loom_run_hal_invocation_run_plan(
     const loom_run_hal_invocation_plan_t* plan, iree_allocator_t allocator,
     loom_run_hal_invocation_result_t* result);
 
-// Transfers dispatch bindings back to host-visible storage for inspection.
+// Transfers all dispatch bindings back to host-visible storage for inspection.
+// The transfer waits for every timepoint in |wait_semaphore_list|, preserving
+// device memory dependencies when the dispatch used another queue.
+// The binding list is replaced only after the complete transfer succeeds and
+// remains unchanged on failure.
 iree_status_t loom_run_hal_transfer_bindings_to_host(
     const loom_run_hal_runtime_t* runtime,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
     loom_run_hal_binding_list_t* binding_list);
 
 // Parses bindings, dispatches |request->artifact|, transfers bindings back
