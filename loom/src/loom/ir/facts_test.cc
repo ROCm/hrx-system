@@ -485,6 +485,40 @@ TEST(FactsFitBitCount, UnsignedRange) {
       loom_value_facts_fit_unsigned_bit_count(loom_value_facts_unknown(), 32));
 }
 
+//===----------------------------------------------------------------------===//
+// Signed extension
+//===----------------------------------------------------------------------===//
+
+TEST(FactsSignExtend, LogicalExactValues) {
+  loom_value_facts_t zero =
+      loom_value_facts_sign_extend(loom_value_facts_exact_i64(0), 1);
+  EXPECT_TRUE(loom_value_facts_is_exact(zero));
+  EXPECT_EQ(zero.range_lo, 0);
+
+  loom_value_facts_t one =
+      loom_value_facts_sign_extend(loom_value_facts_exact_i64(1), 1);
+  EXPECT_TRUE(loom_value_facts_is_exact(one));
+  EXPECT_EQ(one.range_lo, -1);
+}
+
+TEST(FactsSignExtend, LogicalDynamicDomain) {
+  loom_value_facts_t source = loom_value_facts_make(0, 1, 1);
+  loom_value_facts_mark_lane_predicate(&source);
+  loom_value_facts_t result = loom_value_facts_sign_extend(source, 1);
+  EXPECT_EQ(result.range_lo, -1);
+  EXPECT_EQ(result.range_hi, 0);
+  EXPECT_TRUE(loom_value_facts_is_lane_varying(result));
+  EXPECT_FALSE(loom_value_facts_is_lane_predicate(result));
+  EXPECT_FALSE(loom_value_facts_is_boolean(result));
+}
+
+TEST(FactsSignExtend, WiderSignedDomainIsIdentity) {
+  loom_value_facts_t source = loom_value_facts_make(-8, 7, 1);
+  loom_value_facts_mark_workgroup_uniform(&source);
+  EXPECT_TRUE(
+      loom_value_facts_equal(loom_value_facts_sign_extend(source, 8), source));
+}
+
 TEST(FactsMaximum, NonNegativeFiniteRange) {
   int64_t maximum = -1;
   EXPECT_TRUE(loom_value_facts_as_non_negative_i64_maximum(
