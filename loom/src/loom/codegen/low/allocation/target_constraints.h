@@ -86,21 +86,18 @@ typedef struct loom_low_allocation_resolved_reserved_range_t {
   uint32_t location_count;
 } loom_low_allocation_resolved_reserved_range_t;
 
+// Target-validated fixed value prepared for allocation.
+//
+// |assignment| contains the propagated sparse and per-unit storage lifetime
+// used by conflict searches and is copied directly into the final allocation
+// table when selected.
 typedef struct loom_low_allocation_resolved_fixed_value_t {
-  // SSA value forced to the fixed location.
-  loom_value_id_t value_id;
-  // Liveness-local ordinal for |value_id|.
+  // Complete assignment at the required target-visible location.
+  loom_low_allocation_assignment_t assignment;
+  // Liveness-local ordinal for |assignment.value_id|.
   loom_value_ordinal_t value_ordinal;
-  // Descriptor-set-local register class ID for |value_id|.
-  uint16_t descriptor_reg_class_id;
-  // Live interval for |value_id|.
-  const loom_liveness_interval_t* interval;
-  // Target-visible fixed location kind.
-  loom_low_allocation_location_kind_t location_kind;
-  // Base physical register or target ID.
-  uint32_t location_base;
-  // Number of contiguous units fixed at |location_base|.
-  uint32_t location_count;
+  // Exclusive semantic live-range end before storage lifetime refinement.
+  uint32_t semantic_end_point;
 } loom_low_allocation_resolved_fixed_value_t;
 
 typedef struct loom_low_allocation_class_capacity_t {
@@ -160,11 +157,13 @@ iree_status_t loom_low_allocation_target_constraints_initialize(
     iree_arena_allocator_t* arena,
     loom_low_allocation_target_constraints_t* out_constraints);
 
-// Resolves fixed values against |liveness| and |value_domain|.
+// Resolves fixed values into complete assignments after |unit_liveness| has
+// been initialized and propagated for |liveness|.
 iree_status_t loom_low_allocation_target_constraints_resolve_fixed_values(
     loom_low_allocation_target_constraints_t* constraints,
     const loom_liveness_analysis_t* liveness,
     const loom_local_value_domain_t* value_domain,
+    const loom_low_allocation_unit_liveness_t* unit_liveness,
     const loom_low_allocation_fixed_value_t* fixed_values,
     iree_host_size_t fixed_value_count, iree_arena_allocator_t* arena);
 

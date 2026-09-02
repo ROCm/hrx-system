@@ -201,13 +201,13 @@ TEST_F(AllocationCheckerTest, AcceptsExplicitStorageAlias) {
 
 TEST_F(AllocationCheckerTest, RejectsFixedLocationMismatch) {
   loom_low_allocation_resolved_fixed_value_t fixed = {};
-  fixed.value_id = value_ids_[0];
   fixed.value_ordinal = 0;
-  fixed.descriptor_reg_class_id = 0;
-  fixed.interval = &intervals_[0];
-  fixed.location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
-  fixed.location_base = 7;
-  fixed.location_count = 1;
+  fixed.assignment.value_id = value_ids_[0];
+  fixed.assignment.descriptor_reg_class_id = 0;
+  fixed.assignment.location_kind =
+      LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
+  fixed.assignment.location_base = 7;
+  fixed.assignment.location_count = 1;
   frame_.allocation.fixed_values = &fixed;
   frame_.allocation.fixed_value_count = 1;
   const loom_low_allocation_check_result_t result = Check();

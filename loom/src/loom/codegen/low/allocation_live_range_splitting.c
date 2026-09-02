@@ -59,10 +59,10 @@ static bool loom_low_allocation_value_is_reference_register(
 static bool loom_low_allocation_fixed_value_overlaps_spill_assignment(
     const loom_low_allocation_resolved_fixed_value_t* fixed_value,
     const loom_low_allocation_assignment_t* spill_assignment) {
-  return loom_liveness_value_class_equal(fixed_value->interval->value_class,
+  return loom_liveness_value_class_equal(fixed_value->assignment.value_class,
                                          spill_assignment->value_class) &&
-         loom_low_allocation_live_range_assignment_overlaps_interval(
-             spill_assignment, fixed_value->interval);
+         spill_assignment->start_point < fixed_value->semantic_end_point &&
+         fixed_value->assignment.start_point < spill_assignment->end_point;
 }
 
 static bool loom_low_allocation_fixed_value_has_only_split_transfer_use(
@@ -560,16 +560,15 @@ static iree_status_t loom_low_allocation_try_split_fixed_value(
     const loom_low_allocation_resolved_fixed_value_t* fixed_value,
     uint32_t source_assignment_index, iree_arena_allocator_t* arena,
     loom_low_allocation_live_range_split_result_t* result) {
-  if (fixed_value->value_id == LOOM_VALUE_ID_INVALID ||
-      fixed_value->value_id >= module->values.count) {
+  const loom_value_id_t value_id = fixed_value->assignment.value_id;
+  if (value_id == LOOM_VALUE_ID_INVALID || value_id >= module->values.count) {
     return iree_ok_status();
   }
 
-  const loom_value_t* value = loom_module_value(module, fixed_value->value_id);
+  const loom_value_t* value = loom_module_value(module, value_id);
   if (loom_value_is_consumed(value) ||
-      loom_module_value_has_predicate_attribute_uses(module,
-                                                     fixed_value->value_id) ||
-      loom_module_value_has_type_uses(module, fixed_value->value_id) ||
+      loom_module_value_has_predicate_attribute_uses(module, value_id) ||
+      loom_module_value_has_type_uses(module, value_id) ||
       value->use_count == 0 ||
       loom_low_allocation_fixed_value_has_only_split_transfer_use(value)) {
     return iree_ok_status();
@@ -578,7 +577,7 @@ static iree_status_t loom_low_allocation_try_split_fixed_value(
   loom_block_t* insertion_block = NULL;
   loom_op_t* insertion_anchor = NULL;
   if (!loom_low_allocation_value_can_split_after_definition(
-          module, fixed_value->value_id, &insertion_block, &insertion_anchor)) {
+          module, value_id, &insertion_block, &insertion_anchor)) {
     return iree_ok_status();
   }
 
@@ -586,8 +585,7 @@ static iree_status_t loom_low_allocation_try_split_fixed_value(
   const loom_use_t* original_uses = loom_value_uses(value);
   for (uint32_t i = 0; i < original_use_count; ++i) {
     if (!loom_low_allocation_split_use_is_eligible(
-            fixed_value->value_id, insertion_block, insertion_anchor,
-            original_uses[i])) {
+            value_id, insertion_block, insertion_anchor, original_uses[i])) {
       return iree_ok_status();
     }
   }
@@ -604,26 +602,24 @@ static iree_status_t loom_low_allocation_try_split_fixed_value(
   }
 
   loom_op_t* transfer_op = NULL;
-  const loom_type_t value_type =
-      loom_module_value_type(module, fixed_value->value_id);
+  const loom_type_t value_type = loom_module_value_type(module, value_id);
   iree_status_t status =
-      loom_low_allocation_value_is_reference_register(module, table,
-                                                      fixed_value->value_id)
-          ? loom_low_move_build(&rewriter.builder, fixed_value->value_id, true,
-                                value_type, LOOM_LOCATION_NONE, &transfer_op)
-          : loom_low_copy_build(&rewriter.builder, fixed_value->value_id, true,
-                                value_type, LOOM_LOCATION_NONE, &transfer_op);
+      loom_low_allocation_value_is_reference_register(module, table, value_id)
+          ? loom_low_move_build(&rewriter.builder, value_id, true, value_type,
+                                LOOM_LOCATION_NONE, &transfer_op)
+          : loom_low_copy_build(&rewriter.builder, value_id, true, value_type,
+                                LOOM_LOCATION_NONE, &transfer_op);
   loom_builder_restore(&rewriter.builder, saved_ip);
   if (iree_status_is_ok(status)) {
     const loom_value_id_t split_value_id = loom_op_results(transfer_op)[0];
     status = loom_rewriter_try_set_derived_value_name(
-        &rewriter, fixed_value->value_id, split_value_id, IREE_SV("split"));
+        &rewriter, value_id, split_value_id, IREE_SV("split"));
     if (iree_status_is_ok(status)) {
       status = loom_rewriter_replace_all_uses_except(
-          &rewriter, fixed_value->value_id, split_value_id, transfer_op);
+          &rewriter, value_id, split_value_id, transfer_op);
     }
     if (iree_status_is_ok(status)) {
-      result->source_value_id = fixed_value->value_id;
+      result->source_value_id = value_id;
       result->split_value_id = split_value_id;
       result->source_assignment_index = source_assignment_index;
       result->transfer_packet_count = 1;
@@ -694,9 +690,9 @@ static iree_string_view_t loom_low_allocation_live_range_split_value_class_name(
   for (iree_host_size_t i = 0; i < table->fixed_value_count; ++i) {
     const loom_low_allocation_resolved_fixed_value_t* fixed_value =
         &table->fixed_values[i];
-    if (fixed_value->value_id == result->source_value_id) {
+    if (fixed_value->assignment.value_id == result->source_value_id) {
       return loom_low_diagnostic_value_class_name(
-          table->target.descriptor_set, fixed_value->interval->value_class);
+          table->target.descriptor_set, fixed_value->assignment.value_class);
     }
   }
   return IREE_SV("<unknown>");
