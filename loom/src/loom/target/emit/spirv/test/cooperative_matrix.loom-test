@@ -29,6 +29,7 @@ low.kernel.def target<spirv.logical.core>(@hal_target_coop_f16) workgroup_size(3
                OpCapability Float16
                OpCapability StorageBuffer16BitAccess
                OpCapability CooperativeMatrixKHR
+               OpCapability GroupNonUniform
                OpExtension "SPV_KHR_vulkan_memory_model"
                OpExtension "SPV_KHR_physical_storage_buffer"
                OpExtension "SPV_KHR_16bit_storage"
@@ -178,6 +179,7 @@ low.kernel.def target<spirv.logical.core>(@hal_target_coop_s8) workgroup_size(32
                OpCapability Int8
                OpCapability StorageBuffer8BitAccess
                OpCapability CooperativeMatrixKHR
+               OpCapability GroupNonUniform
                OpExtension "SPV_KHR_vulkan_memory_model"
                OpExtension "SPV_KHR_physical_storage_buffer"
                OpExtension "SPV_KHR_8bit_storage"
@@ -327,6 +329,7 @@ low.kernel.def target<spirv.logical.core>(@hal_target_coop_u8) workgroup_size(32
                OpCapability Int8
                OpCapability StorageBuffer8BitAccess
                OpCapability CooperativeMatrixKHR
+               OpCapability GroupNonUniform
                OpExtension "SPV_KHR_vulkan_memory_model"
                OpExtension "SPV_KHR_physical_storage_buffer"
                OpExtension "SPV_KHR_8bit_storage"
@@ -477,6 +480,7 @@ low.kernel.def target<spirv.logical.core>(@hal_target_coop_bf16) workgroup_size(
                OpCapability CooperativeMatrixKHR
                OpCapability BFloat16TypeKHR
                OpCapability BFloat16CooperativeMatrixKHR
+               OpCapability GroupNonUniform
                OpExtension "SPV_KHR_vulkan_memory_model"
                OpExtension "SPV_KHR_physical_storage_buffer"
                OpExtension "SPV_KHR_16bit_storage"

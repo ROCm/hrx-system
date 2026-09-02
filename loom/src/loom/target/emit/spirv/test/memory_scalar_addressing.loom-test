@@ -20,6 +20,7 @@ func.def target(@target) @scalar_static_rank2_i32(%input: buffer, %output: buffe
                OpCapability VulkanMemoryModel
                OpCapability PhysicalStorageBufferAddresses
                OpCapability Int64
+               OpCapability GroupNonUniform
                OpExtension "SPV_KHR_vulkan_memory_model"
                OpExtension "SPV_KHR_physical_storage_buffer"
                OpMemoryModel PhysicalStorageBuffer64 Vulkan
@@ -94,6 +95,7 @@ func.def target(@target) @scalar_dynamic_view_base_i32(%input: buffer, %output: 
                OpCapability VulkanMemoryModel
                OpCapability PhysicalStorageBufferAddresses
                OpCapability Int64
+               OpCapability GroupNonUniform
                OpExtension "SPV_KHR_vulkan_memory_model"
                OpExtension "SPV_KHR_physical_storage_buffer"
                OpMemoryModel PhysicalStorageBuffer64 Vulkan
@@ -176,6 +178,7 @@ func.def target(@target) @scalar_materialized_view_base_suffix_i32(%input: buffe
                OpCapability VulkanMemoryModel
                OpCapability PhysicalStorageBufferAddresses
                OpCapability Int64
+               OpCapability GroupNonUniform
                OpExtension "SPV_KHR_vulkan_memory_model"
                OpExtension "SPV_KHR_physical_storage_buffer"
                OpMemoryModel PhysicalStorageBuffer64 Vulkan
@@ -262,6 +265,7 @@ func.def target(@target) @scalar_dynamic_index_i32(%input: buffer, %output: buff
                OpCapability VulkanMemoryModel
                OpCapability PhysicalStorageBufferAddresses
                OpCapability Int64
+               OpCapability GroupNonUniform
                OpExtension "SPV_KHR_vulkan_memory_model"
                OpExtension "SPV_KHR_physical_storage_buffer"
                OpMemoryModel PhysicalStorageBuffer64 Vulkan
@@ -346,6 +350,7 @@ func.def target(@target) @scalar_mixed_rank2_i32(%input: buffer, %output: buffer
                OpCapability VulkanMemoryModel
                OpCapability PhysicalStorageBufferAddresses
                OpCapability Int64
+               OpCapability GroupNonUniform
                OpExtension "SPV_KHR_vulkan_memory_model"
                OpExtension "SPV_KHR_physical_storage_buffer"
                OpMemoryModel PhysicalStorageBuffer64 Vulkan
@@ -449,6 +454,7 @@ func.def target(@target) @scalar_dynamic_stride_i32(%input: buffer, %output: buf
                OpCapability VulkanMemoryModel
                OpCapability PhysicalStorageBufferAddresses
                OpCapability Int64
+               OpCapability GroupNonUniform
                OpExtension "SPV_KHR_vulkan_memory_model"
                OpExtension "SPV_KHR_physical_storage_buffer"
                OpMemoryModel PhysicalStorageBuffer64 Vulkan
@@ -555,6 +561,7 @@ func.def target(@target) @scalar_subview_dynamic_index_i32(%input: buffer, %outp
                OpCapability VulkanMemoryModel
                OpCapability PhysicalStorageBufferAddresses
                OpCapability Int64
+               OpCapability GroupNonUniform
                OpExtension "SPV_KHR_vulkan_memory_model"
                OpExtension "SPV_KHR_physical_storage_buffer"
                OpMemoryModel PhysicalStorageBuffer64 Vulkan

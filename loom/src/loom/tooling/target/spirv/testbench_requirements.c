@@ -42,6 +42,76 @@ static const loom_spirv_vulkan_feature_requirement_t
             .feature = IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BFLOAT16_TYPE,
         },
         {
+            .name = IREE_SVL("shader_buffer_float16_atomic_add"),
+            .feature =
+                IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_FLOAT16_ATOMIC_ADD,
+        },
+        {
+            .name = IREE_SVL("shader_buffer_float16_atomics"),
+            .feature =
+                IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_FLOAT16_ATOMICS,
+        },
+        {
+            .name = IREE_SVL("shader_buffer_float32_atomic_add"),
+            .feature =
+                IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_FLOAT32_ATOMIC_ADD,
+        },
+        {
+            .name = IREE_SVL("shader_buffer_float32_atomics"),
+            .feature =
+                IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_FLOAT32_ATOMICS,
+        },
+        {
+            .name = IREE_SVL("shader_buffer_float64_atomic_add"),
+            .feature =
+                IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_FLOAT64_ATOMIC_ADD,
+        },
+        {
+            .name = IREE_SVL("shader_buffer_float64_atomics"),
+            .feature =
+                IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_FLOAT64_ATOMICS,
+        },
+        {
+            .name = IREE_SVL("shader_buffer_int64_atomics"),
+            .feature =
+                IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BUFFER_INT64_ATOMICS,
+        },
+        {
+            .name = IREE_SVL("shader_shared_float16_atomic_add"),
+            .feature =
+                IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_SHARED_FLOAT16_ATOMIC_ADD,
+        },
+        {
+            .name = IREE_SVL("shader_shared_float16_atomics"),
+            .feature =
+                IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_SHARED_FLOAT16_ATOMICS,
+        },
+        {
+            .name = IREE_SVL("shader_shared_float32_atomic_add"),
+            .feature =
+                IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_SHARED_FLOAT32_ATOMIC_ADD,
+        },
+        {
+            .name = IREE_SVL("shader_shared_float32_atomics"),
+            .feature =
+                IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_SHARED_FLOAT32_ATOMICS,
+        },
+        {
+            .name = IREE_SVL("shader_shared_float64_atomic_add"),
+            .feature =
+                IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_SHARED_FLOAT64_ATOMIC_ADD,
+        },
+        {
+            .name = IREE_SVL("shader_shared_float64_atomics"),
+            .feature =
+                IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_SHARED_FLOAT64_ATOMICS,
+        },
+        {
+            .name = IREE_SVL("shader_shared_int64_atomics"),
+            .feature =
+                IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_SHARED_INT64_ATOMICS,
+        },
+        {
             .name = IREE_SVL("shader_float16"),
             .feature = IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FLOAT16,
         },

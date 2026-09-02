@@ -22,6 +22,7 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @spirv_
                OpCapability VulkanMemoryModel
                OpCapability PhysicalStorageBufferAddresses
                OpCapability Int64
+               OpCapability GroupNonUniform
                OpExtension "SPV_KHR_vulkan_memory_model"
                OpExtension "SPV_KHR_physical_storage_buffer"
                OpMemoryModel PhysicalStorageBuffer64 Vulkan
@@ -109,6 +110,7 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @spirv_
                OpCapability VulkanMemoryModel
                OpCapability PhysicalStorageBufferAddresses
                OpCapability Int64
+               OpCapability GroupNonUniform
                OpExtension "SPV_KHR_vulkan_memory_model"
                OpExtension "SPV_KHR_physical_storage_buffer"
                OpMemoryModel PhysicalStorageBuffer64 Vulkan
@@ -203,6 +205,7 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @spirv_
                OpCapability VulkanMemoryModel
                OpCapability PhysicalStorageBufferAddresses
                OpCapability Int64
+               OpCapability GroupNonUniform
                OpExtension "SPV_KHR_vulkan_memory_model"
                OpExtension "SPV_KHR_physical_storage_buffer"
                OpMemoryModel PhysicalStorageBuffer64 Vulkan

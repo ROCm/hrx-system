@@ -52,6 +52,7 @@ kernel.def target(@target) @ordinary_vector_structure_i32() {
                OpCapability Shader
                OpCapability PhysicalStorageBufferAddresses
                OpCapability Int64
+               OpCapability GroupNonUniform
                OpExtension "SPV_KHR_physical_storage_buffer"
                OpMemoryModel PhysicalStorageBuffer64 GLSL450
                OpEntryPoint GLCompute %ordinary_vector_structure_i32 "ordinary_vector_structure_i32"
