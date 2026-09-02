@@ -213,9 +213,12 @@ TEST_F(SlabProviderTest, DefaultPhysicalDevicePoolGrowsAdditionalSlabs) {
   iree_hal_pool_reservation_t first_reservation = {0};
   iree_hal_pool_acquire_info_t first_info = {0};
   iree_hal_pool_acquire_result_t first_result = IREE_HAL_POOL_ACQUIRE_EXHAUSTED;
-  iree::Status first_status(iree_hal_pool_acquire_reservation(
-      default_pool, capabilities.max_allocation_size,
-      capabilities.min_allocation_size, /*requester_frontier=*/NULL,
+  const iree_hal_pool_reservation_request_t request = {
+      .params = {.min_alignment = capabilities.min_allocation_size},
+      .allocation_size = capabilities.max_allocation_size,
+  };
+  iree::Status first_status(iree_hal_pool_acquire_reservations(
+      default_pool, 1, &request, /*requester_frontier=*/NULL,
       IREE_HAL_POOL_RESERVE_FLAG_NONE, &first_reservation, &first_info,
       &first_result));
   const bool first_acquired =
@@ -226,9 +229,8 @@ TEST_F(SlabProviderTest, DefaultPhysicalDevicePoolGrowsAdditionalSlabs) {
   iree_hal_pool_acquire_info_t second_info = {0};
   iree_hal_pool_acquire_result_t second_result =
       IREE_HAL_POOL_ACQUIRE_EXHAUSTED;
-  iree::Status second_status(iree_hal_pool_acquire_reservation(
-      default_pool, capabilities.max_allocation_size,
-      capabilities.min_allocation_size, /*requester_frontier=*/NULL,
+  iree::Status second_status(iree_hal_pool_acquire_reservations(
+      default_pool, 1, &request, /*requester_frontier=*/NULL,
       IREE_HAL_POOL_RESERVE_FLAG_NONE, &second_reservation, &second_info,
       &second_result));
   const bool second_acquired =
@@ -239,12 +241,12 @@ TEST_F(SlabProviderTest, DefaultPhysicalDevicePoolGrowsAdditionalSlabs) {
   iree_hal_pool_query_stats(default_pool, &stats);
 
   if (second_acquired) {
-    iree_hal_pool_release_reservation(default_pool, &second_reservation,
-                                      /*death_frontier=*/NULL);
+    iree_hal_pool_release_reservations(default_pool, 1, &second_reservation,
+                                       /*death_frontier=*/NULL);
   }
   if (first_acquired) {
-    iree_hal_pool_release_reservation(default_pool, &first_reservation,
-                                      /*death_frontier=*/NULL);
+    iree_hal_pool_release_reservations(default_pool, 1, &first_reservation,
+                                       /*death_frontier=*/NULL);
   }
 
   EXPECT_TRUE(first_status.ok()) << first_status.ToString();

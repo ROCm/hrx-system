@@ -210,9 +210,9 @@ static void iree_hal_amdgpu_pending_op_release_alloca_memory_wait(
 
   switch (wait->kind) {
     case IREE_HAL_AMDGPU_ALLOCA_MEMORY_WAIT_FRONTIER:
-      iree_hal_pool_release_reservation(op->alloca_op.pool,
-                                        &wait->frontier.reservation,
-                                        wait->frontier.wait_frontier);
+      iree_hal_pool_release_reservations(op->alloca_op.pool, 1,
+                                         &wait->frontier.reservation,
+                                         wait->frontier.wait_frontier);
       wait->kind = IREE_HAL_AMDGPU_ALLOCA_MEMORY_WAIT_NONE;
       break;
     case IREE_HAL_AMDGPU_ALLOCA_MEMORY_WAIT_POOL_GROWTH:
@@ -742,12 +742,13 @@ static iree_status_t iree_hal_amdgpu_pending_op_grow_alloca_pool(
   iree_hal_pool_acquire_info_t acquire_info;
   iree_hal_pool_acquire_result_t acquire_result =
       IREE_HAL_POOL_ACQUIRE_EXHAUSTED;
-  IREE_RETURN_IF_ERROR(iree_hal_pool_acquire_reservation(
-      op->alloca_op.pool, op->alloca_op.allocation_size,
-      op->alloca_op.params.min_alignment ? op->alloca_op.params.min_alignment
-                                         : 1,
-      requester_frontier, reserve_flags, &reservation, &acquire_info,
-      &acquire_result));
+  const iree_hal_pool_reservation_request_t request = {
+      .params = op->alloca_op.params,
+      .allocation_size = op->alloca_op.allocation_size,
+  };
+  IREE_RETURN_IF_ERROR(iree_hal_pool_acquire_reservations(
+      op->alloca_op.pool, 1, &request, requester_frontier, reserve_flags,
+      &reservation, &acquire_info, &acquire_result));
 
   switch (acquire_result) {
     case IREE_HAL_POOL_ACQUIRE_OK:
@@ -764,14 +765,14 @@ static iree_status_t iree_hal_amdgpu_pending_op_grow_alloca_pool(
               op->alloca_op.params, op->alloca_op.buffer,
               &wait->pool_growth.materialization);
       if (!iree_status_is_ok(status)) {
-        iree_hal_pool_release_reservation(op->alloca_op.pool, &reservation,
-                                          /*death_frontier=*/NULL);
+        iree_hal_pool_release_reservations(op->alloca_op.pool, 1, &reservation,
+                                           /*death_frontier=*/NULL);
       }
       return status;
     }
     case IREE_HAL_POOL_ACQUIRE_OK_NEEDS_WAIT:
-      iree_hal_pool_release_reservation(op->alloca_op.pool, &reservation,
-                                        acquire_info.wait_frontier);
+      iree_hal_pool_release_reservations(op->alloca_op.pool, 1, &reservation,
+                                         acquire_info.wait_frontier);
       wait->kind = IREE_HAL_AMDGPU_ALLOCA_MEMORY_WAIT_NONE;
       return iree_ok_status();
     case IREE_HAL_POOL_ACQUIRE_EXHAUSTED:
@@ -1192,8 +1193,8 @@ static iree_status_t iree_hal_amdgpu_host_queue_defer_alloca_frontier_wait(
   if (iree_status_is_ok(status)) {
     *out_memory_wait_op = memory_wait_op;
   } else {
-    iree_hal_pool_release_reservation(
-        allocation_pool, &alloca_reservation->reservation,
+    iree_hal_pool_release_reservations(
+        allocation_pool, 1, &alloca_reservation->reservation,
         alloca_reservation->acquire_info.wait_frontier);
     if (!pending_op && memory_wait_op) {
       iree_hal_amdgpu_pending_op_destroy_under_lock(memory_wait_op,

@@ -1114,9 +1114,9 @@ static void iree_hal_task_queue_op_release_alloca_memory_wait(
 
   switch (wait->kind) {
     case IREE_HAL_TASK_QUEUE_ALLOCA_MEMORY_WAIT_FRONTIER:
-      iree_hal_pool_release_reservation(operation->alloca.pool,
-                                        &wait->frontier.reservation,
-                                        wait->frontier.wait_frontier);
+      iree_hal_pool_release_reservations(operation->alloca.pool, 1,
+                                         &wait->frontier.reservation,
+                                         wait->frontier.wait_frontier);
       wait->kind = IREE_HAL_TASK_QUEUE_ALLOCA_MEMORY_WAIT_NONE;
       break;
     case IREE_HAL_TASK_QUEUE_ALLOCA_MEMORY_WAIT_POOL_NOTIFICATION:
@@ -1198,8 +1198,8 @@ static iree_status_t iree_hal_task_queue_alloca_wait_for_frontier(
     }
   }
   if (!iree_status_is_ok(status)) {
-    iree_hal_pool_release_reservation(operation->alloca.pool, reservation,
-                                      wait_frontier);
+    iree_hal_pool_release_reservations(operation->alloca.pool, 1, reservation,
+                                       wait_frontier);
     if (wait) {
       wait->kind = IREE_HAL_TASK_QUEUE_ALLOCA_MEMORY_WAIT_NONE;
     }
@@ -1753,9 +1753,13 @@ static iree_status_t iree_hal_task_queue_drain_alloca_submit_reservation(
   iree_hal_task_transient_buffer_attach_reservation(
       operation->alloca.transient_buffer, operation->alloca.pool, reservation);
 
+  const iree_hal_pool_reservation_request_t request = {
+      .params = operation->alloca.params,
+      .allocation_size = operation->alloca.allocation_size,
+  };
   iree_hal_buffer_t* backing_buffer = NULL;
-  iree_status_t status = iree_hal_pool_materialize_reservation(
-      operation->alloca.pool, operation->alloca.params, reservation,
+  iree_status_t status = iree_hal_pool_materialize_reservations(
+      operation->alloca.pool, 1, &request, reservation,
       IREE_HAL_POOL_MATERIALIZE_FLAG_NONE, &backing_buffer);
   if (iree_status_is_ok(status)) {
     iree_hal_task_transient_buffer_stage_backing(
@@ -1797,14 +1801,14 @@ static iree_status_t iree_hal_task_queue_drain_alloca_acquire(
     iree_hal_pool_reservation_t* out_reservation,
     iree_hal_pool_acquire_info_t* out_acquire_info,
     iree_hal_pool_acquire_result_t* out_acquire_result) {
-  const iree_device_size_t min_alignment =
-      operation->alloca.params.min_alignment
-          ? operation->alloca.params.min_alignment
-          : 1;
-  iree_status_t status = iree_hal_pool_acquire_reservation(
-      operation->alloca.pool, operation->alloca.allocation_size, min_alignment,
-      /*requester_frontier=*/NULL, operation->alloca.reserve_flags,
-      out_reservation, out_acquire_info, out_acquire_result);
+  const iree_hal_pool_reservation_request_t request = {
+      .params = operation->alloca.params,
+      .allocation_size = operation->alloca.allocation_size,
+  };
+  iree_status_t status = iree_hal_pool_acquire_reservations(
+      operation->alloca.pool, 1, &request, /*requester_frontier=*/NULL,
+      operation->alloca.reserve_flags, out_reservation, out_acquire_info,
+      out_acquire_result);
   if (iree_status_is_ok(status)) {
     iree_hal_profile_memory_event_flags_t flags =
         IREE_HAL_PROFILE_MEMORY_EVENT_FLAG_QUEUE_OPERATION;
@@ -1892,8 +1896,9 @@ static iree_status_t iree_hal_task_queue_drain_alloca_on_acquire_result(
     case IREE_HAL_POOL_ACQUIRE_OK_NEEDS_WAIT:
       if (!iree_all_bits_set(operation->alloca.flags,
                              IREE_HAL_ALLOCA_FLAG_ALLOW_POOL_WAIT_FRONTIER)) {
-        iree_hal_pool_release_reservation(operation->alloca.pool, reservation,
-                                          acquire_info->wait_frontier);
+        iree_hal_pool_release_reservations(operation->alloca.pool, 1,
+                                           reservation,
+                                           acquire_info->wait_frontier);
         return iree_make_status(
             IREE_STATUS_RESOURCE_EXHAUSTED,
             "queue_alloca recycled pool memory requires "

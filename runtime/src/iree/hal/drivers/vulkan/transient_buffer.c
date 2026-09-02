@@ -262,7 +262,7 @@ void iree_hal_vulkan_transient_buffer_release_reservation(
   }
   iree_slim_mutex_unlock(&buffer->mutex);
   if (was_armed) {
-    iree_hal_pool_release_reservation(pool, &reservation, death_frontier);
+    iree_hal_pool_release_reservations(pool, 1, &reservation, death_frontier);
     iree_slim_mutex_lock(&buffer->mutex);
     buffer->reservation_pool = NULL;
     memset(&buffer->reservation, 0, sizeof(buffer->reservation));

@@ -4678,8 +4678,8 @@ static iree_status_t iree_hal_vulkan_queue_stage_alloca_reservation(
   if (acquire_result == IREE_HAL_POOL_ACQUIRE_OK_NEEDS_WAIT &&
       !iree_all_bits_set(submission->alloca.flags,
                          IREE_HAL_ALLOCA_FLAG_ALLOW_POOL_WAIT_FRONTIER)) {
-    iree_hal_pool_release_reservation(submission->alloca.pool, reservation,
-                                      wait_frontier);
+    iree_hal_pool_release_reservations(submission->alloca.pool, 1, reservation,
+                                       wait_frontier);
     iree_hal_vulkan_queue_profile_record_memory_event(
         submission, IREE_HAL_PROFILE_MEMORY_EVENT_TYPE_POOL_RELEASE,
         IREE_HAL_PROFILE_MEMORY_EVENT_FLAG_QUEUE_OPERATION |
@@ -4693,9 +4693,13 @@ static iree_status_t iree_hal_vulkan_queue_stage_alloca_reservation(
                             "IREE_HAL_ALLOCA_FLAG_ALLOW_POOL_WAIT_FRONTIER");
   }
 
+  const iree_hal_pool_reservation_request_t request = {
+      .params = submission->alloca.params,
+      .allocation_size = submission->alloca.allocation_size,
+  };
   iree_hal_buffer_t* backing_buffer = NULL;
-  iree_status_t status = iree_hal_pool_materialize_reservation(
-      submission->alloca.pool, submission->alloca.params, reservation,
+  iree_status_t status = iree_hal_pool_materialize_reservations(
+      submission->alloca.pool, 1, &request, reservation,
       IREE_HAL_POOL_MATERIALIZE_FLAG_NONE, &backing_buffer);
   if (iree_status_is_ok(status)) {
     iree_hal_vulkan_transient_buffer_attach_reservation(
@@ -4716,8 +4720,8 @@ static iree_status_t iree_hal_vulkan_queue_stage_alloca_reservation(
         /*backing_id=*/0, submission->alloca.allocation_size,
         wait_frontier ? wait_frontier->entry_count : 0);
   } else {
-    iree_hal_pool_release_reservation(
-        submission->alloca.pool, reservation,
+    iree_hal_pool_release_reservations(
+        submission->alloca.pool, 1, reservation,
         acquire_result == IREE_HAL_POOL_ACQUIRE_OK_NEEDS_WAIT ? wait_frontier
                                                               : NULL);
     iree_hal_profile_memory_event_flags_t release_flags =
@@ -4804,13 +4808,14 @@ static iree_status_t iree_hal_vulkan_queue_prepare_alloca_pool_notification(
   iree_hal_pool_acquire_info_t acquire_info;
   iree_hal_pool_acquire_result_t acquire_result =
       IREE_HAL_POOL_ACQUIRE_EXHAUSTED;
-  iree_status_t status = iree_hal_pool_acquire_reservation(
-      submission->alloca.pool, submission->alloca.allocation_size,
-      submission->alloca.params.min_alignment
-          ? submission->alloca.params.min_alignment
-          : 1,
-      requester_frontier, submission->alloca.reserve_flags, &reservation,
-      &acquire_info, &acquire_result);
+  const iree_hal_pool_reservation_request_t request = {
+      .params = submission->alloca.params,
+      .allocation_size = submission->alloca.allocation_size,
+  };
+  iree_status_t status = iree_hal_pool_acquire_reservations(
+      submission->alloca.pool, 1, &request, requester_frontier,
+      submission->alloca.reserve_flags, &reservation, &acquire_info,
+      &acquire_result);
 
   if (iree_status_is_ok(status)) {
     iree_hal_vulkan_queue_profile_record_memory_event(
@@ -4885,13 +4890,14 @@ static iree_status_t iree_hal_vulkan_queue_prepare_alloca_backing(
   iree_hal_pool_acquire_info_t acquire_info;
   iree_hal_pool_acquire_result_t acquire_result =
       IREE_HAL_POOL_ACQUIRE_EXHAUSTED;
-  IREE_RETURN_IF_ERROR(iree_hal_pool_acquire_reservation(
-      submission->alloca.pool, submission->alloca.allocation_size,
-      submission->alloca.params.min_alignment
-          ? submission->alloca.params.min_alignment
-          : 1,
-      requester_frontier, submission->alloca.reserve_flags, &reservation,
-      &acquire_info, &acquire_result));
+  const iree_hal_pool_reservation_request_t request = {
+      .params = submission->alloca.params,
+      .allocation_size = submission->alloca.allocation_size,
+  };
+  IREE_RETURN_IF_ERROR(iree_hal_pool_acquire_reservations(
+      submission->alloca.pool, 1, &request, requester_frontier,
+      submission->alloca.reserve_flags, &reservation, &acquire_info,
+      &acquire_result));
 
   iree_hal_vulkan_queue_profile_record_memory_event(
       submission, IREE_HAL_PROFILE_MEMORY_EVENT_TYPE_POOL_RESERVE,
@@ -4955,13 +4961,14 @@ static iree_status_t iree_hal_vulkan_queue_try_stage_alloca_backing_now(
   iree_hal_pool_acquire_info_t acquire_info;
   iree_hal_pool_acquire_result_t acquire_result =
       IREE_HAL_POOL_ACQUIRE_EXHAUSTED;
-  IREE_RETURN_IF_ERROR(iree_hal_pool_acquire_reservation(
-      submission->alloca.pool, submission->alloca.allocation_size,
-      submission->alloca.params.min_alignment
-          ? submission->alloca.params.min_alignment
-          : 1,
-      requester_frontier, submission->alloca.reserve_flags, &reservation,
-      &acquire_info, &acquire_result));
+  const iree_hal_pool_reservation_request_t request = {
+      .params = submission->alloca.params,
+      .allocation_size = submission->alloca.allocation_size,
+  };
+  IREE_RETURN_IF_ERROR(iree_hal_pool_acquire_reservations(
+      submission->alloca.pool, 1, &request, requester_frontier,
+      submission->alloca.reserve_flags, &reservation, &acquire_info,
+      &acquire_result));
 
   iree_hal_vulkan_queue_profile_record_memory_event(
       submission, IREE_HAL_PROFILE_MEMORY_EVENT_TYPE_POOL_RESERVE,

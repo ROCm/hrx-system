@@ -282,11 +282,14 @@ iree_status_t iree_hal_amdgpu_host_queue_acquire_alloca_reservation(
       iree_hal_amdgpu_host_queue_pool_requester_frontier(
           queue, resolution, &requester_frontier_storage);
 
-  IREE_RETURN_IF_ERROR(iree_hal_pool_acquire_reservation(
-      allocation_pool, allocation_size,
-      params.min_alignment ? params.min_alignment : 1, requester_frontier,
-      reserve_flags, &out_reservation->reservation,
-      &out_reservation->acquire_info, &out_reservation->acquire_result));
+  const iree_hal_pool_reservation_request_t request = {
+      .params = params,
+      .allocation_size = allocation_size,
+  };
+  IREE_RETURN_IF_ERROR(iree_hal_pool_acquire_reservations(
+      allocation_pool, 1, &request, requester_frontier, reserve_flags,
+      &out_reservation->reservation, &out_reservation->acquire_info,
+      &out_reservation->acquire_result));
 
   iree_hal_profile_memory_event_flags_t reserve_event_flags =
       IREE_HAL_PROFILE_MEMORY_EVENT_FLAG_QUEUE_OPERATION;
@@ -319,8 +322,8 @@ iree_status_t iree_hal_amdgpu_host_queue_acquire_alloca_reservation(
     case IREE_HAL_POOL_ACQUIRE_OK_NEEDS_WAIT:
       if (!iree_all_bits_set(flags,
                              IREE_HAL_ALLOCA_FLAG_ALLOW_POOL_WAIT_FRONTIER)) {
-        iree_hal_pool_release_reservation(
-            allocation_pool, &out_reservation->reservation,
+        iree_hal_pool_release_reservations(
+            allocation_pool, 1, &out_reservation->reservation,
             out_reservation->acquire_info.wait_frontier);
         iree_hal_amdgpu_host_queue_record_memory_event(
             queue, IREE_HAL_PROFILE_MEMORY_EVENT_TYPE_POOL_RELEASE,
@@ -419,9 +422,13 @@ iree_status_t iree_hal_amdgpu_host_queue_materialize_alloca_reservation(
   out_materialization->reservation.acquire_result =
       IREE_HAL_POOL_ACQUIRE_EXHAUSTED;
 
+  const iree_hal_pool_reservation_request_t request = {
+      .params = params,
+      .allocation_size = iree_hal_buffer_byte_length(buffer),
+  };
   iree_hal_buffer_t* backing_buffer = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_pool_materialize_reservation(
-      allocation_pool, params, &alloca_reservation->reservation,
+  IREE_RETURN_IF_ERROR(iree_hal_pool_materialize_reservations(
+      allocation_pool, 1, &request, &alloca_reservation->reservation,
       IREE_HAL_POOL_MATERIALIZE_FLAG_NONE, &backing_buffer));
 
   out_materialization->reservation = *alloca_reservation;
@@ -448,8 +455,8 @@ void iree_hal_amdgpu_host_queue_release_alloca_materialization(
     case IREE_HAL_POOL_ACQUIRE_OK:
     case IREE_HAL_POOL_ACQUIRE_OK_FRESH:
     case IREE_HAL_POOL_ACQUIRE_OK_NEEDS_WAIT:
-      iree_hal_pool_release_reservation(
-          allocation_pool, &materialization->reservation.reservation,
+      iree_hal_pool_release_reservations(
+          allocation_pool, 1, &materialization->reservation.reservation,
           iree_hal_amdgpu_alloca_reservation_failure_frontier(
               &materialization->reservation));
       materialization->reservation.acquire_result =
@@ -558,9 +565,9 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_alloca_reservation(
           IREE_ARRAYSIZE(operation_resources), &profile_event_info, out_ready,
           &submission);
   if (!iree_status_is_ok(status) || !*out_ready) {
-    iree_hal_pool_release_reservation(allocation_pool,
-                                      &alloca_reservation->reservation,
-                                      reservation_failure_frontier);
+    iree_hal_pool_release_reservations(allocation_pool, 1,
+                                       &alloca_reservation->reservation,
+                                       reservation_failure_frontier);
     iree_hal_amdgpu_host_queue_record_memory_event(
         queue, IREE_HAL_PROFILE_MEMORY_EVENT_TYPE_POOL_RELEASE,
         IREE_HAL_PROFILE_MEMORY_EVENT_FLAG_QUEUE_OPERATION,
@@ -573,9 +580,13 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_alloca_reservation(
     return status;
   }
 
+  const iree_hal_pool_reservation_request_t request = {
+      .params = params,
+      .allocation_size = iree_hal_buffer_byte_length(buffer),
+  };
   iree_hal_buffer_t* backing_buffer = NULL;
-  status = iree_hal_pool_materialize_reservation(
-      allocation_pool, params, &alloca_reservation->reservation,
+  status = iree_hal_pool_materialize_reservations(
+      allocation_pool, 1, &request, &alloca_reservation->reservation,
       IREE_HAL_POOL_MATERIALIZE_FLAG_NONE, &backing_buffer);
   if (iree_status_is_ok(status)) {
     iree_hal_amdgpu_transient_buffer_attach_reservation(
@@ -623,9 +634,9 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_alloca_reservation(
 
   if (!iree_status_is_ok(status)) {
     iree_hal_amdgpu_host_queue_fail_barrier_submission(queue, &submission);
-    iree_hal_pool_release_reservation(allocation_pool,
-                                      &alloca_reservation->reservation,
-                                      reservation_failure_frontier);
+    iree_hal_pool_release_reservations(allocation_pool, 1,
+                                       &alloca_reservation->reservation,
+                                       reservation_failure_frontier);
     iree_hal_amdgpu_host_queue_record_memory_event(
         queue, IREE_HAL_PROFILE_MEMORY_EVENT_TYPE_POOL_RELEASE,
         IREE_HAL_PROFILE_MEMORY_EVENT_FLAG_QUEUE_OPERATION,

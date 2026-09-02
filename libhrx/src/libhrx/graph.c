@@ -106,6 +106,20 @@ static iree_status_t hrx_graph_add_node_internal(hrx_graph_s* graph,
   return iree_ok_status();
 }
 
+// Captures one buffer and the allocation pool it borrows for the graph
+// lifetime. Pools live in a separate set so graph destruction can release all
+// buffers before releasing any pool.
+static iree_status_t hrx_graph_capture_buffer_resources(hrx_graph_s* graph,
+                                                        hrx_buffer_t buffer) {
+  if (!buffer) return iree_ok_status();
+  void* pool_resource = buffer->hal_pool;
+  IREE_RETURN_IF_ERROR(iree_hal_resource_set_insert(graph->allocation_pool_set,
+                                                    1, &pool_resource));
+  void* buffer_resource = buffer->hal_buffer;
+  return iree_hal_resource_set_insert(graph->node_resource_set, 1,
+                                      &buffer_resource);
+}
+
 //===----------------------------------------------------------------------===//
 // hrx_graph_t (template)
 //===----------------------------------------------------------------------===//
@@ -130,6 +144,9 @@ hrx_status_t hrx_graph_create(hrx_device_t device, uint32_t flags,
   iree_arena_initialize(&device->block_pool, &graph->arena);
   graph->arena_allocator = iree_arena_allocator(&graph->arena);
 
+  graph->node_resource_set = NULL;
+  graph->allocation_pool_set = NULL;
+
   graph->node_blocks = NULL;
   graph->current_node_block = NULL;
   graph->node_count = 0;
@@ -141,14 +158,26 @@ hrx_status_t hrx_graph_create(hrx_device_t device, uint32_t flags,
   graph->flags = flags;
   iree_slim_mutex_initialize(&graph->mutex);
 
-  *out_graph = graph;
+  iree_status_t status = iree_hal_resource_set_allocate(
+      &device->block_pool, &graph->node_resource_set);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_resource_set_allocate(&device->block_pool,
+                                            &graph->allocation_pool_set);
+  }
+  if (iree_status_is_ok(status)) {
+    *out_graph = graph;
+  } else {
+    hrx_graph_destroy(graph);
+  }
   IREE_TRACE_ZONE_END(z0);
-  return hrx_ok_status();
+  return hrx_status_from_iree(status);
 }
 
 static void hrx_graph_destroy(hrx_graph_s* graph) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
+  iree_hal_resource_set_free(graph->node_resource_set);
+  iree_hal_resource_set_free(graph->allocation_pool_set);
   iree_arena_deinitialize(&graph->arena);
   iree_slim_mutex_deinitialize(&graph->mutex);
   iree_allocator_free(iree_allocator_system(), graph);
@@ -280,7 +309,17 @@ hrx_status_t hrx_graph_add_kernel_node(
   k->bindings.count = attrs->binding_count;
   k->bindings.values = bindings_data;
 
-  iree_status_t status = hrx_graph_add_node_internal(graph, node);
+  void* executable_resource = k->executable;
+  iree_status_t status = iree_hal_resource_set_insert(graph->node_resource_set,
+                                                      1, &executable_resource);
+  for (size_t i = 0; i < attrs->binding_count && iree_status_is_ok(status);
+       ++i) {
+    status =
+        hrx_graph_capture_buffer_resources(graph, attrs->bindings[i].buffer);
+  }
+  if (iree_status_is_ok(status)) {
+    status = hrx_graph_add_node_internal(graph, node);
+  }
   if (iree_status_is_ok(status) && out_node) {
     *out_node = node;
   }
@@ -336,7 +375,13 @@ static hrx_status_t hrx_graph_add_copy_buffer_node_internal(
   m->size = src.length;
   m->flags = 0;
 
-  iree_status_t status = hrx_graph_add_node_internal(graph, node);
+  iree_status_t status = hrx_graph_capture_buffer_resources(graph, src.buffer);
+  if (iree_status_is_ok(status)) {
+    status = hrx_graph_capture_buffer_resources(graph, dst.buffer);
+  }
+  if (iree_status_is_ok(status)) {
+    status = hrx_graph_add_node_internal(graph, node);
+  }
   if (iree_status_is_ok(status) && out_node) {
     *out_node = node;
   }
@@ -371,7 +416,10 @@ static hrx_status_t hrx_graph_add_fill_buffer_node_internal(
   m->count = dst.length;
   m->flags = 0;
 
-  iree_status_t status = hrx_graph_add_node_internal(graph, node);
+  iree_status_t status = hrx_graph_capture_buffer_resources(graph, dst.buffer);
+  if (iree_status_is_ok(status)) {
+    status = hrx_graph_add_node_internal(graph, node);
+  }
   if (iree_status_is_ok(status) && out_node) {
     *out_node = node;
   }

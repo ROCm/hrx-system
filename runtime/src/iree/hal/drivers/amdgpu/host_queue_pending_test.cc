@@ -321,8 +321,12 @@ static iree_status_t SeedWaitableFixedBlockReservation(
   iree_hal_pool_reservation_t reservation;
   iree_hal_pool_acquire_info_t acquire_info;
   iree_hal_pool_acquire_result_t acquire_result;
-  IREE_RETURN_IF_ERROR(iree_hal_pool_acquire_reservation(
-      pool, allocation_size, /*alignment=*/1, /*requester_frontier=*/NULL,
+  const iree_hal_pool_reservation_request_t request = {
+      .params = {.min_alignment = 1},
+      .allocation_size = allocation_size,
+  };
+  IREE_RETURN_IF_ERROR(iree_hal_pool_acquire_reservations(
+      pool, 1, &request, /*requester_frontier=*/NULL,
       IREE_HAL_POOL_RESERVE_FLAG_NONE, &reservation, &acquire_info,
       &acquire_result));
   if (acquire_result != IREE_HAL_POOL_ACQUIRE_OK &&
@@ -333,8 +337,8 @@ static iree_status_t SeedWaitableFixedBlockReservation(
 
   iree_async_single_frontier_t death_frontier;
   iree_async_single_frontier_initialize(&death_frontier, death_axis, 1);
-  iree_hal_pool_release_reservation(
-      pool, &reservation,
+  iree_hal_pool_release_reservations(
+      pool, 1, &reservation,
       iree_async_single_frontier_as_const_frontier(&death_frontier));
   return iree_ok_status();
 }

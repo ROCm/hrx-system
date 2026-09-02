@@ -27,42 +27,47 @@ typedef struct iree_async_notification_t iree_async_notification_t;
 //===----------------------------------------------------------------------===//
 
 // Result of a pool reservation acquisition operation. This is a result enum,
-// NOT an iree_status_t, because acquire_reservation() is a hot-path operation
+// NOT an iree_status_t, because acquiring reservations is a hot-path operation
 // that regularly returns EXHAUSTED or OVER_BUDGET during normal operation
 // (pool growth, steady-state pipelining where releases lag reservations by one
 // epoch).
 // Using iree_make_status() for these cases would capture backtraces on every
 // transient exhaustion; expensive and misleading.
 //
-// The iree_status_t return from acquire_reservation() is reserved for
+// The iree_status_t return from acquiring reservations is reserved for
 // infrastructure failures: invalid arguments, internal corruption, slab
 // provider errors. Those are exceptional and warrant backtraces.
 typedef uint32_t iree_hal_pool_acquire_result_t;
 enum iree_hal_pool_acquire_result_e {
+  // No reservation result has been produced. Zero-initialized per-request
+  // information uses this value for entries that did not participate in a
+  // committed transaction.
+  IREE_HAL_POOL_ACQUIRE_NONE = 0,
+
   // Block reserved successfully. The death frontier from the recycled block
   // was dominated by the requester's frontier; zero-sync reuse. The memory
   // is safe for immediate use without any device synchronization.
-  IREE_HAL_POOL_ACQUIRE_OK = 0,
+  IREE_HAL_POOL_ACQUIRE_OK = 1,
 
   // Block reserved from previously unused offset space (first use of this
   // region, or the block was freed with a NULL frontier). No death frontier
   // to check. Equivalent to OK for callers; no synchronization needed.
-  IREE_HAL_POOL_ACQUIRE_OK_FRESH = 1,
+  IREE_HAL_POOL_ACQUIRE_OK_FRESH = 2,
 
   // Block reserved, but the death frontier was NOT dominated by the
   // requester's frontier. The block IS reserved (offset assigned), but the
   // queue scheduler must add a hidden wait on the death frontier's axes before
   // the reservation's bytes are used. The block's death frontier is returned
-  // via |out_info->wait_frontier| from
-  // iree_hal_pool_acquire_reservation(), and generic
-  // metadata about that dependency is returned via |out_info->flags|.
+  // via the corresponding |out_infos| entry from
+  // iree_hal_pool_acquire_reservations(), and generic
+  // metadata about that dependency is returned in the same entry.
   //
   // This occurs when try-before-fence fails: prior work on this block may
   // still be executing, and the requester's frontier does not transitively
   // cover it. Queue implementations decide how to represent that hidden wait
   // in their own scheduler state; user-facing queue_alloca APIs must not
   // surface this as a transient caller-visible branch.
-  IREE_HAL_POOL_ACQUIRE_OK_NEEDS_WAIT = 2,
+  IREE_HAL_POOL_ACQUIRE_OK_NEEDS_WAIT = 3,
 
   // No blocks available. All blocks are allocated, or all free blocks have
   // non-dominated death frontiers and the pool chose not to hand one out
@@ -70,8 +75,8 @@ enum iree_hal_pool_acquire_result_e {
   //
   // The caller should observe the pool's notification, retry the reservation,
   // and wait on the observed token only if the pool remains exhausted. No
-  // reservation was made; |out_reservation| is not modified.
-  IREE_HAL_POOL_ACQUIRE_EXHAUSTED = 3,
+  // reservation was made; |out_reservations| is not modified.
+  IREE_HAL_POOL_ACQUIRE_EXHAUSTED = 4,
 
   // The pool's budget limit would be exceeded by this reservation. The
   // request is valid and blocks may be physically available, but the budget
@@ -79,13 +84,13 @@ enum iree_hal_pool_acquire_result_e {
   //
   // The caller should free other reservations from this pool, adjust the
   // budget, or use a different pool. No reservation was made;
-  // |out_reservation| is not modified.
-  IREE_HAL_POOL_ACQUIRE_OVER_BUDGET = 4,
+  // |out_reservations| is not modified.
+  IREE_HAL_POOL_ACQUIRE_OVER_BUDGET = 5,
 };
 
 // A reservation from a pool. Returned by
-// iree_hal_pool_acquire_reservation() and passed to
-// iree_hal_pool_release_reservation().
+// iree_hal_pool_acquire_reservations() and passed to
+// iree_hal_pool_release_reservations().
 //
 // This is a pure value type (32 bytes, no ownership). It lives on the stack
 // during queue submission or is stored in the buffer that wraps it. The offset
@@ -118,6 +123,15 @@ typedef struct iree_hal_pool_reservation_t {
   uint16_t reserved[3];
 } iree_hal_pool_reservation_t;
 
+// Describes one allocation in a pool reservation transaction.
+typedef struct iree_hal_pool_reservation_request_t {
+  // Requested memory type, access, usage, placement, and alignment.
+  iree_hal_buffer_params_t params;
+
+  // Minimum number of user-visible bytes required.
+  iree_device_size_t allocation_size;
+} iree_hal_pool_reservation_request_t;
+
 // Flags controlling pool reservation acquisition.
 typedef uint32_t iree_hal_pool_reserve_flags_t;
 enum iree_hal_pool_reserve_flag_bits_e {
@@ -126,8 +140,8 @@ enum iree_hal_pool_reserve_flag_bits_e {
   // Allows the pool to return IREE_HAL_POOL_ACQUIRE_OK_NEEDS_WAIT when a
   // recycled block is available but its death frontier is not dominated by the
   // requester frontier. Callers setting this flag must either insert an
-  // internal dependency on out_info->wait_frontier before the bytes are used or
-  // release the reservation with out_info->wait_frontier to preserve the
+  // internal dependency on the corresponding wait frontier before the bytes
+  // are used or release the reservation with that frontier to preserve the
   // block's dependency metadata.
   //
   // Callers that cannot model queue-owned hidden memory dependencies must omit
@@ -171,7 +185,7 @@ enum iree_hal_pool_acquire_flag_bits_e {
 //
 // If a caller declines an IREE_HAL_POOL_ACQUIRE_OK_NEEDS_WAIT reservation and
 // immediately releases it, passing |wait_frontier| back to
-// iree_hal_pool_release_reservation() must preserve the block's dependency
+// iree_hal_pool_release_reservations() must preserve the block's dependency
 // metadata. Concrete pools must therefore tolerate |death_frontier| aliasing
 // the reservation's own pool-owned frontier storage in that path.
 typedef struct iree_hal_pool_acquire_info_t {
@@ -182,7 +196,8 @@ typedef struct iree_hal_pool_acquire_info_t {
   // Generic metadata bits describing the selected reservation.
   iree_hal_pool_acquire_flags_t flags;
 
-  uint32_t reserved;
+  // Result for this request within the containing transaction.
+  iree_hal_pool_acquire_result_t result;
 } iree_hal_pool_acquire_info_t;
 
 // Controls how a concrete buffer object/view is materialized for a reservation.
@@ -196,7 +211,7 @@ enum iree_hal_pool_materialize_flag_bits_e {
   //
   // Without this flag, the returned buffer is only a borrowed view of the
   // reserved bytes and the caller remains responsible for calling
-  // iree_hal_pool_release_reservation() exactly once.
+  // iree_hal_pool_release_reservations() exactly once.
   IREE_HAL_POOL_MATERIALIZE_FLAG_TRANSFER_RESERVATION_OWNERSHIP = 1u << 0,
 };
 
@@ -224,7 +239,7 @@ typedef struct iree_hal_pool_capabilities_t {
   // Strategy-specific maximum single user-visible reservation in bytes.
   // Fixed-block pools use their block size, TLSF pools use their slab size, and
   // pass-through pools report 0 for no strategy limit. Budgets are reported
-  // separately and enforced by acquire_reservation().
+  // separately and enforced by reservation acquisition.
   iree_device_size_t max_allocation_size;
 } iree_hal_pool_capabilities_t;
 
@@ -252,10 +267,10 @@ typedef struct iree_hal_pool_stats_t {
   // Number of slabs from the slab provider.
   uint32_t slab_count;
 
-  // Total successful acquire_reservation() calls.
+  // Total successful reservation acquisitions.
   uint64_t reserve_count;
 
-  // Total release_reservation() calls.
+  // Total reservation releases.
   uint64_t release_count;
 
   // Reserves that hit frontier-dominated reuse.
@@ -278,9 +293,9 @@ typedef struct iree_hal_pool_stats_t {
 } iree_hal_pool_stats_t;
 
 // Callback for try-before-fence epoch queries. When a death-frontier dominance
-// check fails in acquire_reservation(), the pool calls this to check whether
-// the timeline has actually advanced past the death frontier's epoch on a
-// specific axis, even though the requester's frontier hasn't imported the
+// check fails during reservation acquisition, the pool calls this to check
+// whether the timeline has actually advanced past the death frontier's epoch
+// on a specific axis, even though the requester's frontier hasn't imported the
 // update yet.
 //
 // Returns true if |axis| has reached at least |epoch| (the work has
@@ -340,23 +355,23 @@ static inline iree_hal_pool_epoch_query_t iree_hal_pool_epoch_query_null(void) {
 //
 //   submit queue_alloca             use bytes             submit queue_dealloca
 // ┌─────────────────────┐      ┌────────────────┐      ┌──────────────────────┐
-// │ acquire_reservation │─────▶│ borrowed view  │─────▶│ release_reservation  │
+// │ acquire transaction │─────▶│ borrowed views │─────▶│ release transaction  │
 // │ checks death edge   │      │ no pool retain │      │ records death edge   │
 // └─────────────────────┘      └────────────────┘      └──────────────────────┘
 //
-//   1. acquire_reservation() at submit time: finds a free block, checks death
-//      frontier dominance, returns a reservation with offset and byte length.
-//   2. materialize_reservation() without ownership transfer: creates a
-//      backing buffer view whose lifetime is independent from the reservation.
-//   3. release_reservation() at the queue implementation's dealloca retirement
-//      point: returns the block to pool reuse metadata, tagged with a death
+//   1. acquire_reservations() at submit time: finds free blocks, checks death
+//      frontier dominance, and returns reservations with offsets and lengths.
+//   2. materialize_reservations() without ownership transfer: creates backing
+//      buffer views whose lifetimes are independent from the reservations.
+//   3. release_reservations() at the queue implementation's dealloca retirement
+//      point: returns the blocks to pool reuse metadata, tagged with a death
 //      frontier.
 //
 // Synchronous allocation:
-//   iree_hal_pool_allocate_buffer(): calls acquire_reservation() +
-//   materialize_reservation(TRANSFER_RESERVATION_OWNERSHIP) in a loop, waiting
-//   on the pool's notification if exhausted. This is a shared utility, not a
-//   vtable method.
+//   iree_hal_pool_allocate_buffer(): submits one-element acquire and
+//   materialize transactions with TRANSFER_RESERVATION_OWNERSHIP in a loop,
+//   waiting on the pool's notification if exhausted. This is a shared utility,
+//   not a vtable method.
 //
 // ## Death frontier integration
 //
@@ -372,14 +387,13 @@ IREE_API_EXPORT void iree_hal_pool_retain(iree_hal_pool_t* pool);
 // Releases the given |pool| from the caller.
 IREE_API_EXPORT void iree_hal_pool_release(iree_hal_pool_t* pool);
 
-// Acquires a reservation from the pool for a future allocation.
+// Acquires an all-or-none transaction of reservations for future allocations.
 //
-// |size| is the minimum number of user-visible bytes needed. |alignment| is
-// the required alignment for the returned offset (must be a power of two and
-// > 0). The returned reservation byte length may exceed |size| due to
-// alignment rounding or block splitting constraints, but it does not expose
+// Each returned reservation may be larger than its requested allocation size
+// due to alignment rounding or block splitting constraints, but does not expose
 // hidden backing bytes reserved by the pool for provider metadata, guard
-// regions, or sanitizer redzones.
+// regions, or sanitizer redzones. Every request must be satisfiable by this
+// pool; routing among pools is a higher-level pool implementation concern.
 //
 // |requester_frontier| is the queue scheduler's current causal position, used
 // for death frontier dominance checking. Pass NULL to skip dominance checking
@@ -391,43 +405,55 @@ IREE_API_EXPORT void iree_hal_pool_release(iree_hal_pool_t* pool);
 // IREE_HAL_POOL_RESERVE_FLAG_ALLOW_WAIT_FRONTIER before a pool may return
 // IREE_HAL_POOL_ACQUIRE_OK_NEEDS_WAIT.
 //
-// On success (iree_ok_status()), |out_result| indicates the specific outcome:
-//   OK / OK_FRESH: reservation succeeded, memory is safe for immediate use.
-//   OK_NEEDS_WAIT: reservation succeeded, but the queue scheduler must add a
-//     hidden wait on |out_info->wait_frontier| before the reservation's bytes
-//     are used.
-//   EXHAUSTED: no reservation made, pool has no suitable blocks.
-//   OVER_BUDGET: no reservation made, budget limit would be exceeded.
+// On success (iree_ok_status()), |out_result| describes the whole transaction:
+//   OK: all reservations succeeded and at least one recycled range was used.
+//   OK_FRESH: all reservations succeeded from previously unused ranges.
+//   OK_NEEDS_WAIT: all reservations succeeded and at least one requires a
+//     hidden wait recorded in the corresponding |out_infos| entry.
+//   EXHAUSTED: no reservations were made because at least one request could
+//     not be satisfied.
+//   OVER_BUDGET: no reservations were made because the transaction would
+//     exceed the pool budget.
 //
-// |out_info| is always initialized on success. For EXHAUSTED/OVER_BUDGET it is
-// set to an empty record. For OK_NEEDS_WAIT, |out_info->wait_frontier| is
-// borrowed pool storage owned by the reservation and remains valid until the
-// reservation is released.
+// On a successful reservation result (OK, OK_FRESH, or OK_NEEDS_WAIT), every
+// output reservation and information record is assigned. Each information
+// record contains that request's successful result; the transaction result
+// summarizes them with OK_NEEDS_WAIT taking precedence over OK and OK taking
+// precedence over OK_FRESH. For OK_NEEDS_WAIT, each non-NULL wait frontier is
+// borrowed pool storage owned by its corresponding reservation and remains
+// valid until that reservation is released.
+//
+// On EXHAUSTED or OVER_BUDGET, every information record and |out_result| are
+// assigned while the reservation outputs remain untouched. One or more
+// information records identify the requests that could not be satisfied with
+// the transaction result and any associated flags; requests not committed or
+// not examined use IREE_HAL_POOL_ACQUIRE_NONE. On an error status all outputs
+// are untouched.
 //
 // Returns an error status (with backtrace) only for infrastructure failures:
 // invalid arguments (size 0, non-power-of-two alignment), internal
 // corruption, or slab provider errors. These are exceptional.
-IREE_API_EXPORT iree_status_t iree_hal_pool_acquire_reservation(
-    iree_hal_pool_t* pool, iree_device_size_t size,
-    iree_device_size_t alignment,
+IREE_API_EXPORT iree_status_t iree_hal_pool_acquire_reservations(
+    iree_hal_pool_t* pool, iree_host_size_t request_count,
+    const iree_hal_pool_reservation_request_t* requests,
     const iree_async_frontier_t* requester_frontier,
     iree_hal_pool_reserve_flags_t flags,
-    iree_hal_pool_reservation_t* out_reservation,
-    iree_hal_pool_acquire_info_t* out_info,
+    iree_hal_pool_reservation_t* out_reservations,
+    iree_hal_pool_acquire_info_t* out_infos,
     iree_hal_pool_acquire_result_t* out_result);
 
-// Releases a reservation back to the pool's free list.
+// Releases a transaction of reservations back to the pool's free list.
 //
-// |reservation| is the reservation returned by a prior
-// iree_hal_pool_acquire_reservation() call on this pool. |death_frontier| is
-// the causal snapshot to attach to the freed block; typically the queue's
-// dealloca completion frontier. Pass NULL for an empty frontier (the block is
+// |reservations| is a transaction returned by a prior successful
+// iree_hal_pool_acquire_reservations() call on this pool. |death_frontier| is
+// the causal snapshot attached to every freed block; typically the queue's
+// dealloca completion frontier. Pass NULL for an empty frontier (the blocks are
 // immediately available for zero-sync reuse by any requester).
 //
 // The reservation's offset is returned to the pool's reuse metadata
-// immediately. The range may be considered by future acquire_reservation()
-// calls from that point forward, even though device work may still be executing
-// prior accesses; death frontier dominance checking gates actual reuse safety.
+// immediately. The range may be considered by future reservation transactions
+// from that point forward, even though device work may still be executing prior
+// accesses; death frontier dominance checking gates actual reuse safety.
 //
 // Target-specific deallocation effects that change device-visible memory state
 // are not implied by this bookkeeping call. Queue-ordered users that need
@@ -439,28 +465,31 @@ IREE_API_EXPORT iree_status_t iree_hal_pool_acquire_reservation(
 // Publishes the pool's notification epoch. Releases that occur with no known
 // waiter may skip platform wake work; waiters use an observe-check-wait
 // protocol so this cannot lose wakeups.
-IREE_API_EXPORT void iree_hal_pool_release_reservation(
-    iree_hal_pool_t* pool, const iree_hal_pool_reservation_t* reservation,
+IREE_API_EXPORT void iree_hal_pool_release_reservations(
+    iree_hal_pool_t* pool, iree_host_size_t reservation_count,
+    const iree_hal_pool_reservation_t* reservations,
     const iree_async_frontier_t* death_frontier);
 
-// Materializes a concrete buffer object/view for a reservation from this pool.
+// Materializes concrete buffer objects or views for a reservation transaction.
 //
-// |params| describes the buffer's usage, access, and memory type properties.
-// |reservation| is the reservation returned by
-// iree_hal_pool_acquire_reservation().
+// |requests| is the allocation request transaction used to acquire
+// |reservations|. The operation validates and materializes the entire set.
 //
 // If |flags| includes
-// IREE_HAL_POOL_MATERIALIZE_FLAG_TRANSFER_RESERVATION_OWNERSHIP, the returned
-// buffer stores the reservation and a borrowed pointer to |pool| and releases
-// that reservation with a NULL death frontier when destroyed.
+// IREE_HAL_POOL_MATERIALIZE_FLAG_TRANSFER_RESERVATION_OWNERSHIP, each returned
+// buffer stores its reservation and a borrowed pointer to |pool| and releases
+// that reservation with a NULL death frontier when destroyed. Ownership
+// transfers only after every buffer has been materialized successfully.
 //
-// Otherwise the returned buffer is only a borrowed view and the caller keeps
-// ownership of |reservation|. This is the queue-allocation path's backing
-// materialization primitive: a transient wrapper can commit/decommit the
-// borrowed view while releasing the reservation independently at a
+// Otherwise the returned buffers are borrowed views and the caller keeps
+// ownership of every reservation. This is the queue-allocation path's backing
+// materialization primitive: transient wrappers can commit/decommit the
+// borrowed views while releasing the reservations independently at a
 // queue-ordered dealloca point.
 //
-// |pool| must outlive both the reservation and the returned buffer.
+// The operation is all-or-none. Output buffer slots are assigned only when the
+// function returns OK and are otherwise untouched. |pool| must outlive every
+// reservation and returned buffer.
 //
 // The concrete pool owns reservation bookkeeping and release callbacks, but
 // provider-specific buffer materialization must flow through that pool's slab
@@ -468,10 +497,11 @@ IREE_API_EXPORT void iree_hal_pool_release_reservation(
 // they pass the reservation's user-visible slab offset and byte range to
 // iree_hal_slab_provider_wrap_buffer(). Hidden backing bytes remain owned by
 // the concrete pool/provider and are not materialized through this API.
-IREE_API_EXPORT iree_status_t iree_hal_pool_materialize_reservation(
-    iree_hal_pool_t* pool, iree_hal_buffer_params_t params,
-    const iree_hal_pool_reservation_t* reservation,
-    iree_hal_pool_materialize_flags_t flags, iree_hal_buffer_t** out_buffer);
+IREE_API_EXPORT iree_status_t iree_hal_pool_materialize_reservations(
+    iree_hal_pool_t* pool, iree_host_size_t reservation_count,
+    const iree_hal_pool_reservation_request_t* requests,
+    const iree_hal_pool_reservation_t* reservations,
+    iree_hal_pool_materialize_flags_t flags, iree_hal_buffer_t** out_buffers);
 
 // Queries the memory capabilities of the pool. O(1); reads cached fields
 // computed at pool creation time.
@@ -504,11 +534,11 @@ IREE_API_EXPORT iree_async_notification_t* iree_hal_pool_notification(
 // Allocates a buffer from the pool synchronously.
 //
 // This is a shared utility (NOT a vtable method) that calls
-// acquire_reservation() + materialize_reservation() in a loop. If
-// acquire_reservation() returns EXHAUSTED or OVER_BUDGET, the function waits
-// on the pool's notification for |timeout| and retries.
+// one-element acquire and materialize transactions in a loop. If acquisition
+// returns EXHAUSTED or OVER_BUDGET, the function waits on the pool's
+// notification for |timeout| and retries.
 //
-// |requester_frontier| is passed to acquire_reservation() for dominance
+// |requester_frontier| is passed to reservation acquisition for dominance
 // checking. Pass NULL to skip dominance checking (appropriate for persistent
 // buffers that aren't queue-ordered).
 //
@@ -541,26 +571,28 @@ typedef struct iree_hal_pool_vtable_t {
   // Destroys a concrete pool implementation.
   void(IREE_API_PTR* destroy)(iree_hal_pool_t* pool);
 
-  // Acquires reservation metadata from the concrete pool implementation.
-  iree_status_t(IREE_API_PTR* acquire_reservation)(
-      iree_hal_pool_t* pool, iree_device_size_t size,
-      iree_device_size_t alignment,
+  // Acquires a reservation transaction from the concrete pool implementation.
+  iree_status_t(IREE_API_PTR* acquire_reservations)(
+      iree_hal_pool_t* pool, iree_host_size_t request_count,
+      const iree_hal_pool_reservation_request_t* requests,
       const iree_async_frontier_t* requester_frontier,
       iree_hal_pool_reserve_flags_t flags,
-      iree_hal_pool_reservation_t* out_reservation,
-      iree_hal_pool_acquire_info_t* out_info,
+      iree_hal_pool_reservation_t* out_reservations,
+      iree_hal_pool_acquire_info_t* out_infos,
       iree_hal_pool_acquire_result_t* out_result);
 
-  // Releases reservation metadata back to the concrete pool implementation.
-  void(IREE_API_PTR* release_reservation)(
-      iree_hal_pool_t* pool, const iree_hal_pool_reservation_t* reservation,
+  // Releases a reservation transaction to the concrete pool implementation.
+  void(IREE_API_PTR* release_reservations)(
+      iree_hal_pool_t* pool, iree_host_size_t reservation_count,
+      const iree_hal_pool_reservation_t* reservations,
       const iree_async_frontier_t* death_frontier);
 
-  // Materializes a concrete buffer object or view for a reservation.
-  iree_status_t(IREE_API_PTR* materialize_reservation)(
-      iree_hal_pool_t* pool, iree_hal_buffer_params_t params,
-      const iree_hal_pool_reservation_t* reservation,
-      iree_hal_pool_materialize_flags_t flags, iree_hal_buffer_t** out_buffer);
+  // Materializes concrete buffer objects or views for a reservation set.
+  iree_status_t(IREE_API_PTR* materialize_reservations)(
+      iree_hal_pool_t* pool, iree_host_size_t reservation_count,
+      const iree_hal_pool_reservation_request_t* requests,
+      const iree_hal_pool_reservation_t* reservations,
+      iree_hal_pool_materialize_flags_t flags, iree_hal_buffer_t** out_buffers);
 
   // Queries cached memory capabilities for routing.
   void(IREE_API_PTR* query_capabilities)(
@@ -578,6 +610,16 @@ typedef struct iree_hal_pool_vtable_t {
   iree_async_notification_t*(IREE_API_PTR* notification)(iree_hal_pool_t* pool);
 } iree_hal_pool_vtable_t;
 IREE_HAL_ASSERT_VTABLE_LAYOUT(iree_hal_pool_vtable_t);
+
+// Common pool state embedded at offset zero in every pool implementation.
+struct iree_hal_pool_t {
+  // Base HAL resource state. Must be at offset zero.
+  iree_hal_resource_t resource;
+};
+
+// Initializes |out_pool| with one owning reference.
+IREE_API_EXPORT void iree_hal_pool_initialize(
+    const iree_hal_pool_vtable_t* vtable, iree_hal_pool_t* out_pool);
 
 IREE_API_EXPORT void iree_hal_pool_destroy(iree_hal_pool_t* pool);
 

@@ -105,7 +105,7 @@ bool iree_hal_vulkan_transient_buffer_query_reservation(
 // Releases the attached reservation exactly once. If the wrapper has no
 // reservation or the reservation was already released, this is a no-op.
 //
-// |death_frontier| is forwarded to iree_hal_pool_release_reservation() when
+// |death_frontier| is forwarded to iree_hal_pool_release_reservations() when
 // the reservation is still owned. Pass NULL for an immediately reusable
 // reservation in synchronous/drain-ordered paths. This updates pool reuse
 // metadata; target-visible release effects are performed by the queue before

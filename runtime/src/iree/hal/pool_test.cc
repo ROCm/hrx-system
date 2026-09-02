@@ -30,7 +30,7 @@ static iree_async_proactor_t* test_proactor() {
 }
 
 typedef struct iree_hal_needs_wait_test_pool_t {
-  iree_hal_resource_t resource;
+  iree_hal_pool_t base;
 
   // Notification used by the generic synchronous allocation helper.
   iree_async_notification_t* notification = nullptr;
@@ -47,52 +47,57 @@ static void iree_hal_needs_wait_test_pool_destroy(iree_hal_pool_t* base_pool) {
   delete pool;
 }
 
-static iree_status_t iree_hal_needs_wait_test_pool_acquire_reservation(
-    iree_hal_pool_t* base_pool, iree_device_size_t size,
-    iree_device_size_t alignment,
+static iree_status_t iree_hal_needs_wait_test_pool_acquire_reservations(
+    iree_hal_pool_t* base_pool, iree_host_size_t request_count,
+    const iree_hal_pool_reservation_request_t* requests,
     const iree_async_frontier_t* requester_frontier,
     iree_hal_pool_reserve_flags_t flags,
-    iree_hal_pool_reservation_t* out_reservation,
-    iree_hal_pool_acquire_info_t* out_info,
+    iree_hal_pool_reservation_t* out_reservations,
+    iree_hal_pool_acquire_info_t* out_infos,
     iree_hal_pool_acquire_result_t* out_result) {
   auto* pool = (iree_hal_needs_wait_test_pool_t*)base_pool;
-  (void)alignment;
+  IREE_ASSERT_EQ(request_count, 1u);
   (void)requester_frontier;
   (void)flags;
   iree_async_single_frontier_initialize(
       &pool->wait_frontier, iree_async_axis_make_queue(1, 2, 3, 4), 42);
-  memset(out_reservation, 0, sizeof(*out_reservation));
-  out_reservation->offset = 128;
-  out_reservation->byte_length = size;
-  out_reservation->block_handle = 0xB10Cu;
-  out_reservation->slab_index = 7;
-  memset(out_info, 0, sizeof(*out_info));
-  out_info->wait_frontier =
+  memset(out_reservations, 0, sizeof(*out_reservations));
+  out_reservations[0].offset = 128;
+  out_reservations[0].byte_length = requests[0].allocation_size;
+  out_reservations[0].block_handle = 0xB10Cu;
+  out_reservations[0].slab_index = 7;
+  memset(out_infos, 0, sizeof(*out_infos));
+  out_infos[0].wait_frontier =
       iree_async_single_frontier_as_const_frontier(&pool->wait_frontier);
+  out_infos[0].result = IREE_HAL_POOL_ACQUIRE_OK_NEEDS_WAIT;
   *out_result = IREE_HAL_POOL_ACQUIRE_OK_NEEDS_WAIT;
   return iree_ok_status();
 }
 
-static void iree_hal_needs_wait_test_pool_release_reservation(
-    iree_hal_pool_t* base_pool, const iree_hal_pool_reservation_t* reservation,
+static void iree_hal_needs_wait_test_pool_release_reservations(
+    iree_hal_pool_t* base_pool, iree_host_size_t reservation_count,
+    const iree_hal_pool_reservation_t* reservations,
     const iree_async_frontier_t* death_frontier) {
   auto* pool = (iree_hal_needs_wait_test_pool_t*)base_pool;
-  pool->released_reservation = *reservation;
+  IREE_ASSERT_EQ(reservation_count, 1u);
+  pool->released_reservation = reservations[0];
   pool->released_frontier = death_frontier;
 }
 
-static iree_status_t iree_hal_needs_wait_test_pool_materialize_reservation(
-    iree_hal_pool_t* base_pool, iree_hal_buffer_params_t params,
-    const iree_hal_pool_reservation_t* reservation,
-    iree_hal_pool_materialize_flags_t flags, iree_hal_buffer_t** out_buffer) {
+static iree_status_t iree_hal_needs_wait_test_pool_materialize_reservations(
+    iree_hal_pool_t* base_pool, iree_host_size_t reservation_count,
+    const iree_hal_pool_reservation_request_t* requests,
+    const iree_hal_pool_reservation_t* reservations,
+    iree_hal_pool_materialize_flags_t flags, iree_hal_buffer_t** out_buffers) {
   auto* pool = (iree_hal_needs_wait_test_pool_t*)base_pool;
-  (void)params;
-  (void)reservation;
+  (void)reservation_count;
+  (void)requests;
+  (void)reservations;
   (void)flags;
-  (void)out_buffer;
+  (void)out_buffers;
   pool->wrap_called = true;
   return iree_make_status(IREE_STATUS_INTERNAL,
-                          "materialize_reservation must not be called");
+                          "materialize_reservations must not be called");
 }
 
 static void iree_hal_needs_wait_test_pool_query_capabilities(
@@ -121,20 +126,20 @@ static iree_async_notification_t* iree_hal_needs_wait_test_pool_notification(
 }
 
 static const iree_hal_pool_vtable_t iree_hal_needs_wait_test_pool_vtable = {
-    iree_hal_needs_wait_test_pool_destroy,
-    iree_hal_needs_wait_test_pool_acquire_reservation,
-    iree_hal_needs_wait_test_pool_release_reservation,
-    iree_hal_needs_wait_test_pool_materialize_reservation,
-    iree_hal_needs_wait_test_pool_query_capabilities,
-    iree_hal_needs_wait_test_pool_query_stats,
-    iree_hal_needs_wait_test_pool_trim,
-    iree_hal_needs_wait_test_pool_notification,
+    .destroy = iree_hal_needs_wait_test_pool_destroy,
+    .acquire_reservations = iree_hal_needs_wait_test_pool_acquire_reservations,
+    .release_reservations = iree_hal_needs_wait_test_pool_release_reservations,
+    .materialize_reservations =
+        iree_hal_needs_wait_test_pool_materialize_reservations,
+    .query_capabilities = iree_hal_needs_wait_test_pool_query_capabilities,
+    .query_stats = iree_hal_needs_wait_test_pool_query_stats,
+    .trim = iree_hal_needs_wait_test_pool_trim,
+    .notification = iree_hal_needs_wait_test_pool_notification,
 };
 
 static iree_hal_needs_wait_test_pool_t* CreateNeedsWaitTestPool() {
   auto* pool = new iree_hal_needs_wait_test_pool_t;
-  iree_hal_resource_initialize(&iree_hal_needs_wait_test_pool_vtable,
-                               &pool->resource);
+  iree_hal_pool_initialize(&iree_hal_needs_wait_test_pool_vtable, &pool->base);
   IREE_CHECK_OK(iree_async_notification_create(
       test_proactor(), IREE_ASYNC_NOTIFICATION_FLAG_NONE, &pool->notification));
   iree_async_single_frontier_initialize(
@@ -147,7 +152,7 @@ static iree_hal_needs_wait_test_pool_t* CreateNeedsWaitTestPool() {
 
 typedef struct iree_hal_routing_test_pool_t {
   // Base resource header for vtable dispatch and ref counting.
-  iree_hal_resource_t resource;
+  iree_hal_pool_t base;
 
   // Capabilities returned when registering this pool in a pool set.
   iree_hal_pool_capabilities_t capabilities = {0};
@@ -157,45 +162,49 @@ static void iree_hal_routing_test_pool_destroy(iree_hal_pool_t* base_pool) {
   delete (iree_hal_routing_test_pool_t*)base_pool;
 }
 
-static iree_status_t iree_hal_routing_test_pool_acquire_reservation(
-    iree_hal_pool_t* base_pool, iree_device_size_t size,
-    iree_device_size_t alignment,
+static iree_status_t iree_hal_routing_test_pool_acquire_reservations(
+    iree_hal_pool_t* base_pool, iree_host_size_t request_count,
+    const iree_hal_pool_reservation_request_t* requests,
     const iree_async_frontier_t* requester_frontier,
     iree_hal_pool_reserve_flags_t flags,
-    iree_hal_pool_reservation_t* out_reservation,
-    iree_hal_pool_acquire_info_t* out_info,
+    iree_hal_pool_reservation_t* out_reservations,
+    iree_hal_pool_acquire_info_t* out_infos,
     iree_hal_pool_acquire_result_t* out_result) {
   (void)base_pool;
-  (void)size;
-  (void)alignment;
+  (void)request_count;
+  (void)requests;
   (void)requester_frontier;
   (void)flags;
-  (void)out_reservation;
-  (void)out_info;
+  (void)out_reservations;
+  (void)out_infos;
   (void)out_result;
   return iree_make_status(IREE_STATUS_INTERNAL,
-                          "acquire_reservation must not be called");
+                          "acquire_reservations must not be called");
 }
 
-static void iree_hal_routing_test_pool_release_reservation(
-    iree_hal_pool_t* base_pool, const iree_hal_pool_reservation_t* reservation,
+static void iree_hal_routing_test_pool_release_reservations(
+    iree_hal_pool_t* base_pool, iree_host_size_t reservation_count,
+    const iree_hal_pool_reservation_t* reservations,
     const iree_async_frontier_t* death_frontier) {
   (void)base_pool;
-  (void)reservation;
+  (void)reservation_count;
+  (void)reservations;
   (void)death_frontier;
 }
 
-static iree_status_t iree_hal_routing_test_pool_materialize_reservation(
-    iree_hal_pool_t* base_pool, iree_hal_buffer_params_t params,
-    const iree_hal_pool_reservation_t* reservation,
-    iree_hal_pool_materialize_flags_t flags, iree_hal_buffer_t** out_buffer) {
+static iree_status_t iree_hal_routing_test_pool_materialize_reservations(
+    iree_hal_pool_t* base_pool, iree_host_size_t reservation_count,
+    const iree_hal_pool_reservation_request_t* requests,
+    const iree_hal_pool_reservation_t* reservations,
+    iree_hal_pool_materialize_flags_t flags, iree_hal_buffer_t** out_buffers) {
   (void)base_pool;
-  (void)params;
-  (void)reservation;
+  (void)reservation_count;
+  (void)requests;
+  (void)reservations;
   (void)flags;
-  (void)out_buffer;
+  (void)out_buffers;
   return iree_make_status(IREE_STATUS_INTERNAL,
-                          "materialize_reservation must not be called");
+                          "materialize_reservations must not be called");
 }
 
 static void iree_hal_routing_test_pool_query_capabilities(
@@ -224,21 +233,21 @@ static iree_async_notification_t* iree_hal_routing_test_pool_notification(
 }
 
 static const iree_hal_pool_vtable_t iree_hal_routing_test_pool_vtable = {
-    iree_hal_routing_test_pool_destroy,
-    iree_hal_routing_test_pool_acquire_reservation,
-    iree_hal_routing_test_pool_release_reservation,
-    iree_hal_routing_test_pool_materialize_reservation,
-    iree_hal_routing_test_pool_query_capabilities,
-    iree_hal_routing_test_pool_query_stats,
-    iree_hal_routing_test_pool_trim,
-    iree_hal_routing_test_pool_notification,
+    .destroy = iree_hal_routing_test_pool_destroy,
+    .acquire_reservations = iree_hal_routing_test_pool_acquire_reservations,
+    .release_reservations = iree_hal_routing_test_pool_release_reservations,
+    .materialize_reservations =
+        iree_hal_routing_test_pool_materialize_reservations,
+    .query_capabilities = iree_hal_routing_test_pool_query_capabilities,
+    .query_stats = iree_hal_routing_test_pool_query_stats,
+    .trim = iree_hal_routing_test_pool_trim,
+    .notification = iree_hal_routing_test_pool_notification,
 };
 
 static iree_hal_routing_test_pool_t* CreateRoutingTestPool(
     iree_device_size_t max_allocation_size) {
   auto* pool = new iree_hal_routing_test_pool_t;
-  iree_hal_resource_initialize(&iree_hal_routing_test_pool_vtable,
-                               &pool->resource);
+  iree_hal_pool_initialize(&iree_hal_routing_test_pool_vtable, &pool->base);
   pool->capabilities.memory_type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL;
   pool->capabilities.supported_usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
   pool->capabilities.min_allocation_size = 0;
@@ -256,14 +265,16 @@ TEST(PoolAllocateBufferTest,
   params.type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL;
   params.access = IREE_HAL_MEMORY_ACCESS_ALL;
 
-  iree_hal_buffer_t* buffer = NULL;
+  iree_hal_buffer_t* const sentinel_buffer =
+      (iree_hal_buffer_t*)(uintptr_t)0x1234;
+  iree_hal_buffer_t* buffer = sentinel_buffer;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INTERNAL,
                         iree_hal_pool_allocate_buffer(
                             pool, params, 4096,
                             iree_async_single_frontier_as_const_frontier(
                                 &concrete_pool->wait_frontier),
                             iree_make_timeout_ms(0), &buffer));
-  EXPECT_EQ(buffer, nullptr);
+  EXPECT_EQ(buffer, sentinel_buffer);
   EXPECT_FALSE(concrete_pool->wrap_called);
   EXPECT_EQ(concrete_pool->released_reservation.offset, 128u);
   EXPECT_EQ(concrete_pool->released_reservation.byte_length, 4096u);

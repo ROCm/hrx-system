@@ -425,8 +425,8 @@ void iree_hal_amdgpu_transient_buffer_release_reservation(
   const int32_t was_armed = iree_atomic_exchange(&buffer->reservation_armed, 0,
                                                  iree_memory_order_acq_rel);
   if (was_armed) {
-    iree_hal_pool_release_reservation(reservation_pool, &buffer->reservation,
-                                      death_frontier);
+    iree_hal_pool_release_reservations(reservation_pool, 1,
+                                       &buffer->reservation, death_frontier);
   }
   buffer->reservation_pool = NULL;
   memset(&buffer->reservation, 0, sizeof(buffer->reservation));
