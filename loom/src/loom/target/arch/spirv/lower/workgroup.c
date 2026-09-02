@@ -398,8 +398,12 @@ static iree_status_t loom_spirv_workgroup_view_plan_from_facts(
     return iree_ok_status();
   }
   loom_value_fact_view_reference_t reference = {0};
-  IREE_ASSERT(loom_spirv_workgroup_view_reference(
-      loom_low_lower_context_fact_table(context), result, &reference));
+  if (!loom_spirv_workgroup_view_reference(
+          loom_low_lower_context_fact_table(context), result, &reference)) {
+    return iree_make_status(
+        IREE_STATUS_INTERNAL,
+        "selected SPIR-V Workgroup view has no Workgroup reference");
+  }
   out_plan->root_value_id = reference.root_value_id;
   *out_selected = true;
   return iree_ok_status();
