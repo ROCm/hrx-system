@@ -20,7 +20,9 @@
 extern "C" {
 #endif
 
-// Returns generic IR traits implied by a verified low descriptor.
+// Returns generic IR traits implied by a verified low descriptor. Precise
+// memory accesses remain reads and writes, ordering barriers become memory
+// fences, and target effects without a generic semantic remain unknown.
 loom_trait_flags_t loom_low_descriptor_effective_traits(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor);

@@ -70,6 +70,17 @@ func.def @convergent_ops_do_not_cse(%value: i32) -> (i32, i32) {
 
 // ====
 
+// Memory fences are observable ordering points and cannot be CSE'd even when
+// they produce operand-identical results.
+// RUN: pass cse
+func.def @memory_fences_do_not_cse(%value: i32) -> (i32, i32) {
+  %lhs = test.memory_fence %value : i32
+  %rhs = test.memory_fence %value : i32
+  func.return %lhs, %rhs : i32, i32
+}
+
+// ====
+
 // Function passes still run over the function-like body projection. CSE can be
 // driven over every root region. Equivalent expressions are only shared inside
 // one region tree; config and body keep separate SSA scopes.

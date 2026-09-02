@@ -310,7 +310,8 @@ enum {
   LOOM_OP_TEST_CONDITION_REFINES_POSITIVE = LOOM_OP_KIND(LOOM_DIALECT_TEST, 114),
   LOOM_OP_TEST_PARTITIONED_CALL = LOOM_OP_KIND(LOOM_DIALECT_TEST, 115),
   LOOM_OP_TEST_MODULE_METADATA = LOOM_OP_KIND(LOOM_DIALECT_TEST, 116),
-  LOOM_OP_TEST_COUNT_ = 117,
+  LOOM_OP_TEST_MEMORY_FENCE = LOOM_OP_KIND(LOOM_DIALECT_TEST, 117),
+  LOOM_OP_TEST_COUNT_ = 118,
 };
 
 // Synthetic flags for TemplateParamFlags parser/printer coverage.
@@ -2347,6 +2348,16 @@ LOOM_DEFINE_ISA(loom_test_module_metadata_isa, LOOM_OP_TEST_MODULE_METADATA)
 iree_status_t loom_test_module_metadata_build(
     loom_builder_t* builder,
     loom_location_id_t location,
+    loom_op_t** out_op);
+
+// LOOM_OP_TEST_MEMORY_FENCE: Value-producing memory fence used to verify transform ordering.
+// %result = test.memory_fence %input : i32
+LOOM_DEFINE_ISA(loom_test_memory_fence_isa, LOOM_OP_TEST_MEMORY_FENCE)
+LOOM_DEFINE_OPERAND(loom_test_memory_fence_input, 0)
+LOOM_DEFINE_RESULT(loom_test_memory_fence_result, 0)
+iree_status_t loom_test_memory_fence_build(
+    loom_builder_t* builder, loom_value_id_t input,
+    loom_type_t result_type, loom_location_id_t location,
     loom_op_t** out_op);
 
 // Returns the vtable array for the test dialect.
