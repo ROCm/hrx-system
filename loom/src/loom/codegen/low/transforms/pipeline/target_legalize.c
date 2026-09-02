@@ -1680,7 +1680,7 @@ iree_status_t loom_low_target_legalize_run(loom_pass_t* pass,
       .function_versions =
           loom_target_pass_capability_function_versions(target_capability),
   };
-  iree_status_t status = loom_low_select_source_funcs(
+  iree_status_t status = loom_low_select_target_bound_funcs(
       module, &selection_options, &run_arena, &selection_list);
 
   bool emitted_error_diagnostics = false;

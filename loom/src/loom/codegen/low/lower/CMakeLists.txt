@@ -104,7 +104,9 @@ loom_cc_library(
     loom::error::emitter
     loom::error::error_defs
     loom::ir
+    loom::ops::func
     loom::ops::func_symbol_facts
+    loom::ops::kernel
     loom::ops::target
     loom::target::function_contract
     loom::target::function_version
