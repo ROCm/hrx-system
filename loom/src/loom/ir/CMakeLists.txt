@@ -125,6 +125,17 @@ loom_cc_test(
 
 loom_cc_test(
   NAME
+    attribute_test
+  SRCS
+    "attribute_test.cc"
+  DEPS
+    ::ir
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+loom_cc_test(
+  NAME
     context_test
   SRCS
     "context_test.cc"

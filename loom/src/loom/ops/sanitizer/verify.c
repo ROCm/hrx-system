@@ -230,44 +230,6 @@ static iree_status_t loom_sanitizer_assert_accesses_verify_static_shape(
 // Predicate assertions
 //===----------------------------------------------------------------------===//
 
-static bool loom_sanitizer_type_accepts_integer_predicates(loom_type_t type) {
-  if (!loom_type_is_scalar(type)) return false;
-  loom_scalar_type_t scalar_type = loom_type_element_type(type);
-  return loom_scalar_type_is_integer(scalar_type) ||
-         scalar_type == LOOM_SCALAR_TYPE_INDEX ||
-         scalar_type == LOOM_SCALAR_TYPE_OFFSET;
-}
-
-static bool loom_sanitizer_type_accepts_float_predicates(loom_type_t type) {
-  return loom_type_is_scalar(type) &&
-         loom_scalar_type_is_float(loom_type_element_type(type));
-}
-
-static bool loom_sanitizer_type_accepts_predicate(loom_type_t type,
-                                                  uint8_t predicate_kind) {
-  switch ((loom_predicate_kind_t)predicate_kind) {
-    case LOOM_PREDICATE_EQ:
-    case LOOM_PREDICATE_NE:
-    case LOOM_PREDICATE_LT:
-    case LOOM_PREDICATE_LE:
-    case LOOM_PREDICATE_GT:
-    case LOOM_PREDICATE_GE:
-    case LOOM_PREDICATE_MUL:
-    case LOOM_PREDICATE_MIN:
-    case LOOM_PREDICATE_MAX:
-    case LOOM_PREDICATE_POW2:
-    case LOOM_PREDICATE_RANGE:
-      return loom_sanitizer_type_accepts_integer_predicates(type);
-    case LOOM_PREDICATE_NOT_NAN:
-    case LOOM_PREDICATE_NOT_INF:
-    case LOOM_PREDICATE_FINITE:
-      return loom_sanitizer_type_accepts_float_predicates(type);
-    case LOOM_PREDICATE_COUNT_:
-      return false;
-  }
-  return false;
-}
-
 static iree_string_view_t loom_sanitizer_predicate_expected_type(
     uint8_t predicate_kind) {
   switch ((loom_predicate_kind_t)predicate_kind) {
@@ -352,7 +314,8 @@ static iree_status_t loom_sanitizer_verify_predicates_reference_values(
             expected_constraint);
       }
       loom_type_t value_type = loom_module_value_type(module, value_id);
-      if (!loom_sanitizer_type_accepts_predicate(value_type, predicate->kind)) {
+      if (!loom_predicate_kind_accepts_value_type(predicate->kind,
+                                                  value_type)) {
         return loom_sanitizer_emit_predicate_value_type(
             emitter, op, predicate_index, argument_index, value_type,
             loom_sanitizer_predicate_expected_type(predicate->kind));
