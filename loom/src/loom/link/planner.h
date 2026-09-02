@@ -132,6 +132,10 @@ typedef struct loom_link_plan_options_t {
     // Index-wide symbol ordinals in caller-defined stable order.
     const iree_host_size_t* values;
   } root_symbol_ordinals;
+  // Select test-only symbols from INPUT providers as roots in LINK mode.
+  // Test-only symbols from LIBRARY providers remain ordinary dependency
+  // candidates and are not selected merely because their library is present.
+  bool include_input_tests;
 } loom_link_plan_options_t;
 
 // One live symbol selection in a plan.

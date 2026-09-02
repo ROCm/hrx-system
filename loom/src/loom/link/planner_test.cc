@@ -1821,6 +1821,73 @@ TEST_F(LinkPlannerTest, KeepTestSymbolPolicyPreservesDependencies) {
   EXPECT_TRUE(ContainsSymbol(plan.get(), check_case));
 }
 
+TEST_F(LinkPlannerTest, InputTestRootsExcludeLibraryTests) {
+  loom_module_t* root_module = Parse(IREE_SV(R"(
+func.decl @library_helper(%x: i32) -> (i32)
+
+check.case @root_case {
+  %input = check.literal value(1) : i32
+  %actual = func.call @library_helper(%input) : (i32) -> (i32)
+  check.expect.equal actual(%actual) expected(%input) : i32
+  check.return
+}
+
+check.benchmark<@root_case> @root_benchmark
+)"),
+                                     IREE_SV("root.loom"));
+  loom_module_t* library_module = Parse(IREE_SV(R"(
+func.def public @library_helper(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+
+check.case public @library_case {
+  check.return
+}
+
+check.benchmark<@library_case> @library_benchmark
+)"),
+                                        IREE_SV("library.loom"));
+
+  IndexPtr index = CreateIndex();
+  AddMaterialized(index.get(), root_module, IREE_SV("root"),
+                  LOOM_LINK_PROVIDER_ROLE_INPUT);
+  AddMaterialized(index.get(), library_module, IREE_SV("library"),
+                  LOOM_LINK_PROVIDER_ROLE_LIBRARY);
+  loom_link_plan_options_t options = {
+      /*.mode=*/LOOM_LINK_PLAN_LINK,
+  };
+  options.include_input_tests = true;
+  PlanPtr plan = BuildPlan(index.get(), &options);
+
+  const loom_link_module_index_module_t* root_index_module =
+      loom_link_module_index_module_at(index.get(), 0);
+  const loom_link_module_index_module_t* library_index_module =
+      loom_link_module_index_module_at(index.get(), 1);
+  ASSERT_NE(root_index_module, nullptr);
+  ASSERT_NE(library_index_module, nullptr);
+  const loom_link_module_index_symbol_t* root_case =
+      loom_link_module_index_lookup_private(index.get(), root_index_module,
+                                            IREE_SV("root_case"));
+  const loom_link_module_index_symbol_t* root_benchmark =
+      loom_link_module_index_lookup_private(index.get(), root_index_module,
+                                            IREE_SV("root_benchmark"));
+  const loom_link_module_index_symbol_t* library_helper =
+      loom_link_module_index_lookup_global(index.get(),
+                                           IREE_SV("library_helper"));
+  const loom_link_module_index_symbol_t* library_case =
+      loom_link_module_index_lookup_global(index.get(),
+                                           IREE_SV("library_case"));
+  const loom_link_module_index_symbol_t* library_benchmark =
+      loom_link_module_index_lookup_private(index.get(), library_index_module,
+                                            IREE_SV("library_benchmark"));
+
+  EXPECT_TRUE(ContainsSymbol(plan.get(), root_case));
+  EXPECT_TRUE(ContainsSymbol(plan.get(), root_benchmark));
+  EXPECT_TRUE(ContainsSymbol(plan.get(), library_helper));
+  EXPECT_FALSE(ContainsSymbol(plan.get(), library_case));
+  EXPECT_FALSE(ContainsSymbol(plan.get(), library_benchmark));
+}
+
 TEST_F(LinkPlannerTest, TestSymbolStripPolicyRejectsStrippedRoots) {
   loom_module_t* module = Parse(Fixture(
       IREE_SV("test_symbol_strip_policy_rejects_stripped_roots_module.loom")));
