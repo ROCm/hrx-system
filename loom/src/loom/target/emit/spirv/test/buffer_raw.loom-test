@@ -73,13 +73,13 @@ func.def target(@target) @raw_byte_roundtrip(%source: buffer, %source_offset: of
      %target = OpLoad %ulong %23 Aligned 8
          %25 = OpAccessChain %_ptr_StorageBuffer_ulong %11 %int_0
 %target_offset = OpLoad %ulong %25 Aligned 8
-         %29 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_uchar %source
-         %30 = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_uchar %29 %source_offset
+         %27 = OpIAdd %ulong %source %source_offset
+         %30 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_uchar %27
          %31 = OpLoad %uchar %30 Aligned 1
          %33 = OpUConvert %uint %31
        %byte = OpBitcast %int %33
-         %35 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_uchar %target
-         %36 = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_uchar %35 %target_offset
+         %35 = OpIAdd %ulong %target %target_offset
+         %36 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_uchar %35
          %37 = OpBitcast %uint %byte
          %38 = OpUConvert %uchar %37
                OpStore %36 %38 Aligned 1

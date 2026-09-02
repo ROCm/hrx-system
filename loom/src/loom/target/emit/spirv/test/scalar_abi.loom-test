@@ -197,39 +197,39 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) @
          %72 = OpIAdd %uint %35 %uint_9
          %73 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %33 %int_0 %72
  %output_f64 = OpLoad %ulong %73 Aligned 8
-         %77 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_char %input_i8
-%input_i8_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_char %77 %byte_offset
+         %75 = OpIAdd %ulong %input_i8 %byte_offset
+%input_i8_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_char %75
   %loaded_i8 = OpLoad %char %input_i8_view Aligned 1
      %sum_i8 = OpIAdd %char %loaded_i8 %loaded_i8
-         %81 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_char %output_i8
-%output_i8_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_char %81 %byte_offset
+         %81 = OpIAdd %ulong %output_i8 %byte_offset
+%output_i8_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_char %81
                OpStore %output_i8_view %sum_i8 Aligned 1
-         %85 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_short %input_i16
-%input_i16_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_short %85 %byte_offset
+         %83 = OpIAdd %ulong %input_i16 %byte_offset
+%input_i16_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_short %83
  %loaded_i16 = OpLoad %short %input_i16_view Aligned 2
     %sum_i16 = OpIAdd %short %loaded_i16 %loaded_i16
-         %89 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_short %output_i16
-%output_i16_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_short %89 %byte_offset
+         %89 = OpIAdd %ulong %output_i16 %byte_offset
+%output_i16_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_short %89
                OpStore %output_i16_view %sum_i16 Aligned 2
-         %93 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_half %input_f16
-%input_f16_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_half %93 %byte_offset
+         %91 = OpIAdd %ulong %input_f16 %byte_offset
+%input_f16_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_half %91
  %loaded_f16 = OpLoad %half %input_f16_view Aligned 2
     %sum_f16 = OpFAdd %half %loaded_f16 %loaded_f16
-         %97 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_half %output_f16
-%output_f16_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_half %97 %byte_offset
+         %97 = OpIAdd %ulong %output_f16 %byte_offset
+%output_f16_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_half %97
                OpStore %output_f16_view %sum_f16 Aligned 2
-        %101 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_bfloat16 %input_bf16
-%input_bf16_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_bfloat16 %101 %byte_offset
+         %99 = OpIAdd %ulong %input_bf16 %byte_offset
+%input_bf16_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_bfloat16 %99
 %loaded_bf16 = OpLoad %bfloat16 %input_bf16_view Aligned 2
-        %104 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_bfloat16 %output_bf16
-%output_bf16_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_bfloat16 %104 %byte_offset
+        %104 = OpIAdd %ulong %output_bf16 %byte_offset
+%output_bf16_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_bfloat16 %104
                OpStore %output_bf16_view %loaded_bf16 Aligned 2
-        %108 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_double %input_f64
-%input_f64_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_double %108 %byte_offset
+        %106 = OpIAdd %ulong %input_f64 %byte_offset
+%input_f64_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_double %106
  %loaded_f64 = OpLoad %double %input_f64_view Aligned 8
     %sum_f64 = OpFAdd %double %loaded_f64 %loaded_f64
-        %112 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_double %output_f64
-%output_f64_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_double %112 %byte_offset
+        %112 = OpIAdd %ulong %output_f64 %byte_offset
+%output_f64_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_double %112
                OpStore %output_f64_view %sum_f64 Aligned 8
                OpReturn
                OpFunctionEnd
@@ -703,32 +703,32 @@ low.kernel.def target<spirv.logical.core>(@hal_target_scalar_payloads) workgroup
         %123 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %91 %int_0 %122
  %output_i64 = OpLoad %ulong %123 Aligned 8
    %flag_i32 = OpSelect %int %flag %one %zero
-        %129 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %output_flag
-  %flag_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %129 %byte_offset
+        %128 = OpIAdd %ulong %output_flag %byte_offset
+  %flag_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %128
                OpStore %flag_view %flag_i32 Aligned 4
-        %132 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_char %output_i8
-    %i8_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_char %132 %byte_offset
+        %131 = OpIAdd %ulong %output_i8 %byte_offset
+    %i8_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_char %131
                OpStore %i8_view %i8 Aligned 1
-        %135 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_short %output_i16
-   %i16_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_short %135 %byte_offset
+        %134 = OpIAdd %ulong %output_i16 %byte_offset
+   %i16_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_short %134
                OpStore %i16_view %i16 Aligned 2
-        %138 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_half %output_f16
-   %f16_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_half %138 %byte_offset
+        %137 = OpIAdd %ulong %output_f16 %byte_offset
+   %f16_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_half %137
                OpStore %f16_view %f16 Aligned 2
-        %141 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_bfloat16 %output_bf16
-  %bf16_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_bfloat16 %141 %byte_offset
+        %140 = OpIAdd %ulong %output_bf16 %byte_offset
+  %bf16_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_bfloat16 %140
                OpStore %bf16_view %bf16 Aligned 2
     %f32_sum = OpFAdd %float %f32 %f32
-        %145 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %output_f32
-   %f32_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_float %145 %byte_offset
+        %144 = OpIAdd %ulong %output_f32 %byte_offset
+   %f32_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %144
                OpStore %f32_view %f32_sum Aligned 4
     %f64_sum = OpFAdd %double %f64 %f64
-        %149 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_double %output_f64
-   %f64_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_double %149 %byte_offset
+        %148 = OpIAdd %ulong %output_f64 %byte_offset
+   %f64_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_double %148
                OpStore %f64_view %f64_sum Aligned 8
     %i64_sum = OpIAdd %long %i64 %i64
-        %153 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_long %output_i64
-   %i64_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_long %153 %byte_offset
+        %152 = OpIAdd %ulong %output_i64 %byte_offset
+   %i64_view = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_long %152
                OpStore %i64_view %i64_sum Aligned 8
                OpReturn
                OpFunctionEnd

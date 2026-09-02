@@ -280,8 +280,8 @@ def _storage_buffer_rows_for_scalar(
     return (
         _PacketRow(
             f"spirv.op_ptr_access_chain.storage_buffer.{scalar.suffix}.byte_offset",
-            opcode="LOOM_SPIRV_OP_PTR_ACCESS_CHAIN",
-            form="LOOM_SPIRV_PACKET_FORM_PTR_ACCESS_CHAIN",
+            opcode="LOOM_SPIRV_OP_CONVERT_U_TO_PTR",
+            form="LOOM_SPIRV_PACKET_FORM_PHYSICAL_STORAGE_BUFFER_BYTE_OFFSET",
             result_type=_physical_storage_buffer_pointer_value(scalar),
             operand_types=(
                 _storage_buffer_address_value(),
