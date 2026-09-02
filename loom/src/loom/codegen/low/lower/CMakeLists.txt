@@ -16,6 +16,7 @@ loom_cc_library(
     "contract_query.h"
     "lower.h"
     "lower_internal.h"
+    "lower_report.h"
     "lower_rule_descriptor.h"
     "lower_rule_source_memory.h"
     "lower_rules.h"
@@ -149,6 +150,25 @@ loom_cc_test(
     loom::ops::func
     loom::ops::scalar
     loom::target::low_descriptor_registry
+    loom::target::test::low_registry
+    loom::target::test::lower
+    loom::target::test::target_record_table
+    loom::util::fact_table
+)
+
+loom_cc_test(
+  NAME
+    lower_report_test
+  SRCS
+    "lower_report_test.cc"
+  DEPS
+    ::lower
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::codegen::low::testing::source_workload
+    loom::ir
+    loom::ops::func
+    loom::ops::scalar
     loom::target::test::low_registry
     loom::target::test::lower
     loom::target::test::target_record_table

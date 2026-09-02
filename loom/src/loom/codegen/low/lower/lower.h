@@ -22,6 +22,7 @@
 #include "loom/analysis/native_layout.h"
 #include "loom/analysis/symbolic_expr.h"
 #include "loom/codegen/low/descriptors.h"
+#include "loom/codegen/low/lower/lower_report.h"
 #include "loom/codegen/low/lower/module_state.h"
 #include "loom/codegen/low/memory_access.h"
 #include "loom/error/emitter.h"
@@ -949,9 +950,6 @@ iree_status_t loom_low_lower_function(loom_module_t* module,
                                       const loom_low_lower_options_t* options,
                                       loom_low_lower_result_t* out_result);
 
-// Releases report row storage owned by |result|.
-void loom_low_lower_result_deinitialize(loom_low_lower_result_t* result);
-
 // Lowers one target-bound external function declaration into a low.func.decl.
 //
 // The emitted low declaration preserves the source symbol identity, maps the
@@ -1332,18 +1330,6 @@ iree_status_t loom_low_lower_record_source_memory_access(
     loom_low_lower_context_t* context, loom_op_t* low_op,
     const loom_low_source_memory_access_plan_t* source_plan,
     loom_low_lower_memory_access_record_flags_t flags);
-
-// Populates row source interval evidence from |source_plan| and interns exact
-// symbolic interval endpoints when report-only accounting can prove them.
-iree_status_t loom_low_lower_memory_report_row_populate_source_interval(
-    loom_low_lower_context_t* context,
-    const loom_low_source_memory_access_plan_t* source_plan,
-    loom_low_lower_memory_report_row_t* row);
-
-// Records an emitted source-memory packet report row.
-iree_status_t loom_low_lower_record_memory_report_row(
-    loom_low_lower_context_t* context, const loom_op_t* source_op,
-    const loom_low_lower_memory_report_row_t* row);
 
 // Emits ERR_TARGET_033 for a source value type rejected by the active
 // target-low policy.
