@@ -1232,10 +1232,6 @@ class BuildFileFunctions(object):
         # declarations for the configurations it supports.
         pass
 
-    def loom_test_suite(self, **kwargs):
-        # Expands to Bazel loom_test targets and has no CMake counterpart.
-        pass
-
     def config_setting(self, **kwargs):
         pass
 

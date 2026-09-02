@@ -90,12 +90,14 @@ test module therefore owns correctness and benchmark declarations independently
 while the production module remains free of check records.
 
 This is a scalable library shape: `motif/` and `kernel/` packages publish
-reusable modules, while their sibling `test/` packages own test modules, cases,
-and benchmark records. The public Bazel `loom_test` rule executes one
-authored source through `iree-test-loom`, with production `loom_library`
-dependencies supplied as explicit libraries. It executes each selected case
-sample once for correctness; benchmark planning and measurement remain explicit
-`iree-benchmark-loom` workflows.
+reusable modules, while their sibling `test/` packages own grouped test
+modules, cases, and benchmark records. The public Bazel `loom_test` rule merges
+its `srcs`, retains all tests and benchmarks they own, and links the definitions
+they reach through `deps`. Tests and benchmarks declared by dependencies are
+not part of the resulting test module. `iree-test-loom` executes each selected
+case sample once for correctness. The test then runs each benchmark through
+`iree-benchmark-loom` with one measured iteration and no warmup repetitions;
+full performance measurement remains an explicit benchmark workflow.
 
 ## Parameters define the sample space
 

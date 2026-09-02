@@ -9,7 +9,6 @@ load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
 load(
     "//loom/build_tools/bazel:defs.bzl",
     "loom_test",
-    "loom_test_suite",
 )
 load(
     "//loom/src/loom/tooling/target/amdgpu:execution_profiles.bzl",
@@ -56,7 +55,7 @@ iree_execution_test_suite(
     },
 )
 
-loom_test_suite(
+loom_test(
     name = "hal_tests",
     srcs = [
         "amdgpu_hal_actual.loom",
@@ -70,24 +69,24 @@ loom_test_suite(
 
 loom_test(
     name = "kernarg_hardware_test",
-    src = "amdgpu_unused_kernargs.loom",
+    srcs = ["amdgpu_unused_kernargs.loom"],
     execution_profile = AMDGPU_HARDWARE_PROFILE,
 )
 
 loom_test(
     name = "kernarg_access_test",
-    src = "amdgpu_unused_kernargs.loom",
+    srcs = ["amdgpu_unused_kernargs.loom"],
     execution_profile = AMDGPU_ACCESS_PROFILE,
 )
 
 loom_test(
     name = "asan_test",
-    src = "//loom/src/loom/test/corpus/sanitizer:amdgpu_asan_actual.loom",
+    srcs = ["//loom/src/loom/test/corpus/sanitizer:amdgpu_asan_actual.loom"],
     execution_profile = AMDGPU_ASAN_PROFILE,
 )
 
 loom_test(
     name = "tsan_test",
-    src = "//loom/src/loom/test/corpus/sanitizer:amdgpu_tsan_actual.loom",
+    srcs = ["//loom/src/loom/test/corpus/sanitizer:amdgpu_tsan_actual.loom"],
     execution_profile = AMDGPU_TSAN_PROFILE,
 )

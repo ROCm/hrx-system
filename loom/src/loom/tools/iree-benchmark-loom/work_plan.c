@@ -597,6 +597,12 @@ static iree_status_t iree_benchmark_loom_select_matching_benchmarks(
     const loom_testbench_module_plan_t* module_plan,
     const iree_benchmark_loom_options_t* options,
     iree_benchmark_loom_work_plan_t* plan) {
+  if (module_plan->benchmark_count == 0 &&
+      iree_string_view_is_empty(options->selected_benchmark) &&
+      iree_string_view_is_empty(options->selected_case)) {
+    return iree_ok_status();
+  }
+
   iree_host_size_t selection_count = 0;
   for (iree_host_size_t i = 0; i < module_plan->benchmark_count; ++i) {
     const loom_testbench_benchmark_plan_t* benchmark_plan =

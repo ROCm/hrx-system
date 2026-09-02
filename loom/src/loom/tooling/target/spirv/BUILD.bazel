@@ -10,7 +10,7 @@ load(
     "loom_cc_test",
     "loom_config_compatible_with",
 )
-load("//loom/build_tools/bazel:defs.bzl", "loom_test_suite")
+load("//loom/build_tools/bazel:defs.bzl", "loom_test")
 load(
     ":execution_profiles.bzl",
     "SPIRV_VULKAN_HARDWARE_PROFILE",
@@ -207,7 +207,7 @@ loom_cc_test(
     ],
 )
 
-loom_test_suite(
+loom_test(
     name = "vulkan_tests",
     srcs = [
         "test/spirv_vulkan_atomic_hal_actual.loom",

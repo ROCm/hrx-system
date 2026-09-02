@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Public rules for Loom libraries, kernels, and correctness tests."""
+"""Public rules for Loom libraries, kernels, and tests."""
 
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//build_tools/bazel:cc_attrs.bzl", "cc_attrs")
@@ -27,16 +27,31 @@ _LOOM_LINT_TOOLCHAIN_TYPE = Label("//loom/build_tools/bazel:lint_toolchain_type"
 _LOOM_LINK_TOOLCHAIN_TYPE = Label("//loom/build_tools/bazel:link_toolchain_type")
 _LOOM_TEST_TOOLCHAIN_TYPE = Label("//loom/build_tools/bazel:test_toolchain_type")
 
+_LOOM_BENCHMARK_SMOKE_ARGS = [
+    "--iterations=1",
+    "--warmup-iterations=0",
+    "--output-format=jsonl",
+    "--compile-report=none",
+]
+
 LoomLibraryInfo = _LoomLibraryInfo
 
 LoomExecutionTestInfo = provider(
-    doc = "A correctness test executing one authored Loom source.",
+    doc = "A test executing one linked Loom test module.",
     fields = {
-        "libraries": "Ordered Loom libraries supplied to the correctness runner.",
+        "benchmark_runner": "Resolved single-iteration benchmark runner executable.",
+        "benchmark_runner_args": "Smoke and profile arguments passed to the benchmark runner.",
+        "module": "Linked Loom module containing root-owned cases and benchmarks.",
         "profile_name": "Stable execution profile name, or empty for an unprofiled test.",
-        "runner": "Resolved correctness runner executable.",
-        "runner_args": "Profile arguments passed to the correctness runner.",
-        "source": "Authored Loom source consumed as the primary input.",
+        "test_runner": "Resolved correctness runner executable.",
+        "test_runner_args": "Profile and test arguments passed to the correctness runner.",
+    },
+)
+
+_LoomTestModuleInfo = provider(
+    doc = "A linked module retaining tests owned by one root library.",
+    fields = {
+        "module": "Linked Loom bytecode module consumed by execution and plan runners.",
     },
 )
 
@@ -51,16 +66,15 @@ def loom_execution_profile(
         resource_group = None,
         sanitizer_suppressions = None,
         tags = []):
-    """Defines immutable policy for Loom correctness-test execution.
+    """Defines immutable policy for Loom test execution.
 
     Args:
       name: Stable profile name used in generated target names and query tags.
       target_family: Compiler target family, such as amdgpu or spirv.
       target_class: Broad target class, such as gpu or cpu.
       executor: Execution environment, such as hardware or reference.
-      runner_args: Arguments appended after explicit libraries passed to
-        iree-test-loom.
-      build_requirements: Build requirements needed by the correctness runner.
+      runner_args: Arguments passed to the correctness and benchmark runners.
+      build_requirements: Build requirements needed by the execution runners.
       run_requirements: Runtime resources needed to execute the test.
       resource_group: Optional local resource group serializing competing tests.
       sanitizer_suppressions: Sanitizer suppression files keyed by sanitizer
@@ -153,6 +167,39 @@ _loom_library = rule(
     toolchains = [_LOOM_LINK_TOOLCHAIN_TYPE],
 )
 
+def _loom_test_module_impl(ctx):
+    root_library = ctx.attr.root_library[LoomLibraryInfo]
+    dependency_infos = [dep[LoomLibraryInfo] for dep in ctx.attr.deps]
+    module = loom_linking.declare_test_module(
+        ctx = ctx,
+        root_module = root_library.module,
+        dependency_infos = dependency_infos,
+        output_stem = ctx.label.name,
+        mnemonic = "LoomTestModule",
+        progress_message = "Linking Loom test module %s" % ctx.label,
+    )
+    return [
+        DefaultInfo(files = depset([module])),
+        _LoomTestModuleInfo(module = module),
+    ]
+
+_loom_test_module = rule(
+    implementation = _loom_test_module_impl,
+    attrs = {
+        "deps": attr.label_list(
+            providers = [LoomLibraryInfo],
+            doc = "Direct libraries available only for dependency resolution.",
+        ),
+        "root_library": attr.label(
+            mandatory = True,
+            providers = [LoomLibraryInfo],
+            doc = "Root library whose test-only symbols become link roots.",
+        ),
+    },
+    doc = "Links one root-owned Loom test module.",
+    toolchains = [_LOOM_LINK_TOOLCHAIN_TYPE],
+)
+
 def _tool_runfiles(ctx, tool, files):
     runfiles = ctx.runfiles(files = files + [tool.executable])
     if tool.runfiles:
@@ -187,59 +234,101 @@ def _write_test_launcher(ctx, tool, input_file, tool_args):
     )
     return output
 
-def _loom_execution_test_launcher_impl(ctx):
-    tool = ctx.toolchains[_LOOM_TEST_TOOLCHAIN_TYPE].tool
-    libraries = [dep[LoomLibraryInfo] for dep in ctx.attr.libraries]
-    library_modules = [library.module for library in libraries]
-    output = _write_test_launcher(
+def _write_execution_test_launcher(
         ctx,
-        tool,
-        ctx.file.src,
-        ["--library=%s" % module.short_path for module in library_modules] +
-        ctx.attr.runner_args,
+        test_tool,
+        benchmark_tool,
+        module,
+        test_runner_args,
+        benchmark_runner_args):
+    output = ctx.actions.declare_file(ctx.label.name + ".sh")
+    test_args = "".join([
+        " \\\n  %s" % _shell_quote(arg)
+        for arg in test_runner_args
+    ])
+    benchmark_args = "".join([
+        " \\\n  %s" % _shell_quote(arg)
+        for arg in benchmark_runner_args
+    ])
+    content = (
+        "#!/usr/bin/env bash\n" +
+        "set -euo pipefail\n" +
+        "RUNFILES=\"${{RUNFILES_DIR:-$0.runfiles}}\"\n" +
+        "cd \"${{RUNFILES}}/{workspace}\"\n" +
+        "\"${{PWD}}/{test_tool}\" \"${{PWD}}/{module}\"{test_args}\n" +
+        "exec \"${{PWD}}/{benchmark_tool}\" \"${{PWD}}/{module}\"{benchmark_args}\n"
+    ).format(
+        workspace = ctx.workspace_name,
+        test_tool = test_tool.executable.short_path,
+        benchmark_tool = benchmark_tool.executable.short_path,
+        module = module.short_path,
+        test_args = test_args,
+        benchmark_args = benchmark_args,
     )
+    ctx.actions.write(
+        content = content,
+        is_executable = True,
+        output = output,
+    )
+    return output
+
+def _loom_execution_test_launcher_impl(ctx):
+    test_tool = ctx.toolchains[_LOOM_TEST_TOOLCHAIN_TYPE].tool
+    benchmark_tool = ctx.toolchains[_LOOM_BENCHMARK_TOOLCHAIN_TYPE].tool
+    module = ctx.attr.module[_LoomTestModuleInfo].module
+    test_runner_args = ctx.attr.profile_args + ctx.attr.test_args
+    benchmark_runner_args = _LOOM_BENCHMARK_SMOKE_ARGS + ctx.attr.profile_args
+    output = _write_execution_test_launcher(
+        ctx,
+        test_tool,
+        benchmark_tool,
+        module,
+        test_runner_args,
+        benchmark_runner_args,
+    )
+    runfiles = _tool_runfiles(ctx, test_tool, [module])
+    runfiles = runfiles.merge(_tool_runfiles(ctx, benchmark_tool, []))
     return [
         DefaultInfo(
             executable = output,
             files = depset([output]),
-            runfiles = _tool_runfiles(
-                ctx,
-                tool,
-                [ctx.file.src] + library_modules,
-            ),
+            runfiles = runfiles,
         ),
         LoomExecutionTestInfo(
-            libraries = libraries,
+            benchmark_runner = benchmark_tool.executable,
+            benchmark_runner_args = benchmark_runner_args,
+            module = module,
             profile_name = ctx.attr.profile_name,
-            runner = tool.executable,
-            runner_args = ctx.attr.runner_args,
-            source = ctx.file.src,
+            test_runner = test_tool.executable,
+            test_runner_args = test_runner_args,
         ),
     ]
 
 _loom_execution_test_launcher = rule(
     implementation = _loom_execution_test_launcher_impl,
     attrs = {
-        "libraries": attr.label_list(
-            providers = [LoomLibraryInfo],
-            doc = "Loom libraries linked into the authored test source.",
+        "module": attr.label(
+            mandatory = True,
+            providers = [_LoomTestModuleInfo],
+            doc = "Linked Loom module containing root-owned cases and benchmarks.",
+        ),
+        "profile_args": attr.string_list(
+            doc = "Profile arguments appended after the module for both runners.",
         ),
         "profile_name": attr.string(
             mandatory = True,
             doc = "Stable execution profile name.",
         ),
-        "runner_args": attr.string_list(
-            doc = "Profile arguments appended after explicit libraries.",
-        ),
-        "src": attr.label(
-            allow_single_file = [".loom"],
-            mandatory = True,
-            doc = "Authored Loom source containing correctness cases.",
+        "test_args": attr.string_list(
+            doc = "Arguments appended only to the correctness runner.",
         ),
     },
-    doc = "Generates a launcher for one authored Loom execution profile.",
+    doc = "Generates a launcher for one linked Loom test profile.",
     executable = True,
-    toolchains = [_LOOM_TEST_TOOLCHAIN_TYPE],
+    toolchains = [
+        _LOOM_BENCHMARK_TOOLCHAIN_TYPE,
+        _LOOM_TEST_TOOLCHAIN_TYPE,
+    ],
 )
 
 def _loom_format_test_launcher_impl(ctx):
@@ -294,7 +383,7 @@ _loom_lint_test_launcher = rule(
 
 def _loom_plan_test_launcher_impl(ctx):
     tool = ctx.toolchains[_LOOM_BENCHMARK_TOOLCHAIN_TYPE].tool
-    module = ctx.attr.library[LoomLibraryInfo].module
+    module = ctx.attr.module[_LoomTestModuleInfo].module
     output = _write_test_launcher(
         ctx,
         tool,
@@ -316,10 +405,10 @@ def _loom_plan_test_launcher_impl(ctx):
 _loom_plan_test_launcher = rule(
     implementation = _loom_plan_test_launcher_impl,
     attrs = {
-        "library": attr.label(
+        "module": attr.label(
             mandatory = True,
-            providers = [LoomLibraryInfo],
-            doc = "Kernel library whose check.benchmark work graph is planned.",
+            providers = [_LoomTestModuleInfo],
+            doc = "Linked root-owned test module whose benchmarks are planned.",
         ),
     },
     doc = "Generates a launcher that plans every declared Loom benchmark.",
@@ -408,10 +497,9 @@ def _execution_profile_tags(profile):
 
 def _declare_execution_test(
         name,
-        src,
-        libraries,
+        module,
         profile,
-        runner_args,
+        test_runner_args,
         size,
         tags,
         visibility):
@@ -456,10 +544,10 @@ def _declare_execution_test(
         name = name,
         launcher_rule = _loom_execution_test_launcher,
         launcher_attrs = {
-            "libraries": libraries,
+            "module": module,
+            "profile_args": profile_runner_args,
             "profile_name": profile_name,
-            "runner_args": profile_runner_args + runner_args,
-            "src": src,
+            "test_args": test_runner_args,
         },
         test_kwargs = test_kwargs,
     )
@@ -510,12 +598,24 @@ def _declare_library(
         )
         tests.append(test_name)
 
+    test_module = None
+    if plan_benchmarks or execution_profiles:
+        test_module = name + "_test_module"
+        _loom_test_module(
+            name = test_module,
+            deps = deps,
+            root_library = ":" + name,
+            tags = tags + ["manual"],
+            testonly = True,
+            visibility = ["//visibility:private"],
+        )
+
     if plan_benchmarks:
         plan_test_name = name + "_plan_test"
         _declare_launcher_test(
             name = plan_test_name,
             launcher_rule = _loom_plan_test_launcher,
-            launcher_attrs = {"library": ":" + name},
+            launcher_attrs = {"module": ":" + test_module},
             test_kwargs = {
                 "tags": tags + ["hostonly"],
                 "visibility": ["//visibility:private"],
@@ -528,35 +628,26 @@ def _declare_library(
     execution_names = {}
     for profile in execution_profiles:
         profile_suffix = _name_suffix(profile.name)
-        for source_index, src in enumerate(srcs):
-            if len(srcs) == 1:
-                execution_name = "%s_execute_%s_test" % (name, profile_suffix)
-            else:
-                execution_name = "%s_execute_%s_%d_test" % (
+        execution_name = "%s_execute_%s_test" % (name, profile_suffix)
+        if execution_name in execution_names:
+            fail(
+                "%s execution profile %s has the same generated name as %s" % (
                     name,
-                    profile_suffix,
-                    source_index,
-                )
-            if execution_name in execution_names:
-                fail(
-                    "%s execution profile %s has the same generated name as %s" % (
-                        name,
-                        profile.name,
-                        execution_names[execution_name],
-                    ),
-                )
-            execution_names[execution_name] = profile.name
-            _declare_execution_test(
-                name = execution_name,
-                src = src,
-                libraries = deps,
-                profile = profile,
-                runner_args = [],
-                size = "small",
-                tags = tags,
-                visibility = ["//visibility:private"],
+                    profile.name,
+                    execution_names[execution_name],
+                ),
             )
-            tests.append(execution_name)
+        execution_names[execution_name] = profile.name
+        _declare_execution_test(
+            name = execution_name,
+            module = ":" + test_module,
+            profile = profile,
+            test_runner_args = [],
+            size = "small",
+            tags = tags,
+            visibility = ["//visibility:private"],
+        )
+        tests.append(execution_name)
 
     binary_names = {}
     for target in kernel_targets:
@@ -628,55 +719,6 @@ def loom_library(
 
 def loom_test(
         name,
-        src,
-        deps = [],
-        args = [],
-        execution_profile = None,
-        size = "small",
-        tags = [],
-        visibility = None):
-    """Executes one authored Loom source as a correctness test.
-
-    The test runs ``iree-test-loom`` directly on ``src`` and supplies ``deps``
-    as explicit Loom bytecode libraries. Each selected ``check.case`` sample is
-    executed once. ``check.benchmark`` records do not trigger benchmark
-    planning, timing, or repetition.
-
-    Args:
-      name: Name of the generated test target.
-      src: Authored ``.loom`` source containing correctness cases.
-      deps: Loom libraries linked into the source before execution.
-      args: Additional arguments passed to ``iree-test-loom``.
-      execution_profile: Optional execution environment and requirement policy.
-      size: Bazel test size.
-      tags: Additional tags applied to the test.
-      visibility: Bazel visibility of the generated test target.
-    """
-    if not src:
-        fail("%s requires one authored test source" % name)
-    _declare_execution_test(
-        name = name,
-        src = src,
-        libraries = deps,
-        profile = execution_profile,
-        runner_args = args,
-        size = size,
-        tags = tags,
-        visibility = visibility,
-    )
-
-def _loom_test_suite_source_name(src):
-    source_name = str(src)
-    if ":" in source_name:
-        source_name = source_name.split(":")[-1]
-    if "/" in source_name:
-        source_name = source_name.split("/")[-1]
-    if source_name.endswith(".loom"):
-        source_name = source_name[:-len(".loom")]
-    return _name_suffix(source_name)
-
-def loom_test_suite(
-        name,
         srcs,
         deps = [],
         args = [],
@@ -684,53 +726,55 @@ def loom_test_suite(
         size = "small",
         tags = [],
         visibility = None):
-    """Executes each authored Loom source as an independent test.
+    """Executes tests owned by a group of authored Loom sources.
 
-    This is a naming and aggregation convenience around ``loom_test``. It does
-    not merge sources or create a test-only Loom library.
+    The rule merges ``srcs`` into one relocatable root library and links a test
+    module containing every root-owned ``check.case`` and ``check.benchmark``
+    plus their reachable dependencies. Test-only symbols from ``deps`` are not
+    selected. The linked module is the only Loom input to the runners.
+    ``iree-test-loom`` executes correctness cases once, then
+    ``iree-benchmark-loom`` executes each benchmark with one measured iteration
+    and no warmup repetitions.
 
     Args:
-      name: Name of the generated test suite.
-      srcs: Authored ``.loom`` sources, each executed as its own test.
-      deps: Loom libraries supplied to every test.
-      args: Additional ``iree-test-loom`` arguments supplied to every test.
-      execution_profile: Optional execution profile shared by every test.
-      size: Bazel test size applied to every test.
-      tags: Additional tags applied to every test and the suite.
-      visibility: Bazel visibility of the generated test suite.
+      name: Name of the generated test target.
+      srcs: Authored ``.loom`` sources jointly owning the test module.
+      deps: Loom libraries available only for dependency resolution.
+      args: Additional arguments passed to the correctness runner.
+      execution_profile: Optional execution environment and requirement policy.
+      size: Bazel test size.
+      tags: Additional tags applied to the test.
+      visibility: Bazel visibility of the generated test target.
     """
     if not srcs:
         fail("%s requires at least one authored test source" % name)
-    tests = []
-    source_names = {}
-    for src in srcs:
-        source_name = _loom_test_suite_source_name(src)
-        if source_name in source_names:
-            fail(
-                "%s sources %s and %s have the same test name" %
-                (name, source_names[source_name], src),
-            )
-        source_names[source_name] = src
-        test_name = "%s_%s_test" % (name, source_name)
-        loom_test(
-            name = test_name,
-            src = src,
-            deps = deps,
-            args = args,
-            execution_profile = execution_profile,
-            size = size,
-            tags = tags,
-            visibility = ["//visibility:private"],
-        )
-        tests.append(test_name)
-    suite_kwargs = {
-        "name": name,
-        "tags": tags,
-        "tests": tests,
-    }
-    if visibility != None:
-        suite_kwargs["visibility"] = visibility
-    native.test_suite(**suite_kwargs)
+    library_name = name + "_library"
+    module_name = name + "_module"
+    _loom_library(
+        name = library_name,
+        srcs = srcs,
+        deps = deps,
+        tags = tags + ["manual"],
+        testonly = True,
+        visibility = ["//visibility:private"],
+    )
+    _loom_test_module(
+        name = module_name,
+        deps = deps,
+        root_library = ":" + library_name,
+        tags = tags + ["manual"],
+        testonly = True,
+        visibility = ["//visibility:private"],
+    )
+    _declare_execution_test(
+        name = name,
+        module = ":" + module_name,
+        profile = execution_profile,
+        test_runner_args = args,
+        size = size,
+        tags = tags,
+        visibility = visibility,
+    )
 
 def loom_kernel_library(
         name,
@@ -742,10 +786,13 @@ def loom_kernel_library(
         visibility = None):
     """Declares launchable kernels with format, plan, and target coverage.
 
-    Each entry in ``targets`` generates a private ``loom_kernel_binary`` and a
-    test that checks its loader artifact and reports. The generated binary uses
-    this library as its direct input, so only this library's exports become
-    roots while dependencies remain closure-only candidates.
+    Cases and benchmarks in ``srcs`` form one root-owned test module;
+    test-only symbols from ``deps`` are excluded. Each execution profile runs
+    that module as one correctness and benchmark-smoke test. Each entry in
+    ``targets`` generates a private ``loom_kernel_binary`` and a test that
+    checks its loader artifact and reports. The generated binary uses this
+    library as its direct input, so only this library's exports become roots
+    while dependencies remain closure-only candidates.
     """
     _declare_library(
         name = name,

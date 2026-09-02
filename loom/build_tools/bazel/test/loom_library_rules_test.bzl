@@ -19,7 +19,7 @@ load(
 REFERENCE_PROFILE = loom_execution_profile(
     name = "reference",
     executor = "reference",
-    runner_args = ["--case=@scalar_case"],
+    runner_args = ["--max-samples-per-case=1"],
     target_class = "cpu",
     target_family = "test",
 )
@@ -28,7 +28,7 @@ SERIALIZED_REFERENCE_PROFILE = loom_execution_profile(
     name = "serialized_reference",
     executor = "reference",
     resource_group = "loom-profile-analysis-tests",
-    runner_args = ["--case=@scalar_case"],
+    runner_args = ["--max-samples-per-case=1"],
     target_class = "cpu",
     target_family = "test",
 )
@@ -36,7 +36,7 @@ SERIALIZED_REFERENCE_PROFILE = loom_execution_profile(
 SUPPRESSED_REFERENCE_PROFILE = loom_execution_profile(
     name = "suppressed_reference",
     executor = "reference",
-    runner_args = ["--case=@scalar_case"],
+    runner_args = ["--max-samples-per-case=1"],
     sanitizer_suppressions = {
         "lsan": "//build_tools/sanitizer:lsan_suppressions_vulkan.txt",
     },
@@ -289,22 +289,35 @@ def _test_execution_profile_contract(name, **kwargs):
 
 def _test_execution_profile_contract_impl(env, target):
     info = target[LoomExecutionTestInfo]
-    env.expect.that_str(info.source.basename).equals("profile_cases.loom")
-    if len(info.libraries) != 1:
-        env.fail("expected one execution library, got %r" % info.libraries)
-    env.expect.that_str(info.libraries[0].module.basename).equals(
-        "library_dependency.loombc",
+    env.expect.that_str(info.module.basename).equals(
+        "profiled_test_module.loombc",
     )
     env.expect.that_str(info.profile_name).equals("reference")
-    if info.runner_args != ["--case=@scalar_case"]:
-        env.fail("unexpected runner args %r" % info.runner_args)
-    if not info.runner.basename.startswith("iree-test-loom"):
-        env.fail("unexpected correctness runner %r" % info.runner)
+    if not info.test_runner.basename.startswith("iree-test-loom"):
+        env.fail("unexpected correctness runner %r" % info.test_runner)
+    if info.test_runner_args != [
+        "--max-samples-per-case=1",
+        "--sample=0",
+    ]:
+        env.fail("unexpected correctness runner args %r" % info.test_runner_args)
+    if not info.benchmark_runner.basename.startswith("iree-benchmark-loom"):
+        env.fail("unexpected benchmark runner %r" % info.benchmark_runner)
+    if info.benchmark_runner_args != [
+        "--iterations=1",
+        "--warmup-iterations=0",
+        "--output-format=jsonl",
+        "--compile-report=none",
+        "--max-samples-per-case=1",
+    ]:
+        env.fail("unexpected benchmark runner args %r" % info.benchmark_runner_args)
 
     runfiles = target[DefaultInfo].default_runfiles.files.to_list()
-    _expect_basename(env, runfiles, "profile_cases.loom")
-    _expect_basename(env, runfiles, "library_dependency.loombc")
-    _expect_no_basename(env, runfiles, "profiled_test.loombc")
+    _expect_basename(env, runfiles, "profiled_test_module.loombc")
+    _expect_basename(env, runfiles, info.test_runner.basename)
+    _expect_basename(env, runfiles, info.benchmark_runner.basename)
+    _expect_no_basename(env, runfiles, "profile_cases.loom")
+    _expect_no_basename(env, runfiles, "profile_benchmarks.loom")
+    _expect_no_basename(env, runfiles, "library_dependency.loombc")
 
     tags = target[TestingAspectInfo].attrs.tags
     for expected_tag in [
@@ -329,11 +342,8 @@ def _test_resource_profile_preserves_direct_execution(name, **kwargs):
 
 def _test_resource_profile_preserves_direct_execution_impl(env, target):
     info = target[LoomExecutionTestInfo]
-    env.expect.that_str(info.source.basename).equals("profile_cases.loom")
-    if len(info.libraries) != 1:
-        env.fail("expected one execution library, got %r" % info.libraries)
-    env.expect.that_str(info.libraries[0].module.basename).equals(
-        "library_dependency.loombc",
+    env.expect.that_str(info.module.basename).equals(
+        "serialized_profile_test_module.loombc",
     )
     env.expect.that_str(info.profile_name).equals("serialized_reference")
 
@@ -345,6 +355,64 @@ def _test_resource_profile_preserves_direct_execution_impl(env, target):
     ]:
         if expected_tag not in tags:
             env.fail("expected %r in test tags %r" % (expected_tag, tags))
+
+def _test_grouped_execution_root_sources(name, **kwargs):
+    analysis_test(
+        name = name,
+        attr_values = {
+            "timeout": "short",
+        },
+        impl = _test_grouped_execution_root_sources_impl,
+        target = ":profiled_test_library",
+        **kwargs
+    )
+
+def _test_grouped_execution_root_sources_impl(env, target):
+    action = _find_action(env, target[TestingAspectInfo].actions, "LoomLibrary")
+    inputs = action.inputs.to_list()
+    _expect_basename(env, inputs, "profile_benchmarks.loom")
+    _expect_basename(env, inputs, "profile_cases.loom")
+    _expect_basename(env, inputs, "library_dependency.loombc")
+
+def _test_execution_module_links_root_tests(name, **kwargs):
+    analysis_test(
+        name = name,
+        attr_values = {
+            "timeout": "short",
+        },
+        impl = _test_execution_module_links_root_tests_impl,
+        target = ":profiled_test_module",
+        **kwargs
+    )
+
+def _test_execution_module_links_root_tests_impl(env, target):
+    files = target[DefaultInfo].files.to_list()
+    _expect_basename(env, files, "profiled_test_module.loombc")
+    action = _find_action(env, target[TestingAspectInfo].actions, "LoomTestModule")
+    for expected_arg in [
+        "--mode=link",
+        "--include-input-tests",
+        "--to=bc",
+    ]:
+        if expected_arg not in action.argv:
+            env.fail("expected %r in %r" % (expected_arg, action.argv))
+    _expect_arg_with_prefix_and_suffix(
+        env,
+        action.argv,
+        "",
+        "profiled_test_library.loombc",
+    )
+    _expect_arg_with_prefix_and_suffix(
+        env,
+        action.argv,
+        "--library=",
+        "library_dependency.loombc",
+    )
+    inputs = action.inputs.to_list()
+    _expect_basename(env, inputs, "profiled_test_library.loombc")
+    _expect_basename(env, inputs, "library_dependency.loombc")
+    _expect_no_basename(env, inputs, "profile_cases.loom")
+    _expect_no_basename(env, inputs, "profile_benchmarks.loom")
 
 def _test_suppression_profile_configures_test_environment(name, **kwargs):
     analysis_test(
@@ -372,8 +440,10 @@ def loom_library_rules_test_suite(name):
         name = name,
         tests = [
             _test_deps_only_library_propagates_dependencies,
+            _test_execution_module_links_root_tests,
             _test_execution_profile_contract,
             _test_generated_kernel_binary_is_testonly,
+            _test_grouped_execution_root_sources,
             _test_library_keeps_dependency_module_separate,
             _test_redundant_direct_dependency_is_not_transitive,
             _test_resource_profile_preserves_direct_execution,

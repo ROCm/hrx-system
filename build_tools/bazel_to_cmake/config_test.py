@@ -259,7 +259,6 @@ loom_check_test_suite(
 load(
     "//loom/build_tools/bazel:defs.bzl",
     "loom_test",
-    "loom_test_suite",
 )
 load(
     "//synthetic:policy.bzl",
@@ -268,12 +267,6 @@ load(
 
 loom_test(
     name = "one_test",
-    src = "one.loom",
-    execution_profile = TEST_EXECUTION_POLICY,
-)
-
-loom_test_suite(
-    name = "many_tests",
     srcs = ["one.loom", "two.loom"],
     execution_profile = TEST_EXECUTION_POLICY,
 )
@@ -284,7 +277,6 @@ loom_test_suite(
         )
 
         self.assertNotIn("one_test", cmake)
-        self.assertNotIn("many_tests", cmake)
 
     def test_unhandled_loaded_rule_fails_loudly(self):
         repo_root = Path(__file__).resolve().parents[2]

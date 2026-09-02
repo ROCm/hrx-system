@@ -59,7 +59,10 @@ loom_kernel_library(
 
 loom_library(
     name = "library_dependency",
-    srcs = ["link_kernels.loom"],
+    srcs = [
+        "dependency_checks.loom",
+        "link_kernels.loom",
+    ],
     tags = ["manual"],
 )
 
@@ -129,7 +132,11 @@ loom_library(
 
 loom_test(
     name = "profiled_test",
-    src = "profile_cases.loom",
+    srcs = [
+        "profile_benchmarks.loom",
+        "profile_cases.loom",
+    ],
+    args = ["--sample=0"],
     execution_profile = REFERENCE_PROFILE,
     tags = ["manual"],
     deps = [":library_dependency"],
@@ -137,7 +144,7 @@ loom_test(
 
 loom_test(
     name = "serialized_profile_test",
-    src = "profile_cases.loom",
+    srcs = ["profile_cases.loom"],
     execution_profile = SERIALIZED_REFERENCE_PROFILE,
     tags = ["manual"],
     deps = [":library_dependency"],
@@ -145,7 +152,7 @@ loom_test(
 
 loom_test(
     name = "suppressed_profile_test",
-    src = "profile_cases.loom",
+    srcs = ["profile_cases.loom"],
     execution_profile = SUPPRESSED_REFERENCE_PROFILE,
     tags = ["manual"],
     deps = [":library_dependency"],
