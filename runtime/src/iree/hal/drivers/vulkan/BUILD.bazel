@@ -105,6 +105,16 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
+    name = "buffer_test",
+    srcs = ["buffer_test.cc"],
+    deps = [
+        ":vulkan",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "command_buffer_test",
     srcs = ["command_buffer_test.cc"],
     deps = [

@@ -97,7 +97,9 @@ iree_status_t iree_hal_vulkan_sparse_buffer_handle(iree_hal_buffer_t* buffer,
 iree_status_t iree_hal_vulkan_sparse_buffer_memory_requirements(
     iree_hal_buffer_t* buffer, VkMemoryRequirements* out_memory_requirements);
 
-// Returns the Vulkan buffer device address backing |buffer|.
+// Returns the Vulkan buffer device address backing |buffer| plus its byte
+// offset. Returns 0 when the backing buffer has no device address. Fails if the
+// offset cannot be represented in a VkDeviceAddress.
 iree_status_t iree_hal_vulkan_sparse_buffer_device_address(
     iree_hal_buffer_t* buffer, VkDeviceAddress* out_device_address);
 

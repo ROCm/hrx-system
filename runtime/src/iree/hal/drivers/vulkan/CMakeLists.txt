@@ -125,6 +125,21 @@ endif()
 if(IREE_HAL_DRIVER_VULKAN)
 iree_cc_test(
   NAME
+    buffer_test
+  SRCS
+    "buffer_test.cc"
+  DEPS
+    ::vulkan
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=runtime.hal.vulkan"
+)
+endif()
+
+if(IREE_HAL_DRIVER_VULKAN)
+iree_cc_test(
+  NAME
     command_buffer_test
   SRCS
     "command_buffer_test.cc"

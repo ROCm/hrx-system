@@ -392,10 +392,20 @@ iree_status_t iree_hal_vulkan_buffer_device_address(
   }
   iree_hal_vulkan_buffer_t* vulkan_buffer =
       iree_hal_vulkan_buffer_cast(allocated_buffer);
+  if (vulkan_buffer->device_address == 0) {
+    *out_device_address = 0;
+    return iree_ok_status();
+  }
   iree_device_size_t byte_offset = 0;
   IREE_RETURN_IF_ERROR(iree_hal_vulkan_buffer_resolve_backing_offset(
       buffer, backing_buffer, /*local_byte_offset=*/0, &byte_offset));
-  *out_device_address = vulkan_buffer->device_address + byte_offset;
+  uint64_t device_address = 0;
+  if (!iree_checked_add_u64(vulkan_buffer->device_address, byte_offset,
+                            &device_address)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "Vulkan buffer device address overflows");
+  }
+  *out_device_address = device_address;
   return iree_ok_status();
 }
 
