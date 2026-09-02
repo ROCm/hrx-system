@@ -127,26 +127,6 @@ typedef struct loom_low_lower_target_state_record_t {
   void* data;
 } loom_low_lower_target_state_record_t;
 
-typedef struct loom_low_lower_module_target_state_record_t {
-  // Target-owned static key identifying this module-scope state object.
-  const void* key;
-  // Byte length of state storage.
-  iree_host_size_t data_length;
-  // Zero-initialized state storage allocated from the module-state arena.
-  void* data;
-} loom_low_lower_module_target_state_record_t;
-
-struct loom_low_lower_module_state_t {
-  // Arena used for module-scope target state records and payloads.
-  iree_arena_allocator_t* arena;
-  // Module-scope target state records keyed by target-owned static storage.
-  loom_low_lower_module_target_state_record_t* target_state_records;
-  // Number of populated target_state_records entries.
-  iree_host_size_t target_state_record_count;
-  // Number of allocated target_state_records entries.
-  iree_host_size_t target_state_record_capacity;
-};
-
 typedef enum loom_low_lower_function_analysis_phase_e {
   LOOM_LOW_LOWER_FUNCTION_ANALYSIS_EMPTY = 0,
   LOOM_LOW_LOWER_FUNCTION_ANALYSIS_EXPRESSIONS = 1,

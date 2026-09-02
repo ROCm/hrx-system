@@ -19,6 +19,7 @@ loom_cc_library(
     "lower_rule_descriptor.h"
     "lower_rule_source_memory.h"
     "lower_rules.h"
+    "module_state.h"
   SRCS
     "contract_query.c"
     "lower.c"
@@ -29,6 +30,7 @@ loom_cc_library(
     "lower_rule_source_memory_match.c"
     "lower_rule_source_memory_materialize.c"
     "lower_rules.c"
+    "module_state.c"
   DEPS
     iree::base
     iree::base::internal
@@ -96,6 +98,18 @@ loom_cc_library(
     loom::target::function_version
     loom::target::types
   PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    module_state_test
+  SRCS
+    "module_state_test.cc"
+  DEPS
+    ::lower
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 
 loom_cc_test(

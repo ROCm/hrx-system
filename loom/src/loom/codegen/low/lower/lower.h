@@ -22,6 +22,7 @@
 #include "loom/analysis/native_layout.h"
 #include "loom/analysis/symbolic_expr.h"
 #include "loom/codegen/low/descriptors.h"
+#include "loom/codegen/low/lower/module_state.h"
 #include "loom/codegen/low/memory_access.h"
 #include "loom/error/emitter.h"
 #include "loom/error/error_defs.h"
@@ -38,7 +39,6 @@ extern "C" {
 #endif
 
 typedef struct loom_low_lower_context_t loom_low_lower_context_t;
-typedef struct loom_low_lower_module_state_t loom_low_lower_module_state_t;
 typedef struct loom_low_lower_source_query_scope_t
     loom_low_lower_source_query_scope_t;
 typedef struct loom_low_lower_rule_set_t loom_low_lower_rule_set_t;
@@ -953,36 +953,6 @@ iree_status_t loom_low_lower_function(loom_module_t* module,
 
 // Releases report row storage owned by |result|.
 void loom_low_lower_result_deinitialize(loom_low_lower_result_t* result);
-
-// Creates a module-scope target-state container allocated from |arena|.
-//
-// Callers pass the returned state through every loom_low_lower_function call in
-// one source-to-low module pass and then invoke policy module finalizers before
-// releasing |arena|. Target-owned state stored here must be treated as
-// pass-local scratch until a module finalizer materializes durable IR.
-iree_status_t loom_low_lower_module_state_create(
-    iree_arena_allocator_t* arena,
-    loom_low_lower_module_state_t** out_module_state);
-
-// Returns module-scope target state for |key|, allocating zeroed storage on
-// first use.
-//
-// Keys must be target-owned static addresses. Reusing a key with a different
-// data length is an internal lowering error. The returned storage remains valid
-// until the arena passed to loom_low_lower_module_state_create is released.
-iree_status_t loom_low_lower_module_state_get_or_allocate(
-    loom_low_lower_module_state_t* module_state, const void* key,
-    iree_host_size_t data_length, void** out_data);
-
-// Allocates uninitialized pass-local module-state storage.
-iree_status_t loom_low_lower_module_state_allocate(
-    loom_low_lower_module_state_t* module_state, iree_host_size_t byte_length,
-    void** out_ptr);
-
-// Allocates an uninitialized pass-local module-state array.
-iree_status_t loom_low_lower_module_state_allocate_array(
-    loom_low_lower_module_state_t* module_state, iree_host_size_t count,
-    iree_host_size_t element_size, void** out_ptr);
 
 // Lowers one target-bound external function declaration into a low.func.decl.
 //
