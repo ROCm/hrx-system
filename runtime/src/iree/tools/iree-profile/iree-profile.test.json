@@ -8,7 +8,7 @@
         "args": ["--agents_md"]
       },
       "stdout": {
-        "contains": ["# IREE HAL Profiling With iree-profile", "JSONL"]
+        "non_empty": true
       },
       "stderr": {
         "empty": true

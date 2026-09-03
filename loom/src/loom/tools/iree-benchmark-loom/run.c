@@ -233,9 +233,13 @@ iree_status_t iree_benchmark_loom_run_file(
   iree_host_size_t correctness_failed_sample_count = 0;
   int exit_code = 0;
 
-  iree_status_t status = iree_ok_status();
-  status = iree_benchmark_loom_append_config_assignments(
-      &config_set, benchmark_options->config_assignments);
+  iree_status_t status =
+      loom_run_hal_testbench_context_validate_explicit_device(
+          &hal_context.execution);
+  if (iree_status_is_ok(status)) {
+    status = iree_benchmark_loom_append_config_assignments(
+        &config_set, benchmark_options->config_assignments);
+  }
   if (iree_status_is_ok(status)) {
     status = iree_benchmark_loom_append_config_files(
         &config_set, benchmark_options->config_files, allocator);

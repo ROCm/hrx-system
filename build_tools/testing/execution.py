@@ -471,6 +471,11 @@ class ExecutionRunner:
         if spec_value is None:
             return
         spec = _as_mapping(spec_value, f"{case_name}:{step_name}.{stream_name}")
+        if spec.get("empty") is True and spec.get("non_empty") is True:
+            raise SchemaError(
+                f"{case_name}:{step_name}.{stream_name}: "
+                "'empty' and 'non_empty' are mutually exclusive"
+            )
         if "save" in spec:
             save_path = Path(
                 _as_string(spec["save"], f"{case_name}:{step_name}.{stream_name}.save")
@@ -485,6 +490,14 @@ class ExecutionRunner:
                 argv,
                 None,
                 f"expected empty {stream_name}, got:\n{text}",
+            )
+        if spec.get("non_empty") is True and not text:
+            self._fail_command(
+                case_name,
+                step_name,
+                argv,
+                None,
+                f"expected non-empty {stream_name}",
             )
         if "contains" in spec:
             self._check_contains(

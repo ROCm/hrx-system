@@ -52,7 +52,7 @@ const loom_device_provider_t* loom_device_provider_registry_lookup(
   return NULL;
 }
 
-iree_status_t loom_device_provider_registry_format_names(
+iree_status_t loom_device_provider_registry_format_driver_names(
     const loom_device_provider_registry_t* registry,
     iree_string_builder_t* output) {
   IREE_ASSERT_ARGUMENT(registry);
@@ -62,7 +62,7 @@ iree_status_t loom_device_provider_registry_format_names(
       IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(output, ", "));
     }
     IREE_RETURN_IF_ERROR(iree_string_builder_append_string(
-        output, registry->providers[i]->artifact_provider->name));
+        output, registry->providers[i]->driver_name));
   }
   return iree_ok_status();
 }

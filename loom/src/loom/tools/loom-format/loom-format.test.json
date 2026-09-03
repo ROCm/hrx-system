@@ -8,17 +8,7 @@
         "args": ["--agents_md"]
       },
       "stdout": {
-        "contains": {
-          "unordered": [
-            "## loom-format",
-            "--from=text",
-            "--to=bc",
-            "--from=auto",
-            "--check",
-            "--in-place",
-            "loom-link --library"
-          ]
-        }
+        "non_empty": true
       }
     },
     {

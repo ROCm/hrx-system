@@ -70,6 +70,16 @@ declared:
 }
 ```
 
+Use `non_empty` for smoke coverage that only requires the tool to emit a stream:
+
+```json
+{
+  "stdout": {
+    "non_empty": true
+  }
+}
+```
+
 `contains` lists are ordered by default. Use `unordered` when order is not part
 of the contract:
 

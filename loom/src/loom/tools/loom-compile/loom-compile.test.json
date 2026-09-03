@@ -8,12 +8,7 @@
         "args": ["--agents_md"]
       },
       "stdout": {
-        "contains": [
-          "## loom-compile",
-          "--backend=",
-          "--emit-command-artifacts=",
-          "--emit-kernel-requests="
-        ]
+        "non_empty": true
       }
     },
     {

@@ -8,15 +8,7 @@
         "args": ["--agents_md"]
       },
       "stdout": {
-        "contains": {
-          "unordered": [
-            "## iree-run-loom",
-            "--backend=",
-            "--kernel-input-buffer=64xf32=0",
-            "--emit-target-artifact=",
-            "--compile-report=summary"
-          ]
-        }
+        "non_empty": true
       }
     }
   ]

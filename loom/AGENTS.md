@@ -22,6 +22,12 @@ or enum for a backend table is usually hiding the contract in the wrong place.
 Move the type to a checked-in header and have Python emit rows that initialize
 that type.
 
+Public documentation, command help, agent guidance, and canonical examples are
+product surfaces. They lead with user goals and stable observable behavior,
+keep implementation machinery behind the point where it becomes necessary,
+and present ordinary workflows before specialized diagnostics. Work under
+`loom/docs/` follows the more specific contract in `loom/docs/AGENTS.md`.
+
 ## IR Represents Programs, Not Pass State
 
 Loom IR is never an inter-pass mailbox. An operation, attribute, operand, type,

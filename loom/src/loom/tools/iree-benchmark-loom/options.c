@@ -35,8 +35,10 @@ IREE_FLAG_NAMED(int32_t, max_samples_per_case, "max-samples-per-case",
                 LOOM_TESTBENCH_DEFAULT_MAX_SAMPLES_PER_CASE,
                 "Maximum number of samples planned per check.case.");
 IREE_FLAG(string, pipeline, "default",
-          "Pass pipeline used before HAL candidate emission. Use 'default', "
-          "'none', '@symbol', or a comma-separated pass list.");
+          "Pass pipeline used before HAL candidate emission. 'default' runs "
+          "the normal compiler pipeline. 'none' disables all compiler "
+          "transformations and requires emission-ready input. Use '@symbol' "
+          "or a comma-separated pass list for an explicit pipeline.");
 IREE_FLAG_LIST(
     string, config,
     "Compile-time config binding for HAL kernel launches. Repeat as "

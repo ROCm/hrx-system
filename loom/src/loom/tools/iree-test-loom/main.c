@@ -45,8 +45,10 @@ IREE_FLAG_NAMED(int32_t, max_samples_per_case, "max-samples-per-case",
                 LOOM_TESTBENCH_DEFAULT_MAX_SAMPLES_PER_CASE,
                 "Maximum number of samples planned per check.case.");
 IREE_FLAG(string, pipeline, "default",
-          "Pass pipeline used for HAL kernel launches. Use 'default', "
-          "'none', '@symbol', or a comma-separated pass list.");
+          "Pass pipeline used for HAL kernel launches. 'default' runs the "
+          "normal compiler pipeline. 'none' disables all compiler "
+          "transformations and requires emission-ready input. Use '@symbol' "
+          "or a comma-separated pass list for an explicit pipeline.");
 IREE_FLAG_LIST(
     string, config,
     "Compile-time config binding for HAL kernel launches. Repeat as "
@@ -547,8 +549,13 @@ static void iree_test_loom_print_agents_markdown(FILE* stream) {
       "Kernel\n"
       "launches use the selected HAL artifact provider, target provider, "
       "and HAL device linked into this binary. "
+      "An explicit `--device=DRIVER` is validated even when the selected cases "
+      "contain no kernel launches; unavailable selections list the drivers "
+      "present in this installation. "
       "`--pipeline=default|none|@symbol|pass,list` controls the HAL kernel "
-      "compile pipeline. `--config=key=value` and `--config-file=path` "
+      "compile pipeline. `none` disables all compiler transformations and "
+      "requires emission-ready input. `--config=key=value` and "
+      "`--config-file=path` "
       "materialize config declarations in the private compile copy before "
       "lowering runs. Case sample values remain runtime invocation inputs. "
       "`--sanitizer=...` and "
@@ -698,6 +705,8 @@ int iree_test_loom_main(int argc, char** argv,
         configuration->device_provider_registry, allocator, &hal_context);
     loom_run_hal_testbench_context_set_runtime_sanitizer_options(
         &hal_context, &sanitizer_options);
+    status =
+        loom_run_hal_testbench_context_validate_explicit_device(&hal_context);
   }
 
   const iree_string_view_t input_path =

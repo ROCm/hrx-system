@@ -491,7 +491,13 @@ low_func_def = Op(
     "low.func.def",
     group=low_ops,
     phase=OpPhase.EXECUTABLE,
-    doc="Target-bound low function definition with register-typed signature values.",
+    doc=(
+        "Target-bound low function definition with register-typed signature "
+        "values. Without exactness modifiers, registers are virtual and the "
+        "instruction schedule is free. allocation(...) and schedule(...) are "
+        "independent contracts: fixed preserves physical register assignment, "
+        "while locked preserves authored instruction order."
+    ),
     traits=[SYMBOL_DEFINE, ISOLATED_FROM_ABOVE],
     attrs=list(_FUNC_COMMON_ATTRS),
     symbol_def=SymbolDefinition(
@@ -523,7 +529,7 @@ low_func_def = Op(
     examples=[
         "low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_generic) @add(%lhs: reg<amdgpu.vgpr x1>, %rhs: reg<amdgpu.vgpr x1>) -> (reg<amdgpu.vgpr x1>) {\n  %sum = low.op<amdgpu.v_add_u32>(%lhs, %rhs) : (reg<amdgpu.vgpr x1>, reg<amdgpu.vgpr x1>) -> reg<amdgpu.vgpr x1>\n  low.return %sum : reg<amdgpu.vgpr x1>\n}",
         "low.func.def target<amdgpu.rdna3_5.core> @invocation_bound() {\n  low.return\n}",
-        "low.func.def allocation(fixed) schedule(locked) target<amdgpu.gfx11.generic.core>(@gfx11_generic) @agent_authored(%lhs: reg<amdgpu.vgpr x1>) {\n  low.return\n}",
+        "low.func.def schedule(locked) target<amdgpu.gfx11.generic.core>(@gfx11_generic) @exact_order(%lhs: reg<amdgpu.vgpr x1>, %rhs: reg<amdgpu.vgpr x1>) -> (reg<amdgpu.vgpr x1>) {\n  %sum = low.op<amdgpu.v_add_u32>(%lhs, %rhs) : (reg<amdgpu.vgpr x1>, reg<amdgpu.vgpr x1>) -> reg<amdgpu.vgpr x1>\n  low.return %sum : reg<amdgpu.vgpr x1>\n}",
     ],
 )
 
@@ -576,7 +582,7 @@ low_func_decl = Op(
     "low.func.decl",
     group=low_ops,
     phase=OpPhase.EXECUTABLE,
-    doc="Target-bound low function declaration with register-typed signature values.",
+    doc=("Target-bound low function declaration with register-typed signature values. Allocation and scheduling exactness independently describe the imported implementation contract."),
     traits=[SYMBOL_DEFINE],
     operands=[Operand("args", REGISTER, variadic=True)],
     attrs=[*_FUNC_COMMON_ATTRS, *_FUNC_DECL_IMPORT_ATTRS],
@@ -603,7 +609,8 @@ low_func_decl = Op(
     ],
     examples=[
         "low.func.decl target<amdgpu.gfx11.generic.core>(@gfx11_generic) @extern_add(%lhs: reg<amdgpu.vgpr x1>, %rhs: reg<amdgpu.vgpr x1>) -> (reg<amdgpu.vgpr x1>)",
-        'low.func.decl allocation(fixed) schedule(locked) import(rocasm, "mfma_16x16_seq") target<amdgpu.gfx11.generic.core>(@gfx11_generic) @mfma_rocasm(%acc: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>)',
+        'low.func.decl allocation(fixed) import(rocasm, "fixed_register_fragment") target<amdgpu.gfx11.generic.core>(@gfx11_generic) @fixed_register_fragment(%acc: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>)',
+        'low.func.decl schedule(locked) import(rocasm, "exact_order_fragment") target<amdgpu.gfx11.generic.core>(@gfx11_generic) @exact_order_fragment(%acc: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>)',
     ],
 )
 

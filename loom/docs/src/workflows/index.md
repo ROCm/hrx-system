@@ -49,6 +49,8 @@ at `.loombc`. A JIT embedding can perform the same operations in memory through
 | Drive a kernel from production witness through controlled optimization | [Agent-driven kernel development](agent-driven-kernel-development.md) |
 | Turn a score change into a compiler question | [Read compile reports](compile-reports.md#relate-reports-to-benchmark-results) |
 | Preserve a complete result and its compiler evidence | [Benchmark checked work](benchmark.md#preserve-the-experiment) |
+| Query snapshot and JSONL benchmark evidence | [Read benchmark results](benchmark-results.md) |
+| Follow a compiler question into raw report evidence | [Query compile evidence](compile-report-queries.md) |
 
 ## External oracles
 
@@ -58,6 +60,7 @@ exact selected program, workload, tool identity, and evidence boundary.
 
 | Oracle | Question it can answer |
 | --- | --- |
+| [Native schedule reconstruction](oracles/native-schedule.md) | Which behaviors in a selected native program must move into maintained Loom source, and where the default pipeline first diverges. |
 | [RADV and Vulkan](oracles/radv.md) | Which shader and physical schedule an optimized Vulkan stack selected for one dispatch. |
 | [LLVM MC](oracles/llvm-mc.md) | Whether selected native instructions and packets encode to the expected target bytes. |
 | [GGML and llama.cpp](oracles/ggml-llama-cpp.md) | Which model, storage, graph, and optimized-runtime contracts a port must preserve. |
@@ -80,6 +83,7 @@ performance result.
 | Measure a complete checked case | [Benchmark checked work](benchmark.md#measure-the-complete-case) |
 | Measure device dispatch completion | [Benchmark checked work](benchmark.md#measure-dispatch-completion) |
 | Compare candidates in one run | [Benchmark checked work](benchmark.md#compare-candidates-in-one-run) |
+| Join benchmark, profile, artifact, and comparison rows | [Read benchmark results](benchmark-results.md#read-an-event-stream) |
 
 The concise path belongs in the testing and benchmarking workflows. Sanitizers,
 profiles, interleaved comparisons, artifact bundles, and report archaeology are

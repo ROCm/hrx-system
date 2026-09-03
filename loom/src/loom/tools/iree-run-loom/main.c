@@ -30,9 +30,10 @@ IREE_FLAG(string, backend, "",
           "Registered compilation and execution backend to run.");
 IREE_FLAG(string, pipeline, "default",
           "Pass pipeline to run before execution. Use 'default' or empty for "
-          "the comprehensive prepared-low pipeline, 'none' to disable pass "
-          "execution, '@symbol' to run a module-local pass.pipeline, or a "
-          "comma-separated pass list such as 'canonicalize,cse'.");
+          "the comprehensive prepared-low pipeline. 'none' disables all "
+          "compiler transformations and passes the input directly to the "
+          "selected backend. Use '@symbol' to run a module-local pass.pipeline "
+          "or a comma-separated pass list such as 'canonicalize,cse'.");
 IREE_FLAG(string, sanitizer, "none",
           "Sanitizer checks to insert in the default target pipeline: none, "
           "all, or a '|'-separated set of access, value, operation, and race.");
@@ -402,9 +403,14 @@ static void iree_run_loom_print_agents_markdown(FILE* stream) {
       "\n"
       "```shell\n"
       "iree-run-loom module.loom --compile-report=summary\n"
-      "iree-run-loom module.loom --pipeline=none\n"
+      "iree-run-loom prepared-low.loom --backend=amdgpu-hal \\\n"
+      "  --function=kernel --pipeline=none\n"
       "iree-run-loom module.loom --pipeline=@my_pipeline\n"
       "```\n"
+      "\n"
+      "`--pipeline=none` disables all compiler transformations. The input "
+      "must\n"
+      "already satisfy the selected backend's complete emission contract.\n"
       "\n"
       "`--compile-report=summary|details` prints the same structured compile\n"
       "report family as `loom-compile`. Use `iree-test-loom` once the "

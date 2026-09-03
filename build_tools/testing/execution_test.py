@@ -122,6 +122,40 @@ class ExecutionUnitTest(unittest.TestCase):
                 "case", "step", "stdout", "alpha\nbeta\ngamma\n", ["gamma", "alpha"]
             )
 
+    def test_non_empty_stream(self):
+        runner = execution.ExecutionRunner(tools={})
+        runner._check_stream(
+            "case",
+            "step",
+            ["fixture"],
+            "stdout",
+            b"generated output\n",
+            {"non_empty": True},
+        )
+        with self.assertRaisesRegex(execution.CaseFailure, "expected non-empty stdout"):
+            runner._check_stream(
+                "case",
+                "step",
+                ["fixture"],
+                "stdout",
+                b"",
+                {"non_empty": True},
+            )
+
+    def test_stream_rejects_conflicting_empty_expectations(self):
+        runner = execution.ExecutionRunner(tools={})
+        with self.assertRaisesRegex(
+            execution.SchemaError, "'empty' and 'non_empty' are mutually exclusive"
+        ):
+            runner._check_stream(
+                "case",
+                "step",
+                ["fixture"],
+                "stdout",
+                b"",
+                {"empty": True, "non_empty": True},
+            )
+
     def test_sanitizer_env_resolves_suppressions_runfile(self):
         with tempfile.TemporaryDirectory() as directory:
             runfiles_dir = Path(directory)

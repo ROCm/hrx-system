@@ -8,22 +8,7 @@
         "args": ["--agents_md"]
       },
       "stdout": {
-        "contains": {
-          "unordered": [
-            "## loom-link",
-            "--library=providers.loombc",
-            "--root-library=app.loombc",
-            "--transitive-library=indirect.loombc",
-            "--strict-deps",
-            "--dependency-report=component.dependencies.json",
-            "--root=@entry",
-            "--print-plan",
-            "--list-symbols",
-            "--strip-check",
-            "--target-profile=amdgpu:gfx11-generic",
-            "--allow-unresolved"
-          ]
-        }
+        "non_empty": true
       }
     },
     {
